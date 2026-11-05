@@ -1,0 +1,155 @@
+$runtime_checks
+from p"concurrency.jo" import (TRANSFER_SEND_CLAIM TRANSFER_SEND_OFF TRANSFER_SYNC_CLAIM TRANSFER_SYNC_OFF TRANSFER_UNSAFE concurrency_reason concurrency_zero_types transfer_claim_pos transfer_claims_checked transfer_tags)
+from p"check.jo" import (check_struct_fields dewy_at lib_dir)
+from p"util.jo" import (fatal files name_of pos_file)
+from p"ffi_checks.dewy" import (ffi_unsafe_at)
+from p"types.jo" import (dt fields fixed_len struct_targ structs targ telem tkind types variants)
+from p"ast.jo" import (nodes)
+from p"refine.jo" import (representation_type)
+# Structural transfer and zero-initialization checks; shared state has one owner in concurrency.jo.
+TransferWord:type=int64<overflow='wrap'>
+concurrency_builtin_type=(t0:TransferWord name:string):>bool=>$unsafe {
+    let t=representation_type(t0)
+    if tkind(t) not=? 'struct_' {return false}
+    let d:TransferWord=TransferWord(structs.ptr[TransferWord(types.ptr[t].st)].decl)
+    if d =? 0 or name_of(TransferWord(nodes.ptr[d].name)) not=? name {return false}
+    let file=if name =? "Task" {"/std/tasks.jo"} else if name =? "TaskGroup" {"/std/task_core.jo"} else if name =? "__Mpmc" {"/prelude/mpmc.jo"} else if name =? "__Spsc" {"/prelude/spsc.jo"} else {"/std/thread.jo"}
+    return files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}{file}"
+}
+# Raw storage and unknown callable environments cannot cross safely. All
+# ordinary values compose, including arrays, recursive products and unions.
+concurrency_transfer=(t0:TransferWord @seen:dict<int64 bool> sync:bool=false):>bool=>$unsafe {
+    let t=representation_type(t0)
+    if seen.has(t) {return true}
+    seen[t] = true;
+    let k=tkind(t)
+    if concurrency_builtin_type(t "Atomic") or concurrency_builtin_type(t "TaskGroup") or concurrency_builtin_type(t "Task") {return true}
+    # (a lock's shared state, Mutex<T>'s: Send and Sync when its payload is Send, which only a holder touches)
+    # (a channel's ring, Channel<T>'s or Mpmc<T>'s: the same, as what crosses it is moved by a send)
+    if concurrency_builtin_type(t "__Lock") or concurrency_builtin_type(t "__Chan") or concurrency_builtin_type(t "__Mpmc") or concurrency_builtin_type(t "__Spsc") {
+        let payload:dict<int64 bool>=dict<int64 bool>()
+        return concurrency_transfer(struct_targ(TransferWord(types.ptr[t].st) 0) @payload false)
+    }
+    if k =? 'ptr' or k =? 'fn_' or k =? 'cfn' or k =? 'polyfn' {return false}
+    if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'box' {return concurrency_transfer(telem(t) @seen sync)}
+    if k =? 'tuple' {
+        loop i in [0..TransferWord(types.ptr[t].nargs)) {
+            if not concurrency_transfer(targ(t i) @seen sync) {return false}
+        }
+    }
+    if k =? 'struct_' or k =? 'enum_' {
+        let si:TransferWord=TransferWord(types.ptr[t].st)
+        let tags:TransferWord=0
+        if transfer_tags.length >? 0 {tags=transfer_tags.get(TransferWord(structs.ptr[si].decl)) ?? 0}
+        if tags not=? 0 {
+            let off=TRANSFER_SEND_OFF
+            let claim=TRANSFER_SEND_CLAIM
+            let property="Send"
+            if sync {
+                off=TRANSFER_SYNC_OFF
+                claim=TRANSFER_SYNC_CLAIM
+                property="Sync"
+            }
+            if tags & off not=? 0 {
+                concurrency_reason="{dt(t)} opts out of {property} with `$send=false`"
+                if sync {concurrency_reason="{dt(t)} opts out of {property} with `$sync=false`"}
+                return false
+            }
+            if tags & claim not=? 0 {
+                concurrency_claim_check(si);
+                return true
+            }
+        }
+        return concurrency_fields(si @seen sync)
+    }
+    return k not=? 'var' and k not=? 'param'
+}
+concurrency_fields=(si:TransferWord @seen:dict<int64 bool> sync:bool):>bool=>$unsafe {
+    check_struct_fields(si);
+    loop i in [0..TransferWord(structs.ptr[si].nfields)) {
+        if not concurrency_transfer(TransferWord(fields.ptr[TransferWord(structs.ptr[si].fields) + i].type) @seen sync) {return false}
+    }
+    loop j in [0..TransferWord(structs.ptr[si].nvariants)) {
+        let v:TransferWord=TransferWord(structs.ptr[si].variants) + j
+        loop i in [0..TransferWord(variants.ptr[v].nfields)) {
+            if not concurrency_transfer(TransferWord(fields.ptr[TransferWord(variants.ptr[v].fields) + i].type) @seen sync) {return false}
+        }
+    }
+    return true
+}
+# A claimed Send or Sync is believed; one the structure does not already give
+# needs the unsafe boundary (`$unsafe` before the type, or among its rows).
+# Checked once per claiming type: O(its fields' types).
+concurrency_claim_check=(si:TransferWord):>void=>$unsafe {
+    let d:TransferWord=TransferWord(structs.ptr[si].decl)
+    if transfer_claims_checked.has(d) {return}
+    transfer_claims_checked[d] = true;
+    let tags=transfer_tags[d]
+    let pos=transfer_claim_pos.get(d) ?? nodes.ptr[d].pos
+    if tags & TRANSFER_UNSAFE not=? 0 or ffi_unsafe_at(pos) {return}
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    if tags & TRANSFER_SEND_CLAIM not=? 0 and not concurrency_fields(si @seen false) {
+        fatal(pos "`$send` claims Send for {name_of(TransferWord(nodes.ptr[d].name))}, which the compiler cannot verify (a field holds raw storage or a callable); claiming it needs an unsafe boundary: write `$unsafe` on a line of its own before the type, or among its rows");
+    }
+    let seen2:dict<int64 bool>=dict<int64 bool>()
+    if tags & TRANSFER_SYNC_CLAIM not=? 0 and not concurrency_fields(si @seen2 true) {
+        fatal(pos "`$sync` claims Sync for {name_of(TransferWord(nodes.ptr[d].name))}, which the compiler cannot verify (a field holds raw storage or a callable); claiming it needs an unsafe boundary: write `$unsafe` on a line of its own before the type, or among its rows");
+    }
+}
+# Every claiming type is checked, sent or not: O(structs) only when a claim exists.
+concurrency_claims_finalize=():>void=>$unsafe {
+    if transfer_claim_pos.length =? 0 {return}
+    loop si in [1..structs.length) {
+        let d:TransferWord=TransferWord(structs.ptr[si].decl)
+        if d not=? 0 and transfer_claim_pos.has(d) {concurrency_claim_check(si);}
+    }
+}
+concurrency_why=():>string=>$unsafe {
+    let reason=concurrency_reason
+    concurrency_reason=""
+    if (reason).length =? 0 {return ""}
+    return " ({reason})"
+}
+concurrency_zeroable=(t0:TransferWord @seen:dict<int64 bool>):>bool=>$unsafe {
+    let t=representation_type(t0)
+    if seen.has(t) {return true}
+    seen[t] = true;
+    let k=tkind(t)
+    if concurrency_builtin_type(t "Atomic") or concurrency_builtin_type(t "TaskGroup") or concurrency_builtin_type(t "Task") or concurrency_builtin_type(t "__Chan") or concurrency_builtin_type(t "__Mpmc") or concurrency_builtin_type(t "__Spsc") {return false}
+    if k =? 'fixed' {return fixed_len(t) =? 0 or concurrency_zeroable(telem(t) @seen)}
+    if k =? 'box' {return concurrency_zeroable(telem(t) @seen)}
+    if k =? 'tuple' {
+        loop i in [0..TransferWord(types.ptr[t].nargs)) {
+            if not concurrency_zeroable(targ(t i) @seen) {return false}
+        }
+    }
+    if k =? 'struct_' or k =? 'enum_' {
+        let si:TransferWord=TransferWord(types.ptr[t].st)
+        check_struct_fields(si);
+        loop i in [0..TransferWord(structs.ptr[si].nfields)) {
+            if not concurrency_zeroable(TransferWord(fields.ptr[TransferWord(structs.ptr[si].fields) + i].type) @seen) {return false}
+        }
+        loop j in [0..TransferWord(structs.ptr[si].nvariants)) {
+            let v:TransferWord=TransferWord(structs.ptr[si].variants) + j
+            loop i in [0..TransferWord(variants.ptr[v].nfields)) {
+                if not concurrency_zeroable(TransferWord(fields.ptr[TransferWord(variants.ptr[v].fields) + i].type) @seen) {return false}
+    # An empty dynamic container or none does not manufacture an element.
+            }
+        }
+    }
+    return true
+}
+concurrency_require_zero=(n:TransferWord t0:TransferWord):>void=>$unsafe {
+    if not dewy_at(nodes.ptr[n].pos) {return}
+    let t=representation_type(t0)
+    let k=tkind(t)
+    if k not=? 'fixed' and k not=? 'tuple' and k not=? 'struct_' and k not=? 'enum_' and k not=? 'box' {return}
+    let valid=concurrency_zero_types.get(t)
+    if valid =? none {
+        let seen:dict<int64 bool>=dict<int64 bool>()
+        let result=concurrency_zeroable(t @seen)
+        valid=result
+        concurrency_zero_types[t] = result;
+    }
+    if not (valid ?? false) {fatal(nodes.ptr[n].pos "zero initialization cannot create private synchronized handles; supply atomic(value) or a task-group result explicitly");}
+}

@@ -27,6 +27,7 @@ use 'ffi_checks.dewy'
 use 'effect_contracts.dewy'
 use 'effect_sources.dewy'
 use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
 
 concurrency_calls: int[]
 # A type's transfer rows (`$send=false`, `$sync=false`, claims `$send`/`$sync`,
@@ -54,92 +55,6 @@ concurrency_calls_c = () -> bool:
         d = int(fns[f].decl)
         if d != 0 and has_flag(d, NF_EXTERN) and len(fns[f].clib) > 0: return true
     false
-
-concurrency_builtin_type = (t0: int, name: str) -> bool:
-    t = representation_type(t0)
-    if tkind(t) != .struct_: return false
-    d = int(structs[int(types[t].st)].decl)
-    d != 0 and name_of(int(nodes[d].name)) == name and files[pos_file(nodes[d].pos)].path == lib_dir + (if name == "Task": "/std/tasks.jo" else if name == "TaskGroup": "/std/task_core.jo" else if name == "__Mpmc": "/prelude/mpmc.jo" else if name == "__Spsc": "/prelude/spsc.jo" else: "/std/thread.jo")
-
-# Raw storage and unknown callable environments cannot cross safely. All
-# ordinary values compose, including arrays, recursive products and unions.
-concurrency_transfer = (t0: int, seen: mut {int: bool}, sync: bool = false) -> bool:
-    t = representation_type(t0)
-    if seen.has(t): return true
-    seen[t] = true
-    k = tkind(t)
-    if concurrency_builtin_type(t, "Atomic") or concurrency_builtin_type(t, "TaskGroup") or concurrency_builtin_type(t, "Task"): return true
-    # (a lock's shared state, Mutex<T>'s: Send and Sync when its payload is Send, which only a holder touches)
-    # (a channel's ring, Channel<T>'s or Mpmc<T>'s: the same, as what crosses it is moved by a send)
-    if concurrency_builtin_type(t, "__Lock") or concurrency_builtin_type(t, "__Chan") or concurrency_builtin_type(t, "__Mpmc") or concurrency_builtin_type(t, "__Spsc"):
-        payload: {int: bool} = {}
-        return concurrency_transfer(struct_targ(int(types[t].st), 0), payload, false)
-    if k == .ptr or k == .fn_ or k == .cfn or k == .polyfn: return false
-    if k == .array or k == .fixed or k == .opt or k == .box: return concurrency_transfer(telem(t), seen, sync)
-    if k == .tuple:
-        loop i in [0..int(types[t].nargs)):
-            if not concurrency_transfer(targ(t, i), seen, sync): return false
-    if k == .struct_ or k == .enum_:
-        si = int(types[t].st)
-        tags = 0
-        if transfer_tags.len() > 0: tags = transfer_tags.get(int(structs[si].decl)) ?? 0
-        if tags != 0:
-            off = TRANSFER_SEND_OFF
-            claim = TRANSFER_SEND_CLAIM
-            property = "Send"
-            if sync:
-                off = TRANSFER_SYNC_OFF
-                claim = TRANSFER_SYNC_CLAIM
-                property = "Sync"
-            if tags & off != 0:
-                concurrency_reason = "{dt(t)} opts out of {property} with `$send=false`"
-                if sync: concurrency_reason = "{dt(t)} opts out of {property} with `$sync=false`"
-                return false
-            if tags & claim != 0:
-                concurrency_claim_check(si)
-                return true
-        return concurrency_fields(si, seen, sync)
-    k != .var and k != .param
-
-concurrency_fields = (si: int, seen: mut {int: bool}, sync: bool) -> bool:
-    check_struct_fields(si)
-    loop i in [0..int(structs[si].nfields)):
-        if not concurrency_transfer(int(fields[int(structs[si].fields) + i].type), seen, sync): return false
-    loop j in [0..int(structs[si].nvariants)):
-        v = int(structs[si].variants) + j
-        loop i in [0..int(variants[v].nfields)):
-            if not concurrency_transfer(int(fields[int(variants[v].fields) + i].type), seen, sync): return false
-    true
-
-# A claimed Send or Sync is believed; one the structure does not already give
-# needs the unsafe boundary (`$unsafe` before the type, or among its rows).
-# Checked once per claiming type: O(its fields' types).
-concurrency_claim_check = (si: int):
-    d = int(structs[si].decl)
-    if transfer_claims_checked.has(d): return
-    transfer_claims_checked[d] = true
-    tags = transfer_tags[d]
-    pos = transfer_claim_pos.get(d) ?? nodes[d].pos
-    if tags & TRANSFER_UNSAFE != 0 or ffi_unsafe_at(pos): return
-    seen: {int: bool}
-    if tags & TRANSFER_SEND_CLAIM != 0 and not concurrency_fields(si, seen, false):
-        fatal(pos, "`$send` claims Send for {name_of(int(nodes[d].name))}, which the compiler cannot verify (a field holds raw storage or a callable); claiming it needs an unsafe boundary: write `$unsafe` on a line of its own before the type, or among its rows")
-    seen2: {int: bool}
-    if tags & TRANSFER_SYNC_CLAIM != 0 and not concurrency_fields(si, seen2, true):
-        fatal(pos, "`$sync` claims Sync for {name_of(int(nodes[d].name))}, which the compiler cannot verify (a field holds raw storage or a callable); claiming it needs an unsafe boundary: write `$unsafe` on a line of its own before the type, or among its rows")
-
-# Every claiming type is checked, sent or not: O(structs) only when a claim exists.
-concurrency_claims_finalize = ():
-    if transfer_claim_pos.len() == 0: return
-    loop si in [1..structs.len()):
-        d = int(structs[si].decl)
-        if d != 0 and transfer_claim_pos.has(d): concurrency_claim_check(si)
-
-concurrency_why = () -> str:
-    reason = concurrency_reason
-    concurrency_reason = ""
-    if len(reason) == 0: return ""
-    " ({reason})"
 
 # Settled waiting answers, by function. A query that finds no wait settles every
 # function it visited (all their callees were visited too); one that finds a wait
@@ -594,37 +509,3 @@ concurrency_task_globals_node = (n: int, seen: mut {int: bool}):
 # Zero-fill must not fabricate an identity whose private storage needs a factory.
 # Only complete root queries are memoized; recursive backedges stay query-local.
 concurrency_zero_types: {int: bool}
-concurrency_zeroable = (t0: int, seen: mut {int: bool}) -> bool:
-    t = representation_type(t0)
-    if seen.has(t): return true
-    seen[t] = true
-    k = tkind(t)
-    if concurrency_builtin_type(t, "Atomic") or concurrency_builtin_type(t, "TaskGroup") or concurrency_builtin_type(t, "Task") or concurrency_builtin_type(t, "__Chan") or concurrency_builtin_type(t, "__Mpmc") or concurrency_builtin_type(t, "__Spsc"): return false
-    if k == .fixed: return fixed_len(t) == 0 or concurrency_zeroable(telem(t), seen)
-    if k == .box: return concurrency_zeroable(telem(t), seen)
-    if k == .tuple:
-        loop i in [0..int(types[t].nargs)):
-            if not concurrency_zeroable(targ(t, i), seen): return false
-    if k == .struct_ or k == .enum_:
-        si = int(types[t].st)
-        check_struct_fields(si)
-        loop i in [0..int(structs[si].nfields)):
-            if not concurrency_zeroable(int(fields[int(structs[si].fields) + i].type), seen): return false
-        loop j in [0..int(structs[si].nvariants)):
-            v = int(structs[si].variants) + j
-            loop i in [0..int(variants[v].nfields)):
-                if not concurrency_zeroable(int(fields[int(variants[v].fields) + i].type), seen): return false
-    # An empty dynamic container or none does not manufacture an element.
-    true
-
-concurrency_require_zero = (n: int, t0: int):
-    if not dewy_at(nodes[n].pos): return
-    t = representation_type(t0)
-    k = tkind(t)
-    if k != .fixed and k != .tuple and k != .struct_ and k != .enum_ and k != .box: return
-    valid = concurrency_zero_types.get(t)
-    if valid == none:
-        seen: {int: bool}
-        valid = concurrency_zeroable(t, seen)
-        concurrency_zero_types[t] = valid!
-    if not valid!: fatal(nodes[n].pos, "zero initialization cannot create private synchronized handles; supply atomic(value) or a task-group result explicitly")

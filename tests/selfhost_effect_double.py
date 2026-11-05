@@ -2,6 +2,9 @@
 
 
 def effect_services(text, modules):
+    if 'concurrency_tasks:' not in modules.get('concurrency.jo', ''):
+        text = text.replace('concurrency_types.dewy', 'concurrency.jo').replace(
+            'concurrency_types.jo', 'concurrency.jo')
     if 'struct IsolationRow:' not in modules.get('isolation.jo', ''):
         text = text.replace('isolation_ops.dewy', 'isolation.jo').replace(
             'isolation_ops.jo', 'isolation.jo')
