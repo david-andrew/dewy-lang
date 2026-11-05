@@ -4,7 +4,7 @@ from p"check.jo" import (FK_INIT add_universe bind_from_imports calls_named chec
 from p"icount.jo" import (IC_CHECK IC_EFFECTS IC_FACTS IC_LIB IC_LOAD IC_OWNERSHIP IC_ROOT IC_SHARED ic_mod ic_restore ic_switch)
 from p"ast.jo" import (NF_EXTERN has_flag mk nkids nkids2 nodes set_list)
 from p"types.jo" import (T_FLOAT T_NEVER T_VOID get_struct_inst is_int layout prune ts_dewy)
-from p"arena.jo" import (arena_reset runtime_switch runtime_switch_on runtime_switches)
+from p"arena.jo" import (runtime_switches)
 from p"check_constant.jo" import (cc_reset)
 from p"concurrency.jo" import (concurrency_claims_finalize concurrency_finalize concurrency_protocol_module)
 from p"expr.jo" import (console_type_id)
@@ -35,6 +35,7 @@ from p"refine.jo" import (refine_reset)
 from p"parse.jo" import (stop_after)
 from p"safe_paths.jo" import (ut_reset ut_run)
 from p"warn_if.jo" import (wi_reset)
+from p"arena_ops.dewy" import (arena_reset runtime_switch runtime_switch_on)
 # Program-level checking owns phase order; services may grow all compiler arenas.
 PGWord:type=int64<overflow='wrap'>
 check_program=(main_path:string):>void=>$unsafe {

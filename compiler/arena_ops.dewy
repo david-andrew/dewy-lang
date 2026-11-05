@@ -1,0 +1,789 @@
+$runtime_checks
+from p"arena.jo" import (ArenaRoot ArenaScope arena_enter_decl arena_fns arena_keep_depth arena_keep_low arena_keep_state arena_keep_witness arena_lambda_depth arena_proof_nodes arena_proof_sites arena_proofs_done arena_proven arena_proven_machinery arena_runtime_ready arena_stack arena_unproven runtime_switches)
+from p"lower.jo" import (BOX_HDR HK VC_AGG Val ctl)
+from p"effects.jo" import (effect_name)
+from p"effect_types.dewy" import (EffectEvent)
+from p"expr.jo" import (IN last_checked ntype)
+from p"check.jo" import (LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_ELEMALIAS LF_MUTPARAM LF_PARAM LF_SOAELEM LF_VALUECAP LF_VALUEPARAM ctxs cx demand_name fns globals lib_dir locals prelude release_build runtime_fn syms)
+from p"ast.jo" import (NF_CHECKED NF_EXTERN NF_GENERIC NF_SPREAD has_flag kid kids nkids nodes)
+from p"node_store.dewy" import (Node)
+from p"lower_storage.dewy" import (V blk borrow br_to brif_to endc field_store_type hdr_load iff load_val lop new_temp opt_has store_val vc)
+from p"ir.jo" import (VI)
+from p"directives.jo" import (dir_explicit_copies)
+from p"ir_builders.dewy" import (e_addi e_bin e_call1 e_call2 e_copy e_iconst e_load e_mov e_ret e_slot e_store vreg)
+from p"util.jo" import (fatal files ice intern name_of pos_file pos_in_lib pos_str)
+from p"lower_helpers.dewy" import (field_list fixed_elem_addr fixed_loop_begin fixed_loop_end helper_params)
+from p"types.jo" import (fields is_managed layout math_optional prune ptr_size structs telem tkind tsize type_has_fn type_str types variants)
+from p"lower_group.dewy" import (gen_expr)
+from p"isolation.jo" import (isolation_children)
+from p"lower_primitives.dewy" import (lf_helper rt)
+from p"math_lower.jo" import (math_payload_type math_tag)
+from p"ownership.jo" import (owner_stride)
+from p"ownership_types.dewy" import (ownership_type)
+from p"places.jo" import (place_scalar_root)
+from p"units.jo" import (quantity_base)
+# Direct recursive lowering; shared state has one owner in arena.jo.
+ArenaWord:type=int64<overflow='wrap'>
+runtime_switch_on=(name:string):>void=>$unsafe {
+    if not runtime_switches.contains(name) {runtime_switches.push(name);}
+}
+runtime_switch=():>void=>$unsafe {
+    loop name in runtime_switches {
+        let id=intern(name)
+        demand_name(id);
+        let s=prelude.get(id) ?? 0
+        if s =? 0 or syms.ptr[s].kind not=? 'const_' {ice("missing runtime constant {name}");}
+        let value:ArenaWord=ArenaWord(nodes.ptr[ArenaWord(syms.ptr[s].decl)].b)
+        if nodes.ptr[value].kind not=? 'bool_lit' {ice("runtime constant {name} is not a literal");}
+        nodes.ptr[value].ival = 1;
+    }
+}
+arena_enable=():>void=>$unsafe {
+    runtime_switch_on("__ARENAS");
+    if not release_build {runtime_switch_on("__ARENA_POISON");}
+}
+arena_reset=():>void=>$unsafe {
+    arena_fns=dict<int64 bool>()
+    arena_runtime_ready=false
+    runtime_switches=[]
+    arena_proofs_done=false
+    arena_proven=dict<int64 bool>()
+    arena_proven_machinery=dict<int64 bool>()
+    arena_unproven=dict<int64 string>()
+    arena_lambda_depth=0
+}
+arena_unpromotable=(t0:ArenaWord depth:ArenaWord=0):>string=>$unsafe {
+    let t=quantity_base(t0)
+    if depth >? 32 or not is_managed(t) and tkind(t) not=? 'ptr' {return ""}
+    if ownership_type(t) {return "a resource owner ({type_str(t)})"}
+    let k=types.ptr[t].kind
+    if k =? 'fn_' or k =? 'polyfn' or k =? 'callable' {return "a function value ({type_str(t)})"}
+    if k =? 'ptr' {return "a raw pointer ({type_str(t)})"}
+    if k =? 'array' or k =? 'box' or k =? 'opt' or k =? 'fixed' {return arena_unpromotable(ArenaWord(types.ptr[t].elem) depth + 1)}
+    if k =? 'struct_' or k =? 'tuple' {
+        loop field in field_list(t) {
+            let why=arena_unpromotable(field[0] depth + 1)
+            if why not=? "" {return why}
+        }
+    }
+    if k =? 'enum_' {
+        layout(t);
+        let si:ArenaWord=ArenaWord(types.ptr[t].st)
+        loop v in [0..ArenaWord(structs.ptr[si].nvariants)) {
+            let vi:ArenaWord=ArenaWord(structs.ptr[si].variants) + v
+            loop i in [0..ArenaWord(variants.ptr[vi].nfields)) {
+                let why=arena_unpromotable(field_store_type(ArenaWord(variants.ptr[vi].fields) + i) depth + 1)
+                if why not=? "" {return why}
+            }
+        }
+    }
+    return ""
+}
+arena_no_return=(n:ArenaWord):>void=>$unsafe {
+    let at=arena_return_at(n)
+    if at not=? 0 {fatal(nodes.ptr[at].pos "`return` inside an `$allocator` expression would leave it before its value is copied out of the arena: make the value the expression's result, and return after it");}
+}
+arena_return_at=(n:ArenaWord):>int64=>$unsafe {
+    if n =? 0 {return 0}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fn_' {return 0}
+    if k =? 'return_' {return n}
+    let mask=isolation_children(k)
+    if mask <? 0 {return 0}
+    if mask & 1 not=? 0 {
+        let at=arena_return_at(ArenaWord(nodes.ptr[n].a))
+        if at not=? 0 {return at}
+    }
+    if mask & 2 not=? 0 {
+        let at=arena_return_at(ArenaWord(nodes.ptr[n].b))
+        if at not=? 0 {return at}
+    }
+    if mask & 4 not=? 0 {
+        let at=arena_return_at(ArenaWord(nodes.ptr[n].c))
+        if at not=? 0 {return at}
+    }
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {
+            let at=arena_return_at(child)
+            if at not=? 0 {return at}
+        }
+    }
+    return 0
+}
+arena_check_result=(n:ArenaWord value:ArenaWord t:ArenaWord asked:bool):>int64=>$unsafe {
+    let why=arena_unpromotable(t)
+    if why not=? "" {fatal(nodes.ptr[n].pos "the value of an `$allocator` expression is copied out of its arena, and {why} cannot be copied yet: give plain data (records, arrays, strings, numbers) as its value, and make the closure or owner after the expression");}
+    if not asked and is_managed(t) and dir_explicit_copies(nodes.ptr[n].pos) {
+        fatal(nodes.ptr[n].pos "under `$explicit_copies`, the value of an `$allocator` expression is copied out of its arena: end the expression with `.copy()` to ask for the copy");
+    }
+    if not arena_runtime_ready {
+        arena_runtime_ready=true
+        loop name in ["__arena_promote_arr" "__arena_promote_str" "__box_new"] {
+            runtime_fn(name);
+        }
+    }
+    let owner:ArenaWord=0
+    if cx >=? 0 {owner=ArenaWord(ctxs.ptr[cx].inst)}
+    arena_fns[owner] = true
+    nodes.ptr[n] = Node[kind = 'conv' pos = nodes.ptr[n].pos a = int32<overflow='wrap'>(value) aux = int32<overflow='wrap'>(18) type = int32<overflow='wrap'>(t) flags = int32<overflow='wrap'>(NF_CHECKED)];
+    last_checked=n
+    return t
+}
+arena_gen_promote=(e:ArenaWord):>Val=>$unsafe {
+    let a:ArenaWord=ArenaWord(nodes.ptr[e].a)
+    let t=prune(ntype(e))
+    let value=gen_expr(a)
+    if not is_managed(t) {return value}
+    let slot=new_temp(t)
+    let addr=e_slot(slot)
+    if vc(t) =? VC_AGG {e_copy(addr value.v tsize(t));}
+    else {store_val(t addr 0 value.v);}
+    e_call1(lf_helper(HK.promote t 0) addr -1);
+    borrow(value t);
+    if vc(t) =? VC_AGG {return Val[addr true slot]}
+    return V(load_val(t addr 0) true)
+}
+arena_promote_at=(addr:ArenaWord t0:ArenaWord):>void=>$unsafe {
+    let t=quantity_base(t0)
+    if is_managed(t) {e_call1(lf_helper(HK.promote t 0) addr -1);}
+}
+arena_promote_buffer=(a:ArenaWord t:ArenaWord):>void=>$unsafe {
+    let k=types.ptr[t].kind
+    let p=e_load(VI a 0 ptr_size)
+    if k =? 'str_' {
+        e_store(a 0 e_call1(rt("__arena_promote_str") p VI) ptr_size);
+        return
+    }
+    let et:ArenaWord=ArenaWord(types.ptr[t].elem)
+    let stride=owner_stride(et)
+    let q=e_call2(rt("__arena_promote_arr") p e_iconst(stride) VI)
+    e_store(a 0 q ptr_size);
+    if not is_managed(et) {return}
+    # (static data, not copied, holds static data only: its elements stay too)
+    iff(e_bin('ne' VI q p));
+    let n=hdr_load(q 8)
+    let i=vreg(VI)
+    e_mov(i e_iconst(0));
+    blk();
+    lop();
+    brif_to(e_bin('ges' VI i n) ctl - 1);
+    arena_promote_at(e_bin('add' VI e_addi(q 24) e_bin('mul' VI i e_iconst(stride))) et);
+    e_mov(i e_addi(i 1));
+    br_to(ctl);
+    endc();
+    endc();
+    endc();
+}
+helper_promote=(t:ArenaWord):>int64=>$unsafe {
+    let ps=helper_params(1)
+    let a=ps.ptr[0]
+    let k=types.ptr[t].kind
+    if types.ptr[t].rep =? 'tagged_int' or math_optional(t) {
+        # (an arbitrary-precision integer: a word, or a tagged pointer to its digits)
+        let v=e_load(VI a 0 8)
+        if math_optional(t) {v=e_bin('xor' VI v e_iconst(1))}
+        iff(e_bin('and_' VI math_tag(v) e_bin('ne' VI v e_iconst(1))));
+        let digits=e_slot(new_temp(math_payload_type()))
+        e_store(digits 0 e_addi(v -1) 8);
+        arena_promote_buffer(digits math_payload_type());
+        let w=e_addi(e_load(VI digits 0 8) 1)
+        if math_optional(t) {w=e_bin('xor' VI w e_iconst(1))}
+        e_store(a 0 w 8);
+        endc();
+    }
+    else if k =? 'str_' or k =? 'array' {
+        arena_promote_buffer(a t);
+    }
+    else if k =? 'box' {
+        let et:ArenaWord=ArenaWord(types.ptr[t].elem)
+        let p=e_load(VI a 0 ptr_size)
+        iff(e_bin('ne' VI p e_iconst(0)));
+        let q=e_call1(rt("__box_new") e_iconst(tsize(et)) VI)
+        e_copy(e_addi(q BOX_HDR) e_addi(p BOX_HDR) tsize(et));
+        arena_promote_at(e_addi(q BOX_HDR) et);
+        e_store(a 0 q ptr_size);
+        endc();
+    }
+    else if k =? 'opt' {
+        let inner:ArenaWord=ArenaWord(types.ptr[t].elem)
+        iff(e_bin('ne' VI opt_has(a inner) e_iconst(0)));
+        arena_promote_at(a inner);
+        endc();
+    }
+    else if k =? 'enum_' {
+        let si:ArenaWord=ArenaWord(types.ptr[t].st)
+        layout(t);
+        let tag=e_load(VI a 0 4)
+        loop v in [0..ArenaWord(structs.ptr[si].nvariants)) {
+            let vi:ArenaWord=ArenaWord(structs.ptr[si].variants) + v
+            let any=false
+            loop i in [0..ArenaWord(variants.ptr[vi].nfields)) {
+                if is_managed(field_store_type(ArenaWord(variants.ptr[vi].fields) + i)) {any=true}
+            }
+            if not any {continue}
+            iff(e_bin('eq' VI tag e_iconst(v)));
+            loop i in [0..ArenaWord(variants.ptr[vi].nfields)) {
+                let f:ArenaWord=ArenaWord(variants.ptr[vi].fields) + i
+                arena_promote_at(e_addi(a ArenaWord(fields.ptr[f].offset)) field_store_type(f));
+            }
+            endc();
+        }
+    }
+    else if k =? 'fixed' {
+        let et:ArenaWord=ArenaWord(types.ptr[t].elem)
+        if is_managed(et) {
+            let i=fixed_loop_begin(t)
+            arena_promote_at(fixed_elem_addr(a i et) et);
+            fixed_loop_end(i);
+        }
+    }
+    else if k =? 'struct_' or k =? 'tuple' {
+        loop field in field_list(t) {arena_promote_at(e_addi(a field[1]) field[0]);}
+    }
+    else {ice("promotion of {type_str(t)} out of an allocator scope");}
+    return e_ret(-1)
+}
+arena_error=(n:ArenaWord reason:string):>void=>$unsafe {
+    fatal(nodes.ptr[n].pos "`$allocator`: {reason}");
+}
+arena_scope_start=(b:ArenaWord):>int64=>$unsafe {
+    if nkids(b) not=? 4 {return 0}
+    let d=kid(b 0)
+    if nodes.ptr[d].kind not=? 'vardecl' {return 0}
+    let c:ArenaWord=ArenaWord(nodes.ptr[d].b)
+    if c =? 0 or nodes.ptr[c].kind not=? 'call' or nodes.ptr[c].aux not=? 0 or nodes.ptr[c].sym <=? 0 {return 0}
+    if ArenaWord(fns.ptr[ArenaWord(nodes.ptr[c].sym)].decl) not=? arena_enter_decl {return 0}
+    return d
+}
+arena_root=(e0:ArenaWord):>ArenaRoot=>$unsafe {
+    let e=e0
+    let buffer=false
+    loop depth in [0..64) {
+        let k=nodes.ptr[e].kind
+        if k =? 'addr' or k =? 'unwrap' or k =? 'narrow' or k =? 'field' {
+            e=ArenaWord(nodes.ptr[e].a)
+            continue
+        }
+        if k =? 'index' {
+            buffer=true
+            e=ArenaWord(nodes.ptr[e].a)
+            continue
+        }
+        if k =? 'ident' {
+            let p=place_scalar_root(e)
+            if p.root =? 'local' and p.declaration >? 0 {
+                let l=p.declaration
+                let inside=arena_stack.length >? 0 and l >? arena_stack.ptr[arena_stack.length - 1].context
+                # (a loop's `mut` element stands for an element of another place)
+                if ArenaWord(locals.ptr[l].flags) & (LF_ELEMALIAS | LF_SOAELEM | LF_BYREF | LF_CAPTURE | LF_PARAM) not=? 0 {
+                    inside=false
+                    buffer=true
+                }
+                return ArenaRoot[l not inside buffer name_of(ArenaWord(locals.ptr[l].name))]
+            }
+            if p.root =? 'global' and p.declaration >? 0 {return ArenaRoot[0 true buffer name_of(ArenaWord(globals.ptr[p.declaration].name))]}
+        }
+        break
+    }
+    return ArenaRoot[0 true true]
+}
+arena_handle=(t0:ArenaWord):>bool=>$unsafe {
+    let t=prune(t0)
+    if tkind(t) not=? 'struct_' {return false}
+    let si:ArenaWord=ArenaWord(types.ptr[t].st)
+    let d:ArenaWord=ArenaWord(structs.ptr[si].decl)
+    return structs.ptr[si].name =? "Arena" and d not=? 0 and files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/arena.jo"
+}
+arena_store=(n:ArenaWord e:ArenaWord t:ArenaWord):>void=>$unsafe {
+    let r=arena_root(e)
+    if not r.outside {return}
+    loop scope in arena_stack {
+        if r.local not=? 0 and scope.arena =? r.local {arena_lent(n r.local);}
+    }
+    if not r.buffer and (not is_managed(t) or arena_handle(t)) {return}
+    let what=if r.name not=? "" {"`{r.name}`"} else {"a place"}
+    arena_error(n "this changes {what}, declared outside the expression, and could leave storage of the arena in it, which its reset would invalidate: make the change after the expression, from its value");
+}
+arena_lent=(n:ArenaWord l:ArenaWord):>void=>$unsafe {
+    arena_error(n "`{name_of(ArenaWord(locals.ptr[l].name))}` is lent to the expression: it cannot be used, reset or lent again inside it");
+}
+arena_mention=(n:ArenaWord):>void=>$unsafe {
+    if nodes.ptr[n].aux not=? int32<overflow='wrap'>(1) {return}
+    let l:ArenaWord=ArenaWord(nodes.ptr[n].sym)
+    loop scope in arena_stack {
+        if scope.arena =? l {arena_lent(n l);}
+    }
+}
+arena_mutators=(id:IN):>bool=>$unsafe {
+    return id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.extend or id =? IN.setlen or id =? IN.fill or id =? IN.lend
+}
+arena_trusted=(n:ArenaWord):>bool=>$unsafe {
+    return pos_in_lib(nodes.ptr[n].pos)
+}
+arena_keep_scan=(f:ArenaWord n:ArenaWord @callees:array<int64>):>int64=>$unsafe {
+    if n =? 0 {return 0}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return 0}
+    let bad:ArenaWord=0
+    if k =? 'assign' {bad=arena_keep_store(f ArenaWord(nodes.ptr[n].a) n)}
+    else if k =? 'intrinsic' {
+        let id=nodes.ptr[n].aux as IN
+        if arena_mutators(id) and nkids(n) >? 0 {bad=arena_keep_store(f kid(n 0) n)}
+        # (work started elsewhere could still hold the expression's storage after it ends)
+        else if id =? IN.clone_thread or id =? IN.task_report or id =? IN.task_data {bad=n}
+        else if (id =? IN.setjmp or id =? IN.longjmp or id =? IN.jump or id =? IN.callc or id =? IN.wasm_call or id =? IN.compute or id =? IN.compute_spirv or id =? IN.compute_textures or id =? IN.gpu_kernel or id =? IN.memcpy or id =? IN.memset or id =? IN.syscall) and not arena_trusted(n) {bad=n}
+    }
+    else if k =? 'call' {
+        let aux:ArenaWord=ArenaWord(nodes.ptr[n].aux)
+        if aux =? 0 and nodes.ptr[n].sym >? 0 {
+            let g:ArenaWord=ArenaWord(nodes.ptr[n].sym)
+            let d:ArenaWord=ArenaWord(fns.ptr[g].decl)
+            if d =? 0 or has_flag(d NF_EXTERN) or fns.ptr[g].cabi {
+                if not arena_trusted(n) {bad=n}
+            }
+            else {callees.push(g);}
+        }
+        else if aux =? 1 {
+            let callee:ArenaWord=ArenaWord(nodes.ptr[n].a)
+            let formal=false
+            if nodes.ptr[callee].kind =? 'ident' and nodes.ptr[callee].aux =? int32<overflow='wrap'>(1) {
+                # (a Dewy parameter's own binding is the parameter until something writes it)
+                let fl:ArenaWord=ArenaWord(locals.ptr[ArenaWord(nodes.ptr[callee].sym)].flags)
+                formal=fl & LF_PARAM not=? 0 or fl & (LF_VALUEPARAM | LF_ASSIGNED) =? LF_VALUEPARAM
+            }
+            if not formal {bad=n}
+        }
+    }
+    else if (k =? 'index' or k =? 'field') and tkind(ntype(ArenaWord(nodes.ptr[n].a))) =? 'ptr' and not arena_trusted(n) {bad=n}
+    if bad not=? 0 {return bad}
+    let mask=isolation_children(k)
+    if mask <? 0 {return if arena_trusted(n) {0} else {n}}
+    if mask & 1 not=? 0 {bad=arena_keep_scan(f ArenaWord(nodes.ptr[n].a) @callees)}
+    if bad =? 0 and mask & 2 not=? 0 {bad=arena_keep_scan(f ArenaWord(nodes.ptr[n].b) @callees)}
+    if bad =? 0 and mask & 4 not=? 0 {bad=arena_keep_scan(f ArenaWord(nodes.ptr[n].c) @callees)}
+    if bad =? 0 and mask & 16 not=? 0 {
+        loop child in kids(n) {
+            bad=arena_keep_scan(f child @callees)
+            if bad not=? 0 {break}
+        }
+    }
+    return bad
+}
+arena_keep_store=(f:ArenaWord e0:ArenaWord n:ArenaWord):>int64=>$unsafe {
+    let e=e0
+    let buffer=false
+    loop depth in [0..64) {
+        let k=nodes.ptr[e].kind
+        if k =? 'addr' or k =? 'unwrap' or k =? 'narrow' or k =? 'field' {
+            if k =? 'field' and tkind(ntype(ArenaWord(nodes.ptr[e].a))) =? 'ptr' {return if arena_trusted(n) {0} else {n}}
+            e=ArenaWord(nodes.ptr[e].a)
+            continue
+        }
+        if k =? 'index' {
+            if tkind(ntype(ArenaWord(nodes.ptr[e].a))) =? 'ptr' {return if arena_trusted(n) {0} else {n}}
+            buffer=true
+            e=ArenaWord(nodes.ptr[e].a)
+            continue
+        }
+        break
+    }
+    if nodes.ptr[e].kind not=? 'ident' {return n}
+    if nodes.ptr[e].aux =? int32<overflow='wrap'>(2) {
+        let g:ArenaWord=ArenaWord(nodes.ptr[e].sym)
+        if buffer or is_managed(ArenaWord(globals.ptr[g].type)) {return n}
+        return 0
+    }
+    if nodes.ptr[e].aux not=? int32<overflow='wrap'>(1) {return n}
+    let l:ArenaWord=ArenaWord(nodes.ptr[e].sym)
+    let flags:ArenaWord=ArenaWord(locals.ptr[l].flags)
+    if flags & LF_CAPTURE not=? 0 and flags & LF_VALUECAP =? 0 {return n}
+    if flags & (LF_ELEMALIAS | LF_SOAELEM | LF_BYREF | LF_ALIAS) not=? 0 {
+        let a:ArenaWord=ArenaWord(locals.ptr[l].alias)
+        if a =? 0 {return n}
+        return arena_keep_store(f a n)
+    }
+    return 0
+}
+arena_keeps=(f:ArenaWord depth:ArenaWord=0):>int64=>$unsafe {
+    let state=arena_keep_state.get(f) ?? 0
+    if state =? 2 {return 0}
+    if state =? 3 {return arena_keep_witness[f]}
+    let cached_at=arena_keep_depth.get(f)
+    if cached_at not=? none {
+        let at=cached_at
+        arena_keep_low=min(arena_keep_low at)
+        return 0
+    }
+    if fns.ptr[f].body =? 0 or fns.ptr[f].state not=? 2 {
+        arena_keep_state[f] = 3;
+        arena_keep_witness[f] = ArenaWord(fns.ptr[f].decl);
+        return ArenaWord(fns.ptr[f].decl)
+    }
+    arena_keep_depth[f] = depth;
+    let saved_low=arena_keep_low
+    arena_keep_low=depth
+    let callees:array<int64>=[]
+    let bad=arena_keep_scan(f ArenaWord(fns.ptr[f].body) @callees)
+    loop g in callees {
+        if bad not=? 0 {break}
+        if arena_keeps(g depth + 1) not=? 0 {bad=arena_keep_call_site(f g)}
+    }
+    arena_keep_depth.remove(f);
+    if bad not=? 0 {
+        arena_keep_state[f] = 3;
+        arena_keep_witness[f] = bad;
+    }
+    else if arena_keep_low >=? depth {arena_keep_state[f] = 2;}
+    arena_keep_low=min(saved_low arena_keep_low)
+    return bad
+}
+arena_keep_call_site=(f:ArenaWord g:ArenaWord):>int64=>$unsafe {
+    let w=arena_keep_witness.get(g) ?? ArenaWord(fns.ptr[g].decl)
+    if w =? 0 {w=ArenaWord(fns.ptr[f].decl)}
+    return w
+}
+arena_summary=(n:ArenaWord f:ArenaWord):>void=>$unsafe {
+    let w=arena_keeps(f)
+    if w =? 0 {return}
+    let where=if w >? 0 and w <? nodes.length {" (at {pos_str(nodes.ptr[w].pos)})"} else {""}
+    arena_error(n "`{effect_name(f)}` may keep storage of the arena where the expression's reset cannot see it{where}");
+}
+arena_call=(n:ArenaWord):>void=>$unsafe {
+    let aux:ArenaWord=ArenaWord(nodes.ptr[n].aux)
+    if aux =? 2 or aux =? 3 {return}
+    if aux =? 1 {
+        # (a function value held by a local of the expression was made in it, its body
+        # checked with it: function values from outside it are rejected where they are read)
+        let callee:ArenaWord=ArenaWord(nodes.ptr[n].a)
+        if nodes.ptr[callee].kind =? 'ident' and not arena_root(callee).outside {return}
+    }
+    if aux not=? 0 or nodes.ptr[n].sym <=? 0 {arena_error(n "a call through a function value made outside the expression has no checked summary of what it keeps");}
+    let f:ArenaWord=ArenaWord(nodes.ptr[n].sym)
+    # (an `@place` argument: the callee may write it, as the expression would)
+    loop i in [0..nkids(n)) {
+        let arg=kid(n i)
+        if i <? fns.ptr[f].params.length and ArenaWord(locals.ptr[fns.ptr[f].params.ptr[i]].flags) & LF_MUTPARAM not=? 0 {arena_store(arg arg ntype(arg));}
+    }
+    if type_has_fn(ntype(n)) {arena_error(n "a function value made by `{effect_name(f)}` has no checked summary of what it keeps");}
+    arena_summary(n f);
+}
+arena_function_value=(n:ArenaWord):>void=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {
+        let f:ArenaWord=ArenaWord(nodes.ptr[n].sym)
+        if has_flag(n NF_GENERIC) or f <=? 0 {arena_error(n "a generic function value is not checked inside an allocator expression yet");}
+        loop cap in fns.ptr[f].caps {
+            if ArenaWord(locals.ptr[ArenaWord(cap.inner)].flags) & LF_VALUECAP =? 0 {arena_error(n "a closure that changes `{name_of(ArenaWord(locals.ptr[ArenaWord(cap.inner)].name))}` could leave storage of the arena in it: change it after the expression");}
+        }
+        arena_lambda_depth += 1;
+        arena_visit(ArenaWord(fns.ptr[f].body));
+        arena_lambda_depth -= 1;
+        return
+    }
+    if k =? 'fnref' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {
+        arena_summary(n ArenaWord(nodes.ptr[n].sym));
+        return
+    }
+    arena_error(n "a function value made outside the expression has no checked summary of what it keeps");
+}
+arena_visit=(n:ArenaWord):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    let active=arena_stack.length >? 0
+    if k =? 'lambda' {
+        if active {arena_function_value(n);}
+        return
+    }
+    if k =? 'block' {
+        let d=arena_scope_start(n)
+        if d not=? 0 {
+            arena_scope(n d);
+            return
+        }
+    }
+    if active {
+        if k =? 'ident' {
+            arena_mention(n);
+            if type_has_fn(ntype(n)) and arena_root(n).outside {arena_error(n "a function value made outside the expression has no checked summary of what it keeps");}
+        }
+        else if k =? 'fnref' or k =? 'partial' {arena_function_value(n);}
+        else if arena_lambda_depth >? 0 and (k =? 'return_' or k =? 'break_' or k =? 'continue_') {}
+        else if k =? 'return_' {arena_error(n "`return` would leave the expression before its value is copied out: give the value as the expression's result");}
+        else if k =? 'break_' or k =? 'continue_' {
+            if ArenaWord(nodes.ptr[n].ival) >=? arena_stack.ptr[arena_stack.length - 1].loops {arena_error(n "this leaves the expression before its value is copied out: end the loop outside it");}
+        }
+        else if k =? 'assign' {arena_store(n ArenaWord(nodes.ptr[n].a) ntype(ArenaWord(nodes.ptr[n].a)));}
+        else if k =? 'intrinsic' {
+            let id=nodes.ptr[n].aux as IN
+            if arena_mutators(id) and nkids(n) >? 0 {arena_store(n kid(n 0) ntype(kid(n 0)));}
+            if id =? IN.setjmp or id =? IN.longjmp or id =? IN.jump or id =? IN.clone_thread or id =? IN.task_report or id =? IN.task_data {
+                arena_error(n "this intrinsic leaves the expression's control or thread");
+            }
+        }
+        else if k =? 'call' {arena_call(n);}
+    }
+    let looping=k =? 'while_' or k =? 'for_'
+    if active and looping {arena_stack.ptr[arena_stack.length - 1].loops += 1;}
+    let mask=isolation_children(k)
+    if mask <? 0 {
+        if active {arena_error(n "this construct is not checked inside an allocator expression yet");}
+        return
+    }
+    if mask & 1 not=? 0 {arena_visit(ArenaWord(nodes.ptr[n].a));}
+    if mask & 2 not=? 0 {arena_visit(ArenaWord(nodes.ptr[n].b));}
+    if mask & 4 not=? 0 {arena_visit(ArenaWord(nodes.ptr[n].c));}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {arena_visit(child);}
+    }
+    if active and looping {arena_stack.ptr[arena_stack.length - 1].loops -= 1;}
+}
+arena_scope=(b:ArenaWord d:ArenaWord):>void=>$unsafe {
+    let enter:ArenaWord=ArenaWord(nodes.ptr[d].b)
+    let place=kid(enter 0)
+    arena_visit(place);
+    let lent=arena_root(place)
+    loop scope in arena_stack {
+        if lent.local not=? 0 and scope.arena =? lent.local {arena_error(place "this arena is already lent to an enclosing `$allocator` expression");}
+    }
+    arena_stack.push(ArenaScope[ArenaWord(nodes.ptr[d].sym) lent.local 0]);
+    arena_visit(kid(b 1));
+    arena_stack.pop();
+    arena_visit(kid(b 2));
+    arena_visit(kid(b 3));
+}
+arena_finalize=():>void=>$unsafe {
+    if arena_fns.length =? 0 {return}
+    arena_enter_decl=ArenaWord(fns.ptr[runtime_fn("__arena_enter")].decl)
+    arena_keep_state=dict<int64 int64>()
+    arena_keep_witness=dict<int64 int64>()
+    arena_keep_depth=dict<int64 int64>()
+    loop [f _] in arena_fns {
+        arena_stack=[]
+        arena_visit(ArenaWord(fns.ptr[f].body));
+    }
+}
+arena_capacity_exempt=(event:EffectEvent):>bool=>$unsafe {
+    if not arena_proofs_done {
+        arena_proofs_done=true
+        arena_prove_all();
+    # (`arena(bytes)` acquires capacity explicitly: its refusal is its result, OutOfMemory)
+    }
+    if event.via not=? 0 {
+        if event.via_fn >? 0 and arena_acquisition(event.via_fn) {return true}
+        return arena_proven.has(event.via)
+    }
+    if event.atom.kind =? 'alloc' {return arena_proven.has(event.witness)}
+    return (event.atom.kind =? 'opaque' or event.atom.kind =? 'remainder') and arena_proven_machinery.has(event.witness)
+}
+arena_acquisition=(g:ArenaWord):>bool=>$unsafe {
+    let d:ArenaWord=ArenaWord(fns.ptr[g].decl)
+    return d not=? 0 and name_of(ArenaWord(nodes.ptr[d].name)) =? "arena" and files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/arena.jo"
+}
+arena_prove_all=():>void=>$unsafe {
+    arena_enter_decl=ArenaWord(fns.ptr[runtime_fn("__arena_enter")].decl)
+    loop [f _] in arena_fns {
+        if f >? 0 and f <? fns.length and fns.ptr[f].state =? 2 {arena_prove_in(f ArenaWord(fns.ptr[f].body) ArenaWord(fns.ptr[f].body));}
+    }
+}
+arena_prove_in=(f:ArenaWord body:ArenaWord n:ArenaWord):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return}
+    if k =? 'block' and arena_scope_start(n) not=? 0 {
+        arena_prove_scope(body n);
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {arena_prove_in(f body ArenaWord(nodes.ptr[n].a));}
+    if mask & 2 not=? 0 {arena_prove_in(f body ArenaWord(nodes.ptr[n].b));}
+    if mask & 4 not=? 0 {arena_prove_in(f body ArenaWord(nodes.ptr[n].c));}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {arena_prove_in(f body child);}
+    }
+}
+arena_fixed_capacity=(body:ArenaWord l:ArenaWord):>int64=>$unsafe {
+    let d=arena_find_decl(body l)
+    if d =? 0 {return -1}
+    let e:ArenaWord=ArenaWord(nodes.ptr[d].b)
+    loop depth in [0..16) {
+        if e =? 0 {return -1}
+        let k=nodes.ptr[e].kind
+        if k =? 'conv' or k =? 'unwrap' or k =? 'narrow' or k =? 'exprstmt' {e=ArenaWord(nodes.ptr[e].a)}
+        else if k =? 'block' and nkids(e) >? 1 and nodes.ptr[kid(e 0)].kind =? 'vardecl' {
+            # (`arena(n) or_throw`, errors.jo: `{ let v=arena(n)  if v is? OutOfMemory return v  v }`)
+            let last=kid(e nkids(e) - 1)
+            if nodes.ptr[last].kind =? 'exprstmt' {last=ArenaWord(nodes.ptr[last].a)}
+            if nodes.ptr[last].kind not=? 'ident' or nodes.ptr[last].name not=? nodes.ptr[kid(e 0)].name {return -1}
+            e=ArenaWord(nodes.ptr[kid(e 0)].b)
+        }
+        else if k =? 'call' and nodes.ptr[e].aux =? 0 and nodes.ptr[e].sym >? 0 {
+            let g:ArenaWord=ArenaWord(fns.ptr[ArenaWord(nodes.ptr[e].sym)].decl)
+            if g =? 0 or name_of(ArenaWord(nodes.ptr[g].name)) not=? "arena" or not pos_in_lib(nodes.ptr[g].pos) or nkids(e) not=? 1 {return -1}
+            let size=kid(e 0)
+            if nodes.ptr[size].kind =? 'conv' {size=ArenaWord(nodes.ptr[size].a)}
+            if nodes.ptr[size].kind not=? 'int_lit' {return -1}
+            return ArenaWord(nodes.ptr[size].ival)
+        }
+        else {return -1}
+    }
+    return -1
+}
+arena_find_decl=(n:ArenaWord l:ArenaWord):>int64=>$unsafe {
+    if n =? 0 {return 0}
+    let k=nodes.ptr[n].kind
+    if k =? 'vardecl' and nodes.ptr[n].sym =? int32<overflow='wrap'>(l) {return n}
+    if k =? 'lambda' {return 0}
+    let mask=isolation_children(k)
+    if mask <? 0 {return 0}
+    let found:ArenaWord=0
+    if mask & 1 not=? 0 {found=arena_find_decl(ArenaWord(nodes.ptr[n].a) l)}
+    if found =? 0 and mask & 2 not=? 0 {found=arena_find_decl(ArenaWord(nodes.ptr[n].b) l)}
+    if found =? 0 and mask & 4 not=? 0 {found=arena_find_decl(ArenaWord(nodes.ptr[n].c) l)}
+    if found =? 0 and mask & 16 not=? 0 {
+        loop child in kids(n) {
+            found=arena_find_decl(child l)
+            if found not=? 0 {break}
+        }
+    }
+    return found
+}
+arena_prove_scope=(body:ArenaWord b:ArenaWord):>void=>$unsafe {
+    let d=arena_scope_start(b)
+    let place=kid(ArenaWord(nodes.ptr[d].b) 0)
+    let lent=arena_root(place)
+    let value:ArenaWord=ArenaWord(nodes.ptr[kid(b 1)].b)
+    let capacity=if lent.local =? 0 {-1} else {arena_fixed_capacity(body lent.local)}
+    if capacity <? 0 {
+        arena_unprove(value "its arena's capacity is not known here: lend a local made by `arena(bytes)` with a constant size");
+        return
+    }
+    arena_proof_sites=[]
+    arena_proof_nodes=[]
+    let need=arena_bound(value 1)
+    if need <? 0 {
+        arena_unprove(value "its allocation is not bounded (only array literals of known length count, in loops over constant ranges)");
+        return
+    }
+    if need >? capacity {
+        arena_unprove(value "it may take {need} bytes of its arena's {capacity}");
+        return
+    }
+    loop site in arena_proof_sites {arena_proven[site] = true;}
+    # (inside, the expression's other costs are its own storage's: counts and bounds; its
+    # allocation is the proof's. The acquisition `arena(n) or_throw` forwards its failure.)
+    loop node in arena_proof_nodes {arena_proven_machinery[node] = true;}
+    let acquisition=arena_find_decl(body lent.local)
+    arena_mark_subtree(acquisition);
+    # (the expression's own entry and exit: a fixed arena's enter only empties it)
+    arena_proven[ArenaWord(nodes.ptr[d].b)] = true;
+    let leave=kid(b 2)
+    if nodes.ptr[leave].kind =? 'exprstmt' {leave=ArenaWord(nodes.ptr[leave].a)}
+    arena_proven[leave] = true;
+    let result=kid(b 3)
+    if nodes.ptr[result].kind =? 'exprstmt' {result=ArenaWord(nodes.ptr[result].a)}
+    if not is_managed(ntype(result)) {arena_mark_subtree(result);}
+}
+arena_unprove=(n:ArenaWord why:string):>void=>$unsafe {
+    arena_proof_nodes=[]
+    arena_collect(n);
+    loop node in arena_proof_nodes {arena_unproven[node] = why;}
+}
+arena_capacity_hint=(witness:ArenaWord):>string=>$unsafe {
+    if arena_unproven.length =? 0 {return ""}
+    let cached_why=arena_unproven.get(witness)
+    if cached_why not=? none {let why=cached_why; return "; it is inside an `$allocator` expression not proven to fit its arena: {why}"}
+    return ""
+}
+arena_collect=(n:ArenaWord):>void=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind =? 'lambda' {return}
+    arena_proof_nodes.push(n);
+    let mask=isolation_children(nodes.ptr[n].kind)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {arena_collect(ArenaWord(nodes.ptr[n].a));}
+    if mask & 2 not=? 0 {arena_collect(ArenaWord(nodes.ptr[n].b));}
+    if mask & 4 not=? 0 {arena_collect(ArenaWord(nodes.ptr[n].c));}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {arena_collect(child);}
+    }
+}
+arena_mark_subtree=(n:ArenaWord):>void=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind =? 'lambda' {return}
+    arena_proven_machinery[n] = true;
+    let mask=isolation_children(nodes.ptr[n].kind)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {arena_mark_subtree(ArenaWord(nodes.ptr[n].a));}
+    if mask & 2 not=? 0 {arena_mark_subtree(ArenaWord(nodes.ptr[n].b));}
+    if mask & 4 not=? 0 {arena_mark_subtree(ArenaWord(nodes.ptr[n].c));}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {arena_mark_subtree(child);}
+    }
+}
+arena_bound=(n:ArenaWord times:ArenaWord):>int64=>$unsafe {
+    if n =? 0 {return 0}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'map_lit' or k =? 'matrix' {return -1}
+    arena_proof_nodes.push(n);
+    # (operations that may allocate past what the proof counts: growth, detaching a shared
+    # buffer on a write, joined text, boxes)
+    if k =? 'intrinsic' {
+        let id=nodes.ptr[n].aux as IN
+        if arena_mutators(id) or id =? IN.slice or id =? IN.dewy_set or id =? IN.dewy_fmt or id =? IN.fmt_struct {return -1}
+    }
+    if k =? 'assign' and nodes.ptr[ArenaWord(nodes.ptr[n].a)].kind =? 'index' {return -1}
+    if k =? 'str_lit' and nodes.ptr[n].aux =? 1 {return -1}
+    if k =? 'call' and (nodes.ptr[n].aux =? 2 or nodes.ptr[n].aux =? 3) and is_managed(ntype(n)) {return -1}
+    let total:ArenaWord=0
+    if k =? 'array' {
+        let t=prune(ntype(n))
+        if tkind(t) not=? 'array' {return -1}
+        loop c in kids(n) {
+            if has_flag(c NF_SPREAD) {return -1}
+        }
+        let count=nkids(n)
+        if count >? 0 {
+            total=times * ((24 + count * owner_stride(telem(t)) + 31) & ~15)
+            arena_proof_sites.push(n);
+        }
+    }
+    if k =? 'block' and arena_scope_start(n) not=? 0 {
+        # (a nested expression's value is copied into this arena)
+        if is_managed(ntype(kid(n 3))) {return -1}
+        return 0
+    }
+    if k =? 'while_' {return if arena_bound(ArenaWord(nodes.ptr[n].b) 1) =? 0 and arena_bound(ArenaWord(nodes.ptr[n].a) 1) =? 0 {0} else {-1}}
+    if k =? 'for_' {
+        let sites=arena_proof_sites.length
+        let inner=arena_bound(ArenaWord(nodes.ptr[n].b) 1)
+        if inner <? 0 {return -1}
+        if inner =? 0 {return arena_bound(ArenaWord(nodes.ptr[n].a) times)}
+        let trips=arena_trips(ArenaWord(nodes.ptr[n].a))
+        if trips <? 0 {return -1}
+        arena_proof_sites.truncate(sites);
+        inner=arena_bound(ArenaWord(nodes.ptr[n].b) times * trips)
+        if inner <? 0 {return -1}
+        return inner + max(0 arena_bound(ArenaWord(nodes.ptr[n].a) times))
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return -1}
+    let parts:array<int64>=[]
+    if mask & 1 not=? 0 {parts.push(ArenaWord(nodes.ptr[n].a));}
+    if mask & 2 not=? 0 {parts.push(ArenaWord(nodes.ptr[n].b));}
+    if mask & 4 not=? 0 {parts.push(ArenaWord(nodes.ptr[n].c));}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {parts.push(child);}
+    }
+    loop p in parts {
+        let b=arena_bound(p times)
+        if b <? 0 {return -1}
+        total += b;
+    }
+    return total
+}
+arena_trips=(range:ArenaWord):>int64=>$unsafe {
+    if nodes.ptr[range].kind not=? 'range' {return -1}
+    let a:ArenaWord=ArenaWord(nodes.ptr[range].a)
+    let b:ArenaWord=ArenaWord(nodes.ptr[range].b)
+    if a =? 0 or b =? 0 or nodes.ptr[a].kind not=? 'int_lit' or nodes.ptr[b].kind not=? 'int_lit' {return -1}
+    if nodes.ptr[range].c not=? 0 {return -1}
+    return max(0 ArenaWord(nodes.ptr[b].ival) - ArenaWord(nodes.ptr[a].ival) + 1)
+}

@@ -216,6 +216,13 @@ DOUBLES['module_paths'] = {
     'dewy': 'path_norm=(p:string):>string=>p\n',
     'jo': 'path_norm = (p: str) -> str: p\n',
 }
+JO['arena_ops.dewy'] = r'''from p"arena.jo" import (arena_reset as reset_double runtime_switch as switch_double runtime_switch_on as on_double)
+arena_reset=():>void=>reset_double()
+runtime_switch=():>void=>switch_double()
+runtime_switch_on=(name:string):>void=>on_double(name)
+'''
+JO['arena_ops.jo'] = "use 'arena.jo'\n"
+
 DRIVER = ''.join(f"use '{m}'\n" for m in EXTRA) + BASE + r'''
 pg_grow = true
 pg_ffi = true

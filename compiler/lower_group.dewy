@@ -15,7 +15,6 @@ from p"ir_types.dewy" import (Op)
 from p"types.jo" import (T_F32 T_I32 T_INT T_MAT4 T_MATH_INT T_NEVER T_RANGE T_STR T_U64 T_U8 T_VEC4 T_VOID fields fixed_len int_policy is_int is_managed is_union is_vec layout math_optional mk_array mk_box prune ptr_size structs targ telem tkind ts_dewy tsize type_eq type_has_fn type_str types union_holder union_index union_members variants)
 from p"checker_tokens.dewy" import (Tok)
 from p"checked_eval.dewy" import (cx_token_values)
-from p"arena.jo" import (arena_gen_promote)
 from p"facts.jo" import (array_len_expr fact_fixed_comprehension fact_fixed_comprehension_exact fact_library_call fact_storage_loop fixed_array_len fixed_array_local index_safety len_of_local lower_length_guard lower_length_guards positive_bound range_facts_begin range_facts_end stable_loop_index)
 from p"util.jo" import (call_args_text fatal files ice name_of pos_file pos_off pos_str)
 from p"effects.jo" import (callable_base effect_lower_intrinsic effect_policy effects_active)
@@ -47,6 +46,7 @@ from p"concurrency.jo" import (concurrency_runtime_needed)
 from p"lower_intrinsics.dewy" import (gen_intrinsic_argv gen_intrinsic_compute_spirv gen_intrinsic_compute_textures gen_intrinsic_embed gen_intrinsic_gpu_kernel gen_intrinsic_shader gen_intrinsic_unreachable gen_intrinsic_zeroed)
 from p"lower_races.dewy" import (in_lib parallel_direct race_check type_as_value)
 from p"ir_builders.dewy" import (e_addi e_bin e_brtable e_call e_call0 e_call1 e_call2 e_call3 e_call4 e_calli e_copy e_fconst e_iconst e_load e_mov e_ret e_slot e_store e_un e_vop e_zero emit ir_set_pos new_slot vreg)
+from p"arena_ops.dewy" import (arena_gen_promote)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LGWord:type=int64<overflow='wrap'>
 LGUWord:type=uint64<overflow='wrap'>
