@@ -3,7 +3,7 @@ from p"effect_types.dewy" import (EffectAtom)
 from p"ast.jo" import (NF_EXTERN has_flag kid kid2 nkids nkids2 nodes)
 from p"effect_contracts.dewy" import (callable_contract)
 from p"concurrency_types.dewy" import (concurrency_transfer concurrency_why)
-from p"concurrency.jo" import (concurrency_block_memo parsafe_vouched)
+from p"concurrency.jo" import (concurrency_block_memo)
 from p"effect_lattice.dewy" import (effect_allows)
 from p"effects.jo" import (effect_contracts)
 from p"effect_sources.dewy" import (effect_source_row)
@@ -13,6 +13,7 @@ from p"isolation_ops.dewy" import (isolation_children)
 from p"expr.jo" import (ntype)
 from p"ownership.jo" import (ownership_literal_print)
 from p"lower_helpers.dewy" import (value_helper_calls)
+from p"concurrency_parsafe.dewy" import (parsafe_vouched)
 # Demanded waiting-effect queries; shared state has one owner in concurrency.jo.
 WaitingWord:type=int64<overflow='wrap'>
 concurrency_fn_blocks=(f:WaitingWord):>bool=>$unsafe {

@@ -1,0 +1,206 @@
+$runtime_checks
+from p"check.jo" import (LF_ASSIGNED LF_CAPTURE LF_PARAM LF_VALUEPARAM decl_infos fns locals)
+from p"concurrency.jo" import (ParSafeVia concurrency_callback concurrency_calls parsafe_fns parsafe_req parsafe_work)
+from p"util.jo" import (err_notes fatal name_of)
+from p"lower_races.dewy" import (in_lib race_arg)
+from p"ast.jo" import (kid kid2 kids nkids nkids2 nodes parsafe_tags)
+from p"expr.jo" import (ntype)
+from p"types.jo" import (tkind)
+# Demanded parallel callback contracts; shared state has one owner in concurrency.jo.
+ParSafeWord:type=int64<overflow='wrap'>
+parsafe_key=(f:ParSafeWord i:ParSafeWord):>int64=>$unsafe {
+    return (f << 8) | i
+}
+# The parameter (function, index) a variable is: through captures to the enclosing function's
+# own binding, which must still be the one its caller gave; (0, -1) for any other variable.
+parsafe_param_local=(l0:ParSafeWord):>[int64 int64]=>$unsafe {
+    let l=l0
+    loop ParSafeWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 and locals.ptr[l].outer >? 0 {l=ParSafeWord(locals.ptr[l].outer)}
+    let fl:ParSafeWord=ParSafeWord(locals.ptr[l].flags)
+    if fl & LF_PARAM =? 0 and fl & (LF_VALUEPARAM | LF_ASSIGNED) not=? LF_VALUEPARAM {return [0 (-1)]}
+    let g:ParSafeWord=ParSafeWord(locals.ptr[l].owner)
+    if g <=? 0 or g >=? fns.length {return [0 (-1)]}
+    # (a Dewy value parameter's own binding stands for the hidden parameter of its name)
+    loop i in [0..fns.ptr[g].params.length) {
+        let p=fns.ptr[g].params.ptr[i]
+        if (p =? l or fl & LF_VALUEPARAM not=? 0 and locals.ptr[p].name =? locals.ptr[l].name) and i <? 256 {return [g i]}
+    }
+    return [0 (-1)]
+}
+parsafe_param=(a0:ParSafeWord):>[int64 int64]=>$unsafe {
+    let a=a0
+    loop nodes.ptr[a].kind =? 'conv' {a=ParSafeWord(nodes.ptr[a].a)}
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32(1) {return [0 (-1)]}
+    return parsafe_param_local(ParSafeWord(nodes.ptr[a].sym))
+}
+parsafe_require=(g:ParSafeWord i:ParSafeWord via:ParSafeVia):>void=>$unsafe {
+    let k=parsafe_key(g i)
+    if parsafe_req.has(k) {return}
+    parsafe_req[k] = via;
+    parsafe_fns[g] = true;
+    parsafe_work.push(k);
+}
+# Whether a callback (an argument, or what a call calls) is a parameter that every call of its
+# function checks: then it is parallel-safe wherever it runs (race_check, race_scan).
+parsafe_vouched=(a:ParSafeWord):>bool=>$unsafe {
+    if parsafe_fns.length =? 0 {return false}
+    let [g i]=parsafe_param(a)
+    return g >? 0 and parsafe_req.has(parsafe_key(g i))
+}
+parsafe_vouched_local=(l:ParSafeWord):>bool=>$unsafe {
+    if parsafe_fns.length =? 0 {return false}
+    let [g i]=parsafe_param_local(l)
+    return g >? 0 and parsafe_req.has(parsafe_key(g i))
+}
+parsafe_fn_name=(f:ParSafeWord):>string=>$unsafe {
+    let d:ParSafeWord=ParSafeWord(fns.ptr[f].decl)
+    if d =? 0 or nodes.ptr[d].kind not=? 'fn_' {return "this function"}
+    return name_of(ParSafeWord(nodes.ptr[d].name))
+}
+parsafe_param_name=(f:ParSafeWord i:ParSafeWord):>string=>$unsafe {
+    return name_of(ParSafeWord(locals.ptr[fns.ptr[f].params.ptr[i]].name))
+}
+# How a parallel call reads in a note: `parallel` for the loop and comprehension forms.
+parsafe_parallel_name=(n:ParSafeWord):>string=>$unsafe {
+    let nm=parsafe_fn_name(ParSafeWord(nodes.ptr[n].sym))
+    if nm.startswith("__dewy_parallel") {return "`parallel`"}
+    return nm
+}
+# The parallel calls' callback parameters: direct (`parallel_map(xs @f)`) or captured by the
+# function they run (`[parallel x in xs f(x)]`).
+parsafe_roots=():>void=>$unsafe {
+    loop n in concurrency_calls {
+        if in_lib(nodes.ptr[n].pos) {continue}
+        loop a in kids(n) {
+            if tkind(ntype(a)) not=? 'fn_' {continue}
+            let [g i]=parsafe_param(a)
+            if g >? 0 {
+                parsafe_require(g i ParSafeVia[n 0 0]);
+                continue
+            }
+            let c=a
+            loop nodes.ptr[c].kind =? 'conv' {c=ParSafeWord(nodes.ptr[c].a)}
+            if nodes.ptr[c].kind not=? 'lambda' or nodes.ptr[c].sym <=? 0 {continue}
+            loop cap in fns.ptr[ParSafeWord(nodes.ptr[c].sym)].caps {
+                if tkind(ParSafeWord(locals.ptr[ParSafeWord(cap.inner)].type)) not=? 'fn_' {continue}
+                let [h j]=parsafe_param_local(ParSafeWord(cap.outer))
+                if h <=? 0 {continue}
+                parsafe_require(h j ParSafeVia[n 0 0]);
+            }
+        }
+    }
+}
+# The program's direct calls, by callee (a list threaded through call_next from call_head), and
+# its function values (fnref, partial).
+parsafe_index=(n:ParSafeWord @call_head:dict<int64 int64> @call_node:array<int64> @call_next:array<int64> @values:array<int64>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return}
+    if k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {
+        let g:ParSafeWord=ParSafeWord(nodes.ptr[n].sym)
+        let nx:ParSafeWord=-1
+        if call_head.has(g) {nx=call_head[g]}
+        call_head[g] = call_node.length;
+        call_node.push(n);
+        call_next.push(nx);
+    }
+    else if (k =? 'fnref' or k =? 'partial' and nodes.ptr[n].aux =? 0) and nodes.ptr[n].sym >? 0 {values.push(n);}
+    parsafe_index(ParSafeWord(nodes.ptr[n].a) @call_head @call_node @call_next @values);
+    parsafe_index(ParSafeWord(nodes.ptr[n].b) @call_head @call_node @call_next @values);
+    if k not=? 'for_' {
+        parsafe_index(ParSafeWord(nodes.ptr[n].c) @call_head @call_node @call_next @values);
+        if k not=? 'partial' {parsafe_index(ParSafeWord(nodes.ptr[n].d) @call_head @call_node @call_next @values);}
+    }
+    loop i in [0..nkids(n)) {parsafe_index(kid(n i) @call_head @call_node @call_next @values);}
+    loop i in [0..nkids2(n)) {parsafe_index(kid2(n i) @call_head @call_node @call_next @values);}
+}
+# The chain from g's parameter i to the parallel use, as notes on the error it ends in.
+parsafe_notes=(g0:ParSafeWord i0:ParSafeWord):>void=>$unsafe {
+    let g=g0
+    let i=i0
+    loop true {
+        let via=parsafe_req[parsafe_key(g i)]
+        if via.callee =? 0 {
+            err_notes.push([nodes.ptr[via.site].pos "note: {parsafe_fn_name(g)} runs '{parsafe_param_name(g i)}' on many threads at once here, through {parsafe_parallel_name(via.site)}"]);
+            return
+        }
+        err_notes.push([nodes.ptr[via.site].pos "note: {parsafe_fn_name(g)} passes '{parsafe_param_name(g i)}' on to {parsafe_fn_name(ParSafeWord(via.callee))}'s parameter '{parsafe_param_name(ParSafeWord(via.callee) ParSafeWord(via.param))}' here"]);
+        g=ParSafeWord(via.callee)
+        i=ParSafeWord(via.param)
+    }
+}
+# Argument i of call c, to g: checked as the parallel call would check it, or passed up.
+parsafe_arg=(c:ParSafeWord g:ParSafeWord i:ParSafeWord):>void=>$unsafe {
+    let a=kid(c i)
+    let [h j]=parsafe_param(a)
+    if h >? 0 {
+        parsafe_require(h j ParSafeVia[c g i]);
+        return
+    }
+    err_notes.push([nodes.ptr[a].pos "note: this is given to {parsafe_fn_name(g)}'s parameter '{parsafe_param_name(g i)}', which must be parallel-safe"]);
+    parsafe_notes(g i);
+    let who="{parsafe_fn_name(g)} (through its parameter '{parsafe_param_name(g i)}')"
+    let b=a
+    loop nodes.ptr[b].kind =? 'conv' {b=ParSafeWord(nodes.ptr[b].a)}
+    let k=nodes.ptr[b].kind
+    if k not=? 'lambda' and k not=? 'fnref' and k not=? 'partial' {fatal(nodes.ptr[a].pos "{who} runs this function on many threads at once, so the compiler checks it for data races, which it can only do for a function it can see: pass a function by name or a lambda");}
+    concurrency_callback(a);
+    race_arg(a who);
+    err_notes=[]
+}
+parsafe_finalize=():>void=>$unsafe {
+    parsafe_roots();
+    if parsafe_work.length >? 0 {
+        let call_head:dict<int64 int64>=dict<int64 int64>()
+        let call_node:array<int64>=[]
+        let call_next:array<int64>=[]
+        let values:array<int64>=[]
+        loop f in [1..fns.length) {
+            if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 or in_lib(nodes.ptr[ParSafeWord(fns.ptr[f].body)].pos) {continue}
+            parsafe_index(ParSafeWord(fns.ptr[f].body) @call_head @call_node @call_next @values);
+        }
+        loop parsafe_work.length >? 0 {
+            let key=parsafe_work.pop()
+            let g=key >> 8
+            let i=key & 255
+            let at:ParSafeWord=-1
+            if call_head.has(g) {at=call_head[g]}
+            loop at >=? 0 {
+                let c=call_node.ptr[at]
+                if i <? nkids(c) {parsafe_arg(c g i);}
+                at=call_next.ptr[at]
+            }
+        }
+        loop v in values {
+            let h:ParSafeWord=ParSafeWord(nodes.ptr[v].sym)
+            if not parsafe_fns.has(h) {continue}
+            loop j in [0..fns.ptr[h].params.length) {
+                if not parsafe_req.has(parsafe_key(h j)) {continue}
+                parsafe_notes(h j);
+                fatal(nodes.ptr[v].pos "{parsafe_fn_name(h)} runs its parameter '{parsafe_param_name(h j)}' on many threads at once, so it can only be called directly (where the compiler checks the function given for '{parsafe_param_name(h j)}'), not used as a value or partially applied");
+            }
+        }
+    }
+    if parsafe_tags.length >? 0 {parsafe_tags_check();}
+}
+# `$parallel_safe` (parsafe_tags, by declaration): each checked instance must take a callback and
+# still pass every callback parameter into parallel code, so an edit to the body cannot quietly
+# drop the requirement its callers are held to. O(tagged instances x parameters).
+parsafe_tags_check=():>void=>$unsafe {
+    loop [d pos] in parsafe_tags {
+        let di:ParSafeWord=ParSafeWord(nodes.ptr[d].sym)
+        if di <=? 0 {continue}
+        loop f in decl_infos.ptr[di].insts {
+            if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 {continue}
+            let callback=false
+            loop t in fns.ptr[f].ptypes {
+                if tkind(t) =? 'fn_' {callback=true}
+            }
+            if not callback {fatal(pos "`$parallel_safe` holds callers to giving a parallel-safe function for each callback parameter, but {parsafe_fn_name(f)} takes no function, so the tag would check nothing: remove it");}
+            loop i in [0..fns.ptr[f].ptypes.length) {
+                if tkind(fns.ptr[f].ptypes.ptr[i]) not=? 'fn_' or i >=? fns.ptr[f].params.length or parsafe_req.has(parsafe_key(f i)) {continue}
+                fatal(pos "`$parallel_safe` says {parsafe_fn_name(f)} runs its callback '{parsafe_param_name(f i)}' on many threads at once, so its callers must give a parallel-safe function, but its body no longer passes '{parsafe_param_name(f i)}' into parallel code: pass it into parallel code again, or remove the tag (this loosens what callers are held to)");
+            }
+        }
+    }
+}
