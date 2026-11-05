@@ -11,7 +11,7 @@ def test_lower_temporary_arena_nested_early_release(compiler, tmp_path):
     source.write_text(''.join(f"use '{ROOT / 'compiler' / (name + '.jo')}'\n"
                               for name in ('lower', 'ir', 'types'))
                       + ''.join(f"use '{ROOT / 'compiler' / (name + '.dewy')}'\n"
-                                for name in ('lower_storage', 'lower_functions')) + '''
+                                for name in ('lower_storage', 'lower_functions', 'ir_builders')) + '''
 init_types()
 loop round in [0..3):
     begin_fn("temps", 0)

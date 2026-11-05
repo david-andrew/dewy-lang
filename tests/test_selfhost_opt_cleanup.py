@@ -148,6 +148,8 @@ def test_opt_cleanup_twins(compiler, tmp_path, release):  # noqa: F811
         'ow_flow_pop', 'ow_grow_output', 'ow_append_plain', 'ow_append'))
     ir = (ROOT / 'compiler/ir.jo').read_text()
     walker = ir[ir.index('ir_use_count = 0'):ir.index('ir_operand_layout: int[]')]
+    builders = (ROOT / 'compiler/ir_builders.jo').read_text()
+    walker += builders[builders.index('ir_use = '):]
     outputs = []
     for extension in ('dewy', 'jo'):
         for stem in ('ir_types', 'ir_operands', 'opt_workspace', 'opt_cleanup'):

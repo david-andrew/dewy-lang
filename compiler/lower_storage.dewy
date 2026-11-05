@@ -1,7 +1,7 @@
 from p"lower_primitives.dewy" import (e_daddr e_gaddr global_addr_off lf_helper lf_of_inst rt rt_global)
 from p"lower_closures.dewy" import (closure_scalar_environment drop_stack_closure)
 $runtime_checks
-from p"ir.jo" import (A_RC1 M_FLOAT M_HDR M_SIGNED VF VI VS e_addi e_bin e_block e_br e_brif e_call0 e_call1 e_call2 e_call3 e_copy e_else e_end e_fconst e_iconst e_if e_load e_loop e_mov e_slot e_store e_un e_zero emit ir ir_cold ir_pos is_kv kv_of new_slot vreg)
+from p"ir.jo" import (A_RC1 M_FLOAT M_HDR M_SIGNED VF VI VS ir ir_cold ir_pos)
 from p"lower.jo" import (BOX_HDR BuildItem HK LowerTypePlan LowerZero Place TempItem VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_dflt_data building cond_depth ctl env_v lop_watch lower_epoch lower_has_nops lower_mark_serial lower_planning lower_types lower_zeros mt_active_off opt_release pinned_box pinned_type ro_starts rodata scope_defers scope_locals tl_cond tl_items tl_nop tl_values)
 from p"ir.jo" import (CALL_IF_SHARED CALL_RC_DEC CALL_RC_INC)
 from p"checker_state.dewy" import (SK)
@@ -20,6 +20,7 @@ from p"ownership.jo" import (owner_drop owner_element_live owner_forget_slot own
 from p"ownership_types.dewy" import (ownership_copyable ownership_type)
 from p"facts.jo" import (positive_epoch)
 from p"units.jo" import (quantity_base)
+from p"ir_builders.dewy" import (e_addi e_bin e_block e_br e_brif e_call0 e_call1 e_call2 e_call3 e_copy e_else e_end e_fconst e_iconst e_if e_load e_loop e_mov e_slot e_store e_un e_zero emit is_kv kv_of new_slot vreg)
 # Value storage, lifetime and structured control; state stays in lower.jo.
 LSWord:type=int64<overflow='wrap'>
 hdr_load=(p:LSWord off:LSWord):>int64=>$unsafe {

@@ -15,7 +15,7 @@ from p"icount.jo" import (IC_OWNERSHIP ic_phase ic_restore)
 from p"ir_types.dewy" import (Ins Op)
 from p"ast.jo" import (NF_GLOBAL has_flag kid mk nkids nodes)
 from p"types.jo" import (T_MATH_INT is_managed prune talign tsize types)
-from p"ir.jo" import (VI dbg_on e_bin e_end e_iconst e_if e_mov e_ret e_slot e_store e_trap e_zero emit ir ir_begin ir_pos ir_set_pos new_slot vreg)
+from p"ir.jo" import (VI dbg_on ir ir_pos)
 from p"copies.jo" import (copies_on copies_prepare copy_inputs)
 from p"exact_guards.jo" import (eg_demanded)
 from p"lower_storage.dewy" import (endc iff new_temp norm ret_vt scope_add_local scope_push store_type store_val vc vt_of)
@@ -35,6 +35,7 @@ from p"partition.jo" import (partition_begin)
 from p"pcheck.jo" import (pc_restore)
 from p"refine.jo" import (refine_active refine_gen_entry)
 from p"lower_closure_borrow.dewy" import (stack_closure_params)
+from p"ir_builders.dewy" import (e_bin e_end e_iconst e_if e_mov e_ret e_slot e_store e_trap e_zero emit ir_begin ir_set_pos new_slot vreg)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LFnWord:type=int64<overflow='wrap'>
 begin_fn=(name:string idx:LFnWord):>void=>$unsafe {

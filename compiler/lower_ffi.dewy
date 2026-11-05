@@ -2,13 +2,14 @@ from p"lower_primitives.dewy" import (e_daddr e_gaddr rt str_data)
 from p"lower_functions.dewy" import (begin_fn)
 $runtime_checks
 from p"lower.jo" import (VC_AGG VC_INT data_size ffi_keys ffi_offs ffi_slot late_binding mac_imports)
-from p"ir.jo" import (VF VI VS e_bin e_call1 e_call2 e_calli e_iconst e_load e_mov e_ret e_store e_zero emit ir vreg)
+from p"ir.jo" import (VF VI VS ir)
 from p"types.jo" import (align_up prune tkind tsize types)
 from p"lower_storage.dewy" import (endc iff norm opt_has ret_vt vc vt_of)
 from p"util.jo" import (fatal name_of)
 from p"check.jo" import (fns target_macos target_windows)
 from p"ast.jo" import (nodes)
 from p"pe_format.dewy" import (pe_imports)
+from p"ir_builders.dewy" import (e_bin e_call1 e_call2 e_calli e_iconst e_load e_mov e_ret e_store e_zero emit vreg)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LFFWord:type=int64<overflow='wrap'>
 mac_bound_lib=(lib:string):>string=>$unsafe {

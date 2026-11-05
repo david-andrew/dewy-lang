@@ -1,0 +1,361 @@
+$runtime_checks
+from p"ir_types.dewy" import (Ins IrFn Op)
+from p"ir.jo" import (M_INDEX VI VK VS ir ir_cold ir_lines ir_pos ir_positions ir_use_count ir_use_span ir_use_span_count ir_use_values kc_epoch kc_fn kc_reg kc_val)
+from p"util.jo" import (files ice line_col pos_file pos_off src_lines)
+# Direct recursive lowering; shared state has one owner in ir.jo.
+IRWord:type=int64<overflow='wrap'>
+mem_index=(ins:Ins):>int64=>$unsafe {
+    if IRWord(ins.c) & M_INDEX =? 0 {return -1}
+    if ins.op =? 'store' {return IRWord(ins.dst)}
+    return IRWord(ins.b)
+}
+mem_scale=(ins:Ins):>int64=>$unsafe {
+    return (IRWord(ins.c) >> 8) & 3
+}
+ir_begin=(name:string fn_index:IRWord):>void=>$unsafe {
+    ir=IrFn[name = name ret = -1 fn_index = fn_index]
+    kc_fn = IRWord(kc_fn) + 1
+}
+vreg=(ty:IRWord):>int64=>$unsafe {
+    ir.vtypes.push(int8<overflow='wrap'>(ty));
+    return IRWord(ir.vtypes.length) - 1
+}
+vtype=(v:IRWord):>int64=>$unsafe {
+    let t:IRWord=IRWord(ir.vtypes.ptr[v])
+    if t =? VK {return VI}
+    return t
+}
+is_kv=(v:IRWord):>bool=>$unsafe {
+    return IRWord(ir.vtypes.ptr[v]) =? VK
+}
+kv_of=(v:IRWord):>int64=>$unsafe {
+    return ir.kval.ptr[v]
+}
+k_vreg=(v:IRWord):>int64=>$unsafe {
+    let slot=((v xor (v >> 8))) & 255
+    if kc_epoch.ptr[slot] =? kc_fn and kc_val.ptr[slot] =? v {return kc_reg.ptr[slot]}
+    let d=k_vreg_new(v)
+    kc_epoch.ptr[slot] = kc_fn;
+    kc_val.ptr[slot] = v;
+    kc_reg.ptr[slot] = d;
+    return d
+}
+k_vreg_new=(v:IRWord):>int64=>$unsafe {
+    let d=ir.vtypes.length
+    ir.vtypes.push(int8<overflow='wrap'>(VK));
+    loop ir.kval.length <? d {ir.kval.push(0);}
+    ir.kval.push(v);
+    return d
+}
+ir_fits32=(v:IRWord):>bool=>$unsafe {
+    return v >=? -2147483648 and v <=? 2147483647
+}
+new_slot=(size:IRWord align:IRWord):>int64=>$unsafe {
+    ir.slot_size.push(int32<overflow='wrap'>(size));
+    let a=align
+    if a <? 8 {a=8}
+    ir.slot_align.push(int32<overflow='wrap'>(a));
+    return IRWord(ir.slot_size.length) - 1
+}
+ir_line=(i:int64):>int64=>$unsafe {
+    if ir_lines.length not=? ir_positions.length {
+        ir_lines=fill(0 ir_positions.length)
+        let lf:IRWord=-1
+        let li:IRWord=0
+        let ls:array<int64>=[]
+        loop k in [1..ir_positions.length) {
+            let p=ir_positions.ptr[k]
+            let f=pos_file(p)
+            if f <? 0 or f >=? files.length {continue}
+            let off=pos_off(p)
+            if f not=? lf {
+                line_col(p);
+                ls=src_lines.starts.ptr[f]
+                lf=f
+                li=0
+            }
+            if off <? ls.ptr[li] or li + 4 <? ls.length and off >=? ls.ptr[li + 4] {li=line_col(p)[0] - 1}
+            else {
+                loop li + 1 <? ls.length and ls.ptr[li + 1] <=? off {li += 1;}
+            }
+            ir_lines.ptr[k] = li + 1;
+        }
+    }
+    if i <=? 0 or i >=? ir_lines.length {return 0}
+    return ir_lines.ptr[i]
+}
+ir_set_pos=(p:IRWord):>void=>$unsafe {
+    if p =? 0 {return}
+    if ir_positions.ptr[ir_pos] =? p {return}
+    ir_positions.push(p);
+    ir_pos=IRWord(ir_positions.length) - 1
+}
+emit=(op:Op ty:IRWord dst:IRWord a:IRWord b:IRWord c0:IRWord imm:IRWord):>int64=>$unsafe {
+    let c=c0
+    if ir_cold and op =? 'call' and c =? 0 {c=2}
+    ir.code.push(Ins[op int32<overflow='wrap'>(ty) int32<overflow='wrap'>(dst) int32<overflow='wrap'>(a) int32<overflow='wrap'>(b) int32<overflow='wrap'>(c) imm int32<overflow='wrap'>(ir_pos)]);
+    return IRWord(ir.code.length) - 1
+}
+e_iconst=(v:IRWord):>int64=>$unsafe {
+    if ir_fits32(v) {return k_vreg(v)}
+    let d=vreg(VI)
+    emit('iconst' VI d 0 0 0 v);
+    return d
+}
+e_fconst=(f:float64 ty:IRWord):>int64=>$unsafe {
+    let d=vreg(ty)
+    let bits:IRWord=IRWord(f64_bits(f))
+    if ty =? VS {bits=IRWord(f32_bits(float32(f)))}
+    emit('fconst' ty d 0 0 0 bits);
+    return d
+}
+e_bin=(op:Op ty:IRWord a:IRWord b:IRWord):>int64=>$unsafe {
+    let rt=ty
+    if op =? 'eq' or op =? 'ne' or op =? 'lts' or op =? 'les' or op =? 'gts' or op =? 'ges' or op =? 'ltu' or op =? 'leu' or op =? 'gtu' or op =? 'geu' or op =? 'feq' or op =? 'fne' or op =? 'flt' or op =? 'fle' or op =? 'fgt' or op =? 'fge' {rt=VI}
+    let d=vreg(rt)
+    emit(op ty d a b 0 0);
+    return d
+}
+e_un=(op:Op ty:IRWord a:IRWord):>int64=>$unsafe {
+    let rt=ty
+    if op =? 'i2f' or op =? 'u2f' {rt=ty}
+    let d=vreg(rt)
+    emit(op ty d a 0 0 0);
+    return d
+}
+e_mov=(dst:IRWord src:IRWord):>int64=>$unsafe {
+    if is_kv(dst) {ice("assignment to a constant vreg");}
+    return emit('mov' vtype(dst) dst src 0 0 0)
+}
+e_addi=(a:IRWord k:IRWord):>int64=>$unsafe {
+    if k =? 0 {return a}
+    return e_bin('add' VI a e_iconst(k))
+}
+e_load=(ty:IRWord addr:IRWord off:IRWord mode:IRWord):>int64=>$unsafe {
+    let d=vreg(ty)
+    emit('load' ty d addr 0 mode off);
+    return d
+}
+e_store=(addr:IRWord off:IRWord val:IRWord mode:IRWord):>int64=>$unsafe {
+    return emit('store' vtype(val) 0 addr val mode off)
+}
+e_slot=(s:IRWord):>int64=>$unsafe {
+    let d=vreg(VI)
+    emit('slot' VI d s 0 0 0);
+    return d
+}
+e_copy=(dst:IRWord src:IRWord size:IRWord):>int64=>$unsafe {
+    return emit('copy' VI 0 dst src 0 size)
+}
+e_vop=(dst:IRWord bsrc:IRWord csrc:IRWord kind:IRWord n:IRWord flags:IRWord):>int64=>$unsafe {
+    return emit('vop' VI 0 dst bsrc csrc kind | (n << 4) | flags)
+}
+e_zero=(dst:IRWord size:IRWord):>int64=>$unsafe {
+    return emit('zero' VI 0 dst 0 0 size)
+}
+e_call0=(f:IRWord rtype:IRWord):>int64=>$unsafe {
+    let start=ir.args.length
+    return e_call_span(f start 0 rtype)
+}
+e_call1=(f:IRWord a0:IRWord rtype:IRWord):>int64=>$unsafe {
+    let start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0));
+    return e_call_span(f start 1 rtype)
+}
+e_call2=(f:IRWord a0:IRWord a1:IRWord rtype:IRWord):>int64=>$unsafe {
+    let start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0));
+    ir.args.push(int32<overflow='wrap'>(a1));
+    return e_call_span(f start 2 rtype)
+}
+e_call3=(f:IRWord a0:IRWord a1:IRWord a2:IRWord rtype:IRWord):>int64=>$unsafe {
+    let start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0));
+    ir.args.push(int32<overflow='wrap'>(a1));
+    ir.args.push(int32<overflow='wrap'>(a2));
+    return e_call_span(f start 3 rtype)
+}
+e_call4=(f:IRWord a0:IRWord a1:IRWord a2:IRWord a3:IRWord rtype:IRWord):>int64=>$unsafe {
+    let start=ir.args.length
+    ir.args.push(int32<overflow='wrap'>(a0));
+    ir.args.push(int32<overflow='wrap'>(a1));
+    ir.args.push(int32<overflow='wrap'>(a2));
+    ir.args.push(int32<overflow='wrap'>(a3));
+    return e_call_span(f start 4 rtype)
+}
+e_call_span=(f:IRWord start:IRWord n:IRWord rtype:IRWord):>int64=>$unsafe {
+    let d:IRWord=-1
+    if rtype >=? 0 {d=vreg(rtype)}
+    emit('call' rtype d start n 0 f);
+    return d
+}
+e_call=(f:IRWord args:array<int64> rt:IRWord):>int64=>$unsafe {
+    let start=ir.args.length
+    loop a in args {ir.args.push(int32<overflow='wrap'>(a));}
+    let d:IRWord=-1
+    if rt >=? 0 {d=vreg(rt)}
+    emit('call' rt d int32<overflow='wrap'>(start) int32<overflow='wrap'>(args.length) 0 f);
+    return d
+}
+e_calli=(fp:IRWord args:array<int64> rt:IRWord cabi:bool):>int64=>$unsafe {
+    let start=ir.args.length
+    loop a in args {ir.args.push(int32<overflow='wrap'>(a));}
+    let d:IRWord=-1
+    if rt >=? 0 {d=vreg(rt)}
+    let op:Op='calli'
+    if cabi {op='callc'}
+    emit(op rt d int32<overflow='wrap'>(start) int32<overflow='wrap'>(args.length) int32<overflow='wrap'>(fp) 0);
+    return d
+}
+e_block=():>int64=>$unsafe {
+    return emit('block' 0 0 0 0 0 0)
+}
+e_loop=():>int64=>$unsafe {
+    return emit('loop' 0 0 0 0 0 int64(ir_cold))
+}
+e_if=(c:IRWord):>int64=>$unsafe {
+    return emit('if_' 0 0 c 0 0 0)
+}
+e_else=():>int64=>$unsafe {
+    return emit('else_' 0 0 0 0 0 0)
+}
+e_end=():>int64=>$unsafe {
+    return emit('end' 0 0 0 0 0 0)
+}
+e_br=(depth:IRWord):>int64=>$unsafe {
+    return emit('br' 0 0 0 0 0 depth)
+}
+e_brif=(c:IRWord depth:IRWord):>int64=>$unsafe {
+    return emit('brif' 0 0 c 0 0 depth)
+}
+e_brtable=(idx:IRWord depths:array<int64> default_depth:IRWord):>int64=>$unsafe {
+    let start=ir.args.length
+    loop d in depths {ir.args.push(int32<overflow='wrap'>(d));}
+    return emit('brtable' 0 0 idx depths.length start default_depth)
+}
+e_ret=(v:IRWord):>int64=>$unsafe {
+    return emit('ret' 0 0 v 0 0 0)
+}
+e_trap=():>int64=>$unsafe {
+    return emit('trap' 0 0 0 0 0 0)
+}
+op_name=(op:Op):>string=>$unsafe {
+    return "{op}"
+}
+dump_ir=():>void=>$unsafe {
+    printl("fn {ir.name} (params {ir.nparams}, ret {ir.ret}):");
+    loop i in [0..ir.slot_size.length) and s in ir.slot_size {printl("  slot{i}: size {s} align {ir.slot_align.ptr[i]}");}
+    let ind:IRWord=1
+    loop ins in ir.code {
+        if ins.op =? 'end' or ins.op =? 'else_' {ind -= 1;}
+        let pad=repeat("  " ind)
+        let line="{pad}{ins.op}"
+        if ins.dst >=? 0 and ins.op not=? 'store' and ins.op not=? 'br' and ins.op not=? 'brif' and ins.op not=? 'brtable' and ins.op not=? 'block' and ins.op not=? 'loop' and ins.op not=? 'end' and ins.op not=? 'if_' and ins.op not=? 'else_' and ins.op not=? 'ret' {line="{pad}v{ins.dst} = {ins.op}"}
+        line = "{line} a={ins.a} b={ins.b} c={ins.c} imm={ins.imm} ty={ins.ty}"
+        if ins.op =? 'call' or ins.op =? 'calli' or ins.op =? 'callc' or ins.op =? 'syscall' or ins.op =? 'intr' {
+            let al=""
+            loop k in [0..IRWord(ins.b)) {al = "{al} v{ir.args.ptr[IRWord(ins.a) + IRWord(k)]}"}
+            line = "{line} args:{al}"
+        }
+        printl(line);
+        if ins.op =? 'block' or ins.op =? 'loop' or ins.op =? 'if_' or ins.op =? 'else_' {ind += 1;}
+    }
+}
+ir_use=(i:IRWord):>int64=>$unsafe {
+    if ir_use_span >=? 0 {
+        if i <? ir_use_span_count {return IRWord(ir.args.ptr[IRWord(ir_use_span) + i])}
+        return ir_use_values[2]
+    # The three integer fields are contiguous. Every caller bounds i by the
+    # descriptor's count (at most three on this inline path).
+    }
+    if i =? 0 {return ir_use_values[0]}
+    if i =? 1 {return ir_use_values[1]}
+    return ir_use_values[2]
+}
+ir_has_use=(v:IRWord):>bool=>$unsafe {
+    loop i in [0..ir_use_count) {
+        if ir_use(i) =? v {return true}
+    }
+    return false
+}
+ir_operands=(ins:Ins):>int64=>$unsafe {
+    ir_use_count=0
+    ir_use_span=-1
+    let a:IRWord=IRWord(ins.a)
+    let bb:IRWord=IRWord(ins.b)
+    let d:IRWord=IRWord(ins.dst)
+    ir_use_values[0] = a;
+    ir_use_values[1] = bb;
+    ir_use_values[2] = IRWord(ins.c);
+    match ins.op {
+        <'nop' | 'block' | 'loop' | 'end' | 'else_' | 'br' | 'trap' | 'zeroslots'> => {return -1}
+        <'iconst' | 'fconst' | 'slot' | 'gaddr' | 'daddr' | 'faddr'> => {return d}
+        <'intr' | 'call' | 'syscall'> => {
+            ir_use_span=a
+            ir_use_span_count=bb
+            ir_use_count=bb
+            return d
+        }
+        <'calli' | 'callc'> => {
+            ir_use_span=a
+            ir_use_span_count=bb
+            ir_use_count=bb + 1
+            return d
+        }
+        <'if_' | 'brif' | 'brtable' | 'assume'> => {
+            ir_use_count=1
+            return -1
+        }
+        <'ret'> => {
+            if a >=? 0 {ir_use_count=1}
+            return -1
+        }
+        <'store'> => {
+            ir_use_count=2
+            if IRWord(ins.c) & M_INDEX not=? 0 {
+                ir_use_values[2] = d;
+                ir_use_count=3
+            }
+            return -1
+        }
+        <'vst'> => {
+            ir_use_values[2] = d;
+            ir_use_count=3
+            return -1
+        }
+        <'vsplat'> => {
+            ir_use_count=1
+            return d
+        }
+        <'vzu'> => {return -1}
+        <'copy'> => {
+            ir_use_count=2
+            return -1
+        }
+        <'zero'> => {
+            ir_use_count=1
+            return -1
+        }
+        <'memcpy' | 'memset' | 'vop'> => {
+            ir_use_count=3
+            return -1
+        }
+        <'select' | 'memeq' | 'findbyte' | 'scanbytes' | 'findb'> => {
+            ir_use_count=3
+            return d
+        }
+        <'load'> => {
+            ir_use_count=1
+            if IRWord(ins.c) & M_INDEX not=? 0 {ir_use_count=2}
+            return d
+        }
+        <'mov' | 'neg' | 'not_' | 'fneg' | 'fsqrt' | 'fabs' | 'ffloor' | 'fceil' | 'ftrunc' | 'sext8' | 'sext16' | 'sext32' | 'zext8' | 'zext16' | 'zext32' | 'i2f' | 'u2f' | 'f2i' | 'f2f' | 'bits2f' | 'f2bits'> => {
+            ir_use_count=1
+            return d
+        }
+        _ => {
+            ir_use_count=2
+            return d
+        }
+    }
+}

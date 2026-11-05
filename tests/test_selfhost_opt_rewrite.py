@@ -131,6 +131,8 @@ def test_opt_rewrite_twins(compiler, tmp_path, release):  # noqa: F811
         'kills_memory_classify', 'o_retargetable_classify', 'o_resize'))
     ir = (ROOT / 'compiler/ir.jo').read_text()
     walker = ir[ir.index('ir_use_count = 0'):ir.index('ir_operand_layout: int[]')]
+    builders = (ROOT / 'compiler/ir_builders.jo').read_text()
+    walker += builders[builders.index('ir_use = '):]
     # The extracted table initializer calls classifiers that read this flag.
     driver = '\nchecked_flags = true\nir_operand_layout = ir_operand_layouts()\n' + decode + walker + DRIVER
     outputs = [build_run(compiler, tmp_path, ext, driver, release) for ext in ('dewy', 'jo')]

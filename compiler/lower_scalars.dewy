@@ -1,7 +1,7 @@
 from p"lower_primitives.dewy" import (e_call_nr0 e_daddr lf_helper rt)
 $runtime_checks
 from p"check.jo" import (LF_ALIAS LF_MUTPARAM fns lib_dir locals)
-from p"ir.jo" import (M_SIGNED VI VS e_addi e_bin e_call2 e_fconst e_iconst e_load e_mov e_slot e_store e_un e_zero emit mulh_ok vreg)
+from p"ir.jo" import (M_SIGNED VI VS mulh_ok)
 from p"ast.jo" import (NF_U64 has_flag kid nkids nodes)
 from p"ir_types.dewy" import (Op)
 from p"types.jo" import (T_INT T_MAT4 T_MATH_INT T_NEVER T_U64 is_int is_managed layout prune structs tkind tsize types variants)
@@ -21,6 +21,7 @@ from p"units.jo" import (quantity_base)
 from p"refine.jo" import (ref_storage_contract refine_active)
 from p"lower_analysis.dewy" import (same_var)
 from p"facts.jo" import (word_integer_value)
+from p"ir_builders.dewy" import (e_addi e_bin e_call2 e_fconst e_iconst e_load e_mov e_slot e_store e_un e_zero emit vreg)
 # Scalar arithmetic, constants and range lowering; state stays in lower.jo.
 LCWord:type=int64<overflow='wrap'>
 LCUWord:type=uint64<overflow='wrap'>

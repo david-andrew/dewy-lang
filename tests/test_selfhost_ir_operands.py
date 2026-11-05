@@ -53,6 +53,8 @@ def test_ir_operand_twins(compiler, tmp_path, release):  # noqa: F811
     # Keep the existing walker independent: it does not read the layout table.
     ir = (ROOT / 'compiler/ir.jo').read_text()
     walker = ir[ir.index('ir_use_count = 0'):ir.index('ir_operand_layout: int[]')]
+    builders = (ROOT / 'compiler/ir_builders.jo').read_text()
+    walker += builders[builders.index('ir_use = '):]
     outputs = []
     for extension in ('dewy', 'jo'):
         for stem in ('ir_types', 'ir_operands'):

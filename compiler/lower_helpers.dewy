@@ -7,7 +7,7 @@ from p"lower_analysis.dewy" import (fn_writes)
 $runtime_checks
 from p"lower.jo" import (BOX_HDR VC_AGG VC_FLT VC_INT Val ctl hk_key lfuncs value_member_cache)
 from p"check.jo" import (FK_PARTIAL LF_ASSIGNED LF_EXPOSED LF_VALUECAP fns locals prelude syms value_equal_fns value_hash_fns)
-from p"ir.jo" import (M_FLOAT VI VS e_addi e_bin e_call e_call0 e_call1 e_call2 e_calli e_copy e_fconst e_iconst e_load e_mov e_ret e_slot e_store e_zero emit ir mulh_ok vreg)
+from p"ir.jo" import (M_FLOAT VI VS ir mulh_ok)
 from p"types.jo" import (T_MATH_INT T_STR fields fixed_len is_managed layout math_optional prune ptr_size structs targ telem tkind tsize type_has_fn types variants)
 from p"checker_state.dewy" import (SK)
 from p"lower.jo" import (HK)
@@ -21,6 +21,7 @@ from p"ownership.jo" import (helper_capture_drop owner_begin owner_element_drop 
 from p"ownership_types.dewy" import (ownership_callable_cap ownership_copyable ownership_inline ownership_type)
 from p"parallel_lower.jo" import (parallel_job_helper)
 from p"units.jo" import (quantity_base)
+from p"ir_builders.dewy" import (e_addi e_bin e_call e_call0 e_call1 e_call2 e_calli e_copy e_fconst e_iconst e_load e_mov e_ret e_slot e_store e_zero emit vreg)
 # Generated aggregate helpers; shared state has one owner in lower.jo.
 LHWord:type=int64<overflow='wrap'>
 helper_params=(n:LHWord):>array<int64>=>$unsafe {

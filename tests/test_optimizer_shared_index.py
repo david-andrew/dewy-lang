@@ -10,7 +10,7 @@ from tests.support import compiler
 def test_shared_optimizer_index(compiler, tmp_path):
     root = Path(__file__).resolve().parents[1]
     source = tmp_path / 'shared-index.jo'
-    source.write_text(f"use '{root}/compiler/ir_types.dewy'\nuse '{root}/compiler/ir.jo'\nuse '{root}/compiler/opt.jo'\nuse '{root}/compiler/opt_workspace.dewy'\n" + '''
+    source.write_text(f"use '{root}/compiler/ir_types.dewy'\nuse '{root}/compiler/ir.jo'\nuse '{root}/compiler/ir_builders.dewy'\nuse '{root}/compiler/opt.jo'\nuse '{root}/compiler/opt_workspace.dewy'\n" + '''
 # Rewrite every operand shape, including indexed memory and indirect targets.
 loop opcode in [0..int(Op.findb) + 1):
     loop indexed in [0, M_INDEX]:

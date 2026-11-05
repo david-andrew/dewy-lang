@@ -3,7 +3,7 @@ $runtime_checks
 from p"check.jo" import (FK_PARTIAL LF_ALIAS LF_BYREF LF_CAPTURE LF_MUTPARAM LF_PARAM LF_VALUECAP decl_infos fns globals locals modules prelude runtime_fn syms target_arm64 target_wasm)
 from p"lower.jo" import (HK LFunc LK_HELPER LK_INST data_size global_off helper_count helper_lf helper_slots inst_lf lfuncs loc_last_file loc_last_line loc_last_off opt_release ro_starts rodata set_text_tables str_off)
 from p"ast.jo" import (NF_MUT has_flag kid kids nkids nodes)
-from p"ir.jo" import (VI e_bin e_call e_call2 e_call4 e_iconst e_load e_mov emit ir vreg)
+from p"ir.jo" import (VI ir)
 from p"types.jo" import (align_up prune secret_repr secrets_seen talign targ tsize types)
 from p"lower_storage.dewy" import (arr_len endc hdr_load iff is_shared load_val)
 from p"util.jo" import (files ice intern line_col pos_file pos_in_lib)
@@ -12,6 +12,7 @@ from p"expr.jo" import (ntype)
 from p"parallel_lower.jo" import (parallel_serial)
 from p"lower_scalars.dewy" import (push_i64)
 from p"refine.jo" import (str_set_of str_sets)
+from p"ir_builders.dewy" import (e_bin e_call e_call2 e_call4 e_iconst e_load e_mov emit vreg)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LPWord:type=int64<overflow='wrap'>
 helper_key_hash=(hk:HK t:LPWord p:LPWord):>int64=>$unsafe {

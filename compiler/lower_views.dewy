@@ -7,7 +7,7 @@ from p"ast.jo" import (nkids2 NF_ALIASDECL NF_COMPREHENSION NF_GLOBAL NF_INBOUND
 from p"types.jo" import (TF_BOXED)
 from p"types.jo" import (T_INT T_MATH_INT is_int is_managed prune telem tkind type_eq type_has_fn types)
 from p"checked_eval.dewy" import (cx_token_values)
-from p"ir.jo" import (VI dbg_on e_addi e_iconst emit vreg)
+from p"ir.jo" import (VI dbg_on)
 from p"callback_specialize.jo" import (callback_local)
 from p"lower_analysis.dewy" import (checked_call_mutmask lpath_key lpath_root path_within place_var raw_view)
 from p"copies.jo" import (copies_on copy_bindings copy_inputs copy_strict)
@@ -16,6 +16,7 @@ from p"util.jo" import (files pos_file)
 from p"lower_storage.dewy" import (is_shared opt_has vc)
 from p"ownership_types.dewy" import (ownership_type)
 from p"lower_ptr_reads.dewy" import (pr_exposed ptr_reads)
+from p"ir_builders.dewy" import (e_addi e_iconst emit vreg)
 # View, uniqueness and collection-bound queries; state stays in lower.jo.
 LVWord:type=int64<overflow='wrap'>
 param_view_decl=(s:LVWord l:LVWord):>bool=>$unsafe {
