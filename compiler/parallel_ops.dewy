@@ -1,0 +1,277 @@
+$runtime_checks
+from p"refinement_types.dewy" import (FactBound)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURED LF_EXPOSED LF_SHARED LF_VALUECAP fns locals modules runtime_fn target_wasm)
+from p"ast.jo" import (NF_EXTERN NF_GENERIC has_flag kid kids kids2 nkids nodes)
+from p"parallel_lower.jo" import (ParallelRegion parallel_owned parallel_scalars parallel_serial)
+from p"lower.jo" import (HK VC_AGG VC_FLT VC_INT ctl cur_fn)
+from p"ir.jo" import (VI ir)
+from p"lower_storage.dewy" import (blk br_to brif_to els endc iff is_shared load_val lop read_place ret_vt scope_add_local store_type store_val vc)
+from p"ir_builders.dewy" import (e_addi e_bin e_call e_iconst e_load e_mov e_ret e_slot e_store new_slot vreg)
+from p"lower_primitives.dewy" import (e_faddr lf_helper lf_of_inst rt)
+from p"lower_closures.dewy" import (env_layout)
+from p"facts.jo" import (fact_parallel_bounds)
+from p"util.jo" import (fatal name_of)
+from p"lower_group.dewy" import (gen_borrowed local_place)
+from p"lower_helpers.dewy" import (helper_params value_helper_calls)
+from p"types.jo" import (is_managed tkind)
+from p"math_lower.jo" import (math_word_captures math_word_regs)
+from p"math_ops.dewy" import (math_word_expr)
+from p"expr.jo" import (mk_ident_local)
+from p"ownership_types.dewy" import (ownership_callable_cap ownership_type)
+from p"partition.jo" import (partition_fork partition_fork_safe partition_local_arg)
+from p"lower_analysis.dewy" import (place_var)
+from p"lower_races.dewy" import (race_check)
+# Direct recursive lowering; shared state has one owner in parallel_lower.jo.
+MoveWord:type=int64<overflow='wrap'>
+parallel_prelude_call=(n:MoveWord name:string):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return false}
+    let f:MoveWord=MoveWord(nodes.ptr[n].sym)
+    let d:MoveWord=MoveWord(fns.ptr[f].decl)
+    return d not=? 0 and modules.ptr[MoveWord(fns.ptr[f].mod)].is_prelude and name_of(MoveWord(nodes.ptr[d].name)) =? name
+}
+parallel_region=(n0:MoveWord):>ParallelRegion=>$unsafe {
+    let n=n0
+    if nodes.ptr[n].kind =? 'parallel_region' {n=MoveWord(nodes.ptr[n].a)}
+    if nkids(n) not=? 2 {return ParallelRegion[]}
+    let first:MoveWord=0
+    let count:MoveWord=-1
+    let source=kid(n 0)
+    if parallel_prelude_call(n "parallel_range") {
+        if nodes.ptr[source].kind =? 'int_lit' {count=nodes.ptr[source].ival}
+    }
+    else if parallel_prelude_call(n "__dewy_parallel_collect") {
+        if not parallel_prelude_call(source "__dewy_range") or nkids(source) not=? 5 {return ParallelRegion[]}
+        let a=kid(source 0)
+        let second=kid(source 1)
+        if nodes.ptr[second].kind not=? 'int_lit' {return ParallelRegion[]}
+        let b=kid(source 2)
+        let step=kid(source 3)
+        let inclusive=kid(source 4)
+        if nodes.ptr[a].kind not=? 'int_lit' or nodes.ptr[b].kind not=? 'int_lit' or nodes.ptr[step].kind not=? 'bool_lit' or nodes.ptr[step].ival not=? 0 or nodes.ptr[inclusive].kind not=? 'bool_lit' {return ParallelRegion[]}
+        first=nodes.ptr[a].ival
+        let last=nodes.ptr[b].ival
+        # Bound arithmetic before subtraction: no overflow in compile-time shape.
+        if first <? -1048576 or first >? 1048576 or last <? first or last >? first + 8 {return ParallelRegion[]}
+        count=last - first + nodes.ptr[inclusive].ival
+    }
+    else {return ParallelRegion[]}
+    if count <? 1 or count >? 8 {return ParallelRegion[]}
+    let callback=kid(n 1)
+    if nodes.ptr[callback].kind not=? 'lambda' or has_flag(callback NF_GENERIC) {return ParallelRegion[]}
+    let f:MoveWord=MoveWord(nodes.ptr[callback].sym)
+    if fns.ptr[f].params.length not=? 1 or ownership_type(MoveWord(fns.ptr[f].ret)) or (vc(MoveWord(fns.ptr[f].ret)) not=? VC_INT and vc(MoveWord(fns.ptr[f].ret)) not=? VC_FLT) {return ParallelRegion[]}
+    if ownership_callable_cap(MoveWord(fns.ptr[f].fntype)) not=? 0 {return ParallelRegion[]}
+    if count =? 2 and partition_fork(n) not=? 0 {return ParallelRegion[n callback first count]}
+    loop cap in fns.ptr[f].caps {
+        let inn:MoveWord=MoveWord(cap.inner)
+        let t=store_type(inn)
+        if ownership_type(t) or vc(t) =? VC_AGG or is_shared(inn) {return ParallelRegion[]}
+    }
+    return ParallelRegion[n callback first count]
+}
+parallel_prepare=(n:MoveWord):>void=>$unsafe {
+    let region=parallel_region(n)
+    if region.call =? 0 {return}
+    # Reuse the existing literal-region contract. These are actual iteration
+    # endpoints, not an assumed practical bound; the opt-out keeps this proof.
+    let f:MoveWord=MoveWord(nodes.ptr[region.callback].sym)
+    let bound=FactBound[region.first region.first + region.count - 1]
+    let cached_previous=fact_parallel_bounds.get(f)
+    if cached_previous not=? none {let previous=cached_previous;
+        bound.lo = min(bound.lo previous.lo); bound.hi = max(bound.hi previous.hi)
+    }
+    fact_parallel_bounds[f] = bound;
+    if target_wasm {return}
+    runtime_fn("__fj_split");
+    runtime_fn("__fj_scalar");
+}
+parallel_scalar_uses=(n:MoveWord l:MoveWord count:MoveWord):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fn_' {return true}
+    if k =? 'ident' {return nodes.ptr[n].aux not=? int32<overflow='wrap'>(1) or nodes.ptr[n].sym not=? int32<overflow='wrap'>(l)}
+    # Length reads do not require materializing a fixed scalar collector.
+    # This includes the diagnostics generated by a runtime assertion.
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) and nkids(n) =? 1 {
+        let a=kid(n 0)
+        if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32<overflow='wrap'>(1) and nodes.ptr[a].sym =? int32<overflow='wrap'>(l) {return true}
+    }
+    if k =? 'index' and nodes.ptr[n].aux =? 0 {
+        let a:MoveWord=MoveWord(nodes.ptr[n].a)
+        let b:MoveWord=MoveWord(nodes.ptr[n].b)
+        if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32<overflow='wrap'>(1) and nodes.ptr[a].sym =? int32<overflow='wrap'>(l) {
+            return nodes.ptr[b].kind =? 'int_lit' and nodes.ptr[b].ival >=? 0 and nodes.ptr[b].ival <? count
+    # A write/address cannot use scalar read substitution for its target.
+        }
+    }
+    if k =? 'assign' or k =? 'addr' {
+        let root=place_var(MoveWord(nodes.ptr[n].a))
+        if root not=? 0 and nodes.ptr[root].aux =? int32<overflow='wrap'>(1) and nodes.ptr[root].sym =? int32<overflow='wrap'>(l) {return false}
+    }
+    if not parallel_scalar_uses(MoveWord(nodes.ptr[n].a) l count) {return false}
+    if not parallel_scalar_uses(MoveWord(nodes.ptr[n].b) l count) {return false}
+    if k not=? 'for_' {
+        if not parallel_scalar_uses(MoveWord(nodes.ptr[n].c) l count) {return false}
+        if k not=? 'partial' and not parallel_scalar_uses(MoveWord(nodes.ptr[n].d) l count) {return false}
+    }
+    loop child in kids(n) {
+        if not parallel_scalar_uses(child l count) {return false}
+    }
+    loop child in kids2(n) {
+        if not parallel_scalar_uses(child l count) {return false}
+    }
+    return true
+}
+parallel_scalar_decl=(s:MoveWord l:MoveWord):>bool=>$unsafe {
+    let iv:MoveWord=MoveWord(nodes.ptr[s].b)
+    if iv =? 0 or (nodes.ptr[iv].kind not=? 'call' and nodes.ptr[iv].kind not=? 'parallel_region') {return false}
+    if MoveWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_CAPTURED | LF_ADDR | LF_EXPOSED | LF_SHARED | LF_ALIAS | LF_BYREF) not=? 0 {return false}
+    let region=parallel_region(iv)
+    if region.call =? 0 {return false}
+    if not parallel_scalar_uses(MoveWord(fns.ptr[cur_fn].body) l region.count) {return false}
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    if not parallel_context_free(region.callback @seen) {return false}
+    let split=partition_fork(region.call) not=? 0
+    if split {
+        let proof:dict<int64 bool>=dict<int64 bool>()
+        if not partition_fork_safe(MoveWord(nodes.ptr[region.callback].sym) @proof) {fatal(nodes.ptr[region.call].pos "mutable slice fork must not resize, copy or escape its partitions");}
+    }
+    else {race_check(MoveWord(nodes.ptr[region.call].sym) kids(region.call) nodes.ptr[region.call].pos);}
+    let f:MoveWord=MoveWord(nodes.ptr[region.callback].sym)
+    # Preserve the activation owning the region. In particular, recursive
+    # forks must inline their body into the parent, not expand the parent into
+    # the body and leave an environment-passing recursive cycle behind.
+    ir.noinline = true;
+    env_layout(f);
+    # This environment is only passed directly to the checked body. No closure
+    # value is constructed/copied, so no heap header or refcount is needed.
+    let env=e_iconst(0)
+    if fns.ptr[f].caps.length >? 0 {
+        env=e_slot(new_slot(MoveWord(fns.ptr[f].env_size) 8))
+        loop cap in fns.ptr[f].caps {
+            let inn:MoveWord=MoveWord(cap.inner)
+            let outer:MoveWord=MoveWord(cap.outer)
+            let t=store_type(inn)
+            if split and tkind(MoveWord(locals.ptr[inn].type)) =? 'array' {
+                e_store(env MoveWord(locals.ptr[inn].env_off) partition_local_arg(outer MoveWord(locals.ptr[inn].flags) & LF_VALUECAP =? 0) 8);
+                continue
+            }
+            if math_word_captures.has(inn) {
+                store_val(t env MoveWord(locals.ptr[inn].env_off) math_word_expr(mk_ident_local(outer nodes.ptr[s].pos)));
+            }
+            else if math_word_regs.has(outer) {
+                store_val(t env MoveWord(locals.ptr[inn].env_off) gen_borrowed(mk_ident_local(outer nodes.ptr[s].pos)).v);
+            }
+            else {store_val(t env MoveWord(locals.ptr[inn].env_off) read_place(local_place(outer false) t));}
+        }
+    }
+    let results:array<int64>=[]
+    let result_type=ret_vt(MoveWord(fns.ptr[f].ret))
+    loop i in [0..region.count) {results.push(vreg(result_type));}
+    if not target_wasm and not parallel_serial and region.count >? 1 {
+        iff(e_call(rt("__fj_split") [] VI));
+        let root=e_call(rt("__fj_enter") [] VI)
+        let job=e_slot(new_slot(80 8))
+        let output=e_slot(new_slot(region.count * 8 8))
+        e_call(rt("__fj_scalar") [job e_faddr(lf_helper(HK.parallel_job (if split {2} else {0}) f)) env e_iconst(region.first) e_iconst(region.count) e_addi(output 8) e_faddr(lf_helper(HK.parallel_job (if split {3} else {1}) f))] -1);
+        let first_result=e_call((if split {lf_helper(HK.partition 0 f)} else {lf_of_inst(f)}) [env e_iconst(region.first)] result_type)
+        e_mov(results.ptr[0] first_result);
+        e_call(rt("__fj_join") [job] -1);
+        loop i in [1..region.count) {
+            e_mov(results.ptr[i] load_val(MoveWord(fns.ptr[f].ret) output i * 8));
+        }
+        e_call(rt("__fj_leave") [root] -1);
+        els();
+    }
+    let serial_body=if split {lf_helper(HK.partition 1 f)} else if target_wasm or parallel_serial or region.count =? 1 {lf_of_inst(f)} else {lf_helper(HK.parallel_serial 0 f)}
+    loop i in [0..region.count) {
+        e_mov(results.ptr[i] e_call(serial_body [env e_iconst(region.first + i)] result_type));
+    }
+    if not target_wasm and not parallel_serial and region.count >? 1 {endc();}
+    parallel_scalars[l] = results;
+    if is_managed(MoveWord(fns.ptr[f].ret)) {
+        parallel_owned[l] = MoveWord(fns.ptr[f].ret);
+        scope_add_local(l);
+    }
+    return true
+}
+parallel_scalar_length=(n:MoveWord):>int64=>$unsafe {
+    if parallel_scalars.length =? 0 or nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? int32<overflow='wrap'>(1) {return -1}
+    let l:MoveWord=MoveWord(nodes.ptr[n].sym)
+    if not parallel_scalars.has(l) {return -1}
+    return parallel_scalars[l].length
+}
+parallel_scalar_read=(n:MoveWord):>int64=>$unsafe {
+    if parallel_scalars.length =? 0 or nodes.ptr[n].aux not=? 0 {return -1}
+    let a:MoveWord=MoveWord(nodes.ptr[n].a)
+    let b:MoveWord=MoveWord(nodes.ptr[n].b)
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32<overflow='wrap'>(1) or nodes.ptr[b].kind not=? 'int_lit' {return -1}
+    let l:MoveWord=MoveWord(nodes.ptr[a].sym)
+    if not parallel_scalars.has(l) {return -1}
+    return parallel_scalars[l][MoveWord(nodes.ptr[b].ival)]
+}
+parallel_context_fn=(f:MoveWord @seen:dict<int64 bool>):>bool=>$unsafe {
+    if seen.has(f) {return true}
+    if seen.length >=? 128 {return false}
+    seen[f] = true;
+    let d:MoveWord=MoveWord(fns.ptr[f].decl)
+    if d =? 0 or has_flag(d NF_EXTERN) {return false}
+    if modules.ptr[MoveWord(fns.ptr[f].mod)].is_prelude {
+        let name=name_of(MoveWord(nodes.ptr[d].name))
+        if name =? "random" or name =? "random_int" or name =? "__random_int_from" or name =? "seed_random" {return false}
+        if name =? "parallel_range" or name =? "__dewy_parallel_collect" or name =? "__dewy_parallel_each" or name =? "parallel_map" or name =? "parallel_update" {return true}
+    }
+    return parallel_context_free(MoveWord(fns.ptr[f].body) @seen)
+}
+parallel_context_free=(n:MoveWord @seen:dict<int64 bool>):>bool=>$unsafe {
+    if n =? 0 {return true}
+    # Equality/hash and formatting may invoke user code through generated
+    # helpers even when the checked expression is not a call node.
+    loop called in value_helper_calls(n) {
+        if not parallel_context_fn(called @seen) {return false}
+    }
+    let k=nodes.ptr[n].kind
+    if k =? 'pair' and nodes.ptr[n].sym >? 0 and not parallel_context_fn(MoveWord(nodes.ptr[n].sym) @seen) {return false}
+    if k =? 'lambda' {return parallel_context_fn(MoveWord(nodes.ptr[n].sym) @seen)}
+    if k =? 'call' {
+        if nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4 {return false}
+        if nodes.ptr[n].aux =? 0 and not parallel_context_fn(MoveWord(nodes.ptr[n].sym) @seen) {return false}
+    }
+    if not parallel_context_free(MoveWord(nodes.ptr[n].a) @seen) {return false}
+    if not parallel_context_free(MoveWord(nodes.ptr[n].b) @seen) {return false}
+    if k not=? 'for_' {
+        if not parallel_context_free(MoveWord(nodes.ptr[n].c) @seen) {return false}
+        if k not=? 'partial' and not parallel_context_free(MoveWord(nodes.ptr[n].d) @seen) {return false}
+    }
+    loop child in kids(n) {
+        if not parallel_context_free(child @seen) {return false}
+    }
+    loop child in kids2(n) {
+        if not parallel_context_free(child @seen) {return false}
+    }
+    return true
+}
+parallel_job_helper=(f:MoveWord serial:bool split:bool):>int64=>$unsafe {
+    let ps=helper_params(2)
+    let job=ps.ptr[1]
+    let env=e_load(VI job 8 8)
+    let first=e_load(VI job 16 8)
+    let limit=e_load(VI job 24 8)
+    let output=e_load(VI job 32 8)
+    let index=vreg(VI)
+    e_mov(index first);
+    let t:MoveWord=MoveWord(fns.ptr[f].ret)
+    let body=if split {lf_helper(HK.partition (if serial {1} else {0}) f)} else if serial {lf_helper(HK.parallel_serial 0 f)} else {lf_of_inst(f)}
+    blk();
+    let done=ctl
+    lop();
+    brif_to(e_bin('ges' VI index limit) done);
+    let value=e_call(body [env index] ret_vt(t))
+    let offset=e_bin('mul' VI index e_iconst(8))
+    store_val(t e_bin('add' VI output offset) 0 value);
+    e_mov(index e_addi(index 1));
+    br_to(ctl);
+    endc();
+    endc();
+    return e_ret(-1)
+}

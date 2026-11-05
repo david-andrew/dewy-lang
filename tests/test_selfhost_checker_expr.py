@@ -503,6 +503,9 @@ juxt_factor = (c: int) -> int:
               'util.jo': "use 'driver.jo'\npos_in_lib = (pos: int) -> bool: zc_lib\n",
               'effects.jo': "use 'driver.jo'\ncallable_base = (t0: int) -> int: if zc_base != 0: zc_base else: t0\n"}
 
+JO_DOUBLES['parallel_ops.dewy'] = 'from p"parallel_lower.jo" import (parallel_prepare as prepare_double)\nparallel_prepare=(n:int64):>void=>prepare_double(n)\n'
+JO_DOUBLES['parallel_ops.jo'] = "use 'parallel_lower.jo'\n"
+
 for _module, _definitions in EXPR_NUMERIC_JO.items():
     _existing = JO_DOUBLES.get(_module, '')
     _missing = {_name: _definition for _name, _definition in _definitions.items()
