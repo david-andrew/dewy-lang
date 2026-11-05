@@ -99,7 +99,8 @@ exact_potential=(n0:int64):>bool=>$unsafe {
 }
 # Semantic int64 arithmetic returns int. A bounded expression can retain its
 # static-width computation behind the representation boundary until a consumer
-# needs a tagged value. Peeling this boundary never narrows the value.
+# needs a tagged value. This returns a candidate: callers must preserve the
+# mathematical operation when joining its type with the other operand.
 exact_math_operand=(n0:int64):>int64=>$unsafe {
     let n=EXWord(n0)
     if ex_type_of(n) not=? ex_math_int[0] {return n}

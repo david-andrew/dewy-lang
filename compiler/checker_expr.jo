@@ -454,7 +454,7 @@ xe_binary = (n: int, expected: int) -> int:
         wb = exact_math_operand(b)
         ua = int(xe_nodes[0][wa].type)
         ub = int(xe_nodes[0][wb].type)
-        if ua != mi and ub != mi and xe_word(ua) and xe_word(ub):
+        if ua != mi and ub != mi and xe_word(ua) and xe_word(ub) and (is_shift or num_join(ua, ub) == xe_int_type[0]):
             a = wa
             b = wb
             xe_nodes[0][n].a = i32(a)

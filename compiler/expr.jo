@@ -3224,7 +3224,7 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
     b = checked[1]
     if (ntype(a) == T_MATH_INT or ntype(b) == T_MATH_INT) and dewy_at(nodes[n].pos):
         wa = exact_math_operand(a); wb = exact_math_operand(b)
-        if is_int(ntype(wa)) and is_int(ntype(wb)) and ntype(wa) != T_MATH_INT and ntype(wb) != T_MATH_INT and int_policy(ntype(wa)) == 0 and int_policy(ntype(wb)) == 0:
+        if is_int(ntype(wa)) and is_int(ntype(wb)) and ntype(wa) != T_MATH_INT and ntype(wb) != T_MATH_INT and int_policy(ntype(wa)) == 0 and int_policy(ntype(wb)) == 0 and num_join(ntype(wa), ntype(wb)) == T_INT:
             a = wa; b = wb
             checked[0] = a; checked[1] = b
     exact_operands = (is_numeric(ntype(a)) or bundled_rational_type(ntype(a)) or bundled_bigint_type(ntype(a))) and (is_numeric(ntype(b)) or bundled_rational_type(ntype(b)) or bundled_bigint_type(ntype(b)))

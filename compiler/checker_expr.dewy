@@ -29,7 +29,7 @@ from p"checker_numeric.dewy" import xw_numeric
 from p"checker_exact.dewy" import (exact_potential exact_math_operand)
 from p"checker_coerce.dewy" import cq_settled
 from p"checker_call_queries.dewy" import (ctx_dependent map_float_key habit_call_check intrinsic_of)
-from p"expr.jo" import (expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give path_literal_module call_name_unknown take_name relocate_name release_name expr_literal expr_other type_receiver_at receiver_literal_hint check_soa_method dewy_len_check)
+from p"expr.jo" import (num_join expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give path_literal_module call_name_unknown take_name relocate_name release_name expr_literal expr_other type_receiver_at receiver_literal_hint check_soa_method dewy_len_check)
 from p"temperature_kinds.jo" import temperature_read
 from p"check.jo" import (module_lookup)
 from p"concurrency.jo" import (concurrency_tasks concurrency_runtime_needed concurrency_calls concurrency_atomic_call)
@@ -596,7 +596,9 @@ xe_binary=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
         let wb=XEWord(exact_math_operand(b))
         let ua=XEWord(xe_nodes[0].ptr[wa].type)
         let ub=XEWord(xe_nodes[0].ptr[wb].type)
-        if ua not=? mi and ub not=? mi and xe_word(ua) and xe_word(ub) {
+        # Shifts keep their independent count type. Other operations need the
+        # int64 join to preserve exact arithmetic after peeling the int boundary.
+        if ua not=? mi and ub not=? mi and xe_word(ua) and xe_word(ub) and (is_shift or num_join(ua ub) =? xe_int_type[0]) {
             a=wa
             b=wb
             xe_nodes[0][n].a=int32<overflow='wrap'>(a)
