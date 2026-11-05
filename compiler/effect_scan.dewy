@@ -1,6 +1,6 @@
 $runtime_checks
 from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
-from p"effects.jo" import (EffectEdge effect_contracts effect_counters effect_exact_rep effect_footprints_only effect_for_marks effect_limit effect_owner_init effect_policy effect_seen effect_summaries effects_active)
+from p"effects.jo" import (EffectEdge effect_contracts effect_counters effect_exact_rep effect_footprints_only effect_for_marks effect_limit effect_policy effect_seen effect_summaries effects_active)
 from p"effect_costs.dewy" import (effect_bounds effect_cleanup effect_failure effect_intrinsic_cost effect_plan_cost)
 from p"dewy_reader_types.dewy" import (EffectKind)
 from p"expr.jo" import (IN is_fn_type ntype)
@@ -30,6 +30,7 @@ from p"places.jo" import (place_append place_project place_route place_scalar_ro
 from p"lower_analysis.dewy" import (raw_view)
 from p"refine.jo" import (ref_predicates representation_type)
 from p"lower_storage.dewy" import (vc)
+from p"effect_owners.dewy" import (effect_owner_init)
 # Demanded body and place scanning; shared state has one owner in effects.jo.
 EffectScanWord:type=int64<overflow='wrap'>
 # Locals never cross call edges. Externally visible roots use owner-qualified

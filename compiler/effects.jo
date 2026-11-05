@@ -52,6 +52,7 @@ use 'panic_inventory.dewy'
 use 'effect_sources.dewy'
 use 'effect_costs.dewy'
 use 'effect_scan.dewy'
+use 'effect_owners.dewy'
 
 struct EffectEdge:
     callee: int
@@ -229,40 +230,3 @@ panic_name_rational = 0
 panic_name_pow = 0
 panic_name_pow_op = 0
 panic_name_fraction = 0
-# Scoped byte loans run in effect_loans.dewy for functions holding byte
-# operations (loan_owners); these are its services.
-loan_error = (n: int, reason: str): fatal(nodes[n].pos, "scoped loan: {reason}")
-loan_host_error = (n: int, message: str): fatal(nodes[n].pos, message)
-loan_host_append = (n: int, p: PlaceIdentity) -> PlaceIdentity: place_append(place_route(n), p)
-loan_host_route = (n: int) -> PlaceIdentity: place_route(n)
-loan_host_demand = (f: int) -> bool: effects_demand(f)
-loan_host_events = (f: int) -> EffectEvent[]: effect_summaries[f].events
-
-# Owning boundaries must publish every optional hook edge before verification.
-# Last-use elision never grants permission to omit a hook's possible effects.
-effect_owner_init = (f: int, source: int, origin: int):
-    t = prune(ntype(source))
-    if not ownership_type(t): return
-    k = nodes[source].kind
-    move = nodes[origin].kind != .conv or nodes[origin].aux != i32(int(CV.explicit_copy))
-    if k != .ident and k != .field and move: return
-    p = if k == .ident or k == .field: effect_export(f, place_route(source)) else: PlaceIdentity(.local, f, source)
-    effect_owner_components(f, t, origin, p, move)
-
-effect_owner_components = (f: int, t: int, origin: int, p: PlaceIdentity, move: bool, depth: int = 0):
-    if depth > 32:
-        effect_opaque(f, origin)
-        return
-    if tkind(t) == .array or tkind(t) == .fixed:
-        effect_owner_components(f, telem(t), origin, p, move and tkind(t) == .fixed, depth + 1)
-        return
-    if let copier = owner_map_copies.get(t):
-        effect_summaries[f].edges.push(EffectEdge(copier, origin, [p]))
-        return
-    if let hook = ownership_copies.get(t): effect_summaries[f].edges.push(EffectEdge(hook, origin, [p]))
-    if move:
-        if let hook = ownership_moves.get(t): effect_summaries[f].edges.push(EffectEdge(hook, origin, [p]))
-    si = int(types[prune(t)].st)
-    loop i in [0..int(structs[si].nfields)):
-        ft = int(fields[int(structs[si].fields) + i].type)
-        if ownership_type(ft): effect_owner_components(f, ft, origin, p, move, depth + 1)
