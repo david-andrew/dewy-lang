@@ -1,5 +1,4 @@
 $runtime_checks
-from p"effects.jo" import (callable_base)
 from p"checker_call_queries.dewy" import (check_mutable_arguments save_call_order)
 from p"expr.jo" import (AUX2_PARTIAL value_call_error default_arg finish_partial has_hole map_args ntype)
 from p"ast.jo" import (dewy_param_kinds kid nkids nodes set_list)
@@ -11,6 +10,7 @@ from p"ide.jo" import (never_cascade)
 from p"poly_closure.jo" import (poly_families)
 from p"refine.jo" import (representation_type)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)
+from p"effect_contracts.dewy" import (callable_base)
 # O(arguments), preserving call order and retaining indices across arena growth.
 HVWord:type=int64<overflow='wrap'>
 value_call=(n:int64 callee:int64 args:array<int64> expected:int64=0):>int64=>$unsafe {

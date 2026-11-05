@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tests.selfhost_effect_double import contract_services
 from tests.test_selfhost_type_constructors import DRIVER as CONSTRUCTORS
 
 DRIVER = CONSTRUCTORS.split('main = ():')[0] + r'''
@@ -187,6 +188,8 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
     jo_doubles = dict(jo_doubles or {})
     for module, functions in RESOLVE_JO.items():
         text = jo_doubles.get(module, "use 'driver.jo'\nuse 'checker_resolve.dewy'\n")
+        if module == 'effects.jo' and 'struct EffectSummary:' in text:
+            continue
         for name, definition in functions.items():
             if not re.search(r'(?m)^' + re.escape(name) + r'\s*=', text):
                 text += definition + '\n'
@@ -211,7 +214,7 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
                 text = (ROOT / f'compiler/{stem}.{extension}').read_text()
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
-            (directory / f'{stem}.{extension}').write_text(text)
+            (directory / f'{stem}.{extension}').write_text(contract_services(text, jo_doubles))
         for name, text in (jo_doubles or {}).items():
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
@@ -219,7 +222,7 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
                 # Switch those edges too, so the graph has one implementation.
                 for stem in extra_stems:
                     text = text.replace(f'p"{stem}.dewy"', f'p"{stem}.jo"')
-            (directory / name).write_text(text)
+            (directory / name).write_text(contract_services(text, jo_doubles))
         source, binary = directory / 'driver.jo', directory / 'driver'
         source.write_text(''.join(f"use '{s}.{extension}'\n" for s in stems) + driver)
         built = subprocess.run([compiler, 'build', source, '-o', binary,

@@ -5,7 +5,7 @@ from p"checker_call_cost.dewy" import (arg_cost)
 from p"expr.jo" import (array_has_spread branch_numeric bundled_bigint_type call_refined_literal_cost call_string_cost can_coerce charlike decimal_literal_tree dewy_bigint_literal_target dewy_positional_fits dewy_record_spread_entries dewy_record_target dewy_set_literal find_variant fixed_literal_ok fn_value_adapts is_dewy_set_type is_fn_type is_lit is_map_type is_nd lit_default lit_fits match_type nd_elem ntype oversized_literal subst_partial union_target variant_enum word_rational_source)
 from p"check.jo" import (binding_leaves check_struct_fields globals locals resolve_type subst syms)
 from p"units.jo" import (bundled_rational_type bundled_word_rational_type quantity_constant_fits quantity_int_promotes)
-from p"effects.jo" import (callable_base callable_contract effect_infer_callable effects_active)
+from p"effects.jo" import (effect_infer_callable effects_active)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checker_call_queries.dewy" import (ctx_dependent)
 from p"util.jo" import (files pos_file)
@@ -389,6 +389,7 @@ from p"partition.jo" import (partition_slice partition_active)
 from p"expr.jo" import (path_narrows path_rooted path_forget path_key)
 from p"types.jo" import unify
 from p"ast.jo" import NF_MUT
+from p"effect_contracts.dewy" import (callable_base callable_contract)
 # Mutable inference binds the declared storage contract, including an outer
 # refinement. Read-value erasure remains correct for by-value inference.
 call_mutable_cost=(a:CVWord pt:CVWord @binds:array<int64> @recv_fits:bool receiver:bool):>CVWord=>$unsafe {

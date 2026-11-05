@@ -17,7 +17,7 @@ from p"checker_tokens.dewy" import (Tok)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"facts.jo" import (array_len_expr fact_fixed_comprehension fact_fixed_comprehension_exact fact_library_call fact_storage_loop fixed_array_len fixed_array_local index_safety len_of_local lower_length_guard lower_length_guards positive_bound range_facts_begin range_facts_end stable_loop_index)
 from p"util.jo" import (call_args_text fatal files ice name_of pos_file pos_off pos_str)
-from p"effects.jo" import (callable_base effect_lower_intrinsic effect_policy effects_active)
+from p"effects.jo" import (effect_lower_intrinsic effect_policy effects_active)
 from p"callback_specialize.jo" import (callback_arg_borrow callback_calls callback_key callback_local)
 from p"lower_closure_borrow.dewy" import (closure_borrow_param)
 from p"copies.jo" import (copies_on copy_bindings copy_capture_ids copy_components copy_consumes copy_error copy_explicit copy_own copy_shared_decl copy_shared_global copy_strict costly_copy own_at)
@@ -50,6 +50,7 @@ from p"arena_ops.dewy" import (arena_gen_promote)
 from p"math_ops.dewy" import (gen_math_for math_accumulator_for math_binary math_call math_compare math_count math_default_formatter math_float_binary math_local_is math_pack_word math_proven_word math_reset_local_decl math_shift math_shift_count math_signed math_static_bits math_static_local_decl math_static_narrow math_static_value math_sum_compare math_word math_word_expr math_word_helper math_word_local_decl math_word_range)
 from p"member_ops.dewy" import (member_lower_block member_lower_text)
 from p"parallel_ops.dewy" import (parallel_scalar_decl parallel_scalar_length parallel_scalar_read)
+from p"effect_contracts.dewy" import (callable_base)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LGWord:type=int64<overflow='wrap'>
 LGUWord:type=uint64<overflow='wrap'>

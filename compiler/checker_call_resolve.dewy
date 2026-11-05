@@ -7,7 +7,7 @@ from p"checker_call_queries.dewy" import (ctx_dependent check_mutable_arguments 
 from p"checker_expr.dewy" import (check_expr finish_arg check_args_untyped)
 from p"check.jo" import (decl_info decl_infos get_fn_inst fns)
 from p"units.jo" import (bundled_rational_type bundled_word_rational_type)
-from p"effects.jo" import (effect_contracts callable_base mk_callable_contract callable_contract)
+from p"effects.jo" import (effect_contracts)
 from p"poly_closure.jo" import (poly_default_type poly_default_variant poly_fnref)
 from p"util.jo" import (pos_file files)
 from p"ide.jo" import (ide_on)
@@ -19,6 +19,7 @@ from p"directives.jo" import (dir_floats_any)
 from p"check_constant.jo" import (cc_any cc_call)
 from p"types.jo" import (types tkind prune has_var type_eq targ T_BOOL T_STR T_NEVER T_VOID)
 from p"checker_signature.dewy" import (fn_sig)
+from p"effect_contracts.dewy" import (callable_base mk_callable_contract callable_contract)
 # O(candidates * arguments), with candidate-local binding arrays.
 # Services may re-enter checking or grow arenas; retain indices, never elements.
 CRWord:type=int64<overflow='wrap'>

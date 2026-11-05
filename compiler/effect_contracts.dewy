@@ -1,0 +1,241 @@
+$runtime_checks
+from p"effect_types.dewy" import (EffectAtom PlaceIdentity)
+from p"ast.jo" import (NF_MUT has_flag kid nkids nodes)
+from p"checker_types.dewy" import (TypeInfo)
+from p"check.jo" import (check_struct_fields ensure_global globals module_lookup resolve_alias resolve_type subst syms)
+from p"effect_lattice.dewy" import (effect_allows effect_intern effect_join effect_overlap effect_rows_fit place_base)
+from p"effects.jo" import (effect_contracts effect_syntax)
+from p"util.jo" import (fatal name_of)
+from p"types.jo" import (fields mk_type prune structs targ telem tkind types variants zonk)
+from p"checker_expr.dewy" import (lookup)
+from p"expr.jo" import (match_type)
+from p"places.jo" import (place_project)
+from p"refine.jo" import (representation_type)
+# Effect row resolution and matching; shared state has one owner in effects.jo.
+ContractWord:type=int64<overflow='wrap'>
+# Rows occupy kind-checked specialization slots, never runtime values.
+effect_type=(contract:int64):>int64=>$unsafe {
+    return mk_type(TypeInfo[kind = 'effect' st = int32<overflow='wrap'>(contract)] effect_contracts.ptr[contract].variables)
+}
+effect_subst=(contract:int64 args:array<int64> zoning:bool=false):>int64=>$unsafe {
+    if contract =? 0 {return 0}
+    let row=effect_contracts.ptr[contract]
+    if row.variables.length =? 0 {return contract}
+    let atoms=row.atoms
+    let exclusions=row.exclusions
+    let variables:array<int64>=[]
+    let open=row.open
+    loop v in row.variables {
+        let t=if zoning {zonk(v)} else {subst(v args)}
+        if tkind(t) =? 'effect' {
+            let r=effect_contracts.ptr[ContractWord(types.ptr[t].st)]
+            atoms.extend(r.atoms);
+            exclusions.extend(r.exclusions);
+            variables.extend(r.variables);
+            open=open or r.open
+        }
+        else {variables.push(t);}
+    }
+    return effect_intern(atoms exclusions variables open)
+}
+effect_contract=(decl:ContractWord params:array<int64> labels:array<int64> mask:ContractWord):>int64=>$unsafe {
+    let syntax:ContractWord=ContractWord(nodes.ptr[decl].sval)
+    if syntax =? 0 {return 0}
+    let atoms:array<EffectAtom>=[]
+    let exclusions:array<EffectAtom>=[]
+    let variables:array<int64>=[]
+    let positive=effect_syntax.ptr[syntax].length =? 0
+    let inherited_open=false
+    loop entry in effect_syntax.ptr[syntax] {
+        if not entry.negative {positive=true}
+        if entry.variable {
+            let sym=lookup(entry.path.ptr[0])
+            if sym =? 0 or syms.ptr[sym].kind not=? 'type_' or tkind(ContractWord(syms.ptr[sym].ref)) not=? 'effect' {fatal(entry.pos "effect row requires an Effect binder");}
+            let row=effect_contracts.ptr[ContractWord(types.ptr[ContractWord(syms.ptr[sym].ref)].st)]
+            atoms.extend(row.atoms);
+            exclusions.extend(row.exclusions);
+            variables.extend(row.variables);
+            inherited_open=inherited_open or row.open
+            continue
+        }
+        if entry.path.length =? 0 {
+            let atom=EffectAtom[entry.kind]
+            if entry.negative {exclusions.push(atom);}
+            else {atoms.push(atom);}
+            continue
+        }
+        let name=entry.path.ptr[0]
+        let p=PlaceIdentity['local' 0 0]
+        let t:ContractWord=0
+        let projection_start:ContractWord=1
+        loop i in [0..labels.length) {
+            if labels.ptr[i] not=? name {continue}
+            if mask & (1 << i) =? 0 {fatal(entry.pos "effect place '{name_of(name)}' must be an @ parameter");}
+            p=PlaceIdentity['formal' 0 i + 1]
+            t=params.ptr[i]
+        }
+        if p.declaration =? 0 {
+            let s=lookup(name)
+            if s not=? 0 and syms.ptr[s].kind =? 'module' and entry.path.length >? 1 {
+                s=module_lookup(ContractWord(syms.ptr[s].ref) entry.path.ptr[1])
+                projection_start=2
+            }
+            if s not=? 0 and syms.ptr[s].kind =? 'alias_' {
+                let rt=resolve_alias(ContractWord(syms.ptr[s].ref) [] entry.pos)
+                if tkind(rt) not=? 'struct_' and tkind(rt) not=? 'enum_' {fatal(entry.pos "effect resource requires nominal identity");}
+                p=PlaceIdentity['resource' 0 ContractWord(structs.ptr[ContractWord(types.ptr[rt].st)].decl)]
+            }
+            else if s not=? 0 and (syms.ptr[s].kind =? 'struct_' or syms.ptr[s].kind =? 'enum_') {
+                p=PlaceIdentity['resource' 0 ContractWord(syms.ptr[s].ref)]
+            }
+            else if s =? 0 or (syms.ptr[s].kind not=? 'global' and syms.ptr[s].kind not=? 'const_') {fatal(entry.pos "unknown effect place '{name_of(name)}'");}
+            if p.declaration =? 0 {
+                let g:ContractWord=ContractWord(syms.ptr[s].ref)
+                ensure_global(g entry.pos);
+                p=PlaceIdentity['global' 0 g]
+                t=ContractWord(globals.ptr[g].type)
+            }
+        }
+        loop i in [projection_start..entry.path.length) {
+            t=representation_type(t)
+            if tkind(t) not=? 'struct_' {fatal(entry.pos "effect projection needs a record field");}
+            let si:ContractWord=ContractWord(types.ptr[t].st)
+            check_struct_fields(si);
+            let found=false
+            loop j in [0..ContractWord(structs.ptr[si].nfields)) {
+                let fi:ContractWord=ContractWord(structs.ptr[si].fields) + j
+                if ContractWord(fields.ptr[fi].name) =? entry.path.ptr[i] {
+                    t=ContractWord(fields.ptr[fi].type)
+                    found=true
+                    break
+                }
+            }
+            if not found {fatal(entry.pos "unknown effect field '{name_of(entry.path.ptr[i])}'");}
+            p=place_project(p entry.path.ptr[i])
+            if p.declaration =? 0 {fatal(entry.pos "effect place exceeds projection budget");}
+        }
+        let atom=EffectAtom[entry.kind p]
+        if entry.negative {exclusions.push(atom);}
+        else if not atoms.contains(atom) {atoms.push(atom);}
+        if atoms.length >? 32 {fatal(entry.pos "effect row exceeds region budget");}
+    }
+    loop a in atoms {
+        loop e in exclusions {
+            if effect_overlap(a e) {fatal(nodes.ptr[decl].pos "contradictory effect permission and exclusion");}
+        }
+    }
+    return effect_intern(atoms exclusions variables not positive or inherited_open)
+}
+effect_argument=(tn:ContractWord):>int64=>$unsafe {
+    if nodes.ptr[tn].kind =? 'tname' and nodes.ptr[tn].aux =? -8 {return effect_type(effect_contract(tn [] [] 0))}
+    if nodes.ptr[tn].kind =? 'tname' {
+        let sym=lookup(ContractWord(nodes.ptr[tn].name))
+        if sym not=? 0 and syms.ptr[sym].kind =? 'type_' and tkind(ContractWord(syms.ptr[sym].ref)) =? 'effect' {return ContractWord(syms.ptr[sym].ref)}
+    }
+    fatal(nodes.ptr[tn].pos "generic argument kind mismatch: expected Effect row");
+    return 0
+}
+# An unchecked external implementation cannot manufacture callable guarantees,
+# including when an alias or aggregate hides the qualifying wrapper.
+effect_qualified_type=(t0:ContractWord @seen:array<int64>):>bool=>$unsafe {
+    let t=prune(t0)
+    if t =? 0 or seen.contains(t) {return false}
+    if seen.length >=? 64 {return true}
+    seen.push(t);
+    let k=types.ptr[t].kind
+    if k =? 'callable' {return true}
+    if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'ptr' or k =? 'refined' {return effect_qualified_type(telem(t) @seen)}
+    if k =? 'fn_' or k =? 'cfn' or k =? 'tuple' {
+        if effect_qualified_type(telem(t) @seen) {return true}
+        loop i in [0..ContractWord(types.ptr[t].nargs)) {
+            if effect_qualified_type(targ(t i) @seen) {return true}
+        }
+    }
+    if k =? 'struct_' or k =? 'enum_' {
+        let si:ContractWord=ContractWord(types.ptr[t].st)
+        check_struct_fields(si);
+        loop i in [0..ContractWord(structs.ptr[si].nfields)) {
+            if effect_qualified_type(ContractWord(fields.ptr[ContractWord(structs.ptr[si].fields) + i].type) @seen) {return true}
+        }
+        loop i in [0..ContractWord(structs.ptr[si].nvariants)) {
+            let v:ContractWord=ContractWord(structs.ptr[si].variants) + i
+            loop j in [0..ContractWord(variants.ptr[v].nfields)) {
+                if effect_qualified_type(ContractWord(fields.ptr[ContractWord(variants.ptr[v].fields) + j].type) @seen) {return true}
+            }
+        }
+    }
+    return false
+}
+effect_generic_argument=(tn:int64):>int64=>$unsafe {
+    if nodes.ptr[tn].kind =? 'tname' {
+        if nodes.ptr[tn].aux =? -8 {return effect_argument(tn)}
+        let sym=lookup(ContractWord(nodes.ptr[tn].name))
+        if sym not=? 0 and syms.ptr[sym].kind =? 'type_' and tkind(ContractWord(syms.ptr[sym].ref)) =? 'effect' {return ContractWord(syms.ptr[sym].ref)}
+    }
+    return resolve_type(tn)
+}
+effect_decl_contract=(decl:ContractWord params:array<int64>):>int64=>$unsafe {
+    if decl =? 0 or nodes.ptr[decl].sval =? 0 {return 0}
+    let labels:array<int64>=[]
+    let mask:ContractWord=0
+    loop i in [0..nkids(decl)) {
+        let p=kid(decl i)
+        labels.push(ContractWord(nodes.ptr[p].name));
+        if has_flag(p NF_MUT) {mask |= 1 << i;}
+    }
+    return effect_contract(decl params labels mask)
+}
+mk_callable_contract=(base:int64 contract:int64 capability:int64=0):>int64=>$unsafe {
+    let cap=capability
+    if types.ptr[prune(base)].kind =? 'callable' {cap=max(cap ContractWord(types.ptr[prune(base)].bits))}
+    if contract =? 0 and cap =? 0 {return base}
+    let variables:array<int64>=[]
+    if contract not=? 0 {variables=effect_contracts.ptr[contract].variables}
+    return mk_type(TypeInfo[kind = 'callable' elem = int32<overflow='wrap'>(callable_base(base)) st = int32<overflow='wrap'>(contract) bits = int32<overflow='wrap'>(cap)] variables)
+}
+callable_base=(t0:int64):>int64=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind =? 'callable' {return ContractWord(types.ptr[t].elem)}
+    return t
+}
+callable_contract=(t0:int64):>int64=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind =? 'callable' {return ContractWord(types.ptr[t].st)}
+    return 0
+}
+effect_contract_fits=(source_type:ContractWord dest_type:ContractWord):>bool=>$unsafe {
+    return effect_rows_fit(callable_contract(source_type) callable_contract(dest_type))
+}
+# Explicit callback-place permissions are checked here, before extracting E.
+# A foreign formal ordinal can never enter a nonlocal row substitution.
+effect_match=(source:ContractWord dest:ContractWord @binds:array<int64>):>bool=>$unsafe {
+    if dest =? 0 {return true}
+    if source =? 0 {return false}
+    let dr=effect_contracts.ptr[dest]
+    if dr.variables.length =? 0 {return effect_rows_fit(source dest)}
+    if dr.variables.length not=? 1 {return false}
+    let sr=effect_contracts.ptr[source]
+    let rest:array<EffectAtom>=[]
+    let exclusions:array<EffectAtom>=[]
+    loop a in sr.atoms {
+        if effect_allows(dest a) {continue}
+        if place_base(a.place).root =? 'formal' {return false}
+        loop ex in dr.exclusions {
+            if effect_overlap(a ex) {return false}
+        }
+        rest.push(a);
+    }
+    loop ex in sr.exclusions {
+        if place_base(ex.place).root not=? 'formal' {exclusions.push(ex);}
+    }
+    let t=effect_type(effect_intern(rest exclusions sr.variables sr.open))
+    let v=dr.variables.ptr[0]
+    if tkind(v) =? 'param' {
+        let slot:ContractWord=ContractWord(types.ptr[v].id)
+        if slot <? binds.length and binds.ptr[slot] not=? 0 and tkind(binds.ptr[slot]) =? 'effect' {
+            binds.ptr[slot] = effect_type(effect_join(ContractWord(types.ptr[binds.ptr[slot]].st) ContractWord(types.ptr[t].st)));
+            return true
+        }
+    }
+    return match_type(v t @binds 1) >=? 0
+}

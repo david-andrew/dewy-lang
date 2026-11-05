@@ -8,7 +8,6 @@ from p"units.jo" import (bundled_word_rational_type dewy_quantity_call)
 from p"checker_expr.dewy" import (call_by_name check_expr check_intrinsic finish_arg lookup)
 from p"check.jo" import (check_struct_fields cur_mod demand_name dewy_at ensure_global globals jo_type_spelling locals method_modules module_lookup modules prelude resolve_alias resolve_type runtime_fn syms universe)
 from p"dewy_methods.jo" import (dewy_type_method)
-from p"effects.jo" import (effect_generic_argument)
 from p"exact.jo" import (exact_int_result exact_type)
 from p"util.jo" import (files intern name_of pos_file pos_in_lib)
 from p"checker_signature.dewy" import (fn_sig)
@@ -18,6 +17,7 @@ from p"refine.jo" import (is_total_dict refine_active refine_storage representat
 from p"juxtapose.jo" import (juxt_chain_numeric juxt_head_numeric juxt_power juxt_product juxt_text juxt_value_head)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)
 from p"string_domains.jo" import (string_domain_members)
+from p"effect_contracts.dewy" import (effect_generic_argument)
 # Call dispatch uses interned names and indices; services may grow the arenas.
 CDWord:type=int64<overflow='wrap'>
 call_head=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
