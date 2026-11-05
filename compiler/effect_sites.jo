@@ -1,0 +1,115 @@
+use 'checker_state.dewy'
+# Frozen effect site indexing from effects.jo.
+use 'ast.jo'
+use 'effects.jo'
+use 'check.jo'
+use 'isolation.jo'
+use 'places.jo'
+
+# Collect result expressions without interpreting loop locals as syntax nodes.
+effect_returns = (n: int, out: mut int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .return_:
+        value_leaves(int(nodes[n].a), out)
+        return
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: effect_returns(int(nodes[n].a), out)
+    if mask & 2 != 0: effect_returns(int(nodes[n].b), out)
+    if mask & 4 != 0: effect_returns(int(nodes[n].c), out)
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): effect_returns(kid(n, i), out)
+
+
+# The local an assignment target writes through field/index selectors, or 0.
+effect_write_root = (q: int) -> int:
+    target = int(nodes[q].a)
+    loop nodes[target].kind == .field or nodes[target].kind == .index: target = int(nodes[target].a)
+    if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)): return int(nodes[target].sym)
+    0
+
+
+# Node q's key in site index `kind` (0 writes, 1 scalar writes, 2 uses), or 0.
+effect_site_key = (kind: int, q: int) -> int:
+    k = nodes[q].kind
+    if kind == 2: return if (k == .call and nodes[q].aux == 0 or k == .fnref) and nodes[q].sym > 0: int(nodes[q].sym) else: 0
+    if k == .vardecl: return if has_flag(q, NF_GLOBAL) or nodes[q].sym <= 0: 0 else: int(nodes[q].sym)
+    if k != .assign: return 0
+    if kind == 0: return effect_write_root(q)
+    p = place_scalar_root(int(nodes[q].a))
+    if p.root != .local: return 0
+    p.declaration
+
+
+effect_index_build = (kind: int):
+    # Classify appended nodes once, but construct only the requested chain.
+    # Other kinds replay these sparse candidates, never the whole syntax tree.
+    # O(new nodes + demanded candidates + new keys); at most three chains.
+    if effect_ix_nodes == 0:
+        effect_ix_heads = [[], [], []]
+        effect_ix_tails = [[], [], []]
+        effect_ix_next = [[], [], []]
+        effect_ix_writes = []
+        effect_ix_uses = []
+        effect_ix_built = [0, 0, 0]
+    loop q in [max(1, effect_ix_nodes)..nodes.len()):
+        k = nodes[q].kind
+        if k == .vardecl or k == .assign: effect_ix_writes.push(q)
+        else if k == .call or k == .fnref: effect_ix_uses.push(q)
+    effect_ix_nodes = nodes.len()
+    effect_ix_locals = locals.len()
+    candidates = if kind == 2: effect_ix_uses else: effect_ix_writes
+    if effect_ix_built[kind] == candidates.len(): return
+    limit = if kind == 2: fns.len() + 1 else: locals.len() + 1
+    if effect_ix_heads[kind].len() < limit:
+        effect_ix_heads[kind].resize(limit)
+        effect_ix_tails[kind].resize(limit)
+    effect_ix_next[kind].resize(nodes.len())
+    loop i in [effect_ix_built[kind]..candidates.len()):
+        q = candidates[i]
+        effect_index_link(kind, effect_site_key(kind, q), q)
+    effect_ix_built[kind] = candidates.len()
+
+
+effect_index_link = (kind: int, key: int, q: int):
+    if key <= 0: return
+    if key >= effect_ix_heads[kind].len():
+        effect_ix_heads[kind].resize(key + 1)
+        effect_ix_tails[kind].resize(key + 1)
+    tail = effect_ix_tails[kind][key]
+    if tail == 0: effect_ix_heads[kind][key] = q
+    else: effect_ix_next[kind][tail] = q
+    effect_ix_tails[kind][key] = q
+
+
+# Candidate nodes in ascending order; callers still test each one in full.
+# While checking is open, nodes change in place: scan them all.
+effect_sites = (kind: int, key: int) -> int[]:
+    out: int[]
+    if key <= 0:
+        loop q in [1..nodes.len()): out.push(q)
+        return out
+    if not effect_final:
+        if kind == 2:
+            loop q in [1..nodes.len()):
+                k = nodes[q].kind
+                if (k == .call or k == .fnref) and effect_site_key(kind, q) == key: out.push(q)
+            return out
+        loop q in [1..nodes.len()):
+            k = nodes[q].kind
+            if (k == .vardecl or k == .assign) and effect_site_key(kind, q) == key: out.push(q)
+        return out
+    effect_index_build(kind)
+    q = if key < effect_ix_heads[kind].len(): effect_ix_heads[kind][key] else: 0
+    loop q != 0:
+        out.push(q)
+        q = effect_ix_next[kind][q]
+    out
+
+
+effect_write_sites = (l: int) -> int[]: effect_sites(0, l)
+
+effect_scalar_sites = (l: int) -> int[]: effect_sites(1, l)
+
+effect_use_sites = (f: int) -> int[]: effect_sites(2, f)

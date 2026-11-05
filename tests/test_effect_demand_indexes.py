@@ -7,7 +7,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 def test_effect_site_index_lifecycle(compiler, tmp_path):
     source = tmp_path / 'effect_indexes.jo'
     source.write_text("".join(f"use '{ROOT / 'compiler' / name}'\n" for name in
-                              ('effects.jo', 'types.jo', 'ast.jo', 'check.jo',
+                              ('effect_sites.dewy', 'effects.jo', 'types.jo', 'ast.jo', 'check.jo',
                                'checker_types.dewy', 'checker_tokens.dewy', 'checker_state.dewy',
                                'node_store.dewy')) + '''
 init_types()

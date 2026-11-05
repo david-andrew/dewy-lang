@@ -1,0 +1,126 @@
+$runtime_checks
+from p"ast.jo" import (NF_GLOBAL has_flag kid nkids nodes)
+from p"effects.jo" import (effect_final effect_ix_built effect_ix_heads effect_ix_locals effect_ix_next effect_ix_nodes effect_ix_tails effect_ix_uses effect_ix_writes)
+from p"check.jo" import (fns locals value_leaves)
+from p"isolation.jo" import (isolation_children)
+from p"places.jo" import (place_scalar_root)
+# Demanded effect site indexing; shared state has one owner in effects.jo.
+SiteWord:type=int64<overflow='wrap'>
+# Collect result expressions without interpreting loop locals as syntax nodes.
+effect_returns=(n:SiteWord @out:array<int64>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'return_' {
+        value_leaves(SiteWord(nodes.ptr[n].a) @out);
+        return
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {effect_returns(SiteWord(nodes.ptr[n].a) @out);}
+    if mask & 2 not=? 0 {effect_returns(SiteWord(nodes.ptr[n].b) @out);}
+    if mask & 4 not=? 0 {effect_returns(SiteWord(nodes.ptr[n].c) @out);}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {effect_returns(kid(n i) @out);}
+    }
+}
+# The local an assignment target writes through field/index selectors, or 0.
+effect_write_root=(q:SiteWord):>int64=>$unsafe {
+    let target:SiteWord=SiteWord(nodes.ptr[q].a)
+    loop nodes.ptr[target].kind =? 'field' or nodes.ptr[target].kind =? 'index' {target=SiteWord(nodes.ptr[target].a)}
+    if nodes.ptr[target].kind =? 'ident' and nodes.ptr[target].aux =? int32(1) {return SiteWord(nodes.ptr[target].sym)}
+    return 0
+}
+# Node q's key in site index `kind` (0 writes, 1 scalar writes, 2 uses), or 0.
+effect_site_key=(kind:SiteWord q:SiteWord):>int64=>$unsafe {
+    let k=nodes.ptr[q].kind
+    if kind =? 2 {return if (k =? 'call' and nodes.ptr[q].aux =? 0 or k =? 'fnref') and nodes.ptr[q].sym >? 0 {SiteWord(nodes.ptr[q].sym)} else {0}}
+    if k =? 'vardecl' {return if has_flag(q NF_GLOBAL) or nodes.ptr[q].sym <=? 0 {0} else {SiteWord(nodes.ptr[q].sym)}}
+    if k not=? 'assign' {return 0}
+    if kind =? 0 {return effect_write_root(q)}
+    let p=place_scalar_root(SiteWord(nodes.ptr[q].a))
+    if p.root not=? 'local' {return 0}
+    return p.declaration
+}
+effect_index_build=(kind:SiteWord):>void=>$unsafe {
+    # Classify appended nodes once, but construct only the requested chain.
+    # Other kinds replay these sparse candidates, never the whole syntax tree.
+    # O(new nodes + demanded candidates + new keys); at most three chains.
+    if effect_ix_nodes =? 0 {
+        effect_ix_heads=[[] [] []]
+        effect_ix_tails=[[] [] []]
+        effect_ix_next=[[] [] []]
+        effect_ix_writes=[]
+        effect_ix_uses=[]
+        effect_ix_built=[0 0 0]
+    }
+    loop q in [max(1 effect_ix_nodes)..nodes.length) {
+        let k=nodes.ptr[q].kind
+        if k =? 'vardecl' or k =? 'assign' {effect_ix_writes.push(q);}
+        else if k =? 'call' or k =? 'fnref' {effect_ix_uses.push(q);}
+    }
+    effect_ix_nodes=nodes.length
+    effect_ix_locals=locals.length
+    let candidates=if kind =? 2 {effect_ix_uses} else {effect_ix_writes}
+    if effect_ix_built.ptr[kind] =? candidates.length {return}
+    let limit=if kind =? 2 {SiteWord(fns.length) + 1} else {SiteWord(locals.length) + 1}
+    if effect_ix_heads.ptr[kind].length <? limit {
+        effect_ix_heads.ptr[kind].resize(limit);
+        effect_ix_tails.ptr[kind].resize(limit);
+    }
+    effect_ix_next.ptr[kind].resize(nodes.length);
+    loop i in [effect_ix_built.ptr[kind]..candidates.length) {
+        let q=candidates.ptr[i]
+        effect_index_link(kind effect_site_key(kind q) q);
+    }
+    effect_ix_built.ptr[kind] = candidates.length;
+}
+effect_index_link=(kind:SiteWord key:SiteWord q:SiteWord):>void=>$unsafe {
+    if key <=? 0 {return}
+    if key >=? effect_ix_heads.ptr[kind].length {
+        effect_ix_heads.ptr[kind].resize(key + 1);
+        effect_ix_tails.ptr[kind].resize(key + 1);
+    }
+    let tail=effect_ix_tails.ptr[kind].ptr[key]
+    if tail =? 0 {effect_ix_heads.ptr[kind].ptr[key] = q;}
+    else {effect_ix_next.ptr[kind].ptr[tail] = q;}
+    effect_ix_tails.ptr[kind].ptr[key] = q;
+}
+# Candidate nodes in ascending order; callers still test each one in full.
+# While checking is open, nodes change in place: scan them all.
+effect_sites=(kind:SiteWord key:SiteWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    if key <=? 0 {
+        loop q in [1..nodes.length) {out.push(q);}
+        return out
+    }
+    if not effect_final {
+        if kind =? 2 {
+            loop q in [1..nodes.length) {
+                let k=nodes.ptr[q].kind
+                if (k =? 'call' or k =? 'fnref') and effect_site_key(kind q) =? key {out.push(q);}
+            }
+            return out
+        }
+        loop q in [1..nodes.length) {
+            let k=nodes.ptr[q].kind
+            if (k =? 'vardecl' or k =? 'assign') and effect_site_key(kind q) =? key {out.push(q);}
+        }
+        return out
+    }
+    effect_index_build(kind);
+    let q=if key <? effect_ix_heads.ptr[kind].length {effect_ix_heads.ptr[kind].ptr[key]} else {0}
+    loop q not=? 0 {
+        out.push(q);
+        q=effect_ix_next.ptr[kind].ptr[q]
+    }
+    return out
+}
+effect_write_sites=(l:SiteWord):>array<int64>=>$unsafe {
+    return effect_sites(0 l)
+}
+effect_scalar_sites=(l:SiteWord):>array<int64>=>$unsafe {
+    return effect_sites(1 l)
+}
+effect_use_sites=(f:SiteWord):>array<int64>=>$unsafe {
+    return effect_sites(2 f)
+}
