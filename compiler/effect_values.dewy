@@ -1,0 +1,215 @@
+$runtime_checks
+from p"ast.jo" import (NF_U64 has_flag nodes)
+from p"types.jo" import (T_MATH_INT T_VOID fields is_vec layout math_optional prune structs targ telem tkind types variants)
+from p"checker_tokens.dewy" import (Tok)
+from p"arena.jo" import (arena_fns)
+from p"arena_ops.dewy" import (arena_handle)
+from p"effects.jo" import (effect_plain_cache effect_share_cache effect_value_cache)
+from p"expr.jo" import (is_nd nd_elem ntype)
+from p"ownership_types.dewy" import (ownership_scalar ownership_type)
+from p"refine.jo" import (representation_type)
+# Demanded value effect queries; shared state has one owner in effects.jo.
+ValueWord:type=int64<overflow='wrap'>
+# Residual implementation inventory used by check and both code generators.
+# No optimization-dependent capacity/uniqueness discharge in this slice.
+# Immutable shares (text, `int`, records of them: effect_share) and reviewed
+# library string operations (effect_library.jo) are classified; unsupported
+# adapters and other managed operations stay top, even with an Alloc event:
+# allocation permission alone never promises failure-free execution.
+effect_scalar=(t0:ValueWord):>bool=>$unsafe {
+    let t=representation_type(t0)
+    return types.ptr[t].kind =? 'bool_' or types.ptr[t].kind =? 'int_' and t not=? T_MATH_INT
+}
+# A fixed-width float is a word as well: copying, reading or storing one costs
+# nothing hidden, and its `+ - * /` and comparisons are single instructions
+# that never fail (a `$finite_floats` obligation is checked by floats.jo).
+effect_float=(t0:ValueWord):>bool=>$unsafe {
+    return types.ptr[representation_type(t0)].kind =? 'float_'
+}
+effect_float_op=(op:Tok):>bool=>$unsafe {
+    return op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'slash' or op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge'
+}
+# A word-sized `int` literal is a constant: a shift count such as the `3` in
+# `x >> 3` lowers to an immediate, with no promotion or check.
+effect_count_literal=(n:ValueWord):>bool=>$unsafe {
+    return nodes.ptr[n].kind =? 'int_lit' and prune(ntype(n)) =? T_MATH_INT and nodes.ptr[n].ival >=? 0 and not has_flag(n NF_U64)
+}
+effect_word_op=(op:Tok):>bool=>$unsafe {
+    return op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'amp' or op =? 'pipe' or op =? 'caret' or op =? 'kw_xor' or op =? 'shl' or op =? 'shr' or op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge'
+}
+# Inline POD records use the same layout decision as lowering. A recursive
+# box, custom lifecycle or managed field is never certified as a free copy.
+effect_plain=(t0:ValueWord depth:ValueWord=0):>bool=>$unsafe {
+    let t=representation_type(t0)
+    if effect_scalar(t) or effect_float(t) or is_vec(t) {return true}
+    if depth =? 0 {
+        let k=tkind(t)
+        if k =? 'struct_' or k =? 'enum_' or k =? 'tuple' or k =? 'fixed' or k =? 'opt' {
+            let known=effect_plain_cache.get(t)
+            if known not=? none {return known}
+            let answer=effect_plain_type(t)
+            effect_plain_cache[t] = answer;
+            return answer
+        }
+    }
+    return effect_plain_type(t depth)
+}
+effect_plain_type=(t:ValueWord depth:ValueWord=0):>bool=>$unsafe {
+    # (an Arena is a handle: copying, reading or dropping one allocates nothing, arena.jo)
+    if arena_fns.length >? 0 and arena_handle(t) {return true}
+    # (a union of plain members, `int64 | Oops`, is plain: a tag and a payload;
+    # `void | Oops`'s void member has nothing)
+    if depth <=? 16 and tkind(t) =? 'enum_' {
+        layout(t);
+        let si:ValueWord=ValueWord(types.ptr[t].st)
+        if structs.ptr[si].drop_fn not=? 0 {return false}
+        loop v in [0..ValueWord(structs.ptr[si].nvariants)) {
+            let vi:ValueWord=ValueWord(structs.ptr[si].variants) + v
+            loop j in [0..ValueWord(variants.ptr[vi].nfields)) {
+                let fi:ValueWord=ValueWord(variants.ptr[vi].fields) + j
+                if representation_type(ValueWord(fields.ptr[fi].type)) =? T_VOID {continue}
+                if fields.ptr[fi].boxed or not effect_plain(ValueWord(fields.ptr[fi].type) depth + 1) {return false}
+            }
+        }
+        return true
+    # (an optional plain value is inline: a flag beside the payload)
+    }
+    if depth <=? 16 and tkind(t) =? 'opt' {return not math_optional(t) and effect_plain(ValueWord(types.ptr[t].elem) depth + 1)}
+    # (a fixed array or tuple of plain elements is inline storage with no lifecycle)
+    if depth <=? 16 and tkind(t) =? 'fixed' {return effect_plain(ValueWord(types.ptr[t].elem) depth + 1)}
+    if depth <=? 16 and tkind(t) =? 'tuple' {
+        loop i in [0..ValueWord(types.ptr[t].nargs)) {
+            if not effect_plain(targ(t i) depth + 1) {return false}
+        }
+        return true
+    }
+    if depth >? 16 or tkind(t) not=? 'struct_' {return false}
+    layout(t);
+    let si:ValueWord=ValueWord(types.ptr[t].st)
+    if structs.ptr[si].drop_fn not=? 0 {return false}
+    loop i in [0..ValueWord(structs.ptr[si].nfields)) {
+        let fi:ValueWord=ValueWord(structs.ptr[si].fields) + i
+        if fields.ptr[fi].boxed or not effect_plain(ValueWord(fields.ptr[fi].type) depth + 1) {return false}
+    }
+    return true
+}
+# A payload-free enum (a literal union such as `'ready' | 'blocked'`) is one
+# word: its members are constants and `=?` compares words.
+effect_simple_enum=(t0:ValueWord):>bool=>$unsafe {
+    let t=representation_type(t0)
+    if tkind(t) not=? 'enum_' {return false}
+    layout(t);
+    return structs.ptr[ValueWord(types.ptr[t].st)].simple_enum
+}
+# An immutable share: a plain value, text, an `int` (a word, or an immutable
+# big payload), or an inline record, union, tuple or optional of shares with no
+# lifecycle hooks. Copying one costs at most a reference count, never an
+# allocation: reading, binding, passing, returning or building one inline is
+# free (a recursive box still allocates, effect_access).
+effect_share=(t0:ValueWord depth:ValueWord=0):>bool=>$unsafe {
+    let t=representation_type(t0)
+    if effect_plain(t) or ownership_scalar(t) {return true}
+    if types.ptr[t].kind =? 'str_' or t =? T_MATH_INT {return true}
+    let k=tkind(t)
+    if depth >? 16 or k not=? 'struct_' and k not=? 'enum_' and k not=? 'tuple' and k not=? 'opt' {return false}
+    let known=effect_share_cache.get(t)
+    if known not=? none {return known}
+    # (a recursive type is no share: its cycle goes through a box)
+    effect_share_cache[t] = false;
+    let answer=effect_share_type(t depth)
+    effect_share_cache[t] = answer;
+    return answer
+}
+effect_share_type=(t:ValueWord depth:ValueWord):>bool=>$unsafe {
+    let k=tkind(t)
+    if k =? 'opt' {return effect_share(ValueWord(types.ptr[t].elem) depth + 1)}
+    if k =? 'tuple' {
+        loop i in [0..ValueWord(types.ptr[t].nargs)) {
+            if not effect_share(targ(t i) depth + 1) {return false}
+        }
+        return true
+    }
+    if ownership_type(t) {return false}
+    layout(t);
+    let si:ValueWord=ValueWord(types.ptr[t].st)
+    if structs.ptr[si].drop_fn not=? 0 {return false}
+    if k =? 'enum_' {
+        loop v in [0..ValueWord(structs.ptr[si].nvariants)) {
+            let vi:ValueWord=ValueWord(structs.ptr[si].variants) + v
+            loop j in [0..ValueWord(variants.ptr[vi].nfields)) {
+                let fi:ValueWord=ValueWord(variants.ptr[vi].fields) + j
+                if representation_type(ValueWord(fields.ptr[fi].type)) =? T_VOID {continue}
+                if fields.ptr[fi].boxed or not effect_share(ValueWord(fields.ptr[fi].type) depth + 1) {return false}
+            }
+        }
+        return true
+    }
+    loop i in [0..ValueWord(structs.ptr[si].nfields)) {
+        let fi:ValueWord=ValueWord(structs.ptr[si].fields) + i
+        if fields.ptr[fi].boxed or not effect_share(ValueWord(fields.ptr[fi].type) depth + 1) {return false}
+    }
+    return true
+}
+# A value whose copy is a share: a share, or a dynamic array of shares (copy on
+# write: a copy shares the storage; a later write's detach is that write's own
+# cost, as the growth intrinsics and element stores classify it).
+effect_value=(t0:ValueWord depth:ValueWord=0):>bool=>$unsafe {
+    let t=representation_type(t0)
+    if tkind(t) =? 'array' {return effect_share(telem(t))}
+    # The builtin tensor copies its two COW arrays; no element hook runs.
+    if is_nd(t) {return effect_share(nd_elem(t))}
+    if effect_share(t) {return true}
+    return effect_value_record(t depth)
+}
+# An inline record, tuple or optional of such values (`[items:array<int>
+# up:bool]`): its copy copies each field, so it shares each array's storage
+# exactly as passing the array would. No lifecycle hook, box or nominal owner.
+# Cached per type; O(fields) once.
+effect_value_record=(t:ValueWord depth:ValueWord):>bool=>$unsafe {
+    let k=tkind(t)
+    if depth >? 8 or k not=? 'struct_' and k not=? 'tuple' and k not=? 'opt' {return false}
+    let known=effect_value_cache.get(t)
+    if known not=? none {return known}
+    effect_value_cache[t] = false;
+    let answer=false
+    if k =? 'opt' {answer=effect_value(ValueWord(types.ptr[t].elem) depth + 1)}
+    else if k =? 'tuple' {
+        answer=true
+        loop i in [0..ValueWord(types.ptr[t].nargs)) {
+            if not effect_value(targ(t i) depth + 1) {answer=false}
+        }
+    }
+    else if not ownership_type(t) {
+        layout(t);
+        let si:ValueWord=ValueWord(types.ptr[t].st)
+        answer=structs.ptr[si].drop_fn =? 0
+        loop i in [0..ValueWord(structs.ptr[si].nfields)) {
+            let fi:ValueWord=ValueWord(structs.ptr[si].fields) + i
+            if fields.ptr[fi].boxed or not effect_value(ValueWord(fields.ptr[fi].type) depth + 1) {answer=false}
+        }
+    }
+    effect_value_cache[t] = answer;
+    return answer
+}
+effect_signature_value=(t0:ValueWord depth:ValueWord=0):>bool=>$unsafe {
+    let t=representation_type(t0)
+    if effect_plain(t) or ownership_scalar(t) or t =? T_MATH_INT {return true}
+    if is_nd(t) {return effect_share(nd_elem(t))}
+    let k=tkind(t)
+    # (an optional or a record of such values, a share without text: `int?`, `rational`)
+    if depth <? 4 and (k =? 'opt' or k =? 'struct_' or k =? 'tuple') and effect_share(t) {
+        if k =? 'opt' {return effect_signature_value(ValueWord(types.ptr[t].elem) depth + 1)}
+        if k =? 'tuple' {
+            loop i in [0..ValueWord(types.ptr[t].nargs)) {
+                if not effect_signature_value(targ(t i) depth + 1) {return false}
+            }
+            return true
+        }
+        let si:ValueWord=ValueWord(types.ptr[t].st)
+        loop i in [0..ValueWord(structs.ptr[si].nfields)) {
+            if not effect_signature_value(ValueWord(fields.ptr[ValueWord(structs.ptr[si].fields) + i].type) depth + 1) {return false}
+        }
+        return true
+    }
+    return k =? 'array' and (effect_scalar(telem(t)) or representation_type(telem(t)) =? T_MATH_INT)
+}

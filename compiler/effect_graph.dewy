@@ -2,7 +2,7 @@ $runtime_checks
 from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
 from p"effect_library.jo" import EffectClass
 from p"isolation.jo" import IsolationReason
-from p"effects.jo" import (EffectBody EffectDelta EffectEdge EffectEdgeKey EffectEventKey EffectSummary effect_blocks_demanded effect_bodies effect_body_cache effect_body_owner effect_body_panics effect_bounds_proven effect_caller_obligation effect_contracts effect_declared effect_event_index effect_exact_rep effect_final effect_footprints_only effect_for_marks effect_inference_busy effect_isolation_block effect_ix_locals effect_ix_nodes effect_library_summary effect_limit effect_map_remove effect_plain_cache effect_prepare effect_scan_node effect_seen effect_serial effect_share_cache effect_signature_opaque effect_solving effect_stack effect_stamps effect_subst effect_summaries effect_ticks effect_unavailable effect_value effect_value_cache)
+from p"effects.jo" import (EffectBody EffectDelta EffectEdge EffectEdgeKey EffectEventKey EffectSummary effect_blocks_demanded effect_bodies effect_body_cache effect_body_owner effect_body_panics effect_bounds_proven effect_caller_obligation effect_contracts effect_declared effect_event_index effect_exact_rep effect_final effect_footprints_only effect_for_marks effect_inference_busy effect_isolation_block effect_ix_locals effect_ix_nodes effect_library_summary effect_limit effect_map_remove effect_plain_cache effect_prepare effect_scan_node effect_seen effect_serial effect_share_cache effect_signature_opaque effect_solving effect_stack effect_stamps effect_subst effect_summaries effect_ticks effect_unavailable effect_value_cache)
 from p"check.jo" import (FK_INIT FK_LAMBDA FK_PARTIAL LF_MUTPARAM decl_info decl_infos fns locals)
 from p"ast.jo" import (NF_EXTERN has_flag nodes)
 from p"types.jo" import (T_VOID)
@@ -15,6 +15,7 @@ from p"exact.jo" import (exact_effect_owners)
 from p"expr.jo" import (is_fn_type)
 from p"places.jo" import (place_append)
 from p"refine.jo" import (representation_type)
+from p"effect_values.dewy" import (effect_value)
 # Demanded effect graph execution; shared state has one owner in effects.jo.
 GraphWord:type=int64<overflow='wrap'>
 effect_graph_reset=(reuse_bodies:bool=false):>void=>$unsafe {
