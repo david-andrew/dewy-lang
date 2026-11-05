@@ -1,0 +1,223 @@
+$runtime_checks
+from p"check.jo" import (LF_ADDR LF_PARTBORROW check_pending_functions fns globals lib_dir locals modules runtime_fn target_macos target_wasm target_windows)
+from p"ast.jo" import (NF_CHECKED NF_EXTERN NF_STMT add_flag has_flag kid kid2 kids mk nkids nkids2 nodes)
+from p"types.jo" import (T_MATH_INT T_NONE T_VOID tkind)
+from p"expr.jo" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt last_checked ntype type_node_of)
+from p"checker_expr.dewy" import (check_expr)
+from p"deadlock.jo" import deadlock_atomics
+from p"concurrency_waits.dewy" import concurrency_blocks
+from p"concurrency_parsafe.dewy" import (parsafe_finalize parsafe_vouched_local)
+from p"concurrency.jo" import (concurrency_calls concurrency_ffi_start concurrency_protocol_module concurrency_runtime_needed concurrency_tasks)
+from p"concurrency_types.dewy" import (concurrency_builtin_type concurrency_transfer concurrency_why)
+from p"errors.jo" import (exception_member nominal_generic_instance value_members)
+from p"util.jo" import (fatal files name_of pos_file)
+from p"lower_races.dewy" import (in_lib race_arg)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"refine.jo" import (representation_type)
+from p"lower_helpers.dewy" import (value_helper_calls)
+# Task, queue and atomic execution checks; shared state has one owner in concurrency.jo.
+TaskWord:type=int64<overflow='wrap'>
+# Whether the checked program calls a C function (a task program only: O(functions) once).
+concurrency_calls_c=():>bool=>$unsafe {
+    loop f in [1..fns.length) {
+        let d:TaskWord=TaskWord(fns.ptr[f].decl)
+        if d not=? 0 and has_flag(d NF_EXTERN) and (fns.ptr[f].clib).length >? 0 {return true}
+    }
+    return false
+}
+concurrency_callback=(a:TaskWord waiting:bool=false):>void=>$unsafe {
+    if nodes.ptr[a].kind =? 'conv' {
+        concurrency_callback(TaskWord(nodes.ptr[a].a) waiting);
+        return
+    }
+    let f:TaskWord=TaskWord(nodes.ptr[a].sym)
+    if nodes.ptr[a].kind not=? 'lambda' and nodes.ptr[a].kind not=? 'fnref' and nodes.ptr[a].kind not=? 'partial' {return}
+    if f <=? 0 {return}
+    if nodes.ptr[a].kind =? 'partial' {
+        loop i in [0..nkids(a)) {
+            let arg=kid(a i)
+            if nodes.ptr[arg].kind =? 'hole' {continue}
+            let seen:dict<int64 bool>=dict<int64 bool>()
+            if not concurrency_transfer(ntype(arg) @seen) {fatal(nodes.ptr[arg].pos "bound task argument does not satisfy inferred Send/Sync{concurrency_why()}");}
+        }
+    }
+    loop cap in fns.ptr[f].caps {
+        # (a callback parameter run here: its function's callers check what they give)
+        if not waiting and parsafe_vouched_local(TaskWord(cap.outer)) {continue}
+        let t:TaskWord=TaskWord(locals.ptr[TaskWord(cap.outer)].type)
+        let seen:dict<int64 bool>=dict<int64 bool>()
+        if (waiting or TaskWord(locals.ptr[TaskWord(cap.inner)].flags) & LF_PARTBORROW =? 0) and (TaskWord(locals.ptr[TaskWord(cap.inner)].flags) & LF_ADDR not=? 0 or not concurrency_transfer(t @seen)) {
+            let why=concurrency_why()
+            if (why).length >? 0 {fatal(nodes.ptr[a].pos "task capture does not satisfy inferred Send{why}");}
+            fatal(nodes.ptr[a].pos "task capture does not satisfy inferred Send/Sync: a place or non-atomic raw-storage handle cannot cross tasks");
+        }
+    }
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    if not concurrency_transfer(TaskWord(fns.ptr[f].ret) @seen) {fatal(nodes.ptr[a].pos "task result does not satisfy inferred Send{concurrency_why()}");}
+    if not waiting {
+        let called:dict<int64 bool>=dict<int64 bool>()
+        if concurrency_blocks(f @called true) {fatal(nodes.ptr[a].pos "parallel body may block; use `concurrent` for waiting work (the two-lane rule)");}
+    }
+}
+# A queue's payload is a factory precondition, even without a task in this
+# program. Instances are interned: only new bundled factory specializations
+# demand the indexed structural Send walk, O(reachable payload types + fields).
+concurrency_queue_instance=(decl:TaskWord payload:TaskWord pos:TaskWord):>void=>$unsafe {
+    let name=name_of(TaskWord(nodes.ptr[decl].name))
+    if name not=? "channel" and name not=? "mpmc" and name not=? "spsc" {return}
+    let file=if name =? "channel" {"channels"} else {name}
+    if files.ptr[pos_file(nodes.ptr[decl].pos)].path not=? "{lib_dir}/prelude/{file}.dewy" {return}
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    if not concurrency_transfer(payload @seen) {fatal(pos "{name} payload must satisfy Send{concurrency_why()}; use a payload whose fields can cross tasks");}
+}
+concurrency_atomic_call=(n:TaskWord):>void=>$unsafe {
+    if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return}
+    deadlock_atomics=true
+    let f:TaskWord=TaskWord(nodes.ptr[n].sym)
+    if not modules.ptr[TaskWord(fns.ptr[f].mod)].is_prelude {return}
+    let d:TaskWord=TaskWord(fns.ptr[f].decl)
+    if d =? 0 {return}
+    let name=name_of(TaskWord(nodes.ptr[d].name))
+    let factory=name =? "atomic"
+    if not factory and (nkids(n) =? 0 or not concurrency_builtin_type(ntype(kid(n 0)) "Atomic")) {return}
+    if in_lib(nodes.ptr[n].pos) or files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/std/thread.jo" {return}
+    if factory and fns.ptr[f].targs.length >? 0 {
+        let t=representation_type(fns.ptr[f].targs.ptr[0])
+        if tkind(t) not=? 'int_' or t =? T_MATH_INT {fatal(nodes.ptr[n].pos "Atomic<T> requires a fixed-width integer payload; use int64 for a counter");}
+    }
+    if nkids(n) >? 0 and concurrency_builtin_type(ntype(kid(n 0)) "Atomic") {concurrency_atomic_validate(n);}
+}
+concurrency_finalize=():>void=>$unsafe {
+    # (lowering shields cleanup and checks cancellation in task programs: their runtime, checked now)
+    if concurrency_runtime_needed {
+        loop name in ["__task_shield_enter" "__task_shield_leave" "__task_canceled"] {check_pending_functions(runtime_fn(name));}
+        # (C functions loaded through the system's ld.so: C's library starts on the main thread,
+        # before any task, compiler/main.jo)
+        if not target_wasm and not target_windows and not target_macos and concurrency_calls_c() {
+            concurrency_ffi_start=runtime_fn("__ffi_start")
+            check_pending_functions(concurrency_ffi_start);
+        }
+    }
+    if concurrency_tasks.length >? 0 and (target_wasm or target_windows or target_macos) {
+        fatal(nodes.ptr[concurrency_tasks.ptr[0]].pos "the threads task backend currently requires Linux; parallel computation remains portable");
+    }
+    loop n in concurrency_tasks {
+        if in_lib(nodes.ptr[n].pos) {continue}
+        let task_arg=concurrency_protocol_task_arg(n)
+        let callbacks=kids(n)
+        loop i in [0..callbacks.length) and callback in callbacks {
+            if tkind(ntype(callback)) not=? 'fn_' or task_arg >=? -1 and i not=? task_arg {continue}
+            concurrency_callback(callback true);
+            race_arg(callback "spawn");
+            let visited:dict<int64 bool>=dict<int64 bool>()
+            let callee=callback
+            loop nodes.ptr[callee].kind =? 'conv' {callee=TaskWord(nodes.ptr[callee].a)}
+            concurrency_task_globals(TaskWord(nodes.ptr[callee].sym) @visited);
+        }
+    }
+    parsafe_finalize();
+    loop n in concurrency_calls {
+        if in_lib(nodes.ptr[n].pos) {continue}
+        let f:TaskWord=TaskWord(nodes.ptr[n].sym)
+        loop j in [0..nkids(n)) {
+            let a=kid(n j)
+            if tkind(ntype(a)) =? 'fn_' {concurrency_callback(a);}
+            else {
+                let seen:dict<int64 bool>=dict<int64 bool>()
+                if not concurrency_transfer(ntype(a) @seen) {fatal(nodes.ptr[a].pos "parallel input does not satisfy inferred Send{concurrency_why()}");}
+            }
+        }
+    }
+}
+# The argument of a certified protocol's call that runs on a task of its own (`serve`'s handler,
+# `pipeline`'s work; the rest run on the caller's), -1 for none, -2 when n is not a protocol's
+concurrency_protocol_task_arg=(n:TaskWord):>int64=>$unsafe {
+    let f:TaskWord=TaskWord(nodes.ptr[n].sym)
+    let d:TaskWord=TaskWord(fns.ptr[f].decl)
+    if concurrency_protocol_module <? 0 or d =? 0 or TaskWord(nodes.ptr[d].mod) not=? concurrency_protocol_module {return -2}
+    let name=name_of(TaskWord(nodes.ptr[d].name))
+    if name =? "serve" {return 0}
+    if name =? "pipeline" {return 2}
+    return -1
+}
+concurrency_atomic_validate=(n:TaskWord):>void=>$unsafe {
+    let f:TaskWord=TaskWord(nodes.ptr[n].sym)
+    let name=name_of(TaskWord(nodes.ptr[TaskWord(fns.ptr[f].decl)].name))
+    let order=kid(n nkids(n) - 1)
+    if nodes.ptr[order].kind not=? 'str_lit' {fatal(nodes.ptr[order].pos "MemoryOrder must be a compile-time literal");}
+    let value=name_of(TaskWord(nodes.ptr[order].sval))
+    if value not=? "relaxed" and value not=? "acquire" and value not=? "release" and value not=? "acq_rel" and value not=? "seq_cst" {fatal(nodes.ptr[order].pos "MemoryOrder must be 'relaxed', 'acquire', 'release', 'acq_rel', or 'seq_cst'");}
+    if (name =? "load" or name =? "get") and (value =? "release" or value =? "acq_rel") {fatal(nodes.ptr[order].pos "an atomic load cannot use release or acq_rel order");}
+    if (name =? "store" or name =? "set") and (value =? "acquire" or value =? "acq_rel") {fatal(nodes.ptr[order].pos "an atomic store cannot use acquire or acq_rel order");}
+}
+# A generic task result keeps its concrete exception alternatives. Report one
+# selected alternative to the group's first-failure cell without erasing data.
+concurrency_report=(n:TaskWord args:array<int64>):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    check_expr(args.ptr[0] 0);
+    let group=last_checked
+    add_flag(group NF_CHECKED);
+    let t=check_expr(args.ptr[1] 0)
+    let value=last_checked
+    add_flag(value NF_CHECKED);
+    let gn="$report_group{n}"
+    let vn="$report_value{n}"
+    let statements=[bc_let(gn group pos) bc_let(vn value pos)]
+    let members=value_members(t)
+    loop member in members {
+        if not exception_member(member) {continue}
+        let actual=if member =? T_NONE {mk('none_lit' pos)} else {bc_ident(vn pos)}
+        # (the family holds no generic instance: `Unsent<T>` reports its reason, errors.jo)
+        if member not=? T_NONE and nominal_generic_instance(member) {actual=bc_field(actual "reason" pos)}
+        let call=bc_stmt(bc_call("__task_fail" [bc_ident(gn pos) actual] pos) pos)
+        if members.length =? 1 {statements.push(call);}
+        else {
+            let condition=mk('istype' pos)
+            nodes.ptr[condition].a = int32(bc_ident(vn pos));
+            nodes.ptr[condition].b = int32(type_node_of(member pos));
+            let branch=mk('if_' pos)
+            nodes.ptr[branch].a = int32(condition);
+            nodes.ptr[branch].b = int32(bc_block([call] pos));
+            add_flag(branch NF_STMT);
+            statements.push(branch);
+        }
+    }
+    statements.push(bc_stmt(bc_block([] pos) pos));
+    let block=bc_block(statements pos)
+    nodes.ptr[n] = nodes.ptr[block];
+    return check_expr(n T_VOID)
+}
+# A waiting parent can continue changing globals while its children run.
+# Explicit synchronized identities are shared; other data travels as captures.
+concurrency_task_globals=(f:TaskWord @seen:dict<int64 bool>):>void=>$unsafe {
+    if f <=? 0 or f >=? fns.length or seen.has(f) {return}
+    seen[f] = true;
+    if modules.ptr[TaskWord(fns.ptr[f].mod)].is_prelude {return}
+    concurrency_task_globals_node(TaskWord(fns.ptr[f].body) @seen);
+}
+concurrency_task_globals_node=(n:TaskWord @seen:dict<int64 bool>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(2) {
+        let t=ntype(n)
+        let g:TaskWord=TaskWord(nodes.ptr[n].sym)
+        # (a binding nothing writes after its declaration, nor exposes, is as constant as a `const`)
+        let written=globals.ptr[g].fn_written or globals.ptr[g].init_written or globals.ptr[g].exposed
+        if not globals.ptr[g].is_const and written and not concurrency_builtin_type(t "Atomic") and not concurrency_builtin_type(t "TaskGroup") {
+            fatal(nodes.ptr[n].pos "a task cannot read an unsynchronized global while its parent runs; capture a value or use Atomic");
+        }
+    }
+    if k =? 'call' and nodes.ptr[n].aux =? 0 {concurrency_task_globals(TaskWord(nodes.ptr[n].sym) @seen);}
+    loop f in value_helper_calls(n) {concurrency_task_globals(f @seen);}
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {concurrency_task_globals_node(TaskWord(nodes.ptr[n].a) @seen);}
+    if mask & 2 not=? 0 {concurrency_task_globals_node(TaskWord(nodes.ptr[n].b) @seen);}
+    if mask & 4 not=? 0 {concurrency_task_globals_node(TaskWord(nodes.ptr[n].c) @seen);}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {concurrency_task_globals_node(kid(n i) @seen);}
+    }
+    if mask & 32 not=? 0 {
+        loop i in [0..nkids2(n)) {concurrency_task_globals_node(kid2(n i) @seen);}
+    }
+}

@@ -6,7 +6,7 @@ from p"ast.jo" import (NF_EXTERN has_flag mk nkids nkids2 nodes set_list)
 from p"types.jo" import (T_FLOAT T_NEVER T_VOID get_struct_inst is_int layout prune ts_dewy)
 from p"arena.jo" import (runtime_switches)
 from p"check_constant.jo" import (cc_reset)
-from p"concurrency.jo" import (concurrency_finalize concurrency_protocol_module)
+from p"concurrency.jo" import (concurrency_protocol_module)
 from p"expr.jo" import (console_type_id)
 from p"lazy_bodies.jo" import (dc_force_all)
 from p"deadlock.jo" import (deadlock_finalize)
@@ -37,6 +37,7 @@ from p"warn_if.jo" import (wi_reset)
 from p"arena_ops.dewy" import (arena_reset runtime_switch runtime_switch_on)
 from p"effect_control.dewy" import (effects_finalize effects_reset)
 from p"concurrency_types.dewy" import (concurrency_claims_finalize)
+from p"concurrency_tasks.dewy" import (concurrency_finalize)
 # Program-level checking owns phase order; services may grow all compiler arenas.
 PGWord:type=int64<overflow='wrap'>
 check_program=(main_path:string):>void=>$unsafe {

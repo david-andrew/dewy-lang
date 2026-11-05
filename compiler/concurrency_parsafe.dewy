@@ -1,11 +1,12 @@
 $runtime_checks
 from p"check.jo" import (LF_ASSIGNED LF_CAPTURE LF_PARAM LF_VALUEPARAM decl_infos fns locals)
-from p"concurrency.jo" import (ParSafeVia concurrency_callback concurrency_calls parsafe_fns parsafe_req parsafe_work)
+from p"concurrency.jo" import (ParSafeVia concurrency_calls parsafe_fns parsafe_req parsafe_work)
 from p"util.jo" import (err_notes fatal name_of)
 from p"lower_races.dewy" import (in_lib race_arg)
 from p"ast.jo" import (kid kid2 kids nkids nkids2 nodes parsafe_tags)
 from p"expr.jo" import (ntype)
 from p"types.jo" import (tkind)
+from p"concurrency_tasks.dewy" import (concurrency_callback)
 # Demanded parallel callback contracts; shared state has one owner in concurrency.jo.
 ParSafeWord:type=int64<overflow='wrap'>
 parsafe_key=(f:ParSafeWord i:ParSafeWord):>int64=>$unsafe {
