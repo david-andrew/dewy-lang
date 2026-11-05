@@ -1,0 +1,128 @@
+use 'util.jo'
+use 'ast.jo'
+use 'expr.jo'
+use 'check.jo'
+use 'arena.jo'
+use 'ownership.jo'
+use 'settings.jo'
+use 'effects.jo'
+use 'directives.jo'
+use 'arena_ops.dewy'
+# Frozen recursive lowering from oom.jo.
+use 'oom.jo'
+
+oom_module = (file: int, pos: int):
+    if oom_files.has(file): fatal(pos, "`$explicit_allocation_failure` is already set for this module")
+    oom_files[file] = true
+    runtime_switch_on("__EXPLICIT_OOM")
+
+
+oom_active = (pos: int) -> bool: oom_files.len() > 0 and oom_files.has(pos_file(pos))
+
+
+oom_fixed_type = (t: int) -> bool:
+    if t == 0 or (nodes[t].kind != .ident and nodes[t].kind != .tname): return false
+    name_of(int(nodes[t].name)) in ["int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32", "float64", "bool", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64"]
+
+
+oom_body_allocates = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit or k == .break_ or k == .continue_: return false
+    if k == .vardecl:
+        # (a value parameter's own binding, dewy_nodes.jo dw_finish_function, has its type)
+        if nodes[n].aux2 == 1: return false
+        if nodes[n].a == 0 or not oom_fixed_type(int(nodes[n].a)): return true
+        return oom_body_allocates(int(nodes[n].b))
+    simple = k == .binary or k == .unary or k == .not_ or k == .and_ or k == .or_ or k == .if_ or k == .while_ or k == .block or k == .exprstmt or k == .assign or k == .return_
+    if not simple: return true
+    if oom_body_allocates(int(nodes[n].a)) or oom_body_allocates(int(nodes[n].b)) or oom_body_allocates(int(nodes[n].c)): return true
+    if k == .block:
+        loop child in kids(n):
+            if oom_body_allocates(child): return true
+    false
+
+
+oom_allocates = (n: int) -> bool:
+    # (a row that rules allocation out, its own or its scope's: the effect check proves the body
+    # allocates nothing)
+    if oom_row_excludes_alloc(oom_row(n)): return false
+    loop p in kids(n):
+        if not oom_fixed_type(int(nodes[p].a)): return true
+    if not has_flag(n, NF_VOID) and not oom_fixed_type(int(nodes[n].a)): return true
+    oom_body_allocates(int(nodes[n].b))
+
+
+oom_declarations = (n: int) -> int[]:
+    # (lifecycle hooks are proven not to allocate or fail: ownership.jo)
+    if not oom_active(nodes[n].pos) or nodes[n].kind != .fn_ or ownership_hooks.has(n) or not oom_allocates(n): return [n]
+    pos = nodes[n].pos
+    name = name_of(int(nodes[n].name))
+    inner = "__eaf_{name}"
+    w = mk(.fn_, pos)
+    nodes[w].name = nodes[n].name
+    # (the frame answers to the function's own row, as its body does)
+    nodes[w].sval = nodes[n].sval
+    nodes[n].name = i32(intern(inner))
+    if nkids2(n) > 0 and has_flag(n, NF_GENERIC):
+        type_params: int[]
+        loop tp in kids2(n): type_params.push(clone(tp))
+        set_list2(w, type_params)
+        add_flag(w, NF_GENERIC)
+    params: int[]
+    args: int[]
+    loop p in kids(n):
+        if nkids(p) > 0: fatal(nodes[p].pos, "under `$explicit_allocation_failure`, a parameter that unpacks its argument is not supported yet: unpack it in the body")
+        params.push(clone(p))
+        arg = mk(.ident, nodes[p].pos)
+        nodes[arg].name = nodes[p].name
+        nodes[arg].aux2 = 1
+        if has_flag(p, NF_MUT): add_flag(arg, NF_MUT)
+        args.push(arg)
+    set_list(w, params)
+    if let kinds = dewy_param_kinds.get(n): dewy_param_kinds[w] = kinds
+    # (the frame stands where the body does: in its scopes, with the row they give it)
+    at = if nodes[n].b != 0: nodes[int(nodes[n].b)].pos else: pos
+    failed = mk(.return_, at)
+    nodes[failed].a = i32(bc_ident("OutOfMemory", at))
+    call = bc_stmt(bc_call(inner, args, at), at)
+    body = 0
+    if target_wasm:
+        # (WebAssembly cannot return to a frame: a refusal there ends the program, and the
+        # function keeps its result type, so the program means the same everywhere)
+        body = bc_block([bc_if(bc_call("__oom_unsupported", [], at), [failed], [], at), call], at)
+    else:
+        frame = bc_call("__setjmp", [bc_call("__oom_frame", [], at)], at)
+        check = bc_if(bc_bin(.ne, frame, bc_int(0, at), at), [bc_stmt(bc_call("__oom_caught", [], at), at), failed], [], at)
+        release = mk(.defer_, at)
+        nodes[release].a = i32(bc_stmt(bc_call("__oom_release", [], at), at))
+        body = bc_block([check, release, call], at)
+    nodes[w].b = i32(body)
+    [w, n]
+
+
+oom_row = (n: int) -> int:
+    if nodes[n].sval != 0: return int(nodes[n].sval)
+    if not dir_rows_any: return 0
+    body = int(nodes[n].b)
+    p = if body != 0: nodes[body].pos else: nodes[n].pos
+    i = dir_find(dir_name_row, p)
+    if i < 0 or dir_scopes[i].value <= 0: return 0
+    dir_scopes[i].value
+
+
+oom_row_excludes_alloc = (row: int) -> bool:
+    if row <= 0 or row >= effect_syntax.len(): return false
+    positive = effect_syntax[row].len() == 0
+    loop entry in effect_syntax[row]:
+        if entry.variable: return false
+        if entry.kind == .alloc and entry.path.len() == 0: return entry.negative
+        if not entry.negative: positive = true
+    positive
+
+
+oom_wrap_all = (made: int[]) -> int[]:
+    out: int[]
+    loop d in made:
+        loop e in oom_declarations(d): out.push(e)
+    out

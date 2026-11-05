@@ -1,0 +1,132 @@
+$runtime_checks
+from p"ast.jo" import (NF_GENERIC NF_MUT NF_VOID add_flag clone dewy_param_kinds has_flag kids kids2 mk nkids nkids2 nodes set_list set_list2)
+from p"expr.jo" import (bc_bin bc_block bc_call bc_ident bc_if bc_int bc_stmt)
+from p"directives.jo" import (dir_find dir_name_row dir_rows_any dir_scopes)
+from p"effects.jo" import (effect_syntax)
+from p"util.jo" import (fatal intern name_of pos_file)
+from p"oom.jo" import (oom_files)
+from p"ownership.jo" import (ownership_hooks)
+from p"arena_ops.dewy" import (runtime_switch_on)
+from p"check.jo" import (target_wasm)
+# Direct recursive lowering; shared state has one owner in oom.jo.
+MoveWord:type=int64<overflow='wrap'>
+oom_module=(file:MoveWord pos:MoveWord):>void=>$unsafe {
+    if oom_files.has(file) {fatal(pos "`$explicit_allocation_failure` is already set for this module");}
+    oom_files[file] = true;
+    runtime_switch_on("__EXPLICIT_OOM");
+}
+oom_active=(pos:MoveWord):>bool=>$unsafe {
+    return oom_files.length >? 0 and oom_files.has(pos_file(pos))
+}
+oom_fixed_type=(t:MoveWord):>bool=>$unsafe {
+    if t =? 0 or (nodes.ptr[t].kind not=? 'ident' and nodes.ptr[t].kind not=? 'tname') {return false}
+    return name_of(MoveWord(nodes.ptr[t].name)) in? ["int8" "int16" "int32" "int64" "uint8" "uint16" "uint32" "uint64" "float32" "float64" "bool" "i8" "i16" "i32" "i64" "u8" "u16" "u32" "u64" "f32" "f64"]
+}
+oom_body_allocates=(n:MoveWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' or k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'break_' or k =? 'continue_' {return false}
+    if k =? 'vardecl' {
+        # (a value parameter's own binding, dewy_nodes.jo dw_finish_function, has its type)
+        if nodes.ptr[n].aux2 =? 1 {return false}
+        if nodes.ptr[n].a =? 0 or not oom_fixed_type(MoveWord(nodes.ptr[n].a)) {return true}
+        return oom_body_allocates(MoveWord(nodes.ptr[n].b))
+    }
+    let simple=k =? 'binary' or k =? 'unary' or k =? 'not_' or k =? 'and_' or k =? 'or_' or k =? 'if_' or k =? 'while_' or k =? 'block' or k =? 'exprstmt' or k =? 'assign' or k =? 'return_'
+    if not simple {return true}
+    if oom_body_allocates(MoveWord(nodes.ptr[n].a)) or oom_body_allocates(MoveWord(nodes.ptr[n].b)) or oom_body_allocates(MoveWord(nodes.ptr[n].c)) {return true}
+    if k =? 'block' {
+        loop child in kids(n) {
+            if oom_body_allocates(child) {return true}
+        }
+    }
+    return false
+}
+oom_allocates=(n:MoveWord):>bool=>$unsafe {
+    # (a row that rules allocation out, its own or its scope's: the effect check proves the body
+    # allocates nothing)
+    if oom_row_excludes_alloc(oom_row(n)) {return false}
+    loop p in kids(n) {
+        if not oom_fixed_type(MoveWord(nodes.ptr[p].a)) {return true}
+    }
+    if not has_flag(n NF_VOID) and not oom_fixed_type(MoveWord(nodes.ptr[n].a)) {return true}
+    return oom_body_allocates(MoveWord(nodes.ptr[n].b))
+}
+oom_declarations=(n:MoveWord):>array<int64>=>$unsafe {
+    # (lifecycle hooks are proven not to allocate or fail: ownership.jo)
+    if not oom_active(nodes.ptr[n].pos) or nodes.ptr[n].kind not=? 'fn_' or ownership_hooks.has(n) or not oom_allocates(n) {return [n]}
+    let pos=nodes.ptr[n].pos
+    let name=name_of(MoveWord(nodes.ptr[n].name))
+    let inner="__eaf_{name}"
+    let w=mk('fn_' pos)
+    nodes.ptr[w].name = nodes.ptr[n].name;
+    # (the frame answers to the function's own row, as its body does)
+    nodes.ptr[w].sval = nodes.ptr[n].sval;
+    nodes.ptr[n].name = int32<overflow='wrap'>(intern(inner));
+    if nkids2(n) >? 0 and has_flag(n NF_GENERIC) {
+        let type_params:array<int64>=[]
+        loop tp in kids2(n) {type_params.push(clone(tp));}
+        set_list2(w type_params);
+        add_flag(w NF_GENERIC);
+    }
+    let params:array<int64>=[]
+    let args:array<int64>=[]
+    loop p in kids(n) {
+        if nkids(p) >? 0 {fatal(nodes.ptr[p].pos "under `$explicit_allocation_failure`, a parameter that unpacks its argument is not supported yet: unpack it in the body");}
+        params.push(clone(p));
+        let arg=mk('ident' nodes.ptr[p].pos)
+        nodes.ptr[arg].name = nodes.ptr[p].name;
+        nodes.ptr[arg].aux2 = 1;
+        if has_flag(p NF_MUT) {add_flag(arg NF_MUT);}
+        args.push(arg);
+    }
+    set_list(w params);
+    let cached_kinds=dewy_param_kinds.get(n)
+    if cached_kinds not=? none {let kinds=cached_kinds;dewy_param_kinds[w] = kinds;}
+    # (the frame stands where the body does: in its scopes, with the row they give it)
+    let at=if nodes.ptr[n].b not=? 0 {nodes.ptr[MoveWord(nodes.ptr[n].b)].pos} else {pos}
+    let failed=mk('return_' at)
+    nodes.ptr[failed].a = int32<overflow='wrap'>(bc_ident("OutOfMemory" at));
+    let call=bc_stmt(bc_call(inner args at) at)
+    let body:MoveWord=0
+    if target_wasm {
+        # (WebAssembly cannot return to a frame: a refusal there ends the program, and the
+        # function keeps its result type, so the program means the same everywhere)
+        body=bc_block([bc_if(bc_call("__oom_unsupported" [] at) [failed] [] at) call] at)
+    }
+    else {
+        let frame=bc_call("__setjmp" [bc_call("__oom_frame" [] at)] at)
+        let check=bc_if(bc_bin('ne' frame bc_int(0 at) at) [bc_stmt(bc_call("__oom_caught" [] at) at) failed] [] at)
+        let release=mk('defer_' at)
+        nodes.ptr[release].a = int32<overflow='wrap'>(bc_stmt(bc_call("__oom_release" [] at) at));
+        body=bc_block([check release call] at)
+    }
+    nodes.ptr[w].b = int32<overflow='wrap'>(body);
+    return [w n]
+}
+oom_row=(n:MoveWord):>int64=>$unsafe {
+    if nodes.ptr[n].sval not=? 0 {return MoveWord(nodes.ptr[n].sval)}
+    if not dir_rows_any {return 0}
+    let body:MoveWord=MoveWord(nodes.ptr[n].b)
+    let p=if body not=? 0 {nodes.ptr[body].pos} else {nodes.ptr[n].pos}
+    let i=dir_find(dir_name_row p)
+    if i <? 0 or dir_scopes.ptr[i].value <=? 0 {return 0}
+    return dir_scopes.ptr[i].value
+}
+oom_row_excludes_alloc=(row:MoveWord):>bool=>$unsafe {
+    if row <=? 0 or row >=? effect_syntax.length {return false}
+    let positive=effect_syntax.ptr[row].length =? 0
+    loop entry in effect_syntax.ptr[row] {
+        if entry.variable {return false}
+        if entry.kind =? 'alloc' and entry.path.length =? 0 {return entry.negative}
+        if not entry.negative {positive=true}
+    }
+    return positive
+}
+oom_wrap_all=(made:array<int64>):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    loop d in made {
+        loop e in oom_declarations(d) {out.push(e);}
+    }
+    return out
+}
