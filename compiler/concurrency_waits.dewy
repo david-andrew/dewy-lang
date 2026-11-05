@@ -1,0 +1,107 @@
+$runtime_checks
+from p"effect_types.dewy" import (EffectAtom)
+from p"ast.jo" import (NF_EXTERN has_flag kid kid2 nkids nkids2 nodes)
+from p"effect_contracts.dewy" import (callable_contract)
+from p"concurrency_types.dewy" import (concurrency_transfer concurrency_why)
+from p"concurrency.jo" import (concurrency_block_memo parsafe_vouched)
+from p"effect_lattice.dewy" import (effect_allows)
+from p"effects.jo" import (effect_contracts)
+from p"effect_sources.dewy" import (effect_source_row)
+from p"util.jo" import (fatal files name_of pos_file)
+from p"check.jo" import (fns lib_dir modules)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"expr.jo" import (ntype)
+from p"ownership.jo" import (ownership_literal_print)
+from p"lower_helpers.dewy" import (value_helper_calls)
+# Demanded waiting-effect queries; shared state has one owner in concurrency.jo.
+WaitingWord:type=int64<overflow='wrap'>
+concurrency_fn_blocks=(f:WaitingWord):>bool=>$unsafe {
+    if concurrency_block_memo.has(f) {return concurrency_block_memo[f]}
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    let r=concurrency_blocks(f @seen)
+    if r {concurrency_block_memo[f] = true;}
+    else {
+        loop g in seen.keys() {concurrency_block_memo[g] = false;}
+    }
+    return r
+}
+concurrency_blocks=(f:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bool=>$unsafe {
+    if f <=? 0 or f >=? fns.length {return true}
+    if not sharing and concurrency_block_memo.has(f) {return concurrency_block_memo[f]}
+    if seen.has(f) {return false}
+    seen[f] = true;
+    let d:WaitingWord=WaitingWord(fns.ptr[f].decl)
+    if d =? 0 {return true}
+    if modules.ptr[WaitingWord(fns.ptr[f].mod)].is_prelude {
+        let name=name_of(WaitingWord(nodes.ptr[d].name))
+        # Blocking public boundaries. Fork-join is safe inline and is not a
+        # waiting-lane join. Its checked callbacks supply the obligations.
+        if fns.ptr[f].parallel_api {return false}
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/tasks.jo" {return true}
+        if name =? "sleep" or name =? "__sleep_ns" or name =? "read_file" or name =? "write_file" or name =? "read_line" or name =? "read_stdin" or name =? "print" or name =? "printl" or name =? "__print_str" or name =? "write" or name =? "flush" or name =? "__task_join" or name =? "__group_join" {return true}
+        # Runtime internals are trusted nonblocking unless classified here;
+        # raw syscalls/foreign code in user modules remain conservative.
+        # (a channel's waits are the waiting lane's: a parallel body must not wait on a sibling)
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/thread.jo" {return name =? "__chan_send_wait" or name =? "__chan_receive_wait"}
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/prelude/mpmc.jo" {return name =? "__mpmc_send_wait" or name =? "__mpmc_receive_wait"}
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/prelude/spsc.jo" {return name =? "__spsc_send_wait" or name =? "__spsc_receive_wait"}
+        # (the running task's state; its input operations wait)
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/task_core.jo" and name in? ["__task_slot" "__task_context" "__task_scope_canceled" "__task_canceled" "__task_shield_enter" "__task_shield_leave" "__task_file_code" "__task_file_begin" "__task_lock" "__task_unlock"] {return false}
+        if name.startswith("__fj_") {return false}
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/rt.jo" {return false}
+        if name =? "panic" {return false}
+    }
+    if has_flag(d NF_EXTERN) {return true}
+    if fns.ptr[f].body =? 0 {return true}
+    return concurrency_blocks_node(WaitingWord(fns.ptr[f].body) @seen sharing)
+}
+concurrency_blocks_node=(n:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if sharing and k =? 'ident' and nodes.ptr[n].aux =? int32(2) {
+        let held:dict<int64 bool>=dict<int64 bool>()
+        if not concurrency_transfer(ntype(n) @held true) {fatal(nodes.ptr[n].pos "shared global does not satisfy inferred Sync{concurrency_why()}");}
+    }
+    if ownership_literal_print(n) {return true}
+    if k =? 'lambda' or k =? 'fnref' or k =? 'partial' {return false}
+    if k =? 'parallel_region' {return concurrency_blocks_node(WaitingWord(nodes.ptr[n].a) @seen sharing)}
+    if k =? 'call' {
+        if nodes.ptr[n].aux =? 0 and concurrency_blocks(WaitingWord(nodes.ptr[n].sym) @seen sharing) {return true}
+        # (a callback parameter's callers check that what they give does not wait: parsafe)
+        if (nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4) and not parsafe_vouched(WaitingWord(nodes.ptr[n].a)) {
+            let contract=callable_contract(ntype(WaitingWord(nodes.ptr[n].a)))
+            if contract =? 0 {
+                contract=effect_source_row(WaitingWord(nodes.ptr[n].a))
+            }
+            if contract =? 0 or effect_allows(contract EffectAtom['block']) or effect_contracts.ptr[contract].atoms.contains(EffectAtom['opaque']) {return true}
+        }
+    }
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(9) {
+        # Clocks and process/affinity queries cannot wait on another task.
+        let op=if nkids(n) >? 0 {kid(n 0)} else {0}
+        let number=if op not=? 0 and nodes.ptr[op].kind =? 'int_lit' {nodes.ptr[op].ival} else {-1}
+        if number not=? 39 and number not=? 60 and number not=? 186 and number not=? 204 and number not=? 228 {return true}
+    }
+    loop f in value_helper_calls(n) {
+        if concurrency_blocks(f @seen sharing) {return true}
+    }
+    if k =? 'pair' and nodes.ptr[n].sym >? 0 and concurrency_blocks(WaitingWord(nodes.ptr[n].sym) @seen sharing) {return true}
+    let mask=isolation_children(k)
+    if mask <? 0 {return false}
+    if mask & 1 not=? 0 and concurrency_blocks_node(WaitingWord(nodes.ptr[n].a) @seen sharing) {return true}
+    if mask & 2 not=? 0 and concurrency_blocks_node(WaitingWord(nodes.ptr[n].b) @seen sharing) {return true}
+    if mask & 4 not=? 0 and concurrency_blocks_node(WaitingWord(nodes.ptr[n].c) @seen sharing) {return true}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {
+            let c=kid(n i)
+            if concurrency_blocks_node(c @seen sharing) {return true}
+        }
+    }
+    if mask & 32 not=? 0 {
+        loop i in [0..nkids2(n)) {
+            let c=kid2(n i)
+            if concurrency_blocks_node(c @seen sharing) {return true}
+        }
+    }
+    return false
+}

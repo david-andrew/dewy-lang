@@ -8,7 +8,6 @@ from p"ast.jo" import (NF_EXTERN has_flag nodes)
 from p"types.jo" import (T_VOID)
 from p"arena_ops.dewy" import (arena_capacity_exempt)
 from p"arena.jo" import (arena_fns)
-from p"concurrency.jo" import (concurrency_fn_blocks)
 from p"effect_lattice.dewy" import (effect_intern effect_top place_base)
 from p"effect_classifiers.dewy" import (effect_library_class)
 from p"exact.jo" import (exact_effect_owners)
@@ -20,6 +19,7 @@ from p"effect_contracts.dewy" import (effect_subst)
 from p"effect_control.dewy" import (effect_prepare)
 from p"effect_costs.dewy" import (effect_caller_obligation effect_library_summary effect_map_remove effect_signature_opaque)
 from p"effect_scan.dewy" import (effect_isolation_block effect_scan_node)
+from p"concurrency_waits.dewy" import (concurrency_fn_blocks)
 # Demanded effect graph execution; shared state has one owner in effects.jo.
 GraphWord:type=int64<overflow='wrap'>
 effect_graph_reset=(reuse_bodies:bool=false):>void=>$unsafe {
