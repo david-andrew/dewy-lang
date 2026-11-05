@@ -1,0 +1,389 @@
+$runtime_checks
+from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
+from p"effect_library.jo" import EffectClass
+from p"isolation.jo" import IsolationReason
+from p"effects.jo" import (EffectBody EffectDelta EffectEdge EffectEdgeKey EffectEventKey EffectSummary effect_blocks_demanded effect_bodies effect_body_cache effect_body_owner effect_body_panics effect_bounds_proven effect_caller_obligation effect_contracts effect_declared effect_event_index effect_exact_rep effect_final effect_footprints_only effect_for_marks effect_inference_busy effect_isolation_block effect_ix_locals effect_ix_nodes effect_library_summary effect_limit effect_map_remove effect_plain_cache effect_prepare effect_scan_node effect_seen effect_serial effect_share_cache effect_signature_opaque effect_solving effect_stack effect_stamps effect_subst effect_summaries effect_ticks effect_unavailable effect_value effect_value_cache)
+from p"check.jo" import (FK_INIT FK_LAMBDA FK_PARTIAL LF_MUTPARAM decl_info decl_infos fns locals)
+from p"ast.jo" import (NF_EXTERN has_flag nodes)
+from p"types.jo" import (T_VOID)
+from p"arena_ops.dewy" import (arena_capacity_exempt)
+from p"arena.jo" import (arena_fns)
+from p"concurrency.jo" import (concurrency_fn_blocks)
+from p"effect_lattice.dewy" import (effect_intern effect_top place_base)
+from p"effect_classifiers.dewy" import (effect_library_class)
+from p"exact.jo" import (exact_effect_owners)
+from p"expr.jo" import (is_fn_type)
+from p"places.jo" import (place_append)
+from p"refine.jo" import (representation_type)
+# Demanded effect graph execution; shared state has one owner in effects.jo.
+GraphWord:type=int64<overflow='wrap'>
+effect_graph_reset=(reuse_bodies:bool=false):>void=>$unsafe {
+    effect_footprints_only=false
+    if not reuse_bodies {
+        effect_bodies=dict<int64 EffectBody>()
+        effect_body_cache=false
+    }
+    effect_body_owner=0
+    effect_body_panics=[]
+    # Discharging bounds changes no write, use or declaration site.
+    if not reuse_bodies {
+        effect_ix_nodes=0
+        effect_ix_locals=0
+    }
+    effect_limit=fns.length
+    effect_summaries=fill(EffectSummary[] effect_limit)
+    effect_seen=fill(0 nodes.length)
+    effect_event_index=dict<EffectEventKey bool>()
+    if not reuse_bodies {
+        effect_for_marks=dict<int64 array<int64>>()
+        effect_plain_cache=dict<int64 bool>()
+        effect_share_cache=dict<int64 bool>()
+        effect_value_cache=dict<int64 bool>()
+    }
+    effect_stack=[]
+    effect_serial=0
+}
+effect_function_row=(f:GraphWord):>int64=>$unsafe {
+    if effect_footprints_only {
+        # An indirect row discovered during footprint solving is conservatively
+        # opaque; never reset the active Tarjan stack. Contract roots ask again
+        # outside that traversal and receive the full graph.
+        if effect_stack.length >? 0 {return effect_top()}
+        effect_graph_reset();
+    }
+    if f <=? 0 or f >=? fns.length {return effect_top()}
+    if not effect_final and not effect_solving {
+        if effect_inference_busy {return effect_top()}
+        effect_inference_busy=true
+        let seen:array<int64>=[]
+        effect_prepare(f @seen 0);
+        effect_inference_busy=false
+        effect_graph_reset();
+    }
+    if f >=? effect_limit {return effect_top()}
+    if effect_summaries.ptr[f].index =? 0 {
+        let previous=effect_solving
+        effect_solving=true
+        effect_visit(f);
+        effect_solving=previous
+    }
+    if not effect_summaries.ptr[f].done {return effect_top()}
+    let atoms:array<EffectAtom>=[]
+    loop event in effect_summaries.ptr[f].events {
+        let atom=event.atom
+        let base=place_base(atom.place)
+        if base.root =? 'formal' {
+            if base.owner not=? f {return effect_top()}
+            atom.place = place_append(PlaceIdentity['formal' 0 base.declaration] atom.place);
+        }
+        atoms.push(atom);
+    }
+    let exclusions:array<EffectAtom>=[]
+    if effect_blocks_demanded and not concurrency_fn_blocks(f) {exclusions.push(EffectAtom['block']);}
+    return effect_intern(atoms exclusions)
+}
+# A place atom of a read or write: the kinds a summary may widen to a root.
+effect_place_atom=(a:EffectAtom):>bool=>$unsafe {
+    return (a.kind =? 'read' or a.kind =? 'write') and a.place.declaration not=? 0
+}
+effect_restamp=(f:GraphWord):>void=>$unsafe {
+    effect_ticks = GraphWord(effect_ticks) + 1;
+    effect_summaries.ptr[f].changed_at = effect_ticks;
+    effect_stamps = GraphWord(effect_stamps) + 1;
+    effect_summaries.ptr[f].stamp = effect_stamps;
+    loop old in effect_summaries.ptr[f].events {effect_event_index[EffectEventKey[effect_stamps old.atom]] = true;}
+}
+effect_add=(f:GraphWord event:EffectEvent):>bool=>$unsafe {
+    if effect_footprints_only {
+        let kind=event.atom.kind
+        if kind =? 'opaque' or kind =? 'escape' {effect_summaries.ptr[f].footprint_opaque = true;}
+        else if kind not=? 'write' and kind not=? 'remainder' {return false}
+    }
+    if f =? effect_body_owner and event.atom.kind =? 'panic' {effect_body_panics.push(event);}
+    # (allocation proven within an arena's acquired capacity is not hidden: arena.jo)
+    if arena_fns.length >? 0 and arena_capacity_exempt(event) {return false}
+    let covered=effect_place_atom(event.atom)
+    let root=if covered {place_base(event.atom.place)} else {event.atom.place}
+    if effect_summaries.ptr[f].stamp =? 0 {
+        effect_stamps = GraphWord(effect_stamps) + 1;
+        effect_summaries.ptr[f].stamp = effect_stamps;
+    }
+    let stamp=effect_summaries.ptr[f].stamp
+    if effect_event_index.has(EffectEventKey[stamp event.atom]) {return false}
+    if effect_summaries.ptr[f].capped {return false}
+    # (a whole-root event already covers its fields)
+    if covered and effect_event_index.has(EffectEventKey[stamp EffectAtom[event.atom.kind root]]) {return false}
+    # (the one placeless possible failure takes no room: discharging it never
+    # changes how the summary widens)
+    let budget:GraphWord=32
+    if effect_summaries.ptr[f].events.length >=? 32 and (event.atom.kind =? 'panic' or effect_event_index.has(EffectEventKey[stamp EffectAtom['panic']])) {budget=33}
+    if effect_summaries.ptr[f].events.length >=? budget {
+        # Past the budget every place event widens to its whole root, still an
+        # upper bound: a kernel touching many fields of one record stays exact
+        # about which records it reads and writes.
+        let kept:array<EffectEvent>=[]
+        loop old0 in effect_summaries.ptr[f].events {
+            let old=old0
+            if effect_place_atom(old.atom) {old.atom.place = place_base(old.atom.place);}
+            let seen=false
+            loop k in kept {
+                if k.atom =? old.atom {seen=true}
+            }
+            if not seen {kept.push(old);}
+        }
+        let wide=event
+        if covered {wide.atom.place = root;}
+        loop k in kept {
+            if k.atom =? wide.atom {
+                effect_summaries.ptr[f].events = kept;
+                effect_restamp(f);
+                return true
+            }
+        }
+        if kept.length <? budget {
+            kept.push(wide);
+            effect_summaries.ptr[f].events = kept;
+            effect_restamp(f);
+            return true
+        }
+        effect_summaries.ptr[f].events = kept;
+        effect_restamp(f);
+        effect_summaries.ptr[f].capped = true;
+        loop old in effect_summaries.ptr[f].events {
+            if old.atom.kind =? 'opaque' {return false}
+        }
+        effect_summaries.ptr[f].events.push(EffectEvent[EffectAtom['opaque'] event.witness event.via]);
+        effect_event_index[EffectEventKey[effect_summaries.ptr[f].stamp EffectAtom['opaque']]] = true;
+        return true
+    }
+    effect_summaries.ptr[f].events.push(event);
+    effect_event_index[EffectEventKey[stamp event.atom]] = true;
+    effect_ticks = GraphWord(effect_ticks) + 1;
+    effect_summaries.ptr[f].changed_at = effect_ticks;
+    return true
+}
+effect_opaque=(f:GraphWord n:GraphWord):>bool=>$unsafe {
+    return effect_add(f EffectEvent[EffectAtom['opaque'] n])
+}
+effect_edge_event=(f:GraphWord edge:EffectEdge event0:EffectEvent):>EffectEvent=>$unsafe {
+    let event=event0
+    event.via = edge.origin;
+    event.via_fn = edge.callee;
+    let p=event.atom.place
+    let base=place_base(p)
+    if base.root =? 'formal' {
+        let i:GraphWord=GraphWord(base.declaration) - 1
+        if base.owner not=? edge.callee or i <? 0 or i >=? edge.actuals.length {event.atom = EffectAtom['opaque'];}
+        else {
+            let actual=edge.actuals.ptr[i]
+            if actual.declaration =? 0 {event.atom = EffectAtom['opaque'];}
+            else {
+                event.atom.place = place_append(actual p);
+                if event.atom.place.declaration =? 0 {event.atom = EffectAtom['opaque'];}
+            }
+        }
+    }
+    return event
+}
+# A declared closed row is the contract callers see, not the body's narrower inferred
+# row: a caller is checked against what the callee may do, as declared. Open (negative
+# only) rows and rows with variables still left open show the inferred events.
+effect_declared_row=(g:GraphWord):>int64=>$unsafe {
+    let known=effect_declared.get(g)
+    if known not=? none {return known}
+    let c:GraphWord=0
+    let d:GraphWord=GraphWord(fns.ptr[g].decl)
+    if d not=? 0 and nodes.ptr[d].sval not=? 0 and fns.ptr[g].kind not=? FK_LAMBDA and nodes.ptr[d].kind =? 'fn_' {
+        let k=effect_subst(GraphWord(decl_infos.ptr[decl_info(d)].sig.contract) fns.ptr[g].targs)
+        if k not=? 0 and not effect_contracts.ptr[k].open and effect_contracts.ptr[k].variables.length =? 0 {c=k}
+    }
+    effect_declared[g] = c;
+    return c
+}
+effect_unique_edges=(f:GraphWord):>void=>$unsafe {
+    let seen:dict<EffectEdgeKey bool>=dict<EffectEdgeKey bool>()
+    let unique:array<int64>=[]
+    let edges=effect_summaries.ptr[f].edges
+    loop i in [0..edges.length) {
+        let key=EffectEdgeKey[edges.ptr[i].callee edges.ptr[i].actuals]
+        if seen.has(key) {continue}
+        seen[key] = true;
+        unique.push(i);
+    }
+    effect_summaries.ptr[f].unique = unique;
+    effect_summaries.ptr[f].deltas = fill(EffectDelta[] unique.length);
+    effect_summaries.ptr[f].unique_ready = true;
+}
+# Re-propagating f is a no-op when no callee changed since f's last pass:
+# every re-offered atom is already present, covered by its root, or capped.
+effect_stale=(f:GraphWord):>bool=>$unsafe {
+    if effect_summaries.ptr[f].propagated_at =? 0 {return true}
+    let since=effect_summaries.ptr[f].propagated_at
+    loop i in effect_summaries.ptr[f].unique {
+        let g=effect_summaries.ptr[f].edges.ptr[i].callee
+        if g >? 0 and g <? effect_limit and effect_summaries.ptr[g].changed_at >? since {return true}
+    }
+    return false
+}
+# Append-only generations offer each (edge, event) once. A widened callee
+# replays its new row, preserving the original order and first witnesses.
+# O(unique edges + newly offered events) per active SCC pass; O(unique edges)
+# cursor storage, allocated only when a demanded summary first propagates.
+effect_propagate=(f:GraphWord):>bool=>$unsafe {
+    if not effect_summaries.ptr[f].unique_ready {effect_unique_edges(f);}
+    if not effect_stale(f) {return false}
+    effect_ticks = GraphWord(effect_ticks) + 1;
+    effect_summaries.ptr[f].propagated_at = effect_ticks;
+    let changed=false
+    loop di in [0..effect_summaries.ptr[f].unique.length) {
+        let delta=effect_summaries.ptr[f].deltas.ptr[di]
+        # A closed declared row or an unavailable callee has no later delta.
+        if delta.end <? 0 {continue}
+        let index=effect_summaries.ptr[f].unique.ptr[di]
+        let edge=effect_summaries.ptr[f].edges.ptr[index]
+        let g=edge.callee
+        if g <=? 0 or g >=? effect_limit {
+            if effect_add(f EffectEvent[EffectAtom['opaque'] edge.origin]) {changed=true}
+            effect_summaries.ptr[f].deltas.ptr[di].end = -1;
+            continue
+        }
+        let declared=effect_declared_row(g)
+        if declared not=? 0 {
+            let d:GraphWord=GraphWord(fns.ptr[g].decl)
+            loop atom0 in effect_contracts.ptr[declared].atoms {
+                let atom=atom0
+                if atom.place.root =? 'formal' {
+                    let base=place_base(atom.place)
+                    atom.place = place_append(PlaceIdentity['formal' g base.declaration] atom.place);
+                }
+                let e=effect_edge_event(f edge EffectEvent[atom d])
+                if (e.atom.kind =? 'read' or e.atom.kind =? 'write') and e.atom.place.declaration not=? 0 and e.atom.place.root =? 'local' {continue}
+                if effect_add(f e) {changed=true}
+            }
+            effect_summaries.ptr[f].deltas.ptr[di].end = -1;
+            continue
+        # Snapshot both row and generation: a self-edge can append or widen
+        # this same summary while it is consumed. The next pass sees the delta.
+        }
+        let stamp=effect_summaries.ptr[g].stamp
+        let events=effect_summaries.ptr[g].events
+        let first=if delta.stamp =? stamp {delta.end} else {0}
+        loop ei in [first..events.length) {
+            let event=events.ptr[ei]
+            if event.atom.kind =? 'panic' {
+                if delta.obligation <? 0 {delta.obligation = int64(effect_caller_obligation(edge.origin));}
+                if delta.obligation =? 1 {continue}
+            }
+            let e=effect_edge_event(f edge event)
+            if (e.atom.kind =? 'read' or e.atom.kind =? 'write') and e.atom.place.declaration not=? 0 and e.atom.place.root =? 'local' {continue}
+            if effect_add(f e) {changed=true}
+        }
+        delta.stamp = stamp;
+        delta.end = events.length;
+        effect_summaries.ptr[f].deltas.ptr[di] = delta;
+    }
+    return changed
+}
+# (its opaque conditions imply effect_signature_opaque's)
+effect_visit=(f:GraphWord):>void=>$unsafe {
+    effect_serial = GraphWord(effect_serial) + 1;
+    effect_summaries.ptr[f].index = effect_serial;
+    effect_summaries.ptr[f].low = effect_serial;
+    effect_stack.push(f);
+    effect_summaries.ptr[f].footprint_only = effect_footprints_only;
+    if effect_footprints_only and effect_signature_opaque(f) {
+        # Numeric consumers already forget every exposed root for this row.
+        # Its body and callee graph cannot change that answer. Full contracts
+        # request a fresh full graph; isolation uses its own syntax fallback.
+        effect_opaque(f GraphWord(fns.ptr[f].decl));
+    }
+    else {
+    let cached_body=effect_bodies.get(f)
+    if cached_body not=? none {
+        let body=cached_body
+        effect_summaries.ptr[f].edges = body.edges;
+        effect_summaries.ptr[f].isolation = body.isolation;
+        effect_summaries.ptr[f].isolation_witness = body.witness;
+        loop event in body.events {
+            if event.atom.kind not=? 'panic' {effect_add(f event);}
+        }
+        loop event in body.panics {
+            if not effect_bounds_proven.has(event.witness) {effect_add(f event);}
+        }
+    }
+    else {
+        let old_owner=effect_body_owner
+        let old_panics=effect_body_panics
+        if effect_body_cache {
+            effect_body_owner=f
+            effect_body_panics=[]
+        }
+        let d:GraphWord=GraphWord(fns.ptr[f].decl)
+        # (a foreign function is opaque unless it declares a closed row, which is
+        # trusted: the claim its unsafe callers rely on)
+        let trusted=d not=? 0 and has_flag(d NF_EXTERN) and effect_declared_row(f) not=? 0
+        if effect_blocks_demanded and not trusted and concurrency_fn_blocks(f) {effect_add(f EffectEvent[EffectAtom['block'] d]);}
+        let library=effect_library_class(f)
+        if effect_footprints_only and effect_map_remove(f) {
+            effect_add(f EffectEvent[EffectAtom['write' PlaceIdentity['formal' f 1]] d]);
+        }
+        else if library not=? EffectClass.unclassified {effect_library_summary(f library d);}
+        else if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 or fns.ptr[f].kind =? FK_INIT or (d not=? 0 and has_flag(d NF_EXTERN)) or effect_unavailable.has(f) {
+            if not trusted {effect_opaque(f d);}
+            effect_isolation_block(f IsolationReason.unavailable d);
+        }
+        else {
+            if fns.ptr[f].caps.length not=? 0 or fns.ptr[f].kind =? FK_PARTIAL {
+                effect_opaque(f GraphWord(fns.ptr[f].body));
+                effect_isolation_block(f IsolationReason.capture GraphWord(fns.ptr[f].body));
+            }
+            if fns.ptr[f].cabi {effect_opaque(f d);}
+            if not effect_value(GraphWord(fns.ptr[f].ret)) and GraphWord(fns.ptr[f].ret) not=? T_VOID {effect_opaque(f d);}
+            loop i in [0..fns.ptr[f].params.length) {
+                let l=fns.ptr[f].params.ptr[i]
+                let t=representation_type(GraphWord(locals.ptr[l].type))
+                if GraphWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 and not effect_value(t) and not is_fn_type(t) {effect_opaque(f d);}
+            }
+            let previous_exact=effect_exact_rep
+            effect_exact_rep=f <? exact_effect_owners.length and exact_effect_owners.ptr[f]
+            effect_scan_node(f GraphWord(fns.ptr[f].body));
+            effect_exact_rep=previous_exact
+        }
+        if effect_body_cache {
+            let direct=effect_summaries.ptr[f]
+            if not direct.capped and direct.events.length <? 32 {effect_bodies[f] = EffectBody[direct.events effect_body_panics direct.edges direct.isolation direct.isolation_witness];}
+            effect_body_owner=old_owner
+            effect_body_panics=old_panics
+    # An opaque footprint already invalidates every exposed root. No edge
+    # or remaining body can refine that answer; full effect users rebuild.
+        }
+    }
+    }
+    if effect_footprints_only and effect_summaries.ptr[f].footprint_opaque {effect_summaries.ptr[f].edges = [];}
+    loop edge in effect_summaries.ptr[f].edges {
+        let g=edge.callee
+        if g <=? 0 or g >=? effect_limit {continue}
+        if effect_summaries.ptr[g].index =? 0 {
+            effect_visit(g);
+            if not effect_summaries.ptr[g].done {effect_summaries.ptr[f].low = min(effect_summaries.ptr[f].low effect_summaries.ptr[g].low);}
+        }
+        else if not effect_summaries.ptr[g].done {effect_summaries.ptr[f].low = min(effect_summaries.ptr[f].low effect_summaries.ptr[g].index);}
+    }
+    if effect_summaries.ptr[f].low not=? effect_summaries.ptr[f].index {return}
+    let start:GraphWord=GraphWord(effect_stack.length) - 1
+    loop effect_stack.ptr[start] not=? f {start -= 1;}
+    # Substitute on EVERY edge, including backedges, until this component is
+    # settled. Bounded region sets/projection depth ensure monotone termination.
+    # (a member whose callees did not change since its last pass is skipped)
+    loop true {
+        let changed=false
+        loop i in [start..effect_stack.length) {
+            if effect_propagate(effect_stack.ptr[i]) {changed=true}
+        }
+        if not changed {break}
+    }
+    loop effect_stack.length >? start {
+        let g=effect_stack.pop()
+        effect_summaries.ptr[g].done = true;
+    }
+}

@@ -1,0 +1,342 @@
+# Frozen effect graph execution from effects.jo.
+use 'effect_types.dewy'
+use 'effects.jo'
+use 'check.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'arena_ops.dewy'
+use 'arena.jo'
+use 'concurrency.jo'
+use 'effect_lattice.dewy'
+use 'effect_classifiers.dewy'
+use 'exact.jo'
+use 'expr.jo'
+use 'places.jo'
+use 'refine.jo'
+
+effect_graph_reset = (reuse_bodies: bool = false):
+    effect_footprints_only = false
+    if not reuse_bodies:
+        effect_bodies = {}
+        effect_body_cache = false
+    effect_body_owner = 0
+    effect_body_panics = []
+    # Discharging bounds changes no write, use or declaration site.
+    if not reuse_bodies:
+        effect_ix_nodes = 0
+        effect_ix_locals = 0
+    effect_limit = fns.len()
+    effect_summaries = fill(EffectSummary(), effect_limit)
+    effect_seen = fill(0, nodes.len())
+    effect_event_index = {}
+    if not reuse_bodies:
+        effect_for_marks = {}
+        effect_plain_cache = {}
+        effect_share_cache = {}
+        effect_value_cache = {}
+    effect_stack = []
+    effect_serial = 0
+
+
+effect_function_row = (f: int) -> int:
+    if effect_footprints_only:
+        # An indirect row discovered during footprint solving is conservatively
+        # opaque; never reset the active Tarjan stack. Contract roots ask again
+        # outside that traversal and receive the full graph.
+        if effect_stack.len() > 0: return effect_top()
+        effect_graph_reset()
+    if f <= 0 or f >= fns.len(): return effect_top()
+    if not effect_final and not effect_solving:
+        if effect_inference_busy: return effect_top()
+        effect_inference_busy = true
+        seen: int[]
+        effect_prepare(f, seen, 0)
+        effect_inference_busy = false
+        effect_graph_reset()
+    if f >= effect_limit: return effect_top()
+    if effect_summaries[f].index == 0:
+        previous = effect_solving
+        effect_solving = true
+        effect_visit(f)
+        effect_solving = previous
+    if not effect_summaries[f].done: return effect_top()
+    atoms: EffectAtom[]
+    loop event in effect_summaries[f].events:
+        atom = event.atom
+        base = place_base(atom.place)
+        if base.root == .formal:
+            if base.owner != f: return effect_top()
+            atom.place = place_append(PlaceIdentity(.formal, 0, base.declaration), atom.place)
+        atoms.push(atom)
+    exclusions: EffectAtom[]
+    if effect_blocks_demanded and not concurrency_fn_blocks(f): exclusions.push(EffectAtom(.block))
+    effect_intern(atoms, exclusions)
+
+
+# A place atom of a read or write: the kinds a summary may widen to a root.
+effect_place_atom = (a: EffectAtom) -> bool: (a.kind == .read or a.kind == .write) and a.place.declaration != 0
+
+
+effect_restamp = (f: int):
+    effect_ticks += 1
+    effect_summaries[f].changed_at = effect_ticks
+    effect_stamps += 1
+    effect_summaries[f].stamp = effect_stamps
+    loop old in effect_summaries[f].events: effect_event_index[EffectEventKey(effect_stamps, old.atom)] = true
+
+
+effect_add = (f: int, event: EffectEvent) -> bool:
+    if effect_footprints_only:
+        kind = event.atom.kind
+        if kind == .opaque or kind == .escape: effect_summaries[f].footprint_opaque = true
+        else if kind != .write and kind != .remainder: return false
+    if f == effect_body_owner and event.atom.kind == .panic: effect_body_panics.push(event)
+    # (allocation proven within an arena's acquired capacity is not hidden: arena.jo)
+    if arena_fns.len() > 0 and arena_capacity_exempt(event): return false
+    covered = effect_place_atom(event.atom)
+    root = if covered: place_base(event.atom.place) else: event.atom.place
+    if effect_summaries[f].stamp == 0:
+        effect_stamps += 1
+        effect_summaries[f].stamp = effect_stamps
+    stamp = effect_summaries[f].stamp
+    if effect_event_index.has(EffectEventKey(stamp, event.atom)): return false
+    if effect_summaries[f].capped: return false
+    # (a whole-root event already covers its fields)
+    if covered and effect_event_index.has(EffectEventKey(stamp, EffectAtom(event.atom.kind, root))): return false
+    # (the one placeless possible failure takes no room: discharging it never
+    # changes how the summary widens)
+    budget = 32
+    if effect_summaries[f].events.len() >= 32 and (event.atom.kind == .panic or effect_event_index.has(EffectEventKey(stamp, EffectAtom(.panic)))): budget = 33
+    if effect_summaries[f].events.len() >= budget:
+        # Past the budget every place event widens to its whole root, still an
+        # upper bound: a kernel touching many fields of one record stays exact
+        # about which records it reads and writes.
+        kept: EffectEvent[]
+        loop old0 in effect_summaries[f].events:
+            old = old0
+            if effect_place_atom(old.atom): old.atom.place = place_base(old.atom.place)
+            seen = false
+            loop k in kept:
+                if k.atom == old.atom: seen = true
+            if not seen: kept.push(old)
+        wide = event
+        if covered: wide.atom.place = root
+        loop k in kept:
+            if k.atom == wide.atom:
+                effect_summaries[f].events = kept
+                effect_restamp(f)
+                return true
+        if kept.len() < budget:
+            kept.push(wide)
+            effect_summaries[f].events = kept
+            effect_restamp(f)
+            return true
+        effect_summaries[f].events = kept
+        effect_restamp(f)
+        effect_summaries[f].capped = true
+        loop old in effect_summaries[f].events:
+            if old.atom.kind == .opaque: return false
+        effect_summaries[f].events.push(EffectEvent(EffectAtom(.opaque), event.witness, event.via))
+        effect_event_index[EffectEventKey(effect_summaries[f].stamp, EffectAtom(.opaque))] = true
+        return true
+    effect_summaries[f].events.push(event)
+    effect_event_index[EffectEventKey(stamp, event.atom)] = true
+    effect_ticks += 1
+    effect_summaries[f].changed_at = effect_ticks
+    true
+
+
+effect_opaque = (f: int, n: int): effect_add(f, EffectEvent(EffectAtom(.opaque), n))
+
+
+effect_edge_event = (f: int, edge: EffectEdge, event0: EffectEvent) -> EffectEvent:
+    event = event0
+    event.via = edge.origin
+    event.via_fn = edge.callee
+    p = event.atom.place
+    base = place_base(p)
+    if base.root == .formal:
+        i = base.declaration - 1
+        if base.owner != edge.callee or i < 0 or i >= edge.actuals.len(): event.atom = EffectAtom(.opaque)
+        else:
+            actual = edge.actuals[i]
+            if actual.declaration == 0: event.atom = EffectAtom(.opaque)
+            else:
+                event.atom.place = place_append(actual, p)
+                if event.atom.place.declaration == 0: event.atom = EffectAtom(.opaque)
+    event
+
+
+# A declared closed row is the contract callers see, not the body's narrower inferred
+# row: a caller is checked against what the callee may do, as declared. Open (negative
+# only) rows and rows with variables still left open show the inferred events.
+effect_declared_row = (g: int) -> int:
+    if let known = effect_declared.get(g): return known
+    c = 0
+    d = int(fns[g].decl)
+    if d != 0 and nodes[d].sval != 0 and fns[g].kind != FK_LAMBDA and nodes[d].kind == .fn_:
+        k = effect_subst(int(decl_infos[decl_info(d)].sig.contract), fns[g].targs)
+        if k != 0 and not effect_contracts[k].open and effect_contracts[k].variables.len() == 0: c = k
+    effect_declared[g] = c
+    c
+
+
+effect_unique_edges = (f: int):
+    seen: {EffectEdgeKey: bool} = {}
+    unique: int[]
+    edges = effect_summaries[f].edges
+    loop i in [0..edges.len()):
+        key = EffectEdgeKey(edges[i].callee, edges[i].actuals)
+        if seen.has(key): continue
+        seen[key] = true
+        unique.push(i)
+    effect_summaries[f].unique = unique
+    effect_summaries[f].deltas = fill(EffectDelta(), unique.len())
+    effect_summaries[f].unique_ready = true
+
+
+# Re-propagating f is a no-op when no callee changed since f's last pass:
+# every re-offered atom is already present, covered by its root, or capped.
+effect_stale = (f: int) -> bool:
+    if effect_summaries[f].propagated_at == 0: return true
+    since = effect_summaries[f].propagated_at
+    loop i in effect_summaries[f].unique:
+        g = effect_summaries[f].edges[i].callee
+        if g > 0 and g < effect_limit and effect_summaries[g].changed_at > since: return true
+    false
+
+
+# Append-only generations offer each (edge, event) once. A widened callee
+# replays its new row, preserving the original order and first witnesses.
+# O(unique edges + newly offered events) per active SCC pass; O(unique edges)
+# cursor storage, allocated only when a demanded summary first propagates.
+effect_propagate = (f: int) -> bool:
+    if not effect_summaries[f].unique_ready: effect_unique_edges(f)
+    if not effect_stale(f): return false
+    effect_ticks += 1
+    effect_summaries[f].propagated_at = effect_ticks
+    changed = false
+    loop di in [0..effect_summaries[f].unique.len()):
+        delta = effect_summaries[f].deltas[di]
+        # A closed declared row or an unavailable callee has no later delta.
+        if delta.end < 0: continue
+        index = effect_summaries[f].unique[di]
+        edge = effect_summaries[f].edges[index]
+        g = edge.callee
+        if g <= 0 or g >= effect_limit:
+            if effect_add(f, EffectEvent(EffectAtom(.opaque), edge.origin)): changed = true
+            effect_summaries[f].deltas[di].end = -1
+            continue
+        declared = effect_declared_row(g)
+        if declared != 0:
+            d = int(fns[g].decl)
+            loop atom0 in effect_contracts[declared].atoms:
+                atom = atom0
+                if atom.place.root == .formal:
+                    base = place_base(atom.place)
+                    atom.place = place_append(PlaceIdentity(.formal, g, base.declaration), atom.place)
+                e = effect_edge_event(f, edge, EffectEvent(atom, d))
+                if (e.atom.kind == .read or e.atom.kind == .write) and e.atom.place.declaration != 0 and e.atom.place.root == .local: continue
+                if effect_add(f, e): changed = true
+            effect_summaries[f].deltas[di].end = -1
+            continue
+        # Snapshot both row and generation: a self-edge can append or widen
+        # this same summary while it is consumed. The next pass sees the delta.
+        stamp = effect_summaries[g].stamp
+        events = effect_summaries[g].events
+        first = if delta.stamp == stamp: delta.end else: 0
+        loop ei in [first..events.len()):
+            event = events[ei]
+            if event.atom.kind == .panic:
+                if delta.obligation < 0: delta.obligation = int(effect_caller_obligation(edge.origin))
+                if delta.obligation == 1: continue
+            e = effect_edge_event(f, edge, event)
+            if (e.atom.kind == .read or e.atom.kind == .write) and e.atom.place.declaration != 0 and e.atom.place.root == .local: continue
+            if effect_add(f, e): changed = true
+        delta.stamp = stamp
+        delta.end = events.len()
+        effect_summaries[f].deltas[di] = delta
+    changed
+
+
+# (its opaque conditions imply effect_signature_opaque's)
+effect_visit = (f: int):
+    effect_serial += 1
+    effect_summaries[f].index = effect_serial
+    effect_summaries[f].low = effect_serial
+    effect_stack.push(f)
+    effect_summaries[f].footprint_only = effect_footprints_only
+    if effect_footprints_only and effect_signature_opaque(f):
+        # Numeric consumers already forget every exposed root for this row.
+        # Its body and callee graph cannot change that answer. Full contracts
+        # request a fresh full graph; isolation uses its own syntax fallback.
+        effect_opaque(f, int(fns[f].decl))
+    else if let body = effect_bodies.get(f):
+        effect_summaries[f].edges = body.edges
+        effect_summaries[f].isolation = body.isolation
+        effect_summaries[f].isolation_witness = body.witness
+        loop event in body.events:
+            if event.atom.kind != .panic: effect_add(f, event)
+        loop event in body.panics:
+            if not effect_bounds_proven.has(event.witness): effect_add(f, event)
+    else:
+        old_owner = effect_body_owner
+        old_panics = effect_body_panics
+        if effect_body_cache:
+            effect_body_owner = f
+            effect_body_panics = []
+        d = int(fns[f].decl)
+        # (a foreign function is opaque unless it declares a closed row, which is
+        # trusted: the claim its unsafe callers rely on)
+        trusted = d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0
+        if effect_blocks_demanded and not trusted and concurrency_fn_blocks(f): effect_add(f, EffectEvent(EffectAtom(.block), d))
+        library = effect_library_class(f)
+        if effect_footprints_only and effect_map_remove(f):
+            effect_add(f, EffectEvent(EffectAtom(.write, PlaceIdentity(.formal, f, 1)), d))
+        else if library != .unclassified: effect_library_summary(f, library, d)
+        else if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)) or effect_unavailable.has(f):
+            if not trusted: effect_opaque(f, d)
+            effect_isolation_block(f, .unavailable, d)
+        else:
+            if fns[f].caps.len() != 0 or fns[f].kind == FK_PARTIAL:
+                effect_opaque(f, int(fns[f].body))
+                effect_isolation_block(f, .capture, int(fns[f].body))
+            if fns[f].cabi: effect_opaque(f, d)
+            if not effect_value(int(fns[f].ret)) and int(fns[f].ret) != T_VOID: effect_opaque(f, d)
+            loop i in [0..fns[f].params.len()):
+                l = fns[f].params[i]
+                t = representation_type(int(locals[l].type))
+                if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_value(t) and not is_fn_type(t): effect_opaque(f, d)
+            previous_exact = effect_exact_rep
+            effect_exact_rep = f < exact_effect_owners.len() and exact_effect_owners[f]
+            effect_scan_node(f, int(fns[f].body))
+            effect_exact_rep = previous_exact
+        if effect_body_cache:
+            direct = effect_summaries[f]
+            if not direct.capped and direct.events.len() < 32: effect_bodies[f] = EffectBody(direct.events, effect_body_panics, direct.edges, direct.isolation, direct.isolation_witness)
+            effect_body_owner = old_owner
+            effect_body_panics = old_panics
+    # An opaque footprint already invalidates every exposed root. No edge
+    # or remaining body can refine that answer; full effect users rebuild.
+    if effect_footprints_only and effect_summaries[f].footprint_opaque: effect_summaries[f].edges = []
+    loop edge in effect_summaries[f].edges:
+        g = edge.callee
+        if g <= 0 or g >= effect_limit: continue
+        if effect_summaries[g].index == 0:
+            effect_visit(g)
+            if not effect_summaries[g].done: effect_summaries[f].low = min(effect_summaries[f].low, effect_summaries[g].low)
+        else if not effect_summaries[g].done: effect_summaries[f].low = min(effect_summaries[f].low, effect_summaries[g].index)
+    if effect_summaries[f].low != effect_summaries[f].index: return
+    start = effect_stack.len() - 1
+    loop effect_stack[start] != f: start -= 1
+    # Substitute on EVERY edge, including backedges, until this component is
+    # settled. Bounded region sets/projection depth ensure monotone termination.
+    # (a member whose callees did not change since its last pass is skipped)
+    loop true:
+        changed = false
+        loop i in [start..effect_stack.len()):
+            if effect_propagate(effect_stack[i]): changed = true
+        if not changed: break
+    loop effect_stack.len() > start:
+        g = effect_stack.pop()
+        effect_summaries[g].done = true
