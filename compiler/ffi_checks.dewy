@@ -1,0 +1,83 @@
+$runtime_checks
+from p"ast.jo" import (NF_EXTERN has_flag kid nodes)
+from p"types.jo" import (T_MATH_INT T_VOID dt fields prune structs tkind types)
+from p"check.jo" import (check_struct_fields fns)
+from p"directives.jo" import (dir_scopes dir_value)
+from p"util.jo" import (fatal files intern name_of pos_file)
+from p"ffi.jo" import (ffi_unsafe_name)
+# Direct recursive lowering; shared state has one owner in ffi.jo.
+MoveWord:type=int64<overflow='wrap'>
+ffi_unsafe_at=(pos:MoveWord):>bool=>$unsafe {
+    if dir_scopes.length =? 0 {return false}
+    if ffi_unsafe_name =? 0 {ffi_unsafe_name=intern("unsafe")}
+    return dir_value(ffi_unsafe_name pos) =? 1
+}
+ffi_require_unsafe=(pos:MoveWord what:string why:string):>void=>$unsafe {
+    if pos <=? 0 or not files.ptr[pos_file(pos)].is_dewy or ffi_unsafe_at(pos) {return}
+    fatal(pos "{what} needs an unsafe boundary ({why}): write `$unsafe` before the expression, on its line or the line above, or `$unsafe \{ ... }` around several");
+}
+ffi_extern_use=(decl:MoveWord use_pos:MoveWord):>void=>$unsafe {
+    if not has_flag(decl NF_EXTERN) or use_pos <=? 0 or not files.ptr[pos_file(use_pos)].is_dewy {return}
+    if pos_file(use_pos) =? pos_file(nodes.ptr[decl].pos) and use_pos =? nodes.ptr[decl].pos {return}
+    ffi_require_unsafe(use_pos "using the foreign function '{name_of(MoveWord(nodes.ptr[decl].name))}'" "the compiler cannot check what it does");
+}
+ffi_deref=(pos:MoveWord t:MoveWord):>void=>$unsafe {
+    if pos <=? 0 or not files.ptr[pos_file(pos)].is_dewy {return}
+    ffi_require_unsafe(pos "dereferencing a raw {dt(t)}" "the compiler cannot check that it points to live memory of that type");
+}
+ffi_check_signature=(f:MoveWord decl:MoveWord):>void=>$unsafe {
+    if not files.ptr[pos_file(nodes.ptr[decl].pos)].is_dewy {return}
+    let extern_=has_flag(decl NF_EXTERN)
+    loop i in [0..fns.ptr[f].ptypes.length) and t in fns.ptr[f].ptypes {
+        let p=kid(decl i)
+        ffi_check_type(t nodes.ptr[p].pos extern_ true);
+    }
+    if MoveWord(fns.ptr[f].ret) not=? T_VOID {ffi_check_type(MoveWord(fns.ptr[f].ret) nodes.ptr[decl].pos extern_ false);}
+}
+ffi_check_type=(t0:MoveWord pos:MoveWord extern_:bool param:bool):>void=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    let side=if extern_ {"a `$extern` function"} else {"a `$export` function"}
+    if t =? T_MATH_INT {fatal(pos "`int` cannot cross the C boundary (its size is not fixed): {side} uses int32, int64, uint8, … instead");}
+    if k =? 'ptr' {
+        ffi_check_pointee(MoveWord(types.ptr[t].elem) pos);
+        return
+    }
+    if k =? 'int_' or k =? 'float_' or k =? 'bool_' or k =? 'cfn' {return}
+    if k =? 'opt' and tkind(MoveWord(types.ptr[t].elem)) =? 'ptr' {
+        ffi_check_pointee(MoveWord(types.ptr[prune(MoveWord(types.ptr[t].elem))].elem) pos);
+        if extern_ {return}
+        fatal(pos "`$export` takes and returns `ptr<T>` but not yet `ptr<T>?`: C callers would see an optional's layout");
+    }
+    if k =? 'str_' and extern_ and param {return}
+    let what=dt(t)
+    if k =? 'str_' and extern_ {fatal(pos "a C function cannot return a string: declare its result as `ptr<uint8>` and copy the bytes it points to");}
+    let more=if extern_ {", `ptr<T>?`, strings (a `char *`) and function types (C function pointers)"} else {""}
+    fatal(pos "{what} cannot cross the C boundary: {side} takes and returns fixed-width numbers, bools, `ptr<T>`{more}");
+}
+ffi_check_pointee=(t0:MoveWord pos:MoveWord):>void=>$unsafe {
+    let seen:dict<int64 bool>=dict<int64 bool>()
+    let why=ffi_c_layout(t0 @seen)
+    if why not=? "" {fatal(pos "{dt(t0)} has no C layout ({why}): a pointer for C points to fixed-width numbers, bools, pointers, or records of them");}
+}
+ffi_c_layout=(t0:MoveWord @seen:dict<int64 bool>):>string=>$unsafe {
+    let t=prune(t0)
+    if seen.has(t) {return ""}
+    seen[t] = true;
+    let k=types.ptr[t].kind
+    if t =? T_MATH_INT {return "`int` has no fixed size"}
+    if k =? 'int_' or k =? 'float_' or k =? 'bool_' or k =? 'ptr' or k =? 'cfn' or k =? 'void_' {return ""}
+    if k =? 'opt' and tkind(MoveWord(types.ptr[t].elem)) =? 'ptr' {return ""}
+    if k =? 'fixed' {return ffi_c_layout(MoveWord(types.ptr[t].elem) @seen)}
+    if k =? 'struct_' {
+        let si:MoveWord=MoveWord(types.ptr[t].st)
+        check_struct_fields(si);
+        loop i in [0..MoveWord(structs.ptr[si].nfields)) {
+            let fi:MoveWord=MoveWord(structs.ptr[si].fields) + i
+            let why=ffi_c_layout(MoveWord(fields.ptr[fi].type) @seen)
+            if why not=? "" {return "its field '{name_of(MoveWord(fields.ptr[fi].name))}': {why}"}
+        }
+        return ""
+    }
+    return "{dt(t)} is managed by Dewy"
+}
