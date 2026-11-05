@@ -1,0 +1,304 @@
+$runtime_checks
+from p"effect_types.dewy" import (EffectAtom EffectContract EffectEvent PlaceIdentity)
+from p"effects.jo" import (EffectBody EffectEventKey EffectPolicy EffectSummary effect_bodies effect_body_cache effect_body_owner effect_body_panics effect_bound_sites effect_bounds_proven effect_contracts effect_declared effect_event_index effect_final effect_footprints_only effect_for_marks effect_inference_busy effect_ix_locals effect_ix_nodes effect_limit effect_obligations effect_panics_reset effect_plain_cache effect_policy effect_seen effect_serial effect_share_cache effect_solving effect_source_row effect_stack effect_summaries effect_syntax effect_value_cache effects_active loan_owners)
+from p"check.jo" import (FK_LAMBDA check_fn_body decl_info decl_infos fns globals main_fn)
+from p"icount.jo" import (IC_EFFECTS ic_phase ic_restore)
+from p"ast.jo" import (NF_GENERIC has_flag kid nkids nodes)
+from p"arena_ops.dewy" import (arena_capacity_hint)
+from p"arena.jo" import (arena_fns)
+from p"effect_contracts.dewy" import (callable_contract effect_subst)
+from p"effect_lattice.dewy" import (effect_allows effect_excluded effect_rows_fit place_base)
+from p"effect_graph.dewy" import (effect_graph_reset effect_visit)
+from p"effect_classifiers.dewy" import (effect_library_reset)
+from p"facts.jo" import (fact_probe_function fact_policy)
+from p"util.jo" import (fatal name_of pos_in_lib pos_str)
+from p"floats.jo" import (ff_probe_function)
+from p"isolation.jo" import (isolation_children)
+from p"places.jo" import (place_append place_parents places_reset)
+from p"concurrency.jo" import (ParSafeVia concurrency_calls concurrency_tasks parsafe_req parsafe_fns parsafe_work concurrency_runtime_needed concurrency_ffi_start concurrency_block_memo)
+from p"directives.jo" import dir_row_origin
+# Effect demand and finalization; shared state has one owner in effects.jo.
+ControlWord:type=int64<overflow='wrap'>
+effects_reset=():>void=>$unsafe {
+    effect_footprints_only=false
+    effect_bodies=dict<int64 EffectBody>()
+    effect_body_cache=false
+    effect_body_owner=0
+    effect_body_panics=[]
+    effect_panics_reset();
+    concurrency_calls=[]
+    concurrency_tasks=[]
+    parsafe_req=dict<int64 ParSafeVia>()
+    parsafe_fns=dict<int64 bool>()
+    parsafe_work=[]
+    concurrency_runtime_needed=false
+    concurrency_ffi_start=0
+    concurrency_block_memo=dict<int64 bool>()
+    effect_bound_sites=[]
+    effect_bounds_proven=dict<int64 bool>()
+    effect_declared=dict<int64 int64>()
+    loan_owners=dict<int64 bool>()
+    effects_active=false
+    effect_obligations=[]
+    effect_inference_busy=false
+    effect_solving=false
+    effect_final=false
+    effect_policy=EffectPolicy[]
+    let policy=env("DEWY_INTERNAL_EFFECT_POLICY")
+    if policy not=? none {
+        if policy =? "scalar-no-effects" {
+            effect_policy=EffectPolicy[-1 true]
+            fact_policy='RequireStatic'
+        }
+    }
+    effect_syntax=[[]]
+    effect_contracts=[EffectContract[]]
+    effect_summaries=[]
+    effect_seen=[]
+    effect_stack=[]
+    effect_serial=0
+    effect_limit=0
+    effect_event_index=dict<EffectEventKey bool>()
+    effect_for_marks=dict<int64 array<int64>>()
+    effect_plain_cache=dict<int64 bool>()
+    effect_share_cache=dict<int64 bool>()
+    effect_value_cache=dict<int64 bool>()
+    effect_library_reset();
+    effect_ix_nodes=0
+    effect_ix_locals=0
+    places_reset();
+}
+effect_prepare_node=(n:ControlWord @seen:array<int64> depth:ControlWord):>void=>$unsafe {
+    if n =? 0 or depth >? 32 {return}
+    let k=nodes.ptr[n].kind
+    if (k =? 'call' and nodes.ptr[n].aux =? 0) or k =? 'fnref' {effect_prepare(ControlWord(nodes.ptr[n].sym) @seen depth + 1);}
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {effect_prepare_node(ControlWord(nodes.ptr[n].a) @seen depth + 1);}
+    if mask & 2 not=? 0 {effect_prepare_node(ControlWord(nodes.ptr[n].b) @seen depth + 1);}
+    if mask & 4 not=? 0 {effect_prepare_node(ControlWord(nodes.ptr[n].c) @seen depth + 1);}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {effect_prepare_node(kid(n i) @seen depth + 1);}
+    }
+}
+effect_prepare=(f:ControlWord @seen:array<int64> depth:ControlWord):>void=>$unsafe {
+    if f <=? 0 or f >=? fns.length or depth >? 32 or seen.contains(f) {return}
+    seen.push(f);
+    if fns.ptr[f].state =? 0 {check_fn_body(f);}
+    if fns.ptr[f].state =? 2 {effect_prepare_node(ControlWord(fns.ptr[f].body) @seen depth + 1);}
+}
+effect_name=(f:ControlWord):>string=>$unsafe {
+    let d:ControlWord=ControlWord(fns.ptr[f].decl)
+    if d not=? 0 {return name_of(ControlWord(nodes.ptr[d].name))}
+    return "<helper>"
+}
+effect_place_name=(p:PlaceIdentity):>string=>$unsafe {
+    if p.parent not=? 0 {return "{effect_place_name(place_parents.ptr[p.parent])}.{name_of(p.selector)}"}
+    if p.root =? 'global' {return name_of(ControlWord(globals.ptr[p.declaration].name))}
+    if p.root =? 'resource' and p.declaration >? 0 and p.declaration <? nodes.length and nodes.ptr[p.declaration].name >? 0 {return name_of(ControlWord(nodes.ptr[p.declaration].name))}
+    if p.root =? 'formal' and p.owner >? 0 {
+        let d:ControlWord=ControlWord(fns.ptr[p.owner].decl)
+        if d not=? 0 {return name_of(ControlWord(nodes.ptr[kid(d ControlWord(p.declaration) - 1)].name))}
+    }
+    return "unknown place"
+}
+effect_witness=(f:ControlWord event0:EffectEvent):>string=>$unsafe {
+    let chain=effect_name(f)
+    let event=event0
+    let seen=[f]
+    loop depth in [0..8) {
+        if event.via =? 0 {break}
+        let g=event.via_fn
+        if g <=? 0 or g >=? effect_limit {break}
+        # (the chain stops where it enters the library, whose helpers are its own)
+        let gd:ControlWord=ControlWord(fns.ptr[g].decl)
+        if gd not=? 0 and pos_in_lib(nodes.ptr[gd].pos) {
+            let name=effect_name(g)
+            if starts_with(name "__") {chain="{chain} -> the library"}
+            else {chain="{chain} -> {name} (the library)"}
+            break
+        }
+        chain="{chain} -> {effect_name(g)}"
+        if seen.contains(g) {
+            chain="{chain} (recursive component)"
+            break
+        }
+        seen.push(g);
+        let next=EffectEvent[EffectAtom['opaque'] 0]
+        loop candidate in effect_summaries.ptr[g].events {
+            if candidate.witness =? event.witness {
+                next=candidate
+                break
+            }
+        }
+        event=next
+    }
+    return chain
+}
+# A declared contract, or main under the internal policy.
+effect_root=(f:ControlWord):>bool=>$unsafe {
+    let d:ControlWord=ControlWord(fns.ptr[f].decl)
+    let policy_root=effect_policy.prohibitions not=? 0 and f =? main_fn
+    if d =? 0 or (nodes.ptr[d].sval =? 0 and not policy_root) {return false}
+    return not (fns.ptr[f].kind =? FK_LAMBDA and has_flag(d NF_GENERIC) and fns.ptr[f].body =? 0 and not fns.ptr[f].has_env)
+}
+# Summaries first charge every unproven element access a possible failure.
+# One facts probe per owning body then discharges what its own facts prove,
+# and the graph is solved again. Probe answers depend only on callees' write
+# footprints, which discharging a failure cannot change. Discharging only
+# removes failures, so it is demanded only when the charged graph breaks a
+# contract (effect_contracts_hold); no other summary use reads failures.
+effect_settle_bounds=():>void=>$unsafe {
+    effect_body_cache=true
+    effect_bound_sites=[]
+    loop obligation in effect_obligations {effect_source_row(obligation.source);}
+    loop f in [1..effect_limit) {
+        if effect_root(f) and effect_summaries.ptr[f].index =? 0 {effect_visit(f);}
+    }
+}
+effect_discharge_bounds=():>void=>$unsafe {
+    let sites=effect_bound_sites
+    effect_bound_sites=[]
+    if sites.length =? 0 {return}
+    # Index the sites by owner once; each site's proof is consumed once.
+    let by_owner:dict<int64 array<int64>>=dict<int64 array<int64>>()
+    let owners:array<int64>=[]
+    loop site in sites {
+        if not by_owner.has(site[0]) {owners.push(site[0]);}
+        let owned=by_owner.get(site[0]) ?? []
+        owned.push(site[1]);
+        by_owner[site[0]] = owned;
+    }
+    let proved=false
+    loop f in owners {
+        let found=fact_probe_function(f)
+        let floats:dict<int64 bool>=dict<int64 bool>()
+        loop n in by_owner[f] {
+            if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(3) {
+                floats=ff_probe_function(f)
+                break
+            }
+        }
+        loop n in by_owner[f] {
+            if (found.get(n) ?? false) or (floats.get(n) ?? false) {
+                effect_bounds_proven[n] = true;
+                proved=true
+            }
+        }
+    }
+    if proved {effect_graph_reset(true);}
+}
+effects_finalize=():>void=>$unsafe {
+    if not effects_active and effect_policy.prohibitions =? 0 {return}
+    effect_final=true
+    effect_graph_reset();
+    effect_settle_bounds();
+    if effect_bound_sites.length >? 0 and effect_contracts_hold(false) {
+        effect_bound_sites=[]
+        return
+    }
+    effect_discharge_bounds();
+    effect_contracts_hold(true);
+}
+# Whether every obligation and contract root's row admits its summary; report:
+# the first that does not is an error. O(roots' events + obligations).
+effect_contracts_hold=(report:bool):>bool=>$unsafe {
+    loop obligation in effect_obligations {
+        let actual=effect_source_row(obligation.source)
+        if not effect_rows_fit(actual obligation.bound) {
+            if not report {return false}
+            fatal(nodes.ptr[obligation.source].pos "cannot prove callable effect contract: a reaching source exceeds the inferred row");
+        }
+    }
+    loop f in [1..effect_limit) {
+        if not effect_root(f) {continue}
+        let d:ControlWord=ControlWord(fns.ptr[f].decl)
+        let policy_root=effect_policy.prohibitions not=? 0 and f =? main_fn
+        let contract=if fns.ptr[f].kind =? FK_LAMBDA and not has_flag(d NF_GENERIC) {callable_contract(ControlWord(fns.ptr[f].fntype))} else {effect_subst(ControlWord(decl_infos.ptr[decl_info(d)].sig.contract) fns.ptr[f].targs)}
+        if effect_summaries.ptr[f].index =? 0 {effect_visit(f);}
+        # A concrete prohibited cost is more informative than an earlier
+        # conservative aggregate/signature blocker. Preserve the call-site
+        # diagnostic and the allocating operation's original witness.
+        let ordered:array<EffectEvent>=[]
+        loop event in effect_summaries.ptr[f].events {
+            if event.atom.kind =? 'alloc' {ordered.push(event);}
+        }
+        loop event in effect_summaries.ptr[f].events {
+            if event.atom.kind not=? 'alloc' and event.atom.kind not=? 'opaque' {ordered.push(event);}
+        }
+        loop event in effect_summaries.ptr[f].events {
+            if event.atom.kind =? 'opaque' {ordered.push(event);}
+        }
+        loop event in ordered {
+            let atom=event.atom
+            if atom.place.root =? 'formal' {
+                let base=place_base(atom.place)
+                atom.place = place_append(PlaceIdentity['formal' 0 base.declaration] atom.place);
+            }
+            let prohibited=false
+            if policy_root {
+                # Preserve the declared effect-kind bit positions of the shared policy.
+                let bit:ControlWord=match atom.kind {
+                    <'read'> => 1
+                    <'write'> => 2
+                    <'alloc'> => 4
+                    <'detach'> => 8
+                    <'costly_copy'> => 16
+                    <'panic'> => 32
+                    <'io'> => 64
+                    <'block'> => 128
+                    <'spawn'> => 256
+                    <'escape'> => 512
+                    <'opaque'> => 1024
+                    <'remainder'> => 2048
+                }
+                prohibited=ControlWord(effect_policy.prohibitions) & bit not=? 0 or atom.kind =? 'opaque'
+            }
+            if (contract =? 0 or effect_allows(contract atom)) and not prohibited {continue}
+            if not report {return false}
+            let at=if event.via not=? 0 {event.via} else {event.witness}
+            if at =? 0 {at=d}
+            let what=if atom.kind =? 'write' {"mutation"} else if atom.kind =? 'read' {"read"} else if atom.kind =? 'alloc' {"allocation"} else if atom.kind =? 'panic' {"possible failure"} else if atom.kind =? 'detach' {"storage detach"} else if atom.kind =? 'io' {"I/O"} else if atom.kind =? 'block' {"blocking operation"} else if atom.kind =? 'costly_copy' {"costly copy"} else if atom.kind =? 'escape' {"escape"} else if atom.kind =? 'spawn' {"spawn"} else {"opaque operation or unproved implementation cost"}
+            if event.atom.place.declaration not=? 0 and not starts_with(effect_place_name(event.atom.place) "__") {what="{what} of '{effect_place_name(event.atom.place)}'"}
+            let chain=effect_witness(f event)
+            let origin=if event.witness not=? 0 and not pos_in_lib(nodes.ptr[event.witness].pos) {"; witness at {pos_str(nodes.ptr[event.witness].pos)}"} else if event.witness not=? 0 {""} else {"; witness at {pos_str(nodes.ptr[d].pos)}"}
+            let row=if contract not=? 0 {effect_contracts.ptr[contract]} else {EffectContract[]}
+            let why=if contract =? 0 {"is forbidden by the effect policy"} else if row.exclusions.length >? 0 and effect_excluded(row atom) {"exceeds the contract (its row excludes it)"} else if row.atoms.length =? 0 and row.variables.length =? 0 and not row.open {"exceeds the closed row (no_effects permits none)"} else {"exceeds the closed row (the contract does not permit it)"}
+            let hint=if arena_fns.length >? 0 and event.witness >? 0 {arena_capacity_hint(event.witness)} else {""}
+            fatal(nodes.ptr[at].pos "effect contract violation in '{effect_name(f)}': {what} {why}; {chain}{origin}{hint}{dir_row_origin(d)}");
+        }
+    }
+    return true
+}
+# Facts request only summaries of calls they actually analyze. Ordinary code
+# with no refinement consumers pays neither an arena allocation nor a walk.
+effects_demand=(f:ControlWord footprints:bool=false):>bool=>$unsafe {
+    if effect_footprints_only and not footprints {effect_graph_reset();}
+    effect_final=true
+    if effect_limit =? 0 {
+        effect_footprints_only=footprints and not effects_active and effect_policy.prohibitions =? 0
+        effect_limit=fns.length
+        effect_summaries=fill(EffectSummary[] effect_limit)
+        effect_seen=fill(0 nodes.length)
+        effect_event_index=dict<EffectEventKey bool>()
+        effect_for_marks=dict<int64 array<int64>>()
+        effect_plain_cache=dict<int64 bool>()
+        effect_share_cache=dict<int64 bool>()
+        effect_value_cache=dict<int64 bool>()
+    }
+    if f <=? 0 or f >=? effect_limit {return false}
+    if effect_summaries.ptr[f].index =? 0 {
+        let icb=ic_phase(IC_EFFECTS)
+        effect_visit(f);
+        ic_restore(icb);
+    }
+    return effect_summaries.ptr[f].done
+}
+# Lowering consults summaries too. Cover nodes made since the arena was sized
+# before a fresh visit scans them; later functions remain unknown.
+effects_demand_late=(f:ControlWord):>bool=>$unsafe {
+    if effect_limit not=? 0 {
+        loop effect_seen.length <? nodes.length {effect_seen.push(0);}
+    }
+    return effects_demand(f)
+}

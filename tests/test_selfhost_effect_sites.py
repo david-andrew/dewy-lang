@@ -9,6 +9,7 @@ from tests.selfhost_lower_double import modules_for
 
 DRIVER = r'''
 use 'main.jo'
+use 'effect_control.dewy'
 use 'effects.jo'
 use 'types.jo'
 use 'ast.jo'

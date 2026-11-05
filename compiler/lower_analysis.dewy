@@ -8,7 +8,7 @@ from p"ast.jo" import (NF_EXTERN NF_MUT has_flag kid kid2 kid_c kid_d nkids node
 from p"types.jo" import (T_MATH_INT int_policy is_int is_managed math_optional prune tkind types)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"copies.jo" import (copies_on copy_strict)
-from p"effects.jo" import (effect_summaries effects_demand_late)
+from p"effects.jo" import (effect_summaries)
 from p"util.jo" import (fatal files name_of pos_file)
 from p"check.jo" import (jd)
 from p"ast.jo" import (nkids2)
@@ -16,6 +16,7 @@ from p"ownership_types.dewy" import (ownership_type)
 from p"effect_lattice.dewy" import (place_base)
 from p"places.jo" import (place_path)
 from p"lower_helpers.dewy" import (value_helper_calls)
+from p"effect_control.dewy" import (effects_demand_late)
 # Mutation and alias queries; shared state has one owner in lower.jo.
 LAWord:type=int64<overflow='wrap'>
 shares_mut_root=(a:LAWord args:array<int64> mutmask:LAWord callee:LAWord=-2):>bool=>$unsafe {

@@ -15,7 +15,6 @@ from p"dewy_methods.jo" import (dewy_infer_methods dewy_methods dewy_resolve_inh
 from p"prelude.jo" import (dewy_prelude_file dewy_prelude_module order_prelude_globals)
 from p"definite.jo" import (dg_check_program dg_globals)
 from p"directives.jo" import (directives_reset)
-from p"effects.jo" import (effects_finalize effects_reset)
 from p"util.jo" import (errors_only files intern pos_in_lib)
 from p"exact.jo" import (exact_prepare)
 from p"facts.jo" import (facts_reset)
@@ -36,6 +35,7 @@ from p"parse.jo" import (stop_after)
 from p"safe_paths.jo" import (ut_reset ut_run)
 from p"warn_if.jo" import (wi_reset)
 from p"arena_ops.dewy" import (arena_reset runtime_switch runtime_switch_on)
+from p"effect_control.dewy" import (effects_finalize effects_reset)
 # Program-level checking owns phase order; services may grow all compiler arenas.
 PGWord:type=int64<overflow='wrap'>
 check_program=(main_path:string):>void=>$unsafe {

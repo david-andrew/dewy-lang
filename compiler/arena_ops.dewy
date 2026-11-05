@@ -1,7 +1,6 @@
 $runtime_checks
 from p"arena.jo" import (ArenaRoot ArenaScope arena_enter_decl arena_fns arena_keep_depth arena_keep_low arena_keep_state arena_keep_witness arena_lambda_depth arena_proof_nodes arena_proof_sites arena_proofs_done arena_proven arena_proven_machinery arena_runtime_ready arena_stack arena_unproven runtime_switches)
 from p"lower.jo" import (BOX_HDR HK VC_AGG Val ctl)
-from p"effects.jo" import (effect_name)
 from p"effect_types.dewy" import (EffectEvent)
 from p"expr.jo" import (IN last_checked ntype)
 from p"check.jo" import (LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_ELEMALIAS LF_MUTPARAM LF_PARAM LF_SOAELEM LF_VALUECAP LF_VALUEPARAM ctxs cx demand_name fns globals lib_dir locals prelude release_build runtime_fn syms)
@@ -22,6 +21,7 @@ from p"ownership_types.dewy" import (ownership_type)
 from p"places.jo" import (place_scalar_root)
 from p"units.jo" import (quantity_base)
 from p"math_ops.dewy" import (math_payload_type math_tag)
+from p"effect_control.dewy" import (effect_name)
 # Direct recursive lowering; shared state has one owner in arena.jo.
 ArenaWord:type=int64<overflow='wrap'>
 runtime_switch_on=(name:string):>void=>$unsafe {
