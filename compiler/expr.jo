@@ -5101,6 +5101,7 @@ fmt_part = (part: int, pos: int):
     observed = int(nodes[part].a)
     if dewy_at(pos) and exact_type(ntype(observed), pos) and not types[exact_representation(ntype(observed))].sign and exact_potential(observed): exact_int_result(observed, true)
     t = prune(ntype(int(nodes[part].a)))
+    oom_unhandled(t, pos, "showing it")
     shown = if is_quantity(t) and nodes[part].sval < 0 and dewy_at(pos): quantity_display(int(nodes[part].a)) else: 0
     if shown != 0:
         nodes[part].a = i32(shown)

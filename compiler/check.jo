@@ -2143,13 +2143,19 @@ sink_void_error = (s: int, t: int):
     fname = "this function"
     if sink_fn >= 0:
         d = int(fns[int(ctxs[cx].inst)].decl)
-        if d != 0 and nodes[d].kind == .fn_ and nodes[d].name > 0: fname = "'{name_of(int(nodes[d].name))}'"
+        if d != 0 and nodes[d].kind == .fn_ and nodes[d].name > 0: fname = "'{oom_written_name(int(nodes[d].name))}'"
     if union_has_void(t):
         e = sink_failures(t)
         fatal(nodes[v].pos, "this gives nothing when it succeeds and expresses {e} when it fails, which is not taken here: propagate the failure with `or_throw`, handle it (`match`, `is?`), or attach `;` to discard it, as in `f();`")
     rt = prune(int(ctxs[cx].ret))
     gives = if union_has_void(rt): "nothing, or the errors it returns" else: "nothing"
     fatal(nodes[v].pos, "this expresses {a_type(t)}, and {fname} is written `:>{dt(rt)}`, so its body gives {gives}: attach `;` to discard the value, as in `f();`, or change the result type")
+
+# (a function's name as written: its body under `$explicit_allocation_failure` is `__eaf_NAME`)
+oom_written_name = (id: int) -> str:
+    name = name_of(id)
+    if starts_with(name, "__eaf_"): return name[6..]
+    name
 
 # Function f's result is written `:>(int64 int64)` (result type node tn): calls give
 # several values, and its body must express that many.

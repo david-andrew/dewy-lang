@@ -4383,6 +4383,10 @@ drops the resource owners made since it began and makes it return
 `OutOfMemory`; memory the interrupted work held is not freed. An `OutOfMemory`
 reaching `main` prints `error: OutOfMemory`. WebAssembly cannot return to the
 function, so a refusal there still ends the program.
+In such a module a value that may be `OutOfMemory` is handled before it is used:
+reading a member through it, calling a method on it or showing it (`printl`, an
+interpolation) is an error, so a refusal cannot pass unseen. Pass it on with
+`or_throw`, test it (`if r is? OutOfMemory`, `match`) or fall back with `??`.
 
 Other directives of the design (`$no_prelude`,
 `$unsafe_assume`, …) are reported as not implemented yet where they

@@ -10,10 +10,12 @@ use 'util.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'ownership.jo'
+use 'oom.jo'
 use 'ownership_types.dewy'
 
 exception_type = 0
 error_type = 0
+out_of_memory_type = 0
 nominal_parent: {int: int}
 nominal_types: int[]
 nominal_ready = false
@@ -28,6 +30,7 @@ exception_builtins = ():
         structs[int(types[t].st)].resolved = true
         universe[intern(name)] = new_sym(intern(name), .type_, t, d)
         nominal_types.push(t)
+        if name == "OutOfMemory": out_of_memory_type = t
         if name == "exception": exception_type = t
         else if name == "error":
             error_type = t
@@ -297,6 +300,15 @@ propagate_host = CheckerPropagateHost(check_expr, propagate_inferring, value_mem
 propagate_input = CheckerPropagateInput(&nodes, &fns, &ctxs, &cx, &last_checked, &T_NONE, &propagate_host)
 propagate_binding = checker_propagate_bind(&propagate_input)
 
+# Under `$explicit_allocation_failure` a refusal cannot pass unseen: a value that may be
+# OutOfMemory is handled before it is read through or shown.
+oom_unhandled = (t0: int, pos: int, use_text: str):
+    if oom_files.len() == 0 or not oom_files.has(pos_file(pos)): return
+    t = prune(t0)
+    if not is_union(t) and tkind(t) != .opt: return
+    loop member in value_members(t):
+        if member == out_of_memory_type: fatal(pos, "this value may be OutOfMemory, and under `$explicit_allocation_failure` {use_text} would pass the refusal on unseen: hand it to the caller with `or_throw`, test it with `if x is? OutOfMemory`, or fall back with `??`")
+
 # Read-only receiver navigation. Only the receiver forwards, never arguments.
 # A narrowed concrete error still exposes its own payload fields normally.
 forward_member = (n: int, receiver: int, t: int, expected: int) -> int:
@@ -304,6 +316,7 @@ forward_member = (n: int, receiver: int, t: int, expected: int) -> int:
     # A method's own object (a family's member, seen through its parent) is read,
     # not forwarded: every member of the family has the parent's members.
     own = nodes[receiver].kind == .ident and starts_with(name_of(int(nodes[receiver].name)), "$self")
+    if not own: oom_unhandled(t, pos, "reading a member")
     if cur_assign != 0 and int(nodes[cur_assign].a) == n:
         if own: fatal(pos, "a method of a type with minted children cannot change its object yet")
         fatal(pos, "cannot assign through a union receiver; narrow it with is? first")
@@ -358,6 +371,7 @@ forward_call = (n: int, name: int, args: int[], expected: int) -> int:
     pos = nodes[n].pos
     receiver = unnamed(args[0])
     t = prune(ntype(receiver))
+    oom_unhandled(t, pos, "calling a method")
     recv = "$receiver{n}"
     add_flag(receiver, NF_CHECKED)
     stmts = [bc_let(recv, receiver, pos)]

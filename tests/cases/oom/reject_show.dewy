@@ -1,0 +1,9 @@
+$explicit_allocation_failure
+grow=(n:int64):>array<int64>=>{
+    let xs:array<int64>=[]
+    loop i in [0..n) { xs.push(i) }
+    xs
+}
+main=():>void=>{
+    printl(grow(3))
+}

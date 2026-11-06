@@ -1,0 +1,32 @@
+# The near misses of reject_member_read and reject_show: each handles the refusal first.
+# Another error family still forwards under the directive.
+$runtime_checks
+$explicit_allocation_failure
+Busy:type = type of error
+grow=(n:int64):>array<int64>=>{
+    let xs:array<int64>=[]
+    loop i in [0..n) { xs.push(i) }
+    xs
+}
+wrapper=(n:int64):>int64|OutOfMemory=>{
+    let r=grow(n) or_throw
+    r.length
+}
+main=():>void|OutOfMemory=>{
+    let a=grow(3)
+    if a is? OutOfMemory { return }
+    printl(a.length)
+    let b=grow(4)
+    if b isnt? OutOfMemory { printl(b.length) }
+    let c=grow(5)
+    match c {
+        <OutOfMemory> => printl("no memory")
+        _ => printl(c.length)
+    }
+    printl((grow(6) ?? []).length)
+    printl(wrapper(7) or_throw)
+    let p:array<int64>|Busy=[1 2]
+    printl(p.length)
+    let d=grow(8).copy() or_throw
+    printl(d.length)
+}
