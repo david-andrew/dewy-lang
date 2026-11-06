@@ -2226,6 +2226,12 @@ currently supported.
 In a fixed-array context, `[]` initializes every element to its zero value;
 otherwise a literal must supply exactly the declared number of elements.
 
+`[]` is underspecified, as `1` is: it takes its type from context. A `dict<K V>`
+parameter, variable, field or result gets an empty dictionary, a set an empty set,
+a record with defaults its defaults, and an array an empty array. Between
+overloads it is an array, its default. With nothing to say which, it is a compile
+error asking for the type where it is made.
+
 `[int64 string]` is a fixed-length array with a type per position, Dewy's form
 of a tuple: `let entry:[int64 string] = [7 "seven"]`. A constant index reads that
 position with its own type (`entry[0]` is an `int64`, `entry[1]` a `string`);

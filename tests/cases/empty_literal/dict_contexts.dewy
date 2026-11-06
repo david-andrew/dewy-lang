@@ -1,0 +1,25 @@
+# `[]` takes its type from context, wherever a dictionary is expected.
+count = (counts:dict<string int>) => counts.length
+maybe = (counts:dict<string int>?) => (counts ?? ["x"->1]).length
+nested = (rows:array<dict<string int>>) => rows.length
+either = (value:dict<string int>|int) => 1
+keyed = <K V>(m:dict<K V> k:K v:V) => m.length
+named = (m:dict<string int> n:int=1) => m.length + n
+fresh = ():>dict<string int> => []
+Box:type = [d:dict<string int> a:array<int>]
+main = () => {
+    printl(count([]))
+    printl(maybe([]))
+    printl(nested([[] []]))
+    printl(either([]))
+    printl(keyed([] "a" 1))
+    printl(named(m=[]))
+    printl(fresh())
+    let d:dict<string int> = ["a"->1]
+    d = []
+    printl(d.length)
+    let o:dict<string int>? = []
+    printl(maybe(o))
+    printl(Box[[] []])
+    printl(if d.length >? 0 d else [])
+}

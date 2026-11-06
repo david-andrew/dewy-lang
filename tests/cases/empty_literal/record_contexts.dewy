@@ -1,0 +1,8 @@
+# `[]` where a record with defaults is expected builds it from them.
+Q:type = [x:int=1 y:int=2]
+h = (q:Q) => q.x
+main = () => {
+    let a:Q = []
+    printl(a)
+    printl(h([]))
+}

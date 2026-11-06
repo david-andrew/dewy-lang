@@ -727,7 +727,7 @@ habit_hint = (dewy_text: str, sloppy_text: str) -> str:
 empty_hint = (nm: str, t0: int) -> str:
     t = prune(t0)
     if ts_dewy:
-        if types[t].kind == .array: return " (`let {nm}:array<int64> = []` for an array of integers)"
+        if types[t].kind == .array: return " (`let {nm}:array<int64> = []` for an array of integers, `let {nm}:dict<string int64> = []` for a dictionary)"
         if is_map_type(t): return " (`let {nm}:dict<string int64> = []` for a dictionary from text to integers)"
         return ""
     if types[t].kind == .array:
@@ -1546,7 +1546,7 @@ instance_bad_arg = (decl: int, z: int, use_pos: int):
     fname = name_of(int(nodes[decl].name))
     pz = prune(z)
     # (an empty [] or {} argument: nothing says what it holds)
-    if starts_with(fname, "__fmt") or starts_with(fname, "__dewy_fmt"): fatal(use_pos, "cannot tell what kind of value this is yet (an empty `[]` says nothing of what it will hold): write its type where it is made, {jd(use_pos, "`xs: int[] = []`", "`let xs:array<int64> = []`")}, or put something in it first")
+    if starts_with(fname, "__fmt") or starts_with(fname, "__dewy_fmt"): fatal(use_pos, "cannot tell what kind of value this is yet (an empty `[]` says nothing of what it will hold): write its type where it is made, {jd(use_pos, "`xs: int[] = []`", "`let xs:array<int64> = []` or `let d:dict<string int64> = []`")}, or put something in it first")
     if types[pz].kind == .array: fatal(use_pos, "cannot tell what the array given to '{fname}' holds (an empty `[]` says nothing): write the type where the result goes, {jd(use_pos, "`scores: int[] = {fname}(...)`", "`let scores:array<int64> = {fname}(...)`")}, or pass a variable of a known type")
     if is_map_type(pz): fatal(use_pos, "cannot tell what the map given to '{fname}' holds (an empty {jd(use_pos, "`\{}`", "`[]`")} says nothing): write the type where the result goes, {jd(use_pos, "`m: \{str: int} = {fname}(...)`", "`let m:dict<string int64> = {fname}(...)`")}, or pass a variable of a known type")
     fatal(use_pos, "cannot infer the type of an argument to '{fname}'; write the type where the result goes ({jd(use_pos, "`x: T = {fname}(...)`", "`let x:T = {fname}(...)`")}) or give the argument a type")

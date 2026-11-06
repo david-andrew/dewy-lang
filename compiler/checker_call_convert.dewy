@@ -264,6 +264,11 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
         if k =? 'array' or (k =? 'block' and has_flag(a NF_COMPREHENSION)) {
             if pk =? 'array' {return 0}
             if nkids(a) =? 0 and not has_flag(a NF_CHECKED) and dewy_record_target(p) not=? 0 and files.ptr[pos_file(nodes.ptr[a].pos)].is_dewy {return 0}
+            # (`[]` is a dictionary where one is wanted; an array, its default, wins an overload)
+            if nkids(a) =? 0 and not has_flag(a NF_CHECKED) and CVWord(nodes.ptr[a].b) =? 0 and files.ptr[pos_file(nodes.ptr[a].pos)].is_dewy {
+                if is_map_type(p) {return 1}
+                if pk =? 'opt' and is_map_type(CVWord(types.ptr[p].elem)) {return 3}
+            }
             if pk =? 'param' {return 3}
             return -1
         }
