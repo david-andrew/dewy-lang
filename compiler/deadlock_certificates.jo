@@ -1,0 +1,327 @@
+use 'deadlock.jo'
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'util.jo'
+use 'directives.jo'
+use 'ownership.jo'
+use 'concurrency.jo'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'effect_contracts.dewy'
+use 'effect_control.dewy'
+use 'lower_helpers.dewy'
+use 'isolation_ops.dewy'
+use 'deadlock_locations.dewy'
+use 'deadlock_summaries.dewy'
+use 'deadlock_walk.dewy'
+use 'deadlock_waits.dewy'
+
+nd_empty = () -> NdSum: NdSum(0, "", 0, "", 0, 0)
+
+nd_top = () -> int: nd_stack.len() - 1
+
+nd_fn = () -> int: nd_fns[nd_fns.len() - 1]
+
+nd_where = (site: int, from: int) -> str:
+    l, c = line_col(site)
+    if pos_file(site) == pos_file(from): return "line {l}"
+    path = files[pos_file(site)].path
+    base = path[rfind(path, "/") + 1..]
+    "{base}:{l}"
+
+nd_bad = (site: int, text: str, fix: str):
+    t = nd_top()
+    if nd_stack[t].flags & ND_BAD == 0:
+        nd_stack[t].flags |= ND_BAD
+        nd_stack[t].bad = text
+        nd_stack[t].bad_site = site
+    if dir_no_deadlocks(site): fatal(site, "this {text}, and no certificate covers it (`$no_deadlocks`): {fix}")
+
+nd_wait = (site: int, text: str):
+    t = nd_top()
+    nd_stack[t].flags |= ND_WAIT
+    if len(nd_stack[t].wait) == 0:
+        nd_stack[t].wait = text
+        nd_stack[t].wait_site = site
+
+nd_held_across = (held: DlHeld[], site: int, what: str):
+    if held.len() == 0: return
+    h = held[held.len() - 1]
+    nd_bad(site, "{what} while holding {dl_name(h.loc)} (since {nd_where(h.site, site)})", "a lock is held only across other locks taken in the checked order; let the place end before this wait")
+
+nd_summary = (f: int) -> NdSum:
+    if let s = nd_sums.get(f): return s
+    if let i = nd_index.get(f):
+        nd_low = min(nd_low, i)
+        return nd_empty()
+    # (the library's own waits are classified at its calls, nd_call)
+    if fns[f].body == 0 or pos_in_lib(nodes[int(fns[f].body)].pos): return nd_empty()
+    i = nd_path.len()
+    nd_index[f] = i
+    nd_path.push(f)
+    saved = nd_low
+    nd_low = i
+    nd_stack.push(nd_empty())
+    nd_fns.push(f)
+    held: DlHeld[]
+    nd_walk(int(fns[f].body), held)
+    # (cleanup: a lifecycle hook runs where a value ends, unseen by the order and the joins)
+    d = int(fns[f].decl)
+    t = nd_top()
+    if d != 0 and ownership_hooks.has(d) and nd_stack[t].flags & (ND_LOCK | ND_WAIT) != 0 and nd_stack[t].flags & ND_BAD == 0:
+        what = if len(nd_stack[t].wait) > 0: "{nd_stack[t].wait} ({nd_where(nd_stack[t].wait_site, nodes[d].pos)})" else: "takes a lock"
+        nd_bad(nodes[d].pos, "lifecycle hook waits: it {what}", "cleanup runs where a value ends, which the lock order and the joins do not see; keep waits out of `$__drop__`, `$__copy__` and `$__move__` hooks")
+    nd_fns.pop()
+    s = nd_stack.pop()
+    low = nd_low
+    nd_low = min(saved, low)
+    if low >= i:
+        loop j in [i..nd_path.len()):
+            nd_sums[nd_path[j]] = s
+            nd_index.remove(nd_path[j])
+        loop nd_path.len() > i: nd_path.pop()
+    s
+
+nd_callee = (h: int, held: DlHeld[], pos: int, name: str):
+    busy = nd_index.has(h)
+    s = nd_summary(h)
+    t = nd_top()
+    nd_stack[t].flags |= s.flags & (ND_LOCK | ND_WAIT | ND_ASK)
+    if s.flags & ND_WAIT != 0 and len(nd_stack[t].wait) == 0:
+        nd_stack[t].wait = s.wait
+        nd_stack[t].wait_site = s.wait_site
+    if s.flags & ND_ASK != 0 and nd_stack[t].ask_site == 0: nd_stack[t].ask_site = s.ask_site
+    if s.flags & ND_BAD != 0:
+        if nd_stack[t].flags & ND_BAD == 0:
+            nd_stack[t].flags |= ND_BAD
+            nd_stack[t].bad = s.bad
+            nd_stack[t].bad_site = s.bad_site
+        # (an uncertified wait under `$no_deadlocks` is reported where it is)
+        if dir_no_deadlocks(pos) and not dir_no_deadlocks(s.bad_site): fatal(pos, "this calls {name}, which {s.bad} ({nd_where(s.bad_site, pos)}), and no certificate covers that wait (`$no_deadlocks`): give it one, or opt its scope in to see what it lacks")
+    if held.len() > 0 and busy: nd_held_across(held, pos, "calls {name} again (recursively), whose waits are not known yet,")
+    else if held.len() > 0 and s.flags & ND_WAIT != 0: nd_held_across(held, pos, "calls {name}, which {s.wait} ({nd_where(s.wait_site, pos)}),")
+
+nd_param = (e0: int) -> bool:
+    e = e0
+    loop nodes[e].kind == .conv or nodes[e].kind == .namedarg: e = int(nodes[e].a)
+    if nodes[e].kind != .ident or nodes[e].aux != i32(int(SK.local)) or nodes[e].sym <= 0: return false
+    l = int(nodes[e].sym)
+    loop depth in [0..8):
+        if dl_param_of(l) >= 0: return true
+        if int(locals[l].flags) & LF_CAPTURE == 0 or locals[l].outer <= 0: return false
+        l = int(locals[l].outer)
+    false
+
+nd_nonblocking = (e: int) -> bool:
+    c = callable_contract(ntype(e))
+    c != 0 and not effect_allows(c, EffectAtom(.block))
+
+nd_args = (n: int, held: DlHeld[], pos: int, first: int = 0):
+    loop i in [first..nkids(n)):
+        a = kid(n, i)
+        if not is_fn_type(ntype(a)): continue
+        h = dl_fn_arg(a)
+        if h > 0:
+            nd_callee(h, held, pos, "the function given here")
+            continue
+        if nd_param(a) or nd_nonblocking(a): continue
+        nd_bad(pos, "gives a function value the compiler cannot follow, so what it waits for is unknown", "give a function literal or a named function, or a callable type whose row says `no blocks`")
+
+nd_walk = (n: int, held: mut DlHeld[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fnref: return
+    if k == .block:
+        mark = held.len()
+        loop c in kids(n): nd_walk(c, held)
+        if nodes[n].aux != 5: dl_drop(held, mark)
+        return
+    if k == .vardecl:
+        init = int(nodes[n].b)
+        loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
+        if init != 0 and nodes[init].kind == .call:
+            what = dl_lock_call(init)
+            if what == "lock" or what == "try_lock$acquire" or what == "__take":
+                if what == "lock": nd_stack[nd_top()].flags |= ND_LOCK
+                held.push(DlHeld(dl_resolve(dl_receiver(init), nd_fn()), nodes[init].pos, int(nodes[n].sym)))
+                return
+        nd_walk(int(nodes[n].b), held)
+        return
+    if k == .if_ or k == .iflet:
+        nd_walk(int(nodes[n].a), held)
+        mark = held.len()
+        nd_walk(int(nodes[n].b), held)
+        dl_drop(held, mark)
+        nd_walk(int(nodes[n].c), held)
+        dl_drop(held, mark)
+        return
+    if k == .while_ and deadlock_atomics: nd_poll(n)
+    if k == .intrinsic and nodes[n].aux == i32(int(IN.syscall)): nd_syscall(n)
+    if k == .call: nd_call(n, held)
+    else if k == .propagate or k == .parallel_region:
+        nd_walk(int(nodes[n].a), held)
+        return
+    loop g in value_helper_calls(n): nd_callee(g, held, nodes[n].pos, "`{effect_name(g)}` (a hidden call)")
+    if k == .call: return
+    mask = isolation_children(k)
+    if mask < 0:
+        nd_walk(int(nodes[n].a), held)
+        nd_walk(int(nodes[n].b), held)
+        nd_walk(int(nodes[n].c), held)
+        loop c in kids(n): nd_walk(c, held)
+        return
+    if mask & 1 != 0: nd_walk(int(nodes[n].a), held)
+    if mask & 2 != 0: nd_walk(int(nodes[n].b), held)
+    if mask & 4 != 0: nd_walk(int(nodes[n].c), held)
+    if mask & 16 != 0:
+        mark = held.len()
+        loop c in kids(n):
+            nd_walk(c, held)
+            if k == .match_ or k == .arm: dl_drop(held, mark)
+    if mask & 32 != 0:
+        loop c in kids2(n): nd_walk(c, held)
+
+nd_poll = (lp: int):
+    polled: DlLoc[]
+    dl_atomic_reads(int(nodes[lp].a), nd_fn(), polled)
+    loop p in polled:
+        if dl_atomic_written(int(nodes[lp].b), nd_fn(), p): continue
+        nd_wait(nodes[lp].pos, "polls {dl_name(p)}")
+        nd_bad(nodes[lp].pos, "loop waits for another task to set {dl_name(p)}, by polling it", "an atomic set elsewhere is an event no certificate covers; wait for a join or a certified protocol (`serve`, `pipeline`) instead")
+        return
+
+nd_syscall = (n: int):
+    op = if nkids(n) > 0: kid(n, 0) else: 0
+    number = if op != 0 and nodes[op].kind == .int_lit: nodes[op].ival else: -1
+    if number == 39 or number == 60 or number == 186 or number == 204 or number == 228: return
+    if dir_audited_wait(nodes[n].pos): return
+    nd_bad(nodes[n].pos, "makes a system call that may block", "wrap it in an audited adapter: a function whose body says `$audited_wait`, for a call checked to wait only on the outside world")
+
+nd_call = (n: int, held: mut DlHeld[]):
+    pos = nodes[n].pos
+    what = dl_lock_call(n)
+    if what == "__lock_all":
+        nd_stack[nd_top()].flags |= ND_LOCK
+        return
+    if ends_with(what, "$release"):
+        if nkids(n) >= 2:
+            g = kid(n, 1)
+            if nodes[g].kind == .ident and nodes[g].sym > 0:
+                loop i in [0..held.len()):
+                    if held[i].guard == int(nodes[g].sym):
+                        held.remove(i)
+                        break
+        return
+    if len(what) > 0: return
+    op = dc_chan_call(n)
+    if op == 1 or op == 2:
+        loop i in [1..nkids(n)): nd_walk(kid(n, i), held)
+        verb = if op == 1: "waits to send into" else: "waits to receive from"
+        nd_wait(pos, "{verb} {dl_name(dl_resolve(kid(n, 0), nd_fn()))}")
+        nd_bad(pos, "{verb} the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a raw channel's waits are not certified; use a certified protocol: `serve` for request/reply, `pipeline` for a pipeline with feedback")
+        return
+    if op > 0:
+        loop c in kids(n): nd_walk(c, held)
+        return
+    loop c in kids(n): nd_walk(c, held)
+    if nodes[n].aux == 1 or nodes[n].aux == 4:
+        nd_walk(int(nodes[n].a), held)
+        nd_value_call(n, held)
+        return
+    if nodes[n].aux != 0 or nodes[n].sym <= 0: return
+    g = int(nodes[n].sym)
+    d = int(fns[g].decl)
+    if d == 0: return
+    gname = name_of(int(nodes[d].name))
+    if has_flag(d, NF_EXTERN):
+        nd_foreign(n, g, d)
+        return
+    if pc_mod >= 0 and int(fns[g].mod) == pc_mod:
+        nd_protocol(n, gname, held)
+        return
+    if not pos_in_lib(nodes[d].pos):
+        nd_callee(g, held, pos, "`{effect_name(g)}`")
+        nd_args(n, held, pos)
+        return
+    # The library: its own waits are on the outside world, except these.
+    if gname == "__task_spawn" and nkids(n) == 2:
+        h = dl_fn_arg(kid(n, 1))
+        none_held: DlHeld[]
+        if h > 0: nd_callee(h, none_held, pos, "the spawned task")
+        else: nd_bad(pos, "spawns a function value the compiler cannot follow", "spawn a call the compiler can see")
+        return
+    if gname == "__task_join" or gname == "__task_cleanup":
+        nd_wait(pos, "joins its tasks")
+        nd_held_across(held, pos, "joins its tasks")
+        return
+    if (gname == "within" or gname == "race") and int(fns[g].mod) == concurrency_task_module:
+        nd_wait(pos, "waits for the task of `{gname}`")
+        nd_held_across(held, pos, "waits for the task of `{gname}`")
+        none_held: DlHeld[]
+        nd_args(n, none_held, pos)
+        return
+    nd_args(n, held, pos)
+
+nd_value_call = (n: int, held: DlHeld[]):
+    pos = nodes[n].pos
+    callee = int(nodes[n].a)
+    if nd_nonblocking(callee): return
+    h = dl_fn_arg(callee)
+    if h > 0:
+        nd_callee(h, held, pos, "the function value called here")
+        return
+    if nd_param(callee):
+        if held.len() > 0: nd_held_across(held, pos, "calls a function value it was given")
+        return
+    nd_bad(pos, "calls a function value the compiler cannot follow, so what it waits for is unknown", "call a function literal or a named function (or a local holding one), or give the value a callable type whose row says `no blocks`")
+
+nd_foreign = (n: int, g: int, d: int):
+    if nodes[d].sval != 0:
+        row = int(decl_infos[decl_info(d)].sig.contract)
+        if row != 0 and not effect_allows(row, EffectAtom(.block)): return
+    if dir_audited_wait(nodes[n].pos): return
+    nd_bad(nodes[n].pos, "calls the foreign function '{name_of(int(nodes[d].name))}', which may block", "wrap it in an audited adapter, a function whose body says `$audited_wait` (a person has checked that it waits only on the outside world), or declare it with a row that excludes `blocks` if it never waits")
+
+nd_protocol = (n: int, gname: str, held: DlHeld[]):
+    pos = nodes[n].pos
+    none_held: DlHeld[]
+    if gname == "request":
+        nd_wait(pos, "asks a service")
+        t = nd_top()
+        nd_stack[t].flags |= ND_ASK
+        if nd_stack[t].ask_site == 0: nd_stack[t].ask_site = pos
+        nd_held_across(held, pos, "asks a service")
+        return
+    if gname == "serve" and nkids(n) == 2:
+        nd_wait(pos, "serves requests")
+        nd_held_across(held, pos, "serves requests")
+        h = dl_fn_arg(kid(n, 0))
+        if h <= 0: nd_bad(pos, "serves requests with a handler the compiler cannot follow", "give `serve` a function literal or a named function as its handler")
+        else:
+            s = nd_summary(h)
+            # (a server that waits on a service may wait on itself)
+            if s.flags & ND_ASK != 0: nd_bad(pos, "serves requests with a handler that asks a service itself ({nd_where(s.ask_site, pos)})", "a server waiting on a service may wait on itself; compute the reply in the handler, and ask other services from the body")
+            nd_callee(h, none_held, pos, "the handler")
+        nd_args(n, none_held, pos, 1)
+        return
+    if gname == "pipeline":
+        nd_wait(pos, "runs a pipeline")
+        nd_held_across(held, pos, "runs a pipeline")
+        nd_args(n, none_held, pos)
+        return
+    nd_args(n, held, pos)
+
+nd_check = ():
+    if dc_mod < 0: dc_mod = dc_module()
+    if dc_qmod < 0: dc_qmod = dc_module("/prelude/mpmc.dewy")
+    if dc_smod < 0: dc_smod = dc_module("/prelude/spsc.dewy")
+    # (the functions of the files that opt in; what they reach is summarized as they call it)
+    files_in: {int: bool} = {}
+    loop sc in dir_scopes:
+        if sc.setting == dir_name_deadlocks and sc.value == 1: files_in[pos_file(sc.start)] = true
+    loop f in [1..fns.len()):
+        if fns[f].state != 2 or fns[f].body == 0: continue
+        if not files_in.has(pos_file(nodes[int(fns[f].body)].pos)): continue
+        nd_summary(f)

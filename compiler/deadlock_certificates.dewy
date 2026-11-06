@@ -1,0 +1,369 @@
+$runtime_checks
+from p"deadlock.jo" import (DlHeld DlLoc NdSum ND_LOCK ND_WAIT ND_ASK ND_BAD nd_sums nd_index nd_path nd_low nd_stack nd_fns deadlock_atomics dc_mod dc_qmod dc_smod pc_mod dc_module dc_chan_call)
+from p"deadlock_locations.dewy" import (dl_name dl_resolve dl_receiver)
+from p"deadlock_summaries.dewy" import dl_drop
+from p"deadlock_walk.dewy" import (dl_param_of dl_fn_arg dl_lock_call)
+from p"deadlock_waits.dewy" import (dl_atomic_reads dl_atomic_written)
+from p"ast.jo" import (nodes kids kids2 kid nkids has_flag NF_EXTERN)
+from p"check.jo" import (fns locals LF_CAPTURE decl_infos decl_info)
+from p"expr.jo" import (is_fn_type ntype)
+from p"util.jo" import (fatal name_of pos_in_lib pos_file line_col files)
+from p"directives.jo" import (dir_no_deadlocks dir_audited_wait dir_scopes dir_name_deadlocks)
+from p"ownership.jo" import ownership_hooks
+from p"concurrency.jo" import concurrency_task_module
+from p"effect_lattice.dewy" import effect_allows
+from p"effect_types.dewy" import EffectAtom
+from p"effect_contracts.dewy" import callable_contract
+from p"effect_control.dewy" import effect_name
+from p"lower_helpers.dewy" import value_helper_calls
+from p"isolation_ops.dewy" import isolation_children
+from p"expr.jo" import IN
+
+# Summarize only demanded bodies; recursive components share their root summary.
+CertificateWord:type=int64<overflow='wrap'>
+nd_empty=():>NdSum=>NdSum(0 "" 0 "" 0 0)
+nd_top=():>int64=>CertificateWord(nd_stack.length) - 1
+nd_fn=():>int64=>$unsafe {nd_fns.ptr[CertificateWord(nd_fns.length) - 1]}
+nd_where=(site:CertificateWord from_:CertificateWord):>string=>$unsafe {
+    let lc=line_col(site)
+    if pos_file(site) =? pos_file(from_) {return "line {lc[0]}"}
+    # split preserves arbitrary path bytes, including an invalid UTF-8 basename.
+    let parts=files.ptr[pos_file(site)].path.split("/")
+    "{parts.ptr[CertificateWord(parts.length) - 1]}:{lc[0]}"
+}
+nd_bad=(site:CertificateWord text:string fix:string):>void=>$unsafe {
+    let t=nd_top()
+    if nd_stack.ptr[t].flags & ND_BAD =? 0 {
+        nd_stack.ptr[t].flags|=ND_BAD
+        nd_stack.ptr[t].bad=text
+        nd_stack.ptr[t].bad_site=site
+    }
+    if dir_no_deadlocks(site) {fatal(site "this {text}, and no certificate covers it (`$no_deadlocks`): {fix}")}
+}
+nd_wait=(site:CertificateWord text:string):>void=>$unsafe {
+    let t=nd_top()
+    nd_stack.ptr[t].flags|=ND_WAIT
+    if nd_stack.ptr[t].wait.length =? 0 {
+        nd_stack.ptr[t].wait=text
+        nd_stack.ptr[t].wait_site=site
+    }
+}
+nd_held_across=(held:array<DlHeld> site:CertificateWord what:string):>void=>$unsafe {
+    if held.length =? 0 {return}
+    let h=held.ptr[CertificateWord(held.length) - 1]
+    nd_bad(site "{what} while holding {dl_name(h.loc)} (since {nd_where(h.site site)})" "a lock is held only across other locks taken in the checked order; let the place end before this wait")
+}
+nd_summary=(f:CertificateWord):>NdSum=>$unsafe {
+    let cached=nd_sums.get(f)
+    if cached not=? none {return cached}
+    let index=nd_index.get(f)
+    if index not=? none {
+        nd_low=min(nd_low index)
+        return nd_empty()
+    }
+    if fns.ptr[f].body =? 0 or pos_in_lib(nodes.ptr[CertificateWord(fns.ptr[f].body)].pos) {return nd_empty()}
+    let i=CertificateWord(nd_path.length)
+    nd_index[f]=i
+    nd_path.push(f)
+    let saved=nd_low
+    nd_low=i
+    nd_stack.push(nd_empty())
+    nd_fns.push(f)
+    let held:array<DlHeld>=[]
+    nd_walk(CertificateWord(fns.ptr[f].body) @held)
+    let d=CertificateWord(fns.ptr[f].decl)
+    let t=nd_top()
+    if d not=? 0 and ownership_hooks.has(d) and nd_stack.ptr[t].flags & (ND_LOCK | ND_WAIT) not=? 0 and nd_stack.ptr[t].flags & ND_BAD =? 0 {
+        let what=if nd_stack.ptr[t].wait.length >? 0 {"{nd_stack.ptr[t].wait} ({nd_where(nd_stack.ptr[t].wait_site nodes.ptr[d].pos)})"} else {"takes a lock"}
+        nd_bad(nodes.ptr[d].pos "lifecycle hook waits: it {what}" "cleanup runs where a value ends, which the lock order and the joins do not see; keep waits out of `$__drop__`, `$__copy__` and `$__move__` hooks")
+    }
+    nd_fns.pop();
+    let s=nd_stack.pop()
+    let low=nd_low
+    nd_low=min(saved low)
+    if low >=? i {
+        loop j in [i..nd_path.length) {
+            nd_sums[nd_path.ptr[j]]=s
+            nd_index.remove(nd_path.ptr[j]);
+        }
+        loop nd_path.length >? i {nd_path.pop();}
+    }
+    s
+}
+nd_callee=(h:CertificateWord held:array<DlHeld> pos:CertificateWord name:string):>void=>$unsafe {
+    let busy=nd_index.has(h)
+    let s=nd_summary(h)
+    let t=nd_top()
+    nd_stack.ptr[t].flags|=s.flags & (ND_LOCK | ND_WAIT | ND_ASK)
+    if s.flags & ND_WAIT not=? 0 and nd_stack.ptr[t].wait.length =? 0 {
+        nd_stack.ptr[t].wait=s.wait
+        nd_stack.ptr[t].wait_site=s.wait_site
+    }
+    if s.flags & ND_ASK not=? 0 and nd_stack.ptr[t].ask_site =? 0 {nd_stack.ptr[t].ask_site=s.ask_site}
+    if s.flags & ND_BAD not=? 0 {
+        if nd_stack.ptr[t].flags & ND_BAD =? 0 {
+            nd_stack.ptr[t].flags|=ND_BAD
+            nd_stack.ptr[t].bad=s.bad
+            nd_stack.ptr[t].bad_site=s.bad_site
+        }
+        if dir_no_deadlocks(pos) and not dir_no_deadlocks(s.bad_site) {fatal(pos "this calls {name}, which {s.bad} ({nd_where(s.bad_site pos)}), and no certificate covers that wait (`$no_deadlocks`): give it one, or opt its scope in to see what it lacks")}
+    }
+    if held.length >? 0 and busy {nd_held_across(held pos "calls {name} again (recursively), whose waits are not known yet,")}
+    else if held.length >? 0 and s.flags & ND_WAIT not=? 0 {nd_held_across(held pos "calls {name}, which {s.wait} ({nd_where(s.wait_site pos)}),")}
+}
+nd_param=(e0:CertificateWord):>bool=>$unsafe {
+    let e=e0
+    loop nodes.ptr[e].kind =? 'conv' or nodes.ptr[e].kind =? 'namedarg' {e=CertificateWord(nodes.ptr[e].a)}
+    if nodes.ptr[e].kind not=? 'ident' or nodes.ptr[e].aux not=? int32(1) or nodes.ptr[e].sym <=? 0 {return false}
+    let l=CertificateWord(nodes.ptr[e].sym)
+    loop depth in [0..8) {
+        if dl_param_of(l) >=? 0 {return true}
+        if CertificateWord(locals.ptr[l].flags) & LF_CAPTURE =? 0 or locals.ptr[l].outer <=? 0 {return false}
+        l=CertificateWord(locals.ptr[l].outer)
+    }
+    false
+}
+nd_nonblocking=(e:CertificateWord):>bool=>{
+    let c=callable_contract(ntype(e))
+    c not=? 0 and not effect_allows(c EffectAtom('block'))
+}
+nd_args=(n:CertificateWord held:array<DlHeld> pos:CertificateWord first:CertificateWord=0):>void=>{
+    loop i in [first..nkids(n)) {
+        let a=kid(n i)
+        if not is_fn_type(ntype(a)) {continue}
+        let h=dl_fn_arg(a)
+        if h >? 0 {
+            nd_callee(h held pos "the function given here")
+            continue
+        }
+        if nd_param(a) or nd_nonblocking(a) {continue}
+        nd_bad(pos "gives a function value the compiler cannot follow, so what it waits for is unknown" "give a function literal or a named function, or a callable type whose row says `no blocks`")
+    }
+}
+nd_walk=(n:CertificateWord @held:array<DlHeld>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fnref' {return}
+    if k =? 'block' {
+        let mark=held.length
+        loop c in kids(n) {nd_walk(c @held)}
+        if nodes.ptr[n].aux not=? 5 {dl_drop(@held mark)}
+        return
+    }
+    if k =? 'vardecl' {
+        let init=CertificateWord(nodes.ptr[n].b)
+        loop init not=? 0 and nodes.ptr[init].kind =? 'conv' {init=CertificateWord(nodes.ptr[init].a)}
+        if init not=? 0 and nodes.ptr[init].kind =? 'call' {
+            let what=dl_lock_call(init)
+            if what =? "lock" or what =? "try_lock$acquire" or what =? "__take" {
+                if what =? "lock" {nd_stack.ptr[nd_top()].flags|=ND_LOCK}
+                held.push(DlHeld(dl_resolve(dl_receiver(init) nd_fn()) nodes.ptr[init].pos CertificateWord(nodes.ptr[n].sym)))
+                return
+            }
+        }
+        nd_walk(CertificateWord(nodes.ptr[n].b) @held)
+        return
+    }
+    if k =? 'if_' or k =? 'iflet' {
+        nd_walk(CertificateWord(nodes.ptr[n].a) @held)
+        let mark=held.length
+        nd_walk(CertificateWord(nodes.ptr[n].b) @held)
+        dl_drop(@held mark)
+        nd_walk(CertificateWord(nodes.ptr[n].c) @held)
+        dl_drop(@held mark)
+        return
+    }
+    if k =? 'while_' and deadlock_atomics {nd_poll(n)}
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(IN.syscall) {nd_syscall(n)}
+    if k =? 'call' {nd_call(n @held)}
+    else if k =? 'propagate' or k =? 'parallel_region' {
+        nd_walk(CertificateWord(nodes.ptr[n].a) @held)
+        return
+    }
+    loop g in value_helper_calls(n) {nd_callee(g held nodes.ptr[n].pos "`{effect_name(g)}` (a hidden call)")}
+    if k =? 'call' {return}
+    let mask=isolation_children(k)
+    if mask <? 0 {
+        nd_walk(CertificateWord(nodes.ptr[n].a) @held)
+        nd_walk(CertificateWord(nodes.ptr[n].b) @held)
+        nd_walk(CertificateWord(nodes.ptr[n].c) @held)
+        loop c in kids(n) {nd_walk(c @held)}
+        return
+    }
+    if mask & 1 not=? 0 {nd_walk(CertificateWord(nodes.ptr[n].a) @held)}
+    if mask & 2 not=? 0 {nd_walk(CertificateWord(nodes.ptr[n].b) @held)}
+    if mask & 4 not=? 0 {nd_walk(CertificateWord(nodes.ptr[n].c) @held)}
+    if mask & 16 not=? 0 {
+        let mark=held.length
+        loop c in kids(n) {
+            nd_walk(c @held)
+            if k =? 'match_' or k =? 'arm' {dl_drop(@held mark)}
+        }
+    }
+    if mask & 32 not=? 0 {loop c in kids2(n) {nd_walk(c @held)}}
+}
+nd_poll=(lp:CertificateWord):>void=>$unsafe {
+    let polled:array<DlLoc>=[]
+    dl_atomic_reads(CertificateWord(nodes.ptr[lp].a) nd_fn() @polled)
+    loop p in polled {
+        if dl_atomic_written(CertificateWord(nodes.ptr[lp].b) nd_fn() p) {continue}
+        nd_wait(nodes.ptr[lp].pos "polls {dl_name(p)}")
+        nd_bad(nodes.ptr[lp].pos "loop waits for another task to set {dl_name(p)}, by polling it" "an atomic set elsewhere is an event no certificate covers; wait for a join or a certified protocol (`serve`, `pipeline`) instead")
+        return
+    }
+}
+nd_syscall=(n:CertificateWord):>void=>$unsafe {
+    let op:CertificateWord=if nkids(n) >? 0 {kid(n 0)} else {0}
+    let number:CertificateWord=if op not=? 0 and nodes.ptr[op].kind =? 'int_lit' {nodes.ptr[op].ival} else {-1}
+    if number =? 39 or number =? 60 or number =? 186 or number =? 204 or number =? 228 {return}
+    if dir_audited_wait(nodes.ptr[n].pos) {return}
+    nd_bad(nodes.ptr[n].pos "makes a system call that may block" "wrap it in an audited adapter: a function whose body says `$audited_wait`, for a call checked to wait only on the outside world")
+}
+nd_call=(n:CertificateWord @held:array<DlHeld>):>void=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let what=dl_lock_call(n)
+    if what =? "__lock_all" {
+        nd_stack.ptr[nd_top()].flags|=ND_LOCK
+        return
+    }
+    if what.endswith("$release") {
+        if nkids(n) >=? 2 {
+            let g=kid(n 1)
+            if nodes.ptr[g].kind =? 'ident' and nodes.ptr[g].sym >? 0 {
+                loop i in [0..held.length) {
+                    if held.ptr[i].guard =? CertificateWord(nodes.ptr[g].sym) {
+                        held.pop(i);
+                        break
+                    }
+                }
+            }
+        }
+        return
+    }
+    if what.length >? 0 {return}
+    let op=dc_chan_call(n)
+    if op =? 1 or op =? 2 {
+        loop i in [1..nkids(n)) {nd_walk(kid(n i) @held)}
+        let verb=if op =? 1 {"waits to send into"} else {"waits to receive from"}
+        nd_wait(pos "{verb} {dl_name(dl_resolve(kid(n 0) nd_fn()))}")
+        nd_bad(pos "{verb} the channel {dl_name(dl_resolve(kid(n 0) nd_fn()))}" "a raw channel's waits are not certified; use a certified protocol: `serve` for request/reply, `pipeline` for a pipeline with feedback")
+        return
+    }
+    if op >? 0 {
+        loop c in kids(n) {nd_walk(c @held)}
+        return
+    }
+    loop c in kids(n) {nd_walk(c @held)}
+    if nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4 {
+        nd_walk(CertificateWord(nodes.ptr[n].a) @held)
+        nd_value_call(n held)
+        return
+    }
+    if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return}
+    let g=CertificateWord(nodes.ptr[n].sym)
+    let d=CertificateWord(fns.ptr[g].decl)
+    if d =? 0 {return}
+    let gname=name_of(CertificateWord(nodes.ptr[d].name))
+    if has_flag(d NF_EXTERN) {
+        nd_foreign(n g d)
+        return
+    }
+    if pc_mod >=? 0 and CertificateWord(fns.ptr[g].mod) =? pc_mod {
+        nd_protocol(n gname held)
+        return
+    }
+    if not pos_in_lib(nodes.ptr[d].pos) {
+        nd_callee(g held pos "`{effect_name(g)}`")
+        nd_args(n held pos)
+        return
+    }
+    if gname =? "__task_spawn" and nkids(n) =? 2 {
+        let h=dl_fn_arg(kid(n 1))
+        let none_held:array<DlHeld>=[]
+        if h >? 0 {nd_callee(h none_held pos "the spawned task")}
+        else {nd_bad(pos "spawns a function value the compiler cannot follow" "spawn a call the compiler can see")}
+        return
+    }
+    if gname =? "__task_join" or gname =? "__task_cleanup" {
+        nd_wait(pos "joins its tasks")
+        nd_held_across(held pos "joins its tasks")
+        return
+    }
+    if (gname =? "within" or gname =? "race") and CertificateWord(fns.ptr[g].mod) =? concurrency_task_module {
+        nd_wait(pos "waits for the task of `{gname}`")
+        nd_held_across(held pos "waits for the task of `{gname}`")
+        let none_held:array<DlHeld>=[]
+        nd_args(n none_held pos)
+        return
+    }
+    nd_args(n held pos)
+}
+nd_value_call=(n:CertificateWord held:array<DlHeld>):>void=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let callee=CertificateWord(nodes.ptr[n].a)
+    if nd_nonblocking(callee) {return}
+    let h=dl_fn_arg(callee)
+    if h >? 0 {
+        nd_callee(h held pos "the function value called here")
+        return
+    }
+    if nd_param(callee) {
+        if held.length >? 0 {nd_held_across(held pos "calls a function value it was given")}
+        return
+    }
+    nd_bad(pos "calls a function value the compiler cannot follow, so what it waits for is unknown" "call a function literal or a named function (or a local holding one), or give the value a callable type whose row says `no blocks`")
+}
+nd_foreign=(n:CertificateWord g:CertificateWord d:CertificateWord):>void=>$unsafe {
+    if nodes.ptr[d].sval not=? 0 {
+        let row=CertificateWord(decl_infos.ptr[decl_info(d)].sig.contract)
+        if row not=? 0 and not effect_allows(row EffectAtom('block')) {return}
+    }
+    if dir_audited_wait(nodes.ptr[n].pos) {return}
+    nd_bad(nodes.ptr[n].pos "calls the foreign function '{name_of(CertificateWord(nodes.ptr[d].name))}', which may block" "wrap it in an audited adapter, a function whose body says `$audited_wait` (a person has checked that it waits only on the outside world), or declare it with a row that excludes `blocks` if it never waits")
+}
+nd_protocol=(n:CertificateWord gname:string held:array<DlHeld>):>void=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let none_held:array<DlHeld>=[]
+    if gname =? "request" {
+        nd_wait(pos "asks a service")
+        let t=nd_top()
+        nd_stack.ptr[t].flags|=ND_ASK
+        if nd_stack.ptr[t].ask_site =? 0 {nd_stack.ptr[t].ask_site=pos}
+        nd_held_across(held pos "asks a service")
+        return
+    }
+    if gname =? "serve" and nkids(n) =? 2 {
+        nd_wait(pos "serves requests")
+        nd_held_across(held pos "serves requests")
+        let h=dl_fn_arg(kid(n 0))
+        if h <=? 0 {nd_bad(pos "serves requests with a handler the compiler cannot follow" "give `serve` a function literal or a named function as its handler")}
+        else {
+            let s=nd_summary(h)
+            if s.flags & ND_ASK not=? 0 {nd_bad(pos "serves requests with a handler that asks a service itself ({nd_where(s.ask_site pos)})" "a server waiting on a service may wait on itself; compute the reply in the handler, and ask other services from the body")}
+            nd_callee(h none_held pos "the handler")
+        }
+        nd_args(n none_held pos 1)
+        return
+    }
+    if gname =? "pipeline" {
+        nd_wait(pos "runs a pipeline")
+        nd_held_across(held pos "runs a pipeline")
+        nd_args(n none_held pos)
+        return
+    }
+    nd_args(n held pos)
+}
+nd_check=():>void=>$unsafe {
+    if dc_mod <? 0 {dc_mod=dc_module()}
+    if dc_qmod <? 0 {dc_qmod=dc_module("/prelude/mpmc.dewy")}
+    if dc_smod <? 0 {dc_smod=dc_module("/prelude/spsc.dewy")}
+    let files_in:dict<int64 bool>=[]
+    loop sc in dir_scopes {
+        if sc.setting =? dir_name_deadlocks and sc.value =? 1 {files_in[pos_file(sc.start)]=true}
+    }
+    loop f in [1..fns.length) {
+        if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 {continue}
+        if not files_in.has(pos_file(nodes.ptr[CertificateWord(fns.ptr[f].body)].pos)) {continue}
+        nd_summary(f);
+    }
+}
