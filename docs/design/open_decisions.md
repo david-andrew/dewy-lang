@@ -91,14 +91,19 @@ gap.total_days                                             # 9861
 - **Rec:** both, as shown: `age` as a top-level function, and `Date - Date` gives a `Period`.
 
 ### D15e. A clearer name for `today_support`
-- **What it is:** `today` gives one `Date`. This gives the range of dates it could really be right now: one normally, two when the clock's uncertainty spans midnight, and unknown if the clock was never set. It's rarely needed.
+- **What it is:** `today` always gives one `Date`. This is the careful version, which refuses to pretend when the clock can't say. It's rarely needed.
 
 ```dewy
-let dates = today_range      # [2026-11-06..2026-11-07] at 23:59:59 with a ±2s clock
+match strict_today {
+    d:Date => printl"{d}"                         # the normal case
+    a:AmbiguousToday => printl"{a.dates}"         # 23:59:59 with a ±2s clock: 2026-11-06 or 2026-11-07
+    u:UnknownToday => printl"clock was never set"
+}
 ```
 
-- **Options:** `today_range`, `today_span`, `today_bounds`. Considered: `possible_todays` and `today_support`, which both read oddly.
-- **Rec:** `today_range`, since it returns a range in Dewy's range syntax.
+- **One function, not two:** this returns the same union `today` gives under `$time.explicit_clock_accuracy`, so the range of possible dates lives on `AmbiguousToday`, with no separate query.
+- **Options:** `strict_today`, `pedantic_today`, `careful_today`, `checked_today`.
+- **Rec:** `strict_today`, since "strict" is already the word for this in the time design. `pedantic_today` is your suggestion and also reads correctly.
 
 ### D10. Safety defaults and tag names (#108)
 - **BLUF:** with no tags, anything a program can reasonably meet is a value or a compile error, and crashing takes one written word. A tag's first word tells you its direction. Full proposal and the cold-read review of the names: `docs/design/proposals/bulletproof/round2.md`, `round2-review.md`.
