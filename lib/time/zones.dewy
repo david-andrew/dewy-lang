@@ -1,0 +1,401 @@
+# Zones of docs/design/time.md: the pinned rule pack (tools/time/gen_rules.py), offsets at a moment,
+# local times resolved through gaps and folds, and zoned values. Only a program that reaches a
+# zone operation links the pack.
+from p"core.dewy" import (Instant Duration Days Months instant_at ns_count read_fields read_offset NO_OFFSET _Cursor Fields _byte _utc_to_axis _axis_to_utc civil_from_days days_from_civil days_in_month _year_text _fraction_text _DAY_NS _NS pad)
+import p"core.dewy" as core
+# (inside a function, so a program links the pack only if something still reads it when it runs:
+# a literal folded while compiling does not)
+_rules=():>array<uint8>=>{
+    const pack=$include_bytes(p"rules/current.bin")
+    pack
+}
+
+Zone:type=[_entry:int64]
+ZonedDateTime:type=[nominal:Instant zone:Zone offset:int64]
+
+# ---------------- reading the pack ----------------
+_u8=(at:int64):>int64=>$unsafe {int64(_rules()[at])}
+_u32=(at:int64):>int64=>$unsafe {
+    int64(_rules()[at]) + (int64(_rules()[at+1]) << 8) + (int64(_rules()[at+2]) << 16) + (int64(_rules()[at+3]) << 24)
+}
+_i32=(at:int64):>int64=>{
+    let v=_u32(at)
+    if v >=? 2147483648 {v-4294967296} else {v}
+}
+_i64=(at:int64):>int64=>$unsafe {
+    let v:int64<overflow='wrap'>=0
+    loop i in [0..8) {
+        v=v+(int64<overflow='wrap'>(_rules()[at+i]) << (8*i))
+    }
+    int64<overflow='wrap'>(v)
+}
+_zone_count=():>int64=>_u32(4)
+_entry_at=(entry:int64):>int64=>16+entry*12
+# (the name's bytes against text: negative, zero or positive)
+_compare=(entry:int64 text:string):>int64=>$unsafe {
+    let at=_u32(_entry_at(entry))
+    let len=_u32(_entry_at(entry)+4)
+    let bytes=text as array<uint8>
+    let i:int64=0
+    loop i <? len and i <? bytes.length {
+        let a=int64(_rules()[at+i])
+        let b=int64(bytes[i])
+        if a not=? b {return a-b}
+        i=i+1
+    }
+    len-bytes.length
+}
+_text_at=(at:int64 len:int64):>string=>$unsafe {
+    # (pack names and rules are ASCII; this also runs at compile time, for a literal's message)
+    let out:array<uint8>=[]
+    loop i in [0..len) {out.push(_rules()[at+i])}
+    str_from_bytes(out)
+}
+# The rule data this program's zones come from.
+rules_version=():>string=>_text_at(_u32(8) _u32(12))
+
+zone_parse=(name:string):>Zone|UnknownZone=>{
+    let lo:int64=0
+    let hi=_zone_count()
+    loop lo <? hi {
+        let mid=(lo+hi)//2
+        let c=_compare(mid name)
+        if c =? 0 {return Zone[mid]}
+        if c <? 0 {lo=mid+1} else {hi=mid}
+    }
+    UnknownZone["no time zone is called {name}"]
+}
+zone_error=(name:string):>string?=>match zone_parse(name) {
+    z:Zone=>none
+    e:UnknownZone=>e.message
+}
+name=(z:Zone):>string=>_text_at(_u32(_entry_at(z._entry)) _u32(_entry_at(z._entry)+4))
+__as__=(z:Zone):>string=>name(z)
+__eq__=(a:Zone b:Zone):>bool=>a._entry =? b._entry
+
+# The machine's zone, read once. Its rules still come from the pack; a name the pack does not
+# know, or none at all, is UTC.
+_system:Zone|none=none
+system_zone=():>Zone=>{
+    if _system isnt? none {return _system}
+    let found=zone_parse(__system_zone_name())
+    let chosen:Zone=match found {
+        z:Zone=>z
+        e:UnknownZone=>zone_parse("UTC") ?? Zone[0]
+    }
+    _system=chosen
+    chosen
+}
+# (what is wrong with a `$time.zone` value; only a name can be)
+zone_scope_error=(scope:string|none):>string?=>{
+    if scope is? none or scope =? 'system' {return none}
+    zone_error(scope)
+}
+# A named zone or the machine's, as `$time.zone` says.
+scope_zone=(scope:string|none):>Zone|UnknownZone=>{
+    if scope is? none or scope =? 'system' {return system_zone()}
+    zone_parse(scope)
+}
+
+# ---------------- offsets ----------------
+_record=(z:Zone):>int64=>_u32(_entry_at(z._entry)+8)
+# The number of changes at or before a POSIX second, by binary search.
+_changes_before=(record:int64 moment:int64):>int64=>{
+    let count=_u32(record+4)
+    let lo:int64=0
+    let hi=count
+    loop lo <? hi {
+        let mid=(lo+hi)//2
+        if _i64(record+16+mid*8) <=? moment {lo=mid+1} else {hi=mid}
+    }
+    lo
+}
+_offset_after=(record:int64 changes:int64):>int64=>{
+    if changes =? 0 {return _i32(record)}
+    _i32(record+16+_u32(record+4)*8+(changes-1)*4)
+}
+# Seconds east of UTC at a POSIX second, by the table and then by the zone's POSIX rule.
+offset_at=(z:Zone moment:int64):>int64=>{
+    let record=_record(z)
+    let count=_u32(record+4)
+    let changes=_changes_before(record moment)
+    if changes <? count or _u32(record+12) =? 0 {return _offset_after(record changes)}
+    _rule_offset(record moment)
+}
+
+# ---------------- the POSIX TZ rule after the table ----------------
+# `std offset [dst [offset] [,start[/time],end[/time]]]`, read from the pack in place.
+_Rule:type=[at:int64 stop:int64]
+_skip_name=(@r:_Rule):>void=>{
+    if _u8(r.at) =? 60 {
+        loop _u8(r.at) not=? 62 {r.at=r.at+1}
+        r.at=r.at+1
+        return
+    }
+    loop r.at <? r.stop and ((_u8(r.at) >=? 65 and _u8(r.at) <=? 90) or (_u8(r.at) >=? 97 and _u8(r.at) <=? 122)) {r.at=r.at+1}
+}
+_number=(@r:_Rule):>int64=>{
+    let v:int64=0
+    loop r.at <? r.stop and _u8(r.at) >=? 48 and _u8(r.at) <=? 57 {
+        v=v*10+_u8(r.at)-48
+        r.at=r.at+1
+    }
+    v
+}
+# hh[:mm[:ss]], signed: seconds.
+_hms=(@r:_Rule):>int64=>{
+    let sign:int64=1
+    if r.at <? r.stop and _u8(r.at) =? 45 {
+        sign=-1
+        r.at=r.at+1
+    } else if r.at <? r.stop and _u8(r.at) =? 43 {r.at=r.at+1}
+    let v=_number(@r)*3600
+    if r.at <? r.stop and _u8(r.at) =? 58 {
+        r.at=r.at+1
+        v=v+_number(@r)*60
+        if r.at <? r.stop and _u8(r.at) =? 58 {
+            r.at=r.at+1
+            v=v+_number(@r)
+        }
+    }
+    sign*v
+}
+_weekday_of=(days:int):>int64=>((days+4)%7).to_int64() ?? 0
+# A `Mm.n.d[/time]`, `Jn` or `n` date in a year: local seconds since 1970 at which it falls.
+_rule_date=(@r:_Rule year:int):>int=>{
+    let days:int=0
+    let b=_u8(r.at)
+    if b =? 77 {
+        r.at=r.at+1
+        let month=_number(@r)
+        r.at=r.at+1
+        let week=_number(@r)
+        r.at=r.at+1
+        let weekday=_number(@r)
+        let first=days_from_civil(year month 1)
+        let delta=(weekday-_weekday_of(first)+7)%7
+        let day=int(delta)+int(week-1)*7
+        let length=int(days_in_month(year month))
+        loop day >=? length {day=day-7}
+        days=first+day
+    } else if b =? 74 {
+        r.at=r.at+1
+        let n=_number(@r)
+        let extra:int64=if days_in_month(year 2) =? 29 and n >=? 60 {1} else {0}
+        days=days_from_civil(year 1 1)+int(n)-1+int(extra)
+    } else {
+        days=days_from_civil(year 1 1)+int(_number(@r))
+    }
+    let time:int64=7200
+    if r.at <? r.stop and _u8(r.at) =? 47 {
+        r.at=r.at+1
+        time=_hms(@r)
+    }
+    days*86400+int(time)
+}
+_rule_offset=(record:int64 moment:int64):>int64=>{
+    let start=_u32(record+8)
+    let r=_Rule[start start+_u32(record+12)]
+    _skip_name(@r)
+    let standard=-_hms(@r)
+    if r.at >=? r.stop {return standard}
+    _skip_name(@r)
+    let daylight=standard+3600
+    if r.at <? r.stop and _u8(r.at) not=? 44 {daylight=-_hms(@r)}
+    if r.at >=? r.stop {return standard}
+    r.at=r.at+1
+    let [year _m _d]=civil_from_days(int(moment+standard)//86400)
+    let on=_rule_date(@r year)-int(standard)
+    r.at=r.at+1
+    let off=_rule_date(@r year)-int(daylight)
+    let t=int(moment)
+    let in_dst=if on <? off {t >=? on and t <? off} else {not (t >=? off and t <? on)}
+    if in_dst {daylight} else {standard}
+}
+
+# ---------------- moments in a zone, and local times back to moments ----------------
+const _MJD_1970:int=40587
+_posix_of=(t:Instant):>int64|OutsideCoverage=>{
+    let label=_axis_to_utc(ns_count(t))
+    if label is? none {return OutsideCoverage["UTC, and so a zone's rules, starts in 1961"]}
+    let [mjd in_day]=label
+    let seconds=(mjd-_MJD_1970)*86400+(if in_day >=? _DAY_NS {86399} else {in_day//_NS})
+    seconds.to_int64() ?? 0
+}
+in_zone=(t:Instant z:Zone):>ZonedDateTime|OutsideCoverage=>ZonedDateTime[t z offset_at(z _posix_of(t) or_throw)]
+_at=(moment:int64 nanos:int z:Zone offset:int64):>ZonedDateTime|OutsideCoverage|OffGrid|InvalidFields=>{
+    let days=int(moment)//86400
+    let axis=_utc_to_axis(days+_MJD_1970 (int(moment)%86400)*_NS+nanos) or_throw
+    ZonedDateTime[instant_at(axis) z offset]
+}
+_local_text=(local:int64):>string=>{
+    let [y m d]=civil_from_days(int(local)//86400)
+    let t=local%86400
+    "{_year_text(y)}-{pad(m 2)}-{pad(d 2)}T{pad(t//3600 2)}:{pad((t%3600)//60 2)}:{pad(t%60 2)}"
+}
+_pair_text=(offset:int64):>string=>{
+    let size=if offset <? 0 {-offset} else {offset}
+    let sign=if offset <? 0 {"-"} else {"+"}
+    "{sign}{pad(size//3600 2)}:{pad((size%3600)//60 2)}"
+}
+_FoldPolicy:type='earlier'|'later'|'reject'
+_GapPolicy:type='preserve_displacement'|'next'|'reject'
+# Local seconds in a zone: the moment under the policies, or the Gap or Ambiguous with no policy.
+_resolve=(local:int64 nanos:int z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields=>{
+    let record=_record(z)
+    let window:int64=93600
+    let early=offset_at(z local-window)
+    let late=offset_at(z local+window)
+    let seen:array<int64>=[early]
+    let first=_changes_before(record local-window)
+    let last=_changes_before(record local+window)
+    let i=first
+    loop i <? last {
+        let o=_offset_after(record i+1)
+        if not seen.contains(o) {seen.push(o)}
+        i=i+1
+    }
+    if not seen.contains(late) {seen.push(late)}
+    # (each offset whose moment really reads that offset, earliest moment first: largest offset first)
+    let found:array<int64>=[]
+    loop o in seen {
+        if offset_at(z local-o) =? o {found.push(o)}
+    }
+    found.sort(reverse=true)
+    if found.length =? 1 {return _at(local-found[0] nanos z found[0])}
+    if found.length =? 0 {
+        let before=offset_at(z local-window)
+        let after=offset_at(z local+window)
+        if gap =? 'preserve_displacement' {return _at(local-before nanos z after)}
+        if gap =? 'next' {
+            # (the change itself: the first moment after the gap)
+            let change=_i64(record+16+_changes_before(record local-before)*8-8)
+            return _at(change 0 z after)
+        }
+        return Gap["{_local_text(local)} does not exist in {name(z)}: the clocks jumped from {_pair_text(before)} to {_pair_text(after)}. Add gap='preserve_displacement' or gap='next'" int(before) int(after)]
+    }
+    if fold =? 'earlier' {return _at(local-found[0] nanos z found[0])}
+    if fold =? 'later' {return _at(local-found[found.length-1] nanos z found[found.length-1])}
+    Ambiguous["{_local_text(local)} happens more than once in {name(z)}. Add fold='earlier' or fold='later'" [loop o in found int(o)]]
+}
+
+# The zone of a time: written in its text, or given, or the scope's. A literal cannot assume.
+_zone_for=(written:Zone|none given:Zone|none scope:string|none running:bool):>Zone|UnknownZone|MissingContext=>{
+    if written isnt? none {return written}
+    if given isnt? none {return given}
+    if scope is? none or (scope =? 'system' and not running) {
+        return MissingContext["there is no zone to read this in, and a literal cannot assume one: write it in the text, `2026-10-26T09:00[America/New_York]`, pass `zone=`, or set `$time.zone`"]
+    }
+    if scope =? 'system' {return system_zone()}
+    zone_parse(scope)
+}
+# `2026-10-26T09:00[America/New_York]`, or local text with a `zone`, or the scope's `$time.zone`.
+zoned_parse=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none running:bool=true):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>{
+    let c=_Cursor[text 0]
+    let f=read_fields(@c) or_throw
+    if not f.has_time {return ParseError["a zoned time needs a time of day, as `2026-10-26T09:00[America/New_York]`"]}
+    let written=read_offset(@c) or_throw
+    let bytes=text as array<uint8>
+    let written_zone:Zone|none=none
+    if _byte(c c.at) =? 91 {
+        let close=c.at
+        loop close <? bytes.length and _byte(c close) not=? 93 {close=close+1}
+        if close =? bytes.length {return ParseError["a zone in brackets closes with `]`"]}
+        written_zone=zone_parse(text[c.at+1..close)) or_throw
+        c.at=close+1
+    }
+    if c.at not=? bytes.length {return ParseError["unexpected text after the time"]}
+    let chosen=_zone_for(written_zone zone scope running) or_throw
+    if f.second =? 60 {return InvalidFields["a :60 second is a UTC label: use `utc`"]}
+    let days=days_from_civil(f.year f.month f.day)
+    let local=(days*86400+int(f.hour)*3600+int(f.minute)*60+int(f.second)).to_int64() ?? 0
+    if written not=? NO_OFFSET {
+        # (an offset beside a zone says which reading: it must be one the zone had)
+        let moment=local-written
+        if offset_at(chosen moment) not=? written {return ParseError["{name(chosen)} was not at {_pair_text(written)} then"]}
+        return _at(moment int(f.nanosecond) chosen written)
+    }
+    _resolve(local int(f.nanosecond) chosen fold gap)
+}
+zoned_error=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>match zoned_parse(text zone fold gap scope false) {
+    z:ZonedDateTime=>none
+    e:ParseError=>e.message
+    e:Gap=>e.message
+    e:Ambiguous=>e.message
+    e:UnknownZone=>e.message
+    e:MissingContext=>e.message
+    e:OutsideCoverage=>e.message
+    e:InvalidFields=>e.message
+    <OffGrid>=>"that label falls between nanoseconds under the UTC rate of its time"
+}
+
+# ---------------- zoned values ----------------
+_local=(z:ZonedDateTime):>int64=>(_posix_of(z.nominal) ?? 0)+z.offset
+__as__=(z:ZonedDateTime):>string=>{
+    let local=(_posix_of(z.nominal) ?? 0)+z.offset
+    let label=_axis_to_utc(ns_count(z.nominal))
+    let nanos:int=if label is? none {0} else {
+        let [_m in_day]=label
+        in_day%_NS
+    }
+    "{_local_text(local)}{_fraction_text(nanos)}{_pair_text(z.offset)}[{name(z.zone)}]"
+}
+# Elapsed time: a zoned value moves as its instant does.
+__add__=(z:ZonedDateTime d:Duration):>ZonedDateTime=>in_zone(z.nominal+d z.zone) ?? z
+__sub__=(z:ZonedDateTime d:Duration):>ZonedDateTime=>in_zone(z.nominal-d z.zone) ?? z
+__add__=(z:ZonedDateTime q:int*Time):>ZonedDateTime=>in_zone(z.nominal+q z.zone) ?? z
+__sub__=(z:ZonedDateTime q:int*Time):>ZonedDateTime=>in_zone(z.nominal-q z.zone) ?? z
+__sub__=(a:ZonedDateTime b:ZonedDateTime):>Duration=>a.nominal-b.nominal
+__eq__=(a:ZonedDateTime b:ZonedDateTime):>bool=>a.nominal =? b.nominal and a.zone =? b.zone
+__lt__=(a:ZonedDateTime b:ZonedDateTime):>bool=>a.nominal <? b.nominal
+# The local fields on a date with the same time of day, under the scope's policies.
+# (a move past the table, or onto a pre-1972 label between nanoseconds, has no local time either)
+_civil=(r:ZonedDateTime|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields):>ZonedDateTime|Gap|Ambiguous=>match r {
+    z:ZonedDateTime=>z
+    e:Gap=>e
+    e:Ambiguous=>e
+    e:OutsideCoverage=>Gap[e.message 0 0]
+    e:InvalidFields=>Gap[e.message 0 0]
+    <OffGrid>=>Gap["that label falls between nanoseconds under the UTC rate of its time" 0 0]
+}
+_day_add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>{
+    let nanos:int=(ns_count(z.nominal)%_NS)
+    _civil(_resolve(_local(z)+p.count*86400 nanos z.zone fold gap))
+}
+_month_add=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>{
+    let local=_local(z)
+    let t=local%86400
+    let [y m d]=civil_from_days(int(local)//86400)
+    let total=y*12+int(m)-1+int(p.count)
+    let ny=total//12
+    let nm=((total%12).to_int64() ?? 0)+1
+    if d >? days_in_month(ny nm) {return InvalidDate["{_year_text(ny)}-{pad(nm 2)} has no day {d}"]}
+    let nanos:int=(ns_count(z.nominal)%_NS)
+    _civil(_resolve(((days_from_civil(ny nm d)*86400).to_int64() ?? 0)+t nanos z.zone fold gap))
+}
+# (what is wrong with these constants; none when the add resolves)
+day_add_error=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>string?=>match _day_add(z p fold gap) {
+    r:ZonedDateTime=>none
+    e:Gap=>e.message
+    e:Ambiguous=>e.message
+}
+# (both policies written: nothing is left to fail. Empty text: no promise, and no error.)
+policy_gap=(fold:_FoldPolicy|none gap:_GapPolicy|none):>string?=>if fold is? none or gap is? none or fold =? 'reject' or gap =? 'reject' {""} else {none}
+
+$check_constant day_add_error(z p fold gap) "this add has no one answer"
+$check_constant policy_gap(fold gap) "unused"
+__add__=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add(z p fold gap)
+$check_constant day_add_error(z p fold gap) "this add has no one answer"
+$check_constant policy_gap(fold gap) "unused"
+__sub__=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add(z Days[-p.count] fold gap)
+__add__=(z:ZonedDateTime p:Months fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>_month_add(z p fold gap)
+$check_constant day_add_error(z p fold gap) "this add has no one answer"
+$check_constant policy_gap(fold gap) "unused"
+add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add(z p fold gap)
+
+# The local date of an instant in a zone.
+local_days=(t:Instant z:Zone):>int=>{
+    let moment=_posix_of(t)
+    if moment is? OutsideCoverage {return ns_count(t)//_DAY_NS+2557}
+    int(moment+offset_at(z moment))//86400
+}

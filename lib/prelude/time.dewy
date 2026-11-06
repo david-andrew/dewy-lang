@@ -1,6 +1,10 @@
 # Dewy's prelude: time without an import. Each name loads lib/time only when named.
 import p"@lib/time/core.dewy" as core
 from p"@lib/time/core.dewy" import (instant_error utc_error)
+import p"@lib/time/civil.dewy" as civil
+from p"@lib/time/civil.dewy" import date_error
+import p"@lib/time/zones.dewy" as zones
+from p"@lib/time/zones.dewy" import (zone_error zone_scope_error zoned_error _FoldPolicy _GapPolicy)
 
 Instant:type=core.Instant
 Duration:type=core.Duration
@@ -11,3 +15,26 @@ $check_constant instant_error(text) "not an instant"
 instant=(text:string):>Instant|ParseError|OffGrid|OutsideCoverage|InvalidFields=>core.instant_parse(text)
 $check_constant utc_error(text) "not a UTC label"
 utc=(text:string):>UtcLabel|ParseError|OffGrid|OutsideCoverage|InvalidFields=>core.utc_parse(text)
+
+Date:type=civil.Date
+Gregorian:type=civil.Gregorian
+Period:type=core.Period|civil.Span
+Span:type=civil.Span
+
+# `1day` and `1week` count calendar days; `1month` and `1year` count months.
+const day=core.Days[1]
+const week=core.Days[7]
+const month=core.Months[1]
+const year=core.Months[12]
+
+$check_constant date_error(text) "not a date"
+date=(text:string):>Date|ParseError=>civil.date_parse(text)
+age=(born:Date on:Date leap_day:civil._LeapDay='march_1'):>int=>civil.age_on(born on leap_day)
+
+Zone:type=zones.Zone
+ZonedDateTime:type=zones.ZonedDateTime
+
+$check_constant zone_error(name) "not a time zone"
+zone=(name:string):>Zone|UnknownZone=>zones.zone_parse(name)
+$check_constant zoned_error(text zone fold gap scope) "not a zoned time"
+zoned=(text:string zone:Zone|none=none fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse(text zone fold gap scope)

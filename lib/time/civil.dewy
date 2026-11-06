@@ -1,0 +1,124 @@
+# Civil time of docs/design/time.md without zones: dates and their calendars, periods, ages.
+# Gregorian (arithmetic proleptic Gregorian, astronomical years, year zero) is the only calendar
+# so far. It maps no data.
+from p"core.dewy" import (Instant Days Months days_from_civil civil_from_days days_in_month read_fields _Cursor Fields _year_text pad)
+
+# `_days` counts from 1970-01-01.
+Date:type=[_days:int64]
+Gregorian:type=[]
+const _MONTHS=["January" "February" "March" "April" "May" "June" "July" "August" "September" "October" "November" "December"]
+const _WEEKDAYS=["Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday" "Sunday"]
+
+_of_days=(days:int):>Date=>Date[days.to_int64() ?? 0]
+date_of=(year:int month:int64 day:int64):>Date=>_of_days(days_from_civil(year month day))
+date_parse=(text:string):>Date|ParseError=>{
+    let c=_Cursor[text 0]
+    let f=read_fields(@c) or_throw
+    if f.has_time or c.at not=? (text as array<uint8>).length {return ParseError["a date is written YYYY-MM-DD, with no time"]}
+    date_of(f.year f.month f.day)
+}
+date_error=(text:string):>string?=>{
+    let r=date_parse(text)
+    match r {
+        d:Date=>none
+        e:ParseError=>e.message
+    }
+}
+
+fields=(d:Date):>[int int64 int64]=>civil_from_days(int(d._days))
+year=(d:Date):>int=>fields(d)[0]
+month=(d:Date):>int64=>fields(d)[1]
+day=(d:Date):>int64=>fields(d)[2]
+# 0 for Monday to 6 for Sunday (1970-01-01 was a Thursday).
+weekday=(d:Date):>int64=>(((int(d._days)+3)%7).to_int64() ?? 0)
+month_name=(d:Date):>string=>_MONTHS[month(d)-1]
+weekday_name=(d:Date):>string=>_WEEKDAYS[weekday(d)]
+
+__eq__=(a:Date b:Date):>bool=>a._days =? b._days
+__lt__=(a:Date b:Date):>bool=>a._days <? b._days
+__as__=(d:Date):>string=>{
+    let [y m dd]=fields(d)
+    "{_year_text(y)}-{pad(m 2)}-{pad(dd 2)}"
+}
+__add__=(d:Date p:Days):>Date=>_of_days(int(d._days)+int(p.count))
+__sub__=(d:Date p:Days):>Date=>_of_days(int(d._days)-int(p.count))
+# The period between two dates, which knows its anchor: `total_days` counts calendar successors, so
+# `a + (b - a) =? b`; `years`, `months` and `days` decompose it by completed anniversaries and months,
+# a 29 February start counting on 1 March (`age`'s default).
+Span:type=[total_days:int64 years:int64 months:int64 days:int64]
+__sub__=(a:Date b:Date):>Span=>{
+    let total=int64<overflow='saturate'>(int(a._days)-int(b._days))
+    let forward=total >=? 0
+    let early=if forward b else a
+    let late=if forward a else b
+    let years=int64<overflow='saturate'>(age_on(early late 'march_1'))
+    let [ey em ed]=fields(early)
+    let [ly lm ld]=fields(late)
+    let month_count=(ly*12+int(lm))-(ey*12+int(em))-(if ld <? ed {1} else {0})
+    let months=int64<overflow='saturate'>(month_count)
+    let anchor=_month_clamped(early months)
+    let days=int64<overflow='saturate'>(int(late._days)-int(anchor._days))
+    let sign:int64=if forward {1} else {-1}
+    Span[total sign*years sign*int64<overflow='saturate'>(months%12) sign*days]
+}
+_month_clamped=(d:Date count:int64):>Date=>{
+    let [y m dd]=_month_add(d count)
+    date_of(y m min(dd days_in_month(y m)))
+}
+__add__=(d:Date p:Span):>Date=>_of_days(int(d._days)+int(p.total_days))
+__sub__=(d:Date p:Span):>Date=>_of_days(int(d._days)-int(p.total_days))
+__eq__=(a:Span b:Span):>bool=>a.total_days =? b.total_days
+__lt__=(a:Span b:Span):>bool=>a.total_days <? b.total_days
+__as__=(p:Span):>string=>"{p.total_days}day"
+_span_divisor=(b:Days):>string?=>if b.count =? 0 "a period of no days divides nothing" else none
+$check_constant _span_divisor(b) "not a divisor"
+__truediv__=(a:Span b:Days):>rational|OutOfRange=>{
+    if b.count =? 0 {return OutOfRange}
+    rational(int(a.total_days) int(b.count))
+}
+
+# Moves by months, keeping the day; [the date, whether that day exists in the month].
+_month_add=(d:Date count:int64):>[int int64 int64]=>{
+    let [y m dd]=fields(d)
+    let total=y*12+int(m)-1+int(count)
+    [total//12 ((total%12).to_int64() ?? 0)+1 dd]
+}
+# A month's 31st may not exist: a date, or InvalidDate; `add` names what to do instead.
+__add__=(d:Date p:Months):>Date|InvalidDate=>{
+    let [y m dd]=_month_add(d p.count)
+    if dd >? days_in_month(y m) {return InvalidDate["{_year_text(y)}-{pad(m 2)} has no day {dd}"]}
+    date_of(y m dd)
+}
+__sub__=(d:Date p:Months):>Date|InvalidDate=>d+(-p)
+
+_Overflow:type='clamp'|'next'
+# `overflow='clamp'` takes the month's last day; `'next'` the first of the next month.
+add=(d:Date p:Months overflow:_Overflow):>Date=>{
+    let [y m dd]=_month_add(d p.count)
+    let last=days_in_month(y m)
+    if dd <=? last {return date_of(y m dd)}
+    if overflow =? 'clamp' {return date_of(y m last)}
+    let t=y*12+int(m)
+    date_of(t//12 ((t%12).to_int64() ?? 0)+1 1)
+}
+add=(d:Date p:Days):>Date=>d+p
+
+# Completed anniversaries, never elapsed seconds over a year. A 29 February birthday counts on
+# 1 March in a common year.
+
+_LeapDay:type='march_1'|'february_28'
+age_on=(born:Date on:Date leap_day:_LeapDay):>int=>{
+    let [by bm bd]=fields(born)
+    let [oy om od]=fields(on)
+    let count=oy-by
+    let am=bm
+    let ad=bd
+    if bm =? 2 and bd =? 29 and days_in_month(oy 2) =? 28 {
+        if leap_day =? 'march_1' {
+            am=3
+            ad=1
+        } else {ad=28}
+    }
+    if om <? am or (om =? am and od <? ad) {return count-1}
+    count
+}

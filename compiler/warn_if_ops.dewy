@@ -143,7 +143,8 @@ wi_call=(n:WarnWord f:WarnWord decl:WarnWord):>void=>$unsafe {
         let x=kid(n w.param)
         let r=wi_is(wi_arg_type(x) subst(w.type fns.ptr[f].targs))
         if w.negated and r =? 1 or not w.negated and r =? 0 {continue}
-        warn(nodes.ptr[x].pos w.message)
+        # (a parameter's default is the caller's to fix: at the call)
+        warn(if pos_in_lib(nodes.ptr[x].pos) {nodes.ptr[n].pos} else {nodes.ptr[x].pos} w.message)
     }
 }
 # (the argument's own type, under the conversion to the parameter's)

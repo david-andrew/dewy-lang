@@ -117,7 +117,10 @@ wi_call = (n: int, f: int, decl: int):
         x = kid(n, w.param)
         r = wi_is(wi_arg_type(x), subst(w.type, fns[f].targs))
         if w.negated and r == 1 or not w.negated and r == 0: continue
-        warn(nodes[x].pos, w.message)
+        # (a parameter's default is the caller's to fix: at the call)
+        at = nodes[x].pos
+        if pos_in_lib(at): at = nodes[n].pos
+        warn(at, w.message)
 # (the argument's own type, under the conversion to the parameter's)
 wi_arg_type = (x0: int) -> int:
     x = x0

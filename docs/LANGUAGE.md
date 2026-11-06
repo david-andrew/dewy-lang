@@ -1506,14 +1506,47 @@ Arithmetic that leaves the 128-bit range (±5.39×10²¹ years) ends the program
 ```dewy
 let t = instant"2026-10-24T12:00:00Z"   # checked while compiling, then a plain value
 printl"{t + 90minute}"                  # 2026-10-24T13:30:00Z
+let d = date"2027-01-31"
+printl"{d + 1day} {d.year} {d.weekday_name}"  # 2027-02-01 2027 Sunday
+printl"{d.add(1month overflow='clamp')}"      # 2027-02-28
+printl"{(date"2026-12-25" - date"2026-10-24") / 1day}"  # 62
+printl(age(date"2000-02-29" on=date"2027-02-28"))       # 26
+
+const meet = zoned"2026-10-26T09:00[America/New_York]"
+printl"{meet + 1week}"    # 2026-11-02T09:00:00-05:00[America/New_York]: the same local time
+printl"{meet + 168hour}"  # 2026-11-02T08:00:00-05:00[America/New_York]: exactly 168 hours
+printl"{(meet + 1week).nominal - meet.nominal}"  # 169h
 ```
 
-`instant"..."` and `utc"..."` with constant text are checked while compiling: a date that does
-not exist or a leap second that never happened is a compile error that says what to write.
-Passing, they are plain values. The same calls on runtime text return the failure as a value
-(`Instant | ParseError | InvalidFields | OffGrid | OutsideCoverage`). `utc"..."` keeps a `:60`
-label, and `.nominal` gives its instant. A UTC label before 1961 is outside coverage, and such an
-`Instant` prints as a TT label.
+`instant"..."`, `utc"..."`, `date"..."`, `zone"..."` and `zoned"..."` with constant text are
+checked while compiling: a date that does not exist, a leap second that never happened, a
+local time in a daylight-saving gap or repeated hour are compile errors that say what to
+write. Passing, they are plain values. The same calls on runtime text return the failure as
+a value (`Instant | ParseError | InvalidFields | OffGrid | OutsideCoverage`). `utc"..."` keeps a
+`:60` label, and `.nominal` gives its instant. A UTC label before 1961 is outside coverage, and
+such an `Instant` prints as a TT label.
+
+`1day`, `1week`, `1month` and `1year` are calendar periods, not lengths of time: they need a
+date or a zoned time. `date + 1day` is the next calendar day; `date + 1month` is `Date |
+InvalidDate`, since not every month has a 31st, and `.add(1month overflow='clamp')` or `'next'`
+says what to do. `date - date` is a period of days. `age(born on=date)` counts completed
+anniversaries; a 29 February birthday counts on 1 March in a common year (or pass
+`leap_day='february_28'`).
+
+A zoned add that lands in a gap or repeated hour gives `ZonedDateTime | Gap | Ambiguous`, and
+naming the policies makes it a plain `ZonedDateTime`: `fold='earlier'` or `'later'`, and
+`gap='preserve_displacement'` (02:30 in a one-hour gap becomes 03:30) or `'next'` (03:00). They
+can be arguments (`zoned(text zone=z fold='later')`), or settings for a scope: `$time.fold =
+'earlier'`, `$time.gap = 'next'`. A constant zoned time or `const` operand is proved while
+compiling, so it needs neither.
+
+`$time.zone = 'America/New_York'` pins the program to one zone: set in the main file, it holds in
+every module, and a different setting in an inner scope or another module is a compile error. A
+main file that sets none leaves modules and scopes free to set their own. `'system'` reads the
+name of the machine's zone when the program runs, and `'build'` pins the zone of the machine building it.
+A literal cannot assume a zone. Zone rules are not the machine's: each
+Dewy version ships its own (IANA data in `lib/time/rules`), so a program means the same thing
+anywhere, and a program links them only if it reaches a zone operation.
 
 ## Exact large integers
 

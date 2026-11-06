@@ -1,0 +1,16 @@
+# quick
+# A weekly meeting against a fixed delay, across the end of daylight saving time.
+const meet = zoned"2026-10-26T09:00[America/New_York]"
+const weekly = meet + 1week
+printl"{weekly}"
+printl"{meet + 168hour}"
+printl"{weekly.nominal - meet.nominal}"
+
+const tomorrow = zoned"2026-10-31T09:00[America/New_York]"
+printl"{tomorrow + 1day}"
+printl"{tomorrow + 24hour}"
+
+# A date has no hidden hour: the day after the British calendar is arithmetic here.
+printl"{date"1752-09-02" + 1day}"
+printl"{(date"2026-12-25" - date"2026-10-24") / 1day} days to go"
+printl"{age(date"2000-05-12" on=date"2026-10-24")}"
