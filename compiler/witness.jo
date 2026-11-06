@@ -878,9 +878,21 @@ wit_index = (n: int, s: mut FactState, index: int, length: int, lo: int, hi: int
     wit_context(0)
     wit_help(relation)
     if hi != 1: wit_position_help(n, (if index_node >= 0: index_node else: int(nodes[n].b)), a)
+    if lo != 1: wit_parameter_lower_help(if index_node >= 0: index_node else: int(nodes[n].b))
     which = if lo != 1 and hi != 1: "lower and upper bounds" else if lo != 1: "lower bound" else: "upper bound"
     if dir_defer(n, "cannot prove {read} is in bounds: missing {which}", true): return
     wit_fail(nodes[n].pos, "cannot prove {read} is in bounds: missing {which}")
+
+# (`tokens[pos]` with `pos` a parameter: a position that cannot be negative says so where it is
+# declared, and each caller proves it. O(1))
+wit_parameter_lower_help = (index0: int):
+    e = index0
+    loop e > 0 and (nodes[e].kind == .narrow or nodes[e].kind == .conv): e = int(nodes[e].a)
+    if e <= 0 or nodes[e].kind != .ident or nodes[e].aux != i32(int(SK.local)) or not dewy_at(nodes[e].pos): return
+    flags = int(locals[int(nodes[e].sym)].flags)
+    if flags & (LF_PARAM | LF_MUTPARAM | LF_VALUEPARAM) == 0: return
+    mark = if flags & LF_MUTPARAM != 0: "@" else: ""
+    err_notes.push((-1, "help: or state it where the parameter is declared, `{mark}{name_of(int(nodes[e].name))}:{dt(prune(ntype(e)))}<(>=? 0)>`: each caller then proves it"))
 
 # (`xs[argmax(xs)]`, argmax returning a plain `int`: what its body proves
 # holds for every input, an empty xs among them, where no index is below the

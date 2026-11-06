@@ -1,0 +1,10 @@
+get = (xs:array<int> @pos:int):>int => {
+    if pos >=? xs.length return 0
+    let v = xs[pos]
+    pos += 1
+    v
+}
+main = () => {
+    let p:int = 0
+    printl(get([1] @p))
+}

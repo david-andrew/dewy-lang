@@ -1,0 +1,12 @@
+# The contract the help names proves the read; callers keep it.
+get = (xs:array<int> @pos:int<(>=? 0)>):>int => {
+    if pos >=? xs.length return 0
+    let v = xs[pos]
+    pos += 1
+    v
+}
+main = () => {
+    let p:int<(>=? 0)> = 0
+    printl(get([7] @p))
+    printl(p)
+}
