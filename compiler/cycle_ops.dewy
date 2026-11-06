@@ -1,0 +1,533 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (join)
+from p"ast.jo" import (NF_GENERIC has_flag kid kid2 kids nkids nkids2 nodes set_list)
+from p"check.jo" import (dfs_state fns globals init_fns locals modules order_modules value_equal_fns value_hash_fns)
+from p"import_cycles.jo" import (cr_comp cr_decls cr_ev cr_events cr_helpers cr_index cr_low cr_mark cr_member cr_next cr_on cr_owner cr_sets cr_stack cr_stamp cr_stmt cr_taken cr_targets cycle_groups cycle_merged ensuring_globals tj_comps tj_index tj_low tj_next tj_on tj_stack)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"lower_helpers.dewy" import (value_helper_calls)
+from p"prelude.jo" import (dp_loaded)
+from p"util.jo" import (fatal files line_col name_of pos_file)
+
+CycleWord:type=int64<overflow='wrap'>
+# (a Dewy module initializes after the Dewy prelude's loaded modules, as in
+# order_modules; those do not depend on one another by that rule)
+cycle_edges=(m:CycleWord):>array<int64>=>{
+    let out:array<int64>=[]
+    loop edge in modules[m].imports {out.push(edge[0])}
+    if dp_loaded.length >? 0 and files[CycleWord(modules[m].file)].is_dewy and not dp_loaded.contains(m) {
+        loop dm in dp_loaded {out.push(dm)}
+    }
+    out
+}
+tj_visit=(m:CycleWord):>void=>{
+    tj_index[m]=tj_next
+    tj_low[m]=tj_next
+    tj_next += 1
+    tj_stack.push(m)
+    tj_on[m]=true
+    loop w in cycle_edges(m) {
+        if tj_index[w] <? 0 {
+            tj_visit(w)
+            if tj_low[w] <? tj_low[m] {tj_low[m]=tj_low[w]}
+        }
+        else if tj_on[w] and tj_index[w] <? tj_low[m] {tj_low[m]=tj_index[w]}
+    }
+    if tj_low[m] =? tj_index[m] {
+        let comp:array<int64>=[]
+        loop true {
+            let w=tj_stack.pop()
+            tj_on[w]=false
+            comp.push(w)
+            if w =? m {break}
+        }
+        tj_comps.push(comp)
+    }
+}
+# The modules in initialization order: order_modules' import order, unless a
+# cycle contains a Dewy module. Then components come dependencies first, each
+# cycle's members in import order, and cycle_groups lists the cycles to merge.
+init_module_order=(mainm:CycleWord):>array<int64>=>{
+    cycle_groups=[]
+    cycle_merged=dict<int64 int64>()
+    ensuring_globals=[]
+    dfs_state=fill(false modules.length)
+    let order:array<int64>=[]
+    order_modules(mainm @order)
+    let dewy=false
+    loop m in order {
+        if files[CycleWord(modules[m].file)].is_dewy {dewy=true}
+    }
+    if not dewy {return order}
+    tj_index=fill((-1) modules.length)
+    tj_low=fill(0 modules.length)
+    tj_on=fill(false modules.length)
+    tj_stack=[]
+    tj_comps=[]
+    tj_next=0
+    tj_visit(mainm)
+    loop dm in order {
+        if tj_index[dm] <? 0 {tj_visit(dm)}
+    }
+    let rank=fill(modules.length modules.length)
+    loop i in 0.. and m in order {rank[m]=i}
+    let found=false
+    loop comp in tj_comps {
+        if comp.length <? 2 {continue}
+        loop m in comp {
+            if files[CycleWord(modules[m].file)].is_dewy and not modules[m].is_prelude {found=true}
+        }
+    }
+    if not found {return order}
+    let out:array<int64>=[]
+    loop comp in tj_comps {
+        let members=comp
+        # (in import order: insertion, a cycle is small)
+        loop i in [1..members.length) {
+            let j=i
+            loop j >? 0 and rank[members[j - 1]] >? rank[members[j]] {
+                let t=members[j]
+                members[j]=members[j - 1]
+                members[j - 1]=t
+                j -= 1
+            }
+        }
+        let dewy_member=false
+        loop m in members {
+            if not modules[m].is_prelude and rank[m] <? modules.length {out.push(m)}
+            if files[CycleWord(modules[m].file)].is_dewy and not modules[m].is_prelude {dewy_member=true}
+        }
+        if members.length >? 1 and dewy_member {
+            let group:array<int64>=[]
+            loop m in members {
+                if not modules[m].is_prelude and rank[m] <? modules.length {group.push(m)}
+            }
+            if group.length >? 1 {cycle_groups.push(group)}
+        }
+    }
+    # (the prelude initializes first, by itself: init_prelude)
+    let full:array<int64>=[]
+    loop m in order {
+        if modules[m].is_prelude {full.push(m)}
+    }
+    loop m in out {full.push(m)}
+    full
+}
+cyc_reads_start=(group:array<int64>):>void=>{
+    cr_member=fill(false modules.length)
+    loop m in group {
+        if not modules[m].is_prelude {cr_member[m]=true}
+    }
+    cr_index=[]
+    cr_low=[]
+    cr_on=[]
+    cr_comp=[]
+    cr_targets=[]
+    cr_helpers=value_equal_fns.length >? 0 or value_hash_fns.length >? 0
+    cr_stack=[]
+    cr_events=[]
+    cr_sets=[]
+    cr_next=0
+    cr_mark=fill(0 globals.length)
+    cr_stamp=0
+    cr_taken=fill(0 globals.length)
+    cr_stmt=0
+    cr_decls=dict<int64 bool>()
+    loop g in globals {
+        if g.decl >? 0 and cr_member[int64(g.mod)] and (g.fn_accessed or g.exposed) {cr_decls[int64(g.decl)]=true}
+    }
+}
+# Each statement and demanded function body is walked once. Set propagation
+# costs the total size of the summaries consumed at call edges (not a repeated
+# body walk); SCC members share one summary, including mutual recursion.
+cyc_reads=(s:CycleWord @out:array<int64>):>void=>{
+    cr_stmt += 1
+    cr_owner=0
+    cr_ev=[]
+    cyc_walk(s)
+    out=cr_ev
+}
+cyc_take=(g:CycleWord pos:CycleWord via:CycleWord):>void=>{
+    if cr_taken[g] =? cr_stmt {return}
+    cr_taken[g]=cr_stmt
+    cr_ev.push(g)
+    cr_ev.push(pos)
+    cr_ev.push(via)
+}
+# In function f's body (f > 0), ev gets its reads and calls; in a statement of
+# the program (f == 0), ev gets the statement's reads.
+cyc_walk=(root:CycleWord):>void=>$unsafe {
+    # Checking is finished: this read-only walk and its call-graph visits do
+    # not grow or rewrite nodes. Keep that stable view across recursive calls.
+    let ns=nodes.ptr
+    let n=root
+    loop n >? 0 {
+        let k=ns[n].kind
+        if k =? 'ident' {
+            if ns[n].aux =? int32(2) {
+                let g=CycleWord(ns[n].sym)
+                if cr_member[CycleWord(globals.ptr[g].mod)] {
+                    if cr_owner >? 0 {cr_ev.push(g)}
+                    else {cyc_take(g ns[n].pos 0)}
+                }
+            }
+            return
+        }
+        if k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' {return}
+        # Only executed calls demand a summary. Creating a callable does not.
+        let h:CycleWord=0
+        if k =? 'call' {
+            if ns[n].aux =? 0 {h=CycleWord(ns[n].sym)}
+            else if ns[n].aux =? 1 or ns[n].aux =? 4 {h=cyc_callable(CycleWord(ns[n].a))}
+        }
+        if h >? 0 {cyc_call(h n)}
+        if cr_helpers and (k =? 'binary' or k =? 'intrinsic') {
+            loop helper in value_helper_calls(n) {cyc_call(helper n)}
+        }
+        if k =? 'assign' and ns[n].op =? int32(47) {
+            cyc_write(CycleWord(ns[n].a))
+            n=CycleWord(ns[n].b)
+            continue
+        }
+        let mask=isolation_children(k)
+        if mask =? 0 {return}
+        # Tail-walk chains of field accesses and coercions without a stack
+        # frame per node. Other children retain their normal first-use order.
+        if mask =? 1 {
+            n=CycleWord(ns[n].a)
+            continue
+        }
+        if mask =? 2 {
+            n=CycleWord(ns[n].b)
+            continue
+        }
+        if mask =? 3 {
+            cyc_walk(CycleWord(ns[n].a))
+            n=CycleWord(ns[n].b)
+            continue
+        }
+        if mask <? 0 {mask=1 | 2 | 16}
+        if mask & 1 not=? 0 {cyc_walk(CycleWord(ns[n].a))}
+        if mask & 2 not=? 0 {cyc_walk(CycleWord(ns[n].b))}
+        if mask & 4 not=? 0 {cyc_walk(CycleWord(ns[n].c))}
+        if mask & 16 not=? 0 {
+            loop i in [0..nkids(n)) {cyc_walk(kid(n i))}
+        }
+        if mask & 32 not=? 0 {
+            loop i in [0..nkids2(n)) {cyc_walk(kid2(n i))}
+        }
+        return
+    }
+}
+# A plain assignment does not read its destination; accessing a field/index
+# does read the container. Destructuring is a collection of destinations.
+cyc_write=(n:CycleWord):>void=>$unsafe {
+    if n <=? 0 or nodes.ptr[n].kind =? 'ident' {return}
+    if nodes.ptr[n].kind =? 'tuple' {
+        loop i in [0..nkids(n)) {cyc_write(kid(n i))}
+    }
+    else {cyc_walk(n)}
+}
+# Resolve literal function values at a call site. Handles returned by calls,
+# passed as parameters or stored in mutable places remain opaque; guessing
+# their targets would reject callbacks that are only stored and called later.
+cyc_callable=(n:CycleWord):>CycleWord=>$unsafe {
+    if n <=? 0 {return 0}
+    let k=nodes.ptr[n].kind
+    if k =? 'fnref' or (k =? 'lambda' and not has_flag(n NF_GENERIC)) {return CycleWord(nodes.ptr[n].sym)}
+    if k =? 'partial' {
+        if nodes.ptr[n].aux =? 0 {return CycleWord(nodes.ptr[n].sym)}
+        return cyc_callable(CycleWord(nodes.ptr[n].a))
+    }
+    if k =? 'conv' or k =? 'cast' {return cyc_callable(CycleWord(nodes.ptr[n].a))}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(2) {
+        let g=CycleWord(nodes.ptr[n].sym)
+        if globals.ptr[g].fn_written or globals.ptr[g].init_written or globals.ptr[g].exposed or globals.ptr[g].is_const {return 0}
+        if cr_targets.length =? 0 {cr_targets=fill((-1) globals.length)}
+        if cr_targets[g] >=? 0 {return cr_targets[g]}
+        cr_targets[g]=0
+        let d=CycleWord(globals.ptr[g].decl)
+        if d >? 0 and nkids(d) =? 0 {cr_targets[g]=cyc_callable(CycleWord(nodes.ptr[d].b))}
+        return cr_targets[g]
+    }
+    0
+}
+cyc_call=(h:CycleWord n:CycleWord):>void=>$unsafe {
+    let f=cr_owner
+    if h <=? 0 or h >=? fns.length {return}
+    if cr_index.length =? 0 {
+        cr_index=fill((-1) fns.length)
+        cr_low=fill(0 fns.length)
+        cr_on=fill(false fns.length)
+        cr_comp=fill((-1) fns.length)
+    }
+    if cr_index[h] <? 0 {
+        cyc_visit(h)
+        if f >? 0 and cr_low[h] <? cr_low[f] {cr_low[f]=cr_low[h]}
+    }
+    else if f >? 0 and cr_on[h] and cr_index[h] <? cr_low[f] {cr_low[f]=cr_index[h]}
+    if f >? 0 {cr_ev.push(-h)}
+    else {
+        loop g in cr_sets[cr_comp[h]] {cyc_take(g nodes.ptr[n].pos h)}
+    }
+}
+# Walk f's body; when f closes a component, its set is the members' events in
+# visit order, each call out of the component adding that component's set.
+cyc_visit=(f:CycleWord):>void=>$unsafe {
+    let v=cr_next
+    cr_index[f]=v
+    cr_low[f]=v
+    cr_next += 1
+    cr_stack.push(f)
+    cr_on[f]=true
+    cr_events.push([])
+    let parent=cr_owner
+    let parent_ev=cr_ev
+    cr_owner=f
+    cr_ev=[]
+    cyc_walk(CycleWord(fns.ptr[f].body))
+    cr_events[v]=cr_ev
+    cr_owner=parent
+    cr_ev=parent_ev
+    if cr_low[f] not=? v {return}
+    let c=cr_sets.length
+    let comp:array<int64>=[]
+    loop true {
+        let w=cr_stack.pop()
+        cr_on[w]=false
+        cr_comp[w]=c
+        comp.push(w)
+        if w =? f {break}
+    }
+    cr_stamp += 1
+    let acc:array<int64>=[]
+    let i=comp.length
+    loop i >? 0 {
+        i -= 1
+        let x=cr_index[comp[i]]
+        loop e in cr_events[x] {
+            if e >=? 0 {
+                cyc_add(e @acc)
+            }
+            else if cr_comp[-e] not=? c {
+                loop g in cr_sets[cr_comp[-e]] {cyc_add(g @acc)}
+            }
+        }
+    }
+    cr_sets.push(acc)
+}
+cyc_add=(g:CycleWord @acc:array<int64>):>void=>{
+    if cr_mark[g] =? cr_stamp {return}
+    cr_mark[g]=cr_stamp
+    acc.push(g)
+}
+cyc_where=(p:CycleWord):>string=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return "<unknown>"}
+    let [l c]=line_col(p)
+    "{files[f].path}:{l}"
+}
+merge_cycle_inits=(order:array<int64>):>void=>{
+    cyc_reads_start(order)
+    let grouped=fill(false modules.length)
+    loop group in cycle_groups {
+        loop m in group {grouped[m]=true}
+        merge_cycle_group(group)
+    }
+    loop m in order {
+        if not modules[m].is_prelude and not grouped[m] {merge_cycle_group([m])}
+    }
+    if cycle_groups.length =? 0 {return}
+    let seen=dict<int64 bool>()
+    let merged:array<int64>=[]
+    loop f0 in init_fns {
+        let f=cycle_merged.get(f0) ?? f0
+        if seen.has(f) {continue}
+        seen[f]=true
+        merged.push(f)
+    }
+    init_fns=merged
+}
+# Each member's statements stay in their order; a statement waits for the
+# declarations it reads; among the ready ones the earliest member goes first.
+merge_cycle_group=(group:array<int64>):>void=>$unsafe {
+    let n=group.length
+    let flat:array<int64>=[]
+    let start:array<int64>=[]
+    loop m in group {
+        start.push(flat.length)
+        loop s in kids(CycleWord(fns.ptr[CycleWord(modules[m].init_fn)].body)) {flat.push(s)}
+    }
+    start.push(flat.length)
+    # Direct same-file reads were checked while resolving names. Only values
+    # accessed from functions need this additional check; after the last such
+    # declaration there is no remaining single-file obligation.
+    let last=flat.length - 1
+    if n =? 1 {
+        loop last >=? 0 and not cr_decls.has(flat[last]) {last -= 1}
+        if last <? 0 {return}
+    }
+    # (statement node -> its index in its member, as si * n + member)
+    let at=dict<int64 int64>()
+    loop mi in [0..n) {
+        loop si in [0..start[mi + 1] - start[mi]) {at[flat[start[mi] + si]]=si * n + mi}
+    }
+    # (per statement: waited-for statement code, global, use, called function)
+    let needs:array<array<int64>>=[]
+    loop mi in [0..n) {
+        loop si in [0..start[mi + 1] - start[mi]) {
+            let reads:array<int64>=[]
+            if n >? 1 or si <=? last {cyc_reads(flat[start[mi] + si] @reads)}
+            let need:array<int64>=[]
+            let i:CycleWord=0
+            loop i <? reads.length {
+                let g=reads[i]
+                let code=at.get(CycleWord(globals.ptr[g].decl))
+                if code not=? none {
+                    need.push(code)
+                    need.push(g)
+                    need.push(reads[i + 1])
+                    need.push(reads[i + 2])
+                }
+                i += 3
+            }
+            needs.push(need)
+        }
+    }
+    let nxt:array<int64>=fill(0 n)
+    let out:array<int64>=[]
+    loop out.length <? flat.length {
+        let picked:CycleWord=-1
+        loop mi in [0..n) {
+            if nxt[mi] >=? start[mi + 1] - start[mi] {continue}
+            if cyc_blocker(needs[start[mi] + nxt[mi]] nxt n) <? 0 {
+                picked=mi
+                break
+            }
+        }
+        if picked <? 0 {cyc_stuck(group flat start needs nxt)}
+        out.push(flat[start[picked] + nxt[picked]])
+        nxt[picked] += 1
+    }
+    if n =? 1 {return}
+    let f0=CycleWord(modules[group[0]].init_fn)
+    set_list(CycleWord(fns.ptr[f0].body) out)
+    loop mi in [1..n) {
+        let fo=CycleWord(modules[group[mi]].init_fn)
+        loop l in fns.ptr[fo].locals {
+            locals.ptr[l].owner=int32(f0)
+            fns.ptr[f0].locals.push(l)
+        }
+        fns.ptr[fo].locals=[]
+        set_list(CycleWord(fns.ptr[fo].body) [])
+        modules[group[mi]].init_fn=int32(f0)
+        cycle_merged[fo]=f0
+    }
+}
+# The first of a statement's needs not yet met (an index into its quadruples), or -1.
+cyc_blocker=(need:array<int64> nxt:array<int64> n:CycleWord):>CycleWord=>{
+    let i:CycleWord=0
+    loop i <? need.length {
+        let code=need[i]
+        if nxt[code % n] <=? code // n {return i}
+        i += 4
+    }
+    -1
+}
+# No member can go on: follow what each waits for until a member repeats, and
+# name that chain.
+cyc_stuck=(group:array<int64> flat:array<int64> start:array<int64> needs:array<array<int64>> nxt:array<int64>):>void=>$unsafe {
+    let n=group.length
+    let cur:CycleWord=0
+    loop nxt[cur] >=? start[cur + 1] - start[cur] {cur += 1}
+    let visited:array<int64>=[]
+    let links:array<string>=[]
+    let first_pos:array<int64>=[]
+    let waits:array<bool>=[]
+    let names:array<string>=[]
+    let routes:array<string>=[]
+    loop not visited.contains(cur) {
+        visited.push(cur)
+        let s=flat[start[cur] + nxt[cur]]
+        let need=needs[start[cur] + nxt[cur]]
+        let b=cyc_blocker(need nxt n)
+        let code=need[b]
+        let dm=code % n
+        let ds=code // n
+        let g=need[b + 1]
+        let route=""
+        let via=need[b + 3]
+        if via >? 0 {
+            let path:array<int64>=[]
+            let seen=fill(false fns.length)
+            if cyc_trace(via g @seen @path) {
+                let parts:array<string>=[]
+                loop h in path {
+                    let d=CycleWord(fns.ptr[h].decl)
+                    parts.push("'{name_of(CycleWord(nodes.ptr[d].name))}' ({cyc_where(nodes.ptr[d].pos)})")
+                }
+                route="; {cyc_where(nodes.ptr[s].pos)} calls {join(parts " -> ")} -> reads '{name_of(CycleWord(globals.ptr[g].name))}'"
+            }
+        }
+        routes.push(route)
+        first_pos.push(need[b + 2])
+        names.push(name_of(CycleWord(globals.ptr[g].name)))
+        let d=flat[start[dm] + ds]
+        let link="{cyc_where(nodes.ptr[s].pos)} needs '{name_of(CycleWord(globals.ptr[g].name))}' ({cyc_where(nodes.ptr[d].pos)})"
+        waits.push(nxt[dm] <? ds)
+        if nxt[dm] <? ds {
+            link="{link}, which runs after {cyc_where(nodes.ptr[flat[start[dm] + nxt[dm]]].pos)}"
+        }
+        links.push(link)
+        cur=dm
+    }
+    let k=visited.index_of(cur) ?? (-1)
+    let shown:array<string>=[]
+    let waited=false
+    loop i in [k..links.length) {
+        shown.push(links[i])
+        if waits[i] {waited=true}
+    }
+    let chain=join(shown "; ")
+    loop i in [k..routes.length) {chain="{chain}{routes[i]}"}
+    let first_name=names[k]
+    if n =? 1 {fatal(first_pos[k] "'{first_name}' is used before it has its value: {chain}")}
+    if waited {fatal(first_pos[k] "'{first_name}' is used before it has its value: run as one file, the modules' top-level code has no order that gives it first: {chain}")}
+    fatal(first_pos[k] "a value cycle across modules: each of these needs the next one's value first: {chain}")
+}
+# Only an error needs a path. Follow the recorded graph, visiting each
+# function once even inside a recursive component; no successful statement
+# re-walks a function body to build diagnostic chains.
+cyc_trace=(f:CycleWord g:CycleWord @seen:array<bool> @path:array<int64>):>bool=>{
+    if seen[f] {return false}
+    seen[f]=true
+    path.push(f)
+    loop e in cr_events[cr_index[f]] {
+        if e =? g {return true}
+        if e <? 0 and cyc_trace((-e) g @seen @path) {return true}
+    }
+    path.pop();
+    false
+}
+# Checking g's first value reached g again. Within one module the one-file
+# error stands; through another module's values, name the chain.
+global_cycle_across_modules=(g:CycleWord use_pos:CycleWord):>void=>$unsafe {
+    let k=ensuring_globals.index_of(g) ?? (-1)
+    if k <? 0 {return}
+    let across=false
+    loop i in [k..ensuring_globals.length) {
+        if globals.ptr[ensuring_globals[i]].mod not=? globals.ptr[g].mod {across=true}
+    }
+    if not across {return}
+    let parts:array<string>=[]
+    loop i in [k..ensuring_globals.length) {
+        let h=ensuring_globals[i]
+        parts.push("'{name_of(CycleWord(globals.ptr[h].name))}' ({cyc_where(nodes.ptr[CycleWord(globals.ptr[h].decl)].pos)})")
+    }
+    let chain=parts[0]
+    loop i in [1..parts.length) {
+        let joint=", which needs "
+        if i =? 1 {joint=" needs "}
+        chain="{chain}{joint}{parts[i]}"
+    }
+    fatal(use_pos "a value cycle across modules: {chain}, which needs '{name_of(CycleWord(globals.ptr[g].name))}': give one of them a value that does not need the others")
+}
