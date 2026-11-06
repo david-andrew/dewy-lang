@@ -1,0 +1,278 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_EXCL_FIRST NF_JUXT NF_SPREAD add_flag has_flag kid kids nkids nodes set_kid)
+from p"check.jo" import (check_struct_fields ensure_global globals locals syms)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"expr.jo" import (AUX2_PARTIAL a_type call_collect_fns bundled_bigint_type is_nd last_checked)
+from p"lex.jo" import (is_ident_char)
+from p"node_store.dewy" import (NK Node)
+from p"types.jo" import (dt fields is_union prune structs tkind types union_members)
+from p"units.jo" import (bundled_rational_type bundled_word_rational_type)
+from p"util.jo" import (fatal files name_of pos_file pos_in_lib pos_off warn)
+
+JuxtWord:type=int64<overflow='wrap'>
+let juxt_keywords=["if" "else" "loop" "in" "and" "or" "not" "xor" "nand" "nor" "xnor" "return" "let" "const" "match" "is" "as" "of" "break" "continue" "transmute" "or_throw" "parallel" "concurrent" "spawn" "defer" "import" "from" "then"]
+juxt_numeric=(t0:JuxtWord):>bool=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    if k =? 'refined' {return juxt_numeric(JuxtWord(types.ptr[t].elem))}
+    k =? 'int_' or k =? 'float_' or k =? 'quantity' or bundled_rational_type(t) or bundled_word_rational_type(t) or bundled_bigint_type(t)
+}
+juxt_callable=(t0:JuxtWord):>bool=>{
+    let k=tkind(prune(t0))
+    k =? 'fn_' or k =? 'cfn' or k =? 'polyfn' or k =? 'callable'
+}
+# (a short spelling of a head for messages: `a`, `material.k`, or `(...)`)
+juxt_text=(h:JuxtWord):>string=>$unsafe {
+    let k=nodes.ptr[h].kind
+    if k =? 'ident' {return name_of(JuxtWord(nodes.ptr[h].name))}
+    if k =? 'field' and nodes.ptr[h].name not=? 0 {
+        let base=juxt_text(JuxtWord(nodes.ptr[h].a))
+        if base not=? "(...)" {return "{base}.{name_of(JuxtWord(nodes.ptr[h].name))}"}
+    }
+    if k =? 'int_lit' {return "{nodes.ptr[h].ival}"}
+    if k =? 'float_lit' and nodes.ptr[h].sval not=? 0 {return name_of(JuxtWord(nodes.ptr[h].sval))}
+    if (k =? 'call' or k =? 'index') and nkids(h) <=? 2 {
+        let base=juxt_text(JuxtWord(nodes.ptr[h].a))
+        if base not=? "(...)" and nodes.ptr[JuxtWord(nodes.ptr[h].a)].kind not=? 'call' and nodes.ptr[JuxtWord(nodes.ptr[h].a)].kind not=? 'index' {
+            let inner=juxt_texts(kids(h) " ")
+            if inner not=? "(...)" {return if k =? 'call' {"{base}({inner})"} else {"{base}[{inner}]"}}
+        }
+    }
+    "(...)"
+}
+# (several simple values joined by sep, or "(...)")
+juxt_texts=(xs:array<int64> sep:string):>string=>$unsafe {
+    let out=""
+    loop i in 0.. and x in xs {
+        if nodes.ptr[x].kind =? 'namedarg' {return "(...)"}
+        let t=juxt_text(x)
+        if t =? "(...)" {return t}
+        out=if i =? 0 {t} else {"{out}{sep}{t}"}
+    }
+    out
+}
+# The type a name or field route holds as a value (0: not a value binding, a method, or
+# not known without checking); never calls anything.
+juxt_route_type=(h:JuxtWord):>JuxtWord=>$unsafe {
+    let k=nodes.ptr[h].kind
+    if k =? 'ident' {
+        let s=lookup(JuxtWord(nodes.ptr[h].name))
+        if s =? 0 {return 0}
+        let sk=syms.ptr[s].kind
+        if sk =? 'local' {return prune(JuxtWord(locals.ptr[JuxtWord(syms.ptr[s].ref)].type))}
+        if sk =? 'global' {
+            ensure_global(JuxtWord(syms.ptr[s].ref) nodes.ptr[h].pos)
+            return prune(JuxtWord(globals.ptr[JuxtWord(syms.ptr[s].ref)].type))
+        }
+        if sk =? 'const_' {
+            let t=prune(check_expr(h 0))
+            return t
+        }
+        return 0
+    }
+    if k =? 'field' and nodes.ptr[h].b =? 0 {
+        let bt=juxt_route_type(JuxtWord(nodes.ptr[h].a))
+        if bt =? 0 {return 0}
+        let st=bt
+        if types.ptr[st].kind =? 'ptr' {st=prune(JuxtWord(types.ptr[st].elem))}
+        if types.ptr[st].kind not=? 'struct_' {return 0}
+        let si=JuxtWord(types.ptr[st].st)
+        check_struct_fields(si)
+        let fname=JuxtWord(nodes.ptr[h].name)
+        loop i in [0..JuxtWord(structs.ptr[si].nfields)) {
+            let fi=JuxtWord(structs.ptr[si].fields) + i
+            if JuxtWord(fields.ptr[fi].name) =? fname {return prune(JuxtWord(fields.ptr[fi].type))}
+        }
+        return 0
+    }
+    0
+}
+# The head of marked call r is an eligible number (a product), or not (a call). A union of
+# callable and numeric, or a tensor, is an error here.
+juxt_head_numeric=(r:JuxtWord):>bool=>$unsafe {
+    # (`head()` holds no value to multiply by: always a call)
+    # (a call already resolved keeps no head: it was classified when it was checked)
+    if not has_flag(r NF_JUXT) or nodes.ptr[r].kind not=? 'call' or nkids(r) =? 0 or nodes.ptr[r].a =? 0 or has_flag(r NF_CHECKED) {return false}
+    let h=JuxtWord(nodes.ptr[r].a)
+    let k=nodes.ptr[h].kind
+    let t:JuxtWord=0
+    if k =? 'field' {
+        # (a field may share its name with a method, `world.bodies()`: only a number multiplies)
+        t=juxt_route_type(h)
+        return t not=? 0 and juxt_numeric(t)
+    }
+    if k =? 'ident' {
+        t=juxt_route_type(h)
+        if t =? 0 or juxt_callable(t) {return false}
+        # (`$`-names are the compiler's own, as `end` in brackets: never a coefficient)
+        let text=name_of(JuxtWord(nodes.ptr[h].name))
+        if (text as array<uint8>).length >? 0 and (text as array<uint8>)[0] =? b'$' {return false}
+        juxt_shadow_check(r h t)
+    }
+    else {
+        # (a parenthesized group: its value decides)
+        t=prune(check_expr(h 0))
+        nodes.ptr[r].a=int32(last_checked)
+        h=last_checked
+    }
+    if t =? 0 {return false}
+    juxt_category(r h t)
+}
+juxt_category=(r:JuxtWord h:JuxtWord t:JuxtWord):>bool=>$unsafe {
+    if juxt_numeric(t) {return true}
+    if juxt_callable(t) {return false}
+    let k=types.ptr[t].kind
+    if is_union(t) {
+        let callable=false
+        let numeric=false
+        loop m in union_members(t) {
+            if juxt_callable(m) {callable=true}
+            if juxt_numeric(m) {numeric=true}
+        }
+        if callable and numeric {fatal(nodes.ptr[r].pos "`{juxt_text(h)}` is {dt(t)}, a function or a number, so `{juxt_text(h)}(...)` is neither a call nor a product: narrow it first, or write `{juxt_text(h)} * (...)` to multiply")}
+        return false
+    }
+    if k =? 'array' or k =? 'fixed' or k =? 'vec' or is_nd(t) {fatal(nodes.ptr[r].pos "`{juxt_text(h)}(...)` does not multiply {a_type(t)}: write `{juxt_text(h)}*x` (or `{juxt_text(h)}[x]` to index)")}
+    false
+}
+# Marked call c, or a chain of calls on one (`a(x)(y)`), multiplies.
+juxt_chain_numeric=(c:JuxtWord):>bool=>$unsafe {
+    let r=c
+    loop nodes.ptr[r].kind =? 'call' and not has_flag(r NF_JUXT) and nodes.ptr[JuxtWord(nodes.ptr[r].a)].kind =? 'call' and nkids(r) >? 0 {
+        r=JuxtWord(nodes.ptr[r].a)
+    }
+    nodes.ptr[r].kind =? 'call' and juxt_head_numeric(r)
+}
+# The one value call c's parentheses hold as a factor.
+juxt_factor=(c:JuxtWord):>JuxtWord=>$unsafe {
+    let h=JuxtWord(nodes.ptr[c].a)
+    if nodes.ptr[c].aux2 =? int32(AUX2_PARTIAL) {fatal(nodes.ptr[c].pos "partial application requires a callable: `{juxt_text(h)}` is a number, and `{juxt_text(h)}(...)` multiplies")}
+    if nkids(c) not=? 1 or nodes.ptr[kid(c 0)].kind =? 'namedarg' or has_flag(kid(c 0) NF_SPREAD) {
+        let product=juxt_texts(kids(c) " * ")
+        if nkids(c) <? 2 or product =? "(...)" {product="x * y"}
+        fatal(nodes.ptr[c].pos "`{juxt_text(h)}(...)` multiplies here (`{juxt_text(h)}` is a number), and its parentheses hold exactly one value: write `{juxt_text(h)} * ({product})`")
+    }
+    kid(c 0)
+}
+# Call n (a marked number head, or a chain on one) becomes head * factor, in place.
+juxt_product=(n:JuxtWord):>void=>$unsafe {
+    let factor=juxt_factor(n)
+    let head=nodes.ptr[n].a
+    nodes.ptr[n].kind='binary'
+    nodes.ptr[n].op=int32(60)
+    nodes.ptr[n].a=head
+    nodes.ptr[n].b=int32(factor)
+    nodes.ptr[n].list=0
+    nodes.ptr[n].nlist=0
+    nodes.ptr[n].sym=0
+    nodes.ptr[n].aux=0
+    nodes.ptr[n].aux2=0
+    add_flag(n NF_JUXT)
+}
+# `a(x)^e` with a numeric head: the power takes the last factor, `a*(x^e)`; power call p
+# becomes the product in place.
+juxt_power=(p:JuxtWord):>void=>$unsafe {
+    let c=kid(p 0)
+    let factor=juxt_factor(c)
+    nodes.ptr[c].list=0
+    nodes.ptr[c].nlist=0
+    set_kid(p 0 factor)
+    let power=nodes.length
+    nodes.push(nodes.ptr[p])
+    nodes.ptr[p]=Node(kind='binary' pos=nodes.ptr[p].pos op=int32(60) a=nodes.ptr[c].a b=int32(power))
+    add_flag(p NF_JUXT)
+}
+# Call n's head was checked (type t) and is not callable: a group head multiplies; a call
+# result or an indexed element is never a coefficient.
+juxt_value_head=(n:JuxtWord head_kind:NK head_text:string t:JuxtWord):>bool=>$unsafe {
+    # (an empty `()` after any expression calls it: `(5)()` is a call, not a product)
+    if not juxt_numeric(t) or nkids(n) =? 0 {return false}
+    if has_flag(n NF_JUXT) {return true}
+    if head_kind not=? 'index' and head_kind not=? 'call' {return false}
+    let head=head_text
+    let factor=juxt_texts(kids(n) " * ")
+    if head =? "(...)" or factor =? "(...)" or nkids(n) not=? 1 {
+        head=if head_kind =? 'index' {"xs[i]"} else {"f(x)"}
+        factor="y"
+    }
+    let what=if head_kind =? 'index' {"an indexed element"} else {"a call result"}
+    fatal(nodes.ptr[n].pos "{what} is not a coefficient: write `{head} * {factor}`")
+    false
+}
+# (call n of a number with a string literal, `a"hi"`: such a call never multiplies)
+juxt_string_call_hint=(n:JuxtWord):>string=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nkids(n) not=? 1 or nodes.ptr[kid(n 0)].kind not=? 'str_lit' or has_flag(n NF_JUXT) {return ""}
+    " (a string literal after a name is always a call)"
+}
+# The token just before pos on its line, past at least one space or tab ("" when there is
+# none): what a value at pos was written after, as `9.81 m` or `a b`.
+juxt_spaced_before=(pos:JuxtWord):>string=>{
+    let src=files[pos_file(pos)].src
+    let bytes=src as array<uint8>
+    let o=pos_off(pos)
+    if o >? bytes.length {return ""}
+    let i=o
+    loop i >? 0 and (bytes[i - 1] =? b' ' or bytes[i - 1] =? b'\t') {i -= 1}
+    if i =? o or i =? 0 {return ""}
+    let stop=i
+    if bytes[i - 1] =? b')' or bytes[i - 1] =? b']' {return src.byte_slice(i - 1 stop)}
+    loop i >? 0 and (is_ident_char(bytes[i - 1]) or bytes[i - 1] =? b'.') {i -= 1}
+    if i =? stop {return ""}
+    src.byte_slice(i stop)
+}
+# `9.81 m`: a unit (a constant quantity) written apart from its number is two expressions.
+juxt_spaced_unit=(n:JuxtWord):>void=>$unsafe {
+    if pos_in_lib(nodes.ptr[n].pos) or not files[pos_file(nodes.ptr[n].pos)].is_dewy {return}
+    let before=juxt_spaced_before(nodes.ptr[n].pos)
+    if (before as array<uint8>).length =? 0 or (before as array<uint8>)[0] <? b'0' or (before as array<uint8>)[0] >? b'9' {return}
+    let unit=name_of(JuxtWord(nodes.ptr[n].name))
+    fatal(nodes.ptr[n].pos "`{before} {unit}` is two expressions, a number and then the unit `{unit}`: a unit is written against its number, `{before}{unit}`")
+}
+# (for a value dropped or rejected at pos: written after a name, a number or a group, with
+# only whitespace between, it reads as a product that whitespace does not make)
+juxt_space_hint=(pos:JuxtWord):>string=>{
+    if not files[pos_file(pos)].is_dewy {return ""}
+    let before=juxt_spaced_before(pos)
+    if (before as array<uint8>).length =? 0 or before in? juxt_keywords {return ""}
+    " (whitespace separates expressions: to multiply, write `*`)"
+}
+# Member or index m was written right after a call's parentheses (`a(x).abs()`, `a(x)[i]`).
+# When that call multiplies, the member would belong to the group by precedence, not to the
+# product: rejected, until a use asks for it.
+juxt_member_check=(m:JuxtWord):>void=>$unsafe {
+    let c=JuxtWord(nodes.ptr[m].a)
+    if nodes.ptr[c].kind not=? 'call' or not juxt_chain_numeric(c) {return}
+    let h=juxt_text(JuxtWord(nodes.ptr[c].a))
+    fatal(nodes.ptr[m].pos "`{h}(...)` multiplies here (`{h}` is a number), so a member or index written right after its parentheses would belong to the parenthesized value, not the product: write the product with `*`, as `{h} * (...)`, or parenthesize it")
+}
+# Product n was written `(group)factor`, `(5)x`, `(x)2`: the group must be a number. A
+# function there is not called by a name after it; anything else known is not multiplied.
+juxt_group_product=(n:JuxtWord):>void=>$unsafe {
+    let a=JuxtWord(nodes.ptr[n].a)
+    let k=nodes.ptr[a].kind
+    if k =? 'int_lit' or k =? 'float_lit' or has_flag(a NF_CHECKED) {return}
+    let t:JuxtWord=0
+    if k =? 'ident' or k =? 'field' {t=juxt_route_type(a)}
+    let named_fn=k =? 'ident' and lookup(JuxtWord(nodes.ptr[a].name)) not=? 0 and syms.ptr[lookup(JuxtWord(nodes.ptr[a].name))].kind =? 'fns'
+    if named_fn or t not=? 0 and juxt_callable(t) {fatal(nodes.ptr[n].pos "`({juxt_text(a)})` is a function, and a name or number after its parentheses does not call it: write `{juxt_text(a)}(x)`, or give it a delimited argument, `({juxt_text(a)})(x)`")}
+    t=prune(check_expr(a 0))
+    nodes.ptr[n].a=int32(last_checked)
+    add_flag(last_checked NF_CHECKED)
+    let tk=types.ptr[t].kind
+    if juxt_numeric(t) or tk =? 'var' or tk =? 'param' {return}
+    if juxt_callable(t) {fatal(nodes.ptr[n].pos "this group is a function, and a name or number after its parentheses does not call it: give it a delimited argument, `(f)(x)`")}
+    fatal(nodes.ptr[n].pos "a group multiplies a name or number after it only when it is a number, and this one is {a_type(t)}: write `*`")
+}
+# `let sin=0.5` then `sin(x)^2`: a number or an array named like a function makes the
+# call a product (or an error); say which the name means here.
+juxt_shadow_check=(r:JuxtWord h:JuxtWord t:JuxtWord):>void=>$unsafe {
+    let tk=types.ptr[t].kind
+    if not (juxt_numeric(t) or tk =? 'array' or tk =? 'fixed' or is_nd(t)) {return}
+    if pos_in_lib(nodes.ptr[r].pos) {return}
+    let fns_:array<int64>=[]
+    call_collect_fns(JuxtWord(nodes.ptr[h].name) @fns_)
+    if fns_.length =? 0 {return}
+    let nm=name_of(JuxtWord(nodes.ptr[h].name))
+    if juxt_numeric(t) {warn(nodes.ptr[h].pos "`{nm}` here is {a_type(t)}, which hides the function `{nm}`, so `{nm}(...)` multiplies by it instead of calling the function: rename the value, or write `{nm} * (...)` to keep the product")}
+    else {warn(nodes.ptr[h].pos "`{nm}` here is {a_type(t)}, which hides the function `{nm}`, so `{nm}(...)` is not a call of the function: rename the value, or index it, `{nm}[...]`")}
+}
