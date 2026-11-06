@@ -28,155 +28,17 @@ string_domain_conversions: (int, int, int)[]
 string_domain_conversion_stops: {int: int} = {}
 string_domain_captures: {int: int} = {}
 
-string_domain_declare = (binding: int, value: int):
-    if value != 0 and nodes[value].kind == .str_lit and nodes[value].aux != 1:
-        string_domains[binding] = [int(nodes[value].sval)]
-        statement_watch.text_domains = string_domains.len()
-        return
-    values: int[]
-    if domain_literals(value, true, values):
-        string_domains[binding] = values
-        statement_watch.text_domains = string_domains.len()
 
-string_domain_binding = (n: int) -> int:
-    if nodes[n].kind != .ident: return 0
-    if nodes[n].aux == i32(int(SK.global)): return -int(nodes[n].sym) - 1
-    if nodes[n].aux != i32(int(SK.local)): return 0
-    l = int(nodes[n].sym)
-    loop true:
-        if int(locals[l].flags) & LF_CAPTURE != 0 and int(locals[l].flags) & LF_VALUECAP == 0: l = int(locals[l].outer)
-        else if narrowed_var(l) != 0: l = narrowed_var(l)
-        else: break
-    g = alias_global(l)
-    if g >= 0: return -g - 1
-    l
 
-string_domain_write = (lhs: int, value: int):
-    binding = string_domain_binding(lhs)
-    if not string_domains.has(binding): return
-    if string_domains[binding].len() == 0: return
-    values: int[]
-    known = domain_literals(value, true, values)
-    sd_write(string_domains, binding, values, known)
-    statement_watch.text_domains = string_domains.len()
 
-string_domain_match = (m: int) -> bool:
-    binding = string_domain_binding(int(nodes[m].a))
-    if not string_domains.has(binding): return false
-    string_domain_matches.push((m, binding))
-    true
 
-# A closure can write a captured binding after its consumer was checked. Close
-# requests after all checked functions, including module initializers, settle.
-# This visits only demands and their writes, never syntax trees or all bindings.
-string_domains_finish = ():
-    loop request in string_domain_matches:
-        m = request.0
-        binding = request.1
-        values = string_domain_values(binding)
-        if values.len() == 0: fatal(nodes[m].pos, "match is not exhaustive (inferred string domain is open; add `else`)")
-        covered: int[]
-        loop arm in kids(m):
-            loop p in kids(arm):
-                if nodes[p].kind == .plit and nodes[int(nodes[p].a)].kind == .str_lit:
-                    covered.push(int(nodes[int(nodes[p].a)].sval))
-        missing: str[]
-        loop value in values:
-            if not covered.contains(value):
-                text = "'{name_of(value)}'"
-                if not missing.contains(text): missing.push(text)
-        if missing.len() > 0: fatal(nodes[m].pos, "this match has no arm for {join(missing, ", ")} (add one, or `else`)")
 
-# Value captures own their later writes but can start with any value of the
-# outer binding. Capture links point to older bindings, so no fixed point is
-# needed. A nonliteral write opens either domain conservatively.
-string_domain_capture = (inner: int, outer: int):
-    root = outer
-    loop int(locals[root].flags) & LF_CAPTURE != 0 and int(locals[root].flags) & LF_VALUECAP == 0: root = int(locals[root].outer)
-    sd_capture(string_domains, string_domain_captures, inner, root)
-    statement_watch.text_domains = string_domains.len()
 
-string_domain_values = (binding: int) -> int[]:
-    sd_values(string_domains, string_domain_captures, binding)
 
-# (the request's index, or -1 for a binding without a finite domain)
-string_domain_conversion = (n: int, set: int) -> int:
-    binding = string_domain_binding(n)
-    if not string_domains.has(binding): return -1
-    string_domain_conversions.push((nodes[n].pos, binding, set))
-    string_domain_conversions.len() - 1
 
-# The sequence's element storage is string, just like the inferred binding.
-# Populate its literal array, in text order, once every checked write is known. Type-based
-# members(U) continues to use compile-time singleton specialization.
-string_domain_members = (n: int) -> bool:
-    if nkids(n) != 1: return false
-    arg = kid(n, 0)
-    if nodes[arg].kind != .ident: return false
-    sym = lookup(int(nodes[arg].name))
-    if sym == 0 or (syms[sym].kind != .local and syms[sym].kind != .global): return false
-    check_expr(arg, 0)
-    binding = string_domain_binding(last_checked)
-    if not string_domains.has(binding): fatal(nodes[n].pos, "members(value) needs an inferred finite string domain")
-    pos = nodes[n].pos
-    t = mk_array(T_STR)
-    array = mk(.array, pos)
-    nodes[array].type = i32(t)
-    add_flag(array, NF_CHECKED)
-    ret = mk(.return_, pos)
-    nodes[ret].a = i32(array)
-    nodes[ret].type = i32(T_NEVER)
-    body = bc_block([ret], pos)
-    nodes[body].type = i32(T_NEVER)
-    f = new_inst(FK_NORMAL, cur_mod(), "members")
-    fns[f].body = i32(body)
-    fns[f].ret = i32(t)
-    fns[f].fntype = i32(mk_fn([], t, 0))
-    # Compile-time evaluation must not observe the unfinished array.
-    fns[f].state = 1
-    fns[f].noinline = true
-    nodes[n] = Node(kind = .call, pos = pos, sym = i32(f), type = i32(t), flags = i32(NF_CHECKED))
-    string_domain_sequences.push((array, binding))
-    string_domain_sequence_fns.push(f)
-    true
 
-string_domains_materialize = ():
-    loop i in 0.. and request in string_domain_conversions:
-        pos = request.0
-        binding = request.1
-        set = request.2
-        values = string_domain_values(binding)
-        loop value in values:
-            if not str_sets[set].contains(name_of(value)): fatal(pos, "inferred string domain contains '{name_of(value)}', which is not one of {str_set_text(set)}")
-        # (a settled domain inside the set never reaches the failing arm: no panic is left)
-        stop = string_domain_conversion_stops.get(i) ?? 0
-        if stop != 0 and values.len() > 0: nodes[stop] = nodes[str_set_const(set, 0, pos)]
-    loop request in string_domain_sequences:
-        n = request.0
-        binding = request.1
-        values = string_domain_values(binding)
-        if values.len() == 0: fatal(nodes[n].pos, "members(value) needs a finite string domain; a nonliteral write leaves it open")
-        # (in text order, as `members(U)`: a domain is a set, not its writes' order)
-        texts: str[]
-        loop value in values:
-            if not texts.contains(name_of(value)): texts.push(name_of(value))
-        items: int[]
-        loop text in texts.sorted():
-            item = mk(.str_lit, nodes[n].pos)
-            nodes[item].sval = i32(intern(text))
-            nodes[item].type = i32(T_STR)
-            add_flag(item, NF_CHECKED)
-            items.push(item)
-        set_list(n, items)
-    loop f in string_domain_sequence_fns: fns[f].state = 2
 
-# Literal leaves of a written value: a literal, or a conditional choosing
-# between them (`if verbose 'loud' else 'quiet'`), through the conversions and
-# single-value blocks checking adds. Strings give text ids, integers values.
-domain_leaf = (n0: int) -> int: ld_leaf(nodes, lists, n0)
 
-domain_literals = (n0: int, text: bool, out: mut int[], depth: int = 0) -> bool:
-    ld_literals(nodes, lists, n0, text, i32(int(Tok.minus)), out, depth)
 
 # Unannotated integer bindings: the covering set of every written value, as
 # literal points plus the deltas of compound writes that run at most once per
@@ -186,86 +48,18 @@ domain_literals = (n0: int, text: bool, out: mut int[], depth: int = 0) -> bool:
 # demanded set capped at INT_DOMAIN_CAP values (O(points * 2^deltas) bounded).
 int_log: int[]
 
-int_record = (binding: int, kind: int, a: int, b: int):
-    id_record(int_log, binding, kind, a, b)
 int_domain_matches: (int, int, int[])[]
 int_domain_conversions: (int, int, int)[]
 int_domain_proven: {int: bool} = {}
 
-int_site = () -> int: if cx >= 0: int(ctxs[cx].inst) * 4096 + min(int(ctxs[cx].loop_depth), 4095) else: -1
 
-int_domain_declare = (binding: int, value: int):
-    site = -1
-    if binding >= 0: site = int_site()
-    leaf = domain_leaf(value)
-    if leaf != 0 and nodes[leaf].kind == .int_lit and not (has_flag(leaf, NF_U64) and nodes[leaf].ival < 0):
-        int_record(binding, INT_DECL, site, 0)
-        int_record(binding, INT_POINT, nodes[leaf].ival, 0)
-        return
-    values: int[]
-    if not domain_literals(value, false, values): return
-    int_record(binding, INT_DECL, site, 0)
-    loop v in values: int_record(binding, INT_POINT, v, 0)
 
-# op: 0 for `=`, else the compound token. A write the set cannot follow opens it.
-int_domain_write = (lhs: int, value: int, op: int):
-    binding = string_domain_binding(lhs)
-    if binding == 0: return
-    values: int[]
-    if op == 0 and domain_literals(value, false, values):
-        loop v in values: int_record(binding, INT_POINT, v, 0)
-        return
-    if (op == int(Tok.pluseq) or op == int(Tok.minuseq)) and binding > 0 and domain_literals(value, false, values) and values.len() == 1:
-        delta = values[0]
-        if op == int(Tok.minuseq): delta = -delta
-        int_record(binding, INT_DELTA, delta, int_site())
-        return
-    int_record(binding, INT_OPEN, 0, 0)
 
-int_domain_capture = (inner: int, outer: int):
-    root = outer
-    loop int(locals[root].flags) & LF_CAPTURE != 0 and int(locals[root].flags) & LF_VALUECAP == 0: root = int(locals[root].outer)
-    int_record(inner, INT_CAPTURE, root, 0)
 
 # The complete log solver lives in Dewy; syntax/type consumers stay here.
 int_domain_states: {int: IntDomain} = {}
 
-int_domain_settle = ():
-    demanded: {int: bool} = {}
-    loop request in int_domain_matches: demanded[request.1] = true
-    loop request in int_domain_conversions: demanded[request.1] = true
-    id_settle(int_log, int_domain_states, demanded)
-
-# Deferred to int_domains_finish: later writes still join the set.
-int_domain_match = (m: int, covered: int[]) -> bool:
-    binding = string_domain_binding(int(nodes[m].a))
-    if binding == 0: return false
-    int_domain_matches.push((m, binding, covered))
-    true
-
-int_domain_conversion = (n: int, target: int):
-    e = n
-    loop nodes[e].kind == .conv: e = int(nodes[e].a)
-    if nodes[e].kind != .ident or representation_type(ntype(e)) != T_MATH_INT: return
-    binding = string_domain_binding(e)
-    if binding != 0: int_domain_conversions.push((n, binding, target))
-
-int_domains_finish = ():
-    if int_domain_matches.len() == 0 and int_domain_conversions.len() == 0: return
-    int_domain_settle()
-    loop request in int_domain_matches:
-        m = request.0
-        if not int_domain_states.has(request.1): fatal(nodes[m].pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
-        domain = id_intervals(int_domain_states, request.1)
-        if domain.len() == 0: fatal(nodes[m].pos, "match is not exhaustive (the integer's written values are not a bounded set; add `else`)")
-        missing = interval_missing(domain, request.2)
-        if missing.len() > 0: fatal(nodes[m].pos, "this match has no arm for {interval_text(missing)} (the integer holds {id_text(domain)}; add one, or `else`)")
-    loop request in int_domain_conversions:
-        domain = id_intervals(int_domain_states, request.1)
-        if domain.len() == 0: continue
-        known, allowed = int_intervals(request.2)
-        if known and interval_missing(domain, allowed).len() == 0: int_domain_proven[request.0] = true
-    int_log = []
-    int_domain_matches = []
-    int_domain_conversions = []
-    int_domain_states = {}
+# (facts.jo reads a binding's initializer through this)
+domain_leaf = (n0: int) -> int: ld_leaf(nodes, lists, n0)
+domain_literals = (n0: int, text: bool, out: mut int[], depth: int = 0) -> bool:
+    ld_literals(nodes, lists, n0, text, i32(int(Tok.minus)), out, depth)

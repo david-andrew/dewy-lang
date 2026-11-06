@@ -1,0 +1,266 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_U64 add_flag has_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (FK_NORMAL LF_CAPTURE LF_VALUECAP alias_global ctxs cur_mod cx fns locals narrowed_var new_inst statement_watch syms)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"expr.jo" import (bc_block int_intervals last_checked ntype)
+from p"int_domains.dewy" import (IntDomain INT_CAPTURE INT_DECL INT_DELTA INT_OPEN INT_POINT id_intervals id_record id_settle id_text)
+from p"intervals.dewy" import (interval_missing interval_text)
+from p"node_store.dewy" import (Node)
+from p"refine.jo" import (representation_type str_set_const str_set_text str_sets)
+from p"string_domains.jo" import (domain_leaf domain_literals int_domain_conversions int_domain_matches int_domain_proven int_domain_states int_log string_domain_captures string_domain_conversion_stops string_domain_conversions string_domain_matches string_domain_sequence_fns string_domain_sequences string_domains)
+from p"text_domains.dewy" import (sd_capture sd_values sd_write)
+from p"types.jo" import (T_MATH_INT T_NEVER T_STR mk_array mk_fn)
+from p"@lib/core/str.jo" import (join)
+from p"util.jo" import (fatal intern name_of)
+
+DomainWord:type=int64<overflow='wrap'>
+string_domain_declare=(binding:DomainWord value:DomainWord):>void=>$unsafe {
+    if value not=? 0 and nodes.ptr[value].kind =? 'str_lit' and nodes.ptr[value].aux not=? 1 {
+        string_domains[binding]=[DomainWord(nodes.ptr[value].sval)]
+        statement_watch.text_domains=string_domains.length
+        return
+    }
+    let values:array<int64>=[]
+    if domain_literals(value true @values) {
+        string_domains[binding]=values
+        statement_watch.text_domains=string_domains.length
+    }
+}
+string_domain_binding=(n:DomainWord):>DomainWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'ident' {return 0}
+    if nodes.ptr[n].aux =? int32(2) {return -DomainWord(nodes.ptr[n].sym) - 1}
+    if nodes.ptr[n].aux not=? int32(1) {return 0}
+    let l=DomainWord(nodes.ptr[n].sym)
+    loop true {
+        if DomainWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 and DomainWord(locals.ptr[l].flags) & LF_VALUECAP =? 0 {l=DomainWord(locals.ptr[l].outer)}
+        else if narrowed_var(l) not=? 0 {l=narrowed_var(l)}
+        else {break}
+    }
+    let g=alias_global(l)
+    if g >=? 0 {return -g - 1}
+    l
+}
+string_domain_write=(lhs:DomainWord value:DomainWord):>void=>{
+    let binding=string_domain_binding(lhs)
+    if not string_domains.has(binding) {return}
+    if string_domains[binding].length =? 0 {return}
+    let values:array<int64>=[]
+    let known=domain_literals(value true @values)
+    sd_write(@string_domains binding values known)
+    statement_watch.text_domains=string_domains.length
+}
+string_domain_match=(m:int64):>bool=>$unsafe {
+    let binding=string_domain_binding(DomainWord(nodes.ptr[m].a))
+    if not string_domains.has(binding) {return false}
+    string_domain_matches.push([m binding])
+    true
+}
+# A closure can write a captured binding after its consumer was checked. Close
+# requests after all checked functions, including module initializers, settle.
+# This visits only demands and their writes, never syntax trees or all bindings.
+string_domains_finish=():>void=>$unsafe {
+    loop request in string_domain_matches {
+        let m=request[0]
+        let binding=request[1]
+        let values=string_domain_values(binding)
+        if values.length =? 0 {fatal(nodes.ptr[m].pos "match is not exhaustive (inferred string domain is open; add `else`)")}
+        let covered:array<int64>=[]
+        loop arm in kids(m) {
+            loop p in kids(arm) {
+                if nodes.ptr[p].kind =? 'plit' and nodes.ptr[DomainWord(nodes.ptr[p].a)].kind =? 'str_lit' {
+                    covered.push(DomainWord(nodes.ptr[DomainWord(nodes.ptr[p].a)].sval))
+                }
+            }
+        }
+        let missing:array<string>=[]
+        loop value in values {
+            if not (value in? covered) {
+                let text="'{name_of(value)}'"
+                if not (text in? missing) {missing.push(text)}
+            }
+        }
+        if missing.length >? 0 {
+            let names=join(missing ", ")
+            fatal(nodes.ptr[m].pos "this match has no arm for {names} (add one, or `else`)")
+        }
+    }
+}
+# Value captures own their later writes but can start with any value of the
+# outer binding. Capture links point to older bindings, so no fixed point is
+# needed. A nonliteral write opens either domain conservatively.
+string_domain_capture=(inner:DomainWord outer:DomainWord):>void=>$unsafe {
+    let root=outer
+    loop DomainWord(locals.ptr[root].flags) & LF_CAPTURE not=? 0 and DomainWord(locals.ptr[root].flags) & LF_VALUECAP =? 0 {root=DomainWord(locals.ptr[root].outer)}
+    sd_capture(@string_domains @string_domain_captures inner root)
+    statement_watch.text_domains=string_domains.length
+}
+string_domain_values=(binding:DomainWord):>array<int64>=>{
+    sd_values(@string_domains @string_domain_captures binding)
+}
+# (the request's index, or -1 for a binding without a finite domain)
+string_domain_conversion=(n:DomainWord set:DomainWord):>DomainWord=>$unsafe {
+    let binding=string_domain_binding(n)
+    if not string_domains.has(binding) {return -1}
+    string_domain_conversions.push([nodes.ptr[n].pos binding set])
+    string_domain_conversions.length - 1
+}
+# The sequence's element storage is string, just like the inferred binding.
+# Populate its literal array, in text order, once every checked write is known. Type-based
+# members(U) continues to use compile-time singleton specialization.
+string_domain_members=(n:DomainWord):>bool=>$unsafe {
+    if nkids(n) not=? 1 {return false}
+    let arg=kid(n 0)
+    if nodes.ptr[arg].kind not=? 'ident' {return false}
+    let sym=lookup(DomainWord(nodes.ptr[arg].name))
+    if sym =? 0 or (syms.ptr[sym].kind not=? 'local' and syms.ptr[sym].kind not=? 'global') {return false}
+    check_expr(arg 0);
+    let binding=string_domain_binding(last_checked)
+    if not string_domains.has(binding) {fatal(nodes.ptr[n].pos "members(value) needs an inferred finite string domain")}
+    let pos=nodes.ptr[n].pos
+    let t=mk_array(T_STR)
+    let array=mk('array' pos)
+    nodes.ptr[array].type=int32(t)
+    add_flag(array NF_CHECKED)
+    let ret=mk('return_' pos)
+    nodes.ptr[ret].a=int32(array)
+    nodes.ptr[ret].type=int32(T_NEVER)
+    let body=bc_block([ret] pos)
+    nodes.ptr[body].type=int32(T_NEVER)
+    let f=new_inst(FK_NORMAL cur_mod() "members")
+    fns.ptr[f].body=int32(body)
+    fns.ptr[f].ret=int32(t)
+    fns.ptr[f].fntype=int32(mk_fn([] t 0))
+    # Compile-time evaluation must not observe the unfinished array.
+    fns.ptr[f].state=1
+    fns.ptr[f].noinline=true
+    nodes.ptr[n]=Node(kind='call' pos=pos sym=int32(f) type=int32(t) flags=int32(NF_CHECKED))
+    string_domain_sequences.push([array binding])
+    string_domain_sequence_fns.push(f)
+    true
+}
+string_domains_materialize=():>void=>$unsafe {
+    loop i in 0.. and request in string_domain_conversions {
+        let pos=request[0]
+        let binding=request[1]
+        let set=request[2]
+        let values=string_domain_values(binding)
+        loop value in values {
+            if not str_sets[set].contains(name_of(value)) {fatal(pos "inferred string domain contains '{name_of(value)}', which is not one of {str_set_text(set)}")}
+        }
+        # (a settled domain inside the set never reaches the failing arm: no panic is left)
+        let stop=string_domain_conversion_stops.get(i) ?? 0
+        if stop not=? 0 and values.length >? 0 {
+            let constant=str_set_const(set 0 pos)
+            nodes.ptr[stop]=nodes.ptr[constant]
+        }
+    }
+    loop request in string_domain_sequences {
+        let n=request[0]
+        let binding=request[1]
+        let values=string_domain_values(binding)
+        if values.length =? 0 {fatal(nodes.ptr[n].pos "members(value) needs a finite string domain; a nonliteral write leaves it open")}
+        # (in text order, as `members(U)`: a domain is a set, not its writes' order)
+        let texts:array<string>=[]
+        loop value in values {
+            if not texts.contains(name_of(value)) {texts.push(name_of(value))}
+        }
+        let items:array<int64>=[]
+        loop text in texts.sorted() {
+            let item=mk('str_lit' nodes.ptr[n].pos)
+            nodes.ptr[item].sval=int32(intern(text))
+            nodes.ptr[item].type=int32(T_STR)
+            add_flag(item NF_CHECKED)
+            items.push(item)
+        }
+        set_list(n items)
+    }
+    loop f in string_domain_sequence_fns {fns.ptr[f].state=2}
+}
+# Literal leaves of a written value: a literal, or a conditional choosing
+# between them (`if verbose 'loud' else 'quiet'`), through the conversions and
+# single-value blocks checking adds. Strings give text ids, integers values.
+int_record=(binding:DomainWord kind:DomainWord a:DomainWord b:DomainWord):>void=>{
+    id_record(@int_log binding kind a b)
+}
+int_site=():>DomainWord=>{
+    if cx <? 0 {return -1}
+    DomainWord(ctxs[cx].inst) * 4096 + min(DomainWord(ctxs[cx].loop_depth) 4095)
+}
+int_domain_declare=(binding:DomainWord value:DomainWord):>void=>$unsafe {
+    let site:DomainWord=-1
+    if binding >=? 0 {site=int_site()}
+    let leaf=domain_leaf(value)
+    if leaf not=? 0 and nodes.ptr[leaf].kind =? 'int_lit' and not (has_flag(leaf NF_U64) and nodes.ptr[leaf].ival <? 0) {
+        int_record(binding INT_DECL site 0)
+        int_record(binding INT_POINT nodes.ptr[leaf].ival 0)
+        return
+    }
+    let values:array<int64>=[]
+    if not domain_literals(value false @values) {return}
+    int_record(binding INT_DECL site 0)
+    loop v in values {int_record(binding INT_POINT v 0)}
+}
+# op: 0 for `=`, else the compound token. A write the set cannot follow opens it.
+int_domain_write=(lhs:DomainWord value:DomainWord op:DomainWord):>void=>{
+    let binding=string_domain_binding(lhs)
+    if binding =? 0 {return}
+    let values:array<int64>=[]
+    if op =? 0 and domain_literals(value false @values) {
+        loop v in values {int_record(binding INT_POINT v 0)}
+        return
+    }
+    if (op =? 48 or op =? 49) and binding >? 0 and domain_literals(value false @values) and values.length =? 1 {
+        let delta=values[0]
+        if op =? 49 {delta=-delta}
+        int_record(binding INT_DELTA delta int_site())
+        return
+    }
+    int_record(binding INT_OPEN 0 0)
+}
+int_domain_capture=(inner:DomainWord outer:DomainWord):>void=>$unsafe {
+    let root=outer
+    loop DomainWord(locals.ptr[root].flags) & LF_CAPTURE not=? 0 and DomainWord(locals.ptr[root].flags) & LF_VALUECAP =? 0 {root=DomainWord(locals.ptr[root].outer)}
+    int_record(inner INT_CAPTURE root 0)
+}
+int_domain_settle=():>void=>{
+    let demanded=dict<int64 bool>()
+    loop request in int_domain_matches {demanded[request[1]]=true}
+    loop request in int_domain_conversions {demanded[request[1]]=true}
+    id_settle(@int_log @int_domain_states @demanded)
+}
+# Deferred to int_domains_finish: later writes still join the set.
+int_domain_match=(m:int64 covered:array<int64>):>bool=>$unsafe {
+    let binding=string_domain_binding(DomainWord(nodes.ptr[m].a))
+    if binding =? 0 {return false}
+    int_domain_matches.push([m binding covered])
+    true
+}
+int_domain_conversion=(n:DomainWord target:DomainWord):>void=>$unsafe {
+    let e=n
+    loop nodes.ptr[e].kind =? 'conv' {e=DomainWord(nodes.ptr[e].a)}
+    if nodes.ptr[e].kind not=? 'ident' or representation_type(ntype(e)) not=? T_MATH_INT {return}
+    let binding=string_domain_binding(e)
+    if binding not=? 0 {int_domain_conversions.push([n binding target])}
+}
+int_domains_finish=():>void=>$unsafe {
+    if int_domain_matches.length =? 0 and int_domain_conversions.length =? 0 {return}
+    int_domain_settle()
+    loop request in int_domain_matches {
+        let m=request[0]
+        if not int_domain_states.has(request[1]) {fatal(nodes.ptr[m].pos "match is not exhaustive (add a `_ => ...` arm or `else`)")}
+        let domain=id_intervals(@int_domain_states request[1])
+        if domain.length =? 0 {fatal(nodes.ptr[m].pos "match is not exhaustive (the integer's written values are not a bounded set; add `else`)")}
+        let missing=interval_missing(domain request[2])
+        if missing.length >? 0 {fatal(nodes.ptr[m].pos "this match has no arm for {interval_text(missing)} (the integer holds {id_text(domain)}; add one, or `else`)")}
+    }
+    loop request in int_domain_conversions {
+        let domain=id_intervals(@int_domain_states request[1])
+        if domain.length =? 0 {continue}
+        let [known allowed]=int_intervals(request[2])
+        if known and interval_missing(domain allowed).length =? 0 {int_domain_proven[request[0]]=true}
+    }
+    int_log=[]
+    int_domain_matches=[]
+    int_domain_conversions=[]
+    int_domain_states=dict<int64 IntDomain>()
+}
