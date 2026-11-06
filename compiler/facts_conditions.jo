@@ -1,0 +1,262 @@
+use 'facts.jo'
+use 'lower_scalars.dewy'
+use 'lower_views.dewy'
+use 'lower_storage.dewy'
+use 'lower_analysis.dewy'
+use 'lower_helpers.dewy'
+use 'lower_group.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'sequence_selectors.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ide.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'ast.jo'
+use 'icount.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'lower.jo'
+use 'check.jo'
+use 'comptime.jo'
+use 'check_constant.jo'
+use 'isolation.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'places.jo'
+use 'effects.jo'
+use 'effect_library.jo'
+use 'ownership.jo'
+use 'witness.jo'
+use 'directives.jo'
+use 'warn_if.jo'
+use 'string_domains.jo'
+use 'draw_context.jo'
+use 'predicate_facts.jo'
+use 'floats.jo'
+use 'member_replay.jo'
+use 'ownership_types.dewy'
+use 'lower_primitives.dewy'
+use 'math_ops.dewy'
+use 'draw_ops.dewy'
+use 'effect_classifiers.dewy'
+use 'effect_values.dewy'
+use 'effect_control.dewy'
+use 'effect_costs.dewy'
+use 'effect_owners.dewy'
+use 'isolation_ops.dewy'
+use 'facts_joins.dewy'
+use 'facts_changes.dewy'
+use 'facts_library.dewy'
+use 'facts_summaries.dewy'
+use 'facts_pushes.dewy'
+use 'facts_text.dewy'
+use 'facts_arrays.dewy'
+use 'facts_maps.dewy'
+use 'facts_pools.dewy'
+use 'facts_members.dewy'
+use 'facts_progress.dewy'
+use 'facts_probes.dewy'
+
+# Split during evaluation: RHS effects see the appropriate LHS edge, and
+# success can only narrow the old captured value, not its replacement.
+fact_condition = (n: int, entry: FactState) -> FactPaths:
+    k = nodes[n].kind
+    if k == .not_:
+        p = fact_condition(int(nodes[n].a), entry)
+        return FactPaths(p.no, p.yes, p.reason)
+    if k == .and_ or k == .or_:
+        a = fact_condition(int(nodes[n].a), entry)
+        b = fact_condition(int(nodes[n].b), if k == .and_: a.yes else: a.no)
+        reason = if a.yes.live and a.no.live: a.reason else: b.reason
+        if k == .and_:
+            no = fact_join(a.no, b.no, n)
+            # (`not (a and b)`: each side's refutation implies the other's)
+            if fact_either_wanted & 2 != 0 and a.no.live and b.no.live and a.value != 0 and b.value != 0: fact_either(no, a.value, a.no, false, b.value, b.no, false)
+            return FactPaths(b.yes, no, reason)
+        yes = fact_join(a.yes, b.yes, n)
+        if fact_either_wanted & 1 != 0 and a.yes.live and b.yes.live and a.value != 0 and b.value != 0: fact_either(yes, a.value, a.yes, true, b.value, b.yes, true)
+        return FactPaths(yes, b.no, reason)
+    # (a comparison chain holding an operand in a temporary, `-1 <=? i <? n`:
+    # `{let $chain1 = -1; $chain1 <=? i and i <? n}` declares, then tests as
+    # its last expression does; the temporaries leave scope on both paths.
+    # O(block statements))
+    if fact_condition_block(n):
+        s = entry
+        first = s.bindings.len()
+        loop i in [0..nkids(n) - 1): fact_capture(kid(n, i), s)
+        last = kid(n, nkids(n) - 1)
+        p = fact_condition((if nodes[last].kind == .exprstmt: int(nodes[last].a) else: last), s)
+        if p.yes.live and p.yes.bindings.len() > first: fact_scope_exit(p.yes, n, first)
+        if p.no.live and p.no.bindings.len() > first: fact_scope_exit(p.no, n, first)
+        return p
+    yes = entry
+    v = fact_capture(n, yes)
+    no = yes
+    reason = fact_bound(yes, v)
+    entry_state = if fact_query: yes else: FactState(live = false)
+    fact_assume(yes, v, true)
+    fact_assume(no, v, false)
+    if yes.conditional.len() > 0:
+        result_activate(yes, v)
+        result_activate(no, v)
+    FactPaths(yes, no, reason, v, entry_state)
+# A block of local declarations ending in its value: a condition's temporaries.
+fact_condition_block = (n: int) -> bool:
+    if nodes[n].kind != .block or nkids(n) < 2 or nkids(n) > 8: return false
+    loop i in [0..nkids(n) - 1):
+        c = kid(n, i)
+        if nodes[c].kind != .vardecl or has_flag(c, NF_GLOBAL) or nkids(c) != 0: return false
+    true
+# After a join of two leaf conditions' paths, `x is x_truth or y is
+# y_truth` holds (`if a and b return` leaves `not a or not b`; y's operands
+# may be read under x's outcome, as y was evaluated there). Each side's
+# refutation implying the other is conditional evidence (tag -2) that
+# result_activate applies once the state entails its antecedent: a later
+# guard, or a case split (fact_split_entails). At most two records per join,
+# only for leaf comparisons of integer values present after the join or
+# constants. O(1) each.
+fact_either = (s: mut FactState, x: int, xs: mut FactState, x_truth: bool, y: int, ys: mut FactState, y_truth: bool):
+    # (a loop's speculative rounds go without: its header keeps those of entry)
+    if not s.live or fact_speculating != 0 or s.conditional.len() + 2 > 32: return
+    held = 0
+    loop evidence in s.conditional: held += int(evidence.tag == -2)
+    if held + 2 > 8: return
+    p = fact_leaf_literal(s, x, xs, x_truth)
+    if p.0 == .eof: return
+    q = fact_leaf_literal(s, y, ys, y_truth)
+    if q.0 == .eof: return
+    # (not p implies q, not q implies p)
+    fact_implication(s, (fact_inverse(p.0), p.1, p.2, p.3, p.4), q)
+    fact_implication(s, (fact_inverse(q.0), q.1, q.2, q.3, q.4), p)
+# Leaf v (captured in state vs) at truth as (op, left kind, left, right
+# kind, right): kind 0 a value present in s, kind 1 a constant; op eof when
+# it has no such form.
+fact_leaf_literal = (s: mut FactState, v: int, vs: mut FactState, truth: bool) -> (Tok, int, int, int, int):
+    blank = (Tok.eof, 0, 0, 0, 0)
+    t = fact_terms[v]
+    op = Tok.eq
+    a = v; b = int(truth)
+    kb = 1
+    if fact_comparison(t.op) and t.a != 0 and t.b != 0:
+        op = if truth: t.op else: fact_inverse(t.op)
+        a = t.a; b = t.b; kb = 0
+    else if t.op != .eof or t.type != 0 and fact_type(t.type) != T_BOOL: return blank
+    ka = 0
+    if fact_type(fact_terms[a].type) == T_U64 or kb == 0 and fact_type(fact_terms[b].type) == T_U64: return blank
+    a = fact_leaf_operand(s, a, vs)
+    if kb == 0: b = fact_leaf_operand(s, b, vs)
+    if fact_slot(s, a) < 0:
+        x = fact_bound(vs, a)
+        if x.wide or x.lo != x.hi: return blank
+        ka = 1; a = x.lo
+    if kb == 0 and fact_slot(s, b) < 0:
+        y = fact_bound(vs, b)
+        if y.wide or y.lo != y.hi: return blank
+        kb = 1; b = y.lo
+    # (two constants: decided where it was evaluated, so it says nothing more)
+    if ka == 1 and kb == 1: return blank
+    (op, ka, a, kb, b)
+# An operand evaluated on one path that names a field of a value present
+# after the join (`q =? 0` tests q's numerator) names that field there too.
+# O(1) indexed lookups.
+fact_leaf_operand = (s: mut FactState, x: int, vs: FactState) -> int:
+    if fact_slot(s, x) >= 0: return x
+    pi = fact_projection_origin(vs, x)
+    if pi < 0: return x
+    p = vs.projections[pi]
+    if p.element or fact_slot(s, p.base) < 0 or s.projections.len() >= FACT_CAP: return x
+    fact_project(s, p.base, p.selector, false, fact_terms[x].type)
+fact_implication = (s: mut FactState, ante: (Tok, int, int, int, int), then: (Tok, int, int, int, int)):
+    fact_implications.push(FactImplication(ante.0, ante.2, ante.4, then.0, then.2, then.4, ante.1 | (ante.3 << 1) | (then.1 << 2) | (then.3 << 3)))
+    # (result names a value it reads, which compaction then keeps)
+    s.conditional.push(ResultEvidence((if ante.1 == 0: ante.2 else: ante.4), -2, 0, [], [], 0, fact_implications.len()))
+# Whether implication e's antecedent (part 0) or consequent (part 1) holds
+# in s, allocating nothing: intervals against a constant, else fact_compare.
+# O(1) or one bounded relation query.
+fact_implied = (s: FactState, e: ResultEvidence, part: int) -> bool:
+    r = fact_implications[e.base - 1]
+    op = if part == 0: r.op0 else: r.op1
+    x = if part == 0: r.a0 else: r.a1
+    y = if part == 0: r.b0 else: r.b1
+    kx = (r.k >> (part * 2)) & 1
+    ky = (r.k >> (part * 2 + 1)) & 1
+    if kx == 0 and ky == 0: return fact_compare(s, op, x, y) == 1
+    v = x; c = y
+    if kx == 1:
+        v = y; c = x
+        op = if op == .lt: Tok.gt else if op == .le: Tok.ge else if op == .gt: Tok.lt else if op == .ge: Tok.le else: op
+    b = fact_bound(s, v)
+    if b.wide: return false
+    if op == .lt: return b.hi < c
+    if op == .le: return b.hi <= c
+    if op == .gt: return b.lo > c
+    if op == .ge: return b.lo >= c
+    if op == .eq: return b.lo == c and b.hi == c
+    if op == .ne: return b.hi < c or b.lo > c or c == 0 and b.nz
+    false
+# Whether leaf condition v tests a value implication e's antecedent reads.
+fact_implication_reads = (e: ResultEvidence, v: int) -> bool:
+    r = fact_implications[e.base - 1]
+    t = fact_terms[v]
+    loop x in [v, t.a, t.b]:
+        if x != 0 and (r.k & 1 == 0 and r.a0 == x or r.k & 2 == 0 and r.b0 == x): return true
+    false
+# Assume implication e's consequent in s.
+fact_imply = (s: mut FactState, e: ResultEvidence):
+    r = fact_implications[e.base - 1]
+    a = if r.k & 4 == 0: r.a1 else: fact_constant(s, r.a1)
+    b = if r.k & 8 == 0: r.b1 else: fact_constant(s, r.b1)
+    fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(r.op1, a, b)), true)
+# Assume an optional's or union's tag is (or is not) wanted.
+fact_tag = (s: mut FactState, value: int, wanted: int, truth: bool):
+    if value == 0 or not s.live: return
+    tag = fact_project(s, value, -3, false, T_INT)
+    fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, tag, fact_constant(s, wanted))), truth)
+    if truth and s.conditional.len() > 0: result_activate(s)
+# The tag one pattern establishes, or -1.
+fact_pattern_tag = (p: int, st: int) -> int:
+    k = nodes[p].kind
+    if is_union(st) and k == .pvariant: return int(nodes[p].aux2)
+    if is_union(st) and k == .plit: return int(nodes[p].aux2)
+    if types[st].kind == .opt:
+        if k == .ptype and nodes[p].aux2 != 1: return 1
+        if k == .plit and nodes[int(nodes[p].a)].kind == .none_lit: return 0
+    -1
+# Implication operand slot (kind bit set: a constant) renamed by map.
+fact_stable_operand = (v: int, constant: int, map: {int: int}) -> int: if constant != 0: v else: map.get(v) ?? v
+# Implications only one header holds (a changing optional's, fact_loop_payload)
+# match the other's through the renamed tags and payloads. O(B + I^2), I <= 12.
+fact_loop_stable_implications = (a: FactState, b: FactState) -> bool:
+    if a.conditional == b.conditional: return true
+    mine: ResultEvidence[]
+    theirs: ResultEvidence[]
+    loop evidence in a.conditional:
+        if evidence.tag == -2 and not (evidence in b.conditional): mine.push(evidence)
+    loop evidence in b.conditional:
+        if evidence.tag == -2 and not (evidence in a.conditional): theirs.push(evidence)
+    if mine.len() != theirs.len(): return false
+    if mine.len() == 0: return true
+    map: {int: int} = {}
+    loop binding in a.bindings:
+        i = fact_binding(b, binding.place)
+        if i < 0 or fact_summary_payload(fact_type(fact_terms[binding.value].type)) == 0: continue
+        loop selector in [-3, -4]:
+            x = fact_projection_value(a, binding.value, selector)
+            y = fact_projection_value(b, b.bindings[i].value, selector)
+            if x != 0 and y != 0: map[x] = y
+    loop evidence in mine:
+        r = fact_implications[evidence.base - 1]
+        found = false
+        loop other in theirs:
+            q = fact_implications[other.base - 1]
+            if q.k != r.k or q.op0 != r.op0 or q.op1 != r.op1: continue
+            if q.a0 == fact_stable_operand(r.a0, r.k & 1, map) and q.b0 == fact_stable_operand(r.b0, r.k & 2, map) and q.a1 == fact_stable_operand(r.a1, r.k & 4, map) and q.b1 == fact_stable_operand(r.b1, r.k & 8, map): found = true; break
+        if not found: return false
+    true
