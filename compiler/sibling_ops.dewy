@@ -1,0 +1,393 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_MUT add_flag has_flag kid kid_c kid_d kids kids2 mk nkids nkids2 nodes set_kid set_list)
+from p"check.jo" import (LF_ADDR LF_CAPTURE LF_SHARED check_stmt ctxs cx dewy_at locals narrow_invalidate narrowed_var new_sym push_scope_sym resolve_type statement_watch syms)
+from p"checker_call_queries.dewy" import (ctx_dependent)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checker_state.dewy" import (SiblingKnown)
+from p"errors.jo" import (nominal_parent)
+from p"expr.jo" import (bc_int coerce cur_assign is_lit mk_ident_local narrow_local ntype)
+from p"node_store.dewy" import (Node)
+from p"sibling_types.jo" import (SIBLING_CAP sibling_block sibling_extending sibling_flow sibling_flow_member sibling_flow_next sibling_index sibling_known sibling_literals sibling_pending)
+from p"types.jo" import (is_union mk_array mk_tuple mk_union prune targ tkind type_eq types union_index union_members)
+from p"@lib/core/str.jo" import (join)
+from p"types.jo" import (dt)
+from p"util.jo" import (name_of warn)
+
+SiblingWord:type=int64<overflow='wrap'>
+sibling_descends=(t0:SiblingWord p:SiblingWord):>bool=>{
+    let t=prune(t0)
+    loop t not=? 0 {
+        if type_eq(t p) {return true}
+        t=(nominal_parent.get(t) ?? 0)
+    }
+    false
+}
+# The family two or more distinct record types among a literal's elements share, or 0.
+sibling_parent=(n:int64):>int64=>{
+    if nkids(n) <? 2 {return 0}
+    let first=prune(ntype(kid(n 0)))
+    let distinct=false
+    loop i in [0..nkids(n)) {
+        let c=kid(n i)
+        let t=prune(ntype(c))
+        if tkind(t) not=? 'struct_' or is_lit(c) {return 0}
+        if not type_eq(t first) {distinct=true}
+    }
+    if not distinct {return 0}
+    let p=first
+    loop p not=? 0 {
+        let all=true
+        loop j in [0..nkids(n)) {
+            let c=kid(n j)
+            if all and not sibling_descends(ntype(c) p) {all=false}
+        }
+        if all {return p}
+        p=(nominal_parent.get(p) ?? 0)
+    }
+    0
+}
+sibling_literal=(n:int64):>int64=>$unsafe {
+    let el:array<int64>=[]
+    loop c in kids(n) {el.push(prune(ntype(c)))}
+    nodes.ptr[n].kind='tuple'
+    sibling_literals[n]=true
+    mk_tuple(el)
+}
+# A positional value whose every position fits `elem` becomes an array: a
+# literal in place, a local by reading each position.
+sibling_array_source=(n:SiblingWord from_:SiblingWord elem0:SiblingWord):>bool=>$unsafe {
+    let elem=prune(elem0)
+    if not sibling_literals.has(n) and not (nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1)) {return false}
+    if not dewy_at(nodes.ptr[n].pos) {return false}
+    loop i in [0..SiblingWord(types.ptr[from_].nargs)) {
+        let ti=prune(targ(from_ i))
+        if not (type_eq(ti elem) or sibling_descends(ti elem) or (is_union(elem) and union_index(elem ti) >=? 0)) {return false}
+    }
+    true
+}
+sibling_to_array=(n:SiblingWord from_:SiblingWord to:SiblingWord):>SiblingWord=>$unsafe {
+    let elem=SiblingWord(types.ptr[prune(to)].elem)
+    let pos=nodes.ptr[n].pos
+    if sibling_literals.has(n) and nodes.ptr[n].kind =? 'tuple' {
+        nodes.ptr[n].kind='array'
+        loop i in [0..nkids(n)) {set_kid(n i coerce(kid(n i) elem))}
+        nodes.ptr[n].type=int32(to)
+        return n
+    }
+    let l=SiblingWord(nodes.ptr[n].sym)
+    let items:array<int64>=[]
+    loop i in [0..SiblingWord(types.ptr[from_].nargs)) {
+        let ix=mk('index' pos)
+        nodes.ptr[ix].a=int32(mk_ident_local(l pos))
+        let at=bc_int(i pos)
+        nodes.ptr[ix].b=int32(at)
+        set_list(ix [at])
+        items.push(ix)
+    }
+    let arr=mk('array' pos)
+    set_list(arr items)
+    nodes.ptr[n]=nodes.ptr[arr]
+    check_expr(n to);
+    n
+}
+# `let shapes=[Circle[...] Square[...]]`: positional unless the rest of its block
+# writes it; then its elements' union, with its contents known from here.
+sibling_binding=(s:SiblingWord t:SiblingWord):>SiblingWord=>$unsafe {
+    let name=SiblingWord(nodes.ptr[s].name)
+    let written=true
+    if sibling_block not=? 0 and sibling_index <? nkids(sibling_block) and kid(sibling_block sibling_index) =? s {
+        written=false
+        loop i in [sibling_index + 1..nkids(sibling_block)) {
+            if not written and sibling_writes(kid(sibling_block i) name) {written=true}
+        }
+    }
+    if not written {return t}
+    let members:array<int64>=[]
+    loop i in [0..SiblingWord(types.ptr[t].nargs)) {
+        let m=prune(targ(t i))
+        if not members.contains(m) {members.push(m)}
+    }
+    let to=mk_array(mk_union(members))
+    nodes.ptr[s].b=int32(sibling_to_array(SiblingWord(nodes.ptr[s].b) t to))
+    sibling_pending=[]
+    loop i in [0..SiblingWord(types.ptr[t].nargs)) {sibling_pending.push(prune(targ(t i)))}
+    to
+}
+# Whether unchecked syntax may write the binding `name`: an assignment into it,
+# an `@` of it, a method call on it, a mutable loop over it (conservative).
+sibling_writes=(n:SiblingWord name:SiblingWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {return SiblingWord(nodes.ptr[n].name) =? name and has_flag(n NF_MUT)}
+    if k =? 'assign' and sibling_route_name(SiblingWord(nodes.ptr[n].a)) =? name {return true}
+    if k =? 'call' and nodes.ptr[SiblingWord(nodes.ptr[n].a)].kind =? 'field' and sibling_route_name(SiblingWord(nodes.ptr[SiblingWord(nodes.ptr[n].a)].a)) =? name {return true}
+    if (k =? 'for_' or k =? 'lhead') and has_flag(n NF_MUT) and sibling_route_name(SiblingWord(nodes.ptr[n].a)) =? name {return true}
+    if sibling_writes(SiblingWord(nodes.ptr[n].a) name) or sibling_writes(SiblingWord(nodes.ptr[n].b) name) {return true}
+    if sibling_writes(kid_c(n) name) or sibling_writes(kid_d(n) name) {return true}
+    loop c in kids(n) {
+        if sibling_writes(c name) {return true}
+    }
+    if k not=? 'lambda' and k not=? 'fn_' {
+        loop c in kids2(n) {
+            if sibling_writes(c name) {return true}
+        }
+    }
+    false
+}
+sibling_route_name=(n0:SiblingWord):>SiblingWord=>$unsafe {
+    let n=n0
+    loop n not=? 0 and (nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index') {n=SiblingWord(nodes.ptr[n].a)}
+    if n not=? 0 and nodes.ptr[n].kind =? 'ident' {return SiblingWord(nodes.ptr[n].name)}
+    0
+}
+sibling_establish=(l:SiblingWord):>void=>{
+    if sibling_pending.length =? 0 {return}
+    sibling_known[l]=SiblingKnown(types=sibling_pending owner=SiblingWord(ctxs[cx].inst) depth=SiblingWord(ctxs[cx].loop_depth) block=sibling_block)
+    statement_watch.sibling_known=sibling_known.length
+    sibling_pending=[]
+}
+# A write the knowledge cannot follow ends it.
+sibling_forget=(l:SiblingWord):>void=>{
+    if l not=? sibling_extending and sibling_known.has(l) {
+        sibling_known.remove(l);
+        statement_watch.sibling_known=sibling_known.length
+    }
+}
+# A statement of block b while some binding's contents are known: `xs.push(v)`
+# as a statement of the declaring block appends v's record type.
+sibling_statement=(s:SiblingWord b:SiblingWord):>void=>$unsafe {
+    let l:SiblingWord=0
+    let arg:SiblingWord=0
+    if nodes.ptr[s].kind =? 'exprstmt' and not has_flag(s NF_CHECKED) {
+        let call=SiblingWord(nodes.ptr[s].a)
+        if nodes.ptr[call].kind =? 'call' and nkids(call) =? 1 and nodes.ptr[SiblingWord(nodes.ptr[call].a)].kind =? 'field' and name_of(SiblingWord(nodes.ptr[SiblingWord(nodes.ptr[call].a)].name)) =? "push" {
+            let base=SiblingWord(nodes.ptr[SiblingWord(nodes.ptr[call].a)].a)
+            if nodes.ptr[base].kind =? 'ident' {
+                let sy=lookup(SiblingWord(nodes.ptr[base].name))
+                if sy not=? 0 and syms.ptr[sy].kind =? 'local' and sibling_known.has(SiblingWord(syms.ptr[sy].ref)) {
+                    l=SiblingWord(syms.ptr[sy].ref)
+                    arg=kid(call 0)
+                }
+            }
+        }
+    }
+    if l =? 0 {
+        check_stmt(s)
+        return
+    }
+    # (the pushed value's own type, before the push converts it to the union)
+    let t:SiblingWord=0
+    if not ctx_dependent(arg) and not is_lit(arg) {
+        t=prune(check_expr(arg 0))
+        add_flag(arg NF_CHECKED)
+    }
+    sibling_extending=l
+    check_stmt(s)
+    sibling_extending=0
+    if not sibling_known.has(l) {return}
+    let known=sibling_known[l]
+    if known.block not=? b or known.owner not=? SiblingWord(ctxs[cx].inst) or known.depth not=? SiblingWord(ctxs[cx].loop_depth) or known.types.length >=? SIBLING_CAP or t =? 0 or tkind(t) not=? 'struct_' {
+        sibling_known.remove(l);
+        statement_watch.sibling_known=sibling_known.length
+        return
+    }
+    known.types.push(t)
+    sibling_known[l]=known
+}
+# `xs[k]` with a constant k whose record type is known here: that member.
+sibling_index_narrow=(n:SiblingWord t:SiblingWord):>SiblingWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'index' or cur_assign not=? 0 or has_flag(n NF_MUT) or not is_union(prune(t)) {return t}
+    let base=SiblingWord(nodes.ptr[n].a)
+    if nodes.ptr[base].kind not=? 'ident' or nodes.ptr[base].aux not=? int32(1) {return t}
+    let l=SiblingWord(nodes.ptr[base].sym)
+    if not sibling_known.has(l) {return t}
+    if SiblingWord(locals.ptr[l].flags) & (LF_SHARED | LF_ADDR | LF_CAPTURE) not=? 0 {return t}
+    let e=SiblingWord(nodes.ptr[n].b)
+    loop e not=? 0 and nodes.ptr[e].kind =? 'conv' {e=SiblingWord(nodes.ptr[e].a)}
+    if e =? 0 or nodes.ptr[e].kind not=? 'int_lit' {return t}
+    let k=nodes.ptr[e].ival
+    let known=sibling_known[l]
+    if k <? 0 or k >=? known.types.length or known.owner not=? SiblingWord(ctxs[cx].inst) or known.depth not=? SiblingWord(ctxs[cx].loop_depth) {return t}
+    let member=known.types[k]
+    let vi=union_index(prune(t) member)
+    if vi <? 0 {return t}
+    let inner=nodes.length
+    nodes.push(nodes.ptr[n])
+    nodes.ptr[n]=Node(kind='narrow' pos=nodes.ptr[inner].pos a=int32(inner) aux=int32(vi) type=int32(member) flags=int32(NF_CHECKED))
+    member
+}
+# The record type a literal written to a binding makes, from its syntax (`Square[s=2]`), or 0.
+sibling_syntax_type=(v:SiblingWord):>SiblingWord=>$unsafe {
+    if v =? 0 {return 0}
+    let k=nodes.ptr[v].kind
+    let callee:SiblingWord=0
+    if k =? 'call' or k =? 'index' {callee=SiblingWord(nodes.ptr[v].a)}
+    if callee =? 0 or nodes.ptr[callee].kind not=? 'ident' or nodes.ptr[callee].sval not=? 0 {return 0}
+    let s=lookup(SiblingWord(nodes.ptr[callee].name))
+    if s =? 0 {return 0}
+    let sk=syms.ptr[s].kind
+    let d=SiblingWord(syms.ptr[s].ref)
+    if sk =? 'alias_' or sk =? 'struct_' {
+        if nkids2(d) not=? 0 {return 0}
+    }
+    else if sk not=? 'type_' {return 0}
+    let tn=mk('tname' nodes.ptr[callee].pos)
+    nodes.ptr[tn].name=nodes.ptr[callee].name
+    let t=prune(resolve_type(tn))
+    if tkind(t) not=? 'struct_' {return 0}
+    t
+}
+# The literals unchecked syntax n writes to `name` (`name = Square[...]`) into out; `escapes`
+# when it may be written where the flow cannot follow (through `@name`, inside a function).
+sibling_scalar_scan=(n:SiblingWord name:SiblingWord in_fn:bool @out:array<int64> @escapes:bool):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' and SiblingWord(nodes.ptr[n].name) =? name and has_flag(n NF_MUT) {escapes=true}
+    if k =? 'assign' and nodes.ptr[SiblingWord(nodes.ptr[n].a)].kind =? 'ident' and SiblingWord(nodes.ptr[SiblingWord(nodes.ptr[n].a)].name) =? name {
+        if in_fn {escapes=true}
+        if nodes.ptr[n].op =? int32(47) {
+            let t=sibling_syntax_type(SiblingWord(nodes.ptr[n].b))
+            if t not=? 0 {out.push(t)}
+        }
+    }
+    let inner=in_fn or k =? 'lambda' or k =? 'fn_'
+    sibling_scalar_scan(SiblingWord(nodes.ptr[n].a) name inner @out @escapes)
+    sibling_scalar_scan(SiblingWord(nodes.ptr[n].b) name inner @out @escapes)
+    sibling_scalar_scan(kid_c(n) name inner @out @escapes)
+    sibling_scalar_scan(kid_d(n) name inner @out @escapes)
+    loop c in kids(n) {sibling_scalar_scan(c name inner @out @escapes)}
+    if k not=? 'lambda' and k not=? 'fn_' {
+        loop c in kids2(n) {sibling_scalar_scan(c name inner @out @escapes)}
+    }
+}
+# Whether t0 and t1 are records of one minted family.
+sibling_family=(t0:SiblingWord t1:SiblingWord):>bool=>{
+    let p=(nominal_parent.get(prune(t0)) ?? 0)
+    loop p not=? 0 {
+        if sibling_descends(t1 p) {return true}
+        p=(nominal_parent.get(p) ?? 0)
+    }
+    false
+}
+# `let s = Circle[...]` (vardecl d, value of record type t): the union of t and the sibling
+# literals the rest of its block writes to it, or t.
+sibling_scalar=(d:SiblingWord t:SiblingWord):>SiblingWord=>$unsafe {
+    if sibling_block =? 0 or sibling_index >=? nkids(sibling_block) or kid(sibling_block sibling_index) not=? d {return t}
+    if (nominal_parent.get(prune(t)) ?? 0) =? 0 or sibling_index + 1 >=? nkids(sibling_block) {return t}
+    let name=SiblingWord(nodes.ptr[d].name)
+    let written:array<int64>=[]
+    let escapes=false
+    loop i in [sibling_index + 1..nkids(sibling_block)) {sibling_scalar_scan(kid(sibling_block i) name false @written @escapes)}
+    let members:array<int64>=[prune(t)]
+    loop w in written {
+        if w in? members or not sibling_family(t w) {continue}
+        members.push(w)
+    }
+    if members.length <? 2 {return t}
+    let u=mk_union(members)
+    let shown:array<string>=[]
+    loop m in members {shown.push(dt(m))}
+    let nm=name_of(name)
+    let later:array<string>=[]
+    loop i in [1..shown.length) {later.push(shown[i])}
+    let later_text=join(later " or a ")
+    let all_text=join(shown " | ")
+    let pipe_text=join(shown "|")
+    warn(nodes.ptr[d].pos "'{nm}' is given a {shown[0]} here and later a {later_text}, so it holds {all_text}, and which one is followed from each write: annotate it to say which was meant, `let {nm}:{pipe_text} = ...`, or `let {nm}:{shown[0]} = ...` or `let {nm}:{shown[1]} = ...` for one of them")
+    let converted=coerce(SiblingWord(nodes.ptr[d].b) u)
+    nodes.ptr[d].b=int32(converted)
+    if not escapes {
+        sibling_flow_next=1
+        sibling_flow_member=prune(t)
+    }
+    u
+}
+# `let s:Circle|Square = Circle[...]` (a union of sibling records, value of member type vt):
+# followed from its value's type.
+sibling_annotated=(d:SiblingWord t:SiblingWord vt:SiblingWord):>bool=>$unsafe {
+    let u=prune(t)
+    if not is_union(u) or union_index(u prune(vt)) <? 0 {return false}
+    let ms=union_members(u)
+    if ms.length <? 2 {return false}
+    loop m in ms {
+        if tkind(m) not=? 'struct_' or not sibling_family(ms[0] m) {return false}
+    }
+    if sibling_block =? 0 or sibling_index >=? nkids(sibling_block) or kid(sibling_block sibling_index) not=? d {return false}
+    let written:array<int64>=[]
+    let escapes=false
+    loop i in [sibling_index + 1..nkids(sibling_block)) {sibling_scalar_scan(kid(sibling_block i) SiblingWord(nodes.ptr[d].name) false @written @escapes)}
+    if escapes {return false}
+    sibling_flow_next=1
+    sibling_flow_member=prune(vt)
+    true
+}
+# Variable l was just declared to be followed: it holds the member it starts as.
+sibling_flow_start=(l:SiblingWord pos:SiblingWord):>void=>{
+    sibling_flow_next=0
+    sibling_flow[l]=sibling_block
+    statement_watch.sibling_flow=sibling_flow.length
+    narrow_local(l [sibling_flow_member] pos)
+}
+# The variable a local name stands for (through its narrowing aliases).
+sibling_root=(l0:SiblingWord):>SiblingWord=>{
+    let l=l0
+    loop narrowed_var(l) not=? 0 {l=narrowed_var(l)}
+    l
+}
+# `s = v` checked, s followed: from here it holds v's member (`literal`: the record type its
+# syntax names, `Square[...]`, taken before the check gave the literal the union's type).
+sibling_flow_assign=(s:SiblingWord literal:SiblingWord):>void=>$unsafe {
+    if nodes.ptr[s].op not=? int32(47) {return}
+    let lhs=SiblingWord(nodes.ptr[s].a)
+    if nodes.ptr[lhs].kind not=? 'ident' or nodes.ptr[lhs].aux not=? int32(1) {return}
+    let l=SiblingWord(nodes.ptr[lhs].sym)
+    let root=sibling_root(l)
+    if not sibling_flow.has(root) {return}
+    let v=SiblingWord(nodes.ptr[s].b)
+    loop nodes.ptr[v].kind =? 'conv' {v=SiblingWord(nodes.ptr[v].a)}
+    let rt=prune(ntype(v))
+    if is_union(rt) and literal not=? 0 {rt=literal}
+    if l not=? root and type_eq(prune(SiblingWord(locals.ptr[l].type)) rt) {return}
+    if union_index(prune(SiblingWord(locals.ptr[root].type)) rt) <? 0 {return}
+    narrow_local(root [rt] nodes.ptr[s].pos)
+}
+# Statement s (of block b) about to be checked: a followed variable it writes inside a loop
+# is the union from here, since the loop's next turn sees what the last one wrote.
+sibling_flow_loops=(s:SiblingWord):>void=>$unsafe {
+    loop [l _] in sibling_flow {
+        let name=SiblingWord(locals.ptr[l].name)
+        if not sibling_loop_writes(s name false) {continue}
+        let sy=lookup(name)
+        if sy =? 0 or syms.ptr[sy].kind not=? 'local' {continue}
+        let al=SiblingWord(syms.ptr[sy].ref)
+        if al =? l or sibling_root(al) not=? l {continue}
+        narrow_invalidate(al)
+        push_scope_sym(name new_sym(name 'local' l 0))
+    }
+}
+sibling_loop_writes=(n:SiblingWord name:SiblingWord in_loop:bool):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if in_loop and k =? 'assign' and sibling_route_name(SiblingWord(nodes.ptr[n].a)) =? name {return true}
+    let inner=in_loop or k =? 'while_' or k =? 'for_' or k =? 'loopx' or k =? 'lhead'
+    if sibling_loop_writes(SiblingWord(nodes.ptr[n].a) name inner) or sibling_loop_writes(SiblingWord(nodes.ptr[n].b) name inner) {return true}
+    if sibling_loop_writes(kid_c(n) name inner) or sibling_loop_writes(kid_d(n) name inner) {return true}
+    loop c in kids(n) {
+        if sibling_loop_writes(c name inner) {return true}
+    }
+    if k not=? 'lambda' and k not=? 'fn_' {
+        loop c in kids2(n) {
+            if sibling_loop_writes(c name inner) {return true}
+        }
+    }
+    false
+}
+# Block b ends: the variables declared in it are no longer followed.
+sibling_flow_end=(b:SiblingWord):>void=>{
+    let done:array<int64>=[]
+    loop [l block] in sibling_flow {
+        if block =? b {done.push(l)}
+    }
+    loop l in done {sibling_flow.remove(l);}
+    statement_watch.sibling_flow=sibling_flow.length
+}
