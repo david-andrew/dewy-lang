@@ -5758,7 +5758,14 @@ rd_dc_in_mistake=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64)
     if (((not reader_ctx.flags.report_now) or (reader_ctx.reader.dn_in_interpolation >? 0)) or (reader_ctx.reader.dc_head_depth =? reader_ctx.depth)) {
         return 0
     }
-    rd_dc_report(@reader_ctx pos "`in` names a loop's values, as in `loop item in items \{ ... }`; membership is `in?`, as in `if x in? xs \{ ... }`");
+    # (Python's `for`: dc_foreign_habit's reading, reported here because `in` comes first)
+    let binder:int64=rd_dc_token_from(@reader_ctx rd_pos_off(pos))
+    if ((binder >? 0) and (reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)].kind =? 'identifier') and (rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)]) =? "for")) {
+        rd_dc_report(@reader_ctx rd_mkpos(reader_ctx.file reader_ctx.tokens[(int64<overflow='wrap'>(binder) - 1)].start) "Dewy has no `for`: write `loop x in xs \{ ... }`, or key and value with `loop [key value] in m \{ ... }`");
+    }
+    else {
+        rd_dc_report(@reader_ctx pos "`in` names a loop's values, as in `loop item in items \{ ... }`; membership is `in?`, as in `if x in? xs \{ ... }`");
+    }
     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
     rd_dc_expr(@reader_ctx @reader_nodes (int64<overflow='wrap'>(dn_power('kw_in')) + 1))
 }
