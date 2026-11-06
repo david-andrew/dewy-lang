@@ -18,6 +18,7 @@ use '{root}/compiler/source_types.dewy'
 use '{root}/compiler/check.jo'
 use '{root}/compiler/lex.jo'
 use '{root}/compiler/scan.jo'
+use '{root}/compiler/scan_index.dewy'
 use '{root}/compiler/dewy_fast.jo'
 
 page = 4096
@@ -75,7 +76,7 @@ ALPHABET = [bytes([c]) for c in b'"\'\\{}#.<>=!-+*/%^&|~?:;,()[]@$`ax019_eErbf \
 PREFIXES = [b'x = ', b'"', b'"{', b'"{a', b"'", b'"""', b"'''", b'#', b'#{', b'#[', b'`', b'0x',
             b'1.', b'a.', b'\n    ', b'r"', b'f(', b'=> {', b'{', b'"\\', b'"a{{', b'x="{', b'x=>',
             b'when a:\n', b'f = ():\n    ', b'1e', b'0b', b'"""a"', b'..']
-SOURCES = ['compiler/lex.jo', 'compiler/scan.jo', 'compiler/dewy_lex.dewy', 'compiler/line_table.dewy',
+SOURCES = ['compiler/lex.jo', 'compiler/scan.jo', 'compiler/scan_index.dewy', 'compiler/dewy_lex.dewy', 'compiler/line_table.dewy',
            'lib/core/str.jo', 'lib/std/regex.jo']
 
 
