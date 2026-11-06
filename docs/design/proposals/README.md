@@ -16,10 +16,11 @@ These folders record, for each design decision, what was considered and why one 
 
 | Folder | Topic | Status |
 |---|---|---|
-| [time/](time/) | Time, dates, clocks and calendars | v5 drafted. Settled: the 1977 epoch, integer ticks and `now` without parentheses. The rest is open (open_decisions D6–D9, D15). |
+| [time/](time/) | Time, dates, clocks and calendars | v5 drafted; core accepted 2026-11-06 (decisions.md). v6 applies it. Open: D15a–d. |
 | [concurrency/stage4/](concurrency/stage4/) | Queues, `select`, failed sends | `Unsent`, `spsc` and `mpmc` accepted 2026-11-01. `select` and `[concurrent …]` are superseded by `unified/`. |
-| [concurrency/unified/](concurrency/unified/) | One `parallel` surface | Proposal v2 and reviews. Open (D4, C1–C11). |
-| [concurrency/big-picture/](concurrency/big-picture/) | The 80/20 performance ladder and prior art | Synthesis and reviews. Open (D4, B1–B8). |
-| [bulletproof/](bulletproof/) | Opt-out tags for `$bulletproof` | Open (D10). |
+| [concurrency/unified/](concurrency/unified/) | One `parallel` surface | Proposal v2 and reviews. Open (D4). |
+| [concurrency/big-picture/](concurrency/big-picture/) | The 80/20 performance ladder and prior art | Synthesis and reviews. Open (D4). |
+| [packages/](packages/) | Vendoring and package metadata | Synthesis and reviews. Open: D21a–b. |
+| [bulletproof/](bulletproof/) | Opt-out tags for `$bulletproof` | Being redesigned so unsafety is opted into. |
 
 The earliest time-design inputs were built from David's private notes and are kept outside the repo.

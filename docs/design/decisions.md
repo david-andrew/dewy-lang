@@ -313,3 +313,90 @@ section linked. ROADMAP.md lists them in one line each.
     diagnostics; change it and update the tests and docs. "Use X instead"
     errors for spellings that never shipped are removed. Fix-its that teach
     Dewy over Python or C habits stay. Reason: there is nothing to migrate.
+- Batch 2 from [open_decisions.md](open_decisions.md) (David, 2026-11-06):
+  - **How questions are asked** (standing): a semantic question reaches David
+    only if it fails one of two tests: (1) the common 80% path is easy,
+    ergonomic and fast; (2) when the common path doesn't fit, adjusting it is
+    straightforward. If both pass, the semantics are good and only the syntax is
+    his to review. Reason: most questions asked him to arbitrate semantics that
+    these tests already settle.
+  - **Safety default direction** (standing, #108): vanilla Dewy doesn't need to
+    be near `$bulletproof`, but a lot or all unsafety is opted into, not opted
+    out of, unless there are strong, stated reasons for the reverse. Every tag's
+    name must say what it does (safer or less safe, more or less proof, assume
+    or ensure). Common crashes aren't possible unless opted in. Considered: the
+    8 `$library.require_*`/`$prove_*` opt-outs as proposed; rejected as unclear
+    and as requiring you to remember to opt out. Redesign:
+    [proposals/bulletproof/](proposals/bulletproof/). Very large `parallel`
+    ranges (D10h): `$no_assumed_bounds` rejects an unproven range of 2^63 or more
+    values, with no new tag.
+  - **Time core**, from [proposals/time/](proposals/time/):
+    - `Instant` and `Duration` are 128-bit nanoseconds (D6). Considered: 64-bit,
+      which covers only 1685–2269. Reasons: the 10,000-year priority;
+      `width=64` stays available for compact columns.
+    - `now` is a `ClockReading`: `now - start` is monotonic, `now + 5s` is a
+      monotonic deadline, `.nominal` is the wall `Instant` (D7). Considered:
+      subtraction on the wall clock, which lies when the wall clock is adjusted.
+    - Time literals are checked at compile time and can't fail (D8).
+    - `1day` and `1week` are calendar periods (D9), with good errors pointing to
+      the right form. Considered: durations, which would make `1day` equal
+      `24hour` and break substitution invariance.
+    - `Gregorian` names the default calendar, since Dewy converts nothing
+      implicitly. Considered: `ProlepticGregorian`.
+    - Relative waits count actual time, with active/awake time opt-in.
+    - Default rule data is pinned to the Dewy version, not a year. Considered:
+      `rules_2026`.
+    - If a zone-dependent operation has no explicit zone, the compiler warns which
+      zone it assumed; `$time.zone = 'America/New_York'` is the explicit form.
+    - `age` is explicit about which date is which, and `date - date` is a natural
+      spelling. Considered: `birthdate.age(on=…)`, which relies on remembering an
+      arbitrary order.
+    - Separate `Appointment`, `Occurrence`, `Event` and `Observation` records,
+      and v5's new names: provisional.
+  - **Language version instead of editions:** a program declares the version it
+    was written for, e.g. `$dewy.version = '0.1.0'`. Any current or later compiler
+    compiles it as that version, warnings may mention later changes, and modules
+    with different versions interoperate. Reason: "I want to be able to compile
+    my old programs 100 years later." Considered: `$edition = 2026` and
+    `$build.edition`.
+  - **Loop copies stay writable** (D12, #139): writing to the copy in `loop x in xs`
+    isn't an error, since changing the local copy can be exactly what's wanted, as
+    when looping over integers. Considered: an error naming `loop @x in xs`.
+  - **`[]` is an underspecified literal** (D13, #141): like `1`, it takes its type
+    from context (an empty dict, array or possibly object). Considered: an array
+    always, with a dict special case.
+  - **`?? return x`, `?? break` and `?? continue`** (D14, #142), including with
+    `??<E>` for narrower errors.
+  - **Writing to a tuple slot at a runtime index** (D16, #137) is allowed whenever
+    the operation is valid for every position it could reach, e.g. `t[i] += 1` on
+    `[int64 int64|float64]` is fine and on `[int64 int64|string]` is an error.
+    Considered: only when every position has the same type.
+  - **Self-length refinements** (D17, #138): wanted, e.g.
+    `array<int64<(<? parent.length)>>`.
+  - **`from` stays a reserved keyword everywhere** (D18, #144). Considered: a
+    contextual keyword.
+  - **Formatting** (D19): `pad_center` is added (#134). Nested `"{x:<{w}}"` is
+    rejected as brand-new syntax not patterned after anything in Dewy; dynamic
+    formats use a higher-order format function
+    (`resources/discussion_points.md`, "Format string specifiers") (#135). Width-only
+    formats add no digits, so a rational `120` under `{x:>7}` prints `    120`
+    (#136). `rational("19.99")` prints `19.99`.
+  - **No `if let`** (D20, #143).
+  - **Function types group with `()`, not `<>`** (D22 note): e.g.
+    `f:(int:>int)` and `report:(array<int> :>void)`.
+  - **`spsc` details** (D23, #146): `let [tx rx] = spsc<Message 64>.split`, without
+    the redundant `()`. `$__consume__` is fine. The other calls are implementation
+    choices, made for ergonomics, least surprise and fewest bugs.
+  - **A program function hiding a library method warns, naming both** (D24).
+    Considered: changing lookup; staying silent.
+  - **Start-up reads** (D25): the first call to a function requires every value in
+    its body to be defined by that point, or it's a compile error, even on a branch
+    that wouldn't run. The exception would be a future compile-time exclusion (for
+    OS or environment code). Considered: discarding proven-dead branches; a run-time
+    check.
+  - **Directions:** insulation R-values and anything computed with them must be
+    effortless in units and interoperate with all other units. Metatags direct
+    allowed resource use at a high level (e.g. single core).
+  - Taken under the two-question test, without David's review (either can be
+    overturned): `$capture @x` of an outer variable inside a task is a compile
+    error (D26); `spawn` bodies infer their result so `or_throw` works (D27).
