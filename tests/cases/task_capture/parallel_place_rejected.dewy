@@ -1,0 +1,8 @@
+main = () => {
+    let total = 0
+    parallel i in [0..2) {
+        let f = ($capture @total y:int):>int => { total += y; y }
+        printl(f(i))
+    }
+    printl(total)
+}

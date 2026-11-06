@@ -1,0 +1,8 @@
+# Sharing a task body's own copy would lose the writes.
+main = () => {
+    let total = 0
+    concurrent {
+        spawn { printl([1 2 3].map(($capture @total y:int):>int => { total += y; y })) }
+    }
+    printl(total)
+}

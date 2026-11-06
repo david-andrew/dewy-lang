@@ -1,0 +1,9 @@
+# modes: native native-release
+# Near miss: a task's snapshot may be read, and a private capture copies it again.
+main = () => {
+    let total = 5
+    concurrent {
+        spawn { printl([1 2].map(($capture total y:int):>int => y + total)) }
+    }
+    printl(total)
+}

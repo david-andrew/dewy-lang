@@ -1,0 +1,11 @@
+# modes: native native-release
+# Near miss: a variable made inside the body can be shared.
+main = () => {
+    concurrent {
+        spawn {
+            let total = 0
+            printl([1 2 3].map(($capture @total y:int):>int => { total += y; y }))
+            printl(total)
+        }
+    }
+}

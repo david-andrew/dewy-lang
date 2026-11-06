@@ -3201,7 +3201,9 @@ failure cancels its siblings; joining still waits for their cleanup. Returning
 early from the body cancels and joins its children. `concurrent g { ... }` names
 a `TaskGroup`; pass it explicitly to helpers that use `spawn(g) expression`.
 `cancel(g)` cancels that group and its descendants. Captures and results must
-satisfy inferred transfer properties. A task cannot read an unsynchronized
+satisfy inferred transfer properties. *Provisional:* a body holds its own copy of
+what it captures, so `$capture @x` of an outer `x` inside a task or `parallel` body
+is a compile error. A task cannot read an unsynchronized
 mutable global while its parent runs; capture a value or use an atomic handle.
 A module binding that nothing writes after its declaration (`LOG = """..."""`)
 reads like a `const`.

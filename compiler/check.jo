@@ -1681,6 +1681,16 @@ value_capture = (inst: int, name: int) -> bool:
         if nodes[cap].name == i32(name): return not has_flag(cap, NF_MUT)
     true
 
+# `$capture @x` of what an enclosing task or `parallel` body holds as its own copy of an
+# outer x: the writes would reach only that copy.
+task_copy_shared = (r: int, pos: int):
+    fl = int(locals[r].flags)
+    if fl & LF_CAPTURE == 0 or fl & LF_VALUECAP == 0: return
+    owner = int(fns[int(locals[r].owner)].decl)
+    if owner == 0 or nodes[owner].kind != .lambda or nodes[owner].aux2 != 17 and not has_flag(owner, NF_LANG_BODY): return
+    nm = name_of(int(locals[r].name))
+    fatal(pos, "`$capture @{nm}` would share the copy of '{nm}' that the enclosing task or `parallel` body holds, not the '{nm}' outside it, so its changes would be lost: send results back through a task's result, a channel or an atomic, or make the variable inside the body")
+
 capture_in = (c: int, l: int) -> int:
     inst = int(ctxs[c].inst)
     if int(locals[l].owner) == inst or ctxs[c].parent < 0: return l
@@ -1706,6 +1716,7 @@ capture_in = (c: int, l: int) -> int:
         loop int(locals[r].flags) & LF_CAPTURE != 0 and int(locals[r].flags) & LF_VALUECAP == 0: r = int(locals[r].outer)
         d = int(fns[inst].decl)
         if d != 0 and files[pos_file(nodes[d].pos)].is_dewy:
+            task_copy_shared(r, nodes[d].pos)
             check_shareable(r, nodes[d].pos)
             locals[r].flags = locals[r].flags | i32(LF_SHARED)
         capture_root(r)

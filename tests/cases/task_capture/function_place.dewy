@@ -1,0 +1,6 @@
+# Outside a task, sharing still changes the outer variable.
+main = () => {
+    let total = 0
+    printl([1 2 3].map(($capture @total y:int):>int => { total += y; y }))
+    printl(total)
+}
