@@ -382,8 +382,9 @@ section linked. ROADMAP.md lists them in one line each.
     formats add no digits, so a rational `120` under `{x:>7}` prints `    120`
     (#136). `rational("19.99")` prints `19.99`.
   - **No `if let`** (D20, #143).
-  - **Function types group with `()`, not `<>`** (D22 note): e.g.
-    `f:(int:>int)` and `report:(array<int> :>void)`.
+  - **Function types are idiomatically grouped with `()`** (D22 note): e.g.
+    `f:(int:>int)` and `report:(array<int> :>void)`. `<>` stays valid: it is `()`
+    that also constrains the inside to be types.
   - **`spsc` details** (D23, #146): `let [tx rx] = spsc<Message 64>.split`, without
     the redundant `()`. `$__consume__` is fine. The other calls are implementation
     choices, made for ergonomics, least surprise and fewest bugs.
@@ -400,3 +401,22 @@ section linked. ROADMAP.md lists them in one line each.
   - Taken under the two-question test, without David's review (either can be
     overturned): `$capture @x` of an outer variable inside a task is a compile
     error (D26); `spawn` bodies infer their result so `or_throw` works (D27).
+  - **Time zone with none given** (D15a): chosen at compile time, so you can say
+    exactly the behavior you want. `$time.zone = 'America/New_York'` pins the whole
+    program to one zone; `$time.zone = 'system'` uses the zone of the machine running
+    the program; `$time.zone = 'build'` pins the build machine's zone. Rules are pinned
+    at build unless `$time.zone_source = 'host'`. Unspecified means the running
+    machine, with a warning naming the assumption. Considered: only pinning the name
+    at build, which would make a binary built in New York report New York's date in Tokyo.
+  - **What `$dewy.version` promises** (D15b): once Dewy has settled and has a first
+    release, a program tagged with a compiler version always compiles with that
+    version or any later compiler; all future compilers know how all past versions
+    worked. Before that, the no-legacy rule stays. If an old version turns out to have
+    a serious security problem, the program still compiles, with a very obvious warning
+    and the steps to fix it. Considered: rare breaking changes for security, as in some
+    other languages. No declaration compiles as the current version, with a warning and
+    a fix-it that inserts one.
+  - **Anything taking an interval uses range syntax** (D15d), so the bounds are
+    unambiguous: `[a..b)`. Considered: `interval(a b)`, with a default to remember.
+  - **UI direction:** a declarative layout interface like
+    [Clay](https://github.com/nicbarker/clay). Nothing is built yet.

@@ -81,28 +81,6 @@ let all = [parallel n in ns check(n) or_throw] # first error cancels the sibling
 
 ## P2: unblocks common friction
 
-### D15a. Which time zone does a program use when none is given?
-- **Your note:** use and pin the system zone at build time unless specified; warn when it was assumed.
-- **The catch:** a pinned *rules table* is good, but a pinned zone *name* makes a binary built in New York report New York's date for a user in Tokyo, and for a laptop that travels.
-
-```dewy
-printl(today)                              # warning: uses the time zone of the machine running this
-$time.zone = 'America/New_York'            # always New York, wherever it runs; no warning
-$time.zone = 'system'                      # the running machine's zone, on purpose; no warning
-```
-
-- **Options:**
-  - **a)** Name read when the program runs; rules pinned at build. Warning as above.
-  - **b)** Name and rules both pinned at build (your note, read literally).
-- **Rec:** (a). Scripts get the expected answer, and `$time.zone` covers the fixed case.
-
-### D15b. What does `$dewy.version` promise, and from when?
-- **Direction taken:** your `$dewy.version = '0.1.0'`, per module, replacing editions.
-- **Cost:** the compiler and standard library keep every past behavior change behind a version check forever, and modules on different versions must share data layouts. So breaking changes get rare and expensive once this starts.
-- **Rec:**
-  - The promise starts at the first tagged release; until then, the no-legacy rule stays (today's version is `0.0.0`).
-  - With no declaration: compile as the current version, warn, and offer a fix-it that inserts it. `dewy new` writes it.
-
 ### D15c. Date spellings
 ```dewy
 age(date"2000-02-29" on=date"2027-02-28")                  # 26; `on` defaults to today
@@ -112,18 +90,15 @@ gap.total_days                                             # 9861
 ```
 - **Rec:** both, as shown: `age` as a top-level function, and `Date - Date` gives a `Period`.
 
-### D15d. Intervals: reuse Dewy's range syntax?
-- **Where you'd use one:** "did these bookings overlap", "which log lines fall in this window", "is this moment within the shift".
-- **Why half-open:** 9:00–10:00 and 10:00–11:00 don't overlap, and they cover the morning with no gap.
-- **Proposal:** v5 had `interval(a b)`, with a default to remember. Dewy ranges already spell each end, so there's no default.
+### D15e. A clearer name for `today_support`
+- **What it is:** `today` gives one `Date`. This gives every date it could really be right now: one normally, two when the clock's uncertainty spans midnight, and unknown if the clock was never set.
 
 ```dewy
-let shift = [start..end)
-if now.nominal in shift printl"on shift"
-shift.overlaps?([lunch..lunch + 1hour))
+let dates = possible_todays      # [2026-11-06 2026-11-07] at 23:59:59 with a ±2s clock
 ```
 
-- **Rec:** ranges, dropping `interval(a b)`.
+- **Options:** `possible_todays`, `today_candidates`, or `today_support`.
+- **Rec:** `possible_todays`, which reads correctly cold.
 
 ### D10. Safety defaults and tag names (#108)
 - **BLUF:** with no tags, anything a program can reasonably meet is a value or a compile error, and crashing takes one written word. A tag's first word tells you its direction. Full proposal and the cold-read review of the names: `docs/design/proposals/bulletproof/round2.md`, `round2-review.md`.
@@ -263,7 +238,7 @@ input.pressed('jmup')       # compile error naming the valid actions
 - `if w.has(ball)` only proves `w.pos` after a later compiler stage; until then, the error points to `w.get`.
 - Rec: add `w.get` and `w.has`. `w.has` replaces `alive` and `joint_alive`. Considered and rejected: silently returning a default (a removed ball draws at the origin); handles consumed by `remove` (they're usually aliased in module globals).
 
-**UI.** A Clay-style layout built as a value has nothing left "open", so the panic goes away by construction. I found no Clay work in the Sloppy repo, so this stays a direction until you want it designed. In the meantime, `ui_begin` closes an open menu itself, with a debug warning.
+**UI.** A Clay-style layout built as a value has nothing left "open", so the panic goes away by construction. This stays a direction until the design work is done. In the meantime, `ui_begin` closes an open menu itself, with a debug warning.
 
 ---
 
@@ -298,6 +273,43 @@ let apply_then_report = (xs:array<int> f:(int:>int) report:(array<int> :>void)) 
 ```
 
 - **Rec:** delete the tag. Inference passes both tests, hover shows the requirement, and it can come back if a library ever needs it.
+
+### D26. `$capture @x` inside a task, where `x` comes from outside it
+- **Status:** you hadn't seen this, so I took the rec provisionally. Tell me if you disagree.
+- **Today:** this compiles and the writes silently disappear, because a task's capture is a snapshot.
+
+```dewy
+main = () => {
+    let total = 0
+    concurrent {
+        spawn { printl([1 2 3].map(($capture @total y:int):>int => { total += y; y })) }
+    }
+    printl(total)   # prints 0
+}
+```
+
+- **Taken:** a compile error saying the enclosing body holds its own copy, since a program that writes this almost certainly expects 6.
+- **Considered:** keep it silent; warn.
+
+### D27. `or_throw` in a `spawn { ... }` body
+- **Status:** you hadn't seen this, so I took the rec provisionally. Tell me if you disagree.
+- **Today:** a compile error, because the body has no declared result to forward the failure through.
+
+```dewy
+main = () => {
+    let c = channel<int>(4)
+    concurrent {
+        spawn {
+            c.send(1) or_throw
+            c.close
+        }
+        printl(c.receive)
+    }
+}
+```
+
+- **Taken:** infer the result for `spawn` bodies, as for a function with no declared result. A failed task already fails its group, so forwarding fits.
+- **Considered:** keep the error; infer it for every lambda.
 
 ---
 

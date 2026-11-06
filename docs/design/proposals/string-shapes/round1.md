@@ -291,7 +291,7 @@ With no tag at all, the fix-it offers `w.get(ball)`.
 
 ## 4. UI
 
-I found no Clay work in `~/dev/slop-lang`, so this is a direction, not a port. A frame's UI is a value, so nothing is open while your code runs and an early `return` can't leave anything behind:
+This is a direction, not an implementation. A frame's UI is a value, so nothing is open while your code runs and an early `return` can't leave anything behind:
 
 ```dewy
 Choice:type = 'resume' | 'settings' | 'quit'

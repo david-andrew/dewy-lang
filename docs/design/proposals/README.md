@@ -16,7 +16,7 @@ These folders record, for each design decision, what was considered and why one 
 
 | Folder | Topic | Status |
 |---|---|---|
-| [time/](time/) | Time, dates, clocks and calendars | v5 drafted; core accepted 2026-11-06 (decisions.md). v6 applies it. Open: D15a–d. |
+| [time/](time/) | Time, dates, clocks and calendars | v5 drafted; core accepted 2026-11-06 (decisions.md). v6 applies it. Open: D15c, D15e. |
 | [concurrency/stage4/](concurrency/stage4/) | Queues, `select`, failed sends | `Unsent`, `spsc` and `mpmc` accepted 2026-11-01. `select` and `[concurrent …]` are superseded by `unified/`. |
 | [concurrency/unified/](concurrency/unified/) | One `parallel` surface | Proposal v2 and reviews. Open (D4). |
 | [concurrency/big-picture/](concurrency/big-picture/) | The 80/20 performance ladder and prior art | Synthesis and reviews. Open (D4). |
