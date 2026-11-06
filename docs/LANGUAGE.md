@@ -1784,8 +1784,9 @@ closure runs its captures' copy hooks; cleanup drops owned captures once, in
 reverse order. Callable conversions cannot erase these ownership restrictions.
 A `spawn` body is the exception: it runs once, and its task owns what it captures,
 so a move-only value captured there is moved into the task and dropped once, when
-the group releases the task at its join. Moving a captured owner on out of the
-body (into a function that takes it) is not supported yet; use its methods there.
+the task finishes, before its group joins. The body can pass a captured owner on
+to a function that takes ownership, at its proven last use; a later read, loop
+backedge or defer prevents it, and a closure that can run repeatedly cannot.
 An explicit `$capture @owner` borrows the owner's place without taking ownership.
 Borrowed owner captures currently require a local closure used only by direct
 calls; copying or escaping such a closure is conservatively rejected. Generic
