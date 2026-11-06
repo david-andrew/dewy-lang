@@ -1,0 +1,477 @@
+use 'facts.jo'
+use 'lower_scalars.dewy'
+use 'lower_views.dewy'
+use 'lower_storage.dewy'
+use 'lower_analysis.dewy'
+use 'lower_helpers.dewy'
+use 'lower_group.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'sequence_selectors.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ide.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'ast.jo'
+use 'icount.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'lower.jo'
+use 'check.jo'
+use 'comptime.jo'
+use 'check_constant.jo'
+use 'isolation.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'places.jo'
+use 'effects.jo'
+use 'effect_library.jo'
+use 'ownership.jo'
+use 'witness.jo'
+use 'directives.jo'
+use 'warn_if.jo'
+use 'string_domains.jo'
+use 'draw_context.jo'
+use 'predicate_facts.jo'
+use 'floats.jo'
+use 'member_replay.jo'
+use 'ownership_types.dewy'
+use 'lower_primitives.dewy'
+use 'math_ops.dewy'
+use 'draw_ops.dewy'
+use 'effect_classifiers.dewy'
+use 'effect_values.dewy'
+use 'effect_control.dewy'
+use 'effect_costs.dewy'
+use 'effect_owners.dewy'
+use 'isolation_ops.dewy'
+use 'facts_loops.dewy'
+use 'facts_conditions.dewy'
+use 'facts_joins.dewy'
+use 'facts_changes.dewy'
+use 'facts_library.dewy'
+use 'facts_summaries.dewy'
+use 'facts_pushes.dewy'
+use 'facts_text.dewy'
+use 'facts_arrays.dewy'
+use 'facts_maps.dewy'
+use 'facts_pools.dewy'
+use 'facts_members.dewy'
+use 'facts_progress.dewy'
+use 'facts_probes.dewy'
+
+# Optional/union coercions wrap an already requested boundary in place.
+# Follow just that value spine, as ref_wrapped_check does for refinements.
+fact_fixed_node = (n0: int) -> int:
+    n = n0
+    loop depth in [0..32):
+        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.arr2fixed)): return n
+        if nodes[n].kind == .conv and nodes[n].a != 0: n = int(nodes[n].a)
+        else if nodes[n].kind == .call and nodes[n].aux == 3 and nkids(n) == 1: n = kid(n, 0)
+        else: break
+    fatal(nodes[n0].pos, "cannot locate fixed-size array conversion after wrapping")
+    n0
+# A dynamic-to-fixed conversion has one length equality obligation. Demand
+# only its operand and existing length projection; O(1) lookup plus the bounded
+# difference query. Every analyzed visit must prove it to erase the check.
+fact_fixed_check = (n: int, s: mut FactState, value: int):
+    if fact_speculating != 0 or not s.live: return
+    count = fixed_len(representation_type(ntype(n)))
+    length = 0
+    proven = false
+    if value != 0:
+        length = fact_project(s, value, -1, false, T_INT)
+        expected = fact_constant(s, count)
+        proven = fact_compare(s, .eq, length, expected) == 1
+    if fact_probe_on:
+        fact_probe_record(n, proven)
+        return
+    fact_validated[n] = true
+    dir_index(n, proven)
+    if not proven and (fact_policy == .RequireStatic or fact_query):
+        shown = wit_text(int(nodes[n].a))
+        if shown == "": shown = "the array"
+        wit_unknown(n, fact_bound(s, length), "fixed-size array conversion needs {count} elements", 0, "{shown}.length =? {count}")
+# A comprehension that fills a fixed-size array of plain elements in place:
+# `let acc=[]`, one range or array loop whose body is straight-line
+# declarations ending in one push onto acc, then acc. Its push, or 0.
+fact_fixed_comprehension = (b: int, to: int) -> int:
+    if nodes[b].kind != .block or not has_flag(b, NF_COMPREHENSION) or nkids(b) != 3 or not files[pos_file(nodes[b].pos)].is_dewy: return 0
+    t = fact_type(to)
+    if tkind(t) != .fixed or is_managed(int(types[t].elem)) or ownership_type(int(types[t].elem)): return 0
+    decl = kid(b, 0)
+    loop_ = kid(b, 1)
+    last = kid(b, 2)
+    if nodes[decl].kind != .vardecl or nodes[decl].sym <= 0 or nkids(decl) != 0 or nodes[loop_].kind != .for_ or nodes[last].kind != .exprstmt: return 0
+    acc = int(nodes[decl].sym)
+    init = int(nodes[decl].b)
+    if init == 0 or nodes[init].kind != .array or nkids(init) != 0 or nodes[init].b != 0: return 0
+    if not type_eq(telem(int(locals[acc].type)), int(types[t].elem)): return 0
+    result = int(nodes[last].a)
+    if nodes[result].kind != .ident or nodes[result].sym != i32(acc): return 0
+    if nodes[loop_].aux == 0:
+        it = int(nodes[loop_].a)
+        if nodes[it].kind != .range or nodes[it].b == 0 or has_flag(it, NF_STEP): return 0
+    else if nodes[loop_].aux == 1:
+        k = tkind(ntype(int(nodes[loop_].a)))
+        if k != .array and k != .fixed: return 0
+    else: return 0
+    if fact_mentions(int(nodes[loop_].a), acc): return 0
+    body = int(nodes[loop_].b)
+    nb = nkids(body)
+    if nb == 0 or nodes[kid(body, nb - 1)].kind != .exprstmt: return 0
+    loop i in [0..nb - 1):
+        item = kid(body, i)
+        if nodes[item].kind != .vardecl or not comprehension_value(int(nodes[item].b)) or fact_mentions(int(nodes[item].b), acc): return 0
+    push = int(nodes[kid(body, nb - 1)].a)
+    if nodes[push].kind != .intrinsic or nodes[push].aux != i32(int(IN.push)) or nkids(push) != 2: return 0
+    receiver = kid(push, 0)
+    if nodes[receiver].kind != .ident or nodes[receiver].sym != i32(acc) or not comprehension_value(kid(push, 1)) or fact_mentions(kid(push, 1), acc): return 0
+    push
+# Its loop runs exactly the fixed length's times: a range from 0 to that
+# constant, or an array loop over a fixed array of that length.
+fact_fixed_comprehension_exact = (b: int, to: int) -> bool:
+    n = fixed_len(fact_type(to))
+    loop_ = kid(b, 1)
+    if nodes[loop_].aux == 1: return tkind(fact_type(ntype(int(nodes[loop_].a)))) == .fixed and fixed_len(fact_type(ntype(int(nodes[loop_].a)))) == n
+    it = int(nodes[loop_].a)
+    known_lo, lo = integer_constant(int(nodes[it].a))
+    known_hi, hi = integer_constant(int(nodes[it].b))
+    if not known_lo or not known_hi: return false
+    if has_flag(it, NF_INCLUSIVE): hi += 1
+    lo == 0 and hi == n
+# An optional local that entered a range loop as `none` and that the body
+# sets only to the loop's value: where present, its payload is some i in
+# [lo, hi). The interval holds on the payload itself (vacuous where absent);
+# the relation to hi is an implication from its tag (fact_join_payload's
+# reason). O(1) plus at most two implications.
+fact_found_payload = (s: mut FactState, l: int, lo: int, hi: int):
+    i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
+    if i < 0 or not s.live or s.conditional.len() + 2 > 32: return
+    v = s.bindings[i].value
+    pt = fact_summary_payload(fact_type(int(locals[l].type)))
+    if fact_known_none(s, v) or s.projections.len() + 2 >= FACT_CAP: return
+    held = 0
+    loop evidence in s.conditional: held += int(evidence.tag == -2)
+    if held + 2 > 12: return
+    tag = fact_project(s, v, -3, false, T_INT)
+    t = fact_bound(s, tag)
+    fact_set_bound(s, tag, FactBound(max(0, t.lo), min(1, t.hi)))
+    p = fact_project(s, v, -4, false, pt)
+    x = fact_bound(s, lo); y = fact_bound(s, hi); b = fact_bound(s, p)
+    if not x.wide: b.lo = max(b.lo, x.lo)
+    if not y.wide and y.hi != FACT_MIN: b.hi = min(b.hi, y.hi - 1)
+    fact_set_bound(s, p, b)
+    fact_implication(s, (Tok.eq, 0, tag, 1, 1), (Tok.lt, 0, p, 0, hi))
+    fact_implication(s, (Tok.eq, 0, tag, 1, 1), (Tok.ge, 0, p, 0, lo))
+# Locals that body writes only by `x = l` (l the loop variable), and nothing
+# else: no compound or other stores, no `@x`, no closure. O(body nodes).
+fact_index_carried = (body: int, l: int) -> int[]:
+    copies: {int: bool} = {l: true}   # l and locals declared as its copy
+    stores: (int, int)[]              # (target, the local it is set to, or 0)
+    bad: {int: bool} = {}
+    work = [body]
+    loop work.len() > 0:
+        e = work.pop()
+        if e == 0: continue
+        k = nodes[e].kind
+        if k == .lambda or k == .partial and fact_partial_opaque(e): return []
+        if k == .vardecl and nodes[e].sym > 0 and nodes[e].b != 0 and nkids(e) == 0:
+            value = int(nodes[e].b)
+            if nodes[value].kind == .ident and nodes[value].aux == i32(int(SK.local)) and int(nodes[value].sym) == l: copies[int(nodes[e].sym)] = true
+        if k == .assign and nodes[int(nodes[e].a)].kind == .ident and nodes[int(nodes[e].a)].aux == i32(int(SK.local)):
+            target = int(nodes[int(nodes[e].a)].sym)
+            value = int(nodes[e].b)
+            # (a value-preserving integer conversion, `best=i` into an `int`, or an `int?`)
+            loop nodes[value].kind == .conv and (nodes[value].aux == i32(int(CV.int_)) or nodes[value].aux == i32(int(CV.opt))): value = int(nodes[value].a)
+            if nodes[e].op == i32(int(Tok.assign)) and nodes[value].kind == .ident and nodes[value].aux == i32(int(SK.local)): stores.push((target, int(nodes[value].sym)))
+            else: bad[target] = true
+        if k == .addr and nodes[int(nodes[e].a)].kind == .ident: bad[int(nodes[int(nodes[e].a)].sym)] = true
+        mask = isolation_children(k)
+        if mask < 0: return []
+        if mask & 1 != 0: work.push(int(nodes[e].a))
+        if mask & 2 != 0: work.push(int(nodes[e].b))
+        if mask & 4 != 0: work.push(int(nodes[e].c))
+        if mask & 16 != 0:
+            loop j in [0..nkids(e)): work.push(kid(e, j))
+        if mask & 32 != 0:
+            loop j in [0..nkids2(e)): work.push(kid2(e, j))
+    loop store in stores:
+        if not copies.has(store.1) or copies.has(store.0): bad[store.0] = true
+    out: int[]
+    loop store in stores:
+        if not bad.has(store.0) and not fact_exposed(PlaceIdentity(.local, int(locals[store.0].owner), store.0)) and (fact_scalar(int(locals[store.0].type)) or fact_summary_payload(fact_type(int(locals[store.0].type))) != 0) and store.0 not in out: out.push(store.0)
+    out
+# A stepped range `[first,second..end)`: the step's sign, when known, bounds
+# each value between first and end (the lowering stops before passing end).
+fact_stepped = (n: int, s: mut FactState):
+    iterator = int(nodes[n].a)
+    first = fact_capture(int(nodes[iterator].a), s)
+    second = fact_capture(int(nodes[iterator].c), s)
+    end = if nodes[iterator].b != 0: fact_capture(int(nodes[iterator].b), s) else: 0
+    up = fact_compare(s, .lt, first, second) == 1
+    down = fact_compare(s, .lt, second, first) == 1
+    if not up and not down or fact_probe_on: fact_step_check(n, s, first, second, int(nodes[iterator].a), int(nodes[iterator].c))
+    entry = s
+    fact_changes(n, s, n)
+    after = s
+    body = s
+    l = int(nodes[n].sym)
+    v = fact_fresh(body, int(locals[l].type))
+    fact_bind(body, PlaceIdentity(.local, int(locals[l].owner), l), v)
+    inclusive = has_flag(iterator, NF_INCLUSIVE)
+    if up or down:
+        near = if up: FactTerm(.ge, v, first) else: FactTerm(.le, v, first)
+        fact_assume(body, fact_new(body, fact_domain(T_BOOL), near), true)
+        if end != 0:
+            far = if up: FactTerm((if inclusive: Tok.le else: Tok.lt), v, end) else: FactTerm((if inclusive: Tok.ge else: Tok.gt), v, end)
+            fact_assume(body, fact_new(body, fact_domain(T_BOOL), far), true)
+    edges = fact_loop_body(n, body)
+    fact_range_exhaustion(n, entry, first, second, edges)
+    s = after
+# Each iteration's hidden index lies in [0, length) of the source's entry
+# value; the source is a snapshot, so a body that resizes the original
+# rebinds that place and the length stays the snapshot's.
+fact_loop_index = (n: int, base: int, s: mut FactState):
+    t = fact_type(ntype(int(nodes[n].a)))
+    if types[t].kind != .array and types[t].kind != .fixed: return
+    length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
+    l = int(nodes[n].c)
+    hi = fact_bound(s, length).hi
+    v = fact_new(s, FactBound(0, (if hi > FACT_MIN: hi - 1 else: hi), reason = .loop_, witness = n), FactTerm(type = int(locals[l].type)))
+    fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), v)
+    fact_difference(s, v, length, -1, n)
+    fact_set_bound(s, v, fact_bound(s, v))
+# A readonly iteration over a complete finite element inventory takes its
+# interval hull, never one selected element's facts. Demand-only, O(P), capped
+# by the ordinary projection budget. Mutations rebuild aggregate identities.
+# An element of a key snapshot (FACT_KEYS_SOURCE) is a key besides, and one
+# of an array whose elements are below a value is below it: inside the body
+# the source is not empty, so the bound value is one of its elements.
+fact_loop_elements = (n: int, base: int, s: mut FactState):
+    l = int(nodes[n].sym)
+    if nodes[n].aux != 1 or l <= 0 or base == 0: return
+    place = PlaceIdentity(.local, int(locals[l].owner), l)
+    below = fact_projection_find(s, base, FACT_ELEMENT_BELOW, false)
+    field_keys = fact_projection_find(s, base, FACT_FIELD_KEYS, false)
+    if below < 0 and field_keys < 0 and fact_projection_find(s, base, FACT_KEYS_SOURCE, false) < 0:
+        fact_loop_element(n, base, s)
+        return
+    i = fact_binding(s, place)
+    before = if i >= 0: s.bindings[i].value else: 0
+    fact_loop_element(n, base, s)
+    i = fact_binding(s, place)
+    value = if i >= 0 and s.bindings[i].value != before: s.bindings[i].value else: fact_fresh(s, int(locals[l].type))
+    if below >= 0: fact_difference(s, value, s.projections[below].value, -1, n, 16)
+    fact_bind(s, place, fact_keys_element(s, base, value))
+    # (the element's field the dictionary took its keys from is a key of it)
+    if field_keys >= 0: fact_field_keys(s, s.projections[field_keys].value, value, int(locals[l].type))
+# Each field name the view (FACT_FIELD_KEYS) holds: the element's field is a
+# key of that dictionary (FACT_KEY_SOURCE). O(the view's projections).
+fact_field_keys = (s: mut FactState, view: int, value: int, t0: int):
+    t = fact_type(t0)
+    if tkind(t) != .struct_: return
+    si = int(types[t].st)
+    held: FactProjection[]
+    pi = fact_projection_first(s, view)
+    loop pi >= 0:
+        held.push(s.projections[pi])
+        pi = fact_projection_after(s, pi)
+    loop p in held:
+        if p.element or p.selector <= 0: continue
+        loop i in [0..int(structs[si].nfields)):
+            f = fields[int(structs[si].fields) + i]
+            if int(f.name) != p.selector or s.projections.len() >= FACT_CAP: continue
+            key = fact_project(s, value, p.selector, false, int(f.type))
+            fact_add_projection(s, FactProjection(key, FACT_KEY_SOURCE, false, p.value))
+fact_loop_element = (n: int, base: int, s: mut FactState):
+    l = int(nodes[n].sym)
+    uniform = fact_projection_find(s, base, FACT_ELEMENT_COPY, false)
+    if uniform >= 0:
+        fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), s.projections[uniform].value)
+        return
+    t = fact_type(int(locals[l].type))
+    sized = t == T_STR or tkind(t) == .array
+    if not fact_scalar(t) and not sized and tkind(t) != .tuple and tkind(t) != .struct_: return
+    if sized and fact_push_frames.len() > 0:
+        index = fact_binding(s, PlaceIdentity(.local, fact_owner, int(nodes[n].c)))
+        if index >= 0:
+            value = fact_project(s, base, s.bindings[index].value, true, t)
+            fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
+            return
+    if sized:
+        same = fact_projection_find(s, base, FACT_ELEMENT_SAME_LENGTH, false)
+        if same >= 0:
+            value = fact_new(s, FactBound(), FactTerm(type = t))
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, s.projections[same].value))
+            if fact_hull_owner == fact_owner and tkind(t) == .array: fact_row_bounds(s, base, value)
+            fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
+            return
+        pi = fact_projection_find(s, base, FACT_ELEMENT_LENGTH, false)
+        if pi >= 0:
+            value = fact_new(s, FactBound(), FactTerm(type = t))
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, fact_new(s, fact_bound(s, s.projections[pi].value), FactTerm(type = T_INT))))
+            if fact_hull_owner == fact_owner and tkind(t) == .array: fact_row_bounds(s, base, value)
+            fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
+            return
+    # (an element hull, without a complete inventory)
+    hull = if not fact_scalar(t) or fact_hull_owner != fact_owner: -1 else: fact_projection_find(s, base, FACT_ELEMENT_VALUE, false)
+    if hull >= 0: fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), fact_new(s, fact_bound(s, s.projections[hull].value), FactTerm(type = t)))
+    parts = fact_inventory(s, base)
+    if parts.len() == 0:
+        # (a tuple's integer components, by the facts every element's have)
+        if fact_hull_owner == fact_owner and fact_int_components(t) > 0:
+            value = fact_new(s, FactBound(), FactTerm(type = t))
+            fact_component_bounds(s, base, value, t)
+            fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
+        return
+    value = fact_new(s, FactBound(), FactTerm(type = t))
+    fact_inventory_bound(s, value, parts, t, n)
+    fact_bind(s, PlaceIdentity(.local, int(locals[l].owner), l), value)
+# Permutations keep an immutable element inventory, not the positions of its
+# values. Flatten the source link: O(1) transfer, then the existing bounded
+# inventory query only when a consumer reads an element. Hooked elements can
+# change on copy, so they supply no inventory. All element writes drop the link.
+fact_permuted_elements = (s: mut FactState, before: int, after: int):
+    if before == 0 or after == 0 or s.projections.len() >= FACT_CAP: return
+    t = fact_type(fact_terms[before].type)
+    if tkind(t) != .array and tkind(t) != .fixed: return
+    if ownership_decls.len() != 0 and ownership_fact_type(telem(t)): return
+    # (what holds of every element, as a comprehension's value hull, holds of
+    # every element of the permutation: `[loop i in [0..n) i].sorted(key=f)`)
+    loop selector in [FACT_ELEMENT_VALUE, FACT_ELEMENT_LENGTH, FACT_ELEMENT_SAME_LENGTH, FACT_ELEMENT_BELOW]:
+        held = fact_projection_find(s, before, selector, false)
+        if held >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, selector, false, s.projections[held].value))
+    loop c in [0..fact_int_components(fact_type(telem(t)))):
+        loop below in [false, true]:
+            held = fact_projection_find(s, before, fact_component_selector(c, below), false)
+            if held >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(after, fact_component_selector(c, below), false, s.projections[held].value))
+    uniform = fact_projection_find(s, before, FACT_ELEMENT_COPY, false)
+    if uniform >= 0:
+        fact_add_projection(s, FactProjection(after, FACT_ELEMENT_COPY, false, s.projections[uniform].value))
+        return
+    source = fact_projection_find(s, before, FACT_ELEMENT_SOURCE, false)
+    original = if source >= 0: s.projections[source].value else: before
+    fact_add_projection(s, FactProjection(after, FACT_ELEMENT_SOURCE, false, original))
+# The values of all of base's elements, when each is known by a constant index
+# (a literal's, at most 64 of them); none otherwise. O(base's projections).
+fact_inventory = (s: FactState, base0: int) -> int[]:
+    base = base0
+    source = fact_projection_find(s, base, FACT_ELEMENT_SOURCE, false)
+    if source >= 0: base = s.projections[source].value
+    parts: int[]
+    li = fact_projection_find(s, base, -1, false)
+    if li < 0: return parts
+    length = fact_bound(s, s.projections[li].value)
+    if length.wide or length.lo != length.hi or length.lo <= 0 or length.hi > 64: return parts
+    seen: {int: bool} = {}
+    pi = fact_projection_first(s, base)
+    loop pi >= 0:
+        p = s.projections[pi]
+        pi = fact_projection_after(s, pi)
+        if not p.element: continue
+        key = fact_bound(s, p.selector)
+        if key.wide or key.lo != key.hi or key.lo < 0 or key.lo >= length.lo or seen.has(key.lo): continue
+        seen[key.lo] = true
+        parts.push(p.value)
+    if seen.len() != length.lo: parts.clear()
+    parts
+# A selected scalar satisfies only relations shared by every inventory entry.
+# Candidate rows come from the first entry's indexed incident list; each other
+# entry must entail the substituted row. Demand-only O(parts x incident rows x
+# bounded entailment), within the existing inventory and difference budgets.
+fact_inventory_rows = (s: mut FactState, value: int, parts: int[], at: int):
+    first = parts[0]
+    if first == 0 or value == 0: return
+    loop direction in [0..2):
+        rows: FactDifference[]
+        ri = fact_difference_head(s, first, direction)
+        loop ri >= 0:
+            rows.push(s.differences[ri])
+            ri = fact_difference_next(s, ri, direction)
+        loop row in rows:
+            shared = true
+            loop j in [1..parts.len()):
+                a = if direction == 1: parts[j] else: row.a
+                b = if direction == 0: parts[j] else: row.b
+                if fact_distance(s, a, b, row.limit): continue
+                x = fact_bound(s, a); y = fact_bound(s, b)
+                # Mathematical integer endpoints are sentinels until proved
+                # finite; they cannot establish a row by interval arithmetic.
+                if x.wide or y.wide or y.lo == FACT_MIN or x.hi == FACT_MAX and fact_open_endpoint(s, a, true) or not fact_add_fits(x.hi, -y.lo) or x.hi - y.lo > row.limit:
+                    shared = false
+                    break
+            if shared: fact_difference(s, (if direction == 1: value else: row.a), (if direction == 0: value else: row.b), row.limit, at)
+# What every element of an inventory shares, given to value (one element, of
+# type t): a scalar's hull, a string's or array's length hull, or each scalar
+# component's hull for tuples/records, nesting at most four levels and eight
+# fields per level. O(parts x visited components), capped by FACT_CAP.
+fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: int, depth: int = 0):
+    if depth >= 4 or parts.len() == 0: return
+    # Copy/transfer hooks can construct different fields for each element.
+    # A literal inventory describes those inputs, not a hook's output values.
+    if ownership_decls.len() != 0 and ownership_fact_type(t): return
+    if fact_scalar(t):
+        joined = fact_bound(s, parts[0])
+        loop j in [1..parts.len()): joined = fact_hull(joined, fact_bound(s, parts[j]), at)
+        if joined.wide: return
+        old = fact_bound(s, value)
+        fact_set_bound(s, value, FactBound(max(old.lo, joined.lo), min(old.hi, joined.hi), old.nz or joined.nz))
+        fact_inventory_rows(s, value, parts, at)
+        # A hull touching a host sentinel can still have a finite endpoint:
+        # every constituent must establish that side. Keep it as a value row,
+        # never by changing the mathematical integer's representation type.
+        # Only endpoint hulls demand this O(parts x bounded incident rows) query.
+        if t == T_MATH_INT:
+            if joined.lo == FACT_MIN:
+                finite = true
+                loop part in parts:
+                    if not fact_host_endpoint(s, part, false): finite = false; break
+                if finite: fact_difference(s, fact_constant(s, FACT_MIN), value, 0)
+            if joined.hi == FACT_MAX:
+                finite = true
+                loop part in parts:
+                    if not fact_host_endpoint(s, part, true): finite = false; break
+                if finite: fact_difference(s, value, fact_constant(s, FACT_MAX), 0)
+        return
+    record = tkind(t) == .struct_ and structs[int(types[t].st)].nvariants == 0 and not structs[int(types[t].st)].union_ and not structs[int(types[t].st)].soa_
+    components = if record: min(int(structs[int(types[t].st)].nfields), 8) else if tkind(t) == .tuple: min(int(types[t].nargs), 8) else: 1
+    sized = t == T_STR or tkind(t) == .array
+    if not sized and not record and tkind(t) != .tuple: return
+    loop c in [0..components):
+        f = if record: int(structs[int(types[t].st)].fields) + c else: 0
+        ct = if sized: T_INT else if record: fact_type(int(fields[f].type)) else: fact_type(targ(t, c))
+        selector = if sized: -1 else if record: int(fields[f].name) else: c
+        if s.projections.len() >= FACT_CAP: continue
+        if not fact_scalar(ct):
+            if tkind(ct) != .struct_ and tkind(ct) != .tuple and tkind(ct) != .array and ct != T_STR: continue
+            children: int[]
+            loop part in parts: children.push(fact_project(s, part, selector, false, ct))
+            child = fact_project(s, value, selector, false, ct)
+            fact_inventory_bound(s, child, children, ct, at, depth + 1)
+            continue
+        joined = FactBound()
+        loop j in [0..parts.len()):
+            b = fact_bound(s, fact_project(s, parts[j], selector, false, ct))
+            joined = if j == 0: b else: fact_hull(joined, b, at)
+        # (what the elements share bounds it: where that is too little, nothing
+        # establishes more, whatever iterates them)
+        joined.reason = .missing; joined.witness = 0
+        fact_add_projection(s, FactProjection(value, selector, false, fact_new(s, joined, FactTerm(type = ct))))
+        # (arrays of one short length: each position's hull, as a tuple's)
+        if not sized or t == T_STR or joined.wide or joined.lo != joined.hi or joined.hi > 8: continue
+        et = fact_type(int(types[t].elem))
+        if not fact_scalar(et): continue
+        loop k in [0..joined.lo):
+            item = FactBound()
+            loop j in [0..parts.len()):
+                b = fact_bound(s, fact_project(s, parts[j], fact_constant(s, k), true, et))
+                item = if j == 0: b else: fact_hull(item, b, at)
+            item.reason = .missing; item.witness = 0
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, fact_constant(s, k), true, fact_new(s, item, FactTerm(type = et))))

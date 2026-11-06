@@ -6,7 +6,7 @@ from tests.selfhost_narrow import compare_narrow
 from tests.support import compiler  # noqa: F401
 
 STEMS = ('source_types', 'node_store', 'checker_types', 'checker_state', 'checker_tokens', 'refinement_types', 'nd_slices', 'sequence_selectors')
-SERVICES = ('facts', 'facts_changes', 'nd_contracts', 'expr', 'witness', 'ast', 'types', 'refine', 'effects', 'ownership', 'util', 'check', 'effect_values', 'ownership_types')
+SERVICES = ('facts', 'facts_changes', 'facts_elements', 'nd_contracts', 'expr', 'witness', 'ast', 'types', 'refine', 'effects', 'ownership', 'util', 'check', 'effect_values', 'ownership_types')
 
 EXTRA = r'''
 ownership_decls: int[]
