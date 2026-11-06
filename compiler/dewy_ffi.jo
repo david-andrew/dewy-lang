@@ -12,57 +12,11 @@ use 'expr.jo'
 use 'dewy_nodes.jo'
 use 'dewy_tokens.dewy'
 
-# The library file a `lib=` name stands for on the target being compiled for.
-# None, or 'c', is the C library; 'm' its math library; another bare name is the
-# system's usual file name for it. A name with a dot or slash is a file name.
-dw_ffi_library = (lib: str) -> str:
-    if find(lib, ".") >= 0 or find(lib, "/") >= 0: return lib
-    if lib == "" or lib == "c" or lib == "m":
-        if target_windows: return "msvcrt.dll"
-        if target_macos: return "/usr/lib/libSystem.B.dylib"
-        if lib == "m": return "libm.so.6"
-        return "libc.so.6"
-    if target_windows: return lib + ".dll"
-    if target_macos: return "lib" + lib + ".dylib"
-    "lib" + lib + ".so"
 
-dw_ffi_attr = (name: str, value: int, pos: int) -> int:
-    at = mk(.ident, pos)
-    nodes[at].name = i32(intern(name))
-    nodes[at].a = i32(value)
-    at
 
-dw_ffi_attach = (n: int, attrs: int[]):
-    ab = if nodes[n].c != 0: int(nodes[n].c) else: mk(.block, nodes[n].pos)
-    set_list(ab, kids(ab) + attrs)
-    nodes[n].c = i32(ab)
 
-# A function type in a C function's signature is a C function pointer.
-dw_ffi_c_types = (t: int):
-    if t == 0: return
-    if nodes[t].kind == .tfn: add_flag(t, NF_CABI)
-    else if nodes[t].kind == .topt: dw_ffi_c_types(int(nodes[t].a))
 
 # `$export` / `$export(name='c_name')` before a module function: callable from C
 # (with the C calling convention; its name is the symbol where the target has one).
 dw_export_pos = 0
 dw_export_name = ""
-
-dw_export_at = (pos: int, name: str):
-    if dw_export_pos != 0: fatal(pos, "a second `$export`: one marks the function just after it")
-    dw_export_pos = pos
-    dw_export_name = name
-
-dw_export_attach = (made: int[]):
-    pos = dw_export_pos
-    dw_export_pos = 0
-    if made.len() != 1 or nodes[made[0]].kind != .fn_ or has_flag(made[0], NF_EXTERN): fatal(pos, "`$export` marks a module-level function with a body: put it before one, on its line or the line above")
-    n = made[0]
-    if has_flag(n, NF_GENERIC): fatal(pos, "an `$export` function cannot be generic: C has one signature per symbol")
-    if name_of(int(nodes[n].name)) == "main": fatal(pos, "`main` is the program's entry point, not an `$export` function")
-    loop p in kids(n):
-        if has_flag(p, NF_MUT): fatal(nodes[p].pos, "an `$export` function takes values, not `@` places: take a `ptr<T>`")
-        if nodes[p].a == 0: fatal(nodes[p].pos, "an `$export` parameter states its type: C has one signature per symbol")
-    if nodes[n].a == 0 and not has_flag(n, NF_VOID): fatal(pos, "an `$export` function states its result type, `:>int32` or `:>void`")
-    symbol = if dw_export_name != "": dw_export_name else: name_of(int(nodes[n].name))
-    dw_ffi_attach(n, [dw_ffi_attr("export", bc_str(symbol, pos), pos)])

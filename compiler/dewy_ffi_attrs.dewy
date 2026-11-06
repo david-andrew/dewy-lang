@@ -1,0 +1,61 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (find)
+from p"ast.jo" import (NF_CABI NF_EXTERN NF_GENERIC NF_MUT NF_VOID add_flag has_flag kids mk nodes set_list)
+from p"check.jo" import (target_macos target_windows)
+from p"dewy_ffi.jo" import (dw_export_name dw_export_pos)
+from p"expr.jo" import (bc_str)
+from p"util.jo" import (fatal intern name_of)
+
+FfiWord:type=int64<overflow='wrap'>
+# The library file a `lib=` name stands for on the target being compiled for.
+# None, or 'c', is the C library; 'm' its math library; another bare name is the
+# system's usual file name for it. A name with a dot or slash is a file name.
+dw_ffi_library=(lib:string):>string=>{
+    if (find(lib ".") ?? (-1)) >=? 0 or (find(lib "/") ?? (-1)) >=? 0 {return lib}
+    if lib =? "" or lib =? "c" or lib =? "m" {
+        if target_windows {return "msvcrt.dll"}
+        if target_macos {return "/usr/lib/libSystem.B.dylib"}
+        if lib =? "m" {return "libm.so.6"}
+        return "libc.so.6"
+    }
+    if target_windows {return "{lib}.dll"}
+    if target_macos {return "lib{lib}.dylib"}
+    "lib{lib}.so"
+}
+dw_ffi_attr=(name:string value:FfiWord pos:FfiWord):>FfiWord=>$unsafe {
+    let at=mk('ident' pos)
+    nodes.ptr[at].name=int32(intern(name))
+    nodes.ptr[at].a=int32(value)
+    at
+}
+dw_ffi_attach=(n:FfiWord attrs:array<int64>):>void=>$unsafe {
+    let ab=if nodes.ptr[n].c not=? 0 {FfiWord(nodes.ptr[n].c)} else {mk('block' nodes.ptr[n].pos)}
+    set_list(ab [kids(ab)... attrs...])
+    nodes.ptr[n].c=int32(ab)
+}
+# A function type in a C function's signature is a C function pointer.
+dw_ffi_c_types=(t:FfiWord):>void=>$unsafe {
+    if t =? 0 {return}
+    if nodes.ptr[t].kind =? 'tfn' {add_flag(t NF_CABI)}
+    else if nodes.ptr[t].kind =? 'topt' {dw_ffi_c_types(FfiWord(nodes.ptr[t].a))}
+}
+dw_export_at=(pos:FfiWord name:string):>void=>{
+    if dw_export_pos not=? 0 {fatal(pos "a second `$export`: one marks the function just after it")}
+    dw_export_pos=pos
+    dw_export_name=name
+}
+dw_export_attach=(made:array<int64>):>void=>$unsafe {
+    let pos=dw_export_pos
+    dw_export_pos=0
+    if made.length not=? 1 or nodes.ptr[made[0]].kind not=? 'fn_' or has_flag(made[0] NF_EXTERN) {fatal(pos "`$export` marks a module-level function with a body: put it before one, on its line or the line above")}
+    let n=made[0]
+    if has_flag(n NF_GENERIC) {fatal(pos "an `$export` function cannot be generic: C has one signature per symbol")}
+    if name_of(FfiWord(nodes.ptr[n].name)) =? "main" {fatal(pos "`main` is the program's entry point, not an `$export` function")}
+    loop p in kids(n) {
+        if has_flag(p NF_MUT) {fatal(nodes.ptr[p].pos "an `$export` function takes values, not `@` places: take a `ptr<T>`")}
+        if nodes.ptr[p].a =? 0 {fatal(nodes.ptr[p].pos "an `$export` parameter states its type: C has one signature per symbol")}
+    }
+    if nodes.ptr[n].a =? 0 and not has_flag(n NF_VOID) {fatal(pos "an `$export` function states its result type, `:>int32` or `:>void`")}
+    let symbol=if dw_export_name not=? "" {dw_export_name} else {name_of(FfiWord(nodes.ptr[n].name))}
+    dw_ffi_attach(n [dw_ffi_attr("export" bc_str(symbol pos) pos)])
+}
