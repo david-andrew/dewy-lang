@@ -2691,15 +2691,21 @@ fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false,
         fact_holds_contract(s, t, v)
         s.bindings[i] = FactBinding(p, v, at, s.bindings[i].value)
 
-# A Dewy function's `@` parameter of a record type the program declares: a
-# text sink writes only the library's own output state, which never holds a
-# program record, so `printl` keeps `@inv`'s facts. O(1).
+# A program function's `@` parameter: a text sink writes only the library's
+# own output state, whose globals only the runtime names, so `printl` keeps the
+# facts of `@pos` and `@inv`. O(1).
 fact_sink_disjoint_param = (l: int) -> bool:
     if int(locals[l].flags) & LF_MUTPARAM == 0 or not fact_dewy_local(l): return false
-    t = fact_type(int(locals[l].type))
-    if tkind(t) != .struct_ or is_nd(t) or is_map_type(t): return false
-    d = int(structs[int(types[t].st)].decl)
-    d != 0 and dewy_at(nodes[d].pos) and not pos_in_lib(nodes[d].pos)
+    d = int(fns[int(locals[l].owner)].decl)
+    d != 0 and not pos_in_lib(nodes[d].pos)
+
+# Whether this analysis is of a library function. O(1).
+fact_owner_in_lib = () -> bool: fact_fn_in_lib(fact_owner)
+
+fact_fn_in_lib = (f: int) -> bool:
+    if f <= 0 or f >= fns.len(): return true
+    d = int(fns[f].decl)
+    d == 0 or pos_in_lib(nodes[d].pos)
 
 # A place declared with a refined type holds its contract whatever changed it:
 # every write to it was checked against that type. (A dependency names only
@@ -2809,7 +2815,8 @@ fact_call_effects = (n: int, s: mut FactState):
         return
     events = effect_summaries[f].events
     loop event in events:
-        if event.atom.kind == .opaque or event.atom.kind == .escape:
+        # (a library caller's own facts may describe the output state a helper's text sink writes)
+        if event.atom.kind == .opaque or event.atom.kind == .escape or event.atom.kind == .io and fact_owner_in_lib():
             fact_forget_call(s, n, .call)
             return
     # (an element place argument, `hurt(@fs[i])`, changes only what the
@@ -9145,7 +9152,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             if nodes[n].aux == 0 and callee > 0 and callee < effect_summaries.len() and effect_summaries[callee].done:
                 opaque = false
                 loop event in effect_summaries[int(nodes[n].sym)].events:
-                    if event.atom.kind == .opaque or event.atom.kind == .escape:
+                    if event.atom.kind == .opaque or event.atom.kind == .escape or event.atom.kind == .io and fact_fn_in_lib(f):
                         exposed_writes.push(n)
                         opaque = true
                     if event.atom.kind != .write: continue

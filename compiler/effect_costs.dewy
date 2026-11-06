@@ -176,12 +176,15 @@ effect_failure=(f:EffectCostsWord n:EffectCostsWord):>void=>$unsafe {
 # full cost/panic inventory still reads the body. With hook-free values, no callback or
 # cleanup can write a sibling/global. The library owns its slot bookkeeping.
 # O(1) identity tests and the existing cached share-type query, on demand.
-effect_map_remove=(f:EffectCostsWord):>bool=>$unsafe {
+effect_map_write=(f:EffectCostsWord):>bool=>$unsafe {
     let d:EffectCostsWord=EffectCostsWord(fns.ptr[f].decl)
-    if d =? 0 or name_of(EffectCostsWord(nodes.ptr[d].name)) not=? "remove" or fns.ptr[f].params.length not=? 2 {return false}
+    if d =? 0 or fns.ptr[f].params.length <? 2 or EffectCostsWord(locals.ptr[fns.ptr[f].params.ptr[0]].flags) & LF_MUTPARAM =? 0 {return false}
+    # (a dictionary's own entry writes, `d[k] = v`, `d[k] += 1`: hashing word or text keys runs no hook)
+    let name=name_of(EffectCostsWord(nodes.ptr[d].name))
+    if name not=? "remove" and name not=? "[]=" and name not=? "__map_entry" and name not=? "__map_entry_present" and name not=? "insert_if_absent" {return false}
     if files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/core/map.jo" {return false}
     let m=representation_type(EffectCostsWord(locals.ptr[fns.ptr[f].params.ptr[0]].type))
-    if not is_map_type(m) or EffectCostsWord(locals.ptr[fns.ptr[f].params.ptr[0]].flags) & LF_MUTPARAM =? 0 {return false}
+    if not is_map_type(m) {return false}
     let key=representation_type(EffectCostsWord(locals.ptr[fns.ptr[f].params.ptr[1]].type))
     if not effect_scalar(key) and key not=? T_MATH_INT and key not=? T_STR {return false}
     return effect_value(struct_targ(EffectCostsWord(types.ptr[m].st) 1))
@@ -206,7 +209,7 @@ effect_signature_opaque=(f:EffectCostsWord):>bool=>$unsafe {
     return c =? EffectClass.unclassified or c not=? EffectClass.reads and not effect_class_text.has(f)
 }
 effect_signature_opaque_by_type=(f:EffectCostsWord):>bool=>$unsafe {
-    if effect_map_remove(f) {return false}
+    if effect_map_write(f) {return false}
     let d:EffectCostsWord=EffectCostsWord(fns.ptr[f].decl)
     if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 or fns.ptr[f].kind =? FK_INIT or (d not=? 0 and has_flag(d NF_EXTERN)) {
         return not (d not=? 0 and has_flag(d NF_EXTERN) and effect_declared_row(f) not=? 0)

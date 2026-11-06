@@ -16,6 +16,7 @@ use 'refine.jo'
 use 'effect_values.dewy'
 use 'effect_contracts.dewy'
 use 'effect_control.dewy'
+use 'facts.jo'
 use 'effect_costs.dewy'
 use 'effect_scan.dewy'
 use 'concurrency_waits.dewy'
@@ -276,7 +277,9 @@ effect_visit = (f: int):
         # Numeric consumers already forget every exposed root for this row.
         # Its body and callee graph cannot change that answer. Full contracts
         # request a fresh full graph; isolation uses its own syntax fallback.
-        effect_opaque(f, int(fns[f].decl))
+        # (a text sink writes only the runtime's output state: fact_call_effects keeps a program's places)
+        if fact_text_sink(f): effect_add(f, EffectEvent(EffectAtom(.io), int(fns[f].decl)))
+        else: effect_opaque(f, int(fns[f].decl))
     else if let body = effect_bodies.get(f):
         effect_summaries[f].edges = body.edges
         effect_summaries[f].isolation = body.isolation
@@ -297,7 +300,7 @@ effect_visit = (f: int):
         trusted = d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0
         if effect_blocks_demanded and not trusted and concurrency_fn_blocks(f): effect_add(f, EffectEvent(EffectAtom(.block), d))
         library = effect_library_class(f)
-        if effect_footprints_only and effect_map_remove(f):
+        if effect_footprints_only and effect_map_write(f):
             effect_add(f, EffectEvent(EffectAtom(.write, PlaceIdentity(.formal, f, 1)), d))
         else if library != .unclassified: effect_library_summary(f, library, d)
         else if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)) or effect_unavailable.has(f):

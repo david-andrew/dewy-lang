@@ -1,0 +1,13 @@
+# A dictionary write keeps other places' facts, not the dictionary's own.
+table:dict<string int> = []
+fill = (k:string):>void => { table[k] = 1 }
+drop = (k:string):>void => { table.remove(k); }
+read = (k:string):>int => {
+    if k not in? table return 0
+    drop(k)
+    table[k]
+}
+main = () => {
+    fill("a")
+    printl(read("a"))
+}

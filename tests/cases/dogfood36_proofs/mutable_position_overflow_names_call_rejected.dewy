@@ -1,0 +1,14 @@
+# The failed bound names the call that lost the guard.
+total:int = 0
+note = ():>void => { total += 1 }
+walk = (xs:array<int> @pos:int64<(>=? 0)>):>void => {
+    loop pos <? xs.length {
+        note()
+        pos += 1
+    }
+}
+main = () => {
+    let at:int64<(>=? 0)> = 0
+    walk([1] @at)
+    printl(at)
+}

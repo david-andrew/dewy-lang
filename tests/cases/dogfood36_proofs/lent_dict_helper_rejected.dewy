@@ -1,0 +1,12 @@
+# A lent dictionary's keys do not survive a write through its own parameter.
+forget = (@m:dict<string int> k:string):>void => { m.remove(k); }
+read = (@m:dict<string int> k:string):>int => {
+    if k not in? m return 0
+    forget(@m k)
+    m[k]
+}
+main = () => {
+    let d:dict<string int> = []
+    d["a"] = 1
+    printl(read(@d "a"))
+}

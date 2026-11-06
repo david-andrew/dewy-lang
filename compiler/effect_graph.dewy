@@ -17,7 +17,8 @@ from p"refine.jo" import (representation_type)
 from p"effect_values.dewy" import (effect_value)
 from p"effect_contracts.dewy" import (effect_subst)
 from p"effect_control.dewy" import (effect_prepare)
-from p"effect_costs.dewy" import (effect_caller_obligation effect_library_summary effect_map_remove effect_signature_opaque)
+from p"facts.jo" import (fact_text_sink)
+from p"effect_costs.dewy" import (effect_caller_obligation effect_library_summary effect_map_write effect_signature_opaque)
 from p"effect_scan.dewy" import (effect_isolation_block effect_scan_node)
 from p"concurrency_waits.dewy" import (concurrency_fn_blocks)
 # Demanded effect graph execution; shared state has one owner in effects.jo.
@@ -300,7 +301,9 @@ effect_visit=(f:GraphWord):>void=>$unsafe {
         # Numeric consumers already forget every exposed root for this row.
         # Its body and callee graph cannot change that answer. Full contracts
         # request a fresh full graph; isolation uses its own syntax fallback.
-        effect_opaque(f GraphWord(fns.ptr[f].decl));
+        # (a text sink writes only the runtime's output state: fact_call_effects keeps a program's places)
+        if fact_text_sink(f) {effect_add(f EffectEvent[EffectAtom['io'] GraphWord(fns.ptr[f].decl)]);}
+        else {effect_opaque(f GraphWord(fns.ptr[f].decl));}
     }
     else {
     let cached_body=effect_bodies.get(f)
@@ -329,7 +332,7 @@ effect_visit=(f:GraphWord):>void=>$unsafe {
         let trusted=d not=? 0 and has_flag(d NF_EXTERN) and effect_declared_row(f) not=? 0
         if effect_blocks_demanded and not trusted and concurrency_fn_blocks(f) {effect_add(f EffectEvent[EffectAtom['block'] d]);}
         let library=effect_library_class(f)
-        if effect_footprints_only and effect_map_remove(f) {
+        if effect_footprints_only and effect_map_write(f) {
             effect_add(f EffectEvent[EffectAtom['write' PlaceIdentity['formal' f 1]] d]);
         }
         else if library not=? EffectClass.unclassified {effect_library_summary(f library d);}

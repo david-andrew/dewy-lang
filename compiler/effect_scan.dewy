@@ -3,12 +3,12 @@ from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
 from p"effects.jo" import (EffectEdge effect_contracts effect_counters effect_exact_rep effect_footprints_only effect_for_marks effect_limit effect_policy effect_seen effect_summaries effects_active)
 from p"effect_costs.dewy" import (effect_bounds effect_cleanup effect_failure effect_intrinsic_cost effect_plan_cost)
 from p"dewy_reader_types.dewy" import (EffectKind)
-from p"expr.jo" import (IN is_fn_type ntype)
+from p"expr.jo" import (IN is_fn_type is_map_type ntype)
 from p"isolation.jo" import (IsolationReason)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED compound_op fns globals locals readonly_global)
 from p"ast.jo" import (NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_MUT NF_SPREAD NF_STMT NF_U64 RANGE_EXHAUSTION has_flag kid kid2 nkids nkids2 nodes)
 from p"type_layout.dewy" import (TF_BOXED)
-from p"types.jo" import (T_MATH_INT T_NEVER T_VOID fields is_int is_managed is_vec layout prune structs telem tkind type_eq types zonk)
+from p"types.jo" import (T_MATH_INT T_NEVER T_VOID fields is_int is_managed is_vec layout prune struct_targ structs telem tkind type_eq types zonk)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"lower.jo" import (VC_VOID)
 from p"effect_contracts.dewy" import (callable_base callable_contract)
@@ -839,6 +839,12 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     # library's float `abs` and `min` do: one move, never a pointer. A write
     # footprint only; full summaries keep it opaque)
         }
+    }
+    # (a dictionary literal of word, text or share entries fills a fresh table: a write footprint
+    # only, nothing outside it changes; full summaries keep it opaque)
+    else if k =? 'map_lit' and effect_footprints_only {
+        let m=representation_type(ntype(n))
+        supported=is_map_type(m) and effect_share(struct_targ(EffectScanWord(types.ptr[m].st) 0)) and effect_share(struct_targ(EffectScanWord(types.ptr[m].st) 1))
     }
     else if k =? 'cast' and effect_footprints_only and not raw_view(n) and (effect_scalar(ntype(n)) or effect_float(ntype(n))) and (effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) or effect_float(ntype(EffectScanWord(nodes.ptr[n].a)))) {supported=true}
     else if k =? 'conv' {

@@ -1,0 +1,45 @@
+# Helpers that print, parse or fill their own dictionary cannot reach a caller's `@` place.
+log = (s:string):>string => {
+    printl"token {s}"
+    s
+}
+number = (s:string):>int => to_int(s) ?? 0
+real = (s:string):>float64 => to_float(s) ?? 0.0
+tally = (s:string):>int => {
+    let seen:dict<string int> = []
+    seen[s] = 1
+    if s not in? seen seen[s] = 0
+    seen[s] += 1
+    seen.length
+}
+scan = (tokens:array<string> @pos:int64<(>=? 0)>):>int => {
+    let total = 0
+    loop pos <? tokens.length {
+        printl(tokens[pos])
+        pos += 1
+    }
+    pos = 0
+    loop pos <? tokens.length {
+        let shown = log(tokens[pos])
+        total += number(shown)
+        pos += 1
+    }
+    pos = 0
+    loop pos <? tokens.length {
+        total += tally(tokens[pos])
+        if real(tokens[pos]) >? 0.0 total += 1
+        pos += 1
+    }
+    total
+}
+keep_length = (@xs:array<int> s:string):>int => {
+    if xs.length =? 0 return 0
+    printl(s)
+    xs[0] + number(s)
+}
+main = () => {
+    let at:int64<(>=? 0)> = 0
+    printl(scan(["1" "22"] @at))
+    let xs = [5]
+    printl(keep_length(@xs "2"))
+}

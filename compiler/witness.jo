@@ -404,6 +404,20 @@ wit_tomb = (s: FactState, side: WitSide) -> (int, int):
     if wit_projection(s, binding.value, -1) != side.value: return (0, 0)
     (binding.event, wit_projection(s, binding.prior, -1))
 
+# Where an operand named in a failed bound last lost its value: the call or loop a guard before
+# it no longer reaches past. O(bindings).
+wit_operand_changed = (e0: int, s: FactState):
+    e = e0
+    loop e > 0 and (nodes[e].kind == .narrow or nodes[e].kind == .conv): e = int(nodes[e].a)
+    if e > 0 and nodes[e].kind == .binary:
+        wit_operand_changed(int(nodes[e].a), s)
+        wit_operand_changed(int(nodes[e].b), s)
+        return
+    if e <= 0 or nodes[e].kind != .ident: return
+    i = fact_binding(s, fact_place(e))
+    if i < 0 or s.bindings[i].event <= 0 or nodes[s.bindings[i].event].kind == .vardecl: return
+    wit_note(nodes[s.bindings[i].event].pos, "{wit_text(e)} may have changed at this {wit_event(s.bindings[i].event)}")
+
 # The call an event is, through its statement; 0 for another event.
 wit_call_node = (at: int) -> int:
     e = at

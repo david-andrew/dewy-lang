@@ -51,7 +51,7 @@ main = ():
     effect_bounds(1, n)
     effect_cleanup(1, T_INT, n, PlaceIdentity(.local, 1, 1))
     effect_lower_intrinsic(1, n)
-    assert(not effect_map_remove(1) and not effect_array_reader(1))
+    assert(not effect_map_write(1) and not effect_array_reader(1))
     assert(effect_signature_opaque_by_type(1) and effect_signature_opaque(1))
     print("costs ok")
 '''

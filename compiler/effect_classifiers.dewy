@@ -77,12 +77,16 @@ effect_library_classify=(g:ClassWord):>EffectClass=>$unsafe {
     }
     if file =? "/core/str.jo" {
         if name in? ["find" "rfind" "find_byte" "contains" "starts_with" "ends_with" "count" "hash" "__has_byte" "__has_char" "__memchr"] {return EffectClass.reads}
-        if name in? ["trim" "trim_start" "trim_end" "split" "words" "lines" "join" "replace" "upper" "lower" "__str_from" "__buf_finish_val" "__case_text"] {return EffectClass.allocates}
+        if name in? ["trim" "trim_start" "trim_end" "split" "words" "lines" "join" "replace" "upper" "lower" "__str_from" "__buf_finish_val" "__case_text" "to_int" "to_float"] {return EffectClass.allocates}
         return EffectClass.unclassified
     }
     if file =? "/math_runtime.jo" {
         if name =? "__mi_parse_word" {return EffectClass.reads}
-        if name in? ["__mi_parse" "__mi_parse_limited" "__mi_parse_slow"] {return EffectClass.allocates}
+        # (`to_int` on text: it writes only its result, so a helper that parses keeps its caller's roots)
+        if name in? ["__mi_parse" "__mi_parse_limited" "__mi_parse_slow"] {
+            effect_class_text[g] = true;
+            return EffectClass.allocates
+        }
         return EffectClass.unclassified
     }
     if file =? "/std/graphemes.jo" {
@@ -102,6 +106,23 @@ effect_library_classify=(g:ClassWord):>EffectClass=>$unsafe {
     # (a dictionary lookup by a word or text key hashes and compares the key
     # with builtin operations and reads the table; `[]` panics on a missing
     # key. As facts' fact_map_reads_only: a const table read in a helper)
+    }
+    # (its size and fresh arrays of word, text or share entries: it writes only its result, so a
+    # helper with a dictionary of its own keeps its caller's roots)
+    if file =? "/core/map.jo" and name in? ["len" "is_empty" "keys" "values" "__map_entries"] and fns.ptr[g].params.length =? 1 {
+        let m=representation_type(ClassWord(locals.ptr[fns.ptr[g].params.ptr[0]].type))
+        if is_map_type(m) and effect_share(struct_targ(ClassWord(types.ptr[m].st) 0)) and effect_share(struct_targ(ClassWord(types.ptr[m].st) 1)) {
+            if name =? "len" or name =? "is_empty" {return EffectClass.reads}
+            effect_class_text[g] = true;
+            return EffectClass.allocates
+        }
+    }
+    if file =? "/core/map.jo" and name =? "__map_of" and fns.ptr[g].params.length =? 1 {
+        let m=representation_type(ClassWord(fns.ptr[g].ret))
+        if is_map_type(m) and effect_share(struct_targ(ClassWord(types.ptr[m].st) 0)) and effect_share(struct_targ(ClassWord(types.ptr[m].st) 1)) {
+            effect_class_text[g] = true;
+            return EffectClass.allocates
+        }
     }
     if file =? "/core/map.jo" and name in? ["get" "contains" "has" "[]"] and fns.ptr[g].params.length =? 2 {
         let m=representation_type(ClassWord(locals.ptr[fns.ptr[g].params.ptr[0]].type))

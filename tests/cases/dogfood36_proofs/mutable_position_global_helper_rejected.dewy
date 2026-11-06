@@ -1,0 +1,12 @@
+# A helper that prints and writes the global behind `@i` does change it.
+limit:int64<(>=? 0)> = 3
+reset = (s:string):>void => {
+    printl(s)
+    limit = 5
+}
+read = (xs:array<int> @i:int64<(>=? 0)>):>int => {
+    if i >=? xs.length return 0
+    reset("x")
+    xs[i]
+}
+main = () => printl(read([1 2] @limit))

@@ -762,6 +762,11 @@ effect_scan_node = (f: int, n: int):
     # (a number's bits read as another number of the same width, as the
     # library's float `abs` and `min` do: one move, never a pointer. A write
     # footprint only; full summaries keep it opaque)
+    # (a dictionary literal of word, text or share entries fills a fresh table: a write footprint
+    # only, nothing outside it changes; full summaries keep it opaque)
+    else if k == .map_lit and effect_footprints_only:
+        m = representation_type(ntype(n))
+        supported = is_map_type(m) and effect_share(struct_targ(int(types[m].st), 0)) and effect_share(struct_targ(int(types[m].st), 1))
     else if k == .cast and effect_footprints_only and not raw_view(n) and (effect_scalar(ntype(n)) or effect_float(ntype(n))) and (effect_scalar(ntype(int(nodes[n].a))) or effect_float(ntype(int(nodes[n].a)))): supported = true
 
     else if k == .conv:
