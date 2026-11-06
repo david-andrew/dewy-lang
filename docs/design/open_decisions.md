@@ -91,14 +91,14 @@ gap.total_days                                             # 9861
 - **Rec:** both, as shown: `age` as a top-level function, and `Date - Date` gives a `Period`.
 
 ### D15e. A clearer name for `today_support`
-- **What it is:** `today` gives one `Date`. This gives every date it could really be right now: one normally, two when the clock's uncertainty spans midnight, and unknown if the clock was never set.
+- **What it is:** `today` gives one `Date`. This gives the range of dates it could really be right now: one normally, two when the clock's uncertainty spans midnight, and unknown if the clock was never set. It's rarely needed.
 
 ```dewy
-let dates = possible_todays      # [2026-11-06 2026-11-07] at 23:59:59 with a ±2s clock
+let dates = today_range      # [2026-11-06..2026-11-07] at 23:59:59 with a ±2s clock
 ```
 
-- **Options:** `possible_todays`, `today_candidates`, or `today_support`.
-- **Rec:** `possible_todays`, which reads correctly cold.
+- **Options:** `today_range`, `today_span`, `today_bounds`. Considered: `possible_todays` and `today_support`, which both read oddly.
+- **Rec:** `today_range`, since it returns a range in Dewy's range syntax.
 
 ### D10. Safety defaults and tag names (#108)
 - **BLUF:** with no tags, anything a program can reasonably meet is a value or a compile error, and crashing takes one written word. A tag's first word tells you its direction. Full proposal and the cold-read review of the names: `docs/design/proposals/bulletproof/round2.md`, `round2-review.md`.
