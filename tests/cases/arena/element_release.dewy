@@ -1,0 +1,44 @@
+# Dropping an array of owning elements: each element's last reference frees it,
+# a shared element only loses a reference, and an element from outside the arena
+# survives the arena's reset with its contents.
+build = (shared:array<int64>):>int64 => {
+    let table:array<array<int64>>=[]
+    loop r in [0..50) {
+        let row:array<int64>=[]
+        loop c in [0..3) {row.push(r+c)}
+        table.push(row)
+    }
+    table.push(shared)
+    table.push(shared)
+    let total:int64=0
+    loop row in table {
+        loop x in row {total+=x}
+    }
+    return total
+}
+heap_rows = ():>int64 => {
+    let shared:array<int64>=[7 8]
+    let table:array<array<int64>>=[]
+    loop r in [0..20) {table.push([r r+1])}
+    table.push(shared)
+    let nested:array<array<array<int64>>>=[table table]
+    let total:int64=nested.length
+    nested=[]
+    table=[]
+    shared.push(9)
+    loop x in shared {total+=x}
+    return total
+}
+main = ():>void => {
+    let scratch=Arena[]
+    let shared:array<int64>=[100 200]
+    let sum:int64=0
+    loop k in [0..3) {
+        sum+=$allocator(@scratch) build(shared)
+        scratch.reset()
+    }
+    shared.push(300)
+    printl"{sum} {shared}"
+    printl"{heap_rows()}"
+}
+$runtime_checks

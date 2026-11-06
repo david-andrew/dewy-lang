@@ -163,7 +163,9 @@ helper_arrrel = (t: int):
     brif_to(e_bin(.ges, VI, i, n), ctl - 1)
     base = e_addi(p, 24)
     index = if ownership_type(et): e_bin(.sub, VI, e_addi(n, -1), i) else: i
+    release_expanded = true
     owner_element_drop(e_bin(.add, VI, base, e_bin(.mul, VI, index, e_iconst(owner_stride(et)))), et)
+    release_expanded = false
     e_mov(i, e_addi(i, 1))
     br_to(ctl)
     endc()

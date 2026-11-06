@@ -155,6 +155,27 @@ retain = (v: int, t0: int):
     endc()
     endc()
 
+release_expanded = false
+release_last = (v: int, t: int):
+    if (types[t].kind == .array and is_managed(int(types[t].elem))) or types[t].kind == .box: release_call(v, t)
+    else: e_call1(rt("__free"), v, -1)
+
+release_element = (v: int, t: int):
+    iff(e_bin(.ne, VI, v, e_iconst(0)))
+    rc = hdr_load(v, 0)
+    iff(e_bin(.gts, VI, rc, e_iconst(0)))
+    iff(rt_global("__mt_active"))
+    release_call(v, t)
+    els()
+    iff(e_bin(.gts, VI, rc, e_iconst(1)))
+    hdr_store(v, 0, e_addi(rc, -1))
+    els()
+    release_last(v, t)
+    endc()
+    endc()
+    endc()
+    endc()
+
 release = (v: int, t0: int):
     t = quantity_base(t0)
     if math_optional(t):
@@ -167,6 +188,9 @@ release = (v: int, t0: int):
         release_call(e_addi(v, -1), math_payload_type())
         ir_cold = was
         endc()
+        return
+    if release_expanded:
+        release_element(v, t)
         return
     if not opt_release:
         release_call(v, t)
@@ -189,7 +213,7 @@ release = (v: int, t0: int):
     els()
     # last reference: the out-of-line path frees (and releases elements)
     iff(e_bin(.eq, VI, rc, e_iconst(1)))
-    release_call(v, t)
+    release_last(v, t)
     endc()
     endc()
     endc()

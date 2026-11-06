@@ -2,7 +2,7 @@ from p"lower_primitives.dewy" import (e_faddr e_gaddr global_addr_off inst_mutma
 from p"lower_functions.dewy" import (begin_fn)
 from p"lower_closures.dewy" import (env_layout partial_layout spawn_body spawn_owned_capture)
 from p"lower_scalars.dewy" import (vec_comps)
-from p"lower_storage.dewy" import (V arr_len blk box_val br_to brif_to copy_at drop_at endc env_guard env_guarded field_store_type hdr_load hdr_store iff is_shared load_val lop new_temp opt_has opt_value own release ret_vt retain retain_elems store_type store_val vc vt_of)
+from p"lower_storage.dewy" import (V release_expanded arr_len blk box_val br_to brif_to copy_at drop_at endc env_guard env_guarded field_store_type hdr_load hdr_store iff is_shared load_val lop new_temp opt_has opt_value own release ret_vt retain retain_elems store_type store_val vc vt_of)
 from p"lower_analysis.dewy" import (fn_writes)
 $runtime_checks
 from p"lower.jo" import (BOX_HDR VC_AGG VC_FLT VC_INT Val ctl hk_key lfuncs value_member_cache)
@@ -186,7 +186,9 @@ helper_arrrel=(t:LHWord):>void=>$unsafe {
     blk();
     lop();
     brif_to(e_bin('ges' VI i n) ctl - 1);
+    release_expanded=true
     owner_element_drop(e_bin('add' VI e_addi(p 24) e_bin('mul' VI (if ownership_type(et) {e_bin('sub' VI e_addi(n -1) i)} else {i}) e_iconst(owner_stride(et)))) et);
+    release_expanded=false
     e_mov(i e_addi(i 1));
     br_to(ctl);
     endc();
