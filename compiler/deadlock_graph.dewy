@@ -1,0 +1,229 @@
+$runtime_checks
+from p"deadlock.jo" import (DlEdge dl_global_edges dl_callers dl_givens dl_inits dl_relevant dl_param_index dl_report dl_changed deadlock_parallel deadlock_atomics deadlock_fns dc_fns dc_mod dc_qmod dc_smod pc_mod DL_PASSES dc_split dc_on dc_is dc_protocols dc_chan_call dc_module dc_called pc_module nd_check dc_analyze)
+from p"deadlock_locations.dewy" import (dl_key dl_path dl_name)
+from p"deadlock_walk.dewy" import (dl_fn_arg dl_walk_fn)
+from p"deadlock_waits.dewy" import (dl_undecided dl_polling)
+from p"ast.jo" import (nodes kids kids2 nkids has_flag NF_GLOBAL)
+from p"check.jo" import fns
+from p"expr.jo" import (is_fn_type ntype)
+from p"util.jo" import (pos_in_lib name_of fatal err_notes)
+from p"concurrency.jo" import (concurrency_task_module concurrency_tasks concurrency_calls)
+from p"directives.jo" import dir_deadlocks_any
+from p"lower_helpers.dewy" import value_helper_calls
+from p"lower_races.dewy" import in_lib
+from p"isolation_ops.dewy" import isolation_children
+
+GraphWord:type=int64<overflow='wrap'>
+dl_scan_calls=(f:GraphWord n:GraphWord):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if (k =? 'call' and nodes.ptr[n].aux =? 0 or k =? 'lambda' or k =? 'fnref') and nodes.ptr[n].sym >? 0 {
+        let g=GraphWord(nodes.ptr[n].sym)
+        if g not=? f and g <? fns.length {
+            let list=dl_callers.get(g) ?? []
+            list.push(f)
+            dl_callers[g]=list
+        }
+        if k =? 'call' {
+            loop a in kids(n) {
+                if is_fn_type(ntype(a)) {
+                    let list=dl_givens.get(g) ?? []
+                    list.push(a)
+                    dl_givens[g]=list
+                }
+            }
+        }
+    }
+    if k =? 'vardecl' and nodes.ptr[n].sym >? 0 and nkids(n) =? 0 and not has_flag(n NF_GLOBAL) {dl_inits[GraphWord(nodes.ptr[n].sym)]=n}
+    if k =? 'vardecl' and dc_split(GraphWord(nodes.ptr[n].b)) {
+        loop c in kids(n) {
+            if nodes.ptr[c].kind not=? 'hole' and nodes.ptr[c].sym >? 0 {dl_inits[GraphWord(nodes.ptr[c].sym)]=n}
+        }
+    }
+    if dc_on() and k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and not dc_is(GraphWord(fns.ptr[f].mod)) and GraphWord(fns.ptr[f].mod) not=? dc_protocols() and dc_chan_call(n) >? 0 {dc_fns[f]=true}
+    if dc_on() and k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {
+        let g=GraphWord(nodes.ptr[n].sym)
+        if GraphWord(fns.ptr[g].mod) =? concurrency_task_module and not pos_in_lib(nodes.ptr[n].pos) {
+            let d=GraphWord(fns.ptr[g].decl)
+            if d not=? 0 and name_of(GraphWord(nodes.ptr[d].name)) in? ["__task_spawn" "cancel"] {dc_fns[f]=true}
+        }
+    }
+    if k not=? 'lambda' and k not=? 'fnref' {
+        loop g in value_helper_calls(n) {
+            let list=dl_callers.get(g) ?? []
+            list.push(f)
+            dl_callers[g]=list
+        }
+    }
+    if k =? 'lambda' {return}
+    if k =? 'propagate' or k =? 'parallel_region' {
+        dl_scan_calls(f GraphWord(nodes.ptr[n].a))
+        return
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {
+        dl_scan_calls(f GraphWord(nodes.ptr[n].a))
+        dl_scan_calls(f GraphWord(nodes.ptr[n].b))
+        dl_scan_calls(f GraphWord(nodes.ptr[n].c))
+        loop c in kids(n) {dl_scan_calls(f c)}
+        return
+    }
+    if mask & 1 not=? 0 {dl_scan_calls(f GraphWord(nodes.ptr[n].a))}
+    if mask & 2 not=? 0 {dl_scan_calls(f GraphWord(nodes.ptr[n].b))}
+    if mask & 4 not=? 0 {dl_scan_calls(f GraphWord(nodes.ptr[n].c))}
+    if mask & 16 not=? 0 {loop c in kids(n) {dl_scan_calls(f c)}}
+    if mask & 32 not=? 0 {loop c in kids2(n) {dl_scan_calls(f c)}}
+}
+dl_cycles=():>void=>$unsafe {
+    if dl_global_edges.length =? 0 {return}
+    let ids:dict<string int64>=[]
+    let names_:array<string>=[]
+    let adj:array<array<int64>>=[]
+    let out_edges:array<array<int64>>=[]
+    loop i in [0..dl_global_edges.length) {
+        let e=dl_global_edges.ptr[i]
+        loop key in [dl_key(e.held) dl_key(e.taken)] {
+            if not ids.has(key) {
+                ids[key]=names_.length
+                names_.push(key)
+                adj.push([])
+                out_edges.push([])
+            }
+        }
+        let a=ids[dl_key(e.held)]
+        adj.ptr[a].push(ids[dl_key(e.taken)])
+        out_edges.ptr[a].push(i)
+    }
+    # Preserve the first edge with a path back: O(V + E) per searched edge.
+    loop i in [0..dl_global_edges.length) {
+        let e=dl_global_edges.ptr[i]
+        let a=ids[dl_key(e.held)]
+        let b=ids[dl_key(e.taken)]
+        if a =? b {continue}
+        let prev:array<int64>=fill(-1 names_.length)
+        prev.ptr[b]=i
+        let queue=[b]
+        let q:GraphWord=0
+        let found=false
+        loop q <? queue.length and not found {
+            let v=queue.ptr[q]
+            q+=1
+            loop j in out_edges.ptr[v] {
+                let w=ids[dl_key(dl_global_edges.ptr[j].taken)]
+                if prev.ptr[w] >=? 0 {continue}
+                prev.ptr[w]=j
+                if w =? a {
+                    found=true
+                    break
+                }
+                queue.push(w)
+            }
+        }
+        if not found {continue}
+        let back:array<int64>=[]
+        let v=a
+        loop v not=? b {
+            let j=prev.ptr[v]
+            back.insert(j 0)
+            v=ids[dl_key(dl_global_edges.ptr[j].held)]
+        }
+        dl_report_cycle(e back)
+        return
+    }
+}
+dl_report_cycle=(e:DlEdge back:array<int64>):>void=>$unsafe {
+    let msg="lock order cycle: one path {dl_path(e)}"
+    loop j in back {msg="{msg}; another {dl_path(dl_global_edges.ptr[j])}"}
+    msg="{msg}. Two tasks on these paths can each hold one lock and wait forever for the other. Take the locks together, in one order: `let [a b] = @(lock_all(x y)) or_throw`"
+    if concurrency_tasks.length =? 0 and not deadlock_parallel {
+        let sites=[e.held_site e.at]
+        loop j in back {
+            sites.push(dl_global_edges.ptr[j].held_site)
+            sites.push(dl_global_edges.ptr[j].taken_site)
+            sites.push(dl_global_edges.ptr[j].at)
+        }
+        dl_undecided(e.taken_site "{msg} (no task runs them at once yet)" sites)
+        return
+    }
+    loop j in back {err_notes.push([dl_global_edges.ptr[j].taken_site "note: the other path takes {dl_name(dl_global_edges.ptr[j].taken)} here"])}
+    fatal(e.taken_site msg)
+}
+deadlock_finalize=():>void=>$unsafe {
+    if deadlock_atomics {
+        dl_report=true
+        loop n in concurrency_calls {
+            if in_lib(nodes.ptr[n].pos) {continue}
+            loop a in kids(n) {
+                let h=dl_fn_arg(a)
+                if h >? 0 and fns.ptr[h].body not=? 0 {dl_polling(h)}
+            }
+        }
+        dl_report=false
+    }
+    dc_mod=dc_module()
+    dc_qmod=dc_module("/prelude/mpmc.dewy")
+    dc_smod=dc_module("/prelude/spsc.dewy")
+    if dc_on() and not dc_called() {
+        dc_mod=-1
+        dc_qmod=-1
+        dc_smod=-1
+    }
+    let certify=dir_deadlocks_any
+    pc_mod=pc_module()
+    if deadlock_fns.length =? 0 and not dc_on() and not certify {return}
+    loop f in [1..fns.length) {
+        if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 {continue}
+        loop i in [0..fns.ptr[f].params.length) {dl_param_index[fns.ptr[f].params.ptr[i]]=i}
+        dl_scan_calls(f GraphWord(fns.ptr[f].body))
+    }
+    if deadlock_fns.length =? 0 and dc_fns.length =? 0 and not certify {return}
+    let work:array<int64>=[]
+    loop [f on] in deadlock_fns {
+        if not dl_relevant.has(f) {
+            dl_relevant[f]=true
+            work.push(f)
+        }
+    }
+    loop [f on] in dc_fns {
+        if not dl_relevant.has(f) {
+            dl_relevant[f]=true
+            work.push(f)
+        }
+    }
+    let given_to:dict<int64 array<int64>>=[]
+    loop [g values] in dl_givens {
+        loop a in values {
+            let h=dl_fn_arg(a)
+            if h >? 0 {
+                let list=given_to.get(h) ?? []
+                list.push(g)
+                given_to[h]=list
+            }
+        }
+    }
+    let i:GraphWord=0
+    loop i <? work.length {
+        let f=work.ptr[i]
+        i+=1
+        loop c in [(dl_callers.get(f) ?? [])... (given_to.get(f) ?? [])...] {
+            if not dl_relevant.has(c) {
+                dl_relevant[c]=true
+                work.push(c)
+            }
+        }
+    }
+    if deadlock_fns.length >? 0 {
+        let passes:GraphWord=0
+        dl_changed=true
+        loop dl_changed and passes <? DL_PASSES {
+            dl_changed=false
+            passes+=1
+            loop f in work {dl_walk_fn(f)}
+        }
+        dl_report=true
+        loop f in work {dl_walk_fn(f)}
+        dl_cycles()
+    }
+    if certify {nd_check()}
+    if dc_fns.length >? 0 {dc_analyze()}
+}

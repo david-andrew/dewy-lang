@@ -221,6 +221,8 @@ arena_reset=():>void=>reset_double()
 runtime_switch=():>void=>switch_double()
 runtime_switch_on=(name:string):>void=>on_double(name)
 '''
+JO['deadlock_graph.dewy'] = 'from p"deadlock.jo" import (deadlock_finalize as finalize_double)\ndeadlock_finalize=():>void=>finalize_double()\n'
+JO['deadlock_graph.jo'] = "use 'deadlock.jo'\n"
 JO['arena_ops.jo'] = "use 'arena.jo'\n"
 
 DRIVER = ''.join(f"use '{m}'\n" for m in EXTRA) + BASE + r'''
