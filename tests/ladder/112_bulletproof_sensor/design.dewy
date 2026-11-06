@@ -113,7 +113,11 @@ main = ():>(void | OutOfMemory) & no panics => {
     match summarize(log) {
         <none> => printl"no readings"
         s:Summary => {
-            printl"low {degrees(s.low)} high {degrees(s.high)} mean {degrees(s.mean_tenths)} median {degrees(s.median)}"
+            let low = degrees(s.low) or_throw
+            let high = degrees(s.high) or_throw
+            let mean_tenths = degrees(s.mean_tenths) or_throw
+            let median = degrees(s.median) or_throw
+            printl"low {low} high {high} mean {mean_tenths} median {median}"
             let mean:float64 = float64(s.total)/float64(s.count)/10.0
             printl"exact mean {mean}"
             let bars = histogram(log s)

@@ -21,9 +21,9 @@ main = ():>(void | OutOfMemory) & no panics => {
     let e = 7
     printl"{a} {b} {c} {d} {e}"
     loop i in [0..3) printl"i={i}"
-    printl(refined(Reading(-5)))
-    printl(specified(42))
-    printl(squared(12345678901234))
+    printl(refined(Reading(-5)) or_throw)
+    printl(specified(42) or_throw)
+    printl(squared(12345678901234) or_throw)
 }
 '''
 

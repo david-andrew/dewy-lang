@@ -69,7 +69,7 @@ MEMBERS = {
     # $assume_local_asserts=false: a `$runtime_assert` makes its own module's callers `panics`
     'local_assert': ('checked = (x:int64):>int64 => {\n    $no_hidden_costs=false\n    $runtime_assert x >? 0\n    x\n}\n'
                      'relay = (x:int64):>(int64 | OutOfMemory) & no blocks => checked(x)\n'
-                     'main = () => {\n    $bulletproof=false\n    printl(relay(3))\n}\n',
+                     'main = () => {\n    $bulletproof=false\n    printl(relay(3) or_throw)\n}\n',
                      'main.dewy:7:57: error: calling `checked` may panic (checked -> __eaf_checked: `$runtime_assert` at main.dewy:4:5)'),
 }
 
@@ -107,7 +107,7 @@ pick = (xs:array<int64> i:int64):>int64 => {
 main = () => {
     $bulletproof=false
     $runtime_checks
-    printl(pick([1 2] 1))
+    printl(pick([1 2] 1) or_throw)
 }
 '''
     result = run(compiler, tmp_path, source, 'run')

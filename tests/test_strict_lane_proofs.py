@@ -112,7 +112,7 @@ grow = (n:int64<0 <=? n and n <? 100>):>int64 & allocates => {
 }
 ''' + MAIN + '''    let k = grow(3)
     if k is? OutOfMemory return OutOfMemory
-    printl"{k} {parse("12")} {parse("-999")} {parse("+7")} {parse("1234")} {parse("12a")} {parse("123a")} {parse("")} {parse("-")} {parse("-0")}"
+    printl"{k} {parse("12") or_throw} {parse("-999") or_throw} {parse("+7") or_throw} {parse("1234") or_throw} {parse("12a") or_throw} {parse("123a") or_throw} {parse("") or_throw} {parse("-") or_throw} {parse("-0") or_throw}"
 }
 '''
 

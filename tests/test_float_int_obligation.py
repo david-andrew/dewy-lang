@@ -72,7 +72,7 @@ b = (x:float64):>uint8 => {
 c = (x:float64):>uint64 => if 0.0 <=? x and x <? 1.8e19 uint64(x) else 0
 d = (x:float64):>(int | OutOfMemory) & allocates => if -1e300 <=? x and x <=? 1e300 int(x) else 0
 main = ():>(void | OutOfMemory) & no panics => {
-    printl"{a(-999.9)} {a(5000.0)} {a(float64.nan)} {b(255.9)} {b(-0.5)} {c(1.7e19)} {d(-2.5)} {d(1e301)}"
+    printl"{a(-999.9)} {a(5000.0)} {b(255.9)} {b(-0.5)} {c(1.7e19)} {d(-2.5) or_throw} {d(1e301) or_throw}"
 }
 '''
 
@@ -80,7 +80,12 @@ main = ():>(void | OutOfMemory) & no panics => {
 def test_guarded_accepted(compiler, tmp_path):
     result = run(compiler, tmp_path, ACCEPT, 'run')
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout == '-999 -1 -1 255 0 17000000000000000000 -2 0\n', result.stdout
+    assert result.stdout == '-999 -1 255 0 17000000000000000000 -2 0\n', result.stdout
+
+
+def test_nan_literal_rejected_under_no_nan(compiler, tmp_path):
+    result = run(compiler, tmp_path, ACCEPT.replace('{a(5000.0)}', '{a(float64.nan)}'), 'run')
+    assert result.returncode != 0 and 'cannot prove the value is not NaN' in result.stderr, result.stdout + result.stderr
 
 
 def test_finite_floats_proves_int(compiler, tmp_path):

@@ -58,7 +58,7 @@ h = (x:int n:uint8):>(int | OutOfMemory) & allocates => x >> n
         y <<= n
         printl(x << n)
     }
-    printl"{y} {x << 2} {g(3 4)} {g(3 (-1))} {h(256 4)} {int64<overflow='wrap'>(7) << n}"
+    printl"{y} {x << 2} {g(3 4) or_throw} {g(3 (-1)) or_throw} {h(256 4) or_throw} {int64<overflow='wrap'>(7) << n}"
 }
 '''
 
