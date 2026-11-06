@@ -1,0 +1,21 @@
+# is_finite, is_nan and is_inf guard the float obligations as a comparison does.
+$finite_floats
+same = (x:float64):>float64 => x
+guarded = (s:string):>float64 => {
+    let x = to_float(s) ?? 0.0
+    if is_finite(x) { return same(x) }
+    return 0.0
+}
+early = (s:string):>float64 => {
+    let x = to_float(s) ?? 0.0
+    if not is_finite(x) { return 0.0 }
+    same(x)
+}
+both = (s:string):>float64 => {
+    let x = to_float(s) ?? 0.0
+    if is_nan(x) or is_inf(x) { return 0.0 }
+    same(x)
+}
+main = () => {
+    printl("{guarded("1.5")} {early("2.5")} {both("3.5")} {guarded("inf")} {early("nan")}")
+}

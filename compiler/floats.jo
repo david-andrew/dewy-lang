@@ -779,6 +779,9 @@ ff_refine = (c: int, holds: bool):
     if k == .not_:
         ff_refine(int(nodes[c].a), not holds)
         return
+    if k == .call and nkids(c) == 1:
+        ff_refine_test(c, holds)
+        return
     if k != .binary: return
     op = nodes[c].op as Tok
     if not holds:
@@ -791,6 +794,24 @@ ff_refine = (c: int, holds: bool):
     ff_bound(a, op, ff_eval_pure(b), ordered)
     flipped = if op == .lt: Tok.gt else if op == .le: Tok.ge else if op == .gt: Tok.lt else if op == .ge: Tok.le else: op
     ff_bound(b, flipped, ff_eval_pure(a), ordered)
+
+# The library's float tests as guards: `is_finite(x)` holding is a finite x, `is_nan(x)` failing
+# a number, `is_inf(x)` failing a finite x or NaN.
+ff_refine_test = (c: int, holds: bool):
+    if nodes[c].aux != 0 or nodes[c].sym <= 0: return
+    d = int(fns[int(nodes[c].sym)].decl)
+    if d == 0 or not pos_in_lib(nodes[d].pos): return
+    name = name_of(int(nodes[d].name))
+    x = kid(c, 0)
+    limit = FR(FF_MAX, FF_MAX)
+    below = FR(-FF_MAX, -FF_MAX)
+    if name == "is_finite" and holds:
+        ff_bound(x, .le, limit, true)
+        ff_bound(x, .ge, below, true)
+    else if name == "is_nan" and not holds: ff_bound(x, .eq, FR(-INF, INF), true)
+    else if name == "is_inf" and not holds:
+        ff_bound(x, .le, limit, false)
+        ff_bound(x, .ge, below, false)
 
 # (bounds of an operand already evaluated: constants and tracked locals only)
 ff_eval_pure = (n: int) -> FR:

@@ -1003,7 +1003,8 @@ or a parameter of a lambda or of a function used as a value, may be NaN or
 infinite: using it (in arithmetic, a
 math function, a `return`, a reassignment, a dictionary key or set element) is
 an obligation, which a suitable comparison that holds proves (`let v = r.value`
-then `if v =? v` for NaN, or a finite range guard for infinities).
+then `if v =? v` for NaN, or a finite range guard for infinities), as do the
+library's tests (`if is_finite(v)` for both, `if not is_nan(v)` for NaN).
 Guards on locals and constant operands prove most obligations:
 
 ```dewy
