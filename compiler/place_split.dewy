@@ -1,0 +1,167 @@
+$runtime_checks
+# The definition side of place-returning methods (place_methods.jo): splitting a method that
+# lends a place, as dewy_direct.jo declares a type's methods. Apart from place_methods.jo, which
+# the checker uses, so the bootstrap's seed frontend never reads the Dewy frontend.
+from p"ast.jo" import (NF_AT NF_GENERIC NF_INDEX_CAPTURED NF_VOID NF_WRITTEN_VOID add_flag clone dewy_param_kinds has_flag kid_c kid_d kids mk nkids nodes set_list set_list2)
+from p"expr.jo" import (bc_block bc_bool)
+from p"util.jo" import (fatal intern name_of)
+from p"dewy_nodes.jo" import dw_finish_function
+from p"place_methods.jo" import (PlaceMethod place_methods place_names_used place_written)
+
+SplitWord:type=int64<overflow='wrap'>
+# The member names of `@$self.a.b`, or none when v is not a place inside the receiver.
+place_route_of=(v:SplitWord receiver:SplitWord):>array<int64> | none=>$unsafe {
+    let out:array<int64>=[]
+    let n=v
+    loop nodes.ptr[n].kind =? 'field' {
+        out.insert(SplitWord(nodes.ptr[n].name) 0)
+        n=SplitWord(nodes.ptr[n].a)
+    }
+    if nodes.ptr[n].kind =? 'ident' and SplitWord(nodes.ptr[n].name) =? receiver and out.length >? 0 {return out}
+    none
+}
+# A given place: a `@` route rooted at the receiver.
+place_given=(v:SplitWord receiver:SplitWord):>bool=>$unsafe {
+    if v =? 0 or not has_flag(v NF_AT) {return false}
+    let n=v
+    loop nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index' {n=SplitWord(nodes.ptr[n].a)}
+    nodes.ptr[n].kind =? 'ident' and SplitWord(nodes.ptr[n].name) =? receiver
+}
+place_returns_in=(n:SplitWord receiver:SplitWord @places:array<int64> @values:array<int64>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fn_' {return}
+    if k =? 'return_' {
+        if place_given(SplitWord(nodes.ptr[n].a) receiver) {places.push(n)}
+        else {values.push(n)}
+    }
+    place_returns_in(SplitWord(nodes.ptr[n].a) receiver @places @values)
+    place_returns_in(SplitWord(nodes.ptr[n].b) receiver @places @values)
+    place_returns_in(kid_c(n) receiver @places @values)
+    place_returns_in(kid_d(n) receiver @places @values)
+    loop child in kids(n) {place_returns_in(child receiver @places @values)}
+}
+# Splits a method that lends a place (see the top); the functions it adds, to declare as rows.
+place_method_split=(fn_:SplitWord receiver:SplitWord name:string):>array<int64>=>$unsafe {
+    let written=place_written.get(fn_) ?? 0
+    let body=SplitWord(nodes.ptr[fn_].b)
+    if body =? 0 or nodes.ptr[body].kind not=? 'block' {
+        if written not=? 0 {fatal(nodes.ptr[fn_].pos "'{name}' is written to give a place (`:> @T`), and its body gives a value: give a member with `@`, as `@balance`")}
+        return []
+    }
+    let stmts=kids(body)
+    let places:array<int64>=[]
+    let values:array<int64>=[]
+    place_returns_in(body receiver @places @values)
+    let last=stmts.length - 1
+    let given:SplitWord=0
+    if last >=? 0 and nodes.ptr[stmts[last]].kind =? 'exprstmt' and place_given(SplitWord(nodes.ptr[stmts[last]].a) receiver) {given=SplitWord(nodes.ptr[stmts[last]].a)}
+    if last >=? 0 and places.length =? 1 and places[0] =? stmts[last] {given=SplitWord(nodes.ptr[places[0]].a)}
+    if given =? 0 and places.length =? 0 {
+        if written not=? 0 {fatal(nodes.ptr[fn_].pos "'{name}' is written to give a place (`:> @T`), and its body gives none: give a member with `@`, as `return @balance`")}
+        return []
+    }
+    if given =? 0 or places.length >? 1 or places.length =? 1 and places[0] not=? stmts[last] {
+        let at=if places.length >? 0 {nodes.ptr[places[0]].pos} else {nodes.ptr[fn_].pos}
+        fatal(at "a method gives its place once, as its last statement, for now (`return @balance`); other returns give other values, such as `Busy`")
+    }
+    let route=place_route_of(given receiver)
+    if route =? none {fatal(nodes.ptr[given].pos "a method lends a field of its object for now (`@balance`, `@account.balance`), not an element or the object itself")}
+    # value parameters' bindings lead the body (dw_finish_function)
+    let first:SplitWord=0
+    loop first <? last and nodes.ptr[stmts[first]].kind =? 'vardecl' and nodes.ptr[stmts[first]].aux2 =? 1 {first+=1}
+    let split:SplitWord=-1
+    loop i in [first..last) {
+        let found:array<int64>=[]
+        let others:array<int64>=[]
+        place_returns_in(stmts[i] receiver @found @others)
+        if others.length >? 0 {split=i}
+    }
+    let fails=split >=? 0
+    let prefix:array<int64>=[]
+    let suffix:array<int64>=[]
+    loop i in [first..last) {
+        if i <=? split {prefix.push(stmts[i])}
+        else {suffix.push(stmts[i])}
+    }
+    if fails {
+        let early=dict<int64 bool>()
+        loop st in prefix {
+            if nodes.ptr[st].kind =? 'vardecl' and nodes.ptr[st].name not=? 0 {early[SplitWord(nodes.ptr[st].name)]=true}
+        }
+        if early.length >? 0 {
+            let rest=suffix.copy()
+            rest.push(given)
+            loop st in rest {
+                let used=place_names_used(st early)
+                if used not=? 0 {fatal(nodes.ptr[used].pos "'{name_of(SplitWord(nodes.ptr[used].name))}' is declared before '{name}' last gives another value, and used after: declare it after that `return`, as what the method holds while lending its place")}
+            }
+        }
+    }
+    # what the method holds while the place lives: its body's own locals
+    let guards:array<int64>=[]
+    loop st in suffix {
+        if nodes.ptr[st].kind =? 'vardecl' and nodes.ptr[st].name not=? 0 and nkids(st) =? 0 {guards.push(SplitWord(nodes.ptr[st].name))}
+    }
+    let pos=nodes.ptr[given].pos
+    let guard=bc_bool(true pos)
+    if guards.length >? 0 {
+        guard=mk('record_lit' pos)
+        let fields:array<int64>=[]
+        loop g in guards {
+            let field=mk('namedarg' pos)
+            nodes.ptr[field].name=int32(g)
+            let value=mk('ident' pos)
+            nodes.ptr[value].name=int32(g)
+            nodes.ptr[field].a=int32(value)
+            fields.push(field)
+        }
+        set_list(guard fields)
+    }
+    let give=mk('return_' pos)
+    nodes.ptr[give].a=int32(guard)
+    let params=stmts[0..first)
+    let out:array<int64>=[]
+    if fails {
+        let acquire=clone(fn_)
+        nodes.ptr[acquire].name=int32(intern("{name}$acquire"))
+        let own:array<int64>=[]
+        loop p in params {own.push(clone(p))}
+        loop s in suffix {own.push(s)}
+        own.push(give)
+        nodes.ptr[acquire].b=int32(bc_block(own pos))
+        let kinds=dewy_param_kinds.get(fn_)
+        if kinds not=? none {dewy_param_kinds[acquire]=kinds}
+        place_methods[acquire]=PlaceMethod(route written false guards.length intern("{name}$release") pos)
+        out.push(acquire)
+        let decided=mk('return_' pos)
+        nodes.ptr[decided].a=int32(bc_bool(true pos))
+        let kept=params.copy()
+        loop s in prefix {kept.push(s)}
+        kept.push(decided)
+        set_list(body kept)
+    } else {
+        let kept=params.copy()
+        loop s in suffix {kept.push(s)}
+        kept.push(give)
+        set_list(body kept)
+    }
+    if guards.length >? 0 {
+        # (`m$release`, beside `m`: a method, so an imported type brings it)
+        let release=mk('fn_' pos)
+        nodes.ptr[release].name=int32(intern("{name}$release"))
+        let held=mk('ident' pos)
+        nodes.ptr[held].name=int32(intern("$Held"))
+        set_list2(release [held])
+        add_flag(release NF_GENERIC | NF_VOID | NF_WRITTEN_VOID)
+        let param=mk('param' pos)
+        nodes.ptr[param].name=int32(intern("$guard"))
+        let ht=mk('tname' pos)
+        nodes.ptr[ht].name=nodes.ptr[held].name
+        nodes.ptr[param].a=int32(ht)
+        dw_finish_function(release [param] bc_block([] pos) "{name}$release");
+        out.push(release)
+    }
+    place_methods[fn_]=PlaceMethod(route written fails guards.length intern("{name}$release") pos)
+    out
+}
