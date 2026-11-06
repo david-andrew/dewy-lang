@@ -1,0 +1,102 @@
+$runtime_checks
+from p"deadlock.jo" import (DlLoc DlHeld dl_report dl_relevant)
+from p"deadlock_locations.dewy" import (dl_must dl_may dl_name dl_line dl_named dl_resolve)
+from p"deadlock_summaries.dewy" import (dl_add_edge dl_summary)
+from p"deadlock.jo" import DlEdge
+from p"ast.jo" import (nodes kids kid nkids)
+from p"check.jo" import fns
+from p"expr.jo" import ntype
+from p"util.jo" import (fatal warn name_of)
+from p"directives.jo" import (dir_no_deadlocks dir_deadlocks_any)
+from p"concurrency_types.dewy" import concurrency_builtin_type
+
+WaitWord:type=int64<overflow='wrap'>
+dl_undecided=(site:WaitWord msg:string other:array<int64>=[]):>void=>{
+    let hit=dir_no_deadlocks(site)
+    loop o in other {if dir_no_deadlocks(o) {hit=true}}
+    if hit {fatal(site "{msg}. Under `$no_deadlocks` an undecided wait is an error: no certificate covers it")}
+    warn(site msg)
+}
+dl_wait=(held:array<DlHeld> loc:DlLoc site:WaitWord via:string report_site:WaitWord):>void=>{
+    loop h in held {
+        if dl_report and dl_must(h.loc loc) {
+            let how=if via.length >? 0 {" ({via}, takes it at {dl_line(site)})"} else {""}
+            fatal(report_site "this waits for {dl_name(loc)}, which this task already holds since {dl_line(h.site)}{how}: it would wait forever. Use the place already held, or let it end before taking the lock again")
+        }
+        if dl_report and dl_may(h.loc loc) and not dl_must(h.loc loc) {
+            dl_undecided(report_site "this may wait for {dl_name(loc)} while holding another of the same ({dl_line(h.site)}): two tasks taking them in opposite orders would wait forever. Take them together, in one order: `let [a b] = @(lock_all(x y)) or_throw`" [h.site site])
+            continue
+        }
+        dl_add_edge(DlEdge(h.loc loc h.site site via report_site))
+    }
+    if dl_report and dir_deadlocks_any and held.length >? 0 and (dir_no_deadlocks(report_site) or dir_no_deadlocks(site)) {
+        loop h in held {
+            if dl_named(loc) and dl_named(h.loc) {continue}
+            let how=if via.length >? 0 {" ({via}, takes it at {dl_line(site)})"} else {""}
+            fatal(report_site "this waits for {dl_name(loc)}{how} while holding {dl_name(h.loc)} (since {dl_line(h.site)}), and the compiler cannot name one of them, so no checked lock order covers the wait (`$no_deadlocks`): take them together with `lock_all`, or nest only locks named by a local or a parameter holding a handle `mutex(...)` made (a field, an element or a handle a call gives back may be a copy of another)")
+        }
+    }
+}
+dl_join=(h:WaitWord held:array<DlHeld> pos:WaitWord what:string):>void=>{
+    if not dl_relevant.has(h) or not dl_report {return}
+    let s=dl_summary(h)
+    loop a in s.acqs {
+        if not a.wait {continue}
+        loop hd in held {
+            if dl_must(hd.loc a.loc) {
+                fatal(pos "this holds {dl_name(hd.loc)} (since {dl_line(hd.site)}) while waiting for {what}, which take it ({dl_line(a.site)}): neither can go on. Let the place end before the join, or take the lock inside the work only")
+            }
+            if dl_may(hd.loc a.loc) {
+                dl_undecided(pos "this holds {dl_name(hd.loc)} (since {dl_line(hd.site)}) while waiting for {what}, which may take the same lock ({dl_line(a.site)})" [hd.site])
+            }
+        }
+    }
+}
+dl_polling=(h:WaitWord):>void=>$unsafe {
+    let body=WaitWord(fns.ptr[h].body)
+    let loops:array<int64>=[]
+    dl_find_loops(body @loops)
+    loop lp in loops {
+        let cond=WaitWord(nodes.ptr[lp].a)
+        let polled:array<DlLoc>=[]
+        dl_atomic_reads(cond h @polled)
+        if polled.length =? 0 {continue}
+        loop p in polled {
+            if dl_atomic_written(WaitWord(nodes.ptr[lp].b) h p) {continue}
+            if dl_atomic_written(body h p) {
+                fatal(nodes.ptr[lp].pos "this parallel iteration waits for {dl_name(p)}, which a sibling iteration sets: iterations may run one after another on one thread, so it may wait forever. Use `concurrent` and `spawn` for work that waits on other work")
+            }
+            dl_undecided(nodes.ptr[lp].pos "this parallel iteration polls {dl_name(p)}: iterations may run one after another on one thread, so it waits for whatever sets it")
+        }
+    }
+}
+dl_find_loops=(n:WaitWord @out:array<int64>):>void=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind =? 'lambda' {return}
+    if nodes.ptr[n].kind =? 'while_' {out.push(n)}
+    loop c in [WaitWord(nodes.ptr[n].a) WaitWord(nodes.ptr[n].b) WaitWord(nodes.ptr[n].c)] {dl_find_loops(c @out)}
+    loop c in kids(n) {dl_find_loops(c @out)}
+}
+dl_atomic_name=(n:WaitWord names:array<string>):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) =? 0 {return false}
+    let d=WaitWord(fns.ptr[WaitWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or not concurrency_builtin_type(ntype(kid(n 0)) "Atomic") {return false}
+    name_of(WaitWord(nodes.ptr[d].name)) in? names
+}
+dl_atomic_reads=(n:WaitWord f:WaitWord @out:array<DlLoc>):>void=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind =? 'lambda' {return}
+    if dl_atomic_name(n ["load" "get"]) {
+        let loc=dl_resolve(kid(n 0) f)
+        if loc.root not=? 0 {out.push(loc)}
+    }
+    loop c in [WaitWord(nodes.ptr[n].a) WaitWord(nodes.ptr[n].b) WaitWord(nodes.ptr[n].c)] {dl_atomic_reads(c f @out)}
+    loop c in kids(n) {dl_atomic_reads(c f @out)}
+}
+dl_atomic_written=(n:WaitWord f:WaitWord loc:DlLoc):>bool=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind =? 'lambda' {return false}
+    if dl_atomic_name(n ["store" "set" "add" "compare_swap" "set_max"]) and dl_may(dl_resolve(kid(n 0) f) loc) {return true}
+    loop c in [WaitWord(nodes.ptr[n].a) WaitWord(nodes.ptr[n].b) WaitWord(nodes.ptr[n].c)] {
+        if dl_atomic_written(c f loc) {return true}
+    }
+    loop c in kids(n) {if dl_atomic_written(c f loc) {return true}}
+    false
+}
