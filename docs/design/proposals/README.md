@@ -22,6 +22,7 @@ These folders record, for each design decision, what was considered and why one 
 | [concurrency/big-picture/](concurrency/big-picture/) | The 80/20 performance ladder and prior art | Synthesis and reviews. Open (D4). |
 | [packages/](packages/) | Vendoring and package metadata | Synthesis and reviews. Open: D21a–b. |
 | [string-shapes/](string-shapes/) | Compile-time string shapes, action names, stale handles, UI | Round 1. Open (D11). |
+| [ui/](ui/) | Clay-style declarative UI | Round 1. Open (D28). |
 | [bulletproof/](bulletproof/) | Opt-out tags for `$bulletproof` | Round 2: unsafety is opted into. Open (D10). |
 
 The earliest time-design inputs were built from David's private notes and are kept outside the repo.

@@ -243,7 +243,50 @@ input.pressed('jmup')       # compile error naming the valid actions
 - `if w.has(ball)` only proves `w.pos` after a later compiler stage; until then, the error points to `w.get`.
 - Rec: add `w.get` and `w.has`. `w.has` replaces `alive` and `joint_alive`. Considered and rejected: silently returning a default (a removed ball draws at the origin); handles consumed by `remove` (they're usually aliased in module globals).
 
-**UI.** A Clay-style layout built as a value has nothing left "open", so the panic goes away by construction. This stays a direction until the design work is done. In the meantime, `ui_begin` closes an open menu itself, with a debug warning.
+**UI.** See D28. In the meantime, `ui_begin` closes an open menu itself, with a debug warning.
+
+### D28. Clay-style UI
+- **BLUF:** a frame's UI is a plain value, so nothing is ever "open" and the `ui_begin` panic can't exist. No new syntax. Full design: `docs/design/proposals/ui/round1.md`.
+
+```dewy
+Choice:type = 'resume' | 'quit'
+let screen:Screen = 'paused'
+let volume:float64 = 0.8
+
+pause_menu = ():>void => {
+    let picked = ui<Choice>(back='resume' align='center' column(gap=12 pad=24 width=420 align='center' [
+        text("Paused" size=36)
+        button('resume' "Resume")
+        slider("Volume" @volume 0.0 1.0 step=0.05)     # writes straight to your variable
+        if not muted progress(volume)                  # if and loop work inside the array
+        button('quit' "Quit to the title")
+    ]))
+    if picked =? 'resume' screen = 'playing'
+    else if picked =? 'quit' screen = 'title'
+}
+```
+
+- **Common path:** the example above. Mouse, touch, keyboard and gamepad all work with no further code, and `button('resume2' …)` is a compile error when it isn't in `Choice`.
+- **When that doesn't fit:**
+  - **Reading a button beside it:** `button("Sell")` then `if clicked("Sell") sell(item)` on the next line.
+  - **Reacting to a change:** compare with the old value after the tree.
+  - **Custom drawing:** reserve a `box(id='map' width=200 height=200 [])` and draw into `rect_of('map')`.
+  - **Tests:** `layout(tree 1280 720)` returns plain draw commands, with no window.
+  - **Speed:** reuse a static tree, which saved 40% of the frame in a measurement.
+- **Semantics taken:**
+  - **A value tree, not scoped blocks.** Tested on today's compiler: inside a closure block, `return` only leaves the closure, and writing a local needs `$capture`. Guard-style blocks go silently wrong if the guard isn't bound. The tree costs 16–19% more per frame, about 0.1% of a 60 Hz frame.
+  - **Interaction comes from the last frame's layout,** as in Clay, since that's what the player aimed at.
+  - **Stale state can't crash.** A removed pressed item cancels the press, and a removed focused item moves focus.
+- **Cost:** 378K instructions for a 238-element screen, measured on the desktop in a release build. That's about 0.5% of a 60 Hz frame, with the time estimated from cycles.
+- **Risk:** `scroll`, `grid`, `floating` and text wrapping compile in the prototype but don't behave yet, so their cost and design are the least proven. `no allocates` code can't use the tree; a fixed-pool builder would come later.
+- **Names to review** (rec: yes to all):
+  1. Widgets: `column row box grid scroll floating tooltip modal spacer text image button checkbox slider choice text_field progress`.
+  2. `ui(tree)` returns a pick; `show(tree)` is for a tree with no picks.
+  3. `pick=` is what comes back, and `id=` is identity only.
+  4. `pad` rather than `padding`, pairing with `gap`.
+  5. Sizes: `'fit'`, `'grow'`, a number, `part(0.5)`, `grow(low= high=)`, `fit(high=)`. `part` exists because `width=1/2` means half a unit.
+  6. A single nine-point `align`: `'top_left'`, `'top'`, … `'bottom_right'`.
+  7. `back='resume'` on `ui`, so Escape or B returns that value.
 
 ---
 
