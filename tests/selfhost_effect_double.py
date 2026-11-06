@@ -2,6 +2,10 @@
 
 
 def effect_services(text, modules):
+    if any(name + " = " in modules.get("secrets.jo", "")
+           for name in ("secret_cast", "secret_member", "secret_unary")):
+        text = text.replace("secret_checks.dewy", "secrets.jo").replace(
+            "secret_checks.jo", "secrets.jo")
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(
