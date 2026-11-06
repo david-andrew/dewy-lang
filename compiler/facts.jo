@@ -64,6 +64,7 @@ use 'effect_control.dewy'
 use 'effect_costs.dewy'
 use 'effect_owners.dewy'
 use 'isolation_ops.dewy'
+use 'facts_arrays.dewy'
 use 'facts_maps.dewy'
 use 'facts_pools.dewy'
 use 'facts_members.dewy'
@@ -5796,47 +5797,9 @@ fact_name_insert = 0
 fact_name_reshape = 0
 fact_name_put_slice = 0
 fact_name_bcast = 0
-fact_single_bcast_call = (n: int) -> bool:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 1: return false
-    d = int(fns[int(nodes[n].sym)].decl)
-    d != 0 and name_of(int(nodes[d].name)) == "__bcast" and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/nd.jo"
 fact_name_reads: int[]
 fact_name_permutations: int[]
-fact_array_call = (n: int) -> int:
-    nd = fact_nd_call(n)
-    if nd == 6: return 107
-    if nd >= 100: return nd
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 1 or nkids(n) > 8: return 0
-    d = int(fns[int(nodes[n].sym)].decl)
-    if d == 0: return 0
-    if fact_name_swap == 0:
-        fact_name_swap = intern("swap")
-        fact_name_insert = intern("__dewy_insert")
-        fact_name_reshape = intern("reshape")
-        fact_name_put_slice = intern("__dewy_put_slice")
-        fact_name_bcast = intern("__bcast")
-        fact_name_reads = [intern("__dewy_read_u64"), intern("__dewy_read_u32"), intern("__dewy_read_u16")]
-        fact_name_permutations = [intern("reverse"), intern("sort"), intern("sort_by"), intern("sort_with")]
-    name = int(nodes[d].name)
-    k = 0
-    if nkids(n) == 1: k = if name == fact_name_bcast and nodes[kid(n, 0)].kind == .array: 40 else: 0
-    else if name == fact_name_reshape and nkids(n) >= 3 and nkids(n) <= 5: k = 19 + nkids(n)
-    else if name == fact_name_put_slice and nkids(n) == 8: k = fact_put_slice_kind(n)
-    else if nkids(n) == 3: k = if name == fact_name_swap: 4 else if name == fact_name_insert: 5 else: 0
-    else if nkids(n) == 2: k = if name == fact_name_reads[0]: 18 else if name == fact_name_reads[1]: 14 else if name == fact_name_reads[2]: 12 else: 0
-    if k == 0 and name in fact_name_permutations and files[pos_file(nodes[d].pos)].path == lib_dir + "/core/array.jo": k = 6
-    if k == 0 or not pos_in_lib(nodes[d].pos): return 0
-    rk = tkind(fact_type(ntype(kid(n, 0))))
-    if rk != .array and not (rk == .fixed and k >= 30 and k < 40): return 0
-    k
 
-# (literal flags only: a stepped one keeps its check)
-fact_put_slice_kind = (n: int) -> int:
-    loop i in [4..7):
-        if nodes[kid(n, i)].kind != .bool_lit: return 0
-    if nodes[kid(n, 6)].ival != 0: return 0
-    vk = tkind(representation_type(ntype(kid(n, 7))))
-    if vk == .array or vk == .fixed: 31 else: 30
 
 # Dictionary key presence (no traps): `d[k]`, `d[k] += 1` and `d.pop(k)` need
 # k in d, an obligation of the call as an index is; so does a set's `s.pop(v)`. `k in? d` is a projection
@@ -5945,147 +5908,12 @@ fact_ensured_keys_cache: {int: (int, int)[]} = {}
 
 
 
-# A value slice preserves its elements. Only constant offsets need inventory
-# shifting here; a fill's uniform payload works for any offset. O(projections)
-# on a demanded slice, never a scan of unrelated values or program nodes.
-fact_slice_elements = (s: mut FactState, base: int, value: int, lo: int, hi: int):
-    if base == 0 or value == 0: return
-    fact_keys_copy(s, base, value)
-    uniform = fact_projection_find(s, base, FACT_ELEMENT_COPY, false)
-    if uniform >= 0 and s.projections.len() < FACT_CAP:
-        fact_add_projection(s, FactProjection(value, FACT_ELEMENT_COPY, false, s.projections[uniform].value))
-        return
-    lower = fact_bound(s, lo)
-    upper = fact_bound(s, hi)
-    if lower.wide or lower.lo != lower.hi or lower.lo < 0: return
-    parts: FactProjection[]
-    pi = fact_projection_first(s, base)
-    loop pi >= 0:
-        p = s.projections[pi]
-        pi = fact_projection_after(s, pi)
-        if p.element: parts.push(p)
-    loop p in parts:
-        index = fact_bound(s, p.selector)
-        if index.wide or index.lo != index.hi or index.lo < lower.lo or index.hi >= upper.lo: continue
-        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, fact_constant(s, index.lo - lower.lo), true, p.value))
 
 
 
-fact_array_call_check = (n: int, s: mut FactState, values: int[], kind: int):
-    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
-    if kind >= 100:
-        fact_nd_check(n, s, values, kind)
-        return
-    # (the receiver is a place, as a builtin operation's is)
-    route = fact_receiver_route(n, s)
-    held = fact_route_values(s, route)
-    base = if held.len() > 0: held[held.len() - 1] else: values[0]
-    length = fact_project(s, base, -1, false, T_INT)
-    zero = fact_constant(s, 0)
-    if kind == 6: return
-    if kind == 40:
-        fact_bcast_check(n, s)
-        return
-    if kind >= 30:
-        # (a fixed array's length is its type's)
-        t = representation_type(ntype(kid(n, 0)))
-        if tkind(t) == .fixed: length = fact_constant(s, fixed_len(t))
-        fact_put_slice_check(n, s, values, length, kind == 31)
-        return
-    if kind > 20:
-        fact_reshape_check(n, s, values, length)
-        return
-    if kind > 10:
-        # (i + width <=? length: i - length <=? -width)
-        width = kind - 10
-        index = values[1]
-        lo = fact_compare(s, .le, zero, index)
-        hi = fact_entails(s, index, length, -width)
-        if fact_probe_on: fact_probe_record(n, lo == 1 and hi)
-        else if lo != 1 or not hi:
-            i = wit_text(kid(n, 1))
-            upper = "{i} + {width} <=? {wit_text(kid(n, 0))}.length"
-            relation = if lo == 1: upper else if hi: "0 <=? {i}" else: "0 <=? {i} and {upper}"
-            missing = if lo == 1: "upper bound" else if hi: "lower bound" else: "lower and upper bounds"
-            wit_unknown(n, fact_bound(s, index), "read<uint{width * 8}> is in bounds", 0, relation, missing)
-        return
-    positions = if kind == 4: [1, 2] else: [2]
-    loop i in positions:
-        index = values[i]
-        lo = fact_compare(s, .le, zero, index)
-        hi = if kind == 4: fact_compare(s, .lt, index, length) else: fact_compare(s, .le, index, length)
-        if fact_probe_on:
-            fact_probe_record(n, lo == 1 and hi == 1)
-            continue
-        if lo == 1 and hi == 1: continue
-        # (an insertion position may be the length itself: one past the last index)
-        wit_index(n, s, index, length, lo, hi, kid(n, 0), kid(n, i), kind == 5)
-        return
 
-# reshape's dimensions: each >= 0, their product the length (a product the
-# facts model: all but one dimension constant). O(dimensions).
-fact_reshape_check = (n: int, s: mut FactState, values: int[], length: int):
-    zero = fact_constant(s, 0)
-    product = values[1]
-    loop i in [1..values.len()):
-        if fact_compare(s, .ge, values[i], zero) != 1:
-            if fact_probe_on: fact_probe_record(n, false)
-            else: wit_unknown(n, fact_bound(s, values[i]), "reshape's dimension `{wit_text(kid(n, i))}` is >= 0", 0, "{wit_text(kid(n, i))} >=? 0")
-            return
-        if i > 1: product = fact_arithmetic(s, kid(n, i), .star, product, values[i])
-    proven = fact_compare(s, .eq, length, product) == 1
-    if fact_probe_on: fact_probe_record(n, proven)
-    else if not proven:
-        dims: str[]
-        loop i in [1..values.len()): dims.push(wit_text(kid(n, i)))
-        receiver = wit_text(kid(n, 0))
-        relation = if receiver != "": "{receiver}.length =? {join(dims, "*")}" else: ""
-        whose = if receiver != "": "`" + receiver + "`'s" else: "the"
-        wit_unknown(n, fact_bound(s, product), "reshape's dimensions multiply to {whose} element count", 0, relation)
 
-# The lengths of a dotted expression's 1-D operands (an array of them, the
-# compiler's): each 1 (stretched) or the same as the others. O(operands).
-fact_bcast_check = (n: int, s: mut FactState):
-    one = fact_constant(s, 1)
-    first = 0
-    loop c in kids(kid(n, 0)):
-        v = fact_capture(c, s)
-        if fact_compare(s, .eq, v, one) == 1: continue
-        if first == 0:
-            first = v
-            continue
-        if fact_compare(s, .eq, v, first) == 1: continue
-        if fact_probe_on: fact_probe_record(n, false)
-        else: wit_unknown(n, fact_bound(s, v), "the operands of this elementwise operation have matching lengths", 0, "")
-        return
-    if fact_probe_on: fact_probe_record(n, true)
 
-# A slice assignment's bounds (fact_string_slice's) and, for an array, its length.
-fact_put_slice_check = (n: int, s: mut FactState, values: int[], length: int, many: bool):
-    inclusive = nodes[kid(n, 4)].ival != 0
-    bounded = nodes[kid(n, 5)].ival != 0
-    lo = values[1]
-    hi = length
-    if bounded:
-        hi = values[3]
-        if inclusive: hi = fact_arithmetic(s, kid(n, 3), .plus, hi, fact_constant(s, 1))
-    zero = fact_constant(s, 0)
-    checks = [fact_compare(s, .le, zero, lo), fact_compare(s, .le, lo, hi), fact_compare(s, .le, hi, length)]
-    bounds = checks[0] == 1 and checks[1] == 1 and checks[2] == 1
-    count = true
-    if bounds and many:
-        size = fact_arithmetic(s, kid(n, 3), .minus, hi, lo)
-        vt = representation_type(ntype(kid(n, 7)))
-        given = if tkind(vt) == .fixed: fact_constant(s, fixed_len(vt)) else: fact_project(s, values[7], -1, false, T_INT)
-        count = fact_compare(s, .eq, given, size) == 1
-        if not count and not fact_probe_on:
-            text = wit_text(kid(n, 7))
-            what = if text != "": "`" + text + "`" else: "array"
-            relation = if text != "": text + ".length =? the slice's length" else: ""
-            wit_unknown(n, fact_bound(s, given), "the assigned {what} has the slice's length", 0, relation)
-            return
-    if fact_probe_on: fact_probe_record(n, bounds and count)
-    else if not bounds: wit_slice_at(n, s, lo, hi, length, checks, kid(n, 0), kid(n, 1), (if bounded: kid(n, 3) else: 0), inclusive)
 
 # `text[a..b)`: 0 <=? a <=? b <=? text.length (an inclusive end counts one
 # more, an open end is the length); the slice's length is their difference.

@@ -1,0 +1,217 @@
+$runtime_checks
+from p"ast.jo" import (kid kids nkids nodes)
+from p"check.jo" import (fns lib_dir)
+from p"expr.jo" import (ntype)
+from p"facts.jo" import (FACT_CAP FACT_ELEMENT_COPY FactProjection FactState fact_add_projection fact_arithmetic fact_bound fact_capture fact_compare fact_constant fact_entails fact_name_bcast fact_name_insert fact_name_permutations fact_name_put_slice fact_name_reads fact_name_reshape fact_name_swap fact_policy fact_probe_on fact_project fact_projection_after fact_projection_find fact_projection_first fact_query fact_receiver_route fact_route_values fact_speculating fact_type)
+from p"facts_maps.dewy" import (fact_keys_copy)
+from p"facts_probes.dewy" import (fact_probe_record)
+from p"nd_contracts.jo" import (fact_nd_call fact_nd_check)
+from p"refine.jo" import (representation_type)
+from p"types.jo" import (T_INT fixed_len tkind)
+from p"util.jo" import (files intern name_of pos_file pos_in_lib)
+from p"witness.jo" import (wit_index wit_slice_at wit_text wit_unknown)
+
+ArrayWord:type=int64<overflow='wrap'>
+fact_single_bcast_call=(n:ArrayWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 1 {return false}
+    let d=ArrayWord(fns.ptr[ArrayWord(nodes.ptr[n].sym)].decl)
+    d not=? 0 and name_of(ArrayWord(nodes.ptr[d].name)) =? "__bcast" and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/nd.jo"
+}
+fact_array_call=(n:ArrayWord):>ArrayWord=>$unsafe {
+    let nd=fact_nd_call(n)
+    if nd =? 6 {return 107}
+    if nd >=? 100 {return nd}
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) <? 1 or nkids(n) >? 8 {return 0}
+    let d=ArrayWord(fns.ptr[ArrayWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return 0}
+    if fact_name_swap =? 0 {
+        fact_name_swap=intern("swap")
+        fact_name_insert=intern("__dewy_insert")
+        fact_name_reshape=intern("reshape")
+        fact_name_put_slice=intern("__dewy_put_slice")
+        fact_name_bcast=intern("__bcast")
+        fact_name_reads=[intern("__dewy_read_u64") intern("__dewy_read_u32") intern("__dewy_read_u16")]
+        fact_name_permutations=[intern("reverse") intern("sort") intern("sort_by") intern("sort_with")]
+    }
+    let name=ArrayWord(nodes.ptr[d].name)
+    let k:ArrayWord=0
+    if nkids(n) =? 1 {k=if name =? fact_name_bcast and nodes.ptr[kid(n 0)].kind =? 'array' {40} else {0}}
+    else if name =? fact_name_reshape and nkids(n) >=? 3 and nkids(n) <=? 5 {k=19 + nkids(n)}
+    else if name =? fact_name_put_slice and nkids(n) =? 8 {k=fact_put_slice_kind(n)}
+    else if nkids(n) =? 3 {k=if name =? fact_name_swap {4} else if name =? fact_name_insert {5} else {0}}
+    else if nkids(n) =? 2 {k=if name =? fact_name_reads[0] {18} else if name =? fact_name_reads[1] {14} else if name =? fact_name_reads[2] {12} else {0}}
+    if k =? 0 and name in? fact_name_permutations and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/array.jo" {k=6}
+    if k =? 0 or not pos_in_lib(nodes.ptr[d].pos) {return 0}
+    let rk=tkind(fact_type(ntype(kid(n 0))))
+    if rk not=? 'array' and not (rk =? 'fixed' and k >=? 30 and k <? 40) {return 0}
+    k
+}
+# (literal flags only: a stepped one keeps its check)
+fact_put_slice_kind=(n:ArrayWord):>ArrayWord=>$unsafe {
+    loop i in [4..7) {
+        if nodes.ptr[kid(n i)].kind not=? 'bool_lit' {return 0}
+    }
+    if nodes.ptr[kid(n 6)].ival not=? 0 {return 0}
+    let vk=tkind(representation_type(ntype(kid(n 7))))
+    if vk =? 'array' or vk =? 'fixed' {31} else {30}
+}
+# A value slice preserves its elements. Only constant offsets need inventory
+# shifting here; a fill's uniform payload works for any offset. O(projections)
+# on a demanded slice, never a scan of unrelated values or program nodes.
+fact_slice_elements=(@s:FactState base:ArrayWord value:ArrayWord lo:ArrayWord hi:ArrayWord):>void=>{
+    if base =? 0 or value =? 0 {return}
+    fact_keys_copy(@s base value)
+    let uniform=fact_projection_find(s base FACT_ELEMENT_COPY false)
+    if uniform >=? 0 and s.projections.length <? FACT_CAP {
+        fact_add_projection(@s FactProjection(value FACT_ELEMENT_COPY false s.projections[uniform].value))
+        return
+    }
+    let lower=fact_bound(s lo)
+    let upper=fact_bound(s hi)
+    if lower.wide or lower.lo not=? lower.hi or lower.lo <? 0 {return}
+    let parts:array<FactProjection>=[]
+    let pi=fact_projection_first(s base)
+    loop pi >=? 0 {
+        let p=s.projections[pi]
+        pi=fact_projection_after(s pi)
+        if p.element {parts.push(p)}
+    }
+    loop p in parts {
+        let index=fact_bound(s p.selector)
+        if index.wide or index.lo not=? index.hi or index.lo <? lower.lo or index.hi >=? upper.lo {continue}
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value fact_constant(@s ArrayWord(index.lo) - ArrayWord(lower.lo)) true p.value))}
+    }
+}
+fact_array_call_check=(n:ArrayWord @s:FactState values:array<int64> kind:ArrayWord):>void=>{
+    if fact_speculating not=? 0 or not (fact_policy =? 'RequireStatic' or fact_query) {return}
+    if kind >=? 100 {
+        fact_nd_check(n @s values kind)
+        return
+    }
+    # (the receiver is a place, as a builtin operation's is)
+    let route=fact_receiver_route(n @s)
+    let held=fact_route_values(@s route)
+    let base=if held.length >? 0 {held[held.length - 1]} else {values[0]}
+    let length=fact_project(@s base (-1) false T_INT)
+    let zero=fact_constant(@s 0)
+    if kind =? 6 {return}
+    if kind =? 40 {
+        fact_bcast_check(n @s)
+        return
+    }
+    if kind >=? 30 {
+        # (a fixed array's length is its type's)
+        let t=representation_type(ntype(kid(n 0)))
+        if tkind(t) =? 'fixed' {length=fact_constant(@s fixed_len(t))}
+        fact_put_slice_check(n @s values length kind =? 31)
+        return
+    }
+    if kind >? 20 {
+        fact_reshape_check(n @s values length)
+        return
+    }
+    if kind >? 10 {
+        # (i + width <=? length: i - length <=? -width)
+        let width=kind - 10
+        let index=values[1]
+        let lo=fact_compare(s 'le' zero index)
+        let hi=fact_entails(s index length (-width))
+        if fact_probe_on {fact_probe_record(n lo =? 1 and hi)}
+        else if lo not=? 1 or not hi {
+            let i=wit_text(kid(n 1))
+            let upper="{i} + {width} <=? {wit_text(kid(n 0))}.length"
+            let relation=if lo =? 1 {upper} else if hi {"0 <=? {i}"} else {"0 <=? {i} and {upper}"}
+            let missing=if lo =? 1 {"upper bound"} else if hi {"lower bound"} else {"lower and upper bounds"}
+            wit_unknown(n fact_bound(s index) "read<uint{width * 8}> is in bounds" 0 relation missing)
+        }
+        return
+    }
+    let positions=if kind =? 4 {[1 2]} else {[2]}
+    loop i in positions {
+        let index=values[i]
+        let lo=fact_compare(s 'le' zero index)
+        let hi=if kind =? 4 {fact_compare(s 'lt' index length)} else {fact_compare(s 'le' index length)}
+        if fact_probe_on {
+            fact_probe_record(n lo =? 1 and hi =? 1)
+            continue
+        }
+        if lo =? 1 and hi =? 1 {continue}
+        # (an insertion position may be the length itself: one past the last index)
+        wit_index(n @s index length lo hi kid(n 0) kid(n i) kind =? 5)
+        return
+    }
+}
+# reshape's dimensions: each >= 0, their product the length (a product the
+# facts model: all but one dimension constant). O(dimensions).
+fact_reshape_check=(n:ArrayWord @s:FactState values:array<int64> length:ArrayWord):>void=>{
+    let zero=fact_constant(@s 0)
+    let product=values[1]
+    loop i in [1..values.length) {
+        if fact_compare(s 'ge' values[i] zero) not=? 1 {
+            if fact_probe_on {fact_probe_record(n false)}
+            else {wit_unknown(n fact_bound(s values[i]) "reshape's dimension `{wit_text(kid(n i))}` is >= 0" 0 "{wit_text(kid(n i))} >=? 0")}
+            return
+        }
+        if i >? 1 {product=fact_arithmetic(@s kid(n i) 'star' product values[i])}
+    }
+    let proven=fact_compare(s 'eq' length product) =? 1
+    if fact_probe_on {fact_probe_record(n proven)}
+    else if not proven {
+        let dims:array<string>=[]
+        loop i in [1..values.length) {dims.push(wit_text(kid(n i)))}
+        let receiver=wit_text(kid(n 0))
+        let product_text=dims.join("*")
+        let relation=if receiver not=? "" {"{receiver}.length =? {product_text}"} else {""}
+        let whose=if receiver not=? "" {"`{receiver}`'s"} else {"the"}
+        wit_unknown(n fact_bound(s product) "reshape's dimensions multiply to {whose} element count" 0 relation)
+    }
+}
+# The lengths of a dotted expression's 1-D operands (an array of them, the
+# compiler's): each 1 (stretched) or the same as the others. O(operands).
+fact_bcast_check=(n:ArrayWord @s:FactState):>void=>{
+    let one=fact_constant(@s 1)
+    let first:ArrayWord=0
+    loop c in kids(kid(n 0)) {
+        let v=fact_capture(c @s)
+        if fact_compare(s 'eq' v one) =? 1 {continue}
+        if first =? 0 {
+            first=v
+            continue
+        }
+        if fact_compare(s 'eq' v first) =? 1 {continue}
+        if fact_probe_on {fact_probe_record(n false)}
+        else {wit_unknown(n fact_bound(s v) "the operands of this elementwise operation have matching lengths" 0 "")}
+        return
+    }
+    if fact_probe_on {fact_probe_record(n true)}
+}
+# A slice assignment's bounds (fact_string_slice's) and, for an array, its length.
+fact_put_slice_check=(n:ArrayWord @s:FactState values:array<int64> length:ArrayWord many:bool):>void=>$unsafe {
+    let inclusive=nodes.ptr[kid(n 4)].ival not=? 0
+    let bounded=nodes.ptr[kid(n 5)].ival not=? 0
+    let lo=values[1]
+    let hi=length
+    if bounded {
+        hi=values[3]
+        if inclusive {hi=fact_arithmetic(@s kid(n 3) 'plus' hi fact_constant(@s 1))}
+    }
+    let zero=fact_constant(@s 0)
+    let checks=[fact_compare(s 'le' zero lo) fact_compare(s 'le' lo hi) fact_compare(s 'le' hi length)]
+    let bounds=checks[0] =? 1 and checks[1] =? 1 and checks[2] =? 1
+    let count=true
+    if bounds and many {
+        let size=fact_arithmetic(@s kid(n 3) 'minus' hi lo)
+        let vt=representation_type(ntype(kid(n 7)))
+        let given=if tkind(vt) =? 'fixed' {fact_constant(@s fixed_len(vt))} else {fact_project(@s values[7] (-1) false T_INT)}
+        count=fact_compare(s 'eq' given size) =? 1
+        if not count and not fact_probe_on {
+            let text=wit_text(kid(n 7))
+            let what=if text not=? "" {"`{text}`"} else {"array"}
+            let relation=if text not=? "" {"{text}.length =? the slice's length"} else {""}
+            wit_unknown(n fact_bound(s given) "the assigned {what} has the slice's length" 0 relation)
+            return
+        }
+    }
+    if fact_probe_on {fact_probe_record(n bounds and count)}
+    else if not bounds {wit_slice_at(n @s lo hi length checks kid(n 0) kid(n 1) (if bounded {kid(n 3)} else {0}) inclusive)}
+}
