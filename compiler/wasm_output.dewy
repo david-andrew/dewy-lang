@@ -1,0 +1,70 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (read_file write_file)
+from p"@lib/core/str.jo" import ends_with
+from p"ast.jo" import (NF_EXTERN has_flag nodes)
+from p"types.jo" import (prune tkind types)
+from p"check.jo" import (fns lib_dir program_js)
+from p"ir.jo" import (ir ir_positions main_code main_exit_lf)
+from p"lower.jo" import (LK_INST data_size lfuncs mt_active_off rodata)
+from p"util.jo" import (ice name_of pos_in_lib)
+from p"zip.dewy" import write_zip
+from p"wasm_module.dewy" import (WasmABI html_image html_missing wasm_collect_function wasm_image wf_present wfuncs wm_abi wm_error wm_error_lf)
+from p"wasm_emit.dewy" import (WT_F32 WT_F64 WT_I32 WT_I64 wasm_user_pos)
+
+WasmWord:type=int64<overflow='wrap'>
+import_wt=(t0:WasmWord):>WasmWord=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    if k =? 'float_' {
+        if WasmWord(types.ptr[t].bits) =? 32 {return WT_F32}
+        return WT_F64
+    }
+    if k =? 'int_' and WasmWord(types.ptr[t].bits) =? 64 {return WT_I64}
+    WT_I32
+}
+is_import=(lf:WasmWord):>bool=>$unsafe {
+    let l=lfuncs.ptr[lf]
+    l.kind =? LK_INST and fns.ptr[l.inst].decl not=? 0 and has_flag(WasmWord(fns.ptr[l.inst].decl) NF_EXTERN)
+}
+# Checker ABI facts are demanded once for imports and exported adapters.
+# The Dewy owner controls module emission, source tables and HTML assembly.
+wm_read_js=(part:string):>string=>read_file("{lib_dir}/web/{part}") ?? ""
+wasm_collect=():>void=>{wasm_collect_function(ir)}
+wasm_module=(inits:array<int64> main_lf:WasmWord frame_lf:WasmWord):>array<uint8>=>$unsafe {
+    let nf=lfuncs.length
+    wm_abi=fill(WasmABI() nf)
+    loop lf in [0..nf) {
+        let imp=is_import(lf)
+        let exported=lf <? wf_present.length and wf_present.ptr[lf] and wfuncs.ptr[lf].export_name not=? ""
+        if not imp and not exported {continue}
+        let inst=lfuncs.ptr[lf].inst
+        let abi=WasmABI(imported=imp)
+        if imp {abi.name=name_of(WasmWord(nodes.ptr[WasmWord(fns.ptr[inst].decl)].name))}
+        loop t in fns.ptr[inst].ptypes {
+            abi.params.push(import_wt(t))
+            let tt=prune(t)
+            abi.signed.push(types.ptr[tt].kind =? 'int_' and types.ptr[tt].sign)
+        }
+        let rt=WasmWord(fns.ptr[inst].ret)
+        if tkind(rt) not=? 'void_' {abi.ret=import_wt(rt)}
+        wm_abi.ptr[lf]=abi
+    }
+    wasm_user_pos=fill(false ir_positions.length)
+    loop p in [1..ir_positions.length) {wasm_user_pos.ptr[p]=not pos_in_lib(ir_positions.ptr[p])}
+    let image=wasm_image(inits main_lf main_code main_exit_lf rodata data_size mt_active_off)
+    if wm_error =? 1 {ice("native-only instructions in wasm code")}
+    if wm_error =? 2 {ice("native overflow predicate reached wasm lowering")}
+    if wm_error =? 3 {ice("function {lfuncs.ptr[wm_error_lf].name} used as a value but not generated")}
+    image
+}
+html_page=(wasm:array<uint8> title:string icon:array<uint8>):>string=>{
+    let page=html_image(wasm title icon program_js)
+    if html_missing not=? "" {ice("missing {lib_dir}/web/{html_missing}")}
+    page
+}
+write_html=(path:string wasm:array<uint8> title:string icon:array<uint8>):>bool=>{
+    let page=html_page(wasm title icon)
+    # (game.zip: the page as index.html in a zip, for sites like itch.io)
+    if ends_with(path ".zip") {return write_zip(path ["index.html"] [page as array<uint8>])}
+    write_file(path page)
+}

@@ -16,60 +16,8 @@ use 'lower.jo'
 use 'x64.jo'
 
 use 'wasm_module.dewy'
+use 'wasm_output.dewy'
 use 'ir_builders.dewy'
 
-import_wt = (t0: int) -> int:
-    t = prune(t0)
-    k = types[t].kind
-    if k == .float_:
-        if int(types[t].bits) == 32: return WT_F32
-        return WT_F64
-    if k == .int_ and int(types[t].bits) == 64: return WT_I64
-    WT_I32
-
-is_import = (lf: int) -> bool:
-    l = lfuncs[lf]
-    l.kind == LK_INST and fns[l.inst].decl != 0 and has_flag(int(fns[l.inst].decl), NF_EXTERN)
-
-# Checker ABI facts are demanded once for imports and exported adapters.
-# The Dewy owner controls module emission, source tables and HTML assembly.
-wm_read_js = (part: str) -> str: read_file("{lib_dir}/web/{part}") ?? ""
 wm_services = WasmModuleHost(&files, &ir_positions, ir_line, sym_name, wm_read_js)
 wm_binding = wm_bind(&wm_services)
-
-wasm_collect = (): wasm_collect_function(ir)
-
-wasm_module = (inits: int[], main_lf: int, frame_lf: int) -> u8[]:
-    nf = lfuncs.len()
-    wm_abi = fill(WasmABI(), nf)
-    loop lf in [0..nf):
-        imp = is_import(lf)
-        exported = lf < wf_present.len() and wf_present[lf] and len(wfuncs[lf].export_name) > 0
-        if not imp and not exported: continue
-        inst = lfuncs[lf].inst
-        abi = WasmABI(imported=imp)
-        if imp: abi.name = name_of(int(nodes[int(fns[inst].decl)].name))
-        loop t in fns[inst].ptypes:
-            abi.params.push(import_wt(t))
-            tt = prune(t)
-            abi.signed.push(types[tt].kind == .int_ and types[tt].sign)
-        rt = int(fns[inst].ret)
-        if tkind(rt) != .void_: abi.ret = import_wt(rt)
-        wm_abi[lf] = abi
-    wasm_user_pos = fill(false, ir_positions.len())
-    loop p in [1..ir_positions.len()): wasm_user_pos[p] = not pos_in_lib(ir_positions[p])
-    image = wasm_image(inits, main_lf, main_code, main_exit_lf, rodata, data_size, mt_active_off)
-    if wm_error == 1: ice("native-only instructions in wasm code")
-    if wm_error == 2: ice("native overflow predicate reached wasm lowering")
-    if wm_error == 3: ice("function {lfuncs[wm_error_lf].name} used as a value but not generated")
-    image
-
-html_page = (wasm: u8[], title: str, icon: u8[]) -> str:
-    page = html_image(wasm, title, icon, program_js)
-    if len(html_missing) > 0: ice("missing {lib_dir}/web/{html_missing}")
-    page
-write_html = (path: str, wasm: u8[], title: str, icon: u8[]) -> bool:
-    page = html_page(wasm, title, icon)
-    # (game.zip: the page as index.html in a zip, for sites like itch.io)
-    if ends_with(path, ".zip"): return write_zip(path, ["index.html"], [bytes(page)])
-    write_file(path, page)

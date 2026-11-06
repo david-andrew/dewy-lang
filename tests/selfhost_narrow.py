@@ -5,11 +5,19 @@ from tests.support import ROOT
 
 
 def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run_in=None, observe=None,
-                   invocations=(((), 0),)):
+                   invocations=(((), 0),), services=()):
     """The stdout of each invocation, compared across both builds. stems: real twinned modules;
     doubles: {file: text}, Jo modules both builds use, or a `.dewy`/`.jo` pair; invocations:
     (arguments, status) runs, each in run_in()'s working directory; observe(directory): what else
-    those runs must agree on. A single invocation's stdout comes back alone."""
+    those runs must agree on; services: compiler modules (by stem) whose imports all lead to the Jo
+    double `services.jo`. A single invocation's stdout comes back alone."""
+    def redirect(text):
+        for stem in services:
+            for quote in ('"', "'"):
+                for extension in ('dewy', 'jo'):
+                    text = text.replace(f'{quote}{stem}.{extension}{quote}', f'{quote}services.jo{quote}')
+        return text
+
     outputs = []
     for extension in ('dewy', 'jo'):
         directory = tmp_path / extension
@@ -18,10 +26,13 @@ def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run
             (directory / name).write_text(text.replace(".dewy'", ".jo'") if extension == 'jo' else text)
         for stem in stems:
             text = (ROOT / f'compiler/{stem}.{extension}').read_text()
+            text = redirect(text)
             (directory / f'{stem}.{extension}').write_text(text.replace(".dewy'", ".jo'") if extension == 'jo' else text)
         source, binary = directory / 'driver.jo', directory / 'driver'
-        body = driver.replace(".dewy'", ".jo'") if extension == 'jo' else driver
-        source.write_text(''.join(f"use '{stem}.{extension}'\n" for stem in stems) + body)
+        body = redirect(driver)
+        body = body.replace(".dewy'", ".jo'") if extension == 'jo' else body
+        uses = ("use 'services.jo'\n" if services else '') + ''.join(f"use '{stem}.{extension}'\n" for stem in stems)
+        source.write_text(uses + body)
         built = subprocess.run([compiler, 'build', source, '-o', binary, *(['--release'] if release else [])],
                                capture_output=True, text=True, timeout=90)
         assert built.returncode == 0, built.stdout + built.stderr
