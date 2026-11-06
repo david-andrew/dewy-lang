@@ -1,0 +1,293 @@
+$runtime_checks
+from p"ast.jo" import (kid nodes)
+from p"checker_tokens.dewy" import (Tok)
+from p"expr.jo" import (bc_int is_dewy_range_type ntype)
+from p"facts.jo" import (FACT_CAP FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FactProjection FactState fact_add_projection fact_arithmetic fact_bound fact_compare fact_constant fact_constructor_actuals fact_fresh fact_host_endpoint fact_inventory fact_new fact_project fact_projection_find fact_terms)
+from p"nd_contracts.jo" import (fact_nd_call fact_nd_data_length fact_nd_dim fact_nd_make fact_nd_need fact_nd_shape fact_nd_store fact_nd_valid)
+from p"refine.jo" import (representation_type)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
+from p"types.jo" import (T_INT is_int telem tkind)
+from p"witness.jo" import (wit_text)
+
+SliceWord:type=int64<overflow='wrap'>
+FactNDAxis:type=[first:int64=0 stop:int64=0 keep:bool=true known:bool=false count:int64=0 picks:int64=0]
+# Keep captured endpoints reachable through the normal sparse projection
+# graph, including across the generated selection block's scope collection.
+# A changed struct has no constructor origin, so copied metadata grants no fact.
+fact_nd_remember=(n:SliceWord @s:FactState values:array<int64> t:SliceWord):>SliceWord=>{
+    let result=fact_new(@s FactBound() FactTerm(type=t origin=n))
+    fact_constructor_actuals[result]=values
+    loop i in [0..values.length) {
+        if values[i] not=? 0 and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result (-2147483600 + i) false values[i]))}
+    }
+    result
+}
+fact_nd_axis=(n:SliceWord @s:FactState value:SliceWord extent:SliceWord):>FactNDAxis=>$unsafe {
+    if value =? 0 {return FactNDAxis(fact_constant(@s 0) extent true true)}
+    let origin=fact_terms[value].origin
+    if origin =? 0 or nodes.ptr[origin].kind not=? 'call' {return FactNDAxis()}
+    let kind=fact_nd_call(origin)
+    let actuals=fact_constructor_actuals.get(value) ?? []
+    if kind =? 14 and actuals.length =? 7 {
+        let rest=actuals[1..7)
+        rest.push(fact_constant(@s 0))
+        return fact_nd_range(n @s rest actuals[0] 11)
+    }
+    if kind =? 154 and actuals.length =? 5 {
+        let keep=fact_bound(s actuals[2])
+        if keep.lo not=? keep.hi {return FactNDAxis()}
+        return FactNDAxis(actuals[0] actuals[1] keep.lo not=? 0 true actuals[3] actuals[4])
+    }
+    if (kind =? 12 or kind =? 155) and actuals.length =? 1 {
+        let t=representation_type(ntype(kid(origin 0)))
+        if is_int(t) {return FactNDAxis(actuals[0] 0 false true)}
+        if is_dewy_range_type(t "IntRange") {return fact_nd_axis(n @s actuals[0] extent)}
+        if tkind(t) =? 'array' {return FactNDAxis(known=true picks=actuals[0])}
+        return FactNDAxis()
+    }
+    if kind not=? 11 and kind not=? 13 {return FactNDAxis()}
+    fact_nd_range(n @s actuals extent kind)
+}
+fact_nd_range=(n:SliceWord @s:FactState actuals:array<int64> extent:SliceWord kind:SliceWord):>FactNDAxis=>$unsafe {
+    if actuals.length not=? (if kind =? 11 {7} else {5}) {return FactNDAxis()}
+    let stepped=fact_bound(s actuals[if kind =? 11 {5} else {3}])
+    if stepped.wide or stepped.lo not=? stepped.hi {return FactNDAxis()}
+    if stepped.lo not=? 0 {return fact_nd_stepped(n @s actuals extent kind)}
+    if kind =? 11 {
+        let exclusive=fact_bound(s actuals[6])
+        if exclusive.wide or exclusive.lo not=? 0 or exclusive.hi not=? 0 {return FactNDAxis()}
+    }
+    let bounded=if kind =? 13 {FactBound(1 1)} else {fact_bound(s actuals[4])}
+    if bounded.wide or bounded.lo not=? bounded.hi {return FactNDAxis()}
+    let stop=extent
+    if bounded.lo not=? 0 {
+        let inclusive=fact_bound(s actuals[if kind =? 11 {3} else {4}])
+        if inclusive.wide or inclusive.lo not=? inclusive.hi {return FactNDAxis()}
+        stop=actuals[2]
+        if inclusive.lo not=? 0 {
+            let origin=bc_int(0 nodes.ptr[n].pos)
+            nodes.ptr[origin].type=int32(T_INT)
+            stop=fact_arithmetic(@s origin 'plus' stop fact_constant(@s 1))
+        }
+    }
+    FactNDAxis(actuals[0] stop true true)
+}
+# Constant stepped selectors use unsigned distances, just like IntRange.
+# Every signed endpoint pair fits that span, including a stride above 2^63.
+# Convert only visited endpoints back to signed words; decline counts > INT64_MAX.
+# O(1), requested only at a selection.
+fact_nd_stepped=(n:SliceWord @s:FactState actuals:array<int64> extent:SliceWord kind:SliceWord):>FactNDAxis=>{
+    let first=fact_bound(s actuals[0])
+    let second=fact_bound(s actuals[1])
+    let inclusive=fact_bound(s actuals[if kind =? 11 {3} else {4}])
+    let bounded=if kind =? 11 {fact_bound(s actuals[4])} else {FactBound(1 1)}
+    let tail=if kind =? 11 {fact_bound(s actuals[6])} else {FactBound(0 0)}
+    if inclusive.wide or inclusive.lo not=? inclusive.hi or bounded.wide or bounded.lo not=? bounded.hi or tail.wide or tail.lo not=? tail.hi {return FactNDAxis()}
+    if first.wide or first.lo not=? first.hi or second.wide or second.lo not=? second.hi {return fact_nd_symbolic_step(n @s actuals extent kind)}
+    if first.lo =? second.lo {return FactNDAxis()}
+    let up=second.lo >? first.lo
+    let stride=if up {uint64<overflow='wrap'>(second.lo) - uint64<overflow='wrap'>(first.lo)} else {uint64<overflow='wrap'>(first.lo) - uint64<overflow='wrap'>(second.lo)}
+    let last=fact_bound(s actuals[2])
+    if bounded.lo =? 0 {
+        if not up {last=FactBound(0 0)}
+        else {
+            last=fact_bound(s extent)
+            if last.wide or last.lo not=? last.hi {return fact_nd_symbolic_step(n @s actuals extent kind)}
+            if last.lo =? FACT_MIN {return FactNDAxis()}
+            last=FactBound(last.lo - 1 last.lo - 1)
+        }
+        inclusive=FactBound(1 1)
+    }
+    if last.wide or last.lo not=? last.hi {return fact_nd_symbolic_step(n @s actuals extent kind)}
+    let count=0
+    let start=first.lo
+    let end_=start
+    let empty=if up {start >? last.lo} else {start <? last.lo}
+    if start =? last.lo and inclusive.lo =? 0 {empty=true}
+    if not empty {
+        let distance=if up {uint64<overflow='wrap'>(last.lo) - uint64<overflow='wrap'>(start)} else {uint64<overflow='wrap'>(start) - uint64<overflow='wrap'>(last.lo)}
+        if inclusive.lo =? 0 {distance -= 1}
+        let quotient=distance // stride
+        if quotient >=? uint64<overflow='wrap'>(FACT_MAX) {return FactNDAxis()}
+        count=SliceWord(quotient) + 1
+        end_=SliceWord(if up {uint64<overflow='wrap'>(start) + quotient * stride} else {uint64<overflow='wrap'>(start) - quotient * stride})
+        if tail.lo not=? 0 {
+            count -= 1
+            if count >? 0 {start=SliceWord(if up {uint64<overflow='wrap'>(start) + stride} else {uint64<overflow='wrap'>(start) - stride})}
+        }
+    }
+    FactNDAxis(fact_constant(@s min(start end_)) fact_constant(@s max(start end_)) true true fact_constant(@s count))
+}
+# A symbolic monotone selector visits a subset of its endpoint interval.
+# Keep that conservative hull and an unknown count; no divisibility or exact
+# replacement-count claim. Value comparisons use the existing indexed facts.
+fact_nd_symbolic_step=(n:SliceWord @s:FactState actuals:array<int64> extent:SliceWord kind:SliceWord):>FactNDAxis=>$unsafe {
+    let first=actuals[0]
+    let second=actuals[1]
+    let up=fact_compare(s 'lt' first second) =? 1
+    let down=fact_compare(s 'gt' first second) =? 1
+    if not up and not down {return FactNDAxis()}
+    let inclusive=fact_bound(s actuals[if kind =? 11 {3} else {4}])
+    let bounded=if kind =? 11 {fact_bound(s actuals[4])} else {FactBound(1 1)}
+    let last=actuals[2]
+    if bounded.lo =? 0 {
+        last=if up {extent} else {fact_constant(@s 0)}
+        inclusive=if up {FactBound(0 0)} else {FactBound(1 1)}
+    }
+    let empty=fact_compare(s (if up {(if inclusive.lo not=? 0 {Tok.gt} else {Tok.ge})} else {(if inclusive.lo not=? 0 {Tok.lt} else {Tok.le})}) first last) =? 1
+    if empty {return FactNDAxis(first first true true fact_constant(@s 0))}
+    if inclusive.lo =? 0 {
+        let origin=bc_int(0 nodes.ptr[n].pos)
+        nodes.ptr[origin].type=int32(T_INT)
+        last=fact_arithmetic(@s origin 'plus' last fact_constant(@s if up {-1} else {1}))
+    }
+    let low=if up {first} else {last}
+    let high=if up {last} else {first}
+    let count=fact_new(@s FactBound(0 FACT_MAX) FactTerm(type=T_INT))
+    FactNDAxis(low high true true count)
+}
+# An inventory lists every selected index. A published element hull or fill
+# value instead represents every element, including comprehensions of unknown
+# length. All three certificates belong to the immutable array identity.
+fact_selector_entries=(s:FactState picks:SliceWord size:SliceWord):>[array<int64> bool]=>{
+    let entries=fact_inventory(s picks)
+    let length=fact_bound(s size)
+    if not length.wide and length.lo =? length.hi and length.lo =? entries.length {return [entries true]}
+    let uniform=fact_projection_find(s picks FACT_ELEMENT_COPY false)
+    if uniform >=? 0 {return [[s.projections[uniform].value] true]}
+    let hull=fact_projection_find(s picks FACT_ELEMENT_VALUE false)
+    if hull >=? 0 {return [[s.projections[hull].value] true]}
+    [entries false]
+}
+fact_nd_slice=(n:SliceWord @s:FactState values:array<int64> kind:SliceWord):>SliceWord=>$unsafe {
+    let bound=kind =? 154
+    let shape=if bound {values[0]} else {fact_nd_shape(@s values[0])}
+    let text=wit_text(kid(n 0))
+    if text =? "" {text="the sliced array"}
+    let shape_text=if bound {text} else {"{text}.length"}
+    let rank=fact_bound(s fact_project(@s shape (-1) false T_INT))
+    let spec=values[1]
+    let count=fact_bound(s fact_project(@s spec (-1) false T_INT))
+    let storage=false
+    if not bound {
+        storage=fact_nd_need(n @s 'eq' fact_nd_valid(@s values[0]) fact_constant(@s 1) "{text}.data.length matches its shape")
+    }
+    if rank.wide or rank.lo not=? rank.hi or rank.lo <? 0 or rank.hi >? 32 or count.wide or count.lo not=? count.hi or count.lo <? 0 or count.lo >? rank.lo {
+        fact_nd_need(n @s 'eq' fact_fresh(@s T_INT) fact_constant(@s 1) "slice selectors fit {text}'s rank and axis bounds");
+        if kind >=? 151 and kind <=? 153 {fact_nd_store(n @s n 'write')}
+        return fact_fresh(@s ntype(n))
+    }
+    let dims:array<int64>=[]
+    let selected:array<int64>=[]
+    let axes:array<int64>=[]
+    let complete=true
+    let axis_type=telem(representation_type(ntype(kid(n 1))))
+    loop axis in [0..rank.lo) {
+        let index=fact_constant(@s axis)
+        let extent=if bound {fact_project(@s shape index true T_INT)} else {fact_nd_dim(@s values[0] ntype(kid(n 0)) index)}
+        let selector=if axis <? count.lo {fact_project(@s spec index true axis_type)} else {0}
+        let part=fact_nd_axis(n @s selector extent)
+        if not part.known {
+            fact_nd_need(n @s 'eq' fact_fresh(@s T_INT) fact_constant(@s 1) "slice axis {axis} selects only positions in {shape_text}[{axis}]");
+            complete=false
+            continue
+        }
+        let zero=fact_constant(@s 0)
+        let size=fact_constant(@s 1)
+        if part.picks not=? 0 {
+            size=fact_project(@s part.picks (-1) false T_INT)
+            let [entries complete_picks]=fact_selector_entries(s part.picks size)
+            if not complete_picks {
+                fact_nd_need(n @s 'eq' fact_fresh(@s T_INT) fact_constant(@s 1) "slice axis {axis} index array contains only positions in {shape_text}[{axis}]");
+                complete=false
+                continue
+            }
+            loop entry in entries {
+                fact_nd_need(n @s 'le' zero entry "slice axis {axis} index is nonnegative");
+                fact_nd_need(n @s 'lt' entry extent "slice axis {axis} index is below {shape_text}[{axis}]");
+            }
+            dims.push(size)
+        }
+        else if part.count not=? 0 {
+            size=part.count
+            if fact_compare(s 'eq' size zero) not=? 1 {
+                fact_nd_need(n @s 'le' zero part.first "slice axis {axis} start is nonnegative");
+                fact_nd_need(n @s 'lt' part.stop extent "slice axis {axis} last selected index is below {shape_text}[{axis}]");
+            }
+            dims.push(size)
+        }
+        else if not part.keep {
+            fact_nd_need(n @s 'le' zero part.first "slice axis {axis} index is nonnegative");
+            fact_nd_need(n @s 'lt' part.first extent "slice axis {axis} index is below {shape_text}[{axis}]");
+        }
+        else {
+            # Empty ascending selections visit no positions, even when the
+            # written endpoints lie beyond the source. Otherwise prove the
+            # conventional half-open bounds before publishing a result size.
+            let empty=fact_compare(s 'ge' part.first part.stop) =? 1
+            if empty {size=zero}
+            else {
+                fact_nd_need(n @s 'le' zero part.first "slice axis {axis} start is nonnegative");
+                fact_nd_need(n @s 'le' part.first part.stop "slice axis {axis} start is at most its end");
+                fact_nd_need(n @s 'le' part.stop extent "slice axis {axis} end is at most {shape_text}[{axis}]");
+                let origin=bc_int(0 nodes.ptr[n].pos)
+                nodes.ptr[origin].type=int32(T_INT)
+                size=fact_arithmetic(@s origin 'minus' part.stop part.first)
+                let span=fact_bound(s size)
+                if span.wide or span.lo <? 0 {
+                    # An axis is not an allocated array length: with a zero
+                    # peer, it can exceed fact_length_max. On a valid source's
+                    # normal edge the selected range count still fits int64.
+                    size=fact_new(@s FactBound(0 (if span.wide {FACT_MAX} else {max(0 span.hi)})) FactTerm(type=T_INT))
+                }
+            }
+            dims.push(size)
+        }
+        selected.push(size)
+        if bound {
+            let value=fact_nd_remember(n @s [part.first part.stop fact_constant(@s (if part.keep {1} else {0})) part.count part.picks] axis_type)
+            axes.push(value)
+        }
+    }
+    if not complete {
+        if kind >=? 151 and kind <=? 153 {fact_nd_store(n @s n 'write')}
+        return fact_fresh(@s ntype(n))
+    }
+    if kind =? 152 or kind =? 153 {
+        let length=if kind =? 153 {fact_nd_data_length(@s values[2])} else {fact_project(@s values[2] (-1) false T_INT)}
+        let total=fact_constant(@s 1)
+        let origin=bc_int(0 nodes.ptr[n].pos)
+        nodes.ptr[origin].type=int32(T_INT)
+        loop size in selected {total=fact_arithmetic(@s origin 'star' total size)}
+        fact_nd_need(n @s 'eq' length total "assigned data length equals the slice's selected element count");
+    }
+    if kind >=? 151 and kind <=? 153 {
+        fact_nd_store(n @s n 'write')
+        return fact_fresh(@s ntype(n))
+    }
+    if bound {
+        let result=fact_fresh(@s ntype(n))
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result (-1) false fact_constant(@s axes.length)))}
+        loop axis in [0..axes.length) {
+            if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result fact_constant(@s axis) true axes[axis]))}
+        }
+        return result
+    }
+    if rank.lo =? 0 or not storage {return fact_fresh(@s ntype(n))}
+    fact_nd_make(n @s dims)
+}
+# The semantic-int overload copies the same coordinates into signed words.
+# Prove every narrowing using the snapshot's bounded inventory or hull.
+# O(demanded projections + <=64 entries), only for this overload's calls.
+fact_nd_integer_picks=(n:SliceWord @s:FactState picks:SliceWord):>void=>{
+    let size=fact_project(@s picks (-1) false T_INT)
+    let [entries complete]=fact_selector_entries(s picks size)
+    if not complete {
+        fact_nd_need(n @s 'eq' fact_fresh(@s T_INT) fact_constant(@s 1) "index array elements fit int64");
+        return
+    }
+    loop entry in entries {
+        fact_nd_need(n @s (if fact_host_endpoint(s entry false) {Tok.le} else {Tok.lt}) fact_constant(@s FACT_MIN) entry "selected index fits int64's lower bound");
+        fact_nd_need(n @s (if fact_host_endpoint(s entry true) {Tok.le} else {Tok.lt}) entry fact_constant(@s FACT_MAX) "selected index fits int64's upper bound");
+    }
+}
