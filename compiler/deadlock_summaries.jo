@@ -1,0 +1,31 @@
+use 'deadlock.jo'
+use 'deadlock_locations.dewy'
+
+dl_add_acq = (a: DlAcq):
+    mode = if a.wait: "w" else: "h"
+    key = dl_key(a.loc) + mode
+    if dl_cur.acq_keys.has(key): return
+    dl_cur.acq_keys[key] = true
+    dl_cur.acqs.push(a)
+    dl_changed = true
+
+dl_add_edge = (e: DlEdge):
+    if dl_symbolic(e.held) or dl_symbolic(e.taken):
+        key = "{dl_key(e.held)}>{dl_key(e.taken)}"
+        if dl_cur.edge_keys.has(key): return
+        dl_cur.edge_keys[key] = true
+        dl_cur.edges.push(e)
+        dl_changed = true
+        return
+    if not dl_report or e.held.root == 0 or e.taken.root == 0: return
+    key = "{dl_key(e.held)}>{dl_key(e.taken)}"
+    if dl_global_keys.has(key): return
+    dl_global_keys[key] = true
+    dl_global_edges.push(e)
+
+dl_summary = (f: int) -> DlSummary:
+    if let s = dl_summaries.get(f): return s
+    DlSummary([], {}, [], {}, [], {})
+
+dl_drop = (held: mut DlHeld[], mark: int):
+    loop held.len() > mark: held.pop()

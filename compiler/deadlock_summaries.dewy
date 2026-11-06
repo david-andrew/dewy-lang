@@ -1,0 +1,37 @@
+$runtime_checks
+from p"deadlock.jo" import (DlAcq DlEdge DlSummary DlHeld dl_cur dl_changed dl_report dl_global_keys dl_global_edges dl_summaries)
+from p"deadlock_locations.dewy" import (dl_key dl_symbolic)
+
+# Summary updates retain the first site for each location/mode or ordered pair.
+SummaryWord:type=int64<overflow='wrap'>
+dl_add_acq=(a:DlAcq):>void=>{
+    let mode=if a.wait {"w"} else {"h"}
+    let key="{dl_key(a.loc)}{mode}"
+    if dl_cur.acq_keys.has(key) {return}
+    dl_cur.acq_keys[key]=true
+    dl_cur.acqs.push(a)
+    dl_changed=true
+}
+dl_add_edge=(e:DlEdge):>void=>{
+    if dl_symbolic(e.held) or dl_symbolic(e.taken) {
+        let key="{dl_key(e.held)}>{dl_key(e.taken)}"
+        if dl_cur.edge_keys.has(key) {return}
+        dl_cur.edge_keys[key]=true
+        dl_cur.edges.push(e)
+        dl_changed=true
+        return
+    }
+    if not dl_report or e.held.root =? 0 or e.taken.root =? 0 {return}
+    let key="{dl_key(e.held)}>{dl_key(e.taken)}"
+    if dl_global_keys.has(key) {return}
+    dl_global_keys[key]=true
+    dl_global_edges.push(e)
+}
+dl_summary=(f:SummaryWord):>DlSummary=>{
+    let s=dl_summaries.get(f)
+    if s not=? none {return s}
+    DlSummary([] [] [] [] [] [])
+}
+dl_drop=(@held:array<DlHeld> mark:SummaryWord):>void=>{
+    loop held.length >? mark {held.pop();}
+}

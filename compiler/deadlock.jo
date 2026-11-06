@@ -171,29 +171,7 @@ dl_scan_calls = (f: int, n: int):
 
 # Abstract locations and demanded resolution execute in deadlock_locations.dewy.
 
-# ---------------- summaries ----------------
-
-dl_add_acq = (a: DlAcq):
-    mode = if a.wait: "w" else: "h"
-    key = dl_key(a.loc) + mode
-    if dl_cur.acq_keys.has(key): return
-    dl_cur.acq_keys[key] = true
-    dl_cur.acqs.push(a)
-    dl_changed = true
-
-dl_add_edge = (e: DlEdge):
-    if dl_symbolic(e.held) or dl_symbolic(e.taken):
-        key = "{dl_key(e.held)}>{dl_key(e.taken)}"
-        if dl_cur.edge_keys.has(key): return
-        dl_cur.edge_keys[key] = true
-        dl_cur.edges.push(e)
-        dl_changed = true
-        return
-    if not dl_report or e.held.root == 0 or e.taken.root == 0: return
-    key = "{dl_key(e.held)}>{dl_key(e.taken)}"
-    if dl_global_keys.has(key): return
-    dl_global_keys[key] = true
-    dl_global_edges.push(e)
+# Summary updates and held-lock trimming execute in deadlock_summaries.dewy.
 
 # What the analysis cannot decide: a warning, but an error where `$no_deadlocks` holds at the site
 # or at another of the wait's sites (its certificate is missing).
@@ -220,13 +198,6 @@ dl_wait = (held: DlHeld[], loc: DlLoc, site: int, via: str, report_site: int):
             if dl_named(loc) and dl_named(h.loc): continue
             how = if len(via) > 0: " ({via}, takes it at {dl_line(site)})" else: ""
             fatal(report_site, "this waits for {dl_name(loc)}{how} while holding {dl_name(h.loc)} (since {dl_line(h.site)}), and the compiler cannot name one of them, so no checked lock order covers the wait (`$no_deadlocks`): take them together with `lock_all`, or nest only locks named by a local or a parameter holding a handle `mutex(...)` made (a field, an element or a handle a call gives back may be a copy of another)")
-
-dl_drop = (held: mut DlHeld[], mark: int):
-    loop held.len() > mark: held.pop()
-
-dl_summary = (f: int) -> DlSummary:
-    if let s = dl_summaries.get(f): return s
-    DlSummary([], {}, [], {}, [], {})
 
 # The lock method a call n reaches: "lock", "try_lock$acquire", "__take", "__lock_all", a
 # release ("...$release"), or "".
@@ -1726,3 +1697,4 @@ nd_check = ():
         nd_summary(f)
 
 use 'deadlock_locations.dewy'
+use 'deadlock_summaries.dewy'
