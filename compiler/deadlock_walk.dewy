@@ -1,0 +1,250 @@
+$runtime_checks
+from p"deadlock.jo" import (DlLoc DlAcq DlHeld DlEdge DlCallback dl_fn dl_cur dl_groups dl_summaries dl_inits dl_param_index dl_changed dl_report dl_relevant deadlock_parallel dl_wait dl_join dl_undecided)
+from p"deadlock_locations.dewy" import (dl_lib dl_resolve dl_receiver dl_subst dl_name dl_line)
+from p"deadlock_summaries.dewy" import (dl_summary dl_drop dl_add_acq dl_add_edge)
+from p"ast.jo" import (nodes kids kids2 kid nkids)
+from p"check.jo" import (fns locals LF_CAPTURE)
+from p"util.jo" import (files pos_file name_of pos_in_lib)
+from p"effect_control.dewy" import effect_name
+from p"lower_helpers.dewy" import value_helper_calls
+from p"isolation_ops.dewy" import isolation_children
+
+# Only demanded function bodies and summaries are traversed; state remains shared.
+LockWalkWord:type=int64<overflow='wrap'>
+dl_lock_call=(n:LockWalkWord):>string=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return ""}
+    let d=LockWalkWord(fns.ptr[LockWalkWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or files.ptr[pos_file(nodes.ptr[d].pos)].path not=? dl_lib() {return ""}
+    let nm=name_of(LockWalkWord(nodes.ptr[d].name))
+    if nm =? "lock" or nm =? "try_lock$acquire" or nm =? "__take" or nm =? "__lock_all" or nm.endswith("$release") {return nm}
+    ""
+}
+dl_walk_fn=(f:LockWalkWord):>void=>$unsafe {
+    dl_fn=f
+    dl_cur=dl_summary(f)
+    let held:array<DlHeld>=[]
+    dl_groups=dict<int64 array<int64>>()
+    dl_walk(LockWalkWord(fns.ptr[f].body) @held)
+    dl_summaries[f]=dl_cur
+}
+dl_walk=(n:LockWalkWord @held:array<DlHeld>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fnref' {return}
+    if k =? 'block' {
+        let mark=held.length
+        loop c in kids(n) {dl_walk(c @held)}
+        if nodes.ptr[n].aux not=? 5 {dl_drop(@held mark)}
+        return
+    }
+    if k =? 'vardecl' {
+        let init=LockWalkWord(nodes.ptr[n].b)
+        loop init not=? 0 and nodes.ptr[init].kind =? 'conv' {init=LockWalkWord(nodes.ptr[init].a)}
+        if init not=? 0 and nodes.ptr[init].kind =? 'call' {
+            let what=dl_lock_call(init)
+            if what =? "lock" or what =? "try_lock$acquire" or what =? "__take" {
+                let loc=dl_resolve(dl_receiver(init) dl_fn)
+                if what =? "lock" {
+                    dl_wait(held loc nodes.ptr[init].pos "" nodes.ptr[init].pos)
+                    dl_add_acq(DlAcq(loc nodes.ptr[init].pos true ""))
+                } else {dl_add_acq(DlAcq(loc nodes.ptr[init].pos false ""))}
+                held.push(DlHeld(loc nodes.ptr[init].pos LockWalkWord(nodes.ptr[n].sym)))
+                return
+            }
+        }
+        dl_walk(LockWalkWord(nodes.ptr[n].b) @held)
+        return
+    }
+    if k =? 'if_' or k =? 'iflet' {
+        dl_walk(LockWalkWord(nodes.ptr[n].a) @held)
+        let mark=held.length
+        dl_walk(LockWalkWord(nodes.ptr[n].b) @held)
+        dl_drop(@held mark)
+        dl_walk(LockWalkWord(nodes.ptr[n].c) @held)
+        dl_drop(@held mark)
+        return
+    }
+    if k =? 'call' {dl_call(n @held)}
+    else if k =? 'propagate' or k =? 'parallel_region' {
+        dl_walk(LockWalkWord(nodes.ptr[n].a) @held)
+        return
+    }
+    loop g in value_helper_calls(n) {dl_callee(g 0 @held nodes.ptr[n].pos)}
+    if k =? 'call' {return}
+    let mask=isolation_children(k)
+    if mask <? 0 {
+        dl_walk(LockWalkWord(nodes.ptr[n].a) @held)
+        dl_walk(LockWalkWord(nodes.ptr[n].b) @held)
+        dl_walk(LockWalkWord(nodes.ptr[n].c) @held)
+        loop c in kids(n) {dl_walk(c @held)}
+        return
+    }
+    if mask & 1 not=? 0 {dl_walk(LockWalkWord(nodes.ptr[n].a) @held)}
+    if mask & 2 not=? 0 {dl_walk(LockWalkWord(nodes.ptr[n].b) @held)}
+    if mask & 4 not=? 0 {dl_walk(LockWalkWord(nodes.ptr[n].c) @held)}
+    if mask & 16 not=? 0 {
+        let mark=held.length
+        loop c in kids(n) {
+            dl_walk(c @held)
+            if k =? 'match_' or k =? 'arm' {dl_drop(@held mark)}
+        }
+    }
+    if mask & 32 not=? 0 {loop c in kids2(n) {dl_walk(c @held)}}
+}
+dl_param_of=(l0:LockWalkWord):>int64=>$unsafe {
+    let l=l0
+    loop depth in [0..8) {
+        let i=dl_param_index.get(l)
+        if i not=? none {return i}
+        let d=dl_inits.get(l) ?? 0
+        if d =? 0 {return -1}
+        let init=LockWalkWord(nodes.ptr[d].b)
+        loop init not=? 0 and nodes.ptr[init].kind =? 'conv' {init=LockWalkWord(nodes.ptr[init].a)}
+        if init =? 0 or nodes.ptr[init].kind not=? 'ident' or nodes.ptr[init].aux not=? int32(1) {return -1}
+        l=LockWalkWord(nodes.ptr[init].sym)
+    }
+    -1
+}
+dl_fn_arg=(a0:LockWalkWord depth:LockWalkWord=0):>int64=>$unsafe {
+    let a=a0
+    loop nodes.ptr[a].kind =? 'conv' or nodes.ptr[a].kind =? 'namedarg' {a=LockWalkWord(nodes.ptr[a].a)}
+    if (nodes.ptr[a].kind =? 'lambda' or nodes.ptr[a].kind =? 'fnref' or nodes.ptr[a].kind =? 'partial') and nodes.ptr[a].sym >? 0 {return LockWalkWord(nodes.ptr[a].sym)}
+    if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) and nodes.ptr[a].sym >? 0 and depth <? 8 {
+        let l=LockWalkWord(nodes.ptr[a].sym)
+        if LockWalkWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 and locals.ptr[l].outer >? 0 {l=LockWalkWord(locals.ptr[l].outer)}
+        let d=dl_inits.get(l)
+        if d not=? none {return dl_fn_arg(LockWalkWord(nodes.ptr[d].b) depth + 1)}
+    }
+    0
+}
+dl_call=(n:LockWalkWord @held:array<DlHeld>):>void=>$unsafe {
+    let what=dl_lock_call(n)
+    let pos=nodes.ptr[n].pos
+    if what =? "__lock_all" {
+        let words=kid(n 1)
+        if nodes.ptr[words].kind =? 'namedarg' {words=LockWalkWord(nodes.ptr[words].a)}
+        loop c in kids(words) {
+            let call=c
+            loop nodes.ptr[call].kind =? 'conv' {call=LockWalkWord(nodes.ptr[call].a)}
+            if nodes.ptr[call].kind not=? 'call' {continue}
+            let loc=dl_resolve(dl_receiver(call) dl_fn)
+            dl_wait(held loc pos "" pos)
+            dl_add_acq(DlAcq(loc pos true ""))
+        }
+        return
+    }
+    if what.endswith("$release") {
+        if nkids(n) >=? 2 {
+            let g=kid(n 1)
+            if nodes.ptr[g].kind =? 'ident' and nodes.ptr[g].sym >? 0 {
+                loop i in [0..held.length) {
+                    if held.ptr[i].guard =? LockWalkWord(nodes.ptr[g].sym) {
+                        held.pop(i);
+                        break
+                    }
+                }
+            }
+        }
+        return
+    }
+    if what.length >? 0 {return}
+    loop c in kids(n) {dl_walk(c @held)}
+    if nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4 {
+        dl_walk(LockWalkWord(nodes.ptr[n].a) @held)
+        let callee=LockWalkWord(nodes.ptr[n].a)
+        if nodes.ptr[callee].kind =? 'ident' and nodes.ptr[callee].aux =? int32(1) {
+            let i=dl_param_of(LockWalkWord(nodes.ptr[callee].sym))
+            if i >=? 0 {
+                let locs:array<DlLoc>=[]
+                let sites:array<int64>=[]
+                loop h in held {
+                    locs.push(h.loc)
+                    sites.push(h.site)
+                }
+                let key="{i}:{pos}"
+                if not dl_cur.cb_keys.has(key) {
+                    dl_cur.cb_keys[key]=true
+                    dl_cur.callbacks.push(DlCallback(i locs sites pos))
+                    dl_changed=true
+                }
+                return
+            }
+        }
+        if held.length >? 0 and dl_report {dl_undecided(pos "this calls a function value while holding {dl_name(held.ptr[held.length - 1].loc)} (since {dl_line(held.ptr[held.length - 1].site)}): if it takes that lock, it waits forever. Call it after the place's last use, or pass a function the compiler can see")}
+        return
+    }
+    if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return}
+    let g=LockWalkWord(nodes.ptr[n].sym)
+    let d=LockWalkWord(fns.ptr[g].decl)
+    let gname=if d not=? 0 {name_of(LockWalkWord(nodes.ptr[d].name))} else {""}
+    if gname =? "__task_spawn" and nkids(n) =? 2 {
+        let h=dl_fn_arg(kid(n 1))
+        let grp=kid(n 0)
+        if h >? 0 and nodes.ptr[grp].kind =? 'ident' and nodes.ptr[grp].sym >? 0 {
+            let list=dl_groups.get(LockWalkWord(nodes.ptr[grp].sym)) ?? []
+            list.push(h)
+            dl_groups[LockWalkWord(nodes.ptr[grp].sym)]=list
+        }
+        if h >? 0 {dl_spawned(h)}
+        return
+    }
+    if gname =? "__task_join" and nkids(n) =? 1 {
+        let grp=kid(n 0)
+        if nodes.ptr[grp].kind =? 'ident' and nodes.ptr[grp].sym >? 0 {
+            loop h in (dl_groups.get(LockWalkWord(nodes.ptr[grp].sym)) ?? []) {
+                if held.length >? 0 {dl_join(h held pos "its tasks")}
+                dl_callee(h 0 @held pos "a task joined at {dl_line(pos)}")
+            }
+        }
+        return
+    }
+    if fns.ptr[g].parallel_api {
+        deadlock_parallel=true
+        loop c in kids(n) {
+            let h=dl_fn_arg(c)
+            if h <=? 0 {continue}
+            if held.length >? 0 {dl_join(h held pos "its parallel iterations")}
+            dl_callee(h 0 @held pos "the parallel iterations at {dl_line(pos)}")
+        }
+        return
+    }
+    dl_callee(g n @held pos)
+    let s=dl_summary(g)
+    loop cb in s.callbacks {
+        if cb.param >=? nkids(n) {continue}
+        let h=dl_fn_arg(kid(n cb.param))
+        if h <=? 0 {continue}
+        let inner:array<DlHeld>=[]
+        loop i in [0..cb.held.length) {inner.push(DlHeld(dl_subst(cb.held.ptr[i] g n dl_fn) cb.sites.ptr[i] 0))}
+        loop h2 in held {inner.push(h2)}
+        dl_callee(h 0 @inner pos "the function given to {effect_name(g)}, called back at {dl_line(cb.site)}")
+    }
+}
+dl_callee_name=(g:LockWalkWord n:LockWalkWord pos:LockWalkWord named:string):>string=>$unsafe {
+    if named.length >? 0 {return named}
+    let d=LockWalkWord(fns.ptr[g].decl)
+    let nm=effect_name(g)
+    if d not=? 0 and pos_in_lib(nodes.ptr[d].pos) and nm.startswith("__") {nm="the library"}
+    if n not=? 0 and not pos_in_lib(pos) {return "{nm} at {dl_line(pos)}"}
+    nm
+}
+dl_callee=(g:LockWalkWord n:LockWalkWord @held:array<DlHeld> pos:LockWalkWord named:string=""):>void=>{
+    if not dl_relevant.has(g) {return}
+    let s=dl_summary(g)
+    let gname=dl_callee_name(g n pos named)
+    loop a in s.acqs {
+        let loc=dl_subst(a.loc g n dl_fn)
+        let via=if a.via.length >? 0 {"{gname} -> {a.via}"} else {gname}
+        if a.wait {dl_wait(held loc a.site via pos)}
+        dl_add_acq(DlAcq(loc a.site a.wait via))
+    }
+    loop e in s.edges {
+        let via=if e.via.length >? 0 {"{gname} -> {e.via}"} else {gname}
+        dl_add_edge(DlEdge(dl_subst(e.held g n dl_fn) dl_subst(e.taken g n dl_fn) e.held_site e.taken_site via pos))
+    }
+}
+dl_spawned=(h:LockWalkWord):>void=>{
+    if not dl_relevant.has(h) {return}
+    let s=dl_summary(h)
+    loop e in s.edges {dl_add_edge(e)}
+}
