@@ -1,0 +1,6 @@
+# Near miss: only spawn bodies infer it; another lambda still declares its result.
+main = () => {
+    let c = channel<int>(1)
+    let f = () => { c.send(1) or_throw }
+    f()
+}

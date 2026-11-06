@@ -251,7 +251,7 @@ propagate_error = (n: int, code: int, t: int, at: int):
     if code == 1:
         # (a body with no result to declare, or one a task or callback runs: say where the failure can go)
         if fns[int(ctxs[cx].inst)].kind == FK_LAMBDA:
-            fatal(pos, "or_throw gives a failure back to the function around it, and this lambda or `spawn` body declares no result: give a lambda one (`(x:int):>int|Oops => ...`), move a task's work to a named function with one (`work = (c:Channel<int>):>void|Unsent<int> => ...` then `spawn work(c)`), or handle the failure here (`if c.send(v) is? Unsent<int> break`)")
+            fatal(pos, "or_throw gives a failure back to the function around it, and this lambda declares no result: give it one (`(x:int):>int|Oops => ...`), or handle the failure here")
         fatal(pos, "or_throw requires an enclosing function with a declared return type")
     if code == 2: fatal(pos, "or_throw cannot propagate none from a function without a declared result type: declare it, as `:>T?`, or handle none here")
     # (an optional result with errors: `none` is an exception too, so

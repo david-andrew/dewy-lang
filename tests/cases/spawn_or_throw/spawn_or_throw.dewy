@@ -1,0 +1,13 @@
+# modes: native native-release
+# or_throw in a spawn body: the failure goes to the task's group.
+main = () => {
+    let c = channel<int>(4)
+    concurrent {
+        spawn {
+            c.send(1) or_throw
+            c.close
+        }
+        printl(c.receive)
+    }
+    printl("done")
+}

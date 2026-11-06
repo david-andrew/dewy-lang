@@ -4702,6 +4702,7 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
         locals[l].flags = i32(fl)
         fns[f].params.push(l)
     declared = 0
+    spawned_hint = 0
     old_formals = refine_bindings.formals
     old_self = refine_bindings.self
     if refine_active:
@@ -4718,7 +4719,14 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
     if declared != 0: ctxs[cx].ret = i32(declared)
     else if ret_hint != 0 and not has_var(prune(ret_hint)): ctxs[cx].ret = i32(ret_hint)
     else:
-        if ret_hint != 0: ctxs[cx].ret = i32(ret_hint)
+        # (a `spawn` body infers what it throws, as a function with no declared result does;
+        # its result, with them, then settles what the call wants)
+        if nodes[lam].aux2 == 17 and dewy_at(nodes[lam].pos):
+            spawned_hint = ret_hint
+            ctxs[cx].ret = i32(mk_var())
+            infer_throws[f] = []
+            infer_returns[f] = []
+        else if ret_hint != 0: ctxs[cx].ret = i32(ret_hint)
         else: ctxs[cx].ret = i32(mk_var())
         ctxs[cx].infer_ret = true
     body = int(fns[f].body)
@@ -4765,6 +4773,8 @@ check_lambda_body = (f: int, lam: int, ret_hint: int):
         if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), r))
         else if bt != T_NEVER and not void_arm_end(body, r): fatal(nodes[body].pos, "lambda must return a value of type {dt(r)}")
     else: nodes[body].aux = 0
+    body_result_throws(f, body)
+    if spawned_hint != 0: unify(spawned_hint, int(ctxs[cx].ret))
     fns[f].ret = ctxs[cx].ret
     fns[f].state = 2
     scope_reset(mark)

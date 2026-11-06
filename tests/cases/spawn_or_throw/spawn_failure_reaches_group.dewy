@@ -1,0 +1,10 @@
+# modes: native native-release
+# The body's inferred failure fails its group, and reading it needs its kinds.
+main = () => {
+    let c = channel<int>(1)
+    c.close
+    let ran = concurrent {
+        spawn { c.send(1) or_throw }
+    }
+    printl(ran)
+}

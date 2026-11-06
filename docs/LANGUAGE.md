@@ -3195,6 +3195,8 @@ The closing brace joins every child. A task's result is kept only by
 statement (`loop x in xs { spawn work(x out) }`), so tasks in a loop send their
 results over a channel or store them under a `Mutex`. A helper whose final
 statement is `spawn(g) work()` returns `void`, without exposing a task handle.
+*Provisional:* a `spawn { ... }` body infers its result as a function without a
+declared one does, so `or_throw` in it fails the group.
 As an expression, `concurrent { ... }`
 returns `true` on success or the first exception returned by a child. The first
 failure cancels its siblings; joining still waits for their cleanup. Returning
