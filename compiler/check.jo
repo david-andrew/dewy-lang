@@ -5647,9 +5647,14 @@ dewy_main_result = (decl: int, rt: int):
     loop k in ordered:
         c = main_pinned_code(k, pos)
         pinned.push(c)
-        if c > 0:
+        if c > 0 and not main_library_kind(k):
             if taken.has(c): fatal(pos, "two error kinds reaching main pin exit code {c}")
             taken[c] = true
+    # (the library's own pin gives way to the program's)
+    loop i in 0.. and k in ordered:
+        if pinned[i] > 0 and main_library_kind(k):
+            if taken.has(pinned[i]): pinned[i] = 0
+            else: taken[pinned[i]] = true
     next = 1
     loop i in 0.. and k in ordered:
         code = pinned[i]
@@ -5772,6 +5777,8 @@ exit_code_field_type = (t: int, f: int, owner: int) -> int:
     predicate = ref_intern([RefAtom(.le, RefTerm(1, 1), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, 100))])
     if not ref_spans.has(predicate): ref_spans[predicate] = nodes[f].pos
     mk_refined(t, predicate)
+
+main_library_kind = (t: int) -> bool: tkind(t) == .struct_ and pos_in_lib(nodes[int(structs[int(types[t].st)].decl)].pos)
 
 # an error type's own exit code: its `exit_code` field's default (0: none of its own)
 main_pinned_code = (t: int, pos: int) -> int:

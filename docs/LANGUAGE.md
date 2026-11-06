@@ -3913,6 +3913,16 @@ gives `string | Canceled | FileError | none`: `none` at the end of the input, an
 the others as a file operation's (see "Files, paths and processes"), so a loop over
 the input stops at any of them with `if line is? exception break`, after which
 `line` is the `string`.
+`input(prompt)` shows the prompt and reads a line; `input_int` and `input_float` ask
+again until a number comes. They give `string`, `int64` and `float64` with
+`InputFailure`, the alias for `EndOfInput | FileError | Canceled`, so a program
+decides what the end of the input means: `input("name? ") or_throw` passes it on,
+and an unhandled one reaches `main` as `error: EndOfInput`, exit 1 (its own
+`exit_code`, unless the program's errors pin that code);
+`input_int("n? ") ?? 0` gives 0. `read_stdin()` gives `string | FileError | Canceled`.
+A failed write to standard output does not stop `printl`, which stays `void`: the
+program ends with `error: could not write standard output` and exit 1. Output to a
+closed pipe (`| head`) ends the program quietly.
 They are the prelude's shadowable names for `console.printl` and `console.print`.
 `print(x file=stderr)` (and `printl`) writes to another stream: `stdout` and
 `stderr` are in the prelude. The prelude `console` also has `info` (as
@@ -4772,8 +4782,8 @@ unproven one follows the obligation settings. These generators are predictable
 from their state and are not for secrets: keys, tokens and nonces come from
 `crypto.random_bytes(n)` (`import crypto`), which reads the operating system's
 secure random source (getrandom, getentropy, RtlGenRandom, or
-`crypto.getRandomValues` on the web); a system that gives none ends the program
-with a report, as running out of memory does.
+`crypto.getRandomValues` on the web); it gives `array<uint8> | NoEntropy`, the
+latter from a system that gives none.
 
 ## Directives
 

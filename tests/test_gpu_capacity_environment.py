@@ -65,11 +65,11 @@ def test_exhaustion_reports_and_exits(compiler, tmp_path):
 
 
 def test_input_end_reports_and_exits(compiler, tmp_path):
-    # The same path, reached from a public call at run time.
-    (tmp_path / 'main.dewy').write_text('main=():>void=>printl(input_int())\n')
+    # An end of input that a program passes on reaches `main` as a value.
+    (tmp_path / 'main.dewy').write_text('main=()=>printl(input_int() or_throw)\n')
     ran = subprocess.run([compiler, 'run', 'main.dewy'], capture_output=True, text=True, timeout=120, cwd=tmp_path, stdin=subprocess.DEVNULL)
     assert ran.returncode == 1, ran.stdout + ran.stderr
-    assert ran.stderr == 'fatal: the input ended before a whole number came\n', ran.stderr
+    assert ran.stderr == 'error: EndOfInput\n', ran.stderr
 
 
 @pytest.mark.skipif(sys.platform != 'linux', reason='Vulkan slot allocator is native Linux')

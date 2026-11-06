@@ -1,0 +1,9 @@
+# exit: 2
+# modes: native
+# The program's own pin keeps code 1, and EndOfInput, the library's, takes another.
+Usage:type = type of error & [exit_code:int64=1]
+main = ():>void|Usage|EndOfInput|FileError|Canceled => {
+    let a = input("") or_throw
+    if a =? "" { return Usage[] }
+    printl(a)
+}

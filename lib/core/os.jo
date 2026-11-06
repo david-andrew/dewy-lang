@@ -392,8 +392,13 @@ input_float = (prompt: str = "") -> f64:
 
 # all of standard input (what is piped in), until it ends
 read_stdin = () -> str:
-    __out_flush()
     out: u8[]
+    __stdin_rest(out)
+    str_from_bytes(out)
+
+# The rest of standard input into out: 0 at its end, < 0 (-errno) when it could not be read on.
+__stdin_rest = (out: mut u8[]) -> int:
+    __out_flush()
     if __stdin_pos < __stdin_buf.len():
         __buf_append_raw(out, data(__stdin_buf) + __stdin_pos, __stdin_buf.len() - __stdin_pos)
     __stdin_buf.clear()
@@ -404,9 +409,10 @@ read_stdin = () -> str:
         room = max(65536, n)
         q = __buf_reserve(out, room)
         r = __read_fd(0, q + 24 + n, room)
-        if r <= 0: break
+        if r == -4: continue                            # (EINTR: again)
+        if r <= 0: return r
         (q as *int)[1] = n + r
-    str_from_bytes(out)
+    0
 
 read_bytes = (path: str) -> u8[]?:
     if let s = read_file(path): return bytes(s)

@@ -3,7 +3,7 @@ use 'core/overflow.jo'
 # signatures), a self-signed certificate, and random bytes from the operating system. It is what
 # the library's WebRTC (lib/rtc.jo) is made of, and a program may use it too: `import crypto`.
 #
-#   key = crypto.random_bytes(16)
+#   key = crypto.random_bytes(16)                                   # or NoEntropy
 #   sealed = crypto.aes_gcm_seal(key, nonce12, aad, message)        # the message and a 16-byte tag
 #   opened = crypto.aes_gcm_open(key, nonce12, aad, sealed)         # none when it was changed
 #   pk = crypto.p256_key()                                          # a private key and its public point
@@ -15,12 +15,20 @@ use 'core/overflow.jo'
 
 # ---------------- random bytes ----------------
 # n bytes from the operating system's random source (for keys and nonces: not seeded, not repeatable).
-# A system that gives none is an environment failure: the program ends with a report.
-random_bytes = (n: int) -> u8[]:
+# A system that gives none: NoEntropy.
+random_bytes = (n: int) -> u8[] | NoEntropy:
     b = fill(u8(0), n)
     if n == 0: return b
-    if not __os_entropy(data(b), n): __environment_failure("random_bytes: the system gave no random bytes")
+    if not __os_entropy(data(b), n): return NoEntropy()
     b
+
+# (the library's own connections and keys, which have no failure to pass on: the program ends
+# with a report)
+__random_bytes = (n: int) -> u8[]:
+    b = random_bytes(n)
+    if b is NoEntropy: __environment_failure("random_bytes: the system gave no random bytes")
+    if b is u8[]: return b
+    []
 
 # ---------------- bytes ----------------
 # bytes as lowercase hex ("a9993e...")
@@ -694,7 +702,7 @@ struct P256Key:
 p256_key = () -> P256Key:
     __p256_init()
     loop true:
-        d = random_bytes(32)
+        d = __random_bytes(32)
         k = __u256_be(d, 0)
         if __u256_is_zero(k) or __u256_cmp(k, __N.m) >= 0: continue
         return P256Key(d, __p256_point_bytes(__jac_mul(__p256_g(), k)))
@@ -743,7 +751,7 @@ p256_sign = (k: P256Key, hash: u8[]) -> u8[]:
     d = __to_mont(__N, __u256_be(k.private, 0))
     e = __to_mont(__N, __hash_int(hash))
     loop true:
-        kb = __u256_be(random_bytes(32), 0)
+        kb = __u256_be(__random_bytes(32), 0)
         if __u256_is_zero(kb) or __u256_cmp(kb, __N.m) >= 0: continue
         if let xy = __jac_affine(__jac_mul(__p256_g(), kb)):
             r = xy.0
@@ -848,7 +856,7 @@ self_signed_certificate = (k: P256Key, name: str) -> u8[]:
     spki: u8[]
     spki.extend(__der(0x30, spki_alg))
     spki.extend(__der(0x03, key_bits))
-    serial = random_bytes(8)
+    serial = __random_bytes(8)
     serial[0] = serial[0] & 0x7f
     tbs: u8[]
     tbs.extend(__der(0xa0, __der(2, [u8(2)])))

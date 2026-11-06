@@ -80,6 +80,16 @@ struct Singular:
 struct Overflow:
     pass
 
+# Standard input ended (`input`, `input_int`, `input_float`). Reaching `main`, it is exit 1.
+@nominal(error)
+struct EndOfInput:
+    exit_code: int = 1
+# The operating system gave no random bytes (`crypto.random_bytes`).
+@nominal(error)
+struct NoEntropy:
+    pass
+
+type InputFailure = EndOfInput | FileError | Canceled
 type __FileFailure = FileNotFound | FileAccessDenied | IsDirectory | FileExists | FileError | Canceled
 
 __file_failure = () -> __FileFailure:

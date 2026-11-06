@@ -610,10 +610,14 @@ __write_fd = (fd: int, p: *u8, n: int):
             r = syscall(1, fd, p + off, n - off)
             # (a task's cancellation signal interrupts the wait; output is no cancellation point)
             if r == -4: continue
-            if r <= 0: break
+            if r <= 0:
+                # (a closed pipe, without the signal that ends the program: not a failure to report)
+                if fd == 1 and r != -32: __stdout_failed = true
+                break
             off += r
         if fd == 1 and __test_mirror >= 0: __write_fd(__test_mirror, p, off)
 
+__stdout_failed = false         # (standard output refused a write: reported at the program's end)
 __test_mirror = -1              # (in a test's process: where its standard output is copied too; a handle on Windows)
 
 # read up to n bytes (0: the end, < 0: an error)

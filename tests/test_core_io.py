@@ -10,7 +10,7 @@ PROGRAM = r'''$runtime_checks
 main=(args:array<string>):>void=>exit(entry(args)) entry=(args:array<string>):>int64=>{
 if args[1]=?"stdin" {
     let all=read_stdin()
-    if all is? Canceled return 6
+    if all is? exception return 6
     write(all)
     let tail=read_stdin()
     return if tail is? string and tail=?"" and read_line() is?none 0 else 1
@@ -20,7 +20,7 @@ if args[1]=?"after-line" {
     if line is?none return 2
     if line is?(Canceled|FileError) return 6
     let tail=read_stdin()
-    if tail is?Canceled return 6
+    if tail is?exception return 6
     write(line) write("|") write(tail)
     return if read_line() is?none 0 else 3
 }

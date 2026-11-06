@@ -426,6 +426,11 @@ __end_flush = ():
         __mac_fflush(null)
     else when TARGET != "windows" and TARGET != "wasm":
         if __c_fflush != null: __c_fflush(null)
+    when TARGET != "wasm":
+        if __stdout_failed:
+            __stdout_failed = false
+            __write_err("error: could not write standard output\n")
+            __exit_raw(1)
 
 when TARGET == "macos":
     @lib("/usr/lib/libSystem.B.dylib")

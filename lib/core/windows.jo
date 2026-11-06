@@ -234,7 +234,10 @@ when TARGET == "windows":
         w: u32[] = [0]
         off = 0
         loop off < n:
-            if WriteFile(h, p + off, u32(min(n - off, 1 << 30)), data(w), null) == 0 or w[0] == 0: return
+            if WriteFile(h, p + off, u32(min(n - off, 1 << 30)), data(w), null) == 0 or w[0] == 0:
+                # (109, 232: a closed pipe, not a failure to report)
+                if h == __w32_out and int(GetLastError()) != 109 and int(GetLastError()) != 232: __stdout_failed = true
+                return
             off += int(w[0])
 
     __w32_in: *u8 = null
