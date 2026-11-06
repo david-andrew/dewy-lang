@@ -650,9 +650,29 @@ union_target = (n: int, from: int, u: int) -> int:
     ms = union_members(u)
     loop i in 0.. and m in ms:
         if type_eq(m, f): return i
+    if str_sets.len() > 1 and prune(from) == T_STR: return union_text_target(n, ms)
     loop i in 0.. and m in ms:
         if can_coerce(n, from, m): return i
     -1
+
+# Text going into a union with a string set: a literal the set lists is its word, a literal it
+# does not list is not offered to it, and other text prefers a member that takes any text, since
+# a set would look it up and panic.
+union_text_target = (n: int, ms: int[]) -> int:
+    e = if n != 0: kid_lit(n) else: 0
+    literal = e != 0 and nodes[e].kind == .str_lit and nodes[e].aux != 1
+    text = if literal: name_of(int(nodes[e].sval)) else: ""
+    if literal:
+        loop i in 0.. and m in ms:
+            set = str_set_of(m)
+            if set != 0 and str_sets[set].contains(text): return i
+    looked_up = -1
+    loop i in 0.. and m in ms:
+        if str_set_of(m) != 0:
+            if not literal and looked_up < 0: looked_up = i
+            continue
+        if can_coerce(n, T_STR, m): return i
+    looked_up
 
 # (a wrapper replaces node n and the old content moves to inner: the divisor
 # obligation belongs to the moved call)

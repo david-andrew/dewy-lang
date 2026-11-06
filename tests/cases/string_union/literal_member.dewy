@@ -1,0 +1,20 @@
+# Text into a union with a string set: a listed literal is its word, any other goes to the text member.
+Mode:type = 'auto' | string<length >? 0>
+Plain:type = 'auto' | 'off' | string
+Only:type = 'auto' | 'off' | int64
+show = (m:Mode):>string => if m =? 'auto' "A" else "other"
+main = ():>void => {
+    let a:Mode = 'auto'
+    let b:Mode = 'x'
+    let c:Mode = "y"
+    printl("{a} {b} {c}")
+    printl("{show('auto')} {show('z')}")
+    let p:Plain = 'off'
+    let q:Plain = 'other'
+    printl("{p} {q}")
+    let t = "typed{1}"
+    let r:Plain = t
+    printl(r)
+    let o:Only = 'off'
+    printl(o)
+}

@@ -1153,6 +1153,10 @@ the array of those members in the same order, an `array<U>` unless its context g
 array a type (`let all = members(U)`, `f(members(U))`). Literal unions are
 ordinary type arguments: `Box<'tokens'|'ast'>`, `array<'a'|'b'>`.
 
+In a union with text, as `'auto' | string<length >? 0>`, a literal the set lists
+is that member and any other text goes to the text member, so `'x'` is accepted.
+Without a text member, a literal the set does not list is an error.
+
 A refuted obligation is a compile error. An unproven obligation is a compile
 error by default and a runtime check that panics on failure under
 `$runtime_checks` (see "Directives"); a proven obligation emits no check. Annotated local initialization and replacement, arguments, and results
