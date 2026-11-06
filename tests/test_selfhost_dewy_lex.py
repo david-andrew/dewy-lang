@@ -5,6 +5,7 @@ Two drivers call either module at every quote, brace and `#` of the repository's
 of generated texts (nested and unterminated strings, interpolations, comments, raw and triple
 quotes); a Python oracle written from the lexer's rules gives the expected lines."""
 import random
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +20,10 @@ FIXTURES = ROOT / 'tests/fixtures/selfhost'
 HINT = "`{...}` in a string holds an expression: write `\\{` and `\\}` for literal braces, or use a raw string `r'...'` when the text contains double quotes"
 OPEN = f'unterminated string: this `{{` starts a string interpolation that does not end ({HINT})'
 BLOCK = 'unterminated block comment: `#{` needs a matching `}#` (block comments nest)'
+
+# Find block delimiters in C instead of rescanning every ordinary byte in
+# Python. The oracle still visits every nested delimiter and every input.
+BLOCK_EDGE = re.compile(rb'#{|}#')
 
 
 def ident_start(c):
@@ -64,8 +69,9 @@ class Scanner:
         s = self.s
         i += 2
         depth = 1
-        while i + 1 < stop:
-            if s[i] == 35 and s[i + 1] == 123:
+        while match := BLOCK_EDGE.search(s, i, stop):
+            i = match.start()
+            if s[i] == 35:
                 depth += 1
                 i += 2
             elif s[i] == 125 and s[i + 1] == 35:
@@ -73,8 +79,6 @@ class Scanner:
                 i += 2
                 if depth == 0:
                     return i
-            else:
-                i += 1
         return -1
 
     def interpolation_end(self, start, stop, nesting, incomplete):
