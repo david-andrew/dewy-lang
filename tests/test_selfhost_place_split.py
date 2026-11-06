@@ -166,7 +166,7 @@ FATAL = ('value body written', 'no place written', 'two places', 'place first', 
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_place_split_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = compare_narrow(compiler, tmp_path, release, ('source_types', 'node_store', 'place_split'), DRIVER,
-                             doubles={'services.jo': SERVICES}, services=('ast', 'expr', 'util', 'dewy_nodes', 'place_methods'),
+                             doubles={'services.jo': SERVICES}, services=('ast', 'expr', 'util', 'dewy_nodes', 'place_methods', 'place_method_ops'),
                              invocations=[((), 0)] + [((case,), 41) for case in FATAL])
     assert outputs[0].endswith(b'split ok\n') and b'lend$acquire' in outputs[0] and b'lend$release' in outputs[0]
     for output, text in zip(outputs[1:], (b'and its body gives a value', b'and its body gives none', b'as its last statement',

@@ -1,0 +1,410 @@
+$runtime_checks
+from p"ast.jo" import (NF_ALIASDECL NF_AT NF_GLOBAL NF_LITERAL NF_LOOPCOUNT NF_MUT NF_RDONLY NF_STMT add_flag clear_flag clone has_flag kid kid_c kid_d kids mk nkids nodes set_kid set_list)
+from p"check.jo" import (check_block check_stmt check_vardecl ctxs cx fns lib_dir locals push_type_params resolve_type scope_mark scope_reset stmt_terminates syms)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"deadlock.jo" import (deadlock_fns)
+from p"expr.jo" import (AUX2_PLACE bc_block bc_ident bc_let bc_method bc_stmt mk_ident_local)
+from p"place_methods.jo" import (AUX2_PLACE_TAKEN PlaceMethod place_call_decl place_count place_hidden place_methods)
+from p"places.jo" import (place_locked)
+from p"refine.jo" import (refine_storage)
+from p"sibling_types.jo" import (sibling_block sibling_index)
+from p"types.jo" import (T_VOID dt prune structs tkind type_eq types)
+from p"util.jo" import (fatal files intern name_of pos_file pos_in_lib)
+
+PlaceWord:type=int64<overflow='wrap'>
+# the first ident among n's nodes named in names, or 0
+place_names_used=(n:PlaceWord names:dict<int64 bool>):>PlaceWord=>$unsafe {
+    if n =? 0 {return 0}
+    if nodes.ptr[n].kind =? 'ident' and names.has(PlaceWord(nodes.ptr[n].name)) {return n}
+    loop child in [PlaceWord(nodes.ptr[n].a) PlaceWord(nodes.ptr[n].b) kid_c(n) kid_d(n)] {
+        let found=place_names_used(child names)
+        if found not=? 0 {return found}
+    }
+    loop child in kids(n) {
+        let found=place_names_used(child names)
+        if found not=? 0 {return found}
+    }
+    0
+}
+# check_call reached a call: a place method only through `@(...)`, and `@(...)` only of one.
+place_call_seen=(n:PlaceWord decl:PlaceWord):>void=>$unsafe {
+    let nm=name_of(PlaceWord(nodes.ptr[decl].name))
+    if nodes.ptr[n].aux2 =? int32(AUX2_PLACE) {fatal(nodes.ptr[n].pos "`@(...)` takes the place a method returns as `let name = @(x.{nm}())` or `match @(x.{nm}()) \{...}`")}
+    if not place_methods.has(decl) {
+        if nodes.ptr[n].aux2 =? int32(AUX2_PLACE_TAKEN) {fatal(nodes.ptr[n].pos "'{nm}' gives a value, not a place: drop the `@(...)`")}
+        return
+    }
+    if nodes.ptr[n].aux2 not=? int32(AUX2_PLACE_TAKEN) {fatal(nodes.ptr[n].pos "'{nm}' lends a place inside its object: take it with `let name = @(x.{nm}())`")}
+    place_call_decl=decl
+}
+# The receiver and method name of `@(recv.m(args))`.
+place_call_parts=(call:PlaceWord):>[int64 int64]=>$unsafe {
+    let callee=PlaceWord(nodes.ptr[call].a)
+    if nodes.ptr[callee].kind not=? 'field' {fatal(nodes.ptr[call].pos "`@(...)` takes the place a method returns: `@(acct.lock())`")}
+    let recv=PlaceWord(nodes.ptr[callee].a)
+    let k=nodes.ptr[recv].kind
+    if k not=? 'ident' and k not=? 'field' and k not=? 'index' {fatal(nodes.ptr[recv].pos "a place is lent by an object in a variable, field or element: bind it first (`let x = ...`, then `@(x.{name_of(PlaceWord(nodes.ptr[callee].name))}())`)")}
+    # (a global could be replaced by any call while the place lives, which no lexical check sees)
+    let root=place_root_name(recv)
+    let sym=if root not=? 0 {lookup(root)} else {0}
+    if sym not=? 0 and syms.ptr[sym].kind =? 'global' {fatal(nodes.ptr[recv].pos "a place is lent by an object in a local variable or parameter for now: '{name_of(root)}' is a global, which a call could replace while the place lives")}
+    [recv PlaceWord(nodes.ptr[callee].name)]
+}
+place_root_name=(recv:PlaceWord):>PlaceWord=>$unsafe {
+    let n=recv
+    loop nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index' {n=PlaceWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'ident' {return 0}
+    PlaceWord(nodes.ptr[n].name)
+}
+# `recv.m$suffix(args)`, a copy of the written call with the receiver named by `$recvN`
+place_member_call=(call:PlaceWord recv_name:string method:string pos:PlaceWord):>PlaceWord=>$unsafe {
+    let c=clone(call)
+    nodes.ptr[c].aux2=0
+    let callee=PlaceWord(nodes.ptr[c].a)
+    nodes.ptr[callee].name=int32(intern(method))
+    let r=bc_ident(recv_name pos)
+    add_flag(r NF_MUT)
+    nodes.ptr[callee].a=int32(r)
+    c
+}
+# The hidden local place naming the receiver, checked: `let $recvN = @recv`.
+place_receiver=(recv:PlaceWord pos:PlaceWord):>string=>{
+    place_count += 1
+    let rn="$recv{place_count}"
+    let r=clone(recv)
+    # (a lock's handle is shared: its payload is reached through it, so a copy of the handle
+    # lends the same place, and a closure taking the lock does not change what it captured)
+    if place_shared_receiver(recv) {clear_flag(r NF_MUT | NF_AT)}
+    else {add_flag(r NF_MUT | NF_AT)}
+    let d=bc_let(rn r pos)
+    check_vardecl(d)
+    # (an index key is evaluated once: the declaration became that key's binding)
+    place_hidden.push(d)
+    rn
+}
+place_shared_receiver=(recv:PlaceWord):>bool=>$unsafe {
+    let probe=clone(recv)
+    let t=prune(check_expr(probe 0))
+    if tkind(t) not=? 'struct_' {return false}
+    let d=PlaceWord(structs.ptr[PlaceWord(types.ptr[t].st)].decl)
+    d not=? 0 and name_of(PlaceWord(nodes.ptr[d].name)) =? "Mutex" and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/prelude/locks.dewy"
+}
+# The checked place `let name = $recvN.route`; its local.
+place_alias=(name:PlaceWord rn:string info:PlaceMethod pos:PlaceWord):>PlaceWord=>$unsafe {
+    let e=bc_ident(rn pos)
+    # (a library type's route, `__h.__p.value` of Mutex, is its own: checked where it is written)
+    let at=if info.at >? 0 and pos_in_lib(info.at) {info.at} else {pos}
+    loop f in info.route {
+        let fe=mk('field' at)
+        nodes.ptr[fe].a=int32(e)
+        nodes.ptr[fe].name=int32(f)
+        e=fe
+    }
+    let d=mk('vardecl' pos)
+    nodes.ptr[d].name=int32(name)
+    nodes.ptr[d].b=int32(e)
+    add_flag(d NF_ALIASDECL)
+    check_vardecl(d)
+    let s=lookup(name)
+    let l=PlaceWord(syms.ptr[s].ref)
+    if pos_in_lib(info.at) and files[pos_file(info.at)].path =? "{lib_dir}/prelude/locks.dewy" {place_locked[l]=true}
+    l
+}
+place_written_check=(info:PlaceMethod decl:PlaceWord g:PlaceWord l:PlaceWord pos:PlaceWord):>void=>$unsafe {
+    if info.written =? 0 {return}
+    # (a generic type's method: its parameters as the call instantiated them)
+    let c=PlaceWord(nodes.ptr[g].b)
+    loop c not=? 0 and nodes.ptr[c].kind =? 'conv' {c=PlaceWord(nodes.ptr[c].a)}
+    let mark=scope_mark()
+    if c not=? 0 and nodes.ptr[c].kind =? 'call' and nodes.ptr[c].sym >? 0 and PlaceWord(nodes.ptr[c].sym) <? fns.length and PlaceWord(fns.ptr[PlaceWord(nodes.ptr[c].sym)].decl) =? decl {push_type_params(decl fns.ptr[PlaceWord(nodes.ptr[c].sym)].targs)}
+    let t=resolve_type(info.written)
+    scope_reset(mark)
+    # The lent place's read type may erase its qualifier. Its written
+    # return annotation promises the field's declared storage authority.
+    let storage=refine_storage(mk_ident_local(l pos) PlaceWord(locals.ptr[l].type))
+    if not type_eq(prune(t) prune(storage)) {fatal(pos "the place is written as @{dt(t)}, and its member is {dt(storage)}")}
+}
+# `let a = @(recv.m(args))`, as a statement of sibling_block. false when s is something else.
+place_let_decl=(s:PlaceWord):>bool=>$unsafe {
+    if lock_all_decl(s) {return true}
+    let init=PlaceWord(nodes.ptr[s].b)
+    if init =? 0 or nodes.ptr[init].kind not=? 'call' or nodes.ptr[init].aux2 not=? int32(AUX2_PLACE) {return false}
+    let pos=nodes.ptr[s].pos
+    if nodes.ptr[s].a not=? 0 or nkids(s) >? 0 or has_flag(s NF_GLOBAL) or has_flag(s NF_RDONLY) {fatal(pos "a returned place is bound by name alone: `let a = @(acct.lock())`")}
+    let b=sibling_block
+    let i=sibling_index
+    if b =? 0 or i >=? nkids(b) or kid(b i) not=? s {fatal(pos "a returned place is taken by a statement of its own: `let a = @(acct.lock())`")}
+    let stmts=place_take(PlaceWord(nodes.ptr[s].name) init b i pos 0)
+    let block=bc_block(stmts pos)
+    nodes.ptr[block].aux=5
+    nodes.ptr[s]=nodes.ptr[block]
+    true
+}
+# The checked statements binding name to the place `@(recv.m(args))` (init) lends, at statement i
+# of block b: the receiver's binding, the guard, and its release when the place is never used
+# after i (otherwise the release follows the statement of its last use, there in b). outer: a
+# root the receiver aliases (lock_all's), checked as the receiver's own.
+place_take=(name:PlaceWord init:PlaceWord b:PlaceWord i:PlaceWord pos:PlaceWord outer:PlaceWord):>array<int64>=>$unsafe {
+    let parts=place_call_parts(init)
+    let recv=parts[0]
+    let root=place_root_name(recv)
+    let rn=place_receiver(recv pos)
+    let hidden=place_hidden
+    place_hidden=[]
+    place_count += 1
+    let gn="$guard{place_count}"
+    let call=place_member_call(init rn name_of(parts[1]) nodes.ptr[init].pos)
+    nodes.ptr[call].aux2=int32(AUX2_PLACE_TAKEN)
+    place_call_decl=0
+    let g=bc_let(gn call pos)
+    check_vardecl(g)
+    let decl=place_call_decl
+    if not place_methods.has(decl) {fatal(nodes.ptr[init].pos "'{name_of(parts[1])}' gives a value, not a place: drop the `@(...)`")}
+    let info=place_methods[decl]
+    if info.fails {fatal(nodes.ptr[init].pos "'{name_of(parts[1])}' may give another value instead of its place: `match @(...) \{...}` takes both")}
+    # (a lock taken: the deadlock analysis runs over this function, compiler/deadlock.jo)
+    if files[pos_file(nodes.ptr[decl].pos)].path =? "{lib_dir}/prelude/locks.dewy" {deadlock_fns[PlaceWord(ctxs[cx].inst)]=true}
+    let l=place_alias(name rn info pos)
+    place_written_check(info decl g l pos)
+    let stmts=[hidden... g]
+    let last=place_range(b i name root pos)
+    if outer not=? 0 {
+        loop j in [i + 1..last + 1) {place_scan(kid(b j) name outer false false)}
+    }
+    if info.guards >? 0 {
+        let release=bc_stmt(place_member_call(init rn name_of(info.release) pos) pos)
+        set_list(PlaceWord(nodes.ptr[release].a) [bc_ident(gn pos)])
+        if last =? i {
+            check_stmt(release)
+            stmts.push(release)
+        }
+        else if last <? nkids(b) - 1 and not stmt_terminates(kid(b last)) {
+            let wrap=bc_block([kid(b last) release] pos)
+            nodes.ptr[wrap].aux=5
+            set_kid(b last wrap)
+        }
+    }
+    stmts
+}
+# `let [a b] = @(lock_all(from to)) or_throw` (decisions.md, multi-lock spelling): every lock
+# acquired at once in one canonical order (their words' addresses, lib/std/thread.jo), then each
+# place taken as `let a = @(from.__take())` takes an already held lock, released after its own
+# last use. A lock given twice is `DuplicateLock` and cancellation while waiting is `Canceled`,
+# with nothing held either way. false when s is something else.
+lock_all_decl=(s:PlaceWord):>bool=>$unsafe {
+    let init=PlaceWord(nodes.ptr[s].b)
+    if init =? 0 {return false}
+    let thrown=nodes.ptr[init].kind =? 'propagate'
+    let call=if thrown {PlaceWord(nodes.ptr[init].a)} else {init}
+    if nodes.ptr[call].kind not=? 'call' or nodes.ptr[call].aux2 not=? int32(AUX2_PLACE) {return false}
+    let callee=PlaceWord(nodes.ptr[call].a)
+    if nodes.ptr[callee].kind not=? 'ident' or name_of(PlaceWord(nodes.ptr[callee].name)) not=? "lock_all" {return false}
+    let pos=nodes.ptr[s].pos
+    if not thrown {fatal(nodes.ptr[call].pos "lock_all may give `DuplicateLock` or `Canceled` instead of its places: `let [a b] = @(lock_all(from to)) or_throw`")}
+    let binds=kids(s)
+    if nodes.ptr[s].a not=? 0 or binds.length =? 0 or has_flag(s NF_GLOBAL) {fatal(pos "lock_all's places are bound by name, one for each lock: `let [a b] = @(lock_all(from to)) or_throw`")}
+    loop nm in binds {
+        if nodes.ptr[nm].kind not=? 'ident' and nodes.ptr[nm].kind not=? 'hole' {fatal(nodes.ptr[nm].pos "lock_all's places are bound by name, one for each lock: `let [a b] = @(lock_all(from to)) or_throw`")}
+    }
+    let args=kids(call)
+    if args.length not=? binds.length {fatal(pos "lock_all takes {args.length} lock(s) here and the pattern names {binds.length} place(s): one name for each lock")}
+    if args.length <? 1 {fatal(pos "lock_all takes the locks to hold: `lock_all(from to)`")}
+    let b=sibling_block
+    let i=sibling_index
+    if b =? 0 or i >=? nkids(b) or kid(b i) not=? s {fatal(pos "lock_all's places are taken by a statement of their own: `let [a b] = @(lock_all(from to)) or_throw`")}
+    let stmts:array<int64>=[]
+    let receivers:array<string>=[]
+    let roots:array<int64>=[]
+    loop a in args {
+        let k=nodes.ptr[a].kind
+        if k not=? 'ident' and k not=? 'field' and k not=? 'index' {fatal(nodes.ptr[a].pos "lock_all takes locks in variables, fields or elements: bind it first (`let m = ...`)")}
+        let rsym=lookup(place_root_name(a))
+        if place_root_name(a) not=? 0 and rsym not=? 0 and syms.ptr[rsym].kind =? 'global' {fatal(nodes.ptr[a].pos "lock_all takes locks in local variables or parameters for now: '{name_of(place_root_name(a))}' is a global, which a call could replace while its place lives")}
+        roots.push(place_root_name(a))
+        receivers.push(place_receiver(a nodes.ptr[a].pos))
+        loop h in place_hidden {stmts.push(h)}
+        place_hidden=[]
+    }
+    # (the words in one array; the first lock's type decides, giving DuplicateLock or Canceled)
+    let words=mk('array' pos)
+    let items:array<int64>=[]
+    loop rn in receivers {
+        let w=bc_method(bc_ident(rn pos) "__word" [] pos)
+        add_flag(PlaceWord(nodes.ptr[w].a) NF_LOOPCOUNT)
+        items.push(w)
+    }
+    set_list(words items)
+    let status=bc_method(bc_ident(receivers[0] pos) "__lock_all" [words] pos)
+    add_flag(PlaceWord(nodes.ptr[status].a) NF_LOOPCOUNT)
+    let p=mk('propagate' nodes.ptr[init].pos)
+    nodes.ptr[p].a=int32(status)
+    let discard=mk('assign' pos)
+    nodes.ptr[discard].op=int32(47)
+    nodes.ptr[discard].a=int32(mk('hole' pos))
+    nodes.ptr[discard].b=int32(p)
+    let st=discard
+    check_stmt(st)
+    stmts.push(st)
+    loop j in [0..binds.length) {
+        let nm=binds[j]
+        if nodes.ptr[nm].kind =? 'hole' {
+            place_count += 1
+            nodes.ptr[nm].name=int32(intern("$unused{place_count}"))
+        }
+        let take=bc_method(bc_ident(receivers[j] pos) "__take" [] nodes.ptr[args[j]].pos)
+        add_flag(PlaceWord(nodes.ptr[take].a) NF_LOOPCOUNT)
+        nodes.ptr[take].aux2=int32(AUX2_PLACE)
+        loop t in place_take(PlaceWord(nodes.ptr[nm].name) take b i pos roots[j]) {stmts.push(t)}
+    }
+    let block=bc_block(stmts pos)
+    nodes.ptr[block].aux=5
+    nodes.ptr[s]=nodes.ptr[block]
+    true
+}
+# The index of the last statement after i using the place; the checks over i+1..last.
+place_range=(b:PlaceWord i:PlaceWord name:PlaceWord root:PlaceWord pos:PlaceWord):>PlaceWord=>$unsafe {
+    let last=i
+    let names=dict<int64 bool>()
+    names[name]=true
+    loop j in [i + 1..nkids(b)) {
+        let st=kid(b j)
+        if place_names_used(st names) not=? 0 {last=j}
+        if nodes.ptr[st].kind =? 'vardecl' and PlaceWord(nodes.ptr[st].name) =? name {break}
+    }
+    loop j in [i + 1..last + 1) {place_scan(kid(b j) name root false false)}
+    last
+}
+place_lends=(c:PlaceWord root:PlaceWord):>bool=>$unsafe {
+    nodes.ptr[c].kind =? 'call' and nodes.ptr[c].aux2 =? int32(AUX2_PLACE) and nodes.ptr[PlaceWord(nodes.ptr[c].a)].kind =? 'field' and place_route_base(PlaceWord(nodes.ptr[PlaceWord(nodes.ptr[c].a)].a)) =? root
+}
+place_route_base=(n0:PlaceWord):>PlaceWord=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index' {n=PlaceWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'ident' {return 0}
+    PlaceWord(nodes.ptr[n].name)
+}
+place_scan=(n:PlaceWord name:PlaceWord root:PlaceWord arg:bool closure:bool):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    let nm=name_of(name)
+    if k =? 'ident' and PlaceWord(nodes.ptr[n].name) =? name and closure {
+        fatal(nodes.ptr[n].pos "a function cannot keep the place '{nm}', which ends after its last use here: copy its value first (`let v = {nm}`)")
+    }
+    if has_flag(n NF_AT) and place_route_base(n) =? name and not arg {
+        fatal(nodes.ptr[n].pos "the place '{nm}' cannot be kept: it ends after its last use (a call can still take it, `f(@{nm})`)")
+    }
+    if root not=? 0 and has_flag(n NF_AT) and nodes.ptr[n].kind =? 'ident' and PlaceWord(nodes.ptr[n].name) =? root {
+        fatal(nodes.ptr[n].pos "'{name_of(root)}' lends the place '{nm}' until its last use: it cannot be passed whole as a place before then")
+    }
+    if root not=? 0 and k =? 'assign' and nodes.ptr[PlaceWord(nodes.ptr[n].a)].kind =? 'ident' and PlaceWord(nodes.ptr[PlaceWord(nodes.ptr[n].a)].name) =? root {
+        fatal(nodes.ptr[n].pos "'{name_of(root)}' lends the place '{nm}' until its last use: it cannot be replaced before then")
+    }
+    # (taking a second place by `let` from the same object is re-acquiring it; `match @(x.try_lock())`
+    # decides at run time, as `Busy`)
+    if root not=? 0 and k =? 'vardecl' and nodes.ptr[n].b not=? 0 and place_lends(PlaceWord(nodes.ptr[n].b) root) {
+        # (two locks reached from one variable, as two elements of an array: taken together)
+        let method=name_of(PlaceWord(nodes.ptr[PlaceWord(nodes.ptr[PlaceWord(nodes.ptr[n].b)].a)].name))
+        let both=if method =? "lock" {"; to hold two locks at once, take them together: `let [a b] = @(lock_all(x y)) or_throw`"} else {""}
+        fatal(nodes.ptr[PlaceWord(nodes.ptr[n].b)].pos "'{name_of(root)}' already lends the place '{nm}' until its last use: a second place from it waits until then{both}")
+    }
+    let inner=closure or k =? 'lambda' or k =? 'fn_'
+    place_scan(PlaceWord(nodes.ptr[n].a) name root false inner)
+    place_scan(PlaceWord(nodes.ptr[n].b) name root false inner)
+    place_scan(kid_c(n) name root false inner)
+    place_scan(kid_d(n) name root false inner)
+    loop child in kids(n) {
+        if k =? 'call' and nodes.ptr[child].kind =? 'namedarg' {
+            place_scan(PlaceWord(nodes.ptr[child].a) name root true inner)
+            continue
+        }
+        place_scan(child name root k =? 'call' inner)
+    }
+}
+# `match @(recv.m(args)) {...}` for a method that may give another value first (`Busy`):
+#     { let $recvN = @recv; let $argN = arg...; let $rN = $recvN.m($argN...)
+#       match $rN { <Busy> => ...; <bool> => { let a = @($recvN.m$acquire($argN...)); ... } } }
+# The arm typed with the place's type (`a:int64 => ...`) is the one that takes it, a place
+# binding as `let a = @(...)` (released after its last use there).
+place_match=(m:PlaceWord expected:PlaceWord):>PlaceWord=>$unsafe {
+    let call=PlaceWord(nodes.ptr[m].a)
+    let pos=nodes.ptr[m].pos
+    let parts=place_call_parts(call)
+    let recv=parts[0]
+    let mname=name_of(parts[1])
+    let probe=clone(call)
+    nodes.ptr[probe].aux2=int32(AUX2_PLACE_TAKEN)
+    place_call_decl=0
+    check_expr(probe 0);
+    if not place_methods.has(place_call_decl) {fatal(nodes.ptr[call].pos "'{mname}' gives a value, not a place: drop the `@(...)`")}
+    let info=place_methods[place_call_decl]
+    if not info.fails {fatal(nodes.ptr[call].pos "'{mname}' always gives its place: take it with `let a = @(x.{mname}())`")}
+    let route=clone(recv)
+    let at=if info.at >? 0 and pos_in_lib(info.at) {info.at} else {pos}
+    loop f in info.route {
+        let fe=mk('field' at)
+        nodes.ptr[fe].a=int32(route)
+        nodes.ptr[fe].name=int32(f)
+        route=fe
+    }
+    let pt=prune(check_expr(route 0))
+    let stmts:array<int64>=[]
+    place_count += 1
+    let rn="$recv{place_count}"
+    let r=clone(recv)
+    add_flag(r NF_MUT | NF_AT)
+    stmts.push(bc_let(rn r pos))
+    let args:array<int64>=[]
+    loop c in kids(call) {
+        let v=if nodes.ptr[c].kind =? 'namedarg' {PlaceWord(nodes.ptr[c].a)} else {c}
+        if has_flag(v NF_AT) or has_flag(v NF_LITERAL) {
+            args.push(c)
+            continue
+        }
+        place_count += 1
+        let an="$arg{place_count}"
+        stmts.push(bc_let(an v nodes.ptr[v].pos))
+        if nodes.ptr[c].kind =? 'namedarg' {
+            nodes.ptr[c].a=int32(bc_ident(an nodes.ptr[v].pos))
+            args.push(c)
+        }
+        else {args.push(bc_ident(an nodes.ptr[v].pos))}
+    }
+    set_list(call args)
+    place_count += 1
+    let decided="$decided{place_count}"
+    let first=place_member_call(call rn mname nodes.ptr[call].pos)
+    nodes.ptr[first].aux2=int32(AUX2_PLACE_TAKEN)
+    stmts.push(bc_let(decided first pos))
+    let taken:PlaceWord=0
+    loop arm in kids(m) {
+        let p=kid(arm 0)
+        if nodes.ptr[p].kind not=? 'ptype' or nodes.ptr[p].name =? 0 or nodes.ptr[p].a =? 0 {continue}
+        if not type_eq(prune(resolve_type(PlaceWord(nodes.ptr[p].a))) pt) {continue}
+        if taken not=? 0 {fatal(nodes.ptr[arm].pos "the place is taken by one arm")}
+        taken=arm
+        let bind=mk('vardecl' nodes.ptr[p].pos)
+        nodes.ptr[bind].name=nodes.ptr[p].name
+        let acquire=place_member_call(call rn "{mname}$acquire" nodes.ptr[call].pos)
+        nodes.ptr[acquire].aux2=int32(AUX2_PLACE)
+        nodes.ptr[bind].b=int32(acquire)
+        nodes.ptr[p].name=0
+        let lent=mk('tname' nodes.ptr[p].pos)
+        nodes.ptr[lent].name=int32(intern("bool"))
+        nodes.ptr[p].a=int32(lent)
+        let body=PlaceWord(nodes.ptr[arm].b)
+        if nodes.ptr[body].kind =? 'block' {set_list(body [bind kids(body)...])}
+        else {nodes.ptr[arm].b=int32(bc_block([bind bc_stmt(body nodes.ptr[body].pos)] nodes.ptr[body].pos))}
+    }
+    if taken =? 0 {fatal(pos "this match has no arm taking the place: `a:{dt(pt)} => ...`")}
+    let inner=mk('match_' pos)
+    nodes.ptr[inner]=nodes.ptr[m]
+    nodes.ptr[inner].a=int32(bc_ident(decided pos))
+    stmts.push(bc_stmt(inner pos))
+    let whole=bc_block(stmts pos)
+    nodes.ptr[m]=nodes.ptr[whole]
+    if has_flag(inner NF_STMT) {
+        check_block(m 0 false);
+        return T_VOID
+    }
+    check_block(m expected true)
+}
