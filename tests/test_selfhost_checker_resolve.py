@@ -186,6 +186,7 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
     # {file: text}, Jo modules a Dewy module imports by file name, in both builds.
     # Supply the resolver's direct services to every derived leaf driver.
     arguments = getattr(jo_doubles, 'arguments', ())
+    with_stderr = getattr(jo_doubles, 'with_stderr', False)
     if arguments:
         driver = jo_doubles.runtime_driver(driver)
     jo_doubles = dict(jo_doubles or {})
@@ -240,7 +241,7 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
             assert built.returncode == 0, built.stdout + built.stderr
         ran = subprocess.run([binary, *arguments], capture_output=True, timeout=60)
         assert ran.returncode == status, ran.stdout[-6000:] + ran.stderr
-        outputs.append(ran.stdout)
+        outputs.append(ran.stdout + ran.stderr if with_stderr else ran.stdout)
     assert outputs[0] == outputs[1]
     return outputs[0]
 

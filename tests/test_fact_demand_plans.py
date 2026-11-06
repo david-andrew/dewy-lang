@@ -7,7 +7,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 def test_fact_plan_dependencies(compiler, tmp_path):
     source = tmp_path / 'fact_plans.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / name}'\n" for name in
-                              ('facts.jo', 'effect_graph.dewy', 'effects.jo', 'places.jo', 'place_routes.dewy', 'types.jo',
+                              ('facts.jo', 'facts_probes.dewy', 'effect_graph.dewy', 'effects.jo', 'places.jo', 'place_routes.dewy', 'types.jo',
                                'checker_types.dewy', 'refinement_types.dewy', 'check.jo', 'effect_types.dewy',
                                'exact.jo', 'ast.jo', 'floats.jo')) + '''
 init_types()

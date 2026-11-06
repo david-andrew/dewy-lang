@@ -61,17 +61,20 @@ def modules_for(source, output, leaf="lower_group", flags=()):
     # otherwise the helper's Jo imports and Dewy's direct imports create two
     # copies of checker state. Double-quoted service imports stay fixed while
     # compare_leaf switches the single-quoted leaf import.
+    # A family of leaves may be compared together (one tuple of stems, one compiler pair).
+    leaves = (leaf,) if isinstance(leaf, str) else tuple(leaf)
+    family = '|'.join(re.escape(stem) for stem in leaves)
     modules = {p.name: p.read_text() for p in (ROOT / 'compiler').iterdir()
                if p.suffix in ('.jo', '.dewy')}
     for name in list(modules):
-        if name.endswith('.jo') and name != leaf + '.jo':
+        if name.endswith('.jo') and name[:-3] not in leaves:
             service_leaf = name[:-3] + '.dewy'
             if service_leaf in modules:
                 modules[name] = f'use "{service_leaf}"\n'
     for name, text in list(modules.items()):
         if name.endswith('.jo'):
             modules[name] = re.sub(
-                rf"(?m)^((?:use|import) )'((?!{re.escape(leaf)}\.dewy)[^'\n]+\.dewy)'",
+                rf"(?m)^((?:use|import) )'((?!(?:{family})\.dewy)[^'\n]+\.dewy)'",
                 lambda m: m[1] + json.dumps(m[2]), text)
             # Real service modules already resolve their dependencies. Keep the
             # leaf helper from inserting a test-driver initialization cycle.

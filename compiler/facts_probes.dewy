@@ -1,0 +1,127 @@
+$runtime_checks
+from p"ast.jo" import (NF_INBOUNDS has_flag)
+from p"check.jo" import (fns)
+from p"directives.jo" import (dir_sites)
+from p"effect_control.dewy" import (effects_demand)
+from p"effect_types.dewy" import (EffectAtom)
+from p"effects.jo" import (effect_summaries)
+from p"expr.jo" import (ntype)
+from p"facts.jo" import (FactFootprint FactProbeRun FactRoute FactSlice FactState fact_capture fact_compare fact_constant fact_constructor_actuals fact_fork_entries fact_fork_seed fact_index_success fact_owner fact_parallel_bounds fact_policy fact_probe fact_probe_callees fact_probe_disjoint fact_probe_diverged fact_probe_footprints fact_probe_on fact_probe_runs fact_project fact_slice fact_slice_prepare fact_terms fact_type)
+from p"proofs.jo" import (proof_active result_active)
+from p"refine.jo" import (ref_encoded refine_active refine_fact_entry refine_requests)
+from p"refinement_types.dewy" import (FactTerm)
+from p"types.jo" import (T_INT fixed_len types)
+from p"warn_if.jo" import (wi_fact_calls)
+from p"witness.jo" import (wit_collect wit_collected wit_measure)
+
+ProbeWord:type=int64<overflow='wrap'>
+# What fact_call_effects reads of a direct callee's settled row.
+fact_footprint=(f:ProbeWord):>FactFootprint=>$unsafe {
+    if not effects_demand(f true) {return FactFootprint(1 [])}
+    if fns.ptr[f].body not=? 0 and fns.ptr[f].state not=? 2 {return FactFootprint(2 [])}
+    let writes:array<EffectAtom>=[]
+    loop event in effect_summaries[f].events {
+        if event.atom.kind =? 'opaque' or event.atom.kind =? 'escape' {return FactFootprint(3 [])}
+        if event.atom.kind =? 'write' {writes.push(event.atom)}
+    }
+    FactFootprint(4 writes)
+}
+fact_footprint_same=(a:FactFootprint b:FactFootprint):>bool=>{
+    if a.kind not=? b.kind or a.writes.length not=? b.writes.length {return false}
+    loop i in [0..a.writes.length) {
+        if a.writes[i] not=? b.writes[i] {return false}
+    }
+    true
+}
+fact_probe_note=(f:ProbeWord):>void=>{
+    if fact_probe_callees.contains(f) {return}
+    fact_probe_callees.push(f)
+    fact_probe_footprints.push(fact_footprint(f))
+}
+# Whether the facts pass would run f's body exactly as its probe did.
+fact_probe_reusable=(f:ProbeWord run:FactProbeRun):>bool=>{
+    if fact_policy not=? 'RequireStatic' or proof_active or result_active or wi_fact_calls.length >? 0 or wit_collect and not wit_measure or run.refine not=? (refine_active or refine_requests.length >? 0) {return false}
+    fact_slice_prepare(f)
+    if fact_slice.plan not=? run.plan {
+        if fact_slice.base not=? run.slice_base or fact_slice.flags.length not=? run.slice.length {return false}
+        loop i in [0..run.slice.length) {
+            if fact_slice.flags[i] not=? run.slice[i] {return false}
+        }
+    }
+    loop i in [0..run.callees.length) {
+        if not fact_footprint_same(fact_footprint(run.callees[i]) run.footprints[i]) {return false}
+    }
+    true
+}
+fact_probe_record=(n:ProbeWord proven:bool):>void=>{
+    let ok=proven
+    let old=fact_probe.get(n)
+    if old not=? none {ok=ok and old}
+    fact_probe[n]=ok
+}
+fact_probe_index=(n:ProbeWord @s:FactState index:ProbeWord length:ProbeWord):>void=>{
+    let zero=fact_constant(@s 0)
+    let proven=fact_compare(s 'le' zero index) =? 1 and fact_compare(s 'lt' index length) =? 1
+    fact_probe_record(n proven)
+    if not proven {fact_index_success(n @s index length)}
+}
+# (a check of the probe's own: the facts pass would not make this constant)
+fact_probe_divisor=(n:ProbeWord @s:FactState divisor:ProbeWord operand:ProbeWord):>void=>{
+    fact_probe_diverged=true
+    let zero=fact_constant(@s ref_encoded(0 ntype(operand)))
+    fact_probe_record(n fact_compare(s 'ne' divisor zero) =? 1)
+}
+fact_probe_route=(@s:FactState route:FactRoute values:array<int64>):>void=>$unsafe {
+    loop i in [0..route.selectors.length) {
+        let n=route.sites[i]
+        if n =? 0 or i >=? values.length or has_flag(n NF_INBOUNDS) {continue}
+        let t=fact_type(if i =? 0 {ntype(route.root)} else {route.types[i - 1]})
+        if types.ptr[t].kind not=? 'array' and types.ptr[t].kind not=? 'fixed' {continue}
+        let length=if types.ptr[t].kind =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s values[i] (-1) false T_INT)}
+        fact_probe_index(n @s route.selectors[i] length)
+    }
+}
+# Analyze f's body from an unknown entry (plus its checked parameter
+# refinements) and return the element accesses proven in bounds on every path
+# that reaches them. Nested runs are refused: the caller keeps its obligation.
+fact_probe_function=(f:ProbeWord disjoint:bool=false):>dict<int64 bool>=>$unsafe {
+    fact_probe=dict<int64 bool>()
+    if fact_owner not=? 0 or fact_probe_on or f <=? 0 or f >=? fns.length or fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 {return fact_probe}
+    let saved_proof=proof_active
+    let saved_result=result_active
+    proof_active=false
+    result_active=false
+    fact_probe_on=true
+    fact_probe_disjoint=if disjoint {f} else {0}
+    fact_owner=f
+    fact_terms=[FactTerm()]
+    fact_constructor_actuals=dict<int64 array<int64>>()
+    let state=FactState()
+    let refine=refine_active or refine_requests.length >? 0
+    if refine {refine_fact_entry(f @state)}
+    if fact_fork_entries.length >? 0 or fact_parallel_bounds.length >? 0 {fact_fork_seed(f @state)}
+    fact_slice_prepare(f)
+    fact_probe_diverged=fact_slice.probe_only
+    fact_probe_callees=[]
+    fact_probe_footprints=[]
+    let reported=wit_collected + dir_sites.length
+    fact_capture(ProbeWord(fns.ptr[f].body) @state);
+    if not disjoint and fact_policy =? 'RequireStatic' and not saved_proof and not saved_result and not (wit_collect and not wit_measure) and not fact_probe_diverged and reported =? wit_collected + dir_sites.length {
+        let all=true
+        loop [_ ok] in fact_probe {
+            if not ok {all=false}
+        }
+        if all {fact_probe_runs[f]=FactProbeRun(fact_probe refine fact_slice.plan fact_slice.flags fact_slice.base fact_probe_callees fact_probe_footprints)}
+    }
+    fact_probe_callees=[]
+    fact_probe_footprints=[]
+    fact_slice=FactSlice()
+    fact_owner=0
+    fact_terms=[]
+    fact_constructor_actuals=dict<int64 array<int64>>()
+    fact_probe_on=false
+    fact_probe_disjoint=0
+    proof_active=saved_proof
+    result_active=saved_result
+    fact_probe
+}

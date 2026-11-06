@@ -1,0 +1,146 @@
+use 'facts.jo'
+use 'lower_scalars.dewy'
+use 'lower_views.dewy'
+use 'lower_storage.dewy'
+use 'lower_analysis.dewy'
+use 'lower_helpers.dewy'
+use 'lower_group.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'sequence_selectors.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ide.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'ast.jo'
+use 'icount.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'lower.jo'
+use 'check.jo'
+use 'comptime.jo'
+use 'check_constant.jo'
+use 'isolation.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'places.jo'
+use 'effects.jo'
+use 'effect_library.jo'
+use 'ownership.jo'
+use 'witness.jo'
+use 'directives.jo'
+use 'warn_if.jo'
+use 'string_domains.jo'
+use 'draw_context.jo'
+use 'predicate_facts.jo'
+use 'floats.jo'
+use 'member_replay.jo'
+use 'ownership_types.dewy'
+use 'lower_primitives.dewy'
+use 'math_ops.dewy'
+use 'draw_ops.dewy'
+use 'effect_classifiers.dewy'
+use 'effect_values.dewy'
+use 'effect_control.dewy'
+use 'effect_costs.dewy'
+use 'effect_owners.dewy'
+use 'isolation_ops.dewy'
+
+# What fact_call_effects reads of a direct callee's settled row.
+fact_footprint = (f: int) -> FactFootprint:
+    if not effects_demand(f, true): return FactFootprint(1, [])
+    if fns[f].body != 0 and fns[f].state != 2: return FactFootprint(2, [])
+    writes: EffectAtom[]
+    loop event in effect_summaries[f].events:
+        if event.atom.kind == .opaque or event.atom.kind == .escape: return FactFootprint(3, [])
+        if event.atom.kind == .write: writes.push(event.atom)
+    FactFootprint(4, writes)
+fact_footprint_same = (a: FactFootprint, b: FactFootprint) -> bool:
+    if a.kind != b.kind or a.writes.len() != b.writes.len(): return false
+    loop i in [0..a.writes.len()):
+        if a.writes[i] != b.writes[i]: return false
+    true
+fact_probe_note = (f: int):
+    if fact_probe_callees.contains(f): return
+    fact_probe_callees.push(f)
+    fact_probe_footprints.push(fact_footprint(f))
+# Whether the facts pass would run f's body exactly as its probe did.
+fact_probe_reusable = (f: int, run: FactProbeRun) -> bool:
+    if fact_policy != .RequireStatic or proof_active or result_active or wi_fact_calls.len() > 0 or wit_collect and not wit_measure or run.refine != (refine_active or refine_requests.len() > 0): return false
+    fact_slice_prepare(f)
+    if fact_slice.plan != run.plan:
+        if fact_slice.base != run.slice_base or fact_slice.flags.len() != run.slice.len(): return false
+        loop i in [0..run.slice.len()):
+            if fact_slice.flags[i] != run.slice[i]: return false
+    loop i in [0..run.callees.len()):
+        if not fact_footprint_same(fact_footprint(run.callees[i]), run.footprints[i]): return false
+    true
+fact_probe_record = (n: int, proven: bool):
+    ok = proven
+    if let old = fact_probe.get(n): ok = ok and old
+    fact_probe[n] = ok
+fact_probe_index = (n: int, s: mut FactState, index: int, length: int):
+    zero = fact_constant(s, 0)
+    proven = fact_compare(s, .le, zero, index) == 1 and fact_compare(s, .lt, index, length) == 1
+    fact_probe_record(n, proven)
+    if not proven: fact_index_success(n, s, index, length)
+# (a check of the probe's own: the facts pass would not make this constant)
+fact_probe_divisor = (n: int, s: mut FactState, divisor: int, operand: int):
+    fact_probe_diverged = true
+    zero = fact_constant(s, ref_encoded(0, ntype(operand)))
+    fact_probe_record(n, fact_compare(s, .ne, divisor, zero) == 1)
+fact_probe_route = (s: mut FactState, route: FactRoute, values: int[]):
+    loop i in [0..route.selectors.len()):
+        n = route.sites[i]
+        if n == 0 or i >= values.len() or has_flag(n, NF_INBOUNDS): continue
+        t = fact_type(if i == 0: ntype(route.root) else: route.types[i - 1])
+        if types[t].kind != .array and types[t].kind != .fixed: continue
+        length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, values[i], -1, false, T_INT)
+        fact_probe_index(n, s, route.selectors[i], length)
+# Analyze f's body from an unknown entry (plus its checked parameter
+# refinements) and return the element accesses proven in bounds on every path
+# that reaches them. Nested runs are refused: the caller keeps its obligation.
+fact_probe_function = (f: int, disjoint: bool = false) -> {int: bool}:
+    fact_probe = {}
+    if fact_owner != 0 or fact_probe_on or f <= 0 or f >= fns.len() or fns[f].state != 2 or fns[f].body == 0: return fact_probe
+    saved_proof = proof_active
+    saved_result = result_active
+    proof_active = false
+    result_active = false
+    fact_probe_on = true
+    fact_probe_disjoint = if disjoint: f else: 0
+    fact_owner = f
+    fact_terms = [FactTerm()]
+    fact_constructor_actuals = {}
+    state = FactState()
+    refine = refine_active or refine_requests.len() > 0
+    if refine: refine_fact_entry(f, state)
+    if fact_fork_entries.len() > 0 or fact_parallel_bounds.len() > 0: fact_fork_seed(f, state)
+    fact_slice_prepare(f)
+    fact_probe_diverged = fact_slice.probe_only
+    fact_probe_callees = []
+    fact_probe_footprints = []
+    reported = wit_collected + dir_sites.len()
+    fact_capture(int(fns[f].body), state)
+    if not disjoint and fact_policy == .RequireStatic and not saved_proof and not saved_result and not (wit_collect and not wit_measure) and not fact_probe_diverged and reported == wit_collected + dir_sites.len():
+        all = true
+        loop _, ok in fact_probe:
+            if not ok: all = false
+        if all: fact_probe_runs[f] = FactProbeRun(fact_probe, refine, fact_slice.plan, fact_slice.flags, fact_slice.base, fact_probe_callees, fact_probe_footprints)
+    fact_probe_callees = []
+    fact_probe_footprints = []
+    fact_slice = FactSlice()
+    fact_owner = 0
+    fact_terms = []
+    fact_constructor_actuals = {}
+    fact_probe_on = false
+    fact_probe_disjoint = 0
+    proof_active = saved_proof
+    result_active = saved_result
+    fact_probe
