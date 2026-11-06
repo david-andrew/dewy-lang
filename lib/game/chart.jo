@@ -2,21 +2,21 @@
 # holds what to show; draw_chart draws it into a rectangle (in a game's draw, a live graph), and
 # chart_image makes a picture of it with no window (a script's chart, saved with save_png).
 #
-#   c = Chart(title = "Daily sales", x_label = "day", y_label = "revenue")
-#   c.line(days, revenue, "revenue")
-#   c.line(days, weekly_mean, "7-day mean")
-#   c.points(xs, ys, "orders")
-#   save_png(chart_image(c, 800, 500), "sales.png")
+#   c = Chart(title = 
+#   c.line(days, revenue, 
+#   c.line(days, weekly_mean, 
+#   c.points(xs, ys, 
+#   save_png(chart_image(c, 800, 500), 
 #
-#   c2 = Chart(title = "Units by region")
-#   c2.bars(["north", "south", "east"], [120.0, 95.0, 143.0], "2026")
-#   c3 = Chart(title = "Prices")
+#   c2 = Chart(title = 
+#   c2.bars([
+#   c3 = Chart(title = 
 #   c3.histogram(prices, 30)
 #
 # Each series given no color takes the next of a palette. The axes fit what is shown (from 0 for
 # bars and histograms) unless x_min, x_max, y_min or y_max say otherwise; equal_axes keeps a unit
 # as long across as up (a trajectory's true shape). Whole numbers and f32s (a vec2's parts) may
-# be given as well as f64s. c.annotate(x, y, "apex") writes a word at a point.
+# be given as well as f64s. c.annotate(x, y, 
 
 struct Chart:
     title = ""
@@ -130,7 +130,7 @@ draw_chart = (c: Chart, r: Rect):
         lc = c
         lc.log_y = false
         lc.__exp_ticks = true
-        loop mut s in lc.series: s.ys = [loop y in s.ys: (if y > 0.0: log10(y) else: NAN)]
+        loop mut s in lc.series: s.ys = [loop y in s.ys: (if y > 0.0: log10(y) else: __NAN)]
         if let v = c.y_min: lc.y_min = log10(max(v, 1e-300))
         if let v = c.y_max: lc.y_max = log10(max(v, 1e-300))
         draw_chart(lc, r)
@@ -142,10 +142,10 @@ draw_chart = (c: Chart, r: Rect):
     loop s in c.series:
         if s.kind == 2: bars_n += 1
     cat = bars_n > 0
-    x0 = INF
-    x1 = -INF
-    y0 = INF
-    y1 = -INF
+    x0 = __INF
+    x1 = -__INF
+    y0 = __INF
+    y1 = -__INF
     loop s in c.series:
         if s.kind == 4: continue
         loop i in [0..min(s.xs.len(), s.ys.len())):

@@ -1,0 +1,20 @@
+# Named limits of float64 and float32, and the guards they make.
+$finite_floats
+same = (x:float64):>float64 => x
+guarded = (s:string):>float64 => {
+    let x = to_float(s) ?? 0.0
+    if float64.min <=? x <=? float64.max { return same(x) }
+    return 0.0
+}
+$assert float64.max >? 1.0
+$assert float64.min =? -float64.max
+$assert float32.max <? 1e39
+$assert 1.0 + float64.epsilon >? 1.0
+$assert 1.0 + float64.epsilon / 2.0 =? 1.0
+main = () => {
+    printl("{float64.max} {float64.min} {float64.min_positive} {float64.min_subnormal}")
+    printl("{float64.epsilon} {float64.max_exact_int}")
+    printl("{float32.max} {float32.min} {float32.min_positive} {float32.min_subnormal}")
+    printl("{float32.epsilon} {float32.max_exact_int}")
+    printl("{guarded("1.5")} {guarded("inf")} {guarded("nan")}")
+}

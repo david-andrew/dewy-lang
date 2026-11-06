@@ -985,6 +985,11 @@ gives NaN, and −0.0 is below 0.0; an array's `min` and `max` give NaN when any
 element is NaN. `floor`, `ceil`, `trunc` and `round` keep the sign of a zero result
 (`ceil(-0.5)` is `-0.0`), and `sign` returns a zero or NaN unchanged.
 
+`float64` and `float32` name their limits: `.max` and `.min` (the most negative
+finite value, as `int64.min` is), `.min_positive` (the smallest normal),
+`.min_subnormal`, `.epsilon` (the gap from 1.0 to the next value), `.max_exact_int`
+(every integer up to it is exact, as a float), `.inf` and `.nan`.
+
 Four settings (see "Directives") change the float policy of a scope.
 `$fast_math` permits reassociation and contraction (the backends do neither
 yet, so it currently changes no result). `$no_nan` makes every float operation
@@ -1010,7 +1015,7 @@ Guards on locals and constant operands prove most obligations:
 ```dewy
 $finite_floats
 ratio = (a:float64 b:float64):>float64 => {
-    if 1.0 <=? b and -1e300 <? a <? 1e300 return a/b   # proven: no check
+    if 1.0 <=? b and float64.min <=? a <=? float64.max return a/b   # proven: no check
     return 0.0
 }
 average = (total:float64 n:float64):>float64 => total/n   # unproven

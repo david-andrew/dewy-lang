@@ -31,7 +31,7 @@ ml_decls: str[]              # struct and function definitions, in dependency or
 ml_done: {str: bool} = {}    # declarations already made (by name)
 ml_done_fns: {int: bool} = {}
 ml_pending: int[]
-ml_stage = ""                # "vertex", "fragment", "compute" or "kernel"
+ml_stage = ""                # 
 ml_utype = 0                 # the uniforms' type: its values are addresses
 ml_lref: {int: str} = {}     # locals holding the uniforms (or a part): their address
 ml_temps = 0
@@ -85,8 +85,8 @@ ml_struct = (t: int, pos: int):
 
 ml_float = (x: f64) -> str:
     if x != x: return "NAN"
-    if x == INF: return "INFINITY"
-    if x == -INF: return "(-INFINITY)"
+    if x == __INF: return "INFINITY"
+    if x == -__INF: return "(-INFINITY)"
     s = "{f32(x)}"
     if find(s, ".") < 0 and find(s, "e") < 0: s += ".0"
     s + "f"
@@ -102,7 +102,7 @@ ml_fn_name = (f: int) -> str: "f_{gl_name(name_of(int(nodes[int(fns[f].decl)].na
 
 # ---------------- memory (uniforms, vertices, GPU buffers) ----------------
 # where a value is: the address of a buffer of words, plus a byte offset (c a constant, d an
-# expression added to it, or "")
+# expression added to it, or 
 struct MlRef:
     base: str
     c: int
@@ -177,7 +177,7 @@ ml_read = (t0: int, base: str, c: int, d: str, pos: int) -> str:
     ml_err(pos, "type {dt(t)} cannot be read by a shader")
     ""
 
-# the uniforms (or a part of them) an expression stands for, if it does (base "" if not)
+# the uniforms (or a part of them) an expression stands for, if it does (base 
 ml_ref = (e: int) -> MlRef:
     k = nodes[e].kind
     if k == .ident and nodes[e].aux == i32(int(SK.local)):

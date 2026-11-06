@@ -8346,6 +8346,8 @@ ident_unknown = (n: int, expected: int, nm: int):
     if braced_alone(nodes[n].pos, len(name_of(nm))):
         escaped = jd(nodes[n].pos, "\{\{{name_of(nm)}}}}}", "\\\{{name_of(nm)}\\}")
         fatal(nodes[n].pos, "unknown name '{name_of(nm)}': `\{{name_of(nm)}}` in a string puts in the value of {name_of(nm)}; for the braces in the text (a tag), write `{escaped}`, or make it a raw string, r\"...\"{sug}")
+    if name_of(nm) == "INF" and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "unknown name `INF`; infinity is `float64.inf`")
+    if name_of(nm) == "NAN" and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "unknown name `NAN`; not a number is `float64.nan`")
     if name_of(nm) == "Cancelled": fatal(nodes[n].pos, "unknown name `Cancelled`; use `Canceled` (US spelling)")
     fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{private_hint(nm)}{sug}")
 # An interpolation as written in a string, after its `{` (not `printl(x)`'s
@@ -8739,6 +8741,19 @@ member_module = (n: int, bt: int, expected: int, is_callee: bool) -> int:
     t = check_expr_in_module(n, m, expected)
     last_checked = n
     return t
+float_constant_named = (name: str) -> bool: name in ["max", "min", "min_positive", "min_subnormal", "epsilon", "max_exact_int", "inf", "nan"]
+
+# `float64.max` and the rest; `min` is the most negative finite value, as `int64.min` is
+float_constant = (name: str, wide: bool) -> f64:
+    if name == "max": return if wide: 1.7976931348623157e308 else: 3.4028234663852886e38
+    if name == "min": return if wide: -1.7976931348623157e308 else: -3.4028234663852886e38
+    if name == "min_positive": return if wide: 2.2250738585072014e-308 else: 1.1754943508222875e-38
+    if name == "min_subnormal": return if wide: 5e-324 else: 1.401298464324817e-45
+    if name == "epsilon": return if wide: 2.220446049250313e-16 else: 1.1920928955078125e-07
+    if name == "max_exact_int": return if wide: 9007199254740992.0 else: 16777216.0
+    if name == "inf": return __INF
+    __NAN
+
 member_type = (n: int, bt: int, expected: int, is_callee: bool, bypass: mut bool) -> int:
     fname = int(nodes[n].name)
     t = 0
@@ -8765,6 +8780,13 @@ member_type = (n: int, bt: int, expected: int, is_callee: bool, bypass: mut bool
         # Keep the bound's type when a constant/default is cloned and checked again.
         nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(lit), aux = i32(int(CV.int_)), aux2 = 1, type = i32(tt))
         if not types[tt].sign and value < 0: add_flag(lit, NF_U64)
+        check_expr(lit, tt)
+        t = tt
+    else if tt != 0 and is_float(tt) and float_constant_named(name_of(fname)):
+        if ide_on: ide_ref(nodes[n].pos, fname, IK_CONST, 0, tt, 0)
+        lit = mk(.float_lit, nodes[n].pos)
+        nodes[lit].fval = float_constant(name_of(fname), int(types[tt].bits) == 64)
+        nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(lit), aux = i32(int(CV.float_)), aux2 = 1, type = i32(tt))
         check_expr(lit, tt)
         t = tt
     else if tt != 0 and types[tt].kind == .struct_ and not is_callee and dewy_type_method(int(structs[int(types[tt].st)].decl), fname) >= 0:

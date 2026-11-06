@@ -47,7 +47,7 @@ __big_norm = (m0: f64, e0: int) -> Big:
 # the f64 nearest a Big (infinity past 1.8e308, 0 below 1e-308)
 to_f64 = (b: Big) -> f64:
     if b.m == 0.0: return 0.0
-    if b.e > 308: return b.m * INF
+    if b.e > 308: return b.m * __INF
     if b.e < -330: return 0.0
     if b.e < -300: return b.m * pow(10.0, f64(b.e + 300)) * 1e-300
     b.m * pow(10.0, f64(b.e))

@@ -2193,13 +2193,13 @@ $runtime_assert(cpu(h).data =? [2.5 3.5 4.5 5.5])
 $runtime_assert(cpu(.-(half.(g) .* 2.0 .+ 1.0)).data =? [-2.5 -3.5 -4.5 -5.5])
 $runtime_assert(cpu(.+g).data =? [1.0 2.0 3.0 4.0])
 $runtime_assert(cpu(hypot.(gpu([3.0 5.0]) gpu([4.0 12.0]))).data =? [5.0 13.0])
-let magnitudes=cpu(hypot.(gpu([3e30 3e-30 0.0 -3e30 INF NAN NAN])
-                         gpu([4e30 4e-30 -0.0 4e30 NAN INF 1.0]))).data
+let magnitudes=cpu(hypot.(gpu([3e30 3e-30 0.0 -3e30 float64.inf float64.nan float64.nan])
+                         gpu([4e30 4e-30 -0.0 4e30 float64.nan float64.inf 1.0]))).data
 $runtime_assert(abs(magnitudes[0]/5e30-1.0) <? 1e-6)
 $runtime_assert(abs(magnitudes[1]/5e-30-1.0) <? 1e-6)
 $runtime_assert(magnitudes[2] =? 0.0 and 1.0/magnitudes[2] >? 0.0)
 $runtime_assert(abs(magnitudes[3]/5e30-1.0) <? 1e-6)
-$runtime_assert(magnitudes[4] =? INF and magnitudes[5] =? INF and is_nan(magnitudes[6]))
+$runtime_assert(magnitudes[4] =? float64.inf and magnitudes[5] =? float64.inf and is_nan(magnitudes[6]))
 let signed_zeros=cpu(.-gpu([0.0 -0.0])).data
 $runtime_assert(1.0/signed_zeros[0] <? 0.0 and 1.0/signed_zeros[1] >? 0.0)
 $runtime_assert(sum(h) =? 16.0 and min(h) =? 2.5 and max(h) =? 5.5)
@@ -6106,7 +6106,7 @@ loop i in [0..2) {loop j in [0..3) {$runtime_assert(product[i j] =? sum(row(ints
 let cancellation=reshape([float64(1e16) 1.0 (-1e16) 1.0 3.0] 1 5)*reshape([float64(1.0) 1.0 1.0 1.0 1.0] 5 1)
 $runtime_assert(cancellation[0 0] =? 4.0)
 let zero=reshape([float64(0.0) (-0.0) 0.0 0.0 0.0] 1 5)
-let nonfinite=reshape([INF NAN INF NAN INF] 5 1)
+let nonfinite=reshape([float64.inf float64.nan float64.inf float64.nan float64.inf] 5 1)
 let strict=(zero*nonfinite)[0 0]
 $runtime_assert(strict not=? strict)
 let finite=reshape([float64(2.0) 3.0 4.0 5.0 6.0] 5 1)

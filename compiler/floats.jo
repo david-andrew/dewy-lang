@@ -4,7 +4,7 @@ use 'checker_program.dewy'
 use 'checker_state.dewy'
 use 'checker_tokens.dewy'
 use 'refinement_types.dewy'
-# IEEE 754 float policy (docs/design/decisions.md, "Floats (Q8)").
+# IEEE 754 float policy (docs/design/decisions.md, 
 #
 # Strict IEEE is the default and costs nothing here: NaN, infinities, signed
 # zero and subnormals are values, and nothing reassociates or contracts float
@@ -14,8 +14,8 @@ use 'refinement_types.dewy'
 #   by the interval analysis below, else a compile error or a check of the
 #   scope's policy, one that makes its function panic;
 # - `$no_nan` and `$no_inf` (and the `$finite_floats` bundle): inside their
-#   scope, an operation that could create a NaN (IEEE "invalid") or an
-#   infinity (IEEE "overflow" or "division by zero") from operands that are
+#   scope, an operation that could create a NaN (IEEE 
+#   infinity (IEEE 
 #   neither is an obligation, proven by a small interval analysis or deferred
 #   to a runtime check by the scope's policy (`dir_defer`).
 # The analysis runs only over the functions whose bodies lie in such a scope:
@@ -341,19 +341,22 @@ ff_mode_at = (p: int) -> int:
     if dir_value(dir_name_no_inf, p) == 1: m = m | FF_INF
     m
 
+# (`float64.nan` is the one literal with no number to bound)
+ff_literal = (x: f64) -> FR: if x == x: FR(x, x) else: FR(-__INF, __INF, true)
+
 ff_top = () -> FR:
     # (finite under `$no_inf`, and a NaN unless `$no_nan` holds too: a caller outside the scope
     # proves nothing it cannot follow)
     if ff_assume & FF_INF != 0: return FR(-FF_MAX, FF_MAX, ff_assume & FF_NAN == 0)
-    FR(-INF, INF, ff_assume & FF_NAN == 0)
+    FR(-__INF, __INF, ff_assume & FF_NAN == 0)
 
 # a value entering the scope: it may be NaN
 ff_enter = () -> FR:
-    FR(-INF, INF, true)
+    FR(-__INF, __INF, true)
 
 ff_hull = (a: FR, b: FR) -> FR: FR(min(a.lo, b.lo), max(a.hi, b.hi), a.nan or b.nan)
 ff_has = (a: FR, x: f64) -> bool: a.lo <= x and x <= a.hi
-ff_may_inf = (a: FR) -> bool: a.lo == -INF or a.hi == INF
+ff_may_inf = (a: FR) -> bool: a.lo == -__INF or a.hi == __INF
 ff_may_zero = (a: FR) -> bool: ff_has(a, 0.0)
 # (the finite values of a: the ends an infinity can be approached from)
 ff_finite = (a: FR) -> FR: FR(max(a.lo, -FF_MAX), min(a.hi, FF_MAX))
@@ -432,7 +435,7 @@ ff_obligation = (n: int, kind: int, what: str, by: str = ""):
         return
     if kind == FF_ENTER: err_notes.push((-1, "help: a value entering `$no_nan` (a parameter of a function used as a value, a field, an element, a call's result) may be NaN: test it first (`if x =? x`, `if 0.0 <=? x`), or check it at run time with `$runtime_checks`"))
     else if kind == FF_ENTER_INF: err_notes.push((-1, "help: a value entering `$no_inf` may be infinite: bound it with a guard, or check it at run time with `$runtime_checks`"))
-    else: err_notes.push((-1, "help: bound the operands with a guard (`if b not=? 0.0`, `if x <? 1e300`), or opt this scope out with `${tag}=false`"))
+    else: err_notes.push((-1, "help: bound the operands with a guard (`if b not=? 0.0`, `if float64.min <=? x <=? float64.max` for a finite x, narrower where a result must stay finite too), or opt this scope out with `${tag}=false`"))
     fatal(p, claim)
 
 # Bounds of a op b, with the obligations of the settings in force at n.
@@ -445,15 +448,15 @@ ff_arith = (n: int, op: Tok, a: FR, b: FR) -> FR:
 ff_arith_signed = (n: int, m: int, sym: str, a: FR, b: FR, op: Tok) -> FR:
     nan = false
     inf = false
-    r = FR(-INF, INF)
+    r = FR(-__INF, __INF)
     if op == .plus:
-        nan = a.hi == INF and b.lo == -INF or a.lo == -INF and b.hi == INF
+        nan = a.hi == __INF and b.lo == -__INF or a.lo == -__INF and b.hi == __INF
         fa = ff_finite(a)
         fb = ff_finite(b)
         lo = fa.lo + fb.lo
         hi = fa.hi + fb.hi
-        inf = lo == -INF or hi == INF
-        r = FR(ff_end(a.lo + b.lo, -INF), ff_end(a.hi + b.hi, INF))
+        inf = lo == -__INF or hi == __INF
+        r = FR(ff_end(a.lo + b.lo, -__INF), ff_end(a.hi + b.hi, __INF))
     else if op == .star:
         nan = ff_may_zero(a) and ff_may_inf(b) or ff_may_inf(a) and ff_may_zero(b)
         fa = ff_finite(a)
@@ -462,12 +465,12 @@ ff_arith_signed = (n: int, m: int, sym: str, a: FR, b: FR, op: Tok) -> FR:
         p2 = fa.lo * fb.hi
         p3 = fa.hi * fb.lo
         p4 = fa.hi * fb.hi
-        inf = max(max(p1, p2), max(p3, p4)) == INF or min(min(p1, p2), min(p3, p4)) == -INF
-        q1 = ff_end(a.lo * b.lo, INF)
-        q2 = ff_end(a.lo * b.hi, INF)
-        q3 = ff_end(a.hi * b.lo, INF)
-        q4 = ff_end(a.hi * b.hi, INF)
-        r = FR(min(min(ff_end(a.lo * b.lo, -INF), ff_end(a.lo * b.hi, -INF)), min(ff_end(a.hi * b.lo, -INF), ff_end(a.hi * b.hi, -INF))), max(max(q1, q2), max(q3, q4)))
+        inf = max(max(p1, p2), max(p3, p4)) == __INF or min(min(p1, p2), min(p3, p4)) == -__INF
+        q1 = ff_end(a.lo * b.lo, __INF)
+        q2 = ff_end(a.lo * b.hi, __INF)
+        q3 = ff_end(a.hi * b.lo, __INF)
+        q4 = ff_end(a.hi * b.hi, __INF)
+        r = FR(min(min(ff_end(a.lo * b.lo, -__INF), ff_end(a.lo * b.hi, -__INF)), min(ff_end(a.hi * b.lo, -__INF), ff_end(a.hi * b.hi, -__INF))), max(max(q1, q2), max(q3, q4)))
     else:
         nan = ff_may_zero(a) and ff_may_zero(b) or ff_may_inf(a) and ff_may_inf(b)
         if ff_may_zero(b):
@@ -480,12 +483,12 @@ ff_arith_signed = (n: int, m: int, sym: str, a: FR, b: FR, op: Tok) -> FR:
             p2 = fa.lo / fb.hi
             p3 = fa.hi / fb.lo
             p4 = fa.hi / fb.hi
-            inf = max(max(p1, p2), max(p3, p4)) == INF or min(min(p1, p2), min(p3, p4)) == -INF
+            inf = max(max(p1, p2), max(p3, p4)) == __INF or min(min(p1, p2), min(p3, p4)) == -__INF
             q1 = a.lo / b.lo
             q2 = a.lo / b.hi
             q3 = a.hi / b.lo
             q4 = a.hi / b.hi
-            r = FR(min(min(ff_end(q1, -INF), ff_end(q2, -INF)), min(ff_end(q3, -INF), ff_end(q4, -INF))), max(max(ff_end(q1, INF), ff_end(q2, INF)), max(ff_end(q3, INF), ff_end(q4, INF))))
+            r = FR(min(min(ff_end(q1, -__INF), ff_end(q2, -__INF)), min(ff_end(q3, -__INF), ff_end(q4, -__INF))), max(max(ff_end(q1, __INF), ff_end(q2, __INF)), max(ff_end(q3, __INF), ff_end(q4, __INF))))
     if nan and m & FF_NAN != 0: ff_obligation(n, FF_NAN, "`{sym}` produces no NaN")
     if inf and m & FF_INF != 0:
         what = if sym == "/" and ff_may_zero(b): "the divisor is nonzero" else: "`{sym}` does not overflow"
@@ -507,7 +510,7 @@ ff_math = (n: int, name: str, args: FR[]) -> FR:
         inf = ff_may_zero(x)
     else if name == "exp":
         inf = x.hi > 709.0
-        r = FR(0.0, if inf: INF else: 1.0e308)
+        r = FR(0.0, if inf: __INF else: 1.0e308)
     else if name == "sin" or name == "cos":
         nan = ff_may_inf(x)
         r = FR(-1.0, 1.0)
@@ -562,7 +565,7 @@ ff_eval_node = (n: int) -> FR:
     if n <= 0: return ff_top()
     k = nodes[n].kind
     t = ntype(n)
-    if k == .float_lit: return FR(nodes[n].fval, nodes[n].fval)
+    if k == .float_lit: return ff_literal(nodes[n].fval)
     if k == .int_lit:
         if t > 0 and is_float(t): return FR(f64(nodes[n].ival), f64(nodes[n].ival))
         return ff_top()
@@ -591,7 +594,7 @@ ff_eval_node = (n: int) -> FR:
         a = ff_use(kid(n, 0), a)
         m = ff_mode_at(nodes[n].pos)
         if a.lo < 0.0 and m & FF_NAN != 0: ff_obligation(n, FF_NAN, "the square root's operand is not negative")
-        return FR(0.0, ff_end(sqrt(max(a.hi, 0.0)), INF), m & FF_NAN == 0 and (a.nan or a.lo < 0.0))
+        return FR(0.0, ff_end(sqrt(max(a.hi, 0.0)), __INF), m & FF_NAN == 0 and (a.nan or a.lo < 0.0))
     if k == .call and nodes[n].sym > 0:
         args: FR[]
         loop c in kids(n): args.push(ff_eval(c))
@@ -617,7 +620,7 @@ ff_eval_node = (n: int) -> FR:
                 loop i in 0.. and c in kids(n): args[i] = ff_use(c, args[i])
             return ff_math(n, name, args)
         if decl > 0 and scope != 0:
-            hi = if scope & FF_INF != 0: FF_MAX else: INF
+            hi = if scope & FF_INF != 0: FF_MAX else: __INF
             return FR(-hi, hi, scope & FF_NAN == 0)
         return ff_enter()
     if k == .call and ff_float_or_opt(t):
@@ -808,7 +811,7 @@ ff_refine_test = (c: int, holds: bool):
     if name == "is_finite" and holds:
         ff_bound(x, .le, limit, true)
         ff_bound(x, .ge, below, true)
-    else if name == "is_nan" and not holds: ff_bound(x, .eq, FR(-INF, INF), true)
+    else if name == "is_nan" and not holds: ff_bound(x, .eq, FR(-__INF, __INF), true)
     else if name == "is_inf" and not holds:
         ff_bound(x, .le, limit, false)
         ff_bound(x, .ge, below, false)
@@ -816,7 +819,7 @@ ff_refine_test = (c: int, holds: bool):
 # (bounds of an operand already evaluated: constants and tracked locals only)
 ff_eval_pure = (n: int) -> FR:
     k = nodes[n].kind
-    if k == .float_lit: return FR(nodes[n].fval, nodes[n].fval)
+    if k == .float_lit: return ff_literal(nodes[n].fval)
     if k == .int_lit: return FR(f64(nodes[n].ival), f64(nodes[n].ival))
     if k == .unary and nodes[n].op == i32(int(Tok.minus)):
         a = ff_eval_pure(int(nodes[n].a))
@@ -825,7 +828,7 @@ ff_eval_pure = (n: int) -> FR:
     l = ff_local(n)
     if l > 0:
         if let r = ff_env.get(l): return r
-    FR(-INF, INF)
+    FR(-__INF, __INF)
 
 # x op other: x's new bounds, when x is a tracked float local.
 ff_bound = (x0: int, op: Tok, other: FR, ordered: bool):
@@ -860,7 +863,7 @@ ff_bound = (x0: int, op: Tok, other: FR, ordered: bool):
 
 # The largest float below finite x (x itself otherwise).
 ff_below = (x: f64) -> f64:
-    if x != x or x == INF or x == -INF: return x
+    if x != x or x == __INF or x == -__INF: return x
     if x == 0.0: return -5e-324
     bits = int(f64_bits(x))
     f64_from_bits(u64(if x > 0.0: bits - 1 else: bits + 1))
@@ -874,7 +877,7 @@ ff_integer_demand = (n: int) -> bool:
 ff_integer_record = (n: int, value: int, s: FactState):
     if fact_speculating != 0 or not s.live: return
     b = fact_bound(s, value)
-    r = FR(-INF, INF)
+    r = FR(-__INF, __INF)
     if not b.wide and fact_type(ntype(int(nodes[n].a))) != T_U64:
         if b.lo != FACT_MIN or not fact_open_endpoint(s, value, false): r.lo = f64(b.lo)
         if b.hi != FACT_MAX or not fact_open_endpoint(s, value, true): r.hi = f64(b.hi)
@@ -904,7 +907,7 @@ ff_conv = (n: int) -> FR:
         if ntype(a) == T_MATH_INT:
             m = ff_mode_at(nodes[n].pos)
             if m & FF_INF != 0: ff_obligation(n, FF_INF, "the `int` fits a float")
-            return FR(-INF, INF)
+            return FR(-__INF, __INF)
         # (a narrow or refined integer converts within its bounds: a
         # `count:int64<(>? 0)>` divides without making a NaN)
         st = refine_storage(a, ntype(a))
@@ -951,9 +954,9 @@ ff_int_obligation = (n: int, to: int):
         return
     name = if shown[0] == '`' and shown[1] != '.': shown[1..len(shown) - 1) else: "x"
     r = ff_int_range(to)
-    low = if to == T_MATH_INT: "-1e300" else if int(types[to].bits) == 64 and types[to].sign: "-9.2e18" else: "{int(r.lo)}.0"
-    high = if to == T_MATH_INT: "1e300" else if int(types[to].bits) == 64 and types[to].sign: "9.2e18" else if int(types[to].bits) == 64: "1.8e19" else: "{int(r.hi)}.0"
-    guard = "{low} <=? {name} and {name} <? {high}"
+    low = if int(types[to].bits) == 64 and types[to].sign: "float64(int64.min)" else: "{int(r.lo)}.0"
+    high = if int(types[to].bits) == 64 and types[to].sign: "float64(int64.max)" else if int(types[to].bits) == 64: "1.8e19" else: "{int(r.hi)}.0"
+    guard = if to == T_MATH_INT: "is_finite({name})" else: "{low} <=? {name} and {name} <? {high}"
     err_notes.push((-1, "help: NaN, an infinity or a value out of range fails the conversion: guard it (`if {guard}`, a comparison that holds only for numbers), or check it at run time with `$runtime_checks`"))
     fatal(nodes[n].pos, claim)
 

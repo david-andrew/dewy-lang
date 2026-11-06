@@ -4,8 +4,8 @@ use 'overflow.jo'
 const PI = 3.141592653589793
 const TAU = 6.283185307179586
 const E = 2.718281828459045
-const INF = 1e308 * 10.0
-const NAN = INF - INF       # not a number (is_nan(x) asks; NAN == NAN is false)
+const __INF = 1e308 * 10.0
+const __NAN = __INF - __INF       # not a number (is_nan(x) asks; NAN == NAN is false)
 const MAX_INT = 9223372036854775807
 const MIN_INT = -9223372036854775807 - 1
 
@@ -365,7 +365,7 @@ acos = (x: f64) -> f64: PI / 2.0 - asin(x)
 
 exp = (x: f64) -> f64:
     if x != x: return x
-    if x > 709.782712893384: return INF
+    if x > 709.782712893384: return __INF
     if x < -745.1332191019411: return 0.0
     # x = k*ln2 + r, |r| <= ln2/2; exp(r) by a rational minimax approximation
     k = floor(x * 1.44269504088896338700 + 0.5)
@@ -393,12 +393,12 @@ tanh = (x: f64) -> f64:
 
 __pow2 = (k: int) -> f64:
     if k < -1022: return __pow2(k + 60) / 1152921504606846976.0
-    if k > 1023: return INF
+    if k > 1023: return __INF
     (u64(k + 1023) << 52) as f64
 
 log = (x: f64) -> f64:
     if x != x or x < 0.0: return 0.0 / 0.0
-    if x == 0.0: return -INF
+    if x == 0.0: return -__INF
     if x > 1.7976931348623157e308: return x
     # x = m * 2^e with m in [sqrt(1/2), sqrt(2))
     bits = x as u64
@@ -510,16 +510,16 @@ pow = (x: f64, y: f64) -> f64:
         # |y| > 2^31
         if iy > 0x43F00000:
             if ix <= 0x3FEFFFFF:
-                if hy < 0: return INF
+                if hy < 0: return __INF
                 return 0.0
             if ix >= 0x3FF00000:
-                if hy > 0: return INF
+                if hy > 0: return __INF
                 return 0.0
         if ix < 0x3FEFFFFF:
-            if hy < 0: return sgn * INF
+            if hy < 0: return sgn * __INF
             return sgn * 0.0
         if ix > 0x3FF00000:
-            if hy > 0: return sgn * INF
+            if hy > 0: return sgn * __INF
             return sgn * 0.0
         # |1 - x| <= 2^-20: log(x) by x - x^2/2 + x^3/3 - x^4/4
         t = ax - 1.0
@@ -584,8 +584,8 @@ pow = (x: f64, y: f64) -> f64:
     j = __hi(z)
     i = __lo(z)
     if j >= 0x40900000:
-        if (j - 0x40900000) | i != 0: return sgn * INF
-        if p_l + 8.0085662595372944372e-17 > z - p_h: return sgn * INF
+        if (j - 0x40900000) | i != 0: return sgn * __INF
+        if p_l + 8.0085662595372944372e-17 > z - p_h: return sgn * __INF
     else if j & 0x7FFFFFFF >= 0x4090CC00:
         if (j - 0xC090CC00 + 0x100000000) & 0xFFFFFFFF | i != 0: return sgn * 0.0
         if p_l <= z - p_h: return sgn * 0.0
@@ -635,7 +635,7 @@ exp = (x: f32) -> f32:
 
 log = (x: f32) -> f32:
     if x != x or x < 0.0: return f32(0.0 / 0.0)
-    if x == 0.0: return f32(-INF)
+    if x == 0.0: return f32(-__INF)
     if f64(x) > 3.4028234663852886e38: return x
     f32(__log_fast(f64(x)))
 
@@ -655,7 +655,7 @@ pow = (x: f32, y: f32) -> f32:
         return f32(r)
     if x == 0.0:
         if y > 0.0: return 0.0
-        return f32(INF)
+        return f32(__INF)
     if x < 0.0 or x != x or y != y: return f32(0.0 / 0.0)
     if f64(x) > 3.4028234663852886e38:
         if y > 0.0: return x
@@ -684,7 +684,7 @@ __sin_fast = (x: f64, q: int) -> f64:
 
 # e^t for results in the f32 range (relative error ~1e-12)
 __exp_fast = (t: f64) -> f64:
-    if t > 89.0: return INF
+    if t > 89.0: return __INF
     if t < -104.0: return 0.0
     u = t * 1.4426950408889634 + 0.5
     k = int(u)
@@ -739,14 +739,14 @@ __norm_scale = (largest: f64) -> f64:
 hypot = (x: f64, y: f64) -> f64:
     squared = x * x + y * y
     # Keep the ordinary path short; rescale when squaring loses range.
-    if squared >= 2.2250738585072014e-308 and squared < INF: return sqrt(squared)
+    if squared >= 2.2250738585072014e-308 and squared < __INF: return sqrt(squared)
     __hypot_scaled(x, y, squared)
 
 __hypot_scaled = (x: f64, y: f64, squared: f64) -> f64:
     ax = abs(x)
     ay = abs(y)
     # As in the C math function, an infinite magnitude dominates a NaN.
-    if ax == INF or ay == INF: return INF
+    if ax == __INF or ay == __INF: return __INF
     if squared != squared: return squared
     hi = max(ax, ay)
     if hi == 0.0: return 0.0
