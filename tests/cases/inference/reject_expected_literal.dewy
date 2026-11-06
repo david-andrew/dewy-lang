@@ -1,0 +1,7 @@
+Choice:type = 'resume' | 'settings' | 'quit'
+Box:type = <A>[item:A]
+box = <A>(item:A):>Box<A> => Box<A>[item=item]
+main = () => {
+    let x:Box<Choice> = box('nope')
+    printl(x.item)
+}

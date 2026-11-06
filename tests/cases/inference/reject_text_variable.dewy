@@ -1,0 +1,9 @@
+# The near miss: a string variable is text, not a literal, so the result stays Box<string>.
+Choice:type = 'resume' | 'quit'
+Box:type = <A>[item:A]
+box = <A>(item:A):>Box<A> => Box<A>[item=item]
+main = () => {
+    let t = "resume"
+    let x:Box<Choice> = box(t)
+    printl(x.item)
+}

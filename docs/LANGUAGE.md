@@ -1970,6 +1970,8 @@ names such as `models.Box<string>`. Generic type aliases wrap their definition i
 parentheses. Each concrete function/type is specialized by the compact compiler;
 this adds no universal boxed-value representation. Defaults can use the bound
 type parameters, and generic functions can return closures or structural records.
+A bare literal takes what the expected result gives its parameter:
+`let x:Box<Choice> = box('resume')` makes a `Box<Choice>`.
 Generic constructors infer collection and record literals too: `Box([20 22])`
 holds an integer array, and `Box([x=20 y=22])` holds an anonymous record. Other
 fields can supply context for an empty collection or a callback's parameters.

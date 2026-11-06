@@ -1553,24 +1553,39 @@ exact_args = (cd: Cand) -> int:
         if type_eq(prune(ntype(a)), prune(subst(cd.sig.params[i], cd.binds))): k += 1
     k
 
-# (`let s:set<Op> = set(['push'])`: a type parameter bound only by arguments that take their
+# (`let s:set<Op> = set(['push'])`, `let x:Box<Op> = box('push')`: a type parameter bound only by arguments that take their
 # type from where they go, as the text in an array literal, takes what the expected result
 # gives it, as such a literal written there would; only where the call as bound would not
 # give the expected type, so a call that fits keeps its types)
 expected_binds = (cd: mut Cand, expected: int, given: int[]):
     held = cd.binds
-    if match_type(int(cd.sig.ret), expected, held, 0) >= 0: return
+    # (a match can rest on a literal's own type coercing inside a container, `Box<string>` for
+    # `Box<Choice>`: such a result still would not fit, so the literal takes the expected one)
+    if match_type(int(cd.sig.ret), expected, held, 0) >= 0:
+        fitted = subst_partial(int(cd.sig.ret), held)
+        if has_var(fitted) or can_coerce(0, fitted, expected):
+            loop i in 0.. and b in held:
+                if cd.binds[i] == 0 and expected_bind_fits(b): cd.binds[i] = b
+            return
     ret = subst_partial(int(cd.sig.ret), cd.binds)
     if not has_var(ret) and can_coerce(0, ret, expected): return
     eb = fill(0, int(cd.sig.ntp))
     loop i in 0.. and t in given: eb[i] = t
     loop i in 0.. and a in cd.args:
-        if a == 0 or is_lit(a) or ctx_dependent(a) or nodes[a].type == 0: continue
+        if a == 0 or is_lit(a) or ctx_dependent(a) or nodes[a].type == 0 or text_literal(a): continue
         if match_type(cd.sig.params[i], ntype(a), eb, 0) < 0: return
     if match_type(int(cd.sig.ret), expected, eb, 0) < 0: return
     loop i in 0.. and b in eb:
-        if b == 0 or cd.binds[i] == 0 or has_var(b) or is_union(b) or tkind(b) == .opt: continue
-        cd.binds[i] = b
+        if expected_bind_fits(b): cd.binds[i] = b
+
+text_literal = (a: int) -> bool: nodes[a].kind == .str_lit and nodes[a].aux != 1
+# (a bare text literal is typed when it is read, so its call needs this asked: O(arguments))
+text_literal_arg = (cd: Cand) -> bool:
+    loop a in cd.args:
+        if a != 0 and text_literal(a): return true
+    false
+
+expected_bind_fits = (b: int) -> bool: b != 0 and not has_var(b) and not is_union(b) and tkind(b) != .opt
 
 # map call args to parameter slots; returns error message ("" on success)
 # kinds: per parameter, 1 keyword-only (after `...`), 2 position-only (`<v:T>`)

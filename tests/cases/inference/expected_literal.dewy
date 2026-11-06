@@ -1,0 +1,17 @@
+# A bare literal takes the type the expected result gives its parameter.
+Choice:type = 'resume' | 'settings' | 'quit'
+Box:type = <A>[item:A]
+box = <A>(item:A):>Box<A> => Box<A>[item=item]
+pair = <A>(a:A b:A):>Box<A> => Box<A>[item=if a =? b a else b]
+same = <A>(a:A):>A => a
+main = () => {
+    let x:Box<Choice> = box('resume')
+    let f:Box<float64> = box(3)
+    let w:Box<int8> = box(3)
+    let p:Box<Choice> = pair('quit' 'settings')
+    let s:Choice = same('quit')
+    let d:float64 = same(2)
+    let plain = box('resume')
+    let u:Box<int64|string> = Box<int64|string>[item=3]
+    printl("{x.item} {f.item} {w.item} {p.item} {s} {d} {plain.item} {u.item}")
+}
