@@ -250,8 +250,10 @@ input.pressed('jmup')       # compile error naming the valid actions
 
 ```dewy
 Choice:type = 'resume' | 'quit'
+Screen:type = 'playing' | 'paused' | 'title'
 let screen:Screen = 'paused'
 let volume:float64 = 0.8
+let muted = false
 
 pause_menu = ():>void => {
     let picked = ui<Choice>(back='resume' align='center' column(gap=12 pad=24 width=420 align='center' [
