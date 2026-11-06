@@ -1,0 +1,207 @@
+$runtime_checks
+from p"ownership.jo" import (owner_records owner_parts owner_adoptions owner_values owner_capture_records owner_init ownership_decls ownership_hooks)
+from p"ownership_types.dewy" import (ownership_type ownership_nominal)
+from p"types.jo" import (tkind is_managed tsize talign align_up prune types structs)
+from p"expr.jo" import is_map_type
+from p"ast.jo" import (nodes nkids kid)
+from p"check.jo" import (fns locals)
+from p"util.jo" import ice
+from p"lower.jo" import (Val HK VC_INT env_v)
+from p"ir.jo" import (ir VI)
+from p"ir_types.dewy" import Ins
+from p"ir_builders.dewy" import (emit new_slot e_call e_slot e_addi e_load e_store e_iconst e_call0 e_ret)
+from p"lower_primitives.dewy" import (rt lf_helper lf_of_inst e_faddr)
+from p"lower_storage.dewy" import (vc store_type new_temp store_val load_val copy_at iff endc)
+from p"lower_helpers.dewy" import (field_list helper_params drop_embedded)
+from p"lower_closures.dewy" import (spawn_body spawn_owned_capture)
+from p"concurrency.jo" import concurrency_runtime_needed
+# Sparse cleanup records are allocated only for demanded owners.
+OwnerWord:type=int64<overflow='wrap'>
+owner_begin=():>void=>{
+    owner_records.clear()
+    owner_parts.clear()
+    owner_adoptions.clear()
+    owner_values.clear()
+    owner_capture_records.clear()
+    owner_init=-1
+    if ownership_decls.length not=? 0 {owner_init=emit('nop' 0 0 0 0 0 0)}
+}
+owner_end=():>void=>$unsafe {
+    if owner_init <? 0 or owner_records.length =? 0 {return}
+    let start=ir.args.length
+    loop [slot record] in owner_records {ir.args.push(int32(OwnerWord(record) * 2))}
+    ir.code[owner_init]=Ins('zeroslots' 0 0 int32(start) int32(owner_records.length) 0 0)
+}
+owner_record=(slot:OwnerWord):>int64=>{
+    if slot <? 0 {ice("owner without local storage")}
+    let cached_record=owner_records.get(slot)
+    if cached_record not=? none {let record=cached_record;return record}
+    let record=new_slot(32 8)
+    owner_records[slot]=record;
+    record
+}
+owner_structural=(t:OwnerWord):>bool=>{
+    let k=tkind(t)
+    ownership_type(t) and (k =? 'tuple' or k =? 'struct_' and not ownership_nominal(t) and not is_map_type(t))
+}
+owner_register_part=(slot:OwnerWord t:OwnerWord offset:OwnerWord path:string):>void=>$unsafe {
+    if owner_structural(t) {
+        let fs=field_list(t)
+        loop i in [0..fs.length) {
+            let field=fs.ptr[i]
+            if is_managed(field[0]) {owner_register_part(slot field[0] offset + OwnerWord(field[1]) "{path}{i}/")}
+        }
+        return
+    }
+    let parts=owner_parts.get(slot) ?? []
+    let record:OwnerWord=-1
+    loop part in parts {
+        if part[0] =? path {record=part[1]}
+    }
+    if record <? 0 {
+        record=owner_record(new_slot(1 1))
+        parts.push([path record])
+        owner_parts[slot]=parts;
+    }
+    e_call(rt("__owner_link") [e_slot(record) e_addi(e_slot(slot) offset) e_faddr(lf_helper(HK.drop t 0))] -1);
+}
+owner_register=(slot:OwnerWord t:OwnerWord):>void=>{
+    if owner_structural(t) {
+        owner_register_part(slot t 0 "")
+        return
+    }
+    let record=owner_record(slot)
+    e_call(rt("__owner_link") [e_slot(record) e_slot(slot) e_faddr(lf_helper(HK.drop t 0))] -1);
+}
+owner_enter_captures=(f:OwnerWord):>void=>$unsafe {
+    if not spawn_body(f) {return}
+    loop cap in fns.ptr[f].caps {
+        let l=OwnerWord(cap.inner)
+        if not spawn_owned_capture(f l) {continue}
+        let record=owner_record(new_slot(1 1))
+        owner_capture_records.push(record)
+        e_call(rt("__owner_link") [e_slot(record) e_addi(env_v OwnerWord(locals.ptr[l].env_off) - 8) e_faddr(lf_helper(HK.capture_drop store_type(l) 0))] -1);
+    }
+}
+owner_leave_captures=():>void=>{
+    loop record in owner_capture_records {e_call(rt("__owner_unlink") [e_slot(record)] -1);}
+}
+helper_capture_drop=(t:OwnerWord):>void=>$unsafe {
+    let ps=helper_params(1)
+    let live=ps.ptr[0]
+    iff(e_load(VI live 0 8))
+    e_store(live 0 e_iconst(0) 8);
+    e_call0(rt("__task_shield_enter") -1);
+    drop_embedded(e_addi(live 8) t)
+    e_call0(rt("__task_shield_leave") -1);
+    endc()
+    e_ret(-1);
+}
+owner_forget_field=(slot:OwnerWord path:string):>void=>{
+    let cached_parts=owner_parts.get(slot)
+    if cached_parts not=? none {let parts=cached_parts;
+        loop part in parts {
+            if part[0].startswith(path) {e_call(rt("__owner_unlink") [e_slot(part[1])] -1);}
+        }
+    }
+}
+owner_forget_slot=(slot:OwnerWord):>void=>{
+    let cached_parts=owner_parts.get(slot)
+    if cached_parts not=? none {let parts=cached_parts;
+        loop part in parts {e_call(rt("__owner_unlink") [e_slot(part[1])] -1);}
+        return
+    }
+    let record=owner_record(slot)
+    e_call(rt("__owner_unlink") [e_slot(record)] -1);
+}
+owner_address_slot=(addr:OwnerWord):>int64=>$unsafe {
+    let i:OwnerWord=ir.code.length - 1
+    loop i >=? 0 {
+        let ins=ir.code.ptr[i]
+        if ins.op =? 'slot' and OwnerWord(ins.dst) =? addr {return OwnerWord(ins.a)}
+        i-=1
+    }
+    ice("owner address is not a whole local")
+    -1
+}
+owner_forget=(addr:OwnerWord):>void=>{
+    let cached_slot=owner_values.get(addr)
+    if cached_slot not=? none {let slot=cached_slot;owner_forget_slot(slot)}
+    else {owner_forget_slot(owner_address_slot(addr))}
+}
+owner_value=(value:Val t:OwnerWord):>Val=>{
+    if value.slot >=? 0 {
+        if vc(t) =? VC_INT {owner_values[value.v]=value.slot;}
+        owner_register(value.slot t)
+        return value
+    }
+    let slot=new_temp(t)
+    store_val(t e_slot(slot) 0 value.v)
+    owner_values[value.v]=slot;
+    owner_register(slot t)
+    Val(value.v true slot)
+}
+owner_stride=(et:OwnerWord):>int64=>{
+    if ownership_type(et) {return align_up(OwnerWord(tsize(et)) + 1 talign(et))}
+    tsize(et)
+}
+owner_element_live=(addr:OwnerWord et:OwnerWord):>void=>{
+    if ownership_type(et) {e_store(addr tsize(et) e_iconst(1) 1);}
+}
+owner_element_drop=(addr:OwnerWord et:OwnerWord):>void=>{
+    if ownership_type(et) {
+        iff(e_load(VI addr tsize(et) 1))
+        e_store(addr tsize(et) e_iconst(0) 1);
+        drop_embedded(addr et)
+        endc()
+    }
+    else {drop_embedded(addr et)}
+}
+owner_drop=(addr:OwnerWord):>void=>$unsafe {
+    if concurrency_runtime_needed {e_call(rt("__task_shield_enter") [] -1);}
+    let slot=owner_address_slot(addr)
+    let cached_parts=owner_parts.get(slot)
+    if cached_parts not=? none {let parts=cached_parts;
+        loop i in [0..parts.length) {
+            e_call(rt("__owner_drop") [e_slot(parts.ptr[parts.length - 1 - i][1])] -1);
+        }
+    }
+    else {e_call(rt("__owner_drop") [e_slot(owner_record(slot))] -1);}
+    if concurrency_runtime_needed {e_call(rt("__task_shield_leave") [] -1);}
+}
+owner_hook_result=(f:OwnerWord source:OwnerWord t:OwnerWord):>Val=>{
+    let slot=new_temp(t)
+    let addr=e_slot(slot)
+    owner_hook_into(f source t addr)
+    owner_register(slot t)
+    Val(addr true slot)
+}
+owner_hook_into=(f:OwnerWord source:OwnerWord t:OwnerWord dest:OwnerWord):>void=>$unsafe {
+    e_call(lf_of_inst(f) [dest source] -1);
+    let parent=prune(OwnerWord(fns.ptr[f].ret))
+    let first=OwnerWord(structs.ptr[OwnerWord(types.ptr[parent].st)].nfields)
+    let fields_=field_list(t)
+    loop i in [first..fields_.length) {
+        let field=fields_.ptr[i]
+        let dst=e_addi(dest field[1])
+        let src=e_addi(source field[1])
+        if ownership_hooks[OwnerWord(fns.ptr[f].decl)] =? 3 and ownership_type(field[0]) {
+            e_call(lf_helper(HK.move field[0] 0) [dst src] -1);
+        }
+        else {
+            store_val(field[0] dest field[1] load_val(field[0] source field[1]))
+            if ownership_hooks[OwnerWord(fns.ptr[f].decl)] =? 2 {copy_at(dst field[0])}
+        }
+    }
+}
+owner_adopt_result=(n:OwnerWord):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'if_' {
+        owner_adopt_result(OwnerWord(nodes.ptr[n].b))
+        owner_adopt_result(OwnerWord(nodes.ptr[n].c))
+    }
+    else if k =? 'block' and nkids(n) >? 0 {owner_adopt_result(kid(n OwnerWord(nkids(n)) - 1))}
+    else if k =? 'exprstmt' {owner_adopt_result(OwnerWord(nodes.ptr[n].a))}
+    else {owner_adoptions[n]=true;}
+}

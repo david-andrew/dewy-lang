@@ -1,0 +1,197 @@
+use 'lower_closures.dewy'
+use 'lower_storage.dewy'
+use 'lower_helpers.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'ir_types.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'prelude.jo'
+use 'util.jo'
+use 'copies.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'effects.jo'
+use 'errors.jo'
+use 'expr.jo'
+use 'places.jo'
+use 'refine.jo'
+use 'lower.jo'
+use 'ir.jo'
+use 'lower_primitives.dewy'
+use 'ir_builders.dewy'
+use 'effect_contracts.dewy'
+use 'effect_control.dewy'
+use 'ownership.jo'
+import 'concurrency.jo' as concurrency
+
+owner_begin = ():
+    owner_records.clear()
+    owner_parts.clear()
+    owner_adoptions.clear()
+    owner_values.clear()
+    owner_capture_records.clear()
+    owner_init = -1
+    if ownership_decls.len() != 0: owner_init = emit(.nop, 0, 0, 0, 0, 0, 0)
+
+owner_end = ():
+    if owner_init < 0 or owner_records.len() == 0: return
+    start = ir.args.len()
+    loop slot, record in owner_records: ir.args.push(i32(record * 2))
+    ir.code[owner_init] = Ins(.zeroslots, 0, 0, i32(start), i32(owner_records.len()), 0, 0)
+
+owner_record = (slot: int) -> int:
+    if slot < 0: ice("owner without local storage")
+    if let record = owner_records.get(slot): return record
+    record = new_slot(32, 8)
+    owner_records[slot] = record
+    record
+
+owner_structural = (t: int) -> bool:
+    k = tkind(t)
+    ownership_type(t) and (k == .tuple or k == .struct_ and not ownership_nominal(t) and not is_map_type(t))
+
+owner_register_part = (slot: int, t: int, offset: int, path: str):
+    if owner_structural(t):
+        fs = field_list(t)
+        loop i in [0..fs.len()):
+            field = fs[i]
+            if is_managed(field.0): owner_register_part(slot, field.0, offset + field.1, path + "{i}/")
+        return
+    parts = owner_parts.get(slot) ?? []
+    record = -1
+    loop part in parts:
+        if part.0 == path: record = part.1
+    if record < 0:
+        record = owner_record(new_slot(1, 1))
+        parts.push((path, record))
+        owner_parts[slot] = parts
+    e_call(rt("__owner_link"), [e_slot(record), e_addi(e_slot(slot), offset), e_faddr(lf_helper(.drop, t, 0))], -1)
+
+owner_register = (slot: int, t: int):
+    if owner_structural(t):
+        owner_register_part(slot, t, 0, "")
+        return
+    record = owner_record(slot)
+    e_call(rt("__owner_link"), [e_slot(record), e_slot(slot), e_faddr(lf_helper(.drop, t, 0))], -1)
+
+owner_enter_captures = (f: int):
+    if not spawn_body(f): return
+    loop cap in fns[f].caps:
+        l = int(cap.inner)
+        if not spawn_owned_capture(f, l): continue
+        record = owner_record(new_slot(1, 1))
+        owner_capture_records.push(record)
+        e_call(rt("__owner_link"), [e_slot(record), e_addi(env_v, int(locals[l].env_off) - 8), e_faddr(lf_helper(.capture_drop, store_type(l), 0))], -1)
+
+owner_leave_captures = ():
+    loop record in owner_capture_records: e_call(rt("__owner_unlink"), [e_slot(record)], -1)
+
+helper_capture_drop = (t: int):
+    ps = helper_params(1)
+    live = ps[0]
+    iff(e_load(VI, live, 0, 8))
+    e_store(live, 0, e_iconst(0), 8)
+    e_call0(rt("__task_shield_enter"), -1)
+    drop_embedded(e_addi(live, 8), t)
+    e_call0(rt("__task_shield_leave"), -1)
+    endc()
+    e_ret(-1)
+
+owner_forget_field = (slot: int, path: str):
+    if let parts = owner_parts.get(slot):
+        loop part in parts:
+            if starts_with(part.0, path):
+                e_call(rt("__owner_unlink"), [e_slot(part.1)], -1)
+
+owner_forget_slot = (slot: int):
+    if let parts = owner_parts.get(slot):
+        loop part in parts: e_call(rt("__owner_unlink"), [e_slot(part.1)], -1)
+        return
+    record = owner_record(slot)
+    e_call(rt("__owner_unlink"), [e_slot(record)], -1)
+
+owner_address_slot = (addr: int) -> int:
+    i = ir.code.len() - 1
+    loop i >= 0:
+        ins = ir.code[i]
+        if ins.op == .slot and int(ins.dst) == addr: return int(ins.a)
+        i -= 1
+    ice("owner address is not a whole local")
+    -1
+
+owner_forget = (addr: int):
+    if let slot = owner_values.get(addr): owner_forget_slot(slot)
+    else: owner_forget_slot(owner_address_slot(addr))
+
+owner_value = (value: Val, t: int) -> Val:
+    if value.slot >= 0:
+        if vc(t) == VC_INT: owner_values[value.v] = value.slot
+        owner_register(value.slot, t)
+        return value
+    slot = new_temp(t)
+    store_val(t, e_slot(slot), 0, value.v)
+    owner_values[value.v] = slot
+    owner_register(slot, t)
+    Val(value.v, true, slot)
+
+owner_stride = (et: int) -> int:
+    if ownership_type(et): return align_up(tsize(et) + 1, talign(et))
+    tsize(et)
+
+owner_element_live = (addr: int, et: int):
+    if ownership_type(et): e_store(addr, tsize(et), e_iconst(1), 1)
+
+owner_element_drop = (addr: int, et: int):
+    if ownership_type(et):
+        iff(e_load(VI, addr, tsize(et), 1))
+        e_store(addr, tsize(et), e_iconst(0), 1)
+        drop_embedded(addr, et)
+        endc()
+    else: drop_embedded(addr, et)
+
+owner_drop = (addr: int):
+    # (cleanup in a task runs shielded from cancellation, as deferred code does)
+    if concurrency.concurrency_runtime_needed: e_call(rt("__task_shield_enter"), [], -1)
+    slot = owner_address_slot(addr)
+    if let parts = owner_parts.get(slot):
+        loop i in [0..parts.len()):
+            e_call(rt("__owner_drop"), [e_slot(parts[parts.len() - 1 - i].1)], -1)
+    else: e_call(rt("__owner_drop"), [e_slot(owner_record(slot))], -1)
+    if concurrency.concurrency_runtime_needed: e_call(rt("__task_shield_leave"), [], -1)
+
+owner_hook_result = (f: int, source: int, t: int) -> Val:
+    slot = new_temp(t)
+    addr = e_slot(slot)
+    owner_hook_into(f, source, t, addr)
+    owner_register(slot, t)
+    Val(addr, true, slot)
+
+owner_hook_into = (f: int, source: int, t: int, dest: int):
+    e_call(lf_of_inst(f), [dest, source], -1)
+    # An inherited role builds only its declaring parent. Preserve the child's
+    # added fields and complete nominal identity at the owning boundary.
+    parent = prune(int(fns[f].ret))
+    first = int(structs[int(types[parent].st)].nfields)
+    fields_ = field_list(t)
+    loop i in [first..fields_.len()):
+        field = fields_[i]
+        dst = e_addi(dest, field.1)
+        src = e_addi(source, field.1)
+        if ownership_hooks[int(fns[f].decl)] == 3 and ownership_type(field.0):
+            e_call(lf_helper(.move, field.0, 0), [dst, src], -1)
+        else:
+            store_val(field.0, dest, field.1, load_val(field.0, source, field.1))
+            if ownership_hooks[int(fns[f].decl)] == 2: copy_at(dst, field.0)
+
+owner_adopt_result = (n: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .if_:
+        owner_adopt_result(int(nodes[n].b))
+        owner_adopt_result(int(nodes[n].c))
+    else if k == .block and nkids(n) > 0:
+        owner_adopt_result(kid(n, nkids(n) - 1))
+    else if k == .exprstmt: owner_adopt_result(int(nodes[n].a))
+    else: owner_adoptions[n] = true
