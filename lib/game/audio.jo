@@ -323,8 +323,27 @@ __note_freq = (name: str) -> f64:
 
 __not_a_note = (t: str): panic("melody: '{t}' is not a note (a letter from A to G, then # or b, then the octave: C4, F#3, Bb5; `-` holds the note before, `.` is a rest)")
 
+# why a word of a melody is not a note, or none (__note_freq's rules, without its arithmetic)
+__note_error = (t: str) -> str?:
+    c = int(t[0])
+    if c >= 'a': c -= 32
+    if c < 'A' or c > 'G': return "'{t}' is not a note: it starts with a letter from A to G"
+    i = 1
+    if i < len(t) and (t[i] == '#' or t[i] == 'b'): i += 1
+    if i == len(t): return none
+    if i + 1 == len(t) and t[i] >= '0' and t[i] <= '9': return none
+    "'{t}' is not a note: the octave is one digit, 0 to 9 (C4, F#3, Bb5)"
+
+# why text is not a melody, or none: a literal is checked while compiling
+melody_error = (notes: str) -> str?:
+    loop t in words(notes):
+        if t != "." and t != "-":
+            if let why = __note_error(t): return why
+    none
+
 # render a melody: notes separated by spaces, "-" holds the previous note, "." is a rest; each
 # lasts `step` beats (0.5: eighth notes at bpm)
+@check_constant(melody_error(notes), "not a melody")
 melody = (notes: str, bpm: f64 = 120.0, wave: Wave = .triangle, volume: f64 = 0.3, step: f64 = 0.5) -> Sound:
     beat = 60.0 / bpm * step
     toks = words(notes)
@@ -350,6 +369,7 @@ melody = (notes: str, bpm: f64 = 120.0, wave: Wave = .triangle, volume: f64 = 0.
 
 # a melody made to be played with looping = true: exactly as long as its notes, with the end of
 # the last ones (and their release) carried round to the start, so the loop has no seam
+@check_constant(melody_error(notes), "not a melody")
 melody_loop = (notes: str, bpm: f64 = 120.0, wave: Wave = .triangle, volume: f64 = 0.3, step: f64 = 0.5) -> Sound:
     beat = 60.0 / bpm * step
     toks = words(notes)
