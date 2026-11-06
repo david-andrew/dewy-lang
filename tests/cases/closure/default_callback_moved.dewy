@@ -1,0 +1,63 @@
+# Known callbacks: a version with one call site moves into its loop on default builds.
+# Each shape keeps its meaning, wherever the body ends up.
+Predicate:type=(x:int64):>bool
+Transform:type=(x:int64):>int64
+visit = (values:array<int64> accept:Predicate transform:Transform):>int64 => {
+    let total:int64=0
+    loop value in values {if accept(value) {total+=transform(value)}}
+    return total
+}
+forward = (values:array<int64> accept:Predicate transform:Transform):>int64 => visit(values @accept @transform)
+# Returns from inside its loop: the return leaves the moved body, not the caller's loop.
+first = (values:array<int64> accept:Predicate):>int64 => {
+    loop value in values {if accept(value) {return value}}
+    return -1
+}
+# Calls itself through a known callback: never moved into itself.
+down = (n:int64 step:Transform):>int64 => {
+    if n <=? 0 {return 0}
+    return step(n)+down(n-1 @step)
+}
+# A local array of its own in every moved iteration.
+collect = (n:int64 f:Transform):>array<int64> => {
+    let out:array<int64>=[]
+    loop i in [0..n) {out.push(f(i))}
+    return out
+}
+main = ():>void => {
+    let values:array<int64>=[1 3 5 7]
+    let total:int64=0
+    loop i in [0..20) {
+        let bias=i%5
+        let threshold=i%8
+        total+=visit(values (x:int64):>bool=>x>?threshold (x:int64):>int64=>x*3+bias)
+        total+=forward(values (x:int64):>bool=>x<?threshold (x:int64):>int64=>x-bias)
+    }
+    printl"{total}"
+    # (one local callback at two sites: one version, not moved)
+    let limit=4
+    let big=(x:int64):>bool=>x>?limit
+    let twice=(x:int64):>int64=>x*2
+    let both:int64=0
+    loop i in [0..3) {
+        both+=visit(values @big @twice)
+        both+=visit(values @big @twice)
+    }
+    printl"{both}"
+    let found:array<int64>=[]
+    loop t in [0..9) {found.push(first(values (x:int64):>bool=>x>?t))}
+    printl"{found}"
+    loop k in [1..4) {printl"{down(k (x:int64):>int64=>x+k)}"}
+    let rows:array<array<int64>>=[]
+    loop k in [0..3) {rows.push(collect(k+1 (x:int64):>int64=>x*k))}
+    printl"{rows}"
+    # (a call outside any loop stays a call)
+    printl"{visit(values (x:int64):>bool=>x>?limit (x:int64):>int64=>x+limit)}"
+    # (overflow past int64 still reaches the same exact fallback and check)
+    let huge:array<int64>=[9223372036854775807 2]
+    loop i in [0..2) {
+        let shift=i
+        printl"{first(huge (x:int64):>bool=>x>?shift)}"
+    }
+}
+$runtime_checks

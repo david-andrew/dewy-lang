@@ -9,7 +9,9 @@ use 'check.jo'
 use 'opt.jo'
 use 'partition.jo'
 use 'ir_builders.dewy'
+use 'callback_specialize.jo'
 
+const FAST_CALLBACK_MAX = 256
 const INLINE_MAX = 24       # callee size limit, in IR instructions
 const INLINE_LOOP_MAX = 96  # ... for a call in a loop to a leaf (a function that calls nothing)
 const INLINE_WRAPPER_MAX = 64   # ... for a leaf called once by a function at most this size
@@ -32,8 +34,30 @@ rel_by_index: int[]         # lfunc index -> position in rel_fns (-1: not collec
 fast_fns: IrFn[]
 fast_by_index: int[]
 fast_loop_only: bool[]
+fast_moves: bool[]
+
+# Sites calling each known-callback version: a version with one site moves there.
+fast_callback_sites: {int: int}
+fast_callback_depth = 0
+
+# Its body takes the place of its only call, in a loop: the environment stays in the
+# caller's registers. Not its loop into a one-shot web frame, as release; O(body).
+fast_callback_movable = (f: IrFn) -> bool:
+    if fast_callback_sites.len() == 0 or f.cabi or f.noinline or len(f.export_name) > 0 or target_wasm or f.code.len() > FAST_CALLBACK_MAX or (fast_callback_sites.get(f.fn_index) ?? 0) != 1: return false
+    loop ins in f.code:
+        if ins.op == .intr and ins.imm >= 2: return false       # setjmp-like intrinsics
+        if ins.op == .call and ins.imm == f.fn_index: return false
+    true
+
+# (what this path already takes keeps its own rules; a wrapper around a version moves with it)
+fast_moves_alone = (f: IrFn, kind: int) -> bool: (kind == 0 or kind == 2) and fast_callback_movable(f)
 
 fast_inline_kind = (f: IrFn) -> int:
+    kind = fast_plain_kind(f)
+    if fast_moves_alone(f, kind): return 3
+    kind
+
+fast_plain_kind = (f: IrFn) -> int:
     if f.cabi or f.noinline or len(f.export_name) > 0: return 0
     # The native string helper is a bounded comparison plus return. Expand
     # only in loops: its machine body is larger than its two IR instructions.
@@ -69,12 +93,18 @@ fast_inline_kind = (f: IrFn) -> int:
 
 fast_inline_prepare = (fs: IrFn[]):
     inline_cache_clear()
+    fast_callback_sites = {}
+    if callback_calls.len() > 0:
+        loop _, lf in callback_calls: fast_callback_sites[lf] = (fast_callback_sites.get(lf) ?? 0) + 1
     fast_fns = []
     fast_by_index = []
     fast_loop_only = []
+    fast_moves = []
     wrappers: int[]
     loop k in 0.. and f in fs:
-        kind = fast_inline_kind(f)
+        plain = fast_plain_kind(f)
+        moves = fast_moves_alone(f, plain)
+        kind = if moves: 3 else: plain
         if kind == 0: continue
         if kind == 2:
             wrappers.push(k)
@@ -83,6 +113,7 @@ fast_inline_prepare = (fs: IrFn[]):
         fast_by_index[f.fn_index] = fast_fns.len()
         fast_fns.push(f)
         fast_loop_only.push(kind == 3)
+        fast_moves.push(moves)
     leaves = fast_fns.len()
     saved = ir
     loop k in wrappers:
@@ -104,6 +135,7 @@ fast_inline_prepare = (fs: IrFn[]):
         fast_by_index[f.fn_index] = fast_fns.len()
         fast_fns.push(ir)
         fast_loop_only.push(false)
+        fast_moves.push(false)
     ir = saved
 
 fast_inline_target = (ins: Ins, in_loop: bool) -> int:
@@ -113,11 +145,16 @@ fast_inline_target = (ins: Ins, in_loop: bool) -> int:
     if fast_loop_only[j] and not in_loop: return -1
     j
 
+# (in a large caller, what a moved loop keeps in registers may not get them; asked only of
+# a call that has a target, this hot path's target test staying a leaf)
+fast_keeps_call = (j: int) -> bool: fast_moves[j] and fast_fns[j].code.len() > 64 and ir.code.len() > INLINE_LOOPY_CALLER_MAX
+
 fast_inline_into = ():
     if fast_fns.len() == 0: return
     found = false
     loop ins in ir.code:
-        if fast_inline_target(ins, true) >= 0:
+        j = fast_inline_target(ins, true)
+        if j >= 0 and not fast_keeps_call(j):
             found = true
             break
     if not found: return
@@ -126,6 +163,7 @@ fast_inline_into = ():
     old = ir.code
     depth = 0
     loop_depth = 0
+    moved = false
     loop ins in old:
         if ins.op == .block or ins.op == .loop or ins.op == .if_: depth += 1
         if ins.op == .loop and loop_depth == 0: loop_depth = depth
@@ -133,9 +171,18 @@ fast_inline_into = ():
             if depth == loop_depth: loop_depth = 0
             depth -= 1
         j = fast_inline_target(ins, loop_depth > 0)
-        if j >= 0: inline_call(ins, fast_fns[j], out)
+        if j >= 0 and not fast_keeps_call(j):
+            inline_call(ins, fast_fns[j], out)
+            if fast_moves[j]: moved = true
         else: out.push(ins)
     ir.code = out
+    # A moved callback version brings its raw calls: its own leaves, and versions nested
+    # at most callback_request's four levels.
+    if moved and fast_callback_depth < 4:
+        fast_callback_depth += 1
+        fast_inline_into()
+        fast_callback_depth -= 1
+        return
     o_copy_forward()
 
 rel_collect = ():
