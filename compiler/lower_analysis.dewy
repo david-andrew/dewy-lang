@@ -3,7 +3,7 @@ from p"lower_storage.dewy" import (boxed_field_of is_shared)
 $runtime_checks
 from p"lower.jo" import (FnWrites LF_ELEMENTVIEW fr_direct fr_total fw_direct fw_named fw_total held_views lpath_ids lpath_parents mwr_direct opt_release pw_box pw_depth pw_heap)
 from p"expr.jo" import (IN is_map_type ntype)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_SHARED LF_SOAELEM LF_VALUECAP fns globals lib_dir locals)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_VALUEITER LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_SHARED LF_SOAELEM LF_VALUECAP fns globals lib_dir locals)
 from p"ast.jo" import (NF_EXTERN NF_MUT has_flag kid kid2 kid_c kid_d nkids nodes)
 from p"types.jo" import (T_MATH_INT int_policy is_int is_managed math_optional prune tkind types)
 from p"checked_eval.dewy" import (cx_token_values)
@@ -399,7 +399,12 @@ unchanged_by=(e:LAWord n:LAWord):>bool=>$unsafe {
     let rn=lpath_root(e)
     if nodes.ptr[rn].aux not=? int32(2) {
         let r:LAWord=LAWord(nodes.ptr[rn].sym)
-        if LAWord(locals.ptr[r].flags) & (LF_ALIAS | LF_CAPTURE | LF_BYREF) not=? 0 or is_shared(r) {return false}
+        let flags=LAWord(locals.ptr[r].flags)
+        if flags & LF_CAPTURE not=? 0 or is_shared(r) {return false}
+        # A read-only loop element aliases a slot of an array its loop borrowed (the body
+        # cannot change it) or holds as a snapshot (writers detach): only a write to the
+        # element itself, which the walk below finds, can change it during the iteration.
+        if flags & (LF_ALIAS | LF_BYREF) not=? 0 and flags & LF_VALUEITER =? 0 {return false}
     }
     return not may_write_root(n rn)
 }

@@ -1,0 +1,86 @@
+# Inner loops over a read-only loop's element: the element must stay the same for the
+# whole inner loop, whatever the body does to the outer array or to the element's name.
+sum_rows = (t:array<array<int64>>):>int64 => {
+    let total:int64=0
+    loop row in t {
+        loop x in row {total+=x}
+    }
+    return total
+}
+# The body replaces and grows the outer array's rows: the iteration sees the snapshot.
+outer_written = ():>array<int64> => {
+    let t:array<array<int64>>=[[1 2] [3 4]]
+    let seen:array<int64>=[]
+    loop row in t {
+        loop x in row {
+            seen.push(x)
+            t[0]=[100+x]
+            t[1].push(x)
+        }
+    }
+    loop r in t {seen.push(r.length)}
+    return seen
+}
+# The element goes away from everywhere else while the inner loop runs.
+dropped = ():>int64 => {
+    let t:array<array<int64>>=[[1 2 3]]
+    let total:int64=0
+    loop row in t {
+        loop x in row {
+            t=[]
+            total+=x
+        }
+    }
+    return total
+}
+# A nested chain, and a field path of the element.
+R:type=[xs:array<int64> tag:int64]
+fields = (rs:array<R>):>int64 => {
+    let total:int64=0
+    loop r in rs {
+        loop x in r.xs {total+=x*r.tag}
+    }
+    return total
+}
+cube = (c:array<array<array<int64>>>):>int64 => {
+    let total:int64=0
+    loop plane in c {
+        loop row in plane {
+            loop x in row {total+=x}
+        }
+    }
+    return total
+}
+# An element escapes from the inner loop and outlives it.
+escapes = (t:array<array<int64>>):>array<array<int64>> => {
+    let kept:array<array<int64>>=[]
+    loop row in t {
+        loop x in row {
+            if x >? 1 {kept.push(row)}
+        }
+    }
+    return kept
+}
+# A global array written by a function the body calls.
+let grid:array<array<int64>>=[[5 6] [7]]
+replace_grid = ():>void => {grid=[[0]]}
+through_call = ():>int64 => {
+    let total:int64=0
+    loop row in grid {
+        loop x in row {
+            replace_grid()
+            total+=x
+        }
+    }
+    return total
+}
+main = ():>void => {
+    printl"{sum_rows([[1 2] [3] []])}"
+    printl"{outer_written()}"
+    printl"{dropped()}"
+    printl"{fields([R(xs=[1 2] tag=3) R(xs=[4] tag=5)])}"
+    printl"{cube([[[1] [2 3]] [[4 5 6]]])}"
+    printl"{escapes([[1 2] [3]])}"
+    printl"{through_call()}"
+}
+$runtime_checks

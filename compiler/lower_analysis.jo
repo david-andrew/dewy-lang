@@ -356,7 +356,9 @@ unchanged_by = (e: int, n: int) -> bool:
     rn = lpath_root(e)
     if nodes[rn].aux != i32(int(SK.global)):
         r = int(nodes[rn].sym)
-        if int(locals[r].flags) & (LF_ALIAS | LF_CAPTURE | LF_BYREF) != 0 or is_shared(r): return false
+        flags = int(locals[r].flags)
+        if flags & LF_CAPTURE != 0 or is_shared(r): return false
+        if flags & (LF_ALIAS | LF_BYREF) != 0 and flags & LF_VALUEITER == 0: return false
     not may_write_root(n, rn)
 
 mentions_local = (n: int, l: int) -> bool:
