@@ -1,0 +1,139 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (eprint)
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (fns locals)
+from p"directives.jo" import (dir_index dir_proven)
+from p"exact.jo" import (exact_marks exact_owners)
+from p"expr.jo" import (ntype rational_constants)
+from p"facts.jo" import (FactState fact_capture fact_changes fact_constructor_actuals fact_fork_entries fact_fork_seed fact_member_admitted fact_member_failed fact_member_owner fact_member_shared fact_member_template fact_owner fact_parallel_bounds fact_policy fact_probe_on fact_query fact_slice_prepare fact_speculating fact_summary_owner fact_terms fact_validated)
+from p"floats.jo" import (ff_integer_demand)
+from p"ide.jo" import (ide_on)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"member_replay.jo" import (member_scope_locals member_scopes member_templates member_trace)
+from p"ownership.jo" import (ownership_decls)
+from p"proofs.jo" import (proof_active result_active)
+from p"refine.jo" import (refine_active refine_fact_entry refine_requests)
+from p"refinement_types.dewy" import (FactTerm)
+from p"types.jo" import (tkind)
+from p"util.jo" import (err_notes pos_str)
+from p"witness.jo" import (wit_tentative wit_tentative_failed)
+
+MemberWord:type=int64<overflow='wrap'>
+fact_member_literal=(n:MemberWord):>bool=>$unsafe {
+    fact_member_template >=? 0 and member_templates[fact_member_template].positions.has(nodes.ptr[n].pos)
+}
+fact_member_candidate=(f:MemberWord):>bool=>{
+    if member_templates.length =? 0 or fact_policy not=? 'RequireStatic' or fact_probe_on or fact_query or wit_tentative or proof_active or result_active or ide_on {return false}
+    if ownership_decls.length not=? 0 or exact_owners.has(f) or fact_summary_owner not=? 0 {return false}
+    loop i in [0..member_templates.length) {
+        if member_templates[i].owner =? f and member_templates[i].okay {return true}
+    }
+    false
+}
+# x and y are the same checked syntax but for member literals and local
+# copies. Pairs of the nodes a decision can mark (dir_index, fact_validated)
+# go onto pairs. O(nodes), field reads only.
+fact_member_same=(x:MemberWord y:MemberWord index:MemberWord @pairs:array<int64>):>bool=>$unsafe {
+    if x =? 0 or y =? 0 {return x =? y}
+    let k=nodes.ptr[x].kind
+    if k not=? nodes.ptr[y].kind or nodes.ptr[x].pos not=? nodes.ptr[y].pos or nodes.ptr[x].type not=? nodes.ptr[y].type or nodes.ptr[x].flags not=? nodes.ptr[y].flags or nodes.ptr[x].op not=? nodes.ptr[y].op {return false}
+    if nodes.ptr[x].ival not=? nodes.ptr[y].ival or nodes.ptr[x].name not=? nodes.ptr[y].name or nodes.ptr[x].aux2 not=? nodes.ptr[y].aux2 or nodes.ptr[x].d not=? nodes.ptr[y].d or nodes.ptr[x].nlist not=? nodes.ptr[y].nlist or nodes.ptr[x].nlist2 not=? 0 or nodes.ptr[y].nlist2 not=? 0 {return false}
+    if x <? exact_marks.length and exact_marks[x] not=? 0 or y <? exact_marks.length and exact_marks[y] not=? 0 {return false}
+    if rational_constants.length not=? 0 and (rational_constants.has(x) or rational_constants.has(y)) {return false}
+    if (k =? 'str_lit' or k =? 'dotname') and member_templates[index].positions.has(nodes.ptr[x].pos) {
+        if k =? 'dotname' and tkind(ntype(x)) =? 'enum_' or k =? 'str_lit' and (nodes.ptr[x].aux not=? 0 or nodes.ptr[x].nlist not=? 0) {return false}
+    }
+    else if nodes.ptr[x].sval not=? nodes.ptr[y].sval or nodes.ptr[x].aux not=? nodes.ptr[y].aux {return false}
+    if nodes.ptr[x].sym not=? nodes.ptr[y].sym {
+        if not (k =? 'vardecl' or k =? 'ident' and nodes.ptr[x].aux =? int32(1)) or nodes.ptr[x].sym <=? 0 or nodes.ptr[y].sym <=? 0 {return false}
+        let lx=MemberWord(nodes.ptr[x].sym)
+        let ly=MemberWord(nodes.ptr[y].sym)
+        if locals.ptr[lx].type not=? locals.ptr[ly].type or locals.ptr[lx].flags not=? locals.ptr[ly].flags {return false}
+    }
+    if k =? 'index' or k =? 'intrinsic' or k =? 'conv' {
+        if k =? 'conv' and ff_integer_demand(x) {return false}
+        pairs.push(x)
+        pairs.push(y)
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return false}
+    if mask & 1 not=? 0 and not fact_member_same(MemberWord(nodes.ptr[x].a) MemberWord(nodes.ptr[y].a) index @pairs) {return false}
+    if mask & 2 not=? 0 and not fact_member_same(MemberWord(nodes.ptr[x].b) MemberWord(nodes.ptr[y].b) index @pairs) {return false}
+    if mask & 4 not=? 0 and not fact_member_same(MemberWord(nodes.ptr[x].c) MemberWord(nodes.ptr[y].c) index @pairs) {return false}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(x)) {
+            if not fact_member_same(kid(x i) kid(y i) index @pairs) {return false}
+        }
+    }
+    true
+}
+# (the plan's admission of block b: member_lower_block's, every copy the same)
+fact_member_admit=(b:MemberWord):>bool=>{
+    let index=member_scopes.get(kid(b 0)) ?? -1
+    if index <? 0 or not member_templates[index].okay or nkids(b) not=? member_templates[index].texts.length {return false}
+    if member_templates[index].requests.length not=? 0 or member_templates[index].refinements.length not=? 0 {return false}
+    let template=kid(b 0)
+    let pairs:array<int64>=[]
+    loop i in [0..nkids(b)) {
+        let scope=kid(b i)
+        if (member_scopes.get(scope) ?? -1) not=? index or not member_scope_locals.has(scope) {return false}
+        if i >? 0 and not fact_member_same(template scope index @pairs) {return false}
+    }
+    fact_member_admitted[b]=pairs
+    true
+}
+fact_member_block=(b:MemberWord @s:FactState):>bool=>{
+    if not fact_member_admitted.has(b) or fact_owner not=? fact_member_owner or fact_summary_owner not=? 0 or fact_probe_on or fact_member_template >=? 0 {return false}
+    let template=kid(b 0)
+    fact_changes(template @s b)
+    fact_member_template=member_scopes[template]
+    fact_capture(template @s);
+    fact_member_template=-1
+    # (the template's decisions, at the same nodes of every other copy)
+    if fact_speculating =? 0 {
+        let pairs=fact_member_admitted[b]
+        loop i in [0..pairs.length // 2) {
+            let x=pairs[2 * i]
+            let y=pairs[2 * i + 1]
+            let proven=dir_proven.get(x)
+            if proven not=? none {dir_index(y proven)}
+            if fact_validated.has(x) {fact_validated[y]=true}
+        }
+    }
+    true
+}
+# f decided with shared member blocks; false: no decision kept, decide it again.
+fact_member_decide=(f:MemberWord):>bool=>$unsafe {
+    let proven=dir_proven
+    let validated=fact_validated
+    let notes=err_notes
+    fact_member_shared=true
+    fact_member_owner=f
+    fact_member_failed=false
+    fact_member_admitted=dict<int64 array<int64>>()
+    wit_tentative=true
+    wit_tentative_failed=false
+    let state=FactState()
+    if refine_active or refine_requests.length >? 0 {refine_fact_entry(f @state)}
+    if fact_fork_entries.length >? 0 or fact_parallel_bounds.length >? 0 {fact_fork_seed(f @state)}
+    fact_slice_prepare(f)
+    fact_capture(MemberWord(fns.ptr[f].body) @state);
+    let failed=fact_member_failed or wit_tentative_failed
+    if member_trace and fact_member_admitted.length not=? 0 {
+        let verdict="shared"
+        if failed {verdict="decided again"}
+        eprint("member facts {pos_str(nodes.ptr[MemberWord(fns.ptr[f].body)].pos)}: {fact_member_admitted.length} blocks, {verdict}")
+    }
+    wit_tentative=false
+    wit_tentative_failed=false
+    fact_member_shared=false
+    fact_member_owner=0
+    fact_member_admitted=dict<int64 array<int64>>()
+    if not failed {return true}
+    dir_proven=proven
+    fact_validated=validated
+    err_notes=notes
+    fact_terms=[FactTerm()]
+    fact_constructor_actuals=dict<int64 array<int64>>()
+    false
+}
