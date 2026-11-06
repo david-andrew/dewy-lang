@@ -2078,6 +2078,38 @@ call_tie_error = (n: int, name: int, args: int[], cands: Cand[], best: int):
                 fatal(nodes[n].pos, "ambiguous partial application of '{name_of(name)}': more than one overload takes these arguments (candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}); annotate the binding with the callable type it should have, as in `let f:<(b:string):>string> = @{name_of(name)}(...)`")
             fatal(nodes[n].pos, "ambiguous call to '{name_of(name)}({ats})': candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}")
 
+# `x.hash()` of a union or optional is its member's: `=?` compares the member, and equal values
+# hash alike. (none, which has no member, hashes as false does. A dictionary's keyed hash keeps
+# the tag: its keys all have this type.)
+union_hash = (n: int, a: int, t: int, expected: int) -> int:
+    pos = nodes[n].pos
+    held = "__uh{n}"
+    add_flag(a, NF_CHECKED)
+    members = value_members(t)
+    chain = 0
+    j = members.len() - 1
+    loop j >= 0:
+        member = members[j]
+        argument = if member == T_NONE: bc_bool(false, pos) else: bc_ident(held, pos)
+        body = bc_block([bc_stmt(bc_call("hash", [argument], pos), pos)], pos)
+        if chain == 0: chain = body
+        else:
+            it = mk(.istype, pos)
+            nodes[it].a = i32(bc_ident(held, pos))
+            ty = mk(.tname, pos)
+            nodes[ty].aux = -7
+            nodes[ty].ival = member
+            nodes[it].b = i32(ty)
+            f = mk(.if_, pos)
+            nodes[f].a = i32(it)
+            nodes[f].b = i32(body)
+            nodes[f].c = i32(chain)
+            nodes[f].aux2 = -8
+            chain = bc_block([bc_stmt(f, pos)], pos)
+        j -= 1
+    nodes[n] = nodes[bc_block([bc_let(held, a, pos), bc_stmt(chain, pos)], pos)]
+    check_expr(n, expected)
+
 call_no_candidate = (n: int, name: int, decls: int[], args: int[], expected: int, ufcs: bool, recv_fits: bool, failure: mut CallFailure) -> int:
     # (f(e) with e a union and an overload of f for each of its members: chosen by what e holds)
     ud = union_dispatch(n, name, decls, args, expected)
@@ -5708,7 +5740,9 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
     else if id == .hash:
         # (a second argument, `true`: the dictionaries' keyed hash, lib/core/map.jo)
         nargs_check(n, nargs, 1, 2, "__hash_value")
-        note_value_helpers(arg_type(args, 0, 0), true)
+        hashed = arg_type(args, 0, 0)
+        if nargs == 1 and (is_union(hashed) or tkind(hashed) == .opt): return union_hash(n, args[0], hashed, expected)
+        note_value_helpers(hashed, true)
         if nargs == 2:
             arg_type(args, 1, T_BOOL)
             if nodes[args[1]].kind != .bool_lit: fatal(nodes[args[1]].pos, "__hash_value's second argument is a literal `true` (keyed)")

@@ -2119,7 +2119,8 @@ hash = (key:Key):>uint64 => key.id.hash()
 Equal keys must return the same hash; here both operations use `id` and ignore
 `label`. Importing the type is enough for collection operations to find its hash
 function, including generic keys. Ordinary keys without a custom hash use the
-library's default hashing. `hash` gives the same value in every run, but a
+library's default hashing. A union or optional value's `.hash()` is its
+member's. `hash` gives the same value in every run, but a
 dictionary places its keys by a hash keyed with a secret drawn from the operating
 system once per process (a custom hash's result is mixed under it), so keys
 crafted to collide cannot slow it down; iteration follows insertion order
