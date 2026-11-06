@@ -16,8 +16,8 @@ from tests.test_selfhost_spelling import distance
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / 'tests/fixtures/selfhost'
 TABLES = ['dewy_habit', 'sloppy_habit', 'dewy_map_habit', 'sloppy_map_habit']
-SLOPPY_WORDS = {'str', 'f64', 'f32', 'i64', 'i32', 'i16', 'i8', 'u64', 'u32', 'u16', 'u8', 'mut', 'struct', 'enum',
-                'elif', 'len'}
+IMPL_LANGUAGE_WORDS = {'str', 'f64', 'f32', 'i64', 'i32', 'i16', 'i8', 'u64', 'u32', 'u16', 'u8', 'mut', 'struct', 'enum',
+                       'elif', 'len'}
 SURFACE = {'read_file', 'eprint', 'zip'}
 COLORS = (' (the colors with names are WHITE, BLACK, RED, GREEN, BLUE, YELLOW, ORANGE, PURPLE, CYAN, MAGENTA and '
           'GRAY; any other is rgb(0.5, 0.3, 0.1), each from 0 to 1)')
@@ -43,7 +43,7 @@ def sloppy_shaped(hint):
     if any(mark in hint for mark in [', ', '[]', '): ', '->', 'if let']):
         return True
     words = re.findall(r'[A-Za-z_][A-Za-z0-9_]*', hint)
-    return any(w in SLOPPY_WORDS or w in SURFACE for w in words)
+    return any(w in IMPL_LANGUAGE_WORDS or w in SURFACE for w in words)
 
 
 def nearest(name, candidates):
