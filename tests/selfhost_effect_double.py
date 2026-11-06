@@ -33,6 +33,8 @@ def effect_services(text, modules):
         text = text.replace('growth_ops.dewy', 'growth.jo').replace('growth_ops.jo', 'growth.jo')
     if any(name + ' = ' in modules.get('sibling_types.jo', '') for name in ('sibling_array_source', 'sibling_annotated', 'sibling_syntax_type', 'sibling_scalar', 'sibling_binding', 'sibling_statement')):
         text = text.replace('sibling_ops.dewy', 'sibling_types.jo').replace('sibling_ops.jo', 'sibling_types.jo')
+    if any(name + ' = ' in modules.get('reflection.jo', '') for name in ('reflect_fields', 'reflect_members', 'members_argument', 'members_named', 'reflect_member', 'members_array', 'reflect_record', 'reflect_loop')):
+        text = text.replace('reflect_ops.dewy', 'reflection.jo').replace('reflect_ops.jo', 'reflection.jo')
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(

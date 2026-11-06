@@ -1,0 +1,324 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_MUT NF_U64 add_flag clone has_flag kid kid_c kid_d mk nkids nodes set_list)
+from p"check.jo" import (check_block check_struct_fields cur_mod dewy_at globals new_sym push_scope_sym resolve_type scope_mark scope_reset syms)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checker_state.dewy" import (Global)
+from p"comptime.jo" import (ct_literal ct_run ct_values)
+from p"expr.jo" import (bc_bin bc_block bc_ident bc_if bc_int bc_str coerce expr_as_type finalize_literal int_intervals is_map_type last_checked ntype small_span)
+from p"member_admit.dewy" import (member_prepare)
+from p"member_replay.jo" import (member_scopes)
+from p"node_store.dewy" import (Node)
+from p"refine.jo" import (mk_refined ref_intern str_set_of str_set_type str_sets)
+from p"refinement_types.dewy" import (RefAtom RefTerm)
+from p"reflection.jo" import (id_fields id_members reflect_active)
+from p"string_domain_ops.dewy" import (string_domain_members)
+from p"types.jo" import (T_INT T_STR dt fields is_union mk_array mk_typeval mk_union prune structs tkind types union_members)
+from p"util.jo" import (fatal intern name_of)
+
+ReflectWord:type=int64<overflow='wrap'>
+reflect_source=(e:ReflectWord):>ReflectWord=>$unsafe {
+    if nodes.ptr[e].kind =? 'call' and nkids(e) =? 1 {
+        let callee=ReflectWord(nodes.ptr[e].a)
+        if nodes.ptr[callee].kind =? 'ident' and name_of(ReflectWord(nodes.ptr[callee].name)) =? "__dewy_iter" {return kid(e 0)}
+    }
+    e
+}
+reflect_fields=(e:ReflectWord):>bool=>$unsafe {
+    if nodes.ptr[e].kind not=? 'call' {return false}
+    let callee=ReflectWord(nodes.ptr[e].a)
+    if id_fields =? 0 {
+        id_fields=intern("fields")
+        id_members=intern("members")
+    }
+    nodes.ptr[callee].kind =? 'ident' and ReflectWord(nodes.ptr[callee].name) =? id_fields and dewy_at(nodes.ptr[e].pos) and lookup(id_fields) =? 0
+}
+reflect_members=(e:ReflectWord):>bool=>$unsafe {
+    if nodes.ptr[e].kind not=? 'call' {return false}
+    let callee=ReflectWord(nodes.ptr[e].a)
+    if id_members =? 0 {id_members=intern("members")}
+    nodes.ptr[callee].kind =? 'ident' and ReflectWord(nodes.ptr[callee].name) =? id_members and dewy_at(nodes.ptr[e].pos) and lookup(id_members) =? 0
+}
+# the literal members of a type (its string sets and integer singletons), each
+# a checked literal whose type is its own singleton
+literal_members=(t0:ReflectWord pos:ReflectWord @out:array<int64> @singletons:array<int64>):>void=>$unsafe {
+    let t=prune(t0)
+    if is_union(t) {
+        # (a canonical order, as a union is a set: the integers rising, then the text in order)
+        loop m in union_members(t) {
+            if str_set_of(m) =? 0 {literal_members(m pos @out @singletons)}
+        }
+        loop m in union_members(t) {
+            if str_set_of(m) not=? 0 {literal_members(m pos @out @singletons)}
+        }
+        return
+    }
+    let set=str_set_of(t)
+    if set not=? 0 {
+        loop value in str_sets[set].sorted() {
+            let n=bc_str(value pos)
+            nodes.ptr[n].type=int32(T_STR)
+            add_flag(n NF_CHECKED)
+            singletons.push(str_set_type([value]))
+            out.push(n)
+        }
+        return
+    }
+    let [known values]=int_intervals(t)
+    if not known or types.ptr[t].kind not=? 'refined' or values.length >? 64 {fatal(pos "members(U) needs a union of literals, found {dt(t)}")}
+    loop k in [0..values.length // 2) {
+        if not small_span(values[2 * k] values[2 * k + 1] 64) {fatal(pos "members(U) needs a union of literals, found {dt(t)}")}
+        loop v in [values[2 * k]..values[2 * k + 1]] {
+            let n=bc_int(v pos)
+            nodes.ptr[n].type=int32(T_INT)
+            add_flag(n NF_CHECKED)
+            singletons.push(mk_refined(T_INT ref_intern([RefAtom('le' RefTerm(1 v) RefTerm()) RefAtom('le' RefTerm() RefTerm(1 v))])))
+            out.push(n)
+        }
+    }
+}
+# The leaves of `|` written as an expression: the text of string literals, the
+# values of integer literals, and the types of the other members.
+members_leaves=(e:ReflectWord @texts:array<string> @ints:array<int64> @others:array<int64>):>void=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'binary' and nodes.ptr[e].op =? int32(64) {
+        members_leaves(ReflectWord(nodes.ptr[e].a) @texts @ints @others)
+        members_leaves(ReflectWord(nodes.ptr[e].b) @texts @ints @others)
+    }
+    else if k =? 'str_lit' and nodes.ptr[e].aux not=? 1 {
+        if not texts.contains(name_of(ReflectWord(nodes.ptr[e].sval))) {texts.push(name_of(ReflectWord(nodes.ptr[e].sval)))}
+    }
+    else if k =? 'int_lit' and not has_flag(e NF_U64) {
+        if not ints.contains(nodes.ptr[e].ival) {ints.push(nodes.ptr[e].ival)}
+    }
+    else if k =? 'unary' and nodes.ptr[e].op =? int32(59) and nodes.ptr[ReflectWord(nodes.ptr[e].a)].kind =? 'int_lit' and not has_flag(ReflectWord(nodes.ptr[e].a) NF_U64) {
+        if not ints.contains(-nodes.ptr[ReflectWord(nodes.ptr[e].a)].ival) {ints.push(-nodes.ptr[ReflectWord(nodes.ptr[e].a)].ival)}
+    }
+    else {others.push(members_type(e))}
+}
+# integer singletons as one refined int, as in a type position: lo <= v <= hi, v != each gap
+members_int_type=(values:array<int64> pos:ReflectWord):>ReflectWord=>{
+    let lo=values[0]
+    let hi=values[0]
+    loop v in values {
+        lo=min(lo v)
+        hi=max(hi v)
+    }
+    if hi - lo <? 0 or hi - lo - values.length + 1 >? 24 {fatal(pos "an integer singleton union with more than 24 missing values between its least and greatest members")}
+    let atoms=[RefAtom('le' RefTerm(1 lo) RefTerm()) RefAtom('le' RefTerm() RefTerm(1 hi))]
+    loop g in [lo..hi] {
+        if not values.contains(g) {atoms.push(RefAtom('ne' RefTerm() RefTerm(1 g)))}
+    }
+    mk_refined(T_INT ref_intern(atoms))
+}
+# members(U)'s type: a name, type syntax (`members(<'a' | 1>)`), or an inline
+# union of literals parsed as an expression (`members('a' | 'b')`), which means
+# what it means in a type position
+members_type=(e:ReflectWord):>ReflectWord=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'tname' or k =? 'tunion' or k =? 'trefined' {return resolve_type(e)}
+    if k not=? 'binary' and k not=? 'str_lit' and k not=? 'int_lit' and k not=? 'unary' {return expr_as_type(e)}
+    let texts:array<string>=[]
+    let ints:array<int64>=[]
+    let others:array<int64>=[]
+    members_leaves(e @texts @ints @others)
+    let parts:array<int64>=[]
+    if ints.length >? 0 {parts.push(members_int_type(ints nodes.ptr[e].pos))}
+    if texts.length >? 0 {parts.push(str_set_type(texts))}
+    loop other in others {parts.push(other)}
+    if parts.length =? 1 {return parts[0]}
+    mk_union(parts)
+}
+# members(U) used as a value is the array literal of U's members in the
+# loop's order: an array<U>, unless its context gives the array a type.
+members_literal=(n:ReflectWord):>ReflectWord=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    if nkids(n) not=? 1 {fatal(pos "members(U) needs one type")}
+    let u=members_type(kid(n 0))
+    let values:array<int64>=[]
+    let singletons:array<int64>=[]
+    literal_members(u pos @values @singletons)
+    let items:array<int64>=[]
+    loop value in values {
+        if nodes.ptr[value].kind =? 'str_lit' {items.push(bc_str(name_of(ReflectWord(nodes.ptr[value].sval)) pos))}
+        else {items.push(bc_int(nodes.ptr[value].ival pos))}
+    }
+    nodes.ptr[n]=Node(kind='array' pos=pos)
+    set_list(n items)
+    u
+}
+# (a call's callee may be `members`: a cheap test before reflect_members)
+members_named=(a:ReflectWord):>bool=>$unsafe {
+    id_members =? 0 or nodes.ptr[ReflectWord(nodes.ptr[a].a)].name =? int32(id_members)
+}
+# (an argument: the array literal, for the selected call's parameter to type)
+members_argument=(a:int64):>void=>{
+    if reflect_members(a) and not string_domain_members(a) {members_literal(a);}
+}
+members_array=(n:ReflectWord expected:ReflectWord):>ReflectWord=>{
+    let u=members_literal(n)
+    if expected not=? 0 and (tkind(expected) =? 'array' or tkind(expected) =? 'fixed') {return check_expr(n expected)}
+    check_expr(n mk_array(u))
+}
+# Scope nodes carry either a field-table index or a checked constant value.
+reflect_sequence=(e0:ReflectWord binder:ReflectWord):>array<int64>=>$unsafe {
+    let e=reflect_source(e0)
+    let out:array<int64>=[]
+    if reflect_members(e) {
+        if nkids(e) not=? 1 {fatal(nodes.ptr[e].pos "members(U) needs one type")}
+        let values:array<int64>=[]
+        let singletons:array<int64>=[]
+        literal_members(members_type(kid(e 0)) nodes.ptr[e].pos @values @singletons)
+        loop i in 0.. and value in values {
+            let scope=mk('reflect_scope' nodes.ptr[e].pos)
+            nodes.ptr[scope].name=int32(binder)
+            nodes.ptr[scope].a=int32(value)
+            nodes.ptr[scope].aux2=int32(singletons[i])
+            out.push(scope)
+        }
+    }
+    else if reflect_fields(e) {
+        if nkids(e) not=? 1 {fatal(nodes.ptr[e].pos "fields(T) needs one record type")}
+        let t=prune(expr_as_type(kid(e 0)))
+        if tkind(t) not=? 'struct_' or is_map_type(t) {fatal(nodes.ptr[e].pos "fields(T) needs a record type, found {dt(t)}")}
+        let si=ReflectWord(types.ptr[t].st)
+        check_struct_fields(si)
+        loop i in [0..ReflectWord(structs.ptr[si].nfields)) {
+            let scope=mk('reflect_scope' nodes.ptr[e].pos)
+            nodes.ptr[scope].name=int32(binder)
+            nodes.ptr[scope].ival=ReflectWord(structs.ptr[si].fields) + i
+            nodes.ptr[scope].aux=1
+            out.push(scope)
+        }
+    }
+    else {
+        let t=prune(check_expr(e 0))
+        let checked=last_checked
+        if tkind(t) not=? 'array' and tkind(t) not=? 'fixed' {fatal(nodes.ptr[e].pos "a record loop needs fields(T) or a compile-time array")}
+        let v=ct_values[ct_run(checked)]
+        loop item in v.items {
+            let scope=mk('reflect_scope' nodes.ptr[e].pos)
+            nodes.ptr[scope].name=int32(binder)
+            nodes.ptr[scope].a=int32(ct_literal(item nodes.ptr[e].pos))
+            out.push(scope)
+        }
+    }
+    out
+}
+reflect_bind=(s:ReflectWord):>void=>$unsafe {
+    let name=ReflectWord(nodes.ptr[s].name)
+    if nodes.ptr[s].aux =? 1 {
+        push_scope_sym(name new_sym(name 'reflected' nodes.ptr[s].ival 0))
+    }
+    else {
+        let initial=ReflectWord(nodes.ptr[s].a)
+        let g=globals.length
+        # (a literal member is its own singleton: `return m` fits the union)
+        let t=if nodes.ptr[s].aux2 not=? 0 {ReflectWord(nodes.ptr[s].aux2)} else {ntype(initial)}
+        globals.push(Global(name=int32(name) type=int32(t) init=int32(initial) mod=int32(cur_mod()) is_const=true state=2))
+        push_scope_sym(name new_sym(name 'const_' g 0))
+    }
+}
+reflect_name=(n:ReflectWord):>void=>$unsafe {
+    let e=ReflectWord(nodes.ptr[n].b)
+    if e =? 0 {return}
+    check_expr(e T_STR);
+    e=coerce(last_checked T_STR)
+    let value=ct_values[ct_run(e)]
+    if tkind(value.type) not=? 'str_' {fatal(nodes.ptr[n].pos "an object's fields are fixed at compile time; `$field` needs a compile-time string (use a dictionary for runtime names)")}
+    nodes.ptr[n].name=int32(intern(value.s))
+    nodes.ptr[n].b=0
+}
+reflect_member=(n:ReflectWord):>bool=>$unsafe {
+    let receiver=ReflectWord(nodes.ptr[n].a)
+    if nodes.ptr[receiver].kind not=? 'ident' {return false}
+    let s=lookup(ReflectWord(nodes.ptr[receiver].name))
+    if s =? 0 or syms.ptr[s].kind not=? 'reflected' {return false}
+    let f=fields.ptr[ReflectWord(syms.ptr[s].ref)]
+    let member=name_of(ReflectWord(nodes.ptr[n].name))
+    let pos=nodes.ptr[n].pos
+    if member =? "name" {nodes.ptr[n]=Node(kind='str_lit' pos=pos sval=f.name type=int32(T_STR) flags=int32(NF_CHECKED))}
+    else if member =? "type" {
+        let name=intern("$field_type{int64(f.type)}")
+        push_scope_sym(name new_sym(name 'type_' int64(f.type) 0))
+        nodes.ptr[n]=Node(kind='ident' name=int32(name) pos=pos type=int32(mk_typeval(int64(f.type))))
+        add_flag(n NF_CHECKED)
+    }
+    else {fatal(pos "a field descriptor has .name and .type, not .{member}")}
+    last_checked=n
+    true
+}
+reflect_jumps=(n:ReflectWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'break_' or k =? 'continue_' {return true}
+    if k =? 'lambda' {return false}
+    if reflect_jumps(ReflectWord(nodes.ptr[n].a)) or reflect_jumps(ReflectWord(nodes.ptr[n].b)) or reflect_jumps(kid_c(n)) or reflect_jumps(kid_d(n)) {return true}
+    loop i in [0..nkids(n)) {
+        let child=kid(n i)
+        if reflect_jumps(child) {return true}
+    }
+    false
+}
+reflect_loop=(s:ReflectWord):>bool=>$unsafe {
+    let it=reflect_source(ReflectWord(nodes.ptr[s].a))
+    if not reflect_fields(it) and not reflect_members(it) {return false}
+    if nkids(s) not=? 1 or has_flag(s NF_MUT) {fatal(nodes.ptr[s].pos "fields(T) and members(U) yield one immutable value per iteration")}
+    if reflect_members(it) and string_domain_members(it) {return false}
+    let binder=ReflectWord(nodes.ptr[kid(s 0)].name)
+    let scopes=reflect_sequence(it binder)
+    let pos=nodes.ptr[s].pos
+    let index="$field_iteration{s}"
+    let bodies:array<int64>=[]
+    let jumping=reflect_jumps(ReflectWord(nodes.ptr[s].b))
+    if not jumping {member_prepare(scopes ReflectWord(nodes.ptr[s].b))}
+    loop i in [0..scopes.length) {
+        let scope=scopes[i]
+        nodes.ptr[scope].b=int32(if i >? 0 and member_scopes.has(scope) {ReflectWord(nodes.ptr[s].b)} else {clone(ReflectWord(nodes.ptr[s].b))})
+        if jumping {bodies.push(bc_if(bc_bin('eq' bc_ident(index pos) bc_int(i pos) pos) [scope] [] pos))}
+        else {bodies.push(scope)}
+    }
+    if not jumping {
+        let whole=bc_block(bodies pos)
+        nodes.ptr[s]=nodes.ptr[whole]
+        check_block(s 0 false);
+        return true
+    }
+    # A counted dispatch retains ordinary break/continue (including labels),
+    # while every iteration's code and member types are checked independently.
+    let range=mk('range' pos)
+    nodes.ptr[range].a=int32(bc_int(0 pos))
+    nodes.ptr[range].b=int32(bc_int(scopes.length pos))
+    nodes.ptr[s].a=int32(range)
+    nodes.ptr[s].b=int32(bc_block(bodies pos))
+    set_list(s [bc_ident(index pos)])
+    false
+}
+reflect_entries=(n:ReflectWord @entries:array<int64>):>void=>$unsafe {
+    if nodes.ptr[n].kind =? 'record_loop' {
+        let scopes=reflect_sequence(ReflectWord(nodes.ptr[n].a) ReflectWord(nodes.ptr[n].name))
+        loop scope in scopes {
+            let mark=scope_mark()
+            reflect_bind(scope)
+            let active=reflect_active
+            reflect_active=true
+            reflect_entries(clone(ReflectWord(nodes.ptr[n].b)) @entries)
+            reflect_active=active
+            scope_reset(mark)
+        }
+        return
+    }
+    reflect_name(n)
+    let value=ReflectWord(nodes.ptr[n].a)
+    check_expr(value 0);
+    value=last_checked
+    finalize_literal(value);
+    add_flag(value NF_CHECKED)
+    nodes.ptr[n].a=int32(value)
+    entries.push(n)
+}
+reflect_record=(n:ReflectWord):>void=>$unsafe {
+    let entries:array<int64>=[]
+    reflect_entries(n @entries)
+    nodes.ptr[n]=Node(kind='record_lit' pos=nodes.ptr[n].pos)
+    set_list(n entries)
+}
