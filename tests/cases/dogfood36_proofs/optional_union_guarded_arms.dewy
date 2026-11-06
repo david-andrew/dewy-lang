@@ -1,0 +1,19 @@
+# optional union with guards fully covering the int member; a stale narrow through a mutable path
+V:type = int8 | string | none
+f = (x:V):>string => match x {
+    a:int8<a <? 0> => "neg {a}"
+    b:int8<b >=? 0> => "pos {b}"
+    s:string => s
+    <none> => "nil"
+}
+g = (x:V):>int => match x {
+    a:int8<a <? 0> => int(a) * 2
+    _ => 0
+}
+main = () => {
+    let v:array<V> = [(-3) 5 "s" none]
+    loop e in v printl(f(e))
+    printl(g(-3))
+    printl(g(5))
+    printl(g(none))
+}

@@ -1,0 +1,19 @@
+# A guard on an `int` member of an optional union, in either spelling.
+Val:type = int | string | none
+show = (v:Val):>string => match v {
+    n:int<n <? 0> => "negative {n}"
+    m:int<(>? 100)> => "big {m}"
+    k:int => "number {k}"
+    s:string => s
+    <none> => "nil"
+}
+main = () => {
+    printl(show(-1))
+    printl(show(101))
+    printl(show(1))
+    printl(show("t"))
+    printl(show(none))
+    let v:Val = 2
+    printl(v is? int<(>? 1)>)
+    printl(v is? int<(>? 5)>)
+}

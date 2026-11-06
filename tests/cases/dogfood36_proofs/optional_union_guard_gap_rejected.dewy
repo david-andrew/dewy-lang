@@ -1,0 +1,6 @@
+V:type = int8 | none
+f = (x:V):>string => match x {
+    a:int8<a <? 0> => "neg {a}"
+    <none> => "nil"
+}
+main = () => printl(f(none))

@@ -1,0 +1,22 @@
+# Guards on a plain optional integer, as `xs.get(i)` gives.
+sign = (x:int8?):>string => match x {
+    a:int8<a <? 0> => "neg {a}"
+    b:int8<b >=? 0> => "pos {b}"
+    <none> => "nil"
+}
+size = (x:int?):>string => match x {
+    m:int<m >? 100> => "big {m}"
+    k:int => "small {k}"
+    <none> => "nil"
+}
+main = () => {
+    printl(sign(-3))
+    printl(sign(5))
+    printl(sign(none))
+    printl(size(101))
+    printl(size(1))
+    printl(size(none))
+    let xs = [1 200]
+    printl(size(xs.get(1)))
+    printl(size(xs.get(9)))
+}

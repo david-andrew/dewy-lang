@@ -1,0 +1,14 @@
+# is? on an optional of a refined type: its own type and a looser one are presence tests.
+Small:type = int64<(>=? 0)>
+find = (x:int64):>Small | none => {
+    if x >=? 0 return x
+    none
+}
+main = () => {
+    let at = find(5)
+    if at is? Small printl(at)
+    printl(at is? int64<(>? 5)>)
+    printl(at is? int64<(>? 4)>)
+    let gone = find(-1)
+    printl(gone is? Small)
+}

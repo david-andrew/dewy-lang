@@ -6973,6 +6973,8 @@ shape_match_wanted = (m: int) -> bool:
     if not guarded or not plain_path(sc) and has_lambda(sc): return false
     st = prune(check_expr(clone(sc), 0))
     if is_union(st): return true
+    # (and on an optional union's: the value is present, then the same)
+    if types[st].kind == .opt and (is_union(int(types[st].elem)) or is_int(int(types[st].elem)) or prune(int(types[st].elem)) == T_MATH_INT): return true
     (plain_path(sc) or int_guarded) and st == T_MATH_INT
 
 has_lambda = (n: int) -> bool:
@@ -7027,6 +7029,7 @@ shape_choice = (t: int) -> bool: is_union(t) or tkind(t) == .opt
 shape_members = (t0: int) -> int[]:
     t = prune(t0)
     if is_union(t): return union_members(t)
+    if tkind(t) == .opt and is_union(int(types[t].elem)): return union_members(int(types[t].elem)) + [T_NONE]
     if tkind(t) == .opt: return [prune(int(types[t].elem)), T_NONE]
     [t]
 
@@ -7096,7 +7099,7 @@ shape_pattern = (p: int, subj: int, t0: int, out: mut ShapeArm):
                 return
         if not type_eq(pt, t): out.cond = shape_and(out.cond, shape_is(clone(subj), pt, pos), pos)
         # (a refined arm's binding carries its refinement, proven by the test)
-        annotation = if types[pt].kind == .refined and str_set_of(pt) == 0 and not is_union(t): pt else: 0
+        annotation = if types[pt].kind == .refined and str_set_of(pt) == 0 and not is_union(t) and tkind(t) != .opt: pt else: 0
         if name != 0: out.decls.push(shape_decl(name, clone(subj), annotation, pos))
         return
     if k == .pshape:
@@ -7125,6 +7128,14 @@ shape_pattern = (p: int, subj: int, t0: int, out: mut ShapeArm):
     fatal(pos, "invalid pattern")
 
 # what an arm covers of type t: everything, a whole member, or values of one field
+# Whether refined pt guards a member of union or optional t.
+shape_guard_member = (t: int, pt: int) -> bool:
+    if types[pt].kind != .refined: return false
+    if is_union(t): return union_index(t, int(types[pt].elem)) >= 0
+    if tkind(t) != .opt: return false
+    elem = prune(int(types[t].elem))
+    if is_union(elem): union_index(elem, int(types[pt].elem)) >= 0 else: type_eq(elem, int(types[pt].elem))
+
 shape_cover = (p: int, t0: int, out: mut ShapeArm):
     t = prune(t0)
     k = nodes[p].kind
@@ -7136,7 +7147,8 @@ shape_cover = (p: int, t0: int, out: mut ShapeArm):
         if type_eq(pt, t): out.member = -1
         else if is_union(t) and union_index(t, pt) >= 0: out.member = pt
         else if tkind(t) == .opt and (pt == T_NONE or type_eq(pt, int(types[t].elem))): out.member = pt
-        else if is_union(t) and types[pt].kind == .refined and union_index(t, int(types[pt].elem)) >= 0:
+        else if tkind(t) == .opt and is_union(int(types[t].elem)) and types[pt].kind != .refined and union_index(int(types[t].elem), pt) >= 0: out.member = pt
+        else if shape_guard_member(t, pt):
             known, intervals = int_intervals(pt)
             if known:
                 out.gmember = prune(int(types[pt].elem))
@@ -10489,7 +10501,7 @@ istype_set = (n: int, orig: int, at: int, set: int) -> int:
 # x is? 1, x is? 'fast' on a union with an integer or string member: that member, then its value
 istype_member_value = (n: int, orig: int, at: int, tt: int, set: int) -> int:
     pos = nodes[n].pos
-    loop m in union_members(at):
+    loop m in (if is_union(at): union_members(at) else: [at]):
         if type_eq(representation_type(m), representation_type(tt)) or set != 0 and str_set_of(m) != 0:
             subj = is_subject(n, orig)
             held = mk(.istype, pos)

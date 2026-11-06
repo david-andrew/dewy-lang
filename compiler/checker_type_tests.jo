@@ -78,6 +78,9 @@ xi_check = (n: int) -> int:
     if xi_union(at) and (xi_types[0][tt].kind == .refined or set != 0) and uu_index(at, tt) < 0:
         r = xi_host[0].member_value(n, orig, at, tt, set)
         if r >= 0: return r
+    if xi_types[0][at].kind == .opt and xi_types[0][tt].kind == .refined and set == 0 and not tu_equal(tt, int(xi_types[0][at].elem)) and not (xi_refine[0] and xi_host[0].implies(int(xi_types[0][at].elem), tt)) and (xi_union(int(xi_types[0][at].elem)) and uu_index(int(xi_types[0][at].elem), tt) < 0 or xi_kind(xi_representation(int(xi_types[0][at].elem))) == .int_ and tu_equal(xi_representation(int(xi_types[0][at].elem)), xi_representation(tt))):
+        r = xi_host[0].member_value(n, orig, tu_prune(int(xi_types[0][at].elem)), tt, set)
+        if r >= 0: return r
     if xi_types[0][tt].kind == .refined and xi_kind(xi_representation(tt)) == .int_ and xi_kind(xi_representation(at)) == .int_ and not xi_union(at):
         return xi_host[0].refined_test(n, orig, tt)
     if xi_union(at):

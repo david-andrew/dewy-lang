@@ -1,0 +1,7 @@
+Val:type = int | string | none
+show = (v:Val):>string => match v {
+    n:int<n <? 0> => "negative {n}"
+    s:string => s
+    <none> => "nil"
+}
+main = () => printl(show(1))
