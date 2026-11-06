@@ -33,9 +33,8 @@ def frozen_evaluator(compiler, tmp_path_factory):  # noqa: F811
     directory = tmp_path_factory.mktemp('checked-eval-frozen')
     sources = directory / 'compiler'
     shutil.copytree(ROOT / 'compiler', sources)
-    for name in ('comptime.jo', 'math_comptime.jo'):
-        path = sources / name
-        path.write_text(path.read_text().replace("use 'checked_eval.dewy'", "use 'checked_eval.jo'"))
+    path = sources / 'comptime.jo'
+    path.write_text(path.read_text().replace("use 'checked_eval.dewy'", "use 'checked_eval.jo'"))
     binary = directory / 'dewy-core'
     built = subprocess.run([compiler, 'build', sources / 'main.jo', '-o', binary],
                            env={**os.environ, 'DEWY_CORE_LIB': str(ROOT / 'lib'), 'DEWY_EMIT_WORKERS': '1'},
@@ -68,6 +67,5 @@ def test_checked_eval_twins(compiler, frozen_evaluator, tmp_path, release):  # n
 
 def test_checked_evaluator_owns_execution(compiler):  # noqa: F811
     assert b'/compiler/checked_eval.dewy\0' in compiler.read_bytes()
-    for name in ('comptime', 'math_comptime'):
-        source = (ROOT / f'compiler/{name}.jo').read_text()
-        assert not re.search(r'^    (?:if |loop |return )', source, re.M), name
+    source = (ROOT / 'compiler/comptime.jo').read_text()
+    assert not re.search(r'^    (?:if |loop |return )', source, re.M)

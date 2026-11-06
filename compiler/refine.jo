@@ -190,9 +190,6 @@ ref_intern = (atoms: RefAtom[]) -> int: ref_atoms_intern(ref_predicates, atoms)
 
 mk_refined = (base0: int, predicate: int) -> int: tr_make(base0, predicate)
 
-# A string is refined only by its length (`string<length >? 0>`).
-ref_length_only = (predicate: int) -> bool: ref_atoms_length_only(ref_predicates[predicate])
-
 ref_resolve_value = (n: int) -> RefTerm:
     name = int(nodes[n].name)
     sym = lookup(name)

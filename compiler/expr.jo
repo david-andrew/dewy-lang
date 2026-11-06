@@ -1639,10 +1639,6 @@ match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int: tm_match
 # type parameter id is a member of a union in type t
 param_in_union = (t0: int, id: int) -> bool: tm_param_in_union(t0, id)
 
-# T | Err against int | str | Err: the members the pattern names match themselves, and its type
-# parameter stands for the rest (int | str); a lone member (Err, or int) matches the same way
-match_union = (pat: int, a: int, binds: mut int[], depth: int) -> int: tm_union(pat, a, binds, depth)
-
 subst_partial = (pat0: int, binds: mut int[]) -> int: ts_partial(pat0, binds)
 
 find_variant = (si: int, name: int) -> int:
@@ -2327,11 +2323,6 @@ fn_has_defaults = (decl: int) -> bool:
 surface_call_name = (name: int) -> str:
     if starts_with(name_of(name), "__mi_parse"): return "to_int"
     name_of(name)
-
-slot_of = (args: int[], a: int) -> int:
-    loop x in args:
-        if x == a or (nodes[x].kind == .namedarg and int(nodes[x].a) == a): return a
-    a
 
 # the value of a struct type that has default field values (its own, or its fields' structs'),
 # as T() makes it with nothing given: what `x: T` and a field left out start as (0: no struct,
@@ -4313,13 +4304,6 @@ cmp_error = (n: int, ta: int, tb: int):
     # (n == 1 with n an enum: C's and JavaScript's numbered names)
     if len(why) == 0 and tkind(ta) == .enum_ and not is_union(ta) and is_int(tb): why = if dewy_at(nodes[n].pos): " (`x =? .name` asks which it is)" else: " (`x == .name` asks which it is; `int(x)` is its number, counting from 0)"
     fatal(nodes[n].pos, "cannot compare {dt(ta)} with {dt(tb)}{why}")
-
-# "space" given where a Key goes: " (write `.space`)"
-# (the library's Missing, a search's result when nothing is found; 0 before the library is loaded)
-missing_type = () -> int:
-    s = prelude.get(intern("Missing")) ?? 0
-    if s == 0 or syms[s].kind != .struct_: return 0
-    get_struct_inst(int(syms[s].decl), [])
 
 # (the prelude's Console, the type of `console`; 0 before the library is loaded)
 console_type_id = -1
@@ -8098,7 +8082,6 @@ ce_expected = (expected: int) -> int:
     if expected == 0: return 0
     xl_expected(expected)
 ce_finish = (n: int, t: int, expected: int) -> int: xl_finish(n, t, expected)
-check_int_expr = (n: int, expected: int) -> int: xl_check_int(n, expected)
 
 # A name read as a value runs in checker_idents.dewy once looked up; these are its services.
 ident_unknown = (n: int, expected: int, nm: int):
@@ -8311,8 +8294,6 @@ call_map_rows = (n: int, ex: int):
         check_expr(block, mk_array(pair))
         set_kid(n, 0, last_checked)
 
-check_str_expr = (n: int, expected: int) -> int: xl_check_str(n, expected)
-
 logic_mask = (ta: int) -> bool:
     (types[ta].kind == .array and prune(int(types[ta].elem)) == T_BOOL) or (is_nd(ta) and prune(nd_elem(ta)) == T_BOOL)
 logic_broadcast = (n: int):
@@ -8465,8 +8446,6 @@ literal_interpolation_warning = (e: int):
         warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
 literal_float_error = (n: int): fatal(nodes[n].pos, "real literal exceeds float64")
 
-# Member selection runs in checker_members.dewy; these are its services.
-check_field_expr = (n: int, expected: int) -> int: xs_field(n, expected)
 # The receiver prelude of `x.f` runs in checker_receivers.dewy; these are its services.
 field_juxt = (n: int):
     juxt_member_check(n)
@@ -8771,7 +8750,6 @@ dewy_whole_collection = (x: int) -> bool:
     if k == .parallel_region: return true
     k == .call and nkids(x) == 1 and nodes[int(nodes[x].a)].kind == .ident and name_of(int(nodes[int(nodes[x].a)].name)) == "__map_of"
 
-check_index_expr = (n: int, expected: int) -> int: xs_index(n, expected)
 # The receiver prelude of `x[i]` runs in checker_receivers.dewy; these are its services.
 # (`end` in the brackets: the receiver's length, read where it is written or bound once)
 index_end = (n: int, expected: int) -> int:
@@ -9308,8 +9286,6 @@ check_range_value = (n: int, expected: int) -> int: xn_check(n, expected)
 range_value_error = (n: int):
     fatal(nodes[n].pos, "a range with no end (a..) can only be looped over")
 
-# `x in a..b` runs in checker_in_range.dewy; these are its services.
-check_in_range = (n: int, expected: int) -> int: xy_check(n, expected)
 in_range_error = (n: int):
     fatal(nodes[n].pos, "invalid range")
 
@@ -9957,10 +9933,6 @@ bc_loop = (name: str, n: int, body: int[], pos: int) -> int:
 
 # int(x != 1): the step through an operand's dimension of length x (0 when it is broadcast)
 bc_step = (x: int, pos: int) -> int: bc_call("int", [bc_bin(.ne, x, bc_int(1, pos), pos)], pos)
-
-is_dotted = (n: int) -> bool:
-    k = nodes[n].kind
-    (k == .binary and nodes[n].op == i32(int(Tok.dotop))) or ((k == .call or k == .unary) and has_flag(n, NF_BROADCAST))
 
 # the operator a dotted operator applies to each element (.+ is +, .<= is <=, ...)
 dot_base_op = (n: int) -> Tok:

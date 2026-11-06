@@ -75,7 +75,6 @@ lists: i32[]
 
 # (the one-line field reads and flag tests stay here, where they inline into their callers)
 mk = (kind: NK, pos: int) -> int: node_mk(nodes, kind, pos)
-mklist = (xs: int[]) -> int: node_run(lists, xs)
 set_list = (n: int, xs: int[]): node_set_list(nodes, lists, n, xs)
 set_list2 = (n: int, xs: int[]): node_set_list2(nodes, lists, n, xs)
 kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
@@ -83,7 +82,6 @@ kid2 = (n: int, i: int) -> int: int(lists[int(nodes[n].list2) + i])
 nkids = (n: int) -> int: int(nodes[n].nlist)
 nkids2 = (n: int) -> int: int(nodes[n].nlist2)
 set_kid = (n: int, i: int, v: int): lists[int(nodes[n].list) + i] = i32(v)
-set_kid2 = (n: int, i: int, v: int): lists[int(nodes[n].list2) + i] = i32(v)
 # n's c and d where they hold child nodes, for walks over every field of any node. A checked
 # for keeps locals in c and d (its index and the iterable's snapshot), a partial a function
 # instance in d (check.jo, expr.jo's finish_partial); in large builds those numbers reach

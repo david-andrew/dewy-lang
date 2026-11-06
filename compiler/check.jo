@@ -1304,15 +1304,6 @@ push_type_params = (decl: int, targs: int[]):
 struct_components: {int: int[]} = {}
 intersection_parts: {int: int[]} = {}
 
-# the fields of an intersection's operands, merged by name: a field on one side
-# is kept, one on both takes the intersection of its types (never: an error)
-intersection_fields = (si: int, d: int, own: int[]) -> Field[]: cf_intersection_fields(si, d, own)
-
-intersection_merge = (out: mut Field[], field: Field, pos: int): cf_intersection_merge(out, field, pos)
-
-# a & b for field types: the same type, or the members both unions share; 0 for never
-intersect_types = (a0: int, b0: int) -> int: cf_intersect_types(a0, b0)
-
 check_struct_fields = (si: int):
     if structs[si].resolved: return
     cf_check_struct_fields(si)
@@ -1477,12 +1468,6 @@ new_inst = (kind: int, m: int, base: str) -> int:
 
 has_value_return = (n: int) -> bool: cr_has_value_return(n)
 
-# The type of a value the body `b` of the function `name` ends with that does not call it, nor
-# any function whose result is still being worked out (is_even and is_odd calling each other),
-# (a typed one before a literal), or 0. Each candidate is checked as a copy, here, so it may only
-# use names already in scope.
-recursive_base_type = (b: int, name: int) -> int: cr_recursive_base_type(b, name)
-
 result_pending = (name: int) -> int[]:
     pending = [name]
     loop c in ctxs:
@@ -1502,11 +1487,6 @@ result_lookup = (name: int) -> int: lookup(name)
 
 value_leaves = (n: int, out: mut int[]): cr_value_leaves(n, out)
 
-returned_values = (n: int, out: mut int[]): cr_returned_values(n, out)
-
-# (an expression that names none of the functions `pending` and nothing out of scope here)
-base_case = (n: int, pending: int[]) -> bool: cr_base_case(n, pending)
-
 # the name of the type a Dewy method belongs to, or ""
 method_type_name = (d: int) -> str:
     t = int(nodes[kid(d, 0)].a)
@@ -1514,14 +1494,6 @@ method_type_name = (d: int) -> str:
     name_of(int(nodes[t].name))
 
 syntactic_void = (body: int) -> bool: cr_syntactic_void(body)
-
-# (Dewy: an `or_throw` outside a nested function, whose failures a body expressing
-# nothing still gives back, as `void | E`; one walk of the body)
-has_propagate = (n: int) -> bool: cr_has_propagate(n)
-
-# (Dewy: a statement that may express a value, `xs.pop()` in a loop, so that what the
-# body gives is inferred: multi_expressions.md)
-may_express = (n: int) -> bool: cr_may_express(n)
 
 # (@no_web("why"): a function that does nothing in a browser, said where a web build's program
 # calls it)
@@ -1738,10 +1710,6 @@ capture_local = (l: int) -> int: capture_in(cx, l)
 # comes before the capture in the source still counts when a loop around both repeats it.
 loop_serials: int[]     # the loops being checked (innermost last)
 loop_serial_next = 0
-
-enter_loop = ():
-    loop_serial_next += 1
-    loop_serials.push(loop_serial_next)
 
 capture_root = (l: int):
     f = int(locals[l].flags) | LF_CAPTURED
@@ -2298,7 +2266,6 @@ pack_result_count = (tn: int) -> int: if tn != 0 and nodes[tn].kind == .tarray a
 resolve_binding_type = (tn: int) -> int: ct_resolve_binding(tn)
 pack_result_ok = false
 resolve_result_type = (tn: int) -> int: ct_resolve_result(tn)
-pack_result_type = (tn: int) -> int: ct_pack_result(tn)
 
 # loop p in ps (ps a soa array): loop i in [0..len(ps)): p = ps[i]
 soa_loop = (s: int):
@@ -2678,7 +2645,6 @@ op_text = (op: Tok, pos: int) -> str:
         ne: "not=?"
         _: tok_text(op)
 
-check_for = (s: int): fl_for(s)
 # For loops run in checker_for_loops.dewy; these are its services.
 # (the source's rewrites: true when the loop was made another statement, and checked)
 for_rewrite = (s: int) -> bool:
@@ -2829,8 +2795,6 @@ const ASSIGN_OPS = 0
 # cross a function boundary, including a closure checked inside the loop.
 loop_labels: LoopLabel[]
 
-check_loop_enter = (s: int): xb_enter(s)
-check_loop_leave = (s: int): xb_leave(s)
 
 compound_op = (op: int) -> int:
     k = op as Tok
@@ -4633,7 +4597,6 @@ settle_open_globals = ():
 zonk_indexes = 0
 zonk_user_globals = 0
 
-zonk_summary = (root: int): xz_summary(root)
 zonk_tree = (root: int): xz_tree(root)
 
 # ---------------- compile-time evaluation ----------------

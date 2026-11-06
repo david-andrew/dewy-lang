@@ -2540,10 +2540,6 @@ fact_summary_actual = (n: int, i: int, s: mut FactState, known: bool = false) ->
     values = fact_route_values(s, fact_route(e, s))
     if values.len() == 0: 0 else: values[values.len() - 1]
 
-fact_store = (s: mut FactState, e: int, value: int, at: int):
-    route = fact_route(e, s)
-    fact_store_route(s, route, value, at)
-
 fact_exposed = (p: PlaceIdentity) -> bool:
     # Checked references record escape while names are resolved (O(1) per use).
     # Only its own initializer may treat a closed script binding as a local;

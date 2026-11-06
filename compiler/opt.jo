@@ -84,9 +84,6 @@ kills_memory = (op: Op) -> bool: o_decode[int(op)] & 4 != 0
 cse_arity = (op: Op, mode: int) -> int:
     if op == .load and mode & M_INDEX != 0: return 2
     ((o_decode[int(op)] >> 4) & 7) - 1
-o_retargetable = (op: Op) -> bool:
-    if op == .checked_add or op == .checked_sub or op == .checked_mul: return checked_flags
-    o_decode[int(op)] & 8 != 0
 
 const MIN_INT = -9223372036854775807 - 1
 

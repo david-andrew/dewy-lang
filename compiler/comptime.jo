@@ -10,7 +10,6 @@ use 'types.jo'
 use 'expr.jo'
 use 'util.jo'
 use 'lower.jo'
-use 'math_comptime.jo'
 use 'exact.jo'
 use 'checked_eval.dewy'
 use 'lower_primitives.dewy'
@@ -22,32 +21,5 @@ checked_byte_cut = (text: str, start: int, end_: int) -> str: text[start..end_)
 checked_host = CheckedEvalHost(checked_const_init, call_eval_order, check_fn_body, check_struct_fields, compound_op, dewy_at, exact_type, fatal, int_fits, int_widens, intern, math_rep_type, pos_str, representation_type, runtime_fn, str_set_of, checked_wrap, checked_byte_cut, checked_bytes)
 checked_input = CheckedEvalInput(&ct_values, &nodes, &lists, &names, &types, &type_args, &structs, &fields, &variants, &fns, &globals, &locals, &files, &ref_predicates, &ref_narrowing, &str_sets, &T_BOOL, &T_INT, &T_MATH_INT, &T_STR, &T_U64, &T_U8, &ts_dewy, &lib_dir, &checked_host)
 checked_binding = checked_eval_bind(&checked_input)
-ct_fail = (e: int, why: str): cx_fail(e, why)
-ct_add = (v: CTValue) -> int: cx_add(v)
-ct_int = (t: int, i: int) -> int: cx_int(t, i)
-ct_float = (t: int, f: f64) -> int: cx_float(t, f)
-ct_zero = (t0: int) -> int: cx_zero(t0)
-ct_equal = (a: int, b: int, e: int = 0) -> bool: cx_equal(a, b, e)
-ct_exact_operand = (v: int, e: int) -> int: cx_exact_operand(v, e)
-ct_store = (v: int, t0: int, e: int) -> int: cx_store(v, t0, e)
-ct_binary = (e: int, op: Tok, a: int, b: int, t: int) -> int: cx_binary(e, op, a, b, t)
-ct_member = (e: int) -> int: cx_member(e)
-ct_read_place = (p: CTPlace) -> int: cx_read_place(p)
-ct_replace = (v: int, path: int[], at: int, value: int) -> int: cx_replace(v, path, at, value)
-ct_write_place = (p: CTPlace, value: int): cx_write_place(p, value)
-ct_place = (e: int) -> CTPlace: cx_place(e)
-ct_global = (e: int, g: int) -> int: cx_global(e, g)
-ct_call = (e: int) -> int: cx_call(e)
-ct_ref_term = (e: int, term: RefTerm, self: int) -> int: cx_ref_term(e, term, self)
-ct_refinement = (e: int, value: int): cx_refinement(e, value)
-ct_convert = (e: int, v: int) -> int: cx_convert(e, v)
-ct_intrinsic = (e: int) -> int: cx_intrinsic(e)
-ct_pattern = (p: int, v: int) -> bool: cx_pattern(p, v)
-ct_expr = (e: int) -> int: cx_expr(e)
-ct_expr_impl = (e: int) -> int: cx_expr_impl(e)
-ct_load = (e: int, pointer: CTValue, index: int, t: int) -> int: cx_load(e, pointer, index, t)
-ct_loop_exit = () -> bool: cx_loop_exit()
-ct_stmt = (s: int) -> int: cx_stmt(s)
-ct_block = (b: int) -> int: cx_block(b)
 ct_literal = (v: int, pos: int) -> int: cx_literal(v, pos)
 ct_run = (e: int) -> int: cx_run(e)

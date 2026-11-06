@@ -46,9 +46,6 @@ dw_renamed_init = (): dc_parser.reader.dw_renamed = [intern("printl"), intern("p
 
 dw_pending_decls: int[]               # methods of the type just declared, as module functions
 
-dw_receiver_field = (receiver: int, name: i32, pos: int) -> int:
-    db_receiver_field(nodes, dc_parser.reach.used, receiver, name, pos)
-
 # A method's receiver comes first. Its type is the object's (the type parameter
 # `object_type` for a record literal's method); whether it is a place is inferred
 # from the body before checking (dewy_methods.jo).
@@ -294,15 +291,6 @@ dw_int_singleton_type = (values: int[], pos: int) -> int:
     nodes[n].b = i32(predicate)
     refine_active = true
     n
-
-dw_has_shape = (t: int) -> bool:
-    db_has_shape(nodes, t)
-
-# The checks of a shaped parameter at entry: its rank, then each dimension.
-# A dimension named by a word not yet bound binds it (SHAPE_DIM marks the
-# declaration for the checker); any other dimension is compared.
-dw_shape_prologue = (param: int, out: mut int[]):
-    db_shape_prologue(nodes, lists, dw_builder_host, param, out)
 
 # Both constructors synthesize the same local bindings for value parameters.
 dw_finish_function = (n: int, parameters: int[], body: int, name: str) -> int:

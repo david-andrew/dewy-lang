@@ -103,13 +103,7 @@ tkind = (t: int) -> TK: types[prune(t)].kind
 telem = (t: int) -> int: int(types[prune(t)].elem)
 has_var = (t: int) -> bool: int(types[t].flags) & TF_HAS_VAR != 0
 
-# Complete interning runs in Dewy over these shared arena headers.
-__type_hash = (t: TypeInfo, args: int[]) -> u64: type_intern_hash(&t, args)
-__type_same = (id: int, t: TypeInfo, args: int[]) -> bool: type_intern_same(id, &t, args)
-__type_rehash = (): type_intern_rehash()
 mk_type = (t: TypeInfo, args: int[]) -> int: type_intern(&t, args)
-
-basic = (kind: TK, bits: int, sign: bool, size: int) -> int: tb_basic(kind, bits, sign, size)
 
 mk_array = (e: int) -> int: tb_mk_array(e)
 
@@ -128,14 +122,9 @@ mk_opt = (e: int) -> int: tb_mk_opt(e)
 secrets_seen = false     # (a secret type was made: until then secret_repr has nothing to do)
 mk_secret = (e: int) -> int: tb_mk_secret(e)
 
-is_secret = (t: int) -> bool: types[prune(t)].kind == .secret
 # t's representation: t with its secrets, and those of what it is made of, replaced by their values
 secret_repr = (t0: int) -> int: tb_secret_repr(t0)
 
-# Callable labels are compile-time metadata, interned as a newline-separated
-# name tuple in st (unused by fn_ layout). Positional implementation-language
-# callables retain zero, without any label allocation or ABI change.
-fn_label_key = (names: int[]) -> int: tn_label_key(names)
 fn_label_names = (key: int, count: int) -> int[]: tn_label_names(key, count)
 decl_fn_labels = (decl: int) -> int: tn_decl_labels(decl)
 
@@ -201,12 +190,6 @@ is_numeric = (t: int) -> bool:
     k == .int_ or k == .float_
 is_vec = (t: int) -> bool: types[prune(t)].kind == .vec
 
-occurs = (v: int, t0: int) -> bool:
-    t = prune(t0)
-    if t == v: return true
-    if not has_var(t): return false
-    type_query_occurs_children(types, structs, type_args, v, t)
-
 zonk = (t: int) -> int: tu_zonk(t)
 
 struct_targ = (si: int, i: int) -> int: int(type_args[int(structs[si].targs) + i])
@@ -220,7 +203,6 @@ type_eq = (a0: int, b0: int) -> bool:
     type_query_equal_shape(types, structs, type_args, a, b)
 
 unify = (a: int, b: int) -> bool: tu_unify(a, b)
-unify_unions = (a: int, b: int) -> bool: tu_unify_unions(a, b)
 
 simple_enum = (t: int) -> bool: tp_simple_enum(t)
 is_managed = (t: int) -> bool: tp_is_managed(t)
@@ -247,16 +229,8 @@ talign = (t: int) -> int:
     if a == 0: return 1
     a
 
-# Complete recursive boxing, finite defaults and layout execute in Dewy.
-type_holds = (t: int, target: int) -> bool: tl_type_holds(t, target)
-holds_in = (t: int, target: int, gen: int) -> bool: tl_holds_in(t, target, gen)
 decide_boxes = (si: int): tl_decide_boxes(si)
 box_default = (t: int) -> int: tl_box_default(t)
-zero_ends = (t: int) -> bool: tl_zero_ends(t)
-variant_ends = (si: int, v: int) -> bool: tl_variant_ends(si, v)
-fields_end = (f: int, n: int) -> bool: tl_fields_end(f, n)
-endless_check = (si: int): tl_endless_check(si)
-endless_field = (si: int, f: int, vi: int): tl_endless_field(si, f, vi)
 layout = (t: int): tl_layout(t)
 
 layout_endless_error = (si: int, f: int, vi: int):
@@ -314,7 +288,6 @@ dt_named_inner = (p: int) -> bool:
 ts_params: int[]
 
 type_str = (t: int, dewy: bool = false) -> str: tf_string(t, dewy)
-type_str_in = (t: int, dewy: bool) -> str: tf_string_in(t, dewy)
 
 # ---------- unions ----------
 # A | B | C is a tagged value laid out like an enum: variant i holds member i. Members are flat,
@@ -354,8 +327,6 @@ union_alias_note = (t0: int, name: int):
         return
     refined_alias_names[t] = name
 
-union_inst = (ms: int[]) -> int: uu_union_inst(ms)
-
 # ---------- struct-of-arrays ----------
 # soa T[] behaves like T[] but keeps each field of T in an array of its own (see check_soa_*)
 soa_decl = 0       # the declaration node standing for all soa types
@@ -371,10 +342,6 @@ is_soa = (t0: int) -> bool:
 soa_elem = (t: int) -> int: struct_targ(int(types[prune(t)].st), 0)
 
 soa_inst = (p: int) -> int: tc_soa_inst(p)
-
-# how deeply a type nests (counted up to lim; remembered per type once known exactly, so a type
-# sharing parts, (F, F) -> int, is not walked once per path)
-type_nesting = (t: int, lim: int) -> int: tc_nesting(t, lim)
 
 const MAX_TYPE_NESTING = 48
 

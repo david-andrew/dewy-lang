@@ -271,10 +271,6 @@ line_text = (p: int) -> str:
         else: caret += " "
     "\n    {line}\n    {caret}^"
 
-show_line = (p: int):
-    t = line_text(p)
-    if len(t) > 0: eprint(t[1..])
-
 # (the same warning at the same place once: a generic function checked for each of its types;
 # the editor's checks start over each time, so not there)
 warned: {str: bool} = {}

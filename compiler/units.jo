@@ -32,15 +32,10 @@ quantity_dimension = (t0: int) -> int:
     if types[t].kind == .quantity or types[t].kind == .dimension: return int(types[t].st)
     0
 
-intern_dimension = (powers: int[]) -> int: qa_intern_dimension(powers)
-
 combine_dimensions = (a: int, b: int, sign: int, pos: int) -> int: qa_combine_dimensions(a, b, sign, pos)
 
 # (dim raised to num/den; a root finer than the stored denominator is an error)
 power_dimension = (dim: int, num: int, pos: int, den: int = 1) -> int: qa_power_dimension(dim, num, pos, den)
-
-# (a stored power as written: 2, -1, 1/2 or -3/2)
-quantity_power_text = (stored: int) -> str: qa_quantity_power_text(stored)
 
 quantity_numeric = (t0: int) -> bool:
     t = prune(t0)
@@ -925,11 +920,6 @@ quantity_as_unit = (n: int) -> int:
 
 quantity_si_prefixes: str[] = ["n", "µ", "m", "", "k", "M", "G"]
 
-# (sym with SI prefixes from n to G, sym itself worth one canonical unit)
-quantity_si_ladder = (sym: str) -> QuantityLadder: qa_quantity_si_ladder(sym)
-
-quantity_one_unit = (sym: str, num: int, den: int) -> QuantityLadder: qa_quantity_one_unit(sym, num, den)
-
 # base symbols, in the order composite units are written (kg*m^2/s^2)
 quantity_base_order: int[] = [2, 1, 0, 3, 4, 5, 6, 7]
 quantity_base_symbols: str[] = ["s", "m", "kg", "A", "K", "mol", "cd", "turn"]
@@ -938,15 +928,6 @@ quantity_named_symbols: str[] = ["Hz", "N", "Pa", "J", "W", "C", "V", "Ω"]
 quantity_named_powers: int[][] = [[-1, 0, 0, 0], [-2, 1, 1, 0], [-2, -1, 1, 0], [-2, 2, 1, 0], [-3, 2, 1, 0], [1, 0, 0, 1], [-3, 2, 1, -1], [-3, 2, 1, -2]]
 quantity_algebra_input = QuantityAlgebraInput(&quantity_dimensions, &quantity_dimension_names, &quantity_scales, &quantity_units, &quantity_tags, &quantity_si_prefixes, &quantity_base_order, &quantity_base_symbols, &quantity_named_symbols, &quantity_named_powers, fatal)
 quantity_algebra_binding = quantity_algebra_bind(&quantity_algebra_input)
-
-quantity_named_dimension = (i: int) -> int: qa_quantity_named_dimension(i)
-
-quantity_power_suffix = (stored: int) -> str: qa_quantity_power_suffix(stored)
-
-# (named, or "", times base units with the stored powers; "" when nothing is left)
-quantity_composite_text = (named: str, powers: int[]) -> str: qa_quantity_composite_text(named, powers)
-
-quantity_factor_count = (powers: int[]) -> int: qa_quantity_factor_count(powers)
 
 quantity_ladder = (dim: int) -> QuantityLadder: qa_quantity_ladder(dim)
 
