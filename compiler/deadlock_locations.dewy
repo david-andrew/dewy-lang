@@ -1,0 +1,107 @@
+$runtime_checks
+from p"deadlock.jo" import (DlLoc DlEdge dl_param_index dl_inits dc_split)
+from p"check.jo" import (lib_dir globals locals fns LF_ASSIGNED LF_ALIAS LF_CAPTURE)
+from p"ast.jo" import (nodes nkids kid)
+from p"util.jo" import (name_of line_col files pos_file)
+from p"directives.jo" import dir_deadlocks_any
+# Abstract lock locations follow only demanded aliases, captures and fields.
+LocationWord:type=int64<overflow='wrap'>
+dl_lib=():>string=>"{lib_dir}/prelude/locks.dewy"
+dl_key=(l:DlLoc):>string=>"{l.root}:{l.id}:{l.k}{l.route}"
+dl_name=(l:DlLoc):>string=>$unsafe {
+    let base="a lock"
+    if l.root =? 1 {base=name_of(LocationWord(globals.ptr[l.id].name))}
+    else if l.root =? 2 {base=name_of(LocationWord(nodes.ptr[l.id].name))}
+    else if l.root =? 4 {base=name_of(LocationWord(locals.ptr[l.id].name))}
+    else if l.root =? 3 {
+        let d=LocationWord(fns.ptr[l.id].decl)
+        if l.k <? fns.ptr[l.id].params.length {base=name_of(LocationWord(locals.ptr[fns.ptr[l.id].params.ptr[l.k]].name))}
+    }
+    if base.startswith("$") {base="a lock"}
+    "'{base}{l.route}'"
+}
+dl_line=(p:LocationWord):>string=>{
+    let lc=line_col(p)
+    "line {lc[0]}"
+}
+dl_unknown=():>DlLoc=>DlLoc(0 0 0 "" false)
+dl_extend=(l:DlLoc step:string exact:bool):>DlLoc=>DlLoc(l.root l.id l.k "{l.route}{step}" l.exact and exact)
+dl_resolve=(e0:LocationWord f:LocationWord depth:LocationWord=0):>DlLoc=>$unsafe {
+    let e=e0
+    loop e not=? 0 and (nodes.ptr[e].kind =? 'conv' or nodes.ptr[e].kind =? 'addr' or nodes.ptr[e].kind =? 'narrow') {e=LocationWord(nodes.ptr[e].a)}
+    if e =? 0 or depth >? 32 {return dl_unknown()}
+    let k=nodes.ptr[e].kind
+    if k =? 'field' {return dl_extend(dl_resolve(LocationWord(nodes.ptr[e].a) f depth + 1) ".{name_of(LocationWord(nodes.ptr[e].name))}" true)}
+    if k =? 'index' {return dl_extend(dl_resolve(LocationWord(nodes.ptr[e].a) f depth + 1) "[]" false)}
+    if k not=? 'ident' {return dl_unknown()}
+    if nodes.ptr[e].aux =? int32(2) {return DlLoc(1 LocationWord(nodes.ptr[e].sym) 0 "" true)}
+    if nodes.ptr[e].aux not=? int32(1) or nodes.ptr[e].sym <=? 0 {return dl_unknown()}
+    dl_resolve_local(LocationWord(nodes.ptr[e].sym) f depth)
+}
+dl_resolve_local=(l:LocationWord f:LocationWord depth:LocationWord):>DlLoc=>$unsafe {
+    let r=dl_resolve_local_once(l f depth)
+    if LocationWord(locals.ptr[l].flags) & LF_ASSIGNED not=? 0 {r.exact=false}
+    r
+}
+dl_resolve_local_once=(l:LocationWord f:LocationWord depth:LocationWord):>DlLoc=>$unsafe {
+    let flags=LocationWord(locals.ptr[l].flags)
+    if flags & LF_ALIAS not=? 0 and locals.ptr[l].alias >? 0 {return dl_resolve(LocationWord(locals.ptr[l].alias) f depth + 1)}
+    if flags & LF_CAPTURE not=? 0 {
+        if locals.ptr[l].outer <=? 0 {return dl_unknown()}
+        return dl_resolve_local(LocationWord(locals.ptr[l].outer) LocationWord(locals.ptr[LocationWord(locals.ptr[l].outer)].owner) depth + 1)
+    }
+    let index=dl_param_index.get(l)
+    if index not=? none {return DlLoc(3 LocationWord(locals.ptr[l].owner) index "" true)}
+    let declaration=dl_inits.get(l)
+    if declaration not=? none {
+        let d=declaration
+        let init=LocationWord(nodes.ptr[d].b)
+        loop init not=? 0 and nodes.ptr[init].kind =? 'conv' {init=LocationWord(nodes.ptr[init].a)}
+        if dc_split(init) {
+            let base=dl_resolve(kid(init 0) f depth + 1)
+            if base.root not=? 0 {return base}
+            return DlLoc(2 d 0 "" true)
+        }
+        if init not=? 0 and (nodes.ptr[init].kind =? 'ident' or nodes.ptr[init].kind =? 'field' or nodes.ptr[init].kind =? 'index') {return dl_resolve(init f depth + 1)}
+        if dir_deadlocks_any and init not=? 0 and nodes.ptr[init].kind =? 'call' and not dl_makes_handle(init) {return dl_unknown()}
+        return DlLoc(2 d 0 "" true)
+    }
+    DlLoc(4 l 0 "" true)
+}
+dl_makes_handle=(n:LocationWord):>bool=>$unsafe {
+    if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return false}
+    let d=LocationWord(fns.ptr[LocationWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return false}
+    let nm=name_of(LocationWord(nodes.ptr[d].name))
+    let path=files.ptr[pos_file(nodes.ptr[d].pos)].path
+    nm =? "mutex" and path =? dl_lib() or (nm =? "channel" and path.endswith("/prelude/channels.dewy") or nm =? "mpmc" and path.endswith("/prelude/mpmc.dewy") or nm =? "spsc" and path.endswith("/prelude/spsc.dewy")) or nm =? "atomic" and path =? "{lib_dir}/std/thread.jo"
+}
+dl_named=(l:DlLoc):>bool=>$unsafe {
+    if not l.exact or l.route.length >? 0 {return false}
+    if l.root =? 2 or l.root =? 3 {return true}
+    if l.root not=? 1 {return false}
+    let d=LocationWord(globals.ptr[l.id].decl)
+    let init:LocationWord=if d not=? 0 {LocationWord(nodes.ptr[d].b)} else {0}
+    loop init not=? 0 and nodes.ptr[init].kind =? 'conv' {init=LocationWord(nodes.ptr[init].a)}
+    init not=? 0 and nodes.ptr[init].kind =? 'call' and dl_makes_handle(init)
+}
+dl_must=(a:DlLoc b:DlLoc):>bool=>a.exact and b.exact and a.root not=? 0 and dl_key(a) =? dl_key(b)
+dl_may=(a:DlLoc b:DlLoc):>bool=>a.root not=? 0 and dl_key(a) =? dl_key(b)
+dl_symbolic=(l:DlLoc):>bool=>l.root =? 3
+dl_subst=(l:DlLoc g:LocationWord n:LocationWord f:LocationWord):>DlLoc=>$unsafe {
+    if l.root not=? 3 or l.id not=? g {return l}
+    if n =? 0 or l.k >=? nkids(n) {return dl_unknown()}
+    let a=kid(n l.k)
+    if nodes.ptr[a].kind =? 'namedarg' {a=LocationWord(nodes.ptr[a].a)}
+    let base=dl_resolve(a f)
+    if base.root =? 0 {return base}
+    DlLoc(base.root base.id base.k "{base.route}{l.route}" base.exact and l.exact)
+}
+dl_receiver=(n:LocationWord):>int64=>{
+    if nkids(n) >? 0 {return kid(n 0)}
+    0
+}
+dl_path=(e:DlEdge):>string=>{
+    let who=if e.via.length >? 0 {" (in {e.via})"} else {""}
+    "takes {dl_name(e.held)} ({dl_line(e.held_site)}) and then {dl_name(e.taken)} ({dl_line(e.taken_site)}){who}"
+}

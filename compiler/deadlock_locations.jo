@@ -1,0 +1,126 @@
+use 'lower_helpers.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'util.jo'
+use 'lower.jo'
+use 'isolation.jo'
+use 'concurrency.jo'
+use 'effects.jo'
+use 'prelude.jo'
+use 'errors.jo'
+use 'directives.jo'
+use 'ownership.jo'
+use 'lower_races.dewy'
+use 'effect_contracts.dewy'
+use 'effect_control.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+use 'deadlock.jo'
+
+dl_lib = () -> str: lib_dir + "/prelude/locks.dewy"
+
+dl_key = (l: DlLoc) -> str: "{l.root}:{l.id}:{l.k}{l.route}"
+
+dl_name = (l: DlLoc) -> str:
+    base = "a lock"
+    if l.root == 1: base = name_of(int(globals[l.id].name))
+    else if l.root == 2: base = name_of(int(nodes[l.id].name))
+    else if l.root == 4: base = name_of(int(locals[l.id].name))
+    else if l.root == 3:
+        d = int(fns[l.id].decl)
+        if l.k < fns[l.id].params.len(): base = name_of(int(locals[fns[l.id].params[l.k]].name))
+    if starts_with(base, "$"): base = "a lock"
+    "'{base}{l.route}'"
+
+dl_line = (p: int) -> str:
+    l, c = line_col(p)
+    "line {l}"
+
+dl_unknown = () -> DlLoc: DlLoc(0, 0, 0, "", false)
+
+dl_extend = (l: DlLoc, step: str, exact: bool) -> DlLoc: DlLoc(l.root, l.id, l.k, l.route + step, l.exact and exact)
+
+dl_resolve = (e0: int, f: int, depth: int = 0) -> DlLoc:
+    e = e0
+    loop e != 0 and (nodes[e].kind == .conv or nodes[e].kind == .addr or nodes[e].kind == .narrow): e = int(nodes[e].a)
+    if e == 0 or depth > 32: return dl_unknown()
+    k = nodes[e].kind
+    if k == .field: return dl_extend(dl_resolve(int(nodes[e].a), f, depth + 1), ".{name_of(int(nodes[e].name))}", true)
+    if k == .index: return dl_extend(dl_resolve(int(nodes[e].a), f, depth + 1), "[]", false)
+    if k != .ident: return dl_unknown()
+    if nodes[e].aux == i32(int(SK.global)): return DlLoc(1, int(nodes[e].sym), 0, "", true)
+    if nodes[e].aux != i32(int(SK.local)) or nodes[e].sym <= 0: return dl_unknown()
+    dl_resolve_local(int(nodes[e].sym), f, depth)
+
+dl_resolve_local = (l: int, f: int, depth: int) -> DlLoc:
+    r = dl_resolve_local_once(l, f, depth)
+    # (a variable given another handle after it was made or copied names either: perhaps one lock)
+    if int(locals[l].flags) & LF_ASSIGNED != 0: r.exact = false
+    r
+
+dl_resolve_local_once = (l: int, f: int, depth: int) -> DlLoc:
+    flags = int(locals[l].flags)
+    if flags & LF_ALIAS != 0 and locals[l].alias > 0: return dl_resolve(int(locals[l].alias), f, depth + 1)
+    if flags & LF_CAPTURE != 0:
+        if locals[l].outer <= 0: return dl_unknown()
+        return dl_resolve_local(int(locals[l].outer), int(locals[int(locals[l].outer)].owner), depth + 1)
+    if let i = dl_param_index.get(l): return DlLoc(3, int(locals[l].owner), i, "", true)
+    if let d = dl_inits.get(l):
+        init = int(nodes[d].b)
+        loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
+        if dc_split(init):
+            base = dl_resolve(kid(init, 0), f, depth + 1)
+            if base.root != 0: return base
+            return DlLoc(2, d, 0, "", true)
+        # (a copy of another handle, or a value parameter's binding: the same lock)
+        if init != 0 and (nodes[init].kind == .ident or nodes[init].kind == .field or nodes[init].kind == .index):
+            return dl_resolve(init, f, depth + 1)
+        # (under `$no_deadlocks`, a handle a call gives back may be one made elsewhere: unnamed)
+        if dir_deadlocks_any and init != 0 and nodes[init].kind == .call and not dl_makes_handle(init): return dl_unknown()
+        return DlLoc(2, d, 0, "", true)
+    # (a local whose making is not in view: itself)
+    DlLoc(4, l, 0, "", true)
+
+dl_makes_handle = (n: int) -> bool:
+    if nodes[n].aux != 0 or nodes[n].sym <= 0: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    nm = name_of(int(nodes[d].name))
+    path = files[pos_file(nodes[d].pos)].path
+    nm == "mutex" and path == dl_lib() or (nm == "channel" and ends_with(path, "/prelude/channels.dewy") or nm == "mpmc" and ends_with(path, "/prelude/mpmc.dewy") or nm == "spsc" and ends_with(path, "/prelude/spsc.dewy")) or nm == "atomic" and path == lib_dir + "/std/thread.jo"
+
+dl_named = (l: DlLoc) -> bool:
+    if not l.exact or len(l.route) > 0: return false
+    if l.root == 2 or l.root == 3: return true
+    if l.root != 1: return false
+    d = int(globals[l.id].decl)
+    init = if d != 0: int(nodes[d].b) else: 0
+    loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
+    init != 0 and nodes[init].kind == .call and dl_makes_handle(init)
+
+dl_must = (a: DlLoc, b: DlLoc) -> bool: a.exact and b.exact and a.root != 0 and dl_key(a) == dl_key(b)
+
+dl_may = (a: DlLoc, b: DlLoc) -> bool: a.root != 0 and dl_key(a) == dl_key(b)
+
+dl_symbolic = (l: DlLoc) -> bool: l.root == 3
+
+dl_subst = (l: DlLoc, g: int, n: int, f: int) -> DlLoc:
+    if l.root != 3 or l.id != g: return l
+    if n == 0 or l.k >= nkids(n): return dl_unknown()
+    a = kid(n, l.k)
+    if nodes[a].kind == .namedarg: a = int(nodes[a].a)
+    base = dl_resolve(a, f)
+    if base.root == 0: return base
+    DlLoc(base.root, base.id, base.k, base.route + l.route, base.exact and l.exact)
+
+dl_receiver = (n: int) -> int: if nkids(n) > 0: kid(n, 0) else: 0
+
+dl_path = (e: DlEdge) -> str:
+    who = if len(e.via) > 0: " (in {e.via})" else: ""
+    "takes {dl_name(e.held)} ({dl_line(e.held_site)}) and then {dl_name(e.taken)} ({dl_line(e.taken_site)}){who}"
