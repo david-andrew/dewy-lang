@@ -1,0 +1,31 @@
+# Plain data cannot hold arena storage, so a call may write it through `@`,
+# as a direct assignment may: the near miss of reject_placearg.
+Sample:type = [count:int64 mean:float64]
+bump64=(@x:float64):>void=>{ x = x + 1.0 }
+bump32=(@x:float32):>void=>{ x = x + float32(1.0) }
+bumpi=(@x:int64):>void=>{ x = x + 1 }
+bumpb=(@x:uint8):>void=>{ x = uint8(9) }
+flip=(@x:bool):>void=>{ x = true }
+note=(@x:Sample):>void=>{ x.count = 5 }
+pair=(@x:[int64 float64]):>void=>{ x = [2 3.0] }
+main=():>void=>{
+    let a=Arena[]
+    let d:float64=1.5
+    let f:float32=float32(2.5)
+    let i:int64=1
+    let b:uint8=uint8(1)
+    let on=false
+    let s=Sample[1 2.0]
+    let p:[int64 float64]=[1 2.0]
+    let n=$allocator(@a) {
+        bump64(@d)
+        bump32(@f)
+        bumpi(@i)
+        bumpb(@b)
+        flip(@on)
+        note(@s)
+        pair(@p)
+        3
+    }
+    printl("{n} {d} {f} {i} {b} {on} {s} {p}")
+}

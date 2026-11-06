@@ -4334,9 +4334,9 @@ arena. Everything else the expression allocates must die inside it, which the
 compiler proves rather than checks at run time. Inside the expression:
 
 - a variable declared outside it may only be given plain data (numbers, flags,
-  records of them), and not through an array or string; a call may not change
-  such a variable through an `@` argument, and a function it calls may not
-  change a global that holds managed values or a shared capture;
+  records of them), and not through an array or string, whether written directly
+  or by a call through an `@` argument; a function it calls may not change a
+  global that holds managed values or a shared capture;
 - `return`, and `break`/`continue` to a loop outside it, are errors;
 - the lent arena cannot be used, reset or lent again;
 - closures made in it capture snapshots only, and function values made
