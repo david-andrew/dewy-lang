@@ -1,0 +1,159 @@
+$runtime_checks
+from p"deadlock.jo" import (DlLoc dc_mod dc_qmod dc_smod pc_mod dc_ffns dc_fcalls dc_closes dc_trips dc_cancels dc_cancelable_groups dc_actors dc_warned)
+from p"deadlock_locations.dewy" import (dl_resolve dl_unknown dl_makes_handle dl_key dl_line)
+from p"prelude.jo" import (dp_paths dp_mods)
+from p"ast.jo" import (nodes nkids kid has_flag NF_U64 NF_STEP NF_EXCL_FIRST NF_INCLUSIVE)
+from p"check.jo" import (fns globals)
+from p"expr.jo" import ntype
+from p"util.jo" import name_of
+from p"types.jo" import (T_NONE tkind structs types struct_targ)
+from p"errors.jo" import (value_members exception_member)
+from p"expr.jo" import int_intervals
+
+ChannelWord:type=int64<overflow='wrap'>
+dc_module=(path:string="/prelude/channels.dewy"):>int64=>$unsafe {
+    loop i in [0..dp_paths.length) {if dp_paths.ptr[i].endswith(path) {return dp_mods.ptr[i]}}
+    -1
+}
+dc_is=(m:ChannelWord):>bool=>m >=? 0 and (m =? dc_mod or m =? dc_qmod or m =? dc_smod)
+dc_on=():>bool=>dc_mod >=? 0 or dc_qmod >=? 0 or dc_smod >=? 0
+dc_split=(n0:ChannelWord):>bool=>$unsafe {
+    let n=n0
+    if dc_smod <? 0 or n =? 0 {return false}
+    loop nodes.ptr[n].kind =? 'conv' {n=ChannelWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 1 {return false}
+    let g=ChannelWord(nodes.ptr[n].sym)
+    fns.ptr[g].mod =? dc_smod and name_of(ChannelWord(nodes.ptr[ChannelWord(fns.ptr[g].decl)].name)) =? "split"
+}
+pc_module=():>int64=>$unsafe {
+    loop i in [0..dp_paths.length) {if dp_paths.ptr[i].endswith("/prelude/protocols.dewy") {return dp_mods.ptr[i]}}
+    -1
+}
+dc_protocols=():>int64=>{
+    if pc_mod =? -2 {pc_mod=pc_module()}
+    pc_mod
+}
+dc_called=():>bool=>$unsafe {
+    loop f in [1..fns.length) {
+        if not dc_is(ChannelWord(fns.ptr[f].mod)) or fns.ptr[f].state not=? 2 or fns.ptr[f].decl =? 0 {continue}
+        let nm=name_of(ChannelWord(nodes.ptr[ChannelWord(fns.ptr[f].decl)].name))
+        if nm =? "send" or nm =? "receive" or nm =? "close" or nm =? "try_send" or nm =? "try_receive" {return true}
+    }
+    false
+}
+dc_chan_call=(n:ChannelWord):>int64=>$unsafe {
+    if not dc_on() or nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return 0}
+    let g=ChannelWord(nodes.ptr[n].sym)
+    if not dc_is(ChannelWord(fns.ptr[g].mod)) or nkids(n) =? 0 {return 0}
+    let d=ChannelWord(fns.ptr[g].decl)
+    if d =? 0 {return 0}
+    let nm=name_of(ChannelWord(nodes.ptr[d].name))
+    if nm =? "send" {return 1}
+    if nm =? "receive" {return 2}
+    if nm =? "close" {return 3}
+    if nm =? "try_send" {return 6}
+    if nm =? "try_receive" {return 7}
+    0
+}
+dc_loc=(e:ChannelWord):>DlLoc=>$unsafe {
+    let l=dc_concrete(dl_resolve(e dc_ffns.ptr[ChannelWord(dc_ffns.length) - 1]) ChannelWord(dc_ffns.length) - 1)
+    if l.root =? 2 and dc_split(ChannelWord(nodes.ptr[l.id].b)) {l.route=""}
+    let decl:ChannelWord=0
+    if l.root =? 2 {decl=l.id}
+    else if l.root =? 1 {decl=ChannelWord(globals.ptr[l.id].decl)}
+    if decl not=? 0 {
+        let init=ChannelWord(nodes.ptr[decl].b)
+        loop init not=? 0 and nodes.ptr[init].kind =? 'conv' {init=ChannelWord(nodes.ptr[init].a)}
+        if init not=? 0 and nodes.ptr[init].kind =? 'call' and not dc_split(init) and not dl_makes_handle(init) {l.exact=false}
+    }
+    l
+}
+dc_concrete=(l:DlLoc at:ChannelWord):>DlLoc=>$unsafe {
+    if l.root not=? 3 {return l}
+    let i=at
+    loop i >=? 0 and dc_ffns.ptr[i] not=? l.id {i-=1}
+    if i <=? 0 or dc_fcalls.ptr[i] =? 0 {return dl_unknown()}
+    let n=dc_fcalls.ptr[i]
+    if l.k >=? nkids(n) {return dl_unknown()}
+    let a=kid(n l.k)
+    if nodes.ptr[a].kind =? 'namedarg' {a=ChannelWord(nodes.ptr[a].a)}
+    let base=dc_concrete(dl_resolve(a dc_ffns.ptr[i - 1]) i - 1)
+    if base.root =? 0 {return base}
+    DlLoc(base.root base.id base.k "{base.route}{l.route}" base.exact and l.exact)
+}
+dc_const=(e0:ChannelWord):>int64 | none=>$unsafe {
+    let e=e0
+    loop e not=? 0 and nodes.ptr[e].kind =? 'conv' {e=ChannelWord(nodes.ptr[e].a)}
+    if e =? 0 or nodes.ptr[e].kind not=? 'int_lit' or has_flag(e NF_U64) {return none}
+    nodes.ptr[e].ival
+}
+dc_trip_count=(n:ChannelWord):>int64=>$unsafe {
+    if nodes.ptr[n].kind not=? 'for_' {return -1}
+    let r=ChannelWord(nodes.ptr[n].a)
+    if r =? 0 or nodes.ptr[r].kind not=? 'range' or has_flag(r NF_STEP) or has_flag(r NF_EXCL_FIRST) {return -1}
+    let lo=dc_const(ChannelWord(nodes.ptr[r].a))
+    let hi=dc_const(ChannelWord(nodes.ptr[r].b))
+    if lo =? none or hi =? none {return -1}
+    let inclusive:ChannelWord=if has_flag(r NF_INCLUSIVE) {1} else {0}
+    let count=ChannelWord(hi) - ChannelWord(lo) + inclusive
+    if count <? 0 {return 0}
+    count
+}
+dc_may_fail=(t:ChannelWord):>bool=>$unsafe {
+    loop m in value_members(t) {
+        if not exception_member(m) or m =? T_NONE {continue}
+        if tkind(m) =? 'struct_' {
+            let d=ChannelWord(structs.ptr[ChannelWord(types.ptr[m].st)].decl)
+            let nm=if d not=? 0 {name_of(ChannelWord(nodes.ptr[d].name))} else {""}
+            if nm =? "Canceled" or (nm =? "Closed" or nm =? "Unsent") and not dc_closes {continue}
+        }
+        return true
+    }
+    false
+}
+dc_capacity=(l:DlLoc):>int64=>$unsafe {
+    let decl:ChannelWord=0
+    if l.root =? 2 {decl=l.id}
+    else if l.root =? 1 {decl=ChannelWord(globals.ptr[l.id].decl)}
+    if decl =? 0 or l.route.length >? 0 {return -1}
+    let init=ChannelWord(nodes.ptr[decl].b)
+    loop init not=? 0 and nodes.ptr[init].kind =? 'conv' {init=ChannelWord(nodes.ptr[init].a)}
+    if init =? 0 or nodes.ptr[init].kind not=? 'call' or nodes.ptr[init].aux not=? 0 or nodes.ptr[init].sym <=? 0 {return -1}
+    let g=ChannelWord(nodes.ptr[init].sym)
+    if dc_split(init) {return dc_spsc_capacity(ntype(kid(init 0)))}
+    if fns.ptr[g].mod =? dc_smod and name_of(ChannelWord(nodes.ptr[ChannelWord(fns.ptr[g].decl)].name)) =? "spsc" {return dc_spsc_capacity(ntype(init))}
+    if not dc_is(ChannelWord(fns.ptr[g].mod)) or name_of(ChannelWord(nodes.ptr[ChannelWord(fns.ptr[g].decl)].name)) not in? ["channel" "mpmc"] or nkids(init) not=? 1 {return -1}
+    let c=dc_const(kid(init 0))
+    if c =? none {return -1}
+    c
+}
+dc_spsc_capacity=(t:ChannelWord):>int64=>$unsafe {
+    if tkind(t) not=? 'struct_' or structs.ptr[ChannelWord(types.ptr[t].st)].ntargs not=? 2 {return -1}
+    let result=int_intervals(struct_targ(ChannelWord(types.ptr[t].st) 1))
+    let values=result[1]
+    if result[0] and values.length =? 2 and values.ptr[0] =? values.ptr[1] {return values.ptr[0]}
+    -1
+}
+dc_mult=(ev:array<int64> at:array<int64>):>int64=>$unsafe {
+    let k:ChannelWord=0
+    loop k <? ev.length and k <? at.length and ev.ptr[k] =? at.ptr[k] {k+=1}
+    let m:ChannelWord=1
+    loop i in [k..ev.length) {
+        let t=ChannelWord(dc_trips.ptr[ev.ptr[i]])
+        if t <? 0 {return -1}
+        m=min(m * t ChannelWord(1) << 40)
+    }
+    m
+}
+dc_cancelable=(group:string):>bool=>dc_cancels or dc_cancelable_groups.has(group)
+dc_join_line=(group:string):>string=>{
+    loop actor in dc_actors {
+        loop e in actor.events {if e.kind =? 5 and dl_key(e.loc) =? group {return " at {dl_line(e.site)}"}}
+    }
+    ""
+}
+dl_report_warn=(site:ChannelWord):>bool=>{
+    if dc_warned.has(site) {return false}
+    dc_warned[site]=true
+    true
+}

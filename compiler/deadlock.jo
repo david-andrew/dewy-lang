@@ -214,87 +214,18 @@ dc_exclusive: {str: bool}         # one producer, one drainer; no attempt can ra
 dc_ends: {str: bool}              # SPSC ends can also close through ownership cleanup
 
 # The channels prelude's module, if a program loaded it (by its path among the prelude's files)
-dc_module = (path: str = "/prelude/channels.dewy") -> int:
-    loop i in [0..dp_paths.len()):
-        if ends_with(dp_paths[i], path): return dp_mods[i]
-    -1
 
 # Queue identities and verbs are resolved by library identity, never spelling alone.
-dc_is = (m: int) -> bool: m >= 0 and (m == dc_mod or m == dc_qmod or m == dc_smod)
-dc_on = () -> bool: dc_mod >= 0 or dc_qmod >= 0 or dc_smod >= 0
-
-dc_split = (n0: int) -> bool:
-    n = n0
-    if dc_smod < 0 or n == 0: return false
-    loop nodes[n].kind == .conv: n = int(nodes[n].a)
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 1: return false
-    g = int(nodes[n].sym)
-    fns[g].mod == dc_smod and name_of(int(nodes[int(fns[g].decl)].name)) == "split"
 
 # The certified protocols' module (lib/prelude/protocols.dewy), if a program loaded it
-pc_module = () -> int:
-    loop i in [0..dp_paths.len()):
-        if ends_with(dp_paths[i], "/prelude/protocols.dewy"): return dp_mods[i]
-    -1
-
-dc_protocols = () -> int:
-    if pc_mod == -2: pc_mod = pc_module()
-    pc_mod
 
 # Whether the checker reached a channel operation (a program can load the prelude for a name it
 # uses otherwise, as a module of its own called `channel`): O(functions)
-dc_called = () -> bool:
-    loop f in [1..fns.len()):
-        if not dc_is(int(fns[f].mod)) or fns[f].state != 2 or fns[f].decl == 0: continue
-        nm = name_of(int(nodes[int(fns[f].decl)].name))
-        if nm == "send" or nm == "receive" or nm == "close" or nm == "try_send" or nm == "try_receive": return true
-    false
 
 # The channel operation a call is: 1 send, 2 receive, 3 close, 0 none
-dc_chan_call = (n: int) -> int:
-    if not dc_on() or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
-    g = int(nodes[n].sym)
-    if not dc_is(int(fns[g].mod)) or nkids(n) == 0: return 0
-    d = int(fns[g].decl)
-    if d == 0: return 0
-    nm = name_of(int(nodes[d].name))
-    if nm == "send": return 1
-    if nm == "receive": return 2
-    if nm == "close": return 3
-    if nm == "try_send": return 6
-    if nm == "try_receive": return 7
-    0
 
 # A location in the function on top of the walk, with its parameters replaced by the arguments
 # of the calls that entered it
-dc_loc = (e: int) -> DlLoc:
-    l = dc_concrete(dl_resolve(e, dc_ffns[dc_ffns.len() - 1]), dc_ffns.len() - 1)
-    # A saved split pair's two fields still share one ring.
-    if l.root == 2 and dc_split(int(nodes[l.id].b)): l.route = ""
-    # A helper returning a handle need not make a fresh queue. The generic lock
-    # resolver names its declaration in ordinary code; queue occupancy must not
-    # treat that name as independent of the helper's arguments or other handles.
-    decl = 0
-    if l.root == 2: decl = l.id
-    else if l.root == 1: decl = int(globals[l.id].decl)
-    if decl != 0:
-        init = int(nodes[decl].b)
-        loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
-        if init != 0 and nodes[init].kind == .call and not dc_split(init) and not dl_makes_handle(init): l.exact = false
-    l
-
-dc_concrete = (l: DlLoc, at: int) -> DlLoc:
-    if l.root != 3: return l
-    i = at
-    loop i >= 0 and dc_ffns[i] != l.id: i -= 1
-    if i <= 0 or dc_fcalls[i] == 0: return dl_unknown()
-    n = dc_fcalls[i]
-    if l.k >= nkids(n): return dl_unknown()
-    a = kid(n, l.k)
-    if nodes[a].kind == .namedarg: a = int(nodes[a].a)
-    base = dc_concrete(dl_resolve(a, dc_ffns[i - 1]), i - 1)
-    if base.root == 0: return base
-    DlLoc(base.root, base.id, base.k, base.route + l.route, base.exact and l.exact)
 
 dc_event = (kind: int, loc: DlLoc, site: int):
     dc_count += 1
@@ -311,36 +242,12 @@ dc_event = (kind: int, loc: DlLoc, site: int):
     dc_ev.push(DcEvent(kind, loc, loops, dc_branch > 0, locs, sites, site))
 
 # An integer literal (through conversions), or none
-dc_const = (e0: int) -> int?:
-    e = e0
-    loop e != 0 and nodes[e].kind == .conv: e = int(nodes[e].a)
-    if e == 0 or nodes[e].kind != .int_lit or has_flag(e, NF_U64): return none
-    nodes[e].ival
 
 # How many times a loop's body runs: literal range bounds, else -1
-dc_trip_count = (n: int) -> int:
-    if nodes[n].kind != .for_: return -1
-    r = int(nodes[n].a)
-    if r == 0 or nodes[r].kind != .range or has_flag(r, NF_STEP) or has_flag(r, NF_EXCL_FIRST): return -1
-    lo = dc_const(int(nodes[r].a))
-    hi = dc_const(int(nodes[r].b))
-    if lo == none or hi == none: return -1
-    count = hi! - lo! + (if has_flag(r, NF_INCLUSIVE): 1 else: 0)
-    if count < 0: return 0
-    count
 
 # Whether a task's result may be a failure (an exception other than Canceled, which only follows
 # a cancellation, and Closed or a send's Unsent, which follow a close or one: those are drainers
 # and fillers): the group's first failure cancels the rest, so a wait in it may end
-dc_may_fail = (t: int) -> bool:
-    loop m in value_members(t):
-        if not exception_member(m) or m == T_NONE: continue
-        if tkind(m) == .struct_:
-            d = int(structs[int(types[m].st)].decl)
-            nm = if d != 0: name_of(int(nodes[d].name)) else: ""
-            if nm == "Canceled" or (nm == "Closed" or nm == "Unsent") and not dc_closes: continue
-        return true
-    false
 
 dc_drop = (mark: int):
     loop dc_held.len() > mark: dc_held.pop()
@@ -531,39 +438,9 @@ dc_collect = ():
 # ---------------- what waits for what ----------------
 
 # The capacity a channel was made with, when a literal, else -1
-dc_capacity = (l: DlLoc) -> int:
-    decl = 0
-    if l.root == 2: decl = l.id
-    else if l.root == 1: decl = int(globals[l.id].decl)
-    if decl == 0 or len(l.route) > 0: return -1
-    init = int(nodes[decl].b)
-    loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
-    if init == 0 or nodes[init].kind != .call or nodes[init].aux != 0 or nodes[init].sym <= 0: return -1
-    g = int(nodes[init].sym)
-    if dc_split(init): return dc_spsc_capacity(ntype(kid(init, 0)))
-    if fns[g].mod == dc_smod and name_of(int(nodes[int(fns[g].decl)].name)) == "spsc": return dc_spsc_capacity(ntype(init))
-    if not dc_is(int(fns[g].mod)) or name_of(int(nodes[int(fns[g].decl)].name)) not in ["channel", "mpmc"] or nkids(init) != 1: return -1
-    c = dc_const(kid(init, 0))
-    if c == none: return -1
-    c!
-
-dc_spsc_capacity = (t: int) -> int:
-    if tkind(t) != .struct_ or structs[int(types[t].st)].ntargs != 2: return -1
-    known, values = int_intervals(struct_targ(int(types[t].st), 1))
-    if known and values.len() == 2 and values[0] == values[1]: return values[0]
-    -1
 
 # How many times an event at loops ev runs before the first run of one at loops at (loops around
 # both are in their first iteration): -1 when not literal
-dc_mult = (ev: int[], at: int[]) -> int:
-    k = 0
-    loop k < ev.len() and k < at.len() and ev[k] == at[k]: k += 1
-    m = 1
-    loop i in [k..ev.len()):
-        t = dc_trips[ev[i]]
-        if t < 0: return -1
-        m = min(m * t, 1 << 40)
-    m
 
 # Whether the sends into ch by actor a, those before event `upto` (all of event `upto`'s runs,
 # when through), wait: 2 for certain, 1 perhaps, 0 never.
@@ -728,21 +605,10 @@ dc_edges_build = ():
 
 # Whether a group may be canceled while its join waits (a task's failure, or a cancel by hand):
 # then its waits may end, and a cycle through the join is undecided
-dc_cancelable = (group: str) -> bool:
-    dc_cancels or dc_cancelable_groups.has(group)
 
 # " at line N" of a group's join
-dc_join_line = (group: str) -> str:
-    loop actor in dc_actors:
-        loop e in actor.events:
-            if e.kind == 5 and dl_key(e.loc) == group: return " at {dl_line(e.site)}"
-    ""
 
 dc_warned: {int: bool} = {}
-dl_report_warn = (site: int) -> bool:
-    if dc_warned.has(site): return false
-    dc_warned[site] = true
-    true
 
 # A cycle through a channel or join node, among the certain edges (an error), or else among all
 # (a warning). Breadth-first from each such node's edges back to it.
@@ -877,3 +743,4 @@ use 'deadlock_walk.dewy'
 use 'deadlock_waits.dewy'
 use 'deadlock_graph.dewy'
 use 'deadlock_certificates.dewy'
+use 'deadlock_channels.dewy'

@@ -61,6 +61,9 @@ for stem in ('effect_lattice', 'effect_types', 'lower_helpers', 'lower_races', '
     JO[stem + '.dewy'] = ''
     JO[stem + '.jo'] = ''
 
+JO['deadlock_channels.dewy'] = 'from p"deadlock.jo" import (dc_split as split_double)\ndc_split=(n:int64):>bool=>split_double(n)\n'
+JO['deadlock_channels.jo'] = "use 'deadlock.jo'\n"
+
 DRIVER = r'''
 use 'deadlock.jo'
 use 'ast.jo'
