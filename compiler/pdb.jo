@@ -1,8 +1,0 @@
-# Filesystem publication for the complete PDB/MSF image owner.
-use 'util.jo'
-use 'module_paths.dewy'
-use 'dwarf.jo'
-use 'pdb_format.dewy'
-
-write_pdb = (path: str, guid: u8[], text_len: int, sections: u8[], main_path: str, producer: str) -> bool:
-    write_bytes(path, pdb_image(guid, text_len, sections, main_path, producer, os_path(cwd())))

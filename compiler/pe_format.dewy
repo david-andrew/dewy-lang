@@ -251,9 +251,9 @@ pe_rsrc_dir=(@out:array<uint8> entries:array<[int64 int64]>):>void=>$unsafe {
         put32(@out  e[1])
     }
 }
-let pe_section_headers:array<uint8>=[] # (the last program's: its PDB has them, pdb.jo)
+let pe_section_headers:array<uint8>=[] # (the last program's: its PDB has them, pdb_format.dewy)
 
-# write the program; pdb: the name of its PDB (pdb.jo), with guid, for the debug directory
+# write the program; pdb: the name of its PDB (pdb_format.dewy), with guid, for the debug directory
 pe_image=(text:array<uint8> entry_off:PEWord ro:array<uint8> data_size:PEWord gui:bool info:array<uint8> icon:array<uint8> pdb:string guid:array<uint8>):>array<uint8>=>$unsafe {
     let xe_pair1=pe_layout(PEWord(text.length)  PEWord(ro.length))
     let text_rva=PEWord(xe_pair1[0])

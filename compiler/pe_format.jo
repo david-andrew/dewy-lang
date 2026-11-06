@@ -219,9 +219,9 @@ pe_rsrc_dir = (out: mut u8[], entries: (int, int)[]):
         put32(out, e.0)
         put32(out, e.1)
 
-pe_section_headers: u8[]                # (the last program's: its PDB has them, pdb.jo)
+pe_section_headers: u8[]                # (the last program's: its PDB has them, pdb_format.dewy)
 
-# write the program; pdb: the name of its PDB (pdb.jo), with guid, for the debug directory
+# write the program; pdb: the name of its PDB (pdb_format.dewy), with guid, for the debug directory
 pe_image = (text: u8[], entry_off: int, ro: u8[], data_size: int, gui: bool, info: u8[], icon: u8[], pdb: str, guid: u8[]) -> u8[]:
     text_rva, ro_rva, data_rva, idata_size = pe_layout(text.len(), ro.len())
     idata = pe_idata(data_rva)

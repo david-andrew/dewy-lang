@@ -69,7 +69,7 @@ lower_extern_thunk=(lf:LFFWord f:LFFWord):>void=>$unsafe {
     let imp:LFFWord=-1
     if target_windows and lower(lib) =? "kernel32.dll" {imp=LFFWord(pe_imports.index_of(nm) ?? -1)}
     if imp >=? 0 {
-        # (one of the functions the program imports: from the import table, compiler/pe.jo)
+        # (one of the functions the program imports: from the import table, compiler/pe_format.dewy)
         emit('intr' VI fp 0 0 int32<overflow='wrap'>(imp) 10);
     }
     else if target_macos and (mac_bound_lib(lib)).length >? 0 and (not late_binding or nm =? "dlopen" or nm =? "dlsym" or nm =? "dlerror") {

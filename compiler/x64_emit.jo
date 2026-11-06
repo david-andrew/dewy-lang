@@ -352,7 +352,7 @@ emit_prologue = ():
     if xe_windows and nsave > 0: uw_fo = (8 * nsave + 15) / 16
     if uw_fo > 0:
         # (Windows: rbp is set as rsp + 16 fo, as its unwind codes can say, so the registers
-        # saved below rbp are above where unwinding starts and the codes can say where: pe.jo)
+        # saved below rbp are above where unwinding starts and the codes can say where: pe_format.dewy)
         start = xe_start
         uw_at = xe_uw_data[0].len()
         xe_uw_data[0].push(frame_size)
@@ -2644,7 +2644,7 @@ x_emit_intr = (pos: int, ins: *Ins):
         mov_rm(r, r, 0)
         st(d, r)
     else if ins.imm == 10:
-        # the function in entry c of the import address table, below the globals (pe.jo)
+        # the function in entry c of the import address table, below the globals (pe_format.dewy)
         r = dreg(d, RAX)
         rel_fixup_lea(r, 1, xe_iat_off(int(ins.c)))
         mov_rm(r, r, 0)

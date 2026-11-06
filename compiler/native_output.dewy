@@ -1,0 +1,23 @@
+$runtime_checks
+# Filesystem publication for the native image owners. The core writers keep each
+# target's replacement behavior: a stale program is removed, a PDB is overwritten.
+from p"@lib/core/os.jo" import (chmod cwd delete_file write_bytes)
+from p"elf_format.dewy" import elf_image
+from p"pe_format.dewy" import pe_image
+from p"pdb_format.dewy" import pdb_image
+from p"module_paths.dewy" import os_path
+
+publish_program=(path:string image:array<uint8>):>bool=>{
+    delete_file(path);
+    if not write_bytes(path image) {return false}
+    chmod(path 0x1ED)
+}
+write_elf=(path:string text:array<uint8> entry_off:int64 ro:array<uint8> data_size:int64):>bool=>{
+    publish_program(path elf_image(text entry_off ro data_size))
+}
+write_pe=(path:string text:array<uint8> entry_off:int64 ro:array<uint8> data_size:int64 gui:bool info:array<uint8> icon:array<uint8> pdb:string guid:array<uint8>):>bool=>{
+    publish_program(path pe_image(text entry_off ro data_size gui info icon pdb guid))
+}
+write_pdb=(path:string guid:array<uint8> text_len:int64 sections:array<uint8> main_path:string producer:string):>bool=>{
+    write_bytes(path pdb_image(guid text_len sections main_path producer os_path(cwd())))
+}

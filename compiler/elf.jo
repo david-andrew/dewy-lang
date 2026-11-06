@@ -1,9 +1,0 @@
-# Filesystem publication for the Dewy ELF64 image owner.
-use 'util.jo'
-use 'elf_format.dewy'
-
-write_elf = (path: str, text: u8[], entry_off: int, ro: u8[], data_size: int) -> bool:
-    image = elf_image(text, entry_off, ro, data_size)
-    delete_file(path)
-    if not write_bytes(path, image): return false
-    chmod(path, 0x1ED)

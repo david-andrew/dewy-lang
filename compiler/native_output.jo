@@ -1,0 +1,19 @@
+use 'module_paths.dewy'
+use 'elf_format.dewy'
+use 'pe_format.dewy'
+use 'pdb_format.dewy'
+
+write_elf = (path: str, text: u8[], entry_off: int, ro: u8[], data_size: int) -> bool:
+    image = elf_image(text, entry_off, ro, data_size)
+    delete_file(path)
+    if not write_bytes(path, image): return false
+    chmod(path, 0x1ED)
+
+write_pe = (path: str, text: u8[], entry_off: int, ro: u8[], data_size: int, gui: bool, info: u8[], icon: u8[], pdb: str, guid: u8[]) -> bool:
+    image = pe_image(text, entry_off, ro, data_size, gui, info, icon, pdb, guid)
+    delete_file(path)
+    if not write_bytes(path, image): return false
+    chmod(path, 0x1ED)
+
+write_pdb = (path: str, guid: u8[], text_len: int, sections: u8[], main_path: str, producer: str) -> bool:
+    write_bytes(path, pdb_image(guid, text_len, sections, main_path, producer, os_path(cwd())))
