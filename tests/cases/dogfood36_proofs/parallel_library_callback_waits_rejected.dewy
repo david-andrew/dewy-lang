@@ -1,0 +1,5 @@
+# modes: native native-release
+main = () => {
+    let c = channel<int>(1)
+    printl([parallel x in [1 2] [x].map((y) => { let got = c.receive; if got is? int got + y else y })])
+}

@@ -1,0 +1,10 @@
+# modes: native native-release
+total:int = 0
+keep = (f:<(x:int):>int> x:int):>int => {
+    let g = @f
+    g(x)
+}
+main = () => {
+    printl([parallel x in [1 2] keep((y) => { total += y; y } x)])
+    printl(total)
+}

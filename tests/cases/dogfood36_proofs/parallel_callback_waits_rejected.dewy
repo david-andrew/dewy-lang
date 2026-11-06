@@ -1,0 +1,6 @@
+# modes: native native-release
+apply = (f:<(x:int):>int> x:int):>int => f(x)
+main = () => {
+    let c = channel<int>(1)
+    printl([parallel x in [1 2] apply((y) => { let got = c.receive; if got is? int got + y else y } x)])
+}

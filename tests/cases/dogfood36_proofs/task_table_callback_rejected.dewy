@@ -1,0 +1,15 @@
+# modes: native native-release
+# A library callback's own parameter is a function no call shows.
+counter:int = 0
+bump = (x:int):>int => {
+    counter += x
+    x
+}
+const TABLE = [@bump]
+main = () => {
+    concurrent {
+        spawn { printl(TABLE.map((g) => g(1))) }
+        spawn { printl(TABLE.map((g) => g(1))) }
+    }
+    printl(counter)
+}

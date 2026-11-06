@@ -2995,6 +2995,13 @@ square = (x:int):>int => x*x
 printl(apply(@square [1 2 3]))   # [1 4 9]; a callback changing a global is an error here
 ```
 
+Code a `parallel` body or a task runs may call a function with a callback,
+`row.sorted(key=(x) => -x)` or `apply(@inc x)`, the library's or the program's: the
+function given is checked as that code itself. A function value it cannot see at the
+call, from a record field, a table or a local copy, is an error. In a task the
+callback may wait; a function's callback parameter a task calls is checked at each
+call of that function.
+
 `$parallel_safe`, first in a function declaration (on its line or the line
 before), pins this contract on an exported API: each callback parameter must
 still reach parallel code, so an edit to the body cannot quietly loosen what

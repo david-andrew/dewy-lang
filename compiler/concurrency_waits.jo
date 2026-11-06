@@ -12,6 +12,7 @@ use 'util.jo'
 use 'check.jo'
 use 'isolation_ops.dewy'
 use 'expr.jo'
+use 'types.jo'
 use 'ownership.jo'
 use 'ownership_hooks.dewy'
 use 'lower_helpers.dewy'
@@ -57,6 +58,20 @@ concurrency_blocks = (f: int, seen: mut {int: bool}, sharing: bool = false) -> b
     concurrency_blocks_node(int(fns[f].body), seen, sharing)
 
 
+# Whether a function a direct call gives may wait. A parameter passed on was answered for at the
+# call that reached this body; any other function value cannot be followed. O(arguments) plus
+# the demanded walk of each function given, once per walk.
+concurrency_given_blocks = (n: int, seen: mut {int: bool}) -> bool:
+    loop a in kids(n):
+        if tkind(ntype(a)) != .fn_: continue
+        b = a
+        loop nodes[b].kind == .conv: b = int(nodes[b].a)
+        k = nodes[b].kind
+        if k == .lambda or k == .fnref or k == .partial and nodes[b].aux != 1:
+            if concurrency_blocks(int(nodes[b].sym), seen, true): return true
+        else if not parsafe_is_param(b): return true
+    false
+
 concurrency_blocks_node = (n: int, seen: mut {int: bool}, sharing: bool = false) -> bool:
     if n == 0: return false
     k = nodes[n].kind
@@ -67,9 +82,11 @@ concurrency_blocks_node = (n: int, seen: mut {int: bool}, sharing: bool = false)
     if k == .lambda or k == .fnref or k == .partial: return false
     if k == .parallel_region: return concurrency_blocks_node(int(nodes[n].a), seen, sharing)
     if k == .call:
+        # (walking a parallel body: what a call gives answers here for its callee's call through that parameter)
+        if nodes[n].aux == 0 and sharing and concurrency_given_blocks(n, seen): return true
         if nodes[n].aux == 0 and concurrency_blocks(int(nodes[n].sym), seen, sharing): return true
         # (a callback parameter's callers check that what they give does not wait: parsafe)
-        if (nodes[n].aux == 1 or nodes[n].aux == 4) and not parsafe_vouched_nonblocking(int(nodes[n].a)):
+        if (nodes[n].aux == 1 or nodes[n].aux == 4) and not parsafe_vouched_nonblocking(int(nodes[n].a)) and not (sharing and parsafe_is_param(int(nodes[n].a))):
             contract = callable_contract(ntype(int(nodes[n].a)))
             if contract == 0:
                 contract = effect_source_row(int(nodes[n].a))

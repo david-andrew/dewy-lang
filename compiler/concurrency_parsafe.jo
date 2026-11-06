@@ -61,11 +61,17 @@ parsafe_vouched_nonblocking = (a: int) -> bool:
     parsafe_req.has(k) and not parsafe_req[k].waiting
 
 
+parsafe_is_param = (a: int) -> bool:
+    g, i = parsafe_param(a)
+    g > 0
+
+
 # A task calls callback a at call n: when a is its function's parameter, each call of that
 # function now checks what it gives. O(captures of a) once per (function, parameter).
 parsafe_demand_task = (a: int, n: int) -> bool:
     g, i = parsafe_param(a)
-    if g <= 0: return false
+    # (a lambda's own parameter: whoever calls it is not a call the program's index can show)
+    if g <= 0 or fns[g].kind != FK_NORMAL: return false
     parsafe_require(g, i, ParSafeVia(n, 0, 0, true))
     true
 

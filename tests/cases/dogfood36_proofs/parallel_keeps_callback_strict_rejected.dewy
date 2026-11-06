@@ -5,8 +5,15 @@ each = (f:<(x:int):>int> xs:array<int>):>array<int> => [parallel x in xs apply(@
 main = () => {
     let c = channel<int>(1)
     concurrent {
-        let a = spawn apply((v) => { c.close; v } 7)
+        let a = spawn apply((v) => {
+            let got = c.receive
+            if got is? int got + v else v
+        } 7)
+        spawn { c.close }
     }
     printl(a or_throw)
-    printl(each((v) => { c.close; v } [1]))
+    printl(each((v) => {
+        let got = c.receive
+        if got is? int got + v else v
+    } [1]))
 }

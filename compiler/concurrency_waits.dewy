@@ -1,6 +1,6 @@
 $runtime_checks
 from p"effect_types.dewy" import (EffectAtom)
-from p"ast.jo" import (NF_EXTERN has_flag kid kid2 nkids nkids2 nodes)
+from p"ast.jo" import (NF_EXTERN has_flag kid kid2 kids nkids nkids2 nodes)
 from p"effect_contracts.dewy" import (callable_contract)
 from p"concurrency_types.dewy" import (concurrency_transfer concurrency_why)
 from p"concurrency.jo" import (concurrency_block_memo)
@@ -11,9 +11,10 @@ from p"util.jo" import (fatal files name_of pos_file)
 from p"check.jo" import (fns lib_dir modules)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"expr.jo" import (ntype)
+from p"types.jo" import (tkind)
 from p"ownership_hooks.dewy" import (ownership_literal_print)
 from p"lower_helpers.dewy" import (value_helper_calls)
-from p"concurrency_parsafe.dewy" import (parsafe_vouched_nonblocking)
+from p"concurrency_parsafe.dewy" import (parsafe_is_param parsafe_vouched_nonblocking)
 # Demanded waiting-effect queries; shared state has one owner in concurrency.jo.
 WaitingWord:type=int64<overflow='wrap'>
 concurrency_fn_blocks=(f:WaitingWord):>bool=>$unsafe {
@@ -56,6 +57,22 @@ concurrency_blocks=(f:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bo
     if fns.ptr[f].body =? 0 {return true}
     return concurrency_blocks_node(WaitingWord(fns.ptr[f].body) @seen sharing)
 }
+# Whether a function a direct call gives may wait. A parameter passed on was answered for at the
+# call that reached this body; any other function value cannot be followed. O(arguments) plus
+# the demanded walk of each function given, once per walk.
+concurrency_given_blocks=(n:WaitingWord @seen:dict<int64 bool>):>bool=>$unsafe {
+    loop a in kids(n) {
+        if tkind(ntype(a)) not=? 'fn_' {continue}
+        let b=a
+        loop nodes.ptr[b].kind =? 'conv' {b=WaitingWord(nodes.ptr[b].a)}
+        let k=nodes.ptr[b].kind
+        if k =? 'lambda' or k =? 'fnref' or k =? 'partial' and nodes.ptr[b].aux not=? 1 {
+            if concurrency_blocks(WaitingWord(nodes.ptr[b].sym) @seen true) {return true}
+        }
+        else if not parsafe_is_param(b) {return true}
+    }
+    return false
+}
 concurrency_blocks_node=(n:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bool=>$unsafe {
     if n =? 0 {return false}
     let k=nodes.ptr[n].kind
@@ -67,9 +84,11 @@ concurrency_blocks_node=(n:WaitingWord @seen:dict<int64 bool> sharing:bool=false
     if k =? 'lambda' or k =? 'fnref' or k =? 'partial' {return false}
     if k =? 'parallel_region' {return concurrency_blocks_node(WaitingWord(nodes.ptr[n].a) @seen sharing)}
     if k =? 'call' {
+        # (walking a parallel body: what a call gives answers here for its callee's call through that parameter)
+        if nodes.ptr[n].aux =? 0 and sharing and concurrency_given_blocks(n @seen) {return true}
         if nodes.ptr[n].aux =? 0 and concurrency_blocks(WaitingWord(nodes.ptr[n].sym) @seen sharing) {return true}
         # (a callback parameter's callers check that what they give does not wait: parsafe)
-        if (nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4) and not parsafe_vouched_nonblocking(WaitingWord(nodes.ptr[n].a)) {
+        if (nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4) and not parsafe_vouched_nonblocking(WaitingWord(nodes.ptr[n].a)) and not (sharing and parsafe_is_param(WaitingWord(nodes.ptr[n].a))) {
             let contract=callable_contract(ntype(WaitingWord(nodes.ptr[n].a)))
             if contract =? 0 {
                 contract=effect_source_row(WaitingWord(nodes.ptr[n].a))

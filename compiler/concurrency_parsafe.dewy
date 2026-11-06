@@ -1,5 +1,5 @@
 $runtime_checks
-from p"check.jo" import (LF_ASSIGNED LF_CAPTURE LF_PARAM LF_VALUEPARAM decl_infos fns locals)
+from p"check.jo" import (FK_NORMAL LF_ASSIGNED LF_CAPTURE LF_PARAM LF_VALUEPARAM decl_infos fns locals)
 from p"concurrency.jo" import (ParSafeVia concurrency_calls parsafe_fns parsafe_req parsafe_work)
 from p"util.jo" import (err_notes fatal name_of)
 from p"lower_races.dewy" import (in_lib race_arg)
@@ -57,11 +57,16 @@ parsafe_vouched_nonblocking=(a:ParSafeWord):>bool=>$unsafe {
     let k=parsafe_key(g i)
     return parsafe_req.has(k) and not parsafe_req[k].waiting
 }
+parsafe_is_param=(a:ParSafeWord):>bool=>$unsafe {
+    let [g i]=parsafe_param(a)
+    return g >? 0
+}
 # A task calls callback a at call n: when a is its function's parameter, each call of that
 # function now checks what it gives. O(captures of a) once per (function, parameter).
 parsafe_demand_task=(a:ParSafeWord n:ParSafeWord):>bool=>$unsafe {
     let [g i]=parsafe_param(a)
-    if g <=? 0 {return false}
+    # (a lambda's own parameter: whoever calls it is not a call the program's index can show)
+    if g <=? 0 or fns.ptr[g].kind not=? FK_NORMAL {return false}
     parsafe_require(g i ParSafeVia[n 0 0 true]);
     return true
 }
