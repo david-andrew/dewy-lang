@@ -97,6 +97,8 @@ EXTRA['types.jo']['zonk'] = '''zonk = (t: int) -> int:
 for module, text in jo_doubles(EXTRA).items():
     JO[module] = JO.get(module, '') + text
 JO['check.jo'] = "use 'checker_state.dewy'\n" + JO['check.jo']
+JO['definite_walk.dewy'] = 'from p"definite.jo" import (da_record as record_double)\nda_record=(s:int64):>void=>record_double(s)\n'
+JO['definite_walk.jo'] = "use 'definite.jo'\n"
 for module in ('decimals.jo',):
     JO[module] = "use 'check.jo'\nuse 'types.jo'\n" + JO[module]
 

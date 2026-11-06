@@ -1,0 +1,340 @@
+$runtime_checks
+from p"definite.jo" import (DaState DgSummary da_decls da_breaks da_names dg_globals dg_active dg_exits dg_exit_states dg_collecting dg_sink dg_summaries dg_progress dg_mention_memo)
+from p"ast.jo" import (NF_GENERIC has_flag kids kids2 nodes)
+from p"check.jo" import (LF_CAPTURE fns globals locals stmt_terminates)
+from p"util.jo" import (err_notes fatal name_of)
+from p"types.jo" import dt
+from p"isolation_ops.dewy" import isolation_children
+
+# Only functions holding a `let x:T` without a value, and programs with such globals, are walked.
+DefiniteWord:type=int64<overflow='wrap'>
+let DA_LOCAL:DefiniteWord=1 # SK.local
+let DA_GLOBAL:DefiniteWord=2 # SK.global
+let DA_ASSIGN:DefiniteWord=47 # Tok.assign
+da_record=(s:DefiniteWord):>void=>{da_decls.push(s)}
+da_join=(x:DaState y:DaState):>DaState=>{
+    if x.done {return y}
+    if y.done {return x}
+    let u=x.unset
+    loop l in y.unset {
+        if not u.contains(l) {u.push(l)}
+    }
+    DaState(unset=u)
+}
+da_remove=(@st:DaState l:DefiniteWord):>void=>{
+    let i=st.unset.index_of(l) ?? (-1)
+    if i >=? 0 {st.unset.pop(i);}
+}
+da_check_fn=(body:DefiniteWord mark:DefiniteWord):>void=>$unsafe {
+    if da_decls.length <=? mark {return}
+    loop i in [mark..da_decls.length) {
+        let d=da_decls.ptr[i]
+        if nodes.ptr[d].sym >? 0 {da_names[DefiniteWord(nodes.ptr[d].sym)]=d}
+    }
+    let st=DaState()
+    da_breaks=[]
+    st=da_walk(body st)
+    da_decls.truncate(mark)
+}
+# (a closure's captured name stands for the enclosing function's variable)
+da_root=(l0:DefiniteWord):>DefiniteWord=>$unsafe {
+    let l=l0
+    loop DefiniteWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 and locals.ptr[l].outer >? 0 and DefiniteWord(locals.ptr[l].outer) not=? l {l=DefiniteWord(locals.ptr[l].outer)}
+    l
+}
+da_read=(n:DefiniteWord st:DaState):>void=>$unsafe {
+    if st.done or st.unset.length =? 0 {return}
+    let l=da_root(DefiniteWord(nodes.ptr[n].sym))
+    if not st.unset.contains(l) {return}
+    let nm=name_of(DefiniteWord(locals.ptr[l].name))
+    let d=da_names.get(l) ?? 0
+    let ty=if d not=? 0 and nodes.ptr[d].a not=? 0 {dt(DefiniteWord(locals.ptr[l].type))} else {"T"}
+    err_notes.push([locals.ptr[l].pos "note: '{nm}' is declared here without a value"])
+    fatal(nodes.ptr[n].pos "'{nm}' is read before it is given a value on every path: give it one where it is declared (`let {nm}:{ty} = ...`), or assign it on each path before this read")
+}
+da_walk_all=(xs:array<int64> st0:DaState):>DaState=>{
+    let st=st0
+    loop x in xs {st=da_walk(x st)}
+    st
+}
+da_walk=(n:DefiniteWord st0:DaState):>DaState=>$unsafe {
+    if n <=? 0 {return st0}
+    let st=st0
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        if nodes.ptr[n].aux =? DA_LOCAL and nodes.ptr[n].sym >? 0 {da_read(n st)}
+        else if dg_active and nodes.ptr[n].aux =? DA_GLOBAL {dg_read(n DefiniteWord(nodes.ptr[n].sym) st "")}
+        return st
+    }
+    if k =? 'lambda' {
+        # (a closure captures what it reads when it is made)
+        let exits=dg_exits
+        dg_exits=false
+        da_walk(DefiniteWord(nodes.ptr[n].b) st);
+        dg_exits=exits
+        if dg_active and not has_flag(n NF_GENERIC) {dg_through(n DefiniteWord(nodes.ptr[n].sym) @st "makes a function that reads" false)}
+        return st
+    }
+    if dg_active and ((k =? 'call' and nodes.ptr[n].aux =? 0) or k =? 'fnref' or k =? 'partial') {
+        st=da_walk(DefiniteWord(nodes.ptr[n].a) st)
+        st=da_walk_all(kids(n) st)
+        let f=if k =? 'partial' {DefiniteWord(nodes.ptr[n].d)} else {DefiniteWord(nodes.ptr[n].sym)}
+        let how=if k =? 'call' {"calls a function that reads"} else {"takes a function that reads"}
+        dg_through(n f @st how k =? 'call')
+        return st
+    }
+    if k =? 'fn_' or k =? 'defer_' or k =? 'typealias' or k =? 'struct_' or k =? 'enum_' {return st}
+    if k =? 'block' {
+        loop s in kids(n) {
+            st=da_walk(s st)
+            if stmt_terminates(s) {st.done=true}
+        }
+        return st
+    }
+    if k =? 'vardecl' {
+        if nodes.ptr[n].nlist >? 0 {return da_walk(DefiniteWord(nodes.ptr[n].b) st)}
+        st=da_walk(DefiniteWord(nodes.ptr[n].b) st)
+        let sym=DefiniteWord(nodes.ptr[n].sym)
+        if da_names.has(sym) and da_names[sym] =? n and not st.done {st.unset.push(sym)}
+        return st
+    }
+    if k =? 'assign' {
+        let lhs=DefiniteWord(nodes.ptr[n].a)
+        if nodes.ptr[n].op =? DA_ASSIGN and nodes.ptr[lhs].kind =? 'ident' and nodes.ptr[lhs].aux =? DA_LOCAL {
+            st=da_walk(DefiniteWord(nodes.ptr[n].b) st)
+            da_remove(@st da_root(DefiniteWord(nodes.ptr[lhs].sym)))
+            return st
+        }
+        if dg_active and nodes.ptr[n].op =? DA_ASSIGN and nodes.ptr[lhs].kind =? 'ident' and nodes.ptr[lhs].aux =? DA_GLOBAL {
+            st=da_walk(DefiniteWord(nodes.ptr[n].b) st)
+            da_remove(@st (-DefiniteWord(nodes.ptr[lhs].sym) - 1))
+            return st
+        }
+        if nodes.ptr[n].op =? DA_ASSIGN and nodes.ptr[lhs].kind =? 'tuple' {
+            st=da_walk(DefiniteWord(nodes.ptr[n].b) st)
+            da_unpacked(lhs @st)
+            return st
+        }
+        st=da_walk(lhs st)
+        return da_walk(DefiniteWord(nodes.ptr[n].b) st)
+    }
+    if k =? 'if_' or k =? 'iflet' {
+        st=da_walk(DefiniteWord(nodes.ptr[n].a) st)
+        let t=da_walk(DefiniteWord(nodes.ptr[n].b) st)
+        let e=if nodes.ptr[n].c not=? 0 {da_walk(DefiniteWord(nodes.ptr[n].c) st)} else {st}
+        return da_join(t e)
+    }
+    if k =? 'and_' or k =? 'or_' or k =? 'coalesce' {
+        st=da_walk(DefiniteWord(nodes.ptr[n].a) st)
+        da_walk(DefiniteWord(nodes.ptr[n].b) st);
+        return st
+    }
+    if k =? 'while_' {
+        st=da_walk(DefiniteWord(nodes.ptr[n].a) st)
+        let c=DefiniteWord(nodes.ptr[n].a)
+        let forever=nodes.ptr[c].kind =? 'bool_lit' and nodes.ptr[c].ival not=? 0
+        da_breaks.push([])
+        da_walk(DefiniteWord(nodes.ptr[n].b) st);
+        let exits=da_breaks.pop()
+        if not forever {return st}
+        let out=DaState(done=true)
+        loop x in exits {out=da_join(out x)}
+        return out
+    }
+    if k =? 'for_' {
+        st=da_walk(DefiniteWord(nodes.ptr[n].a) st)
+        da_breaks.push([])
+        da_walk(DefiniteWord(nodes.ptr[n].b) st);
+        da_breaks.pop();
+        return st
+    }
+    if k =? 'match_' {
+        st=da_walk(DefiniteWord(nodes.ptr[n].a) st)
+        let arms=kids(n)
+        if arms.length =? 0 {return st}
+        let out=DaState(done=true)
+        loop arm in arms {out=da_join(out da_walk(arm st))}
+        return out
+    }
+    if k =? 'return_' or k =? 'continue_' {
+        st=da_walk(DefiniteWord(nodes.ptr[n].a) st)
+        if k =? 'return_' and dg_exits and not st.done {dg_exit_states.push(st)}
+        st.done=true
+        return st
+    }
+    if k =? 'break_' {
+        if da_breaks.length >? 0 and nodes.ptr[n].name =? 0 {
+            let exits=da_breaks.pop()
+            exits.push(st)
+            da_breaks.push(exits)
+        } else if da_breaks.length >? 0 {
+            # (a labelled break may leave an outer loop: no state is known to reach past it)
+            loop i in [0..da_breaks.length) {
+                let exits=da_breaks[i]
+                exits.push(st)
+                da_breaks[i]=exits
+            }
+        }
+        st.done=true
+        return st
+    }
+    # (other fields hold local numbers or counts in some kinds: an unvisited read is
+    # only a check not made)
+    st=da_walk(DefiniteWord(nodes.ptr[n].a) st)
+    st=da_walk(DefiniteWord(nodes.ptr[n].b) st)
+    da_walk_all(kids(n) st)
+}
+da_unpacked=(t:DefiniteWord @st:DaState):>void=>$unsafe {
+    loop x in kids(t) {
+        if nodes.ptr[x].kind =? 'ident' and nodes.ptr[x].aux =? DA_LOCAL {da_remove(@st da_root(DefiniteWord(nodes.ptr[x].sym)))}
+        else if nodes.ptr[x].kind =? 'tuple' {da_unpacked(x @st)}
+    }
+}
+# ---------------- module-level `let g:T` without a value ----------------
+# Dewy allows one when it is given a value before any read: by the top-level
+# statements, or by `main` before it reads it or calls (or makes a handle to)
+# anything that does. Unassigned globals are in the walk's unset set as -g-1.
+# Demand-driven: nothing runs unless such a global exists; each function's
+# transitive read set is computed once (a walk of the bodies it reaches).
+dg_record=(g:DefiniteWord):>void=>{
+    if not dg_globals.contains(g) {dg_globals.push(g)}
+}
+dg_read=(n:DefiniteWord g:DefiniteWord st:DaState how:string):>void=>$unsafe {
+    if st.done or not st.unset.contains(-g - 1) {return}
+    if dg_collecting {
+        if not dg_sink.contains(-g - 1) {dg_sink.push(-g - 1)}
+        return
+    }
+    let nm=name_of(DefiniteWord(globals.ptr[g].name))
+    let d=DefiniteWord(globals.ptr[g].decl)
+    if d not=? 0 {err_notes.push([nodes.ptr[d].pos "note: '{nm}' is declared here without a value"])}
+    let what=if how =? "" {"'{nm}' is read"} else {"this {how} '{nm}'"}
+    fatal(nodes.ptr[n].pos "{what} before it is given a value: give it one where it is declared, or assign it at the top level or in main before this")
+}
+# A call, or a function value made (that may run later): what f may read must
+# have a value here; after a call, what f assigns on every path has one.
+dg_through=(n:DefiniteWord f:DefiniteWord @st:DaState how:string call:bool):>void=>{
+    if f <=? 0 or f >=? fns.length or st.done or st.unset.length =? 0 {return}
+    let sm=dg_summary(f)
+    loop u in sm.reads {dg_read(n (-u - 1) st how)}
+    if call {
+        loop u in sm.assigns {da_remove(@st u)}
+    }
+}
+# f's effect on the globals, from a walk of its body with all of them unset.
+# (a function reached again while being summarized may read any of them)
+dg_summary=(f:DefiniteWord):>DgSummary=>$unsafe {
+    let known=dg_summaries.get(f)
+    if known not=? none {return known}
+    let mentioned=dg_mentions(f)
+    if mentioned.length =? 0 or fns.ptr[f].body =? 0 {
+        let empty=DgSummary(reads=[] assigns=[])
+        dg_summaries[f]=empty
+        return empty
+    }
+    # (reached again while being summarized: it may read any it mentions)
+    if dg_progress.has(f) {return DgSummary(reads=mentioned assigns=[])}
+    let unset:array<int64>=[]
+    loop g in dg_globals {unset.push(-g - 1)}
+    dg_progress[f]=true
+    let saved_collecting=dg_collecting
+    let saved_sink=dg_sink
+    let saved_exits=dg_exits
+    let saved_states=dg_exit_states
+    let saved_breaks=da_breaks
+    dg_collecting=true
+    dg_sink=[]
+    dg_exits=true
+    dg_exit_states=[]
+    da_breaks=[]
+    let out=da_walk(DefiniteWord(fns.ptr[f].body) DaState(unset=unset))
+    loop x in dg_exit_states {out=da_join(out x)}
+    let assigns:array<int64>=[]
+    if not out.done {
+        loop u in unset {
+            if not out.unset.contains(u) {assigns.push(u)}
+        }
+    }
+    let sm=DgSummary(reads=dg_sink assigns=assigns)
+    dg_collecting=saved_collecting
+    dg_sink=saved_sink
+    dg_exits=saved_exits
+    dg_exit_states=saved_states
+    da_breaks=saved_breaks
+    dg_progress.remove(f);
+    dg_summaries[f]=sm
+    sm
+}
+# the recorded globals f's code may touch (as -g-1): its body, the functions it
+# calls or makes, transitively; a superset of what it reads
+dg_mentions=(f:DefiniteWord):>array<int64>=>{
+    let known=dg_mention_memo.get(f)
+    if known not=? none {return known}
+    let seen=dict<int64 bool>()
+    let out:array<int64>=[]
+    dg_collect_fn(f @seen @out)
+    dg_mention_memo[f]=out
+    out
+}
+dg_collect_fn=(f:DefiniteWord @seen:dict<int64 bool> @out:array<int64>):>void=>$unsafe {
+    if f <=? 0 or f >=? fns.length or seen.has(f) {return}
+    seen[f]=true
+    dg_collect(DefiniteWord(fns.ptr[f].body) @seen @out)
+}
+dg_collect=(n:DefiniteWord @seen:dict<int64 bool> @out:array<int64>):>void=>$unsafe {
+    if n <=? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        if nodes.ptr[n].aux =? DA_GLOBAL {
+            let g=DefiniteWord(nodes.ptr[n].sym)
+            if dg_globals.contains(g) and not out.contains(-g - 1) {out.push(-g - 1)}
+        }
+        return
+    }
+    if (k =? 'call' and nodes.ptr[n].aux =? 0) or k =? 'fnref' or (k =? 'lambda' and not has_flag(n NF_GENERIC)) {dg_collect_fn(DefiniteWord(nodes.ptr[n].sym) @seen @out)}
+    if k =? 'partial' {dg_collect_fn(DefiniteWord(nodes.ptr[n].d) @seen @out)}
+    let mask=isolation_children(k)
+    if mask <? 0 {
+        dg_collect(DefiniteWord(nodes.ptr[n].a) @seen @out)
+        dg_collect(DefiniteWord(nodes.ptr[n].b) @seen @out)
+        loop c in kids(n) {dg_collect(c @seen @out)}
+        return
+    }
+    if mask & 1 not=? 0 {dg_collect(DefiniteWord(nodes.ptr[n].a) @seen @out)}
+    if mask & 2 not=? 0 {dg_collect(DefiniteWord(nodes.ptr[n].b) @seen @out)}
+    if mask & 4 not=? 0 {dg_collect(DefiniteWord(nodes.ptr[n].c) @seen @out)}
+    if mask & 16 not=? 0 {
+        loop c in kids(n) {dg_collect(c @seen @out)}
+    }
+    if mask & 32 not=? 0 {
+        loop c in kids2(n) {dg_collect(c @seen @out)}
+    }
+}
+# After checking: the top-level statements (each module's, in order) and then
+# main must give each global a value before it is read. What main may leave
+# unassigned must not be read by what runs after it (a game's update and draw).
+dg_check_program=(inits:array<int64> main:DefiniteWord later:array<int64>):>void=>$unsafe {
+    if dg_globals.length =? 0 {return}
+    dg_active=true
+    let st=DaState()
+    loop g in dg_globals {st.unset.push(-g - 1)}
+    loop f in inits {
+        if f <=? 0 or fns.ptr[f].body =? 0 {continue}
+        da_breaks=[]
+        let after=da_walk(DefiniteWord(fns.ptr[f].body) st)
+        if not after.done {st=after}
+    }
+    if main >? 0 and fns.ptr[main].body not=? 0 {
+        da_breaks=[]
+        dg_exits=true
+        dg_exit_states=[]
+        let out=da_walk(DefiniteWord(fns.ptr[main].body) DaState(unset=st.unset))
+        dg_exits=false
+        loop x in dg_exit_states {out=da_join(out x)}
+        st=if out.done {DaState()} else {out}
+    }
+    loop f in later {
+        if f >? 0 {dg_through(DefiniteWord(fns.ptr[f].body) f @st "runs after main and reads" false)}
+    }
+    dg_active=false
+}

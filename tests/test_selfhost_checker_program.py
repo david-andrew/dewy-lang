@@ -223,6 +223,8 @@ runtime_switch_on=(name:string):>void=>on_double(name)
 '''
 JO['deadlock_graph.dewy'] = 'from p"deadlock.jo" import (deadlock_finalize as finalize_double)\ndeadlock_finalize=():>void=>finalize_double()\n'
 JO['deadlock_graph.jo'] = "use 'deadlock.jo'\n"
+JO['definite_walk.dewy'] = 'from p"definite.jo" import (dg_check_program as check_double)\ndg_check_program=(inits:array<int64> main:int64 later:array<int64>):>void=>check_double(inits main later)\n'
+JO['definite_walk.jo'] = "use 'definite.jo'\n"
 JO['arena_ops.jo'] = "use 'arena.jo'\n"
 
 DRIVER = ''.join(f"use '{m}'\n" for m in EXTRA) + BASE + r'''
