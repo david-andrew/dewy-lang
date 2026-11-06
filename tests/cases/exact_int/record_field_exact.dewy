@@ -1,0 +1,12 @@
+# `int64 << n` is an exact `int`. An anonymous record literal without an expected type
+# keeps it; its field narrows only when stored as a shape with an int64 field.
+$runtime_checks
+keep = (p:[left:float64 right:int64]):>int64 => p.right
+main = ():>void => {
+    let wide=[right=(int64(-13) << int64(60)) left=float64(-31.0)]
+    printl(wide)
+    printl(wide.right)
+    printl(keep([right=(int64(-13) << int64(3)) left=float64(0.5)]))
+    let x=int64(1) << int64(64)
+    printl(x)
+}

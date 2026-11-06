@@ -1,0 +1,7 @@
+# exit: 101
+# The same exact field, stored where int64 is wanted: it does not fit.
+$runtime_checks
+keep = (p:[left:float64 right:int64]):>int64 => p.right
+main = ():>void => {
+    printl(keep([right=(int64(-13) << int64(60)) left=float64(0.5)]))
+}

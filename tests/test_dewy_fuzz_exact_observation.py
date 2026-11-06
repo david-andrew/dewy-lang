@@ -23,6 +23,22 @@ def test_exact_result_still_checks_when_stored_as_int64():
     assert program.outcome() == ('9223372036854775808\n', 101)
 
 
+def wide_pair():
+    wide = g.Bin(g.I, '<<', g.Lit(g.I, -13), g.Lit(g.I, 60))
+    return g.RecLit(g.PAIR, (('right', wide), ('left', g.Lit(g.F, -31.0))))
+
+
+def test_anonymous_record_literal_keeps_exact_fields():
+    # (seed 9430: without an expected type a field infers the expression's own `int`)
+    program = g.Program((), (g.Print(wide_pair()),))
+    assert program.outcome() == ('[left=-31.0 right=-14987979559889010688]\n', 0)
+
+
+def test_anonymous_record_checks_exact_fields_when_stored_as_its_shape():
+    program = g.Program((), (g.Let('p', g.PAIR, wide_pair()),))
+    assert program.outcome() == ('', 101)
+
+
 @pytest.mark.parametrize(('seed', 'exit_code', 'observed'), (
     (2688088, 101, '<9223372036854775808>\n'),
     (2688142, 0, '= -9223372036854775817\n'),

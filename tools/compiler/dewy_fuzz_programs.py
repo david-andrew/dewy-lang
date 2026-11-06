@@ -599,7 +599,11 @@ class RecLit(Expr):
         return f'{self.ty.name}[{body}]'
 
     def eval(self, m, env):
-        values = {n: copy.deepcopy(store(m.eval(e, env), dict(self.ty.args)[n])) for n, e in self.items}
+        # An anonymous literal without an expected type infers exact fields (LANGUAGE.md, records);
+        # a binding of its declared shape checks them, in store().
+        types = dict(self.ty.args)
+        values = {n: copy.deepcopy(store(m.eval(e, env), types[n]) if self.ty.name else m.eval(e, env))
+                  for n, e in self.items}
         return Rec(self.ty.name, {n: values[n] for n, _ in self.ty.args})
 
 
@@ -1215,6 +1219,9 @@ def store(value, ty):
             if member(value, arm):
                 return store(value, arm)
         raise InvalidProgram('stored union member')
+    if ty.kind == 'rec' and not ty.name:
+        for name, field in ty.args:
+            store(value.fields[name], field)
     if ty in (I, U) and wrap(value, ty) != value:
         raise Panicked('exact integer result does not fit')
     return value
@@ -2953,6 +2960,8 @@ def variant_outline(program: Program, r: random.Random) -> Program | None:
             if (isinstance(n, Expr) and not isinstance(n, (Lit, Var, Range, Ref, Lambda)) and n.ty in VALUE_TYPES
                     and n.ty not in INTS and id(n) not in places and pure(n)
                     and not any(isinstance(x, Is) or isinstance(x, (ArrayLit, DictLit, SetLit)) and not x.items
+                                # (a helper's declared result would narrow an anonymous literal's exact fields)
+                                or isinstance(x, RecLit) and not x.ty.name
                                 for x in walk(n))):
                 candidates.append(n)
     r.shuffle(candidates)
