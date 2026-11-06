@@ -1,0 +1,328 @@
+use 'constant_checks.dewy'
+use 'facts.jo'
+use 'lower_scalars.dewy'
+use 'lower_views.dewy'
+use 'lower_storage.dewy'
+use 'lower_analysis.dewy'
+use 'lower_helpers.dewy'
+use 'lower_group.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'sequence_selectors.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ide.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'ast.jo'
+use 'icount.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'lower.jo'
+use 'check.jo'
+use 'comptime.jo'
+use 'check_constant.jo'
+use 'isolation.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'places.jo'
+use 'effects.jo'
+use 'effect_library.jo'
+use 'ownership.jo'
+use 'witness.jo'
+use 'directives.jo'
+use 'warn_if.jo'
+use 'string_domains.jo'
+use 'draw_context.jo'
+use 'predicate_facts.jo'
+use 'floats.jo'
+use 'member_replay.jo'
+use 'ownership_types.dewy'
+use 'lower_primitives.dewy'
+use 'math_ops.dewy'
+use 'draw_ops.dewy'
+use 'effect_classifiers.dewy'
+use 'effect_values.dewy'
+use 'effect_control.dewy'
+use 'effect_costs.dewy'
+use 'effect_owners.dewy'
+use 'isolation_ops.dewy'
+use 'facts_arrays.dewy'
+use 'facts_maps.dewy'
+use 'facts_pools.dewy'
+use 'facts_members.dewy'
+use 'facts_progress.dewy'
+use 'facts_probes.dewy'
+
+# The bundled delimiter split always appends its final part when the
+# separator is nonempty. Empty separators and whitespace splitting differ.
+# Binding identity is checked, never an arbitrary user function's spelling.
+fact_split_call = (n: int) -> bool:
+    if (nkids(n) != 2 and nkids(n) != 3) or not fact_library_call(n, "split"): return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    files[pos_file(nodes[d].pos)].path == lib_dir + "/core/str.jo" and fact_type(ntype(kid(n, 1))) == T_STR
+# Whitespace splitting emits only nonempty strings; delimiter splitting can
+# emit empty fields. This belongs to the bundled implementation, not its name.
+fact_words_call = (n: int) -> bool:
+    if nkids(n) != 1 or not (fact_library_call(n, "split") or fact_library_call(n, "words")): return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    files[pos_file(nodes[d].pos)].path == lib_dir + "/core/str.jo"
+# core/str.jo lines drops only its last empty part: nonempty input always
+# leaves at least one line (including a lone newline). Empty input leaves none.
+fact_lines_call = (n: int) -> bool:
+    if nkids(n) != 1 or not fact_library_call(n, "lines"): return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    files[pos_file(nodes[d].pos)].path == lib_dir + "/core/str.jo"
+fact_search_call = (n: int) -> bool: fact_array_search_call(n) or fact_text_search_call(n)
+fact_array_search_call = (n: int) -> bool:
+    if nkids(n) != 2 or not fact_library_call(n, "__dewy_index_of"): return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy.jo"
+# The bundled array search reads its arguments and writes nothing when its
+# elements compare by the builtin equality or the library's own (a program's
+# `__eq__` may do anything), and copy without lifecycle hooks. O(1).
+fact_search_reads_only = (n: int) -> bool:
+    if not fact_array_search_call(n): return false
+    t = representation_type(telem(fact_type(ntype(kid(n, 0)))))
+    if effect_scalar(t) or effect_float(t) or t == T_STR: return true
+    if tkind(t) != .struct_ or int(types[t].flags) & TF_MANAGED != 0: return false
+    d = int(structs[int(types[t].st)].decl)
+    d != 0 and pos_in_lib(nodes[d].pos)
+fact_text_search_call = (n: int) -> bool:
+    if nkids(n) != 2 and nkids(n) != 3 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    if fact_name_find == 0:
+        fact_name_find = intern("__dewy_find")
+        fact_name_rfind = intern("__dewy_rfind")
+    name = int(nodes[d].name)
+    (name == fact_name_find or name == fact_name_rfind) and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/graphemes.jo" and fact_type(ntype(kid(n, 0))) == T_STR and fact_type(ntype(kid(n, 1))) == T_STR
+fact_search_result = (n: int, result: int, values: int[], s: mut FactState):
+    if s.conditional.len() >= 32: return
+    if fact_search_predicate == 0:
+        fact_search_predicate = ref_intern([RefAtom(.ge, RefTerm(), RefTerm(1, 0)), RefAtom(.lt, RefTerm(), RefTerm(2, 0, path = [-1]))])
+        fact_text_search_predicate = ref_intern([RefAtom(.ge, RefTerm(), RefTerm(1, 0)), RefAtom(.le, RefTerm(), RefTerm(2, 0, path = [-1]))])
+        # (`text.find(sub start)` counts from its start: start + a count)
+        fact_text_from_predicate = ref_intern([RefAtom(.ge, RefTerm(), RefTerm(2, 2)), RefAtom(.le, RefTerm(), RefTerm(2, 0, path = [-1]))])
+    # A length exists on both success and fallback paths. Materialize this
+    # demanded entry projection before the tag split, so joins can check the
+    # fallback against it too (e.g. -1 is below every array length). O(1).
+    fact_project(s, values[0], -1, false, T_INT)
+    f = int(nodes[n].sym)
+    tag = union_index(prune(int(fns[f].ret)), T_INT)
+    if tag < 0: return
+    selector = result_selector(f, result, s)
+    payload = fact_project(s, result, -4, false, T_INT)
+    predicate = if not fact_text_search_call(n): fact_search_predicate else if nkids(n) == 3 and int(nodes[int(fns[f].decl)].name) == fact_name_find: fact_text_from_predicate else: fact_text_search_predicate
+    s.conditional.push(ResultEvidence(selector, tag, predicate, values, fns[f].ptypes, payload, T_INT))
+fact_regex_call = (n: int) -> bool:
+    if nkids(n) != 1 and nkids(n) != 3 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    if fact_name_regex == 0:
+        fact_name_regex = intern("regex")
+        fact_name_regex_find = intern("__dewy_find")
+    name = int(nodes[d].name)
+    (name == fact_name_regex and nkids(n) == 1 or name == fact_name_regex_find and nkids(n) == 3) and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/regex.jo"
+fact_regex_search_result = (n: int, result: int, values: int[], s: mut FactState):
+    if not fact_regex_call(n): return
+    if ownership_decls.len() != 0:
+        # Union containers do not themselves report member lifecycle hooks.
+        loop t in union_members(fact_type(ntype(n))):
+            if ownership_fact_type(t): return
+        if nkids(n) == 3 and ownership_fact_type(ntype(kid(n, 1))): return
+    named = name_of(int(nodes[int(fns[int(nodes[n].sym)].decl)].name))
+    if named == "regex" and nkids(n) == 1:
+        text = cc_constant(kid(n, 0))
+        if text < 0: return
+        count = fact_regex_counts.get(text) ?? -1
+        if count < 0:
+            # Interpret the library implementation, never a second regex parser.
+            # Only a checked constant string enters the evaluator.
+            arg = mk(.str_lit, nodes[n].pos)
+            nodes[arg].sval = i32(text); nodes[arg].type = i32(T_STR)
+            add_flag(arg, NF_CHECKED)
+            d = int(fns[int(nodes[n].sym)].decl)
+            helper = module_lookup(int(nodes[d].mod), intern("__re_parse"))
+            if helper == 0 or syms[helper].kind != .fns: return
+            f = get_fn_inst(int(syms[helper].decl), [], nodes[n].pos)
+            run = mk(.call, nodes[n].pos)
+            nodes[run].sym = i32(f); nodes[run].type = fns[f].ret
+            add_flag(run, NF_CHECKED); set_list(run, [arg])
+            value = ct_values[ct_run(run)]
+            if value.items.len() != 2: return
+            payload = ct_values[value.items[0]]
+            if tkind(payload.type) != .struct_: return
+            si = int(types[payload.type].st)
+            loop i in [0..int(structs[si].nfields)):
+                if name_of(int(fields[int(structs[si].fields) + i].name)) == "groups": count = ct_values[payload.items[i]].i
+            if count < 0: return
+            fact_regex_counts[text] = count
+        loop t in union_members(fact_type(ntype(n))):
+            if fact_call_field_type(t, intern("groups")) != T_INT: continue
+            payload = fact_project(s, result, -4, false, t)
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(payload, intern("groups"), false, fact_constant(s, count)))
+        return
+    if nkids(n) != 3 or named != "__dewy_find": return
+    name = intern("groups")
+    loop t in union_members(fact_type(ntype(n))):
+        gt = fact_call_field_type(t, name)
+        if tkind(gt) != .array or telem(gt) != T_STR: continue
+        count = fact_project(s, values[1], name, false, T_INT)
+        length = fact_clamped(s, count, n)
+        payload = fact_project(s, result, -4, false, t)
+        groups = fact_project(s, payload, name, false, gt)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(groups, -1, false, length))
+        return
+fact_affix_call = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    if fact_name_starts_with == 0:
+        fact_name_starts_with = intern("starts_with"); fact_name_ends_with = intern("ends_with")
+    name = int(nodes[d].name)
+    if name != fact_name_starts_with and name != fact_name_ends_with: return false
+    pos_in_lib(nodes[d].pos) and fact_type(ntype(kid(n, 0))) == T_STR and fact_type(ntype(kid(n, 1))) == T_STR
+# Graphemes a text matching a nonempty affix pattern has at least. An ASCII
+# literal without CR breaks between every pair of its bytes whatever surrounds
+# it, so each of its bytes starts a grapheme of the text; any other pattern
+# guarantees one.
+fact_affix_floor = (p: int) -> int:
+    if p <= 0 or nodes[p].kind != .str_lit or nodes[p].aux != 0 or nkids(p) != 0 or nodes[p].sval < 0: return 1
+    text = name_of(int(nodes[p].sval))
+    if len(text) == 0: return 1
+    loop c in text:
+        if c >= 128 or c == 13: return 1
+    len(text)
+fact_string_call = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return 0
+    if fact_name_string_length == 0:
+        fact_name_string_length = intern("__dewy_string_length")
+        fact_name_string_index = intern("__dewy_string_index")
+        fact_name_string_slice = intern("__dewy_string_slice")
+        fact_name_byte_slice = intern("__dewy_byte_slice")
+    name = int(nodes[d].name)
+    k = if name == fact_name_string_length and nkids(n) == 1: 1 else if name == fact_name_string_index and nkids(n) == 2: 2 else if name == fact_name_string_slice and nkids(n) == 5: 3 else if name == fact_name_byte_slice and nkids(n) == 3: 4 else: 0
+    # (`text.find(part start)`: 5, its start an obligation as a slice's is)
+    if k == 0 and nkids(n) == 3 and fact_text_search_call(n) and name == fact_name_find: return 5
+    if k == 0 or not pos_in_lib(nodes[d].pos): return 0
+    k
+# `text.find(part start)` searches from grapheme `start`: 0 <=? start <=?
+# text.length, as a slice `text[start..]` needs (the library's start check). O(1).
+fact_find_start = (n: int, s: mut FactState, start: int, length: int):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    zero = fact_constant(s, 0)
+    lo = fact_compare(s, .le, zero, start)
+    hi = fact_compare(s, .le, start, length)
+    if fact_probe_on:
+        fact_probe_record(n, lo == 1 and hi == 1)
+        return
+    if lo == 1 and hi == 1: return
+    i = wit_text(kid(n, 2))
+    text = wit_text(kid(n, 0))
+    upper = if text != "": "{i} <=? {text}.length" else: ""
+    relation = if lo == 1: upper else if hi == 1: "{i} >=? 0" else if upper != "": "0 <=? {upper}" else: ""
+    if lo == 0 or hi == 0:
+        wit_help(relation)
+        if dir_defer(n, "find's start is outside the text", true): return
+        wit_fail(nodes[n].pos, "find's start is outside the text")
+        return
+    missing = if lo == 1: "upper bound" else if hi == 1: "lower bound" else: "lower and upper bounds"
+    wit_unknown(n, fact_bound(s, start), "find's start `{i}` is within the text", 0, relation, missing)
+fact_byte_view = (s: mut FactState, text: int) -> int:
+    view = fact_project(s, text, FACT_BYTE_VIEW, false, mk_array(T_U8))
+    # A decoded literal has an exact byte count even when it is not ASCII
+    # (or contains CR). Materialize only on byte-view demand: O(1) indexed
+    # lookup and interned-string length, with no Unicode/grapheme scan.
+    n = fact_terms[text].origin
+    if view != 0 and n > 0 and nodes[n].kind == .str_lit and nodes[n].aux == 0 and nkids(n) == 0 and nodes[n].sval >= 0 and s.projections.len() < FACT_CAP:
+        known = fact_projection_find(s, view, -1, false)
+        if known < 0: fact_add_projection(s, FactProjection(view, -1, false, fact_constant(s, len(name_of(int(nodes[n].sval))))))
+    view
+# `text.byte_slice(a b)`: 0 <=? a <=? b <=? the text's byte length, and each end a char
+# boundary: 0, the byte length, or an index whose byte the facts hold below 0x80 or at
+# least 0xC0 (a guard `bytes[a] <? 0x80` on the text's byte view). The result's byte
+# length is b - a. O(1) queries.
+fact_byte_slice = (n: int, s: mut FactState, values: int[]) -> int:
+    view = fact_byte_view(s, values[0])
+    length = fact_project(s, view, -1, false, T_INT)
+    lo = values[1]
+    hi = values[2]
+    if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query):
+        zero = fact_constant(s, 0)
+        checks = [fact_compare(s, .le, zero, lo), fact_compare(s, .le, lo, hi), fact_compare(s, .le, hi, length)]
+        bounded = checks[0] == 1 and checks[1] == 1 and checks[2] == 1
+        starts = fact_char_boundary(s, view, length, lo) and fact_char_boundary(s, view, length, hi)
+        if fact_probe_on: fact_probe_record(n, bounded and starts)
+        else if not bounded: wit_slice_at(n, s, lo, hi, length, checks, kid(n, 0), kid(n, 1), kid(n, 2), false)
+        else if not starts:
+            first = fact_char_boundary(s, view, length, lo)
+            which = if first: kid(n, 2) else: kid(n, 1)
+            byte = fact_project(s, view, (if first: hi else: lo), true, T_U8)
+            end = if first: "stop" else: "start"
+            wit_unknown(n, fact_bound(s, byte), "byte_slice's {end} `{wit_text(which)}` is a char boundary", 0, "({wit_text(kid(n, 0))} as array<uint8>)[{wit_text(which)}] <? 0x80")
+    value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+    size = fact_arithmetic(s, kid(n, 2), .minus, hi, lo)
+    if s.projections.len() + 1 < FACT_CAP:
+        bytes = fact_byte_view(s, value)
+        fact_add_projection(s, FactProjection(bytes, -1, false, size))
+    value
+fact_char_boundary = (s: mut FactState, view: int, length: int, at: int) -> bool:
+    # (within the bounds, which are proven first: at most 0 is 0, at least the length is it)
+    # (the constant first: the state is taken before later arguments run)
+    zero = fact_constant(s, 0)
+    if fact_compare(s, .le, at, zero) == 1 or fact_compare(s, .ge, at, length) == 1: return true
+    # ASCII belongs to the immutable string, never a mutable byte array.
+    pi = fact_projection_origin(s, view)
+    if pi >= 0:
+        p = s.projections[pi]
+        if p.selector == FACT_BYTE_VIEW and fact_projection_find(s, p.base, FACT_ASCII_TEXT, false) >= 0: return true
+    byte = fact_project(s, view, at, true, T_U8)
+    b = fact_bound(s, byte)
+    if b.hi < 0x80 or b.lo >= 0xc0: return true
+    false
+# `xs.pop()` needs an element (`xs.length >? 0`); `xs.pop(i)` an index in
+# bounds, as `xs[i]` does. Both are checked at run time where deferred.
+fact_removal = (n: int, s: mut FactState, index: int, length: int):
+    zero = fact_constant(s, 0)
+    if nodes[n].aux == i32(int(IN.pop)):
+        c = fact_compare(s, .gt, length, zero)
+        if c != 1: wit_operation(n, s, .gt, WitSide(length, kid(n, 0), (if wit_text(kid(n, 0)) != "": "{wit_text(kid(n, 0))}.length" else: ""), true), WitSide(zero, 0, "0", false, true), c, "pop() of an empty array", "pop() has an element to remove")
+        return
+    lo = fact_compare(s, .le, zero, index)
+    hi = fact_compare(s, .lt, index, length)
+    if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi, kid(n, 0), kid(n, 1))
+fact_string_index = (n: int, s: mut FactState, index: int, length: int):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    zero = fact_constant(s, 0)
+    lo = fact_compare(s, .le, zero, index)
+    hi = fact_compare(s, .lt, index, length)
+    if fact_probe_on: fact_probe_record(n, lo == 1 and hi == 1)
+    else if lo != 1 or hi != 1: wit_index(n, s, index, length, lo, hi, kid(n, 0), kid(n, 1))
+# `text[a..b)`: 0 <=? a <=? b <=? text.length (an inclusive end counts one
+# more, an open end is the length); the slice's length is their difference.
+fact_string_slice = (n: int, s: mut FactState, values: int[], length: int) -> int:
+    inclusive = nodes[kid(n, 3)].kind == .bool_lit and nodes[kid(n, 3)].ival != 0
+    stop = nodes[kid(n, 4)].kind != .bool_lit or nodes[kid(n, 4)].ival != 0
+    lo = values[1]
+    hi = length
+    if stop:
+        hi = values[2]
+        if inclusive: hi = fact_arithmetic(s, kid(n, 2), .plus, hi, fact_constant(s, 1))
+    if fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query):
+        zero = fact_constant(s, 0)
+        checks = [fact_compare(s, .le, zero, lo), fact_compare(s, .le, lo, hi), fact_compare(s, .le, hi, length)]
+        if fact_probe_on: fact_probe_record(n, checks[0] == 1 and checks[1] == 1 and checks[2] == 1)
+        else if checks[0] != 1 or checks[1] != 1 or checks[2] != 1:
+            wit_slice_at(n, s, lo, hi, length, checks, kid(n, 0), kid(n, 1), (if stop: kid(n, 2) else: 0), inclusive, true)
+    value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
+    size = fact_arithmetic(s, kid(n, if stop: 2 else: 1), .minus, hi, lo)
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, size))
+    value
