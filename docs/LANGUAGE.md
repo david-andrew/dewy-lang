@@ -1684,7 +1684,9 @@ value made from written fractions (`1/3`, `rational(1 4)`) prints as
 `numerator/denominator`. Where both take part, it prints as a decimal when the
 digits end, otherwise as a fraction: `19.99*(8/100)` is `1.5992`, `1/3+0.5` is
 `5/6`. How a value prints never changes the value: `0.5 =? 1/2`, and both are
-the same dictionary key. `rational<int64>` prints the same way.
+the same dictionary key. `rational<int64>` prints the same way. A width alone adds
+no digits, `"{x:>7}"` of `rational(120)` being `    120`; a precision formats it as
+a `float64`, `{x:.2f}`.
 
 A `rational` binding without an annotation that a loop carries through `*`, `/`
 or `^` gets a warning: its parts can grow every iteration (`balance *= 1.05`,
@@ -4596,6 +4598,9 @@ type keeps ordinary value formatting, or fixed decimals when precision is given.
 Decimal/radix integer formats retain every bit. Floating formats on integers
 convert to `float64`; exact library numbers require an explicit `.to_float64()`
 for this kind of formatting. Fixed decimal rounding uses ties to even.
+`s.pad_start(n)`, `s.pad_end(n)` and `s.pad_center(n)` pad text with a computed
+width, around it for `pad_center` (any odd space after: `"hi".pad_center(5)` is
+` hi  `), each with an optional fill: `"hi".pad_center(6 "*")`.
 
 Text takes alignment, fill and minimum width, optionally ending in `s`. Its
 width counts grapheme clusters; it does not truncate. Use a string slice to

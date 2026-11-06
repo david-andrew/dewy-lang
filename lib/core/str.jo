@@ -258,6 +258,13 @@ pad_end = (s: str, width: int, fill: str = " ") -> str:
     if n >= width or len(fill) == 0: return s
     s + __pad_fill(fill, width - n)
 
+# ... or around it, any odd one after: pad_center("hi", 6) is "  hi  "
+pad_center = (s: str, width: int, fill: str = " ") -> str:
+    n = char_count(s)
+    if n >= width or len(fill) == 0: return s
+    before = (width - n) / 2
+    __pad_fill(fill, before) + s + __pad_fill(fill, width - n - before)
+
 # (count characters of fill, round and round)
 __pad_fill = (fill: str, count: int) -> str:
     if len(fill) == 1: return repeat(fill, count)
