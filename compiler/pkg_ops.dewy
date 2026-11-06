@@ -1,0 +1,228 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (env eprint exit file_exists list_dir mkdir read_file run_program temp_dir write_file)
+from p"@lib/core/str.jo" import (ends_with starts_with)
+from p"manifest.dewy" import (pkg_block_at pkg_declares pkg_default_name pkg_fetch_dir pkg_insert pkg_is_commit pkg_is_git pkg_lock_key pkg_lock_read pkg_lock_text pkg_ls_remote_commit pkg_ls_remote_names pkg_pin pkg_scan_at pkg_short pkg_unsafe_git pkg_url)
+from p"module_paths.dewy" import (is_abs_path os_path)
+from p"pkg.jo" import (pkg_dirs pkg_errs pkg_fetch pkg_specs pkg_why)
+
+PkgWord:type=int64<overflow='wrap'>
+pkg_last_slash=(path:string):>PkgWord=>{
+    let bytes=path as array<uint8>
+    let at:PkgWord=bytes.length - 1
+    loop at >=? 0 and bytes[at] not=? b'/' {at-=1}
+    at
+}
+# the package specs in the build block of file path (text: read before the program is parsed)
+pkg_scan=(path:string src:string):>void=>{
+    pkg_scan_at(@pkg_specs path src pkg_block_at(src))
+}
+# the user's cache directory (not temporary: /tmp may be a small memory-backed file system)
+user_cache_dir=():>string=>{
+    if $target.os =? 'windows' {
+        return os_path(env("LOCALAPPDATA") ?? temp_dir())
+    } else if $target.os =? 'mac' {
+        return "{env("HOME") ?? temp_dir()}/Library/Caches"
+    } else {
+        let x=env("XDG_CACHE_HOME")
+        if x not=? none {
+            if (x as array<uint8>).length >? 0 {return x}
+        }
+        return "{env("HOME") ?? temp_dir()}/.cache"
+    }
+}
+# where fetched packages are kept: the user's cache directory
+pkg_cache=():>string=>{
+    let e=env("DEWY_PACKAGES")
+    if e not=? none {return os_path(e)}
+    "{user_cache_dir()}/dewy/packages"
+}
+# where built programs are kept between runs of dewy-core (made, with the directories above it)
+core_cache=():>string=>{
+    let d="{user_cache_dir()}/dewy/core-cache"
+    pkg_mkdirs(d)
+    return d
+}
+# a directory and those above it, made where missing
+pkg_mkdirs=(d:string):>void=>{
+    if (d as array<uint8>).length =? 0 or file_exists("{d}/.") {return}
+    let s=pkg_last_slash(d)
+    if s >? 0 {pkg_mkdirs(d.byte_slice(0 s))}
+    mkdir(d);
+}
+# git, run with these arguments: its exit code and output (-1: git is not there)
+pkg_git=(args:array<string>):>[int64 string]=>{
+    run_program("git" args)
+}
+pkg_resolve=(url:string ref:string):>string=>{
+    if pkg_is_commit(ref) {return ref}
+    let want=ref
+    if (want as array<uint8>).length =? 0 {want="HEAD"}
+    # (git prints an annotated tag's commit, its ^{} line, only when that is asked for too)
+    let [code out]=pkg_git(["ls-remote" url want "{want}^\{}"])
+    if code <? 0 {
+        pkg_why="fetching it needs git (https://git-scm.com), which is not on the PATH"
+        return ""
+    }
+    if code not=? 0 {
+        pkg_why="git could not reach {url}"
+        return ""
+    }
+    let found=pkg_ls_remote_commit(out want)
+    if (found as array<uint8>).length =? 0 {
+        let refs=pkg_ls_remote_names(out want)
+        pkg_why="{url} has no '{want}' (a tag, a branch, or a whole 40-character commit)"
+        if refs.length >? 1 {pkg_why="'{want}' at {url} names both {refs[0]} and {refs[1]}: ask for one by its whole name, as '{refs[0]}'"}
+    }
+    found
+}
+# the commit's files, fetched into dir (a marker last: a half-fetched one is fetched again)
+pkg_get=(url:string commit:string dir:string):>bool=>{
+    pkg_mkdirs(dir)
+    let code=pkg_git(["-C" dir "init" "-q"])[0]
+    if code not=? 0 {return false}
+    let code2=pkg_git(["-C" dir "fetch" "-q" "--depth" "1" url commit])[0]
+    if code2 not=? 0 {
+        # (a server that gives no single commits: all of it)
+        let code3=pkg_git(["-C" dir "fetch" "-q" url])[0]
+        if code3 not=? 0 {return false}
+        let code4=pkg_git(["-C" dir "-c" "advice.detachedHead=false" "checkout" "-q" commit])[0]
+        if code4 not=? 0 {return false}
+    }
+    else {
+        let code4=pkg_git(["-C" dir "-c" "advice.detachedHead=false" "checkout" "-q" "FETCH_HEAD"])[0]
+        if code4 not=? 0 {return false}
+    }
+    write_file("{dir}/.dewy-fetched" commit)
+}
+# the packages' directories (pkg_dirs), with dewy.lock beside the program's main file: read,
+# and written when a package was pinned (fetch: get what is missing)
+pkg_resolve_all=(main_path:string):>void=>{
+    if pkg_specs.length =? 0 {return}
+    let d="."
+    let s=pkg_last_slash(main_path)
+    if s >=? 0 {d=main_path.byte_slice(0 s)}
+    let lock_path="{d}/dewy.lock"
+    let locked=pkg_lock_read(read_file(lock_path) ?? "")
+    let pins:array<string>=[]
+    let changed=false
+    let k:PkgWord=0
+    loop k <? pkg_specs.length {
+        let p=pkg_specs[k]
+        k += 1
+        if not pkg_is_git(p.src) {
+            if starts_with(p.src "-") {
+                pkg_errs[p.name]="package '{p.name}': '{p.src}' is not a directory or a git URL"
+                continue
+            }
+            let dir=p.src
+            if not is_abs_path(dir) {dir="{p.dir}/{dir}"}
+            if not file_exists("{dir}/.") {
+                pkg_errs[p.name]="package '{p.name}': there is no directory {dir}"
+                continue
+            }
+            pkg_dirs[p.name]=dir
+            pkg_scan_main(p.name dir)
+            continue
+        }
+        let url=pkg_url(p.src)
+        if pkg_unsafe_git(url p.ref) {
+            pkg_errs[p.name]="package '{p.name}': '{p.src}' is not a git URL (or the tag, branch or commit is not one)"
+            continue
+        }
+        let commit=locked.get(pkg_lock_key(p.name url p.ref)) ?? ""
+        if (commit as array<uint8>).length =? 0 {
+            if not pkg_fetch {
+                pkg_errs[p.name]="package '{p.name}' is not fetched yet (`dewy-core build` fetches it)"
+                continue
+            }
+            commit=pkg_resolve(url p.ref)
+            if (commit as array<uint8>).length =? 0 {
+                pkg_errs[p.name]="package '{p.name}': {pkg_why}"
+                continue
+            }
+            changed=true
+        }
+        pins.push(pkg_pin(p.name url p.ref commit))
+        let dir=pkg_fetch_dir(pkg_cache() url commit)
+        if not file_exists("{dir}/.dewy-fetched") {
+            if not pkg_fetch {
+                pkg_errs[p.name]="package '{p.name}' is not fetched yet (`dewy-core build` fetches it)"
+                continue
+            }
+            eprint("fetching {p.name} ({url} at {pkg_short(commit)})")
+            if not pkg_get(url commit dir) {
+                pkg_errs[p.name]="package '{p.name}': git could not fetch commit {commit} of {url}"
+                continue
+            }
+        }
+        pkg_dirs[p.name]=dir
+        pkg_scan_main(p.name dir)
+    }
+    if changed and pkg_fetch {write_file(lock_path pkg_lock_text(pins));}
+}
+# a package's own packages: those in the build blocks of the files at its root
+pkg_scan_main=(name:string dir:string):>void=>{
+    loop f in list_dir(dir) {
+        if ends_with(f ".jo") {
+            let src=read_file("{dir}/{f}")
+            if src not=? none {pkg_scan("{dir}/{f}" src)}
+        }
+    }
+}
+# the main file of package name in dir: dir/name.jo, else the only .jo file at its root
+pkg_main=(name:string dir:string):>string | none=>{
+    if file_exists("{dir}/{name}.jo") {return "{dir}/{name}.jo"}
+    let only=""
+    let n:PkgWord=0
+    loop f in list_dir(dir) {
+        if ends_with(f ".jo") {
+            n += 1
+            only=f
+        }
+    }
+    if n =? 1 {return "{dir}/{only}"}
+    none
+}
+# dewy-core add <url or directory> [name] [file.jo]: the package in the program's build block, pinned
+pkg_add_main=(a:array<string>):>void=>{
+    if a.length <? 3 {
+        eprint("usage: dewy-core add <git URL or directory> [name] [file.jo]   (a package, in the build block of file.jo: the .jo file here, if there is one)")
+        exit(2)
+    }
+    let src=a[2]
+    let name=""
+    let file=""
+    loop x in a[3..) {
+        if ends_with(x ".jo") {file=x}
+        else {name=x}
+    }
+    if (name as array<uint8>).length =? 0 {name=pkg_default_name(src)}
+    if (file as array<uint8>).length =? 0 {
+        let found:array<string>=[]
+        loop f in list_dir(".") {
+            if ends_with(f ".jo") {found.push(f)}
+        }
+        if found.length not=? 1 {
+            eprint("error: say which program to add it to: dewy-core add {src} {name} game.jo")
+            exit(1)
+        }
+        file=found[0]
+    }
+    let text=read_file(file) ?? ""
+    if pkg_declares(text name) {
+        eprint("error: {file} has a package named '{name}' already (give it another name: dewy-core add {src} other_name)")
+        exit(1)
+    }
+    text=pkg_insert(text name src)
+    pkg_specs=[]
+    pkg_scan(file text)
+    pkg_fetch=true
+    pkg_resolve_all(file)
+    let why=pkg_errs.get(name)
+    if why not=? none {
+        eprint("error: {why}")
+        exit(1)
+    }
+    write_file(file text);
+    printl("added {name} to {file}: import {name}")
+}
