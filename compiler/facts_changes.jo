@@ -1,0 +1,389 @@
+use 'sequence_selectors.dewy'
+use 'facts.jo'
+use 'lower_scalars.dewy'
+use 'lower_views.dewy'
+use 'lower_storage.dewy'
+use 'lower_analysis.dewy'
+use 'lower_helpers.dewy'
+use 'lower_group.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ide.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'ast.jo'
+use 'icount.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'lower.jo'
+use 'check.jo'
+use 'comptime.jo'
+use 'check_constant.jo'
+use 'isolation.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'places.jo'
+use 'effects.jo'
+use 'effect_library.jo'
+use 'ownership.jo'
+use 'witness.jo'
+use 'directives.jo'
+use 'warn_if.jo'
+use 'string_domains.jo'
+use 'draw_context.jo'
+use 'predicate_facts.jo'
+use 'floats.jo'
+use 'member_replay.jo'
+use 'ownership_types.dewy'
+use 'lower_primitives.dewy'
+use 'math_ops.dewy'
+use 'draw_ops.dewy'
+use 'effect_classifiers.dewy'
+use 'effect_values.dewy'
+use 'effect_control.dewy'
+use 'effect_costs.dewy'
+use 'effect_owners.dewy'
+use 'isolation_ops.dewy'
+use 'facts_library.dewy'
+use 'facts_summaries.dewy'
+use 'facts_pushes.dewy'
+use 'facts_text.dewy'
+use 'facts_arrays.dewy'
+use 'facts_maps.dewy'
+use 'facts_pools.dewy'
+use 'facts_members.dewy'
+use 'facts_progress.dewy'
+use 'facts_probes.dewy'
+
+# Pre-kill one changing route `root.f…[i]…`. Its root gets a fresh value that
+# keeps what the route cannot change: sibling fields and containing lengths.
+# Indexed writes havoc every candidate element's affected descendants. The
+# written value itself (or, with `resize`, the route's own value) is unknown.
+fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reason: FactReason, paths: int[][] = []):
+    if fact_name_vals == 0: fact_name_vals = intern("vals")
+    if target != 0 and nodes[target].kind == .hole: return
+    if target != 0 and nodes[target].kind == .tuple:
+        loop j in [0..nkids(target)): fact_change_route(s, kid(target, j), resize, at, reason, paths)
+        return
+    chain: int[]
+    e = target
+    depth = 0
+    loop e != 0 and depth < 32:
+        depth += 1
+        if fact_field_node(e) or nodes[e].kind == .index and nodes[e].b != 0 or fact_payload_node(e):
+            chain.push(e)
+            e = int(nodes[e].a)
+        # (an element alias, `loop @x in xs`, writes the place it names)
+        else if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)) and int(locals[int(nodes[e].sym)].flags) & LF_ALIAS != 0 and locals[int(nodes[e].sym)].alias != 0 and not place_locked.has(int(nodes[e].sym)):
+            e = int(locals[int(nodes[e].sym)].alias)
+        else: break
+    p = fact_place(e)
+    if e == 0 or nodes[e].kind != .ident or p.declaration == 0:
+        fact_forget(s, at, reason, true)
+        return
+    # (the root's own prior value first: forgetting exposed roots replaces it)
+    i = fact_binding(s, p)
+    old = if i >= 0: s.bindings[i].value else: 0
+    if fact_exposed(p): fact_forget(s, at, reason, false, p)
+    fresh = fact_new(s, fact_domain(ntype(e), reason, at), FactTerm(type = ntype(e)))
+    fact_holds_contract(s, refine_storage(e, ntype(e)), fresh)
+    fact_bind(s, p, fresh)
+    fact_change_shape(s, old, fresh, chain, chain.len() - 1, resize, at, reason, paths)
+# Havoc a route without evaluating its selectors. An indexed write can hit
+# ANY tracked element; recursively havoc each one's affected descendants.
+# This preserves inner lengths only when the write cannot resize them, even
+# if the selector changes in the loop. Demanded projections only, indexed by
+# base; O(tracked projections x route depth), capped by FACT_CAP and depth 32.
+# A call's write through the route (paths: the callee's written paths in the
+# place, fact_call_write) keeps the rest of each value it may reach.
+fact_change_shape = (s: mut FactState, old0: int, fresh0: int, chain: int[], j0: int, resize: bool, at: int, reason: FactReason, paths: int[][] = []):
+    old = old0
+    fresh = fresh0
+    j = j0
+    loop j >= 0 and old != 0 and fresh != 0:
+        c = chain[j]
+        if nodes[c].kind == .index:
+            t = fact_type(ntype(int(nodes[c].a)))
+            if types[t].kind != .array and types[t].kind != .fixed: return
+            # (an element write never resizes the array it indexes)
+            if types[t].kind == .fixed: return
+            # (the length of the old value is an evaluation too, even if unread so far)
+            length = fact_project(s, old, -1, false, T_INT)
+            if length != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, length))
+            if j > 0 and nodes[chain[j - 1]].kind == .index:
+                source = fact_projection_find(s, old, FACT_ROW_SOURCE, false)
+                if source >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, FACT_ROW_SOURCE, false, s.projections[source].value))
+                # (nor the length of any element: `grid[y][x] = v` in a loop
+                # keeps what every row's length is)
+                loop selector in [FACT_ELEMENT_SAME_LENGTH, FACT_ELEMENT_LENGTH]:
+                    held = fact_projection_find(s, old, selector, false)
+                    if held >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, selector, false, s.projections[held].value))
+            if j > 0 or paths.len() > 0:
+                parts: FactProjection[]
+                pi = fact_projection_first(s, old)
+                loop pi >= 0:
+                    p = s.projections[pi]
+                    pi = fact_projection_after(s, pi)
+                    if p.element: parts.push(p)
+                loop p in parts:
+                    if s.projections.len() >= FACT_CAP: break
+                    child_type = refine_storage(c, ntype(c))
+                    # (the written element may be any tracked one: each keeps
+                    # what the callee leaves, its unwritten fields)
+                    if j == 0:
+                        fact_add_projection(s, FactProjection(fresh, p.selector, true, fact_call_write(s, p.value, child_type, paths, 0, at)))
+                        continue
+                    child = fact_new(s, fact_domain(child_type, reason, at), FactTerm(type = child_type))
+                    if child == 0: return
+                    fact_add_projection(s, FactProjection(fresh, p.selector, true, child))
+                    fact_change_shape(s, p.value, child, chain, j - 1, resize, at, reason, paths)
+            return
+        payload = fact_payload_node(c)
+        selector = if payload: -4 else if nodes[c].aux == -2: int(nodes[c].ival) else: int(nodes[c].name)
+        # (a pool's public fields hold no membership: fact_pool_call)
+        if not payload and nodes[c].aux != -2 and fact_pool_type(ntype(int(nodes[c].a))) and not starts_with(name_of(selector), "__"): fact_pool_keep(s, old, fresh)
+        child = 0
+        kept: FactProjection[]
+        # (a dictionary's entries changing keep its keys and their positions)
+        entries = selector == fact_name_vals and nodes[c].aux >= 0 and is_map_type(representation_type(ntype(int(nodes[c].a))))
+        qi = fact_projection_first(s, old)
+        loop qi >= 0:
+            q = s.projections[qi]
+            qi = fact_projection_after(s, qi)
+            if q.selector == FACT_POOL_POSITIONS and not q.element and selector >= 0 and starts_with(name_of(selector), "__"): continue
+            if q.element:
+                if entries and fact_truth(s, q.value) == 1: kept.push(FactProjection(fresh, q.selector, true, q.value))
+                continue
+            if q.selector == selector: child = q.value
+            else if q.selector == ND_STORAGE_VALID: continue
+            else if q.selector != FACT_MAP_POSITIONS and q.selector != FACT_MAP_DENSE or selector == fact_name_vals: kept.push(FactProjection(fresh, q.selector, false, q.value))
+        loop q in kept:
+            if s.projections.len() < FACT_CAP: fact_add_projection(s, q)
+        if j == 0 and resize: return
+        t = refine_storage(c, ntype(c))
+        if child == 0: child = fact_project(s, old, selector, false, t)
+        if child == 0: return
+        next = if j == 0 and paths.len() > 0: fact_call_write(s, child, t, paths, 0, at) else: fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, selector, false, next))
+        old = child
+        fresh = next
+        j -= 1
+fact_pure_intrinsic = (id: IN) -> bool:
+    id == .sqrt or id == .vec_ctor or id == .floor_ or id == .ceil_ or id == .fabs or id == .fmin or id == .fmax or id == .mul_hi
+# Text joins and comparisons (2) and vector and matrix arithmetic (7 to 11:
+# expr.jo check_vec_binary) read their operands and write nothing.
+fact_pure_binary = (n: int) -> bool:
+    aux = int(nodes[n].aux)
+    if aux == 2 or aux >= 7 and aux <= 11: return true
+    # Structural equality without member callbacks or lifecycle hooks only
+    # reads its operands. The existing type-indexed helper inventory is lazy.
+    if aux != 1 or (nodes[n].op != i32(int(Tok.eq)) and nodes[n].op != i32(int(Tok.ne))): return false
+    t = ntype(int(nodes[n].a))
+    helper_value_members(t).len() == 0 and (ownership_decls.len() == 0 or not ownership_fact_type(t))
+# Builtin collection equality implies equal lengths, but unequal contents
+# need not have different lengths. Only hook-free structural arrays and text
+# qualify. Two indexed projections; existing purity and bounded relation work.
+fact_length_comparison = (n: int) -> bool:
+    if n == 0 or nodes[n].kind != .binary or (nodes[n].op != i32(int(Tok.eq)) and nodes[n].op != i32(int(Tok.ne))): return false
+    if not fact_pure_binary(n): return false
+    a = fact_type(ntype(int(nodes[n].a)))
+    b = fact_type(ntype(int(nodes[n].b)))
+    (a == T_STR and b == T_STR) or ((tkind(a) == .array or tkind(a) == .fixed) and (tkind(b) == .array or tkind(b) == .fixed))
+# Is a conversion from one type to the other only a unit attached or dropped?
+fact_unit_erased = (from0: int, to0: int) -> bool:
+    from = prune(from0)
+    to = prune(to0)
+    if types[from].kind != .quantity and types[to].kind != .quantity: return false
+    if types[from].kind == .quantity: from = prune(int(types[from].elem))
+    if types[to].kind == .quantity: to = prune(int(types[to].elem))
+    from == to
+# A word cast into a payload-free enum only changes its representation type.
+# Evaluate the operand with its current facts; raw pointer and aggregate casts
+# remain opaque. No claim that an arbitrary integer names a declared variant.
+fact_enum_cast = (n: int) -> bool:
+    if nodes[n].kind != .cast or nodes[n].aux2 == 1: return false
+    from = representation_type(ntype(int(nodes[n].a)))
+    to = representation_type(ntype(n))
+    types[from].kind == .int_ and types[to].kind == .enum_ and simple_enum(to)
+# Numeric conversions between floats and integers write nothing.
+fact_pure_conversion = (n: int) -> bool:
+    aux = nodes[n].aux
+    # (a union's value re-tagged for a wider or narrower union, `or_throw`'s
+    # remaining members: no copy hook runs, nothing is written)
+    if aux == i32(int(CV.union_)) or aux == i32(int(CV.arr2fixed)): return ownership_decls.len() == 0 or not ownership_fact_type(ntype(n))
+    aux == i32(int(CV.int2float)) or aux == i32(int(CV.float2int)) or aux == i32(int(CV.float_)) or aux == i32(int(CV.wrap_int)) or aux == i32(int(CV.saturate_int))
+# A builtin resize of an array of shares (effect_value: no lifecycle or copy
+# hook) runs none of the program's code: it writes its receiver's route alone,
+# which fact_change_route has havocked, not every exposed root. O(1).
+fact_hook_free_resize = (n: int) -> bool:
+    id = nodes[n].aux as IN
+    if id != .push and id != .pop and id != .insert and id != .remove and id != .clear and id != .extend and id != .resize and id != .truncate: return false
+    nkids(n) > 0 and tkind(fact_type(ntype(kid(n, 0)))) == .array and effect_value(ntype(kid(n, 0)))
+fact_reads_only = (id: IN) -> bool:
+    id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable or fact_pure_intrinsic(id)
+# A remainder or nonnegative constant mask has an unconditional finite range.
+# During loop havoc retain the hull with entry, so zero iterations and every
+# other store remain covered. No speculative source bound is used. Only visited
+# on the obligation's active slice; O(conversion depth), indexed binding access.
+fact_bounded_change = (n: int, s: mut FactState, at: int, reason: FactReason) -> bool:
+    if nodes[n].op != i32(int(Tok.assign)): return false
+    target = int(nodes[n].a)
+    if nodes[target].kind != .ident: return false
+    p = fact_place(target)
+    if p.declaration == 0 or fact_exposed(p) or fact_type(ntype(target)) == T_U64: return false
+    rhs = fact_progress_strip(int(nodes[n].b))
+    kind = 0
+    operand = 0
+    if nodes[rhs].kind == .binary and nodes[rhs].aux == 0 and nodes[rhs].op == i32(int(Tok.percent)) and files[pos_file(nodes[rhs].pos)].is_dewy and is_int(ntype(rhs)):
+        kind = 2
+        operand = int(nodes[rhs].b)
+    else if nodes[rhs].kind == .binary and nodes[rhs].aux == 0 and nodes[rhs].op == i32(int(Tok.amp)) and is_int(ntype(rhs)):
+        kind = 4
+        operand = int(nodes[rhs].b)
+        if nodes[fact_progress_strip(operand)].kind != .int_lit: operand = int(nodes[rhs].a)
+    else if nodes[rhs].kind == .call:
+        kind = fact_floor_call(rhs)
+        if kind == 2 or kind == 4: operand = kid(rhs, 1)
+    if operand == 0: return false
+    divisor = fact_progress_strip(operand)
+    if nodes[divisor].kind != .int_lit or oversized_literal(divisor): return false
+    limit = nodes[divisor].ival
+    if kind == 2 and limit == 0 or kind == 4 and limit < 0: return false
+    low = if kind == 2 and limit < 0: limit + 1 else: 0
+    high = if kind == 4: limit else if limit > 0: limit - 1 else: 0
+    domain = fact_domain(ntype(target))
+    if low < domain.lo or high > domain.hi: return false
+    i = fact_binding(s, p)
+    if i < 0: return false
+    old = fact_bound(s, s.bindings[i].value)
+    fact_change_route(s, target, false, at, reason)
+    i = fact_binding(s, p)
+    if i >= 0: fact_set_bound(s, s.bindings[i].value, fact_hull(old, FactBound(low, high), at))
+    true
+# A partial application saves its arguments' values, so creating one writes
+# nothing (its calls forget what the function writes), unless it takes a place
+# (`@x`: lowering rejects a `mut` one) or may move an owner. O(arguments).
+fact_partial_opaque = (n: int) -> bool: ownership_decls.len() != 0 or fact_partial_place(n)
+fact_partial_place = (n: int) -> bool:
+    loop i in [0..nkids(n)):
+        child = kid(n, i)
+        e = child
+        loop nodes[e].kind == .conv: e = int(nodes[e].a)
+        if nodes[e].kind == .addr: return true
+    false
+# A function handle (`@f`) saves only the function, and a generic closure's
+# handle the closure value it reads: creating one writes nothing (its calls
+# forget what the function writes), unless ownership may move an owner. O(1).
+fact_handle_opaque = (n: int) -> bool: ownership_decls.len() != 0
+# A return expression can itself break/continue before the return executes.
+# Only those expressions can carry their writes to a loop edge. Inspect checked
+# children, excluding deferred function bodies; unknown/deep syntax stays
+# conservative. Demanded only by a return in loop havoc, memoized by node:
+# O(visited expression nodes + edges), depth <= 32, no state-wide scan.
+fact_return_escapes = (n: int, depth: int = 0) -> bool:
+    if n == 0: return false
+    if depth >= 32: return true
+    if let known = fact_return_escapes_cache.get(n): return known
+    k = nodes[n].kind
+    if k == .lambda: return false
+    escapes = k == .break_ or k == .continue_ or isolation_children(k) < 0
+    if not escapes:
+        loop child in fact_slice_children(n):
+            if fact_return_escapes(child, depth + 1): escapes = true; break
+    fact_return_escapes_cache[n] = escapes
+    escapes
+# Conservative loop fallback: pre-kill every syntactically changing route
+# that can reach a loop edge. Returning expressions still run in the ordinary
+# transfer (including their own obligations), but cannot affect later trips.
+# This is also used for iterators whose backedge transfer is not modeled.
+fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
+    if n == 0: return
+    if fact_slice_flags(n) & (FACT_MEMBER | FACT_ACTIVE) == FACT_MEMBER: return
+    k = nodes[n].kind
+    if (k == .intrinsic or k == .call) and nkids(n) >= 2 and fact_balanced_resize(n) != 0:
+        fact_balanced_changes(n, s, at, reason)
+        return
+    if k == .return_ and not fact_return_escapes(int(nodes[n].a)): return
+    # (an element or field store havocs only its route within its root: fact_change_route)
+    if k == .assign and not fact_bounded_change(n, s, at, reason): fact_change_route(s, int(nodes[n].a), false, at, reason)
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .extend or id == .resize or id == .truncate or id == .setlen:
+            fact_change_route(s, kid(n, 0), true, at, reason)
+    # (a direct call havocs what its summary writes; reading lengths and
+    # erased or failing assertions write nothing; a record is built in place)
+    if k == .call and nodes[n].aux == 0 and fact_sequence_store_call(n): fact_sequence_store(n, s, at, reason)
+    else if k == .call and nodes[n].aux == 0 and fact_nd_plain_store(n): fact_nd_store(n, s, at, reason)
+    else if k == .call and nodes[n].aux == 0 and fact_pool_call(n) == 4: fact_pool_store_changes(n, s)
+    else if k == .call and nodes[n].aux == 0 and (fact_map_store_call(n) or fact_map_insert_call(n)): fact_map_store_changes(n, s, at, reason)
+    else if k == .call and nodes[n].aux == 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n)): s = s
+    else if k == .call and nodes[n].aux == 0 and (nodes[n].sym == i32(fact_owner) or nd_mutable_call(n)): fact_path_call_effects(n, s)
+    else if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
+    else if k == .call and nodes[n].aux == 2: s = s
+    else if k == .intrinsic and (fact_reads_only(nodes[n].aux as IN) or fact_hook_free_resize(n)): s = s
+    # (a closure's, partial application's or handle's creation writes nothing,
+    # unless ownership may move an owner: fact_capture)
+    else if k == .call: fact_forget_call(s, n, reason, at)
+    else if k == .intrinsic or k == .lambda and ownership_decls.len() != 0 or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n): fact_forget(s, at, reason)
+    mask = fact_change_children(n)
+    if mask < 0: fact_forget(s, at, reason, true); return
+    if mask & 1 != 0: fact_changes(int(nodes[n].a), s, at, reason)
+    if mask & 2 != 0: fact_changes(int(nodes[n].b), s, at, reason)
+    if mask & 4 != 0: fact_changes(int(nodes[n].c), s, at, reason)
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): fact_changes(kid(n, i), s, at, reason)
+# Runtime children for loop havoc. A match arm's type pattern binds a fresh
+# arm-local and evaluates only its type (a refinement is pure); shape and
+# sequence patterns are their field and element patterns. O(1).
+fact_change_children = (n: int) -> int:
+    k = nodes[n].kind
+    if k == .ptype: return 0
+    if k == .pshape or k == .pseq: return 16
+    isolation_children(k)
+# `xs.push(xs.pop())` and `xs.insert(xs.pop() i)` of a local array: an element
+# taken from xs goes back into it, so on completion xs has its old length
+# (each failure, an empty xs or a position out of bounds, is its own
+# obligation in the transfer). The receiver, or 0. O(1).
+fact_balanced_resize = (n: int) -> int:
+    k = nodes[n].kind
+    if k == .intrinsic and (nodes[n].aux != i32(int(IN.push)) or nkids(n) != 2): return 0
+    if k == .call and (nodes[n].aux != 0 or nkids(n) != 3): return 0
+    taken = kid(n, 1)
+    loop nodes[taken].kind == .conv: taken = int(nodes[taken].a)
+    if nodes[taken].kind != .intrinsic or nodes[taken].aux != i32(int(IN.pop)) or nkids(taken) != 1: return 0
+    if k == .call and fact_array_call(n) != 5: return 0
+    target = fact_balanced_root(kid(n, 0))
+    if target == 0: return 0
+    from = fact_balanced_root(kid(taken, 0))
+    if from == 0 or nodes[from].sym != nodes[target].sym: return 0
+    if ownership_decls.len() != 0 and ownership_fact_type(ntype(target)): return 0
+    target
+# A plain local array named directly (`xs` or `@xs`), or 0.
+fact_balanced_root = (e0: int) -> int:
+    e = e0
+    loop nodes[e].kind == .addr or nodes[e].kind == .conv: e = int(nodes[e].a)
+    if nodes[e].kind != .ident or nodes[e].aux != i32(int(SK.local)) or tkind(fact_type(ntype(e))) != .array: return 0
+    if int(locals[int(nodes[e].sym)].flags) & LF_ALIAS != 0: return 0
+    e
+# A loop's havoc of a balanced resize: xs's elements are unknown, its length
+# is the one it had. The position operand havocs as usual.
+fact_balanced_changes = (n: int, s: mut FactState, at: int, reason: FactReason):
+    target = fact_balanced_resize(n)
+    i = fact_binding(s, fact_place(target))
+    length = if i >= 0: fact_project(s, s.bindings[i].value, -1, false, T_INT) else: 0
+    fact_change_route(s, target, true, at, reason)
+    i = fact_binding(s, fact_place(target))
+    if i >= 0 and length != 0:
+        held = fact_projection_find(s, s.bindings[i].value, -1, false)
+        if held >= 0:
+            fact_difference(s, s.projections[held].value, length, 0, n)
+            fact_difference(s, length, s.projections[held].value, 0, n)
+        else if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(s.bindings[i].value, -1, false, length))
+    if nkids(n) == 3: fact_changes(kid(n, 2), s, at, reason)
