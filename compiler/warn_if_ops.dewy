@@ -1,0 +1,181 @@
+$runtime_checks
+from p"ast.jo" import (kid kids nkids nodes)
+from p"check.jo" import (ctxs cx fns resolve_type subst)
+from p"checked_eval.dewy" import (cx_token)
+from p"expr.jo" import (ntype)
+from p"facts.jo" import (fact_comparison fact_inverse)
+from p"refine_predicates.dewy" import (ref_add)
+from p"refinement_types.dewy" import (FactRequest RefAtom RefTerm)
+from p"safe_paths.jo" import (ut_names_safe ut_p_name ut_paths_used)
+from p"types.jo" import (has_var is_union prune type_eq types union_members)
+from p"util.jo" import (fatal name_of pos_in_lib warn)
+from p"warn_if.jo" import (WI_FACTS WI_PATH WI_TYPE WarnIf wi_any wi_decls wi_fact_calls wi_fact_requests wi_fact_targs)
+
+WarnWord:type=int64<overflow='wrap'>
+wi_reset=():>void=>{
+    wi_decls=dict<int64 array<WarnIf>>()
+    wi_any=false
+    wi_fact_calls=dict<int64 int64>()
+    wi_fact_requests=[]
+    wi_fact_targs=dict<int64 int64>()
+}
+# fn_sig, with the declaration's type parameters in scope: its conditions, read once.
+wi_read_decl=(decl:WarnWord):>void=>$unsafe {
+    if nodes.ptr[decl].c =? 0 or wi_decls.has(decl) {return}
+    let out:array<WarnIf>=[]
+    loop at in kids(WarnWord(nodes.ptr[decl].c)) {
+        if name_of(WarnWord(nodes.ptr[at].name)) not=? "warn_if" {continue}
+        let cond=WarnWord(nodes.ptr[at].a)
+        let msg=WarnWord(nodes.ptr[at].b)
+        if cond =? 0 or msg =? 0 or nodes.ptr[msg].kind not=? 'str_lit' or nodes.ptr[msg].aux not=? 0 {fatal(nodes.ptr[at].pos "a soft precondition takes a condition and a message string: `$warn_if condition \"message\"`")}
+        let w=wi_read(decl cond)
+        w.message=name_of(WarnWord(nodes.ptr[msg].sval))
+        out.push(w)
+    }
+    if out.length =? 0 {return}
+    wi_decls[decl]=out
+    wi_any=true
+}
+wi_param=(decl:WarnWord n:WarnWord):>WarnWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'ident' {return -1}
+    loop i in [0..nkids(decl)) {
+        if WarnWord(nodes.ptr[kid(decl i)].name) =? WarnWord(nodes.ptr[n].name) {return i}
+    }
+    -1
+}
+wi_unsupported=(n:WarnWord):>void=>$unsafe {
+    fatal(nodes.ptr[n].pos "unsupported `$warn_if` condition: a parameter's type test (`x isnt? T`), or integer comparisons of parameters and constants whose negation is a conjunction")
+}
+wi_read=(decl:WarnWord cond:WarnWord):>WarnIf=>$unsafe {
+    let c=cond
+    let negated=false
+    if nodes.ptr[c].kind =? 'not_' and nodes.ptr[WarnWord(nodes.ptr[c].a)].kind =? 'istype' {
+        negated=true
+        c=WarnWord(nodes.ptr[c].a)
+    }
+    if nodes.ptr[c].kind =? 'istype' {
+        let subject=WarnWord(nodes.ptr[c].a)
+        let tn=WarnWord(nodes.ptr[c].b)
+        if ut_names_safe(tn) {
+            let wrapped=false
+            if nodes.ptr[subject].kind =? 'call' and nkids(subject) =? 1 and nodes.ptr[subject].a not=? 0 and nodes.ptr[WarnWord(nodes.ptr[subject].a)].kind =? 'ident' and WarnWord(nodes.ptr[WarnWord(nodes.ptr[subject].a)].name) =? ut_p_name {
+                wrapped=true
+                subject=kid(subject 0)
+            }
+            let i=wi_param(decl subject)
+            if i <? 0 or not negated {wi_unsupported(c)}
+            return WarnIf(WI_PATH i wrapped)
+        }
+        let i=wi_param(decl subject)
+        if i <? 0 {wi_unsupported(c)}
+        return WarnIf(WI_TYPE i false negated resolve_type(tn))
+    }
+    let w=WarnIf(WI_FACTS)
+    wi_negation(decl cond @w.atoms)
+    w
+}
+# what proves c false: the atoms of not c
+wi_negation=(decl:WarnWord c:WarnWord @out:array<RefAtom>):>void=>$unsafe {
+    let k=nodes.ptr[c].kind
+    if k =? 'or_' {
+        wi_negation(decl WarnWord(nodes.ptr[c].a) @out)
+        wi_negation(decl WarnWord(nodes.ptr[c].b) @out)
+        return
+    }
+    if k =? 'not_' {
+        wi_affirm(decl WarnWord(nodes.ptr[c].a) @out)
+        return
+    }
+    if k =? 'binary' and fact_comparison(cx_token(nodes.ptr[c].op)) {
+        ref_add(fact_inverse(cx_token(nodes.ptr[c].op)) wi_term(decl WarnWord(nodes.ptr[c].a)) wi_term(decl WarnWord(nodes.ptr[c].b)) @out)
+        return
+    }
+    wi_unsupported(c)
+}
+# what proves c true
+wi_affirm=(decl:WarnWord c:WarnWord @out:array<RefAtom>):>void=>$unsafe {
+    let k=nodes.ptr[c].kind
+    if k =? 'and_' {
+        wi_affirm(decl WarnWord(nodes.ptr[c].a) @out)
+        wi_affirm(decl WarnWord(nodes.ptr[c].b) @out)
+        return
+    }
+    if k =? 'not_' {
+        wi_negation(decl WarnWord(nodes.ptr[c].a) @out)
+        return
+    }
+    if k =? 'binary' and fact_comparison(cx_token(nodes.ptr[c].op)) {
+        ref_add(cx_token(nodes.ptr[c].op) wi_term(decl WarnWord(nodes.ptr[c].a)) wi_term(decl WarnWord(nodes.ptr[c].b)) @out)
+        return
+    }
+    wi_unsupported(c)
+}
+wi_term=(decl:WarnWord n:WarnWord):>RefTerm=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return RefTerm(1 nodes.ptr[n].ival)}
+    if k =? 'unary' and nodes.ptr[n].op =? int32(59) and nodes.ptr[WarnWord(nodes.ptr[n].a)].kind =? 'int_lit' {return RefTerm(1 (-nodes.ptr[WarnWord(nodes.ptr[n].a)].ival))}
+    if k =? 'field' and name_of(WarnWord(nodes.ptr[n].name)) =? "length" {
+        let i=wi_param(decl WarnWord(nodes.ptr[n].a))
+        if i >=? 0 {return RefTerm(2 i path=[-1])}
+    }
+    let i=wi_param(decl n)
+    if i <? 0 {wi_unsupported(n)}
+    RefTerm(2 i)
+}
+# expr.jo, a call of f (declaration decl) just checked
+wi_call=(n:WarnWord f:WarnWord decl:WarnWord):>void=>$unsafe {
+    if pos_in_lib(nodes.ptr[n].pos) {return}
+    if not wi_decls.has(decl) {return}
+    loop w in wi_decls[decl] {
+        if w.kind =? WI_PATH {
+            ut_paths_used=true
+            continue
+        }
+        if w.kind =? WI_FACTS {
+            if not wi_fact_calls.has(n) {
+                wi_fact_calls[n]=0
+                wi_fact_targs[n]=f
+                wi_fact_requests.push(FactRequest(n if cx >=? 0 {WarnWord(ctxs[cx].inst)} else {0}))
+            }
+            continue
+        }
+        if w.param >=? nkids(n) {continue}
+        let x=kid(n w.param)
+        let r=wi_is(wi_arg_type(x) subst(w.type fns.ptr[f].targs))
+        if w.negated and r =? 1 or not w.negated and r =? 0 {continue}
+        warn(nodes.ptr[x].pos w.message)
+    }
+}
+# (the argument's own type, under the conversion to the parameter's)
+wi_arg_type=(x0:WarnWord):>WarnWord=>$unsafe {
+    let x=x0
+    loop i in [0..16) {
+        if nodes.ptr[x].kind =? 'conv' and nodes.ptr[x].a not=? 0 {x=WarnWord(nodes.ptr[x].a)}
+        else if nodes.ptr[x].kind =? 'call' and nodes.ptr[x].sym =? 0 and nodes.ptr[x].aux =? 3 and nkids(x) =? 1 {x=kid(x 0)}
+        else {break}
+    }
+    ntype(x)
+}
+# a value of type a is a T: always 1, never 0, -1 when it depends on the value
+wi_is=(a0:WarnWord t0:WarnWord):>WarnWord=>$unsafe {
+    let a=prune(a0)
+    let t=prune(t0)
+    if a =? 0 or t =? 0 or has_var(a) or has_var(t) {return -1}
+    if type_eq(a t) {return 1}
+    if types.ptr[a].kind =? 'opt' or types.ptr[t].kind =? 'opt' {return -1}
+    let am=if is_union(a) {union_members(a)} else {[a]}
+    let tm=if is_union(t) {union_members(t)} else {[t]}
+    let some=false
+    let every=true
+    loop m in am {
+        let found=false
+        loop u in tm {
+            if type_eq(m u) {found=true}
+        }
+        if found {some=true}
+        else {every=false}
+    }
+    if every {return 1}
+    if not some {return 0}
+    -1
+}

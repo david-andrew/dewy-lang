@@ -15,6 +15,8 @@ def effect_services(text, modules):
         text = text.replace('constant_checks.dewy', 'check_constant.jo').replace('constant_checks.jo', 'check_constant.jo')
     if 'ic_fn = ' in modules.get('icount.jo', '') or 'ic_mod = ' in modules.get('icount.jo', '') or 'ic_switch = ' in modules.get('icount.jo', ''):
         text = text.replace('icount_ops.dewy', 'icount.jo').replace('icount_ops.jo', 'icount.jo')
+    if 'wi_reset = ' in modules.get('warn_if.jo', ''):
+        text = text.replace('warn_if_ops.dewy', 'warn_if.jo').replace('warn_if_ops.jo', 'warn_if.jo')
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(

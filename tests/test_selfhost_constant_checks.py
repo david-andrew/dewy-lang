@@ -159,7 +159,7 @@ def test_constant_checks_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release,
                             ('source_types', 'node_store', 'checker_types', 'checker_state', 'checker_tokens', 'evaluator_state', 'constant_checks'), DRIVER,
                             doubles={'services.jo': SERVICES, 'check_constant.jo': (ROOT / 'compiler/check_constant.jo').read_text()},
-                            services=('checker_expr', 'ast', 'check', 'expr', 'types', 'util', 'errors', 'comptime', 'warn_if'))
+                            services=('checker_expr', 'ast', 'check', 'expr', 'types', 'util', 'errors', 'comptime', 'warn_if_ops'))
     assert output.endswith(b'constant ok\n')
     for text in (b'the validator of a constant check', b'bad pattern: inner', b'bad pattern: text fails', b'union [50, 51]', b'names a validator'):
         assert text in output, text
