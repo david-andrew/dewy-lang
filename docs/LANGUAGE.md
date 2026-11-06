@@ -4707,6 +4707,9 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   nonempty guard on `a` also proves `b[0]`. The same applies to parameters
   sharing a shape binder (`a:array<int length=[n]> b:array<int length=[n]>`)
   after `n >? 0`. Replacing or resizing an array needs a fresh relation.
+- A guard that decides a remainder moves its dividend to the next multiple: after
+  `if xs.length =? 0 return none` and `if xs.length % 2 =? 1 return ...`, the length is
+  at least 2, so `mid = xs.length // 2` proves `xs[mid - 1]`, whichever came first.
 - For bounded exact integer arithmetic, a sum retains its order relative to
   either captured operand: after
   `stop = start + width`, a nonnegative `width` proves `start <=? stop`,
@@ -4761,6 +4764,9 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
 Script bindings keep facts across loops and calls when no function can reach their
 storage. A binding referenced by a function, passed by mutable place, or exposed
 through a raw address still needs its facts re-established after a possible change.
+An `@` parameter's facts survive a call that cannot write it: printing, `to_int`, a
+helper with a dictionary of its own. One that writes a global or calls a function value
+may change it, and the error names that call.
 
 `dewy check --obligations file.dewy` lists every unproven obligation that
 compiles to a runtime check, one per line, with the setting responsible
