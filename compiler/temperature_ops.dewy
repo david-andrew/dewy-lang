@@ -1,0 +1,489 @@
+$runtime_checks
+from p"ast.jo" import (NF_AT NF_CHECKED NF_GLOBAL NF_MUT has_flag kid kid_c kid_d kids kids2 nkids nodes)
+from p"check.jo" import (LF_CAPTURE ensure_global globals locals modules statement_watch syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checked_eval.dewy" import (cx_token)
+from p"checker_tokens.dewy" import (Tok)
+from p"expr.jo" import (coerce last_checked ntype)
+from p"frontend.jo" import (source_force_body)
+from p"sibling_types.jo" import (sibling_block sibling_index)
+from p"temperature_kinds.jo" import (TKC_DIFF TKC_LIT TKC_NAMED TKC_OTHER TKC_POINT TkDecl TkScan tk_bindings tk_deciding tk_decls tk_difference_reads tk_difference_writes tk_direct tk_offset_units tk_other_mediated tk_reads_on tks)
+from p"types.jo" import (prune tkind type_eq types)
+from p"units.jo" import (base_dimension intern_quantity_tag is_quantity mk_quantity quantity_base quantity_delta_reading quantity_dimension quantity_is_delta quantity_point quantity_retag quantity_tag quantity_tags)
+from p"util.jo" import (line_col name_of pos_in_lib warn)
+
+TempWord:type=int64<overflow='wrap'>
+# (the unit name of a temperature literal as written, before checking: 20°C, -5°F; else 0)
+tk_literal_unit=(e:TempWord):>TempWord=>$unsafe {
+    if e =? 0 or has_flag(e NF_CHECKED) {return 0}
+    let k=nodes.ptr[e].kind
+    if k =? 'unary' and nodes.ptr[e].op =? int32(59) {return tk_literal_unit(TempWord(nodes.ptr[e].a))}
+    if k not=? 'binary' or nodes.ptr[e].op not=? int32(60) {return 0}
+    let x=nodes.ptr[TempWord(nodes.ptr[e].a)].kind
+    let u=TempWord(nodes.ptr[e].b)
+    if (x not=? 'int_lit' and x not=? 'float_lit') or nodes.ptr[u].kind not=? 'ident' {return 0}
+    TempWord(nodes.ptr[u].name)
+}
+# (a name for an offset temperature unit here: °C, °F)
+tk_offset_unit=(nm:TempWord):>bool=>$unsafe {
+    if tk_offset_units.has(nm) {return tk_offset_units[nm]}
+    let s=lookup(nm)
+    let yes=false
+    if s not=? 0 and syms.ptr[s].kind =? 'global' and tk_settled(TempWord(syms.ptr[s].ref)) {
+        let t=TempWord(globals.ptr[TempWord(syms.ptr[s].ref)].type)
+        yes=is_quantity(t) and quantity_tags[quantity_tag(t)].origin not=? 0
+    }
+    tk_offset_units[nm]=yes
+    yes
+}
+# (a temperature unit written by name: t/°C and t/K read t in that unit, whatever its kind)
+tk_unit_name=(e:TempWord):>bool=>$unsafe {
+    if nodes.ptr[e].kind not=? 'ident' or has_flag(e NF_CHECKED) or tk_find(TempWord(nodes.ptr[e].name)) >=? 0 {return false}
+    let s=lookup(TempWord(nodes.ptr[e].name))
+    if s =? 0 or syms.ptr[s].kind not=? 'global' {return false}
+    let g=TempWord(syms.ptr[s].ref)
+    tk_settled(g) and is_quantity(TempWord(globals.ptr[g].type)) and quantity_dimension(TempWord(globals.ptr[g].type)) =? base_dimension(4)
+}
+# (global g's type is known: checked, or a library constant checked now; a program's own
+# globals are never checked out of order here)
+tk_settled=(g:TempWord):>bool=>$unsafe {
+    if globals.ptr[g].state =? 0 and pos_in_lib(nodes.ptr[TempWord(globals.ptr[g].decl)].pos) {ensure_global(g 0)}
+    globals.ptr[g].state =? 2
+}
+tk_find=(nm:TempWord):>TempWord=>{
+    let i=tk_decls.length - 1
+    loop i >=? 0 {
+        if tk_decls[i].name =? nm {return i}
+        i -= 1
+    }
+    -1
+}
+# (x names the binding being decided)
+tk_self=(x:TempWord):>bool=>$unsafe {
+    x not=? 0 and nodes.ptr[x].kind =? 'ident' and not has_flag(x NF_CHECKED) and TempWord(nodes.ptr[x].name) =? tks.name and tk_find(tks.name) <? 0
+}
+tk_type_class=(t0:TempWord):>TempWord=>$unsafe {
+    let t=prune(t0)
+    if tkind(t) =? 'array' {t=prune(TempWord(types.ptr[t].elem))}
+    if not is_quantity(t) or quantity_dimension(t) not=? base_dimension(4) {return TKC_OTHER}
+    if quantity_is_delta(t) {return TKC_DIFF}
+    if quantity_point(t) {return TKC_POINT}
+    TKC_OTHER
+}
+# (the declaration's value, as written)
+tk_decl_value=(d:TempWord):>TempWord=>$unsafe {
+    if nodes.ptr[d].kind =? 'vardecl' {return TempWord(nodes.ptr[d].b)}
+    if nodes.ptr[d].kind =? 'assign' {return TempWord(nodes.ptr[d].b)}
+    0
+}
+# Another literal-only binding: the kind its own uses give it, weighed only while deciding
+# with mediation (one level: its own walk leaves such pairings open).
+tk_partner=(d:TempWord block:TempWord index:TempWord):>TempWord=>$unsafe {
+    if not tks.mediate {return TKC_NAMED}
+    if tk_direct.has(d) {return tk_direct[d]}
+    if tk_deciding.has(d) or (block =? 0 and not has_flag(d NF_GLOBAL)) {return TKC_NAMED}
+    let saved=tks
+    let saved_decls=tk_decls
+    tk_decls=[]
+    tk_deciding[d]=true
+    tks=TkScan(name=TempWord(nodes.ptr[d].name) unit=tk_literal_unit(tk_decl_value(d)) self_decl=d mediate=false)
+    if block not=? 0 {
+        loop i in [index + 1..nkids(block)) {tk_statement(block i)}
+    }
+    else {tk_module(TempWord(nodes.ptr[d].mod))}
+    let kind=tk_own_kind()
+    tk_deciding.remove(d);
+    tks=saved
+    tk_decls=saved_decls
+    tk_direct[d]=kind
+    kind
+}
+# (a literal-only binding already declared with type t: a difference other uses made it is one)
+tk_decided=(d:TempWord t:TempWord):>TempWord=>{
+    let k=tk_partner(d 0 0)
+    if k =? TKC_NAMED and tk_type_class(t) =? TKC_DIFF {return TKC_DIFF}
+    k
+}
+tk_own_kind=():>TempWord=>{
+    if tks.open {return TKC_POINT}
+    if tks.d_direct and not tks.p_direct {return TKC_DIFF}
+    if tks.p_direct and not tks.d_direct {return TKC_POINT}
+    TKC_NAMED
+}
+# (whether the declaration holds a literal-only temperature binding, by its first value)
+tk_candidate=(d:TempWord):>bool=>$unsafe {
+    if tk_direct.has(d) or tk_deciding.has(d) {return true}
+    if nodes.ptr[d].kind =? 'vardecl' and (nodes.ptr[d].a not=? 0 or nodes.ptr[d].nlist >? 0) {return false}
+    let u=tk_literal_unit(tk_decl_value(d))
+    u not=? 0 and tk_offset_unit(u)
+}
+tk_ident_class=(x:TempWord depth:TempWord):>TempWord=>$unsafe {
+    let nm=TempWord(nodes.ptr[x].name)
+    let i=tk_find(nm)
+    if i >=? 0 {
+        let e=tk_decls[i]
+        if e.decl =? 0 {return TKC_POINT}
+        if tk_candidate(e.decl) {return tk_partner(e.decl e.block e.index)}
+        return tk_class(tk_decl_value(e.decl) depth + 1)
+    }
+    if nm =? tks.name {return TKC_NAMED}
+    let s=lookup(nm)
+    if s =? 0 {return TKC_POINT}
+    if syms.ptr[s].kind =? 'local' {
+        let l=TempWord(syms.ptr[s].ref)
+        loop TempWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 and TempWord(locals.ptr[l].outer) not=? 0 {l=TempWord(locals.ptr[l].outer)}
+        if tk_bindings.has(l) {return tk_decided(tk_bindings[l] TempWord(locals.ptr[l].type))}
+        return tk_type_class(TempWord(locals.ptr[l].type))
+    }
+    if syms.ptr[s].kind =? 'global' {
+        let g=TempWord(syms.ptr[s].ref)
+        if tk_bindings.has(-g - 1) {return tk_decided(tk_bindings[-g - 1] TempWord(globals.ptr[g].type))}
+        if globals.ptr[g].state =? 2 {return tk_type_class(TempWord(globals.ptr[g].type))}
+        let d=TempWord(globals.ptr[g].decl)
+        if d =? tks.self_decl {return TKC_NAMED}
+        if globals.ptr[g].is_const {return TKC_OTHER}
+        if tk_candidate(d) {return tk_partner(d 0 0)}
+        return tk_class(tk_decl_value(d) depth + 1)
+    }
+    TKC_OTHER
+}
+# What an operand is, from syntax: computed and input values are points by nature, a
+# difference of two points is a difference, a literal is either until its neighbour says.
+tk_class=(x:TempWord depth:TempWord):>TempWord=>$unsafe {
+    if x =? 0 or depth >? 6 {return TKC_POINT}
+    if has_flag(x NF_CHECKED) and nodes.ptr[x].type not=? 0 {return tk_type_class(ntype(x))}
+    let k=nodes.ptr[x].kind
+    if k =? 'ident' {return tk_ident_class(x depth)}
+    let u=tk_literal_unit(x)
+    if u not=? 0 {return if tk_offset_unit(u) {TKC_LIT} else {TKC_OTHER}}
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'bool_lit' or k =? 'none_lit' {return TKC_OTHER}
+    if k =? 'unary' {
+        if nodes.ptr[x].op not=? int32(59) {return TKC_OTHER}
+        return tk_class(TempWord(nodes.ptr[x].a) depth + 1)
+    }
+    if k =? 'cast' {
+        let c=tk_class(TempWord(nodes.ptr[x].a) depth + 1)
+        return if c =? TKC_LIT or c =? TKC_NAMED {TKC_POINT} else {c}
+    }
+    if k =? 'binary' {
+        let op=cx_token(nodes.ptr[x].op)
+        let a=TempWord(nodes.ptr[x].a)
+        let b=TempWord(nodes.ptr[x].b)
+        if op =? 'plus' or op =? 'minus' {
+            let ca=tk_operand_class(a depth + 1)
+            let cb=tk_operand_class(b depth + 1)
+            if ca =? TKC_OTHER or cb =? TKC_OTHER {return if ca =? TKC_POINT or cb =? TKC_POINT {TKC_POINT} else {TKC_OTHER}}
+            if op =? 'plus' {
+                if ca =? TKC_DIFF and cb =? TKC_DIFF {return TKC_DIFF}
+                return TKC_POINT
+            }
+            if cb =? TKC_DIFF {return if ca =? TKC_DIFF {TKC_DIFF} else {TKC_POINT}}
+            if ca =? TKC_DIFF {return TKC_OTHER}
+            if cb =? TKC_LIT and ca =? TKC_POINT {return TKC_POINT}
+            return TKC_DIFF
+        }
+        if op =? 'star' or op =? 'slash' {
+            let ka=nodes.ptr[a].kind
+            let kb=nodes.ptr[b].kind
+            # (a number times an offset unit is a point: c*°C)
+            if op =? 'star' and kb =? 'ident' and not has_flag(b NF_CHECKED) and tk_offset_unit(TempWord(nodes.ptr[b].name)) {return TKC_POINT}
+            if (kb =? 'int_lit' or kb =? 'float_lit') and tk_class(a depth + 1) =? TKC_DIFF {return TKC_DIFF}
+            if op =? 'star' and (ka =? 'int_lit' or ka =? 'float_lit') and tk_class(b depth + 1) =? TKC_DIFF {return TKC_DIFF}
+            return TKC_OTHER
+        }
+        return TKC_OTHER
+    }
+    if k =? 'call' or k =? 'field' or k =? 'index' or k =? 'if_' or k =? 'match_' or k =? 'block' {return TKC_POINT}
+    TKC_OTHER
+}
+# (an operand inside arithmetic: a named literal-only binding is a point there by default)
+tk_operand_class=(x:TempWord depth:TempWord):>TempWord=>{
+    let c=tk_class(x depth)
+    if c =? TKC_NAMED {return TKC_POINT}
+    c
+}
+tk_other=(x:TempWord):>TempWord=>$unsafe {
+    tk_other_mediated=false
+    let c=tk_class(x 0)
+    if nodes.ptr[x].kind =? 'ident' and not has_flag(x NF_CHECKED) and (c =? TKC_POINT or c =? TKC_DIFF) {
+        let nm=TempWord(nodes.ptr[x].name)
+        let i=tk_find(nm)
+        if i >=? 0 {tk_other_mediated=tk_decls[i].decl not=? 0 and tk_candidate(tk_decls[i].decl)}
+        else {
+            let s=lookup(nm)
+            if s not=? 0 and syms.ptr[s].kind =? 'local' {
+                let l=TempWord(syms.ptr[s].ref)
+                loop TempWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 and TempWord(locals.ptr[l].outer) not=? 0 {l=TempWord(locals.ptr[l].outer)}
+                tk_other_mediated=tk_bindings.has(l)
+            }
+            else if s not=? 0 and syms.ptr[s].kind =? 'global' {
+                let g=TempWord(syms.ptr[s].ref)
+                tk_other_mediated=tk_bindings.has(-g - 1) or (globals.ptr[g].state not=? 2 and not globals.ptr[g].is_const and tk_candidate(TempWord(globals.ptr[g].decl)))
+            }
+        }
+    }
+    c
+}
+tk_note=(difference:bool site:TempWord name:TempWord mediated:bool):>void=>{
+    if difference {
+        if tks.d_use =? 0 {tks.d_use=site}
+        tks.d_reads.push(name)
+        if not mediated {tks.d_direct=true}
+        return
+    }
+    if tks.p_use =? 0 {tks.p_use=site}
+    if not mediated {tks.p_direct=true}
+}
+# A use of the binding, judged where it sits: n holds it as an operand.
+tk_use=(n:TempWord):>void=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'binary' {
+        let a=TempWord(nodes.ptr[n].a)
+        let b=TempWord(nodes.ptr[n].b)
+        let sa=tk_self(a)
+        let sb=tk_self(b)
+        if not sa and not sb {return}
+        let op=cx_token(nodes.ptr[n].op)
+        if op =? 'dotop' {
+            let c=TempWord(nodes.ptr[n].aux)
+            if c =? b'+' {op='plus'}
+            else if c =? b'-' {op='minus'}
+            else if c =? b'*' {op='star'}
+            else if c =? b'/' {op='slash'}
+            else {return}
+        }
+        if sa and sb {return}
+        let me=if sa {a} else {b}
+        let x=if sa {b} else {a}
+        # (a point is not scaled; t/°C reads either kind in °C)
+        if op =? 'star' or (op =? 'slash' and not (sa and tk_unit_name(b))) {
+            tk_note(true n me false)
+            return
+        }
+        let cmp=op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge'
+        if op not=? 'plus' and op not=? 'minus' and not cmp {return}
+        let c=tk_other(x)
+        let mediated=tk_other_mediated
+        if op =? 'minus' and sb and c =? TKC_POINT and tks.neutral_sub =? 0 {tks.neutral_sub=n}
+        if op =? 'plus' and c =? TKC_POINT {tk_note(true n me mediated)}
+        else if op =? 'minus' and sb and c =? TKC_DIFF {tk_note(true n me mediated)}
+        else if op =? 'minus' and sa and c =? TKC_POINT {tk_note(false n me mediated)}
+        else if cmp and c =? TKC_POINT {tk_note(false n me mediated)}
+        else if cmp and c =? TKC_DIFF {tk_note(true n me mediated)}
+        return
+    }
+    if k =? 'unary' and nodes.ptr[n].op =? int32(59) and tk_self(TempWord(nodes.ptr[n].a)) {
+        tk_note(true n TempWord(nodes.ptr[n].a) false)
+        return
+    }
+    if k =? 'assign' {
+        let lhs=TempWord(nodes.ptr[n].a)
+        let rhs=TempWord(nodes.ptr[n].b)
+        let op=cx_token(nodes.ptr[n].op)
+        if tk_self(lhs) {
+            if op =? 'assign' and tk_literal_unit(rhs) =? tks.unit {tks.writes.push(rhs)}
+            else {tks.open=true}
+            return
+        }
+        if (op =? 'pluseq' or op =? 'minuseq') and tk_self(rhs) {
+            if tk_class(lhs 0) not=? TKC_OTHER {tk_note(true n rhs false)}
+        }
+    }
+}
+tk_walk=(n:TempWord):>void=>$unsafe {
+    if n =? 0 or has_flag(n NF_CHECKED) {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        if (has_flag(n NF_AT) or has_flag(n NF_MUT)) and tk_self(n) {tks.open=true}
+        return
+    }
+    if k =? 'block' {
+        let mark=tk_decls.length
+        loop i in [0..nkids(n)) {tk_statement(n i)}
+        tk_decls.truncate(mark)
+        return
+    }
+    if k =? 'lambda' or k =? 'fn_' {
+        let mark=tk_decls.length
+        loop p in kids(n) {
+            if nodes.ptr[p].kind =? 'param' {
+                tk_walk(TempWord(nodes.ptr[p].b))
+                tk_decls.push(TkDecl(name=TempWord(nodes.ptr[p].name) decl=0 block=0 index=0))
+            }
+        }
+        tk_walk(TempWord(nodes.ptr[n].b))
+        tk_decls.truncate(mark)
+        return
+    }
+    if k =? 'for_' {
+        tk_walk(TempWord(nodes.ptr[n].a))
+        let mark=tk_decls.length
+        loop v in kids(n) {
+            if nodes.ptr[v].kind =? 'ident' {tk_decls.push(TkDecl(name=TempWord(nodes.ptr[v].name) decl=0 block=0 index=0))}
+            else {tk_walk(v)}
+        }
+        tk_walk(TempWord(nodes.ptr[n].b))
+        tk_decls.truncate(mark)
+        return
+    }
+    if k =? 'vardecl' {
+        tk_walk(TempWord(nodes.ptr[n].b))
+        if nodes.ptr[n].nlist =? 0 {tk_decls.push(TkDecl(name=TempWord(nodes.ptr[n].name) decl=n block=0 index=0))}
+        else {
+            loop v in kids(n) {
+                if nodes.ptr[v].kind =? 'ident' {tk_decls.push(TkDecl(name=TempWord(nodes.ptr[v].name) decl=0 block=0 index=0))}
+            }
+        }
+        return
+    }
+    if k =? 'binary' or k =? 'unary' or k =? 'assign' {tk_use(n)}
+    if k =? 'assign' and nodes.ptr[n].op =? int32(47) and nodes.ptr[TempWord(nodes.ptr[n].a)].kind =? 'ident' and not tk_self(TempWord(nodes.ptr[n].a)) {
+        # (a name not seen yet: `x = value` declares it)
+        let nm=TempWord(nodes.ptr[TempWord(nodes.ptr[n].a)].name)
+        tk_walk(TempWord(nodes.ptr[n].b))
+        if tk_find(nm) <? 0 and lookup(nm) =? 0 and nm not=? tks.name {tk_decls.push(TkDecl(name=nm decl=n block=0 index=0))}
+        return
+    }
+    tk_walk(TempWord(nodes.ptr[n].a))
+    tk_walk(TempWord(nodes.ptr[n].b))
+    tk_walk(kid_c(n))
+    tk_walk(kid_d(n))
+    loop c in kids(n) {tk_walk(c)}
+    loop c in kids2(n) {tk_walk(c)}
+}
+# Statement i of block b (a declaration there is visible to the rest of b)
+tk_statement=(b:TempWord i:TempWord):>void=>{
+    let s=kid(b i)
+    if s =? tks.self_decl {return}
+    let at=tk_decls.length
+    tk_walk(s)
+    if tk_decls.length =? at + 1 and tk_decls[at].decl =? s {
+        tk_decls[at].block=b
+        tk_decls[at].index=i
+    }
+}
+# A global's scope: its module's top-level statements and functions.
+tk_module=(m:TempWord):>void=>$unsafe {
+    loop d in modules[m].decls {
+        if nodes.ptr[d].kind =? 'fn_' {source_force_body(d)}
+    }
+    loop s in modules[m].inits {
+        if s not=? tks.self_decl {tk_walk(s)}
+    }
+    loop d in modules[m].decls {
+        if d not=? tks.self_decl and nodes.ptr[d].kind not=? 'vardecl' and nodes.ptr[d].kind not=? 'assign' {tk_walk(d)}
+    }
+}
+# (text of an operand or use, for the warning)
+tk_text=(x:TempWord):>string=>$unsafe {
+    let k=nodes.ptr[x].kind
+    if k =? 'ident' {return name_of(TempWord(nodes.ptr[x].name))}
+    let u=tk_literal_unit(x)
+    if u not=? 0 and nodes.ptr[x].kind =? 'binary' {
+        let v=TempWord(nodes.ptr[x].a)
+        let number=if nodes.ptr[v].kind =? 'int_lit' {"{nodes.ptr[v].ival}"} else {"{nodes.ptr[v].fval}"}
+        return "{number}{name_of(u)}"
+    }
+    "…"
+}
+tk_op_text=(op:Tok):>string=>{
+    if op =? 'plus' {return "+"}
+    if op =? 'minus' {return "-"}
+    if op =? 'star' {return "*"}
+    if op =? 'slash' {return "/"}
+    if op =? 'eq' {return "=?"}
+    if op =? 'ne' {return "not=?"}
+    if op =? 'lt' {return "<?"}
+    if op =? 'le' {return "<=?"}
+    if op =? 'gt' {return ">?"}
+    if op =? 'ge' {return ">=?"}
+    if op =? 'pluseq' {return "+="}
+    if op =? 'minuseq' {return "-="}
+    "?"
+}
+tk_use_text=(n:TempWord):>string=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'unary' {return "-{tk_text(TempWord(nodes.ptr[n].a))}"}
+    let op=cx_token(nodes.ptr[n].op)
+    if k =? 'binary' and op =? 'dotop' {
+        let c=TempWord(nodes.ptr[n].aux)
+        let sym="/"
+        if c =? b'+' {sym="+"}
+        else if c =? b'-' {sym="-"}
+        else if c =? b'*' {sym="*"}
+        return "{tk_text(TempWord(nodes.ptr[n].a))} .{sym} {tk_text(TempWord(nodes.ptr[n].b))}"
+    }
+    "{tk_text(TempWord(nodes.ptr[n].a))} {tk_op_text(op)} {tk_text(TempWord(nodes.ptr[n].b))}"
+}
+# s declares a binding whose first value, written as a temperature literal in unit, is
+# now checked with type t. Its kind from all its uses: t (a point), or t as a difference.
+temperature_binding=(s:TempWord t:TempWord unit:TempWord global:bool):>TempWord=>$unsafe {
+    if not quantity_point(t) or quantity_tags[quantity_tag(t)].origin =? 0 {return t}
+    if not global and (sibling_block =? 0 or sibling_index >=? nkids(sibling_block) or kid(sibling_block sibling_index) not=? s) {return t}
+    if not tk_offset_unit(unit) {return t}
+    let saved_decls=tk_decls
+    tk_decls=[]
+    tks=TkScan(name=TempWord(nodes.ptr[s].name) unit=unit self_decl=s)
+    tk_deciding[s]=true
+    if global {tk_module(TempWord(nodes.ptr[s].mod))}
+    else {
+        loop i in [sibling_index + 1..nkids(sibling_block)) {tk_statement(sibling_block i)}
+    }
+    tk_decls=saved_decls
+    tk_deciding.remove(s);
+    tk_direct[s]=tk_own_kind()
+    if tks.open {return t}
+    if tks.d_use =? 0 {
+        if tks.p_use =? 0 and tks.neutral_sub not=? 0 {
+            let nm=name_of(tks.name)
+            warn(nodes.ptr[tks.neutral_sub].pos "`{tk_use_text(tks.neutral_sub)}` leaves `{nm}` ambiguous: a temperature point minus a point gives a difference, but minus a difference gives a point. Write the difference in kelvin (`5K`) or as two points (`25{name_of(unit)} - 5{name_of(unit)}`)")
+        }
+        return t
+    }
+    let nm=name_of(tks.name)
+    if tks.p_use not=? 0 {
+        let dl=line_col(nodes.ptr[tks.d_use].pos)[0]
+        let pl=line_col(nodes.ptr[tks.p_use].pos)[0]
+        warn(nodes.ptr[s].pos "`{nm}` holds only temperature literals, so its uses decide whether it is a point or a difference, and they disagree: `{tk_use_text(tks.d_use)}` (line {dl}) needs a difference, `{tk_use_text(tks.p_use)}` (line {pl}) a point. It stays a point, and `{tk_use_text(tks.d_use)}` reads it as a difference; to say which you mean, write a difference as a subtraction of two points (`let {nm} = 25{name_of(unit)} - 5{name_of(unit)}`) or in kelvin (`5K`), or use two bindings")
+        loop r in tks.d_reads {tk_difference_reads[r]=true}
+        tk_reads_on=true
+        return t
+    }
+    loop w in tks.writes {tk_difference_writes[w]=true}
+    statement_watch.temperature_writes=tk_difference_writes.length
+    let b=TempWord(nodes.ptr[s].b)
+    let d=temperature_difference(b)
+    nodes.ptr[s].b=int32(d)
+    ntype(d)
+}
+# (the checked point n read as a difference, shown in its unit, in its number type)
+temperature_difference=(n:TempWord):>TempWord=>{
+    let t=ntype(n)
+    let q=quantity_tags[quantity_tag(t)]
+    let unit=if q.display not=? 0 {q.display} else {q.origin}
+    let base=quantity_base(t)
+    let e=quantity_delta_reading(n)
+    if not type_eq(quantity_base(ntype(e)) base) {e=coerce(e mk_quantity(base quantity_dimension(t)))}
+    quantity_retag(e intern_quantity_tag(unit 0 true));
+    last_checked=e
+    e
+}
+# (the checked point n made a difference in place)
+temperature_difference_at=(n:TempWord):>TempWord=>$unsafe {
+    let c=nodes.length
+    nodes.push(nodes.ptr[n])
+    let d=temperature_difference(c)
+    nodes.ptr[n]=nodes.ptr[d]
+    last_checked=n
+    ntype(n)
+}
+# A conflicting binding's difference use: its name, checked as t, read as a difference in place.
+temperature_read=(n:TempWord t:TempWord):>TempWord=>{
+    if not tk_difference_reads.has(n) or not quantity_point(t) {return t}
+    temperature_difference_at(n)
+}
+# A literal written to a binding its uses made a difference (`step = 10°C`).
+temperature_write=(written:TempWord value:TempWord rt:TempWord lt:TempWord):>TempWord=>{
+    if not tk_difference_writes.has(written) or not quantity_is_delta(lt) or not quantity_point(rt) {return rt}
+    prune(temperature_difference_at(value))
+}

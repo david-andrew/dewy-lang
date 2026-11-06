@@ -25,6 +25,8 @@ def effect_services(text, modules):
         text = text.replace('juxtapose.dewy', 'juxtapose.jo')
     if 'init_module_order = ' in modules.get('import_cycles.jo', ''):
         text = text.replace('cycle_ops.dewy', 'import_cycles.jo').replace('cycle_ops.jo', 'import_cycles.jo')
+    if 'temperature_read = ' in modules.get('temperature_kinds.jo', ''):
+        text = text.replace('temperature_ops.dewy', 'temperature_kinds.jo').replace('temperature_ops.jo', 'temperature_kinds.jo')
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(
