@@ -1,0 +1,342 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (dewy_at fns lib_dir modules)
+from p"directives.jo" import (dir_defer)
+from p"expr.jo" import (is_dewy_set_type is_map_type is_nd nd_elem ntype)
+from p"facts.jo" import (FACT_CAP FACT_CLAMPED FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FactProjection FactState fact_add_projection fact_bound fact_compare fact_constant fact_difference fact_domain fact_hull_owner fact_inventory fact_length_max fact_name_count fact_name_first fact_name_graphemes fact_name_last fact_name_least fact_name_len fact_name_max_by fact_name_min_by fact_name_most fact_name_peek fact_name_peek_priority fact_name_sorted fact_name_sorted_by fact_name_sorted_with fact_name_sum fact_name_take fact_new fact_offset_value fact_owner fact_policy fact_probe_on fact_project fact_projection_find fact_query fact_route fact_route_values fact_set_bound fact_speculating fact_terms fact_type)
+from p"facts_maps.dewy" import (fact_map_receiver)
+from p"facts_probes.dewy" import (fact_probe_record)
+from p"nd_contracts.jo" import (fact_nd_data_length)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"refine.jo" import (representation_type)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
+from p"types.jo" import (T_INT T_MATH_INT T_STR T_U64 dt fields fixed_len int_policy is_int mk_array structs telem tkind types)
+from p"util.jo" import (err_notes files intern name_of pos_file pos_in_lib)
+from p"witness.jo" import (wit_fail wit_help wit_text wit_unknown)
+
+LibraryWord:type=int64<overflow='wrap'>
+# max(0, n) as a projection of n, so every use of one count (fills of the same
+# n, a callee's result length summarized by its count parameter) has one value.
+fact_clamped=(@s:FactState count:LibraryWord at:LibraryWord=0):>LibraryWord=>{
+    let c=fact_bound(s count)
+    let size=fact_project(@s count FACT_CLAMPED false T_INT)
+    let old=fact_bound(s size)
+    fact_set_bound(@s size FactBound(max(old.lo max(0 c.lo)) min(old.hi max(0 min(c.hi fact_length_max())))))
+    fact_difference(@s count size 0 at)
+    if c.lo >=? 0 {fact_difference(@s size count 0 at)}
+    size
+}
+# A direct call of the prelude function named name (parallel_lower.jo's test).
+fact_prelude_call=(n:LibraryWord name:string):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return false}
+    let f=LibraryWord(nodes.ptr[n].sym)
+    let d=LibraryWord(fns.ptr[f].decl)
+    d not=? 0 and modules[LibraryWord(fns.ptr[f].mod)].is_prelude and name_of(LibraryWord(nodes.ptr[d].name)) =? name
+}
+# A direct call of the bundled library's function named name (std/thread.jo's
+# `parallel_range`, a reviewed contract).
+fact_library_call=(n:LibraryWord name:string):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return false}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    d not=? 0 and pos_in_lib(nodes.ptr[d].pos) and name_of(LibraryWord(nodes.ptr[d].name)) =? name
+}
+# The exact integer prelude implementation, not another library's same-named
+# helper. Its zero-result law is used only for demanded calls below; O(1).
+fact_integer_gcd_call=(n:LibraryWord):>bool=>$unsafe {
+    if not fact_library_call(n "gcd") {return false}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/prelude/integers.dewy"
+}
+fact_endpoint_call=(n:LibraryWord):>LibraryWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 1 {return 0}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return 0}
+    if fact_name_first =? 0 {fact_name_first=intern("first"); fact_name_last=intern("last")}
+    let name=LibraryWord(nodes.ptr[d].name)
+    if name not=? fact_name_first and name not=? fact_name_last {return 0}
+    if files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/prelude/arrays.dewy" or tkind(fact_type(ntype(kid(n 0)))) not=? 'array' {return 0}
+    if ownership_decls.length not=? 0 and ownership_fact_type(ntype(n)) {return 0}
+    if name =? fact_name_first {1} else {2}
+}
+fact_endpoint=(n:LibraryWord @s:FactState base:LibraryWord kind:LibraryWord):>LibraryWord=>{
+    let index=fact_constant(@s 0)
+    if kind =? 2 {
+        let length=fact_project(@s base (-1) false T_INT)
+        index=fact_offset_value(s length (-1))
+        if index =? 0 {
+            let bound=fact_bound(s length)
+            index=fact_new(@s FactBound(LibraryWord(bound.lo) - 1 LibraryWord(bound.hi) - 1) FactTerm('minus' length fact_constant(@s 1) n T_INT))
+            fact_difference(@s index length (-1))
+            fact_difference(@s length index 1)
+        }
+    }
+    fact_project(@s base index true ntype(n))
+}
+fact_chosen_call=(n:LibraryWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 {return false}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return false}
+    if fact_name_min_by =? 0 {fact_name_min_by=intern("min_by"); fact_name_max_by=intern("max_by")}
+    let name=LibraryWord(nodes.ptr[d].name)
+    if name not=? fact_name_min_by and name not=? fact_name_max_by {return false}
+    if files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/prelude/arrays.dewy" or tkind(fact_type(ntype(kid(n 0)))) not=? 'array' {return false}
+    not (ownership_decls.length not=? 0 and ownership_fact_type(ntype(n)))
+}
+fact_chosen=(n:LibraryWord @s:FactState base:LibraryWord):>LibraryWord=>{
+    let length=fact_project(@s base (-1) false T_INT)
+    let b=fact_bound(s length)
+    let index=fact_new(@s FactBound(0 max(0 LibraryWord(b.hi) - 1)) FactTerm(type=T_INT))
+    fact_difference(@s index length (-1))
+    fact_project(@s base index true ntype(n))
+}
+fact_copy_length_call=(n:LibraryWord):>bool=>$unsafe {
+    if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) <? 1 {return false}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return false}
+    if fact_name_sorted =? 0 {
+        fact_name_sorted=intern("sorted")
+        fact_name_sorted_by=intern("sorted_by")
+        fact_name_graphemes=intern("graphemes")
+        fact_name_sorted_with=intern("sorted_with")
+    }
+    let name=LibraryWord(nodes.ptr[d].name)
+    if name not=? fact_name_sorted and name not=? fact_name_sorted_by and name not=? fact_name_sorted_with and name not=? fact_name_graphemes {return false}
+    if tkind(fact_type(ntype(n))) not=? 'array' {return false}
+    let path=files[pos_file(nodes.ptr[d].pos)].path
+    # (`sorted_with(less)` permutes a by-value copy: the callback sees elements, never the copy)
+    if name =? fact_name_sorted_with {return path =? "{lib_dir}/core/array.jo" and tkind(fact_type(ntype(kid(n 0)))) =? 'array'}
+    if name =? fact_name_sorted or name =? fact_name_sorted_by {
+        return path =? "{lib_dir}/core/array.jo" and tkind(fact_type(ntype(kid(n 0)))) =? 'array' or name =? fact_name_sorted and path =? "{lib_dir}/std/dewy_sets.jo" and is_dewy_set_type(fact_type(ntype(kid(n 0))))
+    }
+    # Jo strings use byte length: only the Dewy grapheme projection relates.
+    path =? "{lib_dir}/std/graphemes.jo" and files[pos_file(nodes.ptr[n].pos)].is_dewy and fact_type(ntype(kid(n 0))) =? T_STR
+}
+fact_count_call=(n:LibraryWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 {return false}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return false}
+    if fact_name_count =? 0 {fact_name_count=intern("count")}
+    if LibraryWord(nodes.ptr[d].name) not=? fact_name_count or tkind(fact_type(ntype(kid(n 0)))) not=? 'array' {return false}
+    let path=files[pos_file(nodes.ptr[d].pos)].path
+    path =? "{lib_dir}/core/array.jo" or path =? "{lib_dir}/std/dewy.jo"
+}
+# Reviewed array (set, text) emptiness contract. O(1), only when a demanded
+# expression reads the result; mutation continues to invalidate the receiver
+# normally. A set's is its entry count's (fact_entry_count_call).
+fact_empty_array_call=(n:LibraryWord):>bool=>$unsafe {
+    if nkids(n) not=? 1 or not fact_library_call(n "is_empty") {return false}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    if is_dewy_set_type(representation_type(ntype(kid(n 0)))) {return files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/dewy_sets.jo"}
+    let t=fact_type(ntype(kid(n 0)))
+    # Text has no bytes exactly when it has no graphemes, so either length projection is zero.
+    if t =? T_STR {return files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/dewy.jo"}
+    if types.ptr[t].kind not=? 'array' and types.ptr[t].kind not=? 'fixed' {return false}
+    files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/array.jo"
+}
+fact_entry_count_call=(n:LibraryWord):>bool=>$unsafe {
+    if nkids(n) not=? 1 or nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl =? 0 {return false}
+    if fact_name_len =? 0 {fact_name_len=intern("len")}
+    if LibraryWord(nodes.ptr[LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)].name) not=? fact_name_len {return false}
+    let t=representation_type(ntype(kid(n 0)))
+    let path=files[pos_file(nodes.ptr[LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)].pos)].path
+    is_map_type(t) and path =? "{lib_dir}/core/map.jo" or is_dewy_set_type(t) and path =? "{lib_dir}/std/dewy_sets.jo" or path =? "{lib_dir}/std/heap.jo"
+}
+# Reviewed length-preserving calls: `d.keys` (__dewy_keys), a dictionary's `keys` and
+# `values`, and a set's members as an array (__dewy_set_values, `s.values`) have one
+# element per entry, so the result's length is the receiver's entry count. O(1).
+fact_same_length_call=(n:LibraryWord):>bool=>$unsafe {
+    if nkids(n) not=? 1 or nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl =? 0 {return false}
+    let t=representation_type(ntype(kid(n 0)))
+    let map=is_map_type(t)
+    if not map and not is_dewy_set_type(t) {return false}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    let name=name_of(LibraryWord(nodes.ptr[d].name))
+    let path=files[pos_file(nodes.ptr[d].pos)].path
+    if map {return path =? "{lib_dir}/core/map.jo" and (name =? "keys" or name =? "values") or path =? "{lib_dir}/std/dewy_sets.jo" and name =? "__dewy_keys"}
+    path =? "{lib_dir}/std/dewy_sets.jo" and (name =? "__dewy_set_values" or name =? "values")
+}
+# The length of e's value when its argument is not captured (a dictionary is lent): its place's
+# current value's, or through nested length-preserving calls (`[d.keys...]`); 0 for unknown.
+fact_length_through=(e:LibraryWord @s:FactState depth:LibraryWord):>LibraryWord=>$unsafe {
+    if depth <? 4 and nodes.ptr[e].kind =? 'call' and fact_same_length_call(e) {return fact_length_through(kid(e 0) @s depth + 1)}
+    let held=fact_route_values(@s fact_route(e @s))
+    if held.length =? 0 {return 0}
+    fact_project(@s held[held.length - 1] (-1) false T_INT)
+}
+fact_nonempty_call=(n:LibraryWord):>bool=>$unsafe {
+    if nkids(n) not=? 1 or nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl =? 0 {return false}
+    if fact_name_peek =? 0 {
+        fact_name_peek=intern("peek")
+        fact_name_peek_priority=intern("peek_priority")
+        fact_name_take=intern("pop")
+        fact_name_least=intern("min")
+        fact_name_most=intern("max")
+    }
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    let name=LibraryWord(nodes.ptr[d].name)
+    if name not=? fact_name_take and name not=? fact_name_peek and name not=? fact_name_peek_priority and name not=? fact_name_least and name not=? fact_name_most {return false}
+    let path=files[pos_file(nodes.ptr[d].pos)].path
+    if name =? fact_name_least or name =? fact_name_most {
+        let rk=tkind(fact_type(ntype(kid(n 0))))
+        # (an N-D array's reduces its flat storage: `m.data.length >? 0`)
+        if path =? "{lib_dir}/std/nd.jo" {return is_nd(representation_type(ntype(kid(n 0))))}
+        return path =? "{lib_dir}/core/array.jo" and (rk =? 'array' or rk =? 'fixed')
+    }
+    if path =? "{lib_dir}/std/heap.jo" {return true}
+    name =? fact_name_take and path =? "{lib_dir}/std/dewy_sets.jo" and is_dewy_set_type(representation_type(ntype(kid(n 0))))
+}
+fact_nonempty_check=(n:LibraryWord @s:FactState values:array<int64>):>void=>$unsafe {
+    if fact_speculating not=? 0 or not (fact_policy =? 'RequireStatic' or fact_query) {return}
+    let t=fact_type(ntype(kid(n 0)))
+    let nd=is_nd(representation_type(t))
+    let length=if tkind(t) =? 'fixed' {fact_constant(@s fixed_len(t))} else if nd {fact_nd_data_length(@s fact_map_receiver(@s n values[0]))} else {fact_project(@s fact_map_receiver(@s n values[0]) (-1) false T_INT)}
+    # (the constant first: the state is taken before later arguments run)
+    let one=fact_constant(@s 1)
+    let c=fact_compare(s 'ge' length one)
+    if fact_probe_on {
+        fact_probe_record(n c =? 1)
+        return
+    }
+    if c =? 1 {return}
+    let receiver=wit_text(kid(n 0))
+    if nd and receiver not=? "" {receiver="{receiver}.data"}
+    let rk=tkind(t)
+    let what=if rk =? 'array' or rk =? 'fixed' or nd {"array"} else if is_dewy_set_type(representation_type(ntype(kid(n 0)))) {"set"} else {"heap"}
+    let shown=if receiver not=? "" {"`{receiver}`"} else {"the {what}"}
+    let relation=if receiver not=? "" {"{receiver}.length >? 0"} else {""}
+    if c =? 0 {
+        wit_help(relation)
+        if dir_defer(n "{shown} is empty" true) {return}
+        wit_fail(nodes.ptr[n].pos "{shown} is empty")
+        return
+    }
+    wit_unknown(n fact_bound(s length) "{shown} is nonempty" 0 relation)
+}
+fact_exact_sum_call=(n:LibraryWord):>bool=>$unsafe {
+    if nkids(n) not=? 1 or nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return false}
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or pos_in_lib(nodes.ptr[n].pos) {return false}
+    if fact_name_sum =? 0 {fact_name_sum=intern("sum")}
+    if LibraryWord(nodes.ptr[d].name) not=? fact_name_sum {return false}
+    fact_exact_sum_element(fact_type(ntype(kid(n 0))) files[pos_file(nodes.ptr[d].pos)].path) not=? 0
+}
+# (the checked 64-bit element type of a summed array, or 0)
+fact_exact_sum_element=(t:LibraryWord path:string):>LibraryWord=>$unsafe {
+    let e:LibraryWord=0
+    if is_nd(representation_type(t)) {
+        if path =? "{lib_dir}/std/nd.jo" {e=nd_elem(representation_type(t))}
+    }
+    else if path =? "{lib_dir}/core/array.jo" and (tkind(t) =? 'array' or tkind(t) =? 'fixed') {e=telem(t)}
+    if e =? 0 {return 0}
+    e=fact_type(e)
+    if not is_int(e) or e =? T_MATH_INT or types.ptr[e].bits not=? 64 or int_policy(e) not=? 0 {return 0}
+    e
+}
+fact_exact_sum_check=(n:LibraryWord @s:FactState values:array<int64>):>void=>$unsafe {
+    if fact_speculating not=? 0 or not (fact_policy =? 'RequireStatic' or fact_query) {return}
+    let t=fact_type(ntype(kid(n 0)))
+    let d=LibraryWord(fns.ptr[LibraryWord(nodes.ptr[n].sym)].decl)
+    let e=fact_exact_sum_element(t files[pos_file(nodes.ptr[d].pos)].path)
+    let base=fact_map_receiver(@s n values[0])
+    let nd=is_nd(representation_type(t))
+    if nd {base=fact_project(@s base intern("data") false mk_array(nd_elem(representation_type(t))))}
+    let length=if tkind(t) =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s base (-1) false T_INT)}
+    let hull=fact_element_hull(@s base e)
+    let proven=fact_exact_sum_fits(@s base fact_bound(s length) hull e)
+    if fact_probe_on {
+        fact_probe_record(n proven)
+        return
+    }
+    if proven {return}
+    let receiver=wit_text(kid(n 0))
+    let shown=if receiver not=? "" {"`{receiver}`"} else {"the array"}
+    # (an `int` total is exact: adding into one needs no bound. O(1))
+    if dewy_at(nodes.ptr[n].pos) {err_notes.push([(-1) "help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`"])}
+    wit_unknown(n hull "the exact sum of {shown} fits `{dt(e)}`" 0 "" "bounds on its elements and length that keep every running sum in range")
+}
+# What every element of base (of type e) lies in: a fill's value, else the
+# comprehension hull within e's range. O(1) indexed lookups.
+fact_element_hull=(@s:FactState base:LibraryWord e:LibraryWord):>FactBound=>{
+    let copy=fact_projection_find(s base FACT_ELEMENT_COPY false)
+    if copy >=? 0 {return fact_bound(s s.projections[copy].value)}
+    let b=fact_domain(e)
+    if fact_hull_owner =? fact_owner {
+        let i=fact_projection_find(s base FACT_ELEMENT_VALUE false)
+        if i >=? 0 {
+            let h=fact_bound(s s.projections[i].value)
+            if not h.wide {b=FactBound(max(b.lo h.lo) min(b.hi h.hi) h.nz h.reason h.witness)}
+        }
+    }
+    b
+}
+# Whether every running sum of base's elements fits e (int64 or uint64):
+# the positive upper bounds' total within e's maximum and the negative lower
+# bounds' within its minimum, as unsigned magnitudes. O(parts).
+fact_exact_sum_fits=(@s:FactState base:LibraryWord count:FactBound hull:FactBound e:LibraryWord):>bool=>{
+    let unsigned=e =? T_U64
+    let top=if unsigned {uint64<overflow='wrap'>(18446744073709551615)} else {uint64<overflow='wrap'>(FACT_MAX)}
+    let bottom=if unsigned {uint64<overflow='wrap'>(0)} else {top + uint64<overflow='wrap'>(1)}
+    let up=uint64<overflow='wrap'>(0)
+    let down=uint64<overflow='wrap'>(0)
+    let parts=fact_inventory(s base)
+    if parts.length >? 0 {
+        loop p in parts {
+            let m=fact_exact_sum_magnitudes(fact_bound(s p) unsigned)
+            if m[0] >? top - up or m[1] >? bottom - down {return false}
+            up += m[0]
+            down += m[1]
+        }
+        return true
+    }
+    if count.wide {return false}
+    if count.hi <=? 0 {return true}
+    let m=fact_exact_sum_magnitudes(hull unsigned)
+    let length=uint64<overflow='wrap'>(count.hi)
+    (m[0] =? uint64<overflow='wrap'>(0) or length <=? top // m[0]) and (m[1] =? uint64<overflow='wrap'>(0) or length <=? bottom // m[1])
+}
+# (a bound's positive upper end and negative lower end as magnitudes; a wide
+# one is the type's whole range)
+fact_exact_sum_magnitudes=(b:FactBound unsigned:bool):>[uint64 uint64]=>{
+    let up=uint64<overflow='wrap'>(0)
+    let down=uint64<overflow='wrap'>(0)
+    if unsigned {
+        up=if b.wide {uint64<overflow='wrap'>(18446744073709551615)} else {uint64<overflow='wrap'>(b.hi xor FACT_MIN)}
+        return [up down]
+    }
+    let hi=if b.wide {FACT_MAX} else {b.hi}
+    let lo=if b.wide {FACT_MIN} else {b.lo}
+    if hi >? 0 {up=uint64<overflow='wrap'>(hi)}
+    if lo <? 0 {down=uint64<overflow='wrap'>(-(lo + 1)) + uint64<overflow='wrap'>(1)}
+    [up down]
+}
+# The fields of record value base, by ordinal, for a dependent field contract.
+# O(fields); each sibling is projected once per record value.
+fact_field_args=(@s:FactState base:LibraryWord):>array<int64>=>$unsafe {
+    let t=fact_type(fact_terms[base].type)
+    if t <=? 0 or types.ptr[t].kind not=? 'struct_' {return []}
+    let si=LibraryWord(types.ptr[t].st)
+    let args:array<int64>=[]
+    loop i in [0..LibraryWord(structs.ptr[si].nfields)) {
+        let f=fields.ptr[LibraryWord(structs.ptr[si].fields) + i]
+        args.push(fact_project(@s base int64(f.name) false int64(f.type)))
+    }
+    args
+}
+# An element store replaces a fill's uniform promise. For a short, fixed
+# length and a constant position, retain the other entries' immutable values
+# as an ordinary inventory. No new analysis: O(length), capped at the same 64
+# entries as fact_inventory, and only on a demanded store to a uniform value.
+fact_fill_remainder=(@s:FactState before:LibraryWord after:LibraryWord selector:LibraryWord uniform:LibraryWord):>void=>{
+    let index=fact_bound(s selector)
+    if index.wide or index.lo not=? index.hi or index.lo <? 0 {return}
+    let li=fact_projection_find(s before (-1) false)
+    if li <? 0 {return}
+    let length=fact_bound(s s.projections[li].value)
+    if length.wide or length.lo not=? length.hi or length.lo <=? index.lo or length.hi >? 64 {return}
+    loop i in [0..length.lo) {
+        if i not=? index.lo and s.projections.length <? FACT_CAP {
+            fact_add_projection(@s FactProjection(after fact_constant(@s i) true uniform))
+        }
+    }
+}

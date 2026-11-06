@@ -64,6 +64,7 @@ use 'effect_control.dewy'
 use 'effect_costs.dewy'
 use 'effect_owners.dewy'
 use 'isolation_ops.dewy'
+use 'facts_library.dewy'
 use 'facts_summaries.dewy'
 use 'facts_pushes.dewy'
 use 'facts_text.dewy'
@@ -1008,64 +1009,15 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
     v
 
 
-# max(0, n) as a projection of n, so every use of one count (fills of the same
-# n, a callee's result length summarized by its count parameter) has one value.
-fact_clamped = (s: mut FactState, count: int, at: int = 0) -> int:
-    c = fact_bound(s, count)
-    size = fact_project(s, count, FACT_CLAMPED, false, T_INT)
-    old = fact_bound(s, size)
-    fact_set_bound(s, size, FactBound(max(old.lo, max(0, c.lo)), min(old.hi, max(0, min(c.hi, fact_length_max())))))
-    fact_difference(s, count, size, 0, at)
-    if c.lo >= 0: fact_difference(s, size, count, 0, at)
-    size
 
-# A direct call of the prelude function named name (parallel_lower.jo's test).
-fact_prelude_call = (n: int, name: str) -> bool:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
-    f = int(nodes[n].sym)
-    d = int(fns[f].decl)
-    d != 0 and modules[int(fns[f].mod)].is_prelude and name_of(int(nodes[d].name)) == name
 
-# A direct call of the bundled library's function named name (std/thread.jo's
-# `parallel_range`, a reviewed contract).
-fact_library_call = (n: int, name: str) -> bool:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
-    d = int(fns[int(nodes[n].sym)].decl)
-    d != 0 and pos_in_lib(nodes[d].pos) and name_of(int(nodes[d].name)) == name
 
-# The exact integer prelude implementation, not another library's same-named
-# helper. Its zero-result law is used only for demanded calls below; O(1).
-fact_integer_gcd_call = (n: int) -> bool:
-    if not fact_library_call(n, "gcd"): return false
-    d = int(fns[int(nodes[n].sym)].decl)
-    files[pos_file(nodes[d].pos)].path == lib_dir + "/prelude/integers.dewy"
 
 # The prelude's single-element first/last are reads of this array snapshot.
 # User overloads and slicing overloads have no such contract. O(1).
 fact_name_first = 0
 fact_name_last = 0
-fact_endpoint_call = (n: int) -> int:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 1: return 0
-    d = int(fns[int(nodes[n].sym)].decl)
-    if d == 0: return 0
-    if fact_name_first == 0: fact_name_first = intern("first"); fact_name_last = intern("last")
-    name = int(nodes[d].name)
-    if name != fact_name_first and name != fact_name_last: return 0
-    if files[pos_file(nodes[d].pos)].path != lib_dir + "/prelude/arrays.dewy" or tkind(fact_type(ntype(kid(n, 0)))) != .array: return 0
-    if ownership_decls.len() != 0 and ownership_fact_type(ntype(n)): return 0
-    if name == fact_name_first: 1 else: 2
 
-fact_endpoint = (n: int, s: mut FactState, base: int, kind: int) -> int:
-    index = fact_constant(s, 0)
-    if kind == 2:
-        length = fact_project(s, base, -1, false, T_INT)
-        index = fact_offset_value(s, length, -1)
-        if index == 0:
-            bound = fact_bound(s, length)
-            index = fact_new(s, FactBound(bound.lo - 1, bound.hi - 1), FactTerm(.minus, length, fact_constant(s, 1), n, T_INT))
-            fact_difference(s, index, length, -1)
-            fact_difference(s, length, index, 1)
-    fact_project(s, base, index, true, ntype(n))
 
 # The prelude's `xs.min_by(key)` and `xs.max_by(key)` return one of the
 # receiver's elements (its body reads xs[i] and returns one), so the result
@@ -1074,22 +1026,7 @@ fact_endpoint = (n: int, s: mut FactState, base: int, kind: int) -> int:
 # it. Exact library identity; O(1).
 fact_name_min_by = 0
 fact_name_max_by = 0
-fact_chosen_call = (n: int) -> bool:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return false
-    d = int(fns[int(nodes[n].sym)].decl)
-    if d == 0: return false
-    if fact_name_min_by == 0: fact_name_min_by = intern("min_by"); fact_name_max_by = intern("max_by")
-    name = int(nodes[d].name)
-    if name != fact_name_min_by and name != fact_name_max_by: return false
-    if files[pos_file(nodes[d].pos)].path != lib_dir + "/prelude/arrays.dewy" or tkind(fact_type(ntype(kid(n, 0)))) != .array: return false
-    not (ownership_decls.len() != 0 and ownership_fact_type(ntype(n)))
 
-fact_chosen = (n: int, s: mut FactState, base: int) -> int:
-    length = fact_project(s, base, -1, false, T_INT)
-    b = fact_bound(s, length)
-    index = fact_new(s, FactBound(0, max(0, b.hi - 1)), FactTerm(type = T_INT))
-    fact_difference(s, index, length, -1)
-    fact_project(s, base, index, true, ntype(n))
 
 # Reviewed copies: sorted returns one element per input element; graphemes
 # uses the same cursor as Dewy's string length. Key provenance survives sorting.
@@ -1098,49 +1035,12 @@ fact_name_sorted = 0
 fact_name_sorted_by = 0
 fact_name_graphemes = 0
 fact_name_sorted_with = 0
-fact_copy_length_call = (n: int) -> bool:
-    if nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 1: return false
-    d = int(fns[int(nodes[n].sym)].decl)
-    if d == 0: return false
-    if fact_name_sorted == 0:
-        fact_name_sorted = intern("sorted"); fact_name_sorted_by = intern("sorted_by"); fact_name_graphemes = intern("graphemes")
-        fact_name_sorted_with = intern("sorted_with")
-    name = int(nodes[d].name)
-    if name != fact_name_sorted and name != fact_name_sorted_by and name != fact_name_sorted_with and name != fact_name_graphemes: return false
-    if tkind(fact_type(ntype(n))) != .array: return false
-    path = files[pos_file(nodes[d].pos)].path
-    # (`sorted_with(less)` permutes a by-value copy: the callback sees elements, never the copy)
-    if name == fact_name_sorted_with: return path == lib_dir + "/core/array.jo" and tkind(fact_type(ntype(kid(n, 0)))) == .array
-    if name == fact_name_sorted or name == fact_name_sorted_by:
-        return path == lib_dir + "/core/array.jo" and tkind(fact_type(ntype(kid(n, 0)))) == .array or name == fact_name_sorted and path == lib_dir + "/std/dewy_sets.jo" and is_dewy_set_type(fact_type(ntype(kid(n, 0))))
-    # Jo strings use byte length: only the Dewy grapheme projection relates.
-    path == lib_dir + "/std/graphemes.jo" and files[pos_file(nodes[n].pos)].is_dewy and fact_type(ntype(kid(n, 0))) == T_STR
 
 # The bundled count visits the by-value array snapshot once. A callback or
 # equality hook may change the caller's storage, but cannot change the count's
 # input snapshot. Record its bounds AFTER ordinary call-effect invalidation.
 fact_name_count = 0
-fact_count_call = (n: int) -> bool:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return false
-    d = int(fns[int(nodes[n].sym)].decl)
-    if d == 0: return false
-    if fact_name_count == 0: fact_name_count = intern("count")
-    if int(nodes[d].name) != fact_name_count or tkind(fact_type(ntype(kid(n, 0)))) != .array: return false
-    path = files[pos_file(nodes[d].pos)].path
-    path == lib_dir + "/core/array.jo" or path == lib_dir + "/std/dewy.jo"
 
-# Reviewed array (set, text) emptiness contract. O(1), only when a demanded
-# expression reads the result; mutation continues to invalidate the receiver
-# normally. A set's is its entry count's (fact_entry_count_call).
-fact_empty_array_call = (n: int) -> bool:
-    if nkids(n) != 1 or not fact_library_call(n, "is_empty"): return false
-    d = int(fns[int(nodes[n].sym)].decl)
-    if is_dewy_set_type(representation_type(ntype(kid(n, 0)))): return files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy_sets.jo"
-    t = fact_type(ntype(kid(n, 0)))
-    # Text has no bytes exactly when it has no graphemes, so either length projection is zero.
-    if t == T_STR: return files[pos_file(nodes[d].pos)].path == lib_dir + "/std/dewy.jo"
-    if types[t].kind != .array and types[t].kind != .fixed: return false
-    files[pos_file(nodes[d].pos)].path == lib_dir + "/core/array.jo"
 
 # Reviewed entry-count contract: the bundled dictionary's `len` counts its
 # keys array less the deleted entries still in it, and a set's is its
@@ -1148,35 +1048,8 @@ fact_empty_array_call = (n: int) -> bool:
 # array's. A projection of the evaluated value: every insertion or removal
 # passes the receiver mutably, which replaces that value. O(1).
 fact_name_len = 0
-fact_entry_count_call = (n: int) -> bool:
-    if nkids(n) != 1 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or fns[int(nodes[n].sym)].decl == 0: return false
-    if fact_name_len == 0: fact_name_len = intern("len")
-    if int(nodes[int(fns[int(nodes[n].sym)].decl)].name) != fact_name_len: return false
-    t = representation_type(ntype(kid(n, 0)))
-    path = files[pos_file(nodes[int(fns[int(nodes[n].sym)].decl)].pos)].path
-    is_map_type(t) and path == lib_dir + "/core/map.jo" or is_dewy_set_type(t) and path == lib_dir + "/std/dewy_sets.jo" or path == lib_dir + "/std/heap.jo"
 
-# Reviewed length-preserving calls: `d.keys` (__dewy_keys), a dictionary's `keys` and
-# `values`, and a set's members as an array (__dewy_set_values, `s.values`) have one
-# element per entry, so the result's length is the receiver's entry count. O(1).
-fact_same_length_call = (n: int) -> bool:
-    if nkids(n) != 1 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or fns[int(nodes[n].sym)].decl == 0: return false
-    t = representation_type(ntype(kid(n, 0)))
-    map = is_map_type(t)
-    if not map and not is_dewy_set_type(t): return false
-    d = int(fns[int(nodes[n].sym)].decl)
-    name = name_of(int(nodes[d].name))
-    path = files[pos_file(nodes[d].pos)].path
-    if map: return path == lib_dir + "/core/map.jo" and (name == "keys" or name == "values") or path == lib_dir + "/std/dewy_sets.jo" and name == "__dewy_keys"
-    path == lib_dir + "/std/dewy_sets.jo" and (name == "__dewy_set_values" or name == "values")
 
-# The length of e's value when its argument is not captured (a dictionary is lent): its place's
-# current value's, or through nested length-preserving calls (`[d.keys...]`); 0 for unknown.
-fact_length_through = (e: int, s: mut FactState, depth: int) -> int:
-    if depth < 4 and nodes[e].kind == .call and fact_same_length_call(e): return fact_length_through(kid(e, 0), s, depth + 1)
-    held = fact_route_values(s, fact_route(e, s))
-    if held.len() == 0: return 0
-    fact_project(s, held[held.len() - 1], -1, false, T_INT)
 
 # Reviewed nonempty requirements: an array's `min(xs)` and `max(xs)` (an N-D
 # array's: of its flat storage, `m.data.length >? 0`), a set's
@@ -1189,50 +1062,7 @@ fact_name_peek_priority = 0
 fact_name_take = 0
 fact_name_least = 0
 fact_name_most = 0
-fact_nonempty_call = (n: int) -> bool:
-    if nkids(n) != 1 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or fns[int(nodes[n].sym)].decl == 0: return false
-    if fact_name_peek == 0:
-        fact_name_peek = intern("peek")
-        fact_name_peek_priority = intern("peek_priority")
-        fact_name_take = intern("pop")
-        fact_name_least = intern("min")
-        fact_name_most = intern("max")
-    d = int(fns[int(nodes[n].sym)].decl)
-    name = int(nodes[d].name)
-    if name != fact_name_take and name != fact_name_peek and name != fact_name_peek_priority and name != fact_name_least and name != fact_name_most: return false
-    path = files[pos_file(nodes[d].pos)].path
-    if name == fact_name_least or name == fact_name_most:
-        rk = tkind(fact_type(ntype(kid(n, 0))))
-        # (an N-D array's reduces its flat storage: `m.data.length >? 0`)
-        if path == lib_dir + "/std/nd.jo": return is_nd(representation_type(ntype(kid(n, 0))))
-        return path == lib_dir + "/core/array.jo" and (rk == .array or rk == .fixed)
-    if path == lib_dir + "/std/heap.jo": return true
-    name == fact_name_take and path == lib_dir + "/std/dewy_sets.jo" and is_dewy_set_type(representation_type(ntype(kid(n, 0))))
 
-fact_nonempty_check = (n: int, s: mut FactState, values: int[]):
-    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
-    t = fact_type(ntype(kid(n, 0)))
-    nd = is_nd(representation_type(t))
-    length = if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else if nd: fact_nd_data_length(s, fact_map_receiver(s, n, values[0])) else: fact_project(s, fact_map_receiver(s, n, values[0]), -1, false, T_INT)
-    # (the constant first: the state is taken before later arguments run)
-    one = fact_constant(s, 1)
-    c = fact_compare(s, .ge, length, one)
-    if fact_probe_on:
-        fact_probe_record(n, c == 1)
-        return
-    if c == 1: return
-    receiver = wit_text(kid(n, 0))
-    if nd and receiver != "": receiver = "{receiver}.data"
-    rk = tkind(t)
-    what = if rk == .array or rk == .fixed or nd: "array" else if is_dewy_set_type(representation_type(ntype(kid(n, 0)))): "set" else: "heap"
-    shown = if receiver != "": "`{receiver}`" else: "the {what}"
-    relation = if receiver != "": "{receiver}.length >? 0" else: ""
-    if c == 0:
-        wit_help(relation)
-        if dir_defer(n, "{shown} is empty", true): return
-        wit_fail(nodes[n].pos, "{shown} is empty")
-        return
-    wit_unknown(n, fact_bound(s, length), "{shown} is nonempty", 0, relation)
 
 # A program's `sum(xs)` of checked 64-bit integers (core/array.jo; an N-D
 # array's sums its flat storage, std/nd.jo) fails only when the exact sum
@@ -1243,92 +1073,11 @@ fact_nonempty_check = (n: int, s: mut FactState, values: int[]):
 # comprehension's pushes, the type's range) times the length's upper bound.
 # Demand: these calls only; O(1), or O(elements <= 64) for an inventory.
 fact_name_sum = 0
-fact_exact_sum_call = (n: int) -> bool:
-    if nkids(n) != 1 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return false
-    d = int(fns[int(nodes[n].sym)].decl)
-    if d == 0 or pos_in_lib(nodes[n].pos): return false
-    if fact_name_sum == 0: fact_name_sum = intern("sum")
-    if int(nodes[d].name) != fact_name_sum: return false
-    fact_exact_sum_element(fact_type(ntype(kid(n, 0))), files[pos_file(nodes[d].pos)].path) != 0
 
-# (the checked 64-bit element type of a summed array, or 0)
-fact_exact_sum_element = (t: int, path: str) -> int:
-    e = 0
-    if is_nd(representation_type(t)):
-        if path == lib_dir + "/std/nd.jo": e = nd_elem(representation_type(t))
-    else if path == lib_dir + "/core/array.jo" and (tkind(t) == .array or tkind(t) == .fixed): e = telem(t)
-    if e == 0: return 0
-    e = fact_type(e)
-    if not is_int(e) or e == T_MATH_INT or types[e].bits != 64 or int_policy(e) != 0: return 0
-    e
 
-fact_exact_sum_check = (n: int, s: mut FactState, values: int[]):
-    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
-    t = fact_type(ntype(kid(n, 0)))
-    d = int(fns[int(nodes[n].sym)].decl)
-    e = fact_exact_sum_element(t, files[pos_file(nodes[d].pos)].path)
-    base = fact_map_receiver(s, n, values[0])
-    nd = is_nd(representation_type(t))
-    if nd: base = fact_project(s, base, intern("data"), false, mk_array(nd_elem(representation_type(t))))
-    length = if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, base, -1, false, T_INT)
-    hull = fact_element_hull(s, base, e)
-    proven = fact_exact_sum_fits(s, base, fact_bound(s, length), hull, e)
-    if fact_probe_on:
-        fact_probe_record(n, proven)
-        return
-    if proven: return
-    receiver = wit_text(kid(n, 0))
-    shown = if receiver != "": "`{receiver}`" else: "the array"
-    # (an `int` total is exact: adding into one needs no bound. O(1))
-    if dewy_at(nodes[n].pos): err_notes.push((-1, "help: add into an `int` instead, which never overflows: `let total = 0` then `loop x in xs total += x`"))
-    wit_unknown(n, hull, "the exact sum of {shown} fits `{dt(e)}`", 0, "", "bounds on its elements and length that keep every running sum in range")
 
-# What every element of base (of type e) lies in: a fill's value, else the
-# comprehension hull within e's range. O(1) indexed lookups.
-fact_element_hull = (s: mut FactState, base: int, e: int) -> FactBound:
-    copy = fact_projection_find(s, base, FACT_ELEMENT_COPY, false)
-    if copy >= 0: return fact_bound(s, s.projections[copy].value)
-    b = fact_domain(e)
-    if fact_hull_owner == fact_owner:
-        i = fact_projection_find(s, base, FACT_ELEMENT_VALUE, false)
-        if i >= 0:
-            h = fact_bound(s, s.projections[i].value)
-            if not h.wide: b = FactBound(max(b.lo, h.lo), min(b.hi, h.hi), h.nz, h.reason, h.witness)
-    b
 
-# Whether every running sum of base's elements fits e (int64 or uint64):
-# the positive upper bounds' total within e's maximum and the negative lower
-# bounds' within its minimum, as unsigned magnitudes. O(parts).
-fact_exact_sum_fits = (s: mut FactState, base: int, count: FactBound, hull: FactBound, e: int) -> bool:
-    unsigned = e == T_U64
-    top = if unsigned: u64(18446744073709551615) else: u64(FACT_MAX)
-    bottom = if unsigned: u64(0) else: top + u64(1)
-    up = u64(0); down = u64(0)
-    parts = fact_inventory(s, base)
-    if parts.len() > 0:
-        loop p in parts:
-            m = fact_exact_sum_magnitudes(fact_bound(s, p), unsigned)
-            if m.0 > top - up or m.1 > bottom - down: return false
-            up += m.0; down += m.1
-        return true
-    if count.wide: return false
-    if count.hi <= 0: return true
-    m = fact_exact_sum_magnitudes(hull, unsigned)
-    length = u64(count.hi)
-    (m.0 == u64(0) or length <= top / m.0) and (m.1 == u64(0) or length <= bottom / m.1)
 
-# (a bound's positive upper end and negative lower end as magnitudes; a wide
-# one is the type's whole range)
-fact_exact_sum_magnitudes = (b: FactBound, unsigned: bool) -> (u64, u64):
-    up = u64(0); down = u64(0)
-    if unsigned:
-        up = if b.wide: u64(18446744073709551615) else: u64(b.hi xor FACT_MIN)
-        return (up, down)
-    hi = if b.wide: FACT_MAX else: b.hi
-    lo = if b.wide: FACT_MIN else: b.lo
-    if hi > 0: up = u64(hi)
-    if lo < 0: down = u64(-(lo + 1)) + u64(1)
-    (up, down)
 
 
 
@@ -1365,17 +1114,6 @@ fact_name_regex_find = 0
 fact_regex_counts: {int: int} = {}
 
 
-# The fields of record value base, by ordinal, for a dependent field contract.
-# O(fields); each sibling is projected once per record value.
-fact_field_args = (s: mut FactState, base: int) -> int[]:
-    t = fact_type(fact_terms[base].type)
-    if t <= 0 or types[t].kind != .struct_: return []
-    si = int(types[t].st)
-    args: int[]
-    loop i in [0..int(structs[si].nfields)):
-        f = fields[int(structs[si].fields) + i]
-        args.push(fact_project(s, base, int(f.name), false, int(f.type)))
-    args
 
 fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value: int, t: int) -> int:
     v = fact_new(s, fact_domain(t), FactTerm(type = t))
@@ -1416,20 +1154,6 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
     if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, selector, element, value))
     v
 
-# An element store replaces a fill's uniform promise. For a short, fixed
-# length and a constant position, retain the other entries' immutable values
-# as an ordinary inventory. No new analysis: O(length), capped at the same 64
-# entries as fact_inventory, and only on a demanded store to a uniform value.
-fact_fill_remainder = (s: mut FactState, before: int, after: int, selector: int, uniform: int):
-    index = fact_bound(s, selector)
-    if index.wide or index.lo != index.hi or index.lo < 0: return
-    li = fact_projection_find(s, before, -1, false)
-    if li < 0: return
-    length = fact_bound(s, s.projections[li].value)
-    if length.wide or length.lo != length.hi or length.lo <= index.lo or length.hi > 64: return
-    loop i in [0..length.lo):
-        if i != index.lo and s.projections.len() < FACT_CAP:
-            fact_add_projection(s, FactProjection(after, fact_constant(s, i), true, uniform))
 
 fact_read = (s: mut FactState, e: int) -> int:
     if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)):
