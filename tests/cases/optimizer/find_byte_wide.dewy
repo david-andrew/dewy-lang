@@ -1,0 +1,38 @@
+# find_byte at every position and length around the wide scan's edges.
+main = ():>void => {
+    let bad:int64=0
+    let total:int64=0
+    loop n in [0..300) {
+        let bytes:array<uint8>=[]
+        loop i in [0..n) {bytes.push(97 as uint8)}
+        let empty=str_from_bytes(bytes)
+        if find_byte(empty 98 as uint8) not=? -1 {bad+=1}
+        loop at in [0..n) {
+            let hit:array<uint8>=bytes.copy()
+            hit[at]=98 as uint8
+            let text=str_from_bytes(hit)
+            if find_byte(text 98 as uint8) not=? at {bad+=1}
+            total+=1
+            loop start in [0 1 31 32 33 64 65] {
+                let want=if start <=? at {at} else {-1}
+                if start <=? n and find_byte(text 98 as uint8 start) not=? want {bad+=1}
+            }
+            if at+40 <? n {
+                let two:array<uint8>=hit.copy()
+                two[at+40]=98 as uint8
+                if find_byte(str_from_bytes(two) 98 as uint8) not=? at {bad+=1}
+            }
+        }
+    }
+    # (the byte only past the searched span: the tail must stop at the span's end)
+    let long:array<uint8>=[]
+    loop i in [0..200) {long.push((if i >=? 64 {98} else {97}) as uint8)}
+    let longer=str_from_bytes(long)
+    loop stop in [65..100) {
+        let part=longer.byte_slice(0 stop)
+        if find_byte(part 99 as uint8) not=? -1 {bad+=1}
+        if find_byte(part 98 as uint8) not=? 64 {bad+=1}
+    }
+    printl"{total} {bad}"
+}
+$runtime_checks

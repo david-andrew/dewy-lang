@@ -1124,7 +1124,7 @@ emit_memeq = (d: int, a: int, bb: int, count: int, flags: bool = false, strings:
 # are clobbered. Unaligned vector reads stay inside the supplied span; the
 # tail uses one bounded eight-byte load and 0..7 scalar reads, including
 # spans ending at a guard page.
-emit_findbyte = (d: int, p: int, n: int, byte: int, invert: bool):
+emit_findbyte = (d: int, p: int, n: int, byte: int, invert: bool, wide: bool = false):
     if vloc[d] == LOC_NONE: return
     mask = dreg(d, R11)
     saved = vloc[d] < 0
@@ -1142,6 +1142,35 @@ emit_findbyte = (d: int, p: int, n: int, byte: int, invert: bool):
     sse_rr(0x66, 0x60, 1, 1)                # replicate the low byte
     sse_rr(0x66, 0x61, 1, 1)
     sse_rr(0x66, 0x70, 1, 1); b(0)
+    found_wide = -1
+    short_wide = -1
+    if wide:
+        cmp_branch_pad(10)
+        b24(0xFA8348); b(64)
+        narrow = jcc32(CC_L)
+        vex(1, 0, 1, 2, 1, 0, 1)
+        b(0x78); modrr(1, 1)                # vpbroadcastb ymm1, xmm1
+        nop_pad((32 - x_code[0].len() % 32) % 32)
+        wide_top = x_code[0].len()
+        vmov_rm(0, RCX, 0, VY)
+        vex(0, 0, 1, 1, 1, 0, 1)
+        b(0x74); modrr(0, 1)                # vpcmpeqb ymm0, ymm0, ymm1
+        vex(mask, 0, 0, 1, 1, 0, 1)
+        b(0xD7); modrr(mask, 0)             # vpmovmskb
+        cmp_branch_pad(9)
+        op_rr(0x85, false, mask, mask)
+        found_wide = jcc32(CC_NE)
+        lea(RAX, RAX, 32)
+        lea(RCX, RCX, 32)
+        lea(RDX, RDX, -32)
+        cmp_branch_pad(10)
+        b24(0xFA8348); b(32)
+        patch_branch(jcc32(CC_GE), wide_top)
+        b24(0x77F8C5)                       # vzeroupper
+        cmp_branch_pad(10)
+        b24(0xFA8348); b(8)
+        short_wide = jcc32(CC_L)
+        patch_here(narrow)
     cmp_branch_pad(10)
     b24(0xFA8348); b(16)
     word = jcc32(CC_L)
@@ -1181,6 +1210,7 @@ emit_findbyte = (d: int, p: int, n: int, byte: int, invert: bool):
     lea(RDX, RDX, -8)
     patch_here(short)
     patch_here(tail_short)
+    if short_wide >= 0: patch_here(short_wide)
     op_rr(0x01, true, RAX, RDX)             # end offset = offset + remainder
     sse_rr(0x66, 0x7E, 1, mask)             # movd mask32, xmm1 (the byte)
     tail = x_code[0].len()
@@ -1194,6 +1224,9 @@ emit_findbyte = (d: int, p: int, n: int, byte: int, invert: bool):
     lea(RAX, RAX, 1)
     lea(RCX, RCX, 1)
     jmp_back(tail)
+    if found_wide >= 0:
+        patch_here(found_wide)
+        b24(0x77F8C5)                       # vzeroupper
     patch_here(found)
     patch_here(found_word)
     rex(false, mask, 0, mask, false)
@@ -1426,7 +1459,7 @@ emit_ins = (pos: int, ins: *Ins):
         gaddr, daddr: x_emit_gaddr(pos, ins)
         faddr: x_emit_faddr(pos, ins)
         memeq, streq: x_emit_memeq(pos, ins)
-        findbyte: emit_findbyte(int(ins.dst), int(ins.a), int(ins.b), int(ins.c), ins.imm != 0)
+        findbyte: emit_findbyte(int(ins.dst), int(ins.a), int(ins.b), int(ins.c), ins.imm & 1 != 0, ins.imm & 2 != 0)
         scanbytes: emit_scanbytes(ins)
         findb: x_emit_findb(pos, ins)
         copy: x_emit_copy(pos, ins)
