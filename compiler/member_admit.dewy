@@ -1,0 +1,349 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (env eprint)
+from p"ast.jo" import (NF_AT NF_RDONLY clone has_flag kid kid_c kid_d kids nkids nkids2 nodes set_list)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST check_block check_scopes const_views copy_writes ctxs cx fns globals locals syms)
+from p"exact.jo" import (exact_note exact_stores)
+from p"expr.jo" import (CV IN decl_in_prelude is_map_type ntype)
+from p"facts.jo" import (fact_divisors fact_requests)
+from p"ide.jo" import (ide_on)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"main.jo" import (debug_vars)
+from p"member_replay.jo" import (MemberTemplate member_enabled member_kind_ordinal member_plain_types member_record member_scope_locals member_scopes member_templates member_trace member_words)
+from p"refine.jo" import (ref_narrowing refine_requests str_set_of str_sets)
+from p"refinement_types.dewy" import (FactRequest)
+from p"sibling_types.jo" import (sibling_flow sibling_known)
+from p"types.jo" import (T_MATH_INT T_STR has_var prune struct_targ structs telem types)
+from p"util.jo" import (intern name_of pos_str shown_warnings)
+from p"warn_if.jo" import (wi_fact_calls)
+
+MemberWord:type=int64<overflow='wrap'>
+member_reset=():>void=>{
+    member_templates=[]
+    member_scopes=dict<int64 int64>()
+    member_scope_locals=dict<int64 array<int64>>()
+    member_words=dict<int64 dict<string int64>>()
+    member_plain_types=dict<int64 bool>()
+    member_record=-1
+    let mode=env("DEWY_MEMBERS") ?? ""
+    # Debug variables include generated names derived from node IDs. Keep
+    # their allocation order as well as their values byte-identical under -g.
+    member_enabled=mode not=? "reference" and not debug_vars
+    member_trace=mode =? "trace"
+}
+member_dependencies=(n:MemberWord name:MemberWord @memo:dict<int64 bool>):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let known=memo.get(n)
+    if known not=? none {return known}
+    let found=nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].name =? int32(name)
+    loop child in [MemberWord(nodes.ptr[n].a) MemberWord(nodes.ptr[n].b) kid_c(n) kid_d(n)] {
+        let value=member_dependencies(child name @memo)
+        found=found or value
+    }
+    loop child in kids(n) {
+        let value=member_dependencies(child name @memo)
+        found=found or value
+    }
+    memo[n]=found
+    found
+}
+member_dependent=(n:MemberWord t:MemberTemplate):>bool=>{
+    t.dependent.get(n) ?? false
+}
+member_syntax=(n:MemberWord name:MemberWord @t:MemberTemplate value:bool=false):>bool=>$unsafe {
+    let okay=member_syntax_inner(n name @t value)
+    if not okay and member_trace {eprint("member syntax rejected {pos_str(nodes.ptr[n].pos)} kind {member_kind_ordinal(n)} name {name_of(MemberWord(nodes.ptr[n].name))}")}
+    okay
+}
+member_syntax_inner=(n:MemberWord name:MemberWord @t:MemberTemplate value:bool):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        if nodes.ptr[n].name =? int32(name) {t.positions[nodes.ptr[n].pos]=true}
+        else {
+            # Admission must not demand prelude names for body-local bindings.
+            let nm=MemberWord(nodes.ptr[n].name)
+            let sym=if nm <? check_scopes.top.length and check_scopes.top[nm] >=? MemberWord(ctxs[cx].floor) {check_scopes.syms[check_scopes.top[nm]]} else {0}
+            if sym not=? 0 and syms.ptr[sym].kind =? 'local' {
+                let l=MemberWord(syms.ptr[sym].ref)
+                if has_var(prune(MemberWord(locals.ptr[l].type))) or MemberWord(locals.ptr[l].flags) & (LF_ALIAS | LF_CAPTURED | LF_BYREF | LF_ADDR) not=? 0 {return false}
+            }
+            if sym not=? 0 and syms.ptr[sym].kind =? 'global' and has_var(prune(MemberWord(globals.ptr[MemberWord(syms.ptr[sym].ref)].type))) {return false}
+        }
+        return true
+    }
+    if k =? 'vardecl' {
+        t.bindings[MemberWord(nodes.ptr[n].name)]=true
+        if nodes.ptr[n].name =? int32(name) or nodes.ptr[n].a not=? 0 or nkids(n) >? 0 or has_flag(n NF_RDONLY) or has_flag(n NF_AT) {return false}
+        let b=MemberWord(nodes.ptr[n].b)
+        if member_dependent(b t) and (nodes.ptr[b].kind not=? 'call' or nodes.ptr[MemberWord(nodes.ptr[b].a)].kind not=? 'ident' or name_of(MemberWord(nodes.ptr[MemberWord(nodes.ptr[b].a)].name)) not=? "bytes") {return false}
+    }
+    else if k =? 'call' {
+        let callee=MemberWord(nodes.ptr[n].a)
+        if nodes.ptr[callee].kind =? 'ident' {
+            let nm=name_of(MemberWord(nodes.ptr[callee].name))
+            if nm not=? "bytes" and nm not=? "$runtime_assert" and nm not=? "$assert" {return false}
+            if nm not=? "bytes" and member_dependent(n t) {return false}
+        }
+        else if nodes.ptr[callee].kind =? 'field' {
+            if name_of(MemberWord(nodes.ptr[callee].name)) not=? "push" {return false}
+        }
+        else {return false}
+    }
+    else if k =? 'exprstmt' and not value {
+        let expr=MemberWord(nodes.ptr[n].a)
+        if nodes.ptr[expr].kind not=? 'call' {return false}
+        let callee=MemberWord(nodes.ptr[expr].a)
+        if nodes.ptr[callee].kind =? 'ident' and name_of(MemberWord(nodes.ptr[callee].name)) =? "bytes" {return false}
+    }
+    else if k =? 'field' {
+        if nodes.ptr[n].b not=? 0 or member_dependent(MemberWord(nodes.ptr[n].a) t) {return false}
+    }
+    else if k =? 'index' {
+        if member_dependent(MemberWord(nodes.ptr[n].a) t) {return false}
+    }
+    else if k =? 'binary' {
+        if member_dependent(n t) {return false}
+    }
+    else if k =? 'cast' {
+        if member_dependent(n t) {return false}
+    }
+    else if k =? 'tname' {
+        if nkids(n) >? 0 {return false}
+    }
+    else if k =? 'if_' {
+        if member_dependent(MemberWord(nodes.ptr[n].a) t) {return false}
+    }
+    else if k =? 'assign' {
+        if nodes.ptr[n].op not=? int32(47) or nodes.ptr[MemberWord(nodes.ptr[n].a)].kind not=? 'index' {return false}
+    }
+    else if k not=? 'block' and k not=? 'exprstmt' and k not=? 'field' and k not=? 'index' and k not=? 'array' and k not=? 'binary' and k not=? 'and_' and k not=? 'or_' and k not=? 'not_' and k not=? 'int_lit' and k not=? 'str_lit' and k not=? 'bool_lit' {return false}
+    # Comparison chains contain value blocks. Their final expression belongs
+    # to that block, whereas a loop-body expression could feed an outer sink.
+    let branch_value=if k =? 'if_' {value} else {true}
+    if not member_syntax(MemberWord(nodes.ptr[n].a) name @t true) or not member_syntax(MemberWord(nodes.ptr[n].b) name @t branch_value) or not member_syntax(MemberWord(nodes.ptr[n].c) name @t branch_value) or not member_syntax(MemberWord(nodes.ptr[n].d) name @t true) {return false}
+    loop i in [0..nkids(n)) {
+        let child_value=k not=? 'block' or value and i =? nkids(n) - 1
+        if not member_syntax(kid(n i) name @t child_value) {return false}
+    }
+    nkids2(n) =? 0
+}
+member_prepare=(scopes:array<int64> body:MemberWord):>void=>$unsafe {
+    if not member_enabled or scopes.length <? 2 or ide_on or cx <? 0 or const_views.length >? 0 or sibling_known.length >? 0 or sibling_flow.length >? 0 {return}
+    let t=MemberTemplate(owner=MemberWord(ctxs[cx].inst))
+    loop scope in scopes {
+        let value=MemberWord(nodes.ptr[scope].a)
+        if nodes.ptr[scope].aux not=? 0 or nodes.ptr[value].kind not=? 'str_lit' {return}
+        let text=name_of(MemberWord(nodes.ptr[value].sval))
+        t.texts.push(text)
+        t.domain[text]=true
+    }
+    member_dependencies(body MemberWord(nodes.ptr[scopes[0]].name) @t.dependent);
+    if not member_syntax(body MemberWord(nodes.ptr[scopes[0]].name) @t) {return}
+    if t.positions.length =? 0 {return}
+    let index=member_templates.length
+    member_templates.push(t)
+    loop scope in scopes {member_scopes[scope]=index}
+}
+# User overloads, including ones that lose on the first member, need the ordinary checker.
+member_candidates=(decls:array<int64>):>void=>{
+    if member_record <? 0 {return}
+    loop d in decls {
+        if not decl_in_prelude(d) {member_templates[member_record].okay=false}
+    }
+}
+# Restrict shared local storage to closed scalar/container shapes. Other types
+# can have ownership, inference or callable records outside the checked subtree.
+# Each reachable type is inspected once; recursive shapes conservatively fail.
+member_plain=(input:MemberWord):>bool=>$unsafe {
+    let t=prune(input)
+    let known=member_plain_types.get(t)
+    if known not=? none {return known}
+    member_plain_types[t]=false
+    let k=types.ptr[t].kind
+    let okay=k =? 'bool_' or k =? 'int_' or k =? 'float_' or k =? 'str_' or str_set_of(t) not=? 0
+    if k =? 'array' {okay=member_plain(telem(t))}
+    if is_map_type(t) {
+        let si=MemberWord(types.ptr[t].st)
+        okay=structs.ptr[si].ntargs =? 2 and member_plain(struct_targ(si 0)) and member_plain(struct_targ(si 1))
+    }
+    member_plain_types[t]=okay
+    okay
+}
+member_checked=(n:MemberWord t:MemberTemplate @seen:dict<int64 bool>):>bool=>$unsafe {
+    if n =? 0 or seen.has(n) {return true}
+    seen[n]=true
+    let k=nodes.ptr[n].kind
+    if t.positions.has(nodes.ptr[n].pos) and (k =? 'str_lit' or k =? 'dotname') {
+        if k =? 'dotname' {
+            let set=str_set_of(ntype(n))
+            if set =? 0 {return false}
+            if member_domain_count(set) not=? t.texts.length {return false}
+        }
+        else if ntype(n) not=? T_STR {return false}
+    }
+    if k =? 'ident' {
+        if nodes.ptr[n].aux =? int32(2) {return false}
+        if nodes.ptr[n].aux =? int32(1) {
+            let l=MemberWord(nodes.ptr[n].sym)
+            # A checked path may have become an existing narrowed alias.
+            # Text/integer inference also has use-site records outside this tree.
+            if MemberWord(locals.ptr[l].flags) & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_BYREF) not=? 0 or MemberWord(locals.ptr[l].type) =? T_STR or MemberWord(locals.ptr[l].type) =? T_MATH_INT or not member_plain(MemberWord(locals.ptr[l].type)) {return false}
+        }
+    }
+    if k =? 'lambda' or k =? 'fnref' or k =? 'partial' or k =? 'narrow' or k =? 'istype' or k =? 'iflet' or k =? 'match_' or k =? 'for_' or k =? 'while_' or k =? 'return_' {return false}
+    if k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.refinement)) or nodes.ptr[n].aux =? int32(int64(CV.set_text))) {return false}
+    if exact_stores.has(n) or ref_narrowing.has(n) or wi_fact_calls.has(n) {return false}
+    if nodes.ptr[n].type not=? 0 and has_var(prune(ntype(n))) {return false}
+    if k =? 'intrinsic' {
+        let id=nodes.ptr[n].aux as IN
+        if id not=? IN.to_bytes and id not=? IN.runtime_assert and id not=? IN.static_assert and id not=? IN.len and id not=? IN.push {return false}
+    }
+    if k =? 'call' {
+        if nodes.ptr[n].aux not=? 0 {return false}
+        let decl=MemberWord(fns.ptr[MemberWord(nodes.ptr[n].sym)].decl)
+        if not decl_in_prelude(decl) or nodes.ptr[decl].c not=? 0 {return false}
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return false}
+    if mask & 1 not=? 0 and not member_checked(MemberWord(nodes.ptr[n].a) t @seen) {return false}
+    if mask & 2 not=? 0 and not member_checked(MemberWord(nodes.ptr[n].b) t @seen) {return false}
+    if mask & 4 not=? 0 and not member_checked(MemberWord(nodes.ptr[n].c) t @seen) {return false}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {
+            if not member_checked(child t @seen) {return false}
+        }
+    }
+    true
+}
+member_copy=(n:MemberWord t:MemberTemplate text:string lm:dict<int64 int64> @nm:dict<int64 int64>):>MemberWord=>$unsafe {
+    if n =? 0 {return 0}
+    let known=nm.get(n)
+    if known not=? none {return known}
+    let nd=nodes.ptr[n]
+    let k=nd.kind
+    let c=nodes.length
+    nodes.push(nd)
+    nm[n]=c
+    if t.positions.has(nd.pos) {
+        if k =? 'str_lit' {nodes.ptr[c].sval=int32(intern(text))}
+        else if k =? 'dotname' {
+            nodes.ptr[c].aux=int32(member_words[str_set_of(ntype(n))][text])
+            nodes.ptr[c].name=int32(intern(text))
+        }
+    }
+    if k =? 'vardecl' or k =? 'ident' and nd.aux =? int32(1) {
+        let local=lm.get(int64(nd.sym))
+        if local not=? none {nodes.ptr[c].sym=int32(local)}
+    }
+    let mask=isolation_children(k)
+    if mask & 1 not=? 0 {nodes.ptr[c].a=int32(member_copy(int64(nd.a) t text lm @nm))}
+    if mask & 2 not=? 0 {nodes.ptr[c].b=int32(member_copy(int64(nd.b) t text lm @nm))}
+    if mask & 4 not=? 0 {nodes.ptr[c].c=int32(member_copy(int64(nd.c) t text lm @nm))}
+    if mask & 16 not=? 0 {
+        let children:array<int64>=[]
+        loop i in [0..nkids(n)) {children.push(member_copy(kid(n i) t text lm @nm))}
+        set_list(c children)
+    }
+    let divisor=fact_divisors.get(n)
+    if divisor not=? none {fact_divisors[c]=divisor}
+    exact_note(c)
+    c
+}
+member_scope=(scope:MemberWord):>bool=>$unsafe {
+    let index=member_scopes.get(scope) ?? -1
+    if index <? 0 {return false}
+    if not member_templates[index].okay {
+        nodes.ptr[scope].b=int32(clone(MemberWord(nodes.ptr[scope].b)))
+        return false
+    }
+    if member_templates[index].body =? 0 {
+        let owner=member_templates[index].owner
+        let first_local=fns.ptr[owner].locals.length
+        let first_request=fact_requests.length
+        let first_refine=refine_requests.length
+        let before_warnings=shown_warnings.length
+        let previous=member_record
+        member_record=index
+        check_block(MemberWord(nodes.ptr[scope].b) 0 false);
+        let t=member_templates[index]
+        t.body=MemberWord(nodes.ptr[scope].b)
+        loop i in [first_local..fns.ptr[owner].locals.length) {
+            let l=fns.ptr[owner].locals[i]
+            t.locals.push(l)
+            if not t.bindings.has(MemberWord(locals.ptr[l].name)) {t.okay=false}
+            if MemberWord(locals.ptr[l].flags) & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_BYREF | LF_CONST) not=? 0 or has_var(prune(MemberWord(locals.ptr[l].type))) or MemberWord(locals.ptr[l].type) =? T_STR or MemberWord(locals.ptr[l].type) =? T_MATH_INT or locals.ptr[l].const_init not=? 0 {t.okay=false}
+        }
+        let seen=dict<int64 bool>()
+        if not member_checked(t.body t @seen) or before_warnings not=? shown_warnings.length {t.okay=false}
+        loop i in [first_request..fact_requests.length) {
+            if fact_requests[i].owner =? owner {
+                let request=fact_requests[i].node
+                t.requests.push(request)
+                if not seen.has(request) {t.okay=false}
+            }
+        }
+        loop i in [first_refine..refine_requests.length) {
+            if refine_requests[i].owner =? owner {
+                let request=refine_requests[i].node
+                t.refinements.push(request)
+                if not seen.has(request) {t.okay=false}
+            }
+        }
+        # Admission may have populated destination-domain counts.
+        t.decisions=member_templates[index].decisions
+        member_templates[index]=t
+        if t.okay {member_scope_locals[scope]=t.locals}
+        member_record=previous
+        if member_trace {eprint("member template {pos_str(nodes.ptr[scope].pos)}: {t.okay}, {t.locals.length} locals, {t.requests.length} obligations, {t.refinements.length} refinements")}
+        return true
+    }
+    let t=member_templates[index]
+    let lm=dict<int64 int64>()
+    let copied_locals:array<int64>=[]
+    loop old in t.locals {
+        let l=locals.length
+        locals.push(locals.ptr[old])
+        fns.ptr[t.owner].locals.push(l)
+        lm[old]=l
+        copied_locals.push(l)
+        let write=copy_writes.get(old)
+        if write not=? none {copy_writes[l]=write}
+    }
+    let nm=dict<int64 int64>()
+    let text=name_of(MemberWord(nodes.ptr[MemberWord(nodes.ptr[scope].a)].sval))
+    let body=member_copy(t.body t text lm @nm)
+    loop request in t.requests {
+        let copy=nm.get(request)
+        if copy not=? none {fact_requests.push(FactRequest(copy t.owner))}
+    }
+    loop request in t.refinements {
+        let copy=nm.get(request)
+        if copy not=? none {refine_requests.push(FactRequest(copy t.owner))}
+    }
+    nodes.ptr[scope].b=int32(body)
+    member_scope_locals[scope]=copied_locals
+    true
+}
+# A destination domain intersects the source in this many members; compute it
+# once per body/destination. A partial intersection makes a literal overload's
+# score differ between members, so the whole loop uses ordinary checking.
+member_domain_count=(set:MemberWord):>MemberWord=>{
+    let known=member_templates[member_record].decisions.get(set)
+    if known not=? none {return known}
+    if not member_words.has(set) {
+        let words=dict<string int64>()
+        loop i in 0.. and text in str_sets[set] {words[text]=i}
+        member_words[set]=words
+    }
+    let count:MemberWord=0
+    loop text in str_sets[set] {
+        if member_templates[member_record].domain.has(text) {count += 1}
+    }
+    member_templates[member_record].decisions[set]=count
+    count
+}
+member_string_decision=(n:MemberWord set:MemberWord):>void=>$unsafe {
+    if member_record <? 0 or not member_templates[member_record].positions.has(nodes.ptr[n].pos) {return}
+    let count=member_domain_count(set)
+    if count >? 0 and count <? member_templates[member_record].texts.length {member_templates[member_record].okay=false}
+}
