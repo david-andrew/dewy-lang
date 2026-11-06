@@ -1,0 +1,1043 @@
+$runtime_checks
+from p"ast.jo" import (NF_INCLUSIVE NF_U64 has_flag kid kids nkids nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_SHARED locals)
+from p"checker_tokens.dewy" import (Tok)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"exact.jo" import (exact_demands exact_has_node exact_has_store exact_proof_demands)
+from p"expr.jo" import (CV IN is_nd ntype oversized_literal)
+from p"facts.jo" import (FACT_ACTIVE FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_ELEMENT_VALUE FACT_MEMBER FACT_ROW_ELEMENTS FACT_ROW_SOURCE FactLoop FactProjection FactPushes FactState fact_add_fits fact_add_projection fact_assume fact_bind fact_binding fact_bound fact_carried_cache fact_changes fact_compare fact_component_selector fact_comprehensions fact_constant fact_difference fact_difference_head fact_difference_next fact_distance fact_domain fact_element_hull fact_entails fact_exact_demand fact_fresh fact_hull fact_hull_owner fact_implication fact_incident fact_int_component fact_int_components fact_int_rows fact_inventory fact_length_max fact_loop_body fact_loop_elements fact_loop_exhausted fact_loop_header fact_loop_index fact_loop_stable fact_may_return fact_new fact_owner fact_partial_opaque fact_project fact_projection_after fact_projection_find fact_projection_first fact_projection_origin fact_push_frames fact_pushed_rows_cache fact_scalar fact_set_bound fact_shortest fact_slice fact_slice_flags fact_slot fact_speculating fact_summary_owner fact_terms fact_type)
+from p"facts_progress.dewy" import (fact_progress_same fact_progress_strip)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
+from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_STR T_U64 is_int targ telem tkind types)
+
+PushWord:type=int64<overflow='wrap'>
+# A counted push: a local array the loop body pushes onto exactly once on
+# every completed iteration, with readonly uses but no other mutation (no
+# break), so after the loop its length is its entry length plus the
+# iteration count (a comprehension's accumulator, `out.push(f(x))`).
+fact_mentions=(n:PushWord l:PushWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {return nodes.ptr[n].aux =? int32(1) and nodes.ptr[n].sym =? int32(l)}
+    let mask=isolation_children(k)
+    if mask <? 0 {return k not=? 'lambda'}
+    if mask & 1 not=? 0 and fact_mentions(PushWord(nodes.ptr[n].a) l) {return true}
+    if mask & 2 not=? 0 and fact_mentions(PushWord(nodes.ptr[n].b) l) {return true}
+    if mask & 4 not=? 0 and fact_mentions(PushWord(nodes.ptr[n].c) l) {return true}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {
+            let c=kid(n i)
+            if fact_mentions(c l) {return true}
+        }
+    }
+    false
+}
+fact_labeled_exit=(n:PushWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'break_' or k =? 'continue_' {return nodes.ptr[n].name not=? 0}
+    let mask=isolation_children(k)
+    if mask <? 0 {return k not=? 'lambda'}
+    if mask & 1 not=? 0 and fact_labeled_exit(PushWord(nodes.ptr[n].a)) {return true}
+    if mask & 2 not=? 0 and fact_labeled_exit(PushWord(nodes.ptr[n].b)) {return true}
+    if mask & 4 not=? 0 and fact_labeled_exit(PushWord(nodes.ptr[n].c)) {return true}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {
+            let c=kid(n i)
+            if fact_labeled_exit(c) {return true}
+        }
+    }
+    false
+}
+fact_push_receiver=(e:PushWord):>PushWord=>$unsafe {
+    if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) {return PushWord(nodes.ptr[e].sym)}
+    0
+}
+# Counts on normal and continue edges (-2: absent; -1: unknown). Returning
+# paths leave the function, so only completed iterations constrain the count.
+# A break or other mutation still refuses the counted-loop proof. O(body)
+# per demanded candidate (at most eight); no new loop iterations or budget.
+fact_push_merge=(a:PushWord b:PushWord):>PushWord=>{
+    if a =? -2 {b} else if b =? -2 {a} else if a =? b {a} else {-1}
+}
+fact_push_then=(a:[int64 int64] b:[int64 int64]):>[int64 int64]=>{
+    if a[0] =? -2 {return a}
+    if a[0] <? 0 or a[1] =? -1 or b[0] =? -1 or b[1] =? -1 {return [(-1) (-1)]}
+    let normal=if b[0] =? -2 {-2} else {a[0] + b[0]}
+    let continued=fact_push_merge(a[1] (if b[1] =? -2 {-2} else {a[0] + b[1]}))
+    [normal continued]
+}
+fact_push_flow=(n:PushWord l:PushWord):>[int64 int64]=>$unsafe {
+    if n =? 0 {return [0 (-2)]}
+    let k=nodes.ptr[n].kind
+    if k =? 'break_' {return [(-1) (-1)]}
+    if k =? 'continue_' {
+        if nodes.ptr[n].name not=? 0 or nodes.ptr[n].ival not=? 0 {return [(-1) (-1)]}
+        return [(-2) 0]
+    }
+    if k =? 'return_' {return fact_push_then(fact_push_flow(PushWord(nodes.ptr[n].a) l) [(-2) (-2)])}
+    if k =? 'lambda' {return [0 (-2)]}
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.push)) and nkids(n) =? 2 and fact_push_receiver(kid(n 0)) =? l {
+        return fact_push_then(fact_push_flow(kid(n 1) l) [1 (-2)])
+    }
+    if k =? 'assign' and fact_mentions(PushWord(nodes.ptr[n].a) l) {return [(-1) (-1)]}
+    if (k =? 'call' or k =? 'addr' or k =? 'intrinsic' and nodes.ptr[n].aux not=? int32(int64(IN.len))) and fact_mentions(n l) {return [(-1) (-1)]}
+    # A nested loop may exit this one only with a labeled edge. Any return
+    # in it ends the function; a normal exit makes no change to this array.
+    if k =? 'while_' or k =? 'for_' {
+        if fact_mentions(n l) or fact_labeled_exit(n) {return [(-1) (-1)]}
+        return [0 (-2)]
+    }
+    if k =? 'and_' or k =? 'or_' or k =? 'coalesce' {
+        if fact_mentions(n l) {return [(-1) (-1)]}
+        let a=fact_push_flow(PushWord(nodes.ptr[n].a) l)
+        let b=fact_push_flow(PushWord(nodes.ptr[n].b) l)
+        return fact_push_then(a [fact_push_merge(0 b[0]) b[1]])
+    }
+    if k =? 'if_' or k =? 'iflet' {
+        let condition=fact_push_flow(PushWord(nodes.ptr[n].a) l)
+        if fact_mentions(PushWord(nodes.ptr[n].a) l) {return [(-1) (-1)]}
+        let y=fact_push_flow(PushWord(nodes.ptr[n].b) l)
+        let z=fact_push_flow(PushWord(nodes.ptr[n].c) l)
+        return fact_push_then(condition [fact_push_merge(y[0] z[0]) fact_push_merge(y[1] z[1])])
+    }
+    if k =? 'match_' {
+        if fact_mentions(PushWord(nodes.ptr[n].a) l) {return [(-1) (-1)]}
+        let common:[int64 int64]=[(-2) (-2)]
+        let exhaustive=false
+        loop i in [0..nkids(n)) {
+            let arm=kid(n i)
+            if fact_mentions(PushWord(nodes.ptr[arm].a) l) or fact_mentions(PushWord(nodes.ptr[arm].c) l) {return [(-1) (-1)]}
+            loop guard in [PushWord(nodes.ptr[arm].a) PushWord(nodes.ptr[arm].c)] {
+                let g=fact_push_flow(guard l)
+                if g[0] =? -1 or g[1] not=? -2 {return [(-1) (-1)]}
+            }
+            loop j in [0..nkids(arm)) {
+                let p=kid(arm j)
+                if fact_mentions(p l) {return [(-1) (-1)]}
+                if nodes.ptr[p].kind =? 'pwild' and nodes.ptr[arm].a =? 0 and nodes.ptr[arm].c =? 0 {exhaustive=true}
+            }
+            let c=fact_push_flow(PushWord(nodes.ptr[arm].b) l)
+            common=[fact_push_merge(common[0] c[0]) fact_push_merge(common[1] c[1])]
+        }
+        if not exhaustive {common[0]=fact_push_merge(common[0] 0)}
+        return fact_push_then(fact_push_flow(PushWord(nodes.ptr[n].a) l) common)
+    }
+    if k =? 'ident' {return [0 (-2)]}
+    let mask=isolation_children(k)
+    if mask <? 0 {return [(-1) (-1)]}
+    let total:[int64 int64]=[0 (-2)]
+    let parts:array<int64>=[]
+    if mask & 1 not=? 0 {parts.push(PushWord(nodes.ptr[n].a))}
+    if mask & 2 not=? 0 {parts.push(PushWord(nodes.ptr[n].b))}
+    if mask & 4 not=? 0 {parts.push(PushWord(nodes.ptr[n].c))}
+    if mask & 16 not=? 0 {parts.extend(kids(n))}
+    loop c in parts {
+        if total[0] =? -2 {break}
+        total=fact_push_then(total fact_push_flow(c l))
+        if total[0] =? -1 or total[1] =? -1 {return [(-1) (-1)]}
+    }
+    total
+}
+fact_push_count=(n:PushWord l:PushWord):>PushWord=>{
+    let flow=fact_push_flow(n l)
+    fact_push_merge(flow[0] flow[1])
+}
+# Each counted-push local of loop n with its entry length.
+fact_counted_pushes=(n:PushWord @s:FactState):>array<[int64 int64]>=>$unsafe {
+    let found:array<[int64 int64]>=[]
+    let body=PushWord(nodes.ptr[n].b)
+    let candidates:array<int64>=[]
+    fact_push_candidates(body @candidates)
+    loop l in candidates {
+        if PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) not=? 0 {continue}
+        if tkind(fact_type(PushWord(locals.ptr[l].type))) not=? 'array' {continue}
+        if fact_mentions(PushWord(nodes.ptr[n].a) l) or fact_push_count(body l) not=? 1 {continue}
+        let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[l].owner) l))
+        if i <? 0 {continue}
+        found.push([l fact_project(@s s.bindings[i].value (-1) false T_INT)])
+    }
+    found
+}
+# Each local of loop n that every iteration pushes onto a fixed k >= 2 times
+# (`[loop x in xs {x x*x}]`), with its entry length and k. O(candidate arrays).
+fact_scaled_pushes=(n:PushWord @s:FactState):>array<[int64 int64 int64]>=>$unsafe {
+    let found:array<[int64 int64 int64]>=[]
+    let body=PushWord(nodes.ptr[n].b)
+    let candidates:array<int64>=[]
+    fact_push_candidates(body @candidates)
+    loop l in candidates {
+        if PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) not=? 0 {continue}
+        if tkind(fact_type(PushWord(locals.ptr[l].type))) not=? 'array' or fact_mentions(PushWord(nodes.ptr[n].a) l) {continue}
+        let k=fact_push_count(body l)
+        if k <? 2 or k >? 64 {continue}
+        let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[l].owner) l))
+        if i <? 0 {continue}
+        found.push([l fact_project(@s s.bindings[i].value (-1) false T_INT) k])
+    }
+    found
+}
+# After the loop: each such local's length is its entry length plus k times the count.
+fact_scaled_lengths=(n:PushWord @s:FactState pushes:array<[int64 int64 int64]> count:PushWord):>void=>$unsafe {
+    loop entry in pushes {
+        if s.projections.length >=? FACT_CAP {return}
+        let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[entry[0]].owner) entry[0]))
+        if i <? 0 {continue}
+        let c=fact_bound(s count)
+        let e=fact_bound(s entry[1])
+        let k=entry[2]
+        if c.wide or e.wide or c.lo <? 0 or e.lo <? 0 or e.lo not=? e.hi or c.hi >? fact_length_max() {continue}
+        # (the array holds count*k elements, so the product is a length too:
+        # within the enabled ceiling)
+        let cap=fact_length_max()
+        let added=fact_new(@s FactBound(min(PushWord(c.lo) * PushWord(k) PushWord(cap)) min(PushWord(c.hi) * PushWord(k) PushWord(cap))) FactTerm('star' count fact_constant(@s k) n T_INT))
+        let total=added
+        if e.lo not=? 0 {
+            total=fact_new(@s FactBound(min(PushWord(c.lo) * PushWord(k) + PushWord(e.lo) PushWord(cap)) min(PushWord(c.hi) * PushWord(k) + PushWord(e.lo) PushWord(cap))) FactTerm('plus' entry[1] added n T_INT))
+            fact_difference(@s total added e.lo n)
+            fact_difference(@s added total (-e.lo) n)
+        }
+        fact_add_projection(@s FactProjection(s.bindings[i].value (-1) false total))
+    }
+}
+# A counted push never shrinks its receiver. Seed the entry lower bound at
+# each head; its upper bound remains unknown until the counted exit. An entry
+# length with rows (`d <=? out.length`) is also at most the current length,
+# so those rows reach it (LZ77's `out[out.length - d]` while pushing).
+# O(candidate arrays), using the same checked inventory as counted lengths.
+fact_growing_lengths=(@s:FactState pushes:array<[int64 int64]>):>void=>$unsafe {
+    loop item in pushes {
+        let lower=fact_bound(s item[1]).lo
+        let related=fact_slot(s item[1]) >=? 0 and fact_incident(s item[1]) >=? 0
+        if lower <=? 0 and not related {continue}
+        let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[item[0]].owner) item[0]))
+        if i <? 0 {continue}
+        let length=fact_project(@s s.bindings[i].value (-1) false T_INT)
+        let b=fact_bound(s length)
+        b.lo=max(b.lo lower)
+        fact_set_bound(@s length b)
+        if related {fact_difference(@s item[1] length 0)}
+    }
+}
+# Each other local of loop n that the body changes only by pushes, however
+# many (`if keep(x) out.push(x)`), with its entry length when that has a
+# positive lower bound or rows: a length that never shrinks keeps it at every head
+# and exit (fact_growing_lengths). O(candidate arrays x body).
+fact_growing_pushes=(n:PushWord @s:FactState counted:array<[int64 int64]>):>array<[int64 int64]>=>$unsafe {
+    let found:array<[int64 int64]>=[]
+    let body=PushWord(nodes.ptr[n].b)
+    let candidates:array<int64>=[]
+    fact_push_candidates(body @candidates)
+    loop l in candidates {
+        let known=false
+        loop c in counted {
+            if c[0] =? l {known=true}
+        }
+        if known or PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) not=? 0 {continue}
+        if tkind(fact_type(PushWord(locals.ptr[l].type))) not=? 'array' or fact_mentions(PushWord(nodes.ptr[n].a) l) {continue}
+        let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[l].owner) l))
+        if i <? 0 {continue}
+        let length=fact_project(@s s.bindings[i].value (-1) false T_INT)
+        if fact_bound(s length).lo <=? 0 and fact_incident(s length) <? 0 {continue}
+        let sites:array<int64>=[]
+        if fact_push_only(body l @sites) {found.push([l length])}
+    }
+    found
+}
+fact_push_candidates=(n:PushWord @out:array<int64>):>void=>$unsafe {
+    if n =? 0 or out.length >=? 8 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.push)) and nkids(n) =? 2 {
+        let l=fact_push_receiver(kid(n 0))
+        if l >? 0 and not out.contains(l) {out.push(l)}
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {fact_push_candidates(PushWord(nodes.ptr[n].a) @out)}
+    if mask & 2 not=? 0 {fact_push_candidates(PushWord(nodes.ptr[n].b) @out)}
+    if mask & 4 not=? 0 {fact_push_candidates(PushWord(nodes.ptr[n].c) @out)}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {fact_push_candidates(kid(n i) @out)}
+    }
+}
+# After the loop: each counted local's length is its entry length plus count.
+fact_counted_lengths=(n:PushWord @s:FactState pushes:array<[int64 int64]> count:PushWord):>void=>$unsafe {
+    if count =? 0 {return}
+    let c=fact_bound(s count)
+    if c.lo <? 0 {return}
+    loop entry in pushes {
+        let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[entry[0]].owner) entry[0]))
+        if i <? 0 {continue}
+        let e=fact_bound(s entry[1])
+        let lo=if fact_add_fits(e.lo c.lo) {e.lo + c.lo} else {0}
+        let hi=if fact_add_fits(e.hi c.hi) {e.hi + c.hi} else {FACT_MAX}
+        let total=fact_new(@s FactBound(min(max(lo 0) fact_length_max()) min(hi fact_length_max())) FactTerm('plus' entry[1] count n T_INT))
+        if e.lo =? e.hi {
+            fact_difference(@s total count e.lo n)
+            fact_difference(@s count total (-e.lo) n)
+        }
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(s.bindings[i].value (-1) false total))}
+    }
+}
+# Relations a range loop keeps between scalars it changes (`low <=? high`
+# while tracking a minimum and maximum): pairs of changed scalar places whose
+# entry values a row (or one shared value) relates. Candidates only, to be
+# validated by fact_range_invariants. A value with one known value (a
+# constant start) is left to its interval. At most 8 places, 8 rows.
+fact_range_candidates=(pre:FactState s:FactState):>array<[PlaceIdentity PlaceIdentity int64]>=>$unsafe {
+    let out:array<[PlaceIdentity PlaceIdentity int64]>=[]
+    let places:array<PlaceIdentity>=[]
+    let starts:array<int64>=[]
+    loop binding in s.bindings {
+        if places.length >=? 8 {break}
+        if binding.place.root not=? 'local' {continue}
+        let i=fact_binding(pre binding.place)
+        if i <? 0 or pre.bindings[i].value =? binding.value or not fact_scalar(PushWord(locals.ptr[binding.place.declaration].type)) {continue}
+        let start=pre.bindings[i].value
+        let b=fact_bound(pre start)
+        if b.lo =? b.hi {continue}
+        places.push(binding.place)
+        starts.push(start)
+    }
+    if places.length <? 2 {return out}
+    loop i in [0..places.length) {
+        loop j in [0..places.length) {
+            if i =? j or out.length >=? 8 {continue}
+            let d=fact_shortest(pre starts[i] starts[j])
+            if d not=? FACT_MAX {out.push([places[i] places[j] d])}
+        }
+    }
+    out
+}
+fact_range_assume=(@s:FactState rows:array<[PlaceIdentity PlaceIdentity int64]> at:PushWord):>void=>{
+    loop row in rows {
+        let i=fact_binding(s row[0])
+        let j=fact_binding(s row[1])
+        if i >=? 0 and j >=? 0 {fact_difference(@s s.bindings[i].value s.bindings[j].value row[2] at)}
+    }
+}
+# The candidates every backedge and break keeps (a state that is not live
+# keeps them all).
+fact_range_kept=(edges:FactLoop rows:array<[PlaceIdentity PlaceIdentity int64]>):>array<[PlaceIdentity PlaceIdentity int64]>=>{
+    let out:array<[PlaceIdentity PlaceIdentity int64]>=[]
+    loop row in rows {
+        let held=true
+        loop t in [edges.back edges.exits] {
+            if not t.live {continue}
+            let i=fact_binding(t row[0])
+            let j=fact_binding(t row[1])
+            if i <? 0 or j <? 0 or not fact_distance(t t.bindings[i].value t.bindings[j].value row[2]) {held=false}
+        }
+        if held {out.push(row)}
+    }
+    out
+}
+# A range loop's body with its loop value bound and bounded by the range.
+fact_range_body=(n:PushWord s:FactState lo:PushWord hi:PushWord):>FactState=>$unsafe {
+    let iterator=PushWord(nodes.ptr[n].a)
+    let body=s
+    let l=PushWord(nodes.ptr[n].sym)
+    let v=fact_fresh(@body PushWord(locals.ptr[l].type))
+    fact_bind(@body PlaceIdentity('local' PushWord(locals.ptr[l].owner) l) v)
+    let lower=fact_new(@body fact_domain(T_BOOL) FactTerm('ge' v lo))
+    let upper=fact_new(@body fact_domain(T_BOOL) FactTerm((if has_flag(iterator NF_INCLUSIVE) {Tok.le} else {Tok.lt}) v hi))
+    fact_assume(@body lower true)
+    if nodes.ptr[iterator].b not=? 0 {fact_assume(@body upper true)}
+    body
+}
+# Houdini over the candidates: a speculative pass with all of them assumed at
+# the head drops those a backedge or break loses, and a second pass must keep
+# the rest, or none is kept. Each kept row holds at entry and is preserved, so
+# it holds at every head and at the exit. At most two extra body passes, only
+# for a loop with related changing scalars.
+fact_range_invariants=(n:PushWord pre:FactState @s:FactState lo:PushWord hi:PushWord):>void=>{
+    if fact_loop_exhausted {return}
+    let rows=fact_range_candidates(pre s)
+    if rows.length =? 0 {return}
+    let outer=fact_speculating
+    fact_speculating += 1
+    let settled=false
+    loop round in [0..2) {
+        let trial=s
+        fact_range_assume(@trial rows n)
+        let body=fact_range_body(n trial lo hi)
+        let edges=fact_loop_body(n @body)
+        if not edges.back.live and not edges.exits.live {break}
+        let kept=fact_range_kept(edges rows)
+        if kept.length =? rows.length {
+            settled=true
+            break
+        }
+        rows=kept
+        if rows.length =? 0 {break}
+    }
+    fact_speculating=outer
+    if settled and not fact_loop_exhausted {fact_range_assume(@s rows n)}
+}
+# A bounded range can update a private scalar at most once per iteration.
+# Use declared operand ranges, not a speculative backedge: even conditional
+# updates stay within entry + [0,count] * delta. O(body nodes); nested loops
+# and exposed locals remain unknown. Fixed-width targets are demanded only by
+# static exact stores. A mathematical int counter (`count += 1`) needs no
+# store proof; its sum bounds later narrowing of the counter.
+fact_range_sums=(n:PushWord s:FactState lo:PushWord hi:PushWord):>array<[int64 FactBound]>=>$unsafe {
+    let it=PushWord(nodes.ptr[n].a)
+    if nodes.ptr[it].b =? 0 {return []}
+    let x=fact_bound(s lo)
+    let y=fact_bound(s hi)
+    if x.wide or y.wide or x.lo =? FACT_MIN or y.hi =? FACT_MAX or not fact_add_fits(y.hi (-x.lo)) {return []}
+    let count=max(0 y.hi - x.lo)
+    if has_flag(it NF_INCLUSIVE) {
+        if count =? FACT_MAX {return []}
+        count += 1
+    }
+    fact_counted_sums(n s count)
+}
+# The sums of a loop that runs at most count times (see fact_range_sums).
+fact_counted_sums=(n:PushWord s:FactState count:PushWord):>array<[int64 FactBound]>=>$unsafe {
+    let out:array<[int64 FactBound]>=[]
+    let exact=exact_proof_demands.has(fact_owner) and count <=? 1048576
+    let work=[PushWord(nodes.ptr[n].b)]
+    let stores:array<[int64 int64]>=[]
+    let seen=dict<int64 bool>()
+    let bad=dict<int64 bool>()
+    loop work.length >? 0 {
+        let e=work.pop()
+        if e =? 0 {continue}
+        let k=nodes.ptr[e].kind
+        # (creating a partial application, like a handle, writes nothing; its
+        # calls write only places the flags below exclude)
+        if k =? 'while_' or k =? 'for_' or k =? 'lambda' or k =? 'partial' and fact_partial_opaque(e) or k =? 'defer_' {return out}
+        if k =? 'assign' {
+            let a=PushWord(nodes.ptr[e].a)
+            if nodes.ptr[a].kind =? 'tuple' {return out}
+            if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) {
+                let l=PushWord(nodes.ptr[a].sym)
+                if seen.has(l) {bad[l]=true}
+                seen[l]=true
+                let store=PushWord(nodes.ptr[e].b)
+                let operation:PushWord=0
+                if exact_has_store(store) {
+                    if exact and fact_exact_demand(store) {operation=fact_progress_strip(PushWord(nodes.ptr[store].a))}
+                }
+                else if fact_type(PushWord(locals.ptr[l].type)) =? T_MATH_INT {operation=fact_progress_strip(store)}
+                if operation >? 0 and nodes.ptr[operation].kind =? 'binary' and nodes.ptr[operation].aux =? 0 and (nodes.ptr[operation].op =? int32(58) or nodes.ptr[operation].op =? int32(59)) and fact_progress_same(a PushWord(nodes.ptr[operation].a)) and not exact_has_node(PushWord(nodes.ptr[operation].b)) {
+                    stores.push([l operation])
+                }
+                else {bad[l]=true}
+            }
+        }
+        let mask=isolation_children(k)
+        if mask <? 0 {return out}
+        if mask & 1 not=? 0 {work.push(PushWord(nodes.ptr[e].a))}
+        if mask & 2 not=? 0 {work.push(PushWord(nodes.ptr[e].b))}
+        if mask & 4 not=? 0 {work.push(PushWord(nodes.ptr[e].c))}
+        if mask & 16 not=? 0 {
+            loop j in [0..nkids(e)) {work.push(kid(e j))}
+        }
+    }
+    loop item in stores {
+        let l=item[0]
+        let e=item[1]
+        if bad.has(l) or PushWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) not=? 0 {continue}
+        let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[l].owner) l))
+        if i <? 0 {continue}
+        let entry=fact_bound(s s.bindings[i].value)
+        let rhs=PushWord(nodes.ptr[e].b)
+        # A widening conversion keeps the operand's declared interval.
+        loop nodes.ptr[rhs].kind =? 'conv' and nodes.ptr[rhs].aux =? int32(int64(CV.int_)) {
+            let before=fact_domain(ntype(PushWord(nodes.ptr[rhs].a)))
+            let after=fact_domain(ntype(rhs))
+            if before.wide or after.wide or before.lo <? after.lo or before.hi >? after.hi {break}
+            rhs=PushWord(nodes.ptr[rhs].a)
+        }
+        let delta=fact_domain(ntype(rhs))
+        # (a literal step is its own interval; a mathematical int is unbounded)
+        if nodes.ptr[rhs].kind =? 'int_lit' and not oversized_literal(rhs) and not has_flag(rhs NF_U64) {delta=FactBound(nodes.ptr[rhs].ival nodes.ptr[rhs].ival)}
+        else if fact_type(ntype(rhs)) =? T_MATH_INT {continue}
+        if entry.wide or delta.wide or delta.lo <? -2147483648 or delta.hi >? 2147483647 {continue}
+        let low=min(0 delta.lo)
+        let high=max(0 delta.hi)
+        if nodes.ptr[e].op =? int32(59) {
+            low=min(0 (-delta.hi))
+            high=max(0 (-delta.lo))
+        }
+        if count >? 0 and (-low >? FACT_MAX // count or high >? FACT_MAX // count) {continue}
+        low *= count
+        high *= count
+        # (a mathematical int's endpoint sentinels mean unbounded: keep them)
+        if low not=? 0 and entry.lo =? FACT_MIN or high not=? 0 and entry.hi =? FACT_MAX {continue}
+        if not fact_add_fits(entry.lo low) or not fact_add_fits(entry.hi high) {continue}
+        out.push([l FactBound(entry.lo + low entry.hi + high)])
+    }
+    out
+}
+fact_carried_assigns=(n:PushWord):>array<int64>=>$unsafe {
+    let known=fact_carried_cache.get(n)
+    if known not=? none {return known}
+    let out:array<int64>=[]
+    let work=[PushWord(nodes.ptr[n].b)]
+    loop work.length >? 0 {
+        let e=work.pop()
+        if e =? 0 {continue}
+        let k=nodes.ptr[e].kind
+        if k =? 'assign' {
+            let a=PushWord(nodes.ptr[e].a)
+            # (declared before the loop, so not in its body; the loop's own
+            # element and hidden position are not carried)
+            let l=PushWord(nodes.ptr[a].sym)
+            if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) and l not=? PushWord(nodes.ptr[n].sym) and l not=? PushWord(nodes.ptr[n].c) and (fact_scalar(PushWord(locals.ptr[l].type)) and is_int(PushWord(locals.ptr[l].type)) or is_nd(fact_type(PushWord(locals.ptr[l].type)))) and locals.ptr[l].pos <? nodes.ptr[n].pos {out.push(e)}
+        }
+        let mask=isolation_children(k)
+        if mask <? 0 {continue}
+        if mask & 1 not=? 0 {work.push(PushWord(nodes.ptr[e].a))}
+        if mask & 2 not=? 0 {work.push(PushWord(nodes.ptr[e].b))}
+        if mask & 4 not=? 0 {work.push(PushWord(nodes.ptr[e].c))}
+        if mask & 16 not=? 0 {
+            loop i in [0..nkids(e)) {work.push(kid(e i))}
+        }
+    }
+    fact_carried_cache[n]=out
+    out
+}
+# A carried local a loop's havoc leaves without a useful bound: a mathematical
+# int (unbounded), or a fixed-width signed one where the function has exact
+# results to decide (its domain's far endpoint). O(1).
+fact_carried_type=(t0:PushWord f:PushWord):>bool=>$unsafe {
+    let t=fact_type(t0)
+    # (an N-D array a counted loop replaces, `m = m * p`: its shape settles as a while loop's does)
+    t =? T_MATH_INT or is_nd(t) or exact_demands.has(f) and fact_scalar(t) and is_int(t) and types.ptr[t].sign
+}
+# Whether a range or array loop needs its header iterated: an active carried
+# assignment that no counted sum already bounds.
+fact_iterates=(n:PushWord sums:array<[int64 FactBound]>):>bool=>$unsafe {
+    if not fact_slice.carried {return false}
+    loop e in fact_carried_assigns(n) {
+        if fact_slice_flags(e) & (FACT_MEMBER | FACT_ACTIVE) =? FACT_MEMBER {continue}
+        let l=PushWord(nodes.ptr[PushWord(nodes.ptr[e].a)].sym)
+        if not fact_carried_type(PushWord(locals.ptr[l].type) fact_owner) {continue}
+        let counted=false
+        loop sum in sums {
+            if sum[0] =? l {counted=true}
+        }
+        if not counted {return true}
+    }
+    false
+}
+# Each counted sum bounds every head of its loop: intersect it.
+fact_counted_bounds=(@s:FactState sums:array<[int64 FactBound]>):>void=>$unsafe {
+    loop sum in sums {
+        let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[sum[0]].owner) sum[0]))
+        if i <? 0 {continue}
+        let b=fact_bound(s s.bindings[i].value)
+        b.lo=max(b.lo sum[1].lo)
+        b.hi=min(b.hi sum[1].hi)
+        fact_set_bound(@s s.bindings[i].value b)
+    }
+}
+# One speculative body state of a range (range) or array (base) loop.
+fact_iteration_body=(n:PushWord header:FactState range:bool base:PushWord lo:PushWord hi:PushWord pushes:array<[int64 int64]>):>FactState=>{
+    let body=if range {fact_range_body(n header lo hi)} else {header}
+    fact_growing_lengths(@body pushes)
+    if not range {
+        fact_loop_index(n base @body)
+        fact_loop_elements(n base @body)
+    }
+    body
+}
+# A range or array loop's header from entry by fact_while's iteration: at most
+# four widening rounds, then one narrowing round. Narrowing is sound because
+# the settled header holds at every head, so entry joined with the backedge
+# from it does too. Counted sums bound every head. Demanded by fact_iterates;
+# unsettled or exhausted, the caller havocs instead. O(rounds x body), within
+# the nest's shared speculation budget.
+fact_iterate=(n:PushWord @s:FactState range:bool base:PushWord lo:PushWord hi:PushWord pushes:array<[int64 int64]> sums:array<[int64 FactBound]>):>bool=>$unsafe {
+    if fact_loop_exhausted or not fact_iterates(n sums) {return false}
+    # (a summary run that skips the body has no backedge to iterate)
+    if fact_summary_owner not=? 0 and not fact_may_return(PushWord(nodes.ptr[n].b)) {return false}
+    let outer=fact_speculating
+    let entry=s
+    let header=s
+    let settled=false
+    let edges=FactLoop()
+    fact_speculating += 1
+    loop iteration in [0..4) {
+        if fact_loop_exhausted {break}
+        let body=fact_iteration_body(n header range base lo hi pushes)
+        edges=fact_loop_body(n @body)
+        let next=fact_loop_header(@entry edges.back header n true)
+        fact_counted_bounds(@next sums)
+        settled=fact_loop_stable(header next)
+        header=next
+        if settled {break}
+    }
+    if settled and not fact_loop_exhausted {
+        header=fact_loop_header(@entry edges.back header n false)
+        fact_counted_bounds(@header sums)
+    }
+    fact_speculating=outer
+    if not settled or fact_loop_exhausted {return false}
+    # A place the loop's syntactic changes leave alone keeps its entry value
+    # at every head, even where the body's transfer forgets it (an unsafe
+    # write): both are sound, so their meet is. O(body + bindings).
+    let havoc=entry
+    fact_changes(n @havoc n)
+    loop binding in entry.bindings {
+        let i=fact_binding(havoc binding.place)
+        if i <? 0 or havoc.bindings[i].value not=? binding.value {continue}
+        let h=fact_binding(header binding.place)
+        if h <? 0 or header.bindings[h].value not=? binding.value {fact_bind(@header binding.place binding.value)}
+    }
+    s=header
+    true
+}
+# Element value/length hulls of arrays comprehensions build (filtered or not):
+# the accumulator, empty or hulled at entry, that the loop's body changes only
+# by pushing. Every push site must record a value, in any of the loop's
+# passes, which therefore all describe its elements; then the exit value's
+# elements lie in the hull. Demand: comprehension loops only, whose pushed
+# values the slice demands; O(body) per such loop, O(frames) per push.
+# Whether n changes l only by `l.push(v)`, collecting those pushes. Reads are
+# free; any other mention by a write, call or mutating intrinsic fails.
+fact_push_only=(n:PushWord l:PushWord @sites:array<int64>):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.push)) and nkids(n) =? 2 and fact_push_receiver(kid(n 0)) =? l {
+        sites.push(n)
+        return fact_push_only(kid(n 1) l @sites)
+    }
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.len)) {return true}
+    if k =? 'assign' and fact_mentions(PushWord(nodes.ptr[n].a) l) {return false}
+    if (k =? 'call' or k =? 'addr' or k =? 'intrinsic') and fact_mentions(n l) {return false}
+    if k =? 'for_' and nodes.ptr[n].aux =? 2 and fact_mentions(PushWord(nodes.ptr[n].a) l) {return false}
+    let mask=isolation_children(k)
+    if mask <? 0 {return k =? 'lambda' or not fact_mentions(n l)}
+    if mask & 1 not=? 0 and not fact_push_only(PushWord(nodes.ptr[n].a) l @sites) {return false}
+    if mask & 2 not=? 0 and not fact_push_only(PushWord(nodes.ptr[n].b) l @sites) {return false}
+    if mask & 4 not=? 0 and not fact_push_only(PushWord(nodes.ptr[n].c) l @sites) {return false}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {
+            let c=kid(n i)
+            if not fact_push_only(c l @sites) {return false}
+        }
+    }
+    true
+}
+fact_push_open=(n:PushWord @s:FactState base:PushWord=0):>bool=>$unsafe {
+    let acc=fact_comprehensions.get(n) ?? 0
+    let candidates=if fact_slice.rows {fact_pushed_rows(n)} else {[]}
+    if acc >? 0 and acc not in? candidates {candidates=[acc candidates...]}
+    if candidates.length =? 0 {return false}
+    let frame=FactPushes(n acc=acc)
+    loop l in candidates {
+        if PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) not=? 0 {continue}
+        let t=fact_type(PushWord(locals.ptr[l].type))
+        if tkind(t) not=? 'array' {continue}
+        let e=fact_type(PushWord(types.ptr[t].elem))
+        let sized=e =? T_STR or tkind(e) =? 'array'
+        let components=fact_int_components(e)
+        if not sized and components =? 0 and (not fact_scalar(e) or not is_int(e) or e =? T_U64) {continue}
+        let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[l].owner) l))
+        if i <? 0 {continue}
+        let value=s.bindings[i].value
+        if components >? 0 {
+            fact_push_open_components(n @s @frame l e value)
+            continue
+        }
+        let bound=FactBound()
+        let seen=false
+        let selector=if sized {FACT_ELEMENT_LENGTH} else {FACT_ELEMENT_VALUE}
+        let hull=fact_projection_find(s value selector false)
+        if hull >=? 0 {
+            bound=fact_bound(s s.projections[hull].value)
+            seen=true
+        }
+        else if fact_bound(s fact_project(@s value (-1) false T_INT)).hi not=? 0 {continue}
+        let sites:array<int64>=[]
+        if fact_mentions(PushWord(nodes.ptr[n].a) l) or not fact_push_only(PushWord(nodes.ptr[n].b) l @sites) or sites.length =? 0 {continue}
+        # Only empty, one-push-per-iteration row maps can preserve positions.
+        # The forward transfer below must additionally prove every row length.
+        if l =? acc and base not=? 0 and tkind(e) =? 'array' and nodes.ptr[n].aux =? 1 and not seen and tkind(fact_type(telem(fact_type(ntype(PushWord(nodes.ptr[n].a)))))) =? 'array' {
+            let flow=fact_push_flow(PushWord(nodes.ptr[n].b) l)
+            if flow[0] =? 1 and flow[1] =? -2 {
+                frame.rows=base
+                frame.matching=true
+            }
+        }
+        frame.locals.push(l)
+        frame.lengths.push(sized)
+        frame.bounds.push(bound)
+        frame.seen.push(seen)
+        frame.sites.push(sites)
+        let same:PushWord=-1
+        if tkind(e) =? 'array' {
+            let held=fact_projection_find(s value FACT_ELEMENT_SAME_LENGTH false)
+            if held >=? 0 {same=s.projections[held].value}
+            else if not seen {same=0}
+            if same >=? 0 and not frame.entry.live {frame.entry=s}
+        }
+        frame.same.push(same)
+        frame.same_base.push(0)
+        frame.same_offset.push(0)
+        let below:PushWord=-1
+        if not sized {
+            let held=fact_projection_find(s value FACT_ELEMENT_BELOW false)
+            if held >=? 0 {below=s.projections[held].value}
+            else if not seen {below=0}
+        }
+        frame.below.push(below)
+        frame.parts.push(-1)
+        if fact_int_rows(t) {fact_push_open_rows(@s @frame l value sites)}
+    }
+    if frame.locals.length =? 0 {return false}
+    frame.mark=fact_terms.length
+    fact_push_frames.push(frame)
+    true
+}
+# (an array of tuples, as `[loop i in [0..n) [i i]]`: each integer component a
+# candidate of its own, with its hull and a value it is below)
+fact_push_open_components=(n:PushWord @s:FactState @frame:FactPushes l:PushWord e:PushWord value:PushWord):>void=>$unsafe {
+    let empty=fact_bound(s fact_project(@s value (-1) false T_INT)).hi =? 0
+    let sites:array<int64>=[]
+    if fact_mentions(PushWord(nodes.ptr[n].a) l) or not fact_push_only(PushWord(nodes.ptr[n].b) l @sites) or sites.length =? 0 {return}
+    loop c in [0..fact_int_components(e)) {
+        if not fact_int_component(e c) {continue}
+        let bound=FactBound()
+        let seen=false
+        let hull=fact_projection_find(s value fact_component_selector(c false) false)
+        if hull >=? 0 {
+            bound=fact_bound(s s.projections[hull].value)
+            seen=true
+        }
+        else if not empty {continue}
+        let below:PushWord=-1
+        let held=fact_projection_find(s value fact_component_selector(c true) false)
+        if held >=? 0 {below=s.projections[held].value}
+        else if not seen {below=0}
+        frame.locals.push(l)
+        frame.lengths.push(false)
+        frame.bounds.push(bound)
+        frame.seen.push(seen)
+        frame.sites.push(sites)
+        frame.same.push(-1)
+        frame.same_base.push(0)
+        frame.same_offset.push(0)
+        frame.below.push(below)
+        frame.parts.push(c)
+    }
+}
+# (an array of integer rows, as `[loop i in [0..n) [i i]]`: every element of every row, a
+# candidate of its own beside the rows' lengths)
+fact_push_open_rows=(@s:FactState @frame:FactPushes l:PushWord value:PushWord sites:array<int64>):>void=>{
+    let bound=FactBound()
+    let seen=false
+    let hull=fact_projection_find(s value fact_component_selector(FACT_ROW_ELEMENTS false) false)
+    if hull >=? 0 {
+        bound=fact_bound(s s.projections[hull].value)
+        seen=true
+    }
+    else if fact_bound(s fact_project(@s value (-1) false T_INT)).hi not=? 0 {return}
+    let below:PushWord=-1
+    let held=fact_projection_find(s value fact_component_selector(FACT_ROW_ELEMENTS true) false)
+    if held >=? 0 {below=s.projections[held].value}
+    else if not seen {below=0}
+    frame.locals.push(l)
+    frame.lengths.push(false)
+    frame.bounds.push(bound)
+    frame.seen.push(seen)
+    frame.sites.push(sites)
+    frame.same.push(-1)
+    frame.same_base.push(0)
+    frame.same_offset.push(0)
+    frame.below.push(below)
+    frame.parts.push(FACT_ROW_ELEMENTS)
+}
+# Any element of the pushed row: a value within their hull, and below a value the loop's
+# entry evaluated when each of them is (a literal's elements, or a row with such facts).
+# A row with neither gives a value with no facts. O(row's inventory).
+fact_push_row_value=(@s:FactState row:PushWord mark:PushWord):>PushWord=>{
+    let e=fact_type(telem(fact_type(fact_terms[row].type)))
+    let parts=fact_inventory(s row)
+    if parts.length =? 0 {
+        let v=fact_new(@s fact_element_hull(@s row e) FactTerm(type=e))
+        let below=fact_projection_find(s row FACT_ELEMENT_BELOW false)
+        if below >=? 0 {fact_difference(@s v s.projections[below].value (-1) 0 16)}
+        return v
+    }
+    let b=fact_bound(s parts[0])
+    loop i in [1..parts.length) {b=fact_hull(b fact_bound(s parts[i]) 0)}
+    let v=fact_new(@s b FactTerm(type=e))
+    let top=fact_push_below(s parts[0] mark)
+    if top <? 0 {return v}
+    loop part in parts {
+        if fact_compare(s 'lt' part top) not=? 1 {return v}
+    }
+    fact_difference(@s v top (-1) 0 16)
+    v
+}
+# The pushed length v is a value equal to one loop entry held, or to the
+# length of a value it held (`if cells.length not=? header.length continue`
+# then `rows.push(cells)`): immutable, so the same at every iteration. Kept
+# as (value, 0), or (0, that value) for its length. Its rows only; O(rows of v).
+# (two steps, each at a small exact offset: a comprehension's length is its
+# count, which is its range's end, one more for an inclusive one,
+# `[loop j in [0..b.length] 0]`). Kept as (value, 0, offset) or (0, that
+# value, offset) for its length plus offset.
+fact_push_same=(@s:FactState v:PushWord entry:FactState depth:PushWord=0):>[int64 int64 int64]=>{
+    let found=fact_push_invariant(s v entry)
+    if found[0] not=? 0 or found[1] not=? 0 {return [found[0] found[1] 0]}
+    loop direction in [0..2) {
+        let ri=fact_difference_head(s v direction)
+        loop ri >=? 0 {
+            let row=s.differences[ri]
+            ri=fact_difference_next(s ri direction)
+            let w=if direction =? 0 {row.a} else {row.b}
+            if w =? v or row.limit <? -16 or row.limit >? 16 {continue}
+            # (v = w + d exactly)
+            let d=if direction =? 0 {-row.limit} else {row.limit}
+            if d =? 0 {
+                if fact_compare(s 'eq' v w) not=? 1 {continue}
+            }
+            else if not (fact_entails(s v w d) and fact_entails(s w v (-d))) {continue}
+            if depth =? 0 {
+                let deeper=fact_push_same(@s w entry 1)
+                if deeper[0] >? 0 or deeper[1] >? 0 {return [deeper[0] deeper[1] deeper[2] + d]}
+            }
+            else {
+                found=fact_push_invariant(s w entry)
+                if found[0] not=? 0 or found[1] not=? 0 {return [found[0] found[1] d]}
+            }
+        }
+    }
+    [(-1) 0 0]
+}
+fact_push_invariant=(s:FactState w:PushWord entry:FactState):>[int64 int64]=>{
+    if fact_slot(entry w) >=? 0 {return [w 0]}
+    let pi=fact_projection_origin(s w)
+    if pi >=? 0 and s.projections[pi].selector =? -1 and not s.projections[pi].element and fact_slot(entry s.projections[pi].base) >=? 0 {return [0 s.projections[pi].base]}
+    [0 0]
+}
+# A value v is below that the loop's entry evaluated (its id precedes the
+# frame's mark, so it is one value at every iteration): `i <? hi` of the
+# range `[lo..hi)`. v's rows only, O(rows of v); -1 none.
+fact_push_below=(s:FactState v:PushWord mark:PushWord):>PushWord=>{
+    let ri=fact_difference_head(s v 1)
+    loop ri >=? 0 {
+        let row=s.differences[ri]
+        ri=fact_difference_next(s ri 1)
+        if row.b <? mark and row.limit <=? -1 and fact_slot(s row.b) >=? 0 {return row.b}
+    }
+    -1
+}
+# The shared length in s (fact_push_same's triple), or 0.
+fact_push_same_value=(@s:FactState same:PushWord base:PushWord offset:PushWord=0):>PushWord=>{
+    let held:PushWord=0
+    if same >? 0 and fact_slot(s same) >=? 0 {held=same}
+    else if base >? 0 and fact_slot(s base) >=? 0 {held=fact_project(@s base (-1) false T_INT)}
+    if held =? 0 or offset =? 0 {return held}
+    let b=fact_bound(s held)
+    if not fact_add_fits(b.lo offset) or not fact_add_fits(b.hi offset) {return 0}
+    let shifted=fact_new(@s FactBound(max(0 b.lo + offset) min(b.hi + offset fact_length_max())) FactTerm('plus' held fact_constant(@s offset) 0 T_INT))
+    fact_difference(@s shifted held offset 0)
+    fact_difference(@s held shifted (-offset) 0)
+    shifted
+}
+# An array of rows (arrays).
+fact_row_array=(t0:PushWord):>bool=>$unsafe {
+    let t=fact_type(t0)
+    tkind(t) =? 'array' and tkind(fact_type(PushWord(types.ptr[t].elem))) =? 'array'
+}
+fact_pushed_rows=(n:PushWord):>array<int64>=>$unsafe {
+    let known=fact_pushed_rows_cache.get(n)
+    if known not=? none {return known}
+    let out:array<int64>=[]
+    let work=[PushWord(nodes.ptr[n].b)]
+    loop work.length >? 0 {
+        let e=work.pop()
+        if e =? 0 {continue}
+        let k=nodes.ptr[e].kind
+        if k =? 'lambda' {continue}
+        if k =? 'intrinsic' and nodes.ptr[e].aux =? int32(int64(IN.push)) and nkids(e) =? 2 {
+            let l=fact_push_receiver(kid(e 0))
+            if l >? 0 and locals.ptr[l].pos <? nodes.ptr[n].pos and l not in? out {
+                if fact_row_array(PushWord(locals.ptr[l].type)) {out.push(l)}
+            }
+        }
+        let mask=isolation_children(k)
+        if mask <? 0 {continue}
+        if mask & 1 not=? 0 {work.push(PushWord(nodes.ptr[e].a))}
+        if mask & 2 not=? 0 {work.push(PushWord(nodes.ptr[e].b))}
+        if mask & 4 not=? 0 {work.push(PushWord(nodes.ptr[e].c))}
+        if mask & 16 not=? 0 {
+            loop i in [0..nkids(e)) {work.push(kid(e i))}
+        }
+    }
+    fact_pushed_rows_cache[n]=out
+    out
+}
+fact_push_record=(n:PushWord @s:FactState value:PushWord):>void=>$unsafe {
+    let l=fact_push_receiver(kid(n 0))
+    if l <=? 0 {return}
+    loop f in [0..fact_push_frames.length) {
+        loop j in [0..fact_push_frames[f].locals.length) {
+            if fact_push_frames[f].locals[j] not=? l {continue}
+            let v=if fact_push_frames[f].lengths[j] {fact_project(@s value (-1) false T_INT)} else {value}
+            let c=fact_push_frames[f].parts[j]
+            if c =? FACT_ROW_ELEMENTS {v=fact_push_row_value(@s value fact_push_frames[f].mark)}
+            else if c >=? 0 {
+                let e=fact_type(PushWord(types.ptr[fact_type(PushWord(locals.ptr[l].type))].elem))
+                v=fact_project(@s value c false fact_type(targ(e c)))
+            }
+            let same=fact_push_frames[f].same[j]
+            let base=fact_push_frames[f].same_base[j]
+            let offset=fact_push_frames[f].same_offset[j]
+            if same =? 0 and base =? 0 {
+                let found=fact_push_same(@s v fact_push_frames[f].entry)
+                fact_push_frames[f].same[j]=found[0]
+                fact_push_frames[f].same_base[j]=found[1]
+                fact_push_frames[f].same_offset[j]=found[2]
+            }
+            else if same >=? 0 {
+                let held=fact_push_same_value(@s same base)
+                let kept=held not=? 0
+                if kept and offset =? 0 {kept=fact_compare(s 'eq' v held) =? 1}
+                else if kept {kept=fact_entails(s v held offset) and fact_entails(s held v (-offset))}
+                if not kept {
+                    fact_push_frames[f].same[j]=-1
+                    fact_push_frames[f].same_base[j]=0
+                }
+            }
+            if fact_push_frames[f].matching and l =? fact_push_frames[f].acc {
+                let loop_=fact_push_frames[f].at
+                let index=fact_binding(s PlaceIdentity('local' fact_owner PushWord(nodes.ptr[loop_].c)))
+                if index <? 0 {fact_push_frames[f].matching=false}
+                else {
+                    let row=fact_project(@s fact_push_frames[f].rows s.bindings[index].value true PushWord(locals.ptr[PushWord(nodes.ptr[loop_].sym)].type))
+                    let length=fact_project(@s row (-1) false T_INT)
+                    if fact_compare(s 'eq' v length) not=? 1 {fact_push_frames[f].matching=false}
+                }
+            }
+            let below=fact_push_frames[f].below[j]
+            if below =? 0 {fact_push_frames[f].below[j]=fact_push_below(s v fact_push_frames[f].mark)}
+            else if below >? 0 and fact_compare(s 'lt' v below) not=? 1 {fact_push_frames[f].below[j]=-1}
+            let b=fact_bound(s v)
+            fact_push_frames[f].bounds[j]=if fact_push_frames[f].seen[j] {fact_hull(fact_push_frames[f].bounds[j] b n)} else {b}
+            fact_push_frames[f].seen[j]=true
+            fact_push_frames[f].recorded[n]=true
+        }
+    }
+}
+# Close loop n's frame: each candidate every push site recorded gets its hull.
+fact_push_close=(n:PushWord @s:FactState):>void=>$unsafe {
+    let frame=fact_push_frames.pop()
+    loop j in [0..frame.locals.length) {
+        let all=frame.seen[j]
+        loop site in frame.sites[j] {
+            if not frame.recorded.has(site) {all=false}
+        }
+        let b=frame.bounds[j]
+        if not all or s.projections.length >=? FACT_CAP {continue}
+        let l=frame.locals[j]
+        let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[l].owner) l))
+        if i >=? 0 and frame.same[j] >=? 0 and fact_projection_find(s s.bindings[i].value FACT_ELEMENT_SAME_LENGTH false) <? 0 {
+            let same=fact_push_same_value(@s frame.same[j] frame.same_base[j] frame.same_offset[j])
+            if same not=? 0 and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(s.bindings[i].value FACT_ELEMENT_SAME_LENGTH false same))}
+        }
+        if i >=? 0 and frame.matching and l =? frame.acc {
+            let source=frame.rows
+            let prior=fact_projection_find(s source FACT_ROW_SOURCE false)
+            if prior >=? 0 {source=s.projections[prior].value}
+            fact_add_projection(@s FactProjection(s.bindings[i].value FACT_ROW_SOURCE false source))
+        }
+        let below=frame.below[j]
+        let c=frame.parts[j]
+        let below_selector=FACT_ELEMENT_BELOW
+        if c >=? 0 {below_selector=fact_component_selector(c true)}
+        if i >=? 0 and below >? 0 and fact_slot(s below) >=? 0 and fact_projection_find(s s.bindings[i].value below_selector false) <? 0 and s.projections.length <? FACT_CAP {
+            fact_add_projection(@s FactProjection(s.bindings[i].value below_selector false below))
+        }
+        if b.wide {continue}
+        let selector=if frame.lengths[j] {FACT_ELEMENT_LENGTH} else {FACT_ELEMENT_VALUE}
+        if c >=? 0 {selector=fact_component_selector(c false)}
+        if i <? 0 or fact_projection_find(s s.bindings[i].value selector false) >=? 0 {continue}
+        b.reason='loop_'
+        b.witness=n
+        fact_hull_owner=fact_owner
+        fact_add_projection(@s FactProjection(s.bindings[i].value selector false fact_new(@s b)))
+    }
+}
+# A local the loop sets only to its index (`found = i` before a `break`)
+# that still holds a constant K where the range ran out: past the join,
+# `found >? K` means a break exit, where found was that exit's index. What the
+# exit held of the element at that index (its value or its length) against a
+# value both states share, or a constant, becomes an implication of
+# `found >? K`, which a later guard applies (`if found <? 0 continue`). Sound:
+# the joined state is the disjunction of the two, the antecedent refutes the
+# exhausted one, and values present in both are the same evaluations.
+# Demand: range loops with such a local and a live break exit. O(P + rows of
+# each element), at most 8 implications in a state (fact_either's budget).
+fact_carried_exit=(@s:FactState l:PushWord after:FactState @exits:FactState):>void=>$unsafe {
+    let place=PlaceIdentity('local' PushWord(locals.ptr[l].owner) l)
+    let ai=fact_binding(after place)
+    let xi=fact_binding(exits place)
+    let si=fact_binding(s place)
+    if ai <? 0 or xi <? 0 or si <? 0 {return}
+    let k=fact_bound(after after.bindings[ai].value)
+    let found=exits.bindings[xi].value
+    let phi=s.bindings[si].value
+    if k.wide or k.lo not=? k.hi or phi =? found or fact_bound(exits found).lo <=? k.lo {return}
+    let held:PushWord=0
+    loop evidence in s.conditional {
+            if evidence.tag =? -2 {held += 1}
+        }
+    let ante:[Tok int64 int64 int64 int64]=[Tok.gt 0 phi 1 k.lo]
+    loop pi in [0..exits.projections.length) {
+        let p=exits.projections[pi]
+        if not p.element or p.selector not=? found or fact_slot(s p.base) <? 0 or s.projections.length + 32 >=? FACT_CAP {continue}
+        let element=fact_project(@s p.base phi true fact_terms[p.value].type)
+        # (and its parts: a length, fields, elements at shared positions; at most 16)
+        let parts=[[p.value element]]
+        let at:PushWord=0
+        loop at <? parts.length and parts.length <? 16 {
+            let qi=fact_projection_first(exits parts[at][0])
+            loop qi >=? 0 and parts.length <? 16 {
+                let q=exits.projections[qi]
+                qi=fact_projection_after(exits qi)
+                if q.element and q.selector not=? found and fact_slot(s q.selector) <? 0 {continue}
+                if not q.element and q.selector not=? -1 and q.selector <? 0 {continue}
+                let selector=if q.element and q.selector =? found {phi} else {q.selector}
+                parts.push([q.value fact_project(@s parts[at][1] selector q.element (if not q.element and q.selector =? -1 {T_INT} else {fact_terms[q.value].type}))])
+            }
+            at += 1
+        }
+        loop part in parts {
+            let x=part[0]
+            let b=fact_bound(exits x)
+            let d=fact_bound(s part[1])
+            let consequents:array<[Tok int64 int64 int64 int64]>=[]
+            if not b.wide and b.lo >? d.lo {consequents.push([Tok.ge 0 part[1] 1 b.lo])}
+            if not b.wide and b.hi <? d.hi {consequents.push([Tok.le 0 part[1] 1 b.hi])}
+            if b.nz and not d.nz and b.lo <=? 0 and b.hi >=? 0 {consequents.push([Tok.ne 0 part[1] 1 0])}
+            loop direction in [0..2) {
+                let ri=fact_difference_head(exits x direction)
+                loop ri >=? 0 {
+                    let row=exits.differences[ri]
+                    ri=fact_difference_next(exits ri direction)
+                    if row.limit not=? 0 and row.limit not=? -1 {continue}
+                    let w=if direction =? 0 {row.a} else {row.b}
+                    if w =? found {w=phi}
+                    else if fact_slot(s w) <? 0 {continue}
+                    let op=if row.limit =? 0 {Tok.le} else {Tok.lt}
+                    if direction =? 0 {consequents.push([op 0 w 0 part[1]])}
+                    else {consequents.push([op 0 part[1] 0 w])}
+                }
+            }
+            loop then in consequents {
+                if held >=? 8 or s.conditional.length >=? 32 {return}
+                fact_implication(@s ante then)
+                held += 1
+            }
+        }
+    }
+}
