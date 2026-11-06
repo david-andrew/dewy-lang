@@ -1,0 +1,273 @@
+$runtime_checks
+from p"deadlock.jo" import (DcEdge dc_actors dc_precise dc_complete dc_exclusive dc_attempts dc_edges dc_edge_at dc_cancelable_groups dc_ends dc_unknown_attempt dl_global_edges)
+from p"deadlock_channels.dewy" import (dc_capacity dc_mult dc_may_fail dc_cancelable dc_join_line dl_report_warn)
+from p"deadlock_channel_walk.dewy" import dc_collect
+from p"deadlock_locations.dewy" import (dl_key dl_name dl_line dl_must dl_path)
+from p"deadlock_waits.dewy" import dl_undecided
+from p"util.jo" import (fatal err_notes)
+
+ChannelGraphWord:type=int64<overflow='wrap'>
+dc_send_waits=(a:ChannelGraphWord ch:string upto:ChannelGraphWord through:bool):>int64=>$unsafe {
+    let evs=dc_actors.ptr[a].events
+    let at:array<int64>=if through {[]} else {evs.ptr[upto].loops}
+    let sure:ChannelGraphWord=0
+    let any:ChannelGraphWord=0
+    let unknown=false
+    let last=if through {upto + 1} else {upto}
+    let cap:ChannelGraphWord=-1
+    loop j in [0..last) {
+        let e=evs.ptr[j]
+        if dl_key(e.loc) not=? ch or e.kind not=? 1 and e.kind not=? 2 and e.kind not=? 6 and e.kind not=? 7 {continue}
+        cap=dc_capacity(e.loc)
+        let m=ChannelGraphWord(dc_mult(e.loops at))
+        if m <? 0 {
+            unknown=true
+            if e.kind =? 2 or e.kind =? 7 {sure=0}
+        } else if e.kind =? 1 or e.kind =? 6 {
+            any+=m
+            if not e.branch {
+                if e.kind =? 1 {sure+=m}
+                else if dc_exclusive.get(ch false) and cap >=? 0 {sure=min(cap sure + m)}
+            }
+        } else {
+            sure=max(ChannelGraphWord(0) sure - m)
+            if e.kind =? 2 and not e.branch {any=max(ChannelGraphWord(0) any - m)}
+        }
+    }
+    if cap >=? 0 and not unknown and any <=? cap {return 0}
+    if cap >=? 0 and sure >? cap and dc_precise and dc_complete {return 2}
+    1
+}
+dc_first_receive=(a:ChannelGraphWord j:ChannelGraphWord):>bool=>$unsafe {
+    let evs=dc_actors.ptr[a].events
+    let key=dl_key(evs.ptr[j].loc)
+    loop i in [0..j) {if evs.ptr[i].kind =? 2 and dl_key(evs.ptr[i].loc) =? key {return false}}
+    true
+}
+dc_wait_node=(a:ChannelGraphWord j:ChannelGraphWord upto:ChannelGraphWord through:bool):>[string string int64]=>$unsafe {
+    let e=dc_actors.ptr[a].events.ptr[j]
+    if e.loc.root =? 0 {return ["" "" 0]}
+    let key=dl_key(e.loc)
+    if e.kind =? 1 {
+        let w=dc_send_waits(a key upto through)
+        if w =? 0 {return ["" "" 0]}
+        let cap=dc_capacity(e.loc)
+        if w =? 2 {return ["S{key}" "sends more values into {dl_name(e.loc)} than the {cap} it holds ({dl_line(e.site)})" 2]}
+        return ["S{key}" "may wait to send into {dl_name(e.loc)} ({dl_line(e.site)})" 1]
+    }
+    if e.kind =? 2 {
+        if not dc_first_receive(a j) {return ["" "" 0]}
+        let sure:int64=if e.loc.exact and not dc_attempts.has(key) {2} else {1}
+        return ["R{key}" "waits to receive from {dl_name(e.loc)} ({dl_line(e.site)})" sure]
+    }
+    if e.kind =? 4 {
+        let sure:int64=if e.loc.exact {2} else {1}
+        return ["L{key}" "waits for the lock {dl_name(e.loc)} ({dl_line(e.site)})" sure]
+    }
+    if e.kind =? 5 {return ["J{key}" "waits for the tasks it spawned ({dl_line(e.site)})" 2]}
+    ["" "" 0]
+}
+dc_add_edge=(src:string dst:string certain0:bool text:string site:ChannelGraphWord):>void=>$unsafe {
+    let certain=certain0 and dc_precise and dc_complete
+    let key="{src}>{dst}"
+    let i=dc_edge_at.get(key)
+    if i not=? none {
+        if certain and not dc_edges.ptr[i].certain {dc_edges.ptr[i]=DcEdge(src dst certain text site)}
+        return
+    }
+    dc_edge_at[key]=dc_edges.length
+    dc_edges.push(DcEdge(src dst certain text site))
+}
+dc_hold=(a:ChannelGraphWord node:string i:ChannelGraphWord through:bool how:string ends:bool=false):>void=>$unsafe {
+    let evs=dc_actors.ptr[a].events
+    let last=if through {i + 1} else {i}
+    loop j in [0..last) {
+        let up=if through {j} else {i}
+        let result=dc_wait_node(a j up through)
+        let w=result[0]
+        let text=result[1]
+        let sure=result[2]
+        if w.length =? 0 {continue}
+        dc_add_edge(node w sure =? 2 and not ends "{dc_actors.ptr[a].name} {text}{how}" evs.ptr[j].site)
+    }
+}
+dc_edges_build=():>void=>$unsafe {
+    dc_cancelable_groups.clear()
+    loop actor in dc_actors {
+        if actor.ret not=? 0 and dc_may_fail(actor.ret) {dc_cancelable_groups[actor.group]=true}
+    }
+    let drainers:dict<string array<int64>>=[]
+    let fillers:dict<string array<int64>>=[]
+    loop a in [0..dc_actors.length) {
+        loop e in dc_actors.ptr[a].events {
+            if e.kind =? 4 or e.kind =? 5 or e.loc.root =? 0 {continue}
+            let key=dl_key(e.loc)
+            if e.kind =? 2 or e.kind =? 3 or e.kind =? 7 {
+                let list=drainers.get(key) ?? []
+                if a not in? list {list.push(a)}
+                drainers[key]=list
+            }
+            if e.kind =? 1 or e.kind =? 3 or e.kind =? 6 {
+                let list=fillers.get(key) ?? []
+                if a not in? list {list.push(a)}
+                fillers[key]=list
+            }
+        }
+    }
+    loop [key writers] in fillers {
+        let readers=drainers.get(key) ?? []
+        if writers.length =? 1 and readers.length =? 1 and not dc_actors.ptr[writers.ptr[0]].multi and not dc_actors.ptr[readers.ptr[0]].multi {dc_exclusive[key]=true}
+    }
+    loop actor in dc_actors {
+        loop e in actor.events {if e.kind =? 3 or e.kind =? 7 {dc_exclusive.remove(dl_key(e.loc));}}
+    }
+    loop a in [0..dc_actors.length) {
+        let evs=dc_actors.ptr[a].events
+        let seen_drain:dict<string bool>=[]
+        let seen_fill:dict<string bool>=[]
+        let tried_drain:dict<string bool>=[]
+        loop i in [0..evs.length) {
+            let e=evs.ptr[i]
+            if (e.kind <=? 3 or e.kind =? 6 or e.kind =? 7) and e.loc.root not=? 0 {
+                let key=dl_key(e.loc)
+                if (e.kind =? 2 or e.kind =? 3 or e.kind =? 7) and not seen_drain.has(key) {
+                    if e.kind not=? 7 {seen_drain[key]=true}
+                    if (drainers.get(key) ?? []).length =? 1 {
+                        let verb=if e.kind =? 2 or e.kind =? 7 {"receives from"} else {"closes"}
+                        dc_hold(a "S{key}" i false " before it {verb} {dl_name(e.loc)} ({dl_line(e.site)})" tried_drain.has(key))
+                    }
+                    if e.kind =? 7 {tried_drain[key]=true}
+                }
+                if (e.kind =? 1 or e.kind =? 3 or e.kind =? 6) and not seen_fill.has(key) {
+                    if e.kind not=? 6 {seen_fill[key]=true}
+                    if (fillers.get(key) ?? []).length =? 1 {
+                        let verb=if e.kind =? 1 or e.kind =? 6 {"sends into"} else {"closes"}
+                        dc_hold(a "R{key}" i false " before it {verb} {dl_name(e.loc)} ({dl_line(e.site)})")
+                    }
+                }
+            }
+            if e.held.length >? 0 and e.kind not=? 3 and e.kind not=? 4 {
+                let result=dc_wait_node(a i i true)
+                let w=result[0]
+                let text=result[1]
+                let sure=result[2]
+                if w.length >? 0 {
+                    loop h in [0..e.held.length) {
+                        if e.held.ptr[h].root =? 0 {continue}
+                        dc_add_edge("L{dl_key(e.held.ptr[h])}" w sure =? 2 and e.held.ptr[h].exact "{dc_actors.ptr[a].name} {text} while holding {dl_name(e.held.ptr[h])} (since {dl_line(e.held_sites.ptr[h])})" e.site)
+                    }
+                }
+            }
+        }
+        if dc_actors.ptr[a].group.length >? 0 and evs.length >? 0 {
+            dc_hold(a "J{dc_actors.ptr[a].group}" ChannelGraphWord(evs.length) - 1 true ", and the join of its group{dc_join_line(dc_actors.ptr[a].group)} waits for it" dc_cancelable(dc_actors.ptr[a].group))
+        }
+        loop i in [0..evs.length) {
+            let e=evs.ptr[i]
+            if e.kind >? 2 or e.loc.root =? 0 {continue}
+            let key=dl_key(e.loc)
+            let other=if e.kind =? 1 {drainers} else {fillers}
+            if other.has(key) {continue}
+            let result=dc_wait_node(a i i true)
+            let w=result[0]
+            let text=result[1]
+            let sure=result[2]
+            if w.length =? 0 {continue}
+            let what=if e.kind =? 1 {"nothing receives from it or closes it"} else {"nothing sends into it or closes it"}
+            let implicit=dc_ends.has(key)
+            let canceled=dc_cancelable(dc_actors.ptr[a].group)
+            if sure =? 2 and dc_precise and dc_complete and not implicit and not canceled {fatal(e.site "{dc_actors.ptr[a].name} {text}, and {what}: it waits forever")}
+            if implicit {what="no explicit peer operation was found (an owned end may close on drop)"}
+            if canceled {what="{what} (group cancellation may end the wait)"}
+            if dl_report_warn(e.site) {dl_undecided(e.site "{dc_actors.ptr[a].name} {text}, and {what}: it may wait forever")}
+        }
+    }
+    loop e in dl_global_edges {
+        dc_add_edge("L{dl_key(e.held)}" "L{dl_key(e.taken)}" dl_must(e.held e.held) and dl_must(e.taken e.taken) dl_path(e) e.taken_site)
+    }
+}
+dc_cycles=():>void=>$unsafe {
+    let out:dict<string array<int64>>=[]
+    loop i in [0..dc_edges.length) {
+        let list=out.get(dc_edges.ptr[i].src) ?? []
+        list.push(i)
+        out[dc_edges.ptr[i].src]=list
+    }
+    loop round in [0..2) {
+        let sure=round =? 0
+        let starts:array<string>=[]
+        loop i in [0..dc_edges.length) {
+            let s=dc_edges.ptr[i].src
+            if not s.startswith("L") and s not in? starts {starts.push(s)}
+        }
+        loop s in starts {
+            let prev:dict<string int64>=[]
+            let queue:array<string>=[s]
+            let q:ChannelGraphWord=0
+            let found=false
+            loop q <? queue.length and not found {
+                let v=queue.ptr[q]
+                q+=1
+                loop j in (out.get(v) ?? []) {
+                    if sure and not dc_edges.ptr[j].certain {continue}
+                    let w=dc_edges.ptr[j].dst
+                    if prev.has(w) {continue}
+                    prev[w]=j
+                    if w =? s {
+                        found=true
+                        break
+                    }
+                    queue.push(w)
+                }
+            }
+            if not found {continue}
+            let path:array<int64>=[]
+            let v=s
+            loop true {
+                let j=prev[v]
+                path.insert(j 0)
+                v=dc_edges.ptr[j].src
+                if v =? s {break}
+            }
+            dc_report(path sure)
+            return
+        }
+    }
+}
+dc_report=(path:array<int64> sure:bool):>void=>$unsafe {
+    let texts:array<string>=[]
+    loop j in path {texts.push(dc_edges.ptr[j].text)}
+    let first=dc_edges.ptr[path.ptr[0]]
+    let fix="Receive before sending more than a channel holds, give the channel room for what is sent first, or let a lock's place end before a channel wait"
+    let undecided=" (the compiler cannot tell whether every wait does: a count or capacity that is not literal, a group that a failure or a cancel may end, or a channel or task it cannot follow)"
+    if path.length =? 1 {
+        if sure {fatal(first.site "{first.text}: it waits for itself forever. {fix}")}
+        dl_undecided(first.site "{first.text}: it may wait for itself forever{undecided}")
+        return
+    }
+    let joined=texts.join("; ")
+    let msg="bounded channel cycle: {joined}. Each waits for the next"
+    if sure {
+        loop k in [1..path.length) {err_notes.push([dc_edges.ptr[path.ptr[k]].site "note: {dc_edges.ptr[path.ptr[k]].text}"])}
+        fatal(first.site "{msg}, so none goes on: the program waits forever. {fix}")
+    }
+    let sites:array<int64>=[]
+    loop j in path {sites.push(dc_edges.ptr[j].site)}
+    dl_undecided(first.site "{msg}, so they may wait forever{undecided}" sites)
+}
+dc_analyze=():>void=>{
+    dc_collect()
+    dc_edges_build()
+    dc_cycles()
+    loop actor in dc_actors {
+        loop e in actor.events {
+            if e.kind not=? 1 and e.kind not=? 2 {continue}
+            if (e.loc.root not=? 1 and e.loc.root not=? 2 or not e.loc.exact or e.loc.route.length >? 0) and dl_report_warn(e.site) {
+                dl_undecided(e.site "queue wait with an unresolved queue identity: the compiler cannot follow its peer; it may wait forever")
+            }
+            if (dc_unknown_attempt or dc_attempts.has(dl_key(e.loc))) and dl_report_warn(e.site) {
+                dl_undecided(e.site "queue wait on {dl_name(e.loc)} after non-waiting attempts: the compiler cannot prove the queue's occupancy or that an attempt succeeds; it may wait forever")
+            }
+        }
+    }
+}
