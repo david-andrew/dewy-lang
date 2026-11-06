@@ -1,0 +1,129 @@
+# Parse crontab lines and list the next minutes each job fires.
+Star:type = [step:int<(>? 0)>]
+Span:type = [lo:int hi:int step:int<(>? 0)>]
+Part:type = Star | Span
+
+Job:type = [name:string minute:array<Part> hour:array<Part> dom:array<Part> month:array<Part> dow:array<Part>]
+When:type = [year:int month:int<1 <=? month <=? 12> day:int hour:int minute:int]
+
+is_leap = (y:int):>bool => (y % 4 =? 0 and y % 100 not=? 0) or y % 400 =? 0
+
+days_in = (y:int m:int<1 <=? m <=? 12>):>int => {
+    let lengths = [31 28 31 30 31 30 31 31 30 31 30 31]
+    if m =? 2 and is_leap(y) return 29
+    lengths[m - 1]
+}
+
+# Sakamoto's algorithm: 0 is Sunday.
+weekday = (y:int m:int<1 <=? m <=? 12> d:int):>int => {
+    let offsets = [0 3 2 5 0 3 5 1 4 6 2 4]
+    let yy = if m <? 3 y - 1 else y
+    (yy + yy // 4 - yy // 100 + yy // 400 + offsets[m - 1] + d) % 7
+}
+
+advance = (w:When):>When => {
+    let next = w
+    next.minute += 1
+    if next.minute >=? 60 { next.minute = 0; next.hour += 1 }
+    if next.hour >=? 24 { next.hour = 0; next.day += 1 }
+    if next.day >? days_in(next.year next.month) {
+        next.day = 1
+        if next.month =? 12 { next.month = 1; next.year += 1 }
+        else next.month += 1
+    }
+    next
+}
+
+parse_part = (text:string lo:int hi:int):>Part? => {
+    let pieces = text.split("/")
+    let step = 1
+    if pieces.length =? 2 {
+        step = to_int(pieces[1]) ?? 0
+        if step <=? 0 return none
+    } else if pieces.length not=? 1 return none
+    let body = pieces[0]
+    if body =? "*" return Star[step]
+    let ends = body.split("-")
+    let a = to_int(ends[0]) ?? -1
+    let b = if ends.length =? 2 to_int(ends[1]) ?? -1 else a
+    if a <? lo or b >? hi or a >? b return none
+    Span[a b step]
+}
+
+parse_field = (text:string lo:int hi:int):>array<Part>? => {
+    let parts:array<Part> = []
+    loop piece in text.split(",") {
+        let p = parse_part(piece lo hi)
+        if p is? none return none
+        parts.push(p)
+    }
+    parts
+}
+
+parse_job = (line:string):>Job? => {
+    let words = line.split
+    if words.length not=? 6 return none
+    let minute = parse_field(words[0] 0 59)
+    let hour = parse_field(words[1] 0 23)
+    let dom = parse_field(words[2] 1 31)
+    let month = parse_field(words[3] 1 12)
+    let dow = parse_field(words[4] 0 6)
+    if minute is? none or hour is? none or dom is? none or month is? none or dow is? none return none
+    Job[words[5] minute hour dom month dow]
+}
+
+hits = (parts:array<Part> value:int lo:int):>bool => {
+    loop p in parts {
+        let found = match p {
+            s:Star => (value - lo) % s.step =? 0
+            r:Span => r.lo <=? value <=? r.hi and (value - r.lo) % r.step =? 0
+        }
+        if found return true
+    }
+    false
+}
+
+restricted = (parts:array<Part>):>bool => not (parts.length =? 1 and parts[0] is? Star)
+
+fires = (job:Job w:When):>bool => {
+    if not hits(job.minute w.minute 0) or not hits(job.hour w.hour 0) or not hits(job.month w.month 1) return false
+    let dom_ok = hits(job.dom w.day 1)
+    let dow_ok = hits(job.dow weekday(w.year w.month w.day) 0)
+    if restricted(job.dom) and restricted(job.dow) dom_ok or dow_ok else dom_ok and dow_ok
+}
+
+stamp = (w:When):>string => "{w.year}-{w.month:02}-{w.day:02} {w.hour:02}:{w.minute:02}"
+
+upcoming = (job:Job start:When count:int):>array<string> => {
+    let found:array<string> = []
+    let w = start
+    let budget = 60 * 24 * 400
+    loop found.length <? count and budget >? 0 {
+        if fires(job w) found.push(stamp(w))
+        w = advance(w)
+        budget -= 1
+    }
+    found
+}
+
+main = () => {
+    let lines = [
+        "*/15 9-10 * * 1-5 standup"
+        "0 0 29 2 * leap_report"
+        "30 8 1,15 * 5 payroll"
+        "59 23 31 12 * year_end"
+        "5,10 */6 * 11 0 sunday_scan"
+        "61 * * * * bad_minute"
+        "* * * * oops"
+        "*/0 * * * * zero_step"
+        "1-x * * * * bad_range"
+        "20-10 * * * * backwards"
+    ]
+    let start = When[2026 11 6 9 7]
+    loop line in lines {
+        let job = parse_job(line)
+        if job is? none { printl"rejected: {line}"; continue }
+        let times = upcoming(job start 4)
+        printl"{job.name}: {", ".join(times)}"
+    }
+}

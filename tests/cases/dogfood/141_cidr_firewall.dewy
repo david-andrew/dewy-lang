@@ -1,0 +1,150 @@
+# modes: native native-release
+# Classify packets against firewall rules written with CIDR blocks and port ranges.
+Proto:type = 'tcp' | 'udp' | 'any'
+Action:type = 'allow' | 'deny'
+Net:type = [base:uint32 prefix:int<0 <=? prefix <=? 32>]
+Rule:type = [action:Action proto:Proto net:Net low:int high:int]
+Packet:type = [id:int proto:Proto addr:uint32 port:int]
+Verdict:type = [id:int line:int action:Action]
+
+parse_ip = (text:string):>uint32? => {
+    let parts = text.split(".")
+    if parts.length not=? 4 return none
+    let value = 0
+    loop p in parts {
+        let n = to_int(p) ?? -1
+        if n <? 0 or n >? 255 return none
+        value = value * 256 + n
+    }
+    if value >? 0xFFFFFFFF return none
+    uint32(value)
+}
+mask_of = (prefix:int<0 <=? prefix <=? 32>):>uint32 => {
+    if prefix =? 0 return 0
+    uint32((0xFFFFFFFF << (32 - prefix)) and 0xFFFFFFFF)
+}
+parse_net = (text:string):>Net? => {
+    if text =? "any" return Net[0 0]
+    let pieces = text.split("/")
+    let ip = parse_ip(pieces[0])
+    if ip is? none return none
+    let prefix = if pieces.length =? 2 to_int(pieces[1]) ?? -1 else 32
+    if prefix <? 0 or prefix >? 32 return none
+    if (ip and mask_of(prefix)) not=? ip return none
+    Net[ip prefix]
+}
+parse_ports = (text:string):>[int int]? => {
+    if text =? "*" return [0 65535]
+    let ends = text.split("-")
+    let low = to_int(ends[0]) ?? -1
+    let high = if ends.length =? 2 to_int(ends[1]) ?? -1 else low
+    if low <? 0 or high >? 65535 or low >? high return none
+    [low high]
+}
+parse_proto = (text:string):>Proto? => {
+    loop p in members(Proto) { if text =? p return p }
+    none
+}
+parse_rule = (line:string):>Rule? => {
+    let w = line.split
+    if w.length not=? 4 return none
+    let action:Action = if w[0] =? "allow" 'allow' else if w[0] =? "deny" 'deny' else return none
+    let proto = parse_proto(w[1])
+    let net = parse_net(w[2])
+    let ports = parse_ports(w[3])
+    if proto is? none or net is? none or ports is? none return none
+    Rule[action proto net ports[0] ports[1]]
+}
+parse_packet = (line:string):>Packet? => {
+    let w = line.split
+    if w.length not=? 3 return none
+    let id = to_int(w[0]) ?? -1
+    let proto = parse_proto(w[1])
+    let target = w[2].split(":")
+    if id <? 0 or proto is? none or target.length not=? 2 return none
+    let addr = parse_ip(target[0])
+    let port = to_int(target[1]) ?? -1
+    if addr is? none or port <? 0 or port >? 65535 return none
+    Packet[id proto addr port]
+}
+
+covers = (r:Rule p:Packet):>bool =>
+    (r.proto =? 'any' or r.proto =? p.proto) and (p.addr and mask_of(r.net.prefix)) =? r.net.base and r.low <=? p.port <=? r.high
+
+decide = (rules:array<Rule> p:Packet):>Verdict => {
+    loop i in 0.. and r in rules {
+        if covers(r p) return Verdict[p.id i + 1 r.action]
+    }
+    Verdict[p.id 0 'deny']
+}
+
+dotted = (a:uint32):>string => "{a >> 24}.{(a >> 16) and 255}.{(a >> 8) and 255}.{a and 255}"
+
+judge = (rules:array<Rule> jobs:Mpmc<Packet> results:Mpmc<Verdict>):>void | Unsent<Verdict> => {
+    loop true {
+        let p = jobs.receive
+        if p is? Closed break
+        if p is? Canceled break
+        results.send(decide(rules p)) or_throw
+    }
+}
+feed = (packets:array<Packet> jobs:Mpmc<Packet>):>void | Unsent<Packet> => {
+    loop p in packets { jobs.send(p) or_throw }
+    jobs.close
+}
+keep_parsed = <T>(label:string lines:array<string> parse:<(line:string):>T?>):>array<T> => {
+    let out:array<T> = []
+    loop line in lines {
+        let r = parse(line)
+        if r is? none { printl"bad {label}: {line}"; continue }
+        out.push(r)
+    }
+    out
+}
+
+const RULES = [
+    "deny tcp 10.1.2.0/24 *" "allow tcp 10.0.0.0/8 22-443"
+    "allow udp 192.168.0.0/16 53" "deny any 0.0.0.0/0 0-1023"
+    "allow any any 8000-8999" "allow tcp 10.0.0.1/8 22"
+    "permit tcp 10.0.0.0/8 22" "allow tcp 300.0.0.0/8 22"
+    "allow tcp 10.0.0.0/33 22" "allow tcp 10.0.0.0/8 90-80"
+]
+
+const TRAFFIC = [
+    "0 tcp 10.1.2.3:80" "1 tcp 10.1.3.3:80"
+    "2 udp 192.168.7.9:53" "3 udp 192.168.7.9:54"
+    "4 tcp 8.8.8.8:8080" "5 udp 8.8.8.8:443"
+    "6 tcp 8.8.8.8:2000" "7 icmp 8.8.8.8:0"
+    "8 tcp 8.8.8:80" "9 tcp 255.255.255.255:65535"
+]
+
+main = () => {
+    let rules = keep_parsed("rule" RULES @parse_rule)
+    let packets = keep_parsed("packet" TRAFFIC @parse_packet)
+    let jobs = mpmc<Packet>(4)
+    let results = mpmc<Verdict>(16)
+    let verdicts:array<Verdict> = []
+    concurrent {
+        spawn {
+            concurrent {
+                spawn judge(rules jobs results)
+                spawn judge(rules jobs results)
+                spawn feed(packets jobs)
+            }
+            results.close
+        }
+        loop true {
+            let v = results.receive
+            if v is? Closed break
+            verdicts.push(v or_throw)
+        }
+    }
+    let ordered = verdicts.sorted(key=(v) => v.id)
+    let by_id = [loop p in packets p.id -> p]
+    loop v in ordered {
+        if v.id not in? by_id continue
+        let p = by_id[v.id]
+        printl"{p.id}: {p.proto} {dotted(p.addr)}:{p.port} -> {v.action} (rule {v.line})"
+    }
+    printl"{[loop v in ordered if v.action =? 'allow' v].length} of {ordered.length} allowed"
+}

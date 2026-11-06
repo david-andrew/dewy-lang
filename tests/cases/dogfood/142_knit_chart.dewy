@@ -1,0 +1,148 @@
+# Parse knitting patterns with nested repeats and check stitch counts row by row.
+Stitch:type = [name:string count:int]
+Repeat:type = [body:array<Step> times:int]
+Step:type = Stitch | Repeat
+Row:type = [number:int steps:array<Step>]
+Tally:type = [used:int made:int]
+
+const CONSUME = ["k"->1 "p"->1 "yo"->0 "k2tog"->2 "p2tog"->2 "ssk"->2 "kfb"->1 "sl"->1]
+const PRODUCE = ["k"->1 "p"->1 "yo"->1 "k2tog"->1 "p2tog"->1 "ssk"->1 "kfb"->2 "sl"->1]
+
+tokenize = (text:string):>array<string> => {
+    let tokens:array<string> = []
+    let word = ""
+    loop ch in text {
+        if ch =? "[" or ch =? "]" or ch =? " " or ch =? "," {
+            if word.length >? 0 { tokens.push(word); word = "" }
+            if ch =? "[" or ch =? "]" tokens.push(ch)
+        } else {
+            word = "{word}{ch}"
+        }
+    }
+    if word.length >? 0 tokens.push(word)
+    tokens
+}
+
+parse_stitch = (word:string):>Stitch? => {
+    if word in? CONSUME return Stitch[word 1]
+    # trailing digits are a count: k2, p11, but k2tog is its own stitch
+    let cut = word.length
+    loop cut >? 0 and to_int(word[cut-1]) is? int { cut -= 1 }
+    if cut =? word.length or cut =? 0 return none
+    let name = word[..cut)
+    let count = to_int(word[cut..]) ?? 0
+    if name not in? CONSUME or count <=? 0 return none
+    Stitch[name count]
+}
+
+parse_steps = (tokens:array<string> @pos:int64<(>=? 0)> nested:bool):>array<Step>? => {
+    let steps:array<Step> = []
+    loop pos <? tokens.length {
+        let t = tokens[pos]
+        if t =? "]" {
+            if not nested return none
+            return steps
+        }
+        if t =? "[" {
+            pos += 1
+            let body = parse_steps(tokens @pos true)
+            if body is? none or pos >=? tokens.length or body.length =? 0 return none
+            pos += 1
+            if pos >=? tokens.length return none
+            let count = tokens[pos]
+            if not count.startswith("x") return none
+            let times = to_int(count[1..]) ?? 0
+            if times <=? 0 return none
+            pos += 1
+            steps.push(Repeat[body times])
+            continue
+        }
+        let s = parse_stitch(t)
+        if s is? none return none
+        steps.push(s)
+        pos += 1
+    }
+    if nested return none
+    steps
+}
+
+parse_row = (line:string):>Row? => {
+    let parts = line.split(":")
+    if parts.length not=? 2 return none
+    let number = to_int(parts[0].remove_prefix("row ")) ?? -1
+    if number <? 0 return none
+    let tokens = tokenize(parts[1])
+    let pos:int64<(>=? 0)> = 0
+    let steps = parse_steps(tokens @pos false)
+    if steps is? none return none
+    Row[number steps]
+}
+
+tally = (steps:array<Step>):>Tally => {
+    let total = Tally[0 0]
+    loop step in steps {
+        match step {
+            s:Stitch => {
+                total.used += (CONSUME.get(s.name) ?? 0) * s.count
+                total.made += (PRODUCE.get(s.name) ?? 0) * s.count
+            }
+            r:Repeat => {
+                let inner = tally(r.body)
+                total.used += inner.used * r.times
+                total.made += inner.made * r.times
+            }
+        }
+    }
+    total
+}
+
+expand = (steps:array<Step>):>array<string> => {
+    let out:array<string> = []
+    loop step in steps {
+        match step {
+            s:Stitch => loop _ in [0..s.count) out.push(s.name)
+            r:Repeat => {
+                let once = expand(r.body)
+                loop _ in [0..r.times) out.extend(once)
+            }
+        }
+    }
+    out
+}
+
+const SYMBOLS = ["k"->"|" "p"->"-" "yo"->"o" "k2tog"->"/" "p2tog"->"%" "ssk"->"\\" "kfb"->"V" "sl"->"s"]
+
+check = (cast_on:int lines:array<string>):>void => {
+    let live = cast_on
+    printl"cast on {cast_on}"
+    loop line in lines {
+        let row = parse_row(line)
+        if row is? none { printl"  unreadable: {line}"; continue }
+        let t = tally(row.steps)
+        if t.used not=? live {
+            printl"  row {row.number}: needs {t.used}, has {live}"
+            continue
+        }
+        live = t.made
+        let chart = "".join([loop s in expand(row.steps) SYMBOLS.get(s) ?? "?"])
+        printl"  row {row.number}: {chart} ({live})"
+    }
+}
+
+main = () => {
+    check(12 [
+        "row 1: k2 [p1 k1]x4 k2"
+        "row 2: k1 [k2tog yo]x5 k1"
+        "row 3: [k1 [p1]x2]x4"
+        "row 4: kfb k10 kfb"
+        "row 5: k14 p1"
+        "row 6: ssk k10 k2tog"
+        "row 7: [k3 x2"
+        "row 8: q4"
+        "row 9: k2 ]"
+        "row ten: k12"
+        "row 11: []x2 k12"
+        "row 12: [k1 p1]x0 k12"
+    ])
+    check(5 ["row 1: sl1 k1 yo k3" "row 2: [p3]x2"])
+}

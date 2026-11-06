@@ -1,0 +1,148 @@
+# modes: native native-release
+# A price-time-priority matching engine: one worker task per symbol.
+Limit:type = [id:int trader:string side:string qty:int price:int]
+Market:type = [id:int trader:string side:string qty:int]
+Cancel:type = [target:int]
+Command:type = Limit | Market | Cancel
+
+Trade:type = [buyer:string seller:string qty:int price:int]
+Book:type = [bids:array<Limit> asks:array<Limit>]
+Report:type = [symbol:string trades:array<Trade> notes:array<string> bids:array<Limit> asks:array<Limit>]
+
+parse_line = (line:string):>[string Command]? => {
+    let w = line.split
+    if w.length <? 3 return none
+    let symbol = w[1]
+    if w[0] =? "cancel" {
+        let target = to_int(w[2]) ?? -1
+        return [symbol Cancel[target]]
+    }
+    if w.length <? 6 return none
+    let id = to_int(w[0]) ?? -1
+    let qty = to_int(w[4]) ?? -1
+    if id <? 0 or qty <=? 0 return none
+    if w[3] not in? ["buy" "sell"] return none
+    if w[5] =? "market" return [symbol Market[id w[2] w[3] qty]]
+    let price = to_int(w[5]) ?? -1
+    if price <=? 0 return none
+    [symbol Limit[id w[2] w[3] qty price]]
+}
+
+insert = (@levels:array<Limit> order:Limit better:<(a:int b:int):>bool>):>void => {
+    let at = 0
+    loop at <? levels.length and not better(order.price levels[at].price) { at += 1 }
+    levels.insert(order min(at levels.length))
+}
+
+# Fill an incoming order against the resting side; returns the quantity left.
+fill = (@rest:array<Limit> trader:string buying:bool qty:int limit:int? @trades:array<Trade>):>int => {
+    let left = qty
+    loop left >? 0 and rest.length >? 0 {
+        let top = rest[0]
+        if limit isnt? none {
+            if buying and top.price >? limit break
+            if not buying and top.price <? limit break
+        }
+        let n = min(left top.qty)
+        if buying trades.push(Trade[trader top.trader n top.price])
+        else trades.push(Trade[top.trader trader n top.price])
+        left -= n
+        if n =? top.qty rest.pop(0);
+        else rest[0].qty -= n
+    }
+    left
+}
+
+apply = (@book:Book cmd:Command @trades:array<Trade> @notes:array<string>):>void => {
+    match cmd {
+        c:Cancel => {
+            let before = book.bids.length + book.asks.length
+            book.bids = [loop o in book.bids if o.id not=? c.target o]
+            book.asks = [loop o in book.asks if o.id not=? c.target o]
+            if book.bids.length + book.asks.length =? before notes.push("cancel {c.target}: unknown")
+        }
+        m:Market => {
+            let left = if m.side =? "buy" fill(@book.asks m.trader true m.qty none @trades)
+                       else fill(@book.bids m.trader false m.qty none @trades)
+            if left >? 0 notes.push("market {m.id}: {left} unfilled")
+        }
+        o:Limit => {
+            let left = if o.side =? "buy" fill(@book.asks o.trader true o.qty o.price @trades)
+                       else fill(@book.bids o.trader false o.qty o.price @trades)
+            if left >? 0 {
+                let resting = o
+                resting.qty = left
+                if o.side =? "buy" insert(@book.bids resting (a b) => a >? b)
+                else insert(@book.asks resting (a b) => a <? b)
+            }
+        }
+    }
+}
+
+worker = (symbol:string inbox:Channel<Command>):>Report => {
+    let book = Book[[] []]
+    let trades:array<Trade> = []
+    let notes:array<string> = []
+    loop true {
+        let cmd = inbox.receive
+        if cmd is? Closed break
+        if cmd is? Canceled break
+        apply(@book cmd @trades @notes)
+    }
+    Report[symbol trades notes book.bids book.asks]
+}
+
+show = (r:Report fee:<(n:int):>int>):>void => {
+    printl"== {r.symbol}"
+    let volume = 0
+    let fees = 0
+    loop t in r.trades {
+        printl"  {t.buyer} buys {t.qty} from {t.seller} at {t.price}"
+        volume += t.qty * t.price
+        fees += fee(t.qty * t.price)
+    }
+    printl"  volume {volume} fees {fees}"
+    loop n in r.notes printl"  note: {n}"
+    printl"  bids: {" ".join([loop o in r.bids "{o.qty}@{o.price}"])}"
+    printl"  asks: {" ".join([loop o in r.asks "{o.qty}@{o.price}"])}"
+}
+
+const TAPE = [
+    "1 ACME ann sell 100 1050"
+    "2 ACME bob sell 50 1040"
+    "3 GLOB cam buy 70 300"
+    "4 ACME dan buy 120 1045"
+    "bogus line"
+    "5 ACME eve buy 10 market"
+    "6 GLOB fay sell 20 290"
+    "7 ACME gus buy 30 1050"
+    "cancel ACME 99"
+    "cancel GLOB 3"
+    "8 GLOB hal sell 5 market"
+    "9 ACME ivy buy 0 1000"
+    "10 ACME jon sell 500 market"
+    "11 GLOB kim buy 9 301"
+]
+
+main = () => {
+    let acme = channel<Command>(4)
+    let glob = channel<Command>(4)
+    let bps = 25
+    let fee = (notional:int):>int => notional * bps // 10000
+    concurrent {
+        let a = spawn worker("ACME" acme)
+        let g = spawn worker("GLOB" glob)
+        loop line in TAPE {
+            let parsed = parse_line(line)
+            if parsed is? none { printl"rejected: {line}"; continue }
+            let [symbol cmd] = parsed
+            if symbol =? "ACME" acme.send(cmd) or_throw
+            else if symbol =? "GLOB" glob.send(cmd) or_throw
+            else printl"unknown symbol: {symbol}"
+        }
+        acme.close
+        glob.close
+    }
+    show(a or_throw @fee)
+    show(g or_throw @fee)
+}
