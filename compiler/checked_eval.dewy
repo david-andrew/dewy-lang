@@ -95,6 +95,7 @@ let cx_T_U64:ptr<int64>=$unsafe (uint64<overflow='wrap'>(0) as ptr<int64>)
 let cx_T_U8:ptr<int64>=$unsafe (uint64<overflow='wrap'>(0) as ptr<int64>)
 let cx_ts_dewy:ptr<bool>=$unsafe (uint64<overflow='wrap'>(0) as ptr<bool>)
 let cx_raw_steps:dict<int64 int64>=[]
+let cx_raw_skip:CWord=0
 let cx_lib_dir:ptr<string>=$unsafe (uint64(0) as ptr<string>)
 let cx_host:ptr<CheckedEvalHost>=$unsafe (uint64<overflow='wrap'>(0) as ptr<CheckedEvalHost>)
 checked_eval_bind=(input:ptr<CheckedEvalInput>):>CWord=>$unsafe {
@@ -466,21 +467,66 @@ cx_is_text_of_bytes=(f:CWord):>bool=>$unsafe {
     d not=? 0 and cx_name_of(CWord(cx_nodes[0].ptr[d].name)) =? "__str_from_bytes"
 }
 # The bundled text library's few raw-memory steps, done on evaluator storage: 0 for any other
-# function, 1 `__str_from`, 2 `__buf_append_raw`, 3 `__buf_byte`, 4 `__case_text`. O(1) per call.
+# function, 1 `__str_from`, 2 `__buf_append_raw`, 3 `__buf_byte`, 4 `__case_text`, 5-7 Dewy's
+# string index, slice and length over plain text (the library walks grapheme clusters, each index
+# from the start, which interpreted is quadratic). O(1) per call.
 cx_raw_step=(f:CWord):>CWord=>$unsafe {
     let known=cx_raw_steps.get(f)
     if known not=? none {return known}
     let d=CWord(cx_fns[0][f].decl)
     let step:CWord=0
-    if d not=? 0 and cx_files[0][cx_pos_file(cx_nodes[0].ptr[d].pos)].path.startswith("{cx_lib_dir[0]}/core/") {
+    if d not=? 0 and cx_files[0][cx_pos_file(cx_nodes[0].ptr[d].pos)].path.startswith("{cx_lib_dir[0]}/") {
         let name=cx_name_of(CWord(cx_nodes[0].ptr[d].name))
         if name =? "__str_from" {step=1}
         else if name =? "__buf_append_raw" {step=2}
         else if name =? "__buf_byte" {step=3}
         else if name =? "__case_text" {step=4}
+        else if name =? "__dewy_string_index" {step=5}
+        else if name =? "__dewy_string_slice" {step=6}
+        else if name =? "__dewy_string_length" {step=7}
     }
     cx_raw_steps[f] = step
     step
+}
+# Are the first `count` bytes (all, past the end) plain ASCII one-byte clusters, none joined to the
+# next? Then a cluster's index is its byte's.
+cx_plain_text=(bytes:array<uint8> count:CWord):>bool=>$unsafe {
+    let n=min(count bytes.length)
+    loop i in [0..n) {
+        if bytes[i] >=? 128 or bytes[i] =? 13 {return false}
+    }
+    true
+}
+cx_string_step=(e:CWord f:CWord step:CWord):>CWord=>$unsafe {
+    let values:array<int64>=[]
+    loop i in [0..cx_nkids(e)) {
+        values.push(cx_expr(cx_kid(e  i)))
+        if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
+    }
+    let s=cx_value(values[0]).s
+    let bytes=cx_bytes(s)
+    if step =? 7 {
+        if cx_plain_text(bytes bytes.length) {return cx_int(cx_ntype(e)  bytes.length)}
+    }
+    else {
+        let lo=cx_value(values[1]).i
+        let stop=lo + 1
+        if step =? 6 {
+            stop=if cx_value(values[4]).i not=? 0 {cx_value(values[2]).i + cx_value(values[3]).i} else {bytes.length}
+        }
+        if 0 <=? lo <=? stop and stop <=? bytes.length and cx_plain_text(bytes stop + 1) {
+            return cx_add(CTValue[type = cx_ntype(e)  s = cx_host[0].byte_cut(s lo stop)])
+        }
+    }
+    # (anything else, a bad index included, is the library's)
+    let call=cx_mk('call'  cx_nodes[0].ptr[e].pos)
+    cx_nodes[0].ptr[call].sym = int32<overflow='wrap'>(f)
+    cx_nodes[0].ptr[call].type = cx_nodes[0].ptr[e].type
+    let actual:array<int64>=[]
+    loop value in values {actual.push(cx_literal(value  cx_nodes[0].ptr[e].pos))}
+    cx_set_list(call  actual)
+    cx_raw_skip=call
+    cx_call(call)
 }
 cx_raw_call=(e:CWord step:CWord):>CWord=>$unsafe {
     if step =? 1 {
@@ -504,8 +550,9 @@ cx_raw_call=(e:CWord step:CWord):>CWord=>$unsafe {
 cx_call=(e:CWord):>CWord=>$unsafe {
     let f=CWord(cx_nodes[0].ptr[e].sym)
     if cx_nodes[0].ptr[e].aux not=? 0 or f <=? 0 {cx_fail(e  "indirect calls are not supported")}
-    let raw_step=cx_raw_step(f)
+    let raw_step=if cx_raw_skip =? e {0} else {cx_raw_step(f)}
     if raw_step =? 4 {f=cx_host[0].runtime_fn("__case_text_plain")}
+    else if raw_step >=? 5 {return cx_string_step(e  f  raw_step)}
     else if raw_step not=? 0 {return cx_raw_call(e  raw_step)}
     cx_stack.push(e)
     if cx_fns[0][f].decl not=? 0 and cx_has_flag(CWord(cx_fns[0][f].decl)  NF_EXTERN) {cx_fail(e  "external calls and host effects are not allowed")}

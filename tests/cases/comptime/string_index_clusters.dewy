@@ -1,0 +1,17 @@
+# Compile-time string index, slice and length agree with the run-time ones, by clusters.
+$assert "abc"[1] =? "b"
+$assert "abc".length =? 3
+$assert "abcd"[1..3) =? "bc"
+$assert "abcd"[1..2] =? "bc"
+$assert "abcd"[2..] =? "cd"
+$assert "héllo"[1] =? "é"
+$assert "héllo".length =? 5
+$assert "héllo"[1..3) =? "él"
+$assert "ab\u{301}c"[1] =? "b\u{301}"
+$assert "ab\u{301}c".length =? 3
+$assert "a\r\nb"[1] =? "\r\n"
+$assert "a\r\nb".length =? 3
+main = () => {
+    let ascii = "abc"
+    printl("{ascii[1]} {ascii.length}")
+}
