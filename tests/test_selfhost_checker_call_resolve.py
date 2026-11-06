@@ -61,6 +61,7 @@ use 'checker_call_cost.dewy'
 struct CallFailure:
     rejected: int[]
     last_err_arg: int
+setting_site = 0
 rational_module_found = -1
 call_targs: int[]
 place_method = 0

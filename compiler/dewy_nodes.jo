@@ -471,7 +471,7 @@ dw_parsafe_attach = (made: int[], pos: int):
 # positive IDs are declarations; negative IDs select module-only checker nodes.
 # Keep the statement head separately: a declaration's own position may name its binding.
 dw_top_declarations = (id: int, pos: int) -> int[]:
-    if id < 0 and dc_parser.reader.module_nodes[-1 - id].kind == .build_ and dc_parser.reader.module_nodes[-1 - id].aux != 0 and dc_parser.reader.module_nodes[-1 - id].aux != 5:
+    if id < 0 and dc_parser.reader.module_nodes[-1 - id].kind == .build_ and dc_parser.reader.module_nodes[-1 - id].aux != 0 and dc_parser.reader.module_nodes[-1 - id].aux != 5 and dc_parser.reader.module_nodes[-1 - id].aux != 6:
         result = dc_parser.reader.module_nodes[-1 - id]
         text = dw_module_text(id)
         form = int(result.aux)
@@ -517,7 +517,7 @@ dw_top_declarations_inner = (id: int) -> int[]:
     if result.kind == .nil: return []
     if result.kind == .build_:
         file = pos_file(result.pos)
-        text = if result.aux == 5: "$test" else: dw_module_text(id)
+        text = if result.aux == 5: "$test" else if result.aux == 6: name_of(int(result.a)) else: dw_module_text(id)
         dw_dir_apply(text, int(result.b), result.pos, dir_module_start(file), dir_module_end(file), true)
         return []
     children = node_kids(dc_parser.reader.module_nodes, dc_parser.reader.module_lists, -1 - id)

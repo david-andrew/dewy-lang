@@ -1458,6 +1458,15 @@ rd_dc_body_metatag=(@reader_ctx:ParserContext @reader_nodes:array<Node> @stateme
     if ((dn_directive_form(name) not=? 0) or (name =? "include_bytes")) {
         return 0
     }
+    if rd_dc_valued_place(@reader_ctx reader_ctx.at) {
+        let member:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)])
+        let value:int64=rd_dc_valued_value(@reader_ctx @reader_nodes "{name}.{member}")
+        reader_ctx.reader.dc_settings.push("{name}.{member}");
+        reader_ctx.reader.dc_setting_values.push(value);
+        reader_ctx.reader.dc_setting_at.push(rd_mkpos(reader_ctx.file tag.start));
+        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 5)
+        return 1
+    }
     if reader_ctx.stores.host[0].dw_dir_name(name) {
         let value:int64=rd_dc_block_setting(@reader_ctx)
         if (value <? 0) {
@@ -1754,6 +1763,46 @@ rd_dc_build_member=(@reader_ctx:ParserContext member:DewyLexeme pos:int64):>bool
         rd_dc_report(@reader_ctx pos "`$build` has `mode` ('debug' or 'release'), not `{text}`");
     }
     true
+}
+
+# `$dewy.version = '0.1.0'`, `$time.zone = 'Asia/Tokyo'`: a setting holding a name in quotes,
+# for the rest of its scope. Is one being set at token `at`?
+rd_dc_valued_place=(@reader_ctx:ParserContext at:int64):>bool=>$unsafe {
+    let token:DewyLexeme=reader_ctx.tokens[at]
+    if token.kind not=? 'metatag' {return false}
+    let name:string=rd_dn_payload(@reader_ctx token)
+    if (name not=? "dewy") and (name not=? "time") {return false}
+    let dot:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(at) + 1)]
+    let member:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(at) + 2)]
+    (dot.symbol =? 'dot') and (not dot.space) and (not member.space) and (member.kind =? 'identifier') and (reader_ctx.tokens[(int64<overflow='wrap'>(at) + 3)].symbol =? 'assign')
+}
+
+# The value at the setting whose place starts at the current token, as dir_set takes it: its
+# name's id + 2 (0 and 1 are the off and on of a boolean setting).
+rd_dc_valued_value=(@reader_ctx:ParserContext @reader_nodes:array<Node> text:string):>int64=>$unsafe {
+    let value:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 4)]
+    let literal:int64=(if (((value.kind =? 'quoted') and rd_dc_plain_quote(@reader_ctx value)) or (value.kind =? 'rawquoted')) rd_dn_string(@reader_ctx @reader_nodes value) else int64(0))
+    if (literal =? 0) or (reader_nodes[literal].kind not=? 'str_lit') or (rd_nkids(@reader_nodes literal) >? 0) {
+        reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file value.start) "`${text}` is set to a name in quotes");
+    }
+    int64<overflow='wrap'>(reader_nodes[literal].sval) + 2
+}
+
+# The same setting at the top of a module: a statement declaring nothing. 0 for another form.
+rd_dc_valued_setting=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe {
+    let at:int64=reader_ctx.at
+    if not rd_dc_valued_place(@reader_ctx at) {return 0}
+    let token:DewyLexeme=reader_ctx.tokens[at]
+    let member:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(at) + 2)]
+    let after:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(at) + 5)]
+    let text:string="{rd_dn_payload(@reader_ctx token)}.{rd_dn_payload(@reader_ctx member)}"
+    let value:int64=rd_dc_valued_value(@reader_ctx @reader_nodes text)
+    if (after.kind not=? 'eof') and (not after.newline) {
+        reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file after.start) "`${text} = ...` goes on a line of its own");
+    }
+    reader_ctx.at = (int64<overflow='wrap'>(at) + 5)
+    let made:int64=rd_module_tag(@reader_ctx token 6 reader_ctx.stores.host[0].intern(text) value)
+    made
 }
 
 # `$build.mode = 'release'` or `$target = 'aarch64-linux'` at the top of a module: checked and
@@ -6815,6 +6864,22 @@ rd_dc_metatag_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:De
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
         return rd_dc_target_value(@reader_ctx @reader_nodes 3 pos member.start)
     }
+    # (`$time.zone`, `$dewy.version`: the setting at the call site, dw_setting_read)
+    if (((width =? 5) and (rd_dn_payload(@reader_ctx token) =? "dewy")) or ((width =? 5) and (rd_dn_payload(@reader_ctx token) =? "time"))) and (reader_ctx.tokens[reader_ctx.at].symbol =? 'dot') {
+        let member:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)]
+        if (not reader_ctx.tokens[reader_ctx.at].space) and (not member.space) and (member.kind =? 'identifier') {
+            let text:string="{rd_dn_payload(@reader_ctx token)}.{rd_dn_payload(@reader_ctx member)}"
+            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
+            let literal:int64=node_mk(@reader_nodes 'str_lit' pos)
+            reader_nodes[literal].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(text))
+            let callee:int64=node_mk(@reader_nodes 'ident' pos)
+            reader_nodes[callee].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("__setting_read"))
+            let call:int64=node_mk(@reader_nodes 'call' pos)
+            reader_nodes[call].a = int32<overflow='wrap'>(callee)
+            node_set_list(@reader_nodes @reader_ctx.stores.lists[0] call [literal]);
+            return call
+        }
+    }
     if ((width =? 10) and (rd_dn_payload(@reader_ctx token) =? "allocator")) {
         return rd_dc_allocator(@reader_ctx @reader_nodes token)
     }
@@ -10823,7 +10888,12 @@ rd_dc_update_next=(@reader_ctx:ParserContext):>bool=>$unsafe {
 # `$warn_if condition "message"` on the line before a module function (dw_warn_if_attr): a
 # compact statement holding the attribute the function takes (dw_top_declarations).
 rd_dc_warn_if=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexeme):>int64=>$unsafe {
-    if (((int64<overflow='wrap'>(token.stop) - int64<overflow='wrap'>(token.start)) not=? 8) or (rd_dn_payload(@reader_ctx token) not=? "warn_if")) {
+    let width:int64=int64<overflow='wrap'>(token.stop) - int64<overflow='wrap'>(token.start)
+    if (width not=? 8) and (width not=? 9) and (width not=? 15) {
+        return 0
+    }
+    let tag_name:string=rd_dn_payload(@reader_ctx token)
+    if (tag_name not=? "warn_if") and (tag_name not=? "error_if") and (tag_name not=? "check_constant") {
         return 0
     }
     let pos:int64=rd_mkpos(reader_ctx.file token.start)
@@ -10854,7 +10924,7 @@ rd_dc_warn_if=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLex
     if ((next.kind not=? 'eof') and (not next.newline)) {
         return 0
     }
-    let at:int64=reader_ctx.stores.host[0].dw_ffi_attr("warn_if" condition pos)
+    let at:int64=reader_ctx.stores.host[0].dw_ffi_attr(tag_name condition pos)
     reader_nodes[at].b = int32<overflow='wrap'>(message)
     rd_module_tag(@reader_ctx token 4 at 0)
 }
@@ -11204,6 +11274,10 @@ rd_dn_statement_read=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bo
         let built:int64=rd_dc_build_setting(@reader_ctx @reader_nodes)
         if (built not=? 0) {
             return built
+        }
+        let valued:int64=rd_dc_valued_setting(@reader_ctx @reader_nodes)
+        if (valued not=? 0) {
+            return valued
         }
         let setting:int64=rd_dc_setting(@reader_ctx reader_ctx.tokens[reader_ctx.at])
         if (setting not=? 0) {

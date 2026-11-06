@@ -1,6 +1,6 @@
 $runtime_checks
 from p"ast.jo" import (nodes dewy_param_kinds nkids nkids2 kid has_flag add_flag set_list NF_MUT NF_CHECKED)
-from p"expr.jo" import (rational_module_found exact_family_name exact_members_for call_targs written_int_param can_coerce CallFailure call_map_candidate call_type_arity call_reject_candidate call_rejection_text exact_args call_tie_error call_no_candidate call_decl_checks AUX2_PARTIAL has_hole expected_binds lit_default match_type subst_partial ntype is_lit param_in_union default_arg default_uses_params capture_value finish_partial place_method dewy_literal_method_name call_resolve_error call_ide_ref call_note_contracts call_capture_block decl_in_prelude comprehension_settle unnamed)
+from p"expr.jo" import (setting_site rational_module_found exact_family_name exact_members_for call_targs written_int_param can_coerce CallFailure call_map_candidate call_type_arity call_reject_candidate call_rejection_text exact_args call_tie_error call_no_candidate call_decl_checks AUX2_PARTIAL has_hole expected_binds lit_default match_type subst_partial ntype is_lit param_in_union default_arg default_uses_params capture_value finish_partial place_method dewy_literal_method_name call_resolve_error call_ide_ref call_note_contracts call_capture_block decl_in_prelude comprehension_settle unnamed)
 from p"member_replay.jo" import (member_record)
 from p"member_admit.dewy" import (member_candidates)
 from p"checker_call_cost.dewy" import (Cand call_candidate_cost)
@@ -267,7 +267,11 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
             let earlier=if dewy_call and not capture_defaults {[]} else {fin}
             let pt=fns.ptr[f].ptypes.ptr[i]
             if capture_defaults {pt=representation_type(pt)}
+            # (a metatag read in a default reads the caller's setting: expr.jo's __setting_read)
+            let outer_site=setting_site
+            if outer_site =? 0 {setting_site=nodes.ptr[n].pos}
             a=default_arg(decl i pt earlier capture_defaults fns.ptr[f].targs)
+            setting_site=outer_site
             if capture_defaults {
                 a=capture_value(a representation_type(fns.ptr[f].ptypes.ptr[i]) @statements)
                 finish_arg(a fns.ptr[f].ptypes.ptr[i] false)

@@ -8,6 +8,8 @@ use 'isolation.jo'
 # (lib/directives.dewy) is one metatag for several settings, held throughout
 # its scope; `$bundle=false` opts a nested scope out of all of them.
 # Nothing here costs anything until a program writes one of these settings.
+use 'main.jo'
+use 'settings.jo'
 use 'ast.jo'
 use 'util.jo'
 use 'facts.jo'
@@ -148,6 +150,78 @@ dw_dir_known = (name: str) -> bool:
 # the unsafe boundary: compiler/ffi.jo.)
 dir_builtin = (name: str) -> bool:
     name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe" or name == "assume_local_asserts" or name == "confine_external_paths" or name == "no_deadlocks" or name == "audited_wait" or name == "no_assumed_bounds"
+
+# The settings holding a name in quotes (their value: the name's id + 2).
+dir_valued_name = (name: str) -> bool:
+    name == "dewy.version" or name == "time.zone" or name == "time.zone_source" or name == "time.rules" or name == "time.gap" or name == "time.fold"
+
+dir_valued_check = (name: str, value: str, start: int, at: int):
+    if name == "dewy.version":
+        if start != dir_module_start(pos_file(start)): fatal(at, "`$dewy.version` says what a whole module means: put it at the top of the module")
+        if dir_scope_written(intern(name), pos_file(start)): fatal(at, "`$dewy.version` is set twice")
+        if not version_well_formed(value): fatal(at, "`$dewy.version` is three numbers in quotes, as `$dewy.version = '0.1.0'`")
+        if toolchain_tagged() and version_newer(value, toolchain_version()): fatal(at, "this module says `$dewy.version = '{value}'`, newer than this toolchain ({toolchain_version()}): update Dewy, or set a version it knows")
+    else if name == "time.zone_source" or name == "time.rules":
+        fatal(at, "`${name}` is part of the design but not implemented yet")
+    else if name == "time.gap":
+        if not (value in ["reject", "skip", "preserve_displacement", "next"]): fatal(at, "`$time.gap` is one of 'reject', 'skip', 'preserve_displacement' or 'next'")
+    else if name == "time.fold":
+        if not (value in ["reject", "earlier", "later"]): fatal(at, "`$time.fold` is one of 'reject', 'earlier' or 'later'")
+
+dir_scope_written = (name: int, file: int) -> bool:
+    loop s in dir_scopes:
+        if s.setting == name and pos_file(s.start) == file: return true
+    false
+
+version_well_formed = (v: str) -> bool:
+    parts = split(v, ".")
+    if parts.len() != 3: return false
+    loop p in parts:
+        if len(p) == 0: return false
+        loop i in [0..len(p)):
+            if not is_digit(p[i]): return false
+    true
+
+# (dotted decimal versions, both well formed)
+version_newer = (a: str, b0: str) -> bool:
+    b = b0
+    dash = find(b, "-")
+    if dash >= 0: b = b[..dash)
+    x = split(a, ".")
+    y = split(b, ".")
+    loop i in [0..min(x.len(), y.len())):
+        p = to_int(x[i]) ?? 0
+        q = to_int(y[i]) ?? 0
+        if p != q: return p > q
+    false
+
+# The toolchain's version; a tagged toolchain makes the `$dewy.version` promise (docs/design/time.md).
+toolchain_version = () -> str: env("DEWY_TOOLCHAIN_VERSION") ?? DEWY_CORE_VERSION
+toolchain_tagged = () -> bool: find(toolchain_version(), "-dev") < 0
+
+# `$time.zone` in the main file pins the whole program: another value anywhere else is an error
+# naming both. O(scopes), once, and nothing unless some scope sets a zone.
+dir_zone_pin = ():
+    name = intern("time.zone")
+    pin = -1
+    loop i in [0..dir_scopes.len()):
+        s = dir_scopes[i]
+        if s.setting == name and files[pos_file(s.start)].path == settings_path and s.start == dir_module_start(pos_file(s.start)): pin = i
+    if pin < 0: return
+    held = dir_scopes[pin]
+    loop s in dir_scopes:
+        if s.setting != name or s.value == held.value: continue
+        fatal(s.at, "`$time.zone = '{name_of(s.value - 2)}'` differs from `$time.zone = '{name_of(held.value - 2)}'` at {pos_str(held.at)}, which pins the whole program: remove one, or set the same zone")
+
+# A Dewy module of the program with no `$dewy.version`, on a tagged toolchain: a warning with the fix.
+dir_version_warnings = ():
+    dir_zone_pin()
+    if not toolchain_tagged(): return
+    name = intern("dewy.version")
+    loop m in modules:
+        f = int(m.file)
+        if not files[f].is_dewy or m.is_prelude or starts_with(files[f].path, lib_dir + "/"): continue
+        if not dir_scope_written(name, f): warn(mkpos(f, 0), "this module does not say which Dewy it means: add `$dewy.version = '{toolchain_version()}'` at the top")
 
 dir_bundle_index = (name: int) -> int:
     loop i in [0..dir_bundles.len()):
@@ -353,6 +427,10 @@ dir_set = (name: int, value: int, start: int, end: int, at: int):
     dir_names()
     text = name_of(name)
     if text == "realtime": fatal(at, "`$realtime` is reserved for a future bundle stronger than `$no_hidden_costs` (no blocking, a bounded stack); use `$no_hidden_costs`")
+    if dir_valued_name(text):
+        dir_valued_check(text, name_of(value - 2), start, at)
+        dir_push(DirScope(start, end, name, value, 0, at))
+        return
     if dir_builtin(text):
         # (an audit covers the adapter it is written in, never a whole module)
         if text == "audited_wait" and start == dir_module_start(pos_file(start)): fatal(at, "`$audited_wait` marks one audited adapter: write it in the body of the function that wraps the foreign call, not for a whole module")

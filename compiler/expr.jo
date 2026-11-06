@@ -74,6 +74,7 @@ use 'warn_if.jo'
 use 'warn_if_ops.dewy'
 use 'check_constant.jo'
 use 'directives.jo'
+use 'settings.jo'
 use 'refine.jo'
 use 'nd_contracts.jo'
 use 'proofs.jo'
@@ -110,7 +111,7 @@ enum IN:
     ceil_, fabs, fmin, fmax, setjmp, longjmp, jump, shader, extend, clone_thread, atomic_add, atomic_cas, stack_ptr, fill, fmt_elem, gpu_kernel, cpu_features, code_sync, compute, compute_spirv, compute_textures,
     read_fields, default_init, offset_unit, embed_dir, dewy_iter, dewy_iter_done, dewy_iter_value, json_fields, dewy_iter_pair, dewy_set,
     static_assert, runtime_assert, dewy_print, dewy_fmt, dewy_fmt_elem, lend, loan_address, loan_load, loan_store, loan_length,
-    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, arena_result, arrdata_permute, mul_hi, secret_wrap, secret_value, range_max, fixed_abs, integer_mode
+    zeroed, relocate, take_slot, live_len, task_report, task_data, task_duration, arena_result, arrdata_permute, mul_hi, secret_wrap, secret_value, range_max, fixed_abs, integer_mode, setting_read
 
 # (fixed2arr: T[N] -> T[], a new array holding a copy of the elements)
 enum CV: none_, int_, int2float, float2int, float_, opt, ptr, bits, fn2clos, union_, fixed2arr, arr2fixed, quantity_const, explicit_copy, refinement, big2math, math2big, set_text, promote, wrap_int, saturate_int, fixed_store
@@ -158,11 +159,12 @@ intrinsics = [
     Intrinsic("__clone_thread", .clone_thread, false), Intrinsic("__atomic_add", .atomic_add, false),
     Intrinsic("__atomic_cas", .atomic_cas, false), Intrinsic("__stack_ptr", .stack_ptr, false),
     Intrinsic("__cpu_features", .cpu_features, false), Intrinsic("__code_sync", .code_sync, false), Intrinsic("compute", .compute, false), Intrinsic("__compute_spirv", .compute_spirv, false), Intrinsic("__compute_textures", .compute_textures, false),
-    Intrinsic("__read_fields", .read_fields, false), Intrinsic("__default_init", .default_init, false),
+    Intrinsic("__read_fields", .read_fields, false), Intrinsic("__setting_read", .setting_read, false), Intrinsic("__default_init", .default_init, false),
     Intrinsic("__json_fields", .json_fields, false), Intrinsic("__task_report", .task_report, false), Intrinsic("__task_data", .task_data, false), Intrinsic("__task_nanoseconds", .task_duration, false),
 ]
 
 last_checked = 0
+setting_site = 0               # the call whose parameter default is being filled in
 const AUX2_PARTIAL = -10       # a call node that `@` makes a partial evaluation
 const AUX2_PLACE = -11         # a call `@(m.lock())` taking the place a method returns (place_methods.jo)
 callee_at = 0                  # the callee a call is resolving: a Dewy function name there is not called by itself
@@ -5817,6 +5819,28 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
                 add_flag(d, NF_CHECKED)
                 stmts.push(bc_assign(bc_ident(name_of(int(nodes[args[0]].name)), pos), d, pos))
         nodes[n] = nodes[bc_block(stmts, pos)]
+        return check_expr(n, expected)
+    else if id == .setting_read:
+        # __setting_read("time.zone"), `$time.zone`: the setting where this is read, or at the
+        # call a parameter's default is filled in for; none when no scope sets it
+        pos = nodes[n].pos
+        scope = dir_find(int(nodes[args[0]].sval), if setting_site != 0: setting_site else: pos)
+        # (`$time.zone` in the main file pins the whole program: what a module without its own reads)
+        if scope < 0 and name_of(int(nodes[args[0]].sval)) == "time.zone":
+            loop i in [0..files.len()):
+                if files[i].path == settings_path:
+                    scope = dir_find(int(nodes[args[0]].sval), dir_module_start(i))
+                    break
+        if scope < 0 or dir_scopes[scope].value < 2:
+            nodes[n] = Node(kind = .none_lit, pos = pos)
+            return check_expr(n, expected)
+        value = dir_scopes[scope].value - 2
+        # (`$time.zone = 'build'`: the machine doing this build, pinned now)
+        if value == intern("build") and name_of(int(nodes[args[0]].sval)) == "time.zone":
+            host = __system_zone_name()
+            if len(host) == 0: fatal(dir_scopes[scope].at, "`$time.zone = 'build'` pins the zone of the machine building this, and this machine does not name one: name the zone instead, as `$time.zone = 'America/New_York'`")
+            value = intern(host)
+        nodes[n] = Node(kind = .str_lit, pos = pos, sval = i32(value))
         return check_expr(n, expected)
     else if id == .read_fields:
         # __read_fields(r, x): the code that reads a struct, tuple, enum, union, vector or fixed-size

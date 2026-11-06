@@ -4688,6 +4688,22 @@ an unproven one does:
   the warnings. Obligations of `$proof` functions and `$assert` are never
   deferred.
 
+### The version a module means
+
+`$dewy.version = '0.1.0'`, at the top level of a module, says which Dewy its bare
+names mean. It is three numbers in quotes, it is per module, and importers and
+imports do not inherit it. A later Dewy that changes a default warns first and
+changes it only for modules that declare the new version, and every later Dewy
+compiles every earlier version. Reading `$dewy.version` gives the name. The promise
+starts with the first tagged release: from then on a module with no declaration
+warns with the line to add, and a version newer than the toolchain is an error. A
+development toolchain does neither.
+
+A metatag read in a parameter's default is read where the function is called, so
+a library can take the caller's setting: `f = (zone:string|none=$time.zone) => ...`
+gives the zone set around the call, or `none`. Such settings hold a name in quotes
+and hold throughout their scope, like the others.
+
 ### Making code prove
 
 An unproven obligation's error names the missing relation (`i <? xs.length`,

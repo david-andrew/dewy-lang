@@ -1569,7 +1569,7 @@ instance_attributes = (decl: int, f: int, zt: int[], use_pos: int):
             else if an == "parallel": fns[f].parallel_api = true
             else if an == "deterministic": fns[f].deterministic = true
             else if an == "noinline": fns[f].noinline = true
-            else if an == "warn_if" or an == "check_constant": pass
+            else if an == "warn_if" or an == "check_constant" or an == "error_if": pass
             else if an == "plain":
                 # (its type arguments are copied as bytes, e.g. to the GPU)
                 loop z in zt:
@@ -5702,6 +5702,7 @@ program_setting_errors = (mainm: int):
     if ts_dewy and build_target_at >= 0 and not build_target_seen: fatal(mkpos(int(modules[mainm].file), build_target_at), "this line reads as `$target = ...` but is not a statement at the top level")
     if ts_dewy and file_mode_at >= 0 and not file_mode_seen: fatal(mkpos(int(modules[mainm].file), file_mode_at), "this line reads as `$build.mode = ...` but is not a statement at the top level")
 program_callback_checks = (mainm: int, has_upd: bool, has_drw: bool):
+    dir_version_warnings()
     # (two updates, as a Scratch project's scripts, one per sprite: only the first would run)
     loop gname in ["update", "draw", "main"]:
         first = 0
