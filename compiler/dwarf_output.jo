@@ -1,0 +1,10 @@
+use 'check.jo'
+use 'dwarf_format.dewy'
+use 'module_paths.dewy'
+
+dw_user_module = (m: int) -> bool:
+    m >= 0 and m < modules.len() and not modules[m].is_prelude
+
+dwarf_sections = (text_addr: int, text_len: int, main_path: str, version: str) -> (str, u8[])[]:
+    if dw_inputs[0].line_rows[0].len() == 0: return []
+    dwarf_image(text_addr, text_len, main_path, version, os_path(cwd()))

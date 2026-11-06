@@ -3,6 +3,7 @@ use 'native_debug.dewy'
 # DWARF execution belongs to the format owner. Checker/source services keep
 # their arena headers; callbacks may grow them without invalidating this bind.
 use 'dwarf_format.dewy'
+use 'dwarf_output.dewy'
 use 'checker_types.dewy'
 use 'checker_state.dewy'
 use 'source_types.dewy'
@@ -16,13 +17,6 @@ use 'check.jo'
 use 'lower.jo'
 use 'ir_builders.dewy'
 
-dw_user_module = (m: int) -> bool:
-    m >= 0 and m < modules.len() and not modules[m].is_prelude
-
 dw_host = DwarfHost(type_str, layout, store_type, field_store_type, ir_line, dw_user_module)
 dw_input = DwarfInput(types=&types, type_args=&type_args, structs=&structs, fields=&fields, variants=&variants, locals=&locals, globals=&globals, names=&names, files=&files, global_ids=&global_ids, ir_positions=&ir_positions, dbg_raw=&dbg_raw, dbg_cfi=&dbg_cfi, line_rows=&line_rows, T_VOID=&T_VOID, T_BOOL=&T_BOOL, T_INT=&T_INT, T_MATH_INT=&T_MATH_INT, T_U8=&T_U8, T_F32=&T_F32, T_I32=&T_I32, global_off=&global_off, arm=&target_arm64, host=&dw_host)
 dw_binding = dwarf_bind(&dw_input)
-
-dwarf_sections = (text_addr: int, text_len: int, main_path: str, version: str) -> (str, u8[])[]:
-    if line_rows.len() == 0: return []
-    dwarf_image(text_addr, text_len, main_path, version, os_path(cwd()))

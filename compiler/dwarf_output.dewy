@@ -1,0 +1,12 @@
+$runtime_checks
+# DWARF's demand from the driver: the format owner reads its bound input.
+from p"@lib/core/os.jo" import cwd
+from p"check.jo" import modules
+from p"dwarf_format.dewy" import (dw_inputs dwarf_image)
+from p"module_paths.dewy" import os_path
+
+dw_user_module=(m:int64):>bool=>{m >=? 0 and m <? modules.length and not modules[m].is_prelude}
+dwarf_sections=(text_addr:int64 text_len:int64 main_path:string version:string):>array<[string array<uint8>]>=>$unsafe {
+    if dw_inputs[0].line_rows[0].length =? 0 {return []}
+    dwarf_image(text_addr text_len main_path version os_path(cwd()))
+}
