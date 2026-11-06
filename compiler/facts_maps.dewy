@@ -1,0 +1,524 @@
+$runtime_checks
+from p"ast.jo" import (NF_INDEX_CAPTURED NF_COMPREHENSION NF_GLOBAL NF_MAP_KEY NF_SPREAD has_flag kid nkids nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED LF_SOAMUT fns globals lib_dir locals readonly_global)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"expr.jo" import (is_dewy_set_type is_map_type ntype union_field_sources)
+from p"facts.jo" import (FACT_CAP FACT_FIELD_KEYS FACT_KEYS_POSITIONS FACT_KEYS_SOURCE FACT_KEY_SOURCE FACT_MAP_DENSE FACT_MAP_POSITIONS FactProjection FactState fact_add_projection fact_assume fact_bind fact_binding fact_bound fact_change_route fact_changes fact_comprehension_sources fact_comprehensions fact_constant fact_constant_global fact_dewy_local fact_domain fact_ensured_keys_cache fact_exposed fact_field_node fact_forget fact_fresh fact_grown_root fact_grown_roots fact_inventory fact_inventory_bound fact_key_paths fact_map_grew fact_map_of_name fact_map_snapshot_name fact_name_contains fact_name_entry fact_name_get fact_name_has fact_name_insert_if_absent fact_name_pop fact_name_present fact_name_read fact_name_store fact_name_vals fact_new fact_path_call_effects fact_place fact_policy fact_probe_on fact_project fact_projection_after fact_projection_find fact_projection_first fact_push_flow fact_push_only fact_query fact_receiver_route fact_route_values fact_scalar fact_selector_sources fact_slot fact_speculating fact_store_route fact_terms fact_truth fact_type)
+from p"facts_members.dewy" import (fact_member_literal)
+from p"facts_probes.dewy" import (fact_probe_record)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"refine.jo" import (is_total_dict refine_active refine_storage representation_type)
+from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
+from p"string_domains.jo" import (domain_leaf)
+from p"types.jo" import (T_BOOL T_INT T_STR fields is_union prune struct_targ structs telem tkind types)
+from p"util.jo" import (files intern pos_file pos_in_lib)
+from p"witness.jo" import (wit_cause wit_key)
+
+MapWord:type=int64<overflow='wrap'>
+fact_map_call=(n:MapWord):>MapWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) <? 2 {return 0}
+    let d=MapWord(fns.ptr[MapWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return 0}
+    if fact_name_contains =? 0 {
+        fact_name_contains=intern("contains")
+        fact_name_has=intern("has")
+        fact_name_read=intern("[]")
+        fact_name_present=intern("__map_entry_present")
+        fact_name_pop=intern("pop")
+        fact_name_entry=intern("__map_entry")
+        fact_name_store=intern("[]=")
+        fact_name_get=intern("get")
+    }
+    let name=MapWord(nodes.ptr[d].name)
+    let k=if name =? fact_name_contains or name =? fact_name_has {1} else if name =? fact_name_read {2} else if name =? fact_name_present {3} else if name =? fact_name_pop {4} else if name =? fact_name_entry or name =? fact_name_store {5} else if name =? fact_name_get {6} else {0}
+    if k =? 0 or k not=? 5 and nkids(n) not=? 2 or not pos_in_lib(nodes.ptr[d].pos) {return 0}
+    # (a set's membership is its entries' keys: `v in? s` and `s.pop(v)`)
+    let t=representation_type(ntype(kid(n 0)))
+    if is_dewy_set_type(t) {return if k =? 1 or k =? 4 {k} else {0}}
+    if not is_map_type(t) {return 0}
+    k
+}
+# The key's value; a plain string literal is one value however often written,
+# and so is a binding never written after its declaration (a loop's element
+# among them, which may be read again each time it is named, by reference to
+# an element its loop does not change). Such a value is
+# one per declaration, not per execution: a fact about it made in one
+# iteration reaches the next only through the loop's header, which joins it
+# with the entry, where the declaration has not happened.
+fact_map_key=(@s:FactState e0:MapWord value:MapWord):>MapWord=>$unsafe {
+    let e=e0
+    loop nodes.ptr[e].kind =? 'narrow' or nodes.ptr[e].kind =? 'conv' {e=MapWord(nodes.ptr[e].a)}
+    if has_flag(e NF_MAP_KEY) and nodes.ptr[e].kind =? 'ident' {return value}
+    if nodes.ptr[e].kind =? 'str_lit' and nkids(e) =? 0 and nodes.ptr[e].sval >=? 0 and not fact_member_literal(e) {return fact_constant(@s (1 << 42) + MapWord(nodes.ptr[e].sval))}
+    let stable=fact_stable_key(e)
+    if stable >? 0 {return fact_constant(@s stable)}
+    value
+}
+fact_stable_key=(e:MapWord depth:MapWord=0):>MapWord=>$unsafe {
+    if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) and not has_flag(e NF_GLOBAL) {
+        let l=MapWord(nodes.ptr[e].sym)
+        if l >? 0 and MapWord(locals.ptr[l].flags) & (LF_PARAM | LF_MUTPARAM | LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_ELEMALIAS | LF_SOAMUT) =? 0 and fact_dewy_local(l) {
+            if depth <? 8 {
+                let source=fact_selector_sources.get(l)
+                if source not=? none {
+                    let stable=fact_stable_key(source depth + 1)
+                    if stable not=? 0 {return stable}
+                }
+            }
+            return (2 << 42) + l
+        }
+        return 0
+    }
+    if depth >=? 8 {return 0}
+    if nodes.ptr[e].kind =? 'block' {
+        let source=union_field_sources.get(e)
+        if source not=? none {
+            if ownership_decls.length not=? 0 and ownership_fact_type(ntype(source[0])) {return 0}
+            return fact_stable_field(fact_stable_key(source[0] depth + 1) source[1])
+        }
+        return 0
+    }
+    if not fact_field_node(e) or nodes.ptr[e].aux <? 0 {return 0}
+    fact_stable_field(fact_stable_key(MapWord(nodes.ptr[e].a) depth + 1) MapWord(nodes.ptr[e].name))
+}
+fact_stable_field=(base:MapWord name:MapWord):>MapWord=>{
+    if base =? 0 {return 0}
+    let key:[int64 int64]=[base name]
+    let known=fact_key_paths.get(key)
+    if known not=? none {return known}
+    let made=(3 << 42) + fact_key_paths.length + 1
+    fact_key_paths[key]=made
+    made
+}
+# Only demanded key collections and reads use this indexed provenance. O(1)
+# lookup/transfer, with the ordinary projection budget; no collection scan.
+fact_keys_copy=(@s:FactState before:MapWord after:MapWord):>void=>{
+    let source=fact_projection_find(s before FACT_KEYS_SOURCE false)
+    if source >=? 0 and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(after FACT_KEYS_SOURCE false s.projections[source].value))}
+}
+fact_keys_element=(@s:FactState base:MapWord value:MapWord):>MapWord=>{
+    let source=fact_projection_find(s base FACT_KEYS_SOURCE false)
+    if source >=? 0 and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value FACT_KEY_SOURCE false s.projections[source].value))}
+    value
+}
+# A key from a snapshot's collection is a member of that snapshot, and of any
+# later value sharing its key positions: only an entry change keeps them
+# (fact_map_position), so the key set is the same. O(1) indexed lookups.
+fact_map_member=(@s:FactState n:MapWord map:MapWord key:MapWord):>MapWord=>{
+    let source=fact_projection_find(s key FACT_KEY_SOURCE false)
+    if source >=? 0 {
+        let held=s.projections[source].value
+        if held =? map {return fact_constant(@s 1)}
+        let before=fact_projection_find(s held FACT_MAP_POSITIONS false)
+        let after=if before >=? 0 {fact_projection_find(s map FACT_MAP_POSITIONS false)} else {-1}
+        if after >=? 0 and s.projections[before].value =? s.projections[after].value {return fact_constant(@s 1)}
+        # (map grew by adding keys from that comprehension's dictionary, or
+        # from a value sharing its key positions)
+        let root=fact_grown_root(s map)
+        if root not=? 0 and root =? held {return fact_constant(@s 1)}
+        let at=if root not=? 0 and before >=? 0 {fact_projection_find(s root FACT_MAP_POSITIONS false)} else {-1}
+        if at >=? 0 and s.projections[before].value =? s.projections[at].value {return fact_constant(@s 1)}
+    }
+    fact_project(@s map fact_map_key(@s kid(n 1) key) true T_BOOL)
+}
+# A dictionary's entries (no traps): the entry of key k in a dictionary's value
+# is its `vals` element at k's position, a projection of that value on k (under
+# FACT_MAP_POSITIONS). `d[k]` reads it, and `d[k] += 1` or `d[k][j] = x` change
+# it through `d.vals[__map_entry_present(d k)]` (expr.jo map_elem_place), so
+# what is known of an entry (the keys of a nested dictionary among it) holds
+# from one spelling of `d[k]` to the next while d's value is unchanged. A
+# change of an entry's contents keeps the positions (fact_replace and
+# fact_change_route keep the value's other projections; a store into any
+# other field of the dictionary drops them); every other change of d (an
+# insertion, a removal, an opaque or effectful call) gives d a new value
+# without them. O(1) per read beyond the membership projection's.
+fact_map_position=(@s:FactState n:MapWord map:MapWord key:MapWord):>MapWord=>{
+    # (named before any positions exist: fact_replace keeps them for a store into `vals`)
+    if fact_name_vals =? 0 {fact_name_vals=intern("vals")}
+    let positions=fact_project(@s map FACT_MAP_POSITIONS false T_INT)
+    fact_project(@s positions fact_map_key(@s kid(n 1) key) true T_INT)
+}
+fact_map_entry=(@s:FactState n:MapWord map:MapWord key:MapWord):>MapWord=>$unsafe {
+    let position=fact_map_position(@s n map key)
+    let t=prune(fact_terms[map].type)
+    # (a value made without a type, a comprehension's dictionary: the receiver's)
+    if (t =? 0 or types.ptr[t].kind not=? 'struct_') and nkids(n) >? 0 {t=fact_type(ntype(kid(n 0)))}
+    let vt=if types.ptr[t].kind =? 'struct_' and MapWord(structs.ptr[MapWord(types.ptr[t].st)].nfields) >? 1 {MapWord(fields.ptr[MapWord(structs.ptr[MapWord(types.ptr[t].st)].fields) + 1].type)} else {T_INT}
+    # (a refined value type's contract held when each entry was stored: the
+    # entry is read as the stored type, as an array element is)
+    let et=ntype(n)
+    if tkind(vt) =? 'array' and tkind(telem(vt)) =? 'refined' and fact_type(representation_type(telem(vt))) =? fact_type(et) {et=telem(vt)}
+    fact_project(@s fact_project(@s map fact_name_vals false vt) position true et)
+}
+# A dictionary's membership test, read or entry position for a builtin key
+# reads the dictionary alone (the transfer's own rule). O(1).
+# get(k)'s optional tag is membership only when the stored type cannot itself
+# be none. Defaulted overloads and user hash/equality/lifecycle hooks supply no
+# such contract. The result describes the evaluated dictionary snapshot, never
+# a later replacement. O(1) on a demanded map call; two indexed projections.
+fact_map_optional=(n:MapWord):>bool=>$unsafe {
+    let result=fact_type(ntype(n))
+    let map=fact_type(ntype(kid(n 0)))
+    if tkind(result) not=? 'opt' or not is_map_type(map) {return false}
+    let stored=struct_targ(MapWord(types.ptr[map].st) 1)
+    if fact_type(telem(result)) not=? fact_type(stored) {return false}
+    if tkind(fact_type(stored)) =? 'opt' or is_union(fact_type(stored)) {return false}
+    ownership_decls.length =? 0 or not ownership_fact_type(map)
+}
+fact_map_reads_only=(n:MapWord):>bool=>{
+    let m=fact_map_call(n)
+    if m <? 1 or m >? 3 and m not=? 6 {return false}
+    if m =? 6 and not fact_map_optional(n) {return false}
+    let kt=representation_type(ntype(kid(n 1)))
+    fact_scalar(kt) or kt =? T_STR
+}
+# `d[k] = x` for a builtin key and hook-free stored values writes d alone and calls nothing of the program's (as a pool's `[]=`,
+# fact_pool_capture): d's place gets a new value holding the keys it held
+# and k, and its enclosing values keep their other projections (an outer
+# dictionary's positions and keys, for `d[p][m] = x`). The existing hook query
+# visits the demanded type's fields; the transfer visits only its indexed keys.
+fact_map_store_call=(n:MapWord):>bool=>$unsafe {
+    if fact_map_call(n) not=? 5 or nkids(n) not=? 3 or MapWord(nodes.ptr[MapWord(fns.ptr[MapWord(nodes.ptr[n].sym)].decl)].name) not=? fact_name_store {return false}
+    if ownership_decls.length not=? 0 and ownership_fact_type(ntype(kid(n 0))) {return false}
+    let kt=representation_type(ntype(kid(n 1)))
+    fact_scalar(kt) or kt =? T_STR
+}
+fact_map_insert_call=(n:MapWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 3 {return false}
+    let d=MapWord(fns.ptr[MapWord(nodes.ptr[n].sym)].decl)
+    if fact_name_insert_if_absent =? 0 {fact_name_insert_if_absent=intern("insert_if_absent")}
+    if d =? 0 or MapWord(nodes.ptr[d].name) not=? fact_name_insert_if_absent or files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/core/map.jo" {return false}
+    if not is_map_type(representation_type(ntype(kid(n 0)))) {return false}
+    if ownership_decls.length not=? 0 and ownership_fact_type(ntype(kid(n 0))) {return false}
+    let kt=representation_type(ntype(kid(n 1)))
+    fact_scalar(kt) or kt =? T_STR
+}
+# A loop's havoc of `d[k] = x` (fact_changes): the route's own value is
+# unknown, d keeps the keys it held (a store removes none), and an enclosing
+# dictionary keeps its keys and positions (fact_change_route). O(keys held).
+fact_map_store_changes=(n:MapWord @s:FactState at:MapWord reason:FactReason):>void=>$unsafe {
+    let target=kid(n 0)
+    loop nodes.ptr[target].kind =? 'addr' or nodes.ptr[target].kind =? 'conv' {target=MapWord(nodes.ptr[target].a)}
+    let i=if nodes.ptr[target].kind =? 'ident' {fact_binding(s fact_place(target))} else {-1}
+    let before=if i >=? 0 {s.bindings[i].value} else {0}
+    fact_change_route(@s target true at reason)
+    i=if before not=? 0 {fact_binding(s fact_place(target))} else {-1}
+    if i <? 0 {return}
+    let after=s.bindings[i].value
+    fact_map_grew(@s before after)
+    let keys:array<int64>=[]
+    let j=fact_projection_first(s before)
+    loop j >=? 0 {
+        let q=s.projections[j]
+        j=fact_projection_after(s j)
+        if q.element and fact_truth(s q.value) =? 1 {keys.push(q.selector)}
+    }
+    loop key in keys {fact_assume(@s fact_project(@s after key true T_BOOL) true)}
+}
+fact_map_store=(n:MapWord @s:FactState values:array<int64> before:MapWord):>MapWord=>$unsafe {
+    let target=kid(n 0)
+    loop nodes.ptr[target].kind =? 'addr' or nodes.ptr[target].kind =? 'conv' {target=MapWord(nodes.ptr[target].a)}
+    let route=fact_receiver_route(n @s)
+    if route.root =? 0 {return 0}
+    let written=fact_place(route.root)
+    if written.declaration =? 0 {return 0}
+    if fact_exposed(written) {fact_forget(@s n 'call' false written)}
+    let after=fact_new(@s FactBound() FactTerm(type=ntype(target)))
+    fact_store_route(@s route after n)
+    fact_map_grew(@s before after)
+    let keys:array<int64>=[]
+    let i=fact_projection_first(s before)
+    loop i >=? 0 {
+        let q=s.projections[i]
+        i=fact_projection_after(s i)
+        if q.element and fact_truth(s q.value) =? 1 {keys.push(q.selector)}
+    }
+    loop key in keys {fact_assume(@s fact_project(@s after key true T_BOOL) true)}
+    fact_assume(@s fact_map_member(@s n after values[1]) true)
+    fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))
+}
+# A literal dictionary with literal scalar keys has a dense entry inventory.
+# Duplicate keys overwrite their first position, matching core/map.jo. Unknown
+# key equality cannot establish positions, so it retains membership only.
+# Demand-only, indexed O(entries) construction, bounded by FACT_CAP.
+fact_map_literal=(n:MapWord @s:FactState map:MapWord keys:array<int64> raw:array<int64> payloads:array<int64>):>void=>$unsafe {
+    if map =? 0 or keys.length =? 0 or keys.length not=? nkids(n) {return}
+    loop j in [0..nkids(n)) {
+        let pair=kid(n j)
+        let key=domain_leaf(MapWord(nodes.ptr[pair].a))
+        if nodes.ptr[key].kind not=? 'int_lit' and nodes.ptr[key].kind not=? 'bool_lit' and not (nodes.ptr[key].kind =? 'str_lit' and nkids(key) =? 0 and nodes.ptr[key].sval >=? 0) {return}
+    }
+    loop key in keys {
+        let b=fact_bound(s key)
+        if b.wide or b.lo not=? b.hi {return}
+    }
+    let t=fact_type(ntype(n))
+    let fields_at=MapWord(structs.ptr[MapWord(types.ptr[t].st)].fields)
+    let key_type=MapWord(fields.ptr[fields_at].type)
+    let value_type=MapWord(fields.ptr[fields_at + 1].type)
+    let ids=dict<int64 int64>()
+    let selected:array<int64>=[]
+    let first:array<int64>=[]
+    loop i in [0..keys.length) {
+        let key=fact_bound(s keys[i]).lo
+        let at=ids.get(key) ?? -1
+        if at <? 0 {
+            ids[key]=selected.length
+            selected.push(i)
+            first.push(i)
+        }
+        else {selected[at]=i}
+    }
+    let positions=fact_new(@s FactBound() FactTerm(type=T_INT))
+    let key_values=fact_new(@s FactBound() FactTerm(type=key_type))
+    let entries=fact_new(@s FactBound() FactTerm(type=value_type))
+    loop i in [0..selected.length) {
+        if s.projections.length + 3 >=? FACT_CAP {return}
+        let position=fact_constant(@s i)
+        fact_add_projection(@s FactProjection(positions keys[first[i]] true position))
+        fact_add_projection(@s FactProjection(key_values position true raw[first[i]]))
+        fact_add_projection(@s FactProjection(entries position true payloads[selected[i]]))
+    }
+    if s.projections.length + 7 >=? FACT_CAP {return}
+    let length=fact_constant(@s selected.length)
+    fact_add_projection(@s FactProjection(key_values (-1) false length))
+    fact_add_projection(@s FactProjection(entries (-1) false length))
+    fact_add_projection(@s FactProjection(map MapWord(fields.ptr[fields_at].name) false key_values))
+    if fact_name_vals =? 0 {fact_name_vals=intern("vals")}
+    fact_add_projection(@s FactProjection(map fact_name_vals false entries))
+    fact_add_projection(@s FactProjection(map FACT_MAP_POSITIONS false positions))
+    fact_add_projection(@s FactProjection(map (-1) false length))
+    fact_add_projection(@s FactProjection(map FACT_MAP_DENSE false fact_constant(@s 1)))
+}
+fact_map_snapshot_call=(n:MapWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 1 {return false}
+    let d=MapWord(fns.ptr[MapWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return false}
+    if fact_map_snapshot_name =? 0 {fact_map_snapshot_name=intern("__map_entries")}
+    MapWord(nodes.ptr[d].name) =? fact_map_snapshot_name and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/map.jo"
+}
+fact_map_of=(n:MapWord @s:FactState):>MapWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 1 {return 0}
+    let d=MapWord(fns.ptr[MapWord(nodes.ptr[n].sym)].decl)
+    if fact_map_of_name =? 0 {fact_map_of_name=intern("__map_of")}
+    if d =? 0 or MapWord(nodes.ptr[d].name) not=? fact_map_of_name or files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/core/map.jo" {return 0}
+    let block=kid(n 0)
+    if nodes.ptr[block].kind not=? 'block' or not has_flag(block NF_COMPREHENSION) or nkids(block) not=? 3 {return 0}
+    let loop_=kid(block 1)
+    let acc=fact_comprehensions.get(loop_) ?? 0
+    let source=fact_comprehension_sources.get(loop_) ?? 0
+    if acc <=? 0 or source =? 0 or nodes.ptr[loop_].kind not=? 'for_' or nodes.ptr[loop_].aux not=? 1 or fact_slot(s source) <? 0 {return 0}
+    if s.projections.length + 3 >=? FACT_CAP {return 0}
+    # (another dictionary built from this source in its order has the same
+    # keys at the same positions; a key snapshot of another kind has none)
+    let positions:MapWord=0
+    if fact_projection_find(s source FACT_KEYS_SOURCE false) >=? 0 {
+        let held=fact_projection_find(s source FACT_KEYS_POSITIONS false)
+        if held <? 0 {return 0}
+        positions=s.projections[held].value
+    }
+    let map=fact_type(ntype(n))
+    if not is_map_type(map) or ownership_decls.length not=? 0 and ownership_fact_type(map) {return 0}
+    let key_type=fact_type(struct_targ(MapWord(types.ptr[map].st) 0))
+    let kt=representation_type(key_type)
+    let element=MapWord(nodes.ptr[loop_].sym)
+    if element <=? 0 or not (fact_scalar(kt) or kt =? T_STR) {return 0}
+    let body=MapWord(nodes.ptr[loop_].b)
+    let flow=fact_push_flow(body acc)
+    if flow[0] not=? 1 or flow[1] not=? -2 {return 0}
+    let sites:array<int64>=[]
+    if not fact_push_only(body acc @sites) or sites.length =? 0 {return 0}
+    # (or every key is one field of the element, `[loop p in people p.name -> v]`)
+    let field:MapWord=-1
+    loop site in sites {
+        let pair=kid(site 1)
+        if nodes.ptr[pair].kind not=? 'tuple' or nkids(pair) not=? 2 {return 0}
+        let key=kid(pair 0)
+        let name:MapWord=0
+        if nodes.ptr[key].kind =? 'field' and nodes.ptr[key].aux >=? 0 and tkind(ntype(MapWord(nodes.ptr[key].a))) =? 'struct_' and fact_type(ntype(key)) =? key_type {
+            name=MapWord(nodes.ptr[key].name)
+            key=MapWord(nodes.ptr[key].a)
+        }
+        if nodes.ptr[key].kind not=? 'ident' or nodes.ptr[key].aux not=? int32(1) or MapWord(nodes.ptr[key].sym) not=? element {return 0}
+        if field >=? 0 and field not=? name {return 0}
+        field=name
+    }
+    if field =? 0 and fact_type(MapWord(locals.ptr[element].type)) not=? key_type {return 0}
+    let result=fact_fresh(@s ntype(n))
+    if fact_name_vals =? 0 {fact_name_vals=intern("vals")}
+    if field >? 0 {
+        let view=fact_project(@s source FACT_FIELD_KEYS false T_INT)
+        if fact_projection_find(s view field false) >=? 0 {return result}
+        fact_add_projection(@s FactProjection(view field false result))
+        # (its key positions, which a later entry change keeps: fact_map_member)
+        fact_project(@s result FACT_MAP_POSITIONS false T_INT);
+        fact_grown_roots[result]=true
+        return result
+    }
+    if positions not=? 0 {
+        fact_add_projection(@s FactProjection(result FACT_MAP_POSITIONS false positions))
+        fact_literal_keys(@s MapWord(nodes.ptr[loop_].a) result)
+        return result
+    }
+    fact_add_projection(@s FactProjection(source FACT_KEYS_SOURCE false result))
+    fact_add_projection(@s FactProjection(source FACT_KEYS_POSITIONS false fact_project(@s result FACT_MAP_POSITIONS false T_INT)))
+    fact_literal_keys(@s MapWord(nodes.ptr[loop_].a) result)
+    fact_grown_roots[result]=true
+    result
+}
+# The elements of an array literal `[a "b" r.name]` that every element of the
+# evaluated literal keys in map: each spelled element with a stable key
+# identity (fact_map_key) is a member, as `d[a]` names it. O(elements).
+fact_literal_keys=(@s:FactState e0:MapWord map:MapWord):>void=>$unsafe {
+    let e=e0
+    loop nodes.ptr[e].kind =? 'conv' {e=MapWord(nodes.ptr[e].a)}
+    # (a module const's literal, `const NAMES = [...]`: the same elements)
+    if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(2) {
+        let g=MapWord(nodes.ptr[e].sym)
+        if not readonly_global(g) or globals.ptr[g].exposed or not fact_constant_global(g) {return}
+        e=MapWord(nodes.ptr[MapWord(globals.ptr[g].decl)].b)
+        loop nodes.ptr[e].kind =? 'conv' {e=MapWord(nodes.ptr[e].a)}
+    }
+    if nodes.ptr[e].kind not=? 'array' or nodes.ptr[e].aux not=? 0 or nodes.ptr[e].b not=? 0 {return}
+    loop i in [0..nkids(e)) {
+        let c=kid(e i)
+        if has_flag(c NF_SPREAD) or s.projections.length >=? FACT_CAP {continue}
+        let key=fact_map_key(@s c 0)
+        if key not=? 0 {fact_assume(@s fact_project(@s map key true T_BOOL) true)}
+    }
+}
+fact_ensured_keys=(n:MapWord):>array<[int64 int64]>=>$unsafe {
+    let known=fact_ensured_keys_cache.get(n)
+    if known not=? none {return known}
+    let out:array<[int64 int64]>=[]
+    let element=MapWord(nodes.ptr[n].sym)
+    let work=[MapWord(nodes.ptr[n].b)]
+    loop element >? 0 and work.length >? 0 {
+        let e=work.pop()
+        if e =? 0 {continue}
+        let k=nodes.ptr[e].kind
+        if k =? 'lambda' {continue}
+        if k =? 'call' and nodes.ptr[e].aux =? 0 and nkids(e) =? 3 and (fact_map_store_call(e) or fact_map_insert_call(e)) {
+            let d=kid(e 0)
+            loop nodes.ptr[d].kind =? 'addr' or nodes.ptr[d].kind =? 'conv' {d=MapWord(nodes.ptr[d].a)}
+            let key=kid(e 1)
+            loop nodes.ptr[key].kind =? 'conv' or nodes.ptr[key].kind =? 'narrow' {key=MapWord(nodes.ptr[key].a)}
+            if nodes.ptr[d].kind =? 'ident' and nodes.ptr[d].aux =? int32(1) and not has_flag(d NF_GLOBAL) and nodes.ptr[key].kind =? 'ident' and nodes.ptr[key].aux =? int32(1) and MapWord(nodes.ptr[key].sym) =? element {
+                let l=MapWord(nodes.ptr[d].sym)
+                let fresh=true
+                loop c in out {
+                    if c[0] =? l {fresh=false}
+                }
+                if l >? 0 and fresh and locals.ptr[l].pos <? nodes.ptr[n].pos and MapWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) =? 0 {out.push([l key])}
+            }
+        }
+        let mask=isolation_children(k)
+        if mask <? 0 {continue}
+        if mask & 1 not=? 0 {work.push(MapWord(nodes.ptr[e].a))}
+        if mask & 2 not=? 0 {work.push(MapWord(nodes.ptr[e].b))}
+        if mask & 4 not=? 0 {work.push(MapWord(nodes.ptr[e].c))}
+        if mask & 16 not=? 0 {
+            loop i in [0..nkids(e)) {work.push(kid(e i))}
+        }
+    }
+    fact_ensured_keys_cache[n]=out
+    out
+}
+fact_ensured_close=(n:MapWord base:MapWord @back:FactState @s:FactState):>void=>$unsafe {
+    loop c in fact_ensured_keys(n) {
+        let place=PlaceIdentity('local' MapWord(locals.ptr[c[0]].owner) c[0])
+        let bi=fact_binding(back place)
+        if bi <? 0 or fact_stable_key(c[1]) <=? 0 {continue}
+        let key=fact_map_key(@back c[1] 0)
+        if fact_truth(back fact_project(@back back.bindings[bi].value key true T_BOOL)) not=? 1 {continue}
+        if not fact_keys_monotone(n s place) {continue}
+        let si=fact_binding(s place)
+        if si <? 0 or s.projections.length + 2 >=? FACT_CAP {continue}
+        let map=s.bindings[si].value
+        if fact_name_vals =? 0 {fact_name_vals=intern("vals")}
+        fact_project(@s map FACT_MAP_POSITIONS false T_INT);
+        if fact_projection_find(s base FACT_KEYS_SOURCE false) <? 0 {fact_add_projection(@s FactProjection(base FACT_KEYS_SOURCE false map))}
+        fact_literal_keys(@s MapWord(nodes.ptr[n].a) map)
+    }
+}
+# The loop's havoc of its body keeps every key d held: a marker key no
+# program names survives it. O(body) on a copy of s.
+fact_keys_monotone=(n:MapWord s:FactState place:PlaceIdentity):>bool=>$unsafe {
+    let probe=s
+    let i=fact_binding(probe place)
+    if i <? 0 {return false}
+    let marker=fact_constant(@probe 5 << 42)
+    fact_assume(@probe fact_project(@probe probe.bindings[i].value marker true T_BOOL) true)
+    fact_changes(MapWord(nodes.ptr[n].b) @probe n)
+    i=fact_binding(probe place)
+    i >=? 0 and fact_truth(probe fact_project(@probe probe.bindings[i].value marker true T_BOOL)) =? 1
+}
+fact_map_snapshot=(n:MapWord @s:FactState map:MapWord):>MapWord=>$unsafe {
+    if ownership_decls.length not=? 0 and ownership_fact_type(ntype(kid(n 0))) {
+        fact_path_call_effects(n @s)
+        return fact_fresh(@s ntype(n))
+    }
+    if map =? 0 or fact_projection_find(s map FACT_MAP_DENSE false) <? 0 {return fact_fresh(@s ntype(n))}
+    let t=fact_type(ntype(n))
+    let value=fact_fresh(@s t)
+    loop i in [0..2) {
+        let f=fields.ptr[MapWord(structs.ptr[MapWord(types.ptr[t].st)].fields) + i]
+        let part=fact_project(@s map int64(f.name) false int64(f.type))
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value int64(f.name) false part))}
+    }
+    value
+}
+# A readonly dictionary loop takes key/value hulls from its entry snapshot,
+# even when the source dictionary is subsequently changed. Mutable loops
+# have aliases instead and do not use this rule. O(snapshot projections).
+fact_map_loop=(n:MapWord base:MapWord @s:FactState):>void=>$unsafe {
+    let t=fact_type(ntype(MapWord(nodes.ptr[n].a)))
+    loop i in [0..2) {
+        let l=if i =? 0 {MapWord(nodes.ptr[n].sym)} else {MapWord(nodes.ptr[n].aux2)}
+        if l <=? 0 {continue}
+        let f=fields.ptr[MapWord(structs.ptr[MapWord(types.ptr[t].st)].fields) + i]
+        let array=fact_project(@s base int64(f.name) false int64(f.type))
+        let parts=fact_inventory(s array)
+        if parts.length =? 0 {continue}
+        let lt=fact_type(MapWord(locals.ptr[l].type))
+        let value=fact_fresh(@s lt)
+        fact_inventory_bound(@s value parts lt n)
+        fact_bind(@s PlaceIdentity('local' MapWord(locals.ptr[l].owner) l) value)
+    }
+}
+fact_map_receiver=(@s:FactState n:MapWord value:MapWord):>MapWord=>{
+    let route=fact_receiver_route(n @s)
+    let held=fact_route_values(@s route)
+    if held.length >? 0 {held[held.length - 1]} else {value}
+}
+fact_map_check=(n:MapWord @s:FactState values:array<int64>):>void=>$unsafe {
+    if fact_speculating not=? 0 or not (fact_policy =? 'RequireStatic' or fact_query) {return}
+    # (a totaldict has every key its type admits)
+    let e=kid(n 0)
+    loop e >? 0 {
+        if is_total_dict(ntype(e)) or refine_active and is_total_dict(refine_storage(e ntype(e))) {return}
+        if nodes.ptr[e].kind not=? 'conv' and nodes.ptr[e].kind not=? 'narrow' and nodes.ptr[e].kind not=? 'addr' {break}
+        e=MapWord(nodes.ptr[e].a)
+    }
+    let receiver=fact_map_receiver(@s n values[0])
+    let member=fact_map_member(@s n receiver values[1])
+    let proven=fact_truth(s member) =? 1
+    if fact_probe_on {
+        fact_probe_record(n proven)
+        return
+    }
+    if not proven {
+        # (the call or write that replaced the dictionary's value, or the value
+        # of the record holding it, when one did)
+        let cause=fact_bound(s receiver)
+        if cause.witness <=? 0 or cause.reason =? 'missing' {
+            let route=fact_receiver_route(n @s)
+            let i=if route.root not=? 0 {fact_binding(s fact_place(route.root))} else {-1}
+            if i >=? 0 {cause=fact_bound(s s.bindings[i].value)}
+        }
+        wit_cause(cause n)
+        wit_key(n)
+    }
+}
