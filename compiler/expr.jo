@@ -6705,6 +6705,16 @@ binary_rest = (n: int, expected: int, a0: int, b0: int, ta0: int, tb0: int, hint
             sb = tkb == .str_ or (tkb == .opt and tkind(int(types[tb].elem)) == .str_)
             if (sa and is_numeric(tb)) or (sb and is_numeric(ta)): why = " (text is not a number, even when it holds digits: `to_int(s)` or `input_int(...)` makes a number, and `\"\{x}\"` puts a number in text)"
         if len(why) == 0: why = void_rec_hint(a) + void_rec_hint(b) + uncalled_hint(a, 0) + uncalled_hint(b, 0)
+        # (`x and 1 =? 1`: the word operators join two truth values or two integers, and a test binds tighter)
+        if (op == .amp or op == .pipe or op == .caret) and dewy_at(nodes[n].pos) and (tkb == .bool_ and is_int(ta) or tka == .bool_ and is_int(tb)):
+            word = if op == .amp: "and" else if op == .pipe: "or" else: "xor"
+            tested = if tkb == .bool_: b else: a
+            other = if tkb == .bool_: a else: b
+            shown = wit_text(other)
+            left = if nodes[tested].kind == .binary and fact_comparison(nodes[tested].op as Tok): wit_text(int(nodes[tested].a)) else: ""
+            right = if nodes[tested].kind == .binary and fact_comparison(nodes[tested].op as Tok): wit_text(int(nodes[tested].b)) else: ""
+            mask = if shown != "" and left != "" and right != "": ": to test a mask, group it first, `({shown} {word} {left}) {op_text(nodes[tested].op as Tok, nodes[n].pos)} {right}`" else: ""
+            fatal(nodes[n].pos, "`{word}` joins two truth values or two integers, not {dt(ta)} and {dt(tb)}, and a test binds tighter than it{mask}; to test an integer, compare it, as `x not=? 0`")
         # (square(4) + 1 with a square that prints: it gives nothing back)
         if len(why) == 0:
             loop x in [a, b]:
