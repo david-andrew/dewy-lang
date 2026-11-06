@@ -1,0 +1,159 @@
+$runtime_checks
+from p"ast.jo" import nkids2
+from p"ast.jo" import (NF_GENERIC NF_GLOBAL has_flag kid kid2 nkids nodes)
+from p"callback_specialize.jo" import (callback_calls callback_counts callback_targets callback_versions)
+from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_SHARED fns locals)
+from p"expr.jo" import (CV)
+from p"ir.jo" import (ir)
+from p"lower.jo" import (HK LFunc LK_INST lfuncs)
+from p"lower_closure_borrow.dewy" import (closure_borrow_param stack_closure_params)
+from p"lower_closures.dewy" import (closure_env_shareable)
+from p"lower_primitives.dewy" import (lf_of_inst)
+from p"lower_views.dewy" import (plain_read)
+from p"util.jo" import (files pos_file)
+
+CallbackWord:type=int64<overflow='wrap'>
+callback_key=(lf:CallbackWord node:CallbackWord):>CallbackWord=>{
+    (lf << 32) | node
+}
+callback_local=(l:CallbackWord):>CallbackWord=>{
+    if callback_targets.length =? 0 {return -1}
+    callback_targets.get(callback_key(ir.fn_index l)) ?? -1
+}
+# The work budget counts syntax, including control flow. Nested closures,
+# and large bodies stay on the ordinary path.
+callback_size=(n:CallbackWord budget:CallbackWord):>CallbackWord=>$unsafe {
+    if n =? 0 {return budget}
+    if budget <=? 0 or nodes.ptr[n].kind =? 'lambda' {return -1}
+    let left=callback_size(CallbackWord(nodes.ptr[n].a) budget - 1)
+    left=callback_size(CallbackWord(nodes.ptr[n].b) left)
+    if nodes.ptr[n].kind not=? 'for_' {
+        left=callback_size(CallbackWord(nodes.ptr[n].c) left)
+        if nodes.ptr[n].kind not=? 'partial' {left=callback_size(CallbackWord(nodes.ptr[n].d) left)}
+    }
+    loop i in [0..nkids(n)) {left=callback_size(kid(n i) left)}
+    loop i in [0..nkids2(n)) {left=callback_size(kid2(n i) left)}
+    left
+}
+callback_value=(n0:CallbackWord known:dict<int64 int64>):>CallbackWord=>$unsafe {
+    let n=n0
+    if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.refinement)) {n=CallbackWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind =? 'fnref' and nodes.ptr[n].aux =? 2 {n=CallbackWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1) {return known.get(CallbackWord(nodes.ptr[n].sym)) ?? -1}
+    if nodes.ptr[n].kind not=? 'lambda' or has_flag(n NF_GENERIC) {return -1}
+    let f=CallbackWord(nodes.ptr[n].sym)
+    if not closure_env_shareable(f) or callback_size(CallbackWord(fns.ptr[f].body) 32) <? 0 {return -1}
+    f
+}
+# Collect direct calls in the old scan's preorder while finding bindings. Calls
+# consume the completed bindings, never the partially discovered table. This
+# replaces a second body walk with O(call sites + arguments) work and keeps only
+# node IDs, so nested specialization cannot invalidate a borrowed arena view.
+callback_bindings=(n:CallbackWord @known:dict<int64 int64> @calls:array<int64>):>void=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind =? 'lambda' {return}
+    if nodes.ptr[n].kind =? 'call' and nodes.ptr[n].aux =? 0 {calls.push(n)}
+    if nodes.ptr[n].kind =? 'vardecl' and nkids(n) =? 0 and not has_flag(n NF_GLOBAL) {
+        let l=CallbackWord(nodes.ptr[n].sym)
+        if l >=? 0 and CallbackWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_BYREF | LF_MUTPARAM) =? 0 {
+            let v=callback_value(CallbackWord(nodes.ptr[n].b) known)
+            if v >=? 0 {known[l]=v}
+        }
+    }
+    callback_bindings(CallbackWord(nodes.ptr[n].a) @known @calls)
+    callback_bindings(CallbackWord(nodes.ptr[n].b) @known @calls)
+    if nodes.ptr[n].kind not=? 'for_' {
+        callback_bindings(CallbackWord(nodes.ptr[n].c) @known @calls)
+        if nodes.ptr[n].kind not=? 'partial' {callback_bindings(CallbackWord(nodes.ptr[n].d) @known @calls)}
+    }
+    loop i in [0..nkids(n)) {callback_bindings(kid(n i) @known @calls)}
+    loop i in [0..nkids2(n)) {callback_bindings(kid2(n i) @known @calls)}
+}
+callback_request=(f:CallbackWord targets:array<int64> depth:CallbackWord):>CallbackWord=>$unsafe {
+    if depth >=? 4 or callback_versions.length >=? 128 {return -1}
+    if fns.ptr[f].cabi or fns.ptr[f].has_env or fns.ptr[f].noinline or (fns.ptr[f].export_name as array<uint8>).length >? 0 or fns.ptr[f].body =? 0 {return -1}
+    if callback_size(CallbackWord(fns.ptr[f].body) 180) <? 0 {return -1}
+    let key="{f}:{targets}"
+    let version=callback_versions.get(key)
+    if version not=? none {return version}
+    let count=callback_counts.get(f) ?? 0
+    if count >=? 8 {return -1}
+    let lf=lfuncs.length
+    lfuncs.push(LFunc(LK_INST f HK.drop 0 "{fns.ptr[f].sym}_callback_{lf}"))
+    callback_versions[key]=lf
+    callback_counts[f]=count + 1
+    let known=dict<int64 int64>()
+    loop i in 0.. and t in targets {
+        if t >=? 0 {known[fns.ptr[f].params[i]]=t}
+    }
+    let calls:array<int64>=[]
+    callback_bindings(CallbackWord(fns.ptr[f].body) @known @calls)
+    loop [l t] in known {callback_targets[callback_key(lf l)]=t}
+    loop n in calls {callback_scan(n lf known depth + 1)}
+    lf
+}
+callback_scan=(n:CallbackWord caller:CallbackWord known:dict<int64 int64> depth:CallbackWord):>void=>$unsafe {
+    let f=CallbackWord(nodes.ptr[n].sym)
+    if f <=? 0 or fns.ptr[f].params.length not=? nkids(n) {return}
+    let targets:array<int64>=[]
+    loop i in [0..nkids(n)) {
+        let t=callback_value(kid(n i) known)
+        if t >=? 0 and closure_borrow_param(f i) {
+            if targets.length =? 0 {targets=fill((-1) nkids(n))}
+            targets[i]=t
+        }
+    }
+    if targets.length =? 0 {return}
+    let lf=callback_request(f targets depth)
+    if lf >=? 0 {
+        let caller_lf=if caller <? 0 {lf_of_inst(-caller - 1)} else {caller}
+        callback_calls[callback_key(caller_lf n)]=lf
+    }
+}
+callback_prepare=():>void=>$unsafe {
+    callback_calls.clear()
+    callback_targets.clear()
+    callback_versions.clear()
+    callback_counts.clear()
+    stack_closure_params.clear()
+    let has_lambda=false
+    loop f in [0..fns.length) {
+        if fns.ptr[f].kind =? FK_LAMBDA and fns.ptr[f].decl not=? 0 and files[pos_file(nodes.ptr[CallbackWord(fns.ptr[f].decl)].pos)].is_dewy {
+            has_lambda=true
+            break
+        }
+    }
+    if not has_lambda {return}
+    loop f in [1..fns.length) {
+        let d=CallbackWord(fns.ptr[f].decl)
+        if d =? 0 or not files[pos_file(nodes.ptr[d].pos)].is_dewy {continue}
+        let known=dict<int64 int64>()
+        let calls:array<int64>=[]
+        callback_bindings(CallbackWord(fns.ptr[f].body) @known @calls)
+        # Ordinary callers need the same immutable bindings as versions: their
+        # invocation-only arguments can borrow the already saved environment.
+        # Publish before any fused worker forks, never during lowering.
+        if known.length >? 0 {
+            let lf=lf_of_inst(f)
+            loop [l t] in known {callback_targets[callback_key(lf l)]=t}
+        }
+        loop n in calls {callback_scan(n (-f - 1) known 0)}
+    }
+    stack_closure_params.clear()
+}
+# A known immutable callback's environment needs no independent state copy.
+# Borrow only across inert later reads and into invocation-only parameters;
+# effectful arguments keep the ordinary eager snapshot and lifetime pin.
+callback_arg_borrow=(n0:CallbackWord args:array<int64> i:CallbackWord callee:CallbackWord parameter:CallbackWord):>bool=>$unsafe {
+    let n=n0
+    if nodes.ptr[n].kind =? 'fnref' and nodes.ptr[n].aux =? 2 {n=CallbackWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? int32(1) {return false}
+    let target=callback_local(CallbackWord(nodes.ptr[n].sym))
+    if target <? 0 or not closure_env_shareable(target) {return false}
+    if not closure_borrow_param(callee parameter) {return false}
+    loop j in [i + 1..args.length) {
+        let later=args[j]
+        if nodes.ptr[later].kind =? 'fnref' and nodes.ptr[later].aux =? 2 {later=CallbackWord(nodes.ptr[later].a)}
+        if not plain_read(later) {return false}
+    }
+    true
+}
