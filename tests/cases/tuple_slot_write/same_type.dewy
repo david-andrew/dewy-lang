@@ -1,0 +1,10 @@
+# A tuple slot written through a runtime index.
+$runtime_checks
+pick = (x:int):>int => x
+main = () => {
+    let t:[int64 int64] = [0 0]
+    let i = pick(1)
+    t[i] += 1
+    t[pick(0)] = 5
+    printl(t)
+}

@@ -1,0 +1,10 @@
+# The index and the value run once.
+$runtime_checks
+calls = 0
+next = (x:int):>int => { calls += 1; x }
+main = () => {
+    let t:[int64 int64] = [0 0]
+    t[next(1)] = next(7)
+    printl(t)
+    printl(calls)
+}

@@ -191,7 +191,7 @@ va_tuple=(s:AWord):>AWord=>$unsafe {
 # An indexed target's forms (index services, given the receiver's type: 1 Dewy ranges made
 # values, 2 a range of an array's elements (slice or selection), 3 a stepped range off an
 # n-dimensional array refused, 4 a record's soa element, part or `[]=` call, 5 an array's
-# elements picked by a mask or indexes), or 0 (NF_STEP 32768).
+# elements picked by a mask or indexes, 6 a tuple's position), or 0 (NF_STEP 32768).
 va_index=(s:AWord):>AWord=>$unsafe {
     let lhs=AWord(va_nodes[0].ptr[s].a)
     let bt=tu_prune(AWord(check_expr(AWord(va_nodes[0].ptr[lhs].a) 0)))
@@ -205,6 +205,11 @@ va_index=(s:AWord):>AWord=>$unsafe {
         if AWord(va_nodes[0].ptr[range].flags) & 32768 not=? 0 {assign_index(s bt 3);}
     }
     if bk =? 'struct_' {return assign_index(s bt 4)}
+    # (a position by a runtime index: the write at each position it can reach)
+    if bk =? 'tuple' and va_dewy_at(pos) {
+        let r=AWord(assign_index(s bt 6))
+        if r not=? 0 {return r}
+    }
     if (bk =? 'array' or bk =? 'fixed') and range not=? 0 {
         let rk=va_nodes[0].ptr[range].kind
         if rk not=? 'int_lit' and rk not=? 'range' {return assign_index(s bt 5)}

@@ -3362,6 +3362,16 @@ number_literal_tree = (n: int) -> bool:
     if k == .binary: return number_literal_tree(int(nodes[n].a)) and number_literal_tree(int(nodes[n].b))
     false
 
+# (a constant index's position)
+dewy_position_known = (b: int, pos: int) -> (bool, int):
+    if nodes[b].kind == .int_lit and not has_flag(b, NF_U64): return (true, nodes[b].ival)
+    if nodes[b].kind == .ident:
+        s = lookup(int(nodes[b].name))
+        if s != 0:
+            init = binding_const_init(syms[s].kind, int(syms[s].ref), pos)
+            if init != 0 and nodes[init].kind == .int_lit and not has_flag(init, NF_U64): return (true, nodes[init].ival)
+    (false, 0)
+
 # `pair[i]` of a `[int64 string]`: a constant position reads that position's
 # element, with its own type; any other index the union of the element types,
 # from a fixed array of them, so its bounds are proven as an array index's are.
@@ -3370,18 +3380,7 @@ dewy_position_index = (n: int, bt: int, expected: int) -> int:
     b = int(nodes[n].b)
     count = int(types[bt].nargs)
     if b == 0 or nkids(n) != 1 or nodes[b].kind == .range or nodes[b].kind == .namedarg: fatal(pos, "an array with a type per position takes one index (`pair[0]`); unpack it to take its parts (`let [a b] = pair`)")
-    known = false
-    at = 0
-    if nodes[b].kind == .int_lit and not has_flag(b, NF_U64):
-        known = true
-        at = nodes[b].ival
-    else if nodes[b].kind == .ident:
-        s = lookup(int(nodes[b].name))
-        if s != 0:
-            init = binding_const_init(syms[s].kind, int(syms[s].ref), pos)
-            if init != 0 and nodes[init].kind == .int_lit and not has_flag(init, NF_U64):
-                known = true
-                at = nodes[init].ival
+    known, at = dewy_position_known(b, pos)
     if known:
         if at < 0 or at >= count: fatal(nodes[b].pos, "index {at} is outside this {dt(bt)}: its positions are 0 to {count - 1}")
         nodes[n].kind = .field
@@ -3390,13 +3389,6 @@ dewy_position_index = (n: int, bt: int, expected: int) -> int:
         nodes[n].b = 0
         set_list(n, [])
         return check_expr(n, expected)
-    # (`t[i] += 1`: a runtime index reads a copy of the positions, which nothing writes back)
-    if cur_assign != 0 and nodes[cur_assign].a == i32(n):
-        same = true
-        loop i in [1..count):
-            if not type_eq(targ(bt, i), targ(bt, 0)): same = false
-        fix = if same: ", or declare it `array<{dt(targ(bt, 0))} length={count}>`, whose elements take any index" else: ""
-        fatal(pos, "a position of this {dt_named(bt)} is changed through a constant index (`t[0] = ...`){fix}")
     members: int[]
     loop i in [0..count): members.push(targ(bt, i))
     source = "$positions{n}"
@@ -6197,6 +6189,7 @@ concat_piece = (n: int, text: bool, second: bool = false) -> str:
         if find(s, "\"") < 0 and find(s, "\\") < 0 and find(s, "\{") < 0 and find(s, "}") < 0 and find(s, "\n") < 0: return s
     nm = ""
     if k == .ident: nm = name_of(int(nodes[n].name))
+    else if k == .field and nodes[n].aux == -2 and nodes[int(nodes[n].a)].kind == .ident: nm = "{name_of(int(nodes[int(nodes[n].a)].name))}[{nodes[n].ival}]"
     else if k == .field and nodes[int(nodes[n].a)].kind == .ident: nm = name_of(int(nodes[int(nodes[n].a)].name)) + "." + name_of(int(nodes[n].name))
     else if k == .int_lit: nm = "{nodes[n].ival}"
     else if k == .call and nkids(n) <= 1:

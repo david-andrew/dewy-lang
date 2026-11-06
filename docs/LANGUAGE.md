@@ -2236,7 +2236,11 @@ error asking for the type where it is made.
 of a tuple: `let entry:[int64 string] = [7 "seven"]`. A constant index reads that
 position with its own type (`entry[0]` is an `int64`, `entry[1]` a `string`);
 any other index gives the union of the element types (`int64|string`) and is
-proven in bounds like an array index. `.length` is the number of positions,
+proven in bounds like an array index. A write through such an index (`t[i] += 1`)
+is made at the position the index holds, so it must be valid at every position
+the index can reach, and for each member of a union position: `t[i] += 1` works on
+a `[int64 int64|float64]`, and on a `[int64 int64|string]` is an error naming
+position 1. `.length` is the number of positions,
 and `let [n name] = entry` unpacks it. It prints as an array, `[7 "seven"]`, and
 is how implementation-language tuples such as `(str, u8[])` appear in Dewy.
 

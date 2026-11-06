@@ -1,0 +1,10 @@
+# Through a record's field, and a constant index still takes the position's own type.
+$runtime_checks
+pick = (x:int):>int => x
+Box:type = [t:[int64 float64]]
+main = () => {
+    let b = Box[[1 2.0]]
+    b.t[pick(1)] += 1
+    b.t[0] = 9
+    printl(b)
+}

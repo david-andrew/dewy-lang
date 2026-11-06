@@ -2556,7 +2556,8 @@ loop_copy_hint = (l: int, s: int) -> str:
     nm = name_of(int(locals[l].name))
     if map_loop_values.has(l): return "change the entry through its key, as `loop key in m.keys() \{ m[key]... }`"
     src = route_text(int(nodes[s].a))
-    "write `loop @{nm} in {if len(src) > 0: src else: "items"}` to change the element itself"
+    if len(src) == 0: src = "items"
+    "write `loop @{nm} in {src}` to change the element itself"
 
 # (a use of l in n other than as the object of a statement's call with no result, as
 # `xs.push(1)`, whose change to the copy nothing can see; O(n), for binders written by place)
@@ -3681,9 +3682,95 @@ assign_element = (s: int) -> int:
 # 1 Dewy ranges made values, 2 a range of an array's elements, 3 a stepped range off an
 # n-dimensional array refused, 4 a record's soa element, part or `[]=` call, 5 an array's
 # elements picked by a mask or indexes; the rewritten statement, or 0
+# The positions a runtime index can reach: its refined value set's, when it has one, else all.
+tuple_reachable = (b: int, count: int) -> int[]:
+    out: int[]
+    check_expr(clone(b), 0)
+    c = last_checked
+    if refine_active:
+        ok, keys = total_dict_keys(refine_storage(c, ntype(c)))
+        if ok:
+            loop at in [0..count):
+                if keys.contains("{at}"): out.push(at)
+            if out.len() > 0: return out
+    loop at in [0..count): out.push(at)
+    out
+
+# (the place of a position)
+tuple_slot = (place: int, at: int, pos: int) -> int:
+    slot = mk(.field, pos)
+    nodes[slot].a = i32(clone(place))
+    nodes[slot].aux = -2
+    nodes[slot].ival = at
+    slot
+
+# The write of statement s at one position. An update of a union position is made for the
+# member it holds, so it needs to be valid for each of them.
+tuple_slot_stmt = (s: int, place: int, at: int, bt: int, pos: int) -> int:
+    member_types = if is_union(targ(bt, at)) and int(nodes[s].op) != int(Tok.assign) and not has_flag(s, NF_BROADCAST): union_members(targ(bt, at)) else: []
+    if member_types.len() == 0:
+        w = clone(s)
+        nodes[w].a = i32(tuple_slot(place, at, pos))
+        return w
+    name = "$slot_value{s}_{at}"
+    stmts = [bc_let(name, tuple_slot(place, at, pos), pos)]
+    loop member in member_types:
+        w = clone(s)
+        nodes[w].a = i32(tuple_slot(place, at, pos))
+        nodes[w].op = i32(int(Tok.assign))
+        nodes[w].b = i32(bc_bin(compound_op(int(nodes[s].op)) as Tok, bc_ident(name, pos), clone(int(nodes[s].b)), pos))
+        condition = mk(.istype, pos)
+        nodes[condition].a = i32(bc_ident(name, pos))
+        nodes[condition].b = i32(type_node_of(member, pos))
+        stmts.push(bc_if(condition, [w], [], pos))
+    bc_block(stmts, pos)
+
+# `t[i] = v`, `t[i] += v` for a `[A B]` and a runtime index: the write, valid at every position
+# the index can reach, made there, from a chain testing i once each; the index's bounds proven
+# as an array's are. O(positions * size of v). 0 for what is not such a write.
+tuple_slot_write = (s: int, bt: int) -> int:
+    lhs = int(nodes[s].a)
+    b = int(nodes[lhs].b)
+    pos = nodes[lhs].pos
+    count = int(types[bt].nargs)
+    if b == 0 or nkids(lhs) != 1 or nodes[b].kind == .range or nodes[b].kind == .namedarg: return 0
+    known, _ = dewy_position_known(b, pos)
+    if known: return 0
+    positions = tuple_reachable(b, count)
+    place = int(nodes[lhs].a)
+    loop at in positions:
+        before = err_notes.len()
+        err_notes.push((nodes[s].pos, "note: this writes position {at} of this {dt(bt)}, which holds {a_type(targ(bt, at))}"))
+        check_stmt(tuple_slot_stmt(s, place, at, bt, pos))
+        loop err_notes.len() > before: err_notes.pop()
+    name = "$slot{s}"
+    table = "$position_values{s}"
+    zeros: int[]
+    loop at in [0..count): zeros.push(bc_int(0, pos))
+    values = mk(.array, pos)
+    set_list(values, zeros)
+    shape = mk(.tname, pos)
+    nodes[shape].aux = -7
+    nodes[shape].ival = mk_fixed(T_INT, count)
+    bound_values = bc_let(table, values, pos)
+    nodes[bound_values].a = i32(shape)
+    bound = mk(.index, pos)
+    nodes[bound].a = i32(bc_ident(table, pos))
+    nodes[bound].b = i32(bc_ident(name, pos))
+    set_list(bound, [int(nodes[bound].b)])
+    chain = tuple_slot_stmt(s, place, positions[positions.len() - 1], bt, pos)
+    i = positions.len() - 2
+    loop i >= 0:
+        chain = bc_if(bc_bin(.eq, bc_ident(name, pos), bc_int(positions[i], pos), pos), [tuple_slot_stmt(s, place, positions[i], bt, pos)], [chain], pos)
+        i -= 1
+    block = bc_block([bc_let(name, b, pos), bound_values, bc_let("{name}_bound", bound, pos), chain], pos)
+    check_stmt(block)
+    block
+
 assign_index = (s: int, bt: int, code: int) -> int:
     lhs = int(nodes[s].a)
     op = int(nodes[s].op)
+    if code == 6: return tuple_slot_write(s, bt)
     if code == 1:
         dewy_index_ranges(lhs, bt)
         return 0
