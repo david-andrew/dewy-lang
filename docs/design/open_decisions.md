@@ -545,6 +545,51 @@ printl"{start}"             # as written it never reads limit, and would print 0
 - **Spellings:** none new.
 - **Reversible:** yes; loosening later breaks nothing.
 
+### D26. `$capture @x` inside a task, where `x` comes from outside it
+- **Today:** this compiles, and the writes silently disappear. A task's ordinary capture is a snapshot, and `@total` shares that snapshot rather than the outer variable.
+
+```dewy
+main = () => {
+    let total = 0
+    concurrent {
+        spawn { printl([1 2 3].map(($capture @total y:int):>int => { total += y; y })) }
+    }
+    printl(total)   # prints 0
+}
+```
+
+- **Options:**
+  - **a) Keep it.** The snapshot rule is consistent, but nothing tells the programmer.
+  - **b) Warn.**
+  - **c) Compile error** saying the enclosing body holds its own copy.
+- **Rec:** (c). A program that writes this almost certainly expects 6.
+- **Spellings:** none new.
+- **Reversible:** yes; it only rejects programs.
+
+### D27. `or_throw` in a `spawn { ... }` body
+- **Today:** a compile error with a fix-it, because the body has no declared result to forward the failure through.
+
+```dewy
+main = () => {
+    let c = channel<int>(4)
+    concurrent {
+        spawn {
+            c.send(1) or_throw
+            c.close
+        }
+        printl(c.receive)
+    }
+}
+```
+
+- **Options:**
+  - **a) Keep the error (built).**
+  - **b) Infer the result for `spawn` bodies only,** as a function without a declared result does. A failed task already fails its group, so forwarding fits that rule.
+  - **c) Infer it for every lambda.**
+- **Rec:** (b).
+- **Spellings:** none new.
+- **Reversible:** yes, while no programs depend on it.
+
 ---
 
 ## P4: open-ended
