@@ -1579,13 +1579,100 @@ expected_binds = (cd: mut Cand, expected: int, given: int[]):
         if expected_bind_fits(b): cd.binds[i] = b
 
 text_literal = (a: int) -> bool: nodes[a].kind == .str_lit and nodes[a].aux != 1
-# (a bare text literal is typed when it is read, so its call needs this asked: O(arguments))
-text_literal_arg = (cd: Cand) -> bool:
-    loop a in cd.args:
-        if a != 0 and text_literal(a): return true
-    false
 
 expected_bind_fits = (b: int) -> bool: b != 0 and not has_var(b) and not is_union(b) and tkind(b) != .opt
+
+# Does the unchecked call a take its type from the parameter it meets, as a literal does
+# (node_store.dewy)? 1: the name's one function has a type parameter no parameter mentions
+# (`text=<A>(s:string):>Node<A>`); 2: a bare literal alone gives one, and a is an element of an
+# array literal argument. An array literal argument marks those elements and answers 0.
+# O(parameters) once per name, then skipped (call_waits_never) when the answer was no.
+call_waits = (a: int) -> int:
+    if nodes[a].kind == .array:
+        loop i in [0..nkids(a)):
+            e = kid(a, i)
+            if nodes[e].kind == .call and nodes[e].type == 0 and nodes[int(nodes[e].a)].kind == .ident and not call_waits_skips(int(nodes[int(nodes[e].a)].name)) and literal_typed_call(e):
+                literal_typed_elements[e] = true
+                literal_typed_names[int(nodes[int(nodes[e].a)].name)] = true
+                if int(nodes[int(nodes[e].a)].name) < call_waits_never.len(): call_waits_never[int(nodes[int(nodes[e].a)].name)] = false
+        return 0
+    if nodes[a].kind != .call or nodes[a].type != 0 or nodes[int(nodes[a].a)].kind != .ident: return 0
+    if literal_typed_elements.has(a): return 2
+    name = int(nodes[int(nodes[a].a)].name)
+    s = lookup(name)
+    if s != 0 and syms[s].kind == .local: return 0
+    if s == 0 or syms[s].kind != .fns or syms[s].decl == 0 or nodes[int(syms[s].decl)].nlist2 == 0:
+        call_waits_mark(name)
+        return 0
+    found = false
+    d = call_waits_decl(name)
+    if d != 0:
+        sig = fn_sig(d)
+        if sig.ret != 0:
+            loop id in [0..int(nodes[d].nlist2)):
+                binds = call_waits_binds(int(sig.ntp), id)
+                mentioned = false
+                loop p in sig.params:
+                    if subst_partial(p, binds) != p: mentioned = true
+                if not mentioned and subst_partial(int(sig.ret), binds) != int(sig.ret): found = true
+    # (a generic function of the same name in another module may be missed: its call then says
+    # `cannot infer`, not wrong code)
+    if not found: call_waits_mark(name)
+    if found: 1 else: 0
+
+literal_typed_names: {int: bool} = {}
+literal_typed_elements: {int: bool} = {}
+
+call_waits_skips = (name: int) -> bool: name < call_waits_never.len() and call_waits_never[name]
+
+call_waits_local = (name: int) -> bool:
+    s = lookup(name)
+    s != 0 and syms[s].kind == .local
+
+# (a name that has answered no, or whose first function has no type parameters: not asked again)
+call_waits_mark = (name: int):
+    if literal_typed_names.has(name): return
+    loop call_waits_never.len() <= name: call_waits_never.push(false)
+    call_waits_never[name] = true
+
+# (the name's one generic function, or 0)
+call_waits_decl = (name: int) -> int:
+    own: int[]
+    collect_fns(name, &own)
+    if own.len() != 1 or nodes[own[0]].nlist2 == 0: return 0
+    own[0]
+
+# (a marker for type parameter id, the others open)
+call_waits_binds = (ntp: int, id: int) -> int[]:
+    binds = fill(0, ntp)
+    binds[id] = T_INT
+    binds
+
+literal_typed_call = (e: int) -> bool:
+    if nodes[int(nodes[e].a)].kind != .ident: return false
+    name = int(nodes[int(nodes[e].a)].name)
+    if call_waits_local(name): return false
+    s = lookup(name)
+    if s == 0 or syms[s].kind != .fns or syms[s].decl == 0 or nodes[int(syms[s].decl)].nlist2 == 0:
+        call_waits_mark(name)
+        return false
+    d = call_waits_decl(name)
+    if d == 0:
+        call_waits_mark(name)
+        return false
+    sig = fn_sig(d)
+    if nkids(e) > sig.params.len(): return false
+    loop id in [0..int(nodes[d].nlist2)):
+        literal = false
+        other = false
+        binds = call_waits_binds(int(sig.ntp), id)
+        loop i in 0.. and p in sig.params:
+            given = subst_partial(p, binds)
+            if given == p: continue
+            if i >= nkids(e) or given != T_INT or not (is_lit(kid(e, i)) or text_literal(kid(e, i))): other = true
+            else: literal = true
+        if literal and not other: return true
+    false
 
 # map call args to parameter slots; returns error message ("" on success)
 # kinds: per parameter, 1 keyword-only (after `...`), 2 position-only (`<v:T>`)

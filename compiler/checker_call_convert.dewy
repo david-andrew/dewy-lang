@@ -1,4 +1,5 @@
 $runtime_checks
+from p"node_store.dewy" import (call_waits_hook)
 from p"types.jo" import (T_FLOAT T_INT T_MATH_INT T_U64 fields has_var is_float is_int is_union mk_array prune struct_targ structs targ tkind type_eq types)
 from p"ast.jo" import (NF_CHECKED NF_U64 NF_COMPREHENSION NF_GENERIC NF_SPREAD add_flag clone has_flag kid kids nkids nodes)
 from p"checker_call_cost.dewy" import (arg_cost)
@@ -165,6 +166,7 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
             }
             return 0
         }
+        if k =? 'call' and call_waits_hook(a) not=? 0 {return 1}
         if k =? 'dotname' or k =? 'call' {
             let name:CVWord=CVWord(nodes.ptr[a].name)
             if k =? 'call' {name=CVWord(nodes.ptr[CVWord(nodes.ptr[a].a)].name)}

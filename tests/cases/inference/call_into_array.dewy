@@ -1,0 +1,18 @@
+# The parameter's type flows through a call argument into an array literal's elements.
+Choice:type = 'resume' | 'settings' | 'quit'
+Node:type = <A>[kind:'column'|'text'|'button' id:A|none=none label:string="" kids:array<Node<A>>=[]]
+text_ = <A>(s:string):>Node<A> => Node<A>[kind='text' label=s]
+button = <A>(id:A label:string):>Node<A> => Node<A>[kind='button' id=id label=label]
+column = <A>(kids:array<Node<A>> gap=0.0):>Node<A> => Node<A>[kind='column' label="{gap}" kids=kids]
+holder = <A>(n:Node<A>):>int64 => n.kids.length
+expected = ():>Node<Choice> => column([button('resume' "R") text_("x")])
+named = ():>Node<Choice> => column(gap=2.0 [text_("x") button('quit' "Q")])
+main = () => {
+    let given = column<Choice>([text_("y")])
+    let both = column<Choice>([button('settings' "S") text_("z")])
+    let found = column([text_("x") button("Play" "P")])
+    let nested = holder(text_<Choice>("n"))
+    let typed:array<Node<Choice>> = [text_("t")]
+    printl("{given.kids.length} {both.kids[0].id} {found.kids[1].id} {nested} {typed.length}")
+    printl("{expected().kids[0].id} {named().kids[1].id}")
+}

@@ -73,6 +73,17 @@ Node:type=[
 const NODE_CHECKED:int64=128
 
 # A new node of kind at pos, every other field zero
+# Does an unchecked call's type wait for the parameter it meets (0 no, 1 only its result gives a
+# type parameter, 2 only bare literals do), asked of the checker's host; an array literal argument
+# is asked first, for its elements. Nothing here until the host binds it.
+# (by name, a callee that never waits: such calls skip the question)
+let call_waits_never:array<bool>=[]
+call_waits_none=(node:int64):>int64=>0
+let call_waits_hook:<(node:int64):>int64>=@call_waits_none
+call_waits_bind=(f:<(node:int64):>int64>):>int64=>{
+    call_waits_hook=@f
+    0
+}
 node_mk=(@store:array<Node> kind:NK pos:int64):>int64=>{
     store.push(Node[kind=kind pos=pos])
     store.length - 1

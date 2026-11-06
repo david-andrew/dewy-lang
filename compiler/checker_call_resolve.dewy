@@ -1,6 +1,7 @@
 $runtime_checks
+from p"node_store.dewy" import (call_waits_hook)
 from p"ast.jo" import (nodes dewy_param_kinds nkids nkids2 kid has_flag add_flag set_list NF_MUT NF_CHECKED)
-from p"expr.jo" import (text_literal_arg setting_site rational_module_found exact_family_name exact_members_for call_targs written_int_param can_coerce CallFailure call_map_candidate call_type_arity call_reject_candidate call_rejection_text exact_args call_tie_error call_no_candidate call_decl_checks AUX2_PARTIAL has_hole expected_binds lit_default match_type subst_partial ntype is_lit param_in_union default_arg default_uses_params capture_value finish_partial place_method dewy_literal_method_name call_resolve_error call_ide_ref call_note_contracts call_capture_block decl_in_prelude comprehension_settle unnamed)
+from p"expr.jo" import (setting_site rational_module_found exact_family_name exact_members_for call_targs written_int_param can_coerce CallFailure call_map_candidate call_type_arity call_reject_candidate call_rejection_text exact_args call_tie_error call_no_candidate call_decl_checks AUX2_PARTIAL has_hole expected_binds lit_default match_type subst_partial ntype is_lit param_in_union default_arg default_uses_params capture_value finish_partial place_method dewy_literal_method_name call_resolve_error call_ide_ref call_note_contracts call_capture_block decl_in_prelude comprehension_settle unnamed)
 from p"member_replay.jo" import (member_record)
 from p"member_admit.dewy" import (member_candidates)
 from p"checker_call_cost.dewy" import (Cand call_candidate_cost)
@@ -143,7 +144,12 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
         if ok and cd.sig.ret not=? 0 and match_type(CRWord(cd.sig.ret) CRWord(types.ptr[prune(expected)].elem) @rb 0) <? 0 {ok=false}
         if ok {cd.binds = rb}
     }
-    if expected not=? 0 and cd.plain and cd.sig.ret not=? 0 and cd.sig.ntp >? 0 and text_literal_arg(cd) {cd.plain=false}
+    # (a text literal is typed when it is read, so its call needs the expected result asked)
+    if expected not=? 0 and cd.plain and cd.sig.ret not=? 0 and cd.sig.ntp >? 0 {
+        loop a in cd.args {
+            if a not=? 0 and nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux not=? 1 {cd.plain=false}
+        }
+    }
     if not cd.plain and not partial and expected not=? 0 and cd.sig.ret not=? 0 and cd.sig.ntp >? 0 {expected_binds(@cd expected targs_here)}
     if not cd.plain {
         loop i in [0..np) {
@@ -162,6 +168,19 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
                     cd.binds = rb
                     pt=subst_partial(cd.sig.params.ptr[i] @cd.binds)
                 }
+            }
+            # (nothing gives the type of `[button("Play" "P")]`: its literals do, and then its
+            # other elements take that)
+            if has_var(pt) and nodes.ptr[a].kind =? 'array' {
+                loop e in [0..nkids(a)) {
+                    let element=kid(a e)
+                    if nodes.ptr[element].type =? 0 and nodes.ptr[element].kind =? 'call' and call_waits_hook(element) =? 2 {
+                        check_expr(element 0);
+                        add_flag(element NF_CHECKED)
+                        match_type(CRWord(types.ptr[prune(cd.sig.params.ptr[i])].elem) ntype(element) @cd.binds 1);
+                    }
+                }
+                pt=subst_partial(cd.sig.params.ptr[i] @cd.binds)
             }
             let row=callable_contract(cd.sig.params.ptr[i])
             if row not=? 0 and effect_contracts.ptr[row].variables.length not=? 0 {pt=mk_callable_contract(callable_base(pt) row)}

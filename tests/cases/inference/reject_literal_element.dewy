@@ -1,0 +1,8 @@
+Choice:type = 'resume' | 'quit'
+Node:type = <A>[id:A|none=none kids:array<Node<A>>=[]]
+button = <A>(id:A):>Node<A> => Node<A>[id=id]
+column = <A>(kids:array<Node<A>>):>Node<A> => Node<A>[kids=kids]
+main = () => {
+    let c = column<Choice>([button('nope')])
+    printl(c.kids.length)
+}

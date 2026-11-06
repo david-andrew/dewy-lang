@@ -114,3 +114,10 @@ node_clone = (store: mut Node[], runs: mut i32[], n: int) -> int:
         loop i in [0..int(nd.nlist2)): xs.push(node_clone(store, runs, int(runs[int(nd.list2) + i])))
         node_set_list2(store, runs, c, xs)
     c
+
+call_waits_never: bool[]
+call_waits_none = (node: int) -> int: 0
+call_waits_hook: (int) -> int = call_waits_none
+call_waits_bind = (f: (int) -> int) -> int:
+    call_waits_hook = f
+    0

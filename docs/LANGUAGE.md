@@ -1963,8 +1963,9 @@ main = () => {
 ```
 
 Calls normally infer the type arguments; `first<string>(words)` supplies them
-explicitly. A call used as an argument takes the receiving parameter's type when
-all candidates agree on that type. This also applies to methods, qualified calls
+explicitly. A call used as an argument, directly or as an element of an array
+literal argument (`column<Choice>([text("y")])`), takes the receiving parameter's
+type when all candidates agree on that type. This also applies to methods, qualified calls
 and named arguments; disagreeing overloads supply no such context. Type applications nest, as in `Pool<Box<int64>>`, and work on imported
 names such as `models.Box<string>`. Generic type aliases wrap their definition in
 parentheses. Each concrete function/type is specialized by the compact compiler;

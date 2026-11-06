@@ -1,0 +1,7 @@
+Node:type = <A>[label:string="" kids:array<Node<A>>=[]]
+text_ = <A>(s:string):>Node<A> => Node<A>[label=s]
+column = <A>(kids:array<Node<A>>):>Node<A> => Node<A>[kids=kids]
+main = () => {
+    let c = column([text_("y")])
+    printl(c.kids.length)
+}
