@@ -1,0 +1,125 @@
+$runtime_checks
+from p"checked_eval.dewy" import cx_token
+from p"ast.jo" import NF_RECORD
+from p"ast.jo" import (NF_EXPLICIT_INTEGER NF_U64 has_flag kid nkids nodes)
+from p"check.jo" import (FK_INIT LF_MUTPARAM fns locals)
+from p"checker_tokens.dewy" import (Tok)
+from p"expr.jo" import (CV IN ntype)
+from p"facts.jo" import (FactState fact_comparison fact_constant fact_domain fact_new fact_project fact_scalar fact_type)
+from p"ownership.jo" import (ownership_fact_cleanup)
+from p"predicate_facts.jo" import (FactPredicate fact_predicate_nodes fact_predicates)
+from p"refine.jo" import (ref_encoded)
+from p"refinement_types.dewy" import (FactTerm)
+from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_U64 is_int tkind)
+
+PredicateWord:type=int64<overflow='wrap'>
+fact_predicate_tree=(n:PredicateWord params:dict<int64 int64> @budget:PredicateWord):>PredicateWord=>$unsafe {
+    if n <=? 0 or budget <=? 0 {return 0}
+    budget -= 1
+    let k=nodes.ptr[n].kind
+    if k =? 'block' {
+        if nkids(n) =? 0 {return 0}
+        let scope=params
+        loop i in [0..nkids(n) - 1) {
+            let c=kid(n i)
+            if budget <=? 0 or nodes.ptr[c].kind not=? 'vardecl' or nodes.ptr[c].aux2 not=? 1 or nkids(c) not=? 0 {return 0}
+            budget -= 1
+            let source=PredicateWord(nodes.ptr[c].b)
+            if source <=? 0 or nodes.ptr[source].kind not=? 'ident' or nodes.ptr[source].aux not=? 1 or not params.has(PredicateWord(nodes.ptr[source].sym)) {return 0}
+            scope[PredicateWord(nodes.ptr[c].sym)]=params[PredicateWord(nodes.ptr[source].sym)]
+        }
+        return fact_predicate_tree(kid(n nkids(n) - 1) scope @budget)
+    }
+    # Comparison checking widens lengths and scalar elements to int. Only
+    # integer widenings into a signed host word or mathematical int preserve
+    # these values; float conversions and uint64's biased encoding do not.
+    if k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.int_)) and (ntype(n) =? T_INT or ntype(n) =? T_MATH_INT) {
+        let a=PredicateWord(nodes.ptr[n].a)
+        let t=fact_type(ntype(a))
+        if is_int(t) and t not=? T_U64 and (t not=? T_MATH_INT or ntype(n) =? T_MATH_INT) {return fact_predicate_tree(a params @budget)}
+        return 0
+    }
+    if k =? 'return_' or k =? 'exprstmt' {return fact_predicate_tree(PredicateWord(nodes.ptr[n].a) params @budget)}
+    let term=FactPredicate()
+    if k =? 'ident' and nodes.ptr[n].aux =? 1 {
+        if not params.has(PredicateWord(nodes.ptr[n].sym)) {return 0}
+        term.parameter=params[PredicateWord(nodes.ptr[n].sym)]
+    }
+    else if k =? 'int_lit' or k =? 'bool_lit' {
+        if fact_type(ntype(n)) =? T_U64 or has_flag(n NF_U64) {return 0}
+        term.literal=ref_encoded(nodes.ptr[n].ival ntype(n))
+    }
+    else if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.len)) and nkids(n) =? 1 and tkind(fact_type(ntype(kid(n 0)))) =? 'array' {
+        term.length=true
+        term.a=fact_predicate_tree(kid(n 0) params @budget)
+        if term.a =? 0 {return 0}
+    }
+    else if k =? 'index' and nodes.ptr[n].b not=? 0 {
+        let t=fact_type(ntype(PredicateWord(nodes.ptr[n].a)))
+        let e=fact_type(ntype(n))
+        if (tkind(t) not=? 'array' and tkind(t) not=? 'fixed') or not fact_scalar(e) or e =? T_U64 or not is_int(e) and e not=? T_BOOL {return 0}
+        term.element=ntype(n)
+        term.a=fact_predicate_tree(PredicateWord(nodes.ptr[n].a) params @budget)
+        let index=PredicateWord(nodes.ptr[n].b)
+        # Index checking inserts a checked host-word boundary for `int`.
+        # On a returning read it preserves the index. Never peel a written
+        # conversion, wrapping/saturating policy, or arbitrary narrowed value.
+        if budget >? 0 and nodes.ptr[index].kind =? 'conv' and nodes.ptr[index].aux =? int32(int64(CV.int_)) and ntype(index) =? T_INT and ntype(PredicateWord(nodes.ptr[index].a)) =? T_MATH_INT and not has_flag(index NF_EXPLICIT_INTEGER) {
+            budget -= 1
+            index=PredicateWord(nodes.ptr[index].a)
+        }
+        term.b=fact_predicate_tree(index params @budget)
+        if term.a =? 0 or term.b =? 0 {return 0}
+    }
+    else if k =? 'not_' {
+        term.op='kw_not'
+        term.a=fact_predicate_tree(PredicateWord(nodes.ptr[n].a) params @budget)
+        if term.a =? 0 {return 0}
+    }
+    else if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison(cx_token(int64(nodes.ptr[n].op))) {
+        if k =? 'binary' {
+            let a=fact_type(ntype(PredicateWord(nodes.ptr[n].a)))
+            let b=fact_type(ntype(PredicateWord(nodes.ptr[n].b)))
+            if not is_int(a) or not is_int(b) or a =? T_U64 or b =? T_U64 {return 0}
+        }
+        term.op=if k =? 'and_' {Tok.kw_and} else if k =? 'or_' {Tok.kw_or} else {cx_token(int64(nodes.ptr[n].op))}
+        term.a=fact_predicate_tree(PredicateWord(nodes.ptr[n].a) params @budget)
+        term.b=fact_predicate_tree(PredicateWord(nodes.ptr[n].b) params @budget)
+        if term.a =? 0 or term.b =? 0 {return 0}
+    }
+    else {return 0}
+    fact_predicate_nodes.push(term)
+    fact_predicate_nodes.length - 1
+}
+fact_predicate_summary=(f:PredicateWord):>PredicateWord=>$unsafe {
+    if ownership_fact_cleanup {return 0}
+    let known=fact_predicates.get(f)
+    if known not=? none {return known}
+    if fns.ptr[f].state not=? 2 {return 0}
+    fact_predicates[f]=0
+    if fns.ptr[f].body =? 0 or fns.ptr[f].caps.length not=? 0 or fns.ptr[f].kind =? FK_INIT {return 0}
+    let params=dict<int64 int64>()
+    loop i in [0..fns.ptr[f].params.length) {
+        let l=fns.ptr[f].params[i]
+        if PredicateWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {return 0}
+        params[l]=i
+    }
+    let start=fact_predicate_nodes.length
+    let budget:PredicateWord=32
+    let root=fact_predicate_tree(PredicateWord(fns.ptr[f].body) params @budget)
+    if root =? 0 {fact_predicate_nodes.truncate(start)}
+    fact_predicates[f]=root
+    root
+}
+fact_predicate_apply=(root:PredicateWord values:array<int64> @s:FactState):>PredicateWord=>{
+    let term=fact_predicate_nodes[root]
+    if term.parameter >=? 0 {return if term.parameter <? values.length {values[term.parameter]} else {0}}
+    if term.a =? 0 {return fact_constant(@s term.literal)}
+    let a=fact_predicate_apply(term.a values @s)
+    if a =? 0 {return 0}
+    if term.length {return fact_project(@s a (-1) false T_INT)}
+    let b=if term.b =? 0 {0} else {fact_predicate_apply(term.b values @s)}
+    if term.b not=? 0 and b =? 0 {return 0}
+    if term.element not=? 0 {return fact_project(@s a b true term.element)}
+    fact_new(@s fact_domain(T_BOOL) FactTerm(term.op a b))
+}
