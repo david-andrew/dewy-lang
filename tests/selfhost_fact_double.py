@@ -12,6 +12,7 @@ const FACT_ELEMENT_COPY = -19
 const T_INT = 2
 const T_MATH_INT = 3
 const T_U64 = 4
+const T_MATH_LIKE = 5
 const T_BOOL = 1
 const T_ARRAY_OF_INT = 50
 const T_ARRAY_OF_BOOL = 51
@@ -39,7 +40,7 @@ kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])
 nkids = (n: int) -> int: int(nodes[n].nlist)
 ntype = (n: int) -> int: int(nodes[n].type)
 representation_type = (t: int) -> int: t
-is_int = (t: int) -> bool: t == T_INT or t == T_MATH_INT or t == T_U64
+is_int = (t: int) -> bool: t == T_INT or t == T_MATH_INT or t == T_U64 or t == T_MATH_LIKE
 telem = (t: int) -> int: if t == T_ARRAY_OF_BOOL: T_BOOL else: T_INT
 tkind = (t: int) -> TK:
     if t == T_ARRAY_OF_INT or t == T_ARRAY_OF_BOOL: return .array

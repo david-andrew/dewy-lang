@@ -1,0 +1,160 @@
+$runtime_checks
+from p"nd_slices.dewy" import fact_selector_entries
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (lib_dir)
+from p"effect_values.dewy" import (effect_share)
+from p"expr.jo" import (bc_int ntype)
+from p"facts.jo" import (FACT_CAP FactProjection FactState fact_add_projection fact_arithmetic fact_bound fact_change_route fact_compare fact_constant fact_fresh fact_inventory fact_length_max fact_new fact_path_call_effects fact_project fact_receiver_route fact_route_values fact_store_route)
+from p"nd_contracts.jo" import (fact_nd_call fact_nd_need)
+from p"nd_slices.dewy" import (FactNDAxis fact_nd_axis fact_nd_range)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"refine.jo" import (representation_type)
+from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
+from p"types.jo" import (T_BOOL T_INT fixed_len is_int mk_array telem tkind)
+
+SequenceWord:type=int64<overflow='wrap'>
+fact_sequence_classify=(n:SequenceWord kind:SequenceWord path:string):>SequenceWord=>$unsafe {
+    let ranged=kind <? 166
+    if path not=? (if ranged {"{lib_dir}/std/dewy_ranges.jo"} else {"{lib_dir}/core/array.jo"}) {return 0}
+    let read=kind =? 160 or kind =? 163 or kind =? 166 or kind =? 169
+    let literal=kind =? 163 or kind =? 164
+    let argc=if literal {(if read {7} else {8})} else {(if read {2} else {3})}
+    if nkids(n) not=? argc {return 0}
+    # Contiguous literal stores already have their own bounds diagnostics.
+    if kind =? 164 and nodes.ptr[kid(n 6)].kind =? 'bool_lit' and nodes.ptr[kid(n 6)].ival =? 0 {return 0}
+    let t=representation_type(ntype(kid(n 0)))
+    if tkind(t) not=? 'array' and tkind(t) not=? 'fixed' {return 0}
+    if read and representation_type(ntype(n)) not=? mk_array(telem(t)) {return 0}
+    if not effect_share(telem(t)) {return 0}
+    if ownership_decls.length not=? 0 and ownership_fact_type(t) {return 0}
+    if not ranged {
+        let picks=representation_type(ntype(kid(n 1)))
+        if tkind(picks) not=? 'array' and tkind(picks) not=? 'fixed' {return 0}
+        if kind <? 169 and not is_int(telem(picks)) {return 0}
+        if kind >=? 169 and telem(picks) not=? T_BOOL {return 0}
+    }
+    if not read {
+        let replacement=representation_type(ntype(kid(n argc - 1)))
+        if tkind(replacement) =? 'array' and replacement =? mk_array(telem(t)) {return kind + 1}
+        if replacement not=? telem(t) {return 0}
+    }
+    kind
+}
+fact_sequence_length=(@s:FactState value:SequenceWord t:SequenceWord):>SequenceWord=>{
+    if tkind(representation_type(t)) =? 'fixed' {return fact_constant(@s fixed_len(representation_type(t)))}
+    fact_project(@s value (-1) false T_INT)
+}
+fact_sequence_select=(n:SequenceWord @s:FactState values:array<int64> kind:SequenceWord):>SequenceWord=>$unsafe {
+    let read=kind =? 160 or kind =? 163 or kind =? 166 or kind =? 169
+    let t=ntype(kid(n 0))
+    let base=values[0]
+    # Mutable arguments are reacquired after the RHS; old selector values
+    # remain snapshots, but bounds refer to the destination actually written.
+    if not read {
+        let held=fact_route_values(@s fact_receiver_route(n @s))
+        if held.length >? 0 {base=held[held.length - 1]}
+    }
+    let length=fact_sequence_length(@s base t)
+    let zero=fact_constant(@s 0)
+    let count=0
+    if kind <? 166 {
+        let part=FactNDAxis()
+        if kind >=? 163 {
+            let actuals=[values[1..7)... zero]
+            part=fact_nd_range(n @s actuals length 11)
+        }
+        else {part=fact_nd_axis(n @s values[1] length)}
+        if not part.known {
+            fact_nd_need(n @s 'eq' fact_fresh(@s T_INT) fact_constant(@s 1) "range selects only positions in the array");
+        }
+        else if part.count not=? 0 {
+            count=part.count
+            if fact_compare(s 'eq' count zero) not=? 1 {
+                fact_nd_need(n @s 'le' zero part.first "range first selected index is nonnegative");
+                fact_nd_need(n @s 'lt' part.stop length "range last selected index is below array length");
+            }
+        }
+        else if fact_compare(s 'ge' part.first part.stop) =? 1 {count=zero}
+        else {
+            fact_nd_need(n @s 'le' zero part.first "range start is nonnegative");
+            let ordered=fact_nd_need(n @s 'le' part.first part.stop "range start is at most its end")
+            fact_nd_need(n @s 'le' part.stop length "range end is at most array length");
+            if ordered {
+                let origin=bc_int(0 nodes.ptr[n].pos)
+                nodes.ptr[origin].type=int32(T_INT)
+                count=fact_arithmetic(@s origin 'minus' part.stop part.first)
+            }
+        }
+    }
+    else {
+        let picks=values[1]
+        let size=fact_sequence_length(@s picks ntype(kid(n 1)))
+        let entries=fact_inventory(s picks)
+        let size_bound=fact_bound(s size)
+        let complete=not size_bound.wide and size_bound.lo =? size_bound.hi and size_bound.lo =? entries.length
+        if kind >=? 169 {
+            fact_nd_need(n @s 'eq' size length "mask length equals array length");
+            let selected=0
+            let exact=complete
+            loop entry in entries {
+                let b=fact_bound(s entry)
+                if b.wide or b.lo not=? b.hi {exact=false}
+                else if b.lo not=? 0 {selected += 1}
+            }
+            if exact {count=fact_constant(@s selected)}
+            else {count=fact_new(@s FactBound(0 fact_length_max()) FactTerm(type=T_INT))}
+        }
+        else {
+            let [picked complete_picks]=fact_selector_entries(s picks size)
+            count=size
+            if not complete_picks {
+                fact_nd_need(n @s 'eq' fact_fresh(@s T_INT) fact_constant(@s 1) "index array contains only positions in the array");
+            }
+            else {
+                loop entry in picked {
+                    fact_nd_need(n @s 'le' zero entry "selected index is nonnegative");
+                    fact_nd_need(n @s 'lt' entry length "selected index is below array length");
+                }
+            }
+        }
+    }
+    if count =? 0 {count=fact_new(@s FactBound(0 fact_length_max()) FactTerm(type=T_INT))}
+    if kind =? 162 or kind =? 165 or kind =? 168 or kind =? 171 {
+        let expected=fact_sequence_length(@s values[values.length - 1] ntype(kid(n nkids(n) - 1)))
+        fact_nd_need(n @s 'eq' expected count "replacement length equals selected element count");
+    }
+    if not read {
+        let route=fact_receiver_route(n @s)
+        let target=kid(n 0)
+        loop nodes.ptr[target].kind =? 'addr' or nodes.ptr[target].kind =? 'conv' {target=SequenceWord(nodes.ptr[target].a)}
+        fact_change_route(@s target true n 'write')
+        let fresh=fact_fresh(@s t)
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false length))}
+        fact_store_route(@s route fresh n)
+        return fact_fresh(@s ntype(n))
+    }
+    let result=fact_fresh(@s ntype(n))
+    if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(result (-1) false count))}
+    result
+}
+# Selection stores replace elements, never the selected array's length.
+# Loop fallback visits only demanded writes; this reuses its captured route
+# and indexed projection, O(route depth), without retaining element facts.
+fact_sequence_store=(n:SequenceWord @s:FactState at:SequenceWord reason:FactReason):>void=>$unsafe {
+    let route=fact_receiver_route(n @s)
+    let held=fact_route_values(@s route)
+    if held.length =? 0 {fact_path_call_effects(n @s); return}
+    let t=ntype(kid(n 0))
+    let length=fact_sequence_length(@s held[held.length - 1] t)
+    let target=kid(n 0)
+    loop nodes.ptr[target].kind =? 'addr' or nodes.ptr[target].kind =? 'conv' {target=SequenceWord(nodes.ptr[target].a)}
+    fact_change_route(@s target true at reason)
+    let fresh=fact_new(@s FactBound() FactTerm(type=t))
+    if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh (-1) false length))}
+    fact_store_route(@s route fresh at)
+}
+fact_sequence_store_call=(n:SequenceWord):>bool=>{
+    let kind=fact_nd_call(n)
+    kind >=? 161 and kind <=? 171 and kind not=? 163 and kind not=? 166 and kind not=? 169
+}
