@@ -1,0 +1,8 @@
+# `??<E> jump` covers only the listed kinds; what it does not cover passes on as a value.
+main = () => {
+    loop text in ["1" "x" "99999999999999999999"] {
+        let v = to_int(text) ??<NotAnInteger> continue
+        printl(v)
+    }
+    printl("done")
+}

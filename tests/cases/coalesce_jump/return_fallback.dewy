@@ -1,0 +1,19 @@
+# `?? return x` leaves the function when the left side has no value.
+parse = (text:string):>int => {
+    let n = to_int(text) ?? return 0
+    n + 1
+}
+first = (xs:array<int>):>int? => xs.get(0)
+plain = (xs:array<int>):>void => {
+    let v = first(xs) ?? return
+    printl(v)
+}
+main = () => {
+    printl(parse("3"))
+    printl(parse("x"))
+    plain([7])
+    plain([])
+    let f = (s:string):>int => { let v = to_int(s) ?? return -1; v * 2 }
+    printl(f("4"))
+    printl(f("x"))
+}

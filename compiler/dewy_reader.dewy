@@ -3906,7 +3906,7 @@ rd_dc_expr=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>
             }
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
             let right_at:int64=reader_ctx.at
-            let right:int64=rd_dc_expr(@reader_ctx @reader_nodes power)
+            let right:int64=rd_dc_coalesce_right(@reader_ctx @reader_nodes power)
             if (right =? 0) {
                 return 0
             }
@@ -6388,6 +6388,23 @@ rd_dc_lifecycle_tag=(@reader_ctx:ParserContext token:DewyLexeme):>int64=>$unsafe
 }
 
 # `x ??<A | B> fallback` at `??`: the fallback only for the kinds listed, one type (c).
+# What `??` falls back to: a value, or `return x`, `break` or `continue`, a block holding the
+# jump, which leaves the expression with no value.
+rd_dc_coalesce_right=(@reader_ctx:ParserContext @reader_nodes:array<Node> power:int64):>int64=>$unsafe {
+    let op=rd_dn_peek(@reader_ctx)
+    if ((op not=? 'kw_return') and (op not=? 'kw_break') and (op not=? 'kw_continue')) {
+        return rd_dc_expr(@reader_ctx @reader_nodes power)
+    }
+    let pos:int64=rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at].start)
+    let jump:int64=rd_dc_statement(@reader_ctx @reader_nodes)
+    if (jump =? 0) {
+        return 0
+    }
+    let block:int64=node_mk(@reader_nodes 'block' pos)
+    node_set_list(@reader_nodes @reader_ctx.stores.lists[0] block [jump]);
+    block
+}
+
 rd_dc_listed_coalesce=(@reader_ctx:ParserContext @reader_nodes:array<Node> left:int64 power:int64 pos:int64):>int64=>$unsafe {
     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
     reader_ctx.tokens[reader_ctx.at].symbol = 'langle'
@@ -6405,7 +6422,7 @@ rd_dc_listed_coalesce=(@reader_ctx:ParserContext @reader_nodes:array<Node> left:
         }
         rd_dn_split_closer(@reader_ctx);
     }
-    let right:int64=rd_dc_expr(@reader_ctx @reader_nodes power)
+    let right:int64=rd_dc_coalesce_right(@reader_ctx @reader_nodes power)
     if (right =? 0) {
         return 0
     }

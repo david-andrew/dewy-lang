@@ -3913,7 +3913,9 @@ error such as `to_int`'s `NotAnInteger`, or a search's `Missing`), and the edito
 shows which failures a `??` covers. `value ??<Missing | ParseError> fallback`
 covers only the kinds listed (and `none` only when it is listed); any other
 failure passes on as the result, for `or_throw` or a `match`. Listing a kind the
-value never holds is an error. Zero, `false` and empty
+value never holds is an error. The fallback may also be `return x`, `break` or
+`continue`, on `??` and `??<...>` alike: `let n = to_int(text) ?? return 0`,
+`let v = to_int(line) ?? continue`. Zero, `false` and empty
 collections are present values. Chains associate right, so
 `first ?? second ?? default` picks the first present value. A final optional
 fallback keeps the result optional. With an expected union type that admits both sides, `??` returns that union; without an expected type, it uses the existing fallback inference. Arithmetic binds more tightly than `??`,

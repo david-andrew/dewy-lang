@@ -1,0 +1,26 @@
+# `?? continue` and `?? break` leave the step or the loop, as nothing else follows them.
+sum = (lines:array<string>):>int => {
+    let total = 0
+    loop line in lines {
+        let v = to_int(line) ?? continue
+        total += v
+    }
+    total
+}
+until_bad = (lines:array<string>):>int => {
+    let total = 0
+    loop line in lines {
+        total += to_int(line) ?? break
+    }
+    total
+}
+main = () => {
+    printl(sum(["1" "x" "2"]))
+    printl(until_bad(["1" "x" "2"]))
+    loop i in [0..3) {
+        printl(i)
+        let a:int? = if i =? 1 none else i
+        let b = a ?? continue
+        printl("kept {b}")
+    }
+}
