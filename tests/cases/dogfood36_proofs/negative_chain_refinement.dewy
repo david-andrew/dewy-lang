@@ -1,0 +1,15 @@
+# A refinement's chain may start from a negative literal, with or without parentheses.
+Reading:type = [level:int<-5 <=? level <=? 5>]
+clamp_unit = (x:int<-10 <=? x <=? 10>):>int => x
+tight = (x:int< -3 <? x <? 3>):>int => x + 1
+grouped = (x:int<(-2) <=? x <=? 2>):>int => x * 2
+sign = (a:int):>bool => -2 <=? a <? -1 + 3
+main = () => {
+    printl(clamp_unit(-10))
+    printl(tight(-2))
+    printl(grouped(-2))
+    printl(Reading[-5].level)
+    printl(sign(0))
+    printl(sign(2))
+    printl(0 <=? -1 <? 3)
+}

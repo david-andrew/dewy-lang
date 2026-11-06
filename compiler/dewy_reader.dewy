@@ -2148,12 +2148,33 @@ rd_dc_chain_goes_on=(@reader_ctx:ParserContext token:DewyLexeme minimum:int64):>
 # The operand at entry k is read twice without changing anything (dw_chain_plain): a name, a
 # literal or a member of one, unparenthesized.
 rd_dc_chain_plain=(@reader_ctx:ParserContext @reader_nodes:array<Node> k:int64):>bool=>$unsafe {
-    let t:DewyLexeme=reader_ctx.tokens[reader_ctx.reader.dc_chain_starts[k]]
+    let at:int64=reader_ctx.reader.dc_chain_starts[k]
+    let t:DewyLexeme=reader_ctx.tokens[at]
+    if rd_dc_negative_literal_at(@reader_ctx at) {
+        return true
+    }
     if (not (((((t.kind =? 'identifier') or (t.kind =? 'source_integer')) or (t.kind =? 'integer')) or (t.kind =? 'source_real')) or (t.kind =? 'boolean'))) {
         return false
     }
     rd_dc_plain_operand(@reader_nodes reader_ctx.reader.dc_chain_operands[k])
 }
+
+# `-10` or `(-10)` at token `at`, ending the operand: as plain as the literal it negates.
+rd_dc_negative_literal_at=(@reader_ctx:ParserContext at:int64):>bool=>$unsafe {
+    let grouped:bool=(reader_ctx.tokens[at].symbol =? 'lparen')
+    let minus:int64=if grouped {(int64<overflow='wrap'>(at) + 1)} else {at}
+    if (reader_ctx.tokens[minus].symbol not=? 'minus') {
+        return false
+    }
+    let literal:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(minus) + 1)]
+    if (not ((literal.kind =? 'source_integer') or (literal.kind =? 'integer') or (literal.kind =? 'source_real'))) {
+        return false
+    }
+    let after:DewyToken=reader_ctx.tokens[(int64<overflow='wrap'>(minus) + 2)].symbol
+    if grouped {(after =? 'rparen')} else {rd_dc_comparison_token(after)}
+}
+
+rd_dc_comparison_token=(t:DewyToken):>bool=>(t =? 'lt') or (t =? 'le') or (t =? 'gt') or (t =? 'ge') or (t =? 'eq') or (t =? 'not_eq')
 
 rd_dc_chain_push=(@reader_ctx:ParserContext op:DewyToken operand:int64 at:int64):>void=>$unsafe {
     reader_ctx.reader.dc_chain_ops.push(op);
@@ -2660,6 +2681,10 @@ rd_dc_condition=(@reader_ctx:ParserContext @reader_nodes:array<Node> base:int64)
         return 0
     }
     let k:NK=reader_nodes[predicate].kind
+    # (a comparison chain whose operand needs a temporary, `f(0) <=? x <=? 10`: no condition holds one)
+    if (k =? 'block') {
+        return rd_dc_hint(@reader_ctx pos "a refinement's comparison chain takes names and literals: join these comparisons with `and`, as `low <=? x and x <=? high`")
+    }
     let tested:int64=predicate
     if (k =? 'not_') {
         tested = int64<overflow='wrap'>(reader_nodes[predicate].a)
