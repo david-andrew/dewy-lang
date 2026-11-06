@@ -813,7 +813,7 @@ rt_dc_array_literal = (pos: int) -> int:
         loop i in 0.. and item in items:
             if not has_flag(item, NF_SPREAD) and not grouped.contains(i) and rt_dc_multi(item): collects = true
     if collects:
-        if named and positional and not rows: return rt_dc_hint(rt_dc_mixed_at(items, starts), "Dewy does not yet support a record item without a field name and =")
+        if named and positional and not rows: return rt_dc_hint(rt_dc_mixed_at(items, starts), rt_dc_mixed_text(items))
         if named or rows or nodes[n].kind == .map_lit or flows and dc_parser.reader.dc_targets_made != targets: return 0
         return rt_dc_collector(items, starts, discards, grouped, pos)
     # (a record's rows are named fields and spreads, dw_record_entry)
@@ -831,7 +831,15 @@ rt_dc_array_literal = (pos: int) -> int:
 
 rt_dc_mixed_record = (items: int[], starts: int[]):
     at = rt_dc_mixed_at(items, starts)
-    if at != 0: rt_dc_unsupported(at, "a record item without a field name and =")
+    if at != 0: rt_dc_report(at, rt_dc_mixed_text(items))
+
+rt_dc_mixed_text = (items: int[]) -> str:
+    name = "name"
+    loop item in items:
+        if nodes[item].kind == .namedarg:
+            name = name_of(int(nodes[item].name))
+            break
+    "`{name} = ...` inside `[ ]` names a record field, so every item here needs a field name; to change the variable `{name}`, put it in a block, `\{ {name} = ... }`, or make the change outside the literal"
 
 # (where the first such element is written; 0 for none)
 
