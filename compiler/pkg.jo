@@ -19,7 +19,7 @@ use 'manifest.dewy'
 pkg_specs: PkgSpec[]
 pkg_dirs: {str: str} = {}       # package name -> its directory
 pkg_errs: {str: str} = {}       # package name -> why it has no directory
-pkg_fetch = false               # (sloppy build, run, test, watch: fetch what is missing; the language server does not)
+pkg_fetch = false               # (dewy build, run, test, watch: fetch what is missing; the language server does not)
 
 # the package specs in the build block of file path (text: read before the program is parsed)
 pkg_scan = (path: str, src: str): pkg_scan_at(pkg_specs, path, src, pkg_block_at(src))

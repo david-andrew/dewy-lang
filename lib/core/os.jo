@@ -11,7 +11,7 @@ exit = (code: int):
         __end_flush()
     __exit(code)
 
-# command line arguments (args()[0] is the program as it was started: `sloppy tool.jo` gives "tool.jo")
+# command line arguments (args()[0] is the program as it was started: `dewy tool.jo` gives "tool.jo")
 args = () -> str[]: __os_args()
 __os_args = () -> str[]:
     if __test_args.len() > 0: return __test_args
@@ -635,7 +635,7 @@ list_dir = (path: str) -> str[]:
         syscall(3, fd)
     out
 
-# absolute path of the running executable (a script run with `sloppy tool.jo` is built into a
+# absolute path of the running executable (a script run with `dewy tool.jo` is built into a
 # cache first: its own path is args()[0])
 exe_path = () -> str:
     when TARGET == "wasm":
@@ -678,7 +678,7 @@ exec = (path: str, argv: str[]) -> bool:
         syscall(59, data(__zstr(path)), ptrs, envp)
         false
 
-# exec, the program where it was linked: the interactive prompt's session and sloppy watch's game
+# exec, the program where it was linked: the interactive prompt's session and dewy watch's game
 # get code linked to their addresses (macOS: without its address space randomized, as debuggers
 # start programs; elsewhere they are not moved)
 __exec_unslid = (path: str, argv: str[]) -> bool:

@@ -24,10 +24,10 @@ use 'json_doc.dewy'
 use 'manifest.dewy'
 use 'icount.jo'
 use 'pcheck.jo'
-# The Sloppy compiler.
-#   sloppy file.jo [args]     compile and run
-#   sloppy build file.jo [-o out] [--target wasm32] [--release]
-#   sloppy watch file.jo [args]     run it, and reload it while its files change (watch.jo)
+# The Dewy compiler.
+#   dewy file.jo [args]     compile and run
+#   dewy build file.jo [-o out] [--target wasm32] [--release]
+#   dewy watch file.jo [args]     run it, and reload it while its files change (watch.jo)
 
 build:
     opt = release
@@ -124,8 +124,8 @@ find_lib_dir = () -> str:
 
 dump = false
 host_ir = false                # scalar IR for the optional optimized compiler-host build
-debug_info = false            # DWARF line tables (sloppy build)
-debug_vars = false            # and where variables are, with their types (sloppy build -g)
+debug_info = false            # DWARF line tables (dewy build)
+debug_vars = false            # and where variables are, with their types (dewy build -g)
 exit_codes_only = false          # (dewy build --exit-codes: main's exit codes, and nothing built)
 timing = false
 
@@ -543,10 +543,10 @@ compile = (path: str, out0: str) -> str:
         img_ro_addr = PE_BASE + ro_rva
         img_data_addr = PE_BASE + data_rva + idata_size
         x64_resolve(img_text_addr, img_ro_addr, img_data_addr)
-        # (sloppy watch: after the first build, a patch for the program running)
+        # (dewy watch: after the first build, a patch for the program running)
         if watch_build and not watch_first: ok = watch_make_patch()
         else:
-            # (debuggers get a PDB beside what `sloppy build` writes)
+            # (debuggers get a PDB beside what `dewy build` writes)
             pdb = ""
             guid: u8[]
             if debug_info and not watch_build:
@@ -561,7 +561,7 @@ compile = (path: str, out0: str) -> str:
         entry = arm64_entry_mac(roots, main_lf)
         info = pe_backtrace_info()
         if watch_build and (update_fn != 0 or draw_present()):
-            # (sloppy watch, a game: the code and read-only data run from a region of their own,
+            # (dewy watch, a game: the code and read-only data run from a region of their own,
             # copied there by a loader, macho.jo; after the first build, a patch for the game)
             ro_at = (code.len() + 15) & ~15
             blob_len = (ro_at + rodata.len() + 7) & ~7
@@ -609,7 +609,7 @@ compile = (path: str, out0: str) -> str:
         img_ro_addr = ELF_BASE + ro_off
         img_data_addr = ELF_BASE + data_off
         arm64_resolve(img_text_addr, img_ro_addr, img_data_addr)
-        # (sloppy watch: after the first build, a patch for the program running)
+        # (dewy watch: after the first build, a patch for the program running)
         if watch_build and not watch_first: ok = watch_make_patch()
         else:
             elf_extra = [(".dewy_lines", x64_line_table())]
@@ -627,10 +627,10 @@ compile = (path: str, out0: str) -> str:
         img_ro_addr = ELF_BASE + ro_off
         img_data_addr = ELF_BASE + data_off
         x64_resolve(img_text_addr, img_ro_addr, img_data_addr)
-        # (sloppy watch: after the first build, a patch for the program running)
+        # (dewy watch: after the first build, a patch for the program running)
         if watch_build and not watch_first: ok = watch_make_patch()
         else:
-            # (backtraces always; debuggers and profilers get DWARF in what `sloppy build` writes)
+            # (backtraces always; debuggers and profilers get DWARF in what `dewy build` writes)
             elf_extra = [(".dewy_lines", x64_line_table())]
             if rsp_rows.len() > 0: elf_extra.push((".dewy_frames", x64_frame_table()))
             dw_data_addr = img_data_addr
@@ -646,7 +646,7 @@ compile = (path: str, out0: str) -> str:
         ic_lines_report()
         source_counts()
     if not ok:
-        # (a patch for sloppy watch tells its own trouble)
+        # (a patch for dewy watch tells its own trouble)
         if not watch_build or watch_first: eprint("error: cannot write {out} (a directory there, or no permission?)")
         return ""
     out
@@ -679,8 +679,8 @@ main = ():
         print("dewy-core {DEWY_CORE_VERSION}")
         return
     if a.len() >= 2 and (a[1] == "--help" or a[1] == "help" or a[1] == "-h"): usage(0)
-    # (sloppy build --help: the commands' options, not a file named --help; a program's own
-    # arguments, as in `sloppy game.jo --help`, stay its)
+    # (dewy build --help: the commands' options, not a file named --help; a program's own
+    # arguments, as in `dewy game.jo --help`, stay its)
     if a.len() >= 3 and (a[1] == "build" or a[1] == "check" or a[1] == "test" or a[1] == "fmt" or a[1] == "new" or a[1] == "watch"):
         hi = 2
         loop hi < a.len():
@@ -721,7 +721,7 @@ main = ():
         if a.len() != 2: usage(2)
         print(lib_dir)
         return
-    # (sloppy watch on Windows: each build in a process of its own: watch.jo, w32_compile)
+    # (dewy watch on Windows: each build in a process of its own: watch.jo, w32_compile)
     when TARGET == "windows":
         if a.len() >= 8 and a[1] == "watch" and a[2] == "--build":
             if a.len() > 8: test_mode = a[8] == "1"
@@ -808,7 +808,7 @@ main = ():
         if a.len() < 3: usage()
         if let s = env("DEWY_STOP"): stop_after = s
         path = os_path(a[2])
-        # (the test blocks are checked too, as sloppy test would)
+        # (the test blocks are checked too, as dewy test would)
         test_mode = true
         check_all = true
         if len(stop_after) > 0:
@@ -829,7 +829,7 @@ main = ():
     first = 1
     test_watch = false
     test_json = false
-    if a[1] == "run": first = 2          # (sloppy run game.jo is sloppy game.jo)
+    if a[1] == "run": first = 2          # (dewy run game.jo is dewy game.jo)
     if a[1] == "test":
         test_mode = true
         error_exit = 102
@@ -943,7 +943,7 @@ build_and_exec = (path: str, base: str, key: str, run_args: str[]):
         if rename_file(tmp, out): built = out
     if target_wasm:
         # open the page in the default browser, detached (the browser's output does not
-        # reach this terminal, and sloppy returns at once)
+        # reach this terminal, and dewy returns at once)
         if open_in_browser(built): eprint("dewy-core: opened {built} in the browser")
         else: eprint("dewy-core: built {built}; open it in a browser")
         exit(0)

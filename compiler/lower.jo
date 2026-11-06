@@ -95,7 +95,7 @@ data_size = 8     # offset 0 holds the initial stack pointer
 ffi_offs: int[]
 ffi_keys: str[]
 ffi_slot: {int: int} = {}       # offset -> index
-glsl_of: {int: str} = {}        # (sloppy watch) shader() node -> the GLSL made for it
+glsl_of: {int: str} = {}        # (dewy watch) shader() node -> the GLSL made for it
 global_off: {int: int} = {}
 entry_points: int[]
 
@@ -653,7 +653,7 @@ mac_imports: (int, str, str)[]
 
 # (macOS: the library dyld binds a C function from when the program starts, or "" for one loaded
 # when first called (dlopen): system libraries by path, and Linux's libc as libSystem)
-# (macOS: code compiled for a program already running -- the prompt's inputs, sloppy watch's
+# (macOS: code compiled for a program already running -- the prompt's inputs, dewy watch's
 # later builds -- finds C functions when first called: dyld bound only what the program used.
 # Not the functions that finding them takes, dlopen and dlsym: those programs have them bound,
 # lib/std/repl.jo and lib/std/watch.jo)

@@ -8,7 +8,7 @@ from p"dwarf_format.dewy" import (DL_CONST DL_MEM DL_MEMAT DL_REG DW_BOX DW_BOXP
 PWord:type=int64<overflow='wrap'>
 const PDB_BLOCK=4096
 
-# (sloppy build -g: the type records, below)
+# (dewy build -g: the type records, below)
 let cv_tpi:array<uint8>=[]
 let cv_hash:array<int64>=[] # each record's hash, into 0x3FFFF buckets
 let cv_offs:array<int64>=[] # where each starts in cv_tpi
@@ -219,7 +219,7 @@ pdb_image=(guid:array<uint8> text_len:PWord sections:array<uint8> main_path:stri
     order.sort(key=(i:int64):>int64=>elf_syms[i][1])
     let pfns:array<[string int64 int64]>=[]
     loop i in order {pfns.push(elf_syms[i])}
-    # (sloppy build -g: each function's variables, dbg_raw)
+    # (dewy build -g: each function's variables, dbg_raw)
     cv_tpi=[]
     cv_hash=[]
     cv_offs=[]
@@ -586,7 +586,7 @@ put32_at(@out  map_block * PDB_BLOCK + 4 * j  x)}
     out
 }
 
-# ---------------- types and variables (sloppy build -g) ----------------
+# ---------------- types and variables (dewy build -g) ----------------
 # The TPI stream's records, as CodeView has them: a type refers to types written before it; a
 # struct that holds itself (through an array) refers to a forward reference, which debuggers
 # match to the struct by its unique name, through the hash of each record (the TPI hash stream).

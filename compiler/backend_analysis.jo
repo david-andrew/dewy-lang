@@ -23,7 +23,7 @@ vsoff: *int
 vsave_storage: bool[]
 vsave: *bool              # in a caller-saved register, saved/restored around calls
 backend_debug_vregs: int[]
-dbg_keep: bool[]           # (sloppy build -g) a variable's: not in a register a call changes
+dbg_keep: bool[]           # (dewy build -g) a variable's: not in a register a call changes
 v_live_storage: IrUsePlan[]
 v_live: *IrUsePlan
 v_start_storage: int[]
@@ -203,7 +203,7 @@ backend_analyze = (ir: mut IrFn, ir_operand_layout: mut int[], dbg_on: bool, tar
                 loop_e[s] = pos
     x_has_narrow32 = features & IR_NARROW32 != 0
     x_has_overflow_pair = features & IR_OVERFLOW != 0
-    # (sloppy build -g: each variable lives on to the end of the function, where debuggers can
+    # (dewy build -g: each variable lives on to the end of the function, where debuggers can
     # read it, and not in a register a call changes: dbg_keep)
     if dbg_on:
         dbg_keep = fill(false, nv)

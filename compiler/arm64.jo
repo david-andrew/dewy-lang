@@ -42,7 +42,7 @@ arm64_function = ():
     loop fn_addr.len() <= ir.fn_index: fn_addr.push(-1)
     loop fn_len.len() <= ir.fn_index: fn_len.push(0)
     # (at a multiple of 8, as its float constants are: their padding, so its bytes, then do not
-    # depend on where it lands, which sloppy watch's comparison of builds counts on)
+    # depend on where it lands, which dewy watch's comparison of builds counts on)
     if code.len() % 8 != 0: w32(0)
     fn_addr[ir.fn_index] = code.len()
     fn_start = code.len()
@@ -64,7 +64,7 @@ arm64_function = ():
     elf_syms.push((sym_name(ir.name), fn_start, code.len() - fn_start))
     fn_len[ir.fn_index] = code.len() - fn_start
 
-# (sloppy build -g) where the variables are (registers by DWARF's numbers: x0-x30 as they are,
+# (dewy build -g) where the variables are (registers by DWARF's numbers: x0-x30 as they are,
 # v0-v31 from 64; frame offsets from sp), and how the frame is made (.debug_frame)
 A64_DWREG = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
 

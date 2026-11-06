@@ -1,5 +1,5 @@
 use 'checker_program.dewy'
-# A language server (`sloppy lsp`): the Language Server Protocol over standard input and output,
+# A language server (`dewy lsp`): the Language Server Protocol over standard input and output,
 # for editors. Each question about a program is answered by checking it in a child process
 # (fork; on Windows, this program again: run_child_w32): the checker then always starts afresh, sees the editor's unsaved text (ide_texts), and
 # writes what it learned as lines (see ide.jo). Checks take tens of milliseconds, so there is no
@@ -463,7 +463,7 @@ check_child = (main_path: str, doc_path: str, sentinel: bool, skips: str[], lowe
     ide_finish()
     exit(0)
 
-# Windows has no fork: the child is this program again (sloppy lsp --child), told what to check,
+# Windows has no fork: the child is this program again (dewy lsp --child), told what to check,
 # and the editor's texts, on its standard input; each string as "<length>:<bytes>"
 run_child_w32 = (main_path: str, doc_path: str, sentinel: bool, skips: str[], lower: bool, wide: bool) -> RunOut:
     when TARGET == "windows":
@@ -557,7 +557,7 @@ run_child_w32 = (main_path: str, doc_path: str, sentinel: bool, skips: str[], lo
     else:
         return RunOut([], false)
 
-# sloppy lsp --child: the check run_child_w32 asks for
+# dewy lsp --child: the check run_child_w32 asks for
 child_main = ():
     buf: u8[]
     loop true:

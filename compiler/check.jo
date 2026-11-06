@@ -178,9 +178,9 @@ main_entry_fn = 0        # (a Dewy main giving errors: the entry that reports th
 main_exit_kinds: int[]   # (its error kinds, in exit-code order, and their codes)
 main_exit_codes: int[]
 main_exit_pinned: bool[]
-test_mode = false        # `sloppy test`: run the main file's test blocks instead of main()
+test_mode = false        # `dewy test`: run the main file's test blocks instead of main()
 expectation_ifs: {int: bool} = {}   # Dewy's `$expect`s: `if not condition { report; return }`
-check_all = false        # (sloppy check: the tests and the game loop both checked; nothing runs)
+check_all = false        # (dewy check: the tests and the game loop both checked; nothing runs)
 test_decls: int[]
 update_fn = 0
 draw_fn = 0
@@ -4862,7 +4862,7 @@ runtime_memeq = -1            # private bounded memory comparison, native loweri
 runtime_streq = -1            # private string equality, including nil/empty values
 want_cpu_flag = false           # (x86-64 builds: the vectorizer may use __cpu_avx2)
 want_loop_watch = false         # (debug web builds: loops count down to __loop_watchdog)
-watch_build = false             # (built for `sloppy watch`: WATCH is true in the program)
+watch_build = false             # (built for `dewy watch`: WATCH is true in the program)
 runtime_names = ["__alloc", "__free", "__panic", "__panic_bounds", "__panic_slice", "__panic_unwrap", "__free_obj", "__arr_clone", "__arr_push_slot",
     "__arr_reserve", "__arr_insert_slot", "__arr_remove_slot", "__arr_slice", "__fixed_slice", "__arr_concat", "__str_concat", "__str_eq",
     "__str_cmp", "__str_slice", "__str_append", "__buf_finish", "__buf_append_str", "__arr_resize", "__arr_repeat", "__arr_filled",

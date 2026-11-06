@@ -6,7 +6,7 @@ use 'module_paths.dewy'
 use 'dwarf_format.dewy'
 const PDB_BLOCK = 4096
 
-# (sloppy build -g: the type records, below)
+# (dewy build -g: the type records, below)
 cv_tpi: u8[]
 cv_hash: int[]                  # each record's hash, into 0x3FFFF buckets
 cv_offs: int[]                  # where each starts in cv_tpi
@@ -193,7 +193,7 @@ pdb_image = (guid: u8[], text_len: int, sections: u8[], main_path: str, producer
     order.sort_by((i: int): elf_syms[i].1)
     pfns: (str, int, int)[]
     loop i in order: pfns.push(elf_syms[i])
-    # (sloppy build -g: each function's variables, dbg_raw)
+    # (dewy build -g: each function's variables, dbg_raw)
     cv_tpi = []
     cv_hash = []
     cv_offs = []
@@ -518,7 +518,7 @@ msf = (streams: u8[][]) -> u8[]:
     loop j in 0.. and x in dir_blocks: put32_at(out, map_block * PDB_BLOCK + 4 * j, x)
     out
 
-# ---------------- types and variables (sloppy build -g) ----------------
+# ---------------- types and variables (dewy build -g) ----------------
 # The TPI stream's records, as CodeView has them: a type refers to types written before it; a
 # struct that holds itself (through an array) refers to a forward reference, which debuggers
 # match to the struct by its unique name, through the hash of each record (the TPI hash stream).

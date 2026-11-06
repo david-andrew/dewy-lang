@@ -32,7 +32,7 @@ x64_emit_entry_win=(inits:array<int64> main_lf:XWord main_code:bool entry_end_lf
     modrr(5  RSP)
     b(8)
     if watch_build {
-        # (sloppy watch: room for the code of later builds, reserved before anything else can be
+        # (dewy watch: room for the code of later builds, reserved before anything else can be
         # put there, its pages committed as patches use them; its first word tells
         # lib/std/watch.jo it is there)
         win_virtual_alloc(WATCH_CODE_AT  WATCH_CODE_SIZE  0x2000  iat) # MEM_RESERVE
@@ -143,7 +143,7 @@ x64_emit_entry=(inits:array<int64> main_lf:XWord main_code:bool entry_end_lf:XWo
     modrr(4  RSP)
     b(0xF0) # and rsp, -16
     if watch_build {
-        # (sloppy watch: room for the code of later builds, taken before anything else can be put
+        # (dewy watch: room for the code of later builds, taken before anything else can be put
         # there; its first word tells lib/std/watch.jo it is there)
         mov_imm(RDI  WATCH_CODE_AT)
         mov_imm(RSI  WATCH_CODE_SIZE)

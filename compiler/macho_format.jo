@@ -6,7 +6,7 @@ macho_error = ""
 const MACHO_BASE = 0x100000000
 const MACHO_PAGE = 0x4000
 const MACHO_TEXT_OFF = 0x4000
-const MACHO_WATCH_AT = MACHO_BASE + 0x20000000      # sloppy watch: all the game's a_code[0] (see below;
+const MACHO_WATCH_AT = MACHO_BASE + 0x20000000      # dewy watch: all the game's a_code[0] (see below;
 const MACHO_WATCH_SIZE = 0x10000000                 # below where libSystem's malloc puts its regions)
 const MACHO_WATCH_CODE = MACHO_WATCH_AT + 0x4000    # (after the page with the region's mark)
 
@@ -73,7 +73,7 @@ mstrcmd = (b: mut u8[], cmd: int, fixed: int, s: str, extra: int[]):
     loop c in s: b.push(c)
     loop k in [0..size - fixed - len(s)): b.push(0)
 
-macho_dwarf: (str, u8[])[]         # (sloppy build: dwarf.jo's sections, for write_macho)
+macho_dwarf: (str, u8[])[]         # (dewy build: dwarf.jo's sections, for write_macho)
 
 macho_image = (text: u8[], entry_off: int, ro: u8[], info: u8[], data_size: int, ident: str, watch: bool, imports: (int, str, str)[]) -> u8[]:
     macho_error = ""
@@ -87,7 +87,7 @@ macho_image = (text: u8[], entry_off: int, ro: u8[], info: u8[], data_size: int,
     loop x in macho_dwarf: dw_size = mx_align(dw_size, 8) + x.1.len()
     dw_file = macho_page_up(dw_size)
     link_addr += dw_file
-    # (sloppy watch: the region for the game's a_code[0] kept free by a segment of nothing, which the
+    # (dewy watch: the region for the game's a_code[0] kept free by a segment of nothing, which the
     # loader replaces; __LINKEDIT, which dyld wants last, after it)
     if watch:
         if link_addr > MACHO_WATCH_AT:
@@ -168,7 +168,7 @@ macho_image = (text: u8[], entry_off: int, ro: u8[], info: u8[], data_size: int,
             o += x.1.len()
         ncmds += 1
     if watch:
-        mseg(cmds, "__SLOPPYJIT", MACHO_WATCH_AT, MACHO_WATCH_SIZE, 0, 0, 0, 0)
+        mseg(cmds, "__DEWYJIT", MACHO_WATCH_AT, MACHO_WATCH_SIZE, 0, 0, 0, 0)
         ncmds += 1
     mseg(cmds, "__LINKEDIT", link_addr, macho_page_up(link_size), bind_off, link_size, 1, 0)
     ncmds += 1
@@ -308,9 +308,9 @@ macho_image = (text: u8[], entry_off: int, ro: u8[], info: u8[], data_size: int,
     elf_append_bytes(out, sig)
     out
 
-# ---- sloppy watch ----
+# ---- dewy watch ----
 # Apple silicon runs a_code[0] from a signed page only as signed, so the game's functions cannot be
-# patched where the executable has them. A game built by sloppy watch keeps its a_code[0] (and
+# patched where the executable has them. A game built by dewy watch keeps its a_code[0] (and
 # read-only data, which the a_code[0] reaches relative to itself) in __TEXT as data instead, linked to
 # run at MACHO_WATCH_CODE, and starts with this loader: it takes the region (MAP_JIT memory, which
 # each thread sees either writable or runnable), copies the a_code[0] there, marks the region's first
