@@ -206,12 +206,37 @@ def test_main_file_zone_reaches_every_module(compiler, tmp_path):
     assert ran.stdout == '2026-07-01T12:00:00+09:00[Asia/Tokyo]\n'
 
 
+def test_main_file_zone_cannot_be_overridden(compiler, tmp_path):
+    # An inner scope that is reached, and one that is not.
+    for body in ("f = () => {\n    $time.zone = 'America/New_York'\n    printl(today)\n}\nf\n",
+                 "f = () => {\n    $time.zone = 'America/New_York'\n    printl(today)\n}\nprintl(1)\n"):
+        ran = run(compiler, tmp_path, PIN + body)
+        assert ran.returncode != 0, body
+        assert "`$time.zone = 'America/New_York'` differs from `$time.zone = 'Asia/Tokyo'`" in ran.stderr
+        assert 'main.dewy:1' in ran.stderr
+        assert 'pins the whole program' in ran.stderr
+    (tmp_path / 'other.dewy').write_text("$time.zone = 'system'\nshown = () => 1\n")
+    ran = run(compiler, tmp_path, PIN + 'import p"other.dewy" as other\nprintl(other.shown)\n')
+    assert ran.returncode != 0
+    assert "`$time.zone = 'system'` differs from `$time.zone = 'Asia/Tokyo'`" in ran.stderr
+
+
 def test_the_same_zone_elsewhere_is_fine(compiler, tmp_path):
     (tmp_path / 'other.dewy').write_text("$time.zone = 'Asia/Tokyo'\nshown = () => 1\n")
     source = PIN + "import p\"other.dewy\" as other\nf = () => {\n    $time.zone = 'Asia/Tokyo'\n    printl(other.shown)\n}\nf\n"
     ran = run(compiler, tmp_path, source)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == '1\n'
+
+
+def test_a_stopwatch_links_no_zone_data(compiler, tmp_path):
+    source = tmp_path / 'main.dewy'
+    source.write_text('let start = now\nprintl"{now - start <? 5s}"\n')
+    built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'main'], capture_output=True, timeout=300,
+                           check=False, cwd=tmp_path)
+    assert built.returncode == 0, built.stderr
+    assert b'America/New_York' not in (tmp_path / 'main').read_bytes()
+    assert subprocess.run([tmp_path / 'main'], capture_output=True, text=True, check=False).stdout == 'true\n'
 
 
 def test_a_folded_literal_links_no_zone_data(compiler, tmp_path):

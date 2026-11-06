@@ -79,7 +79,7 @@ missing_module_hint = (rel: str) -> str:
     if rel == "sys": return ": `args()` is the command line, `exit(code)` ends the program"
     if rel == "json": return ": `parse_json(s)` and `to_json(x)` are there without an import"
     if rel == "os" or rel == "shutil" or rel == "pathlib" or rel == "glob": return ": files are there without an import: `read_file`, `list_dir`, `walk_dir`, `glob`, `make_dirs`, `rename_file`, `join_path`"
-    if rel == "time" or rel == "datetime": return ": `time()`, `unix_time()`, `now()` (a Date) and `sleep(s)` are there without an import"
+    if rel == "time" or rel == "datetime": return ": `now`, `today`, `sleep(2s)`, `instant\"...\"` and `date\"...\"` are there without an import"
     if rel == "random" or rel == "math": return ": `random()`, `random_int(lo, hi)`, `sqrt`, `floor`, `PI` are there without an import"
     if rel == "csv": return ": `csv_rows(text)` is there without an import"
     if rel == "collections": return ": maps start missing keys at zero (`counts[w] += 1`); `sorted_by`, `unique`, `group_by`"

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / 'tests/fixtures/selfhost/module_paths_jo.jo'
 FILES = ', '.join(f'`{n}`' for n in ['read_file', 'list_dir', 'walk_dir', 'glob', 'make_dirs', 'rename_file',
                                        'join_path'])
-WHEN = '`time()`, `unix_time()`, `now()` (a Date) and `sleep(s)` are there without an import'
+WHEN = '`now`, `today`, `sleep(2s)`, `instant"..."` and `date"..."` are there without an import'
 MATH = '`random()`, `random_int(lo, hi)`, `sqrt`, `floor`, `PI` are there without an import'
 HINTS = {
     're': 'regular expressions are there without an import, `regex(r"\\d+")`',

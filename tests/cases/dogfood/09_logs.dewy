@@ -15,18 +15,18 @@ garbage line without structure
 2026-10-21 10:45:30 INFO  auth     user=bob action=logout
 """
 
-Entry:type = [stamp:int64 time:string level:string service:string message:string]
+Entry:type = [stamp:Instant time:string level:string service:string message:string]
 
 parse_line = (line:string):>Entry|none => {
     let parts = line.split(" ").filter((p) => p.length >? 0)
     if parts.length <? 5 { return none }
-    let when = parse_date("{parts[0]} {parts[1]}" utc=true)
-    if when is? none { return none }
-    let stamp = int64(unix_time(when))
-    return Entry[stamp parts[1] parts[2] parts[3] parts[4..].join(" ")]
+    let when = instant("{parts[0]}T{parts[1]}Z")
+    if when isnt? Instant { return none }
+    return Entry[when parts[1] parts[2] parts[3] parts[4..].join(" ")]
 }
 
-duration_text = (seconds:int64):>string => {
+duration_text = (span:Duration):>string => {
+    let seconds = (span // 1s).to_int64() ?? 0
     let h = seconds // 3600
     let m = (seconds % 3600) // 60
     let s = seconds % 60
@@ -72,7 +72,7 @@ main = () => {
     printl("slow requests:")
     loop e in slow { printl("  {e.time} {e.message}") }
 
-    let logins:dict<string int64> = []
+    let logins:dict<string Instant> = []
     printl("sessions:")
     loop e in entries if e.service =? "auth" {
         let user = field(e.message "user") ?? "?"

@@ -30,6 +30,8 @@ const year=core.Months[12]
 $check_constant date_error(text) "not a date"
 date=(text:string):>Date|ParseError=>civil.date_parse(text)
 age=(born:Date on:Date leap_day:civil._LeapDay='march_1'):>int=>civil.age_on(born on leap_day)
+$warn_if scope is? none "`age` with no `on=` counts to today, which has no time zone here, so it assumes the zone of the machine it runs on: say so with `$time.zone = 'system'`, or name one: `$time.zone = 'America/New_York'`"
+age=(born:Date leap_day:civil._LeapDay='march_1' scope:string|none=$time.zone):>int=>civil.age_on(born today(scope) leap_day)
 
 Zone:type=zones.Zone
 ZonedDateTime:type=zones.ZonedDateTime
@@ -38,3 +40,17 @@ $check_constant zone_error(name) "not a time zone"
 zone=(name:string):>Zone|UnknownZone=>zones.zone_parse(name)
 $check_constant zoned_error(text zone fold gap scope) "not a zoned time"
 zoned=(text:string zone:Zone|none=none fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse(text zone fold gap scope)
+
+import p"@lib/time/clock.dewy" as clock
+ClockReading:type=clock.ClockReading
+MonoPoint:type=clock.MonoPoint
+now=():>ClockReading=>clock.now()
+monotonic=():>MonoPoint=>clock.monotonic()
+
+# What day it is, where the scope says.
+$warn_if scope is? none "`today` has no time zone here, so it assumes the zone of the machine it runs on: say so with `$time.zone = 'system'`, or name one: `$time.zone = 'America/New_York'`"
+$check_constant zone_scope_error(scope) "not a time zone"
+today=(scope:string|none=$time.zone):>Date=>{
+    let z=zones.scope_zone(scope) ?? zones.system_zone()
+    civil._of_days(zones.local_days(now().nominal z))
+}

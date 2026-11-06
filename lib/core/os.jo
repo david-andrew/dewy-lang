@@ -533,7 +533,8 @@ time = () -> f64:
         syscall(228, 1, &ts)
         f64(ts.0) + f64(ts.1) * 1e-9
 
-# nanoseconds since an arbitrary point (monotonic clock)
+# nanoseconds since an arbitrary point (monotonic clock, counting time the machine is suspended:
+# what Dewy's relative waits and elapsed times mean; on Windows and macOS the counters do)
 time_ns = () -> int:
     when TARGET == "wasm":
         return int(__wasm_now() * 1000000.0)

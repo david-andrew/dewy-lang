@@ -3019,6 +3019,10 @@ dewy_surface_table = () -> {int: str}:
     if dewy_surface_hints.len() == 0:
         loop word in ["read_file", "write_file", "read_bytes", "write_bytes", "append_file", "is_dir", "mkdir", "delete_file", "delete_dir", "list_dir", "run_program", "run_shell", "file_name", "dir_name", "extension", "without_extension", "join_path", "sort_by", "sorted_by", "eprint"]:
             dewy_surface_hints[intern(word)] = ""
+        dewy_surface_hints[intern("unix_time")] = "`now.nominal` is the wall clock as an `Instant`; subtract two `Instant`s for the time between them"
+        dewy_surface_hints[intern("parse_date")] = "`instant(text)` for a time with an offset, `date(text)` for a date, `zoned(text)` for a local time"
+        dewy_surface_hints[intern("date_text")] = "a `Date` or `Instant` prints as ISO 8601"
+        dewy_surface_hints[intern("utc_offset")] = "`zoned(text zone=z).offset`"
         dewy_surface_hints[intern("zip")] = "loop over both at once, `loop x in xs and y in ys \{...}`, or pair them in a comprehension, `[loop x in xs and y in ys [x y]]`"
         dewy_surface_hints[intern("enumerate")] = "count alongside, `loop i in 0.. and x in xs \{...}`"
     dewy_surface_hints
@@ -3043,7 +3047,7 @@ dewy_surface = (name: int, decl: int) -> int:
     0
 
 # (a Sloppy library operation that Dewy spells another way whatever its arguments)
-dewy_renamed = (name: int) -> bool: name == intern("sort_by") or name == intern("sorted_by") or name == intern("eprint") or name == intern("zip") or name == intern("enumerate")
+dewy_renamed = (name: int) -> bool: name == intern("unix_time") or name == intern("parse_date") or name == intern("date_text") or name == intern("utc_offset") or name == intern("sort_by") or name == intern("sorted_by") or name == intern("eprint") or name == intern("zip") or name == intern("enumerate")
 
 # Suggested names as the source at pos spells them: Dewy's own words for the
 # implementation's builtin types and sequence length.
@@ -3073,6 +3077,9 @@ surface_hidden: int[]
 # A Dewy call of a Python builtin the Sloppy library has (zip, enumerate): the Dewy way.
 dewy_surface_check = (n: int, name: int):
     if surface_hidden.len() == 0 or not caller_dewy(): return
+    # (the program's own function of that name is simply called)
+    own = lookup(name)
+    if own != 0 and syms[own].kind == .fns and surface_sees(own, true): return
     hint = dewy_surface_table().get(name) ?? ""
     if hint != "": fatal(nodes[n].pos, "'{name_of(name)}' is not Dewy's: {hint}")
 
@@ -11121,7 +11128,6 @@ call_type_member_error = (callee: int, tt: int, fname: int) -> int:
         # (Date.now(): a function of nothing is called by itself)
         loop d in fd:
             if nkids(d) == 0: why = " (functions are not kept in types: call it by itself, `{name_of(fname)}()`)"
-        if name_of(fname) == "now" and dt(tt) == "Date": why = " (`unix_time()` is the seconds since 1970, a moment to save and compare; `now()` gives today's Date; `time()` the seconds the program has run, for timing)"
     fatal(nodes[callee].pos, "type {dt(tt)} has no member '{name_of(fname)}'{why}")
     0 # unreachable; the C seed requires an explicit result after fatal
 

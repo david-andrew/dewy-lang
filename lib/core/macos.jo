@@ -228,7 +228,7 @@ when TARGET == "macos":
         r
 
     __mac_clock_id = (c: int) -> int:
-        if c == 1: return 6                                 # CLOCK_MONOTONIC
+        if c == 1 or c == 7: return 6                       # CLOCK_MONOTONIC (counts sleep here)
         if c == 2: return 12                                # CLOCK_PROCESS_CPUTIME_ID
         if c == 3: return 16                                # CLOCK_THREAD_CPUTIME_ID
         c

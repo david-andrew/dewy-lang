@@ -475,6 +475,23 @@ rational_helper_call = (n: int, fname: str, a: int, expected: int) -> int:
     last_checked = n
     t
 
+# A wait given a time library value: a `Duration` as its whole nanoseconds (a checked word), and a
+# calendar period refused with the form to write. 0 for anything else.
+time_record_duration = (t: int, a: int, what: str, fix: str, pos: int) -> int:
+    if tkind(t) != .struct_: return 0
+    d = int(structs[int(types[t].st)].decl)
+    if d == 0 or files[pos_file(nodes[d].pos)].path != lib_dir + "/time/core.dewy": return 0
+    shown = dt(t)
+    if shown == "Days": fatal(nodes[a].pos, "{what} takes a length of time, and a day or week is a calendar period, whose length depends on the date: write `{fix}`")
+    if shown == "Months": fatal(nodes[a].pos, "{what} takes a length of time, and a month or year is a calendar period, whose length depends on the date: write the time it means, such as `{fix}`")
+    if shown != "Duration": return 0
+    ensure_bundled_import("time/core.dewy", "$dewy_time", pos)
+    c = mk(.call, pos)
+    nodes[c].a = i32(bc_field(bc_ident("$dewy_time", pos), "wait_ns", pos))
+    set_list(c, [a])
+    check_expr(c, T_INT)
+    last_checked
+
 # (the checked number a as a float64)
 quantity_float = (a: int) -> int:
     t = prune(ntype(a))
@@ -499,6 +516,11 @@ dewy_quantity_call = (n: int, name: int, a: int, expected: int) -> int:
     number = quantity_number(a)
     add_flag(number, NF_CHECKED)
     if fname == "sleep":
+        if not is_quantity(t):
+            d = time_record_duration(t, a, "sleep", "sleep(24hour)", nodes[n].pos)
+            if d != 0:
+                if target_wasm: no_web_check(int(syms[lookup(name)].decl), nodes[n].pos)
+                return runtime_call(n, "__task_sleep_ns", [coerce(d, T_INT)], task_sleep_type())
         if not is_quantity(t) or quantity_dimension(t) != base_dimension(0):
             fatal(nodes[a].pos, "sleep takes a time, such as `sleep(300ms)` or `sleep(2s)` (found {dt(t)})")
         if target_wasm: no_web_check(int(syms[lookup(name)].decl), nodes[n].pos)
@@ -1003,6 +1025,11 @@ task_duration_value = (n: int, a0: int) -> int:
     t = check_expr(a0, 0)
     a = last_checked
     add_flag(a, NF_CHECKED)
+    if not is_quantity(t):
+        d = time_record_duration(t, a, "a deadline", "within(24hour @get(url))", nodes[n].pos)
+        if d != 0:
+            nodes[n] = nodes[d]
+            return T_INT
     if not is_quantity(t) or quantity_dimension(t) != base_dimension(0): fatal(nodes[a].pos, "a deadline takes a time, such as within(2s @get(url))")
     number = quantity_number(a)
     add_flag(number, NF_CHECKED)

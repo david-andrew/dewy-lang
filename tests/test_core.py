@@ -2586,7 +2586,7 @@ def test_core_rollback_model(compiler, tmp_path, target, release):
     ('helper=(n:int64):>int64=>if n>?0 helper(n-1) else int64(time())\ntick=(state:int64 _inputs:array<int64>)=>state+helper(1)', '@tick', 'int64(0)', 'reads the clock'),
     ('tick=(state:Rng _inputs:array<int64>)=>{state.next_int(0 10); return state}', '@tick', 'rng(7)', None),
     ('tick=(state:Rng _inputs:array<int64>)=>{let xs=[1 2 3] shuffle(@state @xs) return state}', '@tick', 'rng(7)', None),
-    ('tick=(state:int64 _inputs:array<int64>)=>state+int64(unix_time(date(0.0 utc=true)))', '@tick', 'int64(0)', None),
+    ('tick=(state:int64 _inputs:array<int64>)=>state+(date"2026-01-01" - date"2025-01-01").total_days', '@tick', 'int64(0)', None),
     ('let random_state=rng(7)\ntick=(state:int64 _inputs:array<int64>)=>state+random_state.next_int(0 10)', '@tick', 'int64(0)', "changes the global 'random_state'"),
     ('random=(value:int64)=>value\ntick=(state:int64 _inputs:array<int64>)=>state+random(1)', '@tick', 'int64(0)', None),
     ('tick=(state:int64 inputs:array<int64>)=>state+inputs[0]+inputs[1]', '@tick', 'int64(0)', None),

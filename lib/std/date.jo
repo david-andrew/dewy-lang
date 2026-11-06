@@ -39,6 +39,19 @@ unix_time = () -> f64:
         syscall(228, 0, &ts)                          # CLOCK_REALTIME
         f64(ts.0) + f64(ts.1) * 1e-9
 
+# (Dewy's `now`: the wall clock in whole nanoseconds since 1970)
+__wall_ns = () -> int:
+    when TARGET == "wasm":
+        return int(__wasm_clock() * 1000000.0)
+    else when TARGET == "windows":
+        ft = [0]
+        GetSystemTimeAsFileTime(data(ft))
+        return (ft[0] - 116444736000000000) * 100
+    else:
+        ts: (int, int)
+        syscall(228, 0, &ts)
+        ts.0 * 1000000000 + ts.1
+
 # the date and time of day of moment t (unix seconds), in the computer's time zone, or in UTC
 date = (t: f64, utc: bool = false) -> Date:
     s = int(floor(t))

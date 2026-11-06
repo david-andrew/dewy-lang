@@ -1482,8 +1482,9 @@ unit (`t/°C`, `t/K`). `as` converts each as what it is: `(20°C as °F)` is
 `68°F` and `((25°C-5°C) as °F)` is `36°F`. A difference prints in the first point's
 unit. Plain kelvins (`300K`) have no offset and can stand for either; a plain
 `float64 * Temperature` annotation holds kelvins and drops the offset scale.
-Calendar durations remain open. `sleep` takes a time, `sleep(300ms)`, and waits whole nanoseconds;
-a plain number is rejected. `sin`, `cos` and `tan` take an angle, `cos(45°)`, reduced
+`sleep` takes a time, `sleep(300ms)`, and waits whole nanoseconds, counting time the machine is
+suspended; a plain number is rejected, and `sleep(1day)` points to `sleep(24hour)`, since a day is a
+calendar period (see [Time and dates](#time-and-dates)). `sin`, `cos` and `tan` take an angle, `cos(45°)`, reduced
 exactly in whole turns. A float angle gives a `float64`; an exact one gives a
 `float64` rounded to fixed's 32 fraction bits until `fixed` exists. A plain
 number is rejected too, and so is `@sin` as a function of one: radians are
@@ -1494,7 +1495,23 @@ its plain canonical number (an angle counts turns), and `sin` is the GPU's.
 
 ## Time and dates
 
-Time needs no import.
+Time needs no import. `now` is two clock samples: subtracting readings measures
+elapsed time on a monotonic clock that a wall-clock step cannot move, and adding a
+time gives a deadline on that clock. `.nominal` is the wall clock, an `Instant`:
+keep that one, since a reading has no meaning in another run.
+
+```dewy
+let start = now
+work
+printl"took {now - start}"              # took 125ms
+let dt = (now - start) / 1s as float64  # float seconds, explicitly
+let deadline = now + 5s
+loop now <? deadline { poll }
+let stamp = now.nominal                 # 2026-10-24T12:00:00.25Z
+```
+
+`monotonic` is the monotonic sample alone. `sleep`, `within` and deadlines count
+actual time, including time the machine is suspended.
 
 `Instant` counts nanoseconds on one continuous axis in 128 bits, so it reaches any
 date anyone needs, and `Duration` is the difference of two. `+` and `-` take durations
@@ -1544,7 +1561,7 @@ compiling, so it needs neither.
 every module, and a different setting in an inner scope or another module is a compile error. A
 main file that sets none leaves modules and scopes free to set their own. `'system'` reads the
 name of the machine's zone when the program runs, and `'build'` pins the zone of the machine building it.
-A literal cannot assume a zone. Zone rules are not the machine's: each
+`today` is the date there; with no zone set it warns, naming what it assumes. A literal cannot assume a zone. Zone rules are not the machine's: each
 Dewy version ships its own (IANA data in `lib/time/rules`), so a program means the same thing
 anywhere, and a program links them only if it reaches a zone operation.
 
@@ -5134,7 +5151,7 @@ The compiler warns about known clock, unseeded random and live-input calls,
 and writes to globals, in a directly supplied named or inline tick callback
 and the user functions it calls. These warnings appear during `check` and native
 or web builds. An `Rng` carried in the game state supplies reproducible random
-numbers; `unix_time(date)` is a value conversion and does not trigger the clock
+numbers; a date or instant literal is a plain value and does not trigger the clock
 warning. This is an advisory scan, not a determinism guarantee: indirect function
 values, external calls and captured state can still need care.
 
