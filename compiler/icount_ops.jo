@@ -1,0 +1,172 @@
+use 'icount.jo'
+use 'dewy_context.jo'
+use 'check.jo'
+use 'lower.jo'
+use 'util.jo'
+use 'ast.jo'
+
+ic_read = () -> int:
+    buf = [0]
+    when BOOTSTRAP:
+        return 0
+    else when TARGET != "linux" or ARCH != "x86_64":
+        return 0
+    else:
+        if syscall(0, ic_fd, data(buf), 8) != 8: return ic_last
+        buf[0]
+ic_start = ():
+    when BOOTSTRAP:
+        return
+    else when TARGET != "linux" or ARCH != "x86_64":
+        return
+    else:
+        # perf_event_attr: hardware instructions, user space only, counting from now
+        attr = fill(0, 16)
+        attr[0] = 128 << 32
+        attr[1] = 1
+        attr[5] = 0x60
+        fd = syscall(298, data(attr), 0, -1, -1, 0)
+        if fd < 0: return
+        ic_fd = fd
+        ic_on = true
+        ic_counts = fill(0, IC_PHASES * 3)
+        ic_last = ic_read()
+# Charge what ran since the last switch to the current bucket; continue in
+# (phase, side). Returns the bucket to give back to ic_restore.
+ic_switch = (phase: int, side: int) -> int:
+    if not ic_on: return 0
+    now = ic_read()
+    ic_counts[ic_bucket] += now - ic_last
+    ic_last = now
+    was = ic_bucket
+    ic_bucket = phase * 3 + side
+    was
+ic_restore = (bucket: int):
+    if not ic_on: return
+    now = ic_read()
+    ic_counts[ic_bucket] += now - ic_last
+    ic_last = now
+    ic_bucket = bucket
+# (library: the prelude, and any module whose file lies under lib/)
+ic_side_mod = (m: int) -> int:
+    if m < 0 or m >= modules.len(): return IC_SHARED
+    if modules[m].is_prelude: return IC_LIB
+    f = int(modules[m].file)
+    if len(lib_root) > 0 and f >= 0 and f < files.len() and starts_with(files[f].path, lib_root): return IC_LIB
+    IC_ROOT
+ic_side_fn = (f: int) -> int:
+    if f <= 0 or f >= fns.len(): return IC_SHARED
+    ic_side_mod(int(fns[f].mod))
+ic_side_lf = (lf: int) -> int:
+    if lf < 0 or lf >= lfuncs.len() or lfuncs[lf].kind != LK_INST: return IC_SHARED
+    ic_side_fn(lfuncs[lf].inst)
+# (ic_switch for one function's work: checking, lowering, emitting it)
+ic_fn = (phase: int, f: int) -> int:
+    if not ic_on: return 0
+    ic_switch(phase, ic_side_fn(f))
+ic_lf = (phase: int, lf: int) -> int:
+    if not ic_on: return 0
+    ic_switch(phase, ic_side_lf(lf))
+ic_mod = (phase: int, m: int) -> int:
+    if not ic_on: return 0
+    ic_switch(phase, ic_side_mod(m))
+# (an analysis nested in another phase's work, for the same side)
+ic_phase = (phase: int) -> int:
+    if not ic_on: return 0
+    ic_switch(phase, ic_bucket % 3)
+ic_report = ():
+    if not ic_on: return
+    ic_restore(ic_bucket)
+    names = ["load", "check", "facts", "effects", "ownership", "lower", "optimize", "codegen", "other"]
+    sides = ["shared", "root", "library"]
+    total = 0
+    side_total = fill(0, 3)
+    loop i in [0..IC_PHASES * 3):
+        total += ic_counts[i]
+        side_total[i % 3] += ic_counts[i]
+    parts = ""
+    loop s in [0..3):
+        row = ""
+        loop p in [0..IC_PHASES):
+            c = ic_counts[p * 3 + s]
+            if c != 0: row = row + " {names[p]} {c}"
+        parts = parts + "; {sides[s]} {side_total[s]}:{row}"
+    eprint("instructions: {total}{parts}")
+    # (syntax nodes by whose source they come from; made by the compiler: shared)
+    counts = fill(0, 3)
+    side_of: {int: int} = {}
+    loop i in [1..nodes.len()):
+        p = nodes[i].pos
+        side = IC_SHARED
+        if p > 0:
+            f = pos_file(p)
+            if let known = side_of.get(f): side = known
+            else:
+                side = IC_ROOT
+                if f >= files.len() or len(lib_root) > 0 and starts_with(files[f].path, lib_root): side = IC_LIB
+                side_of[f] = side
+        counts[side] += 1
+    eprint("nodes: root {counts[IC_ROOT]}, library {counts[IC_LIB]}, shared {counts[IC_SHARED]}")
+# The code lines of the source a declaration spans (its first node's line to its last node's)
+ic_decl_lines = (decl: int) -> int:
+    f = pos_file(nodes[decl].pos)
+    if f <= 0 and nodes[decl].pos <= 0 or f >= files.len(): return 0
+    lo = 1 << 62
+    hi = -1
+    stack = [decl]
+    loop stack.len() > 0:
+        n = stack.pop()
+        p = nodes[n].pos
+        if p > 0 and pos_file(p) == f:
+            o = pos_off(p)
+            if o < lo: lo = o
+            if o > hi: hi = o
+        if nodes[n].a != 0: stack.push(int(nodes[n].a))
+        if nodes[n].b != 0: stack.push(int(nodes[n].b))
+        if kid_c(n) != 0: stack.push(kid_c(n))
+        if kid_d(n) != 0: stack.push(kid_d(n))
+        loop k in kids(n): stack.push(k)
+        loop k in kids2(n): stack.push(k)
+    if hi < 0: return 0
+    src = files[f].src
+    a = lo
+    loop a > 0 and src[a - 1] != '\n': a -= 1
+    b = hi
+    loop b < len(src) and src[b] != '\n': b += 1
+    code_lines(src, a, b)
+# The source lines the compile processed: the program's files; the library files parsed, less the
+# bodies nobody asked for, plus (once per instance, as each is checked and lowered again) the
+# declaration of every generic instance made.
+ic_lines_report = ():
+    if not pl_on: return
+    root = 0
+    library = 0
+    loop f in pl_files:
+        n = code_lines(files[f].src, 0, len(files[f].src))
+        if len(lib_root) > 0 and starts_with(files[f].path, lib_root): library += n
+        else: root += n
+    for_u = 0
+    loop for_u < pl_units.len():
+        library += code_lines(files[pl_units[for_u]].src, pl_units[for_u + 1], pl_units[for_u + 2])
+        for_u += 3
+    reached = 0
+    for_i = 0
+    loop for_i < pl_reached.len():
+        reached += code_lines(files[pl_reached[for_i]].src, pl_reached[for_i + 1], pl_reached[for_i + 2])
+        for_i += 3
+    unasked = 0
+    loop i in [1..nodes.len()):
+        if nodes[i].kind == .block and has_flag(i, NF_LAZY):
+            f = pos_file(nodes[i].pos)
+            if f >= 0 and f < files.len(): unasked += code_lines(files[f].src, int(nodes[i].ival), int(nodes[i].ival) + int(nodes[i].aux))
+    loop b, stop in dc_parser.reader.dc_lazy_span_end:
+        f = pos_file(nodes[b].pos)
+        if f >= 0 and f < files.len(): unasked += code_lines(files[f].src, int(nodes[b].ival), stop)
+    made: {int: int} = {}
+    loop d in pl_inst_decls: made[d] = (made.get(d) ?? 0) + 1
+    inst_lines = 0
+    loop d in pl_inst_decls:
+        if made.has(d):
+            inst_lines += ic_decl_lines(d) * (made.get(d) ?? 0)
+            made.remove(d)
+    eprint("lines: root {root}, library {library - unasked + reached}, instance {inst_lines}; {pl_inst_decls.len()} instances; library parsed {library}, bodies reached {reached} of {unasked}")

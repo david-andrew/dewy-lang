@@ -1,0 +1,207 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (eprint)
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_LAZY has_flag kid_c kid_d kids kids2 nodes)
+from p"check.jo" import (fns modules)
+from p"dewy_context.jo" import (dc_parser)
+from p"icount.jo" import (IC_LIB IC_PHASES IC_ROOT IC_SHARED ic_bucket ic_counts ic_fd ic_last ic_on)
+from p"lower.jo" import (LK_INST lfuncs)
+from p"util.jo" import (code_lines files lib_root pl_files pl_inst_decls pl_on pl_reached pl_units pos_file pos_off)
+
+CountWord:type=int64<overflow='wrap'>
+ic_read=():>int64=>$unsafe {
+    if $target.os =? 'linux' and $target.arch =? 'x86_64' {
+        let buf:array<int64>=[0]
+        if syscall(0 ic_fd data(buf) 8) not=? 8 {return ic_last}
+        return buf[0]
+    } else {
+        return 0
+    }
+}
+ic_start=():>void=>$unsafe {
+    if $target.os =? 'linux' and $target.arch =? 'x86_64' {
+        # perf_event_attr: hardware instructions, user space only, counting from now
+        let attr:array<int64>=fill(0 16)
+        attr[0]=128 << 32
+        attr[1]=1
+        attr[5]=0x60
+        let fd=syscall(298 data(attr) 0 (-1) (-1) 0)
+        if fd <? 0 {return}
+        ic_fd=fd
+        ic_on=true
+        ic_counts=fill(0 IC_PHASES * 3)
+        ic_last=ic_read()
+    }
+}
+# Charge what ran since the last switch to the current bucket; continue in
+# (phase, side). Returns the bucket to give back to ic_restore.
+ic_switch=(phase:int64 side:int64):>int64=>$unsafe {
+    if not ic_on {return 0}
+    let now:CountWord=ic_read()
+    let counts=ic_counts.ptr
+    let was:CountWord=ic_bucket
+    counts[was]=CountWord(counts[was]) + now - CountWord(ic_last)
+    ic_last=now
+    ic_bucket=CountWord(phase) * 3 + CountWord(side)
+    was
+}
+ic_restore=(bucket:int64):>void=>$unsafe {
+    if not ic_on {return}
+    let now:CountWord=ic_read()
+    let counts=ic_counts.ptr
+    let was:CountWord=ic_bucket
+    counts[was]=CountWord(counts[was]) + now - CountWord(ic_last)
+    ic_last=now
+    ic_bucket=bucket
+}
+# (library: the prelude, and any module whose file lies under lib/)
+ic_side_mod=(m:int64):>int64=>{
+    if m <? 0 or m >=? modules.length {return IC_SHARED}
+    if modules[m].is_prelude {return IC_LIB}
+    let f=CountWord(modules[m].file)
+    if (lib_root as array<uint8>).length >? 0 and f >=? 0 and f <? files.length and starts_with(files[f].path lib_root) {return IC_LIB}
+    IC_ROOT
+}
+ic_side_fn=(f:int64):>int64=>$unsafe {
+    if f <=? 0 or f >=? fns.length {return IC_SHARED}
+    ic_side_mod(CountWord(fns.ptr[f].mod))
+}
+ic_side_lf=(lf:int64):>int64=>$unsafe {
+    if lf <? 0 or lf >=? lfuncs.length or lfuncs.ptr[lf].kind not=? LK_INST {return IC_SHARED}
+    ic_side_fn(lfuncs.ptr[lf].inst)
+}
+# (ic_switch for one function's work: checking, lowering, emitting it)
+ic_fn=(phase:int64 f:int64):>int64=>{
+    if not ic_on {return 0}
+    ic_switch(phase ic_side_fn(f))
+}
+ic_lf=(phase:int64 lf:int64):>int64=>{
+    if not ic_on {return 0}
+    ic_switch(phase ic_side_lf(lf))
+}
+ic_mod=(phase:int64 m:int64):>int64=>{
+    if not ic_on {return 0}
+    ic_switch(phase ic_side_mod(m))
+}
+# (an analysis nested in another phase's work, for the same side)
+ic_phase=(phase:int64):>int64=>{
+    if not ic_on {return 0}
+    ic_switch(phase ic_bucket % 3)
+}
+ic_report=():>void=>$unsafe {
+    if not ic_on {return}
+    ic_restore(ic_bucket)
+    names=["load" "check" "facts" "effects" "ownership" "lower" "optimize" "codegen" "other"]
+    let sides=["shared" "root" "library"]
+    let total:CountWord=0
+    let side_total=fill(0 3)
+    loop i in [0..IC_PHASES * 3) {
+        total += ic_counts[i]
+        side_total[i % 3] += ic_counts[i]
+    }
+    let parts=""
+    loop s in [0..3) {
+        let row=""
+        loop p in [0..IC_PHASES) {
+            let c=ic_counts[p * 3 + s]
+            if c not=? 0 {row="{row} {names[p]} {c}"}
+        }
+        parts="{parts}; {sides[s]} {side_total[s]}:{row}"
+    }
+    eprint("instructions: {total}{parts}")
+    # (syntax nodes by whose source they come from; made by the compiler: shared)
+    let counts=fill(0 3)
+    let side_of=dict<int64 int64>()
+    loop i in [1..nodes.length) {
+        let p=nodes.ptr[i].pos
+        let side=IC_SHARED
+        if p >? 0 {
+            let f=pos_file(p)
+            let known=side_of.get(f)
+            if known not=? none {side=known}
+            else {
+                side=IC_ROOT
+                if f >=? files.length or (lib_root as array<uint8>).length >? 0 and starts_with(files[f].path lib_root) {side=IC_LIB}
+                side_of[f]=side
+            }
+        }
+        counts[side] += 1
+    }
+    eprint("nodes: root {counts[IC_ROOT]}, library {counts[IC_LIB]}, shared {counts[IC_SHARED]}")
+}
+# The code lines of the source a declaration spans (its first node's line to its last node's)
+ic_decl_lines=(decl:int64):>int64=>$unsafe {
+    let f=pos_file(nodes.ptr[decl].pos)
+    if f <=? 0 and nodes.ptr[decl].pos <=? 0 or f >=? files.length {return 0}
+    let lo=1 << 62
+    let hi:CountWord=-1
+    let stack=[decl]
+    loop stack.length >? 0 {
+        let n=stack.pop()
+        let p=nodes.ptr[n].pos
+        if p >? 0 and pos_file(p) =? f {
+            let o=pos_off(p)
+            if o <? lo {lo=o}
+            if o >? hi {hi=o}
+        }
+        if nodes.ptr[n].a not=? 0 {stack.push(CountWord(nodes.ptr[n].a))}
+        if nodes.ptr[n].b not=? 0 {stack.push(CountWord(nodes.ptr[n].b))}
+        if kid_c(n) not=? 0 {stack.push(kid_c(n))}
+        if kid_d(n) not=? 0 {stack.push(kid_d(n))}
+        loop k in kids(n) {stack.push(k)}
+        loop k in kids2(n) {stack.push(k)}
+    }
+    if hi <? 0 {return 0}
+    let src=files[f].src
+    let a=lo
+    let bytes=src as array<uint8>
+    loop a >? 0 and bytes[a - 1] not=? b'\n' {a -= 1}
+    let b=hi
+    loop b <? bytes.length and bytes[b] not=? b'\n' {b += 1}
+    code_lines(src a b)
+}
+# The source lines the compile processed: the program's files; the library files parsed, less the
+# bodies nobody asked for, plus (once per instance, as each is checked and lowered again) the
+# declaration of every generic instance made.
+ic_lines_report=():>void=>$unsafe {
+    if not pl_on {return}
+    let root:CountWord=0
+    let library:CountWord=0
+    loop f in pl_files {
+        let n=code_lines(files[f].src 0 (files[f].src as array<uint8>).length)
+        if (lib_root as array<uint8>).length >? 0 and starts_with(files[f].path lib_root) {library += n}
+        else {root += n}
+    }
+    let for_u:CountWord=0
+    loop for_u <? pl_units.length {
+        library += code_lines(files[pl_units[for_u]].src pl_units[for_u + 1] pl_units[for_u + 2])
+        for_u += 3
+    }
+    let reached:CountWord=0
+    let for_i:CountWord=0
+    loop for_i <? pl_reached.length {
+        reached += code_lines(files[pl_reached[for_i]].src pl_reached[for_i + 1] pl_reached[for_i + 2])
+        for_i += 3
+    }
+    let unasked:CountWord=0
+    loop i in [1..nodes.length) {
+        if nodes.ptr[i].kind =? 'block' and has_flag(i NF_LAZY) {
+            let f=pos_file(nodes.ptr[i].pos)
+            if f >=? 0 and f <? files.length {unasked += code_lines(files[f].src CountWord(nodes.ptr[i].ival) CountWord(nodes.ptr[i].ival) + CountWord(nodes.ptr[i].aux))}
+        }
+    }
+    loop [b stop] in dc_parser.reader.dc_lazy_span_end {
+        let f=pos_file(nodes.ptr[b].pos)
+        if f >=? 0 and f <? files.length {unasked += code_lines(files[f].src CountWord(nodes.ptr[b].ival) stop)}
+    }
+    let made=dict<int64 int64>()
+    loop d in pl_inst_decls {made[d]=(made.get(d) ?? 0) + 1}
+    let inst_lines:CountWord=0
+    loop d in pl_inst_decls {
+        if made.has(d) {
+            inst_lines += ic_decl_lines(d) * (made.get(d) ?? 0)
+            made.remove(d);
+        }
+    }
+    eprint("lines: root {root}, library {library - unasked + reached}, instance {inst_lines}; {pl_inst_decls.length} instances; library parsed {library}, bodies reached {reached} of {unasked}")
+}
