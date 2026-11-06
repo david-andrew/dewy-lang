@@ -125,6 +125,146 @@ shift.overlaps?([lunch..lunch + 1hour))
 
 - **Rec:** ranges, dropping `interval(a b)`.
 
+### D10. Safety defaults and tag names (#108)
+- **BLUF:** with no tags, anything a program can reasonably meet is a value or a compile error, and crashing takes one written word. A tag's first word tells you its direction. Full proposal and the cold-read review of the names: `docs/design/proposals/bulletproof/round2.md`, `round2-review.md`.
+- **Exceptions that stay trusted, and why:**
+  - **Out of memory and stack overflow:** the program ends with a report. Otherwise every call would be fallible. `$explicit_allocation_failure` is the opt-in for memory.
+  - **IEEE floats:** `1.0/0.0` is `inf`. Proving every `/` would wreck game math. `$no_nan_or_inf` is the opt-in.
+
+**What changes with no tags**
+
+| The program does | It gets |
+|---|---|
+| `input_int("n? ")` at end of input | `int \| EndOfInput \| FileError \| Canceled` |
+| `input("name? ")` at end of input | `string \| EndOfInput \| FileError \| Canceled` (today `""`, so a loop can spin forever) |
+| `read_stdin` with a read error | Adds `FileError` (today partial text, as if complete) |
+| `window("x" 320 200)` with no display | `void \| WindowError` |
+| `texture(…)`, or `load_wav(bytes)` on a bad file | A named error value |
+| A draw call when the driver fails | Stays `void`; the error is kept and returned at the end of the frame, with no exit |
+| `crypto.random_bytes(16)` with no entropy | `array<uint8> \| NoEntropy` |
+| `printl` to a full disk | Stays `void`; the program exits 1 with an error at the end. A closed pipe (`\| head`) exits quietly |
+
+```dewy
+main = () => {
+    let name = input("name? ") or_throw     # just crash: report, exit 1
+    let age = input_int("age? ") ?? 0       # or use a default
+    printl"{name} is {age}"
+}
+```
+
+**How to read a tag**
+
+| First word | Direction | When it acts |
+|---|---|---|
+| `$no_X` | Safer: X can't happen here | Compile error |
+| `$prove_X` | Safer: stop trusting X, prove it | Compile error |
+| `$explicit_X` | Safer: X must be spelled out in the source or a type | Compile error if omitted |
+| `$panic_on_X` | Less safe: X compiles, and if it goes wrong the program ends with a report | Run time |
+| `$assume_X` | Less safe: a person's claim, and nothing checks it | Never checked |
+
+**The tags: turn this on, and…**
+
+| Tag | …this happens | Was |
+|---|---|---|
+| `$no_nan_or_inf` (or `$no_nan`, `$no_inf`) | `total/n` is a compile error unless it's proven to give neither | `$finite_floats` |
+| `$no_deadlocks` | A channel wait the compiler can't prove finishes is a compile error | |
+| `$no_hidden_costs` | A hidden allocation, costly copy or panic is a compile error | |
+| `$no_assumed_externs` | `$assume_waits_outside` and an extern's `& no_effects` are compile errors | |
+| `$prove_confined_paths` | `p(args[0]).exists` is a compile error until the path is confined to a base | `$confine_external_paths` |
+| `$prove_counter_bounds` | `c += 1` in a loop with no bound, or `parallel` over an unbounded range, is a compile error | `$no_assumed_bounds` |
+| `$prove_library_asserts` | Calling a library function that reaches an unproven `assert`, like `graphemes(text)`, is a compile error | |
+| `$prove_library_runtime_checks` | Calling library code that relies on a hidden index, division or narrowing check is a compile error | |
+| `$prove_library_arena_safety` | `printl(xs)` inside an arena block is a compile error until `printl` is proven not to keep the storage | |
+| `$prove_library_drop_cannot_fail` | `@(m.lock)` is a compile error until the library proves releasing can't fail | |
+| `$prove_library` | All four library tags. Your code can't fix these errors; the library must be proven | |
+| `$prove_finite_float_args` (line above a function) | Calling it with an unguarded float is a compile error; the body may rely on finite values | `$prove_finite_inputs` |
+| `$explicit_copies` | `let b = a` on an array is a compile error; write `.copy` | |
+| `$explicit_allocation_failure` | Allocating functions return `T \| OutOfMemory`, and using that as `T` is a compile error | |
+| `$explicit_module_panic_calls` | Calling a `$runtime_assert` function in your own module is a compile error too | `$assume_local_asserts=false` |
+| `$time.explicit_*` | e.g. `$time.explicit_clock_accuracy`: `today.year` is a compile error, because `today` may be `AmbiguousToday` | `$time.require_*` |
+| `$panic_on_unproven` | An unproven index or division compiles; if it fails, the program reports and exits 101 | `$runtime_checks` |
+| `$prototype` | The same, with a warning at each site. For development only | |
+| `$assume_waits_outside` | "This foreign call only waits on the outside world." Unchecked; allowed only in the adapter's body | `$audited_wait` |
+| `$unsafe` | Unchanged | |
+| `$bulletproof` | Every safer tag; rejects every less-safe tag except `$unsafe`. **It's not usable yet:** even `printl(1)` fails until the library is proven | |
+
+**Removed**
+- `$verify_protocols`: see question 4.
+- `$explicit_environment_failure`: input failure is always a value now.
+- `$explicit_graphics_failure`: graphics failures are values by default.
+- `$prove_finite_inputs`: `$no_inf` already rejects unproven arguments, so only the argument contract above remains.
+
+**Named float constants** (also `float32`). `.min` is the most negative finite value, matching `int64.min` and unlike C's `DBL_MIN`.
+
+```dewy
+float64.max   float64.min   float64.min_positive   float64.min_subnormal
+float64.epsilon   float64.max_exact_int   float64.inf   float64.nan
+if float64.min <=? x <=? float64.max same(x)       # proves x is finite
+if is_finite(x) same(x)                            # the same fact
+```
+
+**Questions:**
+1. Approve this naming grammar and these names? Rec: yes. The rename is mechanical, but `$runtime_checks` alone has 2,403 uses.
+2. `$panic_on_unproven` or `$crash_on_unproven`? Rec: `panic`, matching `panic` and `& no panics`.
+3. Make joined paths a compile error by default? `p"{root}/{name}".exists` would need `root.confine(name) or_throw`. Rec: yes, by your direction. This changes your decided warning.
+4. Make `$no_deadlocks` mean what it says? `serve` and `pipeline` would lose their trusted status until a nightly model check proves them, so 24 uses in 15 files become errors under that tag. What stays stated plainly: a fair scheduler, and any `$assume_waits_outside` you wrote. Spin loops and servers that never answer are hangs, not deadlocks; `within` handles those. Rec: yes.
+
+**Also found:** 21 of 29 example programs carry `$runtime_checks`, which fails the common-path test. 6 can drop it now, 4 hit `ui_begin` and `add_box` (being fixed), and 11 hit compiler proof gaps. These are going to the coordinator as work, not a question.
+
+### D11. Compile-time string shapes and game calls (#131–#133)
+- **BLUF:** bad action names and melodies become compile errors, with one new word (`shape=`). Removed physics bodies use the existing proven/value/checked rule, with no new tags. Full design: `docs/design/proposals/string-shapes/round1.md`.
+
+**D11a. String shapes.** The checker is ordinary Dewy code run on literals at compile time, and any library can define one. (`@` because it passes the function, and a bare name would call it.)
+
+```dewy
+melody_error = (text:string):>string|none => …     # none if fine, otherwise what's wrong
+Melody:type = string<shape=@melody_error>
+melody = (notes:Melody bpm=120.0):>Sound => …
+
+melody("C4 E4 G4")          # fine, with no run-time cost
+melody("C4 E4 G9x")         # compile error: 'G9x' is not a note: the octave is one digit (C4, F#3, Bb5)
+melody(typed)               # compile error: cannot prove this string is a Melody
+if typed is? Melody play(melody(typed))
+let tune = Melody(typed) ?? "C4"
+let strict = Melody(typed) or_throw
+```
+
+- It also fits regex, `date"…"`, format strings, colors and SQL syntax, and composes with unions: `Tempo:type = 'slow' | 'fast' | string<shape=@bpm_error>`.
+- A failed conversion gives `ShapeError`, with the checker's message.
+- **Cost:** about 1.6 M instructions per distinct literal, measured on the desktop; repeats become a lookup. A checker that never ends hangs the build, the same as other compile-time code.
+- Rec: this spelling. Considered: `string<s => melody_ok(s)>` (needs calls in predicates generally, and a bool can't say what's wrong); a tag on the function (gives no type to store, and lets runtime strings through, which you ruled out).
+
+**D11b. Action names.** No language feature: a string union already does this (tested on today's compiler).
+
+```dewy
+Action:type = 'jump' | 'left' | 'right' | 'pause'
+let input = Controls<Action>[binds=[
+    'jump'  -> [Input.key(Key.space) Input.button(PadButton.a)]
+    'left'  -> [Input.key(Key.a) Input.stick(0 (-1))]
+    'right' -> [Input.key(Key.d) Input.stick(0 1)]
+    'pause' -> [Input.key(Key.escape)]
+]]
+input.pressed('jump')       # fine
+input.pressed('jmup')       # compile error naming the valid actions
+```
+
+- Leaving out a binding is a compile error too. Config files test each name with `if name is? Action`, so a stale save can't crash the game.
+- Rec: `Controls<A>` and `Binding` replace `action`/`action_pressed`.
+
+**D11c. Removed physics bodies.** Your question was whether people want a choice. Yes, but per call rather than per program: Rapier, `slotmap` and Bevy each offer both a panicking read and a value read, and games use both. A program-wide tag that changes what `pos` returns would mean a helper written for one mode doesn't compile in another. The existing rule gives all three behaviors:
+
+| You want | Write | Tag |
+|---|---|---|
+| The thing or `none` | `w.get(ball)`, giving `BodyState \| none` | None |
+| Proven | `w.pos(ball)` right after `add`, or inside `if w.has(ball)` | None |
+| Panic if stale | `w.pos(ball)` | `$panic_on_unproven` |
+
+- `w.remove(ball); w.pos(ball)` becomes a compile error even under `$panic_on_unproven`.
+- `if w.has(ball)` only proves `w.pos` after a later compiler stage; until then, the error points to `w.get`.
+- Rec: add `w.get` and `w.has`. `w.has` replaces `alive` and `joint_alive`. Considered and rejected: silently returning a default (a removed ball draws at the origin); handles consumed by `remove` (they're usually aliased in module globals).
+
+**UI.** A Clay-style layout built as a value has nothing left "open", so the panic goes away by construction. I found no Clay work in the Sloppy repo, so this stays a direction until you want it designed. In the meantime, `ui_begin` closes an open menu itself, with a debug warning.
+
 ---
 
 ## P3: lower stakes
@@ -184,10 +324,3 @@ $needs(name='geom' url='https://github.com/someone/geom' min='2.0.0')
 # libs.dewy: written by the tool
 $vendor(name='shapes' url='https://github.com/someone/shapes' commit='9f2c…' digest='sha256:…')
 ```
-
----
-
-## In design: nothing needed from you yet
-
-- **D10. Safety tags.** Being redesigned on your direction: unsafety is opted into, and each tag's name says what it does. It will come back as "turn this on, and doing X is a compile error" explanations. `proposals/bulletproof/`.
-- **D11. Game library calls that crash today.** Being redesigned: string types with a compile-time checked shape (action names, melodies), and removed physics bodies. `ui_begin` waits on the Clay-style UI.
