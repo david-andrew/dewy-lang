@@ -1,4 +1,5 @@
 """Build a Dewy leaf and its frozen twin with only the modules its services need."""
+import re
 import subprocess
 
 from tests.support import ROOT
@@ -18,6 +19,13 @@ def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run
                     text = text.replace(f'{quote}{stem}.{extension}{quote}', f'{quote}services.jo{quote}')
         return text
 
+    # (what a real module imports comes too, down to the services and doubles)
+    stems = list(stems)
+    for stem in stems:
+        for name in (re.findall(r'(?m)^\s*from p"(\w+)\.dewy"', (ROOT / f'compiler/{stem}.dewy').read_text())
+                     + re.findall(r"(?m)^use '(\w+)\.dewy'", (ROOT / f'compiler/{stem}.jo').read_text())):
+            if name not in stems and name not in services and f'{name}.dewy' not in (doubles or {}):
+                stems.append(name)
     outputs = []
     for extension in ('dewy', 'jo'):
         directory = tmp_path / extension

@@ -1,0 +1,79 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (LF_ALIAS locals)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"expr.jo" import (ntype)
+from p"places.jo" import (place_index place_locked place_parents)
+from p"types.jo" import (tkind)
+
+RouteWord:type=int64<overflow='wrap'>
+place_scalar_root=(e:RouteWord):>PlaceIdentity=>$unsafe {
+    if e =? 0 {return PlaceIdentity('local' 0 0)}
+    if nodes.ptr[e].kind =? 'addr' {return place_scalar_root(RouteWord(nodes.ptr[e].a))}
+    if nodes.ptr[e].kind not=? 'ident' {return PlaceIdentity('local' 0 0)}
+    let l=RouteWord(nodes.ptr[e].sym)
+    if nodes.ptr[e].aux =? int32(2) {return PlaceIdentity('global' 0 l)}
+    if nodes.ptr[e].aux not=? int32(1) {return PlaceIdentity('local' 0 0)}
+    let depth=0
+    loop RouteWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 and not place_locked.has(l) {
+        let a=RouteWord(locals.ptr[l].alias)
+        if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32(1) {return PlaceIdentity('local' 0 0)}
+        l=RouteWord(nodes.ptr[a].sym)
+        depth += 1
+        if depth >? 32 {return PlaceIdentity('local' 0 0)}
+    }
+    PlaceIdentity('local' RouteWord(locals.ptr[l].owner) l)
+}
+places_reset=():>void=>{
+    place_parents=[PlaceIdentity('local' 0 0)]
+    place_index=dict<PlaceIdentity int64>()
+}
+place_intern=(p:PlaceIdentity):>RouteWord=>{
+    let i=place_index.get(p)
+    if i not=? none {return i}
+    place_parents.push(p)
+    place_index[p]=place_parents.length - 1
+    place_parents.length - 1
+}
+place_project=(p:PlaceIdentity field:RouteWord):>PlaceIdentity=>{
+    if p.declaration =? 0 {return p}
+    let depth=0
+    let q=p
+    loop q.parent not=? 0 {
+        depth += 1
+        q=place_parents[q.parent]
+    }
+    if depth >=? 8 {return PlaceIdentity('local' 0 0)}
+    PlaceIdentity(p.root p.owner p.declaration place_intern(p) 'field' field)
+}
+place_route=(e:RouteWord depth:RouteWord=0):>PlaceIdentity=>$unsafe {
+    if e =? 0 or depth >? 32 {return PlaceIdentity('local' 0 0)}
+    let k=nodes.ptr[e].kind
+    if k =? 'addr' {return place_route(RouteWord(nodes.ptr[e].a) depth + 1)}
+    if k =? 'field' {
+        if tkind(ntype(RouteWord(nodes.ptr[e].a))) not=? 'struct_' {return PlaceIdentity('local' 0 0)}
+        return place_project(place_route(RouteWord(nodes.ptr[e].a) depth + 1) RouteWord(nodes.ptr[e].name))
+    }
+    if k =? 'ident' and nodes.ptr[e].aux =? int32(1) {
+        let l=RouteWord(nodes.ptr[e].sym)
+        if l <=? 0 or l >=? locals.length {return PlaceIdentity('local' 0 0)}
+        if RouteWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and not place_locked.has(l) {
+            return place_route(RouteWord(locals.ptr[l].alias) depth + 1)
+        }
+    }
+    place_scalar_root(e)
+}
+# The selectors from a place's root down to it.
+place_path=(p0:PlaceIdentity):>array<int64>=>{
+    let out:array<int64>=[]
+    let p=p0
+    loop p.parent not=? 0 {
+        out.insert(p.selector 0)
+        p=place_parents[p.parent]
+    }
+    out
+}
+place_append=(base:PlaceIdentity route:PlaceIdentity):>PlaceIdentity=>{
+    if route.parent =? 0 {return base}
+    place_project(place_append(base place_parents[route.parent]) route.selector)
+}
