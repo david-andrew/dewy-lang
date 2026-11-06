@@ -76,6 +76,15 @@ parsafe_demand_task = (a: int, n: int) -> bool:
     true
 
 
+# A function-typed capture of a task that is its function's parameter: as parsafe_demand_task.
+parsafe_demand_task_local = (l: int, site: int) -> bool:
+    if tkind(int(locals[l].type)) != .fn_: return false
+    g, i = parsafe_param_local(l)
+    if g <= 0 or fns[g].kind != FK_NORMAL: return false
+    parsafe_require(g, i, ParSafeVia(site, 0, 0, true))
+    true
+
+
 parsafe_vouched_local = (l: int) -> bool:
     if parsafe_fns.len() == 0: return false
     g, i = parsafe_param_local(l)

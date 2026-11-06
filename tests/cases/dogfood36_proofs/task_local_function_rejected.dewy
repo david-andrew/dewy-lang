@@ -1,0 +1,6 @@
+# modes: native native-release
+main = () => {
+    let f = (x:int):>int => x + 1
+    concurrent { let a = spawn f(1) }
+    printl(a or_throw)
+}

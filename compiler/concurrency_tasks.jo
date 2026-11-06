@@ -41,11 +41,13 @@ concurrency_callback = (a: int, waiting: bool = false):
     loop cap in fns[f].caps:
         # (a callback parameter run here: its function's callers check what they give)
         if not waiting and parsafe_vouched_local(int(cap.outer)): continue
+        if waiting and parsafe_demand_task_local(int(cap.outer), a): continue
         t = int(locals[int(cap.outer)].type)
         seen: {int: bool}
         if (waiting or int(locals[int(cap.inner)].flags) & LF_PARTBORROW == 0) and (int(locals[int(cap.inner)].flags) & LF_ADDR != 0 or not concurrency_transfer(t, seen)):
             why = concurrency_why()
             if len(why) > 0: fatal(nodes[a].pos, "task capture does not satisfy inferred Send{why}")
+            if tkind(t) == .fn_: fatal(nodes[a].pos, "a task cannot capture the function value '{name_of(int(locals[int(cap.outer)].name))}': the compiler checks a task's code for data races and cannot follow a stored function; declare it at module level and call it by name, take it as a parameter, or write the code in the task")
             fatal(nodes[a].pos, "task capture does not satisfy inferred Send/Sync: a place or non-atomic raw-storage handle cannot cross tasks")
     seen: {int: bool}
     if not concurrency_transfer(int(fns[f].ret), seen): fatal(nodes[a].pos, "task result does not satisfy inferred Send{concurrency_why()}")

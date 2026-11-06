@@ -6,7 +6,7 @@ from p"expr.jo" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt last_c
 from p"checker_expr.dewy" import (check_expr)
 from p"deadlock.jo" import deadlock_atomics
 from p"concurrency_waits.dewy" import concurrency_blocks
-from p"concurrency_parsafe.dewy" import (parsafe_finalize parsafe_vouched_local)
+from p"concurrency_parsafe.dewy" import (parsafe_demand_task_local parsafe_finalize parsafe_vouched_local)
 from p"concurrency.jo" import (concurrency_calls concurrency_ffi_start concurrency_protocol_module concurrency_runtime_needed concurrency_tasks)
 from p"concurrency_types.dewy" import (concurrency_builtin_type concurrency_transfer concurrency_why)
 from p"errors.jo" import (exception_member nominal_generic_instance value_members)
@@ -44,11 +44,13 @@ concurrency_callback=(a:TaskWord waiting:bool=false):>void=>$unsafe {
     loop cap in fns.ptr[f].caps {
         # (a callback parameter run here: its function's callers check what they give)
         if not waiting and parsafe_vouched_local(TaskWord(cap.outer)) {continue}
+        if waiting and parsafe_demand_task_local(TaskWord(cap.outer) a) {continue}
         let t:TaskWord=TaskWord(locals.ptr[TaskWord(cap.outer)].type)
         let seen:dict<int64 bool>=dict<int64 bool>()
         if (waiting or TaskWord(locals.ptr[TaskWord(cap.inner)].flags) & LF_PARTBORROW =? 0) and (TaskWord(locals.ptr[TaskWord(cap.inner)].flags) & LF_ADDR not=? 0 or not concurrency_transfer(t @seen)) {
             let why=concurrency_why()
             if (why).length >? 0 {fatal(nodes.ptr[a].pos "task capture does not satisfy inferred Send{why}");}
+            if tkind(t) =? 'fn_' {fatal(nodes.ptr[a].pos "a task cannot capture the function value '{name_of(TaskWord(locals.ptr[TaskWord(cap.outer)].name))}': the compiler checks a task's code for data races and cannot follow a stored function; declare it at module level and call it by name, take it as a parameter, or write the code in the task");}
             fatal(nodes.ptr[a].pos "task capture does not satisfy inferred Send/Sync: a place or non-atomic raw-storage handle cannot cross tasks");
         }
     }

@@ -1,0 +1,14 @@
+# modes: native native-release
+limit:int = 1
+reads = (f:<(x:int):>int> a:int):>int | Canceled | OutOfMemory => {
+    concurrent {
+        let x = spawn { f(a) }
+    }
+    x or_throw
+}
+wrap = (g:<(x:int):>int> a:int):>int | Canceled | OutOfMemory => reads(@g a)
+peek = (v:int):>int => v + limit
+main = () => {
+    limit = 2
+    printl(wrap(@peek 3))
+}

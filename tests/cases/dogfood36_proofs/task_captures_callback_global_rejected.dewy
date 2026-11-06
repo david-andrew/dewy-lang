@@ -1,0 +1,15 @@
+# modes: native native-release
+total:int = 0
+both = (f:<(x:int):>int> a:int):>int | Canceled | OutOfMemory => {
+    concurrent {
+        let x = spawn { f(a) }
+    }
+    x or_throw
+}
+main = () => {
+    printl(both((v) => {
+        total += v
+        v
+    } 3))
+    printl(total)
+}

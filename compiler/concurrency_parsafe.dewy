@@ -70,6 +70,14 @@ parsafe_demand_task=(a:ParSafeWord n:ParSafeWord):>bool=>$unsafe {
     parsafe_require(g i ParSafeVia[n 0 0 true]);
     return true
 }
+# A function-typed capture of a task that is its function's parameter: as parsafe_demand_task.
+parsafe_demand_task_local=(l:ParSafeWord site:ParSafeWord):>bool=>$unsafe {
+    if tkind(ParSafeWord(locals.ptr[l].type)) not=? 'fn_' {return false}
+    let [g i]=parsafe_param_local(l)
+    if g <=? 0 or fns.ptr[g].kind not=? FK_NORMAL {return false}
+    parsafe_require(g i ParSafeVia[site 0 0 true]);
+    return true
+}
 parsafe_vouched_local=(l:ParSafeWord):>bool=>$unsafe {
     if parsafe_fns.length =? 0 {return false}
     let [g i]=parsafe_param_local(l)
