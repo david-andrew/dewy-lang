@@ -137,11 +137,11 @@ gen_scan_loop=(s:ScanWord):>bool=>$unsafe {
         if fused_on {fz_note_raw(offset 1)}
         mode |= (offset + 1) << 2
     }
-    stmt_begin()
+    stmt_begin();
     let startv=gen_expr(index).v
     let stopv=gen_expr(stop).v
     # No pointer formation or array access for an empty/reversed span.
-    iff(e_bin('lts' VI startv stopv))
+    iff(e_bin('lts' VI startv stopv));
     let valid=e_bin('ges' VI startv e_iconst(0))
     let data=gen_borrowed(array).v
     valid=e_bin('and_' VI valid e_bin('les' VI stopv arr_len(data)))
@@ -150,28 +150,28 @@ gen_scan_loop=(s:ScanWord):>bool=>$unsafe {
         countv=gen_expr(count_node).v
         valid=e_bin('and_' VI valid e_bin('les' VI countv e_bin('sub' VI e_iconst(9223372036854775807) e_bin('sub' VI stopv startv))))
     }
-    iff(valid)
+    iff(valid);
     data=e_addi(data 24)
     let result=vreg(VI)
     let operation=if byte not=? 0 and count_node =? 0 {Op.findbyte} else {Op.scanbytes}
     let needle=if byte not=? 0 {gen_expr(byte).v} else {e_iconst(0)}
     emit(operation VI result e_bin('add' VI data startv) e_bin('sub' VI stopv startv) needle mode);
     if count_node not=? 0 {
-        write_place(local_place(scan_local(count_node) true) T_INT e_bin('add' VI countv result))
-        write_place(local_place(l true) T_INT stopv)
+        write_place(local_place(scan_local(count_node) true) T_INT e_bin('add' VI countv result));
+        write_place(local_place(l true) T_INT stopv);
     }
     else {
-        iff(e_bin('ges' VI result e_iconst(0)))
-        write_place(local_place(l true) T_INT e_bin('add' VI startv result))
-        els()
-        write_place(local_place(l true) T_INT stopv)
-        endc()
+        iff(e_bin('ges' VI result e_iconst(0)));
+        write_place(local_place(l true) T_INT e_bin('add' VI startv result));
+        els();
+        write_place(local_place(l true) T_INT stopv);
+        endc();
     }
-    els()
-    gen_while_scalar(s)
-    endc()
-    endc()
-    stmt_end()
+    els();
+    gen_while_scalar(s);
+    endc();
+    endc();
+    stmt_end();
     true
 }
 # A small, total predicate evaluated over the finite uint8 domain. This is only
