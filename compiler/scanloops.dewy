@@ -1,0 +1,280 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_ELEMALIAS LF_MUTPARAM LF_SHARED LF_SOAELEM globals locals readonly_global target_arm64 target_wasm)
+from p"checked_eval.dewy" import (cx_token)
+from p"expr.jo" import (CV IN ntype)
+from p"fused.jo" import (fused_on fz_note_raw)
+from p"ir.jo" import (VI dbg_on)
+from p"ir_builders.dewy" import (e_addi e_bin e_iconst emit vreg)
+from p"ir_types.dewy" import (Op)
+from p"lower.jo" import (ro_starts rodata)
+from p"lower_group.dewy" import (gen_borrowed gen_expr gen_while_scalar local_place)
+from p"lower_storage.dewy" import (arr_len els endc iff stmt_begin stmt_end write_place)
+from p"types.jo" import (T_INT T_U8 fixed_len prune tkind types)
+
+ScanWord:type=int64<overflow='wrap'>
+scan_local=(n:ScanWord):>ScanWord=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? int32(1) {return -1}
+    let l=ScanWord(nodes.ptr[n].sym)
+    if locals.ptr[l].offset >=? 0 or ScanWord(locals.ptr[l].flags) & (LF_MUTPARAM | LF_CAPTURE | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_SOAELEM | LF_ELEMALIAS) not=? 0 {return -1}
+    l
+}
+scan_word=(n:ScanWord):>bool=>{
+    prune(ntype(n)) =? T_INT
+}
+scan_inc=(s:ScanWord l:ScanWord):>bool=>$unsafe {
+    if nodes.ptr[s].kind not=? 'assign' or scan_local(ScanWord(nodes.ptr[s].a)) not=? l {return false}
+    let rhs=ScanWord(nodes.ptr[s].b)
+    if nodes.ptr[s].op =? int32(48) {
+        return nodes.ptr[rhs].kind =? 'int_lit' and nodes.ptr[rhs].ival =? 1
+    }
+    if nodes.ptr[s].op not=? int32(47) {return false}
+    if nodes.ptr[rhs].kind =? 'conv' and nodes.ptr[rhs].aux =? int32(int64(CV.fixed_store)) {rhs=ScanWord(nodes.ptr[rhs].a)}
+    if nodes.ptr[rhs].kind not=? 'binary' or nodes.ptr[rhs].aux not=? 0 or nodes.ptr[rhs].op not=? int32(58) {return false}
+    let one=ScanWord(nodes.ptr[rhs].b)
+    scan_local(ScanWord(nodes.ptr[rhs].a)) =? l and nodes.ptr[one].kind =? 'int_lit' and nodes.ptr[one].ival =? 1
+}
+scan_value=(n:ScanWord l:ScanWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind =? 'int_lit' {return true}
+    let other=scan_local(n)
+    other >=? 0 and other not=? l
+}
+scan_bound=(n:ScanWord l:ScanWord):>bool=>$unsafe {
+    if not scan_word(n) {return false}
+    if scan_value(n l) {return true}
+    nodes.ptr[n].kind =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.len)) and nkids(n) =? 1 and scan_local(kid(n 0)) >=? 0
+}
+# Return true only after emitting the entire replacement, including its scalar
+# fallback. No expressions with calls, aliasing, narrowing or hidden writes move.
+gen_scan_loop=(s:ScanWord):>bool=>$unsafe {
+    if dbg_on or target_arm64 or target_wasm or nodes.ptr[s].aux not=? 0 {return false}
+    let body=ScanWord(nodes.ptr[s].b)
+    let count_node:ScanWord=0
+    let predicate:ScanWord=0
+    let bound=ScanWord(nodes.ptr[s].a)
+    let increment:ScanWord=0
+    if nkids(body) =? 1 and nodes.ptr[bound].kind =? 'and_' {
+        predicate=ScanWord(nodes.ptr[bound].b)
+        bound=ScanWord(nodes.ptr[bound].a)
+        if nodes.ptr[bound].kind =? 'and_' {
+            predicate=ScanWord(nodes.ptr[s].a)
+            let depth:ScanWord=0
+            loop nodes.ptr[bound].kind =? 'and_' {
+                depth += 1
+                if depth >? 8 {return false}
+                bound=ScanWord(nodes.ptr[bound].a)
+            }
+        }
+        increment=kid(body 0)
+    }
+    else if nkids(body) =? 2 {
+        let branch=kid(body 0)
+        if nodes.ptr[branch].kind not=? 'if_' or nodes.ptr[branch].c not=? 0 {return false}
+        let then_body=ScanWord(nodes.ptr[branch].b)
+        if nkids(then_body) not=? 1 {return false}
+        let update=kid(then_body 0)
+        if nodes.ptr[update].kind not=? 'assign' {return false}
+        count_node=ScanWord(nodes.ptr[update].a)
+        let counter=scan_local(count_node)
+        if counter <? 0 or not scan_word(count_node) or not scan_inc(update counter) {return false}
+        predicate=ScanWord(nodes.ptr[branch].a)
+        increment=kid(body 1)
+    }
+    else {return false}
+    if nodes.ptr[bound].kind not=? 'binary' or nodes.ptr[bound].aux not=? 0 or nodes.ptr[bound].op not=? int32(71) {return false}
+    let index=ScanWord(nodes.ptr[bound].a)
+    let stop=ScanWord(nodes.ptr[bound].b)
+    let l=scan_local(index)
+    if l <? 0 or not scan_word(index) or not scan_bound(stop l) or not scan_inc(increment l) {return false}
+    if count_node not=? 0 and (scan_local(count_node) =? l or scan_local(count_node) =? scan_local(stop)) {return false}
+    let access:ScanWord=0
+    let byte:ScanWord=0
+    let mode=if count_node not=? 0 {2} else {0}
+    let test_node=predicate
+    let negate=nodes.ptr[test_node].kind =? 'not_'
+    if negate {test_node=ScanWord(nodes.ptr[test_node].a)}
+    if nodes.ptr[test_node].kind =? 'binary' and nodes.ptr[test_node].aux =? 0 {
+        let op=cx_token(nodes.ptr[test_node].op)
+        if op =? 'eq' or op =? 'ne' {
+            let a=ScanWord(nodes.ptr[test_node].a)
+            let b=ScanWord(nodes.ptr[test_node].b)
+            if nodes.ptr[a].kind =? 'index' and prune(ntype(a)) =? T_U8 and scan_local(ScanWord(nodes.ptr[a].b)) =? l and scan_value(b l) and prune(ntype(b)) =? T_U8 {
+                access=a
+                byte=b
+                let equal=(op =? 'eq') not=? negate
+                # Search for the first false predicate, or count true ones.
+                if equal not=? (count_node not=? 0) {mode |= 1}
+            }
+        }
+    }
+    let ranges:array<uint8>=[]
+    if access =? 0 {
+        let state:array<int64>=[0 0 bound]
+        let domain=scan_domain(predicate l @state)
+        if domain.length not=? 256 or state[1] =? 0 {return false}
+        access=state[1]
+        let truth=count_node not=? 0
+        ranges=scan_ranges(domain truth)
+        let inverse=scan_ranges(domain not truth)
+        if inverse.length <? ranges.length {
+            ranges=inverse
+            mode |= 1
+        }
+        if ranges.length >? 8 {return false}
+    }
+    if count_node not=? 0 and scan_local(byte) =? scan_local(count_node) {return false}
+    let array=ScanWord(nodes.ptr[access].a)
+    if scan_local(array) <? 0 {return false}
+    let at=prune(ntype(array))
+    let ak=types.ptr[at].kind
+    if ak not=? 'array' and ak not=? 'str_' {return false}
+    if ak not=? 'str_' and prune(ScanWord(types.ptr[at].elem)) not=? T_U8 {return false}
+    if byte =? 0 {
+        let offset=rodata.length
+        ro_starts.push(offset)
+        rodata.push(uint8(ranges.length // 2))
+        loop value in ranges {rodata.push(value)}
+        if fused_on {fz_note_raw(offset 1)}
+        mode |= (offset + 1) << 2
+    }
+    stmt_begin()
+    let startv=gen_expr(index).v
+    let stopv=gen_expr(stop).v
+    # No pointer formation or array access for an empty/reversed span.
+    iff(e_bin('lts' VI startv stopv))
+    let valid=e_bin('ges' VI startv e_iconst(0))
+    let data=gen_borrowed(array).v
+    valid=e_bin('and_' VI valid e_bin('les' VI stopv arr_len(data)))
+    let countv:ScanWord=-1
+    if count_node not=? 0 {
+        countv=gen_expr(count_node).v
+        valid=e_bin('and_' VI valid e_bin('les' VI countv e_bin('sub' VI e_iconst(9223372036854775807) e_bin('sub' VI stopv startv))))
+    }
+    iff(valid)
+    data=e_addi(data 24)
+    let result=vreg(VI)
+    let operation=if byte not=? 0 and count_node =? 0 {Op.findbyte} else {Op.scanbytes}
+    let needle=if byte not=? 0 {gen_expr(byte).v} else {e_iconst(0)}
+    emit(operation VI result e_bin('add' VI data startv) e_bin('sub' VI stopv startv) needle mode);
+    if count_node not=? 0 {
+        write_place(local_place(scan_local(count_node) true) T_INT e_bin('add' VI countv result))
+        write_place(local_place(l true) T_INT stopv)
+    }
+    else {
+        iff(e_bin('ges' VI result e_iconst(0)))
+        write_place(local_place(l true) T_INT e_bin('add' VI startv result))
+        els()
+        write_place(local_place(l true) T_INT stopv)
+        endc()
+    }
+    els()
+    gen_while_scalar(s)
+    endc()
+    endc()
+    stmt_end()
+    true
+}
+# A small, total predicate evaluated over the finite uint8 domain. This is only
+# demanded after the induction/body shape matches. O(256 * E), E <= 24, with
+# temporary indexed vectors. Tables must be literal, immutable, unexposed and
+# cover every byte. No general constant evaluator (or user code) runs here.
+scan_literal=(n0:ScanWord):>ScanWord=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.int_)) {
+        let t=prune(ntype(n))
+        if types.ptr[t].kind not=? 'int_' or ScanWord(types.ptr[t].bits) <? 8 or (ScanWord(types.ptr[t].bits) =? 8 and types.ptr[t].sign) {return -1}
+        n=ScanWord(nodes.ptr[n].a)
+    }
+    if nodes.ptr[n].kind =? 'int_lit' and nodes.ptr[n].ival >=? 0 and nodes.ptr[n].ival <=? 255 {return nodes.ptr[n].ival}
+    -1
+}
+scan_table=(n:ScanWord):>ScanWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'ident' or (nodes.ptr[n].aux not=? int32(2) and nodes.ptr[n].aux not=? int32(6)) {return 0}
+    let t=prune(ntype(n))
+    if types.ptr[t].kind not=? 'fixed' or fixed_len(t) not=? 256 or prune(ScanWord(types.ptr[t].elem)) not=? T_U8 {return 0}
+    let g=ScanWord(nodes.ptr[n].sym)
+    if not globals.ptr[g].is_const and not readonly_global(g) {return 0}
+    if globals.ptr[g].fn_written or globals.ptr[g].init_written or globals.ptr[g].exposed {return 0}
+    let init=ScanWord(globals.ptr[g].init)
+    if init =? 0 {init=ScanWord(nodes.ptr[ScanWord(globals.ptr[g].decl)].b)}
+    if nodes.ptr[init].kind not=? 'array' or nkids(init) not=? 256 {return 0}
+    init
+}
+scan_domain=(n:ScanWord l:ScanWord @state:array<int64>):>array<int64>=>$unsafe {
+    if n =? state[2] {return fill(1 256)}
+    state[0] += 1
+    if state[0] >? 24 {return []}
+    let literal=scan_literal(n)
+    if literal >=? 0 {return fill(literal 256)}
+    let k=nodes.ptr[n].kind
+    if k =? 'index' {
+        let base=ScanWord(nodes.ptr[n].a)
+        let ix=ScanWord(nodes.ptr[n].b)
+        if scan_local(ix) =? l and prune(ntype(n)) =? T_U8 and scan_local(base) >=? 0 and (tkind(ntype(base)) =? 'array' or tkind(ntype(base)) =? 'str_') {
+            if state[1] not=? 0 and scan_local(ScanWord(nodes.ptr[state[1]].a)) not=? scan_local(base) {return []}
+            state[1]=n
+            let out:array<int64>=[]
+            loop v in [0..256) {out.push(v)}
+            return out
+        }
+        let table=scan_table(base)
+        if table =? 0 {return []}
+        let values=scan_domain(ix l @state)
+        if values.length not=? 256 {return []}
+        let out:array<int64>=[]
+        loop v in values {
+            if v <? 0 or v >? 255 {return []}
+            let value=scan_literal(kid(table v))
+            if value <? 0 {return []}
+            out.push(value)
+        }
+        return out
+    }
+    if k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.int_)) {
+        let a=ScanWord(nodes.ptr[n].a)
+        # Only widening the scanned byte; narrowing predicates have distinct semantics.
+        if prune(ntype(a)) =? T_U8 and (prune(ntype(n)) =? T_INT or prune(ntype(n)) =? T_U8) {return scan_domain(a l @state)}
+        return []
+    }
+    if k =? 'not_' {
+        let out=scan_domain(ScanWord(nodes.ptr[n].a) l @state)
+        loop j in [0..out.length) {out[j]=if out[j] =? 0 {1} else {0}}
+        return out
+    }
+    if k not=? 'binary' and k not=? 'and_' and k not=? 'or_' {return []}
+    if k =? 'binary' and nodes.ptr[n].aux not=? 0 {return []}
+    let op=cx_token(nodes.ptr[n].op)
+    if k =? 'binary' and op not=? 'amp' and op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return []}
+    let left=scan_domain(ScanWord(nodes.ptr[n].a) l @state)
+    if left.length not=? 256 {return []}
+    let right=scan_domain(ScanWord(nodes.ptr[n].b) l @state)
+    if right.length not=? 256 {return []}
+    loop v in [0..256) {
+        let a=left[v]
+        let b=right[v]
+        if k =? 'and_' {left[v]=if a not=? 0 and b not=? 0 {1} else {0}}
+        else if k =? 'or_' {left[v]=if a not=? 0 or b not=? 0 {1} else {0}}
+        else if op =? 'amp' {left[v]=a & b}
+        else {
+            let truth=if op =? 'eq' {a =? b} else if op =? 'ne' {a not=? b} else if op =? 'lt' {a <? b} else if op =? 'le' {a <=? b} else if op =? 'gt' {a >? b} else {a >=? b}
+            left[v]=if truth {1} else {0}
+        }
+    }
+    left
+}
+scan_ranges=(domain:array<int64> truth:bool):>array<uint8>=>{
+    let ranges:array<uint8>=[]
+    let v:ScanWord=0
+    loop v <? 256 {
+        if (domain[v] not=? 0) not=? truth {
+            v += 1
+            continue
+        }
+        let lo=v
+        loop v <? 255 and (domain[v + 1] not=? 0) =? truth {v += 1}
+        ranges.push(uint8(lo))
+        ranges.push(uint8(v))
+        v += 1
+    }
+    ranges
+}
