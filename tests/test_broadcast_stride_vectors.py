@@ -53,6 +53,8 @@ main=(args:array<string>)=>{
             body = next(b for b in re.split(r'^fn ', built.stdout, flags=re.M) if b.startswith('f_f_'))
             assert re.search(r' = vbin .*c=5 imm=3 ty=5', body), body
             assert re.search(r' = vbin .*c=5 imm=3 ty=4', body), body
+            # (the row loops' stride versions too, not only the flat same-shape loop)
+            assert len(re.findall(r' = vbin .*c=5 imm=3 ty=5', body)) >= 4, body
         binaries.append(binary)
     for n in (0, 1, 2, 3, 4, 7, 8, 9, 15, 17, 33):
         for mode in range(5):  # unit, each single splat, and two splats (fallback)

@@ -598,9 +598,12 @@ exact_map_for = (s: int) -> bool:
         if store != 0:
             if nodes[n].kind != .assign: return false
             target = int(nodes[n].a); value = exl_strip(int(nodes[n].b))
-            if nodes[target].kind != .ident or nodes[target].aux != i32(int(SK.local)) or nodes[value].kind != .binary or nodes[value].op != i32(int(Tok.plus)): return false
-            if not fact_progress_same(target, int(nodes[value].a)): return false
-            step = int(nodes[value].b)
+            if nodes[target].kind != .ident or nodes[target].aux != i32(int(SK.local)): return false
+            # A generated operand cursor: q = __bcast_index(1, q, stride) is q + stride.
+            if nodes[value].kind != .call or not has_flag(value, NF_PRIVATE_COORD) or nkids(value) != 3: return false
+            scale_known, scale = integer_constant(kid(value, 0))
+            if not scale_known or scale != 1 or not fact_progress_same(target, kid(value, 1)): return false
+            step = kid(value, 2)
             if nodes[step].kind != .ident or exact_representation(ntype(step)) != T_INT: return false
             found = false
             loop j in [0..exm_indices.len()):
