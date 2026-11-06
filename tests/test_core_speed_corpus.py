@@ -37,7 +37,7 @@ def test_root_files_follow_relative_imports_only(tmp_path):
 def test_corpora_membership(tmp_path):
     found = corpus.corpora(tmp_path)
     assert list(found) == ['compiler', 'ladder+examples', 'game', 'tier-4']
-    assert corpus.ROOT / 'compiler/zip.dewy' in found['compiler']
+    assert corpus.ROOT / 'compiler/new_project.dewy' in found['compiler']
     assert all(path.suffix == '.dewy' for paths in found.values() for path in paths)
     mixed = found['ladder+examples']
     assert corpus.LADDER / '01_word_count/core.dewy' in mixed

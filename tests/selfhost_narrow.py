@@ -4,10 +4,12 @@ import subprocess
 from tests.support import ROOT
 
 
-def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run_in=None, status=0, observe=None):
-    """Both builds' stdout, compared and returned. stems: real twinned modules; doubles: {file: text},
-    Jo modules both builds use, or a `.dewy`/`.jo` pair; run_in(): a fresh working directory for each
-    run; observe(directory): what else the two runs must agree on."""
+def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run_in=None, observe=None,
+                   invocations=(((), 0),)):
+    """The stdout of each invocation, compared across both builds. stems: real twinned modules;
+    doubles: {file: text}, Jo modules both builds use, or a `.dewy`/`.jo` pair; invocations:
+    (arguments, status) runs, each in run_in()'s working directory; observe(directory): what else
+    those runs must agree on. A single invocation's stdout comes back alone."""
     outputs = []
     for extension in ('dewy', 'jo'):
         directory = tmp_path / extension
@@ -23,9 +25,13 @@ def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run
         built = subprocess.run([compiler, 'build', source, '-o', binary, *(['--release'] if release else [])],
                                capture_output=True, text=True, timeout=90)
         assert built.returncode == 0, built.stdout + built.stderr
-        where = run_in() if run_in else None
-        ran = subprocess.run([binary], capture_output=True, timeout=60, cwd=where)
-        assert ran.returncode == status, ran.stdout[-3000:] + ran.stderr
-        outputs.append((ran.stdout, ran.stderr, observe(where) if observe else None))
+        runs = []
+        for arguments, status in invocations:
+            where = run_in() if run_in else None
+            ran = subprocess.run([binary, *arguments], capture_output=True, timeout=60, cwd=where)
+            assert ran.returncode == status, (arguments, ran.stdout[-3000:], ran.stderr)
+            runs.append((ran.stdout, ran.stderr, observe(where) if observe else None))
+        outputs.append(runs)
     assert outputs[0] == outputs[1]
-    return outputs[0][0]
+    stdout = [run[0] for run in outputs[0]]
+    return stdout[0] if len(stdout) == 1 else stdout

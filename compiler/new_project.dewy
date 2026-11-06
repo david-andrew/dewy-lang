@@ -1,0 +1,63 @@
+$runtime_checks
+# Small Dewy starting points, using the same native/web runtime as ordinary builds.
+from p"@lib/core/os.jo" import (eprint exit file_exists make_dirs read_file write_file)
+from p"@lib/core/str.jo" import (byte_str is_alnum lower replace starts_with)
+
+new_usage=():>void=>{
+    eprint("usage: dewy-core new <directory> [game|arcade|platformer|3d|story|online|program] (game is the default)")
+    exit(2)
+}
+new_project_name=(dir:string fallback:string):>string=>{
+    # Keep this usable by the C seed, which does not auto-load std/path.jo.
+    let path=replace(dir "\\" "/")
+    let stop=(path as array<uint8>).length
+    loop stop >? 0 and (path as array<uint8>)[stop - 1] =? b'/' {stop-=1}
+    path=path.byte_slice(0 stop)
+    let slash=stop - 1
+    loop slash >=? 0 and (path as array<uint8>)[slash] not=? b'/' {slash-=1}
+    path=path.byte_slice(slash + 1 stop)
+    let name=""
+    loop c in (lower(path) as array<uint8>) {
+        if is_alnum(c) or c =? b'_' {name="{name}{byte_str(int64(c))}"}
+        else if (name as array<uint8>).length >? 0 and (name as array<uint8>)[(name as array<uint8>).length - 1] not=? b'-' {name="{name}-"}
+    }
+    let kept=(name as array<uint8>).length
+    loop kept >? 0 and (name as array<uint8>)[kept - 1] =? b'-' {kept-=1}
+    name=name.byte_slice(0 kept)
+    if kept =? 0 {name=fallback}
+    "{name}.dewy"
+}
+new_project=(lib:string a:array<string>):>void=>{
+    if a.length <? 3 or a.length >? 4 or starts_with(a[2] "-") {new_usage()}
+    let kind="game"
+    if a.length =? 4 {kind=a[3]}
+    if kind not=? "game" and kind not=? "arcade" and kind not=? "platformer" and kind not=? "3d" and kind not=? "story" and kind not=? "online" and kind not=? "program" {
+        eprint("dewy-core: no template '{kind}'")
+        new_usage()
+    }
+    let dir=a[2]
+    if file_exists(dir) {
+        eprint("dewy-core: {dir} already exists; choose a new directory")
+        exit(1)
+    }
+    let template="{lib}/new/dewy/{kind}.dewy"
+    let src=read_file(template) ?? ""
+    if (src as array<uint8>).length =? 0 {
+        eprint("dewy-core: cannot read {template}")
+        exit(1)
+    }
+    let entry=if kind =? "online" or kind =? "arcade" or kind =? "story" {new_project_name(dir kind)} else {"main.dewy"}
+    let readme="# Dewy {kind}\n\nFrom this directory:\n\n```sh\ndewy-core {entry}\ndewy-core check {entry}\ndewy-core watch {entry}\ndewy-core build {entry} -o main\n```\n"
+    if kind not=? "program" {readme="{readme}\nFor a self-contained web build:\n\n```sh\ndewy-core build {entry} --target wasm32 -o main\n```\n\nOpen main.html in a browser. In watch mode, saving a function change updates the\nrunning game while keeping its state. Compiler errors leave the last working\nversion running. Use --release for an optimizing standalone build.\n"}
+    if kind =? "arcade" {readme="{readme}\nCollect gold and avoid the rocks with arrows/WASD or a gamepad. Escape/Start\npauses, as does leaving the window. Menus accept mouse, keyboard and gamepad.\nThe high score is saved locally. Keep {entry}'s filename the same between builds;\nit names the saved data. Use a distinct source filename before publishing.\nRun `dewy-core test {entry}` for the two simulation tests. Its Game value includes\nits random generator, so saved states replay the same input identically.\n"}
+    if kind =? "story" {readme="{readme}\nSpace/Enter/click reveals the current line, then advances. Choose by clicking\nor pressing its number. Escape exits natively. The reading place, background\nand characters are saved on exit; reopening shows the same line or choice.\nEdit SCRIPT to write the story, or load it with str_from_bytes(embed(\"story.txt\")).\nRun `dewy-core test {entry}` for the two story tests. Keep the source filename\nstable across native/web builds: it names saved data. Choose a distinct filename\nbefore publishing. Character circles and scene colors can be replaced by images.\n"}
+    if kind =? "platformer" {readme="{readme}\nMove with arrows/A/D or a gamepad. Jump with Space/W/up or gamepad A; hold down\nto drop through a platform. Collect every coin. Edit LEVEL to change the map,\nRUN/JUMP/GRAVITY to tune movement, and tick to change the player rules.\nThe tile art and sounds are generated in the source; no assets are required.\nRun `dewy-core test main.dewy` for the included movement and coin tests.\n"}
+    if kind =? "3d" {readme="{readme}\nClick to capture the mouse; WASD walks, Space jumps, and left click shoots.\nEscape releases the mouse. Gamepads use the sticks, A, and RB/right trigger.\nFind every glowing orb; shots push crates and are blocked by walls. After winning,\nR or gamepad Start resets the yard. Edit start to place crates and orbs.\nRun `dewy-core test main.dewy` to check shot selection without opening a window.\n"}
+    if kind =? "online" {readme="{readme}\n## Play together\n\nPractice plays locally. Invite a friend shares a code; the friend pastes it into\nJoin a friend and sends the displayed reply back. Set WEB_PAGE in {entry} to\nyour hosted web build so native invitations can share a browser link.\n\nFor short room codes with no reply to copy, configure MATCH_SERVER in the source\nor run `DEWY_MATCH_SERVER=ws://your-server:7700 ./main`. Browser pages accept\n`?server=ws://your-server:7700`; HTTPS pages need a wss:// service. The Dewy\nrepository includes tools/compiler/rendezvous.jo and setup instructions in\nexamples/README.md. No public server is configured by default.\n\nKeep {entry}'s filename the same in native and web builds: it is PROGRAM_NAME,\nwhich scopes saved data and room names. Choose a distinct name before publishing.\nThe tick function consumes ordinary Game and Pad values; rollback replays it,\nso keep clocks, live input and unseeded randomness outside it.\n"}
+    make_dirs(dir);
+    if not write_file("{dir}/{entry}" src) or not write_file("{dir}/README.md" readme) or not write_file("{dir}/.gitignore" "/main\n/main.exe\n/main.html\n/main.zip\n") {
+        eprint("dewy-core: cannot write the project in {dir}")
+        exit(1)
+    }
+    printl("Created {dir}/{entry}. See {dir}/README.md to run, check and build it.")
+}
