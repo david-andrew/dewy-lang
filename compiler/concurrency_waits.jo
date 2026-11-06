@@ -69,7 +69,7 @@ concurrency_blocks_node = (n: int, seen: mut {int: bool}, sharing: bool = false)
     if k == .call:
         if nodes[n].aux == 0 and concurrency_blocks(int(nodes[n].sym), seen, sharing): return true
         # (a callback parameter's callers check that what they give does not wait: parsafe)
-        if (nodes[n].aux == 1 or nodes[n].aux == 4) and not parsafe_vouched(int(nodes[n].a)):
+        if (nodes[n].aux == 1 or nodes[n].aux == 4) and not parsafe_vouched_nonblocking(int(nodes[n].a)):
             contract = callable_contract(ntype(int(nodes[n].a)))
             if contract == 0:
                 contract = effect_source_row(int(nodes[n].a))

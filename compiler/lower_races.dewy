@@ -7,7 +7,7 @@ from p"util.jo" import (fatal files name_of pos_file)
 from p"lower.jo" import (race_done)
 from p"types.jo" import (tkind)
 from p"lower_helpers.dewy" import (value_helper_calls)
-from p"concurrency_parsafe.dewy" import (parsafe_vouched)
+from p"concurrency_parsafe.dewy" import (parsafe_demand_task parsafe_vouched)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LRWord:type=int64<overflow='wrap'>
 race_check=(callee:LRWord args:array<int64> pos:LRWord):>void=>$unsafe {
@@ -99,9 +99,9 @@ race_scan=(n:LRWord f:LRWord who:string captures:bool):>void=>$unsafe {
         let aux:LRWord=LRWord(nodes.ptr[n].aux)
         if aux =? 0 and nodes.ptr[n].sym >? 0 {race_named(LRWord(nodes.ptr[n].sym) who);}
         # (calling a function value: which one, the compiler cannot tell; the library's are its own,
-        # and a callback parameter's are its function's callers' to check)
-        else if aux =? 1 and not in_lib(nodes.ptr[n].pos) and not parsafe_vouched(LRWord(nodes.ptr[n].a)) {
-            fatal(nodes.ptr[n].pos "{who} runs this code on many threads at once, so the compiler checks it for data races, which it cannot do through a call of a function value: call a function by name");
+        # and a callback parameter's are its function's callers' to check, which a task's call demands)
+        else if aux =? 1 and not in_lib(nodes.ptr[n].pos) and not parsafe_vouched(LRWord(nodes.ptr[n].a)) and not (who.startswith("spawn") and parsafe_demand_task(LRWord(nodes.ptr[n].a) n)) {
+            fatal(nodes.ptr[n].pos "{who} runs this code on many threads at once, so the compiler checks it for data races, which it cannot do through a call of a function value it cannot trace to its caller: call a function by name, or take the function as a parameter, so each call's argument is checked");
         }
     }
     else if k =? 'for_' and has_flag(n NF_MUT) {race_target(LRWord(nodes.ptr[n].a) f who captures nodes.ptr[n].pos);}

@@ -65,6 +65,9 @@ concurrency_block_memo: {int: bool}
 # (parsafe_req, by instance and parameter, with the site that made it). Each call of it then
 # checks its argument i as that parallel call would (concurrency_callback, race_arg), or, when
 # the argument is its own caller's parameter, passes the requirement up to that caller.
+# A task's call through a callback parameter (race_scan) makes the same demand in the waiting
+# lane: no shared writes, task Send/Sync and globals, but the callback may wait. A parallel
+# demand on the same parameter replaces it, once.
 # Demand-driven: nothing runs unless a program's parallel call is given a callback parameter;
 # then one walk indexes the program's direct calls and function values (O(nodes)), and a
 # worklist visits each (instance, parameter) once.
@@ -72,6 +75,7 @@ struct ParSafeVia:
     site: int       # the parallel call, or the call passing the parameter on
     callee: int     # the function it is passed on to (0: site is the parallel call)
     param: int      # that function's parameter
+    waiting: bool = false   # the demand is a task's, not a parallel body's: the callback may wait
 
 parsafe_req: {int: ParSafeVia}
 parsafe_fns: {int: bool}        # instances with some parallel-safe parameter

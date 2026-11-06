@@ -13,7 +13,7 @@ from p"isolation_ops.dewy" import (isolation_children)
 from p"expr.jo" import (ntype)
 from p"ownership_hooks.dewy" import (ownership_literal_print)
 from p"lower_helpers.dewy" import (value_helper_calls)
-from p"concurrency_parsafe.dewy" import (parsafe_vouched)
+from p"concurrency_parsafe.dewy" import (parsafe_vouched_nonblocking)
 # Demanded waiting-effect queries; shared state has one owner in concurrency.jo.
 WaitingWord:type=int64<overflow='wrap'>
 concurrency_fn_blocks=(f:WaitingWord):>bool=>$unsafe {
@@ -69,7 +69,7 @@ concurrency_blocks_node=(n:WaitingWord @seen:dict<int64 bool> sharing:bool=false
     if k =? 'call' {
         if nodes.ptr[n].aux =? 0 and concurrency_blocks(WaitingWord(nodes.ptr[n].sym) @seen sharing) {return true}
         # (a callback parameter's callers check that what they give does not wait: parsafe)
-        if (nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4) and not parsafe_vouched(WaitingWord(nodes.ptr[n].a)) {
+        if (nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4) and not parsafe_vouched_nonblocking(WaitingWord(nodes.ptr[n].a)) {
             let contract=callable_contract(ntype(WaitingWord(nodes.ptr[n].a)))
             if contract =? 0 {
                 contract=effect_source_row(WaitingWord(nodes.ptr[n].a))

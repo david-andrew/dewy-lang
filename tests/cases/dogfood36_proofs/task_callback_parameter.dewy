@@ -1,0 +1,29 @@
+# modes: native native-release
+# A task's call through a callback parameter checks what each caller gives; it may wait.
+apply = (f:<(x:int):>int> x:int):>int => f(x)
+twice = (f:<(x:int):>int> x:int):>int => apply(@f apply(@f x))
+consume = (f:<(x:int):>int> xs:array<int>):>int => {
+    let total = 0
+    loop x in xs total += f(x)
+    total
+}
+inc = (x:int):>int => x + 1
+main = () => {
+    let c = channel<int>(4)
+    let k = 3
+    concurrent {
+        let a = spawn twice((v) => v + 1 1)
+        let b = spawn consume(@inc [1 2])
+        let d = spawn consume((v) => v + k [1 2])
+        spawn {
+            let sent = c.send(apply((v) => v * 2 21))
+            if sent is? Unsent<int> printl"unsent"
+            c.close
+        }
+        let e = spawn apply((v) => { let got = c.receive; if got is? int got + v else v } 7)
+    }
+    printl(a or_throw)
+    printl(b or_throw)
+    printl(d or_throw)
+    printl(e or_throw)
+}

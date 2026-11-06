@@ -95,9 +95,9 @@ race_scan = (n: int, f: int, who: str, captures: bool):
         aux = int(nodes[n].aux)
         if aux == 0 and nodes[n].sym > 0: race_named(int(nodes[n].sym), who)
         # (calling a function value: which one, the compiler cannot tell; the library's are its own,
-        # and a callback parameter's are its function's callers' to check)
-        else if aux == 1 and not in_lib(nodes[n].pos) and not concurrency.parsafe_vouched(int(nodes[n].a)):
-            fatal(nodes[n].pos, "{who} runs this code on many threads at once, so the compiler checks it for data races, which it cannot do through a call of a function value: call a function by name")
+        # and a callback parameter's are its function's callers' to check, which a task's call demands)
+        else if aux == 1 and not in_lib(nodes[n].pos) and not concurrency.parsafe_vouched(int(nodes[n].a)) and not (starts_with(who, "spawn") and concurrency.parsafe_demand_task(int(nodes[n].a), n)):
+            fatal(nodes[n].pos, "{who} runs this code on many threads at once, so the compiler checks it for data races, which it cannot do through a call of a function value it cannot trace to its caller: call a function by name, or take the function as a parameter, so each call's argument is checked")
     else if k == .for_ and has_flag(n, NF_MUT): race_target(int(nodes[n].a), f, who, captures, nodes[n].pos)
     # (a part of "...{x}...": formatted by a __fmt function, which may be the program's)
     else if k == .pair and nodes[n].sym > 0: race_named(int(nodes[n].sym), who)

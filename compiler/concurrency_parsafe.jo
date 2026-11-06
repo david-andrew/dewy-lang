@@ -37,7 +37,7 @@ parsafe_param = (a0: int) -> (int, int):
 
 parsafe_require = (g: int, i: int, via: ParSafeVia):
     k = parsafe_key(g, i)
-    if parsafe_req.has(k): return
+    if parsafe_req.has(k) and (via.waiting or not parsafe_req[k].waiting): return
     parsafe_req[k] = via
     parsafe_fns[g] = true
     parsafe_work.push(k)
@@ -49,6 +49,25 @@ parsafe_vouched = (a: int) -> bool:
     if parsafe_fns.len() == 0: return false
     g, i = parsafe_param(a)
     g > 0 and parsafe_req.has(parsafe_key(g, i))
+
+
+# Whether every call of the callback's function checks that it does not wait: a task's demand
+# (race_scan) leaves waiting allowed, so concurrency_blocks still treats that call as unknown.
+parsafe_vouched_nonblocking = (a: int) -> bool:
+    if parsafe_fns.len() == 0: return false
+    g, i = parsafe_param(a)
+    if g <= 0: return false
+    k = parsafe_key(g, i)
+    parsafe_req.has(k) and not parsafe_req[k].waiting
+
+
+# A task calls callback a at call n: when a is its function's parameter, each call of that
+# function now checks what it gives. O(captures of a) once per (function, parameter).
+parsafe_demand_task = (a: int, n: int) -> bool:
+    g, i = parsafe_param(a)
+    if g <= 0: return false
+    parsafe_require(g, i, ParSafeVia(n, 0, 0, true))
+    true
 
 
 parsafe_vouched_local = (l: int) -> bool:
@@ -124,7 +143,8 @@ parsafe_notes = (g0: int, i0: int):
     loop true:
         via = parsafe_req[parsafe_key(g, i)]
         if via.callee == 0:
-            err_notes.push((nodes[via.site].pos, "note: {parsafe_fn_name(g)} runs '{parsafe_param_name(g, i)}' on many threads at once here, through {parsafe_parallel_name(via.site)}"))
+            if via.waiting: err_notes.push((nodes[via.site].pos, "note: {parsafe_fn_name(g)} calls '{parsafe_param_name(g, i)}' here, in code `spawn` runs on another thread"))
+            else: err_notes.push((nodes[via.site].pos, "note: {parsafe_fn_name(g)} runs '{parsafe_param_name(g, i)}' on many threads at once here, through {parsafe_parallel_name(via.site)}"))
             return
         err_notes.push((nodes[via.site].pos, "note: {parsafe_fn_name(g)} passes '{parsafe_param_name(g, i)}' on to {parsafe_fn_name(int(via.callee))}'s parameter '{parsafe_param_name(int(via.callee), int(via.param))}' here"))
         g = int(via.callee)
@@ -135,18 +155,23 @@ parsafe_notes = (g0: int, i0: int):
 parsafe_arg = (c: int, g: int, i: int):
     a = kid(c, i)
     h, j = parsafe_param(a)
+    waiting = parsafe_req[parsafe_key(g, i)].waiting
     if h > 0:
-        parsafe_require(h, j, ParSafeVia(c, g, i))
+        parsafe_require(h, j, ParSafeVia(c, g, i, waiting))
         return
-    err_notes.push((nodes[a].pos, "note: this is given to {parsafe_fn_name(g)}'s parameter '{parsafe_param_name(g, i)}', which must be parallel-safe"))
+    must = if waiting: "safe to run in a task" else: "parallel-safe"
+    err_notes.push((nodes[a].pos, "note: this is given to {parsafe_fn_name(g)}'s parameter '{parsafe_param_name(g, i)}', which must be {must}"))
     parsafe_notes(g, i)
-    who = "{parsafe_fn_name(g)} (through its parameter '{parsafe_param_name(g, i)}')"
+    who = if waiting: "spawn (through {parsafe_fn_name(g)}'s parameter '{parsafe_param_name(g, i)}')" else: "{parsafe_fn_name(g)} (through its parameter '{parsafe_param_name(g, i)}')"
     b = a
     loop nodes[b].kind == .conv: b = int(nodes[b].a)
     k = nodes[b].kind
     if k != .lambda and k != .fnref and k != .partial: fatal(nodes[a].pos, "{who} runs this function on many threads at once, so the compiler checks it for data races, which it can only do for a function it can see: pass a function by name or a lambda")
-    concurrency_callback(a)
+    concurrency_callback(a, waiting)
     race_arg(a, who)
+    if waiting:
+        visited: {int: bool} = {}
+        concurrency_task_globals(int(nodes[b].sym), visited)
     err_notes = []
 
 

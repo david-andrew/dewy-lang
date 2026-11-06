@@ -1,0 +1,11 @@
+# modes: native native-release
+counter:int = 0
+apply = (f:<(x:int):>int> x:int):>int => f(x)
+reads = (x:int):>int => x + counter
+main = () => {
+    counter = 1
+    concurrent {
+        spawn { printl(apply(@reads 1)) }
+        counter = 3
+    }
+}

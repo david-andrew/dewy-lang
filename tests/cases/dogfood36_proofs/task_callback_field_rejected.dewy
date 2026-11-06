@@ -1,0 +1,9 @@
+# modes: native native-release
+H:type = [f:<(x:int):>int>]
+run = (h:H x:int):>int => h.f(x)
+main = () => {
+    concurrent {
+        let a = spawn run(H[(v) => v] 1)
+    }
+    printl(a or_throw)
+}

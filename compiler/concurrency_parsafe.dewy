@@ -6,7 +6,7 @@ from p"lower_races.dewy" import (in_lib race_arg)
 from p"ast.jo" import (kid kid2 kids nkids nkids2 nodes parsafe_tags)
 from p"expr.jo" import (ntype)
 from p"types.jo" import (tkind)
-from p"concurrency_tasks.dewy" import (concurrency_callback)
+from p"concurrency_tasks.dewy" import (concurrency_callback concurrency_task_globals)
 # Demanded parallel callback contracts; shared state has one owner in concurrency.jo.
 ParSafeWord:type=int64<overflow='wrap'>
 parsafe_key=(f:ParSafeWord i:ParSafeWord):>int64=>$unsafe {
@@ -36,7 +36,7 @@ parsafe_param=(a0:ParSafeWord):>[int64 int64]=>$unsafe {
 }
 parsafe_require=(g:ParSafeWord i:ParSafeWord via:ParSafeVia):>void=>$unsafe {
     let k=parsafe_key(g i)
-    if parsafe_req.has(k) {return}
+    if parsafe_req.has(k) and (via.waiting or not parsafe_req[k].waiting) {return}
     parsafe_req[k] = via;
     parsafe_fns[g] = true;
     parsafe_work.push(k);
@@ -47,6 +47,23 @@ parsafe_vouched=(a:ParSafeWord):>bool=>$unsafe {
     if parsafe_fns.length =? 0 {return false}
     let [g i]=parsafe_param(a)
     return g >? 0 and parsafe_req.has(parsafe_key(g i))
+}
+# Whether every call of the callback's function checks that it does not wait: a task's demand
+# (race_scan) leaves waiting allowed, so concurrency_blocks still treats that call as unknown.
+parsafe_vouched_nonblocking=(a:ParSafeWord):>bool=>$unsafe {
+    if parsafe_fns.length =? 0 {return false}
+    let [g i]=parsafe_param(a)
+    if g <=? 0 {return false}
+    let k=parsafe_key(g i)
+    return parsafe_req.has(k) and not parsafe_req[k].waiting
+}
+# A task calls callback a at call n: when a is its function's parameter, each call of that
+# function now checks what it gives. O(captures of a) once per (function, parameter).
+parsafe_demand_task=(a:ParSafeWord n:ParSafeWord):>bool=>$unsafe {
+    let [g i]=parsafe_param(a)
+    if g <=? 0 {return false}
+    parsafe_require(g i ParSafeVia[n 0 0 true]);
+    return true
 }
 parsafe_vouched_local=(l:ParSafeWord):>bool=>$unsafe {
     if parsafe_fns.length =? 0 {return false}
@@ -122,7 +139,8 @@ parsafe_notes=(g0:ParSafeWord i0:ParSafeWord):>void=>$unsafe {
     loop true {
         let via=parsafe_req[parsafe_key(g i)]
         if via.callee =? 0 {
-            err_notes.push([nodes.ptr[via.site].pos "note: {parsafe_fn_name(g)} runs '{parsafe_param_name(g i)}' on many threads at once here, through {parsafe_parallel_name(via.site)}"]);
+            if via.waiting {err_notes.push([nodes.ptr[via.site].pos "note: {parsafe_fn_name(g)} calls '{parsafe_param_name(g i)}' here, in code `spawn` runs on another thread"]);}
+            else {err_notes.push([nodes.ptr[via.site].pos "note: {parsafe_fn_name(g)} runs '{parsafe_param_name(g i)}' on many threads at once here, through {parsafe_parallel_name(via.site)}"]);}
             return
         }
         err_notes.push([nodes.ptr[via.site].pos "note: {parsafe_fn_name(g)} passes '{parsafe_param_name(g i)}' on to {parsafe_fn_name(ParSafeWord(via.callee))}'s parameter '{parsafe_param_name(ParSafeWord(via.callee) ParSafeWord(via.param))}' here"]);
@@ -134,19 +152,25 @@ parsafe_notes=(g0:ParSafeWord i0:ParSafeWord):>void=>$unsafe {
 parsafe_arg=(c:ParSafeWord g:ParSafeWord i:ParSafeWord):>void=>$unsafe {
     let a=kid(c i)
     let [h j]=parsafe_param(a)
+    let waiting=parsafe_req[parsafe_key(g i)].waiting
     if h >? 0 {
-        parsafe_require(h j ParSafeVia[c g i]);
+        parsafe_require(h j ParSafeVia[c g i waiting]);
         return
     }
-    err_notes.push([nodes.ptr[a].pos "note: this is given to {parsafe_fn_name(g)}'s parameter '{parsafe_param_name(g i)}', which must be parallel-safe"]);
+    let must=if waiting "safe to run in a task" else "parallel-safe"
+    err_notes.push([nodes.ptr[a].pos "note: this is given to {parsafe_fn_name(g)}'s parameter '{parsafe_param_name(g i)}', which must be {must}"]);
     parsafe_notes(g i);
-    let who="{parsafe_fn_name(g)} (through its parameter '{parsafe_param_name(g i)}')"
+    let who=if waiting "spawn (through {parsafe_fn_name(g)}'s parameter '{parsafe_param_name(g i)}')" else "{parsafe_fn_name(g)} (through its parameter '{parsafe_param_name(g i)}')"
     let b=a
     loop nodes.ptr[b].kind =? 'conv' {b=ParSafeWord(nodes.ptr[b].a)}
     let k=nodes.ptr[b].kind
     if k not=? 'lambda' and k not=? 'fnref' and k not=? 'partial' {fatal(nodes.ptr[a].pos "{who} runs this function on many threads at once, so the compiler checks it for data races, which it can only do for a function it can see: pass a function by name or a lambda");}
-    concurrency_callback(a);
+    concurrency_callback(a waiting);
     race_arg(a who);
+    if waiting {
+        let visited:dict<int64 bool>=dict<int64 bool>()
+        concurrency_task_globals(ParSafeWord(nodes.ptr[b].sym) @visited);
+    }
     err_notes=[]
 }
 parsafe_finalize=():>void=>$unsafe {
