@@ -1,0 +1,10 @@
+# Near miss: the queue a `.split` consumed cannot be used again, with or without `()`.
+main = () => {
+    let q = spsc<int64 4>
+    let [a b] = q.split
+    let [c d] = q.split
+    a.send(1) or_throw
+    c.send(1) or_throw
+    printl(b.receive or_throw)
+    printl(d.receive or_throw)
+}

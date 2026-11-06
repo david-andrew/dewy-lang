@@ -1,0 +1,12 @@
+# A zero-argument type call drops its parentheses, as a queue's split shows.
+Message:type = [id:int64 body:string]
+main = () => {
+    let [tx rx] = spsc<Message 64>.split
+    tx.send(Message[1 "hi"]) or_throw
+    let m = rx.receive or_throw
+    printl"{m.body}"
+    let q = spsc<int64 4>
+    let [a b] = q.split
+    a.send(5) or_throw
+    printl(b.receive or_throw)
+}

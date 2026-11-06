@@ -3328,7 +3328,7 @@ main = () => {
 }
 ```
 
-`spsc<T N>()` makes a queue for exactly one sender and one receiver, its capacity
+`spsc<T N>` makes a queue for exactly one sender and one receiver, its capacity
 `N` a positive integer in the type. `.split` consumes the queue and gives the two
 ends, an `SpscSender<T>` and an `SpscReceiver<T>`, with the same verbs and
 outcomes (`try_receive` never gives `Busy`: nothing else can be mid-operation).
@@ -3348,7 +3348,7 @@ still clean up before the captures, which drop in reverse capture order.
 
 ```dewy
 main = () => {
-    let [tx rx] = spsc<int64 64>().split
+    let [tx rx] = spsc<int64 64>.split
     concurrent {
         spawn {
             loop i in [0..100) { if tx.send(i) is? Unsent<int64> break }

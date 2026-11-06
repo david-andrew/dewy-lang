@@ -64,7 +64,7 @@ work = (jobs:Mpmc<Entry>):>Tally => {
 }
 
 main = () => {
-    let [tx rx] = spsc<string 2>().split
+    let [tx rx] = spsc<string 2>.split
     let jobs = mpmc<Entry>(4)
     concurrent {
         spawn {
