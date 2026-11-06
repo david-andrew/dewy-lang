@@ -2,6 +2,9 @@
 
 
 def effect_services(text, modules):
+    if "ownership_finalize = " in modules.get("ownership.jo", ""):
+        text = text.replace("ownership_hooks.dewy", "ownership.jo").replace(
+            "ownership_hooks.jo", "ownership.jo")
     if any(name + " = " in modules.get("secrets.jo", "")
            for name in ("secret_cast", "secret_member", "secret_unary")):
         text = text.replace("secret_checks.dewy", "secrets.jo").replace(

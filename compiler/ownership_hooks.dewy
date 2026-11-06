@@ -1,0 +1,176 @@
+$runtime_checks
+from p"ownership.jo" import (ownership_consumers ownership_decls ownership_hooks ownership_fact_cleanup ownership_copies ownership_moves ownership_contained owner_map_copies ownership_nominals ownership_functions ownership_prints)
+from p"ownership_types.dewy" import (ownership_layout ownership_type ownership_copyable)
+from p"ast.jo" import (nodes nkids nkids2 kid add_flag NF_MUT)
+from p"util.jo" import (fatal name_of files pos_file pos_in_lib intern err_notes)
+from p"types.jo" import (types structs prune tkind layout T_VOID TF_MANAGED has_var struct_targ telem)
+from p"check.jo" import (fns check_fn_body lib_dir get_fn_inst syms prelude check_pending_functions runtime_fn runtime_insts)
+from p"prelude.jo" import demand_prelude_name
+from p"copies.jo" import copy_escapes
+from p"expr.jo" import is_map_type
+from p"errors.jo" import nominal_parent
+from p"effects.jo" import (effect_limit effect_serial effect_stack effect_summaries)
+from p"effect_contracts.dewy" import mk_callable_contract
+from p"effect_control.dewy" import (effects_demand effect_witness)
+from p"effect_lattice.dewy" import place_base
+from p"lower_storage.dewy" import field_store_type
+from p"lower_helpers.dewy" import field_list
+# Nominal lifecycle demand and validation share the existing indexed tables.
+HookWord:type=int64<overflow='wrap'>
+# These three callbacks retain plain integer signatures for the service record.
+ownership_check_error=(pos:int64 message:string):>void=>fatal(pos message)
+ownership_check_escapes=(body:int64 l:int64):>bool=>copy_escapes(body l)
+ownership_check_callable=(t:int64 contract:int64 capability:int64):>int64=>mk_callable_contract(t contract capability)
+ownership_declare=(decl:HookWord hook:HookWord role:HookWord):>void=>$unsafe {
+    if role =? 4 {
+        ownership_consumers[hook]=true;
+        return
+    }
+    if nkids(hook) not=? 1 {fatal(nodes.ptr[hook].pos "lifecycle hooks have no explicit parameters")}
+    if nkids2(hook) not=? nkids2(decl) {fatal(nodes.ptr[hook].pos "lifecycle hooks cannot declare additional type parameters")}
+    let key=decl * 4 + role
+    if ownership_decls.has(key) {
+        let name=if role =? 1 {"drop"} else if role =? 2 {"copy"} else {"move"}
+        fatal(nodes.ptr[hook].pos "duplicate $__{name}__ hook")
+    }
+    if role not=? 1 or name_of(HookWord(nodes.ptr[decl].name)) not=? "__Held" or files.ptr[pos_file(nodes.ptr[decl].pos)].path not=? "{lib_dir}/prelude/locks.dewy" {ownership_fact_cleanup=true}
+    ownership_decls[key]=hook;
+    ownership_hooks[hook]=role;
+    add_flag(kid(hook 0) NF_MUT)
+}
+ownership_finalize_hook=(f:HookWord):>void=>$unsafe {
+    let hook=HookWord(fns.ptr[f].decl)
+    check_fn_body(f)
+    let role=ownership_hooks[hook]
+    if role =? 1 and HookWord(fns.ptr[f].ret) not=? T_VOID {fatal(nodes.ptr[hook].pos "a $__drop__ hook must return void")}
+    let t=prune(fns.ptr[f].ptypes.ptr[0])
+    if tkind(t) not=? 'struct_' {fatal(nodes.ptr[hook].pos "a lifecycle receiver must be nominal")}
+    layout(t)
+    let si=HookWord(types.ptr[t].st)
+    loop i in [0..HookWord(structs.ptr[si].nfields)) {
+        let ft=field_store_type(HookWord(structs.ptr[si].fields) + i)
+        if not ownership_layout(ft) {fatal(nodes.ptr[hook].pos "unsupported resource field layout; elements with lifecycle hooks in arrays must be inline")}
+    }
+    if role not=? 1 and prune(HookWord(fns.ptr[f].ret)) not=? t {fatal(nodes.ptr[hook].pos "copy and move hooks must return the same nominal type")}
+    if role =? 1 {structs[si].drop_fn=int32(f)}
+    else if role =? 2 {ownership_copies[t]=f;}
+    else {ownership_moves[t]=f;}
+    types[t].flags=types.ptr[t].flags | int32(TF_MANAGED)
+}
+ownership_finalize=():>void=>$unsafe {
+    if ownership_decls.length =? 0 {return}
+    let hooks:array<int64>=[]
+    loop [key hook] in ownership_decls {
+        if nkids2(hook) =? 0 {hooks.push(get_fn_inst(hook [] nodes.ptr[hook].pos))}
+    }
+    let next_hook:HookWord=0
+    let next_type:HookWord=1
+    loop next_hook <? hooks.length or next_type <? types.length {
+        if next_hook <? hooks.length {
+            ownership_finalize_hook(hooks.ptr[next_hook])
+            next_hook+=1
+            continue
+        }
+        let t=next_type
+        next_type+=1
+        if types.ptr[t].kind not=? 'struct_' or has_var(t) {continue}
+        let si=HookWord(types.ptr[t].st)
+        let decl=HookWord(structs.ptr[si].decl)
+        if decl =? 0 or nkids2(decl) =? 0 {continue}
+        let args:array<int64>=[]
+        loop i in [0..HookWord(structs.ptr[si].ntargs)) {args.push(struct_targ(si i))}
+        loop role in [1..4) {
+            let cached=ownership_decls.get(decl * 4 + role)
+            if cached not=? none {
+                let hook=cached
+                let f=get_fn_inst(hook args nodes.ptr[hook].pos)
+                if not hooks.contains(f) {hooks.push(f)}
+            }
+        }
+    }
+    loop [child parent] in nominal_parent {ownership_inherit(child)}
+    ownership_contained.clear()
+    loop t in [1..types.length) {
+        if ownership_type(t) {
+            types[t].flags=types.ptr[t].flags | int32(TF_MANAGED)
+            if is_map_type(t) and ownership_copyable(t) {
+                let fs=field_list(t)
+                let kt=telem(fs.ptr[0][0])
+                if ownership_type(kt) {
+                    let name=intern("__map_copy_owners")
+                    demand_prelude_name(name)
+                    let decl=HookWord(syms.ptr[prelude[name]].decl)
+                    let f=get_fn_inst(decl [kt telem(fs.ptr[1][0])] nodes.ptr[decl].pos)
+                    check_pending_functions(f);
+                    owner_map_copies[t]=f;
+                }
+            }
+        }
+    }
+    loop name in ["__owner_link" "__owner_unlink" "__owner_drop" "__owner_print" "__owner_start" "__arr_copy"] {
+        let f=runtime_fn(name)
+        check_pending_functions(f);
+    }
+    effect_limit=0
+    effect_serial=0
+    effect_stack=[]
+    loop f in hooks {
+        let role=ownership_hooks[HookWord(fns.ptr[f].decl)]
+        let name=if role =? 1 {"drop"} else if role =? 2 {"copy"} else {"move"}
+        if role =? 1 and pos_in_lib(nodes.ptr[HookWord(fns.ptr[f].decl)].pos) {continue}
+        if not effects_demand(f) {fatal(nodes.ptr[HookWord(fns.ptr[f].decl)].pos "{name} hook has no proven no-failure summary")}
+        loop event in effect_summaries.ptr[f].events {
+            let k=event.atom.kind
+            if k =? 'opaque' or k =? 'panic' or k =? 'alloc' or k =? 'spawn' or k =? 'remainder' or k =? 'detach' or k =? 'escape' {
+                let what=if k =? 'alloc' {"allocation may fail"} else if k =? 'panic' {"operation may fail"} else if k =? 'detach' {"storage detach may allocate"} else if k =? 'spawn' {"task creation may fail"} else if k =? 'escape' {"storage escapes"} else {"operation has no proven no-failure summary"}
+                let at=if event.via not=? 0 {event.via} else {event.witness}
+                if at >? 0 {err_notes.push([nodes.ptr[at].pos "note: {what} here"])}
+                if event.witness >? 0 and event.witness not=? at and not pos_in_lib(nodes.ptr[event.witness].pos) {err_notes.push([nodes.ptr[event.witness].pos "note: originating operation is here"])}
+                fatal(nodes.ptr[HookWord(fns.ptr[f].decl)].pos "{name} hook requires a proven no-failure summary: {effect_witness(f event)} ({what})")
+            }
+            if role =? 2 and k =? 'write' and place_base(event.atom.place).root =? 'formal' {fatal(nodes.ptr[HookWord(fns.ptr[f].decl)].pos "a copy hook requires a readonly receiver")}
+        }
+    }
+}
+ownership_literal_print=(n:HookWord):>bool=>$unsafe {
+    if ownership_decls.length =? 0 or nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nkids(n) not=? 1 {return false}
+    let printer=runtime_insts.get("__print_str") ?? 0
+    if printer =? 0 or HookWord(nodes.ptr[n].sym) not=? printer {return false}
+    let a=kid(n 0)
+    if nodes.ptr[a].kind not=? 'str_lit' or nodes.ptr[a].aux not=? 0 {return false}
+    ownership_prints[n]=true;
+    true
+}
+ownership_reset=():>void=>{
+    ownership_decls.clear()
+    ownership_hooks.clear()
+    ownership_consumers.clear()
+    ownership_copies.clear()
+    ownership_moves.clear()
+    ownership_nominals.clear()
+    owner_map_copies.clear()
+    ownership_functions.clear()
+    ownership_contained.clear()
+    ownership_prints.clear()
+}
+ownership_inherit=(child:HookWord):>void=>$unsafe {
+    let parent=nominal_parent.get(child) ?? 0
+    if parent =? 0 {return}
+    ownership_inherit(parent)
+    if not ownership_type(parent) {return}
+    layout(child)
+    let si=HookWord(types.ptr[child].st)
+    loop field in field_list(child) {
+        if not ownership_layout(field[0]) {fatal(nodes.ptr[HookWord(structs.ptr[si].decl)].pos "unsupported resource field layout; elements with lifecycle hooks in arrays must be inline")}
+    }
+    if structs.ptr[si].drop_fn =? 0 {structs[si].drop_fn=structs.ptr[HookWord(types.ptr[parent].st)].drop_fn}
+    if not ownership_copies.has(child) {
+        let hook=ownership_copies.get(parent)
+        if hook not=? none {ownership_copies[child]=hook;}
+    }
+    if not ownership_moves.has(child) {
+        let hook=ownership_moves.get(parent)
+        if hook not=? none {ownership_moves[child]=hook;}
+    }
+    types[child].flags=types.ptr[child].flags | int32(TF_MANAGED)
+}
