@@ -1,0 +1,263 @@
+$runtime_checks
+from p"ast.jo" import (NF_BROADCAST NF_RDONLY has_flag kid nkids nodes)
+from p"check.jo" import (ctxs cx dewy_at globals locals loop_serials statement_watch syms)
+from p"checker_expr.dewy" import (lookup)
+from p"decimals.jo" import (decimal_floats decimal_frame decimal_globals decimal_locals)
+from p"expr.jo" import (bundled_bigint_type decimal_cached_type)
+from p"growth.jo" import (GROWTH_FLOAT GROWTH_FRAC GROWTH_INT GROWTH_KEYS GROWTH_MESSAGE GROWTH_OTHER Growth GrowthTemp growth_inferred growth_pending growth_pending_n growth_pending_temps growth_seen growth_start_whole growth_temps)
+from p"ide.jo" import (ide_on)
+from p"types.jo" import (T_MATH_INT is_float is_int prune tkind)
+from p"units.jo" import (bundled_rational_type)
+from p"util.jo" import (intern pos_in_lib warn)
+
+GrowthWord:type=int64<overflow='wrap'>
+growth_free=(cls:GrowthWord):>Growth=>{
+    Growth(0 0 false cls false cls =? GROWTH_INT)
+}
+growth_dep=(g:Growth):>bool=>{
+    g.num >? 0 or g.den >? 0 or g.grows
+}
+# the carried binding sy names (a key), or 0: an unannotated rational, declared outside the
+# innermost loop being checked
+growth_key=(sy:GrowthWord):>GrowthWord=>$unsafe {
+    if sy =? 0 {return 0}
+    if syms.ptr[sy].kind =? 'local' {
+        let l=GrowthWord(syms.ptr[sy].ref)
+        if not growth_inferred.has(l) {return 0}
+        if GrowthWord(locals.ptr[l].owner) not=? GrowthWord(ctxs[cx].inst) or GrowthWord(locals.ptr[l].dloops) >=? loop_serials.length {return 0}
+        return l
+    }
+    if syms.ptr[sy].kind =? 'global' {
+        let g=GrowthWord(syms.ptr[sy].ref)
+        let d=GrowthWord(globals.ptr[g].decl)
+        if d =? 0 or globals.ptr[g].type =? 0 or nodes.ptr[d].kind not=? 'vardecl' or nodes.ptr[d].a not=? 0 or has_flag(d NF_RDONLY) {return 0}
+        if not bundled_rational_type(GrowthWord(globals.ptr[g].type)) {return 0}
+        return -1 - g
+    }
+    0
+}
+growth_type_class=(t0:GrowthWord):>GrowthWord=>{
+    if t0 =? 0 {return GROWTH_OTHER}
+    let t=prune(t0)
+    if is_int(t) or t =? T_MATH_INT or bundled_bigint_type(t) {return GROWTH_INT}
+    if bundled_rational_type(t) {return GROWTH_FRAC}
+    if is_float(t) {return GROWTH_FLOAT}
+    GROWTH_OTHER
+}
+# what is free of x on both sides of an operation
+growth_join=(a:GrowthWord b:GrowthWord):>GrowthWord=>{
+    if a =? GROWTH_FLOAT or b =? GROWTH_FLOAT {return GROWTH_FLOAT}
+    if a =? GROWTH_OTHER or b =? GROWTH_OTHER {return GROWTH_OTHER}
+    if a =? GROWTH_FRAC or b =? GROWTH_FRAC {return GROWTH_FRAC}
+    GROWTH_INT
+}
+# n (unchecked syntax) as a rational function of the binding key
+growth_expr=(n:GrowthWord key:GrowthWord):>Growth=>$unsafe {
+    if n =? 0 {return growth_free(GROWTH_OTHER)}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {
+        let g=growth_free(GROWTH_INT)
+        g.unit=nodes.ptr[n].ival =? 1 or nodes.ptr[n].ival =? -1
+        return g
+    }
+    if k =? 'float_lit' {
+        let v=nodes.ptr[n].fval
+        if nodes.ptr[n].sval =? 0 {return growth_free(GROWTH_FLOAT)}
+        if v =? floor(v) and v <? 9007199254740992.0 and v >? -9007199254740992.0 {
+            let g=growth_free(GROWTH_INT)
+            g.unit=v =? 1.0 or v =? -1.0
+            return g
+        }
+        return growth_free(GROWTH_FRAC)
+    }
+    if k =? 'ident' {
+        let sy=lookup(GrowthWord(nodes.ptr[n].name))
+        if sy =? 0 {return growth_free(GROWTH_OTHER)}
+        if growth_key(sy) =? key {return Growth(1 0 false GROWTH_INT false true)}
+        if syms.ptr[sy].kind =? 'local' {
+            let l=GrowthWord(syms.ptr[sy].ref)
+            let temps=growth_temps.get(l)
+            if temps not=? none {
+                loop t in temps {
+                    if t.key =? key {return t.g}
+                }
+            }
+            return growth_free(growth_type_class(GrowthWord(locals.ptr[l].type)))
+        }
+        if syms.ptr[sy].kind =? 'global' {return growth_free(growth_type_class(GrowthWord(globals.ptr[GrowthWord(syms.ptr[sy].ref)].type)))}
+        return growth_free(GROWTH_OTHER)
+    }
+    if k =? 'unary' and (nodes.ptr[n].op =? int32(59) or nodes.ptr[n].op =? int32(58)) and not has_flag(n NF_BROADCAST) {
+        return growth_expr(GrowthWord(nodes.ptr[n].a) key)
+    }
+    if k =? 'binary' and not has_flag(n NF_BROADCAST) {
+        let op=nodes.ptr[n].op
+        if op =? int32(58) or op =? int32(59) {return growth_add(growth_expr(GrowthWord(nodes.ptr[n].a) key) growth_expr(GrowthWord(nodes.ptr[n].b) key))}
+        if op =? int32(60) {return growth_mul(growth_expr(GrowthWord(nodes.ptr[n].a) key) growth_expr(GrowthWord(nodes.ptr[n].b) key))}
+        return growth_free(GROWTH_OTHER)
+    }
+    if k =? 'call' and nkids(n) =? 2 and not has_flag(n NF_BROADCAST) and nodes.ptr[n].a not=? 0 and nodes.ptr[GrowthWord(nodes.ptr[n].a)].kind =? 'ident' {
+        let name=GrowthWord(nodes.ptr[GrowthWord(nodes.ptr[n].a)].name)
+        if name =? intern("__dewy_divide") {return growth_div(growth_expr(kid(n 0) key) growth_expr(kid(n 1) key))}
+        if name =? intern("__dewy_power") {return growth_power(growth_expr(kid(n 0) key) kid(n 1))}
+    }
+    growth_free(GROWTH_OTHER)
+}
+growth_add=(a:Growth b:Growth):>Growth=>{
+    let cls=growth_join(a.cls b.cls)
+    let da=a.num >? 0 or a.den >? 0
+    let db=b.num >? 0 or b.den >? 0
+    let grows=a.grows or b.grows
+    let whole=a.whole and b.whole
+    if not da and not db {return Growth(0 0 grows cls false whole)}
+    # (p/q + c = (p + c q)/q; p1/q1 + p2/q2 = (p1 q2 + p2 q1)/(q1 q2))
+    if not db {return Growth(max(a.num a.den) a.den grows cls false whole)}
+    if not da {return Growth(max(b.num b.den) b.den grows cls false whole)}
+    Growth(max(a.num + b.den b.num + a.den) a.den + b.den grows cls false whole)
+}
+growth_mul=(a:Growth b:Growth):>Growth=>{
+    let da=a.num >? 0 or a.den >? 0
+    let db=b.num >? 0 or b.den >? 0
+    let grows=a.grows or b.grows or (da and not db and b.cls =? GROWTH_FRAC) or (db and not da and a.cls =? GROWTH_FRAC)
+    let g=Growth(a.num + b.num a.den + b.den grows growth_join(a.cls b.cls) false a.whole and b.whole)
+    if not da and not db {g.unit=a.unit and b.unit}
+    g
+}
+growth_div=(a:Growth b:Growth):>Growth=>{
+    let da=a.num >? 0 or a.den >? 0
+    let db=b.num >? 0 or b.den >? 0
+    let grows=a.grows or b.grows or (da and not db and (b.cls =? GROWTH_FRAC or b.cls =? GROWTH_INT) and not b.unit)
+    let cls=growth_join(a.cls b.cls)
+    if cls =? GROWTH_INT {cls=GROWTH_FRAC}
+    Growth(a.num + b.den a.den + b.num grows cls)
+}
+growth_power=(a:Growth e:GrowthWord):>Growth=>$unsafe {
+    if nodes.ptr[e].kind not=? 'int_lit' {return growth_free(if growth_dep(a) {GROWTH_OTHER} else {growth_join(a.cls GROWTH_FRAC)})}
+    let k=nodes.ptr[e].ival
+    if k <? -64 or k >? 64 {return growth_free(GROWTH_OTHER)}
+    let cls=a.cls
+    if k <? 0 and cls =? GROWTH_INT {cls=GROWTH_FRAC}
+    if k >=? 0 {return Growth(a.num * k a.den * k a.grows cls false a.whole)}
+    Growth(a.den * -k a.num * -k a.grows cls)
+}
+growth_grows=(g:Growth):>bool=>{
+    g.cls not=? GROWTH_FLOAT and (g.grows or g.num >=? 2 or g.den >=? 2)
+}
+growth_on=():>bool=>{
+    cx >=? 0 and ctxs[cx].loop_depth >? 0 and (growth_inferred.length >? 0 or decimal_cached_type not=? 0)
+}
+# check_assign, before the assignment s is checked
+growth_assign=(s:GrowthWord):>void=>$unsafe {
+    if not growth_on() {return}
+    let lhs=GrowthWord(nodes.ptr[s].a)
+    if lhs =? 0 or nodes.ptr[lhs].kind not=? 'ident' or has_flag(s NF_BROADCAST) or not dewy_at(nodes.ptr[s].pos) or pos_in_lib(nodes.ptr[s].pos) {return}
+    let sy=lookup(GrowthWord(nodes.ptr[lhs].name))
+    let key=growth_key(sy)
+    if key =? 0 {return}
+    let op=nodes.ptr[s].op
+    let right=GrowthWord(nodes.ptr[s].b)
+    let g=growth_free(GROWTH_OTHER)
+    let x=Growth(1 0 false GROWTH_INT false true)
+    if op =? int32(47) {g=growth_expr(right key)}
+    else if nodes.ptr[s].sval =? int32(intern("__dewy_divide")) {g=growth_div(x growth_expr(right key))}
+    else if nodes.ptr[s].sval =? int32(intern("__dewy_power")) {g=growth_power(x right)}
+    else if nodes.ptr[s].sval not=? 0 {return}
+    else if op =? int32(50) {g=growth_mul(x growth_expr(right key))}
+    else if op =? int32(48) or op =? int32(49) {g=growth_add(x growth_expr(right key))}
+    else {return}
+    if not growth_grows(g) {return}
+    # (whole coefficients keep a binding that starts whole an integer: no fraction to grow)
+    if g.whole and g.den =? 0 and not g.grows and key >? 0 and growth_inferred.get(key) ?? false {return}
+    let p=nodes.ptr[lhs].pos
+    # (a binding a decimal literal made may still turn float64: wait until its body settles)
+    let decl:GrowthWord=0
+    if key >? 0 {decl=decimal_locals.get(key) ?? 0}
+    else {decl=decimal_globals.get(-1 - key) ?? 0}
+    if decl not=? 0 and decimal_frame not=? 0 {
+        growth_pending.push([p decl])
+        return
+    }
+    growth_warn(p)
+}
+growth_warn=(p:GrowthWord):>void=>{
+    if not ide_on {
+        if growth_seen.has(p) {return}
+        growth_seen[p]=true
+    }
+    warn(p GROWTH_MESSAGE)
+}
+# decimal_check_body, once the outermost body that could start over is done
+growth_flush=():>void=>{
+    if growth_pending.length =? 0 {return}
+    let pending=growth_pending
+    growth_pending=[]
+    let done=dict<int64 bool>()
+    loop item in pending {
+        if decimal_floats.has(item[1]) or done.has(item[0]) {continue}
+        done[item[0]]=true
+        growth_warn(item[0])
+    }
+}
+growth_decl_before=(s:GrowthWord):>void=>$unsafe {
+    growth_pending_temps=[]
+    growth_pending_n=0
+    growth_start_whole=false
+    if nodes.ptr[s].b =? 0 or nodes.ptr[s].a not=? 0 {return}
+    let init=GrowthWord(nodes.ptr[s].b)
+    if nodes.ptr[init].kind =? 'float_lit' and nodes.ptr[init].sval not=? 0 {
+        let v=nodes.ptr[init].fval
+        growth_start_whole=v =? floor(v)
+    }
+    else if nodes.ptr[init].kind =? 'int_lit' {growth_start_whole=true}
+    if not growth_on() or not dewy_at(nodes.ptr[s].pos) {return}
+    let keys:array<int64>=[]
+    growth_keys_in(GrowthWord(nodes.ptr[s].b) @keys)
+    loop key in keys {
+        let g=growth_expr(GrowthWord(nodes.ptr[s].b) key)
+        if growth_dep(g) {growth_pending_temps.push(GrowthTemp(key g))}
+    }
+    growth_pending_n=growth_pending_temps.length
+}
+# ... and once its local l exists, of type t
+growth_decl_after=(s:GrowthWord l:GrowthWord t:GrowthWord):>void=>$unsafe {
+    if growth_pending_temps.length >? 0 {
+        growth_temps[l]=growth_pending_temps
+        growth_pending_temps=[]
+        growth_pending_n=0
+    }
+    if nodes.ptr[s].a =? 0 and tkind(t) =? 'struct_' and bundled_rational_type(t) and dewy_at(nodes.ptr[s].pos) and not has_flag(s NF_RDONLY) {
+        growth_inferred[l]=growth_start_whole
+        statement_watch.growth=growth_inferred.length
+    }
+}
+# the carried bindings (and temporaries made from them) that expression n reads
+growth_keys_in=(n:GrowthWord @keys:array<int64>):>void=>$unsafe {
+    if n =? 0 or keys.length >=? GROWTH_KEYS {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        let sy=lookup(GrowthWord(nodes.ptr[n].name))
+        let key=growth_key(sy)
+        if key not=? 0 {
+            if not keys.contains(key) {keys.push(key)}
+            return
+        }
+        if sy not=? 0 and syms.ptr[sy].kind =? 'local' {
+            let temps=growth_temps.get(GrowthWord(syms.ptr[sy].ref))
+            if temps not=? none {
+                loop t in temps {
+                    if not keys.contains(t.key) and keys.length <? GROWTH_KEYS {keys.push(t.key)}
+                }
+            }
+        }
+        return
+    }
+    if k =? 'unary' {growth_keys_in(GrowthWord(nodes.ptr[n].a) @keys)}
+    else if k =? 'binary' {
+        growth_keys_in(GrowthWord(nodes.ptr[n].a) @keys)
+        growth_keys_in(GrowthWord(nodes.ptr[n].b) @keys)
+    }
+    else if k =? 'call' and nkids(n) =? 2 {
+        growth_keys_in(kid(n 0) @keys)
+        growth_keys_in(kid(n 1) @keys)
+    }
+}
