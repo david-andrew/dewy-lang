@@ -185,6 +185,9 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
     # doubles: {stem: {extension: text}}, modules standing in for compiler ones; jo_doubles:
     # {file: text}, Jo modules a Dewy module imports by file name, in both builds.
     # Supply the resolver's direct services to every derived leaf driver.
+    arguments = getattr(jo_doubles, 'arguments', ())
+    if arguments:
+        driver = jo_doubles.runtime_driver(driver)
     jo_doubles = dict(jo_doubles or {})
     for module, functions in RESOLVE_JO.items():
         text = jo_doubles.get(module, "use 'driver.jo'\nuse 'checker_resolve.dewy'\n")
@@ -205,8 +208,7 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
              'type_intern', 'type_inference', 'type_constructors', 'type_labels',
              'type_unions', 'checker_alias', 'checker_resolve', 'checker_coerce') + tuple(doubles) + extra_stems
     for extension in ('dewy', 'jo'):
-        directory = tmp_path / extension
-        directory.mkdir()
+        modules = {}
         for stem in stems:
             if stem in doubles:
                 text = doubles[stem][extension]
@@ -214,7 +216,7 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
                 text = (ROOT / f'compiler/{stem}.{extension}').read_text()
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
-            (directory / f'{stem}.{extension}').write_text(effect_services(text, jo_doubles))
+            modules[f'{stem}.{extension}'] = effect_services(text, jo_doubles)
         for name, text in (jo_doubles or {}).items():
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
@@ -222,13 +224,21 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
                 # Switch those edges too, so the graph has one implementation.
                 for stem in extra_stems:
                     text = text.replace(f'p"{stem}.dewy"', f'p"{stem}.jo"')
-            (directory / name).write_text(effect_services(text, jo_doubles))
-        source, binary = directory / 'driver.jo', directory / 'driver'
-        source.write_text(''.join(f"use '{s}.{extension}'\n" for s in stems) + driver)
-        built = subprocess.run([compiler, 'build', source, '-o', binary,
-                                *(['--release'] if release else [])], capture_output=True, text=True, timeout=90)
-        assert built.returncode == 0, built.stdout + built.stderr
-        ran = subprocess.run([binary], capture_output=True, timeout=60)
+            modules[name] = effect_services(text, jo_doubles)
+        modules['driver.jo'] = ''.join(f"use '{s}.{extension}'\n" for s in stems) + driver
+        if arguments:
+            from tests.selfhost_lower_double import cached_driver
+            binary = cached_driver(compiler, tmp_path, release, modules)
+        else:
+            directory = tmp_path / extension
+            directory.mkdir()
+            for name, text in modules.items():
+                (directory / name).write_text(text)
+            source, binary = directory / 'driver.jo', directory / 'driver'
+            built = subprocess.run([compiler, 'build', source, '-o', binary,
+                                    *(['--release'] if release else [])], capture_output=True, text=True, timeout=90)
+            assert built.returncode == 0, built.stdout + built.stderr
+        ran = subprocess.run([binary, *arguments], capture_output=True, timeout=60)
         assert ran.returncode == status, ran.stdout[-6000:] + ran.stderr
         outputs.append(ran.stdout)
     assert outputs[0] == outputs[1]
