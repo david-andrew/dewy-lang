@@ -1,0 +1,11 @@
+# A function type is one member of a union with literals; its parameter may be one.
+Mode:type='fast'|(int64:>int64)|'slow'
+flag=(f:('on'|'off':>int64)):>int64=>f('on')
+main=():>void=>{
+    let a:Mode='fast'
+    let b:Mode=(x:int64)=>x
+    printl(a is? (int64:>int64))
+    printl(b is? (int64:>int64))
+    printl(flag((v:'on'|'off')=>1))
+}
+$runtime_checks

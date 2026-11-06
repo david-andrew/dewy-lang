@@ -1,0 +1,23 @@
+# `<>` is `()` with the inside constrained to be types: every function type form is valid in it.
+Unary:type=<(x:int64):>int64>
+Bare:type=(x:int64):>int64
+take=(a:<int64:>int64> b:<x:int64:>int64> c:<(x:int64):>int64> d:<(int64):>int64> e:<(_:int64):>int64>):>int64=>a(1)+b(1)+c(1)+d(1)+e(1)
+keyed=(table:dict<string <(x:int64):>int64>> nested:array<<int64:>int64>> plain:array<():>int64>):>int64=>table["a"](1)+nested[0](1)+plain[0]()
+pick=(v:<(int64:>int64)>|string):>string=>match v {
+    <string> => "text"
+    <int64:>int64> => "function"
+}
+main=():>void=>{
+    let f:Unary=(x:int64)=>x+1
+    let g:Bare=@f
+    let h:<(x:int64):>int64>?=none
+    let u:<(int64|string)>=1
+    let n:int<(>=? 0)>=3
+    printl(take(@f @g @f @g @f))
+    printl(keyed(["a"->@f] [@f] [()=>1]))
+    printl(pick(@f))
+    printl(h is? none)
+    printl(u)
+    printl(n)
+}
+$runtime_checks

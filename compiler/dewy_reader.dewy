@@ -247,6 +247,9 @@ rd_dc_annotation=(@reader_ctx:ParserContext @reader_nodes:array<Node> boundary:i
         }
     }
     if (((((dn_power(rd_dn_peek(@reader_ctx)) >? boundary) and (not (reader_ctx.reader.dc_effects_follow and (rd_dn_peek(@reader_ctx) =? 'amp')))) and (not (reader_ctx.reader.dc_rename_follows and (rd_dn_peek(@reader_ctx) =? 'kw_as')))) and (not ((reader_ctx.reader.dc_type_args >? 0) and rd_dc_closes(@reader_ctx)))) and (not rd_dc_annotation_ends(@reader_ctx))) {
+        if (rd_dn_peek(@reader_ctx) =? 'returns') {
+            rd_dc_hint(@reader_ctx pos "a function type takes parentheses here: `f:(int:>int)`, and so does one that is a result, `(int:>(int:>int))`");
+        }
         return 0
     }
     reader_ctx.depth = (int64<overflow='wrap'>(reader_ctx.depth) - 1)
@@ -5261,48 +5264,100 @@ rd_dc_function_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> name
     reader_ctx.stores.host[0].dw_finish_function(n ps body name)
 }
 
-# `<(x:T @y:U):>R>`: a function type, its parameters' labels and types (dw_type's `:>`); an effect
-# row on it is left unread (dc_unread).
-rd_dc_function_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> angled:bool=true):>int64=>$unsafe {
-    reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + int64<overflow='wrap'>((if angled int64(2) else int64(1))))
+# A function type's parameter: `x:T`, `@y:U`, `T` or `@T`. Its result's `:>` may follow.
+rd_dc_function_param=(@reader_ctx:ParserContext @reader_nodes:array<Node> @types_:array<int64> @labels:array<int64>):>bool=>$unsafe {
+    let first:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
+    let place:bool=rd_dn_accept(@reader_ctx 'at')
+    let label:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
+    let labeled:bool=rd_dc_function_label_at(@reader_ctx reader_ctx.at)
+    if labeled {
+        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
+    }
+    let t:int64=rd_dc_annotation(@reader_ctx @reader_nodes 40)
+    if (t =? 0) {
+        return false
+    }
+    # (dw_type's mistakes, noted: a default, a label written twice)
+    if ((rd_dn_peek(@reader_ctx) =? 'assign') and ((not reader_ctx.flags.report_now) or (rd_dc_type_default(@reader_ctx @reader_nodes label) =? 0))) {
+        return false
+    }
+    if place {
+        rd_add_flag(@reader_nodes t NF_MUT);
+    }
+    if (labeled and (rd_dc_word(@reader_ctx int64<overflow='wrap'>(label.name)) not=? DC_HOLE)) {
+        loop earlier in labels {
+            if (reader_nodes[earlier].name =? label.name) {
+                if (not reader_ctx.flags.report_now) {
+                    return false
+                }
+                rd_dc_report(@reader_ctx rd_mkpos(reader_ctx.file label.start) "duplicate callable parameter name '{rd_dn_payload(@reader_ctx label)}'");
+            }
+        }
+    }
+    let named:int64=node_mk(@reader_nodes 'ident' rd_mkpos(reader_ctx.file first.start))
+    reader_nodes[named].name = (if labeled label.name else int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("_")))
+    labels.push(named);
+    types_.push(t);
+    true
+}
+
+# `x:` at here: a parameter's label.
+rd_dc_function_label_at=(@reader_ctx:ParserContext at:int64):>bool=>$unsafe {
+    let label:DewyLexeme=reader_ctx.tokens[at]
+    ((((label.kind =? 'identifier') and ((label.symbol =? 'none') or (label.symbol =? 'kw_test'))) and (not rd_dn_reserved(@reader_ctx int64<overflow='wrap'>(label.name)))) and (reader_ctx.tokens[(int64<overflow='wrap'>(at) + 1)].symbol =? 'colon'))
+}
+
+# `(x:T @y:U)` then `:>`, `:>` being what follows its `)`: the list of a function type, inside
+# `()` or `<>`, in an alias or in a type argument. Lone parentheses here hold a function type, its
+# one parameter: `((x:T:>R):>S)`.
+rd_dc_function_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> angled:bool=false):>int64=>$unsafe {
+    reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
     let pos:int64=rd_mkpos(reader_ctx.file reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)].start)
-    let n:int64=node_mk(@reader_nodes 'tfn' pos)
     let types_:array<int64>=[]
     let labels:array<int64>=[]
     loop (not rd_dn_accept(@reader_ctx 'rparen')) {
-        let first:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
-        let place:bool=rd_dn_accept(@reader_ctx 'at')
-        let label:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
-        if ((((label.kind not=? 'identifier') or ((label.symbol not=? 'none') and (label.symbol not=? 'kw_test'))) or rd_dn_reserved(@reader_ctx int64<overflow='wrap'>(label.name))) or (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol not=? 'colon')) {
+        if (not rd_dc_function_param(@reader_ctx @reader_nodes @types_ @labels)) {
             return 0
         }
-        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
-        let t:int64=rd_dc_annotation(@reader_ctx @reader_nodes)
-        if (t =? 0) {
-            return 0
-        }
-        # (dw_type's mistakes, noted: a default, a label written twice)
-        if ((rd_dn_peek(@reader_ctx) =? 'assign') and ((not reader_ctx.flags.report_now) or (rd_dc_type_default(@reader_ctx @reader_nodes label) =? 0))) {
-            return 0
-        }
-        if place {
-            rd_add_flag(@reader_nodes t NF_MUT);
-        }
-        if (rd_dc_word(@reader_ctx int64<overflow='wrap'>(label.name)) not=? DC_HOLE) {
-            loop earlier in labels {
-                if (reader_nodes[earlier].name =? label.name) {
-                    if (not reader_ctx.flags.report_now) {
-                        return 0
-                    }
-                    rd_dc_report(@reader_ctx rd_mkpos(reader_ctx.file label.start) "duplicate callable parameter name '{rd_dn_payload(@reader_ctx label)}'");
-                }
+        if ((rd_dn_peek(@reader_ctx) =? 'returns') and (types_.length =? 1)) {
+            let inner:int64=rd_dc_function_result(@reader_ctx @reader_nodes pos types_ labels false)
+            if ((inner =? 0) or (not rd_dn_accept(@reader_ctx 'rparen'))) {
+                return 0
             }
+            types_ = [inner]
+            labels = []
+            break
         }
-        let named:int64=node_mk(@reader_nodes 'ident' rd_mkpos(reader_ctx.file first.start))
-        reader_nodes[named].name = label.name
-        labels.push(named);
-        types_.push(t);
     }
+    rd_dc_function_result(@reader_ctx @reader_nodes pos types_ labels angled)
+}
+
+# `@x:T:>R` or `x:T:>R`: a function type whose one parameter is labeled, or a place.
+rd_dc_function_lone=(@reader_ctx:ParserContext @reader_nodes:array<Node> angled:bool):>int64=>$unsafe {
+    let pos:int64=rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at].start)
+    let types_:array<int64>=[]
+    let labels:array<int64>=[]
+    if (not rd_dc_function_param(@reader_ctx @reader_nodes @types_ @labels)) {
+        return 0
+    }
+    if ((rd_dn_peek(@reader_ctx) not=? 'returns') and (rd_dn_peek(@reader_ctx) not=? 'rparen') and (rd_dn_peek(@reader_ctx) not=? 'rangle')) {
+        return rd_dc_hint(@reader_ctx pos "several parameters of a function type take parentheses: `((x:A y:B):>R)`")
+    }
+    rd_dc_function_result(@reader_ctx @reader_nodes pos types_ labels angled)
+}
+
+# `T:>R` with T read: a function type of one unlabeled parameter.
+rd_dc_function_from=(@reader_ctx:ParserContext @reader_nodes:array<Node> first:int64 angled:bool):>int64=>$unsafe {
+    let named:int64=node_mk(@reader_nodes 'ident' reader_nodes[first].pos)
+    reader_nodes[named].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("_"))
+    rd_dc_function_result(@reader_ctx @reader_nodes reader_nodes[first].pos [first] [named] angled)
+}
+
+# `:>R` and an effect row: the function type of these parameters. Its closer is the caller's; under
+# angles the result stops at a joined closer, `dict<string <(x:int64):>int64>>`, and otherwise at
+# the enclosing type argument's, `array<():>int64>`.
+rd_dc_function_result=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64 types_:array<int64> labels:array<int64> angled:bool):>int64=>$unsafe {
+    let n:int64=node_mk(@reader_nodes 'tfn' pos)
     if (not rd_dn_accept(@reader_ctx 'returns')) {
         return 0
     }
@@ -5310,8 +5365,6 @@ rd_dc_function_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> angled:
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
     }
     else {
-        # (its closer may be joined: `dict<string <(x:int64):>int64>>`; without angles, the
-        # enclosing type argument's, `array<():>int64>`)
         let saved_args:int64=reader_ctx.reader.dc_type_args
         let saved_follow:bool=reader_ctx.reader.dc_effects_follow
         if angled {
@@ -5321,7 +5374,7 @@ rd_dc_function_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> angled:
         reader_ctx.reader.dc_effects_follow = true
         let result:int64=rd_dc_annotation(@reader_ctx @reader_nodes)
         reader_ctx.reader.dc_effects_follow = saved_follow
-        reader_ctx.reader.dc_type_args = (if angled int64(0) else saved_args)
+        reader_ctx.reader.dc_type_args = saved_args
         if ((result =? 0) or (((reader_nodes[result].kind =? 'tunion') and (result not=? reader_ctx.reader.dc_grouped)) and (rd_dn_peek(@reader_ctx) =? 'amp'))) {
             return 0
         }
@@ -5331,23 +5384,30 @@ rd_dc_function_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> angled:
         }
         reader_nodes[n].a = int32<overflow='wrap'>(packed)
     }
-    # (`<(x:int64):>int64 & E>`: its effect row, dw_effect_suffix)
+    # (`(x:int64:>int64 & E)`: its effect row, dw_effect_suffix)
     if ((rd_dn_peek(@reader_ctx) =? 'amp') and (not rd_dc_effect_row(@reader_ctx @reader_nodes n))) {
         return 0
     }
-    if (not angled) {
-        node_set_list(@reader_nodes @reader_ctx.stores.lists[0] n types_);
-        node_set_list2(@reader_nodes @reader_ctx.stores.lists[0] n labels);
-        return n
-    }
-    if (not rd_dn_accept(@reader_ctx 'rangle')) {
-        if (not (reader_ctx.reader.dn_edits_on and rd_dn_closer_joined(@reader_ctx))) {
-            return 0
-        }
-        rd_dn_split_closer(@reader_ctx);
-    }
     node_set_list(@reader_nodes @reader_ctx.stores.lists[0] n types_);
     node_set_list2(@reader_nodes @reader_ctx.stores.lists[0] n labels);
+    n
+}
+
+# Inside `()` or `<>` of a type: a function type (`T:>R`, `x:T:>R`, `@T:>R`, `(x:T):>R`) or just a
+# type. The result stops before anything else; `:` binds tighter than `:>`, and `|` and `&` tighter
+# still, so `(x:A|B:>C|D)` takes `A|B` and gives `C|D`.
+rd_dc_type_inside=(@reader_ctx:ParserContext @reader_nodes:array<Node> angled:bool):>int64=>$unsafe {
+    let token:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
+    if ((token.symbol =? 'lparen') and (reader_ctx.tokens[(int64<overflow='wrap'>(rd_dc_closing(@reader_ctx reader_ctx.at)) + 1)].symbol =? 'returns')) {
+        return rd_dc_function_type(@reader_ctx @reader_nodes angled)
+    }
+    if ((token.symbol =? 'at') or rd_dc_function_label_at(@reader_ctx reader_ctx.at)) {
+        return rd_dc_function_lone(@reader_ctx @reader_nodes angled)
+    }
+    let n:int64=rd_dc_annotation(@reader_ctx @reader_nodes 40)
+    if ((n not=? 0) and (rd_dn_peek(@reader_ctx) =? 'returns')) {
+        return rd_dc_function_from(@reader_ctx @reader_nodes n angled)
+    }
     n
 }
 
@@ -7692,10 +7752,10 @@ rd_dc_pattern=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$uns
             reader_nodes[p].a = int32<overflow='wrap'>(rd_bc_int(@reader_nodes int64<overflow='wrap'>((rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[text].sval)) as array<uint8>)[0]) pos))
             return p
         }
-        # `<Busy>`, `<int64|string>`, `<'e'|'w'>`: a type (dw_pattern's `<>`)
-        if ((((literal.kind =? 'identifier') and (literal.symbol =? 'none')) and (int64<overflow='wrap'>(literal.name) not=? reader_ctx.reader.dn_none_id)) or ((literal.kind =? 'quoted') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'pipe'))) {
+        # `<Busy>`, `<int64|string>`, `<'e'|'w'>`, `<(int64:>int64)>`: a type (dw_pattern's `<>`)
+        if ((((literal.kind =? 'identifier') and (literal.symbol =? 'none')) and (int64<overflow='wrap'>(literal.name) not=? reader_ctx.reader.dn_none_id)) or ((literal.kind =? 'quoted') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'pipe')) or (literal.symbol =? 'lparen')) {
             reader_ctx.reader.dc_type_args = (int64<overflow='wrap'>(reader_ctx.reader.dc_type_args) + 1)
-            let t:int64=rd_dc_annotation(@reader_ctx @reader_nodes)
+            let t:int64=rd_dc_type_inside(@reader_ctx @reader_nodes true)
             reader_ctx.reader.dc_type_args = (int64<overflow='wrap'>(reader_ctx.reader.dc_type_args) - 1)
             if (t =? 0) {
                 return 0
@@ -10289,7 +10349,7 @@ rd_dc_type_declaration=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>in
         }
         # `Pair:type = <T>(array<T length=2>)`: a generic alias of the one type in parentheses
         if rd_dn_accept(@reader_ctx 'lparen') {
-            let alias:int64=rd_dc_annotation(@reader_ctx @reader_nodes)
+            let alias:int64=rd_dc_type_inside(@reader_ctx @reader_nodes false)
             if (((alias =? 0) or (not rd_dn_accept(@reader_ctx 'rparen'))) or (dn_power(rd_dn_peek(@reader_ctx)) >? 0)) {
                 return 0
             }
@@ -10372,9 +10432,12 @@ rd_dc_type_group=(@reader_ctx:ParserContext @reader_nodes:array<Node> first:int6
         if (reader_ctx.tokens[reader_ctx.at].kind =? 'eof') {
             return 0
         }
-        let member:int64=rd_dc_annotation(@reader_ctx @reader_nodes)
+        let member:int64=rd_dc_annotation(@reader_ctx @reader_nodes 40)
         if (member =? 0) {
             return 0
+        }
+        if (rd_dn_peek(@reader_ctx) =? 'returns') {
+            return rd_dc_hint(@reader_ctx pos "several parameters of a function type take parentheses: `((A B):>R)`; alone, `(A B)` is several values")
         }
         members.push(member);
     }
@@ -10390,20 +10453,25 @@ rd_dc_type_member=(@reader_ctx:ParserContext @reader_nodes:array<Node> @texts:ar
     let token:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
     # (`('b' | 'a')`: a group's members are the union's, dw_pipe_leaves)
     if (token.symbol =? 'lparen') {
+        let opening:int64=reader_ctx.at
+        let counts:array<int64>=[texts.length ints.length others.length]
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-        loop true {
-            if (rd_dc_type_member(@reader_ctx @reader_nodes @texts @ints @others) <? 0) {
-                return (-1)
-            }
-            if (rd_dn_peek(@reader_ctx) not=? 'pipe') {
+        let read:bool=true
+        loop read {
+            read = (rd_dc_type_member(@reader_ctx @reader_nodes @texts @ints @others) >=? 0)
+            if (read and (rd_dn_peek(@reader_ctx) not=? 'pipe')) {
                 break
             }
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
         }
-        if (not rd_dn_accept(@reader_ctx 'rparen')) {
-            return (-1)
+        if (read and rd_dn_accept(@reader_ctx 'rparen')) {
+            return 0
         }
-        return 0
+        # (`'a' | (int64:>int64)`: a function type, one member)
+        texts.resize(counts[0]);
+        ints.resize(counts[1]);
+        others.resize(counts[2]);
+        reader_ctx.at = opening
     }
     if ((token.kind =? 'quoted') or (token.kind =? 'rawquoted')) {
         if ((token.kind =? 'quoted') and (not rd_dc_plain_quote(@reader_ctx token))) {
@@ -10548,7 +10616,7 @@ rd_dc_type_power=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 po
 }
 
 # A named type with optional type arguments, a grouped type `(A | B)`, a record type
-# `[x:T y:U]` or `[T U]`, or a function type `<(x:T):>R>`; then `?` suffixes.
+# `[x:T y:U]` or `[T U]`, or a function type `(T:>R)`; then `?` suffixes.
 rd_dc_type_primary=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe {
     let token:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
     let n:int64=0
@@ -10563,18 +10631,18 @@ rd_dc_type_primary=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=
         n = rd_dc_function_type(@reader_ctx @reader_nodes false)
     }
     else if (token.symbol =? 'lparen') {
-        # (dw_type of its one element; a joined closer cannot end a type in it)
+        # (dw_type of its one element or a function type; a joined closer cannot end a type in it)
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
         let saved:int64=reader_ctx.reader.dc_type_args
         reader_ctx.reader.dc_type_args = 0
         let saved_literal:bool=reader_ctx.reader.dc_literal_seen
         reader_ctx.reader.dc_literal_seen = false
-        n = rd_dc_annotation(@reader_ctx @reader_nodes)
+        n = rd_dc_type_inside(@reader_ctx @reader_nodes false)
         if ((n not=? 0) and (not rd_dn_accept(@reader_ctx 'rparen'))) {
             n = rd_dc_type_group(@reader_ctx @reader_nodes n rd_mkpos(reader_ctx.file token.start))
         }
         reader_ctx.reader.dc_type_args = saved
-        let literal:bool=reader_ctx.reader.dc_literal_seen
+        let literal:bool=(reader_ctx.reader.dc_literal_seen and ((n =? 0) or (reader_nodes[n].kind not=? 'tfn')))
         reader_ctx.reader.dc_literal_seen = saved_literal
         # (a group holding a literal flattens into the union around it: dc_annotation reads
         # it again as one, dw_pipe_leaves)
@@ -10584,19 +10652,21 @@ rd_dc_type_primary=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=
         }
         reader_ctx.reader.dc_grouped = n
     }
-    else if ((token.symbol =? 'lbrack') or ((token.symbol =? 'langle') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'lparen'))) {
+    else if (token.symbol =? 'lbrack') {
         # (inside, a joined closer ends no type argument)
         let saved:int64=reader_ctx.reader.dc_type_args
         reader_ctx.reader.dc_type_args = 0
-        n = (if (token.symbol =? 'lbrack') rd_dc_record_type(@reader_ctx @reader_nodes) else rd_dc_function_type(@reader_ctx @reader_nodes))
+        n = rd_dc_record_type(@reader_ctx @reader_nodes)
         reader_ctx.reader.dc_type_args = saved
     }
     else if (token.symbol =? 'langle') {
-        # `<int64 | string>`, `<'fast' | 1>`: a type in angle brackets is that type (dw_type's `<>`)
+        # `<int64 | string>`, `<'fast' | 1>`, `<(x:int64):>int64>`: `()` with the inside
+        # constrained to be types, so that type (dw_type's `<>`)
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-        reader_ctx.reader.dc_type_args = (int64<overflow='wrap'>(reader_ctx.reader.dc_type_args) + 1)
-        n = rd_dc_annotation(@reader_ctx @reader_nodes)
-        reader_ctx.reader.dc_type_args = (int64<overflow='wrap'>(reader_ctx.reader.dc_type_args) - 1)
+        let saved:int64=reader_ctx.reader.dc_type_args
+        reader_ctx.reader.dc_type_args = (int64<overflow='wrap'>(saved) + 1)
+        n = rd_dc_type_inside(@reader_ctx @reader_nodes true)
+        reader_ctx.reader.dc_type_args = saved
         if (n =? 0) {
             return 0
         }

@@ -1,0 +1,62 @@
+# `()` groups a function type wherever a type goes; a lone parameter takes no `()`.
+Callbacks:type=[run:(int64:>int64) count:int64]
+Unary:type=(int64:>int64)
+Endo:type=<T>(T:>T)
+Wide:type=((int64|string):>int64)
+
+apply=(f:(int64:>int64) v:int64):>int64=>f(v)
+report=(xs:array<int64> r:(array<int64> :>void)):>void=>r(xs)
+labeled=(f:(x:int64:>int64)):>int64=>f(x=2)
+two=(f:((a:int64 b:int64):>int64)):>int64=>f(b=1 a=2)
+unlabeled=(f:((int64 int64):>int64)):>int64=>f(1 2)
+thunk=(f:(():>int64)):>int64=>f()
+store=(f:(@int64:>void)):>int64=>{let n:int64=1 f(@n) n}
+store2=(f:(@x:int64:>void)):>int64=>{let n:int64=2 f(@n) n}
+higher=(f:((int64:>int64):>int64)):>int64=>f((x:int64)=>x)
+curried=(f:(int64:>(int64:>int64))):>int64=>{let g=f(1) g(2)}
+either=(f:(int64:>int64|string)):>string=>"{f(1)}"
+union=(v:(int64:>int64)|string):>string=>match v {
+    <string> => "text"
+    <(int64:>int64)> => "function"
+}
+generic=<T>(f:(T:>T) v:T):>T=>f(v)
+pair=(f:(int64:>(int64 int64))):>int64=>{let (a b)=f(1) a+b}
+pure=(f:(int64:>int64 & no_effects)):>int64=>f(4)
+angles=(f:<int64:>int64> g:<(x:int64):>int64> h:<x:int64:>int64> i:<(int64):>int64>):>int64=>f(1)+g(1)+h(1)+i(1)
+
+main=():>void=>{
+    let f:(int64:>int64)=(x:int64)=>x+1
+    let g:(int64:>int64)?=none
+    let table:dict<string (int64:>int64)>=["inc"->@f]
+    let list:array<(int64:>int64)>=[@f @f]
+    let cb:Callbacks=[run=@f count=2]
+    let u:Unary=@f
+    let e:Endo<int64>=@f
+    printl(apply(@f 1))
+    report([1 2] (xs:array<int64>)=>printl(xs))
+    printl(labeled((x:int64)=>x))
+    printl(two((a:int64 b:int64)=>a-b))
+    printl(unlabeled((a:int64 b:int64)=>a+b))
+    printl(thunk(()=>7))
+    printl(store((@x:int64)=>{x=5}))
+    printl(store2((@x:int64)=>{x=6}))
+    printl(higher((h:(int64:>int64))=>h(9)))
+    printl(curried((a:int64)=>(b:int64)=>a+b))
+    printl(either((x:int64)=>x))
+    printl(union(@f))
+    printl(union("s"))
+    printl(generic<int64>(@f 1))
+    printl(generic(@f 1))
+    printl(pair((x:int64)=>(x x)))
+    printl(pure((x:int64)=>x*2))
+    printl(angles(@f @f @f @f))
+    printl(table["inc"](1))
+    printl(list[1](1))
+    printl(cb.run(1))
+    printl(u(1))
+    printl(e(1))
+    printl(g is? none)
+    printl(@f is? (int64:>int64))
+    printl(@f is? <int64:>int64>)
+}
+$runtime_checks
