@@ -75,6 +75,16 @@ rt_global = (name: str) -> int:
     e_load(VI, e_gaddr(global_addr_off(int(syms[s].ref))), 0, 1)
 
 
+rt_global_word = (name: str) -> int:
+    s = prelude.get(intern(name)) ?? 0
+    if s == 0 or syms[s].kind != .global: ice("missing runtime global {name}")
+    e_load(VI, e_gaddr(global_addr_off(int(syms[s].ref))), 0, 8)
+
+rt_const = (name: str) -> int:
+    s = prelude.get(intern(name)) ?? 0
+    if s == 0 or syms[s].kind != .const_: ice("missing runtime constant {name}")
+    nodes[int(nodes[int(syms[s].decl)].b)].ival
+
 e_call_nr0 = (f: int, rtype: int) -> int:
     start = ir.args.len()
     emit(.call, rtype, -1, start, 0, 1, f)

@@ -78,6 +78,17 @@ rt_global=(name:string):>int64=>$unsafe {
     if s =? 0 or syms.ptr[s].kind not=? SK.global {ice("missing runtime global {name}");}
     return e_load(VI e_gaddr(global_addr_off(LPWord(syms.ptr[s].ref))) 0 1)
 }
+rt_global_word=(name:string):>int64=>$unsafe {
+    let s=prelude.get(intern(name)) ?? 0
+    if s =? 0 or syms.ptr[s].kind not=? SK.global {ice("missing runtime global {name}");}
+    return e_load(VI e_gaddr(global_addr_off(LPWord(syms.ptr[s].ref))) 0 8)
+}
+# A runtime constant's literal value.
+rt_const=(name:string):>int64=>$unsafe {
+    let s=prelude.get(intern(name)) ?? 0
+    if s =? 0 or syms.ptr[s].kind not=? SK.const_ {ice("missing runtime constant {name}");}
+    return nodes.ptr[LPWord(nodes.ptr[LPWord(syms.ptr[s].decl)].b)].ival
+}
 e_call_nr0=(f:LPWord rtype:LPWord):>int64=>$unsafe {
     let start=ir.args.length
     emit('call' rtype -1 start 0 1 f);

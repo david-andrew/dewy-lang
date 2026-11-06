@@ -1,4 +1,4 @@
-from p"lower_primitives.dewy" import (bounds_check call_eval_order data_writable e_call_nr e_call_nr1 e_call_nr2 e_call_nr3 e_call_nr4 e_daddr e_faddr e_gaddr fixed_index_domain fmt_field global_addr_off inst_mutmask json_field json_key lf_helper lf_of_inst lit loc_data loc_str null_check rt set_text_table set_word_moved str_data tuple_off)
+from p"lower_primitives.dewy" import (rt_const rt_global rt_global_word bounds_check call_eval_order data_writable e_call_nr e_call_nr1 e_call_nr2 e_call_nr3 e_call_nr4 e_daddr e_faddr e_gaddr fixed_index_domain fmt_field global_addr_off inst_mutmask json_field json_key lf_helper lf_of_inst lit loc_data loc_str null_check rt set_text_table set_word_moved str_data tuple_off)
 from p"lower_closures.dewy" import (closure_env_shareable closure_scalar_environment closure_size drop_stack_closure env_layout partial_layout spawn_body spawn_owned_capture stack_closure_local stack_closure_target)
 from p"lower_scalars.dewy" import (all_const byte_eq_type byte_offset_plain const_array f2i_i32 float_op gen_eq gen_match_lookup gen_value_dotname gen_value_float_lit gen_value_int_lit gen_value_none_lit int_op is_plain_ctor is_slice math_int_guard negate_cmp never_after never_value pat_int positive_modulus range_cmp range_tail same_range_read saturate_binary saturate_shift sdiv_wrap stepped_done text_source vec_comps wide_shift)
 from p"lower_views.dewy" import (bounded_open_for declared_in_scope fixed_path_of fp_end held_encode_addr held_opt_reg is_uniq_array plain_read reserve_comprehension simple_cond uq_end)
@@ -8,7 +8,7 @@ from p"lower_helpers.dewy" import (field_list fixed_elem_addr fixed_loop_begin f
 $runtime_checks
 from p"lower.jo" import (BOX_HDR BuildItem CopyBack FixedPath HK LF_ELEMENTVIEW LF_HELDVIEW LoanCapacity LoopInfo Place VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_slot building comprehension_push_index copy_backs ctl cur_block cur_block_i cur_fn cur_ret env_v fixed_fill_count fixed_fill_exact fixed_fill_push fixed_fill_slot fixed_fill_type fixed_paths fp_bases fp_calls fp_escape fp_kill fp_lambda fp_written frozen held_views loan_capacities loops lower_entry opt_release pinned_box pinned_type scope_defers scope_locals sret_v stack_closure_passed stack_closure_targets tl_items tl_values uniq_locals)
 from p"expr.jo" import (CV FMT_DEWY IN fmt_field_order fmt_hidden fmt_minted int_widens integer_constant is_map_type mk_ident_local ntype swizzle_index swizzle_run)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_VALUECAP compound_op dewy_at jd fns globals lib_dir locals mutable_loop_syntax readonly_global runtime_fn target_macos target_windows)
+from p"check.jo" import (target_wasm LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_VALUECAP compound_op dewy_at jd fns globals lib_dir locals mutable_loop_syntax readonly_global runtime_fn target_macos target_windows)
 from p"ir.jo" import (M_FLOAT M_SIGNED VF VI VOP_SPLAT_B VOP_SPLAT_C VS dbg_on ir ir_cold mulh_ok)
 from p"ast.jo" import (NF_COMPREHENSION NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_INDEX_CAPTURED NF_INCLUSIVE NF_MUT NF_RELOOKUP NF_STEP NF_STMT NF_U64 has_flag kid kid2 kids lists mk nkids nkids2 nodes)
 from p"ir_types.dewy" import (Op)
@@ -48,6 +48,7 @@ from p"lower_intrinsics.dewy" import (gen_intrinsic_argv gen_intrinsic_compute_s
 from p"lower_races.dewy" import (in_lib parallel_direct race_check type_as_value)
 from p"ir_builders.dewy" import (e_addi e_bin e_brtable e_call e_call0 e_call1 e_call2 e_call3 e_call4 e_calli e_copy e_fconst e_iconst e_load e_mov e_ret e_slot e_store e_un e_vop e_zero emit ir_set_pos new_slot vreg)
 from p"arena_ops.dewy" import (arena_gen_promote)
+from p"arena.jo" import (arena_runtime_ready)
 from p"math_ops.dewy" import (gen_math_for math_accumulator_for math_binary math_call math_compare math_count math_default_formatter math_float_binary math_local_is math_pack_word math_proven_word math_reset_local_decl math_shift math_shift_count math_signed math_static_bits math_static_local_decl math_static_narrow math_static_value math_sum_compare math_word math_word_expr math_word_helper math_word_local_decl math_word_range)
 from p"member_ops.dewy" import (member_lower_block member_lower_text)
 from p"parallel_ops.dewy" import (parallel_scalar_decl parallel_scalar_length parallel_scalar_read)
@@ -1819,7 +1820,9 @@ gen_intrinsic_push=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
         let done=ctl
         blk();
         let slow=ctl
-        brif_to(e_bin('eq' VI p e_iconst(0)) slow);
+        let bump=arena_runtime_ready and not target_wasm and esz >? 0 and esz <=? 1024
+        if bump {blk();}
+        brif_to(e_bin('eq' VI p e_iconst(0)) ctl);
         brif_to(e_bin('ne' VI hdr_load(p 0) e_iconst(1)) slow);
         let n=hdr_load(p 8)
         brif_to(e_bin('ges' VI n hdr_load(p 16)) slow);
@@ -1827,6 +1830,11 @@ gen_intrinsic_push=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
         e_mov(slotp e_bin('add' VI e_addi(p 24) e_bin('mul' VI n e_iconst(esz))));
         br_to(done);
         endc();
+        if bump {
+            first_push_bump(pl at esz slotp slow);
+            br_to(done);
+            endc();
+        }
         # slow path: copy if shared, then grow
         let was=ir_cold
         ir_cold=true
@@ -1856,6 +1864,30 @@ gen_intrinsic_push=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     owner_element_live(slotp et);
     if ownership_type(et) {owner_forget_slot(val.slot);}
     return V(-1 false)
+}
+# The first push to a null array in a growable context arena on the only thread: inline,
+# what __arr_grow and __arena_alloc do there (lib/std/arena.jo's control words: cursor, end,
+# capacity at 40). Anything else goes to `slow`. Demanded only by programs using arenas.
+first_push_bump=(pl:Place at:LGWord esz:LGWord slotp:LGWord slow:LGWord):>void=>$unsafe {
+    let state=rt_global_word("__tstate")
+    brif_to(e_bin('eq' VI state e_iconst(0)) slow);
+    brif_to(e_bin('ne' VI rt_global_word("__tstack_base") e_iconst(0)) slow);
+    brif_to(e_bin('ne' VI rt_global("__c_threads") e_iconst(0)) slow);
+    let control=e_load(VI state rt_const("__TS_ARENA") * 8 8)
+    brif_to(e_bin('eq' VI control e_iconst(0)) slow);
+    brif_to(e_bin('ges' VI e_load(VI control 40 8) e_iconst(0)) slow);
+    let block=(24 + 8 * esz + 31) & -16
+    let cursor=e_load(VI control 0 8)
+    brif_to(e_bin('gts' VI e_iconst(block) e_bin('sub' VI e_load(VI control 8 8) cursor)) slow);
+    e_store(control 0 e_addi(cursor block) 8);
+    e_store(cursor 0 e_iconst(block - 16) 8);
+    e_store(cursor 8 control 8);
+    let q=e_addi(cursor 16)
+    hdr_store(q 0 e_iconst(1));
+    hdr_store(q 8 e_iconst(1));
+    hdr_store(q 16 e_iconst(8));
+    write_place(pl at q);
+    e_mov(slotp e_addi(q 24));
 }
 gen_intrinsic_pop=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let arg0:LGWord=LGWord(lists.ptr[arg_start])

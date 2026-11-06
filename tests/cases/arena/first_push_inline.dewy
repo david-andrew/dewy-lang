@@ -1,0 +1,38 @@
+# First pushes in the context arena: element sizes, chunk refills, arrays that
+# leave the arena, and arrays in the heap.
+P:type=[x:int64 y:int64 z:int64]
+rows = (n:int64):>int64 => {
+    let total:int64=0
+    loop r in [0..n) {
+        let ints:array<int64>=[]
+        let bytes:array<uint8>=[]
+        let ps:array<P>=[]
+        let names:array<string>=[]
+        loop c in [0..12) {
+            ints.push(r+c)
+            bytes.push(uint8((r+c)%200))
+            ps.push(P(x=r y=c z=r*c))
+            names.push("n")
+        }
+        total+=ints[11]+int64(bytes[3])+ps[11].z+names.length+ints.length
+    }
+    return total
+}
+kept = ():>array<int64> => {
+    let out:array<int64>=[]
+    out.push(41)
+    out.push(42)
+    return out
+}
+main = ():>void => {
+    let scratch=Arena[]
+    printl"{rows(5)}"
+    loop k in [1..4) {
+        printl"{$allocator(@scratch) rows(k*2000)}"
+        scratch.reset()
+    }
+    let held=$allocator(@scratch) kept().copy()
+    scratch.reset()
+    printl"{held}"
+}
+$runtime_checks

@@ -1606,7 +1606,9 @@ gen_intrinsic_push = (e: int, arg_start: int) -> Val:
         done = ctl
         blk()
         slow = ctl
-        brif_to(e_bin(.eq, VI, p, e_iconst(0)), slow)
+        bump = arena_runtime_ready and not target_wasm and esz > 0 and esz <= 1024
+        if bump: blk()
+        brif_to(e_bin(.eq, VI, p, e_iconst(0)), ctl)
         brif_to(e_bin(.ne, VI, hdr_load(p, 0), e_iconst(1)), slow)
         n = hdr_load(p, 8)
         brif_to(e_bin(.ges, VI, n, hdr_load(p, 16)), slow)
@@ -1614,6 +1616,10 @@ gen_intrinsic_push = (e: int, arg_start: int) -> Val:
         e_mov(slotp, e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, n, e_iconst(esz))))
         br_to(done)
         endc()
+        if bump:
+            first_push_bump(pl, at, esz, slotp, slow)
+            br_to(done)
+            endc()
         # slow path: copy if shared, then grow
         was = ir_cold
         ir_cold = true
@@ -1640,6 +1646,28 @@ gen_intrinsic_push = (e: int, arg_start: int) -> Val:
     owner_element_live(slotp, et)
     if ownership_type(et): owner_forget_slot(val.slot)
     return V(-1, false)
+
+# (lower_group.dewy explains this)
+first_push_bump = (pl: Place, at: int, esz: int, slotp: int, slow: int):
+    state = rt_global_word("__tstate")
+    brif_to(e_bin(.eq, VI, state, e_iconst(0)), slow)
+    brif_to(e_bin(.ne, VI, rt_global_word("__tstack_base"), e_iconst(0)), slow)
+    brif_to(e_bin(.ne, VI, rt_global("__c_threads"), e_iconst(0)), slow)
+    control = e_load(VI, state, rt_const("__TS_ARENA") * 8, 8)
+    brif_to(e_bin(.eq, VI, control, e_iconst(0)), slow)
+    brif_to(e_bin(.ges, VI, e_load(VI, control, 40, 8), e_iconst(0)), slow)
+    block = (24 + 8 * esz + 31) & -16
+    cursor = e_load(VI, control, 0, 8)
+    brif_to(e_bin(.gts, VI, e_iconst(block), e_bin(.sub, VI, e_load(VI, control, 8, 8), cursor)), slow)
+    e_store(control, 0, e_addi(cursor, block), 8)
+    e_store(cursor, 0, e_iconst(block - 16), 8)
+    e_store(cursor, 8, control, 8)
+    q = e_addi(cursor, 16)
+    hdr_store(q, 0, e_iconst(1))
+    hdr_store(q, 8, e_iconst(1))
+    hdr_store(q, 16, e_iconst(8))
+    write_place(pl, at, q)
+    e_mov(slotp, e_addi(q, 24))
 
 gen_intrinsic_pop = (e: int, arg_start: int) -> Val:
     arg0 = int(lists[arg_start])
