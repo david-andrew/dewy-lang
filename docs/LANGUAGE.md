@@ -2203,8 +2203,8 @@ $unsafe p[0] = 42
 The receiver's indices run once. A private closure capture keeps its independent
 state when accessed this way; `$capture @name` still shares the binding explicitly.
 The pointer is a low-level view: keep its owner alive and do not resize or replace
-the array while using it. Ordinary read-only iteration bindings remain read-only;
-make a local value copy before editing one, or use `loop @item` to edit storage.
+the array while using it. An ordinary iteration binding holds its own copy of the
+element; use `loop @item` to edit storage.
 
 Use `array<T length=N>` for a known, positive compile-time length:
 
@@ -3038,7 +3038,7 @@ parallel x in shifted { $runtime_assert(x >=? 2) }
 $runtime_assert(saved[0] =? 1 and shifted[0] =? 2)
 ```
 
-An ordinary binding is read-only, as in `loop`. A mutable `@x` binding owns one
+An ordinary binding is read-only. A mutable `@x` binding owns one
 array element for the body, including its managed fields. Saved copies keep their original values. Other captured variables and
 globals may be read but cannot be changed, including through called functions.
 Indexed writes to a captured array are currently rejected; use the mutable
@@ -4024,9 +4024,11 @@ or field path in the body) is a compile error with both fixes: iterate `@xs` to
 see the changes, or bind a snapshot first (`let snapshot = xs` then
 `loop x in snapshot`). A live loop binds one name over a growable array named by
 a binding or field path, and cannot be part of a combined header.
-*Provisional:* its name holds a copy of the element, so writing to it, or
-through it (`x.hp -= 5`, `x.push(0)`), is a compile error naming
-`loop @x in xs`, which changes the elements themselves.
+
+The name in `loop x in xs` holds the step's own copy of the element, so it can be
+changed like any local (`loop x in xs { x += 1; total += x }`); the array stays as
+it was. A write that nothing reads afterwards is a warning naming `loop @x in xs`,
+since it was probably meant for the element.
 
 Use an explicit place binding to update stored array elements:
 

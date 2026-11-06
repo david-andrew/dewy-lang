@@ -1,0 +1,10 @@
+# `loop x in @xs` sees pushes; its name is the step's copy, as in any loop.
+P:type = [x:float64]
+main = () => {
+    let xs = [1 2]
+    loop x in @xs { if xs.length <? 3 xs.push(5); x += 1; printl(x) }
+    printl(xs)
+    let ps = [P[1.0]]
+    loop p in @ps { p.x += 1.0; printl(p.x) }
+    printl(ps)
+}

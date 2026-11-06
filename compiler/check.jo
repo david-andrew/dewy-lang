@@ -1,4 +1,5 @@
 use 'secret_checks.dewy'
+use 'isolation_ops.dewy'
 use 'checker_program.dewy'
 use 'checker_hooks.dewy'
 use 'checker_sinks.dewy'
@@ -1796,6 +1797,10 @@ note_write = (r: int, via_closure: bool, pos: int):
 
 check_shareable = (r: int, pos: int):
     if int(locals[r].flags) & LF_DECL != 0: return
+    # (`loop x in xs`: shared, x is the step's own variable)
+    if int(locals[r].flags) & LF_BYREF != 0 and dewy_at(pos):
+        loop_copy_write(r, pos, true, false)
+        return
     nm = name_of(int(locals[r].name))
     # (loop mut g in gems: steps.then(0.1, (): g.scale = 0.0): the element, changed later)
     if int(locals[r].flags) & LF_ALIAS != 0: fatal(pos, "'{nm}' stands for an element only while the loop is there, and the function changing it runs later: change the element by its position, {jd(pos, "`loop i in 0.. and {nm} in xs:` and then `(): xs[i]...`", "`loop i in 0.. and {nm} in xs \{ ... }` and then `() => xs[i]...`")} in the function")
@@ -2517,10 +2522,104 @@ dewy_iterator_loop = (s: int, place: int = 0) -> bool:
     check_stmt(s)
     true
 
-# (the binders of `loop item in @items` over arrays, by position: the name and the array's
-# path. Each holds a copy of the element read at the step's start, so a write to it, or through
-# it, would change nothing the array holds: an error, check_place)
-live_binders: {int: (int, str)} = {}
+# A written `loop x in xs` binder (Dewy; O(1) per write, plus one declaration per written
+# binder): x starts each step as a copy of the element and belongs to the step, as if the
+# loop held `let x = element`. Whether the last write is read is read off LF_READ, which
+# each write clears (reads are checked in source order); a write inside a further loop may
+# be read by that loop's next round, so any earlier read counts. A use by place may give the
+# value on, so it counts as a read unless it is all a statement does (loop_copy_use).
+struct LoopCopyWrite:
+    pos: int        # the last write
+    kept: bool      # it may be read: no dead-store warning
+    by_place: bool  # some write passed it by place
+
+loop_copy_writes: {int: LoopCopyWrite} = {}
+loop_copy_refined: {int: int} = {}    # a written binder's element type, when refined
+
+loop_copy_write = (l: int, pos: int, kept: bool, by_place: bool):
+    fl = int(locals[l].flags)
+    keep = kept
+    place = by_place
+    if loop_copy_writes.has(l):
+        keep = keep or loop_copy_writes[l].kept
+        place = place or loop_copy_writes[l].by_place
+    if fl & LF_READ != 0 and loop_serials.len() > int(locals[l].dloops): keep = true
+    loop_copy_writes[l] = LoopCopyWrite(pos, keep, place)
+    locals[l].flags = i32((fl | LF_DECL | LF_ASSIGNED) & ~(LF_BYREF | LF_VALUEITER | LF_READ))
+    # (the copy holds what `let y = x` would: an element's refinement does not bind it)
+    if tkind(int(locals[l].type)) == .refined and not loop_copy_refined.has(l):
+        loop_copy_refined[l] = int(locals[l].type)
+        locals[l].type = i32(representation_type(int(locals[l].type)))
+
+# What a dead write's warning says to do instead.
+loop_copy_hint = (l: int, s: int) -> str:
+    nm = name_of(int(locals[l].name))
+    if map_loop_values.has(l): return "change the entry through its key, as `loop key in m.keys() \{ m[key]... }`"
+    src = route_text(int(nodes[s].a))
+    "write `loop @{nm} in {if len(src) > 0: src else: "items"}` to change the element itself"
+
+# (a use of l in n other than as the object of a statement's call with no result, as
+# `xs.push(1)`, whose change to the copy nothing can see; O(n), for binders written by place)
+loop_copy_use = (n: int, l: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .ident: return nodes[n].aux == i32(int(SK.local)) and int(nodes[n].sym) == l
+    if k == .lambda: return true
+    if k == .exprstmt:
+        c = int(nodes[n].a)
+        if (nodes[c].kind == .call or nodes[c].kind == .intrinsic) and nkids(c) > 0 and tkind(ntype(c)) == .void_:
+            first = kid(c, 0)
+            # (by place: an `@` parameter's argument, or a built-in array method's object)
+            place = nodes[first].kind == .addr
+            if nodes[c].kind == .intrinsic:
+                loop it in intrinsics:
+                    if int(it.id) == int(nodes[c].aux) and it.arr: place = true
+            else if nodes[c].aux == 0 and nodes[c].sym > 0:
+                called = int(fns[int(nodes[c].sym)].decl)
+                if called != 0 and nkids(called) > 0 and has_flag(kid(called, 0), NF_MUT): place = true
+            loop nodes[first].kind == .addr: first = int(nodes[first].a)
+            if place and nodes[first].kind == .ident and int(nodes[first].sym) == l:
+                loop i in [1..nkids(c)):
+                    if loop_copy_use(kid(c, i), l): return true
+                return false
+    mask = isolation_children(k)
+    if mask < 0: return true
+    if mask & 1 != 0 and loop_copy_use(int(nodes[n].a), l): return true
+    if mask & 2 != 0 and loop_copy_use(int(nodes[n].b), l): return true
+    if mask & 4 != 0 and loop_copy_use(int(nodes[n].c), l): return true
+    if mask & 16 != 0:
+        loop c2 in kids(n):
+            if loop_copy_use(c2, l): return true
+    false
+
+for_copied_binder = (s: int, l0: int) -> int:
+    if l0 <= 0: return l0
+    if not loop_copy_writes.has(l0): return l0
+    write = loop_copy_writes[l0]
+    fl = int(locals[l0].flags)
+    pos = locals[l0].pos
+    dead = if write.by_place: fl & (LF_CAPTURED | LF_SHARED) == 0 and not loop_copy_use(int(nodes[s].b), l0) else: fl & (LF_READ | LF_CAPTURED | LF_ADDR | LF_SHARED) == 0
+    if not write.kept and dead and not pos_in_lib(pos) and not starts_with(name_of(int(locals[l0].name)), "_"):
+        warn(write.pos, "'{name_of(int(locals[l0].name))}' is changed here but never read afterwards: it holds a copy of the element, so what it was copied from stays as it was; {loop_copy_hint(l0, s)}")
+    locals[l0].flags = i32(fl | LF_READ)
+    element = new_local(0, loop_copy_refined.get(l0) ?? int(locals[l0].type), pos)
+    locals[element].flags = i32(LF_BYREF | LF_READ | (if map_loop_values.has(l0): 0 else: LF_VALUEITER))
+    if map_loop_values.has(l0): map_loop_values[element] = true
+    d = mk(.vardecl, pos)
+    nodes[d].name = locals[l0].name
+    nodes[d].b = i32(mk_ident_local(element, pos))
+    nodes[d].sym = i32(l0)
+    add_flag(d, NF_CHECKED)
+    body = int(nodes[s].b)
+    set_list(body, [d] + kids(body))
+    element
+
+# After a loop's body: each written binder gets its declaration, and the loop a hidden
+# element binder to copy from.
+for_copied_binders = (s: int):
+    if loop_copy_writes.len() == 0: return
+    nodes[s].sym = i32(for_copied_binder(s, int(nodes[s].sym)))
+    if nodes[s].aux == 3: nodes[s].aux2 = i32(for_copied_binder(s, int(nodes[s].aux2)))
 
 # `loop item in @place` (dw_live_loop): an iterator steps in place
 # (dewy_iterator_loop); an array is iterated live, a position counter checked
@@ -2538,7 +2637,6 @@ check_live_loop = (s: int):
         return
     if types[t].kind != .array: fatal(nodes[it].pos, "`loop item in @items` iterates a growable array or a bound iterator live, not {dt(t)}; iterate its value with `loop item in items`")
     binder = kid(s, 0)
-    live_binders[nodes[binder].pos] = (int(nodes[binder].name), route_text(last_checked))
     counter = "$dewy_live_{nodes.len()}"
     range = mk(.range, pos)
     nodes[range].a = i32(bc_int(0, pos))

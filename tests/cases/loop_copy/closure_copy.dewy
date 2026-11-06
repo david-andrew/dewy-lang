@@ -1,0 +1,9 @@
+# A closure sharing the copy: each step has its own, and the write is seen.
+main = () => {
+    loop x in [10 20] {
+        let g = ($capture @x):>int => { x += 1; x }
+        printl(g())
+        printl(g())
+        printl(x)
+    }
+}

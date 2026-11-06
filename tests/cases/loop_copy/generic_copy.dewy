@@ -1,0 +1,10 @@
+# In a generic function, each instance's binder is copied.
+sum = <T>(xs:array<T> zero:T):>T => {
+    let t:T = zero
+    loop x in xs { x += x; t += x }
+    t
+}
+main = () => {
+    printl(sum([1 2] 0))
+    printl(sum([1.5] 0.0))
+}

@@ -509,11 +509,12 @@ def test_dewy_mutable_loop_quickfix(tmp_path, marked):
     client = Client(Path(compiler).resolve(strict=True), tmp_path)
     try:
         diagnostics = client.set_text(source.as_uri(), text, 1)
-        errors = [d for d in diagnostics if d['severity'] == 1]
-        assert len(errors) == 1 and 'cannot modify loop variable' in errors[0]['message'], diagnostics
+        assert not [d for d in diagnostics if d['severity'] == 1], diagnostics
+        stores = [d for d in diagnostics if 'never read afterwards' in d['message']]
+        assert len(stores) == 1, diagnostics
         actions = client.request('textDocument/codeAction', {
-            'textDocument': {'uri': source.as_uri()}, 'range': errors[0]['range'],
-            'context': {'diagnostics': errors},
+            'textDocument': {'uri': source.as_uri()}, 'range': stores[0]['range'],
+            'context': {'diagnostics': stores},
         })
         assert len(actions) == 1, actions
         edits = actions[0]['edit']['changes'][source.as_uri()]
@@ -546,11 +547,11 @@ def test_dewy_mutable_loop_quickfix_unsupported(tmp_path, text):
     client = Client(Path(compiler).resolve(strict=True), tmp_path)
     try:
         diagnostics = client.set_text(source.as_uri(), text, 1)
-        errors = [d for d in diagnostics if d['severity'] == 1]
-        assert errors and 'cannot modify loop variable' in errors[0]['message'], diagnostics
+        stores = [d for d in diagnostics if 'never read afterwards' in d['message']]
+        assert stores, diagnostics
         actions = client.request('textDocument/codeAction', {
-            'textDocument': {'uri': source.as_uri()}, 'range': errors[0]['range'],
-            'context': {'diagnostics': errors},
+            'textDocument': {'uri': source.as_uri()}, 'range': stores[0]['range'],
+            'context': {'diagnostics': stores},
         })
         assert actions == [], actions
     finally:

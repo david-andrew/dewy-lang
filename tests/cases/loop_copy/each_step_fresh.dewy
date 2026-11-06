@@ -1,0 +1,10 @@
+# The copy starts afresh each step; a nested loop reads what the last round wrote.
+main = () => {
+    let total = 0
+    loop x in [1 2] {
+        loop w in [10 20] { total += x; x += w }
+    }
+    printl(total)
+    loop i in 0.. and x in [5 6] { x += i; printl(x) }
+    loop c in "ab" { c = "{c}!"; printl(c) }
+}

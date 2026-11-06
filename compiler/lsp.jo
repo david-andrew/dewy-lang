@@ -2270,6 +2270,12 @@ on_code_action = (id: int, params: int) -> int:
                 at = qf_dewy_untyped_decl(d, p)
                 if at >= 0: out.push(qf_json(d, "Annotate it `float64`", dg, at, at, ":float64"))
             continue
+        if contains(msg, "' is changed here but never read afterwards:") and contains(msg, "`loop @"):
+            nm = quoted(msg, 0)
+            ensure_checked(d)
+            at = qf_dewy_element(d, p, nm)
+            if at >= 0: out.push(qf_json(d, "Update stored elements with `@{nm}`", dg, at, at, "@"))
+            continue
         if starts_with(msg, "cannot modify loop variable '"):
             nm = quoted(msg, 0)
             if ends_with(docs[d].path, ".dewy"):

@@ -6,7 +6,7 @@ from p"checker_state.dewy" import (Local CheckerScope ValueLoop)
 from p"type_inference.dewy" import tu_prune
 from p"checker_loops.dewy" import (xb_enter xb_leave)
 from p"checker_expr.dewy" import check_expr
-from p"check.jo" import (for_rewrite new_local for_open_range for_map_view for_collide for_element for_route for_struct_fields for_map_value for_map_value_ref for_body scope_reset for_error)
+from p"check.jo" import (for_rewrite new_local for_open_range for_map_view for_collide for_element for_route for_struct_fields for_map_value for_map_value_ref for_body for_copied_binders scope_reset for_error)
 from p"expr.jo" import (coerce lit_default is_map_entries_type)
 # `loop x in source`, once the source's rewrites (live, reflected, soa, unpacked,
 # nested, cursor, tidied-map, iterator and sequence loops) are done: a range's
@@ -202,6 +202,7 @@ fl_for=(s:FWord):>void=>$unsafe {
     }
     xb_enter(s)
     for_body(FWord(fl_nodes[0].ptr[s].b))
+    for_copied_binders(s)
     loop fl_value_loops[0].length >? value_mark {fl_value_loops[0].pop();}
     fl_serials[0].pop();
     xb_leave(s)

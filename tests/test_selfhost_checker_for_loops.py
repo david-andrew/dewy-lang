@@ -163,6 +163,7 @@ FOR_JO = {
         'for_map_value': 'for_map_value = (s: int, name: int, vt: int, idx: int) -> int: fl_map_value_host(s, name, vt, idx)',
         'for_map_value_ref': 'for_map_value_ref = (vl: int): fl_map_ref_host(vl)',
         'for_body': 'for_body = (b: int): fl_body_host(b)',
+        'for_copied_binders': 'for_copied_binders = (s: int): return',
         'scope_reset': 'scope_reset = (mark: int): fl_reset_host(mark)',
         'for_error': 'for_error = (n: int, t0: int, code: int): fl_error_host(n, t0, code)',
     },
