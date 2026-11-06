@@ -4574,6 +4574,45 @@ target_dropped_use = (f: int, l: int) -> bool:
         if pos_file(u) == file and u > start and (end < 0 or u < end): return true
     false
 
+hidden_method_message = (dn: str, first: int) -> str:
+    "'{dn}' hides the library's method `{dt(first)}.{dn}`: this function takes over every `x.{dn}` on one in this module; rename it to keep the library's"
+
+# A program function named as a library method, taking the same kind of first argument:
+# `x.name` calls the program's everywhere in the module, which may surprise. Demanded by the
+# program's own functions: a name lookup and a signature match each.
+hidden_method_warnings = (m: int):
+    loop d in modules[m].decls:
+        if nodes[d].kind != .fn_ or nkids(d) == 0 or has_flag(d, NF_EXTERN): continue
+        name = int(nodes[d].name)
+        dn = name_of(name)
+        if starts_with(dn, "_") or starts_with(dn, "(") or starts_with(dn, "op_") or dn == "main": continue
+        # (a built-in array or string method, not a library function)
+        ii = intrinsic_of(name)
+        if ii >= 0 and intrinsics[ii].arr:
+            own = fn_sig(d)
+            at = if own.params.len() > 0: tkind(own.params[0]) else: TK.void_
+            if at == .array or at == .str_:
+                warn(nodes[d].pos, hidden_method_message(dn, own.params[0]))
+                continue
+        found: int[]
+        dm = cl_prelude_module(name)
+        if dm >= 0: collect_in(dm, name, 0, &found)
+        else: collect_in(-1, name, 2, &found)
+        loop c in found:
+            if c == d or not decl_in_prelude(c) or nkids(c) != nkids(d): continue
+            mine = fn_sig(d)
+            theirs = fn_sig(c)
+            if theirs.params.len() == 0 or mine.params.len() == 0: continue
+            first = prune(theirs.params[0])
+            if types[first].kind == .param or contains(files[pos_file(nodes[c].pos)].path, "/game/"): continue
+            # (an argument conversion is an overload, not the same method)
+            binds = fill(0, int(theirs.ntp))
+            if has_var(first):
+                if match_type(first, mine.params[0], binds, 1) < 0: continue
+            else if not type_eq(first, mine.params[0]): continue
+            warn(nodes[d].pos, hidden_method_message(dn, mine.params[0]))
+            break
+
 # (scor = 1 in a function, for the global score: a variable of its own, made and never read)
 unused_local_warnings = (f: int):
     skip = LF_READ | LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_ELEMALIAS | LF_SOAELEM | LF_SHARED | LF_QUIET
@@ -6070,6 +6109,8 @@ program_unused_warnings = (mainm: int, main_path: str, runs: bool):
             fnm = name_of(int(nodes[d].name))
             warn(nodes[d].pos, "nothing in this file runs: it only makes functions, and making {fnm} does not run it. Lines at the top of the file run when the program starts (`{fnm}()` there calls it); a game's {jd(nodes[d].pos, "`update = (dt: f64):` runs every frame, where `if key_pressed(.space): ...` checks a key. (A file that other files `use` is fine like this.)", "`update = (dt:float64):>void => \{...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)")}")
             break
+    loop m in [0..modules.len()):
+        if not modules[m].is_prelude and int(modules[m].file) >= 0 and files[int(modules[m].file)].is_dewy and not pos_in_lib(mkpos(int(modules[m].file), 0)): hidden_method_warnings(m)
     if not ide_on and (not test_mode or check_all) and runs:
         # (a `$test` function: `dewy-core test` runs it)
         tested: {int: bool} = {}

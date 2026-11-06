@@ -2018,6 +2018,9 @@ closure's captured state after explicitly supplied arguments, in parameter order
 This slice accepts plain type parameter names. Constraints such as `T of Bound`
 remain unsupported.
 
+A program function named as a library method, with the same kind of first argument,
+takes over `x.name` on such values throughout its module, and warns, naming both.
+
 Record types and record literals can declare methods: `name = (params) => body`
 rows among the fields. Inside a method, a bare field or method name is that
 member of the object the method was called on; there is no `self`. A parameter
