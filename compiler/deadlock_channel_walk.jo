@@ -1,0 +1,207 @@
+use 'deadlock.jo'
+use 'ast.jo'
+use 'check.jo'
+use 'util.jo'
+use 'lower_helpers.dewy'
+use 'isolation_ops.dewy'
+use 'deadlock_locations.dewy'
+use 'deadlock_walk.dewy'
+use 'deadlock_channels.dewy'
+
+dc_event = (kind: int, loc: DlLoc, site: int):
+    dc_count += 1
+    if dc_count > DC_EVENTS:
+        dc_complete = false
+        return
+    loops: int[]
+    loop x in dc_loops: loops.push(x)
+    locs: DlLoc[]
+    sites: int[]
+    loop h in dc_held:
+        locs.push(h.loc)
+        sites.push(h.site)
+    dc_ev.push(DcEvent(kind, loc, loops, dc_branch > 0, locs, sites, site))
+
+dc_drop = (mark: int):
+    loop dc_held.len() > mark: dc_held.pop()
+
+dc_walk = (n: int):
+    if n == 0 or dc_count > DC_EVENTS: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fnref: return
+    if k == .block:
+        mark = dc_held.len()
+        loop c in kids(n): dc_walk(c)
+        if nodes[n].aux != 5: dc_drop(mark)
+        return
+    if k == .vardecl:
+        init = int(nodes[n].b)
+        loop init != 0 and nodes[init].kind == .conv: init = int(nodes[init].a)
+        if init != 0 and nodes[init].kind == .call:
+            what = dl_lock_call(init)
+            if what == "lock" or what == "try_lock$acquire" or what == "__take":
+                loc = dc_loc(dl_receiver(init))
+                if what == "lock": dc_event(4, loc, nodes[init].pos)
+                dc_held.push(DlHeld(loc, nodes[init].pos, int(nodes[n].sym)))
+                return
+        dc_walk(int(nodes[n].b))
+        return
+    if k == .if_ or k == .iflet:
+        dc_walk(int(nodes[n].a))
+        mark = dc_held.len()
+        dc_branch += 1
+        dc_walk(int(nodes[n].b))
+        dc_drop(mark)
+        dc_walk(int(nodes[n].c))
+        dc_drop(mark)
+        dc_branch -= 1
+        return
+    if k == .for_ or k == .while_:
+        trips = dc_trip_count(n)
+        if k == .for_: dc_walk(int(nodes[n].a))
+        cond = int(nodes[n].a)
+        # (a body that may not run: a loop on a condition, or an empty range)
+        maybe = trips == 0 or trips < 0 and not (k == .while_ and nodes[cond].kind == .bool_lit and nodes[cond].ival == 1)
+        dc_loops.push(dc_trips.len())
+        dc_trips.push(trips)
+        if maybe: dc_branch += 1
+        if k == .while_: dc_walk(cond)
+        mark = dc_held.len()
+        dc_walk(int(nodes[n].b))
+        dc_drop(mark)
+        if maybe: dc_branch -= 1
+        dc_loops.pop()
+        return
+    if k == .call:
+        dc_call(n)
+        return
+    if k == .propagate or k == .parallel_region:
+        dc_walk(int(nodes[n].a))
+        return
+    loop g in value_helper_calls(n): dc_enter(g, 0)
+    branches = k == .match_ or k == .arm
+    if branches: dc_branch += 1
+    mask = isolation_children(k)
+    if mask < 0:
+        dc_walk(int(nodes[n].a))
+        dc_walk(int(nodes[n].b))
+        dc_walk(int(nodes[n].c))
+        loop c in kids(n): dc_walk(c)
+    else:
+        if mask & 1 != 0: dc_walk(int(nodes[n].a))
+        if mask & 2 != 0: dc_walk(int(nodes[n].b))
+        if mask & 4 != 0: dc_walk(int(nodes[n].c))
+        if mask & 16 != 0:
+            mark = dc_held.len()
+            loop c in kids(n):
+                dc_walk(c)
+                if branches: dc_drop(mark)
+        if mask & 32 != 0:
+            loop c in kids2(n): dc_walk(c)
+    if branches: dc_branch -= 1
+
+dc_call = (n: int):
+    pos = nodes[n].pos
+    what = dl_lock_call(n)
+    if what == "__lock_all":
+        words = kid(n, 1)
+        if nodes[words].kind == .namedarg: words = int(nodes[words].a)
+        loop c in kids(words):
+            call = c
+            loop nodes[call].kind == .conv: call = int(nodes[call].a)
+            if nodes[call].kind == .call: dc_event(4, dc_loc(dl_receiver(call)), pos)
+        return
+    if ends_with(what, "$release"):
+        if nkids(n) >= 2:
+            g = kid(n, 1)
+            if nodes[g].kind == .ident and nodes[g].sym > 0:
+                loop i in [0..dc_held.len()):
+                    if dc_held[i].guard == int(nodes[g].sym):
+                        dc_held.remove(i)
+                        break
+        return
+    if len(what) > 0: return
+    op = dc_chan_call(n)
+    if op > 0:
+        loop i in [1..nkids(n)): dc_walk(kid(n, i))
+        loc = dc_loc(kid(n, 0))
+        if fns[int(nodes[n].sym)].mod == dc_smod: dc_ends[dl_key(loc)] = true
+        if loc.root == 0 or not loc.exact or len(loc.route) > 0 or loc.root != 2 and loc.root != 1: dc_precise = false
+        if op == 3: dc_closes = true
+        if op == 6 or op == 7:
+            dc_attempts[dl_key(loc)] = true
+            if loc.root != 1 and loc.root != 2 or not loc.exact or len(loc.route) > 0: dc_unknown_attempt = true
+        dc_event(op, loc, pos)
+        return
+    loop c in kids(n): dc_walk(c)
+    if nodes[n].aux == 1 or nodes[n].aux == 4:
+        # (a function value: what it waits for is not in view)
+        dc_walk(int(nodes[n].a))
+        dc_complete = false
+        return
+    if nodes[n].aux != 0 or nodes[n].sym <= 0: return
+    g = int(nodes[n].sym)
+    d = int(fns[g].decl)
+    gname = if d != 0: name_of(int(nodes[d].name)) else: ""
+    if gname == "__task_spawn" and nkids(n) == 2:
+        h = dl_fn_arg(kid(n, 1))
+        if h > 0 and fns[h].body != 0:
+            if dc_pending.len() >= DC_ACTORS:
+                dc_complete = false
+                return
+            ffns: int[]
+            fcalls: int[]
+            loop x in dc_ffns: ffns.push(x)
+            loop x in dc_fcalls: fcalls.push(x)
+            ffns.push(h)
+            fcalls.push(0)
+            dc_pending.push(DcSpawn(h, ffns, fcalls, dc_multi or dc_loops.len() > 0, dl_key(dc_loc(kid(n, 0))), pos))
+        return
+    if gname == "cancel" and pos_in_lib(nodes[d].pos): dc_cancels = true
+    if gname == "cancel" and pos_in_lib(nodes[d].pos): dc_cancels = true
+    if gname == "__task_join" and nkids(n) == 1:
+        dc_event(5, dc_loc(kid(n, 0)), pos)
+        return
+    if fns[g].parallel_api: return
+    # (a function given as a value to a call not walked here, as a library helper's)
+    if not dl_relevant.has(g):
+        loop c in kids(n):
+            h = dl_fn_arg(c)
+            if h > 0 and dl_relevant.has(h): dc_complete = false
+        return
+    dc_enter(g, n)
+
+dc_enter = (g: int, n: int):
+    if not dl_relevant.has(g) or fns[g].body == 0: return
+    if dc_ffns.contains(g) or dc_ffns.len() > DC_DEPTH:
+        dc_complete = false
+        return
+    dc_ffns.push(g)
+    dc_fcalls.push(n)
+    dc_walk(int(fns[g].body))
+    dc_ffns.pop()
+    dc_fcalls.pop()
+
+dc_collect = ():
+    dc_ev = []
+    loop f in init_fns + [main_fn]:
+        if f <= 0 or not dl_relevant.has(f): continue
+        dc_ffns = []
+        dc_fcalls = []
+        dc_enter(f, 0)
+    dc_actors.push(DcActor(dc_ev, "the program's thread", false, "", 0))
+    i = 0
+    loop i < dc_pending.len():
+        s = dc_pending[i]
+        i += 1
+        dc_ev = []
+        dc_ffns = s.ffns
+        dc_fcalls = s.fcalls
+        dc_loops = []
+        dc_held = []
+        dc_branch = 0
+        dc_multi = s.multi
+        # Even a task with no waits can cancel its siblings by failing. Keep
+        # its result summary, but demand a body walk only for relevant effects.
+        if dl_relevant.has(s.h): dc_walk(int(fns[s.h].body))
+        dc_actors.push(DcActor(dc_ev, "the task spawned at {dl_line(s.site)}", s.multi, s.group, int(fns[s.h].ret)))

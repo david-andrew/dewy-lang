@@ -1,0 +1,236 @@
+$runtime_checks
+from p"deadlock.jo" import (DlLoc DlHeld DcEvent DcSpawn DcActor dc_count DC_EVENTS DC_ACTORS DC_DEPTH dc_complete dc_loops dc_held dc_ev dc_branch dc_trips dc_precise dc_closes dc_attempts dc_unknown_attempt dc_smod dc_ends dc_pending dc_ffns dc_fcalls dc_multi dc_cancels dl_relevant dc_actors)
+from p"deadlock_channels.dewy" import (dc_loc dc_chan_call dc_trip_count)
+from p"deadlock_locations.dewy" import (dl_receiver dl_key dl_line)
+from p"deadlock_walk.dewy" import (dl_lock_call dl_fn_arg)
+from p"ast.jo" import (nodes kids kids2 kid nkids)
+from p"check.jo" import (fns init_fns main_fn)
+from p"util.jo" import (name_of pos_in_lib)
+from p"lower_helpers.dewy" import value_helper_calls
+from p"isolation_ops.dewy" import isolation_children
+
+ChannelWalkWord:type=int64<overflow='wrap'>
+dc_event=(kind:ChannelWalkWord loc:DlLoc site:ChannelWalkWord):>void=>{
+    dc_count=ChannelWalkWord(dc_count) + 1
+    if dc_count >? DC_EVENTS {
+        dc_complete=false
+        return
+    }
+    let loops:array<int64>=[]
+    loop x in dc_loops {loops.push(x)}
+    let locs:array<DlLoc>=[]
+    let sites:array<int64>=[]
+    loop h in dc_held {
+        locs.push(h.loc)
+        sites.push(h.site)
+    }
+    dc_ev.push(DcEvent(kind loc loops dc_branch >? 0 locs sites site))
+}
+dc_drop=(mark:ChannelWalkWord):>void=>{
+    loop dc_held.length >? mark {dc_held.pop();}
+}
+dc_walk=(n:ChannelWalkWord):>void=>$unsafe {
+    if n =? 0 or dc_count >? DC_EVENTS {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fnref' {return}
+    if k =? 'block' {
+        let mark=dc_held.length
+        loop c in kids(n) {dc_walk(c)}
+        if nodes.ptr[n].aux not=? 5 {dc_drop(mark)}
+        return
+    }
+    if k =? 'vardecl' {
+        let init=ChannelWalkWord(nodes.ptr[n].b)
+        loop init not=? 0 and nodes.ptr[init].kind =? 'conv' {init=ChannelWalkWord(nodes.ptr[init].a)}
+        if init not=? 0 and nodes.ptr[init].kind =? 'call' {
+            let what=dl_lock_call(init)
+            if what =? "lock" or what =? "try_lock$acquire" or what =? "__take" {
+                let loc=dc_loc(dl_receiver(init))
+                if what =? "lock" {dc_event(4 loc nodes.ptr[init].pos)}
+                dc_held.push(DlHeld(loc nodes.ptr[init].pos ChannelWalkWord(nodes.ptr[n].sym)))
+                return
+            }
+        }
+        dc_walk(ChannelWalkWord(nodes.ptr[n].b))
+        return
+    }
+    if k =? 'if_' or k =? 'iflet' {
+        dc_walk(ChannelWalkWord(nodes.ptr[n].a))
+        let mark=dc_held.length
+        dc_branch=ChannelWalkWord(dc_branch) + 1
+        dc_walk(ChannelWalkWord(nodes.ptr[n].b))
+        dc_drop(mark)
+        dc_walk(ChannelWalkWord(nodes.ptr[n].c))
+        dc_drop(mark)
+        dc_branch=ChannelWalkWord(dc_branch) - 1
+        return
+    }
+    if k =? 'for_' or k =? 'while_' {
+        let trips=dc_trip_count(n)
+        if k =? 'for_' {dc_walk(ChannelWalkWord(nodes.ptr[n].a))}
+        let cond=ChannelWalkWord(nodes.ptr[n].a)
+        let maybe=trips =? 0 or trips <? 0 and not (k =? 'while_' and nodes.ptr[cond].kind =? 'bool_lit' and nodes.ptr[cond].ival =? 1)
+        dc_loops.push(dc_trips.length)
+        dc_trips.push(trips)
+        if maybe {dc_branch=ChannelWalkWord(dc_branch) + 1}
+        if k =? 'while_' {dc_walk(cond)}
+        let mark=dc_held.length
+        dc_walk(ChannelWalkWord(nodes.ptr[n].b))
+        dc_drop(mark)
+        if maybe {dc_branch=ChannelWalkWord(dc_branch) - 1}
+        dc_loops.pop();
+        return
+    }
+    if k =? 'call' {
+        dc_call(n)
+        return
+    }
+    if k =? 'propagate' or k =? 'parallel_region' {
+        dc_walk(ChannelWalkWord(nodes.ptr[n].a))
+        return
+    }
+    loop g in value_helper_calls(n) {dc_enter(g 0)}
+    let branches=k =? 'match_' or k =? 'arm'
+    if branches {dc_branch=ChannelWalkWord(dc_branch) + 1}
+    let mask=isolation_children(k)
+    if mask <? 0 {
+        dc_walk(ChannelWalkWord(nodes.ptr[n].a))
+        dc_walk(ChannelWalkWord(nodes.ptr[n].b))
+        dc_walk(ChannelWalkWord(nodes.ptr[n].c))
+        loop c in kids(n) {dc_walk(c)}
+    } else {
+        if mask & 1 not=? 0 {dc_walk(ChannelWalkWord(nodes.ptr[n].a))}
+        if mask & 2 not=? 0 {dc_walk(ChannelWalkWord(nodes.ptr[n].b))}
+        if mask & 4 not=? 0 {dc_walk(ChannelWalkWord(nodes.ptr[n].c))}
+        if mask & 16 not=? 0 {
+            let mark=dc_held.length
+            loop c in kids(n) {
+                dc_walk(c)
+                if branches {dc_drop(mark)}
+            }
+        }
+        if mask & 32 not=? 0 {loop c in kids2(n) {dc_walk(c)}}
+    }
+    if branches {dc_branch=ChannelWalkWord(dc_branch) - 1}
+}
+dc_call=(n:ChannelWalkWord):>void=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let what=dl_lock_call(n)
+    if what =? "__lock_all" {
+        let words=kid(n 1)
+        if nodes.ptr[words].kind =? 'namedarg' {words=ChannelWalkWord(nodes.ptr[words].a)}
+        loop c in kids(words) {
+            let call=c
+            loop nodes.ptr[call].kind =? 'conv' {call=ChannelWalkWord(nodes.ptr[call].a)}
+            if nodes.ptr[call].kind =? 'call' {dc_event(4 dc_loc(dl_receiver(call)) pos)}
+        }
+        return
+    }
+    if what.endswith("$release") {
+        if nkids(n) >=? 2 {
+            let g=kid(n 1)
+            if nodes.ptr[g].kind =? 'ident' and nodes.ptr[g].sym >? 0 {
+                loop i in [0..dc_held.length) {
+                    if dc_held.ptr[i].guard =? ChannelWalkWord(nodes.ptr[g].sym) {
+                        dc_held.pop(i);
+                        break
+                    }
+                }
+            }
+        }
+        return
+    }
+    if what.length >? 0 {return}
+    let op=dc_chan_call(n)
+    if op >? 0 {
+        loop i in [1..nkids(n)) {dc_walk(kid(n i))}
+        let loc=dc_loc(kid(n 0))
+        if fns.ptr[ChannelWalkWord(nodes.ptr[n].sym)].mod =? dc_smod {dc_ends[dl_key(loc)]=true}
+        if loc.root =? 0 or not loc.exact or loc.route.length >? 0 or loc.root not=? 2 and loc.root not=? 1 {dc_precise=false}
+        if op =? 3 {dc_closes=true}
+        if op =? 6 or op =? 7 {
+            dc_attempts[dl_key(loc)]=true
+            if loc.root not=? 1 and loc.root not=? 2 or not loc.exact or loc.route.length >? 0 {dc_unknown_attempt=true}
+        }
+        dc_event(op loc pos)
+        return
+    }
+    loop c in kids(n) {dc_walk(c)}
+    if nodes.ptr[n].aux =? 1 or nodes.ptr[n].aux =? 4 {
+        dc_walk(ChannelWalkWord(nodes.ptr[n].a))
+        dc_complete=false
+        return
+    }
+    if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return}
+    let g=ChannelWalkWord(nodes.ptr[n].sym)
+    let d=ChannelWalkWord(fns.ptr[g].decl)
+    let gname=if d not=? 0 {name_of(ChannelWalkWord(nodes.ptr[d].name))} else {""}
+    if gname =? "__task_spawn" and nkids(n) =? 2 {
+        let h=dl_fn_arg(kid(n 1))
+        if h >? 0 and fns.ptr[h].body not=? 0 {
+            if dc_pending.length >=? DC_ACTORS {
+                dc_complete=false
+                return
+            }
+            let ffns:array<int64>=[]
+            let fcalls:array<int64>=[]
+            loop x in dc_ffns {ffns.push(x)}
+            loop x in dc_fcalls {fcalls.push(x)}
+            ffns.push(h)
+            fcalls.push(0)
+            dc_pending.push(DcSpawn(h ffns fcalls dc_multi or dc_loops.length >? 0 dl_key(dc_loc(kid(n 0))) pos))
+        }
+        return
+    }
+    if gname =? "cancel" and pos_in_lib(nodes.ptr[d].pos) {dc_cancels=true}
+    if gname =? "cancel" and pos_in_lib(nodes.ptr[d].pos) {dc_cancels=true}
+    if gname =? "__task_join" and nkids(n) =? 1 {
+        dc_event(5 dc_loc(kid(n 0)) pos)
+        return
+    }
+    if fns.ptr[g].parallel_api {return}
+    if not dl_relevant.has(g) {
+        loop c in kids(n) {
+            let h=dl_fn_arg(c)
+            if h >? 0 and dl_relevant.has(h) {dc_complete=false}
+        }
+        return
+    }
+    dc_enter(g n)
+}
+dc_enter=(g:ChannelWalkWord n:ChannelWalkWord):>void=>$unsafe {
+    if not dl_relevant.has(g) or fns.ptr[g].body =? 0 {return}
+    if g in? dc_ffns or dc_ffns.length >? DC_DEPTH {
+        dc_complete=false
+        return
+    }
+    dc_ffns.push(g)
+    dc_fcalls.push(n)
+    dc_walk(ChannelWalkWord(fns.ptr[g].body))
+    dc_ffns.pop();
+    dc_fcalls.pop();
+}
+dc_collect=():>void=>$unsafe {
+    dc_ev=[]
+    loop f in [init_fns... main_fn] {
+        if f <=? 0 or not dl_relevant.has(f) {continue}
+        dc_ffns=[]
+        dc_fcalls=[]
+        dc_enter(f 0)
+    }
+    dc_actors.push(DcActor(dc_ev "the program's thread" false "" 0))
+    let i:ChannelWalkWord=0
+    loop i <? dc_pending.length {
+        let s=dc_pending.ptr[i]
+        i+=1
+        dc_ev=[]
+        dc_ffns=s.ffns
+        dc_fcalls=s.fcalls
+        dc_loops=[]
+        dc_held=[]
+        dc_branch=0
+        dc_multi=s.multi
+        if dl_relevant.has(s.h) {dc_walk(ChannelWalkWord(fns.ptr[s.h].body))}
+        dc_actors.push(DcActor(dc_ev "the task spawned at {dl_line(s.site)}" s.multi s.group ChannelWalkWord(fns.ptr[s.h].ret)))
+    }
+}
