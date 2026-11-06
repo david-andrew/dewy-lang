@@ -362,6 +362,29 @@ lower = (s: str) -> str: __case_text(s, false)
 # (a copy of s changed in place, a byte at a time: an ASCII letter by itself, a two-byte UTF-8
 # character (the only ones with another case here, and its other case is two bytes too) decoded
 # and encoded again; the bytes of longer ones, and bytes that are not UTF-8, as they are)
+# (compile-time evaluation's __case_text: the same mapping, built without raw writes)
+__case_text_plain = (s: str, up: bool) -> str:
+    n = len(s)
+    out: u8[]
+    lo = if up: 97 else: 65
+    hi = if up: 122 else: 90
+    i = 0
+    loop i < n:
+        c = int(s[i])
+        if c < 128:
+            out.push(u8(if c >= lo and c <= hi: c xor 32 else: c))
+            i += 1
+        else if c >= 0xC2 and c <= 0xDF and i + 1 < n and int(s[i + 1]) & 0xC0 == 0x80:
+            cp = ((c & 0x1F) << 6) | (int(s[i + 1]) & 0x3F)
+            d = __case_of(cp, up)
+            out.push(u8(0xC0 | (d >> 6)))
+            out.push(u8(0x80 | (d & 0x3F)))
+            i += 2
+        else:
+            out.push(u8(c))
+            i += 1
+    str_from_bytes(out)
+
 __case_text = (s: str, up: bool) -> str:
     n = len(s)
     if n == 0: return ""

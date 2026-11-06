@@ -4277,7 +4277,8 @@ General compile-time execution has no mandatory step limit or termination proof.
 It cannot read runtime locals or mutable globals, mutate global state, perform
 I/O, call external functions, or access host memory. Bounded read-only views of
 evaluator-owned integer buffers support ordinary library scanners, including
-Unicode string length. Existing `$include_bytes` inputs retain their tracked
+Unicode string length. The library's text operations (`split`, `find`, `replace`,
+`join`, `upper`, `to_int`, …) run there too, so a validator can use them. Existing `$include_bytes` inputs retain their tracked
 file dependencies. Indirect/capturing calls, raw writes, generated declarations
 and general artifact/host APIs are not yet supported; unsupported operations
 are diagnosed, never silently deferred to runtime.
