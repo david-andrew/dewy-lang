@@ -9482,6 +9482,9 @@ aggregate_error = (n: int, code: int, t: int):
     if code == 1: aggregate_type_error(n)
     if code == 2: fatal(nodes[n].pos, "{dt(t)} has {int(types[t].nargs)} positions, and this array gives {nkids(n)} values")
     if code == 3: fatal(nodes[n].pos, "only arrays can be spread into an array (found {dt(t)})")
+    if nkids(n) > 0 and nodes[kid(n, 0)].kind == .namedarg and (tkind(t) == .array or tkind(t) == .fixed):
+        name = name_of(int(nodes[kid(n, 0)].name))
+        fatal(nodes[n].pos, "`{name} = ...` inside `[ ]` names a record field, but {dt(t)} is expected here; to change the variable `{name}`, put it in a block, `\{ {name} = ... }`, or make the change outside the literal")
     fatal(nodes[n].pos, "record literal needs a record type, found {dt(t)}")
 
 # the expression a nonempty block ends in

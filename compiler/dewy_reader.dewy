@@ -601,7 +601,7 @@ rd_dc_array_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int
     }
     if collects {
         if ((named and positional) and (not rows)) {
-            return rd_dc_hint(@reader_ctx rd_dc_mixed_at(@reader_ctx @reader_nodes items starts) "Dewy does not yet support a record item without a field name and =")
+            return rd_dc_hint(@reader_ctx rd_dc_mixed_at(@reader_ctx @reader_nodes items starts) rd_dc_mixed_text(@reader_ctx @reader_nodes items))
         }
         if (((named or rows) or (reader_nodes[n].kind =? 'map_lit')) or (flows and (reader_ctx.reader.dc_targets_made not=? targets))) {
             return 0
@@ -6957,8 +6957,20 @@ rd_dc_mixed_at=(@reader_ctx:ParserContext @reader_nodes:array<Node> flow:int64):
 rd_dc_mixed_record=(@reader_ctx:ParserContext @reader_nodes:array<Node> items:array<int64> starts:array<int64>):>void=>$unsafe {
     let at:int64=rd_dc_mixed_at(@reader_ctx @reader_nodes items starts)
     if (at not=? 0) {
-        rd_dc_unsupported(@reader_ctx at "a record item without a field name and =");
+        rd_dc_report(@reader_ctx at rd_dc_mixed_text(@reader_ctx @reader_nodes items));
     }
+}
+
+# (a bare `count = 5` in `[ ]` is the field that makes this a record, and often meant as a change)
+rd_dc_mixed_text=(@reader_ctx:ParserContext @reader_nodes:array<Node> items:array<int64>):>string=>$unsafe {
+    let name="name"
+    loop item in items {
+        if (reader_nodes[item].kind =? 'namedarg') {
+            name = rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[item].name))
+            break
+        }
+    }
+    "`{name} = ...` inside `[ ]` names a record field, so every item here needs a field name; to change the variable `{name}`, put it in a block, `\{ {name} = ... }`, or make the change outside the literal"
 }
 
 # `{ ... }` of module statements (dn_bracketed_from's braces), bodies read eagerly.

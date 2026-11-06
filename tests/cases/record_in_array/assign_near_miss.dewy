@@ -1,0 +1,12 @@
+# The near misses: a block changes the variable, and a whole record stays a record.
+main = () => {
+    let count = 1
+    let a:array<int64> = [
+        { count = 5 }
+        count
+        if count >? 2 count += 1
+        count
+    ]
+    let r = [count = 7]
+    printl("{a} {count} {r.count}")
+}
