@@ -1,0 +1,16 @@
+good = (s:array<int>):>int => {
+    if s.length =? 0 return 0
+    if s.length % 3 =? 0 return s[s.length // 3 - 1]
+    -1
+}
+keeps_sign = (x:int<-10 <=? x <=? 10>):>int => {
+    if x % 4 =? 3 return x
+    0
+}
+main = () => {
+    printl(good([1 2 3]))
+    printl(good([1 2]))
+    printl(keeps_sign(-1))
+    printl(keeps_sign(7))
+    printl(keeps_sign(8))
+}

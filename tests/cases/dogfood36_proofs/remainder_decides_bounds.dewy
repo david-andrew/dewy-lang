@@ -1,0 +1,32 @@
+# A decided remainder moves the dividend to the next multiple; quotients follow.
+median = (xs:array<int>):>float64? => {
+    let s = xs.sorted()
+    if s.length =? 0 return none
+    let mid = s.length // 2
+    if s.length % 2 =? 1 return float64(s[mid])
+    float64(s[mid - 1] + s[mid]) / 2.0
+}
+median2 = (xs:array<int>):>float64? => {
+    let s = xs.sorted()
+    let n = s.length
+    if n =? 0 return none
+    if n % 2 =? 0 return float64(s[n // 2 - 1] + s[n // 2]) / 2.0
+    float64(s[n // 2])
+}
+median3 = (s:array<int>):>int => {
+    let n = s.length
+    if n >? 0 {
+        if n % 2 not=? 1 { return s[n//2 - 1] }
+        return s[n//2]
+    }
+    0
+}
+main = () => {
+    printl(median([3 1 2]))
+    printl(median([4 1 3 2]))
+    printl(median([]))
+    printl(median2([3 1 2]))
+    printl(median2([4 1 3 2]))
+    printl(median3([1 2 3 4]))
+    printl(median3([1 2 3]))
+}

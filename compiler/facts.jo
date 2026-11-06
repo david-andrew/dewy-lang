@@ -3496,6 +3496,45 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
     if op == .lt or op == .le:
         fact_offset_narrow(s, a, x)
         fact_offset_narrow(s, b, y)
+    else:
+        fact_remainder_decided(s, a)
+        fact_remainder_decided(s, b)
+
+# A guard decided `d % c` (c a literal above 1, `n % 2 =? 1` false): d is that remainder plus a
+# multiple of c, so its ends move in to the nearest such values (n >=? 1 becomes n >=? 2), and a
+# quotient of d already held here follows (`mid = n // 2` is then at least 1). O(1), plus the
+# values held here only when the dividend's bounds moved: guards that decide a remainder are rare.
+fact_remainder_decided = (s: mut FactState, r: int):
+    if r <= 0 or r >= fact_terms.len(): return
+    t = fact_terms[r]
+    if t.op != .eof or t.a == 0 or t.b == 0 or t.origin <= 0 or t.origin >= nodes.len(): return
+    o = t.origin
+    if not (nodes[o].kind == .binary and nodes[o].op == i32(int(Tok.percent)) or nodes[o].kind == .call and fact_floor_call(o) == 2): return
+    left = fact_bound(s, r); c = fact_bound(s, t.b); d = fact_bound(s, t.a)
+    if left.wide or left.lo != left.hi or c.wide or c.lo != c.hi or c.lo < 2 or left.lo < 0 or left.lo >= c.lo or d.wide or fact_slot(s, t.a) < 0: return
+    lo = d.lo
+    hi = d.hi
+    if lo > FACT_MIN + c.lo: lo += fact_floor_mod(left.lo - lo, c.lo)
+    if hi < FACT_MAX - c.lo: hi -= fact_floor_mod(hi - left.lo, c.lo)
+    if lo == d.lo and hi == d.hi: return
+    fact_set_bound(s, t.a, FactBound(lo, hi, d.nz or lo > 0 or hi < 0))
+    if not s.live: return
+    loop i in [0..s.ids.len()):
+        q = s.ids[i]
+        if fact_terms[q].a != t.a: continue
+        k = fact_quotient_divisor(s, q)
+        if k <= 0: continue
+        b = fact_bound(s, q)
+        if b.wide: continue
+        fact_set_bound(s, q, FactBound(max(b.lo, fact_floor_div(lo, k)), min(b.hi, fact_floor_div(hi, k))))
+
+fact_floor_mod = (a: int, c: int) -> int:
+    m = a % c
+    if m < 0: m + c else: m
+
+fact_floor_div = (a: int, c: int) -> int:
+    q = a / c
+    if a % c < 0: q - 1 else: q
 
 # Two current bounds can bring a wide intermediate back into the host domain.
 # Each endpoint needs a finite captured neighbor, never a cycle of wide terms.

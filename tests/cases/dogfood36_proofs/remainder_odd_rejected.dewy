@@ -1,0 +1,7 @@
+# near miss: odd length of one has no predecessor
+bad = (s:array<int>):>int => {
+    if s.length =? 0 return 0
+    if s.length % 2 =? 1 return s[s.length // 2 - 1]
+    0
+}
+main = () => printl(bad([1 2]))

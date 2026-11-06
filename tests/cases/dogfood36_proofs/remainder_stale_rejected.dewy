@@ -1,0 +1,8 @@
+# near miss: the value changed after the guard
+bad = (@s:array<int>):>int => {
+    if s.length =? 0 return 0
+    if s.length % 2 =? 1 return 0
+    s.pop();
+    s[s.length // 2 - 1]
+}
+main = () => { let a = [1 2]; printl(bad(@a)) }
