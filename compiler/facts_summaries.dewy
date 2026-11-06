@@ -1,0 +1,616 @@
+$runtime_checks
+from p"ast.jo" import (NF_EXTERN has_flag kid nkids nodes)
+from p"check.jo" import (FK_INIT LF_MUTPARAM fns globals locals)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"effects.jo" import (effect_unavailable)
+from p"expr.jo" import (is_map_type is_nd mk_ident_local ntype shape_field_type)
+from p"facts.jo" import (FACT_CAP FACT_STEPS FactPaths FactProjection FactState FactSummary fact_add_fits fact_add_projection fact_bind fact_binding fact_bound fact_call_field_type fact_capture fact_clamped fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_types fact_difference fact_distance fact_domain fact_entails fact_host_finite fact_hull fact_hull_owner fact_hull_type fact_join fact_length_max fact_loop_exhausted fact_loop_steps fact_loops fact_new fact_owner fact_pair_key fact_pending_defers fact_place fact_probe_on fact_project fact_projection_find fact_push_frames fact_query fact_read fact_record_array_types fact_route fact_route_values fact_scalar fact_set_bound fact_shape_summaries fact_slice fact_slice_prepare fact_slice_push_children fact_speculating fact_step_limit fact_summaries fact_summary_acc fact_summary_assumed fact_summary_entry fact_summary_field fact_summary_fields fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_tag fact_terms fact_type)
+from p"facts_pools.dewy" import (fact_pool_type)
+from p"nd_contracts.jo" import (fact_nd_data_length fact_nd_shape)
+from p"ownership.jo" import (ownership_decls ownership_fact_cleanup)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"place_routes.dewy" import (place_route)
+from p"proofs.jo" import (ResultEvidence proof_active result_active)
+from p"refine.jo" import (ref_intern refine_active refine_entry refine_fact_entry refine_owners)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm RefAtom RefTerm)
+from p"types.jo" import (T_INT T_MATH_INT T_U64 T_VOID fields is_int structs tkind type_args types)
+
+SummaryWord:type=int64<overflow='wrap'>
+# Summarize only a demanded array field or integer tuple slot, over every
+# return. Expected O(1) lookup; at most 32 syntax nodes per callee, 128 transfer visits per field query.
+fact_constructor_field=(@s:FactState base:SummaryWord selector:SummaryWord v:SummaryWord):>void=>$unsafe {
+    let call=fact_terms[base].origin
+    let tuple=tkind(fact_type(fact_terms[base].type)) =? 'tuple'
+    let summary=fact_summary(SummaryWord(nodes.ptr[call].sym) false if tuple {selector + 1} else {selector})
+    if tuple and fact_scalar(fact_terms[v].type) and is_int(fact_terms[v].type) {
+        if summary.seen and not summary.value.wide {
+            let old=fact_bound(s v)
+            if summary.host and v not=? 0 {fact_terms[v].type=T_INT}
+            fact_set_bound(@s v FactBound(max(old.lo summary.value.lo) min(old.hi summary.value.hi) old.nz or summary.value.nz))
+        }
+        return
+    }
+    if summary.seen {
+        let length=fact_project(@s v (-1) false T_INT)
+        let old=fact_bound(s length)
+        fact_set_bound(@s length FactBound(max(old.lo summary.length.lo) min(old.hi summary.length.hi)))
+        let actuals=fact_constructor_actuals[base]
+        if summary.same >=? 0 and summary.same <? actuals.length {
+            let arg=actuals[summary.same]
+            let pt=fact_type(ntype(kid(call summary.same)))
+            let other=if tkind(pt) =? 'array' {fact_project(@s arg (-1) false T_INT)} else {fact_clamped(@s arg call)}
+            fact_difference(@s length other summary.delta call)
+            fact_difference(@s other length (-SummaryWord(summary.delta)) call)
+            let b=fact_bound(s length)
+            let o=fact_bound(s other)
+            let lo=if o.lo >=? 0 and fact_add_fits(o.lo summary.delta) {max(b.lo o.lo + summary.delta)} else {b.lo}
+            let hi=if o.hi <=? fact_length_max() and fact_add_fits(o.hi summary.delta) {min(b.hi o.hi + summary.delta)} else {b.hi}
+            fact_set_bound(@s length FactBound(lo hi))
+        }
+    }
+}
+# The parameter whose entry length the result length equals plus a constant in
+# [-2, 2]: at most a few distance queries per array parameter and return.
+fact_summary_relation=(s:FactState length:SummaryWord):>[int64 int64]=>{
+    loop i in [0..fact_summary_entry.length) {
+        let l=fact_summary_entry[i]
+        if l =? 0 {continue}
+        loop c in [-2..3) {
+            if fact_distance(s length l c) and fact_distance(s l length (-c)) {return [i c]}
+        }
+    }
+    [(-1) 0]
+}
+fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
+    let t=fact_type(SummaryWord(fns.ptr[fact_summary_owner].ret))
+    let r=r0
+    let payload=fact_summary_payload(t)
+    if payload not=? 0 and fact_summary_field =? 0 {
+        # (a present return's payload; a known `none` adds nothing)
+        if r not=? 0 {
+            let tag=fact_bound(s fact_project(@s r (-3) false T_INT))
+            if tag.lo =? 0 and tag.hi =? 0 and not tag.wide {return}
+            # (this describes a present payload: what holds where the tag is 1,
+            # its implications too; the state ends with this return)
+            if s.conditional.length >? 0 and not (tag.lo =? 1 and tag.hi =? 1) {
+                fact_tag(@s r 1 true)
+                if not s.live {return}
+            }
+            r=fact_project(@s r (-4) false payload)
+        }
+        t=payload
+    }
+    if fact_summary_field not=? 0 {
+        let selector=if tkind(t) =? 'tuple' {fact_summary_field - 1} else {fact_summary_field}
+        t=fact_summary_field_type(t fact_summary_field)
+        if r not=? 0 {r=fact_project(@s r selector false t)}
+    }
+    let length=FactBound()
+    let value=FactBound()
+    let same:SummaryWord=-1
+    let delta:SummaryWord=0
+    if r not=? 0 and tkind(t) =? 'array' {
+        let lv=fact_project(@s r (-1) false T_INT)
+        length=fact_bound(s lv)
+        if fact_summary_entry.length >? 0 {
+            let relation=fact_summary_relation(s lv)
+            same=relation[0]
+            delta=relation[1]
+        }
+    }
+    else if r not=? 0 {value=fact_bound(s r)}
+    # (a mathematical int result of fixed-width or singleton returns is a
+    # finite int64 value; O(incident rows) per return)
+    let host=r not=? 0 and fact_type(t) =? T_MATH_INT and (not fact_summary_acc.seen or fact_summary_acc.host) and fact_host_finite(s r)
+    let upper:SummaryWord=-1
+    let upper_delta:SummaryWord=0
+    let upper_field:SummaryWord=0
+    let post_field:SummaryWord=0
+    if r not=? 0 and fact_scalar(t) and is_int(t) and t not=? T_U64 {
+        # One source-selected array endpoint per result; at most two bounded
+        # queries per array parameter/return, no pair enumeration. Once a
+        # result arm loses the relation, later arms cannot restore it.
+        loop i in [0..fact_summary_entry.length) {
+            let length_value=fact_summary_entry[i]
+            if length_value =? 0 {continue}
+            if fact_summary_acc.seen and fact_summary_acc.upper not=? i {continue}
+            let limit=if not fact_summary_acc.seen or fact_summary_acc.upper_delta =? -1 {-1} else {0}
+            let holds=fact_entails(s r length_value limit)
+            if not holds and limit not=? 0 {
+                limit=0
+                holds=fact_entails(s r length_value limit)
+            }
+            if holds {
+                upper=i
+                upper_delta=limit
+                break
+            }
+        }
+        # (or a record parameter's array field, when no array parameter holds it)
+        if upper <? 0 {
+            loop entry in fact_summary_fields {
+                if fact_summary_acc.seen and (fact_summary_acc.upper not=? entry[0] or fact_summary_acc.upper_field not=? entry[1]) {continue}
+                let limit=if not fact_summary_acc.seen or fact_summary_acc.upper_delta =? -1 {-1} else {0}
+                let holds=fact_entails(s r entry[2] limit)
+                if not holds and limit not=? 0 {
+                    limit=0
+                    holds=fact_entails(s r entry[2] limit)
+                }
+                if holds {
+                    upper=entry[0]
+                    upper_field=entry[1]
+                    upper_delta=limit
+                    break
+                }
+            }
+        }
+    }
+    let post:SummaryWord=-1
+    # Place results refer to the final observable array, not its entry value.
+    # Pending return cleanup has not run: publish no place relation then.
+    # One bounded query per mutable array parameter on demanded scalar
+    # summaries only; existing body/state budgets apply. Every return agrees.
+    if r not=? 0 and fact_scalar(t) and is_int(t) and t not=? T_U64 and fact_pending_defers =? 0 and not ownership_fact_cleanup {
+        loop i in [0..fact_summary_entry.length) {
+            let l=fns.ptr[fact_summary_owner].params[i]
+            if fact_summary_entry[i] =? 0 or SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {continue}
+            if fact_summary_acc.seen and fact_summary_acc.post not=? i {continue}
+            let b=fact_binding(s PlaceIdentity('local' SummaryWord(locals.ptr[l].owner) l))
+            if b <? 0 {continue}
+            let length_value=fact_project(@s s.bindings[b].value (-1) false T_INT)
+            if not fact_entails(s r length_value (-1)) {continue}
+            post=i
+            break
+        }
+        # (a mutable record parameter's array field at exit, `intern(@g name)`)
+        if post <? 0 {
+            loop entry in fact_summary_fields {
+                let l=fns.ptr[fact_summary_owner].params[entry[0]]
+                if SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {continue}
+                if fact_summary_acc.seen and (fact_summary_acc.post not=? entry[0] or fact_summary_acc.post_field not=? entry[1]) {continue}
+                let b=fact_binding(s PlaceIdentity('local' SummaryWord(locals.ptr[l].owner) l))
+                if b <? 0 {continue}
+                let pt=fact_type(SummaryWord(locals.ptr[l].type))
+                let field=fact_project(@s s.bindings[b].value entry[1] false fact_call_field_type(pt entry[1]))
+                if field =? 0 or not fact_entails(s r fact_project(@s field (-1) false T_INT) (-1)) {continue}
+                post=entry[0]
+                post_field=entry[1]
+                break
+            }
+        }
+    }
+    # Reuse globals already demanded by this scalar summary, never scan
+    # module declarations or a second body. At most eight bounded queries
+    # on its first return; later returns check the same indexed binding.
+    # Cleanup may still replace/shrink a global after evaluating the result.
+    let global_post:SummaryWord=0
+    if r not=? 0 and payload =? 0 and fact_summary_field =? 0 and fact_scalar(t) and is_int(t) and t not=? T_U64 and upper <? 0 and post <? 0 and fact_pending_defers =? 0 and not ownership_fact_cleanup {
+        if fact_summary_acc.seen {
+            let g=fact_summary_acc.global_post
+            if g >? 0 {
+                let b=fact_binding(s PlaceIdentity('global' 0 g))
+                if b >=? 0 and fact_entails(s r fact_project(@s s.bindings[b].value (-1) false T_INT) (-1)) {global_post=g}
+            }
+        }
+        else {
+            let tried:SummaryWord=0
+            let bindings=s.bindings
+            loop binding in bindings {
+                let g=binding.place.declaration
+                if binding.place.root not=? 'global' or g <=? 0 or tkind(fact_type(SummaryWord(globals.ptr[g].type))) not=? 'array' {continue}
+                if tried >=? 8 {break}
+                tried += 1
+                if fact_entails(s r fact_project(@s binding.value (-1) false T_INT) (-1)) {
+                    global_post=g
+                    break
+                }
+            }
+        }
+    }
+    if fact_summary_acc.seen {
+        length=fact_hull(fact_summary_acc.length length 0)
+        value=fact_hull(fact_summary_acc.value value 0)
+        if fact_summary_acc.same not=? same or fact_summary_acc.delta not=? delta {same=-1}
+    }
+    let lengths:array<int64>=[]
+    let useful=false
+    loop i in [0..fact_summary_entry.length) {
+        let mode:SummaryWord=0
+        let l=fns.ptr[fact_summary_owner].params[i]
+        let prior=if not fact_summary_acc.seen {1} else if i <? fact_summary_acc.lengths.length {fact_summary_acc.lengths[i]} else {0}
+        if prior not=? 0 and fact_summary_entry[i] not=? 0 and SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 and fact_pending_defers =? 0 and not ownership_fact_cleanup {
+            let b=fact_binding(s PlaceIdentity('local' SummaryWord(locals.ptr[l].owner) l))
+            if b >=? 0 {
+                let current=fact_project(@s s.bindings[b].value (-1) false T_INT)
+                if fact_entails(s fact_summary_entry[i] current 0) {
+                    mode=if prior =? 1 and fact_entails(s current fact_summary_entry[i] 0) {1} else {2}
+                }
+            }
+        }
+        lengths.push(mode)
+        useful=useful or mode not=? 0
+    }
+    if not useful {lengths=[]}
+    if fact_summary_shapes.length >? 0 {fact_summary_record_shapes(@s)}
+    fact_summary_acc=FactSummary(length value true same delta upper upper_delta host post lengths upper_field post_field global_post)
+    # A hull only widens. Once it says nothing the result's own domain does
+    # not, and no argument-length relation survives (once lost, it stays
+    # lost), the rest of the run cannot bound anything a caller asks: stop it
+    # (an unbounded summary counts the same as none).
+    if same <? 0 and upper <? 0 and post <? 0 and global_post =? 0 and fact_summary_shape_mask =? 0 and fact_summary_vacuous(fact_summary_acc t) {
+        fact_loop_steps=FACT_STEPS + 1
+        fact_loop_exhausted=true
+    }
+}
+# O(demanded N-D parameters) per return, under the ordinary summary budget.
+fact_summary_record_shapes=(@s:FactState):>void=>$unsafe {
+    let shapes:SummaryWord=0
+    loop entry in fact_summary_shapes {
+        let i=entry[0]
+        let keeps=false
+        if entry[1] not=? 0 and (not fact_summary_acc.seen or fact_summary_shape_mask & (SummaryWord(1) << (SummaryWord(i) & 63)) not=? 0) and fact_pending_defers =? 0 and not ownership_fact_cleanup {
+            let l=fns.ptr[fact_summary_owner].params[i]
+            let b=fact_binding(s PlaceIdentity('local' SummaryWord(locals.ptr[l].owner) l))
+            if b >=? 0 {
+                let current=s.bindings[b].value
+                keeps=fact_nd_shape(@s current) =? entry[1] and fact_nd_data_length(@s current) =? entry[2]
+            }
+        }
+        if keeps {shapes |= SummaryWord(1) << (SummaryWord(i) & 63)}
+    }
+    fact_summary_shape_mask=shapes
+}
+# An optional integer result (`:>int?`, a position or none): its summary
+# describes the payload of the present returns. O(1).
+fact_summary_payload=(t:SummaryWord):>SummaryWord=>$unsafe {
+    if tkind(t) not=? 'opt' {return 0}
+    let e=fact_type(SummaryWord(types.ptr[t].elem))
+    if fact_scalar(e) and is_int(e) and e not=? T_U64 {e} else {0}
+}
+fact_summary_vacuous=(acc:FactSummary t:SummaryWord):>bool=>{
+    if acc.lengths.length >? 0 {return false}
+    if tkind(t) =? 'array' {return acc.length.lo <=? 0 and acc.length.hi >=? fact_length_max()}
+    let d=fact_domain(t)
+    acc.value.lo <=? d.lo and acc.value.hi >=? d.hi and not acc.value.nz and not acc.host
+}
+# Ordinary array record fields and flat tuple slots. Shaped tensors have
+# their own contracts; nested records, variants and hooks stay outside this
+# summary. Type-indexed, O(fields), at most 32 tuple slots per demanded type.
+fact_constructor_type=(t:SummaryWord):>bool=>$unsafe {
+    if tkind(t) not=? 'struct_' and tkind(t) not=? 'tuple' {return false}
+    let known=fact_constructor_types.get(t)
+    if known not=? none {return known}
+    if tkind(t) =? 'tuple' {
+        let found=false
+        if types.ptr[t].nargs >? 32 {fact_constructor_types[t]=false; return false}
+        loop i in [0..SummaryWord(types.ptr[t].nargs)) {
+            let part=fact_type(type_args[SummaryWord(types.ptr[t].args) + i])
+            if tkind(part) =? 'array' or fact_scalar(part) and is_int(part) and part not=? T_U64 {found=true}
+        }
+        if found and ownership_decls.length not=? 0 and ownership_fact_type(t) {found=false}
+        fact_constructor_types[t]=found
+        return found
+    }
+    let si=SummaryWord(types.ptr[t].st)
+    let eligible=not is_nd(t) and structs.ptr[si].nvariants =? 0 and not structs.ptr[si].union_ and not structs.ptr[si].soa_
+    let found=false
+    if eligible {
+        loop i in [0..SummaryWord(structs.ptr[si].nfields)) {
+            if tkind(fact_type(SummaryWord(fields.ptr[SummaryWord(structs.ptr[si].fields) + i].type))) =? 'array' {found=true}
+        }
+    }
+    if found and ownership_decls.length not=? 0 and ownership_fact_type(t) {found=false}
+    fact_constructor_types[t]=found
+    found
+}
+# Bound slice construction too, before it allocates indexes for a large
+# algorithm merely because its return type happens to contain an array.
+fact_constructor_body=(f:SummaryWord):>bool=>$unsafe {
+    let known=fact_constructor_bodies.get(f)
+    if known not=? none {return known}
+    let work:array<int64>=[SummaryWord(fns.ptr[f].body)]
+    let cursor:SummaryWord=0
+    loop cursor <? work.length and work.length <=? 32 {
+        let n=work[cursor]
+        cursor += 1
+        if n not=? 0 and nodes.ptr[n].kind not=? 'lambda' {
+            if nkids(n) >? 32 {
+                fact_constructor_bodies[f]=false
+                return false
+            }
+            fact_slice_push_children(@work n)
+        }
+    }
+    let small=work.length <=? 32
+    fact_constructor_bodies[f]=small
+    small
+}
+# A demanded constructor field survives a conditional value just as
+# separate return statements do. No other fields need to be visited.
+fact_constructor_join=(n:SummaryWord paths0:FactPaths y:SummaryWord z:SummaryWord result:FactBound hull:SummaryWord @s:FactState):>SummaryWord=>{
+    let paths=paths0
+    let field=fact_summary_field
+    let ft=fact_summary_field_type(fact_type(ntype(n)) field)
+    if tkind(fact_type(ntype(n))) =? 'tuple' {field -= 1}
+    if fact_scalar(ft) and is_int(ft) {
+        let a=fact_project(@paths.yes y field false ft)
+        let b=fact_project(@paths.no z field false ft)
+        let bound=if not paths.yes.live {fact_bound(paths.no b)} else if not paths.no.live {fact_bound(paths.yes a)} else {fact_hull(fact_bound(paths.yes a) fact_bound(paths.no b) n)}
+        let part_type=if not paths.yes.live {fact_terms[b].type} else if not paths.no.live {fact_terms[a].type} else {fact_hull_type(ft paths.yes a paths.no b)}
+        s=fact_join(paths.yes paths.no n)
+        let value=fact_new(@s result FactTerm(type=hull))
+        let part=fact_new(@s bound FactTerm(type=part_type))
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value field false part))}
+        return value
+    }
+    let a=fact_project(@paths.yes fact_project(@paths.yes y field false ft) (-1) false T_INT)
+    let b=fact_project(@paths.no fact_project(@paths.no z field false ft) (-1) false T_INT)
+    let length=if not paths.yes.live {fact_bound(paths.no b)} else if not paths.no.live {fact_bound(paths.yes a)} else {fact_hull(fact_bound(paths.yes a) fact_bound(paths.no b) n)}
+    let left=fact_summary_relation(paths.yes a)
+    let right=fact_summary_relation(paths.no b)
+    let relation:[int64 int64]=if not paths.yes.live {right} else if not paths.no.live or left =? right {left} else {[(-1) 0]}
+    s=fact_join(paths.yes paths.no n)
+    let value=fact_new(@s result FactTerm(type=hull))
+    let part=fact_project(@s value field false ft)
+    let count=fact_project(@s part (-1) false T_INT)
+    fact_set_bound(@s count length)
+    if relation[0] >=? 0 {
+        let other=fact_summary_entry[relation[0]]
+        fact_difference(@s count other relation[1] n)
+        fact_difference(@s other count (-relation[1]) n)
+    }
+    value
+}
+# Tuple summary keys use slot+1 because zero denotes the whole result.
+# Function identity keeps those keys disjoint from named record fields.
+fact_summary_field_type=(t:SummaryWord field:SummaryWord):>SummaryWord=>$unsafe {
+    if tkind(t) =? 'tuple' {
+        if field <=? 0 or field >? SummaryWord(types.ptr[t].nargs) {return T_VOID}
+        return fact_type(type_args[SummaryWord(types.ptr[t].args) + field - 1])
+    }
+    fact_type(shape_field_type(t field))
+}
+fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=>$unsafe {
+    let key=if field =? 0 {f} else {fact_pair_key(f field)}
+    let known=fact_summaries.get(key)
+    if known not=? none {return known}
+    let unknown=FactSummary(FactBound() FactBound())
+    let d=SummaryWord(fns.ptr[f].decl)
+    let t=fact_type(SummaryWord(fns.ptr[f].ret))
+    if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 or fns.ptr[f].kind =? FK_INIT or fns.ptr[f].caps.length not=? 0 or d not=? 0 and has_flag(d NF_EXTERN) or effect_unavailable.has(f) {return unknown}
+    if field not=? 0 {t=fact_summary_field_type(t field)}
+    else if fact_summary_payload(t) not=? 0 {t=fact_summary_payload(t)}
+    if tkind(t) not=? 'array' and not (fact_scalar(t) and is_int(t)) and not places {return unknown}
+    if (field not=? 0 or fact_constructor_budget >=? 0) and not fact_constructor_body(f) {
+        if field not=? 0 {fact_summaries[key]=unknown}
+        return unknown
+    }
+    fact_summaries[key]=unknown
+    let constructor_root=field not=? 0 and fact_constructor_budget <? 0
+    if constructor_root {fact_constructor_budget=128}
+    let saved_field=fact_summary_field
+    let saved_limit=fact_step_limit
+    fact_step_limit=if field not=? 0 {128} else {FACT_STEPS}
+    fact_summary_field=field
+    let saved:[int64 int64 int64 int64 bool bool bool int64 bool bool]=[fact_owner fact_summary_owner fact_speculating fact_loop_steps fact_loop_exhausted proof_active result_active fact_pending_defers fact_probe_on fact_query]
+    let saved_entry=refine_entry
+    let saved_loops=fact_loops
+    let saved_pushes=fact_push_frames
+    let saved_hulls=fact_hull_owner
+    fact_push_frames=[]
+    let saved_acc=fact_summary_acc
+    let saved_slice=fact_slice
+    let saved_lengths=fact_summary_entry
+    let saved_fields=fact_summary_fields
+    let saved_shapes=fact_summary_shapes
+    let saved_shape_mask=fact_summary_shape_mask
+    fact_summary_shapes=[]
+    fact_summary_shape_mask=0
+    let saved_assumed=fact_summary_assumed
+    let saved_used=fact_summary_used
+    fact_summary_assumed=[]
+    fact_summary_used=false
+    fact_owner=f
+    fact_summary_owner=f
+    fact_speculating += 1
+    fact_loop_steps=0
+    fact_loop_exhausted=false
+    proof_active=false
+    result_active=false
+    fact_pending_defers=0
+    fact_probe_on=false
+    fact_query=false
+    fact_loops=[]
+    fact_summary_acc=FactSummary()
+    let state=FactState()
+    # Width conversions request refinements without enabling declared contracts.
+    # A summary/deferred walk still needs its own entry, never its caller's slots.
+    refine_entry=[]
+    if refine_active or refine_owners.has(f) {refine_fact_entry(f @state)}
+    fact_summary_entry=[]
+    if places or tkind(t) =? 'array' or fact_scalar(t) and is_int(t) and t not=? T_U64 {
+        loop l in fns.ptr[f].params {
+            let pt=fact_type(SummaryWord(locals.ptr[l].type))
+            let v:SummaryWord=0
+            if tkind(pt) =? 'array' {
+                let place=PlaceIdentity('local' SummaryWord(locals.ptr[l].owner) l)
+                let i=fact_binding(state place)
+                if i >=? 0 {v=state.bindings[i].value}
+                else {
+                    v=fact_new(@state FactBound() FactTerm(type=pt))
+                    fact_bind(@state place v)
+                }
+                v=fact_project(@state v (-1) false T_INT)
+            }
+            # (a count parameter: the result may be max(0, n) long, `fill(x n)`)
+            else if tkind(t) =? 'array' and fact_scalar(pt) and is_int(pt) and pt not=? T_U64 {
+                v=fact_clamped(@state fact_read(@state mk_ident_local(l locals.ptr[l].pos)))
+            }
+            fact_summary_entry.push(v)
+            if places and SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 and fact_summary_entry.length <=? 62 and tkind(pt) =? 'struct_' and is_nd(pt) {
+                let value=fact_read(@state mk_ident_local(l locals.ptr[l].pos))
+                fact_summary_shapes.push([fact_summary_entry.length - 1 fact_nd_shape(@state value) fact_nd_data_length(@state value)])
+            }
+        }
+    }
+    fact_summary_fields=[]
+    if fact_scalar(t) and is_int(t) and t not=? T_U64 and field =? 0 {
+        loop i in [0..fns.ptr[f].params.length) {
+            let l=fns.ptr[f].params[i]
+            let pt=fact_type(SummaryWord(locals.ptr[l].type))
+            if not fact_record_arrays(pt) {continue}
+            let si=SummaryWord(types.ptr[pt].st)
+            let value:SummaryWord=0
+            loop k in [0..SummaryWord(structs.ptr[si].nfields)) {
+                if fact_summary_fields.length >=? 8 {break}
+                let name=SummaryWord(fields.ptr[SummaryWord(structs.ptr[si].fields) + k].name)
+                let ft=fact_call_field_type(pt name)
+                if ft =? 0 or tkind(fact_type(ft)) not=? 'array' {continue}
+                if value =? 0 {
+                    let place=PlaceIdentity('local' SummaryWord(locals.ptr[l].owner) l)
+                    let b=fact_binding(state place)
+                    if b >=? 0 {value=state.bindings[b].value}
+                    else {
+                        value=fact_new(@state FactBound() FactTerm(type=pt))
+                        fact_bind(@state place value)
+                    }
+                }
+                let length=fact_project(@state fact_project(@state value name false ft) (-1) false T_INT)
+                if length not=? 0 {fact_summary_fields.push([i name length])}
+            }
+        }
+    }
+    fact_slice_prepare(f true)
+    if places {
+        loop i in [0..fact_summary_entry.length) {
+            let l=fns.ptr[f].params[i]
+            fact_summary_assumed.push(if fact_summary_entry[i] not=? 0 and tkind(fact_type(SummaryWord(locals.ptr[l].type))) =? 'array' and SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {1} else {0})
+        }
+    }
+    let entry=state
+    let r=fact_capture(SummaryWord(fns.ptr[f].body) @state)
+    if state.live {fact_summary_record(@state r)}
+    let verified=true
+    if fact_summary_used {
+        loop i in [0..fact_summary_assumed.length) {
+            if fact_summary_assumed[i] not=? 0 and (i >=? fact_summary_acc.lengths.length or fact_summary_acc.lengths[i] not=? 1) {verified=false}
+        }
+    }
+    # A failed candidate establishes nothing, even about other parameters or
+    # the result. Retry without it, spending the SAME speculation budget.
+    # At most two body walks, demanded only by a tracked mutable length.
+    if not verified and not fact_loop_exhausted {
+        fact_summary_assumed=[]
+        fact_summary_used=false
+        fact_summary_acc=FactSummary()
+        fact_summary_shape_mask=0
+        state=entry
+        r=fact_capture(SummaryWord(fns.ptr[f].body) @state)
+        if state.live {fact_summary_record(@state r)}
+    }
+    let result=if fact_loop_exhausted or fact_constructor_budget =? 0 or not fact_summary_acc.seen {unknown} else {fact_summary_acc}
+    if fact_summary_shapes.length >? 0 and fact_constructor_budget <? 0 and field =? 0 {
+        fact_shape_summaries[f]=if result.seen {fact_summary_shape_mask} else {0}
+    }
+    fact_owner=saved[0]
+    fact_summary_owner=saved[1]
+    fact_speculating=saved[2]
+    fact_loop_steps=saved[3]
+    fact_loop_exhausted=saved[4]
+    proof_active=saved[5]
+    result_active=saved[6]
+    fact_pending_defers=saved[7]
+    fact_probe_on=saved[8]
+    fact_query=saved[9]
+    refine_entry=saved_entry
+    fact_loops=saved_loops
+    fact_push_frames=saved_pushes
+    fact_hull_owner=saved_hulls
+    fact_summary_acc=saved_acc
+    fact_slice=saved_slice
+    fact_summary_entry=saved_lengths
+    fact_summary_fields=saved_fields
+    fact_summary_shapes=saved_shapes
+    fact_summary_shape_mask=saved_shape_mask
+    fact_summary_assumed=saved_assumed
+    fact_summary_used=saved_used
+    fact_summary_field=saved_field
+    fact_step_limit=saved_limit
+    # A constructor's tighter budget must not poison an ordinary summary
+    # requested independently later. Keep its recursion sentinel only while running.
+    if fact_constructor_budget >=? 0 and field =? 0 {fact_summaries.remove(key);}
+    else {fact_summaries[key]=result}
+    if constructor_root {fact_constructor_budget=-1}
+    result
+}
+# A present payload of an optional integer result lies in its summary's
+# interval and below the related argument's entry length: conditional
+# evidence that a test establishing the present arm activates, as a refined
+# arm's (ref_arm_publish). O(1) per demanded call.
+fact_summary_payload_publish=(f:SummaryWord result:SummaryWord entry:array<int64> payload:SummaryWord summary:FactSummary @s:FactState):>void=>$unsafe {
+    if result =? 0 or s.conditional.length >=? 32 {return}
+    let atoms:array<RefAtom>=[]
+    if summary.value.lo not=? FACT_MIN and not summary.value.wide {atoms.push(RefAtom('ge' RefTerm() RefTerm(1 summary.value.lo)))}
+    if summary.value.hi not=? FACT_MAX and not summary.value.wide {atoms.push(RefAtom('le' RefTerm() RefTerm(1 summary.value.hi)))}
+    let values=entry
+    if summary.upper >=? 0 and summary.upper <? entry.length {
+        # (materialized now, so the argument's length stays related after the call)
+        let length=fact_summary_length(@s entry[summary.upper] summary.upper_field f summary.upper)
+        if summary.upper_field =? 0 {atoms.push(RefAtom('le' RefTerm() RefTerm(2 summary.upper path=[-1] offset=summary.upper_delta)))}
+        else if length not=? 0 {
+            # (a record field's length: named as one more value, not a path)
+            values=[entry... length]
+            atoms.push(RefAtom('le' RefTerm() RefTerm(2 entry.length offset=summary.upper_delta)))
+        }
+    }
+    if atoms.length =? 0 {return}
+    let selector=fact_project(@s result (-3) false T_INT)
+    let b=fact_bound(s selector)
+    fact_set_bound(@s selector FactBound(max(0 b.lo) min(1 b.hi)))
+    let value=fact_project(@s result (-4) false payload)
+    s.conditional.push(ResultEvidence(selector 1 ref_intern(atoms) values fns.ptr[f].ptypes value payload))
+}
+fact_record_arrays=(t:SummaryWord):>bool=>$unsafe {
+    if tkind(t) not=? 'struct_' or is_nd(t) or is_map_type(t) or fact_pool_type(t) {return false}
+    let known=fact_record_array_types.get(t)
+    if known not=? none {return known}
+    let si=SummaryWord(types.ptr[t].st)
+    let found=false
+    loop k in [0..SummaryWord(structs.ptr[si].nfields)) {
+        let ft=fact_call_field_type(t SummaryWord(fields.ptr[SummaryWord(structs.ptr[si].fields) + k].name))
+        if ft not=? 0 and tkind(fact_type(ft)) =? 'array' {found=true; break}
+    }
+    fact_record_array_types[t]=found
+    found
+}
+# The length a summary relates its result to: argument value's own, or its
+# record field's (field != 0, parameter i of f). O(1).
+fact_summary_length=(@s:FactState value:SummaryWord field:SummaryWord f:SummaryWord i:SummaryWord):>SummaryWord=>$unsafe {
+    if value =? 0 {return 0}
+    if field =? 0 {return fact_project(@s value (-1) false T_INT)}
+    let pt=fact_type(SummaryWord(locals.ptr[fns.ptr[f].params[i]].type))
+    let inner=fact_project(@s value field false fact_call_field_type(pt field))
+    if inner =? 0 {0} else {fact_project(@s inner (-1) false T_INT)}
+}
+# A postcondition's current mutable actual. Place routes contain only named
+# fields; a missing/unsupported route supplies no evidence. O(route depth).
+fact_summary_actual=(n:SummaryWord i:SummaryWord @s:FactState known:bool=false):>SummaryWord=>$unsafe {
+    if i <? 0 or i >=? nkids(n) {return 0}
+    let e=kid(n i)
+    loop nodes.ptr[e].kind =? 'addr' or nodes.ptr[e].kind =? 'conv' {e=SummaryWord(nodes.ptr[e].a)}
+    if place_route(e).declaration =? 0 {return 0}
+    if known {
+        let route=fact_route(e @s)
+        let b=fact_binding(s fact_place(route.root))
+        if b <? 0 {return 0}
+        let v=s.bindings[b].value
+        loop j in [0..route.selectors.length) {
+            let p=fact_projection_find(s v route.selectors[j] false)
+            if p <? 0 {return 0}
+            v=s.projections[p].value
+        }
+        return v
+    }
+    let values=fact_route_values(@s fact_route(e @s))
+    if values.length =? 0 {0} else {values[values.length - 1]}
+}
