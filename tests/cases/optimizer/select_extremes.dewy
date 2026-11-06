@@ -1,0 +1,59 @@
+# Running minima and maxima, written every way an arm can hold one copy, and
+# copies beside them that must keep their branch.
+scan = (xs:array<int64>):>[int64 int64 int64 int64] => {
+    let high:int64=-1000
+    let low:int64=1000
+    let flipped:int64=-1000
+    let unsigned_like:int64=0
+    loop x in xs {
+        if x >? high high=x
+        if x <? low {low=x}
+        if high <? x high=x
+        if not (flipped >=? x) {flipped=x}
+        if x not=? unsigned_like {unsigned_like=x}
+    }
+    return [high low flipped unsigned_like]
+}
+# Another branch reaches the same end: its path must skip the selection.
+early = (xs:array<int64> stop:int64):>int64 => {
+    let best:int64=0
+    loop x in xs {
+        if x =? stop {break}
+        if x >? best best=x
+    }
+    return best
+}
+# Clamps: the copied value is a constant.
+clamp = (x0:int64 limit:int64):>int64 => {
+    let x=x0
+    if x >? limit x=limit
+    if x <? 0 x=0
+    return x
+}
+# Both operands change in the arm's neighbourhood.
+swap_if = (a0:int64 b0:int64):>[int64 int64] => {
+    let a=a0
+    let b=b0
+    if a >? b {
+        let t=a
+        a=b
+        b=t
+    }
+    return [a b]
+}
+# A comparison read twice cannot flip.
+twice = (x:int64 y0:int64):>int64 => {
+    let y=y0
+    let c=x >? y
+    if c y=x
+    return if c {y+1} else {y}
+}
+main = ():>void => {
+    let xs:array<int64>=[3 -7 12 12 0 -7 5]
+    printl"{scan(xs)}"
+    printl"{early(xs 0)} {early(xs 3)} {early(xs 99)}"
+    printl"{clamp(5 3)} {clamp(-5 3)} {clamp(2 3)}"
+    printl"{swap_if(4 1)} {swap_if(1 4)}"
+    printl"{twice(5 2)} {twice(2 5)}"
+}
+$runtime_checks

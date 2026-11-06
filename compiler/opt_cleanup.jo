@@ -174,6 +174,39 @@ oc_if_select = (out: *Ins, start: int, n: int) -> int:
     loop k in [0..replacement.len()): out[start + k] = replacement[k]
     start + replacement.len()
 
+# (opt_cleanup.dewy explains these two)
+oc_compares = (ins: Ins, x: int, y: int) -> bool:
+    if oc_negate(ins.op) == .nop: return false
+    (int(ins.a) == x and int(ins.b) == y) or (int(ins.a) == y and int(ins.b) == x)
+
+oc_extreme_select = (out: *Ins, start: int, n: int) -> int:
+    if n - start < 2: return -1
+    d = int(out[n - 1].dst)
+    s = int(out[n - 1].a)
+    if out[n - 1].ty != 0 or d < 0 or s < 0 or d == s: return -1
+    if oc_vtype(d) != 0 or oc_vtype(s) != 0: return -1
+    guard = out[n - 2]
+    cond = int(guard.a)
+    if guard.op == .if_ and n - 2 == start:
+        if start < 1 or int(out[start - 1].dst) != cond or not oc_compares(out[start - 1], d, s): return -1
+        selected = Ins(.select, 0, i32(d), i32(cond), i32(s), i32(d), 0)
+        selected.pos = guard.pos
+        out[start] = selected
+        o_regs[d].nuse += 1
+        return start + 1
+    if guard.op != .brif or guard.imm != 0 or n - 3 <= start: return -1
+    if int(out[n - 3].dst) != cond or not oc_compares(out[n - 3], d, s): return -1
+    selected = Ins(.select, 0, i32(d), i32(cond), i32(d), i32(s), 0)
+    if o_regs[cond].nuse == 1:
+        comparison = out[n - 3]
+        comparison.op = oc_negate(comparison.op)
+        out[n - 3] = comparison
+        selected = Ins(.select, 0, i32(d), i32(cond), i32(s), i32(d), 0)
+    selected.pos = guard.pos
+    out[n - 2] = selected
+    o_regs[d].nuse += 1
+    n - 1
+
 # A branch to a block's end can make that end reachable even when its body
 # cannot fall through. Branches to loop headers do not reach the loop's end.
 
@@ -214,6 +247,11 @@ opt_cleanup = (code: *Ins, count: int) -> Ins[]:
                 if selected >= 0:
                     used = selected
                     continue
+            if out[used - 1].op == .mov and (o_flow[top].kind == .block or o_flow[top].kind == .if_):
+                copied = oc_extreme_select(out, o_flow[top].start, used)
+                if copied >= 0:
+                    used = copied
+                    if used == o_flow[top].start + 1: continue
             last = out[used - 1]
             if last.op == .br and last.imm == 0 and o_flow[top].kind != .loop: used -= 1
             # Inlining a leaf can leave `block; value; end` after its final

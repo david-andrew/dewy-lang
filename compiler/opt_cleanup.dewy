@@ -292,6 +292,50 @@ oc_if_select=(out:ptr<Ins> start:int64 n:int64):>int64=>$unsafe {
     (OptWord(start) + OptWord(replacement.length))
 }
 
+# Does ins compare exactly the two values x and y, in either order?
+oc_compares=(ins:Ins x:int64 y:int64):>bool=>$unsafe {
+    if oc_negate(ins.op) =? 'nop' {return false}
+    (int64(ins.a) =? x and int64(ins.b) =? y) or (int64(ins.a) =? y and int64(ins.b) =? x)
+}
+# `if s >? d {d=s}` (any comparison of d and s, nothing else in the arm) is a
+# running minimum or maximum: one conditional move, where a branch on data the
+# predictor cannot learn costs far more. Other copies keep their branch, since
+# a move on a condition makes later addresses wait for data a correct prediction
+# would not (`if p[i] =? q[i] i=j`, string_search +10%). O(1) at a construct's end.
+# Returns the new output length, start + 1 when the `if_` itself is gone, or -1.
+oc_extreme_select=(out:ptr<Ins> start:int64 n:int64):>int64=>$unsafe {
+    if n - start <? 2 {return -1}
+    let d=int64(out[n - 1].dst)
+    let s=int64(out[n - 1].a)
+    if out[n - 1].ty not=? 0 or d <? 0 or s <? 0 or d =? s {return -1}
+    if oc_vtype(d) not=? 0 or oc_vtype(s) not=? 0 {return -1}
+    let guard=out[n - 2]
+    let cond=int64(guard.a)
+    if guard.op =? 'if_' and n - 2 =? start {
+        if start <? 1 or int64(out[start - 1].dst) not=? cond or not oc_compares(out[start - 1] d s) {return -1}
+        let selected=Ins('select' 0 int32(d) int32(cond) int32(s) int32(d) 0)
+        selected.pos=guard.pos
+        out[start]=selected
+        o_regs[d].nuse=o_regs[d].nuse + 1
+        return start + 1
+    }
+    if guard.op not=? 'brif' or guard.imm not=? 0 or n - 3 <=? start {return -1}
+    if int64(out[n - 3].dst) not=? cond or not oc_compares(out[n - 3] d s) {return -1}
+    # The branch skips the copy. A comparison only it reads flips, so the select
+    # keeps d's own register and the emitter's compare stays adjacent.
+    let selected=Ins('select' 0 int32(d) int32(cond) int32(d) int32(s) 0)
+    if o_regs[cond].nuse =? 1 {
+        let comparison=out[n - 3]
+        comparison.op=oc_negate(comparison.op)
+        out[n - 3]=comparison
+        selected=Ins('select' 0 int32(d) int32(cond) int32(s) int32(d) 0)
+    }
+    selected.pos=guard.pos
+    out[n - 2]=selected
+    o_regs[d].nuse=o_regs[d].nuse + 1
+    n - 1
+}
+
 # A branch to a block's end can make that end reachable even when its body
 # cannot fall through. Branches to loop headers do not reach the loop's end.
 opt_cleanup=(code:ptr<Ins> count:int64):>array<Ins>=>$unsafe {
@@ -337,6 +381,13 @@ opt_cleanup=(code:ptr<Ins> count:int64):>array<Ins>=>$unsafe {
                 if (selected >=? 0) {
                     used=selected
                     continue
+                }
+            }
+            if out[used - 1].op =? 'mov' and ((o_flow[top].kind =? 'block') or (o_flow[top].kind =? 'if_')) {
+                let copied=oc_extreme_select(out o_flow[top].start used)
+                if (copied >=? 0) {
+                    used=copied
+                    if used =? o_flow[top].start + 1 {continue}
                 }
             }
             let last=out[(OptWord(used) - OptWord(int64(1)))]
