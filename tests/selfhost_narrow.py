@@ -32,6 +32,10 @@ def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run
             assert ran.returncode == status, (arguments, ran.stdout[-3000:], ran.stderr)
             runs.append((ran.stdout, ran.stderr, observe(where) if observe else None))
         outputs.append(runs)
-    assert outputs[0] == outputs[1]
+    for index, (dewy, jo) in enumerate(zip(*outputs)):
+        for field, (a, b) in zip(('stdout', 'stderr', 'observed'), zip(dewy, jo)):
+            if a != b:
+                at = next((i for i, pair in enumerate(zip(a, b)) if pair[0] != pair[1]), min(len(a), len(b)))
+                raise AssertionError(f'run {index} {field} differs at {at}: dewy {a[max(0, at - 80):at + 160]!r} jo {b[max(0, at - 80):at + 160]!r}')
     stdout = [run[0] for run in outputs[0]]
     return stdout[0] if len(stdout) == 1 else stdout

@@ -1,7 +1,4 @@
-use 'macho_format.dewy'
-use 'elf_format.dewy'
-use 'x64_module.dewy'
-use 'arm64_encode.dewy'
+$runtime_checks
 # Mach-O executable writer (macOS on arm64).
 #
 # macOS runs no static executables: dyld loads the program, binds the C functions it uses
@@ -15,56 +12,55 @@ use 'arm64_encode.dewy'
 # The code signature is "ad hoc" (no certificate: a hash of each 4 KB page), which arm64 macOS
 # requires of every program it runs.
 
-use 'util.jo'
-use 'module_paths.dewy'
-use 'leb128.dewy'
-use 'base64.dewy'
-use 'sha.dewy'
-use 'icns.dewy'
-use 'lower.jo'
-use 'x64.jo'
-use 'arm64.jo'
-use 'types.jo'
+
+from p"@lib/core/os.jo" import (chmod delete_file mkdir write_bytes write_file)
+from p"@lib/core/str.jo" import (is_alnum replace)
+from p"module_paths.dewy" import path_stem
+from p"base64.dewy" import base64
+from p"sha.dewy" import (sha1 sha256)
+from p"icns.dewy" import icns
+from p"macho_format.dewy" import (macho_emit_watch_loader macho_error macho_image macho_plist macho_resources)
+from p"x64_module.dewy" import stub_addr
+from p"lower.jo" import mac_imports
+from p"util.jo" import ice
 
 # Image and loader execution belong to the format owner. This host publishes
 # files and reports compiler diagnostics with their original messages.
-write_macho = (path: str, text: u8[], entry_off: int, ro: u8[], info: u8[], data_size: int, name: str, watch: bool) -> bool:
-    ident = name
-    if len(ident) == 0: ident = path_stem(path)
-    image = macho_image(text, entry_off, ro, info, data_size, ident, watch, mac_imports)
-    if macho_error != "": ice(macho_error)
-    delete_file(path)
-    if not write_bytes(path, image): return false
-    chmod(path, 0x1ED)
+write_macho=(path:string text:array<uint8> entry_off:int64 ro:array<uint8> info:array<uint8> data_size:int64 name:string watch:bool):>bool=>{
+    let ident=if name =? "" {path_stem(path)} else {name}
+    let image=macho_image(text entry_off ro info data_size ident watch mac_imports)
+    if macho_error not=? "" {ice(macho_error)}
+    delete_file(path);
+    if not write_bytes(path image) {return false}
+    chmod(path 0x1ED);
     true
-
-macho_watch_loader = (data_addr: int, blob_addr: int, blob_len: int, entry: int) -> u8[]:
-    image = macho_emit_watch_loader(data_addr, blob_addr, blob_len, entry, mac_imports, stub_addr[11])
-    if macho_error != "": ice(macho_error)
+}
+macho_watch_loader=(data_addr:int64 blob_addr:int64 blob_len:int64 entry:int64):>array<uint8>=>{
+    let image=macho_emit_watch_loader(data_addr blob_addr blob_len entry mac_imports stub_addr[11])
+    if macho_error not=? "" {ice(macho_error)}
     image
-
+}
 # ---------------- an app bundle: `dewy build --target aarch64-mac -o Game.app` ----------------
 # Game.app/Contents/MacOS/<name> (the program), Info.plist (what the Finder and the Dock read)
 # and Resources/icon.icns (the build block's icon). Returns where the program goes, "" if the
 # folders could not be made.
-macos_bundle = (app: str, name: str, icon: u8[]) -> str:
-    base = path_stem(app)
-    exe = base
-    if len(exe) == 0: exe = "game"
-    title = name
-    if len(title) == 0: title = exe
-    if not (mkdir(app) and mkdir("{app}/Contents") and mkdir("{app}/Contents/MacOS") and mkdir("{app}/Contents/Resources")): return ""
+macos_bundle=(app:string name:string icon:array<uint8>):>string=>{
+    let base=path_stem(app)
+    let exe=if base =? "" {"game"} else {base}
+    let title=if name =? "" {exe} else {name}
+    if not (mkdir(app) and mkdir("{app}/Contents") and mkdir("{app}/Contents/MacOS") and mkdir("{app}/Contents/Resources")) {return ""}
     # (a bundle id from the name: letters, digits, '-' and '.')
-    idb: u8[]
-    loop c in bytes(title):
-        if is_alnum(c) or c == '-' or c == '.': idb.push(c)
-        else if c == ' ' or c == '_': idb.push('-')
-    id = str_from_bytes(idb)
-    if len(id) == 0: id = "game"
-    icon_key = ""
-    if icon.len() >= 24:
-        if write_bytes("{app}/Contents/Resources/icon.icns", icns(icon)): icon_key = "\n    <key>CFBundleIconFile</key>\n    <string>icon</string>"
-    plist = """<?xml version="1.0" encoding="UTF-8"?>
+    let idb:array<uint8>=[]
+    loop c in (title as array<uint8>) {
+        if is_alnum(c) or c =? b'-' or c =? b'.' {idb.push(c)}
+        else if c =? b' ' or c =? b'_' {idb.push(b'-')}
+    }
+    let id=if idb.length =? 0 {"game"} else {(idb as string | none) ?? ""}
+    let icon_key=""
+    if icon.length >=? 24 {
+        if write_bytes("{app}/Contents/Resources/icon.icns" icns(icon)) {icon_key="\n    <key>CFBundleIconFile</key>\n    <string>icon</string>"}
+    }
+    let plist="""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -87,31 +83,28 @@ macos_bundle = (app: str, name: str, icon: u8[]) -> str:
     <key>NSHighResolutionCapable</key>
     <true/>{icon_key}
 </dict>
-</plist>
-"""
-    if not write_file("{app}/Contents/Info.plist", plist): return ""
+</plist>"""
+    if not write_file("{app}/Contents/Info.plist" plist) {return ""}
     # the resources, sealed: what the signature's hash of CodeResources stands for
-    sealed = ""
-    sealed2 = ""
-    if len(icon_key) > 0:
-        ic = icns(icon)
-        sealed = "\n\t\t<key>Resources/icon.icns</key>\n\t\t<data>{base64(sha1(ic))}</data>"
-        sealed2 = "\n\t\t<key>Resources/icon.icns</key>\n\t\t<dict>\n\t\t\t<key>hash2</key>\n\t\t\t<data>{base64(sha256(ic, 0, ic.len()))}</data>\n\t\t</dict>"
-    res = CODE_RESOURCES_HEAD + "<key>files</key>\n\t<dict>{sealed}\n\t</dict>\n\t<key>files2</key>\n\t<dict>{sealed2}\n\t</dict>\n\t" + CODE_RESOURCES_RULES
-    if not mkdir("{app}/Contents/_CodeSignature") or not write_file("{app}/Contents/_CodeSignature/CodeResources", res): return ""
-    macho_plist = bytes(plist)
-    macho_resources = bytes(res)
+    let sealed=""
+    let sealed2=""
+    if icon_key not=? "" {
+        let ic=icns(icon)
+        sealed="\n\t\t<key>Resources/icon.icns</key>\n\t\t<data>{base64(sha1(ic))}</data>"
+        sealed2="\n\t\t<key>Resources/icon.icns</key>\n\t\t<dict>\n\t\t\t<key>hash2</key>\n\t\t\t<data>{base64(sha256(ic  0  ic.length))}</data>\n\t\t</dict>"
+    }
+    let res="{CODE_RESOURCES_HEAD}<key>files</key>\n\t<dict>{sealed}\n\t</dict>\n\t<key>files2</key>\n\t<dict>{sealed2}\n\t</dict>\n\t{CODE_RESOURCES_RULES}"
+    if not mkdir("{app}/Contents/_CodeSignature") or not write_file("{app}/Contents/_CodeSignature/CodeResources" res) {return ""}
+    macho_plist=(plist as array<uint8>)
+    macho_resources=(res as array<uint8>)
     "{app}/Contents/MacOS/{exe}"
-
-
-CODE_RESOURCES_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
+}
+let CODE_RESOURCES_HEAD="""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict>
-	"""
-
+<dict>"""
 # (codesign's default rules)
-CODE_RESOURCES_RULES = """<key>rules</key>
+let CODE_RESOURCES_RULES="""<key>rules</key>
 	<dict>
 		<key>^Resources/</key>
 		<true/>
@@ -210,7 +203,5 @@ CODE_RESOURCES_RULES = """<key>rules</key>
 		</dict>
 	</dict>
 </dict>
-</plist>
-"""
-
-xml_text = (s: str) -> str: replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
+</plist>"""
+xml_text=(s:string):>string=>replace(replace(replace(s "&" "&amp;") "<" "&lt;") ">" "&gt;")

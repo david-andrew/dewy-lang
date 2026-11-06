@@ -1,0 +1,197 @@
+use 'macho_format.dewy'
+use 'x64_module.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'base64.dewy'
+use 'sha.dewy'
+use 'icns.dewy'
+use 'lower.jo'
+
+# Image and loader execution belong to the format owner. This host publishes
+# files and reports compiler diagnostics with their original messages.
+write_macho = (path: str, text: u8[], entry_off: int, ro: u8[], info: u8[], data_size: int, name: str, watch: bool) -> bool:
+    ident = name
+    if len(ident) == 0: ident = path_stem(path)
+    image = macho_image(text, entry_off, ro, info, data_size, ident, watch, mac_imports)
+    if macho_error != "": ice(macho_error)
+    delete_file(path)
+    if not write_bytes(path, image): return false
+    chmod(path, 0x1ED)
+    true
+
+macho_watch_loader = (data_addr: int, blob_addr: int, blob_len: int, entry: int) -> u8[]:
+    image = macho_emit_watch_loader(data_addr, blob_addr, blob_len, entry, mac_imports, stub_addr[11])
+    if macho_error != "": ice(macho_error)
+    image
+
+# ---------------- an app bundle: `dewy build --target aarch64-mac -o Game.app` ----------------
+# Game.app/Contents/MacOS/<name> (the program), Info.plist (what the Finder and the Dock read)
+# and Resources/icon.icns (the build block's icon). Returns where the program goes, "" if the
+# folders could not be made.
+macos_bundle = (app: str, name: str, icon: u8[]) -> str:
+    base = path_stem(app)
+    exe = base
+    if len(exe) == 0: exe = "game"
+    title = name
+    if len(title) == 0: title = exe
+    if not (mkdir(app) and mkdir("{app}/Contents") and mkdir("{app}/Contents/MacOS") and mkdir("{app}/Contents/Resources")): return ""
+    # (a bundle id from the name: letters, digits, '-' and '.')
+    idb: u8[]
+    loop c in bytes(title):
+        if is_alnum(c) or c == '-' or c == '.': idb.push(c)
+        else if c == ' ' or c == '_': idb.push('-')
+    id = str_from_bytes(idb)
+    if len(id) == 0: id = "game"
+    icon_key = ""
+    if icon.len() >= 24:
+        if write_bytes("{app}/Contents/Resources/icon.icns", icns(icon)): icon_key = "\n    <key>CFBundleIconFile</key>\n    <string>icon</string>"
+    plist = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>{xml_text(exe)}</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.dewy-lang.{id}</string>
+    <key>CFBundleName</key>
+    <string>{xml_text(title)}</string>
+    <key>CFBundleDisplayName</key>
+    <string>{xml_text(title)}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>{icon_key}
+</dict>
+</plist>
+"""
+    if not write_file("{app}/Contents/Info.plist", plist): return ""
+    # the resources, sealed: what the signature's hash of CodeResources stands for
+    sealed = ""
+    sealed2 = ""
+    if len(icon_key) > 0:
+        ic = icns(icon)
+        sealed = "\n\t\t<key>Resources/icon.icns</key>\n\t\t<data>{base64(sha1(ic))}</data>"
+        sealed2 = "\n\t\t<key>Resources/icon.icns</key>\n\t\t<dict>\n\t\t\t<key>hash2</key>\n\t\t\t<data>{base64(sha256(ic, 0, ic.len()))}</data>\n\t\t</dict>"
+    res = CODE_RESOURCES_HEAD + "<key>files</key>\n\t<dict>{sealed}\n\t</dict>\n\t<key>files2</key>\n\t<dict>{sealed2}\n\t</dict>\n\t" + CODE_RESOURCES_RULES
+    if not mkdir("{app}/Contents/_CodeSignature") or not write_file("{app}/Contents/_CodeSignature/CodeResources", res): return ""
+    macho_plist = bytes(plist)
+    macho_resources = bytes(res)
+    "{app}/Contents/MacOS/{exe}"
+
+
+CODE_RESOURCES_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	"""
+
+# (codesign's default rules)
+CODE_RESOURCES_RULES = """<key>rules</key>
+	<dict>
+		<key>^Resources/</key>
+		<true/>
+		<key>^Resources/.*\\.lproj/</key>
+		<dict>
+			<key>optional</key>
+			<true/>
+			<key>weight</key>
+			<real>1000</real>
+		</dict>
+		<key>^Resources/.*\\.lproj/locversion.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>1100</real>
+		</dict>
+		<key>^Resources/Base\\.lproj/</key>
+		<dict>
+			<key>weight</key>
+			<real>1010</real>
+		</dict>
+		<key>^version.plist$</key>
+		<true/>
+	</dict>
+	<key>rules2</key>
+	<dict>
+		<key>.*\\.dSYM($|/)</key>
+		<dict>
+			<key>weight</key>
+			<real>11</real>
+		</dict>
+		<key>^(.*/)?\\.DS_Store$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>2000</real>
+		</dict>
+		<key>^.*</key>
+		<true/>
+		<key>^Info\\.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^PkgInfo$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^Resources/</key>
+		<dict>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^Resources/.*\\.lproj/</key>
+		<dict>
+			<key>optional</key>
+			<true/>
+			<key>weight</key>
+			<real>1000</real>
+		</dict>
+		<key>^Resources/.*\\.lproj/locversion.plist$</key>
+		<dict>
+			<key>omit</key>
+			<true/>
+			<key>weight</key>
+			<real>1100</real>
+		</dict>
+		<key>^Resources/Base\\.lproj/</key>
+		<dict>
+			<key>weight</key>
+			<real>1010</real>
+		</dict>
+		<key>^[^/]+$</key>
+		<dict>
+			<key>nested</key>
+			<true/>
+			<key>weight</key>
+			<real>10</real>
+		</dict>
+		<key>^embedded\\.provisionprofile$</key>
+		<dict>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+		<key>^version\\.plist$</key>
+		<dict>
+			<key>weight</key>
+			<real>20</real>
+		</dict>
+	</dict>
+</dict>
+</plist>
+"""
+
+xml_text = (s: str) -> str: replace(replace(replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;")
