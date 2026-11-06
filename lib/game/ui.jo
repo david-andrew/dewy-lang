@@ -52,7 +52,7 @@ __ui_side = 0                   # -1 left, 1 right
 __ui_ok = false
 __ui_typing = -1                # the text field that had the focus last frame (its letters are text)
 __ui_open = false               # between ui_begin and ui_end
-__ui_unended = 0                # menus begun in a row without ui_end
+__ui_warned: {str: bool}        # (menus already reported as left open)
 # (each menu's own: several may be drawn in a frame)
 struct __UiMenu:
     focus = 0
@@ -72,11 +72,13 @@ __ui_in_ok = false
 # item chosen; shown again (back from its Settings), with the item it was left on.
 ui_begin = (name: str, top_center: vec2):
     f = frame_number()
-    # (a menu without its ui_end, frame after frame: one skipped by an early return is fine)
+    # (a menu left open: finished here, as its ui_end would, so an early return costs nothing)
     if __ui_open:
-        __ui_unended += 1
-        if __ui_unended >= 3: panic("the menu '{__ui_menu}' needs `ui_end()` after its items (before the next ui_begin)")
-    else: __ui_unended = 0
+        when DEBUG:
+            if not __ui_warned.has(__ui_menu):
+                __ui_warned[__ui_menu] = true
+                __write_err("warning: the menu '{__ui_menu}' has no `ui_end()` before the next ui_begin; finished it there\n")
+        ui_end()
     __ui_open = true
     # (this menu's own state; shown again after frames without it, it opens now, on the item it
     # was left on)

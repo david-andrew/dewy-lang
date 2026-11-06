@@ -1,1 +1,6 @@
-draw=()=>{ui_begin("unended" vec2(0 0))}
+# A menu left open is finished by the next ui_begin, so this may not panic.
+menu=():>void & no panics=>{ui_begin("unended" vec2(0 0))}
+main=()=>{
+    if args().length >? 99 {menu()}
+    printl("ok")
+}

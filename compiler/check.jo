@@ -5169,8 +5169,9 @@ add_universe = ():
     if target_wasm: arch = "wasm32"
     if target_arm64: arch = "arm64"
     nodes[av].sval = i32(intern(arch))
+    # (a debug build: anything but a release build)
     tr = mk(.bool_lit, 0)
-    nodes[tr].ival = 1
+    if not release_build: nodes[tr].ival = 1
     fl = mk(.bool_lit, 0)
     wv = mk(.bool_lit, 0)
     if watch_build: nodes[wv].ival = 1
