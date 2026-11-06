@@ -1,0 +1,19 @@
+# A wrapping operand decides on either side; plain operands stay exact, and `int` keeps it exact.
+W:type = int64<overflow='wrap'>
+S:type = int64<overflow='saturate'>
+main = ():>void => {
+    let big:int64 = int64.max
+    let two:int64 = 2
+    let wb:W = big
+    let w2:W = 2
+    let sb:S = big
+    let m:int = 2
+    printl("{big + two}")
+    printl("{wb + two} {big + w2}")
+    printl("{wb * two} {big * w2}")
+    printl("{w2 - big} {two - wb}")
+    printl("{wb + m} {m + wb}")
+    printl("{sb + two} {big + S(2)}")
+    let small:int8 = 1
+    printl("{wb + small} {small + wb}")
+}

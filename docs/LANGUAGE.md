@@ -950,7 +950,10 @@ Keeping the bits has its own
 spelling: `uint8<overflow='wrap'>(x)` is the integer modulo 2^8 (two's complement for a signed target, and
 the low bits of an `int`), so `uint64<overflow='wrap'>(int64(-1))` is `18446744073709551615`.
 `uint8<overflow='saturate'>(x)` clamps an integer to 0 through 255 instead.
-The policies are part of the type and work through type aliases. Policy conversions
+The policies are part of the type and work through type aliases. A wrapping or
+saturating operand decides the arithmetic on either side: with a plain integer of
+its width or narrower, `a + b` and `b + a` both follow the policy, while an `int`
+operand keeps the result exact and two different policies do not mix. Policy conversions
 accept integer inputs, including arbitrary-precision `int` values. The former
 builtin `wrap<T>(x)` has been removed; user-defined functions named `wrap` remain ordinary functions.
 `x transmute float64` reads the bits of an integer or float as another type of the same width. Among overloads, a narrowing is

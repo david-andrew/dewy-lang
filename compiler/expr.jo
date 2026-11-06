@@ -1060,6 +1060,11 @@ num_join = (a0: int, b0: int) -> int:
     if kb == .float_ and ka == .int_: return b
     if ka == .int_ and kb == .int_:
         if a == T_MATH_INT or b == T_MATH_INT: return T_MATH_INT
+        # (one width and sign: a policy on either side decides; two different ones have no join)
+        if int_policy(a) != int_policy(b) and types[a].bits == types[b].bits and types[a].sign == types[b].sign:
+            if int_policy(b) == 0: return a
+            if int_policy(a) == 0: return b
+            return 0
         if int_widens(a, b): return b
         if int_widens(b, a): return a
     0
