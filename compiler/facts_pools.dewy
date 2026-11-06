@@ -1,0 +1,219 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (fns lib_dir)
+from p"directives.jo" import (dir_defer)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"expr.jo" import (ntype)
+from p"facts.jo" import (FACT_CAP FACT_POOL_POSITIONS FactProjection FactState fact_add_projection fact_binding fact_bound fact_call_effects fact_constant fact_difference fact_domain fact_exposed fact_forget fact_length_max fact_new fact_path_call_effects fact_place fact_policy fact_pool_items_name fact_pool_names fact_pool_path fact_probe_on fact_project fact_projection_after fact_projection_first fact_query fact_receiver_route fact_replace fact_route_values fact_speculating fact_store_route fact_type fact_written_root fact_map_receiver)
+from p"facts_probes.dewy" import (fact_probe_record)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"refinement_types.dewy" import (FactBound FactTerm)
+from p"types.jo" import (T_BOOL T_INT mk_array prune struct_targ structs types)
+from p"util.jo" import (err_notes files intern pos_file pos_in_lib)
+from p"witness.jo" import (wit_context wit_fail wit_help wit_text)
+
+PoolWord:type=int64<overflow='wrap'>
+fact_pool_call=(n:PoolWord):>PoolWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) <? 2 or nkids(n) >? 3 {return 0}
+    let d=PoolWord(fns.ptr[PoolWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return 0}
+    if fact_pool_names.length =? 0 {
+        fact_pool_names=[intern("has") intern("[]") intern("__pool_index") intern("[]=") intern("add") intern("remove")]
+        fact_pool_path="{lib_dir}/std/pool.jo"
+    }
+    let name=PoolWord(nodes.ptr[d].name)
+    let k:PoolWord=0
+    loop i in [0..6) {
+        if fact_pool_names[i] =? name {k=i + 1}
+    }
+    if k =? 0 or nkids(n) not=? (if k =? 4 {3} else {2}) or not pos_in_lib(nodes.ptr[d].pos) {return 0}
+    if files[pos_file(nodes.ptr[d].pos)].path not=? fact_pool_path {return 0}
+    k
+}
+# The bundled Pool's type. O(1).
+fact_pool_type=(t0:PoolWord):>bool=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'struct_' {return false}
+    let st=PoolWord(types.ptr[t].st)
+    if structs.ptr[st].name not=? "Pool" {return false}
+    let d=PoolWord(structs.ptr[st].decl)
+    if fact_pool_path =? "" {fact_pool_path="{lib_dir}/std/pool.jo"}
+    d not=? 0 and files[pos_file(nodes.ptr[d].pos)].path =? fact_pool_path
+}
+fact_pool_member=(@s:FactState pool:PoolWord handle:PoolWord):>PoolWord=>{
+    fact_project(@s pool handle true T_INT)
+}
+# (the members of `from`, by their projections, are members of `to`; with
+# `except`, only those provably another handle than it)
+fact_pool_keep=(@s:FactState source:PoolWord to:PoolWord except:PoolWord=0):>void=>{
+    if source =? to or source =? 0 or to =? 0 {return}
+    let gone=if except not=? 0 {fact_bound(s fact_pool_member(@s source except))} else {FactBound(0 0)}
+    let kept:array<FactProjection>=[]
+    let i=fact_projection_first(s source)
+    loop i >=? 0 {
+        let q=s.projections[i]
+        i=fact_projection_after(s i)
+        if not q.element {continue}
+        let b=fact_bound(s q.value)
+        if b.lo <? 1 or b.wide {continue}
+        if gone.hi >? 0 and not (gone.lo >=? 1 and not gone.wide and (b.hi <? gone.lo or gone.hi <? b.lo)) {continue}
+        kept.push(FactProjection(to q.selector true q.value))
+    }
+    loop q in kept {
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s q)}
+    }
+}
+# The highest finite rank among the members of `pool` (0 when none).
+fact_pool_rank=(s:FactState pool:PoolWord):>PoolWord=>{
+    let top:PoolWord=0
+    let i=fact_projection_first(s pool)
+    loop i >=? 0 {
+        let q=s.projections[i]
+        i=fact_projection_after(s i)
+        if not q.element {continue}
+        let b=fact_bound(s q.value)
+        if b.lo >=? 1 and not b.wide and b.hi <? (1 << 40) {top=max(top b.hi)}
+    }
+    top
+}
+fact_pool_check=(n:PoolWord @s:FactState pool:PoolWord handle:PoolWord):>void=>$unsafe {
+    if fact_speculating not=? 0 or not (fact_policy =? 'RequireStatic' or fact_query) {return}
+    let b=fact_bound(s fact_pool_member(@s pool handle))
+    let proven=b.lo >=? 1 and not b.wide
+    if fact_probe_on {
+        fact_probe_record(n proven)
+        return
+    }
+    if proven {return}
+    let receiver=wit_text(kid(n 0))
+    let h=wit_text(kid(n 1))
+    let relation=if receiver not=? "" and h not=? "" {"{receiver}.has({h})"} else {""}
+    wit_context(0)
+    if relation =? "" and receiver not=? "" {err_notes.push([(-1) "help: a handle is in the pool while nothing removed it since `{receiver}.add` gave it or `{receiver}.has` was true"])}
+    if b.hi <=? 0 and not b.wide {
+        wit_help(relation)
+        if dir_defer(n "the handle is no longer in the pool" true) {return}
+        wit_fail(nodes.ptr[n].pos "the handle is no longer in the pool")
+        return
+    }
+    wit_help(relation)
+    if relation not=? "" and nodes.ptr[n].kind =? 'call' and fact_pool_call(n) =? 2 {err_notes.push([(-1) "help: or take a missing thing as a value: `{receiver}.get({h})` gives none for it"])}
+    if dir_defer(n "cannot prove the handle is in the pool" true) {return}
+    wit_fail(nodes.ptr[n].pos "cannot prove the handle is in the pool")
+}
+# A loop's havoc of `pool[h] = x` (fact_changes): the pool local's new value
+# keeps its memberships, as the call's own transfer does. O(members).
+fact_pool_store_changes=(n:PoolWord @s:FactState):>void=>$unsafe {
+    let e=kid(n 0)
+    loop nodes.ptr[e].kind =? 'addr' or nodes.ptr[e].kind =? 'conv' {e=PoolWord(nodes.ptr[e].a)}
+    let i=if nodes.ptr[e].kind =? 'ident' {fact_binding(s fact_place(e))} else {-1}
+    let before=if i >=? 0 {s.bindings[i].value} else {0}
+    fact_call_effects(n @s)
+    i=if before not=? 0 {fact_binding(s fact_place(e))} else {-1}
+    if i >=? 0 {fact_pool_keep(@s before s.bindings[i].value)}
+}
+# The local or global a pool call's receiver is (a field or element of it
+# included), or none.
+fact_pool_receiver=(n:PoolWord):>PlaceIdentity=>$unsafe {
+    let e=kid(n 0)
+    loop nodes.ptr[e].kind =? 'addr' or nodes.ptr[e].kind =? 'conv' {e=PoolWord(nodes.ptr[e].a)}
+    let p=fact_written_root(e)
+    if p.root not=? 'local' and p.root not=? 'global' {return PlaceIdentity('local' 0 0)}
+    p
+}
+fact_pool_items=(@s:FactState pool:PoolWord t:PoolWord):>PoolWord=>$unsafe {
+    if fact_pool_items_name =? 0 {fact_pool_items_name=intern("items")}
+    fact_project(@s pool fact_pool_items_name false mk_array(struct_targ(PoolWord(types.ptr[fact_type(t)].st) 0)))
+}
+fact_pool_position=(@s:FactState pool:PoolWord handle:PoolWord):>PoolWord=>{
+    let positions=fact_project(@s pool FACT_POOL_POSITIONS false T_INT)
+    fact_project(@s positions handle true T_INT)
+}
+fact_pool_values=(n:PoolWord @s:FactState before:PoolWord after:PoolWord values:array<int64> result:PoolWord kind:PoolWord):>void=>$unsafe {
+    if kind not=? 4 and kind not=? 5 {return}
+    let t=fact_type(ntype(kid(n 0)))
+    if ownership_decls.length not=? 0 and ownership_fact_type(t) {return}
+    let at=mk_array(struct_targ(PoolWord(types.ptr[t].st) 0))
+    let items=fact_pool_items(@s before t)
+    let positions=fact_project(@s before FACT_POOL_POSITIONS false T_INT)
+    if kind =? 4 {
+        let index=fact_pool_position(@s before values[1])
+        let changed=fact_replace(@s items index true values[2] at)
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(after fact_pool_items_name false changed))}
+    }
+    else {
+        let length=fact_project(@s items (-1) false T_INT)
+        let b=fact_bound(s length)
+        let size=fact_new(@s FactBound((if b.lo <? fact_length_max() {b.lo + 1} else {fact_length_max()}) (if b.hi <? fact_length_max() {b.hi + 1} else {fact_length_max()})) FactTerm(type=T_INT))
+        fact_difference(@s length size (-1) n)
+        fact_difference(@s size length 1 n)
+        let appended=fact_replace(@s items length true values[1] at)
+        let changed=fact_replace(@s appended (-1) false size at)
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(after fact_pool_items_name false changed))}
+        # add's new handle is distinct from every earlier live one. Do not
+        # require scalar comparison of an opaque Handle to retain positions.
+        let next=fact_new(@s FactBound() FactTerm(type=T_INT))
+        let kept:array<FactProjection>=[]
+        let pi=fact_projection_first(s positions)
+        loop pi >=? 0 {
+            let p=s.projections[pi]
+            pi=fact_projection_after(s pi)
+            if p.element {kept.push(FactProjection(next p.selector true p.value))}
+        }
+        loop p in kept {
+            if s.projections.length <? FACT_CAP {fact_add_projection(@s p)}
+        }
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(next result true length))}
+        positions=next
+    }
+    if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(after FACT_POOL_POSITIONS false positions))}
+}
+fact_pool_capture=(n:PoolWord @s:FactState values:array<int64> kind:PoolWord):>PoolWord=>$unsafe {
+    let before=fact_map_receiver(@s n values[0])
+    if kind >=? 2 and kind <=? 4 {fact_pool_check(n @s before values[1])}
+    # (has, `[]` and `__pool_index` read the pool and the handle, and call nothing;
+    # `[]=`, add and remove write the pool alone, calling nothing of the program's
+    # without lifecycle hooks: what may alias it is what they can change)
+    if kind >? 3 {
+        let written=fact_pool_receiver(n)
+        if ownership_decls.length =? 0 and written.declaration >? 0 {
+            if fact_exposed(written) {fact_forget(@s n 'call' false written)}
+        }
+        else {fact_path_call_effects(n @s)}
+    }
+    if kind =? 1 {return fact_new(@s fact_domain(T_BOOL) FactTerm('gt' fact_pool_member(@s before values[1]) fact_constant(@s 0)))}
+    if kind =? 2 or kind =? 3 {
+        let t=fact_type(ntype(kid(n 0)))
+        if ownership_decls.length =? 0 or not ownership_fact_type(t) {
+            let position=fact_pool_position(@s before values[1])
+            if kind =? 3 {return position}
+            return fact_project(@s fact_pool_items(@s before t) position true ntype(n))
+        }
+    }
+    if kind <=? 3 {return fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))}
+    # (the pool's value after the call: a new one even where no effect row gave one)
+    let target=kid(n 0)
+    loop nodes.ptr[target].kind =? 'addr' or nodes.ptr[target].kind =? 'conv' {target=PoolWord(nodes.ptr[target].a)}
+    let route=fact_receiver_route(n @s)
+    let held=fact_route_values(@s route)
+    let after=if held.length >? 0 {held[held.length - 1]} else {0}
+    if after =? before or after =? 0 {
+        if route.root =? 0 {return fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))}
+        after=fact_new(@s FactBound() FactTerm(type=ntype(target)))
+        fact_store_route(@s route after n)
+    }
+    let result=fact_new(@s fact_domain(ntype(n) 'missing' n) FactTerm(type=ntype(n)))
+    if kind =? 4 {fact_pool_keep(@s before after)}
+    else if kind =? 5 {
+        let rank=fact_pool_rank(s before) + 1
+        fact_pool_keep(@s before after)
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(after result true fact_constant(@s rank n)))}
+    }
+    else {
+        fact_pool_keep(@s before after values[1])
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(after values[1] true fact_constant(@s 0 n)))}
+    }
+    fact_pool_values(n @s before after values result kind)
+    result
+}
