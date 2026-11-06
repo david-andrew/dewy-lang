@@ -1,0 +1,58 @@
+# Floor `%` and `//` by positive constants: negative dividends need the fix-up,
+# masked (nonnegative) dividends do not, and a dividend must not lend its range
+# past a join or a loop head.
+rem3 = (x:int64):>int64 => x%3
+div3 = (x:int64):>int64 => x//3
+rem7 = (x:int64):>int64 => x%7
+div641 = (x:int64):>int64 => x//641
+masked = (x0:int64):>[int64 int64] => {
+    let x=x0
+    x=x&1048575
+    return [x%1000 x//1000]
+}
+masked_copy = (x:int64):>[int64 int64] => {
+    let y=x&255
+    let z=y
+    return [z%10 z//10]
+}
+# The mask holds on one arm only.
+joined = (x0:int64 c:bool):>[int64 int64] => {
+    let x=x0
+    if c {x=x&15}
+    return [x%10 x//10]
+}
+# The mask holds at the end of the body, not at its start.
+looped = (x0:int64):>array<int64> => {
+    let x=x0
+    let out:array<int64>=[]
+    loop i in [0..3) {
+        out.push(x%10)
+        out.push(x//10)
+        x=(x-100)&255
+        if i =? 0 {x=x-1000}
+    }
+    return out
+}
+# A mask of a negative constant keeps the sign.
+negative_mask = (x:int64):>[int64 int64] => {
+    let y=x&(-16)
+    return [y%10 y//10]
+}
+# A later write replaces the masked value before the division.
+rewritten = (x0:int64 y:int64):>int64 => {
+    let x=x0
+    x=x&15
+    x=y
+    return x%10
+}
+main = ():>void => {
+    loop x in [-9223372036854775807 -7 -6 -1 0 1 6 7 9223372036854775807] {
+        printl"{rem3(x)} {div3(x)} {rem7(x)} {div641(x)}"
+    }
+    printl"{masked(-1)} {masked(123456789)} {masked_copy(-3)} {masked_copy(259)}"
+    printl"{joined(-13 true)} {joined(-13 false)}"
+    printl"{looped(-13)} {looped(77)}"
+    printl"{negative_mask(-1)} {negative_mask(33)}"
+    printl"{rewritten(7 -13)}"
+}
+$runtime_checks

@@ -601,6 +601,22 @@ ow_fact_true = (c: int) -> bool: ow_fact_known(c, 1)
 
 ow_add_fact_true = (c: int): ow_add_fact(c, 1)
 
+# (opt_rewrite.dewy explains these two)
+o_nonnegative_remainder = -1
+ow_nonnegative = (v0: int) -> bool:
+    v = v0
+    j = o_count - 1
+    loop j >= 0 and j >= o_count - 8:
+        ins = o_out + j
+        op = ins.op
+        if op == .loop or op == .else_ or op == .end or op == .zeroslots: return false
+        if opt_decode[oc_tag(ins)] & 1 != 0 and int(ins.dst) == v:
+            if op == .mov: v = int(ins.a)
+            else if op == .and_: return ow_is_k(int(ins.b)) and o_regs[int(ins.b)].cval >= 0
+            else: return false
+        j -= 1
+    false
+
 # simplify one instruction, appending the result to o_out
 # One opcode-directed forward transfer. Only scalar arithmetic enters folding;
 # memory/call/vector/control operations go directly from rewriting to CSE/emission.
@@ -733,6 +749,9 @@ ow_transfer = (ins: *Ins, simplify: bool):
         if not ow_is_k(bb):
             break
         k = o_regs[bb].cval
+        if op == .lts and k == 0 and a == o_nonnegative_remainder:
+            ins[0] = Ins(.iconst, 0, i32(d), 0, 0, 0, 0)
+            continue
         # A nonnegative constant mask bounds its result in [0, mask]. Relational
         # comparisons are monotone on that interval, in both signed and unsigned
         # order. Equal endpoints prove the whole comparison; equality is excluded.
@@ -784,16 +803,20 @@ ow_transfer = (ins: *Ins, simplify: bool):
             # by any other constant: a multiply by a "magic" number, its high half, a shift, and a
             # one added to negative dividends (Hacker's Delight 10-1), as C compilers do
             mag, s = ow_div_magic(k)
+            plain = ow_nonnegative(a)
             q = ow_bin(.mulhs, ow_tmp(), a, ow_kconst(mag))
             if mag < 0: q = ow_bin(.add, ow_tmp(), q, a)
             if s > 0: q = ow_bin(.shrs, ow_tmp(), q, ow_kconst(s))
-            neg = ow_bin(.shru, ow_tmp(), a, ow_kconst(63))
-            if op == .divs:
-                ow_bin(.add, d, q, neg)
-            else:
-                qq = ow_bin(.add, ow_tmp(), q, neg)
+            qq = q
+            if not plain:
+                neg = ow_bin(.shru, ow_tmp(), a, ow_kconst(63))
+                target = if op == .divs: d else: ow_tmp()
+                qq = ow_bin(.add, target, q, neg)
+            else if op == .divs: ow_bin(.mov, d, q, 0)
+            if op == .rems:
                 t = ow_bin(.mul, ow_tmp(), qq, ow_kconst(k))
                 ow_bin(.sub, d, a, t)
+                if plain and ow_stable(d): o_nonnegative_remainder = d
             return
         if (op == .divu or op == .remu) and k > 1 and sh <= 0 and opt_mulh_ok:
             # unsigned: the high half of a multiply by a magic number, and a shift (with an add when
@@ -998,6 +1021,7 @@ ow_input_use = (v: int, pos: int):
     o_input_last[v] = i32(pos)
 
 opt_rewrite = ():
+    o_nonnegative_remainder = -1
     opt_args = data(opt_ir.args)
     opt_vtypes = data(opt_ir.vtypes)
     opt_input_count = opt_ir.code.len()

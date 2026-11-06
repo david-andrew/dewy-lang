@@ -1388,11 +1388,16 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
         let quotient=e_bin('divs' VI va vb)
         let remainder=e_bin('rems' VI va vb)
         e_mov(result if op =? 'slash' {quotient} else {remainder});
-        iff(e_bin('ne' VI remainder e_iconst(0)));
-        iff(e_bin('lts' VI e_bin('xor' VI remainder vb) e_iconst(0)));
+        # A positive divisor differs in sign from a remainder exactly when that
+        # remainder is negative: one predictable test rather than two.
+        if known and divisor >? 0 {iff(e_bin('lts' VI remainder e_iconst(0)));}
+        else {
+            iff(e_bin('ne' VI remainder e_iconst(0)));
+            iff(e_bin('lts' VI e_bin('xor' VI remainder vb) e_iconst(0)));
+        }
         e_mov(result if op =? 'slash' {e_addi(quotient -1)} else {e_bin('add' VI remainder vb)});
         endc();
-        endc();
+        if not (known and divisor >? 0) {endc();}
         endc();
         return V(result false)
     }
