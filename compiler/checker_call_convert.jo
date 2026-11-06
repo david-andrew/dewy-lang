@@ -101,6 +101,14 @@ arg_cost_rest = (a: int, pat: int, binds: mut int[]) -> int:
             return -1
         k = nodes[a].kind
         if k == .if_ or k == .match_: return branch_arg_cost(a, pat, binds)
+        # (a union parameter: the one member this literal builds, as an expected type chooses it)
+        if k == .array or k == .record_lit or k == .map_lit:
+            held = if types[target].kind == .opt: prune(int(types[target].elem)) else: target
+            if is_union(held):
+                member = literal_union_member(a, held)
+                if member == 0: return -1
+                r = arg_cost(a, member, binds)
+                return if r < 0: -1 else: r + 2
         if dewy_set_literal(a):
             target = p
             if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])

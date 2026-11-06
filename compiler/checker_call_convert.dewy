@@ -2,7 +2,7 @@ $runtime_checks
 from p"types.jo" import (T_FLOAT T_INT T_MATH_INT T_U64 fields has_var is_float is_int is_union mk_array prune struct_targ structs targ tkind type_eq types)
 from p"ast.jo" import (NF_CHECKED NF_U64 NF_COMPREHENSION NF_GENERIC NF_SPREAD add_flag clone has_flag kid kids nkids nodes)
 from p"checker_call_cost.dewy" import (arg_cost)
-from p"expr.jo" import (array_has_spread branch_numeric bundled_bigint_type call_refined_literal_cost call_string_cost can_coerce charlike decimal_literal_tree dewy_bigint_literal_target dewy_positional_fits dewy_record_spread_entries dewy_record_target dewy_set_literal find_variant fixed_literal_ok fn_value_adapts is_dewy_set_type is_fn_type is_lit is_map_type is_nd lit_default lit_fits match_type nd_elem ntype oversized_literal subst_partial union_target variant_enum word_rational_source)
+from p"expr.jo" import (literal_union_member array_has_spread branch_numeric bundled_bigint_type call_refined_literal_cost call_string_cost can_coerce charlike decimal_literal_tree dewy_bigint_literal_target dewy_positional_fits dewy_record_spread_entries dewy_record_target dewy_set_literal find_variant fixed_literal_ok fn_value_adapts is_dewy_set_type is_fn_type is_lit is_map_type is_nd lit_default lit_fits match_type nd_elem ntype oversized_literal subst_partial union_target variant_enum word_rational_source)
 from p"check.jo" import (binding_leaves check_struct_fields globals locals resolve_type subst syms)
 from p"units.jo" import (bundled_rational_type bundled_word_rational_type quantity_constant_fits quantity_int_promotes)
 from p"effects.jo" import (effects_active)
@@ -115,6 +115,16 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
         }
         let k=nodes.ptr[a].kind
         if k =? 'if_' or k =? 'match_' {return branch_arg_cost(a pat @binds)}
+        # (a union parameter: the one member this literal builds, as an expected type chooses it)
+        if k =? 'array' or k =? 'record_lit' or k =? 'map_lit' {
+            let held=if types.ptr[target].kind =? 'opt' {prune(CVWord(types.ptr[target].elem))} else {target}
+            if is_union(held) {
+                let member=literal_union_member(a held)
+                if member =? 0 {return -1}
+                let r=arg_cost(a member @binds)
+                return if r <? 0 {-1} else {r + 2}
+            }
+        }
         if dewy_set_literal(a) {
             target=p
             if pk =? 'param' and binds.ptr[CVWord(types.ptr[p].id)] not=? 0 {target=prune(binds.ptr[CVWord(types.ptr[p].id)])}

@@ -28,6 +28,7 @@ is_dewy_set_type = (t: int) -> bool: false
 variant_enum = (t: int, name: int) -> int: t
 find_variant = (s: int, name: int) -> int: name - 1
 array_has_spread = (a: int) -> bool: false
+literal_union_member = (n: int, expected: int) -> int: 0
 fixed_literal_ok = (a: int, t: int) -> bool: nkids(a) == int(types[t].bits)
 is_map_type = (t: int) -> bool: tkind(t) == .struct_ and types[t].bits == 91
 dewy_positional_fits = (a: int, t: int) -> bool: true

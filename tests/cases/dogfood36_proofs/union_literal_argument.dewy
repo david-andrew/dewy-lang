@@ -1,0 +1,29 @@
+# A literal argument takes the one union member it builds, as an annotated binding does.
+P:type = [x:int y:int]
+Q:type = [name:string]
+V:type = int | array<int> | P | Q | dict<string int> | none
+show = (v:V):>string => match v {
+    n:int => "int {n}"
+    a:array<int> => "arr {a.length}"
+    p:P => "P {p.x}"
+    q:Q => "Q {q.name}"
+    d:dict<string int> => "dict {d.length}"
+    <none> => "nil"
+}
+pair = (v:int|[int string]):>string => match v {
+    n:int => "{n}"
+    t:[int string] => "{t[0]}{t[1]}"
+}
+over = (x:int|array<int>):>string => "union {x}"
+over = (x:string):>string => "text {x}"
+main = () => {
+    printl(show([1 2]))
+    printl(show(3))
+    printl(show(none))
+    printl(show([x=1 y=2]))
+    printl(show([name="n"]))
+    printl(show(["a"->1]))
+    printl(pair([1 "a"]))
+    printl(over([1]))
+    printl(over("s"))
+}
