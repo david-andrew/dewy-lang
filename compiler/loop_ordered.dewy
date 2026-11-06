@@ -1,0 +1,36 @@
+$runtime_checks
+# Demand-only helpers for read-only record loops. The existing vector planner
+# bounds a body to 400 instructions; each candidate index checks only that body.
+# No new whole-program pass or persistent analysis state.
+from p"ir_types.dewy" import (Ins)
+from p"ir.jo" import (VF)
+from p"loops.jo" import (CLoop lx_within lx_def_at)
+from p"ir_builders.dewy" import (ir_has_use ir_operands is_kv kv_of mem_index mem_scale)
+
+OrderedWord:type=int64<overflow='wrap'>
+# Record addressing is lowered as a shifted counter plus a field offset.
+# Only power-of-two strides 16..64, f64 fields, and memory-only index uses.
+lx_record_index=(code:array<Ins> L:CLoop p:OrderedWord):>bool=>$unsafe {
+    let ins=code.ptr[p]
+    if ins.op not=? 'shl' or OrderedWord(ins.a) not=? L.ctr or not is_kv(OrderedWord(ins.b)) {return false}
+    let shift=kv_of(OrderedWord(ins.b))
+    let dst=OrderedWord(ins.dst)
+    if shift <? 4 or shift >? 6 or not lx_within(code dst L) {return false}
+    if lx_def_at(code dst L.pl + 1 L.pe) not=? p {return false}
+    let used=false
+    loop q in [L.pl + 1..L.pe) {
+        if q =? p {continue}
+        let access=code.ptr[q]
+        ir_operands(access);
+        if not ir_has_use(dst) {continue}
+        if q <=? p or access.op not=? 'load' or mem_index(access) not=? dst or mem_scale(access) not=? 0 or OrderedWord(access.ty) not=? VF or OrderedWord(access.a) =? dst {return false}
+        used=true
+    }
+    used
+}
+lx_record_stride=(code:array<Ins> L:CLoop ins:Ins):>OrderedWord=>$unsafe {
+    if ins.op not=? 'load' or OrderedWord(ins.ty) not=? VF or mem_scale(ins) not=? 0 {return 0}
+    let at=lx_def_at(code mem_index(ins) L.pl + 1 L.inc)
+    if at <? 0 or not lx_record_index(code L at) {return 0}
+    1 << kv_of(OrderedWord(code.ptr[at].b))
+}
