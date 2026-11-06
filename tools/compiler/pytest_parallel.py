@@ -8,6 +8,10 @@ import pytest
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    # Keep expensive files early without passing every file as a separate
+    # collection root (which makes pytest repeatedly scan the same directory).
+    sizes = {path: path.stat().st_size for path in {item.path for item in items}}
+    items.sort(key=lambda item: -sizes[item.path])
     for item in items:
         if item.get_closest_marker('xdist_group') is not None:
             continue
