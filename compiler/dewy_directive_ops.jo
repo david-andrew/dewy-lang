@@ -1,0 +1,93 @@
+use 'dewy_directives.jo'
+use 'source_types.dewy'
+use 'dewy_parser.dewy'
+use 'dewy_context.jo'
+use 'util.jo'
+use 'ast.jo'
+use 'ide.jo'
+use 'check.jo'
+use 'effects.jo'
+use 'directives.jo'
+use 'dewy_nodes.jo'
+use 'dewy_fast.jo'
+use 'dewy_direct.jo'
+use 'isolation.jo'
+use 'oom.jo'
+use 'oom_ops.dewy'
+use 'isolation_ops.dewy'
+
+# After a Dewy source is lexed: read lib/directives.dewy first when it names a
+# metatag the compiler does not know (a bundle, or a loop label).
+dw_dir_lexed = (file: int):
+    dw_dir_dollars = dn_metatags > 0
+    if not dw_dir_dollars or dir_bundles_loaded: return
+    seen = 0
+    unknown = false
+    loop t in dc_parser.tokens:
+        if t.kind != .metatag: continue
+        if not dw_dir_known(dn_payload(t)):
+            unknown = true
+            break
+        seen += 1
+        if seen >= dn_metatags: break
+    if not unknown: return
+    # (the lexed source waits while the bundles are parsed)
+    tokens = dc_parser.tokens
+    at_file = dc_parser.file
+    suspect = dn_lexer.suspect_brace
+    interpolation = dc_parser.reader.dn_in_interpolation
+    bigint = dw_bigint_import
+    # (and the lexer's state: lazily lexed bodies left to expand, metatags seen)
+    lazy_left = dc_parser.reader.dn_lazy_left
+    metatags = dn_metatags
+    comments = dn_block_comments
+    dw_dir_load()
+    dc_parser.reader.dn_lazy_left = lazy_left
+    dn_metatags = metatags
+    dn_block_comments = comments
+    dc_parser.tokens = tokens
+    dc_parser.file = at_file
+    dc_parser.source = files[dc_parser.file].src
+    dn_lexer.suspect_brace = suspect
+    dc_parser.reader.dn_in_interpolation = interpolation
+    dw_bigint_import = bigint
+    dw_dir_dollars = true
+dw_dir_load = ():
+    dir_bundles_loaded = true
+    path = lib_dir + "/directives.dewy"
+    src = read_source(path)
+    if src == none: return
+    file = files.len()
+    files.push(SrcFile(path, lib_dir, src!, true))
+    made = dewy_fast_file(file)
+    if made.len() != 0: fatal(nodes[made[0]].pos, "lib/directives.dewy defines bundles only")
+dw_dir_name = (name: str) -> bool:
+    dir_builtin(name) or name == "realtime" or dir_bundle_index(intern(name)) >= 0
+# A setting or bundle `$name` (enabled 1) or `$name=false` (0) written at `at`, for the scope
+# [start, end] (the direct grammar's top-level settings come here too: dc_setting).
+dw_dir_apply = (name: str, enabled: int, at: int, start: int, end: int, module: bool):
+    # (a bundle with `$explicit_allocation_failure` sets that module policy too; opting a
+    # nested scope out leaves the module's policy in place)
+    b = dir_bundle_index(intern(name))
+    if b >= 0 and enabled == 1:
+        chain: int[]
+        dir_bundle_resolve(b, chain)
+        if dir_bundles[b].allocation_failure:
+            if not module: fatal(at, "`${name}` includes `$explicit_allocation_failure`, a module policy: put it at the top of a module")
+            if not oom_files.has(pos_file(at)): oom_module(pos_file(at), at)
+    dir_set(intern(name), enabled, start, end, at)
+# (the names compact syntax n uses, in an arm a `$target` test leaves out: dw_target_dropped)
+dw_target_dropped_node = (n: int):
+    if n <= 0 or n >= nodes.len(): return
+    if nodes[n].kind == .ident: dw_target_dropped_name(int(nodes[n].name), nodes[n].pos)
+    mask = isolation_children(nodes[n].kind)
+    # (a lambda's body and captures use names too)
+    if nodes[n].kind == .lambda:
+        mask = 1 | 2 | 4 | 16
+        loop c in kids2(n): dw_target_dropped_node(c)
+    if mask < 0: mask = 1 | 2 | 4 | 16
+    if mask & 1 != 0: dw_target_dropped_node(int(nodes[n].a))
+    if mask & 2 != 0: dw_target_dropped_node(int(nodes[n].b))
+    if mask & 4 != 0: dw_target_dropped_node(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop c in kids(n): dw_target_dropped_node(c)

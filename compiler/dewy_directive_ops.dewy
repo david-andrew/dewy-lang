@@ -1,0 +1,102 @@
+$runtime_checks
+from p"ast.jo" import (kids kids2 nodes)
+from p"check.jo" import (lib_dir)
+from p"dewy_context.jo" import (dc_parser)
+from p"dewy_directives.jo" import (dw_dir_dollars)
+from p"dewy_fast.jo" import (dewy_fast_file dn_block_comments dn_lexer dn_metatags dn_payload)
+from p"dewy_nodes.jo" import (dw_bigint_import dw_target_dropped_name)
+from p"directives.jo" import (dir_builtin dir_bundle_index dir_bundle_resolve dir_bundles dir_bundles_loaded dir_set dw_dir_known)
+from p"ide.jo" import (read_source)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"oom.jo" import (oom_files)
+from p"oom_ops.dewy" import (oom_module)
+from p"source_types.dewy" import (SrcFile)
+from p"util.jo" import (fatal files intern pos_file)
+
+DirectiveWord:type=int64<overflow='wrap'>
+# After a Dewy source is lexed: read lib/directives.dewy first when it names a
+# metatag the compiler does not know (a bundle, or a loop label).
+dw_dir_lexed=(file:DirectiveWord):>void=>{
+    dw_dir_dollars=dn_metatags >? 0
+    if not dw_dir_dollars or dir_bundles_loaded {return}
+    let seen=0
+    let unknown=false
+    loop t in dc_parser.tokens {
+        if t.kind not=? 'metatag' {continue}
+        if not dw_dir_known(dn_payload(t)) {
+            unknown=true
+            break
+        }
+        seen += 1
+        if seen >=? dn_metatags {break}
+    }
+    if not unknown {return}
+    # (the lexed source waits while the bundles are parsed)
+    let tokens=dc_parser.tokens
+    let at_file=dc_parser.file
+    let suspect=dn_lexer.suspect_brace
+    let interpolation=dc_parser.reader.dn_in_interpolation
+    let big_import=dw_bigint_import
+    # (and the lexer's state: lazily lexed bodies left to expand, metatags seen)
+    let lazy_left=dc_parser.reader.dn_lazy_left
+    let metatags=dn_metatags
+    let comments=dn_block_comments
+    dw_dir_load()
+    dc_parser.reader.dn_lazy_left=lazy_left
+    dn_metatags=metatags
+    dn_block_comments=comments
+    dc_parser.tokens=tokens
+    dc_parser.file=at_file
+    dc_parser.source=files[dc_parser.file].src
+    dn_lexer.suspect_brace=suspect
+    dc_parser.reader.dn_in_interpolation=interpolation
+    dw_bigint_import=big_import
+    dw_dir_dollars=true
+}
+dw_dir_load=():>void=>$unsafe {
+    dir_bundles_loaded=true
+    let path="{lib_dir}/directives.dewy"
+    let src=read_source(path)
+    if src =? none {return}
+    let file=files.length
+    files.push(SrcFile(path lib_dir src true))
+    let made=dewy_fast_file(file)
+    if made.length not=? 0 {fatal(nodes.ptr[made[0]].pos "lib/directives.dewy defines bundles only")}
+}
+dw_dir_name=(name:string):>bool=>{
+    dir_builtin(name) or name =? "realtime" or dir_bundle_index(intern(name)) >=? 0
+}
+# A setting or bundle `$name` (enabled 1) or `$name=false` (0) written at `at`, for the scope
+# [start, end_] (the direct grammar's top-level settings come here too: dc_setting).
+dw_dir_apply=(name:string enabled:DirectiveWord at:DirectiveWord start:DirectiveWord end_:DirectiveWord module:bool):>void=>{
+    # (a bundle with `$explicit_allocation_failure` sets that module policy too; opting a
+    # nested scope out leaves the module's policy in place)
+    let b=dir_bundle_index(intern(name))
+    if b >=? 0 and enabled =? 1 {
+        let chain:array<int64>=[]
+        dir_bundle_resolve(b @chain)
+        if dir_bundles[b].allocation_failure {
+            if not module {fatal(at "`${name}` includes `$explicit_allocation_failure`, a module policy: put it at the top of a module")}
+            if not oom_files.has(pos_file(at)) {oom_module(pos_file(at) at)}
+        }
+    }
+    dir_set(intern(name) enabled start end_ at)
+}
+# (the names compact syntax n uses, in an arm a `$target` test leaves out: dw_target_dropped)
+dw_target_dropped_node=(n:DirectiveWord):>void=>$unsafe {
+    if n <=? 0 or n >=? nodes.length {return}
+    if nodes.ptr[n].kind =? 'ident' {dw_target_dropped_name(DirectiveWord(nodes.ptr[n].name) nodes.ptr[n].pos)}
+    let mask=isolation_children(nodes.ptr[n].kind)
+    # (a lambda's body and captures use names too)
+    if nodes.ptr[n].kind =? 'lambda' {
+        mask=1 | 2 | 4 | 16
+        loop c in kids2(n) {dw_target_dropped_node(c)}
+    }
+    if mask <? 0 {mask=1 | 2 | 4 | 16}
+    if mask & 1 not=? 0 {dw_target_dropped_node(DirectiveWord(nodes.ptr[n].a))}
+    if mask & 2 not=? 0 {dw_target_dropped_node(DirectiveWord(nodes.ptr[n].b))}
+    if mask & 4 not=? 0 {dw_target_dropped_node(DirectiveWord(nodes.ptr[n].c))}
+    if mask & 16 not=? 0 {
+        loop c in kids(n) {dw_target_dropped_node(c)}
+    }
+}
