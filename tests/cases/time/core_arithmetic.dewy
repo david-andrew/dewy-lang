@@ -1,0 +1,31 @@
+# quick
+# Instants and durations: exact arithmetic, leap seconds, display.
+import p"@lib/time/core.dewy" as core
+
+let t = instant"2026-10-24T12:00:00Z"
+printl"{t + 90minute}"
+printl"{t + 0.1s}"
+printl"{(t + 90minute) - t}"
+
+# Arithmetic ignores leaps: this minute has 61 seconds.
+let before = instant"2016-12-31T23:59:59Z"
+let leap = utc"2016-12-31T23:59:60"
+printl"{leap} {leap.nominal - before}"
+printl"{instant"2017-01-01T00:00:00Z" - before}"
+
+# The reference integers of docs/design/time.md.
+printl"{core.ns_count(instant"1970-01-01T00:00:00Z")}"
+printl"{core.ns_count(instant"1969-07-20T20:17:40Z")}"
+printl"{core.ns_count(instant"1980-01-06T00:00:00Z")}"
+printl"{core.ns_count(instant"2000-01-01T11:58:55.816Z")}"
+
+# Durations mix with time quantities, and print through the unit chooser.
+let d = (t + 90minute) - t
+printl"{d} {d + 300ms} {d*2} {d/3} {d/1s} {-d} {300ms + d}"
+printl"{d <? 5s} {d >? 1ms} {d =? 90minute} {5s - d} {d//7}"
+printl"{d/1s as float64}"
+
+# Offsets and a fraction read as the same instant; a far count keeps exact digits.
+printl"{instant"2017-01-01T01:00:00+01:00" =? instant"2017-01-01T00:00:00Z"}"
+printl"{instant"2026-10-24T12:00:00.000000001Z"}"
+printl"{core.instant_at(-500000000000000000000000)}"

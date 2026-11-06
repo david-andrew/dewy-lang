@@ -1,0 +1,623 @@
+# The coordinate core of docs/design/time.md: Instant and Duration, two-word
+# counts of nanoseconds from J0 on the TT-rate axis, the UTC segment table, the
+# `instant` and `utc` readers, and RFC 3339 display. It maps no zone data.
+
+_W:type=uint64<overflow='wrap'>
+_I:type=int64<overflow='wrap'>
+
+Instant:type=[_hi:int64 _lo:uint64]
+Duration:type=[_hi:int64 _lo:uint64]
+# A UTC label as written, which keeps `:60`; `nominal` is the instant it names.
+UtcLabel:type=[year:int month:int64 day:int64 hour:int64 minute:int64 second:int64 nanosecond:int64 nominal:Instant]
+
+const _NS:int=1000000000
+const _DAY_NS:int=86400000000000
+# MJD of the J0 label's day: 1977-01-01.
+const _J0_MJD:int=43144
+const _J0_DAYS:int=2557
+
+# (a count that fits a word stays one: the common path has no big integer on it)
+_int=(hi:int64 lo:uint64):>int=>{
+    if hi =? 0 and lo <=? 9223372036854775807 {return int(int64<overflow='wrap'>(lo))}
+    if hi =? -1 and lo >? 9223372036854775807 {return int(int64<overflow='wrap'>(lo))}
+    (int(hi) << 64) + int(lo)
+}
+# (leaving the range is a named assumption, docs/design/assumptions.md; `checked_add` reports it)
+_too_far=():>never=>{
+    __environment_failure("time left the 128-bit range: more than 5.39e21 years from 1977")
+    exit(101)
+}
+_pair=(x:int):>[int64 uint64]=>{
+    let word=x.to_int64()
+    if word isnt? none {return [if word <? 0 -1 else 0 uint64<overflow='wrap'>(word)]}
+    let hi=(x >> 64).to_int64() ?? _too_far()
+    let lo=(x and 18446744073709551615).to_uint64() ?? 0
+    [hi lo]
+}
+_fits=(x:int):>bool=>(x >> 64).to_int64() isnt? none
+_instant=(x:int):>Instant=>{
+    let [hi lo]=_pair(x)
+    Instant[hi lo]
+}
+_duration=(x:int):>Duration=>{
+    let [hi lo]=_pair(x)
+    Duration[hi lo]
+}
+
+# The count of nanoseconds, exact.
+ns_count=((d:Duration):>int=>_int(d._hi d._lo))
+    & ((t:Instant):>int=>_int(t._hi t._lo))
+
+# (the whole count for a wait, saturating: a wait that long never ends anyway)
+wait_ns=(d:Duration):>int64=>{
+    if d._hi <? 0 {return 0}
+    if d._hi >? 0 or d._lo >? 9223372036854775807 {return 9223372036854775807}
+    int64<overflow='wrap'>(d._lo)
+}
+# A count of nanoseconds as a value: the library's other constructors go through these.
+instant_at=(count:int):>Instant=>_instant(count)
+duration_of=(count:int):>Duration=>_duration(count)
+
+# (a word-sized count, with no big integer on the way: the clock's path)
+instant_word=(count:int64):>Instant=>Instant[if count <? 0 -1 else 0 uint64<overflow='wrap'>(count)]
+duration_word=(count:int64):>Duration=>Duration[if count <? 0 -1 else 0 uint64<overflow='wrap'>(count)]
+
+# ---------------- word arithmetic: a carry, then the high words ----------------
+_sum_hi=(a:int64 b:int64 carry:int64):>int64=>{
+    let sum:_I=_I(a)+_I(b)+_I(carry)
+    # (both operands one sign and the sum the other: past the range)
+    if ((_I(a) xor sum) and (_I(b) xor sum)) <? 0 {_too_far()}
+    int64(sum)
+}
+_add=(ah:int64 al:uint64 bh:int64 bl:uint64):>[int64 uint64]=>{
+    let lo:_W=_W(al)+_W(bl)
+    let carry:int64=if uint64(lo) <? al 1 else 0
+    [_sum_hi(ah bh carry) uint64(lo)]
+}
+_sub=(ah:int64 al:uint64 bh:int64 bl:uint64):>[int64 uint64]=>{
+    let lo:_W=_W(al)-_W(bl)
+    let borrow:int64=if al <? bl 1 else 0
+    let dif:_I=_I(ah)-_I(bh)-_I(borrow)
+    if ((_I(ah) xor _I(bh)) and (_I(ah) xor dif)) <? 0 {_too_far()}
+    [int64(dif) uint64(lo)]
+}
+_less=(ah:int64 al:uint64 bh:int64 bl:uint64):>bool=>(ah <? bh) or (ah =? bh and al <? bl)
+
+# ---------------- time quantities meeting durations ----------------
+_seconds=(q:rational*Time):>rational=>q transmute rational
+# A time quantity on the nanosecond grid; a constant off it is a compile error at its use.
+_of_int=(q:int*Time):>Duration=>{
+    let seconds=q transmute int
+    # (up to 285 years, one word multiply)
+    if seconds >? -9000000000 and seconds <? 9000000000 {return duration_word(int64<overflow='wrap'>(seconds)*1000000000)}
+    _duration(seconds*_NS)
+}
+_of_rational=(q:rational*Time):>Duration|OffGrid=>{
+    let count:rational=_seconds(q)*rational(1000000000)
+    if count.denominator not=? 1 {return OffGrid}
+    _duration(count.numerator)
+}
+_grid_error=(q:rational*Time):>string?=>{
+    if _of_rational(q) is? OffGrid {
+        return "the nanosecond grid has no such value: use `quantize(tick=1ns rounding='nearest_even')`, name a tick, or `time.science`"
+    }
+    none
+}
+
+# ---------------- Duration ----------------
+__add__=(a:Duration b:Duration):>Duration=>{
+    let [hi lo]=_add(a._hi a._lo b._hi b._lo)
+    Duration[hi lo]
+}
+__sub__=(a:Duration b:Duration):>Duration=>{
+    let [hi lo]=_sub(a._hi a._lo b._hi b._lo)
+    Duration[hi lo]
+}
+__unary_sub__=(a:Duration):>Duration=>{
+    let [hi lo]=_sub(0 0 a._hi a._lo)
+    Duration[hi lo]
+}
+__lt__=(a:Duration b:Duration):>bool=>_less(a._hi a._lo b._hi b._lo)
+__eq__=(a:Duration b:Duration):>bool=>a._hi =? b._hi and a._lo =? b._lo
+__add__=(a:Duration q:int*Time):>Duration=>a+_of_int(q)
+__add__=(q:int*Time a:Duration):>Duration=>_of_int(q)+a
+__sub__=(a:Duration q:int*Time):>Duration=>a-_of_int(q)
+__sub__=(q:int*Time a:Duration):>Duration=>_of_int(q)-a
+__lt__=(a:Duration q:int*Time):>bool=>a<?_of_int(q)
+__lt__=(q:int*Time a:Duration):>bool=>_of_int(q)<?a
+__eq__=(a:Duration q:int*Time):>bool=>a=?_of_int(q)
+__eq__=(q:int*Time a:Duration):>bool=>a=?_of_int(q)
+$check_constant _grid_error(q) "off the nanosecond grid"
+__add__=(a:Duration q:rational*Time):>Duration|OffGrid=>a+(_of_rational(q) or_throw)
+$check_constant _grid_error(q) "off the nanosecond grid"
+__add__=(q:rational*Time a:Duration):>Duration|OffGrid=>a+(_of_rational(q) or_throw)
+$check_constant _grid_error(q) "off the nanosecond grid"
+__sub__=(a:Duration q:rational*Time):>Duration|OffGrid=>a-(_of_rational(q) or_throw)
+$check_constant _grid_error(q) "off the nanosecond grid"
+__sub__=(q:rational*Time a:Duration):>Duration|OffGrid=>(_of_rational(q) or_throw)-a
+# (comparing never needs the grid: both sides are exact)
+__lt__=(a:Duration q:rational*Time):>bool=>rational(ns_count(a) 1) <? _seconds(q)*rational(1000000000)
+__lt__=(q:rational*Time a:Duration):>bool=>_seconds(q)*rational(1000000000) <? rational(ns_count(a) 1)
+__eq__=(a:Duration q:rational*Time):>bool=>rational(ns_count(a) 1) =? _seconds(q)*rational(1000000000)
+__eq__=(q:rational*Time a:Duration):>bool=>rational(ns_count(a) 1) =? _seconds(q)*rational(1000000000)
+__mul__=(a:Duration k:int):>Duration=>_duration(ns_count(a)*k)
+__mul__=(k:int a:Duration):>Duration=>_duration(ns_count(a)*k)
+# (dividing leaves the grid freely, so the answer is an exact quantity: `d/3`, `d/1s`, `d/other`)
+__truediv__=(a:Duration k:int):>rational*Time=>rational(ns_count(a) 1000000000*k)*s
+__truediv__=(a:Duration b:Duration):>rational=>rational(ns_count(a) ns_count(b))
+__truediv__=(a:Duration q:int*Time):>rational=>rational(ns_count(a) ns_count(_of_int(q)))
+__truediv__=(a:Duration q:rational*Time):>rational=>rational(ns_count(a) 1)/(_seconds(q)*rational(1000000000))
+__floordiv__=(a:Duration k:int):>Duration=>_duration(ns_count(a)//k)
+__floordiv__=(a:Duration b:Duration):>int=>ns_count(a)//ns_count(b)
+__floordiv__=(a:Duration q:int*Time):>int=>ns_count(a)//ns_count(_of_int(q))
+__mod__=(a:Duration b:Duration):>Duration=>_duration(ns_count(a)%ns_count(b))
+
+# The largest unit of the time chooser that keeps a whole count (`125ms`, `90min`, `169h`, `0s`).
+__as__=(d:Duration):>string=>{
+    let n=ns_count(d)
+    if n =? 0 {return "0s"}
+    if n%3600000000000 =? 0 {return "{n//3600000000000}h"}
+    if n%60000000000 =? 0 {return "{n//60000000000}min"}
+    if n%1000000000 =? 0 {return "{n//1000000000}s"}
+    if n%1000000 =? 0 {return "{n//1000000}ms"}
+    if n%1000 =? 0 {return "{n//1000}µs"}
+    "{n}ns"
+}
+
+# ---------------- Instant ----------------
+__add__=(t:Instant d:Duration):>Instant=>{
+    let [hi lo]=_add(t._hi t._lo d._hi d._lo)
+    Instant[hi lo]
+}
+__add__=(d:Duration t:Instant):>Instant=>t+d
+__sub__=(t:Instant d:Duration):>Instant=>{
+    let [hi lo]=_sub(t._hi t._lo d._hi d._lo)
+    Instant[hi lo]
+}
+__sub__=(a:Instant b:Instant):>Duration=>{
+    let [hi lo]=_sub(a._hi a._lo b._hi b._lo)
+    Duration[hi lo]
+}
+__lt__=(a:Instant b:Instant):>bool=>_less(a._hi a._lo b._hi b._lo)
+__eq__=(a:Instant b:Instant):>bool=>a._hi =? b._hi and a._lo =? b._lo
+__add__=(t:Instant q:int*Time):>Instant=>t+_of_int(q)
+__add__=(q:int*Time t:Instant):>Instant=>t+_of_int(q)
+__sub__=(t:Instant q:int*Time):>Instant=>t-_of_int(q)
+$check_constant _grid_error(q) "off the nanosecond grid"
+__add__=(t:Instant q:rational*Time):>Instant|OffGrid=>t+(_of_rational(q) or_throw)
+$check_constant _grid_error(q) "off the nanosecond grid"
+__add__=(q:rational*Time t:Instant):>Instant|OffGrid=>t+(_of_rational(q) or_throw)
+$check_constant _grid_error(q) "off the nanosecond grid"
+__sub__=(t:Instant q:rational*Time):>Instant|OffGrid=>t-(_of_rational(q) or_throw)
+$error_if true "a float time enters by `quantize`: `t + quantize(x tick=1ns rounding='nearest_even')`, or use an exact time"
+__add__=(t:Instant q:float64*Time):>Instant=>t
+$error_if true "a float time enters by `quantize`: `t + quantize(x tick=1ns rounding='nearest_even')`, or use an exact time"
+__sub__=(t:Instant q:float64*Time):>Instant=>t
+
+# ---------------- calendar periods: recipes that need a date to mean anything ----------------
+# `1day` is a Days and `1month` a Months, so a date add that cannot fail has the plain type.
+Days:type=[count:int64]
+Months:type=[count:int64]
+Period:type=Days|Months
+__mul__=(k:int64 p:Days):>Days=>Days[int64<overflow='saturate'>(k*p.count)]
+__mul__=(p:Days k:int64):>Days=>k*p
+__mul__=(k:int64 p:Months):>Months=>Months[int64<overflow='saturate'>(k*p.count)]
+__mul__=(p:Months k:int64):>Months=>k*p
+__add__=(a:Days b:Days):>Days=>Days[int64<overflow='saturate'>(a.count+b.count)]
+__sub__=(a:Days b:Days):>Days=>Days[int64<overflow='saturate'>(a.count-b.count)]
+__add__=(a:Months b:Months):>Months=>Months[int64<overflow='saturate'>(a.count+b.count)]
+__sub__=(a:Months b:Months):>Months=>Months[int64<overflow='saturate'>(a.count-b.count)]
+__unary_sub__=(a:Days):>Days=>Days[int64<overflow='saturate'>(-a.count)]
+__unary_sub__=(a:Months):>Months=>Months[int64<overflow='saturate'>(-a.count)]
+__eq__=(a:Days b:Days):>bool=>a.count =? b.count
+__eq__=(a:Months b:Months):>bool=>a.count =? b.count
+__lt__=(a:Days b:Days):>bool=>a.count <? b.count
+__lt__=(a:Months b:Months):>bool=>a.count <? b.count
+_days_divisor=(b:Days):>string?=>if b.count =? 0 "a period of no days divides nothing" else none
+_months_divisor=(b:Months):>string?=>if b.count =? 0 "a period of no months divides nothing" else none
+$check_constant _days_divisor(b) "not a divisor"
+__truediv__=(a:Days b:Days):>rational|OutOfRange=>{
+    if b.count =? 0 {return OutOfRange}
+    rational(int(a.count) int(b.count))
+}
+$check_constant _months_divisor(b) "not a divisor"
+__truediv__=(a:Months b:Months):>rational|OutOfRange=>{
+    if b.count =? 0 {return OutOfRange}
+    rational(int(a.count) int(b.count))
+}
+__as__=(p:Days):>string=>"{p.count}day"
+__as__=(p:Months):>string=>if p.count%12 =? 0 "{p.count//12}year" else "{p.count}month"
+$error_if true "a day or week is a calendar period, with no fixed length on an instant: write `24hour`, or add it to a date or a zoned time"
+__add__=(t:Instant p:Days):>Instant=>t
+$error_if true "a day or week is a calendar period, with no fixed length on an instant: write `24hour`, or add it to a date or a zoned time"
+__sub__=(t:Instant p:Days):>Instant=>t
+$error_if true "a month or year is a calendar period, with no fixed length on an instant: add it to a date or a zoned time"
+__add__=(t:Instant p:Months):>Instant=>t
+$error_if true "a month or year is a calendar period, with no fixed length on an instant: add it to a date or a zoned time"
+__sub__=(t:Instant p:Months):>Instant=>t
+$error_if true "a day or week is a calendar period, not a length of time: write `24hour`, or add it to a date or a zoned time"
+__add__=(d:Duration p:Days):>Duration=>d
+$error_if true "a month or year is a calendar period, not a length of time: add it to a date or a zoned time"
+__add__=(d:Duration p:Months):>Duration=>d
+
+# Adding that reports leaving the range instead of ending the task.
+checked_add=(t:Instant d:Duration):>Instant|OutOfRange=>{
+    let sum=ns_count(t)+ns_count(d)
+    if not _fits(sum) {return OutOfRange}
+    _instant(sum)
+}
+
+# ---------------- UTC: labels on the axis, segment by segment ----------------
+# 1961-1971: TAI-UTC = a + (MJD - b)*c, with a in 1e-7 s and c in 1e-7 s per day.
+# The first row with an MJD at or below a label's day holds; the same table the IERS
+# publishes (tai-utc.dat). From 1972, integer steps, `c` zero; a leap second is the last second
+# of the day before its row. Continuous UTC from 2027-05-20 adds no row: the offset stays.
+_Segment:type=[mjd:int64 a:int64 b:int64 c:int64]
+const _SEGMENTS:array<_Segment>=[
+    _Segment[37300 14228180 37300 12960]
+    _Segment[37512 13728180 37300 12960]
+    _Segment[37665 18458580 37665 11232]
+    _Segment[38334 19458580 37665 11232]
+    _Segment[38395 32401300 38761 12960]
+    _Segment[38486 33401300 38761 12960]
+    _Segment[38639 34401300 38761 12960]
+    _Segment[38761 35401300 38761 12960]
+    _Segment[38820 36401300 38761 12960]
+    _Segment[38942 37401300 38761 12960]
+    _Segment[39004 38401300 38761 12960]
+    _Segment[39126 43131700 39126 25920]
+    _Segment[39887 42131700 39126 25920]
+    _Segment[41317 100000000 0 0]
+    _Segment[41499 110000000 0 0]
+    _Segment[41683 120000000 0 0]
+    _Segment[42048 130000000 0 0]
+    _Segment[42413 140000000 0 0]
+    _Segment[42778 150000000 0 0]
+    _Segment[43144 160000000 0 0]
+    _Segment[43509 170000000 0 0]
+    _Segment[43874 180000000 0 0]
+    _Segment[44239 190000000 0 0]
+    _Segment[44786 200000000 0 0]
+    _Segment[45151 210000000 0 0]
+    _Segment[45516 220000000 0 0]
+    _Segment[46247 230000000 0 0]
+    _Segment[47161 240000000 0 0]
+    _Segment[47892 250000000 0 0]
+    _Segment[48257 260000000 0 0]
+    _Segment[48804 270000000 0 0]
+    _Segment[49169 280000000 0 0]
+    _Segment[49534 290000000 0 0]
+    _Segment[50083 300000000 0 0]
+    _Segment[50630 310000000 0 0]
+    _Segment[51179 320000000 0 0]
+    _Segment[53736 330000000 0 0]
+    _Segment[54832 340000000 0 0]
+    _Segment[56109 350000000 0 0]
+    _Segment[57204 360000000 0 0]
+    _Segment[57754 370000000 0 0]
+]
+
+# (the row holding on a UTC day, -1 before the table)
+_segment_of_day=(mjd:int):>int64=>{
+    let i:int64=_SEGMENTS.length-1
+    loop i >=? 0 {
+        if mjd >=? int(_SEGMENTS[i].mjd) {return i}
+        i=i-1
+    }
+    -1
+}
+
+# Axis ns of a UTC label: `label` ns since 1977-01-01T00:00 in label digits, in row `i`. The rate
+# makes it a ratio before 1972: [numerator denominator] over the axis.
+_axis_of_label=(label:int i:int64):>[int int]=>{
+    let row=_SEGMENTS[i]
+    if row.c =? 0 {return [label+int(row.a)*100 1]}
+    # T = U + (a + (MJD0 + U/DAY - b)*c)*100
+    let base=(int(row.a)+(_J0_MJD-int(row.b))*int(row.c))*100
+    [(label*_DAY_NS+label*int(row.c)*100+base*_DAY_NS) _DAY_NS]
+}
+
+# A UTC label on the axis: `day` is its MJD, `in_day` its ns from that midnight, which may reach
+# past 86400s only for an inserted label.
+_utc_to_axis=(mjd:int in_day:int):>int|OffGrid|OutsideCoverage|InvalidFields=>{
+    let i=_segment_of_day(mjd)
+    if i <? 0 {return OutsideCoverage["UTC starts in 1961; an earlier time needs a TT label"]}
+    if in_day >=? _DAY_NS {
+        # (an inserted label is valid only where the next day's row steps forward by that much)
+        let over=in_day-_DAY_NS
+        let next=_segment_of_day(mjd+1)
+        if next =? i {return InvalidFields["no leap second was inserted at the end of that day"]}
+        let [num den]=_axis_of_label((mjd+1-_J0_MJD)*_DAY_NS next)
+        let [was_num was_den]=_axis_of_label((mjd+1-_J0_MJD)*_DAY_NS i)
+        # (how much the next row's offset exceeds this one's at that midnight)
+        if num*was_den-was_num*den <=? over*den*was_den {return InvalidFields["no leap second was inserted at the end of that day"]}
+        if num%den not=? 0 {return OffGrid}
+        return num//den-(num*was_den-was_num*den)//(den*was_den)+over
+    }
+    let [num den]=_axis_of_label((mjd-_J0_MJD)*_DAY_NS+in_day i)
+    if num%den not=? 0 {return OffGrid}
+    num//den
+}
+
+# The UTC label of an axis count within coverage: [MJD, ns in that day (past 86400s in an inserted
+# label)]; none before the table.
+_axis_to_utc=(axis:int):>[int int]?=>{
+    let i:int64=_SEGMENTS.length-1
+    loop i >=? 0 {
+        let start=_label_start(i)
+        if axis >=? start {
+            let row=_SEGMENTS[i]
+            let label=if row.c =? 0 {axis-int(row.a)*100} else {
+                let base=(int(row.a)+(_J0_MJD-int(row.b))*int(row.c))*100
+                (axis-base)*_DAY_NS//(_DAY_NS+int(row.c)*100)
+            }
+            return [_J0_MJD+label//_DAY_NS label%_DAY_NS]
+        }
+        # (the labels an inserted step adds, before this row's midnight)
+        if i >? 0 {
+            let [prev_num prev_den]=_axis_of_label(_row_label(i) i-1)
+            let before=prev_num//prev_den
+            if axis >=? before and before <? start {
+                return [int(_SEGMENTS[i].mjd)-1 _DAY_NS+(axis-before)]
+            }
+        }
+        i=i-1
+    }
+    none
+}
+_row_label=(i:int64):>int=>(int(_SEGMENTS[i].mjd)-_J0_MJD)*_DAY_NS
+_label_start=(i:int64):>int=>{
+    let [num den]=_axis_of_label(_row_label(i) i)
+    num//den
+}
+
+# ---------------- the calendar these labels are written in ----------------
+# Proleptic Gregorian days from 1970-01-01, astronomical years (the Gregorian calendar's rule).
+days_from_civil=(year:int month:int64 day:int64):>int=>{
+    let y=if month <=? 2 {year-1} else {year}
+    let era=y//400
+    let yoe=y-era*400
+    let shifted:int=if month >? 2 {int(month)-3} else {int(month)+9}
+    let doy=(153*shifted+2)//5+int(day)-1
+    let doe=yoe*365+yoe//4-yoe//100+doy
+    era*146097+doe-719468
+}
+civil_from_days=(days:int):>[int int64 int64]=>{
+    let z=days+719468
+    let era=z//146097
+    let doe=z-era*146097
+    let yoe=(doe-doe//1460+doe//36524-doe//146096)//365
+    let doy=doe-(365*yoe+yoe//4-yoe//100)
+    let mp=(5*doy+2)//153
+    let day=doy-(153*mp+2)//5+1
+    let month=if mp <? 10 {mp+3} else {mp-9}
+    let year=yoe+era*400+(if month <=? 2 {1} else {0})
+    [year month.to_int64() ?? 1 day.to_int64() ?? 1]
+}
+days_in_month=(year:int month:int64):>int64=>{
+    if month =? 2 {
+        if year%4 =? 0 and (year%100 not=? 0 or year%400 =? 0) {return 29}
+        return 28
+    }
+    if month =? 4 or month =? 6 or month =? 9 or month =? 11 {return 30}
+    31
+}
+
+# ---------------- reading RFC 3339 ----------------
+# A running reader of ASCII text.
+_Cursor:type=[text:string at:int64=0]
+_byte=(c:_Cursor at:int64):>int64=>$unsafe {
+    let bytes=c.text as array<uint8>
+    if at >=? bytes.length {return -1}
+    int64(bytes[at])
+}
+_digits=(@c:_Cursor count:int64):>int64?=>{
+    let v:int64=0
+    loop i in [0..count) {
+        let b=_byte(c c.at)
+        if b <? 48 or b >? 57 {return none}
+        v=v*10+b-48
+        c.at=c.at+1
+    }
+    v
+}
+_eat=(@c:_Cursor b:int64):>bool=>{
+    if _byte(c c.at) =? b {
+        c.at=c.at+1
+        return true
+    }
+    false
+}
+
+# The fields of `YYYY-MM-DD[Thh:mm[:ss[.fraction]]]`, read and range-checked. `:60` is checked by
+# whatever gives the label a meaning.
+Fields:type=[year:int month:int64 day:int64 hour:int64 minute:int64 second:int64 nanosecond:int64 has_time:bool]
+_read_year=(@c:_Cursor):>int?=>{
+    let sign:int=1
+    let width:int64=4
+    if _byte(c c.at) =? 45 {
+        sign=-1
+        c.at=c.at+1
+    } else if _byte(c c.at) =? 43 {
+        c.at=c.at+1
+        width=0
+        loop true {
+            let b=_byte(c c.at+width)
+            if b <? 48 or b >? 57 {break}
+            width=width+1
+        }
+        if width <? 5 {return none}
+    }
+    let v:int=0
+    loop i in [0..width) {
+        let b=_byte(c c.at)
+        if b <? 48 or b >? 57 {return none}
+        v=v*10+int(b-48)
+        c.at=c.at+1
+    }
+    sign*v
+}
+read_fields=(@c:_Cursor):>Fields|ParseError=>{
+    let bad=ParseError["expected YYYY-MM-DD, then optionally Thh:mm:ss.fraction"]
+    let year=_read_year(@c)
+    if year is? none {return bad}
+    if not _eat(@c 45) {return bad}
+    let month=_digits(@c 2)
+    if month is? none or not _eat(@c 45) {return bad}
+    let day=_digits(@c 2)
+    if day is? none {return bad}
+    if month <? 1 or month >? 12 {return ParseError["month {month} is not 1 to 12"]}
+    if day <? 1 or day >? days_in_month(year month) {return ParseError["{_year_text(year)}-{pad(month 2)} has no day {day}"]}
+    let f=Fields[year month day 0 0 0 0 false]
+    let sep=_byte(c c.at)
+    if sep not=? 84 and sep not=? 116 {return f}
+    c.at=c.at+1
+    let hour=_digits(@c 2)
+    if hour is? none or not _eat(@c 58) {return bad}
+    let minute=_digits(@c 2)
+    if minute is? none {return bad}
+    if hour >? 23 or minute >? 59 {return ParseError["{pad(hour 2)}:{pad(minute 2)} is not a time of day"]}
+    f.hour=hour
+    f.minute=minute
+    f.has_time=true
+    if not _eat(@c 58) {return f}
+    let second=_digits(@c 2)
+    if second is? none or second >? 60 {return bad}
+    f.second=second
+    if _byte(c c.at) =? 46 {
+        c.at=c.at+1
+        let scale:int64=100000000
+        let any=false
+        loop true {
+            let b=_byte(c c.at)
+            if b <? 48 or b >? 57 {break}
+            if scale =? 0 and b not=? 48 {return ParseError["more than nine fraction digits are off the nanosecond grid: name a finer tick"]}
+            f.nanosecond=f.nanosecond+(b-48)*scale
+            scale=scale//10
+            any=true
+            c.at=c.at+1
+        }
+        if not any {return bad}
+    }
+    f
+}
+# `Z`, `+hh:mm` or `-hh:mm`: seconds east of UTC; NO_OFFSET where there is none.
+const NO_OFFSET:int64=-1000000000
+read_offset=(@c:_Cursor):>int64|ParseError=>{
+    let b=_byte(c c.at)
+    if b =? 90 or b =? 122 {
+        c.at=c.at+1
+        return int64(0)
+    }
+    if b not=? 43 and b not=? 45 {return NO_OFFSET}
+    c.at=c.at+1
+    let hour=_digits(@c 2)
+    if hour is? none or not _eat(@c 58) {return ParseError["an offset is written +hh:mm"]}
+    let minute=_digits(@c 2)
+    if minute is? none or hour >? 23 or minute >? 59 {return ParseError["an offset is written +hh:mm"]}
+    let size=hour*3600+minute*60
+    if b =? 45 {-size} else {size}
+}
+
+# The nominal coordinate of labelled fields, as a UTC label with this offset.
+_axis_of=(f:Fields offset:int64):>int|OffGrid|OutsideCoverage|InvalidFields=>{
+    let mjd=days_from_civil(f.year f.month f.day)+40587
+    let in_day:int=int(f.hour)*3600+int(f.minute)*60+int(f.second)
+    let local=in_day-int(offset)
+    let shift=local//86400
+    let within=local%86400
+    # (a label reading :60 keeps it past the end of its UTC minute)
+    if f.second =? 60 {
+        let minute_end=local-60
+        if (minute_end+60)%86400 not=? 0 {
+            return InvalidFields["a :60 second is the last second of a UTC day"]
+        }
+        return _utc_to_axis(mjd+minute_end//86400 _DAY_NS+int(f.nanosecond))
+    }
+    _utc_to_axis(mjd+shift within*_NS+int(f.nanosecond))
+}
+
+instant_parse=(text:string):>Instant|ParseError|OffGrid|OutsideCoverage|InvalidFields=>{
+    let c=_Cursor[text 0]
+    let f=read_fields(@c) or_throw
+    let offset=read_offset(@c) or_throw
+    if offset =? NO_OFFSET {return ParseError["an instant needs an offset, as `2026-10-24T12:00:00Z`; a local time is `zoned`"]}
+    if not f.has_time {return ParseError["an instant needs a time of day, as `2026-10-24T12:00:00Z`; a date is `date`"]}
+    if c.at not=? (text as array<uint8>).length {return ParseError["unexpected text after the instant"]}
+    let axis=_axis_of(f offset) or_throw
+    _instant(axis)
+}
+# The label a text names, `:60` and all.
+utc_parse=(text:string):>UtcLabel|ParseError|OffGrid|OutsideCoverage|InvalidFields=>{
+    let c=_Cursor[text 0]
+    let f=read_fields(@c) or_throw
+    let offset=read_offset(@c) or_throw
+    if offset not=? NO_OFFSET and offset not=? 0 {return ParseError["a UTC label has no other offset"]}
+    if not f.has_time {return ParseError["a UTC label needs a time of day"]}
+    if c.at not=? (text as array<uint8>).length {return ParseError["unexpected text after the label"]}
+    let axis=_axis_of(f 0) or_throw
+    UtcLabel[f.year f.month f.day f.hour f.minute f.second f.nanosecond _instant(axis)]
+}
+# (what is wrong with text as an instant or a label; none when it reads)
+_message=(e):>string=>match e {
+    x:ParseError=>x.message
+    x:InvalidFields=>x.message
+    x:OutsideCoverage=>x.message
+    <OffGrid>=>"that label falls between nanoseconds under the UTC rate of its time: name a finer tick"
+}
+instant_error=(text:string):>string?=>{
+    let r=instant_parse(text)
+    if r is? Instant {return none}
+    _message(r)
+}
+utc_error=(text:string):>string?=>{
+    let r=utc_parse(text)
+    if r is? UtcLabel {return none}
+    _message(r)
+}
+
+# ---------------- display ----------------
+# (digits padded by hand: these also run at compile time, for a literal's error message)
+pad=(n:int64 width:int64):>string=>{
+    let text="{n}"
+    loop text.length <? width {text="0{text}"}
+    text
+}
+_year_text=(year:int):>string=>{
+    let magnitude=if year <? 0 {-year} else {year}
+    let digits=magnitude.to_int64()
+    if digits is? none {return "{year}"}
+    if year <? 0 {return "-{pad(digits 4)}"}
+    if year >? 9999 {return "+{digits}"}
+    pad(digits 4)
+}
+_fraction_text=(ns:int):>string=>{
+    if ns =? 0 {return ""}
+    let digits=pad(ns.to_int64() ?? 0 9)
+    let last=digits.length
+    loop last >? 1 and digits[last-1] =? "0" {last=last-1}
+    ".{digits[0..last)}"
+}
+_label_text=(mjd:int in_day:int):>string=>{
+    let [year month day]=civil_from_days(mjd-40587)
+    # (an inserted label stays in its last minute: :60)
+    let seconds=if in_day >=? _DAY_NS {86399} else {in_day//_NS}
+    let extra=if in_day >=? _DAY_NS {1} else {0}
+    let hh=(seconds//3600).to_int64() ?? 0
+    let mm=((seconds%3600)//60).to_int64() ?? 0
+    let ss=((seconds%60+extra)).to_int64() ?? 0
+    "{_year_text(year)}-{pad(month 2)}-{pad(day 2)}T{pad(hh 2)}:{pad(mm 2)}:{pad(ss 2)}{_fraction_text(in_day%_NS)}"
+}
+# TT label: 32.184s after the nominal TAI label.
+_tt_text=(axis:int):>string=>{
+    let tt=axis+32184000000
+    "{_label_text(_J0_MJD+tt//_DAY_NS tt%_DAY_NS)} TT"
+}
+__as__=(t:Instant):>string=>{
+    let axis=ns_count(t)
+    let label=_axis_to_utc(axis)
+    if label is? none {return _tt_text(axis)}
+    let [mjd in_day]=label
+    "{_label_text(mjd in_day)}Z"
+}
+__as__=(u:UtcLabel):>string=>"{_year_text(u.year)}-{pad(u.month 2)}-{pad(u.day 2)}T{pad(u.hour 2)}:{pad(u.minute 2)}:{pad(u.second 2)}{_fraction_text(int(u.nanosecond))}Z"

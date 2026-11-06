@@ -194,6 +194,7 @@ let cx_frames:array<CTFrame>=[]
 let cx_places:array<CTPlace>=[]
 let cx_stack:array<int64>=[]
 let cx_global_cache:dict<int64 int64>=[]
+let cx_embed_cache:dict<int64 int64>=[]
 let cx_pending:array<int64>=[]
 let cx_frame:CWord=-1
 cx_fail=(e:CWord why:string):>void=>$unsafe {
@@ -459,6 +460,10 @@ cx_global=(e:CWord g:CWord):>CWord=>$unsafe {
     cx_nodes[0].ptr[CWord(cx_globals[0].ptr[g].decl)].b = produced2
     v
 }
+cx_is_text_of_bytes=(f:CWord):>bool=>$unsafe {
+    let d=CWord(cx_fns[0].ptr[f].decl)
+    d not=? 0 and cx_name_of(CWord(cx_nodes[0].ptr[d].name)) =? "__str_from_bytes"
+}
 cx_call=(e:CWord):>CWord=>$unsafe {
     let f=CWord(cx_nodes[0].ptr[e].sym)
     if cx_nodes[0].ptr[e].aux not=? 0 or f <=? 0 {cx_fail(e  "indirect calls are not supported")}
@@ -698,9 +703,15 @@ cx_intrinsic=(e:CWord):>CWord=>$unsafe {
         return cx_add(CTValue[type = t  items = items])
     }
     if id =? 'embed' {
+        # (a file's bytes, read as often as a library reads its table: made once)
+        let at=CWord(cx_nodes[0].ptr[e].sval)
+        let known=cx_embed_cache.get(at)
+        if known isnt? none {return known as int64}
         let items:array<int64>=[]
-        loop byte in cx_bytes(cx_name_of(CWord(cx_nodes[0].ptr[e].sval))) {items.push(cx_int(cx_T_U8[0]  CWord(byte)))}
-        return cx_add(CTValue[type = t  items = items])
+        loop byte in cx_bytes(cx_name_of(at)) {items.push(cx_int(cx_T_U8[0]  CWord(byte)))}
+        let made=cx_add(CTValue[type = t  items = items])
+        cx_embed_cache[at] = made
+        return made
     }
     if id =? 'arrdata' {
 # A bounded immutable view into evaluator storage, never a host address.
@@ -835,6 +846,8 @@ cx_expr_impl=(e:CWord):>CWord=>$unsafe {
         if cx_nodes[0].ptr[e].aux =? int32<overflow='wrap'>(CWord(2)) {return cx_global(e  CWord(cx_nodes[0].ptr[e].sym))}
         if cx_nodes[0].ptr[e].aux =? int32<overflow='wrap'>(CWord(1)) {
             let l=CWord(cx_nodes[0].ptr[e].sym)
+            # (a union-to-union view of a local is a value, not a place: `f(x) or_throw` with several errors)
+            if CWord(cx_locals[0].ptr[l].flags) & LF_ALIAS not=? 0 and not (l in? cx_frames[cx_frame].refs) and cx_nodes[0].ptr[CWord(cx_locals[0].ptr[l].alias)].kind =? 'conv' {return cx_expr(CWord(cx_locals[0].ptr[l].alias))}
             if l in? cx_frames[cx_frame].refs or CWord(cx_locals[0].ptr[l].flags) & LF_ALIAS not=? 0 {return cx_read_place(cx_place(e))}
             let cached=cx_frames[cx_frame].values.get(l)
             if cached isnt? none {return cached as int64}
@@ -928,6 +941,13 @@ cx_expr_impl=(e:CWord):>CWord=>$unsafe {
                 if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
             }
             return cx_add(v)
+        }
+        # (the library's text from bytes is raw memory: the evaluator's bytes make the text themselves)
+        if cx_nkids(e) =? 1 and cx_nodes[0].ptr[e].sym >? 0 and cx_is_text_of_bytes(CWord(cx_nodes[0].ptr[e].sym)) {
+            let bytes=cx_value(cx_expr(cx_kid(e  0)))
+            let out:array<uint8>=[]
+            loop item in bytes.items {out.push(uint8((cx_value(item).i) & 0xff))}
+            return cx_add(CTValue[type = t  s = cx_host[0].str_from_bytes(out)])
         }
         return cx_call(e)
     }

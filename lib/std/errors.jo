@@ -34,6 +34,43 @@ struct TooManyDigits:
 @nominal(error)
 struct RegexError:
     message: str
+# Time (lib/time): text that does not read, fields no calendar or UTC day has, an exact value
+# off a tick's grid or past a width, and a time no pinned table covers.
+@nominal(error)
+struct ParseError:
+    message: str
+@nominal(error)
+struct InvalidFields:
+    message: str
+@nominal(error)
+struct InvalidDate:
+    message: str
+@nominal(error)
+struct UnknownZone:
+    message: str
+@nominal(error)
+struct MissingContext:
+    message: str
+# A local time no clock showed (`before` and `after`: the offsets around it, seconds east of UTC).
+@nominal(error)
+struct Gap:
+    message: str
+    before: int
+    after: int
+# A local time clocks showed more than once (`offsets`: each reading's, earliest instant first).
+@nominal(error)
+struct Ambiguous:
+    message: str
+    offsets: int[]
+@nominal(error)
+struct OffGrid:
+    pass
+@nominal(error)
+struct OutOfRange:
+    pass
+@nominal(error)
+struct OutsideCoverage:
+    message: str
 # A square matrix whose rows are not independent.
 @nominal(error)
 struct Singular:

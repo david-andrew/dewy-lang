@@ -2,13 +2,14 @@ $runtime_checks
 # Demand-driven: nothing is read unless a declaration has a constant check. Cost: O(1) per
 # declaration, O(1) per call of one, and one compile-time run of the validator per call with a
 # constant argument.
-from p"check_constant.jo" import (CheckConstant cc_any cc_decls)
+from p"check_constant.jo" import (CheckConstant cc_any cc_decls cc_errors)
 from p"checker_expr.dewy" import lookup
 from p"ast.jo" import (NF_CHECKED add_flag kid kids mk nkids nodes set_list)
 from p"check.jo" import (fns get_fn_inst syms)
 from p"expr.jo" import (CV ntype)
+from p"constant_folds.jo" import (cc_closed_expr cc_fold)
 from p"types.jo" import (T_STR is_union mk_union prune tkind union_index union_members)
-from p"util.jo" import (fatal name_of)
+from p"util.jo" import (fatal name_of pos_in_lib)
 from p"errors.jo" import exception_member
 from p"comptime.jo" import (checked_const_init ct_run ct_values)
 from p"warn_if_ops.dewy" import (wi_param)
@@ -18,25 +19,41 @@ let CC_LOCAL:ConstantWord=1 # SK.local
 let CC_GLOBAL:ConstantWord=2 # SK.global
 let CC_CONST:ConstantWord=6 # SK.const_
 cc_reset=():>void=>{
-    cc_decls=dict<int64 CheckConstant>()
+    cc_decls=dict<int64 array<CheckConstant>>()
     cc_any=false
+    cc_errors=dict<int64 string>()
 }
 # fn_sig, in the declaration's scope: its check, read once.
 cc_read_decl=(decl:ConstantWord):>void=>$unsafe {
-    if nodes.ptr[decl].c =? 0 or cc_decls.has(decl) {return}
+    if nodes.ptr[decl].c =? 0 or cc_decls.has(decl) or cc_errors.has(decl) {return}
+    let checks:array<CheckConstant>=[]
     loop at in kids(ConstantWord(nodes.ptr[decl].c)) {
+        # (`$error_if true "..."`: this overload exists to say what to write instead)
+        if name_of(ConstantWord(nodes.ptr[at].name)) =? "error_if" {
+            let cond=ConstantWord(nodes.ptr[at].a)
+            let said=ConstantWord(nodes.ptr[at].b)
+            if cond =? 0 or said =? 0 or nodes.ptr[cond].kind not=? 'bool_lit' or nodes.ptr[cond].ival =? 0 or nodes.ptr[said].kind not=? 'str_lit' {fatal(nodes.ptr[at].pos "`$error_if` takes `true` and a message for now: `$error_if true \"write this instead\"`")}
+            cc_errors[decl]=name_of(ConstantWord(nodes.ptr[said].sval))
+            cc_any=true
+            continue
+        }
         if name_of(ConstantWord(nodes.ptr[at].name)) not=? "check_constant" {continue}
         let call=ConstantWord(nodes.ptr[at].a)
         let msg=ConstantWord(nodes.ptr[at].b)
         let bad="a constant check names a validator, a parameter and a message: `@check_constant(validator(param), \"message\")`"
-        if call =? 0 or msg =? 0 or nodes.ptr[msg].kind not=? 'str_lit' or nodes.ptr[call].kind not=? 'call' or nkids(call) not=? 1 {fatal(nodes.ptr[at].pos bad)}
+        if call =? 0 or msg =? 0 or nodes.ptr[msg].kind not=? 'str_lit' or nodes.ptr[call].kind not=? 'call' or nkids(call) <? 1 {fatal(nodes.ptr[at].pos bad)}
         let callee=ConstantWord(nodes.ptr[call].a)
         if callee =? 0 or nodes.ptr[callee].kind not=? 'ident' {fatal(nodes.ptr[at].pos bad)}
-        let param=wi_param(decl kid(call 0))
-        if param <? 0 {fatal(nodes.ptr[at].pos bad)}
+        let params:array<int64>=[]
+        loop i in [0..nkids(call)) {
+            let param=wi_param(decl kid(call i))
+            if param <? 0 {fatal(nodes.ptr[at].pos bad)}
+            params.push(param)
+        }
         let s=lookup(ConstantWord(nodes.ptr[callee].name))
         if s =? 0 or syms.ptr[s].kind not=? 'fns' {fatal(nodes.ptr[callee].pos "the validator of a constant check is a function: `{name_of(ConstantWord(nodes.ptr[callee].name))}` is none")}
-        cc_decls[decl]=CheckConstant(param ConstantWord(syms.ptr[s].decl) name_of(ConstantWord(nodes.ptr[msg].sval)))
+        checks.push(CheckConstant(params ConstantWord(syms.ptr[s].decl) name_of(ConstantWord(nodes.ptr[msg].sval))))
+        cc_decls[decl]=checks
         cc_any=true
     }
 }
@@ -47,37 +64,71 @@ cc_constant=(x0:ConstantWord):>ConstantWord=>$unsafe {
         if nodes.ptr[x].kind =? 'conv' and nodes.ptr[x].a not=? 0 and prune(ntype(ConstantWord(nodes.ptr[x].a))) =? T_STR {x=ConstantWord(nodes.ptr[x].a)}
         else {break}
     }
-    if nodes.ptr[x].kind =? 'str_lit' {return ConstantWord(nodes.ptr[x].sval)}
+    # (with parts, it is an interpolation)
+    if nodes.ptr[x].kind =? 'str_lit' {return if nkids(x) =? 0 {ConstantWord(nodes.ptr[x].sval)} else {-1}}
     if nodes.ptr[x].kind not=? 'ident' {return -1}
     let k=ConstantWord(nodes.ptr[x].aux)
     if k not=? CC_CONST and k not=? CC_GLOBAL and k not=? CC_LOCAL {return -1}
     let initial=checked_const_init(k ConstantWord(nodes.ptr[x].sym) nodes.ptr[x].pos)
-    if initial not=? 0 and nodes.ptr[initial].kind =? 'str_lit' {return ConstantWord(nodes.ptr[initial].sval)}
+    if initial not=? 0 and nodes.ptr[initial].kind =? 'str_lit' and nkids(initial) =? 0 {return ConstantWord(nodes.ptr[initial].sval)}
     -1
 }
 # expr.jo, a call n of f (declaration decl) whose type is set: its narrowed type, or 0 when it
 # stays as it is
 cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe {
+    if cc_errors.has(decl) {fatal(nodes.ptr[n].pos cc_errors[decl])}
     if not cc_decls.has(decl) {return 0}
-    let c=cc_decls[decl]
-    if c.param >=? nkids(n) {return 0}
-    let x=kid(n c.param)
-    let text=cc_constant(x)
-    if text <? 0 {return 0}
-    let pos=nodes.ptr[x].pos
-    let v=get_fn_inst(c.validator [] pos)
-    let arg=mk('str_lit' pos)
-    nodes.ptr[arg].sval=int32(text)
-    nodes.ptr[arg].type=int32(T_STR)
-    add_flag(arg NF_CHECKED)
-    let run=mk('call' pos)
-    nodes.ptr[run].sym=int32(v)
-    nodes.ptr[run].type=fns.ptr[v].ret
-    add_flag(run NF_CHECKED)
-    set_list(run [arg])
-    let why=ct_values[ct_run(run)]
-    if tkind(why.type) =? 'opt' and why.i not=? 0 {fatal(pos "{c.message}: {ct_values[why.items[0]].s}")}
-    if tkind(why.type) =? 'str_' {fatal(pos "{c.message}: {why.s}")}
+    # (the first check whose arguments are all closed decides)
+    loop c in cc_decls[decl] {
+        let args=cc_arguments(n c)
+        if args.length not=? c.params.length {continue}
+        let pos=nodes.ptr[n].pos
+        # (at the argument, or at the call when a parameter's default filled it in)
+        if nkids(n) >? c.params[0] and not pos_in_lib(nodes.ptr[kid(n c.params[0])].pos) {pos=nodes.ptr[kid(n c.params[0])].pos}
+        let v=get_fn_inst(c.validator [] pos)
+        let run=mk('call' pos)
+        nodes.ptr[run].sym=int32(v)
+        nodes.ptr[run].type=fns.ptr[v].ret
+        add_flag(run NF_CHECKED)
+        set_list(run args)
+        let why=ct_values[ct_run(run)]
+        # (empty text: no failure and no promise: the call stays as it is)
+        if tkind(why.type) =? 'opt' and why.i not=? 0 {
+            let said=ct_values[why.items[0]].s
+            if said =? "" {return 0}
+            fatal(pos "{c.message}: {said}")
+        }
+        if tkind(why.type) =? 'str_' {
+            if why.s =? "" {return 0}
+            fatal(pos "{c.message}: {why.s}")
+        }
+        return cc_narrow(n)
+    }
+    0
+}
+# The constants a check's parameters are given, as its validator takes them; short when one is not.
+cc_arguments=(n:ConstantWord c:CheckConstant):>array<int64>=>$unsafe {
+    let args:array<int64>=[]
+    loop p in c.params {
+        if p >=? nkids(n) {return args}
+        let x=kid(n p)
+        let text=cc_constant(x)
+        # (a string the parameter takes as itself; in a wider type, the argument keeps its conversion)
+        if text >=? 0 and prune(ntype(x)) =? T_STR {
+            let arg=mk('str_lit' nodes.ptr[x].pos)
+            nodes.ptr[arg].sval=int32(text)
+            nodes.ptr[arg].type=int32(T_STR)
+            add_flag(arg NF_CHECKED)
+            args.push(arg)
+        } else {
+            if not cc_closed_expr(x 0) {return args}
+            args.push(x)
+        }
+    }
+    args
+}
+# A call that cannot fail: its type without the exceptions, or its value when that is one plain record.
+cc_narrow=(n:ConstantWord):>ConstantWord=>$unsafe {
     # (it cannot fail: what is left of the result once its exceptions are gone)
     let rt=prune(ntype(n))
     if not is_union(rt) {return 0}
@@ -86,6 +137,8 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
         if not exception_member(m) {kept.push(m)}
     }
     if kept.length =? 0 or kept.length =? union_members(rt).length {return 0}
+    # (one plain record left and every argument constant: the value itself, nothing at run time)
+    if kept.length =? 1 and cc_fold(n kept[0]) {return kept[0]}
     let inner=nodes.length
     nodes.push(nodes.ptr[n])
     let e=mk('narrow' nodes.ptr[n].pos)

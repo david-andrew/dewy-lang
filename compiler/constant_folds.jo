@@ -1,0 +1,58 @@
+# What a constant check may evaluate (constant_checks.dewy): an argument that needs no run-time value,
+# and a call that cannot fail folded to its value, so a literal such as `instant"..."` costs nothing
+# when the program runs. Demand-driven: reached only from a call of a function with a constant check.
+use 'checker_state.dewy'
+use 'ast.jo'
+use 'check.jo'
+use 'comptime.jo'
+use 'expr.jo'
+use 'types.jo'
+use 'units.jo'
+use 'util.jo'
+
+# (a record of scalars, however nested, holding nothing a run would have to allocate)
+cc_plain = (t: int) -> bool:
+    if tkind(t) != .struct_: return is_int(t) or tkind(t) == .bool_
+    si = int(types[t].st)
+    loop i in [0..int(structs[si].nfields)):
+        if not cc_plain(int(fields[int(structs[si].fields) + i].type)): return false
+    true
+
+# (does this checked expression need no run-time value? a literal, a constant, a record of them,
+# or an operator over them: evaluating one at compile time can have no effect)
+cc_closed_expr = (x: int, depth: int) -> bool:
+    if depth > 16: return false
+    if is_quantity(ntype(x)) and quantity_constant_scale(x) >= 0: return true
+    k = nodes[x].kind
+    if k == .int_lit or k == .str_lit or k == .bool_lit or k == .none_lit or k == .float_lit or k == .dotname: return nkids(x) == 0
+    if k == .conv or k == .narrow: return nodes[x].a != 0 and cc_closed_expr(int(nodes[x].a), depth + 1)
+    if k == .ident:
+        b = nodes[x].aux as SK
+        if b != .const_ and b != .global and b != .local: return false
+        initial = binding_const_init(b, int(nodes[x].sym), nodes[x].pos)
+        return initial != 0 and cc_closed_expr(initial, depth + 1)
+    if k == .call:
+        # (a record, or a value wrapped in a union)
+        if nodes[x].aux != 2 and nodes[x].aux != 3:
+            if nodes[x].sym <= 0 or nodes[x].aux != 0: return false
+            d = int(fns[int(nodes[x].sym)].decl)
+            if d == 0: return false
+            name = name_of(int(nodes[d].name))
+            if name != "__mul__" and name != "__add__" and name != "__sub__" and name != "__unary_sub__": return false
+        loop i in [0..nkids(x)):
+            if not cc_closed_expr(kid(x, i), depth + 1): return false
+        return true
+    false
+
+# A call that cannot fail and whose success type t is one plain record, every argument closed: its
+# value in place of the call. false when it stays a call.
+cc_fold = (n: int, t: int) -> bool:
+    if tkind(t) != .struct_ or not cc_plain(t): return false
+    loop i in [0..nkids(n)):
+        if not cc_closed_expr(kid(n, i), 0): return false
+    value = ct_values[ct_run(n)]
+    # (a union's value holds the member's)
+    if value.items.len() < 1 or tkind(ct_values[value.items[0]].type) != .struct_: return false
+    made = ct_literal(value.items[0], nodes[n].pos)
+    nodes[n] = nodes[made]
+    true

@@ -1,0 +1,13 @@
+# Dewy's prelude: time without an import. Each name loads lib/time only when named.
+import p"@lib/time/core.dewy" as core
+from p"@lib/time/core.dewy" import (instant_error utc_error)
+
+Instant:type=core.Instant
+Duration:type=core.Duration
+UtcLabel:type=core.UtcLabel
+
+# `instant"2026-10-24T12:00:00Z"`: checked while compiling, and then a plain value.
+$check_constant instant_error(text) "not an instant"
+instant=(text:string):>Instant|ParseError|OffGrid|OutsideCoverage|InvalidFields=>core.instant_parse(text)
+$check_constant utc_error(text) "not a UTC label"
+utc=(text:string):>UtcLabel|ParseError|OffGrid|OutsideCoverage|InvalidFields=>core.utc_parse(text)

@@ -34,6 +34,9 @@ mk = (k: NK, pos: int) -> int:
 set_list = (n: int, items: int[]): node_set_list(mut nodes, mut lists, n, items)
 add_flag = (n: int, f: int): nodes[n].flags = i32(int(nodes[n].flags) | f)
 fatal = (pos: int, msg: str): print("fatal {pos}: {msg}")
+pos_in_lib = (p: int) -> bool: false
+cc_closed_expr = (x: int, depth: int) -> bool: nodes[x].kind == .int_lit
+cc_fold = (n: int, t: int) -> bool: false
 name_of = (n: int) -> str: if n == 1: "check_constant" else: "name{n}"
 lookup = (n: int) -> int: if n < 50: n else: 0
 wi_param = (decl: int, x: int) -> int: x - 100
@@ -88,7 +91,7 @@ sym_of = (k: int, s: int) -> int:
 show = ():
     keys = cc_decls.keys()
     keys.sort()
-    loop k in keys: print("{k}: {cc_decls[k].param} {cc_decls[k].validator} {cc_decls[k].message}")
+    loop k in keys: print("{k}: {cc_decls[k].len()} {cc_decls[k][0].params} {cc_decls[k][0].validator} {cc_decls[k][0].message}")
     print(cc_any)
 main = ():
     syms = [Sym(), Sym(kind=.fns, decl=70), Sym(kind=.local, decl=71)]
@@ -127,9 +130,11 @@ main = ():
     print(cc_call(mk(.call, 32), 1, good))
     plain = (t: int) -> int:
         n = mk(.call, 33); nodes[n].type = i32(t)
-        set_list(n, [mk(.int_lit, 34), str_lit(35)])
+        text = str_lit(35)
+        nodes[text].type = i32(T_STR)
+        set_list(n, [mk(.int_lit, 34), text])
         n
-    cc_decls[good] = CheckConstant(1, 70, "bad pattern")
+    cc_decls[good] = [CheckConstant([1], 70, "bad pattern")]
     na = mk(.call, 34); set_list(na, [mk(.int_lit, 35), mk(.int_lit, 36)])
     print(cc_call(na, 1, good))
     verdict = (t: int, i: int, s: str, items: int[]) -> int:
@@ -159,7 +164,7 @@ def test_constant_checks_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release,
                             ('source_types', 'node_store', 'checker_types', 'checker_state', 'checker_tokens', 'evaluator_state', 'constant_checks'), DRIVER,
                             doubles={'services.jo': SERVICES, 'check_constant.jo': (ROOT / 'compiler/check_constant.jo').read_text()},
-                            services=('checker_expr', 'ast', 'check', 'expr', 'types', 'util', 'errors', 'comptime', 'warn_if_ops'))
+                            services=('checker_expr', 'ast', 'check', 'expr', 'types', 'util', 'errors', 'comptime', 'warn_if_ops', 'constant_folds'))
     assert output.endswith(b'constant ok\n')
     for text in (b'the validator of a constant check', b'bad pattern: inner', b'bad pattern: text fails', b'union [50, 51]', b'names a validator'):
         assert text in output, text

@@ -1492,6 +1492,29 @@ within 1e-31 of it, so a float angle rounds once). Conversions involving `rad`
 display as decimals, while retaining the exact fraction internally. In shader code a quantity is
 its plain canonical number (an angle counts turns), and `sin` is the GPU's.
 
+## Time and dates
+
+Time needs no import.
+
+`Instant` counts nanoseconds on one continuous axis in 128 bits, so it reaches any
+date anyone needs, and `Duration` is the difference of two. `+` and `-` take durations
+and time quantities: `t + 90minute`, `d <? 5s`. `d/1s` is an exact `rational`, `d/3`
+an exact quantity, `d//7` a `Duration`. A constant quantity off the nanosecond grid
+(`t + 1ns/3`) is a compile error; at run time such a sum is `Instant | OffGrid`.
+Arithmetic that leaves the 128-bit range (±5.39×10²¹ years) ends the program with a report.
+
+```dewy
+let t = instant"2026-10-24T12:00:00Z"   # checked while compiling, then a plain value
+printl"{t + 90minute}"                  # 2026-10-24T13:30:00Z
+```
+
+`instant"..."` and `utc"..."` with constant text are checked while compiling: a date that does
+not exist or a leap second that never happened is a compile error that says what to write.
+Passing, they are plain values. The same calls on runtime text return the failure as a value
+(`Instant | ParseError | InvalidFields | OffGrid | OutsideCoverage`). `utc"..."` keeps a `:60`
+label, and `.nominal` gives its instant. A UTC label before 1961 is outside coverage, and such an
+`Instant` prints as a TT label.
+
 ## Exact large integers
 
 ```dewy

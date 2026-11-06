@@ -7,9 +7,10 @@
 # is a `Regex`). Any other argument leaves the call as it is.
 
 struct CheckConstant:
-    param: int          # the parameter checked
-    validator: int      # the validator's declaration: (text) -> text?, none when it is fine
+    params: int[]       # the parameters checked, as the validator takes them
+    validator: int      # the validator's declaration: (values) -> text?, none when they are fine
     message: str
 
-cc_decls: {int: CheckConstant} = {}
+cc_decls: {int: CheckConstant[]} = {}
+cc_errors: {int: str} = {}      # declaration -> what `$error_if true` says at a call
 cc_any = false
