@@ -245,6 +245,19 @@ call_value=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
     }
     value_call(n callee args expected)
 }
+# Whether the program declares its own function of this name taking a sequence first: then a
+# call may be the program's, whose `int` parameter must see the value as it is. O(declarations
+# of the name), only at a library `get` of an `int`.
+call_own_sequence_fn=(name:CDWord):>bool=>$unsafe {
+    let cm=cur_mod()
+    if cm <? 0 or modules.ptr[cm].is_prelude {return false}
+    let all_d:array<int64>=[]
+    call_collect_module(cm name @all_d)
+    loop d in all_d {
+        if not decl_in_prelude(d) and takes_seq(d) {return true}
+    }
+    return false
+}
 call_name_early=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expected:CDWord ufcs:bool):>CDWord=>$unsafe {
     if ide_sentinel not=? 0 and name =? ide_sentinel {
         if ufcs and args.length >? 0 {
@@ -279,7 +292,7 @@ call_name_early=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expecte
                 check_expr(a1 0);
                 add_flag(a1 NF_CHECKED)
             }
-            if prune(ntype(a1)) =? T_MATH_INT and not is_lit(a1) {coerce(a1 policy_int(T_INT 2 nodes.ptr[n].pos));}
+            if prune(ntype(a1)) =? T_MATH_INT and not is_lit(a1) and not call_own_sequence_fn(name) {coerce(a1 policy_int(T_INT 2 nodes.ptr[n].pos));}
         }
     }
     if not ufcs and mod_scope <? 0 and args.length =? 2 and (name =? ci(3 "__floor_div") or name =? ci(4 "__floor_mod") or name =? ci(5 "__dewy_power") or name =? ci(6 "__dewy_divide")) and (files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy or pos_in_lib(nodes.ptr[n].pos)) {

@@ -1,0 +1,16 @@
+# ...and a place argument stays that place.
+get = (xs:array<int> @pos:int):>int => {
+    pos += 1
+    xs.length
+}
+peek = (word:string @pos:int):>string => {
+    pos += 1
+    word
+}
+main = () => {
+    let p:int = 0
+    printl(get([7] @p))
+    printl(p)
+    printl(peek("w" @p))
+    printl(p)
+}

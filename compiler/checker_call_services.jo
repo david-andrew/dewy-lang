@@ -220,6 +220,18 @@ call_value = (n: int, expected: int) -> int:
     value_call(n, callee, args, expected)
 
 
+# Whether the program declares its own function of this name taking a sequence first: then a
+# call may be the program's, whose `int` parameter must see the value as it is. O(declarations
+# of the name), only at a library `get` of an `int`.
+call_own_sequence_fn = (name: int) -> bool:
+    cm = cur_mod()
+    if cm < 0 or modules[cm].is_prelude: return false
+    all_d: int[]
+    call_collect_module(cm, name, all_d)
+    loop d in all_d:
+        if not decl_in_prelude(d) and takes_seq(d): return true
+    false
+
 call_name_early = (n: int, name: int, mod_scope: int, args: int[], expected: int, ufcs: bool) -> int:
     if ide_sentinel != 0 and name == ide_sentinel:
         if ufcs and args.len() > 0:
@@ -250,7 +262,7 @@ call_name_early = (n: int, name: int, mod_scope: int, args: int[], expected: int
             if not has_flag(a1, NF_CHECKED):
                 check_expr(a1, 0)
                 add_flag(a1, NF_CHECKED)
-            if prune(ntype(a1)) == T_MATH_INT and not is_lit(a1): coerce(a1, policy_int(T_INT, 2, nodes[n].pos))
+            if prune(ntype(a1)) == T_MATH_INT and not is_lit(a1) and not call_own_sequence_fn(name): coerce(a1, policy_int(T_INT, 2, nodes[n].pos))
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == ci(3, "__floor_div") or name == ci(4, "__floor_mod") or name == ci(5, "__dewy_power") or name == ci(6, "__dewy_divide")) and (files[pos_file(nodes[n].pos)].is_dewy or pos_in_lib(nodes[n].pos)):
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)

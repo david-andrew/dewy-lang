@@ -1,0 +1,14 @@
+# A program's own `get` over a sequence sees an `int` argument as it is; the library's saturates.
+get = (xs:array<int> i:int):>int => i % 7
+take = (xs:array<int> @pos:int<(>=? 0)>):>int => {
+    pos += 1
+    xs.length + pos
+}
+main = () => {
+    let big = 2^70
+    printl(big % 7)
+    printl(get([1] big))
+    printl(get([1] big + 1))
+    let p:int<(>=? 0)> = 0
+    printl(take([7] @p))
+}
