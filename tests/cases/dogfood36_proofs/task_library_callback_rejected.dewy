@@ -1,0 +1,10 @@
+# modes: native native-release
+# A closure given to a library function runs on the task: it was not scanned.
+counter:int = 0
+main = () => {
+    concurrent {
+        spawn { printl([1 2 3].map((x) => { counter += 1; x })) }
+        spawn { printl([1 2 3].map((x) => { counter += 1; x })) }
+    }
+    printl(counter)
+}

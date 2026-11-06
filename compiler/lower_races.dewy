@@ -76,7 +76,14 @@ race_scan=(n:LRWord f:LRWord who:string captures:bool):>void=>$unsafe {
     if n =? 0 {return}
     loop called in value_helper_calls(n) {race_named(called who);}
     let k=nodes.ptr[n].kind
-    if k =? 'lambda' {return}
+    # (a closure or function value made here may run here, through a library's callback call,
+    # which the scan does not follow; its own captures are checked where the task takes them)
+    if k =? 'lambda' {
+        let inner:LRWord=LRWord(nodes.ptr[n].sym)
+        if inner >? 0 {race_scan(LRWord(fns.ptr[inner].body) inner who false);}
+        return
+    }
+    if (k =? 'fnref' or k =? 'partial' and nodes.ptr[n].aux not=? 1) and nodes.ptr[n].sym >? 0 {race_named(LRWord(nodes.ptr[n].sym) who);}
     if k =? 'assign' {race_target(LRWord(nodes.ptr[n].a) f who captures nodes.ptr[n].pos);}
     else if k =? 'intrinsic' and nkids(n) >? 0 {
         let id:LRWord=LRWord(nodes.ptr[n].aux)

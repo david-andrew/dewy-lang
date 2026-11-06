@@ -195,6 +195,8 @@ concurrency_task_globals_node = (n: int, seen: mut {int: bool}):
         if not globals[g].is_const and written and not concurrency_builtin_type(t, "Atomic") and not concurrency_builtin_type(t, "TaskGroup"):
             fatal(nodes[n].pos, "a task cannot read an unsynchronized global while its parent runs; capture a value or use Atomic")
     if k == .call and nodes[n].aux == 0: concurrency_task_globals(int(nodes[n].sym), seen)
+    # (a closure or function value made here may run here, through a library's callback call)
+    if (k == .lambda or k == .fnref or k == .partial and nodes[n].aux != 1) and nodes[n].sym > 0: concurrency_task_globals(int(nodes[n].sym), seen)
     loop f in value_helper_calls(n): concurrency_task_globals(f, seen)
     mask = isolation_children(k)
     if mask < 0: return

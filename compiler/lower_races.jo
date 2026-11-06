@@ -76,7 +76,13 @@ race_scan = (n: int, f: int, who: str, captures: bool):
     if n == 0: return
     loop called in value_helper_calls(n): race_named(called, who)
     k = nodes[n].kind
-    if k == .lambda: return
+    # (a closure or function value made here may run here, through a library's callback call,
+    # which the scan does not follow; its own captures are checked where the task takes them)
+    if k == .lambda:
+        inner = int(nodes[n].sym)
+        if inner > 0: race_scan(int(fns[inner].body), inner, who, false)
+        return
+    if (k == .fnref or k == .partial and nodes[n].aux != 1) and nodes[n].sym > 0: race_named(int(nodes[n].sym), who)
     if k == .assign: race_target(int(nodes[n].a), f, who, captures, nodes[n].pos)
     else if k == .intrinsic and nkids(n) > 0:
         id = nodes[n].aux as IN

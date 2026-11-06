@@ -1,0 +1,15 @@
+# modes: native native-release
+# Closures that touch only their own task's values stay accepted.
+const FACTOR = 2
+scale = (x:int):>int => x * FACTOR
+main = () => {
+    let k = 3
+    concurrent {
+        let a = spawn [1 2 3].map((x) => x + k)
+        let b = spawn [3 1 2].sorted(key=(x) => -x)
+        let c = spawn [1 2].map(@scale)
+    }
+    printl(a or_throw)
+    printl(b or_throw)
+    printl(c or_throw)
+}

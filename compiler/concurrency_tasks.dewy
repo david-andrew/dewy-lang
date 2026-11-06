@@ -208,6 +208,8 @@ concurrency_task_globals_node=(n:TaskWord @seen:dict<int64 bool>):>void=>$unsafe
         }
     }
     if k =? 'call' and nodes.ptr[n].aux =? 0 {concurrency_task_globals(TaskWord(nodes.ptr[n].sym) @seen);}
+    # (a closure or function value made here may run here, through a library's callback call)
+    if (k =? 'lambda' or k =? 'fnref' or k =? 'partial' and nodes.ptr[n].aux not=? 1) and nodes.ptr[n].sym >? 0 {concurrency_task_globals(TaskWord(nodes.ptr[n].sym) @seen);}
     loop f in value_helper_calls(n) {concurrency_task_globals(f @seen);}
     let mask=isolation_children(k)
     if mask <? 0 {return}

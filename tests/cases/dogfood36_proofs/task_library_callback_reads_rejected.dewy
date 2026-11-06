@@ -1,0 +1,9 @@
+# modes: native native-release
+limit:int = 0
+main = () => {
+    limit = 1
+    concurrent {
+        spawn { printl([1 2 3].map((x) => x + limit)) }
+        limit = 2
+    }
+}

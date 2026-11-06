@@ -1,0 +1,10 @@
+# modes: native native-release
+counter:int = 0
+bump = (y:int):>int => { counter += 1; y }
+main = () => {
+    concurrent {
+        spawn { printl([1 2 3].map(@bump)) }
+        spawn { printl([1 2 3].map(@bump)) }
+    }
+    printl(counter)
+}
