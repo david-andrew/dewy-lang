@@ -1,0 +1,298 @@
+$runtime_checks
+from p"ast.jo" import (NF_GENERIC has_flag kid nkids nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_PARAM LF_RESIZED LF_SHARED LF_SOAELEM fns globals locals)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"directives.jo" import (dir_name_assumed_bounds dir_scopes dir_value)
+from p"exact.jo" import (exact_control_parents exact_control_values exact_decide exact_dependency_budget exact_dependency_epoch exact_dependency_seen exact_has_node exact_has_store exact_initializers exact_iteration_sources exact_marks exact_measure_on exact_measure_sites exact_progress_math exact_progress_opaque exact_representation exact_reserve exact_unmark exact_write_controls exact_write_heads exact_write_next exact_write_seen exact_write_targets exact_write_values)
+from p"expr.jo" import (CV IN is_fn_type ntype)
+from p"facts.jo" import (positive_bound stable_loop_index)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"types.jo" import (T_MATH_INT int_policy is_int types)
+
+ProgressWord:type=int64<overflow='wrap'>
+# The default progress axiom covers additive updates of 64-bit storage by a
+# stored machine-word amount. It is not a proof of a multiply, an unbounded
+# exact intermediate, or a narrower counter. The scoped opt-out requires the
+# ordinary range proof instead. Candidate recognition runs only at exact stores;
+# its increment walk is O(increment nodes × place depth), with no body-wide analysis.
+fact_progress_strip=(n0:ProgressWord):>ProgressWord=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.none_)) or nodes.ptr[n].aux =? int32(int64(CV.int_))) {n=ProgressWord(nodes.ptr[n].a)}
+    n
+}
+fact_progress_same=(a0:ProgressWord b0:ProgressWord depth:ProgressWord=0):>bool=>$unsafe {
+    if depth >? 32 {return false}
+    let a=fact_progress_strip(a0)
+    let b=fact_progress_strip(b0)
+    let k=nodes.ptr[a].kind
+    if k not=? nodes.ptr[b].kind {return false}
+    if k =? 'ident' {return nodes.ptr[a].aux =? nodes.ptr[b].aux and nodes.ptr[a].sym =? nodes.ptr[b].sym and (nodes.ptr[a].aux =? int32(1) or nodes.ptr[a].aux =? int32(2))}
+    if k =? 'int_lit' {return nodes.ptr[a].ival =? nodes.ptr[b].ival}
+    if k =? 'field' {
+        return nodes.ptr[a].aux =? nodes.ptr[b].aux and nodes.ptr[a].name =? nodes.ptr[b].name and nodes.ptr[a].ival =? nodes.ptr[b].ival and fact_progress_same(ProgressWord(nodes.ptr[a].a) ProgressWord(nodes.ptr[b].a) depth + 1)
+    }
+    if k =? 'index' and nodes.ptr[a].aux =? 0 and nodes.ptr[b].aux =? 0 and nodes.ptr[a].b not=? 0 and nodes.ptr[b].b not=? 0 {
+        return fact_progress_same(ProgressWord(nodes.ptr[a].a) ProgressWord(nodes.ptr[b].a) depth + 1) and fact_progress_same(ProgressWord(nodes.ptr[a].b) ProgressWord(nodes.ptr[b].b) depth + 1)
+    }
+    false
+}
+# A recurrence such as x += x is geometric growth, not bounded progress.
+# Inspect only the candidate increment, never an unrelated function body.
+# Preparation already records writes. A query follows their indexed heads,
+# including assignments later in the body, with a 64-node budget. Epoch marks
+# break independent recurrence cycles without hiding a path to the counter.
+# O(N+E) collection, O(64*C*P) queries for C candidates and place depth P,
+# O(L+W) indexed storage; ordinary scalar counters have P=1.
+fact_progress_root=(n0:ProgressWord):>ProgressWord=>$unsafe {
+    let n=n0
+    loop depth in [0..32) {
+        n=fact_progress_strip(n)
+        if nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index' or nodes.ptr[n].kind =? 'unwrap' or nodes.ptr[n].kind =? 'narrow' {
+            n=ProgressWord(nodes.ptr[n].a)
+        }
+        else if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1) and ProgressWord(locals.ptr[ProgressWord(nodes.ptr[n].sym)].flags) & LF_ALIAS not=? 0 and locals.ptr[ProgressWord(nodes.ptr[n].sym)].alias not=? 0 {
+            n=ProgressWord(locals.ptr[ProgressWord(nodes.ptr[n].sym)].alias)
+        }
+        else {return n}
+    }
+    0
+}
+# Distinct dynamic indices may designate the same element. Only different
+# literal indices and different field routes prove these stores disjoint.
+fact_progress_may_alias=(a0:ProgressWord b0:ProgressWord depth:ProgressWord=0):>bool=>$unsafe {
+    if depth >=? 32 {return true}
+    let a=fact_progress_strip(a0)
+    let b=fact_progress_strip(b0)
+    if nodes.ptr[a].kind =? 'ident' or nodes.ptr[b].kind =? 'ident' {return fact_progress_same(fact_progress_root(a) fact_progress_root(b))}
+    if nodes.ptr[a].kind not=? nodes.ptr[b].kind {return false}
+    if nodes.ptr[a].kind =? 'field' {
+        return nodes.ptr[a].name =? nodes.ptr[b].name and nodes.ptr[a].ival =? nodes.ptr[b].ival and fact_progress_may_alias(ProgressWord(nodes.ptr[a].a) ProgressWord(nodes.ptr[b].a) depth + 1)
+    }
+    if nodes.ptr[a].kind =? 'index' {
+        let ai=ProgressWord(nodes.ptr[a].b)
+        let bi=ProgressWord(nodes.ptr[b].b)
+        if ai =? 0 or bi =? 0 {return true}
+        if nodes.ptr[ai].kind =? 'int_lit' and nodes.ptr[bi].kind =? 'int_lit' and nodes.ptr[ai].ival not=? nodes.ptr[bi].ival {return false}
+        return fact_progress_may_alias(ProgressWord(nodes.ptr[a].a) ProgressWord(nodes.ptr[b].a) depth + 1)
+    }
+    true
+}
+# A bounded increment cannot secretly count iterations controlled by the
+# accumulator. Control links share the same 64-edge dependency budget.
+fact_progress_control_depends=(head0:ProgressWord target:ProgressWord):>bool=>{
+    let head=head0
+    loop head >? 0 {
+        exact_dependency_budget -= 1
+        if exact_dependency_budget <? 0 or fact_progress_depends(exact_control_values[head - 1] target) {return true}
+        head=exact_control_parents[head - 1]
+    }
+    false
+}
+fact_progress_place_depends=(n:ProgressWord target:ProgressWord):>bool=>$unsafe {
+    let root=fact_progress_root(n)
+    if nodes.ptr[root].kind =? 'array' or nodes.ptr[root].kind =? 'tuple' {return fact_progress_depends(root target)}
+    if nodes.ptr[root].kind =? 'ident' and nodes.ptr[root].aux =? int32(2) {
+        let g=ProgressWord(nodes.ptr[root].sym)
+        let counter=fact_progress_root(target)
+        # An immutable module value predates a private local accumulator.
+        # It cannot contain that local's later progress, including in scripts.
+        if nodes.ptr[counter].kind =? 'ident' and nodes.ptr[counter].aux =? int32(1) and not globals.ptr[g].fn_written and not globals.ptr[g].init_written and not globals.ptr[g].exposed {return false}
+        return true
+    }
+    if nodes.ptr[root].kind not=? 'ident' or nodes.ptr[root].aux not=? int32(1) {return true}
+    let l=ProgressWord(nodes.ptr[root].sym)
+    if ProgressWord(locals.ptr[l].flags) & (LF_ALIAS | LF_CAPTURE | LF_SHARED | LF_EXPOSED | LF_ELEMALIAS | LF_SOAELEM) not=? 0 {return true}
+    if l <? exact_progress_opaque.length and exact_progress_opaque[l] {return true}
+    if l <? exact_initializers.length and exact_initializers[l] >? 0 {
+        if fact_progress_depends(exact_initializers[l] target) {return true}
+    }
+    let edge=if l <? exact_write_heads.length {exact_write_heads[l]} else {0}
+    loop edge >? 0 {
+        exact_dependency_budget -= 1
+        if exact_dependency_budget <? 0 {return true}
+        let at=edge - 1
+        let written=exact_write_targets[at]
+        if exact_write_seen[at] not=? exact_dependency_epoch and fact_progress_may_alias(written n) {
+            exact_write_seen[at]=exact_dependency_epoch
+            if fact_progress_depends(exact_write_values[at] target) or fact_progress_control_depends(exact_write_controls[at] target) {return true}
+        }
+        edge=exact_write_next[at]
+    }
+    false
+}
+fact_progress_local_depends=(l:ProgressWord target:ProgressWord):>bool=>$unsafe {
+    exact_dependency_budget -= 1
+    if exact_dependency_budget <? 0 {return true}
+    let root=fact_progress_strip(target)
+    if nodes.ptr[root].kind =? 'ident' and nodes.ptr[root].aux =? int32(1) and nodes.ptr[root].sym =? int32(l) {return true}
+    if l <=? 0 or l >=? locals.length {return true}
+    let t=exact_representation(ProgressWord(locals.ptr[l].type))
+    # Aggregate actuals can carry the counter into a called helper too.
+    # Follow their indexed definitions/writes under the same query budget.
+    if l <? exact_progress_opaque.length and exact_progress_opaque[l] {return true}
+    let flags=ProgressWord(locals.ptr[l].flags)
+    if is_fn_type(t) and flags & LF_RESIZED not=? 0 {return true}
+    if flags & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {return fact_progress_depends(ProgressWord(locals.ptr[l].alias) target)}
+    # Read-only iteration aliases draw from the indexed source snapshot.
+    if l <? exact_iteration_sources.length and exact_iteration_sources[l] not=? 0 {
+        let source=exact_iteration_sources[l]
+        if nodes.ptr[source].kind =? 'range' {return fact_progress_depends(source target)}
+        return fact_progress_place_depends(source target)
+    }
+    # An array parameter predates a private scalar accumulator. Its entry
+    # contents cannot depend on that local; indexed writes still can. Unknown
+    # mutation and insertion were rejected above, while pop only removes data.
+    root=fact_progress_strip(target)
+    if types.ptr[t].kind =? 'array' and flags & LF_PARAM not=? 0 and nodes.ptr[root].kind =? 'ident' and nodes.ptr[root].aux =? int32(1) {
+        let counter=ProgressWord(nodes.ptr[root].sym)
+        if ProgressWord(locals.ptr[counter].flags) & (LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_ADDR | LF_CAPTURE | LF_SHARED | LF_EXPOSED) =? 0 {
+            flags &= ~(LF_MUTPARAM | LF_BYREF | LF_ADDR)
+        }
+    }
+    # Writes through aliases/captures are outside this local assignment index.
+    if flags & (LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) not=? 0 {return true}
+    if l >=? exact_dependency_seen.length {exact_dependency_seen.resize(locals.length)}
+    if exact_dependency_seen[l] =? exact_dependency_epoch {return false}
+    exact_dependency_seen[l]=exact_dependency_epoch
+    if flags & LF_CAPTURE not=? 0 {
+        if fact_progress_local_depends(ProgressWord(locals.ptr[l].outer) target) {return true}
+    }
+    if l <? exact_initializers.length and exact_initializers[l] >? 0 {
+        if fact_progress_depends(exact_initializers[l] target) {return true}
+    }
+    let edge=if l <? exact_write_heads.length {exact_write_heads[l]} else {0}
+    loop edge >? 0 {
+        if fact_progress_depends(exact_write_values[edge - 1] target) or fact_progress_control_depends(exact_write_controls[edge - 1] target) {return true}
+        edge=exact_write_next[edge - 1]
+    }
+    false
+}
+fact_progress_depends=(n:ProgressWord target:ProgressWord):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    exact_dependency_budget -= 1
+    if exact_dependency_budget <? 0 {return true}
+    if fact_progress_same(n target) {return true}
+    # The enabled array bound already limits every length independently of
+    # element contents. Field writes cannot make a loop's length unbounded.
+    if nodes.ptr[n].kind =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.len)) and positive_bound(n false) >=? 0 {return false}
+    if nodes.ptr[n].kind =? 'ident' {
+        if nodes.ptr[n].aux =? int32(1) {return fact_progress_local_depends(ProgressWord(nodes.ptr[n].sym) target)}
+        if nodes.ptr[n].aux =? int32(2) {return true}
+    }
+    if nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index' {
+        if fact_progress_place_depends(n target) {return true}
+        # The route query already follows only writes that can reach this
+        # field/element; inspecting its whole aggregate would lose that fact.
+        if nodes.ptr[n].kind =? 'index' {return fact_progress_depends(ProgressWord(nodes.ptr[n].b) target)}
+        return false
+    }
+    if nodes.ptr[n].kind =? 'lambda' or nodes.ptr[n].kind =? 'call' {
+        let root=fact_progress_root(target)
+        # A call can read global storage without an explicit actual argument.
+        if nodes.ptr[root].kind =? 'ident' and nodes.ptr[root].aux =? int32(2) {return true}
+        let f=ProgressWord(nodes.ptr[n].sym)
+        if nodes.ptr[n].kind =? 'lambda' and has_flag(n NF_GENERIC) {return true}
+        if f >? 0 and f <? fns.length {
+            loop capture in fns.ptr[f].caps {
+                if nodes.ptr[root].kind =? 'ident' and nodes.ptr[root].aux =? int32(1) and nodes.ptr[root].sym =? capture.outer {return true}
+                if fact_progress_local_depends(int64(capture.outer) target) {return true}
+            }
+        }
+    }
+    let mask=isolation_children(nodes.ptr[n].kind)
+    if mask <=? 0 {return false}
+    if mask & 1 not=? 0 and fact_progress_depends(ProgressWord(nodes.ptr[n].a) target) {return true}
+    if mask & 2 not=? 0 and fact_progress_depends(ProgressWord(nodes.ptr[n].b) target) {return true}
+    if mask & 4 not=? 0 and fact_progress_depends(ProgressWord(nodes.ptr[n].c) target) {return true}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {
+            let child=kid(n i)
+            if fact_progress_depends(child target) {return true}
+        }
+    }
+    false
+}
+# Across a temporary, a changed index must not turn a copy between elements
+# into progress of one counter. Field/array routes must remain stable.
+fact_progress_stable=(n0:ProgressWord):>bool=>$unsafe {
+    let n=fact_progress_strip(n0)
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        return nodes.ptr[n].aux =? int32(1) and ProgressWord(locals.ptr[ProgressWord(nodes.ptr[n].sym)].flags) & (LF_RESIZED | LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_SHARED) =? 0
+    }
+    if k =? 'int_lit' {return true}
+    if k =? 'field' {return fact_progress_stable(ProgressWord(nodes.ptr[n].a))}
+    if k =? 'index' and nodes.ptr[n].aux =? 0 {
+        let index=fact_progress_strip(ProgressWord(nodes.ptr[n].b))
+        let stable=nodes.ptr[index].kind =? 'int_lit' or nodes.ptr[index].kind =? 'ident' and nodes.ptr[index].aux =? int32(1) and stable_loop_index(ProgressWord(nodes.ptr[index].sym))
+        return stable and fact_progress_stable(ProgressWord(nodes.ptr[n].a))
+    }
+    false
+}
+fact_progress_note=(assignment:ProgressWord):>void=>$unsafe {
+    let target=ProgressWord(nodes.ptr[assignment].a)
+    let store=ProgressWord(nodes.ptr[assignment].b)
+    if nodes.ptr[store].kind =? 'ident' and nodes.ptr[store].aux =? int32(1) and fact_progress_stable(target) {
+        let l=ProgressWord(nodes.ptr[store].sym)
+        if l >? 0 and l <? exact_initializers.length and ProgressWord(locals.ptr[l].flags) & (LF_PARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) =? 0 {
+            let candidate=exact_initializers[l]
+            if candidate >? 0 and exact_has_store(candidate) {store=candidate}
+        }
+    }
+    let mathematical=nodes.ptr[store].kind =? 'conv' and nodes.ptr[store].aux =? int32(int64(CV.int_)) and exact_representation(ntype(ProgressWord(nodes.ptr[store].a))) =? T_MATH_INT
+    if not exact_has_store(store) and not mathematical {return}
+    let t=exact_representation(ntype(target))
+    if not is_int(t) or t =? T_MATH_INT or types.ptr[t].bits not=? 64 or int_policy(t) not=? 0 {return}
+    if dir_scopes.length >? 0 and dir_value(dir_name_assumed_bounds nodes.ptr[store].pos) =? 1 {return}
+    let source=ProgressWord(nodes.ptr[store].a)
+    let operation=fact_progress_strip(source)
+    # An inferred exact temporary is not a storage boundary. Recognize the
+    # same immutable update source at its eventual fixed-width assignment.
+    if mathematical and nodes.ptr[operation].kind =? 'ident' and nodes.ptr[operation].aux =? int32(1) and fact_progress_stable(target) {
+        let l=ProgressWord(nodes.ptr[operation].sym)
+        if l >? 0 and l <? exact_initializers.length and ProgressWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_PARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) =? 0 {
+            let initial=exact_initializers[l]
+            if initial >? 0 {operation=fact_progress_strip(initial)}
+        }
+    }
+    if nodes.ptr[operation].kind not=? 'binary' or nodes.ptr[operation].aux not=? 0 {return}
+    let op=cx_token_values.ptr[ProgressWord(nodes.ptr[operation].op)]
+    if op not=? 'plus' and op not=? 'minus' {return}
+    let increment=ProgressWord(nodes.ptr[operation].b)
+    if not fact_progress_same(target ProgressWord(nodes.ptr[operation].a)) {
+        if op not=? 'plus' or not fact_progress_same(target increment) {return}
+        increment=ProgressWord(nodes.ptr[operation].a)
+    }
+    exact_dependency_epoch += 1
+    exact_dependency_budget=64
+    # A syntactically bounded increment stays bounded even if it refers to
+    # the accumulator (for example count & 255). Reuse that existing proof.
+    if fact_progress_depends(increment target) and positive_bound(increment false) <? 0 {return}
+    let it=exact_representation(ntype(increment))
+    if mathematical {
+        # A masked or otherwise bounded mathematical increment need not box
+        # the fixed accumulator merely to add it. The axiom supplies the fit.
+        let stored_word=not exact_has_node(increment) and is_int(it) and it not=? T_MATH_INT and types.ptr[it].bits <=? 64
+        if not types.ptr[t].sign or not stored_word and positive_bound(increment false) <? 0 {return}
+        exact_progress_math[store]=true
+        exact_reserve(store)
+        exact_marks[store] |= 64
+        return
+    }
+    if exact_has_node(increment) or not is_int(it) or it =? T_MATH_INT or types.ptr[it].bits >? 64 {return}
+    exact_decide(store true)
+    exact_marks[store] |= 32
+    # The assumed boundary makes this cloned root a machine-word operation.
+    # Its operands are stored values; no wider intermediate is discarded.
+    if source =? operation {
+        exact_unmark(source)
+        # The emitter may use a word, but facts still evaluate its exact
+        # interval before intersecting the axiom's storage boundary.
+        exact_marks[source] |= 32
+    }
+    if exact_measure_on {
+        let site=exact_measure_sites[store]
+        site.category="progress-axiom"
+        exact_measure_sites[store]=site
+    }
+}
