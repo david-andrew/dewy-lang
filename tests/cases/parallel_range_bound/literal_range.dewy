@@ -1,0 +1,6 @@
+# A literal range is its own proof.
+$no_assumed_bounds
+main = () => {
+    parallel i in [0..4) { $runtime_assert(i >=? 0) }
+    printl("ok")
+}

@@ -3057,7 +3057,9 @@ globals may be read but cannot be changed, including through called functions.
 Indexed writes to a captured array are currently rejected; use the mutable
 element binding. The first implementation accepts one named binding over an
 array or bounded range; combined headers, destructuring and filtered parallel
-collectors are not yet supported. `return`, `break` and `continue` cannot leave
+collectors are not yet supported. A range of 2^63 or more values runs as 2^63 - 1
+of them; under `$no_assumed_bounds` it is a compile error unless its size is
+proven smaller (`if lo <? 0 return` for `[lo..hi)` of `int64`s). `return`, `break` and `continue` cannot leave
 a parallel body.
 
 The existing `parallel_map`, `parallel_range` and `parallel_update` functions

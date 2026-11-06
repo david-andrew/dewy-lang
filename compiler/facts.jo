@@ -4260,6 +4260,8 @@ fact_slice_prepare = (f: int, summary: bool = false):
             else if representation and n < exact_rep_demands.len() and exact_rep_demands[n]: values.push(n)
         # (children visited in place, a, b, c then kids: no list per node)
         mask = isolation_children(k)
+        # (`parallel` under `$no_assumed_bounds`: its range's size is an obligation)
+        if k == .parallel_region and dir_assumed_bounds_any: fact_slice_member(parents, work, int(nodes[n].a), n)
         if mask > 0:
             if mask & 1 != 0: fact_slice_member(parents, work, int(nodes[n].a), n)
             if mask & 2 != 0: fact_slice_member(parents, work, int(nodes[n].b), n)
@@ -4316,6 +4318,12 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 if fact_parallel_array(n):
                     values.push(n)
                     values.push(kid(n, 0))
+            if not summary and dir_assumed_bounds_any and fact_parallel_range_call(n):
+                active.push(n)
+                values.push(n)
+                if fact_library_call(kid(n, 0), "__dewy_range"):
+                    values.push(kid(kid(n, 0), 0))
+                    values.push(kid(kid(n, 0), 2))
             if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_key_callback(n) > 0:
                 arg = fact_key_callback(n)
                 fact_fork_nodes[arg] = true
@@ -4613,6 +4621,39 @@ fact_parallel_array = (n: int) -> bool:
     if fact_name_parallel_arrays.len() == 0: fact_name_parallel_arrays = [intern("__dewy_parallel_collect"), intern("__dewy_parallel_each"), intern("parallel_map")]
     int(nodes[d].name) in fact_name_parallel_arrays and pos_in_lib(nodes[d].pos) and tkind(fact_type(ntype(kid(n, 0)))) == .array
 
+# `parallel i in [a..b)` (a range runs at most 2^63 - 1 values: lib/std/thread.jo).
+fact_parallel_range_call = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return false
+    if not fact_library_call(n, "__dewy_parallel_each") and not fact_library_call(n, "__dewy_parallel_collect"): return false
+    dir_value(dir_name_assumed_bounds, nodes[n].pos) == 1 and tkind(fact_type(ntype(kid(n, 0)))) != .array
+
+fact_through_conv = (n0: int) -> int:
+    n = n0
+    loop nodes[n].kind == .conv: n = int(nodes[n].a)
+    n
+
+# Under `$no_assumed_bounds` that cap is not assumed away: the range's size is proven below
+# it from its endpoints' bounds, whatever its step. O(1), demanded by the tag.
+fact_parallel_count_check = (n: int, s: mut FactState):
+    if fact_speculating != 0 or fact_summary_owner != 0 or not (fact_policy == .RequireStatic or fact_query or fact_probe_on): return
+    range = kid(n, 0)
+    proven = false
+    # (`__dewy_range(first second last stepped inclusive)`)
+    if fact_library_call(range, "__dewy_range") and nkids(range) == 5:
+        first = fact_through_conv(kid(range, 0))
+        last = fact_through_conv(kid(range, 2))
+        lo = if nodes[first].kind == .int_lit: FactBound(nodes[first].ival, nodes[first].ival) else: fact_bound(s, fact_capture(first, s))
+        hi = if nodes[last].kind == .int_lit: FactBound(nodes[last].ival, nodes[last].ival) else: fact_bound(s, fact_capture(last, s))
+        proven = not lo.wide and not hi.wide and lo.lo != FACT_MIN and fact_add_fits(hi.hi, -lo.lo)
+    if fact_probe_on:
+        fact_probe_record(n, proven)
+        return
+    if proven: return
+    message = "cannot prove this `parallel` range has fewer than 2^63 values (`$no_assumed_bounds`)"
+    if dir_defer(n, message, true): return
+    err_notes.push((-1, "help: bound its endpoints first, as `if lo <? 0 return` does for `[lo..hi)`"))
+    wit_fail(nodes[n].pos, message)
+
 fact_parallel_record = (n: int, s: mut FactState, base: int):
     if fact_speculating != 0 or fact_summary_owner != 0 or not fact_parallel_array(n): return
     f = int(nodes[kid(n, 1)].sym)
@@ -4823,6 +4864,7 @@ fact_obligation_node = (n: int) -> bool:
         pool = fact_pool_call(n)
         if pool >= 2 and pool <= 4: return true
         # A fork closure's obligations start from its creator's facts.
+        if dir_assumed_bounds_any and fact_parallel_range_call(n): return true
         if fact_library_call(n, "parallel_range") or fact_library_call(n, "parallel_map") or fact_parallel_array(n):
             loop i in [0..nkids(n)):
                 arg = kid(n, i)
@@ -5787,6 +5829,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if fact_comprehension_sources.len() > 0:
             made = fact_map_of(n, s)
             if made != 0: return made
+        if dir_assumed_bounds_any and fact_parallel_range_call(n): fact_parallel_count_check(n, s)
         if fact_parallel_array(n): fact_parallel_record(n, s, values[0])
         else if fact_fork_entries.len() > 0 and fact_key_callback(n) > 0: fact_key_record(n, s, values[0])
         if wi_fact_calls.len() > 0 and wi_fact_calls.has(n): wi_fact_check(n, values, s)

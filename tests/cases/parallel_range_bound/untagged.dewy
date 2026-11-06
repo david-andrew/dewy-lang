@@ -1,0 +1,6 @@
+# Without the tag, the size is not asked about.
+big = (lo:int64 hi:int64):>void => {
+    parallel i in [lo..hi) { $runtime_assert(i <=? hi) }
+    printl("ran")
+}
+main = () => big(-5 5)
