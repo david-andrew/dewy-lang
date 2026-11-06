@@ -1,0 +1,26 @@
+# the machine field of an ELF file's header (0 if unreadable): 20 bytes, not the whole file
+elf_machine_of = (path: str) -> int:
+    when TARGET == "windows":
+        return 0
+    else:
+        fd = syscall(2, data(__zstr(path)), 0, 0)
+        if fd < 0: return 0
+        hdr = fill(u8(0), 20)
+        n = syscall(17, fd, data(hdr), 20, 0)
+        syscall(3, fd)
+        if n < 20: return 0
+        # (a Mach-O file: macOS's; its CPU type, 0x100000C for arm64)
+        if hdr[0] == 0xCF and hdr[1] == 0xFA and hdr[2] == 0xED and hdr[3] == 0xFE: return int(hdr[4]) | (int(hdr[5]) << 8) | (int(hdr[6]) << 16) | (int(hdr[7]) << 24)
+        return int(hdr[18]) | (int(hdr[19]) << 8)
+
+# The full target name of the machine this compiler runs on.
+host_target_name = () -> str:
+    name = "x86_64-linux"
+    when TARGET == "windows":
+        name = "x86_64-windows"
+    # (the compiler's own processor: its executable's ELF machine, 183 for arm64)
+    when TARGET != "windows":
+        m = elf_machine_of(exe_path())
+        if m == 183: name = "aarch64-linux"
+        else if m == 0x100000C: name = "aarch64-mac"
+    name

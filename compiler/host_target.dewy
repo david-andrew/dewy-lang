@@ -1,0 +1,33 @@
+$runtime_checks
+# The host machine's target name: this executable's own header decides.
+from p"@lib/core/os.jo" import (__zstr exe_path)
+
+TargetWord:type=int64<overflow='wrap'>
+# the machine field of an ELF file's header (0 if unreadable): 20 bytes, not the whole file
+elf_machine_of=(path:string):>TargetWord=>$unsafe {
+    if $target.os =? 'windows' {
+        return 0
+    } else {
+        let fd=syscall(2 data(__zstr(path)) 0 0)
+        if fd <? 0 {return 0}
+        let hdr:array<uint8>=fill(uint8(0) 20)
+        let n=syscall(17 fd data(hdr) 20 0)
+        syscall(3 fd);
+        if n <? 20 {return 0}
+        # (a Mach-O file: macOS's; its CPU type, 0x100000C for arm64)
+        if hdr[0] =? 0xCF and hdr[1] =? 0xFA and hdr[2] =? 0xED and hdr[3] =? 0xFE {return TargetWord(hdr[4]) | (TargetWord(hdr[5]) << 8) | (TargetWord(hdr[6]) << 16) | (TargetWord(hdr[7]) << 24)}
+        return TargetWord(hdr[18]) | (TargetWord(hdr[19]) << 8)
+    }
+}
+# The full target name of the machine this compiler runs on.
+host_target_name=():>string=>{
+    if $target.os =? 'windows' {
+        return "x86_64-windows"
+    } else {
+        # (the compiler's own processor: its executable's ELF machine, 183 for arm64)
+        let m=elf_machine_of(exe_path())
+        if m =? 183 {return "aarch64-linux"}
+        if m =? 0x100000C {return "aarch64-mac"}
+        return "x86_64-linux"
+    }
+}
