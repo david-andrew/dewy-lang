@@ -1,0 +1,40 @@
+use 'lazy_bodies.jo'
+use 'frontend.jo'
+use 'check.jo'
+use 'pcheck.jo'
+use 'util.jo'
+use 'ast.jo'
+
+dc_force_all = ():
+    if not dc_lazy_used: return
+    loop m in modules:
+        if dc_lib_lazy_files.has(int(m.file)): continue
+        loop d in m.decls:
+            if nodes[d].kind == .fn_: source_force_body(d)
+
+# A library module's waiting bodies, all parsed now
+dc_force_module = (m: int):
+    if not dc_lib_lazy_files.has(int(modules[m].file)): return
+    loop d in modules[m].decls:
+        if nodes[d].kind == .fn_: source_force_body(d)
+
+# No diagnostic from a speculative parse/check may escape before replay. This
+# also covers errors in the serial prefix, before the workers can be started.
+dc_replay = ():
+    if not dc_lazy_used and not pc_reordered: return
+    if pc_child >= 0: exit(1)
+    pc_cancel()
+    a = args()
+    replay = [a[0], "--eager-bodies"]
+    loop i in [1..a.len()): replay.push(a[i])
+    __olen = 0
+    if not exec(exe_path(), replay):
+        eprint("error: could not restart eager parsing")
+        exit(2)
+
+dc_flush_warnings = ():
+    dc_lazy_used = false
+    pc_reordered = false
+    loop i in [0..dc_warning_pos.len()): warn(dc_warning_pos[i], dc_warning_text[i])
+    dc_warning_pos = []
+    dc_warning_text = []

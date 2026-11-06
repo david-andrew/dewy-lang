@@ -1,0 +1,49 @@
+$runtime_checks
+# Diagnostic transaction shared with the bootstrap's eager frontend.
+from p"@lib/core/os.jo" import (args eprint exec exe_path exit)
+from p"@lib/core/rt.jo" import __olen
+from p"lazy_bodies.jo" import (dc_lazy_used dc_lib_lazy_files dc_warning_pos dc_warning_text)
+from p"frontend.jo" import source_force_body
+from p"check.jo" import modules
+from p"pcheck.jo" import (pc_cancel pc_child pc_reordered)
+from p"util.jo" import warn
+from p"ast.jo" import nodes
+
+dc_force_all=():>void=>$unsafe {
+    if not dc_lazy_used {return}
+    loop m in modules {
+        if dc_lib_lazy_files.has(int64(m.file)) {continue}
+        loop d in m.decls {
+            if nodes.ptr[d].kind =? 'fn_' {source_force_body(d)}
+        }
+    }
+}
+# A library module's waiting bodies, all parsed now
+dc_force_module=(m:int64):>void=>$unsafe {
+    if not dc_lib_lazy_files.has(int64(modules[m].file)) {return}
+    loop d in modules[m].decls {
+        if nodes.ptr[d].kind =? 'fn_' {source_force_body(d)}
+    }
+}
+# No diagnostic from a speculative parse/check may escape before replay. This
+# also covers errors in the serial prefix, before the workers can be started.
+dc_replay=():>void=>{
+    if not dc_lazy_used and not pc_reordered {return}
+    if pc_child >=? 0 {exit(1)}
+    pc_cancel()
+    let a=args()
+    let replay=[a[0] "--eager-bodies"]
+    loop i in [1..a.length) {replay.push(a[i])}
+    __olen=0
+    if not exec(exe_path() replay) {
+        eprint("error: could not restart eager parsing")
+        exit(2)
+    }
+}
+dc_flush_warnings=():>void=>{
+    dc_lazy_used=false
+    pc_reordered=false
+    loop i in [0..dc_warning_pos.length) {warn(dc_warning_pos[i] dc_warning_text[i])}
+    dc_warning_pos=[]
+    dc_warning_text=[]
+}
