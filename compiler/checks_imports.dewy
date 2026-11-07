@@ -1,0 +1,215 @@
+$runtime_checks
+from p"checks_text.dewy" import (byte_rfind)
+
+from p"ast.jo" import (kid nkids nodes shadowable_decls)
+from p"check.jo" import (bind_module_name decl_shadowable demand_name from_imports globals is_private lib_dir lib_private ml_bump_name modules new_sym prelude rational_one_spelling scope_add_module syms universe)
+from p"checker_call_queries.dewy" import (intrinsic_of)
+from p"checker_state.dewy" import (SK)
+from p"checks_hints.dewy" import (suggestion)
+from p"ide.jo" import (IK_FN ide_alias_of ide_complete_module ide_on ide_ref ide_sentinel ide_sym_ref)
+from p"prelude.jo" import (prelude_source)
+from p"util.jo" import (fatal files name_of pos_in_lib pos_str warn)
+
+ImportWord:type=int64<overflow='wrap'>
+bind_from_imports=(start:ImportWord=0):>void=>$unsafe {
+    loop di in [start..from_imports.length) {
+        let d=from_imports[di]
+        let m=ImportWord(nodes.ptr[d].mod)
+        let im=ImportWord(nodes.ptr[d].sym)
+        if nodes.ptr[d].aux =? 3 {
+            bind_splat(d m im)
+            continue
+        }
+        loop i in [0..nkids(d)) {
+            let id=kid(d i)
+            let nm=ImportWord(nodes.ptr[id].name)
+            if ide_sentinel not=? 0 and nm =? ide_sentinel {ide_complete_module(im)}
+            let alias=nm
+            if nodes.ptr[id].aux not=? 0 {
+                alias=ImportWord(nodes.ptr[id].aux)
+                if ide_on {ide_alias_of[alias]=nm}
+            }
+            let s:ImportWord=0
+            if modules[im].is_prelude {
+                demand_name(nm)
+                s=prelude.get(nm) ?? 0
+            }
+            else {s=modules[im].names.get(nm) ?? 0}
+            if s =? 0 or syms.ptr[s].kind =? 'module' {
+                let cands:array<int64>=[]
+                if not modules[im].is_prelude {
+                    loop [k v] in modules[im].names {cands.push(k)}
+                }
+                fatal(nodes.ptr[id].pos "'{name_of(ImportWord(nodes.ptr[d].sval))}' has no '{name_of(nm)}'{suggestion(name_of(nm) cands)}")
+            }
+            if files[ImportWord(modules[m].file)].is_dewy {rational_one_spelling(im nm nodes.ptr[id].pos "drop `{name_of(nm)}` from the import and ")}
+            if ide_on {
+                if syms.ptr[s].kind =? 'fns' and syms.ptr[s].decl not=? 0 {ide_ref(nodes.ptr[id].pos nm IK_FN nodes.ptr[ImportWord(syms.ptr[s].decl)].pos 0 (-ImportWord(syms.ptr[s].decl)))}
+                else {ide_sym_ref(id s)}
+            }
+            # (in Dewy a module's own declaration shadows a `$shadowable` import as a whole;
+            # other imported consts cannot be shadowed)
+            let dewy_own:ImportWord=0
+            if files[ImportWord(modules[m].file)].is_dewy {
+                let ex=modules[m].names.get(alias)
+                if ex not=? none {
+                    if syms.ptr[ex].decl not=? 0 and ImportWord(nodes.ptr[ImportWord(syms.ptr[ex].decl)].mod) =? m {dewy_own=ex}
+                }
+            }
+            if dewy_own not=? 0 {
+                if decl_shadowable(ImportWord(syms.ptr[s].decl)) {continue}
+                fatal(nodes.ptr[id].pos "cannot import '{name_of(alias)}': this module declares its own '{name_of(alias)}' (at {pos_str(nodes.ptr[ImportWord(syms.ptr[dewy_own].decl)].pos)}), and the imported one is not `$shadowable`; import it with another name: {name_of(nm)} as ...")
+            }
+            if files[ImportWord(modules[m].file)].is_dewy and modules[m].names.get(alias) not=? none {
+                let owned=family_decls(s)
+                if dewy_import_clash(m alias s owned d nodes.ptr[id].pos) =? 1 {continue}
+                bind_imported(m alias syms.ptr[s].kind owned)
+                continue
+            }
+            if syms.ptr[s].kind =? 'fns' {
+                let ex=modules[m].names.get(alias)
+                if ex not=? none {
+                    if syms.ptr[ex].kind not=? 'fns' {fatal(nodes.ptr[id].pos "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' (at {pos_str(nodes.ptr[ImportWord(syms.ptr[ex].decl)].pos)}); import it with another name: {name_of(nm)} as ...")}
+                }
+                let o=s
+                loop o not=? 0 {
+                    scope_add_module(m alias 'fns' ImportWord(syms.ptr[o].ref) ImportWord(syms.ptr[o].decl));
+                    o=ImportWord(syms.ptr[o].next)
+                }
+            }
+            else {
+                let ex=modules[m].names.get(alias)
+                if ex not=? none {
+                    let where="at {pos_str(nodes.ptr[d].pos)}"
+                    if syms.ptr[ex].decl not=? 0 {where="at {pos_str(nodes.ptr[ImportWord(syms.ptr[ex].decl)].pos)}"}
+                    fatal(nodes.ptr[id].pos "cannot import '{name_of(alias)}': this module has a '{name_of(alias)}' ({where}); import it with another name: {name_of(nm)} as ...")
+                }
+                ml_bump_name(alias)
+                bind_module_name(m alias new_sym(alias syms.ptr[s].kind ImportWord(syms.ptr[s].ref) ImportWord(syms.ptr[s].decl)))
+            }
+        }
+    }
+}
+# The module a binding belongs to: where its declaration is (an imported binding
+# keeps its declaration, so it names the module it came from).
+sym_home=(s:ImportWord):>ImportWord=>$unsafe {
+    let k=syms.ptr[s].kind
+    if k =? 'global' or k =? 'const_' {return ImportWord(globals.ptr[ImportWord(syms.ptr[s].ref)].mod)}
+    if k =? 'module' or syms.ptr[s].decl =? 0 {return -1}
+    ImportWord(nodes.ptr[ImportWord(syms.ptr[s].decl)].mod)
+}
+sym_file_name=(s:ImportWord):>string=>{
+    let h=sym_home(s)
+    if h <? 0 {return "an import"}
+    let path=files[ImportWord(modules[h].file)].path
+    path.byte_slice(byte_rfind(path "/") + 1 (path as array<uint8>).length)
+}
+# The overloads of a function family (the declarations of one binding otherwise)
+# that module im declares itself, as (ref, decl).
+import_owned=(s:ImportWord im:ImportWord):>array<[int64 int64]>=>$unsafe {
+    let out:array<[int64 int64]>=[]
+    if syms.ptr[s].kind =? 'fns' {
+        let o=s
+        loop o not=? 0 {
+            let d=ImportWord(syms.ptr[o].decl)
+            if d not=? 0 and ImportWord(nodes.ptr[d].mod) =? im {out.push([ImportWord(syms.ptr[o].ref) d])}
+            o=ImportWord(syms.ptr[o].next)
+        }
+    }
+    else if syms.ptr[s].kind not=? 'module' and sym_home(s) =? im {out.push([ImportWord(syms.ptr[s].ref) ImportWord(syms.ptr[s].decl)])}
+    out
+}
+# Every declaration of a binding, as (ref, decl).
+family_decls=(s:ImportWord):>array<[int64 int64]>=>$unsafe {
+    let out:array<[int64 int64]>=[]
+    let o=s
+    loop o not=? 0 {
+        out.push([ImportWord(syms.ptr[o].ref) ImportWord(syms.ptr[o].decl)])
+        o=if syms.ptr[o].kind =? 'fns' {ImportWord(syms.ptr[o].next)} else {0}
+    }
+    out
+}
+# Does binding `name` hold every one of these declarations already?
+binds_all=(ex:ImportWord owned:array<[int64 int64]>):>bool=>$unsafe {
+    loop p in owned {
+        let found=false
+        let o=ex
+        loop o not=? 0 and not found {
+            if ImportWord(syms.ptr[o].decl) =? p[1] and ImportWord(syms.ptr[o].ref) =? p[0] {found=true}
+            o=if syms.ptr[o].kind =? 'fns' {ImportWord(syms.ptr[o].next)} else {0}
+        }
+        if not found {return false}
+    }
+    true
+}
+# A Dewy module already has `name` and an import brings another binding of it (s, its
+# declarations `owned`): 1 keeps the module's (the import adds nothing, or the module's
+# own declaration shadows a `$shadowable` one), 0 binds the import in its place (it
+# outranks a `$shadowable` import). Otherwise the two collide: an error naming both.
+dewy_import_clash=(m:ImportWord name:ImportWord s:ImportWord owned:array<[int64 int64]> d:ImportWord pos:ImportWord):>ImportWord=>$unsafe {
+    let ex=modules[m].names[name]
+    if binds_all(ex owned) {return 1}
+    let rel=name_of(ImportWord(nodes.ptr[d].sval))
+    let spell=if nodes.ptr[d].aux2 =? 1 {"p\"{rel}\""} else {rel}
+    let fix="import the module under a name (`import {spell} as name`) or select the names you need (`from {spell} import (...)`)"
+    if nodes.ptr[d].aux =? 2 {fix="import it with another name: {name_of(name)} as ..."}
+    let mine=shadowable_decls.has(ImportWord(syms.ptr[s].decl))
+    if sym_home(ex) =? m {
+        if mine {return 1}
+        fatal(pos "cannot import '{name_of(name)}' from {sym_file_name(s)}: this module declares its own '{name_of(name)}' (at {pos_str(nodes.ptr[ImportWord(syms.ptr[ex].decl)].pos)}), and the imported one is not `$shadowable`; {fix}")
+    }
+    let theirs=syms.ptr[ex].decl not=? 0 and shadowable_decls.has(ImportWord(syms.ptr[ex].decl))
+    if theirs and not mine {return 0}
+    if mine and not theirs {return 1}
+    fatal(pos "'{name_of(name)}' is imported from both {sym_file_name(ex)} and {sym_file_name(s)}; {fix}")
+    1
+}
+# Bind an import's declarations of `name` (owned, as (ref, decl)) in module m,
+# replacing any binding there.
+bind_imported=(m:ImportWord name:ImportWord kind:SK owned:array<[int64 int64]>):>void=>{
+    ml_bump_name(name)
+    loop i in [0..owned.length) {
+        let o=owned[i]
+        if i =? 0 {bind_module_name(m name new_sym(name kind o[0] o[1]))}
+        else {scope_add_module(m name kind o[0] o[1]);}
+    }
+}
+# import p"x.dewy": each top-level binding x declares, bound here as if selected
+# (names starting with _ stay in x, and x's own imports are not passed on).
+bind_splat=(d:ImportWord m:ImportWord im:ImportWord):>void=>$unsafe {
+    if modules[im].is_prelude {return}
+    let pairs:array<[int64 int64]>=[]
+    loop [k v] in modules[im].names {pairs.push([k v])}
+    loop p in pairs {
+        let name=p[0]
+        let s=p[1]
+        if is_private(name) {continue}
+        let owned=import_owned(s im)
+        if owned.length =? 0 {continue}
+        if files[ImportWord(modules[im].file)].path =? "{lib_dir}/rational.dewy" and (name_of(name) =? "Rational" or name_of(name) =? "RationalWord") {continue}
+        if modules[m].names.get(name) not=? none {
+            if dewy_import_clash(m name s owned d nodes.ptr[d].pos) =? 1 {continue}
+        }
+        else if files[ImportWord(modules[m].file)].is_dewy and not modules[m].is_prelude and not pos_in_lib(nodes.ptr[d].pos) {splat_shadow_warning(d m im name)}
+        bind_imported(m name syms.ptr[s].kind owned)
+    }
+}
+# A splat import that shadows a prelude name warns, naming both: selecting the name, or
+# importing the module `as` a name, says which is meant. Only the splat's names are probed
+# (the prelude's index, nothing parsed).
+splat_shadow_warning=(d:ImportWord m:ImportWord im:ImportWord name:ImportWord):>void=>$unsafe {
+    if lib_private(name) {return}
+    let from_=prelude_source(name)
+    if from_ =? "" and (universe.get(name) not=? none or intrinsic_of(name) >=? 0) {from_="built in"}
+    if from_ =? "" {return}
+    loop d2 in from_imports {
+        if d2 =? d or ImportWord(nodes.ptr[d2].mod) not=? m or ImportWord(nodes.ptr[d2].sym) not=? im or nodes.ptr[d2].aux =? 3 {continue}
+        loop i in [0..nkids(d2)) {
+            if ImportWord(nodes.ptr[kid(d2 i)].name) =? name {return}
+        }
+    }
+    let shown=name_of(ImportWord(nodes.ptr[d].sval))
+    let stem=name_of(ImportWord(nodes.ptr[d].name))
+    let nm=name_of(name)
+    warn(nodes.ptr[d].pos "`{nm}` from the splat import of {shown} shadows the prelude's `{nm}` ({from_}): select it, `from p\"{shown}\" import {nm}`, or import the module under a name, `import p\"{shown}\" as {stem}`")
+}
