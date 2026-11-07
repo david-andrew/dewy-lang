@@ -1,0 +1,246 @@
+use 'expr.jo'
+use 'secret_checks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'witness.jo'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'ownership.jo'
+use 'units.jo'
+use 'errors.jo'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'settings.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'ide.jo'
+use 'dewy_methods.jo'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+
+# The receiver prelude of `x[i]` runs in checker_receivers.dewy; these are its services.
+# (`end` in the brackets: the receiver's length, read where it is written or bound once)
+index_end = (n: int, expected: int) -> int:
+    pos = nodes[n].pos
+    name = "$index_source{bc_count}"
+    bc_count += 1
+    source = int(nodes[n].a)
+    source_type = prune(check_expr(clone(source), 0))
+    source_kind = types[source_type].kind
+    stable = (source_kind == .array or source_kind == .str_ or source_kind == .fixed) and pool_update_read(last_checked) and dewy_end_arithmetic(int(nodes[n].b), int(nodes[n].sval))
+    if stable and not ide_on:
+        # A stable receiver's length can be read where `end` is written:
+        # `xs[end]` is then exactly `xs[xs.length - 1]`, with no binding.
+        # (The editor keeps the binding so that `end` hovers as a name.)
+        end_names = [int(nodes[n].sval)]
+        end_base = name_of(int(nodes[n].sval))
+        loop axis in [1..max(nkids(n), 1)): end_names.push(intern("{end_base}_{axis}"))
+        nodes[n].sval = 0
+        dewy_end_substitute(int(nodes[n].b), end_names, source, pos)
+        loop x in kids(n):
+            if x != int(nodes[n].b): dewy_end_substitute(x, end_names, source, pos)
+        return check_expr(n, expected)
+    stmts: int[]
+    end_source = clone(source)
+    if not stable:
+        stmts.push(bc_let(name, source, pos))
+        end_source = bc_ident(name, pos)
+        nodes[n].a = i32(bc_ident(name, pos))
+    loop binding in dewy_index_end_bindings(n, end_source, source_type): stmts.push(binding)
+    nodes[n].sval = 0
+    ix = nodes.len()
+    nodes.push(nodes[n])
+    stmts.push(bc_stmt(ix, pos))
+    nodes[n] = nodes[bc_block(stmts, pos)]
+    check_expr(n, expected)
+index_ranges = (n: int, bt: int):
+    dewy_index_ranges(n, bt)
+    return
+index_stepped = (n: int, bt: int, expected: int) -> int:
+    bk = types[bt].kind
+    if bk != .array and bk != .fixed and not is_nd(bt): fatal(nodes[n].pos, "stepped slicing requires an array")
+    nodes[n].a = i32(last_checked)
+    call = dewy_array_slice(n)
+    nodes[n] = nodes[call]
+    check_expr(n, expected)
+index_text = (n: int, expected: int) -> int:
+    b = int(nodes[n].b)
+    base = last_checked
+    add_flag(base, NF_CHECKED)
+    pos = nodes[n].pos
+    call = 0
+    if b != 0 and nodes[b].kind == .range:
+        lo = int(nodes[b].a)
+        hi = int(nodes[b].b)
+        has_stop = hi != 0
+        if lo == 0: lo = mk(.int_lit, pos)
+        if hi == 0: hi = mk(.int_lit, pos)
+        incl = mk(.bool_lit, pos)
+        nodes[incl].ival = if has_flag(b, NF_INCLUSIVE): 1 else: 0
+        stop = mk(.bool_lit, pos)
+        nodes[stop].ival = if has_stop: 1 else: 0
+        call = bc_call("__dewy_string_slice", [base, lo, hi, incl, stop], pos)
+    else:
+        if b == 0: fatal(pos, "invalid string index")
+        call = bc_call("__dewy_string_index", [base, b], pos)
+    nodes[n] = nodes[call]
+    check_expr(n, expected)
+receiver_error = (n: int, bt: int, code: int):
+    fatal(nodes[n].pos, "a set has no positions to index (`d.keys` is a set): `[{concat_piece(last_checked, false)}...]` collects its members into an array, and `in?` tests membership")
+# Indexing runs in checker_indexes.dewy; these are its services.
+# (`Point[3 4]` in Dewy: checking a qualified type replaces its field node with a
+# resolved identifier; use that resolved type rather than looking up its bare name
+# again in the caller's module)
+index_construct = (n: int, bt: int, expected: int) -> int:
+    target = prune(telem(bt))
+    nodes[n].kind = .call
+    nodes[n].b = 0
+    if target != 0 and types[target].kind == .struct_:
+        t = struct_ctor(n, target, int(structs[int(types[target].st)].decl), kids(n), expected)
+        nodes[n].type = i32(t)
+        add_flag(n, NF_CHECKED)
+        last_checked = n
+        return t
+    check_expr(n, expected)
+index_type_value = (n: int) -> int: mk_typeval(expr_as_type(n))
+# m[i, ..], m[1..2, 0..]: a part of an n-dimensional array
+index_part = (n: int, bt: int, expected: int) -> int:
+    if not is_part_index(n, bt): return -1
+    call = bc_call("__nd_slice", [int(nodes[n].a), part_spec(n)], nodes[n].pos)
+    add_flag(int(nodes[n].a), NF_CHECKED)
+    nodes[n] = nodes[call]
+    t = check_expr(n, expected)
+    last_checked = n
+    t
+index_negative = (b: int):
+    neg_index_check(b)
+    return
+# m[i] and m[i, j] of a record: its `[]` operator
+index_operator = (n: int, b: int, expected: int) -> int:
+    call = mk(.call, nodes[n].pos)
+    callee = mk(.ident, nodes[n].pos)
+    nodes[callee].name = i32(intern("[]"))
+    nodes[call].a = i32(callee)
+    add_flag(int(nodes[n].a), NF_CHECKED)
+    if b == 0: set_list(call, [int(nodes[n].a)] + kids(n))
+    else: set_list(call, [int(nodes[n].a), b])
+    if has_flag(n, NF_MUT): add_flag(call, NF_MUT)
+    nodes[n] = nodes[call]
+    t = check_expr(n, expected)
+    last_checked = n
+    t
+index_int_range = (t: int) -> bool: is_dewy_range_type(t, "IntRange")
+# xs[mask], xs[idxs]: the elements picked, as an array
+index_select = (n: int, b: int, bt: int, kind: int, expected: int) -> int:
+    pick = "__pick"
+    if kind == 2: pick = "__pick_mask"
+    if kind == 3: pick = "__pick_indices"
+    call = dewy_array_selection_call(pick, [int(nodes[n].a), b], bt, nodes[n].pos)
+    add_flag(int(nodes[n].a), NF_CHECKED)
+    nodes[n] = nodes[call]
+    t = check_expr(n, expected)
+    last_checked = n
+    t
+index_error = (n: int, code: int, bt: int):
+    if code == 1: fatal(nodes[n].pos, jd(nodes[n].pos, "an array of indexes is int[], or a mask bool[] (found {dt(bt)})", "an array of indexes is array<int64>, or a mask array<bool> (found {dt(bt)})"))
+    if code == 2: fatal(nodes[n].pos, "cannot slice {dt(bt)}")
+    if code == 3: fatal(nodes[n].pos, "invalid index")
+    if code == 4: fatal(nodes[n].pos, "index {nodes[n].ival} is out of bounds for {dt(bt)}")
+    if tkind(bt) == .tuple: fatal(nodes[n].pos, "a tuple's parts are `t.0`, `t.1` (an index in brackets is for arrays)")
+    if tkind(bt) == .opt and dewy_at(nodes[n].pos):
+        fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be none (a member read through an optional is optional too). Check the value first, `if x isnt? none \{ ... }`, which narrows x inside, or give a fallback, `(x ?? default)[i]`")
+    if is_union(bt) and dewy_at(nodes[n].pos):
+        loop m in union_members(bt):
+            if m != T_NONE and exception_member(m): fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}: it may be {dt(m)} (a member read through it forwards {dt(m)} too). Check the value first, `if x isnt? {dt(m)} \{ ... }`, which narrows x inside")
+    never_cascade(nodes[n].pos, bt)
+    fatal(nodes[n].pos, "cannot index a value of type {dt(bt)}")
