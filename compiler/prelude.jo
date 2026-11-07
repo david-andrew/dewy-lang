@@ -25,6 +25,7 @@ use 'scan_index.dewy'
 use 'ide.jo'
 use 'main.jo'
 use 'refine.jo'
+use 'prelude_ops.dewy'
 
 prelude_game_hint = false
 prelude_lazy = false
@@ -49,11 +50,6 @@ pn_posts: PnPost[]
 pn_pending = 0
 pn_seen: bool[]                 # by name: looked for in the index already
 prelude_new_decls: int[]        # declarations parsed on demand, in that order (dewy_methods.jo)
-
-# Whether the prelude is indexed: interactive sessions need future names and complete completion
-# lists, and so parse it all
-prelude_lazy_setup = ():
-    prelude_lazy = not (ide_on or repl_image or watch_build)
 
 # Index the prelude file at path as a module of its own; false: load it whole (load_module)
 defer_prelude = (path: str, sub: str) -> bool:
@@ -174,12 +170,6 @@ prelude_parse_units = (us: int[]) -> int[]:
         loop d in parse_span(f, su_start[u], su_end[u]): out.push(d)
     out
 
-# The units declaring name, parsed and registered (with their modules' other declarations, in
-# file order)
-prelude_demand_units = (name: int):
-    e = pn_find(name)
-    if e >= 0: prelude_demand_entry(e)
-
 prelude_demand_entry = (e: int):
     if pn_entries[e].done: return
     pn_entries[e].done = true
@@ -225,16 +215,10 @@ prelude_demand_entry = (e: int):
         icb = ic_switch(IC_LOAD, IC_LIB)
     ic_restore(icb)
 
-# Every unit still unparsed (a diagnostic listing every name, an explicit import of a whole module)
-prelude_demand_all = ():
-    loop e in [0..pn_entries.len()): prelude_demand_entry(e)
-
 # Names the compiler reads from the prelude map directly (prelude.get(intern("...")) and
 # rt_global): registered with their modules from the start (tests/test_prelude_loading.py keeps
 # this list whole)
 prelude_known = ["Map", "NDArray", "Missing", "Console", "Set", "__crash_install", "__c_threads", "__cpu_avx2", "__loop_budget", "__mt_active", "__hash_key"]
-prelude_known_names = ():
-    loop nm in prelude_known: demand_prelude_name(intern(nm))
 
 math_runtime_loaded = false
 math_eval_loaded = false
@@ -267,20 +251,6 @@ demand_prelude_name = (name: int):
     # (all overload owners before one is selected; registration and later lazy body checks can
     # demand further names, reaching a fixed point)
     if pn_pending > 0: prelude_demand_units(name)
-
-# Deferred declarations retain the eager prelude's module/within-file order.
-prelude_decl_before = (a: int, b: int) -> bool:
-    if nodes[a].mod != nodes[b].mod: return nodes[a].mod < nodes[b].mod
-    nodes[a].pos < nodes[b].pos
-
-order_prelude_globals = (decls: mut int[]):
-    loop i in [1..decls.len()):
-        d = decls[i]
-        j = i
-        loop j > 0 and prelude_decl_before(d, decls[j - 1]):
-            decls[j] = decls[j - 1]
-            j -= 1
-        decls[j] = d
 
 # Dewy's prelude (lib/prelude/*.dewy): library modules every Dewy module sees, under its own
 # names and over the Sloppy prelude, whose family of a name a Dewy prelude declaration replaces (a
@@ -321,20 +291,6 @@ dp_scan = ():
 # The Dewy prelude module declaring name (loaded on first use), or -1
 # (dp_names' answer by interned name, + 2: 0 not asked yet, 1 none)
 dp_by_name: int[]
-dewy_prelude_module = (name: int) -> int:
-    if not dp_scanned: dp_scan()
-    if dp_by_name.len() <= name: dp_by_name.resize(name * 2 + 64)
-    if dp_by_name[name] == 0: dp_by_name[name] = (dp_names.get(name_of(name)) ?? -1) + 2
-    f = dp_by_name[name] - 2
-    if f < 0: return -1
-    dp_load(f)
-
-# The Dewy prelude module of the file named file (lib/prelude/mpmc.jo), loaded now, or -1
-dewy_prelude_file = (file: str) -> int:
-    if not dp_scanned: dp_scan()
-    loop f in [0..dp_paths.len()):
-        if ends_with(dp_paths[f], "/" + file): return dp_load(f)
-    -1
 
 # The module of the prelude's file f, loaded on first use
 dp_load = (f: int) -> int:
@@ -387,12 +343,3 @@ prelude_source = (name: int) -> str:
             i = (i + 1) & mask
     ""
 
-prelude_shown_path = (path: str) -> str:
-    if starts_with(path, lib_dir + "/"): return "lib/" + path[len(lib_dir) + 1..]
-    path
-
-# The Dewy prelude's binding of name, or 0
-dewy_prelude_lookup = (name: int) -> int:
-    m = dewy_prelude_module(name)
-    if m < 0: return 0
-    modules[m].names.get(name) ?? 0

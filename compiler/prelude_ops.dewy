@@ -1,0 +1,70 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (ends_with starts_with)
+from p"ast.jo" import (nodes)
+from p"check.jo" import (lib_dir modules watch_build)
+from p"ide.jo" import (ide_on)
+from p"main.jo" import (repl_image)
+from p"prelude.jo" import (demand_prelude_name dp_by_name dp_load dp_names dp_paths dp_scan dp_scanned pn_entries pn_find prelude_demand_entry prelude_known prelude_lazy)
+from p"util.jo" import (intern name_of)
+
+PreludeWord:type=int64<overflow='wrap'>
+# Whether the prelude is indexed: interactive sessions need future names and complete completion
+# lists, and so parse it all
+prelude_lazy_setup=():>void=>{
+    prelude_lazy=not (ide_on or repl_image or watch_build)
+}
+# The units declaring name, parsed and registered (with their modules' other declarations, in
+# file order)
+prelude_demand_units=(name:PreludeWord):>void=>{
+    let e=pn_find(name)
+    if e >=? 0 {prelude_demand_entry(e)}
+}
+# Every unit still unparsed (a diagnostic listing every name, an explicit import of a whole module)
+prelude_demand_all=():>void=>{
+    loop e in [0..pn_entries.length) {prelude_demand_entry(e)}
+}
+prelude_known_names=():>void=>{
+    loop nm in prelude_known {demand_prelude_name(intern(nm))}
+}
+# Deferred declarations retain the eager prelude's module/within-file order.
+prelude_decl_before=(a:PreludeWord b:PreludeWord):>bool=>$unsafe {
+    if nodes.ptr[a].mod not=? nodes.ptr[b].mod {return nodes.ptr[a].mod <? nodes.ptr[b].mod}
+    nodes.ptr[a].pos <? nodes.ptr[b].pos
+}
+order_prelude_globals=(@decls:array<int64>):>void=>{
+    loop i in [1..decls.length) {
+        let d=decls[i]
+        let j=i
+        loop j >? 0 and prelude_decl_before(d decls[j - 1]) {
+            decls[j]=decls[j - 1]
+            j -= 1
+        }
+        decls[j]=d
+    }
+}
+dewy_prelude_module=(name:int64):>int64=>{
+    if not dp_scanned {dp_scan()}
+    if dp_by_name.length <=? name {dp_by_name.resize(name * 2 + 64)}
+    if dp_by_name[name] =? 0 {dp_by_name[name]=(dp_names.get(name_of(name)) ?? -1) + 2}
+    let f=dp_by_name[name] - 2
+    if f <? 0 {return -1}
+    dp_load(f)
+}
+# The Dewy prelude module of the file named file (lib/prelude/mpmc.jo), loaded now, or -1
+dewy_prelude_file=(file:string):>int64=>{
+    if not dp_scanned {dp_scan()}
+    loop f in [0..dp_paths.length) {
+        if ends_with(dp_paths[f] "/{file}") {return dp_load(f)}
+    }
+    -1
+}
+prelude_shown_path=(path:string):>string=>{
+    if starts_with(path "{lib_dir}/") {return "lib/{path.byte_slice((lib_dir as array<uint8>).length + 1 (path as array<uint8>).length)}"}
+    path
+}
+# The Dewy prelude's binding of name, or 0
+dewy_prelude_lookup=(name:PreludeWord):>int64=>{
+    let m=dewy_prelude_module(name)
+    if m <? 0 {return 0}
+    modules[m].names.get(name) ?? 0
+}

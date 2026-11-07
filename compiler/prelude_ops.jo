@@ -1,0 +1,67 @@
+use 'prelude.jo'
+use 'source_types.dewy'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_main.dewy'
+use 'checks_imports.dewy'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'intern.dewy'
+use 'ast.jo'
+use 'frontend.jo'
+use 'parse.jo'
+use 'scan.jo'
+use 'scan_index.dewy'
+use 'ide.jo'
+use 'main.jo'
+use 'refine.jo'
+
+# Whether the prelude is indexed: interactive sessions need future names and complete completion
+# lists, and so parse it all
+prelude_lazy_setup = ():
+    prelude_lazy = not (ide_on or repl_image or watch_build)
+# The units declaring name, parsed and registered (with their modules' other declarations, in
+# file order)
+prelude_demand_units = (name: int):
+    e = pn_find(name)
+    if e >= 0: prelude_demand_entry(e)
+# Every unit still unparsed (a diagnostic listing every name, an explicit import of a whole module)
+prelude_demand_all = ():
+    loop e in [0..pn_entries.len()): prelude_demand_entry(e)
+prelude_known_names = ():
+    loop nm in prelude_known: demand_prelude_name(intern(nm))
+# Deferred declarations retain the eager prelude's module/within-file order.
+prelude_decl_before = (a: int, b: int) -> bool:
+    if nodes[a].mod != nodes[b].mod: return nodes[a].mod < nodes[b].mod
+    nodes[a].pos < nodes[b].pos
+order_prelude_globals = (decls: mut int[]):
+    loop i in [1..decls.len()):
+        d = decls[i]
+        j = i
+        loop j > 0 and prelude_decl_before(d, decls[j - 1]):
+            decls[j] = decls[j - 1]
+            j -= 1
+        decls[j] = d
+dewy_prelude_module = (name: int) -> int:
+    if not dp_scanned: dp_scan()
+    if dp_by_name.len() <= name: dp_by_name.resize(name * 2 + 64)
+    if dp_by_name[name] == 0: dp_by_name[name] = (dp_names.get(name_of(name)) ?? -1) + 2
+    f = dp_by_name[name] - 2
+    if f < 0: return -1
+    dp_load(f)
+# The Dewy prelude module of the file named file (lib/prelude/mpmc.jo), loaded now, or -1
+dewy_prelude_file = (file: str) -> int:
+    if not dp_scanned: dp_scan()
+    loop f in [0..dp_paths.len()):
+        if ends_with(dp_paths[f], "/" + file): return dp_load(f)
+    -1
+prelude_shown_path = (path: str) -> str:
+    if starts_with(path, lib_dir + "/"): return "lib/" + path[len(lib_dir) + 1..]
+    path
+# The Dewy prelude's binding of name, or 0
+dewy_prelude_lookup = (name: int) -> int:
+    m = dewy_prelude_module(name)
+    if m < 0: return 0
+    modules[m].names.get(name) ?? 0

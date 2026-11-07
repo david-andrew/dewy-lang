@@ -85,7 +85,7 @@ def effect_services(text, modules):
         text = text.replace('facts_lifecycle.dewy', 'facts.jo').replace('facts_lifecycle.jo', 'facts.jo')
     for leaf, home in (('unit_ops', 'units.jo'), ('float_ops', 'floats.jo'), ('facts_arith', 'facts.jo'), ('facts_collect', 'facts.jo'),
                        ('reader_service_ops', 'dewy_reader_services.jo'), ('spirv_ops', 'spirv.jo'),
-                       ('type_ops', 'types.jo'), ('word_overflow', 'types.jo'), ('glsl_ops', 'glsl.jo'), ('msl_ops', 'msl.jo'), ('refine_ops', 'refine.jo'), ('safe_path_ops', 'safe_paths.jo'), ('ide_ops', 'ide.jo'), ('lsp_handlers', 'lsp.jo'), ('ide_index', 'ide.jo')):
+                       ('type_ops', 'types.jo'), ('word_overflow', 'types.jo'), ('glsl_ops', 'glsl.jo'), ('msl_ops', 'msl.jo'), ('refine_ops', 'refine.jo'), ('safe_path_ops', 'safe_paths.jo'), ('ide_ops', 'ide.jo'), ('lsp_handlers', 'lsp.jo'), ('ide_index', 'ide.jo'), ('prelude_ops', 'prelude.jo')):
         if home in modules and leaf + '.dewy' not in modules and leaf + '.jo' not in modules:
             text = text.replace(leaf + '.dewy', home).replace(leaf + '.jo', home)
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
