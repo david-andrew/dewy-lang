@@ -271,6 +271,7 @@ RESOLVE_JO = {
     'refine.jo': {
         'resolve_refinement': 'resolve_refinement = (n: int) -> int: refinement(n)',
         'ref_validate_record': 'ref_validate_record = (t: int, pos: int): validate_record(t, pos)',
+        'ref_field_shape': 'ref_field_shape = (tn: int, t: int, siblings: int[]) -> int: t',
         'total_dict_type': 'total_dict_type = (map: int, pos: int) -> int: total_dict(map, pos)',
         'ref_validate_signature': 'ref_validate_signature = (params: int[], ret: int, mask: int, pos: int): signature(params, ret, mask, pos)',
     },

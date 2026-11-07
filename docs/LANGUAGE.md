@@ -2842,6 +2842,9 @@ and a shaped result gives its checked shape facts back to the caller. A shaped
 `@` parameter constrains its entry value; subsequent writes invalidate facts
 about the value they replace. Taking a handle to a function with a shaped `@`
 parameter still needs `$runtime_checks`; direct calls can prove its entry shape.
+A record field's shape names sibling fields or constants, as
+`Grid:type = [rows:int64 cols:int64 cells:array<float64 length=[rows cols]>]`: every
+stored value is checked, every read knows it, and writing elements keeps it.
 
 
 ```dewy

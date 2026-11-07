@@ -99,6 +99,7 @@ path_forget = (key: str): events.push("forget:{key}")
 '''
 JO['refine.jo'] += r'''refine_arg_target = 0
 ref_mutable_authority = (a: int): events.push("authority:{a}")
+ref_nd_receivers: {int: bool} = {}
 refine_storage = (a: int, t: int) -> int: t
 ref_storage_contract = (t: int) -> bool: false
 is_total_dict = (t: int) -> bool: false

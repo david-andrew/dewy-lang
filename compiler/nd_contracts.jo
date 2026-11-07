@@ -147,6 +147,35 @@ nd_signature = (decl: int, params: mut int[], result: int = 0) -> int:
     nd_shape_predicates[int(types[refined].st)] = true
     refined
 
+# A record field's shape, `a:array<T length=[h w]>`: the same contract as a shaped parameter's,
+# whose dimensions name sibling fields or constants, held where the value enters and where it
+# is read; a word that names neither holds nothing of its axis. O(dimensions), once per record type.
+nd_field_shape = (tn: int, t: int, siblings: int[]) -> int:
+    atoms: RefAtom[]
+    nd = is_nd(representation_type(t))
+    if nd:
+        ref_add(.eq, RefTerm(path = [-2]), RefTerm(1, nkids(tn)), atoms)
+        ref_add(.eq, RefTerm(path = [ND_STORAGE_VALID]), RefTerm(1, 1), atoms)
+    bound: {int: RefTerm} = {}
+    loop i in [0..siblings.len()): bound[siblings[i]] = RefTerm(5, i)
+    loop axis in [0..nkids(tn)):
+        dim = kid(tn, axis)
+        term = RefTerm()
+        if nodes[dim].kind == .ident:
+            name = int(nodes[dim].name)
+            if bound.has(name): term = bound[name]
+            else if lookup(name) != 0 and (syms[lookup(name)].kind == .global or syms[lookup(name)].kind == .const_): term = ref_resolve_value(dim)
+            # (another word stands for an extent the record does not store: only the rank is held)
+            else: continue
+        else: term = nd_shape_term(dim, bound)
+        ref_add(.eq, RefTerm(path = (if nd: [-3 - axis] else: [-1])), term, atoms)
+    predicate = ref_intern(atoms)
+    nd_span(predicate, nodes[tn].pos)
+    if nd: runtime_fn("__nd_storage_valid")
+    refined = mk_refined(t, predicate)
+    nd_shape_predicates[int(types[refined].st)] = true
+    refined
+
 # Runtime projection is total even before the separate rank obligation has
 # been checked (predicate interning may reorder atoms). Missing axes are -1;
 # a legitimate array never has a negative extent.

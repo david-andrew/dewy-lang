@@ -401,7 +401,7 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
     r
 }
 from p"expr.jo" import (call_argument_error written_at check_place coerce)
-from p"refine.jo" import (ref_mutable_authority refine_storage ref_storage_contract is_total_dict refine_arg_target)
+from p"refine.jo" import (ref_mutable_authority ref_nd_receivers refine_storage ref_storage_contract is_total_dict refine_arg_target)
 from p"partition.jo" import (partition_slice partition_active)
 from p"expr.jo" import (path_narrows path_rooted path_forget path_key)
 from p"types.jo" import unify
@@ -431,7 +431,7 @@ call_mutable_cost=(a:CVWord pt:CVWord @binds:array<int64> @recv_fits:bool receiv
 }
 # Finish only arguments that still need checking, a conversion or mutable access.
 arg_finish_rest=(a:CVWord pt:CVWord is_mut:bool):>void=>$unsafe {
-    if is_mut and refine_active {
+    if is_mut and refine_active and not ref_nd_receivers.has(a) {
         ref_mutable_authority(a)
         let storage=refine_storage(a ntype(a))
         if not type_eq(storage pt) and (ref_storage_contract(storage) or ref_storage_contract(pt)) {
@@ -455,6 +455,7 @@ arg_finish_rest=(a:CVWord pt:CVWord is_mut:bool):>void=>$unsafe {
         if path_narrows >? 0 and path_rooted(a) {path_forget(path_key(a))}
         let actual=if refine_active {refine_storage(a ntype(a))} else {ntype(a)}
         if refine_active and is_total_dict(actual) {actual=CVWord(types.ptr[prune(actual)].elem)}
+        if refine_active and ref_nd_receivers.has(a) {actual=representation_type(actual)}
         if not type_eq(actual pt) and not unify(actual pt) {call_argument_error(4 a pt)}
         add_flag(a NF_MUT)
         return

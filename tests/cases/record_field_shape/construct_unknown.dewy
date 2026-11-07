@@ -1,0 +1,4 @@
+# A field's shape contract, near misses.
+G:type = [r:int64 c:int64 a:array<float64 length=[r c]>]
+f = (m:array<float64>):>G => G[2 2 reshape(m 2 2)]
+main = ():>void => { printl(f([1.0 2.0 3.0]).r) }

@@ -1,0 +1,4 @@
+# A field's shape contract, near misses.
+G:type = [r:int64<r >=? 3> c:int64<c >=? 3> a:array<float64 length=[r c]>]
+f = (g:G):>void => { printl(g.a[[0..g.r] [0..1)].length) }
+main = ():>void => { f(G[3 3 zeros(3 3)]) }

@@ -1,0 +1,7 @@
+# A field's shape contract, near misses.
+G:type = [r:int64 c:int64 a:array<float64 length=[r c]>]
+f = (@g:G):>void => { g.r = 9 }
+main = ():>void => {
+    let g = G[2 2 zeros(2 2)]
+    f(@g)
+}

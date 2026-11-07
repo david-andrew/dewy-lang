@@ -9,7 +9,7 @@ from p"type_unions.dewy" import (uu_mk_union)
 from p"type_labels.dewy" import (tn_label_key)
 from p"check.jo" import (type_param_defaults resolve_type_name resolve_type_ide fixed_size_arg fixed_size mk_fixed_checked resolve_type_error nd_of resolve_type_soa resolve_type_map_decl pack_result_count resolve_type_contract resolve_type_pack_error)
 from p"types.jo" import (policy_int get_struct_inst)
-from p"refine.jo" import (resolve_refinement ref_validate_record total_dict_type ref_validate_signature)
+from p"refine.jo" import (ref_field_shape resolve_refinement ref_validate_record total_dict_type ref_validate_signature)
 from p"units.jo" import resolve_quantity_type
 from p"effect_contracts.dewy" import effect_argument
 from p"errors.jo" import nominal_family
@@ -143,8 +143,10 @@ ct_resolve_type=(tn:CTWord):>CTWord=>$unsafe {
         if ct_input[0].nodes[0].ptr[tn].ival <? 0 {return ct_pack_result(tn)}
         if ct_input[0].nodes[0].ptr[tn].ival =? 1 {
             let et=ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))
-            if ct_input[0].nodes[0].ptr[tn].aux >=? 2 {return nd_of(et   ct_input[0].nodes[0].ptr[tn].pos)}
-            return tb_mk_array(et)
+            let shaped=if ct_input[0].nodes[0].ptr[tn].aux >=? 2 {nd_of(et   ct_input[0].nodes[0].ptr[tn].pos)} else {tb_mk_array(et)}
+            # (a record field's shape names its siblings: a contract, as on a parameter)
+            if ct_input[0].refine[0] and ct_input[0].binders[0].fields.length >? 0 {return ref_field_shape(tn shaped ct_input[0].binders[0].fields)}
+            return shaped
         }
         if ct_input[0].nodes[0].ptr[tn].b not=? 0 {return mk_fixed_checked(ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))   fixed_size(CTWord(ct_input[0].nodes[0].ptr[tn].b))   ct_input[0].nodes[0].ptr[tn].pos)}
         if ct_input[0].nodes[0].ptr[tn].aux >=? 2 {return nd_of(ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a))   ct_input[0].nodes[0].ptr[tn].pos)}

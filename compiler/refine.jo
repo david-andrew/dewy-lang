@@ -824,7 +824,7 @@ ref_validate_record = (t: int, pos: int):
                         if not done[j]: ready = false
                         dep = int(fields[int(structs[si].fields) + j].type)
                         bound = ref_projection_type(dep, term.path, pos)
-                        expected = if tkind(representation_type(ft)) == .array or tkind(representation_type(ft)) == .str_: T_INT else: representation_type(ft)
+                        expected = if tkind(representation_type(ft)) == .array or tkind(representation_type(ft)) == .str_ or is_nd(representation_type(ft)): T_INT else: representation_type(ft)
                         if not ref_repr_match(bound, expected, term.path): fatal(pos, "dependent field refinement requires matching integer representations")
             if ready: done[i] = true
     loop yes in done:
@@ -842,12 +842,26 @@ ref_place_alias = (n: int) -> int:
 
 # Dependent field updates construct a private candidate. Every sibling reads
 # the same captured parent; only a validated complete value replaces storage.
+# Whether field `at` of record t has no contract and no sibling's contract names it. O(fields + atoms).
+ref_field_free = (t: int, at: int) -> bool:
+    if at < 0: return false
+    si = int(types[t].st)
+    loop i in [0..int(structs[si].nfields)):
+        ft = prune(int(fields[int(structs[si].fields) + i].type))
+        if types[ft].kind != .refined: continue
+        if i == at: return false
+        loop atom in ref_predicates[int(types[ft].st)]:
+            if atom.a.kind == 5 and atom.a.value == at or atom.b.kind == 5 and atom.b.value == at: return false
+    true
+
 ref_field_store = (statement: int, target: int) -> int:
     lhs = ref_place_alias(int(nodes[statement].a))
     if nodes[lhs].kind != .field: return 0
     parent = int(nodes[lhs].a)
     t = representation_type(ntype(parent))
     if not ref_dependent_record(t) and not ref_dependent_ancestor(parent): return 0
+    # (a field no contract mentions, in a record no contract above holds: an ordinary store)
+    if ref_dependent_record(t) and not ref_dependent_ancestor(parent) and ref_field_free(t, int(nodes[lhs].aux)): return 0
     pos = nodes[statement].pos
     before: int[]
     path = index_update_path(parent)
@@ -902,6 +916,15 @@ copy_checked = (n: int) -> int:
     copy = nodes.len()
     nodes.push(nodes[n])
     copy
+
+# (the receiver of a write the compiler made into an N-D array's own elements, `m[i j] = v`,
+# `m[[a..b) c] = v`: the library setters keep its shape and storage, so a shaped field's contract
+# still holds. Only these nodes, never another `@` argument. O(1))
+ref_nd_receivers: {int: bool} = {}
+ref_nd_receiver = (recv: int, t: int):
+    if refine_active and is_nd(representation_type(t)): ref_nd_receivers[recv] = true
+
+ref_field_shape = (tn: int, t: int, siblings: int[]) -> int: nd_field_shape(tn, t, siblings)
 
 ref_mutable_authority = (n: int):
     if ref_dependent_ancestor(n): fatal(nodes[n].pos, "mutable refinement access needs the full record invariant authority; pass the whole record with `@`")

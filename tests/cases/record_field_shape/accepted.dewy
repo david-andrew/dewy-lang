@@ -1,0 +1,30 @@
+# A record field's shape is a contract: its dimensions name sibling fields or constants.
+const SIDE:int64 = 2
+Grid:type = [
+    rows:int64<rows >=? 2>
+    cols:int64<cols >=? 2>
+    cells:array<float64 length=[rows cols]>
+    corner:array<float64 length=[SIDE SIDE]>
+    steps:int64=0
+]
+make = (rows:int64<rows >=? 2> cols:int64<cols >=? 2>):>Grid =>
+    Grid[rows cols zeros(rows cols) zeros(SIDE SIDE)]
+touch = (@g:Grid):>void => {
+    let h = g.rows-1 let w = g.cols-1
+    let inner = g.cells[[1..h) [1..w)]
+    g.cells[[1..h) [1..w)] = inner .+ 1.0
+    g.cells[[1..h) [1..w)] .+= inner .* 2.0
+    g.cells[0 0] = 5.0
+    g.corner[1 1] = 7.0
+    g.steps += 1
+}
+at = (g:Grid r:int64 c:int64):>float64 => if 0 <=? r <? g.rows and 0 <=? c <? g.cols g.cells[r c] else -1.0
+main = ():>void => {
+    let g = make(3 3)
+    touch(@g)
+    printl(at(g 0 0))
+    printl(at(g 1 1))
+    printl(at(g 9 9))
+    printl(g.corner[1 1])
+    printl(g.steps)
+}

@@ -10045,6 +10045,7 @@ rd_dc_type_arguments=(@reader_ctx:ParserContext @reader_nodes:array<Node> n0:int
                 reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
                 # `array<T length=[m n]>`: a shape (dw_shape_type)
                 if ((((((setting =? DC_LENGTH) and (word =? DC_ARRAY)) and (args.length =? 1)) and (length =? 0)) and (reader_ctx.reader.dc_shapes.length =? shape)) and (rd_dn_peek(@reader_ctx) =? 'lbrack')) {
+                    reader_ctx.stores.host[0].g_refine_active_set(true)
                     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
                     let saved_comma:bool=reader_ctx.flags.comma_stop
                     reader_ctx.flags.comma_stop = false

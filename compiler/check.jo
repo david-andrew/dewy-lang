@@ -3560,6 +3560,7 @@ dewy_selection_update = (s: int, matrix: bool = false) -> int:
     if matrix:
         receiver = clone(int(nodes[lhs].a))
         add_flag(receiver, NF_MUT)
+        ref_nd_receivers[receiver] = true
         stmts.push(bc_stmt(bc_call("__nd_slice_set", [receiver, bc_ident(selector, pos), bc_ident(value, pos)], pos), pos))
     else:
         nodes[lhs].b = i32(bc_ident(selector, pos))
@@ -3841,6 +3842,14 @@ assign_index = (s: int, bt: int, code: int) -> int:
         if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a part of an array (write m[...] = m[...] .+ x)")
         recv = int(nodes[lhs].a)
         add_flag(recv, NF_MUT)
+        ref_nd_receivers[recv] = true
+        # (a named selector keeps what is known of it across an assigned value's loops)
+        if files[pos_file(nodes[s].pos)].is_dewy:
+            elem_tmp_n += 1
+            picked = "$selection_index{elem_tmp_n}"
+            block = bc_block([bc_let(picked, part_spec(lhs), nodes[s].pos), bc_stmt(bc_call("__nd_slice_set", [recv, bc_ident(picked, nodes[s].pos), int(nodes[s].b)], nodes[s].pos), nodes[s].pos)], nodes[s].pos)
+            check_stmt(block)
+            return block
         call = bc_call("__nd_slice_set", [recv, part_spec(lhs), int(nodes[s].b)], nodes[s].pos)
         es = mk(.exprstmt, nodes[s].pos)
         check_expr(call, 0)
@@ -3854,6 +3863,7 @@ assign_index = (s: int, bt: int, code: int) -> int:
         nodes[call].a = i32(callee)
         recv = int(nodes[lhs].a)
         add_flag(recv, NF_MUT)
+        ref_nd_receiver(recv, bt)
         val = int(nodes[s].b)
         # (m[i, j] = v has several indexes)
         ixs = kids(lhs)
