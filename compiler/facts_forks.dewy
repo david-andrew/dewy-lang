@@ -1,0 +1,280 @@
+$runtime_checks
+from p"ast.jo" import (NF_GENERIC has_flag kid nkids nodes)
+from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ASSIGNED LF_EXPOSED LF_PARTBORROW LF_SHARED LF_VALUECAP fns locals)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"expr.jo" import (CV is_map_type ntype)
+from p"facts.jo" import (FACT_CAP FACT_CONTRACT FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_KEYS_SOURCE FACT_KEY_SOURCE FactDifference FactForkEntry FactKeyParam FactProjection FactState fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_covered fact_difference fact_domain fact_ends_path fact_fork_entries fact_key_names fact_key_params fact_name_parallel_arrays fact_new fact_owner fact_owner_value fact_parallel_bounds fact_path_call_effects fact_policy fact_probe_on fact_project fact_projection_find fact_query fact_refinement_covers fact_route fact_route_bounds fact_route_values fact_scalar fact_shortest fact_slice_flags fact_speculating fact_summary_owner fact_type)
+from p"facts_elements.dewy" import (fact_inventory)
+from p"facts_joins.dewy" import (fact_hull)
+from p"facts_library.dewy" import (fact_element_hull)
+from p"facts_probes.dewy" import (fact_probe_route)
+from p"facts_text.dewy" import (fact_string_call)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"lower_primitives.dewy" import (call_eval_order)
+from p"nd_contracts.jo" import (fact_nd_call fact_nd_plain_store fact_nd_reads_only fact_nd_store nd_call_entry nd_mutable_check)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"refine.jo" import (ref_check ref_fact_current_entry ref_signature_has)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
+from p"sequence_selectors.dewy" import (fact_sequence_store fact_sequence_store_call)
+from p"types.jo" import (T_INT T_STR T_U64 is_int telem tkind zonk)
+from p"util.jo" import (intern pos_in_lib)
+
+ForkWord:type=int64<overflow='wrap'>
+# At a fork closure's creation: its captures' facts, by capture. O(k^2)
+# bounded relaxations for k <= 16 captured terms.
+fact_fork_record=(lam:ForkWord @s:FactState):>void=>$unsafe {
+    let f=ForkWord(nodes.ptr[lam].sym)
+    if f <=? 0 or f >=? fns.length {return}
+    let entry=FactForkEntry()
+    let values:array<int64>=[]
+    loop cap in fns.ptr[f].caps {
+        let o=int64(cap.outer)
+        let inner=int64(cap.inner)
+        if o <=? 0 or inner <=? 0 or values.length >=? 16 {continue}
+        let flags=ForkWord(locals.ptr[inner].flags)
+        let t=fact_type(ForkWord(locals.ptr[o].type))
+        let snapshot=flags & LF_VALUECAP not=? 0
+        let array=tkind(t) =? 'array' and (snapshot or flags & LF_PARTBORROW not=? 0)
+        let map=snapshot and flags & (LF_ASSIGNED | LF_ADDR | LF_SHARED | LF_EXPOSED) =? 0 and is_map_type(t) and not (ownership_decls.length not=? 0 and ownership_fact_type(t))
+        if not array and not map and not (snapshot and fact_scalar(t) and is_int(t) and t not=? T_U64) {continue}
+        let p=PlaceIdentity('local' ForkWord(locals.ptr[o].owner) o)
+        let i=fact_binding(s p)
+        let v:ForkWord=0
+        if i >=? 0 {v=s.bindings[i].value}
+        else {
+            v=fact_new(@s fact_domain(t) FactTerm(type=t))
+            fact_bind(@s p v)
+        }
+        if v =? 0 {continue}
+        if array {v=fact_project(@s v (-1) false T_INT)}
+        entry.inner.push(inner)
+        entry.length.push(array)
+        entry.maps.push(map)
+        values.push(v)
+    }
+    loop v in values {entry.bounds.push(fact_bound(s v))}
+    entry.values=values
+    loop i in [0..values.length) {
+        loop j in [0..values.length) {
+            if i =? j or entry.maps[i] or entry.maps[j] {continue}
+            let d=fact_shortest(s values[i] values[j])
+            if d not=? FACT_MAX {entry.rows.push(FactDifference(i j d))}
+        }
+    }
+    fact_fork_entries[lam]=entry
+}
+fact_parallel_array=(n:ForkWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 or nodes.ptr[kid(n 1)].kind not=? 'lambda' or has_flag(kid(n 1) NF_GENERIC) {return false}
+    let d=ForkWord(fns.ptr[ForkWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return false}
+    if fact_name_parallel_arrays.length =? 0 {fact_name_parallel_arrays=[intern("__dewy_parallel_collect") intern("__dewy_parallel_each") intern("parallel_map")]}
+    ForkWord(nodes.ptr[d].name) in? fact_name_parallel_arrays and pos_in_lib(nodes.ptr[d].pos) and tkind(fact_type(ntype(kid(n 0)))) =? 'array'
+}
+fact_parallel_record=(n:ForkWord @s:FactState base:ForkWord):>void=>$unsafe {
+    if fact_speculating not=? 0 or fact_summary_owner not=? 0 or not fact_parallel_array(n) {return}
+    let f=ForkWord(nodes.ptr[kid(n 1)].sym)
+    if f <=? 0 or fns.ptr[f].params.length not=? 1 {return}
+    let t=fact_type(ForkWord(locals.ptr[fns.ptr[f].params[0]].type))
+    if not fact_scalar(t) or t =? T_U64 {return}
+    let bound=fact_domain(t)
+    let pi=fact_projection_find(s base FACT_ELEMENT_VALUE false)
+    if pi >=? 0 {bound=fact_bound(s s.projections[pi].value)}
+    let parts=fact_inventory(s base)
+    if parts.length >? 0 {
+        bound=fact_bound(s parts[0])
+        loop i in [1..parts.length) {bound=fact_hull(bound fact_bound(s parts[i]) n)}
+    }
+    let previous=fact_parallel_bounds.get(f)
+    if previous not=? none {bound=fact_hull(previous bound n)}
+    fact_parallel_bounds[f]=bound
+}
+fact_key_callback=(n:ForkWord):>ForkWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) <? 2 {return 0}
+    let d=ForkWord(fns.ptr[ForkWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or not pos_in_lib(nodes.ptr[d].pos) {return 0}
+    if fact_key_names.length =? 0 {fact_key_names=[intern("sorted") intern("sorted_by") intern("sort") intern("sort_by") intern("min_by") intern("max_by") intern("group_by")]}
+    if ForkWord(nodes.ptr[d].name) not in? fact_key_names {return 0}
+    let callback=kid(n 1)
+    if nodes.ptr[callback].kind not=? 'lambda' or has_flag(callback NF_GENERIC) or nodes.ptr[callback].sym <=? 0 {return 0}
+    let f=ForkWord(nodes.ptr[callback].sym)
+    if fns.ptr[f].params.length not=? 1 or tkind(fact_type(ntype(kid(n 0)))) not=? 'array' {return 0}
+    let t=fact_type(ForkWord(locals.ptr[fns.ptr[f].params[0]].type))
+    if (not fact_scalar(t) or not is_int(t) or t =? T_U64) and t not=? T_STR {return 0}
+    if t not=? fact_type(telem(fact_type(ntype(kid(n 0))))) {return 0}
+    callback
+}
+# Each record describes this call's receiver; another evaluation of the call
+# hulls its bound and keeps only rows both give. O(captures).
+fact_key_record=(n:ForkWord @s:FactState base:ForkWord):>void=>$unsafe {
+    if fact_speculating not=? 0 or fact_summary_owner not=? 0 or base =? 0 {return}
+    let lam=fact_key_callback(n)
+    let f=ForkWord(nodes.ptr[lam].sym)
+    let entry=fact_fork_entries.get(lam) ?? FactForkEntry()
+    let t=fact_type(ForkWord(locals.ptr[fns.ptr[f].params[0]].type))
+    let bound=fact_element_hull(@s base t)
+    let parts=fact_inventory(s base)
+    if parts.length >? 0 {
+        bound=fact_bound(s parts[0])
+        loop i in [1..parts.length) {bound=fact_hull(bound fact_bound(s parts[i]) n)}
+    }
+    let rows:array<FactDifference>=[]
+    let below=fact_projection_find(s base FACT_ELEMENT_BELOW false)
+    if below >=? 0 {
+        let top=s.projections[below].value
+        loop j in [0..entry.values.length) {
+            let d=if entry.values[j] =? top {0} else {fact_shortest(s top entry.values[j])}
+            if d not=? FACT_MAX and d >? FACT_MIN + 1 {rows.push(FactDifference((-1) j d - 1))}
+        }
+    }
+    # Membership crosses the closure boundary only for the identical
+    # immutable dictionary snapshot, never a shared/mutable capture or name.
+    # O(captures^2), capped at 16, using indexed key-source projections.
+    let maps:array<int64>=[]
+    let source=fact_projection_find(s base FACT_KEYS_SOURCE false)
+    if source >=? 0 {
+        let held=s.projections[source].value
+        loop j in [0..entry.values.length) {
+            if entry.maps[j] and entry.values[j] =? held {maps.push(entry.inner[j])}
+        }
+    }
+    let previous=fact_key_params.get(f)
+    if previous not=? none {
+        bound=fact_hull(previous.bound bound n)
+        let common:array<int64>=[]
+        loop j in maps {
+            if previous.maps.contains(j) {common.push(j)}
+        }
+        maps=common
+        let kept:array<FactDifference>=[]
+        loop r in rows {
+            loop q in previous.rows {
+                if q.b =? r.b {kept.push(FactDifference((-1) r.b max(q.limit r.limit)))}
+            }
+        }
+        rows=kept
+    }
+    fact_key_params[f]=FactKeyParam(bound rows maps)
+}
+fact_fork_seed=(f:ForkWord @s:FactState):>void=>$unsafe {
+    if fns.ptr[f].kind not=? FK_LAMBDA {return}
+    let bound=fact_parallel_bounds.get(f)
+    if bound not=? none {
+        let l=fns.ptr[f].params[0]
+        let value=fact_new(@s bound FactTerm(type=T_INT))
+        fact_bind(@s PlaceIdentity('local' f l) value)
+    }
+    let entry=fact_fork_entries.get(ForkWord(fns.ptr[f].decl)) ?? FactForkEntry()
+    let values:array<int64>=[]
+    loop i in [0..entry.inner.length) {
+        let inner=entry.inner[i]
+        let p=PlaceIdentity('local' f inner)
+        let capture_type=if entry.maps[i] {ForkWord(locals.ptr[inner].type)} else {T_INT}
+        let v=fact_new(@s entry.bounds[i] FactTerm(type=capture_type))
+        values.push(v)
+        if entry.length[i] {
+            let t=ForkWord(locals.ptr[inner].type)
+            let array=fact_new(@s FactBound() FactTerm(type=t))
+            if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(array (-1) false v))}
+            fact_bind(@s p array)
+        }
+        else {fact_bind(@s p v)}
+    }
+    loop r in entry.rows {fact_difference(@s values[r.a] values[r.b] r.limit)}
+    let key=fact_key_params.get(f)
+    if key not=? none {
+        let l=fns.ptr[f].params[0]
+        let value=fact_new(@s key.bound FactTerm(type=ForkWord(locals.ptr[l].type)))
+        fact_bind(@s PlaceIdentity('local' f l) value)
+        loop r in key.rows {
+            if r.b >=? 0 and r.b <? values.length {fact_difference(@s value values[r.b] r.limit 0 16)}
+        }
+        loop capture in key.maps {
+            let j=entry.inner.index_of(capture) ?? (-1)
+            if j >=? 0 and j <? values.length and s.projections.length <? FACT_CAP {
+                fact_add_projection(@s FactProjection(value FACT_KEY_SOURCE false values[j]))
+            }
+        }
+    }
+}
+# Both value-demanded and contract-only calls check actuals after their
+# effects, in the same source evaluation order and with the same entry.
+fact_call_arguments=(n:ForkWord @s:FactState):>array<int64>=>$unsafe {
+    let values:array<int64>=fill(0 nkids(n))
+    loop i in call_eval_order(n) {
+        let arg=kid(n i)
+        if nodes.ptr[arg].kind =? 'conv' and nodes.ptr[arg].aux =? int32(int64(CV.refinement)) {
+            let outer=fact_covered
+            fact_covered=fact_refinement_covers(arg)
+            values[i]=fact_capture(ForkWord(nodes.ptr[arg].a) @s)
+            fact_covered=outer
+        }
+        # (an `int` text index's narrowing is the index's own obligation, as an array's)
+        else if i =? 1 and nodes.ptr[arg].kind =? 'conv' and fact_string_call(n) =? 2 {
+            let outer=fact_covered
+            fact_covered=arg
+            values[i]=fact_capture(arg @s)
+            fact_covered=outer
+        }
+        else {values[i]=fact_capture(arg @s)}
+        if ownership_decls.length not=? 0 {values[i]=fact_owner_value(arg values[i] @s)}
+    }
+    nd_call_entry(n @s @values)
+    loop i in [0..nkids(n)) {
+        let arg=kid(n i)
+        if nodes.ptr[arg].kind not=? 'conv' or nodes.ptr[arg].aux not=? int32(int64(CV.refinement)) {continue}
+        # (a refined arm of this function's own result, made a union
+        # member: its formals are this function's parameters)
+        if nodes.ptr[n].aux =? 3 and nkids(n) =? 1 and ref_signature_has(fact_owner zonk(ForkWord(nodes.ptr[arg].aux2))) {ref_check(arg values[i] ref_fact_current_entry(@s) @s)}
+        else {ref_check(arg values[i] values @s)}
+    }
+    nd_mutable_check(n @s values)
+    values
+}
+# Undemanded values still execute their effectful descendants. Ordinary calls
+# apply the same settled write summary without requesting a numeric return
+# summary. Control, obligations and opaque operations use the full transfer.
+fact_slice_capture=(n:ForkWord @s:FactState):>ForkWord=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'call' {
+        fact_capture(ForkWord(nodes.ptr[n].a) @s);
+        if fact_slice_flags(n) & FACT_CONTRACT not=? 0 {fact_call_arguments(n @s);}
+        else {
+            loop i in call_eval_order(n) {
+                let arg=kid(n i)
+                let value=fact_capture(arg @s)
+                if ownership_decls.length not=? 0 {fact_owner_value(arg value @s);}
+            }
+        }
+        let nd=fact_nd_call(n)
+        if nd >=? 160 and fact_sequence_store_call(n) {fact_sequence_store(n @s n 'write')}
+        else if nd not=? 0 and fact_nd_plain_store(n) {fact_nd_store(n @s n 'write')}
+        else if nd not=? 0 and fact_nd_reads_only(n) {s=s}
+        else if nodes.ptr[n].aux not=? 2 and nodes.ptr[n].aux not=? 3 {fact_path_call_effects(n @s)}
+        if fact_ends_path(n) {s.live=false}
+        return 0
+    }
+    if k =? 'vardecl' or k =? 'assign' {
+        if k =? 'assign' and nodes.ptr[n].op not=? int32(47) {fact_capture(ForkWord(nodes.ptr[n].a) @s);}
+        fact_capture(ForkWord(nodes.ptr[n].b) @s);
+        if ownership_decls.length not=? 0 {fact_owner_value(ForkWord(nodes.ptr[n].b) 0 @s);}
+        if k =? 'assign' {
+            let route=fact_route(ForkWord(nodes.ptr[n].a) @s)
+            if nodes.ptr[n].op =? int32(47) and fact_speculating =? 0 {
+                if fact_probe_on {fact_probe_route(@s route fact_route_values(@s route))}
+                else if fact_policy =? 'RequireStatic' or fact_query {fact_route_bounds(@s route fact_route_values(@s route))}
+            }
+        }
+        return 0
+    }
+    let mask=isolation_children(k)
+    if mask >? 0 {
+        if mask & 1 not=? 0 {fact_capture(ForkWord(nodes.ptr[n].a) @s);}
+        if mask & 2 not=? 0 {fact_capture(ForkWord(nodes.ptr[n].b) @s);}
+        if mask & 4 not=? 0 {fact_capture(ForkWord(nodes.ptr[n].c) @s);}
+        if mask & 16 not=? 0 {
+            loop i in [0..nkids(n)) {fact_capture(kid(n i) @s);}
+        }
+    }
+    return 0
+}
