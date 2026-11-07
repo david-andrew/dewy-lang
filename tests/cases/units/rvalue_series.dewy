@@ -1,0 +1,15 @@
+# Series sums, U = 1/R, R per inch and heat loss, all in exact numbers.
+from units import inch, ft, m, W, K, °F, °C, BTU, R, RSI, RValue
+let studs = 3.5inch*(37R/10/inch)
+let wall = 68R/100 + studs + 17R/100
+printl"{studs as R} {wall as R} {[11R 19R].sum as R}"
+if wall not=? 0R printl"{1/wall*wall}"
+printl"{1/(30R) as (BTU/(hour*ft^2*°F))} {30R as R} {3R + 1RSI =? 3R + 52752792631/9290304000*R}"
+let area = 100*ft^2
+let rise = 70°F - 30°F
+let loss = area*rise/(30R)
+printl"{loss as (BTU/hour)}"
+const fixed = 13R
+printl"{(1/fixed)*area*rise =? area*rise/fixed}"
+let rating:float64*RValue = 19.0R
+printl"{rating as R} {1.0/rating as (W/(m^2*K)):.3f}"

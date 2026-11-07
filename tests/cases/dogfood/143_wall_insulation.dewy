@@ -1,0 +1,45 @@
+# An exterior wall built from layers, each a thickness and an R per inch in US
+# customary measures; its total R and RSI, its U-factor, and the heat lost
+# through it on a cold night, in BTU/hour, watts, and kilowatt-hours per day.
+from units import inch, ft, m, K, W, kWh, BTU, °C, °F, R, RSI, RValue
+
+Layer:type = [
+    name:string
+    thickness:float64*Length
+    r_per_inch:float64*RValue/Length
+    r = () => thickness*r_per_inch
+]
+
+# The still air on each face has a resistance of its own, with no thickness.
+const inside_air = 0.68R
+const outside_air = 0.17R
+
+# Takes a difference: a reading such as 70°F is a compile error here.
+heat_loss = (area rise r) => area*rise/r
+
+main = () => {
+    let layers = [
+        Layer["brick veneer" 3.625inch 0.11R/inch]
+        Layer["plywood sheathing" 0.5inch 1.25R/inch]
+        Layer["mineral wool" 5.5inch 4.2R/inch]
+        Layer["drywall" 0.5inch 0.9R/inch]
+    ]
+    let wall:float64*RValue = inside_air + outside_air
+    loop layer in layers {
+        wall += layer.r
+        printl"{layer.name}: {layer.thickness as inch:.3f} in, R-{layer.r as R:.3f}"
+    }
+    printl"wall: R-{wall as R:.2f}, RSI {wall as RSI:.3f}"
+    let u = 1/wall
+    printl"U-factor: {u as (BTU/(hour*ft^2*°F)):.4f} BTU/(hour*ft^2*°F), {u as (W/(m^2*K)):.3f} W/(m^2*K)"
+
+    let area = 8ft*40ft
+    let inside = 70°F
+    let outside = 30°F
+    let rise = inside - outside
+    let loss = heat_loss(area rise wall)
+    printl"{area/ft^2} ft^2 at {rise} ({rise as °C:.2f} °C): {loss as (BTU/hour):.1f} BTU/hour, {loss as W:.1f} W"
+    printl"per day: {loss*24hour as kWh:.2f} kWh"
+    printl"U*A*rise agrees: {abs(u*area*rise/loss - 1) <? 1e-12}"
+    printl"1 RSI is exactly {RSI/R} R"
+}

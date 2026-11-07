@@ -1521,6 +1521,26 @@ unit (`t/°C`, `t/K`). `as` converts each as what it is: `(20°C as °F)` is
 `68°F` and `((25°C-5°C) as °F)` is `36°F`. A difference prints in the first point's
 unit. Plain kelvins (`300K`) have no offset and can stand for either; a plain
 `float64 * Temperature` annotation holds kelvins and drops the offset scale.
+
+Thermal insulation uses `R` (US, `ft^2*°F*hour/BTU`) and `RSI` (`m^2*K/W`), with
+`RValue` as the dimension for annotations. `ft`, `yd`, `mile`, `BTU` (International
+Table), `kJ`, `kW` and `kWh` are in `units` too:
+
+```dewy
+from units import inch, ft, m, K, W, BTU, °F, R, RSI, RValue
+let layers:array<float64*RValue> = [0.68R 5.5inch*4.2R/inch 0.17R]   # R per inch times thickness
+let wall = layers.sum                                 # R values in series add
+printl"{wall as R:.2f} {wall as RSI:.3f}"             # 23.95 4.218
+let u = 1/wall                                        # U-factor
+printl"{u as (W/(m^2*K)):.3f}"                        # 0.237
+let rise = 70°F - 30°F                                # a difference, so it can scale
+printl"{(100ft^2)*rise/wall as (BTU/hour):.1f}"       # 167.0
+```
+
+`1RSI` is exactly `52752792631/9290304000*R`, from the unit definitions. A reading in
+place of the difference (`area*70°F/wall`) is a compile error that names the fix.
+A parameter with no annotation keeps that check; a `float64*Temperature` parameter holds
+kelvins, so a reading passed to one counts from absolute zero.
 `sleep` takes a time, `sleep(300ms)`, and waits whole nanoseconds, counting time the machine is
 suspended; a plain number is rejected, and `sleep(1day)` points to `sleep(24hour)`, since a day is a
 calendar period (see [Time and dates](#time-and-dates)). `sin`, `cos` and `tan` take an angle, `cos(45°)`, reduced
