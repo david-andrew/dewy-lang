@@ -7090,10 +7090,17 @@ fact_literal_nonzero = (n0: int) -> bool:
     loop nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.none_)): n = int(nodes[n].a)
     nodes[n].kind == .int_lit and nodes[n].ival != 0
 
+# A plain library body's obligations are the library's invariants: it notes no
+# panic (dir_defer), so proving them cannot change an answer. Generic instances
+# can carry a program's refinement, so they still decide.
+fact_deferred_implicit = (f: int) -> bool:
+    p = nodes[int(fns[f].body)].pos
+    fns[f].targs.len() == 0 and pos_in_lib(p) and dir_uniform_runtime(p) and dir_policy(p) == DIR_IMPLICIT
+
 # Runtime-enabled bodies need no proof until a static caller asks whether
 # they can panic. Each deferred body is visited at most once on that demand.
 fact_complete_deferred = (f: int):
-    if not fact_deferred.has(f): return
+    if not fact_deferred.has(f) or fact_deferred_implicit(f): return
     fact_deferred.remove(f)
     previous_proving = fact_deferred_proving
     fact_deferred_proving = true
