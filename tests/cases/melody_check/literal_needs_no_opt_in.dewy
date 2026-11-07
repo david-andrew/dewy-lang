@@ -1,0 +1,5 @@
+# A literal that passes its check cannot fail, so the call needs no runtime checks.
+theme = () => melody("C4 E4 G4 - . A3")
+let a = theme()
+let b = melody_loop("c e g4")
+main = () => printl("{a.samples.length >? 0} {b.samples.length >? 0}")

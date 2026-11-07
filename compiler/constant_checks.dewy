@@ -2,7 +2,7 @@ $runtime_checks
 # Demand-driven: nothing is read unless a declaration has a constant check. Cost: O(1) per
 # declaration, O(1) per call of one, and one compile-time run of the validator per call with a
 # constant argument.
-from p"check_constant.jo" import (CheckConstant cc_any cc_decls cc_errors)
+from p"check_constant.jo" import (cc_passed CheckConstant cc_any cc_decls cc_errors)
 from p"checker_expr.dewy" import lookup
 from p"ast.jo" import (NF_CHECKED add_flag kid kids mk nkids nodes set_list)
 from p"check.jo" import (fns get_fn_inst syms)
@@ -105,6 +105,7 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
             if why.s =? "" {return 0}
             fatal(pos "{c.message}: {why.s}")
         }
+        cc_passed[n]=true
         return cc_narrow(n)
     }
     0

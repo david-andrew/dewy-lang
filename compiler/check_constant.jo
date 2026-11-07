@@ -14,3 +14,5 @@ struct CheckConstant:
 cc_decls: {int: CheckConstant[]} = {}
 cc_errors: {int: str} = {}      # declaration -> what `$error_if true` says at a call
 cc_any = false
+# (calls whose every checked constant passed: they cannot fail, so they do not panic)
+cc_passed: {int: bool} = {}
