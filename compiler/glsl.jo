@@ -21,6 +21,7 @@ use 'checks_assign_hooks.dewy'
 use 'expr.jo'
 use 'checks_thin_expr.dewy'
 use 'glsl_ops.dewy'
+use 'glsl_emit.dewy'
 
 gl_out: str[]
 gl_done_fns: {int: bool} = {}
@@ -34,74 +35,6 @@ gl_stage = ""            # "vertex" or "fragment": the stage being translated
 # Dewy's sin, cos and tan of an angle in turns x: the GPU's, of radians. (fract first, which is
 # exact, so the radians stay small.)
 sl_turns_fns: {str: str} = {"__sin_turns": "sin", "__cos_turns": "cos", "__tan_turns": "tan"}
-
-gl_elem_type = (t: int, pos: int) -> str:
-    if types[prune(t)].kind != .fixed: return gl_type(t, pos)
-    nm = "SA_{prune(t)}"
-    if gl_first(nm):
-        inner = gl_type(t, pos)
-        gl_decls.push("struct {nm} \{\n    {inner} v;\n};\n")
-    nm
-
-gl_type = (t0: int, pos: int) -> str:
-    t = sl_type(t0)
-    k = types[t].kind
-    if k == .float_: return "float"
-    if k == .int_: return "int"
-    if k == .bool_: return "bool"
-    if k == .vec:
-        if t == T_MAT4: return "mat4"
-        if types[t].sign: return "ivec{types[t].bits}"
-        return "vec{types[t].bits}"
-    if k == .struct_:
-        si = int(types[t].st)
-        if is_lib_texture(si): return "sampler2D"
-        if is_gpu_buffer(t):
-            gl_gbuf_decls()
-            return "S_GB"
-        gl_struct(t, pos)
-        return "S_{gl_name(structs[si].name)}_{si}"
-    if k == .void_: return "void"
-    if k == .fixed: return "{gl_elem_type(int(types[t].elem), pos)}[{fixed_len(t)}]"
-    gl_err(pos, "type {dt(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
-    ""
-
-gl_struct = (t: int, pos: int):
-    si = int(types[t].st)
-    if gl_done_structs.get(si) != none: return
-    gl_done_structs[si] = true
-    check_struct_fields(si)
-    s = "struct S_{gl_name(structs[si].name)}_{si} \{\n"
-    loop i in [0..int(structs[si].nfields)):
-        f = int(structs[si].fields) + i
-        s += "    {gl_type(int(fields[f].type), pos)} {name_of(int(fields[f].name))}_;\n"
-    gl_decls.push(s + "};\n")
-
-# a name GLSL accepts as part of an identifier: no "__" anywhere (reserved in GLSL ES), and none
-# at the ends (the generated names put "_" around it)
-gl_name = (s: str) -> str:
-    b: u8[]
-    loop c in sanitize(s):
-        if c == '_' and (b.len() == 0 or b[b.len() - 1] == '_'): continue
-        b.push(c)
-    if b.len() > 0 and b[b.len() - 1] == '_': b.pop()
-    if b.len() == 0: return "a"
-    str_from_bytes(b)
-
-# Dewy introduces a local value copy for each ordinary parameter. A read-only
-# copy can use the parameter directly. This is required for uniform records
-# containing samplers, which GLSL cannot assign into a local variable.
-gl_param_copy = (s: int) -> bool:
-    l = int(nodes[s].sym)
-    value = int(nodes[s].b)
-    if value == 0 or nodes[value].kind != .ident or nodes[value].aux != i32(int(SK.local)): return false
-    forbidden = LF_ASSIGNED | LF_ADDR | LF_BYREF | LF_CAPTURED | LF_MUTPARAM | LF_ALIAS
-    if int(locals[l].flags) & forbidden != 0: return false
-    source = int(nodes[value].sym)
-    if int(locals[source].flags) & (LF_PARAM | LF_MUTPARAM) != LF_PARAM: return false
-    if prune(int(locals[l].type)) != prune(int(locals[source].type)): return false
-    gl_param_copies[l] = source
-    true
 
 gl_float = (x: f64) -> str:
     s = "{x}"
@@ -165,15 +98,6 @@ gl_function = (f: int):
     gl_out = saved
     gl_decls.push("{sig} \{\n{join(lines_, "")}}\n")
 
-gl_block = (b: int, depth: int, ret_value: bool):
-    n = nkids(b)
-    loop i in [0..n):
-        s = kid(b, i)
-        if i == n - 1 and ret_value and nodes[b].aux != 0:
-            gl_out.push("{ind(depth)}return {gl_expr(int(nodes[s].a))};\n")
-            continue
-        gl_stmt(s, depth)
-
 gl_assign_op = (op: int) -> str:
     match op as Tok:
         assign: "="
@@ -199,23 +123,6 @@ gl_compound_op = (op: Tok) -> Tok:
 # an assignment's target as GLSL, its indexes computed once beforehand (into temporaries
 # declared at pre) when they are more than a name or a number
 gl_temps = 0
-gl_target = (n: int, pre: str) -> str:
-    k = nodes[n].kind
-    if k == .index:
-        base = gl_target(int(nodes[n].a), pre)
-        ix = int(nodes[n].b)
-        v = ""
-        if gl_wrapped(ntype(int(nodes[n].a))): v = ".v"
-        if nodes[ix].kind == .int_lit: return "{base}[{gl_expr(ix)}]{v}"
-        # (a variable too: the right side may change it)
-        x = gl_expr(ix)
-        gl_temps += 1
-        t = gl_temps
-        gl_out.push("{pre}int sl_t{t} = {x};\n")
-        return "{base}[sl_t{t}]{v}"
-    if k == .field and nodes[n].aux == -4: return "{gl_target(int(nodes[n].a), pre)}.{name_of(int(nodes[n].name))}"
-    if k == .field and nodes[n].aux >= 0: return "{gl_target(int(nodes[n].a), pre)}.{name_of(int(nodes[n].name))}_"
-    gl_expr(n)
 
 gl_stmt = (s: int, depth: int):
     k = nodes[s].kind
@@ -286,38 +193,6 @@ gl_stmt = (s: int, depth: int):
         loop i in [0..nkids(s)): gl_stmt(kid(s, i), depth)
     else if k == .const_: pass
     else: gl_err(nodes[s].pos, "unsupported statement in shader")
-
-gl_stmt_if = (e: int, depth: int):
-    if nodes[e].kind != .if_: gl_err(nodes[e].pos, "match is not supported in shaders")
-    pre = ind(depth)
-    gl_out.push("{pre}if ({gl_expr(int(nodes[e].a))}) \{\n")
-    gl_block(int(nodes[e].b), depth + 1, false)
-    if nodes[e].c != 0:
-        gl_out.push("{pre}} else \{\n")
-        gl_block(int(nodes[e].c), depth + 1, false)
-    gl_out.push("{pre}}\n")
-
-gl_zero = (t0: int, pos: int) -> str:
-    t = sl_type(t0)
-    k = types[t].kind
-    if k == .float_: return "0.0"
-    if k == .int_: return "0"
-    if k == .bool_: return "false"
-    if k == .vec:
-        if t == T_MAT4: return "mat4(0.0)"
-        return "{gl_type(t, pos)}(0)"
-    if k == .struct_:
-        si = int(types[t].st)
-        parts: str[]
-        loop i in [0..int(structs[si].nfields)): parts.push(gl_zero(int(fields[int(structs[si].fields) + i].type), pos))
-        return "{gl_type(t, pos)}({join(parts, ", ")})"
-    if k == .fixed:
-        z = gl_wrap(gl_zero(int(types[t].elem), pos), int(types[t].elem), pos)
-        parts: str[]
-        loop i in [0..fixed_len(t)): parts.push(z)
-        return "{gl_type(t, pos)}({join(parts, ", ")})"
-    gl_err(pos, "cannot zero-initialize {dt(t)} in a shader")
-    ""
 
 gl_binop = (op: Tok) -> str:
     match op:
@@ -547,91 +422,6 @@ gl_arith = (op: Tok, x: str, y: str, ta: int, t: int, tb: int = 0) -> str:
     if op == .plus or op == .minus or op == .star or op == .slash or op == .shl: return gl_narrow("({x} {gl_binop(op)} {y})", t)
     "({x} {gl_binop(op)} {y})"
 
-# the name of a helper dividing signed integers (or integer vectors, by a vector or a number)
-# that by -1 divides by 1 and negates: the smallest integer / -1 is itself, as on the CPU
-gl_sdiv = (ta: int, tb: int) -> str:
-    if gl_first("sdiv"): gl_decls.push("int sl_sdiv(int a, int b) \{\n    int q = a / (b == -1 ? 1 : b);\n    return b == -1 ? int(-uint(a)) : q;\n}\n")
-    if types[ta].kind == .int_: return "sl_sdiv"
-    n = int(types[ta].bits)
-    sc = tb != 0 and not is_vec(tb)
-    nm = "sl_sdiv{n}"
-    bty = "ivec{n}"
-    if sc:
-        nm = "sl_sdiv{n}s"
-        bty = "int"
-    if gl_first(nm):
-        sw = ["x", "y", "z", "w"]
-        cs: str[]
-        loop j in [0..n):
-            if sc: cs.push("sl_sdiv(a.{sw[j]}, b)")
-            else: cs.push("sl_sdiv(a.{sw[j]}, b.{sw[j]})")
-        gl_decls.push("ivec{n} {nm}(ivec{n} a, {bty} b) \{\n    return ivec{n}({join(cs, ", ")});\n}\n")
-    nm
-
-# (the body of sl_abs: x below 0 negated through unsigned numbers, which wrap; by component)
-sl_abs_body = (t: int, un: str) -> str:
-    if not is_vec(t): return "x < 0 ? -uint(x) : uint(x)"
-    sw = ["x", "y", "z", "w"]
-    cs: str[]
-    loop j in [0..int(types[t].bits)): cs.push("x.{sw[j]} < 0 ? -uint(x.{sw[j]}) : uint(x.{sw[j]})")
-    "{un}({join(cs, ", ")})"
-
-gl_shift_decls = ():
-    if not gl_first("shift"): return
-    gl_decls.push("int sl_shl(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? 0 : x << c;\n}\n")
-    gl_decls.push("int sl_shr(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? x >> 31 : x >> c;\n}\n")
-    gl_decls.push("int sl_shru(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? 0 : int(uint(x) >> uint(c));\n}\n")
-
-# x (32 bits) wrapped to the range of a narrower integer type t
-gl_narrow = (x: str, t0: int) -> str:
-    t = sl_type(t0)
-    if types[t].kind != .int_: return x
-    bits = int(types[t].bits)
-    if bits >= 32: return x
-    if not types[t].sign: return "({x} & {(1 << bits) - 1})"
-    "(({x} << {32 - bits}) >> {32 - bits})"
-
-# float x to integer type t, as on the CPU: toward zero, saturating at t's range (32 bits at
-# most), NaN to 0
-gl_float_to_int = (x: str, t0: int) -> str:
-    t = sl_type(t0)
-    bits = int(types[t].bits)
-    if bits > 32: bits = 32
-    sg = types[t].sign
-    lo = 0
-    hi = (1 << bits) - 1
-    if sg:
-        lo = -(1 << (bits - 1))
-        hi = (1 << (bits - 1)) - 1
-    if gl_first("f2i"):
-        # (2^31 - 1 and 2^32 - 1 are not floats: clamped to the largest float below, the top tested apart)
-        gl_decls.push("int sl_f2i(float x, float lo, float top, float hi1, int him) \{\n    if (isnan(x)) return 0;\n    if (x >= hi1) return him;\n    return int(clamp(x, lo, top));\n}\n")
-        gl_decls.push("int sl_f2u(float x, float top) \{\n    if (isnan(x)) return 0;\n    if (x >= 4294967296.0) return -1;\n    return int(uint(clamp(x, 0.0, top)));\n}\n")
-    if bits == 32 and not sg: return "sl_f2u({x}, 4294967040.0)"
-    top = f64(hi)
-    if bits == 32: top = 2147483520.0
-    "sl_f2i({x}, {gl_float(f64(lo))}, {gl_float(top)}, {gl_float(f64(hi) + 1.0)}, {hi})"
-
-# ---------------- GPU buffers ----------------
-gl_gbuf_decls = ():
-    if not gl_first("gbuf"): return
-    gl_decls.push("struct S_GB \{\n    highp isampler2D t_;\n    int n_;\n};\n")
-    gl_decls.push("uint gb_w(highp isampler2D t, int i) \{\n    return uint(texelFetch(t, ivec2((i >> 2) & 1023, i >> 12), 0)[i & 3]);\n}\n")
-    # (bits of the word holding byte a, from bit 8 * (a & 3); sign-extended if sgn)
-    gl_decls.push("int gb_sub(highp isampler2D t, int a, int bits, bool sgn) \{\n    uint w = gb_w(t, a >> 2) >> uint((a & 3) * 8);\n    int sh = 32 - bits;\n    if (sgn) return int(w << uint(sh)) >> sh;\n    return int((w << uint(sh)) >> uint(sh));\n}\n")
-    # (an f64 from its two words, rounded to an f32 as compiler/spirv.jo does)
-    gl_decls.push("float gb_f64(uint lo, uint hi) \{\n    uint e = (hi >> 20) & 0x7FFu;\n    uint m = ((hi & 0xFFFFFu) << 3) | (lo >> 29);\n    uint bits = (((e - 896u) << 23) | m) + ((lo >> 28) & 1u);\n    if (e >= 1151u || bits >= 0x7F800000u) bits = 0x7F800000u;\n    if (e <= 896u) bits = 0u;\n    if (e == 0x7FFu && (m | lo) != 0u) bits = 0x7FC00000u;\n    return uintBitsToFloat(bits | (hi & 0x80000000u));\n}\n")
-
-# the name of a function reading element i of a buffer of t (made once per type and stage); past
-# either end it reads the nearest element, as with Vulkan
-gl_gbuf_reader = (t: int, pos: int) -> str:
-    nm = "gbr_{prune(t)}"
-    if not gl_first(nm): return nm
-    layout(t)
-    ty = gl_type(t, pos)
-    gl_decls.push("{ty} {nm}(S_GB b, int i) \{\n    int o = clamp(i, 0, max(b.n_ - 1, 0)) * {tsize(t)};\n    return {gl_read(t, "o", 0, pos)};\n}\n")
-    nm
-
 # a value of type t at byte o + c of buffer b (laid out as the CPU lays it out)
 gl_read = (t0: int, o: str, c: int, pos: int) -> str:
     t = sl_type(t0)
@@ -673,59 +463,6 @@ gl_read = (t0: int, o: str, c: int, pos: int) -> str:
         return "{gl_type(t, pos)}({join(parts, ", ")})"
     gl_err(pos, "type {dt(t)} cannot be read from a GPU buffer")
     ""
-
-# ---------------- stage wrappers ----------------
-gl_struct_fields = (t: int) -> (str, int)[]:
-    si = int(types[prune(t)].st)
-    check_struct_fields(si)
-    out: (str, int)[]
-    loop i in [0..int(structs[si].nfields)):
-        f = int(structs[si].fields) + i
-        out.push((name_of(int(fields[f].name)), int(fields[f].type)))
-    out
-
-gl_attrib_comps = (t: int, pos: int) -> int:
-    tt = sl_type(t)
-    if types[tt].kind == .float_ and int(types[tt].bits) == 32: return 1
-    if types[tt].kind == .vec and tt != T_MAT4 and not types[tt].sign: return int(types[tt].bits)
-    gl_err(pos, "vertex attributes must be {tsd("f32", "float32")}, vec2, vec3 or vec4 (found {dt(tt)})")
-    0
-
-uniform_kind = (t0: int, pos: int) -> str:
-    t = sl_type(t0)
-    k = types[t].kind
-    if k == .float_:
-        if int(types[t].bits) == 32: return "f"
-        return "d"
-    if k == .int_: return "i"
-    if k == .bool_: return "b"
-    if k == .vec:
-        if t == T_MAT4: return "m"
-        if types[t].sign: return "I"
-        return "v{types[t].bits}"
-    if k == .struct_ and is_lib_texture(int(types[t].st)): return "t"
-    if is_gpu_buffer(t): return "B"
-    gl_err(pos, "uniform fields must be numbers, vectors, mat4 or Texture, or fixed-size arrays of them (found {dt(t)})")
-    ""
-
-# the uniforms' layout entries for struct type t at byte offset base: ";name,kind,offset" (an
-# array: ",count,stride" more); a struct inside them by its fields, named "field_.inner"
-gl_udesc = (t: int, prefix: str, base: int, pos: int) -> str:
-    out = ""
-    si = int(types[prune(t)].st)
-    layout(t)
-    loop i in 0.. and f in gl_struct_fields(t):
-        fo = base + int(fields[int(structs[si].fields) + i].offset)
-        ft = sl_type(f.1)
-        if types[ft].kind == .fixed:
-            # an array: its element kind, then the count and the bytes per element
-            et = int(types[ft].elem)
-            if is_gpu_buffer(et): gl_err(pos, "uniforms cannot hold arrays of GPU buffers")
-            out += ";{prefix}{f.0},{uniform_kind(et, pos)},{fo},{fixed_len(ft)},{tsize(et)}"
-        else if types[ft].kind == .struct_ and not is_lib_texture(int(types[ft].st)) and not is_gpu_buffer(ft):
-            out += gl_udesc(ft, "{prefix}{f.0}_.", fo, pos)
-        else: out += ";{prefix}{f.0},{uniform_kind(f.1, pos)},{fo}"
-    out
 
 # returns (vertex source, fragment source, layout description)
 glsl_build = (vsf: int, fsf: int) -> (str, str, str):

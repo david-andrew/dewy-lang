@@ -34,6 +34,7 @@ LEAF_HOMES = {
     'lsp_text': 'lsp.jo',
     'lsp_requests': 'lsp.jo',
     'spirv_emit': 'spirv.jo',
+    'glsl_emit': 'glsl.jo',
 }
 
 
