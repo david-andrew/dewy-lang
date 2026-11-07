@@ -207,9 +207,15 @@ __given_mass = (w: mut World, b: Body, mass: f64) -> Body:
     if mass > 0.0: __mass_at(w, b.id, mass)
     b
 
+# every size is a box, the sign of a length ignored. A length of zero makes a line or a point:
+# it has no area and so no mass (`mass =` gives none), as `add_circle` with radius 0. Other bodies
+# hit it; gravity moves it, and nothing else does.
 add_box = (w: mut World, pos: vec2, size: vec2, angle: f64 = 0, kind: BodyKind = .dynamic, density: f64 = 1.0, friction: f64 = 0.5, bounce: f64 = 0.0, sensor: bool = false, mass: f64 = 0) -> Body:
-    h = size * 0.5
-    w.add_polygon(pos, [vec2(-h.x, -h.y), vec2(h.x, -h.y), vec2(h.x, h.y), vec2(-h.x, h.y)], angle, kind, density, friction, bounce, sensor, mass)
+    h = vec2(abs(size.x), abs(size.y)) * 0.5
+    corners = [vec2(-h.x, -h.y), vec2(h.x, -h.y), vec2(h.x, h.y), vec2(-h.x, h.y)]
+    if h.x == 0.0 or h.y == 0.0:
+        return __add_convex(w, pos, corners, angle, kind, density, friction, bounce, sensor, mass, [vec2(0, -1), vec2(1, 0), vec2(0, 1), vec2(-1, 0)])
+    __add_convex(w, pos, corners, angle, kind, density, friction, bounce, sensor, mass)
 
 # points around pos, in order: a concave polygon is cut into convex parts (points not in order,
 # or crossing themselves: their convex hull)
@@ -221,6 +227,12 @@ add_polygon = (w: mut World, pos: vec2, points: vec2[], angle: f64 = 0, kind: Bo
         return __given_mass(w, __add_parts(w, pos, parts, angle, kind, density, friction, bounce, sensor, points), mass)
     vs = __hull(points)
     if vs.len() < 3: panic("a polygon needs 3 points not all in a line")
+    __add_convex(w, pos, vs, angle, kind, density, friction, bounce, sensor, mass)
+
+# (vs: at least 3 corners, counterclockwise; with no area between them, normals says which way
+# each edge faces, as a zero-length edge cannot)
+__add_convex = (w: mut World, pos: vec2, vs0: vec2[], angle: f64, kind: BodyKind, density: f64, friction: f64, bounce: f64, sensor: bool, mass: f64, normals: vec2[] = []) -> Body:
+    vs = vs0
     # (the body's position is its center of mass)
     area = 0.0
     c = vec2(0, 0)
@@ -231,14 +243,15 @@ add_polygon = (w: mut World, pos: vec2, points: vec2[], angle: f64 = 0, kind: Bo
         cr = f64(cross(p, q))
         area += cr / 2.0
         c += (p + q) * f32(cr / 6.0)
-    c = c * f32(1.0 / area)
+    if area > 0.0: c = c * f32(1.0 / area)
     loop mut v in vs: v -= c
     loop i in [0..vs.len()):
         p = vs[i]
         q = vs[(i + 1) % vs.len()]
         inertia += f64(cross(p, q)) * f64(dot(p, p) + dot(p, q) + dot(q, q)) / 12.0
-    ns: vec2[]
-    loop i in [0..vs.len()): ns.push(normalize(perp(vs[i] - vs[(i + 1) % vs.len()])))
+    ns = normals
+    if ns.len() == 0:
+        loop i in [0..vs.len()): ns.push(normalize(perp(vs[i] - vs[(i + 1) % vs.len()])))
     b = __PBody(kind = kind, pos = pos + rotate(c, angle), angle = f32(angle), verts = vs, normals = ns, friction = f32(friction), bounce = f32(bounce), sensor = sensor)
     m = f32(density * area / 100.0)
     __set_mass(b, m, f32(density * inertia / 100.0))

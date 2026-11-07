@@ -1,0 +1,18 @@
+# A box with no area stays well-defined: no NaN, it does not stop others, and others do not stop it.
+$runtime_checks
+import physics
+
+finite = (p:vec2):>bool => p.x =? p.x and p.y =? p.y and abs(p.x) <? 1000000.0 and abs(p.y) <? 1000000.0
+
+let world = physics.World[]
+world.add_box(vec2(0 200) vec2(400 20) kind=physics.BodyKind.fixed);
+let ball = world.add_circle(vec2(0 100) 10)
+let line = world.add_box(vec2(0 150) vec2(0 40))
+let point = world.add_box(vec2(4 150) vec2(0 0))
+let other_point = world.add_box(vec2(4 150) vec2(0 0))
+let full = world.add_box(vec2(150 150) vec2(-20 -10))
+loop i in [0..240) { world.step(1.0/60.0) }
+printl(finite(world.pos(ball)) and finite(world.pos(line)) and finite(world.pos(point)) and finite(world.pos(other_point)))
+printl(world.pos(ball).y >? 170.0 and world.pos(ball).y <? 190.0)     # the ball rests on the floor
+printl(world.pos(full).y >? 170.0 and world.pos(full).y <? 195.0)     # a negative size is a full box
+printl(world.pos(line).y >? 200.0)                                    # gravity moves a body with no mass

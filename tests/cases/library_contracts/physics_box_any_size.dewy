@@ -1,0 +1,9 @@
+# Every size is a box, so adding one needs no runtime checks.
+import physics
+
+let world = physics.World[]
+world.add_box(vec2(0 200) vec2(400 20) kind=physics.BodyKind.fixed);
+world.add_box(vec2(0 150) vec2(0 40));          # no width: a line
+world.add_box(vec2(50 150) vec2(0 0));          # no size at all
+world.add_box(vec2(150 150) vec2(-20 -10));     # the sign is ignored
+printl"{world.bodies().length} bodies"
