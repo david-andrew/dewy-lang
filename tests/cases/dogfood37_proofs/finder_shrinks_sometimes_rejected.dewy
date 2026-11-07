@@ -1,0 +1,17 @@
+F:type = [parent:array<int64> size:array<int>]
+find = (@f:F x:int64):>int64? => {
+    if x <? 0 or x >=? f.parent.length return none
+    if x =? 0 {
+        f.parent.pop();
+    }
+    x
+}
+use_it = (@f:F a:int64):>int64 => {
+    let r = find(@f a)
+    if r is? none return -1
+    f.parent[r]
+}
+main = () => {
+    let f = F[[0] [1]]
+    printl(use_it(@f 0))
+}

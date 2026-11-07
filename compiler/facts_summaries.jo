@@ -531,6 +531,20 @@ fact_summary_payload_publish = (f: int, result: int, entry: int[], payload: int,
     fact_set_bound(s, selector, FactBound(max(0, b.lo), min(1, b.hi)))
     value = fact_project(s, result, -4, false, payload)
     s.conditional.push(ResultEvidence(selector, 1, ref_intern(atoms), values, fns[f].ptypes, value, payload))
+# A result below an `@` argument's length that the callee keeps: the length after the call is that one
+# even when this state never asked for it before the call. O(1) per call with such a summary.
+fact_summary_kept_upper = (n: int, f: int, entry: int[], summary: FactSummary, s: mut FactState):
+    i = summary.upper
+    field = summary.upper_field
+    if i < 0 or i >= entry.len() or int(locals[fns[f].params[i]].flags) & LF_MUTPARAM == 0: return
+    if field == 0 and (i >= summary.lengths.len() or summary.lengths[i] != 1): return
+    if field != 0 and not fact_kept_field(summary.kept_fields, i, field): return
+    v = fact_summary_actual(n, i, s)
+    if v == 0 or v == entry[i] or s.projections.len() >= FACT_CAP: return
+    length = fact_summary_length(s, entry[i], field, f, i)
+    holder = if field == 0: v else: fact_project(s, v, field, false, fact_call_field_type(fact_type(int(locals[fns[f].params[i]].type)), field))
+    if length == 0 or holder == 0 or fact_projection_find(s, holder, -1, false) >= 0: return
+    fact_add_projection(s, FactProjection(holder, -1, false, length))
 fact_record_arrays = (t: int) -> bool:
     if tkind(t) != .struct_ or is_nd(t) or is_map_type(t) or fact_pool_type(t): return false
     if let known = fact_record_array_types.get(t): return known

@@ -3987,6 +3987,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_difference(s, result, length, 0, n)
             summary = if counted: FactSummary() else: fact_summary(f)
             if summary.seen:
+                fact_summary_kept_upper(n, f, entry, summary, s)
                 payload = fact_summary_payload(fact_type(int(fns[f].ret)))
                 if payload != 0: fact_summary_payload_publish(f, result, entry, payload, summary, s)
                 else if tkind(fact_type(int(fns[f].ret))) == .array:

@@ -595,6 +595,22 @@ fact_summary_payload_publish=(f:SummaryWord result:SummaryWord entry:array<int64
     let value=fact_project(@s result (-4) false payload)
     s.conditional.push(ResultEvidence(selector 1 ref_intern(atoms) values fns.ptr[f].ptypes value payload))
 }
+# A result below an `@` argument's length that the callee keeps: the length after the call is that one
+# even when this state never asked for it before the call (`let r = find(@f x)`, then `f.parent[r]`, where
+# find writes elements of f.parent). O(1) per call with such a summary.
+fact_summary_kept_upper=(n:SummaryWord f:SummaryWord entry:array<int64> summary:FactSummary @s:FactState):>void=>$unsafe {
+    let i=summary.upper
+    let field=summary.upper_field
+    if i <? 0 or i >=? entry.length or SummaryWord(locals.ptr[fns.ptr[f].params[i]].flags) & LF_MUTPARAM =? 0 {return}
+    if field =? 0 and (i >=? summary.lengths.length or summary.lengths[i] not=? 1) {return}
+    if field not=? 0 and not fact_kept_field(summary.kept_fields i field) {return}
+    let v=fact_summary_actual(n i @s)
+    if v =? 0 or v =? entry[i] or s.projections.length >=? FACT_CAP {return}
+    let length=fact_summary_length(@s entry[i] field f i)
+    let holder=if field =? 0 {v} else {fact_project(@s v field false fact_call_field_type(fact_type(SummaryWord(locals.ptr[fns.ptr[f].params[i]].type)) field))}
+    if length =? 0 or holder =? 0 or fact_projection_find(s holder (-1) false) >=? 0 {return}
+    fact_add_projection(@s FactProjection(holder (-1) false length))
+}
 fact_record_arrays=(t:SummaryWord):>bool=>$unsafe {
     if tkind(t) not=? 'struct_' or is_nd(t) or is_map_type(t) or fact_pool_type(t) {return false}
     let known=fact_record_array_types.get(t)

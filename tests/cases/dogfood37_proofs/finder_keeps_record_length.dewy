@@ -1,0 +1,46 @@
+# A finder that only writes elements of an @ record's array gives a position in it, in the caller too.
+Forest:type = [parent:array<int64<(<? parent.length)>> size:array<int>]
+find = (@f:Forest x:int64):>int64? => {
+    if x <? 0 or x >=? f.parent.length return none
+    let r = x
+    loop f.parent[r] not=? r {
+        f.parent[r] = f.parent[f.parent[r]]
+        r = f.parent[r]
+    }
+    r
+}
+union = (@f:Forest a:int64 b:int64):>bool => {
+    let ra = find(@f a)
+    let rb = find(@f b)
+    if ra is? none or rb is? none or ra =? rb return false
+    f.parent[ra] = rb
+    true
+}
+root_of = (@f:Forest a:int64):>int64 => {
+    let r = find(@f a)
+    if r is? none return -1
+    f.parent[r]
+}
+find_in = (@p:array<int64<(<? p.length)>> x:int64):>int64? => {
+    if x <? 0 or x >=? p.length return none
+    p[x] = p[p[x]]
+    x
+}
+through = (@p:array<int64<(<? p.length)>> x:int64):>int64 => {
+    let r = find_in(@p x)
+    if r is? none return -1
+    p[r]
+}
+main = () => {
+    let f = Forest[[0 1 2] [1 1 1]]
+    printl(union(@f 0 1))
+    printl(union(@f 1 2))
+    printl(union(@f 0 2))
+    printl(union(@f 0 9))
+    printl(f.parent)
+    printl(root_of(@f 0))
+    let p:array<int64<(<? p.length)>> = [1 2 2]
+    printl(through(@p 0))
+    printl(through(@p 7))
+    printl(p)
+}
