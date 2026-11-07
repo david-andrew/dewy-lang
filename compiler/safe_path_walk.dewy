@@ -7,7 +7,7 @@ from p"directive_ops.dewy" import (dir_confine_paths)
 from p"expr.jo" import (bundled_bigint_type)
 from p"refine.jo" import (str_set_of str_sets)
 from p"safe_path_ops.dewy" import (ut_add ut_callee_decl ut_comp_type ut_enqueue ut_global_decl ut_global_single ut_is_path ut_mark_in ut_mark_unproven ut_names_path ut_origin ut_owner ut_shown ut_single ut_text_type ut_traversal ut_unproven)
-from p"safe_paths.jo" import (UT_COMP UT_GUARD UT_HARD UT_JOIN UT_L_DECLARED UT_L_SAFE UT_MINTS UT_PARAMS UT_PASS UT_T_COMP UT_T_KNOWN UT_T_PATH UT_T_TEXT ut_contains_name ut_cur ut_decl_kinds ut_ehead ut_enext ut_epairs ut_eto ut_field_names ut_fields ut_first ut_fk ut_fmask ut_fu ut_global ut_lf ut_li ut_linit ut_lm ut_lo ut_lp ut_lr ut_ls ut_lu ut_m ut_narrowed ut_o ut_origin_what ut_p_name ut_pairs ut_param_safe ut_path_name ut_paths_used ut_queue ut_queued ut_ret ut_rfn ut_rhead ut_rmask ut_rnext ut_rr ut_safe_globals ut_safe_name ut_safe_used ut_serial ut_sink_calls ut_tb ut_text_globals ut_types ut_uhead ut_unext ut_upairs ut_uto ut_walked)
+from p"safe_paths.jo" import (UT_COMP UT_GUARD UT_HARD UT_JOIN UT_L_DECLARED UT_L_SAFE UT_MINTS UT_PARAMS UT_PASS UT_T_COMP UT_T_KNOWN UT_T_PATH UT_T_TEXT ut_contains_name ut_cur ut_decl_kinds ut_ehead ut_enext ut_epairs ut_eto ut_field_names ut_fields ut_first ut_fk ut_fmask ut_fu ut_global ut_lf ut_li ut_linit ut_lm ut_lo ut_lp ut_lr ut_ls ut_lu ut_m ut_narrowed ut_o ut_origin_base ut_origin_what ut_p_name ut_pairs ut_param_safe ut_path_name ut_paths_used ut_queue ut_queued ut_ret ut_rfn ut_rhead ut_rmask ut_rnext ut_rr ut_safe_globals ut_safe_name ut_safe_used ut_serial ut_sink_calls ut_tb ut_text_globals ut_types ut_uhead ut_unext ut_upairs ut_uto ut_walked)
 from p"types.jo" import (T_NEVER T_STR fields prune structs types)
 from p"units.jo" import (bundled_rational_type)
 from p"util.jo" import (files line_col name_of pos_file pos_in_lib warn)
@@ -54,6 +54,7 @@ ut_reset=():>void=>{
     ut_walked=[]
     ut_rr=[]
     ut_origin_what=dict<int64 string>()
+    ut_origin_base=dict<int64 string>()
     ut_ls=[]
     ut_safe_globals=dict<int64 bool>()
     ut_text_globals=dict<int64 int64>()
@@ -595,7 +596,11 @@ ut_joined=(pieces:array<int64> n:PathWalkWord):>void=>$unsafe {
             }
             if not proven {
                 let q=ut_param_of(v)
-                if q >? 0 {ut_add(0 PathWalkWord(1) << (UT_JOIN + q - 1))} else {ut_add(ut_origin(n "built from unproven text") 0)}
+                if q >? 0 {ut_add(0 PathWalkWord(1) << (UT_JOIN + q - 1))} else {
+                    let o=ut_origin(n "built from unproven text")
+                    if not ut_origin_base.has(o) {ut_origin_base[o]=ut_interp_base(n)}
+                    ut_add(o 0)
+                }
             }
         }
         if ut_is_path(vt) {based=true}
@@ -1053,24 +1058,28 @@ ut_base_text=(x0:PathWalkWord):>string=>$unsafe {
         if ut_linit[l] not=? 0 {x=ut_strip(ut_linit[l])}
     }
     if x not=? 0 and nodes.ptr[x].kind =? 'call' and nkids(x) =? 1 {
-        let s=ut_strip(kid(x 0))
-        if nodes.ptr[s].kind =? 'str_lit' and nodes.ptr[s].aux not=? 0 and nkids(s) >? 0 {
-            let first=kid(s 0)
-            if nodes.ptr[first].kind =? 'pair' {
-                let v=ut_strip(PathWalkWord(nodes.ptr[first].a))
-                if ut_is_path(PathWalkWord(nodes.ptr[v].type)) {
-                    let t=ut_arg_text(v)
-                    if (t as array<uint8>).length >? 0 {return t}
-                }
-            }
-        }
+        let t=ut_interp_base(ut_strip(kid(x 0)))
+        if (t as array<uint8>).length >? 0 {return t}
     }
     "root"
 }
+# the path an interpolation starts with (`p"{input}/{name}"`: input), "" when it starts otherwise
+ut_interp_base=(s:PathWalkWord):>string=>$unsafe {
+    if nodes.ptr[s].kind =? 'str_lit' and nodes.ptr[s].aux not=? 0 and nkids(s) >? 0 {
+        let first=kid(s 0)
+        if nodes.ptr[first].kind =? 'pair' {
+            let v=ut_strip(PathWalkWord(nodes.ptr[first].a))
+            if ut_is_path(PathWalkWord(nodes.ptr[v].type)) {return ut_arg_text(v)}
+        }
+    }
+    ""
+}
 # (the fixes, as the editor offers them: lsp.jo reads the first)
-ut_fixes=(x:PathWalkWord):>string=>{
+ut_fixes=(x:PathWalkWord o:PathWalkWord=0):>string=>{
     let arg=ut_arg_text(x)
     let base=ut_base_text(x)
+    # (a parameter: the base is where the caller built the path, which the origin remembers)
+    if base =? "root" and ut_origin_base.has(o) and (ut_origin_base[o] as array<uint8>).length >? 0 {base=ut_origin_base[o]}
     let fix=if (arg as array<uint8>).length >? 0 {arg} else {"..."}
     "validate it, `{base}.confine({fix}) or_throw`, or test it first, `if {base}.contains({fix}) \{...}`"
 }
@@ -1088,7 +1097,7 @@ ut_warn_sinks=():>void=>$unsafe {
             if w.kind =? WI_PATH {message=w.message}
         }
         if o not=? 0 {
-            warn(nodes.ptr[x].pos "{ut_shown(x)} {message} ({ut_origin_text(o nodes.ptr[x].pos)}): {ut_fixes(x)}")
+            warn(nodes.ptr[x].pos "{ut_shown(x)} {message} ({ut_origin_text(o nodes.ptr[x].pos)}): {ut_fixes(x o)}")
         }
         else if dir_confine_paths(nodes.ptr[x].pos) {
             warn(nodes.ptr[x].pos "{ut_shown(x)} is not proven to stay inside a base, which `$confine_external_paths` asks of every path a file-system operation gets: {ut_fixes(x)}, or opt this scope out with `$confine_external_paths=false`")

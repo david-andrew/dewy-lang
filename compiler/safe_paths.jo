@@ -117,6 +117,7 @@ ut_rr: int[]                        # function instance -> the walk that last re
 ut_cur = 0                  # the function instance being walked
 ut_first = false            # its first walk: obligations and sinks are looked at then
 ut_origin_what: {int: str} = {}  # origin -> how it was built, for the warning
+ut_origin_base: {int: str} = {}  # origin -> the base its text was joined onto, for the fix
 
 # SafePath facts of the program's own locals and globals (single assignment), and text classes
 ut_ls: int[]                        # local -> UT_L_* bits
