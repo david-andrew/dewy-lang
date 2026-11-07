@@ -58,6 +58,8 @@ def effect_services(text, modules):
         text = text.replace('facts_forks.dewy', 'facts.jo').replace('facts_forks.jo', 'facts.jo')
     if _doubled(modules.get('facts.jo', ''), ('fact_replace', 'fact_read', 'fact_constant_global', 'fact_constant_tree', 'fact_global_integer', 'fact_global_length', 'fact_receiver_route', 'fact_route', 'fact_after_call', 'fact_route_values', 'fact_store_route', 'fact_component', 'fact_store_pattern', 'fact_route_bounds')):
         text = text.replace('facts_routes.dewy', 'facts.jo').replace('facts_routes.jo', 'facts.jo')
+    if _doubled(modules.get('facts.jo', ''), ('fact_range_call', 'fact_range_first', 'fact_stepped_loop', 'fact_open_range', 'fact_range_assumed', 'fact_range_exhaustion', 'fact_step_check', 'fact_nonnegative', 'fact_refinement_covers', 'fact_host_value', 'fact_host_endpoint', 'fact_narrow_check', 'fact_floor_call', 'fact_range')):
+        text = text.replace('facts_ranges.dewy', 'facts.jo').replace('facts_ranges.jo', 'facts.jo')
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(

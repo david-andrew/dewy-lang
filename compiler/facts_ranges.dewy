@@ -1,0 +1,369 @@
+$runtime_checks
+from p"ast.jo" import (NF_INCLUSIVE NF_STEP RANGE_EXHAUSTION has_flag kid nkids nodes)
+from p"check.jo" import (dewy_at fns locals)
+from p"checker_tokens.dewy" import (Tok)
+from p"directives.jo" import (dir_defer dir_name_assumed_bounds dir_value)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"exact.jo" import (exact_progress_math exact_word_reads)
+from p"expr.jo" import (CV int_intervals ntype)
+from p"facts.jo" import (FactLoop FactState fact_add_fits fact_binding fact_bound fact_capture fact_compare fact_constant fact_covered fact_difference fact_difference_head fact_difference_next fact_domain fact_name_axis_slice fact_name_open_range fact_name_range fact_name_slice_range fact_new fact_policy fact_probe_on fact_query fact_scalar fact_set_bound fact_speculating fact_summary_owner fact_terms fact_type fact_u64_capped fact_validated stable_loop_index)
+from p"facts_changes.dewy" import (fact_changes)
+from p"facts_elements.dewy" import (fact_found_payload fact_index_carried)
+from p"facts_joins.dewy" import (fact_join fact_known_none)
+from p"facts_library.dewy" import (fact_clamped)
+from p"facts_loops.dewy" import (fact_entails fact_loop_body)
+from p"facts_probes.dewy" import (fact_probe_record)
+from p"facts_pushes.dewy" import (fact_carried_exit fact_counted_lengths fact_counted_pushes fact_growing_lengths fact_growing_pushes fact_iterate fact_push_close fact_push_open fact_range_body fact_range_invariants fact_range_sums)
+from p"facts_summaries.dewy" import (fact_summary_payload)
+from p"refine.jo" import (representation_type)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
+from p"string_domains.jo" import (int_domain_proven)
+from p"types.jo" import (T_INT T_MATH_INT T_U64 dt is_int prune types zonk)
+from p"util.jo" import (err_notes intern name_of pos_in_lib)
+from p"witness.jo" import (WitSide wit_context wit_fail wit_help wit_relation wit_relation_text wit_side wit_unknown)
+
+RangeWord:type=int64<overflow='wrap'>
+# A stepped range, `[a, b..c]` (a loop's, or the library's IntRange): its step
+# b - a must be nonzero, so b not=? a is an obligation. n: the stepped `for_`,
+# or a call of one of the library's range constructors with a literal `true`
+# for `stepped` (fact_range_first).
+fact_range_call=(n:RangeWord):>bool=>{
+    fact_range_first(n true) >=? 0
+}
+fact_range_first=(n:RangeWord step:bool):>RangeWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return -1}
+    let m=nkids(n)
+    if m not=? 2 and m not=? 5 and m not=? 7 {return -1}
+    let d=RangeWord(fns.ptr[RangeWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return -1}
+    if fact_name_range =? 0 {
+        fact_name_range=intern("__dewy_range")
+        fact_name_axis_slice=intern("__nd_axis_slice")
+        fact_name_slice_range=intern("__dewy_slice_range")
+        fact_name_open_range=intern("__dewy_open_range_iter")
+    }
+    let name=RangeWord(nodes.ptr[d].name)
+    let first:RangeWord=-1
+    let stepped:RangeWord=-1
+    if m =? 5 and name =? fact_name_range {
+        first=0
+        stepped=3
+    }
+    else if m =? 7 and name =? fact_name_axis_slice {
+        first=0
+        stepped=5
+    }
+    else if m =? 7 and name =? fact_name_slice_range {
+        first=1
+        stepped=6
+    }
+    else if m =? 2 and name =? fact_name_open_range {first=0}
+    if first <? 0 or not pos_in_lib(nodes.ptr[d].pos) {return -1}
+    if stepped <? 0 {return if step {first} else {-1}}
+    let flag=kid(n stepped)
+    if nodes.ptr[flag].kind not=? 'bool_lit' or (nodes.ptr[flag].ival not=? 0) not=? step {return -1}
+    first
+}
+fact_stepped_loop=(n:RangeWord):>bool=>$unsafe {
+    let it=RangeWord(nodes.ptr[n].a)
+    nodes.ptr[n].kind =? 'for_' and nodes.ptr[n].aux =? 0 and nodes.ptr[it].kind =? 'range' and has_flag(it NF_STEP) and nodes.ptr[it].c not=? 0
+}
+# Exhaustion is a separate obligation from a nonzero step. Only a 64-bit
+# counter starting well inside its domain with a small fixed step may use the
+# progress axiom. Narrow counters and huge steps must prove their backedge safe.
+fact_open_range=(n:RangeWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'for_' or nodes.ptr[n].aux not=? 0 {return false}
+    let it=RangeWord(nodes.ptr[n].a)
+    # An unbounded semantic-int range lowers with an exact, promoting cursor.
+    nodes.ptr[it].kind =? 'range' and nodes.ptr[it].b =? 0 and dewy_at(nodes.ptr[n].pos) and prune(RangeWord(locals.ptr[RangeWord(nodes.ptr[n].sym)].type)) not=? T_MATH_INT
+}
+# The marked, small-start 64-bit range has a lexical progress axiom. It
+# needs no value-flow proof; opt-out scopes and every other range retain
+# their ordinary exhaustion obligation. Querying this certificate is O(1).
+fact_range_assumed=(n:RangeWord):>bool=>$unsafe {
+    nodes.ptr[n].aux2 =? int32(RANGE_EXHAUSTION) and nodes.ptr[n].ival not=? 0 and dir_value(dir_name_assumed_bounds nodes.ptr[n].pos) not=? 1
+}
+fact_range_exhaustion=(n:RangeWord entry:FactState first:RangeWord second:RangeWord edges:FactLoop):>void=>$unsafe {
+    if not fact_open_range(n) or fact_speculating not=? 0 or fact_summary_owner not=? 0 {return}
+    fact_validated[n]=true
+    let t=fact_type(RangeWord(locals.ptr[RangeWord(nodes.ptr[n].sym)].type))
+    let start=fact_bound(entry first)
+    let delta=FactBound(1 1)
+    if second not=? 0 {
+        let stop=fact_bound(entry second)
+        delta=FactBound(wide=true)
+        if not start.wide and not stop.wide and start.lo not=? FACT_MIN and start.hi not=? FACT_MIN and fact_add_fits(stop.lo (-start.hi)) and fact_add_fits(stop.hi (-start.lo)) {delta=FactBound(stop.lo - start.hi stop.hi - start.lo)}
+    }
+    let assumed=is_int(t) and types.ptr[t].bits =? 64 and dir_value(dir_name_assumed_bounds nodes.ptr[n].pos) not=? 1 and not start.wide and start.lo >=? -72057594037927936 and start.hi <=? 72057594037927936 and not delta.wide and delta.lo =? delta.hi and delta.lo >=? -65536 and delta.hi <=? 65536
+    let proven=assumed or not edges.back.live
+    if not proven {
+        let back=edges.back
+        let l=RangeWord(nodes.ptr[n].sym)
+        let binding=fact_binding(back PlaceIdentity('local' RangeWord(locals.ptr[l].owner) l))
+        if binding >=? 0 and stable_loop_index(l) {
+            let current=fact_bound(back back.bindings[binding].value)
+            let domain=fact_domain(t)
+            if not current.wide and not delta.wide and fact_add_fits(current.lo delta.lo) and fact_add_fits(current.hi delta.hi) {
+                proven=current.lo + delta.lo >=? domain.lo and current.hi + delta.hi <=? domain.hi
+            }
+        }
+    }
+    if fact_probe_on {
+        fact_probe_record(n proven)
+        return
+    }
+    if not proven {
+        if dir_defer(n "cannot prove the open range does not exhaust its integer type" true) {return}
+        wit_fail(nodes.ptr[n].pos "cannot prove the open range does not exhaust its integer type")
+    }
+}
+fact_step_check=(n:RangeWord @s:FactState first:RangeWord second:RangeWord first_node:RangeWord second_node:RangeWord):>void=>$unsafe {
+    if fact_speculating not=? 0 or not (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) {return}
+    let c=fact_compare(s 'ne' second first)
+    if fact_probe_on {
+        fact_probe_record(n c =? 1)
+        return
+    }
+    if c =? 1 {return}
+    let b=wit_side(second second_node)
+    let a=wit_side(first first_node)
+    let relation=wit_relation_text('ne' b a)
+    let missing=wit_relation(s s 'ne' b a c =? 0)
+    wit_context(0)
+    if c =? 0 {
+        wit_help(relation)
+        if dir_defer(n "the range step is zero" true) {return}
+        wit_fail(nodes.ptr[n].pos "the range step is zero")
+        return
+    }
+    wit_unknown(n fact_bound(s second) "the range step is nonzero" 0 relation missing)
+}
+# value (operand's) >= 0, as `what` requires: proven, an error, or a check of its scope.
+fact_nonnegative=(n:RangeWord @s:FactState value:RangeWord operand:RangeWord what:string):>void=>$unsafe {
+    if fact_speculating not=? 0 or not (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) {return}
+    let zero=fact_constant(@s 0)
+    let c=fact_compare(s 'ge' value zero)
+    if fact_probe_on {
+        fact_probe_record(n c =? 1)
+        return
+    }
+    if c =? 1 {return}
+    let side=wit_side(value operand)
+    let nil=WitSide(zero 0 "0" false true)
+    let missing=wit_relation(s s 'ge' side nil c =? 0)
+    wit_context(0)
+    if c =? 0 {
+        wit_help(wit_relation_text('ge' side nil))
+        if dir_defer(n "{what} is negative" true) {return}
+        wit_fail(nodes.ptr[n].pos "{what} is negative")
+        return
+    }
+    wit_unknown(n fact_bound(s value) "{what} is >= 0" 0 wit_relation_text('ge' side nil) missing)
+}
+fact_refinement_covers=(r:RangeWord):>RangeWord=>$unsafe {
+    let inner=RangeWord(nodes.ptr[r].a)
+    if nodes.ptr[inner].kind not=? 'conv' or nodes.ptr[inner].aux not=? int32(int64(CV.int_)) or prune(ntype(RangeWord(nodes.ptr[inner].a))) not=? T_MATH_INT {return 0}
+    let [known allowed]=int_intervals(zonk(RangeWord(nodes.ptr[r].aux2)))
+    if not known or allowed.length =? 0 or allowed[0] =? FACT_MIN or allowed[allowed.length - 1] =? FACT_MAX {return 0}
+    inner
+}
+# A captured fixed-width value or singleton has real host endpoints, unlike
+# an unconstrained mathematical int. Conversions preserve value identity, so
+# widening int64 to int and storing it back need not invent strict bounds.
+# O(1), using the existing value-indexed term; wide intermediates never qualify.
+fact_host_value=(s:FactState value:RangeWord):>bool=>{
+    if value =? 0 {return false}
+    let b=fact_bound(s value)
+    if b.wide {return false}
+    if b.lo =? b.hi {return true}
+    let t=fact_type(fact_terms[value].type)
+    is_int(t) and t not=? T_MATH_INT and t not=? T_U64
+}
+# Endpoint sentinels become finite through a current guard too. Inspect only
+# this value's indexed incident rows (at most 16), not every value in the body.
+# The other endpoint must itself have a finite interval; do not recurse through
+# rows, so a cycle of unconstrained values cannot manufacture a bound.
+fact_host_endpoint=(s:FactState value:RangeWord upper:bool):>bool=>{
+    let b=fact_bound(s value)
+    if b.wide {return false}
+    let finite=if upper {b.hi not=? FACT_MAX} else {b.lo not=? FACT_MIN}
+    if finite or fact_host_value(s value) {return true}
+    let side:RangeWord=0
+    if upper {side=1}
+    let ri=fact_difference_head(s value side)
+    loop ri >=? 0 {
+        let row=s.differences[ri]
+        ri=fact_difference_next(s ri side)
+        let other=if upper {row.b} else {row.a}
+        let q=fact_bound(s other)
+        if q.wide {continue}
+        if upper {
+            if (q.hi not=? FACT_MAX or fact_host_value(s other)) and fact_add_fits(q.hi row.limit) {return true}
+        }
+        else if row.limit not=? FACT_MIN {
+            if (q.lo not=? FACT_MIN or fact_host_value(s other)) and fact_add_fits(q.lo (-row.limit)) {return true}
+        }
+    }
+    false
+}
+# An `int` converted to a fixed width (`int32(x)`, `x as int32`, a store into a
+# fixed-width place): x must fit, proven, an error or a check of its scope.
+# An `int`'s endpoint sentinels need strict bounds unless a captured fixed
+# value or current guard establishes that endpoint is finite. True when proven.
+fact_narrow_check=(n:RangeWord @s:FactState value:RangeWord):>bool=>$unsafe {
+    let to=representation_type(ntype(n))
+    let bits=RangeWord(types.ptr[to].bits)
+    let sign=types.ptr[to].sign
+    let low:RangeWord=if not sign {0} else if bits >=? 64 {FACT_MIN} else {-(RangeWord(1) << (bits - 1))}
+    let high:RangeWord=if bits >=? 64 {FACT_MAX} else if sign {(RangeWord(1) << (bits - 1)) - 1} else {(RangeWord(1) << bits) - 1}
+    let lo_op=if low =? FACT_MIN and not fact_host_endpoint(s value false) {Tok.gt} else {Tok.ge}
+    let hi_op=if high =? FACT_MAX and not fact_host_endpoint(s value true) {Tok.lt} else {Tok.le}
+    let lo=fact_constant(@s low)
+    let hi=fact_constant(@s high)
+    let lc=fact_compare(s lo_op value lo)
+    let hc=fact_compare(s hi_op value hi)
+    # (uint64's ceiling 2^64-1 is beyond int64: a real int64 end is below it,
+    # a guard row to a larger literal caps an open one, nothing refutes it)
+    let unsigned=fact_type(to) =? T_U64
+    if unsigned and hc not=? 1 {hc=if fact_u64_capped(s value) {1} else {-1}}
+    # (a binding's covering set of written values: string_domains.jo)
+    let proven=lc =? 1 and hc =? 1 or int_domain_proven.has(n) or exact_progress_math.has(n) or exact_word_reads.has(n)
+    if fact_speculating not=? 0 {return proven}
+    if fact_probe_on {
+        fact_probe_record(n proven)
+        return proven
+    }
+    if proven or n =? fact_covered or not s.live or not (fact_policy =? 'RequireStatic' or fact_query) {return proven}
+    let upper=hc not=? 1 and (lc not=? 0 or hc =? 0)
+    let side=wit_side(value RangeWord(nodes.ptr[n].a))
+    # (an operand with no spelling of its own, as refinements show it)
+    if side.text =? "" {side.text="the value"}
+    let limit=if upper {high} else {low}
+    let shown_limit=if upper and unsigned {"18446744073709551615"} else {"{limit}"}
+    let bound_value=if upper {hi} else {lo}
+    let bound=WitSide(bound_value 0 shown_limit false true)
+    let op=if upper {Tok.le} else {Tok.ge}
+    let answer=if upper {hc} else {lc}
+    let refuted=answer =? 0
+    let missing=wit_relation(s s op side bound refuted)
+    let relation=wit_relation_text(op side bound)
+    wit_context(0)
+    if refuted {
+        wit_help(relation)
+        let shown=side.text
+        if dir_defer(n "{shown} does not fit {dt(ntype(n))}" true) {return false}
+        wit_fail(nodes.ptr[n].pos "{shown} does not fit {dt(ntype(n))}")
+        return false
+    }
+    err_notes.push([(-1) "help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`"])
+    let repair=if lc not=? 1 and hc not=? 1 {"{low} <=? {side.text} and {side.text} <=? {shown_limit}"} else {relation}
+    wit_unknown(n fact_bound(s value) "`{relation}` for the conversion to {dt(ntype(n))}" 0 repair missing)
+    false
+}
+# The builtin floor helper a Dewy `//` or `%` resolved to (fact_floor's kind), or 0.
+fact_floor_call=(n:RangeWord):>RangeWord=>$unsafe {
+    if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 {return 0}
+    let f=RangeWord(nodes.ptr[n].sym)
+    if fns.ptr[f].decl =? 0 or not pos_in_lib(nodes.ptr[RangeWord(fns.ptr[f].decl)].pos) {return 0}
+    if not fact_scalar(ntype(n)) {return 0}
+    let name=name_of(RangeWord(nodes.ptr[RangeWord(fns.ptr[f].decl)].name))
+    if name =? "__floor_div" {return 1}
+    if name =? "__floor_mod" {return 2}
+    if name =? "__floor_div_pow2" {return 3}
+    if name =? "__floor_mod_pow2" {return 4}
+    0
+}
+fact_range=(n:RangeWord @s:FactState):>void=>$unsafe {
+    let iterator=RangeWord(nodes.ptr[n].a)
+    let lo=fact_capture(RangeWord(nodes.ptr[iterator].a) @s)
+    let hi=fact_capture(RangeWord(nodes.ptr[iterator].b) @s)
+    let pushes=fact_counted_pushes(n @s)
+    let growers=fact_growing_pushes(n @s pushes)
+    let sums=fact_range_sums(n s lo hi)
+    # A local the body sets only to the loop's value (`best=i`, the argmax)
+    # holds its entry value or some earlier i: at most hi-1 whenever its
+    # entry value is (a sentinel -1, a first index 0).
+    let kept:array<[int64 FactBound bool bool]>=[]
+    # (an optional set only to it, `let best:int? = none`: a present payload is some i)
+    let found:array<int64>=[]
+    if nodes.ptr[iterator].b not=? 0 and not has_flag(iterator NF_INCLUSIVE) and RangeWord(nodes.ptr[n].sym) not=? 0 {
+        loop l in fact_index_carried(RangeWord(nodes.ptr[n].b) RangeWord(nodes.ptr[n].sym)) {
+            let i=fact_binding(s PlaceIdentity('local' RangeWord(locals.ptr[l].owner) l))
+            if i <? 0 {continue}
+            let e=s.bindings[i].value
+            if fact_summary_payload(fact_type(RangeWord(locals.ptr[l].type))) not=? 0 {
+                if fact_known_none(s e) {found.push(l)}
+                continue
+            }
+            kept.push([l fact_bound(s e) fact_entails(s e hi (-1)) fact_entails(s e lo 0)])
+        }
+    }
+    let pre=s
+    let hulls=fact_push_open(n @s)
+    let iterated=fact_iterate(n @s true 0 lo hi [pushes... growers...] sums)
+    if not iterated {
+        fact_changes(n @s n)
+        loop sum in sums {
+            let i=fact_binding(s PlaceIdentity('local' RangeWord(locals.ptr[sum[0]].owner) sum[0]))
+            if i >=? 0 {fact_set_bound(@s s.bindings[i].value sum[1])}
+        }
+    }
+    loop entry in kept {
+        let i=fact_binding(s PlaceIdentity('local' RangeWord(locals.ptr[entry[0]].owner) entry[0]))
+        if i <? 0 {continue}
+        let v=s.bindings[i].value
+        let x=fact_bound(s lo)
+        let y=fact_bound(s hi)
+        let b=fact_bound(s v)
+        b.lo=max(b.lo min(entry[1].lo x.lo))
+        if y.hi not=? FACT_MIN {b.hi=min(b.hi max(entry[1].hi y.hi - 1))}
+        fact_set_bound(@s v b)
+        if entry[2] {fact_difference(@s v hi (-1) n)}
+    }
+    loop l in found {fact_found_payload(@s l lo hi)}
+    if s.live and RangeWord(nodes.ptr[n].sym) not=? 0 {fact_range_invariants(n pre @s lo hi)}
+    let after=s
+    let body=fact_range_body(n s lo hi)
+    fact_growing_lengths(@body pushes)
+    fact_growing_lengths(@body growers)
+    # A nonempty iteration establishes lo < hi. Entry <= lo and every
+    # replacement < hi therefore bound the carried value inside the body,
+    # even when a zero-iteration exit cannot establish entry < hi.
+    loop entry in kept {
+        if not entry[3] {continue}
+        let i=fact_binding(body PlaceIdentity('local' RangeWord(locals.ptr[entry[0]].owner) entry[0]))
+        if i >=? 0 {fact_difference(@body body.bindings[i].value hi (-1) n)}
+    }
+    let edges=fact_loop_body(n @body)
+    fact_range_exhaustion(n pre lo 0 edges)
+    s=if iterated {fact_join(after edges.exits n)} else {after}
+    if iterated and fact_speculating =? 0 and after.live and edges.exits.live {
+        loop entry in kept {fact_carried_exit(@s entry[0] after @edges.exits)}
+    }
+    if hulls {fact_push_close(n @s)}
+    fact_growing_lengths(@s growers)
+    if pushes.length >? 0 and nodes.ptr[iterator].b not=? 0 {
+        # (the iteration count, hi-lo or hi-lo+1, when the range is not reversed)
+        let extra:RangeWord=if has_flag(iterator NF_INCLUSIVE) {1} else {0}
+        let x=fact_bound(s lo)
+        let y=fact_bound(s hi)
+        if fact_compare(s 'le' lo hi) =? 1 or extra =? 1 and fact_compare(s 'le' lo hi) >=? 0 and x.lo =? x.hi and y.lo =? y.hi and RangeWord(y.lo) + 1 >=? x.lo {
+            if x.lo not=? FACT_MIN and y.lo not=? FACT_MIN and fact_add_fits(y.hi extra - RangeWord(x.lo)) and fact_add_fits(y.lo extra - RangeWord(x.hi)) {
+                let count=fact_new(@s FactBound(max(0 RangeWord(y.lo) - RangeWord(x.hi) + extra) RangeWord(y.hi) - RangeWord(x.lo) + extra) FactTerm('minus' hi lo n T_INT))
+                if x.lo =? x.hi {
+                    fact_difference(@s count hi extra - RangeWord(x.lo) n)
+                    fact_difference(@s hi count RangeWord(x.lo) - extra n)
+                }
+                fact_counted_lengths(n @s pushes count)
+                return
+            }
+        }
+        # (`[0..n)` runs max(0, n) times, the length `fill(x n)` has)
+        if extra =? 0 and x.lo =? 0 and x.hi =? 0 {
+            fact_counted_lengths(n @s pushes fact_clamped(@s hi n))
+            return
+        }
+        # (an unknown count is still never negative: the pushes only grow it)
+        fact_counted_lengths(n @s pushes fact_new(@s FactBound(0 FACT_MAX)))
+    }
+}
