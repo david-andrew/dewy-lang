@@ -1,0 +1,7 @@
+# Both mutable: a contract between them could not stay true.
+set = (@xs:array<int64> @i:int64<(<? xs.length)>):>void => { i = xs.length }
+main = () => {
+    let a:array<int64> = [1 2 3]
+    let k:int64 = 0
+    set(@a @k)
+}

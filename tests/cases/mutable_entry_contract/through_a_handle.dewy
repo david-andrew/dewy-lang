@@ -1,0 +1,8 @@
+# Near miss: a function value takes its contract along, so a call through it is proven too.
+set = (@xs:array<int64> i:int64<0 <=? i <? xs.length> v:int64):>void => { xs[i] = v }
+main = () => {
+    let a:array<int64> = [1 2 3]
+    let f = @set
+    f(@a 7 1)
+    printl(a)
+}

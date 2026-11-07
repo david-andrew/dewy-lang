@@ -1,0 +1,11 @@
+# Near miss: a lambda writing through the record ends the fact as a helper would.
+Box:type = [values:array<int64>]
+set = (@b:Box i:int64<0 <=? i <? b.values.length> v:int64 go:<():>void>):>void => {
+    go()
+    b.values[i] = v
+}
+main = () => {
+    let b = Box[[1 2 3]]
+    set(@b 2 7 () => printl(0))
+    printl(b.values)
+}

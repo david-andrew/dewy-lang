@@ -1,0 +1,6 @@
+# A mutable scalar names no entry projection: the value itself may change.
+set = (@n:int64 i:int64<(<? n)>):>void => { n = i }
+main = () => {
+    let a:int64 = 3
+    set(@a 2)
+}

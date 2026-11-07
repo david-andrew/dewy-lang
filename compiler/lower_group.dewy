@@ -573,7 +573,7 @@ gen_direct_call=(f:LGWord args:array<int64> order:array<int64>=[] call_node:LGWo
     let mark=copy_backs.length
     let snaps=arg_snapshots.length
     call_args(args fns.ptr[f].ptypes inst_mutmask(f) @argv f order);
-    if refine_active {refine_gen_args(args argv if vc(ret) =? VC_AGG {1} else {0});}
+    if refine_active {refine_gen_args(args argv if vc(ret) =? VC_AGG {1} else {0} inst_mutmask(f));}
     # Default builds can inline tiny checked helpers without expanding their
     # failure path. Release keeps its measured whole-function inlining policy.
     # Still unwind lowering's pending copy-back records; their unreachable
@@ -656,7 +656,7 @@ gen_closure_call=(callee:LGWord args:array<int64> order:array<int64>=[]):>Val=>$
     let mark=copy_backs.length
     let snaps=arg_snapshots.length
     call_args(args pts LGWord(types.ptr[ft].mutmask) @argv order = order);
-    if refine_active {refine_gen_args(args argv if vc(ret) =? VC_AGG {2} else {1});}
+    if refine_active {refine_gen_args(args argv if vc(ret) =? VC_AGG {2} else {1} LGWord(types.ptr[ft].mutmask));}
     let rv=if known >=? 0 {e_call(lf_of_inst(known) argv ret_vt(ret))} else {e_calli(fp argv ret_vt(ret) false)}
     copy_back(mark);
     release_arg_snapshots(snaps);

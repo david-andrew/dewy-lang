@@ -1,0 +1,10 @@
+# exit: 101
+$runtime_checks
+set = (@xs:array<int64> i:int64<0 <=? i <? xs.length> v:int64):>void => { xs[i] = v }
+main = () => {
+    let a:array<int64> = [1 2 3]
+    let n = to_int("7") ?? 0
+    printl(a.length)
+    set(@a n 9)
+    printl(a)
+}

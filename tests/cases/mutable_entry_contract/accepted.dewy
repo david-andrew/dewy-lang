@@ -1,0 +1,14 @@
+# A by-value parameter's contract may name what a mutable parameter projects: it holds at entry.
+set = (@xs:array<int64> i:int64<0 <=? i <? xs.length> v:int64):>void => { xs[i] = v }
+Box:type = [values:array<int64>]
+put = (@b:Box i:int64<0 <=? i <? b.values.length> v:int64):>void => { b.values[i] = v }
+main = () => {
+    let a:array<int64> = [1 2 3]
+    set(@a 2 7)
+    let i = to_int("1") ?? 0
+    if 0 <=? i <? a.length { set(@a i 9) }
+    printl(a)
+    let b = Box[[1 2 3]]
+    put(@b 0 4)
+    printl(b.values)
+}

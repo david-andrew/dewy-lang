@@ -660,14 +660,22 @@ refine_gen = (n: int) -> Val:
     ref_gen_check(n, value.v, refine_ir_entry, fns[cur_fn].ptypes)
     value
 
-refine_gen_args = (args: int[], values: int[], offset: int):
+refine_gen_args = (args: int[], values: int[], offset: int, mutmask: int = 0):
     captured: int[]
     arg_types: int[]
     loop arg in args: arg_types.push(ntype(arg))
     loop i in [offset..values.len()): captured.push(values[i])
+    loaded = false
     loop i in [0..args.len()):
         n = args[i]
-        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.refinement)): ref_gen_check(n, captured[i], captured, arg_types)
+        if nodes[n].kind != .conv or nodes[n].aux != i32(int(CV.refinement)): continue
+        # (a contract may name what a mutable argument projects: that argument is its place's
+        # address, so read the value it holds now, before the call)
+        if not loaded:
+            loaded = true
+            loop j in [0..args.len()):
+                if j < 62 and mutmask & (1 << j) != 0: captured[j] = load_val(representation_type(arg_types[j]), captured[j], 0)
+        ref_gen_check(n, captured[i], captured, arg_types)
 
 refine_gen_entry = (f: int):
     refine_ir_entry = []
@@ -693,7 +701,10 @@ ref_validate_signature = (params: int[], ret: int, mask: int, pos: int):
                 if term.kind != 2: continue
                 j = term.value
                 if j >= params.len(): fatal(pos, "missing refinement parameter")
-                if mask & (1 << j) != 0 and (i < params.len() or term.path.len() == 0) and not (term.path.len() == 1 and term.path[0] <= -2 and is_nd(representation_type(params[j]))): fatal(pos, "mutable refinement dependencies are only valid in projected postconditions")
+                # (a by-value parameter may name what a mutable one projects: the contract holds
+                # at entry, as a fact about the values it read then, which writes invalidate)
+                entry_projection = i < params.len() and term.path.len() > 0 and mask & (1 << i) == 0
+                if mask & (1 << j) != 0 and (i < params.len() or term.path.len() == 0) and not entry_projection and not (term.path.len() == 1 and term.path[0] <= -2 and is_nd(representation_type(params[j]))): fatal(pos, "mutable refinement dependencies are only valid in projected postconditions")
                 a = if tkind(representation_type(t)) == .array or tkind(representation_type(t)) == .str_ or is_nd(representation_type(t)): T_INT else: representation_type(t)
                 b = ref_projection_type(params[j], term.path, pos)
                 shape_int = b == T_MATH_INT and nd_shape_predicates.has(int(types[t].st))

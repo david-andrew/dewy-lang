@@ -1212,6 +1212,9 @@ automatically preserve this range. A returned refinement may
 project a mutable parameter's final length, for example
 `append = (@xs:array<int64> x:int64):>addr<(<? xs.length)> => { ... }`.
 References to by-value parameters still describe their captured entry values.
+A by-value parameter may name what a mutable one projects:
+`set = (@xs:array<int64> i:int64<0 <=? i <? xs.length> v:int64):>void => { xs[i] = v }`.
+The caller proves it, and it holds at entry; a write that changes the length ends it.
 
 Mutable `@` access requires an equivalent storage contract. A dependent record
 must be passed as a whole so its field updates retain invariant authority.

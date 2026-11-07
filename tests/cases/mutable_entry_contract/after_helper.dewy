@@ -1,0 +1,11 @@
+# The contract held at entry; this write ended it.
+clear = (@ys:array<int64>):>void => { ys = [] }
+set = (@xs:array<int64> i:int64<0 <=? i <? xs.length> v:int64):>void => {
+    clear(@xs)
+    xs[i] = v
+}
+main = () => {
+    let a:array<int64> = [1 2 3]
+    set(@a 2 7)
+    printl(a)
+}
