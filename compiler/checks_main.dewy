@@ -1,0 +1,243 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (exit)
+from p"ast.jo" import (NF_STMT add_flag kid mk nkids nodes set_list)
+from p"check.jo" import (FK_INIT check_scopes check_struct_fields ctxs cx get_fn_inst main_entry_fn main_error_payloads main_exit_codes main_exit_kinds main_exit_pinned modules new_inst resolve_type)
+from p"checker_state.dewy" import (FnCtx)
+from p"errors.jo" import (exception_member nominal_family value_members)
+from p"expr.jo" import (bc_block bc_call bc_field bc_ident bc_int bc_let type_node_of)
+from p"pcheck.jo" import (pc_child)
+from p"refine.jo" import (mk_refined ref_intern ref_spans refine_active)
+from p"refinement_types.dewy" import (RefAtom RefTerm)
+from p"types.jo" import (T_INT T_MATH_INT T_NEVER T_NONE T_STR T_VOID dt fields is_int prune structs tkind type_str types)
+from p"util.jo" import (fatal intern name_known name_of pos_file pos_in_lib pos_off)
+
+MainWord:type=int64<overflow='wrap'>
+# a module's top-level code. It may be checked in the middle of another body (a runtime
+# function demanded there checks what is pending, runtime_fn): that body's context comes back.
+# Whether a Dewy program names a prelude file that declares nominal errors (the locks' or the
+# channels': a name some source has, and that no module of the program declares itself, as a
+# program's own `Mutex` type): a probe per name, then a lookup per module only for a name some
+# source has.
+names_known=(probes:array<string>):>bool=>{
+    loop nm in probes {
+        if name_known(nm) {return true}
+    }
+    false
+}
+prelude_named=(probes:array<string> families:bool=false):>bool=>{
+    loop nm in probes {
+        if not name_known(nm) {continue}
+        # (a protocol's name reaches the prelude's family even beside a module's own:
+        # collect_fns loads its module then, too late for the nominals it uses)
+        if families and (nm as array<uint8>)[0] >=? b'a' and (nm as array<uint8>)[0] <=? b'z' {return true}
+        let id=intern(nm)
+        let own=false
+        loop m in [0..modules.length) {
+            if not modules[m].is_prelude and modules[m].names.get(id) not=? none {own=true}
+        }
+        if not own {return true}
+    }
+    false
+}
+# ---------------- Dewy's main ----------------
+# Dewy's main gives back void or the errors that reach it (`void | E`, declared or
+# inferred; an ordinary type). An error is said on standard error and ends the program
+# with its kind's code: 1, 2, 3, ... in the kinds' order (the declaration's, or the
+# order the kinds are declared in when inferred), up to 100 (101 is a failed runtime check); an error type with an
+# `exit_code` field gives its own.
+dewy_main_result=(decl:MainWord rt:MainWord):>void=>$unsafe {
+    if rt =? T_VOID or rt =? T_NEVER {return}
+    let pos=nodes.ptr[decl].pos
+    if is_int(rt) or rt =? T_MATH_INT {fatal(pos "main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code")}
+    let kinds:array<int64>=[]
+    loop m in value_members(rt) {
+        if tkind(m) =? 'void_' {continue}
+        if m =? T_NONE or not exception_member(m) {fatal(pos "main returns void or the errors that reach it, found {dt(rt)}: {dt(m)} is not an error. A last line giving a value gives it back: declare `main = ():>void => ...` to drop it, print it, or end with `exit(n)` for a code")}
+        kinds.push(m)
+    }
+    let ordered=main_kind_order(decl kinds)
+    let taken=dict<int64 bool>()
+    let pinned:array<int64>=[]
+    loop k in ordered {
+        let c=main_pinned_code(k pos)
+        pinned.push(c)
+        if c >? 0 and not main_library_kind(k) {
+            if taken.has(c) {fatal(pos "two error kinds reaching main pin exit code {c}")}
+            taken[c]=true
+        }
+    }
+    # (the library's own pin gives way to the program's)
+    loop i in 0.. and k in ordered {
+        if pinned[i] >? 0 and main_library_kind(k) {
+            if taken.has(pinned[i]) {pinned[i]=0}
+            else {taken[pinned[i]]=true}
+        }
+    }
+    let next:MainWord=1
+    loop i in 0.. and k in ordered {
+        let code=pinned[i]
+        if code =? 0 {
+            loop taken.has(next) {next += 1}
+            if next >? 100 {fatal(pos "main's errors need more exit codes than 1 to 100: let some share a parent type, or handle them")}
+            code=next
+            taken[next]=true
+        }
+        main_exit_kinds.push(k)
+        main_exit_codes.push(code)
+        main_exit_pinned.push(pinned[i] not=? 0)
+    }
+    # (the entry: main's result, an error said and its code given back, else 0)
+    let d=mk('fn_' pos)
+    nodes.ptr[d].name=int32(intern("$main_entry"))
+    nodes.ptr[d].mod=nodes.ptr[decl].mod
+    nodes.ptr[d].a=int32(type_node_of(T_INT pos))
+    let result="$main_result"
+    # (the call stands in main's body, in its scopes: main's own settings judge what it may do)
+    let at=if nodes.ptr[decl].b not=? 0 {nodes.ptr[MainWord(nodes.ptr[decl].b)].pos} else {pos}
+    let stmts=[bc_let(result bc_call("main" [] at) pos)]
+    loop i in 0.. and k in main_exit_kinds {
+        let message=mk('str_lit' pos)
+        if tkind(k) =? 'struct_' and structs.ptr[MainWord(types.ptr[prune(k)].st)].nfields =? 0 {
+            # (an error with nothing to say, as OutOfMemory: its name)
+            nodes.ptr[message].sval=int32(intern(type_str(k)))
+        }
+        else if not main_error_payloads {
+            # (only a debug build, -g, prints the whole payload, which may hold secrets; others
+            # say the kind and its message: `error: AuthError: login failed`)
+            nodes.ptr[message].sval=int32(intern(type_str(k)))
+            if main_error_has_message(k) {
+                message=bc_call("__main_error_text" [message bc_field(bc_ident(result pos) "message" pos)] pos)
+            }
+        }
+        else {
+            nodes.ptr[message].aux=1
+            let part=mk('pair' pos)
+            nodes.ptr[part].a=int32(bc_ident(result pos))
+            nodes.ptr[part].sval=-1
+            set_list(message [part])
+        }
+        let code=if main_exit_pinned[i] {bc_field(bc_ident(result pos) "exit_code" pos)} else {bc_int(main_exit_codes[i] pos)}
+        let ret=mk('return_' pos)
+        nodes.ptr[ret].a=int32(bc_call("__main_failed" [message code] pos))
+        let condition=mk('istype' pos)
+        nodes.ptr[condition].a=int32(bc_ident(result pos))
+        nodes.ptr[condition].b=int32(type_node_of(k pos))
+        let branch=mk('if_' pos)
+        nodes.ptr[branch].a=int32(condition)
+        nodes.ptr[branch].b=int32(bc_block([ret] pos))
+        add_flag(branch NF_STMT)
+        stmts.push(branch)
+    }
+    let done=mk('return_' pos)
+    nodes.ptr[done].a=int32(bc_int(0 pos))
+    stmts.push(done)
+    nodes.ptr[d].b=int32(bc_block(stmts pos))
+    main_entry_fn=get_fn_inst(d [] pos)
+}
+# does error kind k have a text `message` field (said by release builds)?
+main_error_has_message=(k:MainWord):>bool=>$unsafe {
+    let t=prune(k)
+    if tkind(t) not=? 'struct_' {return false}
+    let si=MainWord(types.ptr[t].st)
+    check_struct_fields(si)
+    loop i in [0..MainWord(structs.ptr[si].nfields)) {
+        let f=MainWord(structs.ptr[si].fields) + i
+        if name_of(MainWord(fields.ptr[f].name)) =? "message" {return prune(MainWord(fields.ptr[f].type)) =? T_STR}
+    }
+    false
+}
+# The kinds in exit-code order: as a declared result writes them, else in the order
+# their types are declared
+main_kind_order=(decl:MainWord kinds:array<int64>):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    if nodes.ptr[decl].a not=? 0 {
+        let written:array<int64>=[]
+        let saved=cx
+        ctxs.push(FnCtx(int32(new_inst(FK_INIT MainWord(nodes.ptr[decl].mod) "main result")) (-1) int32(T_VOID) false 0 nodes.ptr[decl].mod int32(check_scopes.names.length)))
+        cx=ctxs.length - 1
+        main_written_kinds(MainWord(nodes.ptr[decl].a) @written)
+        ctxs.pop();
+        cx=saved
+        loop w in written {
+            if kinds.contains(w) and not out.contains(w) {out.push(w)}
+        }
+    }
+    let rest:array<int64>=[]
+    loop k in kinds {
+        if not out.contains(k) {rest.push(k)}
+    }
+    # (insertion by declaration position)
+    let i:MainWord=1
+    loop i <? rest.length {
+        let j=i
+        loop j >? 0 and main_kind_pos(rest[j]) <? main_kind_pos(rest[j - 1]) {
+            let t=rest[j]
+            rest[j]=rest[j - 1]
+            rest[j - 1]=t
+            j -= 1
+        }
+        i += 1
+    }
+    loop k in rest {out.push(k)}
+    out
+}
+main_written_kinds=(tn:MainWord @out:array<int64>):>void=>$unsafe {
+    if nodes.ptr[tn].kind =? 'tunion' {
+        loop i in [0..nkids(tn)) {main_written_kinds(kid(tn i) @out)}
+        return
+    }
+    let t=prune(resolve_type(tn))
+    loop m in value_members(nominal_family(t)) {out.push(m)}
+}
+main_kind_pos=(t:MainWord):>MainWord=>$unsafe {
+    if tkind(t) not=? 'struct_' {return 0}
+    let d=MainWord(structs.ptr[MainWord(types.ptr[t].st)].decl)
+    if d =? 0 {return 0}
+    let f=pos_file(nodes.ptr[d].pos)
+    f * 1000000000 + pos_off(nodes.ptr[d].pos)
+}
+# An error type's `exit_code` is the code main ends with: 1 to 100 (0 is success,
+# 101 a failed runtime check), so the field is refined to that range and every
+# value written to it is an obligation like any other.
+exit_code_field_type=(t:MainWord f:MainWord owner:MainWord):>MainWord=>$unsafe {
+    let base=prune(t)
+    if types.ptr[base].kind =? 'refined' {base=prune(MainWord(types.ptr[base].elem))}
+    if not is_int(base) {fatal(nodes.ptr[f].pos "{dt(owner)}'s exit_code is the exit code main ends with for it: an integer")}
+    let dv=MainWord(nodes.ptr[f].b)
+    if dv not=? 0 and nodes.ptr[dv].kind =? 'int_lit' and (nodes.ptr[dv].ival <? 1 or nodes.ptr[dv].ival >? 100) {fatal(nodes.ptr[f].pos "{dt(owner)}'s exit_code is {nodes.ptr[dv].ival}: an exit code for an error is 1 to 100 (0 is success, and 101 a failed runtime check)")}
+    if not refine_active and pc_child >=? 0 {exit(1)}
+    let predicate=ref_intern([RefAtom('le' RefTerm(1 1) RefTerm()) RefAtom('le' RefTerm() RefTerm(1 100))])
+    if not ref_spans.has(predicate) {ref_spans[predicate]=nodes.ptr[f].pos}
+    mk_refined(t predicate)
+}
+main_library_kind=(t:MainWord):>bool=>$unsafe {
+    tkind(t) =? 'struct_' and pos_in_lib(nodes.ptr[MainWord(structs.ptr[MainWord(types.ptr[t].st)].decl)].pos)
+}
+# an error type's own exit code: its `exit_code` field's default (0: none of its own)
+main_pinned_code=(t:MainWord pos:MainWord):>MainWord=>$unsafe {
+    if tkind(t) not=? 'struct_' {return 0}
+    let si=MainWord(types.ptr[t].st)
+    check_struct_fields(si)
+    loop i in [0..MainWord(structs.ptr[si].nfields)) {
+        let f=MainWord(structs.ptr[si].fields) + i
+        if name_of(MainWord(fields.ptr[f].name)) not=? "exit_code" {continue}
+        let ft=prune(MainWord(fields.ptr[f].type))
+        if types.ptr[ft].kind =? 'refined' {ft=prune(MainWord(types.ptr[ft].elem))}
+        if not is_int(ft) {fatal(pos "{dt(t)}'s exit_code is the exit code main ends with for it: an integer")}
+        let dv=MainWord(fields.ptr[f].defval)
+        if dv =? 0 or nodes.ptr[dv].kind not=? 'int_lit' {fatal(pos "{dt(t)}'s exit_code needs a constant default, the code main ends with for it: `exit_code:int64=3`")}
+        let c=MainWord(nodes.ptr[dv].ival)
+        if c <? 1 or c >? 100 {fatal(pos "{dt(t)}'s exit_code is {c}: an exit code for an error is 1 to 100 (0 is success, and 101 a failed runtime check)")}
+        return c
+    }
+    0
+}
+# `dewy build --exit-codes`: the table of main's exit codes
+print_exit_codes=():>void=>{
+    printl("0 success")
+    loop i in 0.. and k in main_exit_kinds {
+        let own=if main_exit_pinned[i] {" (its exit_code)"} else {""}
+        printl("{main_exit_codes[i]} {dt(k)}{own}")
+    }
+    printl("101 a panic")
+}

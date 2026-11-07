@@ -1,0 +1,308 @@
+use 'check.jo'
+use 'secret_checks.dewy'
+use 'checks_imports.dewy'
+use 'checks_hints.dewy'
+use 'checks_text.dewy'
+use 'isolation_ops.dewy'
+use 'checker_program.dewy'
+use 'checker_hooks.dewy'
+use 'checker_sinks.dewy'
+use 'checker_value_calls.dewy'
+use 'checker_values.dewy'
+use 'host_binds.jo'
+use 'checker_call_queries.dewy'
+use 'checker_expr.dewy'
+use 'effect_lattice.dewy'
+use 'checker_blocks.dewy'
+use 'checker_assigns.dewy'
+use 'checker_vardecls.dewy'
+use 'checker_for_loops.dewy'
+use 'checker_statements.dewy'
+use 'checker_exprstmts.dewy'
+use 'checker_returns.dewy'
+use 'checker_loops.dewy'
+use 'checker_zonk.dewy'
+use 'checker_body_results.dewy'
+use 'checker_bodies.dewy'
+use 'checker_instances.dewy'
+use 'checker_signature.dewy'
+use 'checker_resolve.dewy'
+use 'checker_alias.dewy'
+use 'checker_fields.dewy'
+use 'checker_results.dewy'
+use 'type_substitute.dewy'
+use 'constant_eval.dewy'
+use 'constant_host.dewy'
+use 'source_types.dewy'
+use 'evaluator_state.dewy'
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'partition.jo'
+use 'lazy_bodies.jo'
+use 'lazy_force.dewy'
+use 'frontend.jo'
+use 'pcheck.jo'
+use 'spelling.dewy'
+use 'habits.dewy'
+use 'units.jo'
+use 'definite.jo'
+use 'definite_walk.dewy'
+use 'import_cycles.jo'
+use 'cycle_ops.dewy'
+use 'decimals.jo'
+use 'growth.jo'
+use 'safe_paths.jo'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'constant_checks.dewy'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'deadlock.jo'
+use 'errors.jo'
+use 'settings.jo'
+use 'host_target.dewy'
+use 'targets.dewy'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'watch.jo'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'pkg.jo'
+use 'pkg_ops.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'parse.jo'
+use 'types.jo'
+use 'expr.jo'
+use 'ide.jo'
+use 'poly_closure.jo'
+use 'prelude.jo'
+use 'comptime.jo'
+use 'facts.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'ownership.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'juxtapose.dewy'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'temperature_kinds.jo'
+use 'temperature_ops.dewy'
+use 'dewy_methods.jo'
+use 'secrets.jo'
+use 'directives.jo'
+use 'ffi.jo'
+use 'floats.jo'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'concurrency_tasks.dewy'
+
+# a module's top-level code. It may be checked in the middle of another body (a runtime
+# function demanded there checks what is pending, runtime_fn): that body's context comes back.
+# Whether a Dewy program names a prelude file that declares nominal errors (the locks' or the
+# channels': a name some source has, and that no module of the program declares itself, as a
+# program's own `Mutex` type): a probe per name, then a lookup per module only for a name some
+# source has.
+names_known = (probes: str[]) -> bool:
+    loop nm in probes:
+        if name_known(nm): return true
+    false
+prelude_named = (probes: str[], families: bool = false) -> bool:
+    loop nm in probes:
+        if not name_known(nm): continue
+        # (a protocol's name reaches the prelude's family even beside a module's own:
+        # collect_fns loads its module then, too late for the nominals it uses)
+        if families and nm[0] >= 'a' and nm[0] <= 'z': return true
+        id = intern(nm)
+        own = false
+        loop m in [0..modules.len()):
+            if not modules[m].is_prelude and modules[m].names.get(id) != none: own = true
+        if not own: return true
+    false
+# ---------------- Dewy's main ----------------
+# Dewy's main gives back void or the errors that reach it (`void | E`, declared or
+# inferred; an ordinary type). An error is said on standard error and ends the program
+# with its kind's code: 1, 2, 3, ... in the kinds' order (the declaration's, or the
+# order the kinds are declared in when inferred), up to 100 (101 is a failed runtime check); an error type with an
+# `exit_code` field gives its own.
+dewy_main_result = (decl: int, rt: int):
+    if rt == T_VOID or rt == T_NEVER: return
+    pos = nodes[decl].pos
+    if is_int(rt) or rt == T_MATH_INT: fatal(pos, "main gives back no exit code: it returns void, or the errors that reach it (`main = ():>void|ParseError => ...`, inferred when not declared). End successfully with `return` (or by reaching the end), and call `exit(n)` for a particular code")
+    kinds: int[]
+    loop m in value_members(rt):
+        if tkind(m) == .void_: continue
+        if m == T_NONE or not exception_member(m): fatal(pos, "main returns void or the errors that reach it, found {dt(rt)}: {dt(m)} is not an error. A last line giving a value gives it back: declare `main = ():>void => ...` to drop it, print it, or end with `exit(n)` for a code")
+        kinds.push(m)
+    ordered = main_kind_order(decl, kinds)
+    taken: {int: bool}
+    pinned: int[]
+    loop k in ordered:
+        c = main_pinned_code(k, pos)
+        pinned.push(c)
+        if c > 0 and not main_library_kind(k):
+            if taken.has(c): fatal(pos, "two error kinds reaching main pin exit code {c}")
+            taken[c] = true
+    # (the library's own pin gives way to the program's)
+    loop i in 0.. and k in ordered:
+        if pinned[i] > 0 and main_library_kind(k):
+            if taken.has(pinned[i]): pinned[i] = 0
+            else: taken[pinned[i]] = true
+    next = 1
+    loop i in 0.. and k in ordered:
+        code = pinned[i]
+        if code == 0:
+            loop taken.has(next): next += 1
+            if next > 100: fatal(pos, "main's errors need more exit codes than 1 to 100: let some share a parent type, or handle them")
+            code = next
+            taken[next] = true
+        main_exit_kinds.push(k)
+        main_exit_codes.push(code)
+        main_exit_pinned.push(pinned[i] != 0)
+    # (the entry: main's result, an error said and its code given back, else 0)
+    d = mk(.fn_, pos)
+    nodes[d].name = i32(intern("$main_entry"))
+    nodes[d].mod = nodes[decl].mod
+    nodes[d].a = i32(type_node_of(T_INT, pos))
+    result = "$main_result"
+    # (the call stands in main's body, in its scopes: main's own settings judge what it may do)
+    at = if nodes[decl].b != 0: nodes[int(nodes[decl].b)].pos else: pos
+    stmts = [bc_let(result, bc_call("main", [], at), pos)]
+    loop i in 0.. and k in main_exit_kinds:
+        message = mk(.str_lit, pos)
+        if tkind(k) == .struct_ and structs[int(types[prune(k)].st)].nfields == 0:
+            # (an error with nothing to say, as OutOfMemory: its name)
+            nodes[message].sval = i32(intern(type_str(k)))
+        else if not main_error_payloads:
+            # (only a debug build, -g, prints the whole payload, which may hold secrets; others
+            # say the kind and its message: `error: AuthError: login failed`)
+            nodes[message].sval = i32(intern(type_str(k)))
+            if main_error_has_message(k):
+                message = bc_call("__main_error_text", [message, bc_field(bc_ident(result, pos), "message", pos)], pos)
+        else:
+            nodes[message].aux = 1
+            part = mk(.pair, pos)
+            nodes[part].a = i32(bc_ident(result, pos))
+            nodes[part].sval = -1
+            set_list(message, [part])
+        code = if main_exit_pinned[i]: bc_field(bc_ident(result, pos), "exit_code", pos) else: bc_int(main_exit_codes[i], pos)
+        ret = mk(.return_, pos)
+        nodes[ret].a = i32(bc_call("__main_failed", [message, code], pos))
+        condition = mk(.istype, pos)
+        nodes[condition].a = i32(bc_ident(result, pos))
+        nodes[condition].b = i32(type_node_of(k, pos))
+        branch = mk(.if_, pos)
+        nodes[branch].a = i32(condition)
+        nodes[branch].b = i32(bc_block([ret], pos))
+        add_flag(branch, NF_STMT)
+        stmts.push(branch)
+    done = mk(.return_, pos)
+    nodes[done].a = i32(bc_int(0, pos))
+    stmts.push(done)
+    nodes[d].b = i32(bc_block(stmts, pos))
+    main_entry_fn = get_fn_inst(d, [], pos)
+# does error kind k have a text `message` field (said by release builds)?
+main_error_has_message = (k: int) -> bool:
+    t = prune(k)
+    if tkind(t) != .struct_: return false
+    si = int(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        if name_of(int(fields[f].name)) == "message": return prune(int(fields[f].type)) == T_STR
+    false
+# The kinds in exit-code order: as a declared result writes them, else in the order
+# their types are declared
+main_kind_order = (decl: int, kinds: int[]) -> int[]:
+    out: int[]
+    if nodes[decl].a != 0:
+        written: int[]
+        saved = cx
+        ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[decl].mod), "main result")), -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(check_scopes.names.len())))
+        cx = ctxs.len() - 1
+        main_written_kinds(int(nodes[decl].a), written)
+        ctxs.pop()
+        cx = saved
+        loop w in written:
+            if kinds.contains(w) and not out.contains(w): out.push(w)
+    rest: int[]
+    loop k in kinds:
+        if not out.contains(k): rest.push(k)
+    # (insertion by declaration position)
+    i = 1
+    loop i < rest.len():
+        j = i
+        loop j > 0 and main_kind_pos(rest[j]) < main_kind_pos(rest[j - 1]):
+            t = rest[j]
+            rest[j] = rest[j - 1]
+            rest[j - 1] = t
+            j -= 1
+        i += 1
+    loop k in rest: out.push(k)
+    out
+main_written_kinds = (tn: int, out: mut int[]):
+    if nodes[tn].kind == .tunion:
+        loop i in [0..nkids(tn)): main_written_kinds(kid(tn, i), out)
+        return
+    t = prune(resolve_type(tn))
+    loop m in value_members(nominal_family(t)): out.push(m)
+main_kind_pos = (t: int) -> int:
+    if tkind(t) != .struct_: return 0
+    d = int(structs[int(types[t].st)].decl)
+    if d == 0: return 0
+    f = pos_file(nodes[d].pos)
+    f * 1000000000 + pos_off(nodes[d].pos)
+# An error type's `exit_code` is the code main ends with: 1 to 100 (0 is success,
+# 101 a failed runtime check), so the field is refined to that range and every
+# value written to it is an obligation like any other.
+exit_code_field_type = (t: int, f: int, owner: int) -> int:
+    base = prune(t)
+    if types[base].kind == .refined: base = prune(int(types[base].elem))
+    if not is_int(base): fatal(nodes[f].pos, "{dt(owner)}'s exit_code is the exit code main ends with for it: an integer")
+    dv = int(nodes[f].b)
+    if dv != 0 and nodes[dv].kind == .int_lit and (nodes[dv].ival < 1 or nodes[dv].ival > 100): fatal(nodes[f].pos, "{dt(owner)}'s exit_code is {nodes[dv].ival}: an exit code for an error is 1 to 100 (0 is success, and 101 a failed runtime check)")
+    if not refine_active and pc_child >= 0: exit(1)
+    predicate = ref_intern([RefAtom(.le, RefTerm(1, 1), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, 100))])
+    if not ref_spans.has(predicate): ref_spans[predicate] = nodes[f].pos
+    mk_refined(t, predicate)
+main_library_kind = (t: int) -> bool: tkind(t) == .struct_ and pos_in_lib(nodes[int(structs[int(types[t].st)].decl)].pos)
+# an error type's own exit code: its `exit_code` field's default (0: none of its own)
+main_pinned_code = (t: int, pos: int) -> int:
+    if tkind(t) != .struct_: return 0
+    si = int(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        if name_of(int(fields[f].name)) != "exit_code": continue
+        ft = prune(int(fields[f].type))
+        if types[ft].kind == .refined: ft = prune(int(types[ft].elem))
+        if not is_int(ft): fatal(pos, "{dt(t)}'s exit_code is the exit code main ends with for it: an integer")
+        dv = int(fields[f].defval)
+        if dv == 0 or nodes[dv].kind != .int_lit: fatal(pos, "{dt(t)}'s exit_code needs a constant default, the code main ends with for it: `exit_code:int64=3`")
+        c = int(nodes[dv].ival)
+        if c < 1 or c > 100: fatal(pos, "{dt(t)}'s exit_code is {c}: an exit code for an error is 1 to 100 (0 is success, and 101 a failed runtime check)")
+        return c
+    0
+# `dewy build --exit-codes`: the table of main's exit codes
+print_exit_codes = ():
+    print("0 success")
+    loop i in 0.. and k in main_exit_kinds:
+        own = if main_exit_pinned[i]: " (its exit_code)" else: ""
+        print("{main_exit_codes[i]} {dt(k)}{own}")
+    print("101 a panic")
