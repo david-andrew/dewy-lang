@@ -1,0 +1,8 @@
+# The length may have changed, so the later read needs its own proof.
+R:type = [values:array<int64>]
+f = (@r:R c:bool):>void => { if c { r.values = [] } }
+main = () => {
+    let r = R[[1 2 3]]
+    f(@r r.values.length >? 9)
+    printl(r.values[2])
+}

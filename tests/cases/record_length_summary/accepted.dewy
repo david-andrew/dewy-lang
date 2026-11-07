@@ -1,0 +1,15 @@
+# A helper that only writes elements of a mutable record's array field keeps that field's length.
+R:type = [values:array<int64> other:array<int64> n:int64=0]
+touch = (@r:R):>void => { if r.values.length >? 0 r.values[0] = 1 }
+bump = (@r:R):>void => {
+    touch(@r)
+    r.n += 1
+    if r.n >? 3 { r.other = [] }
+}
+main = () => {
+    let r = R[[1 2 3] [4 5]]
+    touch(@r)
+    printl(r.values[2])
+    bump(@r)
+    printl(r.values[2])
+}

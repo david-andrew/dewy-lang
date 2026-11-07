@@ -1,0 +1,11 @@
+# The length may have changed, so the later read needs its own proof.
+R:type = [values:array<int64>]
+f = (@r:R):>int64 => {
+    r.values = []
+    0
+}
+main = () => {
+    let r = R[[1 2 3]]
+    let h = f(@r) printl(h)
+    printl(r.values[2])
+}

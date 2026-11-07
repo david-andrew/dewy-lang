@@ -4983,7 +4983,8 @@ storage. A binding referenced by a function, passed by mutable place, or exposed
 through a raw address still needs its facts re-established after a possible change.
 An `@` parameter's facts survive a call that cannot write it: printing, `to_int`, a
 helper with a dictionary of its own. One that writes a global or calls a function value
-may change it, and the error names that call.
+may change it, and the error names that call. A helper that only writes elements of an
+`@` record's array field keeps that field's length.
 
 `dewy check --obligations file.dewy` lists every unproven obligation that
 compiles to a runtime check, one per line, with the setting responsible

@@ -1,0 +1,9 @@
+# Keeping one field says nothing of the other.
+R:type = [values:array<int64> other:array<int64>]
+f = (@r:R):>void => { r.other = [] }
+main = () => {
+    let r = R[[1 2 3] [4 5]]
+    f(@r)
+    printl(r.values[2])
+    printl(r.other[1])
+}

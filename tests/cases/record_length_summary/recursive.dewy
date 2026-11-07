@@ -1,0 +1,11 @@
+# The length may have changed, so the later read needs its own proof.
+R:type = [values:array<int64>]
+f = (@r:R n:int64):>void => {
+    if n >? 0 { f(@r n-1) }
+    else { r.values = [] }
+}
+main = () => {
+    let r = R[[1 2 3]]
+    f(@r 1)
+    printl(r.values[2])
+}

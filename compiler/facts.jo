@@ -1531,6 +1531,7 @@ struct FactSummary:
     upper_field: int = 0     # upper (post) names that record parameter's array field
     post_field: int = 0
     global_post: int = 0    # scalar result < this module array's EXIT length
+    kept_fields: int[]      # (parameter, field) pairs: mutable record array fields whose length every return keeps
 
 fact_summaries: {int: FactSummary} = {}
 fact_summary_owner = 0
@@ -1751,12 +1752,16 @@ fact_path_call_effects = (n: int, s: mut FactState):
     if fact_ends_path(n): effects_demand(0, true); return
     lengths: (int, int)[]
     shapes: (int, int, int)[]
+    record_lengths: (int, int, int)[]
     if nodes[n].aux == 0 and nodes[n].sym > 0 and checked_call_mutmask(n) != 0:
         f = int(nodes[n].sym)
         loop i in [0..min(nkids(n), fns[f].params.len())):
             l = fns[f].params[i]
             if int(locals[l].flags) & LF_MUTPARAM == 0: continue
             pt = fact_type(int(locals[l].type))
+            if fact_record_arrays(pt):
+                fact_tracked_record_lengths(n, i, pt, s, record_lengths)
+                continue
             if tkind(pt) != .array and (tkind(pt) != .struct_ or not is_nd(pt)): continue
             v = fact_summary_actual(n, i, s, true)
             if v == 0: continue
@@ -1769,7 +1774,7 @@ fact_path_call_effects = (n: int, s: mut FactState):
     summary = FactSummary()
     shape_mask = 0
     if shapes.len() > 0: effects_demand(int(nodes[n].sym), true)
-    if lengths.len() > 0 or shapes.len() > 0:
+    if lengths.len() > 0 or shapes.len() > 0 or record_lengths.len() > 0:
         if int(nodes[n].sym) == fact_summary_owner and fact_summary_assumed.len() > 0:
             fact_summary_used = true
             summary.lengths = fact_summary_assumed
@@ -1804,6 +1809,35 @@ fact_path_call_effects = (n: int, s: mut FactState):
         if summary.lengths[i] == 1: fact_difference(s, after, pair.1, 0, n)
         b = fact_bound(s, after); old = fact_bound(s, pair.1)
         fact_set_bound(s, after, FactBound(max(b.lo, old.lo), (if summary.lengths[i] == 1: min(b.hi, old.hi) else: b.hi)))
+
+    # (a record's array field: its length is the same immutable evaluation)
+    loop entry in record_lengths:
+        if not fact_kept_field(summary.kept_fields, entry.0, entry.1) or s.projections.len() >= FACT_CAP: continue
+        v = fact_summary_actual(n, entry.0, s)
+        if v == 0: continue
+        pt = fact_type(int(locals[fns[int(nodes[n].sym)].params[entry.0]].type))
+        field = fact_project(s, v, entry.1, false, fact_call_field_type(pt, entry.1))
+        if field != 0: fact_add_projection(s, FactProjection(field, -1, false, entry.2))
+
+fact_kept_field = (kept: int[], parameter: int, field: int) -> bool:
+    i = 0
+    loop i + 1 < kept.len():
+        if kept[i] == parameter and kept[i + 1] == field: return true
+        i += 2
+    false
+
+# (the array fields of a mutable record actual whose length this state tracks: the demand for
+# their summary. O(fields), at most eight, as the summary's own list)
+fact_tracked_record_lengths = (n: int, i: int, pt: int, s: mut FactState, out: mut (int, int, int)[]):
+    v = fact_summary_actual(n, i, s, true)
+    if v == 0: return
+    si = int(types[pt].st)
+    loop k in [0..min(int(structs[si].nfields), 8)):
+        name = int(fields[int(structs[si].fields) + k].name)
+        p = fact_projection_find(s, v, name, false)
+        if p < 0: continue
+        q = fact_projection_find(s, s.projections[p].value, -1, false)
+        if q >= 0: out.push((i, name, s.projections[q].value))
 
 # A settled summary can preserve exposed roots across read-only calls.
 # Opaque/callback/hidden-helper effects still invalidate every exposed root.
@@ -4245,7 +4279,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
     if summary or result_active: values.push(int(fns[f].body))
     if summary:
         loop l in fns[f].params:
-            if int(locals[l].flags) & LF_MUTPARAM != 0 and (tkind(fact_type(int(locals[l].type))) == .array or is_nd(fact_type(int(locals[l].type)))):
+            if int(locals[l].flags) & LF_MUTPARAM != 0 and (tkind(fact_type(int(locals[l].type))) == .array or is_nd(fact_type(int(locals[l].type))) or fact_record_arrays(fact_type(int(locals[l].type)))):
                 values.push(mk_ident_local(l, locals[l].pos))
     cursor = 0
     loop cursor < work.len():

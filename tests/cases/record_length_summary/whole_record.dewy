@@ -1,0 +1,8 @@
+# The length may have changed, so the later read needs its own proof.
+R:type = [values:array<int64>]
+f = (@r:R):>void => { r = R[[]] }
+main = () => {
+    let r = R[[1 2 3]]
+    f(@r)
+    printl(r.values[2])
+}

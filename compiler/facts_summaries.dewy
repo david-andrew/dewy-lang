@@ -4,7 +4,7 @@ from p"check.jo" import (FK_INIT LF_MUTPARAM fns globals locals)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"effects.jo" import (effect_unavailable)
 from p"expr.jo" import (is_map_type is_nd mk_ident_local ntype shape_field_type)
-from p"facts.jo" import (FACT_CAP FACT_STEPS FactPaths FactProjection FactState FactSummary fact_add_fits fact_add_projection fact_bind fact_binding fact_bound fact_call_field_type fact_capture fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_types fact_difference fact_distance fact_domain fact_hull_owner fact_length_max fact_loop_exhausted fact_loop_steps fact_loops fact_new fact_owner fact_pair_key fact_pending_defers fact_place fact_probe_on fact_project fact_projection_find fact_push_frames fact_query fact_read fact_record_array_types fact_route fact_route_values fact_scalar fact_set_bound fact_shape_summaries fact_slice fact_slice_prepare fact_slice_push_children fact_speculating fact_step_limit fact_summaries fact_summary_acc fact_summary_assumed fact_summary_entry fact_summary_field fact_summary_fields fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_type)
+from p"facts.jo" import (FACT_CAP FACT_STEPS FactPaths FactProjection FactState FactSummary fact_kept_field fact_add_fits fact_add_projection fact_bind fact_binding fact_bound fact_call_field_type fact_capture fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_types fact_difference fact_distance fact_domain fact_hull_owner fact_length_max fact_loop_exhausted fact_loop_steps fact_loops fact_new fact_owner fact_pair_key fact_pending_defers fact_place fact_probe_on fact_project fact_projection_find fact_push_frames fact_query fact_read fact_record_array_types fact_route fact_route_values fact_scalar fact_set_bound fact_shape_summaries fact_slice fact_slice_prepare fact_slice_push_children fact_speculating fact_step_limit fact_summaries fact_summary_acc fact_summary_assumed fact_summary_entry fact_summary_field fact_summary_fields fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_type)
 from p"facts_conditions.dewy" import (fact_tag)
 from p"facts_joins.dewy" import (fact_host_finite fact_hull fact_hull_type fact_join)
 from p"facts_library.dewy" import (fact_clamped)
@@ -235,8 +235,27 @@ fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
         useful=useful or mode not=? 0
     }
     if not useful {lengths=[]}
+    # (a mutable record parameter's array field keeps its length on every return)
+    let kept_fields:array<int64>=[]
+    if fact_pending_defers =? 0 and not ownership_fact_cleanup {
+        loop entry in fact_summary_fields {
+            let l=fns.ptr[fact_summary_owner].params[entry[0]]
+            if SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {continue}
+            if fact_summary_acc.seen and not fact_kept_field(fact_summary_acc.kept_fields entry[0] entry[1]) {continue}
+            let b=fact_binding(s PlaceIdentity('local' SummaryWord(locals.ptr[l].owner) l))
+            if b <? 0 {continue}
+            let pt=fact_type(SummaryWord(locals.ptr[l].type))
+            let field=fact_project(@s s.bindings[b].value entry[1] false fact_call_field_type(pt entry[1]))
+            if field =? 0 {continue}
+            let current=fact_project(@s field (-1) false T_INT)
+            if current =? entry[2] or fact_entails(s entry[2] current 0) and fact_entails(s current entry[2] 0) {
+                kept_fields.push(entry[0])
+                kept_fields.push(entry[1])
+            }
+        }
+    }
     if fact_summary_shapes.length >? 0 {fact_summary_record_shapes(@s)}
-    fact_summary_acc=FactSummary(length value true same delta upper upper_delta host post lengths upper_field post_field global_post)
+    fact_summary_acc=FactSummary(length value true same delta upper upper_delta host post lengths upper_field post_field global_post kept_fields)
     # A hull only widens. Once it says nothing the result's own domain does
     # not, and no argument-length relation survives (once lost, it stays
     # lost), the rest of the run cannot bound anything a caller asks: stop it
@@ -272,7 +291,7 @@ fact_summary_payload=(t:SummaryWord):>SummaryWord=>$unsafe {
     if fact_scalar(e) and is_int(e) and e not=? T_U64 {e} else {0}
 }
 fact_summary_vacuous=(acc:FactSummary t:SummaryWord):>bool=>{
-    if acc.lengths.length >? 0 {return false}
+    if acc.lengths.length >? 0 or acc.kept_fields.length >? 0 {return false}
     if tkind(t) =? 'array' {return acc.length.lo <=? 0 and acc.length.hi >=? fact_length_max()}
     let d=fact_domain(t)
     acc.value.lo <=? d.lo and acc.value.hi >=? d.hi and not acc.value.nz and not acc.host
@@ -458,7 +477,7 @@ fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=
         }
     }
     fact_summary_fields=[]
-    if fact_scalar(t) and is_int(t) and t not=? T_U64 and field =? 0 {
+    if (places or fact_scalar(t) and is_int(t) and t not=? T_U64) and field =? 0 {
         loop i in [0..fns.ptr[f].params.length) {
             let l=fns.ptr[f].params[i]
             let pt=fact_type(SummaryWord(locals.ptr[l].type))
