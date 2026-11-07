@@ -2,6 +2,7 @@ $runtime_checks
 from p"@lib/core/rt.jo" import (__str_from_bytes)
 from p"@lib/core/os.jo" import (__exec_unslid delete_file env eprint exit is_dir time write_bytes)
 from p"@lib/core/str.jo" import (ends_with starts_with trim)
+from p"@lib/std/backtrace.jo" import (__hex_text)
 from p"ast.jo" import (nodes)
 from p"check.jo" import (test_mode watch_build)
 from p"driver_pipeline.dewy" import (emit_function)
@@ -141,7 +142,7 @@ watch_status_str=(st:DriveWord):>string=>{
     if ps_windows() {
         # (Windows: the exit code itself)
         if st =? 101 {return "a panic"}
-        if st >=? 0xC0000000 {return "a crash (exception 0x{st:x})"}
+        if st >=? 0xC0000000 {return "a crash (exception 0x{__hex_text(st)})"}
         return "exit status {st}"
     }
     if st & 127 not=? 0 {return "signal {st & 127}"}

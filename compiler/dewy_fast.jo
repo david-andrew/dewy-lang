@@ -61,7 +61,7 @@ dn_init_words = ():
 DN_BRACE_HINT = "`\{...}` in a string holds an expression: write `\\\{` and `\\\}` for literal braces, or use a raw string `r\"...\"`"
 
 dn_error = (offset: int, message: str) -> int:
-    if dc_parser.reader.dn_in_interpolation > 0: fatal(mkpos(dc_parser.file, offset), "{message}, inside a string interpolation ({DN_BRACE_HINT}; `format(value \".2f\")` formats a number)")
+    if dc_parser.reader.dn_in_interpolation > 0: fatal(mkpos(dc_parser.file, offset), "{message}, inside a string interpolation ({DN_BRACE_HINT}; `fmt'.2f'(value)` formats a number)")
     fatal(mkpos(dc_parser.file, offset), message)
     0
 

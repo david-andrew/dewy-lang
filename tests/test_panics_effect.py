@@ -61,9 +61,6 @@ main=()=>{
                       'cannot prove index is in bounds'),
     'insert_unproven': ('$runtime_checks=false\nf=(@xs:array<int64> i:int64)=>xs.insert(5 i)\nlet a:array<int64>=[1]\nf(@a 0)\n',
                         'cannot prove index is in bounds'),
-    # A literal format specification the library accepts cannot fail; this one can.
-    'format_spec': ('$runtime_checks=false\nshow=(s:string):>string=>format(s ".2")\nprintl(show("x"))\n',
-                    'calling `format` may panic (format: panic "text formatting takes alignment'),
     'dictionary': ('$runtime_checks=false\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n',
                    'cannot prove the key is in the dictionary'),
 }
@@ -102,7 +99,7 @@ def test_panics_proved(compiler, tmp_path):
 
 
 def test_format_literal_spec(compiler, tmp_path):
-    source = '$runtime_checks=false\nshow=(x:float64 n:int64 s:string):>string=>"{format(x ".6f")} {format(n ",")} {format(n "#x")} {format(s ">8")} {format(x "8.2%")}"\nprintl(show(0.5 1234567 "hi"))\n'
+    source = '$runtime_checks=false\nshow=(x:float64 n:int64 s:string):>string=>"{fmt\'.6f\'(x)} {fmt\',\'(n)} {fmt\'#x\'(n)} {fmt\'>8\'(s)} {fmt\'8.2%\'(x)}"\nprintl(show(0.5 1234567 "hi"))\n'
     result = run(compiler, tmp_path, source, 'run')
     assert result.returncode == 0 and result.stdout == '0.500000 1,234,567 0x12d687       hi   50.00%\n', result.stdout + result.stderr
 
@@ -125,9 +122,8 @@ main=():>void=>{
 
 def test_panics_listing(compiler, tmp_path):
     # `check --obligations` names library calls that may panic where checks are allowed.
-    source = '$runtime_checks\nshow=(s:string):>string=>format(s ".2")\nprintl(show("x"))\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n'
+    source = '$runtime_checks\nshow=(s:string):>string=>s.trim()\nprintl(show("x"))\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n'
     result = run(compiler, tmp_path, source, 'check', '--obligations')
-    assert 'program.dewy:2:26: may panic: calling `format` ($runtime_checks)' in result.stdout, result.stdout + result.stderr
     # (a missing key is the caller's obligation, listed as its own check)
     assert 'program.dewy:4:38: runtime check: the key is in the dictionary ($runtime_checks)' in result.stdout, result.stdout + result.stderr
 

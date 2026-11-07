@@ -278,7 +278,7 @@ __fsys_temp_name = (path: str, attempt: int) -> str:
     loop cut >= 0 and path[cut] != '/' and not (TARGET == "windows" and path[cut] == '\\'): cut -= 1
     __fsys_temp_counter += 1
     tag = u64(time_ns()) * u64(0x9E3779B97F4A7C15) + u64(__fsys_temp_counter * 1000003 + attempt)
-    "{path[..cut + 1)}.{path[cut + 1..]}.{format(int(tag >> 16), "x")}.tmp"
+    "{path[..cut + 1)}.{path[cut + 1..]}.{int(tag >> 16):x}.tmp"
 
 # (the st_mode of what is at path, links followed; -1 when nothing can be looked at)
 __fsys_mode = (path: str) -> int:

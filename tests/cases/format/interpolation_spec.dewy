@@ -1,4 +1,4 @@
-# `{value:spec}` formats as `format(value spec)` does; a quantity's spec formats its canonical number.
+# `fmt` patterns inside interpolations; a quantity's number in a unit is the quantity divided by it.
 from units import m, km
 main = () => {
     let x = 3.14159
@@ -6,6 +6,6 @@ main = () => {
     let n = 1234567
     let d:dict<string int> = ["a:b"->5]
     let s = "hi"
-    printl"[{x:.2f}] [{y:.1f}] [{n:,}] [{0.256:.1%}] [{s:^6}] [{s:*>5}] [{d["a:b"]}] [{d["a:b"]:03}]"
-    printl"[{(x):8.3f}] [{"{n:,}":>12}] [{255:#06x}] [{255:+d}] [{x*2:.3f}] [{1/8:.2f}] [{1.5km:.1f}] [{n:_}]"
+    printl"[{fmt'.2f'(x)}] [{fmt'.1f'(y)}] [{fmt','(n)}] [{fmt'.1%'(0.256)}] [{fmt'^6'(s)}] [{fmt'*>5'(s)}] [{d["a:b"]}] [{fmt'03'(d["a:b"])}]"
+    printl"[{fmt'8.3f'((x))}] [{fmt'>12'("{fmt','(n)}")}] [{fmt'#06x'(255)}] [{fmt'+d'(255)}] [{fmt'.3f'(x*2)}] [{fmt'.2f'(1/8)}] [{fmt'.1f'(1.5km/1m)}] [{fmt'_'(n)}]"
 }

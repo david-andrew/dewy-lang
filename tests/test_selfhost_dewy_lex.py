@@ -83,17 +83,10 @@ class Scanner:
 
     def interpolation_end(self, start, stop, nesting, incomplete):
         s = self.s
-        i, depth, parens, spec = start, 1, 0, False
+        i, depth, parens = start, 1, 0
         while i < stop:
             c = s[i]
-            if c == 35 and spec:
-                i += 1
-                continue
-            if c == 58 and depth == 1 and parens == 0:
-                spec = True
-            elif c in (32, 9, 10):
-                spec = False
-            elif c in (40, 91):
+            if c in (40, 91):
                 parens += 1
             elif c in (41, 93):
                 parens -= 1

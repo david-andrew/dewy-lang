@@ -16,7 +16,7 @@ rgb_check=(n:CallHintWord args:array<int64>):>void=>$unsafe {
     }
     if big {warn(nodes.ptr[n].pos "the parts of a color go from 0 to 1 (above 1: brighter than white): for 0 to 255, divide by 255 or write hex(0xff8000)")}
     # (rgba(0, 0, 0, 10): an alpha from 0 to 255)
-    else if args.length >=? 4 and lit_num(args[3]) >? 1.0 {warn(nodes.ptr[CallHintWord(args[3])].pos "alpha goes from 0 (clear) to 1 (solid): {num_text(lit_num(args[3]))} of 255 is {lit_num(args[3]) / 255.0:.2f}")}
+    else if args.length >=? 4 and lit_num(args[3]) >? 1.0 {warn(nodes.ptr[CallHintWord(args[3])].pos "alpha goes from 0 (clear) to 1 (solid): {num_text(lit_num(args[3]))} of 255 is {num_text(round(lit_num(args[3]) / 255.0 * 100.0) / 100.0)}")}
 }
 # hsv(200, 0.8, 0.9): a hue in degrees, which goes around 0 to 1 here
 hsv_check=(n:CallHintWord args:array<int64>):>void=>$unsafe {

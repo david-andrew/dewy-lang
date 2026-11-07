@@ -263,7 +263,7 @@ call_no_candidate=(n:CallErrorWord name:CallErrorWord decls:array<int64> args:ar
         }
         let oh=""
         if opn =? "%" and args.length >? 0 and nodes.ptr[unnamed(args[0])].type not=? 0 and tkind(prune(ntype(unnamed(args[0])))) =? 'str_' {
-            oh=" (text is formatted by interpolation, `\"\{count} items\"`, or `format(value \".2f\")`)"
+            oh=" (text is formatted by interpolation, `\"\{count} items\"`, or `fmt'.2f'(value)`)"
         }
         fatal(nodes.ptr[n].pos "`{opn}` does not work on {ots}{oh}")
     }

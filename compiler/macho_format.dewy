@@ -109,7 +109,7 @@ macho_image=(text:array<uint8> entry_off:MachWord ro:array<uint8> info:array<uin
     # loader replaces; __LINKEDIT, which dyld wants last, after it)
     if watch {
         if link_addr >? MACHO_WATCH_AT {
-            macho_error="dewy-core watch on macOS: the program is too big for the region at {MACHO_WATCH_AT:x}"
+            macho_error="dewy-core watch on macOS: the program is too big for the region at 120000000"
             return []
         }
         link_addr=MACHO_WATCH_AT + MACHO_WATCH_SIZE

@@ -123,7 +123,7 @@ pdb_gsi=(syms:array<[string int64]>):>array<uint8>=>$unsafe {
     let nb:PWord=4096
     let by:array<[int64 string int64]>=[]
     # (within a bucket: shorter names first, then without regard to case)
-    loop s in syms {by.push([pdb_hash(s[0]) % nb  "{(s[0] as array<uint8>).length:8}{s[0].lower()}"  s[1]])}
+    loop s in syms {by.push([pdb_hash(s[0]) % nb  "{"{(s[0] as array<uint8>).length}".pad_start(8)}{s[0].lower()}"  s[1]])}
     by.sort(key=(x:[int64 string int64]):>int64=>x[0])
     # (each bucket's run sorted)
     let k:PWord=0

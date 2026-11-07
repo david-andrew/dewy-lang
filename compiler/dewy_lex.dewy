@@ -141,16 +141,9 @@ dx_interpolation_end=(@lx:DewyLexer p:ptr<uint8> start:int64 stop:int64 nesting:
     let i=start
     let depth:int64=1
     let parens:int64=0
-    let spec=false   # (in a format spec, `{n:#06x}`: its `#` is no comment)
     loop i <? stop {
         let c=p[i]
-        if c =? b'#' and spec {
-            i+=1
-            continue
-        }
-        if c =? b':' and depth =? 1 and parens =? 0 {spec=true}
-        else if c =? b' ' or c =? b'\t' or c =? b'\n' {spec=false}
-        else if c =? b'(' or c =? b'[' {parens+=1}
+        if c =? b'(' or c =? b'[' {parens+=1}
         else if c =? b')' or c =? b']' {parens-=1}
         if c =? b'#' and i + 1 <? stop and p[i + 1] =? b'\{' {
             let e=dx_block_comment_end(p i stop)

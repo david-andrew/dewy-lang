@@ -152,7 +152,7 @@ dc_force_body = (d: int):
         saved_comments = dn_block_comments
         dc_parser.tokens = dn_lex(dc_parser.file, first, dc_parser.reader.dc_lazy_span_end[b])
         dn_block_comments = saved_comments
-        dc_parser.reader.dc_lazy_span_end.remove(b)
+        # (the span stays: a decimal re-check restores the saved lazy body and forces it again)
         first = 0
     else: dc_parser.tokens = dc_parser.reader.dc_lazy_tokens[dc_parser.file]
     dc_parser.at = first

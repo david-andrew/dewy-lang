@@ -318,7 +318,7 @@ call_no_candidate = (n: int, name: int, decls: int[], args: int[], expected: int
             ots += if nodes[unnamed(a0)].type != 0: dt(ntype(unnamed(a0))) else: "?"
         oh = ""
         if opn == "%" and args.len() > 0 and nodes[unnamed(args[0])].type != 0 and tkind(prune(ntype(unnamed(args[0])))) == .str_:
-            oh = " (text is formatted by interpolation, `\"{{count}} items\"`, or `format(value \".2f\")`)"
+            oh = " (text is formatted by interpolation, `\"{{count}} items\"`, or `fmt'.2f'(value)`)"
         fatal(nodes[n].pos, "`{opn}` does not work on {ots}{oh}")
     if decls.len() > 1:
         # (when none fits, the program's own function is the one meant: its error is the one shown)

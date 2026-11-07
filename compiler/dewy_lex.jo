@@ -88,15 +88,9 @@ dx_interpolation_end = (lx: mut DewyLexer, p: *u8, start: int, stop: int, nestin
     i = start
     depth = 1
     parens = 0
-    spec = false
     loop i < stop:
         c = p[i]
-        if c == '#' and spec:
-            i += 1
-            continue
-        if c == ':' and depth == 1 and parens == 0: spec = true
-        else if c == ' ' or c == '\t' or c == '\n': spec = false
-        else if c == '(' or c == '[': parens += 1
+        if c == '(' or c == '[': parens += 1
         else if c == ')' or c == ']': parens -= 1
         if c == '#' and i + 1 < stop and p[i + 1] == '{{':
             e = dx_block_comment_end(p, i, stop)

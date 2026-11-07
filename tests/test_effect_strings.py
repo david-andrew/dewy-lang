@@ -26,7 +26,7 @@ parse = (text:string):>(int32 | Bad) & allocates => {
     if n <? -1000 or n >? 1000 return Bad["out of range"]
     int32(n)
 }
-show = (label:string n:int64 big:int x:float64 on:bool):>string & allocates => "{label}={n} {big} {x} {x:.2f} {on}"
+show = (label:string n:int64 big:int x:float64 on:bool):>string & allocates => "{label}={n} {big} {x} {fmt'.2f'(x)} {on}"
 fields = (line:string):>string & allocates => {
     let parts = line.split(",")
     let out = ""
@@ -77,8 +77,6 @@ REJECT = {
     'slice': ('f = (t:string):>string & allocates => t[1..3]\n', 'possible failure exceeds'),
     'element': ('f = (t:string):>string & allocates => t.split(",")[5]\n', 'possible failure exceeds'),
     'narrow': ('f = (n:int):>int32 & allocates => int32(n)\n', 'possible failure exceeds'),
-    # a specification known only at run time may be one the library refuses
-    'spec': ('f = (x:float64 spec:string):>string & allocates => format(x spec)\n', 'possible failure exceeds'),
 }
 
 

@@ -96,7 +96,7 @@ def test_panic_inventory_program(compiler, tmp_path, monkeypatch, optimized):
     assert ran.returncode == 0 and ran.stdout == b'[1 5 7] 8 0 [1 5]\n', ran.stderr
 
 
-@pytest.mark.parametrize('case', ['row', 'format_spec'])
+@pytest.mark.parametrize('case', ['row'])
 def test_panic_inventory_diagnostics(compiler, tmp_path, monkeypatch, case):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     source, output = tmp_path / 'input.dewy', tmp_path / 'program'
