@@ -110,6 +110,9 @@ decimal_save=(n:DecimalWord):>void=>$unsafe {
 }
 decimal_copy=(f:DecimalWord):>DecimalWord=>$unsafe {
     let d=DecimalWord(fns.ptr[f].decl)
+    # Snapshot parsed nodes: restoring a lazy placeholder would replay a span
+    # whose source entry was consumed by the first body check.
+    if d not=? 0 {source_force_body(d)}
     let b=DecimalWord(fns.ptr[f].body)
     dsn_lo=nodes.ptr[b].pos
     if d not=? 0 {dsn_lo=nodes.ptr[d].pos}
