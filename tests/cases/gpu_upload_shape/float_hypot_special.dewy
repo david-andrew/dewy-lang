@@ -1,0 +1,7 @@
+
+main=()=>{
+let x:array<float32>=[3.0 3e30 3e-30 float32.inf float32.nan float32.nan]
+let y:array<float32>=[4.0 4e30 4e-30 float32.nan float32.inf 1.0]
+let d=cpu(hypot.(gpu(x) gpu(y)))
+if d.length =? [6] {printl(d[0] =? 5.0) printl(abs(d[1]/5e30-1.0) <? 1e-5) printl(abs(d[2]/5e-30-1.0) <? 1e-5) printl(d[3] =? float32.inf) printl(d[4] =? float32.inf) printl(is_nan(d[5]))}
+}

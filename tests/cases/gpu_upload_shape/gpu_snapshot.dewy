@@ -1,0 +1,13 @@
+
+main=()=>{
+let a:array<float32>=[1 2 3]
+let g=gpu(a)
+let saved=g
+a[0]=99
+let changed=g .+ 10.0
+let back=cpu(saved)
+back[0]=77
+printl(cpu(saved).data =? [1 2 3])
+printl(cpu(changed).data =? [11 12 13])
+printl(a =? [99 2 3])
+}

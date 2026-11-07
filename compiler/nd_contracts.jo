@@ -269,8 +269,8 @@ fact_nd_classify = (n: int) -> int:
     path = files[pos_file(nodes[d].pos)].path
     if kind >= 160: return fact_sequence_classify(n, kind, path)
     if kind == 13 or kind == 14: return if nkids(n) == (if kind == 13: 5 else: 7) and path == lib_dir + "/std/dewy_ranges.jo": kind else: 0
-    # (an N-D upload to the GPU: at most four valid dimensions)
-    if kind == 108: return if nkids(n) == 1 and path == lib_dir + "/game/gpuarray.jo" and is_nd(representation_type(ntype(kid(n, 0)))): kind else: 0
+    # (an upload to the GPU: arrays have rank one; N-D inputs prove storage and rank)
+    if kind == 108: return if nkids(n) == 1 and path == lib_dir + "/game/gpuarray.jo" and (is_nd(representation_type(ntype(kid(n, 0)))) or tkind(representation_type(ntype(kid(n, 0)))) == .array or tkind(representation_type(ntype(kid(n, 0)))) == .fixed): kind else: 0
     # (a GPU array's download: an N-D array whose storage matches its shape)
     if kind == 114: return if nkids(n) == 1 and path == lib_dir + "/game/gpuarray.jo" and is_nd(representation_type(ntype(n))): kind else: 0
     if path != lib_dir + "/std/nd.jo" and path != lib_dir + "/prelude/nd.dewy": return 0
@@ -421,8 +421,9 @@ fact_nd_check = (n: int, s: mut FactState, values: int[], kind: int):
         if other == "": other = "the right array"
         fact_nd_need(n, s, .eq, fact_project(s, values[0], -1, false, T_INT), fact_project(s, values[1], -1, false, T_INT), "{text}.length =? {other}.length")
     else if kind == 108:
-        fact_nd_need(n, s, .le, rank, fact_constant(s, 4), "{text}.length.length <=? 4")
-        fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
+        if is_nd(representation_type(t)):
+            fact_nd_need(n, s, .le, rank, fact_constant(s, 4), "{text}.length.length <=? 4")
+            fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
     else if kind == 102:
         if is_nd(representation_type(t)): fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
         fact_nd_need(n, s, .eq, rank, values[1], "{text}.length.length =? {wit_text(kid(n, 1))}")
@@ -655,6 +656,12 @@ fact_nd_download = (n: int, s: mut FactState, input: int) -> int:
     result
 
 fact_nd_upload = (n: int, s: mut FactState, input: int) -> int:
+    t = representation_type(ntype(kid(n, 0)))
+    if not is_nd(t):
+        length = if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, input, -1, false, T_INT)
+        # A fresh rank-one shape retains the input snapshot's length, including
+        # symbolic shaped parameters. No alias to later changes of the input.
+        return fact_nd_make(n, s, [length])
     result = fact_fresh(s, ntype(n))
     if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("shape"), false, fact_nd_shape(s, input)))
     result

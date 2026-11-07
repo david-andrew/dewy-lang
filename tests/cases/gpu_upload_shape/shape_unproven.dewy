@@ -1,0 +1,4 @@
+run=(a:NDArray<float32>)=>cpu(gpu(a) .+ 1.0)
+main=()=>{
+printl(run(zeros<float32>(2 3)).data)
+}

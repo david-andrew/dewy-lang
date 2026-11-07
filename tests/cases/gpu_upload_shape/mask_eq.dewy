@@ -1,0 +1,5 @@
+
+main=()=>{
+let a:array<float32>=[float32.nan -float32.inf -0.0 0.0 float32.inf float32.nan]
+printl(cpu(gpu(a) .=? gpu(a)).data =? [0 1 1 1 1 0])
+}
