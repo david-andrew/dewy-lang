@@ -1,0 +1,334 @@
+$runtime_checks
+from p"expr.jo" import (time_policy_why time_zone_failure)
+from p"units.jo" import (time_core_type)
+from p"check.jo" import jd
+from p"checked_eval.dewy" import (cx_token_values)
+from p"@lib/core/str.jo" import (is_digit lower starts_with upper)
+from p"ast.jo" import (NF_RDONLY has_flag kid kid_c kid_d kids kids2 nkids nodes)
+from p"check.jo" import (LF_DECL LF_PARAM LF_VALUEPARAM check_struct_fields dewy_at fns globals locals modules op_text syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checks_hints.dewy" import (suggestion)
+from p"error_ops.dewy" import (exception_member value_members)
+from p"expr.jo" import (KEY_NAMES a_type is_nd nd_elem)
+from p"ownership_checks.dewy" import (NF_GLOBAL)
+from p"prelude.jo" import (prelude_demand_all)
+from p"secret_checks.dewy" import (secret_hint)
+from p"types.jo" import (T_MATH_INT T_U8 T_VEC2 T_VEC3 T_VEC4 dt dt_named is_int is_numeric is_union is_vec prune structs tkind type_eq types union_index union_members variants)
+from p"units.jo" import (bundled_rational_type)
+from p"util.jo" import (fatal line_col name_of)
+
+CompareWord:type=int64<overflow='wrap'>
+variant_hint_for=(t:CompareWord name:string):>string=>{
+    let tn=dt(prune(t))
+    # (Unity's Input.GetKey and the like: functions here)
+    if tn =? "Input" and starts_with(name "Get") {
+        if name =? "GetKey" {return " (a key held is `key_down(.w)`)"}
+        if name =? "GetKeyDown" {return " (a key pressed this frame is `key_pressed(.space)`)"}
+        if name =? "GetKeyUp" {return " (a key let go this frame is `key_released(.space)`)"}
+        if name =? "GetAxis" or name =? "GetAxisRaw" {return " (the arrows', WASD's and a stick's direction is `input_axis()`, a vec2)"}
+        if name =? "GetMouseButton" {return " (a mouse button held is `mouse_down(.left)`)"}
+        if name =? "GetMouseButtonDown" {return " (a mouse button pressed this frame is `mouse_pressed(.left)`)"}
+        return " (input is asked for with functions: `key_down(.w)`, `key_pressed(.space)`, `input_axis()`, `mouse_pos()`)"
+    }
+    if tn =? "Key" {
+        let w=name
+        # (num1, digit1, key_1: n1)
+        loop pre in ["num" "digit" "key_" "kp"] {
+            if starts_with(w pre) and (w as array<uint8>).length =? (pre as array<uint8>).length + 1 and is_digit((w as array<uint8>)[(pre as array<uint8>).length]) {return " (it is `.n{w.byte_slice((pre as array<uint8>).length (w as array<uint8>).length)}`)"}
+        }
+        let i:CompareWord=0
+        loop i <? KEY_NAMES.length {
+            if KEY_NAMES[i] =? w {return " (it is `.{KEY_NAMES[i + 1]}`)"}
+            i += 2
+        }
+        let sg=suggestion(name variant_names(t))
+        if (sg as array<uint8>).length >? 0 {return sg}
+        return " (keys are named a to z, n0 to n9, f1 to f12, space, enter, escape, tab, backspace, left, right, up, down, shift, ctrl, alt...)"
+    }
+    suggestion(name variant_names(t))
+}
+# (`title` for `.title`: a variant of an enum, written without its dot; the program's enums first)
+bare_variant_hint=(nm:CompareWord):>string=>$unsafe {
+    prelude_demand_all()
+    let found=""
+    loop m in modules {
+        loop d in m.decls {
+            if nodes.ptr[d].kind not=? 'enum_' {continue}
+            loop i in [0..nkids(d)) {
+                let v=kid(d i)
+                if nodes.ptr[v].kind =? 'variant' and CompareWord(nodes.ptr[v].name) =? nm {
+                    let en=name_of(CompareWord(nodes.ptr[d].name))
+                    let h=" (a variant of {en}: `.{name_of(nm)}` where a {en} is expected, else `{en}.{name_of(nm)}`)"
+                    if not m.is_prelude {return h}
+                    if (found as array<uint8>).length =? 0 {found=h}
+                }
+            }
+        }
+    }
+    found
+}
+variant_names=(t:CompareWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    let si=CompareWord(types.ptr[prune(t)].st)
+    check_struct_fields(si)
+    loop vi in [0..CompareWord(structs.ptr[si].nvariants)) {out.push(CompareWord(variants.ptr[CompareWord(structs.ptr[si].variants) + vi].name))}
+    out
+}
+# a union, or an optional union
+union_or_optional=(t0:CompareWord):>bool=>$unsafe {
+    let t=prune(t0)
+    is_union(t) or tkind(t) =? 'opt' and is_union(prune(CompareWord(types.ptr[t].elem)))
+}
+# a == b, a < b with types that do not compare
+# An arithmetic or comparison operand that is a union: the member to narrow to, as it
+# is spelled, and when the other members are all failures (`to_int(s)`), the fallback.
+union_operand_why=(n:CompareWord u:CompareWord):>string=>$unsafe {
+    if not dewy_at(nodes.ptr[n].pos) {return " (find out which it holds first: `if x is int: ...` or a `match`)"}
+    let member:CompareWord=0
+    let others:CompareWord=0
+    loop m in value_members(prune(u)) {
+        if exception_member(m) {
+            if time_core_type(m "Gap") or time_zone_failure(m) {return time_policy_why()}
+            continue
+        }
+        if member =? 0 and is_numeric(m) {member=m} else {others += 1}
+    }
+    if member not=? 0 and others =? 0 {return " (it may hold a failure instead of the {dt(member)}: fall back with `x ?? 0`, pass the failure on with `or_throw`, or test it first, `if x is? {dt(member)} \{ ... }`)"}
+    let shown=if member not=? 0 {dt(member)} else {"int64"}
+    " (find out which it holds first: `if x is? {shown} \{ ... }` or a `match`)"
+}
+cmp_error=(n:CompareWord ta:CompareWord tb:CompareWord):>void=>$unsafe {
+    let why=variant_hint(CompareWord(nodes.ptr[n].b) ta)
+    let a=CompareWord(nodes.ptr[n].a)
+    if tkind(ta) =? 'bool_' and is_numeric(tb) and nodes.ptr[a].kind =? 'binary' {
+        let aop=cx_token_values.ptr[CompareWord(nodes.ptr[a].op)]
+        if aop =? 'lt' or aop =? 'le' or aop =? 'gt' or aop =? 'ge' {why=if dewy_at(nodes.ptr[n].pos) {" (a parenthesized comparison is a bool; the chain `a <? x <? b` goes without parentheses)"} else {" (`a < x < b` is written `a < x and x < b`, or `x in a..b`)"}}
+    }
+    # (the member compared with: the same type, or a number for a number)
+    let member:CompareWord=0
+    if is_union(prune(ta)) {
+        if union_index(prune(ta) prune(tb)) >=? 0 {member=prune(tb)} else if is_numeric(tb) {
+            loop m in union_members(ta) {
+                if member =? 0 and is_numeric(m) {member=m}
+            }
+        }
+    }
+    if (why as array<uint8>).length =? 0 and member not=? 0 {
+        why=if dewy_at(nodes.ptr[n].pos) {" (find out which it holds first: `x is? {dt(member)} and x =? value`)"} else {" (find out which it holds first: `x is {dt(member)} and x == value`)"}
+    }
+    if (why as array<uint8>).length =? 0 and tkind(ta) =? 'opt' and type_eq(prune(CompareWord(types.ptr[prune(ta)].elem)) prune(tb)) {
+        # (env("X") != "": the optional may be none)
+        why=if dewy_at(nodes.ptr[n].pos) {" (it may be none: `(x ?? default) =? value` compares its value, or a default when there is none; `if x isnt? none \{ }` narrows it)"} else {" (it may be none: `(x ?? default) == value` compares its value, or a default when there is none; `if let v = x:` names the value)"}
+    }
+    if (why as array<uint8>).length =? 0 and ((type_eq(prune(ta) T_U8) and tkind(tb) =? 'str_') or (tkind(ta) =? 'str_' and type_eq(prune(tb) T_U8))) {
+        why=" (`s[i]` is a character's code, a number: the character as text is `s[i..i]`)"
+    }
+    if (why as array<uint8>).length =? 0 and ((tkind(ta) =? 'str_' and is_numeric(tb)) or (is_numeric(ta) and tkind(tb) =? 'str_')) {
+        why=" (text is not a number, even with digits in it: `to_int(s) ?? 0` or `to_float(s) ?? 0.0` reads one, and `input_int(...)` asks for one)"
+    }
+    # (n == 1 with n an enum: C's and JavaScript's numbered names)
+    if (why as array<uint8>).length =? 0 and tkind(ta) =? 'enum_' and not is_union(ta) and is_int(tb) {why=if dewy_at(nodes.ptr[n].pos) {" (`x =? .name` asks which it is)"} else {" (`x == .name` asks which it is; `int(x)` is its number, counting from 0)"}}
+    fatal(nodes.ptr[n].pos "cannot compare {dt(ta)} with {dt(tb)}{why}")
+}
+# the operator a library function implements, for diagnostics ("" when it is no operator)
+dewy_operator_fn_text=(name:string):>string=>{
+    if name =? "__floor_mod" or name =? "__floor_mod_pow2" {return "%"}
+    if name =? "__floor_div" or name =? "__floor_div_pow2" {return "//"}
+    if name =? "__dewy_power" {return "^"}
+    if name =? "__dewy_divide" {return "/"}
+    ""
+}
+# (an exact fraction where a float is wanted, or the other way, through arrays and
+# n-dimensional ones: decimal literals such as 0.0 are fractions unless a floating type is
+# written)
+rational_float_mismatch=(from0:CompareWord to0:CompareWord):>bool=>$unsafe {
+    let f=prune(from0)
+    let t=prune(to0)
+    loop tkind(f) =? 'array' and tkind(t) =? 'array' or is_nd(f) and is_nd(t) {
+        if is_nd(f) {
+            f=prune(nd_elem(f))
+            t=prune(nd_elem(t))
+        }
+        else {
+            f=prune(CompareWord(types.ptr[f].elem))
+            t=prune(CompareWord(types.ptr[t].elem))
+        }
+    }
+    (bundled_rational_type(f) and tkind(t) =? 'float_') or (tkind(f) =? 'float_' and bundled_rational_type(t))
+}
+# (an array of `int` where one of a fixed-width integer is wanted, through nested and
+# n-dimensional arrays: integer literals are `int` unless a type is written where they are made)
+int_literal_elem_mismatch=(from0:CompareWord to0:CompareWord):>bool=>$unsafe {
+    let f=prune(from0)
+    let t=prune(to0)
+    if not (tkind(f) =? 'array' and tkind(t) =? 'array' or is_nd(f) and is_nd(t)) {return false}
+    loop tkind(f) =? 'array' and tkind(t) =? 'array' or is_nd(f) and is_nd(t) {
+        if is_nd(f) {
+            f=prune(nd_elem(f))
+            t=prune(nd_elem(t))
+        }
+        else {
+            f=prune(CompareWord(types.ptr[f].elem))
+            t=prune(CompareWord(types.ptr[t].elem))
+        }
+    }
+    f =? T_MATH_INT and tkind(t) =? 'int_' and t not=? T_MATH_INT
+}
+# the declaration of local l in the subtree at n, or 0 (error path only)
+local_decl_in=(n:CompareWord l:CompareWord):>int64=>$unsafe {
+    if n =? 0 {return 0}
+    if nodes.ptr[n].kind =? 'vardecl' and nodes.ptr[n].sym =? int32(l) and not has_flag(n NF_GLOBAL) {return n}
+    loop c in [CompareWord(nodes.ptr[n].a) CompareWord(nodes.ptr[n].b) kid_c(n) kid_d(n)] {
+        let d=local_decl_in(c l)
+        if d not=? 0 {return d}
+    }
+    loop c in [kids(n)... kids2(n)...] {
+        let d=local_decl_in(c l)
+        if d not=? 0 {return d}
+    }
+    0
+}
+# (`let b = [3 4 5]` then `pick() ?? b` wanting array<int64>: b's type is written where it is made)
+int_literal_elem_hint=(a:CompareWord t:CompareWord):>string=>$unsafe {
+    if nodes.ptr[a].kind not=? 'ident' {return ""}
+    let d:CompareWord=0
+    if nodes.ptr[a].aux =? int32(2) {d=CompareWord(globals.ptr[CompareWord(nodes.ptr[a].sym)].decl)} else if nodes.ptr[a].aux =? int32(1) {
+        let l=CompareWord(nodes.ptr[a].sym)
+        # (a parameter's type is written in the signature; a loop variable's is its source's)
+        if CompareWord(locals.ptr[l].flags) & (LF_PARAM | LF_VALUEPARAM) not=? 0 or CompareWord(locals.ptr[l].flags) & LF_DECL =? 0 {return ""}
+        d=local_decl_in(CompareWord(fns.ptr[CompareWord(locals.ptr[l].owner)].body) l)
+    }
+    if d =? 0 or nodes.ptr[d].kind not=? 'vardecl' or nodes.ptr[d].a not=? 0 or nodes.ptr[d].nlist not=? 0 {return ""}
+    let v=CompareWord(nodes.ptr[d].b)
+    loop v not=? 0 and nodes.ptr[v].kind =? 'conv' {v=CompareWord(nodes.ptr[v].a)}
+    if v =? 0 or nodes.ptr[v].kind not=? 'array' {return ""}
+    let kw=if has_flag(d NF_RDONLY) {"const"} else {"let"}
+    let nm=name_of(CompareWord(nodes.ptr[a].name))
+    " (integer literals are `int` unless a type is written where they are made, and an array keeps its element type: write it where '{nm}' is made, as `{kw} {nm}:{dt_named(t)} = [...]`)"
+}
+variant_hint=(a:CompareWord t0:CompareWord):>string=>$unsafe {
+    let t=prune(t0)
+    if nodes.ptr[a].type not=? 0 {
+        # (a color is a vec4; light and sky colors are vec3s)
+        let ft=prune(CompareWord(nodes.ptr[a].type))
+        if types.ptr[ft].kind =? 'secret' and types.ptr[t].kind not=? 'secret' {return secret_hint(a)}
+        if dewy_at(nodes.ptr[a].pos) and rational_float_mismatch(ft t) {return " (a decimal literal such as `0.5` is an exact rational: write the floating type where the value is made, as `let x:float64 = 0.5` or `let xs:array<float64> = [1.5 2.5]`)"}
+        if dewy_at(nodes.ptr[a].pos) and int_literal_elem_mismatch(ft t) {
+            let h=int_literal_elem_hint(a t)
+            if (h as array<uint8>).length >? 0 {return h}
+        }
+        let c="c"
+        if nodes.ptr[a].kind =? 'ident' {c=name_of(CompareWord(nodes.ptr[a].name))}
+        if type_eq(ft T_VEC4) and type_eq(t T_VEC3) {return " (`{c}.rgb` is a color without its alpha)"}
+        if type_eq(t T_VEC2) and (nodes.ptr[a].kind =? 'int_lit' or nodes.ptr[a].kind =? 'float_lit') {return " (a position or size is one vec2: `vec2(x, y)`)"}
+        # (load_texture("hero.png"): a file's bytes, not its name)
+        if types.ptr[t].kind =? 'array' and prune(CompareWord(types.ptr[t].elem)) =? T_U8 and types.ptr[ft].kind =? 'str_' {
+            if nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux =? 0 {
+                let f=name_of(CompareWord(nodes.ptr[a].sval))
+                return " (a file's bytes: `embed(\"{f}\")` builds the file into the program, `read_bytes(\"{f}\")!` reads it when the program runs; the `!` stops the program if the file is not there)"
+            }
+            return " (`bytes(s)` is a string's bytes; `embed(\"file\")` a file's)"
+        }
+        # (chime = sfx_chime, then play(chime): the function kept, not what it makes)
+        if types.ptr[ft].kind =? 'fn_' and CompareWord(types.ptr[ft].nargs) =? 0 and type_eq(prune(CompareWord(types.ptr[ft].elem)) t) and nodes.ptr[a].kind =? 'ident' {
+            let vn=name_of(CompareWord(nodes.ptr[a].name))
+            return " ('{vn}' holds a function that makes {a_type(t)}, not {a_type(t)}: where it is given its value, call the function, `{vn} = ...()`)"
+        }
+        # (circle(p, 8, (1, 0.9, 0.5)): a tuple of numbers for a color or a position)
+        if types.ptr[ft].kind =? 'tuple' and is_vec(t) {
+            if type_eq(t T_VEC4) or type_eq(t T_VEC3) {return " (a color is `rgb(1, 0.9, 0.5)`, a position `vec3(x, y, z)`)"}
+            return " (a position or size is `vec2(x, y)`)"
+        }
+        # (circle(p, 8, "yellow"): a color is made of numbers)
+        if type_eq(t T_VEC4) and types.ptr[ft].kind =? 'str_' {
+            if nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux =? 0 {
+                let cn=upper(name_of(CompareWord(nodes.ptr[a].sval)))
+                if cn =? "GREY" {cn="GRAY"}
+                loop known in ["WHITE" "BLACK" "RED" "GREEN" "BLUE" "YELLOW" "ORANGE" "PURPLE" "CYAN" "MAGENTA" "GRAY"] {
+                    if cn =? known {return " (a color is made of numbers: `{cn}`, or `rgb(r, g, b)` with each from 0 to 1)"}
+                }
+                if (cn as array<uint8>).length >? 0 and (cn as array<uint8>)[0] =? b'#' {return " (a color is made of numbers: `hex(\"{name_of(CompareWord(nodes.ptr[a].sval))}\")`, or `rgb(r, g, b)` with each from 0 to 1)"}
+            }
+            return " (a color is made of numbers: `rgb(r, g, b)` with each from 0 to 1, or a named one such as `YELLOW`)"
+        }
+        # (sprite(img, ...) with an Image: drawing takes it on the GPU)
+        if dt(t) =? "Texture" and dt(ft) =? "Image" {return " (a Texture is an image on the GPU: `texture(img)` makes one, once, at the top level; `load_texture(embed(\"hero.png\"))` loads one from a file)"}
+        if types.ptr[ft].kind =? 'typeval' and types.ptr[t].kind =? 'fn_' and nodes.ptr[a].kind =? 'ident' {
+            let c2=name_of(CompareWord(nodes.ptr[a].name))
+            return " (`{c2}` is a type; for a function that converts each one, write `(x): {c2}(x)`)"
+        }
+        if type_eq(ft T_VEC3) and type_eq(t T_VEC4) {return " (`vec4({c}, 1)` is a vec3 color with its alpha)"}
+    }
+    if types.ptr[t].kind not=? 'enum_' or nodes.ptr[a].kind not=? 'str_lit' or nodes.ptr[a].nlist >? 0 {return ""}
+    let w=name_of(CompareWord(nodes.ptr[a].sval))
+    let si=CompareWord(types.ptr[t].st)
+    check_struct_fields(si)
+    loop vi in [0..CompareWord(structs.ptr[si].nvariants)) {
+        let vn=name_of(CompareWord(variants.ptr[CompareWord(structs.ptr[si].variants) + vi].name))
+        if vn =? w or vn =? lower(w) {return " (write `.{vn}`)"}
+    }
+    ""
+}
+# a call of a function that calls itself, taken to give nothing (it has no `return value`):
+# what to write instead
+# best > 3.0 with best: f64?: said with where best was made, where a default goes
+opt_cmp_error=(n:CompareWord a:CompareWord b:CompareWord ta:CompareWord tb:CompareWord):>void=>$unsafe {
+    let x=a
+    let tx=ta
+    if tkind(ta) not=? 'opt' {
+        x=b
+        tx=tb
+    }
+    if tkind(tx) =? 'opt' and nodes.ptr[x].kind =? 'ident' {
+        let nm=name_of(CompareWord(nodes.ptr[x].name))
+        let et=prune(CompareWord(types.ptr[prune(tx)].elem))
+        let dv="default"
+        if tkind(et) =? 'str_' {dv="\"\""} else if tkind(et) =? 'int_' {dv="0"}
+        else if tkind(et) =? 'float_' {dv="0.0"}
+        let at:CompareWord=0
+        let s=lookup(CompareWord(nodes.ptr[x].name))
+        if s not=? 0 and syms.ptr[s].kind =? 'local' {at=locals.ptr[CompareWord(syms.ptr[s].ref)].pos}
+        if s not=? 0 and syms.ptr[s].kind =? 'global' {at=nodes.ptr[CompareWord(globals.ptr[CompareWord(syms.ptr[s].ref)].decl)].pos}
+        let where=""
+        if at >? 0 {
+            let [ln c]=line_col(at)
+            where=" where line {ln} makes it"
+        }
+        fatal(nodes.ptr[n].pos "'{nm}' may be none (it is {a_type(tx)}), so it cannot be compared with {jd(nodes.ptr[n].pos "<, >" "<?, >?")}: say what to use then{where} (`... ?? {dv}`), or {jd(nodes.ptr[n].pos "`if let v = {nm}: ...`" "`if {nm} isnt? none \{ ... }`")}")
+    }
+    fatal(nodes.ptr[n].pos "optionals can only be compared with {op_text('eq' nodes.ptr[n].pos)} and {op_text('ne' nodes.ptr[n].pos)}")
+}
+# (play(sfx_chime), input_axis * 400: a function's name where its result was meant)
+uncalled_hint=(n:CompareWord want:CompareWord):>string=>$unsafe {
+    if want not=? 0 and (tkind(want) =? 'fn_' or tkind(want) =? 'cfn') {return ""}
+    let nm=""
+    let d:CompareWord=0
+    if nodes.ptr[n].kind =? 'fnref' and nodes.ptr[n].sym >? 0 and CompareWord(nodes.ptr[n].sym) <? fns.length and fns.ptr[CompareWord(nodes.ptr[n].sym)].decl not=? 0 {
+        d=CompareWord(fns.ptr[CompareWord(nodes.ptr[n].sym)].decl)
+        nm=name_of(CompareWord(nodes.ptr[d].name))
+    }
+    else if nodes.ptr[n].kind =? 'ident' {
+        let s=lookup(CompareWord(nodes.ptr[n].name))
+        if s not=? 0 and syms.ptr[s].kind =? 'fns' {
+            nm=name_of(CompareWord(nodes.ptr[n].name))
+            d=CompareWord(syms.ptr[s].decl)
+        }
+    }
+    if (nm as array<uint8>).length =? 0 or starts_with(nm "__") {return ""}
+    # (key_down(right): the key, Key.right, written without its dot)
+    if want not=? 0 and tkind(want) =? 'enum_' {
+        loop v in variant_names(want) {
+            if name_of(v) =? nm {return " (a {dt(want)} is written with a dot: `.{nm}`)"}
+        }
+    }
+    let args=""
+    if d not=? 0 and nkids(d) >? 0 {args="..."}
+    " ('{nm}' is a function and is not called here: `{nm}({args})` calls it)"
+}
+void_rec_hint=(n:CompareWord):>string=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].sym <=? 0 {return ""}
+    let f=CompareWord(nodes.ptr[n].sym)
+    if f >=? fns.length or not fns.ptr[f].aux_void or fns.ptr[f].decl =? 0 {return ""}
+    let nm=name_of(CompareWord(nodes.ptr[CompareWord(fns.ptr[f].decl)].name))
+    " ('{nm}' calls itself, directly or through another function, with no branch that gives its result's type: write it, {jd(nodes.ptr[n].pos "`{nm} = (...) -> int: ...`" "`{nm} = (...):>int64 => ...`")})"
+}
