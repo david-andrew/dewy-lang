@@ -51,6 +51,13 @@ monotonic=():>MonoPoint=>clock.monotonic()
 $warn_if scope is? none "`today` has no time zone here, so it assumes the zone of the machine it runs on: say so with `$time.zone = 'system'`, or name one: `$time.zone = 'America/New_York'`"
 $check_constant zone_scope_error(scope) "not a time zone"
 today=(scope:string|none=$time.zone):>Date=>{
-    let z=zones.scope_zone(scope) ?? zones.system_zone()
+    let z=match zones.scope_zone(scope) {
+        found:Zone=>found
+        # (a name known only when running: said, and then the machine's)
+        e:UnknownZone=>{
+            __write_err("warning: {e.message}, so `today` reads the machine's zone instead\n")
+            zones.system_zone()
+        }
+    }
     civil._of_days(zones.local_days(now().nominal z))
 }

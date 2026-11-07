@@ -229,3 +229,22 @@ def test_a_programs_own_function_keeps_an_old_name(compiler, tmp_path):
     ran = run(compiler, tmp_path, source)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout.splitlines() == ['mine x', '2']
+
+
+def test_a_machine_with_no_readable_zone_says_so(compiler, tmp_path):
+    source = "$time.zone = 'system'\nlet a = today\nlet b = today\nprintl(a =? b)\n"
+    ran = run(compiler, tmp_path, source, TZ='Nowhere/Land')
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout == 'true\n'
+    assert ran.stderr.count("this machine's time zone is called 'Nowhere/Land'") == 1
+    assert 'so times here read as UTC' in ran.stderr
+    ran = run(compiler, tmp_path, source, TZ='Asia/Tokyo')
+    assert ran.returncode == 0 and 'warning' not in ran.stderr, ran.stderr
+
+
+def test_windows_name_for_the_machines_zone(compiler, tmp_path):
+    ran = run(compiler, tmp_path, "$time.zone = 'system'\nprintl(today)\n", TZ='Tokyo Standard Time')
+    assert ran.returncode == 0, ran.stderr
+    assert 'warning' not in ran.stderr
+    from zoneinfo import ZoneInfo
+    assert ran.stdout.strip() == dt.datetime.now(ZoneInfo('Asia/Tokyo')).date().isoformat()

@@ -1595,7 +1595,7 @@ compiling, so it needs neither.
 every module, and a different setting in an inner scope or another module is a compile error. A
 main file that sets none leaves modules and scopes free to set their own. `'system'` reads the
 name of the machine's zone when the program runs, and `'build'` pins the zone of the machine building it.
-`today` is the date there; with no zone set it warns, naming what it assumes. A literal cannot assume a zone. Zone rules are not the machine's: each
+`today` is the date there; with no zone set it warns, naming what it assumes. A machine with no zone to read reads as UTC, and the program says so once on standard error. A literal cannot assume a zone. Zone rules are not the machine's: each
 Dewy version ships its own (IANA data in `lib/time/rules`), so a program means the same thing
 anywhere, and a program links them only if it reaches a zone operation.
 

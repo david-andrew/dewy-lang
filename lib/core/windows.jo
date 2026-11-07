@@ -90,6 +90,8 @@ when TARGET == "windows":
     @lib("kernel32.dll")
     extern GetEnvironmentVariableW = (name: *u16, buf: *u16, n: u32) -> u32
     @lib("kernel32.dll")
+    extern GetDynamicTimeZoneInformation = (info: *u16) -> u32
+    @lib("kernel32.dll")
     extern QueryPerformanceCounter = (count: *int) -> i32
     @lib("kernel32.dll")
     extern QueryPerformanceFrequency = (freq: *int) -> i32
@@ -376,6 +378,14 @@ when TARGET == "windows":
         n = int(GetTempPathW(4096, data(buf)))
         if n > 1 and buf[n - 1] == u16('\\'): n -= 1
         __narrow(data(buf), n)
+
+    # (DYNAMIC_TIME_ZONE_INFORMATION: its key name, 128 wide characters from byte 172)
+    __w32_zone_name = () -> str:
+        info = fill(u16(0), 216)
+        if GetDynamicTimeZoneInformation(data(info)) == 0xFFFFFFFF: return ""
+        n = 0
+        loop n < 128 and info[86 + n] != u16(0): n += 1
+        __narrow(data(info) + 86, n)
 
     __w32_qpf = 0
 

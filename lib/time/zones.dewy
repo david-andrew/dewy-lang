@@ -30,7 +30,7 @@ _i64=(at:int64):>int64=>$unsafe {
     int64<overflow='wrap'>(v)
 }
 _zone_count=():>int64=>_u32(4)
-_entry_at=(entry:int64):>int64=>16+entry*12
+_entry_at=(entry:int64):>int64=>24+entry*12
 # (the name's bytes against text: negative, zero or positive)
 _compare=(entry:int64 text:string):>int64=>$unsafe {
     let at=_u32(_entry_at(entry))
@@ -73,15 +73,49 @@ name=(z:Zone):>string=>_text_at(_u32(_entry_at(z._entry)) _u32(_entry_at(z._entr
 __as__=(z:Zone):>string=>name(z)
 __eq__=(a:Zone b:Zone):>bool=>a._entry =? b._entry
 
-# The machine's zone, read once. Its rules still come from the pack; a name the pack does not
-# know, or none at all, is UTC.
+# A Windows name for a zone (CLDR's table, in the pack): the machine says "Eastern Standard Time".
+_windows_zone=(name:string):>Zone|UnknownZone=>$unsafe {
+    let table=_u32(20)
+    let bytes=name as array<uint8>
+    let lo:int64=0
+    let hi=_u32(16)
+    loop lo <? hi {
+        let mid=(lo+hi)//2
+        let row=table+mid*12
+        let at=_u32(row)
+        let len=_u32(row+4)
+        let order:int64=0
+        let i:int64=0
+        loop order =? 0 and i <? len and i <? bytes.length {
+            order=int64(_rules()[at+i])-int64(bytes[i])
+            i=i+1
+        }
+        if order =? 0 {order=len-bytes.length}
+        if order =? 0 {return Zone[_u32(row+8)]}
+        if order <? 0 {lo=mid+1} else {hi=mid}
+    }
+    UnknownZone["no time zone is called {name}"]
+}
+# What a machine calls its zone: a tz name, or Windows' name for one.
+_machine_named=(name:string):>Zone|UnknownZone=>{
+    let found=zone_parse(name)
+    if found is? Zone {return found}
+    _windows_zone(name)
+}
+
+# The machine's zone, read once by name; its rules still come from the pack. A machine with no zone
+# to read, or a name the pack does not know, is read as UTC, and the program says so once.
 _system:Zone|none=none
 system_zone=():>Zone=>{
     if _system isnt? none {return _system}
-    let found=zone_parse(__system_zone_name())
-    let chosen:Zone=match found {
+    let name=__system_zone_name()
+    let chosen:Zone=match _machine_named(name) {
         z:Zone=>z
-        e:UnknownZone=>zone_parse("UTC") ?? Zone[0]
+        e:UnknownZone=>{
+            let why=if name =? "" "this machine names no time zone" else "this machine's time zone is called '{name}', which the time rules do not know"
+            __write_err("warning: {why}, so times here read as UTC: set the TZ variable, or name a zone with `$time.zone = 'America/New_York'`\n")
+            zone_parse("UTC") ?? Zone[0]
+        }
     }
     _system=chosen
     chosen
@@ -89,12 +123,15 @@ system_zone=():>Zone=>{
 # (what is wrong with a `$time.zone` value; only a name can be)
 zone_scope_error=(scope:string|none):>string?=>{
     if scope is? none or scope =? 'system' {return none}
-    zone_error(scope)
+    match _machine_named(scope) {
+        z:Zone=>none
+        e:UnknownZone=>e.message
+    }
 }
 # A named zone or the machine's, as `$time.zone` says.
 scope_zone=(scope:string|none):>Zone|UnknownZone=>{
     if scope is? none or scope =? 'system' {return system_zone()}
-    zone_parse(scope)
+    _machine_named(scope)
 }
 
 # ---------------- offsets ----------------
@@ -287,7 +324,7 @@ _zone_for=(written:Zone|none given:Zone|none scope:string|none running:bool):>Zo
         return MissingContext["there is no zone to read this in, and a literal cannot assume one: write it in the text, `2026-10-26T09:00[America/New_York]`, pass `zone=`, or set `$time.zone`"]
     }
     if scope =? 'system' {return system_zone()}
-    zone_parse(scope)
+    _machine_named(scope)
 }
 # `2026-10-26T09:00[America/New_York]`, or local text with a `zone`, or the scope's `$time.zone`.
 zoned_parse=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none running:bool=true):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>{

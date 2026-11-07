@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Generate lib/time/rules/current.bin, the zone rules a Dewy version ships, from compiled TZif files.
 
-Usage: tools/time/gen_rules.py [ZONEINFO_DIR] [OUTPUT]
+Usage: tools/time/gen_rules.py [ZONEINFO_DIR] [OUTPUT] [WINDOWS_ZONES_XML]
 
 Pack layout, little-endian:
-  'DZP1', u32 zone count, u32 data version offset, u32 data version length,
+  'DZP2', u32 zone count, u32 data version offset, u32 data version length,
+  u32 Windows name count, u32 Windows table offset,
   then for each zone name in byte order: u32 name offset, u32 name length, u32 record offset.
+  The Windows table (CLDR windowsZones, territory 001), by name in byte order: u32 name offset,
+  u32 name length, u32 zone index.
   A record: i32 offset before the first change, u32 change count, u32 rule offset, u32 rule length,
   then i64 change times (POSIX seconds), then i32 offsets, then u8 daylight flags.
 Names, rules and the version live in a string area after the records. Links share a record,
 and each keeps its own name.
 """
 import pathlib
+import re
 import struct
 import sys
 
@@ -70,11 +74,18 @@ def version_of(root):
     return 'iana-' + first.split()[-1]
 
 
+def windows_names(path, names):
+    pairs = re.findall(r'<mapZone other="([^"]+)" territory="001" type="([^" ]+)', path.read_text())
+    return sorted(((w.encode(), z) for w, z in pairs if z in names), key=lambda pair: pair[0])
+
+
 def main():
     root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else '/usr/share/zoneinfo')
     output = pathlib.Path(sys.argv[2] if len(sys.argv) > 2 else
                           pathlib.Path(__file__).resolve().parents[2] / 'lib/time/rules/current.bin')
     names = names_of(root)
+    xml = pathlib.Path(sys.argv[3] if len(sys.argv) > 3 else '/usr/share/evolution-data-server/ews/windowsZones.xml')
+    windows = windows_names(xml, set(names))
     records = {}
     zones = []
     strings = bytearray()
@@ -89,7 +100,7 @@ def main():
 
     body = bytearray()
     index_size = 12 * len(names)
-    start = 16 + index_size
+    start = 24 + index_size
     for name in names:
         parsed = read_tzif(root / name)
         key = repr(parsed)
@@ -103,9 +114,17 @@ def main():
             body += bytes(c[2] for c in changes)
         zones.append((text(name), records[key]))
     version_at, version_len = text(version_of(root))
+    windows_rows = []
+    for raw, zone in windows:
+        name_at, name_len = text(raw.decode())
+        windows_rows.append((name_at, name_len, names.index(zone)))
+    windows_at = start + len(body)
+    body += b'\0' * (12 * len(windows_rows))
     strings_at = start + len(body)
-    out = bytearray(b'DZP1')
-    out += struct.pack('<LLL', len(zones), strings_at + version_at, version_len)
+    for i, (name_at, name_len, zone) in enumerate(windows_rows):
+        struct.pack_into('<LLL', body, windows_at - start + 12 * i, strings_at + name_at, name_len, zone)
+    out = bytearray(b'DZP2')
+    out += struct.pack('<LLLLL', len(zones), strings_at + version_at, version_len, len(windows_rows), windows_at)
     for (name_at, name_len), record in zones:
         out += struct.pack('<LLL', strings_at + name_at, name_len, record)
     out += body + strings
@@ -116,7 +135,7 @@ def main():
         struct.pack_into('<L', out, at, strings_at + rule_at)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(out)
-    print(f'{output}: {len(out)} bytes, {len(zones)} names, {len(records)} records, {version_of(root)}')
+    print(f'{output}: {len(out)} bytes, {len(zones)} names, {len(records)} records, {len(windows_rows)} Windows names, {version_of(root)}')
 
 
 if __name__ == '__main__':

@@ -119,6 +119,7 @@ let dt = (now - start) / 1s as float64
 
 - **A zone** is an identity plus a versioned transition relation. Offsets can be any size, DST is metadata, and synthetic histories can give more than two candidates.
 - **`$time.zone`** is chosen at compile time. A name (`'America/New_York'`) pins the whole program to one zone, `'system'` is the zone of the machine running the program, read once by name, and `'build'` pins the zone of the machine building it. Set in the main file, it holds in every module, and a different setting in an inner scope or another module is a compile error naming both. A program whose main file sets none may set zones in its modules and scopes. Rules come from the pinned pack, unless `$time.zone_source = 'host'`, so a test cannot change with a distribution's tzdata.
+- **No zone to read.** `'system'` reads the TZ variable, then where `/etc/localtime` points or `/etc/timezone`; Windows' zone name, through CLDR's table in the pack; a page's browser zone. A machine with nothing to read, or a name the pack does not know, reads as UTC, and the program says so once on standard error when it first needs the zone.
 - **The assumed zone.** An operation that needs a zone and has none warns, per site, naming what it assumes:
 
   ```text

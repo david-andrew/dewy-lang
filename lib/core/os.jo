@@ -551,19 +551,23 @@ time_ns = () -> int:
         syscall(228, 7, &ts)
         ts.0 * 1000000000 + ts.1
 
-# (Dewy's `$time.zone = 'system'`: the name of the machine's zone, "" when it has none to read: the
-# TZ variable, or where /etc/localtime points)
+# (Dewy's `$time.zone = 'system'`: what the machine calls its zone, "" when it has nothing to read:
+# the TZ variable, then where /etc/localtime points or /etc/timezone; on Windows its zone's name,
+# and in a web page the browser's)
 __system_zone_name = () -> str:
     if let tz = env("TZ"):
         name = if len(tz) > 0 and tz[0] == ':': tz[1..] else: tz
         if len(name) > 0 and name[0] != '/': return name
-    when TARGET == "linux" or TARGET == "macos":
+    when TARGET == "windows":
+        return __w32_zone_name()
+    else when TARGET != "wasm":
         buf = fill(u8(0), 1024)
         n = syscall(89, data(__zstr("/etc/localtime")), data(buf), 1024)
         if n > 0:
             path = str_from_bytes(buf[..n))
             at = find(path, "zoneinfo/")
             if at >= 0: return path[at + 9..]
+        if let text = read_file("/etc/timezone"): return trim(text)
     ""
 
 # (Dewy's sleep: a time quantity, in whole nanoseconds here)
