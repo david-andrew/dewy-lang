@@ -1,0 +1,9 @@
+# A type written where the array is made is the programmer's: no help to widen it there.
+row = (a:array<int> n:int64):>array<int64> => {
+    let cur:array<int64> = [n]
+    loop j in [1..a.length) {
+        cur.push(min(cur[j - 1] + a[j] cur[j - 1] * 2))
+    }
+    cur
+}
+main = () => printl(row([1 2 3] 4))

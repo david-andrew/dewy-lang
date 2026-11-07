@@ -1,14 +1,14 @@
 $runtime_checks
 from p"ast.jo" import (NF_INCLUSIVE NF_STEP RANGE_EXHAUSTION has_flag kid nkids nodes)
-from p"check.jo" import (dewy_at fns locals)
+from p"check.jo" import (LF_DECL dewy_at fns locals)
 from p"checker_tokens.dewy" import (Tok)
 from p"directives.jo" import (dir_name_assumed_bounds dir_value)
 from p"directive_rules.dewy" import (dir_defer)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"exact.jo" import (exact_progress_math exact_word_reads)
-from p"expr.jo" import (CV ntype)
+from p"expr.jo" import (CV IN ntype)
 from p"checks_thin_expr.dewy" import (int_intervals)
-from p"facts.jo" import (FACT_CAP FactLoop FactState fact_add_fits fact_binding fact_bound fact_capture fact_compare fact_constant fact_covered fact_difference fact_difference_head fact_difference_next fact_distance fact_domain fact_incident fact_loop_exhausted fact_projection_find fact_shortest fact_name_axis_slice fact_name_open_range fact_name_range fact_name_slice_range fact_new fact_policy fact_project fact_probe_on fact_query fact_scalar fact_set_bound fact_speculating fact_summary_owner fact_terms fact_type fact_validated stable_loop_index)
+from p"facts.jo" import (FACT_CAP FactLoop FactState fact_add_fits fact_binding fact_bound fact_capture fact_compare fact_constant fact_covered fact_difference fact_difference_head fact_difference_next fact_distance fact_domain fact_incident fact_loop_exhausted fact_projection_find fact_shortest fact_name_axis_slice fact_name_open_range fact_name_range fact_name_slice_range fact_new fact_owner fact_policy fact_project fact_probe_on fact_query fact_scalar fact_set_bound fact_speculating fact_summary_owner fact_terms fact_type fact_validated stable_loop_index)
 from p"facts_arith.dewy" import (fact_u64_capped)
 from p"facts_changes.dewy" import (fact_changes)
 from p"facts_elements.dewy" import (fact_found_payload fact_index_carried)
@@ -262,9 +262,40 @@ fact_narrow_check=(n:RangeWord @s:FactState value:RangeWord):>bool=>$unsafe {
         return false
     }
     err_notes.push([(-1) "help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`"])
+    let held=fact_pushed_into(n)
+    if held not=? "" {err_notes.push([(-1) "help: the destination is an element of `{held}`, an array<{dt(ntype(n))}> by the values it was made from: make it hold `int` where it is made, `let {held}:array<int> = ...`"])}
     let repair=if lc not=? 1 and hc not=? 1 {"{low} <=? {side.text} and {side.text} <=? {shown_limit}"} else {relation}
     wit_unknown(n fact_bound(s value) "`{relation}` for the conversion to {dt(ntype(n))}" 0 repair missing)
     false
+}
+# The local array a narrowed value is pushed onto (`cur.push(x)`, `cur` made by `let cur = [i]`
+# with no type written), or "": its element type came from what made it. O(the function's
+# body), on the error path only.
+fact_pushed_into=(n:RangeWord):>string=>$unsafe {
+    if fact_owner <=? 0 or fact_owner >=? fns.length or fns.ptr[fact_owner].body =? 0 or not dewy_at(nodes.ptr[n].pos) {return ""}
+    let work=[RangeWord(fns.ptr[fact_owner].body)]
+    let visits:RangeWord=0
+    let target:RangeWord=0
+    let unwritten=dict<int64 bool>()
+    loop work.length >? 0 and visits <? 100000 {
+        let e=work.pop()
+        visits += 1
+        if e <=? 0 or e >=? nodes.length or nodes.ptr[e].kind =? 'lambda' {continue}
+        # (a `let` with no type written: `.a` holds a written one)
+        if nodes.ptr[e].kind =? 'vardecl' and nodes.ptr[e].sym >? 0 {unwritten[RangeWord(nodes.ptr[e].sym)]=nodes.ptr[e].a =? 0}
+        if nodes.ptr[e].kind =? 'intrinsic' and nodes.ptr[e].aux =? int32(int64(IN.push)) and nkids(e) =? 2 and kid(e 1) =? n {
+            let r=kid(e 0)
+            let l=RangeWord(nodes.ptr[r].sym)
+            if nodes.ptr[r].kind not=? 'ident' or nodes.ptr[r].aux not=? int32(1) or l <=? 0 or RangeWord(locals.ptr[l].flags) & LF_DECL =? 0 {return ""}
+            target=l
+        }
+        work.push(RangeWord(nodes.ptr[e].a))
+        work.push(RangeWord(nodes.ptr[e].b))
+        work.push(RangeWord(nodes.ptr[e].c))
+        loop i in [0..nkids(e)) {work.push(kid(e i))}
+    }
+    if target =? 0 or not (unwritten.get(target) ?? false) {return ""}
+    name_of(RangeWord(locals.ptr[target].name))
 }
 # The builtin floor helper a Dewy `//` or `%` resolved to (fact_floor's kind), or 0.
 fact_floor_call=(n:RangeWord):>RangeWord=>$unsafe {

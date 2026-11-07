@@ -1,0 +1,9 @@
+# `[n]` with n an int64 makes an array<int64>: a sum pushed onto it may not fit, and the help names where to widen it.
+row = (a:array<int> n:int64):>array<int64> => {
+    let cur = [n]
+    loop j in [1..a.length) {
+        cur.push(min(cur[j - 1] + a[j] cur[j - 1] * 2))
+    }
+    cur
+}
+main = () => printl(row([1 2 3] 4))
