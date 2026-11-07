@@ -1,0 +1,608 @@
+$runtime_checks
+from p"lower.jo" import HK
+from p"@lib/core/str.jo" import (starts_with)
+from p"arena_ops.dewy" import (arena_handle)
+from p"ast.jo" import (NF_GENERIC has_flag kid nkids nodes)
+from p"check.jo" import (FK_NORMAL LF_ADDR LF_ASSIGNED LF_CAPTURED LF_EXPOSED LF_PARAM LF_READ fns globals locals place_root readonly_global)
+from p"copies.jo" import (copies_on copy_bindings copy_blocked copy_borrowed copy_capture_nodes copy_costs copy_explicit copy_fields copy_inputs copy_loop_after copy_loop_back copy_moves copy_noenv copy_proof_budget)
+from p"directives.jo" import (dir_copies_any dir_explicit_copies)
+from p"expr.jo" import (CV IN is_map_type mk_ident_local ntype)
+from p"ir_builders.dewy" import (e_call e_copy e_iconst e_mov e_slot e_store e_zero vreg)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"lower.jo" import (VC_AGG Val cur_fn env_v)
+from p"lower_closures.dewy" import (spawn_owned_capture)
+from p"lower_group.dewy" import (gen_expr gen_place local_place)
+from p"lower_helpers.dewy" import (field_list)
+from p"lower_primitives.dewy" import (call_eval_order e_gaddr global_addr_off lf_helper)
+from p"lower_races.dewy" import (in_lib)
+from p"lower_storage.dewy" import (V boxed_field_of is_shared new_temp own place_addr scope_add_local store_val vc vt_of write_place zero_val)
+from p"ownership.jo" import (owner_adoptions ownership_consumers ownership_decls ownership_functions)
+from p"ownership_checks.dewy" import (LF_ALIAS LF_BYREF LF_CAPTURE LF_MUTPARAM NF_GLOBAL ownership_parameters ownership_validate)
+from p"ownership_lower.dewy" import (owner_forget_field owner_forget_slot owner_register owner_value)
+from p"ownership_types.dewy" import (ownership_copyable ownership_nominal ownership_type)
+from p"poly_closure.jo" import (poly_families)
+from p"types.jo" import (dt fields layout prune structs targ telem tkind tsize type_eq type_has_fn types variants)
+from p"util.jo" import (err_notes fatal ice name_of)
+
+CopyWord:type=int64<overflow='wrap'>
+copies_reset=():>void=>$unsafe {
+    copies_on=false
+    if dir_copies_any {copies_on=true}
+    copy_costs=dict<int64 int64>()
+    copy_moves=dict<int64 bool>()
+    copy_blocked=dict<int64 bool>()
+    copy_explicit=dict<int64 bool>()
+    copy_inputs=dict<int64 bool>()
+    copy_bindings=dict<int64 bool>()
+    copy_noenv=dict<int64 bool>()
+    copy_borrowed=dict<int64 bool>()
+    if copies_on {copies_parameters()}
+    ownership_parameters()
+    # (a `$__consume__` method's receiver: an owning parameter, as Dewy's own are)
+    if ownership_consumers.length not=? 0 {
+        loop f in [1..fns.length) {
+            if fns.ptr[f].params.length >? 0 and ownership_consumers.has(CopyWord(fns.ptr[f].decl)) and ownership_type(CopyWord(fns.ptr[f].ptypes[0])) {copy_inputs[fns.ptr[f].params[0]]=true}
+        }
+    }
+    ownership_validate()
+    if ownership_decls.length not=? 0 {copies_on=true}
+}
+copy_consumes=(f:CopyWord i:CopyWord):>bool=>$unsafe {
+    f >? 0 and i <? fns.ptr[f].params.length and copy_inputs.has(fns.ptr[f].params[i])
+}
+# Does this local cross an owning boundary? Scalar projections and read-only
+# direct calls do not. Unknown calls and escaping aggregate results fail closed.
+# This is also the escape check for sharing a read-only local snapshot.
+copy_escapes=(n:CopyWord l:CopyWord owning:bool=false):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let owning=owning and (not ownership_type(CopyWord(locals.ptr[l].type)) or ownership_type(ntype(n)))
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        return owning and nodes.ptr[n].aux =? int32(1) and nodes.ptr[n].sym =? int32(l)
+    }
+    if k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.explicit_copy)) {return false}
+    if k =? 'field' or k =? 'index' or k =? 'narrow' or k =? 'unwrap' {
+        if copy_escapes(CopyWord(nodes.ptr[n].a) l owning and costly_copy(ntype(n))) {return true}
+        if k =? 'index' {return copy_escapes(CopyWord(nodes.ptr[n].b) l)}
+        return false
+    }
+    if k =? 'return_' {return copy_escapes(CopyWord(nodes.ptr[n].a) l true)}
+    if k =? 'vardecl' {
+        if nodes.ptr[n].aux2 =? 1 {return false}
+        return copy_escapes(CopyWord(nodes.ptr[n].b) l true)
+    }
+    if k =? 'assign' {
+        return copy_escapes(CopyWord(nodes.ptr[n].a) l) or copy_escapes(CopyWord(nodes.ptr[n].b) l true)
+    }
+    if k =? 'call' {
+        let aux=CopyWord(nodes.ptr[n].aux)
+        let f=if aux =? 0 {CopyWord(nodes.ptr[n].sym)} else {0}
+        if copy_escapes(CopyWord(nodes.ptr[n].a) l) {return true}
+        loop i in [0..nkids(n)) {
+            let take=aux not=? 0 or copy_consumes(f i) or costly_copy(ntype(n))
+            if f >? 0 and i <? fns.ptr[f].params.length and CopyWord(locals.ptr[fns.ptr[f].params[i]].flags) & LF_MUTPARAM not=? 0 {take=false}
+            # (a checked callee that keeps this parameter borrowed cannot return
+            # its storage without a copy of its own: `sha256(key)`)
+            if aux =? 0 and f >? 0 and i <? fns.ptr[f].params.length and copy_borrowed.has(fns.ptr[f].params[i]) and not copy_consumes(f i) {take=false}
+            if copy_escapes(kid(n i) l take) {return true}
+        }
+        return false
+    }
+    if k =? 'intrinsic' {
+        let id=nodes.ptr[n].aux as IN
+        loop i in [0..nkids(n)) {
+            let take=i >? 0 and (id =? IN.push or id =? IN.insert)
+            # (extend copies the source's elements, never adopts its storage)
+            if id =? IN.extend and i =? 1 {take=costly_copy(telem(ntype(kid(n 0))))}
+            if id =? IN.fill and i =? 0 {take=true}
+            if copy_escapes(kid(n i) l take) {return true}
+        }
+        return false
+    }
+    if k =? 'block' {
+        loop i in [0..nkids(n)) {
+            if copy_escapes(kid(n i) l nodes.ptr[n].aux not=? 0 and i =? nkids(n) - 1) {return true}
+        }
+        return false
+    }
+    if k =? 'if_' {
+        return copy_escapes(CopyWord(nodes.ptr[n].a) l) or copy_escapes(CopyWord(nodes.ptr[n].b) l owning) or copy_escapes(CopyWord(nodes.ptr[n].c) l owning)
+    }
+    let take=owning or k =? 'array' or k =? 'tuple' or k =? 'map_lit'
+    loop c in copy_children(n) {
+        if copy_escapes(c l take) {return true}
+    }
+    false
+}
+# A closed direct callee can receive ownership instead of taking an entry
+# snapshot. Handles, callbacks, exports and C entry points keep the borrowed
+# ABI; their unsupported ownership proofs retain a diagnostic.
+copies_parameters=():>void=>$unsafe {
+    let indirect=dict<int64 bool>()
+    loop n in nodes {
+        if n.kind =? 'fnref' or n.kind =? 'partial' {
+            if n.sym >? 0 {indirect[int64(n.sym)]=true}
+        }
+    }
+    # Every analyzed parameter starts borrowed; consumption only grows, so the
+    # loop settles on the least set a direct flow into a result or owner forces.
+    loop round in [0..2) {
+        let changed=true
+        loop changed {
+            changed=false
+            loop f in [1..fns.length) {
+                let body=CopyWord(fns.ptr[f].body)
+                if body =? 0 or not copy_strict(body) or fns.ptr[f].kind not=? FK_NORMAL or fns.ptr[f].cabi or (fns.ptr[f].export_name as array<uint8>).length >? 0 or indirect.has(f) {continue}
+                loop i in [0..nkids(body)) {
+                    let s=kid(body i)
+                    if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+                    if nkids(s) >? 0 {continue}
+                    let l=CopyWord(nodes.ptr[s].sym)
+                    let source=CopyWord(nodes.ptr[s].b)
+                    if nodes.ptr[source].kind not=? 'ident' or nodes.ptr[source].aux not=? int32(1) {continue}
+                    let p=CopyWord(nodes.ptr[source].sym)
+                    if copy_inputs.has(p) or not costly_copy(CopyWord(locals.ptr[l].type)) {continue}
+                    if round =? 0 {
+                        copy_borrowed[p]=true
+                        continue
+                    }
+                    if CopyWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_CAPTURED | LF_EXPOSED) not=? 0 or copy_escapes(body l) {
+                        copy_inputs[p]=true
+                        copy_bindings[l]=true
+                        changed=true
+                    }
+                }
+            }
+        }
+    }
+}
+copy_strict=(e:CopyWord):>bool=>$unsafe {
+    e >? 0 and dir_copies_any and dir_explicit_copies(nodes.ptr[e].pos)
+}
+costly_copy=(t0:CopyWord):>bool=>$unsafe {
+    let t=prune(t0)
+    if copy_costs.has(t) {return copy_costs[t] not=? 2}
+    # (an Arena's copy is another arena, sharing nothing it will use: lib/std/arena.jo)
+    if arena_handle(t) {
+        copy_costs[t]=2
+        return false
+    }
+    copy_costs[t]=1
+    let k=tkind(t)
+    let costly=k =? 'array' or k =? 'fn_' or k =? 'polyfn' or k =? 'box'
+    if k =? 'fixed' or k =? 'opt' {costly=costly_copy(telem(t))}
+    else if k =? 'tuple' {
+        loop i in [0..CopyWord(types.ptr[t].nargs)) {
+            if costly_copy(targ(t i)) {costly=true}
+        }
+    }
+    else if k =? 'enum_' {
+        let si=CopyWord(types.ptr[t].st)
+        layout(t)
+        loop i in [0..CopyWord(structs.ptr[si].nvariants)) {
+            let v=CopyWord(structs.ptr[si].variants) + i
+            loop j in [0..CopyWord(variants.ptr[v].nfields)) {
+                if costly_copy(CopyWord(fields.ptr[CopyWord(variants.ptr[v].fields) + j].type)) {costly=true}
+            }
+        }
+    }
+    else if k =? 'struct_' {
+        layout(t)
+        loop field in field_list(t) {
+            if costly_copy(field[0]) {costly=true}
+        }
+    }
+    copy_costs[t]=if costly {3} else {2}
+    costly
+}
+copy_error=(e:CopyWord why:string):>void=>$unsafe {
+    fatal(nodes.ptr[e].pos "implicit costly copy of {dt(ntype(e))}: {why}; use `.copy`, a view (`const view = @source`), or restructure to transfer the value at its last use")
+}
+copy_reason=(t:CopyWord):>string=>{
+    let k=tkind(t)
+    if k =? 'fn_' or k =? 'polyfn' {return "duplicating a closure environment is not proven unnecessary"}
+    if k =? 'array' {return "runtime-sized mutable array storage may need duplication or detachment"}
+    "the value contains heap payloads that may need duplication or detachment"
+}
+# Use runtime children, never local IDs or type syntax. The liveness proof is
+# deliberately conservative across loops, defers and captured/exposed places.
+copy_children=(n:CopyWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    let mask=isolation_children(nodes.ptr[n].kind)
+    if mask <? 0 {return out}
+    if mask & 1 not=? 0 and nodes.ptr[n].a not=? 0 {out.push(CopyWord(nodes.ptr[n].a))}
+    if mask & 2 not=? 0 and nodes.ptr[n].b not=? 0 {out.push(CopyWord(nodes.ptr[n].b))}
+    if mask & 4 not=? 0 and nodes.ptr[n].c not=? 0 {out.push(CopyWord(nodes.ptr[n].c))}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {out.push(kid(n i))}
+    }
+    out
+}
+copy_mentions=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
+    if n =? 0 {return}
+    if nodes.ptr[n].kind =? 'lambda' {
+        let f=CopyWord(nodes.ptr[n].sym)
+        if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes.ptr[n].aux)].envfn}
+        loop cap in fns.ptr[f].caps {live[int64(cap.outer)]=true}
+        return
+    }
+    if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        live[CopyWord(nodes.ptr[n].sym)]=true
+    }
+    loop c in copy_children(n) {copy_mentions(c @live)}
+}
+# Field paths are per-function and only demanded for resource records.
+copy_field=(n0:CopyWord):>CopyWord=>$unsafe {
+    let n=n0
+    let path=""
+    loop nodes.ptr[n].kind =? 'field' {
+        let a=CopyWord(nodes.ptr[n].a)
+        let t=ntype(a)
+        if nodes.ptr[n].aux <? 0 or tkind(t) not=? 'struct_' or ownership_nominal(t) or is_map_type(t) {return 0}
+        if n not=? n0 and boxed_field_of(n) >=? 0 {return 0}
+        path="{CopyWord(nodes.ptr[n].aux)}/{path}"
+        n=a
+    }
+    if n =? n0 or nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? int32(1) or not ownership_type(ntype(n)) {return 0}
+    let l=CopyWord(nodes.ptr[n].sym)
+    loop i in [0..copy_fields.length) {
+        let p=copy_fields[i]
+        if p[0] =? l and p[1] =? path {return -1 - i}
+    }
+    copy_fields.push([l path])
+    -copy_fields.length
+}
+copy_field_live=(key:CopyWord live:dict<int64 bool>):>bool=>{
+    let p=copy_fields[-1 - key]
+    if live.has(p[0]) {return true}
+    loop [k used] in live {
+        if k >=? 0 {continue}
+        let q=copy_fields[-1 - k]
+        if p[0] =? q[0] and (starts_with(p[1] q[1]) or starts_with(q[1] p[1])) {return true}
+    }
+    false
+}
+copy_local_live=(l:CopyWord live:dict<int64 bool>):>bool=>{
+    if live.has(l) {return true}
+    loop [k used] in live {
+        if k <? 0 and copy_fields[-1 - k][0] =? l {return true}
+    }
+    false
+}
+copy_kill_local=(l:CopyWord @live:dict<int64 bool>):>void=>{
+    live.remove(l);
+    loop i in [0..copy_fields.length) {
+        if copy_fields[i][0] =? l {live.remove(-1 - i);}
+    }
+}
+copy_live=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
+    if n =? 0 {return}
+    if copy_proof_budget =? 0 {return}
+    if copy_proof_budget >? 0 {copy_proof_budget -= 1}
+    let k=nodes.ptr[n].kind
+    if (k =? 'break_' or k =? 'continue_') and copy_loop_after.length >? 0 {
+        let depth=copy_loop_after.length - 1 - CopyWord(nodes.ptr[n].ival)
+        let edge=if k =? 'break_' {copy_loop_after[depth]} else {copy_loop_back[depth]}
+        live.clear()
+        loop [l used] in edge {live[l]=used}
+        return
+    }
+    if k =? 'lambda' {
+        let ids=copy_capture_ids(n)
+        let i=ids.length - 1
+        loop i >=? 0 {
+            copy_live(ids[i] @live)
+            i -= 1
+        }
+        return
+    }
+    if k =? 'return_' {live.clear()}
+    if k =? 'field' {
+        let key=copy_field(n)
+        if key <? 0 {
+            let l=copy_fields[-1 - key][0]
+            let skip=LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
+            if copy_inputs.has(l) {skip &= ~LF_PARAM}
+            if boxed_field_of(n) <? 0 and not copy_field_live(key live) and not copy_blocked.has(l) and CopyWord(locals.ptr[l].flags) & skip =? 0 {copy_moves[n]=true}
+            live[key]=true
+            return
+        }
+    }
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        let l=CopyWord(nodes.ptr[n].sym)
+        let skip=LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
+        if copy_inputs.has(l) {skip &= ~LF_PARAM}
+        if spawn_owned_capture(CopyWord(locals.ptr[l].owner) l) {skip &= ~LF_CAPTURE}
+        if ownership_type(CopyWord(locals.ptr[l].type)) and not is_shared(l) and CopyWord(locals.ptr[l].flags) & LF_ADDR =? 0 {skip &= ~LF_CAPTURED}
+        if not copy_local_live(l live) and not copy_blocked.has(l) and CopyWord(locals.ptr[l].flags) & skip =? 0 {
+            copy_moves[n]=true
+        }
+        live[l]=true
+        return
+    }
+    if k =? 'assign' and nodes.ptr[n].op =? int32(47) and nodes.ptr[n].aux =? 0 {
+        let target=CopyWord(nodes.ptr[n].a)
+        if nodes.ptr[target].kind =? 'ident' and nodes.ptr[target].aux =? int32(1) {
+            # Replacement kills the old value; evaluate its RHS against the
+            # incoming state so self-assignment still captures before dropping.
+            copy_kill_local(CopyWord(nodes.ptr[target].sym) @live)
+            copy_live(CopyWord(nodes.ptr[n].b) @live)
+            return
+        }
+    }
+    if k =? 'vardecl' {
+        copy_kill_local(CopyWord(nodes.ptr[n].sym) @live)
+        copy_live(CopyWord(nodes.ptr[n].b) @live)
+        return
+    }
+    # Every local a loop mentions is live at its backedge; one declared in it
+    # starts fresh each iteration, so its last use can still transfer it.
+    if k =? 'while_' or k =? 'for_' {
+        copy_loop_after.push(live)
+        copy_mentions(n @live)
+        let inner=live
+        copy_loop_locals(n @inner)
+        copy_loop_back.push(inner)
+        let cs=copy_children(n)
+        let i=cs.length - 1
+        loop i >=? 0 {
+            copy_live(cs[i] @inner)
+            i -= 1
+        }
+        copy_loop_after.pop();
+        copy_loop_back.pop();
+        return
+    }
+    if k =? 'defer_' {
+        copy_mentions(n @live)
+        return
+    }
+    if k =? 'if_' {
+        let left=live
+        let right=live
+        copy_live(CopyWord(nodes.ptr[n].b) @left)
+        copy_live(CopyWord(nodes.ptr[n].c) @right)
+        loop [l unused] in left {live[l]=true}
+        loop [l unused] in right {live[l]=true}
+        copy_live(CopyWord(nodes.ptr[n].a) @live)
+        return
+    }
+    if k =? 'call' {
+        # Earlier arguments can borrow a root through the whole call, even
+        # though their evaluation precedes its lexical last read. Transferring
+        # that root to a consuming parameter would invalidate those borrows.
+        let seen=dict<int64 bool>()
+        loop i in [0..nkids(n)) {
+            let arg=kid(n i)
+            if nodes.ptr[arg].kind =? 'conv' and nodes.ptr[arg].aux =? int32(int64(CV.explicit_copy)) {continue}
+            let here=dict<int64 bool>()
+            copy_mentions(arg @here)
+            loop [l unused] in here {
+                if seen.has(l) {live[l]=true}
+                seen[l]=true
+            }
+        }
+        # (named arguments and a record's fields, evaluated in written order, not their
+        # slots': `[w=w held=held]` makes held's field first; backward in that order)
+        if nodes.ptr[n].c not=? 0 {
+            let order=call_eval_order(n)
+            let i=order.length - 1
+            loop i >=? 0 {
+                copy_live(kid(n order[i]) @live)
+                i -= 1
+            }
+            copy_live(CopyWord(nodes.ptr[n].a) @live)
+            return
+        }
+    }
+    let cs=copy_children(n)
+    let i=cs.length - 1
+    loop i >=? 0 {
+        copy_live(cs[i] @live)
+        i -= 1
+    }
+}
+copies_prepare=(f:CopyWord):>void=>$unsafe {
+    copy_moves.clear()
+    copy_capture_nodes.clear()
+    copy_fields=[]
+    copy_blocked.clear()
+    copy_noenv.clear()
+    copy_loop_after=[]
+    copy_loop_back=[]
+    copy_proof_budget=if ownership_functions.has(f) {4096} else {-1}
+    if not copies_on {return}
+    let body=CopyWord(fns.ptr[f].body)
+    if body =? 0 or (not copy_strict(body) and not ownership_functions.has(f)) {return}
+    loop l in fns.ptr[f].locals {
+        if CopyWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {
+            copy_mentions(CopyWord(locals.ptr[l].alias) @copy_blocked)
+        }
+    }
+    copy_deferred(body)
+    let live=dict<int64 bool>()
+    copy_live(body @live)
+    if copy_proof_budget =? 0 {copy_moves.clear()}
+}
+copy_deferred=(n:CopyWord):>void=>$unsafe {
+    if n =? 0 {return}
+    if nodes.ptr[n].kind =? 'defer_' or nodes.ptr[n].kind =? 'addr' {
+        copy_mentions(n @copy_blocked)
+        return
+    }
+    if nodes.ptr[n].kind =? 'vardecl' and not has_flag(n NF_GLOBAL) {
+        let l=CopyWord(nodes.ptr[n].sym)
+        let e=CopyWord(nodes.ptr[n].b)
+        if nkids(n) =? 0 and e not=? 0 and CopyWord(locals.ptr[l].flags) & LF_ASSIGNED =? 0 {
+            if nodes.ptr[e].kind =? 'fnref' and nodes.ptr[e].aux =? 0 {copy_noenv[l]=true}
+            if nodes.ptr[e].kind =? 'lambda' and not has_flag(e NF_GENERIC) and fns.ptr[CopyWord(nodes.ptr[e].sym)].caps.length =? 0 {copy_noenv[l]=true}
+            if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) and copy_noenv.has(CopyWord(nodes.ptr[e].sym)) {copy_noenv[l]=true}
+        }
+    }
+    loop c in copy_children(n) {copy_deferred(c)}
+}
+# Transfer a dead local's ownership, clearing its old slot so ordinary cleanup
+# remains correct on every exit. Other references created by an explicit copy
+# retain their COW ownership and permission to detach.
+copy_take=(e:CopyWord value:Val t:CopyWord):>Val=>$unsafe {
+    let p=gen_place(e false)
+    if vc(t) =? VC_AGG {
+        if ownership_type(t) {copy_forget(e t)}
+        let s=new_temp(t)
+        let a=e_slot(s)
+        # Implementation-library forwarding adopts an already initialized API
+        # value. Re-running a semantic move here could change a dictionary key
+        # after its hash was computed, or change the value returned by pop.
+        if ownership_type(t) and not owner_adoptions.has(e) and not in_lib(nodes.ptr[e].pos) {
+            e_call(lf_helper(HK.move t 0) [a value.v] (-1));
+        }
+        else {e_copy(a value.v tsize(t));}
+        e_zero(place_addr(p t) tsize(t));
+        if ownership_type(t) {owner_register(s t)}
+        return Val(a true s)
+    }
+    let v=vreg(vt_of(t))
+    e_mov(v value.v);
+    write_place(p t zero_val(t))
+    if ownership_type(t) {
+        copy_forget(e t)
+        return owner_value(V(v true) t)
+    }
+    Val(v true (-1))
+}
+copy_forget=(e:CopyWord t:CopyWord):>void=>$unsafe {
+    if nodes.ptr[e].kind =? 'ident' {
+        let l=CopyWord(nodes.ptr[e].sym)
+        if spawn_owned_capture(cur_fn l) {
+            e_store(env_v CopyWord(locals.ptr[l].env_off) - 8 e_iconst(0) 8);
+        }
+        else {owner_forget_slot(CopyWord(locals.ptr[l].offset))}
+    }
+    else {
+        let key=copy_field(e)
+        if key >=? 0 {ice("missing owner field path")}
+        let p=copy_fields[-1 - key]
+        owner_forget_field(CopyWord(locals.ptr[p[0]].offset) p[1])
+    }
+}
+copy_movable=(e:CopyWord):>bool=>$unsafe {
+    if nodes.ptr[e].kind =? 'field' and copy_moves.has(e) {return true}
+    let n=e
+    loop nodes.ptr[n].kind =? 'field' {
+        if boxed_field_of(n) >=? 0 {return false}
+        n=CopyWord(nodes.ptr[n].a)
+    }
+    if nodes.ptr[n].kind not=? 'ident' or not copy_moves.has(n) or copy_blocked.has(CopyWord(nodes.ptr[n].sym)) {return false}
+    n =? e or vc(ntype(n)) =? VC_AGG
+}
+# Diagnostic-only walk after a failed transfer, O(nodes in the current body).
+# It neither changes liveness nor claims that an unreachable use is executed.
+copy_later_use=(n:CopyWord l:CopyWord after:CopyWord):>CopyWord=>$unsafe {
+    if n =? 0 {return 0}
+    if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1) and nodes.ptr[n].sym =? int32(l) and nodes.ptr[n].pos >? after {return nodes.ptr[n].pos}
+    if nodes.ptr[n].kind =? 'lambda' {
+        let f=CopyWord(nodes.ptr[n].sym)
+        if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes.ptr[n].aux)].envfn}
+        loop cap in fns.ptr[f].caps {
+            if int64(cap.outer) =? l and nodes.ptr[n].pos >? after {return nodes.ptr[n].pos}
+        }
+        return 0
+    }
+    let found:CopyWord=0
+    loop c in copy_children(n) {
+        let at=copy_later_use(c l after)
+        if at >? 0 and (found =? 0 or at <? found) {found=at}
+    }
+    found
+}
+copy_own=(e:CopyWord value:Val t:CopyWord):>Val=>$unsafe {
+    if ownership_type(t) {
+        if value.owned {return value}
+        if (nodes.ptr[e].kind =? 'ident' or (nodes.ptr[e].kind =? 'field' and copy_moves.has(e))) and copy_movable(e) {return copy_take(e value t)}
+        if owner_adoptions.has(e) {fatal(nodes.ptr[e].pos "a hook result requires fresh construction or a proven last-use local")}
+        if ownership_copyable(t) {return own(value t)}
+        if copy_proof_budget =? 0 {fatal(nodes.ptr[e].pos "move proof budget exhausted; cannot copy a move-only owner")}
+        if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) {
+            let at=copy_later_use(CopyWord(fns.ptr[cur_fn].body) CopyWord(nodes.ptr[e].sym) nodes.ptr[e].pos)
+            if at >? 0 {err_notes.push([at "note: later use of '{name_of(CopyWord(nodes.ptr[e].name))}' prevents this transfer"])}
+        }
+        fatal(nodes.ptr[e].pos "cannot copy a move-only owner: transfer requires a proven last use (later read, loop, alias or defer keeps it live)")
+    }
+    if value.owned or not copy_strict(e) or not costly_copy(t) {return own(value t)}
+    # A literal may be placed in read-only data, then promoted on its first
+    # write. That implementation choice is not a source-level duplication.
+    if nodes.ptr[e].kind =? 'array' {return own(value t)}
+    if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) and copy_noenv.has(CopyWord(nodes.ptr[e].sym)) {return own(value t)}
+    if copy_explicit.has(e) {return own(value t)}
+    if type_eq(ntype(e) t) and copy_movable(e) {return copy_take(e value t)}
+    copy_error(e copy_reason(t))
+    value
+}
+copy_components=(e:CopyWord t:CopyWord why:string):>void=>{
+    if copies_on and copy_strict(e) and costly_copy(t) and not copy_explicit.has(e) {
+        copy_error(e why)
+    }
+}
+# Additional duplications whose source has already been evaluated: argument
+# snapshots, captures, optional payloads and operands kept across effects.
+own_at=(e:CopyWord value:Val t:CopyWord):>Val=>{
+    if copies_on {return copy_own(e value t)}
+    own(value t)
+}
+# Keeping two read-only values shares immutable storage. This does not grant
+# permission to mutate a live snapshot later. Address exposure and captures
+# prevent the proof; a parameter may be borrowed only for this call's lifetime.
+copy_readonly=(l:CopyWord):>bool=>$unsafe {
+    CopyWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED | LF_ALIAS | LF_BYREF | LF_MUTPARAM | LF_ADDR) =? 0
+}
+copy_shared_decl=(s:CopyWord l:CopyWord):>bool=>$unsafe {
+    if not copy_strict(s) or not copy_readonly(l) {return false}
+    let e=CopyWord(nodes.ptr[s].b)
+    if e =? 0 or not costly_copy(ntype(e)) or type_has_fn(ntype(e)) {return false}
+    if copy_movable(e) {return false}
+    if copy_escapes(CopyWord(fns.ptr[cur_fn].body) l) {return false}
+    let root=place_root(e)
+    if root =? 0 or nodes.ptr[root].kind not=? 'ident' {return false}
+    if nodes.ptr[root].aux =? int32(1) {
+        if not copy_readonly(CopyWord(nodes.ptr[root].sym)) {return false}
+    }
+    else if nodes.ptr[root].aux =? int32(2) {
+        if not readonly_global(CopyWord(nodes.ptr[root].sym)) {return false}
+    }
+    else {return false}
+    let value=own(gen_expr(e) ntype(e))
+    # This immutable reader keeps the source live. A subsequent transfer into
+    # a mutable owner cannot use the source's lexical last read as uniqueness.
+    if nodes.ptr[root].aux =? int32(1) and CopyWord(locals.ptr[l].flags) & LF_READ not=? 0 {
+        copy_blocked[CopyWord(nodes.ptr[root].sym)]=true
+    }
+    write_place(local_place(l true) CopyWord(locals.ptr[l].type) value.v)
+    scope_add_local(l)
+    true
+}
+copy_shared_global=(s:CopyWord g:CopyWord):>bool=>$unsafe {
+    if not copy_strict(s) or not readonly_global(g) {return false}
+    let e=CopyWord(nodes.ptr[s].b)
+    if e =? 0 or type_has_fn(ntype(e)) {return false}
+    let root=place_root(e)
+    if root =? 0 or nodes.ptr[root].aux not=? int32(2) or not readonly_global(CopyWord(nodes.ptr[root].sym)) {return false}
+    let value=own(gen_expr(e) ntype(e))
+    store_val(CopyWord(globals.ptr[g].type) e_gaddr(global_addr_off(g)) 0 value.v)
+    true
+}
+# Locals freshly constructed within a loop do not cross its backedge.
+copy_loop_locals=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
+    if n =? 0 {return}
+    if nodes.ptr[n].kind =? 'vardecl' {copy_kill_local(CopyWord(nodes.ptr[n].sym) @live)}
+    loop c in copy_children(n) {copy_loop_locals(c @live)}
+}
+copy_capture_ids=(n:CopyWord):>array<int64>=>$unsafe {
+    let ids=copy_capture_nodes.get(n)
+    if ids not=? none {return ids}
+    let f=CopyWord(nodes.ptr[n].sym)
+    if has_flag(n NF_GENERIC) {f=poly_families[CopyWord(nodes.ptr[n].aux)].envfn}
+    let ids:array<int64>=[]
+    loop cap in fns.ptr[f].caps {ids.push(mk_ident_local(int64(cap.outer) nodes.ptr[n].pos))}
+    copy_capture_nodes[n]=ids
+    ids
+}

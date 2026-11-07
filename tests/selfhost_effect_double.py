@@ -48,6 +48,8 @@ def effect_services(text, modules):
         text = text.replace('dewy_method_ops.dewy', 'dewy_methods.jo').replace('dewy_method_ops.jo', 'dewy_methods.jo')
     if _doubled(modules.get('decimals.jo', ''), ('decimal_let', 'decimal_binding_in', 'decimal_lambda_in', 'decimal_wants', 'decimal_save', 'decimal_copy', 'decimal_drop', 'decimal_marks', 'decimal_made_here', 'decimal_requests', 'decimal_restore', 'decimal_check_body', 'decimal_watch', 'decimal_root', 'decimal_binding_type', 'decimal_local', 'decimal_global', 'decimal_use', 'decimal_assign_begin', 'decimal_float_write', 'decimal_nested_in_frame', 'decimal_writers_first', 'decimal_input_globals', 'decimal_writes', 'decimal_adapted_warn', 'decimal_compared')):
         text = text.replace('decimal_ops.dewy', 'decimals.jo').replace('decimal_ops.jo', 'decimals.jo')
+    if _doubled(modules.get('copies.jo', ''), ('copies_reset', 'copy_consumes', 'copy_escapes', 'copies_parameters', 'copy_strict', 'costly_copy', 'copy_error', 'copy_reason', 'copy_children', 'copy_mentions', 'copy_field', 'copy_field_live', 'copy_local_live', 'copy_kill_local', 'copy_live', 'copies_prepare', 'copy_deferred', 'copy_take', 'copy_forget', 'copy_movable', 'copy_later_use', 'copy_own', 'copy_components', 'own_at', 'copy_readonly', 'copy_shared_decl', 'copy_shared_global', 'copy_loop_locals', 'copy_capture_ids')):
+        text = text.replace('copy_ops.dewy', 'copies.jo').replace('copy_ops.jo', 'copies.jo')
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(
