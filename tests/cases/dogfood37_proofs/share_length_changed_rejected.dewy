@@ -1,0 +1,10 @@
+f = (@xs:array<int> p:int<0 <=? p and p <? 100>):>int => {
+    if xs.length =? 0 return 0
+    let k = xs.length * p // 100
+    xs.clear()
+    xs[k]
+}
+main = () => {
+    let a = [1 2]
+    printl(f(@a 50))
+}

@@ -1,0 +1,33 @@
+# A share of a length is a position in it.
+constant = (xs:array<int>):>int => {
+    if xs.length =? 0 return 0
+    xs[xs.length * 3 // 4]
+}
+percent = (xs:array<int> p:int<0 <=? p and p <? 100>):>int => {
+    if xs.length =? 0 return 0
+    xs[xs.length * p // 100]
+}
+guarded = (sorted:array<int> p:int):>int => {
+    if sorted.length =? 0 or p <? 0 or p >=? 100 return 0
+    let k = sorted.length * p // 100
+    sorted[k]
+}
+inclusive = (xs:array<int> p:int<0 <=? p and p <=? 100>):>int => {
+    if xs.length =? 0 return 0
+    xs[(xs.length - 1) * p // 100]
+}
+flipped = (xs:array<int> p:int<0 <=? p and p <? 10>):>int => {
+    if xs.length =? 0 return 0
+    xs[p * xs.length // 10]
+}
+at_most = (xs:array<int> p:int<0 <=? p and p <=? 100>):>array<int> => xs[..xs.length * p // 100)
+main = () => {
+    let xs = [10 20 30 40 50 60 70 80 90 100]
+    printl(constant(xs))
+    printl(percent(xs 95))
+    printl(guarded(xs 50))
+    printl(guarded(xs 100))
+    printl(inclusive(xs 100))
+    printl(flipped(xs 9))
+    printl(at_most(xs 30))
+}

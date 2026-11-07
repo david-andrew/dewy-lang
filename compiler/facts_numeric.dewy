@@ -321,7 +321,21 @@ fact_floor=(@s:FactState n:NumericWord kind:NumericWord a:NumericWord b:NumericW
         fact_difference(@s v a distance n)
     }
     if (kind =? 1 and y.lo =? 2 or kind =? 3 and y.lo =? 1) and y.lo =? y.hi and (floor or x.lo >=? 0) {fact_midpoint(@s n v a)}
+    if kind =? 1 and y.lo =? y.hi and y.lo >=? 1 and x.lo >=? 0 {fact_share(@s n v a y.lo)}
     v
+}
+# `g*k // c`, a share of a nonnegative g: k within 0 to c keeps it within g, and k below c keeps it
+# below any positive g (`xs[xs.length*p // 100]`, p a percentage; g*k <= c*g - g). A fact about the
+# product's own factors, so O(1), demanded by a constant division of a product.
+fact_share=(@s:FactState n:NumericWord v:NumericWord a:NumericWord c:NumericWord):>void=>{
+    let t=fact_terms[a]
+    if t.op not=? 'star' or t.a =? 0 or t.b =? 0 or fact_slot(s t.a) <? 0 or fact_slot(s t.b) <? 0 {return}
+    loop factors in [[t.a t.b] [t.b t.a]] {
+        let g=fact_bound(s factors[0])
+        let k=fact_bound(s factors[1])
+        if g.wide or k.wide or g.lo <? 0 or k.lo <? 0 or k.hi >? c {continue}
+        fact_difference(@s v factors[0] (if k.hi <? c and g.lo >=? 1 {-1} else {0}) n)
+    }
 }
 # The constant positive divisor of a floor quotient value (`d // c`, Dewy's
 # `__floor_div` or its power-of-two shift, or a nonnegative dividend's

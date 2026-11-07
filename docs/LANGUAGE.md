@@ -4999,6 +4999,8 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   nonempty guard on `a` also proves `b[0]`. The same applies to parameters
   sharing a shape binder (`a:array<int length=[n]> b:array<int length=[n]>`)
   after `n >? 0`. Replacing or resizing an array needs a fresh relation.
+- A share of a length is a position in it: after a nonempty guard, `xs[xs.length*3 // 4]` and, for
+  `0 <=? p <? 100`, `xs[xs.length*p // 100]`. With `p <=? 100`, `(xs.length-1)*p // 100` is one too.
 - A guard that decides a remainder moves its dividend to the next multiple: after
   `if xs.length =? 0 return none` and `if xs.length % 2 =? 1 return ...`, the length is
   at least 2, so `mid = xs.length // 2` proves `xs[mid - 1]`, whichever came first.

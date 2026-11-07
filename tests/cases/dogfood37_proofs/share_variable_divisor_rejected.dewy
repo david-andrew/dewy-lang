@@ -1,0 +1,5 @@
+f = (xs:array<int> p:int<0 <=? p and p <? 100> c:int<(>=? 50)>):>int => {
+    if xs.length =? 0 return 0
+    xs[xs.length * p // c]
+}
+main = () => printl(f([1 2] 50 60))

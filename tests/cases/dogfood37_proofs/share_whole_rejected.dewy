@@ -1,0 +1,6 @@
+# At p = 100 this is the length itself.
+f = (xs:array<int> p:int<0 <=? p and p <=? 100>):>int => {
+    if xs.length =? 0 return 0
+    xs[xs.length * p // 100]
+}
+main = () => printl(f([1 2] 100))
