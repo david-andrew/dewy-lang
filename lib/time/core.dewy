@@ -308,11 +308,22 @@ quantize_stored=(d:Duration rounding:_Rounding tick:rational*Time):>[Duration Du
     let [count lost]=_on_grid(rational(ns_count(d) 1) tick_ns rounding)
     [_duration(count*tick_ns) _duration(lost.numerator)]
 }
+# (a tick above a second counts in UTC's labels, so a minute starts at :00 on the clock: the axis's
+# own origin is 23:59:44 UTC, and leap seconds have moved it since)
+_label_shift=(axis:int tick_ns:int):>int=>{
+    if tick_ns <=? _NS {return 0}
+    let label=_axis_to_utc(axis)
+    if label is? none {return 0}
+    let [mjd in_day]=label
+    let shift=axis-((mjd-_J0_MJD)*_DAY_NS+in_day)
+    if shift%_NS =? 0 {shift} else {0}
+}
 quantize_stored=(t:Instant rounding:_Rounding tick:rational*Time):>[Instant Duration]|OffGrid=>{
     let tick_ns=_tick_ns(tick)
     if tick_ns is? none {return OffGrid}
-    let [count lost]=_on_grid(rational(ns_count(t) 1) tick_ns rounding)
-    [_instant(count*tick_ns) _duration(lost.numerator)]
+    let shift=_label_shift(ns_count(t) tick_ns)
+    let [count lost]=_on_grid(rational(ns_count(t)-shift 1) tick_ns rounding)
+    [_instant(count*tick_ns+shift) _duration(lost.numerator)]
 }
 # How many ticks from the origin, rounding down, and what is left: `x = count*tick + remainder`,
 # with the remainder at least 0 and below the tick.

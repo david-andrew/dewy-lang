@@ -1,0 +1,22 @@
+# A coarse grid on an Instant lines up with the clock; a fine one is the axis's own.
+show = (t:Instant how:'floor'|'ceil'|'nearest_even' tick:rational*Time) => {
+    let r = quantize(t rounding=how tick=tick)
+    if r isnt? OffGrid {
+        let [value lost] = r
+        printl("{value} {lost}")
+    }
+}
+main = () => {
+    let t = instant"2026-11-05T08:01:12.5Z"
+    show(t 'floor' 1minute)
+    show(t 'ceil' 1minute)
+    show(t 'nearest_even' 1hour)
+    show(t 'floor' 1s)
+    show(t 'floor' 15minute)
+    show(t 'floor' 24hour)
+    show(instant"2015-07-01T00:00:30Z" 'floor' 1minute)
+    show(instant"1975-03-01T10:20:30Z" 'floor' 1hour)
+    # a grid of the axis's own stays as it was
+    let [count left] = (t - instant"1977-01-01T00:00:00Z").ticks(1hour)
+    printl("{count} {left}")
+}

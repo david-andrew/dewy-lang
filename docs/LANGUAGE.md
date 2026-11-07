@@ -1620,7 +1620,10 @@ is `Instant | OffGrid`.
 `'floor'`, `'ceil'` or `'toward_zero'`), and gives back what was lost, signed so that the
 original is the value plus the loss. The tick is `1ns` unless given:
 `let [d lost] = quantize(1ns/3 rounding='nearest_even')` gives `0s` and `1/3ns`, and
-`quantize(t rounding='floor' tick=1s)` takes an `Instant` or `Duration` to a whole second. A
+`quantize(t rounding='floor' tick=1s)` takes an `Instant` or `Duration` to a whole second. An `Instant`'s
+tick above a second counts on the UTC clock, so `tick=1minute` lands on `:00` (a leap second counts as
+the start of the next minute), and before 1972, when UTC's offset was not a whole number of seconds, it
+counts from the axis's origin. A
 float time is `quantize`d to enter, with `OutOfRange` for NaN and the infinities. `convert<Duration>(q)`
 takes a time that is exactly on the grid, giving `Duration | OffGrid | OutOfRange` instead of
 rounding. `t.ticks(1s)` counts down to a grid: `[count remainder]`, with the remainder at
