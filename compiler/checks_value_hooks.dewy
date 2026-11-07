@@ -1,6 +1,5 @@
 $runtime_checks
 from p"error_ops.dewy" import (check_propagate)
-from p"types.jo" import dt
 from p"ast.jo" import (NF_BROADCAST NF_CHECKED NF_COMPREHENSION NF_MUT NF_SPREAD TUPLE_VALUES add_flag clear_flag has_flag kid kids mk nkids nodes set_kid set_list)
 from p"check.jo" import (FK_LAMBDA assign_root check_block check_lambda_body cur_mod dewy_at fns jd new_inst node_mark spread_calls syms target_arm64 target_wasm zonk_tree)
 from p"checker_expr.dewy" import (check_expr lookup)
@@ -20,8 +19,9 @@ from p"nd_contracts.jo" import (nd_mutable_instances nd_mutable_signatures nd_si
 from p"refine.jo" import (is_total_dict ref_validate_signature refine_active refine_bindings representation_type total_literal_check)
 from p"reflect_ops.dewy" import (reflect_name reflect_record)
 from p"sibling_ops.dewy" import (sibling_index_narrow)
-from p"types.jo" import (T_BOOL T_MATH_INT has_var is_int is_soa is_values mk_array mk_tuple prune struct_targ structs tkind types)
-from p"units.jo" import (quantity_constant quantity_unary quantity_unary_literal)
+from p"types.jo" import (T_BOOL T_MATH_INT has_var is_int prune struct_targ structs tkind types dt is_soa is_values mk_array mk_tuple)
+from p"units.jo" import (quantity_unary_literal)
+from p"unit_ops.dewy" import (quantity_constant quantity_unary)
 from p"util.jo" import (err_notes fatal files intern name_of pos_file warn)
 
 ValueHookWord:type=int64<overflow='wrap'>

@@ -447,7 +447,7 @@ def test_temperature_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release,
                             ('checker_tokens', 'node_store', 'checker_types', 'checker_state', 'temperature_ops'), DRIVER,
                             doubles={'services.jo': SERVICES, 'temperature_kinds.jo': state},
-                            services=('ast', 'check', 'checker_expr', 'checked_eval', 'expr', 'frontend', 'lex', 'sibling_types', 'types', 'units', 'util'))
+                            services=('ast', 'check', 'checker_expr', 'checked_eval', 'expr', 'frontend', 'lex', 'sibling_types', 'types', 'units', 'unit_ops', 'util'))
     assert output.endswith(b'temperature ok\n')
     for text in (b'leaves `n50` ambiguous', b'they disagree', b'force ', b'retag ', b'intern_tag 71'):
         assert text in output, text
