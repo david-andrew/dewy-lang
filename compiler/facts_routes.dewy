@@ -1,0 +1,396 @@
+$runtime_checks
+from p"ast.jo" import NF_INDEX_CAPTURED
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_COMPREHENSION NF_INBOUNDS NF_RELOOKUP NF_SPREAD has_flag kid nkids nodes)
+from p"check.jo" import (LF_ALIAS globals locals readonly_global)
+from p"directives.jo" import (dir_index)
+from p"expr.jo" import (CV IN ntype oversized_literal rational_constants)
+from p"facts.jo" import (FACT_SELF_BOUND FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_ELEMENT_SOURCE FACT_ELEMENT_VALUE FACT_FIELD_KEYS FACT_KEYS_POSITIONS FACT_KEYS_SOURCE FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_POOL_POSITIONS FACT_ROW_SOURCE FactProjection FactRoute FactState fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_compare fact_component_fact fact_constant fact_constant_globals fact_covered fact_domain fact_exposed fact_forget fact_fresh fact_index_success fact_name_vals fact_new fact_place fact_policy fact_probe_on fact_project fact_projection_first fact_projection_next_in fact_query fact_rebind fact_route_reuse fact_route_selectors fact_scalar fact_set_bound fact_speculating fact_terms fact_type)
+from p"facts_library.dewy" import (fact_fill_remainder)
+from p"facts_pools.dewy" import (fact_pool_type)
+from p"facts_probes.dewy" import (fact_probe_route)
+from p"facts_text.dewy" import (fact_lines_call fact_split_call fact_words_call)
+from p"nd_contracts.jo" import (ND_STORAGE_VALID)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"places.jo" import (place_locked)
+from p"proofs.jo" import (result_replaced)
+from p"refine.jo" import (ref_self_active ref_self_contract ref_self_place_read ref_assume refine_active refine_storage representation_type)
+from p"refinement_types.dewy" import (FactBound FactTerm)
+from p"string_domains.jo" import (domain_leaf)
+from p"types.jo" import (T_INT T_MATH_INT T_STR fixed_len struct_targ telem tkind types)
+from p"util.jo" import (name_of)
+from p"witness.jo" import (wit_index)
+
+RouteWord:type=int64<overflow='wrap'>
+fact_replace=(@s:FactState base:RouteWord selector:RouteWord element:bool value:RouteWord t:RouteWord):>RouteWord=>{
+    let v=fact_new(@s fact_domain(t) FactTerm(type=t))
+    # (a pool's slot tables are its memberships: fact_pool_call)
+    let private=not element and selector >=? 0 and fact_pool_type(t) and starts_with(name_of(selector) "__")
+    let old=s.projections
+    let links=s.index[0].projection_next
+    let pi=fact_projection_first(s base)
+    loop pi >=? 0 {
+        let p=old[pi]
+        pi=fact_projection_next_in(old links pi)
+        # (it held for the value replaced)
+        if not p.element and p.selector =? FACT_SELF_BOUND {continue}
+        if element and not p.element and (p.selector =? FACT_ELEMENT_LENGTH or p.selector =? FACT_ELEMENT_VALUE or p.selector =? FACT_ELEMENT_COPY or p.selector =? FACT_ELEMENT_SOURCE or p.selector =? FACT_KEYS_SOURCE or p.selector =? FACT_FIELD_KEYS or p.selector =? FACT_KEYS_POSITIONS or p.selector =? FACT_ELEMENT_SAME_LENGTH or p.selector =? FACT_ELEMENT_BELOW or fact_component_fact(p.selector)) {
+            if p.selector =? FACT_ELEMENT_COPY {fact_fill_remainder(@s base v selector p.value)}
+            # (a row stored back with the one length every row has, as
+            # `grid[y][x] = v` does, keeps that length for all of them)
+            # (or within the bounds every row's length has)
+            let sized=(p.selector =? FACT_ELEMENT_SAME_LENGTH or p.selector =? FACT_ELEMENT_LENGTH) and value not=? 0 and tkind(fact_type(t)) =? 'array' and (fact_type(telem(fact_type(t))) =? T_STR or tkind(fact_type(telem(fact_type(t)))) =? 'array')
+            if not sized {continue}
+            let length=fact_project(@s value (-1) false T_INT)
+            if p.selector =? FACT_ELEMENT_SAME_LENGTH and fact_compare(s 'eq' length p.value) not=? 1 {continue}
+            if p.selector =? FACT_ELEMENT_LENGTH {
+                let x=fact_bound(s length)
+                let h=fact_bound(s p.value)
+                if x.wide or h.wide or x.lo <? h.lo or x.hi >? h.hi {continue}
+            }
+        }
+        if element and not p.element and p.selector =? FACT_ROW_SOURCE {
+            let row=fact_project(@s base selector true telem(fact_type(t)))
+            if fact_compare(s 'eq' fact_project(@s row (-1) false T_INT) fact_project(@s value (-1) false T_INT)) not=? 1 {continue}
+        }
+        if private and p.element {continue}
+        if private and p.selector =? FACT_POOL_POSITIONS {continue}
+        if p.selector =? FACT_MAP_POSITIONS and not p.element and (element or selector not=? fact_name_vals) {continue}
+        if p.selector =? FACT_MAP_DENSE and not p.element and (element or selector not=? fact_name_vals) {continue}
+        # (an N-D header's validity marker describes the value replaced)
+        if not p.element and p.selector =? ND_STORAGE_VALID {continue}
+        if p.element =? element {
+            if not element and p.selector =? selector {continue}
+            # Different selector identities do not prove different elements.
+            if element and fact_compare(s 'ne' p.selector selector) not=? 1 {continue}
+        }
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(v p.selector p.element p.value))}
+    }
+    if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(v selector element value))}
+    v
+}
+fact_read=(@s:FactState e:RouteWord):>RouteWord=>$unsafe {
+    if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) {
+        let l=RouteWord(nodes.ptr[e].sym)
+        if RouteWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 and not place_locked.has(l) {return fact_capture(RouteWord(locals.ptr[l].alias) @s)}
+    }
+    let p=fact_place(e)
+    if p.declaration =? 0 {return fact_new(@s FactBound(reason='unsupported' witness=e) FactTerm(type=ntype(e)))}
+    let i=fact_binding(s p)
+    if i >=? 0 {
+        if ref_self_active {ref_self_place_read(e s.bindings[i].value @s)}
+        return s.bindings[i].value
+    }
+    if p.root =? 'global' and readonly_global(p.declaration) and fact_constant_global(p.declaration) {
+        let value=fact_capture(RouteWord(nodes.ptr[RouteWord(globals.ptr[p.declaration].decl)].b) @s)
+        if value not=? 0 {
+            fact_bind(@s p value)
+            return value
+        }
+    }
+    let t=refine_storage(e ntype(e))
+    let v=fact_new(@s fact_domain(t) FactTerm(type=t))
+    fact_bind(@s p v)
+    # (the known length first: a contract on it would project a length of its own)
+    if p.root =? 'global' {
+        if t =? T_MATH_INT {
+            let bound=fact_global_integer(p.declaration)
+            if not bound.wide {fact_set_bound(@s v bound)}
+        }
+        let size=fact_global_length(p.declaration)
+        if size >=? 0 and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(v (-1) false fact_constant(@s size)))}
+    }
+    if refine_active {ref_assume(t v [] @s)}
+    v
+}
+fact_constant_global=(g:RouteWord):>bool=>$unsafe {
+    let known=fact_constant_globals.get(g)
+    if known not=? none {return known}
+    let budget:RouteWord=128
+    let d=RouteWord(globals.ptr[g].decl)
+    let constant=not globals.ptr[g].exposed and d not=? 0 and fact_constant_tree(RouteWord(nodes.ptr[d].b) @budget)
+    fact_constant_globals[g]=constant
+    constant
+}
+fact_constant_tree=(n:RouteWord @budget:RouteWord scope:dict<int64 bool>=dict<int64 bool>()):>bool=>$unsafe {
+    budget -= 1
+    if n =? 0 or budget <? 0 {return false}
+    if rational_constants.has(n) {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' or k =? 'bool_lit' or k =? 'float_lit' or k =? 'none_lit' {return true}
+    if k =? 'str_lit' {return nkids(n) =? 0 and nodes.ptr[n].sval >=? 0}
+    # A comprehension is closed value construction too. The scope contains
+    # only its private binders; true marks an accumulator eligible for push.
+    # No user call, outer local, mutable global or other write is admitted.
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) {return scope.has(RouteWord(nodes.ptr[n].sym))}
+    if k =? 'block' and has_flag(n NF_COMPREHENSION) {
+        if nkids(n) not=? 3 or nodes.ptr[kid(n 0)].kind not=? 'vardecl' {return false}
+        let decl=kid(n 0)
+        let l=RouteWord(nodes.ptr[decl].sym)
+        if l <=? 0 or nkids(decl) not=? 0 or not fact_constant_tree(RouteWord(nodes.ptr[decl].b) @budget scope) {return false}
+        if ownership_decls.length not=? 0 and ownership_fact_type(RouteWord(locals.ptr[l].type)) {return false}
+        let inner=scope
+        inner[l]=true
+        return fact_constant_tree(kid(n 1) @budget inner) and fact_constant_tree(kid(n 2) @budget inner)
+    }
+    if k =? 'for_' and scope.length >? 0 {
+        if nodes.ptr[n].aux not=? 0 and nodes.ptr[n].aux not=? 1 {return false}
+        if not fact_constant_tree(RouteWord(nodes.ptr[n].a) @budget scope) {return false}
+        let inner=scope
+        if nodes.ptr[n].sym >? 0 {inner[RouteWord(nodes.ptr[n].sym)]=false}
+        if nodes.ptr[n].aux =? 1 and nodes.ptr[n].c >? 0 {inner[RouteWord(nodes.ptr[n].c)]=false}
+        return fact_constant_tree(RouteWord(nodes.ptr[n].b) @budget inner)
+    }
+    if k =? 'range' {
+        if nodes.ptr[n].b =? 0 {return false}
+        if nodes.ptr[n].c not=? 0 and not fact_constant_tree(RouteWord(nodes.ptr[n].c) @budget scope) {return false}
+        return fact_constant_tree(RouteWord(nodes.ptr[n].a) @budget scope) and fact_constant_tree(RouteWord(nodes.ptr[n].b) @budget scope)
+    }
+    if k =? 'exprstmt' and scope.length >? 0 {return fact_constant_tree(RouteWord(nodes.ptr[n].a) @budget scope)}
+    if k =? 'if_' and scope.length >? 0 {
+        return fact_constant_tree(RouteWord(nodes.ptr[n].a) @budget scope) and fact_constant_tree(RouteWord(nodes.ptr[n].b) @budget scope) and (nodes.ptr[n].c =? 0 or fact_constant_tree(RouteWord(nodes.ptr[n].c) @budget scope))
+    }
+    if k =? 'block' and scope.length >? 0 {
+        loop i in [0..nkids(n)) {
+            let child=kid(n i)
+            if not fact_constant_tree(child @budget scope) {return false}
+        }
+        return true
+    }
+    if k =? 'intrinsic' {
+        if nodes.ptr[n].aux =? int32(int64(IN.push)) and nkids(n) =? 2 {
+            let receiver=kid(n 0)
+            if nodes.ptr[receiver].kind not=? 'ident' or nodes.ptr[receiver].aux not=? int32(1) or not (scope.get(RouteWord(nodes.ptr[receiver].sym)) ?? false) {return false}
+            return fact_constant_tree(kid(n 1) @budget scope)
+        }
+        if nodes.ptr[n].aux =? int32(int64(IN.len)) and nkids(n) =? 1 {return fact_constant_tree(kid(n 0) @budget scope)}
+        return false
+    }
+    if (k =? 'binary' and nodes.ptr[n].aux =? 0 or k =? 'and_' or k =? 'or_') and fact_scalar(ntype(n)) {
+        return fact_constant_tree(RouteWord(nodes.ptr[n].a) @budget scope) and fact_constant_tree(RouteWord(nodes.ptr[n].b) @budget scope)
+    }
+    if k =? 'unary' and nodes.ptr[n].aux =? 0 and fact_scalar(ntype(n)) {return fact_constant_tree(RouteWord(nodes.ptr[n].a) @budget scope)}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(2) {
+        let g=RouteWord(nodes.ptr[n].sym)
+        return readonly_global(g) and not globals.ptr[g].exposed and fact_constant_tree(RouteWord(nodes.ptr[RouteWord(globals.ptr[g].decl)].b) @budget scope)
+    }
+    if k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.fixed2arr)) or nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_))) {return fact_constant_tree(RouteWord(nodes.ptr[n].a) @budget scope)}
+    if k =? 'map_lit' {
+        let kt=struct_targ(RouteWord(types.ptr[fact_type(ntype(n))].st) 0)
+        if not fact_scalar(kt) and kt not=? T_STR {return false}
+        loop i in [0..nkids(n)) {
+            let pair=kid(n i)
+            if not fact_constant_tree(RouteWord(nodes.ptr[pair].a) @budget scope) or not fact_constant_tree(RouteWord(nodes.ptr[pair].b) @budget scope) {return false}
+        }
+        return true
+    }
+    if k =? 'call' {
+        if nodes.ptr[n].aux not=? 2 and not fact_lines_call(n) and not fact_split_call(n) and not fact_words_call(n) {return false}
+        if ownership_decls.length not=? 0 and ownership_fact_type(ntype(n)) {return false}
+    }
+    else if k not=? 'tuple' and not (k =? 'array' and nodes.ptr[n].a =? 0 and nodes.ptr[n].b =? 0 and nodes.ptr[n].aux =? 0) {return false}
+    loop i in [0..nkids(n)) {
+        let child=kid(n i)
+        if has_flag(child NF_SPREAD) or not fact_constant_tree(child @budget scope) {return false}
+    }
+    true
+}
+# A literal-initialized script integer that no checked write can replace.
+# Seed only demanded reads, O(1), using the existing global write flags.
+# Include the zero-initialized value too: a helper may run during initialization.
+# Mutable literal unions keep their existing whole-write-domain inference.
+fact_global_integer=(g:RouteWord):>FactBound=>$unsafe {
+    let unknown=FactBound(wide=true)
+    if g <=? 0 or g >=? globals.length or globals.ptr[g].fn_written or globals.ptr[g].init_written or globals.ptr[g].exposed {return unknown}
+    let d=RouteWord(globals.ptr[g].decl)
+    if d =? 0 or nodes.ptr[d].kind not=? 'vardecl' {return unknown}
+    let init=domain_leaf(RouteWord(nodes.ptr[d].b))
+    if init =? 0 or nodes.ptr[init].kind not=? 'int_lit' or oversized_literal(init) {return unknown}
+    let x=nodes.ptr[init].ival
+    FactBound(min(0 x) max(0 x))
+}
+# The length of an immutable global literal: O(elements) for arrays,
+# O(bytes) for ASCII strings (CR and non-ASCII graphemes stay unknown).
+fact_global_length=(g:RouteWord):>RouteWord=>$unsafe {
+    if g <=? 0 or g >=? globals.length or globals.ptr[g].fn_written or globals.ptr[g].init_written or globals.ptr[g].exposed {return -1}
+    let kind=tkind(fact_type(RouteWord(globals.ptr[g].type)))
+    if kind not=? 'array' and kind not=? 'str_' {return -1}
+    let d=RouteWord(globals.ptr[g].decl)
+    if d =? 0 or nodes.ptr[d].kind not=? 'vardecl' {return -1}
+    let init=RouteWord(nodes.ptr[d].b)
+    if kind =? 'str_' {
+        if init =? 0 or nodes.ptr[init].kind not=? 'str_lit' or nkids(init) not=? 0 or nodes.ptr[init].sval <? 0 {return -1}
+        let text=name_of(RouteWord(nodes.ptr[init].sval))
+        loop c in (text as array<uint8>) {
+            if c >=? 128 or c =? 13 {return -1}
+        }
+        return (text as array<uint8>).length
+    }
+    # (a contract's check leaves the literal it checked)
+    loop init not=? 0 and nodes.ptr[init].kind =? 'conv' and (nodes.ptr[init].aux =? int32(int64(CV.fixed2arr)) or nodes.ptr[init].aux =? int32(int64(CV.refinement))) {init=RouteWord(nodes.ptr[init].a)}
+    if init =? 0 or nodes.ptr[init].kind not=? 'array' or nodes.ptr[init].b not=? 0 or nodes.ptr[init].aux not=? 0 {return -1}
+    loop i in [0..nkids(init)) {
+        if has_flag(kid(init i) NF_SPREAD) {return -1}
+    }
+    nkids(init)
+}
+fact_receiver_route=(n:RouteWord @s:FactState):>FactRoute=>$unsafe {
+    let target=kid(n 0)
+    loop nodes.ptr[target].kind =? 'addr' or nodes.ptr[target].kind =? 'conv' {target=RouteWord(nodes.ptr[target].a)}
+    # (a temporary, `units[p]` read by `[]`, is no place: its value is the argument's)
+    let k=nodes.ptr[target].kind
+    if k not=? 'ident' and k not=? 'field' and k not=? 'index' {return FactRoute()}
+    let outer=fact_route_reuse
+    fact_route_reuse=n
+    let route=fact_route(target @s)
+    fact_route_reuse=outer
+    route
+}
+# Capture target selectors once. Rebuilding ancestor values below is a pure
+# operation over those captured selectors, never a second syntax evaluation.
+fact_route=(e:RouteWord @s:FactState depth:RouteWord=0):>FactRoute=>$unsafe {
+    if e =? 0 or depth >? 32 {return FactRoute()}
+    let k=nodes.ptr[e].kind
+    if k =? 'ident' {
+        if nodes.ptr[e].aux =? int32(1) {
+            let l=RouteWord(nodes.ptr[e].sym)
+            if RouteWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 and not place_locked.has(l) {return fact_route(RouteWord(locals.ptr[l].alias) @s depth + 1)}
+        }
+        return FactRoute(e)
+    }
+    if k =? 'field' or k =? 'index' {
+        let route=fact_route(RouteWord(nodes.ptr[e].a) @s depth + 1)
+        let selector:RouteWord=0
+        if k =? 'field' {selector=if nodes.ptr[e].aux =? -2 {RouteWord(nodes.ptr[e].ival)} else {RouteWord(nodes.ptr[e].name)}}
+        else {
+            # A dictionary store after an effectful RHS uses the captured key
+            # but a fresh position, with a fresh membership obligation.
+            let known:[int64 int64]=[0 0]
+            if fact_route_reuse not=? 0 and not has_flag(e NF_RELOOKUP) {known=fact_route_selectors.get(e) ?? known}
+            # The bounds obligation also proves an int selector fits int64,
+            # just as for a read. Keep the original value for that obligation.
+            let outer=fact_covered
+            let index=RouteWord(nodes.ptr[e].b)
+            if nodes.ptr[index].kind =? 'conv' and nodes.ptr[index].aux =? int32(int64(CV.int_)) {
+                let kind=tkind(representation_type(ntype(RouteWord(nodes.ptr[e].a))))
+                fact_covered=if kind =? 'array' or kind =? 'fixed' {index} else {0}
+            }
+            selector=if known[0] =? fact_route_reuse and known[0] not=? 0 {known[1]} else {fact_capture(RouteWord(nodes.ptr[e].b) @s)}
+            fact_covered=outer
+        }
+        route.selectors.push(selector)
+        route.elements.push(k =? 'index')
+        route.types.push(refine_storage(e ntype(e)))
+        let site:RouteWord=0
+        if k =? 'index' {site=e}
+        route.sites.push(site)
+        return route
+    }
+    # (a narrowed name, `if r is? T` or `if r isnt? none`, writes its variable's
+    # payload: the -4 projection fact_capture reads it by)
+    if (k =? 'narrow' or k =? 'unwrap') and nodes.ptr[e].a not=? 0 {
+        let route=fact_route(RouteWord(nodes.ptr[e].a) @s depth + 1)
+        if route.root =? 0 {return route}
+        route.selectors.push(-4)
+        route.elements.push(false)
+        route.types.push(ntype(e))
+        route.sites.push(0)
+        return route
+    }
+    fact_capture(e @s);
+    FactRoute()
+}
+# A mutable argument's value after its call: its place read again, reusing the
+# selectors the arguments evaluated (`d[k].m()` on `d.vals[__map_entry_present(d k)]`
+# looks k up once, before the call changed d). O(route depth).
+fact_after_call=(n:RouteWord arg:RouteWord @s:FactState):>RouteWord=>$unsafe {
+    let target=arg
+    loop nodes.ptr[target].kind =? 'addr' or nodes.ptr[target].kind =? 'conv' {target=RouteWord(nodes.ptr[target].a)}
+    let k=nodes.ptr[target].kind
+    if k not=? 'ident' and k not=? 'field' and k not=? 'index' {return fact_capture(arg @s)}
+    let outer=fact_route_reuse
+    fact_route_reuse=n
+    let route=fact_route(target @s)
+    fact_route_reuse=outer
+    let held=fact_route_values(@s route)
+    if held.length >? 0 {held[held.length - 1]} else {fact_fresh(@s ntype(arg))}
+}
+fact_route_values=(@s:FactState route:FactRoute):>array<int64>=>{
+    if route.root =? 0 {return []}
+    let values:array<int64>=[fact_read(@s route.root)]
+    loop i in [0..route.selectors.length) {
+        values.push(fact_project(@s values[i] route.selectors[i] route.elements[i] route.types[i]))
+    }
+    values
+}
+fact_store_route=(@s:FactState route:FactRoute value0:RouteWord at:RouteWord bounds:bool=false):>void=>{
+    let p=fact_place(route.root)
+    if p.declaration =? 0 {fact_forget(@s at 'write' true); return}
+    let values=fact_route_values(@s route)
+    if bounds and fact_speculating =? 0 and fact_probe_on {fact_probe_route(@s route values)}
+    else if bounds and fact_speculating =? 0 and (fact_policy =? 'RequireStatic' or fact_query) {fact_route_bounds(@s route values)}
+    if values.length >? 0 and s.conditional.length >? 0 {result_replaced(values[values.length - 1] at @s)}
+    let value=value0
+    let i=route.selectors.length - 1
+    loop i >=? 0 {
+        let t=if i =? 0 {ntype(route.root)} else {route.types[i - 1]}
+        value=fact_replace(@s values[i] route.selectors[i] route.elements[i] value t)
+        # (a place with a self-length contract holds it for every checked value it gets)
+        if ref_self_active and i >? 0 and ref_self_contract(route.types[i - 1]) {ref_assume(route.types[i - 1] value [] @s)}
+        i -= 1
+    }
+    if ref_self_active {
+        let held=refine_storage(route.root ntype(route.root))
+        if ref_self_contract(held) {ref_assume(held value [] @s)}
+    }
+    if fact_exposed(p) {fact_forget(@s at 'write' false p)}
+    let old:RouteWord=0
+    if values.length >? 0 {old=values[0]}
+    fact_rebind(@s p value at old)
+}
+# Component i of an unpacked value of type t0: a tuple's field or an array's
+# element (a record's is not tracked by position).
+fact_component=(@s:FactState value:RouteWord t0:RouteWord i:RouteWord ct:RouteWord):>RouteWord=>{
+    let t=fact_type(t0)
+    if tkind(t) =? 'tuple' {return fact_project(@s value i false ct)}
+    if tkind(t) =? 'array' or tkind(t) =? 'fixed' {return fact_project(@s value fact_constant(@s i) true ct)}
+    fact_fresh(@s ct)
+}
+# An unpacking store `(a b) = value` writes each component's route.
+fact_store_pattern=(@s:FactState target:RouteWord value:RouteWord at:RouteWord depth:RouteWord=0):>void=>$unsafe {
+    let k=nodes.ptr[target].kind
+    if k =? 'hole' {return}
+    if k =? 'tuple' and depth <? 32 {
+        # (an assignment's pattern has no type of its own: the stored value's)
+        let t=ntype(target)
+        if t =? 0 and value not=? 0 {t=fact_terms[value].type}
+        loop i in [0..nkids(target)) {
+            let c=kid(target i)
+            if nodes.ptr[c].kind not=? 'hole' {fact_store_pattern(@s c fact_component(@s value t i ntype(c)) at depth + 1)}
+        }
+        return
+    }
+    let route=fact_route(target @s)
+    fact_store_route(@s route value at true)
+}
+# A store's element selectors carry the obligation a load's do (fact_capture's index).
+fact_route_bounds=(@s:FactState route:FactRoute values:array<int64>):>void=>$unsafe {
+    loop i in [0..route.selectors.length) {
+        let n=route.sites[i]
+        if n =? 0 or i >=? values.length or has_flag(n NF_INBOUNDS) {continue}
+        let before=if i =? 0 {ntype(route.root)} else {route.types[i - 1]}
+        let t=fact_type(before)
+        if types.ptr[t].kind not=? 'array' and types.ptr[t].kind not=? 'fixed' {continue}
+        let index=route.selectors[i]
+        let length=if types.ptr[t].kind =? 'fixed' {fact_constant(@s fixed_len(t))} else {fact_project(@s values[i] (-1) false T_INT)}
+        let zero=fact_constant(@s 0)
+        let lo=fact_compare(s 'le' zero index)
+        let hi=fact_compare(s 'lt' index length)
+        dir_index(n lo =? 1 and hi =? 1)
+        if lo not=? 1 or hi not=? 1 {
+            wit_index(n @s index length lo hi)
+            fact_index_success(n @s index length)
+        }
+    }
+}

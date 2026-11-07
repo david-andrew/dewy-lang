@@ -1,0 +1,386 @@
+use 'facts.jo'
+use 'facts_forgets.dewy'
+use 'facts_plans.dewy'
+use 'lower_scalars.dewy'
+use 'lower_views.dewy'
+use 'lower_storage.dewy'
+use 'lower_analysis.dewy'
+use 'lower_helpers.dewy'
+use 'lower_group.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'sequence_selectors.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ide.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'ast.jo'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'lex.jo'
+use 'types.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'lower.jo'
+use 'check.jo'
+use 'comptime.jo'
+use 'check_constant.jo'
+use 'constant_checks.dewy'
+use 'isolation.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'proof_ops.dewy'
+use 'places.jo'
+use 'place_routes.dewy'
+use 'effects.jo'
+use 'effect_library.jo'
+use 'ownership.jo'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'directives.jo'
+use 'warn_if.jo'
+use 'string_domains.jo'
+use 'draw_context.jo'
+use 'predicate_facts.jo'
+use 'predicate_summaries.dewy'
+use 'floats.jo'
+use 'member_replay.jo'
+use 'ownership_types.dewy'
+use 'lower_primitives.dewy'
+use 'math_ops.dewy'
+use 'draw_ops.dewy'
+use 'effect_classifiers.dewy'
+use 'effect_values.dewy'
+use 'effect_control.dewy'
+use 'effect_costs.dewy'
+use 'effect_owners.dewy'
+use 'isolation_ops.dewy'
+use 'facts_forks.dewy'
+use 'facts_elements.dewy'
+use 'facts_loops.dewy'
+use 'facts_conditions.dewy'
+use 'facts_joins.dewy'
+use 'facts_changes.dewy'
+use 'facts_library.dewy'
+use 'facts_summaries.dewy'
+use 'facts_pushes.dewy'
+use 'facts_text.dewy'
+use 'facts_arrays.dewy'
+use 'facts_maps.dewy'
+use 'facts_pools.dewy'
+use 'facts_members.dewy'
+use 'facts_progress.dewy'
+use 'facts_probes.dewy'
+
+fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value: int, t: int) -> int:
+    v = fact_new(s, fact_domain(t), FactTerm(type = t))
+    # (a pool's slot tables are its memberships: fact_pool_call)
+    private = not element and selector >= 0 and fact_pool_type(t) and starts_with(name_of(selector), "__")
+    old = s.projections
+    links = s.index[0].projection_next
+    pi = fact_projection_first(s, base)
+    loop pi >= 0:
+        p = old[pi]
+        pi = fact_projection_next_in(old, links, pi)
+        # (it held for the value replaced)
+        if not p.element and p.selector == FACT_SELF_BOUND: continue
+        if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE or p.selector == FACT_FIELD_KEYS or p.selector == FACT_KEYS_POSITIONS or p.selector == FACT_ELEMENT_SAME_LENGTH or p.selector == FACT_ELEMENT_BELOW or fact_component_fact(p.selector)):
+            if p.selector == FACT_ELEMENT_COPY: fact_fill_remainder(s, base, v, selector, p.value)
+            # (a row stored back with the one length every row has, as
+            # `grid[y][x] = v` does, keeps that length for all of them)
+            # (or within the bounds every row's length has)
+            sized = (p.selector == FACT_ELEMENT_SAME_LENGTH or p.selector == FACT_ELEMENT_LENGTH) and value != 0 and tkind(fact_type(t)) == .array and (fact_type(telem(fact_type(t))) == T_STR or tkind(fact_type(telem(fact_type(t)))) == .array)
+            if not sized: continue
+            length = fact_project(s, value, -1, false, T_INT)
+            if p.selector == FACT_ELEMENT_SAME_LENGTH and fact_compare(s, .eq, length, p.value) != 1: continue
+            if p.selector == FACT_ELEMENT_LENGTH:
+                x = fact_bound(s, length); h = fact_bound(s, p.value)
+                if x.wide or h.wide or x.lo < h.lo or x.hi > h.hi: continue
+        if element and not p.element and p.selector == FACT_ROW_SOURCE:
+            row = fact_project(s, base, selector, true, telem(fact_type(t)))
+            if fact_compare(s, .eq, fact_project(s, row, -1, false, T_INT), fact_project(s, value, -1, false, T_INT)) != 1: continue
+        if private and p.element: continue
+        if private and p.selector == FACT_POOL_POSITIONS: continue
+        if p.selector == FACT_MAP_POSITIONS and not p.element and (element or selector != fact_name_vals): continue
+        if p.selector == FACT_MAP_DENSE and not p.element and (element or selector != fact_name_vals): continue
+        # (an N-D header's validity marker describes the value replaced)
+        if not p.element and p.selector == ND_STORAGE_VALID: continue
+        if p.element == element:
+            if not element and p.selector == selector: continue
+            # Different selector identities do not prove different elements.
+            if element and fact_compare(s, .ne, p.selector, selector) != 1: continue
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, p.selector, p.element, p.value))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, selector, element, value))
+    v
+fact_read = (s: mut FactState, e: int) -> int:
+    if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)):
+        l = int(nodes[e].sym)
+        if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0 and not place_locked.has(l): return fact_capture(int(locals[l].alias), s)
+    p = fact_place(e)
+    if p.declaration == 0: return fact_new(s, FactBound(reason = .unsupported, witness = e), FactTerm(type = ntype(e)))
+    i = fact_binding(s, p)
+    if i >= 0:
+        if ref_self_active: ref_self_place_read(e, s.bindings[i].value, s)
+        return s.bindings[i].value
+    if p.root == .global and readonly_global(p.declaration) and fact_constant_global(p.declaration):
+        value = fact_capture(int(nodes[int(globals[p.declaration].decl)].b), s)
+        if value != 0:
+            fact_bind(s, p, value)
+            return value
+    t = refine_storage(e, ntype(e))
+    v = fact_new(s, fact_domain(t), FactTerm(type = t))
+    fact_bind(s, p, v)
+    # (the known length first: a contract on it would project a length of its own)
+    if p.root == .global:
+        if t == T_MATH_INT:
+            bound = fact_global_integer(p.declaration)
+            if not bound.wide: fact_set_bound(s, v, bound)
+        size = fact_global_length(p.declaration)
+        if size >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, -1, false, fact_constant(s, size)))
+    if refine_active: ref_assume(t, v, [], s)
+    v
+fact_constant_global = (g: int) -> bool:
+    if let known = fact_constant_globals.get(g): return known
+    budget = 128
+    d = int(globals[g].decl)
+    known = not globals[g].exposed and d != 0 and fact_constant_tree(int(nodes[d].b), budget)
+    fact_constant_globals[g] = known
+    known
+fact_constant_tree = (n: int, budget: mut int, scope: {int: bool} = {}) -> bool:
+    budget -= 1
+    if n == 0 or budget < 0: return false
+    if rational_constants.has(n): return true
+    k = nodes[n].kind
+    if k == .int_lit or k == .bool_lit or k == .float_lit or k == .none_lit: return true
+    if k == .str_lit: return nkids(n) == 0 and nodes[n].sval >= 0
+    # A comprehension is closed value construction too. The scope contains
+    # only its private binders; true marks an accumulator eligible for push.
+    # No user call, outer local, mutable global or other write is admitted.
+    if k == .ident and nodes[n].aux == i32(int(SK.local)): return scope.has(int(nodes[n].sym))
+    if k == .block and has_flag(n, NF_COMPREHENSION):
+        if nkids(n) != 3 or nodes[kid(n, 0)].kind != .vardecl: return false
+        decl = kid(n, 0)
+        l = int(nodes[decl].sym)
+        if l <= 0 or nkids(decl) != 0 or not fact_constant_tree(int(nodes[decl].b), budget, scope): return false
+        if ownership_decls.len() != 0 and ownership_fact_type(int(locals[l].type)): return false
+        inner = scope
+        inner[l] = true
+        return fact_constant_tree(kid(n, 1), budget, inner) and fact_constant_tree(kid(n, 2), budget, inner)
+    if k == .for_ and scope.len() > 0:
+        if nodes[n].aux != 0 and nodes[n].aux != 1: return false
+        if not fact_constant_tree(int(nodes[n].a), budget, scope): return false
+        inner = scope
+        if nodes[n].sym > 0: inner[int(nodes[n].sym)] = false
+        if nodes[n].aux == 1 and nodes[n].c > 0: inner[int(nodes[n].c)] = false
+        return fact_constant_tree(int(nodes[n].b), budget, inner)
+    if k == .range:
+        if nodes[n].b == 0: return false
+        if nodes[n].c != 0 and not fact_constant_tree(int(nodes[n].c), budget, scope): return false
+        return fact_constant_tree(int(nodes[n].a), budget, scope) and fact_constant_tree(int(nodes[n].b), budget, scope)
+    if k == .exprstmt and scope.len() > 0: return fact_constant_tree(int(nodes[n].a), budget, scope)
+    if k == .if_ and scope.len() > 0:
+        return fact_constant_tree(int(nodes[n].a), budget, scope) and fact_constant_tree(int(nodes[n].b), budget, scope) and (nodes[n].c == 0 or fact_constant_tree(int(nodes[n].c), budget, scope))
+    if k == .block and scope.len() > 0:
+        loop i in [0..nkids(n)):
+            child = kid(n, i)
+            if not fact_constant_tree(child, budget, scope): return false
+        return true
+    if k == .intrinsic:
+        if nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2:
+            receiver = kid(n, 0)
+            if nodes[receiver].kind != .ident or nodes[receiver].aux != i32(int(SK.local)) or not (scope.get(int(nodes[receiver].sym)) ?? false): return false
+            return fact_constant_tree(kid(n, 1), budget, scope)
+        if nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1: return fact_constant_tree(kid(n, 0), budget, scope)
+        return false
+    if (k == .binary and nodes[n].aux == 0 or k == .and_ or k == .or_) and fact_scalar(ntype(n)):
+        return fact_constant_tree(int(nodes[n].a), budget, scope) and fact_constant_tree(int(nodes[n].b), budget, scope)
+    if k == .unary and nodes[n].aux == 0 and fact_scalar(ntype(n)): return fact_constant_tree(int(nodes[n].a), budget, scope)
+    if k == .ident and nodes[n].aux == i32(int(SK.global)):
+        g = int(nodes[n].sym)
+        return readonly_global(g) and not globals[g].exposed and fact_constant_tree(int(nodes[int(globals[g].decl)].b), budget, scope)
+    if k == .conv and (nodes[n].aux == i32(int(CV.fixed2arr)) or nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))): return fact_constant_tree(int(nodes[n].a), budget, scope)
+    if k == .map_lit:
+        kt = struct_targ(int(types[fact_type(ntype(n))].st), 0)
+        if not fact_scalar(kt) and kt != T_STR: return false
+        loop i in [0..nkids(n)):
+            pair = kid(n, i)
+            if not fact_constant_tree(int(nodes[pair].a), budget, scope) or not fact_constant_tree(int(nodes[pair].b), budget, scope): return false
+        return true
+    if k == .call:
+        if nodes[n].aux != 2 and not fact_lines_call(n) and not fact_split_call(n) and not fact_words_call(n): return false
+        if ownership_decls.len() != 0 and ownership_fact_type(ntype(n)): return false
+    else if k != .tuple and not (k == .array and nodes[n].a == 0 and nodes[n].b == 0 and nodes[n].aux == 0): return false
+    loop i in [0..nkids(n)):
+        child = kid(n, i)
+        if has_flag(child, NF_SPREAD) or not fact_constant_tree(child, budget, scope): return false
+    true
+# A literal-initialized script integer that no checked write can replace.
+# Seed only demanded reads, O(1), using the existing global write flags.
+# Include the zero-initialized value too: a helper may run during initialization.
+# Mutable literal unions keep their existing whole-write-domain inference.
+fact_global_integer = (g: int) -> FactBound:
+    unknown = FactBound(wide = true)
+    if g <= 0 or g >= globals.len() or globals[g].fn_written or globals[g].init_written or globals[g].exposed: return unknown
+    d = int(globals[g].decl)
+    if d == 0 or nodes[d].kind != .vardecl: return unknown
+    init = domain_leaf(int(nodes[d].b))
+    if init == 0 or nodes[init].kind != .int_lit or oversized_literal(init): return unknown
+    x = nodes[init].ival
+    FactBound(min(0, x), max(0, x))
+# The length of an immutable global literal: O(elements) for arrays,
+# O(bytes) for ASCII strings (CR and non-ASCII graphemes stay unknown).
+fact_global_length = (g: int) -> int:
+    if g <= 0 or g >= globals.len() or globals[g].fn_written or globals[g].init_written or globals[g].exposed: return -1
+    kind = tkind(fact_type(int(globals[g].type)))
+    if kind != .array and kind != .str_: return -1
+    d = int(globals[g].decl)
+    if d == 0 or nodes[d].kind != .vardecl: return -1
+    init = int(nodes[d].b)
+    if kind == .str_:
+        if init == 0 or nodes[init].kind != .str_lit or nkids(init) != 0 or nodes[init].sval < 0: return -1
+        text = name_of(int(nodes[init].sval))
+        loop c in text:
+            if c >= 128 or c == 13: return -1
+        return len(text)
+    # (a contract's check leaves the literal it checked)
+    loop init != 0 and nodes[init].kind == .conv and (nodes[init].aux == i32(int(CV.fixed2arr)) or nodes[init].aux == i32(int(CV.refinement))): init = int(nodes[init].a)
+    if init == 0 or nodes[init].kind != .array or nodes[init].b != 0 or nodes[init].aux != 0: return -1
+    loop i in [0..nkids(init)):
+        if has_flag(kid(init, i), NF_SPREAD): return -1
+    nkids(init)
+fact_receiver_route = (n: int, s: mut FactState) -> FactRoute:
+    target = kid(n, 0)
+    loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+    # (a temporary, `units[p]` read by `[]`, is no place: its value is the argument's)
+    k = nodes[target].kind
+    if k != .ident and k != .field and k != .index: return FactRoute()
+    outer = fact_route_reuse
+    fact_route_reuse = n
+    route = fact_route(target, s)
+    fact_route_reuse = outer
+    route
+# Capture target selectors once. Rebuilding ancestor values below is a pure
+# operation over those captured selectors, never a second syntax evaluation.
+fact_route = (e: int, s: mut FactState, depth: int = 0) -> FactRoute:
+    if e == 0 or depth > 32: return FactRoute()
+    k = nodes[e].kind
+    if k == .ident:
+        if nodes[e].aux == i32(int(SK.local)):
+            l = int(nodes[e].sym)
+            if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0 and not place_locked.has(l): return fact_route(int(locals[l].alias), s, depth + 1)
+        return FactRoute(e)
+    if k == .field or k == .index:
+        route = fact_route(int(nodes[e].a), s, depth + 1)
+        selector = 0
+        if k == .field: selector = if nodes[e].aux == -2: int(nodes[e].ival) else: int(nodes[e].name)
+        else:
+            # A dictionary store after an effectful RHS uses the captured key
+            # but a fresh position, with a fresh membership obligation.
+            known = if fact_route_reuse != 0 and not has_flag(e, NF_RELOOKUP): fact_route_selectors.get(e) ?? (0, 0) else: (0, 0)
+            # The bounds obligation also proves an int selector fits int64,
+            # just as for a read. Keep the original value for that obligation.
+            outer = fact_covered
+            index = int(nodes[e].b)
+            if nodes[index].kind == .conv and nodes[index].aux == i32(int(CV.int_)):
+                kind = tkind(representation_type(ntype(int(nodes[e].a))))
+                fact_covered = if kind == .array or kind == .fixed: index else: 0
+            selector = if known.0 == fact_route_reuse and known.0 != 0: known.1 else: fact_capture(int(nodes[e].b), s)
+            fact_covered = outer
+        route.selectors.push(selector)
+        route.elements.push(k == .index)
+        route.types.push(refine_storage(e, ntype(e)))
+        route.sites.push(if k == .index: e else: 0)
+        return route
+    # (a narrowed name, `if r is? T` or `if r isnt? none`, writes its variable's
+    # payload: the -4 projection fact_capture reads it by)
+    if (k == .narrow or k == .unwrap) and nodes[e].a != 0:
+        route = fact_route(int(nodes[e].a), s, depth + 1)
+        if route.root == 0: return route
+        route.selectors.push(-4)
+        route.elements.push(false)
+        route.types.push(ntype(e))
+        route.sites.push(0)
+        return route
+    fact_capture(e, s)
+    FactRoute()
+# A mutable argument's value after its call: its place read again, reusing the
+# selectors the arguments evaluated (`d[k].m()` on `d.vals[__map_entry_present(d k)]`
+# looks k up once, before the call changed d). O(route depth).
+fact_after_call = (n: int, arg: int, s: mut FactState) -> int:
+    target = arg
+    loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+    k = nodes[target].kind
+    if k != .ident and k != .field and k != .index: return fact_capture(arg, s)
+    outer = fact_route_reuse
+    fact_route_reuse = n
+    route = fact_route(target, s)
+    fact_route_reuse = outer
+    held = fact_route_values(s, route)
+    if held.len() > 0: held[held.len() - 1] else: fact_fresh(s, ntype(arg))
+fact_route_values = (s: mut FactState, route: FactRoute) -> int[]:
+    if route.root == 0: return []
+    values = [fact_read(s, route.root)]
+    loop i in [0..route.selectors.len()):
+        values.push(fact_project(s, values[i], route.selectors[i], route.elements[i], route.types[i]))
+    values
+fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int, bounds: bool = false):
+    p = fact_place(route.root)
+    if p.declaration == 0: fact_forget(s, at, .write, true); return
+    values = fact_route_values(s, route)
+    if bounds and fact_speculating == 0 and fact_probe_on: fact_probe_route(s, route, values)
+    else if bounds and fact_speculating == 0 and (fact_policy == .RequireStatic or fact_query): fact_route_bounds(s, route, values)
+    if values.len() > 0 and s.conditional.len() > 0: result_replaced(values[values.len() - 1], at, s)
+    value = value0
+    i = route.selectors.len() - 1
+    loop i >= 0:
+        t = if i == 0: ntype(route.root) else: route.types[i - 1]
+        value = fact_replace(s, values[i], route.selectors[i], route.elements[i], value, t)
+        # (a place with a self-length contract holds it for every checked value it gets)
+        if ref_self_active and i > 0 and ref_self_contract(route.types[i - 1]): ref_assume(route.types[i - 1], value, [], s)
+        i -= 1
+    if ref_self_active:
+        held = refine_storage(route.root, ntype(route.root))
+        if ref_self_contract(held): ref_assume(held, value, [], s)
+    if fact_exposed(p): fact_forget(s, at, .write, false, p)
+    fact_rebind(s, p, value, at, if values.len() > 0: values[0] else: 0)
+# Component i of an unpacked value of type t0: a tuple's field or an array's
+# element (a record's is not tracked by position).
+fact_component = (s: mut FactState, value: int, t0: int, i: int, ct: int) -> int:
+    t = fact_type(t0)
+    if tkind(t) == .tuple: return fact_project(s, value, i, false, ct)
+    if tkind(t) == .array or tkind(t) == .fixed: return fact_project(s, value, fact_constant(s, i), true, ct)
+    fact_fresh(s, ct)
+# An unpacking store `(a b) = value` writes each component's route.
+fact_store_pattern = (s: mut FactState, target: int, value: int, at: int, depth: int = 0):
+    k = nodes[target].kind
+    if k == .hole: return
+    if k == .tuple and depth < 32:
+        # (an assignment's pattern has no type of its own: the stored value's)
+        t = ntype(target)
+        if t == 0 and value != 0: t = fact_terms[value].type
+        loop i in [0..nkids(target)):
+            c = kid(target, i)
+            if nodes[c].kind != .hole: fact_store_pattern(s, c, fact_component(s, value, t, i, ntype(c)), at, depth + 1)
+        return
+    route = fact_route(target, s)
+    fact_store_route(s, route, value, at, true)
+# A store's element selectors carry the obligation a load's do (fact_capture's index).
+fact_route_bounds = (s: mut FactState, route: FactRoute, values: int[]):
+    loop i in [0..route.selectors.len()):
+        n = route.sites[i]
+        if n == 0 or i >= values.len() or has_flag(n, NF_INBOUNDS): continue
+        t = fact_type(if i == 0: ntype(route.root) else: route.types[i - 1])
+        if types[t].kind != .array and types[t].kind != .fixed: continue
+        index = route.selectors[i]
+        length = if types[t].kind == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, values[i], -1, false, T_INT)
+        zero = fact_constant(s, 0)
+        lo = fact_compare(s, .le, zero, index)
+        hi = fact_compare(s, .lt, index, length)
+        dir_index(n, lo == 1 and hi == 1)
+        if lo != 1 or hi != 1:
+            wit_index(n, s, index, length, lo, hi)
+            fact_index_success(n, s, index, length)
