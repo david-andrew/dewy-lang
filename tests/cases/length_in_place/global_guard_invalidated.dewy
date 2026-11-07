@@ -1,0 +1,11 @@
+let log:array<int64 length <? 3> = []
+grow=():>void=>{
+    if log.length <? 2 {log.push(0)}
+}
+main=()=>{
+    if log.length <? 2 {
+        grow()
+        log.push(1)
+    }
+    printl(log)
+}

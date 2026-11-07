@@ -1,0 +1,8 @@
+main=()=>{
+    let xs:array<int64 length <=? 8> = [1]
+    if xs.length <=? 6 {xs.extend([2 3])}
+    let snapshot = xs
+    let more:array<int64 length=2> = [4 5]
+    if xs.length <=? 6 {xs.extend(more)}
+    printl"{xs} {snapshot}"
+}

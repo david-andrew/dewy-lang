@@ -1,0 +1,8 @@
+let log:array<int64 length <? 3> = []
+note=(v:int64):>void=>{
+    if log.length <? 2 {log.push(v)}
+}
+main=()=>{
+    loop i in [0..5) {note(i)}
+    printl(log)
+}

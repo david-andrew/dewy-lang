@@ -1,0 +1,8 @@
+grow=(@xs:array<int64 length <? 4> v:int64):>void=>{
+    if xs.length <? 3 {xs.push(v)}
+}
+main=()=>{
+    let xs:array<int64 length <? 4> = []
+    loop i in [0..9) {grow(@xs i)}
+    printl(xs)
+}

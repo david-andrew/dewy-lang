@@ -1236,8 +1236,11 @@ a slice or a call's result is unproven. A function result has no name to write i
 contract, so return a record with such a field or fill an `@` parameter.
 
 `array<int64 length <? 10>` is a dynamic array with a checked length contract;
-`array<int64 length=10>` remains a fixed-size array. Length-changing operations
-check a private candidate before publishing it. `addr` is a nonnegative index
+`array<int64 length=10>` remains a fixed-size array. `push`, `pop`, `extend`, `clear`
+and `truncate` on such a contract check the length they leave before changing the
+array, and work in place: `xs.push(v)` under `length <=? 10` needs `xs.length <=? 9`.
+`swap` keeps the length. Other length-changing operations check a private
+candidate before publishing it. `addr` is a nonnegative index
 below `2^48` on native targets and `2^32` on WebAssembly. Arithmetic does not
 automatically preserve this range. A returned refinement may
 project a mutable parameter's final length, for example

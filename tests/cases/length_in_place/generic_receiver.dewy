@@ -1,0 +1,12 @@
+add=<T>(@xs:array<T length <? 3> v:T):>void=>{
+    if xs.length <? 2 {xs.push(v)}
+}
+main=()=>{
+    let a:array<int64 length <? 3> = []
+    let b:array<string length <? 3> = []
+    loop i in [0..4) {
+        add(@a i)
+        add(@b "{i}")
+    }
+    printl"{a} {b}"
+}

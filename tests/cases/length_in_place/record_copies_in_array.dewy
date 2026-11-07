@@ -1,0 +1,9 @@
+$runtime_checks
+S:type=[xs:array<int64 length <? 3>]
+main=()=>{
+    let a=[S[[1]] S[[2]]]
+    let b=a
+    a[0].xs.push(5)
+    b[1].xs.push(6)
+    printl"{a[0].xs} {a[1].xs} {b[0].xs} {b[1].xs}"
+}

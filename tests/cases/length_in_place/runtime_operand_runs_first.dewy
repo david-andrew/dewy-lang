@@ -1,0 +1,12 @@
+# exit: 101
+main=()=>{
+    $runtime_checks
+    let xs:array<int64 length <? 3> = [1]
+    let grow=($capture @xs):>int64=>{
+        printl"operand"
+        xs.push(2)
+        return 3
+    }
+    xs.push(grow())
+    printl"not reached {xs}"
+}

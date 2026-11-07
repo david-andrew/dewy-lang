@@ -1,0 +1,13 @@
+# exit: 101
+main=()=>{
+    $runtime_checks
+    let xs:array<int64 length <? 4> = [1]
+    let more=($capture @xs):>array<int64>=>{
+        printl"operand"
+        xs.push(2)
+        xs.push(3)
+        return [9]
+    }
+    xs.extend(more())
+    printl"not reached {xs}"
+}

@@ -1,0 +1,9 @@
+main=()=>{
+    let xs:array<int64 length <? 3> = []
+    let grow=($capture @xs):>int64=>{
+        if xs.length <? 2 {xs.push(0)}
+        return 1
+    }
+    if xs.length <? 2 {xs.push(grow())}
+    printl(xs)
+}

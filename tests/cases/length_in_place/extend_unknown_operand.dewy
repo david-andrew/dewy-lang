@@ -1,0 +1,8 @@
+f=(@xs:array<int64 length <=? 8> ys:array<int64>):>void=>{
+    if xs.length <=? 6 {xs.extend(ys)}
+}
+main=()=>{
+    let xs:array<int64 length <=? 8> = []
+    f(@xs [1])
+    printl(xs)
+}

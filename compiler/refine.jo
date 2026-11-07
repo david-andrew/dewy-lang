@@ -1012,7 +1012,69 @@ ref_field_shape = (tn: int, t: int, siblings: int[]) -> int: nd_field_shape(tn, 
 ref_mutable_authority = (n: int):
     if ref_dependent_ancestor(n): fatal(nodes[n].pos, "mutable refinement access needs the full record invariant authority; pass the whole record with `@`")
 
-# Length-changing operations execute on a private candidate. Later argument
+# A contract comparing only this array's own length with literals needs no
+# candidate: the length an operation leaves is checked with the array as it is,
+# after every operand ran and before the write, so it works in place and a failed
+# check changes nothing. Any other contract, or a place an operation does not
+# write directly, publishes a candidate. O(atoms + route).
+ref_length_route = (place: int, t: int) -> bool:
+    if not ref_length_only(t) or ref_dependent_ancestor(place): return false
+    route = place
+    loop nodes[route].kind == .field or nodes[route].kind == .index and nodes[route].aux == 0: route = int(nodes[route].a)
+    nodes[route].kind == .ident
+
+ref_length_only = (t: int) -> bool:
+    if types[t].kind != .refined or tkind(representation_type(t)) != .array: return false
+    loop atom in ref_predicates[int(types[t].st)]:
+        if not (ref_own_length(atom.a) and ref_length_literal(atom.b)) and not (ref_own_length(atom.b) and ref_length_literal(atom.a)): return false
+    true
+
+ref_own_length = (term: RefTerm) -> bool: term.kind == 0 and term.offset == 0 and term.path.len() == 1 and term.path[0] == -1
+ref_length_literal = (term: RefTerm) -> bool: term.kind == 1 and not term.unsigned and term.offset == 0 and term.path.len() == 0 and ref_tagged_fits(term.value)
+
+# t's contract on a value other than the array itself: the array's length + delta
+# (place's own length), a plain count (`path` empty), or literals alone.
+ref_length_contract = (t: int, delta: int, path: int[]) -> int:
+    atoms: RefAtom[]
+    loop atom in ref_predicates[int(types[t].st)]:
+        if ref_own_length(atom.a): atoms.push(RefAtom(atom.op, RefTerm(0, path = path), RefTerm(1, atom.b.value - delta)))
+        else: atoms.push(RefAtom(atom.op, RefTerm(1, atom.a.value - delta), RefTerm(0, path = path)))
+    predicate = ref_intern(atoms)
+    ref_span_copy(int(types[t].st), predicate)
+    predicate
+
+# What op owes before it writes: a check to run (> 0), nothing (0), or it cannot
+# say (< 0: a candidate).
+ref_length_direct = (id: IN, place: int, t: int, args: int[], pos: int) -> int:
+    if id == .push or id == .insert or id == .pop or id == .remove:
+        check = copy_place(place)
+        delta = if id == .push or id == .insert: 1 else: -1
+        refine_coerce(check, mk_refined(int(types[t].elem), ref_length_contract(t, delta, [-1])))
+        return check
+    upper = true
+    empty = true
+    loop atom in ref_predicates[int(types[t].st)]:
+        if not ref_own_length(atom.a) or atom.op == .ne: upper = false
+        if ref_own_length(atom.a):
+            if not ref_literal_holds(atom.op, 0, atom.b.value): empty = false
+        else if not ref_literal_holds(atom.op, atom.a.value, 0): empty = false
+    if id == .clear: return if empty: 0 else: -1
+    # (a shorter array under an upper bound; the count's own failure comes after)
+    if id == .truncate: return if upper: 0 else: -1
+    if id != .extend: return -1
+    length = mk(.call, pos)
+    check_intrinsic(length, int(IN.len), [copy_place(place)], 0)
+    add_flag(length, NF_CHECKED)
+    added = mk(.call, pos)
+    check_intrinsic(added, int(IN.len), [copy_checked(args[1])], 0)
+    add_flag(added, NF_CHECKED)
+    sum = bc_bin(.plus, length, added, pos)
+    check_expr(sum, T_INT)
+    sum = last_checked
+    refine_coerce(sum, mk_refined(T_INT, ref_length_contract(t, 0, [])))
+    sum
+
+# Other length-changing operations execute on a private candidate. Later argument
 # effects run before that candidate is published, so callbacks cannot observe
 # an intermediate violation of the destination's storage contract.
 ref_length_mutation = (n: int, r: int) -> int:
@@ -1025,30 +1087,34 @@ ref_length_mutation = (n: int, r: int) -> int:
     if ref_self_active and ref_self_contract(t) and not ref_dependent_ancestor(place) and ref_self_grow(n, id, place, t): return r
     before: int[]
     args = kids(n)
-    if id == .insert:
-        args[2] = capture_value(args[2], ntype(args[2]), before)
-        args[1] = capture_value(args[1], ntype(args[1]), before)
-    else:
-        loop i in [1..args.len()): args[i] = capture_value(args[i], ntype(args[i]), before)
-    # gen_intrinsic evaluates operands before reacquiring receiver storage.
+    # The receiver's selectors, then the operands, as gen_intrinsic evaluates them.
     path = index_update_path(place)
     j = path.len() - 1
     loop j >= 0:
         part = path[j]; j -= 1
         if nodes[part].kind == .index and nodes[part].b != 0: nodes[part].b = i32(capture_value(int(nodes[part].b), ntype(int(nodes[part].b)), before))
-    candidate = capture_value(copy_place(place), representation_type(t), before)
-    args[0] = candidate
+    loop i in [1..args.len()): args[i] = capture_value(args[i], ntype(args[i]), before)
+    candidate = 0
+    if ref_length_route(place, t):
+        direct = ref_length_direct(id, place, t, args, nodes[n].pos)
+        if direct > 0: before.push(bc_stmt(direct, nodes[n].pos))
+        if direct < 0: candidate = -1
+    else: candidate = -1
+    if candidate != 0:
+        candidate = capture_value(copy_place(place), representation_type(t), before)
+        args[0] = candidate
     operation = copy_checked(n)
     add_flag(operation, NF_CHECKED)
     set_list(operation, args)
     result = 0
     if r != T_VOID: result = capture_value(operation, r, before)
     else: before.push(bc_stmt(operation, nodes[n].pos))
-    store = bc_assign(place, copy_checked(candidate), nodes[n].pos)
-    assigned = store
-    store = check_assign(store)
-    before.push(store)
-    if ref_self_active and ref_self_contract(t): ref_self_shrink(assigned, place, id)
+    if candidate != 0:
+        store = bc_assign(place, copy_checked(candidate), nodes[n].pos)
+        assigned = store
+        store = check_assign(store)
+        before.push(store)
+        if ref_self_active and ref_self_contract(t): ref_self_shrink(assigned, place, id)
     if result != 0: before.push(bc_stmt(result, nodes[n].pos))
     nodes[n] = nodes[bc_block(before, nodes[n].pos)]
     nodes[n].type = i32(r)
@@ -1138,7 +1204,7 @@ ref_array_call_prepare = (decl: int, args: mut int[], ptypes: int[], written: in
     check_place(place, true)
     self_length = ref_self_active and ref_self_contract(t)
     # (a swap changes neither the length nor the values, and has no callback to see it)
-    if self_length and name == "swap":
+    if name == "swap" and (self_length or ref_length_route(place, t)):
         ref_self_direct[place] = true
         return out
     # Receiver selectors, then explicit operands in source order, once.
@@ -1443,7 +1509,7 @@ ref_self_grow = (n: int, id: IN, place: int, t: int) -> bool:
     false
 
 # Does a swap have the array itself, in place of a private candidate?
-ref_self_direct_place = (a: int) -> bool: ref_self_active and ref_self_direct.has(a)
+ref_self_direct_place = (a: int) -> bool: ref_self_direct.len() > 0 and ref_self_direct.has(a)
 
 ref_self_stored = (t0: int) -> bool:
     t = prune(t0)

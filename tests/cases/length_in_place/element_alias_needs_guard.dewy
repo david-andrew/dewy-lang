@@ -1,0 +1,11 @@
+f=(@rows:array<array<int64 length <? 3>>):>void=>{
+    if rows.length >? 0 {
+        let e=@rows[0]
+        e.push(1)
+    }
+}
+main=()=>{
+    let rows:array<array<int64 length <? 3>> = [[]]
+    f(@rows)
+    printl(rows)
+}

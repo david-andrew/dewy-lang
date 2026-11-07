@@ -1,0 +1,8 @@
+main=()=>{
+    let xs:array<int64 length <? 3> = []
+    let add=($capture @xs v:int64):>void=>{
+        if xs.length <? 2 {xs.push(v)}
+    }
+    loop i in [0..5) {add(i)}
+    printl(xs)
+}
