@@ -401,15 +401,17 @@ It also doesn't work in a lambda's result (`g=():>int64:>int64=>...`) or after `
 Turn these on and each works as shown; say no to any and it is removed.
 
 ```dewy
-$time.rules = 'urgent.bin'                              # a rule file beside the main file, rather than v6's descriptor
-Box:type = <T=int64>[v:T]                               # bare Box means Box<int64>; this is how bare Date means Date<Gregorian>
-let t:Instant<width=64> = now()                         # Name<option=N> always means a type declared Name_option_N
+$time.rules = 'urgent.bin'                               # a rule file beside the main file, rather than v6's descriptor
+Box:type = <T=int64>[v:T]                                # bare Box means Box<int64>; this is how bare Date means Date<Gregorian>
+let b:Box = Box[1]
+let t = instant"2026-01-01T00:00:00Z"
+let small = convert<Instant<width=64>>(t)                # Name<option=N> always means a type declared Name_option_N
 let r = [date"2026-01-01"..date"2026-02-01")
 printl"{r.first} {r.last} {r.includes_first} {r.includes_last} {r.is_empty}"
-printl"{quantize(1.5 rounding='nearest_even' tick=1ms)}"   # also 'nearest_away', 'floor', 'ceil', 'toward_zero'
+printl"{quantize(t rounding='floor' tick=1s)}"           # also 'nearest_even', 'nearest_away', 'ceil', 'toward_zero'; gives the value and what was lost
 let at = time_of_day"09:30"
 let l = local"2026-11-01T01:30"
-printl"{date"2026-11-01".at(at)} {l.in_zone(zone"America/New_York" fold='later')}"
+printl"{date"2026-11-01".at(at)} {l.in_zone(zone("America/New_York") fold='later')}"
 printl"{date"2026-11-01".format("EEEE d MMMM y")} {date("1/11/2026" "d/M/y")}"   # Unicode's date letters; a two-digit year doesn't read
 ```
 
