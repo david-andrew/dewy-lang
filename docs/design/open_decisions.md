@@ -1,7 +1,7 @@
 # Decisions waiting on David
 
 - **Only open items.** Once you answer one, it moves to [decisions.md](decisions.md), with what was considered and why, and is removed from here.
-- **Being revised now (2026-11-07):** agents wrote realistic programs with each design, and none scored full marks. D4, D10, D11, D19e, D22, D26–D31 and D33–D36 are being reworked, so skip them for now. D21, D28's core and D32 are unaffected.
+- **Being revised now (2026-11-07):** agents wrote realistic programs with each design, and none scored full marks. D4, D10, D11, D22, D26–D31 and D33–D36 are being reworked, so skip them for now. D21, D28's core and D32 are unaffected.
 - **What gets asked:** a semantic question only appears here if it fails one of two tests:
   1. Is the common (80%) path easy, ergonomic and fast?
   2. If the common path doesn't fit, is it straightforward to adjust?
@@ -228,22 +228,6 @@ pause_menu = ():>void => {
 ---
 
 ## P3: lower stakes
-
-### D19e. Keep `{x:.2f}` next to a format function?
-- **Today:** `"{x:.2f}"` is shorthand for `format(x ".2f")`.
-- **Your note (`discussion_points.md`):** a higher-order `fmt`. A format string gives a function, so a computed width needs no new syntax.
-
-```dewy
-printl"{fmt'.2f'(x)}"
-printl"{x |> fmt'.2f'}"
-printl"{fmt'<{w}'(x)}"     # computed width: an ordinary interpolated string
-```
-
-- **Options:**
-  - **a)** `fmt` only: remove `{x:spec}` and `format(x spec)`. One way to do it, but a little longer, and `x:>7` already reads like a return arrow.
-  - **b)** Keep `{x:.2f}` as shorthand beside `fmt`.
-- **Name:** your notes consider `f` and settle on `fmt`. `f` is shorter but a very common variable name.
-- **Rec:** (a), with the name `fmt`.
 
 ### D22. Delete `$parallel_safe`?
 - **v3 checked your question:** once items may wait, the tag only means race freedom. Every other risk (deadlocks, resources, panics, secrets) is checked elsewhere, so "race-free" leaves nothing unsafe unchecked. If kept, it should be named `$race_free`.

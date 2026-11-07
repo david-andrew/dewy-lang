@@ -467,3 +467,11 @@ section linked. ROADMAP.md lists them in one line each.
       allow (instead of `$panic_on_unproven`). Tags about a function's
       arguments go in an `$args.` namespace. Float constants should be intuitive
       for newer programmers.
+- **Formatting** (D19e, David, 2026-11-07): `fmt` is the only formatter, a higher-order
+  function taking a single pattern string (`f` is too common a name). The pattern narrows
+  the input type the result accepts, so `fmt'.2f'` formats numbers and a mismatch is a
+  compile error. It is used in interpolation as `printl'result is {fmt'.2f'x}'`, and
+  idiomatically pre-built: `f0 = fmt'.2f'`. `{x:.2f}` is not valid Dewy, and
+  `format(x spec)` goes too. Considered: keeping `{x:spec}` as shorthand.
+  ([resources/discussion_points.md](../../resources/discussion_points.md), "Format
+  string specifiers".)
