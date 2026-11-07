@@ -260,7 +260,7 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
         if failed and not every:
             return 1
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith('DEWY_') or k == 'DEWY_GATE_SLOT_HELD'}
+           if not k.startswith('DEWY_') or k in ('DEWY_GATE_SLOT_HELD', 'DEWY_PYTEST_SHARD')}
     env.update(DEWY_CORE_COMPILER=str(binary), PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
     if quick:
         arguments = ['-m', 'core_quick', *arguments]

@@ -4,6 +4,8 @@ Loaded explicitly by the compact-core gate with pytest-xdist's loadgroup mode.
 Other repository tests retain file isolation for their shared build artifacts.
 """
 import os
+import signal
+import time
 import zlib
 
 import pytest
@@ -54,3 +56,36 @@ def shard(items: list[pytest.Item]) -> None:
     if dropped:
         items[0].config.hook.pytest_deselected(items=dropped)
     items[:] = kept
+
+
+# DEWY_TEST_TRACE=DIR (CI): each process appends the tests it starts to DIR/start-PID.log and,
+# when it is sent SIGTERM, records itself, its parent and the test it was running before it
+# dies as it would have. An intermittent exit 143 in CI otherwise leaves no trace of who died.
+TRACE = os.environ.get('DEWY_TEST_TRACE')
+_current = ['']
+
+
+def _note(name: str, text: str) -> None:
+    os.makedirs(TRACE, exist_ok=True)
+    with open(os.path.join(TRACE, f'{name}-{os.getpid()}.log'), 'a') as out:
+        out.write(f'{time.strftime("%H:%M:%S")} {text}\n')
+
+
+def pytest_configure(config) -> None:
+    if not TRACE:
+        return
+
+    def terminated(number, frame):
+        _note('sigterm', f'SIGTERM in pid {os.getpid()} (parent {os.getppid()}, group {os.getpgrp()}) '
+                         f'running {_current[0]!r}')
+        signal.signal(number, signal.SIG_DFL)
+        os.kill(os.getpid(), number)
+
+    signal.signal(signal.SIGTERM, terminated)
+    _note('start', f'pid {os.getpid()} parent {os.getppid()} group {os.getpgrp()}')
+
+
+def pytest_runtest_logstart(nodeid: str, location) -> None:
+    if TRACE:
+        _current[0] = nodeid
+        _note('start', nodeid)

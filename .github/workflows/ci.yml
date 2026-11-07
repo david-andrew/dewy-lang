@@ -127,7 +127,10 @@ jobs:
           DEWY_CORE_COMPILER: ${{ runner.temp }}/dewy-core/bin/dewy-core
           DEWY_EMIT_WORKERS: '1'
           DEWY_PYTEST_SHARD: ${{ matrix.shard }}/2
+          DEWY_TEST_TRACE: ${{ runner.temp }}/test-trace
         run: |
+          free -m
+          echo "pid_max $(cat /proc/sys/kernel/pid_max)"
           python - <<'PY'
           import subprocess
           import sys
@@ -140,12 +143,20 @@ jobs:
               '--dist=loadgroup', '-m', 'not nightly', *TESTS,
           ]))
           PY
+      - name: Show the machine's state after a failure
+        if: failure()
+        run: |
+          free -m
+          sudo dmesg | tail -40 || true
+          tail -n +1 "$RUNNER_TEMP"/test-trace/sigterm-*.log || true
       - name: Preserve test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: compact-core-test-results-${{ matrix.shard }}
-          path: core-results.xml
+          path: |
+            core-results.xml
+            ${{ runner.temp }}/test-trace
           if-no-files-found: ignore
 
   bootstrap-and-test:
