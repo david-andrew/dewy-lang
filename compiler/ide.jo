@@ -29,6 +29,7 @@ use 'checks_thin_expr.dewy'
 use 'checks_index_hooks.dewy'
 use 'lex.jo'
 use 'effects.jo'
+use 'ide_ops.dewy'
 
 const IK_LOCAL = 1
 const IK_PARAM = 2
@@ -82,8 +83,6 @@ ide_esc = (s: str) -> str:
         else: out += byte_str(int(c))
     out
 
-ide_emit = (line: str): ide_lines.push(line)
-
 ide_out = ""                    # (ide_fd < 0: what is flushed goes here)
 
 ide_flush = ():
@@ -104,8 +103,6 @@ ide_indexed = (f: int) -> bool:
         ide_files[f] = 1
         if p != ide_doc and (not ide_wide or starts_with(p, path_norm(lib_dir) + "/")): ide_files[f] = 2
     ide_files[f] == 1
-
-ide_is_name_byte = (c: u8) -> bool: is_ident_char(c)
 
 # where name is written at or after p, on the same line (-1 if it is not)
 ide_name_at = (p: int, name: int) -> int:
@@ -180,11 +177,6 @@ ide_local_root = (l0: int) -> int:
             l = v
     l
 
-ide_local_kind = (l: int) -> int:
-    if int(locals[l].flags) & LF_CONST != 0: return IK_CONST
-    if int(locals[l].flags) & LF_PARAM != 0: return IK_PARAM
-    IK_LOCAL
-
 # a name resolved to symbol s (at n's position)
 ide_sym_ref = (n: int, s: int):
     if not ide_on: return
@@ -215,15 +207,6 @@ ide_sym_ref = (n: int, s: int):
         m = int(syms[s].ref)
         ide_ref(p, nm, IK_MODULE, mkpos(int(modules[m].file), 0), 0, int(modules[m].file))
 
-ide_fn_ref = (p: int, name: int, f: int):
-    if not ide_on or f <= 0 or fns[f].decl == 0: return
-    ide_ref(p, name, IK_FN, nodes[int(fns[f].decl)].pos, 0, f)
-
-# field i of struct (or variant) declaration d
-ide_field_ref = (p: int, name: int, d: int, i: int, type: int):
-    if not ide_on or d == 0 or i < 0 or i >= nkids(d): return
-    ide_ref(p, name, IK_FIELD, nodes[kid(d, i)].pos, type, 0)
-
 # name = value arguments: the parameters (or fields) of declaration d they are for
 ide_named_args = (args: int[], d: int, kind: int, ts: int[]):
     loop a in args:
@@ -234,10 +217,6 @@ ide_named_args = (args: int[], d: int, kind: int, ts: int[]):
                 t = 0
                 if i < ts.len(): t = ts[i]
                 ide_ref(nodes[a].pos, nm, kind, nodes[kid(d, i)].pos, t, 0)
-
-# a call of a builtin function (call node n)
-ide_builtin_ref = (n: int, name: int):
-    if nodes[n].a != 0: ide_ref(nodes[int(nodes[n].a)].pos, name, IK_BUILTIN, 0, 0, 0)
 
 ide_variant_ref = (p: int, name: int, et: int, vi: int):
     if not ide_on: return
@@ -628,9 +607,6 @@ trail_sig = (k: int) -> str:
         s += type_str(zonk(fns[f].ptypes[i]), dewy)
     s + ")"
 
-# Display types for the edited language, including imported implementation declarations.
-ide_type_str = (t: int) -> str: type_str(t, ends_with(ide_doc, ".dewy"))
-
 # a function instance's signature: (a: int, b: str) -> int
 ide_fn_sig = (f: int) -> str:
     dewy = ends_with(ide_doc, ".dewy")
@@ -666,24 +642,13 @@ ide_variant_text = (ed: int, vd: int) -> str:
     if nodes[vd].a != 0 and nodes[int(nodes[vd].a)].kind == .int_lit: s += " = {nodes[int(nodes[vd].a)].ival}"
     s
 
-ide_type_info = (t: int) -> str:
-    if t == 0: return ""
-    ide_type_str(zonk(t))
-
 ide_ref_name = (p: int) -> str:
     src = files[pos_file(p)].src
     e = pos_off(p)
     loop e < len(src) and ide_is_name_byte(src[e]): e += 1
     src[pos_off(p)..e)
 
-ide_pos_str = (p: int) -> str: "{pos_file(p)}:{pos_off(p)}"
-
 decl_done: {int: bool} = {}
-
-ide_decl = (p: int, name: int, kind: int, snippet: str, doc: str):
-    if p < 0 or decl_done.get(p) != none: return
-    decl_done[p] = true
-    ide_emit("D\t{ide_pos_str(p)}\t{len(name_of(name))}\t{kind}\t{ide_esc(name_of(name))}\t{ide_esc(snippet)}\t{ide_esc(doc)}")
 
 # a declaration node d of kind k (with its name at p)
 ide_decl_node = (d: int, p: int, kind: int):
@@ -774,10 +739,6 @@ ide_sym_decls = (s0: int):
                 else: ide_decl(p, nm, k, ide_snippet(nodes[d].pos, false), ide_doc_of(nodes[d].pos))
                 ide_self_ref(p, nm, t)
         s = int(syms[s].next)
-
-ide_self_ref = (p: int, nm: int, info: str):
-    if p < 0: return
-    ide_emit("R\t{ide_pos_str(p)}\t{len(name_of(nm))}\t{ide_pos_str(p)}\t{ide_esc(info)}")
 
 ide_hint_agree = (hints: mut {int: str}, order: mut int[], p: int, lbl: str):
     if let o = hints.get(p):
@@ -941,11 +902,6 @@ ide_skippable = () -> int:
     if d == 0 or nodes[d].kind != .fn_: return -1
     nodes[d].pos
 
-ide_find_file = (path: str) -> int:
-    loop i in 0.. and f in files:
-        if path_norm(f.path) == path: return i
-    -1
-
 # (cascade: the error only follows from a body left out after an earlier one, which the
 # language server drops)
 ide_fatal = (p: int, msg: str, cascade: bool = false):
@@ -961,8 +917,6 @@ ide_fatal = (p: int, msg: str, cascade: bool = false):
     if ide_sentinel == 0: ide_finish()
     else: ide_flush()
     stop(0)
-
-ide_warn = (p: int, msg: str): ide_emit("W\t{ide_pos_str(p)}\t{ide_esc(msg)}")
 
 # ---- completion ----
 

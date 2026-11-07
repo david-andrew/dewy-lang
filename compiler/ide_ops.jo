@@ -1,0 +1,53 @@
+use 'ide.jo'
+use 'checker_signature.dewy'
+use 'checker_expr.dewy'
+use 'effect_panics.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'dewy_lex.dewy'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_hints.dewy'
+use 'expr.jo'
+use 'checks_thin_expr.dewy'
+use 'checks_index_hooks.dewy'
+use 'lex.jo'
+use 'effects.jo'
+
+ide_emit = (line: str): ide_lines.push(line)
+ide_is_name_byte = (c: u8) -> bool: is_ident_char(c)
+ide_local_kind = (l: int) -> int:
+    if int(locals[l].flags) & LF_CONST != 0: return IK_CONST
+    if int(locals[l].flags) & LF_PARAM != 0: return IK_PARAM
+    IK_LOCAL
+ide_fn_ref = (p: int, name: int, f: int):
+    if not ide_on or f <= 0 or fns[f].decl == 0: return
+    ide_ref(p, name, IK_FN, nodes[int(fns[f].decl)].pos, 0, f)
+# field i of struct (or variant) declaration d
+ide_field_ref = (p: int, name: int, d: int, i: int, type: int):
+    if not ide_on or d == 0 or i < 0 or i >= nkids(d): return
+    ide_ref(p, name, IK_FIELD, nodes[kid(d, i)].pos, type, 0)
+# a call of a builtin function (call node n)
+ide_builtin_ref = (n: int, name: int):
+    if nodes[n].a != 0: ide_ref(nodes[int(nodes[n].a)].pos, name, IK_BUILTIN, 0, 0, 0)
+# Display types for the edited language, including imported implementation declarations.
+ide_type_str = (t: int) -> str: type_str(t, ends_with(ide_doc, ".dewy"))
+ide_type_info = (t: int) -> str:
+    if t == 0: return ""
+    ide_type_str(zonk(t))
+ide_pos_str = (p: int) -> str: "{pos_file(p)}:{pos_off(p)}"
+ide_decl = (p: int, name: int, kind: int, snippet: str, doc: str):
+    if p < 0 or decl_done.get(p) != none: return
+    decl_done[p] = true
+    ide_emit("D\t{ide_pos_str(p)}\t{len(name_of(name))}\t{kind}\t{ide_esc(name_of(name))}\t{ide_esc(snippet)}\t{ide_esc(doc)}")
+ide_self_ref = (p: int, nm: int, info: str):
+    if p < 0: return
+    ide_emit("R\t{ide_pos_str(p)}\t{len(name_of(nm))}\t{ide_pos_str(p)}\t{ide_esc(info)}")
+ide_find_file = (path: str) -> int:
+    loop i in 0.. and f in files:
+        if path_norm(f.path) == path: return i
+    -1
+ide_warn = (p: int, msg: str): ide_emit("W\t{ide_pos_str(p)}\t{ide_esc(msg)}")

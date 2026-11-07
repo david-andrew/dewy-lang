@@ -10,15 +10,18 @@ main = ():
 '''
 
 
-def leaf_compilers(compiler, tmp_path, leaf):
-    """The compiler built with the leaf, then with its twin."""
+def leaf_compilers(compiler, tmp_path, leaves):
+    """The compiler built with the leaves, then with their twins."""
     built = []
     for extension in ('dewy', 'jo'):
-        modules = dict(modules_for(tmp_path / 'unused.dewy', tmp_path / 'unused', leaf))
+        modules = dict(modules_for(tmp_path / 'unused.dewy', tmp_path / 'unused', leaves))
         if extension == 'jo':
+            # (every edge to a leaf, from Jo and from Dewy, leads to its twin)
             for name, text in modules.items():
-                if name.endswith('.jo') and name != f'{leaf}.jo':
-                    modules[name] = text.replace(f"'{leaf}.dewy'", f"'{leaf}.jo'")
+                for leaf in leaves:
+                    if name != f'{leaf}.jo':
+                        text = text.replace(f"'{leaf}.dewy'", f"'{leaf}.jo'").replace(f'p"{leaf}.dewy"', f'p"{leaf}.jo"')
+                modules[name] = text
         modules['driver.jo'] = DRIVER
         built.append(cached_driver(compiler, tmp_path, False, modules))
     return built
@@ -48,7 +51,11 @@ def session(compiler, root, steps):
             elif method == 'notify':
                 client.send(*params)
             else:
-                client.request(method, params)
+                # (an error reply is part of what the builds must agree on)
+                client.serial += 1
+                client.send(method, params, client.serial)
+                while (message := client.receive()).get('id') != client.serial:
+                    client.messages.append(message)
         client.request('shutdown', None)
     finally:
         client.process.kill()

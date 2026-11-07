@@ -1,6 +1,6 @@
 """Language-server JSON access, document lookup, replies and lenses agree with frozen Jo over one session."""
 from tests.selfhost_lsp_double import leaf_compilers, session
-from tests.support import compiler  # noqa: F401
+from tests.support import ROOT, compiler  # noqa: F401
 
 MODEL = '''# A record and its step.
 Point:type=[x:float64 y:float64]
@@ -26,7 +26,8 @@ main=()=>{
 '''
 
 
-def test_lsp_ops_session(compiler, tmp_path):
+def compare_session(compiler, tmp_path, monkeypatch, leaves):
+    monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     root = tmp_path / 'project'
     root.mkdir()
     (root / 'model.dewy').write_text(MODEL)
@@ -40,12 +41,12 @@ def test_lsp_ops_session(compiler, tmp_path):
         ('text', (model, MODEL, 1)),
         ('text', (game, GAME, 1)),
         ('textDocument/hover', at(game, 3, 6)),
-        ('textDocument/hover', at(game, 10, 12)),
+        ('textDocument/hover', at(game, 11, 15)),
         ('textDocument/definition', at(game, 3, 6)),
         ('textDocument/references', {**at(model, 3, 1), 'context': {'includeDeclaration': True}}),
-        ('textDocument/documentHighlight', at(game, 9, 18)),
+        ('textDocument/documentHighlight', at(game, 8, 9)),
         ('textDocument/completion', at(game, 3, 22)),
-        ('textDocument/completion', at(game, 10, 25)),
+        ('textDocument/completion', at(game, 11, 11)),
         ('textDocument/signatureHelp', at(game, 3, 21)),
         ('textDocument/signatureHelp', at(game, 3, 30)),
         ('textDocument/inlayHint', {'textDocument': {'uri': game}, 'range': whole}),
@@ -55,15 +56,19 @@ def test_lsp_ops_session(compiler, tmp_path):
         ('textDocument/formatting', {'textDocument': {'uri': model}, 'options': {'tabSize': 4, 'insertSpaces': True}}),
         ('textDocument/codeAction', {'textDocument': {'uri': game}, 'range': whole, 'context': {'diagnostics': []}}),
         ('workspace/symbol', {'query': 'adv'}),
-        ('textDocument/prepareRename', at(game, 9, 18)),
-        ('textDocument/rename', {**at(game, 9, 18), 'newName': 'sum'}),
+        ('textDocument/prepareRename', at(game, 8, 9)),
+        ('textDocument/rename', {**at(game, 8, 9), 'newName': 'sum'}),
         ('text', (model, MODEL.replace('dt:float64', 'dt:float64 extra:int64'), 2)),
         ('textDocument/hover', at(game, 3, 6)),
         ('text', (game, GAME.replace('{total} and', '{missing} and'), 2)),
         ('notify', ('textDocument/didClose', {'textDocument': {'uri': model}})),
         ('textDocument/definition', at(game, 3, 6)),
     ]
-    dewy, jo = leaf_compilers(compiler, tmp_path, 'lsp_ops')
+    dewy, jo = leaf_compilers(compiler, tmp_path, leaves)
     expected = session(jo, root, steps)
     assert session(dewy, root, steps) == expected
-    assert '"result": null' not in expected[:200]
+    return expected
+
+
+def test_lsp_ops_session(compiler, tmp_path, monkeypatch):
+    assert '"semanticTokensProvider"' in compare_session(compiler, tmp_path, monkeypatch, ('lsp_ops',))
