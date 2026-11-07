@@ -12,6 +12,7 @@ DRIVER = r'''use 'main.jo'
 use 'ast.jo'
 use "node_store.dewy"
 use 'types.jo'
+use 'type_ops.dewy'
 use 'check.jo'
 use 'util.jo'
 use 'expr.jo'

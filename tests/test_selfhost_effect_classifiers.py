@@ -15,6 +15,7 @@ use "node_store.dewy"
 use "checker_state.dewy"
 use "source_types.dewy"
 use 'types.jo'
+use 'type_ops.dewy'
 use 'check.jo'
 use 'ast.jo'
 use 'util.jo'

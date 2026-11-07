@@ -12,6 +12,7 @@ DRIVER = r'''
 use 'main.jo'
 use 'effects.jo'
 use 'types.jo'
+use 'type_ops.dewy'
 use 'ast.jo'
 use "checker_types.dewy"
 use "checker_tokens.dewy"

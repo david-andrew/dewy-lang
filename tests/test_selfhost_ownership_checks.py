@@ -7,6 +7,7 @@ from tests.test_selfhost_type_properties import LAYOUT_JO
 
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_ownership_types import DRIVER as TYPES, STEMS as TYPE_STEMS
+from tests.selfhost_effect_double import type_helpers_home
 
 STEMS = ('node_store', 'source_types') + TYPE_STEMS + ('ownership_checks',)
 
@@ -151,6 +152,7 @@ def run(compiler, tmp_path, release, driver, status=0):
         directory.mkdir()
         for stem in STEMS:
             text = (ROOT / f'compiler/{stem}.{extension}').read_text()
+            text = type_helpers_home(text)
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)

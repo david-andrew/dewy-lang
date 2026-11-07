@@ -7,6 +7,7 @@ from tests.test_selfhost_type_properties import LAYOUT_JO
 
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.test_selfhost_type_properties import DRIVER as PROPERTIES
+from tests.selfhost_effect_double import type_helpers_home
 
 STEMS = ('checker_types', 'checker_tokens', 'checker_state', 'refinement_types', 'refine_predicates',
          'refine_queries', 'type_queries', 'type_intern', 'type_inference', 'type_format', 'type_layout',
@@ -112,6 +113,7 @@ def test_ownership_types_twins(compiler, tmp_path, release):  # noqa: F811
         directory.mkdir()
         for stem in STEMS:
             text = (ROOT / f'compiler/{stem}.{extension}').read_text()
+            text = type_helpers_home(text)
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)

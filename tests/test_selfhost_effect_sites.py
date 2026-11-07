@@ -12,6 +12,7 @@ use 'main.jo'
 use 'effect_control.dewy'
 use 'effects.jo'
 use 'types.jo'
+use 'type_ops.dewy'
 use 'ast.jo'
 use 'check.jo'
 use "checker_state.dewy"

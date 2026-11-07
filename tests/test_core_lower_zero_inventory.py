@@ -11,7 +11,7 @@ def test_nested_zero_inventory_order(compiler, tmp_path):
     source.write_text(''.join(f"use '{ROOT / 'compiler' / (name + '.jo')}'\n"
                               for name in ('lower', 'ir', 'types'))
                       + ''.join(f"use '{ROOT / 'compiler' / (name + '.dewy')}'\n"
-                                for name in ('lower_storage', 'lower_functions')) + '''
+                                for name in ('lower_storage', 'lower_functions', 'type_ops')) + '''
 init_types()
 loop round in [0..3):
     begin_fn("zeros", 0)

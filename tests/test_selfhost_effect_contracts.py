@@ -16,6 +16,7 @@ use 'effects.jo'
 use 'effect_lattice.dewy'
 use 'effect_types.dewy'
 use 'types.jo'
+use 'type_ops.dewy'
 use 'ast.jo'
 use 'util.jo'
 use "node_store.dewy"

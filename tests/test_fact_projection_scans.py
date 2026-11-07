@@ -7,7 +7,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 def test_projection_queries_across_branch_promotion(compiler, tmp_path):
     source = tmp_path / 'projections.jo'
     source.write_text(''.join(f"use '{ROOT / 'compiler' / name}'\n" for name in
-                              ('facts.jo', 'facts_routes.dewy', 'types.jo', 'refinement_types.dewy')) + '''
+                              ('facts.jo', 'facts_routes.dewy', 'types.jo', 'type_ops.dewy', 'refinement_types.dewy')) + '''
 # Compare every query against the ordered records, including repeated keys
 # whose first value wins and reverse lookups that exclude element records.
 check = (s: FactState):

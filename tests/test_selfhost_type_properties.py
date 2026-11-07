@@ -5,6 +5,7 @@ import pytest
 from tests.selfhost_expr_double import jo_doubles
 
 from tests.support import ROOT, compiler  # noqa: F401
+from tests.selfhost_effect_double import type_helpers_home
 
 DRIVER = r'''
 
@@ -276,6 +277,7 @@ def test_type_property_twins(compiler, tmp_path, release):  # noqa: F811
         directory.mkdir()
         for stem in stems:
             text = (ROOT / f'compiler/{stem}.{extension}').read_text()
+            text = type_helpers_home(text)
             if extension == 'jo':
                 text = text.replace(".dewy'", ".jo'")
             (directory / f'{stem}.{extension}').write_text(text)

@@ -18,6 +18,7 @@ use 'effect_types.dewy'
 use 'places.jo'
 use 'place_routes.dewy'
 use 'types.jo'
+use 'type_ops.dewy'
 use 'check.jo'
 use 'isolation.jo'
 main = ():
