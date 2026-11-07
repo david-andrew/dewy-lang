@@ -43,11 +43,12 @@ __as__=(d:Date):>string=>{
 }
 __add__=(d:Date p:Days):>Date=>_of_days(int(d._days)+int(p.count))
 __sub__=(d:Date p:Days):>Date=>_of_days(int(d._days)-int(p.count))
-# The period between two dates, which knows its anchor: `total_days` counts calendar successors, so
-# `a + (b - a) =? b`; `years`, `months` and `days` decompose it by completed anniversaries and months,
-# a 29 February start counting on 1 March (`age`'s default).
-Span:type=[total_days:int64 years:int64 months:int64 days:int64]
-__sub__=(a:Date b:Date):>Span=>{
+# `b - a`: the period between two dates, which knows its anchor. `total_days` counts calendar
+# successors, so `a + (b - a) =? b`; `years`, `months` and `days` decompose it by completed
+# anniversaries and months, a 29 February start counting on 1 March (`age`'s default). It is the
+# Period `Date - Date` gives, beside the recipes `1day` (Days) and `1month` (Months).
+_DatePeriod:type=[total_days:int64 years:int64 months:int64 days:int64]
+__sub__=(a:Date b:Date):>_DatePeriod=>{
     let total=int64<overflow='saturate'>(int(a._days)-int(b._days))
     let forward=total >=? 0
     let early=if forward b else a
@@ -62,20 +63,20 @@ __sub__=(a:Date b:Date):>Span=>{
     let anchor=if em =? 2 and ed =? 29 and am =? 2 and days_in_month(ay 2) =? 28 {date_of(ay 3 1)} else {_month_clamped(early months)}
     let days=int64<overflow='saturate'>(int(late._days)-int(anchor._days))
     let sign:int64=if forward {1} else {-1}
-    Span[total sign*years sign*int64<overflow='saturate'>(months%12) sign*days]
+    _DatePeriod[total sign*years sign*int64<overflow='saturate'>(months%12) sign*days]
 }
 _month_clamped=(d:Date count:int64):>Date=>{
     let [y m dd]=_month_add(d count)
     date_of(y m min(dd days_in_month(y m)))
 }
-__add__=(d:Date p:Span):>Date=>_of_days(int(d._days)+int(p.total_days))
-__sub__=(d:Date p:Span):>Date=>_of_days(int(d._days)-int(p.total_days))
-__eq__=(a:Span b:Span):>bool=>a.total_days =? b.total_days
-__lt__=(a:Span b:Span):>bool=>a.total_days <? b.total_days
-__as__=(p:Span):>string=>"{p.total_days}day"
-_span_divisor=(b:Days):>string?=>if b.count =? 0 "a period of no days divides nothing" else none
-$check_constant _span_divisor(b) "not a divisor"
-__truediv__=(a:Span b:Days):>rational|OutOfRange=>{
+__add__=(d:Date p:_DatePeriod):>Date=>_of_days(int(d._days)+int(p.total_days))
+__sub__=(d:Date p:_DatePeriod):>Date=>_of_days(int(d._days)-int(p.total_days))
+__eq__=(a:_DatePeriod b:_DatePeriod):>bool=>a.total_days =? b.total_days
+__lt__=(a:_DatePeriod b:_DatePeriod):>bool=>a.total_days <? b.total_days
+__as__=(p:_DatePeriod):>string=>"{p.total_days}day"
+_period_divisor=(b:Days):>string?=>if b.count =? 0 "a period of no days divides nothing" else none
+$check_constant _period_divisor(b) "not a divisor"
+__truediv__=(a:_DatePeriod b:Days):>rational|OutOfRange=>{
     if b.count =? 0 {return OutOfRange}
     rational(int(a.total_days) int(b.count))
 }

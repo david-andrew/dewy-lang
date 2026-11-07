@@ -52,6 +52,16 @@ __wall_ns = () -> int:
         syscall(228, 0, &ts)
         ts.0 * 1000000000 + ts.1
 
+# (Dewy's `strict_today`: how far off the wall clock may be, in nanoseconds; -1 when the system
+# cannot say. Linux keeps the bound its time sync maintains: 16 s and growing when unsynced)
+__wall_error_ns = () -> int:
+    when TARGET == "linux":
+        tx = fill(0, 26)                              # struct timex, read only
+        if syscall(159, data(tx)) < 0: return -1      # adjtimex
+        return tx[3] * 1000                           # maxerror, in microseconds
+    else:
+        return -1
+
 # the date and time of day of moment t (unix seconds), in the computer's time zone, or in UTC
 date = (t: f64, utc: bool = false) -> Date:
     s = int(floor(t))

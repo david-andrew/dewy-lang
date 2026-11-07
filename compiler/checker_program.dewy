@@ -110,6 +110,8 @@ check_program=(main_path:string):>void=>$unsafe {
     }
     if channels or protocols {dewy_prelude_module(intern("channel"));}
     if protocols {concurrency_protocol_module=dewy_prelude_module(intern("serve"))}
+    # (the time prelude declares `strict_today`'s error types, so it loads before they close)
+    if ts_dewy and prelude_named(["strict_today" "AmbiguousToday" "UnknownToday"]) {dewy_prelude_module(intern("strict_today"));}
     prepare_nominals()
     check_build_block()
     if not target_wasm and prelude.get(intern("__crash_install")) not=? none {

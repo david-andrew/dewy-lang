@@ -44,8 +44,7 @@ utc=(text:string):>UtcLabel|ParseError|OffGrid|OutsideCoverage|InvalidFields=>co
 
 Gregorian:type=civil.Gregorian
 Date:type=<C=Gregorian>(civil.Date<C>)
-Period:type=core.Period|civil.Span
-Span:type=civil.Span
+Period:type=core.Period|civil._DatePeriod
 
 # `1day` and `1week` count calendar days; `1month` and `1year` count months.
 const day=core.Days[1]
@@ -101,14 +100,4 @@ monotonic=():>MonoPoint=>clock.monotonic()
 # What day it is, where the scope says.
 $warn_if scope is? none "`today` has no time zone here, so it assumes the zone of the machine it runs on: say so with `$time.zone = 'system'`, or name one: `$time.zone = 'America/New_York'`"
 $check_constant zone_scope_error(scope) "not a time zone"
-today=(scope:string|none=$time.zone):>Date=>{
-    let z=match zones.scope_zone(scope) {
-        found:Zone=>found
-        # (a name known only when running: said, and then the machine's)
-        e:UnknownZone=>{
-            __write_err("warning: {e.message}, so `today` reads the machine's zone instead\n")
-            zones.system_zone()
-        }
-    }
-    civil._of_days(zones.local_days(now().nominal z))
-}
+today=(scope:string|none=$time.zone):>Date=>civil._of_days(zones.local_days(now().nominal zones.today_zone(scope 'today')))

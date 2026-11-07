@@ -1669,8 +1669,9 @@ such an `Instant` prints as a TT label.
 `1day`, `1week`, `1month` and `1year` are calendar periods, not lengths of time: they need a
 date or a zoned time. `date + 1day` is the next calendar day; `date + 1month` is `Date |
 InvalidDate`, since not every month has a 31st, and `.add(1month overflow='clamp')` or `'next'`
-says what to do. `date - date` is a period of days. `age(born on=date)` counts completed
-anniversaries; a 29 February birthday counts on 1 March in a common year (or pass
+says what to do. `date - date` is a `Period` that knows its dates: `.total_days`, and `.years`,
+`.months` and `.days` by completed anniversaries and months. `age(born on=date)` counts completed
+anniversaries, to today when `on` is left out; a 29 February birthday counts on 1 March in a common year (or pass
 `leap_day='february_28'`).
 
 A zoned add that lands in a gap or repeated hour gives `ZonedDateTime | Gap | Ambiguous`, and
@@ -1684,7 +1685,7 @@ compiling, so it needs neither.
 every module, and a different setting in an inner scope or another module is a compile error. A
 main file that sets none leaves modules and scopes free to set their own. `'system'` reads the
 name of the machine's zone when the program runs, and `'build'` pins the zone of the machine building it.
-`today` is the date there, and `zoned(s)` reads text that names no zone there; with no zone set each warns, naming what it assumes. A machine with no zone to read reads as UTC, and the program says so once on standard error. A literal cannot assume a zone. Zone rules are not the machine's: each
+`today` is the date there, and `zoned(s)` reads text that names no zone there; with no zone set each warns, naming what it assumes. `strict_today` is the careful `today`: `Date | AmbiguousToday | UnknownToday`, where `.dates` holds the dates the clock's error bound spans near midnight, and `.message` says why there is no date (a clock reading before 2017; a system that gives no error bound, which for now is any but Linux). A machine with no zone to read reads as UTC, and the program says so once on standard error. A literal cannot assume a zone. Zone rules are not the machine's: each
 Dewy version ships its own (IANA data in `lib/time/rules`), so a program means the same thing
 anywhere, and a program links them only if it reaches a zone operation. For an urgent law change
 or test data, `$time.rules = 'urgent.bin'` at the top of the main file names a pack beside it,

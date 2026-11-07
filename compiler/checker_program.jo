@@ -133,6 +133,8 @@ check_program = (main_path: str):
     # (the certified protocols are built on channels: theirs load first)
     if channels or protocols: dewy_prelude_module(intern("channel"))
     if protocols: concurrency_protocol_module = dewy_prelude_module(intern("serve"))
+    # (the time prelude declares `strict_today`'s error types, so it loads before they close)
+    if ts_dewy and prelude_named(["strict_today", "AmbiguousToday", "UnknownToday"]): dewy_prelude_module(intern("strict_today"))
     prepare_nominals()
     check_build_block()
     # (native programs report crashes as they do panics: lib/std/backtrace.jo)

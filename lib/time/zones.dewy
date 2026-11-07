@@ -606,3 +606,13 @@ format=(z:ZonedDateTime p:string):>string|ParseError=>{
     if wrong isnt? none {return ParseError[wrong]}
     pattern.render(pattern.Parts[true true true year(z) month(z) day(z) weekday(z) hour(z) minute(z) second(z) nanosecond(z) z.offset name(z.zone)] p)
 }
+
+# The scope's zone, for `today` and `strict_today` (who): a name known only when running, if
+# unknown, is said, and then the machine's zone is read instead.
+today_zone=(scope:string|none who:string):>Zone=>match scope_zone(scope) {
+    found:Zone=>found
+    e:UnknownZone=>{
+        __write_err("warning: {e.message}, so `{who}` reads the machine's zone instead\n")
+        system_zone()
+    }
+}

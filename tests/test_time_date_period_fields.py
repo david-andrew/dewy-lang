@@ -1,4 +1,4 @@
-"""Span's years, months and days against dates counted by hand, on the anniversary rule `age` uses."""
+"""The years, months and days of `Date - Date` against dates counted by hand, on the anniversary rule `age` uses."""
 import subprocess
 
 import pytest

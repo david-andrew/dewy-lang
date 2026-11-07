@@ -112,8 +112,8 @@ let dt = (now - start) / 1s as float64
   | `date + 1month` | Calendar month; overflow (the 31st) needs `overflow=` |
   | `instant + 1day`, `sleep(1day)` | Compile error; fix-it `24hour` (or a zoned add) |
 
-- **Differences.** `zoned - zoned` is an elapsed `Duration`. `date - date` is a `Span`, a `Period` that knows its anchor **(provisional)**: `.total_days` counts calendar successors, so `a + (b - a) =? b` always holds; `.years`, `.months` and `.days` decompose it by completed anniversaries and months; `(b - a) / 1day` is the count of days.
-- **Ages (provisional).** `age(born on=today)` counts completed anniversaries, never elapsed seconds over a year. A 29 February birthday counts on 1 March in common years (`leap_day='march_1'`), a convention `$time.require_profile` makes you state. `legal_age` always takes a jurisdiction.
+- **Differences.** `zoned - zoned` is an elapsed `Duration`. `date - date` is a `Period` that knows its anchor: `.total_days` counts calendar successors, so `a + (b - a) =? b` always holds; `.years`, `.months` and `.days` decompose it by completed anniversaries and months; `(b - a) / 1day` is the count of days.
+- **Ages.** `age(born on=today)`, with `on` defaulting to today, counts completed anniversaries, never elapsed seconds over a year. A 29 February birthday counts on 1 March in common years (`leap_day='march_1'`), a convention `$time.require_profile` makes you state. `legal_age` always takes a jurisdiction.
 
 ## Zones
 
@@ -155,7 +155,7 @@ let dt = (now - start) / 1s as float64
   - `reading - reading` is monotonic elapsed `Duration`. An NTP step cannot affect it.
   - `reading + Duration` is a `MonoPoint`; `reading <? point` compares monotonic samples.
   - `.nominal` is the wall `Instant`, and the only way to wall time. Persist that; a reading has no codec.
-- **`monotonic`** is the monotonic sample alone. **`today`** is the nominal `Date` in the scope's zone. What replaces v5's `today_support` is open (D15e): a query named `possible_todays`, or `strict_today`, the union `Date | AmbiguousToday | UnknownToday` that `today` gives under `$time.require_clock_accuracy`.
+- **`monotonic`** is the monotonic sample alone. **`today`** is the nominal `Date` in the scope's zone. **`strict_today`** is its careful form, `Date | AmbiguousToday | UnknownToday`, the union `today` gives under `$time.require_clock_accuracy`: `AmbiguousToday.dates` is the range of dates the clock's error bound spans, and `UnknownToday` says why there is no date (a clock reading before 2017 was never set; a system that gives no error bound cannot say).
 - **Providers are acquired at entry, only if reached.** Failure is reported once before dependent user code runs, and reads after that are total. A pure program acquires nothing. Losing wall sync changes the status; elapsed time still works.
 - **Monotonic continuity is a named assumption.** A provider that loses continuity ends the task with a report and never returns a compatible-looking reading. `$time.require_clock_domain` removes the assumption.
 - **Relative waits count actual time.** `sleep`, `within`, TTLs and `reading + Duration` use suspend-inclusive monotonic time, so an hour with the lid closed counts as an hour. `clocks.active` excludes suspension and is explicit. Where a platform cannot give suspend-inclusive time, that is an entry failure, never a silent substitution. Wall steps never move a monotonic deadline. `sleep(1day)` is a compile error.

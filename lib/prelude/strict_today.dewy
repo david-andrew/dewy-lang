@@ -1,0 +1,23 @@
+# Dewy's prelude: `strict_today`, the careful `today`. A file of its own because it declares error
+# types, which load before checking starts (checker_program), and only when a program names them.
+import p"@lib/time/civil.dewy" as civil
+import p"@lib/time/zones.dewy" as zones
+import p"@lib/time/clock.dewy" as clock
+
+# What `strict_today` gives instead of a date: the dates the clock's error spans, or why it has none.
+AmbiguousToday:type=type of error & [dates:Range<civil.Date>]
+UnknownToday:type=type of error & [message:string]
+
+# `today` that will not pretend: the clock's error may span midnight, or the clock was never set,
+# or the system does not say how far off it may be. (No constant check: its result is never folded.)
+$warn_if scope is? none "`strict_today` has no time zone here, so it assumes the zone of the machine it runs on: say so with `$time.zone = 'system'`, or name one: `$time.zone = 'America/New_York'`"
+strict_today=(scope:string|none=$time.zone):>civil.Date|AmbiguousToday|UnknownToday=>{
+    let z=zones.today_zone(scope 'strict_today')
+    let t=clock.now().nominal
+    if clock.never_set(t) {return UnknownToday["the clock reads before 2017, so it was never set"]}
+    let error=clock.wall_error() ?? return UnknownToday["this system does not say how far off its clock may be"]
+    let first=civil._of_days(zones.local_days(t-error z))
+    let last=civil._of_days(zones.local_days(t+error z))
+    if first =? last {return first}
+    AmbiguousToday[[first..last]]
+}
