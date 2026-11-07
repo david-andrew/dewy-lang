@@ -1645,7 +1645,7 @@ printl"{(meet + 1week).nominal - meet.nominal}"  # 169h
 `Instant<width=64>` and `Duration<width=64>` hold a word each, for huge columns; they cover
 September 1684 to April 2269. `convert<Instant<width=64>>(t)` narrows, giving `OutOfRange` when
 it does not fit and, for a constant, a compile error; `packed as Instant` widens. Their
-arithmetic gives the value or `OutOfRange`, since that range is reachable.
+arithmetic, with each other or with quantities like `1ns`, gives the value or `OutOfRange`, since that range is reachable.
 
 An interval is a range: `[a..b)`, `[a..b]`, `(a..b]`, `(a..b)`. A range over anything ordered
 that is not an integer (an `Instant`, a `Date`, a time, a fraction, text) is a `Range<T>` holding

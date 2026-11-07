@@ -419,6 +419,38 @@ __add__=(t:Instant_width_64 d:Duration):>Instant_width_64|OutOfRange=>compact_in
 __sub__=(t:Instant_width_64 d:Duration):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)-d)
 __add__=(t:Instant_width_64 q:int*Time):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)+q)
 __sub__=(t:Instant_width_64 q:int*Time):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)-q)
+# (off the grid in a constant is a compile error; a compact result can still leave the range, so no promise)
+_grid_only=(q:rational*Time):>string?=>{
+    let why=_grid_error(q)
+    if why is? none {""} else {why}
+}
+__add__=(q:int*Time t:Instant_width_64):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)+q)
+$check_constant _grid_only(q) "not a whole nanosecond"
+__add__=(t:Instant_width_64 q:rational*Time):>Instant_width_64|OutOfRange|OffGrid=>compact_instant((t as Instant)+(_of_rational(q) or_throw))
+$check_constant _grid_only(q) "not a whole nanosecond"
+__add__=(q:rational*Time t:Instant_width_64):>Instant_width_64|OutOfRange|OffGrid=>compact_instant((t as Instant)+(_of_rational(q) or_throw))
+$check_constant _grid_only(q) "not a whole nanosecond"
+__sub__=(t:Instant_width_64 q:rational*Time):>Instant_width_64|OutOfRange|OffGrid=>compact_instant((t as Instant)-(_of_rational(q) or_throw))
+__add__=(a:Duration_width_64 q:int*Time):>Duration_width_64|OutOfRange=>compact_duration((a as Duration)+q)
+__add__=(q:int*Time a:Duration_width_64):>Duration_width_64|OutOfRange=>compact_duration(q+(a as Duration))
+__sub__=(a:Duration_width_64 q:int*Time):>Duration_width_64|OutOfRange=>compact_duration((a as Duration)-q)
+__sub__=(q:int*Time a:Duration_width_64):>Duration_width_64|OutOfRange=>compact_duration(q-(a as Duration))
+$check_constant _grid_only(q) "not a whole nanosecond"
+__add__=(a:Duration_width_64 q:rational*Time):>Duration_width_64|OutOfRange|OffGrid=>compact_duration((a as Duration)+(_of_rational(q) or_throw))
+$check_constant _grid_only(q) "not a whole nanosecond"
+__add__=(q:rational*Time a:Duration_width_64):>Duration_width_64|OutOfRange|OffGrid=>compact_duration((a as Duration)+(_of_rational(q) or_throw))
+$check_constant _grid_only(q) "not a whole nanosecond"
+__sub__=(a:Duration_width_64 q:rational*Time):>Duration_width_64|OutOfRange|OffGrid=>compact_duration((a as Duration)-(_of_rational(q) or_throw))
+$check_constant _grid_only(q) "not a whole nanosecond"
+__sub__=(q:rational*Time a:Duration_width_64):>Duration_width_64|OutOfRange|OffGrid=>compact_duration((_of_rational(q) or_throw)-(a as Duration))
+__lt__=(a:Duration_width_64 q:int*Time):>bool=>(a as Duration)<?q
+__lt__=(q:int*Time a:Duration_width_64):>bool=>q<?(a as Duration)
+__eq__=(a:Duration_width_64 q:int*Time):>bool=>(a as Duration)=?q
+__eq__=(q:int*Time a:Duration_width_64):>bool=>(a as Duration)=?q
+__lt__=(a:Duration_width_64 q:rational*Time):>bool=>(a as Duration)<?q
+__lt__=(q:rational*Time a:Duration_width_64):>bool=>q<?(a as Duration)
+__eq__=(a:Duration_width_64 q:rational*Time):>bool=>(a as Duration)=?q
+__eq__=(q:rational*Time a:Duration_width_64):>bool=>(a as Duration)=?q
 
 # ---------------- calendar periods: recipes that need a date to mean anything ----------------
 # `1day` is a Days and `1month` a Months, so a date add that cannot fail has the plain type.
