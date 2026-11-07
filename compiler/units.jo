@@ -874,7 +874,12 @@ quantity_unit_text = (e: int) -> str:
         left = quantity_unit_text(int(nodes[e].a))
         right = quantity_unit_text(int(nodes[e].b))
         if left == "" or right == "": return ""
-        if op == .slash: return "{left}/{right}"
+        if op == .slash:
+            # (W/(m^2*K): what the slash divides by stays one group)
+            r = int(nodes[e].b)
+            group = nodes[r].kind == .tquantity and nodes[r].op != i32(int(Tok.caret))
+            if group: return "{left}/({right})"
+            return "{left}/{right}"
         return "{left}*{right}"
     ""
 
