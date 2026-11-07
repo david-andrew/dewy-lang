@@ -64,6 +64,7 @@ use 'effect_control.dewy'
 use 'effect_costs.dewy'
 use 'effect_owners.dewy'
 use 'isolation_ops.dewy'
+use 'facts_plans.dewy'
 use 'facts_numeric.dewy'
 use 'fact_words.dewy'
 use 'facts_ranges.dewy'
@@ -211,20 +212,6 @@ fact_plan_forget = (f: int):
     loop key in [0..16): fact_slice_cache.remove((f << 4) | key)
     fact_probe_runs.remove(f)
 
-# O(demand roots + direct callees + changed rows), rows bounded by the effect budget.
-# Cache hits never traverse the body again.
-fact_plan_current = (plan: FactSlice) -> bool:
-    if plan.float_context != (dir_floats_any or ff_conversions.has(fact_owner)): return false
-    # A probe may settle an exact store or index. Its old demand roots must
-    # not become the finalizer's roots after those obligations changed.
-    loop n in plan.exact_demands:
-        if not fact_exact_demand(n): return false
-    loop n in plan.index_demands:
-        if has_flag(n, NF_INBOUNDS): return false
-    loop i in [0..plan.callees.len()):
-        if fact_plan_version(plan.callees[i]) != plan.versions[i]: return false
-    true
-
 fact_loans: FactLoan[]
 
 fact_returns_cache: {int: bool} = {}
@@ -356,75 +343,9 @@ const FACT_SELF_BOUND = -31
 # row of an array of integer arrays. Built by recorded pushes; an element write drops them.
 const FACT_COMPONENT_FACTS = -64
 const FACT_ROW_ELEMENTS = 8
-fact_component_selector = (c: int, below: bool) -> int:
-    if below: return FACT_COMPONENT_FACTS - 2 * c - 1
-    FACT_COMPONENT_FACTS - 2 * c
-fact_component_fact = (selector: int) -> bool: selector <= FACT_COMPONENT_FACTS and selector > FACT_COMPONENT_FACTS - 18
-# Whether t is an array of integer rows (array<array<int64>>).
-fact_int_rows = (t: int) -> bool:
-    if tkind(t) != .array: return false
-    r = fact_type(telem(t))
-    if tkind(r) != .array: return false
-    e = fact_type(telem(r))
-    fact_scalar(e) and is_int(e) and e != T_U64
-# Whether component c of tuple type t is an integer such facts describe.
-fact_int_component = (t: int, c: int) -> bool:
-    if tkind(t) != .tuple or c >= 8 or c >= int(types[t].nargs): return false
-    ct = fact_type(targ(t, c))
-    fact_scalar(ct) and is_int(ct) and ct != T_U64
-# The tuple components with such facts, or 0 for any other type.
-fact_int_components = (t: int) -> int:
-    if tkind(t) != .tuple: return 0
-    loop c in [0..min(int(types[t].nargs), 8)):
-        if fact_int_component(t, c): return min(int(types[t].nargs), 8)
-    0
 
-# Bound element v of base (of tuple type t) by base's component facts. O(components).
-fact_component_bounds = (s: mut FactState, base: int, v: int, t: int):
-    loop c in [0..fact_int_components(t)):
-        if not fact_int_component(t, c): continue
-        hull = fact_projection_find(s, base, fact_component_selector(c, false), false)
-        below = fact_projection_find(s, base, fact_component_selector(c, true), false)
-        if hull < 0 and below < 0: continue
-        if s.projections.len() + 1 >= FACT_CAP: return
-        part = fact_project(s, v, c, false, fact_type(targ(t, c)))
-        if hull >= 0:
-            b = fact_bound(s, part); h = fact_bound(s, s.projections[hull].value)
-            fact_set_bound(s, part, FactBound(max(b.lo, h.lo), min(b.hi, h.hi), b.nz or h.nz))
-        if below >= 0: fact_difference(s, part, s.projections[below].value, -1, 0, 16)
-
-# Row v of base, an array of integer rows: its elements' hull and a value they are below, by
-# base's facts for every row's (FACT_ROW_ELEMENTS). O(1).
-fact_row_bounds = (s: mut FactState, base: int, v: int):
-    hull = fact_projection_find(s, base, fact_component_selector(FACT_ROW_ELEMENTS, false), false)
-    below = fact_projection_find(s, base, fact_component_selector(FACT_ROW_ELEMENTS, true), false)
-    if s.projections.len() + 2 >= FACT_CAP: return
-    if hull >= 0 and fact_projection_find(s, v, FACT_ELEMENT_VALUE, false) < 0:
-        fact_add_projection(s, FactProjection(v, FACT_ELEMENT_VALUE, false, s.projections[hull].value))
-    if below >= 0 and fact_projection_find(s, v, FACT_ELEMENT_BELOW, false) < 0:
-        fact_add_projection(s, FactProjection(v, FACT_ELEMENT_BELOW, false, s.projections[below].value))
 fact_grown_roots: {int: bool} = {}
 fact_name_vals = 0
-
-# A runtime-child walk, never into nested function bodies. Closed calls
-# keep comptime's existing semantics; an open operand must NEVER reach ct_run.
-fact_open = (e: int) -> bool:
-    todo = [e]
-    loop todo.len() > 0:
-        n = todo.pop()
-        if n == 0: continue
-        if nodes[n].kind == .ident:
-            kind = nodes[n].aux as SK
-            if kind == .local or kind == .global:
-                if binding_const_init(kind, int(nodes[n].sym), nodes[n].pos) == 0: return true
-        mask = isolation_children(nodes[n].kind)
-        if mask < 0: return true
-        if mask & 1 != 0: todo.push(int(nodes[n].a))
-        if mask & 2 != 0: todo.push(int(nodes[n].b))
-        if mask & 4 != 0: todo.push(int(nodes[n].c))
-        if mask & 16 != 0:
-            loop i in [0..nkids(n)): todo.push(kid(n, i))
-    false
 
 # Length facts and callee summaries can cross lexical scopes. When any scope
 # opts out, their shared domain uses only the signed storage limit; an assumed
@@ -442,73 +363,6 @@ fact_scalar = (t0: int) -> bool:
 
 fact_comparison = (op: Tok) -> bool:
     op == .eq or op == .ne or op == .lt or op == .le or op == .gt or op == .ge
-
-# The erased subset has no calls (including overloaded operators), projections,
-# raw access or implicit helpers. Nonlinear arithmetic is pure but unsupported.
-fact_pure = (e: int, budget: mut int) -> int:
-    if e == 0: return 0
-    budget -= 1
-    if budget < 0: return e
-    k = nodes[e].kind
-    if k == .int_lit or k == .bool_lit: return 0
-    if k == .str_lit and nodes[e].aux == 0: return 0
-    if k == .ident:
-        if nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global)): return 0
-    if k == .index and nodes[e].b != 0 and (tkind(ntype(int(nodes[e].a))) == .array or tkind(ntype(int(nodes[e].a))) == .fixed):
-        a = fact_pure(int(nodes[e].a), budget)
-        if a != 0: return a
-        return fact_pure(int(nodes[e].b), budget)
-    if k == .field and (nodes[e].aux >= 0 and tkind(ntype(int(nodes[e].a))) == .struct_ or nodes[e].aux == -2 and tkind(ntype(int(nodes[e].a))) == .tuple):
-        return fact_pure(int(nodes[e].a), budget)
-    if k == .call and fact_nd_reads_only(e) and (fact_nd_call(e) == 4 or fact_nd_call(e) == 5 or fact_nd_call(e) == 6):
-        loop i in [0..nkids(e)):
-            arg = kid(e, i)
-            bad = fact_pure(arg, budget)
-            if bad != 0: return bad
-        return 0
-    if k == .intrinsic and nodes[e].aux == i32(int(IN.len)):
-        return fact_pure(kid(e, 0), budget)
-    if k == .not_ or k == .unary or k == .conv:
-        if not fact_scalar(ntype(e)) or not fact_scalar(ntype(int(nodes[e].a))): return e
-        if k == .conv and nodes[e].aux != i32(int(CV.int_)) and nodes[e].aux != i32(int(CV.none_)): return e
-        return fact_pure(int(nodes[e].a), budget)
-    if k == .and_ or k == .or_ or k == .binary and nodes[e].aux == 0:
-        if not fact_scalar(ntype(int(nodes[e].a))) or not fact_scalar(ntype(int(nodes[e].b))): return e
-        a = fact_pure(int(nodes[e].a), budget)
-        if a != 0: return a
-        return fact_pure(int(nodes[e].b), budget)
-    e
-
-fact_queue = (n: int, cond: int, message: int):
-    if message != 0 and (nodes[message].kind != .str_lit or nodes[message].aux != 0):
-        fatal(nodes[message].pos, "cannot prove assertion: unsupported symbolic message; erased operands must be pure scalar fact terms")
-    # Keep settled narrowing tests, but never erase an effectful tested value.
-    if nodes[cond].kind == .istype and nodes[cond].aux == -3:
-        value = int(nodes[cond].a)
-        loop nodes[value].kind == .narrow: value = int(nodes[value].a)
-        if nodes[value].kind == .ident:
-            set_list(n, [])
-            return
-    if proof_active and cx >= 0 and proof_decls.has(int(fns[int(ctxs[cx].inst)].decl)):
-        proof_term(cond)
-        fact_requests.push(FactRequest(n, int(ctxs[cx].inst)))
-        return
-    if not fact_open(cond):
-        # Even `effect() or true` must pass through comptime's effect checks.
-        budget = 128
-        if fact_pure(cond, budget) == 0: prove_assertion(cond, message)
-        else if ct_values[ct_run(cond)].i == 0: assertion_refuted(cond, message)
-        set_list(n, [])
-        return
-    budget = 128
-    bad = fact_pure(cond, budget)
-    if budget < 0: fact_unknown(cond, FactBound(reason = .budget, witness = bad))
-    if bad != 0:
-        if bad != cond: wit_note(nodes[bad].pos, "this operand is outside the fact language")
-        wit_help("")
-        fatal(nodes[cond].pos, "cannot prove assertion: unsupported symbolic operand; erased operands must be pure scalar fact terms")
-    owner = if cx >= 0: int(ctxs[cx].inst) else: 0
-    fact_requests.push(FactRequest(n, owner))
 
 # Policies share the same numeric domain and unsigned endpoint encoding.
 fact_type = (t0: int) -> int:

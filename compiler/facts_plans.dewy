@@ -1,0 +1,201 @@
+$runtime_checks
+from p"ast.jo" import nkids
+from p"ast.jo" import (NF_INBOUNDS has_flag kid nodes set_list)
+from p"check.jo" import (assertion_refuted binding_const_init ctxs cx fns prove_assertion)
+from p"checker_state.dewy" import (SK)
+from p"comptime.jo" import (ct_run ct_values)
+from p"directives.jo" import (dir_floats_any)
+from p"expr.jo" import (CV IN ntype)
+from p"facts.jo" import (FACT_CAP FACT_COMPONENT_FACTS FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_ROW_ELEMENTS FactProjection FactSlice FactState fact_add_projection fact_bound fact_difference fact_exact_demand fact_owner fact_plan_version fact_project fact_projection_find fact_requests fact_scalar fact_set_bound fact_type fact_unknown)
+from p"floats.jo" import (ff_conversions)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"nd_contracts.jo" import (fact_nd_call fact_nd_reads_only)
+from p"proofs.jo" import (proof_active proof_decls proof_term)
+from p"refinement_types.dewy" import (FactBound FactRequest)
+from p"types.jo" import (T_U64 is_int targ telem tkind types)
+from p"util.jo" import (fatal)
+from p"witness.jo" import (wit_help wit_note)
+
+PlanWord:type=int64<overflow='wrap'>
+# O(demand roots + direct callees + changed rows), rows bounded by the effect budget.
+# Cache hits never traverse the body again.
+fact_plan_current=(plan:FactSlice):>bool=>{
+    if plan.float_context not=? (dir_floats_any or ff_conversions.has(fact_owner)) {return false}
+    # A probe may settle an exact store or index. Its old demand roots must
+    # not become the finalizer's roots after those obligations changed.
+    loop n in plan.exact_demands {
+        if not fact_exact_demand(n) {return false}
+    }
+    loop n in plan.index_demands {
+        if has_flag(n NF_INBOUNDS) {return false}
+    }
+    loop i in [0..plan.callees.length) {
+        if fact_plan_version(plan.callees[i]) not=? plan.versions[i] {return false}
+    }
+    true
+}
+fact_component_selector=(c:PlanWord below:bool):>PlanWord=>{
+    if below {return FACT_COMPONENT_FACTS - 2 * c - 1}
+    FACT_COMPONENT_FACTS - 2 * c
+}
+fact_component_fact=(selector:PlanWord):>bool=>{
+    selector <=? FACT_COMPONENT_FACTS and selector >? FACT_COMPONENT_FACTS - 18
+}
+# Whether t is an array of integer rows (array<array<int64>>).
+fact_int_rows=(t:PlanWord):>bool=>{
+    if tkind(t) not=? 'array' {return false}
+    let r=fact_type(telem(t))
+    if tkind(r) not=? 'array' {return false}
+    let e=fact_type(telem(r))
+    fact_scalar(e) and is_int(e) and e not=? T_U64
+}
+# Whether component c of tuple type t is an integer such facts describe.
+fact_int_component=(t:PlanWord c:PlanWord):>bool=>$unsafe {
+    if tkind(t) not=? 'tuple' or c >=? 8 or c >=? PlanWord(types.ptr[t].nargs) {return false}
+    let ct=fact_type(targ(t c))
+    fact_scalar(ct) and is_int(ct) and ct not=? T_U64
+}
+# The tuple components with such facts, or 0 for any other type.
+fact_int_components=(t:PlanWord):>PlanWord=>$unsafe {
+    if tkind(t) not=? 'tuple' {return 0}
+    loop c in [0..min(PlanWord(types.ptr[t].nargs) 8)) {
+        if fact_int_component(t c) {return min(PlanWord(types.ptr[t].nargs) 8)}
+    }
+    0
+}
+# Bound element v of base (of tuple type t) by base's component facts. O(components).
+fact_component_bounds=(@s:FactState base:PlanWord v:PlanWord t:PlanWord):>void=>{
+    loop c in [0..fact_int_components(t)) {
+        if not fact_int_component(t c) {continue}
+        let hull=fact_projection_find(s base fact_component_selector(c false) false)
+        let below=fact_projection_find(s base fact_component_selector(c true) false)
+        if hull <? 0 and below <? 0 {continue}
+        if s.projections.length + 1 >=? FACT_CAP {return}
+        let part=fact_project(@s v c false fact_type(targ(t c)))
+        if hull >=? 0 {
+            let b=fact_bound(s part)
+            let h=fact_bound(s s.projections[hull].value)
+            fact_set_bound(@s part FactBound(max(b.lo h.lo) min(b.hi h.hi) b.nz or h.nz))
+        }
+        if below >=? 0 {fact_difference(@s part s.projections[below].value (-1) 0 16)}
+    }
+}
+# Row v of base, an array of integer rows: its elements' hull and a value they are below, by
+# base's facts for every row's (FACT_ROW_ELEMENTS). O(1).
+fact_row_bounds=(@s:FactState base:PlanWord v:PlanWord):>void=>{
+    let hull=fact_projection_find(s base fact_component_selector(FACT_ROW_ELEMENTS false) false)
+    let below=fact_projection_find(s base fact_component_selector(FACT_ROW_ELEMENTS true) false)
+    if s.projections.length + 2 >=? FACT_CAP {return}
+    if hull >=? 0 and fact_projection_find(s v FACT_ELEMENT_VALUE false) <? 0 {
+        fact_add_projection(@s FactProjection(v FACT_ELEMENT_VALUE false s.projections[hull].value))
+    }
+    if below >=? 0 and fact_projection_find(s v FACT_ELEMENT_BELOW false) <? 0 {
+        fact_add_projection(@s FactProjection(v FACT_ELEMENT_BELOW false s.projections[below].value))
+    }
+}
+# A runtime-child walk, never into nested function bodies. Closed calls
+# keep comptime's existing semantics; an open operand must NEVER reach ct_run.
+fact_open=(e:PlanWord):>bool=>$unsafe {
+    let todo=[e]
+    loop todo.length >? 0 {
+        let n=todo.pop()
+        if n =? 0 {continue}
+        if nodes.ptr[n].kind =? 'ident' {
+            # (a symbol kind's ordinal: local 1, global 2)
+            if nodes.ptr[n].aux =? int32(1) or nodes.ptr[n].aux =? int32(2) {
+                let kind:SK=if nodes.ptr[n].aux =? int32(1) {'local'} else {'global'}
+                if binding_const_init(kind PlanWord(nodes.ptr[n].sym) nodes.ptr[n].pos) =? 0 {return true}
+            }
+        }
+        let mask=isolation_children(nodes.ptr[n].kind)
+        if mask <? 0 {return true}
+        if mask & 1 not=? 0 {todo.push(PlanWord(nodes.ptr[n].a))}
+        if mask & 2 not=? 0 {todo.push(PlanWord(nodes.ptr[n].b))}
+        if mask & 4 not=? 0 {todo.push(PlanWord(nodes.ptr[n].c))}
+        if mask & 16 not=? 0 {
+            loop i in [0..nkids(n)) {todo.push(kid(n i))}
+        }
+    }
+    false
+}
+# The erased subset has no calls (including overloaded operators), projections,
+# raw access or implicit helpers. Nonlinear arithmetic is pure but unsupported.
+fact_pure=(e:PlanWord @budget:PlanWord):>PlanWord=>$unsafe {
+    if e =? 0 {return 0}
+    budget -= 1
+    if budget <? 0 {return e}
+    let k=nodes.ptr[e].kind
+    if k =? 'int_lit' or k =? 'bool_lit' {return 0}
+    if k =? 'str_lit' and nodes.ptr[e].aux =? 0 {return 0}
+    if k =? 'ident' {
+        if nodes.ptr[e].aux =? int32(1) or nodes.ptr[e].aux =? int32(2) {return 0}
+    }
+    if k =? 'index' and nodes.ptr[e].b not=? 0 and (tkind(ntype(PlanWord(nodes.ptr[e].a))) =? 'array' or tkind(ntype(PlanWord(nodes.ptr[e].a))) =? 'fixed') {
+        let a=fact_pure(PlanWord(nodes.ptr[e].a) @budget)
+        if a not=? 0 {return a}
+        return fact_pure(PlanWord(nodes.ptr[e].b) @budget)
+    }
+    if k =? 'field' and (nodes.ptr[e].aux >=? 0 and tkind(ntype(PlanWord(nodes.ptr[e].a))) =? 'struct_' or nodes.ptr[e].aux =? -2 and tkind(ntype(PlanWord(nodes.ptr[e].a))) =? 'tuple') {
+        return fact_pure(PlanWord(nodes.ptr[e].a) @budget)
+    }
+    if k =? 'call' and fact_nd_reads_only(e) and (fact_nd_call(e) =? 4 or fact_nd_call(e) =? 5 or fact_nd_call(e) =? 6) {
+        loop i in [0..nkids(e)) {
+            let arg=kid(e i)
+            let bad=fact_pure(arg @budget)
+            if bad not=? 0 {return bad}
+        }
+        return 0
+    }
+    if k =? 'intrinsic' and nodes.ptr[e].aux =? int32(int64(IN.len)) {
+        return fact_pure(kid(e 0) @budget)
+    }
+    if k =? 'not_' or k =? 'unary' or k =? 'conv' {
+        if not fact_scalar(ntype(e)) or not fact_scalar(ntype(PlanWord(nodes.ptr[e].a))) {return e}
+        if k =? 'conv' and nodes.ptr[e].aux not=? int32(int64(CV.int_)) and nodes.ptr[e].aux not=? int32(int64(CV.none_)) {return e}
+        return fact_pure(PlanWord(nodes.ptr[e].a) @budget)
+    }
+    if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[e].aux =? 0 {
+        if not fact_scalar(ntype(PlanWord(nodes.ptr[e].a))) or not fact_scalar(ntype(PlanWord(nodes.ptr[e].b))) {return e}
+        let a=fact_pure(PlanWord(nodes.ptr[e].a) @budget)
+        if a not=? 0 {return a}
+        return fact_pure(PlanWord(nodes.ptr[e].b) @budget)
+    }
+    e
+}
+fact_queue=(n:PlanWord cond:PlanWord message:PlanWord):>void=>$unsafe {
+    if message not=? 0 and (nodes.ptr[message].kind not=? 'str_lit' or nodes.ptr[message].aux not=? 0) {
+        fatal(nodes.ptr[message].pos "cannot prove assertion: unsupported symbolic message; erased operands must be pure scalar fact terms")
+    }
+    # Keep settled narrowing tests, but never erase an effectful tested value.
+    if nodes.ptr[cond].kind =? 'istype' and nodes.ptr[cond].aux =? -3 {
+        let value=PlanWord(nodes.ptr[cond].a)
+        loop nodes.ptr[value].kind =? 'narrow' {value=PlanWord(nodes.ptr[value].a)}
+        if nodes.ptr[value].kind =? 'ident' {
+            set_list(n [])
+            return
+        }
+    }
+    if proof_active and cx >=? 0 and proof_decls.has(PlanWord(fns.ptr[PlanWord(ctxs[cx].inst)].decl)) {
+        proof_term(cond)
+        fact_requests.push(FactRequest(n PlanWord(ctxs[cx].inst)))
+        return
+    }
+    if not fact_open(cond) {
+        # Even `effect() or true` must pass through comptime's effect checks.
+        let budget:PlanWord=128
+        if fact_pure(cond @budget) =? 0 {prove_assertion(cond message)}
+        else if ct_values[ct_run(cond)].i =? 0 {assertion_refuted(cond message)}
+        set_list(n [])
+        return
+    }
+    let budget:PlanWord=128
+    let bad=fact_pure(cond @budget)
+    if budget <? 0 {fact_unknown(cond FactBound(reason='budget' witness=bad))}
+    if bad not=? 0 {
+        if bad not=? cond {wit_note(nodes.ptr[bad].pos "this operand is outside the fact language")}
+        wit_help("")
+        fatal(nodes.ptr[cond].pos "cannot prove assertion: unsupported symbolic operand; erased operands must be pure scalar fact terms")
+    }
+    let owner=if cx >=? 0 {PlanWord(ctxs[cx].inst)} else {0}
+    fact_requests.push(FactRequest(n owner))
+}
