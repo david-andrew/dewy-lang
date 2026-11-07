@@ -1,4 +1,5 @@
 use 'secret_checks.dewy'
+use 'checks_type_hooks.dewy'
 use 'checks_loop_copies.dewy'
 use 'checks_static.dewy'
 use 'checks_program.dewy'
@@ -912,33 +913,6 @@ resolve_type_name = (tn: int) -> CheckerTypeName:
     fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type")
     CheckerTypeName()
 
-resolve_type_ide = (tn: int):
-    if ide_on and nodes[tn].pos > 0 and files[pos_file(nodes[tn].pos)].is_dewy:
-        ide_ref(nodes[tn].pos, intern(if nodes[tn].kind == .tarray: "array" else: "dict"), IK_TYPE, 0, 0, 0)
-resolve_type_soa = (et: int, pos: int) -> int:
-    if (tkind(et) != .struct_ and tkind(et) != .param) or is_soa(et): fatal(pos, "soa T[] needs a struct type T, not {dt(et)}")
-    if soa_decl == 0: soa_decl = mk(.struct_, 0)
-    soa_inst(et)
-resolve_type_map_decl = (tn: int) -> int:
-    s = prelude.get(intern("Map")) ?? 0
-    if s == 0: fatal(nodes[tn].pos, "Map type is not available")
-    int(syms[s].ref)
-resolve_type_contract = (tn: int, base: int, ps: int[], names: int[], mm: int) -> int:
-    mk_callable_contract(base, effect_contract(tn, ps, names, mm))
-resolve_type_error = (kind: int, tn: int, count: int):
-    pos = nodes[tn].pos
-    if kind == 2: fatal(pos, "duplicate record field '{name_of(int(nodes[tn].name))}'")
-    if kind == 3: fatal(pos, "inline record fields need value types")
-    if kind == 4: fatal(pos, "parentheses group several values only as a binding's type, `let p:(int64 int64) = ...`, or a function's result, `:>(int64 int64)`")
-    if kind == 5: fatal(pos, "Effect row is not a value type")
-    if kind == 6: fatal(pos, "type '{name_of(int(nodes[tn].name))}' takes no type arguments")
-    if kind == 7: fatal(pos, "type '{name_of(int(nodes[tn].name))}' expects {count} type argument(s), got {nkids(tn)}")
-    if kind == 8: fatal(pos, "`rational` is the exact type and `rational<int64>` its one fixed-width form")
-    fatal(pos, "invalid type")
-resolve_type_pack_error = (tn: int, i: int, t: int, first: int):
-    if i < 0: fatal(nodes[tn].pos, "parentheses group several values only as a function's result, `:>(int64 int64)`, or a binding's type, `let p:(int64 int64) = ...`")
-    if dewy_at(nodes[tn].pos): err_notes.push((-1, "help: for values of different types, give a record, `:>[first:{dt(first)} second:{dt(t)}]`, and take it apart with `let [first second] = f(...)`"))
-    fatal(nodes[kid(tn, i)].pos, "the values a function gives have one type for now: this is {dt(t)}, and the first is {dt(first)}")
 
 readonly_global = (g: int) -> bool:
     d = int(globals[g].decl)
@@ -1010,28 +984,6 @@ type_param_defaults = (d: int, targs: int[]) -> int[]:
 resolve_alias = (d: int, targs: int[], use_pos: int) -> int: ca_resolve_alias(d, targs, use_pos)
 alias_resume = (d: int):
     if refine_deferred.len() > 0: refine_resume(int(nodes[d].mod))
-alias_error = (kind: int, d: int, use_pos: int, count: int):
-    nm = name_of(int(nodes[d].name))
-    if kind == 1: fatal(use_pos, "type '{nm}' expects {nkids2(d)} type argument(s), got {count}")
-    if kind == 2:
-        if dewy_at(nodes[d].pos): fatal(nodes[d].pos, "type '{nm}' is defined in terms of itself: a type contains itself only through a record's field, as `Node:type = [value:int next:Node?]` does; make '{nm}' a record holding the rest (`{nm}:type = [entries:...]`)")
-        fatal(nodes[d].pos, "type '{nm}' is defined in terms of itself")
-    if kind == 3: fatal(nodes[d].pos, "overflow policy requires a string")
-    fatal(nodes[d].pos, "unknown overflow policy")
-alias_atomic_order = () -> int: str_set_type(["relaxed", "acquire", "release", "acq_rel", "seq_cst"])
-alias_enter = (d: int, targs: int[]) -> CheckerAliasScope:
-    saved = cx
-    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "typedef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
-    cx = ctxs.len() - 1
-    mark = scope_mark()
-    push_type_params(d, targs)
-    CheckerAliasScope(saved, mark)
-alias_leave = (scope: CheckerAliasScope):
-    scope_reset(scope.mark)
-    ctxs.pop()
-    cx = scope.context
-alias_note = (d: int, t: int):
-    if dewy_at(nodes[d].pos) and not pos_in_lib(nodes[d].pos): union_alias_note(t, int(nodes[d].name))
 
 subst = (t0: int, targs: int[]) -> int: ts_subst(t0, targs)
 
@@ -1050,54 +1002,11 @@ check_struct_fields = (si: int):
     if structs[si].resolved: return
     cf_check_struct_fields(si)
 
-field_enter = (d: int, si: int) -> CheckerFieldScope:
-    if refine_deferred.len() > 0 and d != 0: refine_resume(int(nodes[d].mod))
-    targs: int[]
-    loop i in [0..int(structs[si].ntargs)): targs.push(struct_targ(si, i))
-    saved = cx
-    if nodes[d].kind == .struct_:
-        loop i in [0..nkids(d)): ref_holder_candidate(kid(d, i))
-    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "fielddef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
-    cx = ctxs.len() - 1
-    mark = scope_mark()
-    push_type_params(d, targs)
-    CheckerFieldScope(saved, mark)
 
-field_leave = (scope: CheckerFieldScope):
-    scope_reset(scope.mark)
-    ctxs.pop()
-    cx = scope.context
 
-field_default = (f: int, si: int, before: int) -> int:
-    d = int(structs[si].decl)
-    cl = clone(int(nodes[f].b))
-    # (a default may name the fields before it)
-    inner = scope_mark()
-    if files[pos_file(nodes[d].pos)].is_dewy:
-        loop j in [0..before):
-            earlier = fields[int(structs[si].fields) + j]
-            if earlier.type != 0: new_local(int(earlier.name), int(earlier.type), nodes[f].pos)
-    t = check_expr(cl, 0)
-    scope_reset(inner)
-    if has_flag(cl, NF_LITERAL):
-        t = lit_default(cl)
-    zonk(t)
 
-field_exit_name = () -> int: intern("exit_code")
-field_exit_type = (t: int, f: int, st: int, d: int) -> int:
-    if files[pos_file(nodes[d].pos)].is_dewy and exception_type != 0 and nominal_descends(st, exception_type): return exit_code_field_type(t, f, st)
-    t
 
-field_error = (kind: int, n: int, a: int, b: int):
-    if kind == 1: fatal(nodes[n].pos, "an intersection of records needs record types, found {dt(a)}")
-    if kind == 2: fatal(nodes[n].pos, "an intersection with a minted type is not supported yet (`type of` makes one)")
-    if kind == 3: fatal(nodes[n].pos, "field needs a type")
-    if kind == 4: fatal(nodes[n].pos, "duplicate field '{name_of(int(nodes[n].name))}'")
-    if kind == 5: fatal(nodes[n].pos, "enum value must be an integer literal")
-    if kind == 6: fatal(nodes[n].pos, "duplicate variant '{name_of(int(nodes[n].name))}'")
 
-field_intersection_error = (pos: int, name: int, a: int, b: int):
-    fatal(pos, "this intersection has no values: field '{name_of(name)}' would be {dt(a)} & {dt(b)}")
 
 module_of_type = (t0: int) -> int:
     t = prune(t0)
@@ -1135,53 +1044,6 @@ refine_resume = (m: int):
 # result, say)
 written_refinement = (n: int) -> bool: cs_written_refinement(n)
 
-# fn_sig (a declaration's signature, cached in its DeclInfo) is checker_signature.dewy's.
-signature_resume = (decl: int):
-    if refine_deferred.len() > 0 and not refine_active and refine_deferred.has(int(nodes[decl].mod)) and written_refinement(decl): refine_resume(int(nodes[decl].mod))
-signature_enter = (decl: int) -> CheckerSignatureScope:
-    saved = cx
-    parent = if nodes[decl].kind == .lambda: cx else: -1
-    floor = if parent >= 0: ctxs[parent].floor else: i32(check_scopes.names.len())
-    ctxs.push(FnCtx(0, i32(parent), i32(T_VOID), false, 0, nodes[decl].mod, floor))
-    cx = ctxs.len() - 1
-    mark = scope_mark()
-    loop i in [0..nkids(decl)): ref_holder_candidate(kid(decl, i))
-    ntp = nkids2(decl)
-    loop i in [0..ntp):
-        nm = int(nodes[kid2(decl, i)].name)
-        pt = mk_param(i)
-        if nodes[kid2(decl, i)].aux == 1: pt = effect_type(effect_intern([], [], [pt]))
-        push_scope_sym(nm, new_sym(nm, .type_, pt, 0))
-    CheckerSignatureScope(saved, mark)
-signature_leave = (scope: CheckerSignatureScope):
-    scope_reset(scope.mark)
-    ctxs.pop()
-    cx = scope.context
-signature_finish = (decl: int, sig: mut FnSig, shaped: bool, mask: int):
-    if shaped: sig.ret = i32(nd_signature(decl, sig.params, int(sig.ret)))
-    if result_active: result_signature(decl, sig.params, int(sig.ret))
-    if proof_active and proof_decls.has(decl):
-        if sig.ret != 0 and sig.ret != T_VOID: fatal(nodes[decl].pos, "$proof cannot return a value")
-        sig.ret = i32(T_VOID)
-        loop p in kids(decl):
-            if has_flag(p, NF_MUT) or nodes[p].b != 0: fatal(nodes[p].pos, "$proof forbids defaults and place parameters")
-        predicate = proof_decls[decl]
-        atoms: RefAtom[]
-        if predicate != 0: ref_atoms(predicate, 0, atoms)
-        loop atom in atoms: proof_atom_type(atom, sig.params, nodes[decl].pos)
-        proof_predicates[decl] = ref_intern(atoms)
-    if refine_active:
-        ref_validate_signature(sig.params, int(sig.ret), mask, nodes[decl].pos)
-        if has_flag(decl, NF_EXTERN):
-            loop t in sig.params + [int(sig.ret)]:
-                if ref_storage_contract(t): fatal(nodes[decl].pos, "extern refinement contracts require a checked implementation")
-    if effects_active and has_flag(decl, NF_EXTERN):
-        seen: int[]
-        if effect_qualified_type(int(sig.ret), seen): fatal(nodes[decl].pos, "extern callable effect contracts require a checked implementation")
-    if nodes[decl].sval != 0: sig.contract = i32(effect_decl_contract(decl, sig.params))
-    if nodes[decl].c != 0 and nodes[decl].kind == .fn_:
-        wi_read_decl(decl)
-        cc_read_decl(decl)
 
 # (operators get names: ([]) is op_index, shown as such in backtraces: lib/std/backtrace.jo)
 OP_NAMES = ["[]", "index", "[]=", "set", "+", "add", "-", "sub", "*", "mul", "/", "div", "%", "mod", "==", "eq", "<", "lt", "^", "pow"]
@@ -1213,22 +1075,8 @@ new_inst = (kind: int, m: int, base: str) -> int:
 
 has_value_return = (n: int) -> bool: cr_has_value_return(n)
 
-result_pending = (name: int) -> int[]:
-    pending = [name]
-    loop c in ctxs:
-        f = int(c.inst)
-        if f > 0 and f < fns.len() and fns[f].state == 1 and fns[f].ret == 0 and fns[f].decl != 0:
-            pending.push(int(nodes[int(fns[f].decl)].name))
-    pending
 
-result_candidate = (leaf: int, need_literal: bool) -> CheckerResultCandidate:
-    e = clone(leaf)
-    t = check_expr(e, 0)
-    if has_flag(e, NF_LITERAL): return CheckerResultCandidate((if need_literal: lit_default(e) else: 0), true)
-    if t != 0 and tkind(t) != .var and tkind(t) != .void_ and t != T_NEVER: return CheckerResultCandidate(prune(t), false)
-    CheckerResultCandidate()
 
-result_lookup = (name: int) -> int: lookup(name)
 
 value_leaves = (n: int, out: mut int[]): cr_value_leaves(n, out)
 
@@ -1262,83 +1110,6 @@ load_body = (decl: int, f: int):
 
 get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int: ci_get_fn_inst(decl, targs, use_pos)
 
-instance_preflight = (decl: int, use_pos: int):
-    if has_flag(decl, NF_EXTERN): ffi_extern_use(decl, use_pos)
-    if target_wasm and nodes[decl].c != 0: no_web_check(decl, use_pos)
-instance_create = (decl: int, use_pos: int) -> int:
-    f = new_inst(FK_NORMAL, int(nodes[decl].mod), sanitize(name_of(int(nodes[decl].name))))
-    fns[f].decl = i32(decl)
-    fns[f].atomic_api = int(nodes[decl].mod) == concurrency_thread_module
-    fns[f].task_api = int(nodes[decl].mod) == concurrency_task_module and name_of(int(nodes[decl].name)) in ["__task_spawn", "within", "race"] or int(nodes[decl].mod) == concurrency_protocol_module and name_of(int(nodes[decl].name)) in ["serve", "pipeline"]
-    fns[f].use_pos = use_pos
-    if cx >= 0: fns[f].made_in = ctxs[cx].inst
-    f
-instance_bad_arg = (decl: int, z: int, use_pos: int):
-    fname = name_of(int(nodes[decl].name))
-    pz = prune(z)
-    # (an empty [] or {} argument: nothing says what it holds)
-    if starts_with(fname, "__fmt") or starts_with(fname, "__dewy_fmt"): fatal(use_pos, "cannot tell what kind of value this is yet (an empty `[]` says nothing of what it will hold): write its type where it is made, {jd(use_pos, "`xs: int[] = []`", "`let xs:array<int64> = []` or `let d:dict<string int64> = []`")}, or put something in it first")
-    if types[pz].kind == .array: fatal(use_pos, "cannot tell what the array given to '{fname}' holds (an empty `[]` says nothing): write the type where the result goes, {jd(use_pos, "`scores: int[] = {fname}(...)`", "`let scores:array<int64> = {fname}(...)`")}, or pass a variable of a known type")
-    if is_map_type(pz): fatal(use_pos, "cannot tell what the map given to '{fname}' holds (an empty {jd(use_pos, "`\{}`", "`[]`")} says nothing): write the type where the result goes, {jd(use_pos, "`m: \{str: int} = {fname}(...)`", "`let m:dict<string int64> = {fname}(...)`")}, or pass a variable of a known type")
-    fatal(use_pos, "cannot infer the type of an argument to '{fname}'; write the type where the result goes ({jd(use_pos, "`x: T = {fname}(...)`", "`let x:T = {fname}(...)`")}) or give the argument a type")
-instance_depth_error = (decl: int, use_pos: int):
-    fatal(use_pos, "the generic function '{name_of(int(nodes[decl].name))}' expands without end: generic functions call each other with ever new types (more than 500 deep)")
-instance_load = (decl: int, f: int, generic: bool):
-    if generic: source_force_body(decl)
-    load_body(decl, f)
-instance_validate = (f: int, sig: FnSig, use_pos: int):
-    if refine_active and sig.generic: ref_validate_signature(fns[f].ptypes, int(fns[f].ret), int(sig.mutmask), use_pos)
-    if sig.generic and pl_on: pl_inst_decls.push(int(fns[f].decl))
-instance_attributes = (decl: int, f: int, zt: int[], use_pos: int):
-    if zt.len() > 0: concurrency_queue_instance(decl, zt[0], use_pos)
-    # attributes
-    if nodes[decl].c != 0:
-        ab = int(nodes[decl].c)
-        loop i in [0..nkids(ab)):
-            at = kid(ab, i)
-            an = name_of(int(nodes[at].name))
-            if an == "cabi": fns[f].cabi = true
-            else if an == "parallel": fns[f].parallel_api = true
-            else if an == "deterministic": fns[f].deterministic = true
-            else if an == "noinline": fns[f].noinline = true
-            else if an == "warn_if" or an == "check_constant" or an == "error_if": pass
-            else if an == "plain":
-                # (its type arguments are copied as bytes, e.g. to the GPU)
-                loop z in zt:
-                    p = plain_problem(z)
-                    if p != "":
-                        held = ""
-                        if p != type_str(z): held = " (it holds a {p})"
-                        fatal(use_pos, "'{name_of(int(nodes[decl].name))}' takes plain data (numbers, bools, vectors and structs of them), not {dt(z)}{held}")
-            else if an == "lib":
-                la = int(nodes[at].a)
-                # (or a constant naming it: const SQLITE = "libsqlite3.so.0", then @lib(SQLITE))
-                if la != 0 and nodes[la].kind == .ident:
-                    cs = lookup(int(nodes[la].name))
-                    if cs != 0:
-                        ci = binding_const_init(syms[cs].kind, int(syms[cs].ref), nodes[la].pos)
-                        if ci != 0 and nodes[ci].kind == .str_lit: la = ci
-                if la == 0 or nodes[la].kind != .str_lit: fatal(nodes[at].pos, "@lib needs a library name, e.g. @lib(\"libGL.so.1\") or a constant holding one")
-                fns[f].clib = name_of(int(nodes[la].sval))
-            else if an == "symbol":
-                if nodes[at].a == 0 or nodes[int(nodes[at].a)].kind != .str_lit: fatal(nodes[at].pos, "@symbol needs the C name, e.g. @symbol(\"glClear\")")
-                fns[f].csym = name_of(int(nodes[int(nodes[at].a)].sval))
-            else if an == "variadic":
-                if not has_flag(decl, NF_EXTERN) or nodes[at].a == 0 or nodes[int(nodes[at].a)].kind != .int_lit or nodes[int(nodes[at].a)].ival < 0 or nodes[int(nodes[at].a)].ival > fns[f].ptypes.len():
-                    fatal(nodes[at].pos, "@variadic needs the number of the C function's fixed parameters, e.g. @variadic(1) for printf (an extern's)")
-                fns[f].cvariadic = i32(nodes[int(nodes[at].a)].ival + 1)
-            else if an == "export":
-                fns[f].cabi = true
-                if nodes[at].a != 0: fns[f].export_name = name_of(int(nodes[int(nodes[at].a)].sval))
-                else: fns[f].export_name = name_of(int(nodes[decl].name))
-            else if an != "no_web":
-                why = ""
-                if an == "inline" or an == "always_inline" or an == "forceinline": why = " (small functions are put inline automatically; @noinline keeps one out)"
-                fatal(nodes[at].pos, "unknown attribute @{an}{why}: there are @noinline, @parallel, @deterministic, @plain, @cabi, @export, @no_web(\"why\"), @warn_if(condition, \"message\"), @check_constant(validator(param), \"message\"), and for externs @lib, @symbol, @variadic")
-    if has_flag(decl, NF_EXTERN) or fns[f].cabi:
-        ffi_check_signature(f, decl)
-        loop t in fns[f].ptypes: check_c_boxes(t, nodes[decl].pos)
-        if fns[f].ret != 0: check_c_boxes(int(fns[f].ret), nodes[decl].pos)
 
 # Recursive value fields use private managed boxes, so their containing layout
 # cannot be passed to C as an ordinary struct (including through a typed pointer).

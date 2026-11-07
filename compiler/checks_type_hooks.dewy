@@ -1,0 +1,326 @@
+$runtime_checks
+from p"refine.jo" import (ref_holder_candidate)
+from p"check.jo" import jd
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_EXTERN NF_LITERAL NF_MUT clone has_flag kid kid2 kids mk nkids nkids2 nodes)
+from p"check.jo" import (FK_INIT FK_NORMAL binding_const_init check_c_boxes check_scopes ctxs cx dewy_at fns load_body new_inst new_local new_sym no_web_check prelude push_scope_sym push_type_params refine_deferred refine_resume sanitize scope_mark scope_reset syms target_wasm written_refinement)
+from p"checker_alias.dewy" import (CheckerAliasScope)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checker_fields.dewy" import (CheckerFieldScope)
+from p"checker_results.dewy" import (CheckerResultCandidate)
+from p"checker_signature.dewy" import (CheckerSignatureScope)
+from p"checker_state.dewy" import (FnCtx FnSig)
+from p"checks_main.dewy" import (exit_code_field_type)
+from p"concurrency.jo" import (concurrency_protocol_module concurrency_task_module concurrency_thread_module)
+from p"concurrency_tasks.dewy" import (concurrency_queue_instance)
+from p"constant_checks.dewy" import (cc_read_decl)
+from p"effect_contracts.dewy" import (effect_contract effect_decl_contract effect_qualified_type effect_type mk_callable_contract)
+from p"effect_lattice.dewy" import (effect_intern)
+from p"effects.jo" import (effects_active)
+from p"errors.jo" import (exception_type nominal_descends)
+from p"expr.jo" import (is_map_type lit_default)
+from p"ffi_checks.dewy" import (ffi_check_signature ffi_extern_use)
+from p"frontend.jo" import (source_force_body)
+from p"ide.jo" import (IK_TYPE ide_on ide_ref)
+from p"nd_contracts.jo" import (nd_signature)
+from p"proofs.jo" import (proof_active proof_atom_type proof_decls proof_predicates result_active result_signature)
+from p"refine.jo" import (ref_atoms ref_intern ref_storage_contract ref_validate_signature refine_active str_set_type)
+from p"refinement_types.dewy" import (RefAtom)
+from p"types.jo" import (T_NEVER T_VOID dt fields is_soa mk_param plain_problem prune soa_decl soa_inst struct_targ structs tkind type_str types union_alias_note zonk)
+from p"util.jo" import (err_notes fatal files intern name_of pl_inst_decls pl_on pos_file pos_in_lib)
+from p"warn_if_ops.dewy" import (wi_read_decl)
+
+TypeHookWord:type=int64<overflow='wrap'>
+resolve_type_ide=(tn:int64):>void=>$unsafe {
+    if ide_on and nodes.ptr[tn].pos >? 0 and files[pos_file(nodes.ptr[tn].pos)].is_dewy {
+        ide_ref(nodes.ptr[tn].pos intern(if nodes.ptr[tn].kind =? 'tarray' {"array"} else {"dict"}) IK_TYPE 0 0 0)
+    }
+}
+resolve_type_soa=(et:int64 pos:int64):>int64=>{
+    if (tkind(et) not=? 'struct_' and tkind(et) not=? 'param') or is_soa(et) {fatal(pos "soa T[] needs a struct type T, not {dt(et)}")}
+    if soa_decl =? 0 {soa_decl=mk('struct_' 0)}
+    soa_inst(et)
+}
+resolve_type_map_decl=(tn:int64):>int64=>$unsafe {
+    let s=prelude.get(intern("Map")) ?? 0
+    if s =? 0 {fatal(nodes.ptr[tn].pos "Map type is not available")}
+    TypeHookWord(syms.ptr[s].ref)
+}
+resolve_type_contract=(tn:int64 base:int64 ps:array<int64> names:array<int64> mm:int64):>int64=>{
+    mk_callable_contract(base effect_contract(tn ps names mm))
+}
+resolve_type_error=(kind:int64 tn:int64 count:int64):>void=>$unsafe {
+    let pos=nodes.ptr[tn].pos
+    if kind =? 2 {fatal(pos "duplicate record field '{name_of(TypeHookWord(nodes.ptr[tn].name))}'")}
+    if kind =? 3 {fatal(pos "inline record fields need value types")}
+    if kind =? 4 {fatal(pos "parentheses group several values only as a binding's type, `let p:(int64 int64) = ...`, or a function's result, `:>(int64 int64)`")}
+    if kind =? 5 {fatal(pos "Effect row is not a value type")}
+    if kind =? 6 {fatal(pos "type '{name_of(TypeHookWord(nodes.ptr[tn].name))}' takes no type arguments")}
+    if kind =? 7 {fatal(pos "type '{name_of(TypeHookWord(nodes.ptr[tn].name))}' expects {count} type argument(s), got {nkids(tn)}")}
+    if kind =? 8 {fatal(pos "`rational` is the exact type and `rational<int64>` its one fixed-width form")}
+    fatal(pos "invalid type")
+}
+resolve_type_pack_error=(tn:int64 i:int64 t:int64 first:int64):>void=>$unsafe {
+    if i <? 0 {fatal(nodes.ptr[tn].pos "parentheses group several values only as a function's result, `:>(int64 int64)`, or a binding's type, `let p:(int64 int64) = ...`")}
+    if dewy_at(nodes.ptr[tn].pos) {err_notes.push([(-1) "help: for values of different types, give a record, `:>[first:{dt(first)} second:{dt(t)}]`, and take it apart with `let [first second] = f(...)`"])}
+    fatal(nodes.ptr[kid(tn i)].pos "the values a function gives have one type for now: this is {dt(t)}, and the first is {dt(first)}")
+}
+alias_error=(kind:int64 d:int64 use_pos:int64 count:int64):>void=>$unsafe {
+    let nm=name_of(TypeHookWord(nodes.ptr[d].name))
+    if kind =? 1 {fatal(use_pos "type '{nm}' expects {nkids2(d)} type argument(s), got {count}")}
+    if kind =? 2 {
+        if dewy_at(nodes.ptr[d].pos) {fatal(nodes.ptr[d].pos "type '{nm}' is defined in terms of itself: a type contains itself only through a record's field, as `Node:type = [value:int next:Node?]` does; make '{nm}' a record holding the rest (`{nm}:type = [entries:...]`)")}
+        fatal(nodes.ptr[d].pos "type '{nm}' is defined in terms of itself")
+    }
+    if kind =? 3 {fatal(nodes.ptr[d].pos "overflow policy requires a string")}
+    fatal(nodes.ptr[d].pos "unknown overflow policy")
+}
+alias_atomic_order=():>int64=>{
+    str_set_type(["relaxed" "acquire" "release" "acq_rel" "seq_cst"])
+}
+alias_enter=(d:int64 targs:array<int64>):>CheckerAliasScope=>$unsafe {
+    let saved=cx
+    if nodes.ptr[d].kind =? 'struct_' {
+        loop i in [0..nkids(d)) {ref_holder_candidate(kid(d i))}
+    }
+    ctxs.push(FnCtx(int32(new_inst(FK_INIT TypeHookWord(nodes.ptr[d].mod) "typedef")) (-1) int32(T_VOID) false 0 nodes.ptr[d].mod int32(check_scopes.names.length)))
+    cx=ctxs.length - 1
+    let mark=scope_mark()
+    push_type_params(d targs)
+    CheckerAliasScope(saved mark)
+}
+alias_leave=(scope:CheckerAliasScope):>void=>{
+    scope_reset(scope.mark)
+    ctxs.pop();
+    cx=scope.context
+}
+alias_note=(d:int64 t:int64):>void=>$unsafe {
+    if dewy_at(nodes.ptr[d].pos) and not pos_in_lib(nodes.ptr[d].pos) {union_alias_note(t TypeHookWord(nodes.ptr[d].name))}
+}
+field_enter=(d:int64 si:int64):>CheckerFieldScope=>$unsafe {
+    if refine_deferred.length >? 0 and d not=? 0 {refine_resume(TypeHookWord(nodes.ptr[d].mod))}
+    let targs:array<int64>=[]
+    loop i in [0..TypeHookWord(structs.ptr[si].ntargs)) {targs.push(struct_targ(si i))}
+    let saved=cx
+    if nodes.ptr[d].kind =? 'struct_' {
+        loop i in [0..nkids(d)) {ref_holder_candidate(kid(d i))}
+    }
+    ctxs.push(FnCtx(int32(new_inst(FK_INIT TypeHookWord(nodes.ptr[d].mod) "fielddef")) (-1) int32(T_VOID) false 0 nodes.ptr[d].mod int32(check_scopes.names.length)))
+    cx=ctxs.length - 1
+    let mark=scope_mark()
+    push_type_params(d targs)
+    CheckerFieldScope(saved mark)
+}
+field_leave=(scope:CheckerFieldScope):>void=>{
+    scope_reset(scope.mark)
+    ctxs.pop();
+    cx=scope.context
+}
+field_default=(f:int64 si:int64 before:int64):>int64=>$unsafe {
+    let d=TypeHookWord(structs.ptr[si].decl)
+    let cl=clone(TypeHookWord(nodes.ptr[f].b))
+    # (a default may name the fields before it)
+    let inner=scope_mark()
+    if files[pos_file(nodes.ptr[d].pos)].is_dewy {
+        loop j in [0..before) {
+            let earlier=fields.ptr[TypeHookWord(structs.ptr[si].fields) + j]
+            if earlier.type not=? 0 {new_local(int64(earlier.name) int64(earlier.type) nodes.ptr[f].pos);}
+        }
+    }
+    let t=check_expr(cl 0)
+    scope_reset(inner)
+    if has_flag(cl NF_LITERAL) {
+        t=lit_default(cl)
+    }
+    zonk(t)
+}
+field_exit_name=():>int64=>{
+    intern("exit_code")
+}
+field_exit_type=(t:int64 f:int64 st:int64 d:int64):>int64=>$unsafe {
+    if files[pos_file(nodes.ptr[d].pos)].is_dewy and exception_type not=? 0 and nominal_descends(st exception_type) {return exit_code_field_type(t f st)}
+    t
+}
+field_error=(kind:int64 n:int64 a:int64 b:int64):>void=>$unsafe {
+    if kind =? 1 {fatal(nodes.ptr[n].pos "an intersection of records needs record types, found {dt(a)}")}
+    if kind =? 2 {fatal(nodes.ptr[n].pos "an intersection with a minted type is not supported yet (`type of` makes one)")}
+    if kind =? 3 {fatal(nodes.ptr[n].pos "field needs a type")}
+    if kind =? 4 {fatal(nodes.ptr[n].pos "duplicate field '{name_of(TypeHookWord(nodes.ptr[n].name))}'")}
+    if kind =? 5 {fatal(nodes.ptr[n].pos "enum value must be an integer literal")}
+    if kind =? 6 {fatal(nodes.ptr[n].pos "duplicate variant '{name_of(TypeHookWord(nodes.ptr[n].name))}'")}
+}
+field_intersection_error=(pos:int64 name:int64 a:int64 b:int64):>void=>{
+    fatal(pos "this intersection has no values: field '{name_of(name)}' would be {dt(a)} & {dt(b)}")
+}
+# fn_sig (a declaration's signature, cached in its DeclInfo) is checker_signature.dewy's.
+signature_resume=(decl:int64):>void=>$unsafe {
+    if refine_deferred.length >? 0 and not refine_active and refine_deferred.has(TypeHookWord(nodes.ptr[decl].mod)) and written_refinement(decl) {refine_resume(TypeHookWord(nodes.ptr[decl].mod))}
+}
+signature_enter=(decl:int64):>CheckerSignatureScope=>$unsafe {
+    let saved=cx
+    let parent=if nodes.ptr[decl].kind =? 'lambda' {cx} else {-1}
+    let floor=if parent >=? 0 {ctxs[parent].floor} else {int32(check_scopes.names.length)}
+    ctxs.push(FnCtx(0 int32(parent) int32(T_VOID) false 0 nodes.ptr[decl].mod floor))
+    cx=ctxs.length - 1
+    let mark=scope_mark()
+    loop i in [0..nkids(decl)) {ref_holder_candidate(kid(decl i))}
+    let ntp=nkids2(decl)
+    loop i in [0..ntp) {
+        let nm=TypeHookWord(nodes.ptr[kid2(decl i)].name)
+        let pt=mk_param(i)
+        if nodes.ptr[kid2(decl i)].aux =? 1 {pt=effect_type(effect_intern([] [] [pt]))}
+        push_scope_sym(nm new_sym(nm 'type_' pt 0))
+    }
+    CheckerSignatureScope(saved mark)
+}
+signature_leave=(scope:CheckerSignatureScope):>void=>{
+    scope_reset(scope.mark)
+    ctxs.pop();
+    cx=scope.context
+}
+signature_finish=(decl:int64 @sig:FnSig shaped:bool mask:int64):>void=>$unsafe {
+    if shaped {sig.ret=int32(nd_signature(decl @sig.params int64(sig.ret)))}
+    if result_active {result_signature(decl sig.params int64(sig.ret))}
+    if proof_active and proof_decls.has(decl) {
+        if sig.ret not=? 0 and sig.ret not=? T_VOID {fatal(nodes.ptr[decl].pos "$proof cannot return a value")}
+        sig.ret=int32(T_VOID)
+        loop p in kids(decl) {
+            if has_flag(p NF_MUT) or nodes.ptr[p].b not=? 0 {fatal(nodes.ptr[p].pos "$proof forbids defaults and place parameters")}
+        }
+        let predicate=proof_decls[decl]
+        let atoms:array<RefAtom>=[]
+        if predicate not=? 0 {ref_atoms(predicate 0 @atoms)}
+        loop atom in atoms {proof_atom_type(atom sig.params nodes.ptr[decl].pos);}
+        proof_predicates[decl]=ref_intern(atoms)
+    }
+    if refine_active {
+        ref_validate_signature(sig.params int64(sig.ret) mask nodes.ptr[decl].pos)
+        if has_flag(decl NF_EXTERN) {
+            loop t in [sig.params... int64(sig.ret)] {
+                if ref_storage_contract(t) {fatal(nodes.ptr[decl].pos "extern refinement contracts require a checked implementation")}
+            }
+        }
+    }
+    if effects_active and has_flag(decl NF_EXTERN) {
+        let seen:array<int64>=[]
+        if effect_qualified_type(int64(sig.ret) @seen) {fatal(nodes.ptr[decl].pos "extern callable effect contracts require a checked implementation")}
+    }
+    if nodes.ptr[decl].sval not=? 0 {sig.contract=int32(effect_decl_contract(decl sig.params))}
+    if nodes.ptr[decl].c not=? 0 and nodes.ptr[decl].kind =? 'fn_' {
+        wi_read_decl(decl)
+        cc_read_decl(decl)
+    }
+}
+result_pending=(name:int64):>array<int64>=>$unsafe {
+    let pending=[name]
+    loop c in ctxs {
+        let f=int64(c.inst)
+        if f >? 0 and f <? fns.length and fns.ptr[f].state =? 1 and fns.ptr[f].ret =? 0 and fns.ptr[f].decl not=? 0 {
+            pending.push(TypeHookWord(nodes.ptr[TypeHookWord(fns.ptr[f].decl)].name))
+        }
+    }
+    pending
+}
+result_candidate=(leaf:int64 need_literal:bool):>CheckerResultCandidate=>{
+    let e=clone(leaf)
+    let t=check_expr(e 0)
+    if has_flag(e NF_LITERAL) {return CheckerResultCandidate((if need_literal {lit_default(e)} else {0}) true)}
+    if t not=? 0 and tkind(t) not=? 'var' and tkind(t) not=? 'void_' and t not=? T_NEVER {return CheckerResultCandidate(prune(t) false)}
+    CheckerResultCandidate()
+}
+result_lookup=(name:int64):>int64=>{
+    lookup(name)
+}
+instance_preflight=(decl:int64 use_pos:int64):>void=>$unsafe {
+    if has_flag(decl NF_EXTERN) {ffi_extern_use(decl use_pos)}
+    if target_wasm and nodes.ptr[decl].c not=? 0 {no_web_check(decl use_pos)}
+}
+instance_create=(decl:int64 use_pos:int64):>int64=>$unsafe {
+    let f=new_inst(FK_NORMAL TypeHookWord(nodes.ptr[decl].mod) sanitize(name_of(TypeHookWord(nodes.ptr[decl].name))))
+    fns.ptr[f].decl=int32(decl)
+    fns.ptr[f].atomic_api=TypeHookWord(nodes.ptr[decl].mod) =? concurrency_thread_module
+    fns.ptr[f].task_api=TypeHookWord(nodes.ptr[decl].mod) =? concurrency_task_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["__task_spawn" "within" "race"] or TypeHookWord(nodes.ptr[decl].mod) =? concurrency_protocol_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["serve" "pipeline"]
+    fns.ptr[f].use_pos=use_pos
+    if cx >=? 0 {fns.ptr[f].made_in=ctxs[cx].inst}
+    f
+}
+instance_bad_arg=(decl:int64 z:int64 use_pos:int64):>void=>$unsafe {
+    let fname=name_of(TypeHookWord(nodes.ptr[decl].name))
+    let pz=prune(z)
+    # (an empty [] or {} argument: nothing says what it holds)
+    if starts_with(fname "__fmt") or starts_with(fname "__dewy_fmt") {fatal(use_pos "cannot tell what kind of value this is yet (an empty `[]` says nothing of what it will hold): write its type where it is made, {jd(use_pos "`xs: int[] = []`" "`let xs:array<int64> = []` or `let d:dict<string int64> = []`")}, or put something in it first")}
+    if types.ptr[pz].kind =? 'array' {fatal(use_pos "cannot tell what the array given to '{fname}' holds (an empty `[]` says nothing): write the type where the result goes, {jd(use_pos "`scores: int[] = {fname}(...)`" "`let scores:array<int64> = {fname}(...)`")}, or pass a variable of a known type")}
+    if is_map_type(pz) {fatal(use_pos "cannot tell what the map given to '{fname}' holds (an empty {jd(use_pos "`\{}`" "`[]`")} says nothing): write the type where the result goes, {jd(use_pos "`m: \{str: int} = {fname}(...)`" "`let m:dict<string int64> = {fname}(...)`")}, or pass a variable of a known type")}
+    fatal(use_pos "cannot infer the type of an argument to '{fname}'; write the type where the result goes ({jd(use_pos "`x: T = {fname}(...)`" "`let x:T = {fname}(...)`")}) or give the argument a type")
+}
+instance_depth_error=(decl:int64 use_pos:int64):>void=>$unsafe {
+    fatal(use_pos "the generic function '{name_of(TypeHookWord(nodes.ptr[decl].name))}' expands without end: generic functions call each other with ever new types (more than 500 deep)")
+}
+instance_load=(decl:int64 f:int64 generic:bool):>void=>{
+    if generic {source_force_body(decl)}
+    load_body(decl f)
+}
+instance_validate=(f:int64 sig:FnSig use_pos:int64):>void=>$unsafe {
+    if refine_active and sig.generic {ref_validate_signature(fns.ptr[f].ptypes TypeHookWord(fns.ptr[f].ret) int64(sig.mutmask) use_pos)}
+    if sig.generic and pl_on {pl_inst_decls.push(TypeHookWord(fns.ptr[f].decl))}
+}
+instance_attributes=(decl:int64 f:int64 zt:array<int64> use_pos:int64):>void=>$unsafe {
+    if zt.length >? 0 {concurrency_queue_instance(decl zt[0] use_pos)}
+    # attributes
+    if nodes.ptr[decl].c not=? 0 {
+        let ab=TypeHookWord(nodes.ptr[decl].c)
+        loop i in [0..nkids(ab)) {
+            let at=kid(ab i)
+            let an=name_of(TypeHookWord(nodes.ptr[at].name))
+            if an =? "cabi" {fns.ptr[f].cabi=true} else if an =? "parallel" {fns.ptr[f].parallel_api=true} else if an =? "deterministic" {fns.ptr[f].deterministic=true} else if an =? "noinline" {fns.ptr[f].noinline=true}
+            else if an =? "warn_if" or an =? "check_constant" or an =? "error_if" {} else if an =? "plain" {
+                # (its type arguments are copied as bytes, e.g. to the GPU)
+                loop z in zt {
+                    let p=plain_problem(z)
+                    if p not=? "" {
+                        let held=""
+                        if p not=? type_str(z) {held=" (it holds a {p})"}
+                        fatal(use_pos "'{name_of(TypeHookWord(nodes.ptr[decl].name))}' takes plain data (numbers, bools, vectors and structs of them), not {dt(z)}{held}")
+                    }
+                }
+            }
+            else if an =? "lib" {
+                let la=TypeHookWord(nodes.ptr[at].a)
+                # (or a constant naming it: const SQLITE = "libsqlite3.so.0", then @lib(SQLITE))
+                if la not=? 0 and nodes.ptr[la].kind =? 'ident' {
+                    let cs=lookup(TypeHookWord(nodes.ptr[la].name))
+                    if cs not=? 0 {
+                        let ci=binding_const_init(syms.ptr[cs].kind TypeHookWord(syms.ptr[cs].ref) nodes.ptr[la].pos)
+                        if ci not=? 0 and nodes.ptr[ci].kind =? 'str_lit' {la=ci}
+                    }
+                }
+                if la =? 0 or nodes.ptr[la].kind not=? 'str_lit' {fatal(nodes.ptr[at].pos "@lib needs a library name, e.g. @lib(\"libGL.so.1\") or a constant holding one")}
+                fns.ptr[f].clib=name_of(TypeHookWord(nodes.ptr[la].sval))
+            }
+            else if an =? "symbol" {
+                if nodes.ptr[at].a =? 0 or nodes.ptr[TypeHookWord(nodes.ptr[at].a)].kind not=? 'str_lit' {fatal(nodes.ptr[at].pos "@symbol needs the C name, e.g. @symbol(\"glClear\")")}
+                fns.ptr[f].csym=name_of(TypeHookWord(nodes.ptr[TypeHookWord(nodes.ptr[at].a)].sval))
+            }
+            else if an =? "variadic" {
+                if not has_flag(decl NF_EXTERN) or nodes.ptr[at].a =? 0 or nodes.ptr[TypeHookWord(nodes.ptr[at].a)].kind not=? 'int_lit' or nodes.ptr[TypeHookWord(nodes.ptr[at].a)].ival <? 0 or nodes.ptr[TypeHookWord(nodes.ptr[at].a)].ival >? fns.ptr[f].ptypes.length {
+                    fatal(nodes.ptr[at].pos "@variadic needs the number of the C function's fixed parameters, e.g. @variadic(1) for printf (an extern's)")
+                }
+                fns.ptr[f].cvariadic=int32(nodes.ptr[TypeHookWord(nodes.ptr[at].a)].ival + 1)
+            }
+            else if an =? "export" {
+                fns.ptr[f].cabi=true
+                if nodes.ptr[at].a not=? 0 {fns.ptr[f].export_name=name_of(TypeHookWord(nodes.ptr[TypeHookWord(nodes.ptr[at].a)].sval))} else {fns.ptr[f].export_name=name_of(TypeHookWord(nodes.ptr[decl].name))}
+            }
+            else if an not=? "no_web" {
+                let why=""
+                if an =? "inline" or an =? "always_inline" or an =? "forceinline" {why=" (small functions are put inline automatically; @noinline keeps one out)"}
+                fatal(nodes.ptr[at].pos "unknown attribute @{an}{why}: there are @noinline, @parallel, @deterministic, @plain, @cabi, @export, @no_web(\"why\"), @warn_if(condition, \"message\"), @check_constant(validator(param), \"message\"), and for externs @lib, @symbol, @variadic")
+            }
+        }
+    }
+    if has_flag(decl NF_EXTERN) or fns.ptr[f].cabi {
+        ffi_check_signature(f decl)
+        loop t in fns.ptr[f].ptypes {check_c_boxes(t nodes.ptr[decl].pos)}
+        if fns.ptr[f].ret not=? 0 {check_c_boxes(TypeHookWord(fns.ptr[f].ret) nodes.ptr[decl].pos)}
+    }
+}
