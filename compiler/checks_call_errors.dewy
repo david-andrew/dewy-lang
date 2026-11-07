@@ -1,0 +1,376 @@
+$runtime_checks
+from p"expr.jo" import (call_collect_fns)
+from p"expr.jo" import (IN)
+from p"checks_text.dewy" import (byte_find)
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_CHECKED add_flag kid kid2 kids mk nkids nkids2 nodes set_list)
+from p"check.jo" import (dewy_at fns jd syms)
+from p"checker_call_cost.dewy" import (Cand)
+from p"checker_call_queries.dewy" import (collect_fns)
+from p"checker_call_resolve.dewy" import (resolve_fn_call)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checks_builders.dewy" import (bc_block bc_bool bc_call bc_ident bc_let bc_stmt)
+from p"checks_hints.dewy" import (habit_name map_habit_name)
+from p"error_ops.dewy" import (exception_member forward_call forwards_exceptions value_members)
+from p"expr.jo" import (CallFailure comprehension_binding call_text caller_dewy decl_in_prelude dewy_operator_fn_text intrinsics is_map_type map_args_text ntype overloads_text refuted_literal_contract shown_fn_name sig_dt uncalled_hint union_dispatch unnamed variant_hint variant_hint_for)
+from p"ide.jo" import (IK_PARAM ide_dewy_alt ide_fn_ref ide_named_args)
+from p"node_store.dewy" import (Node)
+from p"refine.jo" import (str_set_of)
+from p"types.jo" import (T_NEVER T_NONE dt has_var is_int is_numeric is_union prune telem tkind types union_members)
+from p"util.jo" import (fatal files intern name_of pos_file pos_in_lib)
+
+CallErrorWord:type=int64<overflow='wrap'>
+# Why candidate d rejects argument fi (a, wanting ptx): built only when the
+# call fails or two candidates' reasons at one argument are compared.
+rfc_arg_message=(d:CallErrorWord fi:CallErrorWord a:CallErrorWord ptx:CallErrorWord cd:Cand):>string=>$unsafe {
+    let last_err=""
+    let refuted=refuted_literal_contract(a ptx name_of(CallErrorWord(nodes.ptr[kid(d fi)].name)))
+    if refuted not=? "" {last_err=refuted}
+    else if nodes.ptr[a].type not=? 0 {
+        last_err="argument '{name_of(CallErrorWord(nodes.ptr[kid(d fi)].name))}' expects {sig_dt(d ptx)}, found {dt(ntype(a))}{variant_hint(a ptx)}"
+        # (`sum_all(sizes)`, sizes an `array<int64>` where an `array<int>` is wanted)
+        # (`counts[d]`-style calls with d from `t.in_zone(z).date`: the failure it may hold, for the program to answer)
+        if dewy_at(nodes.ptr[a].pos) and is_union(ntype(a)) and not is_union(ptx) and tkind(ptx) not=? 'opt' {
+            loop m in union_members(ntype(a)) {
+                if exception_member(prune(m)) {
+                    last_err="{last_err} (it may hold a failure such as {dt(m)}: handle that first, with `?? fallback` or `or_throw`)"
+                    break
+                }
+            }
+        }
+        if comprehension_binding(a) and tkind(ntype(a)) =? 'array' and tkind(ptx) =? 'array' and is_int(telem(prune(ntype(a)))) and is_int(telem(prune(ptx))) and byte_find(last_err "(integer literals") <? 0 {last_err="{last_err} (an array's elements are not converted one by one: give it its type where it is made, `let {name_of(CallErrorWord(nodes.ptr[a].name))}:{dt(ptx)} = ...`)"}
+    }
+    else if nodes.ptr[a].kind =? 'dotname' and tkind(ptx) =? 'enum_' {
+        let vn=CallErrorWord(nodes.ptr[a].name)
+        last_err="{dt(ptx)} has no variant '{name_of(vn)}'{variant_hint_for(ptx name_of(vn))}"
+    }
+    else {last_err="argument '{name_of(CallErrorWord(nodes.ptr[kid(d fi)].name))}' has the wrong type (expects {sig_dt(d ptx)})"}
+    last_err="{last_err}{uncalled_hint(a ptx)}"
+    let fnm=name_of(CallErrorWord(nodes.ptr[int64(cd.decl)].name))
+    # (Python's `map(f, xs)`: the array comes first)
+    if fi =? 0 and nodes.ptr[a].kind =? 'lambda' and (fnm =? "map" or fnm =? "filter") {last_err="the array comes first: `xs.{fnm}(f)`, or `{fnm}(xs f)`"}
+    # (text("Score:", score, pos): Scratch's join, or Python's print, pieces in a row)
+    if (fnm =? "text" or fnm =? "text_centered") and fi =? 1 and nodes.ptr[cd.args[0]].kind =? 'str_lit' and nodes.ptr[a].type not=? 0 and tkind(ntype(a)) not=? 'vec' {
+        last_err="text takes one piece of text, then where it goes: put the value inside it, `\"Score: \{score}\"`"
+    }
+    # (play("meow.wav"): a sound's file, not loaded)
+    if (fnm =? "play" or fnm =? "play_music") and nodes.ptr[a].kind =? 'str_lit' {
+        last_err="load the sound first, at the top of the file (`meow = load_wav(embed(\"meow.wav\"))`, or load_ogg), then `play(meow)`"
+    }
+    # (load_texture("cat.png"): a file's name where its bytes go)
+    if starts_with(fnm "load_") and nodes.ptr[a].type not=? 0 and tkind(ntype(a)) =? 'str_' and tkind(ptx) =? 'array' {
+        let fln="name.png"
+        if nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux =? 0 {fln=name_of(CallErrorWord(nodes.ptr[a].sval))}
+        last_err="{fnm} takes the file's contents: `{fnm}(embed(\"{fln}\"))` builds the file into the program (read_bytes(path) reads one at run time)"
+    }
+    # (xs.map((x, i): ...): JavaScript's map, which passes the position too)
+    if (fnm =? "map" or fnm =? "filter" or fnm =? "each" or fnm =? "any" or fnm =? "all") and nodes.ptr[a].kind =? 'lambda' and nkids(a) =? 2 {
+        last_err="{fnm} gives the function each element alone; with its position too: `[loop i in 0.. and x in xs: ...]`, or `loop i in 0.. and x in xs:`"
+    }
+    # (xs.reduce((a, b): a + b, 0): JavaScript's order)
+    if fnm =? "reduce" and cd.args.length =? 3 and cd.args[1] not=? 0 and nodes.ptr[unnamed(cd.args[1])].kind =? 'lambda' {
+        last_err="reduce takes the start value first, then the function: `xs.reduce(0, (a, b): a + b)` (or `sum(xs)`)"
+    }
+    # (overlaps(apple, cat_picture): a picture or a thing where a box goes)
+    if nodes.ptr[a].type not=? 0 and tkind(ptx) =? 'struct_' and dt(ptx) =? "Rect" and not pos_in_lib(nodes.ptr[a].pos) {
+        let at=prune(ntype(a))
+        if dt(at) =? "Texture" {last_err="{last_err} (a picture has no place of its own: the box where it is drawn is `Rect(pos.x, pos.y, f64(pic.width), f64(pic.height))`)"} else if tkind(at) =? 'struct_' {
+            let sn=dt(at)
+            let art="a"
+            if (sn as array<uint8>).length >? 0 and byte_find("AEIOU" sn.byte_slice(0 1)) >=? 0 {art="an"}
+            last_err="{last_err} ({art} {sn} is not a box: `Rect(x, y, width, height)` makes the box around it)"
+        }
+    }
+    # (xs.sort((a, b): ...): a comparison, as JavaScript sorts)
+    if nodes.ptr[a].kind =? 'lambda' and nkids(a) =? 2 and name_of(CallErrorWord(nodes.ptr[int64(cd.decl)].name)) =? "sort" {last_err="{last_err} (`sort_with(xs, (a, b): a.hp > b.hp)` sorts by a comparison, `sort_by(xs, (x): x.hp)` by a key)"}
+    if tkind(ptx) =? 'cfn' and (nodes.ptr[a].kind =? 'lambda' or (nodes.ptr[a].type not=? 0 and tkind(ntype(a)) =? 'fn_')) {
+        last_err="argument '{name_of(CallErrorWord(nodes.ptr[kid(d fi)].name))}' is called from C: give it a top-level function marked @cabi (a function value made in the program cannot be)"
+    }
+    last_err
+}
+self_call_error=(n:CallErrorWord name:CallErrorWord ufcs:bool args:array<int64>):>void=>$unsafe {
+    let nm=name_of(name)
+    let hint=""
+    if ufcs and args.length >? 0 and nodes.ptr[unnamed(args[0])].kind =? 'ident' {
+        hint=": `{name_of(CallErrorWord(nodes.ptr[unnamed(args[0])].name))}.{nm}` names this function, which hides any method `{nm}` it was meant to reach; rename the function"
+    }
+    fatal(nodes.ptr[n].pos "'{nm}' calls itself as its whole body, so it repeats without end{hint}")
+}
+call_rejection_text=(@failure:CallFailure):>void=>{
+    let texts:array<string>=[]
+    loop r in failure.rejected {
+        if r.d <? 0 {
+            let mutable="mut parameters"
+            if caller_dewy() {mutable="`@` parameters"}
+            texts.push("argument {r.fi + 1} must have type {sig_dt((-r.d) r.ptx)} ({mutable} need an exact match)")
+        }
+        else {texts.push(rfc_arg_message(r.d r.fi r.a r.ptx r.cd))}
+        if texts.length >? 1 and texts[texts.length - 1] not=? texts[texts.length - 2] {failure.last_err_tie=true}
+    }
+    failure.last_err=texts[texts.length - 1]
+    failure.last_err_map=0
+}
+# `x.hash()` of a union or optional is its member's: `=?` compares the member, and equal values
+# hash alike. (none, which has no member, hashes as false does. A dictionary's keyed hash keeps
+# the tag: its keys all have this type.)
+union_hash=(n:CallErrorWord a:CallErrorWord t:CallErrorWord expected:CallErrorWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let held="__uh{n}"
+    add_flag(a NF_CHECKED)
+    let members=value_members(t)
+    let chain:CallErrorWord=0
+    let j=members.length - 1
+    loop j >=? 0 {
+        let member=members[j]
+        let argument=if member =? T_NONE {bc_bool(false pos)} else {bc_ident(held pos)}
+        let body=bc_block([bc_stmt(bc_call("hash" [argument] pos) pos)] pos)
+        if chain =? 0 {chain=body} else {
+            let it=mk('istype' pos)
+            nodes.ptr[it].a=int32(bc_ident(held pos))
+            let ty=mk('tname' pos)
+            nodes.ptr[ty].aux=-7
+            nodes.ptr[ty].ival=member
+            nodes.ptr[it].b=int32(ty)
+            let f=mk('if_' pos)
+            nodes.ptr[f].a=int32(it)
+            nodes.ptr[f].b=int32(body)
+            nodes.ptr[f].c=int32(chain)
+            nodes.ptr[f].aux2=-8
+            chain=bc_block([bc_stmt(f pos)] pos)
+        }
+        j -= 1
+    }
+    let built=bc_block([bc_let(held a pos) bc_stmt(chain pos)] pos)
+    nodes.ptr[n]=nodes.ptr[built]
+    check_expr(n expected)
+}
+call_no_candidate=(n:CallErrorWord name:CallErrorWord decls:array<int64> args:array<int64> expected:CallErrorWord ufcs:bool recv_fits:bool @failure:CallFailure):>int64=>$unsafe {
+    # (f(e) with e a union and an overload of f for each of its members: chosen by what e holds)
+    let ud=union_dispatch(n name decls args expected)
+    if ud >=? 0 {return ud}
+    # (`lookup(id).scaled(2)`: an error or none receiver is the result as it is)
+    if ufcs and caller_dewy() and args.length >? 0 and nodes.ptr[unnamed(args[0])].type not=? 0 and forwards_exceptions(ntype(unnamed(args[0]))) {
+        return forward_call(n name args expected)
+    }
+    if failure.last_err_map not=? 0 {failure.last_err=map_args_text(failure.last_err_map args)}
+    if failure.last_err_tie {
+        failure.last_err=""
+        failure.last_err_pos=0
+    }
+    if nodes.ptr[n].aux2 =? -9 and args.length >? 0 {
+        # (when nothing of the name takes the object, what its argument expects is beside the point)
+        let why=if (failure.last_err as array<uint8>).length >? 0 and recv_fits {": {failure.last_err}"} else {""}
+        fatal(nodes.ptr[n].pos "{dt(ntype(unnamed(args[0])))} has no field '{name_of(name)}' or matching zero-argument member{why}")
+    }
+    # (x.f() with an x that may be none: the function is there for its value)
+    if args.length >? 0 and nodes.ptr[unnamed(args[0])].type not=? 0 and types.ptr[prune(ntype(unnamed(args[0])))].kind =? 'opt' {
+        let at=prune(ntype(unnamed(args[0])))
+        let a0=unnamed(args[0])
+        # (to_float(load_data("best")): what to use when there is nothing, said where it is made)
+        if nodes.ptr[a0].kind =? 'call' and nodes.ptr[a0].sym >? 0 and CallErrorWord(nodes.ptr[a0].sym) <? fns.length and fns.ptr[CallErrorWord(nodes.ptr[a0].sym)].decl not=? 0 {
+            let gn=name_of(CallErrorWord(nodes.ptr[CallErrorWord(fns.ptr[CallErrorWord(nodes.ptr[a0].sym)].decl)].name))
+            let et0=prune(CallErrorWord(types.ptr[at].elem))
+            let dv="default"
+            if tkind(et0) =? 'str_' {dv="\"\""} else if tkind(et0) =? 'int_' {dv="0"}
+            else if tkind(et0) =? 'float_' {dv="0.0"} else if tkind(et0) =? 'bool_' {dv="false"}
+            fatal(nodes.ptr[a0].pos "{gn} may give none (nothing) rather than a {dt(et0)}: say what to use then, as `{gn}(...) ?? {dv}`, before calling '{surface_call_name(name)}'")
+        }
+        let called=surface_call_name(name)
+        fatal(nodes.ptr[a0].pos "this {dt(at)} may be none (nothing) rather than a {dt(CallErrorWord(types.ptr[at].elem))}: before calling '{called}', say what to use then (`x ?? default`){jd(nodes.ptr[a0].pos ", or `x!` when it cannot be none, or `if let v = x: ...`" ", or check it first: `if x isnt? none \{ ... }`")}")
+    }
+    # (atomic_add(&x, 1): the atomics are for GPU buffers)
+    if starts_with(name_of(name) "atomic_") and args.length >? 0 and nodes.ptr[unnamed(args[0])].type not=? 0 and tkind(ntype(unnamed(args[0]))) =? 'ptr' {
+        fatal(nodes.ptr[n].pos "{name_of(name)} changes an element of a GpuBuffer in a compute function; threads on the CPU do not share variables: parallel_map gives each one's result back, and a count or flag they share is an Atomic (`done = atomic(0)`, `done.add(1)`)")
+    }
+    # (xs ^ 2 on an array: the power of each element is .^)
+    if name_of(name) =? "pow" and args.length =? 2 and nodes.ptr[unnamed(args[0])].type not=? 0 {
+        let t0=prune(ntype(unnamed(args[0])))
+        if types.ptr[t0].kind =? 'array' and is_numeric(CallErrorWord(types.ptr[t0].elem)) {fatal(nodes.ptr[n].pos "^ is not defined for {dt(t0)} (for each element: .^, as in xs .^ 2)")}
+    }
+    # (rect(x, y, w, h) for Rect(x, y, w, h): the drawing function, where the type was meant)
+    let fnm=name_of(name)
+    if (fnm as array<uint8>).length >? 1 and (fnm as array<uint8>)[0] >=? b'a' and (fnm as array<uint8>)[0] <=? b'z' {
+        let cap=capitalize(fnm)
+        let cs=lookup(intern(cap))
+        let nums=args.length >? 0
+        loop a0 in args {
+            if nodes.ptr[unnamed(a0)].type =? 0 or not is_numeric(prune(ntype(unnamed(a0)))) {nums=false}
+        }
+        if cs not=? 0 and syms.ptr[cs].kind =? 'struct_' and nums {
+            let ot=overloads_text(decls "")
+            fatal(nodes.ptr[n].pos "no version of '{fnm}' takes these arguments (`{cap}(...)` makes a {cap}){ot}")
+        }
+    }
+    # (range(3), set(): Python's, which mean other things here)
+    if name_of(name) =? "range" and args.length =? 1 {fatal(nodes.ptr[n].pos "the numbers from 0 to n - 1 are `[0..n)` ({jd(nodes.ptr[n].pos "`loop i in [0..3):`" "`loop i in [0..3) \{ }`")}); range(a, b) is [a..b)")}
+    if name_of(name) =? "set" and args.length =? 0 {
+        if dewy_at(nodes.ptr[n].pos) {fatal(nodes.ptr[n].pos "an empty set is `set[]` with its element type: `let seen:set<string> = set[]`")}
+        fatal(nodes.ptr[n].pos "there is no set type: a map to bool (`seen: \{str: bool} = \{}`, `seen[x] = true`, `x in seen`), or `unique(xs)`")
+    }
+    if name_of(name) =? "join" and args.length =? 2 and nodes.ptr[unnamed(args[1])].type not=? 0 and tkind(prune(ntype(unnamed(args[1])))) =? 'array' {
+        fatal(nodes.ptr[n].pos "join puts text together: {jd(nodes.ptr[n].pos "`[loop x in? xs: str(x)]`" "`[loop x in? xs string(x)]`")} makes text of each first")
+    }
+    # (xs.size() and the like: a name that means something else here)
+    let hh=habit_name(name_of(name))
+    if args.length >? 0 and nodes.ptr[unnamed(args[0])].type not=? 0 {
+        let t0=prune(ntype(unnamed(args[0])))
+        let mh=""
+        if is_map_type(t0) {mh=map_habit_name(name_of(name))}
+        if (mh as array<uint8>).length >? 0 {fatal(nodes.ptr[n].pos "no '{name_of(name)}' for {dt(t0)} (use {mh})")}
+        if (hh as array<uint8>).length >? 0 and types.ptr[t0].kind =? 'array' and has_var(t0) {
+            # (xs = [] then xs.add(5): its type, not known yet, is no help)
+            fatal(nodes.ptr[n].pos "no '{name_of(name)}' for a list (use {hh})")
+        }
+        if (hh as array<uint8>).length >? 0 and (types.ptr[t0].kind =? 'array' or types.ptr[t0].kind =? 'str_') {fatal(nodes.ptr[n].pos "no '{name_of(name)}' for {dt(t0)} (use {hh})")}
+    }
+    # (x.push(1) with x an int64: no function of the name takes such an object, so it has no such member)
+    if ufcs and not recv_fits and failure.last_err_arg =? 1 and caller_dewy() and nodes.ptr[unnamed(args[0])].type not=? 0 {
+        let t0=prune(ntype(unnamed(args[0])))
+        # (ways.join(" ") of an array<'north' | 'south'>: its members are words, not text yet)
+        if name_of(name) =? "join" and types.ptr[t0].kind =? 'array' and str_set_of(CallErrorWord(types.ptr[t0].elem)) not=? 0 {
+            fatal(nodes.ptr[n].pos "{dt(t0)} has no member 'join': its elements are members of a literal union, not strings; collect their text first, `[loop x in xs \"\{x}\"].join(\" \")`")
+        }
+        fatal(nodes.ptr[n].pos "{dt(t0)} has no member '{name_of(name)}'")
+    }
+    # (an operator the library implements with a function: told as the operator)
+    let opn=dewy_operator_fn_text(name_of(name))
+    if (opn as array<uint8>).length >? 0 and caller_dewy() {
+        let ots=""
+        loop i in 0.. and a0 in args {
+            if i >? 0 {ots="{ots} and "}
+            ots="{ots}{if nodes.ptr[unnamed(a0)].type not=? 0 {dt(ntype(unnamed(a0)))} else {"?"}}"
+        }
+        let oh=""
+        if opn =? "%" and args.length >? 0 and nodes.ptr[unnamed(args[0])].type not=? 0 and tkind(prune(ntype(unnamed(args[0])))) =? 'str_' {
+            oh=" (text is formatted by interpolation, `\"\{count} items\"`, or `format(value \".2f\")`)"
+        }
+        fatal(nodes.ptr[n].pos "`{opn}` does not work on {ots}{oh}")
+    }
+    if decls.length >? 1 {
+        # (when none fits, the program's own function is the one meant: its error is the one shown)
+        let own:array<int64>=[]
+        loop d in decls {
+            if not decl_in_prelude(d) {own.push(d)}
+        }
+        if own.length =? 1 {resolve_fn_call(n name own args expected);}
+    }
+    if decls.length =? 1 {
+        if (failure.last_err as array<uint8>).length =? 0 {failure.last_err="arguments do not match"}
+        let ep=nodes.ptr[n].pos
+        if failure.last_err_pos >? 0 {ep=failure.last_err_pos}
+        fatal(ep "in call to {call_text(decls[0])}: {failure.last_err}")
+    }
+    let ts=""
+    loop i in 0.. and a0 in args {
+        let a=unnamed(a0)
+        if i >? 0 {ts="{ts}{if caller_dewy() {" "} else {", "}}"}
+        if nodes.ptr[a].type not=? 0 {ts="{ts}{dt(ntype(a))}"} else {ts="{ts}?"}
+    }
+    let sep=""
+    if (failure.last_err as array<uint8>).length >? 0 {sep=": "}
+    let ot=overloads_text(decls failure.last_err)
+    # (rect(0, 616, 1280, 120): none takes 4, said of them all rather than of the last one tried)
+    if (ot as array<uint8>).length >? 0 and (starts_with(failure.last_err "too many") or starts_with(failure.last_err "missing")) {
+        let an="{args.length} arguments"
+        if args.length =? 1 {an="1 argument"}
+        fatal(nodes.ptr[n].pos "no version of '{shown_fn_name(name_of(name))}' takes {an}{ot}")
+    }
+    let what="({ts})"
+    if byte_find(ts "?") >=? 0 {what="these arguments"}
+    fatal(nodes.ptr[n].pos "no version of '{shown_fn_name(name_of(name))}' takes {what}{sep}{failure.last_err}{ot}")
+    0
+}
+call_type_arity=(name:CallErrorWord d:CallErrorWord targs_here:array<int64> @failure:CallFailure):>void=>{
+    if failure.last_err_arg =? 0 {
+        failure.last_err="'{name_of(name)}' takes {nkids2(d)} type argument(s), given {targs_here.length}"
+        failure.last_err_map=0
+    }
+}
+call_resolve_error=(kind:CallErrorWord n:CallErrorWord name:CallErrorWord decl:CallErrorWord i:CallErrorWord partial:bool):>void=>$unsafe {
+    if kind =? 1 {fatal(nodes.ptr[n].pos "cannot prove callable effect contract; callback-place permissions cannot flow into E")}
+    if kind =? 2 {fatal(nodes.ptr[n].pos "callback effects exceed the explicit generic argument")}
+    if kind =? 3 {fatal(nodes.ptr[n].pos "defaults referring to earlier parameters cannot yet be combined with mutable arguments; supply those defaults explicitly")}
+    if kind =? 5 {
+        if partial {fatal(nodes.ptr[n].pos jd(nodes.ptr[n].pos "cannot infer generic types for partial application of '{name_of(name)}'; annotate the arguments" "cannot infer the type parameters of '{name_of(name)}' for this partial evaluation; give the result a function type (`let f:(b:int64:>int64) = @{name_of(name)}(...)`)"))}
+        let tp="{i + 1}"
+        if CallErrorWord(nodes.ptr[decl].nlist2) >? i {tp="'{name_of(CallErrorWord(nodes.ptr[kid2(decl i)].name))}'"}
+        fatal(nodes.ptr[n].pos "cannot infer type parameter {tp} of '{name_of(name)}' from the arguments")
+    }
+}
+call_ide_ref=(n:CallErrorWord name:CallErrorWord args:array<int64> decl:CallErrorWord f:CallErrorWord):>void=>$unsafe {
+    if nodes.ptr[n].a not=? 0 {ide_fn_ref(nodes.ptr[CallErrorWord(nodes.ptr[n].a)].pos name f)}
+    ide_named_args(args decl IK_PARAM fns.ptr[f].ptypes)
+}
+call_capture_block=(n:CallErrorWord f:CallErrorWord @statements:array<int64>):>void=>$unsafe {
+    let call=nodes.length
+    nodes.push(nodes.ptr[n])
+    let result=mk('exprstmt' nodes.ptr[n].pos)
+    nodes.ptr[result].a=int32(call)
+    statements.push(result)
+    nodes.ptr[n]=Node(kind='block' pos=nodes.ptr[n].pos type=fns.ptr[f].ret)
+    if tkind(CallErrorWord(fns.ptr[f].ret)) not=? 'void_' and CallErrorWord(fns.ptr[f].ret) not=? T_NEVER {nodes.ptr[n].aux=1}
+    set_list(n statements)
+}
+fn_has_defaults=(decl:CallErrorWord):>bool=>$unsafe {
+    if decl =? 0 or not files[pos_file(nodes.ptr[decl].pos)].is_dewy {return false}
+    loop p in kids(decl) {
+        if nodes.ptr[p].b not=? 0 {return true}
+    }
+    false
+}
+# A callee's name as written: `to_int(text)` calls its parser under the hood.
+surface_call_name=(name:CallErrorWord):>string=>{
+    if starts_with(name_of(name) "__mi_parse") {return "to_int"}
+    name_of(name)
+}
+# A program with a top-level `draw` or `update` is a game: a helper that only
+# shares the name (`draw(board)`) wants another one. Dewy wording only.
+game_name_hint=(pos:CallErrorWord nm:string):>string=>{
+    if not dewy_at(pos) {return ""}
+    "; a program with a top-level `{nm}` is a game, so a function of your own that is no game callback needs another name, as `{nm}_board`"
+}
+call_argument_error=(kind:CallErrorWord a:CallErrorWord pt:CallErrorWord):>void=>$unsafe {
+    if kind =? 1 {fatal(nodes.ptr[a].pos "mutable refinement access requires an equivalent storage contract")}
+    if kind =? 2 {fatal(nodes.ptr[a].pos "a mutable argument needs `@` at the call site")}
+    if kind =? 3 {fatal(nodes.ptr[a].pos "`@` passes a place, but this parameter takes a value: drop the `@`")}
+    if kind =? 4 {fatal(nodes.ptr[a].pos "{jd(nodes.ptr[a].pos "`mut`" "an `@`")} argument must have type {dt(pt)} exactly, found {dt(ntype(a))}")}
+}
+call_type_member_error=(callee:CallErrorWord tt:CallErrorWord fname:CallErrorWord):>int64=>$unsafe {
+    let why=""
+    let fd:array<int64>=[]
+    call_collect_fns(fname @fd)
+    if fd.length >? 0 {
+        why=" (functions are not kept in types: call it as `{name_of(fname)}(x)` or `x.{name_of(fname)}()`)"
+        # (Date.now(): a function of nothing is called by itself)
+        loop d in fd {
+            if nkids(d) =? 0 {why=" (functions are not kept in types: call it by itself, `{name_of(fname)}()`)"}
+        }
+    }
+    fatal(nodes.ptr[callee].pos "type {dt(tt)} has no member '{name_of(fname)}'{why}")
+    0
+}
+call_fixed_array_error=(n:CallErrorWord name:CallErrorWord t0:CallErrorWord ii:CallErrorWord):>void=>$unsafe {
+    if intrinsics[ii].id =? IN.arrdata {fatal(nodes.ptr[n].pos "data() is for a growable array T[]; a fixed-size one is stored in place: `&x` is where its first element is (what C wants)")}
+    if intrinsics[ii].id not=? IN.len {
+        let member=name
+        if ide_dewy_alt(name) not=? 0 {member=ide_dewy_alt(name)}
+        fatal(nodes.ptr[n].pos jd(nodes.ptr[n].pos "{name_of(name)}() needs a growable array T[]; {dt(t0)} has a fixed size" "`.{name_of(member)}` needs a growable array (`array<T>`); {dt(t0)} has a fixed length"))
+    }
+}
+call_dispatch_error=(kind:CallErrorWord n:CallErrorWord name:CallErrorWord callee:CallErrorWord expected:CallErrorWord rt:CallErrorWord fname:CallErrorWord et:CallErrorWord tt:CallErrorWord):>void=>$unsafe {
+    if kind =? 1 {fatal(nodes.ptr[n].pos "fields(T) is a compile-time sequence; iterate over it with `loop field in fields(T)`")}
+    if kind =? 2 {fatal(nodes.ptr[callee].pos "this type does not have a record constructor")}
+    if kind =? 3 {fatal(nodes.ptr[callee].pos "cannot infer the enum type for '.{name_of(CallErrorWord(nodes.ptr[callee].name))}'")}
+    if kind =? 4 {fatal(nodes.ptr[callee].pos "{dt(et)} has no variant '{name_of(CallErrorWord(nodes.ptr[callee].name))}'{variant_hint_for(et name_of(CallErrorWord(nodes.ptr[callee].name)))}")}
+    if kind =? 5 {fatal(nodes.ptr[n].pos "a totaldict keeps an entry for every key: it has no {name_of(fname)}")}
+    if kind =? 6 {fatal(nodes.ptr[callee].pos "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt name_of(fname))}")}
+    if kind =? 7 {fatal(nodes.ptr[n].pos "numbers have no `.{name_of(fname)}` member: `uint8<overflow='wrap'>(x)` keeps the low bits of an integer, and `x transmute float64` reads its bits as another type of the same width")}
+    if kind =? 8 {fatal(nodes.ptr[n].pos "use {name_of(name)}.variant(...) to construct an enum")}
+    if kind =? 9 {fatal(nodes.ptr[n].pos "'{name_of(name)}' is not a function")}
+}
+value_call_error=(n:CallErrorWord ft:CallErrorWord args:array<int64> kind:CallErrorWord):>void=>$unsafe {
+    if kind =? 0 {fatal(nodes.ptr[n].pos "cannot call a value of type {dt(ft)}")}
+    if kind =? 1 {fatal(nodes.ptr[n].pos "function value expects {CallErrorWord(types.ptr[ft].nargs)} argument(s), got {args.length}")}
+    if kind =? 2 {fatal(nodes.ptr[n].pos "this callable has no parameter names; use positional arguments or give it a named function type")}
+    fatal(nodes.ptr[n].pos "partial application of C function pointers is not supported")
+}
