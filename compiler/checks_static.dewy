@@ -1,0 +1,228 @@
+$runtime_checks
+from p"checks_text.dewy" import (sym_kind_of)
+from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"@lib/core/os.jo" import (read_bytes read_file)
+
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (SVal binding_const_init build_node icon_node program_icon program_js sa_blocker sa_fits syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checker_state.dewy" import (SK)
+from p"comptime.jo" import (ct_run ct_values)
+from p"expr.jo" import (CV)
+from p"host_target.dewy" import (host_target_name)
+from p"module_paths.dewy" import (is_abs_path)
+from p"targets.dewy" import (target_problem)
+from p"types.jo" import (prune types)
+from p"util.jo" import (fatal files intern name_of pos_file warn)
+
+StaticWord:type=int64<overflow='wrap'>
+sa_unknown=(e:StaticWord):>SVal=>{
+    if sa_blocker =? 0 {sa_blocker=e}
+    SVal(false false 0 "")
+}
+sa_int=(v:StaticWord):>SVal=>{
+    SVal(true false v "")
+}
+# A 64-bit signed operand: arithmetic folds only when it cannot wrap.
+sa_wide_signed=(e:StaticWord):>bool=>$unsafe {
+    let t=prune(StaticWord(nodes.ptr[e].type))
+    t not=? 0 and types.ptr[t].kind =? 'int_' and types.ptr[t].sign and StaticWord(types.ptr[t].bits) =? 64
+}
+sa_unsigned=(e:StaticWord):>bool=>$unsafe {
+    let t=prune(StaticWord(nodes.ptr[e].type))
+    t not=? 0 and types.ptr[t].kind =? 'int_' and not types.ptr[t].sign
+}
+static_value=(e:StaticWord):>SVal=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'bool_lit' or k =? 'int_lit' {return sa_int(nodes.ptr[e].ival)}
+    if k =? 'str_lit' and nodes.ptr[e].aux =? 0 {return SVal(true true 0 name_of(StaticWord(nodes.ptr[e].sval)))}
+    if k =? 'ident' {
+        let initial:StaticWord=0
+        if nodes.ptr[e].type not=? 0 and (nodes.ptr[e].aux =? int32(1) or nodes.ptr[e].aux =? int32(2)) {
+            initial=binding_const_init(sym_kind_of(StaticWord(nodes.ptr[e].aux)) StaticWord(nodes.ptr[e].sym) nodes.ptr[e].pos)
+        }
+        else {
+            let s=lookup(StaticWord(nodes.ptr[e].name))
+            if s not=? 0 {initial=binding_const_init(syms.ptr[s].kind StaticWord(syms.ptr[s].ref) nodes.ptr[e].pos)}
+        }
+        if initial =? 0 {return sa_unknown(e)}
+        return static_value(initial)
+    }
+    if k =? 'conv' {
+        let v=static_value(StaticWord(nodes.ptr[e].a))
+        if not v.known or v.is_str {return v}
+        if nodes.ptr[e].aux not=? int32(int64(CV.int_)) or not sa_fits(v.i StaticWord(nodes.ptr[e].type)) {return sa_unknown(e)}
+        return v
+    }
+    if k =? 'unary' and nodes.ptr[e].op =? int32(59) {
+        let v=static_value(StaticWord(nodes.ptr[e].a))
+        if not v.known {return v}
+        if not sa_wide_signed(e) or v.i =? -9223372036854775807 - 1 {return sa_unknown(e)}
+        return sa_int(-v.i)
+    }
+    if k =? 'not_' {
+        let v=static_value(StaticWord(nodes.ptr[e].a))
+        if not v.known {return v}
+        return sa_int(if v.i =? 0 {1} else {0})
+    }
+    if k =? 'and_' or k =? 'or_' {
+        let a=static_value(StaticWord(nodes.ptr[e].a))
+        let b=static_value(StaticWord(nodes.ptr[e].b))
+        let decisive=if k =? 'and_' {0} else {1}
+        if a.known and (a.i not=? 0) =? (decisive =? 1) {return sa_int(decisive)}
+        if b.known and (b.i not=? 0) =? (decisive =? 1) {return sa_int(decisive)}
+        if a.known and b.known {return sa_int(1 - decisive)}
+        return SVal(false false 0 "")
+    }
+    if k =? 'istype' {
+        # (already narrowed to exactly this type: always true)
+        if nodes.ptr[e].aux =? -3 {return sa_int(1)}
+        return sa_unknown(e)
+    }
+    if k =? 'binary' {
+        let a=static_value(StaticWord(nodes.ptr[e].a))
+        let b=static_value(StaticWord(nodes.ptr[e].b))
+        if not a.known {return a}
+        if not b.known {return b}
+        let op=cx_token_values.ptr[StaticWord(nodes.ptr[e].op)]
+        if a.is_str or b.is_str {
+            if a.is_str not=? b.is_str {return sa_unknown(e)}
+            if op =? 'eq' {return sa_int(if a.s =? b.s {1} else {0})}
+            if op =? 'ne' {return sa_int(if a.s not=? b.s {1} else {0})}
+            return sa_unknown(e)
+        }
+        if op =? 'eq' {return sa_int(if a.i =? b.i {1} else {0})}
+        if op =? 'ne' {return sa_int(if a.i not=? b.i {1} else {0})}
+        if op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
+            # Order unsigned words by their unsigned values.
+            let x=a.i
+            let y=b.i
+            if sa_unsigned(StaticWord(nodes.ptr[e].a)) {
+                x=x xor (-9223372036854775807 - 1)
+                y=y xor (-9223372036854775807 - 1)
+            }
+            if op =? 'lt' {return sa_int(if x <? y {1} else {0})}
+            if op =? 'le' {return sa_int(if x <=? y {1} else {0})}
+            if op =? 'gt' {return sa_int(if x >? y {1} else {0})}
+            return sa_int(if x >=? y {1} else {0})
+        }
+        if not sa_wide_signed(e) {return sa_unknown(e)}
+        let ai:StaticWord=a.i
+        let bi:StaticWord=b.i
+        if op =? 'plus' {
+            let r=ai + bi
+            if ((ai xor r) & (bi xor r)) <? 0 {return sa_unknown(e)}
+            return sa_int(r)
+        }
+        if op =? 'minus' {
+            let r=ai - bi
+            if ((ai xor bi) & (ai xor r)) <? 0 {return sa_unknown(e)}
+            return sa_int(r)
+        }
+        if op =? 'star' {
+            if ai =? 0 or bi =? 0 {return sa_int(0)}
+            let r=ai * bi
+            # (a multiple of bi when exact, and a wrap misses by at least bi: floor and truncation agree here)
+            if (ai =? -1 and bi =? -9223372036854775807 - 1) or (bi =? -1 and ai =? -9223372036854775807 - 1) or r // bi not=? ai {return sa_unknown(e)}
+            return sa_int(r)
+        }
+        return sa_unknown(e)
+    }
+    sa_unknown(e)
+}
+# 1 when the condition is proven, 0 when it is refuted, -1 when unknown.
+static_truth=(e:StaticWord):>int64=>{
+    sa_blocker=0
+    let v=static_value(e)
+    if not v.known {return -1}
+    if v.i not=? 0 {1} else {0}
+}
+# (an expectation the compiler refutes still builds: the test fails when it runs; `$expect false`
+# is written to fail)
+expectation_refuted=(s:StaticWord):>void=>$unsafe {
+    let c=StaticWord(nodes.ptr[s].a)
+    if nodes.ptr[c].kind =? 'not_' and nodes.ptr[StaticWord(nodes.ptr[c].a)].kind =? 'bool_lit' {return}
+    if static_truth(c) =? 1 {warn(nodes.ptr[s].pos "this expectation always fails")}
+}
+assertion_refuted=(cond:StaticWord message:StaticWord):>void=>$unsafe {
+    let why="this condition is always false"
+    if message not=? 0 and nodes.ptr[message].kind =? 'str_lit' and nodes.ptr[message].aux =? 0 {why=name_of(StaticWord(nodes.ptr[message].sval))}
+    fatal(nodes.ptr[cond].pos "assertion refuted: {why}")
+}
+prove_assertion=(cond:StaticWord message:StaticWord):>void=>{
+    let truth=static_truth(cond)
+    if truth =? 1 {return}
+    if truth =? 0 {assertion_refuted(cond message)}
+    if ct_values[ct_run(cond)].i =? 0 {assertion_refuted(cond message)}
+}
+# the build: block of the main file, checked (main.jo's scan_build_block read it before checking
+# began, to know the target: here its mistakes are errors with places)
+check_build_block=():>void=>$unsafe {
+    if build_node =? 0 {return}
+    let b=StaticWord(nodes.ptr[build_node].b)
+    let seen:array<string>=[]
+    loop i in [0..nkids(b)) {
+        let s=kid(b i)
+        if nodes.ptr[s].kind not=? 'assign' or nodes.ptr[StaticWord(nodes.ptr[s].a)].kind not=? 'ident' {
+            fatal(nodes.ptr[s].pos "a build option is `name = value` (target, opt or output)")
+        }
+        let key=name_of(StaticWord(nodes.ptr[StaticWord(nodes.ptr[s].a)].name))
+        let v=StaticWord(nodes.ptr[s].b)
+        let word=""
+        if nodes.ptr[v].kind =? 'ident' {word=name_of(StaticWord(nodes.ptr[v].name))} else if nodes.ptr[v].kind =? 'str_lit' and nodes.ptr[v].aux =? 0 {word=name_of(StaticWord(nodes.ptr[v].sval))}
+        if seen.contains(key) {fatal(nodes.ptr[s].pos "build option '{key}' is set twice")}
+        seen.push(key)
+        if nodes.ptr[v].kind =? 'call' and nodes.ptr[StaticWord(nodes.ptr[v].a)].kind =? 'ident' and name_of(StaticWord(nodes.ptr[StaticWord(nodes.ptr[v].a)].name)) =? "package" {
+            # name = package("git URL or directory"[, "tag, branch or commit"]): pkg.jo
+            if nkids(v) <? 1 or nkids(v) >? 2 {fatal(nodes.ptr[v].pos "a package is package(\"git URL or directory\") or package(\"git URL\", \"tag, branch or commit\")")}
+            loop k in [0..nkids(v)) {
+                if nodes.ptr[kid(v k)].kind not=? 'str_lit' or nodes.ptr[kid(v k)].aux not=? 0 {fatal(nodes.ptr[kid(v k)].pos "package() takes strings in quotes")}
+            }
+            continue
+        }
+        if key =? "target" {
+            let why=target_problem(word host_target_name())
+            if (why as array<uint8>).length >? 0 {fatal(nodes.ptr[v].pos "build option 'target': {why}")}
+        }
+        else if key =? "opt" {
+            if word not=? "debug" and word not=? "release" {fatal(nodes.ptr[v].pos "build option 'opt' is debug or release")}
+        }
+        else if key =? "output" {
+            if nodes.ptr[v].kind not=? 'str_lit' or nodes.ptr[v].aux not=? 0 or (word as array<uint8>).length =? 0 {fatal(nodes.ptr[v].pos "build option 'output' is a file name in quotes: output = \"game\"")}
+        }
+        else if key =? "icon" {
+            if nodes.ptr[v].kind not=? 'str_lit' or nodes.ptr[v].aux not=? 0 or (word as array<uint8>).length =? 0 {fatal(nodes.ptr[v].pos "build option 'icon' is a PNG file in quotes: icon = \"icon.png\"")}
+            let path=word
+            let d=files[pos_file(nodes.ptr[v].pos)].dir
+            if not is_abs_path(path) and (d as array<uint8>).length >? 0 {path="{d}/{path}"}
+            let b:array<uint8>=[]
+            let got=read_bytes(path)
+            if got not=? none {b=got}
+            if b.length =? 0 {fatal(nodes.ptr[v].pos "cannot read the icon '{path}'")}
+            if b.length <? 24 or b[0] not=? 0x89 or b[1] not=? b'P' or b[2] not=? b'N' or b[3] not=? b'G' {fatal(nodes.ptr[v].pos "the icon must be a PNG file ('{path}' is not one)")}
+            let w=(StaticWord(b[16]) << 24) | (StaticWord(b[17]) << 16) | (StaticWord(b[18]) << 8) | StaticWord(b[19])
+            let h=(StaticWord(b[20]) << 24) | (StaticWord(b[21]) << 16) | (StaticWord(b[22]) << 8) | StaticWord(b[23])
+            if w not=? h or w >? 256 {fatal(nodes.ptr[v].pos "the icon must be square and at most 256 pixels wide ('{path}' is {w}x{h})")}
+            program_icon=b
+            nodes.ptr[icon_node].sval=int32(intern(__str_from_bytes(b)))
+        }
+        else if key =? "js" {
+            if nodes.ptr[v].kind not=? 'str_lit' or nodes.ptr[v].aux not=? 0 or (word as array<uint8>).length =? 0 {fatal(nodes.ptr[v].pos "build option 'js' is a JavaScript file in quotes: js = \"glue.js\" (for web builds: it gives their `extern` functions)")}
+            let path=word
+            let d=files[pos_file(nodes.ptr[v].pos)].dir
+            if not is_abs_path(path) and (d as array<uint8>).length >? 0 {path="{d}/{path}"}
+            let t=read_file(path)
+            if t not=? none {program_js=t} else {fatal(nodes.ptr[v].pos "cannot read the JavaScript file '{path}'")}
+        }
+        else if key =? "name" {
+            if nodes.ptr[v].kind not=? 'str_lit' or nodes.ptr[v].aux not=? 0 or (word as array<uint8>).length =? 0 {fatal(nodes.ptr[v].pos "build option 'name' is the program's name in quotes: name = \"Star Garden\"")}
+            loop c in (word as array<uint8>) {
+                if c =? b'/' or c =? b'\\' or c =? b':' or c <? b' ' {fatal(nodes.ptr[v].pos "the program's name is also its save folder's: it cannot contain / \\ or :")}
+            }
+        }
+        else {
+            fatal(nodes.ptr[StaticWord(nodes.ptr[s].a)].pos "unknown build option '{key}' (the options are target, opt, output, name and icon, and packages: name = package(\"git URL\"))")
+        }
+    }
+}

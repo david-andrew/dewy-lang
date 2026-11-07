@@ -1,0 +1,286 @@
+use 'check.jo'
+use 'secret_checks.dewy'
+use 'checks_program.dewy'
+use 'checks_unpack.dewy'
+use 'checks_main.dewy'
+use 'checks_imports.dewy'
+use 'checks_hints.dewy'
+use 'checks_text.dewy'
+use 'isolation_ops.dewy'
+use 'checker_program.dewy'
+use 'checker_hooks.dewy'
+use 'checker_sinks.dewy'
+use 'checker_value_calls.dewy'
+use 'checker_values.dewy'
+use 'host_binds.jo'
+use 'checker_call_queries.dewy'
+use 'checker_expr.dewy'
+use 'effect_lattice.dewy'
+use 'checker_blocks.dewy'
+use 'checker_assigns.dewy'
+use 'checker_vardecls.dewy'
+use 'checker_for_loops.dewy'
+use 'checker_statements.dewy'
+use 'checker_exprstmts.dewy'
+use 'checker_returns.dewy'
+use 'checker_loops.dewy'
+use 'checker_zonk.dewy'
+use 'checker_body_results.dewy'
+use 'checker_bodies.dewy'
+use 'checker_instances.dewy'
+use 'checker_signature.dewy'
+use 'checker_resolve.dewy'
+use 'checker_alias.dewy'
+use 'checker_fields.dewy'
+use 'checker_results.dewy'
+use 'type_substitute.dewy'
+use 'constant_eval.dewy'
+use 'constant_host.dewy'
+use 'source_types.dewy'
+use 'evaluator_state.dewy'
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'partition.jo'
+use 'lazy_bodies.jo'
+use 'lazy_force.dewy'
+use 'frontend.jo'
+use 'pcheck.jo'
+use 'spelling.dewy'
+use 'habits.dewy'
+use 'units.jo'
+use 'definite.jo'
+use 'definite_walk.dewy'
+use 'import_cycles.jo'
+use 'cycle_ops.dewy'
+use 'decimals.jo'
+use 'growth.jo'
+use 'safe_paths.jo'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'constant_checks.dewy'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'deadlock.jo'
+use 'errors.jo'
+use 'settings.jo'
+use 'host_target.dewy'
+use 'targets.dewy'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'watch.jo'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'pkg.jo'
+use 'pkg_ops.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'parse.jo'
+use 'types.jo'
+use 'expr.jo'
+use 'ide.jo'
+use 'poly_closure.jo'
+use 'prelude.jo'
+use 'comptime.jo'
+use 'facts.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'ownership.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'juxtapose.dewy'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'temperature_kinds.jo'
+use 'temperature_ops.dewy'
+use 'dewy_methods.jo'
+use 'secrets.jo'
+use 'directives.jo'
+use 'ffi.jo'
+use 'floats.jo'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'concurrency_tasks.dewy'
+
+sa_unknown = (e: int) -> SVal:
+    if sa_blocker == 0: sa_blocker = e
+    SVal(false, false, 0, "")
+sa_int = (v: int) -> SVal: SVal(true, false, v, "")
+# A 64-bit signed operand: arithmetic folds only when it cannot wrap.
+sa_wide_signed = (e: int) -> bool:
+    t = prune(int(nodes[e].type))
+    t != 0 and types[t].kind == .int_ and types[t].sign and int(types[t].bits) == 64
+sa_unsigned = (e: int) -> bool:
+    t = prune(int(nodes[e].type))
+    t != 0 and types[t].kind == .int_ and not types[t].sign
+static_value = (e: int) -> SVal:
+    k = nodes[e].kind
+    if k == .bool_lit or k == .int_lit: return sa_int(nodes[e].ival)
+    if k == .str_lit and nodes[e].aux == 0: return SVal(true, true, 0, name_of(int(nodes[e].sval)))
+    if k == .ident:
+        initial = 0
+        if nodes[e].type != 0 and (nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global))):
+            initial = binding_const_init(nodes[e].aux as SK, int(nodes[e].sym), nodes[e].pos)
+        else:
+            s = lookup(int(nodes[e].name))
+            if s != 0: initial = binding_const_init(syms[s].kind, int(syms[s].ref), nodes[e].pos)
+        if initial == 0: return sa_unknown(e)
+        return static_value(initial)
+    if k == .conv:
+        v = static_value(int(nodes[e].a))
+        if not v.known or v.is_str: return v
+        if nodes[e].aux != i32(int(CV.int_)) or not sa_fits(v.i, int(nodes[e].type)): return sa_unknown(e)
+        return v
+    if k == .unary and nodes[e].op == i32(int(Tok.minus)):
+        v = static_value(int(nodes[e].a))
+        if not v.known: return v
+        if not sa_wide_signed(e) or v.i == -9223372036854775807 - 1: return sa_unknown(e)
+        return sa_int(-v.i)
+    if k == .not_:
+        v = static_value(int(nodes[e].a))
+        if not v.known: return v
+        return sa_int(if v.i == 0: 1 else: 0)
+    if k == .and_ or k == .or_:
+        a = static_value(int(nodes[e].a))
+        b = static_value(int(nodes[e].b))
+        decisive = if k == .and_: 0 else: 1
+        if a.known and (a.i != 0) == (decisive == 1): return sa_int(decisive)
+        if b.known and (b.i != 0) == (decisive == 1): return sa_int(decisive)
+        if a.known and b.known: return sa_int(1 - decisive)
+        return SVal(false, false, 0, "")
+    if k == .istype:
+        # (already narrowed to exactly this type: always true)
+        if nodes[e].aux == -3: return sa_int(1)
+        return sa_unknown(e)
+    if k == .binary:
+        a = static_value(int(nodes[e].a))
+        b = static_value(int(nodes[e].b))
+        if not a.known: return a
+        if not b.known: return b
+        op = nodes[e].op as Tok
+        if a.is_str or b.is_str:
+            if a.is_str != b.is_str: return sa_unknown(e)
+            if op == .eq: return sa_int(int(a.s == b.s))
+            if op == .ne: return sa_int(int(a.s != b.s))
+            return sa_unknown(e)
+        if op == .eq: return sa_int(int(a.i == b.i))
+        if op == .ne: return sa_int(int(a.i != b.i))
+        if op == .lt or op == .le or op == .gt or op == .ge:
+            # Order unsigned words by their unsigned values.
+            x = a.i
+            y = b.i
+            if sa_unsigned(int(nodes[e].a)):
+                x = x xor (-9223372036854775807 - 1)
+                y = y xor (-9223372036854775807 - 1)
+            if op == .lt: return sa_int(int(x < y))
+            if op == .le: return sa_int(int(x <= y))
+            if op == .gt: return sa_int(int(x > y))
+            return sa_int(int(x >= y))
+        if not sa_wide_signed(e): return sa_unknown(e)
+        if op == .plus:
+            r = a.i + b.i
+            if ((a.i xor r) & (b.i xor r)) < 0: return sa_unknown(e)
+            return sa_int(r)
+        if op == .minus:
+            r = a.i - b.i
+            if ((a.i xor b.i) & (a.i xor r)) < 0: return sa_unknown(e)
+            return sa_int(r)
+        if op == .star:
+            if a.i == 0 or b.i == 0: return sa_int(0)
+            r = a.i * b.i
+            if (a.i == -1 and b.i == -9223372036854775807 - 1) or (b.i == -1 and a.i == -9223372036854775807 - 1) or r / b.i != a.i: return sa_unknown(e)
+            return sa_int(r)
+        return sa_unknown(e)
+    sa_unknown(e)
+# 1 when the condition is proven, 0 when it is refuted, -1 when unknown.
+static_truth = (e: int) -> int:
+    sa_blocker = 0
+    v = static_value(e)
+    if not v.known: return -1
+    if v.i != 0: 1 else: 0
+# (an expectation the compiler refutes still builds: the test fails when it runs; `$expect false`
+# is written to fail)
+expectation_refuted = (s: int):
+    c = int(nodes[s].a)
+    if nodes[c].kind == .not_ and nodes[int(nodes[c].a)].kind == .bool_lit: return
+    if static_truth(c) == 1: warn(nodes[s].pos, "this expectation always fails")
+assertion_refuted = (cond: int, message: int):
+    why = "this condition is always false"
+    if message != 0 and nodes[message].kind == .str_lit and nodes[message].aux == 0: why = name_of(int(nodes[message].sval))
+    fatal(nodes[cond].pos, "assertion refuted: {why}")
+prove_assertion = (cond: int, message: int):
+    truth = static_truth(cond)
+    if truth == 1: return
+    if truth == 0: assertion_refuted(cond, message)
+    if ct_values[ct_run(cond)].i == 0: assertion_refuted(cond, message)
+# the build: block of the main file, checked (main.jo's scan_build_block read it before checking
+# began, to know the target: here its mistakes are errors with places)
+check_build_block = ():
+    if build_node == 0: return
+    b = int(nodes[build_node].b)
+    seen: str[]
+    loop i in [0..nkids(b)):
+        s = kid(b, i)
+        if nodes[s].kind != .assign or nodes[int(nodes[s].a)].kind != .ident:
+            fatal(nodes[s].pos, "a build option is `name = value` (target, opt or output)")
+        key = name_of(int(nodes[int(nodes[s].a)].name))
+        v = int(nodes[s].b)
+        word = ""
+        if nodes[v].kind == .ident: word = name_of(int(nodes[v].name))
+        else if nodes[v].kind == .str_lit and nodes[v].aux == 0: word = name_of(int(nodes[v].sval))
+        if seen.contains(key): fatal(nodes[s].pos, "build option '{key}' is set twice")
+        seen.push(key)
+        if nodes[v].kind == .call and nodes[int(nodes[v].a)].kind == .ident and name_of(int(nodes[int(nodes[v].a)].name)) == "package":
+            # name = package("git URL or directory"[, "tag, branch or commit"]): pkg.jo
+            if nkids(v) < 1 or nkids(v) > 2: fatal(nodes[v].pos, "a package is package(\"git URL or directory\") or package(\"git URL\", \"tag, branch or commit\")")
+            loop k in [0..nkids(v)):
+                if nodes[kid(v, k)].kind != .str_lit or nodes[kid(v, k)].aux != 0: fatal(nodes[kid(v, k)].pos, "package() takes strings in quotes")
+            continue
+        if key == "target":
+            why = target_problem(word, host_target_name())
+            if len(why) > 0: fatal(nodes[v].pos, "build option 'target': {why}")
+        else if key == "opt":
+            if word != "debug" and word != "release": fatal(nodes[v].pos, "build option 'opt' is debug or release")
+        else if key == "output":
+            if nodes[v].kind != .str_lit or nodes[v].aux != 0 or len(word) == 0: fatal(nodes[v].pos, "build option 'output' is a file name in quotes: output = \"game\"")
+        else if key == "icon":
+            if nodes[v].kind != .str_lit or nodes[v].aux != 0 or len(word) == 0: fatal(nodes[v].pos, "build option 'icon' is a PNG file in quotes: icon = \"icon.png\"")
+            path = word
+            d = files[pos_file(nodes[v].pos)].dir
+            if not is_abs_path(path) and len(d) > 0: path = "{d}/{path}"
+            b: u8[]
+            if let got = read_bytes(path): b = got
+            if b.len() == 0: fatal(nodes[v].pos, "cannot read the icon '{path}'")
+            if b.len() < 24 or b[0] != 0x89 or b[1] != 'P' or b[2] != 'N' or b[3] != 'G': fatal(nodes[v].pos, "the icon must be a PNG file ('{path}' is not one)")
+            w = (int(b[16]) << 24) | (int(b[17]) << 16) | (int(b[18]) << 8) | int(b[19])
+            h = (int(b[20]) << 24) | (int(b[21]) << 16) | (int(b[22]) << 8) | int(b[23])
+            if w != h or w > 256: fatal(nodes[v].pos, "the icon must be square and at most 256 pixels wide ('{path}' is {w}x{h})")
+            program_icon = b
+            nodes[icon_node].sval = i32(intern(str_from_bytes(b)))
+        else if key == "js":
+            if nodes[v].kind != .str_lit or nodes[v].aux != 0 or len(word) == 0: fatal(nodes[v].pos, "build option 'js' is a JavaScript file in quotes: js = \"glue.js\" (for web builds: it gives their `extern` functions)")
+            path = word
+            d = files[pos_file(nodes[v].pos)].dir
+            if not is_abs_path(path) and len(d) > 0: path = "{d}/{path}"
+            if let t = read_file(path): program_js = t
+            else: fatal(nodes[v].pos, "cannot read the JavaScript file '{path}'")
+        else if key == "name":
+            if nodes[v].kind != .str_lit or nodes[v].aux != 0 or len(word) == 0: fatal(nodes[v].pos, "build option 'name' is the program's name in quotes: name = \"Star Garden\"")
+            loop c in word:
+                if c == '/' or c == '\\' or c == ':' or c < ' ': fatal(nodes[v].pos, "the program's name is also its save folder's: it cannot contain / \\ or :")
+        else:
+            fatal(nodes[int(nodes[s].a)].pos, "unknown build option '{key}' (the options are target, opt, output, name and icon, and packages: name = package(\"git URL\"))")
