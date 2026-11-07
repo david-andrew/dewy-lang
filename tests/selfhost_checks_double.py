@@ -19,12 +19,16 @@ main = ():
 
 
 def compare_checks(compiler, tmp_path, monkeypatch, cases, flags=()):
-    """Compile each program through both builds; return (compiled, rejected) counts."""
+    """Compile each program (a tests/cases name, or text) through both builds; return (compiled, rejected) counts."""
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     output = tmp_path / 'program'
     compiled = rejected = 0
     for case in cases:
-        source = ROOT / case if case.startswith('tests/') else ROOT / 'tests/cases' / (case + '.dewy')
+        if '\n' in case:
+            source = tmp_path / 'program.dewy'
+            source.write_text(case)
+        else:
+            source = ROOT / 'tests/cases' / (case + '.dewy')
         expected = subprocess.run([compiler, 'build', source, '-o', output, *flags],
                                   capture_output=True, timeout=60)
         modules = modules_for(source, output, LEAVES, flags)

@@ -1,0 +1,225 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_MUT NF_U64 add_flag kid mk nkids nodes)
+from p"check.jo" import (check_struct_fields dewy_at locals module_lookup modules rational_one_spelling soa_alias_of)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_loop_copies.dewy" import (soa_alias_field)
+from p"concurrency_types.dewy" import (concurrency_builtin_type)
+from p"dewy_methods.jo" import (dewy_type_method)
+from p"errors.jo" import (forward_member)
+from p"expr.jo" import (CV bare_call bare_fn_error bare_fn_value bc_int callee_at check_copy check_expr_in_module check_swizzle dewy_bare_fn dewy_len_check find_variant float_constant float_constant_named fn_name_for last_checked member_call_without_arguments mk_ident_local path_alias receiver_text swizzle_name synthetic_copy variant_hint_for vec_n)
+from p"ffi_checks.dewy" import (ffi_deref)
+from p"ide.jo" import (IK_CONST IK_FIELD ide_field_ref ide_on ide_ref ide_variant_ref)
+from p"juxtapose.dewy" import (juxt_member_check)
+from p"node_store.dewy" import (Node)
+from p"refine.jo" import (ref_addr_max ref_addr_type)
+from p"reflect_ops.dewy" import (reflect_name)
+from p"types.jo" import (T_INT T_MATH_INT dt is_float is_int is_vec prune structs types variants)
+from p"util.jo" import (fatal files name_of pos_file pos_in_lib warn)
+from p"x64_encode.dewy" import (b)
+
+MemberHookWord:type=int64<overflow='wrap'>
+# The receiver prelude of `x.f` runs in checker_receivers.dewy; these are its services.
+field_juxt=(n:int64):>void=>{
+    juxt_member_check(n)
+    return
+}
+field_reflect_name=(n:int64):>void=>{
+    reflect_name(n)
+    return
+}
+# (c.__peer in a program: a library's own field, which may change or go in any version)
+field_private=(n:int64):>int64=>$unsafe {
+    let a0=MemberHookWord(nodes.ptr[n].a)
+    if pos_in_lib(nodes.ptr[n].pos) {return a0}
+    let lt=prune(check_expr(a0 0))
+    nodes.ptr[n].a=int32(last_checked)
+    a0=last_checked
+    add_flag(a0 NF_CHECKED)
+    if types.ptr[lt].kind =? 'struct_' {
+        let sd=MemberHookWord(structs.ptr[MemberHookWord(types.ptr[lt].st)].decl)
+        if (concurrency_builtin_type(lt "Atomic") or concurrency_builtin_type(lt "Task") or concurrency_builtin_type(lt "TaskGroup") or concurrency_builtin_type(lt "__Lock") or concurrency_builtin_type(lt "__Chan") or concurrency_builtin_type(lt "__Mpmc") or concurrency_builtin_type(lt "__Spsc")) and dewy_at(nodes.ptr[n].pos) {fatal(nodes.ptr[n].pos "shared concurrency storage is private; use its checked operations")}
+        if sd not=? 0 and pos_in_lib(nodes.ptr[sd].pos) {warn(nodes.ptr[n].pos "{name_of(MemberHookWord(nodes.ptr[n].name))} is {structs.ptr[MemberHookWord(types.ptr[lt].st)].name}'s own, inside the library: it may change or go in any version (if something here is missing, it is worth asking for)")}
+    }
+    a0
+}
+field_soa_alias=(n:int64 a0:int64 expected:int64):>int64=>$unsafe {
+    let sl=soa_alias_of(a0)
+    if sl =? 0 {return -1}
+    nodes.ptr[n]=nodes.ptr[soa_alias_field(n sl)]
+    check_expr(n expected)
+}
+# ps[i].x on a soa array is ps.x[i]
+field_soa_index=(n:int64 a0:int64 expected:int64):>int64=>$unsafe {
+    let f=mk('field' nodes.ptr[n].pos)
+    nodes.ptr[f].a=nodes.ptr[a0].a
+    nodes.ptr[f].name=nodes.ptr[n].name
+    nodes.ptr[n]=Node(kind='index' pos=nodes.ptr[n].pos a=int32(f) b=nodes.ptr[a0].b)
+    check_expr(n expected)
+}
+member_copy=(n:int64 bt:int64):>int64=>$unsafe {
+    if not synthetic_copy(bt MemberHookWord(nodes.ptr[n].name) nodes.ptr[n].pos) {return -1}
+    check_copy(n MemberHookWord(nodes.ptr[n].a) bt)
+}
+member_forward=(n:int64 bt:int64 expected:int64):>int64=>$unsafe {
+    forward_member(n MemberHookWord(nodes.ptr[n].a) bt expected)
+}
+member_len_check=(n:int64 bt:int64):>void=>$unsafe {
+    dewy_len_check(n true bt MemberHookWord(nodes.ptr[n].a))
+    return
+}
+member_module=(n:int64 bt:int64 expected:int64 is_callee:bool):>int64=>$unsafe {
+    let fname=MemberHookWord(nodes.ptr[n].name)
+    let m=MemberHookWord(types.ptr[bt].mod)
+    let s=module_lookup(m fname)
+    let qualifier=MemberHookWord(nodes.ptr[n].a)
+    if nodes.ptr[qualifier].kind not=? 'ident' or (name_of(MemberHookWord(nodes.ptr[qualifier].name)) as array<uint8>)[0] not=? b'$' {
+        if dewy_at(nodes.ptr[n].pos) {rational_one_spelling(m fname nodes.ptr[n].pos "")}
+    }
+    if s =? 0 {
+        if name_of(fname) =? "path" and not dewy_at(nodes.ptr[n].pos) {fatal(nodes.ptr[n].pos "paths are plain functions: `join_path(a, b)`, `file_name(p)`, `dir_name(p)`, `extension(p)`, `file_exists(p)`")}
+        fatal(nodes.ptr[n].pos "module '{name_of(MemberHookWord(modules[m].name))}' has no member '{name_of(fname)}'")
+    }
+    nodes.ptr[n]=Node(kind='ident' pos=nodes.ptr[n].pos name=int32(fname) flags=int32(MemberHookWord(nodes.ptr[n].flags) & NF_MUT))
+    if is_callee {callee_at=n}
+    let t=check_expr_in_module(n m expected)
+    last_checked=n
+    return t
+}
+member_type=(n:int64 bt:int64 expected:int64 is_callee:bool @bypass:bool):>int64=>$unsafe {
+    let fname=MemberHookWord(nodes.ptr[n].name)
+    let t:MemberHookWord=0
+    let tt=prune(MemberHookWord(types.ptr[bt].elem))
+    if tt =? ref_addr_type and (name_of(fname) =? "min" or name_of(fname) =? "max") {
+        nodes.ptr[n]=nodes.ptr[bc_int((if name_of(fname) =? "max" {ref_addr_max()} else {0}) nodes.ptr[n].pos)]
+        bypass=true
+        return check_expr(n T_INT)
+    }
+    if tt =? T_MATH_INT and (name_of(fname) =? "min" or name_of(fname) =? "max") {
+        fatal(nodes.ptr[n].pos "mathematical int has no min or max; int64 describes the interim storage limits")
+    }
+    if tt not=? 0 and is_int(tt) and (name_of(fname) =? "min" or name_of(fname) =? "max") {
+        if ide_on {ide_ref(nodes.ptr[n].pos fname IK_CONST 0 tt 0)}
+        let bits=MemberHookWord(types.ptr[tt].bits)
+        let value:MemberHookWord=0
+        if name_of(fname) =? "min" {
+            if types.ptr[tt].sign {value=MemberHookWord(1) << (bits - 1)}
+            if types.ptr[tt].sign and bits <? 64 {value=-value}
+        }
+        else {
+            if bits =? 64 {value=-1} else {value=(MemberHookWord(1) << bits) - 1}
+            if types.ptr[tt].sign {value=MemberHookWord(uint64<overflow='wrap'>(value) >> 1)}
+        }
+        let lit=mk('int_lit' nodes.ptr[n].pos)
+        nodes.ptr[lit].ival=value
+        # Keep the bound's type when a constant/default is cloned and checked again.
+        nodes.ptr[n]=Node(kind='conv' pos=nodes.ptr[n].pos a=int32(lit) aux=int32(int64(CV.int_)) aux2=1 type=int32(tt))
+        if not types.ptr[tt].sign and value <? 0 {add_flag(lit NF_U64)}
+        check_expr(lit tt);
+        t=tt
+    }
+    else if tt not=? 0 and is_float(tt) and float_constant_named(name_of(fname)) {
+        if ide_on {ide_ref(nodes.ptr[n].pos fname IK_CONST 0 tt 0)}
+        let lit=mk('float_lit' nodes.ptr[n].pos)
+        nodes.ptr[lit].fval=float_constant(name_of(fname) MemberHookWord(types.ptr[tt].bits) =? 64)
+        nodes.ptr[n]=Node(kind='conv' pos=nodes.ptr[n].pos a=int32(lit) aux=int32(int64(CV.float_)) aux2=1 type=int32(tt))
+        check_expr(lit tt);
+        t=tt
+    }
+    else if tt not=? 0 and types.ptr[tt].kind =? 'struct_' and not is_callee and dewy_type_method(MemberHookWord(structs.ptr[MemberHookWord(types.ptr[tt].st)].decl) fname) >=? 0 {
+        # `Type.method`: a static method of no arguments is called by its name
+        let callee=mk('field' nodes.ptr[n].pos)
+        nodes.ptr[callee].a=nodes.ptr[n].a
+        nodes.ptr[callee].name=int32(fname)
+        nodes.ptr[n]=Node(kind='call' pos=nodes.ptr[n].pos a=int32(callee))
+        bypass=true
+        return check_expr(n expected)
+    }
+    else if tt not=? 0 and types.ptr[tt].kind =? 'enum_' {
+        let vi=find_variant(MemberHookWord(types.ptr[tt].st) fname)
+        if vi <? 0 {fatal(nodes.ptr[n].pos "{dt(tt)} has no variant '{name_of(fname)}'{variant_hint_for(tt name_of(fname))}")}
+        if variants.ptr[MemberHookWord(structs.ptr[MemberHookWord(types.ptr[tt].st)].variants) + vi].nfields not=? 0 {fatal(nodes.ptr[n].pos "variant '{name_of(fname)}' needs arguments")}
+        if ide_on {ide_variant_ref(nodes.ptr[n].pos fname tt vi)}
+        nodes.ptr[n].kind='dotname'
+        nodes.ptr[n].aux=int32(vi)
+        nodes.ptr[n].a=0
+        t=tt
+    }
+    else {
+        # (vec3.up, Vector3.zero: written out here)
+        if tt not=? 0 and is_vec(tt) {
+            let vn=name_of(fname)
+            let dims=vec_n(tt)
+            let lit=""
+            if vn =? "zero" {lit="0"} else if vn =? "one" {lit="1"}
+            else if dims =? 3 {
+                if vn =? "up" {lit="0, 1, 0"} else if vn =? "down" {lit="0, -1, 0"}
+                else if vn =? "left" {lit="-1, 0, 0"} else if vn =? "right" {lit="1, 0, 0"}
+                else if vn =? "forward" {lit="0, 0, -1"} else if vn =? "back" {lit="0, 0, 1"}
+            }
+            else if dims =? 2 {
+                if vn =? "up" {lit="0, -1"} else if vn =? "down" {lit="0, 1"}
+                else if vn =? "left" {lit="-1, 0"} else if vn =? "right" {lit="1, 0"}
+            }
+            if (lit as array<uint8>).length >? 0 {
+                let why=""
+                if vn =? "forward" {why=" (forward is -z, the way a camera looks)"}
+                if dims =? 2 and (vn =? "up" or vn =? "down") {why=" (y goes down the screen)"}
+                fatal(nodes.ptr[n].pos "write it out: `{dt(tt)}({lit})`{why}")
+            }
+        }
+        fatal(nodes.ptr[n].pos "type has no member '{name_of(fname)}'")
+    }
+    t
+}
+member_vector=(n:int64 bt:int64 expected:int64 @bypass:bool):>int64=>$unsafe {
+    let fname=MemberHookWord(nodes.ptr[n].name)
+    if files[pos_file(nodes.ptr[n].pos)].is_dewy and not swizzle_name(fname) and fn_name_for(bt fname) and member_call_without_arguments(bt fname) {
+        # (`v.norm` is `v.norm()`: a vector's function, called with a dot as a container's are)
+        let method=mk('field' nodes.ptr[n].pos)
+        nodes.ptr[method].a=nodes.ptr[n].a
+        nodes.ptr[method].name=int32(fname)
+        nodes.ptr[n]=Node(kind='call' pos=nodes.ptr[n].pos a=int32(method) aux2=-9)
+        bypass=true
+        return check_expr(n expected)
+    }
+    let t=check_swizzle(n bt)
+    if ide_on {ide_ref(nodes.ptr[n].pos fname IK_FIELD 0 t 0)}
+    t
+}
+member_deref=(pos:int64 bt:int64):>void=>{
+    ffi_deref(pos bt)
+    return
+}
+member_fields=(si:int64):>void=>{
+    check_struct_fields(si)
+    return
+}
+member_field_ref=(n:int64 si:int64 fi:int64 t:int64):>void=>$unsafe {
+    ide_field_ref(nodes.ptr[n].pos MemberHookWord(nodes.ptr[n].name) MemberHookWord(structs.ptr[si].decl) fi t)
+    return
+}
+member_method_value=(n:int64 method:int64 is_callee:bool expected:int64):>int64=>$unsafe {
+    let text="{receiver_text(MemberHookWord(nodes.ptr[n].a))}.{name_of(MemberHookWord(nodes.ptr[n].name))}"
+    if not dewy_bare_fn(n is_callee) {fatal(nodes.ptr[n].pos "'{text}' is a method, which is not a value yet: call it, `{text}()`")}
+    loop i in [1..nkids(method)) {
+        if nodes.ptr[kid(method i)].b =? 0 {bare_fn_error(n text true)}
+    }
+    add_flag(MemberHookWord(nodes.ptr[n].a) NF_CHECKED)
+    bare_call(n expected)
+}
+member_fn_value=(n:int64 t:int64 is_callee:bool expected:int64):>int64=>$unsafe {
+    if not dewy_bare_fn(n is_callee) {return -1}
+    add_flag(MemberHookWord(nodes.ptr[n].a) NF_CHECKED)
+    bare_fn_value(n t "{receiver_text(MemberHookWord(nodes.ptr[n].a))}.{name_of(MemberHookWord(nodes.ptr[n].name))}" expected)
+}
+member_narrow_path=(n:int64 t:int64):>int64=>$unsafe {
+    let al=path_alias(n)
+    if al <? 0 {return t}
+    nodes.ptr[n]=nodes.ptr[mk_ident_local(al nodes.ptr[n].pos)]
+    MemberHookWord(locals.ptr[al].type)
+}
+member_error=(n:int64 code:int64 bt:int64):>void=>$unsafe {
+    if code =? 1 {fatal(nodes.ptr[n].pos "sets insert with push: replace `.add(value)` with `.push(value)`")}
+    if code =? 2 {fatal(nodes.ptr[n].pos "'.{nodes.ptr[n].ival}' needs a tuple, found {dt(bt)}")}
+    fatal(nodes.ptr[n].pos "tuple index out of range")
+}
