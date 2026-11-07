@@ -33,8 +33,26 @@ const W = J/s
 const V = W/A
 const inch = 127m/5000
 const inches = inch
+const ft = 12inch
+const foot = ft
+const feet = ft
+const yd = 3ft
+const yard = yd
+const yards = yd
+const mile = 5280ft
+const miles = mile
+const kJ = 1000J
+const kW = 1000W
+const kWh = kW*hour
+# The International Table BTU, the one R-values are defined with: 1055.05585262 J exactly.
+const BTU = 1055.05585262J
 # Offset scales: one degree's size and where its zero sits. A temperature written in
 # one is a point; written as an operand next to a point it is a difference
 # (start + 20°C). A named difference is a point minus a point (25°C - 5°C) or plain kelvin (20K).
 const °C = __offset_unit("°C" K 5463K/20)
 const °F = __offset_unit("°F" 5K/9 45967K/180)
+# Thermal insulation. In a compound unit an offset unit counts one degree with no
+# offset (1 °F of R is 5/9 K), which makes 1RSI exactly 52752792631/9290304000 R.
+RValue:type = Temperature*Time^3/Mass
+const R = ft^2*°F*hour/BTU
+const RSI = m^2*K/W

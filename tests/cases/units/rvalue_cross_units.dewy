@@ -1,0 +1,14 @@
+# Interoperates with the rest of the system: every unit of the same dimension mixes.
+from units import inch, ft, m, cm, W, kW, J, K, °F, °C, BTU, R, RSI
+let wall = 11R + 2RSI
+printl"{wall/R =? 11 + 52752792631/4645152000}"
+let rise = 20°C - 5°C
+let flow = (2m*3m)*rise/(3RSI)
+printl"{flow} {flow as (BTU/hour)} {flow as kW}"
+let again = (2m*3m)*(rise as °F)/(3RSI)
+printl"{flow =? again}"
+let rate = 3.7R/inch
+printl"{(10cm)*rate as RSI}"
+printl"{rate as (R/inch)} {rate as (RSI/m)}"
+let rise_named = 40°F
+printl"{(100ft^2)*rise_named/(40R) as (BTU/hour)}"
