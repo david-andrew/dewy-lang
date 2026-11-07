@@ -204,6 +204,9 @@ class Runner:
     runs: int = 0
     # Case path -> 'value' or 'void', once a build has settled how to call its main.
     settled: dict = field(default_factory=dict)
+    # Cases a batch build rejected (the compiler reports one error per build, so each
+    # costs a failed build to find): later batches and modes run them alone from the start.
+    unbatchable: set = field(default_factory=set)
 
     def flags(self, mode: str) -> list[str]:
         flags = ['--release'] if mode.endswith('-release') else []
@@ -301,10 +304,10 @@ class Runner:
         shows the handle's type matched. Settled forms carry over to other
         batches and modes.
         """
-        cases = list(cases)
+        singles = [case for case in cases if case.path in self.unbatchable]
+        cases = [case for case in cases if case.path not in self.unbatchable]
         forms = [self.settled.get(case.path) or ('guess' if returns_void(case.path.read_text()) else 'value')
                  for case in cases]
-        singles = []
         while cases:
             work = self.directory('select' if select else 'batch')
             source, lines = batch_source(cases, forms, select)
@@ -324,6 +327,7 @@ class Runner:
             elif ours and forms[index] == 'value' and 'no type (void)' in message:
                 forms[index] = 'void'
             else:
+                self.unbatchable.add(cases[index].path)
                 singles.append(cases.pop(index))
                 forms.pop(index)
                 continue
