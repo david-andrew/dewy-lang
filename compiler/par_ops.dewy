@@ -1,0 +1,25 @@
+$runtime_checks
+from p"par.jo" import (ParIn pr)
+
+ParWord:type=int64<overflow='wrap'>
+pw=(@b:array<uint8> v:ParWord):>void=>{
+    loop k in [0..8) {b.push(uint8((v >> (8 * k)) & 255))}
+}
+pw_ints=(@b:array<uint8> xs:array<int64>):>void=>{
+    pw(@b xs.length)
+    loop x in xs {pw(@b x)}
+}
+pr_ints=(@r:ParIn):>array<int64>=>{
+    let n=pr(@r)
+    let xs:array<int64>=[]
+    xs.reserve(n)
+    loop _ in [0..n) {xs.push(pr(@r))}
+    xs
+}
+pr_n=(@r:ParIn per:ParWord):>array<int64>=>{
+    let n=pr(@r) * per
+    let xs:array<int64>=[]
+    xs.reserve(n)
+    loop _ in [0..n) {xs.push(pr(@r))}
+    xs
+}

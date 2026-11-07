@@ -26,6 +26,7 @@ use 'lower.jo'
 use 'types.jo'
 use 'ast.jo'
 use 'fused.jo'
+use 'par_ops.dewy'
 
 # (DEWY_EMIT_WORKERS=n: how many; 1: none. DEWY_EMIT_FORCE=1: workers even for a small
 # program, for tests. DEWY_PAR_TIME=1: how long each part took)
@@ -209,13 +210,6 @@ par_worker = (q: IrFn[], fin: bool[], a: int, b: int, r0: int, fd: int):
     if env("DEWY_PAR_TIME") != none: eprint("  worker {a}..{b}: emit {(tw1 - tw0) * 1000.0:.1} ms, pack {(tw2 - tw1) * 1000.0:.1} ms, write {(time() - tw2) * 1000.0:.1} ms, {out.len()} bytes")
     exit(0)
 
-pw = (b: mut u8[], v: int):
-    loop k in [0..8): b.push(u8((v >> (8 * k)) & 255))
-
-pw_ints = (b: mut u8[], xs: int[]):
-    pw(b, xs.len())
-    loop x in xs: pw(b, x)
-
 # ---- joining a worker's run onto what is here ----
 struct ParIn:
     b: u8[]
@@ -228,20 +222,6 @@ pr = (r: mut ParIn) -> int:
     else: v = ((data(r.b) + r.i) as *int)[0]            # (x86-64 and arm64 load from any address)
     r.i += 8
     v
-
-pr_ints = (r: mut ParIn) -> int[]:
-    n = pr(r)
-    xs: int[]
-    xs.reserve(n)
-    loop _ in [0..n): xs.push(pr(r))
-    xs
-
-pr_n = (r: mut ParIn, per: int) -> int[]:
-    n = pr(r) * per
-    xs: int[]
-    xs.reserve(n)
-    loop _ in [0..n): xs.push(pr(r))
-    xs
 
 par_here = 0                # functions of workers' runs made again here (their pads moved)
 

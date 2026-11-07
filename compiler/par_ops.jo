@@ -1,0 +1,37 @@
+use 'par.jo'
+use 'native_debug.dewy'
+use 'pe_format.dewy'
+use 'elf_format.dewy'
+use 'x64_module.dewy'
+use 'x64_emit.dewy'
+use 'driver_pipeline.dewy'
+use 'x64_allocate.dewy'
+use 'ir_types.dewy'
+use 'main.jo'
+use 'util.jo'
+use 'ir.jo'
+use 'x64.jo'
+use 'check.jo'
+use 'watch.jo'
+use 'lower.jo'
+use 'types.jo'
+use 'ast.jo'
+use 'fused.jo'
+
+pw = (b: mut u8[], v: int):
+    loop k in [0..8): b.push(u8((v >> (8 * k)) & 255))
+pw_ints = (b: mut u8[], xs: int[]):
+    pw(b, xs.len())
+    loop x in xs: pw(b, x)
+pr_ints = (r: mut ParIn) -> int[]:
+    n = pr(r)
+    xs: int[]
+    xs.reserve(n)
+    loop _ in [0..n): xs.push(pr(r))
+    xs
+pr_n = (r: mut ParIn, per: int) -> int[]:
+    n = pr(r) * per
+    xs: int[]
+    xs.reserve(n)
+    loop _ in [0..n): xs.push(pr(r))
+    xs
