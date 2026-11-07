@@ -127,18 +127,12 @@ quantity_constant = (n: int, num: int, den: int, dim: int, expected: int, shown:
     else if value.denominator == 1 and not bundled_rational_type(hint) and (value.shown == 0 or is_int(hint)):
         a = bc_int(value.numerator, pos)
         check_expr(a, if is_int(hint): hint else: 0)
-    else if value.shown != 0:
-        # (written decimals keep printing as decimals through units: 2.5kg*9.81N/kg/N is 24.525)
+    else:
+        # (already in lowest terms: no gcd at run time. Written decimals keep printing as
+        # decimals through units: 2.5kg*9.81N/kg/N is 24.525)
         a = rational_constant(value.numerator, value.denominator, pos, false, value.shown)
         check_expr(a, 0)
         rational_constants[a] = rational_constant_parts(value.numerator, value.denominator)
-    else:
-        ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
-        callee = bc_field(bc_ident("$dewy_rational", pos), "rational", pos)
-        a = mk(.call, pos)
-        nodes[a].a = i32(callee)
-        set_list(a, [bc_int(value.numerator, pos), bc_int(value.denominator, pos)])
-        check_expr(a, 0)
     tag = if dim != 0 and is_quantity(expected) and quantity_dimension(expected) == dim: quantity_tag(expected) else: 0
     t = mk_quantity(ntype(a), dim, 0, tag)
     nodes[n] = Node(kind = .conv, pos = pos, a = i32(a), aux = i32(int(CV.quantity_const)), aux2 = i32(scale), type = i32(t), flags = i32(NF_CHECKED))
