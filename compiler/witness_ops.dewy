@@ -10,6 +10,7 @@ from p"checks_thin.dewy" import (library_exit_call)
 from p"checks_static.dewy" import (assertion_refuted)
 from p"checks_stmt_hooks.dewy" import (stmt_terminates)
 from p"checker_tokens.dewy" import (Tok)
+from p"directives.jo" import (DIR_STATIC dir_policy)
 from p"directive_rules.dewy" import (dir_defer)
 from p"expr.jo" import (CV IN intrinsics is_dewy_set_type ntype shown_fn_name)
 from p"checks_thin_expr.dewy" import (is_map_type)
@@ -1140,7 +1141,8 @@ wit_refinement=(n:WitWord t:WitWord atom:RefAtom self:WitWord a:WitWord b:WitWor
             if left not=? "" and right not=? "" {relation="{left} {wit_op(atom.op)} {right}"}
         }
     }
-    if relation =? "" {relation=wit_field_relation(t atom)}
+    # (only for an error: a check deferred to run time drops its notes, dir_defer)
+    if relation =? "" and (fact_query or dir_policy(nodes.ptr[n].pos) =? DIR_STATIC) {relation=wit_field_relation(t atom)}
     let missing=if storage {""} else {wit_relation(s s op x y refuted)}
     if refuted {
         wit_context(contract)

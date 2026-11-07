@@ -2,7 +2,7 @@ $runtime_checks
 from p"ast.jo" import (NF_INCLUSIVE NF_STEP RANGE_EXHAUSTION has_flag kid nkids nodes)
 from p"check.jo" import (LF_DECL dewy_at fns locals)
 from p"checker_tokens.dewy" import (Tok)
-from p"directives.jo" import (dir_name_assumed_bounds dir_value)
+from p"directives.jo" import (DIR_STATIC dir_name_assumed_bounds dir_policy dir_value)
 from p"directive_rules.dewy" import (dir_defer)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"exact.jo" import (exact_progress_math exact_word_reads)
@@ -262,7 +262,8 @@ fact_narrow_check=(n:RangeWord @s:FactState value:RangeWord):>bool=>$unsafe {
         return false
     }
     err_notes.push([(-1) "help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`"])
-    let held=fact_pushed_into(n)
+    # (only for an error: a check deferred to run time drops its notes, dir_defer)
+    let held=if fact_query or dir_policy(nodes.ptr[n].pos) =? DIR_STATIC {fact_pushed_into(n)} else {""}
     if held not=? "" {err_notes.push([(-1) "help: the destination is an element of `{held}`, an array<{dt(ntype(n))}> by the values it was made from: make it hold `int` where it is made, `let {held}:array<int> = ...`"])}
     let repair=if lc not=? 1 and hc not=? 1 {"{low} <=? {side.text} and {side.text} <=? {shown_limit}"} else {relation}
     wit_unknown(n fact_bound(s value) "`{relation}` for the conversion to {dt(ntype(n))}" 0 repair missing)
