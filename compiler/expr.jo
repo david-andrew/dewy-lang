@@ -6265,7 +6265,7 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
     decls: int[]
     if closure != 0: decls.push(poly_families[int(types[prune(ntype(closure))].st)].decl)
     else: collect_named(int(nodes[n].name), mod, &decls)
-    if mod < 0 and closure == 0 and nodes[n].name == i32(intern("to_int")) and dewy_at(nodes[n].pos):
+    if mod < 0 and closure == 0 and nodes[n].name == i32(intern("to_int")) and dewy_at(nodes[n].pos) and not bound_here(int(nodes[n].name)):
         own = false
         loop d in decls:
             if not decl_in_prelude(d): own = true

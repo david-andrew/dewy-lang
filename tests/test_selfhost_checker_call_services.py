@@ -97,6 +97,7 @@ simple_enum = (t: int) -> bool: false
 dewy_quantity_call = (n: int, name: int, a: int, expected: int) -> int: 0
 ''',
     'check.jo': r'''
+bound_here = (name: int) -> bool: false
 cur_mod = () -> int: 0
 demand_name = (name: int): return
 dewy_at = (pos: int) -> bool: false

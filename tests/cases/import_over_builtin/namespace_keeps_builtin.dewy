@@ -1,0 +1,8 @@
+# A module imported under a name binds only the name: plain `find` and `to_int` stay
+# Dewy's; the library's are reached through it.
+import p"@lib/core/str.jo" as jo
+let s = "é漢xyx"
+printl(find(s "x") ?? -1)
+printl(to_int("0x10") ?? -1)
+printl(jo.find(s "x"))
+printl(jo.to_int("0x10") ?? -1)

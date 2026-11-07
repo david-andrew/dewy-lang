@@ -1,0 +1,10 @@
+# An import may shadow the prelude's: a selected `to_int` and `find` are the
+# library's own, not Dewy's built-in readings (hex and `_` read; byte offsets).
+from p"@lib/core/str.jo" import (find rfind to_int)
+let s = "é漢xyx"
+printl(find(s "x"))
+printl(rfind(s "x"))
+printl(to_int("0x10") ?? -1)
+printl(to_int("1_000") ?? -1)
+let parse = @to_int
+printl(parse("0x20") ?? -1)

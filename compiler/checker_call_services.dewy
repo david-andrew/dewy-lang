@@ -11,7 +11,7 @@ from p"type_ops.dewy" import (fixed_len get_struct_inst int_policy is_soa policy
 from p"units.jo" import (bundled_word_rational_type)
 from p"unit_ops.dewy" import (dewy_quantity_call)
 from p"checker_expr.dewy" import (call_by_name check_expr check_intrinsic finish_arg lookup)
-from p"check.jo" import (check_struct_fields cur_mod demand_name dewy_at ensure_global globals jo_type_spelling locals method_modules module_lookup modules prelude runtime_fn syms universe)
+from p"check.jo" import (bound_here check_struct_fields cur_mod demand_name dewy_at ensure_global globals jo_type_spelling locals method_modules module_lookup modules prelude runtime_fn syms universe)
 from p"checks_thin.dewy" import (resolve_alias resolve_type)
 from p"dewy_method_ops.dewy" import (dewy_type_method)
 from p"exact.jo" import (exact_int_result exact_type)
@@ -276,7 +276,7 @@ call_name_early=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expecte
         }
         ide_complete_names()
     }
-    if not ufcs and mod_scope <? 0 and args.length >=? 1 and (name =? id_find or name =? id_rfind or name =? id_index_of or name =? id_chars) and (args.length >=? 2 or name =? id_chars) and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' {
+    if not ufcs and mod_scope <? 0 and args.length >=? 1 and (name =? id_find or name =? id_rfind or name =? id_index_of or name =? id_chars) and (args.length >=? 2 or name =? id_chars) and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and not bound_here(name) {
         let s=lookup(name)
         if s not=? 0 and syms.ptr[s].kind =? 'fns' and decl_in_prelude(CDWord(syms.ptr[s].decl)) {
             let a0=args.ptr[0]
@@ -318,7 +318,7 @@ call_name_early=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expecte
         let r=dewy_range_tail_ordered(n args expected)
         if r >=? 0 {return r}
     }
-    if not ufcs and mod_scope <? 0 and args.length =? 1 and dewy_quantity_name(name) and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+    if not ufcs and mod_scope <? 0 and args.length =? 1 and dewy_quantity_name(name) and nodes.ptr[args.ptr[0]].kind not=? 'namedarg' and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and not bound_here(name) {
         let s=lookup(name)
         if s not=? 0 and syms.ptr[s].kind =? 'fns' and decl_in_prelude(CDWord(syms.ptr[s].decl)) {
             let a0=args.ptr[0]
@@ -328,7 +328,7 @@ call_name_early=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expecte
             if r not=? 0 {return r}
         }
     }
-    if name =? ci(28 "abs") and mod_scope <? 0 and args.length =? 1 and dewy_at(nodes.ptr[n].pos) and not program_fn_named(name) {
+    if name =? ci(28 "abs") and mod_scope <? 0 and args.length =? 1 and dewy_at(nodes.ptr[n].pos) and not program_fn_named(name) and not bound_here(name) {
         let a=args.ptr[0]
         if not has_flag(a NF_CHECKED) {
             check_expr(a 0);
@@ -448,7 +448,7 @@ call_name_collect=(n:CDWord name:CDWord mod_scope:CDWord args:array<int64> expec
         else {call_collect_fns(name @decls)}
     }
     else {call_collect_named(name mod_scope @decls)}
-    if name =? ci(7 "to_int") and mod_scope <? 0 and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy {
+    if name =? ci(7 "to_int") and mod_scope <? 0 and files.ptr[pos_file(nodes.ptr[n].pos)].is_dewy and not bound_here(name) {
         let own=false
         loop d in decls {
             if not decl_in_prelude(d) {own=true}
