@@ -1,0 +1,7 @@
+Pair:type = [a:int64 b:int64]
+__eq__ = (x:Pair y:Pair):>bool => x.a =? y.b and x.b =? y.a
+main = () => {
+    let d:dict<Pair int> = []
+    d[Pair[1 2]] = 1
+    loop p in d.keys.values printl(d[p])
+}

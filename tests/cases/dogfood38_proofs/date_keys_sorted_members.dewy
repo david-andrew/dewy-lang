@@ -1,0 +1,10 @@
+# Dates compare by their day number, a field equal to itself: a date from the
+# sorted keys is a key, as text and numbers are.
+main = () => {
+    let weeks:dict<Date float64> = []
+    let log:array<[Date float64]> = [[date"2026-11-02" 6.0] [date"2026-10-26" 5.2] [date"2026-11-02" 12.0]]
+    loop [d km] in log {
+        weeks[d] = (weeks.get(d) ?? 0.0) + km
+    }
+    loop k in weeks.keys.sorted() printl("{k}: {weeks[k]:.1f}")
+}

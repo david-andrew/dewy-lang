@@ -1,0 +1,7 @@
+Id:type = [v:int64]
+__eq__ = (x:Id y:Id):>bool => x.v not=? y.v
+main = () => {
+    let d:dict<Id int> = []
+    d[Id[1]] = 1
+    loop p in d.keys.values printl(d[p])
+}

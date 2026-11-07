@@ -1,0 +1,14 @@
+# A record key with no equality of its own, and one whose equality compares each
+# field to the same field: both equal themselves.
+Cell:type = [row:int64 col:int64]
+Tag:type = [name:string level:int64]
+__eq__ = (a:Tag b:Tag):>bool => a.name =? b.name and a.level =? b.level
+main = () => {
+    let grid:dict<Cell string> = []
+    grid[Cell[2 1]] = "b"
+    grid[Cell[1 5]] = "a"
+    loop c in grid.keys.values printl("{c.row},{c.col} {grid[c]}")
+    let tags:dict<Tag int> = []
+    tags[Tag["x" 1]] = 10
+    loop t in tags.keys.values printl("{t.name} {tags[t]}")
+}

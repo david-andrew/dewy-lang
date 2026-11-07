@@ -390,6 +390,67 @@ fact_length_max = () -> int:
     if ptr_size == 4: return 4294967295
     (1 << 56) - 1
 
+# A record key type that equals itself and hashes as it did (so a key a snapshot of
+# d.keys holds is found again in d): no hash of its own, fields that are such keys
+# (whole numbers, booleans, text, such records; never floats, NaN being unequal to
+# itself), and no equality of its own or one that compares each field to the same field
+# of the other (`__eq__=(a:Date b:Date):>bool=>a._days =? b._days`). Read from the value
+# helpers checking chose (check_value_members); a type checking never asked about is
+# not one. O(fields + the equality's body), memoized per type.
+fact_reflexive_keys: {int: bool} = {}
+fact_reflexive_key = (t0: int, depth: int = 0) -> bool:
+    t = representation_type(prune(t0))
+    if is_int(t) and fact_scalar(t) or t == T_STR or t == T_BOOL: return true
+    if depth > 4 or tkind(t) != .struct_ or is_map_type(t) or is_dewy_set_type(t): return false
+    if let known = fact_reflexive_keys.get(t): return known
+    fact_reflexive_keys[t] = false
+    if not value_hash_fns.has(t) or not value_equal_fns.has(t) or value_hash_fns[t] != 0: return false
+    si = int(types[t].st)
+    loop i in [0..int(structs[si].nfields)):
+        if not fact_reflexive_key(int(fields[int(structs[si].fields) + i].type), depth + 1): return false
+    eq = value_equal_fns[t]
+    if eq != 0 and (fns[eq].params.len() != 2 or not fact_reflexive_eq(int(fns[eq].body), fns[eq].params[0], fns[eq].params[1], depth)): return false
+    fact_reflexive_keys[t] = true
+    true
+
+# `a.f =? b.f` joined by `and`, each field a reflexive key, a and b the equality's two
+# parameters in order (fact_reflexive_key). O(body).
+fact_reflexive_eq = (e0: int, a0: int, b0: int, depth: int) -> bool:
+    e = e0
+    a = a0
+    b = b0
+    # (a body block first binds its own `a` and `b` from the parameters: compare those)
+    if e > 0 and nodes[e].kind == .block and nkids(e) >= 1:
+        loop i in [0..nkids(e) - 1):
+            c = kid(e, i)
+            init = int(nodes[c].b)
+            if nodes[c].kind != .vardecl or init <= 0 or nodes[init].kind != .ident or int(locals[int(nodes[c].sym)].flags) & LF_ASSIGNED != 0: return false
+            if int(nodes[init].sym) == a: a = int(nodes[c].sym)
+            else if int(nodes[init].sym) == b: b = int(nodes[c].sym)
+            else: return false
+        e = kid(e, nkids(e) - 1)
+    loop e > 0 and (nodes[e].kind == .return_ or nodes[e].kind == .exprstmt): e = int(nodes[e].a)
+    if e <= 0: return false
+    if nodes[e].kind == .and_: return fact_reflexive_eq(int(nodes[e].a), a, b, depth) and fact_reflexive_eq(int(nodes[e].b), a, b, depth)
+    x = 0; y = 0
+    # (any representation's `=?`, text's and an exact integer's too: the fields' types decide)
+    if nodes[e].kind == .binary and nodes[e].op == i32(int(Tok.eq)):
+        x = int(nodes[e].a); y = int(nodes[e].b)
+    else if nodes[e].kind == .call and nodes[e].aux == 0 and nkids(e) == 2: x = kid(e, 0); y = kid(e, 1)
+    else: return false
+    if nodes[x].kind != .field or nodes[y].kind != .field or nodes[x].name != nodes[y].name or nodes[x].aux < 0: return false
+    p = int(nodes[x].a); q = int(nodes[y].a)
+    if nodes[p].kind != .ident or nodes[q].kind != .ident or int(nodes[p].sym) != a or int(nodes[q].sym) != b: return false
+    if not fact_reflexive_key(ntype(x), depth + 1): return false
+    # (a record field compared through its own equality, which must be that one)
+    # (text compared by the library's own text equality)
+    if nodes[e].kind == .call:
+        ft = representation_type(prune(ntype(x)))
+        f = int(nodes[e].sym)
+        if ft == T_STR: return f > 0 and fns[f].decl != 0 and pos_in_lib(nodes[int(fns[f].decl)].pos)
+        return tkind(ft) == .struct_ and value_equal_fns.get(ft) == f
+    true
+
 fact_scalar = (t0: int) -> bool:
     t = fact_type(t0)
     types[t].kind == .bool_ or types[t].kind == .int_
@@ -3301,7 +3362,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     kt = representation_type(struct_targ(int(types[fact_type(ntype(kid(n, 0)))].st), 0))
                     # User equality/hash hooks need their own proof; even a
                     # snapshot key need not compare equal to itself.
-                    if source != 0 and name != "values" and (fact_scalar(kt) or kt == T_STR) and s.projections.len() < FACT_CAP:
+                    if source != 0 and name != "values" and (fact_scalar(kt) or kt == T_STR or fact_reflexive_key(kt)) and s.projections.len() < FACT_CAP:
                         fact_add_projection(s, FactProjection(fresh, FACT_KEYS_SOURCE, false, source))
                         # (its key positions, which a later entry change keeps: fact_map_member)
                         if fact_name_vals == 0: fact_name_vals = intern("vals")

@@ -1,0 +1,7 @@
+Id:type = [v:int64]
+hash = (k:Id):>uint64 => uint64(k.v and 7)
+main = () => {
+    let d:dict<Id int> = []
+    d[Id[1]] = 1
+    loop p in d.keys.values printl(d[p])
+}
