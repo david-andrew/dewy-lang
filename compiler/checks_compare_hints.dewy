@@ -17,6 +17,7 @@ from p"prelude_ops.dewy" import (prelude_demand_all)
 from p"secret_checks.dewy" import (secret_hint)
 from p"types.jo" import (T_MATH_INT T_U8 T_VEC2 T_VEC3 T_VEC4 is_int is_numeric is_union is_vec prune structs tkind type_eq types union_members variants)
 from p"type_ops.dewy" import (dt dt_named union_index)
+from p"refine.jo" import (str_set_of str_sets)
 from p"units.jo" import (bundled_rational_type)
 from p"util.jo" import (fatal line_col name_of)
 
@@ -100,6 +101,13 @@ union_operand_why=(n:CompareWord u:CompareWord):>string=>$unsafe {
     let shown=if member not=? 0 {dt(member)} else {"int64"}
     " (find out which it holds first: `if x is? {shown} \{ ... }` or a `match`)"
 }
+# `d =? 2` with d of a string-literal union (its members are in the message head): ask which, or match
+str_set_compare_why=(operand:CompareWord t:CompareWord):>string=>$unsafe {
+    let held=if nodes.ptr[operand].kind =? 'ident' and nodes.ptr[operand].name >? 0 {name_of(CompareWord(nodes.ptr[operand].name))} else {"x"}
+    let first=str_sets[str_set_of(t)][0]
+    if dewy_at(nodes.ptr[operand].pos) {return " (`{held}` is a word, not a number: ask which with `{held} =? '{first}'`, or `match` it)"}
+    " (`{held}` is a word, not a number: ask which with `{held} == '{first}'`, or `match` it)"
+}
 cmp_error=(n:CompareWord ta:CompareWord tb:CompareWord):>void=>$unsafe {
     let why=variant_hint(CompareWord(nodes.ptr[n].b) ta)
     let a=CompareWord(nodes.ptr[n].a)
@@ -126,6 +134,9 @@ cmp_error=(n:CompareWord ta:CompareWord tb:CompareWord):>void=>$unsafe {
     if (why as array<uint8>).length =? 0 and ((type_eq(prune(ta) T_U8) and tkind(tb) =? 'str_') or (tkind(ta) =? 'str_' and type_eq(prune(tb) T_U8))) {
         why=" (`s[i]` is a character's code, a number: the character as text is `s[i..i]`)"
     }
+    # (a union of string literals against a number: name its members, not a conversion)
+    if (why as array<uint8>).length =? 0 and is_numeric(tb) and str_set_of(ta) not=? 0 {why=str_set_compare_why(CompareWord(nodes.ptr[n].a) ta)}
+    if (why as array<uint8>).length =? 0 and is_numeric(ta) and str_set_of(tb) not=? 0 {why=str_set_compare_why(CompareWord(nodes.ptr[n].b) tb)}
     if (why as array<uint8>).length =? 0 and ((tkind(ta) =? 'str_' and is_numeric(tb)) or (is_numeric(ta) and tkind(tb) =? 'str_')) {
         why=" (text is not a number, even with digits in it: `to_int(s) ?? 0` or `to_float(s) ?? 0.0` reads one, and `input_int(...)` asks for one)"
     }
