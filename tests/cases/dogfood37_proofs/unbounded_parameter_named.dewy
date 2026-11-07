@@ -1,0 +1,10 @@
+# With n negative, i - n passes the end: state what n is.
+f = (xs:array<float64> n:int64):>float64 => {
+    let total = 0.0
+    loop i in [0..xs.length) {
+        total += xs[i]
+        if i >=? n total -= xs[i - n]
+    }
+    total
+}
+main = () => printl(f([1.0 2.0 3.0] 1))

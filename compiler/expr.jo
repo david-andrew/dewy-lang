@@ -2167,6 +2167,12 @@ rfc_arg_message = (d: int, fi: int, a: int, ptx: int, cd: Cand) -> str:
     else if nodes[a].type != 0:
         last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
         # (`sum_all(sizes)`, sizes an `array<int64>` where an `array<int>` is wanted)
+        # (`counts[d]`-style calls with d from `t.in_zone(z).date`: the failure it may hold, for the program to answer)
+        if dewy_at(nodes[a].pos) and is_union(ntype(a)) and not is_union(ptx) and tkind(ptx) != .opt:
+            loop m in union_members(ntype(a)):
+                if exception_member(prune(m)):
+                    last_err += " (it may hold a failure such as {dt(m)}: handle that first, with `?? fallback` or `or_throw`)"
+                    break
         if comprehension_binding(a) and tkind(ntype(a)) == .array and tkind(ptx) == .array and is_int(telem(prune(ntype(a)))) and is_int(telem(prune(ptx))) and not contains(last_err, "(integer literals"): last_err += " (an array's elements are not converted one by one: give it its type where it is made, `let {name_of(int(nodes[a].name))}:{dt(ptx)} = ...`)"
     else if nodes[a].kind == .dotname and tkind(ptx) == .enum_:
         vn = int(nodes[a].name)

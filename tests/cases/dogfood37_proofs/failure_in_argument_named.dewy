@@ -1,0 +1,6 @@
+count = (d:Date):>int => 1
+main = () => {
+    let z = zone("Asia/Tokyo")
+    if z is? exception return
+    printl(count(instant"2026-01-01T00:00:00Z".in_zone(z).date))
+}

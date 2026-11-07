@@ -225,6 +225,23 @@ wit_cause = (b: FactBound, n: int):
     else if b.reason == .budget and (nodes[w].kind == .while_ or nodes[w].kind == .for_): wit_note(nodes[w].pos, "the loop analysis budget ran out at this loop; what it changes is unknown")
     else if b.reason == .budget: wit_note(nodes[w].pos, "the fact budget ran out here")
 # Function-level context: the generic instance being analyzed.
+# Why arithmetic has no known range: a plain parameter (or else local) among its operands has no bound
+# here, which the program can state. O(1).
+wit_unsupported = (w: int) -> str:
+    if nodes[w].kind == .binary and (nodes[w].op == 58 or nodes[w].op == 59 or nodes[w].op == 60):
+        plain = 0
+        loop operand in [int(nodes[w].a), int(nodes[w].b)]:
+            e = operand
+            loop e != 0 and nodes[e].kind == .conv: e = int(nodes[e].a)
+            if e == 0 or nodes[e].kind != .ident or nodes[e].aux != 1: continue
+            l = int(nodes[e].sym)
+            if tkind(int(locals[l].type)) == .refined: continue
+            name = name_of(int(nodes[e].name))
+            if int(locals[l].flags) & (LF_PARAM | LF_MUTPARAM | LF_VALUEPARAM) != 0:
+                return "nothing bounds `{name}` here, so this has no known range: guard it first, or state it where the parameter is declared, `{name}:{dt(prune(int(locals[l].type)))}<(>=? 0)>`"
+            if plain == 0: plain = e
+        if plain != 0: return "nothing bounds `{name_of(int(nodes[plain].name))}` here, so this has no known range: guard it first"
+    "this operation is outside the fact language"
 wit_context = (contract: int):
     if contract > 0: wit_note(contract, "the contract is declared here")
     f = fact_owner

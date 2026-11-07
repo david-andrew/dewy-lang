@@ -1,0 +1,8 @@
+f = (xs:array<int> n:int64<(>=? 0)>):>int => {
+    let total = 0
+    loop i in [0..xs.length) {
+        if i >=? n total += xs[i - n]
+    }
+    total
+}
+main = () => printl(f([1 2 3] 1))
