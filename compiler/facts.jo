@@ -348,6 +348,26 @@ const FACT_SELF_BOUND = -31
 const FACT_COMPONENT_FACTS = -64
 const FACT_ROW_ELEMENTS = 8
 
+# What held of every element of base holds of what a shrink left of them: its copy, hull and
+# bound, and a literal's inventory as a hull, positions being gone. O(inventory), only with a
+# self-length type about, whose shrink obligations are its one consumer.
+fact_shrunk_elements = (s: mut FactState, base: int, fresh: int):
+    if base == 0 or s.projections.len() + 3 >= FACT_CAP: return
+    loop selector in [FACT_ELEMENT_COPY, FACT_ELEMENT_BELOW]:
+        i = fact_projection_find(s, base, selector, false)
+        if i >= 0: fact_add_projection(s, FactProjection(fresh, selector, false, s.projections[i].value))
+    hull = fact_projection_find(s, base, FACT_ELEMENT_VALUE, false)
+    if hull >= 0:
+        fact_add_projection(s, FactProjection(fresh, FACT_ELEMENT_VALUE, false, s.projections[hull].value))
+        return
+    parts = fact_inventory(s, base)
+    if parts.len() == 0: return
+    whole = fact_bound(s, parts[0])
+    loop part in parts:
+        one = fact_bound(s, part)
+        whole = FactBound(min(whole.lo, one.lo), max(whole.hi, one.hi))
+    fact_add_projection(s, FactProjection(fresh, FACT_ELEMENT_VALUE, false, fact_new(s, whole)))
+
 fact_grown_roots: {int: bool} = {}
 fact_name_vals = 0
 
@@ -3558,6 +3578,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 appended = fact_replace(s, base, length, true, position, ntype(a))
                 fresh = fact_replace(s, appended, -1, false, size, ntype(a))
             else if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, size))
+            if ref_self_active and plain and (id == .pop or id == .remove): fact_shrunk_elements(s, base, fresh)
             fact_store_route(s, route, fresh, n, true)
             return if result != 0: result else: fact_fresh(s, ntype(n))
         # `xs.extend(ys)` grows by ys's length, `truncate(k)` never grows,
@@ -3600,6 +3621,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     fact_difference(s, added, size, -old.lo, n)
             fresh = fact_new(s, FactBound(), FactTerm(type = ntype(a)))
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(fresh, -1, false, size))
+            if ref_self_active and id == .truncate and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(a))): fact_shrunk_elements(s, base, fresh)
             # Extending an empty value copies exactly the evaluated source.
             # Keep its key provenance and element inventory, never its mutable
             # place or exact positions. Hooked copies retain no such evidence.

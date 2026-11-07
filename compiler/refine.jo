@@ -548,6 +548,7 @@ ref_check_held = (n: int, self: int, args: int[], s: mut FactState):
     loop atom in ref_predicates[int(types[t].st)]:
         if atom.a.kind == 6:
             truth = ref_self_truth(s, self, ref_self_k(atom))
+            if truth < 0 and ref_self_shrinks.has(n): truth = ref_self_written_truth(s, self, t, ref_self_k(atom))
             if truth == 0: ref_self_fail(n, t, self, s, true)
             if truth < 0:
                 proven = false
@@ -1413,9 +1414,26 @@ ref_self_truth = (s: mut FactState, value: int, k: int) -> int:
         c = s.projections[copy].value
         if fact_compare(s, .le, c, limit) == 1 or k < FACT_MAX and fact_bound(s, c).hi <= k + 1: return 1
     hull = fact_projection_find(s, value, FACT_ELEMENT_VALUE, false)
-    if hull >= 0 and k < FACT_MAX and fact_bound(s, s.projections[hull].value).hi <= k + 1: return 1
+    if hull >= 0 and ref_self_hull_holds(s, fact_bound(s, s.projections[hull].value).hi, length, k): return 1
     below = fact_projection_find(s, value, FACT_ELEMENT_BELOW, false)
     if below >= 0 and fact_compare(s, .lt, s.projections[below].value, ref_value(RefTerm(0, path = [-1], offset = k + 2), value, [], T_INT, s)) == 1: return 1
+    -1
+
+# Is every element at most hi within the length + k, whatever the length is, or for its least?
+ref_self_hull_holds = (s: mut FactState, hi: int, length: int, k: int) -> bool:
+    if k >= FACT_MAX or hi >= FACT_MAX: return false
+    if hi <= k + 1: return true
+    least = fact_bound(s, length).lo
+    least > FACT_MIN and least >= 0 and hi <= least + k
+
+# A shrink keeps the bound written on every element, as `v <? 1` in
+# `array<int64<v => v <? p.length and v <? 1>>`: each store of one has proven it. O(atoms).
+ref_self_written_truth = (s: mut FactState, self: int, t: int, k: int) -> int:
+    array = prune(int(types[t].elem))
+    if types[array].kind != .array: return -1
+    element = int(types[array].elem)
+    length = fact_project(s, self, -1, false, T_INT)
+    if self != 0 and length != 0 and ref_self_hull_holds(s, ref_interval(element, fact_domain(element)).hi, length, k): return 1
     -1
 
 ref_self_fail = (n: int, t: int, self: int, s: FactState, refuted: bool):
