@@ -26,7 +26,7 @@ main = ():
         source = ROOT / 'tests/cases' / (case + '.dewy')
         cases.append((source, 41, source.with_suffix('.err').read_bytes().splitlines()[0]))
     for case in ('deadlock/mutex_basics', 'deadlock/channel_turns',
-                 'deadlock/recursive_service', 'no_deadlocks/request_reply'):
+                 'deadlock/recursive_service', 'protocols/request_reply'):
         cases.append((ROOT / 'tests/cases' / (case + '.dewy'), 0, b'checked\n'))
     for source, status, expected in cases:
         modules = modules_for(source, tmp_path / 'unused', 'deadlock_graph')

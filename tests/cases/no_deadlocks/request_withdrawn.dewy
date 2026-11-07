@@ -1,0 +1,14 @@
+# modes: native
+# `$no_deadlocks` on one function: asking a service waits on `serve`'s protocol, which has no
+# certificate until a library gate proves it. The server outside the scope is not checked.
+square = (n:int64):>int64 => n * n
+ask = (s:Service<int64 int64>):>int64 | Closed | Canceled => {
+    $no_deadlocks
+    s.request(3) or_throw
+}
+main = ():>void | Closed | Canceled => {
+    let total = serve(@square @ask) or_throw
+    printl"{total}"
+}
+
+$runtime_checks

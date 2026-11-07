@@ -1,8 +1,6 @@
 # modes: native native-release
 # A deadline cancels a service mid-conversation: the client's request gives Canceled, the server
-# stops and closes what is left, and nothing stays waiting. The deadline is recovery; the
-# protocol is what certifies the waits.
-$no_deadlocks
+# stops and closes what is left, and nothing stays waiting.
 slow = (n:int64):>int64 => {
     let x:int64 = 0
     loop i in [0..2000000) { x += i % 7 }

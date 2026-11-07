@@ -211,7 +211,7 @@ nd_poll=(lp:CertificateWord):>void=>$unsafe {
     loop p in polled {
         if dl_atomic_written(CertificateWord(nodes.ptr[lp].b) nd_fn() p) {continue}
         nd_wait(nodes.ptr[lp].pos "polls {dl_name(p)}")
-        nd_bad(nodes.ptr[lp].pos "loop waits for another task to set {dl_name(p)}, by polling it" "an atomic set elsewhere is an event no certificate covers; wait for a join or a certified protocol (`serve`, `pipeline`) instead")
+        nd_bad(nodes.ptr[lp].pos "loop waits for another task to set {dl_name(p)}, by polling it" "an atomic set elsewhere is an event no certificate covers; wait for a join instead")
         return
     }
 }
@@ -249,7 +249,7 @@ nd_call=(n:CertificateWord @held:array<DlHeld>):>void=>$unsafe {
         loop i in [1..nkids(n)) {nd_walk(kid(n i) @held)}
         let verb=if op =? 1 {"waits to send into"} else {"waits to receive from"}
         nd_wait(pos "{verb} {dl_name(dl_resolve(kid(n 0) nd_fn()))}")
-        nd_bad(pos "{verb} the channel {dl_name(dl_resolve(kid(n 0) nd_fn()))}" "a raw channel's waits are not certified; use a certified protocol: `serve` for request/reply, `pipeline` for a pipeline with feedback")
+        nd_bad(pos "{verb} the channel {dl_name(dl_resolve(kid(n 0) nd_fn()))}" "a raw channel's waits are not certified; spawn the work as tasks and join them, which is certified (`serve` and `pipeline` have no certificate until a library gate proves them)")
         return
     }
     if op >? 0 {
@@ -324,10 +324,16 @@ nd_foreign=(n:CertificateWord g:CertificateWord d:CertificateWord):>void=>$unsaf
     if dir_audited_wait(nodes.ptr[n].pos) {return}
     nd_bad(nodes.ptr[n].pos "calls the foreign function '{name_of(CertificateWord(nodes.ptr[d].name))}', which may block" "wrap it in an audited adapter, a function whose body says `$audited_wait` (a person has checked that it waits only on the outside world), or declare it with a row that excludes `blocks` if it never waits")
 }
+# `serve` (with its `request`) and `pipeline` have no proof yet: until a library gate proves them,
+# their certificates are withdrawn, and the checks below are what the gate's certificate will add.
+nd_withdrawn=(pos:CertificateWord what:string):>void=>{
+    nd_bad(pos "{what}, whose protocol has no proof yet (its certificate waits for a library gate)" "spawn the work as tasks and join them, which is certified, or opt this scope out with `$no_deadlocks = false`")
+}
 nd_protocol=(n:CertificateWord gname:string held:array<DlHeld>):>void=>$unsafe {
     let pos=nodes.ptr[n].pos
     let none_held:array<DlHeld>=[]
     if gname =? "request" {
+        nd_withdrawn(pos "asks a service of `serve`")
         nd_wait(pos "asks a service")
         let t=nd_top()
         nd_stack.ptr[t].flags|=ND_ASK
@@ -336,6 +342,7 @@ nd_protocol=(n:CertificateWord gname:string held:array<DlHeld>):>void=>$unsafe {
         return
     }
     if gname =? "serve" and nkids(n) =? 2 {
+        nd_withdrawn(pos "serves requests with `serve`")
         nd_wait(pos "serves requests")
         nd_held_across(held pos "serves requests")
         let h=dl_fn_arg(kid(n 0))
@@ -349,6 +356,7 @@ nd_protocol=(n:CertificateWord gname:string held:array<DlHeld>):>void=>$unsafe {
         return
     }
     if gname =? "pipeline" {
+        nd_withdrawn(pos "runs a pipeline with `pipeline`")
         nd_wait(pos "runs a pipeline")
         nd_held_across(held pos "runs a pipeline")
         nd_args(n none_held pos)

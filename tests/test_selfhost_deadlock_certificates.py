@@ -26,16 +26,17 @@ main = ():
 '''
     cases = []
     for case in ('no_deadlocks/foreign_block', 'no_deadlocks/function_value',
-                 'no_deadlocks/handler_asks', 'no_deadlocks/join_held',
+                 'no_deadlocks/serve_withdrawn', 'no_deadlocks/join_held',
                  'no_deadlocks/poll', 'no_deadlocks/raw_channel',
-                 'no_deadlocks/request_held', 'no_deadlocks/uncertified_callee',
-                 'deadlock/recursive_service_held'):
+                 'no_deadlocks/request_withdrawn', 'no_deadlocks/uncertified_callee',
+                 'no_deadlocks/pipeline_withdrawn', 'deadlock/recursive_service_held'):
         source = ROOT / 'tests/cases' / (case + '.dewy')
         cases.append((source, 41, source.with_suffix('.err').read_bytes().splitlines()[0]))
     for case in ('no_deadlocks/audited_adapter', 'no_deadlocks/certified_locks',
-                 'no_deadlocks/request_reply', 'no_deadlocks/pipeline_feedback',
-                 'no_deadlocks/pipeline_optional', 'no_deadlocks/protocol_outer_client',
-                 'no_deadlocks/protocol_cancel', 'deadlock/recursive_service'):
+                 'no_deadlocks/protocol_opted_out', 'protocols/request_reply',
+                 'protocols/pipeline_feedback', 'protocols/pipeline_optional',
+                 'protocols/protocol_outer_client', 'protocols/protocol_cancel',
+                 'deadlock/recursive_service'):
         cases.append((ROOT / 'tests/cases' / (case + '.dewy'), 0, b'checked\n'))
     for source, status, expected in cases:
         modules = modules_for(source, tmp_path / 'unused', 'deadlock_certificates')

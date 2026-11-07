@@ -1,6 +1,5 @@
 # Tier 5 / 109_log_pipeline / milestone 43
-# Acceptance: An access-log report as a pipeline (reader -> parser -> classifier -> aggregator) with a bounded window for backpressure, closing when the lines run out, and malformed-line counting, in a $no_deadlocks module whose every wait is certified.
-$no_deadlocks
+# Acceptance: An access-log report as a pipeline (reader -> parser -> classifier -> aggregator) with a bounded window for backpressure, closing when the lines run out, and malformed-line counting, through the library's pipeline protocol. (Its `$no_deadlocks` certificate is withdrawn until a library gate proves the protocol, so this module no longer sets the tag.)
 
 # Each log line is `METHOD PATH STATUS BYTES`, e.g. `GET /index.html 200 5120`;
 # anything else is counted as malformed and skipped.

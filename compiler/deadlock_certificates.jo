@@ -192,7 +192,7 @@ nd_poll = (lp: int):
     loop p in polled:
         if dl_atomic_written(int(nodes[lp].b), nd_fn(), p): continue
         nd_wait(nodes[lp].pos, "polls {dl_name(p)}")
-        nd_bad(nodes[lp].pos, "loop waits for another task to set {dl_name(p)}, by polling it", "an atomic set elsewhere is an event no certificate covers; wait for a join or a certified protocol (`serve`, `pipeline`) instead")
+        nd_bad(nodes[lp].pos, "loop waits for another task to set {dl_name(p)}, by polling it", "an atomic set elsewhere is an event no certificate covers; wait for a join instead")
         return
 
 nd_syscall = (n: int):
@@ -223,7 +223,7 @@ nd_call = (n: int, held: mut DlHeld[]):
         loop i in [1..nkids(n)): nd_walk(kid(n, i), held)
         verb = if op == 1: "waits to send into" else: "waits to receive from"
         nd_wait(pos, "{verb} {dl_name(dl_resolve(kid(n, 0), nd_fn()))}")
-        nd_bad(pos, "{verb} the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a raw channel's waits are not certified; use a certified protocol: `serve` for request/reply, `pipeline` for a pipeline with feedback")
+        nd_bad(pos, "{verb} the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a raw channel's waits are not certified; spawn the work as tasks and join them, which is certified (`serve` and `pipeline` have no certificate until a library gate proves them)")
         return
     if op > 0:
         loop c in kids(n): nd_walk(c, held)
@@ -287,10 +287,16 @@ nd_foreign = (n: int, g: int, d: int):
     if dir_audited_wait(nodes[n].pos): return
     nd_bad(nodes[n].pos, "calls the foreign function '{name_of(int(nodes[d].name))}', which may block", "wrap it in an audited adapter, a function whose body says `$audited_wait` (a person has checked that it waits only on the outside world), or declare it with a row that excludes `blocks` if it never waits")
 
+# `serve` (with its `request`) and `pipeline` have no proof yet: until a library gate proves them,
+# their certificates are withdrawn, and the checks below are what the gate's certificate will add.
+nd_withdrawn = (pos: int, what: str):
+    nd_bad(pos, "{what}, whose protocol has no proof yet (its certificate waits for a library gate)", "spawn the work as tasks and join them, which is certified, or opt this scope out with `$no_deadlocks = false`")
+
 nd_protocol = (n: int, gname: str, held: DlHeld[]):
     pos = nodes[n].pos
     none_held: DlHeld[]
     if gname == "request":
+        nd_withdrawn(pos, "asks a service of `serve`")
         nd_wait(pos, "asks a service")
         t = nd_top()
         nd_stack[t].flags |= ND_ASK
@@ -298,6 +304,7 @@ nd_protocol = (n: int, gname: str, held: DlHeld[]):
         nd_held_across(held, pos, "asks a service")
         return
     if gname == "serve" and nkids(n) == 2:
+        nd_withdrawn(pos, "serves requests with `serve`")
         nd_wait(pos, "serves requests")
         nd_held_across(held, pos, "serves requests")
         h = dl_fn_arg(kid(n, 0))
@@ -310,6 +317,7 @@ nd_protocol = (n: int, gname: str, held: DlHeld[]):
         nd_args(n, none_held, pos, 1)
         return
     if gname == "pipeline":
+        nd_withdrawn(pos, "runs a pipeline with `pipeline`")
         nd_wait(pos, "runs a pipeline")
         nd_held_across(held, pos, "runs a pipeline")
         nd_args(n, none_held, pos)

@@ -534,8 +534,12 @@ hold: `select` (D3d).
 
 ### `$no_deadlocks` certificates (stage 2, 2026-10-24)
 
-Built: the setting, the certificate check, two certified protocols and the audited
-adapter. Not built: monitored `Deadlock` scopes and STM (later, as decided).
+Built: the setting, the certificate check and the audited adapter. The two
+library protocols are built, but their certificates are withdrawn (decided
+2026-11-07) until a library gate proves them: a model check in the nightly gate
+plus a written argument for any window size, since a few fixed capacities prove
+nothing about the rest. Until then `$no_deadlocks` rejects `serve`, `request` and
+`pipeline`, and the checks for them below are what the certificate will add. Not built: monitored `Deadlock` scopes and STM (later, as decided).
 
 **The setting.** `$no_deadlocks` is a builtin boolean setting, scoped like the
 others (module, function body or block; `$no_deadlocks=false` opts a nested scope
@@ -571,8 +575,9 @@ complete for the code it certifies.
   another handle, so the order cannot place it; `lock_all` takes any set safely.
 - *A structured join* (the end of `concurrent`, `within`, `race`): every spawned
   function is in view and its waits certified, and no lock is held across it.
-- *A certified protocol from the library* (`request`, `serve`, `pipeline`, below):
-  no lock is held across it, and a `serve` handler asks no service.
+- *A certified protocol from the library* (`request`, `serve`, `pipeline`, below),
+  once a library gate proves it (none is certified yet): no lock is held across
+  it, and a `serve` handler asks no service.
 - *An audited adapter*, for a foreign call or raw system call that may block: a
   function whose body says `$audited_wait`. An `$extern` declared with a row that
   excludes `blocks` is trusted not to wait (the unsafe claim already made for rows).
@@ -601,7 +606,7 @@ computes (assumption 2), and its sends never wait (at most `window` items are in
 flight in channels of `window`). A cycle of tasks waiting on one another would need
 an edge against the ranking.
 
-**Certified protocols** (`lib/prelude/protocols.dewy`, loaded only when a
+**Library protocols, uncertified until the gate** (`lib/prelude/protocols.dewy`, loaded only when a
 program names them; provisional spellings `serve`, `Service`, `request`,
 `pipeline`):
 

@@ -21,7 +21,7 @@ await David, so that configuration is not yet fully enforceable.
 | A path taken whole (from arguments, the environment, input or anywhere else) has no base to escape: the file-system operations' `$warn_if path isnt? SafePath` takes it as safe | contained paths (compiler/safe_paths.jo) | `$confine_external_paths` (spelling provisional; `$bulletproof` includes it) |
 | `$no_deadlocks`: the scheduler is fair, local computation terminates, external peers cooperate | deadlock certificates (compiler/deadlock.jo; safety_and_concurrency.md) | stated assumptions of the theorem |
 | A foreign call or system call inside an audited adapter (`$audited_wait`, spelling provisional) waits only on the outside world, never on a task of the program | deadlock certificates (compiler/deadlock.jo) | none: the audit is a person's claim, like `$unsafe`; write `$audited_wait` only in each adapter (never for a module, never in a bundle) |
-| The library's certified protocols (`serve`, `pipeline`: lib/prelude/protocols.dewy) wait only as documented | deadlock certificates | *pending* (a model-checking gate for the primitives, as planned for the expert lane) |
+| (Withdrawn, 2026-11-07) The library's protocols (`serve`, `pipeline`: lib/prelude/protocols.dewy) wait only as documented | deadlock certificates | none needed: `$no_deadlocks` rejects them until a model-checking gate proves them |
 
 When a new assumption is added anywhere in the compiler or library, it gets a
 row here in the same change.

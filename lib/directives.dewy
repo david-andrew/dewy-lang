@@ -28,8 +28,9 @@ $finite_floats = {
 # Not yet enforceable (no opt-out metatag yet; assumptions.md marks them pending):
 # library asserts as invariants, the runtime core as environmental, library
 # environment failures, library obligations as runtime checks, the library's
-# raw memory in arenas, the library's drop hooks, values entering `$no_inf` as
-# finite, and the certified protocols `serve` and `pipeline`.
+# raw memory in arenas, the library's drop hooks, and values entering `$no_inf`
+# as finite. (`serve` and `pipeline` have no certificate until a library gate
+# proves them, so `$no_deadlocks` rejects them.)
 $bulletproof = {
     $no_hidden_costs
     $explicit_allocation_failure

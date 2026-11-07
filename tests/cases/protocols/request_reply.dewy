@@ -1,7 +1,6 @@
 # modes: native native-release
-# `$no_deadlocks`: request/reply through `serve`. Four client tasks ask one server at once and
+# Request/reply through `serve`. Four client tasks ask one server at once and
 # each gets its own replies; a request after the server stopped gives Closed, not a wait.
-$no_deadlocks
 square = (n:int64):>int64 => n * n
 client = (s:Service<int64 int64> base:int64):>int64 | Closed | Canceled => {
     let total:int64 = 0

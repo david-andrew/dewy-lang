@@ -1,0 +1,13 @@
+# modes: native
+# `$no_deadlocks`: `pipeline` has no certificate until a library gate proves it. Its control is
+# protocols/pipeline_feedback, which runs the protocol with no tag.
+$no_deadlocks
+step = (n:int64):>int64 => if n % 2 =? 0 n // 2 else 3 * n + 1
+again = (n:int64):>array<int64> => if n =? 1 [] else [n]
+main = ():>void | Canceled => {
+    let seeds:array<int64> = [6]
+    let path = pipeline(2 seeds @step @again) or_throw
+    printl"{path}"
+}
+
+$runtime_checks

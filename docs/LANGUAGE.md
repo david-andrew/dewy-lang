@@ -3560,7 +3560,6 @@ certificate is one of:
   about is an error here, and so is a lock-order cycle in a program without tasks.
 - a structured join: the end of `concurrent`, `within` and `race`, whose tasks'
   waits are certified, with no lock held across it.
-- a certified protocol from the library, below, with no lock held across it.
 - an audited adapter, for a foreign function that may block: a function whose
   body says `$audited_wait` (provisional spelling), where a person has checked
   that the call waits only on the outside world. A foreign function declared with
@@ -3569,12 +3568,14 @@ certificate is one of:
 A raw channel's, `mpmc`'s or `spsc`'s `send` and `receive`, a loop polling an atomic another task sets,
 a call of a function value the compiler cannot follow, and a wait in a lifecycle
 hook have no certificate. A lock is held only across other locks: holding one
-across a join, a request or a call that waits is an error. A call into code outside
+across a join or a call that waits is an error. A call into code outside
 the scope needs that code's waits certified too. A timeout is recovery, not a
 certificate: a wait inside `within` needs one like any other.
 
-The certified protocols (provisional spellings) are request/reply and a pipeline
-with feedback:
+The library's protocols (provisional spellings) are request/reply and a pipeline
+with feedback. They have no proof yet, so `$no_deadlocks` rejects them until a
+library check proves them: write them in a scope without it, or one that says
+`$no_deadlocks = false`, or spawn the work as tasks and join them, which is certified.
 
 ```dewy
 square = (n:int):>int => n * n
@@ -3591,8 +3592,7 @@ main = ():>void | Closed | Canceled => {
 `serve(handler body)` runs `handler` on a server task and `body` here with a
 `Service<Q R>`; `s.request(q)` gives the handler's reply, `Closed` once the server
 has stopped (when `body` returns), or `Canceled`. Requests from several tasks get
-their own replies. Under `$no_deadlocks` the handler must not ask a service
-itself, since a server waiting on a service may wait on itself.
+their own replies.
 `pipeline(window seeds work feedback)` runs `work` on a stage task over the seeds
 and every item fed back, and `feedback` here on each result, giving the items to
 feed back; it gives every result in order, or `Canceled`. At most `window` items
