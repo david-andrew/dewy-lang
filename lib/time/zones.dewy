@@ -303,13 +303,26 @@ _resolve=(local:int64 nanos:int z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none
     found.sort(reverse=true)
     if found.length =? 1 {return _at(local-found[0] nanos z found[0])}
     if found.length =? 0 {
-        let before=offset_at(z local-window)
-        let after=offset_at(z local+window)
+        # (a gap: at local-largest the clocks had not yet jumped, and at local-smallest they had)
+        let widest=seen[0]
+        let narrowest=seen[0]
+        loop o in seen {
+            if o >? widest {widest=o}
+            if o <? narrowest {narrowest=o}
+        }
+        let before=offset_at(z local-widest)
+        let after=offset_at(z local-narrowest)
         if gap =? 'preserve_displacement' {return _at(local-before nanos z after)}
         if gap =? 'next' {
-            # (the change itself: the first moment after the gap)
-            let change=_i64(record+16+_changes_before(record local-before)*8-8)
-            return _at(change 0 z after)
+            # (the change itself, whether the table or the zone's rule made it: the first moment
+            # after the gap, found between those two moments by the offsets alone)
+            let low=local-widest
+            let high=local-narrowest
+            loop high-low >? 1 {
+                let middle=low+(high-low)//2
+                if offset_at(z middle) =? before {low=middle} else {high=middle}
+            }
+            return _at(high 0 z offset_at(z high))
         }
         return Gap["{_local_text(local)} does not exist in {name(z)}: the clocks jumped from {_pair_text(before)} to {_pair_text(after)}. Add gap='preserve_displacement' or gap='next'" int(before) int(after)]
     }
