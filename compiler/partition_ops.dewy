@@ -1,0 +1,397 @@
+$runtime_checks
+from p"ast.jo" import (NF_GENERIC NF_GLOBAL NF_INCLUSIVE has_flag kid kids kids2 mk nkids nodes)
+from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_SHARED LF_VALUECAP fns locals)
+from p"expr.jo" import (IN ntype)
+from p"facts.jo" import (same_value word_integer_value)
+from p"facts_probes.dewy" import (fact_probe_function)
+from p"ir.jo" import (VI)
+from p"ir_builders.dewy" import (e_addi e_bin e_call e_iconst e_load e_slot e_store new_slot)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"lower.jo" import (HK LK_HELPER Val cur_fn env_v lfuncs)
+from p"lower_analysis.dewy" import (place_var same_var)
+from p"lower_group.dewy" import (gen_expr gen_index gen_place)
+from p"lower_primitives.dewy" import (e_call_nr e_daddr lf_helper rt str_data)
+from p"lower_storage.dewy" import (V arr_len arr_unique endc iff is_shared read_place ret_vt)
+from p"parallel_lower.jo" import (parallel_serial)
+from p"parallel_ops.dewy" import (parallel_prelude_call)
+from p"partition.jo" import (partition_active partition_data partition_descs partition_lengths partition_mode partition_proven)
+from p"types.jo" import (telem tkind tsize)
+from p"util.jo" import (fatal)
+
+PartWord:type=int64<overflow='wrap'>
+partition_scalar=(t:PartWord):>bool=>{
+    let k=tkind(t)
+    k =? 'int_' or k =? 'float_' or k =? 'bool_' or k =? 'void_'
+}
+partition_slice=(n:PartWord):>bool=>$unsafe {
+    nodes.ptr[n].kind =? 'index' and nodes.ptr[n].aux =? 1 and tkind(ntype(PartWord(nodes.ptr[n].a))) =? 'array'
+}
+partition_root=(n:PartWord):>PartWord=>$unsafe {
+    if partition_slice(n) {return PartWord(nodes.ptr[n].a)}
+    n
+}
+# Bounds must be inert: argument evaluation cannot invalidate an earlier
+# descriptor, nor change the shared endpoint used by the disjointness proof.
+partition_bound=(n:PartWord):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return true}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        return PartWord(locals.ptr[PartWord(nodes.ptr[n].sym)].flags) & (LF_ASSIGNED | LF_ADDR | LF_SHARED | LF_BYREF | LF_ALIAS | LF_MUTPARAM) =? 0
+    }
+    if k =? 'conv' {return partition_bound(PartWord(nodes.ptr[n].a))}
+    if k =? 'binary' and nodes.ptr[n].aux =? 0 and (nodes.ptr[n].op =? int32(58) or nodes.ptr[n].op =? int32(59)) {
+        return partition_bound(PartWord(nodes.ptr[n].a)) and partition_bound(PartWord(nodes.ptr[n].b))
+    }
+    false
+}
+partition_disjoint=(a:PartWord b:PartWord):>bool=>$unsafe {
+    if not partition_slice(a) or not partition_slice(b) {return false}
+    if not same_var(PartWord(nodes.ptr[a].a) PartWord(nodes.ptr[b].a)) {return false}
+    let x=PartWord(nodes.ptr[a].b)
+    let y=PartWord(nodes.ptr[b].b)
+    if nodes.ptr[x].b not=? 0 and has_flag(x NF_INCLUSIVE) or nodes.ptr[y].b not=? 0 and has_flag(y NF_INCLUSIVE) {return false}
+    let xl=PartWord(nodes.ptr[x].a)
+    let xh=PartWord(nodes.ptr[x].b)
+    let yl=PartWord(nodes.ptr[y].a)
+    let yh=PartWord(nodes.ptr[y].b)
+    if not partition_bound(xl) or not partition_bound(xh) or not partition_bound(yl) or not partition_bound(yh) {return false}
+    if xh not=? 0 and yl not=? 0 and same_value(xh yl) {return true}
+    if yh not=? 0 and xl not=? 0 and same_value(yh xl) {return true}
+    if xh not=? 0 and yl not=? 0 and nodes.ptr[xh].kind =? 'int_lit' and nodes.ptr[yl].kind =? 'int_lit' {return nodes.ptr[xh].ival <=? nodes.ptr[yl].ival}
+    if yh not=? 0 and xl not=? 0 and nodes.ptr[yh].kind =? 'int_lit' and nodes.ptr[xl].kind =? 'int_lit' {return nodes.ptr[yh].ival <=? nodes.ptr[xl].ival}
+    false
+}
+partition_parameter=(l:PartWord f:PartWord):>PartWord=>$unsafe {
+    if PartWord(locals.ptr[l].owner) not=? f or tkind(PartWord(locals.ptr[l].type)) not=? 'array' {return 0}
+    if PartWord(locals.ptr[l].flags) & LF_PARAM not=? 0 {return l}
+    if PartWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_EXPOSED | LF_SHARED) not=? 0 {return 0}
+    loop s in kids(PartWord(fns.ptr[f].body)) {
+        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        if nodes.ptr[s].sym not=? int32(l) {continue}
+        let a=PartWord(nodes.ptr[s].b)
+        if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) {
+            let p=PartWord(nodes.ptr[a].sym)
+            if fns.ptr[f].params.contains(p) {return p}
+        }
+    }
+    0
+}
+partition_formal=(n:PartWord f:PartWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? int32(1) {return false}
+    let l=PartWord(nodes.ptr[n].sym)
+    partition_parameter(l f) not=? 0
+}
+partition_body=(n:PartWord f:PartWord @seen:dict<int64 bool>):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        return nodes.ptr[n].aux =? int32(1) and partition_scalar(ntype(n))
+    }
+    if k =? 'lambda' or k =? 'fnref' or k =? 'partial' or k =? 'addr' or k =? 'defer_' {return false}
+    if k =? 'assign' {
+        let root=place_var(PartWord(nodes.ptr[n].a))
+        if root not=? 0 and partition_formal(root f) and PartWord(locals.ptr[PartWord(nodes.ptr[root].sym)].flags) & LF_MUTPARAM =? 0 {return false}
+    }
+    if k =? 'index' {
+        if nodes.ptr[n].aux not=? 0 or not partition_formal(PartWord(nodes.ptr[n].a) f) {return false}
+        return partition_scalar(ntype(n)) and partition_body(PartWord(nodes.ptr[n].b) f @seen)
+    }
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.len)) and nkids(n) =? 1 and partition_formal(kid(n 0) f) {return true}
+    if k =? 'call' {
+        if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return false}
+        let callee=PartWord(nodes.ptr[n].sym)
+        if not partition_function(callee @seen) {return false}
+        loop i in [0..nkids(n)) {
+            let arg=kid(n i)
+            let p=fns.ptr[callee].params[i]
+            if tkind(PartWord(locals.ptr[p].type)) =? 'array' {
+                let root=partition_root(arg)
+                if not partition_formal(root f) {return false}
+                if PartWord(locals.ptr[p].flags) & LF_MUTPARAM not=? 0 and PartWord(locals.ptr[PartWord(nodes.ptr[root].sym)].flags) & LF_MUTPARAM =? 0 {return false}
+                if partition_slice(arg) {
+                    let r=PartWord(nodes.ptr[arg].b)
+                    if nodes.ptr[r].b not=? 0 and has_flag(r NF_INCLUSIVE) or not partition_bound(PartWord(nodes.ptr[r].a)) or not partition_bound(PartWord(nodes.ptr[r].b)) {return false}
+                }
+            }
+            else if not partition_body(arg f @seen) {return false}
+        }
+        return true
+    }
+    if k =? 'intrinsic' {
+        let id=nodes.ptr[n].aux as IN
+        if id not=? IN.assert and id not=? IN.runtime_assert and id not=? IN.fmin and id not=? IN.fmax and id not=? IN.sqrt {return false}
+    }
+    if k =? 'vardecl' and nodes.ptr[n].aux2 =? 1 and partition_parameter(PartWord(nodes.ptr[n].sym) f) not=? 0 {return true}
+    if k =? 'vardecl' and not has_flag(n NF_GLOBAL) {
+        let fork=partition_fork(PartWord(nodes.ptr[n].b))
+        if fork not=? 0 {return partition_fork_safe(fork @seen)}
+    }
+    if k =? 'vardecl' and (has_flag(n NF_GLOBAL) or not partition_scalar(PartWord(locals.ptr[PartWord(nodes.ptr[n].sym)].type))) {return false}
+    let mask=isolation_children(k)
+    if mask <? 0 {return false}
+    if mask & 1 not=? 0 and not partition_body(PartWord(nodes.ptr[n].a) f @seen) {return false}
+    if mask & 2 not=? 0 and not partition_body(PartWord(nodes.ptr[n].b) f @seen) {return false}
+    if mask & 4 not=? 0 and not partition_body(PartWord(nodes.ptr[n].c) f @seen) {return false}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {
+            if not partition_body(child f @seen) {return false}
+        }
+    }
+    if mask & 32 not=? 0 {
+        loop child in kids2(n) {
+            if not partition_body(child f @seen) {return false}
+        }
+    }
+    true
+}
+# One query owns the visited set, including recursive edges. No optimistic
+# answer is published until every reachable body has passed the same checks.
+partition_function=(f:PartWord @seen:dict<int64 bool>):>bool=>$unsafe {
+    if seen.has(f) {return true}
+    if seen.length >=? 128 or fns.ptr[f].body =? 0 or fns.ptr[f].cabi or not partition_scalar(PartWord(fns.ptr[f].ret)) {return false}
+    if fns.ptr[f].caps.length >? 0 {return false}
+    seen[f]=true
+    loop p in fns.ptr[f].params {
+        let t=PartWord(locals.ptr[p].type)
+        if tkind(t) =? 'array' {
+            if not partition_scalar(telem(t)) {return false}
+        }
+        else if not partition_scalar(t) or PartWord(locals.ptr[p].flags) & LF_MUTPARAM not=? 0 {return false}
+    }
+    partition_body(PartWord(fns.ptr[f].body) f @seen)
+}
+partition_descriptor=(n:PartWord):>PartWord=>$unsafe {
+    if not partition_mode {return -1}
+    if partition_formal(n cur_fn) or partition_shared_root(n cur_fn) {return partition_descs.get(PartWord(nodes.ptr[n].sym)) ?? -1}
+    -1
+}
+partition_arg=(n:PartWord write:bool=true):>PartWord=>$unsafe {
+    let root=partition_root(n)
+    let desc=partition_descriptor(root)
+    let data:PartWord=0
+    let length:PartWord=0
+    if desc >=? 0 {
+        if not partition_slice(n) {return desc}
+        data=partition_data[PartWord(nodes.ptr[root].sym)]
+        length=partition_lengths[PartWord(nodes.ptr[root].sym)]
+    }
+    else {
+        if nodes.ptr[root].kind not=? 'ident' or nodes.ptr[root].aux not=? int32(1) or PartWord(locals.ptr[PartWord(nodes.ptr[root].sym)].flags) & (LF_ALIAS | LF_BYREF | LF_OWNERBORROW) not=? 0 {
+            fatal(nodes.ptr[n].pos "a mutable slice requires a direct array binding")
+        }
+        let p=gen_place(root write)
+        if write {arr_unique(p ntype(root))}
+        let array=read_place(p ntype(root))
+        data=e_addi(array 24)
+        length=arr_len(array)
+    }
+    if partition_slice(n) {
+        let r=PartWord(nodes.ptr[n].b)
+        if nodes.ptr[r].b not=? 0 and has_flag(r NF_INCLUSIVE) or not partition_bound(PartWord(nodes.ptr[r].a)) or not partition_bound(PartWord(nodes.ptr[r].b)) {
+            fatal(nodes.ptr[n].pos "mutable slices require stable, exclusive bounds")
+        }
+        let lo=if nodes.ptr[r].a =? 0 {e_iconst(0)} else {gen_index(PartWord(nodes.ptr[r].a))}
+        let hi=if nodes.ptr[r].b =? 0 {length} else {gen_index(PartWord(nodes.ptr[r].b))}
+        iff(e_bin('or_' VI e_bin('gtu' VI lo hi) e_bin('gtu' VI hi length)))
+        e_call_nr(rt("__panic_slice") [e_daddr(str_data("mutable slice")) lo hi length] (-1));
+        endc()
+        data=e_bin('add' VI data e_bin('mul' VI lo e_iconst(tsize(telem(ntype(root))))))
+        length=e_bin('sub' VI hi lo)
+    }
+    let slot=e_slot(new_slot(16 8))
+    e_store(slot 0 data 8);
+    e_store(slot 8 length 8);
+    slot
+}
+partition_call_needed=(f:PartWord args:array<int64>):>bool=>$unsafe {
+    loop i in [0..args.length) {
+        if PartWord(locals.ptr[fns.ptr[f].params[i]].flags) & LF_MUTPARAM not=? 0 and tkind(ntype(args[i])) =? 'array' {
+            if partition_slice(args[i]) or partition_descriptor(args[i]) >=? 0 {return true}
+        }
+    }
+    false
+}
+partition_call=(f:PartWord args:array<int64> order:array<int64>):>Val=>$unsafe {
+    let seen=dict<int64 bool>()
+    if not partition_function(f @seen) {fatal(nodes.ptr[args[0]].pos "mutable slice callee must only read or write elements: no resizing, copying, escaping or unknown calls")}
+    if order.length not=? 0 {fatal(nodes.ptr[args[0]].pos "mutable slices require source-order positional arguments")}
+    loop i in [0..args.length) {
+        if tkind(ntype(args[i])) not=? 'array' {continue}
+        loop j in [0..i) {
+            if tkind(ntype(args[j])) =? 'array' and (PartWord(locals.ptr[fns.ptr[f].params[i]].flags) & LF_MUTPARAM not=? 0 or PartWord(locals.ptr[fns.ptr[f].params[j]].flags) & LF_MUTPARAM not=? 0) and same_var(partition_root(args[i]) partition_root(args[j])) and not partition_disjoint(args[i] args[j]) {
+                fatal(nodes.ptr[args[i]].pos "mutable slice arguments overlap; pass disjoint places")
+            }
+        }
+    }
+    let argv:array<int64>=[]
+    loop i in [0..args.length) {
+        let a=args[i]
+        if tkind(ntype(a)) =? 'array' {argv.push(partition_arg(a PartWord(locals.ptr[fns.ptr[f].params[i]].flags) & LF_MUTPARAM not=? 0))}
+        else {
+            if not partition_bound(a) and nodes.ptr[a].kind not=? 'bool_lit' {fatal(nodes.ptr[a].pos "mutable slice arguments must be stable values")}
+            argv.push(gen_expr(a).v)
+        }
+    }
+    let ret=PartWord(fns.ptr[f].ret)
+    let serial=if parallel_serial {1} else {0}
+    V(e_call(lf_helper(HK.partition serial f) argv ret_vt(ret)) false)
+}
+# A binary scoped fork spells its two partitions explicitly. Both arms are
+# single direct calls; all array accesses in each child are confined to the
+# supplied views. Unknown or overlapping footprints are never parallelized.
+partition_arm=(n0:PartWord):>PartWord=>$unsafe {
+    let n=n0
+    if nodes.ptr[n].kind =? 'block' {
+        if nkids(n) not=? 1 {return 0}
+        n=kid(n 0)
+    }
+    if nodes.ptr[n].kind =? 'exprstmt' {n=PartWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return 0}
+    n
+}
+partition_shared_root=(n:PartWord f:PartWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? int32(1) {return false}
+    let l=PartWord(nodes.ptr[n].sym)
+    let fl=PartWord(locals.ptr[l].flags)
+    PartWord(locals.ptr[l].owner) =? f and fl & LF_CAPTURE not=? 0 and (fl & LF_PARTBORROW not=? 0 or is_shared(l) or fl & LF_VALUECAP not=? 0 and fl & (LF_ASSIGNED | LF_ADDR | LF_EXPOSED) =? 0) and tkind(ntype(n)) =? 'array' and partition_scalar(telem(ntype(n)))
+}
+partition_fork=(n0:PartWord):>PartWord=>$unsafe {
+    let n=n0
+    if nodes.ptr[n].kind =? 'parallel_region' {n=PartWord(nodes.ptr[n].a)}
+    if not parallel_prelude_call(n "parallel_range") or nkids(n) not=? 2 {return 0}
+    let count=kid(n 0)
+    let callback=kid(n 1)
+    if nodes.ptr[count].kind not=? 'int_lit' or nodes.ptr[count].ival not=? 2 or nodes.ptr[callback].kind not=? 'lambda' or has_flag(callback NF_GENERIC) {return 0}
+    let f=PartWord(nodes.ptr[callback].sym)
+    let body=PartWord(fns.ptr[f].body)
+    let branch:PartWord=0
+    let returned=false
+    loop statement in kids(body) {
+        if nodes.ptr[statement].kind =? 'vardecl' and nodes.ptr[statement].aux2 =? 1 {continue}
+        if nodes.ptr[statement].kind =? 'if_' and branch =? 0 and not returned {branch=statement}
+        else if nodes.ptr[statement].kind =? 'return_' and branch not=? 0 and not returned {
+            let r=PartWord(nodes.ptr[statement].a)
+            if nodes.ptr[r].kind not=? 'int_lit' or nodes.ptr[r].ival not=? 0 {return 0}
+            returned=true
+        }
+        else {return 0}
+    }
+    if branch =? 0 or not returned {return 0}
+    let condition=PartWord(nodes.ptr[branch].a)
+    if nodes.ptr[condition].kind not=? 'binary' or nodes.ptr[condition].op not=? int32(69) or nodes.ptr[condition].aux not=? 0 {return 0}
+    let index=word_integer_value(PartWord(nodes.ptr[condition].a))
+    let zero=word_integer_value(PartWord(nodes.ptr[condition].b))
+    if nodes.ptr[zero].kind not=? 'int_lit' or nodes.ptr[zero].ival not=? 0 or nodes.ptr[index].kind not=? 'ident' or nodes.ptr[index].aux not=? int32(1) {return 0}
+    let l=PartWord(nodes.ptr[index].sym)
+    if fns.ptr[f].params.length not=? 1 or locals.ptr[l].owner not=? int32(f) or locals.ptr[l].name not=? locals.ptr[fns.ptr[f].params[0]].name or PartWord(locals.ptr[l].flags) & LF_ASSIGNED not=? 0 {return 0}
+    let left=partition_arm(PartWord(nodes.ptr[branch].b))
+    let right=partition_arm(PartWord(nodes.ptr[branch].c))
+    if left =? 0 or right =? 0 {return 0}
+    let arrays:array<int64>=[]
+    let writes:array<bool>=[]
+    let cut:PartWord=0
+    loop call in [left right] {
+        let callee=PartWord(nodes.ptr[call].sym)
+        let before=arrays.length
+        loop i in [0..nkids(call)) {
+            let arg=kid(call i)
+            if tkind(ntype(arg)) =? 'array' {
+                let write=PartWord(locals.ptr[fns.ptr[callee].params[i]].flags) & LF_MUTPARAM not=? 0
+                let root=partition_root(arg)
+                if not partition_shared_root(root f) {return 0}
+                if write and (not partition_slice(arg) or PartWord(locals.ptr[PartWord(nodes.ptr[root].sym)].flags) & LF_VALUECAP not=? 0) {return 0}
+                arrays.push(arg)
+                writes.push(write)
+            }
+            else if not partition_bound(arg) and nodes.ptr[arg].kind not=? 'bool_lit' {return 0}
+        }
+        if arrays.length =? before {return 0}
+        if call =? left {cut=arrays.length}
+    }
+    loop a in [0..cut) {
+        loop b in [cut..arrays.length) {
+            if (writes[a] or writes[b]) and same_var(partition_root(arrays[a]) partition_root(arrays[b])) and not partition_disjoint(arrays[a] arrays[b]) {return 0}
+        }
+    }
+    f
+}
+partition_fork_calls=(f:PartWord):>array<int64>=>$unsafe {
+    loop statement in kids(PartWord(fns.ptr[f].body)) {
+        if nodes.ptr[statement].kind =? 'if_' {return [partition_arm(PartWord(nodes.ptr[statement].b)) partition_arm(PartWord(nodes.ptr[statement].c))]}
+    }
+    []
+}
+partition_fork_safe=(f:PartWord @seen:dict<int64 bool>):>bool=>$unsafe {
+    loop call in partition_fork_calls(f) {
+        if not partition_function(PartWord(nodes.ptr[call].sym) @seen) {return false}
+    }
+    true
+}
+partition_local_arg=(l:PartWord write:bool=true):>PartWord=>$unsafe {
+    let n=mk('ident' locals.ptr[l].pos)
+    nodes.ptr[n].aux=int32(1)
+    nodes.ptr[n].sym=int32(l)
+    nodes.ptr[n].type=locals.ptr[l].type
+    partition_arg(n write)
+}
+# Reject escaping borrowed captures before any optimizer can erase a closure
+# construction or specialize its consumer. Only the directly checked fork
+# owns these borrowed environments and joins them before returning.
+partition_finalize=():>void=>$unsafe {
+    if not partition_active {return}
+    let allowed=dict<int64 bool>()
+    loop n in [1..nodes.length) {
+        if nodes.ptr[n].kind =? 'call' and nodes.ptr[n].aux =? 0 and partition_fork(n) not=? 0 {
+            allowed[kid(n 1)]=true
+        }
+    }
+    loop n in [1..nodes.length) {
+        if nodes.ptr[n].kind not=? 'lambda' or nodes.ptr[n].sym <=? 0 or nodes.ptr[n].type =? 0 {continue}
+        let f=PartWord(nodes.ptr[n].sym)
+        loop capture in fns.ptr[f].caps {
+            if PartWord(locals.ptr[int64(capture.inner)].flags) & LF_PARTBORROW not=? 0 and not allowed.has(n) {
+                fatal(nodes.ptr[n].pos "mutable array parameter captures require a proven-disjoint scoped fork")
+            }
+        }
+    }
+}
+partition_begin=(f:PartWord):>void=>$unsafe {
+    if not partition_mode {return}
+    partition_proven=fact_probe_function(f true)
+    partition_data.clear()
+    partition_lengths.clear()
+    partition_descs.clear()
+    loop p in fns.ptr[f].params {
+        if tkind(PartWord(locals.ptr[p].type)) =? 'array' {
+            let desc=PartWord(locals.ptr[p].vreg)
+            partition_descs[p]=desc
+            partition_data[p]=e_load(VI desc 0 8)
+            partition_lengths[p]=e_load(VI desc 8 8)
+        }
+    }
+    loop cap in fns.ptr[f].caps {
+        let l=int64(cap.inner)
+        if tkind(PartWord(locals.ptr[l].type)) =? 'array' {
+            let desc=e_load(VI env_v PartWord(locals.ptr[l].env_off) 8)
+            partition_descs[l]=desc
+            partition_data[l]=e_load(VI desc 0 8)
+            partition_lengths[l]=e_load(VI desc 8 8)
+        }
+    }
+    loop s in kids(PartWord(fns.ptr[f].body)) {
+        if nodes.ptr[s].kind not=? 'vardecl' or nodes.ptr[s].aux2 not=? 1 {break}
+        let l=PartWord(nodes.ptr[s].sym)
+        let p=partition_parameter(l f)
+        if p not=? 0 and p not=? l {
+            partition_descs[l]=partition_descs[p]
+            partition_data[l]=partition_data[p]
+            partition_lengths[l]=partition_lengths[p]
+        }
+    }
+}
+partition_inline_body=(index:PartWord):>bool=>$unsafe {
+    if index <? 0 or index >=? lfuncs.length {return false}
+    let lf=lfuncs.ptr[index]
+    lf.kind =? LK_HELPER and lf.hkind =? HK.partition and fns.ptr[lf.inst].kind =? FK_LAMBDA
+}
