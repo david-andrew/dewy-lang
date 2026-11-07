@@ -1,0 +1,327 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (cwd exit)
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_RDONLY has_flag kid kid2 nkids nkids2 nodes shadowable_decls)
+from p"check.jo" import (FK_INIT LF_UNNARROWED ceval ctxs cx demand_name dewy_at fns globals inst_counter lib_dir locals loop_copy_writes ml_struct ml_tick module_by_path module_ctx module_frames modules narrow_changes new_sym prelude push_scope_sym refine_deferred runtime_fn runtime_insts syms values_hint_label)
+from p"checker_alias.dewy" import (ca_resolve_alias)
+from p"checker_assigns.dewy" import (va_assign)
+from p"checker_blocks.dewy" import (bk_stmt)
+from p"checker_bodies.dewy" import (cb_check_body_now cb_check_fn_body cb_ensure_ret)
+from p"checker_body_results.dewy" import (xe_body)
+from p"checker_hooks.dewy" import (run_pending_functions)
+from p"checker_resolve.dewy" import (ct_resolve_binding ct_resolve_result ct_resolve_type)
+from p"checker_results.dewy" import (cr_has_value_return cr_syntactic_void cr_value_leaves)
+from p"checker_signature.dewy" import (cs_written_refinement)
+from p"checker_sinks.dewy" import (sink_return)
+from p"checker_state.dewy" import (FnInst)
+from p"checker_vardecls.dewy" import (vd_decl)
+from p"checker_zonk.dewy" import (xz_finalize xz_tree)
+from p"checks_call_hints.dewy" import (a_type)
+from p"checks_loop_copies.dewy" import (for_copied_binder)
+from p"dewy_methods.jo" import (dewy_decl_members)
+from p"expr.jo" import (can_coerce decl_in_prelude fn_used is_dewy_cursor_iter is_map_entries_type is_map_type ntype)
+from p"module_paths.dewy" import (module_key)
+from p"pcheck.jo" import (pc_child)
+from p"refine.jo" import (refine_active)
+from p"types.jo" import (is_numeric is_union prune structs tkind types dt get_struct_inst mk_fixed)
+from p"util.jo" import (fatal files intern name_of pos_file pos_in_lib warn)
+
+ThinWord:type=int64<overflow='wrap'>
+# `$shadowable const` (shadowable_decls) or the prelude, which is declared so as a
+# whole: an inner scope or an importing module may bind the name anew.
+decl_shadowable=(d:ThinWord):>bool=>$unsafe {
+    d not=? 0 and (shadowable_decls.has(d) or modules[ThinWord(nodes.ptr[d].mod)].is_prelude)
+}
+ml_bump=():>void=>{
+    ml_tick += 1
+    ml_struct=ml_tick
+}
+# names starting with _ stay in their module: `use` does not bring them (`import m` reaches
+# them as m._x, `from m import _x` by name). The library's are hidden from programs; its __
+# names are the runtime's, which code the compiler writes calls
+is_private=(name:ThinWord):>bool=>{
+    let s=name_of(name)
+    (s as array<uint8>).length >? 0 and (s as array<uint8>)[0] =? b'_'
+}
+lib_private=(name:ThinWord):>bool=>{
+    let s=name_of(name)
+    (s as array<uint8>).length >? 1 and (s as array<uint8>)[0] =? b'_' and (s as array<uint8>)[1] not=? b'_'
+}
+# The bundled exact fraction's types are the builtin `rational` and
+# `rational<int64>`: their library names are not a second spelling.
+rational_one_spelling=(im:ThinWord nm:ThinWord pos:ThinWord how:string):>void=>{
+    if files[ThinWord(modules[im].file)].path not=? "{lib_dir}/rational.dewy" {return}
+    let builtin=if name_of(nm) =? "Rational" {"rational"} else if name_of(nm) =? "RationalWord" {"rational<int64>"} else {""}
+    if builtin not=? "" {fatal(pos "the exact fraction type is the builtin `{builtin}`: {how}write `{builtin}`")}
+}
+# (the game loop's functions and main keep their own kind of result)
+never_skip_result=(decl:ThinWord):>bool=>$unsafe {
+    if nodes.ptr[decl].c not=? 0 {return true}
+    let nm=name_of(ThinWord(nodes.ptr[decl].name))
+    nm =? "main" or nm =? "update" or nm =? "draw"
+}
+# Normalize graph identity without changing source paths: library checks also
+# accept a relative lib_dir and compare it with the original source spelling.
+module_path_key=(path:string):>string=>{
+    module_key(path cwd())
+}
+find_module=(path:string):>int64=>{
+    module_by_path.get(module_path_key(path)) ?? -1
+}
+resolve_type=(tn:int64):>int64=>{
+    ct_resolve_type(tn)
+}
+readonly_global=(g:ThinWord):>bool=>$unsafe {
+    let d=ThinWord(globals.ptr[g].decl)
+    d not=? 0 and has_flag(d NF_RDONLY)
+}
+mk_fixed_checked=(e:ThinWord n:ThinWord pos:ThinWord):>int64=>{
+    if tkind(e) =? 'void_' {fatal(pos "an array of void")}
+    mk_fixed(e n)
+}
+# T[,], T[,,] ...: n-dimensional arrays (lib/std/nd.jo)
+nd_of=(t:ThinWord pos:ThinWord):>int64=>$unsafe {
+    let s=prelude.get(intern("NDArray")) ?? 0
+    if s =? 0 {fatal(pos "n-dimensional arrays are not available (lib/std/nd.jo is missing)")}
+    get_struct_inst(ThinWord(syms.ptr[s].ref) [t])
+}
+# type Name[T] = ...: the type it stands for, given its type arguments
+resolve_alias=(d:ThinWord targs:array<int64> use_pos:ThinWord):>int64=>{
+    ca_resolve_alias(d targs use_pos)
+}
+alias_resume=(d:int64):>void=>$unsafe {
+    if refine_deferred.length >? 0 {refine_resume(ThinWord(nodes.ptr[d].mod))}
+}
+push_type_params=(decl:ThinWord targs:array<int64>):>void=>$unsafe {
+    loop i in [0..nkids2(decl)) {
+        if i <? targs.length and (nodes.ptr[kid2(decl i)].aux =? 1) not=? (tkind(targs[i]) =? 'effect') {fatal(nodes.ptr[kid2(decl i)].pos "generic argument kind mismatch: expected Effect or value type")}
+        if i <? targs.length {push_scope_sym(ThinWord(nodes.ptr[kid2(decl i)].name) new_sym(ThinWord(nodes.ptr[kid2(decl i)].name) 'type_' targs[i] 0))}
+    }
+}
+refine_resume=(m:ThinWord):>void=>{
+    if refine_active or not refine_deferred.has(m) {return}
+    # (a forked check worker gives up its part: the compiler checks it again itself)
+    if pc_child >=? 0 {exit(1)}
+    refine_active=true
+}
+# a refinement written in the type annotations under node n (a declaration's parameters and
+# result, say)
+written_refinement=(n:ThinWord):>bool=>{
+    cs_written_refinement(n)
+}
+new_inst=(kind:ThinWord m:ThinWord base:string):>int64=>{
+    inst_counter += 1
+    fns.push(FnInst(kind=int32(kind) mod=int32(m) sym="f_{base}_{inst_counter}"))
+    fns.length - 1
+}
+has_value_return=(n:ThinWord):>bool=>{
+    cr_has_value_return(n)
+}
+value_leaves=(n:ThinWord @out:array<int64>):>void=>{
+    cr_value_leaves(n @out)
+}
+# the name of the type a Dewy method belongs to, or ""
+method_type_name=(d:ThinWord):>string=>$unsafe {
+    let t=ThinWord(nodes.ptr[kid(d 0)].a)
+    if t =? 0 or nodes.ptr[t].kind not=? 'tname' {return ""}
+    name_of(ThinWord(nodes.ptr[t].name))
+}
+syntactic_void=(body:ThinWord):>bool=>{
+    cr_syntactic_void(body)
+}
+ensure_ret=(f:ThinWord use_pos:ThinWord):>void=>$unsafe {
+    if fns.ptr[f].ret not=? 0 {return}
+    cb_ensure_ret(f use_pos)
+}
+leave_module_context=(m:ThinWord entered:bool):>void=>{
+    if not entered {return}
+    module_frames[m]=ctxs.pop()
+    module_ctx[m]=-1
+}
+# global g is changed here: in a function, that is something a call may do
+note_global_write=(g:ThinWord):>void=>$unsafe {
+    if globals.ptr[g].fn_written or cx <? 0 {return}
+    if fns.ptr[ThinWord(ctxs[cx].inst)].kind not=? int32(FK_INIT) {globals.ptr[g].fn_written=true} else {globals.ptr[g].init_written=true}
+}
+# ---------------- statements ----------------
+# (the library's exit(code): the program ends there)
+library_exit_call=(e:ThinWord):>bool=>$unsafe {
+    if nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].sym <=? 0 or ThinWord(nodes.ptr[e].sym) >=? fns.length {return false}
+    let d=ThinWord(fns.ptr[ThinWord(nodes.ptr[e].sym)].decl)
+    d not=? 0 and name_of(ThinWord(nodes.ptr[d].name)) =? "exit" and pos_in_lib(nodes.ptr[d].pos)
+}
+# (a function's name as written: its body under `$explicit_allocation_failure` is `__eaf_NAME`)
+oom_written_name=(id:ThinWord):>string=>{
+    let name=name_of(id)
+    if starts_with(name "__eaf_") {return name.byte_slice(6 (name as array<uint8>).length)}
+    name
+}
+set_block_value=(b:ThinWord e:ThinWord):>void=>$unsafe {
+    nodes.ptr[kid(b nkids(b) - 1)].a=int32(e)
+}
+# A written result `:>(int64 int64)` (dw_pack_type): how many values it gives, or 0.
+pack_result_count=(tn:ThinWord):>int64=>$unsafe {
+    if tn not=? 0 and nodes.ptr[tn].kind =? 'tarray' and nodes.ptr[tn].ival <? 0 {ThinWord(-nodes.ptr[tn].ival)} else {0}
+}
+# A binding's written type, where several values may be written, `let p:(int64 int64) = ...`.
+resolve_binding_type=(tn:ThinWord):>int64=>{
+    ct_resolve_binding(tn)
+}
+resolve_result_type=(tn:ThinWord):>int64=>{
+    ct_resolve_result(tn)
+}
+# The iterator protocol: a value whose type has a `next` method, giving the next
+# element or none, is iterated by calling it until none. `loop x in it` steps a
+# copy of the iterator (its value at loop entry); `loop x in @it` steps the bound
+# iterator in place, so the body can call its other methods to steer it (a tree
+# walk's `skip_children`). The loop becomes a `loop true` whose body starts by
+# taking the next element.
+dewy_iterator_type=(t:ThinWord):>bool=>$unsafe {
+    if types.ptr[t].kind not=? 'struct_' or is_map_type(t) or is_map_entries_type(t) or is_dewy_cursor_iter(t) {return false}
+    let members=dewy_decl_members.get(ThinWord(structs.ptr[ThinWord(types.ptr[t].st)].decl)) ?? dict<int64 int64>()
+    (members.get(intern("next")) ?? -1) >=? 0
+}
+# After a loop's body: each written binder gets its declaration, and the loop a hidden
+# element binder to copy from.
+for_copied_binders=(s:ThinWord):>void=>$unsafe {
+    if loop_copy_writes.length =? 0 {return}
+    nodes.ptr[s].sym=int32(for_copied_binder(s ThinWord(nodes.ptr[s].sym)))
+    if nodes.ptr[s].aux =? 3 {nodes.ptr[s].aux2=int32(for_copied_binder(s ThinWord(nodes.ptr[s].aux2)))}
+}
+mutable_loop_syntax=(pos:ThinWord):>string=>{
+    if files[pos_file(pos)].is_dewy {return "loop @item"}
+    "loop mut"
+}
+jd=(pos:ThinWord jo:string dewy:string):>string=>{
+    if dewy_at(pos) {dewy} else {jo}
+}
+narrow_invalidate=(l:ThinWord):>void=>$unsafe {
+    if ThinWord(locals.ptr[l].flags) & LF_UNNARROWED =? 0 {
+        locals.ptr[l].flags=int32(ThinWord(locals.ptr[l].flags) | LF_UNNARROWED)
+        narrow_changes.push(l)
+    }
+}
+narrow_merge=(changed:array<int64>):>void=>{
+    loop l in changed {narrow_invalidate(l)}
+}
+narrow_store_keeps=(l:ThinWord rhs:ThinWord rt:ThinWord):>bool=>$unsafe {
+    let al=ThinWord(locals.ptr[l].alias)
+    let in_place=nodes.ptr[al].kind not=? 'conv' and nodes.ptr[al].kind not=? 'if_'
+    in_place and not is_union(rt) and types.ptr[rt].kind not=? 'opt' and can_coerce(rhs rt ThinWord(locals.ptr[l].type))
+}
+# Reads that cannot run user code or change the place being updated. Checked
+# custom indexing is a call and deliberately does not qualify.
+pool_update_scalar=(n:ThinWord):>bool=>{
+    let t=prune(ntype(n))
+    is_numeric(t) or tkind(t) =? 'bool_'
+}
+pool_library_fn=(f:ThinWord):>bool=>$unsafe {
+    if f <=? 0 {return false}
+    let d=ThinWord(fns.ptr[f].decl)
+    d not=? 0 and decl_in_prelude(d) and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/pool.jo"
+}
+check_assign=(s:ThinWord):>int64=>{
+    va_assign(s)
+}
+# a function another engine would call, which nothing here does: one warning, saying what is
+# called instead (not also that it is never called)
+callback_warn=(gs:ThinWord msg:string):>void=>$unsafe {
+    let d=ThinWord(syms.ptr[gs].decl)
+    fn_used[d]=true
+    warn(nodes.ptr[d].pos msg)
+}
+check_vardecl=(s:ThinWord):>void=>{
+    vd_decl(s)
+}
+check_stmt=(s:ThinWord):>void=>{
+    bk_stmt(s)
+}
+# Local constants, dropped values, `when` and `defer` run in checker_statements.dewy;
+# these are its services.
+statement_bind=(name:int64 g:int64):>void=>{
+    push_scope_sym(name new_sym(name 'const_' g 0))
+}
+statement_error=(s:int64):>void=>$unsafe {
+    fatal(nodes.ptr[s].pos "projected mutable postconditions with deferred cleanup are not yet supported")
+}
+return_sink=(pos:ThinWord):>void=>{
+    sink_return(pos)
+    return
+}
+# (a generic instance's body: an error in the library's code is reported at the program's call)
+check_fn_body=(f:int64):>void=>{
+    cb_check_fn_body(f)
+}
+check_body_now=(f:ThinWord):>void=>{
+    cb_check_body_now(f)
+}
+# Repay with statement/expression checking and lowering-proof finalization cutovers.
+# A body's result obligations run in checker_body_results.dewy; these are its services.
+body_expression=(f:ThinWord decl:ThinWord):>void=>{
+    xe_body(f decl)
+}
+# Finalization runs in checker_zonk.dewy; these are its services.
+body_finalize=(f:ThinWord vars0:ThinWord binds0:ThinWord exposed0:ThinWord da_mark:ThinWord):>void=>{
+    xz_finalize(f vars0 binds0 exposed0 da_mark)
+}
+warn_unused_copy=(pos:ThinWord name:string):>void=>{
+    let alias=if files[pos_file(pos)].is_dewy {"loop @e in xs"} else {"loop mut e in xs"}
+    warn(pos "'{name}' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `{alias}`)")
+}
+hidden_method_message=(dn:string first:ThinWord):>string=>{
+    "'{dn}' hides the library's method `{dt(first)}.{dn}`: this function takes over every `x.{dn}` on one in this module; rename it to keep the library's"
+}
+zonk_tree=(root:ThinWord):>void=>{
+    xz_tree(root)
+}
+const_eval_bool=(e:int64):>bool=>{
+    ceval(e).i not=? 0
+}
+runtime_demand=(name:string):>void=>{
+    if runtime_insts.has(name) {return}
+    demand_name(intern(name))
+    if prelude.get(intern(name)) not=? none {runtime_fn(name);}
+}
+values_expand_error0=(c:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[c].pos "spreading a record's fields into named arguments is not implemented yet: pass them by name, `f(x=r.x)`")
+}
+values_expand_error1=(c:ThinWord t:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[c].pos "`...` spreads a container into arguments: an array, a fixed array or a `[int64 string]` (found {dt(t)})")
+}
+values_expand_error2=(items:array<int64> i:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[items[i]].pos "only one array of unknown length can be spread into a call: its length is what the other arguments leave")
+}
+values_expand_error3=(items:array<int64> dyn:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[items[dyn]].pos "this array's length is not known here, so how many values it gives is not either: spread a fixed array (`array<int64 length=2>`), or call a function (with one version) whose positional parameters say how many")
+}
+values_expand_error4=(items:array<int64> dyn:ThinWord arity:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[items[dyn]].pos "the other arguments already fill the {arity} positional parameters, so this spread array would give none")
+}
+values_group_error0=(c:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[c].pos "a group of values has no names: `(a b)`; a record is `[a=1 b=2]`")
+}
+values_count_label=(count:ThinWord):>void=>{
+    values_hint_label.push("{count}")
+}
+sink_error0=(pos:ThinWord vt:ThinWord elem:ThinWord):>void=>{
+    fatal(pos "this expresses {a_type(vt)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
+}
+sink_error1=(v:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[v].pos "this gives a value, and here the block gives one, its last expression: attach `;` to discard this value, as in `f();`")
+}
+sink_error2=(v:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[v].pos "this expresses a value before the function's end, and the function also gives one back with `return`; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
+}
+sink_error3=(v:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[v].pos "this value is in a loop or a branch, or comes from a call that may give any number, so the block does not give a fixed number of values, and a binding holds a fixed number: collect them into an array, `[ ... ]`, or attach `;` to discard it, as in `f();`")
+}
+program_main_error0=(st:ThinWord s:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[st].pos "main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)")
+}
+program_main_error1=(s:ThinWord rt:ThinWord):>void=>$unsafe {
+    fatal(nodes.ptr[ThinWord(syms.ptr[s].decl)].pos "main must return void or an integer exit code, found {dt(rt)}")
+}
+# Ownership calls this entry through check.jo; execution is in the Dewy leaf.
+check_pending_functions=(start:ThinWord):>int64=>{
+    run_pending_functions(start)
+}

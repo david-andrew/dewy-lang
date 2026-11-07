@@ -131,6 +131,7 @@ use 'effect_contracts.dewy'
 use 'effect_sources.dewy'
 use 'concurrency_tasks.dewy'
 use 'checks_const_views.dewy'
+use 'checks_thin.dewy'
 
 struct Module:
     name: i32
@@ -234,11 +235,6 @@ new_sym = (name: int, kind: SK, r: int, decl: int) -> int:
 
 own_consts: bool[]            # by name: a constant of the program's own (not the library's)
 
-# `$shadowable const` (shadowable_decls) or the prelude, which is declared so as a
-# whole: an inner scope or an importing module may bind the name anew.
-decl_shadowable = (d: int) -> bool:
-    d != 0 and (shadowable_decls.has(d) or modules[int(nodes[d].mod)].is_prelude)
-
 scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
     ml_bump_name(name)
     # (look the name up in place: holding a copy of the table would make the insert below copy it)
@@ -311,9 +307,6 @@ scope_reset = (mark: int):
 ml_tick = 1
 ml_struct = 1
 ml_name_tick: int[]
-ml_bump = ():
-    ml_tick += 1
-    ml_struct = ml_tick
 ml_bump_name = (name: int):
     ml_tick += 1
     if ml_name_tick.len() <= name: ml_name_tick.resize(name * 2 + 64)
@@ -476,27 +469,9 @@ module_lookup_now = (m: int, name: int) -> int:
     if let s = universe.get(name): return s
     0
 
-# names starting with _ stay in their module: `use` does not bring them (`import m` reaches
-# them as m._x, `from m import _x` by name). The library's are hidden from programs; its __
-# names are the runtime's, which code the compiler writes calls
-is_private = (name: int) -> bool:
-    s = name_of(name)
-    len(s) > 0 and s[0] == '_'
-
-lib_private = (name: int) -> bool:
-    s = name_of(name)
-    len(s) > 1 and s[0] == '_' and s[1] != '_'
-
 # from m import a, b as c: each name bound in the importing module (functions join any of its
 # own with that name, as overloads)
 from_imports: int[]
-
-# The bundled exact fraction's types are the builtin `rational` and
-# `rational<int64>`: their library names are not a second spelling.
-rational_one_spelling = (im: int, nm: int, pos: int, how: str):
-    if files[int(modules[im].file)].path != lib_dir + "/rational.dewy": return
-    builtin = if name_of(nm) == "Rational": "rational" else if name_of(nm) == "RationalWord": "rational<int64>" else: ""
-    if builtin != "": fatal(pos, "the exact fraction type is the builtin `{builtin}`: {how}write `{builtin}`")
 
 # Dewy's name for a builtin type Sloppy spells w ("" when w is not one).
 dewy_type_word = (w: str) -> str:
@@ -545,12 +520,6 @@ cur_mod = () -> int:
     if cx >= 0: return int(ctxs[cx].mod)
     0
 
-# (the game loop's functions and main keep their own kind of result)
-never_skip_result = (decl: int) -> bool:
-    if nodes[decl].c != 0: return true          # (attributes: @cabi, @export... keep their types)
-    nm = name_of(int(nodes[decl].name))
-    nm == "main" or nm == "update" or nm == "draw"
-
 # The main module m's own function the game calls by this name (main, update, draw), as its
 # symbol; a type's method of that name (`Shape:type = [draw = () => ...]`) is not one.
 game_fn = (m: int, name: str) -> int?:
@@ -568,12 +537,6 @@ module_source = (stem: str, dewy: bool, exclude: str = "", watch_candidates: boo
         if file_exists(path): return path
         if watch_candidates: watch_missing_input(path)
     ""
-
-# Normalize graph identity without changing source paths: library checks also
-# accept a relative lib_dir and compare it with the original source spelling.
-module_path_key = (path: str) -> str: module_key(path, cwd())
-
-find_module = (path: str) -> int: module_by_path.get(module_path_key(path)) ?? -1
 
 load_module = (path: str, is_prelude: bool, from: int) -> int:
     key = module_path_key(path)
@@ -843,7 +806,6 @@ new_global = (name: int, decl: int, m: int) -> int:
 
 # ---------------- type resolution ----------------
 values_type_ok = false   # (resolve_binding_type: a binding's whole type may be several values)
-resolve_type = (tn: int) -> int: ct_resolve_type(tn)
 resolve_type_name = (tn: int) -> CheckerTypeName:
     if nodes[tn].aux == -8: fatal(nodes[tn].pos, "Effect row is not a value type")
     nm = int(nodes[tn].name)
@@ -898,10 +860,6 @@ resolve_type_name = (tn: int) -> CheckerTypeName:
     fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type")
     CheckerTypeName()
 
-readonly_global = (g: int) -> bool:
-    d = int(globals[g].decl)
-    d != 0 and has_flag(d, NF_RDONLY)
-
 binding_const_init = (kind: SK, ref: int, pos: int) -> int:
     if kind == .const_:
         if globals[ref].init != 0: return int(globals[ref].init)
@@ -936,16 +894,6 @@ fixed_size = (n: int) -> int:
     if v > (1 << 28): fatal(nodes[n].pos, "fixed-size array too large ({v} elements; use {jd(nodes[n].pos, "T[]", "array<T>")} for big arrays)")
     v
 
-mk_fixed_checked = (e: int, n: int, pos: int) -> int:
-    if tkind(e) == .void_: fatal(pos, "an array of void")
-    mk_fixed(e, n)
-
-# T[,], T[,,] ...: n-dimensional arrays (lib/std/nd.jo)
-nd_of = (t: int, pos: int) -> int:
-    s = prelude.get(intern("NDArray")) ?? 0
-    if s == 0: fatal(pos, "n-dimensional arrays are not available (lib/std/nd.jo is missing)")
-    get_struct_inst(int(syms[s].ref), [t])
-
 # A generic type's arguments with those left out filled in from its declaration: `Date` is
 # `Date<Gregorian>` when it says `<C=Gregorian>`. The defaults read in the declaration's own scope.
 type_param_defaults = (d: int, targs: int[]) -> int[]:
@@ -964,17 +912,7 @@ type_param_defaults = (d: int, targs: int[]) -> int[]:
         cx = saved
     out
 
-# type Name[T] = ...: the type it stands for, given its type arguments
-resolve_alias = (d: int, targs: int[], use_pos: int) -> int: ca_resolve_alias(d, targs, use_pos)
-alias_resume = (d: int):
-    if refine_deferred.len() > 0: refine_resume(int(nodes[d].mod))
-
 subst = (t0: int, targs: int[]) -> int: ts_subst(t0, targs)
-
-push_type_params = (decl: int, targs: int[]):
-    loop i in [0..nkids2(decl)):
-        if i < targs.len() and (nodes[kid2(decl, i)].aux == 1) != (tkind(targs[i]) == .effect): fatal(nodes[kid2(decl, i)].pos, "generic argument kind mismatch: expected Effect or value type")
-        if i < targs.len(): push_scope_sym(int(nodes[kid2(decl, i)].name), new_sym(int(nodes[kid2(decl, i)].name), .type_, targs[i], 0))
 
 # Intersection records (`A & B & [f:T]`, dewy_parse's dw_intersection): their
 # declaration's operand types, and each record type's operand records, which a
@@ -1012,15 +950,6 @@ decl_info = (decl: int) -> int:
 # until one of their declarations is resolved (dewy_prelude_module): `mod` of floats does not
 # pay for the refined divisor of `mod` of integers.
 refine_deferred: {int: bool}
-refine_resume = (m: int):
-    if refine_active or not refine_deferred.has(m): return
-    # (a forked check worker gives up its part: the compiler checks it again itself)
-    if pc_child >= 0: exit(1)
-    refine_active = true
-
-# a refinement written in the type annotations under node n (a declaration's parameters and
-# result, say)
-written_refinement = (n: int) -> bool: cs_written_refinement(n)
 
 # (operators get names: ([]) is op_index, shown as such in backtraces: lib/std/backtrace.jo)
 OP_NAMES = ["[]", "index", "[]=", "set", "+", "add", "-", "sub", "*", "mul", "/", "div", "%", "mod", "==", "eq", "<", "lt", "^", "pow"]
@@ -1044,23 +973,6 @@ sanitize = (s: str) -> str:
         else: b.push('X')
         if b.len() > 40: break
     str_from_bytes(b)
-
-new_inst = (kind: int, m: int, base: str) -> int:
-    inst_counter += 1
-    fns.push(FnInst(kind = i32(kind), mod = i32(m), sym = "f_{base}_{inst_counter}"))
-    fns.len() - 1
-
-has_value_return = (n: int) -> bool: cr_has_value_return(n)
-
-value_leaves = (n: int, out: mut int[]): cr_value_leaves(n, out)
-
-# the name of the type a Dewy method belongs to, or ""
-method_type_name = (d: int) -> str:
-    t = int(nodes[kid(d, 0)].a)
-    if t == 0 or nodes[t].kind != .tname: return ""
-    name_of(int(nodes[t].name))
-
-syntactic_void = (body: int) -> bool: cr_syntactic_void(body)
 
 # (@no_web("why"): a function that does nothing in a browser, said where a web build's program
 # calls it)
@@ -1113,10 +1025,6 @@ check_c_boxes = (t0: int, pos: int):
                 if fields[f].boxed:
                     fatal(pos, "recursive value field '{name_of(int(fields[f].name))}' in {dt(current)} uses managed storage and cannot cross the C ABI; use an explicit pointer-based C representation")
                 pending.push(int(fields[f].type))
-
-ensure_ret = (f: int, use_pos: int):
-    if fns[f].ret != 0: return
-    cb_ensure_ret(f, use_pos)
 
 # (--internal-collide-locals, a self-test: a checked loop's index local takes the loop's own
 # node number, so a walk reading the loop's c as a node meets the loop again and never ends)
@@ -1268,11 +1176,6 @@ enter_module_context = (m: int) -> bool:
     ctxs.push(module_frames[m])
     true
 
-leave_module_context = (m: int, entered: bool):
-    if not entered: return
-    module_frames[m] = ctxs.pop()
-    module_ctx[m] = -1
-
 setup_module_contexts = (prelude_init: int):
     first = module_ctx.len()
     loop mi in [first..modules.len()):
@@ -1285,12 +1188,6 @@ setup_module_contexts = (prelude_init: int):
         modules[mi].init_fn = i32(inst)
         module_frames.push(FnCtx(i32(inst), -1, i32(T_VOID), false, 0, i32(mi), 0))
         module_ctx.push(-1)
-
-# global g is changed here: in a function, that is something a call may do
-note_global_write = (g: int):
-    if globals[g].fn_written or cx < 0: return
-    if fns[int(ctxs[cx].inst)].kind != i32(FK_INIT): globals[g].fn_written = true
-    else: globals[g].init_written = true
 
 # the global a narrowed name's place (g.f narrowed by `is`) belongs to, or -1
 alias_global = (l: int) -> int:
@@ -1473,13 +1370,6 @@ unused_value = (raw: Node, t: int):
         else:
             warn(raw.pos, "this value is not used: it changes nothing")
 
-# ---------------- statements ----------------
-# (the library's exit(code): the program ends there)
-library_exit_call = (e: int) -> bool:
-    if nodes[e].kind != .call or nodes[e].sym <= 0 or int(nodes[e].sym) >= fns.len(): return false
-    d = int(fns[int(nodes[e].sym)].decl)
-    d != 0 and name_of(int(nodes[d].name)) == "exit" and pos_in_lib(nodes[d].pos)
-
 has_break = (n: int, depth: int = 0) -> bool:
     if n == 0: return false
     k = nodes[n].kind
@@ -1546,12 +1436,6 @@ sink_no_tuple = false            # (a body about to open whose values are always
 sink_bind_next = 0               # (the block a binding is about to check as its value: a BIND ...)
 sink_bind_expect = 0             # (... and the several values its written type says it holds)
 
-# (a function's name as written: its body under `$explicit_allocation_failure` is `__eaf_NAME`)
-oom_written_name = (id: int) -> str:
-    name = name_of(id)
-    if starts_with(name, "__eaf_"): return name[6..]
-    name
-
 # Function f's result is written `:>(int64 int64)` (result type node tn): calls give
 # several values, and its body must express that many.
 # `return value` in a body: a BODY that becomes a pack cannot also return one.
@@ -1601,15 +1485,8 @@ union_has_void = (t: int) -> bool:
     loop m in union_members(t):
         if tkind(m) == .void_: return true
     false
-set_block_value = (b: int, e: int): nodes[kid(b, nkids(b) - 1)].a = i32(e)
 
-# A written result `:>(int64 int64)` (dw_pack_type): how many values it gives, or 0.
-pack_result_count = (tn: int) -> int: if tn != 0 and nodes[tn].kind == .tarray and nodes[tn].ival < 0: int(-nodes[tn].ival) else: 0
-
-# A binding's written type, where several values may be written, `let p:(int64 int64) = ...`.
-resolve_binding_type = (tn: int) -> int: ct_resolve_binding(tn)
 pack_result_ok = false
-resolve_result_type = (tn: int) -> int: ct_resolve_result(tn)
 
 # loop p in ps (ps a soa array): loop i in [0..len(ps)): p = ps[i]
 soa_loop = (s: int):
@@ -1769,17 +1646,6 @@ dewy_cursor_loop = (s: int) -> bool:
     check_stmt(s)
     true
 
-# The iterator protocol: a value whose type has a `next` method, giving the next
-# element or none, is iterated by calling it until none. `loop x in it` steps a
-# copy of the iterator (its value at loop entry); `loop x in @it` steps the bound
-# iterator in place, so the body can call its other methods to steer it (a tree
-# walk's `skip_children`). The loop becomes a `loop true` whose body starts by
-# taking the next element.
-dewy_iterator_type = (t: int) -> bool:
-    if types[t].kind != .struct_ or is_map_type(t) or is_map_entries_type(t) or is_dewy_cursor_iter(t): return false
-    members = dewy_decl_members.get(int(structs[int(types[t].st)].decl)) ?? {}
-    (members.get(intern("next")) ?? -1) >= 0
-
 dewy_iterator_loop = (s: int, place: int = 0) -> bool:
     it = int(nodes[s].a)
     pos = nodes[s].pos
@@ -1832,13 +1698,6 @@ struct LoopCopyWrite:
 
 loop_copy_writes: {int: LoopCopyWrite} = {}
 loop_copy_refined: {int: int} = {}    # a written binder's element type, when refined
-
-# After a loop's body: each written binder gets its declaration, and the loop a hidden
-# element binder to copy from.
-for_copied_binders = (s: int):
-    if loop_copy_writes.len() == 0: return
-    nodes[s].sym = i32(for_copied_binder(s, int(nodes[s].sym)))
-    if nodes[s].aux == 3: nodes[s].aux2 = i32(for_copied_binder(s, int(nodes[s].aux2)))
 
 # Indexed user containers use their existing length / [] operations. Retain the
 # input value and length once, then reuse the ordinary counted-loop lowering.
@@ -1908,16 +1767,10 @@ dewy_nested_loop_bindings = (s: int):
 # (the value variables of loops over dictionaries: a change is made through the key)
 map_loop_values: {int: bool} = {}
 
-mutable_loop_syntax = (pos: int) -> str:
-    if files[pos_file(pos)].is_dewy: return "loop @item"
-    "loop mut"
-
 # Suggestions are spelled in the language of the source they are about.
 dewy_at = (pos: int) -> bool:
     f = pos_file(pos)
     pos > 0 and f < files.len() and files[f].is_dewy
-
-jd = (pos: int, jo: str, dewy: str) -> str: if dewy_at(pos): dewy else: jo
 
 # an operator as the source at pos spells it (Dewy's comparisons end in `?`)
 op_text = (op: Tok, pos: int) -> str:
@@ -2089,14 +1942,6 @@ narrow_restore = (mark: int) -> int[]:
     narrow_changes.truncate(mark)
     changed
 
-narrow_invalidate = (l: int):
-    if int(locals[l].flags) & LF_UNNARROWED == 0:
-        locals[l].flags = i32(int(locals[l].flags) | LF_UNNARROWED)
-        narrow_changes.push(l)
-
-narrow_merge = (changed: int[]):
-    loop l in changed: narrow_invalidate(l)
-
 # A returning arm cannot change the state on the path after it. Jumps to an
 # enclosing loop must retain writes; jumps contained in the arm do not escape.
 # Log targets while checking instead of walking checked ASTs again. Callees
@@ -2134,11 +1979,6 @@ narrow_store_register = (l: int):
     if root == 0: return
     narrow_store_next[l] = narrow_store_heads.get(root) ?? 0
     narrow_store_heads[root] = l
-
-narrow_store_keeps = (l: int, rhs: int, rt: int) -> bool:
-    al = int(locals[l].alias)
-    in_place = nodes[al].kind != .conv and nodes[al].kind != .if_
-    in_place and not is_union(rt) and types[rt].kind != .opt and can_coerce(rhs, rt, int(locals[l].type))
 
 # A whole-variable replacement invalidates tag evidence through every name
 # for that storage. Payload writes of the same member retain their tag.
@@ -2225,12 +2065,6 @@ index_update_capture = (ix: int, stmts: mut int[]) -> int:
     nodes[ix].b = i32(comp_ident(name, pos))
     name
 
-# Reads that cannot run user code or change the place being updated. Checked
-# custom indexing is a call and deliberately does not qualify.
-pool_update_scalar = (n: int) -> bool:
-    t = prune(ntype(n))
-    is_numeric(t) or tkind(t) == .bool_
-
 pool_update_read = (n: int) -> bool:
     k = nodes[n].kind
     if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit: return true
@@ -2258,11 +2092,6 @@ void_arm_end = (body: int, r: int) -> bool:
     items.push(ret)
     set_list(body, items)
     true
-
-pool_library_fn = (f: int) -> bool:
-    if f <= 0: return false
-    d = int(fns[f].decl)
-    d != 0 and decl_in_prelude(d) and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/pool.jo"
 
 pool_direct_update = (s: int, ix: int, bt: int) -> bool:
     if types[bt].kind != .struct_ or structs[int(types[bt].st)].name != "Pool": return false
@@ -2633,7 +2462,6 @@ map_update_capture = (lhs: int, rhs: int, before: mut int[]):
             add_flag(part, NF_RELOOKUP)
         else: nodes[part].b = i32(kept)
 
-check_assign = (s: int) -> int: va_assign(s)
 # Assignments run in checker_assigns.dewy; these are its services.
 assign_before: int[]    # (selectors captured before the values of the assignments being checked)
 # The source's forms: a `[end]`-indexed target's update (returned), `x = x + ...` appends,
@@ -2795,13 +2623,6 @@ assign_value = (s: int, lt: int, settle: int) -> int:
     if nodes[v].kind != .intrinsic or nodes[v].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(v, lt))
     rt
 
-# a function another engine would call, which nothing here does: one warning, saying what is
-# called instead (not also that it is never called)
-callback_warn = (gs: int, msg: str):
-    d = int(syms[gs].decl)
-    fn_used[d] = true
-    warn(nodes[d].pos, msg)
-
 # x = value where x is a variable of another type: where x was made, and the ways out
 var_type_error = (lhs: int, lt: int, rt: int, at: int):
     nm = name_of(int(nodes[lhs].name))
@@ -2903,7 +2724,6 @@ global_place_decl = (d: int):
     nm = name_of(int(nodes[d].name))
     fatal(nodes[init].pos, "'{nm}' is declared at the top level, so it would be a global, and a global cannot be a place (it would hold a copy): declare the place inside a function or a block (`main = () => \{ let {nm} = @... }`), or copy the value without `@`")
 
-check_vardecl = (s: int): vd_decl(s)
 decl_values = (e: int, expected: int) -> int: values_init(e, expected)
 
 # `return @a`: a place goes only to an `@` parameter or a local place binding;
@@ -2997,7 +2817,6 @@ shape_returned = (value: int, rt: int) -> int:
     check_expr(bc_call("__shape_value", [value, sizes], pos), rt)
     last_checked
 
-check_stmt = (s: int): bk_stmt(s)
 # `x = value` (or `a, b = value`) that declares x, made a declaration; otherwise a spawn's
 # handle and a global declared below are looked at
 stmt_assign = (s: int) -> bool:
@@ -3008,10 +2827,6 @@ stmt_assign = (s: int) -> bool:
     check_late_global(s)
     false
 
-# Local constants, dropped values, `when` and `defer` run in checker_statements.dewy;
-# these are its services.
-statement_bind = (name: int, g: int): push_scope_sym(name, new_sym(name, .const_, g, 0))
-statement_error = (s: int): fatal(nodes[s].pos, "projected mutable postconditions with deferred cleanup are not yet supported")
 # Expression statements run in checker_exprstmts.dewy; these are its services.
 # (`:type name` at the REPL, for a function: its versions as written, with their notes)
 exprstmt_repl = (e: int):
@@ -3025,12 +2840,6 @@ exprstmt_repl = (e: int):
             doc = ide_doc_of(nodes[d].pos)
             if len(doc) > 0: repl_sig += "\n    " + replace(doc, "\n", "\n    ")
         nodes[e] = Node(kind = .int_lit, pos = nodes[e].pos)
-return_sink = (pos: int):
-    sink_return(pos)
-    return
-
-# (a generic instance's body: an error in the library's code is reported at the program's call)
-check_fn_body = (f: int): cb_check_fn_body(f)
 
 # Sparse preorder events for lowering's integer write proofs. Negative loop
 # nodes close the enclosing-loop stack; nested closures contribute only their
@@ -3041,24 +2850,12 @@ zonk_collect_writes = false
 # change as that body goes on)
 type_exposures = 0
 
-check_body_now = (f: int): cb_check_body_now(f)
-
-# Repay with statement/expression checking and lowering-proof finalization cutovers.
-# A body's result obligations run in checker_body_results.dewy; these are its services.
-body_expression = (f: int, decl: int): xe_body(f, decl)
-# Finalization runs in checker_zonk.dewy; these are its services.
-body_finalize = (f: int, vars0: int, binds0: int, exposed0: int, da_mark: int): xz_finalize(f, vars0, binds0, exposed0, da_mark)
-
 # the variable at the bottom of a place (v in v.f[2].g), or 0
 place_root = (n: int) -> int:
     r = n
     loop r != 0 and (nodes[r].kind == .field or nodes[r].kind == .index): r = int(nodes[r].a)
     if r != 0 and nodes[r].kind == .ident: return r
     0
-
-warn_unused_copy = (pos: int, name: str):
-    alias = if files[pos_file(pos)].is_dewy: "loop @e in xs" else: "loop mut e in xs"
-    warn(pos, "'{name}' is changed here but never read: it holds a copy (structs and arrays are values), so what it was copied from stays as it was; change that instead (`xs[i].hp -= 5`, `{alias}`)")
 
 # a function's variables whose fields or elements it changes but whose value it never reads: a
 # copy changed for nothing (`if let e = enemies.find(...): e.hp -= 5` leaves the enemy as it was)
@@ -3127,9 +2924,6 @@ target_dropped_use = (f: int, l: int) -> bool:
     loop u in uses:
         if pos_file(u) == file and u > start and (end < 0 or u < end): return true
     false
-
-hidden_method_message = (dn: str, first: int) -> str:
-    "'{dn}' hides the library's method `{dt(first)}.{dn}`: this function takes over every `x.{dn}` on one in this module; rename it to keep the library's"
 
 # A program function named as a library method, taking the same kind of first argument:
 # `x.name` calls the program's everywhere in the module, which may surprise. Demanded by the
@@ -3398,8 +3192,6 @@ settle_open_globals = ():
 zonk_indexes = 0
 zonk_user_globals = 0
 
-zonk_tree = (root: int): xz_tree(root)
-
 # ---------------- compile-time evaluation ----------------
 # Coarse evaluator services: checking may re-enter ceval and grow shared arenas.
 constant_checked = (e: int) -> CVal:
@@ -3419,8 +3211,6 @@ constant_binding = (e: int) -> int:
     0
 
 ceval = (e: int) -> CVal: constant_eval(nodes, names, files, constant_host, e)
-
-const_eval_bool = (e: int) -> bool: ceval(e).i != 0
 
 # ---------------- static assertions ----------------
 # Closed `$assert` requests keep this constant/evaluator fast path. facts.jo
@@ -3463,11 +3253,6 @@ runtime_insts: {str: int} = {}
 # the checker meets them (expr.jo). Hello pays for neither.
 runtime_ffi_scan = 1
 runtime_ffi_done = false
-
-runtime_demand = (name: str):
-    if runtime_insts.has(name): return
-    demand_name(intern(name))
-    if prelude.get(intern(name)) != none: runtime_fn(name)
 
 # (new instances since the last call: an extern among them brings in what its thunk calls)
 runtime_ffi_demand = () -> bool:
@@ -3701,23 +3486,6 @@ values_hint_label: str[]    # (... and the parameters they fill, once the call i
 values_hint_mark = 0        # (the first of the hints the arguments being expanded made)
 values_hits: bool[]    # (by node: call arguments checked early that gave several values)
 
-values_expand_error0 = (c: int): fatal(nodes[c].pos, "spreading a record's fields into named arguments is not implemented yet: pass them by name, `f(x=r.x)`")
-values_expand_error1 = (c: int, t: int): fatal(nodes[c].pos, "`...` spreads a container into arguments: an array, a fixed array or a `[int64 string]` (found {dt(t)})")
-values_expand_error2 = (items: int[], i: int): fatal(nodes[items[i]].pos, "only one array of unknown length can be spread into a call: its length is what the other arguments leave")
-values_expand_error3 = (items: int[], dyn: int): fatal(nodes[items[dyn]].pos, "this array's length is not known here, so how many values it gives is not either: spread a fixed array (`array<int64 length=2>`), or call a function (with one version) whose positional parameters say how many")
-values_expand_error4 = (items: int[], dyn: int, arity: int): fatal(nodes[items[dyn]].pos, "the other arguments already fill the {arity} positional parameters, so this spread array would give none")
-values_group_error0 = (c: int): fatal(nodes[c].pos, "a group of values has no names: `(a b)`; a record is `[a=1 b=2]`")
-values_count_label = (count: int): values_hint_label.push("{count}")
 values_collect_fns = (name: int, ds: mut int[]): collect_fns(name, &ds)
 values_collect_module = (mod: int, name: int, ds: mut int[]): collect_module(mod, name, &ds)
 
-sink_error0 = (pos: int, vt: int, elem: int): fatal(pos, "this expresses {a_type(vt)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
-sink_error1 = (v: int): fatal(nodes[v].pos, "this gives a value, and here the block gives one, its last expression: attach `;` to discard this value, as in `f();`")
-sink_error2 = (v: int): fatal(nodes[v].pos, "this expresses a value before the function's end, and the function also gives one back with `return`; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
-sink_error3 = (v: int): fatal(nodes[v].pos, "this value is in a loop or a branch, or comes from a call that may give any number, so the block does not give a fixed number of values, and a binding holds a fixed number: collect them into an array, `[ ... ]`, or attach `;` to discard it, as in `f();`")
-
-program_main_error0 = (st: int, s: int): fatal(nodes[st].pos, "main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)")
-program_main_error1 = (s: int, rt: int): fatal(nodes[int(syms[s].decl)].pos, "main must return void or an integer exit code, found {dt(rt)}")
-
-# Ownership calls this entry through check.jo; execution is in the Dewy leaf.
-check_pending_functions = (start: int) -> int: run_pending_functions(start)
