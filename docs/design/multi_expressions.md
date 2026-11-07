@@ -171,12 +171,12 @@ decision. *Flagged: the natural extension is "earlier values, then the returned
 one". Today it's rejected, which is the conservative choice.*
 
 A function value (`@pair`) of a function expressing several values carries it in
-its type, written `<():>(int64 int64)>`: a call through it gives several values,
+its type, written `(():>(int64 int64))`: a call through it gives several values,
 under the same rules as a direct call. The count is part of the function type
 (decided 2026-10-23, substitution invariance; reverses the provisional "count is
 not part of a function type"): `f = @pair; add(f)` fills both parameters, as
-`add(pair)` does, and `<():>(int64 int64 int64)>` does not hold `@pair`. A
-function whose count varies (a loop, a branch) has the type `<():>(int64 ...)>`
+`add(pair)` does, and `(():>(int64 int64 int64))` does not hold `@pair`. A
+function whose count varies (a loop, a branch) has the type `(():>(int64 ...))`
 in diagnostics, and a call through it is only collected. A function giving one
 value does not fit a type giving several, nor the reverse. A lambda checked
 against such a type expresses exactly its count, as a written result does.

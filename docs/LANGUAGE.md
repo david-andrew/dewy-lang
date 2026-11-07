@@ -275,7 +275,7 @@ there is an error. A function without a written result may express several
 values: `pair = () => { 1 2 }` or `pair = () => (1 2)` makes `[pair()]` `[1 2]`.
 `:>(int64 int64)` writes such a result: parentheses group the values, and the
 body must express exactly that many, in its own block. `@pair` keeps it, with the
-count, in its type, `<():>(int64 int64)>`, so a call through it gives that many
+count, in its type, `(():>(int64 int64))`, so a call through it gives that many
 values too (`f = @pair; add(f)` fills both parameters). A fixed number of values
 is returned in place, with no array.
 
@@ -352,7 +352,7 @@ These kinds apply to direct calls of declared functions.
 Named arguments also work through function values, returned callbacks, record
 fields and array elements. An inferred function value retains its declared
 parameter names. A function-type annotation supplies the names at that boundary:
-`let f:<(amount:int):>int> = (x) => x*2` can be called as `f(amount=21)`.
+`let f:(amount:int:>int) = (x) => x*2` can be called as `f(amount=21)`.
 These names do not change the runtime calling convention. The callee evaluates
 first, then explicit arguments in written order. Parameters named `_` accept
 positional arguments only. A handle keeps its function's defaults: after
@@ -372,7 +372,7 @@ function itself:
 
 ```dewy
 double = (x:int):>int => x*2
-apply = (f:<(x:int):>int> x:int):>int => f(x)
+apply = (f:(x:int:>int) x:int):>int => f(x)
 main = () => {
     let f = @double     # the function, not a call
     let g = @f          # copy a function value with `@` too
@@ -386,7 +386,7 @@ ungrouped `@` chain partially evaluates (`@sum(1)(2)`); parentheses end the
 chain, after which an argument group calls (`(@sum(1))(2)`). A parameter left to
 its default must have a literal default for now. An overloaded or generic
 function partially evaluates too: the arguments choose the version, as in a
-call, and an annotation such as `let f:<(b:int64):>int64> = @max(x)` chooses
+call, and an annotation such as `let f:(b:int64:>int64) = @max(x)` chooses
 among versions leaving different parameters open (without one, the version
 leaving the fewest wins) and settles type parameters the arguments leave open.
 `@text.split(" ")` saves the receiver with the arguments; built-in container
@@ -602,16 +602,37 @@ A binary operator with its right operand can be used as a function:
 `(* 2)` doubles its input, `(<? limit)` compares it, and `(.x)` reads a field.
 Normal precedence applies: `(* 2 + 2)` means `x => x * 2 + 2`.
 These functions use ordinary private captures and evaluate their bodies when
-called. Function types use angle brackets, for example `<(x:int64):>int64>`;
-parenthesized function type grouping is rejected. A function's handle also fits
+called.
+
+Function types are grouped with parentheses: `f:(int:>int)`,
+`report:(array<int> :>void)`. One parameter takes no parentheses of its own,
+labeled or not: `(int:>int)`, `(x:int:>int)`, `(@x:int:>void)`. No parameters or
+several do: `(():>int)`, `((int string):>int)`, `((x:int y:string):>int)`, since
+`(int string)` alone is several values. A label lets a call name the argument.
+
+Inside the parentheses `:>` binds loosest, then `:`, then `|` and `&`, so
+`(x:A|B:>C|D)` takes one `A|B` named `x` and gives `C|D`. Anything else takes its
+own group: an optional or a union of function types, `(int:>int)?`,
+`(int:>int)|string`, and a function type that is a parameter or a result,
+`((int:>int):>int)`, `(int:>(int:>int))`. `:>` does not chain, and an annotation
+needs the group: `f:int:>int` is an error. A group works wherever a type does,
+including a record field (`[run:(int:>int)]`), a type argument
+(`dict<string (int:>int)>`) and an alias (`Unary:type = (int:>int)`,
+`Endo:type = <T>(T:>T)`).
+
+`<>` is `()` with the inside constrained to be types, so `<int:>int>` and
+`(x:int:>int)` are the same function types as their parenthesized spellings.
+`int<(>=? 0)>` is something else: a refinement, a condition in a type's arguments.
+
+A function's handle also fits
 a function type whose parameters it accepts and whose result accepts its result:
-`@f` with `f = (x:int64|string):>uint64?` fits `<(x:int64):>uint64?|E>` (through a
+`@f` with `f = (x:int64|string):>uint64?` fits `(x:int64:>uint64?|E)` (through a
 wrapper; refined and `@` parameters still need an exact match). A function value
-held in a variable adapts the same way (`apply(@h)`, `let g:<(x:int64):>int64> = @wide`). An inferred `@fn` handle
+held in a variable adapts the same way (`apply(@h)`, `let g:(x:int64:>int64) = @wide`). An inferred `@fn` handle
 names the visible family, so a module's own function shadows the prelude's;
 multiple concrete overloads still require a callable type. Pass them to a typed callback
 parameter or give a local a function type,
-for example `let twice:<(value:int):>int> = (* 2)`. A module declaration such
+for example `let twice:(value:int:>int) = (* 2)`. A module declaration such
 as `twice = (* 2)` can infer its parameter type at calls, like other functions.
 Operators with prefix meanings keep those meanings: `(-1)` is a negative value.
 
@@ -656,7 +677,7 @@ Row parameters have kind `Effect`, separate from value types. Aliases can mix
 type and row binders and preserve them across imports:
 
 ```dewy
-Action:type = <E:Effect>(<(x:int64):>int64 & E>)
+Action:type = <E:Effect>(x:int64:>int64 & E)
 apply = <E:Effect>(f:Action<E> x:int64):>int64 & E => f(x)
 ```
 
@@ -3097,7 +3118,7 @@ reported where it goes wrong, with notes naming the call, any wrappers and the
 parallel use. Such a function is called directly, not used as a value.
 
 ```dewy
-apply = (f:<(x:int):>int> xs:array<int>):>array<int> => [parallel x in xs f(x)]
+apply = (f:(x:int:>int) xs:array<int>):>array<int> => [parallel x in xs f(x)]
 square = (x:int):>int => x*x
 printl(apply(@square [1 2 3]))   # [1 4 9]; a callback changing a global is an error here
 ```
@@ -3895,7 +3916,7 @@ names its symbol where the target exports one (WebAssembly builds export it to
 the page). `@f` passes it where a C function type is expected:
 
 ```dewy
-qsort = (base:ptr<int32> count:uint64 size:uint64 compare:<(a:ptr<int32> b:ptr<int32>):>int32>):>void => $extern
+qsort = (base:ptr<int32> count:uint64 size:uint64 compare:((a:ptr<int32> b:ptr<int32>):>int32)):>void => $extern
 
 $export
 ascending = (a:ptr<int32> b:ptr<int32>):>int32 => $unsafe {
@@ -4610,7 +4631,7 @@ its own uses its nearest ancestor's, as `as string` does), and function fields a
 left out. A string prints bare on its own and quoted, with its escapes, inside a
 structure (`["a\tb"]`). A present optional or a union shows its member; an
 absent optional prints `none`. A function handle shows its type's spelling,
-`"{@f}"` as `<(x:int64):>int64>`, and so does a type: `printl(Point)`,
+`"{@f}"` as `(x:int64:>int64)`, and so does a type: `printl(Point)`,
 `"{int64}"` and `int64 as string`.
 
 `format(value spec)` formats machine numbers or text, including inside an
