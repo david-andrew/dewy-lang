@@ -1,0 +1,2 @@
+component=(x:float32):>float32=>min(vec2(x x) vec2(0.0 1.0)).y
+main=()=>{loop x in cpu(component.(gpu([float32.nan]))).data {printl(is_nan(x))}}

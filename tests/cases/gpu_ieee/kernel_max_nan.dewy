@@ -1,0 +1,9 @@
+
+main=()=>{
+let a:array<float32>=[float32.nan 1.0 float32.nan]
+let b:array<float32>=[1.0 float32.nan float32.nan]
+let d=cpu(max.(gpu(reshape(a [3])) gpu(reshape(b [3]))))
+loop x in d.data {printl(is_nan(x))}
+let ref=max.(a b)
+loop x in ref {printl(is_nan(x))}
+}

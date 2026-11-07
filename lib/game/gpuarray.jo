@@ -200,6 +200,12 @@ uniform int n;
 uniform int ow;
 uniform int op;
 out vec4 o_;
+float reduce_pair(float a, float b) \{
+    if (isnan(a)) return a;
+    if (isnan(b)) return b;
+    if (a == b) return uintBitsToFloat(op == 1 ? (floatBitsToUint(a) | floatBitsToUint(b)) : (floatBitsToUint(a) & floatBitsToUint(b)));
+    return op == 1 ? min(a, b) : max(a, b);
+}
 void main() \{
     int base = (int(gl_FragCoord.y) * ow + int(gl_FragCoord.x)) * 4;
     vec4 r = vec4(0.0);
@@ -210,7 +216,7 @@ void main() \{
             int ti = j / 4 + k;
             vec4 v = texelFetch(t, ivec2(ti % w, ti / w), 0);
             for (int q = 0; q < 4; q++) \{
-                if (j + k * 4 + q < n) acc = op == 0 ? acc + v[q] : (op == 1 ? min(acc, v[q]) : max(acc, v[q]));
+                if (j + k * 4 + q < n) acc = op == 0 ? acc + v[q] : reduce_pair(acc, v[q]);
             }
         }
         r[c] = acc;

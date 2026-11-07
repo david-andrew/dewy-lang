@@ -157,6 +157,17 @@ sl_hypot_body = (to_bits: str, from_bits: str) -> str: join([
     "    return s * sqrt(sx * sx + sy * sy);\n}\n",
 ], "")
 
+# IEEE minimum/maximum, including NaNs and both orders of signed zero.
+# Keep scalar arguments in a helper so calls with effects are evaluated once.
+gl_minmax = (nm: str):
+    if not gl_first("ieee_{nm}"): return
+    bits = if nm == "min": "|" else: "&"
+    gl_decls.push("float sl_{nm}(float a, float b) \{\n    if (isnan(a)) return a;\n    if (isnan(b)) return b;\n    if (a == b) return uintBitsToFloat(floatBitsToUint(a) {bits} floatBitsToUint(b));\n    return {nm}(a, b);\n}\n")
+    loop width in [2..5):
+        parts: str[]
+        loop c in [0..width): parts.push("sl_{nm}(a[{c}], b[{c}])")
+        gl_decls.push("vec{width} sl_{nm}(vec{width} a, vec{width} b) \{ return vec{width}({join(parts, ", ")}); }\n")
+
 gl_fn_name = (f: int) -> str: "f_{gl_name(name_of(int(nodes[int(fns[f].decl)].name)))}_{f}"
 
 # translate a function and everything it calls
@@ -473,6 +484,11 @@ gl_expr = (e: int) -> str:
                 if nm == "norm" and nkids(e) != 1: gl_err(nodes[e].pos, "the p-norm is not available in shaders: write the length, v.norm")
                 if nm == "hypot" and gl_first("hypot"):
                     gl_decls.push(sl_hypot_body("floatBitsToUint", "uintBitsToFloat"))
+                if (nm == "min" or nm == "max") and (types[t].kind == .float_ or (is_vec(t) and not types[t].sign)):
+                    gl_minmax(nm)
+                    result = args[0]
+                    loop i in [1..args.len()): result = "sl_{nm}({result}, {args[i]})"
+                    return result
                 # (abs of the smallest integer is itself, as on the CPU: GLSL's is undefined)
                 if nm == "abs" and (types[t].kind == .int_ or (is_vec(t) and types[t].sign)):
                     tn = gl_type(t, nodes[e].pos)

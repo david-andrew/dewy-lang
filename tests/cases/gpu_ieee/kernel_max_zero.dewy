@@ -1,0 +1,7 @@
+
+main=()=>{
+let a:array<float32>=[-0.0 0.0]
+let b:array<float32>=[0.0 -0.0]
+let d=cpu(max.(gpu(reshape(a [2])) gpu(reshape(b [2]))))
+if d.length =? [2] {printl(1.0/d[0] >? 0.0);printl(1.0/d[1] >? 0.0)}
+}
