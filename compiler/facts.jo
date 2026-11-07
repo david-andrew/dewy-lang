@@ -1184,13 +1184,14 @@ fact_read = (s: mut FactState, e: int) -> int:
     t = refine_storage(e, ntype(e))
     v = fact_new(s, fact_domain(t), FactTerm(type = t))
     fact_bind(s, p, v)
-    if refine_active: ref_assume(t, v, [], s)
+    # (the known length first: a contract on it would project a length of its own)
     if p.root == .global:
         if t == T_MATH_INT:
             bound = fact_global_integer(p.declaration)
             if not bound.wide: fact_set_bound(s, v, bound)
         size = fact_global_length(p.declaration)
         if size >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, -1, false, fact_constant(s, size)))
+    if refine_active: ref_assume(t, v, [], s)
     v
 
 # Seed demanded immutable globals from effect-free value construction, using
@@ -1304,7 +1305,8 @@ fact_global_length = (g: int) -> int:
         loop c in text:
             if c >= 128 or c == 13: return -1
         return len(text)
-    loop init != 0 and nodes[init].kind == .conv and nodes[init].aux == i32(int(CV.fixed2arr)): init = int(nodes[init].a)
+    # (a contract's check leaves the literal it checked)
+    loop init != 0 and nodes[init].kind == .conv and (nodes[init].aux == i32(int(CV.fixed2arr)) or nodes[init].aux == i32(int(CV.refinement))): init = int(nodes[init].a)
     if init == 0 or nodes[init].kind != .array or nodes[init].b != 0 or nodes[init].aux != 0: return -1
     loop i in [0..nkids(init)):
         if has_flag(kid(init, i), NF_SPREAD): return -1
