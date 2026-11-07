@@ -1,0 +1,240 @@
+# Dewy's prelude: `fmt`, the one formatter. `fmt'.2f'` is a function that writes a number with
+# two decimals: `printl'{fmt'.2f'(x)}'`, or made once and used often, `let f2=fmt'.2f'` and then
+# `f2(x)`. A pattern reads as Python's format specs:
+#     [[fill]align][+][#][0][width][,|_][.precision][type]
+# What a pattern says decides what it formats (_fmt_kind): an integer base (`x`, `#06b`, `d`) takes
+# integers; a floating type (`f`, `e`, `g`, `%`), a precision, a sign, zeros or grouping take
+# numbers; `s` takes text; fill, alignment and width alone take numbers or text.
+#
+# A literal pattern is checked while compiling: the function it gives accepts only what the
+# pattern formats, and anything else is a compile error. A pattern known only when running gives a
+# function that can fail: a pattern that does not read, or one that does not apply to the value, is
+# a ParseError.
+#
+# How it costs nothing: every checked `fmt` forwards to _fmt_apply, so a call of a literal pattern's
+# function, `fmt'.2f'(x)` or `f2(x)`, is checked as `_fmt_apply('.2f' x)` (constant_checks.dewy
+# cc_forward): the overload for x's own type, whose validator runs once for each pattern. The `fmt`
+# overloads, one per kind, give the function's type when it is used as a value.
+#
+# (Interim: `$check_constant` stands in for string shapes (D11), `pattern:string<shape=@...>`.
+# A new kind of pattern (units, durations, dates) is a kind in _fmt_kind, its `fmt` overload, and
+# the _fmt_apply overloads for the types it takes; _fmt_problem stays the one reader of the
+# grammar.)
+
+_FmtInteger:type=int|int64|int32|int16|int8|uint64|uint32|uint16|uint8
+# (an exact fraction is formatted by its own overload of _fmt_apply)
+_FmtNumber:type=int|int64|int32|int16|int8|uint64|uint32|uint16|uint8|float64|float32
+
+$check_constant _fmt_integer(pattern) "not a format pattern"
+fmt=(pattern:string):>((x:_FmtInteger):>string)=>(x:_FmtInteger):>string=>_fmt_apply(pattern x)
+$check_constant _fmt_number(pattern) "not a format pattern"
+fmt=(pattern:string):>((x:_FmtNumber):>string)=>(x:_FmtNumber):>string=>_fmt_apply(pattern x)
+$check_constant _fmt_text(pattern) "not a format pattern"
+fmt=(pattern:string):>((x:string):>string)=>(x:string):>string=>_fmt_apply(pattern x)
+$check_constant _fmt_layout(pattern) "not a format pattern"
+fmt=(pattern:string):>((x:_FmtNumber|string):>string)=>(x:_FmtNumber|string):>string=>_fmt_apply(pattern x)
+# (a pattern known only when running)
+fmt=(pattern:string):>((x:_FmtNumber|string):>string|ParseError)=>(x:_FmtNumber|string):>string|ParseError=>_fmt_runtime(pattern x)
+
+# One overload for each type a pattern can take; each one's validator says whether the pattern
+# reads and takes that type, naming both when it does not.
+$check_constant _fmt_on_integer(p) "cannot format this value"
+_fmt_apply=(p:string x:int):>string=>__format_valid(x p)
+$check_constant _fmt_on_integer(p) "cannot format this value"
+_fmt_apply=(p:string x:int64):>string=>__format_valid(x p)
+$check_constant _fmt_on_integer(p) "cannot format this value"
+_fmt_apply=(p:string x:int32):>string=>__format_valid(x p)
+$check_constant _fmt_on_integer(p) "cannot format this value"
+_fmt_apply=(p:string x:int16):>string=>__format_valid(x p)
+$check_constant _fmt_on_integer(p) "cannot format this value"
+_fmt_apply=(p:string x:int8):>string=>__format_valid(x p)
+$check_constant _fmt_on_integer(p) "cannot format this value"
+_fmt_apply=(p:string x:uint64):>string=>__format_valid(x p)
+$check_constant _fmt_on_integer(p) "cannot format this value"
+_fmt_apply=(p:string x:uint32):>string=>__format_valid(x p)
+$check_constant _fmt_on_integer(p) "cannot format this value"
+_fmt_apply=(p:string x:uint16):>string=>__format_valid(x p)
+$check_constant _fmt_on_integer(p) "cannot format this value"
+_fmt_apply=(p:string x:uint8):>string=>__format_valid(x p)
+$check_constant _fmt_on_float(p) "cannot format this value"
+_fmt_apply=(p:string x:float64):>string=>__format_valid(x p)
+$check_constant _fmt_on_float(p) "cannot format this value"
+_fmt_apply=(p:string x:float32):>string=>__format_valid(x p)
+$check_constant _fmt_on_text(p) "cannot format this value"
+_fmt_apply=(p:string x:string):>string=>__format_valid(x p)
+# (an exact fraction, chosen for one alone (checker_call_values.dewy): its own text under fill,
+# alignment and width alone, on the right as a number's; else the float64 it converts to)
+$check_constant _fmt_on_fraction(p) "cannot format this value"
+_fmt_apply=<R>(p:string x:R):>string=>__format_valid(x as float64 p)
+$check_constant _fmt_on_fraction_text(p) "cannot format this value"
+_fmt_apply=<R>(p:string x:R):>string=>__format_valid("{x}" _fmt_right(p))
+# (the function's own types, when it is used as a value: its pattern was checked by `fmt`)
+_fmt_apply=(p:string x:_FmtInteger):>string=>match x {
+    v:int64=>__format_valid(v p)
+    v:int32=>__format_valid(v p)
+    v:int16=>__format_valid(v p)
+    v:int8=>__format_valid(v p)
+    v:uint64=>__format_valid(v p)
+    v:uint32=>__format_valid(v p)
+    v:uint16=>__format_valid(v p)
+    v:uint8=>__format_valid(v p)
+    _=>__format_valid(x p)
+}
+_fmt_apply=(p:string x:_FmtNumber):>string=>match x {
+    v:float64=>__format_valid(v p)
+    v:float32=>__format_valid(v p)
+    v:_FmtInteger=>_fmt_apply(p v)
+}
+_fmt_apply=(p:string x:_FmtNumber|string):>string=>match x {
+    s:string=>__format_valid(s p)
+    v:_FmtNumber=>_fmt_apply(p v)
+}
+
+_fmt_runtime=(pattern:string x:_FmtNumber|string):>string|ParseError=>{
+    let why=_fmt_problem(pattern)
+    if why isnt? none {return ParseError[why]}
+    let kind=_fmt_kind(pattern)
+    match x {
+        s:string=>{
+            if kind =? 'integer' or kind =? 'number' {return ParseError["the format pattern '{pattern}' takes numbers, not text"]}
+            __format_valid(s pattern)
+        }
+        n:_FmtNumber=>{
+            if kind =? 'text' {return ParseError["the format pattern '{pattern}' takes text, not numbers"]}
+            if kind =? 'integer' {
+                match n {
+                    f:float64=>{return ParseError["the format pattern '{pattern}' takes integers, not floats"]}
+                    f:float32=>{return ParseError["the format pattern '{pattern}' takes integers, not floats"]}
+                    i:_FmtInteger=>{return _fmt_apply(pattern i)}
+                }
+            }
+            _fmt_apply(pattern n)
+        }
+    }
+}
+
+# What a pattern formats, once it reads: 'integer', 'number', 'text' or 'layout' (fill, alignment
+# and width alone).
+_FmtKind:type='integer'|'number'|'text'|'layout'
+_fmt_kind=(p:string):>_FmtKind=>{
+    let b=p as array<uint8>
+    let n=b.length
+    if n >? 0 {
+        let last=b[n - 1]
+        # (the type is last; a fill letter is first and comes before an alignment)
+        if last =? b'd' or last =? b'x' or last =? b'X' or last =? b'b' or last =? b'o' {return 'integer'}
+        if last =? b's' {return 'text'}
+    }
+    let i:int64=0
+    if n >=? 2 and _fmt_align(b[1]) {i=2}
+    else if n >=? 1 and _fmt_align(b[0]) {i=1}
+    loop i <? n {
+        let c=b[i]
+        if c =? b'+' or c =? b'#' or c =? b',' or c =? b'_' or c =? b'.' or c =? b'%' or c =? b'f' or c =? b'e' or c =? b'E' or c =? b'g' or c =? b'G' {return 'number'}
+        # (a zero before the width: pad with zeros after the sign)
+        if c =? b'0' and (i =? 0 or b[i - 1] <? b'0' or b[i - 1] >? b'9') {return 'number'}
+        i+=1
+    }
+    'layout'
+}
+_fmt_align=(c:uint8):>bool=>c =? b'<' or c =? b'>' or c =? b'^'
+_fmt_right=(p:string):>string=>{
+    let b=p as array<uint8>
+    if (b.length >=? 1 and _fmt_align(b[0])) or (b.length >=? 2 and _fmt_align(b[1])) {return p}
+    ">{p}"
+}
+
+# What is wrong with a pattern, or none when it reads. Its messages name the pattern.
+_fmt_problem=(p:string):>string|none=>{
+    let b=p as array<uint8>
+    let n=b.length
+    let i:int64=0
+    if n >=? 2 and _fmt_align(b[1]) {i=2}
+    else if n >=? 1 and _fmt_align(b[0]) {i=1}
+    if i <? n and b[i] =? b'+' {i+=1}
+    let alt=false
+    if i <? n and b[i] =? b'#' {
+        alt=true
+        i+=1
+    }
+    let first=i
+    loop i <? n and b[i] >=? b'0' and b[i] <=? b'9' {i+=1}
+    if i - first >? 9 {return "the width in '{p}' is too large"}
+    let group=false
+    if i <? n and (b[i] =? b',' or b[i] =? b'_') {
+        group=true
+        i+=1
+    }
+    let precision=false
+    if i <? n and b[i] =? b'.' {
+        i+=1
+        first=i
+        loop i <? n and b[i] >=? b'0' and b[i] <=? b'9' {i+=1}
+        if i =? first {return "'{p}' needs the number of decimals after its '.'"}
+        if i - first >? 9 {return "the precision in '{p}' is too large"}
+        precision=true
+    }
+    let kind:uint8=0
+    if i <? n {
+        kind=b[i]
+        if not "feEgG%xXbods".contains(p.byte_slice(i i + 1)) {return "'{p.byte_slice(i n)}' in '{p}' is not a format type (f e E g G % x X b o d s)"}
+        i+=1
+    }
+    if i <? n {return "'{p.byte_slice(i n)}' after the format type in '{p}' is not part of one"}
+    let base=kind =? b'x' or kind =? b'X' or kind =? b'b' or kind =? b'o'
+    if alt and not base {return "'#' in '{p}' adds a radix prefix, so it needs an integer base: x, X, b or o"}
+    if group and base {return "grouping in '{p}' needs a decimal format, not an integer base"}
+    if precision and (base or kind =? b'd') {return "a precision in '{p}' needs a floating format, not an integer one"}
+    if kind =? b's' and (p.contains("+") or alt or group or precision) {return "'{p}' formats text, which takes fill, alignment and width only"}
+    none
+}
+
+# The validators: none when the pattern reads and is of their kind or takes their type.
+_fmt_integer=(p:string):>string|none=>_fmt_of(p 'integer')
+_fmt_number=(p:string):>string|none=>_fmt_of(p 'number')
+_fmt_text=(p:string):>string|none=>_fmt_of(p 'text')
+_fmt_layout=(p:string):>string|none=>_fmt_of(p 'layout')
+_fmt_of=(p:string kind:_FmtKind):>string|none=>{
+    let why=_fmt_problem(p)
+    if why isnt? none {return why}
+    if _fmt_kind(p) not=? kind {return "'{p}' is a pattern of another kind"}
+    none
+}
+_fmt_on_integer=(p:string):>string|none=>{
+    let why=_fmt_problem(p)
+    if why isnt? none {return why}
+    if _fmt_kind(p) =? 'text' {return "the pattern '{p}' formats text, not integers"}
+    none
+}
+_fmt_on_float=(p:string):>string|none=>{
+    let why=_fmt_problem(p)
+    if why isnt? none {return why}
+    let kind=_fmt_kind(p)
+    if kind =? 'integer' {return "the pattern '{p}' formats integers, not floats"}
+    if kind =? 'text' {return "the pattern '{p}' formats text, not floats"}
+    none
+}
+_fmt_on_fraction=(p:string):>string|none=>{
+    let why=_fmt_problem(p)
+    if why isnt? none {return why}
+    let kind=_fmt_kind(p)
+    if kind =? 'integer' {return "the pattern '{p}' formats integers, not fractions"}
+    if kind =? 'text' {return "the pattern '{p}' formats text, not fractions"}
+    if kind =? 'layout' {return "'{p}' is a pattern of another kind"}
+    none
+}
+_fmt_on_fraction_text=(p:string):>string|none=>{
+    let why=_fmt_problem(p)
+    if why isnt? none {return why}
+    if _fmt_kind(p) not=? 'layout' {return "'{p}' is a pattern of another kind"}
+    none
+}
+_fmt_on_text=(p:string):>string|none=>{
+    let why=_fmt_problem(p)
+    if why isnt? none {return why}
+    let kind=_fmt_kind(p)
+    if kind =? 'integer' {return "the pattern '{p}' formats integers, not text"}
+    if kind =? 'number' {return "the pattern '{p}' formats numbers, not text"}
+    none
+}
+

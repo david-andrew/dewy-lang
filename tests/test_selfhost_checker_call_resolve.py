@@ -183,7 +183,8 @@ representation_type = (t: int) -> int: t
     'proofs.jo': 'proof_active = false\n',
     'warn_if.jo': 'wi_any = false\n',
     'directives.jo': 'dir_floats_any = false\n',
-    'check_constant.jo': "use 'driver.jo'\ncc_any = false\ncc_call = (n: int, f: int, d: int) -> int: T_BOOL\n",
+    'check_constant.jo': "use 'driver.jo'\ncc_any = false\ncc_call = (n: int, f: int, d: int) -> int: T_BOOL\n"
+                         "cc_choose = (n: int, ds: int[], xs: int[][], ps: int[][]) -> int[]: []\n",
 }
 
 # Direct imports do not re-export names; stand-ins explicitly share their arenas.

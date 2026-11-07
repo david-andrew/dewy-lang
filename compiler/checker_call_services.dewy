@@ -1,4 +1,5 @@
 from p"checker_call_values.dewy" import value_call
+from p"call_forward.dewy" import (value_binding_forward value_call_forward)
 $runtime_checks
 from p"expr.jo" import (dewy_range_ordered dewy_range_tail_ordered IN args_fit breakpoint_call call_collect_fns call_collect_module call_collect_named call_numeric_member call_targs call_totaldict_member callee_at can_coerce check_expr_in_module check_soa_method ci coerce console_type conversion decl_in_prelude dewy_arithmetic_call dewy_byte_read dewy_console_call dewy_len_check dewy_member_name dewy_method_call dewy_method_field dewy_quantity_name dewy_static_call dewy_surface_check enum_from_int expr_as_type find_variant id_breakpoint id_len intrinsics is_lit last_checked method_str_set_key nargs_check ntype program_fn_named release_name relocate_name struct_ctor surface_hidden synthetic_copy take_name takes_seq variant_ctor variant_enum)
 from p"checks_thin_expr.dewy" import (call_search_name check_copy to_int_word_limit)
@@ -193,7 +194,7 @@ call_member_callable=(n:CDWord callee:CDWord recv:CDWord rt:CDWord fname:CDWord 
                 if method not=? 0 {return dewy_method_call(n callee method args expected)}
                 callee_at=callee
                 check_expr(callee 0);
-                return value_call(n callee args expected)
+                return value_call_bound(n callee args expected)
             }
         }
     }
@@ -245,6 +246,17 @@ call_value=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
         juxt_product(n)
         return check_expr(n expected)
     }
+    # (`fmt'.2f'(x)`: what a forwarding function gives, called at once, calls its target)
+    if head_kind =? 'call' and nodes.ptr[callee].type =? 0 and nodes.ptr[CDWord(nodes.ptr[callee].a)].kind =? 'ident' {
+        let name=CDWord(nodes.ptr[CDWord(nodes.ptr[callee].a)].name)
+        let s=lookup(name)
+        if s not=? 0 and syms.ptr[s].kind =? 'fns' {
+            let decls:array<int64>=[]
+            call_collect_named(name -1 @decls)
+            let direct=value_call_forward(n callee decls args expected)
+            if direct >=? 0 {return direct}
+        }
+    }
     let head_text=if head_kind =? 'call' or head_kind =? 'index' {juxt_text(callee)} else {""}
     callee_at=callee
     check_expr(callee 0);
@@ -253,6 +265,12 @@ call_value=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
         juxt_product(n)
         return check_expr(n expected)
     }
+    value_call_bound(n callee args expected)
+}
+# (a call through a binding that keeps a forwarding function's result, call_forward.dewy)
+value_call_bound=(n:CDWord callee:CDWord args:array<int64> expected:CDWord):>CDWord=>$unsafe {
+    let direct=value_binding_forward(n callee args expected)
+    if direct >=? 0 {return direct}
     value_call(n callee args expected)
 }
 # Whether the program declares its own function of this name taking a sequence first: then a
@@ -397,7 +415,7 @@ call_name_sym=(n:CDWord name:CDWord mod_scope:CDWord s:CDWord args:array<int64> 
                 check_expr_in_module(callee mod_scope);
             }
             else {check_expr(callee 0);}
-            return value_call(n callee args expected)
+            return value_call_bound(n callee args expected)
         }
     }
     else if sk =? 'struct_' {return struct_ctor(n 0 CDWord(syms.ptr[s].ref) args expected)}

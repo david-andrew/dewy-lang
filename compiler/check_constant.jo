@@ -16,3 +16,9 @@ cc_errors: {int: str} = {}      # declaration -> what `$error_if true` says at a
 cc_any = false
 # (calls whose every checked constant passed: they cannot fail, so they do not panic)
 cc_passed: {int: bool} = {}
+# declaration -> [target's name, then the parameters it passes in order]: a constant-checked
+# function whose body only partially applies another (constant_checks.dewy cc_forward_read)
+cc_forwards: {int: int[]} = {}
+# "validator:text" -> what the validator said of that one constant ("\x01": none, it passed),
+# so each distinct literal runs once per compile
+cc_verdicts: {str: str} = {}

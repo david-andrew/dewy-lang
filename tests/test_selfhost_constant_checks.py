@@ -141,11 +141,15 @@ main = ():
     verdict = (t: int, i: int, s: str, items: int[]) -> int:
         ct_values.push(CTValue(type=t, i=i, s=s, items=items))
         ct_values.len() - 1
+    # (a validator's verdict on one constant is kept for the compile, cc_verdicts: each case
+    # here asks the same constant again, so it starts afresh)
     message = verdict(T_TEXT, 0, "inner", [])
     next_value = verdict(T_OPT, 1, "", [message])
     print(cc_call(plain(T_NOT_UNION), 1, good))
+    cc_verdicts = {}
     next_value = verdict(T_TEXT, 0, "text fails", [])
     print(cc_call(plain(T_NOT_UNION), 1, good))
+    cc_verdicts = {}
     next_value = verdict(T_OPT, 0, "", [])
     loop t in [T_NOT_UNION, T_ALL_FAIL]: print(cc_call(plain(t), 1, good))
     loop t in [T_UNION, 23]:

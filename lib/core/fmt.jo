@@ -439,6 +439,57 @@ format = (value: u8, spec: str) -> str: format(u64(value), spec)
 format = (value: u16, spec: str) -> str: format(u64(value), spec)
 format = (value: u32, spec: str) -> str: format(u64(value), spec)
 
+# A spec its caller has read and matched to the value already (lib/prelude/formats.dewy, `fmt`):
+# the same text as format, with no check of its own.
+__format_valid = (value: int, spec: str) -> str:
+    sp = __spec_parse(spec)
+    buf: u8[]
+    if sp.prec >= 0 or find_byte("feEgG%", u8(sp.kind)) >= 0: __fmt_spec(buf, f64(value), spec)
+    else: __fmt_spec(buf, value, spec)
+    str_from_bytes(buf)
+
+__format_valid = (value: u64, spec: str) -> str:
+    sp = __spec_parse(spec)
+    buf: u8[]
+    if sp.prec >= 0 or find_byte("feEgG%", u8(sp.kind)) >= 0: __fmt_spec(buf, f64(value), spec)
+    else: __fmt_spec(buf, value, spec)
+    str_from_bytes(buf)
+
+__format_valid = (value: f64, spec: str) -> str:
+    buf: u8[]
+    __fmt_spec(buf, value, spec)
+    str_from_bytes(buf)
+
+__format_valid = (value: f32, spec: str) -> str:
+    sp = __spec_parse(spec)
+    buf: u8[]
+    if sp.prec < 0 and sp.kind == 0:
+        __fmt(buf, value)
+        __spec_finish(buf, 0, sp, true)
+    else: __fmt_spec(buf, value, spec)
+    str_from_bytes(buf)
+
+__format_valid = (value: str, spec: str) -> str:
+    sp = __spec_parse(spec)
+    if sp.width == 0: return value
+    extra = sp.width - __dewy_string_length(value)
+    if extra <= 0: return value
+    buf: u8[]
+    __buf_append_str(buf, value)
+    before = 0
+    if sp.align == '>': before = extra
+    else if sp.align == '^': before = extra / 2
+    __insert_fill(buf, 0, before, sp.fill)
+    __insert_fill(buf, len(buf), extra - before, sp.fill)
+    str_from_bytes(buf)
+
+__format_valid = (value: i8, spec: str) -> str: __format_valid(int(value), spec)
+__format_valid = (value: i16, spec: str) -> str: __format_valid(int(value), spec)
+__format_valid = (value: i32, spec: str) -> str: __format_valid(int(value), spec)
+__format_valid = (value: u8, spec: str) -> str: __format_valid(u64(value), spec)
+__format_valid = (value: u16, spec: str) -> str: __format_valid(u64(value), spec)
+__format_valid = (value: u32, spec: str) -> str: __format_valid(u64(value), spec)
+
 __format_checked = (spec: str, kinds: str, numeric: bool) -> __Spec:
     i = 0
     n = len(spec)

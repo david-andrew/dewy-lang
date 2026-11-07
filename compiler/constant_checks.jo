@@ -15,6 +15,8 @@ use 'constant_folds.jo'
 use 'constant_fold_ops.dewy'
 
 cc_reset = ():
+    cc_forwards = {}
+    cc_verdicts = {}
     cc_decls = {}
     cc_errors = {}
     cc_any = false
@@ -80,21 +82,26 @@ cc_call = (n: int, f: int, decl: int) -> int:
         pos = nodes[n].pos
         # (at the argument, or at the call when a parameter's default filled it in)
         if nkids(n) > c.params[0] and not pos_in_lib(nodes[kid(n, c.params[0])].pos): pos = nodes[kid(n, c.params[0])].pos
-        v = get_fn_inst(c.validator, [], pos)
-        run = mk(.call, pos)
-        nodes[run].sym = i32(v)
-        nodes[run].type = fns[v].ret
-        add_flag(run, NF_CHECKED)
-        set_list(run, args)
-        why = ct_values[ct_run(run)]
+        # (one run for each validator and constant: `fmt'.2f'` asks the same of every call)
+        key = ""
+        if args.len() == 1 and nodes[args[0]].kind == .str_lit: key = "{c.validator}:{name_of(int(nodes[args[0]].sval))}"
+        said = "\x01"
+        if key != "" and cc_verdicts.has(key): said = cc_verdicts[key]
+        else:
+            v = get_fn_inst(c.validator, [], pos)
+            run = mk(.call, pos)
+            nodes[run].sym = i32(v)
+            nodes[run].type = fns[v].ret
+            add_flag(run, NF_CHECKED)
+            set_list(run, args)
+            why = ct_values[ct_run(run)]
+            if tkind(why.type) == .opt and why.i != 0: said = ct_values[why.items[0]].s
+            else if tkind(why.type) == .str_: said = why.s
+            if key != "": cc_verdicts[key] = said
         # (empty text: no failure and no promise: the call stays as it is)
-        if tkind(why.type) == .opt and why.i != 0:
-            said = ct_values[why.items[0]].s
+        if said != "\x01":
             if said == "": return 0
             fatal(pos, "{c.message}: {said}")
-        if tkind(why.type) == .str_:
-            if why.s == "": return 0
-            fatal(pos, "{c.message}: {why.s}")
         after = cc_fold_after(n, decl)
         if after != 0: return after
         return cc_narrow(n)

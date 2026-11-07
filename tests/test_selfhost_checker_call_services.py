@@ -346,3 +346,6 @@ def test_checker_call_services_errors(compiler, tmp_path, setup, message):  # no
 JO['expr.jo'] = JO['expr.jo'].replace('value_call = ', 'value_call_double = ')
 JO['checker_call_values.dewy'] = 'from p"expr.jo" import value_call_double\nvalue_call=(n:int64 callee:int64 args:array<int64> expected:int64=0):>int64=>value_call_double(n callee args expected)\n'
 JO['checker_call_values.jo'] = "use 'expr.jo'\nvalue_call = (n: int, callee: int, args: int[], expected: int = 0) -> int: value_call_double(n, callee, args, expected)\n"
+# (forwarding, call_forward.dewy, takes no call here: both builds call the value)
+JO['call_forward.dewy'] = 'value_call_forward=(n:int64 giver:int64 decls:array<int64> args:array<int64> expected:int64):>int64=>-1\nvalue_binding_forward=(n:int64 callee:int64 args:array<int64> expected:int64):>int64=>-1\n'
+JO['call_forward.jo'] = "value_call_forward = (n: int, giver: int, decls: int[], args: int[], expected: int) -> int: -1\nvalue_binding_forward = (n: int, callee: int, args: int[], expected: int) -> int: -1\n"

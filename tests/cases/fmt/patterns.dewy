@@ -1,0 +1,42 @@
+# `fmt` patterns of every kind, against Python's format(value, pattern); one differs: `%` with
+# no precision shows no decimals (Python's shows six).
+printl"[{fmt'.2f'(3.14159)}]"
+printl"[{fmt'.0f'(2.5)}]"
+printl"[{fmt'08.3f'(-3.14159)}]"
+printl"[{fmt'+.1f'(2.25)}]"
+printl"[{fmt'.3e'(12345.678)}]"
+printl"[{fmt'E'(0.00012)}]"
+printl"[{fmt'.4g'(1234567.0)}]"
+printl"[{fmt'g'(0.0001)}]"
+printl"[{fmt'.1%'(0.256)}]"
+printl"[{fmt','(1234567)}]"
+printl"[{fmt'_'(1234567)}]"
+printl"[{fmt',.2f'(1234567.891)}]"
+printl"[{fmt'>10,.2f'(98765.4321)}]"
+printl"[{fmt'x'(255)}]"
+printl"[{fmt'X'(255)}]"
+printl"[{fmt'#06x'(255)}]"
+printl"[{fmt'#b'(5)}]"
+printl"[{fmt'o'(8)}]"
+printl"[{fmt'#o'(8)}]"
+printl"[{fmt'd'(-42)}]"
+printl"[{fmt'+d'(42)}]"
+printl"[{fmt'05'(-42)}]"
+printl"[{fmt'*^9'(42)}]"
+printl"[{fmt'>8'(42)}]"
+printl"[{fmt'<6'(7)}]"
+printl"[{fmt'^5'("ab")}]"
+printl"[{fmt'>4'("θ")}]"
+printl"[{fmt'-<8s'("hi")}]"
+printl"[{fmt'.2f'(5)}]"
+printl"[{fmt'%'(0.5)}]"
+printl"[{fmt'0>5'(7)}]"
+printl"[{fmt''(12)}]"
+printl"[{fmt'>7'(2.5)}]"
+let f2=fmt'.2f'
+let hex=fmt'#x'
+printl"{f2(1.005)} {f2(2)} {hex(48879)}"
+let w:uint8=200
+let n:int32=-7
+let big:int=2^70
+printl"{hex(w)} {fmt'+'(n)} {fmt','(big)}"

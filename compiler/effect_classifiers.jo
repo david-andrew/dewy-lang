@@ -66,7 +66,16 @@ effect_library_classify = (g: int) -> EffectClass:
             if not effect_library_formatter(g): return .unclassified
             effect_class_text[g] = true
             return .allocates_panics
-        if name == "format" and fns[g].params.len() == 2 and effect_library_leaf(int(locals[fns[g].params[0]].type)): return .allocates_panics
+        # (`fmt`'s writer: its spec was read and matched to the value before it is called)
+        if name == "__format_valid":
+            effect_class_text[g] = true
+            return .allocates
+        return .unclassified
+    # (`fmt'.2f'(x)` checks as `_fmt_apply('.2f' x)`: it only calls __format_valid)
+    if file == "/prelude/formats.dewy":
+        if name == "_fmt_apply":
+            effect_class_text[g] = true
+            return .allocates
         return .unclassified
     if file == "/core/rt.jo":
         if name in ["__str_eq", "__str_cmp", "__mem_eq", "__str_hash", "__str_khash", "__hash_bytes"]: return .reads

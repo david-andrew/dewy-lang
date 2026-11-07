@@ -108,6 +108,12 @@ __read = (r: mut __TextIn, x: mut __dewy_int):
     value = __mi_parse(r.s[r.n0..r.n1))
     if value is __dewy_int: x = value
     else: __tx_bad(r, "expected a whole number")
+__format_valid = (value: __dewy_int, spec: str) -> str:
+    sp = __spec_parse(spec)
+    buf: u8[]
+    if sp.prec >= 0 or find_byte("feEgG%", u8(sp.kind)) >= 0: __fmt_spec(buf, f64(value), spec)
+    else: __fmt_spec(buf, value, spec)
+    str_from_bytes(buf)
 format = (value: __dewy_int, spec: str) -> str:
     sp = __format_checked(spec, "dxXbofeEgG%", true)
     buf: u8[]

@@ -22,7 +22,7 @@ from p"proofs.jo" import (proof_active)
 from p"warn_if.jo" import (wi_any)
 from p"directives.jo" import (dir_floats_any)
 from p"check_constant.jo" import cc_any
-from p"constant_checks.dewy" import cc_call
+from p"constant_checks.dewy" import (cc_call cc_choose)
 from p"types.jo" import (types tkind prune has_var type_eq targ T_BOOL T_STR T_NEVER T_VOID)
 from p"checker_signature.dewy" import (fn_sig)
 from p"effect_contracts.dewy" import (callable_base mk_callable_contract callable_contract)
@@ -114,6 +114,25 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
         return resolve_fn_call(n name decls args expected closure ufcs)
     }
     if nfit =? 0 and failure.rejected.length >? 0 {call_rejection_text(@failure)}
+    # (overloads told apart by their constant checks: the argument chooses, constant_checks.dewy)
+    if nfit >? 1 and cc_any {
+        let ds:array<int64>=[]
+        let xs:array<array<int64>>=[]
+        let ps:array<array<int64>>=[]
+        loop cd in cands {
+            ds.push(cd.decl)
+            xs.push(cd.args)
+            ps.push(cd.sig.params)
+        }
+        let kept=cc_choose(n ds xs ps)
+        if kept.length >? 0 {
+            let chosen:array<Cand>=[]
+            loop i in kept {chosen.push(cands[i])}
+            cands=chosen
+            nfit=chosen.length
+            first=chosen[0]
+        }
+    }
     if nfit =? 1 {best=0}
     else {
         loop ci in [0..cands.length) and cd in cands {

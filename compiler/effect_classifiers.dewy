@@ -67,7 +67,19 @@ effect_library_classify=(g:ClassWord):>EffectClass=>$unsafe {
             effect_class_text[g] = true;
             return EffectClass.allocates_panics
         }
-        if name =? "format" and fns.ptr[g].params.length =? 2 and effect_library_leaf(ClassWord(locals.ptr[fns.ptr[g].params.ptr[0]].type)) {return EffectClass.allocates_panics}
+        # (`fmt`'s writer: its spec was read and matched to the value before it is called)
+        if name =? "__format_valid" {
+            effect_class_text[g] = true;
+            return EffectClass.allocates
+        }
+        return EffectClass.unclassified
+    }
+    # (`fmt'.2f'(x)` checks as `_fmt_apply('.2f' x)`: it only calls __format_valid)
+    if file =? "/prelude/formats.dewy" {
+        if name =? "_fmt_apply" {
+            effect_class_text[g] = true;
+            return EffectClass.allocates
+        }
         return EffectClass.unclassified
     }
     if file =? "/core/rt.jo" {

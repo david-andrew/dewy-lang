@@ -1,0 +1,15 @@
+# A pattern known only when running gives a function whose result can fail: a pattern that does
+# not read, or one that does not apply to the value, is a ParseError.
+let patterns=[".2f" "x" ".2q" ">6" "s"]
+loop p in patterns {
+    let f=fmt(p)
+    let a=match f(255) {
+        s:string=>s
+        e:ParseError=>"error: {e.message}"
+    }
+    let b=match f(2.5) {
+        s:string=>s
+        e:ParseError=>"error: {e.message}"
+    }
+    printl"{p}: [{a}] [{b}]"
+}

@@ -1,0 +1,194 @@
+$runtime_checks
+# Calls of what a forwarding function gives: `fmt'.2f'(x)`, or `f2(x)` after `const f2=fmt'.2f'`,
+# check as a direct call of the function `fmt` hands its parameters to, `_fmt_apply('.2f' x)`, in
+# the library's own module: the overload for x's type, its constant check once per pattern, and
+# no function value, so effects, facts and deadlock certificates follow the call. Only a function
+# that states a constant check and whose body only hands its parameters on (cc_forward_read), and
+# only for constant string arguments. Demand-driven: O(declarations + arguments) per such call.
+from p"check_constant.jo" import (cc_forwards)
+from p"constant_checks.dewy" import (cc_constant)
+from p"ast.jo" import (NF_CHECKED add_flag kid kids mk nkids nkids2 nodes set_list)
+from p"frontend.jo" import (source_force_body)
+from p"expr.jo" import (AUX2_PARTIAL call_collect_named last_checked ntype)
+from p"check.jo" import (fns syms universe)
+from p"checker_expr.dewy" import (call_by_name check_expr)
+from p"checker_call_resolve.dewy" import (resolve_fn_call)
+from p"comptime.jo" import (checked_const_init)
+from p"types.jo" import (T_STR prune)
+from p"units.jo" import (bundled_rational_type bundled_word_rational_type)
+from p"util.jo" import (name_of)
+
+FwdWord:type=int64<overflow='wrap'>
+# A constant-checked function whose body only hands its parameters on, as a partial application
+# `@target(p)` or a function of the rest, `(x:T):>R=>target(p x)`:
+# `fmt=(pattern:string):>((x:string):>string)=>(x:string):>string=>_fmt_apply(pattern x)`. Read
+# once, before its body is checked: the target and the parameters it passes. O(body statements).
+cc_forward_read=(decl:FwdWord):>void=>$unsafe {
+    if cc_forwards.has(decl) {return}
+    cc_forwards[decl]=[]
+    if nodes.ptr[decl].b =? 0 {return}
+    source_force_body(decl)
+    let e=cc_forward_body(FwdWord(nodes.ptr[decl].b))
+    if e =? 0 {return}
+    # (the function's own parameters, handed on after the declaration's)
+    let rest:array<int64>=[]
+    if nodes.ptr[e].kind =? 'lambda' {
+        loop q in kids(e) {rest.push(FwdWord(nodes.ptr[q].name))}
+        e=cc_forward_body(FwdWord(nodes.ptr[e].b))
+        if e =? 0 or nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].aux2 =? int32(AUX2_PARTIAL) {return}
+    }
+    else if nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].aux2 not=? int32(AUX2_PARTIAL) {return}
+    let target=FwdWord(nodes.ptr[e].a)
+    if target =? 0 or nodes.ptr[target].kind not=? 'ident' {return}
+    let passed:array<int64>=[FwdWord(nodes.ptr[target].name)]
+    let given=kids(e)
+    if given.length <? rest.length {return}
+    loop j in [0..given.length) {
+        let a=given[j]
+        if nodes.ptr[a].kind not=? 'ident' {return}
+        let lead=given.length - rest.length
+        if j >=? lead {
+            if FwdWord(nodes.ptr[a].name) not=? rest[j - lead] {return}
+            continue
+        }
+        let at=-1
+        loop i in [0..nkids(decl)) {
+            if nodes.ptr[kid(decl i)].name =? nodes.ptr[a].name {at=i}
+        }
+        if at <? 0 {return}
+        passed.push(at)
+    }
+    cc_forwards[decl]=passed
+}
+# (does the declaration state a constant check? its metatags, unchecked)
+cc_states_check=(decl:FwdWord):>bool=>$unsafe {
+    if nodes.ptr[decl].c =? 0 {return false}
+    loop at in kids(FwdWord(nodes.ptr[decl].c)) {
+        if name_of(FwdWord(nodes.ptr[at].name)) =? "check_constant" {return true}
+    }
+    false
+}
+# (a Dewy body's one expression, after the copies of its parameters; 0 when it has more)
+cc_forward_body=(b0:FwdWord):>FwdWord=>$unsafe {
+    let b=b0
+    loop b not=? 0 {
+        let k=nodes.ptr[b].kind
+        if k =? 'return_' or k =? 'exprstmt' {b=FwdWord(nodes.ptr[b].a)}
+        else if k =? 'block' and nkids(b) >? 0 {
+            let last=nkids(b) - 1
+            loop i in [0..last) {
+                let c=kid(b i)
+                if nodes.ptr[c].kind not=? 'vardecl' or nodes.ptr[c].b =? 0 or nodes.ptr[FwdWord(nodes.ptr[c].b)].kind not=? 'ident' {return 0}
+            }
+            b=kid(b last)
+        }
+        else {return b}
+    }
+    0
+}
+# A call of what a forwarding function gives, `fmt'.2f'(x)`: when every checked declaration of the
+# family forwards alike and the call that gives the function has only constant strings, the
+# target and its first arguments, [name, string constants...], so the caller calls
+# `_fmt_apply('.2f' x)` directly in the declarations' module. [] otherwise. O(declarations).
+cc_forward=(giver:FwdWord decls:array<int64>):>array<int64>=>$unsafe {
+    let shape:array<int64>=[]
+    loop d in decls {
+        # (read from the declaration alone: nothing of its signature or body is checked)
+        if not cc_states_check(d) {continue}
+        cc_forward_read(d)
+        let f=cc_forwards.get(d) ?? []
+        if f.length =? 0 {return []}
+        if shape.length =? 0 {shape=f}
+        else if f not=? shape {return []}
+    }
+    if shape.length =? 0 {return []}
+    let out:array<int64>=[shape[0]]
+    loop i in [1..shape.length) {
+        let at=shape[i]
+        if at >=? nkids(giver) {return []}
+        let x=kid(giver at)
+        let text=if nodes.ptr[x].kind =? 'str_lit' and nkids(x) =? 0 {FwdWord(nodes.ptr[x].sval)} else if nodes.ptr[x].type not=? 0 {cc_constant(x)} else {-1}
+        if text <? 0 {return []}
+        out.push(text)
+    }
+    out
+}
+# The call n of what giver gives, with arguments args: checked as its target's direct call, or -1
+# when giver is no forwarding call of constants.
+value_call_forward=(n:FwdWord giver:FwdWord decls:array<int64> args:array<int64> expected:FwdWord):>FwdWord=>$unsafe {
+    if decls.length =? 0 {return -1}
+    let f=cc_forward(giver decls)
+    if f.length =? 0 {return -1}
+    let pos=nodes.ptr[n].pos
+    let head=mk('ident' pos)
+    nodes.ptr[head].name=int32(f[0])
+    let all:array<int64>=[]
+    loop i in [1..f.length) {
+        let text=mk('str_lit' nodes.ptr[giver].pos)
+        nodes.ptr[text].sval=int32(f[i])
+        nodes.ptr[text].type=int32(T_STR)
+        add_flag(text NF_CHECKED)
+        all.push(text)
+    }
+    # (checked here, to choose by their types: checking may replace a node, `-x` of an exact one)
+    loop a in args {
+        check_expr(a 0);
+        let v=last_checked
+        add_flag(v NF_CHECKED)
+        all.push(v)
+    }
+    nodes.ptr[n].a=int32(head)
+    nodes.ptr[n].aux=0
+    nodes.ptr[n].sym=0
+    set_list(n all)
+    let mod=FwdWord(nodes.ptr[decls[0]].mod)
+    # (the overloads whose parameters are written as the arguments' own types, when some are: one
+    # of them wins anyway, and only its signature is read, so `_fmt_apply` of a float64 never
+    # reads another's)
+    let family:array<int64>=[]
+    call_collect_named(f[0] mod @family)
+    let exact:array<int64>=[]
+    let plain:array<int64>=[]
+    loop d in family {
+        if nkids(d) not=? all.length {continue}
+        let fits=true
+        let built_in=true
+        loop i in [f.length - 1..all.length) {
+            let tn=FwdWord(nodes.ptr[kid(d i)].a)
+            # (a built-in type's name, read from the universe: nothing is loaded)
+            let s=if tn =? 0 or nodes.ptr[tn].kind not=? 'tname' or nkids(tn) not=? 0 or nodes.ptr[tn].sval not=? 0 {0} else {universe.get(FwdWord(nodes.ptr[tn].name)) ?? 0}
+            if s =? 0 or syms.ptr[s].kind not=? 'type_' {
+                built_in=false
+                fits=false
+            }
+            else if prune(FwdWord(syms.ptr[s].ref)) not=? prune(ntype(all[i])) {fits=false}
+        }
+        if fits {exact.push(d)}
+        # (a conversion goes to float64, never float32)
+        let tl=FwdWord(nodes.ptr[kid(d all.length - 1)].a)
+        let narrow=tl not=? 0 and nodes.ptr[tl].kind =? 'tname' and name_of(FwdWord(nodes.ptr[tl].name)) =? "f32"
+        if built_in and not narrow {plain.push(d)}
+    }
+    if exact.length >? 0 {return resolve_fn_call(n f[0] exact all expected)}
+    # (an exact fraction: the overloads over a type parameter, so the exact library's names are
+    # read only by the programs that use them)
+    let last=prune(ntype(all[all.length - 1]))
+    if bundled_rational_type(last) or bundled_word_rational_type(last) {
+        let generic:array<int64>=[]
+        loop d in family {
+            if nkids(d) =? all.length and nkids2(d) >? 0 {generic.push(d)}
+        }
+        if generic.length >? 0 {return resolve_fn_call(n f[0] generic all expected)}
+    }
+    # (else a conversion: among the overloads of built-in types)
+    if plain.length >? 0 {return resolve_fn_call(n f[0] plain all expected)}
+    call_by_name(n f[0] mod all expected false)
+}
+# A call through a checked binding that keeps what a forwarding function gave, `const f2=fmt'.2f'`
+# or a global never written again: as value_call_forward; -1 otherwise.
+value_binding_forward=(n:FwdWord callee:FwdWord args:array<int64> expected:FwdWord):>FwdWord=>$unsafe {
+    if nodes.ptr[callee].kind not=? 'ident' or nodes.ptr[callee].sym <=? 0 {return -1}
+    let initial=checked_const_init(FwdWord(nodes.ptr[callee].aux) FwdWord(nodes.ptr[callee].sym) nodes.ptr[callee].pos)
+    if initial =? 0 or nodes.ptr[initial].kind not=? 'call' or nodes.ptr[initial].aux not=? 0 or nodes.ptr[initial].sym <=? 0 {return -1}
+    value_call_forward(n initial [FwdWord(fns.ptr[FwdWord(nodes.ptr[initial].sym)].decl)] args expected)
+}

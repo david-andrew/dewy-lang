@@ -2,7 +2,7 @@ $runtime_checks
 # Demand-driven: nothing is read unless a declaration has a constant check. Cost: O(1) per
 # declaration, O(1) per call of one, and one compile-time run of the validator per call with a
 # constant argument.
-from p"check_constant.jo" import (cc_passed CheckConstant cc_any cc_decls cc_errors)
+from p"check_constant.jo" import (cc_passed CheckConstant cc_any cc_decls cc_errors cc_forwards cc_verdicts)
 from p"checker_expr.dewy" import lookup
 from p"ast.jo" import (NF_CHECKED add_flag kid kids mk nkids nodes set_list)
 from p"check.jo" import (fns get_fn_inst syms)
@@ -20,6 +20,8 @@ let CC_LOCAL:ConstantWord=1 # SK.local
 let CC_GLOBAL:ConstantWord=2 # SK.global
 let CC_CONST:ConstantWord=6 # SK.const_
 cc_reset=():>void=>{
+    cc_forwards=dict<int64 array<int64>>()
+    cc_verdicts=dict<string string>()
     cc_decls=dict<int64 array<CheckConstant>>()
     cc_any=false
     cc_errors=dict<int64 string>()
@@ -84,27 +86,13 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
     if folded not=? 0 {return folded}
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl] {
-        let args=cc_arguments(n c)
+        let args=cc_arguments(kids(n) c)
         if args.length not=? c.params.length {continue}
-        let pos=nodes.ptr[n].pos
-        # (at the argument, or at the call when a parameter's default filled it in)
-        if nkids(n) >? c.params[0] and not pos_in_lib(nodes.ptr[kid(n c.params[0])].pos) {pos=nodes.ptr[kid(n c.params[0])].pos}
-        let v=get_fn_inst(c.validator [] pos)
-        let run=mk('call' pos)
-        nodes.ptr[run].sym=int32(v)
-        nodes.ptr[run].type=fns.ptr[v].ret
-        add_flag(run NF_CHECKED)
-        set_list(run args)
-        let why=ct_values[ct_run(run)]
-        # (empty text: no failure and no promise: the call stays as it is)
-        if tkind(why.type) =? 'opt' and why.i not=? 0 {
-            let said=ct_values[why.items[0]].s
+        let pos=cc_check_pos(n c)
+        let said=cc_verdict(c args pos)
+        if said isnt? none {
             if said =? "" {return 0}
             fatal(pos "{c.message}: {said}")
-        }
-        if tkind(why.type) =? 'str_' {
-            if why.s =? "" {return 0}
-            fatal(pos "{c.message}: {why.s}")
         }
         cc_passed[n]=true
         let after=cc_fold_after(n decl)
@@ -113,12 +101,86 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
     }
     0
 }
+# (at the argument, or at the call when a parameter's default filled it in)
+cc_check_pos=(n:ConstantWord c:CheckConstant):>ConstantWord=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    if nkids(n) >? c.params[0] and not pos_in_lib(nodes.ptr[kid(n c.params[0])].pos) {pos=nodes.ptr[kid(n c.params[0])].pos}
+    pos
+}
+# The validator of c on its constant arguments, run now: none when they pass, else what it said
+# ("" promises nothing and fails nothing).
+cc_verdict=(c:CheckConstant args:array<int64> pos:ConstantWord):>string|none=>$unsafe {
+    # (one run for each validator and constant: `fmt'.2f'` asks the same of every call)
+    let key=if args.length =? 1 and nodes.ptr[args[0]].kind =? 'str_lit' {"{c.validator}:{name_of(ConstantWord(nodes.ptr[args[0]].sval))}"} else {""}
+    if key not=? "" and cc_verdicts.has(key) {
+        let said=cc_verdicts[key]
+        return if said =? "\u{1}" {none} else {said}
+    }
+    let said=cc_verdict_run(c args pos)
+    if key not=? "" {cc_verdicts[key]=said ?? "\u{1}"}
+    said
+}
+cc_verdict_run=(c:CheckConstant args:array<int64> pos:ConstantWord):>string|none=>$unsafe {
+    let v=get_fn_inst(c.validator [] pos)
+    let run=mk('call' pos)
+    nodes.ptr[run].sym=int32(v)
+    nodes.ptr[run].type=fns.ptr[v].ret
+    add_flag(run NF_CHECKED)
+    set_list(run args)
+    let why=ct_values[ct_run(run)]
+    if tkind(why.type) =? 'opt' and why.i not=? 0 {return ct_values[why.items[0]].s}
+    if tkind(why.type) =? 'str_' {return why.s}
+    none
+}
+# Overloads told apart only by their constant checks of strings, as `fmt`'s, one for each kind of pattern
+# (the interim form of string shapes, D11): with constant arguments, the candidates whose
+# validators pass; with others, the candidates without a check. Each entry of decls is a
+# candidate's declaration, of args its arguments and of params its parameter types. [] keeps every candidate (fewer
+# than two have checks). None passing is a compile error: the first one's message. O(candidates)
+# validator runs, only where two candidates have checks.
+cc_choose=(n:ConstantWord decls:array<int64> args:array<array<int64>> params:array<array<int64>>):>array<int64>=>$unsafe {
+    let checked=0
+    loop d in decls {if cc_decls.has(d) {checked+=1}}
+    if checked <? 2 {return []}
+    let passed:array<int64>=[]
+    let plain:array<int64>=[]
+    let failed=""
+    let failed_pos:ConstantWord=0
+    let constant=true
+    loop i in [0..decls.length) {
+        if not cc_decls.has(decls[i]) {
+            plain.push(i)
+            continue
+        }
+        let c=cc_decls[decls[i]][0]
+        # (a string a check reads, as a string shape will: other checked values keep every candidate)
+        loop p in c.params {
+            if p >=? params[i].length or prune(params[i][p]) not=? T_STR {return []}
+        }
+        let given=cc_arguments(args[i] c)
+        if given.length not=? c.params.length {
+            constant=false
+            continue
+        }
+        let pos=nodes.ptr[n].pos
+        if args[i].length >? c.params[0] and not pos_in_lib(nodes.ptr[args[i][c.params[0]]].pos) {pos=nodes.ptr[args[i][c.params[0]]].pos}
+        let said=cc_verdict(c given pos)
+        if said is? none {passed.push(i)}
+        else if failed_pos =? 0 and said not=? "" {
+            failed="{c.message}: {said}"
+            failed_pos=pos
+        }
+    }
+    if passed.length >? 0 {return passed}
+    if constant and failed_pos not=? 0 {fatal(failed_pos failed)}
+    plain
+}
 # The constants a check's parameters are given, as its validator takes them; short when one is not.
-cc_arguments=(n:ConstantWord c:CheckConstant):>array<int64>=>$unsafe {
+cc_arguments=(xs:array<int64> c:CheckConstant):>array<int64>=>$unsafe {
     let args:array<int64>=[]
     loop p in c.params {
-        if p >=? nkids(n) {return args}
-        let x=kid(n p)
+        if p >=? xs.length {return args}
+        let x=xs[p]
         let text=cc_constant(x)
         # (a string the parameter takes as itself; in a wider type, the argument keeps its conversion)
         if text >=? 0 and prune(ntype(x)) =? T_STR {
