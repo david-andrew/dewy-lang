@@ -42,6 +42,36 @@ fact_mentions=(n:PushWord l:PushWord):>bool=>$unsafe {
     }
     false
 }
+# Whether call n may change local l: l passed whole (a receiver or an argument), or a
+# place of it lent with `@` anywhere in the call. An element or length read among
+# its arguments (`min(cur[j - 1] + 1 x)`) is a value and cannot. The locals asked
+# about are never captured or shared (fact_counted_pushes). O(call subtree).
+fact_call_may_write=(n:PushWord l:PushWord):>bool=>$unsafe {
+    if not fact_mentions(n l) {return false}
+    loop i in [0..nkids(n)) {
+        let c=kid(n i)
+        loop nodes.ptr[c].kind =? 'conv' or nodes.ptr[c].kind =? 'narrow' or nodes.ptr[c].kind =? 'namedarg' {c=PushWord(nodes.ptr[c].a)}
+        if nodes.ptr[c].kind =? 'ident' and nodes.ptr[c].aux =? int32(1) and nodes.ptr[c].sym =? int32(l) {return true}
+    }
+    if nodes.ptr[n].a not=? 0 and fact_mentions(PushWord(nodes.ptr[n].a) l) {return true}
+    fact_lends(n l)
+}
+fact_lends=(n:PushWord l:PushWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'addr' {return fact_mentions(n l)}
+    let mask=isolation_children(k)
+    if mask <? 0 {return k not=? 'lambda' and fact_mentions(n l)}
+    if mask & 1 not=? 0 and fact_lends(PushWord(nodes.ptr[n].a) l) {return true}
+    if mask & 2 not=? 0 and fact_lends(PushWord(nodes.ptr[n].b) l) {return true}
+    if mask & 4 not=? 0 and fact_lends(PushWord(nodes.ptr[n].c) l) {return true}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {
+            if fact_lends(kid(n i) l) {return true}
+        }
+    }
+    false
+}
 fact_labeled_exit=(n:PushWord):>bool=>$unsafe {
     if n =? 0 {return false}
     let k=nodes.ptr[n].kind
@@ -91,7 +121,8 @@ fact_push_flow=(n:PushWord l:PushWord):>[int64 int64]=>$unsafe {
         return fact_push_then(fact_push_flow(kid(n 1) l) [1 (-2)])
     }
     if k =? 'assign' and fact_mentions(PushWord(nodes.ptr[n].a) l) {return [(-1) (-1)]}
-    if (k =? 'call' or k =? 'addr' or k =? 'intrinsic' and nodes.ptr[n].aux not=? int32(int64(IN.len))) and fact_mentions(n l) {return [(-1) (-1)]}
+    if (k =? 'addr' or k =? 'intrinsic' and nodes.ptr[n].aux not=? int32(int64(IN.len))) and fact_mentions(n l) {return [(-1) (-1)]}
+    if k =? 'call' and fact_call_may_write(n l) {return [(-1) (-1)]}
     # A nested loop may exit this one only with a labeled edge. Any return
     # in it ends the function; a normal exit makes no change to this array.
     if k =? 'while_' or k =? 'for_' {

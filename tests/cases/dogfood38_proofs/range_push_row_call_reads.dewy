@@ -1,0 +1,10 @@
+# A call that only reads the row's elements cannot change it: `min(...)` of
+# earlier cells keeps the one-push-per-value count.
+row = (n:int64):>array<int> => {
+    let cur:array<int> = [3]
+    loop j in [1..n] {
+        cur.push(min(cur[j - 1] + 2 (cur[j - 1] * 3) // 2))
+    }
+    cur
+}
+main = () => printl(row(5))

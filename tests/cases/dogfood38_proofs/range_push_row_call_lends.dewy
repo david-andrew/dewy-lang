@@ -1,0 +1,12 @@
+grow = (@xs:array<int>):>int => {
+    xs.push(0)
+    1
+}
+f = (m:int64):>int => {
+    let cur = [1]
+    loop j in [1..m] {
+        cur.push(grow(@cur) + cur[j - 1])
+    }
+    0
+}
+main = () => printl(f(3))
