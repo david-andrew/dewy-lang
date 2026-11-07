@@ -275,7 +275,9 @@ _local_text=(local:int64):>string=>{
 _pair_text=(offset:int64):>string=>{
     let size=if offset <? 0 {-offset} else {offset}
     let sign=if offset <? 0 {"-"} else {"+"}
-    "{sign}{pad(size//3600 2)}:{pad((size%3600)//60 2)}"
+    # (the seconds of an old local mean time, as Monrovia's -00:44:30, when it has them)
+    let seconds=if size%60 =? 0 {""} else {":{pad(size%60 2)}"}
+    "{sign}{pad(size//3600 2)}:{pad((size%3600)//60 2)}{seconds}"
 }
 _FoldPolicy:type='earlier'|'later'|'reject'
 _GapPolicy:type='preserve_displacement'|'next'|'reject'
@@ -415,8 +417,7 @@ _civil=(r:ZonedDateTime|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields):>Zo
     <OffGrid>=>Gap["that label falls between nanoseconds under the UTC rate of its time" 0 0]
 }
 _day_add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>{
-    let nanos:int=(ns_count(z.nominal)%_NS)
-    _civil(_resolve(_local(z)+p.count*86400 nanos z.zone fold gap))
+    _civil(_resolve(_local(z)+p.count*86400 int(_nanos(z)) z.zone fold gap))
 }
 _month_add=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>{
     let local=_local(z)
@@ -426,8 +427,7 @@ _month_add=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|none):
     let ny=total//12
     let nm=((total%12).to_int64() ?? 0)+1
     if d >? days_in_month(ny nm) {return InvalidDate["{_year_text(ny)}-{pad(nm 2)} has no day {d}"]}
-    let nanos:int=(ns_count(z.nominal)%_NS)
-    _civil(_resolve(((days_from_civil(ny nm d)*86400).to_int64() ?? 0)+t nanos z.zone fold gap))
+    _civil(_resolve(((days_from_civil(ny nm d)*86400).to_int64() ?? 0)+t int(_nanos(z)) z.zone fold gap))
 }
 # (what is wrong with these constants; none when the add resolves)
 day_add_error=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>string?=>match _day_add(z p fold gap) {

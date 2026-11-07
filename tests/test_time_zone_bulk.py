@@ -23,8 +23,8 @@ ZONES = ['Africa/Cairo', 'Africa/Casablanca', 'Africa/Monrovia', 'America/Havana
          'America/New_York', 'America/Nuuk', 'America/Santiago', 'America/St_Johns', 'Antarctica/Troll',
          'Asia/Gaza', 'Asia/Kathmandu', 'Asia/Tehran', 'Asia/Tokyo', 'Australia/Lord_Howe', 'Australia/Sydney',
          'Europe/Dublin', 'Europe/London', 'Pacific/Apia', 'Pacific/Chatham', 'UTC']
-# Through the table, the last table years, and well into the zone's standing rule.
-YEARS = [2000, 2026, 2037, 2040, 2100]
+# Under UTC's old rates, through the table, the last table years, and well into the zone's standing rule.
+YEARS = [1961, 1970, 2000, 2026, 2037, 2040, 2100]
 UTC = dt.timezone.utc
 MINUTE = dt.timedelta(minutes=1)
 
@@ -201,6 +201,18 @@ def test_library_matches_the_generated_answers(compiler, tmp_path):
              for (name, text, zone, answer), got in zip(cases, ran.stdout.splitlines()) if got != answer]
     assert len(ran.stdout.splitlines()) == len(cases)
     assert not wrong, f'{len(wrong)} of {len(cases)} differ:\n' + '\n'.join(wrong[:40])
+
+
+def test_every_printed_reading_reads_back(compiler, tmp_path):
+    readings = sorted({answer for _, _, _, answer in stored() if '[' in answer})
+    calls = '\n'.join(f'back("{text}")' for text in readings)
+    path = tmp_path / 'main.dewy'
+    path.write_text(f"back = (text:string) => printl(zoned(text))\n{calls}\n")
+    ran = subprocess.run([compiler, path], capture_output=True, text=True, timeout=600, check=False, cwd=tmp_path)
+    assert ran.returncode == 0, ran.stderr[:2000]
+    wrong = [(want, got) for want, got in zip(readings, ran.stdout.splitlines()) if want != got]
+    assert len(ran.stdout.splitlines()) == len(readings)
+    assert not wrong, wrong[:20]
 
 
 @same_rules

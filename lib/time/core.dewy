@@ -727,7 +727,7 @@ read_fields=(@c:_Cursor):>Fields|ParseError=>{
     }
     f
 }
-# `Z`, `+hh:mm` or `-hh:mm`: seconds east of UTC; NO_OFFSET where there is none.
+# `Z`, `+hh:mm`, `-hh:mm`, or those with `:ss`: seconds east of UTC; NO_OFFSET where there is none.
 const NO_OFFSET:int64=-1000000000
 read_offset=(@c:_Cursor):>int64|ParseError=>{
     let b=_byte(c c.at)
@@ -742,6 +742,12 @@ read_offset=(@c:_Cursor):>int64|ParseError=>{
     let minute=_digits(@c 2)
     if minute is? none or hour >? 23 or minute >? 59 {return ParseError["an offset is written +hh:mm"]}
     let size=hour*3600+minute*60
+    # (an old local mean time counts seconds too: Monrovia's -00:44:30)
+    if _eat(@c 58) {
+        let second=_digits(@c 2)
+        if second is? none or second >? 59 {return ParseError["an offset's seconds are written +hh:mm:ss"]}
+        size=size+second
+    }
     if b =? 45 {-size} else {size}
 }
 
