@@ -17,18 +17,11 @@ use 'fmt.jo'
 use 'lex.jo'
 use 'main.jo'
 use 'json_doc.dewy'
+use 'lsp_ops.dewy'
 
 # ---------------- JSON ----------------
 # the message being answered (json_doc.dewy), and its values
 jdoc: JsonDoc
-jget = (o: int, key: str) -> int: json_get(jdoc, o, key)
-jpath = (o: int, a: str, b: str) -> int: json_path(jdoc, o, a, b)
-jstr = (v: int) -> str: json_str(jdoc, v)
-jint = (v: int) -> int: json_int(jdoc, v)
-jbool = (v: int) -> bool: json_bool(jdoc, v)
-jitems = (v: int) -> int[]: json_items(jdoc, v)
-# a value as JSON text again (a request's id as it was sent)
-jraw = (v: int) -> str: json_raw(jdoc, v)
 
 # ---------------- messages ----------------
 inbuf: u8[]
@@ -64,15 +57,6 @@ lsp_body_len = (h0: int, h1: int) -> int:
     if k < 0: return 0
     e = find_byte(hs, '\r', k)
     to_int(trim(hs[k + 15..e))) ?? 0
-
-# is a whole message waiting?
-lsp_have_msg = () -> bool:
-    he = lsp_header_end()
-    if he < 0: return false
-    inbuf.len() - he >= lsp_body_len(inpos, he)
-
-# input waiting (without blocking)?
-lsp_input_ready = () -> bool: lsp_wait_input(0)
 
 # input waiting, or arriving within ms milliseconds?
 lsp_wait_input = (ms: int) -> bool:
@@ -120,8 +104,6 @@ lsp_drain = ():
         else:
             if in_eof or not lsp_input_ready(): break
             if not lsp_fill(): break
-
-lsp_pending = () -> bool: lsp_queue.len() > 0 or lsp_input_ready()
 
 lsp_watching = false
 lsp_req = ""
@@ -193,12 +175,6 @@ lsp_send = (body: str):
     msg = "Content-Length: {len(body)}\r\n\r\n{body}"
     __write_fd(1, data(msg), len(msg))
 
-# (requests are answered with `return lsp_reply(...)`: handlers return 0)
-lsp_reply = (id: int, result: str) -> int:
-    if lsp_stop != 0: return lsp_error(id, lsp_stop, "cancelled")
-    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{jraw(id)},\"result\":{result}\}")
-    0
-
 lsp_error = (id: int, code: int, msg: str) -> int:
     out_code = code
     out_msg = msg
@@ -210,11 +186,6 @@ lsp_error = (id: int, code: int, msg: str) -> int:
         if lsp_stop == -32801: out_msg = "the document changed"
     lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{jraw(id)},\"error\":\{\"code\":{out_code},\"message\":{json_quote(out_msg)}\}\}")
     0
-
-lsp_notify = (method: str, params: str):
-    lsp_send("\{\"jsonrpc\":\"2.0\",\"method\":{json_quote(method)},\"params\":{params}\}")
-
-lsp_log = (s: str): eprint("dewy-core lsp: {s}")
 
 # ---------------- positions ----------------
 # LSP positions are lines and UTF-16 code units
@@ -247,11 +218,6 @@ utf16_units = (text: str, a: int, b: int) -> int:
         else if c >= 0xF0: n += 2
     n
 
-lpos_of = (text: str, ls: int[], off: int) -> LPos:
-    o = max(0, min(off, len(text)))
-    l = line_of(ls, o)
-    LPos(l, utf16_units(text, ls[l], o))
-
 off_of = (text: str, ls: int[], line: int, ch: int) -> int:
     if line < 0: return 0
     if line >= ls.len(): return len(text)
@@ -264,8 +230,6 @@ off_of = (text: str, ls: int[], line: int, ch: int) -> int:
         i += 1
         loop i < len(text) and text[i] >= 0x80 and text[i] < 0xC0: i += 1
     i
-
-jpos = (p: LPos) -> str: "\{\"line\":{p.line},\"character\":{p.ch}\}"
 
 # ---------------- documents and check results ----------------
 
@@ -332,26 +296,6 @@ doc_by_uri: {str: int} = {}
 root_lib = ""
 # (a program for checking library files alone: it uses nothing, and is not on disk)
 empty_main = "/.dewy-lsp-empty-main.jo"
-
-uri_to_path = (uri: str) -> str: path_norm(os_path(str_from_bytes(uri_path_bytes(uri))))
-
-# the open document at a path, or -1 (by path: editors spell drive letters and colons
-# differently from path_to_uri)
-open_doc_at = (path: str) -> int:
-    loop k in 0.. and dc in docs:
-        if dc.open and dc.path == path: return k
-    -1
-
-# a file's URI (an open document's as the editor wrote it)
-uri_of = (path: str) -> str:
-    loop dc in docs:
-        if dc.path == path: return dc.uri
-    path_to_uri(path)
-
-# the text of a file: an open document's, else the file's
-text_of = (path: str) -> str:
-    if let t = ide_texts.get(path): return t
-    read_file(path) ?? ""
 
 esc_split = (line: str) -> str[]:
     out: str[]
@@ -652,10 +596,6 @@ remap = (fmap: int[], s: str) -> (int, int):
     if p.0 >= 0 and p.0 < fmap.len(): f = fmap[p.0]
     (f, p.1)
 
-remap_key = (fmap: int[], s: str) -> str:
-    p = remap(fmap, s)
-    "{p.0}:{p.1}"
-
 struct Item:
     a: int
     b: int
@@ -773,22 +713,6 @@ check_doc = (path: str, completing: int, lower: bool, wide: bool) -> Result:
 
 # ---------------- requests ----------------
 
-doc_of = (uri: str) -> int:
-    if let i = doc_by_uri.get(uri): return i
-    -1
-
-text_params_doc = (params: int) -> int: doc_of(jstr(jpath(params, "textDocument", "uri")))
-
-# the byte offset of a request's position in document d
-req_off = (d: int, params: int) -> int:
-    p = jget(params, "position")
-    text = docs[d].text
-    off_of(text, line_starts_of(text), jint(jget(p, "line")), jint(jget(p, "character")))
-
-ensure_checked = (d: int):
-    if not docs[d].dirty: return
-    refresh(d)
-
 # check document d and publish its errors
 refresh = (d: int):
     docs[d].dirty = false
@@ -850,12 +774,6 @@ publish = (d: int):
         if u == docs[d].uri: ver = ",\"version\":{docs[d].version}"
         lsp_notify("textDocument/publishDiagnostics", "\{\"uri\":{json_quote(u)}{ver},\"diagnostics\":[{join(items, ",")}]\}")
     docs[d].diag_uris = sent
-
-# the file number of path in result r (-1 if it is not there)
-file_in = (r: Result, path: str) -> int:
-    loop i in 0.. and p in r.paths:
-        if p == path: return i
-    -1
 
 # map an offset in the current text of path to the text result r was made from (-1: changed)
 map_off = (r: Result, path: str, off: int) -> int:
@@ -1259,11 +1177,6 @@ str_mask = (text: str, b0: int, dewy: bool = false) -> u8[]:
         else: i += 1
     m
 
-# is off inside a comment or a string (outside its {interpolations})?
-in_comment_or_str = (text: str, off: int, dewy: bool = false) -> bool:
-    m = str_mask(text, off, dewy)
-    m[m.len() - 1] != 0
-
 no_items = "\{\"isIncomplete\":false,\"items\":[]\}"
 
 # the keywords to complete: the lexer's, and the words that are keywords where they start something
@@ -1383,14 +1296,6 @@ on_completion = (id: int, params: int) -> int:
         loop kw in comp_words(ends_with(docs[d].path, ".dewy")):
             if seen.get(kw) == none: items.push("\{\"label\":{json_quote(kw)},\"kind\":14,\"sortText\":{json_quote("2" + kw)}\}")
     lsp_reply(id, "\{\"isIncomplete\":false,\"items\":[{join(items, ",")}]\}")
-
-# Dewy arguments are separated by spaces, `f(a b+1 @c name=d)`: a word continues the argument
-# before it when either side of the space is an operator (`b + 1`, `x or_throw`). The index of
-# the argument the cursor (at b) is in, and its name when it is written name=value
-dewy_op_word = (w: str) -> bool:
-    w in ["and", "or", "xor", "nand", "nor", "xnor", "not", "in", "as", "is?", "isnt?", "in?", "if", "else", "of", "or_throw", "transmute"]
-
-dewy_op_byte = (c: u8) -> bool: find_byte("+-*/%^=<>?&|.:!~", c) >= 0
 
 # does word w continue the argument that word prev is in?
 dewy_joins = (prev: str, w: str) -> bool:
@@ -2007,10 +1912,6 @@ on_workspace_symbol = (id: int, params: int) -> int:
 
 # ---------------- code lenses: run a Dewy program or one of its tests ----------------
 
-lens_json = (line: int, title: str, command: str, args: str) -> str:
-    rg = "\{\"start\":\{\"line\":{line},\"character\":0\},\"end\":\{\"line\":{line},\"character\":0\}\}"
-    "\{\"range\":{rg},\"command\":\{\"title\":{json_quote(title)},\"command\":{json_quote(command)},\"arguments\":[{args}]\}\}"
-
 on_code_lens = (id: int, params: int) -> int:
     d = text_params_doc(params)
     if d < 0 or not ends_with(docs[d].path, ".dewy"): return lsp_reply(id, "[]")
@@ -2373,13 +2274,6 @@ on_change = (params: int):
     ide_texts[docs[d].path] = docs[d].text
     users_dirty(d)
 
-# the other open documents whose programs include document d's file are checked again (they see
-# its unsaved text)
-users_dirty = (d: int):
-    loop i in [0..docs.len()):
-        docs[i].has_wide = false
-        if i != d and docs[i].open and docs[i].res.paths.contains(docs[d].path): docs[i].dirty = true
-
 on_close = (params: int):
     d = text_params_doc(params)
     if d < 0: return
@@ -2400,11 +2294,6 @@ on_close = (params: int):
     loop o in owners: publish(o)
 
 capabilities = "\{\"textDocumentSync\":\{\"openClose\":true,\"change\":1,\"save\":\{\"includeText\":false\}\},\"hoverProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true,\"documentHighlightProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"documentFormattingProvider\":true,\"codeActionProvider\":\{\"codeActionKinds\":[\"quickfix\"]\},\"renameProvider\":\{\"prepareProvider\":true\},\"completionProvider\":\{\"triggerCharacters\":[\".\",\"$\",\"/\",\"\\\"\"]\},\"signatureHelpProvider\":\{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]\},\"inlayHintProvider\":true,\"codeLensProvider\":\{\"resolveProvider\":false\},\"semanticTokensProvider\":\{\"legend\":\{\"tokenTypes\":{sem_legend(sem_types)},\"tokenModifiers\":{sem_legend(sem_mods)}\},\"full\":true\}\}"
-
-sem_legend = (xs: str[]) -> str:
-    out: str[]
-    loop x in xs: out.push(json_quote(x))
-    "[{join(out, ",")}]"
 
 lsp_main = ():
     root_lib = path_norm(lib_dir)

@@ -1,0 +1,102 @@
+use 'lsp.jo'
+use 'checker_program.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'ide.jo'
+use 'fmt.jo'
+use 'lex.jo'
+use 'main.jo'
+use 'json_doc.dewy'
+
+jget = (o: int, key: str) -> int: json_get(jdoc, o, key)
+jpath = (o: int, a: str, b: str) -> int: json_path(jdoc, o, a, b)
+jstr = (v: int) -> str: json_str(jdoc, v)
+jint = (v: int) -> int: json_int(jdoc, v)
+jbool = (v: int) -> bool: json_bool(jdoc, v)
+jitems = (v: int) -> int[]: json_items(jdoc, v)
+# a value as JSON text again (a request's id as it was sent)
+jraw = (v: int) -> str: json_raw(jdoc, v)
+# is a whole message waiting?
+lsp_have_msg = () -> bool:
+    he = lsp_header_end()
+    if he < 0: return false
+    inbuf.len() - he >= lsp_body_len(inpos, he)
+# input waiting (without blocking)?
+lsp_input_ready = () -> bool: lsp_wait_input(0)
+lsp_pending = () -> bool: lsp_queue.len() > 0 or lsp_input_ready()
+# (requests are answered with `return lsp_reply(...)`: handlers return 0)
+lsp_reply = (id: int, result: str) -> int:
+    if lsp_stop != 0: return lsp_error(id, lsp_stop, "cancelled")
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{jraw(id)},\"result\":{result}\}")
+    0
+lsp_notify = (method: str, params: str):
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"method\":{json_quote(method)},\"params\":{params}\}")
+lsp_log = (s: str): eprint("dewy-core lsp: {s}")
+lpos_of = (text: str, ls: int[], off: int) -> LPos:
+    o = max(0, min(off, len(text)))
+    l = line_of(ls, o)
+    LPos(l, utf16_units(text, ls[l], o))
+jpos = (p: LPos) -> str: "\{\"line\":{p.line},\"character\":{p.ch}\}"
+uri_to_path = (uri: str) -> str: path_norm(os_path(str_from_bytes(uri_path_bytes(uri))))
+# the open document at a path, or -1 (by path: editors spell drive letters and colons
+# differently from path_to_uri)
+open_doc_at = (path: str) -> int:
+    loop k in 0.. and dc in docs:
+        if dc.open and dc.path == path: return k
+    -1
+# a file's URI (an open document's as the editor wrote it)
+uri_of = (path: str) -> str:
+    loop dc in docs:
+        if dc.path == path: return dc.uri
+    path_to_uri(path)
+# the text of a file: an open document's, else the file's
+text_of = (path: str) -> str:
+    if let t = ide_texts.get(path): return t
+    read_file(path) ?? ""
+remap_key = (fmap: int[], s: str) -> str:
+    p = remap(fmap, s)
+    "{p.0}:{p.1}"
+doc_of = (uri: str) -> int:
+    if let i = doc_by_uri.get(uri): return i
+    -1
+text_params_doc = (params: int) -> int: doc_of(jstr(jpath(params, "textDocument", "uri")))
+# the byte offset of a request's position in document d
+req_off = (d: int, params: int) -> int:
+    p = jget(params, "position")
+    text = docs[d].text
+    off_of(text, line_starts_of(text), jint(jget(p, "line")), jint(jget(p, "character")))
+ensure_checked = (d: int):
+    if not docs[d].dirty: return
+    refresh(d)
+# the file number of path in result r (-1 if it is not there)
+file_in = (r: Result, path: str) -> int:
+    loop i in 0.. and p in r.paths:
+        if p == path: return i
+    -1
+# is off inside a comment or a string (outside its {interpolations})?
+in_comment_or_str = (text: str, off: int, dewy: bool = false) -> bool:
+    m = str_mask(text, off, dewy)
+    m[m.len() - 1] != 0
+# Dewy arguments are separated by spaces, `f(a b+1 @c name=d)`: a word continues the argument
+# before it when either side of the space is an operator (`b + 1`, `x or_throw`). The index of
+# the argument the cursor (at b) is in, and its name when it is written name=value
+dewy_op_word = (w: str) -> bool:
+    w in ["and", "or", "xor", "nand", "nor", "xnor", "not", "in", "as", "is?", "isnt?", "in?", "if", "else", "of", "or_throw", "transmute"]
+dewy_op_byte = (c: u8) -> bool: find_byte("+-*/%^=<>?&|.:!~", c) >= 0
+lens_json = (line: int, title: str, command: str, args: str) -> str:
+    rg = "\{\"start\":\{\"line\":{line},\"character\":0\},\"end\":\{\"line\":{line},\"character\":0\}\}"
+    "\{\"range\":{rg},\"command\":\{\"title\":{json_quote(title)},\"command\":{json_quote(command)},\"arguments\":[{args}]\}\}"
+# the other open documents whose programs include document d's file are checked again (they see
+# its unsaved text)
+users_dirty = (d: int):
+    loop i in [0..docs.len()):
+        docs[i].has_wide = false
+        if i != d and docs[i].open and docs[i].res.paths.contains(docs[d].path): docs[i].dirty = true
+sem_legend = (xs: str[]) -> str:
+    out: str[]
+    loop x in xs: out.push(json_quote(x))
+    "[{join(out, ",")}]"

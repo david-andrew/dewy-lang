@@ -1,0 +1,149 @@
+$runtime_checks
+from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"@lib/core/os.jo" import (eprint read_file)
+
+from p"ide.jo" import (ide_texts)
+from p"json_doc.dewy" import (json_bool json_get json_int json_items json_path json_quote json_raw json_str)
+from p"lsp.jo" import (LPos Result remap doc_by_uri docs inbuf inpos jdoc line_of line_starts_of lsp_body_len lsp_error lsp_header_end lsp_queue lsp_send lsp_stop lsp_wait_input off_of refresh str_mask utf16_units)
+from p"module_paths.dewy" import (os_path path_norm path_to_uri uri_path_bytes)
+
+LspWord:type=int64<overflow='wrap'>
+jget=(o:LspWord key:string):>int64=>{
+    json_get(jdoc o key)
+}
+jpath=(o:LspWord a:string b:string):>int64=>{
+    json_path(jdoc o a b)
+}
+jstr=(v:LspWord):>string=>{
+    json_str(jdoc v)
+}
+jint=(v:LspWord):>int64=>{
+    json_int(jdoc v)
+}
+jbool=(v:LspWord):>bool=>{
+    json_bool(jdoc v)
+}
+jitems=(v:LspWord):>array<int64>=>{
+    json_items(jdoc v)
+}
+# a value as JSON text again (a request's id as it was sent)
+jraw=(v:LspWord):>string=>{
+    json_raw(jdoc v)
+}
+# is a whole message waiting?
+lsp_have_msg=():>bool=>{
+    let he=lsp_header_end()
+    if he <? 0 {return false}
+    inbuf.length - he >=? lsp_body_len(inpos he)
+}
+# input waiting (without blocking)?
+lsp_input_ready=():>bool=>{
+    lsp_wait_input(0)
+}
+lsp_pending=():>bool=>{
+    lsp_queue.length >? 0 or lsp_input_ready()
+}
+# (requests are answered with `return lsp_reply(...)`: handlers return 0)
+lsp_reply=(id:LspWord result:string):>int64=>{
+    if lsp_stop not=? 0 {return lsp_error(id lsp_stop "cancelled")}
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{jraw(id)},\"result\":{result}\}")
+    0
+}
+lsp_notify=(method:string params:string):>void=>{
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"method\":{json_quote(method)},\"params\":{params}\}")
+}
+lsp_log=(s:string):>void=>{
+    eprint("dewy-core lsp: {s}")
+}
+lpos_of=(text:string ls:array<int64> off:LspWord):>LPos=>{
+    let o=max(0 min(off (text as array<uint8>).length))
+    let l=line_of(ls o)
+    LPos(l utf16_units(text ls[l] o))
+}
+jpos=(p:LPos):>string=>{
+    "\{\"line\":{p.line},\"character\":{p.ch}\}"
+}
+uri_to_path=(uri:string):>string=>{
+    path_norm(os_path(__str_from_bytes(uri_path_bytes(uri))))
+}
+# the open document at a path, or -1 (by path: editors spell drive letters and colons
+# differently from path_to_uri)
+open_doc_at=(path:string):>int64=>{
+    loop k in 0.. and dc in docs {
+        if dc.open and dc.path =? path {return k}
+    }
+    -1
+}
+# a file's URI (an open document's as the editor wrote it)
+uri_of=(path:string):>string=>{
+    loop dc in docs {
+        if dc.path =? path {return dc.uri}
+    }
+    path_to_uri(path)
+}
+# the text of a file: an open document's, else the file's
+text_of=(path:string):>string=>{
+    let t=ide_texts.get(path)
+    if t not=? none {return t}
+    read_file(path) ?? ""
+}
+remap_key=(fmap:array<int64> s:string):>string=>{
+    let [a b]=remap(fmap s)
+    "{a}:{b}"
+}
+doc_of=(uri:string):>int64=>{
+    let i=doc_by_uri.get(uri)
+    if i not=? none {return i}
+    -1
+}
+text_params_doc=(params:LspWord):>int64=>{
+    doc_of(jstr(jpath(params "textDocument" "uri")))
+}
+# the byte offset of a request's position in document d
+req_off=(d:LspWord params:LspWord):>int64=>{
+    let p=jget(params "position")
+    let text=docs[d].text
+    off_of(text line_starts_of(text) jint(jget(p "line")) jint(jget(p "character")))
+}
+ensure_checked=(d:LspWord):>void=>{
+    if not docs[d].dirty {return}
+    refresh(d)
+}
+# the file number of path in result r (-1 if it is not there)
+file_in=(r:Result path:string):>int64=>{
+    loop i in 0.. and p in r.paths {
+        if p =? path {return i}
+    }
+    -1
+}
+# is off inside a comment or a string (outside its {interpolations})?
+in_comment_or_str=(text:string off:LspWord dewy:bool=false):>bool=>{
+    let m=str_mask(text off dewy)
+    m[m.length - 1] not=? 0
+}
+# Dewy arguments are separated by spaces, `f(a b+1 @c name=d)`: a word continues the argument
+# before it when either side of the space is an operator (`b + 1`, `x or_throw`). The index of
+# the argument the cursor (at b) is in, and its name when it is written name=value
+dewy_op_word=(w:string):>bool=>{
+    w in? ["and" "or" "xor" "nand" "nor" "xnor" "not" "in" "as" "is?" "isnt?" "in?" "if" "else" "of" "or_throw" "transmute"]
+}
+dewy_op_byte=(c:uint8):>bool=>{
+    find_byte("+-*/%^=<>?&|.:!~" c) >=? 0
+}
+lens_json=(line:LspWord title:string command:string args:string):>string=>{
+    let rg="\{\"start\":\{\"line\":{line},\"character\":0\},\"end\":\{\"line\":{line},\"character\":0\}\}"
+    "\{\"range\":{rg},\"command\":\{\"title\":{json_quote(title)},\"command\":{json_quote(command)},\"arguments\":[{args}]\}\}"
+}
+# the other open documents whose programs include document d's file are checked again (they see
+# its unsaved text)
+users_dirty=(d:LspWord):>void=>{
+    loop i in [0..docs.length) {
+        docs[i].has_wide=false
+        if i not=? d and docs[i].open and docs[i].res.paths.contains(docs[d].path) {docs[i].dirty=true}
+    }
+}
+sem_legend=(xs:array<string>):>string=>{
+    let out:array<string>=[]
+    loop x in xs {out.push(json_quote(x))}
+    "[{join(out ",")}]"
+}
