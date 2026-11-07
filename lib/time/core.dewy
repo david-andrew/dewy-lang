@@ -30,8 +30,11 @@ _too_far=():>never=>{
     exit(101)
 }
 _pair=(x:int):>[int64 uint64]=>{
-    let word=x.to_int64()
-    if word isnt? none {return [if word <? 0 -1 else 0 uint64<overflow='wrap'>(word)]}
+    # (a word stays one: no big integer on the common path)
+    if x >=? -4611686018427387904 and x <=? 4611686018427387903 {
+        let word:int64=x
+        return [if word <? 0 -1 else 0 uint64<overflow='wrap'>(word)]
+    }
     let hi=(x >> 64).to_int64() ?? _too_far()
     let lo=(x and 18446744073709551615).to_uint64() ?? 0
     [hi lo]
