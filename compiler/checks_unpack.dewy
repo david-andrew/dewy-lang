@@ -1,0 +1,340 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_INBOUNDS NF_SPREAD UNPACK_OBLIGATION add_flag has_flag kids mk nodes set_list)
+from p"check.jo" import (binding_leaves ctxs cx decl_binding_type synth_call synth_str)
+from p"checker_expr.dewy" import (check_expr check_intrinsic)
+from p"checker_tokens.dewy" import (Tok)
+from p"expr.jo" import (IN fn_name_for bc_call bc_map_keys capture_value coerce is_dewy_set_type is_map_type last_checked mk_ident_local ntype)
+from p"facts.jo" import (fact_requests)
+from p"refinement_types.dewy" import (FactRequest)
+from p"types.jo" import (structs fields T_INT dt fixed_len is_values mk_array mk_tuple prune targ types)
+from p"@lib/core/str.jo" import (join)
+from p"util.jo" import (fatal files name_of pos_file)
+
+UnpackWord:type=int64<overflow='wrap'>
+# statement calling a prelude function with the given argument nodes
+# a, b = xs with an array: its elements, as a tuple (__unpack2(xs): the length checked)
+unpack_binding=(e:UnpackWord t:UnpackWord bindings:array<int64> pos:UnpackWord):>[int64 array<int64>]=>$unsafe {
+    if not files[pos_file(pos)].is_dewy {return [unpack_array(e t bindings.length pos) bindings]}
+    let leaves:array<int64>=[]
+    # (a bare `...` drops values: it binds nothing)
+    loop leaf in binding_leaves(bindings) {
+        if not (nodes.ptr[leaf].kind =? 'hole' and has_flag(leaf NF_SPREAD)) {leaves.push(leaf)}
+    }
+    let nested=false
+    let annotated=false
+    let special=false
+    loop b in bindings {
+        if nodes.ptr[b].kind =? 'tuple' {nested=true}
+        if nodes.ptr[b].a not=? 0 {annotated=true}
+        if has_flag(b NF_SPREAD) or nodes.ptr[b].sval not=? 0 {special=true}
+    }
+    if not nested and not annotated and not special and types.ptr[t].kind not=? 'array' and types.ptr[t].kind not=? 'fixed' and types.ptr[t].kind not=? 'struct_' {
+        if types.ptr[t].kind =? 'tuple' and UnpackWord(types.ptr[t].nargs) not=? bindings.length {unpack_count_error(e t bindings.length false pos)}
+        return [t bindings]
+    }
+    let statements:array<int64>=[]
+    let values:array<int64>=[]
+    unpack_values(e t bindings pos @statements @values)
+    let tuple=mk('tuple' pos)
+    set_list(tuple values)
+    let result_type=check_expr(tuple 0)
+    # Reads erase refinements, but each written pattern annotation governs
+    # the new storage. Preserve the already checked leaf contracts in the
+    # unpacked tuple descriptor (locals and globals share this boundary).
+    # O(leaves), on the existing unpacking path only.
+    let storage:array<int64>=[]
+    loop i in [0..leaves.length) {
+        let leaf=leaves[i]
+        storage.push(if nodes.ptr[leaf].a not=? 0 {UnpackWord(nodes.ptr[leaf].type)} else {targ(result_type i)})
+    }
+    result_type=mk_tuple(storage)
+    nodes.ptr[tuple].type=int32(result_type)
+    let result=mk('exprstmt' pos)
+    nodes.ptr[result].a=int32(last_checked)
+    statements.push(result)
+    let block=mk('block' pos)
+    nodes.ptr[block].type=int32(result_type)
+    nodes.ptr[block].aux=1
+    set_list(block statements)
+    add_flag(block NF_CHECKED)
+    last_checked=block
+    [result_type leaves]
+}
+# Several values or a `[T U]` of t's count, unpacked into a pattern taking `count` (at least
+# that many with a rest): a compile-time error naming both.
+unpack_count_error=(e:UnpackWord t:UnpackWord count:UnpackWord rest:bool pos:UnpackWord):>void=>$unsafe {
+    let n=UnpackWord(types.ptr[prune(t)].nargs)
+    let takes=if rest {"at least {count}"} else {"{count}"}
+    if is_values(t) {
+        let what=if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].name >? 0 {"'{name_of(UnpackWord(nodes.ptr[e].name))}' holds"} else {"this gives"}
+        fatal(pos "{what} {n} values, and the pattern takes {takes}")
+    }
+    fatal(pos "{dt(t)} has {n} positions, and the pattern takes {takes}")
+}
+# (the length of captured array src, a fresh read)
+unpack_length=(src:UnpackWord pos:UnpackWord):>UnpackWord=>$unsafe {
+    let length=mk('call' pos)
+    check_intrinsic(length int64(IN.len) [mk_ident_local(UnpackWord(nodes.ptr[src].sym) pos)] 0);
+    add_flag(length NF_CHECKED)
+    length
+}
+# Read every leaf before any destination is written. Capturing each container
+# once preserves value snapshots and lets nested length checks precede writes.
+# A rest (`...rest`) takes what the other names leave, from anywhere in the pattern;
+# a bare `...` drops it. Positions after it count from the end.
+unpack_values=(e:UnpackWord t:UnpackWord bindings:array<int64> pos:UnpackWord @statements:array<int64> @values:array<int64>):>void=>$unsafe {
+    if is_dewy_set_type(t) {
+        add_flag(e NF_CHECKED)
+        let at=prune(check_expr(bc_call("__dewy_set_values" [e] pos) 0))
+        unpack_values(last_checked at bindings pos @statements @values)
+        return
+    }
+    let is_fixed=types.ptr[t].kind =? 'fixed'
+    let is_array=types.ptr[t].kind =? 'array' or is_fixed
+    let is_tuple=types.ptr[t].kind =? 'tuple'
+    let is_map=is_map_type(t)
+    let is_record=not is_array and not is_tuple and not is_map
+    if not is_array and not is_tuple and types.ptr[t].kind not=? 'struct_' {
+        fatal(pos "unpacking needs an array, tuple, dictionary or record, found {dt(t)}")
+    }
+    let r:UnpackWord=-1
+    let drop=false
+    loop i in 0.. and b in bindings {
+        if has_flag(b NF_SPREAD) {
+            r=i
+            drop=nodes.ptr[b].kind =? 'hole'
+        }
+        if nodes.ptr[b].sval not=? 0 and not is_record {fatal(nodes.ptr[b].pos "`as` renames a record's field; at a position, any name takes the value: `[a b] = values`")}
+    }
+    let count=bindings.length - (if r >=? 0 {1} else {0})
+    let after=if r >=? 0 {bindings.length - 1 - r} else {0}
+    if is_record and r >=? 0 {fatal(nodes.ptr[bindings[r]].pos "a record's rest is not decided yet: name the fields to take and leave the others out")}
+    if is_map and r >=? 0 and not drop {fatal(nodes.ptr[bindings[r]].pos "a dictionary's rest is not implemented yet: `...` alone drops the remaining entries")}
+    if is_tuple {
+        let n=UnpackWord(types.ptr[t].nargs)
+        if r <? 0 and n not=? count or r >=? 0 and n <? count {unpack_count_error(e t count r >=? 0 pos)}
+    }
+    let exactly=if r >=? 0 {"at least"} else {"exactly"}
+    let elements=if count =? 1 {"element"} else {"elements"}
+    if is_fixed and (r <? 0 and fixed_len(t) not=? count or r >=? 0 and fixed_len(t) <? count) {
+        fatal(pos "unpacking requires {exactly} {count} {elements}, found {dt(t)}")
+    }
+    let total=if is_tuple {UnpackWord(types.ptr[t].nargs)} else if is_fixed {fixed_len(t)} else {-1}
+    let input=e
+    let input_type=t
+    if is_map {
+        add_flag(input NF_CHECKED)
+        input_type=prune(check_expr(bc_call("__map_entries" [input] pos) 0))
+        input=last_checked
+    }
+    let source=capture_value(input input_type @statements)
+    if is_array and not is_fixed {
+        # (an obligation: proven from what is known of the array, or checked where allowed)
+        statements.push(unpack_length_check(mk_ident_local(UnpackWord(nodes.ptr[source].sym) pos) count r <? 0 pos "unpacking requires {exactly} {count} {elements}"))
+    }
+    if is_map {
+        let length=mk('call' pos)
+        check_intrinsic(length int64(IN.len) [bc_map_keys(source pos)] 0);
+        add_flag(length NF_CHECKED)
+        let wanted=mk('int_lit' pos)
+        nodes.ptr[wanted].ival=count
+        let equal=mk('binary' pos)
+        nodes.ptr[equal].op=int32(UnpackWord(if r >=? 0 {74} else {69}))
+        nodes.ptr[equal].a=int32(length)
+        nodes.ptr[equal].b=int32(wanted)
+        let message=synth_str("unpacking requires {exactly} {count} {elements}" pos)
+        let guard=mk('call' pos)
+        check_intrinsic(guard int64(IN.assert) [equal message] 0);
+        let statement=mk('exprstmt' pos)
+        nodes.ptr[statement].a=int32(guard)
+        statements.push(statement)
+    }
+    loop i in 0.. and binding in bindings {
+        if i =? r {
+            if drop {continue}
+            let value=unpack_rest(source t r after total nodes.ptr[binding].pos)
+            if nodes.ptr[binding].a not=? 0 {
+                let target=decl_binding_type(binding)
+                nodes.ptr[binding].type=int32(target)
+                value=coerce(value target)
+                add_flag(value NF_CHECKED)
+            }
+            values.push(value)
+            continue
+        }
+        let value=mk('field' nodes.ptr[binding].pos)
+        if is_array {nodes.ptr[value].kind='index'}
+        nodes.ptr[value].a=int32(source)
+        # (after the rest: counted from the end)
+        let back=if r >=? 0 and i >? r {bindings.length - i} else {0}
+        if is_map {
+            let index:UnpackWord=0
+            if back >? 0 {
+                let keys=mk('call' pos)
+                check_intrinsic(keys int64(IN.len) [bc_map_keys(source pos)] 0);
+                add_flag(keys NF_CHECKED)
+                index=unpack_minus(keys back nodes.ptr[binding].pos)
+            }
+            else {
+                index=mk('int_lit' nodes.ptr[binding].pos)
+                nodes.ptr[index].ival=i
+            }
+            value=bc_call("__map_pair_at" [source index] nodes.ptr[binding].pos)
+        }
+        else if is_array {
+            let index:UnpackWord=0
+            if back >? 0 and total <? 0 {index=unpack_minus(unpack_length(source pos) back nodes.ptr[binding].pos)}
+            else {
+                index=mk('int_lit' nodes.ptr[binding].pos)
+                nodes.ptr[index].ival=if back >? 0 {total - back} else {i}
+            }
+            nodes.ptr[value].b=int32(index)
+            # The length guard above dominates every element read.
+            add_flag(value NF_INBOUNDS)
+        }
+        else if is_tuple {
+            nodes.ptr[value].aux=-2
+            nodes.ptr[value].ival=if back >? 0 {total - back} else {i}
+        }
+        else {
+            if nodes.ptr[binding].kind =? 'hole' {fatal(nodes.ptr[binding].pos "record unpacking names fields; leave unwanted fields out instead of using _")}
+            if nodes.ptr[binding].kind =? 'tuple' and nodes.ptr[binding].sval =? 0 {fatal(nodes.ptr[binding].pos "record unpacking needs field names at this level: unpack a field with `as`, `[field as [a b]] = record`")}
+            nodes.ptr[value].name=if nodes.ptr[binding].sval not=? 0 {nodes.ptr[binding].sval} else {nodes.ptr[binding].name}
+            unpack_field_hint(t UnpackWord(nodes.ptr[value].name) nodes.ptr[binding].pos)
+        }
+        if nodes.ptr[binding].kind =? 'tuple' {
+            let inner=prune(check_expr(value 0))
+            unpack_values(last_checked inner kids(binding) nodes.ptr[binding].pos @statements @values)
+        }
+        else {
+            if nodes.ptr[binding].a not=? 0 {
+                let target=decl_binding_type(binding)
+                nodes.ptr[binding].type=int32(target)
+                check_expr(value target);
+                value=coerce(last_checked target)
+                add_flag(value NF_CHECKED)
+            }
+            values.push(value)
+        }
+    }
+}
+# `let (q r) = a.divmod(b)`: a record unpacks by field name, so a name it lacks is an error
+# naming its fields and the `as` rename (Python unpacks a pair by position). O(fields).
+unpack_field_hint=(t:UnpackWord name:UnpackWord pos:UnpackWord):>void=>$unsafe {
+    if types.ptr[t].kind not=? 'struct_' or fn_name_for(t name) {return}
+    let si=UnpackWord(types.ptr[t].st)
+    let names:array<string>=[]
+    loop i in [0..UnpackWord(structs.ptr[si].nfields)) {
+        let f=UnpackWord(fields.ptr[UnpackWord(structs.ptr[si].fields) + i].name)
+        if f =? name {return}
+        names.push(name_of(f))
+    }
+    if names.length =? 0 {return}
+    fatal(pos "{dt(t)} has no field '{name_of(name)}': a record unpacks by field name, not by position, as in `[{join(names " ")}] = ...`; `as` gives a field another name, `[{names[0]} as {name_of(name)}]`")
+}
+# `length - k`, checked: an index counted from the end.
+unpack_minus=(length:UnpackWord k:UnpackWord pos:UnpackWord):>UnpackWord=>$unsafe {
+    let amount=mk('int_lit' pos)
+    nodes.ptr[amount].ival=k
+    let d=mk('binary' pos)
+    nodes.ptr[d].op=int32(59)
+    nodes.ptr[d].a=int32(length)
+    nodes.ptr[d].b=int32(amount)
+    check_expr(d T_INT);
+    last_checked
+}
+# What a rest takes, from position r with `after` names after it (total: a static count, or -1):
+# an array's slice, a fixed array's elements, or the remaining values or positions of a tuple
+# (several values stay several values).
+unpack_rest=(source:UnpackWord t:UnpackWord r:UnpackWord after:UnpackWord total:UnpackWord pos:UnpackWord):>UnpackWord=>$unsafe {
+    if types.ptr[t].kind =? 'array' {
+        let first=mk('int_lit' pos)
+        nodes.ptr[first].ival=r
+        let last=if after >? 0 {unpack_minus(unpack_length(source pos) after pos)} else {unpack_length(source pos)}
+        # (a slice as written, `xs[r..xs.length-after)`: in bounds by the length obligation)
+        let range=mk('range' pos)
+        nodes.ptr[range].a=int32(first)
+        nodes.ptr[range].b=int32(last)
+        let slice=mk('index' pos)
+        nodes.ptr[slice].a=int32(mk_ident_local(UnpackWord(nodes.ptr[source].sym) pos))
+        nodes.ptr[slice].b=int32(range)
+        check_expr(slice 0);
+        return last_checked
+    }
+    let parts:array<int64>=[]
+    let ts:array<int64>=[]
+    loop i in [r..total - after) {
+        let v=mk('field' pos)
+        nodes.ptr[v].a=int32(mk_ident_local(UnpackWord(nodes.ptr[source].sym) pos))
+        if types.ptr[t].kind =? 'fixed' {
+            nodes.ptr[v].kind='index'
+            let index=mk('int_lit' pos)
+            nodes.ptr[index].ival=i
+            nodes.ptr[v].b=int32(index)
+            add_flag(v NF_INBOUNDS)
+        }
+        else {
+            nodes.ptr[v].aux=-2
+            nodes.ptr[v].ival=i
+        }
+        check_expr(v 0);
+        parts.push(last_checked)
+        ts.push(ntype(last_checked))
+    }
+    let n=mk('tuple' pos)
+    set_list(n parts)
+    if types.ptr[t].kind =? 'fixed' {
+        nodes.ptr[n].kind='array'
+        check_expr(n mk_array(UnpackWord(types.ptr[t].elem)));
+        return last_checked
+    }
+    nodes.ptr[n].type=int32(mk_tuple(ts types.ptr[t].sign))
+    add_flag(n NF_CHECKED)
+    n
+}
+unpack_array=(e:UnpackWord t:UnpackWord n:UnpackWord pos:UnpackWord):>UnpackWord=>$unsafe {
+    if types.ptr[t].kind not=? 'array' or n <? 2 or n >? 4 {return t}
+    add_flag(e NF_CHECKED)
+    let c=UnpackWord(nodes.ptr[synth_call("__unpack{n}" [e] pos)].a)
+    let r=prune(check_expr(c 0))
+    last_checked=c
+    r
+}
+# The elements of container c (k of them), spread: a fixed array or a `[T U]` read at each
+# position; an array of unknown length is first proven (or checked) to have exactly k.
+# The written type of parameter i that every function in decls taking nargs positional
+# arguments has (none of them generic there, mutable or keyword-only), or 0
+# Context for call arguments after mapping names/defaults. Only the receiver and
+# explicit type arguments bind generics here; other arguments still select overloads.
+# Demand-driven by an unchecked call argument. Positional mapping is O(C * P);
+# named mapping uses map_args (O(C * A * P)), with indexed argument-to-slot lookup.
+# Discover the same method/module family that check_call will use, only when an
+# argument call needs context before the multi-value check. No argument is tried
+# against a speculative overload.
+# A Dewy call some of whose arguments give several values (or spread a container): checked
+# with its arguments expanded, as `{ held...; f(values...) }`. -1: nothing to expand.
+# `(a b)`: several values, of type `(T U)`, its items expanded as call arguments are.
+# A length obligation on array src: exactly k elements (or at least k). Proven from facts, it
+# costs nothing; unproven, it is a compile error, or a runtime check where the scope allows
+# one, as any obligation (no_traps.md).
+unpack_length_check=(src:UnpackWord k:UnpackWord exact:bool pos:UnpackWord message:string):>UnpackWord=>$unsafe {
+    let length=mk('call' pos)
+    check_intrinsic(length int64(IN.len) [src] 0);
+    add_flag(length NF_CHECKED)
+    let count=mk('int_lit' pos)
+    nodes.ptr[count].ival=k
+    let cmp=mk('binary' pos)
+    nodes.ptr[cmp].op=int32(UnpackWord(if exact {69} else {74}))
+    nodes.ptr[cmp].a=int32(length)
+    nodes.ptr[cmp].b=int32(count)
+    let guard=mk('call' pos)
+    nodes.ptr[guard].aux2=int32(UNPACK_OBLIGATION)
+    check_intrinsic(guard int64(IN.assert) [cmp synth_str(message pos)] 0);
+    # (a runtime check until the facts prove it, as an index's: a body decided in another
+    # process keeps it)
+    fact_requests.push(FactRequest(guard if cx >=? 0 {UnpackWord(ctxs[cx].inst)} else {0}))
+    let statement=mk('exprstmt' pos)
+    nodes.ptr[statement].a=int32(guard)
+    add_flag(statement NF_CHECKED)
+    statement
+}
