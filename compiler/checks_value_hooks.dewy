@@ -1,4 +1,5 @@
 $runtime_checks
+from p"error_ops.dewy" import (check_propagate)
 from p"types.jo" import dt
 from p"ast.jo" import (NF_BROADCAST NF_CHECKED NF_COMPREHENSION NF_MUT NF_SPREAD TUPLE_VALUES add_flag clear_flag has_flag kid kids mk nkids nodes set_kid set_list)
 from p"check.jo" import (FK_LAMBDA assign_root check_block check_lambda_body cur_mod dewy_at fns jd new_inst node_mark spread_calls syms target_arm64 target_wasm zonk_tree)
@@ -9,7 +10,7 @@ from p"checker_values.dewy" import (values_flatten values_grouped)
 from p"checks_match_hooks.dewy" import (check_match)
 from p"directives.jo" import (dir_function_entry)
 from p"effect_contracts.dewy" import (callable_contract effect_contract_fits effect_decl_contract mk_callable_contract)
-from p"errors.jo" import (check_propagate nominal_parent)
+from p"errors.jo" import (nominal_parent)
 from p"exact.jo" import (exact_int_result)
 from p"expr.jo" import (CV IN bundled_bigint_type ce_expected ce_finish check_lambda check_matrix check_range_value check_soa_method ci coerce coerce_hint dewy_classify_spread dewy_new_axis dewy_record_spread_entries dewy_spread_source_type fixed_literal is_map_type is_nd last_checked literal_union_member name_before_eq nd_elem ntype op_overload spread_count struct_ctor type_node_of unnamed values_spread_call)
 from p"checks_builders.dewy" import (bc_block bc_call bc_stmt mk_name)
