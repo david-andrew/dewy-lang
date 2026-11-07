@@ -432,6 +432,11 @@ call_mutable_cost=(a:CVWord pt:CVWord @binds:array<int64> @recv_fits:bool receiv
 # Finish only arguments that still need checking, a conversion or mutable access.
 arg_finish_rest=(a:CVWord pt:CVWord is_mut:bool):>void=>$unsafe {
     if is_mut and refine_active and not ref_nd_receivers.has(a) {
+        # (a call of a function value has not checked its arguments yet)
+        if nodes.ptr[a].type =? 0 and nodes.ptr[a].kind not=? 'hole' {
+            check_expr(a 0);
+            add_flag(a NF_CHECKED)
+        }
         ref_mutable_authority(a)
         let storage=refine_storage(a ntype(a))
         if not type_eq(storage pt) and (ref_storage_contract(storage) or ref_storage_contract(pt)) and not ref_self_direct_place(a) {
