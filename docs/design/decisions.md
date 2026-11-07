@@ -420,3 +420,50 @@ section linked. ROADMAP.md lists them in one line each.
     unambiguous: `[a..b)`. Considered: `interval(a b)`, with a default to remember.
   - **UI direction:** a declarative layout interface like
     [Clay](https://github.com/nicbarker/clay). Nothing is built yet.
+- Batch 3 from [open_decisions.md](open_decisions.md) (David, 2026-11-07):
+  - **Names are tested cold** (standing): a proposed tag or member name is shown to
+    models with no context, which guess what it does; names they read wrongly are
+    replaced. Reason: names that need explaining fail their job.
+  - **Parallel surface** (D4, partial; [proposals/concurrency/](proposals/concurrency/)):
+    - Accepted: the three shapes, i.e. the loop `parallel x in xs { … }`, the
+      comprehension `[parallel x in xs f(x)]` and the block `parallel { … }`;
+      `tasks`; and the removals (`concurrent`, `spawn`, `concurrent g`,
+      `spawn(g)`, `cancel(g)`, `TaskGroup`, `parallel_map`, `parallel_range`,
+      `parallel_update`, the `select { … }` grammar).
+    - Accepted: items may wait, including on each other, with the strategy
+      inferred (C1). `or_throw` in an item leaves the enclosing function as it
+      does anywhere, canceling the siblings; errors otherwise stay per-item
+      values (C3).
+    - Accepted: `select` is a library call paired with `match` (C5). Its
+      signature is still being designed.
+    - Directions, being designed in a v3 proposal:
+      - metatags go in namespaces with unambiguous names (`$window` is too common
+        a word), e.g. `$parallel.window = 8`;
+      - `tree` in `sum` is a keyword-only argument;
+      - an easy way to filter out error cases in general, e.g.
+        `[parallel n in ns check(n) ?? void]`, only where dropping a value is coherent;
+      - block items may depend on earlier ones, with the dependency graph worked
+        out;
+      - compute-only work runs to completion by default, and opting into
+        cancellation is easy;
+      - ranges should work wherever a sequence is enough;
+      - no callback-style `op.then(f)`.
+  - **Dates** (D15c): `age(born on=today)`, with `on` defaulting to today, and
+    `Date - Date` gives a `Period`.
+  - **`strict_today`** (D15e) is the careful form of `today`, returning
+    `Date | AmbiguousToday | UnknownToday`; the separate `today_support` query is
+    gone. Considered: `possible_todays`, `today_range`, `pedantic_today`.
+  - **Safety defaults** (D10, partial; [proposals/bulletproof/](proposals/bulletproof/)):
+    - Accepted: with no tags, ordinary failures (end of input, no display, bad
+      files, no entropy) are values, not crashes. On success `window` should give a
+      handle. Random bytes for non-security use should be separate from
+      cryptographic ones that can fail.
+    - `$no_deadlocks` means what it says (Q4). `serve` and `pipeline` lose their
+      trusted status until a library gate proves them.
+    - Names that stay: `$finite_floats`, `$prototype`, `$unsafe`, `$bulletproof`.
+    - Removed: `$verify_protocols`, `$explicit_environment_failure`,
+      `$explicit_graphics_failure`, `$prove_finite_inputs`.
+    - Directions: permissions use the word `allow`, and should say what they
+      allow (instead of `$panic_on_unproven`). Tags about a function's
+      arguments go in an `$args.` namespace. Float constants should be intuitive
+      for newer programmers.
