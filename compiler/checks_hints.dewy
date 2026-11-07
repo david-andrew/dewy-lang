@@ -1,0 +1,200 @@
+$runtime_checks
+from p"checks_text.dewy" import (byte_find)
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (LF_DECL check_scopes ctxs cur_mod cx demand_name dewy_type_word fns locals method_decl_for method_modules modules prelude syms universe)
+from p"expr.jo" import (dewy_surface_table is_map_type receiver_fits)
+from p"habits.dewy" import (habit sloppy_shaped)
+from p"lex.jo" import (is_ident_char)
+from p"prelude.jo" import (prelude_demand_all)
+from p"spelling.dewy" import (did_you_mean)
+from p"types.jo" import (prune ts_dewy types)
+from p"util.jo" import (files intern line_col name_of pos_file pos_in_lib)
+
+HintWord:type=int64<overflow='wrap'>
+# ---------------- "did you mean" ----------------
+# the closest of the candidate names (" (did you mean 'x'?)"), or ""; ties go to the longest
+# common prefix, and a short name that starts the misspelling (len / lenght) counts as close
+# (recv: the type whose member was asked for; a habit that names a member, `.length`, is
+# told only when that type has it)
+suggestion=(name:string candidates:array<int64> recv:HintWord=0):>string=>{
+    let h=habit_name(name)
+    if (h as array<uint8>).length >? 0 {
+        # (`push` only where there is one: a texture's size is not its len)
+        let w=h
+        if (w as array<uint8>)[0] =? b'`' {w=w.byte_slice(1 (w as array<uint8>).length - 1)}
+        if byte_find(w "(") >? 0 and byte_find(w " ") <? 0 {w=w.byte_slice(0 byte_find(w "("))}
+        if byte_find(w ".") >? 0 {w=w.byte_slice(byte_find(w ".") + 1 (w as array<uint8>).length)}
+        let known=w =? "true" or w =? "false" or w =? "none" or byte_find(w " ") >=? 0 or byte_find(w "`") >=? 0 or ((w as array<uint8>).length >? 0 and (w as array<uint8>)[0] =? b'.')
+        if recv not=? 0 and (w as array<uint8>).length >? 1 and (w as array<uint8>)[0] =? b'.' {
+            let e:HintWord=1
+            loop e <? (w as array<uint8>).length and is_ident_char((w as array<uint8>)[e]) {e += 1}
+            let member=w.byte_slice(1 e)
+            known=receiver_fits((if member =? "length" {"len"} else {member}) recv)
+        }
+        loop c in candidates {
+            if known {break}
+            if name_of(c) =? w {known=true}
+        }
+        if known {
+            if starts_with(h "nothing: ") {return " (none is needed: {h.byte_slice(9 (h as array<uint8>).length)})"}
+            return " (use {h})"
+        }
+    }
+    # (the nearest of them: spelling.dewy)
+    let spelled:array<string>=[]
+    loop c in candidates {spelled.push(name_of(c))}
+    did_you_mean(name spelled)
+}
+# what this language calls a name from another one ("`push`"), or "" (the tables: habits.dewy)
+map_habit_name=(name:string):>string=>{
+    let h=habit(name)
+    habit_hint(h.dewy_map h.sloppy_map)
+}
+habit_name=(name:string):>string=>{
+    let h=habit(name)
+    habit_hint(h.dewy h.sloppy)
+}
+# (a Dewy program is told Dewy's spelling, else Sloppy's unless that is written for Sloppy: its
+# types, its commas between arguments, its `mut` and `->`, or a library spelling Dewy has another
+# for; a Dewy program is better told nothing than that)
+habit_hint=(dewy_text:string sloppy_text:string):>string=>{
+    if not ts_dewy {return sloppy_text}
+    if (dewy_text as array<uint8>).length >? 0 or (sloppy_text as array<uint8>).length =? 0 {return dewy_text}
+    let surface:array<string>=[]
+    loop k in dewy_surface_table().keys() {surface.push(name_of(k))}
+    if sloppy_shaped(sloppy_text surface) {return ""}
+    sloppy_text
+}
+# an example of the annotation for an empty array or map
+empty_hint=(nm:string t0:HintWord):>string=>$unsafe {
+    let t=prune(t0)
+    if ts_dewy {
+        if types.ptr[t].kind =? 'array' {return " (`let {nm}:array<int64> = []` for an array of integers, `let {nm}:dict<string int64> = []` for a dictionary)"}
+        if is_map_type(t) {return " (`let {nm}:dict<string int64> = []` for a dictionary from text to integers)"}
+        return ""
+    }
+    if types.ptr[t].kind =? 'array' {
+        let et=pushed_type(nm)
+        if (et as array<uint8>).length >? 0 {return " (`{nm}: {et}[] = []`: an array of {et}s, as pushed later)"}
+        return " (`{nm}: int[] = []` for an array of ints)"
+    }
+    if is_map_type(t) {return " (`{nm}: \{str: int} = \{}` for a map from text to ints)"}
+    ""
+}
+# enemies = [] and later enemies.push(vec2(...)): the type of what goes in, as written
+pushed_type=(nm:string):>string=>$unsafe {
+    let id=intern(nm)
+    loop i in [1..nodes.length) {
+        if nodes.ptr[i].kind not=? 'call' or nkids(i) not=? 1 {continue}
+        let f=HintWord(nodes.ptr[i].a)
+        if f =? 0 or nodes.ptr[f].kind not=? 'field' or name_of(HintWord(nodes.ptr[f].name)) not=? "push" {continue}
+        let r=HintWord(nodes.ptr[f].a)
+        if r =? 0 or nodes.ptr[r].kind not=? 'ident' or HintWord(nodes.ptr[r].name) not=? id {continue}
+        let x=kid(i 0)
+        let xk=nodes.ptr[x].kind
+        if xk =? 'str_lit' {return "str"}
+        if xk =? 'int_lit' {return "int"}
+        if xk =? 'float_lit' {return "f64"}
+        if xk =? 'call' and nodes.ptr[HintWord(nodes.ptr[x].a)].kind =? 'ident' {
+            let cn=name_of(HintWord(nodes.ptr[HintWord(nodes.ptr[x].a)].name))
+            if cn =? "rgb" or cn =? "rgba" or cn =? "hex" {return "vec4"}
+            if cn =? "vec2" or cn =? "vec3" or cn =? "vec4" or cn =? "ivec2" or cn =? "ivec3" or ((cn as array<uint8>).length >? 0 and (cn as array<uint8>)[0] >=? b'A' and (cn as array<uint8>)[0] <=? b'Z') {return cn}
+        }
+    }
+    ""
+}
+# a variable of this name was declared earlier in the function, in a block that has ended
+gone_local_hint=(nm:HintWord at:HintWord):>string=>$unsafe {
+    if cx <? 0 {return ""}
+    let inst=HintWord(ctxs[cx].inst)
+    let l=locals.length - 1
+    loop l >? 0 {
+        if HintWord(locals.ptr[l].name) =? nm and HintWord(locals.ptr[l].owner) =? inst and locals.ptr[l].pos <? at and pos_file(locals.ptr[l].pos) =? pos_file(at) {
+            let [ln c]=line_col(locals.ptr[l].pos)
+            return " (the '{name_of(nm)}' made on line {ln} is inside a block that has ended; give it a value before that block to use it here)"
+        }
+        l -= 1
+    }
+    # (pos made in update, used in draw: each function's variables are its own)
+    l=locals.length - 1
+    loop l >? 0 {
+        let o=HintWord(locals.ptr[l].owner)
+        if HintWord(locals.ptr[l].name) =? nm and o not=? inst and HintWord(locals.ptr[l].flags) & LF_DECL not=? 0 and o >? 0 and o <? fns.length and fns.ptr[o].decl not=? 0 and not pos_in_lib(locals.ptr[l].pos) {
+            let fname=name_of(HintWord(nodes.ptr[HintWord(fns.ptr[o].decl)].name))
+            let [ln c]=line_col(locals.ptr[l].pos)
+            return " (the '{name_of(nm)}' made on line {ln} belongs to {fname}; for both to use it, give it its first value at the top level, outside the functions)"
+        }
+        l -= 1
+    }
+    ""
+}
+# names visible from the current scope: locals, the module, the standard library, built-ins
+visible_names=():>array<int64>=>{
+    prelude_demand_all()
+    let out=check_scopes.names
+    loop [k v] in modules[cur_mod()].names {out.push(k)}
+    loop [k v] in prelude {out.push(k)}
+    loop [k v] in universe {out.push(k)}
+    out
+}
+type_names=():>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    prelude_demand_all()
+    let dewy=files[HintWord(modules[cur_mod()].file)].is_dewy
+    loop tbl in [modules[cur_mod()].names prelude universe] {
+        loop [k s] in tbl {
+            let sk=syms.ptr[s].kind
+            if dewy and universe.get(k) =? s and dewy_type_word(name_of(k)) not=? "" {continue}
+            if sk =? 'type_' or sk =? 'struct_' or sk =? 'enum_' {out.push(k)}
+        }
+    }
+    out
+}
+# functions that could be called as recv.f(...): their first parameter has the receiver's kind
+method_names=(recv:HintWord):>array<int64>=>$unsafe {
+    prelude_demand_all()
+    let out:array<int64>=[]
+    let rt=prune(recv)
+    let tables=[modules[cur_mod()].names prelude]
+    loop tm in method_modules(rt) {
+        if tm not=? cur_mod() {tables.push(modules[tm].names)}
+    }
+    loop tbl in tables {
+        loop [k s0] in tbl {
+            let s=s0
+            loop s not=? 0 {
+                if syms.ptr[s].kind =? 'fns' and syms.ptr[s].decl not=? 0 and nkids(HintWord(syms.ptr[s].decl)) >? 0 {
+                    if method_decl_for(HintWord(syms.ptr[s].decl) rt) {
+                        out.push(k)
+                        break
+                    }
+                }
+                s=HintWord(syms.ptr[s].next)
+            }
+        }
+    }
+    out
+}
+# The named part of method_names, for a member being checked rather than a
+# diagnostic listing every spelling. Probe complete overload chains in the
+# same visible tables; an unrelated name must not demand its signatures.
+# O(visible method modules + overloads of name), with indexed name lookup.
+method_name_for=(recv:HintWord name:HintWord):>bool=>$unsafe {
+    demand_name(name)
+    let rt=prune(recv)
+    let tables=[modules[cur_mod()].names prelude]
+    loop tm in method_modules(rt) {
+        if tm not=? cur_mod() {tables.push(modules[tm].names)}
+    }
+    loop tbl in tables {
+        let s=tbl.get(name) ?? 0
+        loop s not=? 0 {
+            if syms.ptr[s].kind =? 'fns' and syms.ptr[s].decl not=? 0 and nkids(HintWord(syms.ptr[s].decl)) >? 0 {
+                if method_decl_for(HintWord(syms.ptr[s].decl) rt) {return true}
+            }
+            s=HintWord(syms.ptr[s].next)
+        }
+    }
+    false
+}

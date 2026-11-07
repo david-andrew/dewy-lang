@@ -2,6 +2,7 @@
 import re
 import subprocess
 
+from tests.selfhost_effect_double import CHECKS_HOMES
 from tests.support import ROOT
 
 
@@ -12,7 +13,14 @@ def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run
     (arguments, status) runs, each in run_in()'s working directory; observe(directory): what else
     those runs must agree on; services: compiler modules (by stem) whose imports all lead to the Jo
     double `services.jo`. A single invocation's stdout comes back alone."""
+    # (a moved checking leaf stands with the module it left, when that module is a service or a double)
+    services = (*services, *(stem for stem, home in CHECKS_HOMES.items() if home[:-3] in services))
+    doubled = {stem: home for stem, home in CHECKS_HOMES.items() if home in (doubles or {})}
+
     def redirect(text):
+        for stem, home in doubled.items():
+            for extension in ('dewy', 'jo'):
+                text = text.replace(f'{stem}.{extension}', home)
         for stem in services:
             for quote in ('"', "'"):
                 for extension in ('dewy', 'jo'):
@@ -24,7 +32,7 @@ def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run
     for stem in stems:
         for name in (re.findall(r'(?m)^\s*from p"(\w+)\.dewy"', (ROOT / f'compiler/{stem}.dewy').read_text())
                      + re.findall(r"(?m)^use '(\w+)\.dewy'", (ROOT / f'compiler/{stem}.jo').read_text())):
-            if name not in stems and name not in services and f'{name}.dewy' not in (doubles or {}):
+            if name not in stems and name not in services and name not in doubled and f'{name}.dewy' not in (doubles or {}):
                 stems.append(name)
     outputs = []
     for extension in ('dewy', 'jo'):

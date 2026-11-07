@@ -1,0 +1,33 @@
+$runtime_checks
+# Byte positions in text. Interned names and paths may hold any bytes: their positions are bytes, as `byte_slice` takes them.
+TextWord:type=int64<overflow='wrap'>
+byte_find=(s:string sub:string start:TextWord=0):>TextWord=>{
+    let n:TextWord=(s as array<uint8>).length
+    let m:TextWord=(sub as array<uint8>).length
+    if m =? 0 {return start}
+    if start <? 0 or m >? n {return -1}
+    let i=start
+    loop i + m <=? n {
+        if byte_match(s sub i) {return i}
+        i += 1
+    }
+    -1
+}
+byte_rfind=(s:string sub:string):>TextWord=>{
+    let m:TextWord=(sub as array<uint8>).length
+    let i:TextWord=TextWord((s as array<uint8>).length) - m
+    loop i >=? 0 {
+        if byte_match(s sub i) {return i}
+        i -= 1
+    }
+    -1
+}
+byte_match=(s:string sub:string at:TextWord):>bool=>{
+    let k:TextWord=0
+    let m:TextWord=(sub as array<uint8>).length
+    loop k <? m {
+        if (s as array<uint8>)[at + k] not=? (sub as array<uint8>)[k] {return false}
+        k += 1
+    }
+    true
+}

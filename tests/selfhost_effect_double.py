@@ -1,5 +1,11 @@
 """Keep isolated checker services bound to their existing effect doubles."""
 from functools import lru_cache
+import re
+from pathlib import Path
+
+# (each moved checking leaf's twin first uses the module it left: an isolated driver's table for that module stands for it)
+CHECKS_HOMES = {path.stem: match[1] for path in (Path(__file__).resolve().parents[1] / 'compiler').glob('checks_*.jo')
+                if (match := re.match(r"use '(\w+\.jo)'\n", path.read_text()))}
 
 
 @lru_cache(maxsize=512)
@@ -9,6 +15,9 @@ def _doubled(text, names):
 
 
 def effect_services(text, modules):
+    if 'main.jo' not in modules:
+        for stem, home in CHECKS_HOMES.items():
+            text = text.replace(stem + '.dewy', home).replace(stem + '.jo', home)
     if "ownership_finalize = " in modules.get("ownership.jo", ""):
         text = text.replace("ownership_hooks.dewy", "ownership.jo").replace(
             "ownership_hooks.jo", "ownership.jo")
