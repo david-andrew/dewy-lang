@@ -2,7 +2,7 @@
 import re
 import subprocess
 
-from tests.selfhost_effect_double import CHECKS_HOMES
+from tests.selfhost_effect_double import CHECKS_HOMES, LEAF_HOMES
 from tests.support import ROOT
 
 
@@ -14,8 +14,9 @@ def compare_narrow(compiler, tmp_path, release, stems, driver, doubles=None, run
     those runs must agree on; services: compiler modules (by stem) whose imports all lead to the Jo
     double `services.jo`. A single invocation's stdout comes back alone."""
     # (a moved checking leaf stands with the module it left, when that module is a service or a double)
-    services = (*services, *(stem for stem, home in CHECKS_HOMES.items() if home[:-3] in services))
-    doubled = {stem: home for stem, home in CHECKS_HOMES.items() if home in (doubles or {})}
+    homes = {**CHECKS_HOMES, **LEAF_HOMES}
+    services = (*services, *(stem for stem, home in homes.items() if home[:-3] in services and stem not in stems))
+    doubled = {stem: home for stem, home in homes.items() if home in (doubles or {})}
 
     def redirect(text):
         for stem, home in doubled.items():

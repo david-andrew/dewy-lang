@@ -7,6 +7,31 @@ from pathlib import Path
 CHECKS_HOMES = {path.stem: match[1] for path in (Path(__file__).resolve().parents[1] / 'compiler').glob('checks_*.jo')
                 if (match := re.match(r"use '(\w+\.jo)'\n", path.read_text()))}
 
+# (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
+# not the leaf reads the leaf's functions from the module, a double or the real one)
+LEAF_HOMES = {
+    'unit_ops': 'units.jo',
+    'float_ops': 'floats.jo',
+    'facts_arith': 'facts.jo',
+    'facts_collect': 'facts.jo',
+    'reader_service_ops': 'dewy_reader_services.jo',
+    'spirv_ops': 'spirv.jo',
+    'type_ops': 'types.jo',
+    'word_overflow': 'types.jo',
+    'glsl_ops': 'glsl.jo',
+    'msl_ops': 'msl.jo',
+    'refine_ops': 'refine.jo',
+    'safe_path_ops': 'safe_paths.jo',
+    'ide_ops': 'ide.jo',
+    'lsp_handlers': 'lsp.jo',
+    'ide_index': 'ide.jo',
+    'prelude_ops': 'prelude.jo',
+    'exact_loop_ops': 'exact_loop.jo',
+    'lsp_ops': 'lsp.jo',
+    'dewy_node_ops': 'dewy_nodes.jo',
+    'dewy_node_builds': 'dewy_nodes.jo',
+}
+
 
 @lru_cache(maxsize=512)
 def _doubled(text, names):
@@ -83,9 +108,7 @@ def effect_services(text, modules):
         text = text.replace('facts_forgets.dewy', 'facts.jo').replace('facts_forgets.jo', 'facts.jo')
     if _doubled(modules.get('facts.jo', ''), ('fact_parallel_range_call', 'fact_through_conv', 'fact_parallel_count_check', 'fact_bounded_index', 'fact_scope_exit', 'fact_refinements_unreachable', 'facts_finalize', 'facts_reset', 'fact_owner_value', 'fact_forget_hooked', 'fact_literal_nonzero', 'fact_complete_deferred')):
         text = text.replace('facts_lifecycle.dewy', 'facts.jo').replace('facts_lifecycle.jo', 'facts.jo')
-    for leaf, home in (('unit_ops', 'units.jo'), ('float_ops', 'floats.jo'), ('facts_arith', 'facts.jo'), ('facts_collect', 'facts.jo'),
-                       ('reader_service_ops', 'dewy_reader_services.jo'), ('spirv_ops', 'spirv.jo'),
-                       ('type_ops', 'types.jo'), ('word_overflow', 'types.jo'), ('glsl_ops', 'glsl.jo'), ('msl_ops', 'msl.jo'), ('refine_ops', 'refine.jo'), ('safe_path_ops', 'safe_paths.jo'), ('ide_ops', 'ide.jo'), ('lsp_handlers', 'lsp.jo'), ('ide_index', 'ide.jo'), ('prelude_ops', 'prelude.jo'), ('exact_loop_ops', 'exact_loop.jo'), ('lsp_ops', 'lsp.jo'), ('dewy_node_ops', 'dewy_nodes.jo'), ('dewy_node_builds', 'dewy_nodes.jo')):
+    for leaf, home in LEAF_HOMES.items():
         if home in modules and leaf + '.dewy' not in modules and leaf + '.jo' not in modules:
             text = text.replace(leaf + '.dewy', home).replace(leaf + '.jo', home)
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
