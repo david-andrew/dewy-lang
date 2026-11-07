@@ -10102,6 +10102,18 @@ rd_dc_type_arguments=(@reader_ctx:ParserContext @reader_nodes:array<Node> n0:int
                 if ((((word =? DC_ARRAY) and (setting not=? DC_OVERFLOW)) and reader_ctx.flags.report_now) and (rd_dc_array_constraint(@reader_ctx @reader_nodes) not=? 0)) {
                     continue
                 }
+                # (`Instant<width=64>`, a library's own option: the type it declares as `Instant_width_64`)
+                if ((word =? 0) and (setting not=? DC_OVERFLOW) and (args.length =? 0) and (reader_nodes[n].kind =? 'tname') and ((reader_ctx.tokens[reader_ctx.at].kind =? 'integer') or (reader_ctx.tokens[reader_ctx.at].kind =? 'source_integer'))) {
+                    let option:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 2)])
+                    let chosen:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at])
+                    let base:string=rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[n].name))
+                    reader_nodes[n].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("{base}_{option}_{chosen}"))
+                    reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+                    if (not rd_dc_closes(@reader_ctx)) {
+                        return 0
+                    }
+                    continue
+                }
                 if ((setting not=? DC_OVERFLOW) or ((word >=? DC_ARRAY) and (word <=? DC_TOTALDICT))) {
                     return 0
                 }
@@ -10324,7 +10336,7 @@ rd_dc_type_declaration=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>in
     # `Name:type = <T U>[fields]`: a generic record (dw_type_params)
     let type_params:array<int64>=[]
     # (`<T>[...]`: type parameters, plain names then a record; `<(x:T):>R>`, `<'a' | 1>`: an alias)
-    if ((((rd_dn_peek(@reader_ctx) =? 'langle') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].kind =? 'identifier')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'none')) and (((reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'rangle') or (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].kind =? 'identifier')) or ((reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'colon') and (rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 3)]) =? "Effect")))) {
+    if ((((rd_dn_peek(@reader_ctx) =? 'langle') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].kind =? 'identifier')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'none')) and (((reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'rangle') or (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'assign') or (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].kind =? 'identifier')) or ((reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'colon') and (rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 3)]) =? "Effect")))) {
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
         loop (not rd_dn_accept(@reader_ctx 'rangle')) {
             let binder:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
@@ -10341,6 +10353,14 @@ rd_dc_type_declaration=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>in
             reader_nodes[t].name = binder.name
             if rd_dc_effect_param(@reader_ctx) {
                 reader_nodes[t].aux = 1
+            }
+            # (`<C=Gregorian>`: what a use that leaves it out means, type_param_defaults)
+            if rd_dn_accept(@reader_ctx 'assign') {
+                let fallback:int64=rd_dc_annotation(@reader_ctx @reader_nodes)
+                if fallback =? 0 {
+                    return 0
+                }
+                reader_nodes[t].b = int32<overflow='wrap'>(fallback)
             }
             type_params.push(t);
         }

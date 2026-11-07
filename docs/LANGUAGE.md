@@ -1581,6 +1581,11 @@ printl"{meet + 168hour}"  # 2026-11-02T08:00:00-05:00[America/New_York]: exactly
 printl"{(meet + 1week).nominal - meet.nominal}"  # 169h
 ```
 
+`Instant<width=64>` and `Duration<width=64>` hold a word each, for huge columns; they cover
+September 1684 to April 2269. `convert<Instant<width=64>>(t)` narrows, giving `OutOfRange` when
+it does not fit and, for a constant, a compile error; `packed as Instant` widens. Their
+arithmetic gives the value or `OutOfRange`, since that range is reachable.
+
 An interval is a range: `[a..b)`, `[a..b]`, `(a..b]`, `(a..b)`. A range over anything ordered
 that is not an integer (an `Instant`, a `Date`, a time, a fraction, text) is a `Range<T>` holding
 its two ends as written, with `.first`, `.last`, `.includes_first`, `.includes_last` and
@@ -2042,6 +2047,11 @@ printl(r.capacity)   # 64
 ```
 
 Only integer literals can be such arguments so far (not named constants).
+
+A type parameter can name a default for a use that leaves it out: with
+`Box:type = <T=int64>[v:T]`, a bare `Box` is `Box<int64>`. A library type can offer a choice by
+name: `Instant<width=64>` is the type its module declares as `Instant_width_64`, so
+`Name<option=N>` always names `Name_option_N`.
 
 Generic functions can also be specialized as values: `let convert = @identity<int64>`
 stores a callable, including functions imported from Dewy or core modules.

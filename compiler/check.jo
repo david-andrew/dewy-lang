@@ -1278,6 +1278,24 @@ nd_of = (t: int, pos: int) -> int:
     if s == 0: fatal(pos, "n-dimensional arrays are not available (lib/std/nd.jo is missing)")
     get_struct_inst(int(syms[s].ref), [t])
 
+# A generic type's arguments with those left out filled in from its declaration: `Date` is
+# `Date<Gregorian>` when it says `<C=Gregorian>`. The defaults read in the declaration's own scope.
+type_param_defaults = (d: int, targs: int[]) -> int[]:
+    if targs.len() >= nkids2(d): return targs
+    out = targs
+    loop i in [targs.len()..nkids2(d)):
+        fallback = int(nodes[kid2(d, i)].b)
+        if fallback == 0: return targs
+        saved = cx
+        ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "typedef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
+        cx = ctxs.len() - 1
+        mark = scope_mark()
+        out.push(resolve_type(fallback))
+        scope_reset(mark)
+        ctxs.pop()
+        cx = saved
+    out
+
 # type Name[T] = ...: the type it stands for, given its type arguments
 resolve_alias = (d: int, targs: int[], use_pos: int) -> int: ca_resolve_alias(d, targs, use_pos)
 alias_resume = (d: int):

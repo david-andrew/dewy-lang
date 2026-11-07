@@ -3,13 +3,13 @@
 # so far. It maps no data.
 from p"core.dewy" import (Instant Days Months days_from_civil civil_from_days days_in_month read_fields _Cursor Fields _year_text pad)
 
-# `_days` counts from 1970-01-01.
-Date:type=[_days:int64]
+# `_days` counts from 1970-01-01, and the calendar is part of the type: bare `Date` is `Date<Gregorian>`.
 Gregorian:type=[]
+Date:type=<C=Gregorian>[_days:int64]
 const _MONTHS=["January" "February" "March" "April" "May" "June" "July" "August" "September" "October" "November" "December"]
 const _WEEKDAYS=["Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday" "Sunday"]
 
-_of_days=(days:int):>Date=>Date[days.to_int64() ?? 0]
+_of_days=(days:int):>Date=>Date<Gregorian>[days.to_int64() ?? 0]
 date_of=(year:int month:int64 day:int64):>Date=>_of_days(days_from_civil(year month day))
 date_parse=(text:string):>Date|ParseError=>{
     let c=_Cursor[text 0]

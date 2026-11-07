@@ -255,6 +255,7 @@ RESOLVE_JO = {
         'fixed_size_arg': 'fixed_size_arg = (tn: int) -> bool: fixed_arg(tn)',
         'fixed_size': 'fixed_size = (n: int) -> int: resolve_fixed_size_double(n)',
         'mk_fixed_checked': 'mk_fixed_checked = (e: int, n: int, pos: int) -> int: fixed(e, n, pos)',
+        'type_param_defaults': 'type_param_defaults = (d: int, targs: int[]) -> int[]: targs',
         'resolve_type_error': 'resolve_type_error = (kind: int, tn: int, count: int): error(kind, tn, count)',
         'nd_of': 'nd_of = (t: int, pos: int) -> int: nd(t, pos)',
         'resolve_type_soa': 'resolve_type_soa = (et: int, pos: int) -> int: soa(et, pos)',

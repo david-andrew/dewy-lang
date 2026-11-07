@@ -12,7 +12,7 @@ UtcLabel:type=core.UtcLabel
 
 # Onto a grid, with the rounding named: `let [d lost] = quantize(1ns/3 rounding='nearest_even')`.
 # A constant tick (1ns unless said) and a constant time cannot fail.
-from p"@lib/time/core.dewy" import (tick_error _Rounding)
+from p"@lib/time/core.dewy" import (tick_error _Rounding compact_instant_error compact_duration_error)
 $check_constant tick_error(tick) "not a tick"
 quantize=(q:rational*Time rounding:_Rounding tick:rational*Time=1ns):>[Duration rational*Time]|OffGrid=>core.quantize_exact(q rounding tick)
 quantize=(x:float64*Time rounding:_Rounding tick:rational*Time=1ns):>[Duration rational*Time]|OffGrid|OutOfRange=>core.quantize_float(x rounding tick)
@@ -25,14 +25,25 @@ convert=<T>(q:int*Time):>T|OffGrid|OutOfRange=>core.duration_from(q)
 convert=<T>(q:rational*Time):>T|OffGrid|OutOfRange=>core.duration_from(q)
 convert=<T>(x:float64*Time):>T|OffGrid|OutOfRange=>core.duration_from(x)
 
+$check_constant compact_instant_error(t) "does not fit"
+convert=<T>(t:Instant):>T|OutOfRange=>core.compact_instant(t)
+$check_constant compact_duration_error(d) "does not fit"
+convert=<T>(d:Duration):>T|OutOfRange=>core.compact_duration(d)
+
+# `Instant<width=64>`, for huge columns; `t as Instant` widens.
+Instant_width_64:type=core.Instant_width_64
+Duration_width_64:type=core.Duration_width_64
+Instant_width_128:type=core.Instant
+Duration_width_128:type=core.Duration
+
 # `instant"2026-10-24T12:00:00Z"`: checked while compiling, and then a plain value.
 $check_constant instant_error(text) "not an instant"
 instant=(text:string):>Instant|ParseError|OffGrid|OutsideCoverage|InvalidFields=>core.instant_parse(text)
 $check_constant utc_error(text) "not a UTC label"
 utc=(text:string):>UtcLabel|ParseError|OffGrid|OutsideCoverage|InvalidFields=>core.utc_parse(text)
 
-Date:type=civil.Date
 Gregorian:type=civil.Gregorian
+Date:type=<C=Gregorian>(civil.Date<C>)
 Period:type=core.Period|civil.Span
 Span:type=civil.Span
 

@@ -333,6 +333,78 @@ duration_from=(x:float64*Time):>Duration|OffGrid|OutOfRange=>{
     _duration(count.numerator)
 }
 
+# ---------------- the compact form, `Instant<width=64>`: September 1684 to April 2269 ----------------
+# For huge columns: one word each. Leaving that range is reachable, so it is a value.
+Instant_width_64:type=[_count:int64]
+Duration_width_64:type=[_count:int64]
+Instant_width_128:type=Instant
+Duration_width_128:type=Duration
+
+_narrow=(hi:int64 lo:uint64):>int64|OutOfRange=>{
+    let word=int64<overflow='wrap'>(lo)
+    if (hi =? 0 and word >=? 0) or (hi =? -1 and word <? 0) {return word}
+    OutOfRange
+}
+compact_instant=(t:Instant):>Instant_width_64|OutOfRange=>{
+    let word=_narrow(t._hi t._lo) or_throw
+    Instant_width_64[word]
+}
+compact_duration=(d:Duration):>Duration_width_64|OutOfRange=>{
+    let word=_narrow(d._hi d._lo) or_throw
+    Duration_width_64[word]
+}
+compact_instant_error=(t:Instant):>string?=>{
+    if compact_instant(t) is? OutOfRange {return "it is outside what 64 bits hold: September 1684 to April 2269"}
+    none
+}
+compact_duration_error=(d:Duration):>string?=>{
+    if compact_duration(d) is? OutOfRange {return "it is more than 292 years, what 64 bits hold"}
+    none
+}
+__as__=(t:Instant_width_64):>Instant=>instant_word(t._count)
+__as__=(d:Duration_width_64):>Duration=>duration_word(d._count)
+__as__=(t:Instant_width_64):>string=>"{instant_word(t._count)}"
+__as__=(d:Duration_width_64):>string=>"{duration_word(d._count)}"
+__eq__=(a:Instant_width_64 b:Instant_width_64):>bool=>a._count =? b._count
+__lt__=(a:Instant_width_64 b:Instant_width_64):>bool=>a._count <? b._count
+__eq__=(a:Duration_width_64 b:Duration_width_64):>bool=>a._count =? b._count
+__lt__=(a:Duration_width_64 b:Duration_width_64):>bool=>a._count <? b._count
+# (a sum of words that fits one, by the sign rule)
+_word_add=(a:int64 b:int64):>int64|OutOfRange=>{
+    let sum:_I=_I(a)+_I(b)
+    if ((_I(a) xor sum) and (_I(b) xor sum)) <? 0 {return OutOfRange}
+    int64<overflow='wrap'>(sum)
+}
+_word_sub=(a:int64 b:int64):>int64|OutOfRange=>{
+    let dif:_I=_I(a)-_I(b)
+    if ((_I(a) xor _I(b)) and (_I(a) xor dif)) <? 0 {return OutOfRange}
+    int64<overflow='wrap'>(dif)
+}
+__add__=(t:Instant_width_64 d:Duration_width_64):>Instant_width_64|OutOfRange=>{
+    let word=_word_add(t._count d._count) or_throw
+    Instant_width_64[word]
+}
+__sub__=(t:Instant_width_64 d:Duration_width_64):>Instant_width_64|OutOfRange=>{
+    let word=_word_sub(t._count d._count) or_throw
+    Instant_width_64[word]
+}
+__sub__=(a:Instant_width_64 b:Instant_width_64):>Duration_width_64|OutOfRange=>{
+    let word=_word_sub(a._count b._count) or_throw
+    Duration_width_64[word]
+}
+__add__=(a:Duration_width_64 b:Duration_width_64):>Duration_width_64|OutOfRange=>{
+    let word=_word_add(a._count b._count) or_throw
+    Duration_width_64[word]
+}
+__sub__=(a:Duration_width_64 b:Duration_width_64):>Duration_width_64|OutOfRange=>{
+    let word=_word_sub(a._count b._count) or_throw
+    Duration_width_64[word]
+}
+__add__=(t:Instant_width_64 d:Duration):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)+d)
+__sub__=(t:Instant_width_64 d:Duration):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)-d)
+__add__=(t:Instant_width_64 q:int*Time):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)+q)
+__sub__=(t:Instant_width_64 q:int*Time):>Instant_width_64|OutOfRange=>compact_instant((t as Instant)-q)
+
 # ---------------- calendar periods: recipes that need a date to mean anything ----------------
 # `1day` is a Days and `1month` a Months, so a date add that cannot fail has the plain type.
 Days:type=[count:int64]

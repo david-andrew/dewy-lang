@@ -55,7 +55,7 @@ let dt = (now - start) / 1s as float64
   | `1980-01-06T00:00:00 GPS` | `95040019000000000` |
   | `2000-01-01T12:00:00 TT` | `725803167816000000` |
 
-- **Width.** Plain `Instant` and `Duration` hold 128 bits. `Instant<width=64>` is the compact form for huge columns; it covers September 1684 to April 2269 and halves the memory. Width never depends on tick.
+- **Width.** Plain `Instant` and `Duration` hold 128 bits. `Instant<width=64>` is the compact form for huge columns; it covers September 1684 to April 2269 and halves the memory. Width never depends on tick. It is a type of its own, declared as `Instant_width_64`, which is what `Name<option=N>` means for a library type.
 - **Representation.** A record of a signed high word and an unsigned low word, written in Dewy. It can become a builtin later with no source change. Add and subtract take about five instructions with no call. Multiply, divide and formatting go through `int`.
 - **Overflow.** Plain arithmetic has no error branch. Leaving the 128-bit range (±5.39×10²¹ years) ends the task with a report, as other environmental failures do. This is a named assumption, and `$time.require_range` removes it. `t.checked_add(d)` gives `Instant | OutOfRange`. `width=64` arithmetic gives the value or `OutOfRange`, since 2269 is reachable.
 - **Time quantities.** `300ms`, `2s`, `0.1s` and `1ns/3` remain exact quantities, and a `Duration` is the on-grid stored form. They mix directly: `t + 90minute`, `d <? 5s`, `d / 1s`. `(now - start) / 1s` is a `rational`.
