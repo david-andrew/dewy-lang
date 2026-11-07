@@ -1,0 +1,145 @@
+use 'expr.jo'
+use 'secret_checks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'witness.jo'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'ownership.jo'
+use 'units.jo'
+use 'errors.jo'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'settings.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'ide.jo'
+use 'dewy_methods.jo'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+
+cond_returned = (changes: int, jumps: int, body: int) -> void: narrow_returned(changes, jumps, body)
+cond_reset = (mark: int) -> void: scope_reset(mark)
+cond_restore = (changes: int) -> void: cond_restored.push(narrow_restore(changes))
+cond_merge = () -> void: narrow_merge(cond_restored.pop())
+cond_promote = (first: int, limit: int) -> void: narrow_promote(first, limit)
+cond_fill_subject = (cond: int, b: int) -> int:
+    fill = opt_fill_subject(cond)
+    if fill != 0: opt_fill_watch.push(OptFill(subject = i32(fill), block = i32(b)))
+    fill
+cond_fill_end = (b: int) -> bool:
+    nl = int(opt_fill_watch.pop().alias)
+    nl != 0 and int(locals[nl].flags) & LF_UNNARROWED == 0 and not stmt_terminates(b)
+cond_then_literal = (b: int) -> int:
+    if not literal_tree(block_tail(b)): return 0
+    clone(block_tail(b))
+cond_sink = (n: int, b: int) -> void: sink_arm(n, b)
+cond_union = (a: int, b: int) -> int: mk_union([a, b])
+# (both values take the expected type; without one, their join)
+cond_join = (va: int, vb: int, ex: int, pos: int) -> int:
+    if ex == 0: return join_types(va, vb, pos)
+    coerce(va, ex)
+    coerce(vb, ex)
+    ex
+cond_error = (n: int, t: int, code: int) -> void:
+    if code == 1:
+        cond = int(nodes[n].a)
+        ex = t
+        if not is_chain_end(cond): fatal(nodes[n].pos, "this `if` must give {a_type(ex)}, but it has no `else`")
+        subject = if nodes[int(nodes[cond].a)].kind == .ident: "`{name_of(int(nodes[int(nodes[cond].a)].name))}`" else: "the value"
+        fatal(nodes[n].pos, "this `if` must give {a_type(ex)}, but it has no `else`: when {subject} is not {a_type(resolve_type(int(nodes[cond].b)))}, it gives nothing (add `else` with a value, or a test for each remaining type)")
+    if code == 2: fatal(nodes[n].pos, "an if expression needs an else branch")
+    if code == 3: fatal(nodes[n].pos, "both branches of an if expression need a value")
+    fatal(nodes[int(nodes[n].a)].pos, "'if let x = value' needs an optional value, found {dt(t)}")

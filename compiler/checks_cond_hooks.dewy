@@ -1,0 +1,63 @@
+$runtime_checks
+from p"ast.jo" import (clone nodes)
+from p"check.jo" import (LF_UNNARROWED locals narrow_merge narrow_restore narrow_returned resolve_type scope_reset stmt_terminates)
+from p"checker_sinks.dewy" import (sink_arm)
+from p"checker_state.dewy" import (OptFill)
+from p"expr.jo" import (a_type block_tail coerce cond_restored is_chain_end join_types literal_tree narrow_promote opt_fill_subject opt_fill_watch)
+from p"types.jo" import (dt mk_union)
+from p"util.jo" import (fatal name_of)
+
+CondHookWord:type=int64<overflow='wrap'>
+cond_returned=(changes:int64 jumps:int64 body:int64):>void=>{
+    narrow_returned(changes jumps body)
+}
+cond_reset=(mark:int64):>void=>{
+    scope_reset(mark)
+}
+cond_restore=(changes:int64):>void=>{
+    cond_restored.push(narrow_restore(changes))
+}
+cond_merge=():>void=>{
+    narrow_merge(cond_restored.pop());
+}
+cond_promote=(first:int64 limit:int64):>void=>{
+    narrow_promote(first limit)
+}
+cond_fill_subject=(cond:int64 b:int64):>int64=>{
+    let fill=opt_fill_subject(cond)
+    if fill not=? 0 {opt_fill_watch.push(OptFill(subject=int32(fill) block=int32(b)))}
+    fill
+}
+cond_fill_end=(b:int64):>bool=>$unsafe {
+    let nl=CondHookWord(opt_fill_watch.pop().alias)
+    nl not=? 0 and CondHookWord(locals.ptr[nl].flags) & LF_UNNARROWED =? 0 and not stmt_terminates(b)
+}
+cond_then_literal=(b:int64):>int64=>{
+    if not literal_tree(block_tail(b)) {return 0}
+    clone(block_tail(b))
+}
+cond_sink=(n:int64 b:int64):>void=>{
+    sink_arm(n b)
+}
+cond_union=(a:int64 b:int64):>int64=>{
+    mk_union([a b])
+}
+# (both values take the expected type; without one, their join)
+cond_join=(va:int64 vb:int64 ex:int64 pos:int64):>int64=>{
+    if ex =? 0 {return join_types(va vb pos)}
+    coerce(va ex);
+    coerce(vb ex);
+    ex
+}
+cond_error=(n:int64 t:int64 code:int64):>void=>$unsafe {
+    if code =? 1 {
+        let cond=CondHookWord(nodes.ptr[n].a)
+        let ex=t
+        if not is_chain_end(cond) {fatal(nodes.ptr[n].pos "this `if` must give {a_type(ex)}, but it has no `else`")}
+        let subject=if nodes.ptr[CondHookWord(nodes.ptr[cond].a)].kind =? 'ident' {"`{name_of(CondHookWord(nodes.ptr[CondHookWord(nodes.ptr[cond].a)].name))}`"} else {"the value"}
+        fatal(nodes.ptr[n].pos "this `if` must give {a_type(ex)}, but it has no `else`: when {subject} is not {a_type(resolve_type(CondHookWord(nodes.ptr[cond].b)))}, it gives nothing (add `else` with a value, or a test for each remaining type)")
+    }
+    if code =? 2 {fatal(nodes.ptr[n].pos "an if expression needs an else branch")}
+    if code =? 3 {fatal(nodes.ptr[n].pos "both branches of an if expression need a value")}
+    fatal(nodes.ptr[CondHookWord(nodes.ptr[n].a)].pos "'if let x = value' needs an optional value, found {dt(t)}")
+}

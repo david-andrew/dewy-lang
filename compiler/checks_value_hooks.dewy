@@ -1,0 +1,390 @@
+$runtime_checks
+from p"types.jo" import dt
+from p"ast.jo" import (NF_BROADCAST NF_CHECKED NF_COMPREHENSION NF_MUT NF_SPREAD TUPLE_VALUES add_flag clear_flag has_flag kid kids mk nkids nodes set_kid set_list)
+from p"check.jo" import (FK_LAMBDA assign_root check_block check_lambda_body cur_mod dewy_at fns jd new_inst node_mark spread_calls syms target_arm64 target_wasm zonk_tree)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checker_sinks.dewy" import (sink_values_use)
+from p"checker_types.dewy" import (TK)
+from p"checker_values.dewy" import (values_flatten values_grouped)
+from p"checks_match_hooks.dewy" import (check_match)
+from p"directives.jo" import (dir_function_entry)
+from p"effect_contracts.dewy" import (callable_contract effect_contract_fits effect_decl_contract mk_callable_contract)
+from p"errors.jo" import (check_propagate nominal_parent)
+from p"exact.jo" import (exact_int_result)
+from p"expr.jo" import (CV IN bc_block bc_call bc_stmt bundled_bigint_type ce_expected ce_finish check_lambda check_matrix check_range_value check_soa_method ci coerce coerce_hint dewy_classify_spread dewy_new_axis dewy_record_spread_entries dewy_spread_source_type fixed_literal is_map_type is_nd last_checked literal_union_member mk_name name_before_eq nd_elem ntype op_overload spread_count struct_ctor type_node_of unnamed values_spread_call)
+from p"ide.jo" import (ide_complete_names never_cascade)
+from p"nd_contracts.jo" import (nd_mutable_instances nd_mutable_signatures nd_signature)
+from p"refine.jo" import (is_total_dict ref_validate_signature refine_active refine_bindings representation_type total_literal_check)
+from p"reflect_ops.dewy" import (reflect_name reflect_record)
+from p"sibling_ops.dewy" import (sibling_index_narrow)
+from p"types.jo" import (T_BOOL T_MATH_INT has_var is_int is_soa is_values mk_array mk_tuple prune struct_targ structs tkind types)
+from p"units.jo" import (quantity_constant quantity_unary quantity_unary_literal)
+from p"util.jo" import (err_notes fatal files intern name_of pos_file warn)
+
+ValueHookWord:type=int64<overflow='wrap'>
+numeric_exact=(n:int64):>int64=>{
+    exact_int_result(n)
+}
+# (a NaN as the target's processor makes it, whatever the compiler runs on: x86-64's has
+# the sign bit set, arm64's and wasm's do not; negating flips it)
+numeric_nan=(v:float64):>float64=>{
+    let neg=ValueHookWord(f64_bits(v)) <? 0
+    if neg =? (target_arm64 or target_wasm) {return -v}
+    v
+}
+# (3 / 4 is 0: in languages with one kind of number it is 0.75)
+numeric_warn_division=(n:int64 x:int64 y:int64):>void=>$unsafe {
+    warn(nodes.ptr[n].pos "{x} / {y} is 0: whole numbers divide to a whole number ({x}.0 / {y} is {float64(x) / float64(y)})")
+}
+# (got / total * 100 with whole numbers: 3 / 4 is 0, so the percent is 0)
+numeric_warn_percent=(n:int64 a:int64):>void=>$unsafe {
+    let an="a"
+    if nodes.ptr[ValueHookWord(nodes.ptr[a].a)].kind =? 'ident' {an=name_of(ValueHookWord(nodes.ptr[ValueHookWord(nodes.ptr[a].a)].name))}
+    warn(nodes.ptr[n].pos "this divides whole numbers before multiplying, dropping the fraction (3 / 4 * 100 is 0): `{an} * 100 / ...` multiplies first, `f64({an}) / ...` keeps the fraction")
+}
+numeric_error=(n:int64 code:int64):>void=>$unsafe {
+    if code =? 1 {fatal(nodes.ptr[n].pos "Dewy does not yet support integer /; use // or convert to float64")}
+    if code =? 2 {fatal(nodes.ptr[n].pos "shift count must be nonnegative")}
+    fatal(nodes.ptr[n].pos "bitwise operators need integers")
+}
+lambda_instance=():>int64=>{
+    new_inst(FK_LAMBDA cur_mod() "lambda")
+}
+lambda_shaped=(lam:int64 f:int64 @pts:array<int64> mm:int64):>void=>$unsafe {
+    refine_bindings.formals=[]
+    loop p in kids(lam) {refine_bindings.formals.push(ValueHookWord(nodes.ptr[p].name))}
+    nd_signature(lam @pts);
+    if nd_mutable_signatures.has(lam) {nd_mutable_instances[f]=nd_mutable_signatures[lam]}
+    ref_validate_signature(pts 0 mm nodes.ptr[lam].pos)
+}
+lambda_entry=(lam:int64 body:int64):>void=>{
+    dir_function_entry(lam body)
+    return
+}
+lambda_body=(f:int64 lam:int64 ret_hint:int64):>void=>{
+    check_lambda_body(f lam ret_hint)
+    return
+}
+lambda_zonk_tree=(root:int64):>void=>{
+    zonk_tree(root)
+    return
+}
+lambda_contract=(t:int64 lam:int64 zp:array<int64>):>int64=>{
+    mk_callable_contract(t effect_decl_contract(lam zp))
+}
+lambda_verify=(t:int64 expected:int64 lam:int64):>void=>$unsafe {
+    if callable_contract(expected) not=? 0 and not has_var(expected) and not effect_contract_fits(t expected) {fatal(nodes.ptr[lam].pos "cannot prove callable effect contract")}
+}
+lambda_error=(n:int64 code:int64 a:int64 b:int64):>void=>$unsafe {
+    if code =? 1 {fatal(nodes.ptr[n].pos "lambda has {a} parameter(s) but {b} are expected")}
+    if code =? 2 {fatal(nodes.ptr[n].pos "parameter type {dt(a)} does not match expected {dt(b)}")}
+    if code =? 3 {
+        let pn=name_of(ValueHookWord(nodes.ptr[n].name))
+        if a =? 0 and (pn =? "self" or pn =? "this") {
+            fatal(nodes.ptr[n].pos "structs have no methods: write the function at the top level (not inside the struct), taking what it works on first, as {jd(nodes.ptr[n].pos "`move = (p: mut Player, dt: f64): ...`" "`move = (@p:Player dt:float64) => ...`")}; `p.move(dt)` calls it")
+        }
+        if pn =? "$partial" {fatal(nodes.ptr[n].pos "partial operator needs a function type; add a function-type annotation or pass it to a typed callback parameter")}
+        # (`($capture @html @para) => ...`: the second shared local lost its `$capture`)
+        if has_flag(n NF_MUT) and dewy_at(nodes.ptr[n].pos) {
+            let outer=lookup(ValueHookWord(nodes.ptr[n].name))
+            if outer not=? 0 and syms.ptr[outer].kind =? 'local' {fatal(nodes.ptr[n].pos "cannot infer the type of parameter '{pn}': to share the enclosing '{pn}' instead, write `$capture @{pn}` (each capture takes its own `$capture`)")}
+        }
+        fatal(nodes.ptr[n].pos "cannot infer the type of parameter '{pn}'; add a type annotation")
+    }
+    let f=a
+    let et=b
+    if fns.ptr[f].pack not=? 0 {
+        # (`key=(e) => (e.at e.step)`, Python's tuple: parentheses list values, a tuple is one)
+        let parts:ValueHookWord=2
+        if fns.ptr[f].pack_k >? 1 {parts=fns.ptr[f].pack_k}
+        let elem=ValueHookWord(types.ptr[prune(ValueHookWord(fns.ptr[f].ret))].elem)
+        let shown="T"
+        if elem >? 0 and tkind(prune(elem)) not=? 'var' {shown=dt(elem)}
+        let tuple="[{" ".join(fill(shown parts))}]"
+        if dewy_at(nodes.ptr[n].pos) {err_notes.push([(-1) "help: parentheses list several values; they make no tuple. For one value of several parts, give a tuple and its type: `(...):>{tuple} => [...]`"])}
+        fatal(nodes.ptr[n].pos "this function gives several values, and the function wanted here gives one")
+    }
+    fatal(nodes.ptr[n].pos "this function gives one value, and {dt(et)} gives several: express each one in its body, `() => \{ 1 2 }`")
+}
+# check_call_expr (checker_expr.dewy) services. A call node holding an integer literal too
+# large for int64 (aux2 -1): the literal itself (a math int) when nothing narrower is
+# wanted, else -1 to check the call that makes the wanted BigInt.
+call_int_literal=(n:int64 ex:int64):>int64=>$unsafe {
+    let literal_target=ex
+    if ex not=? 0 and types.ptr[ex].kind =? 'opt' {literal_target=representation_type(ValueHookWord(types.ptr[ex].elem))}
+    if literal_target =? 0 or literal_target =? T_MATH_INT {
+        # The parser's oversized literal constructor has a literal sign.
+        # Keep that provenance on its packing conversion: the fact domain
+        # can retain the sign without pretending the magnitude fits int64.
+        let sign=nodes.ptr[unnamed(kid(n 0))].ival
+        nodes.ptr[n].aux2=0
+        check_expr(n 0);
+        coerce(n T_MATH_INT);
+        if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.big2math)) {nodes.ptr[n].aux2=int32(sign)}
+        last_checked=n
+        return T_MATH_INT
+    }
+    if not bundled_bigint_type(literal_target) {
+        if is_int(literal_target) and literal_target not=? T_MATH_INT {
+            fatal(nodes.ptr[n].pos "integer literal does not fit in {dt(literal_target)}")
+        }
+        fatal(nodes.ptr[n].pos "integer literal does not fit in int's interim int64 representation; use an explicit BigInt annotation")
+    }
+    nodes.ptr[n].aux2=0
+    -1
+}
+# (`let d:dict<string House> = [loop ... k -> v]`: its pairs are made as the
+# dictionary's key and value types, so a refined value takes its conversion)
+call_map_rows=(n:int64 ex:int64):>void=>$unsafe {
+    if not is_map_type(ex) or not dewy_at(nodes.ptr[n].pos) {return}
+    let block=kid(n 0)
+    if nodes.ptr[block].kind =? 'block' and has_flag(block NF_COMPREHENSION) and nkids(block) >? 0 and nodes.ptr[kid(block 0)].kind =? 'vardecl' and nodes.ptr[kid(block 0)].a =? 0 {
+        let si=ValueHookWord(types.ptr[ex].st)
+        let pair=mk_tuple([struct_targ(si 0) struct_targ(si 1)])
+        check_expr(block mk_array(pair));
+        set_kid(n 0 last_checked)
+    }
+}
+logic_mask=(ta:int64):>bool=>$unsafe {
+    (types.ptr[ta].kind =? 'array' and prune(ValueHookWord(types.ptr[ta].elem)) =? T_BOOL) or (is_nd(ta) and prune(nd_elem(ta)) =? T_BOOL)
+}
+logic_broadcast=(n:int64):>void=>$unsafe {
+    let c=bc_call("__not" [ValueHookWord(nodes.ptr[n].a)] nodes.ptr[n].pos)
+    add_flag(c NF_BROADCAST)
+    nodes.ptr[n]=nodes.ptr[c]
+}
+unary_quantity=(n:int64 expected:int64 literal:bool):>int64=>{
+    quantity_unary_literal=literal
+    quantity_unary(n expected)
+}
+unary_overload=(n:int64):>int64=>{
+    op_overload(n "-")
+}
+unary_exact=(n:int64):>int64=>{
+    exact_int_result(n)
+}
+unary_error=(n:int64 at:int64 code:int64):>void=>$unsafe {
+    if code =? 1 {fatal(nodes.ptr[n].pos "'~' needs an integer")}
+    if code =? 2 {fatal(nodes.ptr[n].pos "unary '+' needs a number")}
+    never_cascade(nodes.ptr[n].pos at)
+    fatal(nodes.ptr[n].pos "cannot negate {dt(at)}")
+}
+# check_intrinsic's services (checker_expr.dewy): diagnostics, and the lengths that are calls
+# (an soa value's, Dewy text's grapheme count).
+intrinsic_error=(n:int64 code:int64 t:int64):>void=>$unsafe {
+    if code =? 1 {fatal(nodes.ptr[n].pos "len() expects an array or string, found {dt(t)}")}
+    # (xs.push(1, 2, 3): JavaScript's push of several)
+    if code =? 2 {fatal(nodes.ptr[n].pos "push adds one value: for several, {jd(nodes.ptr[n].pos "`xs.extend([1, 2, 3])`" "`xs.extend([1 2 3])`")}")}
+    if code =? 3 {fatal(nodes.ptr[n].pos "push() needs an array, found {dt(t)}")}
+    if code =? 4 {fatal(nodes.ptr[n].pos "pop() needs an array")}
+    if code =? 5 {
+        if types.ptr[t].kind =? 'str_' or is_int(t) {fatal(nodes.ptr[n].pos "clear() of the screen takes a color: `clear(rgb(1, 0, 0))`, or from hex digits `clear(hex(\"#ff0000\"))`")}
+        fatal(nodes.ptr[n].pos "clear() needs an array")
+    }
+    if code =? 7 {fatal(nodes.ptr[n].pos "expected a pointer")}
+    if code =? 8 {fatal(nodes.ptr[n].pos "syscall takes 1 to 7 arguments")}
+    if code =? 9 {fatal(nodes.ptr[n].pos "syscall arguments must be integers or pointers")}
+    fatal(nodes.ptr[n].pos "named arguments are not supported here")
+}
+intrinsic_length=(n:int64 a:int64 t:int64 expected:int64):>int64=>$unsafe {
+    if is_soa(t) {return check_soa_method(n a ci(17 "len") [] expected)}
+    add_flag(a NF_CHECKED)
+    nodes.ptr[n]=nodes.ptr[bc_call("__dewy_string_length" [a] nodes.ptr[n].pos)]
+    check_expr(n expected)
+}
+# checker_expr.dewy's services: literal preparation (grouped values, spreads, the
+# optional's element, a literal union's member, total dictionaries) and the kinds that
+# stay here.
+expr_literal=(n:int64 expected:int64 ex0:int64):>int64=>$unsafe {
+    let ex=ex0
+    let exk=TK.void_
+    if ex not=? 0 {exk=types.ptr[ex].kind}
+    let k=nodes.ptr[n].kind
+    if k =? 'array' {
+        # (`[(1 2) 3]`: a group's values are elements, as written)
+        if values_grouped(n) {set_list(n values_flatten(kids(n)))}
+        dewy_classify_spread(n)
+    }
+    if k =? 'array' and exk =? 'opt' {
+        # A payload's length contract must not hide the literal's element
+        # context. The original expected type still checks that contract.
+        let inner=representation_type(ValueHookWord(types.ptr[ex].elem))
+        let ik=types.ptr[inner].kind
+        if ik =? 'array' or ik =? 'fixed' or (ik =? 'tuple' or nkids(n) =? 0 and is_map_type(inner)) and files[pos_file(nodes.ptr[n].pos)].is_dewy {ex=inner}
+    }
+    if k =? 'map_lit' and exk =? 'opt' and nkids(n) =? 0 and is_map_type(ValueHookWord(types.ptr[ex].elem)) {ex=prune(ValueHookWord(types.ptr[ex].elem))}
+    if (k =? 'array' or k =? 'map_lit' or k =? 'record_lit' or k =? 'tuple' and nodes.ptr[n].aux not=? int32(TUPLE_VALUES)) and ex not=? 0 and files[pos_file(nodes.ptr[n].pos)].is_dewy {
+        let member=literal_union_member(n ex)
+        if member not=? 0 {ex=member}
+    }
+    if k =? 'map_lit' and refine_active and expected not=? 0 and is_total_dict(expected) {total_literal_check(n expected)}
+    ex
+}
+expr_other=(n:int64 expected:int64):>int64=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.zeroed)) and expected not=? 0 {
+        # (release_call's zero bytes: of the type the place stores)
+        nodes.ptr[n].type=int32(expected)
+        add_flag(n NF_CHECKED)
+        return expected
+    }
+    if k =? 'propagate' {return check_propagate(n expected)}
+    if k =? 'unit_lit' {
+        return quantity_constant(n nodes.ptr[n].ival ValueHookWord(nodes.ptr[n].aux) ValueHookWord(nodes.ptr[n].aux2) expected)
+    }
+    if k =? 'record_loop' {
+        reflect_record(n)
+        return check_expr(n expected)
+    }
+    if k =? 'new_axis' {return dewy_new_axis(n expected)}
+    if k =? 'range' {return check_range_value(n expected)}
+    if k =? 'matrix' {return check_matrix(n expected)}
+    let ex=ce_expected(expected)
+    let t:ValueHookWord=0
+    if k =? 'lambda' {t=check_lambda(n expected)} else if k =? 'match_' {t=check_match(n expected)} else if k =? 'block' {
+        if has_flag(n NF_COMPREHENSION) and ex not=? 0 and types.ptr[ex].kind =? 'array' {
+            nodes.ptr[kid(n 0)].a=int32(type_node_of(ex nodes.ptr[n].pos))
+        }
+        # (into a fixed-size array: its elements have the fixed array's element type)
+        else if has_flag(n NF_COMPREHENSION) and ex not=? 0 and types.ptr[ex].kind =? 'fixed' and nodes.ptr[kid(n 0)].kind =? 'vardecl' and nodes.ptr[kid(n 0)].a =? 0 {
+            nodes.ptr[kid(n 0)].a=int32(type_node_of(mk_array(ValueHookWord(types.ptr[representation_type(ex)].elem)) nodes.ptr[n].pos))
+        }
+        t=check_block(n expected true)
+    }
+    else {fatal(nodes.ptr[n].pos "invalid expression")}
+    ce_finish(n t expected)
+}
+expr_complete=():>void=>{
+    ide_complete_names()
+    return
+}
+expr_values_use=(n:int64 t:int64):>void=>$unsafe {
+    # (a binding holding several values, read where they are not taken; a bare call, `pair`
+    # as `pair()`, is a call now, and its check took them)
+    if is_values(t) and nodes.ptr[n].kind =? 'ident' and n not=? assign_root and (name_of(ValueHookWord(nodes.ptr[n].name)) as array<uint8>)[0] not=? b'$' {sink_values_use(n t)}
+    return
+}
+expr_sibling=(n:int64 t:int64):>int64=>{
+    sibling_index_narrow(n t)
+}
+# Array and record literals run in checker_aggregates.dewy; these are its services.
+# (thorns = Rect[]: an empty array of Rects is declared with a colon)
+aggregate_type_error=(n:int64):>void=>$unsafe {
+    let vn=name_before_eq(nodes.ptr[n].pos)
+    if (vn as array<uint8>).length >? 0 {
+        let tt="Rect[]"
+        if nkids(n) =? 1 and nodes.ptr[kid(n 0)].kind =? 'ident' {tt="{name_of(ValueHookWord(nodes.ptr[kid(n 0)].name))}[]"}
+        fatal(nodes.ptr[n].pos "an empty array of a type is written with a colon: {jd(nodes.ptr[n].pos "`{vn}: {tt}`" "`let {vn}:{tt} = []`")} (`=` gives a value, `:` a type)")
+    }
+    fatal(nodes.ptr[n].pos "this is a type (an array of that); a value is needed here (an empty array: [])")
+}
+# [a... b c...] builds the array: t = []; t.extend(a); t.push(b); t.extend(c); t
+aggregate_spread=(n:int64 ex:int64 expected:int64):>int64=>$unsafe {
+    let exk=TK.void_
+    if ex not=? 0 {exk=types.ptr[ex].kind}
+    spread_count += 1
+    # Internal bindings must not shadow an operand's user-written name.
+    let acc=intern("$spread{spread_count}")
+    let pos=nodes.ptr[n].pos
+    let stmts:array<int64>=[]
+    let d=mk('vardecl' pos)
+    nodes.ptr[d].name=int32(acc)
+    nodes.ptr[d].b=int32(mk('array' pos))
+    if ex not=? 0 and exk =? 'array' {nodes.ptr[d].a=int32(type_node_of(ex pos))}
+    if ex not=? 0 and exk =? 'fixed' {nodes.ptr[d].a=int32(type_node_of(mk_array(ValueHookWord(types.ptr[ex].elem)) pos))}
+    stmts.push(d)
+    loop i in [0..nkids(n)) {
+        let c=kid(n i)
+        let callee=mk('field' pos)
+        nodes.ptr[callee].a=int32(mk_name(acc pos))
+        # (`[pair()...]` of a function expressing several values: the values, spread; a
+        # fixed number of them, `(int64 int64)`, collected first, as `[pair()]` would)
+        if has_flag(c NF_SPREAD) and nodes.ptr[c].kind =? 'call' {
+            if values_spread_call(c) and is_values(dewy_spread_source_type(c)) {
+                clear_flag(c NF_SPREAD)
+                let collected=mk('array' pos)
+                set_list(collected [c])
+                add_flag(collected NF_SPREAD)
+                c=collected
+            }
+            else {node_mark(@spread_calls c)}
+        }
+        if has_flag(c NF_SPREAD) {
+            clear_flag(c NF_SPREAD)
+            nodes.ptr[callee].name=int32(intern("extend"))
+        }
+        else {nodes.ptr[callee].name=int32(intern("push"))}
+        let call=mk('call' pos)
+        nodes.ptr[call].a=int32(callee)
+        set_list(call [c])
+        let st=mk('exprstmt' pos)
+        nodes.ptr[st].a=int32(call)
+        stmts.push(st)
+    }
+    let r=mk('exprstmt' pos)
+    nodes.ptr[r].a=int32(mk_name(acc pos))
+    stmts.push(r)
+    let b=mk('block' pos)
+    set_list(b stmts)
+    nodes.ptr[n]=nodes.ptr[b]
+    check_expr(n expected)
+}
+aggregate_record_spread=(n:int64 expected:int64):>int64=>$unsafe {
+    let stmts:array<int64>=[]
+    let members=dewy_record_spread_entries(n expected @stmts true)
+    let result=mk('record_lit' nodes.ptr[n].pos)
+    set_list(result members)
+    stmts.push(bc_stmt(result nodes.ptr[n].pos))
+    nodes.ptr[n]=nodes.ptr[bc_block(stmts nodes.ptr[n].pos)]
+    check_expr(n expected)
+}
+aggregate_reflect=(entry:int64):>void=>{
+    reflect_name(entry)
+    return
+}
+aggregate_construct=(n:int64 target:int64 entries:bool expected:int64):>int64=>$unsafe {
+    let args:array<int64>=[]
+    if entries {args=kids(n)}
+    struct_ctor(n target ValueHookWord(structs.ptr[ValueHookWord(types.ptr[target].st)].decl) args expected)
+}
+aggregate_fixed=(n:int64 ex:int64):>void=>{
+    fixed_literal(n ex)
+    return
+}
+# ([1, "two", 3]: an array holds one kind of value)
+aggregate_coerce=(n:int64 elt:int64 spread:bool):>void=>$unsafe {
+    coerce_hint=jd(nodes.ptr[n].pos " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)" " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, use a record type or a union such as `array<int64|string>`)")
+    # ([name count], Python's tuple: a type per position says so)
+    if dewy_at(nodes.ptr[n].pos) and not spread and nkids(n) >=? 2 and nkids(n) <=? 4 {
+        let spelled:array<string>=[]
+        loop c in kids(n) {
+            if nodes.ptr[c].type not=? 0 {spelled.push(dt(ntype(c)))}
+        }
+        if spelled.length =? nkids(n) {coerce_hint=" (an array holds one kind of value, here {dt(elt)}; a few values of their own kinds are a tuple, a type per position: `let pair:[{join(spelled " ")}] = ...`; for many, a record type or a union such as `array<int64|string>`)"}
+    }
+    # ([Bool[true] Null]: siblings of a minted family are held as their parent)
+    if nominal_parent.get(prune(elt) 0) not=? 0 and dewy_at(nodes.ptr[n].pos) {
+        coerce_hint=" (an array holds one kind of value, here {dt(elt)}, taken from the first element; for any member of its family, name the parent: `let values:array<{dt(nominal_parent[prune(elt)])}> = [...]`)"
+    }
+    loop i in [0..nkids(n)) {
+        let c=kid(n i)
+        if has_flag(c NF_SPREAD) {coerce(c mk_array(elt));} else {coerce(c elt);}
+    }
+    coerce_hint=""
+}
+aggregate_error=(n:int64 code:int64 t:int64):>void=>$unsafe {
+    if code =? 1 {aggregate_type_error(n)}
+    if code =? 2 {fatal(nodes.ptr[n].pos "{dt(t)} has {ValueHookWord(types.ptr[t].nargs)} positions, and this array gives {nkids(n)} values")}
+    if code =? 3 {fatal(nodes.ptr[n].pos "only arrays can be spread into an array (found {dt(t)})")}
+    if nkids(n) >? 0 and nodes.ptr[kid(n 0)].kind =? 'namedarg' and (tkind(t) =? 'array' or tkind(t) =? 'fixed') {
+        let name=name_of(ValueHookWord(nodes.ptr[kid(n 0)].name))
+        fatal(nodes.ptr[n].pos "`{name} = ...` inside `[ ]` names a record field, but {dt(t)} is expected here; to change the variable `{name}`, put it in a block, `\{ {name} = ... }`, or make the change outside the literal")
+    }
+    fatal(nodes.ptr[n].pos "record literal needs a record type, found {dt(t)}")
+}
+range_value_error=(n:int64):>void=>$unsafe {
+    fatal(nodes.ptr[n].pos "a range with no end (a..) can only be looped over")
+}
+in_range_error=(n:int64):>void=>$unsafe {
+    fatal(nodes.ptr[n].pos "invalid range")
+}

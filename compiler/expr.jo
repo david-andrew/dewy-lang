@@ -1,4 +1,6 @@
 use 'secret_checks.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
 use 'checks_member_hooks.dewy'
 use 'checks_index_hooks.dewy'
 use 'checks_ident_hooks.dewy'
@@ -7026,25 +7028,6 @@ binary_rest = (n: int, expected: int, a0: int, b0: int, ta0: int, tb0: int, hint
 # (check_binary's end for numbers: division, literal folding, the joined type; it runs in
 # checker_numeric.dewy, these are its services)
 binary_numeric = (n: int, op: Tok, a: int, b: int, ta: int, tb: int, is_cmp: bool) -> int: xw_numeric(n, i32(int(op)), a, b, ta, tb, is_cmp)
-numeric_exact = (n: int) -> int: exact_int_result(n)
-# (a NaN as the target's processor makes it, whatever the compiler runs on: x86-64's has
-# the sign bit set, arm64's and wasm's do not; negating flips it)
-numeric_nan = (v: f64) -> f64:
-    neg = int(f64_bits(v)) < 0
-    if neg == (target_arm64 or target_wasm): return -v
-    v
-# (3 / 4 is 0: in languages with one kind of number it is 0.75)
-numeric_warn_division = (n: int, x: int, y: int):
-    warn(nodes[n].pos, "{x} / {y} is 0: whole numbers divide to a whole number ({x}.0 / {y} is {f64(x) / f64(y)})")
-# (got / total * 100 with whole numbers: 3 / 4 is 0, so the percent is 0)
-numeric_warn_percent = (n: int, a: int):
-    an = "a"
-    if nodes[int(nodes[a].a)].kind == .ident: an = name_of(int(nodes[int(nodes[a].a)].name))
-    warn(nodes[n].pos, "this divides whole numbers before multiplying, dropping the fraction (3 / 4 * 100 is 0): `{an} * 100 / ...` multiplies first, `f64({an}) / ...` keeps the fraction")
-numeric_error = (n: int, code: int):
-    if code == 1: fatal(nodes[n].pos, "Dewy does not yet support integer /; use // or convert to float64")
-    if code == 2: fatal(nodes[n].pos, "shift count must be nonnegative")
-    fatal(nodes[n].pos, "bitwise operators need integers")
 
 # (q1 * q2 for quaternions, which are vec4s: * multiplies their parts one by one, which is no
 # rotation; values from quat_* functions, and variables made from them, are known to be ones)
@@ -7668,51 +7651,6 @@ check_shaped_match = (m: int, expected: int) -> int:
 # ---------------- lambdas ----------------
 # Lambdas run in checker_lambdas.dewy; these are its services.
 check_lambda = (lam: int, expected: int) -> int: xm_lambda(lam, expected)
-lambda_instance = () -> int: new_inst(FK_LAMBDA, cur_mod(), "lambda")
-lambda_shaped = (lam: int, f: int, pts: mut int[], mm: int):
-    refine_bindings.formals = []
-    loop p in kids(lam): refine_bindings.formals.push(int(nodes[p].name))
-    nd_signature(lam, pts)
-    if nd_mutable_signatures.has(lam): nd_mutable_instances[f] = nd_mutable_signatures[lam]
-    ref_validate_signature(pts, 0, mm, nodes[lam].pos)
-lambda_entry = (lam: int, body: int):
-    dir_function_entry(lam, body)
-    return
-lambda_body = (f: int, lam: int, ret_hint: int):
-    check_lambda_body(f, lam, ret_hint)
-    return
-lambda_zonk_tree = (root: int):
-    zonk_tree(root)
-    return
-lambda_contract = (t: int, lam: int, zp: int[]) -> int: mk_callable_contract(t, effect_decl_contract(lam, zp))
-lambda_verify = (t: int, expected: int, lam: int):
-    if callable_contract(expected) != 0 and not has_var(expected) and not effect_contract_fits(t, expected): fatal(nodes[lam].pos, "cannot prove callable effect contract")
-lambda_error = (n: int, code: int, a: int, b: int):
-    if code == 1: fatal(nodes[n].pos, "lambda has {a} parameter(s) but {b} are expected")
-    if code == 2: fatal(nodes[n].pos, "parameter type {dt(a)} does not match expected {dt(b)}")
-    if code == 3:
-        pn = name_of(int(nodes[n].name))
-        if a == 0 and (pn == "self" or pn == "this"):
-            fatal(nodes[n].pos, "structs have no methods: write the function at the top level (not inside the struct), taking what it works on first, as {jd(nodes[n].pos, "`move = (p: mut Player, dt: f64): ...`", "`move = (@p:Player dt:float64) => ...`")}; `p.move(dt)` calls it")
-        if pn == "$partial": fatal(nodes[n].pos, "partial operator needs a function type; add a function-type annotation or pass it to a typed callback parameter")
-        # (`($capture @html @para) => ...`: the second shared local lost its `$capture`)
-        if has_flag(n, NF_MUT) and dewy_at(nodes[n].pos):
-            outer = lookup(int(nodes[n].name))
-            if outer != 0 and syms[outer].kind == .local: fatal(nodes[n].pos, "cannot infer the type of parameter '{pn}': to share the enclosing '{pn}' instead, write `$capture @{pn}` (each capture takes its own `$capture`)")
-        fatal(nodes[n].pos, "cannot infer the type of parameter '{pn}'; add a type annotation")
-    f = a
-    et = b
-    if fns[f].pack != 0:
-        # (`key=(e) => (e.at e.step)`, Python's tuple: parentheses list values, a tuple is one)
-        parts = 2
-        if fns[f].pack_k > 1: parts = fns[f].pack_k
-        elem = int(types[prune(int(fns[f].ret))].elem)
-        shown = "T"
-        if elem > 0 and tkind(prune(elem)) != .var: shown = dt(elem)
-        tuple = "[{" ".join(fill(shown, parts))}]"
-        if dewy_at(nodes[n].pos): err_notes.push((-1, "help: parentheses list several values; they make no tuple. For one value of several parts, give a tuple and its type: `(...):>{tuple} => [...]`"))
-        fatal(nodes[n].pos, "this function gives several values, and the function wanted here gives one")
-    fatal(nodes[n].pos, "this function gives one value, and {dt(et)} gives several: express each one in its body, `() => \{ 1 2 }`")
 # Does declaration d accept every parameter of function type et (by value) and
 # give a result et's result accepts?
 fn_adapts = (d: int, et: int) -> bool:
@@ -8244,56 +8182,7 @@ node_within = (e: int, n: int, depth: int = 0) -> bool:
             if node_within(kid(e, i), n, depth + 1): return true
     false
 
-# check_call_expr (checker_expr.dewy) services. A call node holding an integer literal too
-# large for int64 (aux2 -1): the literal itself (a math int) when nothing narrower is
-# wanted, else -1 to check the call that makes the wanted BigInt.
-call_int_literal = (n: int, ex: int) -> int:
-    literal_target = ex
-    if ex != 0 and types[ex].kind == .opt: literal_target = representation_type(int(types[ex].elem))
-    if literal_target == 0 or literal_target == T_MATH_INT:
-        # The parser's oversized literal constructor has a literal sign.
-        # Keep that provenance on its packing conversion: the fact domain
-        # can retain the sign without pretending the magnitude fits int64.
-        sign = nodes[unnamed(kid(n, 0))].ival
-        nodes[n].aux2 = 0
-        check_expr(n, 0)
-        coerce(n, T_MATH_INT)
-        if nodes[n].kind == .conv and nodes[n].aux == i32(int(CV.big2math)): nodes[n].aux2 = i32(sign)
-        last_checked = n
-        return T_MATH_INT
-    if not bundled_bigint_type(literal_target):
-        if is_int(literal_target) and literal_target != T_MATH_INT:
-            fatal(nodes[n].pos, "integer literal does not fit in {dt(literal_target)}")
-        fatal(nodes[n].pos, "integer literal does not fit in int's interim int64 representation; use an explicit BigInt annotation")
-    nodes[n].aux2 = 0
-    -1
-# (`let d:dict<string House> = [loop ... k -> v]`: its pairs are made as the
-# dictionary's key and value types, so a refined value takes its conversion)
-call_map_rows = (n: int, ex: int):
-    if not is_map_type(ex) or not dewy_at(nodes[n].pos): return
-    block = kid(n, 0)
-    if nodes[block].kind == .block and has_flag(block, NF_COMPREHENSION) and nkids(block) > 0 and nodes[kid(block, 0)].kind == .vardecl and nodes[kid(block, 0)].a == 0:
-        si = int(types[ex].st)
-        pair = mk_tuple([struct_targ(si, 0), struct_targ(si, 1)])
-        check_expr(block, mk_array(pair))
-        set_kid(n, 0, last_checked)
 
-logic_mask = (ta: int) -> bool:
-    (types[ta].kind == .array and prune(int(types[ta].elem)) == T_BOOL) or (is_nd(ta) and prune(nd_elem(ta)) == T_BOOL)
-logic_broadcast = (n: int):
-    c = bc_call("__not", [int(nodes[n].a)], nodes[n].pos)
-    add_flag(c, NF_BROADCAST)
-    nodes[n] = nodes[c]
-unary_quantity = (n: int, expected: int, literal: bool) -> int:
-    quantity_unary_literal = literal
-    quantity_unary(n, expected)
-unary_overload = (n: int) -> int: op_overload(n, "-")
-unary_exact = (n: int) -> int: exact_int_result(n)
-unary_error = (n: int, at: int, code: int):
-    if code == 1: fatal(nodes[n].pos, "'~' needs an integer")
-    if code == 2: fatal(nodes[n].pos, "unary '+' needs a number")
-    never_cascade(nodes[n].pos, at)
-    fatal(nodes[n].pos, "cannot negate {dt(at)}")
 
 
 # The interpolation checked last, for an unknown name inside one: ident_unknown.
@@ -8459,90 +8348,8 @@ dewy_whole_collection = (x: int) -> bool:
 index_deref = (pos: int, bt: int):
     ffi_deref(pos, bt)
     return
-# check_intrinsic's services (checker_expr.dewy): diagnostics, and the lengths that are calls
-# (an soa value's, Dewy text's grapheme count).
-intrinsic_error = (n: int, code: int, t: int):
-    if code == 1: fatal(nodes[n].pos, "len() expects an array or string, found {dt(t)}")
-    # (xs.push(1, 2, 3): JavaScript's push of several)
-    if code == 2: fatal(nodes[n].pos, "push adds one value: for several, {jd(nodes[n].pos, "`xs.extend([1, 2, 3])`", "`xs.extend([1 2 3])`")}")
-    if code == 3: fatal(nodes[n].pos, "push() needs an array, found {dt(t)}")
-    if code == 4: fatal(nodes[n].pos, "pop() needs an array")
-    if code == 5:
-        if types[t].kind == .str_ or is_int(t): fatal(nodes[n].pos, "clear() of the screen takes a color: `clear(rgb(1, 0, 0))`, or from hex digits `clear(hex(\"#ff0000\"))`")
-        fatal(nodes[n].pos, "clear() needs an array")
-    if code == 7: fatal(nodes[n].pos, "expected a pointer")
-    if code == 8: fatal(nodes[n].pos, "syscall takes 1 to 7 arguments")
-    if code == 9: fatal(nodes[n].pos, "syscall arguments must be integers or pointers")
-    fatal(nodes[n].pos, "named arguments are not supported here")
-intrinsic_length = (n: int, a: int, t: int, expected: int) -> int:
-    if is_soa(t): return check_soa_method(n, a, ci(17, "len"), [], expected)
-    add_flag(a, NF_CHECKED)
-    nodes[n] = nodes[bc_call("__dewy_string_length", [a], nodes[n].pos)]
-    check_expr(n, expected)
 
-# checker_expr.dewy's services: literal preparation (grouped values, spreads, the
-# optional's element, a literal union's member, total dictionaries) and the kinds that
-# stay here.
-expr_literal = (n: int, expected: int, ex0: int) -> int:
-    ex = ex0
-    exk = TK.void_
-    if ex != 0: exk = types[ex].kind
-    k = nodes[n].kind
-    if k == .array:
-        # (`[(1 2) 3]`: a group's values are elements, as written)
-        if values_grouped(n): set_list(n, values_flatten(kids(n)))
-        dewy_classify_spread(n)
-    if k == .array and exk == .opt:
-        # A payload's length contract must not hide the literal's element
-        # context. The original expected type still checks that contract.
-        inner = representation_type(int(types[ex].elem))
-        ik = types[inner].kind
-        if ik == .array or ik == .fixed or (ik == .tuple or nkids(n) == 0 and is_map_type(inner)) and files[pos_file(nodes[n].pos)].is_dewy: ex = inner
-    if k == .map_lit and exk == .opt and nkids(n) == 0 and is_map_type(int(types[ex].elem)): ex = prune(int(types[ex].elem))
-    if (k == .array or k == .map_lit or k == .record_lit or k == .tuple and nodes[n].aux != i32(TUPLE_VALUES)) and ex != 0 and files[pos_file(nodes[n].pos)].is_dewy:
-        member = literal_union_member(n, ex)
-        if member != 0: ex = member
-    if k == .map_lit and refine_active and expected != 0 and is_total_dict(expected): total_literal_check(n, expected)
-    ex
-expr_other = (n: int, expected: int) -> int:
-    k = nodes[n].kind
-    if k == .intrinsic and nodes[n].aux == i32(int(IN.zeroed)) and expected != 0:
-        # (release_call's zero bytes: of the type the place stores)
-        nodes[n].type = i32(expected)
-        add_flag(n, NF_CHECKED)
-        return expected
-    if k == .propagate: return check_propagate(n, expected)
-    if k == .unit_lit:
-        return quantity_constant(n, nodes[n].ival, int(nodes[n].aux), int(nodes[n].aux2), expected)
-    if k == .record_loop:
-        reflect_record(n)
-        return check_expr(n, expected)
-    if k == .new_axis: return dewy_new_axis(n, expected)
-    if k == .range: return check_range_value(n, expected)
-    if k == .matrix: return check_matrix(n, expected)
-    ex = ce_expected(expected)
-    t = 0
-    if k == .lambda: t = check_lambda(n, expected)
-    else if k == .match_: t = check_match(n, expected)
-    else if k == .block:
-        if has_flag(n, NF_COMPREHENSION) and ex != 0 and types[ex].kind == .array:
-            nodes[kid(n, 0)].a = i32(type_node_of(ex, nodes[n].pos))
-        # (into a fixed-size array: its elements have the fixed array's element type)
-        else if has_flag(n, NF_COMPREHENSION) and ex != 0 and types[ex].kind == .fixed and nodes[kid(n, 0)].kind == .vardecl and nodes[kid(n, 0)].a == 0:
-            nodes[kid(n, 0)].a = i32(type_node_of(mk_array(int(types[representation_type(ex)].elem)), nodes[n].pos))
-        t = check_block(n, expected, true)
-    else: fatal(nodes[n].pos, "invalid expression")
-    ce_finish(n, t, expected)
-expr_complete = ():
-    ide_complete_names()
-    return
 expr_module = (m: int, name: int) -> int: module_lookup(m, name)
-expr_values_use = (n: int, t: int):
-    # (a binding holding several values, read where they are not taken; a bare call, `pair`
-    # as `pair()`, is a call now, and its check took them)
-    if is_values(t) and nodes[n].kind == .ident and n != assign_root and name_of(int(nodes[n].name))[0] != '$': sink_values_use(n, t)
-    return
-expr_sibling = (n: int, t: int) -> int: sibling_index_narrow(n, t)
 
 # The `__as__` conversion from a record type ft to tt (its declared result), or 0.
 as_conversion = (ft: int, tt: int) -> int:
@@ -8681,141 +8488,10 @@ is_chain_end = (cond: int) -> bool:
 cond_block = (b: int, expected: int, value: bool, jumps: mut int) -> int:
     jumps = narrow_jumps.len()
     check_block(b, expected, value)
-cond_returned = (changes: int, jumps: int, body: int) -> void: narrow_returned(changes, jumps, body)
 cond_narrow = (cond: int, holds: bool) -> void: narrow_by(cond, holds)
-cond_reset = (mark: int) -> void: scope_reset(mark)
 # (the writes an earlier branch logged, restored for its sibling and merged after it;
 # a stack, as conditionals nest)
 cond_restored: int[][]
-cond_restore = (changes: int) -> void: cond_restored.push(narrow_restore(changes))
-cond_merge = () -> void: narrow_merge(cond_restored.pop())
-cond_promote = (first: int, limit: int) -> void: narrow_promote(first, limit)
-cond_fill_subject = (cond: int, b: int) -> int:
-    fill = opt_fill_subject(cond)
-    if fill != 0: opt_fill_watch.push(OptFill(subject = i32(fill), block = i32(b)))
-    fill
-cond_fill_end = (b: int) -> bool:
-    nl = int(opt_fill_watch.pop().alias)
-    nl != 0 and int(locals[nl].flags) & LF_UNNARROWED == 0 and not stmt_terminates(b)
-cond_then_literal = (b: int) -> int:
-    if not literal_tree(block_tail(b)): return 0
-    clone(block_tail(b))
-cond_sink = (n: int, b: int) -> void: sink_arm(n, b)
-cond_union = (a: int, b: int) -> int: mk_union([a, b])
-# (both values take the expected type; without one, their join)
-cond_join = (va: int, vb: int, ex: int, pos: int) -> int:
-    if ex == 0: return join_types(va, vb, pos)
-    coerce(va, ex)
-    coerce(vb, ex)
-    ex
-cond_error = (n: int, t: int, code: int) -> void:
-    if code == 1:
-        cond = int(nodes[n].a)
-        ex = t
-        if not is_chain_end(cond): fatal(nodes[n].pos, "this `if` must give {a_type(ex)}, but it has no `else`")
-        subject = if nodes[int(nodes[cond].a)].kind == .ident: "`{name_of(int(nodes[int(nodes[cond].a)].name))}`" else: "the value"
-        fatal(nodes[n].pos, "this `if` must give {a_type(ex)}, but it has no `else`: when {subject} is not {a_type(resolve_type(int(nodes[cond].b)))}, it gives nothing (add `else` with a value, or a test for each remaining type)")
-    if code == 2: fatal(nodes[n].pos, "an if expression needs an else branch")
-    if code == 3: fatal(nodes[n].pos, "both branches of an if expression need a value")
-    fatal(nodes[int(nodes[n].a)].pos, "'if let x = value' needs an optional value, found {dt(t)}")
-# Array and record literals run in checker_aggregates.dewy; these are its services.
-# (thorns = Rect[]: an empty array of Rects is declared with a colon)
-aggregate_type_error = (n: int):
-    vn = name_before_eq(nodes[n].pos)
-    if len(vn) > 0:
-        tt = "Rect[]"
-        if nkids(n) == 1 and nodes[kid(n, 0)].kind == .ident: tt = "{name_of(int(nodes[kid(n, 0)].name))}[]"
-        fatal(nodes[n].pos, "an empty array of a type is written with a colon: {jd(nodes[n].pos, "`{vn}: {tt}`", "`let {vn}:{tt} = []`")} (`=` gives a value, `:` a type)")
-    fatal(nodes[n].pos, "this is a type (an array of that); a value is needed here (an empty array: [])")
-# [a... b c...] builds the array: t = []; t.extend(a); t.push(b); t.extend(c); t
-aggregate_spread = (n: int, ex: int, expected: int) -> int:
-    exk = TK.void_
-    if ex != 0: exk = types[ex].kind
-    spread_count += 1
-    # Internal bindings must not shadow an operand's user-written name.
-    acc = intern("$spread{spread_count}")
-    pos = nodes[n].pos
-    stmts: int[]
-    d = mk(.vardecl, pos)
-    nodes[d].name = i32(acc)
-    nodes[d].b = i32(mk(.array, pos))
-    if ex != 0 and exk == .array: nodes[d].a = i32(type_node_of(ex, pos))
-    if ex != 0 and exk == .fixed: nodes[d].a = i32(type_node_of(mk_array(int(types[ex].elem)), pos))
-    stmts.push(d)
-    loop i in [0..nkids(n)):
-        c = kid(n, i)
-        callee = mk(.field, pos)
-        nodes[callee].a = i32(mk_name(acc, pos))
-        # (`[pair()...]` of a function expressing several values: the values, spread; a
-        # fixed number of them, `(int64 int64)`, collected first, as `[pair()]` would)
-        if has_flag(c, NF_SPREAD) and nodes[c].kind == .call:
-            if values_spread_call(c) and is_values(dewy_spread_source_type(c)):
-                clear_flag(c, NF_SPREAD)
-                collected = mk(.array, pos)
-                set_list(collected, [c])
-                add_flag(collected, NF_SPREAD)
-                c = collected
-            else: node_mark(spread_calls, c)
-        if has_flag(c, NF_SPREAD):
-            clear_flag(c, NF_SPREAD)
-            nodes[callee].name = i32(intern("extend"))
-        else: nodes[callee].name = i32(intern("push"))
-        call = mk(.call, pos)
-        nodes[call].a = i32(callee)
-        set_list(call, [c])
-        st = mk(.exprstmt, pos)
-        nodes[st].a = i32(call)
-        stmts.push(st)
-    r = mk(.exprstmt, pos)
-    nodes[r].a = i32(mk_name(acc, pos))
-    stmts.push(r)
-    b = mk(.block, pos)
-    set_list(b, stmts)
-    nodes[n] = nodes[b]
-    check_expr(n, expected)
-aggregate_record_spread = (n: int, expected: int) -> int:
-    stmts: int[]
-    members = dewy_record_spread_entries(n, expected, stmts, true)
-    result = mk(.record_lit, nodes[n].pos)
-    set_list(result, members)
-    stmts.push(bc_stmt(result, nodes[n].pos))
-    nodes[n] = nodes[bc_block(stmts, nodes[n].pos)]
-    check_expr(n, expected)
-aggregate_reflect = (entry: int):
-    reflect_name(entry)
-    return
-aggregate_construct = (n: int, target: int, entries: bool, expected: int) -> int:
-    args: int[]
-    if entries: args = kids(n)
-    struct_ctor(n, target, int(structs[int(types[target].st)].decl), args, expected)
-aggregate_fixed = (n: int, ex: int):
-    fixed_literal(n, ex)
-    return
-# ([1, "two", 3]: an array holds one kind of value)
-aggregate_coerce = (n: int, elt: int, spread: bool):
-    coerce_hint = jd(nodes[n].pos, " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, make a struct or a union)", " (an array holds one kind of value, here {dt(elt)}; for values of several kinds, use a record type or a union such as `array<int64|string>`)")
-    # ([name count], Python's tuple: a type per position says so)
-    if dewy_at(nodes[n].pos) and not spread and nkids(n) >= 2 and nkids(n) <= 4:
-        spelled: str[]
-        loop c in kids(n):
-            if nodes[c].type != 0: spelled.push(dt(ntype(c)))
-        if spelled.len() == nkids(n): coerce_hint = " (an array holds one kind of value, here {dt(elt)}; a few values of their own kinds are a tuple, a type per position: `let pair:[{join(spelled, " ")}] = ...`; for many, a record type or a union such as `array<int64|string>`)"
-    # ([Bool[true] Null]: siblings of a minted family are held as their parent)
-    if nominal_parent.get(prune(elt), 0) != 0 and dewy_at(nodes[n].pos):
-        coerce_hint = " (an array holds one kind of value, here {dt(elt)}, taken from the first element; for any member of its family, name the parent: `let values:array<{dt(nominal_parent[prune(elt)])}> = [...]`)"
-    loop i in [0..nkids(n)):
-        c = kid(n, i)
-        if has_flag(c, NF_SPREAD): coerce(c, mk_array(elt))
-        else: coerce(c, elt)
-    coerce_hint = ""
-aggregate_error = (n: int, code: int, t: int):
-    if code == 1: aggregate_type_error(n)
-    if code == 2: fatal(nodes[n].pos, "{dt(t)} has {int(types[t].nargs)} positions, and this array gives {nkids(n)} values")
-    if code == 3: fatal(nodes[n].pos, "only arrays can be spread into an array (found {dt(t)})")
-    if nkids(n) > 0 and nodes[kid(n, 0)].kind == .namedarg and (tkind(t) == .array or tkind(t) == .fixed):
-        name = name_of(int(nodes[kid(n, 0)].name))
-        fatal(nodes[n].pos, "`{name} = ...` inside `[ ]` names a record field, but {dt(t)} is expected here; to change the variable `{name}`, put it in a block, `\{ {name} = ... }`, or make the change outside the literal")
-    fatal(nodes[n].pos, "record literal needs a record type, found {dt(t)}")
 
 # the expression a nonempty block ends in
 block_tail = (b: int) -> int:
@@ -8840,11 +8516,7 @@ literal_tree = (e: int) -> bool:
 # a range used as a value is the array of its numbers: [0..n) is [0, 1, ... n-1]
 # A range as a value runs in checker_range_values.dewy; these are its services.
 check_range_value = (n: int, expected: int) -> int: xn_check(n, expected)
-range_value_error = (n: int):
-    fatal(nodes[n].pos, "a range with no end (a..) can only be looped over")
 
-in_range_error = (n: int):
-    fatal(nodes[n].pos, "invalid range")
 
 # ---------------- struct-of-arrays ----------------
 # soa P[] is a struct with an array per field of P; these rewrite its array operations into
