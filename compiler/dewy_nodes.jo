@@ -39,6 +39,7 @@ use 'node_store.dewy'
 use 'dewy_builders.dewy'
 use 'oom_ops.dewy'
 use 'dewy_node_ops.dewy'
+use 'dewy_node_builds.dewy'
 
 dw_builder_host = ParserBuilderHost(intern, dw_fail_pos)
 
@@ -46,40 +47,12 @@ dw_renamed_init = (): dc_parser.reader.dw_renamed = [intern("printl"), intern("p
 
 dw_pending_decls: int[]               # methods of the type just declared, as module functions
 
-# A method's receiver comes first. Its type is the object's (the type parameter
-# `object_type` for a record literal's method); whether it is a place is inferred
-# from the body before checking (dewy_methods.jo).
-dw_add_receiver = (fn_: int, receiver: int, receiver_type: int):
-    param = mk(.param, nodes[fn_].pos)
-    nodes[param].name = i32(receiver)
-    nodes[param].a = i32(receiver_type)
-    set_list(fn_, [param] + kids(fn_))
-
-# `$target`: the full name of the target being compiled for (docs/LANGUAGE.md,
-# "Targets"). A name has only the fields it needs: the processor (or `c`, `wasm32`),
-# then the system. A processor alone asks for the current machine, so `$target` is
-# never one; `$target.arch` and `$target.os` are its fields.
-dw_target_name = () -> str:
-    if target_wasm: return "wasm32"
-    if target_macos: return "aarch64-mac"
-    if target_arm64: return "aarch64-linux"
-    if target_windows: return "x86_64-windows"
-    "x86_64-linux"
-
 dw_target_dropped_name = (nm: int, pos: int):
     if not dewy_target_dropped.has(nm): dewy_target_dropped[nm] = []
     dewy_target_dropped[nm].push(pos)
 
 # `$supported_targets = ["x86_64-linux" ...]`: the targets a module accepts, by full name.
 dw_targets_listed: {int: bool} = {}   # files that set it
-
-dw_supported_names = (pos: int, names: str[]):
-    file = pos_file(pos)
-    if dw_targets_listed.has(file): fatal(pos, "`$supported_targets` may be set only once per module")
-    dw_targets_listed[file] = true
-    if not (dw_target_name() in names):
-        listed = if names.len() == 0: "no target" else: join(names, ", ")
-        fatal(pos, "this module supports {listed}, not {dw_target_name()}, the target being compiled for")
 
 # `$target = 'name'` (target) or `$build.mode = 'name'` (text, as written) set at pos, its value
 # at value_pos: checked and applied (dw_build_setting, dc_build_setting).
@@ -105,18 +78,6 @@ build_setting_apply = (target: bool, text: str, pos: int, value_pos: int, name: 
         if name != "debug" and name != "release": fatal(value_pos, "unknown build mode \"{name}\": `$build.mode` is \"debug\" or \"release\"")
         if len(cli_mode) > 0 and cli_mode != name: warn(pos, "--{cli_mode} overrides `$build.mode = '{name}'`: this is a {cli_mode} build")
 
-metatag_fail_text = (name: str) -> str:
-    if name == "supported_targets" or name == "explicit_allocation_failure": return "`${name}` is a module directive; put it at file scope"
-    if dir_builtin(name): return "`${name}` is a setting: write it on a line of its own in a module, function body or block"
-    if name == "test": return "`$test` goes alone on the line just before a module-level function declaration"
-    if name == "parallel_safe": return PARSAFE_PLACE
-    if name == "shadowable": return "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file"
-    if name == "expect" or name == "fail": return "`${name}` is a statement in a function: a test, or a helper a test calls"
-    if dw_designed_directive(name): return "`${name}` is part of the design but not implemented yet"
-    if name == "capture": return "`$capture` belongs in a parameter list before a name: `($capture @count) => ...`"
-    if name == "include_bytes": return "`$include_bytes` takes one path literal: `$include_bytes(p\"asset.png\") as image`"
-    "unknown directive `${name}` (a loop label goes on its own line just before its loop)"
-
 # `$allocator(@arena) expression` (docs/LANGUAGE.md, "Scoped allocators"): the
 # expression allocates from the arena, the context allocator until it ends, and its
 # value leaves with storage of the enclosing allocator's:
@@ -136,42 +97,6 @@ dw_arena_scope = (serial: int, arena: int, body: int, copied: bool, pos: int) ->
         bc_stmt(bc_call("__arena_leave", [bc_ident(context, pos)], pos), pos), bc_stmt(bc_call("$allocator_result", [result, bc_bool(copied, pos)], pos), pos)], pos)
 
 # ---- tests: `$test`, `$expect`, `$fail` ----
-
-# The statement checking value (0: none, `$fail`), reporting a failure with the message said
-# and the notes, the condition written at where as described.
-dw_expectation = (pos: int, where: int, described: str, said: int, notes: int, value: int) -> int:
-    shown = ""
-    if value != 0:
-        line = source_line(where)
-        l, c = line_col(where)
-        if len(line) > 0:
-            caret = ""
-            loop i in [0..c - 1):
-                if i < len(line) and line[i] == '\t': caret += "\t"
-                else: caret += " "
-            width = max(1, min(len(described), len(line) - (c - 1)))
-            caret += "^"
-            loop i in [1..width): caret += "~"
-            shown = "    {line}\n    {caret}"
-    report = mk(.call, pos)
-    callee = mk(.ident, pos)
-    nodes[callee].name = i32(intern("__expect_fail"))
-    nodes[report].a = i32(callee)
-    set_list(report, [dw_text(pos_str(pos), pos), dw_text(described, pos), dw_text(shown, pos), said, notes])
-    statement = mk(.exprstmt, pos)
-    nodes[statement].a = i32(report)
-    failed = mk(.block, pos)
-    set_list(failed, [statement, mk(.return_, pos)])
-    if value == 0: return failed
-    n = mk(.if_, pos)
-    negated = mk(.not_, pos)
-    nodes[negated].a = i32(value)
-    nodes[n].a = i32(negated)
-    nodes[n].b = i32(failed)
-    add_flag(n, NF_STMT)
-    expectation_ifs[n] = true
-    statement_watch.expectations = expectation_ifs.len()
-    n
 
 # The two operands of a comparison as written, split at its operator outside
 # brackets and quotes ([] when the operator is not found once).
@@ -202,31 +127,11 @@ dw_comparison_sides = (text: str, op: DewyToken) -> str[]:
     if at < 0: return []
     [trim(text[0..at)), trim(text[at + len(spelled)..len(text)))]
 
-# The function a `$test` line marks: it names the test, and its parameters must
-# take the cases (or there are none, and no cases).
-dw_test_attach = (marked: int, declarations: int[]):
-    pos = nodes[marked].pos
-    if declarations.len() == 0 or nodes[declarations[0]].kind != .fn_: fatal(pos, "`$test` marks a module-level function: put it on the line just before one (`$test` then `let adds = () => $expect add(1 2) =? 3`)")
-    f = declarations[0]
-    nodes[marked].name = nodes[f].name
-    nodes[marked].sval = nodes[f].name
-    cased = nodes[marked].ival == 1
-    if nkids(f) > 0 and not cased: fatal(pos, "the test '{name_of(int(nodes[f].name))}' takes parameters: give it cases, `$test(cases=…)`")
-    if nkids(f) == 0 and cased: fatal(pos, "the test '{name_of(int(nodes[f].name))}' takes no parameters, so it cannot be given cases")
-
 # Only modules that use a large literal import the exact-integer library. The
 # alias contains a character that cannot occur in a user identifier.
 # (the first such literal's position + 1, 0 none: the import is made once the module is read)
 dw_bigint_import = 0
 const DW_BIGINT_ALIAS = "$dewy_bigint"
-
-dw_finish_declarations = (declarations: int[]) -> int[]:
-    if dw_bigint_import == 0: return declarations
-    n = mk(.import_, dw_bigint_import - 1)
-    nodes[n].aux2 = 1
-    nodes[n].sval = i32(intern("@lib/bigint.dewy"))
-    nodes[n].name = i32(intern(DW_BIGINT_ALIAS))
-    [n] + declarations
 
 dw_bigint_value = (limbs: u64[], pos: int, negative: bool = false) -> int:
     if dw_bigint_import == 0: dw_bigint_import = pos + 1
@@ -236,29 +141,6 @@ dw_bigint_value = (limbs: u64[], pos: int, negative: bool = false) -> int:
 dw_type_name = (name: str) -> str:
     if name == "addr": refine_active = true
     db_type_name(name)
-
-# A union of integer singletons is an int64 whose value set is its invariant:
-# `lo <= v <= hi` and `v != g` for each gap g.
-dw_int_singleton_type = (values: int[], pos: int) -> int:
-    lo = values[0]
-    hi = values[0]
-    loop v in values:
-        lo = min(lo, v)
-        hi = max(hi, v)
-    if hi - lo - values.len() + 1 > 24 or hi - lo < 0: fatal(pos, "an integer singleton union with more than 24 missing values between its least and greatest members")
-    binder = intern("$singleton")
-    predicate = dw_singleton_bound(.le, dw_singleton_int(lo, pos), dw_singleton_value(binder, pos), pos)
-    predicate = dw_singleton_and(predicate, dw_singleton_bound(.le, dw_singleton_value(binder, pos), dw_singleton_int(hi, pos), pos), pos)
-    loop g in [lo..hi]:
-        if not values.contains(g): predicate = dw_singleton_and(predicate, dw_singleton_bound(.ne, dw_singleton_value(binder, pos), dw_singleton_int(g, pos), pos), pos)
-    base = mk(.tname, pos)
-    nodes[base].name = i32(intern("i64"))
-    n = mk(.trefined, pos)
-    nodes[n].a = i32(base)
-    nodes[n].name = i32(binder)
-    nodes[n].b = i32(predicate)
-    refine_active = true
-    n
 
 # The compact operator of a combined assignment token.
 dn_assign_tok = (op: DewyToken) -> Tok:
@@ -295,23 +177,6 @@ DW_ROW_HINT = "a row break is a standalone `;`, with a space before it, as in `[
 
 dw_chain_count = 0
 
-# A temporary holding value, declared in statements; its name as a value.
-dw_chain_temp = (value: int, statements: mut int[], pos: int) -> int:
-    dw_chain_count += 1
-    name = "$chain{dw_chain_count}"
-    statements.push(bc_let(name, value, pos))
-    bc_ident(name, pos)
-
-# Pure scalar syntax can stay a compile-time expression. Anything that reads a
-# name, calls code or constructs a collection must retain one initialized value.
-dw_const_number = (n: int) -> bool:
-    k = nodes[n].kind
-    if k == .int_lit or k == .float_lit or k == .bool_lit: return true
-    if k == .unary or k == .not_: return dw_const_number(int(nodes[n].a))
-    if k == .binary or k == .and_ or k == .or_:
-        return dw_const_number(int(nodes[n].a)) and dw_const_number(int(nodes[n].b))
-    false
-
 # (its mistake, "" for a name that may be bound)
 dewy_reserved_text = (name: str) -> str:
     if len(name) < 3: return ""
@@ -332,77 +197,6 @@ dewy_reserved_text = (name: str) -> str:
 # earlier in this module as they are read, from any other once every module is
 # (dewy_resolve_inherited).
 dw_type_members: {int: {int: {int: int}}} = {}   # file -> type name -> its members (dewy_method_group)
-
-# A method's function as a module function: the type's parameters first, then its receiver.
-dw_method_finish = (fn_: int, struct_: int, type_params: int[], receiver: int):
-    pos = nodes[fn_].pos
-    object_type = mk(.tname, pos)
-    nodes[object_type].name = nodes[struct_].name
-    if type_params.len() > 0:
-        own = kids2(fn_)
-        params: int[]
-        arguments: int[]
-        loop tp in type_params:
-            loop mine in own:
-                if nodes[mine].name == nodes[tp].name: fatal(nodes[mine].pos, "type parameter '{name_of(int(nodes[tp].name))}' is already {name_of(int(nodes[struct_].name))}'s")
-            param = mk(.ident, pos)
-            nodes[param].name = nodes[tp].name
-            params.push(param)
-            argument = mk(.tname, pos)
-            nodes[argument].name = nodes[tp].name
-            arguments.push(argument)
-        set_list(object_type, arguments)
-        set_list2(fn_, params + own)
-        add_flag(fn_, NF_GENERIC)
-    dw_add_receiver(fn_, receiver, object_type)
-
-# The clamped slice of index n (its receiver read) by range r (dw_clamp_slice).
-dw_clamp_block = (n: int, r: int) -> int:
-    pos = nodes[n].pos
-    source = "$clamp_source{n}"
-    length = "$clamp_length{n}"
-    lo = "$clamp_start{n}"
-    hi = "$clamp_stop{n}"
-    count = mk(.field, pos)
-    nodes[count].a = i32(bc_ident(source, pos))
-    nodes[count].name = i32(intern("length"))
-    stmts = [bc_let(source, int(nodes[n].a), pos), bc_let(length, count, pos)]
-    if nodes[n].sval != 0: stmts.push(bc_let(name_of(int(nodes[n].sval)), bc_bin(.minus, bc_ident(length, pos), bc_int(1, pos), pos), pos))
-    stmts.push(bc_let(lo, (if nodes[r].a != 0: int(nodes[r].a) else: bc_int(0, pos)), pos))
-    stmts.push(bc_if(bc_bin(.lt, bc_ident(lo, pos), bc_int(0, pos), pos), [bc_assign(bc_ident(lo, pos), bc_int(0, pos), pos)], [], pos))
-    stmts.push(bc_if(bc_bin(.gt, bc_ident(lo, pos), bc_ident(length, pos), pos), [bc_assign(bc_ident(lo, pos), bc_ident(length, pos), pos)], [], pos))
-    stop = bc_ident(length, pos)
-    if nodes[r].b != 0:
-        stop = int(nodes[r].b)
-        if has_flag(r, NF_INCLUSIVE): stop = bc_bin(.plus, stop, bc_int(1, pos), pos)
-    stmts.push(bc_let(hi, stop, pos))
-    stmts.push(bc_if(bc_bin(.gt, bc_ident(hi, pos), bc_ident(length, pos), pos), [bc_assign(bc_ident(hi, pos), bc_ident(length, pos), pos)], [], pos))
-    stmts.push(bc_if(bc_bin(.lt, bc_ident(hi, pos), bc_ident(lo, pos), pos), [bc_assign(bc_ident(hi, pos), bc_ident(lo, pos), pos)], [], pos))
-    bounds = mk(.range, pos)
-    nodes[bounds].a = i32(bc_ident(lo, pos))
-    nodes[bounds].b = i32(bc_ident(hi, pos))
-    slice = mk(.index, pos)
-    nodes[slice].a = i32(bc_ident(source, pos))
-    set_list(slice, [bounds])
-    nodes[slice].b = i32(bounds)
-    stmts.push(bc_stmt(slice, pos))
-    bc_block(stmts, pos)
-
-# Parallel bodies become visible callbacks, so the existing race checker
-# checks captured/global writes transitively. Mutable element bindings use the
-# library's unique-array partition path; each callback owns one value.
-dw_parallel_exits = (n: int, depth: int = 0):
-    if n == 0 or nodes[n].kind == .lambda or nodes[n].kind == .fn_: return
-    k = nodes[n].kind
-    if k == .return_: fatal(nodes[n].pos, "return cannot leave a parallel body; return a comprehension value instead")
-    if (k == .break_ or k == .continue_) and depth == 0:
-        fatal(nodes[n].pos, "break and continue cannot leave a parallel body")
-    inner = depth
-    if k == .for_ or k == .while_ or k == .loopx: inner += 1
-    dw_parallel_exits(int(nodes[n].a), depth)
-    dw_parallel_exits(int(nodes[n].b), inner)
-    dw_parallel_exits(int(nodes[n].c), depth)
-    loop child in kids(n): dw_parallel_exits(child, depth)
 
 # `$warn_if condition "message"` before a function declaration: a soft precondition
 # (compiler/warn_if.jo), kept as the declaration's `warn_if` attribute (condition, message).
@@ -475,62 +269,9 @@ dw_top_declarations_inner = (id: int) -> int[]:
         loop made in dw_top_declarations(children[k], mkpos(pos_file(result.pos), starts[k])): spliced.push(made)
     spliced
 
-# A declaration followed by the module functions its type's methods became.
-dw_with_methods = (declaration: int) -> int[]:
-    declarations = [declaration]
-    loop method in dw_pending_decls: declarations.push(method)
-    dw_pending_decls = []
-    declarations
-
 # Spawned bindings are resolved at the joining brace. Their task storage stays
 # hidden, and ordinary bindings become visible in the enclosing statement scope.
 dw_task_groups: str[]
-
-# `spawn value` in group g: the task's call
-dw_task_spawn = (g: int, value: int, pos: int) -> int:
-    body = bc_block([bc_stmt(value, pos)], pos)
-    fn_ = mk(.lambda, pos)
-    add_flag(fn_, NF_LANG_BODY)
-    # (a spawn body runs once, in its task, which owns what it captures: aux2 17)
-    nodes[fn_].aux2 = 17
-    nodes[fn_].b = i32(body)
-    call = bc_call("__task_spawn", [g, fn_], pos)
-    nodes[call].aux2 = 17
-    call
-
-# A concurrent group named name around body's statements, joined at its end (serial numbers
-# its hidden names).
-dw_task_group = (pos: int, name: str, serial: int, body: int, transparent: bool) -> int:
-    previous = "$context{serial}"
-    outcome = "$joined{serial}"
-    statements = [bc_let(name, bc_call("__task_new_group", [], pos), pos), bc_let(previous, bc_call("__task_enter", [bc_ident(name, pos)], pos), pos)]
-    cleanup = mk(.defer_, pos)
-    # (aux2 17: it only joins the group's tasks, which own what they captured, and touches no owner)
-    nodes[cleanup].aux2 = 17
-    nodes[cleanup].a = i32(bc_stmt(bc_call("__task_cleanup", [bc_ident(name, pos), bc_ident(previous, pos)], pos), pos))
-    statements.push(cleanup)
-    results: int[]
-    loop statement in kids(body):
-        if nodes[statement].kind == .vardecl and nodes[int(nodes[statement].b)].kind == .call and nodes[int(nodes[statement].b)].aux2 == 17:
-            original = name_of(int(nodes[statement].name))
-            token = "$task{statement}"
-            nodes[statement].name = i32(intern(token))
-            results.push(bc_let(original, bc_call("__task_result", [bc_ident(token, nodes[statement].pos)], nodes[statement].pos), nodes[statement].pos))
-        # (`spawn f()` as a statement: its task is the group's, not a value the block expresses)
-        if nodes[statement].kind == .exprstmt and nodes[int(nodes[statement].a)].kind == .call and nodes[int(nodes[statement].a)].aux2 == 17:
-            discard = mk(.assign, nodes[statement].pos)
-            nodes[discard].op = i32(int(Tok.assign))
-            nodes[discard].a = i32(mk(.hole, nodes[statement].pos))
-            nodes[discard].b = nodes[statement].a
-            statements.push(discard)
-        else: statements.push(statement)
-    statements.push(bc_let(outcome, bc_call("__task_join", [bc_ident(name, pos)], pos), pos))
-    statements.push(bc_stmt(bc_call("__task_restore", [bc_ident(previous, pos)], pos), pos))
-    loop result in results: statements.push(result)
-    if not transparent: statements.push(bc_stmt(bc_ident(outcome, pos), pos))
-    block = bc_block(statements, pos)
-    if transparent: nodes[block].aux = 5
-    block
 
 dw_singleton_bound = (op: Tok, a: int, b: int, pos: int) -> int:
     db_singleton_bound(nodes, int(op), a, b, pos)

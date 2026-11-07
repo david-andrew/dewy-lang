@@ -1,0 +1,290 @@
+$runtime_checks
+from p"ast.jo" import NF_LOOPCOUNT
+from p"@lib/core/str.jo" import (join)
+from p"ast.jo" import (NF_GENERIC NF_INCLUSIVE NF_LANG_BODY NF_STMT add_flag has_flag kids kids2 mk nkids nodes set_list set_list2)
+from p"check.jo" import (expectation_ifs statement_watch target_arm64 target_macos target_wasm target_windows)
+from p"checks_builders.dewy" import (bc_block bc_call bc_ident bc_if bc_int bc_let bc_stmt)
+from p"dewy_grammar.dewy" import (dw_designed_directive)
+from p"dewy_node_ops.dewy" import (dw_singleton_and dw_singleton_int dw_singleton_value dw_text)
+from p"dewy_nodes.jo" import (DW_BIGINT_ALIAS PARSAFE_PLACE dw_bigint_import dw_chain_count dw_pending_decls dw_singleton_bound dw_targets_listed)
+from p"directives.jo" import (dir_builtin)
+from p"expr.jo" import (bc_assign bc_bin)
+from p"refine.jo" import (refine_active)
+from p"util.jo" import (fatal intern line_col name_of pos_file pos_str source_line)
+
+NodeBuildWord:type=int64<overflow='wrap'>
+# A method's receiver comes first. Its type is the object's (the type parameter
+# `object_type` for a record literal's method); whether it is a place is inferred
+# from the body before checking (dewy_methods.jo).
+dw_add_receiver=(fn_:NodeBuildWord receiver:NodeBuildWord receiver_type:NodeBuildWord):>void=>$unsafe {
+    let param=mk('param' nodes.ptr[fn_].pos)
+    nodes.ptr[param].name=int32(receiver)
+    nodes.ptr[param].a=int32(receiver_type)
+    set_list(fn_ [param kids(fn_)...])
+}
+# `$target`: the full name of the target being compiled for (docs/LANGUAGE.md,
+# "Targets"). A name has only the fields it needs: the processor (or `c`, `wasm32`),
+# then the system. A processor alone asks for the current machine, so `$target` is
+# never one; `$target.arch` and `$target.os` are its fields.
+dw_target_name=():>string=>{
+    if target_wasm {return "wasm32"}
+    if target_macos {return "aarch64-mac"}
+    if target_arm64 {return "aarch64-linux"}
+    if target_windows {return "x86_64-windows"}
+    "x86_64-linux"
+}
+dw_supported_names=(pos:NodeBuildWord names:array<string>):>void=>{
+    let file=pos_file(pos)
+    if dw_targets_listed.has(file) {fatal(pos "`$supported_targets` may be set only once per module")}
+    dw_targets_listed[file]=true
+    if not (dw_target_name() in? names) {
+        let listed=if names.length =? 0 {"no target"} else {join(names ", ")}
+        fatal(pos "this module supports {listed}, not {dw_target_name()}, the target being compiled for")
+    }
+}
+metatag_fail_text=(name:string):>string=>{
+    if name =? "supported_targets" or name =? "explicit_allocation_failure" {return "`${name}` is a module directive; put it at file scope"}
+    if dir_builtin(name) {return "`${name}` is a setting: write it on a line of its own in a module, function body or block"}
+    if name =? "test" {return "`$test` goes alone on the line just before a module-level function declaration"}
+    if name =? "parallel_safe" {return PARSAFE_PLACE}
+    if name =? "shadowable" {return "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file"}
+    if name =? "expect" or name =? "fail" {return "`${name}` is a statement in a function: a test, or a helper a test calls"}
+    if dw_designed_directive(name) {return "`${name}` is part of the design but not implemented yet"}
+    if name =? "capture" {return "`$capture` belongs in a parameter list before a name: `($capture @count) => ...`"}
+    if name =? "include_bytes" {return "`$include_bytes` takes one path literal: `$include_bytes(p\"asset.png\") as image`"}
+    "unknown directive `${name}` (a loop label goes on its own line just before its loop)"
+}
+# The statement checking value (0: none, `$fail`), reporting a failure with the message said
+# and the notes, the condition written at where as described.
+dw_expectation=(pos:NodeBuildWord where:NodeBuildWord described:string said:NodeBuildWord notes:NodeBuildWord value:NodeBuildWord):>int64=>$unsafe {
+    let shown=""
+    if value not=? 0 {
+        let line=source_line(where)
+        let [l c]=line_col(where)
+        if (line as array<uint8>).length >? 0 {
+            let caret=""
+            loop i in [0..c - 1) {
+                if i <? (line as array<uint8>).length and (line as array<uint8>)[i] =? b'\t' {caret="{caret}\t"} else {caret="{caret} "}
+            }
+            let width=max(1 min((described as array<uint8>).length (line as array<uint8>).length - (c - 1)))
+            caret="{caret}^"
+            loop i in [1..width) {caret="{caret}~"}
+            shown="    {line}\n    {caret}"
+        }
+    }
+    let report=mk('call' pos)
+    let callee=mk('ident' pos)
+    nodes.ptr[callee].name=int32(intern("__expect_fail"))
+    nodes.ptr[report].a=int32(callee)
+    set_list(report [dw_text(pos_str(pos) pos) dw_text(described pos) dw_text(shown pos) said notes])
+    let statement=mk('exprstmt' pos)
+    nodes.ptr[statement].a=int32(report)
+    let failed=mk('block' pos)
+    set_list(failed [statement mk('return_' pos)])
+    if value =? 0 {return failed}
+    let n=mk('if_' pos)
+    let negated=mk('not_' pos)
+    nodes.ptr[negated].a=int32(value)
+    nodes.ptr[n].a=int32(negated)
+    nodes.ptr[n].b=int32(failed)
+    add_flag(n NF_STMT)
+    expectation_ifs[n]=true
+    statement_watch.expectations=expectation_ifs.length
+    n
+}
+# The function a `$test` line marks: it names the test, and its parameters must
+# take the cases (or there are none, and no cases).
+dw_test_attach=(marked:int64 declarations:array<int64>):>void=>$unsafe {
+    let pos=nodes.ptr[marked].pos
+    if declarations.length =? 0 or nodes.ptr[declarations[0]].kind not=? 'fn_' {fatal(pos "`$test` marks a module-level function: put it on the line just before one (`$test` then `let adds = () => $expect add(1 2) =? 3`)")}
+    let f=declarations[0]
+    nodes.ptr[marked].name=nodes.ptr[f].name
+    nodes.ptr[marked].sval=nodes.ptr[f].name
+    let cased=nodes.ptr[marked].ival =? 1
+    if nkids(f) >? 0 and not cased {fatal(pos "the test '{name_of(NodeBuildWord(nodes.ptr[f].name))}' takes parameters: give it cases, `$test(cases=…)`")}
+    if nkids(f) =? 0 and cased {fatal(pos "the test '{name_of(NodeBuildWord(nodes.ptr[f].name))}' takes no parameters, so it cannot be given cases")}
+}
+dw_finish_declarations=(declarations:array<int64>):>array<int64>=>$unsafe {
+    if dw_bigint_import =? 0 {return declarations}
+    let n=mk('import_' dw_bigint_import - 1)
+    nodes.ptr[n].aux2=1
+    nodes.ptr[n].sval=int32(intern("@lib/bigint.dewy"))
+    nodes.ptr[n].name=int32(intern(DW_BIGINT_ALIAS))
+    [n declarations...]
+}
+# A union of integer singletons is an int64 whose value set is its invariant:
+# `lo <= v <= hi` and `v != g` for each gap g.
+dw_int_singleton_type=(values:array<int64> pos:NodeBuildWord):>int64=>$unsafe {
+    let lo=values[0]
+    let hi=values[0]
+    loop v in values {
+        lo=min(lo v)
+        hi=max(hi v)
+    }
+    if hi - lo - values.length + 1 >? 24 or hi - lo <? 0 {fatal(pos "an integer singleton union with more than 24 missing values between its least and greatest members")}
+    let binder=intern("$singleton")
+    let predicate=dw_singleton_bound('le' dw_singleton_int(lo pos) dw_singleton_value(binder pos) pos)
+    predicate=dw_singleton_and(predicate dw_singleton_bound('le' dw_singleton_value(binder pos) dw_singleton_int(hi pos) pos) pos)
+    loop g in [lo..hi] {
+        if not values.contains(g) {predicate=dw_singleton_and(predicate dw_singleton_bound('ne' dw_singleton_value(binder pos) dw_singleton_int(g pos) pos) pos)}
+    }
+    let base=mk('tname' pos)
+    nodes.ptr[base].name=int32(intern("i64"))
+    let n=mk('trefined' pos)
+    nodes.ptr[n].a=int32(base)
+    nodes.ptr[n].name=int32(binder)
+    nodes.ptr[n].b=int32(predicate)
+    refine_active=true
+    n
+}
+# A temporary holding value, declared in statements; its name as a value.
+dw_chain_temp=(value:NodeBuildWord @statements:array<int64> pos:NodeBuildWord):>int64=>{
+    dw_chain_count += 1
+    let name="$chain{dw_chain_count}"
+    statements.push(bc_let(name value pos))
+    bc_ident(name pos)
+}
+# Pure scalar syntax can stay a compile-time expression. Anything that reads a
+# name, calls code or constructs a collection must retain one initialized value.
+dw_const_number=(n:NodeBuildWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' {return true}
+    if k =? 'unary' or k =? 'not_' {return dw_const_number(NodeBuildWord(nodes.ptr[n].a))}
+    if k =? 'binary' or k =? 'and_' or k =? 'or_' {
+        return dw_const_number(NodeBuildWord(nodes.ptr[n].a)) and dw_const_number(NodeBuildWord(nodes.ptr[n].b))
+    }
+    false
+}
+# A method's function as a module function: the type's parameters first, then its receiver.
+dw_method_finish=(fn_:NodeBuildWord struct_:NodeBuildWord type_params:array<int64> receiver:NodeBuildWord):>void=>$unsafe {
+    let pos=nodes.ptr[fn_].pos
+    let object_type=mk('tname' pos)
+    nodes.ptr[object_type].name=nodes.ptr[struct_].name
+    if type_params.length >? 0 {
+        let own=kids2(fn_)
+        let params:array<int64>=[]
+        let arguments:array<int64>=[]
+        loop tp in type_params {
+            loop mine in own {
+                if nodes.ptr[mine].name =? nodes.ptr[tp].name {fatal(nodes.ptr[mine].pos "type parameter '{name_of(NodeBuildWord(nodes.ptr[tp].name))}' is already {name_of(NodeBuildWord(nodes.ptr[struct_].name))}'s")}
+            }
+            let param=mk('ident' pos)
+            nodes.ptr[param].name=nodes.ptr[tp].name
+            params.push(param)
+            let argument=mk('tname' pos)
+            nodes.ptr[argument].name=nodes.ptr[tp].name
+            arguments.push(argument)
+        }
+        set_list(object_type arguments)
+        set_list2(fn_ [params... own...])
+        add_flag(fn_ NF_GENERIC)
+    }
+    dw_add_receiver(fn_ receiver object_type)
+}
+# The clamped slice of index n (its receiver read) by range r (dw_clamp_slice).
+dw_clamp_block=(n:NodeBuildWord r:NodeBuildWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let source="$clamp_source{n}"
+    let length="$clamp_length{n}"
+    let lo="$clamp_start{n}"
+    let hi="$clamp_stop{n}"
+    let count=mk('field' pos)
+    nodes.ptr[count].a=int32(bc_ident(source pos))
+    nodes.ptr[count].name=int32(intern("length"))
+    let stmts=[bc_let(source NodeBuildWord(nodes.ptr[n].a) pos) bc_let(length count pos)]
+    if nodes.ptr[n].sval not=? 0 {stmts.push(bc_let(name_of(NodeBuildWord(nodes.ptr[n].sval)) bc_bin('minus' bc_ident(length pos) bc_int(1 pos) pos) pos))}
+    let low=if nodes.ptr[r].a not=? 0 {NodeBuildWord(nodes.ptr[r].a)} else {bc_int(0 pos)}
+    stmts.push(bc_let(lo low pos))
+    stmts.push(bc_if(bc_bin('lt' bc_ident(lo pos) bc_int(0 pos) pos) [bc_assign(bc_ident(lo pos) bc_int(0 pos) pos)] [] pos))
+    stmts.push(bc_if(bc_bin('gt' bc_ident(lo pos) bc_ident(length pos) pos) [bc_assign(bc_ident(lo pos) bc_ident(length pos) pos)] [] pos))
+    let stop=bc_ident(length pos)
+    if nodes.ptr[r].b not=? 0 {
+        stop=NodeBuildWord(nodes.ptr[r].b)
+        if has_flag(r NF_INCLUSIVE) {stop=bc_bin('plus' stop bc_int(1 pos) pos)}
+    }
+    stmts.push(bc_let(hi stop pos))
+    stmts.push(bc_if(bc_bin('gt' bc_ident(hi pos) bc_ident(length pos) pos) [bc_assign(bc_ident(hi pos) bc_ident(length pos) pos)] [] pos))
+    stmts.push(bc_if(bc_bin('lt' bc_ident(hi pos) bc_ident(lo pos) pos) [bc_assign(bc_ident(hi pos) bc_ident(lo pos) pos)] [] pos))
+    let bounds=mk('range' pos)
+    nodes.ptr[bounds].a=int32(bc_ident(lo pos))
+    nodes.ptr[bounds].b=int32(bc_ident(hi pos))
+    let slice=mk('index' pos)
+    nodes.ptr[slice].a=int32(bc_ident(source pos))
+    set_list(slice [bounds])
+    nodes.ptr[slice].b=int32(bounds)
+    stmts.push(bc_stmt(slice pos))
+    bc_block(stmts pos)
+}
+# Parallel bodies become visible callbacks, so the existing race checker
+# checks captured/global writes transitively. Mutable element bindings use the
+# library's unique-array partition path; each callback owns one value.
+dw_parallel_exits=(n:NodeBuildWord depth:NodeBuildWord=0):>void=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind =? 'lambda' or nodes.ptr[n].kind =? 'fn_' {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'return_' {fatal(nodes.ptr[n].pos "return cannot leave a parallel body; return a comprehension value instead")}
+    if (k =? 'break_' or k =? 'continue_') and depth =? 0 {
+        fatal(nodes.ptr[n].pos "break and continue cannot leave a parallel body")
+    }
+    let inner=depth
+    if k =? 'for_' or k =? 'while_' or k =? 'loopx' {inner += 1}
+    dw_parallel_exits(NodeBuildWord(nodes.ptr[n].a) depth)
+    dw_parallel_exits(NodeBuildWord(nodes.ptr[n].b) inner)
+    dw_parallel_exits(NodeBuildWord(nodes.ptr[n].c) depth)
+    loop child in kids(n) {dw_parallel_exits(child depth)}
+}
+# A declaration followed by the module functions its type's methods became.
+dw_with_methods=(declaration:NodeBuildWord):>array<int64>=>{
+    let declarations:array<int64>=[declaration]
+    loop method in dw_pending_decls {declarations.push(method)}
+    dw_pending_decls=[]
+    declarations
+}
+# `spawn value` in group g: the task's call
+dw_task_spawn=(g:NodeBuildWord value:NodeBuildWord pos:NodeBuildWord):>int64=>$unsafe {
+    let body=bc_block([bc_stmt(value pos)] pos)
+    let fn_=mk('lambda' pos)
+    add_flag(fn_ NF_LANG_BODY)
+    # (a spawn body runs once, in its task, which owns what it captures: aux2 17)
+    nodes.ptr[fn_].aux2=17
+    nodes.ptr[fn_].b=int32(body)
+    let call=bc_call("__task_spawn" [g fn_] pos)
+    nodes.ptr[call].aux2=17
+    call
+}
+# A concurrent group named name around body's statements, joined at its end (serial numbers
+# its hidden names).
+dw_task_group=(pos:NodeBuildWord name:string serial:NodeBuildWord body:NodeBuildWord transparent:bool):>int64=>$unsafe {
+    let previous="$context{serial}"
+    let outcome="$joined{serial}"
+    let statements=[bc_let(name bc_call("__task_new_group" [] pos) pos) bc_let(previous bc_call("__task_enter" [bc_ident(name pos)] pos) pos)]
+    let cleanup=mk('defer_' pos)
+    # (aux2 17: it only joins the group's tasks, which own what they captured, and touches no owner)
+    nodes.ptr[cleanup].aux2=17
+    nodes.ptr[cleanup].a=int32(bc_stmt(bc_call("__task_cleanup" [bc_ident(name pos) bc_ident(previous pos)] pos) pos))
+    statements.push(cleanup)
+    let results:array<int64>=[]
+    loop statement in kids(body) {
+        if nodes.ptr[statement].kind =? 'vardecl' and nodes.ptr[NodeBuildWord(nodes.ptr[statement].b)].kind =? 'call' and nodes.ptr[NodeBuildWord(nodes.ptr[statement].b)].aux2 =? 17 {
+            let original=name_of(NodeBuildWord(nodes.ptr[statement].name))
+            let token="$task{statement}"
+            nodes.ptr[statement].name=int32(intern(token))
+            results.push(bc_let(original bc_call("__task_result" [bc_ident(token nodes.ptr[statement].pos)] nodes.ptr[statement].pos) nodes.ptr[statement].pos))
+        }
+        # (`spawn f()` as a statement: its task is the group's, not a value the block expresses)
+        if nodes.ptr[statement].kind =? 'exprstmt' and nodes.ptr[NodeBuildWord(nodes.ptr[statement].a)].kind =? 'call' and nodes.ptr[NodeBuildWord(nodes.ptr[statement].a)].aux2 =? 17 {
+            let discard=mk('assign' nodes.ptr[statement].pos)
+            nodes.ptr[discard].op=int32(47)
+            nodes.ptr[discard].a=int32(mk('hole' nodes.ptr[statement].pos))
+            nodes.ptr[discard].b=nodes.ptr[statement].a
+            statements.push(discard)
+        }
+        else {statements.push(statement)}
+    }
+    statements.push(bc_let(outcome bc_call("__task_join" [bc_ident(name pos)] pos) pos))
+    statements.push(bc_stmt(bc_call("__task_restore" [bc_ident(previous pos)] pos) pos))
+    loop result in results {statements.push(result)}
+    if not transparent {statements.push(bc_stmt(bc_ident(outcome pos) pos))}
+    let block=bc_block(statements pos)
+    if transparent {nodes.ptr[block].aux=5}
+    block
+}
