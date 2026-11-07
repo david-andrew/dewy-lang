@@ -195,12 +195,6 @@ def test_a_scope_setting_must_name_a_zone(compiler, tmp_path):
     assert 'no time zone is called Mars/Olympus' in ran.stderr
 
 
-def test_unbuilt_settings_say_so(compiler, tmp_path):
-    ran = run(compiler, tmp_path, "$time.zone_source = 'host'\n")
-    assert ran.returncode != 0
-    assert 'not implemented yet' in ran.stderr
-
-
 def test_date_literal_reports_its_validators_text(compiler, tmp_path):
     for literal, message in [('date"2026-02-30"', 'not a date: 2026-02 has no day 30'),
                              ('date"2026-13-01"', 'not a date: month 13 is not 1 to 12'),

@@ -3,7 +3,7 @@ from p"@lib/core/os.jo" import (env)
 from p"@lib/core/str.jo" import (find is_digit split starts_with)
 from p"ast.jo" import (NF_GENERIC NF_INBOUNDS add_flag has_flag nodes)
 from p"check.jo" import (FK_LAMBDA decl_info decl_infos fns lib_dir modules)
-from p"directives.jo" import (DIR_DEFAULT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirScope DirSite dir_assumed_bounds_any dir_builtin dir_bundles dir_bundles_loaded dir_copies_any dir_deadlocks_any dir_entry_functions dir_entry_positions dir_find dir_floats_any dir_forced dir_mixed_files dir_module_start dir_name_assumed_bounds dir_name_audited dir_name_confine dir_name_copies dir_name_deadlocks dir_name_local_asserts dir_name_no_inf dir_name_no_nan dir_name_prototype dir_name_row dir_name_runtime dir_name_warnings dir_obligations dir_panic_sites dir_panics_demanded dir_policy dir_prior_static dir_proven dir_row_scopes dir_rows_any dir_scopes dir_scopes_gen dir_sites dir_static_body dir_uniform_files dir_value)
+from p"directives.jo" import (dir_rules_from_host DIR_DEFAULT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirScope DirSite dir_assumed_bounds_any dir_builtin dir_bundles dir_bundles_loaded dir_copies_any dir_deadlocks_any dir_entry_functions dir_entry_positions dir_find dir_floats_any dir_forced dir_mixed_files dir_module_start dir_name_assumed_bounds dir_name_audited dir_name_confine dir_name_copies dir_name_deadlocks dir_name_local_asserts dir_name_no_inf dir_name_no_nan dir_name_prototype dir_name_row dir_name_runtime dir_name_warnings dir_obligations dir_panic_sites dir_panics_demanded dir_policy dir_prior_static dir_proven dir_row_scopes dir_rows_any dir_scopes dir_scopes_gen dir_sites dir_static_body dir_uniform_files dir_value)
 from p"effect_contracts.dewy" import (callable_contract effect_subst)
 from p"effect_control.dewy" import (effect_name)
 from p"effect_panics.dewy" import (effect_panics panic_reaches)
@@ -76,7 +76,9 @@ dir_valued_check=(name:string value:string start:DirWord at:DirWord):>void=>{
         if toolchain_tagged() and version_newer(value toolchain_version()) {fatal(at "this module says `$dewy.version = '{value}'`, newer than this toolchain ({toolchain_version()}): update Dewy, or set a version it knows")}
     }
     else if name =? "time.zone_source" {
-        fatal(at "`${name}` is part of the design but not implemented yet")
+        if files[pos_file(start)].path not=? settings_path or start not=? dir_module_start(pos_file(start)) {fatal(at "`$time.zone_source` says whose rules the whole program follows: put it at the top of the main file")}
+        if value not=? "host" {fatal(at "`$time.zone_source` is 'host', this machine's rules when the program runs; with none set, the program follows the rules this Dewy ships")}
+        dir_rules_from_host=true
     }
     else if name =? "time.rules" {
         if files[pos_file(start)].path not=? settings_path or start not=? dir_module_start(pos_file(start)) {fatal(at "`$time.rules` says which rules the whole program uses: put it at the top of the main file")}

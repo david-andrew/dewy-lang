@@ -16,10 +16,19 @@ Zone:type=[_entry:int64]
 ZonedDateTime:type=[nominal:Instant zone:Zone offset:int64]
 
 # ---------------- reading the pack ----------------
-_u8=(at:int64):>int64=>$unsafe {int64(_rules()[at])}
-_u32=(at:int64):>int64=>$unsafe {
-    int64(_rules()[at]) + (int64(_rules()[at+1]) << 8) + (int64(_rules()[at+2]) << 16) + (int64(_rules()[at+3]) << 24)
+# `$time.zone_source = 'host'`: a zone's rules are the machine's, read when it is first reached and
+# kept past the pack's end. The pack still names the zones, and a literal cannot fold against them.
+const _SOURCE:string|none=$time.zone_source
+const _HOST:bool=_SOURCE =? 'host'
+_host_rules:array<uint8>=[]
+_host_zones:array<int64>=[]
+_host_records:array<int64>=[]
+_host_said:bool=false
+_rule_byte=(at:int64):>int64=>$unsafe {
+    if _HOST and at >=? _rules().length {int64(_host_rules[at-_rules().length])} else {int64(_rules()[at])}
 }
+_u8=(at:int64):>int64=>_rule_byte(at)
+_u32=(at:int64):>int64=>_rule_byte(at) + (_rule_byte(at+1) << 8) + (_rule_byte(at+2) << 16) + (_rule_byte(at+3) << 24)
 _i32=(at:int64):>int64=>{
     let v=_u32(at)
     if v >=? 2147483648 {v-4294967296} else {v}
@@ -27,7 +36,7 @@ _i32=(at:int64):>int64=>{
 _i64=(at:int64):>int64=>$unsafe {
     let v:int64<overflow='wrap'>=0
     loop i in [0..8) {
-        v=v+(int64<overflow='wrap'>(_rules()[at+i]) << (8*i))
+        v=v+(int64<overflow='wrap'>(_rule_byte(at+i)) << (8*i))
     }
     int64<overflow='wrap'>(v)
 }
@@ -137,7 +146,101 @@ scope_zone=(scope:string|none):>Zone|UnknownZone=>{
 }
 
 # ---------------- offsets ----------------
-_record=(z:Zone):>int64=>_u32(_entry_at(z._entry)+8)
+_record=(z:Zone):>int64=>if _HOST {_host_record(z)} else {_u32(_entry_at(z._entry)+8)}
+_be32=(d:array<uint8> at:int64):>int64=>$unsafe {
+    (int64(d[at]) << 24) + (int64(d[at+1]) << 16) + (int64(d[at+2]) << 8) + int64(d[at+3])
+}
+_be64=(d:array<uint8> at:int64):>int64=>$unsafe {
+    let v:int64<overflow='wrap'>=0
+    loop i in [0..8) {
+        v=(v << 8)+int64<overflow='wrap'>(d[at+i])
+    }
+    int64<overflow='wrap'>(v)
+}
+_put32=(v:int64):>void=>{
+    loop i in [0..4) {_host_rules.push(uint8((v >> (8*i)) & 255))}
+}
+_put64=(v:int64):>void=>{
+    loop i in [0..8) {_host_rules.push(uint8((v >> (8*i)) & 255))}
+}
+# A zone's TZif file as a record of the pack's form, kept past its end (tools/time/gen_rules.py makes
+# the same from the same files), or -1 when this machine has no such file. O(file).
+_host_read=(zone_name:string):>int64=>$unsafe {
+    let d=read_bytes(p("{env("TZDIR") ?? "/usr/share/zoneinfo"}/{zone_name}"))
+    if d isnt? array<uint8> or d.length <? 44 or d[0] not=? 84 or d[1] not=? 90 or d[2] not=? 105 or d[3] not=? 102 or d[4] <? 50 {return -1}
+    let at=44+_be32(d 32)*5+_be32(d 36)*6+_be32(d 40)+_be32(d 28)*8+_be32(d 24)+_be32(d 20)
+    if d.length <? at+44 {return -1}
+    let isut=_be32(d at+20)
+    let isstd=_be32(d at+24)
+    let leap=_be32(d at+28)
+    let times=_be32(d at+32)
+    let kinds=_be32(d at+36)
+    let chars=_be32(d at+40)
+    let moments=at+44
+    let indexes=moments+times*8
+    let types=indexes+times
+    let footer=types+kinds*6+chars+leap*12+isstd+isut
+    if d.length <? footer or kinds <? 1 {return -1}
+    let first=_signed32(_be32(d types))
+    let last=first
+    let last_dst:int64=-1
+    let changes:array<int64>=[]
+    let offsets:array<int64>=[]
+    let flags:array<int64>=[]
+    # (drop the "big bang" sentinel and changes that change nothing)
+    loop i in [0..times) {
+        let kind=types+int64(d[indexes+i])*6
+        if kind+6 >? footer {return -1}
+        let moment=_be64(d moments+i*8)
+        let offset=_signed32(_be32(d kind))
+        let dst=int64(d[kind+4])
+        if moment <=? -576460752303423488 {
+            first=offset
+            last=offset
+            continue
+        }
+        if offset =? last and changes.length >? 0 and last_dst =? dst {continue}
+        changes.push(moment)
+        offsets.push(offset)
+        flags.push(dst)
+        last=offset
+        last_dst=dst
+    }
+    let rule_start=footer
+    let rule_stop=d.length
+    loop rule_start <? rule_stop and d[rule_start] =? 10 {rule_start=rule_start+1}
+    loop rule_stop >? rule_start and d[rule_stop-1] =? 10 {rule_stop=rule_stop-1}
+    let record=_rules().length+_host_rules.length
+    let size=16+changes.length*13
+    _put32(first)
+    _put32(changes.length)
+    _put32(record+size)
+    _put32(rule_stop-rule_start)
+    loop c in changes {_put64(c)}
+    loop o in offsets {_put32(o)}
+    loop f in flags {_host_rules.push(uint8(f))}
+    loop i in [rule_start..rule_stop) {_host_rules.push(d[i])}
+    record
+}
+_signed32=(v:int64):>int64=>if v >=? 2147483648 {v-4294967296} else {v}
+_host_record=(z:Zone):>int64=>$unsafe {
+    let i:int64=0
+    loop i <? _host_zones.length {
+        if _host_zones[i] =? z._entry {return _host_records[i]}
+        i=i+1
+    }
+    let record=_host_read(name(z))
+    if record <? 0 {
+        if not _host_said {
+            __write_err("warning: `$time.zone_source = 'host'`, but this machine has no rules for {name(z)}, so it keeps those of Dewy's own pack, {rules_version()}\n")
+            _host_said=true
+        }
+        record=_u32(_entry_at(z._entry)+8)
+    }
+    _host_zones.push(z._entry)
+    _host_records.push(record)
+    record
+}
 # The number of changes at or before a POSIX second, by binary search.
 _changes_before=(record:int64 moment:int64):>int64=>{
     let count=_u32(record+4)
@@ -372,16 +475,21 @@ zoned_parse=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|non
     }
     _resolve(local int(f.nanosecond) chosen fold gap)
 }
-zoned_error=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>match zoned_parse(text zone fold gap scope false) {
-    z:ZonedDateTime=>none
-    e:ParseError=>e.message
-    e:Gap=>e.message
-    e:Ambiguous=>e.message
-    e:UnknownZone=>e.message
-    e:MissingContext=>e.message
-    e:OutsideCoverage=>e.message
-    e:InvalidFields=>e.message
-    <OffGrid>=>"that label falls between nanoseconds under the UTC rate of its time"
+# (a literal needs rules while compiling, and `'host'` has none until the program runs)
+const _HOST_LITERAL="`$time.zone_source = 'host'` follows this machine's rules when the program runs, so a literal cannot be worked out from them: read it from text at run time, as `zoned(text)`"
+zoned_error=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>{
+    if _HOST {return _HOST_LITERAL}
+    match zoned_parse(text zone fold gap scope false) {
+        z:ZonedDateTime=>none
+        e:ParseError=>e.message
+        e:Gap=>e.message
+        e:Ambiguous=>e.message
+        e:UnknownZone=>e.message
+        e:MissingContext=>e.message
+        e:OutsideCoverage=>e.message
+        e:InvalidFields=>e.message
+        <OffGrid>=>"that label falls between nanoseconds under the UTC rate of its time"
+    }
 }
 
 # (the same with no zone given)

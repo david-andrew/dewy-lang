@@ -1683,7 +1683,9 @@ name of the machine's zone when the program runs, and `'build'` pins the zone of
 Dewy version ships its own (IANA data in `lib/time/rules`), so a program means the same thing
 anywhere, and a program links them only if it reaches a zone operation. For an urgent law change
 or test data, `$time.rules = 'urgent.bin'` at the top of the main file names a pack beside it,
-made with `tools/time/gen_rules.py`.
+made with `tools/time/gen_rules.py`. `$time.zone_source = 'host'` there follows the machine's own
+zone files when the program runs instead (under `TZDIR`, else `/usr/share/zoneinfo`), so a
+`zoned` literal is a compile error; a machine without a zone's file keeps Dewy's rules and says so once.
 
 `d.format("EEEE d MMMM y")` writes a value by a pattern of Unicode's date letters, in English: `y`
 year; `M` month, `MM` with a zero, `MMM` and `MMMM` by name; `d` day; `EEE` and `EEEE` weekday; `H`

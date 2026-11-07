@@ -6087,7 +6087,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         pos = nodes[n].pos
         scope = dir_find(int(nodes[args[0]].sval), if setting_site != 0: setting_site else: pos)
         # (`$time.zone` in the main file pins the whole program: what a module without its own reads)
-        if scope < 0 and name_of(int(nodes[args[0]].sval)) == "time.zone":
+        if scope < 0 and (name_of(int(nodes[args[0]].sval)) == "time.zone" or name_of(int(nodes[args[0]].sval)) == "time.zone_source"):
             loop i in [0..files.len()):
                 if files[i].path == settings_path:
                     scope = dir_find(int(nodes[args[0]].sval), dir_module_start(i))

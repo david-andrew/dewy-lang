@@ -71,7 +71,9 @@ dir_valued_check = (name: str, value: str, start: int, at: int):
         if not version_well_formed(value): fatal(at, "`$dewy.version` is three numbers in quotes, as `$dewy.version = '0.1.0'`")
         if toolchain_tagged() and version_newer(value, toolchain_version()): fatal(at, "this module says `$dewy.version = '{value}'`, newer than this toolchain ({toolchain_version()}): update Dewy, or set a version it knows")
     else if name == "time.zone_source":
-        fatal(at, "`${name}` is part of the design but not implemented yet")
+        if files[pos_file(start)].path != settings_path or start != dir_module_start(pos_file(start)): fatal(at, "`$time.zone_source` says whose rules the whole program follows: put it at the top of the main file")
+        if value != "host": fatal(at, "`$time.zone_source` is 'host', this machine's rules when the program runs; with none set, the program follows the rules this Dewy ships")
+        dir_rules_from_host = true
     else if name == "time.rules":
         if files[pos_file(start)].path != settings_path or start != dir_module_start(pos_file(start)): fatal(at, "`$time.rules` says which rules the whole program uses: put it at the top of the main file")
     else if name == "time.gap":

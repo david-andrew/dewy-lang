@@ -5,6 +5,7 @@ use 'checker_state.dewy'
 use 'ast.jo'
 use 'check.jo'
 use 'comptime.jo'
+use 'directives.jo'
 use 'warn_if.jo'
 use 'expr.jo'
 use 'types.jo'
@@ -68,12 +69,13 @@ cc_waits_for_validators = (n: int, decl: int) -> bool:
 
 # (every argument constant and the value a plain record: the value, nothing at run time)
 cc_fold_first = (n: int, decl: int) -> int:
-    if cc_waits_for_validators(n, decl): return 0
+    # (a fold could reach zone rules that exist only when the program runs: the validators say)
+    if dir_rules_from_host or cc_waits_for_validators(n, decl): return 0
     cc_fold_value(n)
 
 # (after the validators passed a call that waited for them)
 cc_fold_after = (n: int, decl: int) -> int:
-    if not cc_waits_for_validators(n, decl): return 0
+    if dir_rules_from_host or not cc_waits_for_validators(n, decl): return 0
     cc_fold_value(n)
 
 cc_fold_value = (n: int) -> int:
