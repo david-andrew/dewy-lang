@@ -153,7 +153,7 @@ fz_small = (f: int) -> bool: pc_smalls.get(f) ?? (nkids(int(fns[f].body)) <= 8 a
 fz_pinit = 0
 fz_ready = false            # (worker results to replay and join)
 # The layout that makes a function's code the same wherever it is made (functions at multiples
-# of 32 bytes, line rows by source position, extern thunks without an inherited position): for
+# of 64 bytes, line rows by source position, extern thunks without an inherited position): for
 # the programs workers may make, whatever the number of workers, so that one process makes the
 # same bytes. Other programs keep the ordinary layout.
 fz_layout = false
@@ -925,7 +925,7 @@ fz_emit = (q: IrFn[]):
 fz_place = (x: FzRec, lf: int):
     w = x.w
     fz_rd[w].i = x.chunk
-    loop code.len() % 32 != 0: code.push(0xCC)
+    loop code.len() % 64 != 0: code.push(0xCC)
     base = code.len()
     loop fn_addr.len() <= lf: fn_addr.push(-1)
     loop fn_len.len() <= lf: fn_len.push(0)

@@ -810,6 +810,7 @@ int_bin=(opc_rr:XWord ext:XWord ins:Ins):>void=>$unsafe {
     st(d  r)
 }
 let pad_moves=false # the function being emitted has a pad that depends on where it starts
+let x_loop_line:XWord=32 # where a loop head goes: a default build, 64
 let x_branch_pos:XWord=-1
 
 # Demand-only bounded lookahead at a crossing fused pair: O(24) IR entries.
@@ -3201,7 +3202,7 @@ x_emit_loop=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     # Padding belongs before the target so the backedge never executes it.
     if ra_on {
         pad_moves=true # moving a function by 16 changes this entry pad
-        let padding=(32 - XWord(x_code[0].length) % 32) % 32
+        let padding=(x_loop_line - XWord(x_code[0].length) % x_loop_line) % x_loop_line
         # A register conditional move immediately before the loop can absorb
         # two ignored CS prefixes. Check its complete four-byte encoding and
         # the last resolved entry before growing it; no relocation is moved.

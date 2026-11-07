@@ -251,8 +251,7 @@ par_here = 0                # functions of workers' runs made again here (their 
 # its place is known, and the run's next function lands elsewhere again.
 par_join = (bytes_: u8[], r0: int, q: IrFn[], fin: bool[], a: int):
     r = ParIn(bytes_)
-    align = 16
-    if fz_layout: align = 32
+    align = x64_code_align()
     nf = pr(r)
     fis: int[]
     ats: int[]

@@ -47,16 +47,20 @@ fn_len: int[]               # lfunc -> its code's length (dewy watch)
 
 row_line = -1
 
+# Where a function starts. On a default build a loop head takes a whole cache line, with its
+# function: arena's time moved 617-728 ms with where its function fell, 618-625 with this (redfox).
+# Code moved by whole multiples of this is the same bytes wherever it is made.
+x64_code_align = () -> int:
+    if not opt_release and not dbg_on and not watch_build and not repl_image: return 64
+    16
+
 x64_function = ():
     x_int_fail.clear()
     pad_moves = false
     loop fn_addr.len() <= ir.fn_index: fn_addr.push(-1)
     loop fn_len.len() <= ir.fn_index: fn_len.push(0)
-    # (fused.jo's programs: 32, as cmp_branch_pad keeps a branch within a 32-byte region, so
-    # where a function's code moves by whole multiples of 32 alone, it is the same bytes
-    # wherever it is made)
-    align = 16
-    if fz_layout: align = 32
+    align = x64_code_align()
+    x_loop_line = if align == 64: 64 else: 32
     loop code.len() % align != 0: b(0xCC)
     fn_addr[ir.fn_index] = code.len()
     fn_start = code.len()

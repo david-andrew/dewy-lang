@@ -664,6 +664,7 @@ int_bin = (opc_rr: int, ext: int, ins: Ins):
     st(d, r)
 
 pad_moves = false           # the function being emitted has a pad that depends on where it starts
+x_loop_line = 32            # where a loop head goes: a default build, 64
 
 x_branch_pos = -1
 # Demand-only bounded lookahead at a crossing fused pair: O(24) IR entries.
@@ -2700,7 +2701,7 @@ x_emit_loop = (pos: int, ins: *Ins):
     # Padding belongs before the target so the backedge never executes it.
     if ra_on:
         pad_moves = true # moving a function by 16 changes this entry pad
-        padding = (32 - x_code[0].len() % 32) % 32
+        padding = (x_loop_line - x_code[0].len() % x_loop_line) % x_loop_line
         # A register conditional move immediately before the loop can absorb
         # two ignored CS prefixes. Check its complete four-byte encoding and
         # the last resolved entry before growing it; no relocation is moved.
