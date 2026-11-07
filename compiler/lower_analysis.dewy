@@ -1,7 +1,7 @@
 from p"lower_primitives.dewy" import (inst_mutmask)
 from p"lower_storage.dewy" import (boxed_field_of is_shared)
 $runtime_checks
-from p"lower.jo" import (FnWrites LF_ELEMENTVIEW fr_direct fr_total fw_direct fw_named fw_total held_views lpath_ids lpath_parents mwr_direct opt_release pw_box pw_depth pw_heap)
+from p"lower.jo" import (FW_NEAR FnWrites LF_ELEMENTVIEW fr_direct fr_total fw_direct fw_named fw_near fw_total held_views lpath_ids lpath_parents mwr_direct opt_release pw_box pw_depth pw_heap)
 from p"expr.jo" import (IN is_map_type ntype)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_VALUEITER LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_SHARED LF_SOAELEM LF_VALUECAP fns globals lib_dir locals)
 from p"ast.jo" import (NF_EXTERN NF_MUT has_flag kid kid2 kid_c kid_d nkids nodes)
@@ -105,7 +105,8 @@ borrow_may_change=(a:LAWord args:array<int64> i:LAWord callee:LAWord):>bool=>$un
             mwr_direct=false
             return w
         }
-        if not opt_release or callee <=? 0 {return true}
+        if callee <=? 0 {return true}
+        if not opt_release and not fn_leaves_globals(callee) {return true}
         let w=fn_writes(callee)
         if w.all or w.globals.contains(LAWord(nodes.ptr[n].sym)) {return true}
         loop j in [i + 1..args.length) {
@@ -140,8 +141,9 @@ borrow_may_change=(a:LAWord args:array<int64> i:LAWord callee:LAWord):>bool=>$un
     # cannot be reached by the callee except through another actual; those
     # aliases and later argument writes are checked above/by shares_mut_root.
     if resource {return false}
+    if callee <=? 0 {return true}
     # (the source copy policy cannot depend on the build: it consults writes always)
-    if not opt_release and not (copies_on and copy_strict(a)) or callee <=? 0 {return true}
+    if not opt_release and not (copies_on and copy_strict(a)) and not fn_leaves_globals(callee) {return true}
     let w=fn_writes(callee)
     if w.all or w.globals.length >? 0 {return true}
     loop j in [i + 1..args.length) {
@@ -560,6 +562,30 @@ calls_leave=(n:LAWord rn:LAWord written:bool):>bool=>$unsafe {
         if not calls_leave(kid2(n i) rn written) {return false}
     }
     return true
+}
+# Whether a call to f writes no global and runs no unknown code, seen within a few functions;
+# false past them. A default build asks this before it keeps a borrow across a call, so a large
+# call graph costs it nothing. At most FW_NEAR bodies a question, each scanned once a program.
+fn_leaves_globals=(f:LAWord):>bool=>$unsafe {
+    let cached=fw_near.get(f)
+    if cached not=? none {return cached}
+    let seen:array<int64>=[]
+    let todo=[f]
+    let leaves=true
+    loop leaves and todo.length >? 0 {
+        let g=todo.pop()
+        if seen.contains(g) {continue}
+        if seen.length >=? FW_NEAR {
+            leaves=false
+            break
+        }
+        seen.push(g)
+        let d=fn_writes_direct(g)
+        if d.all or d.globals.length >? 0 {leaves=false}
+        loop c in d.calls {todo.push(c)}
+    }
+    fw_near[f]=leaves
+    return leaves
 }
 fn_writes_named=(f:LAWord):>FnWrites=>$unsafe {
     let cached_w=fw_named.get(f)

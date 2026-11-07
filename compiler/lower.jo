@@ -511,6 +511,8 @@ struct FnWrites:
     mentions: int[]             # the globals it names at all
 fw_direct: {int: FnWrites}      # by function: what its own body does
 fw_total: {int: FnWrites}       # ... and with everything it calls
+fw_near: {int: bool}            # ... whether it leaves the globals alone, seen near it
+const FW_NEAR = 8
 
 # the globals f and the functions it calls by name write, also past calls of function values
 # (fn_writes stops at the first of those: `all`)
