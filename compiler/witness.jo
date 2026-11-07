@@ -658,6 +658,7 @@ wit_unknown = (n: int, b: FactBound, what: str, contract: int = 0, relation: str
     wit_help(relation, runtime, contract)
     wit_counter_help(n, b)
     wit_int_parameter_help(n)
+    wit_int_global_help(n)
     wit_field_divisor_help(divisor)
     # (a loop's or an unsupported operation's part is a note at its span: the
     # headline names the bound the relation lacks)
@@ -688,6 +689,16 @@ wit_counter_help = (n: int, b: FactBound):
     if nodes[v].kind != .ident or nodes[v].aux != i32(int(SK.local)) or prune(ntype(v)) != T_MATH_INT or not dewy_at(nodes[n].pos): return
     name = name_of(int(nodes[v].name))
     err_notes.push((-1, "help: or declare `{name}` a 64-bit counter where it is made (`let {name}:{dt(ntype(n))} = 0`): the counter-progress assumption covers 64-bit counters, not an `int` converted afterwards"))
+
+# (`let other = -1`, a script's `int` given where an int64 is wanted: one declared with the width
+# holds only what fits, and each write is proven. O(1))
+wit_int_global_help = (n: int):
+    if n <= 0 or nodes[n].a == 0 or not is_int(ntype(n)) or prune(ntype(n)) == T_MATH_INT or not dewy_at(nodes[n].pos): return
+    v = int(nodes[n].a)
+    loop nodes[v].kind == .narrow: v = int(nodes[v].a)
+    if nodes[v].kind != .ident or nodes[v].aux != i32(int(SK.global)) or prune(ntype(v)) != T_MATH_INT: return
+    name = name_of(int(nodes[v].name))
+    err_notes.push((-1, "help: or declare `{name}` with its width where it is made (`let {name}:{dt(ntype(n))} = ...`): an `int` holds any integer, and one with a width proves each write instead"))
 
 # (`bins:int` given where an int64 is wanted, `fill(0 bins)`: an `int` parameter holds any
 # integer, while one declared with the width moves the proof to each caller. O(1))
@@ -1154,6 +1165,18 @@ wit_refinement = (n: int, t: int, atom: RefAtom, self: int, a: int, b: int, s: F
         loop term in [atom.a, atom.b]:
             if term.path.len() == 1 and term.path[0] == ND_STORAGE_VALID: storage = true
     if storage: relation = "{shown}.data.length matches its shape"
+    # (a bound another parameter projects, `i:int64<(<? ring.values.length)>`: named by the callee)
+    if relation == "":
+        call = wit_call_holding(n)
+        if call > 0 and nodes[call].aux == 0 and nodes[call].sym > 0:
+            f = int(nodes[call].sym)
+            at = -1
+            loop i in [0..nkids(call)):
+                if kid(call, i) == n: at = i
+            left = wit_formal_text(atom.a, f, at)
+            right = wit_formal_text(atom.b, f, at)
+            if left != "" and right != "":
+                relation = "{left} {wit_op(atom.op)} {right}"
     missing = if storage: "" else: wit_relation(s, s, op, x, y, refuted)
     if refuted:
         wit_context(contract)

@@ -1,0 +1,5 @@
+# A bound another parameter projects is named as the callee wrote it.
+Box:type = [values:array<int64>]
+get = (b:Box index:int64<0 <=? index <? b.values.length>):>int64 => b.values[index]
+first = (b:Box):>int64 => get(b 1)
+main = () => { printl(first(Box[[1 2]])) }
