@@ -1,5 +1,4 @@
 # A deterministic game and two rollback peers on a simulated network.
-$runtime_checks
 import netplay
 
 Pad:type = [dx:int64=0 fire:bool=false]
@@ -13,8 +12,8 @@ Simulation:type = [
 
 # Each invocation owns its value; writing a player detaches a shared snapshot.
 step = (world:World pads:array<Pad>):>World => {
+    if pads.length <? 2 return world
     let next = world
-    $runtime_assert pads.length >=? 2
     loop player in [0..2) {
         next.positions[player] += pads[player].dx
         if pads[player].fire and abs(next.positions[player]-next.positions[1-player])<?5 {
@@ -26,7 +25,7 @@ step = (world:World pads:array<Pad>):>World => {
 }
 
 # Inputs depend on simulation ticks, so waiting or replaying never changes them.
-input_for = (player:int64 tick:int64):>Pad => Pad[
+input_for = (player:int tick:int):>Pad => Pad[
     dx=(tick//12+player)%3-1
     fire=(tick+player*3)%11=?0
 ]

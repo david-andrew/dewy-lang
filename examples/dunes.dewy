@@ -1,5 +1,4 @@
 # A playable desert journey with procedural cloth and custom shaders.
-$runtime_checks
 from p"dunes_model.dewy" import WORLD, dune_height, sand_color, robe_vertices, robe_indices,
     ribbon_vertices, ribbon_indices, SandParams, sand_vs, sand_fs, BeamParams, beam_vs, beam_fs
 from units import rad
@@ -101,7 +100,7 @@ let wind_id = 0
 ground = (x:float64 z:float64):>float64 => dune_height(x z)
 
 # each link trails the one before it, fluttering in the wind
-follow = (chain:array<vec3> anchor:vec3 count:int64 dt:float64):>array<vec3> => {
+follow = (chain:array<vec3> anchor:vec3 count:int dt:float64):>array<vec3> => {
     loop chain.length <? count { chain.push(chain.get(chain.length - 1) ?? anchor) }
     if chain.length =? 0 { return chain }
     chain[0] = anchor

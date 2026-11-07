@@ -1,8 +1,7 @@
 # A game-position history using a generic container written entirely in Dewy.
-$runtime_checks
 from p"ring.dewy" import new_ring
 
-Point:type = [x:int64 y:int64]
+Point:type = [x:int y:int]
 __add__ = (a:Point b:Point):>Point => Point[a.x+b.x a.y+b.y]
 
 main = ():>void => {
@@ -13,7 +12,12 @@ main = ():>void => {
         trail.push(position)
     }
     let rewind = trail
-    trail[trail.length-1].x += 100
+    # The ring could be shorter than these indexes, so say what happens then.
+    if trail.length <? 4 {
+        printl"Not enough history yet"
+        return
+    }
+    trail[3].x += 100
     printl"History length: {trail.length}"
     printl"Oldest position: {trail[0].x}, {trail[0].y}"
     printl"Newest position: {trail[3].x}, {trail[3].y}"

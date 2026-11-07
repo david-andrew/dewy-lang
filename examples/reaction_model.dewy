@@ -1,24 +1,30 @@
 # A two-field reaction/diffusion simulation. All fields are ordinary values;
 # matrix slices and dotted arithmetic express the interior stencil directly.
-$runtime_checks
-Field:type = [a:NDArray<float32> b:NDArray<float32> steps:int64]
+Field:type = [
+    height:int64<height >=? 3>
+    width:int64<width >=? 3>
+    a:array<float32 length=[height width]>
+    b:array<float32 length=[height width]>
+    steps:int64
+]
 
-fresh = (width:int64 height:int64):>Field => {
-    $runtime_assert(width >=? 3 and height >=? 3)
-    return Field[reshape(fill(1.0 as float32 width*height) height width)
-        zeros<float32>(height width) 0]
-}
+fresh = (width:int64<width >=? 3> height:int64<height >=? 3>):>Field =>
+    Field[height width zeros<float32>(height width) .+ 1.0 zeros<float32>(height width) 0]
 
 paint = (@field:Field x:int64 y:int64 radius:int64):>void => {
-    let left = max(1 x-radius) let right = min(cols(field.a)-2 x+radius)
-    let top = max(1 y-radius) let bottom = min(rows(field.a)-2 y+radius)
+    let left = max(1 x-radius) let right = min(field.width-2 x+radius)
+    let top = max(1 y-radius) let bottom = min(field.height-2 y+radius)
     if left >? right or top >? bottom return
     field.a[[top..bottom] [left..right]] = 0.5
     field.b[[top..bottom] [left..right]] = 0.25
 }
 
+# The second chemical at a cell, 0 outside the field.
+level = (field:Field y:int64 x:int64):>float32 =>
+    if 0 <=? y <? field.height and 0 <=? x <? field.width field.b[y x] else 0.0
+
 advance = (@field:Field feed:float32 remove:float32):>void => {
-    let h = rows(field.a)-1 let w = cols(field.a)-1
+    let h = field.height-1 let w = field.width-1
     # Keep both old interiors until both updates are computed. The outer ring
     # remains at A=1, B=0, supplying a fixed boundary for the simulation.
     let a = field.a[[1..h) [1..w)]
@@ -46,6 +52,6 @@ painting_and_evolution_preserve_a_saved_field = () => {
     let field = fresh(8 6) let saved = field
     paint(@field 4 3 1)
     advance(@field 0.035 0.062)
-    $expect field.b[3 4] >? 0.25 and field.b[0 0] =? 0.0
+    $expect level(field 3 4) >? 0.25 and level(field 0 0) =? 0.0
     $expect saved.b.data =? fill(0.0 as float32 48) and saved.steps =? 0
 }

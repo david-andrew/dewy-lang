@@ -1,13 +1,10 @@
 # A bounded history, oldest entry first. Once full, push replaces the oldest
 # entry in constant time. Construct with new_ring<T>(capacity).
-# The head and length invariants live in these functions: indexes are checked.
-$runtime_checks
-Ring:type = <T>[capacity:int64 values:array<T> head:int64=0]
+# The types state the invariants: a positive capacity, a head inside it, and an
+# index a caller has proven in bounds.
+Ring:type = <T>[capacity:int64<capacity >? 0> values:array<T> head:int64<0 <=? head <? capacity>=0]
 
-new_ring = <T>(capacity:int64):>Ring<T> => {
-    if capacity <=? 0 panic("ring capacity must be positive")
-    return Ring<T>[capacity=capacity values=[]]
-}
+new_ring = <T>(capacity:int64<capacity >? 0>):>Ring<T> => Ring<T>[capacity=capacity values=[]]
 
 length = <T>(ring:Ring<T>):>int64 => ring.values.length
 
@@ -16,18 +13,11 @@ push = <T>(@ring:Ring<T> value:T):>void => {
         ring.values.push(value)
     } else {
         ring.values[ring.head] = value
-        ring.head += 1
-        if ring.head =? ring.capacity ring.head = 0
+        ring.head = (ring.head+1)%ring.capacity
     }
 }
 
-storage_index = <T>(ring:Ring<T> index:int64):>int64 => {
-    if index <? 0 or index >=? ring.values.length panic("ring index out of bounds")
-    let slot = ring.head+index
-    return if slot >=? ring.capacity slot-ring.capacity else slot
-}
-
-__index__ = <T>(ring:Ring<T> index:int64):>T => ring.values[storage_index(ring index)]
-__setindex__ = <T>(@ring:Ring<T> index:int64 value:T):>void => {
-    ring.values[storage_index(ring index)] = value
+__index__ = <T>(ring:Ring<T> index:int64<0 <=? index <? ring.values.length>):>T => ring.values[(ring.head+index)%ring.values.length]
+__setindex__ = <T>(@ring:Ring<T> index:int64<0 <=? index <? ring.values.length> value:T):>void => {
+    ring.values[(ring.head+index)%ring.values.length] = value
 }

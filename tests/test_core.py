@@ -2019,8 +2019,9 @@ return if empty.length =? 1 and empty[0] =? 42 42 else 4
 }
 ''') + RUNTIME_CHECKS)
     else:
+        # (a constant outside the contract is an error while compiling; data is checked when it runs)
         action = {'capacity': 'new_ring<int64>(0);',
-                  'negative-index': 'ring[-1];', 'past-end': 'ring[1];'}[case]
+                  'negative-index': 'ring[-1];', 'past-end': 'ring[to_int("1") ?? 0];'}[case]
         source.write_text((f'from p"ring.dewy" import new_ring\n'
                           f'main=():>void=>exit(entry()) entry=()=>{{let ring=new_ring<int64>(2) ring.push(42) {action} return 0}}') + RUNTIME_CHECKS)
     binary = tmp_path / 'ring'
@@ -2029,6 +2030,10 @@ return if empty.length =? 1 and empty[0] =? 42 42 else 4
         flags += ['--target', 'wasm32']
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
+    if case in ('capacity', 'negative-index'):
+        assert built.returncode != 0
+        assert ('capacity' if case == 'capacity' else 'refinement refuted') in built.stdout + built.stderr
+        return
     assert built.returncode == 0, built.stdout + built.stderr
     command = [binary]
     if target == 'wasm':
@@ -2049,8 +2054,7 @@ return if empty.length =? 1 and empty[0] =? 42 42 else 4
         assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
     else:
         assert ran.returncode != 0
-        message = 'ring capacity must be positive' if case == 'capacity' else 'ring index out of bounds'
-        assert message in ran.stdout + ran.stderr
+        assert 'refinement failed' in ran.stdout + ran.stderr
 
 
 @pytest.mark.parametrize('case', ['stale', 'missing', 'storage-bounds', 'rhs-removes-item'])

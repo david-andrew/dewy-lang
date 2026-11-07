@@ -1,7 +1,6 @@
 # Native and web share the game source.
 # Host a native build with HOST=1; join it with JOIN=localhost.
 # DEWY_NETPONG_PORT overrides the default 47200 for local sessions.
-$runtime_checks
 from units import rad
 
 import net
@@ -9,7 +8,8 @@ import invite
 
 window("Dewy / Netpong" 1280 720)
 
-let PORT = to_int(env("DEWY_NETPONG_PORT") ?? "47200") ?? 47200
+let requested_port = to_int(env("DEWY_NETPONG_PORT") ?? "47200") ?? 47200
+let PORT:int64<1 <=? PORT <=? 65535> = if 1 <=? requested_port <=? 65535 requested_port else 47200
 const PADDLE_H:float64 = 120.0
 const PADDLE_SPEED:float64 = 620.0
 const BALL_SPEED:float64 = 520.0
@@ -25,7 +25,7 @@ let Screen = [title = 0 help = 1 friend = 2 by_address = 3 joining = 4 waiting =
 
 let screen = Screen.title
 let hosting = false
-let other = -1 # the other player (a peer)
+let other:int64 = -1 # the other player (a peer)
 let address = env("JOIN") ?? "localhost" # (a web page: ?join=address)
 let left_y:float64 = 360.0 # the host's paddle (left), the other's (right)
 let right_y:float64 = 360.0

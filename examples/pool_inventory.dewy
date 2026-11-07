@@ -1,13 +1,13 @@
 # Repeated entity updates through stable handles, while retaining a snapshot.
-$runtime_checks
 Entity:type = [inventory:array<int64>]
 
-mutate_inventory = (@entities:Pool<Entity> handles:array<Handle> count:int64):>void => {
-    # (handles and slots are data: checked where they are used)
-    $runtime_checks
+mutate_inventory = (@entities:Pool<Entity> handles:array<Handle length=64> count:int64):>void => {
     loop i in [0..count) {
         let entity = i%64 let slot = (i//64)%32 let delta = i%7
-        entities[handles[entity]].inventory[slot] += delta+1
+        let handle = handles[entity]
+        if entities.has(handle) and slot <? entities[handle].inventory.length {
+            entities[handle].inventory[slot] += delta+1
+        }
     }
 }
 
@@ -24,13 +24,11 @@ main = (argv:array<string>):>void => {
     if argv.length >? 1 {
         let parsed = to_int(argv[1])
         if parsed is? error panic("expected an update count")
+        if parsed <? 0 or parsed >? int64.max panic("update count must fit an int64 and be nonnegative")
         count = parsed
     }
-    if count <? 0 panic("update count must be nonnegative")
-    let entities:Pool<Entity> = [] let handles:array<Handle> = []
-    loop i in [0..64) {
-        handles.push(entities.add(Entity[[loop j in [0..32) 0]]))
-    }
+    let entities:Pool<Entity> = []
+    let handles = [loop i in [0..64) entities.add(Entity[fill(0 32)])]
     let snapshot = entities
     let started = time_ns()
     mutate_inventory(@entities handles count)

@@ -1,6 +1,5 @@
 # Run: tools/dewy examples/reaction_field.dewy
 # Browser: tools/dewy build examples/reaction_field.dewy --target wasm32 -o field
-$runtime_checks
 from p"reaction_model.dewy" import fresh, paint, advance
 
 const WIDTH:int64 = 96
@@ -50,7 +49,10 @@ update = (_dt:float64):>void => {
             paint(@field ((mouse.x-32.0)/8.0) as int64 ((mouse.y-144.0)/8.0) as int64 2)
         }
     if running {
-        loop i in [0..(speed as int64)) advance(@field feed as float32 remove as float32)
+        let steps = speed
+        if 0.0 <=? steps <=? 64.0 {
+            loop i in [0..(steps as int64)) advance(@field feed as float32 remove as float32)
+        }
     }
 }
 

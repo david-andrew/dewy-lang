@@ -1,7 +1,6 @@
 # Stable entity handles and a priority queue, using bundled generic containers.
-$runtime_checks
-Enemy:type = [name:string health:int64=100]
-Event:type = <T>[target:T damage:int64]
+Enemy:type = [name:string health:int=100]
+Event:type = <T>[target:T damage:int]
 
 # The core specializes this function for the queue's element type.
 schedule = <T>(@queue:Heap<T> value:T time:float64):>void => {
