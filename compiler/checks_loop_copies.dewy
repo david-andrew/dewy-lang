@@ -1,0 +1,183 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_CHECKED NF_INCLUSIVE NF_MUT NF_RDONLY add_flag clone has_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (LF_ADDR LF_CAPTURED LF_DECL LF_READ LF_SOAELEM LF_SOAMUT LF_VALUEITER LoopCopyWrite check_stmt dewy_iterator_loop dewy_iterator_type fns locals loop_copy_refined loop_copy_writes loop_serials map_loop_values new_local route_text soa_aliases)
+from p"checked_eval.dewy" import (LF_ALIAS)
+from p"checker_expr.dewy" import (check_expr)
+from p"dwarf_format.dewy" import (LF_ASSIGNED)
+from p"effect_loans.dewy" import (LF_SHARED)
+from p"expr.jo" import (bc_bin bc_call bc_ident bc_int intrinsics last_checked mk_ident_local ntype)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"native_debug.dewy" import (LF_BYREF)
+from p"parse.jo" import (desugar_loopx lx_block)
+from p"refine.jo" import (representation_type)
+from p"types.jo" import (dt prune tkind types)
+from p"util.jo" import (fatal name_of pos_in_lib warn)
+
+LoopWord:type=int64<overflow='wrap'>
+# the element alias of a loop over a soa array (see soa_loop)
+soa_alias=(s:LoopWord):>void=>$unsafe {
+    let tmpl=clone(LoopWord(nodes.ptr[s].b))
+    check_expr(LoopWord(nodes.ptr[s].b) 0);
+    let v=last_checked
+    let l=new_local(LoopWord(nodes.ptr[s].name) ntype(v) nodes.ptr[s].pos)
+    soa_aliases += 1
+    let f=LF_ALIAS | LF_SOAELEM
+    if has_flag(s NF_MUT) {f |= LF_SOAMUT}
+    locals.ptr[l].flags=int32(f)
+    locals.ptr[l].alias=int32(v)
+    locals.ptr[l].soa=int32(tmpl)
+    nodes.ptr[s].kind='block'
+    nodes.ptr[s].nlist=0
+}
+# p.x for a soa element alias p: ps.x[i]
+soa_alias_field=(n:LoopWord l:LoopWord):>int64=>$unsafe {
+    let t=LoopWord(locals.ptr[l].soa)
+    let f=mk('field' nodes.ptr[n].pos)
+    nodes.ptr[f].a=int32(clone(LoopWord(nodes.ptr[t].a)))
+    nodes.ptr[f].name=nodes.ptr[n].name
+    let ix=mk('index' nodes.ptr[n].pos)
+    nodes.ptr[ix].a=int32(f)
+    nodes.ptr[ix].b=int32(clone(LoopWord(nodes.ptr[t].b)))
+    if LoopWord(locals.ptr[l].flags) & LF_SOAMUT =? 0 {
+        add_flag(ix NF_RDONLY)
+        nodes.ptr[ix].name=locals.ptr[l].name
+    }
+    ix
+}
+loop_copy_write=(l:LoopWord pos:LoopWord kept:bool by_place:bool):>void=>$unsafe {
+    let fl=LoopWord(locals.ptr[l].flags)
+    let keep=kept
+    let place=by_place
+    if loop_copy_writes.has(l) {
+        keep=keep or loop_copy_writes[l].kept
+        place=place or loop_copy_writes[l].by_place
+    }
+    if fl & LF_READ not=? 0 and loop_serials.length >? LoopWord(locals.ptr[l].dloops) {keep=true}
+    loop_copy_writes[l]=LoopCopyWrite(pos keep place)
+    locals.ptr[l].flags=int32((fl | LF_DECL | LF_ASSIGNED) & ~(LF_BYREF | LF_VALUEITER | LF_READ))
+    # (the copy holds what `let y = x` would: an element's refinement does not bind it)
+    if tkind(LoopWord(locals.ptr[l].type)) =? 'refined' and not loop_copy_refined.has(l) {
+        loop_copy_refined[l]=LoopWord(locals.ptr[l].type)
+        locals.ptr[l].type=int32(representation_type(LoopWord(locals.ptr[l].type)))
+    }
+}
+# What a dead write's warning says to do instead.
+loop_copy_hint=(l:LoopWord s:LoopWord):>string=>$unsafe {
+    let nm=name_of(LoopWord(locals.ptr[l].name))
+    if map_loop_values.has(l) {return "change the entry through its key, as `loop key in m.keys() \{ m[key]... }`"}
+    let src=route_text(LoopWord(nodes.ptr[s].a))
+    if (src as array<uint8>).length =? 0 {src="items"}
+    "write `loop @{nm} in {src}` to change the element itself"
+}
+# (a use of l in n other than as the object of a statement's call with no result, as
+# `xs.push(1)`, whose change to the copy nothing can see; O(n), for binders written by place)
+loop_copy_use=(n:LoopWord l:LoopWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {return nodes.ptr[n].aux =? int32(1) and LoopWord(nodes.ptr[n].sym) =? l}
+    if k =? 'lambda' {return true}
+    if k =? 'exprstmt' {
+        let c=LoopWord(nodes.ptr[n].a)
+        if (nodes.ptr[c].kind =? 'call' or nodes.ptr[c].kind =? 'intrinsic') and nkids(c) >? 0 and tkind(ntype(c)) =? 'void_' {
+            let first=kid(c 0)
+            # (by place: an `@` parameter's argument, or a built-in array method's object)
+            let place=nodes.ptr[first].kind =? 'addr'
+            if nodes.ptr[c].kind =? 'intrinsic' {
+                loop it in intrinsics {
+                    if int64(it.id) =? LoopWord(nodes.ptr[c].aux) and it.arr {place=true}
+                }
+            }
+            else if nodes.ptr[c].aux =? 0 and nodes.ptr[c].sym >? 0 {
+                let called=LoopWord(fns.ptr[LoopWord(nodes.ptr[c].sym)].decl)
+                if called not=? 0 and nkids(called) >? 0 and has_flag(kid(called 0) NF_MUT) {place=true}
+            }
+            loop nodes.ptr[first].kind =? 'addr' {first=LoopWord(nodes.ptr[first].a)}
+            if place and nodes.ptr[first].kind =? 'ident' and LoopWord(nodes.ptr[first].sym) =? l {
+                loop i in [1..nkids(c)) {
+                    if loop_copy_use(kid(c i) l) {return true}
+                }
+                return false
+            }
+        }
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return true}
+    if mask & 1 not=? 0 and loop_copy_use(LoopWord(nodes.ptr[n].a) l) {return true}
+    if mask & 2 not=? 0 and loop_copy_use(LoopWord(nodes.ptr[n].b) l) {return true}
+    if mask & 4 not=? 0 and loop_copy_use(LoopWord(nodes.ptr[n].c) l) {return true}
+    if mask & 16 not=? 0 {
+        loop c2 in kids(n) {
+            if loop_copy_use(c2 l) {return true}
+        }
+    }
+    false
+}
+for_copied_binder=(s:LoopWord l0:LoopWord):>int64=>$unsafe {
+    if l0 <=? 0 {return l0}
+    if not loop_copy_writes.has(l0) {return l0}
+    let write=loop_copy_writes[l0]
+    let fl=LoopWord(locals.ptr[l0].flags)
+    let pos=locals.ptr[l0].pos
+    let dead=if write.by_place {fl & (LF_CAPTURED | LF_SHARED) =? 0 and not loop_copy_use(LoopWord(nodes.ptr[s].b) l0)} else {fl & (LF_READ | LF_CAPTURED | LF_ADDR | LF_SHARED) =? 0}
+    if not write.kept and dead and not pos_in_lib(pos) and not starts_with(name_of(LoopWord(locals.ptr[l0].name)) "_") {
+        warn(write.pos "'{name_of(LoopWord(locals.ptr[l0].name))}' is changed here but never read afterwards: it holds a copy of the element, so what it was copied from stays as it was; {loop_copy_hint(l0 s)}")
+    }
+    locals.ptr[l0].flags=int32(fl | LF_READ)
+    let element=new_local(0 loop_copy_refined.get(l0) ?? LoopWord(locals.ptr[l0].type) pos)
+    locals.ptr[element].flags=int32(LF_BYREF | LF_READ | (if map_loop_values.has(l0) {0} else {LF_VALUEITER}))
+    if map_loop_values.has(l0) {map_loop_values[element]=true}
+    let d=mk('vardecl' pos)
+    nodes.ptr[d].name=locals.ptr[l0].name
+    nodes.ptr[d].b=int32(mk_ident_local(element pos))
+    nodes.ptr[d].sym=int32(l0)
+    add_flag(d NF_CHECKED)
+    let body=LoopWord(nodes.ptr[s].b)
+    set_list(body [d kids(body)...])
+    element
+}
+# `loop item in @place` (dw_live_loop): an iterator steps in place
+# (dewy_iterator_loop); an array is iterated live, a position counter checked
+# against its current length each time and the element read at the body's start,
+# so pushes and edits made by the body are seen (worklists).
+check_live_loop=(s:LoopWord):>void=>$unsafe {
+    let it=LoopWord(nodes.ptr[s].a)
+    let pos=nodes.ptr[s].pos
+    # (unchecked copies of the place, for the loop's own reads)
+    let length_place=clone(it)
+    let element_place=clone(it)
+    let t=prune(check_expr(it 0))
+    if dewy_iterator_type(t) {
+        dewy_iterator_loop(s length_place);
+        return
+    }
+    if types.ptr[t].kind not=? 'array' {fatal(nodes.ptr[it].pos "`loop item in @items` iterates a growable array or a bound iterator live, not {dt(t)}; iterate its value with `loop item in items`")}
+    let binder=kid(s 0)
+    let counter="$dewy_live_{nodes.length}"
+    let range=mk('range' pos)
+    nodes.ptr[range].a=int32(bc_int(0 pos))
+    add_flag(range NF_INCLUSIVE)
+    let first=mk('lhead' pos)
+    nodes.ptr[first].op=1
+    set_list(first [bc_ident(counter pos)])
+    nodes.ptr[first].a=int32(range)
+    let second=mk('lhead' pos)
+    nodes.ptr[second].op=4
+    nodes.ptr[second].a=int32(bc_bin('lt' bc_ident(counter pos) bc_call("__dewy_live_length" [length_place] pos) pos))
+    let both=mk('lhead' pos)
+    nodes.ptr[both].op=2
+    nodes.ptr[both].a=int32(first)
+    nodes.ptr[both].b=int32(second)
+    let element=mk('index' pos)
+    nodes.ptr[element].a=int32(element_place)
+    nodes.ptr[element].b=int32(bc_ident(counter pos))
+    let decl=mk('vardecl' nodes.ptr[binder].pos)
+    nodes.ptr[decl].name=nodes.ptr[binder].name
+    nodes.ptr[decl].b=int32(element)
+    let lx=mk('loopx' pos)
+    nodes.ptr[lx].sval=nodes.ptr[s].sval
+    nodes.ptr[lx].a=int32(both)
+    nodes.ptr[lx].b=int32(lx_block([decl kids(LoopWord(nodes.ptr[s].b))...] pos))
+    nodes.ptr[s]=nodes.ptr[desugar_loopx(lx)]
+    check_stmt(s)
+}
