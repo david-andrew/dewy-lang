@@ -1,0 +1,9 @@
+# Type arguments and refinements still read, spaced or not.
+Box:type = <T>[value:T]
+f = (x:int<(>? 0)> xs:array<int>):>int => xs.length + x
+let d:dict<string array<int>> = []
+main = () => {
+    let b:Box<int> = Box<int>[1]
+    let n:int<0 <=? n and n <? 5> = 3
+    printl(b.value + n + f(1 [1]) + d.length)
+}
