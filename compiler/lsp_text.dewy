@@ -1,0 +1,265 @@
+$runtime_checks
+from p"checks_text.dewy" import (byte_find byte_rfind)
+from p"@lib/core/str.jo" import (ends_with starts_with)
+from p"ide.jo" import (IK_CONST IK_ENUM IK_FIELD IK_FN IK_GLOBAL IK_LOCAL IK_PARAM IK_STRUCT ide_texts)
+from p"ide_text.dewy" import (ide_params_end)
+from p"json_doc.dewy" import (json_quote)
+from p"lex.jo" import (is_ident_char)
+from p"lsp.jo" import (Diag Hit Ref Result docs empty_main sy_dewy sy_ls sy_text)
+from p"lsp_handlers.dewy" import (dewy_ends_op kind_name line_of line_starts_of map_off)
+from p"lsp_ops.dewy" import (dewy_op_byte dewy_op_word ensure_checked file_in jget jint jitems jpath jpos jstr lpos_of lsp_notify lsp_reply req_off text_of text_params_doc uri_of users_dirty)
+
+LspTextWord:type=int64<overflow='wrap'>
+utf16_units=(text:string a:LspTextWord b:LspTextWord):>int64=>{
+    let n:LspTextWord=0
+    loop i in [a..min(b (text as array<uint8>).length)) {
+        let c=(text as array<uint8>)[i]
+        if c <? 0x80 or c >=? 0xC0 and c <? 0xF0 {n += 1} else if c >=? 0xF0 {n += 2}
+    }
+    n
+}
+off_of=(text:string ls:array<int64> line:LspTextWord ch:LspTextWord):>int64=>{
+    if line <? 0 {return 0}
+    if line >=? ls.length {return (text as array<uint8>).length}
+    let i=ls[line]
+    let u:LspTextWord=0
+    loop i <? (text as array<uint8>).length and (text as array<uint8>)[i] not=? b'\n' and u <? ch {
+        let c=(text as array<uint8>)[i]
+        if c >=? 0xF0 {u += 2} else {u += 1}
+        i += 1
+        loop i <? (text as array<uint8>).length and (text as array<uint8>)[i] >=? 0x80 and (text as array<uint8>)[i] <? 0xC0 {i += 1}
+    }
+    i
+}
+publish=(d:LspTextWord):>void=>{
+    let r=docs[d].res
+    let by_path=dict<string array<string>>()
+    loop x0 in r.diags {
+        let x=x0
+        if (x.path as array<uint8>).length =? 0 or x.path =? empty_main {x=Diag(docs[d].path 0 x.msg x.warning x.info)}
+        let text=text_of(x.path)
+        let ls=line_starts_of(text)
+        let a=x.off
+        let b=a
+        loop b <? (text as array<uint8>).length and is_ident_char((text as array<uint8>)[b]) {b += 1}
+        if b =? a and a <? (text as array<uint8>).length and (text as array<uint8>)[a] not=? b'\n' {b=a + 1}
+        let sev:LspTextWord=1
+        if x.warning {sev=2}
+        if x.info {sev=3}
+        let item="\{\"range\":\{\"start\":{jpos(lpos_of(text ls a))},\"end\":{jpos(lpos_of(text ls b))}\},\"severity\":{sev},\"source\":\"dewy-core\",\"message\":{json_quote(x.msg)}\}"
+        let lst=by_path.get(x.path) ?? []
+        lst.push(item)
+        by_path[x.path]=lst
+    }
+    if by_path.get(docs[d].path) =? none {by_path[docs[d].path]=[]}
+    let sent:array<string>=[]
+    loop [p items] in by_path {sent.push(uri_of(p))}
+    # (first clear errors published before to files that have none now)
+    loop u in docs[d].diag_uris {
+        if not sent.contains(u) {lsp_notify("textDocument/publishDiagnostics" "\{\"uri\":{json_quote(u)},\"diagnostics\":[]\}")}
+    }
+    loop [p items] in by_path {
+        let u=uri_of(p)
+        let ver=""
+        if u =? docs[d].uri {ver=",\"version\":{docs[d].version}"}
+        lsp_notify("textDocument/publishDiagnostics" "\{\"uri\":{json_quote(u)}{ver},\"diagnostics\":[{join(items ",")}]\}")
+    }
+    docs[d].diag_uris=sent
+}
+# the reference at offset off of document d (in its latest result, else in the last good one)
+ref_at=(d:LspTextWord off:LspTextWord):>Hit=>{
+    loop which in [0..2) {
+        let r=docs[d].res
+        if which =? 1 {
+            if not docs[d].has_good {break}
+            r=docs[d].good
+        }
+        let f=file_in(r docs[d].path)
+        if f <? 0 {continue}
+        let o=map_off(r docs[d].path off)
+        if o <? 0 {continue}
+        let best:LspTextWord=-1
+        loop i in 0.. and x in r.refs {
+            if x.file =? f and o >=? x.off and o <=? x.off + x.len {
+                # (prefer the one starting closest, and one with a declaration)
+                if best <? 0 or x.off >? r.refs[best].off or x.off =? r.refs[best].off and (r.refs[best].decl as array<uint8>).length =? 0 {best=i}
+            }
+        }
+        if best >=? 0 {return Hit(true r.refs[best] r)}
+    }
+    Hit(false Ref() Result())
+}
+on_hover=(id:LspTextWord params:LspTextWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    ensure_checked(d)
+    let h=ref_at(d req_off(d params))
+    if not h.found {return lsp_reply(id "null")}
+    let x=h.ref
+    let code=""
+    let doc=""
+    let dc=h.res.decls.get(x.decl)
+    if dc not=? none {
+        code=dc.snippet
+        doc=dc.doc
+        let k=dc.kind
+        if k =? IK_FN and (x.info as array<uint8>).length >? 0 and ends_with(docs[d].path ".dewy") {
+            code="{dc.name}={x.info}"
+        }
+        else if k =? IK_FN and (x.info as array<uint8>).length >? 0 {
+            # the types it was used with (the result's when inferred; generic parameters')
+            let hdr=dc.snippet
+            let ip=x.info
+            let ar=byte_find(ip ") -> ")
+            if ar >=? 0 {ip=ip.byte_slice(0 ar + 1)}
+            if contains(hdr ip) {
+                if not contains(hdr "->") and ar >=? 0 {code="{hdr}{x.info.byte_slice(ar + 1 (x.info as array<uint8>).length)}"}
+            }
+            else {code="{hdr}\n# here: {dc.name}{x.info}"}
+        }
+        else if (k =? IK_LOCAL or k =? IK_PARAM or k =? IK_GLOBAL) and (x.info as array<uint8>).length >? 0 {
+            code="{dc.name}: {x.info}"
+        }
+        # (a secret constant: its type, and not the text that makes it)
+        else if k =? IK_CONST and (starts_with(x.info "secret<") or starts_with(x.info "secret[")) {code="{dc.name}: {x.info} = <redacted>"} else if k =? IK_FIELD and (x.info as array<uint8>).length >? 0 and not contains(code ":") {code="{code}: {x.info}"}
+        if k not=? IK_FN and k not=? IK_STRUCT and k not=? IK_ENUM {code="({kind_name(k)}) {code}"}
+    }
+    else if (x.info as array<uint8>).length >? 0 {code=x.info}
+    if (code as array<uint8>).length =? 0 {return lsp_reply(id "null")}
+    let language=if ends_with(docs[d].path ".dewy") {"dewy"} else {"jo"}
+    let md="```{language}\n{code}\n```"
+    if (doc as array<uint8>).length >? 0 {md="{md}\n---\n{doc}"}
+    lsp_reply(id "\{\"contents\":\{\"kind\":\"markdown\",\"value\":{json_quote(md)}\}\}")
+}
+# file:line, for messages
+where_str=(r:Result f:LspTextWord off:LspTextWord):>string=>{
+    let path=r.paths[f]
+    let t=r.texts.get(path) ?? text_of(path)
+    "{path.byte_slice(byte_rfind(path "/") + 1 (path as array<uint8>).length)}:{line_of(line_starts_of(t) off) + 1}"
+}
+# where a name ends / starts around off
+name_start=(text:string off:LspTextWord):>int64=>{
+    let a=off
+    loop a >? 0 and is_ident_char((text as array<uint8>)[a - 1]) {a -= 1}
+    a
+}
+name_end=(text:string off:LspTextWord):>int64=>{
+    let b=off
+    loop b <? (text as array<uint8>).length and is_ident_char((text as array<uint8>)[b]) {b += 1}
+    b
+}
+# does word w continue the argument that word prev is in?
+dewy_joins=(prev:string w:string):>bool=>{
+    if dewy_op_word(prev) or dewy_op_word(w) {return true}
+    if (w as array<uint8>)[0] not=? b'@' and dewy_op_byte((w as array<uint8>)[0]) {return true}
+    dewy_ends_op(prev)
+}
+count_lead=(s:string i:LspTextWord):>int64=>{
+    let n:LspTextWord=0
+    loop i + n <? (s as array<uint8>).length and (s as array<uint8>)[i + n] =? b' ' {n += 1}
+    n
+}
+count_trail=(s:string i:LspTextWord):>int64=>{
+    let n:LspTextWord=0
+    loop i - n - 1 >=? 0 and (s as array<uint8>)[i - n - 1] =? b' ' {n += 1}
+    n
+}
+indent_of=(s:string):>int64=>{
+    let n:LspTextWord=0
+    loop n <? (s as array<uint8>).length and ((s as array<uint8>)[n] =? b' ' or (s as array<uint8>)[n] =? b'\t') {n += 1}
+    n
+}
+ident_prefix=(s:string):>string=>{
+    let n:LspTextWord=0
+    loop n <? (s as array<uint8>).length and is_ident_char((s as array<uint8>)[n]) {n += 1}
+    s.byte_slice(0 n)
+}
+skip_blanks=(t:string k0:LspTextWord):>int64=>{
+    let k=k0
+    loop k <? (t as array<uint8>).length and ((t as array<uint8>)[k] =? b' ' or (t as array<uint8>)[k] =? b'\t') {k += 1}
+    k
+}
+# name = (params): or name[T] = (params) -> ret: a function (c: the byte after the name on line i)
+fn_decl_at=(i:LspTextWord c:LspTextWord):>bool=>{
+    let t=sy_text
+    let k=sy_ls[i] + c
+    if k <? (t as array<uint8>).length and (t as array<uint8>)[k] =? b'[' {
+        loop k <? (t as array<uint8>).length and (t as array<uint8>)[k] not=? b']' and (t as array<uint8>)[k] not=? b'\n' {k += 1}
+        k += 1
+    }
+    k=skip_blanks(t k)
+    if k >=? (t as array<uint8>).length or (t as array<uint8>)[k] not=? b'=' or k + 1 <? (t as array<uint8>).length and (t as array<uint8>)[k + 1] =? b'=' {return false}
+    k=skip_blanks(t k + 1)
+    # Dewy places generic parameters after '=' and uses '=>' for the body.
+    if sy_dewy and k <? (t as array<uint8>).length and (t as array<uint8>)[k] =? b'<' {
+        loop k <? (t as array<uint8>).length and (t as array<uint8>)[k] not=? b'>' and (t as array<uint8>)[k] not=? b'\n' {k += 1}
+        k=skip_blanks(t min(k + 1 (t as array<uint8>).length))
+    }
+    if k >=? (t as array<uint8>).length or (t as array<uint8>)[k] not=? b'(' {return false}
+    let e=ide_params_end(t k)
+    if e <? 0 {return false}
+    k=skip_blanks(t e)
+    k <? (t as array<uint8>).length and ((t as array<uint8>)[k] =? b':' or ((t as array<uint8>)[k] =? b'-' or sy_dewy and (t as array<uint8>)[k] =? b'=') and k + 1 <? (t as array<uint8>).length and (t as array<uint8>)[k + 1] =? b'>')
+}
+is_word=(s:string):>bool=>{
+    loop c in (s as array<uint8>) {
+        if not is_ident_char(c) {return false}
+    }
+    true
+}
+# where the word w is on the line of offset p, the occurrence nearest p (-1: not there)
+word_near=(text:string p:LspTextWord w:string):>int64=>{
+    let a=p
+    loop a >? 0 and (text as array<uint8>)[a - 1] not=? b'\n' {a -= 1}
+    let e=byte_find(text "\n" a)
+    if e <? 0 {e=(text as array<uint8>).length}
+    let best:LspTextWord=-1
+    let i=byte_find(text w a)
+    loop i >=? 0 and i + (w as array<uint8>).length <=? e {
+        let lb=i =? 0 or not is_ident_char((text as array<uint8>)[i - 1])
+        let rb=i + (w as array<uint8>).length >=? (text as array<uint8>).length or not is_ident_char((text as array<uint8>)[i + (w as array<uint8>).length])
+        if lb and rb and (best <? 0 or abs(i - p) <? abs(best - p)) {best=i}
+        i=byte_find(text w i + 1)
+    }
+    best
+}
+on_change=(params:LspTextWord):>void=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return}
+    loop ch in jitems(jget(params "contentChanges")) {
+        if jget(ch "range") =? 0 {docs[d].text=jstr(jget(ch "text"))} else {
+            # (incremental change: the client did not take the full-text offer)
+            let text=docs[d].text
+            let ls=line_starts_of(text)
+            let rg=jget(ch "range")
+            let a=off_of(text ls jint(jpath(rg "start" "line")) jint(jpath(rg "start" "character")))
+            let b=off_of(text ls jint(jpath(rg "end" "line")) jint(jpath(rg "end" "character")))
+            docs[d].text="{text.byte_slice(0 a)}{jstr(jget(ch "text"))}{text.byte_slice(b (text as array<uint8>).length)}"
+        }
+    }
+    docs[d].version=jint(jpath(params "textDocument" "version"))
+    docs[d].dirty=true
+    loop i in [0..docs.length) {docs[i].has_wide=false}
+    ide_texts[docs[d].path]=docs[d].text
+    users_dirty(d)
+}
+on_close=(params:LspTextWord):>void=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return}
+    docs[d].open=false
+    docs[d].dirty=false
+    ide_texts.remove(docs[d].path);
+    users_dirty(d)
+    # (its errors are cleared, but for files another open document published errors to: that
+    # one's are published again)
+    let owners:array<int64>=[]
+    loop u in docs[d].diag_uris {
+        let o:LspTextWord=-1
+        loop i in [0..docs.length) {
+            if i not=? d and docs[i].open and docs[i].diag_uris.contains(u) {o=i}
+        }
+        if o <? 0 {lsp_notify("textDocument/publishDiagnostics" "\{\"uri\":{json_quote(u)},\"diagnostics\":[]\}")} else if not owners.contains(o) {owners.push(o)}
+    }
+    docs[d].diag_uris=[]
+    loop o in owners {publish(o)}
+}

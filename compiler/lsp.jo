@@ -20,6 +20,7 @@ use 'main.jo'
 use 'json_doc.dewy'
 use 'lsp_ops.dewy'
 use 'lsp_handlers.dewy'
+use 'lsp_text.dewy'
 
 # ---------------- JSON ----------------
 # the message being answered (json_doc.dewy), and its values
@@ -114,27 +115,6 @@ lsp_send = (body: str):
 struct LPos:
     line: int
     ch: int
-
-utf16_units = (text: str, a: int, b: int) -> int:
-    n = 0
-    loop i in [a..min(b, len(text))):
-        c = text[i]
-        if c < 0x80 or c >= 0xC0 and c < 0xF0: n += 1
-        else if c >= 0xF0: n += 2
-    n
-
-off_of = (text: str, ls: int[], line: int, ch: int) -> int:
-    if line < 0: return 0
-    if line >= ls.len(): return len(text)
-    i = ls[line]
-    u = 0
-    loop i < len(text) and text[i] != '\n' and u < ch:
-        c = text[i]
-        if c >= 0xF0: u += 2
-        else: u += 1
-        i += 1
-        loop i < len(text) and text[i] >= 0x80 and text[i] < 0xC0: i += 1
-    i
 
 # ---------------- documents and check results ----------------
 
@@ -590,98 +570,10 @@ check_doc = (path: str, completing: int, lower: bool, wide: bool) -> Result:
 
 # ---------------- requests ----------------
 
-publish = (d: int):
-    r = docs[d].res
-    by_path: {str: str[]} = {}
-    loop x0 in r.diags:
-        x = x0
-        if len(x.path) == 0 or x.path == empty_main: x = Diag(docs[d].path, 0, x.msg, x.warning, x.info)
-        text = text_of(x.path)
-        ls = line_starts_of(text)
-        a = x.off
-        b = a
-        loop b < len(text) and is_ident_char(text[b]): b += 1
-        if b == a and a < len(text) and text[a] != '\n': b = a + 1
-        sev = 1
-        if x.warning: sev = 2
-        if x.info: sev = 3
-        item = "\{\"range\":\{\"start\":{jpos(lpos_of(text, ls, a))},\"end\":{jpos(lpos_of(text, ls, b))}\},\"severity\":{sev},\"source\":\"dewy-core\",\"message\":{json_quote(x.msg)}\}"
-        lst = by_path.get(x.path) ?? []
-        lst.push(item)
-        by_path[x.path] = lst
-    if by_path.get(docs[d].path) == none: by_path[docs[d].path] = []
-    sent: str[]
-    loop p, items in by_path: sent.push(uri_of(p))
-    # (first clear errors published before to files that have none now)
-    loop u in docs[d].diag_uris:
-        if not sent.contains(u): lsp_notify("textDocument/publishDiagnostics", "\{\"uri\":{json_quote(u)},\"diagnostics\":[]\}")
-    loop p, items in by_path:
-        u = uri_of(p)
-        ver = ""
-        if u == docs[d].uri: ver = ",\"version\":{docs[d].version}"
-        lsp_notify("textDocument/publishDiagnostics", "\{\"uri\":{json_quote(u)}{ver},\"diagnostics\":[{join(items, ",")}]\}")
-    docs[d].diag_uris = sent
-
 struct Hit:
     found: bool
     ref: Ref
     res: Result
-
-# the reference at offset off of document d (in its latest result, else in the last good one)
-ref_at = (d: int, off: int) -> Hit:
-    loop which in [0..2):
-        r = docs[d].res
-        if which == 1:
-            if not docs[d].has_good: break
-            r = docs[d].good
-        f = file_in(r, docs[d].path)
-        if f < 0: continue
-        o = map_off(r, docs[d].path, off)
-        if o < 0: continue
-        best = -1
-        loop i in 0.. and x in r.refs:
-            if x.file == f and o >= x.off and o <= x.off + x.len:
-                # (prefer the one starting closest, and one with a declaration)
-                if best < 0 or x.off > r.refs[best].off or x.off == r.refs[best].off and len(r.refs[best].decl) == 0: best = i
-        if best >= 0: return Hit(true, r.refs[best], r)
-    Hit(false, Ref(), Result())
-
-on_hover = (id: int, params: int) -> int:
-    d = text_params_doc(params)
-    if d < 0: return lsp_reply(id, "null")
-    ensure_checked(d)
-    h = ref_at(d, req_off(d, params))
-    if not h.found: return lsp_reply(id, "null")
-    x = h.ref
-    code = ""
-    doc = ""
-    if let dc = h.res.decls.get(x.decl):
-        code = dc.snippet
-        doc = dc.doc
-        k = dc.kind
-        if k == IK_FN and len(x.info) > 0 and ends_with(docs[d].path, ".dewy"):
-            code = dc.name + "=" + x.info
-        else if k == IK_FN and len(x.info) > 0:
-            # the types it was used with (the result's when inferred; generic parameters')
-            hdr = dc.snippet
-            ip = x.info
-            ar = find(ip, ") -> ")
-            if ar >= 0: ip = ip[..ar + 1)
-            if contains(hdr, ip):
-                if not contains(hdr, "->") and ar >= 0: code = hdr + x.info[ar + 1..]
-            else: code = hdr + "\n# here: " + dc.name + x.info
-        else if (k == IK_LOCAL or k == IK_PARAM or k == IK_GLOBAL) and len(x.info) > 0:
-            code = "{dc.name}: {x.info}"
-        # (a secret constant: its type, and not the text that makes it)
-        else if k == IK_CONST and (starts_with(x.info, "secret<") or starts_with(x.info, "secret[")): code = "{dc.name}: {x.info} = <redacted>"
-        else if k == IK_FIELD and len(x.info) > 0 and not contains(code, ":"): code = "{code}: {x.info}"
-        if k != IK_FN and k != IK_STRUCT and k != IK_ENUM: code = "({kind_name(k)}) {code}"
-    else if len(x.info) > 0: code = x.info
-    if len(code) == 0: return lsp_reply(id, "null")
-    language = if ends_with(docs[d].path, ".dewy"): "dewy" else: "jo"
-    md = "```{language}\n{code}\n```"
-    if len(doc) > 0: md += "\n---\n" + doc
-    lsp_reply(id, "\{\"contents\":\{\"kind\":\"markdown\",\"value\":{json_quote(md)}\}\}")
 
 # the file named by a `use` line at off, or ""
 use_target = (d: int, off: int) -> str:
@@ -760,23 +652,6 @@ uses_of = (d: int, h: Hit) -> Use[]:
         f = file_in(w, path)
         if f >= 0: out.push(Use(w, "{f}:{p.1}"))
     out
-
-# file:line, for messages
-where_str = (r: Result, f: int, off: int) -> str:
-    path = r.paths[f]
-    t = r.texts.get(path) ?? text_of(path)
-    "{path[rfind(path, "/") + 1..]}:{line_of(line_starts_of(t), off) + 1}"
-
-# where a name ends / starts around off
-name_start = (text: str, off: int) -> int:
-    a = off
-    loop a > 0 and is_ident_char(text[a - 1]): a -= 1
-    a
-
-name_end = (text: str, off: int) -> int:
-    b = off
-    loop b < len(text) and is_ident_char(text[b]): b += 1
-    b
 
 # for each cursor position in text up to b: 1 if it is inside a string or a comment (not in a
 # string's {interpolations}), the text read from its start as the lexer reads it
@@ -897,12 +772,6 @@ on_completion = (id: int, params: int) -> int:
         loop kw in comp_words(ends_with(docs[d].path, ".dewy")):
             if seen.get(kw) == none: items.push("\{\"label\":{json_quote(kw)},\"kind\":14,\"sortText\":{json_quote("2" + kw)}\}")
     lsp_reply(id, "\{\"isIncomplete\":false,\"items\":[{join(items, ",")}]\}")
-
-# does word w continue the argument that word prev is in?
-dewy_joins = (prev: str, w: str) -> bool:
-    if dewy_op_word(prev) or dewy_op_word(w): return true
-    if w[0] != '@' and dewy_op_byte(w[0]): return true
-    dewy_ends_op(prev)
 
 dewy_arg_at = (text: str, m: u8[], a: int, b: int) -> (int, str):
     words: str[]
@@ -1068,16 +937,6 @@ on_signature = (id: int, params: int) -> int:
     sig += "\}"
     lsp_reply(id, "\{\"signatures\":[{sig}],\"activeSignature\":0,\"activeParameter\":{active}\}")
 
-count_lead = (s: str, i: int) -> int:
-    n = 0
-    loop i + n < len(s) and s[i + n] == ' ': n += 1
-    n
-
-count_trail = (s: str, i: int) -> int:
-    n = 0
-    loop i - n - 1 >= 0 and s[i - n - 1] == ' ': n += 1
-    n
-
 # ---------------- semantic tokens (what each name is: the references a check found) ----------------
 
 # token types and modifiers, by index (the legend in the capabilities)
@@ -1210,41 +1069,6 @@ stmt_lines = (text: str, ls: int[]) -> bool[]:
         else if (c == ')' or c == ']' or c == '}}') and depth > 0: depth -= 1
         i += 1
     ok
-
-indent_of = (s: str) -> int:
-    n = 0
-    loop n < len(s) and (s[n] == ' ' or s[n] == '\t'): n += 1
-    n
-
-ident_prefix = (s: str) -> str:
-    n = 0
-    loop n < len(s) and is_ident_char(s[n]): n += 1
-    s[..n)
-
-skip_blanks = (t: str, k0: int) -> int:
-    k = k0
-    loop k < len(t) and (t[k] == ' ' or t[k] == '\t'): k += 1
-    k
-
-# name = (params): or name[T] = (params) -> ret: a function (c: the byte after the name on line i)
-fn_decl_at = (i: int, c: int) -> bool:
-    t = sy_text
-    k = sy_ls[i] + c
-    if k < len(t) and t[k] == '[':
-        loop k < len(t) and t[k] != ']' and t[k] != '\n': k += 1
-        k += 1
-    k = skip_blanks(t, k)
-    if k >= len(t) or t[k] != '=' or k + 1 < len(t) and t[k + 1] == '=': return false
-    k = skip_blanks(t, k + 1)
-    # Dewy places generic parameters after '=' and uses '=>' for the body.
-    if sy_dewy and k < len(t) and t[k] == '<':
-        loop k < len(t) and t[k] != '>' and t[k] != '\n': k += 1
-        k = skip_blanks(t, min(k + 1, len(t)))
-    if k >= len(t) or t[k] != '(': return false
-    e = ide_params_end(t, k)
-    if e < 0: return false
-    k = skip_blanks(t, e)
-    k < len(t) and (t[k] == ':' or (t[k] == '-' or sy_dewy and t[k] == '=') and k + 1 < len(t) and t[k + 1] == '>')
 
 symbols_in = (lines_: str[], from: int, to: int, ind: int) -> str[]:
     out: str[]
@@ -1415,26 +1239,6 @@ on_code_lens = (id: int, params: int) -> int:
     lsp_reply(id, "[{join(out, ",")}]")
 
 # ---------------- quick fixes: edits that errors suggest ----------------
-
-is_word = (s: str) -> bool:
-    loop c in s:
-        if not is_ident_char(c): return false
-    true
-
-# where the word w is on the line of offset p, the occurrence nearest p (-1: not there)
-word_near = (text: str, p: int, w: str) -> int:
-    a = p
-    loop a > 0 and text[a - 1] != '\n': a -= 1
-    e = find(text, "\n", a)
-    if e < 0: e = len(text)
-    best = -1
-    i = find(text, w, a)
-    loop i >= 0 and i + len(w) <= e:
-        lb = i == 0 or not is_ident_char(text[i - 1])
-        rb = i + len(w) >= len(text) or not is_ident_char(text[i + len(w)])
-        if lb and rb and (best < 0 or abs(i - p) < abs(best - p)): best = i
-        i = find(text, w, i + 1)
-    best
 
 # the start of the nearest line above p whose text pred accepts (-1: none)
 line_above = (text: str, p: int, pred: (str) -> bool) -> int:
@@ -1672,44 +1476,6 @@ on_code_action = (id: int, params: int) -> int:
     lsp_reply(id, "[{join(out, ",")}]")
 
 # ---------------- the main loop ----------------
-
-on_change = (params: int):
-    d = text_params_doc(params)
-    if d < 0: return
-    loop ch in jitems(jget(params, "contentChanges")):
-        if jget(ch, "range") == 0: docs[d].text = jstr(jget(ch, "text"))
-        else:
-            # (incremental change: the client did not take the full-text offer)
-            text = docs[d].text
-            ls = line_starts_of(text)
-            rg = jget(ch, "range")
-            a = off_of(text, ls, jint(jpath(rg, "start", "line")), jint(jpath(rg, "start", "character")))
-            b = off_of(text, ls, jint(jpath(rg, "end", "line")), jint(jpath(rg, "end", "character")))
-            docs[d].text = text[..a) + jstr(jget(ch, "text")) + text[b..]
-    docs[d].version = jint(jpath(params, "textDocument", "version"))
-    docs[d].dirty = true
-    loop i in [0..docs.len()): docs[i].has_wide = false
-    ide_texts[docs[d].path] = docs[d].text
-    users_dirty(d)
-
-on_close = (params: int):
-    d = text_params_doc(params)
-    if d < 0: return
-    docs[d].open = false
-    docs[d].dirty = false
-    ide_texts.remove(docs[d].path)
-    users_dirty(d)
-    # (its errors are cleared, but for files another open document published errors to: that
-    # one's are published again)
-    owners: int[]
-    loop u in docs[d].diag_uris:
-        o = -1
-        loop i in [0..docs.len()):
-            if i != d and docs[i].open and docs[i].diag_uris.contains(u): o = i
-        if o < 0: lsp_notify("textDocument/publishDiagnostics", "\{\"uri\":{json_quote(u)},\"diagnostics\":[]\}")
-        else if not owners.contains(o): owners.push(o)
-    docs[d].diag_uris = []
-    loop o in owners: publish(o)
 
 capabilities = "\{\"textDocumentSync\":\{\"openClose\":true,\"change\":1,\"save\":\{\"includeText\":false\}\},\"hoverProvider\":true,\"definitionProvider\":true,\"referencesProvider\":true,\"documentHighlightProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"documentFormattingProvider\":true,\"codeActionProvider\":\{\"codeActionKinds\":[\"quickfix\"]\},\"renameProvider\":\{\"prepareProvider\":true\},\"completionProvider\":\{\"triggerCharacters\":[\".\",\"$\",\"/\",\"\\\"\"]\},\"signatureHelpProvider\":\{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]\},\"inlayHintProvider\":true,\"codeLensProvider\":\{\"resolveProvider\":false\},\"semanticTokensProvider\":\{\"legend\":\{\"tokenTypes\":{sem_legend(sem_types)},\"tokenModifiers\":{sem_legend(sem_mods)}\},\"full\":true\}\}"
 
