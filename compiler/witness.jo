@@ -218,6 +218,13 @@ wit_slice_at = (n: int, s: mut FactState, lo: int, hi: int, length: int, checks:
     relation = join(relations, "` and `")
     wit_help(relation)
     if clamp and (not inclusive or hi_node == 0): wit_clamp_help(base, lo_node, hi_node)
+    # (`xs[..3]` read as Python's `xs[:3]`: the closed end includes 3, and Python's stops
+    # before it and truncates)
+    else if clamp and base != "":
+        first = if lo_node != 0: wit_text(lo_node) else: ""
+        last = wit_text(hi_node)
+        if last != "" and (lo_node == 0 or first != ""):
+            err_notes.push((-1, "help: `{base}[{first}..{last}]` includes position {last}; Python's `{base}[{first}:{last}]` stops before it and truncates to `{base}`: `{base}[$clamp {first}..{last})`"))
     if refuted:
         if dir_defer(n, "slice is not in bounds", true): return
         wit_fail(nodes[n].pos, "slice is not in bounds")
