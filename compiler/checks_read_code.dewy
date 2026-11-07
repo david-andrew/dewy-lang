@@ -1,0 +1,269 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_MUT has_flag kid kid2 mk nkids nkids2 nodes set_list)
+from p"check.jo" import (check_struct_fields)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_builders.dewy" import (bc_block bc_bool bc_call bc_field bc_ident bc_if bc_int bc_let bc_stmt bc_str)
+from p"dewy_method_ops.dewy" import (dewy_is_method)
+from p"expr.jo" import (bc_assign bc_bin bc_decl bc_loop caller_dewy is_map_type)
+from p"ide.jo" import (ide_dewy_alt ide_param_text)
+from p"node_store.dewy" import (NK)
+from p"types.jo" import (T_F32 T_I32 T_MAT4 dt fields fixed_len is_float is_int is_union prune structs tkind ts_params type_str types union_members variants)
+from p"util.jo" import (fatal files name_of pos_file)
+
+CodeWord:type=int64<overflow='wrap'>
+# (the ones a call with the wrong number of arguments could have meant: "; there are f(a: int),
+# f(a: int, b: int)")
+overloads_text=(decls:array<int64> err:string):>string=>$unsafe {
+    if decls.length <? 2 {return ""}
+    # (only when how many arguments was wrong: a wrong one's type is said already)
+    if (err as array<uint8>).length >? 0 and not starts_with(err "too many") and not starts_with(err "missing") {return ""}
+    let s=""
+    let k:CodeWord=0
+    loop d in decls {
+        if starts_with(name_of(CodeWord(nodes.ptr[d].name)) "__") {continue}
+        if k =? 4 {return "{s} ..."}
+        if k =? 0 {s="; there are "} else {s="{s}, "}
+        s="{s}{call_text(d)}"
+        k += 1
+    }
+    s
+}
+call_text=(d:CodeWord):>string=>$unsafe {
+    if caller_dewy() {return dewy_call_text(d)}
+    let s="{name_of(CodeWord(nodes.ptr[d].name))}("
+    loop i in [0..nkids(d)) {
+        if i >? 0 {s="{s}, "}
+        s="{s}{ide_param_text(nodes.ptr[kid(d i)].pos)}"
+    }
+    "{s})"
+}
+# (a declaration as a Dewy program sees it: its Dewy name, `@` for a mutable parameter and Dewy
+# types, whitespace between parameters, whichever language declares it)
+dewy_call_text=(d:CodeWord):>string=>{
+    let saved=ts_params
+    ts_params=type_param_names(d)
+    let s=dewy_call_text_in(d)
+    ts_params=saved
+    s
+}
+# (a generic declaration's type parameters by their names, for its signature's types)
+type_param_names=(d:CodeWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    loop i in [0..nkids2(d)) {out.push(CodeWord(nodes.ptr[kid2(d i)].name))}
+    out
+}
+# (a type of declaration d's signature, as a diagnostic shows it)
+sig_dt=(d:CodeWord t:CodeWord):>string=>{
+    let saved=ts_params
+    ts_params=type_param_names(d)
+    let s=dt(t)
+    ts_params=saved
+    s
+}
+dewy_call_text_in=(d:CodeWord):>string=>$unsafe {
+    let nm=CodeWord(nodes.ptr[d].name)
+    let alt=ide_dewy_alt(nm)
+    let sig=fn_sig(d)
+    if alt =? 0 {alt=nm}
+    let s="{name_of(alt)}("
+    # (a method by its type, without its hidden receiver)
+    let first:CodeWord=0
+    if dewy_is_method(d) and sig.params.length >? 0 {
+        s="{dt(sig.params[0])}.{name_of(alt)}("
+        first=1
+    }
+    loop i in [first..nkids(d)) {
+        let p=kid(d i)
+        if i >? first {s="{s} "}
+        if has_flag(p NF_MUT) or int64(sig.mutmask) & (CodeWord(1) << i) not=? 0 {s="{s}@"}
+        let pn=name_of(CodeWord(nodes.ptr[p].name))
+        if starts_with(pn "$parameter") {pn="_"}
+        s="{s}{pn}"
+        if i <? sig.params.length and sig.params[i] not=? 0 {s="{s}:{dt(sig.params[i])}"}
+    }
+    s="{s})"
+    s
+}
+# ---------------- reading values from text (lib/std/text.jo) ----------------
+# __read_fields(r, x) for a value of type t: statements that read it with r (a __TextIn)
+read_code=(t:CodeWord rn:string xn:string pos:CodeWord):>array<int64>=>$unsafe {
+    let k=types.ptr[t].kind
+    let st:array<int64>=[]
+    if k =? 'struct_' {
+        # Name(field=value, ...): by name, in any order; others skipped, missing ones left as they are
+        let si=CodeWord(types.ptr[t].st)
+        check_struct_fields(si)
+        st.push(rcall("__tx_open" rn [] pos))
+        let chain=rcall("__tx_skip" rn [] pos)
+        # (a Dewy record's field without a default must be in the text, an optional one is none: nothing is invented for it)
+        let dewy=files[pos_file(nodes.ptr[CodeWord(structs.ptr[si].decl)].pos)].is_dewy
+        let required:array<int64>=[]
+        let i=CodeWord(structs.ptr[si].nfields) - 1
+        loop i >=? 0 {
+            let f=fields.ptr[CodeWord(structs.ptr[si].fields) + i]
+            let fi=i
+            i -= 1
+            let fk=tkind(int64(f.type))
+            if fk =? 'fn_' or fk =? 'cfn' or fk =? 'ptr' {continue}
+            let fname=name_of(int64(f.name))
+            let rd=rcall("__read" rn [bc_field(bc_ident(xn pos) fname pos)] pos)
+            # (the field's name kept while it is read: errors say where they are)
+            let body=[rd rcall("__tx_at" rn [bc_str(fname pos)] pos)]
+            if dewy and int64(f.defval) =? 0 and fk not=? 'opt' {
+                required.insert(fi 0)
+                body.push(bc_assign(bc_ident("__seen{fi}" pos) bc_bool(true pos) pos))
+            }
+            chain=bc_if(bc_call("__tx_name_is" [bc_ident(rn pos) bc_str(fname pos)] pos) body [chain] pos)
+        }
+        loop fi in required {st.push(bc_let("__seen{fi}" bc_bool(false pos) pos))}
+        let w=mk('while_' pos)
+        nodes.ptr[w].a=int32(bc_call("__tx_field" [bc_ident(rn pos)] pos))
+        nodes.ptr[w].b=int32(bc_block([chain] pos))
+        st.push(w)
+        loop fi in required {
+            let fname=name_of(CodeWord(fields.ptr[CodeWord(structs.ptr[si].fields) + fi].name))
+            st.push(bc_if(bc_ident("__seen{fi}" pos) [] [rcall("__tx_missing" rn [bc_str(fname pos)] pos)] pos))
+        }
+    }
+    else if k =? 'tuple' {
+        st.push(rcall("__tx_want" rn [bc_int(b'(' pos)] pos))
+        loop i in [0..CodeWord(types.ptr[t].nargs)) {
+            st.push(rcall("__tx_sep" rn [bc_int(i pos)] pos))
+            let el=mk('field' pos)
+            nodes.ptr[el].a=int32(bc_ident(xn pos))
+            nodes.ptr[el].aux=-2
+            nodes.ptr[el].ival=i
+            st.push(rcall("__read" rn [el] pos))
+        }
+        st.push(rcall("__tx_eat" rn [bc_int(b',' pos)] pos))
+        st.push(rcall("__tx_want" rn [bc_int(b')' pos)] pos))
+    }
+    else if k =? 'vec' and t not=? T_MAT4 {
+        # vec2(1.5, 2.0)
+        st.push(rcall("__tx_open" rn [] pos))
+        let ct=T_F32
+        if types.ptr[t].sign {ct=T_I32}
+        loop i in [0..CodeWord(types.ptr[t].bits)) {
+            st.push(rcall("__tx_sep" rn [bc_int(i pos)] pos))
+            let v="__c{i}"
+            st.push(bc_decl(v ct pos))
+            st.push(rcall("__read" rn [bc_ident(v pos)] pos))
+            st.push(bc_assign(bc_field(bc_ident(xn pos) ["x" "y" "z" "w"][i] pos) bc_ident(v pos) pos))
+        }
+        st.push(rcall("__tx_eat" rn [bc_int(b',' pos)] pos))
+        st.push(rcall("__tx_want" rn [bc_int(b')' pos)] pos))
+    }
+    else if k =? 'fixed' {
+        st.push(rcall("__tx_want" rn [bc_int(b'[' pos)] pos))
+        let el=mk('index' pos)
+        nodes.ptr[el].a=int32(bc_ident(xn pos))
+        nodes.ptr[el].b=int32(bc_ident("__i" pos))
+        st.push(bc_loop("__i" bc_int(fixed_len(t) pos) [rcall("__tx_sep" rn [bc_ident("__i" pos)] pos) rcall("__read" rn [el] pos)] pos))
+        st.push(rcall("__tx_eat" rn [bc_int(b',' pos)] pos))
+        st.push(rcall("__tx_want" rn [bc_int(b']' pos)] pos))
+    }
+    else if k =? 'enum_' and is_union(t) {
+        # the member's value as it is written: told apart by how it starts (a struct by its name)
+        st.push(bc_let("__k" bc_call("__tx_kind" [bc_ident(rn pos)] pos) pos))
+        let ms=union_members(t)
+        let has_int=false
+        loop m in ms {
+            if is_int(m) {has_int=true}
+        }
+        let chain=rcall("__tx_fail_found" rn [bc_str("expected a {dt(t)}" pos)] pos)
+        # (enums last: a bare name could be one of them, Name(...) a struct)
+        loop pass_ in [0..2) {
+            let i=ms.length - 1
+            loop i >=? 0 {
+                let m=prune(ms[i])
+                i -= 1
+                let mk_=types.ptr[m].kind
+                if (mk_ =? 'enum_') not=? (pass_ =? 0) {continue}
+                let c:CodeWord=0
+                if mk_ =? 'str_' {c=kind_is(1 pos)} else if is_int(m) {c=kind_is(2 pos)}
+                else if is_float(m) {
+                    c=kind_is(3 pos)
+                    if not has_int {c=bc_logic('or_' c kind_is(2 pos) pos)}
+                }
+                else if mk_ =? 'bool_' {c=kind_is(5 pos)} else if mk_ =? 'array' or mk_ =? 'fixed' {c=kind_is(8 pos)}
+                else if is_map_type(m) {c=kind_is(9 pos)} else if mk_ =? 'tuple' {c=kind_is(10 pos)}
+                else if mk_ =? 'struct_' or mk_ =? 'vec' {
+                    let nm=type_str(m)
+                    if mk_ =? 'struct_' {nm=structs.ptr[CodeWord(types.ptr[m].st)].name}
+                    c=bc_logic('and_' kind_is(6 pos) bc_bin('eq' bc_field(bc_ident(rn pos) "name" pos) bc_str(nm pos) pos) pos)
+                }
+                else if mk_ =? 'enum_' {c=bc_logic('or_' kind_is(6 pos) kind_is(7 pos) pos)}
+                if c =? 0 {continue}
+                let v="__u{i + 1}"
+                let body=[bc_decl(v m pos) bc_stmt(bc_call("__default_init" [bc_ident(v pos)] pos) pos) rcall("__read" rn [bc_ident(v pos)] pos) bc_assign(bc_ident(xn pos) bc_ident(v pos) pos)]
+                chain=bc_if(c body [chain] pos)
+            }
+        }
+        st.push(chain)
+    }
+    else if k =? 'enum_' {
+        # a variant by name: hard, or rect(1.0, 2.0)
+        let si=CodeWord(types.ptr[t].st)
+        check_struct_fields(si)
+        st.push(bc_let("__wrapped" bc_call("__tx_enum_open" [bc_ident(rn pos)] pos) pos))
+        st.push(bc_let("__w" bc_call("__tx_word" [bc_ident(rn pos) mk('bool_lit' pos)] pos) pos))
+        st.push(bc_if(bc_ident("__wrapped" pos) [rcall("__tx_want" rn [bc_int(b':' pos)] pos)] [] pos))
+        let vs=""
+        loop vi in [0..CodeWord(structs.ptr[si].nvariants)) {
+            if vi >? 0 {vs="{vs}, "}
+            vs="{vs}{name_of(CodeWord(variants.ptr[CodeWord(structs.ptr[si].variants) + vi].name))}"
+        }
+        let chain=rcall("__tx_bad" rn [bc_str("expected a {dt(t)} ({vs})" pos)] pos)
+        let v=CodeWord(structs.ptr[si].nvariants) - 1
+        loop v >=? 0 {
+            let vi=CodeWord(structs.ptr[si].variants) + v
+            v -= 1
+            let vn=name_of(CodeWord(variants.ptr[vi].name))
+            let dn=mk('dotname' pos)
+            nodes.ptr[dn].name=variants.ptr[vi].name
+            let nf=CodeWord(variants.ptr[vi].nfields)
+            let body:array<int64>=[]
+            if nf =? 0 {
+                body.push(bc_if(bc_ident("__wrapped" pos) [rcall("__tx_bad" rn [bc_str("expected a variant name as a JSON string" pos)] pos)] [] pos))
+                body.push(bc_assign(bc_ident(xn pos) dn pos))
+            }
+            else {
+                body.push(rcall("__tx_want" rn [bc_int(b'(' pos)] pos))
+                let vargs:array<int64>=[]
+                loop j in [0..nf) {
+                    let a="__a{j}"
+                    body.push(rcall("__tx_sep" rn [bc_int(j pos)] pos))
+                    body.push(bc_decl(a CodeWord(fields.ptr[CodeWord(variants.ptr[vi].fields) + j].type) pos))
+                    body.push(bc_stmt(bc_call("__default_init" [bc_ident(a pos)] pos) pos))
+                    body.push(rcall("__read" rn [bc_ident(a pos)] pos))
+                    vargs.push(bc_ident(a pos))
+                }
+                body.push(rcall("__tx_eat" rn [bc_int(b',' pos)] pos))
+                body.push(rcall("__tx_want" rn [bc_int(b')' pos)] pos))
+                let c=mk('call' pos)
+                nodes.ptr[c].a=int32(dn)
+                set_list(c vargs)
+                body.push(bc_assign(bc_ident(xn pos) c pos))
+            }
+            chain=bc_if(bc_bin('eq' bc_ident("__w" pos) bc_str(vn pos) pos) body [chain] pos)
+        }
+        st.push(chain)
+        st.push(bc_if(bc_ident("__wrapped" pos) [rcall("__tx_want" rn [bc_int(b'}' pos)] pos)] [] pos))
+    }
+    else {fatal(pos "a value of type {dt(t)} cannot be read from text")}
+    st
+}
+# f(r, args...) as a statement
+rcall=(f:string rn:string args:array<int64> pos:CodeWord):>int64=>{
+    bc_stmt(bc_call(f [bc_ident(rn pos) args...] pos) pos)
+}
+bc_logic=(k:NK a:CodeWord b:CodeWord pos:CodeWord):>int64=>$unsafe {
+    let n=mk(k pos)
+    nodes.ptr[n].a=int32(a)
+    nodes.ptr[n].b=int32(b)
+    n
+}
+kind_is=(c:CodeWord pos:CodeWord):>int64=>{
+    bc_bin('eq' bc_ident("__k" pos) bc_int(c pos) pos)
+}
