@@ -1,0 +1,142 @@
+$runtime_checks
+from p"dewy_builders.dewy" import db_type_name
+from p"dewy_builders.dewy" import db_bigint_value
+from p"checks_builders.dewy" import bc_ident
+from p"checker_tokens.dewy" import Tok
+from p"@lib/core/str.jo" import (trim)
+from p"ast.jo" import (lists nodes)
+from p"check.jo" import (dewy_target_dropped)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_builders.dewy" import (bc_block bc_bool bc_call bc_ident bc_let bc_stmt)
+from p"dewy_builders.dewy" import (db_bigint_value db_type_name)
+from p"dewy_method_ops.dewy" import (dewy_is_method dewy_method_group)
+from p"dewy_context.jo" import (dc_parser)
+from p"dewy_node_builds.dewy" import (dw_target_name)
+from p"dewy_nodes.jo" import (dw_bigint_import dw_builder_host)
+from p"dewy_tokens.dewy" import (DewyToken dn_token_text)
+from p"refine.jo" import (refine_active)
+from p"host_target.dewy" import (host_target_name)
+from p"settings.jo" import (build_target_at build_target_seen cli_mode cli_target file_mode_at file_mode_seen native_only settings_path)
+from p"targets.dewy" import (supported_target_names target_names target_problem)
+from p"util.jo" import (fatal files intern pos_file pos_off warn)
+
+DwRareWord:type=int64<overflow='wrap'>
+dw_renamed_init=():>void=>{
+    dc_parser.reader.dw_renamed=[intern("printl") intern("print") intern("print") intern("__dewy_print") intern("int") intern("__dewy_int") intern("bigint")]
+}
+dw_target_dropped_name=(nm:DwRareWord pos:DwRareWord):>void=>{
+    if not dewy_target_dropped.has(nm) {dewy_target_dropped[nm]=[]}
+    dewy_target_dropped[nm].push(pos)
+}
+# `$target = 'name'` (target) or `$build.mode = 'name'` (text, as written) set at pos, its value
+# at value_pos: checked and applied (dw_build_setting, dc_build_setting).
+build_setting_apply=(target:bool text:string pos:DwRareWord value_pos:DwRareWord name:string):>void=>{
+    let file=pos_file(pos)
+    if files[file].path not=? settings_path {
+        if target {fatal(pos "`$target` is set by the program's main file; a module lists the targets it supports with `$supported_targets`")}
+        fatal(pos "`{text}` is set by the program's main file")
+    }
+    if (target and build_target_seen) or (not target and file_mode_seen) {fatal(pos "`{text}` is set twice")}
+    let at=if target {build_target_at} else {file_mode_at}
+    if at not=? pos_off(pos) {fatal(pos "`{text} = ...` goes on a line of its own, at its start")}
+    if target {
+        build_target_seen=true
+        let host=host_target_name()
+        let why=target_problem(name host)
+        if not (name in? target_names()) {fatal(value_pos "`$target`: {why}")}
+        let overridden=(cli_target as array<uint8>).length >? 0 or native_only
+        if (why as array<uint8>).length >? 0 and not overridden {fatal(value_pos "`$target`: {why}")}
+        let meant=if name in? supported_target_names() {name} else {host}
+        if (cli_target as array<uint8>).length >? 0 and not native_only and meant not=? dw_target_name() {warn(pos "--target {cli_target} overrides `$target = '{name}'`: this build is for {dw_target_name()}")}
+    }
+    else {
+        file_mode_seen=true
+        if name not=? "debug" and name not=? "release" {fatal(value_pos "unknown build mode \"{name}\": `$build.mode` is \"debug\" or \"release\"")}
+        if (cli_mode as array<uint8>).length >? 0 and cli_mode not=? name {warn(pos "--{cli_mode} overrides `$build.mode = '{name}'`: this is a {cli_mode} build")}
+    }
+}
+# The scope lending arena to body (its allocator number serial; copied, its value is written
+# `....copy()`).
+dw_arena_scope=(serial:DwRareWord arena:DwRareWord body:DwRareWord copied:bool pos:DwRareWord):>int64=>$unsafe {
+    let context="__arena_context{serial}"
+    let value="__arena_value{serial}"
+    # (the value itself, even a function: a closure is reported as what cannot leave)
+    let result=bc_ident(value pos)
+    nodes.ptr[result].aux2=1
+    bc_block([bc_let(context bc_call("__arena_enter" [arena] pos) pos) bc_let(value body pos) bc_stmt(bc_call("__arena_leave" [bc_ident(context pos)] pos) pos) bc_stmt(bc_call("$allocator_result" [result bc_bool(copied pos)] pos) pos)] pos)
+}
+# The two operands of a comparison as written, split at its operator outside
+# brackets and quotes ([] when the operator is not found once).
+dw_comparison_sides=(text:string op:DewyToken):>array<string>=>{
+    let spelled=dn_token_text(op)
+    let depth:DwRareWord=0
+    let quote:uint8=0
+    let at:DwRareWord=-1
+    let i:DwRareWord=0
+    loop i <? (text as array<uint8>).length {
+        let c=(text as array<uint8>)[i]
+        if quote not=? 0 {
+            if c =? b'\\' {i += 1} else if c =? quote {quote=0}
+        }
+        else if c =? b'"' or c =? b'\'' {quote=c} else if c =? b'(' or c =? b'[' or c =? b'\{' {depth += 1}
+        else if c =? b')' or c =? b']' or c =? b'\}' {depth -= 1} else if depth =? 0 and i + (spelled as array<uint8>).length <=? (text as array<uint8>).length and text.byte_slice(i i + (spelled as array<uint8>).length) =? spelled {
+            # (`<?` inside `<=?`, `=?` inside `not=?`: the whole operator only)
+            let before=if i >? 0 {(text as array<uint8>)[i - 1]} else {uint8(b' ')}
+            let negated=i >=? 3 and text.byte_slice(i - 3 i) =? "not"
+            if before not=? b'<' and before not=? b'>' and before not=? b'=' and before not=? b'.' and not negated {
+                if at >=? 0 {return []}
+                at=i
+                i += (spelled as array<uint8>).length
+                continue
+            }
+        }
+        i += 1
+    }
+    if at <? 0 {return []}
+    [trim(text.byte_slice(0 at)) trim(text.byte_slice(at + (spelled as array<uint8>).length (text as array<uint8>).length))]
+}
+dw_bigint_value=(limbs:array<uint64> pos:DwRareWord negative:bool=false):>int64=>{
+    if dw_bigint_import =? 0 {dw_bigint_import=pos + 1}
+    db_bigint_value(@nodes @lists @dw_builder_host limbs pos negative)
+}
+# Surface type spellings share one translation in both construction paths.
+dw_type_name=(name:string):>string=>{
+    if name =? "addr" {refine_active=true}
+    db_type_name(name)
+}
+# The compact operator of a combined assignment token.
+dn_assign_tok=(op:DewyToken):>Tok=>{
+    if op =? 'assign' {return 'assign'}
+    if op =? 'plus_assign' {return 'pluseq'}
+    if op =? 'minus_assign' {return 'minuseq'}
+    if op =? 'slash_assign' or op =? 'floor_assign' {return 'slasheq'}
+    if op =? 'percent_assign' {return 'percenteq'}
+    if op =? 'power_assign' or op =? 'xor_assign' {return 'careteq'}
+    if op =? 'shl_assign' {return 'shleq'}
+    if op =? 'shr_assign' {return 'shreq'}
+    if op =? 'amp_assign' or op =? 'and_assign' {return 'ampeq'}
+    if op =? 'pipe_assign' or op =? 'or_assign' {return 'pipeeq'}
+    'stareq'
+}
+dw_register_literal_methods=(entries:array<int64>):>void=>$unsafe {
+    let row_names:array<int64>=[]
+    let decls:array<int64>=[]
+    loop entry in entries {
+        if nodes.ptr[entry].kind not=? 'namedarg' or nodes.ptr[entry].name =? 0 {continue}
+        let value=DwRareWord(nodes.ptr[entry].a)
+        row_names.push(DwRareWord(nodes.ptr[entry].name))
+        decls.push(if nodes.ptr[value].kind =? 'lambda' and dewy_is_method(value) {value} else {0})
+    }
+    dewy_method_group(row_names decls);
+}
+# (its mistake, "" for a name that may be bound)
+dewy_reserved_text=(name:string):>string=>{
+    if (name as array<uint8>).length <? 3 {return ""}
+    let c=(name as array<uint8>)[0]
+    if c not=? b'e' and c not=? b'n' and c not=? b'v' {return ""}
+    let role=""
+    if name =? "end" {role="inside brackets it is the last index, as in `xs[end]`"} else if name =? "new" {role="inside brackets it inserts an axis, as in `xs[new]`"}
+    else if name =? "none" {role="it is the empty value"} else if name =? "void" {role="it is the type of no value"}
+    if role =? "" {return ""}
+    "'{name}' is reserved, not a name: {role} (use `{name}_`)"
+}

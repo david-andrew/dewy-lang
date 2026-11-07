@@ -40,43 +40,14 @@ use 'dewy_builders.dewy'
 use 'oom_ops.dewy'
 use 'dewy_node_ops.dewy'
 use 'dewy_node_builds.dewy'
+use 'dewy_node_rare.dewy'
 
 dw_builder_host = ParserBuilderHost(intern, dw_fail_pos)
 
-dw_renamed_init = (): dc_parser.reader.dw_renamed = [intern("printl"), intern("print"), intern("print"), intern("__dewy_print"), intern("int"), intern("__dewy_int"), intern("bigint")]
-
 dw_pending_decls: int[]               # methods of the type just declared, as module functions
-
-dw_target_dropped_name = (nm: int, pos: int):
-    if not dewy_target_dropped.has(nm): dewy_target_dropped[nm] = []
-    dewy_target_dropped[nm].push(pos)
 
 # `$supported_targets = ["x86_64-linux" ...]`: the targets a module accepts, by full name.
 dw_targets_listed: {int: bool} = {}   # files that set it
-
-# `$target = 'name'` (target) or `$build.mode = 'name'` (text, as written) set at pos, its value
-# at value_pos: checked and applied (dw_build_setting, dc_build_setting).
-build_setting_apply = (target: bool, text: str, pos: int, value_pos: int, name: str):
-    file = pos_file(pos)
-    if files[file].path != settings_path:
-        if target: fatal(pos, "`$target` is set by the program's main file; a module lists the targets it supports with `$supported_targets`")
-        fatal(pos, "`{text}` is set by the program's main file")
-    if (target and build_target_seen) or (not target and file_mode_seen): fatal(pos, "`{text}` is set twice")
-    at = if target: build_target_at else: file_mode_at
-    if at != pos_off(pos): fatal(pos, "`{text} = ...` goes on a line of its own, at its start")
-    if target:
-        build_target_seen = true
-        host = host_target_name()
-        why = target_problem(name, host)
-        if not (name in target_names()): fatal(value_pos, "`$target`: {why}")
-        overridden = len(cli_target) > 0 or native_only
-        if len(why) > 0 and not overridden: fatal(value_pos, "`$target`: {why}")
-        meant = if name in supported_target_names(): name else: host
-        if len(cli_target) > 0 and not native_only and meant != dw_target_name(): warn(pos, "--target {cli_target} overrides `$target = '{name}'`: this build is for {dw_target_name()}")
-    else:
-        file_mode_seen = true
-        if name != "debug" and name != "release": fatal(value_pos, "unknown build mode \"{name}\": `$build.mode` is \"debug\" or \"release\"")
-        if len(cli_mode) > 0 and cli_mode != name: warn(pos, "--{cli_mode} overrides `$build.mode = '{name}'`: this is a {cli_mode} build")
 
 # `$allocator(@arena) expression` (docs/LANGUAGE.md, "Scoped allocators"): the
 # expression allocates from the arena, the context allocator until it ends, and its
@@ -85,87 +56,13 @@ build_setting_apply = (target: bool, text: str, pos: int, value_pos: int, name: 
 # compiler/arena.jo checks that nothing else the expression makes outlives it.
 dw_allocators = 0
 
-# The scope lending arena to body (its allocator number serial; copied, its value is written
-# `....copy()`).
-dw_arena_scope = (serial: int, arena: int, body: int, copied: bool, pos: int) -> int:
-    context = "__arena_context{serial}"
-    value = "__arena_value{serial}"
-    # (the value itself, even a function: a closure is reported as what cannot leave)
-    result = bc_ident(value, pos)
-    nodes[result].aux2 = 1
-    bc_block([bc_let(context, bc_call("__arena_enter", [arena], pos), pos), bc_let(value, body, pos),
-        bc_stmt(bc_call("__arena_leave", [bc_ident(context, pos)], pos), pos), bc_stmt(bc_call("$allocator_result", [result, bc_bool(copied, pos)], pos), pos)], pos)
-
 # ---- tests: `$test`, `$expect`, `$fail` ----
-
-# The two operands of a comparison as written, split at its operator outside
-# brackets and quotes ([] when the operator is not found once).
-dw_comparison_sides = (text: str, op: DewyToken) -> str[]:
-    spelled = dn_token_text(op)
-    depth = 0
-    quote: u8 = 0
-    at = -1
-    i = 0
-    loop i < len(text):
-        c = text[i]
-        if quote != 0:
-            if c == '\\': i += 1
-            else if c == quote: quote = 0
-        else if c == '"' or c == '\'': quote = c
-        else if c == '(' or c == '[' or c == '{': depth += 1
-        else if c == ')' or c == ']' or c == '}': depth -= 1
-        else if depth == 0 and i + len(spelled) <= len(text) and text[i..i + len(spelled)) == spelled:
-            # (`<?` inside `<=?`, `=?` inside `not=?`: the whole operator only)
-            before = if i > 0: text[i - 1] else: u8(' ')
-            negated = i >= 3 and text[i - 3..i) == "not"
-            if before != '<' and before != '>' and before != '=' and before != '.' and not negated:
-                if at >= 0: return []
-                at = i
-                i += len(spelled)
-                continue
-        i += 1
-    if at < 0: return []
-    [trim(text[0..at)), trim(text[at + len(spelled)..len(text)))]
 
 # Only modules that use a large literal import the exact-integer library. The
 # alias contains a character that cannot occur in a user identifier.
 # (the first such literal's position + 1, 0 none: the import is made once the module is read)
 dw_bigint_import = 0
 const DW_BIGINT_ALIAS = "$dewy_bigint"
-
-dw_bigint_value = (limbs: u64[], pos: int, negative: bool = false) -> int:
-    if dw_bigint_import == 0: dw_bigint_import = pos + 1
-    db_bigint_value(nodes, lists, dw_builder_host, limbs, pos, negative)
-
-# Surface type spellings share one translation in both construction paths.
-dw_type_name = (name: str) -> str:
-    if name == "addr": refine_active = true
-    db_type_name(name)
-
-# The compact operator of a combined assignment token.
-dn_assign_tok = (op: DewyToken) -> Tok:
-    match op:
-        assign: .assign
-        plus_assign: .pluseq
-        minus_assign: .minuseq
-        slash_assign, floor_assign: .slasheq
-        percent_assign: .percenteq
-        power_assign, xor_assign: .careteq
-        shl_assign: .shleq
-        shr_assign: .shreq
-        amp_assign, and_assign: .ampeq
-        pipe_assign, or_assign: .pipeeq
-        _: .stareq
-
-dw_register_literal_methods = (entries: int[]):
-    row_names: int[]
-    decls: int[]
-    loop entry in entries:
-        if nodes[entry].kind != .namedarg or nodes[entry].name == 0: continue
-        value = int(nodes[entry].a)
-        row_names.push(int(nodes[entry].name))
-        decls.push(if nodes[value].kind == .lambda and dewy_is_method(value): value else: 0)
-    dewy_method_group(row_names, decls)
 
 # `[1 2; 3 4]` written for a matrix: the attached `;` discards the 2, which does nothing,
 # so `[1 3 4]` is meant only rarely (the editor's fix-it puts a space before the `;`).
@@ -176,19 +73,6 @@ DW_ROW_HINT = "a row break is a standalone `;`, with a space before it, as in `[
 # holds (which way one runs: dewy_grammar.dewy dw_chain_way).
 
 dw_chain_count = 0
-
-# (its mistake, "" for a name that may be bound)
-dewy_reserved_text = (name: str) -> str:
-    if len(name) < 3: return ""
-    c = name[0]
-    if c != 'e' and c != 'n' and c != 'v': return ""
-    role = ""
-    if name == "end": role = "inside brackets it is the last index, as in `xs[end]`"
-    else if name == "new": role = "inside brackets it inserts an axis, as in `xs[new]`"
-    else if name == "none": role = "it is the empty value"
-    else if name == "void": role = "it is the type of no value"
-    if role == "": return ""
-    "'{name}' is reserved, not a name: {role} (use `{name}_`)"
 
 # A type's methods become module functions of the same name taking the instance first
 # (`s.width` is `width(s)` by the uniform call syntax); no function is stored in the

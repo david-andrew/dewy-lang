@@ -40,6 +40,7 @@ LEAF_HOMES = {
     'lsp_fixes': 'lsp.jo',
     'ide_decls': 'ide.jo',
     'directive_rules': 'directives.jo',
+    'dewy_node_rare': 'dewy_nodes.jo',
 }
 
 
