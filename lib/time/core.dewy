@@ -125,6 +125,10 @@ __unary_sub__=(a:Duration):>Duration=>{
 }
 __lt__=(a:Duration b:Duration):>bool=>_less(a._hi a._lo b._hi b._lo)
 __eq__=(a:Duration b:Duration):>bool=>a._hi =? b._hi and a._lo =? b._lo
+# A constant time where a `Duration` is wanted: `let total:Duration = 0s`, `totals[k] = 0s` (expr.jo's coerce).
+duration_of=(q:int*Time):>Duration=>_of_int(q)
+$check_constant _grid_error(q) "off the nanosecond grid"
+duration_of=(q:rational*Time):>Duration|OffGrid=>_of_rational(q)
 __add__=(a:Duration q:int*Time):>Duration=>a+_of_int(q)
 __add__=(q:int*Time a:Duration):>Duration=>_of_int(q)+a
 __sub__=(a:Duration q:int*Time):>Duration=>a-_of_int(q)

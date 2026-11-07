@@ -489,6 +489,32 @@ time_record_duration = (t: int, a: int, what: str, fix: str, pos: int) -> int:
     check_expr(c, T_INT)
     last_checked
 
+# The time library's own type by name, as a program sees it (0 when t is another type).
+time_core_type = (t0: int, name: str) -> bool:
+    t = prune(t0)
+    if types[t].kind != .struct_: return false
+    d = int(structs[int(types[t].st)].decl)
+    d != 0 and structs[int(types[t].st)].name == name and files[pos_file(nodes[d].pos)].path == lib_dir + "/time/core.dewy"
+
+# A constant time meets a `Duration` directly (time.md: "they mix"), so it is one where a `Duration` is
+# wanted: `let total:Duration = 0s`. A time known only at run time goes through `convert<Duration>`.
+time_constant_duration = (n: int, from: int, to: int) -> bool:
+    n != 0 and types[prune(from)].kind == .quantity and quantity_dimension(prune(from)) == base_dimension(0) and time_core_type(to, "Duration") and not is_float(quantity_base(prune(from))) and quantity_constant_scale(n) >= 0
+
+# (`d*1day` next to a quantity: what a calendar period is, for an operator's error)
+calendar_period_why = (a: int, b: int) -> str:
+    if time_core_type(ntype(a), "Days") or time_core_type(ntype(b), "Days"): return " (`1day` and `1week` are calendar periods, whose length depends on the date, so they add to dates and zoned times: for a length of time write `24hour`, or `7*24hour`)"
+    if time_core_type(ntype(a), "Months") or time_core_type(ntype(b), "Months"): return " (`1month` and `1year` are calendar periods, whose length depends on the date, so they add to dates and zoned times: for a length of time write the hours it means, such as `30*24hour`)"
+    ""
+
+# (`0s` with a local `s`: what a unit written against a number means here, for an operator's error)
+hidden_unit_why = (n: int, a: int, b: int) -> str:
+    if not has_flag(n, NF_JUXT) or nodes[a].kind != .int_lit and nodes[a].kind != .float_lit or nodes[b].kind != .ident or nodes[b].aux != i32(int(SK.local)) or is_numeric(ntype(b)): return ""
+    made = locals[int(nodes[b].sym)].pos
+    ln, c = line_col(made)
+    nm = name_of(int(nodes[b].name))
+    " (`{nm}` here is the local variable made on line {ln}, a {dt(ntype(b))}, which hides any unit named `{nm}`: rename the variable to use the unit)"
+
 # (the checked number a as a float64)
 quantity_float = (a: int) -> int:
     t = prune(ntype(a))

@@ -5,7 +5,7 @@ from p"ast.jo" import (NF_CHECKED NF_U64 NF_COMPREHENSION NF_GENERIC NF_SPREAD a
 from p"checker_call_cost.dewy" import (arg_cost)
 from p"expr.jo" import (literal_union_member array_has_spread branch_numeric bundled_bigint_type call_refined_literal_cost call_string_cost can_coerce charlike decimal_literal_tree dewy_bigint_literal_target dewy_positional_fits dewy_record_spread_entries dewy_record_target dewy_set_literal find_variant fixed_literal_ok fn_value_adapts is_dewy_set_type is_fn_type is_lit is_map_type is_nd lit_default lit_fits match_type nd_elem ntype oversized_literal subst_partial union_target variant_enum word_rational_source)
 from p"check.jo" import (binding_leaves check_struct_fields globals locals resolve_type subst syms)
-from p"units.jo" import (bundled_rational_type bundled_word_rational_type quantity_constant_fits quantity_int_promotes)
+from p"units.jo" import (bundled_rational_type bundled_word_rational_type quantity_constant_fits quantity_int_promotes time_constant_duration)
 from p"effects.jo" import (effects_active)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checker_call_queries.dewy" import (ctx_dependent)
@@ -373,6 +373,7 @@ arg_cost_rest=(a:CVWord pat:CVWord @binds:array<int64>):>CVWord=>$unsafe {
         return 2
     }
     if types.ptr[fp].kind =? 'quantity' and nodes.ptr[a].type not=? 0 and quantity_int_promotes(ntype(a) fp) {return 10}
+    if types.ptr[fp].kind =? 'struct_' and nodes.ptr[a].type not=? 0 and time_constant_duration(a ntype(a) fp) {return 2}
     if types.ptr[fp].kind =? 'fixed' and nodes.ptr[a].kind =? 'array' and tkind(ntype(a)) =? 'array' and fixed_literal_ok(a fp) {
         let et:CVWord=CVWord(types.ptr[fp].elem)
         if has_var(prune(et)) {

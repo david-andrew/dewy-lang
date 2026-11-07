@@ -1610,7 +1610,8 @@ actual time, including time the machine is suspended.
 
 `Instant` counts nanoseconds on one continuous axis in 128 bits, so it reaches any
 date anyone needs, and `Duration` is the difference of two. `+` and `-` take durations
-and time quantities: `t + 90minute`, `d <? 5s`. `d/1s` is an exact `rational`, `d/3`
+and time quantities: `t + 90minute`, `d <? 5s`. A constant time is a `Duration` where one is wanted, so `let total:Duration = 0s`, `totals[k] = 0s` and
+`f(90s)` work, and `totals.get(k) ?? 0s`; one known only at run time goes through `convert<Duration>`. `d/1s` is an exact `rational`, `d/3`
 an exact quantity, `d//7` a `Duration`; a divisor known only at run time may be zero, so
 that result also has `OutOfRange`, and a constant zero is a compile error. A constant
 quantity off the nanosecond grid (`t + 1ns/3`) is a compile error; at run time such a sum

@@ -78,7 +78,7 @@ resolve_type = (n: int) -> int:
 subst = (p: int, bs: int[]) -> int: p
 '''
 JO['services.jo'] += 'cv_lookup = (name: int) -> int: name\n'
-JO['units.jo'] += 'quantity_constant_fits = (a: int, t: int) -> bool: true\nquantity_int_promotes = (a: int, t: int) -> bool: false\n'
+JO['units.jo'] += 'quantity_constant_fits = (a: int, t: int) -> bool: true\nquantity_int_promotes = (a: int, t: int) -> bool: false\ntime_constant_duration = (n: int, a: int, t: int) -> bool: false\n'
 JO['effects.jo'] += "use 'ast.jo'\neffects_active = false\neffect_infer_callable = (a: int, t: int) -> int:\n    cv_effect_snapshot = nodes\n    loop i in [0..256): nodes.push(Node())\n    T_FLOAT\n"
 JO['refine.jo'] += 'str_sets: str[][] = [[]]\n'
 JO['effects.jo'] = JO['effects.jo'].replace('callable_contract = (t: int) -> int: 0',

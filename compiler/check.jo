@@ -2907,6 +2907,12 @@ var_type_error = (lhs: int, lt: int, rt: int, at: int):
         fatal(at, "'{nm}' holds text{made} (a value in quotes, \"0\", is text, even with digits): for a number, give it one without quotes (`{nm} = 0`)")
     fatal(at, "'{nm}' has type {dt(lt)}{made} and cannot hold this {dt(rt)}: {how}")
 
+    # (gap = 0s, then gap = t2 - t1: a time written with a unit is a quantity, and the subtraction a Duration)
+    if is_quantity(lt) and time_core_type(rt, "Duration"): how = "give it the type where it is made, `let {nm}:Duration = ...`"
+    # (m = m + 1day, a zoned time: the sum may be a gap or repeated hour)
+    if is_union(rt):
+        loop member in union_members(prune(rt)):
+            if time_zone_failure(member): how = "the result may land in a clock change{time_policy_why()}"
 # A type on the whole pattern supplies context before extracting its leaves.
 check_binding_input = (s: int) -> int:
     expected = 0

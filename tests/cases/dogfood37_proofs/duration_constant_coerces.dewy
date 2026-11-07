@@ -1,0 +1,21 @@
+# A constant time meets a Duration directly, wherever a Duration is wanted.
+main = () => {
+    let total:Duration = 0s
+    let x = instant"2026-01-01T00:00:00Z"
+    total += (x + 90s) - x
+    printl(total)
+    let totals:dict<string Duration> = []
+    if "a" not in? totals totals["a"] = 0s
+    totals["a"] += total
+    totals["b"] = (totals.get("b") ?? 5s) + total
+    printl(totals)
+    printl(wait(2s) + wait(1500ms))
+    let half:Duration = 1500ms
+    printl(half)
+    const limit = 2hour
+    let cap:Duration = limit
+    printl(cap)
+    let mix = [total half]
+    printl(mix)
+}
+wait = (d:Duration):>Duration => d + 1s
