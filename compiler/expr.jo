@@ -2090,11 +2090,35 @@ call_targs: int[]              # type arguments written at the call being resolv
 cur_assign = 0                 # the assignment whose target is being checked (`x = ...`, `x += ...`)
 early_set: {int: bool} = {}    # globals top-level code assigns above their own line
 
+# What a literal argument breaks when its refined parameter's atoms compare the
+# value with literals: the first it fails, as the contract reads; "" otherwise.
+refuted_literal_contract = (a: int, t0: int, name: str) -> str:
+    t = prune(t0)
+    # (a contract its type's name already spells, `1 | 2 | 3`, says it there)
+    if not refine_active or types[t].kind != .refined or types[t].bits == -1 or not contains(dt(t), "<refinement>"): return ""
+    v = 0
+    if nodes[a].kind == .int_lit and not has_flag(a, NF_U64): v = nodes[a].ival
+    else if nodes[a].kind == .unary and nodes[a].op == i32(int(Tok.minus)) and nodes[int(nodes[a].a)].kind == .int_lit: v = -nodes[int(nodes[a].a)].ival
+    else: return ""
+    loop atom in ref_predicates[int(types[t].st)]:
+        if atom.a.unsigned or atom.b.unsigned: return ""
+        if atom.a.kind == 0 and atom.b.kind == 1 and atom.a.path.len() == 0:
+            if not ref_literal_holds(atom.op, v, atom.b.value + atom.b.offset): return "argument '{name}' is {v}, which breaks its contract `{name} {wit_op(atom.op)} {atom.b.value + atom.b.offset}`"
+        else if atom.a.kind == 1 and atom.b.kind == 0 and atom.b.path.len() == 0:
+            if not ref_literal_holds(atom.op, atom.a.value, v + atom.b.offset):
+                flipped = if atom.op == .lt: Tok.gt else if atom.op == .le: Tok.ge else: atom.op
+                return "argument '{name}' is {v}, which breaks its contract `{name} {wit_op(flipped)} {atom.a.value}`"
+    ""
+
+ref_literal_holds = (op: Tok, x: int, y: int) -> bool: if op == .lt: x < y else if op == .le: x <= y else: x != y
+
 # Why candidate d rejects argument fi (a, wanting ptx): built only when the
 # call fails or two candidates' reasons at one argument are compared.
 rfc_arg_message = (d: int, fi: int, a: int, ptx: int, cd: Cand) -> str:
     last_err = ""
-    if nodes[a].type != 0: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
+    refuted = refuted_literal_contract(a, ptx, name_of(int(nodes[kid(d, fi)].name)))
+    if refuted != "": last_err = refuted
+    else if nodes[a].type != 0: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
     else if nodes[a].kind == .dotname and tkind(ptx) == .enum_:
         vn = int(nodes[a].name)
         last_err = "{dt(ptx)} has no variant '{name_of(vn)}'{variant_hint_for(ptx, name_of(vn))}"

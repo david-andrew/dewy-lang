@@ -12,7 +12,7 @@ printl(share(84 2))
 
 Passing a value that provably breaks the condition is a compile error:
 
-<!-- dewy-example: {"mode": "reject", "diagnostic": "argument 'n' expects"} -->
+<!-- dewy-example: {"mode": "reject", "diagnostic": "argument 'n' is 0, which breaks its contract"} -->
 ```dewy
 share = (total:int64 n:int64<(>? 0)>):>int64 => total // n
 printl(share(84 0))
