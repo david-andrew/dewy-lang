@@ -83,6 +83,10 @@ def effect_services(text, modules):
         text = text.replace('facts_forgets.dewy', 'facts.jo').replace('facts_forgets.jo', 'facts.jo')
     if _doubled(modules.get('facts.jo', ''), ('fact_parallel_range_call', 'fact_through_conv', 'fact_parallel_count_check', 'fact_bounded_index', 'fact_scope_exit', 'fact_refinements_unreachable', 'facts_finalize', 'facts_reset', 'fact_owner_value', 'fact_forget_hooked', 'fact_literal_nonzero', 'fact_complete_deferred')):
         text = text.replace('facts_lifecycle.dewy', 'facts.jo').replace('facts_lifecycle.jo', 'facts.jo')
+    for leaf, home in (('unit_ops', 'units.jo'), ('float_ops', 'floats.jo'), ('facts_arith', 'facts.jo'), ('facts_collect', 'facts.jo'),
+                       ('reader_service_ops', 'dewy_reader_services.jo'), ('spirv_ops', 'spirv.jo')):
+        if home in modules and leaf + '.dewy' not in modules and leaf + '.jo' not in modules:
+            text = text.replace(leaf + '.dewy', home).replace(leaf + '.jo', home)
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(
