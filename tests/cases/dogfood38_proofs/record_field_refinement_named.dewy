@@ -1,0 +1,4 @@
+# Building a ring of no items cannot give it a head: the error names the field relation.
+Ring:type = <T>[items:array<T> head:int64<v => 0 <=? v and v <? items.length>]
+ring_new = <T>(capacity:int fill:T):>Ring<T> => Ring<T>[[loop i in [0..capacity) fill] 0]
+main = () => printl(ring_new(3 "x").head)

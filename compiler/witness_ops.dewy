@@ -23,7 +23,7 @@ from p"proofs.jo" import (proof_active proof_decls)
 from p"refine.jo" import (ref_narrowing ref_spans representation_type)
 from p"refine_ops.dewy" import (total_dict_keys)
 from p"refinement_types.dewy" import (FACT_MIN FactBound RefAtom RefTerm)
-from p"types.jo" import (T_BOOL T_MATH_INT T_NEVER T_U64 is_int prune struct_targ structs tkind types)
+from p"types.jo" import (T_BOOL T_MATH_INT T_NEVER T_U64 fields is_int prune struct_targ structs tkind types)
 from p"type_ops.dewy" import (dt dt_named type_str zonk)
 from p"util.jo" import (err_held_on err_hold err_notes errors_only fatal name_of pos_file pos_in_lib pos_str)
 from p"witness.jo" import (wit_holder_text WitLeaf WitSide wit_after wit_after_note wit_after_relation wit_calls wit_calls_owner wit_collect wit_collected wit_failed_owners wit_obligation wit_parents wit_skip_users wit_skipped wit_slice_at wit_tentative wit_tentative_failed wit_text)
@@ -1140,6 +1140,7 @@ wit_refinement=(n:WitWord t:WitWord atom:RefAtom self:WitWord a:WitWord b:WitWor
             if left not=? "" and right not=? "" {relation="{left} {wit_op(atom.op)} {right}"}
         }
     }
+    if relation =? "" {relation=wit_field_relation(t atom)}
     let missing=if storage {""} else {wit_relation(s s op x y refuted)}
     if refuted {
         wit_context(contract)
@@ -1149,6 +1150,35 @@ wit_refinement=(n:WitWord t:WitWord atom:RefAtom self:WitWord a:WitWord b:WitWor
     }
     let what=if relation not=? "" {"refinement `{relation}`"} else {"refinement"}
     wit_unknown(n fact_bound(s self) what contract relation missing)
+}
+# A record field's refinement that names its siblings (`head:int64<v => v <? items.length>`),
+# met while one is built: said with the fields' names, from the record declaring the
+# field. O(records' fields), on the error path only.
+wit_field_relation=(t:WitWord atom:RefAtom):>string=>$unsafe {
+    let tt=prune(t)
+    loop si in [0..structs.length) {
+        let base=WitWord(structs.ptr[si].fields)
+        loop i in [0..WitWord(structs.ptr[si].nfields)) {
+            if prune(WitWord(fields.ptr[base + i].type)) not=? tt {continue}
+            let left=wit_field_term(atom.a si i)
+            let right=wit_field_term(atom.b si i)
+            if left =? "" or right =? "" {return ""}
+            return "{left} {wit_op(atom.op)} {right}"
+        }
+    }
+    ""
+}
+wit_field_term=(term:RefTerm si:WitWord self:WitWord):>string=>$unsafe {
+    if term.kind =? 1 {return wit_ref_text(term "")}
+    let index=if term.kind =? 0 {self} else if term.kind =? 5 {term.value} else {-1}
+    if index <? 0 or index >=? WitWord(structs.ptr[si].nfields) {return ""}
+    let text=name_of(WitWord(fields.ptr[WitWord(structs.ptr[si].fields) + index].name))
+    loop selector in term.path {
+        if selector =? -1 {text="{text}.length"}
+        else if selector >? 0 {text="{text}.{name_of(selector)}"}
+        else {return ""}
+    }
+    "{text}{wit_offset_text(term.offset)}"
 }
 wit_formal_text=(term:RefTerm f:WitWord self:WitWord):>string=>$unsafe {
     let index=if term.kind =? 0 {self} else if term.kind =? 2 or term.kind =? 5 {term.value} else {-1}
