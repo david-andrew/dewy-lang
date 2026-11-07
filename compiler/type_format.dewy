@@ -165,26 +165,31 @@ tf_string_in=(t0:FWord dewy:bool):>string=>$unsafe {
         }
         <'polyfn'> => {"generic closure"}
         <'fn_' | 'cfn'> => {
-            let s="("
             let labels:array<string>=[]
             if dewy and ti.kind =? 'fn_' and ti.st not=? 0 {labels=tf_split_labels(tf_inputs[0].host[0].name_of(FWord(ti.st)))}
-            if ti.kind =? 'cfn' {s="cfn("}
-            if dewy {s="<("}
-            loop i in [0..FWord(ti.nargs)) {
-                if i >? 0 {s="{s}{if dewy {" "} else {", "}}"}
-                if FWord(ti.mutmask) & (FWord(1) << (i & 63)) not=? 0 {s="{s}{if dewy {"@"} else {"mut "}}"}
-                if dewy {
-                    let label=if i <? labels.length and labels[i] not=? "" {labels[i]} else {"_"}
-                    s="{s}{label}:"
+            if dewy {
+                # (`(x:int64:>int64)`, one parameter bare; `((x:int64 y:int64):>int64)`, several in their own)
+                let params=""
+                loop i in [0..FWord(ti.nargs)) {
+                    if i >? 0 {params="{params} "}
+                    if FWord(ti.mutmask) & (FWord(1) << (i & 63)) not=? 0 {params="{params}@"}
+                    if i <? labels.length and labels[i] not=? "" {params="{params}{labels[i]}:"}
+                    params="{params}{tf_string(tu_targ(t i) dewy)}"
                 }
+                if FWord(ti.nargs) not=? 1 {params="({params})"}
+                # (several values: `:>(int64 int64)`, a fixed number; `:>(int64 ...)`, any number)
+                if ti.kind =? 'fn_' and ti.sign and not tf_values(FWord(ti.elem)) {return "({params}:>({tf_string(FWord(tf_inputs[0].types[0].ptr[tu_prune(FWord(ti.elem))].elem) dewy)} ...))"}
+                return "({params}:>{tf_string(FWord(ti.elem) dewy)})"
+            }
+            let s="("
+            if ti.kind =? 'cfn' {s="cfn("}
+            loop i in [0..FWord(ti.nargs)) {
+                if i >? 0 {s="{s}, "}
+                if FWord(ti.mutmask) & (FWord(1) << (i & 63)) not=? 0 {s="{s}mut "}
                 s="{s}{tf_string(tu_targ(t i) dewy)}"
             }
             s="{s})"
-            # (several values: `:>(int64 int64)`, a fixed number; `:>(int64 ...)`, any number)
-            if dewy and ti.kind =? 'fn_' and ti.sign and tf_values(FWord(ti.elem)) {s="{s}:>{tf_string(FWord(ti.elem) dewy)}>"}
-            else if dewy and ti.kind =? 'fn_' and ti.sign {s="{s}:>({tf_string(FWord(tf_inputs[0].types[0].ptr[tu_prune(FWord(ti.elem))].elem) dewy)} ...)>"}
-            else if dewy {s="{s}:>{tf_string(FWord(ti.elem) dewy)}>"}
-            else if tf_kind(FWord(ti.elem)) not=? 'void_' {s="{s} -> {tf_string(FWord(ti.elem) dewy)}"}
+            if tf_kind(FWord(ti.elem)) not=? 'void_' {s="{s} -> {tf_string(FWord(ti.elem) dewy)}"}
             else if ti.kind =? 'fn_' {s="{s} -> void"}
             s
         }

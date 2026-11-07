@@ -123,24 +123,28 @@ tf_string_in = (t0: int, dewy: bool) -> str:
             "vec{ti.bits}"
         polyfn: "generic closure"
         fn_, cfn:
-            s = "("
             labels: str[]
             if dewy and ti.kind == .fn_ and ti.st != 0: labels = split(tf_inputs[0].host[0].name_of(int(ti.st)), "\n")
+            if dewy:
+                # (`(x:int64:>int64)`, one parameter bare; `((x:int64 y:int64):>int64)`, several in their own)
+                params = ""
+                loop i in [0..int(ti.nargs)):
+                    if i > 0: params += " "
+                    if int(ti.mutmask) & (1 << i) != 0: params += "@"
+                    if i < labels.len() and labels[i] != "": params += labels[i] + ":"
+                    params += tf_string(tu_targ(t, i), dewy)
+                if int(ti.nargs) != 1: params = "(" + params + ")"
+                # (several values: `:>(int64 int64)`, a fixed number; `:>(int64 ...)`, any number)
+                if ti.kind == .fn_ and ti.sign and not tf_values(int(ti.elem)): return "(" + params + ":>(" + tf_string(int(tf_inputs[0].types[0][tu_prune(int(ti.elem))].elem), dewy) + " ...))"
+                return "(" + params + ":>" + tf_string(int(ti.elem), dewy) + ")"
+            s = "("
             if ti.kind == .cfn: s = "cfn("
-            if dewy: s = "<("
             loop i in [0..int(ti.nargs)):
-                if i > 0: s += if dewy: " " else: ", "
-                if int(ti.mutmask) & (1 << i) != 0: s += if dewy: "@" else: "mut "
-                if dewy:
-                    label = if i < labels.len() and labels[i] != "": labels[i] else: "_"
-                    s += label + ":"
+                if i > 0: s += ", "
+                if int(ti.mutmask) & (1 << i) != 0: s += "mut "
                 s += tf_string(tu_targ(t, i), dewy)
             s += ")"
-            # (several values: `:>(int64 int64)`, a fixed number; `:>(int64 ...)`, any number)
-            if dewy and ti.kind == .fn_ and ti.sign and tf_values(int(ti.elem)): s += ":>" + tf_string(int(ti.elem), dewy) + ">"
-            else if dewy and ti.kind == .fn_ and ti.sign: s += ":>(" + tf_string(int(tf_inputs[0].types[0][tu_prune(int(ti.elem))].elem), dewy) + " ...)>"
-            else if dewy: s += ":>" + tf_string(int(ti.elem), dewy) + ">"
-            else if tf_kind(int(ti.elem)) != .void_: s += " -> " + tf_string(int(ti.elem), dewy)
+            if tf_kind(int(ti.elem)) != .void_: s += " -> " + tf_string(int(ti.elem), dewy)
             else if ti.kind == .fn_: s += " -> void"
             s
         tuple:

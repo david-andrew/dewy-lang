@@ -547,10 +547,12 @@ ide_dewy_type_node = (n: int) -> str:
             prefix = ""
             if has_flag(child, NF_MUT): prefix = "@"
             label = if i < nkids2(n) and nodes[kid2(n, i)].name != 0: name_of(int(nodes[kid2(n, i)].name)) else: "_"
-            params.push(prefix + label + ":" + ide_dewy_type_node(child))
+            if label != "_": prefix += label + ":"
+            params.push(prefix + ide_dewy_type_node(child))
         result = "void"
         if nodes[n].a != 0: result = ide_dewy_type_node(int(nodes[n].a))
-        return "<(" + params.join(" ") + "):>" + result + ">"
+        if params.len() == 1: return "(" + params[0] + ":>" + result + ")"
+        return "((" + params.join(" ") + "):>" + result + ")"
     "?"
 
 ide_dewy_fn_header = (d: int) -> str:

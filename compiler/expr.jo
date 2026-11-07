@@ -2202,7 +2202,7 @@ call_tie_error = (n: int, name: int, args: int[], cands: Cand[], best: int):
                 if ai > 0: ats += ", "
                 if nodes[unnamed(a0)].type != 0: ats += dt(ntype(unnamed(a0)))
             if nodes[n].aux2 == i32(AUX2_PARTIAL) and dewy_at(nodes[n].pos):
-                fatal(nodes[n].pos, "ambiguous partial application of '{name_of(name)}': more than one overload takes these arguments (candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}); annotate the binding with the callable type it should have, as in `let f:<(b:string):>string> = @{name_of(name)}(...)`")
+                fatal(nodes[n].pos, "ambiguous partial application of '{name_of(name)}': more than one overload takes these arguments (candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}); annotate the binding with the callable type it should have, as in `let f:(b:string:>string) = @{name_of(name)}(...)`")
             fatal(nodes[n].pos, "ambiguous call to '{name_of(name)}({ats})': candidates at {pos_str(nodes[cands[best].decl].pos)} and {pos_str(nodes[cd.decl].pos)}")
 
 # `x.hash()` of a union or optional is its member's: `=?` compares the member, and equal values
@@ -2447,7 +2447,7 @@ call_resolve_error = (kind: int, n: int, name: int, decl: int, i: int, partial: 
     if kind == 2: fatal(nodes[n].pos, "callback effects exceed the explicit generic argument")
     if kind == 3: fatal(nodes[n].pos, "defaults referring to earlier parameters cannot yet be combined with mutable arguments; supply those defaults explicitly")
     if kind == 5:
-        if partial: fatal(nodes[n].pos, jd(nodes[n].pos, "cannot infer generic types for partial application of '{name_of(name)}'; annotate the arguments", "cannot infer the type parameters of '{name_of(name)}' for this partial evaluation; give the result a function type (`let f:<(b:int64):>int64> = @{name_of(name)}(...)`)"))
+        if partial: fatal(nodes[n].pos, jd(nodes[n].pos, "cannot infer generic types for partial application of '{name_of(name)}'; annotate the arguments", "cannot infer the type parameters of '{name_of(name)}' for this partial evaluation; give the result a function type (`let f:(b:int64:>int64) = @{name_of(name)}(...)`)"))
         tp = "{i + 1}"
         if int(nodes[decl].nlist2) > i: tp = "'{name_of(int(nodes[kid2(decl, i)].name))}'"
         fatal(nodes[n].pos, "cannot infer type parameter {tp} of '{name_of(name)}' from the arguments")
