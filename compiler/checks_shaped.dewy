@@ -1,0 +1,526 @@
+$runtime_checks
+from p"ast.jo" import (NF_LOOPCOUNT NF_STMT add_flag clone has_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (check_block check_struct_fields resolve_type)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_int bc_stmt bc_str)
+from p"checks_read_code.dewy" import (bc_logic)
+from p"expr.jo" import (ShapeArm bc_assign bc_bin finalize_literal has_lambda int_intervals is_map_type kid_lit last_checked ntype plain_path small_span type_node_of)
+from p"intervals.dewy" import (interval_missing interval_text)
+from p"refine.jo" import (mk_refined ref_intern str_set_of str_set_type str_sets)
+from p"refinement_types.dewy" import (RefAtom RefTerm)
+from p"types.jo" import (T_INT T_MATH_INT T_NONE T_VOID dt fields is_int is_union prune structs targ tkind type_eq types union_index union_members)
+from p"util.jo" import (fatal name_of)
+
+ShapedWord:type=int64<overflow='wrap'>
+# A literal arm on a union's literal member (`<'fast'>`, `<1>` on
+# `1 | 2 | 'fast' | 'slow'`): the member is covered once each of its values is.
+union_literal_seen=(p:int64 e:int64 vi:int64 pt:int64 @done:array<string> @seen:array<bool>):>void=>$unsafe {
+    let lit=kid_lit(e)
+    let values:array<string>=[]
+    let key=""
+    let set=str_set_of(pt)
+    if set not=? 0 {
+        if nodes.ptr[lit].kind not=? 'dotname' {return}
+        key="{vi}'{str_sets[set][ShapedWord(nodes.ptr[lit].aux)]}"
+        loop value in str_sets[set] {values.push("{vi}'{value}")}
+    }
+    else {
+        let [known intervals]=int_intervals(pt)
+        if not known or nodes.ptr[lit].kind not=? 'int_lit' {return}
+        key="{vi}#{nodes.ptr[lit].ival}"
+        loop k in [0..intervals.length // 2) {
+            if not small_span(intervals[2 * k] intervals[2 * k + 1] 64) {return}
+            loop v in [intervals[2 * k]..intervals[2 * k + 1]] {values.push("{vi}#{v}")}
+        }
+    }
+    if done.contains(key) or seen[vi] {fatal(nodes.ptr[p].pos "this arm is unreachable: earlier arms already match every value it does")}
+    done.push(key)
+    let all=true
+    loop value in values {
+        if not done.contains(value) {all=false}
+    }
+    if all {seen[vi]=true}
+}
+# a union member as a missing arm names it: a literal member by its values not matched yet
+union_literal_missing=(vi:int64 pt:int64 done:array<string>):>string=>$unsafe {
+    let set=str_set_of(pt)
+    if types.ptr[prune(pt)].kind not=? 'refined' and set =? 0 {return dt(pt)}
+    let text=""
+    if set not=? 0 {
+        loop value in str_sets[set] {
+            if done.contains("{vi}'{value}") {continue}
+            if (text as array<uint8>).length >? 0 {text="{text}, "}
+            text="{text}'{value}'"
+        }
+        return text
+    }
+    let [known intervals]=int_intervals(pt)
+    if not known {return dt(pt)}
+    loop k in [0..intervals.length // 2) {
+        if not small_span(intervals[2 * k] intervals[2 * k + 1] 64) {return dt(pt)}
+        loop v in [intervals[2 * k]..intervals[2 * k + 1]] {
+            if done.contains("{vi}#{v}") {continue}
+            if (text as array<uint8>).length >? 0 {text="{text}, "}
+            text="{text}{v}"
+        }
+    }
+    text
+}
+# ---- object and sequence patterns: the match becomes an `if` chain ----
+# A match with an object pattern `[sign:1 limbs]`, a sequence `(a:int64 b)`,
+# a sequence scrutinee `(x y)`, or a guard on an `int`: each arm is an `if` arm
+# whose condition is its pattern's tests and whose body first declares its
+# names, so narrowing and facts come from the ordinary flow checking.
+shape_match_wanted=(m:ShapedWord):>bool=>$unsafe {
+    if nodes.ptr[ShapedWord(nodes.ptr[m].a)].kind =? 'tuple' {return true}
+    let guarded=false
+    let int_guarded=false
+    loop i in [0..nkids(m)) {
+        let arm=kid(m i)
+        loop j in [0..nkids(arm)) {
+            let p=kid(arm j)
+            let k=nodes.ptr[p].kind
+            if k =? 'pshape' or k =? 'pseq' {return true}
+            if k =? 'ptype' and nodes.ptr[ShapedWord(nodes.ptr[p].a)].kind =? 'trefined' {
+                guarded=true
+                let base=ShapedWord(nodes.ptr[ShapedWord(nodes.ptr[p].a)].a)
+                if nodes.ptr[base].kind =? 'tname' and name_of(ShapedWord(nodes.ptr[base].name)) =? "__dewy_int" {int_guarded=true}
+            }
+        }
+    }
+    # (a guard on an `int`: its values reach past any word range; the scrutinee is
+    # checked on a copy, so one with a function literal inside is left alone)
+    # (a guard on a union member, `small:int64<small <? 100>` over `bool|int64|string`,
+    # is the member's test and then the guard's)
+    let sc=ShapedWord(nodes.ptr[m].a)
+    if not guarded or not plain_path(sc) and has_lambda(sc) {return false}
+    let st=prune(check_expr(clone(sc) 0))
+    if is_union(st) {return true}
+    # (and on an optional union's: the value is present, then the same)
+    if types.ptr[st].kind =? 'opt' and (is_union(ShapedWord(types.ptr[st].elem)) or is_int(ShapedWord(types.ptr[st].elem)) or prune(ShapedWord(types.ptr[st].elem)) =? T_MATH_INT) {return true}
+    (plain_path(sc) or int_guarded) and st =? T_MATH_INT
+}
+shape_and=(a:ShapedWord b:ShapedWord pos:ShapedWord):>int64=>{
+    if a =? 0 {return b}
+    if b =? 0 {return a}
+    bc_logic('and_' a b pos)
+}
+shape_is=(subj:ShapedWord t:ShapedWord pos:ShapedWord):>int64=>$unsafe {
+    let n=mk('istype' pos)
+    nodes.ptr[n].a=int32(subj)
+    nodes.ptr[n].b=int32(type_node_of(t pos))
+    n
+}
+shape_decl=(name:ShapedWord value:ShapedWord t:ShapedWord pos:ShapedWord):>int64=>$unsafe {
+    let d=mk('vardecl' pos)
+    nodes.ptr[d].name=int32(name)
+    nodes.ptr[d].b=int32(value)
+    if t not=? 0 {nodes.ptr[d].a=int32(type_node_of(t pos))}
+    d
+}
+# a literal pattern as its singleton type (0: compared as a value)
+shape_literal_type=(e:ShapedWord):>int64=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'str_lit' and nodes.ptr[e].aux not=? 1 {return str_set_type([name_of(ShapedWord(nodes.ptr[e].sval))])}
+    let v:ShapedWord=0
+    if k =? 'int_lit' {v=nodes.ptr[e].ival} else if k =? 'unary' and nodes.ptr[e].op =? int32(59) and nodes.ptr[ShapedWord(nodes.ptr[e].a)].kind =? 'int_lit' {v=-nodes.ptr[ShapedWord(nodes.ptr[e].a)].ival}
+    else {return 0}
+    mk_refined(T_INT ref_intern([RefAtom('le' RefTerm(1 v) RefTerm()) RefAtom('le' RefTerm() RefTerm(1 v))]))
+}
+# The members a shaped arm chooses among: a union's, or an optional's payload
+# and `none`; a plain type is its own.
+shape_choice=(t:ShapedWord):>bool=>{
+    is_union(t) or tkind(t) =? 'opt'
+}
+shape_members=(t0:ShapedWord):>array<int64>=>$unsafe {
+    let t=prune(t0)
+    if is_union(t) {return union_members(t)}
+    if tkind(t) =? 'opt' and is_union(ShapedWord(types.ptr[t].elem)) {return [union_members(ShapedWord(types.ptr[t].elem))... T_NONE]}
+    if tkind(t) =? 'opt' {return [prune(ShapedWord(types.ptr[t].elem)) T_NONE]}
+    [t]
+}
+# the record type an object pattern names: t itself, or the one member of union
+# (or optional) t with its fields
+shape_record=(p:ShapedWord t0:ShapedWord):>int64=>$unsafe {
+    let t=prune(t0)
+    let candidates=shape_members(t)
+    let found:array<int64>=[]
+    loop c in candidates {
+        if tkind(c) not=? 'struct_' or is_map_type(c) {continue}
+        let si=ShapedWord(types.ptr[prune(c)].st)
+        check_struct_fields(si)
+        let all=true
+        loop part in kids(p) {
+            let has=false
+            loop i in [0..ShapedWord(structs.ptr[si].nfields)) {
+                if fields.ptr[ShapedWord(structs.ptr[si].fields) + i].name =? nodes.ptr[part].name {has=true}
+            }
+            if not has {all=false}
+        }
+        if all {found.push(prune(c))}
+    }
+    if found.length =? 0 {
+        # (`[q r] =>` on a tuple, or an optional one: its positions are taken with `(q r) =>`)
+        let hint=""
+        loop c in candidates {
+            if hint =? "" and tkind(c) =? 'tuple' {
+                let names:array<string>=[]
+                loop part in kids(p) {names.push(if nodes.ptr[part].name not=? 0 {name_of(ShapedWord(nodes.ptr[part].name))} else {"_"})}
+                hint=" ({dt(c)} is a tuple: take its positions with `({join(names " ")}) =>`)"
+            }
+        }
+        fatal(nodes.ptr[p].pos "no {dt(t)} has the fields this pattern names{hint}")
+    }
+    if found.length >? 1 {fatal(nodes.ptr[p].pos "several members of {dt(t)} have the fields this pattern names; name the type with `x:T` or `<T>`")}
+    found[0]
+}
+# The array or tuple a sequence pattern takes apart: t, or its one such member.
+# A tuple (`[T U]`) has a type per position and as many positions as the pattern.
+shape_sequence=(p:ShapedWord t:ShapedWord):>int64=>$unsafe {
+    let found:array<int64>=[]
+    loop m in shape_members(t) {
+        if types.ptr[prune(m)].kind =? 'array' or tkind(m) =? 'tuple' {found.push(prune(m))}
+    }
+    if found.length not=? 1 {fatal(nodes.ptr[p].pos "a sequence pattern needs an array, a tuple or a sequence of values (`match (x y) ...`), found {dt(t)}")}
+    let st=found[0]
+    if tkind(st) =? 'tuple' and ShapedWord(types.ptr[st].nargs) not=? nkids(p) {fatal(nodes.ptr[p].pos "this pattern has {nkids(p)} positions; {dt(st)} has {ShapedWord(types.ptr[st].nargs)}")}
+    st
+}
+shape_field_type=(r:ShapedWord name:ShapedWord):>int64=>$unsafe {
+    let si=ShapedWord(types.ptr[r].st)
+    loop i in [0..ShapedWord(structs.ptr[si].nfields)) {
+        if ShapedWord(fields.ptr[ShapedWord(structs.ptr[si].fields) + i].name) =? name {return ShapedWord(fields.ptr[ShapedWord(structs.ptr[si].fields) + i].type)}
+    }
+    0
+}
+# the tests and names of pattern p on subject subj (a path, cloned for each use) of type t
+shape_pattern=(p:ShapedWord subj:ShapedWord t0:ShapedWord @out:ShapeArm):>void=>$unsafe {
+    let t=prune(t0)
+    let pos=nodes.ptr[p].pos
+    let k=nodes.ptr[p].kind
+    let name=ShapedWord(nodes.ptr[p].name)
+    if k =? 'pwild' {
+        if name not=? 0 {out.decls.push(shape_decl(name clone(subj) 0 pos))}
+        return
+    }
+    if k =? 'ptype' or k =? 'plit' {
+        let pt:ShapedWord=0
+        if k =? 'ptype' {pt=prune(resolve_type(ShapedWord(nodes.ptr[p].a)))} else {
+            pt=shape_literal_type(ShapedWord(nodes.ptr[p].a))
+            if pt =? 0 {
+                out.cond=shape_and(out.cond bc_bin('eq' clone(subj) ShapedWord(nodes.ptr[p].a) pos) pos)
+                if name not=? 0 {out.decls.push(shape_decl(name clone(subj) 0 pos))}
+                return
+            }
+        }
+        if not type_eq(pt t) {out.cond=shape_and(out.cond shape_is(clone(subj) pt pos) pos)}
+        # (a refined arm's binding carries its refinement, proven by the test)
+        let annotation=if types.ptr[pt].kind =? 'refined' and str_set_of(pt) =? 0 and not is_union(t) and tkind(t) not=? 'opt' {pt} else {0}
+        if name not=? 0 {out.decls.push(shape_decl(name clone(subj) annotation pos))}
+        return
+    }
+    if k =? 'pshape' {
+        let r=shape_record(p t)
+        if shape_choice(t) {out.cond=shape_and(out.cond shape_is(clone(subj) r pos) pos)}
+        loop part in kids(p) {
+            let field=bc_field(clone(subj) name_of(ShapedWord(nodes.ptr[part].name)) nodes.ptr[part].pos)
+            let first=out.decls.length
+            shape_pattern(part field shape_field_type(r ShapedWord(nodes.ptr[part].name)) @out)
+            # (a field's name is its binding too; leaving it unused is no mistake)
+            loop d in out.decls[first..] {add_flag(d NF_LOOPCOUNT)}
+        }
+        return
+    }
+    if k =? 'pseq' {
+        let st=shape_sequence(p t)
+        if not type_eq(st t) {out.cond=shape_and(out.cond shape_is(clone(subj) st pos) pos)}
+        let tuple=tkind(st) =? 'tuple'
+        if not tuple {out.cond=shape_and(out.cond bc_bin('eq' bc_field(clone(subj) "length" pos) bc_int(nkids(p) pos) pos) pos)}
+        loop i in 0.. and part in kids(p) {
+            let item=mk('index' nodes.ptr[part].pos)
+            nodes.ptr[item].a=int32(clone(subj))
+            nodes.ptr[item].b=int32(bc_int(i nodes.ptr[part].pos))
+            # (a tuple's position reads as `pair[0]` does: dewy_position_index)
+            if tuple {set_list(item [ShapedWord(nodes.ptr[item].b)])}
+            shape_pattern(part item (if tuple {targ(st i)} else {ShapedWord(types.ptr[st].elem)}) @out)
+        }
+        return
+    }
+    fatal(pos "invalid pattern")
+}
+# what an arm covers of type t: everything, a whole member, or values of one field
+# Whether refined pt guards a member of union or optional t.
+shape_guard_member=(t:ShapedWord pt:ShapedWord):>bool=>$unsafe {
+    if types.ptr[pt].kind not=? 'refined' {return false}
+    if is_union(t) {return union_index(t ShapedWord(types.ptr[pt].elem)) >=? 0}
+    if tkind(t) not=? 'opt' {return false}
+    let elem=prune(ShapedWord(types.ptr[t].elem))
+    if is_union(elem) {union_index(elem ShapedWord(types.ptr[pt].elem)) >=? 0} else {type_eq(elem ShapedWord(types.ptr[pt].elem))}
+}
+shape_cover=(p:ShapedWord t0:ShapedWord @out:ShapeArm):>void=>$unsafe {
+    let t=prune(t0)
+    let k=nodes.ptr[p].kind
+    if k =? 'pwild' {
+        out.member=-1
+        return
+    }
+    if k =? 'ptype' {
+        let pt=prune(resolve_type(ShapedWord(nodes.ptr[p].a)))
+        if type_eq(pt t) {out.member=-1} else if is_union(t) and union_index(t pt) >=? 0 {out.member=pt}
+        else if tkind(t) =? 'opt' and (pt =? T_NONE or type_eq(pt ShapedWord(types.ptr[t].elem))) {out.member=pt} else if tkind(t) =? 'opt' and is_union(ShapedWord(types.ptr[t].elem)) and types.ptr[pt].kind not=? 'refined' and union_index(ShapedWord(types.ptr[t].elem) pt) >=? 0 {out.member=pt}
+        else if shape_guard_member(t pt) {
+            let [known intervals]=int_intervals(pt)
+            if known {
+                out.gmember=prune(ShapedWord(types.ptr[pt].elem))
+                out.guard=intervals
+            }
+        }
+        return
+    }
+    # (`<none>` takes an optional's absent member)
+    if k =? 'plit' and tkind(t) =? 'opt' and nodes.ptr[ShapedWord(nodes.ptr[p].a)].kind =? 'none_lit' {
+        out.member=T_NONE
+        return
+    }
+    # (a tuple's names and its positions' own types take it whole)
+    if k =? 'pseq' {
+        let st=shape_sequence(p t)
+        if tkind(st) not=? 'tuple' {return}
+        loop i in 0.. and part in kids(p) {
+            let pk=nodes.ptr[part].kind
+            if pk =? 'pwild' {continue}
+            if pk =? 'ptype' and type_eq(prune(resolve_type(ShapedWord(nodes.ptr[part].a))) prune(targ(st i))) {continue}
+            return
+        }
+        out.member=if type_eq(st t) {-1} else {st}
+        return
+    }
+    if k not=? 'pshape' {return}
+    let r=shape_record(p t)
+    let constrained:array<int64>=[]
+    loop part in kids(p) {
+        let pk=nodes.ptr[part].kind
+        if pk =? 'pwild' {continue}
+        if pk =? 'ptype' and type_eq(prune(resolve_type(ShapedWord(nodes.ptr[part].a))) prune(shape_field_type(r ShapedWord(nodes.ptr[part].name)))) {continue}
+        constrained.push(part)
+    }
+    if constrained.length =? 0 {
+        out.member=if type_eq(r t) {-1} else {r}
+        return
+    }
+    if constrained.length not=? 1 {return}
+    let part=constrained[0]
+    out.field=ShapedWord(nodes.ptr[part].name)
+    out.member=0
+    let ft=prune(shape_field_type(r out.field))
+    let vt=if nodes.ptr[part].kind =? 'ptype' {prune(resolve_type(ShapedWord(nodes.ptr[part].a)))} else {shape_literal_type(ShapedWord(nodes.ptr[part].a))}
+    if vt =? 0 or ft =? 0 {
+        out.field=0
+        return
+    }
+    shape_values(vt @out.values)
+    out.record=r
+}
+# a literal type's values as text keys (strings quoted, integers bare); empty if unbounded
+shape_values=(t:ShapedWord @out:array<string>):>void=>{
+    let set=str_set_of(t)
+    if set not=? 0 {
+        loop value in str_sets[set] {out.push("'{value}'")}
+        return
+    }
+    let [known intervals]=int_intervals(t)
+    if not known {return}
+    loop k in [0..intervals.length // 2) {
+        if not small_span(intervals[2 * k] intervals[2 * k + 1] 64) {return}
+        loop v in [intervals[2 * k]..intervals[2 * k + 1]] {out.push("{v}")}
+    }
+}
+# an arm whose whole member, or whose field values, earlier arms already match
+shape_reachable=(arm:ShapedWord cover:ShapeArm covered:array<int64> arms:array<ShapeArm>):>void=>$unsafe {
+    let member=if cover.field not=? 0 {cover.record} else {cover.member}
+    if member <=? 0 {return}
+    loop c in covered {
+        if type_eq(c member) or is_union(c) and union_index(c member) >=? 0 {fatal(nodes.ptr[arm].pos "this arm is unreachable: earlier arms already match every {dt(member)}")}
+    }
+    if cover.field =? 0 or cover.values.length =? 0 {return}
+    let have:array<string>=[]
+    loop a in arms {
+        if a.field =? cover.field and type_eq(a.member member) {have.extend(a.values)}
+    }
+    loop v in cover.values {
+        if not have.contains(v) {return}
+    }
+    fatal(nodes.ptr[arm].pos "this arm is unreachable: earlier arms already match every value it does")
+}
+check_shaped_match=(m:ShapedWord expected:ShapedWord):>int64=>$unsafe {
+    let is_stmt=has_flag(m NF_STMT)
+    let pos=nodes.ptr[m].pos
+    let sc=ShapedWord(nodes.ptr[m].a)
+    let stmts:array<int64>=[]
+    let subjects:array<int64>=[]
+    let subject_types:array<int64>=[]
+    let values=if nodes.ptr[sc].kind =? 'tuple' {kids(sc)} else {[sc]}
+    loop i in 0.. and value in values {
+        if plain_path(value) and nodes.ptr[sc].kind not=? 'tuple' {
+            let subj=clone(value)
+            subject_types.push(prune(check_expr(clone(value) 0)))
+            subjects.push(subj)
+            continue
+        }
+        check_expr(value 0);
+        let checked=last_checked
+        finalize_literal(checked);
+        let held="__m{m}_{i}"
+        stmts.push(bc_assign(bc_ident(held pos) checked pos))
+        subjects.push(bc_ident(held pos))
+        subject_types.push(prune(ntype(checked)))
+    }
+    let arms:array<ShapeArm>=[]
+    let total=false
+    let whole=subjects.length =? 1 and shape_choice(subject_types[0])
+    let covered:array<int64>=[]
+    let seq_covered:array<array<int64>>=[]
+    loop _ in subjects {seq_covered.push([])}
+    loop arm in kids(m) {
+        if total {fatal(nodes.ptr[arm].pos "this arm is unreachable: an earlier arm already matches every value")}
+        if nkids(arm) not=? 1 {fatal(nodes.ptr[arm].pos "an arm with an object or sequence pattern has one pattern")}
+        let p=kid(arm 0)
+        let out=ShapeArm()
+        let cover=ShapeArm()
+        if subjects.length >? 1 {
+            if nodes.ptr[p].kind =? 'pwild' {
+                if nodes.ptr[p].name not=? 0 {fatal(nodes.ptr[p].pos "name each value of a sequence scrutinee: `(a b) => ...`")}
+                cover.member=-1
+            }
+            else {
+                if nodes.ptr[p].kind not=? 'pseq' or nkids(p) not=? subjects.length {fatal(nodes.ptr[p].pos "this scrutinee is a sequence of {subjects.length} values; its arms are `(p1 p2 ...)` with as many patterns")}
+                let all=true
+                let partial:ShapedWord=-1
+                let each_cover:array<ShapeArm>=[]
+                loop i in 0.. and part in kids(p) {
+                    shape_pattern(part subjects[i] subject_types[i] @out)
+                    let each=ShapeArm()
+                    shape_cover(part subject_types[i] @each)
+                    each_cover.push(each)
+                    if each.member not=? -1 {
+                        all=false
+                        partial=if partial =? -1 {i} else {-2}
+                    }
+                }
+                if all {cover.member=-1}
+                # (every value but one is matched whole: that one's member is covered there)
+                else if partial >=? 0 and each_cover[partial].member >? 0 {
+                    if seq_covered[partial].contains(each_cover[partial].member) {fatal(nodes.ptr[arm].pos "this arm is unreachable: earlier arms already match every value it does")}
+                    seq_covered[partial].push(each_cover[partial].member)
+                }
+            }
+        }
+        else {
+            shape_pattern(p subjects[0] subject_types[0] @out)
+            shape_cover(p subject_types[0] @cover)
+            shape_reachable(arm cover covered arms)
+        }
+        if cover.member =? -1 {total=true} else if cover.member not=? 0 {covered.push(cover.member)}
+        out.member=cover.member
+        out.field=cover.field
+        out.values=cover.values
+        out.gmember=cover.gmember
+        out.guard=cover.guard
+        if cover.field not=? 0 {out.member=cover.record}
+        arms.push(out)
+    }
+    # (a sequence whose arms cover each member of one value, the others matched whole)
+    if not total and subjects.length >? 1 {
+        loop j in 0.. and st in subject_types {
+            if not is_union(st) {continue}
+            let all=true
+            loop member in union_members(st) {
+                if not seq_covered[j].contains(member) {all=false}
+            }
+            if all {total=true}
+        }
+    }
+    # members covered field by field: `[sign:1 ...]` and `[sign:-1 ...]` cover `[sign:-1|1 ...]`
+    let missing=""
+    if not total and (whole or subjects.length =? 1 and tkind(subject_types[0]) =? 'struct_') {
+        let members=if whole {shape_members(subject_types[0])} else {[subject_types[0]]}
+        total=true
+        loop member in members {
+            let done=false
+            loop c in covered {
+                if type_eq(c member) or is_union(c) and union_index(c member) >=? 0 {done=true}
+            }
+            # (guards on an integer member cover it once their values do)
+            if not done {
+                let have:array<int64>=[]
+                loop a in arms {
+                    if a.gmember not=? 0 and type_eq(a.gmember member) {have.extend(a.guard)}
+                }
+                let [known want]=int_intervals(member)
+                if have.length >? 0 and known {
+                    let left=interval_missing(want have)
+                    if left.length =? 0 {done=true} else if (missing as array<uint8>).length =? 0 {missing="{dt(member)} {interval_text(left)}"}
+                }
+            }
+            if not done and tkind(member) =? 'struct_' {
+                let si=ShapedWord(types.ptr[prune(member)].st)
+                loop f in [0..ShapedWord(structs.ptr[si].nfields)) {
+                    let fname=ShapedWord(fields.ptr[ShapedWord(structs.ptr[si].fields) + f].name)
+                    let want:array<string>=[]
+                    shape_values(ShapedWord(fields.ptr[ShapedWord(structs.ptr[si].fields) + f].type) @want)
+                    if want.length =? 0 {continue}
+                    let have:array<string>=[]
+                    loop a in arms {
+                        if a.field =? fname and type_eq(a.member member) {have.extend(a.values)}
+                    }
+                    let left:array<string>=[]
+                    loop v in want {
+                        if not have.contains(v) {left.push(v)}
+                    }
+                    if left.length =? 0 {done=true} else if have.length >? 0 and (missing as array<uint8>).length =? 0 {missing="{dt(member)} with {name_of(fname)} {join(left ", ")}"}
+                }
+            }
+            if not done {
+                total=false
+                if (missing as array<uint8>).length =? 0 {missing=dt(member)}
+            }
+        }
+    }
+    if not total and not is_stmt {
+        if (missing as array<uint8>).length >? 0 {fatal(pos "this match has no arm for {missing} (add one, or a `_ => ...` arm for the rest)")}
+        fatal(pos "match is not exhaustive (add a `_ => ...` arm or `else`)")
+    }
+    # the chain, from its last arm back
+    let rest:ShapedWord=0
+    if total and not is_stmt {
+        rest=bc_block([bc_stmt(bc_call("panic" [bc_str("no match arm matched" pos)] pos) pos)] pos)
+    }
+    let i=arms.length - 1
+    loop i >=? 0 {
+        let arm=kid(m i)
+        let body=ShapedWord(nodes.ptr[arm].b)
+        set_list(body [arms[i].decls... kids(body)...])
+        if arms[i].cond =? 0 {rest=body} else {
+            let n=mk('if_' nodes.ptr[arm].pos)
+            nodes.ptr[n].a=int32(arms[i].cond)
+            nodes.ptr[n].b=int32(body)
+            if rest not=? 0 {nodes.ptr[n].c=int32(rest)}
+            if is_stmt {add_flag(n NF_STMT)}
+            rest=bc_block([n] nodes.ptr[arm].pos)
+        }
+        i -= 1
+    }
+    if is_stmt {
+        loop x in kids(rest) {stmts.push(x)}
+        let built=bc_block(stmts pos)
+        nodes.ptr[m]=nodes.ptr[built]
+        add_flag(m NF_STMT)
+        check_block(m 0 false);
+        nodes.ptr[m].type=int32(T_VOID)
+        return T_VOID
+    }
+    loop x in kids(rest) {stmts.push(x)}
+    let built=bc_block(stmts pos)
+    nodes.ptr[m]=nodes.ptr[built]
+    check_expr(m expected)
+}

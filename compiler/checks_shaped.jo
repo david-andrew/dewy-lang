@@ -1,0 +1,558 @@
+use 'expr.jo'
+use 'secret_checks.dewy'
+use 'checks_read_code.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'checks_const_views.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'settings.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'ide.jo'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+
+# A literal arm on a union's literal member (`<'fast'>`, `<1>` on
+# `1 | 2 | 'fast' | 'slow'`): the member is covered once each of its values is.
+union_literal_seen = (p: int, e: int, vi: int, pt: int, done: mut str[], seen: mut bool[]):
+    lit = kid_lit(e)
+    values: str[]
+    key = ""
+    set = str_set_of(pt)
+    if set != 0:
+        if nodes[lit].kind != .dotname: return
+        key = "{vi}'{str_sets[set][int(nodes[lit].aux)]}"
+        loop value in str_sets[set]: values.push("{vi}'{value}")
+    else:
+        known, intervals = int_intervals(pt)
+        if not known or nodes[lit].kind != .int_lit: return
+        key = "{vi}#{nodes[lit].ival}"
+        loop k in [0..intervals.len() / 2):
+            if not small_span(intervals[2 * k], intervals[2 * k + 1], 64): return
+            loop v in [intervals[2 * k]..intervals[2 * k + 1]]: values.push("{vi}#{v}")
+    if done.contains(key) or seen[vi]: fatal(nodes[p].pos, "this arm is unreachable: earlier arms already match every value it does")
+    done.push(key)
+    all = true
+    loop value in values:
+        if not done.contains(value): all = false
+    if all: seen[vi] = true
+# a union member as a missing arm names it: a literal member by its values not matched yet
+union_literal_missing = (vi: int, pt: int, done: str[]) -> str:
+    set = str_set_of(pt)
+    if types[prune(pt)].kind != .refined and set == 0: return dt(pt)
+    text = ""
+    if set != 0:
+        loop value in str_sets[set]:
+            if done.contains("{vi}'{value}"): continue
+            if len(text) > 0: text += ", "
+            text += "'{value}'"
+        return text
+    known, intervals = int_intervals(pt)
+    if not known: return dt(pt)
+    loop k in [0..intervals.len() / 2):
+        if not small_span(intervals[2 * k], intervals[2 * k + 1], 64): return dt(pt)
+        loop v in [intervals[2 * k]..intervals[2 * k + 1]]:
+            if done.contains("{vi}#{v}"): continue
+            if len(text) > 0: text += ", "
+            text += "{v}"
+    text
+# ---- object and sequence patterns: the match becomes an `if` chain ----
+# A match with an object pattern `[sign:1 limbs]`, a sequence `(a:int64 b)`,
+# a sequence scrutinee `(x y)`, or a guard on an `int`: each arm is an `if` arm
+# whose condition is its pattern's tests and whose body first declares its
+# names, so narrowing and facts come from the ordinary flow checking.
+shape_match_wanted = (m: int) -> bool:
+    if nodes[int(nodes[m].a)].kind == .tuple: return true
+    guarded = false
+    int_guarded = false
+    loop i in [0..nkids(m)):
+        arm = kid(m, i)
+        loop j in [0..nkids(arm)):
+            p = kid(arm, j)
+            k = nodes[p].kind
+            if k == .pshape or k == .pseq: return true
+            if k == .ptype and nodes[int(nodes[p].a)].kind == .trefined:
+                guarded = true
+                base = int(nodes[int(nodes[p].a)].a)
+                if nodes[base].kind == .tname and name_of(int(nodes[base].name)) == "__dewy_int": int_guarded = true
+    # (a guard on an `int`: its values reach past any word range; the scrutinee is
+    # checked on a copy, so one with a function literal inside is left alone)
+    # (a guard on a union member, `small:int64<small <? 100>` over `bool|int64|string`,
+    # is the member's test and then the guard's)
+    sc = int(nodes[m].a)
+    if not guarded or not plain_path(sc) and has_lambda(sc): return false
+    st = prune(check_expr(clone(sc), 0))
+    if is_union(st): return true
+    # (and on an optional union's: the value is present, then the same)
+    if types[st].kind == .opt and (is_union(int(types[st].elem)) or is_int(int(types[st].elem)) or prune(int(types[st].elem)) == T_MATH_INT): return true
+    (plain_path(sc) or int_guarded) and st == T_MATH_INT
+shape_and = (a: int, b: int, pos: int) -> int:
+    if a == 0: return b
+    if b == 0: return a
+    bc_logic(.and_, a, b, pos)
+shape_is = (subj: int, t: int, pos: int) -> int:
+    n = mk(.istype, pos)
+    nodes[n].a = i32(subj)
+    nodes[n].b = i32(type_node_of(t, pos))
+    n
+shape_decl = (name: int, value: int, t: int, pos: int) -> int:
+    d = mk(.vardecl, pos)
+    nodes[d].name = i32(name)
+    nodes[d].b = i32(value)
+    if t != 0: nodes[d].a = i32(type_node_of(t, pos))
+    d
+# a literal pattern as its singleton type (0: compared as a value)
+shape_literal_type = (e: int) -> int:
+    k = nodes[e].kind
+    if k == .str_lit and nodes[e].aux != 1: return str_set_type([name_of(int(nodes[e].sval))])
+    v = 0
+    if k == .int_lit: v = nodes[e].ival
+    else if k == .unary and nodes[e].op == i32(int(Tok.minus)) and nodes[int(nodes[e].a)].kind == .int_lit: v = -nodes[int(nodes[e].a)].ival
+    else: return 0
+    mk_refined(T_INT, ref_intern([RefAtom(.le, RefTerm(1, v), RefTerm()), RefAtom(.le, RefTerm(), RefTerm(1, v))]))
+# The members a shaped arm chooses among: a union's, or an optional's payload
+# and `none`; a plain type is its own.
+shape_choice = (t: int) -> bool: is_union(t) or tkind(t) == .opt
+shape_members = (t0: int) -> int[]:
+    t = prune(t0)
+    if is_union(t): return union_members(t)
+    if tkind(t) == .opt and is_union(int(types[t].elem)): return union_members(int(types[t].elem)) + [T_NONE]
+    if tkind(t) == .opt: return [prune(int(types[t].elem)), T_NONE]
+    [t]
+# the record type an object pattern names: t itself, or the one member of union
+# (or optional) t with its fields
+shape_record = (p: int, t0: int) -> int:
+    t = prune(t0)
+    candidates = shape_members(t)
+    found: int[]
+    loop c in candidates:
+        if tkind(c) != .struct_ or is_map_type(c): continue
+        si = int(types[prune(c)].st)
+        check_struct_fields(si)
+        all = true
+        loop part in kids(p):
+            has = false
+            loop i in [0..int(structs[si].nfields)):
+                if fields[int(structs[si].fields) + i].name == nodes[part].name: has = true
+            if not has: all = false
+        if all: found.push(prune(c))
+    if found.len() == 0:
+        # (`[q r] =>` on a tuple, or an optional one: its positions are taken with `(q r) =>`)
+        hint = ""
+        loop c in candidates:
+            if hint == "" and tkind(c) == .tuple:
+                names: str[]
+                loop part in kids(p): names.push(if nodes[part].name != 0: name_of(int(nodes[part].name)) else: "_")
+                hint = " ({dt(c)} is a tuple: take its positions with `({join(names, " ")}) =>`)"
+        fatal(nodes[p].pos, "no {dt(t)} has the fields this pattern names{hint}")
+    if found.len() > 1: fatal(nodes[p].pos, "several members of {dt(t)} have the fields this pattern names; name the type with `x:T` or `<T>`")
+    found[0]
+# The array or tuple a sequence pattern takes apart: t, or its one such member.
+# A tuple (`[T U]`) has a type per position and as many positions as the pattern.
+shape_sequence = (p: int, t: int) -> int:
+    found: int[]
+    loop m in shape_members(t):
+        if types[prune(m)].kind == .array or tkind(m) == .tuple: found.push(prune(m))
+    if found.len() != 1: fatal(nodes[p].pos, "a sequence pattern needs an array, a tuple or a sequence of values (`match (x y) ...`), found {dt(t)}")
+    st = found[0]
+    if tkind(st) == .tuple and int(types[st].nargs) != nkids(p): fatal(nodes[p].pos, "this pattern has {nkids(p)} positions; {dt(st)} has {int(types[st].nargs)}")
+    st
+shape_field_type = (r: int, name: int) -> int:
+    si = int(types[r].st)
+    loop i in [0..int(structs[si].nfields)):
+        if int(fields[int(structs[si].fields) + i].name) == name: return int(fields[int(structs[si].fields) + i].type)
+    0
+# the tests and names of pattern p on subject subj (a path, cloned for each use) of type t
+shape_pattern = (p: int, subj: int, t0: int, out: mut ShapeArm):
+    t = prune(t0)
+    pos = nodes[p].pos
+    k = nodes[p].kind
+    name = int(nodes[p].name)
+    if k == .pwild:
+        if name != 0: out.decls.push(shape_decl(name, clone(subj), 0, pos))
+        return
+    if k == .ptype or k == .plit:
+        pt = 0
+        if k == .ptype: pt = prune(resolve_type(int(nodes[p].a)))
+        else:
+            pt = shape_literal_type(int(nodes[p].a))
+            if pt == 0:
+                out.cond = shape_and(out.cond, bc_bin(.eq, clone(subj), int(nodes[p].a), pos), pos)
+                if name != 0: out.decls.push(shape_decl(name, clone(subj), 0, pos))
+                return
+        if not type_eq(pt, t): out.cond = shape_and(out.cond, shape_is(clone(subj), pt, pos), pos)
+        # (a refined arm's binding carries its refinement, proven by the test)
+        annotation = if types[pt].kind == .refined and str_set_of(pt) == 0 and not is_union(t) and tkind(t) != .opt: pt else: 0
+        if name != 0: out.decls.push(shape_decl(name, clone(subj), annotation, pos))
+        return
+    if k == .pshape:
+        r = shape_record(p, t)
+        if shape_choice(t): out.cond = shape_and(out.cond, shape_is(clone(subj), r, pos), pos)
+        loop part in kids(p):
+            field = bc_field(clone(subj), name_of(int(nodes[part].name)), nodes[part].pos)
+            first = out.decls.len()
+            shape_pattern(part, field, shape_field_type(r, int(nodes[part].name)), out)
+            # (a field's name is its binding too; leaving it unused is no mistake)
+            loop d in out.decls[first..]: add_flag(d, NF_LOOPCOUNT)
+        return
+    if k == .pseq:
+        st = shape_sequence(p, t)
+        if not type_eq(st, t): out.cond = shape_and(out.cond, shape_is(clone(subj), st, pos), pos)
+        tuple = tkind(st) == .tuple
+        if not tuple: out.cond = shape_and(out.cond, bc_bin(.eq, bc_field(clone(subj), "length", pos), bc_int(nkids(p), pos), pos), pos)
+        loop i in 0.. and part in kids(p):
+            item = mk(.index, nodes[part].pos)
+            nodes[item].a = i32(clone(subj))
+            nodes[item].b = i32(bc_int(i, nodes[part].pos))
+            # (a tuple's position reads as `pair[0]` does: dewy_position_index)
+            if tuple: set_list(item, [int(nodes[item].b)])
+            shape_pattern(part, item, (if tuple: targ(st, i) else: int(types[st].elem)), out)
+        return
+    fatal(pos, "invalid pattern")
+# what an arm covers of type t: everything, a whole member, or values of one field
+# Whether refined pt guards a member of union or optional t.
+shape_guard_member = (t: int, pt: int) -> bool:
+    if types[pt].kind != .refined: return false
+    if is_union(t): return union_index(t, int(types[pt].elem)) >= 0
+    if tkind(t) != .opt: return false
+    elem = prune(int(types[t].elem))
+    if is_union(elem): union_index(elem, int(types[pt].elem)) >= 0 else: type_eq(elem, int(types[pt].elem))
+shape_cover = (p: int, t0: int, out: mut ShapeArm):
+    t = prune(t0)
+    k = nodes[p].kind
+    if k == .pwild:
+        out.member = -1
+        return
+    if k == .ptype:
+        pt = prune(resolve_type(int(nodes[p].a)))
+        if type_eq(pt, t): out.member = -1
+        else if is_union(t) and union_index(t, pt) >= 0: out.member = pt
+        else if tkind(t) == .opt and (pt == T_NONE or type_eq(pt, int(types[t].elem))): out.member = pt
+        else if tkind(t) == .opt and is_union(int(types[t].elem)) and types[pt].kind != .refined and union_index(int(types[t].elem), pt) >= 0: out.member = pt
+        else if shape_guard_member(t, pt):
+            known, intervals = int_intervals(pt)
+            if known:
+                out.gmember = prune(int(types[pt].elem))
+                out.guard = intervals
+        return
+    # (`<none>` takes an optional's absent member)
+    if k == .plit and tkind(t) == .opt and nodes[int(nodes[p].a)].kind == .none_lit:
+        out.member = T_NONE
+        return
+    # (a tuple's names and its positions' own types take it whole)
+    if k == .pseq:
+        st = shape_sequence(p, t)
+        if tkind(st) != .tuple: return
+        loop i in 0.. and part in kids(p):
+            pk = nodes[part].kind
+            if pk == .pwild: continue
+            if pk == .ptype and type_eq(prune(resolve_type(int(nodes[part].a))), prune(targ(st, i))): continue
+            return
+        out.member = if type_eq(st, t): -1 else: st
+        return
+    if k != .pshape: return
+    r = shape_record(p, t)
+    constrained: int[]
+    loop part in kids(p):
+        pk = nodes[part].kind
+        if pk == .pwild: continue
+        if pk == .ptype and type_eq(prune(resolve_type(int(nodes[part].a))), prune(shape_field_type(r, int(nodes[part].name))) ): continue
+        constrained.push(part)
+    if constrained.len() == 0:
+        out.member = if type_eq(r, t): -1 else: r
+        return
+    if constrained.len() != 1: return
+    part = constrained[0]
+    out.field = int(nodes[part].name)
+    out.member = 0
+    ft = prune(shape_field_type(r, out.field))
+    vt = if nodes[part].kind == .ptype: prune(resolve_type(int(nodes[part].a))) else: shape_literal_type(int(nodes[part].a))
+    if vt == 0 or ft == 0:
+        out.field = 0
+        return
+    shape_values(vt, out.values)
+    out.record = r
+# a literal type's values as text keys (strings quoted, integers bare); empty if unbounded
+shape_values = (t: int, out: mut str[]):
+    set = str_set_of(t)
+    if set != 0:
+        loop value in str_sets[set]: out.push("'{value}'")
+        return
+    known, intervals = int_intervals(t)
+    if not known: return
+    loop k in [0..intervals.len() / 2):
+        if not small_span(intervals[2 * k], intervals[2 * k + 1], 64): return
+        loop v in [intervals[2 * k]..intervals[2 * k + 1]]: out.push("{v}")
+# an arm whose whole member, or whose field values, earlier arms already match
+shape_reachable = (arm: int, cover: ShapeArm, covered: int[], arms: ShapeArm[]):
+    member = if cover.field != 0: cover.record else: cover.member
+    if member <= 0: return
+    loop c in covered:
+        if type_eq(c, member) or is_union(c) and union_index(c, member) >= 0: fatal(nodes[arm].pos, "this arm is unreachable: earlier arms already match every {dt(member)}")
+    if cover.field == 0 or cover.values.len() == 0: return
+    have: str[]
+    loop a in arms:
+        if a.field == cover.field and type_eq(a.member, member): have += a.values
+    loop v in cover.values:
+        if not have.contains(v): return
+    fatal(nodes[arm].pos, "this arm is unreachable: earlier arms already match every value it does")
+check_shaped_match = (m: int, expected: int) -> int:
+    is_stmt = has_flag(m, NF_STMT)
+    pos = nodes[m].pos
+    sc = int(nodes[m].a)
+    stmts: int[]
+    subjects: int[]
+    subject_types: int[]
+    values = if nodes[sc].kind == .tuple: kids(sc) else: [sc]
+    loop i in 0.. and value in values:
+        if plain_path(value) and nodes[sc].kind != .tuple:
+            subj = clone(value)
+            subject_types.push(prune(check_expr(clone(value), 0)))
+            subjects.push(subj)
+            continue
+        check_expr(value, 0)
+        checked = last_checked
+        finalize_literal(checked)
+        held = "__m{m}_{i}"
+        stmts.push(bc_assign(bc_ident(held, pos), checked, pos))
+        subjects.push(bc_ident(held, pos))
+        subject_types.push(prune(ntype(checked)))
+    arms: ShapeArm[]
+    total = false
+    whole = subjects.len() == 1 and shape_choice(subject_types[0])
+    covered: int[]
+    seq_covered: int[][]
+    loop _ in subjects: seq_covered.push([])
+    loop arm in kids(m):
+        if total: fatal(nodes[arm].pos, "this arm is unreachable: an earlier arm already matches every value")
+        if nkids(arm) != 1: fatal(nodes[arm].pos, "an arm with an object or sequence pattern has one pattern")
+        p = kid(arm, 0)
+        out = ShapeArm()
+        cover = ShapeArm()
+        if subjects.len() > 1:
+            if nodes[p].kind == .pwild:
+                if nodes[p].name != 0: fatal(nodes[p].pos, "name each value of a sequence scrutinee: `(a b) => ...`")
+                cover.member = -1
+            else:
+                if nodes[p].kind != .pseq or nkids(p) != subjects.len(): fatal(nodes[p].pos, "this scrutinee is a sequence of {subjects.len()} values; its arms are `(p1 p2 ...)` with as many patterns")
+                all = true
+                partial = -1
+                each_cover: ShapeArm[]
+                loop i in 0.. and part in kids(p):
+                    shape_pattern(part, subjects[i], subject_types[i], out)
+                    each = ShapeArm()
+                    shape_cover(part, subject_types[i], each)
+                    each_cover.push(each)
+                    if each.member != -1:
+                        all = false
+                        partial = if partial == -1: i else: -2
+                if all: cover.member = -1
+                # (every value but one is matched whole: that one's member is covered there)
+                else if partial >= 0 and each_cover[partial].member > 0:
+                    if seq_covered[partial].contains(each_cover[partial].member): fatal(nodes[arm].pos, "this arm is unreachable: earlier arms already match every value it does")
+                    seq_covered[partial].push(each_cover[partial].member)
+        else:
+            shape_pattern(p, subjects[0], subject_types[0], out)
+            shape_cover(p, subject_types[0], cover)
+            shape_reachable(arm, cover, covered, arms)
+        if cover.member == -1: total = true
+        else if cover.member != 0: covered.push(cover.member)
+        out.member = cover.member
+        out.field = cover.field
+        out.values = cover.values
+        out.gmember = cover.gmember
+        out.guard = cover.guard
+        if cover.field != 0: out.member = cover.record
+        arms.push(out)
+    # (a sequence whose arms cover each member of one value, the others matched whole)
+    if not total and subjects.len() > 1:
+        loop j in 0.. and st in subject_types:
+            if not is_union(st): continue
+            all = true
+            loop member in union_members(st):
+                if not seq_covered[j].contains(member): all = false
+            if all: total = true
+    # members covered field by field: `[sign:1 ...]` and `[sign:-1 ...]` cover `[sign:-1|1 ...]`
+    missing = ""
+    if not total and (whole or subjects.len() == 1 and tkind(subject_types[0]) == .struct_):
+        members = if whole: shape_members(subject_types[0]) else: [subject_types[0]]
+        total = true
+        loop member in members:
+            done = false
+            loop c in covered:
+                if type_eq(c, member) or is_union(c) and union_index(c, member) >= 0: done = true
+            # (guards on an integer member cover it once their values do)
+            if not done:
+                have: int[]
+                loop a in arms:
+                    if a.gmember != 0 and type_eq(a.gmember, member): have += a.guard
+                known, want = int_intervals(member)
+                if have.len() > 0 and known:
+                    left = interval_missing(want, have)
+                    if left.len() == 0: done = true
+                    else if len(missing) == 0: missing = "{dt(member)} {interval_text(left)}"
+            if not done and tkind(member) == .struct_:
+                si = int(types[prune(member)].st)
+                loop f in [0..int(structs[si].nfields)):
+                    fname = int(fields[int(structs[si].fields) + f].name)
+                    want: str[]
+                    shape_values(int(fields[int(structs[si].fields) + f].type), want)
+                    if want.len() == 0: continue
+                    have: str[]
+                    loop a in arms:
+                        if a.field == fname and type_eq(a.member, member): have += a.values
+                    left: str[]
+                    loop v in want:
+                        if not have.contains(v): left.push(v)
+                    if left.len() == 0: done = true
+                    else if have.len() > 0 and len(missing) == 0: missing = "{dt(member)} with {name_of(fname)} {join(left, ", ")}"
+            if not done:
+                total = false
+                if len(missing) == 0: missing = dt(member)
+    if not total and not is_stmt:
+        if len(missing) > 0: fatal(pos, "this match has no arm for {missing} (add one, or a `_ => ...` arm for the rest)")
+        fatal(pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
+    # the chain, from its last arm back
+    rest = 0
+    if total and not is_stmt:
+        rest = bc_block([bc_stmt(bc_call("panic", [bc_str("no match arm matched", pos)], pos), pos)], pos)
+    i = arms.len() - 1
+    loop i >= 0:
+        arm = kid(m, i)
+        body = int(nodes[arm].b)
+        set_list(body, arms[i].decls + kids(body))
+        if arms[i].cond == 0: rest = body
+        else:
+            n = mk(.if_, nodes[arm].pos)
+            nodes[n].a = i32(arms[i].cond)
+            nodes[n].b = i32(body)
+            if rest != 0: nodes[n].c = i32(rest)
+            if is_stmt: add_flag(n, NF_STMT)
+            rest = bc_block([n], nodes[arm].pos)
+        i -= 1
+    if is_stmt:
+        stmts += kids(rest)
+        nodes[m] = nodes[bc_block(stmts, pos)]
+        add_flag(m, NF_STMT)
+        check_block(m, 0, false)
+        nodes[m].type = i32(T_VOID)
+        return T_VOID
+    stmts += kids(rest)
+    nodes[m] = nodes[bc_block(stmts, pos)]
+    check_expr(m, expected)
