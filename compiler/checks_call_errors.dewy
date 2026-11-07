@@ -13,7 +13,7 @@ from p"checker_expr.dewy" import (check_expr lookup)
 from p"checks_builders.dewy" import (bc_block bc_bool bc_call bc_ident bc_let bc_stmt)
 from p"checks_hints.dewy" import (habit_name map_habit_name)
 from p"error_ops.dewy" import (forward_call forwards_exceptions value_members exception_member)
-from p"expr.jo" import (CallFailure caller_dewy decl_in_prelude intrinsics map_args_text ntype refuted_literal_contract shown_fn_name union_dispatch unnamed comprehension_binding)
+from p"expr.jo" import (CallFailure caller_dewy decl_in_prelude intrinsics map_args_text ntype program_fn_named refuted_literal_contract shown_fn_name union_dispatch unnamed comprehension_binding)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"checks_read_code.dewy" import (call_text overloads_text sig_dt)
 from p"checks_compare_hints.dewy" import (dewy_operator_fn_text uncalled_hint variant_hint variant_hint_for)
@@ -22,7 +22,7 @@ from p"ide_decls.dewy" import (ide_dewy_alt)
 from p"ide_text.dewy" import (ide_named_args)
 from p"ide_ops.dewy" import (ide_fn_ref)
 from p"node_store.dewy" import (Node)
-from p"refine.jo" import (str_set_of)
+from p"refine.jo" import (str_set_of str_sets)
 from p"types.jo" import (T_NEVER T_NONE has_var is_int is_numeric is_union prune telem tkind types union_members)
 from p"type_ops.dewy" import (dt)
 from p"util.jo" import (fatal files intern name_of pos_file pos_in_lib)
@@ -53,6 +53,18 @@ rfc_arg_message=(d:CallErrorWord fi:CallErrorWord a:CallErrorWord ptx:CallErrorW
         last_err="{dt(ptx)} has no variant '{name_of(vn)}'{variant_hint_for(ptx name_of(vn))}"
     }
     else {last_err="argument '{name_of(CallErrorWord(nodes.ptr[kid(d fi)].name))}' has the wrong type (expects {sig_dt(d ptx)})"}
+    # (['easy' 'nromal'] where a list of 'easy' | 'normal' is wanted: the word that is not one of them)
+    if nodes.ptr[a].type =? 0 and nodes.ptr[a].kind =? 'array' and tkind(ptx) =? 'array' and str_set_of(telem(prune(ptx))) not=? 0 {
+        let words=str_sets[str_set_of(telem(prune(ptx)))]
+        loop e in kids(a) {
+            if nodes.ptr[e].kind =? 'str_lit' and nodes.ptr[e].aux =? 0 and not words.contains(name_of(CallErrorWord(nodes.ptr[e].sval))) {
+                let spelled:array<string>=[]
+                loop w in words {spelled.push("'{w}'")}
+                last_err="argument '{name_of(CallErrorWord(nodes.ptr[kid(d fi)].name))}' has '{name_of(CallErrorWord(nodes.ptr[e].sval))}', which is not one of {join(spelled " | ")}"
+                break
+            }
+        }
+    }
     last_err="{last_err}{uncalled_hint(a ptx)}"
     let fnm=name_of(CallErrorWord(nodes.ptr[int64(cd.decl)].name))
     # (Python's `map(f, xs)`: the array comes first)
@@ -219,11 +231,12 @@ call_no_candidate=(n:CallErrorWord name:CallErrorWord decls:array<int64> args:ar
         fatal(nodes.ptr[n].pos "join puts text together: {jd(nodes.ptr[n].pos "`[loop x in xs: str(x)]`" "`[loop x in xs string(x)]`")} makes text of each first")
     }
     # (xs.size() and the like: a name that means something else here)
-    let hh=habit_name(name_of(name))
+    # (a function of the program's own by that name is the one meant, not a habit's)
+    let hh=if program_fn_named(name) {""} else {habit_name(name_of(name))}
     if args.length >? 0 and nodes.ptr[unnamed(args[0])].type not=? 0 {
         let t0=prune(ntype(unnamed(args[0])))
         let mh=""
-        if is_map_type(t0) {mh=map_habit_name(name_of(name))}
+        if is_map_type(t0) and not program_fn_named(name) {mh=map_habit_name(name_of(name))}
         if (mh as array<uint8>).length >? 0 {fatal(nodes.ptr[n].pos "no '{name_of(name)}' for {dt(t0)} (use {mh})")}
         if (hh as array<uint8>).length >? 0 and types.ptr[t0].kind =? 'array' and has_var(t0) {
             # (xs = [] then xs.add(5): its type, not known yet, is no help)
