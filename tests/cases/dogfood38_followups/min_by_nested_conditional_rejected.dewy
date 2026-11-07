@@ -1,0 +1,8 @@
+# The inner push is conditional: no iteration need push.
+main = () => {
+    let results:array<int> = []
+    loop seed in [7 11] {
+        loop k in [1 2] { if seed >? 100 results.push(seed + k) }
+    }
+    printl(results.min_by((p) => p))
+}

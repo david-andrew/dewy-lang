@@ -1,5 +1,5 @@
 $runtime_checks
-from p"ast.jo" import (NF_INCLUSIVE NF_U64 has_flag kid kids nkids nodes)
+from p"ast.jo" import (NF_INCLUSIVE NF_SPREAD NF_U64 has_flag kid kids nkids nodes)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_SHARED locals)
 from p"checker_tokens.dewy" import (Tok)
 from p"effect_types.dewy" import (PlaceIdentity)
@@ -107,6 +107,18 @@ fact_push_then=(a:[int64 int64] b:[int64 int64]):>[int64 int64]=>{
     let continued=fact_push_merge(a[1] (if b[1] =? -2 {-2} else {a[0] + b[1]}))
     [normal continued]
 }
+# The values a `for_` loop over an array literal walks (`loop k in [1 2]`), at most
+# 64; -1 for any other loop. O(1).
+fact_literal_trips=(n:PushWord):>PushWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'for_' {return -1}
+    let it=PushWord(nodes.ptr[n].a)
+    loop it not=? 0 and nodes.ptr[it].kind =? 'conv' {it=PushWord(nodes.ptr[it].a)}
+    if it =? 0 or nodes.ptr[it].kind not=? 'array' or nodes.ptr[it].aux not=? 0 or nkids(it) >? 64 {return -1}
+    loop i in [0..nkids(it)) {
+        if has_flag(kid(it i) NF_SPREAD) {return -1}
+    }
+    nkids(it)
+}
 fact_push_flow=(n:PushWord l:PushWord):>[int64 int64]=>$unsafe {
     if n =? 0 {return [0 (-2)]}
     let k=nodes.ptr[n].kind
@@ -125,9 +137,16 @@ fact_push_flow=(n:PushWord l:PushWord):>[int64 int64]=>$unsafe {
     if k =? 'call' and fact_call_may_write(n l) {return [(-1) (-1)]}
     # A nested loop may exit this one only with a labeled edge. Any return
     # in it ends the function; a normal exit makes no change to this array.
+    # (one over a literal of m values whose every iteration pushes c times, by
+    # the same rule, pushes m*c: `loop k in [1 2] {out.push(k)}`)
     if k =? 'while_' or k =? 'for_' {
-        if fact_mentions(n l) or fact_labeled_exit(n) {return [(-1) (-1)]}
-        return [0 (-2)]
+        if fact_labeled_exit(n) {return [(-1) (-1)]}
+        if not fact_mentions(n l) {return [0 (-2)]}
+        let m=fact_literal_trips(n)
+        if m <? 0 or fact_mentions(PushWord(nodes.ptr[n].a) l) {return [(-1) (-1)]}
+        let inner=fact_push_flow(PushWord(nodes.ptr[n].b) l)
+        if inner[0] <? 0 or inner[0] >? 64 or inner[1] not=? -2 and inner[1] not=? inner[0] {return [(-1) (-1)]}
+        return [m * inner[0] (-2)]
     }
     if k =? 'and_' or k =? 'or_' or k =? 'coalesce' {
         if fact_mentions(n l) {return [(-1) (-1)]}

@@ -1,0 +1,11 @@
+# A break may leave the inner loop before it pushes.
+main = () => {
+    let results:array<int> = []
+    loop seed in [7 11] {
+        loop k in [1 2] {
+            if k =? seed break
+            results.push(seed + k)
+        }
+    }
+    printl(results.min_by((p) => p))
+}

@@ -1,0 +1,9 @@
+# An inner literal with no values pushes nothing.
+main = () => {
+    let results:array<int> = []
+    let none_yet:array<int> = []
+    loop seed in [7 11] {
+        loop k in none_yet { results.push(seed + k) }
+    }
+    printl(results.min_by((p) => p))
+}

@@ -1,0 +1,10 @@
+# Two nested loops over literals, the inner pushing once per value: the array holds
+# 2*2 values after them, so min_by's nonempty contract proves.
+main = () => {
+    let results:array<[string int]> = []
+    loop seed in [7 11] {
+        loop name in ["a" "b"] { results.push(["{name}{seed}" seed * 2]) }
+    }
+    let best = results.min_by((p) => p[1])
+    printl("{best[0]} {results.length} {results[3][0]}")
+}
