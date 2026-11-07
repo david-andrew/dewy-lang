@@ -1,0 +1,8 @@
+# A controller that reads only the tick still takes the waiting counts its type asks for.
+Controller:type = ([int int] int):>int
+fixed = (waiting:[int int] tick:int):>int => tick % 2
+main = () => {
+    let c:Controller = @fixed
+    let broken:int = "not a number"
+    printl(c([1 2] 3))
+}

@@ -3007,6 +3007,11 @@ unused_local_warnings = (f: int):
                     if starts_with(shown, files[lf].dir + "/"): shown = shown[len(files[lf].dir) + 1..]
                     near = ": it is a variable of this function's own, as the global '{gn}' of {shown} is not seen from this file (`use '{shown}'` at its top lets it change that one)"
                     break
+        # (a parameter a function type asks for, `(waiting:[int int] tick:int)` for a controller
+        # that reads only the tick: an underscore says it is unused on purpose)
+        if fl & LF_ASSIGNED == 0 and len(near) == 0 and files[pos_file(locals[l].pos)].is_dewy:
+            loop p in fns[f].params:
+                if locals[p].name == locals[l].name and locals[p].pos == locals[l].pos: near = " (a parameter kept for the function's type can be named `_{nm}`)"
         # (score = 0 in update, then score += 1: it starts again each frame, and nothing reads it)
         fnm = ""
         if fns[f].decl != 0 and nodes[int(fns[f].decl)].kind == .fn_: fnm = name_of(int(nodes[int(fns[f].decl)].name))
