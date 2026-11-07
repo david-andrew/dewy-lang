@@ -190,7 +190,8 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
     if arguments:
         driver = jo_doubles.runtime_driver(driver)
     jo_doubles = dict(jo_doubles or {})
-    for module, functions in RESOLVE_JO.items():
+    # (a whole compiler supplies every service itself)
+    for module, functions in () if 'main.jo' in jo_doubles else RESOLVE_JO.items():
         text = jo_doubles.get(module, "use 'driver.jo'\nuse 'checker_resolve.dewy'\n")
         if module == 'effects.jo' and 'struct EffectSummary:' in text:
             continue

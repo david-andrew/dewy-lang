@@ -1,0 +1,382 @@
+use 'errors.jo'
+use 'checker_expr.dewy'
+use 'checker_propagate.dewy'
+use 'checker_state.dewy'
+use 'ast.jo'
+use 'types.jo'
+use 'util.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'ownership.jo'
+use 'oom.jo'
+use 'ownership_types.dewy'
+
+exception_builtins = ():
+    loop name in ["exception", "error", "Canceled", "Timeout", "OutOfMemory"]:
+        d = mk(.struct_, 0)
+        nodes[d].name = i32(intern(name))
+        t = get_struct_inst(d, [])
+        structs[int(types[t].st)].resolved = true
+        universe[intern(name)] = new_sym(intern(name), .type_, t, d)
+        nominal_types.push(t)
+        if name == "OutOfMemory": out_of_memory_type = t
+        if name == "exception": exception_type = t
+        else if name == "error":
+            error_type = t
+            nominal_parent[t] = exception_type
+        else: nominal_parent[t] = exception_type
+nominal_descends = (t: int, parent: int) -> bool:
+    current = t
+    loop current != 0:
+        if current == parent: return true
+        current = nominal_parent.get(current, 0)
+    false
+exception_member = (t: int) -> bool:
+    t == T_NONE or nominal_descends(t, exception_type)
+# Flatten optionals as well as general unions for classification and forwarding.
+value_members = (t: int) -> int[]:
+    if tkind(t) == .opt: return [T_NONE] + value_members(telem(t))
+    if is_union(t): return union_members(t)
+    [t]
+nominal_family = (t: int) -> int:
+    if not nominal_ready or (t != exception_type and t != error_type and not nominal_parent.has(t)): return t
+    if ownership_nominals.has(t) or nominal_generic_instance(t): return t
+    if let found = nominal_families.get(t): return found
+    members: int[]
+    loop child in nominal_types:
+        if nominal_descends(child, t): members.push(child)
+    if t == exception_type: members.push(T_NONE)
+    result = mk_union(members)
+    nominal_families[t] = result
+    result
+# A family written as a pattern (`e:error`) against union u: the family's members u holds,
+# as one type (0 when t is no family's, or u holds none of it). O(members).
+nominal_family_part = (t: int, u: int) -> int:
+    if not is_union(t) and tkind(t) != .opt: return 0
+    family = false
+    loop _, found in nominal_families:
+        if found == t: family = true
+    if not family: return 0
+    held: int[]
+    wanted = value_members(t)
+    loop m in value_members(u):
+        if wanted.contains(m) or family_holds_generic(t, m): held.push(m)
+    if held.len() == 0: return 0
+    mk_union(held)
+# Two branches' types that differ only in how they may fail join into one union: `int | Bad`
+# and `int | Worse` give `int | Bad | Worse` (0 when their values differ, or neither fails).
+exception_join = (ta: int, tb: int) -> int:
+    ma = value_members(ta)
+    mb = value_members(tb)
+    va: int[]
+    vb: int[]
+    fails = false
+    loop m in ma:
+        if m == T_NONE or exception_member(m): fails = true
+        else: va.push(m)
+    loop m in mb:
+        if m == T_NONE or exception_member(m): fails = true
+        else: vb.push(m)
+    if not fails or not (members_within(va, vb) or members_within(vb, va)): return 0
+    mk_union(ma + mb)
+members_within = (xs: int[], ys: int[]) -> bool:
+    loop x in xs:
+        found = false
+        loop y in ys:
+            if type_eq(x, y): found = true
+        if not found: return false
+    true
+nominal_resolve = (t: int):
+    if nominal_parent.has(t) or t == exception_type: return
+    if nominal_resolving.get(t, false): fatal(nodes[int(structs[int(types[t].st)].decl)].pos, "nominal ancestry contains a cycle")
+    nominal_resolving[t] = true
+    d = int(structs[int(types[t].st)].decl)
+    # (type of any: the root of a family of its own, minted under nothing)
+    if mint_of_any(d):
+        nominal_parent[t] = 0
+        nominal_resolving[t] = false
+        return
+    saved = cx
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "nominal")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
+    cx = ctxs.len() - 1
+    parent = resolve_type(int(nodes[d].a))
+    ctxs.pop()
+    cx = saved
+    if not nominal_types.contains(parent):
+        if tkind(parent) != .struct_ or not ownership_declared(int(structs[int(types[parent].st)].decl)):
+            if files[pos_file(nodes[d].pos)].is_dewy and tkind(parent) == .struct_:
+                pn = dt(parent)
+                fatal(nodes[d].pos, "`type of {pn}` needs a minted parent: start the family with `{pn}:type=type of any & [...]` (its fields and methods are inherited), or use `type of error` for errors")
+            fatal(nodes[d].pos, "type of currently requires exception, error, or a nominal descendant")
+        ownership_nominals[parent] = true
+        ownership_nominals[t] = true
+    else:
+        nominal_resolve(parent)
+        if ownership_nominals.has(parent): ownership_nominals[t] = true
+    nominal_parent[t] = parent
+    nominal_resolving[t] = false
+mint_of_any = (d: int) -> bool:
+    p = int(nodes[d].a)
+    nodes[p].kind == .tname and name_of(int(nodes[p].name)) == "any" and nkids(p) == 0 and files[pos_file(nodes[d].pos)].is_dewy
+prepare_nominals = ():
+    generic: int[]
+    loop m in modules:
+        loop d in m.decls:
+            if nodes[d].kind != .struct_: continue
+            if not nominal_declaration(d): continue
+            if nkids2(d) != 0: generic.push(d)
+            else: nominal_types.push(get_struct_inst(d, []))
+    loop t in nominal_types: nominal_resolve(t)
+    loop d in generic: nominal_generic[d] = nominal_generic_parent(d)
+    nominal_ready = true
+nominal_generic_parent = (d: int) -> int:
+    saved = cx
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "nominal")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
+    cx = ctxs.len() - 1
+    parent = resolve_type(int(nodes[d].a))
+    ctxs.pop()
+    cx = saved
+    if not nominal_types.contains(parent): fatal(nodes[d].pos, "a generic nominal type needs exception, error, or a nongeneric nominal parent")
+    parent
+nominal_instance = (decl: int, t: int):
+    if nominal_parent.has(t): return
+    parent = nominal_generic.get(decl) ?? 0
+    if parent == 0: return
+    nominal_parent[t] = parent
+# Whether family (a family's union, written as a pattern) holds m, a generic instance
+# descending from its parent: the union itself never lists one
+family_holds_generic = (family: int, m: int) -> bool:
+    if not nominal_generic_instance(m): return false
+    loop parent, found in nominal_families:
+        if found == family and nominal_descends(m, parent): return true
+    false
+nominal_generic_instance = (t: int) -> bool:
+    nominal_generic.len() > 0 and tkind(t) == .struct_ and nominal_generic.has(int(structs[int(types[t].st)].decl))
+# `return e` in such a function, e an exception (or a value-or-exception union): its
+# kinds are thrown, joined to the result when the body is done (false: an ordinary value)
+infer_throw = (s: int, t0: int) -> bool:
+    f = int(ctxs[cx].inst)
+    if not ctxs[cx].infer_ret or not infer_throws.has(f): return false
+    t = prune(t0)
+    members = value_members(t)
+    thrown: int[]
+    rest: int[]
+    loop m in members:
+        if m != T_NONE and exception_member(m): thrown.push(m)
+        else: rest.push(m)
+    if thrown.len() == 0: return false
+    if rest.len() > 0:
+        ret = prune(int(ctxs[cx].ret))
+        value = if rest.len() == 1: rest[0] else: mk_union(rest)
+        if tkind(ret) == .var: unify(ret, value)
+        else if not can_coerce(0, value, ret): return false
+    known = infer_throws[f]
+    loop m in thrown:
+        if not known.contains(m): known.push(m)
+    infer_throws[f] = known
+    infer_note_return(s)
+    true
+infer_note_return = (s: int):
+    f = int(ctxs[cx].inst)
+    returns = infer_returns[f]
+    returns.push(s)
+    infer_returns[f] = returns
+# The result of a function that threw: its value part (void, never or a type) and
+# the thrown kinds; every return gives it
+infer_finish = (f: int, body: int) -> int:
+    thrown = infer_throws[f]
+    r = prune(int(ctxs[cx].ret))
+    if thrown.len() == 0: return r
+    members: int[]
+    if r != T_NEVER:
+        loop m in value_members(r): members.push(m)
+    loop m in thrown: members.push(m)
+    final = if members.len() == 1: members[0] else: mk_union(members)
+    ctxs[cx].ret = i32(final)
+    ctxs[cx].infer_ret = false
+    loop s in infer_returns[f]:
+        if nodes[s].a != 0: nodes[s].a = i32(coerce(int(nodes[s].a), final))
+        else if union_has_void(final):
+            check_expr(bc_block([], nodes[s].pos), final)
+            nodes[s].a = i32(coerce(last_checked, final))
+    n = nkids(body)
+    if nodes[body].aux != 0: set_block_value(body, coerce(block_value(body), final))
+    else if r == T_VOID and not (n > 0 and stmt_terminates(kid(body, n - 1))): void_arm_end(body, final)
+    final
+# A propagation is ordinary control flow, so gen_return performs all temporary,
+# partial-expression, defer and enclosing-scope cleanup on the early path.
+# `or_throw` runs in checker_propagate.dewy; these are its services.
+check_propagate = (n: int, expected: int) -> int: xq_check(n, expected)
+propagate_inferring = (inst: int) -> bool: infer_throws.has(inst)
+propagate_error = (n: int, code: int, t: int, at: int):
+    pos = nodes[n].pos
+    if code == 1:
+        # (a body with no result to declare, or one a task or callback runs: say where the failure can go)
+        if fns[int(ctxs[cx].inst)].kind == FK_LAMBDA:
+            fatal(pos, "or_throw gives a failure back to the function around it, and this lambda declares no result: give it one (`(x:int):>int|Oops => ...`), or handle the failure here")
+        fatal(pos, "or_throw requires an enclosing function with a declared return type")
+    if code == 2: fatal(pos, "or_throw cannot propagate none from a function without a declared result type: declare it, as `:>T?`, or handle none here")
+    # (an optional result with errors: `none` is an exception too, so
+    # keeping the optional takes a match that forwards only the errors)
+    errors = ""
+    loop m in value_members(at):
+        if m != T_NONE and exception_member(m):
+            if errors != "": errors += " "
+            errors += "failure:{dt(m)} => return failure"
+    if t == T_NONE and errors != "" and dewy_at(pos):
+        fatal(pos, "or_throw cannot propagate none: it forwards every exception alternative, and `none` is one (`T?` is `T | none`), but the declared return type is {dt(int(ctxs[cx].ret))}; to forward only the errors and keep the optional, match the value: `match value \{ {errors} ... }`")
+    # (every alternative this one forwards that the result lacks: naming one at a time takes a build each)
+    lacking = dt(t)
+    result = int(ctxs[cx].ret)
+    loop m in value_members(at):
+        if m != t and exception_member(m) and not can_coerce(0, m, result): lacking += " | " + dt(m)
+    fatal(pos, "or_throw cannot propagate {lacking}: the declared return type is {dt(result)}; add them, `:>{dt(result)} | {lacking}`, or handle them here with `match`")
+# Each propagated alternative returns; the rest is the value.
+propagate_rewrite = (n: int, a: int, exceptions: int[], count: int, expected: int) -> int:
+    pos = nodes[n].pos
+    name = "$propagate{n}"
+    stmts = [bc_let(name, a, pos)]
+    loop t in exceptions:
+        ret = mk(.return_, pos)
+        or_throw_returns[pos] = true
+        if t == T_NONE: nodes[ret].a = i32(mk(.none_lit, pos))
+        else: nodes[ret].a = i32(bc_ident(name, pos))
+        if exceptions.len() == count and t == exceptions[exceptions.len() - 1]:
+            stmts.push(ret)
+            break
+        condition = mk(.istype, pos)
+        nodes[condition].a = i32(bc_ident(name, pos))
+        nodes[condition].b = i32(type_node_of(t, pos))
+        branch = mk(.if_, pos)
+        nodes[branch].a = i32(condition)
+        nodes[branch].b = i32(bc_block([ret], pos))
+        add_flag(branch, NF_STMT)
+        stmts.push(branch)
+    if exceptions.len() != count: stmts.push(bc_stmt(bc_ident(name, pos), pos))
+    nodes[n] = nodes[bc_block(stmts, pos)]
+    check_expr(n, expected)
+# Under `$explicit_allocation_failure` a refusal cannot pass unseen: a value that may be
+# OutOfMemory is handled before it is read through or shown.
+oom_unhandled = (t0: int, pos: int, use_text: str):
+    if oom_files.len() == 0 or not oom_files.has(pos_file(pos)): return
+    t = prune(t0)
+    if not is_union(t) and tkind(t) != .opt: return
+    loop member in value_members(t):
+        if member == out_of_memory_type: fatal(pos, "this value may be OutOfMemory, and under `$explicit_allocation_failure` {use_text} would pass the refusal on unseen: hand it to the caller with `or_throw`, test it with `if x is? OutOfMemory`, or fall back with `??`")
+# Read-only receiver navigation. Only the receiver forwards, never arguments.
+# A narrowed concrete error still exposes its own payload fields normally.
+forward_member = (n: int, receiver: int, t: int, expected: int) -> int:
+    pos = nodes[n].pos
+    # A method's own object (a family's member, seen through its parent) is read,
+    # not forwarded: every member of the family has the parent's members.
+    own = nodes[receiver].kind == .ident and starts_with(name_of(int(nodes[receiver].name)), "$self")
+    if not own: oom_unhandled(t, pos, "reading a member")
+    if cur_assign != 0 and int(nodes[cur_assign].a) == n:
+        if own: fatal(pos, "a method of a type with minted children cannot change its object yet")
+        fatal(pos, "cannot assign through a union receiver; narrow it with is? first")
+    name = "$receiver{n}"
+    add_flag(receiver, NF_CHECKED)
+    members = value_members(t)
+    source = (receiver, int(nodes[n].name))
+    selections: int[]
+    chain = 0
+    j = members.len() - 1
+    loop j >= 0:
+        member = members[j]
+        base = bc_ident(name, pos)
+        value = base
+        if member == T_NONE: value = mk(.none_lit, pos)
+        else if own or not exception_member(member): value = bc_field(base, name_of(int(nodes[n].name)), pos)
+        selections.push(value)
+        body = bc_block([bc_stmt(value, pos)], pos)
+        if chain == 0: chain = body
+        else:
+            condition = mk(.istype, pos)
+            nodes[condition].a = i32(bc_ident(name, pos))
+            nodes[condition].b = i32(type_node_of(member, pos))
+            branch = mk(.if_, pos)
+            nodes[branch].a = i32(condition)
+            nodes[branch].b = i32(body)
+            nodes[branch].c = i32(chain)
+            nodes[branch].aux2 = -8  # explicit union join, not numeric branch promotion
+            chain = bc_block([bc_stmt(branch, pos)], pos)
+        j -= 1
+    nodes[n] = nodes[bc_block([bc_let(name, receiver, pos), bc_stmt(chain, pos)], pos)]
+    result = check_expr(n, 0)
+    direct = true
+    loop selection in selections:
+        if nodes[selection].kind != .field or nodes[selection].aux < 0: direct = false; break
+    if direct: union_field_sources[n] = source
+    result
+# A union or optional with an exception alternative and a value alternative.
+forwards_exceptions = (t0: int) -> bool:
+    t = prune(t0)
+    if not is_union(t) and tkind(t) != .opt: return false
+    exceptions = 0
+    loop member in value_members(t):
+        if member == T_NONE or exception_member(member): exceptions += 1
+    exceptions > 0 and exceptions < value_members(t).len()
+# `r.m(a)` with r forwarding: the receiver and then the arguments are
+# evaluated once; an exception or none receiver is the result, any other
+# alternative calls m. Only the receiver forwards, never arguments.
+forward_call = (n: int, name: int, args: int[], expected: int) -> int:
+    pos = nodes[n].pos
+    receiver = unnamed(args[0])
+    t = prune(ntype(receiver))
+    oom_unhandled(t, pos, "calling a method")
+    recv = "$receiver{n}"
+    add_flag(receiver, NF_CHECKED)
+    stmts = [bc_let(recv, receiver, pos)]
+    loop i in [1..args.len()):
+        a = args[i]
+        stmts.push(bc_let("$argument{n}_{i}", (if nodes[a].kind == .namedarg: int(nodes[a].a) else: a), pos))
+    members = value_members(t)
+    chain = 0
+    j = members.len() - 1
+    loop j >= 0:
+        member = members[j]
+        value = 0
+        if member == T_NONE: value = mk(.none_lit, pos)
+        else if exception_member(member): value = bc_ident(recv, pos)
+        else:
+            call_args = [bc_ident(recv, pos)]
+            loop i in [1..args.len()):
+                if nodes[args[i]].kind == .namedarg:
+                    named = mk(.namedarg, nodes[args[i]].pos)
+                    nodes[named].name = nodes[args[i]].name
+                    nodes[named].a = i32(bc_ident("$argument{n}_{i}", pos))
+                    call_args.push(named)
+                else: call_args.push(bc_ident("$argument{n}_{i}", pos))
+            value = bc_call(name_of(name), call_args, pos)
+        body = bc_block([bc_stmt(value, pos)], pos)
+        if chain == 0: chain = body
+        else:
+            condition = mk(.istype, pos)
+            nodes[condition].a = i32(bc_ident(recv, pos))
+            nodes[condition].b = i32(type_node_of(member, pos))
+            branch = mk(.if_, pos)
+            nodes[branch].a = i32(condition)
+            nodes[branch].b = i32(body)
+            nodes[branch].c = i32(chain)
+            nodes[branch].aux2 = -8  # explicit union join, not numeric branch promotion
+            chain = bc_block([bc_stmt(branch, pos)], pos)
+        j -= 1
+    stmts.push(bc_stmt(chain, pos))
+    nodes[n] = nodes[bc_block(stmts, pos)]
+    check_expr(n, expected)
+family_annotation = (t: int) -> bool:
+    if not is_union(t) and tkind(t) != .opt: return false
+    loop parent, family in nominal_families:
+        if family == t: return true
+    false
+nominal_declaration = (d: int) -> bool:
+    # Sloppy library metadata is explicit, and ignored by the C seed.
+    if nodes[d].c != 0:
+        loop attr in kids(int(nodes[d].c)):
+            if name_of(int(nodes[attr].name)) == "nominal":
+                a = int(nodes[attr].a)
+                if nodes[a].kind != .ident: fatal(nodes[attr].pos, "nominal metadata requires a parent type")
+                ty = mk(.tname, nodes[a].pos)
+                nodes[ty].name = nodes[a].name
+                nodes[d].a = i32(ty)
+    nodes[d].a != 0

@@ -1,0 +1,469 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_CHECKED NF_STMT add_flag kid kids mk nkids nkids2 nodes)
+from p"check.jo" import (FK_INIT FK_LAMBDA block_value check_scopes ctxs cx dewy_at fns modules new_inst new_sym or_throw_returns resolve_type set_block_value stmt_terminates union_has_void universe void_arm_end)
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_propagate.dewy" import (xq_check)
+from p"checker_state.dewy" import (FnCtx)
+from p"errors.jo" import (error_type exception_type infer_returns infer_throws nominal_families nominal_generic nominal_parent nominal_ready nominal_resolving nominal_types out_of_memory_type)
+from p"expr.jo" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt can_coerce coerce cur_assign last_checked ntype type_node_of union_field_sources unnamed)
+from p"oom.jo" import (oom_files)
+from p"ownership.jo" import (ownership_nominals)
+from p"ownership_types.dewy" import (ownership_declared)
+from p"types.jo" import (T_NEVER T_NONE T_VOID dt get_struct_inst is_union mk_union prune structs telem tkind type_eq types unify union_members)
+from p"util.jo" import (fatal files intern name_of pos_file)
+
+ErrWord:type=int64<overflow='wrap'>
+exception_builtins=():>void=>$unsafe {
+    loop name in ["exception" "error" "Canceled" "Timeout" "OutOfMemory"] {
+        let d=mk('struct_' 0)
+        nodes.ptr[d].name=int32(intern(name))
+        let t=get_struct_inst(d [])
+        structs.ptr[ErrWord(types.ptr[t].st)].resolved=true
+        universe[intern(name)]=new_sym(intern(name) 'type_' t d)
+        nominal_types.push(t)
+        if name =? "OutOfMemory" {out_of_memory_type=t}
+        if name =? "exception" {exception_type=t}
+        else if name =? "error" {
+            error_type=t
+            nominal_parent[t]=exception_type
+        }
+        else {nominal_parent[t]=exception_type}
+    }
+}
+nominal_descends=(t:ErrWord parent:ErrWord):>bool=>{
+    let current=t
+    loop current not=? 0 {
+        if current =? parent {return true}
+        current=nominal_parent.get(current 0)
+    }
+    false
+}
+exception_member=(t:int64):>bool=>{
+    t =? T_NONE or nominal_descends(t exception_type)
+}
+# Flatten optionals as well as general unions for classification and forwarding.
+value_members=(t:int64):>array<int64>=>{
+    if tkind(t) =? 'opt' {return [T_NONE value_members(telem(t))...]}
+    if is_union(t) {return union_members(t)}
+    [t]
+}
+nominal_family=(t:ErrWord):>ErrWord=>{
+    if not nominal_ready or (t not=? exception_type and t not=? error_type and not nominal_parent.has(t)) {return t}
+    if ownership_nominals.has(t) or nominal_generic_instance(t) {return t}
+    let found=nominal_families.get(t)
+    if found not=? none {return found}
+    let members:array<int64>=[]
+    loop child in nominal_types {
+        if nominal_descends(child t) {members.push(child)}
+    }
+    if t =? exception_type {members.push(T_NONE)}
+    let result=mk_union(members)
+    nominal_families[t]=result
+    result
+}
+# A family written as a pattern (`e:error`) against union u: the family's members u holds,
+# as one type (0 when t is no family's, or u holds none of it). O(members).
+nominal_family_part=(t:int64 u:int64):>int64=>{
+    if not is_union(t) and tkind(t) not=? 'opt' {return 0}
+    let family=false
+    loop [_ found] in nominal_families {
+        if found =? t {family=true}
+    }
+    if not family {return 0}
+    let held:array<int64>=[]
+    let wanted=value_members(t)
+    loop m in value_members(u) {
+        if wanted.contains(m) or family_holds_generic(t m) {held.push(m)}
+    }
+    if held.length =? 0 {return 0}
+    mk_union(held)
+}
+# Two branches' types that differ only in how they may fail join into one union: `int | Bad`
+# and `int | Worse` give `int | Bad | Worse` (0 when their values differ, or neither fails).
+exception_join=(ta:ErrWord tb:ErrWord):>ErrWord=>{
+    let ma=value_members(ta)
+    let mb=value_members(tb)
+    let va:array<int64>=[]
+    let vb:array<int64>=[]
+    let fails=false
+    loop m in ma {
+        if m =? T_NONE or exception_member(m) {fails=true}
+        else {va.push(m)}
+    }
+    loop m in mb {
+        if m =? T_NONE or exception_member(m) {fails=true}
+        else {vb.push(m)}
+    }
+    if not fails or not (members_within(va vb) or members_within(vb va)) {return 0}
+    mk_union([ma... mb...])
+}
+members_within=(xs:array<int64> ys:array<int64>):>bool=>{
+    loop x in xs {
+        let found=false
+        loop y in ys {
+            if type_eq(x y) {found=true}
+        }
+        if not found {return false}
+    }
+    true
+}
+nominal_resolve=(t:ErrWord):>void=>$unsafe {
+    if nominal_parent.has(t) or t =? exception_type {return}
+    if nominal_resolving.get(t false) {fatal(nodes.ptr[ErrWord(structs.ptr[ErrWord(types.ptr[t].st)].decl)].pos "nominal ancestry contains a cycle")}
+    nominal_resolving[t]=true
+    let d=ErrWord(structs.ptr[ErrWord(types.ptr[t].st)].decl)
+    # (type of any: the root of a family of its own, minted under nothing)
+    if mint_of_any(d) {
+        nominal_parent[t]=0
+        nominal_resolving[t]=false
+        return
+    }
+    let saved=cx
+    ctxs.push(FnCtx(int32(new_inst(FK_INIT ErrWord(nodes.ptr[d].mod) "nominal")) (-1) int32(T_VOID) false 0 nodes.ptr[d].mod int32(check_scopes.names.length)))
+    cx=ctxs.length - 1
+    let parent=resolve_type(ErrWord(nodes.ptr[d].a))
+    ctxs.pop();
+    cx=saved
+    if not nominal_types.contains(parent) {
+        if tkind(parent) not=? 'struct_' or not ownership_declared(ErrWord(structs.ptr[ErrWord(types.ptr[parent].st)].decl)) {
+            if files[pos_file(nodes.ptr[d].pos)].is_dewy and tkind(parent) =? 'struct_' {
+                let pn=dt(parent)
+                fatal(nodes.ptr[d].pos "`type of {pn}` needs a minted parent: start the family with `{pn}:type=type of any & [...]` (its fields and methods are inherited), or use `type of error` for errors")
+            }
+            fatal(nodes.ptr[d].pos "type of currently requires exception, error, or a nominal descendant")
+        }
+        ownership_nominals[parent]=true
+        ownership_nominals[t]=true
+    }
+    else {
+        nominal_resolve(parent)
+        if ownership_nominals.has(parent) {ownership_nominals[t]=true}
+    }
+    nominal_parent[t]=parent
+    nominal_resolving[t]=false
+}
+mint_of_any=(d:ErrWord):>bool=>$unsafe {
+    let p=ErrWord(nodes.ptr[d].a)
+    nodes.ptr[p].kind =? 'tname' and name_of(ErrWord(nodes.ptr[p].name)) =? "any" and nkids(p) =? 0 and files[pos_file(nodes.ptr[d].pos)].is_dewy
+}
+prepare_nominals=():>void=>$unsafe {
+    let generic:array<int64>=[]
+    loop m in modules {
+        loop d in m.decls {
+            if nodes.ptr[d].kind not=? 'struct_' {continue}
+            if not nominal_declaration(d) {continue}
+            if nkids2(d) not=? 0 {generic.push(d)}
+            else {nominal_types.push(get_struct_inst(d []))}
+        }
+    }
+    loop t in nominal_types {nominal_resolve(t)}
+    loop d in generic {nominal_generic[d]=nominal_generic_parent(d)}
+    nominal_ready=true
+}
+nominal_generic_parent=(d:ErrWord):>ErrWord=>$unsafe {
+    let saved=cx
+    ctxs.push(FnCtx(int32(new_inst(FK_INIT ErrWord(nodes.ptr[d].mod) "nominal")) (-1) int32(T_VOID) false 0 nodes.ptr[d].mod int32(check_scopes.names.length)))
+    cx=ctxs.length - 1
+    let parent=resolve_type(ErrWord(nodes.ptr[d].a))
+    ctxs.pop();
+    cx=saved
+    if not nominal_types.contains(parent) {fatal(nodes.ptr[d].pos "a generic nominal type needs exception, error, or a nongeneric nominal parent")}
+    parent
+}
+nominal_instance=(decl:ErrWord t:ErrWord):>void=>{
+    if nominal_parent.has(t) {return}
+    let parent=nominal_generic.get(decl) ?? 0
+    if parent =? 0 {return}
+    nominal_parent[t]=parent
+}
+# Whether family (a family's union, written as a pattern) holds m, a generic instance
+# descending from its parent: the union itself never lists one
+family_holds_generic=(family:ErrWord m:ErrWord):>bool=>{
+    if not nominal_generic_instance(m) {return false}
+    loop [parent found] in nominal_families {
+        if found =? family and nominal_descends(m parent) {return true}
+    }
+    false
+}
+nominal_generic_instance=(t:ErrWord):>bool=>$unsafe {
+    nominal_generic.length >? 0 and tkind(t) =? 'struct_' and nominal_generic.has(ErrWord(structs.ptr[ErrWord(types.ptr[t].st)].decl))
+}
+# `return e` in such a function, e an exception (or a value-or-exception union): its
+# kinds are thrown, joined to the result when the body is done (false: an ordinary value)
+infer_throw=(s:ErrWord t0:ErrWord):>bool=>{
+    let f=ErrWord(ctxs[cx].inst)
+    if not ctxs[cx].infer_ret or not infer_throws.has(f) {return false}
+    let t=prune(t0)
+    let members=value_members(t)
+    let thrown:array<int64>=[]
+    let rest:array<int64>=[]
+    loop m in members {
+        if m not=? T_NONE and exception_member(m) {thrown.push(m)}
+        else {rest.push(m)}
+    }
+    if thrown.length =? 0 {return false}
+    if rest.length >? 0 {
+        let ret=prune(ErrWord(ctxs[cx].ret))
+        let value=if rest.length =? 1 {rest[0]} else {mk_union(rest)}
+        if tkind(ret) =? 'var' {unify(ret value);}
+        else if not can_coerce(0 value ret) {return false}
+    }
+    let known=infer_throws[f]
+    loop m in thrown {
+        if not known.contains(m) {known.push(m)}
+    }
+    infer_throws[f]=known
+    infer_note_return(s)
+    true
+}
+infer_note_return=(s:ErrWord):>void=>{
+    let f=ErrWord(ctxs[cx].inst)
+    let returns=infer_returns[f]
+    returns.push(s)
+    infer_returns[f]=returns
+}
+# The result of a function that threw: its value part (void, never or a type) and
+# the thrown kinds; every return gives it
+infer_finish=(f:ErrWord body:ErrWord):>ErrWord=>$unsafe {
+    let thrown=infer_throws[f]
+    let r=prune(ErrWord(ctxs[cx].ret))
+    if thrown.length =? 0 {return r}
+    let members:array<int64>=[]
+    if r not=? T_NEVER {
+        loop m in value_members(r) {members.push(m)}
+    }
+    loop m in thrown {members.push(m)}
+    let final=if members.length =? 1 {members[0]} else {mk_union(members)}
+    ctxs[cx].ret=int32(final)
+    ctxs[cx].infer_ret=false
+    loop s in infer_returns[f] {
+        if nodes.ptr[s].a not=? 0 {nodes.ptr[s].a=int32(coerce(ErrWord(nodes.ptr[s].a) final))}
+        else if union_has_void(final) {
+            check_expr(bc_block([] nodes.ptr[s].pos) final);
+            nodes.ptr[s].a=int32(coerce(last_checked final))
+        }
+    }
+    let n=nkids(body)
+    if nodes.ptr[body].aux not=? 0 {set_block_value(body coerce(block_value(body) final))}
+    else if r =? T_VOID and not (n >? 0 and stmt_terminates(kid(body n - 1))) {void_arm_end(body final);}
+    final
+}
+# A propagation is ordinary control flow, so gen_return performs all temporary,
+# partial-expression, defer and enclosing-scope cleanup on the early path.
+# `or_throw` runs in checker_propagate.dewy; these are its services.
+check_propagate=(n:ErrWord expected:ErrWord):>ErrWord=>{
+    xq_check(n expected)
+}
+propagate_inferring=(inst:int64):>bool=>{
+    infer_throws.has(inst)
+}
+propagate_error=(n:int64 code:int64 t:int64 at:int64):>void=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    if code =? 1 {
+        # (a body with no result to declare, or one a task or callback runs: say where the failure can go)
+        if fns.ptr[ErrWord(ctxs[cx].inst)].kind =? FK_LAMBDA {
+            fatal(pos "or_throw gives a failure back to the function around it, and this lambda declares no result: give it one (`(x:int):>int|Oops => ...`), or handle the failure here")
+        }
+        fatal(pos "or_throw requires an enclosing function with a declared return type")
+    }
+    if code =? 2 {fatal(pos "or_throw cannot propagate none from a function without a declared result type: declare it, as `:>T?`, or handle none here")}
+    # (an optional result with errors: `none` is an exception too, so
+    # keeping the optional takes a match that forwards only the errors)
+    let errors=""
+    loop m in value_members(at) {
+        if m not=? T_NONE and exception_member(m) {
+            if errors not=? "" {errors="{errors} "}
+            errors="{errors}failure:{dt(m)} => return failure"
+        }
+    }
+    if t =? T_NONE and errors not=? "" and dewy_at(pos) {
+        fatal(pos "or_throw cannot propagate none: it forwards every exception alternative, and `none` is one (`T?` is `T | none`), but the declared return type is {dt(ErrWord(ctxs[cx].ret))}; to forward only the errors and keep the optional, match the value: `match value \{ {errors} ... }`")
+    }
+    # (every alternative this one forwards that the result lacks: naming one at a time takes a build each)
+    let lacking=dt(t)
+    let result=ErrWord(ctxs[cx].ret)
+    loop m in value_members(at) {
+        if m not=? t and exception_member(m) and not can_coerce(0 m result) {lacking="{lacking} | {dt(m)}"}
+    }
+    fatal(pos "or_throw cannot propagate {lacking}: the declared return type is {dt(result)}; add them, `:>{dt(result)} | {lacking}`, or handle them here with `match`")
+}
+# Each propagated alternative returns; the rest is the value.
+propagate_rewrite=(n:int64 a:int64 exceptions:array<int64> count:int64 expected:int64):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let name="$propagate{n}"
+    let stmts=[bc_let(name a pos)]
+    loop t in exceptions {
+        let ret=mk('return_' pos)
+        or_throw_returns[pos]=true
+        if t =? T_NONE {nodes.ptr[ret].a=int32(mk('none_lit' pos))}
+        else {nodes.ptr[ret].a=int32(bc_ident(name pos))}
+        if exceptions.length =? count and t =? exceptions[exceptions.length - 1] {
+            stmts.push(ret)
+            break
+        }
+        let condition=mk('istype' pos)
+        nodes.ptr[condition].a=int32(bc_ident(name pos))
+        nodes.ptr[condition].b=int32(type_node_of(t pos))
+        let branch=mk('if_' pos)
+        nodes.ptr[branch].a=int32(condition)
+        nodes.ptr[branch].b=int32(bc_block([ret] pos))
+        add_flag(branch NF_STMT)
+        stmts.push(branch)
+    }
+    if exceptions.length not=? count {stmts.push(bc_stmt(bc_ident(name pos) pos))}
+    let lowered=bc_block(stmts pos)
+    nodes.ptr[n]=nodes.ptr[lowered]
+    check_expr(n expected)
+}
+# Under `$explicit_allocation_failure` a refusal cannot pass unseen: a value that may be
+# OutOfMemory is handled before it is read through or shown.
+oom_unhandled=(t0:ErrWord pos:ErrWord use_text:string):>void=>{
+    if oom_files.length =? 0 or not oom_files.has(pos_file(pos)) {return}
+    let t=prune(t0)
+    if not is_union(t) and tkind(t) not=? 'opt' {return}
+    loop member in value_members(t) {
+        if member =? out_of_memory_type {fatal(pos "this value may be OutOfMemory, and under `$explicit_allocation_failure` {use_text} would pass the refusal on unseen: hand it to the caller with `or_throw`, test it with `if x is? OutOfMemory`, or fall back with `??`")}
+    }
+}
+# Read-only receiver navigation. Only the receiver forwards, never arguments.
+# A narrowed concrete error still exposes its own payload fields normally.
+forward_member=(n:ErrWord receiver:ErrWord t:ErrWord expected:ErrWord):>ErrWord=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    # A method's own object (a family's member, seen through its parent) is read,
+    # not forwarded: every member of the family has the parent's members.
+    let own=nodes.ptr[receiver].kind =? 'ident' and starts_with(name_of(ErrWord(nodes.ptr[receiver].name)) "$self")
+    if not own {oom_unhandled(t pos "reading a member")}
+    if cur_assign not=? 0 and ErrWord(nodes.ptr[cur_assign].a) =? n {
+        if own {fatal(pos "a method of a type with minted children cannot change its object yet")}
+        fatal(pos "cannot assign through a union receiver; narrow it with is? first")
+    }
+    let name="$receiver{n}"
+    add_flag(receiver NF_CHECKED)
+    let members=value_members(t)
+    let source:[int64 int64]=[receiver ErrWord(nodes.ptr[n].name)]
+    let selections:array<int64>=[]
+    let chain:ErrWord=0
+    let j=members.length - 1
+    loop j >=? 0 {
+        let member=members[j]
+        let base=bc_ident(name pos)
+        let value=base
+        if member =? T_NONE {value=mk('none_lit' pos)}
+        else if own or not exception_member(member) {value=bc_field(base name_of(ErrWord(nodes.ptr[n].name)) pos)}
+        selections.push(value)
+        let body=bc_block([bc_stmt(value pos)] pos)
+        if chain =? 0 {chain=body}
+        else {
+            let condition=mk('istype' pos)
+            nodes.ptr[condition].a=int32(bc_ident(name pos))
+            nodes.ptr[condition].b=int32(type_node_of(member pos))
+            let branch=mk('if_' pos)
+            nodes.ptr[branch].a=int32(condition)
+            nodes.ptr[branch].b=int32(body)
+            nodes.ptr[branch].c=int32(chain)
+            nodes.ptr[branch].aux2=-8
+            chain=bc_block([bc_stmt(branch pos)] pos)
+        }
+        j -= 1
+    }
+    let lowered=bc_block([bc_let(name receiver pos) bc_stmt(chain pos)] pos)
+    nodes.ptr[n]=nodes.ptr[lowered]
+    let result=check_expr(n 0)
+    let direct=true
+    loop selection in selections {
+        if nodes.ptr[selection].kind not=? 'field' or nodes.ptr[selection].aux <? 0 {direct=false; break}
+    }
+    if direct {union_field_sources[n]=source}
+    result
+}
+# A union or optional with an exception alternative and a value alternative.
+forwards_exceptions=(t0:ErrWord):>bool=>{
+    let t=prune(t0)
+    if not is_union(t) and tkind(t) not=? 'opt' {return false}
+    let exceptions:ErrWord=0
+    loop member in value_members(t) {
+        if member =? T_NONE or exception_member(member) {exceptions += 1}
+    }
+    exceptions >? 0 and exceptions <? value_members(t).length
+}
+# `r.m(a)` with r forwarding: the receiver and then the arguments are
+# evaluated once; an exception or none receiver is the result, any other
+# alternative calls m. Only the receiver forwards, never arguments.
+forward_call=(n:ErrWord name:ErrWord args:array<int64> expected:ErrWord):>ErrWord=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let receiver=unnamed(args[0])
+    let t=prune(ntype(receiver))
+    oom_unhandled(t pos "calling a method")
+    let recv="$receiver{n}"
+    add_flag(receiver NF_CHECKED)
+    let stmts=[bc_let(recv receiver pos)]
+    loop i in [1..args.length) {
+        let a=args[i]
+        let argument=a
+        if nodes.ptr[a].kind =? 'namedarg' {argument=ErrWord(nodes.ptr[a].a)}
+        stmts.push(bc_let("$argument{n}_{i}" argument pos))
+    }
+    let members=value_members(t)
+    let chain:ErrWord=0
+    let j=members.length - 1
+    loop j >=? 0 {
+        let member=members[j]
+        let value:ErrWord=0
+        if member =? T_NONE {value=mk('none_lit' pos)}
+        else if exception_member(member) {value=bc_ident(recv pos)}
+        else {
+            let call_args=[bc_ident(recv pos)]
+            loop i in [1..args.length) {
+                if nodes.ptr[args[i]].kind =? 'namedarg' {
+                    let named=mk('namedarg' nodes.ptr[args[i]].pos)
+                    nodes.ptr[named].name=nodes.ptr[args[i]].name
+                    nodes.ptr[named].a=int32(bc_ident("$argument{n}_{i}" pos))
+                    call_args.push(named)
+                }
+                else {call_args.push(bc_ident("$argument{n}_{i}" pos))}
+            }
+            value=bc_call(name_of(name) call_args pos)
+        }
+        let body=bc_block([bc_stmt(value pos)] pos)
+        if chain =? 0 {chain=body}
+        else {
+            let condition=mk('istype' pos)
+            nodes.ptr[condition].a=int32(bc_ident(recv pos))
+            nodes.ptr[condition].b=int32(type_node_of(member pos))
+            let branch=mk('if_' pos)
+            nodes.ptr[branch].a=int32(condition)
+            nodes.ptr[branch].b=int32(body)
+            nodes.ptr[branch].c=int32(chain)
+            nodes.ptr[branch].aux2=-8
+            chain=bc_block([bc_stmt(branch pos)] pos)
+        }
+        j -= 1
+    }
+    stmts.push(bc_stmt(chain pos))
+    let lowered=bc_block(stmts pos)
+    nodes.ptr[n]=nodes.ptr[lowered]
+    check_expr(n expected)
+}
+family_annotation=(t:int64):>bool=>{
+    if not is_union(t) and tkind(t) not=? 'opt' {return false}
+    loop [parent family] in nominal_families {
+        if family =? t {return true}
+    }
+    false
+}
+nominal_declaration=(d:ErrWord):>bool=>$unsafe {
+    # Sloppy library metadata is explicit, and ignored by the C seed.
+    if nodes.ptr[d].c not=? 0 {
+        loop attr in kids(ErrWord(nodes.ptr[d].c)) {
+            if name_of(ErrWord(nodes.ptr[attr].name)) =? "nominal" {
+                let a=ErrWord(nodes.ptr[attr].a)
+                if nodes.ptr[a].kind not=? 'ident' {fatal(nodes.ptr[attr].pos "nominal metadata requires a parent type")}
+                let ty=mk('tname' nodes.ptr[a].pos)
+                nodes.ptr[ty].name=nodes.ptr[a].name
+                nodes.ptr[d].a=int32(ty)
+            }
+        }
+    }
+    nodes.ptr[d].a not=? 0
+}

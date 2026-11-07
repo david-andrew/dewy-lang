@@ -11,6 +11,7 @@ from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 
 LEAVES = tuple(sorted(p.stem for p in (ROOT / 'compiler').glob('facts_*.dewy')))
+MOVED = ('error_ops',)
 DRIVER = '''use 'main.jo'
 main = ():
     lower_test_cli()
@@ -18,18 +19,23 @@ main = ():
 '''
 
 
-def compare_facts(compiler, tmp_path, monkeypatch, cases, flags=()):
+def compare_facts(compiler, tmp_path, monkeypatch, cases, flags=(), leaves=LEAVES):
     """Compile each program (a tests/cases name or a repository path) through both builds; return how many compiled."""
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     output = tmp_path / 'program'
     compiled = 0
     for case in cases:
-        source = ROOT / case if case.startswith('tests/') else ROOT / 'tests/cases' / (case + '.dewy')
+        source = ROOT / case if case.startswith(('tests/', 'bench/')) else ROOT / 'tests/cases' / (case + '.dewy')
         expected = subprocess.run([compiler, 'build', source, '-o', output, *flags],
                                   capture_output=True, timeout=60)
-        modules = modules_for(source, output, LEAVES, flags)
+        modules = modules_for(source, output, leaves, flags)
         modules.with_stderr = True
         compare_leaf(compiler, tmp_path, False, DRIVER, status=expected.returncode,
-                     extra_stems=LEAVES, jo_doubles=modules)
+                     extra_stems=leaves, jo_doubles=modules)
         compiled += expected.returncode == 0
     return compiled
+
+
+def compare_moved(compiler, tmp_path, monkeypatch, cases, flags=()):
+    """The same, one compiler pair over the leaves that are not facts leaves but need real services."""
+    return compare_facts(compiler, tmp_path, monkeypatch, cases, flags, MOVED)

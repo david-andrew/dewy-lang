@@ -1,4 +1,11 @@
 """Keep isolated checker services bound to their existing effect doubles."""
+from functools import lru_cache
+
+
+@lru_cache(maxsize=512)
+def _doubled(text, names):
+    """Whether a module's text defines one of these functions, a double of a moved leaf's."""
+    return any('\n' + name + ' = ' in text for name in names)
 
 
 def effect_services(text, modules):
@@ -35,6 +42,8 @@ def effect_services(text, modules):
         text = text.replace('sibling_ops.dewy', 'sibling_types.jo').replace('sibling_ops.jo', 'sibling_types.jo')
     if any(name + ' = ' in modules.get('reflection.jo', '') for name in ('reflect_fields', 'reflect_members', 'members_argument', 'members_named', 'reflect_member', 'members_array', 'reflect_record', 'reflect_loop')):
         text = text.replace('reflect_ops.dewy', 'reflection.jo').replace('reflect_ops.jo', 'reflection.jo')
+    if _doubled(modules.get('errors.jo', ''), ('exception_builtins', 'nominal_descends', 'exception_member', 'value_members', 'nominal_family', 'nominal_family_part', 'exception_join', 'members_within', 'nominal_resolve', 'mint_of_any', 'prepare_nominals', 'nominal_generic_parent', 'nominal_instance', 'family_holds_generic', 'nominal_generic_instance', 'infer_throw', 'infer_note_return', 'infer_finish', 'check_propagate', 'propagate_inferring', 'propagate_error', 'propagate_rewrite', 'oom_unhandled', 'forward_member', 'forwards_exceptions', 'forward_call', 'family_annotation', 'nominal_declaration')):
+        text = text.replace('error_ops.dewy', 'errors.jo').replace('error_ops.jo', 'errors.jo')
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(
