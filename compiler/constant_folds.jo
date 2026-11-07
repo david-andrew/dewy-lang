@@ -9,6 +9,7 @@ use 'expr.jo'
 use 'types.jo'
 use 'units.jo'
 use 'util.jo'
+use 'errors.jo'
 
 # (a record of scalars, however nested, holding nothing a run would have to allocate)
 cc_plain = (t: int) -> bool:
@@ -44,15 +45,28 @@ cc_closed_expr = (x: int, depth: int) -> bool:
         return true
     false
 
-# A call that cannot fail and whose success type t is one plain record, every argument closed: its
-# value in place of the call. false when it stays a call.
-cc_fold = (n: int, t: int) -> bool:
-    if tkind(t) != .struct_ or not cc_plain(t): return false
+# A call whose success type is one plain record, every argument closed: evaluated now, and when it
+# succeeds its value replaces the call, with no validator run needed. 0 when it stays a call: a
+# failure then goes to the validator, for the message.
+cc_fold_first = (n: int) -> int:
+    rt = prune(ntype(n))
+    if not is_union(rt): return 0
+    kept: int[]
+    loop m in union_members(rt):
+        if not exception_member(m): kept.push(m)
+    if kept.len() != 1 or kept.len() == union_members(rt).len(): return 0
+    t = kept[0]
+    if tkind(t) != .struct_ or not cc_plain(t): return 0
     loop i in [0..nkids(n)):
-        if not cc_closed_expr(kid(n, i), 0): return false
+        if not cc_closed_expr(kid(n, i), 0): return 0
+        # (`$time.zone = 'system'`: known only when the program runs, so the validator says what a
+        # literal can do with it)
+        x = kid(n, i)
+        if nodes[x].kind == .conv and nodes[x].a != 0: x = int(nodes[x].a)
+        if nodes[x].kind == .str_lit and name_of(int(nodes[x].sval)) == "system": return 0
     value = ct_values[ct_run(n)]
     # (a union's value holds the member's)
-    if value.items.len() < 1 or tkind(ct_values[value.items[0]].type) != .struct_: return false
+    if value.items.len() < 1 or prune(ct_values[value.items[0]].type) != t: return 0
     made = ct_literal(value.items[0], nodes[n].pos)
     nodes[n] = nodes[made]
-    true
+    t

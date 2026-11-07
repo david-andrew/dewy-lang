@@ -67,6 +67,9 @@ cc_constant = (x0: int) -> int:
 cc_call = (n: int, f: int, decl: int) -> int:
     if cc_errors.has(decl): fatal(nodes[n].pos, cc_errors[decl])
     if not cc_decls.has(decl): return 0
+    # (every argument constant and the value a plain record: the value, nothing at run time)
+    folded = cc_fold_first(n)
+    if folded != 0: return folded
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl]:
         args = cc_arguments(n, c)
@@ -120,8 +123,6 @@ cc_narrow = (n: int) -> int:
     loop m in union_members(rt):
         if not exception_member(m): kept.push(m)
     if kept.len() == 0 or kept.len() == union_members(rt).len(): return 0
-    # (one plain record left and every argument constant: the value itself, nothing at run time)
-    if kept.len() == 1 and cc_fold(n, kept[0]): return kept[0]
     inner = nodes.len()
     nodes.push(nodes[n])
     e = mk(.narrow, nodes[n].pos)

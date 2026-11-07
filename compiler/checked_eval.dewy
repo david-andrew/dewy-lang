@@ -794,8 +794,13 @@ cx_intrinsic=(e:CWord):>CWord=>$unsafe {
         let at=CWord(cx_nodes[0].ptr[e].sval)
         let known=cx_embed_cache.get(at)
         if known isnt? none {return known as int64}
+        # (each of the 256 byte values once, so a big file costs one word a byte)
+        let values:array<int64>=[]
+        loop v in [0..256) {values.push(cx_int(cx_T_U8[0]  CWord(v)))}
+        let bytes=cx_bytes(cx_name_of(at))
         let items:array<int64>=[]
-        loop byte in cx_bytes(cx_name_of(at)) {items.push(cx_int(cx_T_U8[0]  CWord(byte)))}
+        items.reserve(bytes.length)
+        loop byte in bytes {items.push(values[int64(byte)])}
         let made=cx_add(CTValue[type = t  items = items])
         cx_embed_cache[at] = made
         return made
@@ -1358,7 +1363,59 @@ cx_math_unpack=(value:CWord):>CWord=>$unsafe {
     let x=cx_value(value)
     cx_add(CTValue[type = cx_T_MATH_INT[0]  i = cx_value(x.items[0]).i  items = cx_value(x.items[1]).items])
 }
+# An operation on two exact integers that are words, and whose answer is one: done here. The library
+# form (__mc_slow) is interpreted big-integer code, hundreds of thousands of instructions for an
+# add, and gives the same value. -1 when the answer may not be a word, or the op is not one of these.
+cx_word_binary=(e:CWord op:Tok p:CWord q:CWord):>CWord=>$unsafe {
+    if op =? 'eq' {return cx_int(cx_T_BOOL[0]  int64(p =? q))}
+    if op =? 'ne' {return cx_int(cx_T_BOOL[0]  int64(p not=? q))}
+    if op =? 'lt' {return cx_int(cx_T_BOOL[0]  int64(p <? q))}
+    if op =? 'le' {return cx_int(cx_T_BOOL[0]  int64(p <=? q))}
+    if op =? 'gt' {return cx_int(cx_T_BOOL[0]  int64(p >? q))}
+    if op =? 'ge' {return cx_int(cx_T_BOOL[0]  int64(p >=? q))}
+    let min_word:CWord=-9223372036854775807 - 1
+    if op =? 'plus' {
+        let r:CWord=p+q
+        if ((p xor r) & (q xor r)) <? 0 {return -1}
+        return cx_int(cx_T_MATH_INT[0]  r)
+    }
+    if op =? 'minus' {
+        let r:CWord=p-q
+        if ((p xor q) & (p xor r)) <? 0 {return -1}
+        return cx_int(cx_T_MATH_INT[0]  r)
+    }
+    if op =? 'star' {
+        # (both under 2^31 in size cannot overflow; anything larger takes the library)
+        if p >? 2147483647 or p <? -2147483647 or q >? 2147483647 or q <? -2147483647 {return -1}
+        return cx_int(cx_T_MATH_INT[0]  p*q)
+    }
+    if op =? 'amp' {return cx_int(cx_T_MATH_INT[0]  p & q)}
+    if op =? 'pipe' {return cx_int(cx_T_MATH_INT[0]  p | q)}
+    if op =? 'caret' {return cx_int(cx_T_MATH_INT[0]  p xor q)}
+    if op =? 'slash' or op =? 'percent' {
+        # (a division here truncates unless aux2 -1 asks for the floor, as __mc_slow's operations do)
+        if q =? 0 or (p =? min_word and q =? -1) {return -1}
+        let quotient:CWord=p//q
+        let remainder:CWord=p-quotient*q
+        # (rounded down, whichever way the word division went)
+        if remainder not=? 0 and (remainder <? 0) not=? (q <? 0) {
+            quotient=quotient-1
+            remainder=remainder+q
+        }
+        let floored=cx_nodes[0].ptr[e].kind =? 'binary' and cx_nodes[0].ptr[e].aux2 =? -1
+        if not floored and remainder not=? 0 and (p <? 0) not=? (q <? 0) {
+            quotient=quotient+1
+            remainder=remainder-q
+        }
+        return cx_int(cx_T_MATH_INT[0]  if op =? 'slash' {quotient} else {remainder})
+    }
+    -1
+}
 cx_math_binary=(e:CWord op:Tok a:CWord b:CWord):>CWord=>$unsafe {
+    if cx_value(a).items.length =? 0 and cx_value(b).items.length =? 0 {
+        let word=cx_word_binary(e  op  cx_value(a).i  cx_value(b).i)
+        if word >=? 0 {return word}
+    }
     if op =? 'starstar' {
         let exponent=cx_value(b).i
         if exponent <? 0 or cx_value(b).items.length >? 0 {cx_fail(e  "power exponent must be a nonnegative bounded integer")}

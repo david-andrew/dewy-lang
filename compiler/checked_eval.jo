@@ -670,8 +670,11 @@ cx_intrinsic = (e: int) -> int:
         # (a file's bytes, read as often as a library reads its table: made once)
         at = int(cx_nodes[0][e].sval)
         if let known = cx_embed_cache.get(at): return known
+        # (each of the 256 byte values once, so a big file costs one word a byte)
+        values: int[]
+        loop v in [0..256): values.push(cx_int(cx_T_U8[0], v))
         items: int[]
-        loop byte in cx_name_of(at): items.push(cx_int(cx_T_U8[0], int(byte)))
+        loop byte in cx_name_of(at): items.push(values[int(byte)])
         made = cx_add(CTValue(type = t, items = items))
         cx_embed_cache[at] = made
         return made
@@ -1144,7 +1147,51 @@ cx_math_unpack = (value: int) -> int:
     x = cx_value(value)
     cx_add(CTValue(type = cx_T_MATH_INT[0], i = cx_value(x.items[0]).i, items = cx_value(x.items[1]).items))
 
+# An operation on two exact integers that are words, and whose answer is one: done here. The library
+# form (__mc_slow) is interpreted big-integer code, hundreds of thousands of instructions for an
+# add, and gives the same value. -1 when the answer may not be a word, or the op is not one of these.
+cx_word_binary = (e: int, op: Tok, p: int, q: int) -> int:
+    if op == .eq: return cx_int(cx_T_BOOL[0], int(p == q))
+    if op == .ne: return cx_int(cx_T_BOOL[0], int(p != q))
+    if op == .lt: return cx_int(cx_T_BOOL[0], int(p < q))
+    if op == .le: return cx_int(cx_T_BOOL[0], int(p <= q))
+    if op == .gt: return cx_int(cx_T_BOOL[0], int(p > q))
+    if op == .ge: return cx_int(cx_T_BOOL[0], int(p >= q))
+    if op == .plus:
+        r = p + q
+        if ((p xor r) & (q xor r)) < 0: return -1
+        return cx_int(cx_T_MATH_INT[0], r)
+    if op == .minus:
+        r = p - q
+        if ((p xor q) & (p xor r)) < 0: return -1
+        return cx_int(cx_T_MATH_INT[0], r)
+    if op == .star:
+        # (both under 2^31 in size cannot overflow; anything larger takes the library)
+        if p > 2147483647 or p < -2147483647 or q > 2147483647 or q < -2147483647: return -1
+        return cx_int(cx_T_MATH_INT[0], p * q)
+    if op == .amp: return cx_int(cx_T_MATH_INT[0], p & q)
+    if op == .pipe: return cx_int(cx_T_MATH_INT[0], p | q)
+    if op == .caret: return cx_int(cx_T_MATH_INT[0], p xor q)
+    if op == .slash or op == .percent:
+        # (a division here truncates unless aux2 -1 asks for the floor, as __mc_slow's operations do)
+        if q == 0 or (p == -9223372036854775807 - 1 and q == -1): return -1
+        quotient = p / q
+        remainder = p - quotient * q
+        # (rounded down, whichever way the word division went)
+        if remainder != 0 and (remainder < 0) != (q < 0):
+            quotient = quotient - 1
+            remainder = remainder + q
+        floored = cx_nodes[0][e].kind == .binary and cx_nodes[0][e].aux2 == -1
+        if not floored and remainder != 0 and (p < 0) != (q < 0):
+            quotient = quotient + 1
+            remainder = remainder - q
+        return cx_int(cx_T_MATH_INT[0], if op == .slash: quotient else: remainder)
+    -1
+
 cx_math_binary = (e: int, op: Tok, a: int, b: int) -> int:
+    if cx_value(a).items.len() == 0 and cx_value(b).items.len() == 0:
+        word = cx_word_binary(e, op, cx_value(a).i, cx_value(b).i)
+        if word >= 0: return word
     if op == .starstar:
         exponent = cx_value(b).i
         if exponent < 0 or cx_value(b).items.len() > 0: cx_fail(e, "power exponent must be a nonnegative bounded integer")

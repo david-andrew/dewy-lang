@@ -1,0 +1,37 @@
+# quick
+# Exact arithmetic at compile time gives what it gives at run time, at the edges of a word.
+$runtime_checks
+compute = (a:int b:int):>array<int> => {
+    let out:array<int> = [a+b a-b a*b]
+    if b not=? 0 { out = [out... a//b a%b] }
+    out = [out... a and b a or b a xor b]
+    let lt:int = if a <? b 1 else 0
+    let eq:int = if a =? b 1 else 0
+    [out... lt eq]
+}
+const MAX:int = 9223372036854775807
+const MIN:int = -9223372036854775807-1
+const EDGES:array<int> = [0 1 -1 2 -2 7 -7 3037000500 -3037000500 2147483647 2147483648 -2147483648 MAX MAX-1 MIN MIN+1 MAX+1 MIN-1]
+all_of = ():>array<int> => {
+    let out:array<int> = []
+    loop a in EDGES {
+        loop b in EDGES {
+            out = [out... compute(a b)...]
+        }
+    }
+    out
+}
+words = (a:int64 b:int64):>array<int64> => [a//b a%b -a//b -a%b]
+const WORDS = [words(17 9) words(-17 9) words(17 -9) words(-17 -9) words(18 9) words(-18 9)]
+const AT_COMPILE = all_of()
+main = () => {
+    let at_run = all_of()
+    $runtime_assert at_run.length =? AT_COMPILE.length
+    let differ = 0
+    loop x in at_run and y in AT_COMPILE {
+        if x not=? y { differ += 1 }
+    }
+    printl"{at_run.length} {differ}"
+    let same = WORDS =? [words(17 9) words(-17 9) words(17 -9) words(-17 -9) words(18 9) words(-18 9)]
+    printl"{same}"
+}
