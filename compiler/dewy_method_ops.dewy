@@ -1,0 +1,412 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_MUT add_flag has_flag kid kid_c kid_d kids kids2 mk nkids nodes)
+from p"check.jo" import (FK_INIT binding_leaves check_scopes ctxs cx modules new_inst resolve_type)
+from p"checker_call_queries.dewy" import (intrinsic_of)
+from p"checker_state.dewy" import (FnCtx)
+from p"dewy_context.jo" import (dc_parser)
+from p"dewy_methods.jo" import (DewyMethod dewy_allowed_members dewy_decl_members dewy_decl_methods dewy_deferred dewy_deferred_callees dewy_deferred_files dewy_deferred_names dewy_deferred_order dewy_methods dewy_methods_inferred dewy_module_of_file dewy_reachable dewy_receivers dewy_seen_new dewy_type_members)
+from p"error_ops.dewy" import (mint_of_any)
+from p"expr.jo" import (AUX2_PARTIAL IN intrinsics)
+from p"ownership.jo" import (ownership_hooks)
+from p"prelude.jo" import (demand_prelude_name prelude_new_decls)
+from p"types.jo" import (T_VOID prune structs types)
+from p"util.jo" import (fatal intern name_of pos_file)
+
+MethodWord:type=int64<overflow='wrap'>
+dewy_inherited_key=():>MethodWord=>{
+    intern("$inherited")
+}
+dewy_defer_type=(decl:MethodWord file:MethodWord):>void=>$unsafe {
+    if not dewy_deferred.has(decl) {
+        dewy_deferred[decl]=[]
+        dewy_deferred_order.push(decl)
+    }
+    let here=dewy_deferred_files.get(file) ?? dict<int64 bool>()
+    here[MethodWord(nodes.ptr[decl].name)]=true
+    dewy_deferred_files[file]=here
+}
+dewy_deferred_here=(file:MethodWord name:MethodWord):>bool=>{
+    let here=dewy_deferred_files.get(file)
+    if here not=? none {return here.has(name)}
+    false
+}
+dewy_defer_name=(decl:MethodWord n:MethodWord name:MethodWord):>void=>{
+    let left=dewy_deferred[decl]
+    left.push(n)
+    dewy_deferred[decl]=left
+    dewy_deferred_names[n]=name
+}
+dewy_defer_callee=(n:MethodWord):>void=>{
+    if dewy_deferred_names.has(n) {dewy_deferred_callees[n]=true}
+}
+dewy_resolve_inherited=():>void=>{
+    if dewy_deferred_order.length =? 0 {return}
+    let done=dict<int64 bool>()
+    loop decl in dewy_deferred_order {dewy_inherit(decl @done);}
+    dewy_deferred_order=[]
+    dewy_deferred=dict<int64 array<int64>>()
+    dewy_deferred_names=dict<int64 int64>()
+    dewy_deferred_callees=dict<int64 bool>()
+}
+# The members of the type declared by decl, with those it inherits.
+dewy_inherit=(decl:MethodWord @done:dict<int64 bool>):>dict<int64 int64>=>$unsafe {
+    let own=dewy_decl_members.get(decl) ?? dict<int64 int64>()
+    if not dewy_deferred.has(decl) or done.has(decl) {return own}
+    done[decl]=true
+    let members=dict<int64 int64>()
+    let parent=dewy_parent_decl(decl)
+    if parent not=? 0 {
+        loop [name member] in dewy_inherit(parent @done) {members[name]=member}
+    }
+    loop [name member] in own {members[name]=member}
+    dewy_decl_members[decl]=members
+    if dewy_type_members.has(decl) {dewy_type_members[decl]=members}
+    let range=dewy_decl_methods.get(decl)
+    if range not=? none {
+        loop i in [range[0]..range[1]) {dewy_methods[i].members=members}
+    }
+    let receiver=intern("$self")
+    loop n in dewy_deferred[decl] {
+        let name=dewy_deferred_names[n]
+        if not members.has(name) {continue}
+        let base=mk('ident' nodes.ptr[n].pos)
+        nodes.ptr[base].name=int32(receiver)
+        if dewy_deferred_callees.has(n) {add_flag(base NF_MUT)}
+        let field=mk('field' nodes.ptr[n].pos)
+        nodes.ptr[field].a=int32(base)
+        nodes.ptr[field].name=int32(name)
+        nodes.ptr[field].flags=nodes.ptr[n].flags
+        nodes.ptr[n]=nodes.ptr[field]
+    }
+    members
+}
+# The declaration of the type decl is minted under (0: none, or not a record type).
+dewy_parent_decl=(decl:MethodWord):>MethodWord=>$unsafe {
+    let p=MethodWord(nodes.ptr[decl].a)
+    if p =? 0 or mint_of_any(decl) {return 0}
+    let saved=cx
+    ctxs.push(FnCtx(int32(new_inst(FK_INIT MethodWord(nodes.ptr[decl].mod) "nominal")) (-1) int32(T_VOID) false 0 nodes.ptr[decl].mod int32(check_scopes.names.length)))
+    cx=ctxs.length - 1
+    let t=prune(resolve_type(p))
+    ctxs.pop();
+    cx=saved
+    if types.ptr[t].kind not=? 'struct_' {return 0}
+    MethodWord(structs.ptr[MethodWord(types.ptr[t].st)].decl)
+}
+dewy_is_method=(decl:MethodWord):>bool=>$unsafe {
+    nkids(decl) >? 0 and starts_with(name_of(MethodWord(nodes.ptr[kid(decl 0)].name)) "$self")
+}
+# The rows of one object (a type or a record literal), in order: decls[i] is the
+# method declared by names[i], or 0 for a field or a function stored as a value.
+# A minted type also has the members it inherits. Gives the object's members.
+dewy_method_group=(names:array<int64> decls:array<int64> inherited:dict<int64 int64>=dict<int64 int64>()):>dict<int64 int64>=>{
+    let members=dict<int64 int64>()
+    loop [name member] in inherited {members[name]=member}
+    let first=dewy_methods.length
+    loop i in 0.. and name in names {
+        members[name]=-1
+        if decls[i] not=? 0 {
+            members[name]=dewy_methods.length
+            dewy_methods.push(DewyMethod(decl=decls[i]))
+        }
+    }
+    loop i in [first..dewy_methods.length) {dewy_methods[i].members=members}
+    members
+}
+dewy_demand_receivers=(name:MethodWord):>void=>$unsafe {
+    demand_prelude_name(name)
+    loop dewy_seen_new <? prelude_new_decls.length {
+        let d=prelude_new_decls[dewy_seen_new]
+        dewy_seen_new += 1
+        if nodes.ptr[d].kind not=? 'fn_' or nkids(d) =? 0 {continue}
+        let nm=MethodWord(nodes.ptr[d].name)
+        let ds=dewy_receivers.get(nm) ?? []
+        ds.push(d)
+        dewy_receivers[nm]=ds
+    }
+}
+# A least fixed point: a method changes its object if its body does, given what the
+# methods found so far do (so mutual recursion settles).
+dewy_infer_methods=():>void=>$unsafe {
+    if dewy_methods_inferred =? dewy_methods.length {return}
+    dewy_receivers=dict<int64 array<int64>>()
+    dewy_module_of_file=dict<int64 int64>()
+    dewy_reachable=dict<int64 dict<int64 bool>>()
+    loop m in [0..modules.length) {
+        dewy_module_of_file[MethodWord(modules[m].file)]=m
+        loop d in modules[m].decls {
+            if nodes.ptr[d].kind not=? 'fn_' or nkids(d) =? 0 {continue}
+            let name=MethodWord(nodes.ptr[d].name)
+            let ds=dewy_receivers.get(name) ?? []
+            ds.push(d)
+            dewy_receivers[name]=ds
+        }
+    }
+    dewy_seen_new=prelude_new_decls.length
+    loop true {
+        let progress=false
+        loop i in [dewy_methods_inferred..dewy_methods.length) {
+            if dewy_methods[i].state =? 3 {continue}
+            let decl=dewy_methods[i].decl
+            let receiver=MethodWord(nodes.ptr[kid(decl 0)].name)
+            let changes=dewy_changes(MethodWord(nodes.ptr[decl].b) receiver i false)
+            loop param in kids(decl) {
+                if dewy_changes(MethodWord(nodes.ptr[param].b) receiver i false) {changes=true}
+            }
+            if changes {
+                dewy_methods[i].state=3
+                progress=true
+            }
+        }
+        if not progress {break}
+    }
+    loop i in [dewy_methods_inferred..dewy_methods.length) {
+        if dewy_methods[i].state =? 3 {add_flag(kid(dewy_methods[i].decl 0) NF_MUT)}
+        else {dewy_methods[i].state=2}
+        if dc_parser.reach.captures.length >? 0 {dewy_member_closures(MethodWord(nodes.ptr[dewy_methods[i].decl].b))}
+    }
+    # A method is static unless it reaches a member other than a static method:
+    # a least fixed point again, so static methods may call one another.
+    loop true {
+        let progress=false
+        loop i in [dewy_methods_inferred..dewy_methods.length) {
+            if dewy_methods[i].reads {continue}
+            let decl=dewy_methods[i].decl
+            let receiver=MethodWord(nodes.ptr[kid(decl 0)].name)
+            let reads=ownership_hooks.has(decl) or dewy_reads(MethodWord(nodes.ptr[decl].b) receiver i)
+            loop param in kids(decl) {
+                if dewy_reads(MethodWord(nodes.ptr[param].b) receiver i) {reads=true}
+            }
+            if reads {
+                dewy_methods[i].reads=true
+                progress=true
+            }
+        }
+        if not progress {break}
+    }
+    dewy_methods_inferred=dewy_methods.length
+}
+# Whether n reaches the object through `receiver` other than to call a static method.
+dewy_reads=(n:MethodWord receiver:MethodWord i:MethodWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {return MethodWord(nodes.ptr[n].name) =? receiver}
+    if k =? 'field' {
+        let base=MethodWord(nodes.ptr[n].a)
+        if nodes.ptr[base].kind =? 'ident' and MethodWord(nodes.ptr[base].name) =? receiver {
+            let j=dewy_methods[i].members.get(MethodWord(nodes.ptr[n].name))
+            if j not=? none {
+                if j >=? 0 and not dewy_methods[j].reads {return false}
+            }
+            return true
+        }
+        return dewy_reads(base receiver i)
+    }
+    if dewy_reads(MethodWord(nodes.ptr[n].a) receiver i) or dewy_reads(MethodWord(nodes.ptr[n].b) receiver i) {return true}
+    if dewy_reads(kid_c(n) receiver i) or dewy_reads(kid_d(n) receiver i) {return true}
+    loop child in kids(n) {
+        if dewy_reads(child receiver i) {return true}
+    }
+    if k not=? 'lambda' and k not=? 'fn_' {
+        loop child in kids2(n) {
+            if dewy_reads(child receiver i) {return true}
+        }
+    }
+    false
+}
+# The method `name` of the type declared by `decl` (an index of dewy_methods), or -1.
+dewy_type_method=(decl:MethodWord name:MethodWord):>MethodWord=>{
+    let members=dewy_type_members.get(decl)
+    if members not=? none {
+        let j=members.get(name)
+        if j not=? none {return j}
+    }
+    -1
+}
+dewy_method_changes=(i:MethodWord):>bool=>{
+    dewy_methods[i].state =? 3
+}
+# The modules whose functions a member of an object reachable from `m` may be:
+# m, what it uses (transitively) and the prelude.
+dewy_reachable_from=(m:MethodWord):>dict<int64 bool>=>{
+    let known=dewy_reachable.get(m)
+    if known not=? none {return known}
+    let seen=dict<int64 bool>()
+    let stack=[m]
+    loop stack.length >? 0 {
+        let x=stack.pop()
+        if seen.has(x) {continue}
+        seen[x]=true
+        loop u in modules[x].uses {stack.push(u)}
+    }
+    loop p in [0..modules.length) {
+        if modules[p].is_prelude {seen[p]=true}
+    }
+    dewy_reachable[m]=seen
+    seen
+}
+# The variable a route of fields and elements starts from.
+dewy_route_root=(n:MethodWord):>MethodWord=>$unsafe {
+    let n=n
+    loop n not=? 0 and (nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index') {n=MethodWord(nodes.ptr[n].a)}
+    n
+}
+dewy_reaches=(n:MethodWord receiver:MethodWord):>bool=>$unsafe {
+    let root=dewy_route_root(n)
+    root not=? 0 and nodes.ptr[root].kind =? 'ident' and MethodWord(nodes.ptr[root].name) =? receiver
+}
+# Member `name` of the route `base` (from the receiver), called or read: whether that
+# changes it. The object's own members are known; anything else is judged by name.
+dewy_member_changes=(base:MethodWord name:MethodWord receiver:MethodWord i:MethodWord):>bool=>$unsafe {
+    if nodes.ptr[base].kind =? 'ident' {
+        let j=dewy_methods[i].members.get(name)
+        if j not=? none {
+            if j <? 0 {return false}
+            return dewy_method_changes(j)
+        }
+    }
+    let ii=intrinsic_of(name)
+    if ii >=? 0 and intrinsics[ii].arr {
+        let id=intrinsics[ii].id
+        if id not=? IN.len and id not=? IN.arrcap and id not=? IN.slice {return true}
+    }
+    let m=dewy_module_of_file.get(pos_file(nodes.ptr[dewy_methods[i].decl].pos)) ?? -1
+    dewy_demand_receivers(name)
+    let ds=dewy_receivers.get(name)
+    if ds not=? none {
+        loop d in ds {
+            if m >=? 0 {
+                let dm=dewy_module_of_file.get(pos_file(nodes.ptr[d].pos)) ?? -1
+                if dm >=? 0 and not dewy_reachable_from(m).has(dm) {continue}
+            }
+            if has_flag(kid(d 0) NF_MUT) {return true}
+            if dewy_is_method(d) {
+                loop j in [0..dewy_methods.length) {
+                    if dewy_methods[j].decl =? d and dewy_method_changes(j) {return true}
+                }
+            }
+        }
+    }
+    false
+}
+dewy_change_found=(n:MethodWord nested:bool member:MethodWord=0):>bool=>$unsafe {
+    if nested and (member =? 0 or not dewy_allowed_members.contains(member)) {
+        if member not=? 0 {fatal(nodes.ptr[n].pos "a function inside a method changes the object's member '{name_of(member)}' only through an explicit capture: `($capture @{name_of(member)}) => ...`")}
+        fatal(nodes.ptr[n].pos "a function inside a method cannot change the object itself (it would change its own copy); change it in the method, or capture the members it changes: `($capture @name) => ...`")
+    }
+    true
+}
+# A closure that captured members by place holds the caller's object: it is
+# bound with `let` and only called in the method (a bare name calls; `@f` would
+# let it escape). O(method body), only for methods with such closures.
+dewy_member_closures=(body:MethodWord):>void=>{
+    let names:array<int64>=[]
+    dewy_member_closure_names(body 0 @names)
+    if names.length >? 0 {dewy_member_closure_handles(body names)}
+}
+dewy_member_closure_names=(n:MethodWord parent:MethodWord @names:array<int64>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' and dc_parser.reach.captures.has(n) {
+        if parent =? 0 or nodes.ptr[parent].kind not=? 'vardecl' or MethodWord(nodes.ptr[parent].b) not=? n {fatal(nodes.ptr[n].pos "a closure that changes the object's members runs inside the method: bind it with `let` and call it there")}
+        names.push(MethodWord(nodes.ptr[parent].name))
+    }
+    dewy_member_closure_names(MethodWord(nodes.ptr[n].a) n @names)
+    dewy_member_closure_names(MethodWord(nodes.ptr[n].b) n @names)
+    dewy_member_closure_names(kid_c(n) n @names)
+    dewy_member_closure_names(kid_d(n) n @names)
+    loop child in kids(n) {dewy_member_closure_names(child n @names)}
+}
+dewy_member_closure_handles=(n:MethodWord names:array<int64>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    let escapes=k =? 'ident' and has_flag(n NF_MUT) and names.contains(MethodWord(nodes.ptr[n].name))
+    if k =? 'call' and nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL) and nodes.ptr[MethodWord(nodes.ptr[n].a)].kind =? 'ident' and names.contains(MethodWord(nodes.ptr[MethodWord(nodes.ptr[n].a)].name)) {escapes=true}
+    if escapes {
+        let named=n
+        if k =? 'call' {named=MethodWord(nodes.ptr[n].a)}
+        fatal(nodes.ptr[n].pos "'{name_of(MethodWord(nodes.ptr[named].name))}' changes the object's members, so it cannot leave the method: call it there")
+    }
+    dewy_member_closure_handles(MethodWord(nodes.ptr[n].a) names)
+    dewy_member_closure_handles(MethodWord(nodes.ptr[n].b) names)
+    dewy_member_closure_handles(kid_c(n) names)
+    dewy_member_closure_handles(kid_d(n) names)
+    loop child in kids(n) {dewy_member_closure_handles(child names)}
+}
+# The object's member a route from the receiver starts with (0 for the object itself).
+dewy_route_member=(n:MethodWord receiver:MethodWord):>MethodWord=>$unsafe {
+    let n=n
+    let member:MethodWord=0
+    loop n not=? 0 and (nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index') {
+        if nodes.ptr[n].kind =? 'field' {member=MethodWord(nodes.ptr[n].name)}
+        else {member=0}
+        if nodes.ptr[MethodWord(nodes.ptr[n].a)].kind =? 'ident' and MethodWord(nodes.ptr[MethodWord(nodes.ptr[n].a)].name) =? receiver {return member}
+        n=MethodWord(nodes.ptr[n].a)
+    }
+    0
+}
+# Whether n changes the object reached through `receiver`. `nested` is set inside a
+# function written in the method's body, whose captured copy of the object is its own.
+dewy_changes=(n:MethodWord receiver:MethodWord i:MethodWord nested:bool):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    let found=false
+    let inner=nested or k =? 'lambda'
+    if k =? 'lambda' {
+        let saved=dewy_allowed_members
+        dewy_allowed_members=dc_parser.reach.captures.get(n) ?? []
+        found=dewy_changes_within(n receiver i true) or dewy_allowed_members.length >? 0
+        dewy_allowed_members=saved
+        return found
+    }
+    if k =? 'assign' {
+        let target=MethodWord(nodes.ptr[n].a)
+        let targets=if nodes.ptr[target].kind =? 'tuple' {binding_leaves(kids(target))} else {[target]}
+        loop t in targets {
+            if dewy_reaches(t receiver) {found=dewy_change_found(n nested dewy_route_member(t receiver))}
+        }
+    }
+    if (k =? 'for_' or k =? 'lhead') and has_flag(n NF_MUT) and dewy_reaches(MethodWord(nodes.ptr[n].a) receiver) {
+        found=dewy_change_found(n nested dewy_route_member(MethodWord(nodes.ptr[n].a) receiver))
+    }
+    if k =? 'call' and nodes.ptr[MethodWord(nodes.ptr[n].a)].kind =? 'field' {
+        let callee=MethodWord(nodes.ptr[n].a)
+        let base=MethodWord(nodes.ptr[callee].a)
+        if dewy_reaches(base receiver) and dewy_member_changes(base MethodWord(nodes.ptr[callee].name) receiver i) {
+            found=dewy_change_found(n nested dewy_route_member(base receiver))
+        }
+        # The receiver of a member call is marked as a possible place; judged above.
+        if dewy_changes_within(base receiver i inner) {found=true}
+        loop arg in kids(n) {
+            if dewy_changes(arg receiver i inner) {found=true}
+        }
+        return found
+    }
+    if k =? 'field' and nodes.ptr[n].name not=? 0 and dewy_reaches(MethodWord(nodes.ptr[n].a) receiver) {
+        if dewy_member_changes(MethodWord(nodes.ptr[n].a) MethodWord(nodes.ptr[n].name) receiver i) {found=dewy_change_found(n nested dewy_route_member(MethodWord(nodes.ptr[n].a) receiver))}
+    }
+    if has_flag(n NF_MUT) and (k =? 'ident' or k =? 'field' or k =? 'index') and dewy_reaches(n receiver) {
+        found=dewy_change_found(n nested dewy_route_member(n receiver))
+    }
+    if dewy_changes_within(n receiver i inner) {found=true}
+    found
+}
+dewy_changes_within=(n:MethodWord receiver:MethodWord i:MethodWord nested:bool):>bool=>$unsafe {
+    let found=false
+    let k=nodes.ptr[n].kind
+    if dewy_changes(MethodWord(nodes.ptr[n].a) receiver i nested) {found=true}
+    if k =? 'field' {return found}
+    if dewy_changes(MethodWord(nodes.ptr[n].b) receiver i nested) {found=true}
+    if dewy_changes(kid_c(n) receiver i nested) {found=true}
+    if dewy_changes(kid_d(n) receiver i nested) {found=true}
+    loop child in kids(n) {
+        if dewy_changes(child receiver i nested) {found=true}
+    }
+    if k not=? 'lambda' and k not=? 'fn_' {
+        loop child in kids2(n) {
+            if dewy_changes(child receiver i nested) {found=true}
+        }
+    }
+    found
+}

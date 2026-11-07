@@ -419,7 +419,7 @@ def test_poly_ops_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release,
                             ('node_store', 'checker_types', 'checker_state', 'poly_ops'), DRIVER,
                             doubles={'services.jo': SERVICES, 'poly_closure.jo': "use 'checker_state.dewy'\n" + state},
-                            services=('ast', 'check', 'checker_expr', 'checker_signature', 'dewy_methods', 'effect_contracts', 'expr', 'lower_storage', 'types', 'util'))
+                            services=('ast', 'check', 'checker_expr', 'checker_signature', 'dewy_methods', 'dewy_method_ops', 'effect_contracts', 'expr', 'lower_storage', 'types', 'util'))
     assert output.endswith(b'poly ok\n')
     for text in (b'cannot infer a generic', b'recursive method', b'mk_callable_contract', b'a recursive generic closure that returns', b'more than 500', b'opt_rest_rebase'):
         assert text in output, text
