@@ -772,6 +772,13 @@ quantity_point_scaled = (pos: int, point: int, t: int):
     unit = quantity_point_unit(t)
     fatal(pos, "cannot scale a temperature point: `{p}` is a reading on the {unit} scale, and scaling one depends on where the scale's zero sits (2 × 20°C is 40°C, but 2 × 68°F, the same temperature, is 136°F). Scale a difference instead (`({p} - ref)*2`); for an average write `mean[t1 t2]`; `{p}/K` is its reading in kelvins")
 
+# (a point times or over another quantity: A*t/R, where only a difference has a meaning)
+quantity_point_in_compound = (pos: int, point: int, t: int):
+    p = quantity_operand_text(point, "")
+    what = if p == "": "this temperature" else: "`{p}`"
+    unit = quantity_point_unit(t)
+    fatal(pos, "a temperature point cannot be a factor of a compound quantity: {what} is a reading on the {unit} scale, and the result would depend on where the scale's zero sits. Use a difference: subtract two points (`(70{unit} - 30{unit})`) or use kelvin (`5K`); for one degree in a compound unit, write the unit alone (`J/(g*{unit})`)")
+
 # Products and quotients with an offset temperature: a plain number scales a difference;
 # another quantity combines with a difference's or a unit's own size (J/°C); a temperature
 # over a temperature unit counts in that unit (t/°C is t's reading in Celsius). A point
@@ -792,8 +799,12 @@ quantity_offset_product = (n: int, a: int, b: int, op: Tok, expected: int, a_nam
             top = quantity_internal_check(top)
         else: quantity_retag(a, 0)
         return quantity_become(n, quantity_operation(.slash, top, quantity_delta_reading(b), pos), 0)
-    if quantity_point(ta) and not quantity_is_unit(a, a_name): quantity_point_scaled(pos, a, ta)
-    if quantity_point(tb) and not quantity_is_unit(b, b_name): quantity_point_scaled(pos, b, tb)
+    if quantity_point(ta) and not quantity_is_unit(a, a_name):
+        if bq: quantity_point_in_compound(pos, a, ta)
+        quantity_point_scaled(pos, a, ta)
+    if quantity_point(tb) and not quantity_is_unit(b, b_name):
+        if aq: quantity_point_in_compound(pos, b, tb)
+        quantity_point_scaled(pos, b, tb)
     if aq and not bq: return quantity_become(n, quantity_scaled(a, b, op, true, pos), quantity_tag(ta))
     if bq and not aq and op == .star: return quantity_become(n, quantity_scaled(b, a, op, false, pos), quantity_tag(tb))
     return quantity_become(n, quantity_operation(op, quantity_delta_reading(a), quantity_delta_reading(b), pos), 0)
