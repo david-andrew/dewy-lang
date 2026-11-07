@@ -93,6 +93,9 @@ members_leaves=(e:ReflectWord @texts:array<string> @ints:array<int64> @others:ar
     else if k =? 'unary' and nodes.ptr[e].op =? int32(59) and nodes.ptr[ReflectWord(nodes.ptr[e].a)].kind =? 'int_lit' and not has_flag(ReflectWord(nodes.ptr[e].a) NF_U64) {
         if not ints.contains(-nodes.ptr[ReflectWord(nodes.ptr[e].a)].ival) {ints.push(-nodes.ptr[ReflectWord(nodes.ptr[e].a)].ival)}
     }
+    # These syntax kinds reached here because they are not literal type leaves.
+    # Resolve or diagnose them once, rather than entering members_type again.
+    else if k =? 'binary' or k =? 'str_lit' or k =? 'int_lit' or k =? 'unary' {others.push(expr_as_type(e))}
     else {others.push(members_type(e))}
 }
 # integer singletons as one refined int, as in a type position: lo <= v <= hi, v != each gap

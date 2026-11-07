@@ -77,6 +77,8 @@ members_leaves = (e: int, texts: mut str[], ints: mut int[], others: mut int[]):
         if not ints.contains(nodes[e].ival): ints.push(nodes[e].ival)
     else if k == .unary and nodes[e].op == i32(int(Tok.minus)) and nodes[int(nodes[e].a)].kind == .int_lit and not has_flag(int(nodes[e].a), NF_U64):
         if not ints.contains(-nodes[int(nodes[e].a)].ival): ints.push(-nodes[int(nodes[e].a)].ival)
+    # Nonliteral leaves must resolve or diagnose, not reenter the dispatcher.
+    else if k == .binary or k == .str_lit or k == .int_lit or k == .unary: others.push(expr_as_type(e))
     else: others.push(members_type(e))
 # integer singletons as one refined int, as in a type position: lo <= v <= hi, v != each gap
 members_int_type = (values: int[], pos: int) -> int:
