@@ -6,7 +6,8 @@ from p"effects.jo" import (effect_unavailable)
 from p"expr.jo" import (is_nd mk_ident_local ntype)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"checks_shaped.dewy" import (shape_field_type)
-from p"facts.jo" import (FACT_CAP FACT_STEPS FactPaths FactProjection FactState FactSummary fact_add_fits fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_types fact_difference fact_distance fact_domain fact_hull_owner fact_length_max fact_loop_exhausted fact_loop_steps fact_loops fact_new fact_owner fact_pair_key fact_pending_defers fact_place fact_probe_on fact_project fact_projection_find fact_push_frames fact_query fact_record_array_types fact_scalar fact_set_bound fact_shape_summaries fact_slice fact_slice_prepare fact_slice_push_children fact_speculating fact_step_limit fact_summaries fact_summary_acc fact_summary_assumed fact_summary_entry fact_summary_field fact_summary_fields fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_type)
+from p"facts.jo" import (FACT_CAP fact_length_forced fact_length_strict FACT_STEPS FactPaths FactProjection FactState FactSummary fact_add_fits fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_types fact_difference fact_distance fact_domain fact_hull_owner fact_length_max fact_loop_exhausted fact_loop_steps fact_loops fact_new fact_owner fact_pair_key fact_pending_defers fact_place fact_probe_on fact_project fact_projection_find fact_push_frames fact_query fact_record_array_types fact_scalar fact_set_bound fact_shape_summaries fact_slice fact_slice_prepare fact_slice_push_children fact_speculating fact_step_limit fact_summaries fact_summary_acc fact_summary_assumed fact_summary_entry fact_summary_field fact_summary_fields fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_type)
+from p"directives.jo" import (dir_assumed_bounds_any)
 from p"facts_forgets.dewy" import (fact_kept_field fact_call_field_type)
 from p"facts_routes.dewy" import (fact_read fact_route fact_route_values)
 from p"facts_conditions.dewy" import (fact_tag)
@@ -398,7 +399,10 @@ fact_summary_field_type=(t:SummaryWord field:SummaryWord):>SummaryWord=>$unsafe 
     fact_type(shape_field_type(t field))
 }
 fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=>$unsafe {
-    let key=if field =? 0 {f} else {fact_pair_key(f field)}
+    let strict=dir_assumed_bounds_any and fact_length_strict()
+    let key0=if field =? 0 {f} else {fact_pair_key(f field)}
+    # (a strict caller's summaries are cached apart: fact_length_max)
+    let key=if strict {-1 - key0} else {key0}
     let known=fact_summaries.get(key)
     if known not=? none {return known}
     let unknown=FactSummary(FactBound() FactBound())
@@ -437,6 +441,8 @@ fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=
     let saved_used=fact_summary_used
     fact_summary_assumed=[]
     fact_summary_used=false
+    let saved_forced=fact_length_forced
+    fact_length_forced=strict
     fact_owner=f
     fact_summary_owner=f
     fact_speculating += 1
@@ -539,6 +545,7 @@ fact_summary=(f:SummaryWord places:bool=false field:SummaryWord=0):>FactSummary=
     if fact_summary_shapes.length >? 0 and fact_constructor_budget <? 0 and field =? 0 {
         fact_shape_summaries[f]=if result.seen {fact_summary_shape_mask} else {0}
     }
+    fact_length_forced=saved_forced
     fact_owner=saved[0]
     fact_summary_owner=saved[1]
     fact_speculating=saved[2]

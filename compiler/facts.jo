@@ -381,15 +381,77 @@ fact_shrunk_elements = (s: mut FactState, base: int, fresh: int):
 fact_grown_roots: {int: bool} = {}
 fact_name_vals = 0
 
-# Length facts and callee summaries can cross lexical scopes. When any scope
-# opts out, their shared domain uses only the signed storage limit; an assumed
-# ceiling must not reach that scope through an alias, summary or capture.
-# Node-local lowering still applies the enabled axiom at its exact use site.
-# This conservative O(1) choice needs no provenance pass or global body walk.
+# The array-length ceiling (2^56 bytes) is an axiom `$no_assumed_bounds` turns
+# off in its scope, decided by where the analyzed code is: a function whose body
+# is in such a scope or holds one uses only the signed storage limit; every other
+# function keeps the ceiling for its own proofs, whatever its callers or the other
+# modules set. Its summary, asked for by a strict function, is computed and cached
+# apart without the ceiling (fact_summary), so none reaches the strict scope through
+# a call; the exact domain decides by file (dir_assumed_bounds_file). Facts with no
+# owning function (retried requests without one) take the strict limit when any
+# scope sets it. O(1) per query, O(body) once per function in a file holding a
+# nested strict scope.
 fact_length_max = () -> int:
-    if dir_assumed_bounds_any: return FACT_MAX
+    if dir_assumed_bounds_any and fact_length_strict(): return FACT_MAX
     if ptr_size == 4: return 4294967295
     (1 << 56) - 1
+
+fact_length_owner = -1
+# (a callee's summary asked for by such a function: computed, and cached apart,
+# without the ceiling, so none reaches the strict scope through it)
+fact_length_forced = false
+fact_length_owner_strict = false
+fact_length_gen = -1
+fact_length_strict_fns: {int: bool} = {}
+
+fact_length_strict = () -> bool:
+    if fact_length_forced: return true
+    f = if fact_owner != 0: fact_owner else: fact_retry_owner
+    if f <= 0 or f >= fns.len(): return true
+    if fact_length_gen != dir_scopes_gen:
+        fact_length_gen = dir_scopes_gen
+        fact_length_strict_fns = {}
+        fact_length_owner = -1
+    if f == fact_length_owner: return fact_length_owner_strict
+    strict = false
+    if let known = fact_length_strict_fns.get(f): strict = known
+    else:
+        strict = fact_length_strict_body(int(fns[f].body))
+        fact_length_strict_fns[f] = strict
+    fact_length_owner = f
+    fact_length_owner_strict = strict
+    strict
+
+# (a body in a `$no_assumed_bounds` scope, or holding one: a scope of the
+# setting that starts inside the body's positions)
+fact_length_strict_body = (body: int) -> bool:
+    if body <= 0: return true
+    p = nodes[body].pos
+    if p <= 0: return true
+    if dir_value(dir_name_assumed_bounds, p) == 1: return true
+    file = p >> 40
+    later = false
+    loop s in dir_scopes:
+        if s.setting == dir_name_assumed_bounds and s.value == 1 and s.start > p and s.start >> 40 == file: later = true
+    if not later: return false
+    end = fact_max_pos(body)
+    loop s in dir_scopes:
+        if s.setting == dir_name_assumed_bounds and s.value == 1 and s.start > p and s.start <= end: return true
+    false
+
+# (the last position in n's tree; a node the walk does not know, or a lambda,
+# gives its file's end, so a nested scope is never missed)
+fact_max_pos = (n: int) -> int:
+    if n <= 0: return 0
+    out = nodes[n].pos
+    mask = isolation_children(nodes[n].kind)
+    if mask < 0 or nodes[n].kind == .lambda: return (out >> 40 << 40) | 0xFFFFFFFFFF
+    if mask & 1 != 0: out = max(out, fact_max_pos(int(nodes[n].a)))
+    if mask & 2 != 0: out = max(out, fact_max_pos(int(nodes[n].b)))
+    if mask & 4 != 0: out = max(out, fact_max_pos(int(nodes[n].c)))
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): out = max(out, fact_max_pos(kid(n, i)))
+    out
 
 # A record key type that equals itself and hashes as it did (so a key a snapshot of
 # d.keys holds is found again in d): no hash of its own, fields that are such keys

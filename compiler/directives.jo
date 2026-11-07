@@ -113,6 +113,20 @@ dir_builtin = (name: str) -> bool:
     name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe" or name == "assume_local_asserts" or name == "confine_external_paths" or name == "no_deadlocks" or name == "audited_wait" or name == "no_assumed_bounds"
 
 dir_module_start = (file: int) -> int: file << 40
+
+# Whether some scope of a file sets `$no_assumed_bounds` (cached by file until the scopes
+# change). The exact domain's length ceiling is decided by file: a value made outside
+# a nested strict scope (`let n = xs.length`) may be used inside it. O(scopes) once.
+dir_bounds_files: {int: bool} = {}
+dir_bounds_gen = -1
+dir_assumed_bounds_file = (file: int) -> bool:
+    if not dir_assumed_bounds_any: return false
+    if dir_bounds_gen != dir_scopes_gen:
+        dir_bounds_gen = dir_scopes_gen
+        dir_bounds_files = {}
+        loop s in dir_scopes:
+            if s.setting == dir_name_assumed_bounds and s.value == 1: dir_bounds_files[s.start >> 40] = true
+    dir_bounds_files.has(file)
 dir_module_end = (file: int) -> int: (file << 40) | 0xFFFFFFFFFF
 
 # (the chain of a setting's scopes in a file, -1 none)

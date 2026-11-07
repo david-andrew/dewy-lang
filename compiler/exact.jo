@@ -1024,7 +1024,7 @@ exact_count_bound = (n: int) -> FactBound:
     else if k == .unary and nodes[n].op == i32(int(Tok.tilde)):
         source = exact_count_bound(int(nodes[n].a))
         if not source.wide: out = FactBound(-1 - source.hi, -1 - source.lo)
-    else if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1 and tkind(ntype(kid(n, 0))) == .array and not dir_assumed_bounds_any:
+    else if k == .intrinsic and nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1 and tkind(ntype(kid(n, 0))) == .array and not dir_assumed_bounds_file(nodes[n].pos >> 40):
         bytes = tsize(telem(ntype(kid(n, 0))))
         out = FactBound(0, (if bytes > 0: (1 << 56) / bytes else: FACT_MAX))
     else:
