@@ -1,0 +1,11 @@
+# The loop itself changes the global: its keys are new.
+COLUMNS = ["todo" "doing" "done"]
+Task:type = [id:int column:string tags:array<string>]
+main = () => {
+    let tasks:dict<int Task> = []
+    tasks[1] = Task[1 "todo" ["x"]]
+    let per:dict<string int> = []
+    loop c in COLUMNS per[c] = 0
+    loop [id t] in tasks COLUMNS = t.tags
+    loop c in COLUMNS printl("{c}={per[c]}")
+}

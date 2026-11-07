@@ -1,0 +1,17 @@
+# A value with a drop hook of its own may run the program's code as entries are
+# copied and released: the global may change.
+COLUMNS = ["todo" "doing" "done"]
+Task:type = type of [
+    id:int
+    column:string
+    $__drop__
+    release = ():>void => { COLUMNS = [] }
+]
+main = () => {
+    let tasks:dict<int Task> = []
+    tasks[1] = Task[1 "todo"]
+    let per:dict<string int> = []
+    loop c in COLUMNS per[c] = 0
+    loop [id t] in tasks per[t.column] = id
+    loop c in COLUMNS printl("{c}={per[c]}")
+}

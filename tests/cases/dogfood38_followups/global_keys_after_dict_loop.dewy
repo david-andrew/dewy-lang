@@ -1,0 +1,13 @@
+# Keys set from a plain global survive a loop over a dictionary of records with
+# array fields: walking its entries copies shares and runs none of the program's code.
+COLUMNS = ["todo" "doing" "done"]
+Task:type = [id:int column:string tags:array<string>]
+main = () => {
+    let tasks:dict<int Task> = []
+    tasks[1] = Task[1 "todo" ["x"]]
+    tasks[2] = Task[2 "done" []]
+    let per:dict<string int> = []
+    loop c in COLUMNS per[c] = 0
+    loop [id t] in tasks per[t.column] = (per.get(t.column) ?? 0) + 1
+    loop c in COLUMNS printl("{c}={per[c]}")
+}

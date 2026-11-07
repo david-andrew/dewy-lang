@@ -1,7 +1,7 @@
 $runtime_checks
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (LF_ALIAS LF_MUTPARAM locals)
+from p"check.jo" import (LF_ALIAS LF_MUTPARAM fns lib_dir locals)
 from p"effect_values.dewy" import (effect_value)
 from p"expr.jo" import (CV IN ntype)
 from p"checks_thin_expr.dewy" import (is_map_type oversized_literal)
@@ -23,7 +23,7 @@ from p"places.jo" import (place_locked)
 from p"refine.jo" import (refine_storage representation_type)
 from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
 from p"sequence_selectors.dewy" import (fact_sequence_store fact_sequence_store_call)
-from p"types.jo" import (T_INT T_STR T_U64 is_int prune tkind types)
+from p"types.jo" import (T_INT T_STR T_U64 is_int prune struct_targ tkind types)
 from p"type_ops.dewy" import (simple_enum)
 from p"util.jo" import (files intern name_of pos_file)
 
@@ -217,6 +217,20 @@ fact_hook_free_resize=(n:ChangeWord):>bool=>$unsafe {
     if id not=? IN.push and id not=? IN.pop and id not=? IN.insert and id not=? IN.remove and id not=? IN.clear and id not=? IN.extend and id not=? IN.resize and id not=? IN.truncate {return false}
     nkids(n) >? 0 and tkind(fact_type(ntype(kid(n 0)))) =? 'array' and effect_value(ntype(kid(n 0)))
 }
+# A dictionary's entry snapshot for a loop (`loop [k v] in d`, `__map_entries`) whose
+# keys and values copy as shares (effect_value: no lifecycle or copy hook) runs none of
+# the program's code: it writes no place a fact holds, a mutable global among them. O(1).
+fact_map_entries_name:int64=0
+fact_map_entries_call=(n:ChangeWord):>bool=>$unsafe {
+    if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 1 {return false}
+    let d=ChangeWord(fns.ptr[ChangeWord(nodes.ptr[n].sym)].decl)
+    if fact_map_entries_name =? 0 {fact_map_entries_name=intern("__map_entries")}
+    if d =? 0 or ChangeWord(nodes.ptr[d].name) not=? fact_map_entries_name or files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/core/map.jo" {return false}
+    let m=representation_type(ntype(kid(n 0)))
+    if not is_map_type(m) or ownership_decls.length not=? 0 and ownership_fact_type(m) {return false}
+    let st=ChangeWord(types.ptr[m].st)
+    effect_value(struct_targ(st 0)) and effect_value(struct_targ(st 1))
+}
 fact_reads_only=(id:IN):>bool=>{
     id =? IN.gpu_kernel or id =? IN.len or id =? IN.arrcap or id =? IN.sizeof or id =? IN.alignof or id =? IN.static_assert or id =? IN.runtime_assert or id =? IN.assert or id =? IN.panic or id =? IN.unreachable or fact_pure_intrinsic(id)
 }
@@ -334,7 +348,7 @@ fact_changes=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_')
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_nd_plain_store(n) {fact_nd_store(n @s at reason)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_pool_call(n) =? 4 {fact_pool_store_changes(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_map_store_call(n) or fact_map_insert_call(n)) {fact_map_store_changes(n @s at reason)}
-    else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n)) {s=s}
+    else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n) or fact_map_entries_call(n)) {s=s}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and (nodes.ptr[n].sym =? int32(fact_owner) or nd_mutable_call(n)) {fact_path_call_effects(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 {fact_call_effects(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 2 {s=s}
