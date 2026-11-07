@@ -1,6 +1,6 @@
 $runtime_checks
 from p"@lib/core/os.jo" import (env)
-from p"@lib/core/str.jo" import (find is_digit split starts_with)
+from p"@lib/core/str.jo" import (find is_digit split starts_with to_int as jo_to_int)
 from p"ast.jo" import (NF_GENERIC NF_INBOUNDS add_flag has_flag nodes)
 from p"check.jo" import (FK_LAMBDA decl_info decl_infos fns lib_dir modules)
 from p"directives.jo" import (dir_rules_from_host DIR_DEFAULT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirScope DirSite dir_assumed_bounds_any dir_builtin dir_bundles dir_bundles_loaded dir_copies_any dir_deadlocks_any dir_entry_functions dir_entry_positions dir_find dir_floats_any dir_forced dir_mixed_files dir_module_start dir_name_assumed_bounds dir_name_audited dir_name_confine dir_name_copies dir_name_deadlocks dir_name_local_asserts dir_name_no_inf dir_name_no_nan dir_name_prototype dir_name_row dir_name_runtime dir_name_warnings dir_obligations dir_panic_sites dir_policy dir_prior_static dir_proven dir_row_scopes dir_rows_any dir_scopes dir_scopes_gen dir_sites dir_static_body dir_uniform_files dir_value)
@@ -118,8 +118,8 @@ version_newer=(a:string b0:string):>bool=>{
     let x=split(a ".")
     let y=split(b ".")
     loop i in [0..min(x.length y.length)) {
-        let p=to_int(x[i]) ?? 0
-        let q=to_int(y[i]) ?? 0
+        let p=jo_to_int(x[i]) ?? 0
+        let q=jo_to_int(y[i]) ?? 0
         if p not=? q {return p >? q}
     }
     false
