@@ -291,7 +291,13 @@ fused_start = (pinit_lf: int) -> bool:
                 continue
             syscall(3, fds[w])
             st = [0]
-            syscall(61, pids[w], data(st), 0, 0)
+            if pc_active:
+                pc_fds[w] = -1
+                st[0] = pc_reap(w)
+            else:
+                r = -4
+                loop r == -4: r = syscall(61, pids[w], data(st), 0, 0)
+                if r != pids[w]: st[0] = -1
             if st[0] & 0xFFFF != 0 or got[w].len() < 16:
                 lost = true
                 continue

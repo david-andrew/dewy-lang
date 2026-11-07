@@ -29,7 +29,12 @@ when TARGET != "windows" and TARGET != "wasm":
     __watch_test_interrupt = (sig: i32, info: *u8, context: *u8):
         # No allocation or I/O buffering inside a signal handler.
         pid = __watch_test_pid[0]
-        if pid > 0: syscall(62, -pid, 15)
+        # The handler can interrupt watch_reap after wait4 has reaped the
+        # group leader but before w_pid is cleared. Verify child ownership
+        # without blocking; a live child cannot recycle its PID here.
+        status = 0
+        if pid > 0 and syscall(61, pid, &status, 1, 0) == 0:
+            syscall(62, -pid, 15)
         __exit(128 + int(sig))
 
 __watch_on = false

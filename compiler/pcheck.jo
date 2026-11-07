@@ -230,10 +230,10 @@ pc_try = (start: int):
         if not good:
             loop w in [0..n):
                 if controls[w] >= 0: syscall(3, controls[w])
-                if pc_fds[w] >= 0: syscall(3, pc_fds[w])
-                if pc_pids[w] > 0:
-                    st = [0]
-                    syscall(61, pc_pids[w], data(st), 0, 0)
+                if pc_fds[w] >= 0:
+                    syscall(3, pc_fds[w])
+                    pc_fds[w] = -1
+                pc_reap(w)
             pc_pids = []
             pc_fds = []
             pc_owner = {}
@@ -393,6 +393,18 @@ pc_tree = (n: int) -> bool:
         if not pc_tree(kid2(n, i)): return false
     true
 
+# A PID is an owned child only until wait reaps it. Keep the worker slot but
+# retire its PID immediately; fused emission and cancellation share this path.
+pc_reap = (w: int) -> int:
+    pid = pc_pids[w]
+    if pid <= 0: return -1
+    st = [0]
+    r = -4
+    loop r == -4: r = syscall(61, pid, data(st), 0, 0)
+    if r == pid or r == -10: pc_pids[w] = -1
+    if r != pid: return -1
+    st[0]
+
 pc_cancel = ():
     when BOOTSTRAP or TARGET != "linux" or ARCH != "x86_64":
         return
@@ -402,10 +414,8 @@ pc_cancel = ():
             if pid > 0: syscall(62, pid, 15)
         loop fd in pc_fds:
             if fd >= 0: syscall(3, fd)
-        loop pid in pc_pids:
-            if pid > 0:
-                st = [0]
-                syscall(61, pid, data(st), 0, 0)
+        pc_fds = []
+        loop w in [0..pc_pids.len()): pc_reap(w)
         pc_active = false
 
 # Before facts: a process decides its obligations tentatively (its other
