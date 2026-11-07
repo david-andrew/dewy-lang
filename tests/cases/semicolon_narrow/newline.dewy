@@ -1,0 +1,4 @@
+use=(r:int64):>void=>{printl(r)}
+probe=(r:int64|none):>void=>{if r is? none {return}
+ use(r)}
+main=():>void=>{probe(none); probe(42)}

@@ -9302,6 +9302,8 @@ rd_dc_statement=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
             let discard:int64=node_mk(@reader_nodes 'block' pos)
             node_set_list(@reader_nodes @reader_ctx.stores.lists[0] discard [n]);
             rd_add_flag(@reader_nodes discard NF_DISCARD);
+            # Dropping an if's value introduces no scope around its exit facts.
+            if op =? 'kw_if' {reader_nodes[discard].aux=5}
             return discard
         }
         return n
