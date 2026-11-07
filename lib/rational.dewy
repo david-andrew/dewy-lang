@@ -457,6 +457,9 @@ _quantity_float=(value:float64 units:array<string> nums:array<int64> dens:array<
     }
     return "{(value*float64(dens[pick])-offset)/float64(nums[pick])}{units[pick]}"
 }
+# (a format spec's number, in the unit the quantity prints in)
+_quantity_exact_number=(value:Rational num:int64 den:int64 offset:Rational):>Rational=>(value-offset)*rational(den num)
+_quantity_float_number=(value:float64 num:int64 den:int64 offset:float64):>float64=>(value*float64(den)-offset)/float64(num)
 _quantity_float32=(value:float32 units:array<string> nums:array<int64> dens:array<int64> base:int64 offset:float32):>string=>{
     let size=value
     if size <? 0 size=-size

@@ -1469,7 +1469,9 @@ unit (`0s`). The unit attaches to the number, as it is written; a unit with
 nothing above the line puts the number there (`1/s^2`, not `1 1/s^2`). Other dimensions print in canonical units, using one named unit
 where that needs fewer factors (`m/s^2`, `N*s`, `kg/m^3`, `V/Hz^(1/2)`,
 `°/s`). Text from `string(x)` is the same. A format spec such as `{x:.2f}`
-formats the canonical number alone.
+formats the number alone: in the unit a value converted with `as` or a temperature
+scale prints in (`{1500m as km:.1f}` is `1.5`, `{20°C:.1f}` is `20.0`), and otherwise
+the canonical number (`{1500m:.1f}` is `1500.0`).
 
 `x as unit` converts a quantity to a constant unit of the same dimension:
 `30cm as inches` prints `1500/127inches` and `25m/s as km/hour` prints

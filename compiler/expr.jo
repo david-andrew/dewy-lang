@@ -5266,8 +5266,13 @@ fmt_part = (part: int, pos: int):
         nodes[part].a = i32(shown)
         t = T_STR
     else if is_quantity(t):
-        nodes[part].a = i32(quantity_number(int(nodes[part].a)))
-        t = quantity_base(t)
+        reading = if dewy_at(pos): quantity_shown_number(int(nodes[part].a)) else: 0
+        if reading != 0:
+            nodes[part].a = i32(reading)
+            t = prune(ntype(reading))
+        else:
+            nodes[part].a = i32(quantity_number(int(nodes[part].a)))
+            t = quantity_base(t)
     # (`{x:.2f}` of an exact number formats it as `format(x ".2f")` does: as a float64)
     # (a width alone, `{x:>7}`, adds no digits: its own text, padded on the left unless told)
     if nodes[part].sval >= 0 and (bundled_rational_type(t) or bundled_word_rational_type(t)) and dewy_at(pos):

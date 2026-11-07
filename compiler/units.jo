@@ -1017,6 +1017,47 @@ quantity_display = (x: int) -> int:
     check_expr(c, T_STR)
     last_checked
 
+# What a format spec shows of the checked x (`{wall as R:.1f}`, `{t:.1f}`): its number in the
+# unit it prints in, without the unit. 0 for a quantity showing no such unit, whose number
+# is the canonical one.
+quantity_shown_number = (x: int) -> int:
+    t = prune(ntype(x))
+    q = quantity_tags[quantity_tag(t)]
+    shown = if q.display != 0: q.display else: q.origin
+    if shown == 0: return 0
+    base = prune(quantity_base(t))
+    exact = is_int(base) or base == T_MATH_INT or bundled_rational_type(base) or bundled_bigint_type(base)
+    if not exact and not is_float(base): return 0
+    u = quantity_units[shown]
+    onum = if q.delta: 0 else: u.onum
+    oden = if q.delta: 1 else: u.oden
+    if u.num == u.den and onum == 0: return 0
+    pos = nodes[x].pos
+    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
+    number = quantity_number(x)
+    add_flag(number, NF_CHECKED)
+    offset = 0
+    if exact:
+        if not bundled_rational_type(base):
+            r = mk(.call, pos)
+            nodes[r].a = i32(bc_field(bc_ident("$dewy_rational", pos), "rational", pos))
+            set_list(r, [number])
+            number = r
+        offset = mk(.call, pos)
+        nodes[offset].a = i32(bc_field(bc_ident("$dewy_rational", pos), "rational", pos))
+        set_list(offset, [bc_int(onum, pos), bc_int(oden, pos)])
+    else:
+        number = quantity_float(number)
+        offset = mk(.float_lit, pos)
+        scaled = quantity_scale(onum * u.den, oden)
+        nodes[offset].fval = f64(quantity_scales[scaled].numerator) / f64(quantity_scales[scaled].denominator)
+    c = mk(.call, pos)
+    fname = if exact: "_quantity_exact_number" else: "_quantity_float_number"
+    nodes[c].a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos))
+    set_list(c, [number, bc_int(u.num, pos), bc_int(u.den, pos), offset])
+    check_expr(c, 0)
+    last_checked
+
 quantity_array = (items: int[], elem: int, pos: int) -> int:
     a = mk(.array, pos)
     set_list(a, items)
