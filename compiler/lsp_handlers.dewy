@@ -1,8 +1,9 @@
 $runtime_checks
+from p"lsp_text.dewy" import ident_prefix
 from p"checks_text.dewy" import (byte_find)
 from p"@lib/core/rt.jo" import (__str_from_bytes)
 from p"@lib/core/os.jo" import (file_exists list_dir)
-from p"@lib/core/str.jo" import (ends_with lower split starts_with trim)
+from p"@lib/core/str.jo" import (ends_with join lower split starts_with trim)
 from p"fmt_ops.dewy" import (fmt_checked)
 from p"ide.jo" import (IK_CONST IK_ENUM IK_FIELD IK_FN IK_GLOBAL IK_LOCAL IK_MODULE IK_PARAM IK_STRUCT IK_TYPE IK_VARIANT ide_texts)
 from p"json_doc.dewy" import (JsonDoc json_get json_parse json_path json_quote json_raw json_str)
@@ -11,7 +12,7 @@ from p"lsp.jo" import (Doc Hit Item Result Use WsSym doc_by_uri docs empty_main 
 from p"lsp_fixes.dewy" import (lsp_read split_pos)
 from p"lsp_requests.dewy" import (check_doc stmt_lines symbols_in top_item use_target uses_of)
 from p"lsp_text.dewy" import (indent_of off_of publish ref_at utf16_units where_str)
-from p"lsp_ops.dewy" import (dewy_op_byte dewy_op_word doc_of ensure_checked file_in jbool jget jint jitems jpath jpos jraw jstr lpos_of lsp_have_msg lsp_input_ready lsp_reply req_off text_of text_params_doc uri_of uri_to_path users_dirty)
+from p"lsp_ops.dewy" import (dewy_op_byte dewy_op_word doc_of ensure_checked file_in jbool jget jint jitems jpath jpos jraw jstr lpos_of lsp_have_msg lsp_input_ready lens_json lsp_reply req_off text_of text_params_doc uri_of uri_to_path users_dirty)
 from p"module_paths.dewy" import (path_to_uri)
 from p"util.jo" import (quiet_errors)
 
@@ -647,4 +648,39 @@ on_open=(params:LspHandlerWord):>void=>{
     docs[d].dirty=true
     ide_texts[path]=text
     users_dirty(d)
+}
+on_code_lens=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 or not ends_with(docs[d].path ".dewy") {return lsp_reply(id "[]")}
+    let lenses:array<[int64 string]>=[]
+    let u=json_quote(docs[d].uri)
+    let tests:LspHandlerWord=0
+    # (a `$test` line: the function on the next line is a test, run by its name)
+    let text_lines=split(docs[d].text "\n")
+    loop i in 0.. and line in text_lines {
+        let t=trim(line)
+        let tb=t as array<uint8>
+        if not starts_with(t "$test") or (tb.length >? 5 and tb[5] not=? b'(' and tb[5] not=? b' ' and tb[5] not=? b'\r') {continue}
+        let j=i + 1
+        loop j <? text_lines.length and ((trim(text_lines[j]) as array<uint8>).length =? 0 or (trim(text_lines[j]) as array<uint8>)[0] =? b'#') {j += 1}
+        if j >=? text_lines.length {continue}
+        let decl=trim(text_lines[j])
+        let word=ident_prefix(decl)
+        if word =? "let" or word =? "const" {decl=trim(decl.byte_slice((word as array<uint8>).length (decl as array<uint8>).length))}
+        let name=ident_prefix(decl)
+        if (name as array<uint8>).length =? 0 {continue}
+        if tests =? 0 {lenses.push([i lens_json(i "Run all tests" "dewy.core.test" u)])}
+        lenses.push([i lens_json(i "Run test" "dewy.core.runTest" "{u},{json_quote(name)}")])
+        tests += 1
+    }
+    loop y in ws_symbols_of(docs[d].path docs[d].text) {
+        if y.kind =? 12 and y.name =? "main" and (y.container as array<uint8>).length =? 0 {
+            lenses.push([y.line lens_json(y.line "Run" "dewy.core.run" u)])
+            lenses.push([y.line lens_json(y.line "Debug" "dewy.core.debug" u)])
+        }
+    }
+    lenses.sort(key=(l:[int64 string])=>l[0])
+    let out:array<string>=[]
+    loop l in lenses {out.push(l[1])}
+    lsp_reply(id "[{join(out ",")}]")
 }

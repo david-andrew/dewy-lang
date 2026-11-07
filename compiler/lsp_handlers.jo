@@ -559,3 +559,34 @@ on_open = (params: int):
     docs[d].dirty = true
     ide_texts[path] = text
     users_dirty(d)
+
+on_code_lens = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0 or not ends_with(docs[d].path, ".dewy"): return lsp_reply(id, "[]")
+    lenses: (int, str)[]
+    u = json_quote(docs[d].uri)
+    tests = 0
+    # (a `$test` line: the function on the next line is a test, run by its name)
+    text_lines = split(docs[d].text, "\n")
+    loop i in 0.. and line in text_lines:
+        t = trim(line)
+        if not starts_with(t, "$test") or (len(t) > 5 and t[5] != '(' and t[5] != ' ' and t[5] != '\r'): continue
+        j = i + 1
+        loop j < text_lines.len() and (len(trim(text_lines[j])) == 0 or trim(text_lines[j])[0] == '#'): j += 1
+        if j >= text_lines.len(): continue
+        decl = trim(text_lines[j])
+        word = ident_prefix(decl)
+        if word == "let" or word == "const": decl = trim(decl[len(word)..])
+        name = ident_prefix(decl)
+        if len(name) == 0: continue
+        if tests == 0: lenses.push((i, lens_json(i, "Run all tests", "dewy.core.test", u)))
+        lenses.push((i, lens_json(i, "Run test", "dewy.core.runTest", "{u},{json_quote(name)}")))
+        tests += 1
+    loop y in ws_symbols_of(docs[d].path, docs[d].text):
+        if y.kind == 12 and y.name == "main" and len(y.container) == 0:
+            lenses.push((y.line, lens_json(y.line, "Run", "dewy.core.run", u)))
+            lenses.push((y.line, lens_json(y.line, "Debug", "dewy.core.debug", u)))
+    lenses.sort_by((l: (int, str)): l.0)
+    out: str[]
+    loop l in lenses: out.push(l.1)
+    lsp_reply(id, "[{join(out, ",")}]")
