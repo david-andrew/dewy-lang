@@ -1,6 +1,7 @@
 # Decisions waiting on David
 
 - **Only open items.** Once you answer one, it moves to [decisions.md](decisions.md), with what was considered and why, and is removed from here.
+- **Being revised now (2026-11-07):** agents wrote realistic programs with each design, and none scored full marks. D4, D10, D11, D19e, D22, D26–D31 and D33–D36 are being reworked, so skip them for now. D21, D28's core and D32 are unaffected.
 - **What gets asked:** a semantic question only appears here if it fails one of two tests:
   1. Is the common (80%) path easy, ergonomic and fast?
   2. If the common path doesn't fit, is it straightforward to adjust?
