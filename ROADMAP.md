@@ -7,15 +7,15 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 ## North star
 
-| Measure | Now (2026-11-06) | Goal |
+| Measure | Now (2026-11-07) | Goal |
 |---|---|---|
 | Acceptance ladder, design surface | 130/130 | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
 | No traps by default | census 2,557 sites in 1,032 of 2,252 programs, down from 3,600 on 10-26 | ordinary code proves without opt-ins |
 | Compile throughput, single thread, default build, every processed line | flagships 162.9k lines/s (min 100_rtos_kernel 129.5k, 99_dewy_frontend 133.1k) | 200–250k on every flagship |
 | Hello-world compile | 7.5 ms (instruction-derived) | ≤20 ms |
-| Kernels vs C -O2 (time, default, `bench` on redfox) | 18 of 28 at ≤1.2×; worst byte_find 4.95×, callbacks_literal 4.83×, callbacks 2.35×, name_table 1.65–1.91×, graph 1.54×, dict_words 1.48×, arena 1.42× | ≤1.2× |
-| Quick / full suite | about 25 s / about 9.5 min at 4 workers | ≤30 s / ≤5 min | ≤30 s / ≤5 min |
+| Kernels vs C -O2 (time, default, `bench` on redfox) | 18 of 28 at ≤1.2×; worst byte_find 2.85×, callbacks_literal 2.34× (fair C about 1.47×), name_table 1.67×, graph 1.54×, dict_words 1.51×, arena 1.43× | ≤1.2× |
+| Quick / full suite | about 25 s / about 9.5 min at 4 workers | ≤30 s / ≤5 min |
 
 Ladder: `python3 -m tools.core ladder` (`tests/ladder/ladder.json`). Compile:
 `speed` (single-thread instructions; the gate) and `speed --cycles` for layout
@@ -45,10 +45,9 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
    (`bench --baseline`; waive with `bench: accept <reason>`). The push family is
    reopened: arena reached 1.42×; the last large saving needs an arena-residency
    proof. Next: callback inlining on default, then dictionary helpers.
-5. **Decided surface still to build** (Batch 2, 11-06, in
-   [decisions.md](docs/design/decisions.md)): the time system; function types
-   grouped with `()`; loop-copy writes, `[]`, `?? return`, tuple-slot writes and
-   the smaller items; self-length refinements (D17); R-value units.
+5. **Decided surface still to build** ([decisions.md](docs/design/decisions.md)):
+   the rest of the time system; self-length refinements (D17); R-value units;
+   examples needing `$runtime_checks`, 21 of 29 as of 11-06, toward zero.
 6. **In David's design rounds, build nothing:** D4 parallel (later: metatags that
    direct allowed resources, and `DEWY_THREADS` becomes a metatag), D10 safety
    tags, D11 game APIs, D21 packages, D22 `$parallel_safe`.
