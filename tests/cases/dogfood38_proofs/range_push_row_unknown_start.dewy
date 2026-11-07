@@ -1,0 +1,8 @@
+f = (seed:array<int> n:int64):>int => {
+    let cur = seed
+    loop j in [1..n] {
+        cur.push(cur[j - 1] + 1)
+    }
+    0
+}
+main = () => printl(f([1] 4))

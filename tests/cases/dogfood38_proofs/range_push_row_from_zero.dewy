@@ -1,0 +1,10 @@
+# An empty start and `[0..n)`: before value i the array holds i elements.
+squares = (n:int64):>array<int> => {
+    let out:array<int> = []
+    loop i in [0..n) {
+        let before = if i >? 0 out[i - 1] else 0
+        out.push(before + 2 * i + 1)
+    }
+    out
+}
+main = () => printl(squares(5))

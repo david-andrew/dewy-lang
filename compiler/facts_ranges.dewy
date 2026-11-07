@@ -8,7 +8,7 @@ from p"effect_types.dewy" import (PlaceIdentity)
 from p"exact.jo" import (exact_progress_math exact_word_reads)
 from p"expr.jo" import (CV ntype)
 from p"checks_thin_expr.dewy" import (int_intervals)
-from p"facts.jo" import (FactLoop FactState fact_add_fits fact_binding fact_bound fact_capture fact_compare fact_constant fact_covered fact_difference fact_difference_head fact_difference_next fact_domain fact_name_axis_slice fact_name_open_range fact_name_range fact_name_slice_range fact_new fact_policy fact_probe_on fact_query fact_scalar fact_set_bound fact_speculating fact_summary_owner fact_terms fact_type fact_validated stable_loop_index)
+from p"facts.jo" import (FACT_CAP FactLoop FactState fact_add_fits fact_binding fact_bound fact_capture fact_compare fact_constant fact_covered fact_difference fact_difference_head fact_difference_next fact_domain fact_name_axis_slice fact_name_open_range fact_name_range fact_name_slice_range fact_new fact_policy fact_project fact_probe_on fact_query fact_scalar fact_set_bound fact_speculating fact_summary_owner fact_terms fact_type fact_validated stable_loop_index)
 from p"facts_arith.dewy" import (fact_u64_capped)
 from p"facts_changes.dewy" import (fact_changes)
 from p"facts_elements.dewy" import (fact_found_payload fact_index_carried)
@@ -278,6 +278,29 @@ fact_floor_call=(n:RangeWord):>RangeWord=>$unsafe {
     if name =? "__floor_mod_pow2" {return 4}
     0
 }
+# A counted push (one per iteration, fact_counted_pushes) in a range loop: at each
+# head the array holds its entry length plus one element per value before the
+# loop's, so `let cur = [i]` then `loop j in [1..n] cur.push(cur[j - 1] + 1)` knows
+# `cur.length =? j`. The range ascends by one from its first value (fact_range
+# serves only unstepped ranges, and its body assumes `lo <=? v`). A constant entry
+# length and first value only: two rows per counted array. O(pushes).
+fact_range_push_rows=(n:RangeWord @body:FactState lo:RangeWord pushes:array<[int64 int64]>):>void=>$unsafe {
+    let l=RangeWord(nodes.ptr[n].sym)
+    if l =? 0 or pushes.length =? 0 or not body.live {return}
+    let vi=fact_binding(body PlaceIdentity('local' RangeWord(locals.ptr[l].owner) l))
+    let x=fact_bound(body lo)
+    if vi <? 0 or x.wide or x.lo not=? x.hi or x.lo <? -(1 << 40) or x.lo >? (1 << 40) {return}
+    loop entry in pushes {
+        let e=fact_bound(body entry[1])
+        if e.wide or e.lo not=? e.hi or e.lo <? 0 or e.lo >? (1 << 40) {continue}
+        let i=fact_binding(body PlaceIdentity('local' RangeWord(locals.ptr[entry[0]].owner) entry[0]))
+        if i <? 0 or body.projections.length >=? FACT_CAP {continue}
+        let length=fact_project(@body body.bindings[i].value (-1) false T_INT)
+        let v=body.bindings[vi].value
+        fact_difference(@body length v RangeWord(e.lo) - RangeWord(x.lo) n)
+        fact_difference(@body v length RangeWord(x.lo) - RangeWord(e.lo) n)
+    }
+}
 fact_range=(n:RangeWord @s:FactState):>void=>$unsafe {
     let iterator=RangeWord(nodes.ptr[n].a)
     let lo=fact_capture(RangeWord(nodes.ptr[iterator].a) @s)
@@ -331,6 +354,7 @@ fact_range=(n:RangeWord @s:FactState):>void=>$unsafe {
     let body=fact_range_body(n s lo hi)
     fact_growing_lengths(@body pushes)
     fact_growing_lengths(@body growers)
+    fact_range_push_rows(n @body lo pushes)
     # A nonempty iteration establishes lo < hi. Entry <= lo and every
     # replacement < hi therefore bound the carried value inside the body,
     # even when a zero-iteration exit cannot establish entry < hi.
@@ -352,7 +376,10 @@ fact_range=(n:RangeWord @s:FactState):>void=>$unsafe {
         let extra:RangeWord=if has_flag(iterator NF_INCLUSIVE) {1} else {0}
         let x=fact_bound(s lo)
         let y=fact_bound(s hi)
-        if fact_compare(s 'le' lo hi) =? 1 or extra =? 1 and fact_compare(s 'le' lo hi) >=? 0 and x.lo =? x.hi and y.lo =? y.hi and RangeWord(y.lo) + 1 >=? x.lo {
+        # (an inclusive range from a constant may be empty and still count hi-lo+1:
+        # `[1..n]` with `n >=? 0` runs n times, the length `y.chars` has)
+        let empty_ok=extra =? 1 and x.lo =? x.hi and fact_entails(s lo hi 1)
+        if fact_compare(s 'le' lo hi) =? 1 or empty_ok or extra =? 1 and fact_compare(s 'le' lo hi) >=? 0 and x.lo =? x.hi and y.lo =? y.hi and RangeWord(y.lo) + 1 >=? x.lo {
             if x.lo not=? FACT_MIN and y.lo not=? FACT_MIN and fact_add_fits(y.hi extra - RangeWord(x.lo)) and fact_add_fits(y.lo extra - RangeWord(x.hi)) {
                 let count=fact_new(@s FactBound(max(0 RangeWord(y.lo) - RangeWord(x.hi) + extra) RangeWord(y.hi) - RangeWord(x.lo) + extra) FactTerm('minus' hi lo n T_INT))
                 if x.lo =? x.hi {

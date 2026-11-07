@@ -1,0 +1,9 @@
+f = (n:int64):>int => {
+    let cur = [7 8]
+    loop j in [1..n] {
+        cur.push(cur[j - 1] + 1)
+        cur.pop();
+    }
+    0
+}
+main = () => printl(f(4))

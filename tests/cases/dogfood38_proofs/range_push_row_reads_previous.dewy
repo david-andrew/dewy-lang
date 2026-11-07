@@ -1,0 +1,11 @@
+# One push per value of `[1..n]` after `[7]`: at each head the row holds j
+# elements, so `cur[j - 1]` is the last; after it, n + 1.
+ramp = (n:int64):>int => {
+    if n <? 0 return 0
+    let cur = [7]
+    loop j in [1..n] {
+        cur.push(cur[j - 1] + j)
+    }
+    cur[n]
+}
+main = () => printl([ramp(0) ramp(1) ramp(4) ramp(-3)])

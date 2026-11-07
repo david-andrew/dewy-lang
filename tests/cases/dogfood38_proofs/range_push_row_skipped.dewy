@@ -1,0 +1,9 @@
+f = (n:int64):>int => {
+    let cur = [7]
+    loop j in [1..n] {
+        if j % 2 =? 0 continue
+        cur.push(cur[j - 1] + 1)
+    }
+    0
+}
+main = () => printl(f(4))
