@@ -1,0 +1,9 @@
+# A ceiling at the end of int64 may stand for no ceiling at all.
+g = (n:int64 y:int64 r:int64):>int64 => {
+    let top = max(1 y-r)
+    let bottom = min(n y+r)
+    if top >? bottom return 0
+    let t:int64 = top+1
+    return t
+}
+main = ():>void => { printl(g(9 3 1)) }

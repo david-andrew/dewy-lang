@@ -1,0 +1,9 @@
+# `bottom` has no ceiling, so the pair says nothing of its high end.
+g = (y:int64 r:int64):>int64 => {
+    let top = max(1 y-r)
+    let bottom = y+r
+    if top >? bottom return 0
+    let b:int64 = bottom
+    return b
+}
+main = ():>void => { printl(g(3 1)) }

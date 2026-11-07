@@ -1,0 +1,9 @@
+# `top` has no floor, so the pair says nothing of its low end.
+g = (n:int64 y:int64 r:int64):>int64 => {
+    let top = y-r
+    let bottom = min(n-2 y+r)
+    if top >? bottom return 0
+    let t:int64 = top
+    return t
+}
+main = ():>void => { printl(g(9 3 1)) }

@@ -1,0 +1,10 @@
+# `top` has a real floor and `bottom` a real ceiling: ordered, both lie between them.
+g = (n:int64 y:int64 r:int64):>int => {
+    let top = max(1 y-r)
+    let bottom = min(n-2 y+r)
+    if top >? bottom return 0
+    let t:int64 = top
+    let b:int64 = bottom
+    return t+b
+}
+main = ():>void => { printl(g(9 3 1)) }

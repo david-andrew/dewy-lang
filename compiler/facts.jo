@@ -2486,6 +2486,17 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
         if x.wide and not y.wide and fact_real_ends(s, b, y): x = y; fact_set_bound(s, a, x, y.lo == y.hi)
         else if y.wide and not x.wide and fact_real_ends(s, a, x): y = x; fact_set_bound(s, b, y, x.lo == x.hi)
     else if op == .lt or op == .le:
+        # (each bounded on its far end, `top <=? bottom` after `top = max(1 ..)` and
+        # `bottom = min(n-2 ..)`: the pair lies between those ends, so neither is wide)
+        if x.wide and y.wide and (x.lo != FACT_MIN or not fact_open_endpoint(s, a, false)) and (y.hi != FACT_MAX or not fact_open_endpoint(s, b, true)):
+            x.hi = min(x.hi, y.hi)
+            x.wide = false
+            fact_set_bound(s, a, x, not fact_open_endpoint(s, b, true))
+            y.lo = max(y.lo, x.lo)
+            y.wide = false
+            fact_set_bound(s, b, y, not fact_open_endpoint(s, a, false))
+            x = fact_bound(s, a)
+            y = fact_bound(s, b)
         if x.wide and not y.wide and x.lo > FACT_MIN and (y.hi != FACT_MAX or not fact_open_endpoint(s, b, true)):
             x.hi = y.hi
             x.wide = false

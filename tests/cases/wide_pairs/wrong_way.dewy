@@ -1,0 +1,9 @@
+# On the other branch the order is reversed: neither end transfers.
+g = (n:int64 y:int64 r:int64):>int64 => {
+    let top = max(1 y-r)
+    let bottom = min(n-2 y+r)
+    if top <=? bottom return 0
+    let t:int64 = top
+    return t
+}
+main = ():>void => { printl(g(9 3 1)) }
