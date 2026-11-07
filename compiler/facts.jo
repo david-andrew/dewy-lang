@@ -3541,13 +3541,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if id == .push or id == .pop or id == .clear or id == .reserve or id == .insert or id == .remove:
             a = kid(n, 0)
             # Intrinsics lower value/selector operands before reacquiring the
-            # receiver. Insertion evaluates the value before its position.
+            # receiver. Insertion evaluates its position before its value.
             position = 0
-            if id == .insert:
-                fact_capture(kid(n, 2), s)
-                position = fact_capture(kid(n, 1), s)
-            else:
-                loop i in [1..nkids(n)): position = fact_capture(kid(n, i), s)
+            loop i in [1..nkids(n)):
+                captured = fact_capture(kid(n, i), s)
+                if i == 1 or id != .insert: position = captured
             if id == .push and fact_push_frames.len() > 0: fact_push_record(n, s, position)
             route = fact_route(a, s)
             values = fact_route_values(s, route)
