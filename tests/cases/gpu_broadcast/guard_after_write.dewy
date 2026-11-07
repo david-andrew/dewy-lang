@@ -1,0 +1,9 @@
+# Near miss: replacing the array ends what the guard said.
+main = ():>void => {
+    let d = cpu(gpu(zeros<float32>(2 3)) .+ 1.0)
+    let e = cpu(gpu(zeros<float32>(4 4)) .+ 1.0)
+    if d.length =? [2 3] {
+        d = e
+        printl(d[1 2])
+    }
+}

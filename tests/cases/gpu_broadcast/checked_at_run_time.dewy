@@ -1,0 +1,8 @@
+# exit: 101
+$runtime_checks
+main = ():>void => {
+    let a = gpu(zeros<float32>(1 2))
+    let n = to_int("3") ?? 0
+    let b = gpu(zeros<float32>(1 n))
+    printl(cpu(a .+ b).length)
+}

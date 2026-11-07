@@ -1,0 +1,7 @@
+# Equal shapes have equal extents: a guard proves a download whose shape is known only at run time.
+main = ():>void => {
+    let d = cpu(gpu(zeros<float32>(2 3)) .+ 1.0)
+    if d.length =? [2 3] { printl(d[1 2]) }
+    let e = cpu(gpu(zeros<float32>(2 3)) .+ 2.0)
+    if d.length =? [2 3] and d.length =? e.length { printl(e[1 2]) }
+}

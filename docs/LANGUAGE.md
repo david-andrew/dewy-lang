@@ -3094,7 +3094,9 @@ and arrays may have up to four dimensions: an `NDArray`'s upload needs
 constructor or a shaped parameter as other array contracts are. A download
 has storage matching its shape, and an uploaded `NDArray`'s download keeps the
 upload's shape, so `cpu(gpu(m))[i j]` is proven as `m[i j]` is; a GPU program's
-result has a shape known only when it runs.
+result has a shape known only when it runs, which a guard or a check states:
+`if d.length =? [2 3]` gives its rank and extents. A broadcast of uploads
+of known shapes is proven as a CPU array's is.
 
 ```dewy
 $runtime_checks                  # shapes are checked

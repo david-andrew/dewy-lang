@@ -1,0 +1,5 @@
+# Near miss: the guard's shape holds the index on one axis only.
+main = ():>void => {
+    let d = cpu(gpu(zeros<float32>(2 3)) .+ 1.0)
+    if d.length =? [2 3] { printl(d[2 2]) }
+}

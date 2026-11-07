@@ -213,7 +213,7 @@ fact_hook_free_resize=(n:ChangeWord):>bool=>$unsafe {
     nkids(n) >? 0 and tkind(fact_type(ntype(kid(n 0)))) =? 'array' and effect_value(ntype(kid(n 0)))
 }
 fact_reads_only=(id:IN):>bool=>{
-    id =? IN.len or id =? IN.arrcap or id =? IN.sizeof or id =? IN.alignof or id =? IN.static_assert or id =? IN.runtime_assert or id =? IN.assert or id =? IN.panic or id =? IN.unreachable or fact_pure_intrinsic(id)
+    id =? IN.gpu_kernel or id =? IN.len or id =? IN.arrcap or id =? IN.sizeof or id =? IN.alignof or id =? IN.static_assert or id =? IN.runtime_assert or id =? IN.assert or id =? IN.panic or id =? IN.unreachable or fact_pure_intrinsic(id)
 }
 # A remainder or nonnegative constant mask has an unconditional finite range.
 # During loop havoc retain the hull with entry, so zero iterations and every

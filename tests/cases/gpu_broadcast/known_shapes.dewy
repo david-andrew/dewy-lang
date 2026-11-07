@@ -1,0 +1,11 @@
+# Known shapes prove a GPU broadcast, so it needs no runtime checks; a guard proves a download.
+main = ():>void => {
+    let x = zeros<float32>(1 3)
+    let z = zeros<float32>(3 1)
+    let reference = x .+ z
+    let gx = gpu(x) let gz = gpu(z)
+    let d = cpu(gx .+ gz)
+    $runtime_assert(d.length =? reference.length)
+    printl(max(abs.(d .- reference)))
+    printl(reference[2 2])
+}

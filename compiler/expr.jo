@@ -10693,7 +10693,14 @@ check_dotted = (n: int, expected: int) -> int:
         nodes[ds].sval = i32(intern(desc))
         ga = mk(.array, pos)
         set_list(ga, gins)
-        run = bc_call(runf, [bc_call("__gpu_kernel", [lam, ds], pos), ga, typed_array(fscal, T_F32, pos), typed_array(iscal, T_I32, pos)], pos)
+        # (the operands' broadcast, an obligation as a CPU array's is)
+        gs = mk(.array, pos)
+        gshapes: int[]
+        loop k in [0..leaves.len()):
+            if ranks[k] == 3: gshapes.push(bc_field(d(k), "shape", pos))
+        set_list(gs, gshapes)
+        stmts.push(bc_let("{pre}gsh", bc_call("__bcast_shape", [gs], pos), pos))
+        run = bc_call(runf, [bc_call("__gpu_kernel", [lam, ds], pos), ga, typed_array(fscal, T_F32, pos), typed_array(iscal, T_I32, pos), bc_ident("{pre}gsh", pos)], pos)
         hkinds: int[]
         loop k in [0..leaves.len()):
             if ranks[k] == 3: hkinds.push(2)

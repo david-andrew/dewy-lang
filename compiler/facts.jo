@@ -2425,6 +2425,7 @@ fact_u64_capped = (s: FactState, v: int) -> bool:
     false
 
 # Assume the CAPTURED Boolean, never reevaluate its syntax after later effects.
+fact_equal_arrays: {int: (int, int, int)} = {}
 fact_assume = (s: mut FactState, v: int, truth: bool):
     if v == 0: return
     known = fact_truth(s, v)
@@ -2445,6 +2446,19 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
             equal = truth == (nodes[t.origin].op == i32(int(Tok.eq)))
             if equal:
                 fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, t.a, t.b)), true)
+                # (equal int arrays of a small known length have equal elements: `m.length =? [33 33]`)
+                # (by node: its latest evaluation, the one this value names; term numbers are reused)
+                pair = fact_equal_arrays.get(t.origin) ?? (0, 0, 0)
+                if pair.0 == v:
+                    x = fact_bound(s, t.a)
+                    y = fact_bound(s, t.b)
+                    count = if x.lo == x.hi: x.lo else if y.lo == y.hi: y.lo else: -1
+                    if count >= 0 and count <= 4:
+                        loop axis in [0..count):
+                            index = fact_constant(s, axis)
+                            left = fact_project(s, pair.1, index, true, T_INT)
+                            right = fact_project(s, pair.2, index, true, T_INT)
+                            fact_assume(s, fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, left, right)), true)
             else:
                 x = fact_bound(s, t.a); y = fact_bound(s, t.b)
                 if x.lo == 0 and x.hi == 0 or y.lo == 0 and y.hi == 0:
@@ -5532,7 +5546,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             bt = fact_type(ntype(int(nodes[n].b)))
             al = if tkind(at) == .fixed: fact_constant(s, fixed_len(at)) else: fact_project(s, a, -1, false, T_INT)
             bl = if tkind(bt) == .fixed: fact_constant(s, fixed_len(bt)) else: fact_project(s, b, -1, false, T_INT)
-            return fact_new(s, fact_domain(T_BOOL), FactTerm(a = al, b = bl, origin = n, type = T_BOOL))
+            v = fact_new(s, fact_domain(T_BOOL), FactTerm(a = al, b = bl, origin = n, type = T_BOOL))
+            if tkind(at) == .array and tkind(bt) == .array and telem(at) == T_INT and telem(bt) == T_INT: fact_equal_arrays[n] = (v, a, b)
+            return v
         if nodes[n].aux != 0 and not fact_pure_binary(n): fact_forget(s, n, .call)
         return fact_unmodeled(s, n, .unsupported)
     if fact_enum_cast(n):
@@ -5641,6 +5657,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if not fact_pure_conversion(n): fact_forget(s, n, .call)
         return fact_new(s, FactBound(reason = .unsupported, witness = n))
     if k == .intrinsic:
+        # (a GPU program, compiled from its literal function: the call runs nothing here)
+        if nodes[n].aux == i32(int(IN.gpu_kernel)): return fact_fresh(s, ntype(n))
         id = nodes[n].aux as IN
         if id == .setlen:
             size = fact_capture(kid(n, 1), s)

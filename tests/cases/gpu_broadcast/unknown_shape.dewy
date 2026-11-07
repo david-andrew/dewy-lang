@@ -1,0 +1,6 @@
+# Near miss: a shape known only at run time needs a guard or the opt-in.
+f = (m:NDArray<float32>):>void => {
+    let a = gpu(zeros<float32>(1 2))
+    printl(cpu(a .+ gpu(m)).length)
+}
+main = ():>void => { f(zeros<float32>(1 2)) }

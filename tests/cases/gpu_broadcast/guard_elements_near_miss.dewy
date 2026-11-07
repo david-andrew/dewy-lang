@@ -1,0 +1,5 @@
+# Near miss: not equal says nothing of any extent.
+main = ():>void => {
+    let d = cpu(gpu(zeros<float32>(2 3)) .+ 1.0)
+    if d.length not=? [2 3] { printl(d[1 2]) }
+}

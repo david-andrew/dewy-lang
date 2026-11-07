@@ -1,0 +1,6 @@
+# Near miss: 2 and 3 do not broadcast.
+main = ():>void => {
+    let a = gpu(zeros<float32>(1 2))
+    let b = gpu(zeros<float32>(1 3))
+    printl(cpu(a .+ b).length)
+}

@@ -237,7 +237,7 @@ __gpu_reduced = (g: GpuArray[f32], op: int) -> f32[]:
         m = (cur.n + 63) / 64
         nxt = __gpu_alloc(cur.host, [m])
         prog = __gpu_program(__GPU_REDUCE)
-        locs = __gpu_locs[prog]
+        locs = __gpu_locs.get(prog) ?? []
         __gpu_target(nxt.tex, nxt.w, nxt.h, prog)
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, u32(cur.tex))
@@ -423,19 +423,15 @@ __gpu_draw = ():
 # for each input k: t<k> its texture, st<k> its steps per dimension (0 where it stretches), w<k>
 # its texture's width; then the numbers s<k> (f32 ones first, then i32 ones). Shapes have up to
 # 4 dimensions, padded in front with 1s.
-__gpu_run_f = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[]) -> GpuArray[f32]:
-    out = __gpu_alloc([] as f32[], __gpu_out_shape(ins))
+# (shape: its operands' broadcast, __bcast_shape, which the caller checks or proves)
+__gpu_run_f = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[], shape: int[]) -> GpuArray[f32]:
+    out = __gpu_alloc_n([] as f32[], shape, __nd_count(shape))
     __gpu_run(src, ins, fs, ints, out.tex, out.w, out.h, out.shape)
     out
-__gpu_run_i = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[]) -> GpuArray[__GpuInt]:
-    out = __gpu_alloc([] as __GpuInt[], __gpu_out_shape(ins))
+__gpu_run_i = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[], shape: int[]) -> GpuArray[__GpuInt]:
+    out = __gpu_alloc_n([] as __GpuInt[], shape, __nd_count(shape))
     __gpu_run(src, ins, fs, ints, out.tex, out.w, out.h, out.shape)
     out
-
-__gpu_out_shape = (ins: __GpuIn[]) -> int[]:
-    shapes: int[][]
-    loop g in ins: shapes.push(g.shape)
-    __bcast_shape(shapes)
 
 __gpu_run = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[], tex: int, w: int, h: int, shp: int[]):
     when TARGET != "wasm":
@@ -443,7 +439,7 @@ __gpu_run = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[], tex: int, w: int,
             __gpu_run_vk(src, ins, fs, ints, tex, shp)
             return
     prog = __gpu_program(src)
-    locs = __gpu_locs[prog]
+    locs = __gpu_locs.get(prog) ?? []
     __gpu_target(tex, w, h, prog)
     od = __pad4(shp, 1)
     gl_uniform4i(locs[0], od[0], od[1], od[2], od[3])
@@ -466,7 +462,8 @@ __gpu_run = (src: str, ins: __GpuIn[], fs: f32[], ints: i32[], tex: int, w: int,
 
 # a shape (or strides) as 4 numbers, padded in front
 __pad4 = (xs: int[], pad: int) -> int[]:
-    if xs.len() > 4: panic("GPU arrays have at most 4 dimensions")
+    # (uploads have at most 4, and a broadcast of them no more)
+    assert(xs.len() <= 4)
     out = fill(pad, 4 - xs.len())
     out.extend(xs)
     out
@@ -481,7 +478,7 @@ when TARGET != "wasm":
             z = find_byte(src, 0)
             pl = __vk_compute_pipeline(src[z + 1..len(src)))
             __gvk_pipelines[src] = pl
-        n = __nd_size(shp)
+        n = __nd_count(shp)
         if n == 0: return
         w: u32[]
         __gvk_put_addr(w, __gvk[tex].addr)
