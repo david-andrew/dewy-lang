@@ -1,0 +1,324 @@
+use 'facts.jo'
+use 'lower_scalars.dewy'
+use 'lower_views.dewy'
+use 'lower_storage.dewy'
+use 'lower_analysis.dewy'
+use 'lower_helpers.dewy'
+use 'lower_group.dewy'
+use 'checker_state.dewy'
+use 'effect_lattice.dewy'
+use 'effect_types.dewy'
+use 'sequence_selectors.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ide.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'ast.jo'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'lex.jo'
+use 'types.jo'
+use 'util.jo'
+use 'expr.jo'
+use 'lower.jo'
+use 'check.jo'
+use 'checks_static.dewy'
+use 'comptime.jo'
+use 'check_constant.jo'
+use 'constant_checks.dewy'
+use 'isolation.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'proof_ops.dewy'
+use 'places.jo'
+use 'place_routes.dewy'
+use 'effects.jo'
+use 'effect_library.jo'
+use 'ownership.jo'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'directives.jo'
+use 'warn_if.jo'
+use 'string_domains.jo'
+use 'draw_context.jo'
+use 'predicate_facts.jo'
+use 'predicate_summaries.dewy'
+use 'floats.jo'
+use 'member_replay.jo'
+use 'ownership_types.dewy'
+use 'lower_primitives.dewy'
+use 'math_ops.dewy'
+use 'draw_ops.dewy'
+use 'effect_classifiers.dewy'
+use 'effect_values.dewy'
+use 'effect_control.dewy'
+use 'effect_costs.dewy'
+use 'effect_owners.dewy'
+use 'isolation_ops.dewy'
+use 'facts_lifecycle.dewy'
+use 'facts_forgets.dewy'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'fact_words.dewy'
+use 'facts_ranges.dewy'
+use 'facts_routes.dewy'
+use 'facts_forks.dewy'
+use 'facts_elements.dewy'
+use 'facts_loops.dewy'
+use 'facts_conditions.dewy'
+use 'facts_joins.dewy'
+use 'facts_changes.dewy'
+use 'facts_library.dewy'
+use 'facts_summaries.dewy'
+use 'facts_pushes.dewy'
+use 'facts_text.dewy'
+use 'facts_arrays.dewy'
+use 'facts_maps.dewy'
+use 'facts_pools.dewy'
+use 'facts_members.dewy'
+use 'facts_progress.dewy'
+use 'facts_probes.dewy'
+
+fact_preread = (n: int, s: mut FactState, budget: mut int):
+    if n <= 0 or budget <= 0: return
+    budget -= 1
+    k = nodes[n].kind
+    if k == .ident:
+        if fact_preread_local(n): fact_read(s, n)
+        return
+    if k == .int_lit or k == .bool_lit:
+        fact_shared_literals.push((n, fact_literal(s, n)))
+        return
+    if k == .index and nodes[n].b != 0:
+        base = int(nodes[n].a)
+        index = int(nodes[n].b)
+        t = fact_type(ntype(base))
+        if fact_preread_local(base) and fact_preread_local(index) and (types[t].kind == .array or types[t].kind == .fixed):
+            fact_project(s, fact_read(s, base), fact_read(s, index), true, int(types[t].elem))
+            return
+    if k == .binary or k == .not_ or k == .and_ or k == .or_ or k == .index:
+        fact_preread(int(nodes[n].a), s, budget)
+        fact_preread(int(nodes[n].b), s, budget)
+fact_preread_local = (n: int) -> bool:
+    nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)) and int(locals[int(nodes[n].sym)].flags) & LF_ALIAS == 0
+# An `int` literal in [2^63, 2^64) (a wide value): its uint64 bits as an
+# int64, which is negative; otherwise 0. O(1).
+fact_u64_literal = (v: int) -> int:
+    if v <= 0 or v >= fact_terms.len(): return 0
+    t = fact_terms[v]
+    n = t.origin
+    if t.op != .eof or t.a != 0 or t.b != 0 or n <= 0 or nodes[n].kind != .int_lit or not has_flag(n, NF_U64): return 0
+    if fact_type(ntype(n)) == T_U64 or nodes[n].ival >= 0: return 0
+    nodes[n].ival
+# v <= 2^64-1 through a guard row v - c <= d to such a literal c (fact_assume
+# keeps that row: no interval holds it). O(incident rows of v).
+fact_u64_capped = (s: FactState, v: int) -> bool:
+    ri = fact_difference_head(s, v, 1)
+    loop ri >= 0:
+        row = s.differences[ri]
+        ri = fact_difference_next(s, ri, 1)
+        c = fact_u64_literal(row.b)
+        if c < 0 and fact_add_fits(c, row.limit) and c + row.limit <= -1: return true
+    false
+# Publish an arm's scalar result, including its incident difference rows.
+# O(incident rows), indexed and capped by the existing fact-row budget. Only
+# demanded if-expressions use this; no all-pairs closure or new candidate scan.
+fact_selected = (s: mut FactState, selected: int, value: int, at: int):
+    if not s.live or value == 0: return
+    fact_set_bound(s, selected, fact_bound(s, value))
+    loop direction in [0..2):
+        ri = fact_difference_head(s, value, direction)
+        rows: FactDifference[]
+        loop ri >= 0:
+            rows.push(s.differences[ri])
+            ri = fact_difference_next(s, ri, direction)
+        loop row in rows:
+            fact_difference(s, (if row.a == value: selected else: row.a), (if row.b == value: selected else: row.b), row.limit, at)
+    fact_difference(s, selected, value, 0, at)
+    fact_difference(s, value, selected, 0, at)
+# Join only candidate rows touching a demanded scalar result. The peer may
+# prove them by intervals as well as graph paths (e.g. the constant arm of
+# `if n < 12: n else: 12`). O(incident rows x bounded entailment).
+fact_selected_rows = (s: mut FactState, arm: FactState, peer: FactState, selected: int):
+    if not arm.live or not peer.live: return
+    loop direction in [0..2):
+        ri = fact_difference_head(arm, selected, direction)
+        loop ri >= 0:
+            row = arm.differences[ri]
+            ri = fact_difference_next(arm, ri, direction)
+            if fact_slot(s, row.a) < 0 or fact_slot(s, row.b) < 0: continue
+            if fact_entails(peer, row.a, row.b, row.limit): fact_difference(s, row.a, row.b, row.limit, row.at)
+fact_unknown = (n: int, b: FactBound, what: str = "assertion", contract: int = 0): wit_unknown(n, b, what, contract)
+# A fresh value of type t. A signed 64-bit or `int` value keeps its type, so
+# fact_open_endpoint can tell an int64's real edges from an `int`'s open ones.
+fact_fresh_type = (t: int) -> int:
+    f = fact_type(t)
+    if is_int(f) and types[f].bits == 64 and f != T_U64: return t
+    0
+fact_fresh = (s: mut FactState, t: int) -> int: fact_new(s, fact_domain(t), FactTerm(type = fact_fresh_type(t)))
+# The tightest bound on v that rows give through other terms' intervals
+# (v - t <= d with t <= hi, or the mirror), over a bounded single-source
+# search like fact_distance's.
+fact_relational = (s: FactState, v: int, upper: bool) -> int:
+    best = if upper: fact_bound(s, v).hi else: fact_bound(s, v).lo
+    terms = [v]
+    distances = [0]
+    seen: {int: bool} = {v: true}
+    cursor = 0
+    visits = 0
+    loop cursor < terms.len():
+        source = terms[cursor]
+        distance = distances[cursor]
+        cursor += 1
+        ri = fact_difference_head(s, source, int(upper))
+        loop ri >= 0:
+            row = s.differences[ri]
+            visits += 1
+            ri = fact_difference_next(s, ri, int(upper))
+            if visits > 256: return best
+            if not fact_add_fits(distance, row.limit): continue
+            other = if upper: row.b else: row.a
+            value = distance + row.limit
+            o = fact_bound(s, other)
+            if upper and o.hi != FACT_MAX and fact_add_fits(o.hi, value): best = min(best, o.hi + value)
+            if not upper and o.lo != FACT_MIN and value != FACT_MIN and fact_add_fits(o.lo, -value): best = max(best, o.lo - value)
+            if not seen.has(other) and terms.len() < 32:
+                seen[other] = true
+                terms.push(other)
+                distances.push(value)
+    best
+fact_sum_source = (n: int) -> int:
+    e = n
+    loop nodes[e].kind == .conv or nodes[e].kind == .narrow: e = int(nodes[e].a)
+    e
+fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
+    if fact_type(ntype(n)) == T_U64: return exact_unsigned_fact(s, n, op, a, b)
+    x = fact_bound(s, a); y = fact_bound(s, b)
+    if x.wide or y.wide: return fact_unmodeled(s, n, .unsupported)
+    if op != .star:
+        # An interval beyond the host word may still be bounded through rows (a
+        # lockstep counter stepping after its partner's guard).
+        ylo = if op == .minus: (if y.hi == FACT_MAX: FACT_MIN else: -y.hi) else: y.lo
+        yhi = if op == .minus: (if y.lo == FACT_MIN: FACT_MAX else: -y.lo) else: y.hi
+        if not fact_add_fits(x.hi, yhi): x.hi = fact_relational(s, a, true)
+        if not fact_add_fits(x.lo, ylo): x.lo = fact_relational(s, a, false)
+        if op == .plus and not fact_add_fits(x.hi, y.hi): y.hi = fact_relational(s, b, true)
+        if op == .plus and not fact_add_fits(x.lo, y.lo): y.lo = fact_relational(s, b, false)
+        if op == .minus and not fact_add_fits(x.hi, yhi): y.lo = fact_relational(s, b, false)
+        if op == .minus and not fact_add_fits(x.lo, ylo): y.hi = fact_relational(s, b, true)
+    # An open `int` end (fact_open_endpoint) is infinite, never MIN/MAX
+    # itself: `n-1` of an unbounded n has no upper bound, `-n` no lower one.
+    xlo_open = x.lo == FACT_MIN and fact_open_endpoint(s, a, false)
+    xhi_open = x.hi == FACT_MAX and fact_open_endpoint(s, a, true)
+    ylo_open = y.lo == FACT_MIN and fact_open_endpoint(s, b, false)
+    yhi_open = y.hi == FACT_MAX and fact_open_endpoint(s, b, true)
+    if op == .star:
+        # Mathematical ints multiply exactly too. Two bounded variable
+        # operands need the same four endpoint products as fixed exact ints.
+        if not exact_has_node(n) and prune(ntype(n)) != T_MATH_INT and x.lo != x.hi and y.lo != y.hi: return fact_unmodeled(s, n, .unsupported)
+        if xlo_open or xhi_open or ylo_open or yhi_open: return fact_open_product(s, n, a, b, x, y, xlo_open, xhi_open, ylo_open, yhi_open)
+        if math_word_overflow(2, x.lo, y.lo) or math_word_overflow(2, x.lo, y.hi) or math_word_overflow(2, x.hi, y.lo) or math_word_overflow(2, x.hi, y.hi):
+            # (an exact `int` scaled by a constant keeps the end that fits and
+            # opens the other: `2*i` of a widened i >= 0 is still at least 0)
+            if prune(ntype(n)) != T_MATH_INT or exact_has_node(n): return fact_unmodeled(s, n, .unsupported)
+            again = fact_scaled_again(s, a, b, x, y)
+            if again != 0: return again
+            return fact_scaled_open(s, n, a, b, x, y)
+        lo = min(min(x.lo * y.lo, x.lo * y.hi), min(x.hi * y.lo, x.hi * y.hi))
+        hi = max(max(x.lo * y.lo, x.lo * y.hi), max(x.hi * y.lo, x.hi * y.hi))
+        if not exact_has_node(n) and (not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n))): return fact_unmodeled(s, n, .unsupported)
+        # (a symbolic value scaled by a constant again, `xs.length*3`: the same
+        # product, as a comprehension's length is; O(values) only for this shape)
+        again = fact_scaled_again(s, a, b, x, y)
+        if again != 0: return again
+        value = fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0), FactTerm(op, a, b, n, fact_word_type(s, n, a, b, lo, hi)))
+        fact_scaled_quotient(s, n, value, a, b, x, y)
+        return value
+    # (two symbolic operands: the same sum again, or rows through terms
+    # already evaluated, which can also bound it)
+    sums: FactDifference[]
+    if op == .plus and a != 0 and b != 0 and x.lo != x.hi and y.lo != y.hi:
+        loop i in [0..s.ids.len()):
+            t = fact_terms[s.ids[i]]
+            if t.op == .plus and t.type == ntype(n) and (t.a == a and t.b == b or t.a == b and t.b == a):
+                # (an open end is infinite: only a real end of both tightens)
+                lo_real = fact_add_fits(x.lo, y.lo) and not (x.lo == FACT_MIN and fact_open_endpoint(s, a, false)) and not (y.lo == FACT_MIN and fact_open_endpoint(s, b, false))
+                hi_real = fact_add_fits(x.hi, y.hi) and not (x.hi == FACT_MAX and fact_open_endpoint(s, a, true)) and not (y.hi == FACT_MAX and fact_open_endpoint(s, b, true))
+                lo_sum = if lo_real: x.lo + y.lo else: 0
+                hi_sum = if hi_real: x.hi + y.hi else: 0
+                fact_reuse_tighten(s, s.ids[i], lo_sum, hi_sum, lo_real, hi_real)
+                return s.ids[i]
+        sums = fact_sum_rows(s, a, b)
+    if op == .minus:
+        if y.lo == FACT_MIN:
+            if exact_has_node(n) or n == fact_sum_operand and fact_type(ntype(n)) == T_MATH_INT and fact_host_finite(s, a) and fact_host_finite(s, b): return fact_new(s, FactBound(wide = true), FactTerm(op, a, b, n, ntype(n)))
+            return fact_unmodeled(s, n, .unsupported)
+        lo = -y.hi
+        y.hi = -y.lo
+        y.lo = lo
+        swapped = ylo_open
+        ylo_open = yhi_open
+        yhi_open = swapped
+    lo = FACT_MIN; hi = FACT_MAX
+    low = fact_add_fits(x.lo, y.lo); high = fact_add_fits(x.hi, y.hi)
+    if low: lo = x.lo + y.lo
+    if high: hi = x.hi + y.hi
+    lo_open = low and (xlo_open or ylo_open)
+    hi_open = high and (xhi_open or yhi_open)
+    if lo_open: lo = FACT_MIN
+    if hi_open: hi = FACT_MAX
+    # (a difference of two related values: `high - low` with `low <=? high`
+    # is at least 0. Only for operands with rows: two bounded searches)
+    if op == .minus and a != b and a != 0 and b != 0 and x.lo != x.hi and fact_incident(s, a) >= 0 and fact_incident(s, b) >= 0:
+        d = fact_shortest(s, a, b)
+        if d != FACT_MAX and (not high or d < hi): hi = d; high = true
+        e = fact_shortest(s, b, a)
+        if e != FACT_MAX and e != FACT_MIN and (not low or -e > lo): lo = -e; low = true
+    loop r in sums:
+        if r.a == 0:
+            c = fact_bound(s, r.b)
+            if c.hi != FACT_MAX and fact_add_fits(c.hi, r.limit) and (not high or c.hi + r.limit < hi):
+                hi = c.hi + r.limit; high = true
+        else:
+            c = fact_bound(s, r.a)
+            if c.lo != FACT_MIN and r.limit != FACT_MIN and fact_add_fits(c.lo, -r.limit) and (not low or c.lo - r.limit > lo):
+                lo = c.lo - r.limit; low = true
+    if not low or not high:
+        if exact_has_node(n) or n == fact_sum_operand and fact_type(ntype(n)) == T_MATH_INT and fact_host_finite(s, a) and fact_host_finite(s, b) or n < exact_marks.len() and exact_marks[n] & 32 != 0: return fact_new(s, FactBound(lo, hi, lo > 0 or hi < 0, wide = true), FactTerm(op, a, b, n, ntype(n)))
+        # (an `int` end beyond the host word is open, not unknown: a counter
+        # at most int64's MAX plus one keeps its lower bound)
+        # (both ends open, `r + c` of two unbounded `int`s: still the named
+        # sum, so a guard on `r + c` bounds the same `r + c` again)
+        if fact_type(ntype(n)) != T_MATH_INT: return fact_unmodeled(s, n, .unsupported)
+        if not low: lo = FACT_MIN; lo_open = true
+        if not high: hi = FACT_MAX; hi_open = true
+    if not exact_has_node(n) and (not sa_fits(lo, ntype(n)) or not sa_fits(hi, ntype(n))): return fact_unmodeled(s, n, .unsupported)
+    # (`i+2` again names the value the last `i+2` made: a scanner's reads
+    # `b[i] b[i+1] b[i+2]` and its guard `i+2 <? n` share rows instead of
+    # spending i's incident rows. O(incident rows of a), at most 8)
+    if y.lo == y.hi and y.lo != FACT_MIN:
+        same = fact_offset_value(s, a, y.lo)
+        if same != 0: return same
+    value = fact_new(s, fact_open_bound(lo, hi, lo_open and lo == FACT_MIN, hi_open and hi == FACT_MAX), FactTerm(op, a, b, n, (if lo_open or hi_open: ntype(n) else: fact_word_type(s, n, a, b, lo, hi))))
+    loop r in sums: fact_difference(s, (if r.a == 0: value else: r.a), (if r.b == 0: value else: r.b), r.limit, n)
+    if y.lo == y.hi and y.lo != FACT_MIN:
+        fact_difference(s, value, a, y.lo, 0, 16)
+        fact_difference(s, a, value, -y.lo, 0, 16)
+    else if op == .minus:
+        # (a sign-definite subtrahend: value - a is -b, within [y.lo, y.hi],
+        # so `n - 1 - k` with k >= 0 stays at most n - 1. O(1), one row
+        # for a given sign; sums keep their intervals, which bound them)
+        if y.hi <= 0: fact_difference(s, value, a, y.hi, n)
+        if y.lo >= 0 and y.lo != FACT_MAX: fact_difference(s, a, value, -y.lo, n)
+    else if op == .plus and x.lo != x.hi:
+        # (a nonnegative addend: value - a is b >= y.lo, so `lo + (hi-lo)//2`
+        # stays at least lo. O(1), only for an operand that already has rows)
+        if y.lo >= 0 and y.lo != FACT_MAX and fact_incident(s, a) >= 0: fact_difference(s, a, value, -y.lo, n)
+        if x.lo >= 0 and x.lo != FACT_MAX and fact_incident(s, b) >= 0: fact_difference(s, b, value, -x.lo, n)
+    if op == .plus and x.lo == x.hi and x.lo != FACT_MIN:
+        fact_difference(s, value, b, x.lo, 0, 16)
+        fact_difference(s, b, value, -x.lo, 0, 16)
+    value
