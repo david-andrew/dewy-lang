@@ -29,6 +29,7 @@ use 'refine.jo'
 use 'effects.jo'
 use 'node_store.dewy'
 use 'concurrency_types.dewy'
+use 'type_ops.dewy'
 
 # (fixed: T[N], N elements stored in place; elem is T, bits is N. box: what a field holding its
 # own struct or enum keeps, a pointer to its value (elem) on the heap; only the lowering sees it)
@@ -69,8 +70,6 @@ T_NULL = 0
 T_RANGE = 0
 T_NONE = 0
 T_NEVER = 0
-union_type_name = (t: int) -> str: type_str(t)
-union_postfix_name = (t: int) -> str: type_str_postfix(t)
 T_RAWPTR = 0
 T_VEC2 = 0
 T_VEC3 = 0
@@ -80,25 +79,6 @@ T_IVEC2 = 0
 T_IVEC3 = 0
 T_IVEC4 = 0
 
-# Word overflow predicate shared by semantic folding and IR folding. Operands
-# are bit patterns in the implementation language, whose int remains wrapping.
-math_word_overflow = (operation: int, x: int, y: int) -> bool:
-    if operation == 0:
-        r = x + y
-        return ((x xor r) & (y xor r)) < 0
-    if operation == 1:
-        r = x - y
-        return ((x xor y) & (x xor r)) < 0
-    if operation == 2:
-        ax = if x < 0: u64(-(x + 1)) + 1 else: u64(x)
-        ay = if y < 0: u64(-(y + 1)) + 1 else: u64(y)
-        limit = if (x < 0) != (y < 0): u64(9223372036854775807) + 1 else: u64(9223372036854775807)
-        return ay != 0 and ax > limit / ay
-    if operation == 3: return y == 0 or (x == -9223372036854775807 - 1 and y == -1)
-    if y < 0: return true
-    if y >= 64: return x != 0
-    ((x << y) >> y) != x
-
 targ = (t: int, i: int) -> int: int(type_args[int(types[t].args) + i])
 tkind = (t: int) -> TK: types[prune(t)].kind
 telem = (t: int) -> int: int(types[prune(t)].elem)
@@ -106,83 +86,24 @@ has_var = (t: int) -> bool: int(types[t].flags) & TF_HAS_VAR != 0
 
 mk_type = (t: TypeInfo, args: int[]) -> int: type_intern(&t, args)
 
-mk_array = (e: int) -> int: tb_mk_array(e)
-
-mk_fixed = (e: int, n: int) -> int: tb_mk_fixed(e, n)
-
-fixed_len = (t: int) -> int: int(types[prune(t)].bits)
-mk_ptr = (e: int) -> int: tb_mk_ptr(e)
-
-mk_box = (e: int) -> int: tb_mk_box(e)
-
-mk_opt = (e: int) -> int: tb_mk_opt(e)
-
 # secret<T> (docs/design/decisions.md): T's value under a compile-time wrapper. Its
 # representation is T's (layout, lowering: quantity_base strips it); only the checker tells them
 # apart, so the value reaches no output except as `<redacted>` and leaves only through `.reveal`.
 secrets_seen = false     # (a secret type was made: until then secret_repr has nothing to do)
-mk_secret = (e: int) -> int: tb_mk_secret(e)
-
-# t's representation: t with its secrets, and those of what it is made of, replaced by their values
-secret_repr = (t0: int) -> int: tb_secret_repr(t0)
-
-fn_label_names = (key: int, count: int) -> int[]: tn_label_names(key, count)
-decl_fn_labels = (decl: int) -> int: tn_decl_labels(decl)
-
-# defaults: the function instance whose parameter defaults a call through the
-# value fills in (`g = @f` keeps f's defaults); 0 when none travel with it.
-# Kept in bits: part of the type's identity, ignored by the calling convention.
-# (`pack`: the function gives several values: ret is `(int64 int64)` when their number is
-# fixed, returned in place, or the array of them when it varies)
-mk_fn = (params: int[], ret: int, mutmask: int, labels: int = 0, defaults: int = 0, pack: bool = false) -> int: tb_mk_fn(params, ret, mutmask, labels, defaults, pack)
 
 fn_type_pack = (t: int) -> bool: types[t].kind == .fn_ and types[t].sign
-mk_cfn = (params: int[], ret: int) -> int: tb_mk_cfn(params, ret)
-
-# (`values`: several values, `(int64 int64)` in Dewy: what `pair = (1 2)` holds, not a
-# container; laid out as a tuple. docs/design/multi_expressions.md)
-mk_tuple = (elems: int[], values: bool = false) -> int: tb_mk_tuple(elems, values)
 
 values_any = false   # (some value of several values was made: their checks run only then)
-mk_values = (elems: int[]) -> int: tb_mk_values(elems)
 
-is_values = (t0: int) -> bool:
-    if t0 == 0: return false
-    t = prune(t0)
-    types[t].kind == .tuple and types[t].sign
 var_counter = 0
 # (each binding of a type variable: a body checked with neither a new variable nor a binding
 # has no type a zonk would change)
 type_binds = 0
 
-mk_var = () -> int: tb_mk_var()
-
-mk_param = (idx: int) -> int: tb_mk_param(idx)
-
-mk_typeval = (t: int) -> int: tb_mk_typeval(t)
-
-mk_modval = (m: int) -> int: tb_mk_modval(m)
-
-init_types = (): tb_init_types()
-
 prune = (t0: int) -> int:
     t = t0
     loop t != 0 and types[t].kind == .var and types[t].ref != 0: t = int(types[t].ref)
     t
-
-# Integer overflow policy is interned in st (0 exact, 1 wrap, 2 saturate).
-# It changes value semantics, not the ABI or storage layout.
-int_policy = (t: int) -> int:
-    let t = prune(t)
-    if types[t].kind != .int_ or t == T_MATH_INT: return 0
-    int(types[t].st)
-
-policy_int = (base: int, policy: int, pos: int) -> int:
-    t = prune(base)
-    if not is_int(t) or t == T_MATH_INT: fatal(pos, "overflow= requires a fixed-width integer type")
-    ti = types[t]
-    ti.st = i32(policy)
-    mk_type(ti, [])
 
 is_int = (t: int) -> bool: types[prune(t)].kind == .int_
 is_float = (t: int) -> bool: types[prune(t)].kind == .float_
@@ -190,8 +111,6 @@ is_numeric = (t: int) -> bool:
     k = types[prune(t)].kind
     k == .int_ or k == .float_
 is_vec = (t: int) -> bool: types[prune(t)].kind == .vec
-
-zonk = (t: int) -> int: tu_zonk(t)
 
 struct_targ = (si: int, i: int) -> int: int(type_args[int(structs[si].targs) + i])
 
@@ -203,23 +122,6 @@ type_eq = (a0: int, b0: int) -> bool:
     if not has_var(a) and not has_var(b): return false
     type_query_equal_shape(types, structs, type_args, a, b)
 
-unify = (a: int, b: int) -> bool: tu_unify(a, b)
-
-simple_enum = (t: int) -> bool: tp_simple_enum(t)
-is_managed = (t: int) -> bool: tp_is_managed(t)
-plain_problem = (t: int) -> str: tp_plain_problem(t)
-
-is_lib_texture = (si: int) -> bool:
-    if structs[si].name != "Texture" or structs[si].decl == 0: return false
-    fi = pos_file(nodes[int(structs[si].decl)].pos)
-    fi >= 0 and fi < files.len() and files[fi].path == lib_dir + "/game/draw2d.jo"
-
-# can a value of this type hold a function value (a closure)? (through arrays, optionals, tuples,
-# struct and enum fields, and union members)
-type_has_fn = (t: int) -> bool: tp_type_has_fn(t)
-math_optional = (t: int) -> bool: tp_math_optional(t)
-is_aggregate = (t: int) -> bool: tp_is_aggregate(t)
-
 align_up = (x: int, a: int) -> int: (x + a - 1) & ~(a - 1)
 tsize = (t: int) -> int:
     layout(t)
@@ -230,65 +132,18 @@ talign = (t: int) -> int:
     if a == 0: return 1
     a
 
-decide_boxes = (si: int): tl_decide_boxes(si)
-box_default = (t: int) -> int: tl_box_default(t)
-layout = (t: int): tl_layout(t)
-
-layout_endless_error = (si: int, f: int, vi: int):
-    ft = int(fields[f].type)
-    nm = structs[si].name
-    fname = name_of(int(fields[f].name))
-    dewy = files[pos_file(nodes[int(structs[si].decl)].pos)].is_dewy
-    fix = "`{fname}: {type_str_postfix(ft, dewy)}?`"
-    if vi >= 0: fix = "`{name_of(int(variants[vi].name))}({fname}: {type_str_postfix(ft, dewy)}?)`"
-    fatal(nodes[int(structs[si].decl)].pos, "recursive type '{nm}' has no finite value: field '{fname}' keeps containing {type_str(ft, dewy)}; make it optional ({fix}) or an array")
-layout_cycle_error = (si: int): ice("{structs[si].name} laid out inside itself")
-layout_cache_padded = (t: int) -> bool:
-    si = int(types[t].st)
-    structs[si].decl != 0 and nodes[int(structs[si].decl)].name == i32(intern("CachePadded")) and concurrency_builtin_type(t, "CachePadded")
-
-# a type followed by [] or ? or |: function types and unions need parentheses there
-type_str_postfix = (t: int, dewy: bool = false) -> str: tf_postfix(t, dewy)
-
 # (a type's text is cut short past 150 of its parts: types built from aliases of aliases,
 # (F, F) -> int with F = (G, G) -> int..., would spell out exponentially)
 
 # Diagnostics name types the way the program being compiled spells them:
 # int64, float64, string and array<T> for Dewy; int, f64, str and T[] for Sloppy.
 ts_dewy = false
-# (text in the spelling of the program being compiled: Sloppy's, else Dewy's)
-tsd = (jo: str, dewy: str) -> str: if ts_dewy: dewy else: jo
-dt = (t: int) -> str: type_str(t, ts_dewy)
 # (a type mismatch's side: a Dewy union by the alias the program names it with)
 # (and a refined type by its alias, `C:type = int64<...>`, inside a tuple or array too)
 refined_alias_names: {int: int} = {}
-dt_named = (t: int) -> str:
-    alias = if ts_dewy: uu_alias_name(t) else: 0
-    if alias != 0: return name_of(alias)
-    if not ts_dewy: return dt(t)
-    p = prune(t)
-    if types[p].kind == .refined and (refined_alias_names.get(p) ?? 0) != 0: return name_of(refined_alias_names[p])
-    if types[p].kind == .tuple and dt_named_inner(p):
-        parts: str[]
-        loop i in [0..int(types[p].nargs)): parts.push(dt_named(targ(p, i)))
-        return "[{join(parts, " ")}]"
-    if types[p].kind == .array and dt_named_inner(p): return "array<{dt_named(int(types[p].elem))}>"
-    dt(t)
-# (a tuple's or array's parts include a named union or refinement)
-dt_named_inner = (p: int) -> bool:
-    parts: int[]
-    if types[p].kind == .tuple:
-        loop i in [0..int(types[p].nargs)): parts.push(prune(targ(p, i)))
-    else: parts.push(prune(int(types[p].elem)))
-    loop c in parts:
-        if uu_alias_name(c) != 0 or (refined_alias_names.get(c) ?? 0) != 0: return true
-        if (types[c].kind == .tuple or types[c].kind == .array) and dt_named_inner(c): return true
-    false
 # (the names of the type parameters of the declaration whose types are being shown: a
 # parameter that has none shows as T, U, ... by its place)
 ts_params: int[]
-
-type_str = (t: int, dewy: bool = false) -> str: tf_string(t, dewy)
 
 # ---------- unions ----------
 # A | B | C is a tagged value laid out like an enum: variant i holds member i. Members are flat,
@@ -303,55 +158,14 @@ union_members = (t0: int) -> int[]:
     loop i in [0..int(structs[si].ntargs)): out.push(struct_targ(si, i))
     out
 
-# the index of member m in union u (-1 if it is not one)
-union_index = (u: int, m: int) -> int: uu_index(u, m)
-
-# the member of union u that holds union member m: m itself, or else u's string set when
-# m is one too (a union has at most one), holding all of m's members when `whole`
-# (`'b'|'c'` in `'a'|'b'|'c' | int64`); -1 if none
-union_holder = (u: int, m: int, whole: bool) -> int: uu_holder(u, m, whole)
-
-mk_union = (ms: int[]) -> int: uu_mk_union(ms)
-
 # mk_union supplies flat, sorted member IDs. Concrete unions are canonical;
 # unresolved members still need structural matching until inference finishes.
 # (a Dewy union the program names with one non-generic alias, `Value:type=int64|string`:
 # diagnostics show the alias; 0 when two aliases name it)
 
-union_alias_note = (t0: int, name: int):
-    uu_alias_note(t0, name)
-    t = prune(t0)
-    if types[t].kind != .refined or types[t].bits == -1: return
-    # (a second spelling makes it ambiguous: 0, shown expanded)
-    if let seen = refined_alias_names.get(t):
-        if seen != name: refined_alias_names[t] = 0
-        return
-    refined_alias_names[t] = name
-
 # ---------- struct-of-arrays ----------
 # soa T[] behaves like T[] but keeps each field of T in an array of its own (see check_soa_*)
 soa_decl = 0       # the declaration node standing for all soa types
-factory_declaration = (decl: int) -> TypeDeclInfo:
-    TypeDeclInfo(name_of(int(nodes[decl].name)), has_flag(decl, NF_RECORD), nodes[decl].kind == .enum_)
-factory_nesting_error = (decl: int):
-    fatal(nodes[decl].pos, "the generic type '{name_of(int(nodes[decl].name))}' expands without end: its type arguments nest more than {MAX_TYPE_NESTING} deep (does a field use it with a bigger type argument than its own?)")
-
-is_soa = (t0: int) -> bool:
-    t = prune(t0)
-    types[t].kind == .struct_ and structs[int(types[t].st)].soa_
-
-soa_elem = (t: int) -> int: struct_targ(int(types[prune(t)].st), 0)
-
-soa_inst = (p: int) -> int: tc_soa_inst(p)
 
 const MAX_TYPE_NESTING = 48
 
-# ---------- struct instances ----------
-# Concrete argument lists have canonical instances. Inference-bearing requests
-# still match structurally; zonking them must produce a concrete instance rather
-# than returning an earlier record whose TF_HAS_VAR flag can never clear.
-get_struct_inst = (decl: int, args: int[]) -> int:
-    t = tc_struct_inst(decl, args)
-    # (a generic nominal type's instance joins its family: errors.jo)
-    if args.len() > 0 and nominal_generic.len() > 0: nominal_instance(decl, t)
-    t

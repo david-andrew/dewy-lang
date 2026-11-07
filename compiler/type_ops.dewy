@@ -1,0 +1,256 @@
+$runtime_checks
+from p"ast.jo" import (NF_RECORD has_flag nodes)
+from p"check.jo" import (lib_dir)
+from p"concurrency_types.dewy" import (concurrency_builtin_type)
+from p"error_ops.dewy" import (nominal_instance)
+from p"errors.jo" import (nominal_generic)
+from p"type_constructors.dewy" import (tb_init_types tb_mk_array tb_mk_box tb_mk_cfn tb_mk_fixed tb_mk_fn tb_mk_modval tb_mk_opt tb_mk_param tb_mk_ptr tb_mk_secret tb_mk_tuple tb_mk_typeval tb_mk_values tb_mk_var tb_secret_repr)
+from p"type_factory.dewy" import (MAX_TYPE_NESTING TypeDeclInfo tc_soa_inst tc_struct_inst)
+from p"type_format.dewy" import (tf_postfix tf_string)
+from p"type_inference.dewy" import (tu_unify tu_zonk)
+from p"type_labels.dewy" import (tn_decl_labels tn_label_names)
+from p"type_layout.dewy" import (tl_box_default tl_decide_boxes tl_layout)
+from p"type_properties.dewy" import (tp_is_aggregate tp_is_managed tp_math_optional tp_plain_problem tp_simple_enum tp_type_has_fn)
+from p"type_unions.dewy" import (uu_alias_name uu_alias_note uu_holder uu_index uu_mk_union)
+from p"types.jo" import (T_MATH_INT fields is_int mk_type prune refined_alias_names struct_targ structs targ ts_dewy types variants)
+from p"util.jo" import (fatal files ice intern name_of pos_file)
+
+TypeOpWord:type=int64<overflow='wrap'>
+union_type_name=(t:int64):>string=>{
+    type_str(t)
+}
+union_postfix_name=(t:int64):>string=>{
+    type_str_postfix(t)
+}
+mk_array=(e:int64):>int64=>{
+    tb_mk_array(e)
+}
+mk_fixed=(e:TypeOpWord n:TypeOpWord):>int64=>{
+    tb_mk_fixed(e n)
+}
+fixed_len=(t:TypeOpWord):>int64=>$unsafe {
+    TypeOpWord(types.ptr[prune(t)].bits)
+}
+mk_ptr=(e:TypeOpWord):>int64=>{
+    tb_mk_ptr(e)
+}
+mk_box=(e:TypeOpWord):>int64=>{
+    tb_mk_box(e)
+}
+mk_opt=(e:int64):>int64=>{
+    tb_mk_opt(e)
+}
+mk_secret=(e:TypeOpWord):>int64=>{
+    tb_mk_secret(e)
+}
+# t's representation: t with its secrets, and those of what it is made of, replaced by their values
+secret_repr=(t0:TypeOpWord):>int64=>{
+    tb_secret_repr(t0)
+}
+fn_label_names=(key:TypeOpWord count:TypeOpWord):>array<int64>=>{
+    tn_label_names(key count)
+}
+decl_fn_labels=(decl:int64):>int64=>{
+    tn_decl_labels(decl)
+}
+# defaults: the function instance whose parameter defaults a call through the
+# value fills in (`g = @f` keeps f's defaults); 0 when none travel with it.
+# Kept in bits: part of the type's identity, ignored by the calling convention.
+# (`pack`: the function gives several values: ret is `(int64 int64)` when their number is
+# fixed, returned in place, or the array of them when it varies)
+mk_fn=(params:array<int64> ret:TypeOpWord mutmask:TypeOpWord labels:TypeOpWord=0 defaults:TypeOpWord=0 pack:bool=false):>int64=>{
+    tb_mk_fn(params ret mutmask labels defaults pack)
+}
+mk_cfn=(params:array<int64> ret:TypeOpWord):>int64=>{
+    tb_mk_cfn(params ret)
+}
+# (`values`: several values, `(int64 int64)` in Dewy: what `pair = (1 2)` holds, not a
+# container; laid out as a tuple. docs/design/multi_expressions.md)
+mk_tuple=(elems:array<int64> values:bool=false):>int64=>{
+    tb_mk_tuple(elems values)
+}
+mk_values=(elems:array<int64>):>int64=>{
+    tb_mk_values(elems)
+}
+is_values=(t0:TypeOpWord):>bool=>$unsafe {
+    if t0 =? 0 {return false}
+    let t=prune(t0)
+    types.ptr[t].kind =? 'tuple' and types.ptr[t].sign
+}
+mk_var=():>int64=>{
+    tb_mk_var()
+}
+mk_param=(idx:TypeOpWord):>int64=>{
+    tb_mk_param(idx)
+}
+mk_typeval=(t:TypeOpWord):>int64=>{
+    tb_mk_typeval(t)
+}
+mk_modval=(m:TypeOpWord):>int64=>{
+    tb_mk_modval(m)
+}
+init_types=():>void=>{
+    tb_init_types()
+}
+# Integer overflow policy is interned in st (0 exact, 1 wrap, 2 saturate).
+# It changes value semantics, not the ABI or storage layout.
+int_policy=(t:TypeOpWord):>int64=>$unsafe {
+    let t=prune(t)
+    if types.ptr[t].kind not=? 'int_' or t =? T_MATH_INT {return 0}
+    TypeOpWord(types.ptr[t].st)
+}
+policy_int=(base:int64 policy:int64 pos:int64):>int64=>$unsafe {
+    let t=prune(base)
+    if not is_int(t) or t =? T_MATH_INT {fatal(pos "overflow= requires a fixed-width integer type")}
+    let ti=types.ptr[t]
+    ti.st=int32(policy)
+    mk_type(ti [])
+}
+zonk=(t:TypeOpWord):>int64=>{
+    tu_zonk(t)
+}
+unify=(a:TypeOpWord b:TypeOpWord):>bool=>{
+    tu_unify(a b)
+}
+simple_enum=(t:int64):>bool=>{
+    tp_simple_enum(t)
+}
+is_managed=(t:TypeOpWord):>bool=>{
+    tp_is_managed(t)
+}
+plain_problem=(t:TypeOpWord):>string=>{
+    tp_plain_problem(t)
+}
+is_lib_texture=(si:int64):>bool=>$unsafe {
+    if structs.ptr[si].name not=? "Texture" or structs.ptr[si].decl =? 0 {return false}
+    let fi=pos_file(nodes.ptr[TypeOpWord(structs.ptr[si].decl)].pos)
+    fi >=? 0 and fi <? files.length and files[fi].path =? "{lib_dir}/game/draw2d.jo"
+}
+# can a value of this type hold a function value (a closure)? (through arrays, optionals, tuples,
+# struct and enum fields, and union members)
+type_has_fn=(t:TypeOpWord):>bool=>{
+    tp_type_has_fn(t)
+}
+math_optional=(t:TypeOpWord):>bool=>{
+    tp_math_optional(t)
+}
+is_aggregate=(t:TypeOpWord):>bool=>{
+    tp_is_aggregate(t)
+}
+decide_boxes=(si:TypeOpWord):>void=>{
+    tl_decide_boxes(si)
+}
+box_default=(t:TypeOpWord):>int64=>{
+    tl_box_default(t)
+}
+layout=(t:int64):>void=>{
+    tl_layout(t)
+}
+layout_endless_error=(si:TypeOpWord f:TypeOpWord vi:TypeOpWord):>void=>$unsafe {
+    let ft=TypeOpWord(fields.ptr[f].type)
+    let nm=structs.ptr[si].name
+    let fname=name_of(TypeOpWord(fields.ptr[f].name))
+    let dewy=files[pos_file(nodes.ptr[TypeOpWord(structs.ptr[si].decl)].pos)].is_dewy
+    let fix="`{fname}: {type_str_postfix(ft dewy)}?`"
+    if vi >=? 0 {fix="`{name_of(TypeOpWord(variants.ptr[vi].name))}({fname}: {type_str_postfix(ft dewy)}?)`"}
+    fatal(nodes.ptr[TypeOpWord(structs.ptr[si].decl)].pos "recursive type '{nm}' has no finite value: field '{fname}' keeps containing {type_str(ft dewy)}; make it optional ({fix}) or an array")
+}
+layout_cycle_error=(si:TypeOpWord):>void=>$unsafe {
+    ice("{structs.ptr[si].name} laid out inside itself")
+}
+layout_cache_padded=(t:TypeOpWord):>bool=>$unsafe {
+    let si=TypeOpWord(types.ptr[t].st)
+    structs.ptr[si].decl not=? 0 and nodes.ptr[TypeOpWord(structs.ptr[si].decl)].name =? int32(intern("CachePadded")) and concurrency_builtin_type(t "CachePadded")
+}
+# a type followed by [] or ? or |: function types and unions need parentheses there
+type_str_postfix=(t:TypeOpWord dewy:bool=false):>string=>{
+    tf_postfix(t dewy)
+}
+# (text in the spelling of the program being compiled: Sloppy's, else Dewy's)
+tsd=(jo:string dewy:string):>string=>{
+    if ts_dewy {dewy} else {jo}
+}
+dt=(t:TypeOpWord):>string=>{
+    type_str(t ts_dewy)
+}
+dt_named=(t:TypeOpWord):>string=>$unsafe {
+    let alias=if ts_dewy {uu_alias_name(t)} else {0}
+    if alias not=? 0 {return name_of(alias)}
+    if not ts_dewy {return dt(t)}
+    let p=prune(t)
+    if types.ptr[p].kind =? 'refined' and (refined_alias_names.get(p) ?? 0) not=? 0 {return name_of(refined_alias_names[p])}
+    if types.ptr[p].kind =? 'tuple' and dt_named_inner(p) {
+        let parts:array<string>=[]
+        loop i in [0..TypeOpWord(types.ptr[p].nargs)) {parts.push(dt_named(targ(p i)))}
+        return "[{join(parts " ")}]"
+    }
+    if types.ptr[p].kind =? 'array' and dt_named_inner(p) {return "array<{dt_named(TypeOpWord(types.ptr[p].elem))}>"}
+    dt(t)
+}
+# (a tuple's or array's parts include a named union or refinement)
+dt_named_inner=(p:TypeOpWord):>bool=>$unsafe {
+    let parts:array<int64>=[]
+    if types.ptr[p].kind =? 'tuple' {
+        loop i in [0..TypeOpWord(types.ptr[p].nargs)) {parts.push(prune(targ(p i)))}
+    }
+    else {parts.push(prune(TypeOpWord(types.ptr[p].elem)))}
+    loop c in parts {
+        if uu_alias_name(c) not=? 0 or (refined_alias_names.get(c) ?? 0) not=? 0 {return true}
+        if (types.ptr[c].kind =? 'tuple' or types.ptr[c].kind =? 'array') and dt_named_inner(c) {return true}
+    }
+    false
+}
+type_str=(t:int64 dewy:bool=false):>string=>{
+    tf_string(t dewy)
+}
+# the index of member m in union u (-1 if it is not one)
+union_index=(u:TypeOpWord m:TypeOpWord):>int64=>{
+    uu_index(u m)
+}
+# the member of union u that holds union member m: m itself, or else u's string set when
+# m is one too (a union has at most one), holding all of m's members when `whole`
+# (`'b'|'c'` in `'a'|'b'|'c' | int64`); -1 if none
+union_holder=(u:TypeOpWord m:TypeOpWord whole:bool):>int64=>{
+    uu_holder(u m whole)
+}
+mk_union=(ms:array<int64>):>int64=>{
+    uu_mk_union(ms)
+}
+union_alias_note=(t0:TypeOpWord name:TypeOpWord):>void=>$unsafe {
+    uu_alias_note(t0 name)
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'refined' or types.ptr[t].bits =? -1 {return}
+    # (a second spelling makes it ambiguous: 0, shown expanded)
+    let seen=refined_alias_names.get(t)
+    if seen not=? none {
+        if seen not=? name {refined_alias_names[t]=0}
+        return
+    }
+    refined_alias_names[t]=name
+}
+factory_declaration=(decl:int64):>TypeDeclInfo=>$unsafe {
+    TypeDeclInfo(name_of(TypeOpWord(nodes.ptr[decl].name)) has_flag(decl NF_RECORD) nodes.ptr[decl].kind =? 'enum_')
+}
+factory_nesting_error=(decl:int64):>void=>$unsafe {
+    fatal(nodes.ptr[decl].pos "the generic type '{name_of(TypeOpWord(nodes.ptr[decl].name))}' expands without end: its type arguments nest more than {MAX_TYPE_NESTING} deep (does a field use it with a bigger type argument than its own?)")
+}
+is_soa=(t0:TypeOpWord):>bool=>$unsafe {
+    let t=prune(t0)
+    types.ptr[t].kind =? 'struct_' and structs.ptr[TypeOpWord(types.ptr[t].st)].soa_
+}
+soa_elem=(t:TypeOpWord):>int64=>$unsafe {
+    struct_targ(TypeOpWord(types.ptr[prune(t)].st) 0)
+}
+soa_inst=(p:TypeOpWord):>int64=>{
+    tc_soa_inst(p)
+}
+# ---------- struct instances ----------
+# Concrete argument lists have canonical instances. Inference-bearing requests
+# still match structurally; zonking them must produce a concrete instance rather
+# than returning an earlier record whose TF_HAS_VAR flag can never clear.
+get_struct_inst=(decl:int64 args:array<int64>):>int64=>{
+    let t=tc_struct_inst(decl args)
+    # (a generic nominal type's instance joins its family: errors.jo)
+    if args.length >? 0 and nominal_generic.length >? 0 {nominal_instance(decl t)}
+    t
+}

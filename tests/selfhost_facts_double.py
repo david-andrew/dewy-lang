@@ -11,7 +11,7 @@ from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 
 LEAVES = tuple(sorted(p.stem for p in (ROOT / 'compiler').glob('facts_*.dewy')))
-MOVED = ('error_ops', 'dewy_method_ops', 'decimal_ops', 'copy_ops', 'partition_ops', 'inline_ops', 'proof_ops', 'witness_ops', 'directive_ops', 'float_ops', 'unit_ops', 'reader_service_ops', 'spirv_ops')
+MOVED = ('error_ops', 'dewy_method_ops', 'decimal_ops', 'copy_ops', 'partition_ops', 'inline_ops', 'proof_ops', 'witness_ops', 'directive_ops', 'float_ops', 'unit_ops', 'reader_service_ops', 'spirv_ops', 'type_ops')
 DRIVER = '''use 'main.jo'
 main = ():
     lower_test_cli()

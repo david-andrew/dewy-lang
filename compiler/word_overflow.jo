@@ -1,0 +1,18 @@
+# Word overflow predicate shared by semantic folding and IR folding. Operands
+# are bit patterns in the implementation language, whose int remains wrapping.
+math_word_overflow = (operation: int, x: int, y: int) -> bool:
+    if operation == 0:
+        r = x + y
+        return ((x xor r) & (y xor r)) < 0
+    if operation == 1:
+        r = x - y
+        return ((x xor y) & (x xor r)) < 0
+    if operation == 2:
+        ax = if x < 0: u64(-(x + 1)) + 1 else: u64(x)
+        ay = if y < 0: u64(-(y + 1)) + 1 else: u64(y)
+        limit = if (x < 0) != (y < 0): u64(9223372036854775807) + 1 else: u64(9223372036854775807)
+        return ay != 0 and ax > limit / ay
+    if operation == 3: return y == 0 or (x == -9223372036854775807 - 1 and y == -1)
+    if y < 0: return true
+    if y >= 64: return x != 0
+    ((x << y) >> y) != x

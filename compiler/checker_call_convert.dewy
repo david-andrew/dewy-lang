@@ -1,6 +1,7 @@
 $runtime_checks
 from p"node_store.dewy" import (call_waits_hook)
-from p"types.jo" import (T_FLOAT T_INT T_MATH_INT T_U64 fields has_var is_float is_int is_union mk_array prune struct_targ structs targ tkind type_eq types)
+from p"types.jo" import (T_FLOAT T_INT T_MATH_INT T_U64 fields has_var is_float is_int is_union prune struct_targ structs targ tkind type_eq types)
+from p"type_ops.dewy" import (mk_array)
 from p"ast.jo" import (NF_CHECKED NF_U64 NF_COMPREHENSION NF_GENERIC NF_SPREAD add_flag clone has_flag kid kids nkids nodes)
 from p"checker_call_cost.dewy" import (arg_cost)
 from p"expr.jo" import (literal_union_member branch_numeric bundled_bigint_type call_refined_literal_cost call_string_cost can_coerce charlike decimal_literal_tree dewy_bigint_literal_target dewy_positional_fits dewy_record_spread_entries dewy_record_target find_variant fn_value_adapts is_dewy_set_type is_lit is_nd lit_default lit_fits match_type ntype union_target variant_enum word_rational_source function_member lambda_member)
@@ -419,7 +420,7 @@ from p"refine.jo" import (ref_mutable_authority ref_nd_receivers refine_storage 
 from p"partition.jo" import (partition_active)
 from p"partition_ops.dewy" import (partition_slice)
 from p"expr.jo" import (path_narrows path_rooted path_forget path_key)
-from p"types.jo" import unify
+from p"type_ops.dewy" import (unify)
 from p"ast.jo" import NF_MUT
 from p"effect_contracts.dewy" import (callable_base callable_contract)
 from p"effect_sources.dewy" import (effect_infer_callable)
