@@ -10,6 +10,21 @@ Instant:type=core.Instant
 Duration:type=core.Duration
 UtcLabel:type=core.UtcLabel
 
+# Onto a grid, with the rounding named: `let [d lost] = quantize(1ns/3 rounding='nearest_even')`.
+# A constant tick (1ns unless said) and a constant time cannot fail.
+from p"@lib/time/core.dewy" import (tick_error _Rounding)
+$check_constant tick_error(tick) "not a tick"
+quantize=(q:rational*Time rounding:_Rounding tick:rational*Time=1ns):>[Duration rational*Time]|OffGrid=>core.quantize_exact(q rounding tick)
+quantize=(x:float64*Time rounding:_Rounding tick:rational*Time=1ns):>[Duration rational*Time]|OffGrid|OutOfRange=>core.quantize_float(x rounding tick)
+$check_constant tick_error(tick) "not a tick"
+quantize=(d:Duration rounding:_Rounding tick:rational*Time):>[Duration Duration]|OffGrid=>core.quantize_stored(d rounding tick)
+$check_constant tick_error(tick) "not a tick"
+quantize=(t:Instant rounding:_Rounding tick:rational*Time):>[Instant Duration]|OffGrid=>core.quantize_stored(t rounding tick)
+# A time as a stored value, when it is exactly one: `convert<Duration>(q)`.
+convert=<T>(q:int*Time):>T|OffGrid|OutOfRange=>core.duration_from(q)
+convert=<T>(q:rational*Time):>T|OffGrid|OutOfRange=>core.duration_from(q)
+convert=<T>(x:float64*Time):>T|OffGrid|OutOfRange=>core.duration_from(x)
+
 # `instant"2026-10-24T12:00:00Z"`: checked while compiling, and then a plain value.
 $check_constant instant_error(text) "not an instant"
 instant=(text:string):>Instant|ParseError|OffGrid|OutsideCoverage|InvalidFields=>core.instant_parse(text)

@@ -1550,8 +1550,20 @@ actual time, including time the machine is suspended.
 `Instant` counts nanoseconds on one continuous axis in 128 bits, so it reaches any
 date anyone needs, and `Duration` is the difference of two. `+` and `-` take durations
 and time quantities: `t + 90minute`, `d <? 5s`. `d/1s` is an exact `rational`, `d/3`
-an exact quantity, `d//7` a `Duration`. A constant quantity off the nanosecond grid
-(`t + 1ns/3`) is a compile error; at run time such a sum is `Instant | OffGrid`.
+an exact quantity, `d//7` a `Duration`; a divisor known only at run time may be zero, so
+that result also has `OutOfRange`, and a constant zero is a compile error. A constant
+quantity off the nanosecond grid (`t + 1ns/3`) is a compile error; at run time such a sum
+is `Instant | OffGrid`.
+
+`quantize` puts a time on a grid, naming the rounding (`'nearest_even'`, `'nearest_away'`,
+`'floor'`, `'ceil'` or `'toward_zero'`), and gives back what was lost, signed so that the
+original is the value plus the loss. The tick is `1ns` unless given:
+`let [d lost] = quantize(1ns/3 rounding='nearest_even')` gives `0s` and `1/3ns`, and
+`quantize(t rounding='floor' tick=1s)` takes an `Instant` or `Duration` to a whole second. A
+float time is `quantize`d to enter, with `OutOfRange` for NaN and the infinities. `convert<Duration>(q)`
+takes a time that is exactly on the grid, giving `Duration | OffGrid | OutOfRange` instead of
+rounding. `t.ticks(1s)` counts down to a grid: `[count remainder]`, with the remainder at
+least zero and below the tick, so `-0.25s` is `-1` and `750ms`.
 Arithmetic that leaves the 128-bit range (±5.39×10²¹ years) ends the program with a report.
 
 ```dewy

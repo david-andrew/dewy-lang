@@ -99,7 +99,7 @@ _of_rational=(q:rational*Time):>Duration|OffGrid=>{
 }
 _grid_error=(q:rational*Time):>string?=>{
     if _of_rational(q) is? OffGrid {
-        return "the nanosecond grid has no such value: use `quantize(tick=1ns rounding='nearest_even')`, name a tick, or `time.science`"
+        return "the nanosecond grid has no such value: round it with `quantize(q rounding='nearest_even')`"
     }
     none
 }
@@ -143,14 +143,58 @@ __eq__=(q:rational*Time a:Duration):>bool=>rational(ns_count(a) 1) =? _seconds(q
 __mul__=(a:Duration k:int):>Duration=>_duration(ns_count(a)*k)
 __mul__=(k:int a:Duration):>Duration=>_duration(ns_count(a)*k)
 # (dividing leaves the grid freely, so the answer is an exact quantity: `d/3`, `d/1s`, `d/other`)
-__truediv__=(a:Duration k:int):>rational*Time=>rational(ns_count(a) 1000000000*k)*s
-__truediv__=(a:Duration b:Duration):>rational=>rational(ns_count(a) ns_count(b))
-__truediv__=(a:Duration q:int*Time):>rational=>rational(ns_count(a) ns_count(_of_int(q)))
-__truediv__=(a:Duration q:rational*Time):>rational=>rational(ns_count(a) 1)/(_seconds(q)*rational(1000000000))
-__floordiv__=(a:Duration k:int):>Duration=>_duration(ns_count(a)//k)
-__floordiv__=(a:Duration b:Duration):>int=>ns_count(a)//ns_count(b)
-__floordiv__=(a:Duration q:int*Time):>int=>ns_count(a)//ns_count(_of_int(q))
-__mod__=(a:Duration b:Duration):>Duration=>_duration(ns_count(a)%ns_count(b))
+# A divisor that may be zero gives OutOfRange, and a constant one that is not cannot fail: `d/1s`,
+# `d//7`. A constant zero is a compile error.
+_nonzero_int=(k:int):>string?=>if k =? 0 "this divides by zero" else none
+_nonzero_time=(q:rational*Time):>string?=>if _seconds(q).numerator =? 0 "this divides by zero" else none
+_nonzero_whole=(q:int*Time):>string?=>if (q transmute int) =? 0 "this divides by zero" else none
+_nonzero_duration=(d:Duration):>string?=>if d._hi =? 0 and d._lo =? 0 "this divides by zero" else none
+$check_constant _nonzero_int(k) "not a divisor"
+__truediv__=(a:Duration k:int):>(rational*Time)|OutOfRange=>{
+    if k =? 0 {return OutOfRange}
+    rational(ns_count(a) 1000000000*k)*s
+}
+$check_constant _nonzero_duration(b) "not a divisor"
+__truediv__=(a:Duration b:Duration):>rational|OutOfRange=>{
+    let n=ns_count(b)
+    if n =? 0 {return OutOfRange}
+    rational(ns_count(a) n)
+}
+$check_constant _nonzero_whole(q) "not a divisor"
+__truediv__=(a:Duration q:int*Time):>rational|OutOfRange=>{
+    let n=ns_count(_of_int(q))
+    if n =? 0 {return OutOfRange}
+    rational(ns_count(a) n)
+}
+$check_constant _nonzero_time(q) "not a divisor"
+__truediv__=(a:Duration q:rational*Time):>rational|OutOfRange=>{
+    let count=_seconds(q)*rational(1000000000)
+    if count.numerator =? 0 {return OutOfRange}
+    rational(ns_count(a)*count.denominator count.numerator)
+}
+$check_constant _nonzero_int(k) "not a divisor"
+__floordiv__=(a:Duration k:int):>Duration|OutOfRange=>{
+    if k =? 0 {return OutOfRange}
+    _duration(ns_count(a)//k)
+}
+$check_constant _nonzero_duration(b) "not a divisor"
+__floordiv__=(a:Duration b:Duration):>int|OutOfRange=>{
+    let n=ns_count(b)
+    if n =? 0 {return OutOfRange}
+    ns_count(a)//n
+}
+$check_constant _nonzero_whole(q) "not a divisor"
+__floordiv__=(a:Duration q:int*Time):>int|OutOfRange=>{
+    let n=ns_count(_of_int(q))
+    if n =? 0 {return OutOfRange}
+    ns_count(a)//n
+}
+$check_constant _nonzero_duration(b) "not a divisor"
+__mod__=(a:Duration b:Duration):>Duration|OutOfRange=>{
+    let n=ns_count(b)
+    if n =? 0 {return OutOfRange}
+    _duration(ns_count(a)%n)
+}
 
 # The largest unit of the time chooser that keeps a whole count (`125ms`, `90min`, `169h`, `0s`).
 __as__=(d:Duration):>string=>{
@@ -189,10 +233,105 @@ $check_constant _grid_error(q) "off the nanosecond grid"
 __add__=(q:rational*Time t:Instant):>Instant|OffGrid=>t+(_of_rational(q) or_throw)
 $check_constant _grid_error(q) "off the nanosecond grid"
 __sub__=(t:Instant q:rational*Time):>Instant|OffGrid=>t-(_of_rational(q) or_throw)
-$error_if true "a float time enters by `quantize`: `t + quantize(x tick=1ns rounding='nearest_even')`, or use an exact time"
+$error_if true "a float time is rounded first: `let [d loss] = quantize(x rounding='nearest_even') or_throw`, then `t + d`"
 __add__=(t:Instant q:float64*Time):>Instant=>t
-$error_if true "a float time enters by `quantize`: `t + quantize(x tick=1ns rounding='nearest_even')`, or use an exact time"
+$error_if true "a float time is rounded first: `let [d loss] = quantize(x rounding='nearest_even') or_throw`, then `t + d`"
 __sub__=(t:Instant q:float64*Time):>Instant=>t
+
+# ---------------- onto a grid: rounding says how, and what was lost is returned ----------------
+_Rounding:type='nearest_even'|'nearest_away'|'floor'|'ceil'|'toward_zero'
+_rounded=(count:rational rounding:_Rounding):>int=>match rounding {
+    <'nearest_even'>=>round(count ties='even')
+    <'nearest_away'>=>round(count ties='away')
+    <'floor'>=>count.numerator//count.denominator
+    <'ceil'>=>-((-count.numerator)//count.denominator)
+    <'toward_zero'>=>if count.numerator <? 0 {-((-count.numerator)//count.denominator)} else {count.numerator//count.denominator}
+}
+# (a tick in nanoseconds; none when it is not a positive whole number of them)
+_tick_ns=(tick:rational*Time):>int?=>{
+    let count=_seconds(tick)*rational(1000000000)
+    if count.denominator not=? 1 or count.numerator <=? 0 {return none}
+    count.numerator
+}
+tick_error=(tick:rational*Time):>string?=>{
+    if _tick_ns(tick) is? none {return "a tick here is a positive whole number of nanoseconds"}
+    none
+}
+# (an exact count of nanoseconds onto a grid: the count in ticks, and what was lost in nanoseconds)
+_on_grid=(exact_ns:rational tick_ns:int rounding:_Rounding):>[int rational]=>{
+    let count=_rounded(rational(exact_ns.numerator exact_ns.denominator*tick_ns) rounding)
+    [count exact_ns-rational(count*tick_ns 1)]
+}
+# The exact time a float holds: its binary value, which is why a float has to be rounded to enter.
+_float_exact=(value:float64):>rational=>{
+    let bits=f64_bits(value)
+    let exponent=int64<overflow='wrap'>((bits >> 52) and 2047)
+    let mantissa:int=int((bits and 4503599627370495))
+    if exponent =? 0 {exponent=1} else {mantissa=mantissa+4503599627370496}
+    let signed:int=if (bits >> 63) =? 1 {-mantissa} else {mantissa}
+    let shift=exponent-1075
+    if shift >=? 0 {return rational(signed << shift 1)}
+    rational(signed bigint(1) << (-shift))
+}
+quantize_exact=(q:rational*Time rounding:_Rounding tick:rational*Time):>[Duration rational*Time]|OffGrid=>{
+    let tick_ns=_tick_ns(tick)
+    if tick_ns is? none {return OffGrid}
+    let [count lost]=_on_grid(_seconds(q)*rational(1000000000) tick_ns rounding)
+    [_duration(count*tick_ns) (lost*rational(1 1000000000))*s]
+}
+quantize_float=(x:float64*Time rounding:_Rounding tick:rational*Time):>[Duration rational*Time]|OffGrid|OutOfRange=>{
+    let value=x transmute float64
+    if not is_finite(value) {return OutOfRange}
+    quantize_exact(_float_exact(value)*s rounding tick)
+}
+quantize_stored=(d:Duration rounding:_Rounding tick:rational*Time):>[Duration Duration]|OffGrid=>{
+    let tick_ns=_tick_ns(tick)
+    if tick_ns is? none {return OffGrid}
+    let [count lost]=_on_grid(rational(ns_count(d) 1) tick_ns rounding)
+    [_duration(count*tick_ns) _duration(lost.numerator)]
+}
+quantize_stored=(t:Instant rounding:_Rounding tick:rational*Time):>[Instant Duration]|OffGrid=>{
+    let tick_ns=_tick_ns(tick)
+    if tick_ns is? none {return OffGrid}
+    let [count lost]=_on_grid(rational(ns_count(t) 1) tick_ns rounding)
+    [_instant(count*tick_ns) _duration(lost.numerator)]
+}
+# How many ticks from the origin, rounding down, and what is left: `x = count*tick + remainder`,
+# with the remainder at least 0 and below the tick.
+$check_constant tick_error(tick) "not a tick"
+ticks=(t:Instant tick:rational*Time):>[int Duration]|OffGrid=>{
+    let tick_ns=_tick_ns(tick)
+    if tick_ns is? none {return OffGrid}
+    let n=ns_count(t)
+    [n//tick_ns _duration(n%tick_ns)]
+}
+$check_constant tick_error(tick) "not a tick"
+ticks=(d:Duration tick:rational*Time):>[int Duration]|OffGrid=>{
+    let tick_ns=_tick_ns(tick)
+    if tick_ns is? none {return OffGrid}
+    let n=ns_count(d)
+    [n//tick_ns _duration(n%tick_ns)]
+}
+# A time as a stored Duration, when it is exactly one.
+duration_from=(q:int*Time):>Duration|OffGrid|OutOfRange=>{
+    let n=(q transmute int)*_NS
+    if not _fits(n) {return OutOfRange}
+    _duration(n)
+}
+duration_from=(q:rational*Time):>Duration|OffGrid|OutOfRange=>{
+    let count=_seconds(q)*rational(1000000000)
+    if count.denominator not=? 1 {return OffGrid}
+    if not _fits(count.numerator) {return OutOfRange}
+    _duration(count.numerator)
+}
+duration_from=(x:float64*Time):>Duration|OffGrid|OutOfRange=>{
+    let value=x transmute float64
+    if not is_finite(value) {return OutOfRange}
+    let count=_float_exact(value)*rational(1000000000)
+    if count.denominator not=? 1 {return OffGrid}
+    if not _fits(count.numerator) {return OutOfRange}
+    _duration(count.numerator)
+}
 
 # ---------------- calendar periods: recipes that need a date to mean anything ----------------
 # `1day` is a Days and `1month` a Months, so a date add that cannot fail has the plain type.
