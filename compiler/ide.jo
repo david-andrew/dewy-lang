@@ -31,6 +31,7 @@ use 'lex.jo'
 use 'effects.jo'
 use 'ide_ops.dewy'
 use 'ide_index.dewy'
+use 'ide_text.dewy'
 
 const IK_LOCAL = 1
 const IK_PARAM = 2
@@ -86,20 +87,6 @@ ide_flush = ():
     __write_fd(ide_fd, data(s), len(s))
     __write_fd(ide_fd, data("\n"), 1)
 
-ide_find_name = (f: int, from: int, name: int) -> int:
-    src = files[f].src
-    nm = name_of(name)
-    n = len(nm)
-    if n == 0: return -1
-    i = from
-    loop i + n <= len(src):
-        c = src[i]
-        if c == '\n': return -1
-        if c == nm[0] and (i == 0 or not ide_is_name_byte(src[i - 1])) and (i + n == len(src) or not ide_is_name_byte(src[i + n])):
-            if __mem_eq(data(src) + i, data(nm), n): return mkpos(f, i)
-        i += 1
-    -1
-
 # The Dewy spelling of a name the checker knows by the library's: int64 for i64, xs.pop(i) for
 # remove, printl for print (0: none)
 ide_dewy_alt = (name: int) -> int:
@@ -124,39 +111,7 @@ ide_dewy_alt = (name: int) -> int:
 # from m import x as y: y -> x
 ide_alias_of: {int: int} = {}
 
-# name = value arguments: the parameters (or fields) of declaration d they are for
-ide_named_args = (args: int[], d: int, kind: int, ts: int[]):
-    loop a in args:
-        if nodes[a].kind != .namedarg: continue
-        nm = int(nodes[a].name)
-        loop i in [0..nkids(d)):
-            if int(nodes[kid(d, i)].name) == nm:
-                t = 0
-                if i < ts.len(): t = ts[i]
-                ide_ref(nodes[a].pos, nm, kind, nodes[kid(d, i)].pos, t, 0)
-
 # ---- descriptions ----
-
-ide_line_start = (src: str, i0: int) -> int:
-    i = i0
-    loop i > 0 and src[i - 1] != '\n': i -= 1
-    i
-
-ide_line_end = (src: str, i0: int) -> int:
-    i = i0
-    loop i < len(src) and src[i] != '\n': i += 1
-    i
-
-ide_indent = (src: str, a: int) -> int:
-    i = a
-    loop i < len(src) and (src[i] == ' ' or src[i] == '\t'): i += 1
-    i - a
-
-# does a string literal start at i ("", '', """""", r"")?
-ide_str_start = (src: str, i: int) -> bool:
-    c = src[i]
-    if c == '"' or c == '\'': return true
-    c == 'r' and i + 1 < len(src) and (src[i + 1] == '"' or src[i + 1] == '\'') and (i == 0 or not is_ident_char(src[i - 1]))
 
 ide_mark = (m: mut u8[], i: int, v: u8):
     if i < m.len(): m[i] = v
@@ -223,96 +178,6 @@ ide_str_end = (src: str, i0: int, marks: mut u8[], nesting: int = 0, dewy: bool 
     ide_mark(marks, n, 1)
     n
 
-# the end of the comment at i: a line comment's line end; in Dewy, after a block comment's last }#
-# (or the end of the text, while it is unfinished)
-ide_comment_end = (src: str, i: int, dewy: bool) -> int:
-    if dewy and i + 1 < len(src) and src[i + 1] == '{{':
-        e = dewy_block_comment_end(src, i, len(src))
-        if e < 0: return len(src)
-        return e
-    e = i
-    loop e < len(src) and src[e] != '\n': e += 1
-    e
-
-ide_skip_str = (src: str, i: int) -> int:
-    m: u8[]
-    ide_str_end(src, i, m)
-
-# where a comment starts on the line [a, b) (outside strings), or -1
-ide_comment_at = (src: str, a: int, b: int) -> int:
-    i = a
-    loop i < b:
-        if ide_str_start(src, i):
-            i = ide_skip_str(src, i)
-            continue
-        if src[i] == '#': return i
-        i += 1
-    -1
-
-# the comment lines right above the declaration at p (when it starts its line: not a field
-# of a record written on one line), and a comment after it on its line
-ide_doc_of = (p: int) -> str:
-    f = pos_file(p)
-    if p <= 0 or f < 0 or f >= files.len(): return ""
-    src = files[f].src
-    a = ide_line_start(src, pos_off(p))
-    out = ""
-    k = a
-    if not ide_leads_line(src, pos_off(p)): k = 0
-    loop k > 0:
-        pa = ide_line_start(src, k - 1)
-        t = trim(src[pa..k - 1))
-        # (past its @attributes)
-        if len(out) == 0 and len(t) > 0 and t[0] == '@':
-            k = pa
-            continue
-        if len(t) == 0 or t[0] != '#': break
-        t = t[1..]
-        if len(t) > 0 and t[0] == ' ': t = t[1..]
-        # (a section banner, # ---- name ----, is not about the declaration)
-        if starts_with(t, "---") or starts_with(t, "==="): break
-        if len(out) > 0: out = t + "\n" + out
-        else: out = t
-        k = pa
-    b = ide_line_end(src, a)
-    c = ide_comment_at(src, pos_off(p), b)
-    if c >= 0:
-        t = trim(src[c + 1..b))
-        if len(t) > 0:
-            if len(out) > 0: out += "\n"
-            out += t
-    out
-
-# the source of a declaration: its first line without a trailing comment or body, and for
-# structs and enums the indented lines after it (at most 30)
-ide_snippet = (p: int, whole: bool) -> str:
-    f = pos_file(p)
-    if p <= 0 or f < 0 or f >= files.len(): return ""
-    src = files[f].src
-    if not whole and ends_with(files[f].path, ".dewy") and not ide_leads_line(src, pos_off(p)): return ide_dewy_item(src, pos_off(p))
-    a = ide_line_start(src, pos_off(p))
-    b = ide_line_end(src, a)
-    c = ide_comment_at(src, a, b)
-    e = b
-    if c >= 0: e = c
-    out = trim(src[pos_off(p)..e))
-    if not whole: return out
-    ind = ide_indent(src, a)
-    i = b + 1
-    n = 0
-    loop i < len(src) and n < 30:
-        j = ide_line_end(src, i)
-        t = src[i..j)
-        if len(trim(t)) > 0 and ide_indent(src, i) <= ind: break
-        if len(trim(t)) > 0:
-            cc = ide_comment_at(src, i, j)
-            if cc >= 0: t = src[i..cc)
-            if len(trim(t)) > 0:
-                out += "\n" + trim_end(t[ind..])
-                n += 1
-        i = j + 1
-    out
-
 # A Dewy field or parameter written among others, `[x:float64 y:float64]`: the one at
 # offset i, up to where the next starts (a name followed by : or =), as `x: float64`.
 ide_dewy_item = (src: str, i: int) -> str:
@@ -342,137 +207,6 @@ ide_dewy_item = (src: str, i: int) -> str:
     c = find_byte(t, ':')
     if c > 0 and c + 1 < len(t) and t[c + 1] != ' ' and t[c + 1] != '>': t = t[..c + 1) + " " + t[c + 1..]
     t
-
-# a parameter as written: name: Type = default
-ide_param_text = (p: int) -> str:
-    src = files[pos_file(p)].src
-    i = pos_off(p)
-    depth = 0
-    loop i < len(src) and src[i] != '\n':
-        c = src[i]
-        if ide_str_start(src, i):
-            i = ide_skip_str(src, i)
-            continue
-        if c == '(' or c == '[' or c == '{{': depth += 1
-        else if c == ')' or c == ']' or c == '}}':
-            if depth == 0: break
-            depth -= 1
-        else if c == ',' and depth == 0: break
-        i += 1
-    trim(src[pos_off(p)..min(i, len(src))))
-
-# the end of a function's parameter list (after its closing parenthesis), from its declaration at
-# offset i (-1 if there is none)
-ide_params_end = (src: str, i0: int) -> int:
-    i = i0
-    loop i < len(src) and src[i] != '(' and src[i] != '\n': i += 1
-    if i >= len(src) or src[i] != '(': return -1
-    depth = 0
-    loop i < len(src):
-        c = src[i]
-        if ide_str_start(src, i):
-            i = ide_skip_str(src, i)
-            continue
-        if c == '#': i = ide_line_end(src, i)
-        else if c == '(' or c == '[' or c == '{{': depth += 1
-        else if c == ')' or c == ']' or c == '}}':
-            depth -= 1
-            if depth == 0: return i + 1
-        i += 1
-    -1
-
-# Declaration-only display: completion must not instantiate/check every library
-# function just to show its signature, and generic parameter names stay readable.
-ide_dewy_type_node = (n: int) -> str:
-    if n == 0: return "?"
-    k = nodes[n].kind
-    if k == .tname:
-        if nodes[n].aux == -7: return type_str(int(nodes[n].ival), true)
-        name = name_of(int(nodes[n].name))
-        if name == "__dewy_int": name = "int"
-        else if name == "int" or name == "i64": name = "int64"
-        else if name == "str": name = "string"
-        else if name in ["i8", "i16", "i32"]: name = "int" + name[1..]
-        else if name in ["u8", "u16", "u32", "u64"]: name = "uint" + name[1..]
-        else if name == "f32" or name == "f64": name = "float" + name[1..]
-        else if name == "Map" and nkids(n) == 2: name = "dict"
-        if nodes[n].sval != 0: name = name_of(int(nodes[n].sval)) + "." + name
-        if nkids(n) > 0:
-            args: str[]
-            loop child in kids(n): args.push(ide_dewy_type_node(child))
-            name += "<" + args.join(" ") + ">"
-        return name
-    if k == .tarray:
-        base = ide_dewy_type_node(int(nodes[n].a))
-        if nodes[n].aux >= 2: return "NDArray<" + base + ">"
-        if nodes[n].b != 0:
-            size = int(nodes[n].b)
-            text = "?"
-            if nodes[size].kind == .int_lit: text = "{nodes[size].ival}"
-            else if nodes[size].kind == .ident: text = name_of(int(nodes[size].name))
-            return "array<" + base + " length=" + text + ">"
-        return "array<" + base + ">"
-    if k == .tmap: return "dict<" + ide_dewy_type_node(int(nodes[n].a)) + " " + ide_dewy_type_node(int(nodes[n].b)) + ">"
-    if k == .tptr: return "*" + ide_dewy_type_node(int(nodes[n].a))
-    if k == .topt:
-        base = ide_dewy_type_node(int(nodes[n].a))
-        if nodes[int(nodes[n].a)].kind == .tunion: base = "(" + base + ")"
-        return base + "?"
-    if k == .tunion or k == .ttuple or k == .trecord:
-        parts: str[]
-        loop child in kids(n):
-            if k == .trecord: parts.push(name_of(int(nodes[child].name)) + ":" + ide_dewy_type_node(int(nodes[child].a)))
-            else: parts.push(ide_dewy_type_node(child))
-        if k == .tunion: return parts.join(" | ")
-        if k == .trecord: return "[" + parts.join(" ") + "]"
-        return "(" + parts.join(" ") + ")"
-    if k == .tfn:
-        params: str[]
-        loop i in [0..nkids(n)):
-            child = kid(n, i)
-            prefix = ""
-            if has_flag(child, NF_MUT): prefix = "@"
-            label = if i < nkids2(n) and nodes[kid2(n, i)].name != 0: name_of(int(nodes[kid2(n, i)].name)) else: "_"
-            if label != "_": prefix += label + ":"
-            params.push(prefix + ide_dewy_type_node(child))
-        result = "void"
-        if nodes[n].a != 0: result = ide_dewy_type_node(int(nodes[n].a))
-        if params.len() == 1: return "(" + params[0] + ":>" + result + ")"
-        return "((" + params.join(" ") + "):>" + result + ")"
-    "?"
-
-# a function's header: name = (params) -> ret (the parameter list as written)
-ide_fn_header = (d: int) -> str:
-    if ends_with(ide_doc, ".dewy"): return ide_dewy_fn_header(d)
-    p = nodes[d].pos
-    f = pos_file(p)
-    src = files[f].src
-    start = pos_off(p)
-    i = ide_params_end(src, start)
-    if i < 0: i = ide_line_end(src, start)
-    # -> ret, up to the colon that starts the body
-    j = i
-    loop j < len(src) and src[j] == ' ': j += 1
-    if j + 1 < len(src) and src[j] == '-' and src[j + 1] == '>':
-        depth = 0
-        loop j < len(src) and src[j] != '\n':
-            c = src[j]
-            if ide_str_start(src, j):
-                j = ide_skip_str(src, j)
-                continue
-            if c == '(' or c == '[' or c == '{{': depth += 1
-            else if c == ')' or c == ']' or c == '}}': depth -= 1
-            else if c == ':' and depth == 0: break
-            j += 1
-        i = min(j, len(src))
-    out = ""
-    loop k in [start..i):
-        c = src[k]
-        if c == '\n': out += " "
-        else: out += byte_str(int(c))
-    # (parameters on several lines: one space between them)
-    loop find(out, "  ") >= 0: out = replace(out, "  ", " ")
-    trim(out)
 
 # name(a: int, b: str[]): the generic instance that err_trail[k]'s call made
 trail_sig = (k: int) -> str:
@@ -513,48 +247,7 @@ ide_fn_sig = (f: int) -> str:
     if dewy and effect_panics_settled and effect_panics(f): s += " & panics"
     s
 
-# Enum.variant(fields) = value
-ide_variant_text = (ed: int, vd: int) -> str:
-    s = "{name_of(int(nodes[ed].name))}.{name_of(int(nodes[vd].name))}"
-    if nkids(vd) > 0:
-        s += "("
-        loop i in [0..nkids(vd)):
-            if i > 0: s += ", "
-            fnm = name_of(int(nodes[kid(vd, i)].name))
-            if not is_digit(fnm[0]): s += fnm + ": "
-            s += ide_param_text(nodes[int(nodes[kid(vd, i)].a)].pos)
-        s += ")"
-    if nodes[vd].a != 0 and nodes[int(nodes[vd].a)].kind == .int_lit: s += " = {nodes[int(nodes[vd].a)].ival}"
-    s
-
 decl_done: {int: bool} = {}
-
-# the declaration a reference points to, when it is not one of the indexed files' own
-ide_decl_of_ref = (r: IdeRef):
-    if r.decl < 0 or decl_done.get(r.decl) != none: return
-    f = pos_file(r.decl)
-    src = files[f].src
-    e = pos_off(r.decl)
-    loop e < len(src) and ide_is_name_byte(src[e]): e += 1
-    nm = intern(src[pos_off(r.decl)..e))
-    k = int(r.kind)
-    if k == IK_FN:
-        # (inst: the function's instance; for an imported name, minus its declaration node)
-        fd = 0
-        if r.inst > 0: fd = int(fns[int(r.inst)].decl)
-        else: fd = -int(r.inst)
-        if fd > 0: ide_decl(r.decl, nm, k, ide_fn_header(fd), ide_doc_of(r.decl))
-    else if k == IK_MODULE: ide_decl(r.decl, nm, k, "module {files[f].path}", "")
-    else if k == IK_LOCAL or k == IK_PARAM or k == IK_GLOBAL: ide_decl(r.decl, nm, k, "{name_of(nm)}: {ide_type_info(int(r.type))}", ide_doc_of(r.decl))
-    else if k == IK_VARIANT and tkind(int(r.type)) == .enum_:
-        ed = int(structs[int(types[prune(int(r.type))].st)].decl)
-        vd = 0
-        loop i in [0..nkids(ed)):
-            if int(nodes[kid(ed, i)].name) == nm: vd = kid(ed, i)
-        sn = name_of(nm)
-        if vd != 0: sn = ide_variant_text(ed, vd)
-        ide_decl(r.decl, nm, k, sn, ide_doc_of(r.decl))
-    else: ide_decl(r.decl, nm, k, ide_snippet(r.decl, k == IK_STRUCT or k == IK_ENUM), ide_doc_of(r.decl))
 
 ide_sym_decls = (s0: int):
     s = s0
@@ -612,27 +305,6 @@ ide_hint_agree = (hints: mut {int: str}, order: mut int[], p: int, lbl: str):
 
 # from m import x as y: where each y is bound ("file:y": position); the binding refers to what x does
 ide_alias_at: {str: int} = {}
-
-ide_alias_binds = ():
-    binds: IdeRef[]
-    loop d in from_imports:
-        f = pos_file(nodes[d].pos)
-        if not ide_indexed(f): continue
-        loop i in [0..nkids(d)):
-            id = kid(d, i)
-            if nodes[id].aux == 0: continue
-            nm = int(nodes[id].name)
-            al = int(nodes[id].aux)
-            p = ide_name_at(nodes[id].pos, nm)
-            if p < 0: continue
-            ap = ide_find_name(f, pos_off(p) + len(name_of(nm)), al)
-            if ap < 0: continue
-            ide_alias_at["{f}:{name_of(al)}"] = ap
-            loop r in ide_refs:
-                if r.pos == p:
-                    binds.push(IdeRef(ap, r.decl, r.kind, r.type, r.inst))
-                    break
-    loop b in binds: ide_refs.push(b)
 
 # everything learned: files, declarations, references, hints
 ide_finish = ():
@@ -762,73 +434,3 @@ ide_sym_detail = (s: int) -> (int, str):
     if sk == .module: return (IK_MODULE, "module")
     (IK_FN, "builtin")
 
-# the members of a value of type t0: fields, then functions taking it first (x.f() is f(x))
-ide_complete_members = (t0: int):
-    t = prune(t0)
-    k = types[t].kind
-    seen: {int: bool} = {}
-    if k == .module:
-        m = int(types[t].mod)
-        loop nm, s in modules[m].names:
-            nms = name_of(nm)
-            if len(nms) == 0 or nms[0] == '#': continue
-            kd = ide_sym_detail(s)
-            ide_emit("C\t{ide_esc(ide_completion_name(nm, s))}\t{kd.0}\t{ide_esc(kd.1)}")
-        ide_flush()
-        stop(0)
-    if k == .typeval:
-        tt = prune(int(types[t].elem))
-        if tt != 0 and types[tt].kind == .enum_: ide_complete_variants(tt)
-        if tt != 0 and is_int(tt):
-            loop name in ["min", "max"]: ide_emit("C\t{name}\t{IK_CONST}\t{ide_type_str(tt)}")
-        ide_flush()
-        stop(0)
-    st = t
-    if k == .ptr: st = prune(int(types[t].elem))
-    if types[st].kind == .struct_ and (not ends_with(ide_doc, ".dewy") or not is_map_type(st)):
-        si = int(types[st].st)
-        check_struct_fields(si)
-        loop i in [0..int(structs[si].nfields)):
-            fi = int(structs[si].fields) + i
-            seen[int(fields[fi].name)] = true
-            ide_emit("C\t{ide_esc(name_of(int(fields[fi].name)))}\t{IK_FIELD}\t{ide_esc(ide_type_str(zonk(int(fields[fi].type))))}")
-    if k == .vec and t != T_MAT4:
-        names_ = ["x", "y", "z", "w"]
-        loop i in [0..vec_n(t)): ide_emit("C\t{names_[i]}\t{IK_FIELD}\t{ide_type_str(vec_comp_type(t))}")
-    if k == .tuple and not ends_with(ide_doc, ".dewy"):
-        loop i in [0..int(types[t].nargs)): ide_emit("C\t{i}\t{IK_FIELD}\t{ide_type_str(zonk(targ(t, i)))}")
-    if ends_with(ide_doc, ".dewy") and (k == .array or k == .str_ or is_map_type(t)):
-        ide_emit("C\tlength\t{IK_FIELD}\tint64")
-    if k == .fixed: ide_emit("C\tlen\t{IK_FN}\tlen() -> int")
-    loop nm in method_names(t):
-        if seen.get(nm) != none or not is_ident_start(name_of(nm)[0]): continue
-        seen[nm] = true
-        # (an overload whose first parameter takes the value)
-        s = lookup(nm)
-        if s == 0: s = module_lookup(-1, nm)
-        loop s != 0:
-            d = int(syms[s].decl)
-            if syms[s].kind == .fns and d != 0 and nkids(d) > 0 and surface_sees(s, ends_with(ide_doc, ".dewy")):
-                sig = fn_sig(d)
-                binds = fill(0, int(sig.ntp))
-                if match_type(sig.params[0], t, binds, 0) >= 0:
-                    ide_emit("C\t{ide_esc(name_of(nm))}\t{IK_FN}\t{ide_esc(ide_fn_header(d))}")
-                    break
-            s = int(syms[s].next)
-    if k == .array or k == .str_:
-        loop it in intrinsics:
-            if ends_with(ide_doc, ".dewy") and k == .str_ and it.id != .len and it.id != .arrcap and it.id != .arrdata: continue
-            if it.arr: ide_emit("C\t{it.name}\t{IK_FN}\tbuiltin")
-    ide_flush()
-    stop(0)
-
-ide_complete_variants = (et: int):
-    t = prune(et)
-    if types[t].kind == .opt: t = prune(int(types[t].elem))
-    if types[t].kind == .enum_:
-        si = int(types[t].st)
-        loop v in [0..int(structs[si].nvariants)):
-            vi = int(structs[si].variants) + v
-            ide_emit("C\t{ide_esc(name_of(int(variants[vi].name)))}\t{IK_VARIANT}\t{ide_esc(ide_type_str(t))}")
-    ide_flush()
-    stop(0)
