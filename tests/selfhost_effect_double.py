@@ -64,6 +64,8 @@ def effect_services(text, modules):
         text = text.replace('facts_numeric.dewy', 'facts.jo').replace('facts_numeric.jo', 'facts.jo')
     if _doubled(modules.get('facts.jo', ''), ('fact_plan_current', 'fact_component_selector', 'fact_component_fact', 'fact_int_rows', 'fact_int_component', 'fact_int_components', 'fact_component_bounds', 'fact_row_bounds', 'fact_open', 'fact_pure', 'fact_queue')):
         text = text.replace('facts_plans.dewy', 'facts.jo').replace('facts_plans.jo', 'facts.jo')
+    if _doubled(modules.get('facts.jo', ''), ('fact_written_root', 'fact_routed_write', 'fact_routed_place', 'fact_forget_call', 'fact_dewy_local', 'fact_disjoint', 'fact_exposed_bound', 'fact_forget', 'fact_sink_disjoint_param', 'fact_owner_in_lib', 'fact_fn_in_lib', 'fact_holds_contract', 'fact_ends_path', 'fact_path_call_effects', 'fact_call_effects', 'fact_builtin_formatter', 'fact_text_sink', 'fact_call_field_type', 'fact_call_write')):
+        text = text.replace('facts_forgets.dewy', 'facts.jo').replace('facts_forgets.jo', 'facts.jo')
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(

@@ -1,0 +1,445 @@
+$runtime_checks
+from p"facts_summaries.dewy" import fact_record_arrays
+from p"effect_library.jo" import EffectClass
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (FK_INIT LF_ALIAS LF_MUTPARAM dewy_at fns globals lib_dir library_exit_call locals modules runtime_insts)
+from p"effect_classifiers.dewy" import (effect_library_class)
+from p"effect_control.dewy" import (effects_demand)
+from p"effect_costs.dewy" import (effect_signature_opaque)
+from p"effect_lattice.dewy" import (place_base)
+from p"effect_types.dewy" import (PlaceIdentity)
+from p"effects.jo" import (effect_summaries)
+from p"expr.jo" import (is_map_type is_nd nd_elem ntype shape_field_type)
+from p"facts.jo" import (FACT_CAP FactBinding FactCallWrites FactProjection FactState FactSummary fact_add_projection fact_binding fact_bound fact_call_field_types fact_difference fact_domain fact_exposed fact_forget_mutable_maps fact_index_get fact_index_put fact_new fact_owner fact_probe_on fact_project fact_projection_find fact_projection_first fact_projection_next_in fact_rebind fact_set_bound fact_shape_summaries fact_summary_assumed fact_summary_owner fact_summary_used fact_terms fact_text_sinks fact_type)
+from p"facts_changes.dewy" import (fact_change_route)
+from p"facts_joins.dewy" import (fact_field_node fact_payload_node)
+from p"facts_pools.dewy" import (fact_pool_type)
+from p"facts_probes.dewy" import (fact_probe_note)
+from p"facts_summaries.dewy" import (fact_summary fact_summary_actual)
+from p"lower_analysis.dewy" import (checked_call_mutmask)
+from p"nd_contracts.jo" import (fact_nd_data_length)
+from p"place_routes.dewy" import (place_path place_route)
+from p"places.jo" import (place_locked)
+from p"refine.jo" import (ref_assume refine_active representation_type)
+from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
+from p"types.jo" import (fields structs types T_INT T_NEVER T_STR mk_array tkind)
+from p"util.jo" import (files intern name_of pos_file pos_in_lib)
+
+ForgetWord:type=int64<overflow='wrap'>
+# The root a mutable argument writes: its place's, through elements as well as
+# fields (`f(@xs[i])`, and `d[k].clear()` on `d.vals[__map_entry_present(d k)]`),
+# or none. O(route depth).
+fact_written_root=(e0:ForgetWord):>PlaceIdentity=>$unsafe {
+    let p=place_base(place_route(e0))
+    if p.declaration not=? 0 {return p}
+    let e=e0
+    let indexed=false
+    let depth:ForgetWord=0
+    loop e not=? 0 and depth <? 32 {
+        depth += 1
+        let k=nodes.ptr[e].kind
+        if k =? 'index' and nodes.ptr[e].b not=? 0 or fact_payload_node(e) {indexed=true}
+        # (a local place, `let q = @xs[i]` or `loop @x in xs`, and a narrowed
+        # name write the place they name)
+        else if k =? 'ident' and nodes.ptr[e].aux =? int32(1) and ForgetWord(locals.ptr[ForgetWord(nodes.ptr[e].sym)].flags) & LF_ALIAS not=? 0 and locals.ptr[ForgetWord(nodes.ptr[e].sym)].alias not=? 0 and not place_locked.has(ForgetWord(nodes.ptr[e].sym)) {
+            e=ForgetWord(locals.ptr[ForgetWord(nodes.ptr[e].sym)].alias)
+            indexed=true
+            continue
+        }
+        else if k not=? 'addr' and k not=? 'conv' and not fact_field_node(e) {break}
+        e=ForgetWord(nodes.ptr[e].a)
+    }
+    if not indexed or e =? 0 {return p}
+    place_base(place_route(e))
+}
+# A call's write through an element place, `f(@xs[i])` or `f(@d[k])` (on
+# `d.vals[...]`), changes that route alone: its root gets a new value keeping
+# what the route cannot change (fact_change_route: an array's length, a
+# dictionary's keys and positions). False when the place is not one, for the
+# caller's own rule. O(route depth + the root's projections).
+fact_routed_write=(@s:FactState e0:ForgetWord at:ForgetWord reason:FactReason paths:array<array<int64>>=[]):>bool=>{
+    let e=fact_routed_place(e0)
+    if e =? 0 {return false}
+    fact_change_route(@s e false at reason paths)
+    true
+}
+# The element place a mutable argument names (`@xs[i]`, `@d[k]`), or 0.
+fact_routed_place=(e0:ForgetWord):>ForgetWord=>$unsafe {
+    let e=e0
+    loop nodes.ptr[e].kind =? 'addr' or nodes.ptr[e].kind =? 'conv' {e=ForgetWord(nodes.ptr[e].a)}
+    if place_base(place_route(e)).declaration not=? 0 or fact_written_root(e).declaration =? 0 {return 0}
+    e
+}
+# An opaque call's effects: every exposed root, and each local lent to it.
+fact_forget_call=(@s:FactState n:ForgetWord reason:FactReason at:ForgetWord=0):>void=>{
+    let site=if at =? 0 {n} else {at}
+    fact_forget(@s site reason)
+    fact_forget_mutable_maps(n @s true at reason)
+}
+fact_dewy_local=(l:ForgetWord):>bool=>$unsafe {
+    let f=ForgetWord(locals.ptr[l].owner)
+    if f <=? 0 or f >=? fns.length {return false}
+    # (a Dewy module's top level is its initializer's body)
+    if fns.ptr[f].decl =? 0 {return fns.ptr[f].kind =? FK_INIT and files[ForgetWord(modules[ForgetWord(fns.ptr[f].mod)].file)].is_dewy}
+    files[pos_file(nodes.ptr[ForgetWord(fns.ptr[f].decl)].pos)].is_dewy
+}
+# Distinct `@` parameters of one Dewy function are disjoint storage: each call
+# passes them places the mutable-argument check proves apart (provisional).
+fact_disjoint=(p:PlaceIdentity q:PlaceIdentity):>bool=>$unsafe {
+    # (two globals are two storages: neither is ever a place of the other)
+    if p.root =? 'global' and q.root =? 'global' {return p.declaration not=? q.declaration and p.declaration >? 0 and q.declaration >? 0}
+    if p.root not=? 'local' or q.root not=? 'local' or p.declaration =? q.declaration or p.declaration =? 0 or q.declaration =? 0 {return false}
+    let a=p.declaration
+    let b=q.declaration
+    if locals.ptr[a].owner not=? locals.ptr[b].owner or ForgetWord(locals.ptr[a].flags) & LF_MUTPARAM =? 0 or ForgetWord(locals.ptr[b].flags) & LF_MUTPARAM =? 0 {return false}
+    let f=ForgetWord(locals.ptr[a].owner)
+    f >? 0 and f <? fns.length and fns.ptr[f].decl not=? 0 and files[pos_file(nodes.ptr[ForgetWord(fns.ptr[f].decl)].pos)].is_dewy
+}
+fact_exposed_bound=(s:FactState):>bool=>$unsafe {
+    loop i in [0..s.bindings.length) {
+        if fact_exposed(s.bindings.ptr[i].place) {return true}
+    }
+    false
+}
+# A write through an exposed place p forgets every exposed root but those
+# disjoint from p.
+fact_forget=(@s:FactState at:ForgetWord reason:FactReason all:bool=false written:PlaceIdentity=PlaceIdentity('local' 0 0) keep_written:bool=false text_sink:bool=false):>void=>$unsafe {
+    loop i in [0..s.bindings.length) {
+        let p=s.bindings.ptr[i].place
+        if not all and not fact_exposed(p) {continue}
+        # Output's internal buffers remain mutable. Preserve only checked
+        # program globals that cannot alias those buffers through an escape.
+        if text_sink and p.root =? 'global' and not globals.ptr[p.declaration].exposed {
+            let d=ForgetWord(globals.ptr[p.declaration].decl)
+            if d not=? 0 and dewy_at(nodes.ptr[d].pos) and not pos_in_lib(nodes.ptr[d].pos) {continue}
+        }
+        if text_sink and p.root =? 'local' and fact_sink_disjoint_param(p.declaration) {continue}
+        if not all and (fact_disjoint(written p) or keep_written and p =? written) {continue}
+        let t=if p.root =? 'local' {ForgetWord(locals.ptr[p.declaration].type)} else {ForgetWord(globals.ptr[p.declaration].type)}
+        let v=fact_new(@s fact_domain(t reason at) FactTerm(type=t))
+        fact_holds_contract(@s t v)
+        s.bindings.ptr[i]=FactBinding(p v at s.bindings.ptr[i].value)
+    }
+}
+# A program function's `@` parameter: a text sink writes only the library's
+# own output state, whose globals only the runtime names, so `printl` keeps the
+# facts of `@pos` and `@inv`. O(1).
+fact_sink_disjoint_param=(l:ForgetWord):>bool=>$unsafe {
+    if ForgetWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 or not fact_dewy_local(l) {return false}
+    let d=ForgetWord(fns.ptr[ForgetWord(locals.ptr[l].owner)].decl)
+    d not=? 0 and not pos_in_lib(nodes.ptr[d].pos)
+}
+# Whether this analysis is of a library function. O(1).
+fact_owner_in_lib=():>bool=>{
+    fact_fn_in_lib(fact_owner)
+}
+fact_fn_in_lib=(f:ForgetWord):>bool=>$unsafe {
+    if f <=? 0 or f >=? fns.length {return true}
+    let d=ForgetWord(fns.ptr[f].decl)
+    d =? 0 or pos_in_lib(nodes.ptr[d].pos)
+}
+# A place declared with a refined type holds its contract whatever changed it:
+# every write to it was checked against that type. (A dependency names only
+# stable bindings: ref_term.)
+fact_holds_contract=(@s:FactState t:ForgetWord v:ForgetWord):>void=>{
+    if refine_active and v not=? 0 {ref_assume(t v [] @s)}
+}
+# A call that never returns ends its path: what it writes is never read, so
+# its callee tree is not summarized for it.
+fact_ends_path=(n:ForgetWord):>bool=>$unsafe {
+    ntype(n) =? T_NEVER or nodes.ptr[n].aux =? 0 and library_exit_call(n)
+}
+# A call needs length transfer only when its caller already tracks a mutable
+# array's length. Reuse the bounded return summary, cached per function; no
+# analysis for untouched/undemanded arrays. O(actual route depths + affected
+# lengths), plus the existing once-per-callee, budgeted summary traversal.
+fact_path_call_effects=(n:ForgetWord @s:FactState):>void=>$unsafe {
+    if fact_ends_path(n) {effects_demand(0 true); return}
+    let lengths:array<[int64 int64]>=[]
+    let shapes:array<[int64 int64 int64]>=[]
+    let record_lengths:array<[int64 int64 int64]>=[]
+    if nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and checked_call_mutmask(n) not=? 0 {
+        let f=ForgetWord(nodes.ptr[n].sym)
+        loop i in [0..min(nkids(n) fns.ptr[f].params.length)) {
+            let l=fns.ptr[f].params[i]
+            if ForgetWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {continue}
+            let pt=fact_type(ForgetWord(locals.ptr[l].type))
+            if fact_record_arrays(pt) {
+                fact_tracked_record_lengths(n i pt @s @record_lengths)
+                continue
+            }
+            if tkind(pt) not=? 'array' and (tkind(pt) not=? 'struct_' or not is_nd(pt)) {continue}
+            let v=fact_summary_actual(n i @s true)
+            if v =? 0 {continue}
+            if tkind(pt) not=? 'array' {
+                let p=fact_projection_find(s v intern("shape") false)
+                if p >=? 0 {shapes.push([i s.projections[p].value fact_nd_data_length(@s v)])}
+            }
+            else {
+                let p=fact_projection_find(s v (-1) false)
+                if p >=? 0 {lengths.push([i s.projections[p].value])}
+            }
+        }
+    }
+    let summary=FactSummary()
+    let shape_mask:ForgetWord=0
+    if shapes.length >? 0 {effects_demand(ForgetWord(nodes.ptr[n].sym) true);}
+    if lengths.length >? 0 or shapes.length >? 0 or record_lengths.length >? 0 {
+        if ForgetWord(nodes.ptr[n].sym) =? fact_summary_owner and fact_summary_assumed.length >? 0 {
+            fact_summary_used=true
+            summary.lengths=fact_summary_assumed
+        }
+        else {
+            summary=fact_summary(ForgetWord(nodes.ptr[n].sym) true)
+            if shapes.length >? 0 {shape_mask=fact_shape_summaries.get(ForgetWord(nodes.ptr[n].sym)) ?? 0}
+        }
+    }
+    fact_call_effects(n @s)
+    # Only an already demanded shape requests the bounded body summary. On
+    # every returning path it must preserve both immutable identities; an
+    # unknown write, replacement, callback or pending cleanup refuses reuse.
+    # O(actual routes + tracked shapes), within the existing summary budget.
+    loop entry in shapes {
+        let i=entry[0]
+        if i >=? 62 or shape_mask & (ForgetWord(1) << ForgetWord(i)) =? 0 {continue}
+        let v=fact_summary_actual(n i @s)
+        if v =? 0 or s.projections.length + 3 >=? FACT_CAP {continue}
+        fact_add_projection(@s FactProjection(v intern("shape") false entry[1]))
+        let data=fact_project(@s v intern("data") false mk_array(nd_elem(representation_type(fact_terms[v].type))))
+        fact_add_projection(@s FactProjection(data (-1) false entry[2]))
+    }
+    loop pair in lengths {
+        let i=pair[0]
+        if i >=? summary.lengths.length or summary.lengths[i] =? 0 {continue}
+        let v=fact_summary_actual(n i @s)
+        if v =? 0 {continue}
+        # An unchanged length is the SAME immutable evaluation. Reusing it
+        # avoids chains of equalities through recursive calls and joins.
+        if summary.lengths[i] =? 1 and s.projections.length <? FACT_CAP {
+            fact_add_projection(@s FactProjection(v (-1) false pair[1]))
+            continue
+        }
+        let after=fact_project(@s v (-1) false T_INT)
+        fact_difference(@s pair[1] after 0 n)
+        if summary.lengths[i] =? 1 {fact_difference(@s after pair[1] 0 n)}
+        let b=fact_bound(s after)
+        let old=fact_bound(s pair[1])
+        let high=if summary.lengths[i] =? 1 {min(b.hi old.hi)} else {b.hi}
+        fact_set_bound(@s after FactBound(max(b.lo old.lo) high))
+    }
+    # (a record's array field: its length is the same immutable evaluation)
+    loop entry in record_lengths {
+        if not fact_kept_field(summary.kept_fields entry[0] entry[1]) or s.projections.length >=? FACT_CAP {continue}
+        let v=fact_summary_actual(n entry[0] @s)
+        if v =? 0 {continue}
+        let pt=fact_type(ForgetWord(locals.ptr[fns.ptr[ForgetWord(nodes.ptr[n].sym)].params[entry[0]]].type))
+        let field=fact_project(@s v entry[1] false fact_call_field_type(pt entry[1]))
+        if field not=? 0 {fact_add_projection(@s FactProjection(field (-1) false entry[2]))}
+    }
+}
+fact_kept_field=(kept:array<int64> parameter:ForgetWord field:ForgetWord):>bool=>$unsafe {
+    let i:ForgetWord=0
+    loop i + 1 <? kept.length {
+        if kept.ptr[i] =? parameter and kept.ptr[i + 1] =? field {return true}
+        i += 2
+    }
+    false
+}
+# (the array fields of a mutable record actual whose length this state tracks: the demand for
+# their summary. O(fields), at most eight, as the summary's own list)
+fact_tracked_record_lengths=(n:ForgetWord i:ForgetWord pt:ForgetWord @s:FactState @out:array<[int64 int64 int64]>):>void=>$unsafe {
+    let v=fact_summary_actual(n i @s true)
+    if v =? 0 {return}
+    let si=ForgetWord(types.ptr[pt].st)
+    loop k in [0..min(ForgetWord(structs.ptr[si].nfields) 8)) {
+        let name=ForgetWord(fields.ptr[ForgetWord(structs.ptr[si].fields) + k].name)
+        let p=fact_projection_find(s v name false)
+        if p <? 0 {continue}
+        let q=fact_projection_find(s s.projections[p].value (-1) false)
+        if q >=? 0 {out.push([i name s.projections[q].value])}
+    }
+}
+# A settled summary can preserve exposed roots across read-only calls.
+# Opaque/callback/hidden-helper effects still invalidate every exposed root.
+fact_call_effects=(n:ForgetWord @s:FactState):>void=>$unsafe {
+    let f=ForgetWord(nodes.ptr[n].sym)
+    fact_forget_mutable_maps(n @s)
+    # Formatting operands have already run. These bundled text sinks touch
+    # runtime output buffers only, never a program's global or lent places.
+    # Keep their full I/O/cost effects; this is solely a write-footprint rule.
+    if nodes.ptr[n].aux =? 0 and fact_text_sink(f) {fact_forget(@s n 'call' text_sink=true); return}
+    # (a callee opaque by its signature forgets the same exposed roots its
+    # summary would: its call tree is not visited for it)
+    if nodes.ptr[n].aux =? 0 and f >? 0 and f <? fns.length and not (fns.ptr[f].body not=? 0 and fns.ptr[f].state not=? 2) and effect_signature_opaque(f) {
+        # A reviewed library class writes only its mutable actuals. With
+        # none, allocator/bookkeeping opacity cannot change caller places.
+        # Reuse the cached contract, O(1); do not walk a runtime call tree.
+        if checked_call_mutmask(n) =? 0 and effect_library_class(f) not=? EffectClass.unclassified {return}
+        effects_demand(0 true);
+        fact_forget_call(@s n 'call')
+        return
+    }
+    # (a return summary's run does not settle callee effect rows for itself:
+    # a callee not yet settled forgets every exposed root, as an opaque call)
+    if fact_summary_owner not=? 0 and nodes.ptr[n].aux =? 0 and f >? 0 and f <? effect_summaries.length and not effect_summaries.ptr[f].done {
+        fact_forget_call(@s n 'call')
+        return
+    }
+    # (a call can change only exposed roots and its place arguments: with
+    # neither bound here, its effect row has nothing to tell this state)
+    if nodes.ptr[n].aux =? 0 and checked_call_mutmask(n) =? 0 and not fact_exposed_bound(s) {return}
+    if fact_probe_on and nodes.ptr[n].aux =? 0 {fact_probe_note(f)}
+    if nodes.ptr[n].aux not=? 0 or not effects_demand(f true) {
+        fact_forget_call(@s n 'call')
+        return
+    }
+    if fns.ptr[f].body not=? 0 and fns.ptr[f].state not=? 2 {
+        fact_forget_call(@s n 'callee')
+        return
+    }
+    let events=effect_summaries.ptr[f].events
+    loop e in [0..events.length) {
+        let kind=events.ptr[e].atom.kind
+        # (a library caller's own facts may describe the output state a helper's text sink writes)
+        if kind =? 'opaque' or kind =? 'escape' or kind =? 'io' and fact_owner_in_lib() {
+            fact_forget_call(@s n 'call')
+            return
+        }
+    }
+    # (an element place argument, `hurt(@fs[i])`, changes only what the
+    # callee writes in it: its written paths, on every tracked element)
+    let routed:dict<int64 array<array<int64>>>=[]
+    loop e in [0..events.length) {
+        if events.ptr[e].atom.kind not=? 'write' {continue}
+        let p=place_base(events.ptr[e].atom.place)
+        let i=p.declaration - 1
+        if p.root not=? 'formal' or i <? 0 or i >=? nkids(n) or fact_routed_place(kid(n i)) =? 0 {continue}
+        let paths=routed.get(i) ?? []
+        paths.push(place_path(events.ptr[e].atom.place))
+        routed[i]=paths
+    }
+    if routed.length >? 0 {
+        loop i in [0..nkids(n)) {
+            let paths=routed.get(i)
+            if paths not=? none {fact_routed_write(@s kid(n i) n 'call' paths);}
+        }
+    }
+    let groups:array<FactCallWrites>=[]
+    let by_root:array<int64>=[]
+    loop e in [0..events.length) {
+        if events.ptr[e].atom.kind not=? 'write' {continue}
+        let route=events.ptr[e].atom.place
+        let p=place_base(route)
+        let path=place_path(route)
+        if p.root =? 'formal' {
+            let i=p.declaration - 1
+            if i <? 0 or i >=? nkids(n) {fact_forget_call(@s n 'call'); return}
+            if routed.has(i) {continue}
+            let actual=place_route(kid(n i))
+            p=place_base(actual)
+            if actual.parent not=? 0 {path=[place_path(actual)... path...]}
+        }
+        if p.declaration =? 0 {fact_forget_call(@s n 'call'); return}
+        let i=fact_binding(s p)
+        if i <? 0 {
+            if fact_exposed(p) {fact_forget(@s n 'call' false p)}
+            continue
+        }
+        let old=s.bindings[i].value
+        if path.length =? 0 or fact_projection_first(s old) <? 0 {
+            if fact_exposed(p) {fact_forget(@s n 'call' false p true)}
+            let t=if p.root =? 'local' {ForgetWord(locals.ptr[p.declaration].type)} else {ForgetWord(globals.ptr[p.declaration].type)}
+            let value=fact_new(@s fact_domain(t 'call' n) FactTerm(type=t))
+            fact_holds_contract(@s t value)
+            fact_rebind(@s p value n old)
+            continue
+        }
+        let g=fact_index_get(by_root i)
+        if g <? 0 {
+            g=groups.length
+            fact_index_put(@by_root i g)
+            groups.push(FactCallWrites(p i))
+        }
+        let group_paths=groups[g].paths
+        group_paths.push(path)
+        groups[g].paths=group_paths
+    }
+    loop group in groups {
+        let p=group.place
+        let old=s.bindings[group.binding].value
+        # Other exposed roots may alias this one. Read the old value only
+        # after earlier groups have invalidated any such alias.
+        if fact_exposed(p) {fact_forget(@s n 'call' false p true)}
+        let t=if p.root =? 'local' {ForgetWord(locals.ptr[p.declaration].type)} else {ForgetWord(globals.ptr[p.declaration].type)}
+        let value=fact_call_write(@s old t group.paths 0 n)
+        fact_rebind(@s p value n old)
+    }
+}
+# Scalars can select a program formatter. Only the resolved builtin word
+# leaf or reviewed library formatter has no external writes.
+fact_builtin_formatter=(part:ForgetWord):>bool=>$unsafe {
+    let f=ForgetWord(nodes.ptr[part].sym)
+    if f <=? 0 {return false}
+    if f =? (runtime_insts.get("__fmt_word") ?? 0) {return true}
+    effect_library_class(f) not=? EffectClass.unclassified
+}
+fact_text_sink=(f:ForgetWord):>bool=>$unsafe {
+    if f <=? 0 or f >=? fns.length {return false}
+    let known=fact_text_sinks.get(f)
+    if known not=? none {return known}
+    let d=ForgetWord(fns.ptr[f].decl)
+    let sink=false
+    if d not=? 0 and nodes.ptr[d].kind =? 'fn_' and fns.ptr[f].params.length =? 1 {
+        let name=name_of(ForgetWord(nodes.ptr[d].name))
+        let path=files[pos_file(nodes.ptr[d].pos)].path
+        sink=(name =? "__print_str" and path =? "{lib_dir}/core/rt.jo" or name =? "write" and path =? "{lib_dir}/core/os.jo") and ForgetWord(locals.ptr[fns.ptr[f].params[0]].type) =? T_STR
+    }
+    fact_text_sinks[f]=sink
+    sink
+}
+fact_call_field_type=(t:ForgetWord selector:ForgetWord):>ForgetWord=>{
+    let known=fact_call_field_types.get([t selector])
+    if known not=? none {return known}
+    let ft=shape_field_type(t selector)
+    fact_call_field_types[[t selector]]=ft
+    ft
+}
+fact_call_write=(@s:FactState old:ForgetWord t:ForgetWord paths:array<array<int64>> depth:ForgetWord at:ForgetWord):>ForgetWord=>{
+    let whole=false
+    loop path in paths {
+        if depth >=? path.length {whole=true}
+    }
+    let fresh=fact_new(@s fact_domain(t 'call' at) FactTerm(type=t))
+    let pi=fact_projection_first(s old)
+    if whole or pi <? 0 or tkind(fact_type(t)) not=? 'struct_' or is_map_type(fact_type(t)) or fact_pool_type(t) {
+        fact_holds_contract(@s t fresh)
+        return fresh
+    }
+    # Index the written children, then visit each demanded projection once.
+    # No projection is created for an unread or wholly overwritten field.
+    let replaced:array<int64>=[]
+    let by_field=dict<int64 array<array<int64>>>()
+    loop path in paths {
+        let selector=path[depth]
+        if depth + 1 =? path.length {fact_index_put(@replaced selector 1); continue}
+        let routes=by_field.get(selector) ?? []
+        routes.push(path)
+        by_field[selector]=routes
+    }
+    let prior=s.projections
+    let links=s.index[0].projection_next
+    loop pi >=? 0 {
+        let p=prior[pi]
+        pi=fact_projection_next_in(prior links pi)
+        if p.element or p.selector <? 0 or fact_index_get(replaced p.selector) >=? 0 {continue}
+        let routes=by_field.get(p.selector) ?? []
+        let value=p.value
+        if routes.length >? 0 {
+            let ft=fact_call_field_type(fact_type(t) p.selector)
+            if ft =? 0 {continue}
+            value=fact_call_write(@s value ft routes depth + 1 at)
+        }
+        if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh p.selector false value))}
+    }
+    fresh
+}
