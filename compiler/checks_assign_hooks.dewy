@@ -1,0 +1,605 @@
+$runtime_checks
+from p"ast.jo" import NF_INDEX_CAPTURED
+from p"ast.jo" import NF_SQUOTE
+from p"@lib/core/str.jo" import (join)
+from p"ast.jo" import (NF_BROADCAST NF_CHECKED NF_COMPREHENSION NF_DISCARD NF_MUT NF_RELOOKUP NF_STMT add_flag clear_flag clone has_flag kid kids mk nkids nodes set_kid set_list)
+from p"check.jo" import (SINK_ARM SINK_BIND SINK_BODY SINK_COLLECTOR SINK_NONE SINK_ONE assign_before binding_leaves check_assign check_stmt compound_checked compound_selector_capture compound_value copy_writes ctxs cx dewy_at dewy_selection_update discarding elem_field_assign elem_tmp_n expand_when fns gcopy_writes index_update_arrays index_update_path index_update_sources interp_appends map_update_capture oom_written_name or_throw_returns place_root sink_arm_next sink_bind_next sink_body_mode sink_final sink_fn sink_pack_hit sink_pack_site sinks tuple_slot_write union_has_void value_capable values_hint_first values_hint_label values_hint_pos values_index_base var_type_error)
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_sinks.dewy" import (sink_express sink_open sink_root)
+from p"checker_tokens.dewy" import (Tok)
+from p"checker_values.dewy" import (values_init)
+from p"checks_unpack.dewy" import (unpack_binding unpack_length_check)
+from p"decimals.jo" import (decimal_float_write)
+from p"exact.jo" import (exact_type)
+from p"expr.jo" import (a_type bc_assign bc_block bc_call bc_ident bc_let bc_stmt can_coerce capture_value check_place coerce concat_piece copy_path copy_place dewy_array_selection_call dewy_array_slice dewy_index_ranges index_array_fn is_lit is_map_type is_nd is_part_index last_checked lit_default mk_ident_local narrow_expr narrow_path ntype opt_fill opt_fill_at part_spec path_forget path_key path_name path_narrows path_rooted soa_assign)
+from p"ide.jo" import (ide_on)
+from p"lex.jo" import (tok_text_at)
+from p"refine.jo" import (copy_checked ref_dependent_ancestor ref_nd_receiver ref_nd_receivers ref_storage_contract refine_storage representation_type)
+from p"sibling_ops.dewy" import (sibling_flow_assign)
+from p"string_domain_ops.dewy" import (int_domain_write string_domain_write)
+from p"string_domains.jo" import (string_domains)
+from p"temperature_ops.dewy" import (temperature_write)
+from p"types.jo" import (T_MATH_INT T_NEVER T_STR T_VOID dt is_numeric is_soa is_union mk_tuple prune targ tkind type_eq types union_index union_members)
+from p"units.jo" import (quantity_compound)
+from p"util.jo" import (err_notes fatal files intern line_col name_of pos_file pos_in_lib warn)
+
+AssignHookWord:type=int64<overflow='wrap'>
+# A function body's sink: an inferred result may be a pack, a written one is one value,
+# and `:>void | E` (like `:>void`) gives no value, so what its body expresses is dropped.
+# (a function's result written as a type: `:>void`, `:>void | E`)
+# The members of t other than void, for "this expresses E when it fails".
+sink_failures=(t:int64):>string=>{
+    let out=""
+    loop m in union_members(t) {
+        if tkind(m) =? 'void_' {continue}
+        if (out as array<uint8>).length >? 0 {out="{out} | "}
+        out="{out}{dt(m)}"
+    }
+    out
+}
+# Exprstmt s gives t, in a statement where nothing may be expressed (SINK_VOID), or t is
+# `void | E`, which expresses its failure: say how to keep the statement.
+sink_void_error=(s:int64 t:int64):>void=>$unsafe {
+    let v=AssignHookWord(nodes.ptr[s].a)
+    let fname="this function"
+    if sink_fn >=? 0 {
+        let d=AssignHookWord(fns.ptr[AssignHookWord(ctxs[cx].inst)].decl)
+        if d not=? 0 and nodes.ptr[d].kind =? 'fn_' and nodes.ptr[d].name >? 0 {fname="'{oom_written_name(AssignHookWord(nodes.ptr[d].name))}'"}
+    }
+    if union_has_void(t) {
+        let e=sink_failures(t)
+        fatal(nodes.ptr[v].pos "this gives nothing when it succeeds and expresses {e} when it fails, which is not taken here: propagate the failure with `or_throw`, handle it (`match`, `is?`), or attach `;` to discard it, as in `f();`")
+    }
+    let rt=prune(AssignHookWord(ctxs[cx].ret))
+    let gives=if union_has_void(rt) {"nothing, or the errors it returns"} else {"nothing"}
+    fatal(nodes.ptr[v].pos "this expresses {a_type(t)}, and {fname} is written `:>{dt(rt)}`, so its body gives {gives}: attach `;` to discard the value, as in `f();`, or change the result type")
+}
+# The name a several-valued expression is shown by: `pair`, or the called function's.
+values_shown=(v:int64):>string=>$unsafe {
+    let k=nodes.ptr[v].kind
+    if k =? 'ident' and nodes.ptr[v].name >? 0 {return name_of(AssignHookWord(nodes.ptr[v].name))}
+    if k =? 'call' and nodes.ptr[v].sym >? 0 and nodes.ptr[v].aux =? 0 {
+        let d=AssignHookWord(fns.ptr[AssignHookWord(nodes.ptr[v].sym)].decl)
+        if d not=? 0 and nodes.ptr[d].name >? 0 {return "{name_of(AssignHookWord(nodes.ptr[d].name))}()"}
+    }
+    if k =? 'call' and nodes.ptr[AssignHookWord(nodes.ptr[v].a)].kind =? 'ident' {return "{name_of(AssignHookWord(nodes.ptr[AssignHookWord(nodes.ptr[v].a)].name))}()"}
+    "(...)"
+}
+# An accumulator for sink i's values: `$packN = []`, declared first in its block at the end.
+# (values of two types expressed in main's body: main gives back none, so the first one
+# expressed is the mistake to name, as sink_close does)
+sink_main_value=(i:int64 pos:int64):>void=>$unsafe {
+    if sinks[i].mode not=? SINK_BODY {return}
+    let d=AssignHookWord(fns.ptr[AssignHookWord(ctxs[cx].inst)].decl)
+    if d =? 0 or nodes.ptr[d].kind not=? 'fn_' or name_of(AssignHookWord(nodes.ptr[d].name)) not=? "main" {return}
+    let first=AssignHookWord(sinks[i].first)
+    if first =? 0 {first=pos}
+    fatal(first "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")
+}
+# (how a block's values go: a function body's, a collector's, an arm's, a binding's, or
+# dropped; -1 for none)
+block_sink_mode=(b:int64 want_value:bool):>int64=>$unsafe {
+    let sink_mode:AssignHookWord=-1
+    if sink_body_mode >=? 0 {
+        sink_mode=sink_body_mode
+        sink_body_mode=-1
+    }
+    else if has_flag(b NF_DISCARD) and sinks.length >? 0 {sink_mode=SINK_NONE} else if want_value and files[pos_file(nodes.ptr[b].pos)].is_dewy {
+        if has_flag(b NF_COMPREHENSION) {sink_mode=SINK_COLLECTOR} else if sink_arm_next =? b {sink_mode=SINK_ARM} else if sink_bind_next =? b {sink_mode=SINK_BIND} else {sink_mode=SINK_ONE}
+    }
+    sink_arm_next=0
+    sink_bind_next=0
+    if sink_mode >=? 0 {
+        sink_open(b sink_mode)
+        discarding=false
+    }
+    sink_mode
+}
+block_expand=(b:int64):>void=>{
+    let nl:array<int64>=[]
+    loop i in [0..nkids(b)) {expand_when(@nl kid(b i))}
+    set_list(b nl)
+}
+block_direct=(s:int64):>void=>{
+    sinks[sinks.length - 1].direct=s
+}
+# The value statement ending a value block (its result type), or -1 when it is a statement.
+block_final=(b:int64 i:int64 expected:int64 sink_mode:int64):>int64=>$unsafe {
+    let s=kid(b i)
+    # A trailing spawn is a statement even in a value-producing helper body.
+    if not value_capable(s) or nodes.ptr[s].kind =? 'exprstmt' and nodes.ptr[AssignHookWord(nodes.ptr[s].a)].kind =? 'call' and nodes.ptr[AssignHookWord(nodes.ptr[s].a)].aux2 =? 17 {return -1}
+    let collecting=sink_mode =? SINK_BODY or sink_mode =? SINK_ARM or sink_mode =? SINK_BIND
+    let counted=sink_mode =? SINK_BODY or sink_mode =? SINK_BIND
+    if nodes.ptr[s].kind =? 'if_' or nodes.ptr[s].kind =? 'iflet' {
+        let es=mk('exprstmt' nodes.ptr[s].pos)
+        nodes.ptr[es].a=int32(s)
+        clear_flag(s NF_STMT)
+        set_kid(b i es)
+        s=es
+        if counted {sinks[sinks.length - 1].direct=s}
+    }
+    let e=AssignHookWord(nodes.ptr[s].a)
+    if nodes.ptr[e].kind =? 'match_' {clear_flag(e NF_STMT)}
+    let result=T_VOID
+    if collecting {
+        let saved_final=sink_final
+        sink_final=e
+        let saved_site=sink_pack_site
+        sink_pack_site=e
+        result=check_expr(e expected)
+        sink_final=saved_final
+        nodes.ptr[s].a=int32(last_checked)
+        let pack=sink_pack_hit not=? 0 and sink_pack_hit =? e
+        sink_pack_hit=0
+        sink_pack_site=saved_site
+        let armed=sinks[sink_root(sinks.length - 1)].finals.contains(e)
+        if not armed and tkind(result) not=? 'void_' and result not=? T_NEVER {sink_express(s result pack true)}
+    }
+    else {
+        result=check_expr(e expected)
+        nodes.ptr[s].a=int32(last_checked)
+    }
+    if tkind(result) not=? 'void_' {nodes.ptr[b].aux=1}
+    if result =? T_NEVER {nodes.ptr[b].aux=0}
+    add_flag(s NF_CHECKED)
+    result
+}
+# (1 followed variables a statement writes in a loop, 2 a statement while sibling contents
+# are known, 3 a followed variable just declared (n: it, m: its position), 4 the block's end)
+# the value expression of a value block
+block_value=(b:int64):>int64=>$unsafe {
+    AssignHookWord(nodes.ptr[kid(b nkids(b) - 1)].a)
+}
+# (1 growth's reading, 2 the decimal binding written (the one before it returned), 3 the
+# record type a sibling literal's syntax names)
+# `a, b = value`'s services (checker_assigns.dewy va_tuple): 1 a compound update refused,
+# 3 the value checked and unpacked (its type; a Dewy target's written type refused first),
+# 4 a value of another shape refused, 5 an element written (its place checked, its text or
+# integer domain written), 6 an element of another type refused (part: the target as
+# written), 7 refinement contracts (a block, or 0), 8 elements converted
+assign_tuple=(s:int64 part:int64 t:int64 tt:int64 code:int64):>int64=>$unsafe {
+    let lhs=AssignHookWord(nodes.ptr[s].a)
+    if code =? 1 {fatal(nodes.ptr[s].pos "compound assignment to a tuple")}
+    if code =? 3 {
+        if files[pos_file(nodes.ptr[s].pos)].is_dewy {
+            loop binding in binding_leaves(kids(lhs)) {
+                if nodes.ptr[binding].a not=? 0 {fatal(nodes.ptr[binding].pos "type annotations declare bindings; use let or const for typed unpacking")}
+            }
+        }
+        let vt=prune(values_init(AssignHookWord(nodes.ptr[s].b) 0 true))
+        nodes.ptr[s].b=int32(last_checked)
+        let unpacked=unpack_binding(AssignHookWord(nodes.ptr[s].b) vt kids(lhs) nodes.ptr[s].pos)
+        set_list(lhs unpacked[1])
+        nodes.ptr[s].b=int32(last_checked)
+        return unpacked[0]
+    }
+    if code =? 4 {fatal(nodes.ptr[s].pos "expected a tuple with {nkids(lhs)} elements (or an array), found {dt(t)}")}
+    if code =? 5 {
+        check_place(part false)
+        if string_domains.length >? 0 and t =? T_STR {string_domain_write(part 0)}
+        if t =? T_MATH_INT and dewy_at(nodes.ptr[s].pos) {int_domain_write(part 0 (-1))}
+        return 0
+    }
+    if code =? 6 {
+        if not can_coerce(0 t tt) and not type_eq(t tt) {fatal(nodes.ptr[part].pos "cannot assign {dt(t)} to {dt(tt)}")}
+        return 0
+    }
+    if code =? 7 {
+        let contracted=false
+        loop target in kids(lhs) {
+            if nodes.ptr[target].kind =? 'hole' {continue}
+            if ref_storage_contract(refine_storage(target ntype(target))) or ref_dependent_ancestor(target) {contracted=true}
+        }
+        if not contracted {return 0}
+        let before:array<int64>=[]
+        let source=capture_value(AssignHookWord(nodes.ptr[s].b) t @before)
+        loop i in [0..nkids(lhs)) {
+            let target=kid(lhs i)
+            if nodes.ptr[target].kind =? 'hole' {continue}
+            let field=mk('field' nodes.ptr[s].pos)
+            nodes.ptr[field].a=int32(source)
+            nodes.ptr[field].aux=-2
+            nodes.ptr[field].ival=i
+            check_expr(field 0);
+            field=last_checked
+            let store=bc_assign(target field nodes.ptr[s].pos)
+            before.push(check_assign(store))
+        }
+        return bc_block(before nodes.ptr[s].pos)
+    }
+    let converted=false
+    loop i in [0..nkids(lhs)) {
+        let target=kid(lhs i)
+        if nodes.ptr[target].kind not=? 'hole' and not type_eq(targ(t i) ntype(target)) {converted=true}
+    }
+    if not converted {return s}
+    # Freeze the tuple once, then convert every element before writing
+    # destinations. Semantic int and fixed widths have different ABIs.
+    elem_tmp_n += 1
+    let name="$unpack_convert{elem_tmp_n}"
+    let pos=nodes.ptr[s].pos
+    let decl=bc_let(name AssignHookWord(nodes.ptr[s].b) pos)
+    add_flag(AssignHookWord(nodes.ptr[s].b) NF_CHECKED)
+    check_stmt(decl)
+    let values:array<int64>=[]
+    let targets:array<int64>=[]
+    loop i in [0..nkids(lhs)) {
+        let field=mk('field' pos)
+        nodes.ptr[field].a=int32(bc_ident(name pos))
+        nodes.ptr[field].aux=-2
+        nodes.ptr[field].ival=i
+        check_expr(field 0);
+        field=last_checked
+        let target=kid(lhs i)
+        let et=if nodes.ptr[target].kind =? 'hole' {targ(t i)} else {ntype(target)}
+        values.push(coerce(field et))
+        targets.push(et)
+    }
+    let tuple=mk('tuple' pos)
+    nodes.ptr[tuple].type=int32(mk_tuple(targets))
+    add_flag(tuple NF_CHECKED)
+    set_list(tuple values)
+    nodes.ptr[s].b=int32(tuple)
+    let assignment=nodes.length
+    nodes.push(nodes.ptr[s])
+    bc_block([decl assignment] pos)
+}
+# A field or element target's custom index or captured selectors, or 0.
+assign_element=(s:int64):>int64=>{
+    let r=elem_field_assign(s)
+    if r not=? 0 {return r}
+    # (after a custom index's read/edit/writeback, which captures its own
+    # receiver selectors before its getter runs)
+    compound_selector_capture(s)
+}
+assign_index=(s:int64 bt:int64 code:int64):>int64=>$unsafe {
+    let lhs=AssignHookWord(nodes.ptr[s].a)
+    let op=AssignHookWord(nodes.ptr[s].op)
+    if code =? 6 {return tuple_slot_write(s bt)}
+    if code =? 1 {
+        dewy_index_ranges(lhs bt)
+        return 0
+    }
+    if code =? 2 {
+        if has_flag(s NF_BROADCAST) {return dewy_selection_update(s)}
+        if op not=? 47 {fatal(nodes.ptr[s].pos "compound assignment to picked elements (write an explicit loop)")}
+        let call=dewy_array_slice(lhs AssignHookWord(nodes.ptr[s].b))
+        let es=mk('exprstmt' nodes.ptr[s].pos)
+        check_expr(call 0);
+        nodes.ptr[es].a=int32(last_checked)
+        return es
+    }
+    if code =? 3 {
+        if not is_nd(bt) {fatal(nodes.ptr[s].pos "stepped slicing requires an array")}
+        return 0
+    }
+    if code =? 5 {
+        let put=index_array_fn(AssignHookWord(nodes.ptr[lhs].b) "__put")
+        if (put as array<uint8>).length >? 0 {
+            # xs[mask] = v, xs[idxs] = vs: sets the elements picked
+            if has_flag(s NF_BROADCAST) {return dewy_selection_update(s)}
+            if op not=? 47 {fatal(nodes.ptr[s].pos "compound assignment to picked elements (write xs[m] = xs[m] .+ x)")}
+            let recv=AssignHookWord(nodes.ptr[lhs].a)
+            add_flag(recv NF_MUT)
+            let call=dewy_array_selection_call(put [recv AssignHookWord(nodes.ptr[lhs].b) AssignHookWord(nodes.ptr[s].b)] bt nodes.ptr[s].pos)
+            let es=mk('exprstmt' nodes.ptr[s].pos)
+            check_expr(call 0);
+            nodes.ptr[es].a=int32(last_checked)
+            return es
+        }
+        return 0
+    }
+    if is_soa(bt) and nodes.ptr[lhs].b not=? 0 {return soa_assign(s)}
+    if types.ptr[bt].kind =? 'struct_' and is_part_index(lhs bt) {
+        # m[.., j] = xs: writes into a part of m
+        if has_flag(s NF_BROADCAST) and is_nd(bt) {return dewy_selection_update(s true)}
+        if op not=? 47 {fatal(nodes.ptr[s].pos "compound assignment to a part of an array (write m[...] = m[...] .+ x)")}
+        let recv=AssignHookWord(nodes.ptr[lhs].a)
+        add_flag(recv NF_MUT)
+        ref_nd_receivers[recv]=true
+        # (a named selector keeps what is known of it across an assigned value's loops)
+        if files[pos_file(nodes.ptr[s].pos)].is_dewy {
+            elem_tmp_n += 1
+            let picked="$selection_index{elem_tmp_n}"
+            let block=bc_block([bc_let(picked part_spec(lhs) nodes.ptr[s].pos) bc_stmt(bc_call("__nd_slice_set" [recv bc_ident(picked nodes.ptr[s].pos) AssignHookWord(nodes.ptr[s].b)] nodes.ptr[s].pos) nodes.ptr[s].pos)] nodes.ptr[s].pos)
+            check_stmt(block)
+            return block
+        }
+        let call=bc_call("__nd_slice_set" [recv part_spec(lhs) AssignHookWord(nodes.ptr[s].b)] nodes.ptr[s].pos)
+        let es=mk('exprstmt' nodes.ptr[s].pos)
+        check_expr(call 0);
+        nodes.ptr[es].a=int32(last_checked)
+        return es
+    }
+    # (m[k] += x for a map changes the value in place: see map_elem_place)
+    if types.ptr[bt].kind =? 'struct_' and not (op not=? 47 and is_map_type(bt) and nodes.ptr[lhs].b not=? 0) {
+        let call=mk('call' nodes.ptr[s].pos)
+        let callee=mk('ident' nodes.ptr[s].pos)
+        nodes.ptr[callee].name=int32(intern("[]="))
+        nodes.ptr[call].a=int32(callee)
+        let recv=AssignHookWord(nodes.ptr[lhs].a)
+        add_flag(recv NF_MUT)
+        ref_nd_receiver(recv bt)
+        let val=AssignHookWord(nodes.ptr[s].b)
+        # (m[i, j] = v has several indexes)
+        let ixs=kids(lhs)
+        if nodes.ptr[lhs].b not=? 0 {ixs=[AssignHookWord(nodes.ptr[lhs].b)]}
+        if op not=? 47 {
+            let get=mk('index' nodes.ptr[s].pos)
+            let ga=clone(recv)
+            clear_flag(ga NF_MUT)
+            nodes.ptr[ga].type=0
+            nodes.ptr[get].a=int32(ga)
+            if nodes.ptr[lhs].b not=? 0 {nodes.ptr[get].b=int32(clone(AssignHookWord(nodes.ptr[lhs].b)))} else {
+                let cl:array<int64>=[]
+                loop x in ixs {cl.push(clone(x))}
+                set_list(get cl)
+            }
+            if nodes.ptr[s].sval not=? 0 or has_flag(s NF_BROADCAST) {
+                let gt=check_expr(get 0)
+                get=last_checked
+                add_flag(get NF_CHECKED)
+                val=compound_checked(s get val gt)
+                add_flag(val NF_CHECKED)
+            }
+            else {val=compound_value(s get val)}
+        }
+        set_list(call [recv ixs... val])
+        # (a resolved call, such as m[1] in m[1][2] = 3, is not checked again)
+        if nodes.ptr[recv].kind not=? 'call' {clear_flag(recv NF_CHECKED)}
+        let es=mk('exprstmt' nodes.ptr[s].pos)
+        check_expr(call 0);
+        nodes.ptr[es].a=int32(last_checked)
+        return es
+    }
+    0
+}
+# A field or element target: its dictionary selectors captured before the value (Dewy),
+# and the variable written through noted (a local written through and never read: see
+# copy_write_warnings)
+assign_capture=(s:int64 lhs:int64 dewy:bool):>void=>$unsafe {
+    if dewy {map_update_capture(lhs AssignHookWord(nodes.ptr[s].b) @assign_before)}
+    let r=place_root(lhs)
+    if r not=? 0 and nodes.ptr[r].kind =? 'ident' and nodes.ptr[r].aux =? int32(1) {
+        let wl=AssignHookWord(nodes.ptr[r].sym)
+        if not copy_writes.has(wl) {copy_writes[wl]=nodes.ptr[s].pos}
+    }
+    else if r not=? 0 and nodes.ptr[r].kind =? 'ident' and nodes.ptr[r].aux =? int32(2) {
+        let wg=AssignHookWord(nodes.ptr[r].sym)
+        if not gcopy_writes.has(wg) {gcopy_writes[wg]=nodes.ptr[s].pos}
+    }
+}
+# `x = value` checked to rt: (1 a temperature difference, 2 a decimal binding made float64,
+# 3 a variable of another type, 4 an optional being filled, 5 the paths it narrows,
+# 6 the paths it ends, 7 the optional filled (rt: its index))
+assign_write=(s:int64 rt:int64 lt:int64 code:int64):>int64=>$unsafe {
+    let lhs=AssignHookWord(nodes.ptr[s].a)
+    if code =? 1 {return temperature_write(AssignHookWord(nodes.ptr[s].b) last_checked rt lt)}
+    if code =? 2 {return if decimal_float_write(rt lt) {1} else {0}}
+    if code =? 3 {
+        if not can_coerce(last_checked rt lt) {var_type_error(lhs lt rt nodes.ptr[last_checked].pos)}
+        return 0
+    }
+    if code =? 4 {return opt_fill_at(lhs rt last_checked)}
+    if code =? 5 {
+        let rooted=path_rooted(lhs)
+        let key=""
+        if rooted or is_union(lt) or tkind(lt) =? 'opt' {key=path_key(lhs)}
+        if rooted {path_forget(key rt)}
+        # x.f = 5 where x.f is int | str: x.f is an int from here on
+        if is_union(lt) and union_index(lt rt) >=? 0 and (key as array<uint8>).length >? 0 {
+            path_narrows += 1
+            narrow_expr(copy_path(lhs) [rt] nodes.ptr[s].pos path_name(key))
+        }
+        # x.f = Enemy() where x.f is an Enemy?: it holds one from here on
+        else if tkind(lt) =? 'opt' and (key as array<uint8>).length >? 0 and type_eq(AssignHookWord(types.ptr[prune(lt)].elem) rt) {narrow_path(lhs (-2) true)}
+        return 0
+    }
+    if code =? 6 {
+        if path_rooted(lhs) {path_forget(path_key(lhs))}
+        return 0
+    }
+    opt_fill(rt lhs nodes.ptr[s].pos)
+    0
+}
+# `x op= value`'s services (checker_assigns.dewy va_compound): 1 a refined update, 2 a
+# quantity's (1: done), 3 a Dewy `+=` on an array (or text), 4 an exact-width integer (1),
+# 5 a helper-call update, 6 a one-character text added to an integer, 7 a text's `+=`
+# (refused in Dewy but for an interpolation's append), 8 a shift by a non-integer, 9 a
+# float given to an integer (other: its type)
+assign_update=(s:int64 lt:int64 other:int64 code:int64):>int64=>$unsafe {
+    let lhs=AssignHookWord(nodes.ptr[s].a)
+    let op=AssignHookWord(nodes.ptr[s].op)
+    if code =? 1 {
+        # The checked replacement reads and writes one selected element.
+        # Capture selectors before the old-value read, including scalar names
+        # which the RHS could change, rather than replaying the target.
+        let before:array<int64>=[]
+        let path=index_update_path(lhs)
+        let i=path.length - 1
+        loop i >=? 0 {
+            let part=path[i]
+            i -= 1
+            if nodes.ptr[part].kind =? 'index' and nodes.ptr[part].b not=? 0 and not has_flag(part NF_RELOOKUP) {
+                let selector=AssignHookWord(nodes.ptr[part].b)
+                if nodes.ptr[selector].kind not=? 'int_lit' {nodes.ptr[part].b=int32(capture_value(selector ntype(selector) @before))}
+            }
+        }
+        let rd=copy_place(lhs)
+        add_flag(rd NF_CHECKED)
+        let value=compound_checked(s rd AssignHookWord(nodes.ptr[s].b) representation_type(lt))
+        nodes.ptr[s].b=int32(coerce(value lt))
+        nodes.ptr[s].op=int32(47)
+        if before.length >? 0 {return bc_block([before... copy_checked(s)] nodes.ptr[s].pos)}
+        return s
+    }
+    let l=lt
+    if code =? 2 {return if quantity_compound(s l) {1} else {0}}
+    if code =? 3 or code =? 7 {
+        if code =? 7 and (not dewy_at(nodes.ptr[s].pos) or interp_appends.has(s)) {
+            let srt=prune(check_expr(AssignHookWord(nodes.ptr[s].b) T_STR))
+            if nodes.ptr[lhs].kind =? 'ident' and is_numeric(srt) and not can_coerce(last_checked srt T_STR) {var_type_error(lhs l srt nodes.ptr[s].pos)}
+            nodes.ptr[s].b=int32(coerce(last_checked T_STR))
+            nodes.ptr[s].aux=2
+            return s
+        }
+        if interp_appends.has(s) {return 0}
+        let nm=concat_piece(lhs false)
+        if types.ptr[l].kind =? 'str_' {fatal(nodes.ptr[s].pos "`+=` does not add text: `{nm} = \"\{{nm}}...\"` appends in place, and many pieces collect in an array and `join`")}
+        fatal(nodes.ptr[s].pos "`+=` does not join arrays (on arrays it is reserved for elementwise math): `{nm}.extend(ys)` appends ys and `{nm}.push(y)` one element; `.+=` adds element by element")
+    }
+    if code =? 4 {return if exact_type(l nodes.ptr[s].pos) {1} else {0}}
+    if code =? 5 {
+        # Helper calls, overloads and vectors: x = operation(x, y). Capture
+        # indices before reading x, including names the right side may change.
+        # Reacquire indexed/field storage after the RHS: it can resize an array.
+        let pos=nodes.ptr[s].pos
+        let pre:array<int64>=[]
+        let x=lhs
+        loop nodes.ptr[x].kind =? 'field' or nodes.ptr[x].kind =? 'index' {
+            if nodes.ptr[x].kind =? 'index' and nodes.ptr[x].b not=? 0 and not has_flag(x NF_RELOOKUP) {
+                let ib=AssignHookWord(nodes.ptr[x].b)
+                let ik=nodes.ptr[ib].kind
+                if ik not=? 'int_lit' {
+                    elem_tmp_n += 1
+                    let nm=intern("__index{elem_tmp_n}")
+                    let d=mk('vardecl' pos)
+                    nodes.ptr[d].name=int32(nm)
+                    nodes.ptr[d].b=int32(ib)
+                    index_update_sources[nm]=ib
+                    let rk=types.ptr[representation_type(ntype(AssignHookWord(nodes.ptr[x].a)))].kind
+                    if rk =? 'array' or rk =? 'fixed' {index_update_arrays[nm]=true}
+                    add_flag(ib NF_CHECKED)
+                    check_stmt(d)
+                    pre.insert(d 0)
+                    let idn=mk('ident' pos)
+                    nodes.ptr[idn].name=int32(nm)
+                    check_expr(idn 0);
+                    nodes.ptr[x].b=int32(last_checked)
+                }
+            }
+            x=AssignHookWord(nodes.ptr[x].a)
+        }
+        let rd=copy_place(lhs)
+        add_flag(rd NF_CHECKED)
+        nodes.ptr[s].b=int32(compound_checked(s rd AssignHookWord(nodes.ptr[s].b) lt))
+        nodes.ptr[s].op=int32(47)
+        if pre.length =? 0 {return s}
+        # (the statement, moved, after the index's variables)
+        let c=nodes.length
+        nodes.push(nodes.ptr[s])
+        let blk=mk('block' pos)
+        set_list(blk [pre... c])
+        return blk
+    }
+    if code =? 6 {
+        let rb=AssignHookWord(nodes.ptr[s].b)
+        if (name_of(AssignHookWord(nodes.ptr[rb].sval)) as array<uint8>).length =? 1 and not pos_in_lib(nodes.ptr[s].pos) {
+            let ch=name_of(AssignHookWord(nodes.ptr[rb].sval))
+            warn(nodes.ptr[rb].pos "\"{ch}\" here is the character code of {ch}, not the number: write {ch} without quotes for the number")
+        }
+        return 0
+    }
+    if code =? 8 {fatal(nodes.ptr[AssignHookWord(nodes.ptr[s].b)].pos "shift amount must be an integer")}
+    if nodes.ptr[lhs].kind =? 'ident' {var_type_error(lhs l other nodes.ptr[s].pos)}
+    fatal(nodes.ptr[s].pos "cannot apply {tok_text_at(op)} to {dt(l)} and {dt(other)} (int(...) makes the value an int, or make the field a float)")
+    0
+}
+assign_flow=(r:int64 literal:int64):>void=>{
+    sibling_flow_assign(r literal)
+    return
+}
+# (the selectors captured since mark, then the assignment)
+assign_wrap=(s:int64 r:int64 mark:int64):>int64=>$unsafe {
+    let before=assign_before[mark..]
+    assign_before.truncate(mark)
+    bc_block([before... copy_checked(r)] nodes.ptr[s].pos)
+}
+# (`f(pair())` where pair gives a number of values known only when it runs)
+values_dynamic=(v:int64):>void=>$unsafe {
+    let shown=values_shown(v)
+    fatal(nodes.ptr[v].pos "'{shown}' gives a number of values known only when it runs, and here a fixed number is taken: collect them, `[{shown}]`, or write its result type, `:>(int64 int64)`")
+}
+values_init_error=(kind:int64 v:int64 expected:int64 t:int64):>void=>$unsafe {
+    if kind =? 1 {fatal(nodes.ptr[v].pos "this gives {types.ptr[prune(t)].nargs} values, and the binding's type, {dt(expected)}, holds {types.ptr[prune(expected)].nargs}")}
+    if kind =? 2 {fatal(nodes.ptr[v].pos "'{values_shown(v)}' gives a number of values known only when it runs, and a binding holds a fixed number: collect them, `[{values_shown(v)}]`")}
+}
+values_internal_callee=(callee:int64):>bool=>$unsafe {
+    if nodes.ptr[callee].kind =? 'ident' {
+        let nm=name_of(AssignHookWord(nodes.ptr[callee].name))
+        if (nm as array<uint8>).length >? 1 and ((nm as array<uint8>)[0] =? b'_' and (nm as array<uint8>)[1] =? b'_' or (nm as array<uint8>)[0] =? b'$') {return true}
+    }
+    false
+}
+values_call_labels=(v:int64 hints:int64):>void=>$unsafe {
+    if ide_on and values_hint_pos.length >? hints and nodes.ptr[v].kind =? 'call' and nodes.ptr[v].aux =? 0 and nodes.ptr[v].sym >? 0 {
+        let d=AssignHookWord(fns.ptr[AssignHookWord(nodes.ptr[v].sym)].decl)
+        loop h in [hints..values_hint_pos.length) {
+            let first=values_hint_first[h]
+            let count=to_int(values_hint_label[h]) ?? 0
+            let names:array<string>=[]
+            loop i in [first..first + count) {
+                if i >=? nkids(d) or names.length >=? 8 {break}
+                names.push(name_of(AssignHookWord(nodes.ptr[kid(d i)].name)))
+            }
+            values_hint_label[h]="{join(names " ")}:"
+        }
+    }
+}
+values_shift_warning=(item:int64 count:int64):>void=>$unsafe {
+    warn(nodes.ptr[item].pos "'{values_shown(item)}' gives {count} values, filling as many positions, and positional arguments follow it: check which parameters they fill, or pass those by name")
+}
+values_length_check=(src:int64 k:int64 pos:int64):>int64=>{
+    unpack_length_check(mk_ident_local(src pos) k true pos "spreading this array into the call needs exactly {k} elements")
+}
+sink_pack_error=(n:int64 f:int64):>void=>$unsafe {
+    # (through a function value whose type says it gives several values, `<():>(int64 int64)>`)
+    if nodes.ptr[n].aux =? 1 {
+        let callee=AssignHookWord(nodes.ptr[n].a)
+        let cn=if nodes.ptr[callee].kind =? 'ident' and nodes.ptr[callee].name >? 0 {name_of(AssignHookWord(nodes.ptr[callee].name))} else {"this function"}
+        fatal(nodes.ptr[n].pos "'{cn}' gives several values (its type says so), and only one is taken here: collect them, `[{cn}(...)]`")
+    }
+    let d=AssignHookWord(fns.ptr[f].decl)
+    let name=if d not=? 0 and nodes.ptr[d].name >? 0 {name_of(AssignHookWord(nodes.ptr[d].name))} else {"this function"}
+    if fns.ptr[f].pack_n >? 0 {fatal(nodes.ptr[n].pos "'{name}' gives {fns.ptr[f].pack_n} values (its result is written so), and only one is taken here: collect them, `[{name}(...)]`, or unpack them, `(a b) = {name}(...)`")}
+    if fns.ptr[f].pack_k >? 0 {fatal(nodes.ptr[n].pos "'{name}' gives {fns.ptr[f].pack_k} values, and only one is taken here: collect them, `[{name}(...)]`, or unpack them, `(a b) = {name}(...)`")}
+    let ln=line_col(fns.ptr[f].pack)[0]
+    fatal(nodes.ptr[n].pos "'{name}' gives several values (its body expresses one before its end, at line {ln}), and only one is taken here: collect them, `[{name}(...)]`, or attach `;` to each value its body should discard, `f();`")
+}
+sink_values_error=(n:int64 t:int64):>void=>$unsafe {
+    let count=AssignHookWord(types.ptr[prune(t)].nargs)
+    let shown=values_shown(n)
+    let what=if nodes.ptr[n].kind =? 'ident' {"'{shown}' holds {count} values"} else {"this gives {count} values"}
+    if values_index_base =? n {fatal(nodes.ptr[n].pos "{what}, which are not an array: collect them to index them, `[{shown}][0]`, or unpack them, `(x y) = {shown}`")}
+    fatal(nodes.ptr[n].pos "{what}, and only one is taken here: collect them, `[{shown}]`, unpack them, `(x y) = {shown}`, or pass them to a function taking {count}")
+}
+sink_hold_error=(p:int64 t:int64 elem:int64 parts:array<int64>):>void=>$unsafe {
+    # (`key=(w) => (-w.count w.word)`: Python's tuple, which is one value of several parts)
+    if parts.length >? 1 and dewy_at(nodes.ptr[p].pos) {
+        let shown:array<string>=[]
+        loop q in parts {shown.push(dt(if is_lit(q) {lit_default(q)} else {ntype(q)}))}
+        err_notes.push([(-1) "help: for one value of several parts (a sort key, say), give a tuple and its type: `(x):>[{join(shown " ")}] => [...]`"])
+    }
+    fatal(nodes.ptr[p].pos "this expresses {a_type(t)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
+}
+sink_close_count_error=(i:int64 b:int64):>void=>$unsafe {
+    let want=AssignHookWord(sinks[i].want)
+    let d=AssignHookWord(fns.ptr[AssignHookWord(ctxs[cx].inst)].decl)
+    let what=if d not=? 0 and nodes.ptr[d].kind =? 'fn_' and nodes.ptr[d].name >? 0 {"'{name_of(AssignHookWord(nodes.ptr[d].name))}'"} else {"this function"}
+    # (a lambda checked as a function type giving that many: the type says so)
+    let said=if fns.ptr[AssignHookWord(ctxs[cx].inst)].pack_n >? 0 {"is written"} else {"is passed where its type says it has"}
+    if sinks[i].vague not=? 0 {fatal(AssignHookWord(sinks[i].vague) "{what} {said} to give {want} values, so its block expresses them itself, each once: a value in a loop or a branch, or from a call that may give any number, has no fixed count")}
+    if sinks[i].count not=? want {fatal(nodes.ptr[b].pos "{what} {said} to give {want} values, and its body expresses {sinks[i].count}")}
+}
+sink_close_body_error=(i:int64 first:int64):>void=>$unsafe {
+    if sinks[i].returns not=? 0 {
+        let at=line_col(sinks[i].returns)[0]
+        let back=if or_throw_returns.has(sinks[i].returns) {"`or_throw` (line {at}) gives its failure back with a `return`"} else {"the function also gives one back with `return` (line {at})"}
+        fatal(first "this expresses a value before the function's end, and {back}; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
+    }
+    let d=AssignHookWord(fns.ptr[AssignHookWord(ctxs[cx].inst)].decl)
+    if d not=? 0 and nodes.ptr[d].kind =? 'fn_' and name_of(AssignHookWord(nodes.ptr[d].name)) =? "main" {fatal(first "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")}
+}
+sink_acc_name=():>int64=>{
+    intern("$pack{nodes.length}")
+}

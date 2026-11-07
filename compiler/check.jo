@@ -1,4 +1,5 @@
 use 'secret_checks.dewy'
+use 'checks_assign_hooks.dewy'
 use 'checks_stmt_hooks.dewy'
 use 'checks_type_hooks.dewy'
 use 'checks_loop_copies.dewy'
@@ -1608,32 +1609,7 @@ sink_no_tuple = false            # (a body about to open whose values are always
 sink_bind_next = 0               # (the block a binding is about to check as its value: a BIND ...)
 sink_bind_expect = 0             # (... and the several values its written type says it holds)
 
-# A function body's sink: an inferred result may be a pack, a written one is one value,
-# and `:>void | E` (like `:>void`) gives no value, so what its body expresses is dropped.
-# (a function's result written as a type: `:>void`, `:>void | E`)
-# The members of t other than void, for "this expresses E when it fails".
-sink_failures = (t: int) -> str:
-    out = ""
-    loop m in union_members(t):
-        if tkind(m) == .void_: continue
-        if len(out) > 0: out += " | "
-        out += dt(m)
-    out
 
-# Exprstmt s gives t, in a statement where nothing may be expressed (SINK_VOID), or t is
-# `void | E`, which expresses its failure: say how to keep the statement.
-sink_void_error = (s: int, t: int):
-    v = int(nodes[s].a)
-    fname = "this function"
-    if sink_fn >= 0:
-        d = int(fns[int(ctxs[cx].inst)].decl)
-        if d != 0 and nodes[d].kind == .fn_ and nodes[d].name > 0: fname = "'{oom_written_name(int(nodes[d].name))}'"
-    if union_has_void(t):
-        e = sink_failures(t)
-        fatal(nodes[v].pos, "this gives nothing when it succeeds and expresses {e} when it fails, which is not taken here: propagate the failure with `or_throw`, handle it (`match`, `is?`), or attach `;` to discard it, as in `f();`")
-    rt = prune(int(ctxs[cx].ret))
-    gives = if union_has_void(rt): "nothing, or the errors it returns" else: "nothing"
-    fatal(nodes[v].pos, "this expresses {a_type(t)}, and {fname} is written `:>{dt(rt)}`, so its body gives {gives}: attach `;` to discard the value, as in `f();`, or change the result type")
 
 # (a function's name as written: its body under `$explicit_allocation_failure` is `__eaf_NAME`)
 oom_written_name = (id: int) -> str:
@@ -1652,31 +1628,12 @@ oom_written_name = (id: int) -> str:
 # Either is taken only where its consumer set sink_pack_site: a collector, a statement, a
 # body's values, a binding, an unpacking, or call arguments (expanded into several).
 
-# The name a several-valued expression is shown by: `pair`, or the called function's.
-values_shown = (v: int) -> str:
-    k = nodes[v].kind
-    if k == .ident and nodes[v].name > 0: return name_of(int(nodes[v].name))
-    if k == .call and nodes[v].sym > 0 and nodes[v].aux == 0:
-        d = int(fns[int(nodes[v].sym)].decl)
-        if d != 0 and nodes[d].name > 0: return name_of(int(nodes[d].name)) + "()"
-    if k == .call and nodes[int(nodes[v].a)].kind == .ident: return name_of(int(nodes[int(nodes[v].a)].name)) + "()"
-    "(...)"
 
 values_index_base = 0     # (the base of an index being checked: `pair[0]` says how to index)
 
 # Several values (type t) used at n: taken where a consumer asked; elsewhere it is one value's place.
 mv_count = 0
 
-# An accumulator for sink i's values: `$packN = []`, declared first in its block at the end.
-# (values of two types expressed in main's body: main gives back none, so the first one
-# expressed is the mistake to name, as sink_close does)
-sink_main_value = (i: int, pos: int):
-    if sinks[i].mode != SINK_BODY: return
-    d = int(fns[int(ctxs[cx].inst)].decl)
-    if d == 0 or nodes[d].kind != .fn_ or name_of(int(nodes[d].name)) != "main": return
-    first = int(sinks[i].first)
-    if first == 0: first = pos
-    fatal(first, "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")
 
 # `value` pushed (or a pack extended) onto sink i's accumulator, in exprstmt s.
 # The value(s) of exprstmt s, a statement of BODY/BIND i's own block while their number is
@@ -1704,71 +1661,6 @@ block_open = (b: int, mode: int) -> int:
         sink_open(b, mode)
         return mode
     block_sink_mode(b, mode == -2)
-# (how a block's values go: a function body's, a collector's, an arm's, a binding's, or
-# dropped; -1 for none)
-block_sink_mode = (b: int, want_value: bool) -> int:
-    sink_mode = -1
-    if sink_body_mode >= 0:
-        sink_mode = sink_body_mode
-        sink_body_mode = -1
-    else if has_flag(b, NF_DISCARD) and sinks.len() > 0: sink_mode = SINK_NONE
-    else if want_value and files[pos_file(nodes[b].pos)].is_dewy:
-        if has_flag(b, NF_COMPREHENSION): sink_mode = SINK_COLLECTOR
-        else if sink_arm_next == b: sink_mode = SINK_ARM
-        else if sink_bind_next == b: sink_mode = SINK_BIND
-        else: sink_mode = SINK_ONE
-    sink_arm_next = 0
-    sink_bind_next = 0
-    if sink_mode >= 0:
-        sink_open(b, sink_mode)
-        discarding = false
-    sink_mode
-block_expand = (b: int):
-    nl: int[]
-    loop i in [0..nkids(b)): expand_when(nl, kid(b, i))
-    set_list(b, nl)
-block_direct = (s: int): sinks[sinks.len() - 1].direct = s
-# The value statement ending a value block (its result type), or -1 when it is a statement.
-block_final = (b: int, i: int, expected: int, sink_mode: int) -> int:
-    s = kid(b, i)
-    # A trailing spawn is a statement even in a value-producing helper body.
-    if not value_capable(s) or nodes[s].kind == .exprstmt and nodes[int(nodes[s].a)].kind == .call and nodes[int(nodes[s].a)].aux2 == 17: return -1
-    collecting = sink_mode == SINK_BODY or sink_mode == SINK_ARM or sink_mode == SINK_BIND
-    counted = sink_mode == SINK_BODY or sink_mode == SINK_BIND
-    if nodes[s].kind == .if_ or nodes[s].kind == .iflet:
-        es = mk(.exprstmt, nodes[s].pos)
-        nodes[es].a = i32(s)
-        clear_flag(s, NF_STMT)
-        set_kid(b, i, es)
-        s = es
-        if counted: sinks[sinks.len() - 1].direct = s
-    e = int(nodes[s].a)
-    if nodes[e].kind == .match_: clear_flag(e, NF_STMT)
-    result = T_VOID
-    if collecting:
-        saved_final = sink_final
-        sink_final = e
-        saved_site = sink_pack_site
-        sink_pack_site = e
-        result = check_expr(e, expected)
-        sink_final = saved_final
-        nodes[s].a = i32(last_checked)
-        pack = sink_pack_hit != 0 and sink_pack_hit == e
-        sink_pack_hit = 0
-        sink_pack_site = saved_site
-        armed = sinks[sink_root(sinks.len() - 1)].finals.contains(e)
-        if not armed and tkind(result) != .void_ and result != T_NEVER: sink_express(s, result, pack, true)
-    else:
-        result = check_expr(e, expected)
-        nodes[s].a = i32(last_checked)
-    if tkind(result) != .void_: nodes[b].aux = 1
-    if result == T_NEVER: nodes[b].aux = 0
-    add_flag(s, NF_CHECKED)
-    result
-# (1 followed variables a statement writes in a loop, 2 a statement while sibling contents
-# are known, 3 a followed variable just declared (n: it, m: its position), 4 the block's end)
-# the value expression of a value block
-block_value = (b: int) -> int: int(nodes[kid(b, nkids(b) - 1)].a)
 
 # A union with a void member (`:>void | E`): a bare return or the end of the body gives it.
 union_has_void = (t: int) -> bool:
@@ -2836,96 +2728,6 @@ assign_prelude = (s: int) -> int:
         if int(locals[sl].flags) & LF_SOAMUT == 0: fatal(nodes[s].pos, "cannot modify loop variable '{name_of(int(locals[sl].name))}' (use `{mutable_loop_syntax(nodes[s].pos)}`)")
         nodes[s].a = i32(clone(int(locals[sl].soa)))
     0
-# (1 growth's reading, 2 the decimal binding written (the one before it returned), 3 the
-# record type a sibling literal's syntax names)
-# `a, b = value`'s services (checker_assigns.dewy va_tuple): 1 a compound update refused,
-# 3 the value checked and unpacked (its type; a Dewy target's written type refused first),
-# 4 a value of another shape refused, 5 an element written (its place checked, its text or
-# integer domain written), 6 an element of another type refused (part: the target as
-# written), 7 refinement contracts (a block, or 0), 8 elements converted
-assign_tuple = (s: int, part: int, t: int, tt: int, code: int) -> int:
-    lhs = int(nodes[s].a)
-    if code == 1: fatal(nodes[s].pos, "compound assignment to a tuple")
-    if code == 3:
-        if files[pos_file(nodes[s].pos)].is_dewy:
-            loop binding in binding_leaves(kids(lhs)):
-                if nodes[binding].a != 0: fatal(nodes[binding].pos, "type annotations declare bindings; use let or const for typed unpacking")
-        vt = prune(values_init(int(nodes[s].b), 0, true))
-        nodes[s].b = i32(last_checked)
-        unpacked = unpack_binding(int(nodes[s].b), vt, kids(lhs), nodes[s].pos)
-        set_list(lhs, unpacked.1)
-        nodes[s].b = i32(last_checked)
-        return unpacked.0
-    if code == 4: fatal(nodes[s].pos, "expected a tuple with {nkids(lhs)} elements (or an array), found {dt(t)}")
-    if code == 5:
-        check_place(part, false)
-        if string_domains.len() > 0 and t == T_STR: string_domain_write(part, 0)
-        if t == T_MATH_INT and dewy_at(nodes[s].pos): int_domain_write(part, 0, -1)
-        return 0
-    if code == 6:
-        if not can_coerce(0, t, tt) and not type_eq(t, tt): fatal(nodes[part].pos, "cannot assign {dt(t)} to {dt(tt)}")
-        return 0
-    if code == 7:
-        contracted = false
-        loop target in kids(lhs):
-            if nodes[target].kind == .hole: continue
-            if ref_storage_contract(refine_storage(target, ntype(target))) or ref_dependent_ancestor(target): contracted = true
-        if not contracted: return 0
-        before: int[]
-        source = capture_value(int(nodes[s].b), t, before)
-        loop i in [0..nkids(lhs)):
-            target = kid(lhs, i)
-            if nodes[target].kind == .hole: continue
-            field = mk(.field, nodes[s].pos)
-            nodes[field].a = i32(source)
-            nodes[field].aux = -2
-            nodes[field].ival = i
-            check_expr(field, 0)
-            field = last_checked
-            store = bc_assign(target, field, nodes[s].pos)
-            before.push(check_assign(store))
-        return bc_block(before, nodes[s].pos)
-    converted = false
-    loop i in [0..nkids(lhs)):
-        target = kid(lhs, i)
-        if nodes[target].kind != .hole and not type_eq(targ(t, i), ntype(target)): converted = true
-    if not converted: return s
-    # Freeze the tuple once, then convert every element before writing
-    # destinations. Semantic int and fixed widths have different ABIs.
-    elem_tmp_n += 1
-    name = "$unpack_convert{elem_tmp_n}"
-    pos = nodes[s].pos
-    decl = bc_let(name, int(nodes[s].b), pos)
-    add_flag(int(nodes[s].b), NF_CHECKED)
-    check_stmt(decl)
-    values: int[]
-    targets: int[]
-    loop i in [0..nkids(lhs)):
-        field = mk(.field, pos)
-        nodes[field].a = i32(bc_ident(name, pos))
-        nodes[field].aux = -2
-        nodes[field].ival = i
-        check_expr(field, 0)
-        field = last_checked
-        target = kid(lhs, i)
-        et = if nodes[target].kind == .hole: targ(t, i) else: ntype(target)
-        values.push(coerce(field, et))
-        targets.push(et)
-    tuple = mk(.tuple, pos)
-    nodes[tuple].type = i32(mk_tuple(targets))
-    add_flag(tuple, NF_CHECKED)
-    set_list(tuple, values)
-    nodes[s].b = i32(tuple)
-    assignment = nodes.len()
-    nodes.push(nodes[s])
-    bc_block([decl, assignment], pos)
-# A field or element target's custom index or captured selectors, or 0.
-assign_element = (s: int) -> int:
-    r = elem_field_assign(s)
-    if r != 0: return r
-    # (after a custom index's read/edit/writeback, which captures its own
-    # receiver selectors before its getter runs)
-    compound_selector_capture(s)
 # An indexed target's forms (checker_assigns.dewy va_index, given the receiver's type bt):
 # 1 Dewy ranges made values, 2 a range of an array's elements, 3 a stepped range off an
 # n-dimensional array refused, 4 a record's soa element, part or `[]=` call, 5 an array's
@@ -3044,112 +2846,9 @@ tuple_slot_write = (s: int, bt: int) -> int:
     check_stmt(block)
     block
 
-assign_index = (s: int, bt: int, code: int) -> int:
-    lhs = int(nodes[s].a)
-    op = int(nodes[s].op)
-    if code == 6: return tuple_slot_write(s, bt)
-    if code == 1:
-        dewy_index_ranges(lhs, bt)
-        return 0
-    if code == 2:
-        if has_flag(s, NF_BROADCAST): return dewy_selection_update(s)
-        if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write an explicit loop)")
-        call = dewy_array_slice(lhs, int(nodes[s].b))
-        es = mk(.exprstmt, nodes[s].pos)
-        check_expr(call, 0)
-        nodes[es].a = i32(last_checked)
-        return es
-    if code == 3:
-        if not is_nd(bt): fatal(nodes[s].pos, "stepped slicing requires an array")
-        return 0
-    if code == 5:
-        put = index_array_fn(int(nodes[lhs].b), "__put")
-        if len(put) > 0:
-            # xs[mask] = v, xs[idxs] = vs: sets the elements picked
-            if has_flag(s, NF_BROADCAST): return dewy_selection_update(s)
-            if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to picked elements (write xs[m] = xs[m] .+ x)")
-            recv = int(nodes[lhs].a)
-            add_flag(recv, NF_MUT)
-            call = dewy_array_selection_call(put, [recv, int(nodes[lhs].b), int(nodes[s].b)], bt, nodes[s].pos)
-            es = mk(.exprstmt, nodes[s].pos)
-            check_expr(call, 0)
-            nodes[es].a = i32(last_checked)
-            return es
-        return 0
-    if is_soa(bt) and nodes[lhs].b != 0: return soa_assign(s)
-    if types[bt].kind == .struct_ and is_part_index(lhs, bt):
-        # m[.., j] = xs: writes into a part of m
-        if has_flag(s, NF_BROADCAST) and is_nd(bt): return dewy_selection_update(s, true)
-        if op != int(Tok.assign): fatal(nodes[s].pos, "compound assignment to a part of an array (write m[...] = m[...] .+ x)")
-        recv = int(nodes[lhs].a)
-        add_flag(recv, NF_MUT)
-        ref_nd_receivers[recv] = true
-        # (a named selector keeps what is known of it across an assigned value's loops)
-        if files[pos_file(nodes[s].pos)].is_dewy:
-            elem_tmp_n += 1
-            picked = "$selection_index{elem_tmp_n}"
-            block = bc_block([bc_let(picked, part_spec(lhs), nodes[s].pos), bc_stmt(bc_call("__nd_slice_set", [recv, bc_ident(picked, nodes[s].pos), int(nodes[s].b)], nodes[s].pos), nodes[s].pos)], nodes[s].pos)
-            check_stmt(block)
-            return block
-        call = bc_call("__nd_slice_set", [recv, part_spec(lhs), int(nodes[s].b)], nodes[s].pos)
-        es = mk(.exprstmt, nodes[s].pos)
-        check_expr(call, 0)
-        nodes[es].a = i32(last_checked)
-        return es
-    # (m[k] += x for a map changes the value in place: see map_elem_place)
-    if types[bt].kind == .struct_ and not (op != int(Tok.assign) and is_map_type(bt) and nodes[lhs].b != 0):
-        call = mk(.call, nodes[s].pos)
-        callee = mk(.ident, nodes[s].pos)
-        nodes[callee].name = i32(intern("[]="))
-        nodes[call].a = i32(callee)
-        recv = int(nodes[lhs].a)
-        add_flag(recv, NF_MUT)
-        ref_nd_receiver(recv, bt)
-        val = int(nodes[s].b)
-        # (m[i, j] = v has several indexes)
-        ixs = kids(lhs)
-        if nodes[lhs].b != 0: ixs = [int(nodes[lhs].b)]
-        if op != int(Tok.assign):
-            get = mk(.index, nodes[s].pos)
-            ga = clone(recv)
-            clear_flag(ga, NF_MUT)
-            nodes[ga].type = 0
-            nodes[get].a = i32(ga)
-            if nodes[lhs].b != 0: nodes[get].b = i32(clone(int(nodes[lhs].b)))
-            else:
-                cl: int[]
-                loop x in ixs: cl.push(clone(x))
-                set_list(get, cl)
-            if nodes[s].sval != 0 or has_flag(s, NF_BROADCAST):
-                gt = check_expr(get, 0)
-                get = last_checked
-                add_flag(get, NF_CHECKED)
-                val = compound_checked(s, get, val, gt)
-                add_flag(val, NF_CHECKED)
-            else: val = compound_value(s, get, val)
-        set_list(call, [recv] + ixs + [val])
-        # (a resolved call, such as m[1] in m[1][2] = 3, is not checked again)
-        if nodes[recv].kind != .call: clear_flag(recv, NF_CHECKED)
-        es = mk(.exprstmt, nodes[s].pos)
-        check_expr(call, 0)
-        nodes[es].a = i32(last_checked)
-        return es
-    0
 assign_place = (lhs: int):
     check_place(lhs, false)
     return
-# A field or element target: its dictionary selectors captured before the value (Dewy),
-# and the variable written through noted (a local written through and never read: see
-# copy_write_warnings)
-assign_capture = (s: int, lhs: int, dewy: bool):
-    if dewy: map_update_capture(lhs, int(nodes[s].b), assign_before)
-    r = place_root(lhs)
-    if r != 0 and nodes[r].kind == .ident and nodes[r].aux == i32(int(SK.local)):
-        wl = int(nodes[r].sym)
-        if not copy_writes.has(wl): copy_writes[wl] = nodes[s].pos
-    else if r != 0 and nodes[r].kind == .ident and nodes[r].aux == i32(int(SK.global)):
-        wg = int(nodes[r].sym)
-        if not gcopy_writes.has(wg): gcopy_writes[wg] = nodes[s].pos
 # (1 the refined storage written, 2 a refined field's checked store (or 0), 3 a text
 # domain's write, 4 an integer domain's)
 assign_refine = (s: int, lt: int, code: int) -> int:
@@ -3171,132 +2870,6 @@ assign_value = (s: int, lt: int, settle: int) -> int:
     if settle == 2 and rt != lt and not can_coerce(v, rt, lt): var_type_error(int(nodes[s].a), lt, rt, nodes[v].pos)
     if nodes[v].kind != .intrinsic or nodes[v].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(v, lt))
     rt
-# `x = value` checked to rt: (1 a temperature difference, 2 a decimal binding made float64,
-# 3 a variable of another type, 4 an optional being filled, 5 the paths it narrows,
-# 6 the paths it ends, 7 the optional filled (rt: its index))
-assign_write = (s: int, rt: int, lt: int, code: int) -> int:
-    lhs = int(nodes[s].a)
-    if code == 1: return temperature_write(int(nodes[s].b), last_checked, rt, lt)
-    if code == 2: return if decimal_float_write(rt, lt): 1 else: 0
-    if code == 3:
-        if not can_coerce(last_checked, rt, lt): var_type_error(lhs, lt, rt, nodes[last_checked].pos)
-        return 0
-    if code == 4: return opt_fill_at(lhs, rt, last_checked)
-    if code == 5:
-        rooted = path_rooted(lhs)
-        key = ""
-        if rooted or is_union(lt) or tkind(lt) == .opt: key = path_key(lhs)
-        if rooted: path_forget(key, rt)
-        # x.f = 5 where x.f is int | str: x.f is an int from here on
-        if is_union(lt) and union_index(lt, rt) >= 0 and len(key) > 0:
-            path_narrows += 1
-            narrow_expr(copy_path(lhs), [rt], nodes[s].pos, path_name(key))
-        # x.f = Enemy() where x.f is an Enemy?: it holds one from here on
-        else if tkind(lt) == .opt and len(key) > 0 and type_eq(int(types[prune(lt)].elem), rt): narrow_path(lhs, -2, true)
-        return 0
-    if code == 6:
-        if path_rooted(lhs): path_forget(path_key(lhs))
-        return 0
-    opt_fill(rt, lhs, nodes[s].pos)
-    0
-# `x op= value`'s services (checker_assigns.dewy va_compound): 1 a refined update, 2 a
-# quantity's (1: done), 3 a Dewy `+=` on an array (or text), 4 an exact-width integer (1),
-# 5 a helper-call update, 6 a one-character text added to an integer, 7 a text's `+=`
-# (refused in Dewy but for an interpolation's append), 8 a shift by a non-integer, 9 a
-# float given to an integer (other: its type)
-assign_update = (s: int, lt: int, other: int, code: int) -> int:
-    lhs = int(nodes[s].a)
-    op = int(nodes[s].op)
-    if code == 1:
-        # The checked replacement reads and writes one selected element.
-        # Capture selectors before the old-value read, including scalar names
-        # which the RHS could change, rather than replaying the target.
-        before: int[]
-        path = index_update_path(lhs)
-        i = path.len() - 1
-        loop i >= 0:
-            part = path[i]; i -= 1
-            if nodes[part].kind == .index and nodes[part].b != 0 and not has_flag(part, NF_RELOOKUP):
-                selector = int(nodes[part].b)
-                if nodes[selector].kind != .int_lit: nodes[part].b = i32(capture_value(selector, ntype(selector), before))
-        rd = copy_place(lhs)
-        add_flag(rd, NF_CHECKED)
-        value = compound_checked(s, rd, int(nodes[s].b), representation_type(lt))
-        nodes[s].b = i32(coerce(value, lt))
-        nodes[s].op = i32(int(Tok.assign))
-        if before.len() > 0: return bc_block(before + [copy_checked(s)], nodes[s].pos)
-        return s
-    l = lt
-    if code == 2: return if quantity_compound(s, l): 1 else: 0
-    if code == 3 or code == 7:
-        if code == 7 and (not dewy_at(nodes[s].pos) or interp_appends.has(s)):
-            srt = prune(check_expr(int(nodes[s].b), T_STR))
-            if nodes[lhs].kind == .ident and is_numeric(srt) and not can_coerce(last_checked, srt, T_STR): var_type_error(lhs, l, srt, nodes[s].pos)
-            nodes[s].b = i32(coerce(last_checked, T_STR))
-            nodes[s].aux = 2
-            return s
-        if interp_appends.has(s): return 0
-        nm = concat_piece(lhs, false)
-        if types[l].kind == .str_: fatal(nodes[s].pos, "`+=` does not add text: `{nm} = \"\{{nm}}...\"` appends in place, and many pieces collect in an array and `join`")
-        fatal(nodes[s].pos, "`+=` does not join arrays (on arrays it is reserved for elementwise math): `{nm}.extend(ys)` appends ys and `{nm}.push(y)` one element; `.+=` adds element by element")
-    if code == 4: return if exact_type(l, nodes[s].pos): 1 else: 0
-    if code == 5:
-        # Helper calls, overloads and vectors: x = operation(x, y). Capture
-        # indices before reading x, including names the right side may change.
-        # Reacquire indexed/field storage after the RHS: it can resize an array.
-        pos = nodes[s].pos
-        pre: int[]
-        x = lhs
-        loop nodes[x].kind == .field or nodes[x].kind == .index:
-            if nodes[x].kind == .index and nodes[x].b != 0 and not has_flag(x, NF_RELOOKUP):
-                ib = int(nodes[x].b)
-                ik = nodes[ib].kind
-                if ik != .int_lit:
-                    elem_tmp_n += 1
-                    nm = intern("__index{elem_tmp_n}")
-                    d = mk(.vardecl, pos)
-                    nodes[d].name = i32(nm)
-                    nodes[d].b = i32(ib)
-                    index_update_sources[nm] = ib
-                    rk = types[representation_type(ntype(int(nodes[x].a)))].kind
-                    if rk == .array or rk == .fixed: index_update_arrays[nm] = true
-                    add_flag(ib, NF_CHECKED)
-                    check_stmt(d)
-                    pre.insert(0, d)
-                    idn = mk(.ident, pos)
-                    nodes[idn].name = i32(nm)
-                    check_expr(idn, 0)
-                    nodes[x].b = i32(last_checked)
-            x = int(nodes[x].a)
-        rd = copy_place(lhs)
-        add_flag(rd, NF_CHECKED)
-        nodes[s].b = i32(compound_checked(s, rd, int(nodes[s].b), lt))
-        nodes[s].op = i32(int(Tok.assign))
-        if pre.len() == 0: return s
-        # (the statement, moved, after the index's variables)
-        c = nodes.len()
-        nodes.push(nodes[s])
-        blk = mk(.block, pos)
-        set_list(blk, pre + [c])
-        return blk
-    if code == 6:
-        rb = int(nodes[s].b)
-        if len(name_of(int(nodes[rb].sval))) == 1 and not pos_in_lib(nodes[s].pos):
-            ch = name_of(int(nodes[rb].sval))
-            warn(nodes[rb].pos, "\"{ch}\" here is the character code of {ch}, not the number: write {ch} without quotes for the number")
-        return 0
-    if code == 8: fatal(nodes[int(nodes[s].b)].pos, "shift amount must be an integer")
-    if nodes[lhs].kind == .ident: var_type_error(lhs, l, other, nodes[s].pos)
-    fatal(nodes[s].pos, "cannot apply {tok_text(op as Tok)} to {dt(l)} and {dt(other)} (int(...) makes the value an int, or make the field a float)")
-    0
-assign_flow = (r: int, literal: int):
-    sibling_flow_assign(r, literal)
-    return
-# (the selectors captured since mark, then the assignment)
-assign_wrap = (s: int, r: int, mark: int) -> int:
-    before = assign_before[mark..]
-    assign_before.truncate(mark)
-    bc_block(before + [copy_checked(r)], nodes[s].pos)
 
 # a function another engine would call, which nothing here does: one warning, saying what is
 # called instead (not also that it is never called)
@@ -4230,15 +3803,8 @@ values_hint_label: str[]    # (... and the parameters they fill, once the call i
 values_hint_mark = 0        # (the first of the hints the arguments being expanded made)
 values_hits: bool[]    # (by node: call arguments checked early that gave several values)
 
-# (`f(pair())` where pair gives a number of values known only when it runs)
-values_dynamic = (v: int):
-    shown = values_shown(v)
-    fatal(nodes[v].pos, "'{shown}' gives a number of values known only when it runs, and here a fixed number is taken: collect them, `[{shown}]`, or write its result type, `:>(int64 int64)`")
 
 
-values_init_error = (kind: int, v: int, expected: int, t: int):
-    if kind == 1: fatal(nodes[v].pos, "this gives {types[prune(t)].nargs} values, and the binding's type, {dt(expected)}, holds {types[prune(expected)].nargs}")
-    if kind == 2: fatal(nodes[v].pos, "'{values_shown(v)}' gives a number of values known only when it runs, and a binding holds a fixed number: collect them, `[{values_shown(v)}]`")
 
 values_expand_error0 = (c: int): fatal(nodes[c].pos, "spreading a record's fields into named arguments is not implemented yet: pass them by name, `f(x=r.x)`")
 values_expand_error1 = (c: int, t: int): fatal(nodes[c].pos, "`...` spreads a container into arguments: an array, a fixed array or a `[int64 string]` (found {dt(t)})")
@@ -4246,74 +3812,14 @@ values_expand_error2 = (items: int[], i: int): fatal(nodes[items[i]].pos, "only 
 values_expand_error3 = (items: int[], dyn: int): fatal(nodes[items[dyn]].pos, "this array's length is not known here, so how many values it gives is not either: spread a fixed array (`array<int64 length=2>`), or call a function (with one version) whose positional parameters say how many")
 values_expand_error4 = (items: int[], dyn: int, arity: int): fatal(nodes[items[dyn]].pos, "the other arguments already fill the {arity} positional parameters, so this spread array would give none")
 values_group_error0 = (c: int): fatal(nodes[c].pos, "a group of values has no names: `(a b)`; a record is `[a=1 b=2]`")
-values_internal_callee = (callee: int) -> bool:
-    if nodes[callee].kind == .ident:
-        nm = name_of(int(nodes[callee].name))
-        if len(nm) > 1 and (nm[0] == '_' and nm[1] == '_' or nm[0] == '$'): return true
-    false
-values_call_labels = (v: int, hints: int):
-        if ide_on and values_hint_pos.len() > hints and nodes[v].kind == .call and nodes[v].aux == 0 and nodes[v].sym > 0:
-            d = int(fns[int(nodes[v].sym)].decl)
-            loop h in [hints..values_hint_pos.len()):
-                first = values_hint_first[h]
-                count = to_int(values_hint_label[h]) ?? 0
-                names: str[]
-                loop i in [first..first + count):
-                    if i >= nkids(d) or names.len() >= 8: break
-                    names.push(name_of(int(nodes[kid(d, i)].name)))
-                values_hint_label[h] = join(names, " ") + ":"
-values_shift_warning = (item: int, count: int):
-    warn(nodes[item].pos, "'{values_shown(item)}' gives {count} values, filling as many positions, and positional arguments follow it: check which parameters they fill, or pass those by name")
 values_count_label = (count: int): values_hint_label.push("{count}")
-values_length_check = (src: int, k: int, pos: int) -> int: unpack_length_check(mk_ident_local(src, pos), k, true, pos, "spreading this array into the call needs exactly {k} elements")
 values_collect_fns = (name: int, ds: mut int[]): collect_fns(name, &ds)
 values_collect_module = (mod: int, name: int, ds: mut int[]): collect_module(mod, name, &ds)
 
-sink_pack_error = (n: int, f: int):
-    # (through a function value whose type says it gives several values, `<():>(int64 int64)>`)
-    if nodes[n].aux == 1:
-        callee = int(nodes[n].a)
-        cn = if nodes[callee].kind == .ident and nodes[callee].name > 0: name_of(int(nodes[callee].name)) else: "this function"
-        fatal(nodes[n].pos, "'{cn}' gives several values (its type says so), and only one is taken here: collect them, `[{cn}(...)]`")
-    d = int(fns[f].decl)
-    name = if d != 0 and nodes[d].name > 0: name_of(int(nodes[d].name)) else: "this function"
-    if fns[f].pack_n > 0: fatal(nodes[n].pos, "'{name}' gives {fns[f].pack_n} values (its result is written so), and only one is taken here: collect them, `[{name}(...)]`, or unpack them, `(a b) = {name}(...)`")
-    if fns[f].pack_k > 0: fatal(nodes[n].pos, "'{name}' gives {fns[f].pack_k} values, and only one is taken here: collect them, `[{name}(...)]`, or unpack them, `(a b) = {name}(...)`")
-    ln = line_col(fns[f].pack).0
-    fatal(nodes[n].pos, "'{name}' gives several values (its body expresses one before its end, at line {ln}), and only one is taken here: collect them, `[{name}(...)]`, or attach `;` to each value its body should discard, `f();`")
-sink_values_error = (n: int, t: int):
-    count = int(types[prune(t)].nargs)
-    shown = values_shown(n)
-    what = if nodes[n].kind == .ident: "'{shown}' holds {count} values" else: "this gives {count} values"
-    if values_index_base == n: fatal(nodes[n].pos, "{what}, which are not an array: collect them to index them, `[{shown}][0]`, or unpack them, `(x y) = {shown}`")
-    fatal(nodes[n].pos, "{what}, and only one is taken here: collect them, `[{shown}]`, unpack them, `(x y) = {shown}`, or pass them to a function taking {count}")
-sink_hold_error = (p: int, t: int, elem: int, parts: int[]):
-    # (`key=(w) => (-w.count w.word)`: Python's tuple, which is one value of several parts)
-    if parts.len() > 1 and dewy_at(nodes[p].pos):
-        shown: str[]
-        loop q in parts: shown.push(dt(if is_lit(q): lit_default(q) else: ntype(q)))
-        err_notes.push((-1, "help: for one value of several parts (a sort key, say), give a tuple and its type: `(x):>[{join(shown, " ")}] => [...]`"))
-    fatal(nodes[p].pos, "this expresses {a_type(t)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
-sink_close_count_error = (i: int, b: int):
-    want = int(sinks[i].want)
-    d = int(fns[int(ctxs[cx].inst)].decl)
-    what = if d != 0 and nodes[d].kind == .fn_ and nodes[d].name > 0: "'{name_of(int(nodes[d].name))}'" else: "this function"
-    # (a lambda checked as a function type giving that many: the type says so)
-    said = if fns[int(ctxs[cx].inst)].pack_n > 0: "is written" else: "is passed where its type says it has"
-    if sinks[i].vague != 0: fatal(int(sinks[i].vague), "{what} {said} to give {want} values, so its block expresses them itself, each once: a value in a loop or a branch, or from a call that may give any number, has no fixed count")
-    if sinks[i].count != want: fatal(nodes[b].pos, "{what} {said} to give {want} values, and its body expresses {sinks[i].count}")
-sink_close_body_error = (i: int, first: int):
-    if sinks[i].returns != 0:
-        at = line_col(sinks[i].returns).0
-        back = if or_throw_returns.has(sinks[i].returns): "`or_throw` (line {at}) gives its failure back with a `return`" else: "the function also gives one back with `return` (line {at})"
-        fatal(first, "this expresses a value before the function's end, and {back}; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
-    d = int(fns[int(ctxs[cx].inst)].decl)
-    if d != 0 and nodes[d].kind == .fn_ and name_of(int(nodes[d].name)) == "main": fatal(first, "this expresses a value before main's end, and main gives back nothing (or the errors that reach it): attach `;` to discard it, as in `f();`")
 sink_error0 = (pos: int, vt: int, elem: int): fatal(pos, "this expresses {a_type(vt)}, and the values expressed before it are {dt(elem)}: the values one block expresses have one type; attach `;` to discard this one, as in `f();`, or convert it")
 sink_error1 = (v: int): fatal(nodes[v].pos, "this gives a value, and here the block gives one, its last expression: attach `;` to discard this value, as in `f();`")
 sink_error2 = (v: int): fatal(nodes[v].pos, "this expresses a value before the function's end, and the function also gives one back with `return`; a function expressing several values cannot `return` one yet: attach `;` to discard this value, as in `f();`")
 sink_error3 = (v: int): fatal(nodes[v].pos, "this value is in a loop or a branch, or comes from a call that may give any number, so the block does not give a fixed number of values, and a binding holds a fixed number: collect them into an array, `[ ... ]`, or attach `;` to discard it, as in `f();`")
-sink_acc_name = () -> int: intern("$pack{nodes.len()}")
 
 program_main_error0 = (st: int, s: int): fatal(nodes[st].pos, "main runs by itself, once, after the file's top-level statements: remove this call (a file without main runs top to bottom as a script)")
 program_main_error1 = (s: int, rt: int): fatal(nodes[int(syms[s].decl)].pos, "main must return void or an integer exit code, found {dt(rt)}")
