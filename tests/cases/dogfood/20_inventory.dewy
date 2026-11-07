@@ -4,7 +4,7 @@ Item:type = type of any & [
     name:string
     weight:float64
     value:int64
-    label = ():>string => "{name} ({format(weight ".1f")} kg, {value} gold)"
+    label = ():>string => "{name} ({fmt'.1f'(weight)} kg, {value} gold)"
 ]
 Weapon:type = type of Item & [damage:int64 durability:int64=100]
 Armor:type = type of Item & [defense:int64]
@@ -58,7 +58,7 @@ main = () => {
     loop it in loot {
         if bag.add(it) printl("picked up {it.name}") else printl("too heavy: {it.name}")
     }
-    printl("carrying {format(bag.total_weight() ".1f")} / {bag.capacity} kg")
+    printl("carrying {fmt'.1f'(bag.total_weight())} / {bag.capacity} kg")
     loop it in bag.items printl("  {describe(it)}")
 
     let worth = 0

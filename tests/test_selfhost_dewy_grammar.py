@@ -369,7 +369,7 @@ def test_selfhost_dewy_grammar_ships_dewy(compiler, tmp_path):
                     "    let s=[1.5 2.5]\n"
                     "    printl(2x^2 + (x)2 - -x^2)\n"
                     "    printl(not x =? 2 and 0 <? x <=? 3)\n"
-                    "    printl('{x:>4}|{s[1]:.2f}|{['a:b' 'c'][0]}')\n"
+                    "    printl('{fmt\'>4\'(x)}|{fmt\'.2f\'(s[1])}|{['a:b' 'c'][0]}')\n"
                     "    printl([1 2 3].map((* 2)))\n"
                     "}\n")
     ran = subprocess.run([compiler, 'run', main], capture_output=True, text=True, timeout=60)

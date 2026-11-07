@@ -36,7 +36,7 @@ main = () => {
     loop w in [10cm 25cm 40cm] {
         let area = border_area(bed_l bed_b w)
         let depth = 5cm
-        printl"border {w}: {format(area/m^2 ".2f")} m^2, {area*depth/m^3*1000} litres of gravel"
+        printl"border {w}: {fmt'.2f'(area/m^2)} m^2, {area*depth/m^3*1000} litres of gravel"
     }
     # The same border by hand: 2w(l+b) + 4w^2.
     let w = 25cm

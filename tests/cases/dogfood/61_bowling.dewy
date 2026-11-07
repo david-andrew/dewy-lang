@@ -91,8 +91,8 @@ main = () => {
                     let totals:array<string> = []
                     loop f in card {
                         total += f.score
-                        marks.push(format(mark(f) "^4"))
-                        totals.push(format(total "^4"))
+                        marks.push(fmt'^4'(mark(f)))
+                        totals.push(fmt'^4'(total))
                     }
                     printl("  |{marks.join("|")}|")
                     printl("  |{totals.join("|")}|  {total}")

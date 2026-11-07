@@ -52,13 +52,13 @@ pace = (w:Workout):>string => {
     let per_km = float64(secs) / (w.distance / 1km)
     if not is_finite(per_km) return "-"
     let whole = int(per_km)
-    "{whole // 60}:{whole % 60:02}/km"
+    "{whole // 60}:{fmt'02'(whole % 60)}/km"
 }
 
 clock = (d:Duration):>string => {
     let s = int(d / 1s)
-    if s >=? 3600 return "{s // 3600}:{s // 60 % 60:02}:{s % 60:02}"
-    "{s // 60}:{s % 60:02}"
+    if s >=? 3600 return "{s // 3600}:{fmt'02'(s // 60 % 60)}:{fmt'02'(s % 60)}"
+    "{s // 60}:{fmt'02'(s % 60)}"
 }
 
 monday = (d:Date):>Date => d - d.weekday * 1day
@@ -92,10 +92,10 @@ main = () => {
     }
     let sports = by_sport.keys.sorted(key=(s) => -(by_sport[s].distance / 1km))
     printl("")
-    printl("{"sport":<6} {"n":>3} {"km":>7} {"time":>8} {"longest":>8}")
+    printl("{fmt'<6'("sport")} {fmt'>3'("n")} {fmt'>7'("km")} {fmt'>8'("time")} {fmt'>8'("longest")}")
     loop s in sports {
         let t = by_sport[s]
-        printl("{s:<6} {t.count:>3} {t.distance / 1km:>7.1f} {clock(t.time):>8} {t.longest / 1km:>8.2f}")
+        printl("{fmt'<6'(s)} {fmt'>3'(t.count)} {fmt'>7.1f'(t.distance / 1km)} {fmt'>8'(clock(t.time))} {fmt'>8.2f'(t.longest / 1km)}")
     }
 
     let weeks:dict<Date float64> = []
@@ -104,10 +104,10 @@ main = () => {
         weeks[k] = (weeks.get(k) ?? 0.0) + w.distance / 1km
     }
     printl("")
-    loop k in weeks.keys.sorted() printl("week of {k.format("d MMM")}: {weeks[k]:.1f} km")
+    loop k in weeks.keys.sorted() printl("week of {k.format("d MMM")}: {fmt'.1f'(weeks[k])} km")
 
     printl("")
     let runs = [loop w in workouts if w.sport =? "run" w]
     let fastest = runs.sorted(key=(w) => w.time / 1s / (w.distance / 1m))
-    loop w in fastest[$clamp ..3) printl("{w.day} {w.distance / 1km:.1f}km {clock(w.time)} {pace(w)} {w.note}")
+    loop w in fastest[$clamp ..3) printl("{w.day} {fmt'.1f'(w.distance / 1km)}km {clock(w.time)} {pace(w)} {w.note}")
 }

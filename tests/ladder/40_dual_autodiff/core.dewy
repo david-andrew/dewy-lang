@@ -58,5 +58,5 @@ main = ():>void => {
     let exponential = exp_dual(Dual[0.0 4.0])
     $runtime_assert(exponential.value =? 1.0)
     $runtime_assert(exponential.tangent =? 4.0)
-    printl("{format(derivative_sum ".6f")} {format(dx.tangent ".6f")} {format(dy.tangent ".6f")}")
+    printl("{fmt'.6f'(derivative_sum)} {fmt'.6f'(dx.tangent)} {fmt'.6f'(dy.tangent)}")
 }

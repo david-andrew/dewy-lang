@@ -47,15 +47,15 @@ fmt_time = (d:float64 * Time):>string => {
     let whole = int(total)
     let h = whole // 3600
     let rest = whole % 3600
-    if h >? 0 return "{h}:{format(rest // 60 "02d")}:{format(rest % 60 "02d")}"
-    "{rest // 60}:{format(rest % 60 "02d")}"
+    if h >? 0 return "{h}:{fmt'02d'(rest // 60)}:{fmt'02d'(rest % 60)}"
+    "{rest // 60}:{fmt'02d'(rest % 60)}"
 }
 
 fmt_pace = (p:float64 * Time / Length):>string => {
     let secs_per_km = p*km/s
     if not (0.0 <=? secs_per_km <? 1e9) return "--:--/km"
     let whole = int(secs_per_km)
-    "{whole // 60}:{format(whole % 60 "02d")}/km"
+    "{whole // 60}:{fmt'02d'(whole % 60)}/km"
 }
 
 # Heat slows you down: about 0.4% per degree above 15°C.
@@ -91,7 +91,7 @@ main = () => {
             let adjusted = w.pace / heat_factor(w.temp)
             printl"day {w.day}: run {w.distance} in {fmt_time(w.duration)}, pace {fmt_pace(w.pace)}, heat-adjusted {fmt_pace(adjusted)} at {w.temp as °F}"
         } else {
-            printl"day {w.day}: ride {w.distance} at {format(w.speed*3600s/km ".1f")} km/h"
+            printl"day {w.day}: ride {w.distance} at {fmt'.1f'(w.speed*3600s/km)} km/h"
         }
     }
     # weekly totals
@@ -102,7 +102,7 @@ main = () => {
         weekly[week] += w.distance
     }
     loop [week total] in weekly {
-        printl"week {week}: {total} ({format(total/mile ".1f")} mi)"
+        printl"week {week}: {total} ({fmt'.1f'(total/mile)} mi)"
     }
     # energy: running ~ 1 kcal per kg per km; riding ~ 0.3
     const mass = 70.0kg
@@ -111,7 +111,7 @@ main = () => {
         let per = if w.sport =? 'run' 1.0 else 0.3
         energy += per * kcal/(kg*km) * mass * w.distance
     }
-    printl"energy: {format(energy/kcal ".0f")} kcal"
+    printl"energy: {fmt'.0f'(energy/kcal)} kcal"
     let runs = [loop w in workouts if w.sport =? 'run' w]
     if not runs.is_empty {
         let fastest = runs.min_by((w:Workout) => w.pace/(s/km))

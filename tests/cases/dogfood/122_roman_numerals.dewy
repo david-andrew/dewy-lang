@@ -63,14 +63,14 @@ read_entry = (text:string):>int | BadNumeral => {
 
 main = () => {
     printl"encode:"
-    loop n in [1 4 9 14 40 90 400 1994 2024 3999] printl"  {n:>4} -> {to_roman(n)}"
+    loop n in [1 4 9 14 40 90 400 1994 2024 3999] printl"  {fmt'>4'(n)} -> {to_roman(n)}"
 
     printl"decode:"
     let samples = ["XLII" "mmxxiv" "MCMXCIV" "IIII" "VX" "IC" "MCMC" "ABC" "" "MMMM"]
     loop s in samples {
         match from_roman(s) {
-            n:int => printl"  {s:<8} = {n}"
-            bad:BadNumeral => printl"  {s:<8} rejected: {bad.reason}"
+            n:int => printl"  {fmt'<8'(s)} = {n}"
+            bad:BadNumeral => printl"  {fmt'<8'(s)} rejected: {bad.reason}"
         }
     }
 
@@ -82,7 +82,7 @@ main = () => {
         match read_entry(item) {
             n:int => {
                 total += n
-                printl"  + {to_roman(n):>9} ({n})"
+                printl"  + {fmt'>9'(to_roman(n))} ({n})"
             }
             bad:BadNumeral => {
                 rejected += 1

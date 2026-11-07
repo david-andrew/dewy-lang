@@ -103,5 +103,5 @@ main = () => {
     printl"free: {[loop g in gaps(blocks) hours(g)].join(", ")}"
     let [total chosen] = schedule(jobs)
     printl"best takings {total} from {chosen.length} jobs:"
-    loop j in chosen printl"  {j.name:<10} {j.start:>2}-{j.finish:<2} {j.fee:>4}"
+    loop j in chosen printl"  {fmt'<10'(j.name)} {fmt'>2'(j.start)}-{fmt'<2'(j.finish)} {fmt'>4'(j.fee)}"
 }

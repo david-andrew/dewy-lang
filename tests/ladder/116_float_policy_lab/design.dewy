@@ -146,15 +146,15 @@ main = () => {
     let score = new_score()
     loop r in samples record(@score r)
     printl"samples {samples.length}, usable {score.usable}, rejected {score.rejected}"
-    printl"positive {score.positive}, sum {format(score.total ".3f")}"
+    printl"positive {score.positive}, sum {fmt'.3f'(score.total)}"
     loop i in [0..5) {
         let r = samples.get(i) ?? Reading[0.0 1.0]
         let signal = r.signal
         let baseline = r.baseline
         if -100.0 <=? signal and signal <=? 100.0 and 0.1 <=? baseline and baseline <=? 100.0 {
             let ratio = safe_ratio(signal baseline)
-            printl"{i}: {band(ratio)} {format(ratio ".3f")}"
+            printl"{i}: {band(ratio)} {fmt'.3f'(ratio)}"
         }
     }
-    printl"transform {format(fast_transform(2.0) ".3f")} {format(normal_transform(2.0) ".3f")}"
+    printl"transform {fmt'.3f'(fast_transform(2.0))} {fmt'.3f'(normal_transform(2.0))}"
 }

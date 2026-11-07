@@ -26,7 +26,7 @@ simulate = (speed:Speed angle:float64 * Angle mass:float64 * Mass drag:float64 *
         state.y += state.vy*dt
         t += dt
     }
-    printl("  flight time {format(t/s ".2f")} s")
+    printl("  flight time {fmt'.2f'(t/s)} s")
     return state
 }
 
@@ -35,12 +35,12 @@ main = () => {
     let ball_mass:float64 * Mass = 0.145kg
     printl("No drag:")
     let ideal = simulate(launch 45deg ball_mass 0.0kg/m 0.001s)
-    printl("  range {format(ideal.x/m ".1f")} m")
+    printl("  range {fmt'.1f'(ideal.x/m)} m")
     printl("With drag:")
     let real = simulate(launch 45deg ball_mass 0.0013kg/m 0.001s)
-    printl("  range {format(real.x/m ".1f")} m")
+    printl("  range {fmt'.1f'(real.x/m)} m")
     let analytic = launch*launch/g
-    printl("Analytic no-drag range {format(analytic/m ".1f")} m")
+    printl("Analytic no-drag range {fmt'.1f'(analytic/m)} m")
     let loss = (1.0 - real.x/ideal.x)*100.0
-    printl("Drag shortens the range by {format(loss ".0f")}%")
+    printl("Drag shortens the range by {fmt'.0f'(loss)}%")
 }

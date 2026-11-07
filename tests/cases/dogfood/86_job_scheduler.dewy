@@ -35,7 +35,7 @@ clock = (t:int * Time):>string => {
     let total = int(t / s)
     let minutes = total // 60
     let seconds = total % 60
-    "{minutes:02}:{seconds:02}"
+    "{fmt'02'(minutes)}:{fmt'02'(seconds)}"
 }
 
 main = () => {
@@ -61,10 +61,10 @@ main = () => {
         let wait = now - job.arrival
         total_wait += wait
         if wait >? longest.wait longest = [name=job.name wait=wait]
-        printl"{clock(now)} start {job.name:<12} p{job.priority} waited {clock(wait)}"
+        printl"{clock(now)} start {fmt'<12'(job.name)} p{job.priority} waited {clock(wait)}"
         now += job.duration
     }
     printl"{clock(now)} all done"
-    printl"average wait: {total_wait / JOBS.length / s:.1f} s"
+    printl"average wait: {fmt'.1f'(total_wait / JOBS.length / s)} s"
     printl"longest wait: {longest.name} ({clock(longest.wait)}, {longest.wait})"
 }

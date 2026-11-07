@@ -48,7 +48,7 @@ main = () => {
             let id = people.length
             people.push(Customer[id DOOR spot(line.length) 'walking' 3 + roll(@rng 6) tick -1])
             line.push(id)
-            printl"t={tick:>2} #{id} arrives"
+            printl"t={fmt'>2'(tick)} #{id} arrives"
         }
         # a free window calls the front of the line, if they are standing in it
         loop w in [0..busy.length) {
@@ -61,7 +61,7 @@ main = () => {
             people[front].window = w
             people[front].target = WINDOWS[w]
             waits.push(tick - people[front].arrived)
-            printl"t={tick:>2} window {w} calls #{front}"
+            printl"t={fmt'>2'(tick)} window {w} calls #{front}"
             loop k in [0..line.length) {
                 let id = line[k]
                 if 0 <=? id <? people.length people[id].target = spot(k)
@@ -77,7 +77,7 @@ main = () => {
                 c.service -= 1
                 if c.service <=? 0 {
                     c.phase = 'gone'
-                    printl"t={tick:>2} #{c.id} leaves window {c.window}"
+                    printl"t={fmt'>2'(tick)} #{c.id} leaves window {c.window}"
                 }
             }
         }
@@ -89,5 +89,5 @@ main = () => {
     let served = waits.length
     let total = [loop w in waits w].sum()
     printl"{people.length} arrived, {served} called, {line.length} still in line"
-    if served >? 0 printl"average wait {total / served:.2f} ticks, longest {waits.max()}"
+    if served >? 0 printl"average wait {fmt'.2f'(total / served)} ticks, longest {waits.max()}"
 }

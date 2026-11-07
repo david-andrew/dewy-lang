@@ -79,14 +79,14 @@ main = () => {
         let s = by_region[name]
         if s.count =? 0 continue
         let mean = s.total / s.count
-        printl"{name:<7} {s.count:>5} {mean:>6.2f} {s.worst:>7.2f}"
+        printl"{fmt'<7'(name)} {fmt'>5'(s.count)} {fmt'>6.2f'(mean)} {fmt'>7.2f'(s.worst)}"
     }
 
     let counts = [loop _ in [0..BUCKETS) 0]
     loop r in rows counts[bucket_of(r.minutes)] += 1
     printl""
     printl"minutes histogram"
-    loop b in [0..BUCKETS) printl"{label(b):>6} | {bar(counts[b] 2)} {counts[b]}"
+    loop b in [0..BUCKETS) printl"{fmt'>6'(label(b))} | {bar(counts[b] 2)} {counts[b]}"
 
     let five_star = [loop r in rows if r.rating =? 5 r.courier]
     printl""

@@ -71,7 +71,7 @@ Bank:type = [
 cents = (amount:int):>string => {
     let sign = if amount <? 0 "-" else ""
     let a = abs(amount)
-    "{sign}${a // 100}.{format(a % 100 "02")}"
+    "{sign}${a // 100}.{fmt'02'(a % 100)}"
 }
 
 describe = (e:BankError):>string => match e {
@@ -117,7 +117,7 @@ main = () => {
 
     printl""
     loop [name acct] in bank.accounts {
-        printl"{name:<6} {cents(acct.balance):>9}  {acct.history.join(" ")}"
+        printl"{fmt'<6'(name)} {fmt'>9'(cents(acct.balance))}  {acct.history.join(" ")}"
     }
     printl"money is conserved: {bank.total =? start_total}"
 }

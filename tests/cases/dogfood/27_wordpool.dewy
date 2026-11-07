@@ -46,11 +46,11 @@ main = () => {
         }
     }
     per_doc.sort(key=(c) => c.name)
-    loop c in per_doc printl("{c.name:<9} {c.lines} lines, {c.words.length} distinct words")
+    loop c in per_doc printl("{fmt'<9'(c.name)} {c.lines} lines, {c.words.length} distinct words")
     let top = [loop [w n] in total [word=w n=n]]
     top.sort(key=(e) => e.word)
     top.sort(key=(e) => e.n reverse=true)
-    loop e in top[$clamp 0..5) printl("{e.word:<6} {e.n}")
+    loop e in top[$clamp 0..5) printl("{fmt'<6'(e.word)} {e.n}")
 }
 
 $runtime_checks

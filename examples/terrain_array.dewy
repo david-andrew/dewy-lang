@@ -21,5 +21,5 @@ main = ():>void => {
     let error = max(abs.(downloaded .- reference))
     $runtime_assert(error <? 0.00002)
     printl"Generated {rows(downloaded)}x{cols(downloaded)} height field (GPU available: {gpu_available()})."
-    printl"Maximum CPU difference: {format(error ".6f")}"
+    printl"Maximum CPU difference: {fmt'.6f'(error)}"
 }

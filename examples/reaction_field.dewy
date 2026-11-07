@@ -85,13 +85,13 @@ draw = ():>void => {
     text("A feeds the field. B forms the pattern." vec2(846 99) 18 muted)
     text("Feed A" vec2(846 155) 22 ink)
     feed = hud_slider(Rect(846 186 388 42) feed 0.015 0.060 step=0.001
-        label=format(feed ".3f"))
+        label=fmt'.3f'(feed))
     text("Remove B" vec2(846 257) 22 ink)
     remove = hud_slider(Rect(846 288 388 42) remove 0.045 0.070 step=0.001
-        label=format(remove ".3f"))
+        label=fmt'.3f'(remove))
     text("Steps per frame" vec2(846 359) 22 ink)
     speed = hud_slider(Rect(846 390 388 42) speed 1.0 12.0 step=1.0
-        label=format(speed ".0f"))
+        label=fmt'.0f'(speed))
     if hud_button(Rect(846 466 182 48) (if running "Pause" else "Resume")) running = not running
     if hud_button(Rect(1052 466 182 48) "Seed again") seed()
     text("B concentration" vec2(846 558) 18 muted)

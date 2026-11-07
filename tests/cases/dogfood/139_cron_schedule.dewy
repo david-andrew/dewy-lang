@@ -92,7 +92,7 @@ fires = (job:Job w:When):>bool => {
     if restricted(job.dom) and restricted(job.dow) dom_ok or dow_ok else dom_ok and dow_ok
 }
 
-stamp = (w:When):>string => "{w.year}-{w.month:02}-{w.day:02} {w.hour:02}:{w.minute:02}"
+stamp = (w:When):>string => "{w.year}-{fmt'02'(w.month)}-{fmt'02'(w.day)} {fmt'02'(w.hour)}:{fmt'02'(w.minute)}"
 
 upcoming = (job:Job start:When count:int):>array<string> => {
     let found:array<string> = []

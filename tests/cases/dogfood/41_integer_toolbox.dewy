@@ -122,7 +122,7 @@ to_base = (value:int64 base:int64):>string => {
 }
 
 loop x in [uint64(0) 1 7 8 255 1023 4096] {
-    printl"{x:>5} popcount={popcount(x)} bits={bits(x 12)} pow2={is_power_of_two(x)} next={next_power_of_two(x)}"
+    printl"{fmt'>5'(x)} popcount={popcount(x)} bits={bits(x 12)} pow2={is_power_of_two(x)} next={next_power_of_two(x)}"
 }
 
 let seen = bs_new()
@@ -137,7 +137,7 @@ loop w in ["apple" "durian" "cherry" "fig"] {
 
 let data:array<int64> = [3 17 22 45 46 47 51 68 70 71 72 99 100 -4]
 let h = histogram(data 0 100 5)
-loop i in 0.. and c in h printl"{i*20:>3}-{i*20+19:<3} {"*" * c}"
+loop i in 0.. and c in h printl"{fmt'>3'(i*20)}-{fmt'<3'(i*20+19)} {"*" * c}"
 
 printl"3^200 mod 1000007 = {pow_mod(3 200 1000007)}"
 printl"inverse of 17 mod 3120 = {inverse(17 3120)}"

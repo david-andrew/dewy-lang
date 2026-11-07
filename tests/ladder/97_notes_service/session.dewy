@@ -76,8 +76,8 @@ wire_transcripts = (@service:Service):>array<string> => {
     let chunked = "POST /api/notes HTTP/1.1\r\nHost: notes.local\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
     let part1 = r'{"title":"  Buy milk ","tags":["Home","errands","home"]'
     let part2 = r',"body":"2 litres"}'
-    let size1 = format(bytes(part1).length "x")
-    let size2 = format(bytes(part2).length "X")
+    let size1 = fmt'x'(bytes(part1).length)
+    let size2 = fmt'X'(bytes(part2).length)
     exchange(@service @out "chunked create"
         pieces(bytes("{chunked}{size1}\r\n{part1}\r\n{size2};ext=1\r\n{part2}\r\n0\r\nX-Trailer: 1\r\n\r\n") 4))
     exchange(@service @out "wrong media type"

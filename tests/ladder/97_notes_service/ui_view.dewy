@@ -14,7 +14,7 @@ row = (note:NoteView selected:bool):>string => {
     let mark = if selected ">" else " "
     let box = if note.done "[x]" else "[ ]"
     let title = if note.title.length >? 20 "{note.title[0..19)}…" else note.title
-    return "{mark}{box} #{note.id} {format(title "<20")} {note.tags.join(" ")}".trim_end()
+    return "{mark}{box} #{note.id} {fmt'<20'(title)} {note.tags.join(" ")}".trim_end()
 }
 
 render = (ui:Ui):>array<string> => {

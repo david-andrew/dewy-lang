@@ -2,12 +2,12 @@ $runtime_checks=false
 # (no traps: a specification the compiler knows, a literal or a binding written
 # once, is checked while compiling; an unbounded integer's format included)
 Spec:type="<6" | ">6"
-show=(x:int64 spec:Spec):>string=>format(x spec)
+show=(x:int64 spec:Spec):>string=>fmt(spec)(x) ?? ""
 main=():>void=>{
-    printl(format(5 ">8"))
-    printl(format(12500 ".2e"))
+    printl(fmt'>8'(5))
+    printl(fmt'.2e'(12500))
     let pattern=".2f"
-    printl(format(1.125 pattern))
-    printl(format(255 "#x"))
+    printl(fmt(pattern)(1.125))
+    printl(fmt'#x'(255))
     printl(show(42 ">6"))
 }

@@ -14,8 +14,8 @@ kind_of = (f:Path):>Kind => {
 
 human = (n:int64):>string => {
     if n <? 1024 return "{n} B"
-    if n <? 1024*1024 return "{format(n/1024 ".1f")} KiB"
-    "{format(n/(1024*1024) ".1f")} MiB"
+    if n <? 1024*1024 return "{fmt'.1f'(n/1024)} KiB"
+    "{fmt'.1f'(n/(1024*1024))} MiB"
 }
 
 checksum = (bytes:array<uint8>):>uint64 => {

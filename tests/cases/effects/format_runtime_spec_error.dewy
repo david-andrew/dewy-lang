@@ -1,5 +1,6 @@
 $runtime_checks=false
+# (no traps: a pattern known only when running fails as a value, a ParseError)
 main=():>void=>{
     let pattern=env("SPEC") ?? ">4"
-    printl(format(5 pattern))
+    printl(fmt(pattern)(5) ?? "bad")
 }

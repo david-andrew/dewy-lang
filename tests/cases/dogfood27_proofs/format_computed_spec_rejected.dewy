@@ -1,5 +1,6 @@
-# A spec computed at run time is checked by `format`, which may panic.
+# A pattern computed at run time gives a function whose result can fail (a ParseError).
 main = () => {
     let w = 6
-    printl(format("ab" "<{w}"))
+    printl("[{fmt("<{w}")("ab") ?? "bad"}]")
+    printl("[{fmt("<{w}q")("ab") ?? "bad"}]")
 }

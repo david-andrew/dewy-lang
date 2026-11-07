@@ -91,7 +91,7 @@ exact_variance = (values:array<rational>):>rational | TooFewPoints => {
 }
 
 show = (label:string value:float64 | TooFewPoints | NoSpread) => match value {
-    x:float64 => printl"{label}: {x:.4f}"
+    x:float64 => printl"{label}: {fmt'.4f'(x)}"
     e:TooFewPoints => printl"{label}: needs {e.needed} values, got {e.got}"
     e:NoSpread => printl"{label}: {e.message}"
 }
@@ -103,7 +103,7 @@ main = () => {
     show("median" temps.median)
     show("variance" temps.variance)
     match temps.summary {
-        s:Summary => printl"range {s.low}..{s.high}, sd {sqrt(s.variance):.3f}"
+        s:Summary => printl"range {s.low}..{s.high}, sd {fmt'.3f'(sqrt(s.variance))}"
         e:TooFewPoints => printl"summary: needs {e.needed} values"
     }
     let lonely = Sample["one" [4.0]]
@@ -113,8 +113,8 @@ main = () => {
     let scores:array<float64> = [52 55 61 64 70 73]
     match fit_line(hours scores) {
         line:Line => {
-            printl"score = {line.slope:.3f} * hours + {line.intercept:.3f} (r² {line.r2:.4f})"
-            printl"predicted at 8 hours: {line.at(8.0):.1f}"
+            printl"score = {fmt'.3f'(line.slope)} * hours + {fmt'.3f'(line.intercept)} (r² {fmt'.4f'(line.r2)})"
+            printl"predicted at 8 hours: {fmt'.1f'(line.at(8.0))}"
         }
         e:TooFewPoints => printl"fit: need {e.needed}"
         e:NoSpread => printl"fit: {e.message}"
@@ -130,7 +130,7 @@ main = () => {
     {
         $runtime_checks          # matrix shape and index obligations remain checked
         match fit_quadratic(xs ys) {
-            beta:array<float64> => printl"quadratic: {[loop b in beta format(b ".3f")].join(" ")}"
+            beta:array<float64> => printl"quadratic: {[loop b in beta fmt'.3f'(b)].join(" ")}"
             e:TooFewPoints => printl"quadratic: need {e.needed}"
             <Singular> => printl"quadratic: singular"
         }

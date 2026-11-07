@@ -49,7 +49,7 @@ split_cents = (amount:rational n:int):>array<int> => {
 money = (cents:int):>string => {
     let sign = if cents <? 0 "-" else ""
     let [quotient as whole remainder as part] = abs(cents).divmod(100)
-    "{sign}{whole}.{format(part "02")}"
+    "{sign}{whole}.{fmt'02'(part)}"
 }
 
 main = () => {
@@ -73,13 +73,13 @@ main = () => {
         loop who in e.shares and cents in parts {
             if who in? balance balance[who] -= cents
         }
-        printl"{e.payer:<5} paid {e.amount:>7} for {e.what} ({e.shares.join("/")})"
+        printl"{fmt'<5'(e.payer)} paid {fmt'>7'(e.amount)} for {e.what} ({e.shares.join("/")})"
     }
 
     let total = sum([loop e in expenses e.amount])
     printl""
     printl"total {total} over {expenses.length} expenses; average per person {total / PEOPLE.length}"
-    loop p in PEOPLE printl"{p:<5} spent {spent[p]:>7}  balance {money(balance[p]):>8}"
+    loop p in PEOPLE printl"{fmt'<5'(p)} spent {fmt'>7'(spent[p])}  balance {fmt'>8'(money(balance[p]))}"
     let check = sum(balance.values)
     printl"balances sum to {check} cents"
 

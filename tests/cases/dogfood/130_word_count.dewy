@@ -50,7 +50,7 @@ summarize = (b:Batch split:(line:string:>array<string>)):>void => {
     let total = 0
     loop c in counts.values total += c
     printl"batch {b.id}: {b.docs.length} docs, {total} words, {counts.length} distinct"
-    loop w in top(counts 4) printl"    {w:<10} {counts.get(w) ?? 0}"
+    loop w in top(counts 4) printl"    {fmt'<10'(w)} {counts.get(w) ?? 0}"
 }
 
 main = () => {

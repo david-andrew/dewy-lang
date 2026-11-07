@@ -71,10 +71,10 @@ main = () => {
     }
     let standings = table.values
     standings.sort_with(@rank_before)
-    printl"{"team":<11} P  W  D  L  GD  Pts"
+    printl"{fmt'<11'("team")} P  W  D  L  GD  Pts"
     loop i in 0.. and s in standings {
         let gd = difference(s)
-        printl"{i+1}. {s.team:<8} {s.played}  {s.won}  {s.drawn}  {s.lost}  {gd:<+3} {points(s):>3}"
+        printl"{i+1}. {fmt'<8'(s.team)} {s.played}  {s.won}  {s.drawn}  {s.lost}  {fmt'<+3'(gd)} {fmt'>3'(points(s))}"
     }
     if standings.is_empty return
     let leader = standings[0]

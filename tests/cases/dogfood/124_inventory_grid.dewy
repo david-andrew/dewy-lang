@@ -108,7 +108,7 @@ split = (@inv:Inventory i:int) => {
 }
 
 cell = (s:Stack?):>string => match s {
-    x:Stack => "{x.item[$clamp ..3)}x{x.count:<2}"
+    x:Stack => "{x.item[$clamp ..3)}x{fmt'<2'(x.count)}"
     _ => "  ..  "
 }
 

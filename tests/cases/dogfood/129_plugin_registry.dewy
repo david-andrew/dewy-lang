@@ -58,7 +58,7 @@ main = () => {
     ]
     loop job in jobs {
         let result = pipe(job[0] job[1])
-        printl"{job[0]:<14} {job[1]:<22} -> {result}"
+        printl"{fmt'<14'(job[0])} {fmt'<22'(job[1])} -> {result}"
         remember(@log "{job[0]} -> {result}")
     }
     printl"last {log.room} results:"

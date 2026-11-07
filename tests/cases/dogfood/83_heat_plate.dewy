@@ -64,10 +64,10 @@ main = () => {
     printl"converged after {iterations} iterations"
     show_plate(plate)
     let centre = plate[ROWS//2 COLS//2]
-    printl"centre: {centre:.2f}"
+    printl"centre: {fmt'.2f'(centre)}"
     let middle_row = plate[ROWS//2 [..]]
-    printl"middle row mean: {mean(middle_row):.2f}"
-    printl"interior mean: {mean(plate[[1..ROWS-1) [1..COLS-1)]):.2f}"
+    printl"middle row mean: {fmt'.2f'(mean(middle_row))}"
+    printl"interior mean: {fmt'.2f'(mean(plate[[1..ROWS-1) [1..COLS-1)]))}"
     let hot = 0
     loop r in [0..ROWS) loop c in [0..COLS) if plate[r c] >? 60.0 hot += 1
     printl"cells above 60: {hot}"

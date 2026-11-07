@@ -116,7 +116,7 @@ main = () => {
     popular.sort(key=(e) => e.url)
     popular.sort(key=(e) => e.n reverse=true)
     printl"most linked:"
-    loop e in popular[$clamp 0..4) printl"  {e.url:<14} {e.n}"
+    loop e in popular[$clamp 0..4) printl"  {fmt'<14'(e.url)} {e.n}"
     let total_words = sum([loop [url page] in pages page.words])
     printl"{total_words} words across the site"
 }

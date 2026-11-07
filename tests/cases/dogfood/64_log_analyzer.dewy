@@ -67,7 +67,7 @@ main = () => {
     loop r in requests per_hour[r.hour] = (per_hour.get(r.hour) ?? 0) + 1
     loop hour in per_hour.keys.sorted() {
         let n = per_hour.get(hour) ?? 0
-        printl"  {format(hour "02")}:00 {n:>2} {bar(n 2)}"
+        printl"  {fmt'02'(hour)}:00 {fmt'>2'(n)} {bar(n 2)}"
     }
 
     printl"\nstatus classes:"
@@ -86,7 +86,7 @@ main = () => {
     }
     let means = [loop [path ms] in times if ms.length >? 0 [path=path mean=sum(ms) / ms.length]]
     means.sort(key=(e) => e.mean reverse=true)
-    loop e in means[$clamp 0..3) printl"  {e.path:<18} {format(e.mean ".1f"):>6}"
+    loop e in means[$clamp 0..3) printl"  {fmt'<18'(e.path)} {fmt'>6'(fmt'.1f'(e.mean))}"
 
     let visitors = set[loop r in requests r.ip]
     let browsers = set[loop r in requests if r.agent.startswith("Mozilla") r.ip]
@@ -109,7 +109,7 @@ main = () => {
     }
     loop name in agents.keys.sorted() {
         let methods = agents.get(name) ?? set[]
-        printl"  {name:<16} {methods.sorted().join(",")}"
+        printl"  {fmt'<16'(name)} {methods.sorted().join(",")}"
     }
 
     log.unlink or_throw;

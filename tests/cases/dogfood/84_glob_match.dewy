@@ -82,7 +82,7 @@ main = () => {
         let hits = [loop f in files if glob(pattern f) f]
         counts[pattern] = hits.length
         let shown = if hits.is_empty "(none)" else hits.join(" ")
-        printl"{pattern:<12} -> {shown}"
+        printl"{fmt'<12'(pattern)} -> {shown}"
     }
     let ranked = [loop [k v] in counts [pattern=k hits=v]].sorted(key=(e) => e.hits reverse=true)
     if ranked.length >? 1 printl"most matches: {ranked[1].pattern} ({ranked[1].hits}) after '{ranked[0].pattern}'"

@@ -18,7 +18,7 @@ COINS = [5 10 25 100]
 
 Command:type = 'coin' | 'select' | 'cancel' | 'restock' | 'report' | 'quit'
 
-money = (cents:int64):>string => "${cents // 100}.{cents % 100:02}"
+money = (cents:int64):>string => "${cents // 100}.{fmt'02'(cents % 100)}"
 
 credit_of = (m:Machine):>int64 => match m.state {
     p:Paying => p.credit
@@ -77,7 +77,7 @@ cancel = (@m:Machine) => {
 report = (m:Machine) => {
     printl"  bank {money(m.bank)}"
     loop [code item] in m.slots {
-        printl"  {code} {item.name:<10} {money(item.price):>6} x{item.stock}"
+        printl"  {code} {fmt'<10'(item.name)} {fmt'>6'(money(item.price))} x{item.stock}"
     }
     loop [name count] in m.sold {
         printl"  sold {count} {name}"

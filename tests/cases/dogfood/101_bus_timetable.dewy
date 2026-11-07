@@ -30,7 +30,7 @@ minutes = (text:string):>int64? => {
     h * 60 + m
 }
 
-clock = (t:int64):>string => "{t // 60:02}:{t % 60:02}"
+clock = (t:int64):>string => "{fmt'02'(t // 60)}:{fmt'02'(t % 60)}"
 
 parse = (line:string):>Trip? => {
     let parts = line.split(": " max=1)
@@ -94,7 +94,7 @@ main = () => {
         }
     }]
     board.sort(key=(row) => row.at)
-    loop [at route toward] in board printl"  {clock(at)}  {route:<9} toward {toward}"
+    loop [at route toward] in board printl"  {clock(at)}  {fmt'<9'(route)} toward {toward}"
 
     let queries = [["Mill Lane" "07:00" "Station"] ["Station" "07:30" "Harbour"] ["Harbour" "08:00" "Park"] ["Park" "07:00" "Harbour"]]
     loop [source leave dest] in queries {

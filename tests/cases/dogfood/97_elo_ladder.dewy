@@ -77,18 +77,18 @@ main = () => {
     table.sort(key=(row) => row.rating reverse=true)
     printl"rank  player  rating  games  best win"
     loop i in 0.. and row in table {
-        let note = if row.best is? none "-" else "{row.best.opponent} ({row.best.rating:.0f})"
-        printl"{i + 1:>4}  {row.name:<6}  {row.rating:6.1f}  {row.played:>5}  {note}"
+        let note = if row.best is? none "-" else "{row.best.opponent} ({fmt'.0f'(row.best.rating)})"
+        printl"{fmt'>4'(i + 1)}  {fmt'<6'(row.name)}  {fmt'6.1f'(row.rating)}  {fmt'>5'(row.played)}  {note}"
     }
     printl""
     let names = players.keys.sorted()
-    printl"      {[loop n in names format(n ">5")].join}"
+    printl"      {[loop n in names fmt'>5'(n)].join}"
     loop a in names {
         let cells = [loop b in names {
             if a =? b "    -"
-            else format("{players[a].h2h.get(b) ?? 0.0}" ">5")
+            else fmt'>5'("{players[a].h2h.get(b) ?? 0.0}")
         }]
-        printl"{a:<5} {cells.join}"
+        printl"{fmt'<5'(a)} {cells.join}"
     }
     if not skipped.is_empty printl"\nskipped: {skipped.join(" | ")}"
 }

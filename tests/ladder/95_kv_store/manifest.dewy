@@ -15,7 +15,7 @@ slot_name = (generation:int64):>string => "MANIFEST-{generation%2}"
 
 encode_manifest = (m:Manifest):>array<uint8> => {
     let body = "dewykv {m.generation} {m.log}"
-    return bytes("{format(crc32(bytes(body)) "08x")} {body}\n")
+    return bytes("{fmt'08x'(crc32(bytes(body)))} {body}\n")
 }
 
 decode_manifest = (data:array<uint8>):>Manifest? => {
@@ -27,7 +27,7 @@ decode_manifest = (data:array<uint8>):>Manifest? => {
     let log = words[3]
     let body = "dewykv {words[2]} {log}"
     let generation = to_int(words[2])
-    if format(crc32(bytes(body)) "08x") not=? checksum return none
+    if fmt'08x'(crc32(bytes(body))) not=? checksum return none
     if generation is? error or generation <? 1 return none
     return Manifest[generation log]
 }

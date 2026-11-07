@@ -62,5 +62,5 @@ main = ():>void | Singular => {
     $runtime_assert(identity_product.data =? saved.data)
     let shifted_again = saved .+ 0.0
     $runtime_assert(shifted_again.data =? saved.data)
-    printl("{format(total ".1f")} {format(checksum ".1f")} {format(sum(expanded) ".1f")}")
+    printl("{fmt'.1f'(total)} {fmt'.1f'(checksum)} {fmt'.1f'(sum(expanded))}")
 }

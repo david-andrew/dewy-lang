@@ -14,7 +14,7 @@ quoted = (value:string):>string => {
         } else if b =? b'\t' {
             out.extend(bytes("\\t"))
         } else if b <? b' ' {
-            out.extend(bytes("\\x{format(b "02x")}"))
+            out.extend(bytes("\\x{fmt'02x'(b)}"))
         } else {
             out.push(b)
         }

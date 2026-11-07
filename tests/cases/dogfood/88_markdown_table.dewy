@@ -53,13 +53,12 @@ is_number = (cell:string):>bool => {
     dots <=? 1
 }
 
-# a computed width makes the spec unprovable, so the format is checked when it runs
+# a computed width makes a pattern known only when running, whose result can fail
 pad = (text:string width:int align:Align):>string => {
-    $runtime_checks
     match align {
-    <'left'> => format(text "<{width}")
-    <'right'> => format(text ">{width}")
-    <'center'> => format(text "^{width}")
+    <'left'> => fmt("<{width}")(text) ?? text
+    <'right'> => fmt(">{width}")(text) ?? text
+    <'center'> => fmt("^{width}")(text) ?? text
     }
 }
 
@@ -126,7 +125,7 @@ main = () => {
     })
     let moons = sum([loop r in rows to_int(r[1]) ?? 0])
     let radius = sum([loop r in rows to_float(r[2]) ?? 0.0])
-    let totals = ["total" "{moons}" format(radius ".1f") ""]
+    let totals = ["total" "{moons}" fmt'.1f'(radius) ""]
     render(header aligns [by_moons... totals])
 
     printl""

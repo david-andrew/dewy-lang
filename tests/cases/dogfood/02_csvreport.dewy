@@ -79,15 +79,15 @@ main = ():>void => {
     let keys = [groups.keys...]
     keys.sort(key=(k) => groups[k].revenue reverse=true)
     printl("Summary by {opts.group}")
-    printl(format("" "-<36"))
-    printl("{format(opts.group "<10")} {format("rows" ">5")} {format("units" ">7")} {format("revenue" ">12")}")
+    printl(fmt'-<36'(""))
+    printl("{fmt'<10'(opts.group)} {fmt'>5'("rows")} {fmt'>7'("units")} {fmt'>12'("revenue")}")
     let grand:float64 = 0.0
     loop k in keys[..min(opts.top keys.length)) {
         let t = groups[k]
         grand += t.revenue
-        printl("{format(k "<10")} {format(t.rows ">5")} {format(t.units ">7")} {format(t.revenue ">12.2f")}")
+        printl("{fmt'<10'(k)} {fmt'>5'(t.rows)} {fmt'>7'(t.units)} {fmt'>12.2f'(t.revenue)}")
     }
-    printl(format("" "-<36"))
-    printl("{format("total" "<10")} {format(grand ">26,.2f")}")
+    printl(fmt'-<36'(""))
+    printl("{fmt'<10'("total")} {fmt'>26,.2f'(grand)}")
     if skipped >? 0 { printl("({skipped} rows skipped)") }
 }

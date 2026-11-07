@@ -45,7 +45,7 @@ fingerprint = (entries:array<Entry>):>string => {
             h = (h xor (b as uint64<overflow='wrap'>))*0x100000001b3
         }
     }
-    return format(h "016x")
+    return fmt'016x'(h)
 }
 
 model_entries = (model:dict<string string>):>array<Entry> => {

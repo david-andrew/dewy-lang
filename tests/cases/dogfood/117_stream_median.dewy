@@ -88,7 +88,7 @@ main = () => {
     loop x in READINGS {
         add(@low @high x)
         k += 1
-        printl"{k:>2}. read {x:>2}  median {median(low high):>4}  halves {low.items.length}/{high.items.length}"
+        printl"{fmt'>2'(k)}. read {fmt'>2'(x)}  median {fmt'>4'(median(low high))}  halves {low.items.length}/{high.items.length}"
     }
     printl"largest three: {largest(READINGS 3)}"
     let sorted = READINGS.sorted()

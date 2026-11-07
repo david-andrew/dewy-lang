@@ -177,11 +177,11 @@ draw = ():>void => {
         rgb(0.45 0.46 0.5) in_front = true)
     if flash>?0.0 point_light(eye_pos+forward()*0.8 vec3(1.0 0.8 0.5) 6.0 flash*2.0)
     circle(vec2(640 360) 3 rgba(1 1 1 0.8))
-    text("ORBS {hits} / {ORBS}    {format(run_time ".1f")} s" vec2(24 20) 28)
+    text("ORBS {hits} / {ORBS}    {fmt'.1f'(run_time)} s" vec2(24 20) 28)
     text("WASD: walk    Space: jump    Click: shoot    Escape: release mouse" vec2(24 60) 20)
     if not is_mouse_locked() text_centered("Click to look around" vec2(640 420) 28 rgba(1 1 1 0.7))
     if done {
-        text_centered("All {ORBS} in {format(run_time ".1f")} s" vec2(640 300) 56 rgb(1.0 0.85 0.3))
+        text_centered("All {ORBS} in {fmt'.1f'(run_time)} s" vec2(640 300) 56 rgb(1.0 0.85 0.3))
         text_centered("R (or Start) to play again" vec2(640 470) 28)
     }
 }

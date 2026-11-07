@@ -142,7 +142,7 @@ main = () => {
     let vars:dict<string rational> = []
     loop line in program {
         let result = run_line(@vars line)
-        if result is? CalcError printl"{line:<20} error: {result.message}"
-        else printl"{line:<20} {result}"
+        if result is? CalcError printl"{fmt'<20'(line)} error: {result.message}"
+        else printl"{fmt'<20'(line)} {result}"
     }
 }

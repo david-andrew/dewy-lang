@@ -48,7 +48,7 @@ printl"Revenue by region"
 loop [region rows] in by_region {
     let total = 0.0
     loop r in rows total += r.units * r.price
-    printl"  {region:<6} {rows.length} sales  {total:>9.2f}"
+    printl"  {fmt'<6'(region)} {rows.length} sales  {fmt'>9.2f'(total)}"
 }
 
 # per-rep totals, sorted descending
@@ -61,7 +61,7 @@ ranked.sort(key=(x:[rep:string total:float64]) => x.total reverse=true)
 printl""
 printl"Top 3 reps"
 loop x in ranked[$clamp 0..3) {
-    printl"  {x.rep:<6} {x.total:>9.2f}"
+    printl"  {fmt'<6'(x.rep)} {fmt'>9.2f'(x.total)}"
 }
 
 # monthly units per product
@@ -79,15 +79,15 @@ loop s in sales {
 
 printl""
 let header:array<string> = ["product   "]
-loop m in months header.push(format(m ">8"))
+loop m in months header.push(fmt'>8'(m))
 printl(header.join(""))
 let products = product_set.sorted
 loop p in products {
-    let row:array<string> = [format(p "<10")]
+    let row:array<string> = [fmt'<10'(p)]
     let per_month = units_by.get(p) ?? []
     loop m in months {
         let n = per_month.get(m) ?? 0
-        row.push(format(n ">8"))
+        row.push(fmt'>8'(n))
     }
     printl(row.join(""))
 }
@@ -104,7 +104,7 @@ loop s in sales {
 printl""
 loop [p total] in price_sum {
     let avg = total / (price_n.get(p) ?? 1)
-    printl"avg price {p}: {avg:.2f}"
+    printl"avg price {p}: {fmt'.2f'(avg)}"
 }
 if sales.length >? 0 {
     let biggest = sales.max_by((s:Sale) => s.units * s.price)

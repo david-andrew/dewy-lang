@@ -90,7 +90,7 @@ main = () => {
     }
     let total = sum([loop r in chosen r.cost])
     printl"cables to lay ({chosen.length} runs, cost {total}):"
-    loop r in chosen printl"  {HOUSES[r.a]:<7} - {HOUSES[r.b]:<7} {r.cost:>3}"
+    loop r in chosen printl"  {fmt'<7'(HOUSES[r.a])} - {fmt'<7'(HOUSES[r.b])} {fmt'>3'(r.cost)}"
 
     # Without one chosen run, which houses lose the mill?
     printl"single points of failure:"

@@ -47,9 +47,9 @@ draw = ():>void => {
     view(simulation.left.state 30.0 "Peer 1" simulation.left.tick simulation.left.rollbacks simulation.left.waiting)
     view(simulation.right.state 670.0 "Peer 2" simulation.right.tick simulation.right.rollbacks simulation.right.waiting)
     ui_begin("network" vec2(640 498))
-    latency = ui_slider("One-way latency: {format(latency*300.0 ".0f")} ms" latency 0.05)
-    jitter = ui_slider("Additional jitter: {format(jitter*150.0 ".0f")} ms" jitter 0.05)
-    loss = ui_slider("Packet loss: {format(loss*25.0 ".0f")}%" loss 0.04)
+    latency = ui_slider("One-way latency: {fmt'.0f'(latency*300.0)} ms" latency 0.05)
+    jitter = ui_slider("Additional jitter: {fmt'.0f'(jitter*150.0)} ms" jitter 0.05)
+    loss = ui_slider("Packet loss: {fmt'.0f'(loss*25.0)}%" loss 0.04)
     ui_end()
     let status = if paused "Paused" else "Running"
     if simulation.left.desync>=?0 or simulation.right.desync>=?0 status = "State disagreement detected"

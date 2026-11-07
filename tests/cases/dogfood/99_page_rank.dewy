@@ -69,12 +69,12 @@ main = () => {
         if change <? TOLERANCE break
     }
 
-    printl"converged after {rounds} rounds (total rank {sum(rank):.6f})"
+    printl"converged after {rounds} rounds (total rank {fmt'.6f'(sum(rank))})"
     let order = [loop i in [0..n) i].sorted(key=(i) => -rank[i])
     loop place in 1.. and i in order {
         let width = rank[i] * 100.0
         let bar = if 0.0 <=? width <=? 100.0 "#" * int(width) else "?"
         let inbound = sum([loop links in out if i in? links 1 else 0])
-        printl"{place:>2}. {names[i]:<7} {rank[i]:.4f} in={inbound} out={out[i].length} {bar}"
+        printl"{fmt'>2'(place)}. {fmt'<7'(names[i])} {fmt'.4f'(rank[i])} in={inbound} out={out[i].length} {bar}"
     }
 }

@@ -30,8 +30,8 @@ duration_text = (span:Duration):>string => {
     let h = seconds // 3600
     let m = (seconds % 3600) // 60
     let s = seconds % 60
-    if h >? 0 { return "{h}h{format(m "02")}m" }
-    if m >? 0 { return "{m}m{format(s "02")}s" }
+    if h >? 0 { return "{h}h{fmt'02'(m)}m" }
+    if m >? 0 { return "{m}m{fmt'02'(s)}s" }
     return "{s}s"
 }
 
@@ -59,13 +59,13 @@ main = () => {
         by_service[e.service].push(e)
     }
     printl("by level:")
-    loop [level count] in by_level { printl("  {format(level "<6")} {count}") }
+    loop [level count] in by_level { printl("  {fmt'<6'(level)} {count}") }
 
     printl("by service:")
     loop service in [by_service.keys...].sorted() {
         let list = by_service[service]
         let span = list[end].stamp - list[0].stamp
-        printl("  {format(service "<5")} {list.length} entries over {duration_text(span)}")
+        printl("  {fmt'<5'(service)} {list.length} entries over {duration_text(span)}")
     }
 
     let slow = [loop e in entries if e.message.endswith("ms") and to_int(e.message.split(" ")[end][..end-2]) ?? 0 >? 1000 e]

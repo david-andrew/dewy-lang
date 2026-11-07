@@ -32,7 +32,7 @@ find = (store:Store id:int):>int|none => {
 
 show = (t:Task):>string => {
     let mark = if t.done "x" else " "
-    return "[{mark}] {format(t.id ">3")}  {t.text}"
+    return "[{mark}] {fmt'>3'(t.id)}  {t.text}"
 }
 
 run_command = (argv:array<string>):>int => {

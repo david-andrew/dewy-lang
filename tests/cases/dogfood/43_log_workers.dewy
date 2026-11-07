@@ -91,7 +91,7 @@ main = () => {
     loop r in rows {
         if r.st.count =? 0 continue
         let avg = r.st.total_ms / r.st.count
-        printl"{r.path}: {r.st.count} hits, avg {format(avg.to_float64() ".1f")} ms, slowest {r.st.slowest} ms"
+        printl"{r.path}: {r.st.count} hits, avg {fmt'.1f'(avg.to_float64())} ms, slowest {r.st.slowest} ms"
     }
     let candidates = [loop i in [1..60] i*i + 1]
     let flags = [parallel n in candidates is_prime(n)]

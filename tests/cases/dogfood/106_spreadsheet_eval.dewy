@@ -145,6 +145,6 @@ main = () => {
     loop [name text] in sheet.source {
         let r = evaluate(@sheet name)
         let shown = if r.error.is_empty "{r.value}" else r.error
-        printl"{name:<3} {text:<22} {shown}"
+        printl"{fmt'<3'(name)} {fmt'<22'(text)} {shown}"
     }
 }

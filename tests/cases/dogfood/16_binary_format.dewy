@@ -70,7 +70,7 @@ decode = (data:array<uint8>):>array<Record>|FormatError => {
     let body = data[0..data.length-4)
     let stored = get_u32_le(data data.length-4)
     let actual = crc32(body crc_table())
-    if stored not=? actual return FormatError["checksum mismatch: stored {format(stored "08x")}, computed {format(actual "08x")}"]
+    if stored not=? actual return FormatError["checksum mismatch: stored {fmt'08x'(stored)}, computed {fmt'08x'(actual)}"]
     let count = get_u16_le(data 4)
     let at = 6
     let records:array<Record> = []
@@ -88,7 +88,7 @@ decode = (data:array<uint8>):>array<Record>|FormatError => {
 main = ():>void => {
     let records = [Record[1 1500 "ada"] Record[70000 (-42) "grace"] Record[3 0 "linus"]]
     let blob = encode(records)
-    printl("encoded {blob.length} bytes, crc {format(get_u32_le(blob blob.length-4) "08x")}")
+    printl("encoded {blob.length} bytes, crc {fmt'08x'(get_u32_le(blob blob.length-4))}")
     let path = p"dogfood_records.bin"
     if path.write_bytes(blob) is? (error|Canceled) {
         printl("cannot write {path}")

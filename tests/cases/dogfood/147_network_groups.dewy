@@ -136,7 +136,7 @@ main = () => {
         pair[1] *= 1.5
         if pair[1] >? worst[1] { worst[0] = pair[0]; worst[1] = pair[1] }
     }
-    printl("worst {worst[0]} {worst[1]:.2f}")
+    printl("worst {worst[0]} {fmt'.2f'(worst[1])}")
     let sizes = [loop [_ m] in groups m.length]
     printl(apply_all(sizes (x) => x * x))
     printl(count_prefix(trie "db"))

@@ -147,7 +147,7 @@ main = ():>void => {
             correct += [loop hit in hits if hit hit].length
             train_step(@m @opt backward(m xb tb a))
         }
-        printl("epoch {two(epoch)} loss {format(loss/float64(train.length) ".6f")} train {correct}/{train.length}")
+        printl("epoch {two(epoch)} loss {fmt'.6f'(loss/float64(train.length))} train {correct}/{train.length}")
     }
     # Evaluation in parallel batches of the held-out set.
     let tx = features(test).to(device)
@@ -170,7 +170,7 @@ main = ():>void => {
     let y = forward(m probes.to(device)).y
     let classes = predict(y)
     loop r in 0.. and guess in classes {
-        let shown = [loop k in [0..CLASSES) format(y[r k] ".3f")]
-        printl("probe ({format(probes[r 0] ".1f")}, {format(probes[r 1] ".1f")}) -> {shown.join(" ")} class {guess}")
+        let shown = [loop k in [0..CLASSES) fmt'.3f'(y[r k])]
+        printl("probe ({fmt'.1f'(probes[r 0])}, {fmt'.1f'(probes[r 1])}) -> {shown.join(" ")} class {guess}")
     }
 }

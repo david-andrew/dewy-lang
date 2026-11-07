@@ -60,7 +60,7 @@ Bank:type = [
     }
 ]
 
-money = (x:rational):>string => "${format(x.to_float64() ",.2f")}"
+money = (x:rational):>string => "${fmt',.2f'(x.to_float64())}"
 
 describe = (e:error):>string => match e {
     x:InsufficientFunds => "{x.account} needs {money(x.needed)} but has {money(x.available)}"
@@ -92,11 +92,11 @@ main = () => {
     loop name in bank.accounts.keys() { bank.accounts[name].apply_interest(0.015) }
     printl("Balances:")
     loop [name acct] in bank.accounts {
-        printl("  {format(name "<6")} {format(money(acct.balance) ">10")}  ({acct.history.length} transactions)")
+        printl("  {fmt'<6'(name)} {fmt'>10'(money(acct.balance))}  ({acct.history.length} transactions)")
     }
     printl("Total: {money(bank.total())}")
     printl("History of bob:")
     loop t in bank.accounts["bob"].history {
-        printl("  {format(t.kind "<9")} {format(money(t.amount) ">9")} -> {money(t.balance)}")
+        printl("  {fmt'<9'(t.kind)} {fmt'>9'(money(t.amount))} -> {money(t.balance)}")
     }
 }

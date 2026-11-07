@@ -83,7 +83,7 @@ main = () => {
         printl("{header[0]} for {guests} (x{show(factor)}):")
         loop item in items {
             let [amount unit] = friendly(item.amount * factor item.unit)
-            printl("  {show(amount):>6} {unit:<5} {item.name}")
+            printl("  {fmt'>6'(show(amount))} {fmt'<5'(unit)} {item.name}")
         }
     }
     # a shopping list for three batches of 6, in teaspoons, then friendly units
@@ -97,6 +97,6 @@ main = () => {
     printl("shopping list:")
     loop [name tsp] in totals {
         let [amount unit] = friendly(tsp "tsp")
-        printl("  {name:<14} {show(amount)} {unit}")
+        printl("  {fmt'<14'(name)} {show(amount)} {unit}")
     }
 }

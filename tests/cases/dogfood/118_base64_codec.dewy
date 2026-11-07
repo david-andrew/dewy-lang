@@ -76,10 +76,10 @@ main = () => {
         let code = encode(s)
         let back = decode(code)
         let ok = if back is? string back =? s else false
-        printl"{"\"{s}\"":<28} -> {code:<36} round trip {ok}"
+        printl"{fmt'<28'("\"{s}\"")} -> {fmt'<36'(code)} round trip {ok}"
     }
     loop bad in ["Zm9v!A==" "Zm9vY" "Zg==Zm9v" "Zm=v"] {
         let result = decode(bad)
-        if result is? DecodeError printl"{bad:<10} error: {result.message}" else printl"{bad:<10} decoded \"{result}\""
+        if result is? DecodeError printl"{fmt'<10'(bad)} error: {result.message}" else printl"{fmt'<10'(bad)} decoded \"{result}\""
     }
 }

@@ -53,28 +53,28 @@ main = () => {
     let columns = quarters.sorted
     let regions = [pivot.keys...].sorted
 
-    print"{"region":<8}"
-    loop q in columns print"{q:>10}"
-    printl"{"total":>10}"
+    print"{fmt'<8'("region")}"
+    loop q in columns print"{fmt'>10'(q)}"
+    printl"{fmt'>10'("total")}"
     let column_totals:dict<string float64> = []
     let grand = 0.0
     loop region in regions {
         let row = pivot[region]
-        print"{region:<8}"
+        print"{fmt'<8'(region)}"
         let row_total = 0.0
         loop q in columns {
             let value = row.get(q) ?? 0.0
-            print"{value:>10.2f}"
+            print"{fmt'>10.2f'(value)}"
             row_total += value
             if q not in? column_totals column_totals[q] = 0.0
             column_totals[q] += value
         }
-        printl"{row_total:>10.2f}"
+        printl"{fmt'>10.2f'(row_total)}"
         grand += row_total
     }
-    print"{"total":<8}"
-    loop q in columns print"{column_totals.get(q) ?? 0.0:>10.2f}"
-    printl"{grand:>10.2f}"
+    print"{fmt'<8'("total")}"
+    loop q in columns print"{fmt'>10.2f'(column_totals.get(q) ?? 0.0)}"
+    printl"{fmt'>10.2f'(grand)}"
 
     printl""
     loop region in regions {
@@ -82,6 +82,6 @@ main = () => {
         if entries.is_empty continue
         let best = entries.max_by((e) => e.revenue)
         let share = 100.0 * best.revenue / grand
-        printl"{region}: best {best.quarter} ({best.revenue:.2f}, {share:.1f}% of all sales)"
+        printl"{region}: best {best.quarter} ({fmt'.2f'(best.revenue)}, {fmt'.1f'(share)}% of all sales)"
     }
 }

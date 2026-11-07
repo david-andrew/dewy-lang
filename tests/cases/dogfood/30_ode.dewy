@@ -33,7 +33,7 @@ spring = () => {
     let w0 = sqrt(k/mass) * s   # rad/s as a plain number
     let zeta = (c/(2.0*sqrt(k*mass)))
     let wd = w0*sqrt(1.0 - zeta^2)
-    printl"spring: w0 = {w0:.4f} rad/s, zeta = {zeta:.4f}"
+    printl"spring: w0 = {fmt'.4f'(w0)} rad/s, zeta = {fmt'.4f'(zeta)}"
     let exact = (t:float64):>float64 => exp(-zeta*w0*t) * (cos(wd*t*rad) + zeta*w0/wd*sin(wd*t*rad))
     let f = (t:float64 y:Vec):>Vec => [y[1] -(k/mass*s^2)*y[0] - (c/mass*s)*y[1]]
     printl"   steps   Euler error     RK4 error"
@@ -41,7 +41,7 @@ spring = () => {
         let e = integrate(@euler_step @f [1.0 0.0] 5.0 n)
         let r = integrate(@rk4_step @f [1.0 0.0] 5.0 n)
         let x = exact(5.0)
-        printl"{n:>8} {abs(e[0]-x):>13.3e} {abs(r[0]-x):>13.3e}"
+        printl"{fmt'>8'(n)} {fmt'>13.3e'(abs(e[0]-x))} {fmt'>13.3e'(abs(r[0]-x))}"
     }
 }
 
@@ -58,14 +58,14 @@ predator_prey = () => {
     printl"predator-prey:"
     loop i in [0..400) {
         let t = i*h
-        if i % 50 =? 0 printl"  t={t:>5.1f}  prey={y[0]:>7.3f}  foxes={y[1]:>7.3f}"
+        if i % 50 =? 0 printl"  t={fmt'>5.1f'(t)}  prey={fmt'>7.3f'(y[0])}  foxes={fmt'>7.3f'(y[1])}"
         if y[0] >? peak_prey {
             peak_prey = y[0]
             peak_time = t
         }
         y = rk4_step(@f t y h)
     }
-    printl"  prey peaks at {peak_prey:.2f} (t={peak_time:.2f})"
+    printl"  prey peaks at {fmt'.2f'(peak_prey)} (t={fmt'.2f'(peak_time)})"
 }
 
 # --- heat rod: explicit finite differences, ends held at 0 and 100
@@ -81,10 +81,10 @@ heat = () => {
     printl"heat rod after 500 steps:"
     loop i in [0, 4..n) {
         let bar = "#" * int64(u[i] / 5.0)
-        printl"  x={i/(n-1):.2f} {u[i]:>6.2f} {bar}"
+        printl"  x={fmt'.2f'(i/(n-1))} {fmt'>6.2f'(u[i])} {bar}"
     }
     let mean_temp = sum(u)/u.length
-    printl"  mean {mean_temp:.2f}, max interior step {max([loop i in [1..n) abs(u[i]-u[i-1])]):.2f}"
+    printl"  mean {fmt'.2f'(mean_temp)}, max interior step {fmt'.2f'(max([loop i in [1..n) abs(u[i]-u[i-1])]))}"
 }
 
 main = () => {

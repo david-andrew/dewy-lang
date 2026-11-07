@@ -44,7 +44,7 @@ fit = (samples:array<Reading>):>Estimate | Singular => {
 
 report = (label:string samples:array<Reading>):>void => {
     match fit(samples) {
-        estimate:Estimate => printl"{label}: ({estimate.point.x:.2f}, {estimate.point.y:.2f}), residual {estimate.residual:.3f}"
+        estimate:Estimate => printl"{label}: ({fmt'.2f'(estimate.point.x)}, {fmt'.2f'(estimate.point.y)}), residual {fmt'.3f'(estimate.residual)}"
         <Singular> => printl"{label}: singular baselines"
     }
 }

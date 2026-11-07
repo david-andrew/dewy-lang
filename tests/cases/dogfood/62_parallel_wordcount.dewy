@@ -82,7 +82,7 @@ main = () => {
     ranked.sort(key=(e) => e.word)
     ranked.sort(key=(e) => e.n reverse=true)
     printl"most common:"
-    loop e in ranked[$clamp 0..8) printl"  {e.word:<8} {e.n:>3}"
+    loop e in ranked[$clamp 0..8) printl"  {fmt'<8'(e.word)} {fmt'>3'(e.n)}"
 
     # words that appear in exactly one chunk, per chunk
     let seen_in:dict<string set<int>> = []

@@ -53,7 +53,7 @@ ship = (@inv:Inventory order:array<Line> capacity:rational * Mass):>rational * M
 report = (inv:Inventory) => {
     loop [sku it] in inv.items {
         let longest = if it.unit_length >? 0m "  {it.count * it.unit_length as m} of it laid end to end" else ""
-        printl"{sku} {it.name:<12} x{it.count:<4} {it.mass}{longest}"
+        printl"{sku} {fmt'<12'(it.name)} x{fmt'<4'(it.count)} {it.mass}{longest}"
     }
     printl"total mass {inv.total_mass}"
 }

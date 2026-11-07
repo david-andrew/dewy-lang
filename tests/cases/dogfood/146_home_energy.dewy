@@ -59,29 +59,29 @@ main = () => {
         let use = yearly(a)
         total += use
         let cost = use / 1kWh * PRICE
-        printl("{a.name}: {use as kWh:.1f} kWh, ${cost:.2f}")
+        printl("{a.name}: {fmt'.1f'((use)/(1kWh))} kWh, ${fmt'.2f'(cost)}")
     }
-    printl("appliances: {total as kWh:.0f} kWh, ${total / 1kWh * PRICE:.2f}")
+    printl("appliances: {fmt'.0f'((total)/(1kWh))} kWh, ${fmt'.2f'(total / 1kWh * PRICE)}")
 
     let ua = conductance(SURFACES)
-    printl("UA = {ua as BTU/hour/°F:.1f} BTU/h/°F")
+    printl("UA = {fmt'.1f'((ua)/(1BTU/hour/°F))} BTU/h/°F")
 
     let season = 0.0BTU
     loop m in CLIMATE {
         let q = monthly_heat(m ua)
         season += q
         let therms = q / THERM / FURNACE_EFFICIENCY
-        printl("{m.name}: {q as BTU:.0f} BTU, {therms:.1f} therms, ${therms * GAS_PRICE:.2f}")
+        printl("{m.name}: {fmt'.0f'((q)/(1BTU))} BTU, {fmt'.1f'(therms)} therms, ${fmt'.2f'(therms * GAS_PRICE)}")
     }
     let therms = season / THERM / FURNACE_EFFICIENCY
-    printl("season: {therms:.1f} therms, ${therms * GAS_PRICE:.2f}")
-    printl("average load: {season / (212 * 24hour) as BTU/hour:.0f} BTU/h, or {season / 212 as BTU:.0f} BTU/day")
+    printl("season: {fmt'.1f'(therms)} therms, ${fmt'.2f'(therms * GAS_PRICE)}")
+    printl("average load: {fmt'.0f'((season / (212 * 24hour))/(1BTU/hour))} BTU/h, or {fmt'.0f'((season / 212)/(1BTU))} BTU/day")
 
     # heating a bath of water
     let bath = 150L
     let rise = 40°C - 12°C
     let mass = bath * (1000g / 1L) 
     let heat = mass * 4.186J/(g*K) * rise
-    printl("a bath: {heat as kWh:.2f} kWh, {float64(heat / 1kWh) * PRICE / 0.92:.2f} dollars")
-    printl("standby: {150W * (30 * 24hour) as kWh:.1f} kWh per month")
+    printl("a bath: {fmt'.2f'((heat)/(1kWh))} kWh, {fmt'.2f'(float64(heat / 1kWh) * PRICE / 0.92)} dollars")
+    printl("standby: {fmt'.1f'((150W * (30 * 24hour))/(1kWh))} kWh per month")
 }

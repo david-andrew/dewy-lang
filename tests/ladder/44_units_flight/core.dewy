@@ -56,5 +56,5 @@ main = ():>void => {
     $runtime_assert(acceleration =? 10m/s^2)
     let momentum = saved.mass*saved.speed
     $runtime_assert(momentum/(kg*m/s) =? 40.0)
-    printl("{format(maximum/m ".3f")} {format(initial/(kg*m^2/s^2) ".3f")} {format(reported_impulse ".3f")} {distance/m}")
+    printl("{fmt'.3f'(maximum/m)} {fmt'.3f'(initial/(kg*m^2/s^2))} {fmt'.3f'(reported_impulse)} {distance/m}")
 }

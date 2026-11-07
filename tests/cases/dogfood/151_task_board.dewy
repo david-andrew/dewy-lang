@@ -57,7 +57,7 @@ undo = (@b:Board):>string => {
 
 show = (t:Task):>string => {
     let tags = if t.tags.is_empty "" else " [{", ".join(t.tags)}]"
-    "{t.id:>3} p{t.prio} {t.column:<6} {t.title}{tags}"
+    "{fmt'>3'(t.id)} p{t.prio} {fmt'<6'(t.column)} {t.title}{tags}"
 }
 
 list = (b:Board words:array<string>):>string|BadArgument => {
@@ -89,7 +89,7 @@ stats = (b:Board):>string => {
     let total = b.tasks.length
     let done = per.get("done") ?? 0
     let pct = if total >? 0 done * 100 / total else 0.0
-    "{" ".join(parts)} ({pct:.0f}% done)"
+    "{" ".join(parts)} ({fmt'.0f'(pct)}% done)"
 }
 
 run = (@b:Board line:string):>string|CommandError => {

@@ -69,7 +69,7 @@ price_orders = (input:Channel<Order> out:Channel<Priced>):>void | Unsent<Priced>
     }
 }
 
-dollars = (cents:int):>string => "${cents // 100}.{format(cents % 100 "02")}"
+dollars = (cents:int):>string => "${cents // 100}.{fmt'02'(cents % 100)}"
 
 main = () => {
     let orders = channel<Order>(2)
@@ -98,11 +98,11 @@ main = () => {
     loop p in results {
         let o = p.order
         if p.note.is_empty {
-            printl"#{o.id} {o.customer:<6} {o.quantity:>2} x {o.item:<9} {dollars(p.cents):>8}"
+            printl"#{o.id} {fmt'<6'(o.customer)} {fmt'>2'(o.quantity)} x {fmt'<9'(o.item)} {fmt'>8'(dollars(p.cents))}"
             total += p.cents
             by_customer[o.customer] = (by_customer.get(o.customer) ?? 0) + p.cents
         } else {
-            printl"#{o.id} {o.customer:<6} {o.quantity:>2} x {o.item:<9} -- {p.note}"
+            printl"#{o.id} {fmt'<6'(o.customer)} {fmt'>2'(o.quantity)} x {fmt'<9'(o.item)} -- {p.note}"
         }
     }
     printl"total {dollars(total)} from {by_customer.length} customers"

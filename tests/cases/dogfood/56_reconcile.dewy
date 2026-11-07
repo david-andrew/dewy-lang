@@ -58,7 +58,7 @@ cents = (text:string):>int | none => {
 money = (c:int):>string => {
     let sign = if c <? 0 "-" else ""
     let a = abs(c)
-    "{sign}{a // 100}.{a % 100:02}"
+    "{sign}{a // 100}.{fmt'02'(a % 100)}"
 }
 
 parse = (csv:string skip_header:bool):>array<Entry> => {
@@ -99,17 +99,17 @@ main = () => {
         }
         used[found] = true
         let lag = bank[found].day - e.day
-        printl("  {e.text:<18} {money(e.cents):>9}  {bank[found].text}{if lag >? 0 " (+{lag}d)" else ""}")
+        printl("  {fmt'<18'(e.text)} {fmt'>9'(money(e.cents))}  {bank[found].text}{if lag >? 0 " (+{lag}d)" else ""}")
     }
     printl("in the ledger, not at the bank:")
-    loop e in unmatched printl("  {e.text:<18} {money(e.cents):>9}")
+    loop e in unmatched printl("  {fmt'<18'(e.text)} {fmt'>9'(money(e.cents))}")
     printl("at the bank, not in the ledger:")
     let bank_only = [loop j in [0..bank.length) if not used[j] bank[j]]
-    loop b in bank_only printl("  {b.text:<18} {money(b.cents):>9}")
+    loop b in bank_only printl("  {fmt'<18'(b.text)} {fmt'>9'(money(b.cents))}")
     let book = sum([loop e in ledger e.cents])
     let statement = sum([loop b in bank b.cents])
     let explained = book - sum([loop e in unmatched e.cents]) + sum([loop b in bank_only b.cents])
-    printl("ledger balance    {money(book):>9}")
-    printl("statement balance {money(statement):>9}")
+    printl("ledger balance    {fmt'>9'(money(book))}")
+    printl("statement balance {fmt'>9'(money(statement))}")
     printl(if explained =? statement "reconciled: the differences explain the gap" else "NOT reconciled: off by {money(statement - explained)}")
 }

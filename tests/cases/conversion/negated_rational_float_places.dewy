@@ -2,7 +2,7 @@
 # field, a global, an element, a loop-carried binding
 twice = (y:float64):>float64 => y * 2.0
 P:type = [a:rational]
-from_param = (x:rational):>void => printl"{twice(-x)} {format(-x ".1f")}"
+from_param = (x:rational):>void => printl"{twice(-x)} {fmt'.1f'(-x)}"
 let g = 1.5
 main = () => {
     from_param(5/2)
@@ -10,5 +10,5 @@ main = () => {
     let xs = [1/2 3/2]
     let q = 1/3
     loop _ in [0..2) q = q * 2
-    printl"{twice(-g)} {twice(-p.a)} {format(-xs[1] ".1f")} {format(-q ".2f")}"
+    printl"{twice(-g)} {twice(-p.a)} {fmt'.1f'(-xs[1])} {fmt'.2f'(-q)}"
 }

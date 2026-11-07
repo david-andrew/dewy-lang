@@ -89,7 +89,7 @@ main = () => {
     loop prefix in ["wea" "web" "we" "west" "x" ""] {
         let shown = suggest(root prefix)
         let label = if prefix.is_empty "(all)" else prefix
-        printl"{label:<6} -> {if shown.is_empty "nothing" else shown.join(", ")}"
+        printl"{fmt'<6'(label)} -> {if shown.is_empty "nothing" else shown.join(", ")}"
     }
     printl"every search starts with '{shared_prefix(root)}'"
     printl"longest search: {depth(root)} characters"

@@ -80,13 +80,13 @@ simulate = (name:string choose:Controller ticks:int seed:int):>Stats => {
         }
     }
     let left = [loop r in lanes r.count]
-    printl("{name:<12} passed {stats.passed:>3}  dropped {stats.dropped:>2}  left {left}")
+    printl("{fmt'<12'(name)} passed {fmt'>3'(stats.passed)}  dropped {fmt'>2'(stats.dropped)}  left {left}")
     stats
 }
 
 report = (name:string s:Stats) => {
     let avg = if s.passed >? 0 s.total_wait / s.passed else 0.0
-    printl("{name:<12} avg wait {avg:.2f} ticks, worst {s.worst}")
+    printl("{fmt'<12'(name)} avg wait {fmt'.2f'(avg)} ticks, worst {s.worst}")
 }
 
 main = () => {

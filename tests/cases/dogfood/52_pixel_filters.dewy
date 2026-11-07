@@ -101,7 +101,7 @@ main = () => {
     let widest = max(1 max(hist))
     loop i in 0.. and n in hist {
         let bar = "#" * (n * 30 // widest)
-        printl("{i * 32:>3}-{i * 32 + 31:>3} {n:>4} {bar}")
+        printl("{fmt'>3'(i * 32)}-{fmt'>3'(i * 32 + 31)} {fmt'>4'(n)} {bar}")
     }
     printl("equalized:")
     render(equalize(img))

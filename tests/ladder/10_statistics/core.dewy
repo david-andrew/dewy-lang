@@ -28,5 +28,5 @@ main = ():>void => {
     $runtime_assert(abs(result.variance-32.0/7.0) <? 1e-10)
     $runtime_assert(median(input) =? 4.5)
     $runtime_assert(statistics([2.0]).variance =? 0.0)
-    printl("{result.count} {result.mean} {format(result.variance ".6f")} {median(input)}")
+    printl("{result.count} {result.mean} {fmt'.6f'(result.variance)} {median(input)}")
 }

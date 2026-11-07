@@ -3,10 +3,11 @@ $runtime_checks
 let word="first"
 spec=():>string=>{word="later" return ">8"}
 run=()=>{
-let result=format(word spec())
-if result not=? "   first" or word not=? "later" return 1
+# (the pattern first, then the value: `fmt(p)` gives the function that is then called)
+let result=fmt(spec())(word) ?? ""
+if result not=? "   later" or word not=? "later" return 1
 let pattern=".2f"
-if format(1.125 pattern) not=? "1.12" return 2
+if fmt(pattern)(1.125) not=? "1.12" return 2
 return 42
 }
 main=()=>exit(run())

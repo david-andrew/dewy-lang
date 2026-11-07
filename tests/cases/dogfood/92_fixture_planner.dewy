@@ -48,7 +48,7 @@ main = () => {
         }
         let pitch = PITCHES[used % PITCHES.length]
         let slot = SLOTS[used // PITCHES.length % SLOTS.length]
-        printl"  {slot} {pitch:<5}  {m.home:>9} v {m.away}"
+        printl"  {slot} {fmt'<5'(pitch)}  {fmt'>9'(m.home)} v {m.away}"
         used += 1
         if used >? per_round printl"  (round {current} has more matches than pitches)"
     }
@@ -65,7 +65,7 @@ main = () => {
 
     # home balance and the longest run of home or away games per club
     printl""
-    printl"{"club":<10} home away  longest run"
+    printl"{fmt'<10'("club")} home away  longest run"
     let rows = [loop club in CLUBS {
         let venues = [loop m in plan if m.home =? club or m.away =? club m.home =? club]
         let home = venues.count(true)
@@ -83,7 +83,7 @@ main = () => {
         if a.run not=? b.run return a.run <? b.run
         a.club <? b.club
     })
-    loop r in by_balance printl"{r.club:<10} {r.home:>4} {r.away:>4}  {r.run:>11}"
+    loop r in by_balance printl"{fmt'<10'(r.club)} {fmt'>4'(r.home)} {fmt'>4'(r.away)}  {fmt'>11'(r.run)}"
     let worst = by_balance.last
     printl"least balanced: {worst.club} ({worst.run} in a row)"
 }

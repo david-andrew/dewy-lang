@@ -33,7 +33,7 @@ fnv1a = (text:string):>uint64 => {
     return hash
 }
 
-asset_etag = (asset:Asset):>string => "\"{format(fnv1a(asset.body) "016x")}\""
+asset_etag = (asset:Asset):>string => "\"{fmt'016x'(fnv1a(asset.body))}\""
 
 find_asset = (path:string):>Asset? => {
     loop asset in assets() {

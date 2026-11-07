@@ -94,7 +94,7 @@ main = ():>void | net.NetError | Canceled => {
 
     let answers = read_lines(client commands.length) or_throw
     loop command in commands and answer in answers {
-        printl"{command:<26} -> {answer}"
+        printl"{fmt'<26'(command)} -> {answer}"
     }
     let errors = answers.count((a) => a.startswith("ERR"))
     printl"{answers.length} replies, {errors} errors"

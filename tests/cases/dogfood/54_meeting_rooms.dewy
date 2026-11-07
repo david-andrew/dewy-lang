@@ -29,7 +29,7 @@ parse_clock = (text:string):>int | none => {
     h * 60 + m
 }
 
-clock = (minutes:int):>string => "{minutes // 60:02}:{minutes % 60:02}"
+clock = (minutes:int):>string => "{fmt'02'(minutes // 60)}:{fmt'02'(minutes % 60)}"
 
 parse_meeting = (line:string):>Meeting | none => {
     let words = line.split()
@@ -108,5 +108,5 @@ main = () => {
     let picked = one_room(meetings)
     printl("one room holds {picked.length}: {[loop m in picked m.title].join(", ")}")
     let total = sum([loop m in meetings m.finish - m.start])
-    printl("booked {total // 60}h{total % 60:02}m in total")
+    printl("booked {total // 60}h{fmt'02'(total % 60)}m in total")
 }

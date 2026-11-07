@@ -31,7 +31,7 @@ main=(args:array<string>)=>{
         printl"{to_int(long) is? TooManyDigits} {to_int("123456" max_digits=5) is? TooManyDigits} {to_int("12345" max_digits=5) ?? 0}"
         printl"{to_int("-12" max_digits=2) ?? 0} {(to_int(long max_digits=0) ?? 0) % 1000}"
         let one:int=1
-        printl(format((one << 4001)+5 "x").length)
+        printl(fmt'x'((one << 4001)+5).length)
     }
 }
 $runtime_checks

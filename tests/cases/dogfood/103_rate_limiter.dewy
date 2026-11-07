@@ -79,7 +79,7 @@ main = () => {
         if not by_bucket clients[r.client].denied[0] += 1
         if not by_window clients[r.client].denied[1] += 1
         let mark = (ok:bool) => if ok "ok" else "DENY"
-        printl"{r.at:>6}  {r.client:<6}  {r.path:<13}  {mark(by_bucket):<6}  {mark(by_window)}"
+        printl"{fmt'>6'(r.at)}  {fmt'<6'(r.client)}  {fmt'<13'(r.path)}  {fmt'<6'(mark(by_bucket))}  {mark(by_window)}"
     }
     printl""
     loop [client c] in clients printl"{client}: bucket denied {c.denied[0]}, window denied {c.denied[1]}"

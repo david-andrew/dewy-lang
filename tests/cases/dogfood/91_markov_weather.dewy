@@ -54,12 +54,12 @@ bar = (share:float64 width:int64):>string => {
 main = () => {
     let p = estimate(OBSERVED)
     printl"transition probabilities (row: today, column: tomorrow)"
-    print"{"":>6}"
-    loop name in STATES print"{name:>7}"
+    print"{fmt'>6'("")}"
+    loop name in STATES print"{fmt'>7'(name)}"
     printl""
     loop i in [0..3) {
-        print"{STATES[i]:>6}"
-        loop j in [0..3) print"{p[i j]:>7.3f}"
+        print"{fmt'>6'(STATES[i])}"
+        loop j in [0..3) print"{fmt'>7.3f'(p[i j])}"
         printl""
     }
 
@@ -67,12 +67,12 @@ main = () => {
     let today:array<float64> = [1.0 0.0 0.0]
     loop day in [1..5] {
         today = step(p today)
-        let parts = [loop i in [0..3) "{STATES[i]} {today.get(i) ?? 0.0:.3f}"]
+        let parts = [loop i in [0..3) "{STATES[i]} {fmt'.3f'(today.get(i) ?? 0.0)}"]
         printl"day {day}: {parts.join(", ")}"
     }
 
     let week = power(p 7)
-    printl"a week after rain: {[loop j in [0..3) "{STATES[j]} {week[2 j]:.3f}"].join(", ")}"
+    printl"a week after rain: {[loop j in [0..3) "{STATES[j]} {fmt'.3f'(week[2 j])}"].join(", ")}"
 
     # stationary distribution: step until nothing moves
     let pi:array<float64> = [1.0/3.0 1.0/3.0 1.0/3.0]
@@ -84,7 +84,7 @@ main = () => {
         rounds += 1
         if moved <? 1e-12 break
     }
-    printl"stationary after {rounds} steps: {[loop x in pi format(x ".4f")].join(" ")}"
+    printl"stationary after {rounds} steps: {[loop x in pi fmt'.4f'(x)].join(" ")}"
 
     # simulate 2000 days and compare the visit shares
     let gen = rng(16)
@@ -104,16 +104,16 @@ main = () => {
     loop i in [0..3) {
         let share = float64(visits[i]) / 2000.0
         let expected = pi.get(i) ?? 0.0
-        printl"{STATES[i]:>6} {share:.3f} vs {expected:.3f} {bar(share 40)}"
+        printl"{fmt'>6'(STATES[i])} {fmt'.3f'(share)} vs {fmt'.3f'(expected)} {bar(share 40)}"
     }
 
     # the same one-step update on the GPU path (CPU fallback when absent)
     let current = gpu(reshape(pi 1 3))
     let back = cpu(current)
-    printl"downloaded {back.length}: first {back[0 0]:.4f}"
+    printl"downloaded {back.length}: first {fmt'.4f'(back[0 0])}"
     let scaled = {
         $runtime_checks   # a GPU program's operand shapes are checked when it runs
         cpu(current .* 100.0)
     }
-    printl"percent: {[loop x in scaled.data format(x ".1f")].join(" ")}"
+    printl"percent: {[loop x in scaled.data fmt'.1f'(x)].join(" ")}"
 }

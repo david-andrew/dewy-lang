@@ -121,5 +121,5 @@ main = () => {
     }
     let winner = if team_alive(fs 0) and not team_alive(fs 1) "team 0" else if team_alive(fs 1) and not team_alive(fs 0) "team 1" else "nobody"
     printl"winner: {winner} after {round - 1} rounds"
-    loop f in fs printl"  {f.name:<5} {f.hp:>3}/{f.max_hp:<3} {f.status}"
+    loop f in fs printl"  {fmt'<5'(f.name)} {fmt'>3'(f.hp)}/{fmt'<3'(f.max_hp)} {f.status}"
 }

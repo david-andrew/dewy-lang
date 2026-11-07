@@ -55,7 +55,7 @@ newton = (f:Fn df:Fn x0:float64 tol:float64=1e-12 max_iter:int64=50):>float64|No
 
 show = (label:string value:float64|NoRoot):>void => {
     match value {
-        v:float64 => printl("{label}: {format(v ".10f")}")
+        v:float64 => printl("{label}: {fmt'.10f'(v)}")
         e:NoRoot => printl("{label}: no root ({e.reason})")
     }
 }
@@ -63,12 +63,12 @@ show = (label:string value:float64|NoRoot):>void => {
 main = () => {
     let pi = 3.141592653589793
     printl("integral of sin over [0, pi] = 2")
-    printl("  trapezoid n=100: {format(trapezoid((x:float64)=>sin(x*rad) 0.0 pi 100) ".8f")}")
-    printl("  simpson   n=10:  {format(simpson((x:float64)=>sin(x*rad) 0.0 pi 10) ".8f")}")
-    printl("  adaptive:        {format(adaptive((x:float64)=>sin(x*rad) 0.0 pi 1e-10) ".10f")}")
+    printl("  trapezoid n=100: {fmt'.8f'(trapezoid((x:float64)=>sin(x*rad) 0.0 pi 100))}")
+    printl("  simpson   n=10:  {fmt'.8f'(simpson((x:float64)=>sin(x*rad) 0.0 pi 10))}")
+    printl("  adaptive:        {fmt'.10f'(adaptive((x:float64)=>sin(x*rad) 0.0 pi 1e-10))}")
     let gauss = (x:float64) => exp(-x*x)
-    printl("integral of exp(-x^2) over [-5, 5] = sqrt(pi) = {format(sqrt(pi) ".10f")}")
-    printl("  adaptive:        {format(adaptive(@gauss -5.0 5.0 1e-10) ".10f")}")
+    printl("integral of exp(-x^2) over [-5, 5] = sqrt(pi) = {fmt'.10f'(sqrt(pi))}")
+    printl("  adaptive:        {fmt'.10f'(adaptive(@gauss -5.0 5.0 1e-10))}")
 
     let cubic = (x:float64) => x^3-2x-5
     let dcubic = (x:float64) => 3x^2-2

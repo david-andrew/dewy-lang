@@ -19,7 +19,7 @@ Op:type = 'put' | 'del'
 Change:type = [op:Op key:string value:string=""]
 Txn:type = [id:int64 changes:array<Change>]
 
-hex8 = (value:uint32):>string => format(value "08x")
+hex8 = (value:uint32):>string => fmt'08x'(value)
 
 record = (txn:int64 tag:string key:string value:string):>string => {
     let body = "{txn} {tag} {bytes(key).length} {bytes(value).length} {key}{value}"

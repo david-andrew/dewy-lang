@@ -47,10 +47,10 @@ main = () => {
     loop events.length >? 0 {
         let e = events.pop()
         if e.kind =? 'arrive' {
-            printl("{e.time:>4}  {e.patient.name} arrives ({e.patient.severity})")
+            printl("{fmt'>4'(e.time)}  {e.patient.name} arrives ({e.patient.severity})")
             waiting.push(e.patient RANK[e.patient.severity] * 1000 + e.patient.arrived)
         } else {
-            printl("{e.time:>4}  {e.patient.name} leaves doctor {e.doctor}")
+            printl("{fmt'>4'(e.time)}  {e.patient.name} leaves doctor {e.doctor}")
             if 0 <=? e.doctor <? free.length free[e.doctor] = true
         }
         # hand waiting patients to free doctors
@@ -60,7 +60,7 @@ main = () => {
                 free[d] = false
                 stats.record(p e.time)
                 let done = e.time + TREAT_MINUTES[p.severity]
-                printl("{e.time:>4}  doctor {d} sees {p.name} until {done}")
+                printl("{fmt'>4'(e.time)}  doctor {d} sees {p.name} until {done}")
                 events.push(Event['finish' done p d] done)
             }
         }
@@ -71,6 +71,6 @@ main = () => {
         let ws = stats.waits.get(sev) ?? []
         if ws.length =? 0 continue
         let avg = sum(ws) / ws.length
-        printl("{sev:<9} n={ws.length} avg wait {avg:.1f} max {max(ws)}")
+        printl("{fmt'<9'(sev)} n={ws.length} avg wait {fmt'.1f'(avg)} max {max(ws)}")
     }
 }

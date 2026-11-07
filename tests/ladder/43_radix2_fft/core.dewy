@@ -74,5 +74,5 @@ main = ():>void => {
     }
     let singleton = fft([Complex[3.0 4.0]] false)
     $runtime_assert(singleton[0].im =? 4.0)
-    printl("{format(spectrum[0].re ".3f")} {format(energy ".3f")} {format(spectrum[1].re ".3f")}")
+    printl("{fmt'.3f'(spectrum[0].re)} {fmt'.3f'(energy)} {fmt'.3f'(spectrum[1].re)}")
 }

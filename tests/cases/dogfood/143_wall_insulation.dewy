@@ -27,19 +27,19 @@ main = () => {
     let wall:float64*RValue = inside_air + outside_air
     loop layer in layers {
         wall += layer.r
-        printl"{layer.name}: {layer.thickness as inch:.3f} in, R-{layer.r as R:.3f}"
+        printl"{layer.name}: {fmt'.3f'((layer.thickness)/(1inch))} in, R-{fmt'.3f'((layer.r)/(1R))}"
     }
-    printl"wall: R-{wall as R:.2f}, RSI {wall as RSI:.3f}"
+    printl"wall: R-{fmt'.2f'((wall)/(1R))}, RSI {fmt'.3f'((wall)/(1RSI))}"
     let u = 1/wall
-    printl"U-factor: {u as (BTU/(hour*ft^2*°F)):.4f} BTU/(hour*ft^2*°F), {u as (W/(m^2*K)):.3f} W/(m^2*K)"
+    printl"U-factor: {fmt'.4f'((u)/1(BTU/(hour*ft^2*°F)))} BTU/(hour*ft^2*°F), {fmt'.3f'((u)/1(W/(m^2*K)))} W/(m^2*K)"
 
     let area = 8ft*40ft
     let inside = 70°F
     let outside = 30°F
     let rise = inside - outside
     let loss = heat_loss(area rise wall)
-    printl"{area/ft^2} ft^2 at {rise} ({rise as °C:.2f} °C): {loss as (BTU/hour):.1f} BTU/hour, {loss as W:.1f} W"
-    printl"per day: {loss*24hour as kWh:.2f} kWh"
+    printl"{area/ft^2} ft^2 at {rise} ({fmt'.2f'((rise)/(1K))} °C): {fmt'.1f'((loss)/1(BTU/hour))} BTU/hour, {fmt'.1f'((loss)/(1W))} W"
+    printl"per day: {fmt'.2f'((loss*24hour)/(1kWh))} kWh"
     printl"U*A*rise agrees: {abs(u*area*rise/loss - 1) <? 1e-12}"
     printl"1 RSI is exactly {RSI/R} R"
 }

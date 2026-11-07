@@ -71,7 +71,7 @@ luhn_digit = (digits:string):>int64 => {
 
 loop text in ["Wikipedia" "hello world" ""] {
     let data = bytes_of(text)
-    printl"{text:<12} adler32={hex32(adler32(data))} fnv1a={hex32(fnv1a(data))} crc8={crc8(data)}"
+    printl"{fmt'<12'(text)} adler32={hex32(adler32(data))} fnv1a={hex32(fnv1a(data))} crc8={crc8(data)}"
 }
 let state:uint32 = 2463534242
 let rolls:array<int64> = []

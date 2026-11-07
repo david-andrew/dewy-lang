@@ -57,7 +57,7 @@ intersect = (a:Box b:Box):>Box? => {
     Box[lo hi]
 }
 
-fmt = (p:Point):>string => "({p.x:.1f}, {p.y:.1f})"
+show_point = (p:Point):>string => "({fmt'.1f'(p.x)}, {fmt'.1f'(p.y)})"
 
 main = () => {
     let shapes:array<Circle | Rect | Triangle> = [
@@ -68,14 +68,14 @@ main = () => {
         Circle[name="well" center=[-3.0 3.0] radius=0.5]
     ]
 
-    printl"{"shape":<6} {"area":>7} {"perimeter":>9}  bounds"
+    printl"{fmt'<6'("shape")} {fmt'>7'("area")} {fmt'>9'("perimeter")}  bounds"
     loop s in shapes {
         let b = bounds(s)
-        printl"{s.name:<6} {area(s):>7.2f} {perimeter(s):>9.2f}  {fmt(b.lo)}..{fmt(b.hi)}"
+        printl"{fmt'<6'(s.name)} {fmt'>7.2f'(area(s))} {fmt'>9.2f'(perimeter(s))}  {show_point(b.lo)}..{show_point(b.hi)}"
     }
 
     let total = sum([loop s in shapes area(s)])
-    printl"total area {total:.2f}"
+    printl"total area {fmt'.2f'(total)}"
     let biggest = shapes.max_by(@area)
     printl"largest: {biggest.name}"
     let ranked = shapes.sorted(key=@perimeter reverse=true)
@@ -84,7 +84,7 @@ main = () => {
     let probes:array<Point> = [[2.0 2.0] [4.0 1.0] [4.0 2.0] [0.0 0.0] [-3.2 2.9]]
     loop p in probes {
         let inside = [loop s in shapes if contains(s p) s.name]
-        printl"{fmt(p)} is in {if inside.is_empty "nothing" else inside.join(" and ")}"
+        printl"{show_point(p)} is in {if inside.is_empty "nothing" else inside.join(" and ")}"
     }
 
     printl"overlapping bounds:"
@@ -92,7 +92,7 @@ main = () => {
         loop j in [i + 1..shapes.length) {
             let o = intersect(bounds(shapes[i]) bounds(shapes[j]))
             if o is? Box {
-                printl"  {shapes[i].name} & {shapes[j].name}: {o.width:.2f} x {o.height:.2f}"
+                printl"  {shapes[i].name} & {shapes[j].name}: {fmt'.2f'(o.width)} x {fmt'.2f'(o.height)}"
             }
         }
     }

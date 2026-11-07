@@ -106,9 +106,9 @@ main = () => {
                     <RegexError> => false
                 }
                 if mine =? theirs agree += 1
-                printl("{source:<16} {"\"{text}\"":<16} {if mine "match" else "no"}{if mine =? theirs "" else "  (library disagrees)"}")
+                printl("{fmt'<16'(source)} {fmt'<16'("\"{text}\"")} {if mine "match" else "no"}{if mine =? theirs "" else "  (library disagrees)"}")
             }
-            problem:string => printl("{source:<16} error: {problem}")
+            problem:string => printl("{fmt'<16'(source)} error: {problem}")
         }
     }
     printl("{agree} of {cases.length} agree with the library")

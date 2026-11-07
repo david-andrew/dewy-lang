@@ -54,16 +54,16 @@ from_ordinal = (n:int):>Date => {
 
 weekday = (d:Date):>string => WEEKDAYS[ordinal(d) % 7]
 
-show = (d:Date):>string => "{d.year}-{d.month:02}-{d.day:02}"
+show = (d:Date):>string => "{d.year}-{fmt'02'(d.month)}-{fmt'02'(d.day)}"
 
 print_month = (year:int month:Month):>void => {
     let title = "{MONTH_NAMES[month - 1]} {year}"
-    printl(format(title "^20"))
+    printl(fmt'^20'(title))
     printl"Mo Tu We Th Fr Sa Su"
     let first = ordinal(Date[year month 1]) % 7
     let cells:array<string> = [loop _ in [0..first) "  "]
     loop day in [1..month_length(year month)] {
-        cells.push(format(day ">2"))
+        cells.push(fmt'>2'(day))
         if cells.length =? 7 {
             printl(cells.join(" "))
             cells.clear()
