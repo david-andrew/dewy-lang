@@ -4,7 +4,7 @@ from p"@lib/time/core.dewy" import (instant_error utc_error)
 import p"@lib/time/civil.dewy" as civil
 from p"@lib/time/civil.dewy" import (date_error time_of_day_error local_error date_read_error time_read_error local_read_error date_pattern_only time_pattern_only local_pattern_only)
 import p"@lib/time/zones.dewy" as zones
-from p"@lib/time/zones.dewy" import (zone_error zone_scope_error zoned_error local_zone_error policy_gap _FoldPolicy _GapPolicy)
+from p"@lib/time/zones.dewy" import (zone_error zone_scope_error zoned_error zoned_text_error local_zone_error policy_gap _FoldPolicy _GapPolicy)
 
 Instant:type=core.Instant
 Duration:type=core.Duration
@@ -86,8 +86,11 @@ in_zone=(l:LocalDateTime z:Zone fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|
 
 $check_constant zone_error(name) "not a time zone"
 zone=(name:string):>Zone|UnknownZone=>zones.zone_parse(name)
+$check_constant zoned_text_error(text fold gap scope) "not a zoned time"
+$warn_if scope is? none "`zoned` has no time zone here, so text that names none reads in the zone of the machine it runs on: say so with `$time.zone = 'system'`, pass `zone=`, or name one: `$time.zone = 'America/New_York'`"
+zoned=(text:string fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse(text none fold gap scope)
 $check_constant zoned_error(text zone fold gap scope) "not a zoned time"
-zoned=(text:string zone:Zone|none=none fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse(text zone fold gap scope)
+zoned=(text:string zone:Zone|none fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse(text zone fold gap scope)
 
 import p"@lib/time/clock.dewy" as clock
 ClockReading:type=clock.ClockReading

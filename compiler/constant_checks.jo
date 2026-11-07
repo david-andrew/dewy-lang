@@ -69,7 +69,7 @@ cc_call = (n: int, f: int, decl: int) -> int:
     if cc_errors.has(decl): fatal(nodes[n].pos, cc_errors[decl])
     if not cc_decls.has(decl): return 0
     # (every argument constant and the value a plain record: the value, nothing at run time)
-    folded = cc_fold_first(n)
+    folded = cc_fold_first(n, decl)
     if folded != 0: return folded
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl]:
@@ -93,6 +93,8 @@ cc_call = (n: int, f: int, decl: int) -> int:
         if tkind(why.type) == .str_:
             if why.s == "": return 0
             fatal(pos, "{c.message}: {why.s}")
+        after = cc_fold_after(n, decl)
+        if after != 0: return after
         return cc_narrow(n)
     0
 

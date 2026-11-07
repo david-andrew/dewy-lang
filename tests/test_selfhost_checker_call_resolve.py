@@ -128,6 +128,7 @@ finish_partial = (n: int, ps: int[], mask: int, ret: int) -> int: events.push("p
 call_resolve_error = (kind: int, n: int, name: int, d: int, i: int, partial: bool): print(events); print("error:{kind}:{i}:{partial}"); exit(32)
 call_ide_ref = (n: int, name: int, xs: int[], d: int, f: int): events.push("ide")
 call_note_contracts = (n: int, f: int, d: int, partial: bool, closure: int): events.push("contracts:{partial}:{closure}")
+call_warn_unsettled = (n: int, f: int, d: int): events.push("warn:{d}")
 call_capture_block = (n: int, f: int, ss: mut int[]): events.push("capture-block:{ss}")
 call_conversion_double = (a: int, p: int, bs: mut int[]) -> int:
     if nodes[a].ival == -1: return -1

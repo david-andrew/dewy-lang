@@ -335,10 +335,11 @@ _resolve=(local:int64 nanos:int z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none
 _zone_for=(written:Zone|none given:Zone|none scope:string|none running:bool):>Zone|UnknownZone|MissingContext=>{
     if written isnt? none {return written}
     if given isnt? none {return given}
-    if scope is? none or (scope =? 'system' and not running) {
+    if not running and (scope is? none or scope =? 'system') {
         return MissingContext["there is no zone to read this in, and a literal cannot assume one: write it in the text, `2026-10-26T09:00[America/New_York]`, pass `zone=`, or set `$time.zone`"]
     }
-    if scope =? 'system' {return system_zone()}
+    # (unspecified means the running machine, and the call has already warned)
+    if scope is? none or scope =? 'system' {return system_zone()}
     _machine_named(scope)
 }
 # `2026-10-26T09:00[America/New_York]`, or local text with a `zone`, or the scope's `$time.zone`.
@@ -380,6 +381,9 @@ zoned_error=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|non
     e:InvalidFields=>e.message
     <OffGrid>=>"that label falls between nanoseconds under the UTC rate of its time"
 }
+
+# (the same with no zone given)
+zoned_text_error=(text:string fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>zoned_error(text none fold gap scope)
 
 # ---------------- zoned values ----------------
 _local=(z:ZonedDateTime):>int64=>(_posix_of(z.nominal) ?? 0)+z.offset

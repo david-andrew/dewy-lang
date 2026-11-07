@@ -2493,8 +2493,12 @@ call_note_contracts = (n: int, f: int, decl: int, partial: bool, closure: int):
     if proof_active and proof_decls.has(decl):
         if partial: fatal(nodes[n].pos, "a proof cannot be used as a value; use a direct statement call")
         proof_calls.push(FactRequest(n, int(ctxs[cx].inst)))
-    if wi_any and nodes[decl].c != 0 and not partial and closure == 0: wi_call(n, f, decl)
+    if wi_any and nodes[decl].c != 0 and not partial and closure == 0 and not cc_decls.has(decl): wi_call(n, f, decl)
     if dir_floats_any and not partial and closure == 0: ff_note_call(f, decl)
+
+# (a declaration with constant checks warns after them: a call they folded has nothing left to assume)
+call_warn_unsettled = (n: int, f: int, decl: int):
+    if nodes[decl].c != 0 and cc_decls.has(decl): wi_call(n, f, decl)
 
 call_capture_block = (n: int, f: int, statements: mut int[]):
     call = nodes.len()

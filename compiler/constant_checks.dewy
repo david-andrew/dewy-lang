@@ -7,7 +7,7 @@ from p"checker_expr.dewy" import lookup
 from p"ast.jo" import (NF_CHECKED add_flag kid kids mk nkids nodes set_list)
 from p"check.jo" import (fns get_fn_inst syms)
 from p"expr.jo" import (CV ntype)
-from p"constant_folds.jo" import (cc_closed_expr cc_fold_first)
+from p"constant_folds.jo" import (cc_closed_expr cc_fold_first cc_fold_after)
 from p"types.jo" import (T_STR is_union mk_union prune tkind union_index union_members)
 from p"util.jo" import (fatal name_of pos_in_lib)
 from p"error_ops.dewy" import (exception_member)
@@ -79,7 +79,7 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
     if cc_errors.has(decl) {fatal(nodes.ptr[n].pos cc_errors[decl])}
     if not cc_decls.has(decl) {return 0}
     # (every argument constant and the value a plain record: the value, nothing at run time)
-    let folded=cc_fold_first(n)
+    let folded=cc_fold_first(n decl)
     if folded not=? 0 {return folded}
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl] {
@@ -106,6 +106,8 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
             fatal(pos "{c.message}: {why.s}")
         }
         cc_passed[n]=true
+        let after=cc_fold_after(n decl)
+        if after not=? 0 {return after}
         return cc_narrow(n)
     }
     0

@@ -5,6 +5,7 @@ use 'checker_state.dewy'
 use 'ast.jo'
 use 'check.jo'
 use 'comptime.jo'
+use 'warn_if.jo'
 use 'expr.jo'
 use 'types.jo'
 use 'units.jo'
@@ -49,7 +50,33 @@ cc_closed_expr = (x: int, depth: int) -> bool:
 # A call whose success type is one plain record, every argument closed: evaluated now, and when it
 # succeeds its value replaces the call, with no validator run needed. 0 when it stays a call: a
 # failure then goes to the validator, for the message.
-cc_fold_first = (n: int) -> int:
+# Does this call have an argument known only when the program runs? `$time.zone = 'system'`, or
+# a none its `$warn_if` warns of, as `zoned` with no zone set. Then folding could reach what a
+# compile cannot read, so the validators speak first, and what they pass assumes nothing. O(kids).
+cc_waits_for_validators = (n: int, decl: int) -> bool:
+    loop i in [0..nkids(n)):
+        x = kid(n, i)
+        if nodes[x].kind == .conv and nodes[x].a != 0: x = int(nodes[x].a)
+        if nodes[x].kind == .str_lit and name_of(int(nodes[x].sval)) == "system": return true
+    if wi_decls.has(decl):
+        loop w in wi_decls[decl]:
+            if w.param < 0 or w.param >= nkids(n): continue
+            x = kid(n, w.param)
+            if nodes[x].kind == .conv and nodes[x].a != 0: x = int(nodes[x].a)
+            if nodes[x].kind == .none_lit: return true
+    false
+
+# (every argument constant and the value a plain record: the value, nothing at run time)
+cc_fold_first = (n: int, decl: int) -> int:
+    if cc_waits_for_validators(n, decl): return 0
+    cc_fold_value(n)
+
+# (after the validators passed a call that waited for them)
+cc_fold_after = (n: int, decl: int) -> int:
+    if not cc_waits_for_validators(n, decl): return 0
+    cc_fold_value(n)
+
+cc_fold_value = (n: int) -> int:
     rt = prune(ntype(n))
     if not is_union(rt): return 0
     kept: int[]
@@ -60,11 +87,6 @@ cc_fold_first = (n: int) -> int:
     if tkind(t) != .struct_ or not cc_plain(t): return 0
     loop i in [0..nkids(n)):
         if not cc_closed_expr(kid(n, i), 0): return 0
-        # (`$time.zone = 'system'`: known only when the program runs, so the validator says what a
-        # literal can do with it)
-        x = kid(n, i)
-        if nodes[x].kind == .conv and nodes[x].a != 0: x = int(nodes[x].a)
-        if nodes[x].kind == .str_lit and name_of(int(nodes[x].sval)) == "system": return 0
     value = ct_values[ct_run(n)]
     # (a union's value holds the member's)
     if value.items.len() < 1 or prune(ct_values[value.items[0]].type) != t: return 0

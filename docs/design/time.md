@@ -127,6 +127,7 @@ let dt = (now - start) / 1s as float64
     say so with `$time.zone = 'system'`, or name one: `$time.zone = 'America/New_York'`
   ```
 
+  `zoned(s)` on text known only at run time warns the same way and reads the running machine's zone; a call settled at compile time has nothing to assume, so it does not warn.
   A literal cannot assume, so `zoned"2026-10-26T09:00"` without a zone, or with `'system'`, is a compile error.
 - **Resolution policies.** Native resolution never guesses. `earlier`, `later`, `all`, `reject`, `skip`, `preserve_displacement` and `next` are named. A missing 02:30 in a one-hour gap becomes 03:30 under `preserve_displacement` and 03:00 under `next`.
 - **Scope defaults.** `$time.gap = 'preserve_displacement'` and `$time.fold = 'earlier'` set lexical defaults. Without them, a civil add on a runtime zoned value gives `ZonedDateTime | Gap | Ambiguous`. A literal operand is proved at compile time.

@@ -36,7 +36,8 @@ add_flag = (n: int, f: int): nodes[n].flags = i32(int(nodes[n].flags) | f)
 fatal = (pos: int, msg: str): print("fatal {pos}: {msg}")
 pos_in_lib = (p: int) -> bool: false
 cc_closed_expr = (x: int, depth: int) -> bool: nodes[x].kind == .int_lit
-cc_fold_first = (n: int) -> int: 0
+cc_fold_first = (n: int, d: int) -> int: 0
+cc_fold_after = (n: int, d: int) -> int: 0
 name_of = (n: int) -> str: if n == 1: "check_constant" else: "name{n}"
 lookup = (n: int) -> int: if n < 50: n else: 0
 wi_param = (decl: int, x: int) -> int: x - 100

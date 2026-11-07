@@ -282,5 +282,6 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
     if cc_any and nodes[decl].c != 0 and closure == 0 and not capture_defaults:
         narrowed = cc_call(n, f, decl)
         if narrowed != 0: return narrowed
+    if wi_any and cc_any and closure == 0: call_warn_unsettled(n, f, decl)
     if capture_defaults: call_capture_block(n, f, statements)
     representation_type(int(fns[f].ret))
