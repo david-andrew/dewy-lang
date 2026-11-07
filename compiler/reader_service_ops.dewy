@@ -1,0 +1,456 @@
+$runtime_checks
+from p"@lib/std/path.jo" import (file_name)
+from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"@lib/core/str.jo" import (join replace trim)
+from p"arena_ops.dewy" import (arena_enable arena_return_at)
+from p"ast.jo" import (dewy_live_sources dewy_note_member dewy_param_kinds)
+from p"check.jo" import (binding_leaves struct_components target_wasm)
+from p"checker_call_queries.dewy" import (intrinsic_of)
+from p"concurrency.jo" import (TRANSFER_SEND_CLAIM TRANSFER_SEND_OFF TRANSFER_SYNC_CLAIM TRANSFER_SYNC_OFF TRANSFER_UNSAFE transfer_claim_pos transfer_tags)
+from p"decimal_ops.dewy" import (decimal_let)
+from p"dewy_direct.jo" import (DC_TEST_USAGE dn_expand_lazy)
+from p"dewy_directive_ops.dewy" import (dw_dir_apply dw_dir_name dw_target_dropped_node)
+from p"dewy_fast.jo" import (dn_error dn_interpolation_close dn_lex dn_lexer)
+from p"dewy_ffi_attrs.dewy" import (dw_ffi_attach dw_ffi_attr dw_ffi_c_types dw_ffi_library)
+from p"dewy_grammar.dewy" import (dn_spec_colon)
+from p"dewy_method_ops.dewy" import (dewy_defer_callee dewy_defer_name dewy_defer_type dewy_deferred_here dewy_inherited_key dewy_method_group)
+from p"dewy_methods.jo" import (dewy_decl_members dewy_decl_methods dewy_methods dewy_type_members)
+from p"dewy_nodes.jo" import (DW_ROW_HINT build_setting_apply dewy_reserved_name dw_add_receiver dw_allocators dw_arena_scope dw_bigint_import dw_bigint_value dw_chain_temp dw_clamp_block dw_expectation dw_finish_function dw_int_singleton_type dw_method_finish dw_parallel_exits dw_range_value dw_register_literal_methods dw_renamed_init dw_target_dropped_name dw_target_field_value dw_target_name dw_task_group dw_task_groups dw_task_spawn dw_type_members metatag_fail_text)
+from p"dewy_reader_types.dewy" import (DirBundle EffectSyntax ResultClause)
+from p"dewy_tokens.dewy" import (DewyLexeme)
+from p"directive_ops.dewy" import (dir_bundle_index dir_set dw_dir_known)
+from p"directives.jo" import (dir_builtin dir_bundles dir_scopes)
+from p"effects.jo" import (effect_blocks_demanded effect_panics_demanded effect_syntax effects_active)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"lazy_bodies.jo" import (dc_lazy_used)
+from p"node_store.dewy" import (NK)
+from p"ownership_hooks.dewy" import (ownership_declare)
+from p"parse.jo" import (head_collapse)
+from p"place_methods.jo" import (place_written)
+from p"place_split.dewy" import (place_method_split)
+from p"proofs.jo" import (proof_decls proof_pending result_active result_boolean_masks result_syntax)
+from p"refine.jo" import (refine_active str_set_type)
+from p"util.jo" import (fatal intern intern_sub warn)
+
+rs___pow10=(a0:int64):>float64=>{
+    __pow10(a0)
+}
+rs_arena_enable=():>void=>{
+    arena_enable()
+    return
+}
+rs_arena_return_at=(n:int64):>int64=>{
+    arena_return_at(n)
+}
+rs_binding_leaves=(bindings:array<int64>):>array<int64>=>{
+    binding_leaves(bindings)
+}
+rs_build_setting_apply=(target:bool text:string pos:int64 value_pos:int64 name:string):>void=>{
+    build_setting_apply(target text pos value_pos name)
+    return
+}
+rs_bytes_slice=(source:string first:int64 stop:int64):>string=>{
+    source.byte_slice(first stop)
+}
+rs_decimal_let=(n:int64):>void=>{
+    decimal_let(n)
+    return
+}
+rs_dewy_defer_callee=(n:int64):>void=>{
+    dewy_defer_callee(n)
+    return
+}
+rs_dewy_defer_name=(decl:int64 n:int64 name:int64):>void=>{
+    dewy_defer_name(decl n name)
+    return
+}
+rs_dewy_defer_type=(decl:int64 file:int64):>void=>{
+    dewy_defer_type(decl file)
+    return
+}
+rs_dewy_deferred_here=(file:int64 name:int64):>bool=>{
+    dewy_deferred_here(file name)
+}
+rs_dewy_inherited_key=():>int64=>{
+    dewy_inherited_key()
+}
+rs_dewy_method_group=(names:array<int64> decls:array<int64> inherited:dict<int64 int64>):>dict<int64 int64>=>{
+    dewy_method_group(names decls inherited)
+}
+rs_dewy_note_member=(n:int64):>void=>{
+    dewy_note_member(n)
+    return
+}
+rs_dewy_reserved_name=(name:string pos:int64):>void=>{
+    dewy_reserved_name(name pos)
+    return
+}
+rs_dir_builtin=(name:string):>bool=>{
+    dir_builtin(name)
+}
+rs_dir_bundle_index=(name:int64):>int64=>{
+    dir_bundle_index(name)
+}
+rs_dir_set=(name:int64 value:int64 start:int64 end_:int64 at:int64):>void=>{
+    dir_set(name value start end_ at)
+    return
+}
+rs_dn_error=(offset:int64 message:string):>int64=>{
+    dn_error(offset message)
+}
+rs_dn_expand_lazy=():>void=>{
+    dn_expand_lazy()
+    return
+}
+rs_dn_interpolation_close=(source:string start:int64 stop:int64):>int64=>{
+    dn_interpolation_close(source start stop)
+}
+rs_dn_lex=(file:int64 begin:int64 stop:int64 intern_names:bool):>array<DewyLexeme>=>{
+    dn_lex(file begin stop intern_names)
+}
+rs_dw_add_receiver=(fn_:int64 receiver:int64 receiver_type:int64):>void=>{
+    dw_add_receiver(fn_ receiver receiver_type)
+    return
+}
+rs_dw_arena_scope=(serial:int64 arena:int64 body:int64 copied:bool pos:int64):>int64=>{
+    dw_arena_scope(serial arena body copied pos)
+}
+rs_dw_bigint_value=(limbs:array<uint64> pos:int64 negative:bool):>int64=>{
+    dw_bigint_value(limbs pos negative)
+}
+rs_dw_chain_temp=(value:int64 @statements:array<int64> pos:int64):>int64=>{
+    dw_chain_temp(value @statements pos)
+}
+rs_dw_clamp_block=(n:int64 r:int64):>int64=>{
+    dw_clamp_block(n r)
+}
+rs_dw_dir_apply=(name:string enabled:int64 at:int64 start:int64 end_:int64 module:bool):>void=>{
+    dw_dir_apply(name enabled at start end_ module)
+    return
+}
+rs_dw_dir_known=(name:string):>bool=>{
+    dw_dir_known(name)
+}
+rs_dw_dir_name=(name:string):>bool=>{
+    dw_dir_name(name)
+}
+rs_dw_expectation=(pos:int64 where:int64 described:string said:int64 notes:int64 value:int64):>int64=>{
+    dw_expectation(pos where described said notes value)
+}
+rs_dw_ffi_attach=(n:int64 attrs:array<int64>):>void=>{
+    dw_ffi_attach(n attrs)
+    return
+}
+rs_dw_ffi_attr=(name:string value:int64 pos:int64):>int64=>{
+    dw_ffi_attr(name value pos)
+}
+rs_dw_ffi_c_types=(t:int64):>void=>{
+    dw_ffi_c_types(t)
+    return
+}
+rs_dw_ffi_library=(lib:string):>string=>{
+    dw_ffi_library(lib)
+}
+rs_dw_finish_function=(n:int64 parameters:array<int64> body:int64 name:string):>int64=>{
+    dw_finish_function(n parameters body name)
+}
+rs_dw_int_singleton_type=(values:array<int64> pos:int64):>int64=>{
+    dw_int_singleton_type(values pos)
+}
+rs_dw_method_finish=(fn_:int64 struct_:int64 type_params:array<int64> receiver:int64):>void=>{
+    dw_method_finish(fn_ struct_ type_params receiver)
+    return
+}
+rs_dw_parallel_exits=(n:int64 depth:int64):>void=>{
+    dw_parallel_exits(n depth)
+    return
+}
+rs_dw_range_value=(range:int64):>int64=>{
+    dw_range_value(range)
+}
+rs_dw_register_literal_methods=(entries:array<int64>):>void=>{
+    dw_register_literal_methods(entries);
+    return
+}
+rs_dw_renamed_init=():>void=>{
+    dw_renamed_init()
+    return
+}
+rs_dw_target_dropped_name=(nm:int64 pos:int64):>void=>{
+    dw_target_dropped_name(nm pos)
+    return
+}
+rs_dw_target_dropped_node=(n:int64):>void=>{
+    dw_target_dropped_node(n)
+    return
+}
+rs_dw_target_field_value=(field:int64):>string=>{
+    dw_target_field_value(field)
+}
+rs_dw_target_name=():>string=>{
+    dw_target_name()
+}
+rs_dw_task_group=(pos:int64 name:string serial:int64 body:int64 transparent:bool):>int64=>{
+    dw_task_group(pos name serial body transparent)
+}
+rs_dw_task_spawn=(g:int64 value:int64 pos:int64):>int64=>{
+    dw_task_spawn(g value pos)
+}
+rs_fatal=(p0:int64 msg0:string):>void=>{
+    fatal(p0 msg0)
+    return
+}
+rs_file_name=(path:string):>string=>{
+    file_name(path)
+}
+rs_head_collapse=(n:int64):>int64=>{
+    head_collapse(n)
+}
+rs_intern=(s:string):>int64=>{
+    intern(s)
+}
+rs_intern_sub=(s:string start:int64 n:int64):>int64=>{
+    intern_sub(s start n)
+}
+rs_intrinsic_of=(name:int64):>int64=>{
+    intrinsic_of(name)
+}
+rs_isolation_children=(k:NK):>int64=>{
+    isolation_children(k)
+}
+rs_join=(a0:array<string> a1:string):>string=>{
+    join(a0 a1)
+}
+rs_metatag_fail_text=(name:string):>string=>{
+    metatag_fail_text(name)
+}
+rs_ownership_declare=(decl:int64 hook:int64 role:int64):>void=>{
+    ownership_declare(decl hook role)
+    return
+}
+rs_place_method_split=(fn_:int64 receiver:int64 name:string):>array<int64>=>{
+    place_method_split(fn_ receiver name)
+}
+rs_replace=(a0:string a1:string a2:string):>string=>{
+    replace(a0 a1 a2)
+}
+rs_spec_colon=(source:string start:int64 stop:int64):>int64=>{
+    dn_spec_colon(@dn_lexer source start stop)
+}
+rs_str_from_bytes=(a0:array<uint8>):>string=>{
+    __str_from_bytes(a0)
+}
+rs_str_set_type=(values:array<string>):>int64=>{
+    str_set_type(values)
+}
+rs_to_float=(a0:string):>float64 | none=>{
+    to_float(a0)
+}
+rs_trim=(a0:string):>string=>{
+    trim(a0)
+}
+rs_warn=(p:int64 msg:string):>void=>{
+    warn(p msg)
+    return
+}
+rs_words=(a0:string):>array<string>=>{
+    words(a0)
+}
+rs_g_DC_TEST_USAGE=():>string=>{
+    DC_TEST_USAGE
+}
+rs_g_DW_ROW_HINT=():>string=>{
+    DW_ROW_HINT
+}
+rs_g_TRANSFER_SEND_CLAIM=():>int64=>{
+    TRANSFER_SEND_CLAIM
+}
+rs_g_TRANSFER_SEND_OFF=():>int64=>{
+    TRANSFER_SEND_OFF
+}
+rs_g_TRANSFER_SYNC_CLAIM=():>int64=>{
+    TRANSFER_SYNC_CLAIM
+}
+rs_g_TRANSFER_SYNC_OFF=():>int64=>{
+    TRANSFER_SYNC_OFF
+}
+rs_g_TRANSFER_UNSAFE=():>int64=>{
+    TRANSFER_UNSAFE
+}
+rs_g_dc_lazy_used_set=(a0:bool):>void=>{
+    dc_lazy_used=a0
+    return
+}
+rs_g_dewy_decl_members_item_set=(a0:int64 a1:dict<int64 int64>):>void=>{
+    dewy_decl_members[a0]=a1
+    return
+}
+rs_g_dewy_decl_methods_item_set=(a0:int64 a1:array<int64>):>void=>{
+    dewy_decl_methods[a0]=a1
+    return
+}
+rs_g_dewy_live_sources_has=(a0:int64):>bool=>{
+    dewy_live_sources.has(a0)
+}
+rs_g_dewy_live_sources_item_set=(a0:int64 a1:bool):>void=>{
+    dewy_live_sources[a0]=a1
+    return
+}
+rs_g_dewy_live_sources_remove=(a0:int64):>void=>{
+    dewy_live_sources.remove(a0);
+    return
+}
+rs_g_dewy_methods_len=():>int64=>{
+    dewy_methods.length
+}
+rs_g_dewy_methods_truncate=(a0:int64):>void=>{
+    dewy_methods.truncate(a0)
+    return
+}
+rs_g_dewy_param_kinds_item_set=(a0:int64 a1:array<int64>):>void=>{
+    dewy_param_kinds[a0]=a1
+    return
+}
+rs_g_dewy_type_members_item_set=(a0:int64 a1:dict<int64 int64>):>void=>{
+    dewy_type_members[a0]=a1
+    return
+}
+rs_g_dir_bundles_push=(a0:DirBundle):>void=>{
+    dir_bundles.push(a0)
+    return
+}
+rs_g_dir_scopes_len=():>int64=>{
+    dir_scopes.length
+}
+rs_g_dir_scopes_truncate=(a0:int64):>void=>{
+    dir_scopes.truncate(a0)
+    return
+}
+rs_g_dw_allocators=():>int64=>{
+    dw_allocators
+}
+rs_g_dw_allocators_set=(a0:int64):>void=>{
+    dw_allocators=a0
+    return
+}
+rs_g_dw_bigint_import=():>int64=>{
+    dw_bigint_import
+}
+rs_g_dw_bigint_import_set=(a0:int64):>void=>{
+    dw_bigint_import=a0
+    return
+}
+rs_g_dw_task_groups_item=(a0:int64):>string=>{
+    dw_task_groups[a0]
+}
+rs_g_dw_task_groups_len=():>int64=>{
+    dw_task_groups.length
+}
+rs_g_dw_task_groups_pop=():>string=>{
+    dw_task_groups.pop()
+}
+rs_g_dw_task_groups_push=(a0:string):>void=>{
+    dw_task_groups.push(a0)
+    return
+}
+rs_g_dw_type_members_get=(a0:int64):>dict<int64 dict<int64 int64>> | none=>{
+    dw_type_members.get(a0)
+}
+rs_g_dw_type_members_item_set=(a0:int64 a1:dict<int64 dict<int64 int64>>):>void=>{
+    dw_type_members[a0]=a1
+    return
+}
+rs_g_effect_blocks_demanded=():>bool=>{
+    effect_blocks_demanded
+}
+rs_g_effect_blocks_demanded_set=(a0:bool):>void=>{
+    effect_blocks_demanded=a0
+    return
+}
+rs_g_effect_panics_demanded=():>bool=>{
+    effect_panics_demanded
+}
+rs_g_effect_panics_demanded_set=(a0:bool):>void=>{
+    effect_panics_demanded=a0
+    return
+}
+rs_g_effect_syntax_len=():>int64=>{
+    effect_syntax.length
+}
+rs_g_effect_syntax_push=(a0:array<EffectSyntax>):>void=>{
+    effect_syntax.push(a0)
+    return
+}
+rs_g_effect_syntax_truncate=(a0:int64):>void=>{
+    effect_syntax.truncate(a0)
+    return
+}
+rs_g_effects_active_set=(a0:bool):>void=>{
+    effects_active=a0
+    return
+}
+rs_g_place_written_item_set=(a0:int64 a1:int64):>void=>{
+    place_written[a0]=a1
+    return
+}
+rs_g_place_written_remove=(a0:int64):>void=>{
+    place_written.remove(a0);
+    return
+}
+rs_g_proof_decls=():>dict<int64 int64>=>{
+    proof_decls
+}
+rs_g_proof_decls_item_set=(a0:int64 a1:int64):>void=>{
+    proof_decls[a0]=a1
+    return
+}
+rs_g_proof_decls_len=():>int64=>{
+    proof_decls.length
+}
+rs_g_proof_decls_remove=(a0:int64):>void=>{
+    proof_decls.remove(a0);
+    return
+}
+rs_g_proof_pending=():>bool=>{
+    proof_pending
+}
+rs_g_refine_active_set=(a0:bool):>void=>{
+    refine_active=a0
+    return
+}
+rs_g_result_active_set=(a0:bool):>void=>{
+    result_active=a0
+    return
+}
+rs_g_result_boolean_masks_get=(a0:int64):>int64 | none=>{
+    result_boolean_masks.get(a0)
+}
+rs_g_result_boolean_masks_item_set=(a0:int64 a1:int64):>void=>{
+    result_boolean_masks[a0]=a1
+    return
+}
+rs_g_result_syntax_get=(a0:int64):>array<ResultClause> | none=>{
+    result_syntax.get(a0)
+}
+rs_g_result_syntax_item_set=(a0:int64 a1:array<ResultClause>):>void=>{
+    result_syntax[a0]=a1
+    return
+}
+rs_g_struct_components_item_set=(a0:int64 a1:array<int64>):>void=>{
+    struct_components[a0]=a1
+    return
+}
+rs_g_target_wasm=():>bool=>{
+    target_wasm
+}
+rs_g_transfer_claim_pos_item_set=(a0:int64 a1:int64):>void=>{
+    transfer_claim_pos[a0]=a1
+    return
+}
+rs_g_transfer_tags_get=(a0:int64):>int64 | none=>{
+    transfer_tags.get(a0)
+}
+rs_g_transfer_tags_item_set=(a0:int64 a1:int64):>void=>{
+    transfer_tags[a0]=a1
+    return
+}
