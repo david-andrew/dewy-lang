@@ -1,0 +1,49 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (fns locals)
+from p"glsl.jo" import (gl_done gl_elem_type gl_name gl_param_copies)
+from p"types.jo" import (prune types)
+from p"util.jo" import (fatal name_of)
+
+GlslWord:type=int64<overflow='wrap'>
+gl_err=(pos:GlslWord msg:string):>void=>{
+    fatal(pos "in shader code: {msg}")
+}
+# A type as shaders hold it (GLSL, Metal and SPIR-V alike): a physical quantity's unit is checked
+# at compilation, so on the GPU it is its plain number, in canonical units (an angle in turns).
+sl_type=(t0:GlslWord):>int64=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind =? 'quantity' {return prune(GlslWord(types.ptr[t].elem))}
+    t
+}
+# true the first time a helper is asked for (its declarations are then made by the caller)
+gl_first=(name:string):>bool=>{
+    if gl_done.get(name) not=? none {return false}
+    gl_done[name]=true
+    true
+}
+# GLSL ES has no arrays of arrays: an array that is an element of an array is kept in a struct
+# (SA_n { T v[k]; }), so `a[i]` there is a[i].v
+gl_wrapped=(t:GlslWord):>bool=>$unsafe {
+    types.ptr[prune(t)].kind =? 'fixed' and types.ptr[prune(GlslWord(types.ptr[prune(t)].elem))].kind =? 'fixed'
+}
+# a value of array type t (an element of an array of arrays) wrapped as gl_elem_type has it
+gl_wrap=(x:string t:GlslWord pos:GlslWord):>string=>$unsafe {
+    if types.ptr[prune(t)].kind not=? 'fixed' {return x}
+    "{gl_elem_type(t pos)}({x})"
+}
+gl_local=(l:GlslWord):>string=>$unsafe {
+    let source=gl_param_copies.get(l)
+    if source not=? none {return gl_local(source)}
+    "l_{gl_name(name_of(GlslWord(locals.ptr[l].name)))}_{l}"
+}
+gl_fn_name=(f:GlslWord):>string=>$unsafe {
+    "f_{gl_name(name_of(GlslWord(nodes.ptr[GlslWord(fns.ptr[f].decl)].name)))}_{f}"
+}
+ind=(n:GlslWord):>string=>{
+    repeat("    " n)
+}
+gl_unsigned=(t0:GlslWord):>bool=>$unsafe {
+    let t=sl_type(t0)
+    types.ptr[t].kind =? 'int_' and not types.ptr[t].sign
+}

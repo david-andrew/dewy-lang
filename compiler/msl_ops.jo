@@ -1,0 +1,75 @@
+use 'msl.jo'
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'util.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'checks_assign_hooks.dewy'
+use 'expr.jo'
+use 'checks_thin_expr.dewy'
+use 'glsl.jo'
+use 'glsl_ops.dewy'
+
+ml_err = (pos: int, msg: str): fatal(pos, "in shader code: {msg}")
+ml_first = (name: str) -> bool:
+    if ml_done.get(name) != none: return false
+    ml_done[name] = true
+    true
+ml_local = (l: int) -> str: "l_{gl_name(name_of(int(locals[l].name)))}_{l}"
+ml_fn_name = (f: int) -> str: "f_{gl_name(name_of(int(nodes[int(fns[f].decl)].name)))}_{f}"
+ml_off = (c: int, d: str) -> str:
+    if len(d) == 0: return "{c}"
+    if c == 0: return d
+    "({d} + {c})"
+# the word at byte offset (c + d) of base (a multiple of 4)
+ml_word = (base: str, c: int, d: str) -> str:
+    if len(d) == 0: return "{base}[{c >> 2}]"
+    "{base}[({ml_off(c, d)}) >> 2]"
+ml_drain = ():
+    loop ml_pending.len() > 0: ml_function(ml_pending.pop())
+# ---------------- expressions ----------------
+ml_is_floaty = (t0: int) -> bool:
+    t = sl_type(t0)
+    types[t].kind == .float_ or (types[t].kind == .vec and not types[t].sign)
+ml_is_vector = (t0: int) -> bool:
+    t = sl_type(t0)
+    types[t].kind == .vec and t != T_MAT4
+ml_ncomp = (t0: int) -> int:
+    t = sl_type(t0)
+    if types[t].kind == .vec: return int(types[t].bits)
+    1
+# (what every function is given besides its parameters: the textures, and in the vertex stage
+# the vertex and instance, in compute ones the SIMD group's size and place in it)
+ml_ctx_params = () -> str:
+    if ml_stage == "vertex": return "constant SlTex* tx, uint sl_vid, uint sl_iid"
+    if ml_stage == "compute": return "constant SlTex* tx, uint sl_sg_size, uint sl_sg_id"
+    "constant SlTex* tx"
+ml_ctx_args = () -> str:
+    if ml_stage == "vertex": return "tx, sl_vid, sl_iid"
+    if ml_stage == "compute": return "tx, sl_sg_size, sl_sg_id"
+    "tx"
+ml_with_ctx = (ctx: str, rest: str[]) -> str:
+    if rest.len() == 0: return ctx
+    ctx + ", " + join(rest, ", ")
+# ---------------- GPU buffers (lib/game/gpubuffer.jo) ----------------
+# A GpuBuffer here is SlGB (its address, its length). Reads past either end read the nearest
+# element; writes (and atomics) past them do nothing. Only compute programs write.
+ml_is_gbuf_op = (e: int, name: str) -> bool:
+    if nodes[e].kind != .call or nodes[e].aux != 0 or nkids(e) == 0: return false
+    decl = int(fns[int(nodes[e].sym)].decl)
+    decl != 0 and modules[int(nodes[decl].mod)].is_prelude and name_of(int(nodes[decl].name)) == name and is_gpu_buffer(ntype(kid(e, 0)))
+# a GpuBuffer operand, kept in a temporary unless it is read from the uniforms each time it is used
+ml_gbuf_value = (e: int) -> str: ml_expr(e)
+ml_store_decls = ():
+    if not ml_first("store"): return
+    # (the low `bits` bits of v to bits [8 * (a & 3), ...) of their word: cleared, then set, each
+    # atomically, so that the bytes beside them, which other threads may write, stay)
+    ml_decls.push("void sl_store_sub(device uint* b, int a, int bits, int v) \{\n    device atomic_uint* w = (device atomic_uint*)(b + (a >> 2));\n    uint sh = uint((a & 3) * 8);\n    uint ones = (1u << uint(bits)) - 1u;\n    atomic_fetch_and_explicit(w, ~(ones << sh), memory_order_relaxed);\n    atomic_fetch_or_explicit(w, (as_type<uint>(v) & ones) << sh, memory_order_relaxed);\n}\n")
+    # (an f32 as an f64's two words; numbers too small for an f32's normal range become 0)
+    ml_decls.push("uint2 sl_to_f64(float v) \{\n    uint bits = as_type<uint>(v);\n    uint sign = bits & 0x80000000u;\n    uint e = (bits >> 23) & 0xFFu;\n    uint m = bits & 0x7FFFFFu;\n    uint hi = sign | (((e + 896u) << 20) | (m >> 3));\n    if (e == 0xFFu) hi = sign | 0x7FF00000u | (m >> 3);\n    if (e == 0u) return uint2(0u, sign);\n    return uint2(m << 29, hi);\n}\n")
+ml_wref = (base: str, c: int, d: str) -> str: "{base}[({ml_off(c, d)}) >> 2]"
+# the source: the declarations, then every function's prototype, then the functions, then main
+ml_source = (main: str) -> str: ml_head() + join(ml_decls, "") + join(ml_protos, "") + join(ml_bodies, "") + main

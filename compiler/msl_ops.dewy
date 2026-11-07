@@ -1,0 +1,97 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (join)
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (fns locals modules)
+from p"checks_thin_expr.dewy" import (is_gpu_buffer)
+from p"expr.jo" import (ntype)
+from p"glsl.jo" import (gl_name)
+from p"glsl_ops.dewy" import (sl_type)
+from p"msl.jo" import (ml_bodies ml_decls ml_done ml_expr ml_function ml_head ml_pending ml_protos ml_stage)
+from p"types.jo" import (T_MAT4 types)
+from p"util.jo" import (fatal name_of)
+
+MslWord:type=int64<overflow='wrap'>
+ml_err=(pos:MslWord msg:string):>void=>{
+    fatal(pos "in shader code: {msg}")
+}
+ml_first=(name:string):>bool=>{
+    if ml_done.get(name) not=? none {return false}
+    ml_done[name]=true
+    true
+}
+ml_local=(l:MslWord):>string=>$unsafe {
+    "l_{gl_name(name_of(MslWord(locals.ptr[l].name)))}_{l}"
+}
+ml_fn_name=(f:MslWord):>string=>$unsafe {
+    "f_{gl_name(name_of(MslWord(nodes.ptr[MslWord(fns.ptr[f].decl)].name)))}_{f}"
+}
+ml_off=(c:MslWord d:string):>string=>{
+    if (d as array<uint8>).length =? 0 {return "{c}"}
+    if c =? 0 {return d}
+    "({d} + {c})"
+}
+# the word at byte offset (c + d) of base (a multiple of 4)
+ml_word=(base:string c:MslWord d:string):>string=>{
+    if (d as array<uint8>).length =? 0 {return "{base}[{c >> 2}]"}
+    "{base}[({ml_off(c d)}) >> 2]"
+}
+ml_drain=():>void=>{
+    loop ml_pending.length >? 0 {ml_function(ml_pending.pop());}
+}
+# ---------------- expressions ----------------
+ml_is_floaty=(t0:MslWord):>bool=>$unsafe {
+    let t=sl_type(t0)
+    types.ptr[t].kind =? 'float_' or (types.ptr[t].kind =? 'vec' and not types.ptr[t].sign)
+}
+ml_is_vector=(t0:MslWord):>bool=>$unsafe {
+    let t=sl_type(t0)
+    types.ptr[t].kind =? 'vec' and t not=? T_MAT4
+}
+ml_ncomp=(t0:MslWord):>int64=>$unsafe {
+    let t=sl_type(t0)
+    if types.ptr[t].kind =? 'vec' {return MslWord(types.ptr[t].bits)}
+    1
+}
+# (what every function is given besides its parameters: the textures, and in the vertex stage
+# the vertex and instance, in compute ones the SIMD group's size and place in it)
+ml_ctx_params=():>string=>{
+    if ml_stage =? "vertex" {return "constant SlTex* tx, uint sl_vid, uint sl_iid"}
+    if ml_stage =? "compute" {return "constant SlTex* tx, uint sl_sg_size, uint sl_sg_id"}
+    "constant SlTex* tx"
+}
+ml_ctx_args=():>string=>{
+    if ml_stage =? "vertex" {return "tx, sl_vid, sl_iid"}
+    if ml_stage =? "compute" {return "tx, sl_sg_size, sl_sg_id"}
+    "tx"
+}
+ml_with_ctx=(ctx:string rest:array<string>):>string=>{
+    if rest.length =? 0 {return ctx}
+    "{ctx}, {join(rest ", ")}"
+}
+# ---------------- GPU buffers (lib/game/gpubuffer.jo) ----------------
+# A GpuBuffer here is SlGB (its address, its length). Reads past either end read the nearest
+# element; writes (and atomics) past them do nothing. Only compute programs write.
+ml_is_gbuf_op=(e:MslWord name:string):>bool=>$unsafe {
+    if nodes.ptr[e].kind not=? 'call' or nodes.ptr[e].aux not=? 0 or nkids(e) =? 0 {return false}
+    let decl=MslWord(fns.ptr[MslWord(nodes.ptr[e].sym)].decl)
+    decl not=? 0 and modules[MslWord(nodes.ptr[decl].mod)].is_prelude and name_of(MslWord(nodes.ptr[decl].name)) =? name and is_gpu_buffer(ntype(kid(e 0)))
+}
+# a GpuBuffer operand, kept in a temporary unless it is read from the uniforms each time it is used
+ml_gbuf_value=(e:MslWord):>string=>{
+    ml_expr(e)
+}
+ml_store_decls=():>void=>{
+    if not ml_first("store") {return}
+    # (the low `bits` bits of v to bits [8 * (a & 3), ...) of their word: cleared, then set, each
+    # atomically, so that the bytes beside them, which other threads may write, stay)
+    ml_decls.push("void sl_store_sub(device uint* b, int a, int bits, int v) \{\n    device atomic_uint* w = (device atomic_uint*)(b + (a >> 2));\n    uint sh = uint((a & 3) * 8);\n    uint ones = (1u << uint(bits)) - 1u;\n    atomic_fetch_and_explicit(w, ~(ones << sh), memory_order_relaxed);\n    atomic_fetch_or_explicit(w, (as_type<uint>(v) & ones) << sh, memory_order_relaxed);\n}\n")
+    # (an f32 as an f64's two words; numbers too small for an f32's normal range become 0)
+    ml_decls.push("uint2 sl_to_f64(float v) \{\n    uint bits = as_type<uint>(v);\n    uint sign = bits & 0x80000000u;\n    uint e = (bits >> 23) & 0xFFu;\n    uint m = bits & 0x7FFFFFu;\n    uint hi = sign | (((e + 896u) << 20) | (m >> 3));\n    if (e == 0xFFu) hi = sign | 0x7FF00000u | (m >> 3);\n    if (e == 0u) return uint2(0u, sign);\n    return uint2(m << 29, hi);\n}\n")
+}
+ml_wref=(base:string c:MslWord d:string):>string=>{
+    "{base}[({ml_off(c d)}) >> 2]"
+}
+# the source: the declarations, then every function's prototype, then the functions, then main
+ml_source=(main:string):>string=>{
+    "{ml_head()}{join(ml_decls "")}{join(ml_protos "")}{join(ml_bodies "")}{main}"
+}

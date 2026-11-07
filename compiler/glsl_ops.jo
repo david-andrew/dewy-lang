@@ -1,0 +1,40 @@
+use 'glsl.jo'
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'util.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'checks_assign_hooks.dewy'
+use 'expr.jo'
+use 'checks_thin_expr.dewy'
+
+gl_err = (pos: int, msg: str): fatal(pos, "in shader code: {msg}")
+# A type as shaders hold it (GLSL, Metal and SPIR-V alike): a physical quantity's unit is checked
+# at compilation, so on the GPU it is its plain number, in canonical units (an angle in turns).
+sl_type = (t0: int) -> int:
+    t = prune(t0)
+    if types[t].kind == .quantity: return prune(int(types[t].elem))
+    t
+# true the first time a helper is asked for (its declarations are then made by the caller)
+gl_first = (name: str) -> bool:
+    if gl_done.get(name) != none: return false
+    gl_done[name] = true
+    true
+# GLSL ES has no arrays of arrays: an array that is an element of an array is kept in a struct
+# (SA_n { T v[k]; }), so `a[i]` there is a[i].v
+gl_wrapped = (t: int) -> bool: types[prune(t)].kind == .fixed and types[prune(int(types[prune(t)].elem))].kind == .fixed
+# a value of array type t (an element of an array of arrays) wrapped as gl_elem_type has it
+gl_wrap = (x: str, t: int, pos: int) -> str:
+    if types[prune(t)].kind != .fixed: return x
+    "{gl_elem_type(t, pos)}({x})"
+gl_local = (l: int) -> str:
+    if let source = gl_param_copies.get(l): return gl_local(source)
+    "l_{gl_name(name_of(int(locals[l].name)))}_{l}"
+gl_fn_name = (f: int) -> str: "f_{gl_name(name_of(int(nodes[int(fns[f].decl)].name)))}_{f}"
+ind = (n: int) -> str: repeat("    ", n)
+gl_unsigned = (t0: int) -> bool:
+    t = sl_type(t0)
+    types[t].kind == .int_ and not types[t].sign
