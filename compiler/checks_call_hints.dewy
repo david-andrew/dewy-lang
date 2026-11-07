@@ -1,0 +1,140 @@
+$runtime_checks
+from p"types.jo" import ts_dewy
+from p"types.jo" import dt
+from p"@lib/core/str.jo" import (is_alnum lower)
+from p"ast.jo" import (NF_LITERAL has_flag nodes)
+from p"expr.jo" import (unnamed)
+from p"util.jo" import (files pos_file pos_off warn)
+
+CallHintWord:type=int64<overflow='wrap'>
+# rgb(255, 128, 0): colors go from 0 to 1 (more is brighter than white, for glow)
+rgb_check=(n:CallHintWord args:array<int64>):>void=>$unsafe {
+    let big=false
+    loop i in [0..3) {
+        # (a little above 1 is brighter than white, as a flash or a glow in 3D: rgb(3, 3, 3))
+        if lit_num(args[i]) >? 8.0 {big=true}
+    }
+    if big {warn(nodes.ptr[n].pos "the parts of a color go from 0 to 1 (above 1: brighter than white): for 0 to 255, divide by 255 or write hex(0xff8000)")}
+    # (rgba(0, 0, 0, 10): an alpha from 0 to 255)
+    else if args.length >=? 4 and lit_num(args[3]) >? 1.0 {warn(nodes.ptr[CallHintWord(args[3])].pos "alpha goes from 0 (clear) to 1 (solid): {num_text(lit_num(args[3]))} of 255 is {lit_num(args[3]) / 255.0:.2f}")}
+}
+# hsv(200, 0.8, 0.9): a hue in degrees, which goes around 0 to 1 here
+hsv_check=(n:CallHintWord args:array<int64>):>void=>$unsafe {
+    let h=lit_num(args[0])
+    if h >? 1.0 {warn(nodes.ptr[n].pos "a hue goes from 0 to 1 around the color circle (as 0 to 360 degrees): {num_text(h)} degrees is `{h} / 360.0`")}
+}
+num_text=(v:float64):>string=>{
+    if v =? floor(v) and abs(v) <? 1e15 {return "{int64(v)}"}
+    "{v}"
+}
+# a number written as it is (5, 0.5): its value, else -1
+lit_num=(a0:CallHintWord):>float64=>$unsafe {
+    if a0 =? 0 {return -1.0}
+    let a=unnamed(a0)
+    if not has_flag(a NF_LITERAL) and nodes.ptr[a].kind not=? 'float_lit' {return -1.0}
+    if nodes.ptr[a].kind =? 'int_lit' {return float64(nodes.ptr[a].ival)}
+    if nodes.ptr[a].kind =? 'float_lit' {return nodes.ptr[a].fval}
+    if nodes.ptr[a].kind =? 'conv' {return lit_num(CallHintWord(nodes.ptr[a].a))}
+    -1.0
+}
+# (is p among the arguments of print, text, window and the like, on its line?)
+# (".png" after a name in the source: cat1.png written without its quotes)
+# the name after a dot after the n characters at p (this.tweens: "tweens"), or ""
+member_after=(p:CallHintWord n:CallHintWord):>string=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return ""}
+    let src=files[f].src
+    let o=pos_off(p) + n
+    if o >=? (src as array<uint8>).length or (src as array<uint8>)[o] not=? b'.' {return ""}
+    let e=o + 1
+    loop e <? (src as array<uint8>).length and (is_alnum((src as array<uint8>)[e]) or (src as array<uint8>)[e] =? b'_') {e += 1}
+    src.byte_slice(o + 1 e)
+}
+# (this.tweens.add, this.time.delayedCall, game.config.width: Phaser's, through its scene)
+phaser_hint=(nm:string member:string):>string=>{
+    if nm not=? "this" and nm not=? "game" and nm not=? "scene" {return ""}
+    if member =? "tweens" {return " (a tween is a value: `t = tween(from, to, 0.3, ease = ease_out_back)`, kept in a variable or a field, with `t.update(dt)` and `t.value()` each frame)"}
+    if member =? "time" {return " (a wait is `Actions`: `steps.then(0.5, (): drop())` and `steps.update(dt)` in update; or `every(1, 0.5)`)"}
+    if member =? "config" or member =? "scale" {return " (the screen's size is `screen_width()` and `screen_height()`)"}
+    if member =? "add" {return " (things are drawn each frame in draw, `circle(...)`, `sprite(...)`, `text(...)`, not added to a scene)"}
+    if member =? "input" {return " (input is asked for in update each frame: `mouse_pressed(.left)`, `mouse_pos()`, `key_pressed(.space)`)"}
+    if member =? "sound" {return " (`snd = load_wav(embed(\"pop.wav\"))` at the top, then `play(snd)`; or `sfx_coin()` and the other ready-made sounds)"}
+    if member =? "cameras" {return " (`shake` for a screen shake, `camera2d(...)` to move the view)"}
+    if member =? "scene" {return " (screens are an enum, `screen = Screen.play`, with a `match screen:` in update and in draw)"}
+    ""
+}
+file_ext_after=(p:CallHintWord n:CallHintWord):>string=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return ""}
+    let src=files[f].src
+    let o=pos_off(p) + n
+    if o >=? (src as array<uint8>).length or (src as array<uint8>)[o] not=? b'.' {return ""}
+    let e=o + 1
+    loop e <? (src as array<uint8>).length and is_alnum((src as array<uint8>)[e]) {e += 1}
+    let ext=lower(src.byte_slice(o + 1 e))
+    loop x in ["png" "jpg" "jpeg" "wav" "ogg" "mp3" "txt" "json" "csv" "ttf" "otf" "glb" "gltf" "tmx" "jo"] {
+        if ext =? x {return src.byte_slice(o e)}
+    }
+    ""
+}
+# (a name in the source alone between { and }: in a string, an interpolation of just it)
+braced_alone=(p:CallHintWord n:CallHintWord):>bool=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return false}
+    let src=files[f].src
+    let o=pos_off(p)
+    o >? 0 and o + n <? (src as array<uint8>).length and (src as array<uint8>)[o - 1] =? b'\{' and (src as array<uint8>)[o + n] =? b'}'
+}
+in_text_call=(p:CallHintWord):>bool=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return false}
+    let src=files[f].src
+    let o=pos_off(p) - 1
+    loop o >=? 0 and (src as array<uint8>)[o] not=? b'(' and (src as array<uint8>)[o] not=? b'\n' and (src as array<uint8>)[o] not=? b'"' {o -= 1}
+    if o <? 0 or (src as array<uint8>)[o] not=? b'(' {return false}
+    let e=o
+    o -= 1
+    loop o >=? 0 and (is_alnum((src as array<uint8>)[o]) or (src as array<uint8>)[o] =? b'_') {o -= 1}
+    let w=src.byte_slice(o + 1 e)
+    w =? "print" or w =? "text" or w =? "text_centered" or w =? "window" or w =? "write" or w =? "ui_button" or w =? "ui_text" or w =? "eprint"
+}
+# (the word w at p is all of an argument, made of letters only: print(hello), not print(totl + 1))
+is_word_arg=(p:CallHintWord w:string):>bool=>{
+    loop c in (w as array<uint8>) {
+        if not is_alpha(c) or c =? uint8(95) {return false}
+    }
+    let src=files[pos_file(p)].src
+    let e=pos_off(p) + (w as array<uint8>).length
+    loop e <? (src as array<uint8>).length and (src as array<uint8>)[e] =? b' ' {e += 1}
+    e <? (src as array<uint8>).length and ((src as array<uint8>)[e] =? b')' or (src as array<uint8>)[e] =? b',')
+}
+# (`thorns = Rect[]`: the name before the `=` on the line of p, "" when there is none)
+name_before_eq=(p:CallHintWord):>string=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return ""}
+    let src=files[f].src
+    let o=pos_off(p) - 1
+    # (p may be at the `[` after the type's name: that name first)
+    loop o >=? 0 and (is_alnum((src as array<uint8>)[o]) or (src as array<uint8>)[o] =? b'_') {o -= 1}
+    loop o >=? 0 and (src as array<uint8>)[o] =? b' ' {o -= 1}
+    if o <? 0 or (src as array<uint8>)[o] not=? b'=' {return ""}
+    o -= 1
+    loop o >=? 0 and (src as array<uint8>)[o] =? b' ' {o -= 1}
+    let e=o + 1
+    loop o >=? 0 and (is_alnum((src as array<uint8>)[o]) or (src as array<uint8>)[o] =? b'_') {o -= 1}
+    src.byte_slice(o + 1 e)
+}
+# (written in braces in the source: "{4}", not print(4) made into text)
+brace_before=(p:CallHintWord):>bool=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return false}
+    let o=pos_off(p)
+    let src=files[f].src
+    o >? 0 and o <=? (src as array<uint8>).length and (src as array<uint8>)[o - 1] =? uint8(123)
+}
+# "a str", "an int", "an f64", "a float64": a type named with its article
+a_type=(t:CallHintWord):>string=>{
+    let s=dt(t)
+    if (s as array<uint8>).length >? 0 and ((s as array<uint8>)[0] =? b'a' or (s as array<uint8>)[0] =? b'e' or (s as array<uint8>)[0] =? b'i' or (s as array<uint8>)[0] =? b'o' or ((s as array<uint8>)[0] =? b'f' and not ts_dewy) or (s as array<uint8>)[0] =? b'A' or (s as array<uint8>)[0] =? b'E' or (s as array<uint8>)[0] =? b'I' or (s as array<uint8>)[0] =? b'O') {return "an {s}"}
+    "a {s}"
+}

@@ -1,0 +1,242 @@
+use 'expr.jo'
+use 'secret_checks.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'settings.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'ide.jo'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+
+# rgb(255, 128, 0): colors go from 0 to 1 (more is brighter than white, for glow)
+rgb_check = (n: int, args: int[]):
+    big = false
+    loop i in [0..3):
+        # (a little above 1 is brighter than white, as a flash or a glow in 3D: rgb(3, 3, 3))
+        if lit_num(args[i]) > 8.0: big = true
+    if big: warn(nodes[n].pos, "the parts of a color go from 0 to 1 (above 1: brighter than white): for 0 to 255, divide by 255 or write hex(0xff8000)")
+    # (rgba(0, 0, 0, 10): an alpha from 0 to 255)
+    else if args.len() >= 4 and lit_num(args[3]) > 1.0: warn(nodes[int(args[3])].pos, "alpha goes from 0 (clear) to 1 (solid): {num_text(lit_num(args[3]))} of 255 is {lit_num(args[3]) / 255.0:.2f}")
+# hsv(200, 0.8, 0.9): a hue in degrees, which goes around 0 to 1 here
+hsv_check = (n: int, args: int[]):
+    h = lit_num(args[0])
+    if h > 1.0: warn(nodes[n].pos, "a hue goes from 0 to 1 around the color circle (as 0 to 360 degrees): {num_text(h)} degrees is `{h} / 360.0`")
+num_text = (v: f64) -> str:
+    if v == floor(v) and abs(v) < 1e15: return "{i64(v)}"
+    "{v}"
+# a number written as it is (5, 0.5): its value, else -1
+lit_num = (a0: int) -> f64:
+    if a0 == 0: return -1.0
+    a = unnamed(a0)
+    if not has_flag(a, NF_LITERAL) and nodes[a].kind != .float_lit: return -1.0
+    if nodes[a].kind == .int_lit: return f64(nodes[a].ival)
+    if nodes[a].kind == .float_lit: return nodes[a].fval
+    if nodes[a].kind == .conv: return lit_num(int(nodes[a].a))
+    -1.0
+# (is p among the arguments of print, text, window and the like, on its line?)
+# (".png" after a name in the source: cat1.png written without its quotes)
+# the name after a dot after the n characters at p (this.tweens: "tweens"), or ""
+member_after = (p: int, n: int) -> str:
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return ""
+    src = files[f].src
+    o = pos_off(p) + n
+    if o >= len(src) or src[o] != '.': return ""
+    e = o + 1
+    loop e < len(src) and (is_alnum(src[e]) or src[e] == '_'): e += 1
+    src[o + 1..e)
+# (this.tweens.add, this.time.delayedCall, game.config.width: Phaser's, through its scene)
+phaser_hint = (nm: str, member: str) -> str:
+    if nm != "this" and nm != "game" and nm != "scene": return ""
+    if member == "tweens": return " (a tween is a value: `t = tween(from, to, 0.3, ease = ease_out_back)`, kept in a variable or a field, with `t.update(dt)` and `t.value()` each frame)"
+    if member == "time": return " (a wait is `Actions`: `steps.then(0.5, (): drop())` and `steps.update(dt)` in update; or `every(1, 0.5)`)"
+    if member == "config" or member == "scale": return " (the screen's size is `screen_width()` and `screen_height()`)"
+    if member == "add": return " (things are drawn each frame in draw, `circle(...)`, `sprite(...)`, `text(...)`, not added to a scene)"
+    if member == "input": return " (input is asked for in update each frame: `mouse_pressed(.left)`, `mouse_pos()`, `key_pressed(.space)`)"
+    if member == "sound": return " (`snd = load_wav(embed(\"pop.wav\"))` at the top, then `play(snd)`; or `sfx_coin()` and the other ready-made sounds)"
+    if member == "cameras": return " (`shake` for a screen shake, `camera2d(...)` to move the view)"
+    if member == "scene": return " (screens are an enum, `screen = Screen.play`, with a `match screen:` in update and in draw)"
+    ""
+file_ext_after = (p: int, n: int) -> str:
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return ""
+    src = files[f].src
+    o = pos_off(p) + n
+    if o >= len(src) or src[o] != '.': return ""
+    e = o + 1
+    loop e < len(src) and is_alnum(src[e]): e += 1
+    ext = lower(src[o + 1..e))
+    loop x in ["png", "jpg", "jpeg", "wav", "ogg", "mp3", "txt", "json", "csv", "ttf", "otf", "glb", "gltf", "tmx", "jo"]:
+        if ext == x: return src[o..e)
+    ""
+# (a name in the source alone between { and }: in a string, an interpolation of just it)
+braced_alone = (p: int, n: int) -> bool:
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return false
+    src = files[f].src
+    o = pos_off(p)
+    o > 0 and o + n < len(src) and src[o - 1] == '{{' and src[o + n] == '}}'
+in_text_call = (p: int) -> bool:
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return false
+    src = files[f].src
+    o = pos_off(p) - 1
+    loop o >= 0 and src[o] != '(' and src[o] != '\n' and src[o] != '"': o -= 1
+    if o < 0 or src[o] != '(': return false
+    e = o
+    o -= 1
+    loop o >= 0 and (is_alnum(src[o]) or src[o] == '_'): o -= 1
+    w = src[o + 1..e)
+    w == "print" or w == "text" or w == "text_centered" or w == "window" or w == "write" or w == "ui_button" or w == "ui_text" or w == "eprint"
+# (the word w at p is all of an argument, made of letters only: print(hello), not print(totl + 1))
+is_word_arg = (p: int, w: str) -> bool:
+    loop c in w:
+        if not is_alpha(c) or c == u8(95): return false
+    src = files[pos_file(p)].src
+    e = pos_off(p) + len(w)
+    loop e < len(src) and src[e] == ' ': e += 1
+    e < len(src) and (src[e] == ')' or src[e] == ',')
+# (`thorns = Rect[]`: the name before the `=` on the line of p, "" when there is none)
+name_before_eq = (p: int) -> str:
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return ""
+    src = files[f].src
+    o = pos_off(p) - 1
+    # (p may be at the `[` after the type's name: that name first)
+    loop o >= 0 and (is_alnum(src[o]) or src[o] == '_'): o -= 1
+    loop o >= 0 and src[o] == ' ': o -= 1
+    if o < 0 or src[o] != '=': return ""
+    o -= 1
+    loop o >= 0 and src[o] == ' ': o -= 1
+    e = o + 1
+    loop o >= 0 and (is_alnum(src[o]) or src[o] == '_'): o -= 1
+    src[o + 1..e)
+# (written in braces in the source: "{4}", not print(4) made into text)
+brace_before = (p: int) -> bool:
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return false
+    o = pos_off(p)
+    src = files[f].src
+    o > 0 and o <= len(src) and src[o - 1] == u8(123)          # ('{')
+# "a str", "an int", "an f64", "a float64": a type named with its article
+a_type = (t: int) -> str:
+    s = dt(t)
+    if len(s) > 0 and (s[0] == 'a' or s[0] == 'e' or s[0] == 'i' or s[0] == 'o' or (s[0] == 'f' and not ts_dewy) or s[0] == 'A' or s[0] == 'E' or s[0] == 'I' or s[0] == 'O'): return "an {s}"
+    "a {s}"
