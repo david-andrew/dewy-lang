@@ -62,6 +62,9 @@ type_intern_rehash=():>void=>$unsafe {
         let t=types + id
         if (t[0].flags & TI_HAS_VAR) not=? 0 {continue}
         if t[0].kind =? 'var' or t[0].kind =? 'param' {continue}
+        # Type and module values append a record per use and are never looked up:
+        # copies of one key would make a run that any lookup landing there walks.
+        if t[0].kind =? 'typeval' or t[0].kind =? 'module' {continue}
         let h=ti_hash_seed(types + id)
         let first=IWord(t[0].args)
         let last=first + IWord(t[0].nargs)
