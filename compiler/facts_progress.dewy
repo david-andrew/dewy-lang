@@ -229,6 +229,29 @@ fact_progress_stable=(n0:ProgressWord):>bool=>$unsafe {
     }
     false
 }
+# Upper bound of a nonnegative increment, or -1: positive_bound's syntax, seeing
+# through immutable locals' initializers and sums of them (`let d = i%7`, `d+1`).
+# The bound rests on syntax, so a later change to `i` cannot matter. Shares the
+# query's 64-node budget.
+fact_progress_bound=(n0:ProgressWord):>ProgressWord=>$unsafe {
+    let known=positive_bound(n0 false)
+    if known >=? 0 {return known}
+    exact_dependency_budget -= 1
+    if exact_dependency_budget <? 0 {return -1}
+    let n=fact_progress_strip(n0)
+    if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        let l=ProgressWord(nodes.ptr[n].sym)
+        if l <=? 0 or l >=? exact_initializers.length or exact_initializers[l] <=? 0 {return -1}
+        if ProgressWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_PARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) not=? 0 {return -1}
+        return fact_progress_bound(exact_initializers[l])
+    }
+    if nodes.ptr[n].kind not=? 'binary' or nodes.ptr[n].aux not=? 0 or cx_token_values.ptr[ProgressWord(nodes.ptr[n].op)] not=? 'plus' {return -1}
+    let a=fact_progress_bound(ProgressWord(nodes.ptr[n].a))
+    if a <? 0 {return -1}
+    let b=fact_progress_bound(ProgressWord(nodes.ptr[n].b))
+    if b <? 0 or a >? 9223372036854775807-b {return -1}
+    return a+b
+}
 fact_progress_note=(assignment:ProgressWord):>void=>$unsafe {
     let target=ProgressWord(nodes.ptr[assignment].a)
     let store=ProgressWord(nodes.ptr[assignment].b)
@@ -279,12 +302,16 @@ fact_progress_note=(assignment:ProgressWord):>void=>$unsafe {
         exact_marks[store] |= 64
         return
     }
-    if exact_has_node(increment) or not is_int(it) or it =? T_MATH_INT or types.ptr[it].bits >? 64 {return}
+    # An exact increment counts when it is syntactically bounded (`i%7+1`).
+    let exact_increment=exact_has_node(increment)
+    if exact_increment and (not types.ptr[t].sign or fact_progress_bound(increment) <? 0) {return}
+    if not is_int(it) or it =? T_MATH_INT or types.ptr[it].bits >? 64 {return}
     exact_decide(store true)
     exact_marks[store] |= 32
     # The assumed boundary makes this cloned root a machine-word operation.
     # Its operands are stored values; no wider intermediate is discarded.
-    if source =? operation {
+    # An exact increment keeps its own lowering, whose low word is its value.
+    if source =? operation and not exact_increment {
         exact_unmark(source)
         # The emitter may use a word, but facts still evaluate its exact
         # interval before intersecting the axiom's storage boundary.

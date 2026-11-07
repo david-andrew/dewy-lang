@@ -903,7 +903,7 @@ allocation rather than introducing a fit obligation at the arithmetic.
 
 By default, the counter-progress axiom assumes additive updates of 64-bit
 counters and accumulators by a bounded machine-word amount cannot overflow.
-A bounded mathematical increment, such as `value and 65535`, also qualifies.
+A bounded mathematical increment, such as `value and 65535` or `i%7+1` (also through immutable locals), also qualifies.
 `Atomic<int64>.add` also uses this axiom for literal or bounded increments and
 immutable scalar parameters. Loading the counter as its own increment still
 needs proof; `$no_assumed_bounds` keeps the atomic overflow obligation.

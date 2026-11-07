@@ -1,0 +1,17 @@
+# A 64-bit counter growing by a bounded amount: the counter-progress assumption covers these.
+R:type = [inv:array<int64 length=4>]
+grow = (@r:R n:int64):>void => {
+    loop i in [0..n) {
+        let d = i%7
+        r.inv[i%4] += d+1
+        r.inv[0] += i%7+1
+        r.inv[1] -= 1+d+d
+        let e = d+1
+        r.inv[2] += e+1
+    }
+}
+main = ():>void => {
+    let r = R[fill(0 4)]
+    grow(@r 10)
+    printl(r.inv)
+}
