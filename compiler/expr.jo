@@ -3885,6 +3885,11 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
         if not covers[i]: values.push(m)
     target = if expected != 0 and is_union(expected): expected else if values.len() == 1: values[0] else: mk_union(values)
     probe = clone(fallback)
+    # (`sleep(1s) ?? 0`: the call gives nothing when it succeeds, so there is no value to default)
+    held_hint = coerce_hint
+    if values.len() == 1 and prune(values[0]) == T_VOID and dewy_at(pos):
+        called = if nodes[a].kind == .call and nodes[a].a != 0 and nodes[int(nodes[a].a)].kind == .ident: "`{name_of(int(nodes[int(nodes[a].a)].name))}`" else: "this call"
+        coerce_hint = " ({called} gives no value when it succeeds, so `??` has no value to default: `or_throw` passes its failure on, or `match` it)"
     pt = prune(check_expr(probe, target))
     if tkind(pt) == .opt or pt == T_NONE: target = mk_opt(target)
     chain = 0
@@ -3913,7 +3918,9 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
             chain = bc_block([bc_stmt(branch, pos)], pos)
         j -= 1
     nodes[n] = nodes[bc_block([bc_let(name, a, pos), bc_stmt(chain, pos)], pos)]
-    check_expr(n, expected)
+    result = check_expr(n, expected)
+    coerce_hint = held_hint
+    result
 
 # the member a Dewy program wrote, for a library function standing for it
 shown_fn_name = (name: str) -> str:
