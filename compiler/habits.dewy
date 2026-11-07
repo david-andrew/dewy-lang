@@ -41,6 +41,10 @@ habit_word_part=(c:uint8):>bool=>habit_word_start(c) or c >=? b'0' and c <=? b'9
 
 # Dewy spellings where the Sloppy ones below are not Dewy's.
 dewy_habit=(name:string):>string=>match name {
+    <"remove_at"> => "`xs.pop(i)`"
+    <"delete"> => "`xs.pop(i)`"
+    <"erase"> => "`xs.pop(i)`"
+    <"Remove"> => "`xs.pop(i)`"
     <"float"> => "`float64` (and `to_float(s)` for text)"
     <"double"> => "`float64`"
     <"number"> => "`float64`"

@@ -28,7 +28,11 @@ habit_word_start = (c: u8) -> bool: (c >= 'a' and c <= 'z') or (c >= 'A' and c <
 habit_word_part = (c: u8) -> bool: habit_word_start(c) or (c >= '0' and c <= '9')
 
 dewy_habit = (name: str) -> str:
-    table = ["float", "`float64` (and `to_float(s)` for text)",
+    table = ["remove_at", "`xs.pop(i)`",
+        "delete", "`xs.pop(i)`",
+        "erase", "`xs.pop(i)`",
+        "Remove", "`xs.pop(i)`",
+        "float", "`float64` (and `to_float(s)` for text)",
         "double", "`float64`",
         "number", "`float64`",
         "f64", "`float64`",
