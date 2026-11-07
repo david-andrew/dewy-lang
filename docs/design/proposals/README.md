@@ -24,5 +24,6 @@ These folders record, for each design decision, what was considered and why one 
 | [string-shapes/](string-shapes/) | Compile-time string shapes, action names, stale handles, UI | Round 1. Open (D11). |
 | [ui/](ui/) | Clay-style declarative UI | Round 1. Open (D28). |
 | [bulletproof/](bulletproof/) | Opt-out tags for `$bulletproof` | Round 2: unsafety is opted into. Open (D10). |
+| [compile-speed/](compile-speed/) | Compile-speed redesigns | Fact state round 1: measured bound below the bar; nothing adopted. |
 
 The earliest time-design inputs were built from David's private notes and are kept outside the repo.
