@@ -1,0 +1,312 @@
+use 'fused.jo'
+use 'lower_closures.dewy'
+use 'lower_storage.dewy'
+use 'lower_determinism.dewy'
+use 'native_debug.dewy'
+use 'elf_format.dewy'
+use 'x64_emit.dewy'
+use 'driver_pipeline.dewy'
+use 'x64_allocate.dewy'
+use 'ir_types.dewy'
+use 'pcheck.jo'
+use 'main.jo'
+use 'util.jo'
+use 'ir.jo'
+use 'x64.jo'
+use 'check.jo'
+use 'lower.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'ast.jo'
+use 'par.jo'
+use 'inline.jo'
+use 'inline_ops.dewy'
+use 'opt.jo'
+use 'lower_functions.dewy'
+use 'lower_primitives.dewy'
+
+# 0 function (local lf, inst); 1 helper (local lf, kind, type, p); 2 string (local offset,
+# text); 3 global (local offset, global); 4 empty box (local offset, type); 5 warning (pos, text);
+# 6 raw constant (local offset, alignment, length, bytes); 7 deterministic call (node)
+fz_note = (kind: int, local: int, a: int, b: int, c: int):
+    fz_j.push(kind)
+    fz_j.push(local)
+    fz_j.push(a)
+    fz_j.push(b)
+    fz_j.push(c)
+fz_note_text = (kind: int, local: int, s: str):
+    fz_texts.push(s)
+    if kind == 2: fz_note(2, local, fz_texts.len() - 1, 0, 0)
+    else: fz_note(5, 0, local, fz_texts.len() - 1, 0)
+fz_note_raw = (o: int, align: int):
+    fz_note(6, o, align, rodata.len() - o, fz_raws.len())
+    loop k in [o..rodata.len()): fz_raws.push(rodata[k])
+fz_note_ro = (bits: int, o: int):
+    fz_ro.push(bits)
+    fz_ro.push(o)
+# the functions workers lower: checked bodies (top-level code included), not the prelude's init
+fz_cand = (f: int, pinit: int) -> bool:
+    if f <= 0 or f == pinit or f >= fns.len(): return false
+    if fns[f].state != 2 or fns[f].body == 0: return false
+    k = fns[f].kind
+    if k != FK_NORMAL and k != FK_LAMBDA and k != FK_INIT: return false
+    d = int(fns[f].decl)
+    if d != 0 and has_flag(d, NF_EXTERN): return false
+    true
+# (a lowered function that is its instance's own, not a version made for known callbacks:
+# callback_specialize.jo; versions are lowered and emitted here, and what calls one too)
+fz_canon = (lf: int) -> bool: lfuncs[lf].kind != LK_INST or (inst_lf.get(lfuncs[lf].inst) ?? -1) == lf
+fz_extern = (f: int) -> bool:
+    d = int(fns[f].decl)
+    d != 0 and has_flag(d, NF_EXTERN)
+fz_weight = (f: int) -> int: pc_weights.get(f) ?? (8 + fns[f].locals.len() * 4 + nkids(int(fns[f].body)) * 8)
+# (a function small enough that it may be a leaf fast_inline_into expands: lowered by every
+# worker whose functions call it)
+fz_small = (f: int) -> bool: pc_smalls.get(f) ?? (nkids(int(fns[f].body)) <= 8 and fns[f].locals.len() <= 12)
+fused_fork = (pinit_lf: int) -> bool:
+    ready = fused_start(pinit_lf)
+    # A checking child must never proceed to the parent's executable writer.
+    if pc_child >= 0: exit(1)
+    if pc_active and not ready:
+        pc_cancel()
+        # (the workers' obligations, decided there, are decided here again)
+        pc_facts_serial()
+    ready
+# lower one function here, noting what it refers to (tainted: what it refers to may differ from
+# what lowering it in the compiler would find, so it is lowered there instead)
+fzw_lower = (lf: int, owned: bool):
+    j0 = fz_j.len()
+    n0 = fns.len()
+    ty0 = types.len()
+    gl0 = globals.len()
+    lower_function(lf)
+    changed = fns.len() != n0 or types.len() != ty0 or globals.len() != gl0
+    taint = changed
+    if changed: fzw_grown = true
+    if changed and env("DEWY_FUSED_TRACE") != none: eprint("fused worker: {lfuncs[lf].name} grew fns {n0}->{fns.len()} types {ty0}->{types.len()} globals {gl0}->{globals.len()}")
+    k = j0
+    loop k < fz_j.len():
+        kind = fz_j[k]
+        if kind == 0 and fz_j[k + 2] >= fzw_f0: taint = true
+        if kind == 1 and (fz_j[k + 3] >= fzw_t0 or fz_j[k + 4] >= fzw_f0): taint = true
+        if kind == 3 and fz_j[k + 2] >= fzw_g0: taint = true
+        if kind == 4 and fz_j[k + 2] >= fzw_t0: taint = true
+        k += 5
+    fzw_have[lf] = fzw_recs.len()
+    fzw_recs.push(FzLocal(lf, owned, taint, fast_inline_kind(ir), j0, fz_j.len(), ir))
+fz_put_str = (out: mut u8[], s: str):
+    pw(out, len(s))
+    loop c in bytes(s): out.push(c)
+fz_get_str = (r: mut ParIn) -> str:
+    n = pr(r)
+    s = str_from_bytes(r.b[r.i..r.i + n))
+    r.i += n
+    s
+# ---- here: the workers' results ----
+fz_hkey = (hk: int, t: int, p: int) -> str: "{hk}:{t}:{p}"
+fz_parse = (w: int, b: u8[]):
+    fz_rd[w] = ParIn(b)
+    r = ParIn(b)
+    n = pr(r)
+    first = fz_recs.len()
+    loop _ in [0..n):
+        x = FzRec(w = w)
+        x.lf = pr(r)
+        x.lkind = pr(r)
+        x.ka = pr(r)
+        x.kb = pr(r)
+        x.kc = pr(r)
+        x.owned = pr(r) != 0
+        x.taint = pr(r) != 0
+        x.kind = pr(r)
+        nj = pr(r)
+        loop _ in [0..nj / 5):
+            kind = pr(r)
+            x.ents.push(kind)
+            loop _ in [0..4): x.ents.push(pr(r))
+            if kind == 2 or kind == 5: x.texts.push(fz_get_str(r))
+            else if kind == 6:
+                m = pr(r)
+                x.raws.push(r.b[r.i..r.i + m))
+                r.i += m
+        x.assumed = pr_ints(r)
+        x.uses = pr_ints(r)
+        x.irp = -1
+        x.chunk = -1
+        if pr(r) != 0:
+            x.irp = r.i
+            fz_skip_ir(r)
+        fz_recs.push(x)
+    loop k in [first..fz_recs.len()):
+        if pr(r) == 0: continue
+        fz_recs[k].chunk = r.i
+        nc = pr(r)
+        r.i += nc
+        skip = 16 * pr(r)
+        r.i += skip
+        skip = 24 * pr(r)
+        r.i += skip
+        skip = 16 * pr(r)
+        r.i += skip
+        skip = 16 * pr(r)
+        r.i += skip
+        skip = 16 * pr(r)
+        r.i += skip
+        skip = 16 * pr(r)
+        r.i += skip
+        skip = 16 * pr(r)       # RSP unwind transitions
+        r.i += skip
+        pr(r)
+    loop k in [first..fz_recs.len()):
+        x = fz_recs[k]
+        if not x.owned or x.taint: continue
+        if x.lkind == LK_INST:
+            if fz_by_inst.get(x.ka) == none: fz_by_inst[x.ka] = k
+        else:
+            key = fz_hkey(x.ka, x.kb, x.kc)
+            if fz_by_helper.get(key) == none: fz_by_helper[key] = k
+fz_skip_ir = (r: mut ParIn):
+    r.i += 48
+    skip = pr(r)
+    r.i += skip
+    skip = 8 * pr(r)
+    r.i += skip
+    skip = 8 * pr(r)
+    r.i += skip
+    skip = 8 * pr(r)
+    r.i += skip
+    skip = 8 * pr(r)
+    r.i += skip
+    skip = 8 * pr(r)
+    r.i += skip
+    skip = 64 * pr(r)
+    r.i += skip
+# the record that stands for local function lf of worker w (-1: none)
+fz_owner_of = (x: FzRec) -> int:
+    if x.lkind == LK_INST: return fz_by_inst.get(x.ka) ?? -1
+    fz_by_helper.get(fz_hkey(x.ka, x.kb, x.kc)) ?? -1
+fz_validate = ():
+    # (by worker: local function -> its record)
+    local: {int: int}[]
+    loop _ in fz_rd: local.push({})
+    loop k in 0.. and x in fz_recs: local[x.w][x.lf] = k
+    loop k in 0.. and x in fz_recs:
+        ok = x.owned and not x.taint and x.chunk >= 0 and fz_owner_of(x) == k
+        if ok:
+            loop f in x.assumed:
+                o = fz_by_inst.get(f) ?? -1
+                # (a foreign function's thunk calls through a pointer: never expanded)
+                if o < 0 and fz_extern(f): continue
+                if o < 0 or fz_recs[o].kind != 0: ok = false
+        fz_recs[k].valid = ok
+    # (one it may inline: its raw constants are found by those of the one replayed)
+    changed = true
+    loop changed:
+        changed = false
+        loop k in 0.. and x in fz_recs:
+            if not x.valid: continue
+            loop g in x.uses:
+                h = local[x.w].get(g) ?? -1
+                ok = h >= 0
+                if ok and fz_recs[h].raws.len() > 0:
+                    o = fz_owner_of(fz_recs[h])
+                    ok = o >= 0 and fz_recs[o].valid
+                if not ok:
+                    fz_recs[k].valid = false
+                    changed = true
+                    break
+# what the records not replayed refer to (made by another worker, or an inlined copy): found
+# by what they are
+fz_map_rest = ():
+    loop k in 0.. and x in fz_recs:
+        if x.taint: continue
+        o = fz_owner_of(x)
+        t = 0
+        rw = 0
+        e = 0
+        loop e < x.ents.len():
+            kind = x.ents[e]
+            local = x.ents[e + 1]
+            a = x.ents[e + 2]
+            if kind == 0:
+                if fz_mlf[x.w].get(local) == none:
+                    if let v = inst_lf.get(a): fz_mlf[x.w][local] = v
+            else if kind == 1:
+                if fz_mlf[x.w].get(local) == none:
+                    if let v = helper_lf.get("{a}:{x.ents[e + 3]}:{x.ents[e + 4]}"): fz_mlf[x.w][local] = v
+            else if kind == 2:
+                if fz_mro[x.w].get(local) == none:
+                    if let v = str_off.get(x.texts[t]): fz_mro[x.w][local] = v
+                t += 1
+            else if kind == 3:
+                if fz_mdt[x.w].get(local) == none:
+                    if let v = global_off.get(a): fz_mdt[x.w][local] = v
+            else if kind == 4:
+                if fz_mro[x.w].get(local) == none:
+                    if let v = box_dflt_data.get(prune(a)): fz_mro[x.w][local] = v
+            else if kind == 5: t += 1
+            else if kind == 6:
+                if fz_mro[x.w].get(local) == none and o >= 0 and rw < fz_recs[o].raw_par.len(): fz_mro[x.w][local] = fz_recs[o].raw_par[rw]
+                rw += 1
+            e += 5
+fz_map_lf = (w: int, lf: int) -> int:
+    if lf < fz_lf0: return lf
+    if let v = fz_mlf[w].get(lf): return v
+    ice("fused: no function here for worker function {lf}")
+    0
+fz_map_in = (w: int, space: int, off: int, low: int) -> int:
+    if off < low: return off
+    if space == 0:
+        if let v = fz_mro[w].get(off): return v
+        if fz_kro[w].len() == 0:
+            loop k2, _ in fz_mro[w]: fz_kro[w].push(k2)
+            fz_kro[w].sort()
+        return fz_interior(fz_mro[w], fz_kro[w], off)
+    if let v = fz_mdt[w].get(off): return v
+    if fz_kdt[w].len() == 0:
+        loop k2, _ in fz_mdt[w]: fz_kdt[w].push(k2)
+        fz_kdt[w].sort()
+    fz_interior(fz_mdt[w], fz_kdt[w], off)
+fz_interior = (mp: {int: int}, keys: int[], off: int) -> int:
+    lo = 0
+    hi = keys.len()
+    loop lo + 1 < hi:
+        mid = (lo + hi) / 2
+        if keys[mid] <= off: lo = mid
+        else: hi = mid
+    if keys.len() == 0 or keys[lo] > off:
+        ice("fused: no place here for worker offset {off}")
+        return off
+    mp[keys[lo]] + off - keys[lo]
+# a source position's id here
+fz_pos = (p: int) -> int:
+    if p == 0: return 0
+    if ir_positions[ir_positions.len() - 1] != p: ir_positions.push(p)
+    ir_positions.len() - 1
+# the machine code of the queued functions, in order: workers' joined, the rest made here
+fz_emit = (q: IrFn[]):
+    t0 = time()
+    fz_map_rest()
+    t1 = time()
+    fs: IrFn[]
+    native = fill(false, q.len())
+    loop k in 0.. and f in q:
+        if let rk = fz_qrec.get(f.fn_index):
+            x = fz_recs[rk]
+            if x.irp >= 0: fs.push(fz_unpack_ir(x, f.fn_index))
+        else:
+            native[k] = true
+            fs.push(f)
+    t2 = time()
+    fast_inline_prepare(fs)
+    t3 = time()
+    tn = 0.0
+    loop k in 0.. and f in q:
+        if native[k]:
+            t4 = time()
+            ir = f
+            emit_now(false)
+            tn += time() - t4
+            continue
+        fz_place(fz_recs[fz_qrec[f.fn_index]], f.fn_index)
+    if env("DEWY_PAR_TIME") != none: eprint("fused: joined in {(time() - t0) * 1000.0:.1} ms (mapping {(t1 - t0) * 1000.0:.1}, leaves {(t2 - t1) * 1000.0:.1}, prepare {(t3 - t2) * 1000.0:.1}, made here {tn * 1000.0:.1})")
