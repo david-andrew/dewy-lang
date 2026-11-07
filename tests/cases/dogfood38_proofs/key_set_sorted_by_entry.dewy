@@ -1,0 +1,14 @@
+# `d.keys` is a set: its members, sorted by a key that reads `d`, are d's keys.
+Totals:type = [count:int distance:float64]
+main = () => {
+    let by:dict<string Totals> = []
+    let log:array<[string float64]> = [["run" 5.0] ["bike" 20.0] ["run" 3.5] ["swim" 1.5]]
+    loop [s d] in log {
+        if s not in? by by[s] = Totals[0 0.0]
+        by[s].count += 1
+        by[s].distance += d
+    }
+    let order = by.keys.sorted(key=(s) => -by[s].distance)
+    loop s in order printl("{s} {by[s].count} {by[s].distance}")
+    printl(by.keys.sorted(key=(s:string) => by[s].count reverse=true))
+}

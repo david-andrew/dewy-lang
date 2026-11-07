@@ -2,7 +2,7 @@ $runtime_checks
 from p"ast.jo" import (NF_GENERIC has_flag kid nkids nodes)
 from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ASSIGNED LF_EXPOSED LF_PARTBORROW LF_SHARED LF_VALUECAP fns locals)
 from p"effect_types.dewy" import (PlaceIdentity)
-from p"expr.jo" import (CV ntype)
+from p"expr.jo" import (CV is_dewy_set_type ntype)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"facts.jo" import (FACT_CAP FACT_CONTRACT FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_KEYS_SOURCE FACT_KEY_SOURCE FactDifference FactForkEntry FactKeyParam FactProjection FactState fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_covered fact_difference fact_domain fact_fork_entries fact_key_names fact_key_params fact_name_parallel_arrays fact_new fact_owner fact_parallel_bounds fact_policy fact_probe_on fact_project fact_projection_find fact_query fact_scalar fact_shortest fact_slice_flags fact_speculating fact_summary_owner fact_type)
 from p"facts_lifecycle.dewy" import (fact_owner_value)
@@ -22,7 +22,7 @@ from p"ownership_types.dewy" import (ownership_fact_type)
 from p"refine.jo" import (ref_check ref_fact_current_entry ref_signature_has)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"sequence_selectors.dewy" import (fact_sequence_store fact_sequence_store_call)
-from p"types.jo" import (T_INT T_STR T_U64 is_int telem tkind)
+from p"types.jo" import (T_INT T_STR T_U64 is_int struct_targ telem tkind types)
 from p"type_ops.dewy" import (zonk)
 from p"util.jo" import (intern pos_in_lib)
 
@@ -104,10 +104,13 @@ fact_key_callback=(n:ForkWord):>ForkWord=>$unsafe {
     let callback=kid(n 1)
     if nodes.ptr[callback].kind not=? 'lambda' or has_flag(callback NF_GENERIC) or nodes.ptr[callback].sym <=? 0 {return 0}
     let f=ForkWord(nodes.ptr[callback].sym)
-    if fns.ptr[f].params.length not=? 1 or tkind(fact_type(ntype(kid(n 0)))) not=? 'array' {return 0}
+    if fns.ptr[f].params.length not=? 1 {return 0}
+    # (an array's elements, or a set's members: `d.keys.sorted(key=...)`)
+    let receiver=fact_type(ntype(kid(n 0)))
+    let element:ForkWord=if tkind(receiver) =? 'array' {telem(receiver)} else if is_dewy_set_type(receiver) {struct_targ(ForkWord(types.ptr[receiver].st) 0)} else {return 0}
     let t=fact_type(ForkWord(locals.ptr[fns.ptr[f].params[0]].type))
     if (not fact_scalar(t) or not is_int(t) or t =? T_U64) and t not=? T_STR {return 0}
-    if t not=? fact_type(telem(fact_type(ntype(kid(n 0))))) {return 0}
+    if t not=? fact_type(element) {return 0}
     callback
 }
 # Each record describes this call's receiver; another evaluation of the call
