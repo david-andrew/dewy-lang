@@ -2147,13 +2147,27 @@ refuted_literal_contract = (a: int, t0: int, name: str) -> str:
 
 ref_literal_holds = (op: Tok, x: int, y: int) -> bool: if op == .lt: x < y else if op == .le: x <= y else: x != y
 
+# (a local a comprehension made, unannotated: `let sizes = [loop ... w.length]`)
+comprehension_binding = (a: int) -> bool:
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) or nodes[a].sym <= 0: return false
+    l = int(nodes[a].sym)
+    if int(locals[l].flags) & (LF_PARAM | LF_VALUEPARAM | LF_MUTPARAM) != 0 or int(locals[l].flags) & LF_DECL == 0: return false
+    d = local_decl_in(int(fns[int(locals[l].owner)].body), l)
+    if d == 0 or nodes[d].kind != .vardecl or nodes[d].a != 0 or nodes[d].b == 0: return false
+    v = int(nodes[d].b)
+    loop v != 0 and nodes[v].kind == .conv: v = int(nodes[v].a)
+    v != 0 and nodes[v].kind == .block and has_flag(v, NF_COMPREHENSION)
+
 # Why candidate d rejects argument fi (a, wanting ptx): built only when the
 # call fails or two candidates' reasons at one argument are compared.
 rfc_arg_message = (d: int, fi: int, a: int, ptx: int, cd: Cand) -> str:
     last_err = ""
     refuted = refuted_literal_contract(a, ptx, name_of(int(nodes[kid(d, fi)].name)))
     if refuted != "": last_err = refuted
-    else if nodes[a].type != 0: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
+    else if nodes[a].type != 0:
+        last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
+        # (`sum_all(sizes)`, sizes an `array<int64>` where an `array<int>` is wanted)
+        if comprehension_binding(a) and tkind(ntype(a)) == .array and tkind(ptx) == .array and is_int(telem(prune(ntype(a)))) and is_int(telem(prune(ptx))) and not contains(last_err, "(integer literals"): last_err += " (an array's elements are not converted one by one: give it its type where it is made, `let {name_of(int(nodes[a].name))}:{dt(ptx)} = ...`)"
     else if nodes[a].kind == .dotname and tkind(ptx) == .enum_:
         vn = int(nodes[a].name)
         last_err = "{dt(ptx)} has no variant '{name_of(vn)}'{variant_hint_for(ptx, name_of(vn))}"
