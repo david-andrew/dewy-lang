@@ -92,7 +92,7 @@ feed = (packets:array<Packet> jobs:Mpmc<Packet>):>void | Unsent<Packet> => {
     loop p in packets { jobs.send(p) or_throw }
     jobs.close
 }
-keep_parsed = <T>(label:string lines:array<string> parse:<(line:string):>T?>):>array<T> => {
+keep_parsed = <T>(label:string lines:array<string> parse:(line:string:>T?)):>array<T> => {
     let out:array<T> = []
     loop line in lines {
         let r = parse(line)

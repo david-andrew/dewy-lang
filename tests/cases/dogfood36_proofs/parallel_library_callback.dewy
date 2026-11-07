@@ -1,10 +1,10 @@
 # modes: native native-release
 # A parallel body may call a library or program function with a callback it can see.
 rank = (xs:array<int>):>array<int> => xs.sorted(key=(x) => -x)
-apply = (f:<(x:int):>int> x:int):>int => f(x)
-via = (f:<(x:int):>int> x:int):>int => apply(@f x)
+apply = (f:(x:int:>int) x:int):>int => f(x)
+via = (f:(x:int:>int) x:int):>int => apply(@f x)
 inc = (x:int):>int => x + 1
-by_key = (f:<(x:int):>int> xs:array<int>):>array<int> => xs.sorted(key=@f)
+by_key = (f:(x:int:>int) xs:array<int>):>array<int> => xs.sorted(key=@f)
 neg = (x:int):>int => -x
 main = () => {
     printl([parallel row in [[1 2] [3 4]] rank(row)])

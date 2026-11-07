@@ -1,7 +1,7 @@
 # Creating a function handle writes nothing: facts about exposed values survive it.
 let items = [1 2 3]
 add = (a:int b:int):>int => a + b
-Box = type of [h:<(a:int b:int):>int>]
+Box = type of [h:((a:int b:int):>int)]
 f = (i:int):>int => {
     if i <? 0 or i >=? items.length return 0
     let g = @add

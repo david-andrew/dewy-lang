@@ -1,6 +1,6 @@
 plus=(a:int64 b:int64):>int64=>a+b
 scaled=(a:int64 scale:int64=10):>int64=>a*scale
-Worker:type=[on_event:<(x:int64 y:int64):>int64>]
+Worker:type=[on_event:((x:int64 y:int64):>int64)]
 main=():>void=>{
     let add5=@plus(5)
     printl(add5(1))

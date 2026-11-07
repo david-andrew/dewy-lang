@@ -36,7 +36,7 @@ Owner = type of [value:int64
     $__drop__
     release = ():>void => { drops += 1 }
 ]
-apply = (f:<(x:int64):>int64> v:int64):>(int64 | Oops) => f(v)
+apply = (f:(x:int64:>int64) v:int64):>(int64 | Oops) => f(v)
 $unsafe
 peek = (p:ptr<uint8> i:int64):>uint8 => p[i]
 pick = (v:int64|string|bool):>int64 => match v { <bool> => 10 n:int64 => n <string> => 3 }

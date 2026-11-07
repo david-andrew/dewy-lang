@@ -1,10 +1,10 @@
 # Tier 3 / 74_callback_rows / milestone 23
 # Acceptance: Forward nonlocal callback rows while remapping explicit place permissions.
-Action:type = <E:Effect>(<(x:int64):>int64 & E>)
+Action:type = <E:Effect>((x:int64:>int64 & E))
 map_one = <E:Effect>(f:Action<E> value:int64):>int64 & E => {
     return f(value)
 }
-forward = <E:Effect>(f:<(@x:int64):>void & mutates<x> & E> @y:int64):>void & mutates<y> & E => {
+forward = <E:Effect>(f:(@x:int64:>void & mutates<x> & E) @y:int64):>void & mutates<y> & E => {
     f(@y)
 }
 square = (x:int64):>int64 & no_effects => x*x

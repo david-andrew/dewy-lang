@@ -5,7 +5,7 @@
 
 let nonempty:type = string<length >? 0>
 let Bad = type of error
-let Protocol:type = [eat:<(src:nonempty):>int64? | Bad>]
+let Protocol:type = [eat:(src:nonempty:>int64? | Bad)]
 Space = type of Protocol & [eat = (src:nonempty):>int64? | Bad => if src[0] =? " " 1 else none]
 Word = type of Protocol & [eat = (src:nonempty):>int64? | Bad => {
     if src[0] =? "!" return Bad

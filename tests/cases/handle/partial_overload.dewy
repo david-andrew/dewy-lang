@@ -10,12 +10,12 @@ run=()=>{
     let integer=@describe(5)
     let text=@describe("x")
     printl"{integer("!")} {text("?")}"
-    let sum:<(b:int64):>int64>=@pick(40)
-    let labeled:<(label:string):>int64>=@pick(40)
+    let sum:(b:int64:>int64)=@pick(40)
+    let labeled:(label:string:>int64)=@pick(40)
     printl"{sum(2)} {labeled("ab")}"
     let forty:int64=40
     let plus=@add(forty)
-    let typed:<(a:float64 b:float64):>float64>=@add()
+    let typed:((a:float64 b:float64):>float64)=@add()
     printl"{plus(2)} {typed(1.5 2.0)}"
     let three:int64=3
     let larger=@max(three)

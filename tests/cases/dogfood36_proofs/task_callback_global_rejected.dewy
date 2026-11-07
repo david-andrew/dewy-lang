@@ -1,6 +1,6 @@
 # modes: native native-release
 counter:int = 0
-apply = (f:<(x:int):>int> x:int):>int => f(x)
+apply = (f:(x:int:>int) x:int):>int => f(x)
 main = () => {
     concurrent {
         let a = spawn apply((v) => { counter += v; v } 1)

@@ -9,7 +9,7 @@ Base:type = '0b' | '0d' | '0x'
 Root = type of Context & [base:Base = '0d']                 # a string-literal-union field: one string handle
 BlockBody = type of Context
 
-let Protocol:type = [eat:<(src:string ctx:Context):>int64> priority:int64 = 0]
+let Protocol:type = [eat:((src:string ctx:Context):>int64) priority:int64 = 0]
 
 Whitespace = type of Protocol & [
     eat = (src:string ctx:Context):>int64 => if src.startswith(" ") 1 else 0
@@ -34,7 +34,7 @@ main = () => {
     let total:int64 = tokenize("# note" Root(depth=0))       # 0 + (6 + 1) = 7
     total += tokenize(" x" BlockBody(depth=1))               # 1 → 8
     let table = allowed(Root(depth=0))
-    if "{table}" =? "[Whitespace[eat=<(src:string ctx:Context):>int64> priority=0] LineComment[eat=<(src:string ctx:Context):>int64> priority=1]]" total += 30   # 38 (each element prints as what it is)
+    if "{table}" =? "[Whitespace[eat=((src:string ctx:Context):>int64) priority=0] LineComment[eat=((src:string ctx:Context):>int64) priority=1]]" total += 30   # 38 (each element prints as what it is)
     let w = Whitespace
     if w.priority =? 0 and Whitespace().priority =? 0 total += 2                                                                             # 40
     let r = Root(depth=0 base='0x')

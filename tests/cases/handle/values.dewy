@@ -1,10 +1,10 @@
 #
 double=(x:int64):>int64=>x*2
 seven=():>int64=>7
-apply=(f:<(x:int64):>int64> v:int64):>int64=>f(v)
-twice=(f:<(x:int64):>int64> v:int64):>int64=>apply(@f apply(@f v))
+apply=(f:(x:int64:>int64) v:int64):>int64=>f(v)
+twice=(f:(x:int64:>int64) v:int64):>int64=>apply(@f apply(@f v))
 make_adder=(k:int64)=>(x:int64)=>x+k
-Worker:type=[on_event:<(x:int64):>int64> tick:<():>int64>]
+Worker:type=[on_event:(x:int64:>int64) tick:(():>int64)]
 main=():>void=>{
     printl(apply(@double 5))
     let g=@double

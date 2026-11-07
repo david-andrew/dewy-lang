@@ -1,6 +1,6 @@
 # The requirement passes up through wrappers that give their own callback parameter on.
-apply = (f:<(x:int):>int> xs:array<int>):>array<int> => parallel_map(xs @f)
-mid = (g:<(x:int):>int> xs:array<int>):>array<int> => apply(@g xs)
-outer = (h:<(x:int):>int> xs:array<int>):>array<int> => mid(@h xs)
+apply = (f:(x:int:>int) xs:array<int>):>array<int> => parallel_map(xs @f)
+mid = (g:(x:int:>int) xs:array<int>):>array<int> => apply(@g xs)
+outer = (h:(x:int:>int) xs:array<int>):>array<int> => mid(@h xs)
 triple = (x:int):>int => 3*x
 main = () => printl(outer(@triple [1 2 3]))

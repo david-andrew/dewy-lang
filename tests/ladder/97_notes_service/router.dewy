@@ -163,7 +163,7 @@ stats_get = (@service:Service _request:Request _id:int64):>Response => {
 
 # The route table -----------------------------------------------------------
 
-Handler:type = <(@service:Service request:Request id:int64):>Response>
+Handler:type = ((@service:Service request:Request id:int64):>Response)
 Method:type = [name:string run:Handler needs_json:bool=false]
 Route:type = [pattern:string methods:array<Method>]
 

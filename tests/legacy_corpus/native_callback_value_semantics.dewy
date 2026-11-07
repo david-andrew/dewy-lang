@@ -1,7 +1,7 @@
 # An indirect call can select either a reader or a writer. Merge their effects
 # without replacing the runtime callback or borrowing writable value storage.
 State:type=[items:array<int64>]
-Leaf:type=<(state:State):>State?>
+Leaf:type=(state:State:>State?)
 let read=(state:State):>State?=>state
 let write=(state:State):>State?=>{
     if state.items.length >?0 {state.items[0]=99}

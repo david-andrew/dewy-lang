@@ -3,7 +3,7 @@
 # One function type holds plain functions (no environment: nothing to release or copy),
 # closures and partial applications (an environment each). Copies, containers, pinned calls
 # and replacements release exactly the environments, and keep each alive while it is held.
-Op:type=<(value:int64):>int64>
+Op:type=(value:int64:>int64)
 Holder:type=[op:Op rows:array<Op>]
 double=(value:int64):>int64=>value*2
 add=(a:int64 b:int64):>int64=>a+b

@@ -1,13 +1,13 @@
 # modes: native native-release
 # A task may run its function's callback parameter; each call's argument is checked.
-both = (f:<(x:int):>int> a:int b:int):>[int int] | Canceled | OutOfMemory => {
+both = (f:(x:int:>int) a:int b:int):>[int int] | Canceled | OutOfMemory => {
     concurrent {
         let x = spawn { f(a) }
         let y = spawn f(b)
     }
     [x or_throw y or_throw]
 }
-wrap = (g:<(x:int):>int> a:int):>int | Canceled | OutOfMemory => {
+wrap = (g:(x:int:>int) a:int):>int | Canceled | OutOfMemory => {
     let [p q] = both(@g a a + 1) or_throw
     p + q
 }

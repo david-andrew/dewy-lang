@@ -111,9 +111,9 @@ main=()=>{
 @pytest.mark.parametrize('callback,accepted', [('@quiet', True), ('@f', False)])
 def test_callback_blocking_contract(compiler, tmp_path, callback, accepted):
     result = check(compiler, tmp_path, f'''
-run=(f:<():>void & no blocks>):>void & no blocks=>f()
+run=(f:(():>void & no blocks)):>void & no blocks=>f()
 quiet=():>void=>{{}}
-forward=(f:<():>void>):>void=>run({callback})
+forward=(f:(():>void)):>void=>run({callback})
 main=()=>{{forward(@quiet)}}
 ''')
     assert (result.returncode == 0) == accepted, result.stderr

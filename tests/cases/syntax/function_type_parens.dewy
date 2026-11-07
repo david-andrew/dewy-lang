@@ -22,7 +22,7 @@ union=(v:(int64:>int64)|string):>string=>match v {
 generic=<T>(f:(T:>T) v:T):>T=>f(v)
 pair=(f:(int64:>(int64 int64))):>int64=>{let (a b)=f(1) a+b}
 pure=(f:(int64:>int64 & no_effects)):>int64=>f(4)
-angles=(f:<int64:>int64> g:<(x:int64):>int64> h:<x:int64:>int64> i:<(int64):>int64>):>int64=>f(1)+g(1)+h(1)+i(1)
+angles=(f:<int64:>int64> g:(x:int64:>int64) h:<x:int64:>int64> i:(int64:>int64)):>int64=>f(1)+g(1)+h(1)+i(1)
 
 main=():>void=>{
     let f:(int64:>int64)=(x:int64)=>x+1

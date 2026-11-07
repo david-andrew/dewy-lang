@@ -18,7 +18,7 @@ REJECT = [
     ('callback_return_ptr_array_uint8_reject', 'array<uint8>'),
     ('callback_return_ptr_int_reject', 'int'),
     ('callback_return_x_int32_reject', 'C boundary'),
-    ('nested_result', '<():>int>'),
+    ('nested_result', '(():>int)'),
     ('nested_parameter', 'cannot cross the C boundary'),
 ]
 

@@ -23,7 +23,7 @@ def run(compiler, tmp_path, files, *arguments):
 
 def test_same_module_needs_no_opt_in(compiler, tmp_path):
     # The module's own callers, transitively and through a handle, do not opt in.
-    source = HELPER + 'apply=(f:<(xs:array<int64> i:int64):>int64> i:int64):>int64=>f([5 6 7] i)\nmain=():>void=>printl"{twice([1 2 3] 1)} {apply(@pick 2)}"\n'
+    source = HELPER + 'apply=(f:((xs:array<int64> i:int64):>int64) i:int64):>int64=>f([5 6 7] i)\nmain=():>void=>printl"{twice([1 2 3] 1)} {apply(@pick 2)}"\n'
     result = run(compiler, tmp_path, {'main.dewy': source}, 'run')
     assert result.returncode == 0 and result.stdout == '4 7\n', result.stdout + result.stderr
 
@@ -68,7 +68,7 @@ def test_external_handles_and_checks(compiler, tmp_path, kind, call):
         helper = helper.replace('$runtime_checks\n    return xs[i]', 'if i <? 0 {panic("negative index")}\n    return 7')
     elif kind == 'prototype':
         helper = helper.replace('$runtime_checks', '$prototype')
-    caller = 'apply=(f:<(xs:array<int64> i:int64):>int64> i:int64):>int64=>f([5 6 7] i)\nmain=():>void=>printl(' + call + ')\n'
+    caller = 'apply=(f:((xs:array<int64> i:int64):>int64) i:int64):>int64=>f([5 6 7] i)\nmain=():>void=>printl(' + call + ')\n'
     local = run(compiler, tmp_path, {'main.dewy': helper + caller}, 'check')
     assert local.returncode == 0, local.stdout + local.stderr
     external = run(compiler, tmp_path, {'helper.dewy': helper, 'main.dewy': 'from p"helper.dewy" import (pick twice)\n' + caller}, 'check')

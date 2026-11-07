@@ -97,7 +97,7 @@ NEGATIVES = {
     'explicit-copy': 'let owner=Handle[7] let callback=()=>owner.value let moved=(@callback).copy() printl"{moved()}"',
     'two-captures': 'let owner=Handle[7] let first=()=>owner.value let second=()=>owner.value printl"{first()} {second()}"',
     'generic-copy': 'let owner=Handle[7] let callback=()=>owner.value let both=duplicate(@callback) printl"{both.first()}"',
-    'erased-callable': 'let owner=Handle[7] let callback=()=>owner.value let erased:<():>int64>=@callback printl"{erased()}"',
+    'erased-callable': 'let owner=Handle[7] let callback=()=>owner.value let erased:(():>int64)=@callback printl"{erased()}"',
     'borrow-escape': 'let owner=Handle[7] let callback=($capture @owner)=>owner.value let escaped=[callback=@callback] printl"{escaped.callback()}"',
 }
 

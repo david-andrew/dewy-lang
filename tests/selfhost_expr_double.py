@@ -8,7 +8,7 @@ from tests.test_selfhost_checker_resolve import compare
 
 DEWY = r'''$runtime_checks
 CheckExprDouble:type=[
-    check:<(node:int64 expected:int64):>int64>
+    check:((node:int64 expected:int64):>int64)
 ]
 let dbl_host:ptr<CheckExprDouble>=$unsafe (uint64(0) as ptr<CheckExprDouble>)
 check_expr_double=(host:ptr<CheckExprDouble>):>int64=>$unsafe {

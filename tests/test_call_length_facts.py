@@ -11,7 +11,7 @@ PROVED = {
 f=(j:int64)=>{printl(j)}
 main=()=>{loop j in [0..NAMES.length) {f(j) printl(NAMES[j])}}''', '0\na\n1\nb\n'),
     'const_element_callback': ('''const NAMES=["a" "b"]
-f=(i:int64 g:<(n:int64):>void>)=>{
+f=(i:int64 g:(n:int64:>void))=>{
     if i <? 0 or i >=? NAMES.length return
     if NAMES[i].length <? 1 return
     g(i)
@@ -126,7 +126,7 @@ def test_imported_const_retains_guard(compiler, tmp_path):
     (tmp_path / 'names.dewy').write_text('const NAMES=["a" "b"]\n')
     path = tmp_path / 'user.dewy'
     path.write_text('import p"names.dewy" as names\n'
-                    'f=(g:<(n:int64):>void>)=>{loop i in [0..names.NAMES.length) {g(i); printl(names.NAMES[i])}}\n')
+                    'f=(g:(n:int64:>void))=>{loop i in [0..names.NAMES.length) {g(i); printl(names.NAMES[i])}}\n')
     checked = subprocess.run([compiler, 'check', path], text=True, capture_output=True, timeout=60)
     assert checked.returncode == 0, checked.stdout + checked.stderr
 

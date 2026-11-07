@@ -1,5 +1,5 @@
 # A library holding its lock while it calls back: the callback taking the same lock waits forever.
-notify = (m:Mutex<int> listener:<(i:int):>void>):>void => {
+notify = (m:Mutex<int> listener:(i:int:>void)):>void => {
     let state = @(m.lock())
     state += 1
     listener(state)

@@ -1,6 +1,6 @@
 # modes: native native-release
 total:int = 0
-both = (f:<(x:int):>int> a:int):>int | Canceled | OutOfMemory => {
+both = (f:(x:int:>int) a:int):>int | Canceled | OutOfMemory => {
     concurrent {
         let x = spawn { f(a) }
     }

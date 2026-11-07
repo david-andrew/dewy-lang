@@ -1,7 +1,7 @@
 # modes: native native-release
 # A task lets a callback wait; the same parameter under `parallel` does not.
-apply = (f:<(x:int):>int> x:int):>int => f(x)
-each = (f:<(x:int):>int> xs:array<int>):>array<int> => [parallel x in xs apply(@f x)]
+apply = (f:(x:int:>int) x:int):>int => f(x)
+each = (f:(x:int:>int) xs:array<int>):>array<int> => [parallel x in xs apply(@f x)]
 main = () => {
     let c = channel<int>(1)
     concurrent {

@@ -26,7 +26,7 @@ f=(xs:array<int>):>int=>{if xs.last =? 0 return 0; 12//xs.last}''',
 zap=(@c:C):>void=>{c=C[[] []]}
 f=(@c:C):>int=>{if c.keys.length =? 0 return 0; zap(@c); c.keys[0]}''',
     'record_callback': '''C:type=[keys:array<int> prev:array<int>]
-f=(@c:C change:<(@c:C):>void>):>int=>{if c.keys.length =? 0 return 0; change(@c); c.keys[0]}''',
+f=(@c:C change:(@c:C:>void)):>int=>{if c.keys.length =? 0 return 0; change(@c); c.keys[0]}''',
     'remove_key_hook': '''Key:type=[value:int]
 let xs:array<int>=[42]
 hash=(key:Key):>uint64=>{xs.clear(); 0}

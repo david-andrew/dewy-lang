@@ -9,7 +9,7 @@ Root = type of Context
 
 Token = $abstract type of any & [
     src:string  idx:int64
-    eat:<(src:string ctx:Context):>int64? >               # a slot every kind fills
+    eat:((src:string ctx:Context):>int64? )               # a slot every kind fills
     width = ():>int64 => src.length                       # an instance method: reads a field
 ]
 Whitespace = type of Token & [

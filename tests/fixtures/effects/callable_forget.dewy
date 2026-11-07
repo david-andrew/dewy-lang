@@ -1,5 +1,5 @@
 quiet=(x:int64):>int64 & no_effects=>if x <? 9223372036854775807 x+1 else x
 main=():>void=>{
-    let f:<(x:int64):>int64>=@quiet
+    let f:(x:int64:>int64)=@quiet
     printl("{f(41)}")
 }

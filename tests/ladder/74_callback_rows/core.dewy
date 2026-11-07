@@ -1,11 +1,11 @@
 # Current-dialect algorithm projection; does not establish removed design contracts.
 # Tier 3 / 74_callback_rows / milestone 23
 # Acceptance: Forward nonlocal callback rows while remapping explicit place permissions.
-Action:type = <(x:int64):>int64>
+Action:type = (x:int64:>int64)
 map_one = (f:Action value:int64):>int64 => {
     return f(value)
 }
-forward = (f:<(@x:int64):>void> @y:int64):>void => {
+forward = (f:(@x:int64:>void) @y:int64):>void => {
     f(@y)
 }
 square = (x:int64):>int64 => x*x

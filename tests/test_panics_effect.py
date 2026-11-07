@@ -27,7 +27,7 @@ check=(x:int64):>int64=>{
     $runtime_assert(x >? 0)
     return x
 }
-apply=(f:<(x:int64):>int64> x:int64):>int64=>f(x)
+apply=(f:(x:int64:>int64) x:int64):>int64=>f(x)
 main=():>void=>printl(apply(@check 2))
 ''', 'a handle to `check`, which may be called, may panic (check: `$runtime_assert`'),
     # A row excluding panics holds transitively, whatever the scope.

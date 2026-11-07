@@ -3,7 +3,7 @@
 from units import m, kg, N, rad
 
 Vec:type = array<float64>
-Deriv:type = <(t:float64 y:Vec):>Vec>
+Deriv:type = ((t:float64 y:Vec):>Vec)
 
 euler_step = (f:Deriv t:float64 y:Vec h:float64):>Vec => y .+ f(t y) .* h
 
@@ -15,7 +15,7 @@ rk4_step = (f:Deriv t:float64 y:Vec h:float64):>Vec => {
     y .+ (k1 .+ k2 .* 2.0 .+ k3 .* 2.0 .+ k4) .* (h/6)
 }
 
-integrate = (step:<(f:Deriv t:float64 y:Vec h:float64):>Vec> f:Deriv y0:Vec t_end:float64 n:int64):>Vec => {
+integrate = (step:((f:Deriv t:float64 y:Vec h:float64):>Vec) f:Deriv y0:Vec t_end:float64 n:int64):>Vec => {
     let h = t_end / n
     let y = y0
     loop i in [0..n) {

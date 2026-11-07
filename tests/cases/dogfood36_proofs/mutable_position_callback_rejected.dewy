@@ -1,10 +1,10 @@
 # A callback may write the place behind `@i`, even in a helper that prints.
 limit:int64<(>=? 0)> = 3
-run = (f:<():>void>):>void => {
+run = (f:(():>void)):>void => {
     printl"run"
     f()
 }
-read = (xs:array<int> @i:int64<(>=? 0)> f:<():>void>):>int => {
+read = (xs:array<int> @i:int64<(>=? 0)> f:(():>void)):>int => {
     if i >=? xs.length return 0
     run(@f)
     xs[i]

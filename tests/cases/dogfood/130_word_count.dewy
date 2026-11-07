@@ -26,7 +26,7 @@ tokens = (line:string):>array<string> => {
 long_tokens = (line:string):>array<string> => [loop w in tokens(line) if w.length >=? 4 w]
 
 $parallel_safe
-map_reduce = (docs:array<string> split:<(line:string):>array<string>>):>dict<string int> => {
+map_reduce = (docs:array<string> split:(line:string:>array<string>)):>dict<string int> => {
     let parts = [parallel d in docs split(d)]
     let counts:dict<string int> = []
     loop words in parts {
@@ -45,7 +45,7 @@ top = (counts:dict<string int> k:int):>array<string> => {
 }
 
 # Takes the batch: it is released when this returns.
-summarize = (b:Batch split:<(line:string):>array<string>>):>void => {
+summarize = (b:Batch split:(line:string:>array<string>)):>void => {
     let counts = map_reduce(b.docs @split)
     let total = 0
     loop c in counts.values total += c

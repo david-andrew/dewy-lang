@@ -114,14 +114,14 @@ LATER = '''sum=(@xs:array<int64>):>int=>{
 }
 main=()=>{ let a:array<int64>=[1 2 3]; printl(sum(@a)) }
 '''
-CALLBACK = '''sum=(@xs:array<int64> step:<(@ys:array<int64>):>void>):>int=>{
+CALLBACK = '''sum=(@xs:array<int64> step:(@ys:array<int64>:>void)):>int=>{
     let t:int=0
     loop i in 0.. and x in xs { step(@xs); t=t+xs[i] }
     return t
 }
 main=()=>{ let a:array<int64>=[1 2 3]; printl(sum(@a (@ys:array<int64>)=>{if ys.length >? 0 {ys.pop()}})) }
 '''
-COMBINED_CALLBACK = '''first=(@xs:array<int64> ys:array<int64> step:<(@zs:array<int64>):>void>):>int=>{
+COMBINED_CALLBACK = '''first=(@xs:array<int64> ys:array<int64> step:(@zs:array<int64>:>void)):>int=>{
     if xs.length <? 1 return 0
     let t:int=0
     loop x in xs and y in ys { t=t+xs[0]*y; step(@xs) }

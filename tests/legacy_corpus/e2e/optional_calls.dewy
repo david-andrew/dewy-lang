@@ -4,7 +4,7 @@ let choose = ((value:int64):>int64|none => value)
 
 let main = ():>int64 => {
     let local = (value:int64):>int64|none => value
-    let callback:<(value:int64):>int64|none> = @local
+    let callback:(value:int64:>int64|none) = @local
     let first:int64|none = choose(20)
     let second:int64|none = callback(20)
     if first is? int64 and second is? int64 {

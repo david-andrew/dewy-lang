@@ -135,8 +135,8 @@ f=(@xs:array<int64> i:int64 b:bool)=>{
     rewrite(@xs b)
     printl(xs[i])
 }''',
-    'helper_callback': '''rewrite=(@xs:array<int64> callback:<(@ys:array<int64>):>void>)=>{callback(@xs)}
-f=(@xs:array<int64> i:int64 callback:<(@ys:array<int64>):>void>)=>{
+    'helper_callback': '''rewrite=(@xs:array<int64> callback:(@ys:array<int64>:>void))=>{callback(@xs)}
+f=(@xs:array<int64> i:int64 callback:(@ys:array<int64>:>void))=>{
     if i <? 0 or i >=? xs.length return
     rewrite(@xs @callback)
     printl(xs[i])

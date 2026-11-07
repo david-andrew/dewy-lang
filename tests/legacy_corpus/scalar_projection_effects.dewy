@@ -7,7 +7,7 @@ node_at=(nodes:array<Node> id:addr=mark(2)):>Node=>{
     return nodes[id]
 }
 make=():>array<Node>=>{mark(1); return [Node[42 [7 8]]]}
-indirect=(getter:<(nodes:array<Node> id:addr):>Node> nodes:array<Node>):>int64=>getter(nodes 0).value
+indirect=(getter:((nodes:array<Node> id:addr):>Node) nodes:array<Node>):>int64=>getter(nodes 0).value
 plain=(nodes:array<Node> id:addr):>Node=>{
     $runtime_assert id <? nodes.length
     return nodes[id]

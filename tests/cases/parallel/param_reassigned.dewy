@@ -1,5 +1,5 @@
 # A reassigned parameter no longer holds the function the caller gave.
-apply=(f:<(x:int64):>int64> xs:array<int64>):>array<int64>=>{
+apply=(f:(x:int64:>int64) xs:array<int64>):>array<int64>=>{
     f = @other
     parallel_map(xs @f)
 }

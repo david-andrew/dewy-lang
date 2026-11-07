@@ -5,7 +5,7 @@
 
 let Bad = type of error & [code:int64]
 let Token:type = [text:string idx:int64]
-let P:type = [eat:<(n:int64):>Token | none | Bad>]
+let P:type = [eat:(n:int64:>Token | none | Bad)]
 Ws = type of P & [eat = (n:int64):>Token | none => if n >? 0 Token(text="ws" idx=n) else none]      # no Bad
 Lc = type of P & [eat = (n:int64):>Token | Bad => if n >? 0 Token(text="lc" idx=n) else Bad(code=n)]  # no none
 
@@ -13,7 +13,7 @@ let widen = (n:int64):>int64? => if n >? 0 n else none
 
 main = () => {
     let table:array<P> = [Ws Lc]
-    let wider:<(n:int64):>int64 | none | Bad> = @widen                                                 # a named function stands in, no adapter
+    let wider:(n:int64:>int64 | none | Bad) = @widen                                                 # a named function stands in, no adapter
     let total:int64 = 0
     match table[0].eat(5) { t:Token => { total += t.idx + t.text.length }  <none> => exit(1)  <Bad> => exit(2) }   # 7
     match table[0].eat(0) { t:Token => exit(3)  <none> => { total += 10 }  <Bad> => exit(4) }                        # 17

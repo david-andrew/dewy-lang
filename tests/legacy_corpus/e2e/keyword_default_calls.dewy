@@ -5,7 +5,7 @@ let next_default = ():>int64 => {
 }
 let lazy = (... value:int64=next_default()):>int64 => value
 let forty_two = ():>int64 => 42
-let invoke = (... fn:<():>int64>=@forty_two):>int64 => fn()
+let invoke = (... fn:(():>int64)=@forty_two):>int64 => fn()
 let add = (x:int64 y:int64=2):>int64 => x + y
 let inferred = (x:int64 y=2):>int64 => x + y
 let interleaved = (x:int64 y:int64=2 z:int64):>int64 => x + y + z

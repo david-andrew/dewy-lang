@@ -58,7 +58,7 @@ def test_refinement_proven_erasure(compiler, tmp_path, release):
     ('main=()=>{let limit:int64=5; let x:int64<i => i <? limit>=1; printl(x)}', 'stable binding'),
     ('f=(@x:int64)=>{x=0}\nmain=()=>{let x:int64<i => i >? 0>=1; f(@x)}', 'mutable refinement'),
     ('f=(x:int64<i => i*i >? 0>)=>printl(x)\nmain=()=>f(2)', 'unsupported refinement term'),
-    ('f=(x:int64<i => i >? 0>):>int64=>x\nmain=()=>{let cb:<(x:int64):>int64>=@f; printl(cb(2))}', 'type mismatch'),
+    ('f=(x:int64<i => i >? 0>):>int64=>x\nmain=()=>{let cb:(x:int64:>int64)=@f; printl(cb(2))}', 'type mismatch'),
 ])
 def test_refinement_rejections(compiler, tmp_path, source, diagnostic):
     path = tmp_path / 'reject.dewy'

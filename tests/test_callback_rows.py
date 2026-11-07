@@ -36,9 +36,9 @@ def test_inferred_callback_sources(compiler, tmp_path, mode, flow, forbidden):
     source.write_text(('''let shared:int64=0
 pure=(x:int64):>int64=>x+1
 bad=(x:int64):>int64=>{shared+=x; return x+1}
-use_it=(f:<(x:int64):>int64 & no_effects>):>int64=>f(1)
-Holder:type=[f:<(x:int64):>int64>]
-''' + f'make=():><(x:int64):>int64>=>@{selected}\n'
+use_it=(f:(x:int64:>int64 & no_effects)):>int64=>f(1)
+Holder:type=[f:(x:int64:>int64)]
+''' + f'make=():>(x:int64:>int64)=>@{selected}\n'
       + f'add=(a:int64 x:int64):>int64=>{{return {selected}(a+x)-1}}\n'
       + 'main=():>void=>exit(entry()) entry=():>int64=>{\n' + FLOWS[flow].replace('FUNC', selected) + '\n}\n') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, mode)
@@ -56,7 +56,7 @@ Holder:type=[f:<(x:int64):>int64>]
 def test_imported_alias_and_resources(compiler, tmp_path, mode, forbidden):
     (tmp_path / 'contracts.dewy').write_text(('''Filesystem:type=[]
 Disk:type=Filesystem
-Action:type=<E:Effect>(<(x:int64):>int64 & E>)
+Action:type=<E:Effect>(x:int64:>int64 & E)
 # Inner E shadows the importing function's E; substitution is positional.
 Forward:type=<T E:Effect>(Action<E>)
 ''') + "\n$runtime_checks\n")
@@ -79,7 +79,7 @@ main=():>void=>exit(entry()) entry=():>int64=>restricted(@callback)
 @pytest.mark.parametrize('declaration,message', [
     ('Bad:type=Action<int64>', 'expected Effect'),
     ('bad=<E:Effect>(x:E):>int64=>0', 'not a value type'),
-    ('Bad:type=<T>(<(x:T):>T & T>)', 'Effect binder'),
+    ('Bad:type=<T>(x:T:>T & T)', 'Effect binder'),
     ('bad=():>int64 & allocates<Filesystem>=>0', 'effect'),
     ('bad=():>int64 & no_effects & allocates=>0', 'no_effects'),
     ('bad=():>int64 & reads<Filesystem> & no reads<Filesystem>=>0', 'contradictory'),
@@ -91,7 +91,7 @@ def test_effect_kind_errors(compiler, tmp_path, declaration, message):
     if declaration.startswith('Bad:type=Action'): use = 'let invalid:Bad\n'
     elif declaration.startswith('Bad:type=<T>'): use = 'let invalid:Bad<int64>\n'
     elif declaration.startswith('bad=<E:Effect>'): use = 'bad<no_effects>(1)\n'
-    source.write_text('Filesystem:type=[]\nAction:type=<E:Effect>(<(x:int64):>int64 & E>)\n'
+    source.write_text('Filesystem:type=[]\nAction:type=<E:Effect>(x:int64:>int64 & E)\n'
                       + declaration + '\nmain=():>void=>exit(entry()) entry=():>int64=>{\n' + use + 'return 0\n}\n')
     result = compile_source(compiler, source, tmp_path, 'check')
     assert result.returncode != 0, result.stdout + result.stderr
@@ -116,13 +116,13 @@ def test_callback_place_is_not_nonlocal_remainder(compiler, tmp_path, explicit_p
 @pytest.mark.parametrize('forbidden', [False, True])
 def test_nested_callback_contravariance(compiler, tmp_path, forbidden):
     source = tmp_path / 'nested.dewy'
-    source.write_text(('''Pure:type=<(x:int64):>int64 & no_effects>
-Plain:type=<(x:int64):>int64>
+    source.write_text(('''Pure:type=(x:int64:>int64 & no_effects)
+Plain:type=(x:int64:>int64)
 pure=(x:int64):>int64 & no_effects=>x+1
 accept_any=(cb:Plain):>int64=>cb(1)
 require_pure=(cb:Pure):>int64=>cb(1)
-with_pure=(f:<(cb:Pure):>int64>):>int64=>f(@pure)
-with_any=(f:<(cb:Plain):>int64>):>int64=>f(@pure)
+with_pure=(f:(cb:Pure:>int64)):>int64=>f(@pure)
+with_any=(f:(cb:Plain:>int64)):>int64=>f(@pure)
 main=():>void=>exit(entry()) entry=():>int64=>''' + ('with_any(@require_pure)' if forbidden else 'with_pure(@accept_any)') + '\n') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, 'default')
     assert (result.returncode != 0) == forbidden, result.stdout + result.stderr
@@ -151,7 +151,7 @@ def test_reassignment_joins_declared_rows(compiler, tmp_path, constrained):
     source.write_text(('''let shared:int64=0
 pure=(x:int64):>int64 & no_effects=>x+1
 bad=(x:int64):>int64 & reads<shared> & mutates<shared>=>{shared+=x; return x+1}
-invoke=(f:<(x:int64):>int64 & no_effects>):>int64=>f(1)
+invoke=(f:(x:int64:>int64 & no_effects)):>int64=>f(1)
 main=():>void=>exit(entry()) entry=():>int64=>{let f=@pure; f=@bad; return '''
                       + ('invoke(@f)' if constrained else 'f(1)') + '}\n') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, 'default')
@@ -166,7 +166,7 @@ def test_demanded_nested_handle_summary(compiler, tmp_path):
     source = tmp_path / 'nested_handle.dewy'
     source.write_text(('''leaf=(x:int64):>int64=>x+1
 wrapper=(x:int64):>int64=>{let f=@leaf; return f(x)}
-invoke=(f:<(x:int64):>int64 & no_effects>):>int64=>f(1)
+invoke=(f:(x:int64:>int64 & no_effects)):>int64=>f(1)
 main=():>void=>exit(entry()) entry=():>int64=>invoke(@wrapper)
 ''') + "\n$runtime_checks\n")
     result = compile_source(compiler, source, tmp_path, 'default')
@@ -179,7 +179,7 @@ def test_shared_row_unions_callbacks(compiler, tmp_path, mode):
     source = tmp_path / 'join.dewy'
     source.write_text(('''Filesystem:type=[]
 Database:type=[]
-Action:type=<E:Effect>(<():>int64 & E>)
+Action:type=<E:Effect>(():>int64 & E)
 first=():>int64 & reads<Filesystem>=>20
 second=():>int64 & mutates<Database>=>22
 twice=<E:Effect>(a:Action<E> b:Action<E>):>int64 & E=>a()+b()
@@ -199,7 +199,7 @@ def test_qualified_resources_remain_nominal(compiler, tmp_path, same_resource):
     source.write_text('''import p"resources.dewy" as resources
 Filesystem:type=[]
 reader=():>int64 & reads<resources.Filesystem>=>42
-invoke=(f:<():>int64 & reads<''' + permission + '''>>):>int64=>f()
+invoke=(f:(():>int64 & reads<''' + permission + '''>)):>int64=>f()
 main=():>void=>exit(entry()) entry=():>int64=>invoke(@reader)
 ''')
     result = compile_source(compiler, source, tmp_path, 'check')
@@ -210,7 +210,7 @@ main=():>void=>exit(entry()) entry=():>int64=>invoke(@reader)
 
 @pytest.mark.parametrize('aggregate', [False, True])
 def test_extern_cannot_forge_callback_contract(compiler, tmp_path, aggregate):
-    (tmp_path / 'contracts.dewy').write_text('''Pure:type=<(x:int64):>int64 & no_effects>
+    (tmp_path / 'contracts.dewy').write_text('''Pure:type=(x:int64:>int64 & no_effects)
 Holder:type=[f:Pure]
 ''')
     result_type = 'Holder' if aggregate else 'Pure'
@@ -230,7 +230,7 @@ def test_explicit_row_is_not_widened(compiler, tmp_path):
     source.write_text('''Filesystem:type=[]
 first=():>int64 & no_effects=>20
 second=():>int64 & reads<Filesystem>=>22
-twice=<E:Effect>(a:<():>int64 & E> b:<():>int64 & E>):>int64 & E=>a()+b()
+twice=<E:Effect>(a:(():>int64 & E) b:(():>int64 & E)):>int64 & E=>a()+b()
 main=():>void=>exit(entry()) entry=():>int64=>twice<no_effects>(@first @second)
 ''')
     result = compile_source(compiler, source, tmp_path, 'check')

@@ -28,7 +28,7 @@ parse_line = (line:string):>[string Command]? => {
     [symbol Limit[id w[2] w[3] qty price]]
 }
 
-insert = (@levels:array<Limit> order:Limit better:<(a:int b:int):>bool>):>void => {
+insert = (@levels:array<Limit> order:Limit better:((a:int b:int):>bool)):>void => {
     let at = 0
     loop at <? levels.length and not better(order.price levels[at].price) { at += 1 }
     levels.insert(order min(at levels.length))
@@ -92,7 +92,7 @@ worker = (symbol:string inbox:Channel<Command>):>Report => {
     Report[symbol trades notes book.bids book.asks]
 }
 
-show = (r:Report fee:<(n:int):>int>):>void => {
+show = (r:Report fee:(n:int:>int)):>void => {
     printl"== {r.symbol}"
     let volume = 0
     let fees = 0

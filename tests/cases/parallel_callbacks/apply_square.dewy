@@ -1,6 +1,6 @@
 # quick
 # A function that runs its callback parameter in parallel code needs no tag: its callers'
 # arguments are checked to be parallel-safe.
-apply = (f:<(x:int):>int> xs:array<int>):>array<int> => [parallel x in xs f(x)]
+apply = (f:(x:int:>int) xs:array<int>):>array<int> => [parallel x in xs f(x)]
 square = (x:int):>int => x*x
 main = () => printl(apply(@square [1 2 3 4]))

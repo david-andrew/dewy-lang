@@ -1,6 +1,6 @@
 # modes: native native-release
 # An `$export` function has the C calling convention: C's qsort calls it back.
-qsort=(base:ptr<int32> count:uint64 size:uint64 compare:<(a:ptr<int32> b:ptr<int32>):>int32>):>void => $extern
+qsort=(base:ptr<int32> count:uint64 size:uint64 compare:((a:ptr<int32> b:ptr<int32>):>int32)):>void => $extern
 
 $export
 ascending=(a:ptr<int32> b:ptr<int32>):>int32 => {

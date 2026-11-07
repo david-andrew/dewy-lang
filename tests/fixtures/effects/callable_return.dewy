@@ -1,6 +1,6 @@
 quiet=(x:int64):>int64 & no_effects=>if x <? 9223372036854775807 x+1 else x
-make=():><(x:int64):>int64 & no_effects>=>@quiet
+make=():>(x:int64:>int64 & no_effects)=>@quiet
 main=():>void=>{
-    let f:<(x:int64):>int64>=make()
+    let f:(x:int64:>int64)=make()
     printl("{f(41)}")
 }

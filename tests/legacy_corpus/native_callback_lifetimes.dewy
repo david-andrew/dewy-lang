@@ -3,7 +3,7 @@
 # returned state in an optional still gives the caller an independent value.
 State:type=[items:array<int64>]
 Data:type=[calls:int64]
-Leaf:type=<(state:State @data:Data):>State?>
+Leaf:type=((state:State @data:Data):>State?)
 let copied=():>int64=>_arena_copied_bytes
 let live=():>int64=>_arena_live_bytes
 let first=(state:State @data:Data):>State?=>{

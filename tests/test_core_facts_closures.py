@@ -60,7 +60,7 @@ main=():>void=>exit(entry()) entry=():>int64=>pick()
 ''', 'i may have changed at this call'),
     'callback_writes_captured_field': ('''# a closure that writes a captured record's field, passed to a direct call
 Box:type=[at:int64 items:array<int64>]
-twice=(f:<():>void>)=>{f() f()}
+twice=(f:(():>void))=>{f() f()}
 pick=():>int64=>{
     let b=Box[0 [1 2 3]]
     let move=($capture @b)=>{b.at=9}

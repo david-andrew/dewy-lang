@@ -7,7 +7,7 @@ let Grid:type = [cells:array<int64 length=3> name:string]
 let Shown:type = [x:int64 __as__ = ():>string => "<{x}>"]
 let Fault:type = type of error & [code:int64 = 7]
 let Bare:type = type of error
-let Box:type = [value:int64 on_change:<(v:int64):>int64>]
+let Box:type = [value:int64 on_change:(v:int64:>int64)]
 let main = ():>void => {
     printl(5)
     printl([1 2 3])
