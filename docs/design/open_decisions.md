@@ -397,6 +397,34 @@ It also doesn't work in a lambda's result (`g=():>int64:>int64=>...`) or after `
 - **Rec:** leave bare off. Today it gets the hint "a function type takes parentheses here".
 - **Reversible:** yes.
 
+### D31. More spellings added while building time (all built, all reversible)
+Turn these on and each works as shown; say no to any and it is removed.
+
+```dewy
+$time.rules = 'urgent.bin'                              # a rule file beside the main file, rather than v6's descriptor
+Box:type = <T=int64>[v:T]                               # bare Box means Box<int64>; this is how bare Date means Date<Gregorian>
+let t:Instant<width=64> = now()                         # Name<option=N> always means a type declared Name_option_N
+let r = [date"2026-01-01"..date"2026-02-01")
+printl"{r.first} {r.last} {r.includes_first} {r.includes_last} {r.is_empty}"
+printl"{quantize(1.5 rounding='nearest_even' tick=1ms)}"   # also 'nearest_away', 'floor', 'ceil', 'toward_zero'
+let at = time_of_day"09:30"
+let l = local"2026-11-01T01:30"
+printl"{date"2026-11-01".at(at)} {l.in_zone(zone"America/New_York" fold='later')}"
+printl"{date"2026-11-01".format("EEEE d MMMM y")} {date("1/11/2026" "d/M/y")}"   # Unicode's date letters; a two-digit year doesn't read
+```
+
+- **Rec:** keep all of them. `Name<option=N>` standing for `Name_option_N` is the one to look at hardest, as it is a naming convention the compiler knows about.
+- **Reversible:** yes.
+
+### D32. Unicode-licensed time zone data in the repository
+Mapping Windows zone names to IANA names uses Unicode's CLDR table, now stored in the rule pack. Its license asks that its copyright and permission notice travel with copies, and the project has kept to Apache-2.0 WITH LLVM-exception with no NOTICE file.
+
+- **Options:**
+  - **a) Keep the table and add Unicode's notice** next to the data file.
+  - **b) Drop the table.** On Windows, `'system'` then warns and reads times as UTC unless `$time.zone` or `TZ` names an IANA zone.
+- **Rec:** (a). Windows machines report only their Windows name, so without the table every Windows program needs a setting.
+- **Reversible:** yes.
+
 ---
 
 ## P4: open-ended
