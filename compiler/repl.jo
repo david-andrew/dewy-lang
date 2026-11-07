@@ -46,6 +46,7 @@ use 'decimal_ops.dewy'
 use 'lower_ffi.dewy'
 use 'lower_functions.dewy'
 use 'lower_primitives.dewy'
+use 'repl_ops.dewy'
 
 const REPL_REGION = 0x10000000          # where inputs' code goes in the session (within 2 GB of
 const REPL_REGION_SIZE = 0x10000000     # its globals: code reaches them by 32-bit offsets; arm64's
@@ -68,13 +69,6 @@ repl_pid = -1                           # (Windows: the session's process handle
 repl_exe = ""                           # (Windows: the session's program, deleted at the end)
 repl_jbuf: *u8 = null                   # where an error in an input goes (repl_try)
 
-# the session's main: __repl_main in the input module
-repl_set_main = ():
-    loop i in 0.. and m in modules:
-        if m.is_main: repl_mainm = i
-    if let s = modules[repl_mainm].names.get(intern("__repl_main")):
-        main_fn = get_fn_inst(int(syms[s].decl), [], 0)
-
 # ---- the session ----
 
 # (macOS: where the session is asked to put it, above the program, which starts at 4 GB with
@@ -83,13 +77,6 @@ repl_region = () -> int:
     when TARGET == "macos":
         return MACHO_BASE + 0x20000000
     REPL_REGION
-
-# the session's first reply: where the region for inputs' code is (0: where it was asked to be)
-repl_started = () -> bool:
-    r = repl_wait_reply()
-    if r < 0: return false
-    if r > 0: repl_next = r
-    true
 
 repl_start = () -> str:
     repl_next = repl_region()
@@ -241,236 +228,6 @@ struct ReplOut:
     entry: int          # the offset of the input's entry point in code
     addr: int           # where the code goes in the session
 
-# compile input text (as input number n); fatal errors end the process (a copy, see repl_check)
-repl_compile = (text: str, n: int) -> ReplOut:
-    out = ReplOut()
-    m = repl_mainm
-    fb = fns.len()
-    first_module = modules.len()
-    first_import = from_imports.len()
-    fi = files.len()
-    files.push(SrcFile("<input>", ".", text, true))
-    decls = source_declarations(fi)
-    # declaring a name again replaces it (code compiled already keeps the old one)
-    loop d in decls:
-        k = nodes[d].kind
-        if k == .fn_ or k == .struct_ or k == .enum_ or k == .typealias or k == .const_ or k == .vardecl and nodes[d].nlist == 0:
-            nm = int(nodes[d].name)
-            if modules[m].names.get(nm) != none:
-                ml_bump_name(nm)
-                name_unbind(m, nm)
-    n0 = modules[m].inits.len()
-    modules[m].decls.extend(decls)
-    register_decls(m, decls)
-    mi = first_module
-    loop mi < modules.len():
-        register_module(mi)
-        mi += 1
-    bind_from_imports(first_import)
-    setup_module_contexts(init_fns[0])
-    stmts: int[]
-    loop i in [n0..modules[m].inits.len()): stmts.push(modules[m].inits[i])
-    # check: the statements as a function of their own, and the functions declared
-    ci = new_inst(FK_INIT, m, "input_{n}")
-    body = mk(.block, mkpos(fi, 0))
-    set_list(body, stmts)
-    fns[ci].body = i32(body)
-    fns[ci].ret = i32(T_VOID)
-    # (as top-level code: a decimal binding the input declares and writes a float is a float64,
-    # its statements checked again)
-    if module_ctx[m] >= 0: ctxs[module_ctx[m]].inst = i32(ci)
-    else: module_frames[m].inst = i32(ci)
-    decimal_input_globals(m, stmts)
-    if decimal_wants(ci): decimal_check_body(ci)
-    else: check_init_now(ci)
-    entered = enter_module_context(m)
-    cx = module_ctx[m]
-    # an expression with a value at the end: shown
-    if stmts.len() > 0:
-        last = stmts[stmts.len() - 1]
-        if nodes[last].kind == .exprstmt:
-            t = prune(ntype(int(nodes[last].a)))
-            if t != 0 and tkind(t) != .void_ and t != T_NEVER:
-                out.show = true
-                out.type = type_str(zonk(t), true)
-                if len(repl_sig) > 0: out.type = repl_sig
-                if not repl_sig_query:
-                    show = "__repl_show"
-                    if dewy_at(nodes[last].pos): show = "__dewy_repl_show"
-                    shown = synth_call(show, [int(nodes[last].a)], nodes[last].pos)
-                    check_stmt(shown)
-                    nodes[last] = nodes[shown]
-                    zonk_tree(body)
-    leave_module_context(m, entered)
-    cx = -1
-    loop d in decls:
-        if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic: get_fn_inst(d, [], nodes[d].pos)
-    loop imported in [first_module..modules.len()):
-        if modules[imported].is_prelude: continue
-        loop d in modules[imported].decls:
-            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic: get_fn_inst(d, [], nodes[d].pos)
-    check_pending_functions(fb)
-    if open_globals.len() > 0: settle_open_globals()
-    # lower and compile what is new
-    lf0 = lfuncs.len()
-    init_lf = lf_of_inst(ci)
-    code = []
-    call_fix = []
-    data_fix = []
-    stub_fix = []
-    cabi_fix = []
-    a_call_fix = []
-    a_stub_fix = []
-    a_faddr_fix = []
-    a_data_fix = []
-    elf_syms = []
-    pinits: int[]
-    minits: int[]
-    dfs_state = fill(false, modules.len())
-    order: int[]
-    order_modules(m, order)
-    loop imported in order:
-        if imported == m or modules[imported].is_prelude or repl_modules_inited.has(imported): continue
-        repl_modules_inited[imported] = true
-        minits.push(lf_of_inst(int(modules[imported].init_fn)))
-    i = lf0
-    loop true:
-        loop i < lfuncs.len():
-            if lfuncs[i].kind == LK_INST and fns[lfuncs[i].inst].decl != 0 and has_flag(int(fns[lfuncs[i].inst].decl), NF_EXTERN):
-                fx = lfuncs[i].inst
-                if len(fns[fx].clib) == 0: fatal(nodes[int(fns[fx].decl)].pos, "extern functions need @lib(\"library.so\") on native targets")
-                lower_extern_thunk(i, fx)
-                emit_function()
-            else:
-                lower_function(i)
-                emit_function()
-            i += 1
-        # library globals used for the first time: initialized before the input runs
-        decls2: int[]
-        loop g in global_ids:
-            if modules[int(globals[g].mod)].is_prelude and global_off.get(g) != none and repl_inited.get(g) == none:
-                repl_inited[g] = true
-                d = int(globals[g].decl)
-                if not decls2.contains(d): decls2.push(d)
-        if decls2.len() == 0: break
-        pi = new_inst(FK_INIT, 0, "input_{n}_lib")
-        pb = mk(.block, 0)
-        set_list(pb, decls2)
-        fns[pi].body = i32(pb)
-        fns[pi].ret = i32(T_VOID)
-        fns[pi].state = 2
-        zonk_tree(pb)
-        pinits.push(lf_of_inst(pi))
-    pinits.extend(minits)
-    if target_arm64: return repl_place_arm64(out, pinits, init_lf, lf0)
-    # the entry: library globals first (in the order they were found), then the input
-    loop code.len() % 16 != 0: b(0xCC)
-    out.entry = code.len()
-    loop x in [0x48, 0x83, 0xEC, 0x08]: b(x)                     # sub rsp, 8
-    loop f in pinits:
-        b(0xE8)
-        b32(0)
-        call_fix.push((code.len() - 4, f))
-    b(0xE8)
-    b32(0)
-    call_fix.push((code.len() - 4, init_lf))
-    loop x in [0x48, 0x83, 0xC4, 0x08, 0xC3]: b(x)               # add rsp, 8; ret
-    # place it: code, then the new read-only data
-    addr = repl_next
-    out.addr = addr
-    loop lf in [lf0..lfuncs.len()):
-        loop lf_abs.len() <= lf: lf_abs.push(0)
-        if lf < fn_addr.len() and fn_addr[lf] >= 0: lf_abs[lf] = addr + fn_addr[lf]
-    loop code.len() % 16 != 0: b(0)
-    ro_at = addr + code.len()
-    if rodata.len() > ro_shipped:
-        ro_segs.push((ro_shipped, rodata.len(), ro_at))
-        loop j in [ro_shipped..rodata.len()): code.push(rodata[j])
-        ro_shipped = rodata.len()
-    loop f in stub_fix: patch32(f.0, img_text_addr + stub_addr[f.1] - (addr + f.0 + 4))
-    # (Windows: a @cabi function's address is its adapter's)
-    loop lf in [lf0..lfuncs.len()):
-        if let off = cabi_adapter.get(lf): repl_cabi_abs[lf] = addr + off
-    loop f in cabi_fix:
-        t = repl_cabi_abs.get(f.1) ?? 0
-        if t == 0: ice("no adapter for {lfuncs[f.1].name}")
-        patch32(f.0, t - (addr + f.0 + 4))
-    loop f in call_fix:
-        t = lf_abs[f.1]
-        if t == 0: ice("unresolved function {lfuncs[f.1].name}")
-        patch32(f.0, t - (addr + f.0 + 4))
-    loop f in data_fix:
-        t = img_data_addr + f.2
-        if f.1 == 0: t = repl_ro_addr(f.2)
-        patch32(f.0, t - (addr + f.0 + 4))
-    out.code = code
-    repl_next = (addr + code.len() + 4095) & ~4095
-    out
-
-# arm64: the entry, then the code placed at repl_next and linked to the session (calls beyond
-# BL's reach through veneers after the code), then the new read-only data
-repl_place_arm64 = (out0: ReplOut, pinits: int[], init_lf: int, lf0: int) -> ReplOut:
-    out = out0
-    out.entry = code.len()
-    w32(0xA9BF7BFD)                                             # stp x29, x30, [sp, #-16]!
-    w32(0x910003FD)                                             # mov x29, sp
-    loop f in pinits:
-        a_call_fix.push((code.len(), f))
-        a_bl()
-    a_call_fix.push((code.len(), init_lf))
-    a_bl()
-    w32(0xA8C17BFD)                                             # ldp x29, x30, [sp], #16
-    a_ret()
-    addr = repl_next
-    out.addr = addr
-    loop lf in [lf0..lfuncs.len()):
-        loop lf_abs.len() <= lf: lf_abs.push(0)
-        if lf < fn_addr.len() and fn_addr[lf] >= 0: lf_abs[lf] = addr + fn_addr[lf]
-    bls: (int, int)[]
-    loop f in a_call_fix:
-        t = lf_abs[f.1]
-        if t == 0: ice("unresolved function {lfuncs[f.1].name}")
-        bls.push((f.0, t))
-    loop f in a_stub_fix: bls.push((f.0, img_text_addr + stub_addr[f.1]))
-    veneers: {int: int} = {}
-    loop f in bls:
-        t = f.1
-        if t - (addr + f.0) >= 1 << 27 or t - (addr + f.0) < -(1 << 27):
-            v = veneers.get(t) ?? -1
-            if v < 0:
-                v = code.len()
-                veneers[t] = v
-                w32(0x58000050)                                 # ldr x16, #8
-                a_br(16)
-                w32(t & 0xFFFFFFFF)
-                w32((t >> 32) & 0xFFFFFFFF)
-            t = addr + v
-        wr32(f.0, rd32(f.0) | (((t - (addr + f.0)) / 4) & 0x3FFFFFF))
-    loop f in a_faddr_fix:
-        t = lf_abs[f.1]
-        if t == 0: ice("unresolved function {lfuncs[f.1].name}")
-        a_patch_adrp(f.0, addr, t)
-    loop code.len() % 16 != 0: w32(0)
-    ro_at = addr + code.len()
-    if rodata.len() > ro_shipped:
-        ro_segs.push((ro_shipped, rodata.len(), ro_at))
-        loop j in [ro_shipped..rodata.len()): code.push(rodata[j])
-        ro_shipped = rodata.len()
-    loop f in a_data_fix:
-        t = img_data_addr + f.2
-        if f.1 == 0: t = repl_ro_addr(f.2)
-        a_patch_adrp(f.0, addr, t)
-    out.code = code
-    repl_next = (addr + code.len() + 0x3FFF) & ~0x3FFF
-    out
-
-# the address of read-only data at offset off
-repl_ro_addr = (off: int) -> int:
-    loop s in ro_segs:
-        if off >= s.0 and off < s.1: return s.2 + off - s.0
-    ice("read-only data at {off} has no place")
-    0
-
 struct ReplTry:
     ok: bool
     show: bool
@@ -505,20 +262,6 @@ repl_try = (text: str, keep: bool) -> ReplTry:
             t.type = __snap_unkeep(box[2] as *u8)
         __os_raw_free(box as *u8, 4096)
     t
-
-# where the code of a line ends (before a comment)
-repl_code_end = (s: str) -> int:
-    q: u8 = 0
-    i = 0
-    loop i < len(s):
-        c = s[i]
-        if q != 0:
-            if c == '\\': i += 1
-            else if c == q: q = 0
-        else if c == '"' or c == '\'': q = c
-        else if c == '#': return i
-        i += 1
-    len(s)
 
 # run an input: compile, send, run; false if the session ended
 repl_run = (text: str) -> bool:
@@ -619,127 +362,6 @@ repl_getc = () -> int:
     if __read_fd(0, data(b), 1) != 1: return -1
     int(b[0])
 
-# display width of a line's bytes (UTF-8: one column per character)
-repl_cols = (s: str, n: int) -> int:
-    c = 0
-    loop i in [0..min(n, len(s))):
-        if s[i] < 0x80 or s[i] >= 0xC0: c += 1
-    c
-
-# read a line with editing (arrows, home/end, history, ctrl-a/e/k/u/w/l/c/d); none at the end
-repl_edit = (prompt: str, initial: str) -> str?:
-    line = initial
-    cur = len(line)
-    hi = repl_history.len()
-    draft = ""
-    loop true:
-        repl_out("\r{prompt}{line}\x1b[K\r\x1b[{repl_cols(prompt, len(prompt)) + repl_cols(line, cur)}C")
-        if len(prompt) + cur == 0: repl_out("\r")
-        c = repl_getc()
-        if c < 0: return none
-        if c == 13 or c == 10:
-            repl_out("\r\n")
-            return line
-        if c == 4:                              # ctrl-d
-            if len(line) == 0:
-                repl_out("\r\n")
-                return none
-            if cur < len(line): line = line[..cur) + line[cur + 1..]
-        else if c == 3:                         # ctrl-c: drop the line
-            repl_out("^C\r\n")
-            return "\x03"
-        else if c == 127 or c == 8:
-            if cur > 0:
-                k = cur - 1
-                loop k > 0 and line[k] >= 0x80 and line[k] < 0xC0: k -= 1
-                line = line[..k) + line[cur..]
-                cur = k
-        else if c == 1: cur = 0
-        else if c == 5: cur = len(line)
-        else if c == 11: line = line[..cur)
-        else if c == 21:
-            line = line[cur..]
-            cur = 0
-        else if c == 23:                        # ctrl-w: the word before the cursor
-            k = cur
-            loop k > 0 and line[k - 1] == ' ': k -= 1
-            loop k > 0 and line[k - 1] != ' ': k -= 1
-            line = line[..k) + line[cur..]
-            cur = k
-        else if c == 12: repl_out("\x1b[H\x1b[2J")
-        else if c == 9:
-            if len(trim(line[..cur))) == 0:
-                # (at the start of a line: indent)
-                line = line[..cur) + "    " + line[cur..]
-                cur += 4
-            else:
-                cands = repl_completions(repl_before + line[..cur))
-                a = cur
-                loop a > 0 and (is_alnum(line[a - 1]) or line[a - 1] >= 0x80): a -= 1
-                typed = line[a..cur)
-                common = repl_common(cands)
-                if cands.len() == 1: common = cands[0]
-                if len(common) > len(typed):
-                    line = line[..a) + common + line[cur..]
-                    cur = a + len(common)
-                else if cands.len() > 1:
-                    # list them (in columns)
-                    w = 0
-                    loop x in cands: w = max(w, len(x))
-                    w += 2
-                    per = max(1, 78 / w)
-                    listing = "\r\n"
-                    loop i in 0.. and x in cands:
-                        if i >= 200:
-                            listing += "... ({cands.len()} in all)"
-                            break
-                        listing += x + repeat(" ", w - len(x))
-                        if i % per == per - 1: listing += "\r\n"
-                    repl_out(listing + "\r\n")
-        else if c == 27:
-            c2 = repl_getc()
-            c3 = repl_getc()
-            if c2 == '[' or c2 == 'O':
-                if c3 == 'D' and cur > 0:
-                    cur -= 1
-                    loop cur > 0 and line[cur] >= 0x80 and line[cur] < 0xC0: cur -= 1
-                else if c3 == 'C' and cur < len(line):
-                    cur += 1
-                    loop cur < len(line) and line[cur] >= 0x80 and line[cur] < 0xC0: cur += 1
-                else if c3 == 'H': cur = 0
-                else if c3 == 'F': cur = len(line)
-                else if c3 == 'A' and hi > 0:
-                    if hi == repl_history.len(): draft = line
-                    hi -= 1
-                    line = repl_history[hi]
-                    cur = len(line)
-                else if c3 == 'B' and hi < repl_history.len():
-                    hi += 1
-                    line = draft
-                    if hi < repl_history.len(): line = repl_history[hi]
-                    cur = len(line)
-                else if c3 >= '0' and c3 <= '9':
-                    c4 = repl_getc()
-                    if c4 == '~':
-                        if c3 == '1' or c3 == '7': cur = 0
-                        else if c3 == '4' or c3 == '8': cur = len(line)
-                        else if c3 == '3' and cur < len(line): line = line[..cur) + line[cur + 1..]
-        else if c >= 32:
-            line = line[..cur) + byte_str(c) + line[cur..]
-            cur += 1
-
-# a line from standard input without editing (not a terminal); none at the end
-repl_plain = () -> str?:
-    out: u8[]
-    loop true:
-        c = repl_getc()
-        if c < 0:
-            if out.len() == 0: return none
-            return str_from_bytes(out)
-        if c == 10: return str_from_bytes(out)
-        out.push(u8(c))
-    none
-
 # names that could go at the end of text (what is typed of the name being completed is dropped):
 # the checker, at a placeholder name (as the language server does), then the compiler's memory
 # put back as it was
@@ -776,64 +398,7 @@ repl_completions = (text: str) -> str[]:
     out.sort()
     out
 
-# the longest start all of xs share
-repl_common = (xs: str[]) -> str:
-    if xs.len() == 0: return ""
-    c = xs[0]
-    loop x in xs:
-        n = 0
-        loop n < len(c) and n < len(x) and c[n] == x[n]: n += 1
-        c = c[..n)
-    c
-
 repl_before = ""          # (the lines of the input typed so far, for completion)
-
-# brackets and strings still open at the end of text
-repl_open = (text: str) -> int:
-    depth = 0
-    i = 0
-    loop i < len(text):
-        c = text[i]
-        raw = c == 'r' and i + 1 < len(text) and (text[i + 1] == '"' or text[i + 1] == '\'') and (i == 0 or not (is_alnum(text[i - 1]) or text[i - 1] == '_' or text[i - 1] >= 128))
-        if raw or c == '"' or c == '\'':
-            start = if raw: i + 1 else: i
-            i = source_quote_end(text, start, raw)
-            if i < 0: return depth + 1
-            continue
-        if c == '#' and i + 1 < len(text) and text[i + 1] == '{{':
-            # (an unfinished block comment continues the input)
-            i = dewy_block_comment_end(text, i, len(text))
-            if i < 0: return depth + 1
-            continue
-        if c == '#':
-            loop i < len(text) and text[i] != '\n': i += 1
-            continue
-        if c == '(' or c == '[' or c == '{{': depth += 1
-        else if c == ')' or c == ']' or c == '}}': depth -= 1
-        i += 1
-    depth
-
-# One Dewy input, continued while its brackets or quoted text remain open.
-repl_read = () -> str?:
-    text = ""
-    loop true:
-        prompt = if len(text) == 0: ">>> " else: "... "
-        l = if repl_tty: repl_edit(prompt, "") else: repl_plain()
-        if l == none:
-            if len(text) > 0: return text
-            return none
-        line = l!
-        if line == "\x03":
-            repl_before = ""
-            return ""
-        if len(text) == 0 and len(trim(line)) == 0: return ""
-        if repl_tty and len(trim(line)) > 0 and (repl_history.len() == 0 or repl_history[repl_history.len() - 1] != line): repl_history.push(line)
-        text += line + "\n"
-        repl_before = text
-        if repl_open(text) > 0: continue
-        repl_before = ""
-        return text
-    none
 
 repl_load_history = ():
     if let path = env("DEWY_REPL_HISTORY"):
@@ -848,13 +413,6 @@ repl_load_history = ():
     if let h = read_file(repl_hist_path):
         loop l in lines(h):
             if len(l) > 0: repl_history.push(l)
-
-repl_save_history = ():
-    if len(repl_hist_path) == 0: return
-    keep: str[]
-    s = max(0, repl_history.len() - 1000)
-    loop i in [s..repl_history.len()): keep.push(repl_history[i])
-    write_file(repl_hist_path, join(keep, "\n") + "\n")
 
 # ---- the prompt ----
 
@@ -951,9 +509,3 @@ REPL_BUILTINS = ["print", "print(value)    writes a value without a line break",
     "len", "len(values)    number of elements; for strings, bytes (text.length counts graphemes)",
     "bytes", "bytes(text)    UTF-8 bytes as array<uint8>"]
 
-repl_builtin_doc = (name: str) -> str:
-    i = 0
-    loop i + 1 < REPL_BUILTINS.len():
-        if REPL_BUILTINS[i] == name: return REPL_BUILTINS[i + 1] + "\n"
-        i += 2
-    ""

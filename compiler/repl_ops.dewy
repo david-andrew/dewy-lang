@@ -1,0 +1,564 @@
+$runtime_checks
+from p"dewy_lex.dewy" import dewy_block_comment_end
+from p"frontend.jo" import source_quote_end
+from p"repl.jo" import repl_completions
+from p"@lib/core/os.jo" import (write_file)
+from p"repl.jo" import REPL_BUILTINS
+from p"repl.jo" import repl_hist_path
+from p"repl.jo" import repl_tty
+from p"repl.jo" import repl_before
+from p"repl.jo" import repl_getc
+from p"repl.jo" import repl_out
+from p"arm64_emit.dewy" import a_data_fix
+from p"arm64_emit.dewy" import a_faddr_fix
+from p"arm64_emit.dewy" import a_stub_fix
+from p"arm64_emit.dewy" import a_call_fix
+from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"@lib/core/str.jo" import (byte_str is_alnum)
+from p"arm64_encode.dewy" import (a_bl a_br a_patch_adrp a_ret rd32 w32 wr32)
+from p"ast.jo" import (NF_EXTERN has_flag mk nodes set_list)
+from p"check.jo" import (FK_INIT ctxs cx dewy_at dfs_state enter_module_context fns from_imports get_fn_inst global_ids globals init_fns main_fn ml_bump_name module_ctx module_frames modules name_unbind open_globals order_modules register_decls register_module repl_sig repl_sig_query settle_open_globals setup_module_contexts syms target_arm64)
+from p"checker_hooks.dewy" import (check_init_now)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_imports.dewy" import (bind_from_imports)
+from p"checks_program.dewy" import (synth_call)
+from p"checks_thin.dewy" import (check_pending_functions check_stmt leave_module_context new_inst zonk_tree)
+from p"decimal_ops.dewy" import (decimal_check_body decimal_input_globals decimal_wants)
+from p"driver_pipeline.dewy" import (emit_function)
+from p"expr.jo" import (ntype)
+from p"frontend.jo" import (source_declarations)
+from p"lower.jo" import (LK_INST global_off lfuncs rodata)
+from p"lower_ffi.dewy" import (lower_extern_thunk)
+from p"lower_functions.dewy" import (lower_function)
+from p"lower_primitives.dewy" import (lf_of_inst)
+from p"main.jo" import (img_data_addr img_text_addr)
+from p"repl.jo" import (ReplOut lf_abs repl_cabi_abs repl_history repl_inited repl_mainm repl_modules_inited repl_next repl_wait_reply ro_segs ro_shipped)
+from p"source_types.dewy" import (SrcFile)
+from p"type_ops.dewy" import (type_str zonk)
+from p"types.jo" import (T_NEVER T_VOID prune tkind)
+from p"util.jo" import (fatal files ice intern mkpos)
+from p"x64.jo" import (code data_fix fn_addr)
+from p"elf_format.dewy" import (elf_syms)
+from p"x64_emit.dewy" import (cabi_fix call_fix stub_fix)
+from p"x64_encode.dewy" import (b b32 patch32)
+from p"x64_module.dewy" import (cabi_adapter stub_addr)
+
+ReplWord:type=int64<overflow='wrap'>
+# the session's main: __repl_main in the input module
+repl_set_main=():>void=>$unsafe {
+    loop i in 0.. and m in modules {
+        if m.is_main {repl_mainm=i}
+    }
+    let s=modules[repl_mainm].names.get(intern("__repl_main"))
+    if s not=? none {
+        main_fn=get_fn_inst(ReplWord(syms.ptr[s].decl) [] 0)
+    }
+}
+# the session's first reply: where the region for inputs' code is (0: where it was asked to be)
+repl_started=():>bool=>{
+    let r=repl_wait_reply()
+    if r <? 0 {return false}
+    if r >? 0 {repl_next=r}
+    true
+}
+# compile input text (as input number n); fatal errors end the process (a copy, see repl_check)
+repl_compile=(text:string n:ReplWord):>ReplOut=>$unsafe {
+    let out=ReplOut()
+    let m=repl_mainm
+    let fb=fns.length
+    let first_module=modules.length
+    let first_import=from_imports.length
+    let fi=files.length
+    files.push(SrcFile("<input>" "." text true))
+    let decls=source_declarations(fi)
+    # declaring a name again replaces it (code compiled already keeps the old one)
+    loop d in decls {
+        let k=nodes.ptr[d].kind
+        if k =? 'fn_' or k =? 'struct_' or k =? 'enum_' or k =? 'typealias' or k =? 'const_' or k =? 'vardecl' and nodes.ptr[d].nlist =? 0 {
+            let nm=ReplWord(nodes.ptr[d].name)
+            if modules[m].names.get(nm) not=? none {
+                ml_bump_name(nm)
+                name_unbind(m nm)
+            }
+        }
+    }
+    let n0=modules[m].inits.length
+    modules[m].decls.extend(decls)
+    register_decls(m decls)
+    let mi=first_module
+    loop mi <? modules.length {
+        register_module(mi)
+        mi += 1
+    }
+    bind_from_imports(first_import)
+    setup_module_contexts(init_fns[0])
+    let stmts:array<int64>=[]
+    loop i in [n0..modules[m].inits.length) {stmts.push(modules[m].inits[i])}
+    # check: the statements as a function of their own, and the functions declared
+    let ci=new_inst(FK_INIT m "input_{n}")
+    let body=mk('block' mkpos(fi 0))
+    set_list(body stmts)
+    fns.ptr[ci].body=int32(body)
+    fns.ptr[ci].ret=int32(T_VOID)
+    # (as top-level code: a decimal binding the input declares and writes a float is a float64,
+    # its statements checked again)
+    if module_ctx[m] >=? 0 {ctxs[module_ctx[m]].inst=int32(ci)} else {module_frames[m].inst=int32(ci)}
+    decimal_input_globals(m stmts)
+    if decimal_wants(ci) {decimal_check_body(ci)} else {check_init_now(ci)}
+    let entered=enter_module_context(m)
+    cx=module_ctx[m]
+    # an expression with a value at the end: shown
+    if stmts.length >? 0 {
+        let last=stmts[stmts.length - 1]
+        if nodes.ptr[last].kind =? 'exprstmt' {
+            let t=prune(ntype(ReplWord(nodes.ptr[last].a)))
+            if t not=? 0 and tkind(t) not=? 'void_' and t not=? T_NEVER {
+                out.show=true
+                out.type=type_str(zonk(t) true)
+                if (repl_sig as array<uint8>).length >? 0 {out.type=repl_sig}
+                if not repl_sig_query {
+                    let show="__repl_show"
+                    if dewy_at(nodes.ptr[last].pos) {show="__dewy_repl_show"}
+                    let shown=synth_call(show [ReplWord(nodes.ptr[last].a)] nodes.ptr[last].pos)
+                    check_stmt(shown)
+                    nodes.ptr[last]=nodes.ptr[shown]
+                    zonk_tree(body)
+                }
+            }
+        }
+    }
+    leave_module_context(m entered)
+    cx=-1
+    loop d in decls {
+        if nodes.ptr[d].kind =? 'fn_' and not has_flag(d NF_EXTERN) and not fn_sig(d).generic {get_fn_inst(d [] nodes.ptr[d].pos);}
+    }
+    loop imported in [first_module..modules.length) {
+        if modules[imported].is_prelude {continue}
+        loop d in modules[imported].decls {
+            if nodes.ptr[d].kind =? 'fn_' and not has_flag(d NF_EXTERN) and not fn_sig(d).generic {get_fn_inst(d [] nodes.ptr[d].pos);}
+        }
+    }
+    check_pending_functions(fb);
+    if open_globals.length >? 0 {settle_open_globals()}
+    # lower and compile what is new
+    let lf0=lfuncs.length
+    let init_lf=lf_of_inst(ci)
+    code=[]
+    call_fix=[]
+    data_fix=[]
+    stub_fix=[]
+    cabi_fix=[]
+    a_call_fix=[]
+    a_stub_fix=[]
+    a_faddr_fix=[]
+    a_data_fix=[]
+    elf_syms=[]
+    let pinits:array<int64>=[]
+    let minits:array<int64>=[]
+    dfs_state=fill(false modules.length)
+    let order:array<int64>=[]
+    order_modules(m @order)
+    loop imported in order {
+        if imported =? m or modules[imported].is_prelude or repl_modules_inited.has(imported) {continue}
+        repl_modules_inited[imported]=true
+        minits.push(lf_of_inst(ReplWord(modules[imported].init_fn)))
+    }
+    let i=lf0
+    loop true {
+        loop i <? lfuncs.length {
+            if lfuncs.ptr[i].kind =? LK_INST and fns.ptr[lfuncs.ptr[i].inst].decl not=? 0 and has_flag(ReplWord(fns.ptr[lfuncs.ptr[i].inst].decl) NF_EXTERN) {
+                let fx=lfuncs.ptr[i].inst
+                if (fns.ptr[fx].clib as array<uint8>).length =? 0 {fatal(nodes.ptr[ReplWord(fns.ptr[fx].decl)].pos "extern functions need @lib(\"library.so\") on native targets")}
+                lower_extern_thunk(i fx)
+                emit_function()
+            }
+            else {
+                lower_function(i)
+                emit_function()
+            }
+            i += 1
+        }
+        # library globals used for the first time: initialized before the input runs
+        let decls2:array<int64>=[]
+        loop g in global_ids {
+            if modules[ReplWord(globals.ptr[g].mod)].is_prelude and global_off.get(g) not=? none and repl_inited.get(g) =? none {
+                repl_inited[g]=true
+                let d=ReplWord(globals.ptr[g].decl)
+                if not decls2.contains(d) {decls2.push(d)}
+            }
+        }
+        if decls2.length =? 0 {break}
+        let pi=new_inst(FK_INIT 0 "input_{n}_lib")
+        let pb=mk('block' 0)
+        set_list(pb decls2)
+        fns.ptr[pi].body=int32(pb)
+        fns.ptr[pi].ret=int32(T_VOID)
+        fns.ptr[pi].state=2
+        zonk_tree(pb)
+        pinits.push(lf_of_inst(pi))
+    }
+    pinits.extend(minits)
+    if target_arm64 {return repl_place_arm64(out pinits init_lf lf0)}
+    # the entry: library globals first (in the order they were found), then the input
+    loop code.length % 16 not=? 0 {b(0xCC)}
+    out.entry=code.length
+    loop x in [0x48 0x83 0xEC 0x08] {b(x)}
+    loop f in pinits {
+        b(0xE8)
+        b32(0)
+        call_fix.push([code.length - 4 f])
+    }
+    b(0xE8)
+    b32(0)
+    call_fix.push([code.length - 4 init_lf])
+    loop x in [0x48 0x83 0xC4 0x08 0xC3] {b(x)}
+    # place it: code, then the new read-only data
+    let addr=repl_next
+    out.addr=addr
+    loop lf in [lf0..lfuncs.length) {
+        loop lf_abs.length <=? lf {lf_abs.push(0)}
+        if lf <? fn_addr.length and fn_addr[lf] >=? 0 {lf_abs[lf]=addr + fn_addr[lf]}
+    }
+    loop code.length % 16 not=? 0 {b(0)}
+    let ro_at=addr + code.length
+    if rodata.length >? ro_shipped {
+        ro_segs.push([ro_shipped rodata.length ro_at])
+        loop j in [ro_shipped..rodata.length) {code.push(rodata[j])}
+        ro_shipped=rodata.length
+    }
+    loop f in stub_fix {patch32(f[0] img_text_addr + stub_addr[f[1]] - (addr + f[0] + 4))}
+    # (Windows: a @cabi function's address is its adapter's)
+    loop lf in [lf0..lfuncs.length) {
+        let off=cabi_adapter.get(lf)
+        if off not=? none {repl_cabi_abs[lf]=addr + off}
+    }
+    loop f in cabi_fix {
+        let t=repl_cabi_abs.get(f[1]) ?? 0
+        if t =? 0 {ice("no adapter for {lfuncs.ptr[f[1]].name}")}
+        patch32(f[0] t - (addr + f[0] + 4))
+    }
+    loop f in call_fix {
+        let t=lf_abs[f[1]]
+        if t =? 0 {ice("unresolved function {lfuncs.ptr[f[1]].name}")}
+        patch32(f[0] t - (addr + f[0] + 4))
+    }
+    loop f in data_fix {
+        let t=img_data_addr + f[2]
+        if f[1] =? 0 {t=repl_ro_addr(f[2])}
+        patch32(f[0] t - (addr + f[0] + 4))
+    }
+    out.code=code
+    repl_next=(addr + code.length + 4095) & ~4095
+    out
+}
+# arm64: the entry, then the code placed at repl_next and linked to the session (calls beyond
+# BL's reach through veneers after the code), then the new read-only data
+repl_place_arm64=(out0:ReplOut pinits:array<int64> init_lf:ReplWord lf0:ReplWord):>ReplOut=>$unsafe {
+    let out=out0
+    out.entry=code.length
+    w32(0xA9BF7BFD)
+    w32(0x910003FD)
+    loop f in pinits {
+        a_call_fix.push([code.length f])
+        a_bl()
+    }
+    a_call_fix.push([code.length init_lf])
+    a_bl()
+    w32(0xA8C17BFD)
+    a_ret()
+    let addr=repl_next
+    out.addr=addr
+    loop lf in [lf0..lfuncs.length) {
+        loop lf_abs.length <=? lf {lf_abs.push(0)}
+        if lf <? fn_addr.length and fn_addr[lf] >=? 0 {lf_abs[lf]=addr + fn_addr[lf]}
+    }
+    let bls:array<[int64 int64]>=[]
+    loop f in a_call_fix {
+        let t=lf_abs[f[1]]
+        if t =? 0 {ice("unresolved function {lfuncs.ptr[f[1]].name}")}
+        bls.push([f[0] t])
+    }
+    loop f in a_stub_fix {bls.push([f[0] img_text_addr + stub_addr[f[1]]])}
+    let veneers=dict<int64 int64>()
+    loop f in bls {
+        let t=f[1]
+        if t - (addr + f[0]) >=? 1 << 27 or t - (addr + f[0]) <? -(1 << 27) {
+            let v=veneers.get(t) ?? -1
+            if v <? 0 {
+                v=code.length
+                veneers[t]=v
+                w32(0x58000050)
+                a_br(16)
+                w32(t & 0xFFFFFFFF)
+                w32((t >> 32) & 0xFFFFFFFF)
+            }
+            t=addr + v
+        }
+        wr32(f[0] rd32(f[0]) | (((t - (addr + f[0])) // 4) & 0x3FFFFFF))
+    }
+    loop f in a_faddr_fix {
+        let t=lf_abs[f[1]]
+        if t =? 0 {ice("unresolved function {lfuncs.ptr[f[1]].name}")}
+        a_patch_adrp(f[0] addr t)
+    }
+    loop code.length % 16 not=? 0 {w32(0)}
+    let ro_at=addr + code.length
+    if rodata.length >? ro_shipped {
+        ro_segs.push([ro_shipped rodata.length ro_at])
+        loop j in [ro_shipped..rodata.length) {code.push(rodata[j])}
+        ro_shipped=rodata.length
+    }
+    loop f in a_data_fix {
+        let t=img_data_addr + f[2]
+        if f[1] =? 0 {t=repl_ro_addr(f[2])}
+        a_patch_adrp(f[0] addr t)
+    }
+    out.code=code
+    repl_next=(addr + code.length + 0x3FFF) & ~0x3FFF
+    out
+}
+# the address of read-only data at offset off
+repl_ro_addr=(off:ReplWord):>int64=>{
+    loop s in ro_segs {
+        if off >=? s[0] and off <? s[1] {return s[2] + off - s[0]}
+    }
+    ice("read-only data at {off} has no place")
+    0
+}
+# where the code of a line ends (before a comment)
+repl_code_end=(s:string):>int64=>{
+    let q:uint8=0
+    let i:ReplWord=0
+    loop i <? (s as array<uint8>).length {
+        let c=(s as array<uint8>)[i]
+        if q not=? 0 {
+            if c =? b'\\' {i += 1} else if c =? q {q=0}
+        }
+        else if c =? b'"' or c =? b'\'' {q=c} else if c =? b'#' {return i}
+        i += 1
+    }
+    (s as array<uint8>).length
+}
+# display width of a line's bytes (UTF-8: one column per character)
+repl_cols=(s:string n:ReplWord):>int64=>{
+    let c:ReplWord=0
+    loop i in [0..min(n (s as array<uint8>).length)) {
+        if (s as array<uint8>)[i] <? 0x80 or (s as array<uint8>)[i] >=? 0xC0 {c += 1}
+    }
+    c
+}
+# read a line with editing (arrows, home/end, history, ctrl-a/e/k/u/w/l/c/d); none at the end
+repl_edit=(prompt:string initial:string):>string | none=>{
+    let line=initial
+    let cur=(line as array<uint8>).length
+    let hi=repl_history.length
+    let draft=""
+    loop true {
+        repl_out("\r{prompt}{line}\u{1b}[K\r\u{1b}[{repl_cols(prompt (prompt as array<uint8>).length) + repl_cols(line cur)}C")
+        if (prompt as array<uint8>).length + cur =? 0 {repl_out("\r")}
+        let c=repl_getc()
+        if c <? 0 {return none}
+        if c =? 13 or c =? 10 {
+            repl_out("\r\n")
+            return line
+        }
+        if c =? 4 {
+            if (line as array<uint8>).length =? 0 {
+                repl_out("\r\n")
+                return none
+            }
+            if cur <? (line as array<uint8>).length {line="{line.byte_slice(0 cur)}{line.byte_slice(cur + 1 (line as array<uint8>).length)}"}
+        }
+        else if c =? 3 {
+            repl_out("^C\r\n")
+            return "\u{3}"
+        }
+        else if c =? 127 or c =? 8 {
+            if cur >? 0 {
+                let k=cur - 1
+                loop k >? 0 and (line as array<uint8>)[k] >=? 0x80 and (line as array<uint8>)[k] <? 0xC0 {k -= 1}
+                line="{line.byte_slice(0 k)}{line.byte_slice(cur (line as array<uint8>).length)}"
+                cur=k
+            }
+        }
+        else if c =? 1 {cur=0} else if c =? 5 {cur=(line as array<uint8>).length}
+        else if c =? 11 {line=line.byte_slice(0 cur)} else if c =? 21 {
+            line=line.byte_slice(cur (line as array<uint8>).length)
+            cur=0
+        }
+        else if c =? 23 {
+            let k=cur
+            loop k >? 0 and (line as array<uint8>)[k - 1] =? b' ' {k -= 1}
+            loop k >? 0 and (line as array<uint8>)[k - 1] not=? b' ' {k -= 1}
+            line="{line.byte_slice(0 k)}{line.byte_slice(cur (line as array<uint8>).length)}"
+            cur=k
+        }
+        else if c =? 12 {repl_out("\u{1b}[H\u{1b}[2J")} else if c =? 9 {
+            if (trim(line.byte_slice(0 cur)) as array<uint8>).length =? 0 {
+                # (at the start of a line: indent)
+                line="{line.byte_slice(0 cur)}    {line.byte_slice(cur (line as array<uint8>).length)}"
+                cur += 4
+            }
+            else {
+                let cands=repl_completions("{repl_before}{line.byte_slice(0 cur)}")
+                let a=cur
+                loop a >? 0 and (is_alnum((line as array<uint8>)[a - 1]) or (line as array<uint8>)[a - 1] >=? 0x80) {a -= 1}
+                let typed=line.byte_slice(a cur)
+                let common=repl_common(cands)
+                if cands.length =? 1 {common=cands[0]}
+                if (common as array<uint8>).length >? (typed as array<uint8>).length {
+                    line="{line.byte_slice(0 a)}{common}{line.byte_slice(cur (line as array<uint8>).length)}"
+                    cur=a + (common as array<uint8>).length
+                }
+                else if cands.length >? 1 {
+                    # list them (in columns)
+                    let w:ReplWord=0
+                    loop x in cands {w=max(w (x as array<uint8>).length)}
+                    w += 2
+                    let per=max(1 78 // w)
+                    let listing="\r\n"
+                    loop i in 0.. and x in cands {
+                        if i >=? 200 {
+                            listing="{listing}... ({cands.length} in all)"
+                            break
+                        }
+                        listing="{listing}{x}{repeat(" " w - (x as array<uint8>).length)}"
+                        if i % per =? per - 1 {listing="{listing}\r\n"}
+                    }
+                    repl_out("{listing}\r\n")
+                }
+            }
+        }
+        else if c =? 27 {
+            let c2=repl_getc()
+            let c3=repl_getc()
+            if c2 =? b'[' or c2 =? b'O' {
+                if c3 =? b'D' and cur >? 0 {
+                    cur -= 1
+                    loop cur >? 0 and (line as array<uint8>)[cur] >=? 0x80 and (line as array<uint8>)[cur] <? 0xC0 {cur -= 1}
+                }
+                else if c3 =? b'C' and cur <? (line as array<uint8>).length {
+                    cur += 1
+                    loop cur <? (line as array<uint8>).length and (line as array<uint8>)[cur] >=? 0x80 and (line as array<uint8>)[cur] <? 0xC0 {cur += 1}
+                }
+                else if c3 =? b'H' {cur=0} else if c3 =? b'F' {cur=(line as array<uint8>).length}
+                else if c3 =? b'A' and hi >? 0 {
+                    if hi =? repl_history.length {draft=line}
+                    hi -= 1
+                    line=repl_history[hi]
+                    cur=(line as array<uint8>).length
+                }
+                else if c3 =? b'B' and hi <? repl_history.length {
+                    hi += 1
+                    line=draft
+                    if hi <? repl_history.length {line=repl_history[hi]}
+                    cur=(line as array<uint8>).length
+                }
+                else if c3 >=? b'0' and c3 <=? b'9' {
+                    let c4=repl_getc()
+                    if c4 =? b'~' {
+                        if c3 =? b'1' or c3 =? b'7' {cur=0} else if c3 =? b'4' or c3 =? b'8' {cur=(line as array<uint8>).length}
+                        else if c3 =? b'3' and cur <? (line as array<uint8>).length {line="{line.byte_slice(0 cur)}{line.byte_slice(cur + 1 (line as array<uint8>).length)}"}
+                    }
+                }
+            }
+        }
+        else if c >=? 32 {
+            line="{line.byte_slice(0 cur)}{byte_str(c)}{line.byte_slice(cur (line as array<uint8>).length)}"
+            cur += 1
+        }
+    }
+}
+# a line from standard input without editing (not a terminal); none at the end
+repl_plain=():>string | none=>{
+    let out:array<uint8>=[]
+    loop true {
+        let c=repl_getc()
+        if c <? 0 {
+            if out.length =? 0 {return none}
+            return __str_from_bytes(out)
+        }
+        if c =? 10 {return __str_from_bytes(out)}
+        out.push(uint8(c))
+    }
+    none
+}
+# the longest start all of xs share
+repl_common=(xs:array<string>):>string=>{
+    if xs.length =? 0 {return ""}
+    let c=xs[0]
+    loop x in xs {
+        let n:ReplWord=0
+        loop n <? (c as array<uint8>).length and n <? (x as array<uint8>).length and (c as array<uint8>)[n] =? (x as array<uint8>)[n] {n += 1}
+        c=c.byte_slice(0 n)
+    }
+    c
+}
+# brackets and strings still open at the end of text
+repl_open=(text:string):>int64=>{
+    let depth:ReplWord=0
+    let i:ReplWord=0
+    loop i <? (text as array<uint8>).length {
+        let c=(text as array<uint8>)[i]
+        let raw=c =? b'r' and i + 1 <? (text as array<uint8>).length and ((text as array<uint8>)[i + 1] =? b'"' or (text as array<uint8>)[i + 1] =? b'\'') and (i =? 0 or not (is_alnum((text as array<uint8>)[i - 1]) or (text as array<uint8>)[i - 1] =? b'_' or (text as array<uint8>)[i - 1] >=? 128))
+        if raw or c =? b'"' or c =? b'\'' {
+            let start=if raw {i + 1} else {i}
+            i=source_quote_end(text start raw)
+            if i <? 0 {return depth + 1}
+            continue
+        }
+        if c =? b'#' and i + 1 <? (text as array<uint8>).length and (text as array<uint8>)[i + 1] =? b'\{' {
+            # (an unfinished block comment continues the input)
+            i=dewy_block_comment_end(text i (text as array<uint8>).length)
+            if i <? 0 {return depth + 1}
+            continue
+        }
+        if c =? b'#' {
+            loop i <? (text as array<uint8>).length and (text as array<uint8>)[i] not=? b'\n' {i += 1}
+            continue
+        }
+        if c =? b'(' or c =? b'[' or c =? b'\{' {depth += 1} else if c =? b')' or c =? b']' or c =? b'}' {depth -= 1}
+        i += 1
+    }
+    depth
+}
+# One Dewy input, continued while its brackets or quoted text remain open.
+repl_read=():>string | none=>{
+    let text=""
+    loop true {
+        let prompt=if (text as array<uint8>).length =? 0 {">>> "} else {"... "}
+        let l=if repl_tty {repl_edit(prompt "")} else {repl_plain()}
+        if l =? none {
+            if (text as array<uint8>).length >? 0 {return text}
+            return none
+        }
+        let line=l ?? ""
+        if line =? "\u{3}" {
+            repl_before=""
+            return ""
+        }
+        if (text as array<uint8>).length =? 0 and (trim(line) as array<uint8>).length =? 0 {return ""}
+        if repl_tty and (trim(line) as array<uint8>).length >? 0 and (repl_history.length =? 0 or repl_history[repl_history.length - 1] not=? line) {repl_history.push(line)}
+        text="{text}{line}\n"
+        repl_before=text
+        if repl_open(text) >? 0 {continue}
+        repl_before=""
+        return text
+    }
+    none
+}
+repl_save_history=():>void=>{
+    if (repl_hist_path as array<uint8>).length =? 0 {return}
+    let keep:array<string>=[]
+    let s=max(0 repl_history.length - 1000)
+    loop i in [s..repl_history.length) {keep.push(repl_history[i])}
+    write_file(repl_hist_path "{join(keep "\n")}\n");
+}
+repl_builtin_doc=(name:string):>string=>{
+    let i:ReplWord=0
+    loop i + 1 <? REPL_BUILTINS.length {
+        if REPL_BUILTINS[i] =? name {return "{REPL_BUILTINS[i + 1]}\n"}
+        i += 2
+    }
+    ""
+}
