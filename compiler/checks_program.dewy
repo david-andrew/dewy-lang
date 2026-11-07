@@ -1,0 +1,336 @@
+$runtime_checks
+from p"check.jo" import word_count
+from p"check.jo" import method_type_name
+from p"check.jo" import hidden_method_warnings
+from p"ast.jo" import NF_EXTERN
+from p"ast.jo" import has_flag
+from p"expr.jo" import fn_used
+from p"expr.jo" import back_to_screen
+from p"expr.jo" import draw_to_at
+from p"ast.jo" import NF_MUT
+from p"check.jo" import calls_named
+from p"expr.jo" import bc_bin
+from p"check.jo" import jd
+from p"checks_text.dewy" import (byte_rfind)
+from p"@lib/core/str.jo" import (ends_with starts_with)
+from p"ast.jo" import (NF_VOID add_flag clone kids mk nkids nodes set_list)
+from p"check.jo" import (callback_warn check_all game_fn gcopy_writes global_read globals has_break modules program_name program_named skip_main syms test_decls test_mode warn_unused_copy)
+from p"dewy_methods.jo" import (dewy_is_method)
+from p"directives.jo" import (dir_version_warnings)
+from p"expr.jo" import (bc_call bc_ident bc_loop)
+from p"ide.jo" import (ide_on)
+from p"lower_primitives.dewy" import (rt)
+from p"module_paths.dewy" import (strip_ext)
+from p"settings.jo" import (build_target_at build_target_seen file_mode_at file_mode_seen)
+from p"spelling.dewy" import (edit_distance)
+from p"types.jo" import (ts_dewy)
+from p"util.jo" import (fatal files intern line_col mkpos name_of pos_file pos_in_lib warn)
+
+ProgramWord:type=int64<overflow='wrap'>
+# if __test_begin(name): body; __test_end()   (the body in a process of its own, where it can be)
+test_entry=(name:ProgramWord body:array<int64> pos:ProgramWord):>int64=>$unsafe {
+    let block=mk('block' pos)
+    set_list(block [body... synth_call("__test_end" [] pos)])
+    let ifn=mk('if_' pos)
+    nodes.ptr[ifn].a=int32(bc_call("__test_begin" [name] pos))
+    nodes.ptr[ifn].b=int32(block)
+    ifn
+}
+synth_call=(name:string args:array<int64> pos:ProgramWord):>int64=>$unsafe {
+    let c=mk('call' pos)
+    let id=mk('ident' pos)
+    nodes.ptr[id].name=int32(intern(name))
+    nodes.ptr[c].a=int32(id)
+    set_list(c args)
+    let st=mk('exprstmt' pos)
+    nodes.ptr[st].a=int32(c)
+    st
+}
+synth_str=(s:string pos:ProgramWord):>int64=>$unsafe {
+    let n=mk('str_lit' pos)
+    nodes.ptr[n].sval=int32(intern(s))
+    n
+}
+program_name_default=(main_path:string):>void=>{
+    if (program_name as array<uint8>).length >? 0 {program_named=true}
+    if (program_name as array<uint8>).length =? 0 {
+        program_name=main_path
+        let s=byte_rfind(program_name "/")
+        if s >=? 0 {program_name=program_name.byte_slice(s + 1 (program_name as array<uint8>).length)}
+        program_name=strip_ext(program_name)
+    }
+}
+program_setting_errors=(mainm:ProgramWord):>void=>{
+    # (a setting main.jo's scan_settings read that the parser did not find as a statement: inside
+    # a string or comment, say)
+    if ts_dewy and build_target_at >=? 0 and not build_target_seen {fatal(mkpos(ProgramWord(modules[mainm].file) build_target_at) "this line reads as `$target = ...` but is not a statement at the top level")}
+    if ts_dewy and file_mode_at >=? 0 and not file_mode_seen {fatal(mkpos(ProgramWord(modules[mainm].file) file_mode_at) "this line reads as `$build.mode = ...` but is not a statement at the top level")}
+}
+program_callback_checks=(mainm:ProgramWord has_upd:bool has_drw:bool):>void=>$unsafe {
+    dir_version_warnings()
+    # (two updates, as a Scratch project's scripts, one per sprite: only the first would run)
+    loop gname in ["update" "draw" "main"] {
+        let first:ProgramWord=0
+        loop d in modules[mainm].decls {
+            if nodes.ptr[d].kind not=? 'fn_' or name_of(ProgramWord(nodes.ptr[d].name)) not=? gname or dewy_is_method(d) {continue}
+            if first =? 0 {first=d} else {
+                let what="runs every frame"
+                if gname =? "draw" {what="draws every frame"} else if gname =? "main" {what="runs once, after the top of the file"}
+                let [fl fc]=line_col(nodes.ptr[first].pos)
+                fatal(nodes.ptr[d].pos "a second {gname} (the first is on line {fl}): a program has one {gname}, which {what}; put the lines of both in it, or make each a function of its own that {gname} calls")
+            }
+        }
+    }
+    # (a top-level `loop:` in a game, as Scratch's forever: the frames start after the top level ends)
+    if has_upd or has_drw {
+        loop d in modules[mainm].decls {
+            if nodes.ptr[d].kind =? 'while_' and nodes.ptr[ProgramWord(nodes.ptr[d].a)].kind =? 'bool_lit' and nodes.ptr[ProgramWord(nodes.ptr[d].a)].ival not=? 0 and not has_break(ProgramWord(nodes.ptr[d].b)) {
+                let upd="update"
+                if not has_upd {upd="draw"}
+                warn(nodes.ptr[d].pos "this loop never ends, so the game never starts: {upd} runs after the lines at the top of the file are done. What repeats each frame goes in {upd}, which is the game's forever loop")
+            }
+        }
+    }
+    # (the game ignores what update and draw give back: their last line is a statement, as
+    # `world.step(dt)` or a mistaken `pos == pos + v`, which then gets its warning)
+    loop gn in ["update" "draw"] {
+        let gs=game_fn(mainm gn)
+        if gs not=? none {
+            let gd=ProgramWord(syms.ptr[gs].decl)
+            if syms.ptr[gs].kind =? 'fns' and gd not=? 0 and nodes.ptr[gd].kind =? 'fn_' and nodes.ptr[gd].a =? 0 {add_flag(gd NF_VOID)}
+        }
+    }
+    # (Godot's callbacks, which nothing here calls)
+    if not has_upd and not has_drw {
+        loop gn in ["_process" "_physics_process" "_ready" "_draw" "_input" "Awake" "FixedUpdate" "LateUpdate" "OnGUI"] {
+            let gs=modules[mainm].names.get(intern(gn))
+            if gs not=? none {
+                if syms.ptr[gs].decl not=? 0 {callback_warn(gs "nothing calls {gn}: a game is {jd(nodes.ptr[ProgramWord(syms.ptr[gs].decl)].pos "`update = (dt: f64): ...`" "`update = (dt:float64):>void => \{...}`")}, called each frame, and {jd(nodes.ptr[ProgramWord(syms.ptr[gs].decl)].pos "`draw = (): ...`" "`draw = ():>void => \{...}`")} after it; what runs once goes at the top level")}
+            }
+        }
+    }
+    # (Draw = ():, updte = (dt: f64): a near miss of the name the game calls, and nothing runs)
+    loop want in ["draw" "update"] {
+        if game_fn(mainm want) not=? none {continue}
+        let lim:ProgramWord=1
+        if want =? "update" {lim=2}
+        loop [nm gs] in modules[mainm].names {
+            if syms.ptr[gs].kind not=? 'fns' or syms.ptr[gs].decl =? 0 {continue}
+            let s=name_of(nm)
+            # (a game's: no main, and the parameters the game would give it)
+            let gd=ProgramWord(syms.ptr[gs].decl)
+            let np:ProgramWord=0
+            if want =? "update" {np=1}
+            if modules[mainm].names.get(intern("main")) not=? none or nodes.ptr[gd].kind not=? 'fn_' or nkids(gd) not=? np {continue}
+            if abs((s as array<uint8>).length - (want as array<uint8>).length) <=? 1 and edit_distance(s want lim) <=? lim {
+                callback_warn(gs "nothing calls {s}: the game calls `{want}` each frame (did you mean `{want}`?)")
+            }
+        }
+    }
+    # (a quit hook under another name: on_close, Unity's OnApplicationQuit)
+    if modules[mainm].names.get(intern("on_quit")) =? none {
+        loop gn in ["on_close" "onClose" "onQuit" "on_exit" "onExit" "OnApplicationQuit" "on_quit_game" "at_exit" "atexit" "_exit_tree" "beforeunload"] {
+            let gs=modules[mainm].names.get(intern(gn))
+            if gs not=? none {
+                if syms.ptr[gs].kind =? 'fns' and syms.ptr[gs].decl not=? 0 {callback_warn(gs "nothing calls {gn}: when the game closes, it calls `on_quit = (): ...` (did you mean `on_quit`?)")}
+            }
+        }
+    }
+    # (Unity's collision callbacks: contacts are read, each frame)
+    loop gn in ["OnCollisionEnter" "OnCollisionStay" "OnCollisionExit" "OnTriggerEnter" "OnTriggerStay" "OnTriggerExit"] {
+        let gs=modules[mainm].names.get(intern(gn))
+        if gs not=? none {
+            if syms.ptr[gs].kind =? 'fns' and syms.ptr[gs].decl not=? 0 {callback_warn(gs "nothing calls {gn}: read `w.contacts(b)` in update, each frame (`if c.new:` for a touch that just began; sensors' are there too)")}
+        }
+    }
+    # (LÖVE's input callbacks: input is asked for, each frame)
+    loop gn in ["keypressed" "keyreleased" "mousepressed" "mousereleased" "textinput" "wheelmoved"] {
+        let gs=modules[mainm].names.get(intern(gn))
+        if gs not=? none {
+            if syms.ptr[gs].kind =? 'fns' and syms.ptr[gs].decl not=? 0 {callback_warn(gs "nothing calls {gn}: in update, ask each frame (`key_pressed(.space)`, `mouse_pressed(.left)`, `text_input()`, `mouse_wheel()`)")}
+        }
+    }
+}
+program_tests=(mainm:ProgramWord main_path:string):>void=>$unsafe {
+    if test_mode and test_decls.length =? 0 and not check_all and not ide_on {
+        # (pytest's test_ functions, or no tests at all: "0 tests passed" would say all is well)
+        let pyt=""
+        loop [nm gs] in modules[mainm].names {
+            if starts_with(name_of(nm) "test_") and syms.ptr[gs].kind =? 'fns' and (pyt as array<uint8>).length =? 0 {pyt=name_of(nm)}
+        }
+        if ends_with(main_path ".dewy") {
+            if (pyt as array<uint8>).length >? 0 {fatal(nodes.ptr[ProgramWord(syms.ptr[modules[mainm].names[intern(pyt)]].decl)].pos "'{pyt}' is a function, not a test: put `$test` on the line before it")}
+            fatal((-1) "no tests in {main_path}: a test is a function marked `$test` on the line before it (`$test` then `let adds = () => $expect add(1 2) =? 3`)")
+        }
+        if (pyt as array<uint8>).length >? 0 {fatal(nodes.ptr[ProgramWord(syms.ptr[modules[mainm].names[intern(pyt)]].decl)].pos "'{pyt}' is a function, not a test: a test is written `test \"{pyt.byte_slice(5 (pyt as array<uint8>).length)}\":` with its lines below it (`assert(...)` in them)")}
+        fatal((-1) "no tests in {main_path}: a test is written `test \"adds\":` with its lines below it, as `assert(add(1, 2) == 3)`")
+    }
+    if test_mode {
+        # top-level code runs first (it may set up globals), then each test in order
+        if not check_all {skip_main=true}
+        let count:ProgramWord=0
+        let computed:array<int64>=[]
+        loop d in test_decls {
+            let pos=nodes.ptr[d].pos
+            let nm=name_of(ProgramWord(nodes.ptr[d].sval))
+            if nodes.ptr[d].aux =? 1 {
+                # (Dewy's `$test` function: called once, or once per case as name[i])
+                if nodes.ptr[d].a not=? 0 {
+                    # (a computed array of cases: each element, by its index at run time)
+                    let cases=ProgramWord(nodes.ptr[d].a)
+                    let index="$test_case{d}"
+                    let arg=bc_call("__test_case" [cases bc_ident(index pos)] pos)
+                    let name=bc_call("__test_case_name" [synth_str(nm pos) bc_ident(index pos)] pos)
+                    modules[mainm].inits.push(bc_loop(index bc_call("__test_count" [clone(cases)] pos) [test_entry(name [synth_call(nm [arg] pos)] pos)] pos))
+                    computed.push(clone(cases))
+                    continue
+                }
+                if nkids(d) =? 0 {
+                    modules[mainm].inits.push(test_entry(synth_str(nm pos) [synth_call(nm [] pos)] pos))
+                    count += 1
+                    continue
+                }
+                loop k in 0.. and case in kids(d) {
+                    modules[mainm].inits.push(test_entry(synth_str("{nm}[{k}]" nodes.ptr[case].pos) [synth_call(nm kids(case) nodes.ptr[case].pos)] nodes.ptr[case].pos))
+                    count += 1
+                }
+                continue
+            }
+            if not files[pos_file(pos)].is_dewy and (nm as array<uint8>).length >=? 2 and (nm as array<uint8>)[0] =? b'"' {nm=nm.byte_slice(1 (nm as array<uint8>).length - 1)}
+            let body=ProgramWord(nodes.ptr[d].b)
+            modules[mainm].inits.push(test_entry(synth_str(nm pos) kids(body) pos))
+            count += 1
+        }
+        let cnt=mk('int_lit' 0)
+        nodes.ptr[cnt].ival=count
+        let total=cnt
+        loop cases in computed {total=bc_bin('plus' total bc_call("__test_count" [cases] 0) 0)}
+        modules[mainm].inits.push(synth_call("__test_done" [total] 0))
+    }
+}
+program_game=(mainm:ProgramWord has_upd:bool has_drw:bool):>void=>$unsafe {
+    let user_main=false
+    loop st0 in modules[mainm].inits {
+        if calls_named(st0 "main") {user_main=true}
+    }
+    if user_main {skip_main=true} else if modules[mainm].names.get(intern("main")) isnt? none {
+        let mc=mk('call' 0)
+        let mid=mk('ident' 0)
+        nodes.ptr[mid].name=int32(intern("main"))
+        nodes.ptr[mc].a=int32(mid)
+        let st=mk('exprstmt' 0)
+        nodes.ptr[st].a=int32(mc)
+        modules[mainm].inits.push(st)
+        skip_main=true
+    }
+    # (before the program's own code: it is a game, so a texture made at the top opens the
+    # window; a script's opens none)
+    let isg=mk('assign' 0)
+    nodes.ptr[isg].op=int32(47)
+    let isgl=mk('ident' 0)
+    nodes.ptr[isgl].name=int32(intern("__is_game"))
+    nodes.ptr[isg].a=int32(isgl)
+    let isgv=mk('bool_lit' 0)
+    nodes.ptr[isgv].ival=1
+    nodes.ptr[isg].b=int32(isgv)
+    modules[mainm].inits.insert(isg 0)
+    let gc=mk('call' 0)
+    let gid=mk('ident' 0)
+    nodes.ptr[gid].name=int32(intern("__game_run"))
+    nodes.ptr[gc].a=int32(gid)
+    # (at the program's update and draw: a mismatch is reported there)
+    let ua=mk('ident' 0)
+    if has_upd {
+        nodes.ptr[ua].name=int32(intern("update"))
+        let update_sym=game_fn(mainm "update")
+        $runtime_assert update_sym isnt? none
+        nodes.ptr[ua].pos=nodes.ptr[ProgramWord(syms.ptr[update_sym].decl)].pos
+        add_flag(ua NF_MUT)
+    }
+    else {nodes.ptr[ua].name=int32(intern("__no_update"))}
+    let da=mk('ident' 0)
+    if has_drw {
+        nodes.ptr[da].name=int32(intern("draw"))
+        let draw_sym=game_fn(mainm "draw")
+        $runtime_assert draw_sym isnt? none
+        nodes.ptr[da].pos=nodes.ptr[ProgramWord(syms.ptr[draw_sym].decl)].pos
+        add_flag(da NF_MUT)
+    }
+    else {nodes.ptr[da].name=int32(intern("__no_draw"))}
+    set_list(gc [ua da])
+    # (quit = (): the game's own, in place of the library's that closes the window)
+    let qq=modules[mainm].names.get(intern("quit"))
+    if qq not=? none {
+        let qd2=ProgramWord(syms.ptr[qq].decl)
+        if syms.ptr[qq].kind =? 'fns' and qd2 not=? 0 and nodes.ptr[qd2].kind =? 'fn_' and nkids(qd2) =? 0 {warn(nodes.ptr[qd2].pos "this quit takes the place of the library's quit(), which closes the window: for what runs as the game ends (to save), write `on_quit = ():`")}
+    }
+    # (on_quit = (): what the game does as it ends: its window closed; quit() closes it)
+    let qs=modules[mainm].names.get(intern("on_quit"))
+    if qs not=? none {
+        let qd=ProgramWord(syms.ptr[qs].decl)
+        if syms.ptr[qs].kind =? 'fns' and qd not=? 0 and nodes.ptr[qd].kind =? 'fn_' and nkids(qd) =? 0 {
+            # (what its last line gives, on_quit = (): save_value(...)'s bool, is dropped)
+            add_flag(qd NF_VOID)
+            let qc=mk('call' 0)
+            let qf=mk('ident' 0)
+            nodes.ptr[qf].name=int32(intern("__set_quit"))
+            nodes.ptr[qc].a=int32(qf)
+            let qa=mk('ident' nodes.ptr[qd].pos)
+            nodes.ptr[qa].name=int32(intern("on_quit"))
+            add_flag(qa NF_MUT)
+            set_list(qc [qa])
+            let qst=mk('exprstmt' 0)
+            nodes.ptr[qst].a=int32(qc)
+            modules[mainm].inits.push(qst)
+        }
+    }
+    let st2=mk('exprstmt' 0)
+    nodes.ptr[st2].a=int32(gc)
+    modules[mainm].inits.push(st2)
+}
+program_unused_warnings=(mainm:ProgramWord main_path:string runs:bool):>void=>$unsafe {
+    loop [ci at] in draw_to_at {
+        if not back_to_screen.has(ci) {warn(at "after draw_to, drawing goes into that picture to the end of the frame, and the screen shows nothing: `draw_to_screen()` comes back to the screen (then `draw_target(rt)` shows the picture)")}
+    }
+    # (nothing runs at all: one word for the whole file, as a module or a program not finished)
+    if not ide_on and not test_mode and not runs and not check_all and not ends_with(main_path "<input>") {
+        loop d in modules[mainm].decls {
+            if nodes.ptr[d].kind not=? 'fn_' or fn_used.has(d) or has_flag(d NF_EXTERN) or nodes.ptr[d].c not=? 0 {continue}
+            let fnm=name_of(ProgramWord(nodes.ptr[d].name))
+            warn(nodes.ptr[d].pos "nothing in this file runs: it only makes functions, and making {fnm} does not run it. Lines at the top of the file run when the program starts (`{fnm}()` there calls it); a game's {jd(nodes.ptr[d].pos "`update = (dt: f64):` runs every frame, where `if key_pressed(.space): ...` checks a key. (A file that other files `use` is fine like this.)" "`update = (dt:float64):>void => \{...}` runs every frame, where `if key_pressed(Key.space) ...` checks a key. (A file that other files import is fine like this.)")}")
+            break
+        }
+    }
+    loop m in [0..modules.length) {
+        if not modules[m].is_prelude and ProgramWord(modules[m].file) >=? 0 and files[ProgramWord(modules[m].file)].is_dewy and not pos_in_lib(mkpos(ProgramWord(modules[m].file) 0)) {hidden_method_warnings(m)}
+    }
+    if not ide_on and (not test_mode or check_all) and runs {
+        # (a `$test` function: `dewy-core test` runs it)
+        let tested=dict<int64 bool>()
+        loop d in modules[mainm].decls {
+            if nodes.ptr[d].kind =? 'test_' and nodes.ptr[d].aux =? 1 {tested[ProgramWord(nodes.ptr[d].name)]=true}
+        }
+        loop d in modules[mainm].decls {
+            if nodes.ptr[d].kind not=? 'fn_' or fn_used.has(d) or has_flag(d NF_EXTERN) or nodes.ptr[d].c not=? 0 or tested.has(ProgramWord(nodes.ptr[d].name)) {continue}
+            let dn=name_of(ProgramWord(nodes.ptr[d].name))
+            if dn =? "main" or dn =? "update" or dn =? "draw" or starts_with(dn "_") or starts_with(dn "(") or starts_with(dn "op_") {continue}
+            # (a method is a member of its type, there for whoever uses the type: only a private
+            # type's, `_Name`, is held to this rule)
+            if dewy_is_method(d) and not starts_with(method_type_name(d) "_") {continue}
+            # (its name written anywhere else in the file: an overload used under it, or a use in
+            # code for another target, as in `when TARGET == "windows":`)
+            if word_count(files[pos_file(nodes.ptr[d].pos)].src dn) >? 1 {continue}
+            let how="`{dn}()`"
+            if nkids(d) >? 0 {how="`{dn}(...)`"}
+            if dewy_is_method(d) and nkids(d) >? 1 {how="`value.{dn}(...)`"} else if dewy_is_method(d) {how="`value.{dn}`"}
+            warn(nodes.ptr[d].pos "'{dn}' is never called: nothing runs it (call it, as {how} where it should run)")
+        }
+    }
+    # (globals of the program whose fields or elements are changed and that are never read)
+    loop [g wp] in gcopy_writes {
+        if g <? global_read.length and global_read[g] {continue}
+        if modules[ProgramWord(globals.ptr[g].mod)].is_prelude or pos_in_lib(wp) {continue}
+        let nm=name_of(ProgramWord(globals.ptr[g].name))
+        warn_unused_copy(wp nm)
+    }
+}
