@@ -2879,16 +2879,21 @@ obligation `>=? 0`, proven where the arguments show it (`zeros(2 3)`), and a
 shape with more elements than an `int64` counts runs out of memory:
 
 ```dewy
-$runtime_checks                  # the linear algebra calls below may panic
-let values:array<float64> = [3.0 1.0 1.0 2.0]
-let matrix = reshape(values 2 2)
-let saved = matrix
-matrix[0 1] = 4.0
-$runtime_assert(saved[0 1] =? 1.0)
-let solution = solve(saved [9.0 8.0]) or_throw  # approximately [2.0 3.0]
-let product = saved*eye(2)
-$runtime_assert(product.data =? saved.data)
+main = () => {
+    $runtime_checks                  # the linear algebra calls below may panic
+    let values:array<float64> = [3.0 1.0 1.0 2.0]
+    let matrix = reshape(values 2 2)
+    let saved = matrix
+    matrix[0 1] = 4.0
+    $runtime_assert(saved[0 1] =? 1.0)
+    let solution = solve(saved [9.0 8.0]) or_throw  # approximately [2.0 3.0]
+    let product = saved*eye(2)
+    $runtime_assert(product.data =? saved.data)
+}
 ```
+
+`or_throw` returns a failure from its enclosing function, so this example uses
+`main` to report a failed solve and exit with its error code.
 
 Write a matrix literal with a standalone `;` (a space before it) between rows and
 `;;` between 2-D blocks: `[1 2 ; 3 4]` has shape `[2 2]`,
