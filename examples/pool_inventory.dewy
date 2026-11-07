@@ -1,13 +1,11 @@
 # Repeated entity updates through stable handles, while retaining a snapshot.
-Entity:type = [inventory:array<int64>]
+Entity:type = [inventory:array<int64 length=32>]
 
 mutate_inventory = (@entities:Pool<Entity> handles:array<Handle length=64> count:int64):>void => {
     loop i in [0..count) {
         let entity = i%64 let slot = (i//64)%32 let delta = i%7
         let handle = handles[entity]
-        if entities.has(handle) and slot <? entities[handle].inventory.length {
-            entities[handle].inventory[slot] += delta+1
-        }
+        if entities.has(handle) {entities[handle].inventory[slot] += delta+1}
     }
 }
 

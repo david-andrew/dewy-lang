@@ -1,0 +1,8 @@
+C:type=[hp:int64]
+E:type=[cells:array<C length=2>]
+main=()=>{
+    let p:Pool<E> = []
+    let a = p.add(E[[C[1] C[2]]])
+    if p.has(a) {p[a].cells[1].hp += 40}
+    printl(p.items[0].cells[1].hp)
+}

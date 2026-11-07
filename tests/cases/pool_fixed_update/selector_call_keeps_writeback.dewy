@@ -1,0 +1,13 @@
+E:type=[inv:array<int64 length=2>]
+next=(@i:int64):>int64=>{
+    i += 1
+    return i
+}
+main=()=>{
+    $runtime_checks
+    let p:Pool<E> = []
+    let a = p.add(E[[1 2]])
+    let i:int64 = -1
+    p[a].inv[next(@i)] += 5
+    printl"{p.items[0].inv} {i}"
+}

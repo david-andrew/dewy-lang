@@ -1,0 +1,8 @@
+E:type=[inv:array<int64 length=4>]
+f=(@p:Pool<E> h:Handle):>void=>{p[h].inv[1] += 1}
+main=()=>{
+    let p:Pool<E> = []
+    let a = p.add(E[[0 0 0 0]])
+    f(@p a)
+    printl(p.items[0].inv)
+}

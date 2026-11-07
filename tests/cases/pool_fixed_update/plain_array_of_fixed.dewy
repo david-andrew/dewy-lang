@@ -1,0 +1,7 @@
+E:type=[rows:array<array<int64 length=2>>]
+main=()=>{
+    let p:Pool<E> = []
+    let a = p.add(E[[[1 2] [3 4]]])
+    if p.has(a) and 1 <? p[a].rows.length {p[a].rows[1][0] += 10}
+    printl(p.items[0].rows)
+}

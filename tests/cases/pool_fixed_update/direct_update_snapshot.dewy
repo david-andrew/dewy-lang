@@ -1,0 +1,15 @@
+# quick
+E:type=[n:int64 inv:array<int64 length=4>]
+main=()=>{
+    let p:Pool<E> = []
+    let a = p.add(E[1 [0 0 0 0]])
+    let b = p.add(E[2 [5 5 5 5]])
+    let snapshot = p
+    if p.has(a) and p.has(b) {
+        p[a].inv[1] += 7
+        p[b].inv[3] = 9
+        p[a].n -= 1
+    }
+    printl"{p.items[0].inv} {p.items[1].inv} {p.items[0].n}"
+    printl"{snapshot.items[0].inv} {snapshot.items[1].inv} {snapshot.items[0].n}"
+}

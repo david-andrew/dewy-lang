@@ -3216,7 +3216,8 @@ pool_update_read = (n: int) -> bool:
     if k == .ident or k == .int_lit or k == .float_lit or k == .bool_lit: return true
     if k == .field: return pool_update_read(int(nodes[n].a))
     if k == .index and nodes[n].b != 0:
-        return tkind(ntype(int(nodes[n].a))) == .array and pool_update_read(int(nodes[n].a)) and pool_update_read(int(nodes[n].b))
+        at = tkind(ntype(int(nodes[n].a)))
+        return (at == .array or at == .fixed) and pool_update_read(int(nodes[n].a)) and pool_update_read(int(nodes[n].b))
     # Inspect checked scalar operators: an overloaded operator has become a
     # call. Do not admit aggregate comparisons or conversions on this basis.
     if k == .unary or k == .not_ or k == .conv:
@@ -3267,8 +3268,8 @@ pool_direct_update = (s: int, ix: int, bt: int) -> bool:
         check_expr(clone(int(nodes[part].b)), 0)
         if not pool_update_read(last_checked): return false
         if part != ix:
-            pt = check_expr(clone(int(nodes[part].a)), 0)
-            if tkind(pt) != .array: return false
+            pt = tkind(check_expr(clone(int(nodes[part].a)), 0))
+            if pt != .array and pt != .fixed: return false
     true
 
 # A selector that may run code or have effects (a block, a call, an operator

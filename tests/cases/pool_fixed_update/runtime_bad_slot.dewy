@@ -1,0 +1,13 @@
+# exit: 101
+# args: 2
+E:type=[inv:array<int64 length=2>]
+main=(argv:array<string>)=>{
+    $runtime_checks
+    let p:Pool<E> = []
+    let a = p.add(E[[1 2]])
+    let i = argv.length
+    p[a].inv[i - 1] += 1
+    printl(p.items[0].inv)
+    p[a].inv[i] += 1
+    printl"not reached {p.items[0].inv}"
+}
