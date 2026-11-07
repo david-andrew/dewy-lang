@@ -1,0 +1,23 @@
+# A literal subset inside the optional mixed result returned by a UI picker.
+Column:type = 'on' | 'what' | 'amount' | 'category'
+Row:type = [i:int64]
+Pick:type = 'add' | 'delete' | Column | Row
+optional = (picked:Pick?):>bool => picked is? Column
+plain = (picked:Pick):>bool => picked is? Column
+Partial:type = 'on' | 'missing'
+Words:type = 'on' | 'what' | 'add'
+Subset:type = 'on' | 'what'
+partial = (picked:Pick?):>bool => picked is? Partial
+only_words = (picked:Words?):>bool => picked is? Subset
+printl(optional('on'))
+printl(optional('delete'))
+printl(optional(Row[1]))
+printl(optional(none))
+printl(plain('amount'))
+printl(plain('add'))
+printl(partial('on'))
+printl(partial('what'))
+printl(partial(none))
+printl(only_words('what'))
+printl(only_words('add'))
+printl(only_words(none))

@@ -102,6 +102,12 @@ xi_check=(n:XIWord):>XIWord=>$unsafe {
         let r=xi_host[0].member_value(n orig at tt set)
         if r >=? 0 {return r}
     }
+    # Literal subsets also test an optional's contained value after its member
+    # check has excluded none. Literal sets are enums, not union types.
+    if xi_types[0].ptr[at].kind =? 'opt' and set not=? 0 and not tu_equal(tt XIWord(xi_types[0].ptr[at].elem)) {
+        let r=xi_host[0].member_value(n orig tu_prune(XIWord(xi_types[0].ptr[at].elem)) tt set)
+        if r >=? 0 {return r}
+    }
     # (and on an optional union or integer: present, holding that member, then its value)
     if xi_types[0].ptr[at].kind =? 'opt' and xi_types[0].ptr[tt].kind =? 'refined' and set =? 0 and not tu_equal(tt XIWord(xi_types[0].ptr[at].elem)) and not (xi_refine[0] and xi_host[0].implies(XIWord(xi_types[0].ptr[at].elem) tt)) and (xi_union(XIWord(xi_types[0].ptr[at].elem)) and uu_index(XIWord(xi_types[0].ptr[at].elem) tt) <? 0 or xi_kind(xi_representation(XIWord(xi_types[0].ptr[at].elem))) =? 'int_' and tu_equal(xi_representation(XIWord(xi_types[0].ptr[at].elem)) xi_representation(tt))) {
         let r=xi_host[0].member_value(n orig tu_prune(XIWord(xi_types[0].ptr[at].elem)) tt set)

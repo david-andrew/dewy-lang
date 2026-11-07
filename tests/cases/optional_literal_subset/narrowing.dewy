@@ -1,0 +1,25 @@
+Column:type = 'on' | 'what'
+Row:type = [i:int64]
+Pick:type = 'add' | Column | Row
+Box:type = [picked:Pick?]
+# The existing narrowing exposes the literal member of the mixed union.
+Words:type = 'add' | Column
+caption = (c:Words):>string => "{c}"
+render = (picked:Pick?):>string => {
+    if picked is? Column {return caption(picked)}
+    "other"
+}
+field = (box:Box):>string => {
+    if box.picked is? Column {return caption(box.picked)}
+    "other"
+}
+let calls = 0
+next = ():>Pick? => {calls += 1; 'on'}
+printl(render('on'))
+printl(render('add'))
+printl(render(none))
+printl(field(Box['what']))
+printl(field(Box[Row[1]]))
+printl(field(Box[none]))
+printl(next() is? Column)
+printl(calls)
