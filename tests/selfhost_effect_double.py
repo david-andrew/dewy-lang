@@ -47,6 +47,7 @@ LEAF_HOMES = {
     'x64_ops': 'x64.jo',
     'safe_path_walk': 'safe_paths.jo',
     'glsl_stmts': 'glsl.jo',
+    'msl_stmts': 'msl.jo',
 }
 
 

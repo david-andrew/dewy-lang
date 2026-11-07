@@ -1,0 +1,873 @@
+$runtime_checks
+from p"type_ops.dewy" import tsd
+from p"checked_eval.dewy" import (cx_token cx_token_values)
+from p"@lib/core/os.jo" import (env write_file)
+from p"@lib/core/str.jo" import (replace starts_with)
+from p"ast.jo" import (NF_INCLUSIVE has_flag kid nkids nodes)
+from p"check.jo" import (LF_ALIAS LF_MUTPARAM fns locals modules)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"checks_thin_expr.dewy" import (is_gpu_buffer)
+from p"expr.jo" import (CV gpu_buffer_elem ntype)
+from p"glsl.jo" import (sl_turns_fns)
+from p"glsl_emit.dewy" import (gl_narrow gl_struct_fields)
+from p"glsl_ops.dewy" import (gl_unsigned ind sl_type)
+from p"glsl_stmts.dewy" import (gl_binop gl_compound_op sl_hypot_body)
+from p"msl.jo" import (MlRef ml_decls ml_dumped ml_float ml_lref ml_math_names ml_out ml_stage ml_temps ml_utype)
+from p"msl_emit.dewy" import (ml_as ml_block ml_compare ml_field_offset ml_fn ml_gbuf_elem ml_gbuf_store ml_int ml_intrinsic ml_mat_from ml_reset ml_sdiv ml_shift_decls ml_target ml_type ml_varyings ml_zero)
+from p"msl_ops.dewy" import (ml_ctx_args ml_drain ml_err ml_first ml_is_floaty ml_is_gbuf_op ml_is_vector ml_local ml_off ml_source ml_store_decls ml_with_ctx ml_word ml_wref)
+from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
+from p"types.jo" import (T_FLOAT T_I32 T_IVEC2 T_IVEC3 T_MAT4 T_MATH_INT T_VEC4 fields is_vec prune structs tkind tsize types)
+from p"util.jo" import (name_of)
+
+MslStmtWord:type=int64<overflow='wrap'>
+ml_head=():>string=>{
+    join([
+        "#include <metal_stdlib>\nusing namespace metal;\n"
+        "struct SlPC \{ device const uint* params; device const uint* verts; device const uint* insts; int vstride; int istride; float flip; int depth; };\n"
+        "struct SlTex \{ texture2d<float> t; sampler s; };\n"
+        "struct SlGB \{ device uint* p; int n; };\n"
+        "struct SlPtr \{ device uint* p; };\n"
+    ] "")
+}
+ml_mem_decls=():>void=>{
+    if not ml_first("mem") {return}
+    # (bits of the word holding byte a, from bit 8 * (a & 3); sign-extended if sgn)
+    ml_decls.push("int sl_sub(device const uint* b, int a, int bits, bool sgn) \{\n    uint w = b[a >> 2] >> uint((a & 3) * 8);\n    int sh = 32 - bits;\n    if (sgn) return as_type<int>(w << uint(sh)) >> sh;\n    return int((w << uint(sh)) >> uint(sh));\n}\n")
+    # (an f64 from its two words, rounded to an f32 as spirv.jo does)
+    ml_decls.push("float sl_f64(uint lo, uint hi) \{\n    uint e = (hi >> 20) & 0x7FFu;\n    uint m = ((hi & 0xFFFFFu) << 3) | (lo >> 29);\n    uint bits = (((e - 896u) << 23) | m) + ((lo >> 28) & 1u);\n    if (e >= 1151u || bits >= 0x7F800000u) bits = 0x7F800000u;\n    if (e <= 896u) bits = 0u;\n    if (e == 0x7FFu && (m | lo) != 0u) bits = 0x7FC00000u;\n    return as_type<float>(bits | (hi & 0x80000000u));\n}\n")
+    # (a device address stored at byte offset a)
+    ml_decls.push("device uint* sl_ptr(device const uint* b, int a) \{\n    return ((device const SlPtr*)(b + (a >> 2)))->p;\n}\n")
+}
+# a value of type t stored (as the CPU lays it out) at byte offset (c + d) of base
+ml_read=(t0:MslStmtWord base:string c:MslStmtWord d:string pos:MslStmtWord):>string=>$unsafe {
+    ml_mem_decls()
+    let t=sl_type(t0)
+    let k=types.ptr[t].kind
+    if k =? 'float_' {
+        if MslStmtWord(types.ptr[t].bits) =? 64 {return "sl_f64({ml_word(base c d)}, {ml_word(base c + 4 d)})"}
+        return "as_type<float>({ml_word(base c d)})"
+    }
+    if k =? 'int_' {
+        let bits=MslStmtWord(types.ptr[t].bits)
+        if bits >=? 32 {return "as_type<int>({ml_word(base c d)})"}
+        let sg="false"
+        if types.ptr[t].sign {sg="true"}
+        return "sl_sub({base}, {ml_off(c d)}, {bits}, {sg})"
+    }
+    if k =? 'bool_' {return "(sl_sub({base}, {ml_off(c d)}, 8, false) != 0)"}
+    let ty=ml_type(t pos)
+    let parts:array<string>=[]
+    if k =? 'vec' {
+        if t =? T_MAT4 {
+            loop col in [0..4) {parts.push(ml_read(T_VEC4 base c + 16 * col d pos))}
+        }
+        else {
+            let ct="float"
+            if types.ptr[t].sign {ct="int"}
+            loop i in [0..MslStmtWord(types.ptr[t].bits)) {parts.push("as_type<{ct}>({ml_word(base c + 4 * i d)})")}
+        }
+        return "{ty}({join(parts ", ")})"
+    }
+    if k =? 'struct_' {
+        let si=MslStmtWord(types.ptr[t].st)
+        layout(t)
+        if is_lib_texture(si) {return ml_word(base c + ml_field_offset(si "id") d)}
+        if is_gpu_buffer(t) {
+            return "SlGB\{sl_ptr({base}, {ml_off(c + ml_field_offset(si "addr") d)}), as_type<int>({ml_word(base c + ml_field_offset(si "n") d)})}"
+        }
+        loop i in [0..MslStmtWord(structs.ptr[si].nfields)) {
+            let f=MslStmtWord(structs.ptr[si].fields) + i
+            parts.push(ml_read(MslStmtWord(fields.ptr[f].type) base c + MslStmtWord(fields.ptr[f].offset) d pos))
+        }
+        return "{ty}\{{join(parts ", ")}}"
+    }
+    if k =? 'fixed' {
+        let el=MslStmtWord(types.ptr[t].elem)
+        layout(el)
+        loop i in [0..fixed_len(t)) {parts.push(ml_read(el base c + i * tsize(el) d pos))}
+        return "{ty}\{{join(parts ", ")}}"
+    }
+    ml_err(pos "type {dt(t)} cannot be read by a shader")
+    ""
+}
+# the uniforms (or a part of them) an expression stands for, if it does (base 
+ml_ref=(e:MslStmtWord):>MlRef=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'ident' and nodes.ptr[e].aux =? int32(1) {
+        let l=MslStmtWord(nodes.ptr[e].sym)
+        if MslStmtWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 {return ml_ref(MslStmtWord(locals.ptr[l].alias))}
+        let p=ml_lref.get(l)
+        if p not=? none {return MlRef(p 0 "" ntype(e))}
+        return MlRef()
+    }
+    if k =? 'field' and nodes.ptr[e].aux >=? 0 {
+        let a=MslStmtWord(nodes.ptr[e].a)
+        let r=ml_ref(a)
+        if (r.base as array<uint8>).length =? 0 {return r}
+        let bt=prune(ntype(a))
+        if types.ptr[bt].kind not=? 'struct_' {return MlRef()}
+        layout(bt)
+        let f=MslStmtWord(structs.ptr[MslStmtWord(types.ptr[bt].st)].fields) + MslStmtWord(nodes.ptr[e].aux)
+        return MlRef(r.base r.c + MslStmtWord(fields.ptr[f].offset) r.d ntype(e))
+    }
+    if k =? 'index' {
+        let a=MslStmtWord(nodes.ptr[e].a)
+        let r=ml_ref(a)
+        if (r.base as array<uint8>).length =? 0 {return r}
+        let bt=prune(ntype(a))
+        let stride:MslStmtWord=4
+        if bt =? T_MAT4 {stride=16} else if types.ptr[bt].kind =? 'fixed' {
+            layout(MslStmtWord(types.ptr[bt].elem))
+            stride=tsize(MslStmtWord(types.ptr[bt].elem))
+        }
+        let b=MslStmtWord(nodes.ptr[e].b)
+        if nodes.ptr[b].kind =? 'int_lit' {return MlRef(r.base r.c + MslStmtWord(nodes.ptr[b].ival) * stride r.d ntype(e))}
+        let off="({ml_expr(b)}) * {stride}"
+        if (r.d as array<uint8>).length >? 0 {off="{r.d} + {off}"}
+        return MlRef(r.base r.c "({off})" ntype(e))
+    }
+    if ml_is_gbuf_op(e "[]") {return ml_gbuf_elem(e)}
+    MlRef()
+}
+ml_stmt=(s:MslStmtWord depth:MslStmtWord):>void=>$unsafe {
+    let k=nodes.ptr[s].kind
+    let pre=ind(depth)
+    if k =? 'vardecl' {
+        if nodes.ptr[s].nlist >? 0 {ml_err(nodes.ptr[s].pos "tuple destructuring is not supported in shaders")}
+        let l=MslStmtWord(nodes.ptr[s].sym)
+        let t=MslStmtWord(locals.ptr[l].type)
+        if prune(t) =? ml_utype {
+            # (another name for the uniforms, or a part of them: their address)
+            let r=MlRef()
+            if nodes.ptr[s].b not=? 0 {r=ml_ref(MslStmtWord(nodes.ptr[s].b))}
+            if (r.base as array<uint8>).length =? 0 or r.c not=? 0 or (r.d as array<uint8>).length not=? 0 {ml_err(nodes.ptr[s].pos "the uniforms ({dt(t)}) can only be read in shader code")}
+            ml_lref[l]=r.base
+            return
+        }
+        if is_gpu_buffer(t) {ml_err(nodes.ptr[s].pos "a GpuBuffer cannot be kept in a variable in shaders (use it where it is, e.g. u.particles[i])")}
+        let ty=ml_type(t nodes.ptr[s].pos)
+        if nodes.ptr[s].b not=? 0 {ml_out.push("{pre}{ty} {ml_local(l)} = {ml_expr(MslStmtWord(nodes.ptr[s].b))};\n")} else {ml_out.push("{pre}{ty} {ml_local(l)} = {ml_zero(t nodes.ptr[s].pos)};\n")}
+    }
+    else if k =? 'assign' {
+        if nodes.ptr[s].aux not=? 0 {ml_err(nodes.ptr[s].pos "unsupported assignment in shader")}
+        let a=MslStmtWord(nodes.ptr[s].a)
+        let op=MslStmtWord(nodes.ptr[s].op)
+        let ta=prune(ntype(a))
+        let b=MslStmtWord(nodes.ptr[s].b)
+        if op =? 47 {
+            ml_out.push("{pre}{ml_target(a pre)} = {ml_expr(b)};\n")
+            return
+        }
+        let bop=gl_compound_op(cx_token(op))
+        let x=ml_target(a pre)
+        if types.ptr[ta].kind =? 'bool_' {
+            # (and= or= xor= on bools: both sides computed)
+            let o="&"
+            if bop =? 'pipe' {o="|"}
+            if bop =? 'caret' {o="!="}
+            ml_out.push("{pre}{x} = bool(({x}) {o} ({ml_expr(b)}));\n")
+            return
+        }
+        ml_out.push("{pre}{x} = {ml_arith(bop x ml_expr(b) ta ta ntype(b))};\n")
+    }
+    else if k =? 'exprstmt' {
+        let e=MslStmtWord(nodes.ptr[s].a)
+        if nodes.ptr[e].kind =? 'if_' or nodes.ptr[e].kind =? 'match_' {
+            ml_stmt_if(e depth)
+            return
+        }
+        if ml_is_gbuf_op(e "[]=") {
+            ml_gbuf_store(e pre)
+            return
+        }
+        ml_out.push("{pre}{ml_expr(e)};\n")
+    }
+    else if k =? 'if_' {ml_stmt_if(s depth)} else if k =? 'return_' {
+        if nodes.ptr[s].a not=? 0 {ml_out.push("{pre}return {ml_expr(MslStmtWord(nodes.ptr[s].a))};\n")} else {ml_out.push("{pre}return;\n")}
+    }
+    else if k =? 'while_' {
+        ml_out.push("{pre}while ({ml_expr(MslStmtWord(nodes.ptr[s].a))}) \{\n")
+        ml_block(MslStmtWord(nodes.ptr[s].b) depth + 1 false)
+        ml_out.push("{pre}}\n")
+    }
+    else if k =? 'for_' and (nodes.ptr[s].aux =? 1 or nodes.ptr[s].aux =? 2) and tkind(ntype(MslStmtWord(nodes.ptr[s].a))) =? 'fixed' {
+        # loop [mut] x in xs (a fixed-size array): an index loop; without `mut`, over a copy (in the
+        # uniforms: over its elements there, read one at a time)
+        let ct=prune(ntype(MslStmtWord(nodes.ptr[s].a)))
+        let et=MslStmtWord(types.ptr[ct].elem)
+        let iv=ml_local(MslStmtWord(nodes.ptr[s].c))
+        let el=MslStmtWord(nodes.ptr[s].sym)
+        let arr=""
+        let r=MlRef()
+        if nodes.ptr[s].aux =? 1 {
+            r=ml_ref(MslStmtWord(nodes.ptr[s].a))
+            if (r.base as array<uint8>).length =? 0 {
+                arr=ml_local(MslStmtWord(nodes.ptr[s].d))
+                ml_out.push("{pre}{ml_type(ct nodes.ptr[s].pos)} {arr} = {ml_expr(MslStmtWord(nodes.ptr[s].a))};\n")
+            }
+        }
+        ml_out.push("{pre}for (int {iv} = 0; {iv} < {fixed_len(ct)}; {iv}++) \{\n")
+        if nodes.ptr[s].aux =? 1 {
+            let ety=ml_type(et nodes.ptr[s].pos)
+            if (r.base as array<uint8>).length >? 0 {
+                layout(et)
+                let d="{iv} * {tsize(et)}"
+                if (r.d as array<uint8>).length >? 0 {d="{r.d} + {d}"}
+                ml_out.push("{pre}    {ety} {ml_local(el)} = {ml_read(et r.base r.c "({d})" nodes.ptr[s].pos)};\n")
+            }
+            else {ml_out.push("{pre}    {ety} {ml_local(el)} = {arr}[{iv}];\n")}
+        }
+        ml_block(MslStmtWord(nodes.ptr[s].b) depth + 1 false)
+        ml_out.push("{pre}}\n")
+    }
+    else if k =? 'for_' {
+        if nodes.ptr[s].aux not=? 0 {ml_err(nodes.ptr[s].pos "only `loop i in [a..b)` loops and loops over fixed-size arrays are supported in shaders")}
+        let l=MslStmtWord(nodes.ptr[s].sym)
+        let it=MslStmtWord(nodes.ptr[s].a)
+        let v=ml_local(l)
+        let cmp="<"
+        if has_flag(it NF_INCLUSIVE) {cmp="<="}
+        ml_out.push("{pre}for (int {v} = {ml_expr(MslStmtWord(nodes.ptr[it].a))}; {v} {cmp} {ml_expr(MslStmtWord(nodes.ptr[it].b))}; {v}++) \{\n")
+        ml_block(MslStmtWord(nodes.ptr[s].b) depth + 1 false)
+        ml_out.push("{pre}}\n")
+    }
+    else if k =? 'break_' {ml_out.push("{pre}break;\n")} else if k =? 'continue_' {ml_out.push("{pre}continue;\n")}
+    else if k =? 'block' {
+        loop i in [0..nkids(s)) {ml_stmt(kid(s i) depth)}
+    }
+    else if k =? 'const_' {} else {ml_err(nodes.ptr[s].pos "unsupported statement in shader")}
+}
+ml_stmt_if=(e:MslStmtWord depth:MslStmtWord):>void=>$unsafe {
+    if nodes.ptr[e].kind not=? 'if_' {ml_err(nodes.ptr[e].pos "match is not supported in shaders")}
+    let pre=ind(depth)
+    ml_out.push("{pre}if ({ml_expr(MslStmtWord(nodes.ptr[e].a))}) \{\n")
+    ml_block(MslStmtWord(nodes.ptr[e].b) depth + 1 false)
+    if nodes.ptr[e].c not=? 0 {
+        ml_out.push("{pre}} else \{\n")
+        ml_block(MslStmtWord(nodes.ptr[e].c) depth + 1 false)
+    }
+    ml_out.push("{pre}}\n")
+}
+ml_expr=(e:MslStmtWord):>string=>$unsafe {
+    let k=nodes.ptr[e].kind
+    let t=sl_type(ntype(e))
+    if t =? T_MATH_INT {ml_err(nodes.ptr[e].pos "checked mathematical int is not yet supported in shaders; use an explicit fixed width")}
+    let pos=nodes.ptr[e].pos
+    # (the uniforms, or a part of them: read from memory)
+    if k =? 'ident' or k =? 'field' or k =? 'index' or ml_is_gbuf_op(e "[]") {
+        let r=ml_ref(e)
+        if (r.base as array<uint8>).length >? 0 {
+            if prune(r.t) =? ml_utype {
+                if r.c =? 0 and (r.d as array<uint8>).length =? 0 {return r.base}
+                ml_err(pos "the uniforms ({dt(t)}) can only be read in shader code")
+            }
+            return ml_read(r.t r.base r.c r.d pos)
+        }
+    }
+    if k =? 'int_lit' {
+        if types.ptr[t].kind =? 'float_' {return ml_float(float64(nodes.ptr[e].ival))}
+        if nodes.ptr[e].ival <? -2147483648 or nodes.ptr[e].ival >? 4294967295 {ml_err(nodes.ptr[e].pos "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")}
+        return ml_int(MslStmtWord(nodes.ptr[e].ival))
+    }
+    if k =? 'float_lit' {return ml_float(nodes.ptr[e].fval)}
+    if k =? 'bool_lit' {
+        if nodes.ptr[e].ival not=? 0 {return "true"}
+        return "false"
+    }
+    if k =? 'ident' {
+        if nodes.ptr[e].aux not=? int32(1) {ml_err(pos "shaders can only use local variables, parameters and constants (a value of the program's: `const SPEED = 2.0` at the top, or a field of the uniforms struct, given at each draw)")}
+        let l=MslStmtWord(nodes.ptr[e].sym)
+        if MslStmtWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 {return ml_expr(MslStmtWord(locals.ptr[l].alias))}
+        return ml_local(l)
+    }
+    if k =? 'field' {
+        let a=MslStmtWord(nodes.ptr[e].a)
+        if nodes.ptr[e].aux =? -4 {return "{ml_expr(a)}.{name_of(MslStmtWord(nodes.ptr[e].name))}"}
+        if nodes.ptr[e].aux <? 0 {ml_err(pos "unsupported field access in shader")}
+        return "{ml_expr(a)}.{name_of(MslStmtWord(nodes.ptr[e].name))}_"
+    }
+    if k =? 'index' {
+        let bt=prune(ntype(MslStmtWord(nodes.ptr[e].a)))
+        if types.ptr[bt].kind not=? 'vec' and types.ptr[bt].kind not=? 'fixed' {ml_err(pos "only vectors, matrices and fixed-size arrays (T[N]) can be indexed in shaders")}
+        return "{ml_expr(MslStmtWord(nodes.ptr[e].a))}[{ml_expr(MslStmtWord(nodes.ptr[e].b))}]"
+    }
+    if k =? 'binary' {
+        let a=MslStmtWord(nodes.ptr[e].a)
+        let b=MslStmtWord(nodes.ptr[e].b)
+        let op=cx_token_values.ptr[MslStmtWord(nodes.ptr[e].op)]
+        let ta=ntype(a)
+        let tb=ntype(b)
+        if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
+            let x=ml_expr(a)
+            let y=ml_expr(b)
+            let ct=ta
+            # (an int compared with a float: as floats)
+            if ml_is_floaty(ta) not=? ml_is_floaty(tb) and types.ptr[prune(ta)].kind not=? 'bool_' {
+                if ml_is_floaty(tb) {
+                    x=ml_as(a x tb)
+                    ct=tb
+                }
+                else {y=ml_as(b y ta)}
+            }
+            return ml_compare(op ct x y pos)
+        }
+        let x=ml_as(a ml_expr(a) t)
+        let y=ml_as(b ml_expr(b) t)
+        if types.ptr[t].kind =? 'bool_' {
+            if op =? 'amp' {return "bool({x} & {y})"}
+            if op =? 'pipe' {return "bool({x} | {y})"}
+            if op =? 'caret' {return "({x} != {y})"}
+        }
+        return ml_arith(op x y ta t tb)
+    }
+    if k =? 'unary' {
+        let x=ml_expr(MslStmtWord(nodes.ptr[e].a))
+        if nodes.ptr[e].op =? int32(58) {return x}
+        if nodes.ptr[e].op =? int32(59) {
+            # (integers through unsigned ones, which wrap)
+            if types.ptr[t].kind =? 'int_' {return gl_narrow("as_type<int>(-as_type<uint>(int({x})))" t)}
+            if is_vec(t) and types.ptr[t].sign {return "as_type<int{types.ptr[t].bits}>(-as_type<uint{types.ptr[t].bits}>({x}))"}
+            return "(- {x})"
+        }
+        return gl_narrow("(~{x})" t)
+    }
+    if k =? 'not_' {return "(!{ml_expr(MslStmtWord(nodes.ptr[e].a))})"}
+    if k =? 'and_' {return "({ml_expr(MslStmtWord(nodes.ptr[e].a))} && {ml_expr(MslStmtWord(nodes.ptr[e].b))})"}
+    if k =? 'or_' {return "({ml_expr(MslStmtWord(nodes.ptr[e].a))} || {ml_expr(MslStmtWord(nodes.ptr[e].b))})"}
+    if k =? 'conv' {
+        let cv=nodes.ptr[e].aux
+        let a=ml_expr(MslStmtWord(nodes.ptr[e].a))
+        let from_=sl_type(ntype(MslStmtWord(nodes.ptr[e].a)))
+        if cv =? int32(int64(CV.int2float)) {
+            if gl_unsigned(from_) {return "float(as_type<uint>(int({a})))"}
+            return "float({a})"
+        }
+        if cv =? int32(int64(CV.float2int)) {
+            if types.ptr[t].kind not=? 'int_' {return "int({a})"}
+            return ml_float_to_int(a t)
+        }
+        if (cv =? int32(int64(CV.int_)) or cv =? int32(int64(CV.wrap_int))) and types.ptr[t].kind =? 'int_' {
+            if types.ptr[from_].kind =? 'bool_' {return "int({a})"}
+            return gl_narrow(a t)
+        }
+        if cv =? int32(int64(CV.float_)) or cv =? int32(int64(CV.none_)) or cv =? int32(int64(CV.quantity_const)) {return a}
+        ml_err(pos "unsupported conversion in shader")
+    }
+    if k =? 'if_' {
+        let b=MslStmtWord(nodes.ptr[e].b)
+        let c=MslStmtWord(nodes.ptr[e].c)
+        if nkids(b) not=? 1 or nkids(c) not=? 1 or nodes.ptr[b].aux =? 0 or nodes.ptr[c].aux =? 0 {ml_err(pos "if expressions in shaders must be single expressions: `if c: a else: b`")}
+        return "({ml_expr(MslStmtWord(nodes.ptr[e].a))} ? {ml_expr(block_value(b))} : {ml_expr(block_value(c))})"
+    }
+    if k =? 'intrinsic' {return ml_intrinsic(e)}
+    if k =? 'call' {return ml_call(e)}
+    if k =? 'array' and types.ptr[t].kind =? 'fixed' {
+        let parts:array<string>=[]
+        if nodes.ptr[e].b not=? 0 {
+            let v=ml_expr(kid(e 0))
+            loop i in [0..fixed_len(t)) {parts.push(v)}
+        }
+        else if nkids(e) =? 0 {return ml_zero(t pos)} else {
+            loop i in [0..nkids(e)) {parts.push(ml_expr(kid(e i)))}
+        }
+        return "{ml_type(t pos)}\{{join(parts ", ")}}"
+    }
+    if k =? 'array' {ml_err(pos "growable arrays ({tsd("T[]" "array<T>")}) cannot be used in shaders; use a fixed-size array {tsd("T[N]" "array<T length=N>")}")}
+    ml_err(pos "unsupported expression in shader")
+    ""
+}
+# (operands are already a name, a call or in parentheses: an extra pair around one that looks
+# like a type, float2(float(a), float(b)), makes C++ read a cast)
+# x op y for operands of type ta, giving type t, the CPU's way: integer + - * through unsigned
+# numbers (which wrap), unsigned ones divide, take remainders, shift and compare as such, narrow
+# ones wrap to their range (tb: the right operand's type, where it may be a scalar beside a vector)
+ml_arith=(op:Tok x:string y:string ta0:MslStmtWord t0:MslStmtWord tb0:MslStmtWord=0):>string=>$unsafe {
+    let ta=prune(ta0)
+    let t=sl_type(t0)
+    let tb=prune(tb0)
+    let o=gl_binop(op)
+    if ta =? T_MAT4 or tb =? T_MAT4 {
+        if (op =? 'plus' or op =? 'minus') and (tb =? 0 or not (tb =? T_MAT4)) and ta =? T_MAT4 and not is_vec(tb) {
+            return "({x} {o} float4x4(float4({y}), float4({y}), float4({y}), float4({y})))"
+        }
+        return "({x} {o} {y})"
+    }
+    if op =? 'plus' or op =? 'minus' or op =? 'star' {
+        if types.ptr[ta].kind =? 'int_' and types.ptr[t].kind =? 'int_' {return gl_narrow("as_type<int>(as_type<uint>(int({x})) {o} as_type<uint>(int({y})))" t)}
+        if is_vec(t) and types.ptr[t].sign {
+            let n=MslStmtWord(types.ptr[t].bits)
+            let ux="as_type<uint>(int({x}))"
+            if is_vec(ta) {ux="as_type<uint{n}>({x})"}
+            let uy="as_type<uint>(int({y}))"
+            if tb =? 0 or is_vec(tb) {uy="as_type<uint{n}>({y})"}
+            return "as_type<int{n}>({ux} {o} {uy})"
+        }
+    }
+    if (op =? 'shl' or op =? 'shr') and types.ptr[ta].kind =? 'int_' {
+        ml_shift_decls()
+        if op =? 'shl' {return gl_narrow("sl_shl({x}, {y})" t)}
+        if gl_unsigned(ta) {return "sl_shru({x}, {y})"}
+        return "sl_shr({x}, {y})"
+    }
+    # (% keeps the dividend's sign, as on the CPU)
+    if op =? 'percent' and (ml_is_floaty(ta) or ml_is_floaty(t)) {return "({x} - {y} * trunc({x} / {y}))"}
+    if gl_unsigned(ta) {
+        if op =? 'slash' or op =? 'percent' or op =? 'shr' {return gl_narrow("as_type<int>(as_type<uint>(int({x})) {o} as_type<uint>(int({y})))" t)}
+    }
+    if (op =? 'slash' or op =? 'percent') and (types.ptr[ta].kind =? 'int_' or (is_vec(ta) and types.ptr[ta].sign)) {
+        # (the smallest integer / -1 wraps, as on the CPU)
+        let d=ml_sdiv(ta tb)
+        if op =? 'slash' {return gl_narrow("{d}({x}, {y})" t)}
+        return gl_narrow("as_type<int>(as_type<uint>(int({x})) - as_type<uint>(int({d}({x}, {y}))) * as_type<uint>(int({y})))" t)
+    }
+    if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'slash' or op =? 'shl' {return gl_narrow("({x} {o} {y})" t)}
+    "({x} {o} {y})"
+}
+# float x to integer type t, as on the CPU: toward zero, saturating at t's range (32 bits at
+# most), NaN to 0
+ml_float_to_int=(x:string t0:MslStmtWord):>string=>$unsafe {
+    let t=sl_type(t0)
+    let bits=MslStmtWord(types.ptr[t].bits)
+    if bits >? 32 {bits=32}
+    let sg=types.ptr[t].sign
+    let lo:MslStmtWord=0
+    let hi:MslStmtWord=(MslStmtWord(1) << bits) - 1
+    if sg {
+        lo=-(MslStmtWord(1) << (bits - 1))
+        hi=(MslStmtWord(1) << (bits - 1)) - 1
+    }
+    if ml_first("f2i") {
+        ml_decls.push("int sl_f2i(float x, float lo, float top, float hi1, int him) \{\n    if (isnan(x)) return 0;\n    if (x >= hi1) return him;\n    return int(clamp(x, lo, top));\n}\n")
+        ml_decls.push("int sl_f2u(float x, float top) \{\n    if (isnan(x)) return 0;\n    if (x >= 4294967296.0f) return -1;\n    return as_type<int>(uint(clamp(x, 0.0f, top)));\n}\n")
+    }
+    if bits =? 32 and not sg {return "sl_f2u({x}, 4294967040.0f)"}
+    let top=float64(hi)
+    if bits =? 32 {top=2147483520.0}
+    "sl_f2i({x}, {ml_float(float64(lo))}, {ml_float(top)}, {ml_float(float64(hi) + 1.0)}, {ml_int(hi)})"
+}
+ml_vec_ctor=(e:MslStmtWord):>string=>$unsafe {
+    let t=sl_type(ntype(e))
+    let pos=nodes.ptr[e].pos
+    let ty=ml_type(t pos)
+    let n=nkids(e)
+    if t =? T_MAT4 {
+        if n =? 0 {return "float4x4(1.0f)"}
+        if n =? 1 and not is_vec(ntype(kid(e 0))) {return "float4x4(float({ml_expr(kid(e 0))}))"}
+        let all_cols=n =? 4
+        loop i in [0..n) {
+            if prune(ntype(kid(e i))) not=? T_VEC4 {all_cols=false}
+        }
+        let parts:array<string>=[]
+        loop i in [0..n) {
+            let a=kid(e i)
+            let at=prune(ntype(a))
+            let x=ml_expr(a)
+            if all_cols or not is_vec(at) {parts.push(ml_as(a x T_FLOAT))} else if types.ptr[at].sign {parts.push("float{types.ptr[at].bits}({x})")}
+            else {parts.push(x)}
+        }
+        if all_cols {return "float4x4({join(parts ", ")})"}
+        # (sixteen numbers, or vectors adding up to them: column by column)
+        return ml_mat_from(parts e)
+    }
+    if n =? 0 {return "{ty}(0)"}
+    let integer=types.ptr[t].sign
+    let parts:array<string>=[]
+    loop i in [0..n) {
+        let a=kid(e i)
+        let at=prune(ntype(a))
+        let x=ml_expr(a)
+        if is_vec(at) and types.ptr[at].sign not=? integer {
+            # (a vector of the other kind: each component converted as a scalar is)
+            let m=MslStmtWord(types.ptr[at].bits)
+            if integer {
+                let sw=["x" "y" "z" "w"]
+                let cs:array<string>=[]
+                loop j in [0..m) {cs.push(ml_float_to_int("({x}).{sw[j]}" T_I32))}
+                parts.push("int{m}({join(cs ", ")})")
+            }
+            else {parts.push("float{m}({x})")}
+        }
+        else if is_vec(at) {parts.push(x)} else {parts.push(ml_as(a x t))}
+    }
+    "{ty}({join(parts ", ")})"
+}
+ml_call=(e:MslStmtWord):>string=>$unsafe {
+    let t=sl_type(ntype(e))
+    let pos=nodes.ptr[e].pos
+    let aux=MslStmtWord(nodes.ptr[e].aux)
+    if aux =? 2 {
+        # a struct constructor (fields left out are zero)
+        let si=MslStmtWord(types.ptr[t].st)
+        let parts:array<string>=[]
+        loop i in [0..MslStmtWord(structs.ptr[si].nfields)) {
+            let a=kid(e i)
+            if a =? 0 {parts.push(ml_zero(MslStmtWord(fields.ptr[MslStmtWord(structs.ptr[si].fields) + i].type) pos))} else {parts.push(ml_expr(a))}
+        }
+        return "{ml_type(t pos)}\{{join(parts ", ")}}"
+    }
+    if aux not=? 0 {ml_err(pos "function values cannot be called in shaders")}
+    let f=MslStmtWord(nodes.ptr[e].sym)
+    let decl=MslStmtWord(fns.ptr[f].decl)
+    let nm=name_of(MslStmtWord(nodes.ptr[decl].name))
+    if modules[MslStmtWord(nodes.ptr[decl].mod)].is_prelude {
+        if nm =? "discard" {
+            if ml_stage not=? "fragment" {ml_err(pos "discard() can only be used in the fragment shader")}
+            return "discard_fragment()"
+        }
+        if nm =? "vertex_id" or nm =? "instance_id" {
+            if ml_stage not=? "vertex" {ml_err(pos "{nm}() can only be used in the vertex shader")}
+            if nm =? "vertex_id" {return "int(sl_vid)"}
+            return "int(sl_iid)"
+        }
+        if nm =? "sample" or nm =? "sample_lod" {
+            let tx="tx[{ml_expr(kid(e 0))}]"
+            let uv=ml_expr(kid(e 1))
+            if nm =? "sample" and ml_stage =? "fragment" {return "{tx}.t.sample({tx}.s, {uv})"}
+            let lod="0.0f"
+            if nm =? "sample_lod" {lod=ml_expr(kid(e 2))}
+            return "{tx}.t.sample({tx}.s, {uv}, level({lod}))"
+        }
+        if nm =? "texel" {
+            let tx="tx[{ml_expr(kid(e 0))}]"
+            let p=ml_expr(kid(e 1))
+            return "{tx}.t.read(uint2(clamp(({p}), int2(0), int2({tx}.t.get_width(), {tx}.t.get_height()) - 1)), 0)"
+        }
+        if nm =? "texture_size" {
+            let tx="tx[{ml_expr(kid(e 0))}]"
+            return "int2({tx}.t.get_width(), {tx}.t.get_height())"
+        }
+        let g=sl_turns_fns.get(nm)
+        if g not=? none {return "{g}(6.283185307179586f * fract({ml_expr(kid(e 0))}))"}
+        if ml_math_names.get(nm) not=? none {return ml_math(nm e)}
+        if nkids(e) >? 0 and is_gpu_buffer(ntype(kid(e 0))) {
+            if nm =? "len" {return "({ml_expr(kid(e 0))}).n"}
+            if nm =? "[]=" {ml_err(pos "GPU buffers are written in statements of compute functions")}
+            if starts_with(nm "atomic_") {return ml_atomic(e nm)}
+        }
+        if starts_with(nm "subgroup_") {return ml_subgroup(e nm)}
+    }
+    # (prelude helpers written in Sloppy are translated like user code)
+    let args:array<string>=[]
+    loop i in [0..nkids(e)) {
+        let a=kid(e i)
+        let l=fns.ptr[f].params[i]
+        if prune(MslStmtWord(locals.ptr[l].type)) =? ml_utype {
+            let r=ml_ref(a)
+            if (r.base as array<uint8>).length =? 0 or r.c not=? 0 or (r.d as array<uint8>).length not=? 0 {ml_err(nodes.ptr[a].pos "the uniforms can only be passed on as they are")}
+            args.push(r.base)
+        }
+        else if MslStmtWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {args.push(ml_target(a ""))} else {args.push(ml_expr(a))}
+    }
+    "{ml_fn(f)}({ml_with_ctx(ml_ctx_args() args)})"
+}
+# the math functions, scalars spread to vectors where the result is a vector (min(v, 0.0),
+# mix(a, b, t), step(edge, v))
+ml_math=(nm:string e:MslStmtWord):>string=>$unsafe {
+    let t=sl_type(ntype(e))
+    let pos=nodes.ptr[e].pos
+    if nm =? "norm" and nkids(e) not=? 1 {ml_err(nodes.ptr[e].pos "the p-norm is not available in shaders: write the length, v.norm")}
+    let n=nkids(e)
+    let args:array<string>=[]
+    loop i in [0..n) {
+        let a=kid(e i)
+        let x=ml_expr(a)
+        let at=prune(ntype(a))
+        if ml_is_vector(t) and not is_vec(at) and nm not=? "norm" and nm not=? "distance" and nm not=? "dot" {
+            x="{ml_type(t pos)}({ml_as(a x t)})"
+        }
+        else if ml_is_floaty(t) and not ml_is_floaty(at) and types.ptr[at].kind not=? 'bool_' {x=ml_as(a x t)}
+        args.push(x)
+    }
+    if nm =? "dot" and not is_vec(ntype(kid(e 0))) {return "({args[0]} * {args[1]})"}
+    if nm =? "fwidth" and ml_stage not=? "fragment" {ml_err(pos "fwidth() can only be used in the fragment shader")}
+    if nm =? "atan" and n =? 2 {return "atan2({args[0]}, {args[1]})"}
+    if nm =? "inverse" {
+        if ml_first("inverse") {ml_decls.push(ML_INVERSE())}
+    }
+    if nm =? "hypot" and ml_first("hypot") {
+        ml_decls.push(sl_hypot_body("as_type<uint>" "as_type<float>"))
+    }
+    if nm =? "mod" {
+        if ml_first("mod") {ml_decls.push("template <typename T, typename U> T sl_mod(T x, U y) \{ return x - y * floor(x / y); }\n")}
+        if not ml_is_floaty(t) {return "({args[0]} % {args[1]})"}
+    }
+    if nm =? "abs" and not ml_is_floaty(t) and types.ptr[t].kind not=? 'bool_' {
+        # (x below 0 negated through unsigned numbers, which wrap: abs of the smallest integer is itself)
+        if ml_is_vector(t) {
+            let m=MslStmtWord(types.ptr[t].bits)
+            return gl_narrow("select(({args[0]}), as_type<int{m}>(-as_type<uint{m}>({args[0]})), ({args[0]}) < 0)" t)
+        }
+        return gl_narrow("(({args[0]}) < 0 ? as_type<int>(-as_type<uint>(int({args[0]}))) : ({args[0]}))" t)
+    }
+    if gl_unsigned(t) and (nm =? "min" or nm =? "max" or nm =? "clamp") {
+        let us:array<string>=[]
+        loop x in args {us.push("as_type<uint>(int({x}))")}
+        return "as_type<int>({nm}({join(us ", ")}))"
+    }
+    let g=ml_math_names[nm]
+    gl_narrow("{g}({join(args ", ")})" t)
+}
+ML_INVERSE=():>string=>{
+    join([
+        "float4x4 sl_inverse(float4x4 m) \{\n"
+        "    float a00 = m[0][0], a01 = m[0][1], a02 = m[0][2], a03 = m[0][3];\n"
+        "    float a10 = m[1][0], a11 = m[1][1], a12 = m[1][2], a13 = m[1][3];\n"
+        "    float a20 = m[2][0], a21 = m[2][1], a22 = m[2][2], a23 = m[2][3];\n"
+        "    float a30 = m[3][0], a31 = m[3][1], a32 = m[3][2], a33 = m[3][3];\n"
+        "    float b00 = a00 * a11 - a01 * a10, b01 = a00 * a12 - a02 * a10, b02 = a00 * a13 - a03 * a10;\n"
+        "    float b03 = a01 * a12 - a02 * a11, b04 = a01 * a13 - a03 * a11, b05 = a02 * a13 - a03 * a12;\n"
+        "    float b06 = a20 * a31 - a21 * a30, b07 = a20 * a32 - a22 * a30, b08 = a20 * a33 - a23 * a30;\n"
+        "    float b09 = a21 * a32 - a22 * a31, b10 = a21 * a33 - a23 * a31, b11 = a22 * a33 - a23 * a32;\n"
+        "    float d = 1.0f / (b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06);\n"
+        "    return float4x4(\n"
+        "        float4(a11 * b11 - a12 * b10 + a13 * b09, a02 * b10 - a01 * b11 - a03 * b09, a31 * b05 - a32 * b04 + a33 * b03, a22 * b04 - a21 * b05 - a23 * b03) * d,\n"
+        "        float4(a12 * b08 - a10 * b11 - a13 * b07, a00 * b11 - a02 * b08 + a03 * b07, a32 * b02 - a30 * b05 - a33 * b01, a20 * b05 - a22 * b02 + a23 * b01) * d,\n"
+        "        float4(a10 * b10 - a11 * b08 + a13 * b06, a01 * b08 - a00 * b10 - a03 * b06, a30 * b04 - a31 * b02 + a33 * b00, a21 * b02 - a20 * b04 - a23 * b00) * d,\n"
+        "        float4(a11 * b07 - a10 * b09 - a12 * b06, a00 * b09 - a01 * b07 + a02 * b06, a31 * b01 - a30 * b03 - a32 * b00, a20 * b03 - a21 * b01 + a22 * b00) * d);\n}\n"
+    ] "")
+}
+ml_write=(t0:MslStmtWord base:string c:MslStmtWord d:string v:string pre:string pos:MslStmtWord):>void=>$unsafe {
+    ml_store_decls()
+    let t=sl_type(t0)
+    let k=types.ptr[t].kind
+    if k =? 'float_' {
+        if MslStmtWord(types.ptr[t].bits) =? 64 {
+            ml_temps += 1
+            ml_out.push("{pre}uint2 sl_d{ml_temps} = sl_to_f64({v});\n")
+            ml_out.push("{pre}{ml_wref(base c d)} = sl_d{ml_temps}.x;\n{pre}{ml_wref(base c + 4 d)} = sl_d{ml_temps}.y;\n")
+        }
+        else {ml_out.push("{pre}{ml_wref(base c d)} = as_type<uint>(float({v}));\n")}
+        return
+    }
+    if k =? 'int_' {
+        let bits=MslStmtWord(types.ptr[t].bits)
+        if bits <? 32 {
+            ml_out.push("{pre}sl_store_sub({base}, {ml_off(c d)}, {bits}, {v});\n")
+            return
+        }
+        ml_out.push("{pre}{ml_wref(base c d)} = as_type<uint>(int({v}));\n")
+        if bits =? 64 {
+            let hi="0u"
+            if types.ptr[t].sign {hi="as_type<uint>(int({v}) >> 31)"}
+            ml_out.push("{pre}{ml_wref(base c + 4 d)} = {hi};\n")
+        }
+        return
+    }
+    if k =? 'bool_' {
+        ml_out.push("{pre}sl_store_sub({base}, {ml_off(c d)}, 8, ({v}) ? 1 : 0);\n")
+        return
+    }
+    if k =? 'vec' {
+        if t =? T_MAT4 {
+            loop col in [0..4) {ml_write(T_VEC4 base c + 16 * col d "({v})[{col}]" pre pos)}
+            return
+        }
+        let sw=["x" "y" "z" "w"]
+        loop i in [0..MslStmtWord(types.ptr[t].bits)) {ml_out.push("{pre}{ml_wref(base c + 4 * i d)} = as_type<uint>(({v}).{sw[i]});\n")}
+        return
+    }
+    if k =? 'struct_' {
+        let si=MslStmtWord(types.ptr[t].st)
+        if is_lib_texture(si) or is_gpu_buffer(t) {ml_err(pos "a {structs.ptr[si].name} cannot be written into a GPU buffer")}
+        layout(t)
+        loop i in [0..MslStmtWord(structs.ptr[si].nfields)) {
+            let f=MslStmtWord(structs.ptr[si].fields) + i
+            ml_write(MslStmtWord(fields.ptr[f].type) base c + MslStmtWord(fields.ptr[f].offset) d "({v}).{name_of(MslStmtWord(fields.ptr[f].name))}_" pre pos)
+        }
+        return
+    }
+    if k =? 'fixed' {
+        let el=MslStmtWord(types.ptr[t].elem)
+        layout(el)
+        loop i in [0..fixed_len(t)) {ml_write(el base c + i * tsize(el) d "({v})[{i}]" pre pos)}
+        return
+    }
+    ml_err(pos "type {dt(t)} cannot be written into a GPU buffer")
+}
+# atomic_op(b, i, v...): the element's old value (0 past the ends, where nothing is done)
+ml_atomic=(e:MslStmtWord nm:string):>string=>$unsafe {
+    let pos=nodes.ptr[e].pos
+    if ml_stage not=? "compute" {ml_err(pos "{nm}() can be used in compute programs only")}
+    let et=prune(gpu_buffer_elem(ntype(kid(e 0))))
+    if types.ptr[et].kind not=? 'int_' or MslStmtWord(types.ptr[et].bits) not=? 32 {ml_err(pos "atomic operations work on {tsd("GpuBuffer[i32] and GpuBuffer[u32]" "GpuBuffer<int32> and GpuBuffer<uint32>")}")}
+    let sg=types.ptr[et].sign
+    let op=""
+    if nm =? "atomic_compare_exchange" {op="cas"} else if nm =? "atomic_exchange" {op="exchange"}
+    else if nm =? "atomic_add" or nm =? "atomic_sub" or nm =? "atomic_min" or nm =? "atomic_max" or nm =? "atomic_and" or nm =? "atomic_or" or nm =? "atomic_xor" {op=replace(nm "atomic_" "")} else {ml_err(pos "{nm}() is not available in compute functions")}
+    let ty="uint"
+    if sg and (op =? "min" or op =? "max") {ty="int"}
+    let fname="sl_at_{op}_{ty}"
+    if ml_first(fname) {
+        let at="atomic_{ty}"
+        if op =? "cas" {
+            ml_decls.push("int {fname}(SlGB b, int i, int expected, int desired) \{\n    if (as_type<uint>(i) >= as_type<uint>(b.n)) return 0;\n    device {at}* p = (device {at}*)(b.p + i);\n    uint e = as_type<uint>(expected);\n    uint old = e;\n    while (!atomic_compare_exchange_weak_explicit(p, &old, as_type<uint>(desired), memory_order_relaxed, memory_order_relaxed)) \{\n        if (old != e) break;\n    }\n    return as_type<int>(old);\n}\n")
+        }
+        else {
+            let call="atomic_fetch_{op}_explicit(p, as_type<{ty}>(v), memory_order_relaxed)"
+            if op =? "exchange" {call="atomic_exchange_explicit(p, as_type<{ty}>(v), memory_order_relaxed)"}
+            ml_decls.push("int {fname}(SlGB b, int i, int v) \{\n    if (as_type<uint>(i) >= as_type<uint>(b.n)) return 0;\n    device {at}* p = (device {at}*)(b.p + i);\n    return as_type<int>({call});\n}\n")
+        }
+    }
+    let args:array<string>=[]
+    loop j in [0..nkids(e)) {args.push(ml_expr(kid(e j)))}
+    "{fname}({join(args ", ")})"
+}
+# subgroup_add(x) and the others: Metal's SIMD-group functions
+ml_subgroup=(e:MslStmtWord nm:string):>string=>$unsafe {
+    let pos=nodes.ptr[e].pos
+    if ml_stage not=? "compute" {ml_err(pos "{nm}() can be used in compute functions only")}
+    if nm =? "subgroup_size" {return "int(sl_sg_size)"}
+    if nm =? "subgroup_invocation_id" {return "int(sl_sg_id)"}
+    if nm =? "subgroup_elect" {return "simd_is_first()"}
+    let x=""
+    if nkids(e) >? 0 {x=ml_expr(kid(e 0))}
+    if nm =? "subgroup_all" {return "simd_all({x})"}
+    if nm =? "subgroup_any" {return "simd_any({x})"}
+    if nm =? "subgroup_broadcast_first" {return "simd_broadcast_first({x})"}
+    let t=sl_type(ntype(e))
+    let k=types.ptr[t].kind
+    let un=gl_unsigned(t)
+    if nm =? "subgroup_add" {return gl_narrow("simd_sum({x})" t)}
+    if nm =? "subgroup_inclusive_add" {return gl_narrow("simd_prefix_inclusive_sum({x})" t)}
+    if nm =? "subgroup_exclusive_add" {return gl_narrow("simd_prefix_exclusive_sum({x})" t)}
+    if nm =? "subgroup_min" or nm =? "subgroup_max" {
+        let f="simd_min"
+        if nm =? "subgroup_max" {f="simd_max"}
+        if un {return "as_type<int>({f}(as_type<uint>(int({x}))))"}
+        return "{f}({x})"
+    }
+    if nm =? "subgroup_and" or nm =? "subgroup_or" or nm =? "subgroup_xor" {
+        let f=replace(nm "subgroup_" "simd_")
+        if k =? 'bool_' {return "bool({f}(int({x})))"}
+        return "{f}({x})"
+    }
+    ml_err(pos "{nm}() is not available in compute functions")
+    ""
+}
+# returns (the vertex stage's source, the fragment stage's): entry points sl_vs and sl_fs
+msl_build=(vsf:MslStmtWord fsf:MslStmtWord):>[string string]=>$unsafe {
+    let pos=nodes.ptr[MslStmtWord(fns.ptr[vsf].decl)].pos
+    let np=fns.ptr[vsf].ptypes.length
+    let vtype_=MslStmtWord(fns.ptr[vsf].ptypes[0])
+    let itype:MslStmtWord=0
+    if np =? 3 {itype=MslStmtWord(fns.ptr[vsf].ptypes[1])}
+    let otype=MslStmtWord(fns.ptr[vsf].ret)
+    # vertex
+    ml_reset("vertex")
+    ml_utype=prune(MslStmtWord(fns.ptr[vsf].ptypes[np - 1]))
+    ml_mem_decls()
+    let vname=ml_fn(vsf)
+    ml_drain()
+    let [leaves vstruct]=ml_varyings(otype pos)
+    let m="{vstruct}vertex SlV sl_vs(uint sl_vid [[vertex_id]], uint sl_iid [[instance_id]], constant SlPC& pc [[buffer(0)]], constant SlTex* tx [[buffer(1)]]) \{\n"
+    let args:array<string>=[ml_read(vtype_ "pc.verts" 0 "int(sl_vid) * pc.vstride" pos)]
+    if itype not=? 0 {args.push(ml_read(itype "pc.insts" 0 "int(sl_iid) * pc.istride" pos))}
+    args.push("pc.params")
+    let ofs=gl_struct_fields(otype)
+    m="{m}{"    {ml_type(otype pos)} o = {vname}(tx, sl_vid, sl_iid, {join(args ", ")});\n"}"
+    # (y turned over when drawing to a texture: see the top; z from -1..1 to 0..1)
+    m="{m}    float4 p = o.{ofs[0][0]}_;\n    SlV r;\n    r.pos = float4(p.x, pc.flip > 0.0f ? p.y : -p.y, (p.z + p.w) * 0.5f, p.w);\n"
+    loop i in 0.. and lf in leaves {m="{m}    r.v{i} = o{lf[0]};\n"}
+    m="{m}    return r;\n}\n"
+    let vs=ml_source(m)
+    # fragment
+    ml_reset("fragment")
+    let fnp=fns.ptr[fsf].ptypes.length
+    ml_utype=prune(MslStmtWord(fns.ptr[fsf].ptypes[fnp - 1]))
+    ml_mem_decls()
+    let fname=ml_fn(fsf)
+    ml_drain()
+    let itype2=MslStmtWord(fns.ptr[fsf].ptypes[0])
+    let [leaves2 vstruct2]=ml_varyings(itype2 pos)
+    let ifs=gl_struct_fields(itype2)
+    m="{vstruct2}fragment float4 sl_fs(SlV in [[stage_in]], constant SlPC& pc [[buffer(0)]], constant SlTex* tx [[buffer(1)]]) \{\n"
+    # (OpenGL counts the window's rows from the bottom)
+    m="{m}    float4 fc = in.pos;\n    if (pc.flip > 0.0f) fc.y = pc.flip - fc.y;\n"
+    m="{m}    {ml_type(itype2 pos)} i = {ml_type(itype2 pos)}\{};\n    i.{ifs[0][0]}_ = fc;\n"
+    loop j in 0.. and lf in leaves2 {m="{m}    i{lf[0]} = in.v{j};\n"}
+    m="{m}    return {fname}(tx, i, pc.params);\n}\n"
+    let fs=ml_source(m)
+    let dir=env("DEWY_MSL_DUMP")
+    if dir not=? none {
+        write_file("{dir}/{ml_dumped}.vs.metal" vs);
+        write_file("{dir}/{ml_dumped}.fs.metal" fs);
+        ml_dumped += 1
+    }
+    [vs fs]
+}
+# compute(f) (lib/game/gpubuffer.jo): f(id, params) for each id in [0, n) (n where the vertex
+# stride is), or each cell of a grid (f(id: ivec2 or ivec3, params): its width and height where
+# the strides are, its depth in depth). Entry point sl_main.
+msl_compute=(f:MslStmtWord):>string=>$unsafe {
+    ml_reset("compute")
+    ml_utype=prune(MslStmtWord(fns.ptr[f].ptypes[1]))
+    ml_mem_decls()
+    let name=ml_fn(f)
+    ml_drain()
+    let it=prune(fns.ptr[f].ptypes[0])
+    let m="kernel void sl_main(uint3 gid [[thread_position_in_grid]], uint sl_sg_size [[threads_per_simdgroup]], uint sl_sg_id [[thread_index_in_simdgroup]], constant SlPC& pc [[buffer(0)]], constant SlTex* tx [[buffer(1)]]) \{\n"
+    if it =? T_IVEC3 {m="{m}    if (int(gid.x) < pc.vstride && int(gid.y) < pc.istride && int(gid.z) < pc.depth) {name}(tx, sl_sg_size, sl_sg_id, int3(gid), pc.params);\n"} else if it =? T_IVEC2 {m="{m}    if (int(gid.x) < pc.vstride && int(gid.y) < pc.istride) {name}(tx, sl_sg_size, sl_sg_id, int2(gid.xy), pc.params);\n"}
+    else {m="{m}    if (int(gid.x) < pc.vstride) {name}(tx, sl_sg_size, sl_sg_id, int(gid.x), pc.params);\n"}
+    m="{m}}\n"
+    let src=ml_source(m)
+    let dir=env("DEWY_MSL_DUMP")
+    if dir not=? none {
+        write_file("{dir}/{ml_dumped}.comp.metal" src);
+        ml_dumped += 1
+    }
+    src
+}
+# the compute program of a dotted expression on GPU arrays (see spirv_kernel: the same
+# parameters, at pc.params): each thread computes one element of the result. Entry point sl_main.
+msl_kernel=(f:MslStmtWord desc:string):>string=>$unsafe {
+    ml_reset("kernel")
+    ml_utype=0
+    ml_mem_decls()
+    let name=ml_fn(f)
+    ml_drain()
+    let m="kernel void sl_main(uint3 gid [[thread_position_in_grid]], constant SlPC& pc [[buffer(0)]], constant SlTex* tx [[buffer(1)]]) \{\n"
+    m="{m}    device const uint* q = pc.params;\n    int idx = int(gid.x);\n    if (idx >= as_type<int>(q[6])) return;\n"
+    m="{m}    int od3 = as_type<int>(q[5]), od2 = as_type<int>(q[4]), od1 = as_type<int>(q[3]);\n"
+    m="{m}    int i3 = idx % od3;\n    int r = idx / od3;\n    int i2 = r % od2;\n    r /= od2;\n    int i1 = r % od1;\n    int i0 = r / od1;\n"
+    let nt:MslStmtWord=0
+    let nf:MslStmtWord=0
+    loop c in (desc as array<uint8>) {
+        if c =? b't' or c =? b'i' {nt += 1}
+        if c =? b's' {nf += 1}
+    }
+    let sbase=8 + 6 * nt
+    let args:array<string>=[]
+    let kt:MslStmtWord=0
+    let kf:MslStmtWord=0
+    let ki:MslStmtWord=0
+    loop c in (desc as array<uint8>) {
+        if c =? b't' or c =? b'i' {
+            let w0=8 + 6 * kt
+            m="{m}    int o{kt} = i0 * as_type<int>(q[{w0 + 2}]) + i1 * as_type<int>(q[{w0 + 3}]) + i2 * as_type<int>(q[{w0 + 4}]) + i3 * as_type<int>(q[{w0 + 5}]);\n"
+            let v="sl_ptr(q, {w0 * 4})[o{kt}]"
+            if c =? b'i' {args.push("as_type<int>({v})")} else {args.push("as_type<float>({v})")}
+            kt += 1
+        }
+        else if c =? b's' {
+            args.push("as_type<float>(q[{sbase + kf}])")
+            kf += 1
+        }
+        else {
+            args.push("as_type<int>(q[{sbase + nf + ki}])")
+            ki += 1
+        }
+    }
+    let rt=prune(MslStmtWord(fns.ptr[f].ret))
+    let val="{name}(tx, {join(args ", ")})"
+    let bits="as_type<uint>({val})"
+    if types.ptr[rt].kind =? 'bool_' {bits="as_type<uint>(({val}) ? 1.0f : 0.0f)"} else if types.ptr[rt].kind =? 'int_' {bits="as_type<uint>(int({val}))"}
+    m="{m}    sl_ptr(q, 0)[idx] = {bits};\n}\n"
+    let src=ml_source(m)
+    let dir=env("DEWY_MSL_DUMP")
+    if dir not=? none {
+        write_file("{dir}/{ml_dumped}.kernel.metal" src);
+        ml_dumped += 1
+    }
+    src
+}

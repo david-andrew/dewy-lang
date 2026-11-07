@@ -29,5 +29,9 @@ def compare_builds(compiler, tmp_path, monkeypatch, leaves, paths, flags=((),)):
     paths = [p if (tmp_path / p).exists() else ROOT / p for p in paths]
     dewy, jo = leaf_compilers(compiler, tmp_path, leaves)
     expected = build_all(jo, tmp_path, 'jo', paths, flags)
-    assert build_all(dewy, tmp_path, 'dewy', paths, flags) == expected
+    got = build_all(dewy, tmp_path, 'dewy', paths, flags)
+    for a, b in zip(got, expected):
+        # (the first program that differs: its text, and which output files differ)
+        assert a[:5] == b[:5] and a[5].keys() == b[5].keys(), (a[:5], b[:5])
+        assert a[5] == b[5], (a[0], a[1], [name for name in a[5] if a[5][name] != b[5][name]])
     return expected
