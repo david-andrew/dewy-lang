@@ -1,4 +1,5 @@
 $runtime_checks
+from p"checks_thin_expr.dewy" import (is_gpu_array nd_elem)
 from p"check_constant.jo" import (cc_passed)
 from p"directives.jo" import (DIR_PROTOTYPE DIR_RUNTIME dir_name_assumed_bounds dir_policy dir_value)
 from p"directive_ops.dewy" import (dir_assume_local_asserts)
@@ -217,6 +218,20 @@ panic_literal=(e0:PanicWord):>int64=>$unsafe {
     if e >? 0 and (nodes.ptr[e].kind =? 'int_lit' and not has_flag(e NF_U64) or nodes.ptr[e].kind =? 'bool_lit') {return e}
     return 0
 }
+# GPU float sum/mean are total, including an empty array. The implementation
+# dispatches ceil(n/64) outputs, guards each source read by n and downloads
+# only live outputs. GpuBuffer's public indexing panic is not a caller
+# precondition here. Match the bundled declaration, never a user's namesake.
+# Demand-driven O(1); other effects still come from the body.
+panic_gpu_total=(n:PanicWord):>bool=>$unsafe {
+    if k_call_args(n) not=? 1 {return false}
+    let d=PanicWord(fns.ptr[PanicWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/game/gpuarray.jo" {return false}
+    let name=name_of(PanicWord(nodes.ptr[d].name))
+    if name not=? "sum" and name not=? "mean" {return false}
+    let t=representation_type(ntype(kid(n 0)))
+    return is_gpu_array(t) and tkind(nd_elem(t)) =? 'float_'
+}
 panic_literal_safe=(n:PanicWord):>bool=>$unsafe {
     if cc_passed.length >? 0 and cc_passed.has(n) {return true}
     if k_call_args(n) <? 2 {return false}
@@ -292,7 +307,7 @@ panic_site=(f:PanicWord n:PanicWord):>void=>$unsafe {
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
         }
-        if nodes.ptr[n].sym >? 0 and not (k =? 'call' and (fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_floor_call(n) not=? 0 or fact_divisors.has(n) or fact_rational_constructor(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or panic_atomic_progress(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_rational_divmod(n)) or panic_literal_safe(n))) {panic_edge(f PanicWord(nodes.ptr[n].sym) n);}
+        if nodes.ptr[n].sym >? 0 and not (k =? 'call' and (fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_floor_call(n) not=? 0 or fact_divisors.has(n) or fact_rational_constructor(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or panic_atomic_progress(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_rational_divmod(n)) or panic_gpu_total(n) or panic_literal_safe(n))) {panic_edge(f PanicWord(nodes.ptr[n].sym) n);}
     }
     if k =? 'binary' or k =? 'intrinsic' {
         loop g in value_helper_calls(n) {panic_edge(f g n);}
