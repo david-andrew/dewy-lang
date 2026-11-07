@@ -25,7 +25,42 @@
 ## P2: unblocks common friction
 
 ### D10. Safety defaults and tag names (#108)
-- **Status:** accepted parts are in decisions.md (batch 3). Names are being re-picked by testing candidates on readers with no context, and they come back here with the winners. Proposal: `docs/design/proposals/bulletproof/round2.md`.
+- **Status:** accepted parts are in decisions.md (batch 3). The names below were each read cold by three readers with no context, and the misread ones were replaced. Full scoring: `docs/design/proposals/bulletproof/names-round1.md`.
+- **Names: turn this on, and…**
+
+| Tag | …this happens |
+|---|---|
+| `$allow_unproven` | An unproven index, division or narrowing compiles; if it fails, the program ends with a report. Narrower: `$allow_unproven_indexing`, `$allow_unproven_division` |
+| `$prototype` | The same, with a warning at each site |
+| `$allow_unconfined_paths` | Joined paths need no confinement (only if Q3 makes that the default) |
+| `$assume_extern_never_waits_on_tasks` | On a C-call wrapper: your unchecked claim that it never waits on this program's tasks, for `$no_deadlocks` |
+| `$finite_floats`, `$no_nan`, `$no_inf` | Producing NaN or infinity without a proof is a compile error |
+| `$no_hidden_copies` | `let b = a` on an array is a compile error; write `.copy` |
+| `$explicit_allocation_failure` | Allocating returns `T \| OutOfMemory`, and you must handle it |
+| `$count_local_asserts_as_panics` | Calling a `$runtime_assert` function in your own module marks your function as "may panic" too |
+| `$prove_no_counter_overflow` | A 64-bit counter needs a real overflow proof instead of being assumed safe |
+| `$prove_confined_paths` | Every path, whole ones too, must be proven inside a base folder |
+| `$no_unverified_extern_waits` | The `$assume_extern_never_waits_on_tasks` claims are compile errors |
+| `$args.prove_finite_floats` | Above a function: callers must prove float arguments finite, and the body may rely on it |
+| `$time.handle_uncertain_today` | `today.year` is a compile error, because the clock may not know the date (the other strict time tags follow the same `handle_` pattern) |
+| `$prove_library_asserts` | Calling library code that reaches an unproven `assert` is a compile error. Remedy: a guard at your call, or `= false` on just that block |
+| `$prove_library_runtime_checks` | Calling library code that relies on a hidden index or division check is a compile error |
+| `$prove_library_arena_safety` | `printl(xs)` inside an arena block is a compile error until `printl` is proven not to keep the memory |
+| `$prove_library_drop_cannot_fail` | `@(m.lock)` is a compile error until releasing is proven unable to fail |
+| `$no_trusted_library` | All four library tags |
+
+- **Kept as you have them:** `$no_deadlocks`, `$no_hidden_costs`, `$unsafe`, `$bulletproof`.
+- **Random:** `random_bytes` is fast, never fails and isn't for secrets. `secure_random_bytes` is for secrets and can give `NoEntropy`. All three readers picked `secure_random_bytes` for a password-reset token.
+- **Float constants:**
+
+```dewy
+float64.max   float64.most_negative   float64.smallest_normal   float64.smallest_above_zero
+float64.epsilon   float64.max_exact_int   float64.inf   float64.nan
+x.next_up   x.next_down   x.spacing          # spacing: the gap from x to the next float up
+if float64.most_negative <=? x <=? float64.max same(x)   # proves x is finite
+```
+
+- **Q1. Take these names?** Rec: yes.
 - **Still open, Q3: should joined paths be a compile error by default?**
 
 ```dewy
