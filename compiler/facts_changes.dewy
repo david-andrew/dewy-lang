@@ -323,7 +323,8 @@ fact_changes=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_')
     }
     # (a direct call havocs what its summary writes; reading lengths and
     # erased or failing assertions write nothing; a record is built in place)
-    if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_sequence_store_call(n) {fact_sequence_store(n @s at reason)}
+    # (a swap, as a selection store, keeps the length: facts_arrays.dewy, kind 4)
+    if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_sequence_store_call(n) or fact_array_call(n) =? 4) {fact_sequence_store(n @s at reason)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_nd_plain_store(n) {fact_nd_store(n @s at reason)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and fact_pool_call(n) =? 4 {fact_pool_store_changes(n @s)}
     else if k =? 'call' and nodes.ptr[n].aux =? 0 and (fact_map_store_call(n) or fact_map_insert_call(n)) {fact_map_store_changes(n @s at reason)}

@@ -1,0 +1,11 @@
+shrink=(@xs:array<int64>):>void=>{
+    if xs.length >? 0 {xs.pop();}
+}
+main=()=>{
+    let xs:array<int64> = fill(0 5)
+    loop i in [1..5) {
+        xs.swap(i-1 i)
+        shrink(@xs)
+    }
+    printl(xs)
+}

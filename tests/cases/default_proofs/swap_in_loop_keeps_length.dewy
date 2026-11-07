@@ -1,0 +1,14 @@
+bubble=(xs:array<int64 length =? 4>):>array<int64>=>{
+    let ys:array<int64 length =? 4> = xs
+    loop i in [1..4) {
+        if ys[i-1] >? ys[i] {ys.swap(i-1 i)}
+    }
+    return ys
+}
+plain=():>array<int64>=>{
+    let xs:array<int64> = fill(0 5)
+    xs[0]=1
+    loop i in [1..5) {xs.swap(i-1 i)}
+    return xs
+}
+main=()=>{printl"{bubble([4 3 2 1])} {plain()}"}
