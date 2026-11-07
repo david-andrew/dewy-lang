@@ -1,0 +1,387 @@
+$runtime_checks
+from p"checked_eval.dewy" import (cx_token_values)
+from p"ast.jo" import (NF_MUT has_flag kid kids nkids nodes set_list)
+from p"check.jo" import (fns main_fn resolve_type subst)
+from p"dewy_reader_types.dewy" import (ResultClause)
+from p"expr.jo" import (CV IN int_fits)
+from p"facts.jo" import (FactState fact_assume fact_bound fact_capture fact_compare fact_comparison fact_constant fact_domain fact_new fact_pending_defers fact_policy fact_project fact_set_bound fact_speculating fact_terms fact_truth fact_validated)
+from p"facts_conditions.dewy" import (fact_implication_reads fact_implied fact_imply)
+from p"facts_forgets.dewy" import (fact_forget)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"node_store.dewy" import (Node)
+from p"proofs.jo" import (ResultEvidence proof_active proof_calls proof_decls proof_pending proof_predicates result_active result_boolean_masks result_contracts result_syntax)
+from p"refine.jo" import (ref_atoms ref_intern ref_predicates ref_projection_type ref_subst ref_value refine_entry representation_type)
+from p"refinement_types.dewy" import (FactBound FactTerm RefAtom)
+from p"types.jo" import (T_BOOL T_INT T_U64 T_VOID has_var is_int is_union prune type_eq types union_index union_members)
+from p"util.jo" import (fatal)
+from p"witness.jo" import (wit_proof)
+
+ProofWord:type=int64<overflow='wrap'>
+# More restrictive than executable assertions: no globals, indexed access,
+# calls, or overloaded operators may disappear with an erased call/body.
+proof_term=(n:ProofWord depth:ProofWord=0):>void=>$unsafe {
+    if n =? 0 {return}
+    if depth >? 128 {fatal(nodes.ptr[n].pos "proof fact-term budget exhausted")}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' or k =? 'bool_lit' {return}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) {return}
+    if k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.refinement)) or nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_))) {
+        proof_term(ProofWord(nodes.ptr[n].a) depth + 1)
+        return
+    }
+    if k =? 'field' and nodes.ptr[n].aux >=? 0 {
+        proof_term(ProofWord(nodes.ptr[n].a) depth + 1)
+        return
+    }
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.len)) {
+        proof_term(kid(n 0) depth + 1)
+        return
+    }
+    if k =? 'not_' or k =? 'unary' and nodes.ptr[n].aux =? 0 {
+        proof_term(ProofWord(nodes.ptr[n].a) depth + 1)
+        return
+    }
+    if k =? 'and_' or k =? 'or_' or k =? 'binary' and nodes.ptr[n].aux =? 0 {
+        let op=cx_token_values.ptr[ProofWord(nodes.ptr[n].op)]
+        if k =? 'binary' and not fact_comparison(op) and op not=? 'plus' and op not=? 'minus' and op not=? 'star' {
+            fatal(nodes.ptr[n].pos "proof arguments and conditions require pure fact terms")
+        }
+        proof_term(ProofWord(nodes.ptr[n].a) depth + 1)
+        proof_term(ProofWord(nodes.ptr[n].b) depth + 1)
+        return
+    }
+    fatal(nodes.ptr[n].pos "proof arguments and conditions require pure fact terms; runtime calls and globals cannot be erased")
+}
+proof_walk=(n:ProofWord body:bool statement:bool=false):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and proof_decls.has(ProofWord(fns.ptr[ProofWord(nodes.ptr[n].sym)].decl)) {
+        if not statement {fatal(nodes.ptr[n].pos "a proof cannot be used as a value; use a direct statement call")}
+        loop arg in kids(n) {proof_term(arg)}
+        return
+    }
+    if body {
+        if k =? 'block' {
+            loop child in kids(n) {proof_walk(child true)}
+            return
+        }
+        if k =? 'exprstmt' {
+            proof_walk(ProofWord(nodes.ptr[n].a) true true)
+            return
+        }
+        if k =? 'vardecl' and nodes.ptr[n].aux2 =? 1 {
+            proof_term(ProofWord(nodes.ptr[n].b))
+            return
+        }
+        if k =? 'if_' {
+            proof_term(ProofWord(nodes.ptr[n].a))
+            proof_walk(ProofWord(nodes.ptr[n].b) true)
+            proof_walk(ProofWord(nodes.ptr[n].c) true)
+            return
+        }
+        if k =? 'return_' and nodes.ptr[n].a =? 0 {return}
+        if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.static_assert)) {
+            if nkids(n) >? 0 {proof_term(kid(n 0))}
+            return
+        }
+        fatal(nodes.ptr[n].pos "$proof bodies allow only assertions, branches, bare returns and proof calls")
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {proof_walk(ProofWord(nodes.ptr[n].a) false k =? 'exprstmt')}
+    if mask & 2 not=? 0 {proof_walk(ProofWord(nodes.ptr[n].b) false)}
+    if mask & 4 not=? 0 {proof_walk(ProofWord(nodes.ptr[n].c) false)}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {proof_walk(child false)}
+    }
+}
+# Validate dependencies by declaration, including across generic instances.
+proof_visit=(decl:ProofWord @visiting:array<int64> @done:array<int64>):>void=>$unsafe {
+    if contains(done decl) {return}
+    if contains(visiting decl) {fatal(nodes.ptr[decl].pos "cyclic proof dependency")}
+    visiting.push(decl)
+    loop call in proof_calls {
+        if ProofWord(fns.ptr[call.owner].decl) not=? decl {continue}
+        proof_visit(ProofWord(fns.ptr[ProofWord(nodes.ptr[call.node].sym)].decl) @visiting @done)
+    }
+    visiting.pop();
+    done.push(decl)
+}
+proof_prepare=():>void=>$unsafe {
+    let seen=dict<int64 bool>()
+    loop call in proof_calls {seen[call.owner]=true}
+    loop f in [1..fns.length) {
+        if proof_decls.has(ProofWord(fns.ptr[f].decl)) {seen[f]=true}
+    }
+    loop [f _] in seen {
+        if proof_decls.has(ProofWord(fns.ptr[f].decl)) and (f =? main_fn or fns.ptr[f].export_name not=? "") {
+            fatal(nodes.ptr[ProofWord(fns.ptr[f].decl)].pos "a proof cannot be a runtime entry point or export")
+        }
+        proof_walk(ProofWord(fns.ptr[f].body) proof_decls.has(ProofWord(fns.ptr[f].decl)))
+    }
+    let visiting:array<int64>=[]
+    let done:array<int64>=[]
+    loop [f _] in seen {
+        if proof_decls.has(ProofWord(fns.ptr[f].decl)) {proof_visit(ProofWord(fns.ptr[f].decl) @visiting @done)}
+    }
+}
+proof_predicate=(f:ProofWord):>ProofWord=>$unsafe {
+    ref_subst(proof_predicates[ProofWord(fns.ptr[f].decl)] fns.ptr[f].targs)
+}
+proof_require=(predicate:ProofWord values:array<int64> params:array<int64> n:ProofWord @s:FactState what:string f:ProofWord=0):>void=>$unsafe {
+    if not s.live {return}
+    loop atom in ref_predicates[predicate] {
+        let base=proof_atom_type(atom params nodes.ptr[n].pos)
+        let a=ref_value(atom.a 0 values base @s)
+        let b=ref_value(atom.b 0 values base @s)
+        let truth=fact_compare(s atom.op a b)
+        if truth not=? 1 {wit_proof(n s atom a b f (-1) truth =? 0 "proof {what}")}
+    }
+}
+proof_exit=(f:ProofWord n:ProofWord @s:FactState):>void=>$unsafe {
+    proof_require(proof_predicate(f) refine_entry fns.ptr[f].ptypes n @s "exit proposition" f)
+}
+proof_call=(n:ProofWord @s:FactState):>void=>$unsafe {
+    let previous_policy=fact_policy
+    fact_policy='RequireStatic'
+    let f=ProofWord(nodes.ptr[n].sym)
+    let values:array<int64>=[]
+    loop i in 0.. and arg in kids(n) {
+        let value=arg
+        # Only the call boundary's own contract is discharged below. An
+        # explicit refined cast inside the operand still owes a static check.
+        if nodes.ptr[value].kind =? 'conv' and nodes.ptr[value].aux =? int32(int64(CV.refinement)) and type_eq(ProofWord(nodes.ptr[value].aux2) fns.ptr[f].ptypes[i]) {value=ProofWord(nodes.ptr[value].a)}
+        values.push(fact_capture(value @s))
+    }
+    # Even in ordinary code unknown obligations cannot get a runtime fallback.
+    loop i in [0..values.length) {
+        let t=prune(fns.ptr[f].ptypes[i])
+        if types.ptr[t].kind not=? 'refined' {continue}
+        loop atom in ref_predicates[ProofWord(types.ptr[t].st)] {
+            let a=ref_value(atom.a values[i] values ProofWord(types.ptr[t].elem) @s)
+            let b=ref_value(atom.b values[i] values ProofWord(types.ptr[t].elem) @s)
+            let truth=fact_compare(s atom.op a b)
+            if fact_speculating =? 0 and truth not=? 1 {wit_proof(n s atom a b f i truth =? 0 "proof precondition")}
+        }
+        let arg=kid(n i)
+        if nodes.ptr[arg].kind =? 'conv' and nodes.ptr[arg].aux =? int32(int64(CV.refinement)) {fact_validated[arg]=true}
+    }
+    loop atom in ref_predicates[proof_predicate(f)] {
+        let base=proof_atom_type(atom fns.ptr[f].ptypes nodes.ptr[n].pos)
+        let a=ref_value(atom.a 0 values base @s)
+        let b=ref_value(atom.b 0 values base @s)
+        let v=fact_new(@s fact_domain(T_BOOL) FactTerm(atom.op a b))
+        fact_assume(@s v true)
+    }
+    if result_active {result_publish(f 0 values @s)}
+    fact_policy=previous_policy
+    if fact_speculating =? 0 {fact_validated[n]=true}
+}
+proof_erase=():>void=>$unsafe {
+    loop call in proof_calls {
+        if not fact_validated.has(call.node) {
+            fact_terms=[FactTerm()]
+            let state=FactState()
+            proof_call(call.node @state)
+        }
+        nodes.ptr[call.node]=Node(kind='block' pos=nodes.ptr[call.node].pos type=int32(T_VOID))
+    }
+    # Lowering discovers functions from surviving references. Emptying bodies
+    # also prevents checked, unused proof instances from retaining runtime work.
+    loop f in [1..fns.length) {
+        if proof_decls.has(ProofWord(fns.ptr[f].decl)) {
+            set_list(ProofWord(fns.ptr[f].body) [])
+        }
+    }
+}
+result_signature=(decl:ProofWord params:array<int64> ret:ProofWord):>void=>$unsafe {
+    if not result_syntax.has(decl) and not result_boolean_masks.has(decl) {return}
+    if result_boolean_masks.has(decl) and representation_type(ret) not=? T_BOOL {
+        fatal(nodes.ptr[decl].pos "boolean result arms currently require a boolean result")
+    }
+    let clauses:array<ResultClause>=[]
+    loop clause in (result_syntax.get(decl) ?? []) {
+        let atoms:array<RefAtom>=[]
+        ref_atoms(clause.predicate 0 @atoms)
+        loop atom in atoms {proof_atom_type(atom params nodes.ptr[decl].pos);}
+        clauses.push(ResultClause(resolve_type(clause.member) ref_intern(atoms) clause.boolean))
+    }
+    # Until cleanup/place summaries support post-state arguments, reject them.
+    loop p in kids(decl) {
+        if has_flag(p NF_MUT) {fatal(nodes.ptr[p].pos "conditional result facts require value parameters")}
+    }
+    result_contracts[decl]=clauses
+}
+result_tag=(f:ProofWord clause:ResultClause):>ProofWord=>$unsafe {
+    if clause.boolean not=? 0 {return clause.boolean - 1}
+    let t=prune(subst(clause.member fns.ptr[f].targs))
+    let rt=prune(ProofWord(fns.ptr[f].ret))
+    if is_union(rt) {return union_index(rt t)}
+    if types.ptr[rt].kind =? 'opt' {return if types.ptr[t].kind =? 'none_lit' {0} else {1}}
+    -1
+}
+result_selector=(f:ProofWord result:ProofWord @s:FactState):>ProofWord=>$unsafe {
+    if representation_type(ProofWord(fns.ptr[f].ret)) =? T_BOOL {return result}
+    let selector=fact_project(@s result (-3) false T_INT)
+    let bound=fact_bound(s selector)
+    let rt=prune(ProofWord(fns.ptr[f].ret))
+    let count=if is_union(rt) {union_members(rt).length} else {2}
+    bound.lo=max(0 bound.lo)
+    bound.hi=min(count - 1 bound.hi)
+    fact_set_bound(@s selector bound)
+    selector
+}
+result_exit=(f:ProofWord result:ProofWord n:ProofWord @s:FactState):>void=>$unsafe {
+    if f <=? 0 or not s.live or not result_contracts.has(ProofWord(fns.ptr[f].decl)) {return}
+    if fact_pending_defers not=? 0 {fatal(nodes.ptr[n].pos "result facts with deferred cleanup are not yet supported")}
+    let mask=result_boolean_masks.get(ProofWord(fns.ptr[f].decl)) ?? 3
+    let wanted=if mask =? 2 {1} else {0}
+    if mask not=? 3 and fact_truth(s result) not=? wanted {
+        fatal(nodes.ptr[n].pos "cannot prove declared boolean result arm")
+    }
+    loop clause in result_contracts[ProofWord(fns.ptr[f].decl)] {
+        let path=s
+        let tag=result_tag(f clause)
+        if tag >=? 0 {
+            let selector=result_selector(f result @path)
+            if representation_type(ProofWord(fns.ptr[f].ret)) =? T_BOOL {fact_assume(@path selector tag =? 1)}
+            else {
+                let wanted=fact_constant(@path tag)
+                let condition=fact_new(@path fact_domain(T_BOOL) FactTerm('eq' selector wanted))
+                fact_assume(@path condition true)
+            }
+        }
+        let predicate=ref_subst(clause.predicate fns.ptr[f].targs)
+        proof_require(predicate refine_entry fns.ptr[f].ptypes n @path "result proposition" f)
+    }
+}
+result_publish=(f:ProofWord result:ProofWord values:array<int64> @s:FactState):>void=>$unsafe {
+    if not result_contracts.has(ProofWord(fns.ptr[f].decl)) {return}
+    let mask=result_boolean_masks.get(ProofWord(fns.ptr[f].decl)) ?? 3
+    if mask not=? 3 {fact_assume(@s result mask =? 2)}
+    loop clause in result_contracts[ProofWord(fns.ptr[f].decl)] {
+        if s.conditional.length >=? 32 {return}
+        let tag=result_tag(f clause)
+        let selector=if tag <? 0 {0} else {result_selector(f result @s)}
+        s.conditional.push(ResultEvidence(selector tag ref_subst(clause.predicate fns.ptr[f].targs) values fns.ptr[f].ptypes))
+    }
+    result_activate(@s)
+}
+# A call's result whose optional or union arm is refined (`addr<i => i <?
+# xs.length> | none`): the arm's predicate holds of its payload once a test
+# establishes that arm. O(arms) per such call; nothing for any other call.
+ref_arm_publish=(f:ProofWord result:ProofWord values:array<int64> @s:FactState):>void=>$unsafe {
+    let rt=prune(ProofWord(fns.ptr[f].ret))
+    let k=types.ptr[rt].kind
+    if not ref_refined_arms(rt) {return}
+    let members:array<int64>=if k =? 'opt' {[int64(ProofWord(types.ptr[rt].elem))]} else {union_members(rt)}
+    let selector:ProofWord=0
+    loop i in [0..members.length) {
+        let t=prune(members[i])
+        if types.ptr[t].kind not=? 'refined' or s.conditional.length >=? 32 {continue}
+        if selector =? 0 {
+            selector=fact_project(@s result (-3) false T_INT)
+            let b=fact_bound(s selector)
+            let last=if k =? 'opt' {1} else {members.length - 1}
+            fact_set_bound(@s selector FactBound(max(0 b.lo) min(last b.hi)))
+        }
+        let tag=if k =? 'opt' {1} else {i}
+        let payload=fact_project(@s result (-4) false t)
+        s.conditional.push(ResultEvidence(selector tag ProofWord(types.ptr[t].st) values fns.ptr[f].ptypes payload ProofWord(types.ptr[t].elem)))
+    }
+}
+ref_refined_arms=(t:ProofWord):>bool=>$unsafe {
+    if types.ptr[t].kind =? 'opt' {return types.ptr[prune(ProofWord(types.ptr[t].elem))].kind =? 'refined'}
+    if not is_union(t) {return false}
+    loop m in union_members(t) {
+        if types.ptr[prune(m)].kind =? 'refined' {return true}
+    }
+    false
+}
+# (a call whose result is refined, or has a refined arm, publishes facts about
+# its arguments: fact_slice_prepare keeps them)
+ref_refined_result=(t0:ProofWord):>bool=>$unsafe {
+    let t=prune(t0)
+    types.ptr[t].kind =? 'refined' or ref_refined_arms(t)
+}
+result_activate=(@s:FactState leaf:ProofWord=0):>void=>{
+    loop evidence in s.conditional {
+        if evidence.tag =? -2 {
+            # (an implication, fact_either: its antecedent holds, so its
+            # consequent does; after a leaf condition, only one it tested)
+            if (leaf =? 0 or fact_implication_reads(evidence leaf)) and fact_implied(s evidence 0) and not fact_implied(s evidence 1) {fact_imply(@s evidence)}
+            continue
+        }
+        else if evidence.tag >=? 0 {
+            let wanted=fact_constant(@s evidence.tag)
+            let bound=fact_bound(s evidence.result)
+            if bound.nz and bound.lo =? 0 {bound.lo=1}
+            if fact_compare(s 'eq' evidence.result wanted) not=? 1 and not (bound.lo =? evidence.tag and bound.hi =? evidence.tag) {continue}
+        }
+        loop atom in ref_predicates[evidence.predicate] {
+            let base=if evidence.base not=? 0 {evidence.base} else {T_INT}
+            if evidence.base =? 0 {
+                loop term in [atom.a atom.b] {
+                    if term.kind =? 2 {base=ref_projection_type(evidence.types[term.value] term.path (-1))}
+                }
+            }
+            let a=ref_value(atom.a evidence.payload evidence.values base @s)
+            let b=ref_value(atom.b evidence.payload evidence.values base @s)
+            let v=fact_new(@s fact_domain(T_BOOL) FactTerm(atom.op a b))
+            fact_assume(@s v true)
+        }
+    }
+}
+proof_reset=():>void=>{
+    proof_active=false
+    proof_pending=false
+    proof_decls=dict<int64 int64>()
+    proof_predicates=dict<int64 int64>()
+    proof_calls=[]
+    result_active=false
+    result_syntax=dict<int64 array<ResultClause>>()
+    result_contracts=dict<int64 array<ResultClause>>()
+    result_boolean_masks=dict<int64 int64>()
+}
+proof_atom_type=(atom:RefAtom params:array<int64> pos:ProofWord):>ProofWord=>{
+    let base:ProofWord=0
+    loop term in [atom.a atom.b] {
+        if term.kind =? 1 or term.kind =? 4 {continue}
+        if term.kind not=? 2 or term.value >=? params.length {fatal(pos "result propositions must refer to value parameters")}
+        let t=representation_type(ref_projection_type(params[term.value] term.path pos))
+        if has_var(t) {continue}
+        if not is_int(t) {fatal(pos "result propositions require integer or length terms")}
+        if base not=? 0 and not type_eq(base t) {fatal(pos "result proposition requires matching integer representations")}
+        base=t
+    }
+    if base =? 0 {return T_INT}
+    loop term in [atom.a atom.b] {
+        if term.kind not=? 1 {continue}
+        if term.unsigned and base not=? T_U64 or not term.unsigned and not int_fits(term.value base) {
+            fatal(pos "result proposition bound is outside its integer representation")
+        }
+    }
+    base
+}
+# Retire activated arm evidence as well as the delayed implication when the
+# result storage is replaced. Until facts carry per-clause provenance, dropping
+# the current state is conservative; declared storage contracts are reloaded.
+result_replaced=(value:ProofWord at:ProofWord @s:FactState):>void=>{
+    if s.conditional.length =? 0 {return}
+    let replaced=false
+    loop evidence in s.conditional {
+        # (an implication between immutable values outlives any store)
+        if evidence.tag =? -2 {continue}
+        if evidence.result =? value {replaced=true}
+        loop projection in s.projections {
+            if projection.base =? value and projection.value =? evidence.result {replaced=true}
+        }
+    }
+    if not replaced {return}
+    let kept:array<ResultEvidence>=[]
+    loop evidence in s.conditional {
+        if evidence.tag =? -2 {kept.push(evidence)}
+    }
+    s.conditional=kept
+    fact_forget(@s at 'write' true)
+}

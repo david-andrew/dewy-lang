@@ -54,6 +54,8 @@ def effect_services(text, modules):
         text = text.replace('partition_ops.dewy', 'partition.jo').replace('partition_ops.jo', 'partition.jo')
     if _doubled(modules.get('inline.jo', ''), ('fast_callback_movable', 'fast_moves_alone', 'fast_inline_kind', 'fast_plain_kind', 'fast_inline_prepare', 'rel_collect', 'inlinable', 'inline_branch_mask', 'inline_cache_clear', 'inline_target', 'inline_callee')):
         text = text.replace('inline_ops.dewy', 'inline.jo').replace('inline_ops.jo', 'inline.jo')
+    if _doubled(modules.get('proofs.jo', ''), ('proof_term', 'proof_walk', 'proof_visit', 'proof_prepare', 'proof_predicate', 'proof_require', 'proof_exit', 'proof_call', 'proof_erase', 'result_signature', 'result_tag', 'result_selector', 'result_exit', 'result_publish', 'ref_arm_publish', 'ref_refined_arms', 'ref_refined_result', 'result_activate', 'proof_reset', 'proof_atom_type', 'result_replaced')):
+        text = text.replace('proof_ops.dewy', 'proofs.jo').replace('proof_ops.jo', 'proofs.jo')
     if _doubled(modules.get('facts.jo', ''), ('fact_fork_record', 'fact_parallel_array', 'fact_parallel_record', 'fact_key_callback', 'fact_key_record', 'fact_fork_seed', 'fact_call_arguments', 'fact_slice_capture')):
         text = text.replace('facts_forks.dewy', 'facts.jo').replace('facts_forks.jo', 'facts.jo')
     if _doubled(modules.get('facts.jo', ''), ('fact_replace', 'fact_read', 'fact_constant_global', 'fact_constant_tree', 'fact_global_integer', 'fact_global_length', 'fact_receiver_route', 'fact_route', 'fact_after_call', 'fact_route_values', 'fact_store_route', 'fact_component', 'fact_store_pattern', 'fact_route_bounds')):
