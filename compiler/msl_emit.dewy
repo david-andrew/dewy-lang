@@ -1,0 +1,316 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (LF_MUTPARAM check_struct_fields fns locals)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_thin_expr.dewy" import (is_gpu_buffer)
+from p"expr.jo" import (IN gpu_buffer_elem ntype)
+from p"glsl.jo" import (gl_binop)
+from p"glsl_emit.dewy" import (gl_name)
+from p"glsl_ops.dewy" import (gl_unsigned ind sl_type)
+from p"msl.jo" import (MlRef ml_bodies ml_decls ml_done ml_done_fns ml_expr ml_lref ml_out ml_pending ml_protos ml_stage ml_stmt ml_temps ml_utype ml_vec_ctor ml_write)
+from p"msl_ops.dewy" import (ml_ctx_params ml_err ml_first ml_fn_name ml_gbuf_value ml_is_floaty ml_is_vector ml_local ml_ncomp ml_with_ctx)
+from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout tsd)
+from p"types.jo" import (T_MAT4 T_VEC4 fields is_vec prune structs tkind tsize types)
+from p"util.jo" import (name_of)
+
+MslEmitWord:type=int64<overflow='wrap'>
+# ---------------- types ----------------
+ml_type=(t0:MslEmitWord pos:MslEmitWord):>string=>$unsafe {
+    let t=sl_type(t0)
+    let k=types.ptr[t].kind
+    if k =? 'float_' {return "float"}
+    if k =? 'int_' {return "int"}
+    if k =? 'bool_' {return "bool"}
+    if k =? 'vec' {
+        if t =? T_MAT4 {return "float4x4"}
+        if types.ptr[t].sign {return "int{types.ptr[t].bits}"}
+        return "float{types.ptr[t].bits}"
+    }
+    if k =? 'struct_' {
+        let si=MslEmitWord(types.ptr[t].st)
+        if is_lib_texture(si) {return "uint"}
+        if is_gpu_buffer(t) {return "SlGB"}
+        ml_struct(t pos)
+        return "S_{gl_name(structs.ptr[si].name)}_{si}"
+    }
+    if k =? 'void_' {return "void"}
+    if k =? 'fixed' {return "array<{ml_type(MslEmitWord(types.ptr[t].elem) pos)}, {fixed_len(t)}>"}
+    ml_err(pos "type {dt(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
+    ""
+}
+ml_struct=(t:MslEmitWord pos:MslEmitWord):>void=>$unsafe {
+    let si=MslEmitWord(types.ptr[t].st)
+    let nm="S_{gl_name(structs.ptr[si].name)}_{si}"
+    if not ml_first(nm) {return}
+    check_struct_fields(si)
+    let s="struct {nm} \{\n"
+    loop i in [0..MslEmitWord(structs.ptr[si].nfields)) {
+        let f=MslEmitWord(structs.ptr[si].fields) + i
+        s="{s}    {ml_type(MslEmitWord(fields.ptr[f].type) pos)} {name_of(MslEmitWord(fields.ptr[f].name))}_;\n"
+    }
+    ml_decls.push("{s}};\n")
+}
+ml_int=(v:MslEmitWord):>string=>{
+    let w=v & 0xFFFFFFFF
+    if w >=? 0x80000000 {w -= 0x100000000}
+    if w =? -2147483648 {return "int(0x80000000u)"}
+    "{w}"
+}
+ml_field_offset=(si:MslEmitWord name:string):>int64=>$unsafe {
+    loop i in [0..MslEmitWord(structs.ptr[si].nfields)) {
+        let f=MslEmitWord(structs.ptr[si].fields) + i
+        if name_of(MslEmitWord(fields.ptr[f].name)) =? name {return MslEmitWord(fields.ptr[f].offset)}
+    }
+    0
+}
+# ---------------- functions ----------------
+ml_fn=(f:MslEmitWord):>string=>{
+    if ml_done_fns.get(f) =? none {
+        ml_done_fns[f]=true
+        ml_pending.push(f)
+    }
+    ml_fn_name(f)
+}
+ml_param=(l:MslEmitWord):>string=>$unsafe {
+    let t=MslEmitWord(locals.ptr[l].type)
+    if prune(t) =? ml_utype {return "device const uint* {ml_local(l)}"}
+    let ty=ml_type(t locals.ptr[l].pos)
+    if MslEmitWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {return "thread {ty}& {ml_local(l)}"}
+    "{ty} {ml_local(l)}"
+}
+# translate a function (its declaration first: callers may come before it in the text)
+ml_function=(f:MslEmitWord):>void=>$unsafe {
+    let decl=MslEmitWord(fns.ptr[f].decl)
+    if decl =? 0 or (nodes.ptr[decl].kind not=? 'fn_' and nodes.ptr[decl].kind not=? 'lambda') {ml_err(0 "only named functions can be used in shaders")}
+    if fns.ptr[f].caps.length >? 0 {ml_err(nodes.ptr[decl].pos "a function that captures variables cannot run on the GPU")}
+    let rt=MslEmitWord(fns.ptr[f].ret)
+    let ret=ml_type(rt nodes.ptr[decl].pos)
+    let ps:array<string>=[]
+    loop l in fns.ptr[f].params {
+        ps.push(ml_param(l))
+        if prune(MslEmitWord(locals.ptr[l].type)) =? ml_utype {ml_lref[l]=ml_local(l)}
+    }
+    let sig="{ret} {ml_fn_name(f)}({ml_with_ctx(ml_ctx_params() ps)})"
+    let saved=ml_out
+    ml_out=[]
+    let body=MslEmitWord(fns.ptr[f].body)
+    ml_block(body 1 tkind(rt) not=? 'void_')
+    let lines_=ml_out
+    ml_out=saved
+    ml_protos.push("{sig};\n")
+    ml_bodies.push("{sig} \{\n{join(lines_ "")}}\n")
+}
+ml_block=(b:MslEmitWord depth:MslEmitWord ret_value:bool):>void=>$unsafe {
+    let n=nkids(b)
+    loop i in [0..n) {
+        let s=kid(b i)
+        if i =? n - 1 and ret_value and nodes.ptr[b].aux not=? 0 {
+            ml_out.push("{ind(depth)}return {ml_expr(MslEmitWord(nodes.ptr[s].a))};\n")
+            continue
+        }
+        ml_stmt(s depth)
+    }
+}
+# an assignment's target, its indexes computed once beforehand (into temporaries) when they are
+# more than a name or a number
+ml_target=(n:MslEmitWord pre:string):>string=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'index' {
+        let base=ml_target(MslEmitWord(nodes.ptr[n].a) pre)
+        let ix=MslEmitWord(nodes.ptr[n].b)
+        if nodes.ptr[ix].kind =? 'int_lit' {return "{base}[{ml_expr(ix)}]"}
+        let x=ml_expr(ix)
+        ml_temps += 1
+        ml_out.push("{pre}int sl_t{ml_temps} = {x};\n")
+        return "{base}[sl_t{ml_temps}]"
+    }
+    if k =? 'field' and nodes.ptr[n].aux =? -4 {return "{ml_target(MslEmitWord(nodes.ptr[n].a) pre)}.{name_of(MslEmitWord(nodes.ptr[n].name))}"}
+    if k =? 'field' and nodes.ptr[n].aux >=? 0 {return "{ml_target(MslEmitWord(nodes.ptr[n].a) pre)}.{name_of(MslEmitWord(nodes.ptr[n].name))}_"}
+    ml_expr(n)
+}
+ml_zero=(t0:MslEmitWord pos:MslEmitWord):>string=>$unsafe {
+    let t=sl_type(t0)
+    let k=types.ptr[t].kind
+    if k =? 'float_' {return "0.0f"}
+    if k =? 'int_' {return "0"}
+    if k =? 'bool_' {return "false"}
+    if k =? 'vec' {
+        if t =? T_MAT4 {return "float4x4(0.0f)"}
+        return "{ml_type(t pos)}(0)"
+    }
+    if k =? 'struct_' or k =? 'fixed' {return "{ml_type(t pos)}\{}"}
+    ml_err(pos "cannot zero-initialize {dt(t)} in a shader")
+    ""
+}
+# value x of e's type converted to the scalar kind of t (int <-> float), for operands the checker left mixed
+ml_as=(e:MslEmitWord x:string t:MslEmitWord):>string=>$unsafe {
+    let from_=prune(ntype(e))
+    let n=ml_ncomp(from_)
+    if ml_is_floaty(t) and not ml_is_floaty(from_) and types.ptr[from_].kind not=? 'bool_' {
+        let ty="float"
+        if n >? 1 {ty="float{n}"}
+        if gl_unsigned(from_) {return "{ty}(uint({x}))"}
+        return "{ty}({x})"
+    }
+    if not ml_is_floaty(t) and ml_is_floaty(from_) and types.ptr[prune(t)].kind not=? 'bool_' {
+        let ty="int"
+        if n >? 1 {ty="int{n}"}
+        return "{ty}({x})"
+    }
+    x
+}
+# a == b, a < b...: a bool (vectors: whether every component is equal, or any differs)
+ml_compare=(op:Tok t0:MslEmitWord x:string y:string pos:MslEmitWord):>string=>$unsafe {
+    let t=sl_type(t0)
+    let o=gl_binop(op)
+    if types.ptr[t].kind =? 'bool_' {
+        if op not=? 'eq' and op not=? 'ne' {ml_err(pos "bools can only be compared with {tsd("== and !=" "=? and not=?")}")}
+        return "({x} {o} {y})"
+    }
+    if t =? T_MAT4 {
+        let r:array<string>=[]
+        loop c in [0..4) {r.push("all(({x})[{c}] == ({y})[{c}])")}
+        if op =? 'eq' {return "({join(r " && ")})"}
+        return "(!({join(r " && ")}))"
+    }
+    if gl_unsigned(t) and op not=? 'eq' and op not=? 'ne' {return "(as_type<uint>(int({x})) {o} as_type<uint>(int({y})))"}
+    if ml_is_vector(t) {
+        if op =? 'ne' {return "any({x} != {y})"}
+        return "all({x} {o} {y})"
+    }
+    "({x} {o} {y})"
+}
+ml_sdiv=(ta:MslEmitWord tb:MslEmitWord):>string=>$unsafe {
+    if ml_first("sdiv") {ml_decls.push("int sl_sdiv(int a, int b) \{\n    int q = a / (b == -1 ? 1 : b);\n    return b == -1 ? as_type<int>(-as_type<uint>(a)) : q;\n}\n")}
+    if types.ptr[ta].kind =? 'int_' {return "sl_sdiv"}
+    let n=MslEmitWord(types.ptr[ta].bits)
+    let sc=tb not=? 0 and not is_vec(tb)
+    let nm="sl_sdiv{n}"
+    let bty="int{n}"
+    if sc {
+        nm="sl_sdiv{n}s"
+        bty="int"
+    }
+    if ml_first(nm) {
+        let sw=["x" "y" "z" "w"]
+        let cs:array<string>=[]
+        loop j in [0..n) {
+            if sc {cs.push("sl_sdiv(a.{sw[j]}, b)")} else {cs.push("sl_sdiv(a.{sw[j]}, b.{sw[j]})")}
+        }
+        ml_decls.push("int{n} {nm}(int{n} a, {bty} b) \{\n    return int{n}({join(cs ", ")});\n}\n")
+    }
+    nm
+}
+ml_shift_decls=():>void=>{
+    if not ml_first("shift") {return}
+    ml_decls.push("int sl_shl(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? 0 : as_type<int>(as_type<uint>(x) << uint(c));\n}\n")
+    ml_decls.push("int sl_shr(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? x >> 31 : x >> c;\n}\n")
+    ml_decls.push("int sl_shru(int x, int c) \{\n    c &= 63;\n    return c >= 32 ? 0 : int(as_type<uint>(x) >> uint(c));\n}\n")
+}
+ml_intrinsic=(e:MslEmitWord):>string=>$unsafe {
+    let id=nodes.ptr[e].aux as IN
+    let pos=nodes.ptr[e].pos
+    if id =? IN.vec_ctor {return ml_vec_ctor(e)}
+    if id =? IN.sqrt {return "sqrt({ml_expr(kid(e 0))})"}
+    if id =? IN.floor_ {return "floor({ml_expr(kid(e 0))})"}
+    if id =? IN.ceil_ {return "ceil({ml_expr(kid(e 0))})"}
+    if id =? IN.fabs {return "abs({ml_expr(kid(e 0))})"}
+    if id =? IN.fmin {return "min({ml_expr(kid(e 0))}, {ml_expr(kid(e 1))})"}
+    if id =? IN.fmax {return "max({ml_expr(kid(e 0))}, {ml_expr(kid(e 1))})"}
+    ml_err(pos "this operation is not available in shaders")
+    ""
+}
+# a matrix from 16 numbers (or vectors of them), column by column
+ml_mat_from=(parts:array<string> e:MslEmitWord):>string=>$unsafe {
+    # (each part is a float or a float vector: flattened into a temporary array of 16)
+    ml_temps += 1
+    let vals:array<string>=[]
+    loop i in [0..nkids(e)) {
+        let at=prune(ntype(kid(e i)))
+        if is_vec(at) {
+            let sw=["x" "y" "z" "w"]
+            loop j in [0..MslEmitWord(types.ptr[at].bits)) {vals.push("({parts[i]}).{sw[j]}")}
+        }
+        else {vals.push(parts[i])}
+    }
+    if vals.length not=? 16 {ml_err(nodes.ptr[e].pos "a mat4 is made of 16 numbers or 4 columns")}
+    let cols:array<string>=[]
+    loop c in [0..4) {cols.push("float4({vals[4 * c]}, {vals[4 * c + 1]}, {vals[4 * c + 2]}, {vals[4 * c + 3]})")}
+    "float4x4({join(cols ", ")})"
+}
+# b[i]: where the element is
+ml_gbuf_elem=(e:MslEmitWord):>MlRef=>{
+    let et=gpu_buffer_elem(ntype(kid(e 0)))
+    layout(et)
+    let b=ml_gbuf_value(kid(e 0))
+    let i=ml_expr(kid(e 1))
+    MlRef("({b}).p" 0 "(clamp({i}, 0, max(({b}).n - 1, 0)) * {tsize(et)})" et)
+}
+# b[i] = v, as a statement
+ml_gbuf_store=(e:MslEmitWord pre:string):>void=>$unsafe {
+    let pos=nodes.ptr[e].pos
+    if ml_stage not=? "compute" {ml_err(pos "GPU buffers are written by compute programs only")}
+    let et=gpu_buffer_elem(ntype(kid(e 0)))
+    layout(et)
+    ml_temps += 1
+    let k=ml_temps
+    ml_out.push("{pre}\{\n{pre}    SlGB sl_b{k} = {ml_expr(kid(e 0))};\n{pre}    int sl_i{k} = {ml_expr(kid(e 1))};\n")
+    ml_out.push("{pre}    {ml_type(et pos)} sl_v{k} = {ml_expr(kid(e 2))};\n")
+    ml_out.push("{pre}    if (as_type<uint>(sl_i{k}) < as_type<uint>(sl_b{k}.n)) \{\n")
+    ml_write(et "sl_b{k}.p" 0 "sl_i{k} * {tsize(et)}" "sl_v{k}" "{pre}        " pos)
+    ml_out.push("{pre}    }\n{pre}}\n")
+}
+# ---------------- the stages ----------------
+ml_reset=(stage:string):>void=>{
+    ml_out=[]
+    ml_decls=[]
+    ml_done=dict<string bool>()
+    ml_done_fns=dict<int64 bool>()
+    ml_pending=[]
+    ml_lref=dict<int64 string>()
+    ml_protos=[]
+    ml_bodies=[]
+    ml_temps=0
+    ml_stage=stage
+}
+# the parts of the vertex function's result passed between the stages (after the clip position),
+# each a scalar or vector: (how to reach it from the struct, its type)
+ml_leaves=(t0:MslEmitWord path:string @out:array<[string int64]>):>void=>$unsafe {
+    let t=sl_type(t0)
+    if types.ptr[t].kind =? 'struct_' and not is_lib_texture(MslEmitWord(types.ptr[t].st)) {
+        let si=MslEmitWord(types.ptr[t].st)
+        check_struct_fields(si)
+        loop i in [0..MslEmitWord(structs.ptr[si].nfields)) {
+            let f=MslEmitWord(structs.ptr[si].fields) + i
+            ml_leaves(MslEmitWord(fields.ptr[f].type) "{path}.{name_of(MslEmitWord(fields.ptr[f].name))}_" @out)
+        }
+        return
+    }
+    if types.ptr[t].kind =? 'fixed' {
+        loop i in [0..fixed_len(t)) {ml_leaves(MslEmitWord(types.ptr[t].elem) "{path}[{i}]" @out)}
+        return
+    }
+    if t =? T_MAT4 {
+        loop i in [0..4) {ml_leaves(T_VEC4 "{path}[{i}]" @out)}
+        return
+    }
+    out.push([path t])
+}
+ml_varyings=(otype:MslEmitWord pos:MslEmitWord):>[array<[string int64]> string]=>$unsafe {
+    let si=MslEmitWord(types.ptr[prune(otype)].st)
+    check_struct_fields(si)
+    let leaves:array<[string int64]>=[]
+    loop i in [1..MslEmitWord(structs.ptr[si].nfields)) {
+        let f=MslEmitWord(structs.ptr[si].fields) + i
+        ml_leaves(MslEmitWord(fields.ptr[f].type) ".{name_of(MslEmitWord(fields.ptr[f].name))}_" @leaves)
+    }
+    let s="struct SlV \{\n    float4 pos [[position]];\n"
+    loop i in 0.. and lf in leaves {
+        let lt=sl_type(lf[1])
+        if types.ptr[lt].kind =? 'bool_' {ml_err(pos "bools cannot be passed from the vertex to the fragment shader (use an int)")}
+        let flat=""
+        if types.ptr[lt].kind =? 'int_' or (types.ptr[lt].kind =? 'vec' and types.ptr[lt].sign) or (types.ptr[lt].kind =? 'struct_' and is_lib_texture(MslEmitWord(types.ptr[lt].st))) {flat=", flat"}
+        s="{s}    {ml_type(lt pos)} v{i} [[user(locn{i}){flat}]];\n"
+    }
+    [leaves "{s}};\n"]
+}
