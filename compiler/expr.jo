@@ -1,4 +1,5 @@
 use 'secret_checks.dewy'
+use 'checks_builders.dewy'
 use 'checks_value_hooks.dewy'
 use 'checks_cond_hooks.dewy'
 use 'checks_member_hooks.dewy'
@@ -6387,10 +6388,6 @@ array_has_spread = (n: int) -> bool:
         if has_flag(kid(n, i), NF_SPREAD): return true
     false
 
-mk_name = (name: int, pos: int) -> int:
-    n = mk(.ident, pos)
-    nodes[n].name = i32(name)
-    n
 
 # a type expression node for an already resolved type (for synthesized declarations)
 type_node_of = (t: int, pos: int) -> int:
@@ -8854,21 +8851,8 @@ part_spec = (n: int) -> int:
     set_list(arr, elems)
     arr
 
-bc_ident = (name: str, pos: int) -> int:
-    n = mk(.ident, pos)
-    nodes[n].name = i32(intern(name))
-    n
 
-bc_bool = (v: bool, pos: int) -> int:
-    n = mk(.bool_lit, pos)
-    if v: nodes[n].ival = 1
-    n
 
-bc_int = (v: int, pos: int) -> int:
-    n = mk(.int_lit, pos)
-    nodes[n].ival = v
-    add_flag(n, NF_LITERAL)
-    n
 
 bc_bin = (op: Tok, a: int, b: int, pos: int) -> int:
     n = mk(.binary, pos)
@@ -9128,54 +9112,13 @@ index_array_fn = (b: int, base: str) -> str:
     fatal(nodes[b].pos, jd(nodes[b].pos, "an array of indexes is int[], or a mask bool[] (found {dt(it)})", "an array of indexes is array<int64>, or a mask array<bool> (found {dt(it)})"))
     ""
 
-bc_call = (name: str, args: int[], pos: int) -> int:
-    c = mk(.call, pos)
-    nodes[c].a = i32(bc_ident(name, pos))
-    set_list(c, args)
-    c
 
-bc_method = (recv: int, name: str, args: int[], pos: int) -> int:
-    f = mk(.field, pos)
-    nodes[f].a = i32(recv)
-    nodes[f].name = i32(intern(name))
-    c = mk(.call, pos)
-    nodes[c].a = i32(f)
-    set_list(c, args)
-    c
 
-bc_field = (recv: int, name: str, pos: int) -> int:
-    f = mk(.field, pos)
-    nodes[f].a = i32(recv)
-    nodes[f].name = i32(intern(name))
-    f
 
-# A map's key array, read by a loop's lowering: the library's own member,
-# but never the program's, so never warned about.
-bc_map_keys = (recv: int, pos: int) -> int:
-    f = bc_field(recv, "__keys", pos)
-    add_flag(f, NF_LOOPCOUNT)
-    f
 
-bc_let = (name: str, v: int, pos: int) -> int:
-    d = mk(.vardecl, pos)
-    nodes[d].name = i32(intern(name))
-    nodes[d].b = i32(v)
-    d
 
-bc_stmt = (e: int, pos: int) -> int:
-    s = mk(.exprstmt, pos)
-    nodes[s].a = i32(e)
-    s
 
-bc_block = (stmts: int[], pos: int) -> int:
-    b = mk(.block, pos)
-    set_list(b, stmts)
-    b
 
-bc_str = (s: str, pos: int) -> int:
-    n = mk(.str_lit, pos)
-    nodes[n].sval = i32(intern(s))
-    n
 
 bc_assign = (target: int, v: int, pos: int) -> int:
     a = mk(.assign, pos)
@@ -9184,31 +9127,12 @@ bc_assign = (target: int, v: int, pos: int) -> int:
     nodes[a].b = i32(v)
     a
 
-bc_if = (c: int, then: int[], else_: int[], pos: int) -> int:
-    n = mk(.if_, pos)
-    nodes[n].a = i32(c)
-    nodes[n].b = i32(bc_block(then, pos))
-    if else_.len() > 0: nodes[n].c = i32(bc_block(else_, pos))
-    add_flag(n, NF_STMT)
-    n
 
 # The library's `__release_at(xs, i)` (lib/core/map.jo), when a call resolves to that
 # declaration: xs[i] = the zero bytes of its element type, an intrinsic that makes no checked
 # value, so the element's contract and defaults are not consulted. The store lets go of what
 # the element held. The declaration's own body serves earlier compilers.
 release_name = intern("__release_at")
-release_call = (n: int, args: int[], expected: int) -> int:
-    pos = nodes[n].pos
-    t = prune(check_expr(args[0], 0))
-    add_flag(args[0], NF_CHECKED)
-    if types[t].kind != .array: fatal(pos, "__release_at needs a growable array")
-    zero = mk(.intrinsic, pos)
-    nodes[zero].aux = i32(int(IN.zeroed))
-    target = mk(.index, pos)
-    nodes[target].a = i32(args[0])
-    nodes[target].b = i32(args[1])
-    nodes[n] = nodes[bc_block([bc_assign(target, zero, pos)], pos)]
-    check_expr(n, expected)
 
 # name: t (its zero value)
 bc_decl = (name: str, t: int, pos: int) -> int:
@@ -10341,31 +10265,8 @@ path_forget = (key: str, same_type: int = 0):
         i -= 1
 
 relocate_name = intern("__relocate_at")
-relocate_call = (n: int, args: int[]) -> int:
-    t = prune(check_expr(args[0], 0))
-    if tkind(t) != .array: fatal(nodes[n].pos, "relocation needs a growable array")
-    check_place(args[0], false)
-    check_expr(args[1], T_INT)
-    check_expr(args[2], T_INT)
-    nodes[n].kind = .intrinsic
-    nodes[n].aux = i32(int(IN.relocate))
-    nodes[n].a = 0
-    set_list(n, args)
-    nodes[n].type = i32(T_VOID)
-    T_VOID
 
 take_name = intern("__take_at")
-take_call = (n: int, args: int[]) -> int:
-    t = prune(check_expr(args[0], 0))
-    if tkind(t) != .array: fatal(nodes[n].pos, "slot transfer needs a growable array")
-    check_place(args[0], false)
-    check_expr(args[1], T_INT)
-    nodes[n].kind = .intrinsic
-    nodes[n].aux = i32(int(IN.take_slot))
-    nodes[n].a = 0
-    set_list(n, args)
-    nodes[n].type = i32(telem(t))
-    telem(t)
 
 # A program with a top-level `draw` or `update` is a game: a helper that only
 # shares the name (`draw(board)`) wants another one. Dewy wording only.

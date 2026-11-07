@@ -1,0 +1,124 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_LITERAL NF_LOOPCOUNT NF_STMT add_flag mk nodes set_list)
+from p"checker_expr.dewy" import (check_expr)
+from p"expr.jo" import (IN bc_assign check_place)
+from p"types.jo" import (T_INT T_VOID prune telem tkind types)
+from p"util.jo" import (fatal intern)
+
+BuildWord:type=int64<overflow='wrap'>
+mk_name=(name:BuildWord pos:BuildWord):>int64=>$unsafe {
+    let n=mk('ident' pos)
+    nodes.ptr[n].name=int32(name)
+    n
+}
+bc_ident=(name:string pos:BuildWord):>int64=>$unsafe {
+    let n=mk('ident' pos)
+    nodes.ptr[n].name=int32(intern(name))
+    n
+}
+bc_bool=(v:bool pos:BuildWord):>int64=>$unsafe {
+    let n=mk('bool_lit' pos)
+    if v {nodes.ptr[n].ival=1}
+    n
+}
+bc_int=(v:BuildWord pos:BuildWord):>int64=>$unsafe {
+    let n=mk('int_lit' pos)
+    nodes.ptr[n].ival=v
+    add_flag(n NF_LITERAL)
+    n
+}
+bc_call=(name:string args:array<int64> pos:BuildWord):>int64=>$unsafe {
+    let c=mk('call' pos)
+    nodes.ptr[c].a=int32(bc_ident(name pos))
+    set_list(c args)
+    c
+}
+bc_method=(recv:BuildWord name:string args:array<int64> pos:BuildWord):>int64=>$unsafe {
+    let f=mk('field' pos)
+    nodes.ptr[f].a=int32(recv)
+    nodes.ptr[f].name=int32(intern(name))
+    let c=mk('call' pos)
+    nodes.ptr[c].a=int32(f)
+    set_list(c args)
+    c
+}
+bc_field=(recv:BuildWord name:string pos:BuildWord):>int64=>$unsafe {
+    let f=mk('field' pos)
+    nodes.ptr[f].a=int32(recv)
+    nodes.ptr[f].name=int32(intern(name))
+    f
+}
+# A map's key array, read by a loop's lowering: the library's own member,
+# but never the program's, so never warned about.
+bc_map_keys=(recv:BuildWord pos:BuildWord):>int64=>{
+    let f=bc_field(recv "__keys" pos)
+    add_flag(f NF_LOOPCOUNT)
+    f
+}
+bc_let=(name:string v:BuildWord pos:BuildWord):>int64=>$unsafe {
+    let d=mk('vardecl' pos)
+    nodes.ptr[d].name=int32(intern(name))
+    nodes.ptr[d].b=int32(v)
+    d
+}
+bc_stmt=(e:BuildWord pos:BuildWord):>int64=>$unsafe {
+    let s=mk('exprstmt' pos)
+    nodes.ptr[s].a=int32(e)
+    s
+}
+bc_block=(stmts:array<int64> pos:BuildWord):>int64=>{
+    let b=mk('block' pos)
+    set_list(b stmts)
+    b
+}
+bc_str=(s:string pos:BuildWord):>int64=>$unsafe {
+    let n=mk('str_lit' pos)
+    nodes.ptr[n].sval=int32(intern(s))
+    n
+}
+bc_if=(c:BuildWord then:array<int64> else_:array<int64> pos:BuildWord):>int64=>$unsafe {
+    let n=mk('if_' pos)
+    nodes.ptr[n].a=int32(c)
+    nodes.ptr[n].b=int32(bc_block(then pos))
+    if else_.length >? 0 {nodes.ptr[n].c=int32(bc_block(else_ pos))}
+    add_flag(n NF_STMT)
+    n
+}
+release_call=(n:BuildWord args:array<int64> expected:BuildWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let t=prune(check_expr(args[0] 0))
+    add_flag(args[0] NF_CHECKED)
+    if types.ptr[t].kind not=? 'array' {fatal(pos "__release_at needs a growable array")}
+    let zero=mk('intrinsic' pos)
+    nodes.ptr[zero].aux=int32(int64(IN.zeroed))
+    let target=mk('index' pos)
+    nodes.ptr[target].a=int32(args[0])
+    nodes.ptr[target].b=int32(args[1])
+    nodes.ptr[n]=nodes.ptr[bc_block([bc_assign(target zero pos)] pos)]
+    check_expr(n expected)
+}
+relocate_call=(n:BuildWord args:array<int64>):>int64=>$unsafe {
+    let t=prune(check_expr(args[0] 0))
+    if tkind(t) not=? 'array' {fatal(nodes.ptr[n].pos "relocation needs a growable array")}
+    check_place(args[0] false)
+    check_expr(args[1] T_INT);
+    check_expr(args[2] T_INT);
+    nodes.ptr[n].kind='intrinsic'
+    nodes.ptr[n].aux=int32(int64(IN.relocate))
+    nodes.ptr[n].a=0
+    set_list(n args)
+    nodes.ptr[n].type=int32(T_VOID)
+    T_VOID
+}
+take_call=(n:BuildWord args:array<int64>):>int64=>$unsafe {
+    let t=prune(check_expr(args[0] 0))
+    if tkind(t) not=? 'array' {fatal(nodes.ptr[n].pos "slot transfer needs a growable array")}
+    check_place(args[0] false)
+    check_expr(args[1] T_INT);
+    nodes.ptr[n].kind='intrinsic'
+    nodes.ptr[n].aux=int32(int64(IN.take_slot))
+    nodes.ptr[n].a=0
+    set_list(n args)
+    nodes.ptr[n].type=int32(telem(t))
+    telem(t)
+}
