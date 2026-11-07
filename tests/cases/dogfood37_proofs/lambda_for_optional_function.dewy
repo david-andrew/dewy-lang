@@ -1,0 +1,38 @@
+# A lambda or a handle where an optional or a union of function types is wanted.
+Rule:type = (int:>int) | string
+Hook:type = [before:(int:>int)?]
+maybe = (f:(int:>int)? x:int):>int => {
+    if f is? none return x
+    f(x)
+}
+describe = (r:Rule):>string => match r {
+    s:string => s
+    g:(int:>int) => "fn {g(3)}"
+}
+arity = (f:(int:>int)|((int int):>int)):>string => match f {
+    one:(int:>int) => "one {one(5)}"
+    two:((int int):>int) => "two {two(5 6)}"
+}
+angled = (r:Rule):>int => match r {
+    g:<int:>int> => g(1)
+    _ => 0
+}
+inc = (x:int):>int => x + 1
+main = () => {
+    printl(maybe((x) => x - 1 3))
+    printl(maybe(none 3))
+    printl(maybe(@inc 3))
+    printl(describe((x) => x * 2))
+    printl(describe(@inc))
+    printl(describe("text"))
+    printl(arity((a) => a))
+    printl(arity((a b) => a + b))
+    printl(angled((x) => x + 41))
+    let local:(int:>int)? = (x) => x + 4
+    if local isnt? none printl(local(1))
+    let h = Hook[(x) => x + 9]
+    let before = h.before
+    if before isnt? none printl(before(1))
+    let rules:array<Rule> = ["a" (x) => x]
+    printl(rules.length)
+}

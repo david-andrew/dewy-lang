@@ -7876,7 +7876,8 @@ rd_dc_pattern=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$uns
         }
         return p
     }
-    if (((leaf =? 0) and (written.symbol not=? 'lbrack')) and (((written.kind not=? 'identifier') or (written.symbol not=? 'none')) or (int64<overflow='wrap'>(written.name) =? reader_ctx.reader.dn_none_id))) {
+    # (`g:(int64:>int64)`: a function type, in its group)
+    if (((leaf =? 0) and (written.symbol not=? 'lbrack') and (written.symbol not=? 'lparen') and (written.symbol not=? 'langle')) and (((written.kind not=? 'identifier') or (written.symbol not=? 'none')) or (int64<overflow='wrap'>(written.name) =? reader_ctx.reader.dn_none_id))) {
         return 0
     }
     let outer:int64=reader_ctx.reader.dc_pattern_binder

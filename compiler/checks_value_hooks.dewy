@@ -12,7 +12,7 @@ from p"directives.jo" import (dir_function_entry)
 from p"effect_contracts.dewy" import (callable_contract effect_contract_fits effect_decl_contract mk_callable_contract)
 from p"errors.jo" import (nominal_parent)
 from p"exact.jo" import (exact_int_result)
-from p"expr.jo" import (CV IN bundled_bigint_type ce_expected ce_finish check_lambda check_matrix check_range_value check_soa_method ci coerce coerce_hint dewy_classify_spread dewy_new_axis dewy_record_spread_entries dewy_spread_source_type fixed_literal is_map_type is_nd last_checked literal_union_member name_before_eq nd_elem ntype op_overload spread_count struct_ctor type_node_of unnamed values_spread_call)
+from p"expr.jo" import (lambda_member CV IN bundled_bigint_type ce_expected ce_finish check_lambda check_matrix check_range_value check_soa_method ci coerce coerce_hint dewy_classify_spread dewy_new_axis dewy_record_spread_entries dewy_spread_source_type fixed_literal is_map_type is_nd last_checked literal_union_member name_before_eq nd_elem ntype op_overload spread_count struct_ctor type_node_of unnamed values_spread_call)
 from p"checks_builders.dewy" import (bc_block bc_call bc_stmt mk_name)
 from p"ide.jo" import (ide_complete_names never_cascade)
 from p"nd_contracts.jo" import (nd_mutable_instances nd_mutable_signatures nd_signature)
@@ -243,7 +243,7 @@ expr_other=(n:int64 expected:int64):>int64=>$unsafe {
     if k =? 'matrix' {return check_matrix(n expected)}
     let ex=ce_expected(expected)
     let t:ValueHookWord=0
-    if k =? 'lambda' {t=check_lambda(n expected)} else if k =? 'match_' {t=check_match(n expected)} else if k =? 'block' {
+    if k =? 'lambda' {t=check_lambda(n lambda_member(n expected))} else if k =? 'match_' {t=check_match(n expected)} else if k =? 'block' {
         if has_flag(n NF_COMPREHENSION) and ex not=? 0 and types.ptr[ex].kind =? 'array' {
             nodes.ptr[kid(n 0)].a=int32(type_node_of(ex nodes.ptr[n].pos))
         }
