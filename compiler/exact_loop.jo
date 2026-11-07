@@ -32,6 +32,7 @@ use 'lower.jo'
 use 'ownership_types.dewy'
 use 'ir_builders.dewy'
 use 'math_ops.dewy'
+use 'exact_loop_ops.dewy'
 
 exact_loop_fast = false
 exl_arrays: {int: int} = {}
@@ -43,16 +44,7 @@ exl_bad = 0
 exl_reductions = 0
 exl_target = 0
 
-exl_strip = (n0: int) -> int:
-    n = n0
-    loop nodes[n].kind == .conv and (nodes[n].aux == i32(int(CV.fixed_store)) or nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_))): n = int(nodes[n].a)
-    n
-
 exl_key = (n: int) -> int: (int(nodes[n].aux) << 32) | int(nodes[n].sym)
-
-exl_word = (t0: int) -> bool:
-    t = exact_representation(t0)
-    t == T_MATH_INT or is_int(t) and types[t].sign and types[t].bits == 64
 
 exl_array = (n: int) -> bool:
     if nodes[n].kind != .ident: return false
@@ -261,16 +253,6 @@ exm_assignment = 0
 exm_produced_flags: {int: int} = {}
 exm_produced_widths: {int: int} = {}
 
-exm_fresh_array = (s: int):
-    init = int(nodes[s].b)
-    if init == 0 or nodes[init].kind != .array or nkids(init) != 0 or not has_flag(init, NF_BROADCAST): return
-    t = ntype(init)
-    if tkind(t) != .array or exact_representation(telem(t)) != T_MATH_INT: return
-    l = int(nodes[s].sym)
-    flag = vreg(VI); e_mov(flag, e_iconst(1))
-    exm_produced_flags[l] = flag
-    exm_produced_widths.remove(l)
-
 exm_producer = (node: int, bits: int) -> int:
     n = node
     loop depth in [0..32):
@@ -389,38 +371,6 @@ exm_census = (l: int, node: int, bits: int) -> int:
     endc()
     combined
 
-# A tagged input must be immediate as well as inside the requested interval.
-# Put its tag above the accepted magnitude bits so the same OR census rejects it.
-exm_magnitude = (value: int, array: int, bias: int, bits: int) -> int:
-    if exact_representation(telem(ntype(array))) != T_MATH_INT: return e_bin(.add, VI, value, bias)
-    # Compare biased tagged words. A logical shift retains the outlier high
-    # bits and avoids synthesizing an arithmetic qword shift in the census.
-    shifted = e_bin(.shru, VI, e_bin(.add, VI, value, e_bin(.shl, VI, bias, e_iconst(1))), e_iconst(1))
-    e_bin(.or_, VI, shifted, e_bin(.shl, VI, math_tag(value), e_iconst(bits)))
-
-exm_element = (value: int, array: int) -> int:
-    if exact_representation(telem(ntype(array))) == T_MATH_INT: return math_untag(value)
-    value
-
-# Only generated fresh broadcast storage qualifies. Its slots start at zero,
-# are not exposed during the map, and each position is written exactly once.
-exm_store = (s: int) -> bool:
-    if not exact_map_active or not exm_math_output or s != exm_assignment: return false
-    target = int(nodes[s].a)
-    place = gen_place(target, true)
-    word = exm_tagged_word(int(nodes[s].b))
-    write_place(place, T_MATH_INT, word)
-    true
-
-exm_declaration = (s: int) -> bool:
-    if not exact_map_active: return false
-    l = int(nodes[s].sym)
-    if not exm_elements.contains(l): return false
-    value = gen_expr(int(nodes[s].b)).v
-    loop j in [0..exm_elements.len()):
-        if exm_elements[j] == l: e_mov(int(locals[l].vreg), value)
-    true
-
 exm_width = (n0: int, bits: int) -> int:
     if exact_has_store(n0) and not exact_proved(n0): exm_obligation = true; exact_map_stores[n0] = true
     if nodes[n0].kind == .conv and nodes[n0].aux == i32(int(CV.int_)) and exact_representation(ntype(n0)) == T_INT and exact_representation(ntype(int(nodes[n0].a))) == T_MATH_INT:
@@ -476,22 +426,6 @@ exm_word = (n0: int) -> int:
 # census proves every intermediate fits the signed payload; multiplication
 # needs that factor on only one operand. No tagged value crosses the guard.
 exm_tagged_sources: {int: bool} = {}
-exm_tagged_source = (n0: int) -> bool:
-    n = exl_strip(n0)
-    if let found = exm_tagged_sources.get(n): return found
-    found = exm_find_tagged_source(n)
-    exm_tagged_sources[n] = found
-    found
-
-# Memoize syntax membership once per map; emitted stride versions share it.
-exm_find_tagged_source = (n: int) -> bool:
-    if nodes[n].kind == .ident and nodes[n].aux == i32(int(SK.local)):
-        l = int(nodes[n].sym)
-        loop j in [0..exm_elements.len()):
-            if exm_elements[j] == l: return exact_representation(telem(ntype(exm_arrays[j]))) == T_MATH_INT
-    if nodes[n].kind == .binary: return exm_tagged_source(int(nodes[n].a)) or exm_tagged_source(int(nodes[n].b))
-    if nodes[n].kind == .unary: return exm_tagged_source(int(nodes[n].a))
-    false
 
 exm_tagged_word = (n0: int) -> int:
     n = exl_strip(n0)

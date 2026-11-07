@@ -1,0 +1,87 @@
+$runtime_checks
+from p"ast.jo" import (NF_BROADCAST has_flag nkids nodes)
+from p"check.jo" import (locals)
+from p"exact.jo" import (exact_representation)
+from p"exact_loop.jo" import (exact_map_active exm_arrays exm_assignment exm_elements exm_math_output exm_produced_flags exm_produced_widths exm_tagged_sources exm_tagged_word)
+from p"expr.jo" import (CV ntype)
+from p"ir.jo" import (VI)
+from p"ir_builders.dewy" import (e_bin e_iconst e_mov vreg)
+from p"lower_group.dewy" import (gen_expr gen_place)
+from p"lower_storage.dewy" import (write_place)
+from p"math_ops.dewy" import (math_tag math_untag)
+from p"types.jo" import (T_MATH_INT is_int telem tkind types)
+
+ExactLoopWord:type=int64<overflow='wrap'>
+exl_strip=(n0:ExactLoopWord):>int64=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.fixed_store)) or nodes.ptr[n].aux =? int32(int64(CV.none_)) or nodes.ptr[n].aux =? int32(int64(CV.int_))) {n=ExactLoopWord(nodes.ptr[n].a)}
+    n
+}
+exl_word=(t0:ExactLoopWord):>bool=>$unsafe {
+    let t=exact_representation(t0)
+    t =? T_MATH_INT or is_int(t) and types.ptr[t].sign and types.ptr[t].bits =? 64
+}
+exm_fresh_array=(s:ExactLoopWord):>void=>$unsafe {
+    let init=ExactLoopWord(nodes.ptr[s].b)
+    if init =? 0 or nodes.ptr[init].kind not=? 'array' or nkids(init) not=? 0 or not has_flag(init NF_BROADCAST) {return}
+    let t=ntype(init)
+    if tkind(t) not=? 'array' or exact_representation(telem(t)) not=? T_MATH_INT {return}
+    let l=ExactLoopWord(nodes.ptr[s].sym)
+    let flag=vreg(VI)
+    e_mov(flag e_iconst(1));
+    exm_produced_flags[l]=flag
+    exm_produced_widths.remove(l);
+}
+# A tagged input must be immediate as well as inside the requested interval.
+# Put its tag above the accepted magnitude bits so the same OR census rejects it.
+exm_magnitude=(value:ExactLoopWord array:ExactLoopWord bias:ExactLoopWord bits:ExactLoopWord):>int64=>{
+    if exact_representation(telem(ntype(array))) not=? T_MATH_INT {return e_bin('add' VI value bias)}
+    # Compare biased tagged words. A logical shift retains the outlier high
+    # bits and avoids synthesizing an arithmetic qword shift in the census.
+    let shifted=e_bin('shru' VI e_bin('add' VI value e_bin('shl' VI bias e_iconst(1))) e_iconst(1))
+    e_bin('or_' VI shifted e_bin('shl' VI math_tag(value) e_iconst(bits)))
+}
+exm_element=(value:ExactLoopWord array:ExactLoopWord):>int64=>{
+    if exact_representation(telem(ntype(array))) =? T_MATH_INT {return math_untag(value)}
+    value
+}
+# Only generated fresh broadcast storage qualifies. Its slots start at zero,
+# are not exposed during the map, and each position is written exactly once.
+exm_store=(s:ExactLoopWord):>bool=>$unsafe {
+    if not exact_map_active or not exm_math_output or s not=? exm_assignment {return false}
+    let target=ExactLoopWord(nodes.ptr[s].a)
+    let place=gen_place(target true)
+    let word=exm_tagged_word(ExactLoopWord(nodes.ptr[s].b))
+    write_place(place T_MATH_INT word)
+    true
+}
+exm_declaration=(s:ExactLoopWord):>bool=>$unsafe {
+    if not exact_map_active {return false}
+    let l=ExactLoopWord(nodes.ptr[s].sym)
+    if not exm_elements.contains(l) {return false}
+    let value=gen_expr(ExactLoopWord(nodes.ptr[s].b)).v
+    loop j in [0..exm_elements.length) {
+        if exm_elements[j] =? l {e_mov(ExactLoopWord(locals.ptr[l].vreg) value);}
+    }
+    true
+}
+exm_tagged_source=(n0:ExactLoopWord):>bool=>{
+    let n=exl_strip(n0)
+    let known=exm_tagged_sources.get(n)
+    if known not=? none {return known}
+    let found=exm_find_tagged_source(n)
+    exm_tagged_sources[n]=found
+    found
+}
+# Memoize syntax membership once per map; emitted stride versions share it.
+exm_find_tagged_source=(n:ExactLoopWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        let l=ExactLoopWord(nodes.ptr[n].sym)
+        loop j in [0..exm_elements.length) {
+            if exm_elements[j] =? l {return exact_representation(telem(ntype(exm_arrays[j]))) =? T_MATH_INT}
+        }
+    }
+    if nodes.ptr[n].kind =? 'binary' {return exm_tagged_source(ExactLoopWord(nodes.ptr[n].a)) or exm_tagged_source(ExactLoopWord(nodes.ptr[n].b))}
+    if nodes.ptr[n].kind =? 'unary' {return exm_tagged_source(ExactLoopWord(nodes.ptr[n].a))}
+    false
+}
