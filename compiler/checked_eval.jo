@@ -151,6 +151,9 @@ cx_frames: CTFrame[]
 cx_places: CTPlace[]
 cx_stack: int[]
 cx_global_cache: {int: int}
+cx_embed_cache: {int: int}
+cx_raw_steps: {int: int}
+cx_raw_skip = 0
 cx_pending: int[]
 cx_frame = -1
 
@@ -385,9 +388,86 @@ cx_global = (e: int, g: int) -> int:
     cx_nodes[0][int(cx_globals[0][g].decl)].b = i32(cx_literal(v, cx_nodes[0][initial].pos))
     v
 
+cx_is_text_of_bytes = (f: int) -> bool:
+    d = int(cx_fns[0][f].decl)
+    d != 0 and cx_name_of(int(cx_nodes[0][d].name)) == "__str_from_bytes"
+
+# The bundled text library's few raw-memory steps, done on evaluator storage: 0 for any other
+# function, 1 `__str_from`, 2 `__buf_append_raw`, 3 `__buf_byte`, 4 `__case_text`, 5-7 Dewy's
+# string index, slice and length over plain text. O(1) per call.
+cx_raw_step = (f: int) -> int:
+    if let known = cx_raw_steps.get(f): return known
+    d = int(cx_fns[0][f].decl)
+    step = 0
+    if d != 0 and starts_with(cx_files[0][cx_pos_file(cx_nodes[0][d].pos)].path, cx_lib_dir[0] + "/"):
+        name = cx_name_of(int(cx_nodes[0][d].name))
+        if name == "__str_from": step = 1
+        else if name == "__buf_append_raw": step = 2
+        else if name == "__buf_byte": step = 3
+        else if name == "__case_text": step = 4
+        else if name == "__dewy_string_index": step = 5
+        else if name == "__dewy_string_slice": step = 6
+        else if name == "__dewy_string_length": step = 7
+    cx_raw_steps[f] = step
+    step
+
+# Are the first `count` bytes (all, past the end) plain ASCII one-byte clusters, none joined to the
+# next? Then a cluster's index is its byte's.
+cx_plain_text = (s: str, count: int) -> bool:
+    n = min(count, len(s))
+    loop i in [0..n):
+        if int(s[i]) >= 128 or int(s[i]) == 13: return false
+    true
+
+cx_string_step = (e: int, f: int, step: int) -> int:
+    values: int[]
+    loop i in [0..cx_nkids(e)):
+        values.push(cx_expr(cx_kid(e, i)))
+        if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
+    s = cx_value(values[0]).s
+    if step == 7:
+        if cx_plain_text(s, len(s)): return cx_int(cx_ntype(e), len(s))
+    else:
+        lo = cx_value(values[1]).i
+        stop = lo + 1
+        if step == 6:
+            stop = if cx_value(values[4]).i != 0: cx_value(values[2]).i + cx_value(values[3]).i else: len(s)
+        if 0 <= lo and lo <= stop and stop <= len(s) and cx_plain_text(s, stop + 1):
+            return cx_add(CTValue(type = cx_ntype(e), s = cx_host[0].byte_cut(s, lo, stop)))
+    # (anything else, a bad index included, is the library's)
+    call = cx_mk(.call, cx_nodes[0][e].pos)
+    cx_nodes[0][call].sym = i32(f)
+    cx_nodes[0][call].type = cx_nodes[0][e].type
+    actual: int[]
+    loop value in values: actual.push(cx_literal(value, cx_nodes[0][e].pos))
+    cx_set_list(call, actual)
+    cx_raw_skip = call
+    cx_call(call)
+
+cx_raw_call = (e: int, step: int) -> int:
+    if step == 1:
+        source = cx_value(cx_expr(cx_kid(e, 0)))
+        n = cx_value(cx_expr(cx_kid(e, 1))).i
+        bytes: u8[]
+        loop i in [0..n): bytes.push(u8(cx_value(cx_load(e, source, i, cx_T_U8[0])).i & 0xff))
+        return cx_add(CTValue(type = cx_ntype(e), s = cx_host[0].str_from_bytes(bytes)))
+    p = cx_place(cx_kid(e, 0))
+    x = cx_value(cx_read_place(p))
+    if step == 2:
+        source = cx_value(cx_expr(cx_kid(e, 1)))
+        n = cx_value(cx_expr(cx_kid(e, 2))).i
+        loop i in [0..n): x.items.push(cx_load(e, source, i, cx_T_U8[0]))
+    else: x.items.push(cx_int(cx_T_U8[0], cx_value(cx_expr(cx_kid(e, 1))).i & 0xff))
+    cx_write_place(p, cx_add(x))
+    0
+
 cx_call = (e: int) -> int:
     f = int(cx_nodes[0][e].sym)
     if cx_nodes[0][e].aux != 0 or f <= 0: cx_fail(e, "indirect calls are not supported")
+    raw_step = if cx_raw_skip == e: 0 else: cx_raw_step(f)
+    if raw_step == 4: f = cx_host[0].runtime_fn("__case_text_plain")
+    else if raw_step >= 5: return cx_string_step(e, f, raw_step)
+    else if raw_step != 0: return cx_raw_call(e, raw_step)
     cx_stack.push(e)
     if cx_fns[0][f].decl != 0 and cx_has_flag(int(cx_fns[0][f].decl), NF_EXTERN): cx_fail(e, "external calls and host effects are not allowed")
     cx_host[0].check_fn_body(f)
@@ -587,9 +667,14 @@ cx_intrinsic = (e: int) -> int:
         loop byte in x.s: items.push(cx_int(cx_T_U8[0], int(byte)))
         return cx_add(CTValue(type = t, items = items))
     if id == .embed:
+        # (a file's bytes, read as often as a library reads its table: made once)
+        at = int(cx_nodes[0][e].sval)
+        if let known = cx_embed_cache.get(at): return known
         items: int[]
-        loop byte in cx_name_of(int(cx_nodes[0][e].sval)): items.push(cx_int(cx_T_U8[0], int(byte)))
-        return cx_add(CTValue(type = t, items = items))
+        loop byte in cx_name_of(at): items.push(cx_int(cx_T_U8[0], int(byte)))
+        made = cx_add(CTValue(type = t, items = items))
+        cx_embed_cache[at] = made
+        return made
     if id == .arrdata:
         # A bounded immutable view into evaluator storage, never a host address.
         return cx_add(CTValue(type = t, items = [cx_expr(cx_kid(e, 0))]))
@@ -693,6 +778,7 @@ cx_expr_impl = (e: int) -> int:
                 if cx_tkind(pt) == .str_: text += pv.s
                 else if pt == cx_T_BOOL[0]: text += if pv.i != 0: "true" else: "false"
                 else if cx_is_int(pt) and pt != cx_T_MATH_INT[0] and (cx_types[0][pt].sign or pv.i >= 0): text += "{pv.i}"
+                else if pt == cx_T_MATH_INT[0] and pv.items.len() == 0: text += "{pv.i}"
                 else: cx_fail(e, "this string interpolation is not supported at compile time (text, machine integers and booleans are)")
             return cx_add(CTValue(type = t, s = text))
         return cx_add(CTValue(type = t, s = cx_name_of(int(cx_nodes[0][e].sval))))
@@ -700,6 +786,8 @@ cx_expr_impl = (e: int) -> int:
         if cx_nodes[0][e].aux == i32(int(2)): return cx_global(e, int(cx_nodes[0][e].sym))
         if cx_nodes[0][e].aux == i32(int(1)):
             l = int(cx_nodes[0][e].sym)
+            # (a union-to-union view of a local is a value, not a place: `f(x) or_throw` with several errors)
+            if int(cx_locals[0][l].flags) & LF_ALIAS != 0 and not cx_frames[cx_frame].refs.has(l) and cx_nodes[0][int(cx_locals[0][l].alias)].kind == .conv: return cx_expr(int(cx_locals[0][l].alias))
             if cx_frames[cx_frame].refs.has(l) or int(cx_locals[0][l].flags) & LF_ALIAS != 0: return cx_read_place(cx_place(e))
             if let v = cx_frames[cx_frame].values.get(l): return v
             initial = cx_host[0].binding_const_init(1, l, cx_nodes[0][e].pos)
@@ -777,6 +865,12 @@ cx_expr_impl = (e: int) -> int:
                     v.items[i] = cx_zero(int(cx_fields[0][fi].type))
                 if cx_frames[cx_frame].signal != 0: return cx_frames[cx_frame].result
             return cx_add(v)
+        # (the library's text from bytes is raw memory: the evaluator's bytes make the text themselves)
+        if cx_nkids(e) == 1 and cx_nodes[0][e].sym > 0 and cx_is_text_of_bytes(int(cx_nodes[0][e].sym)):
+            bytes = cx_value(cx_expr(cx_kid(e, 0)))
+            out: u8[]
+            loop item in bytes.items: out.push(u8(cx_value(item).i & 0xff))
+            return cx_add(CTValue(type = t, s = cx_host[0].str_from_bytes(out)))
         return cx_call(e)
     if k == .intrinsic: return cx_intrinsic(e)
     if k == .conv:
@@ -792,6 +886,10 @@ cx_expr_impl = (e: int) -> int:
                 return cx_int(t, if cx_tsize(v.type) == 4: int(f32_bits(f32(v.f))) else: int(f64_bits(v.f)))
             if cx_is_int(v.type) and cx_is_float(t):
                 return cx_float(t, if cx_tsize(t) == 4: f64(f32_from_bits(u32(v.i))) else: f64_from_bits(u64(v.i)))
+        # (the bundled string search aligns its word loop: a pointer's place in its storage serves)
+        if cx_tkind(v.type) == .ptr and cx_is_int(t) and cx_files[0][cx_pos_file(cx_nodes[0][e].pos)].path == cx_lib_dir[0] + "/core/str.jo": return cx_int(t, v.i)
+        # (the parser's immediate form of a small number: the evaluator keeps the number itself)
+        if t == cx_T_MATH_INT[0] and cx_is_int(v.type) and cx_files[0][cx_pos_file(cx_nodes[0][e].pos)].path == cx_lib_dir[0] + "/math_runtime.jo": return cx_int(t, v.i >> 1)
         if cx_tkind(v.type) != .ptr or cx_tkind(t) != .ptr: cx_fail(e, "raw representation casts are not supported")
         v.type = t
         return cx_add(v)
