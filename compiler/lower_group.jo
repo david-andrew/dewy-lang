@@ -1540,8 +1540,8 @@ gen_intrinsic_take_slot = (e: int, arg_start: int) -> Val:
     arg1 = int(lists[arg_start + 1])
     at = ntype(arg0)
     et = telem(at)
-    index = gen_expr(arg1).v
     pl = gen_place(arg0, true)
+    index = gen_expr(arg1).v
     arr_unique(pl, at)
     p = read_place(pl, at)
     bounds_check(p, index, nodes[e].pos)
@@ -1557,9 +1557,9 @@ gen_intrinsic_relocate = (e: int, arg_start: int) -> Val:
     arg2 = int(lists[arg_start + 2])
     at = ntype(arg0)
     et = telem(at)
+    pl = gen_place(arg0, true)
     dst = gen_expr(arg1).v
     src = gen_expr(arg2).v
-    pl = gen_place(arg0, true)
     arr_unique(pl, at)
     p = read_place(pl, at)
     da = e_bin(.add, VI, e_addi(p, 24), e_bin(.mul, VI, dst, e_iconst(owner_stride(et))))
@@ -1590,9 +1590,9 @@ gen_intrinsic_push = (e: int, arg_start: int) -> Val:
     esz = owner_stride(et)
     # xs.push(S(...)) with side-effect-free fields: build the element in place
     in_place = not ownership_type(et) and is_plain_ctor(arg1)
+    pl = gen_place(arg0, true)
     val = V(-1, false)
     if not in_place: val = gen_owned(arg1)
-    pl = gen_place(arg0, true)
     p = read_place(pl, at)
     slotp = vreg(VI)
     direct = false
@@ -1714,9 +1714,9 @@ gen_intrinsic_insert = (e: int, arg_start: int) -> Val:
     arg2 = int(lists[arg_start + 2])
     at = prune(ntype(arg0))
     et = int(types[at].elem)
-    val = gen_owned(arg2)
-    idx = gen_expr(arg1).v
     pl = gen_place(arg0, true)
+    idx = gen_expr(arg1).v
+    val = gen_owned(arg2)
     arr_unique(pl, at)
     sa = place_addr(pl, at)
     slotp = e_call3(rt("__arr_insert_slot"), sa, e_iconst(owner_stride(et)), idx, VI)
@@ -1732,8 +1732,8 @@ gen_intrinsic_remove = (e: int, arg_start: int) -> Val:
     at = prune(ntype(arg0))
     et = int(types[at].elem)
     sz = owner_stride(et)
-    idx = gen_expr(arg1).v
     pl = gen_place(arg0, true)
+    idx = gen_expr(arg1).v
     arr_unique(pl, at)
     p = read_place(pl, at)
     bounds_check(p, idx, nodes[e].pos)
@@ -1866,8 +1866,8 @@ gen_intrinsic_reserve = (e: int, arg_start: int) -> Val:
     arg0 = int(lists[arg_start])
     arg1 = int(lists[arg_start + 1])
     at = prune(ntype(arg0))
-    n = gen_expr(arg1).v
     pl = gen_place(arg0, true)
+    n = gen_expr(arg1).v
     arr_unique(pl, at)
     sa = place_addr(pl, at)
     e_call3(rt("__arr_reserve"), sa, e_iconst(owner_stride(int(types[at].elem))), n, -1)
@@ -1880,13 +1880,13 @@ gen_intrinsic_resize = (e: int, arg_start: int) -> Val:
     id = nodes[e].aux as IN
     at = prune(ntype(arg0))
     et = int(types[at].elem)
+    pl = gen_place(arg0, true)
     n = gen_expr(arg1).v
     if id == .truncate and files[pos_file(nodes[arg1].pos)].is_dewy:
         # (a count below zero keeps no elements and is a mistake, not `clear`)
         iff(e_bin(.lts, VI, n, e_iconst(0)))
         e_call_nr1(rt("__panic"), e_daddr(str_data("{loc_str(nodes[arg1].pos)}: truncate keeps a count of elements, which cannot be negative")), -1)
         endc()
-    pl = gen_place(arg0, true)
     arr_unique(pl, at)
     # (elements past an array's length are not zeroed: for elements that hold references
     # the new ones are zeroed, as the stores that write them drop what they replace)

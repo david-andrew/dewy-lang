@@ -1749,8 +1749,8 @@ gen_intrinsic_take_slot=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let arg1:LGWord=LGWord(lists.ptr[arg_start + 1])
     let at=ntype(arg0)
     let et=telem(at)
-    let index=gen_expr(arg1).v
     let pl=gen_place(arg0 true)
+    let index=gen_expr(arg1).v
     arr_unique(pl at);
     let p=read_place(pl at)
     bounds_check(p index nodes.ptr[e].pos);
@@ -1766,9 +1766,9 @@ gen_intrinsic_relocate=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let arg2:LGWord=LGWord(lists.ptr[arg_start + 2])
     let at=ntype(arg0)
     let et=telem(at)
+    let pl=gen_place(arg0 true)
     let dst=gen_expr(arg1).v
     let src=gen_expr(arg2).v
-    let pl=gen_place(arg0 true)
     arr_unique(pl at);
     let p=read_place(pl at)
     let da=e_bin('add' VI e_addi(p 24) e_bin('mul' VI dst e_iconst(owner_stride(et))))
@@ -1801,9 +1801,9 @@ gen_intrinsic_push=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let esz=owner_stride(et)
     # xs.push(S(...)) with side-effect-free fields: build the element in place
     let in_place=not ownership_type(et) and is_plain_ctor(arg1)
+    let pl=gen_place(arg0 true)
     let val=V(-1 false)
     if not in_place {val=gen_owned(arg1)}
-    let pl=gen_place(arg0 true)
     let p=read_place(pl at)
     let slotp=vreg(VI)
     let direct=false
@@ -1938,9 +1938,9 @@ gen_intrinsic_insert=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let arg2:LGWord=LGWord(lists.ptr[arg_start + 2])
     let at=prune(ntype(arg0))
     let et:LGWord=LGWord(types.ptr[at].elem)
-    let val=gen_owned(arg2)
-    let idx=gen_expr(arg1).v
     let pl=gen_place(arg0 true)
+    let idx=gen_expr(arg1).v
+    let val=gen_owned(arg2)
     arr_unique(pl at);
     let sa=place_addr(pl at)
     let slotp=e_call3(rt("__arr_insert_slot") sa e_iconst(owner_stride(et)) idx VI)
@@ -1956,8 +1956,8 @@ gen_intrinsic_remove=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let at=prune(ntype(arg0))
     let et:LGWord=LGWord(types.ptr[at].elem)
     let sz=owner_stride(et)
-    let idx=gen_expr(arg1).v
     let pl=gen_place(arg0 true)
+    let idx=gen_expr(arg1).v
     arr_unique(pl at);
     let p=read_place(pl at)
     bounds_check(p idx nodes.ptr[e].pos);
@@ -2096,8 +2096,8 @@ gen_intrinsic_reserve=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let arg0:LGWord=LGWord(lists.ptr[arg_start])
     let arg1:LGWord=LGWord(lists.ptr[arg_start + 1])
     let at=prune(ntype(arg0))
-    let n=gen_expr(arg1).v
     let pl=gen_place(arg0 true)
+    let n=gen_expr(arg1).v
     arr_unique(pl at);
     let sa=place_addr(pl at)
     e_call3(rt("__arr_reserve") sa e_iconst(owner_stride(LGWord(types.ptr[at].elem))) n -1);
@@ -2110,6 +2110,7 @@ gen_intrinsic_resize=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
     let id=nodes.ptr[e].aux as IN
     let at=prune(ntype(arg0))
     let et:LGWord=LGWord(types.ptr[at].elem)
+    let pl=gen_place(arg0 true)
     let n=gen_expr(arg1).v
     if id =? IN.truncate and files.ptr[pos_file(nodes.ptr[arg1].pos)].is_dewy {
         # (a count below zero keeps no elements and is a mistake, not `clear`)
@@ -2117,7 +2118,6 @@ gen_intrinsic_resize=(e:LGWord arg_start:LGWord):>Val=>$unsafe {
         e_call_nr1(rt("__panic") e_daddr(str_data("{loc_str(nodes.ptr[arg1].pos)}: truncate keeps a count of elements, which cannot be negative")) -1);
         endc();
     }
-    let pl=gen_place(arg0 true)
     arr_unique(pl at);
     # (elements past an array's length are not zeroed: for elements that hold references
     # the new ones are zeroed, as the stores that write them drop what they replace)

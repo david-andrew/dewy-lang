@@ -1,0 +1,8 @@
+$runtime_checks
+main=():>void=>{
+ let xs:array<array<int64>>=[[1 2] [3]]
+ let n:int64=1
+ let f=(s:int64 $capture @n):>int64=>{n=0; s-1}
+ xs[f(n)].push(n)
+ printl(xs)
+}
