@@ -1,0 +1,60 @@
+# A loop that only adds to an array keeps a position below its length.
+T:type = [next:array<int64<v => -1 <=? v and v <? next.length>> extra:array<int>]
+param = (@xs:array<int> i:int64):>int => {
+    if i <? 0 or i >=? xs.length return 0
+    loop k in [0..3) xs.push(k)
+    xs[i]
+}
+field = (@t:T i:int64):>int64 => {
+    if i <? 0 or i >=? t.next.length return 0
+    if t.next[i] =? -1 {
+        loop k in [0..3) t.next.push(-1)
+    }
+    t.next[i]
+}
+condition = (@xs:array<int> i:int64):>int => {
+    if 0 <=? i <? xs.length {
+        loop xs.length <? 10 { xs.push(0) }
+        return xs[i]
+    }
+    0
+}
+inside = (@xs:array<int> i:int64):>int => {
+    if not (0 <=? i <? xs.length) return 0
+    let total = 0
+    loop k in [0..3) {
+        total += xs[i]
+        xs.push(total)
+    }
+    total
+}
+extended = (@xs:array<int> ys:array<int> i:int64):>int => {
+    if not (0 <=? i <? xs.length) return 0
+    loop k in [0..2) xs.extend(ys)
+    xs[i]
+}
+nonempty = (@xs:array<int>):>int => {
+    if xs.length =? 0 return 0
+    loop k in [0..2) xs.push(5)
+    xs[0]
+}
+plain_local = (i:int64):>int => {
+    let xs = [1 2 3]
+    if not (0 <=? i <? xs.length) return 0
+    loop k in [0..2) {
+        if k =? 1 xs.push(k)
+    }
+    xs[i]
+}
+main = () => {
+    let a = [1 2]
+    printl(param(@a 1))
+    let t = T[[-1] [1]]
+    printl(field(@t 0))
+    printl(condition(@a 3))
+    printl(inside(@a 0))
+    printl(extended(@a [7] 0))
+    printl(nonempty(@a))
+    printl(plain_local(2))
+    printl(a.length)
+}

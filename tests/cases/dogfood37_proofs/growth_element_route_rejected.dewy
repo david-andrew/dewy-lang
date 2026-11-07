@@ -1,0 +1,12 @@
+f = (@rows:array<array<int>> a:int64 b:int64):>int => {
+    if not (0 <=? a <? rows.length and 0 <=? b <? rows.length) return 0
+    if rows[a].length =? 0 return 0
+    loop k in [0..3) {
+        rows[b].push(k)
+    }
+    rows[b][0]
+}
+main = () => {
+    let r = [[1] []]
+    printl(f(@r 1 1))
+}

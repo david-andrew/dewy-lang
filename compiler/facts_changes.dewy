@@ -1,14 +1,15 @@
 $runtime_checks
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (LF_ALIAS locals)
+from p"check.jo" import (LF_ALIAS LF_MUTPARAM locals)
 from p"effect_values.dewy" import (effect_value)
 from p"expr.jo" import (CV IN is_map_type ntype oversized_literal)
-from p"facts.jo" import (FACT_ACTIVE FACT_CAP FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_MEMBER FACT_POOL_POSITIONS FACT_ROW_SOURCE FactProjection FactState fact_add_projection fact_bind fact_binding fact_bound fact_difference fact_domain fact_exposed fact_name_vals fact_new fact_owner fact_place fact_project fact_projection_after fact_projection_find fact_projection_first fact_return_escapes_cache fact_set_bound fact_slice_children fact_slice_flags fact_truth fact_type)
+from p"facts.jo" import (fact_incident FACT_ACTIVE FACT_CAP FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_MEMBER FACT_POOL_POSITIONS FACT_ROW_SOURCE FactProjection FactState fact_add_projection fact_bind fact_binding fact_bound fact_difference fact_domain fact_exposed fact_name_vals fact_new fact_owner fact_place fact_project fact_projection_after fact_projection_find fact_projection_first fact_return_escapes_cache fact_set_bound fact_slice_children fact_slice_flags fact_truth fact_type)
 from p"facts_forgets.dewy" import (fact_call_effects fact_call_write fact_forget fact_forget_call fact_holds_contract fact_path_call_effects)
 from p"facts_ranges.dewy" import (fact_floor_call)
 from p"facts_arrays.dewy" import (fact_array_call)
 from p"facts_joins.dewy" import (fact_field_node fact_hull fact_payload_node)
+from p"facts_routes.dewy" import (fact_route fact_route_values)
 from p"facts_maps.dewy" import (fact_map_insert_call fact_map_reads_only fact_map_store_call fact_map_store_changes)
 from p"facts_pools.dewy" import (fact_pool_call fact_pool_keep fact_pool_store_changes fact_pool_type)
 from p"facts_progress.dewy" import (fact_progress_strip)
@@ -319,7 +320,8 @@ fact_changes=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_')
     if k =? 'assign' and not fact_bounded_change(n @s at reason) {fact_change_route(@s ChangeWord(nodes.ptr[n].a) false at reason)}
     if k =? 'intrinsic' {
         let id=nodes.ptr[n].aux as IN
-        if id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.extend or id =? IN.resize or id =? IN.truncate or id =? IN.setlen {
+        if (id =? IN.push or id =? IN.extend) and fact_growth_route(kid(n 0)) {fact_growth_change(n @s at reason)}
+        else if id =? IN.push or id =? IN.extend or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.resize or id =? IN.truncate or id =? IN.setlen {
             fact_change_route(@s kid(n 0) true at reason)
         }
     }
@@ -347,6 +349,50 @@ fact_changes=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_')
     if mask & 16 not=? 0 {
         loop i in [0..nkids(n)) {fact_changes(kid(n i) @s at reason)}
     }
+}
+# A loop's havoc of a push or extend: the length it leaves is at least the one it found, so a
+# position below the entry length stays below (`if i <? xs.length` before `loop ... xs.push(x)`). Sites
+# chain in order, and any other change to the route, or a call that may write it, makes a fresh
+# length with no such relation, so the chain to the entry length survives only if every change in the
+# loop grows it. Only for a length the state already holds. O(route depth).
+fact_growth_change=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason):>void=>{
+    let found=fact_held_length(@s kid(n 0))
+    fact_change_route(@s kid(n 0) true at reason)
+    if found =? 0 {return}
+    let was=fact_bound(s found)
+    let related=fact_incident(s found) >=? 0
+    if not related and was.lo <=? 0 {return}
+    let after=fact_route_values(@s fact_route(kid(n 0) @s))
+    if after.length =? 0 {return}
+    let length=fact_project(@s after[after.length - 1] (-1) false T_INT)
+    if related {fact_difference(@s found length 0 n)}
+    let b=fact_bound(s length)
+    if was.lo >? b.lo {
+        b.lo=was.lo
+        fact_set_bound(@s length b)
+    }
+}
+# (an `@` parameter, a global or a field path of a binding: an element's route names a different array
+# as its index moves, an alias's root is someone else's, and a plain local has fact_growing_pushes)
+fact_growth_route=(e0:ChangeWord):>bool=>$unsafe {
+    let e=e0
+    let field=false
+    loop nodes.ptr[e].kind =? 'addr' or nodes.ptr[e].kind =? 'conv' or nodes.ptr[e].kind =? 'field' {
+        if nodes.ptr[e].kind =? 'field' {field=true}
+        e=ChangeWord(nodes.ptr[e].a)
+    }
+    if nodes.ptr[e].kind not=? 'ident' {return false}
+    if nodes.ptr[e].aux not=? int32(1) {return true}
+    let flags=ChangeWord(locals.ptr[ChangeWord(nodes.ptr[e].sym)].flags)
+    flags & LF_ALIAS =? 0 and (field or flags & LF_MUTPARAM not=? 0)
+}
+# (the length a route's array is known to have, or 0: nothing made for one nobody asked about)
+fact_held_length=(@s:FactState e:ChangeWord):>ChangeWord=>{
+    let values=fact_route_values(@s fact_route(e @s))
+    if values.length =? 0 {return 0}
+    let held=fact_projection_find(s values[values.length - 1] (-1) false)
+    if held <? 0 {return 0}
+    s.projections[held].value
 }
 # Runtime children for loop havoc. A match arm's type pattern binds a fresh
 # arm-local and evaluates only its type (a refinement is pure); shape and

@@ -1,0 +1,15 @@
+g:array<int> = [1 2 3]
+shrink = ():>void => {
+    g.clear()
+}
+f = (@xs:array<int> i:int64):>int => {
+    if i <? 0 or i >=? xs.length return 0
+    loop k in [0..3) {
+        xs.push(k)
+        shrink()
+    }
+    xs[i]
+}
+main = () => {
+    printl(f(@g 1))
+}

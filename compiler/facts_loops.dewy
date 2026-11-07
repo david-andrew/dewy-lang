@@ -469,8 +469,12 @@ fact_loop_shape=(@s:FactState a:FactState b:FactState x:LoopWord y:LoopWord into
                     # a round; stability re-validates the interval)
                     let lo=if y0.lo >=? x0.lo {x0.lo} else {0}
                     let hi=if y0.hi <=? x0.hi {x0.hi} else {fact_length_max()}
-                    if lo <=? 0 and hi >=? fact_length_max() {continue}
+                    # (a length the backedge holds at least at entry's keeps that row, so a position below
+                    # the entry length stays below: one entailment per changed length, as stability rechecks)
+                    let grows=b.live and fact_incident(a p.value) >=? 0 and fact_slot(b p.value) >=? 0 and fact_entails(b p.value other 0)
+                    if lo <=? 0 and hi >=? fact_length_max() and not grows {continue}
                     v=fact_new(@s FactBound(lo hi lo >? 0) FactTerm(type=t))
+                    if grows {fact_difference(@s p.value v 0)}
                 }
                 else if x0.wide or y0.wide or x0.lo not=? x0.hi or y0.lo not=? x0.lo or y0.hi not=? x0.hi {continue}
                 else {v=fact_new(@s FactBound(x0.lo x0.hi x0.nz) FactTerm(type=t))}

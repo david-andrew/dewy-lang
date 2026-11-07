@@ -1,0 +1,12 @@
+main = () => {
+    let xs = [1 2 3]
+    let shrink = ($capture @xs):>void => { xs.clear() }
+    let i:int64 = 1
+    if i <? xs.length {
+        loop k in [0..3) {
+            xs.push(k)
+            shrink()
+        }
+        printl(xs[i])
+    }
+}

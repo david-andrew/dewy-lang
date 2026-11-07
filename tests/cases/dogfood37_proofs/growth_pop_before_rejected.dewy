@@ -1,0 +1,13 @@
+f = (@xs:array<int> i:int64):>int => {
+    if i <? 0 or i >=? xs.length return 0
+    loop k in [0..3) {
+        xs.pop();
+        xs.pop();
+        xs.push(k)
+    }
+    xs[i]
+}
+main = () => {
+    let a = [1 2 3 4 5 6 7]
+    printl(f(@a 1))
+}

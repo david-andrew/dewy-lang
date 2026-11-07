@@ -4992,6 +4992,9 @@ An unproven obligation's error names the missing relation (`i <? xs.length`,
   position that cannot be negative can say so in its type
   (`pos:int64<(>=? 0)> = 0` in a record, `i:int64<0 <=? i and i <? xs.length>` as a parameter,
   which moves the proof to each caller).
+- A loop that only adds to an array (`push`, `extend`) keeps a position below its length, at every
+  head and after it: `if i <? xs.length` before `loop ... xs.push(x)` still proves `xs[i]`, also for an
+  `@` parameter or a field path. Any other change in the loop, or a call that may write it, needs a new guard.
 - Equal lengths share subsequent bounds: after `a.length =? b.length`, a
   nonempty guard on `a` also proves `b[0]`. The same applies to parameters
   sharing a shape binder (`a:array<int length=[n]> b:array<int length=[n]>`)

@@ -3575,6 +3575,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 if old.lo != old.hi and (fact_loops.len() == 0 or delta < 0):
                     fact_difference(s, size, length, delta, n)
                     fact_difference(s, length, size, -delta, n)
+                # (in a loop, an insertion's row only says it grew: a head keeps a length the backedge
+                # holds at least at entry's, fact_loop_shape)
+                else if old.lo != old.hi and delta > 0 and fact_incident(s, length) >= 0: fact_difference(s, length, size, 0, n)
             if plain and id == .push and position != 0 and fact_loops.len() == 0 and tkind(fact_type(ntype(kid(n, 1)))) == .array:
                 appended = fact_replace(s, base, length, true, position, ntype(a))
                 fresh = fact_replace(s, appended, -1, false, size, ntype(a))
