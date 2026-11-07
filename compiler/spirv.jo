@@ -23,6 +23,7 @@ use 'checks_assign_hooks.dewy'
 use 'expr.jo'
 use 'checks_thin_expr.dewy'
 use 'glsl.jo'
+use 'spirv_ops.dewy'
 
 # where in the push constants (see the comment above)
 const SV_PC_PARAMS = 0
@@ -78,21 +79,6 @@ sv_loops: (int, int)[]         # (merge, continue) of the loops around
 sv_lvar: {int: int} = {}       # local -> its variable (a pointer)
 sv_lref: {int: int} = {}       # local of the uniforms' type -> its address
 
-sv_err = (pos: int, msg: str): fatal(pos, "in shader code: {msg}")
-
-sv_pick = (c: bool, a: int, b: int) -> int:
-    if c: return a
-    b
-
-# ---------------- instructions ----------------
-sv_ins = (o: mut int[], op: int, args: int[]):
-    o.push(((args.len() + 1) << 16) | op)
-    loop a in args: o.push(a)
-
-sv_new = () -> int:
-    sv_bound += 1
-    sv_bound
-
 # the words of a string operand: its bytes and a terminating 0, padded to a whole word
 sv_strw = (s: str) -> int[]:
     w: int[]
@@ -105,21 +91,6 @@ sv_strw = (s: str) -> int[]:
         w.push(x)
     w
 
-sv_deco = (id: int, d: int, extra: int[]):
-    a: int[] = [id, d]
-    loop x in extra: a.push(x)
-    sv_ins(sv_dec, 71, a)
-
-sv_mdeco = (st: int, member: int, d: int, extra: int[]):
-    a: int[] = [st, member, d]
-    loop x in extra: a.push(x)
-    sv_ins(sv_dec, 72, a)
-
-# an instruction in the function being translated (in a new, unreachable block after a branch)
-sv_code = (op: int, args: int[]):
-    if sv_dead: sv_begin(sv_new())
-    sv_ins(sv_body, op, args)
-
 # an instruction with a result: returns its id
 sv_val = (op: int, ty: int, args: int[]) -> int:
     id = sv_new()
@@ -128,21 +99,12 @@ sv_val = (op: int, ty: int, args: int[]) -> int:
     sv_code(op, a)
     id
 
-sv_begin = (label: int):
-    sv_ins(sv_body, 248, [label])
-    sv_label = label
-    sv_dead = false
-
 # end the block with a branch (unless it has ended); returns whether it branched
 sv_branch = (target: int) -> bool:
     if sv_dead: return false
     sv_ins(sv_body, 249, [target])
     sv_dead = true
     true
-
-sv_cond_branch = (c: int, a: int, b: int):
-    sv_code(250, [c, a, b])
-    sv_dead = true
 
 # ---------------- types and constants ----------------
 sv_type_key = (key: str, op: int, args: int[]) -> int:
@@ -153,17 +115,6 @@ sv_type_key = (key: str, op: int, args: int[]) -> int:
     sv_ins(sv_glob, op, a)
     sv_cache[key] = id
     id
-
-sv_void = () -> int: sv_type_key("void", 19, [])
-sv_bool = () -> int: sv_type_key("bool", 20, [])
-sv_f32 = () -> int: sv_type_key("f32", 22, [32])
-sv_i32 = () -> int: sv_type_key("i32", 21, [32, 1])
-sv_u32 = () -> int: sv_type_key("u32", 21, [32, 0])
-sv_vecf = (n: int) -> int: sv_type_key("v{n}", 23, [sv_f32(), n])
-sv_veci = (n: int) -> int: sv_type_key("iv{n}", 23, [sv_i32(), n])
-sv_vecb = (n: int) -> int: sv_type_key("bv{n}", 23, [sv_bool(), n])
-sv_mat4 = () -> int: sv_type_key("m4", 24, [sv_vecf(4), 4])
-sv_ptr = (sc: int, t: int) -> int: sv_type_key("p{sc},{t}", 32, [sc, t])
 
 sv_fntype = (ret: int, params: int[]) -> int:
     key = "fn{ret}"
@@ -210,10 +161,6 @@ sv_const = (ty: int, bits: int) -> int:
     sv_cache[key] = id
     id
 
-sv_ci = (v: int) -> int: sv_const(sv_i32(), v & 0xFFFFFFFF)
-sv_cu = (v: int) -> int: sv_const(sv_u32(), v & 0xFFFFFFFF)
-sv_cf = (x: f64) -> int: sv_const(sv_f32(), int(f32_bits(f32(x))))
-
 sv_cbool = (b: bool) -> int:
     key = "false"
     op = 42
@@ -235,20 +182,11 @@ sv_null = (ty: int) -> int:
     sv_cache[key] = id
     id
 
-# a variable of the current function (declared at the start of its first block)
-sv_var = (ty: int) -> int:
-    id = sv_new()
-    sv_ins(sv_vars, 59, [sv_ptr(SC_FUNCTION, ty), id, SC_FUNCTION])
-    id
-
 sv_global = (ptrty: int, sc: int) -> int:
     id = sv_new()
     sv_ins(sv_glob, 59, [ptrty, id, sc])
     sv_iface.push(id)
     id
-
-sv_load = (ty: int, p: int) -> int: sv_val(61, ty, [p])
-sv_store = (p: int, v: int): sv_code(62, [p, v])
 
 # ---------------- the interface ----------------
 # a buffer read as 32-bit words, and an address of one
@@ -265,10 +203,6 @@ sv_rawptr = () -> int:
     sv_cache["rawptr"] = p
     p
 
-sv_pc_types = () -> int[]:
-    r = sv_rawptr()
-    [r, r, r, sv_i32(), sv_i32(), sv_f32(), sv_i32()]
-
 sv_pc_var = () -> int:
     if sv_pc != 0: return sv_pc
     ms = sv_pc_types()
@@ -278,27 +212,6 @@ sv_pc_var = () -> int:
     loop i in [0..ms.len()): sv_mdeco(st, i, 35, [offs[i]])
     sv_pc = sv_global(sv_ptr(SC_PUSH, st), SC_PUSH)
     sv_pc
-
-sv_pc_get = (i: int) -> int:
-    ty = sv_pc_types()[i]
-    p = sv_val(65, sv_ptr(SC_PUSH, ty), [sv_pc_var(), sv_ci(i)])
-    sv_load(ty, p)
-
-sv_builtin_var = (ty: int, sc: int, builtin: int) -> int:
-    v = sv_global(sv_ptr(sc, ty), sc)
-    sv_deco(v, 11, [builtin])
-    v
-
-sv_vertex_id = () -> int:
-    if sv_vid == 0: sv_vid = sv_builtin_var(sv_i32(), SC_INPUT, 42)
-    sv_load(sv_i32(), sv_vid)
-
-sv_instance_id = () -> int:
-    if sv_iid == 0: sv_iid = sv_builtin_var(sv_i32(), SC_INPUT, 43)
-    sv_load(sv_i32(), sv_iid)
-
-sv_image_type = () -> int: sv_type_key("img2d", 25, [sv_f32(), 1, 0, 0, 0, 1, 0])
-sv_sampled_type = () -> int: sv_type_key("simg2d", 27, [sv_image_type()])
 
 # the texture with index t (a u32), as a sampled image
 sv_texture = (t: int) -> int:
@@ -523,10 +436,6 @@ sv_function = (f: int):
         else: sv_code(253, [])
         sv_dead = true
     sv_finish_fn(head)
-
-# ---------------- statements ----------------
-sv_stmts = (b: int):
-    loop i in [0..nkids(b)): sv_stmt(kid(b, i))
 
 sv_stmt = (s: int):
     k = nodes[s].kind
@@ -758,26 +667,6 @@ sv_assign_op = (op: Tok) -> Tok:
         shreq: .shr
         _: .plus
 
-# ---------------- expressions ----------------
-sv_is_floaty = (t0: int) -> bool:
-    t = sl_type(t0)
-    types[t].kind == .float_ or (types[t].kind == .vec and not types[t].sign)
-
-sv_is_vector = (t0: int) -> bool:
-    t = sl_type(t0)
-    types[t].kind == .vec and t != T_MAT4
-
-sv_ncomp = (t0: int) -> int:
-    t = sl_type(t0)
-    if types[t].kind == .vec: return int(types[t].bits)
-    1
-
-# a scalar as a vector of type t (all components equal)
-sv_splat = (t: int, v: int, pos: int) -> int:
-    parts: int[]
-    loop i in [0..sv_ncomp(t)): parts.push(v)
-    sv_val(80, sv_type(t, pos), parts)
-
 # a op b for numbers and vectors (rt: the result's type)
 sv_arith = (op: Tok, ta0: int, a0: int, tb0: int, b0: int, rt: int, pos: int) -> int:
     ta = prune(ta0)
@@ -860,11 +749,6 @@ sv_shift = (code: int, ty: int, a: int, b: int, rt: int) -> int:
     far = sv_ci(0)
     if code == 195: far = sv_val(195, ty, [a, sv_ci(31)])
     sv_val(169, ty, [sv_val(175, sv_bool(), [c, sv_ci(32)]), far, r])
-
-# integers are 32 bits in shaders; an unsigned one (u8 u16 u32 u64) is held in the same bits
-sv_unsigned = (t0: int) -> bool:
-    t = sl_type(t0)
-    types[t].kind == .int_ and not types[t].sign
 
 # v (32 bits) wrapped to the range of a narrower integer type t, as on the CPU
 sv_narrow = (v: int, t0: int) -> int:
@@ -1340,20 +1224,6 @@ sv_hypot = (x: int, y: int) -> int:
     infinite = sv_val(166, b, [sv_val(170, b, [ax, inf]), sv_val(170, b, [ay, inf])])
     sv_val(169, f, [infinite, sv_val(124, f, [inf]), result])
 
-# ---------------- GPU buffers (lib/game/gpubuffer.jo) ----------------
-# A GpuBuffer here is (its address, its length): struct { uvec2, i32 }. Reads past either end read
-# the nearest element; writes (and atomics) past them do nothing. Only compute programs write.
-sv_uv2 = () -> int: sv_type_key("uv2", 23, [sv_u32(), 2])
-sv_gbuf_type = () -> int: sv_type_key("gbuf", 30, [sv_uv2(), sv_i32()])
-sv_gbuf_ptr = (b: int) -> int: sv_val(124, sv_rawptr_w(), [sv_val(81, sv_uv2(), [b, 0])])
-sv_gbuf_len = (b: int) -> int: sv_val(81, sv_i32(), [b, 1])
-
-# e is a call of the library's operation `name` on a GpuBuffer (its first argument)
-sv_is_gbuf_op = (e: int, name: str) -> bool:
-    if nodes[e].kind != .call or nodes[e].aux != 0 or nkids(e) == 0: return false
-    decl = int(fns[int(nodes[e].sym)].decl)
-    decl != 0 and modules[int(nodes[decl].mod)].is_prelude and name_of(int(nodes[decl].name)) == name and is_gpu_buffer(ntype(kid(e, 0)))
-
 # b[i]: where the element is
 sv_gbuf_elem = (e: int) -> SvRef:
     i32_ = sv_i32()
@@ -1400,8 +1270,6 @@ sv_word_ptr = (base: int, c: int, d: int) -> int:
         if c != 0: off = sv_val(128, sv_i32(), [d, sv_ci(c)])
         idx = sv_val(195, sv_i32(), [off, sv_ci(2)])
     sv_val(65, sv_ptr(SC_PSB, sv_u32()), [base, sv_ci(0), idx])
-
-sv_store_word = (base: int, c: int, d: int, w: int): sv_code(62, [sv_word_ptr(base, c, d), w, 2, 4])
 
 # the low `bits` bits of v (an i32) to bits [8 * ((c + d) & 3), ...) of their word: cleared, then
 # set, each atomically, so that the bytes beside them, which other invocations may write, stay
@@ -1519,12 +1387,6 @@ sv_atomic = (e: int, nm: str, ops: (int, int)) -> int:
     sv_begin(merge)
     sv_val(124, sv_i32(), [sv_val(245, u, [r, then_end, sv_cu(0), from_])])
 
-# ---------------- subgroups ----------------
-sv_cap = (c: int):
-    if sv_cache.get("cap{c}") != none: return
-    sv_cache["cap{c}"] = 1
-    sv_ins(sv_caps, 17, [c])
-
 sv_subgroup_builtin = (b: int) -> int:
     key = "sgb{b}"
     if let v = sv_cache.get(key): return sv_val(124, sv_i32(), [sv_load(sv_u32(), v)])
@@ -1608,7 +1470,6 @@ sv_drain = ():
             sv_translated[f] = true
             sv_function(f)
 
-
 # the module's bytes
 sv_module = (model: int, main: int) -> str:
     w: int[] = [0x07230203, 0x00010500, 0, sv_bound + 1, 0]
@@ -1652,11 +1513,6 @@ sv_slots = (t0: int) -> int:
     if t == T_MAT4: return 4
     if types[t].kind == .fixed: return fixed_len(t) * sv_slots(int(types[t].elem))
     1
-
-sv_is_int_leaf = (t0: int) -> bool:
-    t = sl_type(t0)
-    if types[t].kind == .fixed: return sv_is_int_leaf(int(types[t].elem))
-    types[t].kind == .int_ or (types[t].kind == .vec and types[t].sign) or (types[t].kind == .struct_ and is_lib_texture(int(types[t].st)))
 
 # the varyings: one variable per part of the vertex function's result after the first (the
 # clip position), at consecutive locations; integers are not interpolated
@@ -1807,11 +1663,6 @@ spirv_build = (vsf: int, fsf: int) -> (str, str):
 #   8 + 6k: input k's address (2 words), then its steps per dimension (4: 0 where it stretches)
 #   then the f32 numbers, then the i32 ones (desc says which operand is which: see glsl_kernel)
 const SV_KERNEL_GROUP = 64
-
-# a buffer address from two words (low, high) of the parameters
-sv_addr_at = (params: int, word: int, ptrty: int) -> int:
-    v = sv_val(80, sv_type_key("uv2", 23, [sv_u32(), 2]), [sv_word(params, word * 4, 0), sv_word(params, word * 4 + 4, 0)])
-    sv_val(124, ptrty, [v])
 
 # a buffer of 32-bit words that can be written
 sv_rawptr_w = () -> int:
@@ -1974,3 +1825,5 @@ spirv_compute = (f: int) -> str:
         write_file("{dir}/{sv_dumped}.comp.spv", m)
         sv_dumped += 1
     m
+
+sv_cf = (x: f64) -> int: sv_const(sv_f32(), int(f32_bits(f32(x))))
