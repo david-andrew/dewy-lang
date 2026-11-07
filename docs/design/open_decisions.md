@@ -444,6 +444,23 @@ printl"{heat_loss(a 70°F wall) as (BTU/hour):.1f}"           # compile error, n
 - **Also built provisionally, for you to see:** the names `R`, `RSI` and `RValue`, plus `BTU`, `kJ`, `kW`, `kWh`, `ft`/`foot`/`feet`, `yd`/`yard`/`yards`, `mile`/`miles`.
 - **Reversible:** yes.
 
+### D33. A type alias that names itself in a self-length refinement
+Turn this on and a function can return a self-length array, which has no type name to write today.
+
+```dewy
+Parents:type = array<int64<(<? Parents.length)>>
+make_parents = (n:int64<(>? 0)>):>Parents => {
+    let p:Parents = [0]
+    loop p.length <? n { p.push(p.length) }
+    p
+}
+```
+
+Today the same contract works on a `let`, a parameter or a record field, so a function can fill one given by `@` or return it inside a record.
+
+- **Rec:** add it, as the next step if returning these arrays turns out to matter. It would be the first alias allowed to refer to itself this way.
+- **Reversible:** yes.
+
 ---
 
 ## P4: open-ended
