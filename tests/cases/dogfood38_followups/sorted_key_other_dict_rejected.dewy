@@ -1,0 +1,9 @@
+# The callback reads another dictionary: its keys are not the receiver's.
+Key:type = [a:int b:string]
+main = () => {
+    let by:dict<Key int> = []
+    let other:dict<Key int> = []
+    by[Key[1 "x"]] = 2
+    let ks = by.keys.sorted(key=(k) => -other[k])
+    printl(ks.length)
+}

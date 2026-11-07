@@ -1,0 +1,10 @@
+# `d.keys.sorted(key=...)` over record keys keeps membership in the callback, as it
+# does for numbers and text: the key equals itself and hashes as it did.
+Key:type = [a:int b:string]
+main = () => {
+    let by:dict<Key int> = []
+    by[Key[1 "x"]] = 2
+    by[Key[2 "y"]] = 5
+    let ks = by.keys.sorted(key=(k) => -by[k])
+    loop k in ks printl("{k.a} {k.b} {by[k]}")
+}

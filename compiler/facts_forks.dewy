@@ -4,7 +4,7 @@ from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ASSIGNED LF_EXPOSED LF_PARTBORROW 
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"expr.jo" import (CV is_dewy_set_type ntype)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"facts.jo" import (FACT_CAP FACT_CONTRACT FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_KEYS_SOURCE FACT_KEY_SOURCE FactDifference FactForkEntry FactKeyParam FactProjection FactState fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_covered fact_difference fact_domain fact_fork_entries fact_key_names fact_key_params fact_name_parallel_arrays fact_new fact_owner fact_parallel_bounds fact_policy fact_probe_on fact_project fact_projection_find fact_query fact_scalar fact_shortest fact_slice_flags fact_speculating fact_summary_owner fact_type)
+from p"facts.jo" import (FACT_CAP fact_reflexive_key FACT_CONTRACT FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_KEYS_SOURCE FACT_KEY_SOURCE FactDifference FactForkEntry FactKeyParam FactProjection FactState fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_covered fact_difference fact_domain fact_fork_entries fact_key_names fact_key_params fact_name_parallel_arrays fact_new fact_owner fact_parallel_bounds fact_policy fact_probe_on fact_project fact_projection_find fact_query fact_scalar fact_shortest fact_slice_flags fact_speculating fact_summary_owner fact_type)
 from p"facts_lifecycle.dewy" import (fact_owner_value)
 from p"facts_forgets.dewy" import (fact_ends_path fact_path_call_effects)
 from p"facts_ranges.dewy" import (fact_refinement_covers)
@@ -110,7 +110,8 @@ fact_key_callback=(n:ForkWord):>ForkWord=>$unsafe {
     let receiver=fact_type(ntype(kid(n 0)))
     let element:ForkWord=if tkind(receiver) =? 'array' {telem(receiver)} else if is_dewy_set_type(receiver) {struct_targ(ForkWord(types.ptr[receiver].st) 0)} else {return 0}
     let t=fact_type(ForkWord(locals.ptr[fns.ptr[f].params[0]].type))
-    if (not fact_scalar(t) or not is_int(t) or t =? T_U64) and t not=? T_STR {return 0}
+    # (or a record key that equals itself and hashes as it did: membership alone)
+    if (not fact_scalar(t) or not is_int(t) or t =? T_U64) and t not=? T_STR and not fact_reflexive_key(t) {return 0}
     if t not=? fact_type(element) {return 0}
     callback
 }

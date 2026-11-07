@@ -1,0 +1,9 @@
+# An equality comparing each field to the same field keeps membership.
+Pair:type = [a:int64 b:int64]
+__eq__ = (x:Pair y:Pair):>bool => x.a =? y.a and x.b =? y.b
+main = () => {
+    let by:dict<Pair int> = []
+    by[Pair[1 2]] = 2
+    by[Pair[3 4]] = 7
+    loop k in by.keys.sorted(key=(k) => -by[k]) printl("{k.a} {by[k]}")
+}
