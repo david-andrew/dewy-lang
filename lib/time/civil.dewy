@@ -57,7 +57,9 @@ __sub__=(a:Date b:Date):>Span=>{
     let [ly lm ld]=fields(late)
     let month_count=(ly*12+int(lm))-(ey*12+int(em))-(if ld <? ed {1} else {0})
     let months=int64<overflow='saturate'>(month_count)
-    let anchor=_month_clamped(early months)
+    # (a February 29 birthday's anniversary is March 1 in a common year, as `age` counts it)
+    let [ay am ad]=_month_add(early months)
+    let anchor=if em =? 2 and ed =? 29 and am =? 2 and days_in_month(ay 2) =? 28 {date_of(ay 3 1)} else {_month_clamped(early months)}
     let days=int64<overflow='saturate'>(int(late._days)-int(anchor._days))
     let sign:int64=if forward {1} else {-1}
     Span[total sign*years sign*int64<overflow='saturate'>(months%12) sign*days]
