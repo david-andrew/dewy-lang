@@ -1,0 +1,506 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (env write_file)
+from p"ast.jo" import (kid nodes)
+from p"check.jo" import (LF_MUTPARAM check_struct_fields locals)
+from p"expr.jo" import (IN gpu_buffer_elem ntype)
+from p"glsl_ops.dewy" import (sl_type)
+from p"spirv.jo" import (SC_FUNCTION SC_INPUT SC_PSB SC_PUSH SC_UCONST SV_KERNEL_GROUP SvRef sv_body sv_bound sv_cache sv_caps sv_dead sv_dec sv_dumped sv_expr sv_fn_ids sv_fns sv_fragment sv_function sv_glob sv_group sv_iface sv_iid sv_label sv_loops sv_lref sv_lvar sv_minmax sv_pc sv_pending sv_stage sv_std sv_textures sv_translated sv_type sv_utype sv_vars sv_vec_ctor sv_vertex sv_vid sv_write)
+from p"spirv_ops.dewy" import (sv_begin sv_bool sv_builtin_var sv_ci sv_code sv_cond_branch sv_cu sv_deco sv_err sv_gbuf_len sv_gbuf_ptr sv_i32 sv_ins sv_is_int_leaf sv_is_vector sv_load sv_mdeco sv_new sv_pc_types sv_ptr sv_sampled_type sv_stmts sv_u32)
+from p"type_ops.dewy" import (fixed_len is_lib_texture layout)
+from p"types.jo" import (T_MAT4 fields prune structs tsize types)
+from p"util.jo" import (name_of)
+
+SpirvEmitWord:type=int64<overflow='wrap'>
+# the words of a string operand: its bytes and a terminating 0, padded to a whole word
+sv_strw=(s:string):>array<int64>=>{
+    let w:array<int64>=[]
+    let n=(s as array<uint8>).length
+    loop i in [0..n // 4 + 1) {
+        let x:SpirvEmitWord=0
+        loop j in [0..4) {
+            let k=i * 4 + j
+            if k <? n {x=x | (SpirvEmitWord((s as array<uint8>)[k]) << (8 * j))}
+        }
+        w.push(x)
+    }
+    w
+}
+# an instruction with a result: returns its id
+sv_val=(op:SpirvEmitWord ty:SpirvEmitWord args:array<int64>):>int64=>{
+    let id=sv_new()
+    let a:array<int64>=[ty id]
+    loop x in args {a.push(x)}
+    sv_code(op a)
+    id
+}
+# end the block with a branch (unless it has ended); returns whether it branched
+sv_branch=(target:SpirvEmitWord):>bool=>{
+    if sv_dead {return false}
+    sv_ins(@sv_body 249 [target])
+    sv_dead=true
+    true
+}
+# ---------------- types and constants ----------------
+sv_type_key=(key:string op:SpirvEmitWord args:array<int64>):>int64=>{
+    let cached=(sv_cache.get(key))
+    if cached not=? none {return cached}
+    let id=sv_new()
+    let a:array<int64>=[id]
+    loop x in args {a.push(x)}
+    sv_ins(@sv_glob op a)
+    sv_cache[key]=id
+    id
+}
+sv_fntype=(ret:SpirvEmitWord params:array<int64>):>int64=>{
+    let key="fn{ret}"
+    loop p in params {key="{key},{p}"}
+    let a:array<int64>=[ret]
+    loop p in params {a.push(p)}
+    sv_type_key(key 33 a)
+}
+sv_const=(ty:SpirvEmitWord bits:SpirvEmitWord):>int64=>{
+    let key="c{ty}:{bits}"
+    let cached=(sv_cache.get(key))
+    if cached not=? none {return cached}
+    let id=sv_new()
+    sv_ins(@sv_glob 43 [int64(ty) id int64(bits)])
+    sv_cache[key]=id
+    id
+}
+sv_cbool=(b:bool):>int64=>{
+    let key="false"
+    let op:SpirvEmitWord=42
+    if b {
+        key="true"
+        op=41
+    }
+    let cached=(sv_cache.get(key))
+    if cached not=? none {return cached}
+    let id=sv_new()
+    sv_ins(@sv_glob op [sv_bool() id])
+    sv_cache[key]=id
+    id
+}
+# the zero value of a type
+sv_null=(ty:SpirvEmitWord):>int64=>{
+    let key="null{ty}"
+    let cached=(sv_cache.get(key))
+    if cached not=? none {return cached}
+    let id=sv_new()
+    sv_ins(@sv_glob 46 [int64(ty) id])
+    sv_cache[key]=id
+    id
+}
+sv_global=(ptrty:SpirvEmitWord sc:SpirvEmitWord):>int64=>{
+    let id=sv_new()
+    sv_ins(@sv_glob 59 [ptrty id sc])
+    sv_iface.push(id)
+    id
+}
+# ---------------- the interface ----------------
+# a buffer read as 32-bit words, and an address of one
+sv_rawptr=():>int64=>{
+    let id=sv_cache.get("rawptr")
+    if id not=? none {return id}
+    let u=sv_u32()
+    let rt=sv_type_key("rawrt" 29 [u])
+    sv_deco(rt 6 [4])
+    let st=sv_type_key("rawst" 30 [rt])
+    sv_deco(st 2 [])
+    sv_mdeco(st 0 35 [0])
+    sv_mdeco(st 0 24 [])
+    let p=sv_ptr(SC_PSB st)
+    sv_cache["rawptr"]=p
+    p
+}
+sv_pc_var=():>int64=>{
+    if sv_pc not=? 0 {return sv_pc}
+    let ms=sv_pc_types()
+    let st=sv_type_key("pcst" 30 ms)
+    sv_deco(st 2 [])
+    let offs=[0 8 16 24 28 32 36]
+    loop i in [0..ms.length) {sv_mdeco(st i 35 [offs[i]])}
+    sv_pc=sv_global(sv_ptr(SC_PUSH st) SC_PUSH)
+    sv_pc
+}
+# the texture with index t (a u32), as a sampled image
+sv_texture=(t:SpirvEmitWord):>int64=>{
+    let si=sv_sampled_type()
+    if sv_textures =? 0 {
+        let arr=sv_type_key("texarr" 29 [si])
+        sv_textures=sv_global(sv_ptr(SC_UCONST arr) SC_UCONST)
+        sv_deco(sv_textures 34 [0])
+        sv_deco(sv_textures 33 [0])
+    }
+    let i=sv_val(83 sv_u32() [t])
+    sv_deco(i 5300 [])
+    let p=sv_val(65 sv_ptr(SC_UCONST si) [sv_textures i])
+    sv_deco(p 5300 [])
+    let v=sv_load(si p)
+    sv_deco(v 5300 [])
+    v
+}
+# ---------------- reading the uniforms (and vertices) from memory ----------------
+# the word at byte offset (c + d) of base (c + d is a multiple of 4)
+sv_word=(base:SpirvEmitWord c:SpirvEmitWord d:SpirvEmitWord):>int64=>{
+    let idx=sv_ci(c >> 2)
+    if d not=? 0 {
+        let off=d
+        if c not=? 0 {off=sv_val(128 sv_i32() [d sv_ci(c)])}
+        idx=sv_val(195 sv_i32() [off sv_ci(2)])
+    }
+    let p=sv_val(65 sv_ptr(SC_PSB sv_u32()) [base sv_ci(0) idx])
+    let id=sv_new()
+    sv_code(61 [sv_u32() id p 2 4])
+    id
+}
+# bits [bit, bit + count) of the 32-bit-aligned word holding byte offset (c + d), as an i32
+sv_subword=(base:SpirvEmitWord c:SpirvEmitWord d:SpirvEmitWord count:SpirvEmitWord signed:bool):>int64=>{
+    let w:SpirvEmitWord=0
+    let shift:SpirvEmitWord=0
+    if d =? 0 {
+        w=sv_word(base c & -4 0)
+        shift=sv_ci((c & 3) * 8)
+    }
+    else {
+        let off=d
+        if c not=? 0 {off=sv_val(128 sv_i32() [d sv_ci(c)])}
+        w=sv_word(base 0 sv_val(199 sv_i32() [off sv_ci(-4)]))
+        shift=sv_val(132 sv_i32() [sv_val(199 sv_i32() [off sv_ci(3)]) sv_ci(8)])
+    }
+    let wi=sv_val(124 sv_i32() [w])
+    let op:SpirvEmitWord=203
+    if signed {op=202}
+    sv_val(op sv_i32() [wi shift sv_ci(count)])
+}
+sv_field_offset=(si:SpirvEmitWord name:string):>int64=>$unsafe {
+    loop i in [0..SpirvEmitWord(structs.ptr[si].nfields)) {
+        let f=SpirvEmitWord(structs.ptr[si].fields) + i
+        if name_of(SpirvEmitWord(fields.ptr[f].name)) =? name {return SpirvEmitWord(fields.ptr[f].offset)}
+    }
+    0
+}
+# ---------------- functions ----------------
+sv_fn_id=(f:SpirvEmitWord):>int64=>{
+    let cached=(sv_fn_ids.get(f))
+    if cached not=? none {return cached}
+    let id=sv_new()
+    sv_fn_ids[f]=id
+    sv_pending.push(f)
+    id
+}
+sv_param_type=(l:SpirvEmitWord):>int64=>$unsafe {
+    let t=SpirvEmitWord(locals.ptr[l].type)
+    if prune(t) =? sv_utype {return sv_rawptr()}
+    let ty=sv_type(t locals.ptr[l].pos)
+    if SpirvEmitWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {return sv_ptr(SC_FUNCTION ty)}
+    ty
+}
+# the function's words: header and parameters, then its first block with the variables first
+sv_finish_fn=(head:array<int64>):>void=>{
+    loop w in head {sv_fns.push(w)}
+    # (the body starts with the first block's label: the variables go right after it)
+    loop i in [0..2) {sv_fns.push(sv_body[i])}
+    loop w in sv_vars {sv_fns.push(w)}
+    loop i in [2..sv_body.length) {sv_fns.push(sv_body[i])}
+    sv_ins(@sv_fns 56 [])
+}
+sv_start_fn=():>void=>{
+    sv_body=[]
+    sv_vars=[]
+    sv_loops=[]
+    sv_lvar=dict<int64 int64>()
+    sv_lref=dict<int64 int64>()
+    sv_dead=false
+    sv_begin(sv_new())
+}
+# a loop's header (where the loop is declared) and the blocks it needs: (header, body, continue,
+# merge). The header branches to a block of its own, where the condition is computed.
+sv_loop_start=():>[int64 int64 int64 int64]=>{
+    let header=sv_new()
+    let body=sv_new()
+    let cont=sv_new()
+    let merge=sv_new()
+    let cond=sv_new()
+    sv_branch(header);
+    sv_begin(header)
+    sv_code(246 [merge cont 0])
+    sv_branch(cond);
+    sv_begin(cond)
+    [header body cont merge]
+}
+# the body, then the continue block (the caller adds what it does, and the branch back)
+sv_loop_body=(b:SpirvEmitWord merge:SpirvEmitWord cont:SpirvEmitWord):>void=>{
+    sv_loops.push([merge cont])
+    sv_stmts(b)
+    sv_loops.pop();
+    sv_branch(cont);
+    sv_begin(cont)
+}
+# a << b, a >> b as on the CPU, where values shift in 64 bits by the count's low 6 bits: by 32
+# or more, nothing is left (or the sign, shifting a signed value right)
+sv_shift=(code:SpirvEmitWord ty:SpirvEmitWord a:SpirvEmitWord b:SpirvEmitWord rt:SpirvEmitWord):>int64=>{
+    if sv_is_vector(rt) {return sv_val(code ty [a b])}
+    let i=sv_i32()
+    let c=sv_val(199 i [b sv_ci(63)])
+    let r=sv_val(code ty [a sv_val(199 i [c sv_ci(31)])])
+    let far=sv_ci(0)
+    if code =? 195 {far=sv_val(195 ty [a sv_ci(31)])}
+    sv_val(169 ty [sv_val(175 sv_bool() [c sv_ci(32)]) far r])
+}
+# v (32 bits) wrapped to the range of a narrower integer type t, as on the CPU
+sv_narrow=(v:SpirvEmitWord t0:SpirvEmitWord):>int64=>$unsafe {
+    let t=sl_type(t0)
+    if types.ptr[t].kind not=? 'int_' {return v}
+    let bits=SpirvEmitWord(types.ptr[t].bits)
+    if bits >=? 32 {return v}
+    if not types.ptr[t].sign {return sv_val(199 sv_i32() [v sv_ci((SpirvEmitWord(1) << bits) - 1)])}
+    let sh=sv_ci(32 - bits)
+    sv_val(195 sv_i32() [sv_val(196 sv_i32() [v sh]) sh])
+}
+# a and b, a or b: b is computed only when it decides
+sv_logic=(e:SpirvEmitWord is_and:bool):>int64=>$unsafe {
+    let bo=sv_bool()
+    let x=sv_expr(SpirvEmitWord(nodes.ptr[e].a))
+    let from_=sv_label
+    let rhs=sv_new()
+    let merge=sv_new()
+    sv_code(247 [merge 0])
+    if is_and {sv_cond_branch(x rhs merge)} else {sv_cond_branch(x merge rhs)}
+    sv_begin(rhs)
+    let y=sv_expr(SpirvEmitWord(nodes.ptr[e].b))
+    let rhs_end=sv_label
+    sv_branch(merge);
+    sv_begin(merge)
+    sv_val(245 bo [x from_ y rhs_end])
+}
+sv_intrinsic=(e:SpirvEmitWord):>int64=>$unsafe {
+    let id=nodes.ptr[e].aux as IN
+    let t=sl_type(ntype(e))
+    let pos=nodes.ptr[e].pos
+    let ty=sv_type(t pos)
+    if id =? IN.vec_ctor {return sv_vec_ctor(e)}
+    if id =? IN.sqrt {return sv_val(12 ty [sv_std 31 sv_expr(kid(e 0))])}
+    if id =? IN.floor_ {return sv_val(12 ty [sv_std 8 sv_expr(kid(e 0))])}
+    if id =? IN.ceil_ {return sv_val(12 ty [sv_std 9 sv_expr(kid(e 0))])}
+    if id =? IN.fabs {return sv_val(12 ty [sv_std 4 sv_expr(kid(e 0))])}
+    if id =? IN.fmin {return sv_minmax(t sv_expr(kid(e 0)) sv_expr(kid(e 1)) true pos)}
+    if id =? IN.fmax {return sv_minmax(t sv_expr(kid(e 0)) sv_expr(kid(e 1)) false pos)}
+    sv_err(pos "this operation is not available in shaders")
+    0
+}
+# b[i]: where the element is
+sv_gbuf_elem=(e:SpirvEmitWord):>SvRef=>{
+    let i32_=sv_i32()
+    let b=sv_expr(kid(e 0))
+    let i=sv_expr(kid(e 1))
+    let hi=sv_val(12 i32_ [sv_std 42 sv_val(130 i32_ [sv_gbuf_len(b) sv_ci(1)]) sv_ci(0)])
+    i=sv_val(12 i32_ [sv_std 45 i sv_ci(0) hi])
+    let et=gpu_buffer_elem(ntype(kid(e 0)))
+    layout(et)
+    SvRef(sv_gbuf_ptr(b) 0 sv_val(132 i32_ [i sv_ci(tsize(et))]) et)
+}
+# the block that runs only when index i is inside buffer b: (the block left, the merge block)
+sv_gbuf_inside=(b:SpirvEmitWord i:SpirvEmitWord):>[int64 int64]=>{
+    let u=sv_u32()
+    let inside=sv_val(176 sv_bool() [sv_val(124 u [i]) sv_val(124 u [sv_gbuf_len(b)])])
+    let from_=sv_label
+    let then=sv_new()
+    let merge=sv_new()
+    sv_code(247 [merge 0])
+    sv_cond_branch(inside then merge)
+    sv_begin(then)
+    [from_ merge]
+}
+# b[i] = v
+sv_gbuf_store=(e:SpirvEmitWord):>void=>$unsafe {
+    let pos=nodes.ptr[e].pos
+    if sv_stage not=? "compute" {sv_err(pos "GPU buffers are written by compute programs only")}
+    let bt=ntype(kid(e 0))
+    let b=sv_expr(kid(e 0))
+    let i=sv_expr(kid(e 1))
+    let v=sv_expr(kid(e 2))
+    let et=gpu_buffer_elem(bt)
+    layout(et)
+    let [_ merge]=sv_gbuf_inside(b i)
+    sv_write(et sv_gbuf_ptr(b) 0 sv_val(132 sv_i32() [i sv_ci(tsize(et))]) v pos)
+    sv_branch(merge);
+    sv_begin(merge)
+}
+# a pointer to the word at byte offset (c + d) of buffer memory base
+sv_word_ptr=(base:SpirvEmitWord c:SpirvEmitWord d:SpirvEmitWord):>int64=>{
+    let idx=sv_ci(c >> 2)
+    if d not=? 0 {
+        let off=d
+        if c not=? 0 {off=sv_val(128 sv_i32() [d sv_ci(c)])}
+        idx=sv_val(195 sv_i32() [off sv_ci(2)])
+    }
+    sv_val(65 sv_ptr(SC_PSB sv_u32()) [base sv_ci(0) idx])
+}
+# the low `bits` bits of v (an i32) to bits [8 * ((c + d) & 3), ...) of their word: cleared, then
+# set, each atomically, so that the bytes beside them, which other invocations may write, stay
+sv_store_sub=(base:SpirvEmitWord c:SpirvEmitWord d:SpirvEmitWord bits:SpirvEmitWord v:SpirvEmitWord):>void=>{
+    let u=sv_u32()
+    let p:SpirvEmitWord=0
+    let shift:SpirvEmitWord=0
+    if d =? 0 {
+        p=sv_word_ptr(base c & -4 0)
+        shift=sv_cu((c & 3) * 8)
+    }
+    else {
+        let off=d
+        if c not=? 0 {off=sv_val(128 sv_i32() [d sv_ci(c)])}
+        p=sv_word_ptr(base 0 sv_val(199 sv_i32() [off sv_ci(-4)]))
+        shift=sv_val(124 u [sv_val(132 sv_i32() [sv_val(199 sv_i32() [off sv_ci(3)]) sv_ci(8)])])
+    }
+    let ones=sv_cu((SpirvEmitWord(1) << bits) - 1)
+    let mask=sv_val(196 u [ones shift])
+    let val=sv_val(196 u [sv_val(199 u [sv_val(124 u [v]) ones]) shift])
+    sv_val(240 u [p sv_cu(1) sv_cu(0) sv_val(200 u [mask])]);
+    sv_val(241 u [p sv_cu(1) sv_cu(0) val]);
+}
+sv_subgroup_builtin=(b:SpirvEmitWord):>int64=>{
+    let key="sgb{b}"
+    let cached=sv_cache.get(key)
+    if cached not=? none {return sv_val(124 sv_i32() [sv_load(sv_u32() cached)])}
+    let v=sv_builtin_var(sv_u32() SC_INPUT b)
+    sv_cache[key]=v
+    sv_val(124 sv_i32() [sv_load(sv_u32() v)])
+}
+# ---------------- the stages ----------------
+sv_reset=(stage:string):>void=>{
+    sv_bound=0
+    sv_caps=[]
+    sv_dec=[]
+    sv_glob=[]
+    sv_fns=[]
+    sv_cache=dict<string int64>()
+    sv_iface=[]
+    sv_fn_ids=dict<int64 int64>()
+    sv_pending=[]
+    sv_pc=0
+    sv_textures=0
+    sv_vid=0
+    sv_iid=0
+    sv_stage=stage
+    sv_group=[SV_KERNEL_GROUP 1 1]
+    sv_std=sv_new()
+    # Shader, ImageQuery, ShaderNonUniform, RuntimeDescriptorArray,
+    # SampledImageArrayNonUniformIndexing, PhysicalStorageBufferAddresses
+    loop c in [1 50 5301 5302 5307 5347] {sv_ins(@sv_caps 17 [c])}
+}
+# translate everything called (functions can call more functions)
+sv_drain=():>void=>{
+    loop sv_pending.length >? 0 {
+        let f=sv_pending.pop()
+        if sv_fn_ids.get(f) not=? none and sv_translated.get(f) =? none {
+            sv_translated[f]=true
+            sv_function(f)
+        }
+    }
+}
+# the parts of a struct passed between the stages, each a variable at its own location: (the
+# path of field indices to it, its type)
+sv_leaves=(t0:SpirvEmitWord path:array<int64> @out:array<[array<int64> int64]>):>void=>$unsafe {
+    let t=sl_type(t0)
+    if types.ptr[t].kind =? 'struct_' and not is_lib_texture(SpirvEmitWord(types.ptr[t].st)) {
+        let si=SpirvEmitWord(types.ptr[t].st)
+        check_struct_fields(si)
+        loop i in [0..SpirvEmitWord(structs.ptr[si].nfields)) {
+            let p:array<int64>=[]
+            loop x in path {p.push(x)}
+            p.push(i)
+            sv_leaves(SpirvEmitWord(fields.ptr[SpirvEmitWord(structs.ptr[si].fields) + i].type) p @out)
+        }
+        return
+    }
+    out.push([path t])
+}
+# the locations a value of type t takes
+sv_slots=(t0:SpirvEmitWord):>int64=>$unsafe {
+    let t=sl_type(t0)
+    if t =? T_MAT4 {return 4}
+    if types.ptr[t].kind =? 'fixed' {return fixed_len(t) * sv_slots(SpirvEmitWord(types.ptr[t].elem))}
+    1
+}
+# the varyings: one variable per part of the vertex function's result after the first (the
+# clip position), at consecutive locations; integers are not interpolated
+sv_varyings=(otype:SpirvEmitWord sc:SpirvEmitWord pos:SpirvEmitWord):>[array<[array<int64> int64]> array<int64>]=>$unsafe {
+    let si=SpirvEmitWord(types.ptr[prune(otype)].st)
+    check_struct_fields(si)
+    let leaves:array<[array<int64> int64]>=[]
+    loop i in [1..SpirvEmitWord(structs.ptr[si].nfields)) {sv_leaves(SpirvEmitWord(fields.ptr[SpirvEmitWord(structs.ptr[si].fields) + i].type) [i] @leaves)}
+    let vars:array<int64>=[]
+    let loc:SpirvEmitWord=0
+    loop lf in leaves {
+        if types.ptr[prune(lf[1])].kind =? 'bool_' {sv_err(pos "bools cannot be passed from the vertex to the fragment shader (use an int)")}
+        let v=sv_global(sv_ptr(sc sv_type(lf[1] pos)) sc)
+        sv_deco(v 30 [loc])
+        if sv_is_int_leaf(lf[1]) and sc =? SC_INPUT {sv_deco(v 14 [])}
+        loc += sv_slots(lf[1])
+        vars.push(v)
+    }
+    [leaves vars]
+}
+# the value of type t (a part of the varyings struct at path) rebuilt from the leaf values
+sv_rebuild=(t0:SpirvEmitWord path:array<int64> leaves:array<[array<int64> int64]> vals:array<int64> pos:SpirvEmitWord):>int64=>$unsafe {
+    let t=sl_type(t0)
+    loop i in 0.. and lf in leaves {
+        if lf[0].length =? path.length {
+            let same=true
+            loop j in [0..path.length) {
+                if lf[0][j] not=? path[j] {same=false}
+            }
+            if same {return vals[i]}
+        }
+    }
+    let si=SpirvEmitWord(types.ptr[t].st)
+    let parts:array<int64>=[]
+    loop i in [0..SpirvEmitWord(structs.ptr[si].nfields)) {
+        let p:array<int64>=[]
+        loop x in path {p.push(x)}
+        p.push(i)
+        parts.push(sv_rebuild(SpirvEmitWord(fields.ptr[SpirvEmitWord(structs.ptr[si].fields) + i].type) p leaves vals pos))
+    }
+    sv_val(80 sv_type(t pos) parts)
+}
+# returns (vertex module, fragment module). With DEWY_SPIRV_DUMP=dir, each is also written to
+# dir/<n>.vert.spv and dir/<n>.frag.spv (for spirv-val: tools/spirvtest.py)
+spirv_build=(vsf:SpirvEmitWord fsf:SpirvEmitWord):>[string string]=>{
+    sv_translated=dict<int64 bool>()
+    let vs=sv_vertex(vsf)
+    sv_translated=dict<int64 bool>()
+    let fs=sv_fragment(fsf)
+    let dir=env("DEWY_SPIRV_DUMP")
+    if dir not=? none {
+        write_file("{dir}/{sv_dumped}.vert.spv" vs);
+        write_file("{dir}/{sv_dumped}.frag.spv" fs);
+        sv_dumped += 1
+    }
+    [vs fs]
+}
+# a buffer of 32-bit words that can be written
+sv_rawptr_w=():>int64=>{
+    let id=sv_cache.get("rawptrw")
+    if id not=? none {return id}
+    let rt=sv_type_key("rawrtw" 29 [sv_u32()])
+    sv_deco(rt 6 [4])
+    let st=sv_type_key("rawstw" 30 [rt])
+    sv_deco(st 2 [])
+    sv_mdeco(st 0 35 [0])
+    let p=sv_ptr(SC_PSB st)
+    sv_cache["rawptrw"]=p
+    p
+}
+# this invocation's index: they are laid out in rows of all the x groups (as many as there may be,
+# 65535, then more rows)
+sv_invocation=():>int64=>{
+    let i=sv_i32()
+    let uv3=sv_type_key("uv3" 23 [sv_u32() 3])
+    let gid=sv_load(uv3 sv_builtin_var(uv3 SC_INPUT 28))
+    let ng=sv_load(uv3 sv_builtin_var(uv3 SC_INPUT 24))
+    let gx=sv_val(124 i [sv_val(81 sv_u32() [gid 0])])
+    let gy=sv_val(124 i [sv_val(81 sv_u32() [gid 1])])
+    let nx=sv_val(124 i [sv_val(81 sv_u32() [ng 0])])
+    sv_val(128 i [gx sv_val(132 i [gy sv_val(132 i [nx sv_ci(SV_KERNEL_GROUP)])])])
+}
