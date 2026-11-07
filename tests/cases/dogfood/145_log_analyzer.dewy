@@ -1,0 +1,99 @@
+# modes: native native-release
+# stdin: 2026-11-05T08:01:12Z INFO api 120 GET /home\n2026-11-05T08:01:15.250Z INFO api 95 GET /about\n2026-11-05T08:02:44Z WARN db 870 slow query\nthis line is not a log entry\n2026-11-05T08:59:59Z ERROR api 2300 upstream timeout\n2026-11-05T09:00:00Z INFO api 101 GET /home\n2026-11-05T04:30:00-05:00 ERROR db 1500 replica lag\n2026-11-05T09:45:30Z INFO cache 3 hit\n2026-11-05T10:15:30+01:00 INFO cache 4 hit\n2026-11-05T11:15:00Z INFO cache 2 hit\n2026-13-05T11:15:00Z INFO cache 2 hit\n2026-11-05T11:15:01Z WARN api x slow\n2026-11-05T11:20:00Z ERROR cache 12 evicted too much\n\n2026-11-05T11:20:00.000000001Z INFO api 44 GET /pricing\n
+# Summarize a server log read from standard input.
+Entry:type = [at:Instant level:string service:string ms:int message:string]
+
+parse_line = (line:string):>Entry? => {
+    let parts = line.split(" ")
+    if parts.length <? 5 return none
+    let at = instant(parts[0]) ?? return none
+    let ms = to_int(parts[3]) ?? return none
+    Entry[at parts[1] parts[2] ms " ".join(parts[4..])]
+}
+
+percentile = (sorted:array<int> p:int):>int => {
+    if sorted.length =? 0 or p <? 0 or p >=? 100 return 0
+    let k = sorted.length * p // 100
+    sorted[k]
+}
+
+hour_label = (t:Instant):>string => t.format("y-MM-dd HH:00")
+
+main = () => {
+    let entries:array<Entry> = []
+    let bad = 0
+    loop true {
+        let line = read_line()
+        if line is? exception break
+        if line =? "" continue
+        let e = parse_line(line)
+        if e is? none {
+            bad += 1
+            continue
+        }
+        entries.push(e)
+    }
+    printl("{entries.length} entries, {bad} bad lines")
+    if entries.length =? 0 return
+
+    let by_level:dict<string int> = []
+    let by_hour:dict<string int> = []
+    let by_service:dict<string array<int>> = []
+    loop e in entries {
+        if e.level not in? by_level by_level[e.level] = 0
+        by_level[e.level] += 1
+        let h = hour_label(e.at)
+        if h not in? by_hour by_hour[h] = 0
+        by_hour[h] += 1
+        if e.service not in? by_service by_service[e.service] = []
+        by_service[e.service].push(e.ms)
+    }
+    loop [level n] in by_level printl("{level}: {n}")
+
+    let busiest = ""
+    let most = 0
+    loop [h n] in by_hour {
+        printl("{h} {"#" * n}")
+        if n >? most {
+            most = n
+            busiest = h
+        }
+    }
+    printl("busiest hour {busiest} with {most}")
+
+    loop [name times] in by_service {
+        let s = times.sorted()
+        if s.length =? 0 continue
+        let total = s.sum
+        let avg = float64(total) / float64(s.length)
+        printl("{name}: n={s.length} avg={avg:.1f}ms p50={percentile(s 50)}ms p90={percentile(s 90)}ms max={s[s.length-1]}ms")
+    }
+
+    # longest quiet gap
+    let ordered = entries.sorted(key=(e) => e.at)
+    let gap:Duration = 0s
+    let after = ordered[0].at
+    loop i in [1..ordered.length) {
+        let d = ordered[i].at - ordered[i-1].at
+        if d >? gap {
+            gap = d
+            after = ordered[i-1].at
+        }
+    }
+    printl("quietest gap {gap} after {after}")
+
+    # the error windows, shown in the on-call engineer's zone
+    let tokyo = zone"Asia/Tokyo"
+    let window = [ordered[0].at..ordered[0].at + 1hour)
+    let early = 0
+    loop e in ordered {
+        if e.at in? window early += 1
+        if e.level =? "ERROR" {
+            let local = e.at.in_zone(tokyo)
+            printl("{local.format("EEE HH:mm:ss VV")} {e.service}: {e.message} ({e.ms * 1ms})")
+        }
+    }
+    printl("{early} in the first hour; log spans {ordered[ordered.length-1].at - ordered[0].at}")
+    let rounded = quantize(ordered[0].at rounding='floor' tick=1minute)
+    printl("started in the minute of {rounded[0]}, {rounded[1]} in")
+}

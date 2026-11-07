@@ -1,0 +1,146 @@
+# modes: native native-release
+# stdin: 0.75\nweb.a web.b 0.2\nweb.b db.a 0.4\ncache.a cache.b 0.1\ndb.a db.b 0.9\ndb.b db.c x\ndb.b db.c 0.3\nmalformed line\ncache.b web.a 2.5\n
+# Group machines into networks with a union-find, and autocomplete hostnames with a trie.
+# Commands come from standard input, one per line.
+Forest:type = [parent:array<int64<(<? parent.length)>> size:array<int>]
+
+new_forest = ():>Forest => Forest[[] []]
+
+add_node = (@f:Forest):>int64 => {
+    let id = f.parent.length
+    f.parent.push(id)
+    f.size.push(1)
+    id
+}
+
+find = (@f:Forest x:int64):>int64? => {
+    if x <? 0 or x >=? f.parent.length return none
+    let r = x
+    loop f.parent[r] not=? r {
+        f.parent[r] = f.parent[f.parent[r]]
+        r = f.parent[r]
+    }
+    r
+}
+
+union = (@f:Forest a:int64 b:int64):>bool => {
+    let ra = find(@f a)
+    let rb = find(@f b)
+    if ra is? none or rb is? none or ra =? rb return false
+    if ra >=? f.size.length or rb >=? f.size.length return false
+    if f.size[ra] <? f.size[rb] {
+        f.parent[ra] = rb
+        f.size[rb] += f.size[ra]
+    } else {
+        f.parent[rb] = ra
+        f.size[ra] += f.size[rb]
+    }
+    true
+}
+
+# trie: every child points at a node of the same array, -1 for no child
+Trie:type = [next:array<int64<v => -1 <=? v and v <? next.length>> ends:array<bool>]
+
+const ALPHABET = 27
+
+trie_new = ():>Trie => {
+    let t = Trie[[] []]
+    loop i in [0..ALPHABET) t.next.push(-1)
+    t.ends.push(false)
+    t
+}
+
+slot = (c:uint8):>int => {
+    if b'a' <=? c <=? b'z' return int(c) - 97
+    26
+}
+
+insert = (@t:Trie word:string):>void => {
+    let node = 0
+    loop c in bytes(word) {
+        let i = node * ALPHABET + slot(c)
+        if i <? 0 or i >=? t.next.length return
+        if t.next[i] =? -1 {
+            let id = t.next.length // ALPHABET
+            t.next[i] = id
+            loop k in [0..ALPHABET) t.next.push(-1)
+            t.ends.push(false)
+        }
+        node = t.next[i]
+    }
+    if 0 <=? node <? t.ends.length t.ends[node] = true
+}
+
+count_prefix = (t:Trie prefix:string):>int => {
+    let node = 0
+    loop c in bytes(prefix) {
+        let n = t.next.get(node * ALPHABET + slot(c)) ?? return 0
+        if n =? -1 return 0
+        node = n
+    }
+    let total = 0
+    let stack = [node]
+    loop stack.length >? 0 {
+        let at = stack.pop()
+        if t.ends.get(at) ?? false total += 1
+        loop k in [0..ALPHABET) {
+            let n = t.next.get(at * ALPHABET + k) ?? -1
+            if n not=? -1 stack.push(n)
+        }
+    }
+    total
+}
+
+apply_all = (xs:array<int64> f:(int64:>int)):>array<int> => [loop x in xs f(x)]
+
+main = () => {
+    let f = new_forest()
+    let trie = trie_new()
+    let ids:dict<string int64> = []
+    let names = []
+    let threshold = input_float("threshold? ") ?? 0.5
+    let latency:array<[string float64]> = []
+    let line_count = 0
+    loop true {
+        let line = input("") 
+        if line is? EndOfInput break
+        if line is? exception break
+        line_count += 1
+        let parts = line.split(" ")
+        if parts.length not=? 3 continue
+        let [a b w] = parts
+        let weight = to_float(w) ?? continue
+        loop h in [a b] {
+            if h not in? ids {
+                ids[h] = add_node(@f)
+                names.push(h)
+                insert(@trie h)
+            }
+        }
+        latency.push([a weight])
+        if weight <? threshold {
+            if union(@f ids[a] ids[b]) printl("joined {a} {b}")
+        }
+    }
+    let groups:dict<int64 array<string>> = []
+    loop n in names {
+        let root = find(@f ids.get(n) ?? continue) ?? continue
+        if root not in? groups groups[root] = []
+        groups[root].push(n)
+    }
+    loop [root members] in groups printl("{names.get(root) ?? "?"}: {", ".join(members)}")
+
+    # adjust the worst latency in place, tuple-slot style
+    let worst:[string float64] = ["" -float64.max]
+    loop pair in latency {
+        pair[1] *= 1.5
+        if pair[1] >? worst[1] { worst[0] = pair[0]; worst[1] = pair[1] }
+    }
+    printl("worst {worst[0]} {worst[1]:.2f}")
+    let sizes = [loop [_ m] in groups m.length]
+    printl(apply_all(sizes (x) => x * x))
+    printl(count_prefix(trie "db"))
+    printl(count_prefix(trie "web.a"))
+    printl(count_prefix(trie "zz"))
+    printl("{line_count} lines, min {float64.min_subnormal >? 0.0} eps {float64.epsilon <? 1e-10}")
+}

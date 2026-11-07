@@ -1,0 +1,121 @@
+# Hospital shift roster across the autumn and spring clock changes.
+# Shifts are written in wall-clock time; payroll needs the hours actually worked.
+Shift:type = [nurse:string starts:ZonedDateTime ends:ZonedDateTime]
+
+const HOME = zone"America/New_York"
+const OVERTIME = 40hour
+
+const ROSTER = [
+    "ana 2026-10-30 22:00 06:00"
+    "ana 2026-10-31 22:00 06:00"
+    "ben 2026-10-31 18:00 02:00"
+    "ben 2026-11-01 00:30 01:30"
+    "cal 2026-11-01 01:30 09:30"
+    "ana 2026-11-02 08:00 16:00"
+    "dee 2027-03-13 22:00 06:00"
+    "eli 2027-03-14 02:30 10:30"
+    "eli 2027-03-15 09:00 17:00"
+    "bad 2026-13-01 09:00 17:00"
+    "bad 2026-11-01"
+    "dee 2027-03-14 25:00 03:00"
+]
+
+parse_shift = (line:string):>Shift? => {
+    let parts = line.split(" ")
+    if parts.length <? 4 return none
+    let d = date(parts[1])
+    if d is? exception return none
+    let a = time_of_day(parts[2])
+    let b = time_of_day(parts[3])
+    if a is? exception or b is? exception return none
+    let finish_day = if b <=? a d + 1day else d
+    let s = d.at(a).in_zone(HOME fold='later' gap='next')
+    let e = finish_day.at(b).in_zone(HOME fold='later' gap='next')
+    Shift[parts[0] s e]
+}
+
+worked = (s:Shift):>Duration => s.ends.nominal - s.starts.nominal
+
+week_of = (d:Date):>Date => d - (d.weekday * 1day)
+
+hours = (d:Duration):>float64 => float64(d / 1hour)
+
+main = () => {
+    let shifts:array<Shift> = []
+    let rejected = 0
+    loop line in ROSTER {
+        let s = parse_shift(line)
+        if s is? none {
+            rejected += 1
+            continue
+        }
+        shifts.push(s)
+    }
+    printl("{shifts.length} shifts, {rejected} rejected")
+
+    let totals:dict<string Duration> = []
+    let weeks:dict<string int> = []
+    loop s in shifts {
+        let t = worked(s)
+        let label = s.starts.format("EEE d MMM HH:mm")
+        let finish = s.ends.format("HH:mm XXX")
+        printl("{s.nurse} {label} -> {finish}: {hours(t):.1f}h")
+        totals[s.nurse] = (totals.get(s.nurse) ?? 0hour) + t
+        let wk = "{s.nurse} {week_of(s.starts.date)}"
+        if wk not in? weeks weeks[wk] = 0
+        weeks[wk] += 1
+    }
+    loop [name total] in totals {
+        let flag = if total >? OVERTIME " overtime" else ""
+        printl("{name}: {total}{flag}")
+    }
+    loop [wk n] in weeks printl("{wk}: {n}")
+
+    # which clock change does each shift cross?
+    const fall = date"2026-11-01"
+    const spring = date"2027-03-14"
+    let fall_week = [fall..fall + 7day)
+    loop s in shifts {
+        if s.starts.date in? fall_week printl("{s.nurse} works fall week")
+        if s.starts.date =? spring {
+            printl("{s.nurse} on spring day: offset {s.starts.format("XXX")}")
+        }
+    }
+
+    # days until each milestone
+    if shifts.length =? 0 return
+    let start = date"2026-10-30"
+    let last = shifts[shifts.length - 1].starts.date
+    let span = last - start
+    printl("rota covers {span.total_days} days: {span.months} months {span.days} days")
+    let d = start
+    loop d <? start + 3day {
+        printl(d.format("EEEE d MMMM y"))
+        d = d + 1day
+    }
+    handover()
+}
+
+# A weekly handover stays at nine local; a month-end audit keeps to the last day.
+handover = () => {
+    const meet = zoned"2026-10-26T09:00[America/New_York]"
+    let next_week = meet + 1week
+    printl("{next_week} after {next_week.nominal - meet.nominal}")
+    let m = meet
+    loop i in [0..3) {
+        printl(m.format("EEE d MMM h:mm a XXX"))
+        m = m.add(1week fold='later' gap='next')
+    }
+    let audit = date"2027-01-31"
+    loop i in [0..4) {
+        let d = audit.add(i * 1month overflow='clamp')
+        printl("audit {d} {d.weekday_name} {d.month_name}")
+    }
+    let booked = date("14/3/2027" "d/M/y") or_throw
+    let at = time_of_day("2:30 AM" "h:mm a") or_throw
+    let slot = booked.at(at).in_zone(HOME fold='earlier' gap='preserve_displacement')
+    printl("booked {slot} {slot.hour}:{slot.minute}")
+    let stamp = slot.nominal.in_zone(zone"Europe/Berlin")
+    printl("berlin {stamp.format("y-MM-dd HH:mm VV")} monday {stamp.weekday =? 0}")
+    printl("age {age(date"1990-03-14" on=booked)} {booked - date"1990-03-14"}")
+}

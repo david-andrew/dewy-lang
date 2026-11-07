@@ -1,0 +1,87 @@
+# Estimate a house's yearly energy use and its heating bill.
+from units import kW, kWh, W, BTU, ft, °F, °C, R, RValue, J, L, g, K
+
+Appliance:type = [name:string power:float64 * Mass * Length^2 / Time^3 hours:float64 days:float64]
+
+const PRICE = 0.31          # per kWh
+const GAS_PRICE = 1.45      # per therm
+const THERM = 100000BTU
+const FURNACE_EFFICIENCY = 0.92
+
+const APPLIANCES = [
+    Appliance["fridge" 150W 8.0 365.0]
+    Appliance["oven" 2.4kW 0.75 300.0]
+    Appliance["washer" 500W 1.0 100.0]
+    Appliance["dryer" 3kW 0.9 100.0]
+    Appliance["tv" 120W 4.5 365.0]
+    Appliance["heat pump water" 450W 3.0 365.0]
+]
+
+yearly = (a:Appliance) => a.power * (a.hours * 1hour) * a.days
+
+Surface:type = [name:string area:float64*Length^2 r:float64*RValue]
+
+const SURFACES = [
+    Surface["walls" 1400ft^2 19.0R]
+    Surface["roof" 1100ft^2 49.0R]
+    Surface["floor" 1100ft^2 30.0R]
+    Surface["windows" 220ft^2 3.1R]
+]
+
+# Heating-degree style table: month, days, mean outdoor temperature
+Month:type = [name:string days:int outdoor:float64*Temperature]
+
+const CLIMATE = [
+    Month["Jan" 31 28.0°F]
+    Month["Feb" 28 31.0°F]
+    Month["Mar" 31 40.0°F]
+    Month["Apr" 30 50.0°F]
+    Month["Oct" 31 52.0°F]
+    Month["Nov" 30 42.0°F]
+    Month["Dec" 31 32.0°F]
+]
+
+const INSIDE = 68.0°F
+
+conductance = (surfaces) => {
+    let ua = 0.0BTU/hour/°F
+    loop s in surfaces {
+        ua += s.area / s.r
+    }
+    ua
+}
+
+monthly_heat = (m:Month ua) => ua * (INSIDE - m.outdoor) * float64(m.days) * 24hour
+
+main = () => {
+    let total = 0.0kWh
+    loop a in APPLIANCES {
+        let use = yearly(a)
+        total += use
+        let cost = use / 1kWh * PRICE
+        printl("{a.name}: {use as kWh:.1f} kWh, ${cost:.2f}")
+    }
+    printl("appliances: {total as kWh:.0f} kWh, ${total / 1kWh * PRICE:.2f}")
+
+    let ua = conductance(SURFACES)
+    printl("UA = {ua as BTU/hour/°F:.1f} BTU/h/°F")
+
+    let season = 0.0BTU
+    loop m in CLIMATE {
+        let q = monthly_heat(m ua)
+        season += q
+        let therms = q / THERM / FURNACE_EFFICIENCY
+        printl("{m.name}: {q as BTU:.0f} BTU, {therms:.1f} therms, ${therms * GAS_PRICE:.2f}")
+    }
+    let therms = season / THERM / FURNACE_EFFICIENCY
+    printl("season: {therms:.1f} therms, ${therms * GAS_PRICE:.2f}")
+    printl("average load: {season / (212 * 24hour) as BTU/hour:.0f} BTU/h, or {season / 212 as BTU:.0f} BTU/day")
+
+    # heating a bath of water
+    let bath = 150L
+    let rise = 40°C - 12°C
+    let mass = bath * (1000g / 1L) 
+    let heat = mass * 4.186J/(g*K) * rise
+    printl("a bath: {heat as kWh:.2f} kWh, {float64(heat / 1kWh) * PRICE / 0.92:.2f} dollars")
+    printl("standby: {150W * (30 * 24hour) as kWh:.1f} kWh per month")
+}
