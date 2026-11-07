@@ -3664,6 +3664,8 @@ call_name_unknown = (n: int, name: int, mod_scope: int, args: int[], expected: i
     if ii >= 0 and intrinsics[ii].arr and args.len() > 0: fatal(nodes[n].pos, "'{name_of(name)}' expects an array or string, found {dt(ntype(args[0]))}")
     if ufcs:
         t0 = prune(ntype(args[0]))
+        # (`lookup(id).scaled(2)`, where only the value's own module has `scaled`)
+        if caller_dewy() and forwards_exceptions(t0): return forward_call(n, name, args, expected)
         # (step.1() for a tuple whose element 1 is a function: that element, called)
         nm0 = name_of(name)
         if types[t0].kind == .tuple and len(nm0) > 0 and is_digit(nm0[0]):

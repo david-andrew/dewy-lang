@@ -6,7 +6,7 @@ from p"checker_expr.dewy" import (check_expr)
 from p"checker_propagate.dewy" import (xq_check)
 from p"checker_state.dewy" import (FnCtx)
 from p"errors.jo" import (error_type exception_type infer_returns infer_throws nominal_families nominal_generic nominal_parent nominal_ready nominal_resolving nominal_types out_of_memory_type)
-from p"expr.jo" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt can_coerce coerce cur_assign last_checked ntype type_node_of union_field_sources unnamed)
+from p"expr.jo" import (bc_block bc_method bc_field bc_ident bc_let bc_stmt can_coerce coerce cur_assign last_checked ntype type_node_of union_field_sources unnamed)
 from p"oom.jo" import (oom_files)
 from p"ownership.jo" import (ownership_nominals)
 from p"ownership_types.dewy" import (ownership_declared)
@@ -413,7 +413,8 @@ forward_call=(n:ErrWord name:ErrWord args:array<int64> expected:ErrWord):>ErrWor
         if member =? T_NONE {value=mk('none_lit' pos)}
         else if exception_member(member) {value=bc_ident(recv pos)}
         else {
-            let call_args=[bc_ident(recv pos)]
+            # (a method call again, so the alternative's own module supplies its methods)
+            let call_args:array<int64>=[]
             loop i in [1..args.length) {
                 if nodes.ptr[args[i]].kind =? 'namedarg' {
                     let named=mk('namedarg' nodes.ptr[args[i]].pos)
@@ -423,7 +424,7 @@ forward_call=(n:ErrWord name:ErrWord args:array<int64> expected:ErrWord):>ErrWor
                 }
                 else {call_args.push(bc_ident("$argument{n}_{i}" pos))}
             }
-            value=bc_call(name_of(name) call_args pos)
+            value=bc_method(bc_ident(recv pos) name_of(name) call_args pos)
         }
         let body=bc_block([bc_stmt(value pos)] pos)
         if chain =? 0 {chain=body}

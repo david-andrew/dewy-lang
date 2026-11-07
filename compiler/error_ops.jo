@@ -339,7 +339,8 @@ forward_call = (n: int, name: int, args: int[], expected: int) -> int:
         if member == T_NONE: value = mk(.none_lit, pos)
         else if exception_member(member): value = bc_ident(recv, pos)
         else:
-            call_args = [bc_ident(recv, pos)]
+            # (a method call again, so the alternative's own module supplies its methods)
+            call_args: int[]
             loop i in [1..args.len()):
                 if nodes[args[i]].kind == .namedarg:
                     named = mk(.namedarg, nodes[args[i]].pos)
@@ -347,7 +348,7 @@ forward_call = (n: int, name: int, args: int[], expected: int) -> int:
                     nodes[named].a = i32(bc_ident("$argument{n}_{i}", pos))
                     call_args.push(named)
                 else: call_args.push(bc_ident("$argument{n}_{i}", pos))
-            value = bc_call(name_of(name), call_args, pos)
+            value = bc_method(bc_ident(recv, pos), name_of(name), call_args, pos)
         body = bc_block([bc_stmt(value, pos)], pos)
         if chain == 0: chain = body
         else:
