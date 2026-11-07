@@ -116,9 +116,9 @@ __hash_key_init = () -> u64:
 
 # the 128-bit product of a and b, its high half xor its low half
 __hk_mum = (a: u64, b: u64) -> u64:
-    when __MUL_HI:
-        return (a * b) xor __mul_hi(a, b)
-    __mul_hi_soft(a, b) xor (a * b)
+    when __MUL_HI: high = __mul_hi(a, b)
+    when not __MUL_HI: high = __mul_hi_soft(a, b)
+    (a * b) xor high
 
 # the high 64 bits of a 128-bit product from four 32-bit ones (WebAssembly; older compilers)
 __mul_hi_soft = (a: u64, b: u64) -> u64:
@@ -136,9 +136,9 @@ __mul_hi_soft = (a: u64, b: u64) -> u64:
 __hk_mix = (k: u64, x: u64) -> u64:
     a = x xor k
     b = k xor 0xE7037ED1A0B428DB
-    when __MUL_HI:
-        return (a * b) xor __mul_hi(a, b)
-    (a * b) xor __mul_hi_soft(a, b)
+    when __MUL_HI: high = __mul_hi(a, b)
+    when not __MUL_HI: high = __mul_hi_soft(a, b)
+    (a * b) xor high
 
 # Only __map_add (and reserve) draw the key: a dictionary's first entry is hashed again there,
 # after the key is drawn. Until then every keyed hash uses 0 (a lookup in a dictionary with
@@ -147,9 +147,9 @@ __hk_word = (x: u64) -> u64:
     k = __hash_key
     a = x xor k
     b = k xor 0xE7037ED1A0B428DB
-    when __MUL_HI:
-        return (a * b) xor __mul_hi(a, b)
-    (a * b) xor __mul_hi_soft(a, b)
+    when __MUL_HI: high = __mul_hi(a, b)
+    when not __MUL_HI: high = __mul_hi_soft(a, b)
+    (a * b) xor high
 
 # n bytes at p: sixteen at a time (the last sixteen overlapping the ones before), the state
 # starting from the key and the length
