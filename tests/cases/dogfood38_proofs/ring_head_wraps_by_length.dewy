@@ -1,0 +1,13 @@
+# A ring's head is below its items' length, so that length is at least 1 and
+# `(head + 1) % length` is a head again.
+Ring:type = <T>[items:array<T> head:int64<v => 0 <=? v and v <? items.length> count:int64<v => 0 <=? v and v <=? items.length>]
+advance = <T>(@r:Ring<T>):>T => {
+    let x = r.items[r.head]
+    r.head = (r.head + 1) % r.items.length
+    x
+}
+main = () => {
+    let r = Ring<string>[["a" "b" "c"] 0 0]
+    loop i in [0..5) print(advance(@r))
+    printl(" {r.head}")
+}

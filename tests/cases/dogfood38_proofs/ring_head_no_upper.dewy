@@ -1,0 +1,9 @@
+Ring:type = [items:array<int> head:int64<(>=? 0)>]
+advance = (@r:Ring):>void => {
+    r.head = (r.head + 1) % r.items.length
+}
+main = () => {
+    let r = Ring[[1 2] 0]
+    advance(@r)
+    printl(r.head)
+}

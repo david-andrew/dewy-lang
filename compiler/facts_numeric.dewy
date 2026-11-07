@@ -257,6 +257,10 @@ fact_floor=(@s:FactState n:NumericWord kind:NumericWord a:NumericWord b:NumericW
     # finite divisor alone. Division and right shift must retain it.
     if y.wide or x.wide and (kind =? 1 or kind =? 3 or not floor) {return fact_unmodeled(@s n 'unsupported')}
     if x.lo <? 1 {x.lo=max(x.lo fact_relational(s a false))}
+    # (a divisor's relations raise it too: `0 <=? h <? xs.length` makes the
+    # length at least 1, so `(h + 1) % xs.length` is below it. One indexed
+    # query, only for a divisor not already known positive.)
+    if y.lo <? 1 and y.hi >=? 1 {y.lo=max(y.lo fact_relational(s b false))}
     # Shrinking an unbounded mathematical value does not make it a word.
     # Endpoint sentinels must not become finite merely by division/shift.
     if (kind =? 1 or kind =? 3) and (not fact_host_endpoint(s a false) or not fact_host_endpoint(s a true)) {return fact_unmodeled(@s n 'unsupported')}
