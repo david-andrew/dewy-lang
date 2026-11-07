@@ -1,0 +1,7 @@
+# In range for the source, out of range for the target.
+R:type = [x:float64]
+f = (p:R):>uint8 => {
+    if 0.0 <=? p.x and p.x <? 300.0 { return p.x as uint8 }
+    return 0
+}
+main = ():>void => { printl(f(R[1.0])) }

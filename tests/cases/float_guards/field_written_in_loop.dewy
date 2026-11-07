@@ -1,0 +1,15 @@
+# A loop may have written the field before this read.
+R:type = [x:float64]
+f = (p:R o:float64):>int64 => {
+    let q = p
+    if 0.0 <=? q.x and q.x <? 100.0 {
+        let total:int64 = 0
+        loop i in [0..3) {
+            total = q.x as int64
+            q.x = o
+        }
+        return total
+    }
+    return 0
+}
+main = ():>void => { printl(f(R[1.0] 2.0)) }

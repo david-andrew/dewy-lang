@@ -1,0 +1,7 @@
+# A guard on one record's field says nothing of the same field elsewhere.
+R:type = [x:float64]
+f = (p:R o:R):>int64 => {
+    if 0.0 <=? p.x and p.x <? 100.0 { return o.x as int64 }
+    return 0
+}
+main = ():>void => { printl(f(R[1.0] R[2.0])) }

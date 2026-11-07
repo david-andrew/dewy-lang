@@ -934,7 +934,7 @@ compile error). `as` and type calls use those same checks. Float-to-integer conv
 truncate toward zero and keep the value: NaN, an infinity or a value outside the
 target's range fails and never saturates, so the value lying in range (finite, for `int`) is
 an obligation like a narrowing's, proven by comparisons that hold only for numbers
-(`if 0.0 <=? x and x <? 256.0`; `$finite_floats` makes every float finite), an error
+(`if 0.0 <=? x and x <? 256.0`, on a local or a local's field, `mouse.x`, and through arithmetic on it; `$finite_floats` makes every float finite), an error
 where unproven (a constant one always is), or a check (`the float is above the int64 range`) where the scope allows one;
 exact decimal and fraction conversions to integers also truncate toward zero,
 without rounding through a float. `int`-to-float retains the usual rounding. Conversions keep the value:

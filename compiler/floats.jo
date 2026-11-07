@@ -374,6 +374,23 @@ ff_local = (n: int) -> int:
     if not ff_tracked(l): return 0
     l
 
+# A float field of a tracked local, `mouse.x`, keeps the bounds its guards gave it: its key holds
+# the local in the low 32 bits and the field's name above. Writing the field or the local forgets
+# them. Field keys exist only where a guard made one, so the walk of ff_env that forgets them
+# is O(guarded fields). No key is made for a local whose address is taken: ff_tracked.
+ff_field_key = (n: int) -> int:
+    if n <= 0 or nodes[n].kind != .field: return 0
+    l = ff_local(int(nodes[n].a))
+    if l == 0 or not ff_float(n): return 0
+    l + ((int(nodes[n].name) + 1) << 32)
+
+ff_forget_fields = (l: int):
+    if ff_env.len() == 0: return
+    keys: int[]
+    loop k, _ in ff_env:
+        if k >= (1 << 32) and k & 4294967295 == l: keys.push(k)
+    loop k in keys: ff_env.remove(k)
+
 ff_get = (n: int) -> FR:
     l = ff_local(n)
     if l > 0:
@@ -629,6 +646,9 @@ ff_eval_node = (n: int) -> FR:
         return ff_enter()
     if (k == .field or k == .index) and t > 0 and is_float(t):
         ff_children(n)
+        key = ff_field_key(n)
+        if key != 0:
+            if let known = ff_env.get(key): return known
         return ff_enter()
     if k == .vardecl:
         r = ff_eval(int(nodes[n].b))
@@ -676,7 +696,11 @@ ff_eval_node = (n: int) -> FR:
     if k == .addr:
         # (a place lent out, `@x`: what it holds afterwards is unknown)
         l = ff_local(int(nodes[n].a))
-        if l > 0: ff_env.remove(l)
+        if l > 0:
+            ff_env.remove(l)
+            ff_forget_fields(l)
+        key = ff_field_key(int(nodes[n].a))
+        if key != 0: ff_env.remove(key)
     mask = isolation_children(k)
     if mask < 0 or k == .lambda:
         ff_env = {}
@@ -737,6 +761,9 @@ ff_assign = (n: int) -> FR:
     if l > 0:
         if float: ff_env[l] = r
         else: ff_env.remove(l)
+        ff_forget_fields(l)
+    key = ff_field_key(target)
+    if key != 0: ff_env.remove(key)
     r
 
 # Every tracked local assigned inside n forgets its bounds.
@@ -750,6 +777,9 @@ ff_forget_assigned = (n: int):
             nan = ff_env.has(l) and ff_env[l].nan
             ff_env.remove(l)
             if nan: ff_env[l] = ff_enter()
+            ff_forget_fields(l)
+        key = ff_field_key(int(nodes[n].a))
+        if key != 0: ff_env.remove(key)
     mask = isolation_children(k)
     if mask <= 0: return
     if mask & 1 != 0: ff_forget_assigned(int(nodes[n].a))
@@ -828,6 +858,9 @@ ff_eval_pure = (n: int) -> FR:
     l = ff_local(n)
     if l > 0:
         if let r = ff_env.get(l): return r
+    key = ff_field_key(n)
+    if key != 0:
+        if let r = ff_env.get(key): return r
     FR(-__INF, __INF)
 
 # x op other: x's new bounds, when x is a tracked float local.
@@ -835,9 +868,14 @@ ff_bound = (x0: int, op: Tok, other: FR, ordered: bool):
     x = x0
     loop x > 0 and nodes[x].kind == .conv and nodes[x].aux == i32(int(CV.float_)): x = int(nodes[x].a)
     l = ff_local(x)
-    if l == 0: return
-    lt = int(locals[l].type)
-    if lt <= 0 or not is_float(lt): return
+    if l == 0:
+        l = ff_field_key(x)
+        if l == 0: return
+        # (not (x >? c) may also be NaN, and a field read enters as one)
+        if not ff_env.has(l): ff_env[l] = ff_enter()
+    else:
+        lt = int(locals[l].type)
+        if lt <= 0 or not is_float(lt): return
     r = ff_env.get(l) ?? ff_top()
     if ordered and r.nan:
         r.nan = false

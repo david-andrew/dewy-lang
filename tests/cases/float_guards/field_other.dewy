@@ -1,0 +1,7 @@
+# A guard on one field says nothing of another.
+R:type = [x:float64 y:float64]
+f = (p:R):>int64 => {
+    if 0.0 <=? p.x and p.x <? 100.0 { return p.y as int64 }
+    return 0
+}
+main = ():>void => { printl(f(R[1.0 2.0])) }

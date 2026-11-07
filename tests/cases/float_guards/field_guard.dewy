@@ -1,0 +1,23 @@
+# A guard on a float field proves what is computed from it, as a guard on a local does.
+Rect:type = [x:float64 y:float64]
+cell = (p:Rect):>int64 => {
+    if p.x >=? 32.0 and p.x <? 800.0 and p.y >=? 144.0 and p.y <? 656.0 {
+        return ((p.x-32.0)/8.0) as int64
+    }
+    return -1
+}
+lane = (v:vec2):>int64 => if 0.0 <=? v.x and v.x <? 256.0 (v.x as uint8) as int64 else 0
+narrowed = (p:Rect):>int64 => {
+    let q = p
+    if q.x >=? 0.0 and q.x <=? 100.0 {
+        let a = q.x as int64
+        return a
+    }
+    return 0
+}
+main = ():>void => {
+    printl(cell(Rect[40.0 150.0]))
+    printl(cell(Rect[0.0 0.0]))
+    printl(lane(vec2(200.5 0)))
+    printl(narrowed(Rect[7.5 0.0]))
+}

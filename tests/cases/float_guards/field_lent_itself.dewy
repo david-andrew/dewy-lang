@@ -1,0 +1,14 @@
+# A helper given the field may have written it.
+R:type = [x:float64]
+g = (@v:float64):>void => { v = 1e300 }
+f = (@p:R):>int64 => {
+    if 0.0 <=? p.x and p.x <? 100.0 {
+        g(@p.x)
+        return p.x as int64
+    }
+    return 0
+}
+main = ():>void => {
+    let r = R[1.0]
+    printl(f(@r))
+}

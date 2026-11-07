@@ -1,0 +1,7 @@
+# Either comparison may have held: neither bound is known.
+R:type = [x:float64 y:float64]
+f = (p:R):>int64 => {
+    if 0.0 <=? p.x or 0.0 <=? p.y { return p.x as int64 }
+    return 0
+}
+main = ():>void => { printl(f(R[1.0 2.0])) }

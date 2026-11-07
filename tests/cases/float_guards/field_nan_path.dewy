@@ -1,0 +1,7 @@
+# The else of a comparison may hold NaN, whatever the bound.
+R:type = [x:float64]
+f = (p:R):>int64 => {
+    if p.x >? 100.0 { return 0 }
+    return p.x as int64
+}
+main = ():>void => { printl(f(R[1.0])) }

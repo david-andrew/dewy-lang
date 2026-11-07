@@ -1,0 +1,11 @@
+# Writing the field ends what a guard on it said.
+R:type = [x:float64]
+f = (p:R o:float64):>int64 => {
+    let q = p
+    if 0.0 <=? q.x and q.x <? 100.0 {
+        q.x = o
+        return q.x as int64
+    }
+    return 0
+}
+main = ():>void => { printl(f(R[1.0] 2.0)) }
