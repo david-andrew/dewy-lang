@@ -1581,6 +1581,12 @@ printl"{meet + 168hour}"  # 2026-11-02T08:00:00-05:00[America/New_York]: exactly
 printl"{(meet + 1week).nominal - meet.nominal}"  # 169h
 ```
 
+An interval is a range: `[a..b)`, `[a..b]`, `(a..b]`, `(a..b)`. A range over anything ordered
+that is not an integer (an `Instant`, a `Date`, a time, a fraction, text) is a `Range<T>` holding
+its two ends as written, with `.first`, `.last`, `.includes_first`, `.includes_last` and
+`.is_empty`; `x in? [a..b)` tests it, and it prints as written. It is not a list of its points:
+looping over one is an error, and a step is only for integer ranges so far.
+
 `instant"..."`, `utc"..."`, `date"..."`, `zone"..."` and `zoned"..."` with constant text are
 checked while compiling: a date that does not exist, a leap second that never happened, a
 local time in a daylight-saving gap or repeated hour are compile errors that say what to

@@ -29,7 +29,7 @@ from p"checker_numeric.dewy" import xw_numeric
 from p"checker_exact.dewy" import (exact_potential exact_math_operand)
 from p"checker_coerce.dewy" import cq_settled
 from p"checker_call_queries.dewy" import (ctx_dependent map_float_key habit_call_check intrinsic_of)
-from p"expr.jo" import (num_join expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give path_literal_module call_name_unknown take_name relocate_name release_name expr_literal expr_other type_receiver_at receiver_literal_hint check_soa_method dewy_len_check)
+from p"expr.jo" import (range_membership_ordered num_join expr_complete ident_unknown expr_module expr_values_use check_dotted binary_juxt binary_char_code binary_membership binary_quantity_hint binary_decimal dewy_set_literal binary_context binary_nd_hint binary_secret binary_rest expr_sibling call_int_literal call_map_rows is_nd is_unchecked_at dewy_partial dewy_data_after_give path_literal_module call_name_unknown take_name relocate_name release_name expr_literal expr_other type_receiver_at receiver_literal_hint check_soa_method dewy_len_check)
 from p"temperature_ops.dewy" import (temperature_read)
 from p"check.jo" import (module_lookup)
 from p"concurrency.jo" import (concurrency_tasks concurrency_runtime_needed concurrency_calls)
@@ -502,7 +502,11 @@ xe_char=(n:XEWord):>void=>$unsafe {
 # `x in a..b` in its leaf, other memberships on the host.
 xe_in=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
     let b=XEWord(xe_nodes[0].ptr[n].b)
-    if xe_nodes[0].ptr[b].kind =? 'range' and not xe_flag(b 32768) {return xy_check(n expected)}
+    if xe_nodes[0].ptr[b].kind =? 'range' and not xe_flag(b 32768) {
+        let ordered=range_membership_ordered(n expected)
+        if ordered >=? 0 {return ordered}
+        return xy_check(n expected)
+    }
     binary_membership(n expected)
 }
 # Cold requests out of the operator's frame.

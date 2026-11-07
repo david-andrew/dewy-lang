@@ -361,6 +361,7 @@ check_dotted = (n: int, expected: int) -> int: xe_dotted_host(n, expected)
 binary_juxt = (n: int): xe_juxt_host(n)
 binary_char_code = (n: int): xe_char_host(n)
 binary_membership = (n: int, expected: int) -> int: xe_member_host(n, expected)
+range_membership_ordered = (n: int, expected: int) -> int: -1
 binary_quantity_hint = (t: int) -> int: xe_quantity_hint_host(t)
 binary_decimal = (e: int): xe_decimal_host(e)
 dewy_set_literal = (a: int) -> bool: xe_set_host(a)

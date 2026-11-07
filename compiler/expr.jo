@@ -9235,11 +9235,12 @@ as_conversion = (ft: int, tt: int) -> int:
         loop d in decls:
             if nkids(d) != 1: continue
             sig = fn_sig(d)
-            if sig.generic or sig.ret == 0 or not type_eq(prune(int(sig.ret)), tt): continue
+            if sig.ret == 0 or not type_eq(prune(int(sig.ret)), tt): continue
             p = prune(sig.params[0])
             if owner == prune(ft):
-                binds: int[]
+                binds = fill(0, int(sig.ntp))
                 if match_type(p, ft, binds, 0) == 0: return d
+            if sig.generic: continue
             if type_eq(p, owner) or family != 0 and type_eq(p, prune(family)): return d
         owner = nominal_parent.get(owner, 0)
     0
@@ -9757,6 +9758,60 @@ dewy_index_ranges = (n: int, receiver: int):
             value = dewy_range_value(r)
             set_kid(n, i, value)
             if nodes[n].b == r: nodes[n].b = i32(value)
+
+# `[a..b)` of values that are not integers (Instant, rational, text: anything with `<?`): a Range of
+# lib/ranges.dewy rather than the IntRange of `__dewy_range`. -1 for integers, whose range this leaves.
+dewy_range_ordered = (n: int, args: int[], expected: int) -> int:
+    a = args[0]
+    if nodes[a].kind == .int_lit or nodes[a].kind == .namedarg: return -1
+    t = prune(check_expr(a, 0))
+    add_flag(a, NF_CHECKED)
+    if is_int(t) or t == T_MATH_INT or bundled_bigint_type(t) or tkind(t) == .var or tkind(t) == .param: return -1
+    pos = nodes[n].pos
+    if nodes[args[3]].ival != 0: fatal(pos, "only a range of integers has a step for now: this is a range of {dt(t)}. Count instead: `loop x <? last \{ ... }`")
+    ensure_bundled_import("ranges.dewy", "$dewy_ranges", pos)
+    c = mk(.call, pos)
+    nodes[c].a = i32(bc_field(bc_ident("$dewy_ranges", pos), "_between", pos))
+    set_list(c, [a, args[2], args[4]])
+    r = check_expr(c, expected)
+    nodes[n] = nodes[last_checked]
+    last_checked = n
+    r
+
+# `(a..b)` of the same: the range with its first end left out. -1 for an integer range.
+dewy_range_tail_ordered = (n: int, args: int[], expected: int) -> int:
+    a = args[0]
+    t = prune(check_expr(a, 0))
+    add_flag(a, NF_CHECKED)
+    if is_dewy_range_type(t, "IntRange"): return -1
+    pos = nodes[n].pos
+    ensure_bundled_import("ranges.dewy", "$dewy_ranges", pos)
+    c = mk(.call, pos)
+    nodes[c].a = i32(bc_field(bc_ident("$dewy_ranges", pos), "_open_first", pos))
+    set_list(c, [a])
+    r = check_expr(c, expected)
+    nodes[n] = nodes[last_checked]
+    last_checked = n
+    r
+
+# `x in? [a..b)` of values that are not integers: through the stored range. -1 for integers, which
+# checker_in_range's comparisons take.
+range_membership_ordered = (n: int, expected: int) -> int:
+    if not files[pos_file(nodes[n].pos)].is_dewy: return -1
+    a = int(nodes[n].a)
+    if nodes[a].kind == .int_lit: return -1
+    range = int(nodes[n].b)
+    if nodes[range].a == 0 or nodes[range].b == 0: return -1
+    t = prune(check_expr(a, 0))
+    add_flag(a, NF_CHECKED)
+    if is_int(t) or t == T_MATH_INT or bundled_bigint_type(t) or tkind(t) == .var or tkind(t) == .param: return -1
+    # (the ends in the needle's type: `f in? [0.0..1.0)` of a float compares floats)
+    check_expr(int(nodes[range].a), t)
+    check_expr(int(nodes[range].b), t)
+    add_flag(int(nodes[range].a), NF_CHECKED)
+    add_flag(int(nodes[range].b), NF_CHECKED)
+    nodes[n].b = i32(dewy_range_value(range))
+    binary_membership(n, expected)
 
 dewy_range_value = (range: int) -> int:
     pos = nodes[range].pos

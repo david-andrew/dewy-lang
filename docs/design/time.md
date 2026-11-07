@@ -162,7 +162,7 @@ let dt = (now - start) / 1s as float64
 
 ## Intervals
 
-Anything taking an interval uses range syntax: `[a..b)`, `[a..b]`, `(a..b)`. There is no `interval` function, so the bounds are always written. The flags stay as written and are never normalized away, and an unknown end is not an infinite end. Interval operations (Allen relations, measure, sets) are functions on ranges, per v5 §3.
+Anything taking an interval uses range syntax: `[a..b)`, `[a..b]`, `(a..b)`. Over anything ordered that is not an integer it is a `Range<T>` (lib/ranges.dewy), which is general, not special to time: its ends and which of them it includes. There is no `interval` function, so the bounds are always written. The flags stay as written and are never normalized away, and an unknown end is not an infinite end. Interval operations (Allen relations, measure, sets) are functions on ranges, per v5 §3.
 
 ## Formats
 

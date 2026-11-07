@@ -1,0 +1,26 @@
+# Ranges over ordered values that are not integers: `[a..b)` of instants, times, fractions or text.
+# A range holds its two ends and says which it includes, as written. Nothing counts the points in
+# between, so there is nothing to allocate and no step to assume. Integer ranges are IntRange.
+
+Range:type=<T>[first:T last:T includes_first:bool includes_last:bool]
+
+_between=<T>(first:T last:T inclusive:bool):>Range<T>=>Range<T>[first last true inclusive]
+_open_first=<T>(r:Range<T>):>Range<T>=>Range<T>[r.first r.last false r.includes_last]
+
+contains=<T U>(r:Range<T> value:U):>bool=>{
+    if value <? r.first or r.last <? value {return false}
+    if not r.includes_first and value =? r.first {return false}
+    if not r.includes_last and value =? r.last {return false}
+    true
+}
+is_empty=<T>(r:Range<T>):>bool=>{
+    if r.last <? r.first {return true}
+    if r.first =? r.last {return not (r.includes_first and r.includes_last)}
+    false
+}
+__eq__=<T>(a:Range<T> b:Range<T>):>bool=>a.first =? b.first and a.last =? b.last and a.includes_first =? b.includes_first and a.includes_last =? b.includes_last
+__as__=<T>(r:Range<T>):>string=>{
+    let open=if r.includes_first "[" else "("
+    let close=if r.includes_last "]" else ")"
+    "{open}{r.first}..{r.last}{close}"
+}
