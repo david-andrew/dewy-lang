@@ -10864,6 +10864,7 @@ rd_dc_unread=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     rd_dc_foreign_habit(@reader_ctx at);
     rd_dc_optional_chain(@reader_ctx at);
     rd_dc_as_number(@reader_ctx at);
+    rd_dc_match_literal(@reader_ctx at);
     rd_dc_as_precedence(@reader_ctx at);
     rd_dc_line_habit(@reader_ctx at);
     rd_dc_place_type(@reader_ctx at);
@@ -10951,6 +10952,31 @@ rd_dc_as_number=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
                 }
                 j = (int64<overflow='wrap'>(j) + 1)
             }
+        }
+        k = (int64<overflow='wrap'>(k) + 1)
+    }
+}
+
+# (`match cmd { "add" => ... }`: Python's `case "add":` as an arm, in an unread match: a value
+# pattern goes in angle brackets. Only the match's own arms, first on their line. O(statement).)
+rd_dc_match_literal=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
+    let k:int64=at
+    loop reader_ctx.tokens[k].symbol not=? 'kw_match' {
+        k = (int64<overflow='wrap'>(k) + 1)
+        if reader_ctx.tokens[k].kind =? 'eof' or reader_ctx.tokens[k].newline {return}
+    }
+    k = (int64<overflow='wrap'>(k) + 1)
+    let depth:int64=0
+    loop reader_ctx.tokens[k].kind not=? 'eof' {
+        let t:DewyLexeme=reader_ctx.tokens[k]
+        if t.symbol =? 'lbrace' {depth = (int64<overflow='wrap'>(depth) + 1)}
+        else if t.symbol =? 'rbrace' {
+            depth = (int64<overflow='wrap'>(depth) - 1)
+            if depth <=? 0 {return}
+        }
+        else if depth =? 1 and (t.newline or reader_ctx.tokens[(int64<overflow='wrap'>(k) - 1)].symbol =? 'lbrace') and (t.kind =? 'quoted' or t.kind =? 'integer' or t.kind =? 'source_integer') and reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].symbol =? 'function' {
+            let text:string=reader_ctx.stores.host[0].bytes_slice(reader_ctx.source t.start t.stop)
+            reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file t.start) "a value in a pattern goes in angle brackets: `<{text}> => ...`, and `_ => ...` takes the rest");
         }
         k = (int64<overflow='wrap'>(k) + 1)
     }

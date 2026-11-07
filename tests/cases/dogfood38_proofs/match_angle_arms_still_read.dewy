@@ -1,0 +1,9 @@
+run = (word:string):>int => match word {
+    <"add"> => 1
+    <"move"> => {
+        let x = [loop k in ["a" "b"] k.length]
+        x.length + 1
+    }
+    _ => 0
+}
+main = () => printl([run("add") run("move") run("x")])
