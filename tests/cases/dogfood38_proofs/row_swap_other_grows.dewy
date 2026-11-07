@@ -1,0 +1,14 @@
+f = (a:array<int> b0:array<int>):>int => {
+    let b = b0
+    let prev:array<int> = [loop j in [0..b.length] j]
+    loop i in [1..a.length] {
+        let cur:array<int> = [i]
+        loop j in [1..b.length] {
+            cur.push(prev[j] + cur[j - 1])
+        }
+        prev = cur
+        b.push(0)
+    }
+    0
+}
+main = () => printl(f([1 2] [3 4]))

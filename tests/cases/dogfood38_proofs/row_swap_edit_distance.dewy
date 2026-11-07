@@ -1,0 +1,17 @@
+# The classic two-row edit distance: each row is one longer than `b`, so after
+# `prev = cur` the next row still reads `prev[j]` for every `j` in `[1..b.length]`.
+distance = (a:string b:string):>int => {
+    let x = a.chars
+    let y = b.chars
+    let prev:array<int> = [loop j in [0..y.length] j]
+    loop i in [1..x.length] {
+        let cur:array<int> = [i]
+        loop j in [1..y.length] {
+            let cost = if x[i - 1] =? y[j - 1] 0 else 1
+            cur.push(min(min(prev[j] + 1 cur[j - 1] + 1) prev[j - 1] + cost))
+        }
+        prev = cur
+    }
+    prev[y.length]
+}
+main = () => printl([distance("kitten" "sitting") distance("" "abc") distance("abc" "") distance("flaw" "lawn")])

@@ -8,7 +8,7 @@ from p"effect_types.dewy" import (PlaceIdentity)
 from p"exact.jo" import (exact_progress_math exact_word_reads)
 from p"expr.jo" import (CV ntype)
 from p"checks_thin_expr.dewy" import (int_intervals)
-from p"facts.jo" import (FACT_CAP FactLoop FactState fact_add_fits fact_binding fact_bound fact_capture fact_compare fact_constant fact_covered fact_difference fact_difference_head fact_difference_next fact_domain fact_name_axis_slice fact_name_open_range fact_name_range fact_name_slice_range fact_new fact_policy fact_project fact_probe_on fact_query fact_scalar fact_set_bound fact_speculating fact_summary_owner fact_terms fact_type fact_validated stable_loop_index)
+from p"facts.jo" import (FACT_CAP FactLoop FactState fact_add_fits fact_binding fact_bound fact_capture fact_compare fact_constant fact_covered fact_difference fact_difference_head fact_difference_next fact_distance fact_domain fact_incident fact_loop_exhausted fact_projection_find fact_shortest fact_name_axis_slice fact_name_open_range fact_name_range fact_name_slice_range fact_new fact_policy fact_project fact_probe_on fact_query fact_scalar fact_set_bound fact_speculating fact_summary_owner fact_terms fact_type fact_validated stable_loop_index)
 from p"facts_arith.dewy" import (fact_u64_capped)
 from p"facts_changes.dewy" import (fact_changes)
 from p"facts_elements.dewy" import (fact_found_payload fact_index_carried)
@@ -18,10 +18,11 @@ from p"facts_loops.dewy" import (fact_entails fact_loop_body)
 from p"facts_probes.dewy" import (fact_probe_record)
 from p"facts_pushes.dewy" import (fact_carried_exit fact_counted_lengths fact_counted_pushes fact_growing_lengths fact_growing_pushes fact_iterate fact_push_close fact_push_open fact_range_body fact_range_invariants fact_range_sums)
 from p"facts_summaries.dewy" import (fact_summary_payload)
+from p"isolation_ops.dewy" import (isolation_children)
 from p"refine.jo" import (representation_type)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"string_domains.jo" import (int_domain_proven)
-from p"types.jo" import (T_INT T_MATH_INT T_U64 is_int prune types)
+from p"types.jo" import (T_INT T_MATH_INT T_U64 is_int prune tkind types)
 from p"type_ops.dewy" import (dt zonk)
 from p"util.jo" import (err_notes intern name_of pos_in_lib)
 from p"witness.jo" import (WitSide)
@@ -301,6 +302,121 @@ fact_range_push_rows=(n:RangeWord @body:FactState lo:RangeWord pushes:array<[int
         fact_difference(@body v length RangeWord(x.lo) - RangeWord(e.lo) n)
     }
 }
+# The array locals loop n replaces whole (`prev = cur`, a dynamic-programming row),
+# declared before it. O(body), once per loop.
+fact_replaced_arrays=(n:RangeWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    let work=[RangeWord(nodes.ptr[n].b)]
+    loop work.length >? 0 and out.length <? 8 {
+        let e=work.pop()
+        if e =? 0 {continue}
+        let k=nodes.ptr[e].kind
+        if k =? 'lambda' {continue}
+        if k =? 'assign' {
+            let a=RangeWord(nodes.ptr[e].a)
+            let l=RangeWord(nodes.ptr[a].sym)
+            if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) and l >? 0 and tkind(fact_type(RangeWord(locals.ptr[l].type))) =? 'array' and locals.ptr[l].pos <? nodes.ptr[n].pos and l not in? out {out.push(l)}
+        }
+        let mask=isolation_children(k)
+        if mask <? 0 {continue}
+        if mask & 1 not=? 0 {work.push(RangeWord(nodes.ptr[e].a))}
+        if mask & 2 not=? 0 {work.push(RangeWord(nodes.ptr[e].b))}
+        if mask & 4 not=? 0 {work.push(RangeWord(nodes.ptr[e].c))}
+        if mask & 16 not=? 0 {
+            loop i in [0..nkids(e)) {work.push(kid(e i))}
+        }
+    }
+    out
+}
+# The value a length row compares with in state t: an unchanged int local's value, or
+# an unchanged array local's length (`y.length`); 0 when it has none. O(1).
+fact_row_side=(@t:FactState place:PlaceIdentity length:bool):>RangeWord=>{
+    let i=fact_binding(t place)
+    if i <? 0 {return 0}
+    if not length {return t.bindings[i].value}
+    let p=fact_projection_find(t t.bindings[i].value (-1) false)
+    if p <? 0 {return 0}
+    t.projections[p].value
+}
+# Length rows a range loop keeps for an array it replaces whole: `prev.length - y.length
+# <=? 1` and the reverse, true at entry and kept by every backedge and break, as when
+# each iteration builds `cur` one longer than `y` and ends `prev = cur`. Demanded only
+# by such a loop whose entry length has rows; at most 8 rows against unchanged int
+# locals and array lengths, and two speculative passes (fact_range_invariants'
+# Houdini). O(replaced x unchanged bindings) to choose, O(body) per pass.
+fact_range_length_rows=(n:RangeWord pre:FactState @s:FactState lo:RangeWord hi:RangeWord):>void=>$unsafe {
+    if fact_loop_exhausted {return}
+    let replaced=fact_replaced_arrays(n)
+    if replaced.length =? 0 {return}
+    # (array place, other place, other is a length, array first, limit):
+    # len(array) - other <= limit when array first, else other - len(array) <= limit
+    let rows:array<[PlaceIdentity PlaceIdentity bool bool int64]>=[]
+    loop l in replaced {
+        let place=PlaceIdentity('local' RangeWord(locals.ptr[l].owner) l)
+        let at=fact_row_side(@pre place true)
+        if at =? 0 or fact_incident(pre at) <? 0 {continue}
+        loop binding in s.bindings {
+            if rows.length >=? 8 {break}
+            if binding.place.root not=? 'local' or binding.place =? place {continue}
+            let d=binding.place.declaration
+            let j=fact_binding(pre binding.place)
+            if j <? 0 or pre.bindings[j].value not=? binding.value {continue}
+            let t=fact_type(RangeWord(locals.ptr[d].type))
+            let length=tkind(t) =? 'array'
+            if not length and not (fact_scalar(t) and is_int(t)) {continue}
+            let other=fact_row_side(@pre binding.place length)
+            if other =? 0 {continue}
+            let up=fact_shortest(pre at other)
+            let down=fact_shortest(pre other at)
+            # (a small offset only, `y.length + 1`: a wide limit says nothing a loop keeps)
+            if up not=? FACT_MAX and up >=? -(1 << 32) and up <=? (1 << 32) {rows.push([place binding.place length true up])}
+            if down not=? FACT_MAX and down >=? -(1 << 32) and down <=? (1 << 32) and rows.length <? 8 {rows.push([place binding.place length false down])}
+        }
+    }
+    if rows.length =? 0 {return}
+    let outer=fact_speculating
+    fact_speculating += 1
+    let settled=false
+    loop round in [0..2) {
+        let trial=s
+        fact_length_rows_assume(@trial rows n)
+        let body=fact_range_body(n trial lo hi)
+        let edges=fact_loop_body(n @body)
+        if not edges.back.live and not edges.exits.live {break}
+        let kept:array<[PlaceIdentity PlaceIdentity bool bool int64]>=[]
+        loop row in rows {
+            let held=true
+            loop t in [edges.back edges.exits] {
+                if not t.live {continue}
+                if not fact_length_row_holds(@t row) {held=false}
+            }
+            if held {kept.push(row)}
+        }
+        if kept.length =? rows.length {
+            settled=true
+            break
+        }
+        rows=kept
+        if rows.length =? 0 {break}
+    }
+    fact_speculating=outer
+    if settled and not fact_loop_exhausted {fact_length_rows_assume(@s rows n)}
+}
+fact_length_rows_assume=(@t:FactState rows:array<[PlaceIdentity PlaceIdentity bool bool int64]> at:RangeWord):>void=>{
+    loop row in rows {
+        let i=fact_binding(t row[0])
+        let other=fact_row_side(@t row[1] row[2])
+        if i <? 0 or other =? 0 or t.projections.length >=? FACT_CAP {continue}
+        let length=fact_project(@t t.bindings[i].value (-1) false T_INT)
+        if row[3] {fact_difference(@t length other row[4] at)} else {fact_difference(@t other length row[4] at)}
+    }
+}
+fact_length_row_holds=(@t:FactState row:[PlaceIdentity PlaceIdentity bool bool int64]):>bool=>{
+    let length=fact_row_side(@t row[0] true)
+    let other=fact_row_side(@t row[1] row[2])
+    if length =? 0 or other =? 0 {return false}
+    if row[3] {fact_distance(t length other row[4])} else {fact_distance(t other length row[4])}
+}
 fact_range=(n:RangeWord @s:FactState):>void=>$unsafe {
     let iterator=RangeWord(nodes.ptr[n].a)
     let lo=fact_capture(RangeWord(nodes.ptr[iterator].a) @s)
@@ -350,6 +466,7 @@ fact_range=(n:RangeWord @s:FactState):>void=>$unsafe {
     }
     loop l in found {fact_found_payload(@s l lo hi)}
     if s.live and RangeWord(nodes.ptr[n].sym) not=? 0 {fact_range_invariants(n pre @s lo hi)}
+    if s.live and RangeWord(nodes.ptr[n].sym) not=? 0 {fact_range_length_rows(n pre @s lo hi)}
     let after=s
     let body=fact_range_body(n s lo hi)
     fact_growing_lengths(@body pushes)
