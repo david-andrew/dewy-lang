@@ -129,6 +129,7 @@ use 'ffi_checks.dewy'
 use 'effect_contracts.dewy'
 use 'effect_sources.dewy'
 use 'concurrency_tasks.dewy'
+use 'checks_const_views.dewy'
 
 struct Module:
     name: i32
@@ -489,16 +490,6 @@ lib_private = (name: int) -> bool:
 # own with that name, as overloads)
 from_imports: int[]
 
-
-
-
-
-
-
-
-
-
-
 # The bundled exact fraction's types are the builtin `rational` and
 # `rational<int64>`: their library names are not a second spelling.
 rational_one_spelling = (im: int, nm: int, pos: int, how: str):
@@ -536,17 +527,8 @@ jo_type_spelling = (nm: int, s: int, pos: int):
     dewy = dewy_type_word(w)
     fatal(pos, "`{w}` is not a Dewy type name: write `{dewy}`")
 
-
 repl_sig_query = false          # (the REPL's `:type name`: a function's versions go to repl_sig)
 repl_sig = ""
-
-
-
-
-
-
-
-
 
 # Shared by named member lookup and the complete diagnostic/IDE listing.
 # Read the cached signature in place; no candidate needs a signature copy.
@@ -557,8 +539,6 @@ method_decl_for = (decl: int, rt: int) -> bool:
     p0 = prune(decl_infos[di].sig.params[0])
     # (a method of a minted parent takes its family, which this type is in)
     types[p0].kind != .var and (types[p0].kind == types[rt].kind or type_eq(p0, rt) or family_annotation(p0) and value_members(p0).contains(rt))
-
-
 
 cur_mod = () -> int:
     if cx >= 0: return int(ctxs[cx].mod)
@@ -917,7 +897,6 @@ resolve_type_name = (tn: int) -> CheckerTypeName:
     fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type")
     CheckerTypeName()
 
-
 readonly_global = (g: int) -> bool:
     d = int(globals[g].decl)
     d != 0 and has_flag(d, NF_RDONLY)
@@ -1006,12 +985,6 @@ check_struct_fields = (si: int):
     if structs[si].resolved: return
     cf_check_struct_fields(si)
 
-
-
-
-
-
-
 module_of_type = (t0: int) -> int:
     t = prune(t0)
     k = types[t].kind
@@ -1048,7 +1021,6 @@ refine_resume = (m: int):
 # result, say)
 written_refinement = (n: int) -> bool: cs_written_refinement(n)
 
-
 # (operators get names: ([]) is op_index, shown as such in backtraces: lib/std/backtrace.jo)
 OP_NAMES = ["[]", "index", "[]=", "set", "+", "add", "-", "sub", "*", "mul", "/", "div", "%", "mod", "==", "eq", "<", "lt", "^", "pow"]
 
@@ -1078,9 +1050,6 @@ new_inst = (kind: int, m: int, base: str) -> int:
     fns.len() - 1
 
 has_value_return = (n: int) -> bool: cr_has_value_return(n)
-
-
-
 
 value_leaves = (n: int, out: mut int[]): cr_value_leaves(n, out)
 
@@ -1113,7 +1082,6 @@ load_body = (decl: int, f: int):
     ic_restore(icl)
 
 get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int: ci_get_fn_inst(decl, targs, use_pos)
-
 
 # Recursive value fields use private managed boxes, so their containing layout
 # cannot be passed to C as an ordinary struct (including through a typed pointer).
@@ -1260,46 +1228,6 @@ struct ConstView:
     write: int = 0       # a write not yet followed by a use
 
 const_views: ConstView[]
-
-# A captured or narrowed name's variable, as check_place resolves it.
-place_owner = (l: int) -> int:
-    r = l
-    loop true:
-        if int(locals[r].flags) & LF_CAPTURE != 0 and int(locals[r].flags) & LF_VALUECAP == 0: r = int(locals[r].outer)
-        else if narrowed_var(r) != 0: r = narrowed_var(r)
-        else: break
-    r
-
-const_view_declare = (l: int, init: int):
-    e = init
-    loop nodes[e].kind == .conv: e = int(nodes[e].a)
-    if not has_flag(e, NF_MUT): return
-    loop (nodes[e].kind == .field or nodes[e].kind == .index) and nodes[e].a != 0: e = int(nodes[e].a)
-    if nodes[e].kind != .ident or nodes[e].aux != i32(int(SK.local)): return
-    const_views.push(ConstView(l, place_owner(int(nodes[e].sym)), loop_serials.len(), []))
-    statement_watch.const_views = const_views.len()
-
-const_view_write = (r: int, pos: int):
-    loop i in [0..const_views.len()):
-        if const_views[i].root != r: continue
-        v = const_views[i]
-        loop d in [v.depth..loop_serials.len()):
-            if v.used.contains(loop_serials[d]): const_view_conflict(v.view, pos, 0)
-        if v.write == 0: const_views[i].write = pos
-
-const_view_use = (l: int, pos: int):
-    loop i in [0..const_views.len()):
-        if const_views[i].view != l: continue
-        if const_views[i].write != 0: const_view_conflict(l, const_views[i].write, pos)
-        loop d in [const_views[i].depth..loop_serials.len()): const_views[i].used.push(loop_serials[d])
-
-const_view_conflict = (l: int, write: int, at: int):
-    nm = name_of(int(locals[l].name))
-    if at != 0: err_notes.push((at, "note: '{nm}' is used here, after the write"))
-    else: err_notes.push((-1, "note: the loop repeats a use of '{nm}' after the write"))
-    err_notes.push((locals[l].pos, "note: the view is declared here"))
-    err_notes.push((-1, "help: write after the view's last use, or take an independent snapshot with `.copy`"))
-    fatal(write, "this write conflicts with const view '{nm}', which is still in use")
 
 # root variable r is modified (inside a closure if via_closure)
 note_write = (r: int, via_closure: bool, pos: int):
@@ -1551,7 +1479,6 @@ library_exit_call = (e: int) -> bool:
     d = int(fns[int(nodes[e].sym)].decl)
     d != 0 and name_of(int(nodes[d].name)) == "exit" and pos_in_lib(nodes[d].pos)
 
-
 has_break = (n: int, depth: int = 0) -> bool:
     if n == 0: return false
     k = nodes[n].kind
@@ -1618,8 +1545,6 @@ sink_no_tuple = false            # (a body about to open whose values are always
 sink_bind_next = 0               # (the block a binding is about to check as its value: a BIND ...)
 sink_bind_expect = 0             # (... and the several values its written type says it holds)
 
-
-
 # (a function's name as written: its body under `$explicit_allocation_failure` is `__eaf_NAME`)
 oom_written_name = (id: int) -> str:
     name = name_of(id)
@@ -1637,12 +1562,10 @@ oom_written_name = (id: int) -> str:
 # Either is taken only where its consumer set sink_pack_site: a collector, a statement, a
 # body's values, a binding, an unpacking, or call arguments (expanded into several).
 
-
 values_index_base = 0     # (the base of an index being checked: `pair[0]` says how to index)
 
 # Several values (type t) used at n: taken where a consumer asked; elsewhere it is one value's place.
 mv_count = 0
-
 
 # `value` pushed (or a pack extended) onto sink i's accumulator, in exprstmt s.
 # The value(s) of exprstmt s, a statement of BODY/BIND i's own block while their number is
@@ -1722,7 +1645,6 @@ soa_loop = (s: int):
     set_list(s, [bc_ident(ixn, pos)])
     nodes[s].a = i32(r)
 
-
 # (how many soa element aliases were made: none, and no name is one)
 soa_aliases = 0
 
@@ -1734,7 +1656,6 @@ soa_alias_of = (e: int) -> int:
     l = int(syms[s].ref)
     if int(locals[l].flags) & LF_SOAELEM == 0: return 0
     l
-
 
 # loop a, b in xs (an array of pairs): loop t in xs: let a, b = t
 unpack_loop = (s: int):
@@ -1911,17 +1832,12 @@ struct LoopCopyWrite:
 loop_copy_writes: {int: LoopCopyWrite} = {}
 loop_copy_refined: {int: int} = {}    # a written binder's element type, when refined
 
-
-
-
-
 # After a loop's body: each written binder gets its declaration, and the loop a hidden
 # element binder to copy from.
 for_copied_binders = (s: int):
     if loop_copy_writes.len() == 0: return
     nodes[s].sym = i32(for_copied_binder(s, int(nodes[s].sym)))
     if nodes[s].aux == 3: nodes[s].aux2 = i32(for_copied_binder(s, int(nodes[s].aux2)))
-
 
 # Indexed user containers use their existing length / [] operations. Retain the
 # input value and length once, then reuse the ordinary counted-loop lowering.
@@ -2014,7 +1930,6 @@ op_text = (op: Tok, pos: int) -> str:
         ne: "not=?"
         _: tok_text(op)
 
-
 # Arrays a Dewy loop iterates by value (`loop x in xs`), while their bodies are
 # checked: the loop sees the value at entry, so changing the array's length in
 # the body is an error naming the two meanings the program could have wanted.
@@ -2053,7 +1968,6 @@ const ASSIGN_OPS = 0
 # Labels belong to active loops in one function-checking context. They cannot
 # cross a function boundary, including a closure checked inside the loop.
 loop_labels: LoopLabel[]
-
 
 compound_op = (op: int) -> int:
     k = op as Tok
@@ -3520,10 +3434,6 @@ struct SVal:
 
 sa_blocker = 0
 
-
-
-
-
 sa_fits = (v: int, t0: int) -> bool:
     t = prune(t0)
     if t == 0: return false
@@ -3532,12 +3442,6 @@ sa_fits = (v: int, t0: int) -> bool:
     if bits >= 64: return types[t].sign or v >= 0
     if types[t].sign: return v >= -(1 << (bits - 1)) and v < (1 << (bits - 1))
     v >= 0 and v < (1 << bits)
-
-
-
-
-
-
 
 # ---------------- program ----------------
 runtime_memeq = -1            # private bounded memory comparison, native lowering
@@ -3688,17 +3592,6 @@ order_modules = (m: int, out: mut int[]):
         loop dm in dp_loaded: order_modules(dm, out)
     out.push(m)
 
-
-
-
-
-
-
-
-
-
-
-
 program_named = false         # (the build block gave the name)
 
 # Generated helpers preserve collection semantics and record protocols defined
@@ -3788,17 +3681,6 @@ prepare_value_helpers = () -> bool:
         if demand & 2 != 0: check_value_members(t, true, seen)
     fns.len() > before
 
-
-
-
-
-
-
-
-
-
-
-
 # ---------------- several values into calls and groups (multi_expressions.md) ----------------
 # A group's items or a call's positional arguments, each several-valued one in place of its
 # values, in order: `add(pair)` is `add(1 2)` when `pair = (1 2)`. Groups and spread array
@@ -3817,9 +3699,6 @@ values_hint_first: int[]    # (... the first position its values fill ...)
 values_hint_label: str[]    # (... and the parameters they fill, once the call is resolved)
 values_hint_mark = 0        # (the first of the hints the arguments being expanded made)
 values_hits: bool[]    # (by node: call arguments checked early that gave several values)
-
-
-
 
 values_expand_error0 = (c: int): fatal(nodes[c].pos, "spreading a record's fields into named arguments is not implemented yet: pass them by name, `f(x=r.x)`")
 values_expand_error1 = (c: int, t: int): fatal(nodes[c].pos, "`...` spreads a container into arguments: an array, a fixed array or a `[int64 string]` (found {dt(t)})")

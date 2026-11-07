@@ -1,0 +1,52 @@
+$runtime_checks
+# (types.jo first: entering the cycle here, it reaches host_binds.jo only after that module has initialized what it binds)
+from p"types.jo" import (prune)
+from p"ast.jo" import (NF_MUT has_flag nodes)
+from p"check.jo" import (ConstView const_views locals loop_serials narrowed_var statement_watch)
+from p"effect_loans.dewy" import (LF_CAPTURE)
+from p"ownership_checks.dewy" import (LF_VALUECAP)
+from p"util.jo" import (err_notes fatal name_of)
+
+ViewWord:type=int64<overflow='wrap'>
+# A captured or narrowed name's variable, as check_place resolves it.
+place_owner=(l:ViewWord):>int64=>$unsafe {
+    let r=l
+    loop true {
+        if ViewWord(locals.ptr[r].flags) & LF_CAPTURE not=? 0 and ViewWord(locals.ptr[r].flags) & LF_VALUECAP =? 0 {r=ViewWord(locals.ptr[r].outer)} else if narrowed_var(r) not=? 0 {r=narrowed_var(r)}
+        else {break}
+    }
+    r
+}
+const_view_declare=(l:ViewWord init:ViewWord):>void=>$unsafe {
+    let e=init
+    loop nodes.ptr[e].kind =? 'conv' {e=ViewWord(nodes.ptr[e].a)}
+    if not has_flag(e NF_MUT) {return}
+    loop (nodes.ptr[e].kind =? 'field' or nodes.ptr[e].kind =? 'index') and nodes.ptr[e].a not=? 0 {e=ViewWord(nodes.ptr[e].a)}
+    if nodes.ptr[e].kind not=? 'ident' or nodes.ptr[e].aux not=? int32(1) {return}
+    const_views.push(ConstView(l place_owner(ViewWord(nodes.ptr[e].sym)) loop_serials.length []))
+    statement_watch.const_views=const_views.length
+}
+const_view_write=(r:ViewWord pos:ViewWord):>void=>{
+    loop i in [0..const_views.length) {
+        if const_views[i].root not=? r {continue}
+        let v=const_views[i]
+        loop d in [v.depth..loop_serials.length) {
+            if v.used.contains(loop_serials[d]) {const_view_conflict(v.view pos 0)}
+        }
+        if v.write =? 0 {const_views[i].write=pos}
+    }
+}
+const_view_use=(l:ViewWord pos:ViewWord):>void=>{
+    loop i in [0..const_views.length) {
+        if const_views[i].view not=? l {continue}
+        if const_views[i].write not=? 0 {const_view_conflict(l const_views[i].write pos)}
+        loop d in [const_views[i].depth..loop_serials.length) {const_views[i].used.push(loop_serials[d])}
+    }
+}
+const_view_conflict=(l:ViewWord write:ViewWord at:ViewWord):>void=>$unsafe {
+    let nm=name_of(ViewWord(locals.ptr[l].name))
+    if at not=? 0 {err_notes.push([at "note: '{nm}' is used here, after the write"])} else {err_notes.push([(-1) "note: the loop repeats a use of '{nm}' after the write"])}
+    err_notes.push([locals.ptr[l].pos "note: the view is declared here"])
+    err_notes.push([(-1) "help: write after the view's last use, or take an independent snapshot with `.copy`"])
+    fatal(write "this write conflicts with const view '{nm}', which is still in use")
+}
