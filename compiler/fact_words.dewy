@@ -1,0 +1,14 @@
+$runtime_checks
+# Host-word division that truncates toward zero, as the interval arithmetic in
+# facts_numeric.dewy needs (`//` and `%` floor). b is nonzero and not -1 under MIN.
+FactWord:type=int64<overflow='wrap'>
+fact_trunc_div=(a:FactWord b:FactWord):>FactWord=>{
+    let q=a // b
+    if (a <? 0) not=? (b <? 0) and a % b not=? 0 {q += 1}
+    q
+}
+fact_trunc_rem=(a:FactWord b:FactWord):>FactWord=>{
+    let r=a % b
+    if r not=? 0 and (a <? 0) not=? (b <? 0) {r -= b}
+    r
+}

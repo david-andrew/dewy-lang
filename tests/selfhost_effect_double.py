@@ -60,6 +60,8 @@ def effect_services(text, modules):
         text = text.replace('facts_routes.dewy', 'facts.jo').replace('facts_routes.jo', 'facts.jo')
     if _doubled(modules.get('facts.jo', ''), ('fact_range_call', 'fact_range_first', 'fact_stepped_loop', 'fact_open_range', 'fact_range_assumed', 'fact_range_exhaustion', 'fact_step_check', 'fact_nonnegative', 'fact_refinement_covers', 'fact_host_value', 'fact_host_endpoint', 'fact_narrow_check', 'fact_floor_call', 'fact_range')):
         text = text.replace('facts_ranges.dewy', 'facts.jo').replace('facts_ranges.jo', 'facts.jo')
+    if _doubled(modules.get('facts.jo', ''), ('fact_scaled_again', 'fact_scaled_open', 'fact_scaled_quotient', 'fact_word_type', 'fact_open_product', 'fact_reuse_tighten', 'fact_open_bound', 'fact_offset_value', 'fact_divisor', 'fact_quotient', 'fact_sum_quotient_endpoint', 'fact_sum_quotient', 'fact_floor', 'fact_quotient_divisor', 'fact_midpoint', 'fact_floor_unsigned', 'fact_bitwise', 'fact_extremum_call', 'fact_extremum', 'fact_rational_zero_test', 'fact_rational_constructor', 'fact_rational_divmod', 'fact_quantity_number', 'fact_rational_promotion', 'fact_rational_made', 'fact_power_call', 'fact_power_check', 'fact_holds_implication', 'fact_power_rational', 'fact_shift_obliged')):
+        text = text.replace('facts_numeric.dewy', 'facts.jo').replace('facts_numeric.jo', 'facts.jo')
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(

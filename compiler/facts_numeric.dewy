@@ -1,0 +1,704 @@
+$runtime_checks
+from p"checked_eval.dewy" import (cx_token)
+from p"fact_words.dewy" import (fact_trunc_div fact_trunc_rem)
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (compound_op fns lib_dir sa_fits)
+from p"checker_tokens.dewy" import (Tok)
+from p"exact.jo" import (exact_has_node)
+from p"expr.jo" import (ntype rational_constant_parts rational_constants)
+from p"facts.jo" import (fact_name_rational_lt FACT_CAP FactDifference FactProjection FactState fact_add_fits fact_add_projection fact_assume fact_bound fact_compare fact_constant fact_difference fact_difference_head fact_difference_next fact_domain fact_name_divmod fact_name_pow fact_name_pow_op fact_name_power fact_name_rational fact_name_rational_eq fact_new fact_open_endpoint fact_probe_on fact_project fact_relational fact_row_find fact_scalar fact_set_bound fact_slot fact_speculating fact_terms fact_type fact_unmodeled)
+from p"facts_joins.dewy" import (fact_host_finite fact_hull_type)
+from p"facts_library.dewy" import (fact_prelude_call)
+from p"facts_probes.dewy" import (fact_probe_record)
+from p"facts_ranges.dewy" import (fact_floor_call fact_host_endpoint fact_nonnegative)
+from p"proofs.jo" import (result_activate)
+from p"refine.jo" import (ref_encoded representation_type)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
+from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_U64 is_int math_word_overflow prune structs types)
+from p"util.jo" import (files intern pos_file pos_in_lib)
+from p"witness.jo" import (wit_divisor)
+
+NumericWord:type=int64<overflow='wrap'>
+# A symbolic value scaled by a constant again (`xs.length*3`, `2*i`, in either
+# order): the same product, as a comprehension's length is, so a guard on one
+# evaluation (`loop 2*i+1 <? n`) bounds the next. O(values), this shape only.
+fact_scaled_again=(s:FactState a:NumericWord b:NumericWord x:FactBound y:FactBound):>NumericWord=>{
+    if (x.lo =? x.hi) =? (y.lo =? y.hi) {return 0}
+    let v=if x.lo not=? x.hi {a} else {b}
+    let c=if x.lo not=? x.hi {y.lo} else {x.lo}
+    if v =? 0 {return 0}
+    loop i in [0..s.ids.length) {
+        let t=fact_terms[s.ids[i]]
+        if t.op not=? 'star' or t.a not=? v and t.b not=? v {continue}
+        let other=if t.a =? v {t.b} else {t.a}
+        if other =? 0 or other =? v or fact_slot(s other) <? 0 {continue}
+        let k=fact_bound(s other)
+        if k.lo =? k.hi and k.lo =? c and not k.wide {return s.ids[i]}
+    }
+    0
+}
+# An exact `int` product by a constant whose interval leaves the host word at
+# one end: the end that fits stays, the other is open. O(1).
+fact_scaled_open=(@s:FactState n:NumericWord a:NumericWord b:NumericWord x:FactBound y:FactBound):>NumericWord=>{
+    if (x.lo =? x.hi) =? (y.lo =? y.hi) or x.wide or y.wide {return fact_unmodeled(@s n 'unsupported')}
+    let v=if x.lo not=? x.hi {x} else {y}
+    let c=if x.lo not=? x.hi {y.lo} else {x.lo}
+    if c =? 0 or c =? FACT_MIN {return fact_unmodeled(@s n 'unsupported')}
+    let low_end=if c >? 0 {v.lo} else {v.hi}
+    let high_end=if c >? 0 {v.hi} else {v.lo}
+    let low_fits=not math_word_overflow(2 low_end c)
+    let high_fits=not math_word_overflow(2 high_end c)
+    if low_fits =? high_fits {return fact_unmodeled(@s n 'unsupported')}
+    let lo=if low_fits {low_end * c} else {FACT_MIN}
+    let hi=if high_fits {high_end * c} else {FACT_MAX}
+    let value=fact_new(@s fact_open_bound(lo hi not low_fits not high_fits) FactTerm('star' a b n ntype(n)))
+    fact_scaled_quotient(@s n value a b x y)
+    value
+}
+# A constant product's rows. `c*g` where g lies below a floor quotient
+# `d // c` by the same positive constant (`loop g in [0..d // c)`): c*q <= d,
+# so g <= q + L gives c*g <= d + c*L, and `chars[4*g..4*g+4)` stays within
+# `chars.length`. O(rows from g, at most 8); demanded only by a constant product.
+fact_scaled_quotient=(@s:FactState n:NumericWord value:NumericWord a:NumericWord b:NumericWord x:FactBound y:FactBound):>void=>{
+    if (x.lo =? x.hi) =? (y.lo =? y.hi) {return}
+    let g=if x.lo not=? x.hi {a} else {b}
+    let c=if x.lo not=? x.hi {y.lo} else {x.lo}
+    if g =? 0 or c <? 1 {return}
+    # (a factor of at least one moves a signed value away from zero: `2*i`
+    # of i >= 0 is at least i, so `2*i+1 <? n` bounds i too)
+    if c >? 1 {
+        let sign=if x.lo not=? x.hi {x} else {y}
+        if sign.lo >=? 0 {fact_difference(@s g value 0 n)}
+        else if sign.hi <=? 0 {fact_difference(@s value g 0 n)}
+    }
+    let ri=fact_difference_head(s g 1)
+    let seen:NumericWord=0
+    let found:array<FactDifference>=[]
+    loop ri >=? 0 and seen <? 8 {
+        let row=s.differences[ri]
+        ri=fact_difference_next(s ri 1)
+        seen += 1
+        if row.a not=? g or row.limit =? FACT_MIN or math_word_overflow(2 row.limit c) {continue}
+        if fact_quotient_divisor(s row.b) not=? c {continue}
+        found.push(FactDifference(value fact_terms[row.b].a row.limit * c n))
+    }
+    loop row in found {fact_difference(@s row.a row.b row.limit row.at)}
+}
+# An `int` sum or product of two values with real ends has real ends too: at
+# a MIN/MAX endpoint it is an int64 value, as fact_hull_type types a hull.
+# Only an endpoint at MIN/MAX needs the check (fact_host_finite's rows).
+fact_word_type=(s:FactState n:NumericWord a:NumericWord b:NumericWord lo:NumericWord hi:NumericWord):>NumericWord=>{
+    let t=ntype(n)
+    if lo not=? FACT_MIN and hi not=? FACT_MAX or fact_type(t) not=? T_MATH_INT {return t}
+    if fact_host_finite(s a) and fact_host_finite(s b) {return T_INT}
+    t
+}
+# A product with an open (infinite) `int` end: the endpoint products, an
+# infinite factor times a nonzero finite one infinite with their sign, times
+# 0 zero. O(1).
+fact_open_product=(@s:FactState n:NumericWord a:NumericWord b:NumericWord x:FactBound y:FactBound xlo_open:bool xhi_open:bool ylo_open:bool yhi_open:bool):>NumericWord=>{
+    let lo:NumericWord=FACT_MAX
+    let hi:NumericWord=FACT_MIN
+    let below=false
+    let above=false
+    loop i in [0..4) {
+        let p:NumericWord=if i <? 2 {x.lo} else {x.hi}
+        let q:NumericWord=if i % 2 =? 0 {y.lo} else {y.hi}
+        # (signs: -1/+1 for an infinite end, 0 for a finite one)
+        let pe:NumericWord=0
+        if i <? 2 and xlo_open {pe=-1}
+        else if i >=? 2 and xhi_open {pe=1}
+        let qe:NumericWord=0
+        if i % 2 =? 0 and ylo_open {qe=-1}
+        else if i % 2 not=? 0 and yhi_open {qe=1}
+        if pe =? 0 and qe =? 0 {
+            if math_word_overflow(2 p q) {return fact_unmodeled(@s n 'unsupported')}
+            lo=min(lo p * q)
+            hi=max(hi p * q)
+            continue
+        }
+        let sign:NumericWord=0
+        if pe not=? 0 and qe not=? 0 {sign=pe * qe}
+        else if pe not=? 0 {sign=if q >? 0 {pe} else if q <? 0 {-pe} else {0}}
+        else {sign=if p >? 0 {qe} else if p <? 0 {-qe} else {0}}
+        if sign >? 0 {above=true}
+        else if sign <? 0 {below=true}
+        else {lo=min(lo 0); hi=max(hi 0)}
+    }
+    if below {lo=FACT_MIN}
+    if above {hi=FACT_MAX}
+    if lo >? hi {return fact_unmodeled(@s n 'unsupported')}
+    # (the same product again, `r*w` in a guard and in the index it guards:
+    # one value. O(values))
+    if a not=? 0 and b not=? 0 {
+        loop i in [0..s.ids.length) {
+            let t=fact_terms[s.ids[i]]
+            if t.op =? 'star' and t.type =? ntype(n) and (t.a =? a and t.b =? b or t.a =? b and t.b =? a) {
+                fact_reuse_tighten(@s s.ids[i] lo hi not below not above)
+                return s.ids[i]
+            }
+        }
+    }
+    fact_new(@s fact_open_bound(lo hi below above) FactTerm('star' a b n ntype(n)))
+}
+# A named sum or product evaluated again keeps the bounds its guards gave it,
+# and takes any real end its operands now have: both hold for the one value.
+fact_reuse_tighten=(@s:FactState v:NumericWord lo:NumericWord hi:NumericWord lo_real:bool hi_real:bool):>void=>{
+    let b=fact_bound(s v)
+    if b.wide {return}
+    let nlo=if lo_real and lo >? b.lo {lo} else {b.lo}
+    let nhi=if hi_real and hi <? b.hi {hi} else {b.hi}
+    if nlo =? b.lo and nhi =? b.hi {return}
+    b.lo=nlo
+    b.hi=nhi
+    b.nz=b.nz or nlo >? 0 or nhi <? 0
+    fact_set_bound(@s v b)
+}
+# An interval with an open end; collapsed onto that end, it is only "at least
+# MAX" (or "at most MIN"): wide, as fact_set_bound keeps such a value.
+fact_open_bound=(lo:NumericWord hi:NumericWord below:bool above:bool):>FactBound=>{
+    let r=FactBound(lo hi lo >? 0 or hi <? 0)
+    if lo =? hi and (above and hi =? FACT_MAX or below and lo =? FACT_MIN) {
+        r.wide=true
+        r.nz=true
+    }
+    r
+}
+# A value x with x - a = c exactly (rows both ways), or 0.
+fact_offset_value=(s:FactState a:NumericWord c:NumericWord):>NumericWord=>{
+    if c =? FACT_MIN {return 0}
+    let ri=fact_difference_head(s a 0)
+    loop ri >=? 0 {
+        let row=s.differences[ri]
+        ri=fact_difference_next(s ri 0)
+        if row.limit not=? c or row.a =? a {continue}
+        let back=fact_row_find(s a row.a)
+        if back >=? 0 and s.differences[back].limit =? -c {return row.a}
+    }
+    0
+}
+fact_divisor=(@s:FactState n:NumericWord a:NumericWord b:NumericWord modulo:bool):>bool=>$unsafe {
+    let operand=if nodes.ptr[n].kind =? 'call' {kid(n 1)} else {NumericWord(nodes.ptr[n].b)}
+    # (an exact rational is zero when its numerator is: expr.jo rational_divisor)
+    let t=representation_type(ntype(operand))
+    if types.ptr[t].kind =? 'struct_' {
+        let numerator=fact_project(@s b intern("numerator") false T_MATH_INT)
+        let nothing=fact_constant(@s 0)
+        let truth=fact_compare(s 'ne' numerator nothing)
+        if truth not=? 1 {wit_divisor(n s numerator nothing operand truth =? 0)}
+        return truth =? 1
+    }
+    let zero=fact_constant(@s ref_encoded(0 ntype(operand)))
+    let truth=fact_compare(s 'ne' b zero)
+    if truth not=? 1 {wit_divisor(n s b zero operand truth =? 0)}
+    truth =? 1
+}
+# Call only after excluding zero and MIN / -1. Jo divides toward zero;
+# Dewy's floor quotient rounds downward when the signs differ. O(1).
+fact_quotient=(a:NumericWord b:NumericWord floor:bool):>NumericWord=>{
+    let q=fact_trunc_div(a b)
+    if floor and (a <? 0) not=? (b <? 0) and fact_trunc_rem(a b) not=? 0 {q -= 1}
+    q
+}
+# Divide one exact sum/difference without clipping its 65-bit endpoints.
+# a = q*d+r, 0 <= r < d: combine quotients and a remainder carry. No wide
+# arithmetic in the compiler, no syntax re-evaluation. Demand-driven O(1)
+# plus the bounded, indexed endpoint queries; arbitrary wide inputs decline.
+fact_sum_quotient_endpoint=(a:NumericWord b:NumericWord d:NumericWord subtract:bool):>[bool int64]=>{
+    let qa=fact_quotient(a d true)
+    let qb=fact_quotient(b d true)
+    # (d >= 2: `%` is already the remainder in [0, d))
+    let ra=a % d
+    let rb=b % d
+    let carry:NumericWord=0
+    if subtract and ra <? rb {carry=-1}
+    else if not subtract and ra >=? d - rb {carry=1}
+    if subtract {qb=-qb}
+    if not fact_add_fits(qa qb) {return [false 0]}
+    let q=qa + qb
+    if not fact_add_fits(q carry) {return [false 0]}
+    [true q + carry]
+}
+fact_sum_quotient=(@s:FactState n:NumericWord a:NumericWord d:NumericWord):>NumericWord=>{
+    if a =? 0 or d <? 2 {return 0}
+    let term=fact_terms[a]
+    if term.op not=? 'plus' and term.op not=? 'minus' or term.a =? 0 or term.b =? 0 {return 0}
+    if not fact_host_endpoint(s term.a false) or not fact_host_endpoint(s term.a true) or not fact_host_endpoint(s term.b false) or not fact_host_endpoint(s term.b true) {return 0}
+    let x=fact_bound(s term.a)
+    let y=fact_bound(s term.b)
+    let subtract=term.op =? 'minus'
+    let low_operand=if subtract {y.hi} else {y.lo}
+    let high_operand=if subtract {y.lo} else {y.hi}
+    let low=fact_sum_quotient_endpoint(x.lo low_operand d subtract)
+    let high=fact_sum_quotient_endpoint(x.hi high_operand d subtract)
+    if not low[0] or not high[0] {return 0}
+    # Endpoint arithmetic above certified real host endpoints, including MIN/MAX.
+    let t=if fact_type(ntype(n)) =? T_MATH_INT {T_INT} else {ntype(n)}
+    let v=fact_new(@s FactBound(low[1] high[1] low[1] >? 0 or high[1] <? 0) FactTerm(type=t))
+    if d =? 2 and not subtract {fact_midpoint(@s n v a)}
+    v
+}
+# Integer `//` and `%` by a nonzero divisor (kind 1, 2), or by a power of two
+# as a shift count or mask (3, 4). Dewy's remainder has the divisor's sign, so
+# `x % n` lies in [0, n) for positive n; the truncating form agrees when the
+# dividend is nonnegative. A nonnegative dividend bounds both results, and
+# halving a positive one makes it smaller.
+fact_floor=(@s:FactState n:NumericWord kind:NumericWord a:NumericWord b:NumericWord floor:bool):>NumericWord=>{
+    let x=fact_bound(s a)
+    let y=fact_bound(s b)
+    if x.wide and not y.wide and kind =? 1 and floor and y.lo =? y.hi {
+        let divided=fact_sum_quotient(@s n a y.lo)
+        if divided not=? 0 {return divided}
+    }
+    # A clipped host endpoint is not an upper bound on a wide intermediate.
+    # Only floor remainder/masking can discard that unknown extent using the
+    # finite divisor alone. Division and right shift must retain it.
+    if y.wide or x.wide and (kind =? 1 or kind =? 3 or not floor) {return fact_unmodeled(@s n 'unsupported')}
+    if x.lo <? 1 {x.lo=max(x.lo fact_relational(s a false))}
+    # Shrinking an unbounded mathematical value does not make it a word.
+    # Endpoint sentinels must not become finite merely by division/shift.
+    if (kind =? 1 or kind =? 3) and (not fact_host_endpoint(s a false) or not fact_host_endpoint(s a true)) {return fact_unmodeled(@s n 'unsupported')}
+    # (a shift count stays below the word; a mask is any nonnegative value)
+    if kind =? 3 or kind =? 4 {
+        if y.lo <? 0 or kind =? 3 and y.hi >? 62 {return fact_unmodeled(@s n 'unsupported')}
+    }
+    else if kind =? 1 and y.hi <? 0 {
+        # The four corners bound division on a strictly negative denominator
+        # interval. MIN / -1 is outside the host domain: decline, never wrap.
+        if not fact_host_endpoint(s b false) {return fact_unmodeled(@s n 'unsupported')}
+        if x.lo =? FACT_MIN and y.hi =? -1 {return fact_unmodeled(@s n 'unsupported')}
+        let ll=fact_quotient(x.lo y.lo floor)
+        let lh=fact_quotient(x.lo y.hi floor)
+        let hl=fact_quotient(x.hi y.lo floor)
+        let hh=fact_quotient(x.hi y.hi floor)
+        let low=min(min(ll lh) min(hl hh))
+        let high=max(max(ll lh) max(hl hh))
+        return fact_new(@s FactBound(low high low >? 0 or high <? 0) FactTerm(type=ntype(n)))
+    }
+    else if kind =? 2 and floor and y.hi <? 0 {
+        # Floor remainder has its divisor's sign, including for a wide
+        # dividend: d < x % d <= 0. No negation of MIN is needed. O(1).
+        if not fact_host_endpoint(s b false) {return fact_unmodeled(@s n 'unsupported')}
+        return fact_new(@s FactBound(y.lo + 1 0) FactTerm('eof' a b n ntype(n)))
+    }
+    else if y.lo <? 1 {return fact_unmodeled(@s n 'unsupported')}
+    # (an open divisor end is infinite, not 2^63-1: a quotient by it tends to 0)
+    let y_open=y.hi =? FACT_MAX and fact_open_endpoint(s b true)
+    if x.lo <? 0 and kind =? 1 and not x.wide and not y.wide {
+        let low=fact_trunc_div(x.lo y.lo)
+        if floor and fact_trunc_rem(x.lo y.lo) not=? 0 {low -= 1}
+        let divisor=if x.hi <? 0 {y.hi} else {y.lo}
+        let high=fact_trunc_div(x.hi divisor)
+        if floor and x.hi <? 0 and fact_trunc_rem(x.hi divisor) not=? 0 {high -= 1}
+        if x.hi <? 0 and y_open {high=if floor {-1} else {0}}
+        return fact_new(@s FactBound(low high low >? 0 or high <? 0) FactTerm(type=ntype(n)))
+    }
+    if x.lo <? 0 and (not floor or kind =? 1 or kind =? 3) {return fact_unmodeled(@s n 'unsupported')}
+    let r=FactBound()
+    if kind =? 2 or kind =? 4 {
+        r.lo=0
+        r.hi=if kind =? 2 and fact_host_endpoint(s b true) {y.hi - 1} else {y.hi}
+        if x.lo >=? 0 and not x.wide {r.hi=min(r.hi x.hi)}
+    }
+    else if kind =? 1 {
+        r.lo=if y_open {0} else {fact_trunc_div(x.lo y.hi)}
+        r.hi=fact_trunc_div(x.hi y.lo)
+    }
+    else {
+        r.lo=NumericWord(x.lo) >> NumericWord(y.hi)
+        r.hi=NumericWord(x.hi) >> NumericWord(y.lo)
+    }
+    let v=fact_new(@s r FactTerm('eof' a b n ntype(n)))
+    fact_set_bound(@s v r)
+    if kind =? 2 {fact_difference(@s v b (-1) n)}
+    if kind =? 4 {fact_difference(@s v b 0 n)}
+    let smaller=kind =? 1 and x.lo >=? 1 and y.lo >=? 2 or kind =? 3 and x.lo >=? 1 and y.lo >=? 1
+    if x.lo >=? 0 {
+        let distance:NumericWord=0
+        if kind =? 1 {distance=fact_trunc_div(x.lo y.lo) - NumericWord(x.lo)}
+        else if kind =? 3 {distance=(NumericWord(x.lo) >> NumericWord(y.lo)) - NumericWord(x.lo)}
+        else if smaller {distance=-1}
+        fact_difference(@s v a distance n)
+    }
+    if (kind =? 1 and y.lo =? 2 or kind =? 3 and y.lo =? 1) and y.lo =? y.hi and (floor or x.lo >=? 0) {fact_midpoint(@s n v a)}
+    v
+}
+# The constant positive divisor of a floor quotient value (`d // c`, Dewy's
+# `__floor_div` or its power-of-two shift, or a nonnegative dividend's
+# truncating `/`), else 0: c*q <= d. O(1).
+fact_quotient_divisor=(s:FactState q:NumericWord):>NumericWord=>$unsafe {
+    let t=fact_terms[q]
+    if t.op not=? 'eof' or t.a =? 0 or t.b =? 0 or t.origin <=? 0 or t.origin >=? nodes.length {return 0}
+    if fact_slot(s t.a) <? 0 or fact_slot(s t.b) <? 0 {return 0}
+    let k=fact_bound(s t.b)
+    if k.lo not=? k.hi or k.wide {return 0}
+    let o=t.origin
+    let kind:NumericWord=0
+    if nodes.ptr[o].kind =? 'binary' and nodes.ptr[o].op =? int32(61) {
+        # (truncating division rounds a negative dividend up)
+        if not files[pos_file(nodes.ptr[o].pos)].is_dewy and fact_bound(s t.a).lo <? 0 {return 0}
+        kind=1
+    }
+    else if nodes.ptr[o].kind =? 'call' {kind=fact_floor_call(o)}
+    if kind =? 1 {return if k.lo >=? 1 {k.lo} else {0}}
+    if kind =? 3 {return if k.lo >=? 0 and k.lo <=? 62 {NumericWord(1) << NumericWord(k.lo)} else {0}}
+    0
+}
+# A floor midpoint `(lo + hi) // 2` of two related values lies between them:
+# with lo - hi <= L (L <= 0), lo + floor(-L/2) <= mid <= hi + floor(L/2), so
+# `lo <? hi` gives `lo <=? mid <? hi` (a binary search's probe). O(1) row lookups.
+fact_midpoint=(@s:FactState n:NumericWord v:NumericWord sum:NumericWord):>void=>{
+    let t=fact_terms[sum]
+    if t.op not=? 'plus' or t.a =? 0 or t.b =? 0 or t.a =? t.b {return}
+    loop side in [0..2) {
+        let p=if side =? 0 {t.a} else {t.b}
+        let q=if side =? 0 {t.b} else {t.a}
+        let r=fact_row_find(s p q)
+        if r <? 0 {continue}
+        let limit:NumericWord=s.differences[r].limit
+        if limit >? 0 or limit =? FACT_MIN {continue}
+        # (floor(L/2) for L <= 0, and -floor(-L/2) = ceil(L/2))
+        let down=if limit % 2 =? 0 {fact_trunc_div(limit 2)} else {fact_trunc_div(limit - 1 2)}
+        let up=fact_trunc_div(limit 2)
+        fact_difference(@s v q down n)
+        fact_difference(@s p v up n)
+    }
+}
+# uint64's forms on its order-preserving encoding (value xor MIN, so rows and
+# comparisons between two uint64 values read as unsigned): every result is at
+# most the dividend, `x % n` lies in [0, n) and a mask bounds `x & m`.
+fact_floor_unsigned=(@s:FactState n:NumericWord kind:NumericWord a:NumericWord b:NumericWord):>NumericWord=>{
+    let x=fact_bound(s a)
+    let y=fact_bound(s b)
+    if x.wide or y.wide {return fact_unmodeled(@s n 'unsupported')}
+    if (kind =? 1 or kind =? 2) and y.lo =? FACT_MIN {return fact_unmodeled(@s n 'unsupported')}
+    if kind =? 3 and (y.lo <? 0 or y.hi >? 63) {return fact_unmodeled(@s n 'unsupported')}
+    let r=FactBound(FACT_MIN x.hi)
+    if kind =? 2 {r.hi=min(x.hi y.hi - 1)}
+    else if kind =? 4 {r.hi=min(x.hi y.hi)}
+    else if kind =? 1 {
+        r.lo=NumericWord(uint64<overflow='wrap'>(x.lo xor FACT_MIN) // uint64<overflow='wrap'>(y.hi xor FACT_MIN)) xor FACT_MIN
+        r.hi=NumericWord(uint64<overflow='wrap'>(x.hi xor FACT_MIN) // uint64<overflow='wrap'>(y.lo xor FACT_MIN)) xor FACT_MIN
+    }
+    else {
+        r.lo=NumericWord(uint64<overflow='wrap'>(x.lo xor FACT_MIN) >> uint64<overflow='wrap'>(y.hi)) xor FACT_MIN
+        r.hi=NumericWord(uint64<overflow='wrap'>(x.hi xor FACT_MIN) >> uint64<overflow='wrap'>(y.lo)) xor FACT_MIN
+    }
+    let v=fact_new(@s r FactTerm('eof' a b n T_U64))
+    if kind =? 2 {fact_difference(@s v b (-1) n)}
+    if kind =? 4 {fact_difference(@s v b 0 n)}
+    fact_difference(@s v a 0 n)
+    v
+}
+# Bit operations on nonnegative operands, one interval step each: a mask
+# bounds `x & m` by m, `|` and `xor` stay below the next power of two of the
+# larger operand, `>>` shrinks and `<<` grows within the result type (else a
+# possible wrap). uint64 operands use the order-preserving encoding (value xor
+# MIN); arithmetic bounds are converted before shifting or combining bits.
+fact_bitwise=(@s:FactState n:NumericWord op:Tok a:NumericWord b:NumericWord):>NumericWord=>$unsafe {
+    let x=fact_bound(s a)
+    let y=fact_bound(s b)
+    # Shift counts use their numerical magnitude even when stored as uint64.
+    # Decode the interval engine's order-preserving unsigned coordinates only
+    # when both endpoints fit a nonnegative signed word.
+    if (op =? 'shl' or op =? 'shr') and b not=? 0 and fact_type(fact_terms[b].type) =? T_U64 {
+        if y.wide or y.hi >=? 0 {return fact_unmodeled(@s n 'unsupported')}
+        y.lo=y.lo xor FACT_MIN
+        y.hi=y.hi xor FACT_MIN
+    }
+    # An exact sum/difference may need 65 bits before a right shift. Reuse
+    # the checked quotient endpoints rather than clipping it to a host word.
+    # Demand-only O(1) plus the existing indexed endpoint queries.
+    if op =? 'shr' and x.wide and not y.wide and y.lo =? y.hi and y.lo >=? 1 and y.lo <=? 62 and fact_type(ntype(n)) not=? T_U64 {
+        let divided=fact_sum_quotient(@s n a NumericWord(1) << NumericWord(y.lo))
+        if divided not=? 0 {return divided}
+    }
+    # A finite nonnegative mask bounds even an arbitrarily wide exact operand.
+    # Do not discard this proof just because the other side exceeded a word.
+    if op =? 'amp' and (x.wide or y.wide) and fact_type(ntype(n)) not=? T_U64 {
+        if not x.wide and x.lo >=? 0 or not y.wide and y.lo >=? 0 {
+            let hi=if not x.wide and x.lo >=? 0 and not y.wide and y.lo >=? 0 {min(x.hi y.hi)} else if not x.wide and x.lo >=? 0 {x.hi} else {y.hi}
+            return fact_new(@s FactBound(0 hi) FactTerm('eof' a b n ntype(n)))
+        }
+    }
+    if x.wide or y.wide {return fact_unmodeled(@s n 'unsupported')}
+    let r=FactBound()
+    if fact_type(ntype(n)) =? T_U64 {
+        if fact_type(ntype(NumericWord(nodes.ptr[n].a))) not=? T_U64 {return fact_unmodeled(@s n 'unsupported')}
+        if op =? 'amp' and fact_type(ntype(NumericWord(nodes.ptr[n].b))) =? T_U64 {
+            r=FactBound(FACT_MIN min(x.hi y.hi))
+        }
+        else if (op =? 'pipe' or op =? 'caret') and fact_type(ntype(NumericWord(nodes.ptr[n].b))) =? T_U64 {
+            let top=max(uint64<overflow='wrap'>(x.hi xor FACT_MIN) uint64<overflow='wrap'>(y.hi xor FACT_MIN))
+            let mask:uint64<overflow='wrap'>=0
+            loop mask <? top {mask=(mask << 1) | 1}
+            let low=if op =? 'pipe' {max(x.lo y.lo)} else {FACT_MIN}
+            r=FactBound(low NumericWord(mask) xor FACT_MIN)
+        }
+        else if op =? 'shr' and y.lo >=? 0 and y.hi <=? 63 {
+            r=FactBound(NumericWord(uint64<overflow='wrap'>(x.lo xor FACT_MIN) >> uint64<overflow='wrap'>(y.hi)) xor FACT_MIN NumericWord(uint64<overflow='wrap'>(x.hi xor FACT_MIN) >> uint64<overflow='wrap'>(y.lo)) xor FACT_MIN)
+        }
+        else if op =? 'shl' and y.lo >=? 0 and y.hi <=? 63 {
+            let high=uint64<overflow='wrap'>(x.hi xor FACT_MIN)
+            if high >? (uint64<overflow='wrap'>(18446744073709551615) >> uint64<overflow='wrap'>(y.hi)) {return fact_unmodeled(@s n 'unsupported')}
+            r=FactBound(NumericWord(uint64<overflow='wrap'>(x.lo xor FACT_MIN) << uint64<overflow='wrap'>(y.lo)) xor FACT_MIN NumericWord(high << uint64<overflow='wrap'>(y.hi)) xor FACT_MIN)
+        }
+        else {return fact_unmodeled(@s n 'unsupported')}
+        return fact_new(@s r FactTerm('eof' a b n T_U64))
+    }
+    if op =? 'amp' and (x.lo >=? 0 or y.lo >=? 0) {
+        r.lo=0
+        r.hi=if x.lo >=? 0 and y.lo >=? 0 {min(x.hi y.hi)} else if x.lo >=? 0 {x.hi} else {y.hi}
+    }
+    else if (op =? 'pipe' or op =? 'caret') and x.lo >=? 0 and y.lo >=? 0 {
+        let top=max(x.hi y.hi)
+        let mask:NumericWord=0
+        loop mask <? top {mask=(mask << 1) | 1}
+        r.lo=if op =? 'pipe' {max(x.lo y.lo)} else {0}
+        r.hi=mask
+        # (an open `int` end makes no mask: `n | MAX` is at least MAX, not MAX)
+        if x.hi =? FACT_MAX and fact_open_endpoint(s a true) or y.hi =? FACT_MAX and fact_open_endpoint(s b true) {
+            r=fact_open_bound(r.lo FACT_MAX false true)
+        }
+    }
+    else if (op =? 'amp' or op =? 'pipe' or op =? 'caret') and fact_host_finite(s a) and fact_host_finite(s b) {
+        # Finite signed operands have a common sign-extension width. Boolean
+        # bit operations cannot introduce a bit beyond it. Retain their possible
+        # signs separately, including negative AND and opposite-sign XOR.
+        # Demand-only O(word bits); no new facts or expression traversal.
+        let top=max(max(x.hi (-1 - x.lo)) max(y.hi (-1 - y.lo)))
+        let mask:NumericWord=0
+        loop mask <? top {mask=(mask << 1) | 1}
+        let negative=if op =? 'amp' {x.lo <? 0 and y.lo <? 0} else if op =? 'pipe' {x.lo <? 0 or y.lo <? 0} else {x.lo <? 0 and y.hi >=? 0 or y.lo <? 0 and x.hi >=? 0}
+        let positive=if op =? 'amp' {x.hi >=? 0 or y.hi >=? 0} else if op =? 'pipe' {x.hi >=? 0 and y.hi >=? 0} else {x.lo <? 0 and y.lo <? 0 or x.hi >=? 0 and y.hi >=? 0}
+        r.lo=if negative {-1 - mask} else {0}
+        r.hi=if positive {mask} else {-1}
+        r.nz=r.lo >? 0 or r.hi <? 0
+        # These endpoints are finite even at MIN/MAX; mathematical int must
+        # not reinterpret the sign-extension envelope as unbounded.
+        let result_type=if fact_type(ntype(n)) =? T_MATH_INT {T_INT} else {ntype(n)}
+        return fact_new(@s r FactTerm('eof' a b n result_type))
+    }
+    else if op =? 'shr' and y.lo >=? 0 and y.hi <=? 63 {
+        # Arithmetic right shift is monotone in x. For negative x increasing
+        # the count raises the result; for nonnegative x it lowers it.
+        # Mathematical int's endpoint sentinels are not finite bounds.
+        if fact_type(ntype(NumericWord(nodes.ptr[n].a))) =? T_MATH_INT and (not fact_host_endpoint(s a false) or not fact_host_endpoint(s a true)) {return fact_unmodeled(@s n 'unsupported')}
+        let low_count:NumericWord=if x.lo <? 0 {y.lo} else {y.hi}
+        let high_count:NumericWord=if x.hi <? 0 {y.hi} else {y.lo}
+        r.lo=NumericWord(x.lo) >> low_count
+        r.hi=NumericWord(x.hi) >> high_count
+    }
+    else if op =? 'shl' and x.lo >=? 0 and y.lo >=? 0 and y.hi <=? 62 {
+        if x.hi >? (NumericWord(FACT_MAX) >> NumericWord(y.hi)) {return fact_unmodeled(@s n 'unsupported')}
+        r.lo=NumericWord(x.lo) << NumericWord(y.lo)
+        r.hi=NumericWord(x.hi) << NumericWord(y.hi)
+        if not exact_has_node(n) and not sa_fits(r.hi ntype(n)) {return fact_unmodeled(@s n 'unsupported')}
+    }
+    else {return fact_unmodeled(@s n 'unsupported')}
+    r.nz=r.lo >? 0
+    let v=fact_new(@s r FactTerm('eof' a b n ntype(n)))
+    # (a row only where an interval cannot say it: a symbolic mask, as
+    # `i & (n-1)`; constant masks and shifts are exact enough as intervals)
+    if op =? 'amp' and y.lo >=? 0 and y.lo not=? y.hi {fact_difference(@s v b 0 n)}
+    if op =? 'amp' and x.lo >=? 0 and x.lo not=? x.hi and (y.lo <? 0 or y.lo not=? y.hi) {fact_difference(@s v a 0 n)}
+    v
+}
+fact_extremum_call=(n:NumericWord):>bool=>{
+    nkids(n) =? 2 and fact_scalar(ntype(n)) and is_int(ntype(n)) and fact_type(ntype(n)) not=? T_U64 and (fact_prelude_call(n "min") or fact_prelude_call(n "max"))
+}
+# The prelude's integer `min(a b)` (or `max`): one of its operands, so its
+# interval is theirs combined, and a row below (above) each operand. O(1).
+fact_extremum=(@s:FactState n:NumericWord a:NumericWord b:NumericWord lower:bool):>NumericWord=>{
+    let x=fact_bound(s a)
+    let y=fact_bound(s b)
+    let r=if lower {FactBound(min(x.lo y.lo) min(x.hi y.hi))} else {FactBound(max(x.lo y.lo) max(x.hi y.hi))}
+    # A wide side uses MIN/MAX as infinity. Clamping can replace both with
+    # finite endpoints, even when the clamped intermediate exceeded a word.
+    r.wide=(x.wide or y.wide) and (r.lo =? FACT_MIN or r.hi =? FACT_MAX)
+    r.nz=r.lo >? 0 or r.hi <? 0 or x.nz and y.nz
+    # (an open `int` end stays open: `max(n MAX)` is at least MAX, not MAX)
+    if not r.wide and r.lo =? r.hi and (r.hi =? FACT_MAX or r.lo =? FACT_MIN) {
+        let x_end=if r.hi =? FACT_MAX {x.hi =? FACT_MAX} else {x.lo =? FACT_MIN}
+        let y_end=if r.hi =? FACT_MAX {y.hi =? FACT_MAX} else {y.lo =? FACT_MIN}
+        let xo=fact_open_endpoint(s a r.hi =? FACT_MAX) and x_end
+        let yo=fact_open_endpoint(s b r.hi =? FACT_MAX) and y_end
+        # (the extremum's own side takes either operand's open end; the other side needs both)
+        let own=lower =? (r.lo =? FACT_MIN)
+        if own and (xo or yo) or not own and xo and yo {
+            r.wide=true
+            r.nz=true
+        }
+    }
+    let v=fact_new(@s r FactTerm('eof' a b n fact_hull_type(ntype(n) s a s b)))
+    if lower {
+        fact_difference(@s v a 0 n)
+        fact_difference(@s v b 0 n)
+    }
+    else {
+        fact_difference(@s a v 0 n)
+        fact_difference(@s b v 0 n)
+    }
+    # The other side holds when both operands obey it. Use only existing
+    # incident rows, no candidate pairs or syntax-specific clamp recognition.
+    # O(incident rows x bounded entailment), on demanded min/max results only.
+    loop operand in [a b] {
+        let other=if operand =? a {b} else {a}
+        let side:NumericWord=if lower {0} else {1}
+        let ri=fact_difference_head(s operand side)
+        let rows:array<FactDifference>=[]
+        loop ri >=? 0 {
+            rows.push(s.differences[ri])
+            ri=fact_difference_next(s ri side)
+        }
+        loop row in rows {
+            let peer=if lower {row.a} else {row.b}
+            if peer =? v {continue}
+            if row.limit not=? 0 {continue}
+            if lower and fact_compare(s 'le' peer other) =? 1 {fact_difference(@s peer v 0 n)}
+            else if not lower and fact_compare(s 'le' other peer) =? 1 {fact_difference(@s v peer 0 n)}
+        }
+    }
+    v
+}
+fact_rational_zero_test=(n:NumericWord):>NumericWord=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 or rational_constants.length =? 0 {return -1}
+    let d=NumericWord(fns.ptr[NumericWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return -1}
+    if fact_name_rational_eq =? 0 {
+        fact_name_rational_eq=intern("__eq__")
+        fact_name_rational_lt=intern("__lt__")
+    }
+    if NumericWord(nodes.ptr[d].name) not=? fact_name_rational_eq and NumericWord(nodes.ptr[d].name) not=? fact_name_rational_lt or files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/rational.dewy" {return -1}
+    loop i in [0..2) {
+        let e=kid(n i)
+        loop nodes.ptr[e].kind =? 'conv' {e=NumericWord(nodes.ptr[e].a)}
+        let parts=rational_constants.get(e)
+        if parts not=? none {
+            if parts[0] =? 0 {return 1 - i}
+        }
+    }
+    -1
+}
+fact_rational_constructor=(n:NumericWord count:NumericWord=2):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? count {return false}
+    let d=NumericWord(fns.ptr[NumericWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return false}
+    if fact_name_rational =? 0 {fact_name_rational=intern("rational")}
+    if NumericWord(nodes.ptr[d].name) not=? fact_name_rational {return false}
+    let path=files[pos_file(nodes.ptr[d].pos)].path
+    if path not=? "{lib_dir}/prelude/fractions.dewy" and path not=? "{lib_dir}/rational.dewy" {return false}
+    let t=fact_quantity_number(ntype(kid(n count - 1)))
+    is_int(t) or t =? T_MATH_INT
+}
+fact_rational_divmod=(n:NumericWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 {return false}
+    let d=NumericWord(fns.ptr[NumericWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return false}
+    if fact_name_divmod =? 0 {fact_name_divmod=intern("divmod")}
+    NumericWord(nodes.ptr[d].name) =? fact_name_divmod and not pos_in_lib(nodes.ptr[n].pos) and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/rational.dewy"
+}
+# (a quantity's number type, as lowering erases the unit; any other type's representation)
+fact_quantity_number=(t0:NumericWord):>NumericWord=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind =? 'quantity' {t=prune(NumericWord(types.ptr[t].elem))}
+    representation_type(t)
+}
+# `rational(a)` of an integer (an integer promoted, as `d/e` promotes e): its
+# numerator is a. O(1).
+fact_rational_promotion=(n:NumericWord):>bool=>$unsafe {
+    nodes.ptr[n].kind =? 'call' and nkids(n) =? 1 and fact_rational_constructor(n 1)
+}
+# The value of `rational(a b)` (a call that returned, so b is nonzero): its
+# reduced numerator is a / gcd(a b) with b's sign folded in, so it is zero
+# exactly when a is, and for b > 0 it keeps a's sign within a's interval. A
+# constant pair is the reduced constant. Only a demanded constructor call (a
+# divisor's, or its own denominator's) gets here. O(1).
+fact_rational_made=(@s:FactState n:NumericWord a:NumericWord b:NumericWord):>NumericWord=>{
+    let result=fact_new(@s FactBound() FactTerm(type=ntype(n)))
+    let t=fact_quantity_number(ntype(kid(n 0)))
+    if not is_int(t) and t not=? T_MATH_INT or s.projections.length + 2 >=? FACT_CAP {return result}
+    let x=fact_bound(s a)
+    let y=fact_bound(s b)
+    let numerator:NumericWord=0
+    if not x.wide and not y.wide and x.lo =? x.hi and y.lo =? y.hi and y.lo not=? 0 and x.lo not=? FACT_MIN and y.lo not=? FACT_MIN {
+        let parts=rational_constant_parts(x.lo y.lo)
+        numerator=fact_constant(@s parts[0])
+    }
+    else {
+        let r=fact_domain(T_MATH_INT)
+        if y.lo >? 0 and not y.wide and not x.wide {
+            if x.lo >? 0 {r=FactBound(1 x.hi true)}
+            else if x.hi <? 0 {r=FactBound(x.lo (-1) true)}
+            else {r=FactBound(x.lo x.hi x.nz)}
+        }
+        else {r.nz=x.nz or x.lo >? 0 or x.hi <? 0}
+        numerator=fact_new(@s r FactTerm(type=T_MATH_INT))
+    }
+    fact_add_projection(@s FactProjection(result intern("numerator") false numerator))
+    result
+}
+fact_power_call=(n:NumericWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 {return false}
+    let d=NumericWord(fns.ptr[NumericWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 {return false}
+    if fact_name_power =? 0 {
+        fact_name_power=intern("__dewy_power")
+        fact_name_pow=intern("pow")
+        fact_name_pow_op=intern("__pow__")
+    }
+    let name=NumericWord(nodes.ptr[d].name)
+    if name not=? fact_name_power and name not=? fact_name_pow and name not=? fact_name_pow_op {return false}
+    let e=representation_type(ntype(kid(n 1)))
+    (is_int(e) or e =? T_MATH_INT) and pos_in_lib(nodes.ptr[d].pos)
+}
+fact_power_check=(n:NumericWord @s:FactState exponent:NumericWord base:NumericWord):>void=>{
+    # (a rational base tested nonzero, `if q =? 0 return`, takes any exponent)
+    if base not=? 0 and fact_power_rational(n) {
+        let b=fact_bound(s fact_project(@s base intern("numerator") false T_MATH_INT))
+        if b.nz or b.lo >? 0 or b.hi <? 0 {
+            if fact_speculating =? 0 and fact_probe_on {fact_probe_record(n true)}
+            return
+        }
+    }
+    # (`if n <? 0 and q =? 0 return`: a case split on the base, whose zero
+    # case the refuted conjunction gives a nonnegative exponent. One state
+    # copy, only with an implication present: fact_either)
+    if base not=? 0 and fact_power_rational(n) and fact_holds_implication(s) {
+        let split=s
+        let numerator=fact_project(@split base intern("numerator") false T_MATH_INT)
+        let nothing=fact_constant(@split 0)
+        fact_assume(@split fact_new(@split fact_domain(T_BOOL) FactTerm('eq' numerator nothing)) true)
+        result_activate(@split)
+        let zero=fact_constant(@split 0)
+        if not split.live or fact_compare(split 'ge' exponent zero) =? 1 {
+            if fact_speculating =? 0 and fact_probe_on {fact_probe_record(n true)}
+            return
+        }
+    }
+    fact_nonnegative(n @s exponent kid(n 1) "the exponent")
+}
+fact_holds_implication=(s:FactState):>bool=>{
+    loop evidence in s.conditional {
+        if evidence.tag =? -2 {return true}
+    }
+    false
+}
+fact_power_rational=(n:NumericWord):>bool=>$unsafe {
+    let t=prune(representation_type(ntype(kid(n 0))))
+    if types.ptr[t].kind not=? 'struct_' {return false}
+    let si=NumericWord(types.ptr[t].st)
+    let d=NumericWord(structs.ptr[si].decl)
+    d not=? 0 and structs.ptr[si].name =? "Rational" and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/rational.dewy"
+}
+# An `int` shifted by a signed count (`x << n`, `x >>= n`): a negative count
+# fails, so n >= 0 is an obligation. A fixed width's count is unsigned: total.
+fact_shift_obliged=(n:NumericWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if nodes.ptr[n].aux not=? 0 or (k not=? 'binary' and k not=? 'assign') {return false}
+    let op_code=if k =? 'assign' {compound_op(NumericWord(nodes.ptr[n].op))} else {NumericWord(nodes.ptr[n].op)}
+    let op=cx_token(op_code)
+    if (op not=? 'shl' and op not=? 'shr') or prune(ntype(NumericWord(nodes.ptr[n].a))) not=? T_MATH_INT {return false}
+    let count=prune(ntype(NumericWord(nodes.ptr[n].b)))
+    count =? T_MATH_INT or is_int(count) and types.ptr[count].sign
+}
