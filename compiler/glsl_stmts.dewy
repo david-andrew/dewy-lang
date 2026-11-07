@@ -1,0 +1,669 @@
+$runtime_checks
+from p"type_ops.dewy" import tsd
+from p"checked_eval.dewy" import cx_token_values
+from p"checked_eval.dewy" import (cx_token)
+from p"@lib/core/str.jo" import (join split starts_with)
+from p"ast.jo" import (NF_INCLUSIVE has_flag kid nkids nodes)
+from p"check.jo" import (LF_ALIAS LF_MUTPARAM fns locals modules)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"checks_thin_expr.dewy" import (is_gpu_buffer)
+from p"expr.jo" import (CV IN gpu_buffer_elem ntype)
+from p"glsl.jo" import (builtin_map gl_decls gl_done gl_done_fns gl_done_structs gl_float gl_minmax gl_out gl_param_copies gl_stage sl_turns_fns)
+from p"glsl_emit.dewy" import (gl_attrib_comps gl_block gl_float_to_int gl_gbuf_reader gl_narrow gl_param_copy gl_sdiv gl_shift_decls gl_stmt_if gl_struct_fields gl_target gl_type gl_udesc gl_zero sl_abs_body)
+from p"glsl_ops.dewy" import (gl_err gl_first gl_fn_name gl_local gl_unsigned gl_wrap gl_wrapped ind sl_type)
+from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
+from p"types.jo" import (T_I32 T_MAT4 T_MATH_INT T_VEC4 fields is_float is_vec prune structs tkind tsize types)
+from p"util.jo" import (name_of)
+
+GlslStmtWord:type=int64<overflow='wrap'>
+# Shader arithmetic is float32, even for a CPU float64 function. Scale with
+# float32 exponent bits rather than translating core/math's float64 helper.
+sl_hypot_body=(to_bits:string from_bits:string):>string=>{
+    join([
+        "float sl_hypot(float x, float y) \{\n"
+        "    uint ax = {to_bits}(x) & 0x7fffffffu, ay = {to_bits}(y) & 0x7fffffffu;\n"
+        "    if (ax == 0x7f800000u || ay == 0x7f800000u) return {from_bits}(0x7f800000u);\n"
+        "    uint hi = max(ax, ay);\n"
+        "    if (hi > 0x7f800000u) return x + y;\n"
+        "    float s = {from_bits}(max(hi & 0x7f800000u, 0x00800000u));\n"
+        "    float sx = x / s, sy = y / s;\n"
+        "    return s * sqrt(sx * sx + sy * sy);\n\}\n"
+    ] "")
+}
+# translate a function and everything it calls
+gl_function=(f:GlslStmtWord):>void=>$unsafe {
+    if gl_done_fns.get(f) not=? none {return}
+    gl_done_fns[f]=true
+    let decl=GlslStmtWord(fns.ptr[f].decl)
+    if decl =? 0 or (nodes.ptr[decl].kind not=? 'fn_' and nodes.ptr[decl].kind not=? 'lambda') {gl_err(0 "only named functions can be used in shaders")}
+    if fns.ptr[f].caps.length >? 0 {gl_err(nodes.ptr[decl].pos "a function that captures variables cannot run on the GPU")}
+    let ret=gl_type(GlslStmtWord(fns.ptr[f].ret) nodes.ptr[decl].pos)
+    let sig="{ret} {gl_fn_name(f)}("
+    loop i in 0.. and l in fns.ptr[f].params {
+        if i >? 0 {sig="{sig}, "}
+        if GlslStmtWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {sig="{sig}inout "}
+        sig="{sig}{gl_type(GlslStmtWord(locals.ptr[l].type) locals.ptr[l].pos)} {gl_local(l)}"
+    }
+    sig="{sig})"
+    let saved=gl_out
+    gl_out=[]
+    let body=GlslStmtWord(fns.ptr[f].body)
+    let want=tkind(GlslStmtWord(fns.ptr[f].ret)) not=? 'void_'
+    gl_block(body 1 want)
+    let lines_=gl_out
+    gl_out=saved
+    gl_decls.push("{sig} \{\n{join(lines_ "")}}\n")
+}
+gl_assign_op=(op:GlslStmtWord):>string=>{
+    let tok=cx_token(op)
+    if tok =? 'assign' {return "="}
+    if tok =? 'pluseq' {return "+="}
+    if tok =? 'minuseq' {return "-="}
+    if tok =? 'stareq' {return "*="}
+    if tok =? 'slasheq' {return "/="}
+    "="
+}
+gl_compound_op=(op:Tok):>Tok=>{
+    if op =? 'minuseq' {return 'minus'}
+    if op =? 'stareq' {return 'star'}
+    if op =? 'slasheq' {return 'slash'}
+    if op =? 'percenteq' {return 'percent'}
+    if op =? 'ampeq' {return 'amp'}
+    if op =? 'pipeeq' {return 'pipe'}
+    if op =? 'careteq' {return 'caret'}
+    if op =? 'shleq' {return 'shl'}
+    if op =? 'shreq' {return 'shr'}
+    'plus'
+}
+gl_stmt=(s:GlslStmtWord depth:GlslStmtWord):>void=>$unsafe {
+    let k=nodes.ptr[s].kind
+    let pre=ind(depth)
+    if k =? 'vardecl' {
+        if nodes.ptr[s].nlist >? 0 {gl_err(nodes.ptr[s].pos "tuple destructuring is not supported in shaders")}
+        if gl_param_copy(s) {return}
+        let l=GlslStmtWord(nodes.ptr[s].sym)
+        if is_gpu_buffer(GlslStmtWord(locals.ptr[l].type)) {gl_err(nodes.ptr[s].pos "a GpuBuffer cannot be kept in a variable in shaders (use it where it is, e.g. u.particles[i])")}
+        let t=gl_type(GlslStmtWord(locals.ptr[l].type) nodes.ptr[s].pos)
+        if nodes.ptr[s].b not=? 0 {gl_out.push("{pre}{t} {gl_local(l)} = {gl_expr(GlslStmtWord(nodes.ptr[s].b))};\n")} else {gl_out.push("{pre}{t} {gl_local(l)} = {gl_zero(GlslStmtWord(locals.ptr[l].type) nodes.ptr[s].pos)};\n")}
+    }
+    else if k =? 'assign' {
+        if nodes.ptr[s].aux not=? 0 {gl_err(nodes.ptr[s].pos "unsupported assignment in shader")}
+        let a=GlslStmtWord(nodes.ptr[s].a)
+        let op=GlslStmtWord(nodes.ptr[s].op)
+        let ta=prune(ntype(a))
+        let bop=gl_compound_op(cx_token(op))
+        # (integers through gl_arith: their + - * wrap through unsigned numbers)
+        let native=(bop =? 'plus' or bop =? 'minus' or bop =? 'star' or bop =? 'slash') and (types.ptr[ta].kind =? 'float_' or (is_vec(ta) and not types.ptr[ta].sign))
+        if op not=? 47 and not native {
+            # (x op= y as x = x op y, x's indexes computed once: the operators the CPU's way)
+            let x=gl_target(a pre)
+            gl_out.push("{pre}{x} = {gl_arith(bop x gl_expr(GlslStmtWord(nodes.ptr[s].b)) ta ta ntype(GlslStmtWord(nodes.ptr[s].b)))};\n")
+        }
+        else {gl_out.push("{pre}{gl_expr(a)} {gl_assign_op(op)} {gl_expr(GlslStmtWord(nodes.ptr[s].b))};\n")}
+    }
+    else if k =? 'exprstmt' {
+        let e=GlslStmtWord(nodes.ptr[s].a)
+        if nodes.ptr[e].kind =? 'if_' or nodes.ptr[e].kind =? 'match_' {
+            gl_stmt_if(e depth)
+            return
+        }
+        gl_out.push("{pre}{gl_expr(e)};\n")
+    }
+    else if k =? 'if_' {gl_stmt_if(s depth)} else if k =? 'return_' {
+        if nodes.ptr[s].a not=? 0 {gl_out.push("{pre}return {gl_expr(GlslStmtWord(nodes.ptr[s].a))};\n")} else {gl_out.push("{pre}return;\n")}
+    }
+    else if k =? 'while_' {
+        gl_out.push("{pre}while ({gl_expr(GlslStmtWord(nodes.ptr[s].a))}) \{\n")
+        gl_block(GlslStmtWord(nodes.ptr[s].b) depth + 1 false)
+        gl_out.push("{pre}}\n")
+    }
+    else if k =? 'for_' and (nodes.ptr[s].aux =? 1 or nodes.ptr[s].aux =? 2) and tkind(ntype(GlslStmtWord(nodes.ptr[s].a))) =? 'fixed' {
+        # loop [mut] x in xs (a fixed-size array): an index loop; without `mut`, over a copy
+        let ct=prune(ntype(GlslStmtWord(nodes.ptr[s].a)))
+        let iv=gl_local(GlslStmtWord(nodes.ptr[s].c))
+        let el=GlslStmtWord(nodes.ptr[s].sym)
+        let arr=""
+        if nodes.ptr[s].aux =? 1 {
+            arr=gl_local(GlslStmtWord(nodes.ptr[s].d))
+            gl_out.push("{pre}{gl_type(ct nodes.ptr[s].pos)} {arr} = {gl_expr(GlslStmtWord(nodes.ptr[s].a))};\n")
+        }
+        gl_out.push("{pre}for (int {iv} = 0; {iv} < {fixed_len(ct)}; {iv}++) \{\n")
+        let v=""
+        if gl_wrapped(ct) {v=".v"}
+        if nodes.ptr[s].aux =? 1 {gl_out.push("{pre}    {gl_type(GlslStmtWord(types.ptr[ct].elem) nodes.ptr[s].pos)} {gl_local(el)} = {arr}[{iv}]{v};\n")}
+        gl_block(GlslStmtWord(nodes.ptr[s].b) depth + 1 false)
+        gl_out.push("{pre}}\n")
+    }
+    else if k =? 'for_' {
+        if nodes.ptr[s].aux not=? 0 {gl_err(nodes.ptr[s].pos "only `loop i in [a..b)` loops and loops over fixed-size arrays are supported in shaders")}
+        let l=GlslStmtWord(nodes.ptr[s].sym)
+        let it=GlslStmtWord(nodes.ptr[s].a)
+        let v=gl_local(l)
+        let cmp="<"
+        if has_flag(it NF_INCLUSIVE) {cmp="<="}
+        gl_out.push("{pre}for (int {v} = {gl_expr(GlslStmtWord(nodes.ptr[it].a))}; {v} {cmp} {gl_expr(GlslStmtWord(nodes.ptr[it].b))}; {v}++) \{\n")
+        gl_block(GlslStmtWord(nodes.ptr[s].b) depth + 1 false)
+        gl_out.push("{pre}}\n")
+    }
+    else if k =? 'break_' {gl_out.push("{pre}break;\n")} else if k =? 'continue_' {gl_out.push("{pre}continue;\n")}
+    else if k =? 'block' {
+        loop i in [0..nkids(s)) {gl_stmt(kid(s i) depth)}
+    }
+    else if k =? 'const_' {} else {gl_err(nodes.ptr[s].pos "unsupported statement in shader")}
+}
+gl_binop=(op:Tok):>string=>{
+    if op =? 'plus' {return "+"}
+    if op =? 'minus' {return "-"}
+    if op =? 'star' {return "*"}
+    if op =? 'slash' {return "/"}
+    if op =? 'percent' {return "%"}
+    if op =? 'eq' {return "=="}
+    if op =? 'ne' {return "!="}
+    if op =? 'lt' {return "<"}
+    if op =? 'le' {return "<="}
+    if op =? 'gt' {return ">"}
+    if op =? 'ge' {return ">="}
+    if op =? 'amp' {return "&"}
+    if op =? 'pipe' {return "|"}
+    if op =? 'caret' {return "^"}
+    if op =? 'shl' {return "<<"}
+    if op =? 'shr' {return ">>"}
+    "?"
+}
+gl_expr=(e:GlslStmtWord):>string=>$unsafe {
+    let k=nodes.ptr[e].kind
+    let t=sl_type(ntype(e))
+    if t =? T_MATH_INT {gl_err(nodes.ptr[e].pos "checked mathematical int is not yet supported in shaders; use an explicit fixed width")}
+    if k =? 'int_lit' {
+        if types.ptr[t].kind =? 'float_' {return gl_float(float64(nodes.ptr[e].ival))}
+        if nodes.ptr[e].ival <? -2147483648 or nodes.ptr[e].ival >? 4294967295 {gl_err(nodes.ptr[e].pos "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")}
+        return "{nodes.ptr[e].ival}"
+    }
+    if k =? 'float_lit' {return gl_float(nodes.ptr[e].fval)}
+    if k =? 'bool_lit' {
+        if nodes.ptr[e].ival not=? 0 {return "true"}
+        return "false"
+    }
+    if k =? 'ident' {
+        if nodes.ptr[e].aux not=? int32(1) {gl_err(nodes.ptr[e].pos "shaders can only use local variables, parameters and constants (a value of the program's: `const SPEED = 2.0` at the top, or a field of the uniforms struct, given at each draw)")}
+        let l=GlslStmtWord(nodes.ptr[e].sym)
+        if GlslStmtWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 {return gl_expr(GlslStmtWord(locals.ptr[l].alias))}
+        return gl_local(l)
+    }
+    if k =? 'field' {
+        let a=GlslStmtWord(nodes.ptr[e].a)
+        if nodes.ptr[e].aux =? -4 {return "{gl_expr(a)}.{name_of(GlslStmtWord(nodes.ptr[e].name))}"}
+        if nodes.ptr[e].aux <? 0 {gl_err(nodes.ptr[e].pos "unsupported field access in shader")}
+        return "{gl_expr(a)}.{name_of(GlslStmtWord(nodes.ptr[e].name))}_"
+    }
+    if k =? 'index' {
+        let bt=prune(ntype(GlslStmtWord(nodes.ptr[e].a)))
+        if types.ptr[bt].kind not=? 'vec' and types.ptr[bt].kind not=? 'fixed' {gl_err(nodes.ptr[e].pos "only vectors, matrices and fixed-size arrays (T[N]) can be indexed in shaders")}
+        if gl_wrapped(bt) {return "{gl_expr(GlslStmtWord(nodes.ptr[e].a))}[{gl_expr(GlslStmtWord(nodes.ptr[e].b))}].v"}
+        return "{gl_expr(GlslStmtWord(nodes.ptr[e].a))}[{gl_expr(GlslStmtWord(nodes.ptr[e].b))}]"
+    }
+    if k =? 'binary' {
+        let a=GlslStmtWord(nodes.ptr[e].a)
+        let b=GlslStmtWord(nodes.ptr[e].b)
+        let op=cx_token_values.ptr[GlslStmtWord(nodes.ptr[e].op)]
+        # (% keeps the dividend's sign, as on the CPU: GLSL's mod() takes the divisor's, and its %
+        # is undefined for negative numbers)
+        if op =? 'percent' and (is_float(ntype(a)) or is_vec(ntype(a))) {
+            let x=gl_expr(a)
+            let y=gl_expr(b)
+            return "({x} - {y} * trunc({x} / {y}))"
+        }
+        return gl_arith(op gl_expr(a) gl_expr(b) ntype(a) t ntype(b))
+    }
+    if k =? 'unary' {
+        if nodes.ptr[e].op =? int32(58) {return gl_expr(GlslStmtWord(nodes.ptr[e].a))}
+        # (a space: `- -1.5`, not the decrement `--1.5`)
+        if nodes.ptr[e].op =? int32(59) {
+            # (integers through unsigned ones, which wrap: see gl_arith)
+            if types.ptr[t].kind =? 'int_' {return gl_narrow("int(-uint({gl_expr(GlslStmtWord(nodes.ptr[e].a))}))" t)}
+            if is_vec(t) and types.ptr[t].sign {return "ivec{types.ptr[t].bits}(-uvec{types.ptr[t].bits}({gl_expr(GlslStmtWord(nodes.ptr[e].a))}))"}
+            return gl_narrow("(- {gl_expr(GlslStmtWord(nodes.ptr[e].a))})" t)
+        }
+        return gl_narrow("(~{gl_expr(GlslStmtWord(nodes.ptr[e].a))})" t)
+    }
+    if k =? 'not_' {return "(!{gl_expr(GlslStmtWord(nodes.ptr[e].a))})"}
+    if k =? 'and_' {return "({gl_expr(GlslStmtWord(nodes.ptr[e].a))} && {gl_expr(GlslStmtWord(nodes.ptr[e].b))})"}
+    if k =? 'or_' {return "({gl_expr(GlslStmtWord(nodes.ptr[e].a))} || {gl_expr(GlslStmtWord(nodes.ptr[e].b))})"}
+    if k =? 'conv' {
+        let cv=nodes.ptr[e].aux
+        let a=gl_expr(GlslStmtWord(nodes.ptr[e].a))
+        let from_=sl_type(ntype(GlslStmtWord(nodes.ptr[e].a)))
+        if cv =? int32(int64(CV.int2float)) {
+            if gl_unsigned(from_) {return "float(uint({a}))"}
+            return "float({a})"
+        }
+        if cv =? int32(int64(CV.float2int)) {
+            if types.ptr[t].kind not=? 'int_' {return "int({a})"}
+            return gl_float_to_int(a t)
+        }
+        if (cv =? int32(int64(CV.int_)) or cv =? int32(int64(CV.wrap_int))) and types.ptr[t].kind =? 'int_' {
+            if types.ptr[from_].kind =? 'bool_' {return "int({a})"}
+            return gl_narrow(a t)
+        }
+        if cv =? int32(int64(CV.float_)) or cv =? int32(int64(CV.none_)) or cv =? int32(int64(CV.quantity_const)) {return a}
+        gl_err(nodes.ptr[e].pos "unsupported conversion in shader")
+    }
+    if k =? 'if_' {
+        let b=GlslStmtWord(nodes.ptr[e].b)
+        let c=GlslStmtWord(nodes.ptr[e].c)
+        if nkids(b) not=? 1 or nkids(c) not=? 1 or nodes.ptr[b].aux =? 0 or nodes.ptr[c].aux =? 0 {gl_err(nodes.ptr[e].pos "if expressions in shaders must be single expressions: `if c: a else: b`")}
+        return "({gl_expr(GlslStmtWord(nodes.ptr[e].a))} ? {gl_expr(block_value(b))} : {gl_expr(block_value(c))})"
+    }
+    if k =? 'intrinsic' {
+        let id=nodes.ptr[e].aux
+        if id =? int32(int64(IN.vec_ctor)) {
+            let parts:array<string>=[]
+            loop i in [0..nkids(e)) {
+                let a=kid(e i)
+                let at=prune(ntype(a))
+                if is_vec(at) and at not=? T_MAT4 and t not=? T_MAT4 and types.ptr[at].sign not=? types.ptr[t].sign {
+                    # (a vector of the other kind: each component converted as a scalar is)
+                    let m=GlslStmtWord(types.ptr[at].bits)
+                    if types.ptr[t].sign {parts.push("sl_f2iv{m}({gl_expr(a)})")} else {parts.push("vec{m}({gl_expr(a)})")}
+                    if types.ptr[t].sign and gl_first("f2iv{m}") {
+                        gl_float_to_int("0.0" T_I32);
+                        let sw=["x" "y" "z" "w"]
+                        let cs:array<string>=[]
+                        loop j in [0..m) {cs.push(gl_float_to_int("v.{sw[j]}" T_I32))}
+                        gl_decls.push("ivec{m} sl_f2iv{m}(vec{m} v) \{\n    return ivec{m}({join(cs ", ")});\n}\n")
+                    }
+                }
+                else {parts.push(gl_expr(a))}
+            }
+            if t =? T_MAT4 and nkids(e) =? 0 {return "mat4(1.0)"}
+            return "{gl_type(t nodes.ptr[e].pos)}({join(parts ", ")})"
+        }
+        if id =? int32(int64(IN.sqrt)) {return "sqrt({gl_expr(kid(e 0))})"}
+        gl_err(nodes.ptr[e].pos "this operation is not available in shaders")
+    }
+    if k =? 'call' {
+        let aux=GlslStmtWord(nodes.ptr[e].aux)
+        if aux =? 2 {
+            let si=GlslStmtWord(types.ptr[t].st)
+            let parts:array<string>=[]
+            loop i in [0..GlslStmtWord(structs.ptr[si].nfields)) {
+                let a=kid(e i)
+                if a =? 0 {parts.push(gl_zero(GlslStmtWord(fields.ptr[GlslStmtWord(structs.ptr[si].fields) + i].type) nodes.ptr[e].pos))} else {parts.push(gl_expr(a))}
+            }
+            return "{gl_type(t nodes.ptr[e].pos)}({join(parts ", ")})"
+        }
+        if aux not=? 0 {gl_err(nodes.ptr[e].pos "function values cannot be called in shaders")}
+        let f=GlslStmtWord(nodes.ptr[e].sym)
+        let decl=GlslStmtWord(fns.ptr[f].decl)
+        let nm=name_of(GlslStmtWord(nodes.ptr[decl].name))
+        let args:array<string>=[]
+        loop i in [0..nkids(e)) {args.push(gl_expr(kid(e i)))}
+        if modules[GlslStmtWord(nodes.ptr[decl].mod)].is_prelude {
+            let g=sl_turns_fns.get(nm)
+            if g not=? none {return "{g}(6.283185307179586 * fract({args[0]}))"}
+            let g=builtin_map.get(nm)
+            if g not=? none {
+                if nm =? "norm" and nkids(e) not=? 1 {gl_err(nodes.ptr[e].pos "the p-norm is not available in shaders: write the length, v.norm")}
+                if nm =? "hypot" and gl_first("hypot") {
+                    gl_decls.push(sl_hypot_body("floatBitsToUint" "uintBitsToFloat"))
+                }
+                if (nm =? "min" or nm =? "max") and (types.ptr[t].kind =? 'float_' or (is_vec(t) and not types.ptr[t].sign)) {
+                    gl_minmax(nm)
+                    let result=args[0]
+                    loop i in [1..args.length) {result="sl_{nm}({result}, {args[i]})"}
+                    return result
+                }
+                # (abs of the smallest integer is itself, as on the CPU: GLSL's is undefined)
+                if nm =? "abs" and (types.ptr[t].kind =? 'int_' or (is_vec(t) and types.ptr[t].sign)) {
+                    let tn=gl_type(t nodes.ptr[e].pos)
+                    let un="uint"
+                    if is_vec(t) {un="uvec{types.ptr[t].bits}"}
+                    if gl_first("abs_{tn}") {gl_decls.push("{tn} sl_abs_{tn}({tn} x) \{\n    return {tn}({sl_abs_body(t un)});\n}\n")}
+                    return gl_narrow("sl_abs_{tn}({args[0]})" t)
+                }
+                # (unsigned numbers compared as such; abs(i8(-128)) is -128, as on the CPU)
+                if gl_unsigned(t) and (nm =? "min" or nm =? "max" or nm =? "clamp") {
+                    let us:array<string>=[]
+                    loop x in args {us.push("uint({x})")}
+                    return "int({g}({join(us ", ")}))"
+                }
+                return gl_narrow("{g}({join(args ", ")})" t)
+            }
+            # (lib/game/gpu.jo: what these do on the CPU, for the software renderer)
+            if nm =? "discard" {
+                if gl_stage not=? "fragment" {gl_err(nodes.ptr[e].pos "discard() can only be used in the fragment shader")}
+                return "discard"
+            }
+            if nm =? "instance_id" or nm =? "vertex_id" {
+                if gl_stage not=? "vertex" {gl_err(nodes.ptr[e].pos "{nm}() can only be used in the vertex shader")}
+                # (sl_ibase: the first instance of an indirect draw, as Vulkan counts them)
+                if nm =? "instance_id" {return "(gl_InstanceID + sl_ibase)"}
+                return "gl_VertexID"
+            }
+            if starts_with(nm "subgroup_") {gl_err(nodes.ptr[e].pos "{nm}() can be used in compute functions only")}
+            if nm =? "texel" {return "texelFetch({args[0]}, {args[1]}, 0)"}
+            if nm =? "texture_size" {return "textureSize({args[0]}, 0)"}
+            if nkids(e) >? 0 and is_gpu_buffer(ntype(kid(e 0))) {
+                if nm =? "len" {return "{args[0]}.n_"}
+                if nm =? "[]" {return "{gl_gbuf_reader(gpu_buffer_elem(ntype(kid(e 0))) nodes.ptr[e].pos)}({args[0]}, {args[1]})"}
+                if nm =? "[]=" or starts_with(nm "atomic_") {gl_err(nodes.ptr[e].pos "GPU buffers are written by compute programs only")}
+            }
+        }
+        # prelude helpers written in Sloppy (e.g. vector math) are translated like user code
+        gl_function(f)
+        return "{gl_fn_name(f)}({join(args ", ")})"
+    }
+    if k =? 'array' and types.ptr[t].kind =? 'fixed' {
+        # [a, b, c], [] or fill(v, N): an array constructor
+        let parts:array<string>=[]
+        let et=GlslStmtWord(types.ptr[t].elem)
+        if nodes.ptr[e].b not=? 0 {
+            let v=gl_wrap(gl_expr(kid(e 0)) et nodes.ptr[e].pos)
+            loop i in [0..fixed_len(t)) {parts.push(v)}
+        }
+        else if nkids(e) =? 0 {return gl_zero(t nodes.ptr[e].pos)} else {
+            loop i in [0..nkids(e)) {parts.push(gl_wrap(gl_expr(kid(e i)) et nodes.ptr[e].pos))}
+        }
+        return "{gl_type(t nodes.ptr[e].pos)}({join(parts ", ")})"
+    }
+    if k =? 'array' {gl_err(nodes.ptr[e].pos "growable arrays ({tsd("T[]" "array<T>")}) cannot be used in shaders; use a fixed-size array {tsd("T[N]" "array<T length=N>")}")}
+    gl_err(nodes.ptr[e].pos "unsupported expression in shader")
+    ""
+}
+# x op y for operands of type ta, giving type t: unsigned integers divide, take remainders,
+# shift and compare as unsigned numbers; narrow ones wrap to their range, as on the CPU
+# (Integer + - * go through unsigned numbers, whose overflow wraps by definition: NVIDIA's GLSL
+# compiler assumes signed results do not overflow, and then abs(a * a) - abs(a * a) / 1 need not
+# be 0. tb: the right operand's type, where it may be a scalar beside a vector.)
+gl_arith=(op:Tok x:string y:string ta:GlslStmtWord t:GlslStmtWord tb:GlslStmtWord=0):>string=>$unsafe {
+    if op =? 'plus' or op =? 'minus' or op =? 'star' {
+        if types.ptr[prune(ta)].kind =? 'int_' and types.ptr[prune(t)].kind =? 'int_' {return gl_narrow("int(uint({x}) {gl_binop(op)} uint({y}))" t)}
+        if is_vec(t) and types.ptr[prune(t)].sign {
+            let n=GlslStmtWord(types.ptr[prune(t)].bits)
+            let ux="uint({x})"
+            if is_vec(ta) {ux="uvec{n}({x})"}
+            let uy="uint({y})"
+            if tb =? 0 or is_vec(tb) {uy="uvec{n}({y})"}
+            return "ivec{n}({ux} {gl_binop(op)} {uy})"
+        }
+    }
+    if types.ptr[prune(ta)].kind =? 'bool_' {
+        # (both sides, as and= and or= compute them: not && and ||, which may skip the right)
+        if op =? 'amp' {return "bool(int({x}) & int({y}))"}
+        if op =? 'pipe' {return "bool(int({x}) | int({y}))"}
+        if op =? 'caret' {return "({x} != {y})"}
+    }
+    if (op =? 'shl' or op =? 'shr') and types.ptr[prune(ta)].kind =? 'int_' {
+        # (as on the CPU: by the count's low 6 bits, and by 32 or more nothing is left)
+        gl_shift_decls()
+        if op =? 'shl' {return gl_narrow("sl_shl({x}, {y})" t)}
+        if gl_unsigned(ta) {return "sl_shru({x}, {y})"}
+        return "sl_shr({x}, {y})"
+    }
+    # (% keeps the dividend's sign, as on the CPU: GLSL's mod() takes the divisor's, and its %
+    # is undefined for negative numbers)
+    if op =? 'percent' and (is_float(ta) or is_vec(ta)) {return "({x} - {y} * trunc({x} / {y}))"}
+    if gl_unsigned(ta) {
+        if op =? 'slash' or op =? 'percent' or op =? 'shr' {return gl_narrow("int(uint({x}) {gl_binop(op)} uint({y}))" t)}
+        if op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {return "(uint({x}) {gl_binop(op)} uint({y}))"}
+    }
+    if (op =? 'slash' or op =? 'percent') and (types.ptr[prune(ta)].kind =? 'int_' or (is_vec(ta) and types.ptr[prune(ta)].sign)) {
+        # (the smallest integer / -1 wraps, as on the CPU; GLSL leaves it undefined)
+        let d=gl_sdiv(prune(ta) tb)
+        if op =? 'slash' {return gl_narrow("{d}({x}, {y})" t)}
+        return gl_narrow("int(uint({x}) - uint({d}({x}, {y})) * uint({y}))" t)
+    }
+    if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'slash' or op =? 'shl' {return gl_narrow("({x} {gl_binop(op)} {y})" t)}
+    "({x} {gl_binop(op)} {y})"
+}
+# a value of type t at byte o + c of buffer b (laid out as the CPU lays it out)
+gl_read=(t0:GlslStmtWord o:string c:GlslStmtWord pos:GlslStmtWord):>string=>$unsafe {
+    let t=sl_type(t0)
+    let k=types.ptr[t].kind
+    let a="{o} + {c}"
+    let w="gb_w(b.t_, ({a}) >> 2)"
+    if k =? 'float_' {
+        if GlslStmtWord(types.ptr[t].bits) =? 64 {return "gb_f64({w}, gb_w(b.t_, ({o} + {c + 4}) >> 2))"}
+        return "uintBitsToFloat({w})"
+    }
+    if k =? 'int_' {
+        let bits=GlslStmtWord(types.ptr[t].bits)
+        if bits >=? 32 {return "int({w})"}
+        let sg="false"
+        if types.ptr[t].sign {sg="true"}
+        return "gb_sub(b.t_, {a}, {bits}, {sg})"
+    }
+    if k =? 'bool_' {return "(gb_sub(b.t_, {a}, 8, false) != 0)"}
+    let parts:array<string>=[]
+    if k =? 'vec' {
+        if t =? T_MAT4 {
+            loop col in [0..4) {parts.push(gl_read(T_VEC4 o c + 16 * col pos))}
+        }
+        else {
+            loop i in [0..GlslStmtWord(types.ptr[t].bits)) {
+                let wi="gb_w(b.t_, ({o} + {c + 4 * i}) >> 2)"
+                if types.ptr[t].sign {parts.push("int({wi})")} else {parts.push("uintBitsToFloat({wi})")}
+            }
+        }
+        return "{gl_type(t pos)}({join(parts ", ")})"
+    }
+    if k =? 'struct_' {
+        let si=GlslStmtWord(types.ptr[t].st)
+        if is_lib_texture(si) or is_gpu_buffer(t) {gl_err(pos "a {structs.ptr[si].name} cannot be read from a GPU buffer")}
+        layout(t)
+        loop i in [0..GlslStmtWord(structs.ptr[si].nfields)) {
+            let f=GlslStmtWord(structs.ptr[si].fields) + i
+            parts.push(gl_read(GlslStmtWord(fields.ptr[f].type) o c + GlslStmtWord(fields.ptr[f].offset) pos))
+        }
+        return "{gl_type(t pos)}({join(parts ", ")})"
+    }
+    if k =? 'fixed' {
+        let el=GlslStmtWord(types.ptr[t].elem)
+        layout(el)
+        loop i in [0..fixed_len(t)) {parts.push(gl_wrap(gl_read(el o c + i * tsize(el) pos) el pos))}
+        return "{gl_type(t pos)}({join(parts ", ")})"
+    }
+    gl_err(pos "type {dt(t)} cannot be read from a GPU buffer")
+    ""
+}
+# returns (vertex source, fragment source, layout description)
+glsl_build=(vsf:GlslStmtWord fsf:GlslStmtWord):>[string string string]=>$unsafe {
+    gl_decls=[]
+    gl_param_copies=dict<int64 int64>()
+    gl_done_fns=dict<int64 bool>()
+    gl_done_structs=dict<int64 bool>()
+    gl_done=dict<string bool>()
+    let vpos=nodes.ptr[GlslStmtWord(fns.ptr[vsf].decl)].pos
+    let vtype_=GlslStmtWord(fns.ptr[vsf].ptypes[0])
+    let np=fns.ptr[vsf].ptypes.length
+    let itype:GlslStmtWord=0
+    if np =? 3 {itype=GlslStmtWord(fns.ptr[vsf].ptypes[1])}
+    let utype=GlslStmtWord(fns.ptr[vsf].ptypes[np - 1])
+    let otype=GlslStmtWord(fns.ptr[vsf].ret)
+    gl_stage="vertex"
+    gl_function(vsf)
+    let vdecls=gl_decls
+    gl_decls=[]
+    gl_param_copies=dict<int64 int64>()
+    gl_done_fns=dict<int64 bool>()
+    gl_done_structs=dict<int64 bool>()
+    gl_done=dict<string bool>()
+    gl_stage="fragment"
+    gl_function(fsf)
+    let fdecls=gl_decls
+    let head="#version 300 es\nprecision highp float;\nprecision highp int;\n"
+    # uniforms
+    gl_struct_fields(utype);
+    layout(utype)
+    let udesc="U{tsize(utype)}"
+    let ustruct=gl_type(utype vpos)
+    udesc="{udesc}{gl_udesc(utype "" 0 vpos)}"
+    # vertex attributes
+    let vfields=gl_struct_fields(vtype_)
+    let vsi=GlslStmtWord(types.ptr[prune(vtype_)].st)
+    layout(vtype_)
+    let adesc="A{tsize(vtype_)}"
+    let vs=head
+    loop i in 0.. and f in vfields {
+        let c=gl_attrib_comps(f[1] vpos)
+        let ty="float"
+        if c >? 1 {ty="vec{c}"}
+        vs="{vs}layout(location={i}) in {ty} a_{f[0]};\n"
+        adesc="{adesc};{f[0]},{c},{GlslStmtWord(fields.ptr[GlslStmtWord(structs.ptr[vsi].fields) + i].offset)}"
+    }
+    let idesc=""
+    let ifields:array<[string int64]>=[]
+    if itype not=? 0 {
+        ifields=gl_struct_fields(itype)
+        let isi=GlslStmtWord(types.ptr[prune(itype)].st)
+        layout(itype)
+        idesc="|I{tsize(itype)}"
+        let loc=vfields.length
+        loop i in 0.. and f in ifields {
+            let off=GlslStmtWord(fields.ptr[GlslStmtWord(structs.ptr[isi].fields) + i].offset)
+            if prune(f[1]) =? T_MAT4 {
+                vs="{vs}layout(location={loc}) in mat4 i_{f[0]};\n"
+                loop col in [0..4) {idesc="{idesc};{f[0]},4,{off + 16 * col}"}
+                loc += 4
+            }
+            else {
+                let c=gl_attrib_comps(f[1] vpos)
+                let ty="float"
+                if c >? 1 {ty="vec{c}"}
+                vs="{vs}layout(location={loc}) in {ty} i_{f[0]};\n"
+                idesc="{idesc};{f[0]},{c},{off}"
+                loc += 1
+            }
+        }
+    }
+    let ofields=gl_struct_fields(otype)
+    if ofields.length =? 0 or prune(ofields[0][1]) not=? T_VEC4 {gl_err(vpos "the vertex shader must return a struct whose first field is the clip position (vec4)")}
+    vs="{vs}uniform {ustruct} u;\nuniform int sl_ibase;\n"
+    loop i in 0.. and f in ofields {
+        if i =? 0 {continue}
+        let q=""
+        if types.ptr[sl_type(f[1])].kind =? 'int_' or (types.ptr[sl_type(f[1])].kind =? 'vec' and types.ptr[sl_type(f[1])].sign) {q="flat "}
+        vs="{vs}{q}out {gl_type(f[1] vpos)} v_{f[0]};\n"
+    }
+    vs="{vs}{join(vdecls "")}"
+    let vin:array<string>=[]
+    loop f in vfields {vin.push("a_{f[0]}")}
+    vs="{vs}{"void main() \{\n    {gl_type(vtype_ vpos)} vin = {gl_type(vtype_ vpos)}({join(vin ", ")});\n"}"
+    if itype not=? 0 {
+        let iin:array<string>=[]
+        loop f in ifields {iin.push("i_{f[0]}")}
+        vs="{vs}{"    {gl_type(itype vpos)} iin = {gl_type(itype vpos)}({join(iin ", ")});\n"}"
+        vs="{vs}    {gl_type(otype vpos)} o = {gl_fn_name(vsf)}(vin, iin, u);\n    gl_Position = o.{ofields[0][0]}_;\n"
+    }
+    else {
+        vs="{vs}    {gl_type(otype vpos)} o = {gl_fn_name(vsf)}(vin, u);\n    gl_Position = o.{ofields[0][0]}_;\n"
+    }
+    loop i in 0.. and f in ofields {
+        if i >? 0 {vs="{vs}    v_{f[0]} = o.{f[0]}_;\n"}
+    }
+    vs="{vs}}\n"
+    let fs="{head}uniform {ustruct} u;\n"
+    loop i in 0.. and f in ofields {
+        if i =? 0 {continue}
+        let q=""
+        if types.ptr[sl_type(f[1])].kind =? 'int_' or (types.ptr[sl_type(f[1])].kind =? 'vec' and types.ptr[sl_type(f[1])].sign) {q="flat "}
+        fs="{fs}{q}in {gl_type(f[1] vpos)} v_{f[0]};\n"
+    }
+    fs="{fs}out vec4 frag_color;\n"
+    fs="{fs}{join(fdecls "")}"
+    let fin:array<string>=["gl_FragCoord"]
+    loop i in 0.. and f in ofields {
+        if i >? 0 {fin.push("v_{f[0]}")}
+    }
+    fs="{fs}void main() \{\n    {gl_type(otype vpos)} i = {gl_type(otype vpos)}({join(fin ", ")});\n    frag_color = {gl_fn_name(fsf)}(i, u);\n}\n"
+    # the uniform struct definition must precede `uniform S u;` in both stages
+    vs=__hoist_struct(vs ustruct)
+    fs=__hoist_struct(fs ustruct)
+    [vs fs "{adesc}|{udesc}{idesc}"]
+}
+# the fragment program of a dotted expression on GPU arrays (see check_dotted): kernel f takes the
+# current element of each array (texture uniforms t0, t1...) and each number (uniforms s0, s1...),
+# in the order desc lists them ('t' or 's'); the result goes to the red channel. Each fragment is
+# one element of the result: its index in the result's shape (od, padded to 4 dimensions) picks
+# each array's element through that array's steps (st0, st1...; 0 where it is stretched).
+# (see __gpu_run in lib/game/gpuarray.jo)
+glsl_kernel=(f:GlslStmtWord desc:string):>string=>$unsafe {
+    gl_decls=[]
+    gl_done_fns=dict<int64 bool>()
+    gl_done_structs=dict<int64 bool>()
+    gl_done=dict<string bool>()
+    gl_stage="kernel"
+    gl_function(f)
+    let pos=nodes.ptr[GlslStmtWord(fns.ptr[f].decl)].pos
+    let src="#version 300 es\nprecision highp float;\nprecision highp int;\nuniform ivec4 od;\nuniform int ow;\n"
+    # desc: one letter per operand: t a float texture, i an integer one, s a float number, n an
+    # integer number. Textures hold 4 values per texel; a fragment computes 4 results.
+    let args:array<string>=[]
+    let fetch=""
+    let fdecl=""
+    let idecl=""
+    let nt:GlslStmtWord=0
+    let nf:GlslStmtWord=0
+    let ni:GlslStmtWord=0
+    loop c in (desc as array<uint8>) {
+        if c =? b't' or c =? b'i' {
+            let sampler="sampler2D"
+            if c =? b'i' {sampler="isampler2D"}
+            src="{src}uniform highp {sampler} t{nt};\nuniform ivec4 st{nt};\nuniform int w{nt};\n"
+            fetch="{fetch}        int o{nt} = i0 * st{nt}.x + i1 * st{nt}.y + i2 * st{nt}.z + i3 * st{nt}.w;\n"
+            args.push("texelFetch(t{nt}, ivec2((o{nt} >> 2) % w{nt}, (o{nt} >> 2) / w{nt}), 0)[o{nt} & 3]")
+            nt += 1
+        }
+        else if c =? b's' {
+            fdecl="{fdecl}uniform float sf{nf};\n"
+            args.push("sf{nf}")
+            nf += 1
+        }
+        else {
+            idecl="{idecl}uniform int si{ni};\n"
+            args.push("si{ni}")
+            ni += 1
+        }
+    }
+    let rt=gl_type(GlslStmtWord(fns.ptr[f].ret) pos)
+    let int_out=rt =? "int"
+    src="{src}{fdecl}{idecl}"
+    if int_out {src="{src}out highp ivec4 o_;\n"} else {src="{src}out vec4 o_;\n"}
+    src="{src}{join(gl_decls "")}"
+    let val="{gl_fn_name(f)}({join(args ", ")})"
+    if not int_out and rt not=? "float" {val="float({val})"}
+    let zero="vec4(0.0)"
+    if int_out {zero="ivec4(0)"}
+    src="{src}void main() \{\n    int base = (int(gl_FragCoord.y) * ow + int(gl_FragCoord.x)) * 4;\n"
+    src="{src}    int total = od.x * od.y * od.z * od.w;\n"
+    if int_out {src="{src}    ivec4 r = {zero};\n"} else {src="{src}    vec4 r = {zero};\n"}
+    src="{src}    for (int c = 0; c < 4; c++) \{\n        int lin = base + c;\n        if (lin >= total) break;\n"
+    src="{src}        int i3 = lin % od.w;\n        int q = lin / od.w;\n        int i2 = q % od.z;\n        q /= od.z;\n        int i1 = q % od.y;\n        int i0 = q / od.y;\n"
+    "{src}{fetch}        r[c] = {val};\n    }\n    o_ = r;\n}\n"
+}
+# move every struct definition above the first `uniform` declaration
+__hoist_struct=(src:string ustruct:string):>string=>{
+    let parts=split(src "\n")
+    let structs_:array<string>=[]
+    let rest:array<string>=[]
+    let in_struct=false
+    loop p in parts {
+        if starts_with(p "struct ") {in_struct=true}
+        if in_struct {structs_.push(p)} else {rest.push(p)}
+        if in_struct and p =? "};" {in_struct=false}
+    }
+    let out:array<string>=[]
+    let placed=false
+    loop p in rest {
+        if not placed and (starts_with(p "uniform ") or starts_with(p "layout(") or starts_with(p "out ") or starts_with(p "in ") or starts_with(p "flat ")) {
+            loop s in structs_ {out.push(s)}
+            placed=true
+        }
+        out.push(p)
+    }
+    if not placed {
+        loop s in structs_ {out.push(s)}
+    }
+    join(out "\n")
+}
