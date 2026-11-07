@@ -2,9 +2,9 @@
 import p"@lib/time/core.dewy" as core
 from p"@lib/time/core.dewy" import (instant_error utc_error)
 import p"@lib/time/civil.dewy" as civil
-from p"@lib/time/civil.dewy" import date_error
+from p"@lib/time/civil.dewy" import (date_error time_of_day_error local_error)
 import p"@lib/time/zones.dewy" as zones
-from p"@lib/time/zones.dewy" import (zone_error zone_scope_error zoned_error _FoldPolicy _GapPolicy)
+from p"@lib/time/zones.dewy" import (zone_error zone_scope_error zoned_error local_zone_error policy_gap _FoldPolicy _GapPolicy)
 
 Instant:type=core.Instant
 Duration:type=core.Duration
@@ -61,6 +61,18 @@ age=(born:Date leap_day:civil._LeapDay='march_1' scope:string|none=$time.zone):>
 
 Zone:type=zones.Zone
 ZonedDateTime:type=zones.ZonedDateTime
+
+TimeOfDay:type=civil.TimeOfDay
+LocalDateTime:type=<C=Gregorian>(civil.LocalDateTime<C>)
+$check_constant time_of_day_error(text) "not a time of day"
+time_of_day=(text:string):>TimeOfDay|ParseError=>civil.time_of_day_parse(text)
+$check_constant local_error(text) "not a local time"
+local=(text:string):>LocalDateTime|ParseError=>civil.local_parse(text)
+# A moment as it reads in a zone, or a local time as a moment there.
+in_zone=(t:Instant z:Zone):>ZonedDateTime|OutsideCoverage=>zones.in_zone(t z)
+$check_constant local_zone_error(l z fold gap) "this local time has no one moment"
+$check_constant policy_gap(fold gap) "unused"
+in_zone=(l:LocalDateTime z:Zone fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>zones.local_in_zone(l z fold gap)
 
 $check_constant zone_error(name) "not a time zone"
 zone=(name:string):>Zone|UnknownZone=>zones.zone_parse(name)

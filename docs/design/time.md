@@ -136,7 +136,7 @@ let dt = (now - start) / 1s as float64
 
 - **Default.** The data a Dewy version ships is what that version means: zone rules and the UTC table, in `lib/time/rules/`. There is no name to write. The artifact records the pack's identity.
 - **Which version.** A module's `$dewy.version` selects the pack its literals fold against, and the main module's selects the one used at run time. A tagged release keeps every earlier release's pack.
-- **`$time.rules`** is the override: a descriptor constant in `.dewy` source for urgent law changes or test data. `$time.zone_source = 'host'` follows the host's database at run time, and a literal cannot fold against that.
+- **`$time.rules`** is the override, for urgent law changes or test data: `$time.rules = 'urgent.bin'` at the top of the main file names a pack beside it, made with `tools/time/gen_rules.py` (a path for now, not v6's descriptor constant, which needs a metatag value that is not text). `$time.zone_source = 'host'` follows the host's database at run time, and a literal cannot fold against that.
 - **Format.** Bytes reached through `$include_bytes` from a `.dewy` descriptor and read by library code, at compile time and at run time. Only a program that reaches a zone operation links them.
 - **Staleness.** `ZonePackStale` is a status, never a failure of `today`.
 

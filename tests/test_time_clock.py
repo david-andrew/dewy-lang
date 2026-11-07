@@ -196,10 +196,9 @@ def test_a_scope_setting_must_name_a_zone(compiler, tmp_path):
 
 
 def test_unbuilt_settings_say_so(compiler, tmp_path):
-    for line in ("$time.zone_source = 'host'", "$time.rules = 'x'"):
-        ran = run(compiler, tmp_path, line + '\n')
-        assert ran.returncode != 0
-        assert 'not implemented yet' in ran.stderr
+    ran = run(compiler, tmp_path, "$time.zone_source = 'host'\n")
+    assert ran.returncode != 0
+    assert 'not implemented yet' in ran.stderr
 
 
 def test_date_literal_reports_its_validators_text(compiler, tmp_path):

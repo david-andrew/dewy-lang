@@ -1,7 +1,7 @@
 # Civil time of docs/design/time.md without zones: dates and their calendars, periods, ages.
 # Gregorian (arithmetic proleptic Gregorian, astronomical years, year zero) is the only calendar
 # so far. It maps no data.
-from p"core.dewy" import (Instant Days Months days_from_civil civil_from_days days_in_month read_fields _Cursor Fields _year_text pad)
+from p"core.dewy" import (Instant Days Months days_from_civil civil_from_days days_in_month read_fields _Cursor Fields _year_text _fraction_text pad)
 
 # `_days` counts from 1970-01-01, and the calendar is part of the type: bare `Date` is `Date<Gregorian>`.
 Gregorian:type=[]
@@ -122,3 +122,48 @@ age_on=(born:Date on:Date leap_day:_LeapDay):>int=>{
     if om <? am or (om =? am and od <? ad) {return count-1}
     count
 }
+
+# ---------------- a time of day, and a date with one: no zone, so no moment yet ----------------
+TimeOfDay:type=[_ns:int64]
+LocalDateTime:type=<C=Gregorian>[date:Date<C> time:TimeOfDay]
+const _NS_PER_DAY:int64=86400000000000
+
+hour=(t:TimeOfDay):>int64=>t._ns//3600000000000
+minute=(t:TimeOfDay):>int64=>(t._ns%3600000000000)//60000000000
+second=(t:TimeOfDay):>int64=>(t._ns%60000000000)//1000000000
+nanosecond=(t:TimeOfDay):>int64=>t._ns%1000000000
+__eq__=(a:TimeOfDay b:TimeOfDay):>bool=>a._ns =? b._ns
+__lt__=(a:TimeOfDay b:TimeOfDay):>bool=>a._ns <? b._ns
+__as__=(t:TimeOfDay):>string=>"{pad(hour(t) 2)}:{pad(minute(t) 2)}:{pad(second(t) 2)}{_fraction_text(int(nanosecond(t)))}"
+time_of_fields=(f:Fields):>TimeOfDay=>TimeOfDay[f.hour*3600000000000+f.minute*60000000000+f.second*1000000000+f.nanosecond]
+
+# (read as the time of an arbitrary date, by the one reader of these fields)
+time_of_day_parse=(text:string):>TimeOfDay|ParseError=>{
+    let line=_Cursor["2000-01-01T{text}" 0]
+    let f=read_fields(@line) or_throw
+    if line.at not=? ("2000-01-01T{text}" as array<uint8>).length {return ParseError["a time of day is written hh:mm, hh:mm:ss or hh:mm:ss.fraction"]}
+    if f.second =? 60 {return ParseError["a :60 second is a UTC label: use `utc`"]}
+    time_of_fields(f)
+}
+time_of_day_error=(text:string):>string?=>match time_of_day_parse(text) {
+    t:TimeOfDay=>none
+    e:ParseError=>e.message
+}
+local_parse=(text:string):>LocalDateTime|ParseError=>{
+    let c=_Cursor[text 0]
+    let f=read_fields(@c) or_throw
+    if not f.has_time {return ParseError["a local time is written YYYY-MM-DDThh:mm, with a time; a date alone is `date`"]}
+    if c.at not=? (text as array<uint8>).length {return ParseError["a local time has no offset or zone; one with them is `zoned` or `instant`"]}
+    if f.second =? 60 {return ParseError["a :60 second is a UTC label: use `utc`"]}
+    LocalDateTime<Gregorian>[date_of(f.year f.month f.day) time_of_fields(f)]
+}
+local_error=(text:string):>string?=>match local_parse(text) {
+    t:LocalDateTime=>none
+    e:ParseError=>e.message
+}
+at=(d:Date t:TimeOfDay):>LocalDateTime=>LocalDateTime<Gregorian>[d t]
+__eq__=(a:LocalDateTime b:LocalDateTime):>bool=>a.date =? b.date and a.time =? b.time
+__lt__=(a:LocalDateTime b:LocalDateTime):>bool=>a.date <? b.date or (a.date =? b.date and a.time <? b.time)
+__as__=(l:LocalDateTime):>string=>"{l.date}T{l.time}"
+__add__=(l:LocalDateTime p:Days):>LocalDateTime=>LocalDateTime<Gregorian>[l.date+p l.time]
+__sub__=(l:LocalDateTime p:Days):>LocalDateTime=>LocalDateTime<Gregorian>[l.date-p l.time]

@@ -1620,7 +1620,15 @@ main file that sets none leaves modules and scopes free to set their own. `'syst
 name of the machine's zone when the program runs, and `'build'` pins the zone of the machine building it.
 `today` is the date there; with no zone set it warns, naming what it assumes. A machine with no zone to read reads as UTC, and the program says so once on standard error. A literal cannot assume a zone. Zone rules are not the machine's: each
 Dewy version ships its own (IANA data in `lib/time/rules`), so a program means the same thing
-anywhere, and a program links them only if it reaches a zone operation.
+anywhere, and a program links them only if it reaches a zone operation. For an urgent law change
+or test data, `$time.rules = 'urgent.bin'` at the top of the main file names a pack beside it,
+made with `tools/time/gen_rules.py`.
+
+A zoned time reads as `.date`, `.time_of_day`, `.local`, `.year`, `.month`, `.day`, `.hour`, `.minute`,
+`.second`, `.nanosecond` and `.weekday` (0 is Monday). `t.in_zone(z)` shows an `Instant` in a zone.
+`time_of_day"09:30"` is a `TimeOfDay`, and `local"2026-11-01T01:30"` or `d.at(t)` a `LocalDateTime`,
+with no zone and so no moment yet: `l.in_zone(z fold='later')` gives the moment, under the same
+policies as `zoned`.
 
 ## Exact large integers
 

@@ -5669,6 +5669,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         path = rel
         if not is_abs_path(rel): path = "{files[pos_file(nodes[n].pos)].dir}/{rel}"
         path = path_norm(path)
+        path = time_rules_path(path)
         if not embedded_files.contains(path): embedded_files.push(path)
         d = read_file(path)
         if d == none:
@@ -9758,6 +9759,23 @@ dewy_index_ranges = (n: int, receiver: int):
             value = dewy_range_value(r)
             set_kid(n, i, value)
             if nodes[n].b == r: nodes[n].b = i32(value)
+
+# The zone rules this program uses: the pack a Dewy version ships, unless the main file says
+# `$time.rules = 'file'` (beside the main file, made with tools/time/gen_rules.py).
+time_rules_path = (path: str) -> str:
+    if path != path_norm(lib_dir + "/time/rules/current.bin"): return path
+    setting = intern("time.rules")
+    loop i in [0..files.len()):
+        if files[i].path != settings_path: continue
+        scope = dir_find(setting, dir_module_start(i))
+        if scope < 0 or dir_scopes[scope].value < 2: return path
+        rel = name_of(dir_scopes[scope].value - 2)
+        chosen = if is_abs_path(rel): rel else: "{files[i].dir}/{rel}"
+        d = read_file(chosen)
+        if d == none: fatal(dir_scopes[scope].at, "`$time.rules`: cannot read '{chosen}'")
+        if len(d!) < 4 or d![..4) != "DZP2": fatal(dir_scopes[scope].at, "`$time.rules`: '{chosen}' is not a rule pack; tools/time/gen_rules.py makes one")
+        return path_norm(chosen)
+    path
 
 # `[a..b)` of values that are not integers (Instant, rational, text: anything with `<?`): a Range of
 # lib/ranges.dewy rather than the IntRange of `__dewy_range`. -1 for integers, whose range this leaves.

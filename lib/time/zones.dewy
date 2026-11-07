@@ -1,6 +1,7 @@
 # Zones of docs/design/time.md: the pinned rule pack (tools/time/gen_rules.py), offsets at a moment,
 # local times resolved through gaps and folds, and zoned values. Only a program that reaches a
 # zone operation links the pack.
+from p"civil.dewy" import (Date TimeOfDay LocalDateTime Gregorian date_of _of_days _LeapDay)
 from p"core.dewy" import (Instant Duration Days Months instant_at ns_count read_fields read_offset NO_OFFSET _Cursor Fields _byte _utc_to_axis _axis_to_utc civil_from_days days_from_civil days_in_month _year_text _fraction_text _DAY_NS _NS pad)
 import p"core.dewy" as core
 # (inside a function, so a program links the pack only if something still reads it when it runs:
@@ -435,4 +436,38 @@ local_days=(t:Instant z:Zone):>int=>{
     let moment=_posix_of(t)
     if moment is? OutsideCoverage {return ns_count(t)//_DAY_NS+2557}
     int(moment+offset_at(z moment))//86400
+}
+
+# ---------------- what a zoned time reads as ----------------
+_seconds_today=(z:ZonedDateTime):>int64=>_local(z)%86400
+_nanos=(z:ZonedDateTime):>int64=>{
+    let label=_axis_to_utc(ns_count(z.nominal))
+    if label is? none {return 0}
+    let [_m in_day]=label
+    (in_day%_NS).to_int64() ?? 0
+}
+date=(z:ZonedDateTime):>Date=>_of_days(int(_local(z))//86400)
+time_of_day=(z:ZonedDateTime):>TimeOfDay=>TimeOfDay[_seconds_today(z)*1000000000+_nanos(z)]
+local=(z:ZonedDateTime):>LocalDateTime=>LocalDateTime<Gregorian>[date(z) time_of_day(z)]
+year=(z:ZonedDateTime):>int=>civil_from_days(int(_local(z))//86400)[0]
+month=(z:ZonedDateTime):>int64=>civil_from_days(int(_local(z))//86400)[1]
+day=(z:ZonedDateTime):>int64=>civil_from_days(int(_local(z))//86400)[2]
+hour=(z:ZonedDateTime):>int64=>_seconds_today(z)//3600
+minute=(z:ZonedDateTime):>int64=>(_seconds_today(z)%3600)//60
+second=(z:ZonedDateTime):>int64=>_seconds_today(z)%60
+nanosecond=(z:ZonedDateTime):>int64=>_nanos(z)
+# 0 for Monday to 6 for Sunday.
+weekday=(z:ZonedDateTime):>int64=>((int(_local(z))//86400+3)%7).to_int64() ?? 0
+
+# A local time in a zone: the moment under the policies, or the Gap or Ambiguous with no policy.
+local_in_zone=(l:LocalDateTime z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>{
+    let days=int(l.date._days)
+    let whole=l.time._ns//1000000000
+    let moment=(days*86400).to_int64() ?? 0
+    _civil(_resolve(moment+whole int(l.time._ns%1000000000) z fold gap))
+}
+local_zone_error=(l:LocalDateTime z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>string?=>match local_in_zone(l z fold gap) {
+    r:ZonedDateTime=>none
+    e:Gap=>e.message
+    e:Ambiguous=>e.message
 }
