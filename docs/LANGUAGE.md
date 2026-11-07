@@ -1471,7 +1471,9 @@ kilograms, amperes, kelvins, moles, candelas, and whole turns. Unit scales are
 exact: `3km =? 3000m`, `300ms =? 3s/10`, and `90deg =? turn/4`; `°` also
 spells degrees. Fractions use `rational`, and quantities also support machine
 integers, checked `int` (`bigint`), `float32`, and `float64`. A floating annotation rounds an
-exact scale to that representation.
+exact scale to that representation. A whole number with a unit holds whole numbers,
+and a decimal point makes it hold fractions, as for a plain number: `let t = 0.0m`,
+then `t = t + 1.5m`.
 `L` and `mL` are volume units (`1L =? m^3/1000`, `1000mL =? 1L`).
 
 Addition, subtraction, and comparisons require identical dimensions.

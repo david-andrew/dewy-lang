@@ -4093,6 +4093,8 @@ var_type_error = (lhs: int, lt: int, rt: int, at: int):
         # (`let total:int64 = 0`: the written type made it whole, not its first value)
         if ts_dewy and prune(lt) != T_MATH_INT: how = "declare it a float where it is made (`{nm}:float64`), or make this a whole number with `{dt(lt)}(...)`"
         fatal(at, "'{nm}' holds whole numbers{made}, and this is a number with a fraction: {how}")
+    # (total = 0m, then total += 1.5m: 0.0m holds fractions)
+    if quantity_int_promotes(lt, rt): fatal(at, "'{nm}' holds whole numbers ({dt(lt)}{made}), and this is a {dt(rt)}: write its first value with a decimal point before its unit, so it holds fractions too")
     # (score = "0", then score += 1: a number in quotes is text)
     if tkind(lt) == .str_ and is_numeric(rt):
         fatal(at, "'{nm}' holds text{made} (a value in quotes, \"0\", is text, even with digits): for a number, give it one without quotes (`{nm} = 0`)")

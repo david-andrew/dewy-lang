@@ -122,13 +122,15 @@ quantity_constant = (n: int, num: int, den: int, dim: int, expected: int, shown:
         a = mk(.float_lit, pos)
         nodes[a].fval = f64(value.numerator) / f64(value.denominator)
         check_expr(a, hint)
-    else if value.denominator == 1 and not bundled_rational_type(hint):
+    # (a written decimal holds fractions, `let t = 0.0m`, as a plain 0.0 does)
+    else if value.denominator == 1 and not bundled_rational_type(hint) and (value.shown == 0 or is_int(hint)):
         a = bc_int(value.numerator, pos)
         check_expr(a, if is_int(hint): hint else: 0)
     else if value.shown != 0:
         # (written decimals keep printing as decimals through units: 2.5kg*9.81N/kg/N is 24.525)
         a = rational_constant(value.numerator, value.denominator, pos, false, value.shown)
         check_expr(a, 0)
+        rational_constants[a] = rational_constant_parts(value.numerator, value.denominator)
     else:
         ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
         callee = bc_field(bc_ident("$dewy_rational", pos), "rational", pos)
