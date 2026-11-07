@@ -310,6 +310,6 @@ def test_growth_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release,
                             ('checker_tokens', 'node_store', 'checker_types', 'checker_state', 'growth_ops'), DRIVER,
                             doubles={'services.jo': SERVICES, 'growth.jo': state},
-                            services=('ast', 'check', 'checker_expr', 'decimals', 'expr', 'ide', 'lex', 'types', 'units', 'util'))
+                            services=('ast', 'check', 'checker_expr', 'decimals', 'decimal_ops', 'expr', 'ide', 'lex', 'types', 'units', 'util'))
     assert output.endswith(b'growth ok\n')
     assert output.count(b'this exact value grows') >= 8

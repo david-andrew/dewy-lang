@@ -46,6 +46,8 @@ def effect_services(text, modules):
         text = text.replace('error_ops.dewy', 'errors.jo').replace('error_ops.jo', 'errors.jo')
     if _doubled(modules.get('dewy_methods.jo', ''), ('dewy_inherited_key', 'dewy_defer_type', 'dewy_deferred_here', 'dewy_defer_name', 'dewy_defer_callee', 'dewy_resolve_inherited', 'dewy_inherit', 'dewy_parent_decl', 'dewy_is_method', 'dewy_method_group', 'dewy_demand_receivers', 'dewy_infer_methods', 'dewy_reads', 'dewy_type_method', 'dewy_method_changes', 'dewy_reachable_from', 'dewy_route_root', 'dewy_reaches', 'dewy_member_changes', 'dewy_change_found', 'dewy_member_closures', 'dewy_member_closure_names', 'dewy_member_closure_handles', 'dewy_route_member', 'dewy_changes', 'dewy_changes_within')):
         text = text.replace('dewy_method_ops.dewy', 'dewy_methods.jo').replace('dewy_method_ops.jo', 'dewy_methods.jo')
+    if _doubled(modules.get('decimals.jo', ''), ('decimal_let', 'decimal_binding_in', 'decimal_lambda_in', 'decimal_wants', 'decimal_save', 'decimal_copy', 'decimal_drop', 'decimal_marks', 'decimal_made_here', 'decimal_requests', 'decimal_restore', 'decimal_check_body', 'decimal_watch', 'decimal_root', 'decimal_binding_type', 'decimal_local', 'decimal_global', 'decimal_use', 'decimal_assign_begin', 'decimal_float_write', 'decimal_nested_in_frame', 'decimal_writers_first', 'decimal_input_globals', 'decimal_writes', 'decimal_adapted_warn', 'decimal_compared')):
+        text = text.replace('decimal_ops.dewy', 'decimals.jo').replace('decimal_ops.jo', 'decimals.jo')
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(

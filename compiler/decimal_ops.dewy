@@ -1,0 +1,470 @@
+$runtime_checks
+from p"ast.jo" import nkids2
+from p"ast.jo" import nkids
+from p"@lib/core/os.jo" import (exit)
+from p"ast.jo" import (NF_CHECKED NF_EXTERN NF_RDONLY clear_flag clone has_flag kid kid2 kid_c kid_d lists nodes)
+from p"check.jo" import (FK_INIT FK_LAMBDA FK_NORMAL FK_PARTIAL check_body_now check_fn_body ctxs cx dewy_at ensure_global fns get_fn_inst globals locals modules statement_watch syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checker_hooks.dewy" import (check_init_now)
+from p"checker_signature.dewy" import (fn_sig)
+from p"decimals.jo" import (DECIMAL_ADAPTED_FIX DecimalCopy DecimalMarks decimal_adapted decimal_adapted_locals decimal_again decimal_copies decimal_copy_marks decimal_floats decimal_frame decimal_frame_mark decimal_global_inits decimal_globals decimal_kept decimal_lets decimal_local_fns decimal_locals decimal_modules decimal_nested decimal_phase decimal_saved_fns decimal_stale decimal_target decimal_target_at decimal_target_ref decimal_users decimal_writers dsn_global_recs dsn_globals dsn_hi dsn_ids dsn_lo dsn_nodes dsn_slots dsn_vals)
+from p"expr.jo" import (decimal_literal_tree)
+from p"facts.jo" import (fact_requests)
+from p"frontend.jo" import (source_force_body)
+from p"growth_ops.dewy" import (growth_flush)
+from p"ide.jo" import (ide_hint_fns ide_on ide_refs)
+from p"lazy_force.dewy" import (dc_force_all dc_force_module)
+from p"pcheck.jo" import (pc_child)
+from p"proofs.jo" import (proof_calls)
+from p"refine.jo" import (refine_requests)
+from p"refinement_types.dewy" import (FactRequest)
+from p"types.jo" import (T_FLOAT prune tkind)
+from p"units.jo" import (bundled_rational_type)
+from p"util.jo" import (files line_col name_of pos_file warn)
+
+DecimalWord:type=int64<overflow='wrap'>
+decimal_let=(n:DecimalWord):>void=>$unsafe {
+    if nodes.ptr[n].kind =? 'vardecl' and nodes.ptr[n].a =? 0 and nodes.ptr[n].b not=? 0 and not has_flag(n NF_RDONLY) and decimal_literal_tree(DecimalWord(nodes.ptr[n].b)) {decimal_lets += 1}
+}
+# an unannotated, assignable binding that a decimal literal initializes, among the
+# statements of n or of a lambda inside them (its float write starts the enclosing body over)
+decimal_binding_in=(n:DecimalWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'vardecl' {
+        if nodes.ptr[n].a =? 0 and nodes.ptr[n].b not=? 0 and nodes.ptr[n].nlist =? 0 and not has_flag(n NF_RDONLY) and decimal_literal_tree(DecimalWord(nodes.ptr[n].b)) {return true}
+        return decimal_lambda_in(DecimalWord(nodes.ptr[n].b))
+    }
+    if k not=? 'block' and k not=? 'if_' and k not=? 'iflet' and k not=? 'while_' and k not=? 'for_' and k not=? 'exprstmt' and k not=? 'match_' and k not=? 'arm' and k not=? 'defer_' and k not=? 'when_' {return decimal_lambda_in(n)}
+    if decimal_binding_in(DecimalWord(nodes.ptr[n].a)) or decimal_binding_in(DecimalWord(nodes.ptr[n].b)) or decimal_binding_in(kid_c(n)) or decimal_binding_in(kid_d(n)) {return true}
+    loop i in [0..nkids(n)) {
+        if decimal_binding_in(kid(n i)) {return true}
+    }
+    loop i in [0..nkids2(n)) {
+        if decimal_binding_in(kid2(n i)) {return true}
+    }
+    false
+}
+# a lambda inside expression n whose body declares such a binding
+decimal_lambda_in=(n:DecimalWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return decimal_binding_in(DecimalWord(nodes.ptr[n].b))}
+    if k =? 'ident' or k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'bool_lit' or k =? 'none_lit' {return false}
+    if decimal_lambda_in(DecimalWord(nodes.ptr[n].a)) or decimal_lambda_in(DecimalWord(nodes.ptr[n].b)) or decimal_lambda_in(kid_c(n)) or decimal_lambda_in(kid_d(n)) {return true}
+    loop i in [0..nkids(n)) {
+        if decimal_lambda_in(kid(n i)) {return true}
+    }
+    false
+}
+# __check_fn_body: whether f's body check keeps a copy to start over from
+decimal_wants=(f:DecimalWord):>bool=>$unsafe {
+    let k=DecimalWord(fns.ptr[f].kind)
+    # (top-level code: a script's accumulator)
+    if k =? FK_INIT {return decimal_lets >? 0 and fns.ptr[f].body not=? 0 and files[pos_file(nodes.ptr[DecimalWord(fns.ptr[f].body)].pos)].is_dewy and (decimal_modules.has(DecimalWord(fns.ptr[f].mod)) or decimal_binding_in(DecimalWord(fns.ptr[f].body)))}
+    if k not=? FK_NORMAL {return false}
+    if decimal_frame not=? 0 and fns.ptr[f].body not=? 0 {return true}
+    let d=DecimalWord(fns.ptr[f].decl)
+    if d =? 0 or nodes.ptr[d].kind not=? 'fn_' or has_flag(d NF_EXTERN) {return false}
+    if decimal_writers.length >? 0 and decimal_writers.has(d) {return true}
+    if not files[pos_file(nodes.ptr[d].pos)].is_dewy {return false}
+    source_force_body(d)
+    if decimal_lets =? 0 {return false}
+    decimal_binding_in(DecimalWord(fns.ptr[f].body))
+}
+decimal_save=(n:DecimalWord):>void=>$unsafe {
+    if n =? 0 {return}
+    dsn_ids.push(n)
+    dsn_nodes.push(nodes.ptr[n])
+    let p=nodes.ptr[n].pos
+    if p >? 0 and pos_file(p) =? pos_file(dsn_lo) {
+        if p <? dsn_lo {dsn_lo=p}
+        if p >? dsn_hi {dsn_hi=p}
+    }
+    decimal_save(DecimalWord(nodes.ptr[n].a))
+    decimal_save(DecimalWord(nodes.ptr[n].b))
+    decimal_save(kid_c(n))
+    decimal_save(kid_d(n))
+    let s=DecimalWord(nodes.ptr[n].list)
+    loop i in [0..DecimalWord(nodes.ptr[n].nlist)) {
+        dsn_slots.push(s + i)
+        dsn_vals.push(lists.ptr[s + i])
+        decimal_save(DecimalWord(lists.ptr[s + i]))
+    }
+    let s2=DecimalWord(nodes.ptr[n].list2)
+    loop i in [0..DecimalWord(nodes.ptr[n].nlist2)) {
+        dsn_slots.push(s2 + i)
+        dsn_vals.push(lists.ptr[s2 + i])
+        decimal_save(DecimalWord(lists.ptr[s2 + i]))
+    }
+}
+decimal_copy=(f:DecimalWord):>DecimalWord=>$unsafe {
+    let d=DecimalWord(fns.ptr[f].decl)
+    let b=DecimalWord(fns.ptr[f].body)
+    dsn_lo=nodes.ptr[b].pos
+    if d not=? 0 {dsn_lo=nodes.ptr[d].pos}
+    dsn_hi=dsn_lo
+    let ids=dsn_ids.length
+    let slots=dsn_slots.length
+    if d not=? 0 {
+        loop i in [0..nkids(d)) {decimal_save(kid(d i))}
+    }
+    decimal_save(b)
+    # (top-level code declares globals: their checked state goes back too)
+    let gl=dsn_globals.length
+    if fns.ptr[f].kind =? int32(FK_INIT) {
+        let here=dict<int64 bool>()
+        loop i in [ids..dsn_ids.length) {here[dsn_ids[i]]=true}
+        loop g in [1..globals.length) {
+            if here.has(DecimalWord(globals.ptr[g].decl)) {
+                dsn_globals.push(g)
+                dsn_global_recs.push(globals.ptr[g])
+            }
+        }
+    }
+    decimal_copies.push(DecimalCopy(f ids dsn_ids.length slots dsn_slots.length dsn_lo dsn_hi gl dsn_globals.length))
+    decimal_saved_fns.push(fns.ptr[f])
+    decimal_copy_marks.push(decimal_marks())
+    decimal_copies.length - 1
+}
+# (copy c and the ones after it)
+decimal_drop=(c:DecimalWord):>void=>{
+    if c <? 0 or c >=? decimal_copies.length {return}
+    dsn_ids.truncate(decimal_copies[c].ids)
+    dsn_nodes.truncate(decimal_copies[c].ids)
+    dsn_slots.truncate(decimal_copies[c].slots)
+    dsn_vals.truncate(decimal_copies[c].slots)
+    dsn_globals.truncate(decimal_copies[c].globals)
+    dsn_global_recs.truncate(decimal_copies[c].globals)
+    decimal_copies.truncate(c)
+    decimal_saved_fns.truncate(c)
+    decimal_copy_marks.truncate(c)
+}
+decimal_marks=():>DecimalMarks=>{
+    DecimalMarks(fns.length locals.length fact_requests.length refine_requests.length proof_calls.length ide_refs.length ide_hint_fns.length)
+}
+# (what checking the body made: its lambdas' instances and the locals of both)
+decimal_made_here=(owner:DecimalWord f:DecimalWord m:DecimalMarks inside:dict<int64 bool>):>bool=>$unsafe {
+    if owner =? f {return true}
+    if owner <? m.fns or owner >=? fns.length {return false}
+    let k=DecimalWord(fns.ptr[owner].kind)
+    (k =? FK_LAMBDA or k =? FK_PARTIAL) and inside.has(DecimalWord(fns.ptr[owner].decl))
+}
+decimal_requests=(rs:array<FactRequest> from_:DecimalWord f:DecimalWord m:DecimalMarks inside:dict<int64 bool>):>array<FactRequest>=>{
+    if rs.length <=? from_ {return rs}
+    let out=rs[..from_)
+    loop i in [from_..rs.length) {
+        if not decimal_made_here(rs[i].owner f m inside) {out.push(rs[i])}
+    }
+    out
+}
+# Back to the unchecked body; what its first check recorded is forgotten.
+decimal_restore=(c:DecimalWord m:DecimalMarks):>void=>$unsafe {
+    let cp=decimal_copies[c]
+    let f=cp.owner
+    let inside=dict<int64 bool>()
+    loop i in [cp.ids..cp.ids_end) {
+        nodes.ptr[dsn_ids[i]]=dsn_nodes[i]
+        inside[dsn_ids[i]]=true
+    }
+    loop j in [cp.slots..cp.slots_end) {lists.ptr[dsn_slots[j]]=dsn_vals[j]}
+    loop j in [cp.globals..cp.globals_end) {globals.ptr[dsn_globals[j]]=dsn_global_recs[j]}
+    fact_requests=decimal_requests(fact_requests m.facts f m inside)
+    refine_requests=decimal_requests(refine_requests m.refines f m inside)
+    proof_calls=decimal_requests(proof_calls m.proofs f m inside)
+    # (its locals, to the editor's index and the unused-name warnings: none)
+    loop l in [m.locals..locals.length) {
+        if decimal_made_here(DecimalWord(locals.ptr[l].owner) f m inside) {locals.ptr[l].name=int32(0)}
+    }
+    if ide_on {
+        if ide_refs.length >? m.refs {
+            let refs=ide_refs[..m.refs)
+            loop i in [m.refs..ide_refs.length) {
+                let p=ide_refs[i].pos
+                if pos_file(p) not=? pos_file(cp.lo) or p <? cp.lo or p >? cp.hi {refs.push(ide_refs[i])}
+            }
+            ide_refs=refs
+        }
+        if ide_hint_fns.length >? m.hint_fns {
+            let hf=ide_hint_fns[..m.hint_fns)
+            loop i in [m.hint_fns..ide_hint_fns.length) {
+                if ide_hint_fns[i] not=? f {hf.push(ide_hint_fns[i])}
+            }
+            ide_hint_fns=hf
+        }
+    }
+    fns.ptr[f]=decimal_saved_fns[c]
+}
+# __check_fn_body for a body that may start over
+# __check_fn_body for a body that may start over. Functions checked while it is checked keep
+# copies too: starting over checks them again (their types may depend on the binding).
+decimal_check_body=(f:DecimalWord):>void=>$unsafe {
+    let saved_frame=decimal_frame
+    let saved_again=decimal_again
+    let saved_mark=decimal_frame_mark
+    let c=decimal_copy(f)
+    if saved_frame not=? 0 {decimal_nested.push(c)}
+    if decimal_phase {decimal_kept[f]=c}
+    let reset:array<int64>=[]
+    loop true {
+        let m=decimal_marks()
+        decimal_copy_marks[c]=m
+        decimal_frame=f
+        decimal_frame_mark=decimal_nested.length
+        decimal_again=false
+        if fns.ptr[f].kind =? int32(FK_INIT) {check_init_now(f)}
+        else {check_body_now(f)}
+        if not decimal_again {break}
+        let i=decimal_nested.length - 1
+        loop i >=? decimal_frame_mark {
+            let n=decimal_nested[i]
+            decimal_restore(n decimal_copy_marks[n])
+            reset.push(decimal_copies[n].owner)
+            i -= 1
+        }
+        decimal_nested.truncate(decimal_frame_mark)
+        decimal_restore(c m)
+    }
+    decimal_frame=saved_frame
+    decimal_again=saved_again
+    decimal_frame_mark=saved_mark
+    loop g in reset {
+        if fns.ptr[g].state =? 0 {check_fn_body(g)}
+    }
+    if saved_frame =? 0 and not decimal_phase {
+        decimal_drop(c)
+        decimal_nested=[]
+    }
+    if saved_frame =? 0 {growth_flush()}
+}
+# the function whose body the code being checked is in (lambdas: the enclosing one; a global's
+# initializer: its module's top-level code)
+# (the statement layer's view of the decimal bindings' tables)
+decimal_watch=():>void=>{
+    statement_watch.decimals=decimal_locals.length + decimal_global_inits.length
+}
+decimal_root=():>DecimalWord=>{
+    let c=cx
+    if c <? 0 {return -1}
+    loop ctxs[c].parent >=? 0 {c=DecimalWord(ctxs[c].parent)}
+    let inst=DecimalWord(ctxs[c].inst)
+    if inst <=? 0 {return -1}
+    inst
+}
+# The type of an unannotated binding whose literal initializer defaulted to t.
+decimal_binding_type=(pos:DecimalWord t:DecimalWord):>DecimalWord=>{
+    if decimal_floats.length =? 0 or not bundled_rational_type(t) or not dewy_at(pos) {return t}
+    if decimal_floats.has(pos) {return T_FLOAT}
+    t
+}
+decimal_local=(l:DecimalWord pos:DecimalWord t:DecimalWord):>void=>{
+    if bundled_rational_type(t) and dewy_at(pos) {
+        decimal_locals[l]=pos
+        decimal_watch()
+        decimal_local_fns[l]=decimal_root()
+    }
+    else if decimal_adapted.length >? 0 and decimal_adapted.has(pos) {decimal_adapted_locals[l]=pos}
+}
+decimal_global=(g:DecimalWord pos:DecimalWord t:DecimalWord):>void=>{
+    if bundled_rational_type(t) and dewy_at(pos) and decimal_global_inits.has(g) {
+        decimal_globals[g]=pos
+        statement_watch.decimal_globals=decimal_globals.length
+    }
+}
+# a use of a decimal global while it is exact: who would check again if it became float
+decimal_use=(g:DecimalWord):>void=>{
+    if not decimal_globals.has(g) or decimal_floats.has(decimal_globals[g]) {return}
+    let r=decimal_root()
+    let users=decimal_users.get(g) ?? []
+    if users.contains(r) {return}
+    users.push(r)
+    decimal_users[g]=users
+}
+# check_assign: the binding an assignment writes, when a decimal literal may have made it
+# (a global's first use may be this assignment: its declaration is looked up at the write)
+decimal_assign_begin=(s:DecimalWord):>DecimalWord=>$unsafe {
+    let saved=decimal_target
+    decimal_target=0
+    if decimal_locals.length =? 0 and decimal_global_inits.length =? 0 {return saved}
+    let lhs=DecimalWord(nodes.ptr[s].a)
+    if nodes.ptr[lhs].kind not=? 'ident' {return saved}
+    let sy=lookup(DecimalWord(nodes.ptr[lhs].name))
+    if sy =? 0 {return saved}
+    decimal_target_at=nodes.ptr[lhs].pos
+    if syms.ptr[sy].kind =? 'local' {
+        let l=DecimalWord(syms.ptr[sy].ref)
+        decimal_target=decimal_locals.get(l) ?? 0
+        decimal_target_ref=l
+    }
+    else if syms.ptr[sy].kind =? 'global' and decimal_global_inits.has(DecimalWord(syms.ptr[sy].ref)) {
+        decimal_target=-1
+        decimal_target_ref=-1 - DecimalWord(syms.ptr[sy].ref)
+    }
+    saved
+}
+# A float written to the binding: it is a float64 from its declaration on. The body check
+# goes on (the caller leaves this write unconverted, and later code sees a float64), then
+# starts over. False when the code that saw it exact cannot be checked again: the write is
+# then the usual type error.
+decimal_float_write=(from_:DecimalWord to:DecimalWord):>bool=>$unsafe {
+    if decimal_target =? 0 or tkind(prune(from_)) not=? 'float_' or not bundled_rational_type(prune(to)) {return false}
+    if decimal_frame =? 0 or decimal_root() not=? decimal_frame {return false}
+    if decimal_target_ref >=? 0 {
+        let l=decimal_target_ref
+        if (decimal_local_fns.get(l) ?? 0) not=? decimal_frame {return false}
+        decimal_floats[decimal_target]=true
+        decimal_adapted_warn(decimal_target name_of(DecimalWord(locals.ptr[l].name)))
+        locals.ptr[l].type=int32(T_FLOAT)
+        decimal_again=true
+        return true
+    }
+    let g=-1 - decimal_target_ref
+    if not decimal_globals.has(g) {return false}
+    let pos=decimal_globals[g]
+    let users=decimal_users.get(g) ?? []
+    loop u in users {
+        if u not=? decimal_frame and not (decimal_phase and decimal_kept.has(u)) and not decimal_nested_in_frame(u) {return false}
+    }
+    # (a forked check worker gives up its part: the compiler checks it again itself)
+    if pc_child >=? 0 {exit(1)}
+    decimal_floats[pos]=true
+    decimal_adapted_warn(pos name_of(DecimalWord(nodes.ptr[DecimalWord(globals.ptr[g].decl)].name)))
+    loop u in users {
+        if u not=? decimal_frame and not decimal_nested_in_frame(u) and not decimal_stale.contains(u) {decimal_stale.push(u)}
+    }
+    let d=DecimalWord(globals.ptr[g].decl)
+    nodes.ptr[d].b=int32(clone(decimal_global_inits[g]))
+    clear_flag(d NF_CHECKED)
+    globals.ptr[g].state=0
+    ensure_global(g nodes.ptr[d].pos)
+    decimal_again=true
+    true
+}
+# f was checked inside the current check, which starts over: so will it
+decimal_nested_in_frame=(f:DecimalWord):>bool=>{
+    loop i in [decimal_frame_mark..decimal_nested.length) {
+        if decimal_copies[decimal_nested[i]].owner =? f {return true}
+    }
+    false
+}
+# (a global made by a decimal literal and written in a function: that function is checked
+# first, so the global's type is settled before the code that reads it is checked)
+decimal_writers_first=():>void=>$unsafe {
+    let names=dict<int64 bool>()
+    loop m in modules {
+        if m.is_prelude {continue}
+        loop d in m.decls {
+            if nodes.ptr[d].kind =? 'vardecl' and nodes.ptr[d].nlist =? 0 and nodes.ptr[d].a =? 0 and nodes.ptr[d].b not=? 0 and not has_flag(d NF_RDONLY) and dewy_at(nodes.ptr[d].pos) and decimal_literal_tree(DecimalWord(nodes.ptr[d].b)) {
+                let g=DecimalWord(nodes.ptr[d].sym)
+                if g >? 0 and globals.ptr[g].state =? 0 and DecimalWord(globals.ptr[g].decl) =? d {
+                    names[DecimalWord(nodes.ptr[d].name)]=true
+                    dc_force_module(DecimalWord(globals.ptr[g].mod))
+                    decimal_global_inits[g]=clone(DecimalWord(nodes.ptr[d].b))
+                    decimal_watch()
+                    decimal_modules[DecimalWord(globals.ptr[g].mod)]=true
+                }
+            }
+        }
+    }
+    if names.length =? 0 {return}
+    dc_force_all()
+    let writers:array<int64>=[]
+    loop m in modules {
+        if m.is_prelude {continue}
+        loop d in m.decls {
+            if nodes.ptr[d].kind =? 'fn_' and not has_flag(d NF_EXTERN) and nodes.ptr[d].b not=? 0 and decimal_writes(DecimalWord(nodes.ptr[d].b) names) and not fn_sig(d).generic {
+                decimal_writers[d]=true
+                writers.push(d)
+            }
+        }
+    }
+    # (and top-level code writing one: a script's accumulator, before the functions that read it)
+    let inits:array<int64>=[]
+    loop mi in [0..modules.length) {
+        if decimal_modules.has(mi) and decimal_writes(DecimalWord(fns.ptr[DecimalWord(modules[mi].init_fn)].body) names) {inits.push(DecimalWord(modules[mi].init_fn))}
+    }
+    if writers.length =? 0 and inits.length =? 0 {return}
+    decimal_phase=true
+    loop d in writers {
+        let f=get_fn_inst(d [] nodes.ptr[d].pos)
+        if fns.ptr[f].state =? 0 {check_fn_body(f)}
+    }
+    loop f in inits {
+        if fns.ptr[f].state =? 0 {decimal_check_body(f)}
+    }
+    loop decimal_stale.length >? 0 {
+        let f=decimal_stale.pop()
+        if f <=? 0 or fns.ptr[f].state not=? 2 or not decimal_kept.has(f) {continue}
+        let c=decimal_kept[f]
+        decimal_restore(c decimal_copy_marks[c])
+        if fns.ptr[f].kind =? int32(FK_INIT) {decimal_check_body(f)}
+        else {check_fn_body(f)}
+    }
+    decimal_phase=false
+    decimal_kept=dict<int64 int64>()
+    loop decimal_copies.length >? 0 {decimal_drop(decimal_copies.length - 1)}
+}
+# The prompt's input declares globals as top-level code does: those a decimal literal makes
+# become float64 when the same input writes them a float (as decimal_writers_first finds them).
+# An earlier input's ran exact already: a float written to it later is the usual type error.
+decimal_input_globals=(m:DecimalWord stmts:array<int64>):>void=>$unsafe {
+    if decimal_global_inits.length >? 0 {
+        decimal_global_inits=dict<int64 int64>()
+        decimal_watch()
+    }
+    if decimal_lets =? 0 {return}
+    loop d in stmts {
+        if nodes.ptr[d].kind =? 'vardecl' and nodes.ptr[d].nlist =? 0 and nodes.ptr[d].a =? 0 and nodes.ptr[d].b not=? 0 and not has_flag(d NF_RDONLY) and dewy_at(nodes.ptr[d].pos) and decimal_literal_tree(DecimalWord(nodes.ptr[d].b)) {
+            let g=DecimalWord(nodes.ptr[d].sym)
+            if g >? 0 and globals.ptr[g].state =? 0 and DecimalWord(globals.ptr[g].decl) =? d {
+                decimal_global_inits[g]=clone(DecimalWord(nodes.ptr[d].b))
+                decimal_watch()
+                decimal_modules[m]=true
+            }
+        }
+    }
+}
+decimal_writes=(n:DecimalWord names:dict<int64 bool>):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'assign' {
+        let lhs=DecimalWord(nodes.ptr[n].a)
+        if lhs not=? 0 and nodes.ptr[lhs].kind =? 'ident' and names.has(DecimalWord(nodes.ptr[lhs].name)) {return true}
+    }
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'ident' {return false}
+    if decimal_writes(DecimalWord(nodes.ptr[n].a) names) or decimal_writes(DecimalWord(nodes.ptr[n].b) names) or decimal_writes(kid_c(n) names) or decimal_writes(kid_d(n) names) {return true}
+    loop i in [0..nkids(n)) {
+        if decimal_writes(kid(n i) names) {return true}
+    }
+    loop i in [0..nkids2(n)) {
+        if decimal_writes(kid2(n i) names) {return true}
+    }
+    false
+}
+decimal_adapted_warn=(decl:DecimalWord name:string):>void=>{
+    decimal_adapted[decl]=decimal_target_at
+    statement_watch.decimal_adapted=decimal_adapted.length
+}
+# (the unchecked operands of an exact comparison: the names in them of bindings made float64)
+decimal_compared=(e:DecimalWord):>void=>$unsafe {
+    if e =? 0 or has_flag(e NF_CHECKED) {return}
+    let k=nodes.ptr[e].kind
+    if k =? 'ident' {
+        let sy=lookup(DecimalWord(nodes.ptr[e].name))
+        if sy =? 0 {return}
+        let decl:DecimalWord=0
+        if syms.ptr[sy].kind =? 'local' {decl=decimal_adapted_locals.get(DecimalWord(syms.ptr[sy].ref)) ?? 0}
+        else if syms.ptr[sy].kind =? 'global' {
+            decl=decimal_globals.get(DecimalWord(syms.ptr[sy].ref)) ?? 0
+            if not decimal_adapted.has(decl) {decl=0}
+        }
+        if decl =? 0 {return}
+        let [wl _]=line_col(decimal_adapted[decl])
+        warn(nodes.ptr[e].pos "`{name_of(DecimalWord(nodes.ptr[e].name))}` is float64 because of the float written to it at line {wl}, so this exact comparison tests float64 values, not the exact decimal its literal gave (`0.1+0.2 =? 0.3` is true exactly, false in float64); {DECIMAL_ADAPTED_FIX}")
+        return
+    }
+    if k =? 'lambda' or k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'bool_lit' {return}
+    decimal_compared(DecimalWord(nodes.ptr[e].a))
+    decimal_compared(DecimalWord(nodes.ptr[e].b))
+    loop i in [0..nkids(e)) {decimal_compared(kid(e i))}
+}
