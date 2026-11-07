@@ -93,22 +93,6 @@ sv_std_ops: {str: (int, int)} = {
     "normalize": (69, 0), "reflect": (71, 0), "inverse": (34, 0), "sign": (6, 7), "sinf": (13, 0), "cosf": (14, 0),
 }
 
-# Ordered comparisons plus a bitwise tie preserve -0 for min and +0 for max.
-# Select either NaN explicitly; raw GLSL.std.450 FMin/FMax leave it undefined.
-sv_minmax = (t: int, a: int, b: int, minimum: bool, pos: int) -> int:
-    ty = sv_type(t, pos)
-    bt = sv_bool()
-    ut = sv_u32()
-    if sv_is_vector(t):
-        bt = sv_vecb(sv_ncomp(t))
-        ut = sv_type_key("uv{sv_ncomp(t)}", 23, [sv_u32(), sv_ncomp(t)])
-    tie = sv_val(124, ty, [sv_val(sv_pick(minimum, 197, 199), ut, [sv_val(124, ut, [a]), sv_val(124, ut, [b])])])
-    cmp = sv_pick(minimum, 184, 186)
-    result = sv_val(169, ty, [sv_val(cmp, bt, [b, a]), b, tie])
-    result = sv_val(169, ty, [sv_val(cmp, bt, [a, b]), a, result])
-    result = sv_val(169, ty, [sv_val(156, bt, [b]), b, result])
-    sv_val(169, ty, [sv_val(156, bt, [a]), a, result])
-
 # atomic operations on an element of a GpuBuffer[i32] or GpuBuffer[u32]: (signed, unsigned) opcode
 sv_atomic_ops: {str: (int, int)} = {
     "atomic_add": (234, 234), "atomic_sub": (235, 235), "atomic_min": (236, 237), "atomic_max": (238, 239),

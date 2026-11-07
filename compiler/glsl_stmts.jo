@@ -584,3 +584,14 @@ __hoist_struct = (src: str, ustruct: str) -> str:
     if not placed:
         loop s in structs_: out.push(s)
     join(out, "\n")
+
+# IEEE minimum/maximum, including NaNs and both orders of signed zero.
+# Keep scalar arguments in a helper so calls with effects are evaluated once.
+gl_minmax = (nm: str):
+    if not gl_first("ieee_{nm}"): return
+    bits = if nm == "min": "|" else: "&"
+    gl_decls.push("float sl_{nm}(float a, float b) \{\n    if (isnan(a)) return a;\n    if (isnan(b)) return b;\n    if (a == b) return uintBitsToFloat(floatBitsToUint(a) {bits} floatBitsToUint(b));\n    return {nm}(a, b);\n}\n")
+    loop width in [2..5):
+        parts: str[]
+        loop c in [0..width): parts.push("sl_{nm}(a[{c}], b[{c}])")
+        gl_decls.push("vec{width} sl_{nm}(vec{width} a, vec{width} b) \{ return vec{width}({join(parts, ", ")}); }\n")

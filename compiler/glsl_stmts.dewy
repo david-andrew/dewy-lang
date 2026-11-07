@@ -9,7 +9,7 @@ from p"checker_tokens.dewy" import (Tok)
 from p"checks_assign_hooks.dewy" import (block_value)
 from p"checks_thin_expr.dewy" import (is_gpu_buffer)
 from p"expr.jo" import (CV IN gpu_buffer_elem ntype)
-from p"glsl.jo" import (builtin_map gl_decls gl_done gl_done_fns gl_done_structs gl_float gl_minmax gl_out gl_param_copies gl_stage sl_turns_fns)
+from p"glsl.jo" import (builtin_map gl_decls gl_done gl_done_fns gl_done_structs gl_float gl_out gl_param_copies gl_stage sl_turns_fns)
 from p"glsl_emit.dewy" import (gl_attrib_comps gl_block gl_float_to_int gl_gbuf_reader gl_narrow gl_param_copy gl_sdiv gl_shift_decls gl_stmt_if gl_struct_fields gl_target gl_type gl_udesc gl_zero sl_abs_body)
 from p"glsl_ops.dewy" import (gl_err gl_first gl_fn_name gl_local gl_unsigned gl_wrap gl_wrapped ind sl_type)
 from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
@@ -666,4 +666,16 @@ __hoist_struct=(src:string ustruct:string):>string=>{
         loop s in structs_ {out.push(s)}
     }
     join(out "\n")
+}
+# IEEE minimum/maximum, including NaNs and both orders of signed zero.
+# Keep scalar arguments in a helper so calls with effects are evaluated once.
+gl_minmax=(nm:string):>void=>{
+    if not gl_first("ieee_{nm}") {return}
+    let bits=if nm =? "min" {"|"} else {"&"}
+    gl_decls.push("float sl_{nm}(float a, float b) \{\n    if (isnan(a)) return a;\n    if (isnan(b)) return b;\n    if (a == b) return uintBitsToFloat(floatBitsToUint(a) {bits} floatBitsToUint(b));\n    return {nm}(a, b);\n}\n")
+    loop width in [2..5) {
+        let parts:array<string>=[]
+        loop c in [0..width) {parts.push("sl_{nm}(a[{c}], b[{c}])")}
+        gl_decls.push("vec{width} sl_{nm}(vec{width} a, vec{width} b) \{ return vec{width}({join(parts ", ")}); }\n")
+    }
 }
