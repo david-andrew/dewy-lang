@@ -1,0 +1,121 @@
+use 'refine.jo'
+use 'checks_assign_hooks.dewy'
+use 'lower_storage.dewy'
+use 'lower_group.dewy'
+use 'host_binds.jo'
+use 'checker_expr.dewy'
+use 'type_refinement.dewy'
+use 'type_substitute.dewy'
+use 'ir_types.dewy'
+use 'refine_resolve.dewy'
+use 'refine_resolve_host.dewy'
+use 'checker_state.dewy'
+use 'refine_projection.dewy'
+use 'refine_storage.dewy'
+use 'checker_services.dewy'
+use 'refine_strings.dewy'
+use 'refine_keys.dewy'
+use 'refine_queries.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ast.jo'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'lex.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'expr.jo'
+use 'checks_thin_expr.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_builders.dewy'
+use 'facts.jo'
+use 'facts_elements.dewy'
+use 'directives.jo'
+use 'facts_routes.dewy'
+use 'nd_contracts.jo'
+use 'lower.jo'
+use 'ir.jo'
+use 'util.jo'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'secrets.jo'
+use 'node_store.dewy'
+use 'math_lower.jo'
+use 'lower_primitives.dewy'
+use 'ir_builders.dewy'
+use 'math_ops.dewy'
+
+ref_addr_max = () -> int: if ptr_size == 4: 4294967295 else: 281474976710655
+# t with every refinement inside it dropped, as a reader sees it: formatting writes a value out
+# and never stores into it, so an array of refined elements reads as an array of their base
+representation_deep = (t0: int) -> int: tr_deep(t0)
+# (a set keeps its first spelling's order: its words, which Jo code switching on a
+# Dewy enumeration shares; `members(U)` has its own, canonical order)
+str_set_type = (values: str[]) -> int:
+    ref_string_set_type(str_sets, str_set_types, types, structs, variants, ref_intern_host, fields.len(), values)
+total_dict_type = (map: int, pos: int) -> int:
+    if not total_dict_keys(struct_targ(int(types[prune(map)].st), 0)).0: fatal(pos, "totaldict needs a finite key type (a union of literals), found {dt(struct_targ(int(types[prune(map)].st), 0))}")
+    refine_active = true
+    mk_type(TypeInfo(kind = .refined, elem = i32(map), bits = -1), [])
+# every value of a finite key type, as text (`'0b'`, `3`): (finite, values)
+total_dict_keys = (t0: int) -> (bool, str[]):
+    ref_finite_keys(types, structs, type_args, ref_predicates, str_sets, t0, T_MATH_INT)
+call_result_type = (n: int) -> int:
+    f = int(nodes[n].sym)
+    if f <= 0 or f >= fns.len(): return 0
+    int(fns[f].ret)
+# member i of set id as a constant
+str_set_const = (id: int, i: int, pos: int) -> int:
+    ref_string_set_const(str_sets, str_set_types, nodes, ref_intern_host, id, i, pos)
+ref_tagged_fits = (k: int) -> bool: k >= -4611686018427387904 and k <= 4611686018427387903
+refine_gen = (n: int) -> Val:
+    value = gen_expr(int(nodes[n].a))
+    ref_gen_check(n, value.v, refine_ir_entry, fns[cur_fn].ptypes)
+    value
+ref_type_contains = (t0: int, want: int, depth: int) -> bool:
+    ref_types_contain(types, structs, type_args, t0, want, depth)
+ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int: ts_ref_subst(predicate, args, zonking)
+ref_projection_string_length = (pos: int) -> bool:
+    if not files[pos_file(pos)].is_dewy: return false
+    runtime_fn("__dewy_string_length")
+    true
+copy_checked = (n: int) -> int:
+    copy = nodes.len()
+    nodes.push(nodes[n])
+    copy
+ref_nd_receiver = (recv: int, t: int):
+    if refine_active and is_nd(representation_type(t)): ref_nd_receivers[recv] = true
+ref_field_shape = (tn: int, t: int, siblings: int[]) -> int: nd_field_shape(tn, t, siblings)
+ref_own_length = (term: RefTerm) -> bool: term.kind == 0 and term.offset == 0 and term.path.len() == 1 and term.path[0] == -1
+ref_length_literal = (term: RefTerm) -> bool: term.kind == 1 and not term.unsigned and term.offset == 0 and term.path.len() == 0 and ref_tagged_fits(term.value)
+# The self-length array written at wrapper n. O(1) past its element's resolution.
+ref_self_resolve = (n: int) -> int:
+    inner = int(nodes[n].a)
+    ref_holder_elems[int(nodes[inner].a)] = int(nodes[n].name)
+    ref_self_array(prune(resolve_type(inner)), nodes[n].pos)
+ref_without_name = (names0: int[], name: int) -> int[]:
+    out: int[]
+    loop other in names0: out.push(if other == name: 0 else: other)
+    out
+ref_path_length = (path: int[]) -> bool: path.len() == 1 and path[0] == -1
+ref_self_lower_bound = (atoms: RefAtom[]) -> bool:
+    loop atom in atoms:
+        if atom.b.kind == 0 and atom.b.path.len() == 0 and atom.a.kind == 1 and (atom.op == .lt or atom.op == .le): return true
+    false
+ref_self_contract = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .refined and ref_atoms_have_kind(ref_predicates[int(types[t].st)], 6) and tkind(representation_type(t)) == .array
+# `every element <= length + k`, in one number
+ref_self_k = (atom: RefAtom) -> int:
+    if atom.op == .lt: atom.b.offset - 1 else: atom.b.offset
+ref_self_published = (statement: int) -> int:
+    value = int(nodes[statement].b)
+    if nodes[value].kind == .conv and nodes[value].aux == i32(int(CV.refinement)): return value
+    0
+ref_self_shrink = (statement: int, place: int, id: IN):
+    value = ref_self_published(statement)
+    if value != 0: ref_self_shrinks[value] = (place, id)

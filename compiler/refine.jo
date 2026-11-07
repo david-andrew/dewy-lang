@@ -49,13 +49,13 @@ use 'math_lower.jo'
 use 'lower_primitives.dewy'
 use 'ir_builders.dewy'
 use 'math_ops.dewy'
+use 'refine_ops.dewy'
 
 ref_predicates: RefAtom[][] = [[]]
 # Declaration spans for diagnostics only; never part of predicate identity.
 ref_spans: {int: int} = {}
 refine_active = false
 ref_addr_type = 0
-ref_addr_max = () -> int: if ptr_size == 4: 4294967295 else: 281474976710655
 
 refine_bindings = RefineBindings()
 refine_requests: FactRequest[]
@@ -86,10 +86,6 @@ representation_type = (t0: int) -> int:
     if types[t].kind == .refined: return prune(int(types[t].elem))
     t
 
-# t with every refinement inside it dropped, as a reader sees it: formatting writes a value out
-# and never stores into it, so an array of refined elements reads as an array of their base
-representation_deep = (t0: int) -> int: tr_deep(t0)
-
 # String literal sets (`'a'|'b'`): an enum whose variant i is member i, so a
 # value is one word at run time (the member's index); `=?`, `is?` and `match`
 # compare that word, and the text is made only where the value meets a string.
@@ -97,11 +93,6 @@ str_sets: str[][] = [[]]
 str_set_types: int[] = [0]
 substitution_refinements = TypeSubstituteRefinements(&ref_predicates, ref_span_copy)
 substitution_refinement_binding = type_substitute_refinements(&substitution_refinements)
-
-# (a set keeps its first spelling's order: its words, which Jo code switching on a
-# Dewy enumeration shares; `members(U)` has its own, canonical order)
-str_set_type = (values: str[]) -> int:
-    ref_string_set_type(str_sets, str_set_types, types, structs, variants, ref_intern_host, fields.len(), values)
 
 # the string set a type is, or 0
 str_set_of = (t0: int) -> int:
@@ -115,18 +106,9 @@ str_set_of = (t0: int) -> int:
 # be partial does not become.
 total_literals: {int: bool} = {}
 
-total_dict_type = (map: int, pos: int) -> int:
-    if not total_dict_keys(struct_targ(int(types[prune(map)].st), 0)).0: fatal(pos, "totaldict needs a finite key type (a union of literals), found {dt(struct_targ(int(types[prune(map)].st), 0))}")
-    refine_active = true
-    mk_type(TypeInfo(kind = .refined, elem = i32(map), bits = -1), [])
-
 is_total_dict = (t0: int) -> bool:
     t = prune(t0)
     types[t].kind == .refined and types[t].bits == -1
-
-# every value of a finite key type, as text (`'0b'`, `3`): (finite, values)
-total_dict_keys = (t0: int) -> (bool, str[]):
-    ref_finite_keys(types, structs, type_args, ref_predicates, str_sets, t0, T_MATH_INT)
 
 # a dictionary literal given for a totaldict: an entry for every key
 total_literal_check = (n: int, t: int):
@@ -175,15 +157,6 @@ total_const = (n: int, t: int) -> bool:
     loop key in keys:
         if not given.contains(key): return false
     true
-
-call_result_type = (n: int) -> int:
-    f = int(nodes[n].sym)
-    if f <= 0 or f >= fns.len(): return 0
-    int(fns[f].ret)
-
-# member i of set id as a constant
-str_set_const = (id: int, i: int, pos: int) -> int:
-    ref_string_set_const(str_sets, str_set_types, nodes, ref_intern_host, id, i, pos)
 
 str_set_text = (id: int) -> str:
     text = ""
@@ -267,7 +240,6 @@ ref_resolve_limit = (n: int) -> RefResolveLimit:
         bound = fact_domain(ty)
         return RefResolveLimit(true, RefTerm(1, if member == "max": bound.hi else: bound.lo))
     RefResolveLimit()
-
 
 ref_atoms = (n: int, binder: int, out: mut RefAtom[], depth: int = 0):
     ref_resolve_atoms(nodes, types, names, refine_bindings, ref_resolve_host, n, binder, out, depth)
@@ -661,8 +633,6 @@ ref_math_term = (value: int, t: int, made: mut int[]) -> int:
     if out.owned: made.push(out.v)
     out.v
 
-ref_tagged_fits = (k: int) -> bool: k >= -4611686018427387904 and k <= 4611686018427387903
-
 ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
     if nodes[n].ival == 1: return
     t = zonk(int(nodes[n].aux2))
@@ -746,11 +716,6 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
         endc()
         loop v in made: release(v, T_MATH_INT)
 
-refine_gen = (n: int) -> Val:
-    value = gen_expr(int(nodes[n].a))
-    ref_gen_check(n, value.v, refine_ir_entry, fns[cur_fn].ptypes)
-    value
-
 refine_gen_args = (args: int[], values: int[], offset: int, mutmask: int = 0):
     captured: int[]
     arg_types: int[]
@@ -832,9 +797,6 @@ ref_signature_has = (f: int, t: int) -> bool:
         if ref_type_contains(p, t, 0): return true
     false
 
-ref_type_contains = (t0: int, want: int, depth: int) -> bool:
-    ref_types_contain(types, structs, type_args, t0, want, depth)
-
 ref_decl_mask = (decl: int) -> int:
     mask = 0
     loop i in [0..nkids(decl)):
@@ -845,8 +807,6 @@ ref_decl_mask = (decl: int) -> int:
 # the descriptor's argument list propagate TF_HAS_VAR without a new type field.
 ref_resolve_limit = (term: RefTerm) -> RefTerm: tr_limit(term)
 
-ref_subst = (predicate: int, args: int[], zonking: bool = false) -> int: ts_ref_subst(predicate, args, zonking)
-
 # One shared, noncapturing service; resolution owns its reentrant context.
 ref_storage_contract = (t0: int) -> bool:
     ref_types_storage(types, structs, fields, type_args, ref_fields_host, t0)
@@ -856,11 +816,6 @@ ref_storage_contract = (t0: int) -> bool:
 ref_repr_match = (actual: int, expected: int, path: int[]) -> bool:
     if has_var(actual) or has_var(expected) or type_eq(actual, expected): return true
     expected == T_U64 and path.len() > 0 and path[path.len() - 1] == -1
-
-ref_projection_string_length = (pos: int) -> bool:
-    if not files[pos_file(pos)].is_dewy: return false
-    runtime_fn("__dewy_string_length")
-    true
 
 # Resolve a projection against its concrete binder before publishing a contract.
 ref_projection_type = (root: int, path: int[], pos: int) -> int:
@@ -1004,19 +959,10 @@ ref_field_store = (statement: int, target: int) -> int:
     before.push(store)
     return bc_block(before, pos)
 
-copy_checked = (n: int) -> int:
-    copy = nodes.len()
-    nodes.push(nodes[n])
-    copy
-
 # (the receiver of a write the compiler made into an N-D array's own elements, `m[i j] = v`,
 # `m[[a..b) c] = v`: the library setters keep its shape and storage, so a shaped field's contract
 # still holds. Only these nodes, never another `@` argument. O(1))
 ref_nd_receivers: {int: bool} = {}
-ref_nd_receiver = (recv: int, t: int):
-    if refine_active and is_nd(representation_type(t)): ref_nd_receivers[recv] = true
-
-ref_field_shape = (tn: int, t: int, siblings: int[]) -> int: nd_field_shape(tn, t, siblings)
 
 ref_mutable_authority = (n: int):
     if ref_dependent_ancestor(n): fatal(nodes[n].pos, "mutable refinement access needs the full record invariant authority; pass the whole record with `@`")
@@ -1037,9 +983,6 @@ ref_length_only = (t: int) -> bool:
     loop atom in ref_predicates[int(types[t].st)]:
         if not (ref_own_length(atom.a) and ref_length_literal(atom.b)) and not (ref_own_length(atom.b) and ref_length_literal(atom.a)): return false
     true
-
-ref_own_length = (term: RefTerm) -> bool: term.kind == 0 and term.offset == 0 and term.path.len() == 1 and term.path[0] == -1
-ref_length_literal = (term: RefTerm) -> bool: term.kind == 1 and not term.unsigned and term.offset == 0 and term.path.len() == 0 and ref_tagged_fits(term.value)
 
 # t's contract on a value other than the array itself: the array's length + delta
 # (place's own length), a plain count (`path` empty), or literals alone.
@@ -1301,17 +1244,6 @@ ref_holder_mentioned = (n: int, name: int, depth: int) -> bool:
     if k == .not_: return ref_holder_mentioned(int(nodes[n].a), name, depth + 1)
     false
 
-# The self-length array written at wrapper n. O(1) past its element's resolution.
-ref_self_resolve = (n: int) -> int:
-    inner = int(nodes[n].a)
-    ref_holder_elems[int(nodes[inner].a)] = int(nodes[n].name)
-    ref_self_array(prune(resolve_type(inner)), nodes[n].pos)
-
-ref_without_name = (names0: int[], name: int) -> int[]:
-    out: int[]
-    loop other in names0: out.push(if other == name: 0 else: other)
-    out
-
 # Only `value op name.length + c`, with op < or <=: growing keeps it.
 ref_self_validate = (atoms: RefAtom[], base: int, pos: int):
     if has_var(base) or not type_eq(representation_type(base), T_INT): fatal(pos, "the elements of a self-length array are int64 or addr, found {dt(base)}")
@@ -1332,13 +1264,6 @@ ref_self_misplaced = (t0: int, field: int, name: int, pos: int, depth: int):
             loop term in [atom.a, atom.b]:
                 if term.kind == 5 and term.value == field and ref_path_length(term.path): fatal(pos, "'{name_of(name)}' is the field being declared: its length can bound the direct element of its array, as in `array<int64<(<? {name_of(name)}.length)>>`, and nothing else")
     if k == .refined or k == .array or k == .fixed or k == .opt: ref_self_misplaced(int(types[t].elem), field, name, pos, depth + 1)
-
-ref_path_length = (path: int[]) -> bool: path.len() == 1 and path[0] == -1
-
-ref_self_lower_bound = (atoms: RefAtom[]) -> bool:
-    loop atom in atoms:
-        if atom.b.kind == 0 and atom.b.path.len() == 0 and atom.a.kind == 1 and (atom.op == .lt or atom.op == .le): return true
-    false
 
 # array<int64<(<? name.length)>> resolved: the contract moves onto the array.
 ref_self_array = (array_type: int, pos: int) -> int:
@@ -1366,14 +1291,6 @@ ref_self_array = (array_type: int, pos: int) -> int:
     # (its whole-value check under `$runtime_checks`: only programs with such a type carry it)
     runtime_fn("__first_element_above")
     out
-
-ref_self_contract = (t0: int) -> bool:
-    t = prune(t0)
-    types[t].kind == .refined and ref_atoms_have_kind(ref_predicates[int(types[t].st)], 6) and tkind(representation_type(t)) == .array
-
-# `every element <= length + k`, in one number
-ref_self_k = (atom: RefAtom) -> int:
-    if atom.op == .lt: atom.b.offset - 1 else: atom.b.offset
 
 ref_self_assume = (s: mut FactState, value: int, atom: RefAtom):
     if value == 0 or s.projections.len() >= FACT_CAP: return
@@ -1556,17 +1473,9 @@ ref_self_store = (statement: int, element: int) -> int:
     nodes[int(nodes[statement].b)].b = i32(ref_holder_place(int(nodes[lhs].a)))
     result
 
-ref_self_published = (statement: int) -> int:
-    value = int(nodes[statement].b)
-    if nodes[value].kind == .conv and nodes[value].aux == i32(int(CV.refinement)): return value
-    0
-
 ref_self_establish = (statement: int):
     value = ref_self_published(statement)
     if value == 0: return
     nodes[value].ival = 1
     ref_self_established[value] = true
 
-ref_self_shrink = (statement: int, place: int, id: IN):
-    value = ref_self_published(statement)
-    if value != 0: ref_self_shrinks[value] = (place, id)

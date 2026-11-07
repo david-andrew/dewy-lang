@@ -1,0 +1,131 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (fns runtime_fn)
+from p"checker_types.dewy" import (TypeInfo)
+from p"checks_thin.dewy" import (resolve_type)
+from p"expr.jo" import (CV IN is_nd)
+from p"host_binds.jo" import (ref_intern_host)
+from p"lower.jo" import (Val cur_fn)
+from p"lower_group.dewy" import (gen_expr)
+from p"nd_contracts.jo" import (nd_field_shape)
+from p"refine.jo" import (ref_gen_check ref_holder_elems ref_nd_receivers ref_predicates ref_self_array ref_self_shrinks refine_active refine_ir_entry representation_type str_set_types str_sets)
+from p"refine_keys.dewy" import (ref_finite_keys)
+from p"refine_predicates.dewy" import (ref_atoms_have_kind)
+from p"refine_queries.dewy" import (ref_types_contain)
+from p"refine_strings.dewy" import (ref_string_set_const ref_string_set_type)
+from p"refinement_types.dewy" import (RefAtom RefTerm)
+from p"type_ops.dewy" import (dt)
+from p"type_refinement.dewy" import (tr_deep)
+from p"type_substitute.dewy" import (ts_ref_subst)
+from p"types.jo" import (T_MATH_INT fields mk_type prune ptr_size struct_targ structs tkind type_args types variants)
+from p"util.jo" import (fatal files pos_file)
+
+RefineOpWord:type=int64<overflow='wrap'>
+ref_addr_max=():>int64=>{
+    if ptr_size =? 4 {4294967295} else {281474976710655}
+}
+# t with every refinement inside it dropped, as a reader sees it: formatting writes a value out
+# and never stores into it, so an array of refined elements reads as an array of their base
+representation_deep=(t0:RefineOpWord):>int64=>{
+    tr_deep(t0)
+}
+# (a set keeps its first spelling's order: its words, which Jo code switching on a
+# Dewy enumeration shares; `members(U)` has its own, canonical order)
+str_set_type=(values:array<string>):>int64=>{
+    ref_string_set_type(@str_sets @str_set_types @types @structs @variants @ref_intern_host fields.length values)
+}
+total_dict_type=(map:RefineOpWord pos:RefineOpWord):>int64=>$unsafe {
+    if not total_dict_keys(struct_targ(RefineOpWord(types.ptr[prune(map)].st) 0))[0] {fatal(pos "totaldict needs a finite key type (a union of literals), found {dt(struct_targ(RefineOpWord(types.ptr[prune(map)].st) 0))}")}
+    refine_active=true
+    mk_type(TypeInfo(kind='refined' elem=int32(map) bits=-1) [])
+}
+# every value of a finite key type, as text (`'0b'`, `3`): (finite, values)
+total_dict_keys=(t0:RefineOpWord):>[bool array<string>]=>{
+    ref_finite_keys(@types @structs @type_args @ref_predicates @str_sets t0 T_MATH_INT)
+}
+call_result_type=(n:RefineOpWord):>int64=>$unsafe {
+    let f=RefineOpWord(nodes.ptr[n].sym)
+    if f <=? 0 or f >=? fns.length {return 0}
+    RefineOpWord(fns.ptr[f].ret)
+}
+# member i of set id as a constant
+str_set_const=(id:RefineOpWord i:RefineOpWord pos:RefineOpWord):>int64=>{
+    ref_string_set_const(@str_sets @str_set_types @nodes @ref_intern_host id i pos)
+}
+ref_tagged_fits=(k:RefineOpWord):>bool=>{
+    k >=? -4611686018427387904 and k <=? 4611686018427387903
+}
+refine_gen=(n:RefineOpWord):>Val=>$unsafe {
+    let value=gen_expr(RefineOpWord(nodes.ptr[n].a))
+    ref_gen_check(n value.v refine_ir_entry fns.ptr[cur_fn].ptypes)
+    value
+}
+ref_type_contains=(t0:RefineOpWord want:RefineOpWord depth:RefineOpWord):>bool=>{
+    ref_types_contain(@types @structs @type_args t0 want depth)
+}
+ref_subst=(predicate:int64 args:array<int64> zonking:bool=false):>int64=>{
+    ts_ref_subst(predicate args zonking)
+}
+ref_projection_string_length=(pos:int64):>bool=>{
+    if not files[pos_file(pos)].is_dewy {return false}
+    runtime_fn("__dewy_string_length");
+    true
+}
+copy_checked=(n:RefineOpWord):>int64=>$unsafe {
+    let copy=nodes.length
+    let node=nodes.ptr[n]
+    nodes.push(node)
+    copy
+}
+ref_nd_receiver=(recv:RefineOpWord t:RefineOpWord):>void=>{
+    if refine_active and is_nd(representation_type(t)) {ref_nd_receivers[recv]=true}
+}
+ref_field_shape=(tn:RefineOpWord t:RefineOpWord siblings:array<int64>):>int64=>{
+    nd_field_shape(tn t siblings)
+}
+ref_own_length=(term:RefTerm):>bool=>{
+    term.kind =? 0 and term.offset =? 0 and term.path.length =? 1 and term.path[0] =? -1
+}
+ref_length_literal=(term:RefTerm):>bool=>{
+    term.kind =? 1 and not term.unsigned and term.offset =? 0 and term.path.length =? 0 and ref_tagged_fits(term.value)
+}
+# The self-length array written at wrapper n. O(1) past its element's resolution.
+ref_self_resolve=(n:RefineOpWord):>int64=>$unsafe {
+    let inner=RefineOpWord(nodes.ptr[n].a)
+    ref_holder_elems[RefineOpWord(nodes.ptr[inner].a)]=RefineOpWord(nodes.ptr[n].name)
+    ref_self_array(prune(resolve_type(inner)) nodes.ptr[n].pos)
+}
+ref_without_name=(names0:array<int64> name:RefineOpWord):>array<int64>=>{
+    let out:array<int64>=[]
+    loop other in names0 {
+        let kept=if other =? name {0} else {other}
+        out.push(kept)
+    }
+    out
+}
+ref_path_length=(path:array<int64>):>bool=>{
+    path.length =? 1 and path[0] =? -1
+}
+ref_self_lower_bound=(atoms:array<RefAtom>):>bool=>{
+    loop atom in atoms {
+        if atom.b.kind =? 0 and atom.b.path.length =? 0 and atom.a.kind =? 1 and (atom.op =? 'lt' or atom.op =? 'le') {return true}
+    }
+    false
+}
+ref_self_contract=(t0:RefineOpWord):>bool=>$unsafe {
+    let t=prune(t0)
+    types.ptr[t].kind =? 'refined' and ref_atoms_have_kind(ref_predicates[RefineOpWord(types.ptr[t].st)] 6) and tkind(representation_type(t)) =? 'array'
+}
+# `every element <= length + k`, in one number
+ref_self_k=(atom:RefAtom):>int64=>{
+    if atom.op =? 'lt' {atom.b.offset - 1} else {atom.b.offset}
+}
+ref_self_published=(statement:RefineOpWord):>int64=>$unsafe {
+    let value=RefineOpWord(nodes.ptr[statement].b)
+    if nodes.ptr[value].kind =? 'conv' and nodes.ptr[value].aux =? int32(int64(CV.refinement)) {return value}
+    0
+}
+ref_self_shrink=(statement:RefineOpWord place:RefineOpWord id:IN):>void=>{
+    let value=ref_self_published(statement)
+    if value not=? 0 {ref_self_shrinks[value]=[place id]}
+}
