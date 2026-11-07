@@ -209,7 +209,10 @@ read_pattern=(text:string pattern:string):>Read|ParseError=>$unsafe {
             if b =? 77 {r.month=v}
             else if b =? 100 {r.day=v}
             else if b =? 72 {r.hour=v}
-            else if b =? 104 {r.hour=if v =? 12 {0} else {v}}
+            else if b =? 104 {
+                if v <? 1 or v >? 12 {return ParseError["'{text}' has hour {v}, which `h` reads as 1 to 12"]}
+                r.hour=if v =? 12 {0} else {v}
+            }
             else if b =? 109 {r.minute=v}
             else {r.second=v}
         }
