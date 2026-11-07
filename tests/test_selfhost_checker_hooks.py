@@ -87,6 +87,7 @@ EXTRA['check.jo']['scope_mark'] = 'scope_mark = () -> int: check_scopes.names.le
 EXTRA['check.jo']['enter_module_context'] = 'enter_module_context = (m: int) -> bool: events.push("enter:{m}"); true'
 EXTRA['check.jo']['leave_module_context'] = 'leave_module_context = (m: int, entered: bool): events.push("leave:{m}:{entered}:{cx}")'
 EXTRA['decimals.jo']['decimal_wants'] = 'decimal_wants = (f: int) -> bool: f == hk_decimal'
+EXTRA['decimals.jo']['decimal_quantity_start'] = 'decimal_quantity_start = (pos: int, b: int, t: int) -> int: t'
 EXTRA['decimals.jo']['decimal_check_body'] = 'decimal_check_body = (f: int): events.push("decimal:{f}"); fns[f].state = 2'
 EXTRA['decimals.jo']['decimal_binding_type'] = 'decimal_binding_type = (pos: int, t: int) -> int: events.push("binding:{pos}:{t}"); T_INT'
 EXTRA['types.jo']['zonk'] = '''zonk = (t: int) -> int:

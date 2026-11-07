@@ -1,4 +1,4 @@
-from p"checker_hooks.dewy" import (decl_annotated decl_sibling decl_literal decl_after)
+from p"checker_hooks.dewy" import (decl_annotated decl_sibling decl_literal decl_quantity_literal decl_after)
 $runtime_checks
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
@@ -251,6 +251,11 @@ vd_decl=(s:VWord):>void=>$unsafe {
                 t=decl_literal(s)
                 literal_init=true
             }
+            # (`let total = 0.0kWh`, exact until a float quantity is written to it, as a plain decimal)
+            if k =? 'quantity' and dewy {
+                t=decl_quantity_literal(s t)
+                literal_init=true
+            }
             if vd_kind(t) =? 'none_lit' {decl_error(s t 1)}
         }
     }
@@ -267,7 +272,7 @@ vd_decl=(s:VWord):>void=>$unsafe {
     if vd_sibling_pending[0].length >? 0 {decl_after(s l t 3)}
     if vd_flow_next[0] not=? 0 {vd_flow_local[0]=l}
     if unit not=? 0 {vd_tk_bindings[0][l]=s}
-    if literal_init and (vd_kind(t) =? 'struct_' or vd_watch[0].decimal_adapted >? 0) {decl_after(s l t 4)}
+    if literal_init and (vd_kind(t) =? 'struct_' or vd_kind(t) =? 'quantity' or vd_watch[0].decimal_adapted >? 0) {decl_after(s l t 4)}
     if vd_growth_pending[0] not=? 0 or (not typed and vd_kind(t) =? 'struct_' and dewy and VWord(vd_nodes[0].ptr[s].flags) & 262144 =? 0) {decl_after(s l t 5)}
     let b=VWord(vd_nodes[0].ptr[s].b)
     if b not=? 0 and vd_watch[0].quaternions >? 0 and vd_quat_nodes[0].has(b) {vd_quat_locals[0][l]=true}

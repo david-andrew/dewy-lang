@@ -1473,7 +1473,8 @@ spells degrees. Fractions use `rational`, and quantities also support machine
 integers, checked `int` (`bigint`), `float32`, and `float64`. A floating annotation rounds an
 exact scale to that representation. A whole number with a unit holds whole numbers,
 and a decimal point makes it hold fractions, as for a plain number: `let t = 0.0m`,
-then `t = t + 1.5m`.
+then `t = t + 1.5m`. Written a float quantity, such a binding is one from its declaration on, as a plain
+decimal is (`let total = 0.0kWh`, then `total += power*dt`, with a `float64` power).
 `L` and `mL` are volume units (`1L =? m^3/1000`, `1000mL =? 1L`).
 
 Addition, subtraction, and comparisons require identical dimensions.

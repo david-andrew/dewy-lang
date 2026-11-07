@@ -1,0 +1,10 @@
+# A binding made from a run-time value, unit and all, is not a decimal literal: no starting over.
+from units import m
+start = (r:rational):>int => {
+    let t = r*m
+    let f:float64 = 1.0
+    t += f*m
+    printl(t)
+    0
+}
+main = () => printl(start(rational(1 2)))

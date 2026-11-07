@@ -1442,6 +1442,11 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
                     t = decimal_binding_type(nodes[d].pos, lit_default(int(nodes[d].b)))
                     nodes[d].b = i32(coerce(int(nodes[d].b), t))
                     decimal_global(g, nodes[d].pos, t)
+                else if is_quantity(t):
+                    exact = t
+                    t = decimal_quantity_start(nodes[d].pos, int(nodes[d].b), exact)
+                    if t != exact: nodes[d].b = i32(coerce(int(nodes[d].b), t))
+                    decimal_global(g, nodes[d].pos, t)
         t = zonk(t)
         if t == 0: fatal(nodes[d].pos, "global needs a type or a value")
         if tk_unit != 0:
@@ -2104,9 +2109,9 @@ compound_checked = (s: int, left: int, right: int, target: int) -> int:
     result = prune(check_expr(n, (if has_flag(s, NF_BROADCAST): target else: 0)))
     quantity_update_right = 0
     if is_quantity(target) and quantity_point(target) and quantity_is_delta(result): fatal(nodes[s].pos, "this update leaves a difference, not a temperature point, so the point cannot hold it: subtract a difference (`5K`), or keep the difference in a new binding")
-    quantity_float_update(s, target, result)
     t = prune(target)
     if decimal_target != 0 and decimal_float_write(result, t): return last_checked
+    quantity_float_update(s, target, result)
     # Built-in compound arithmetic keeps the destination's fixed width,
     # just as += does, even when a library helper computes in 64 bits.
     if nodes[s].sval != 0 and ((is_int(t) and is_int(result)) or (is_float(t) and is_float(result))):

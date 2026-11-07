@@ -254,6 +254,7 @@ DECL_JO = {
         'decl_annotated': 'decl_annotated = (s: int, t: int, member: int): dv_annotated(s, t, member)',
         'decl_sibling': 'decl_sibling = (s: int, t: int, code: int) -> int: dv_sibling(s, t, code)',
         'decl_literal': 'decl_literal = (s: int) -> int: dv_literal(s)',
+        'decl_quantity_literal': 'decl_quantity_literal = (s: int, t: int) -> int: t',
         'decl_storage': 'decl_storage = (s: int, t: int) -> int: dv_storage(s, t)',
         'decl_value_param': 'decl_value_param = (s: int, t: int) -> int: dv_value_param(s, t)',
         'decl_temperature': 'decl_temperature = (s: int, t: int, unit: int) -> int: dv_temperature(s, t, unit)',

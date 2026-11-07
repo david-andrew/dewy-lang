@@ -1,0 +1,33 @@
+# A decimal with a unit written a float quantity is a float quantity from its declaration on.
+from units import kWh, W, BTU, m, °F
+Item:type = [power:float64*Mass*Length^2/Time^3 hours:float64]
+const ITEMS = [Item[150.0W 2.0] Item[100W 1.0]]
+yearly:float64 = 365.0
+let script = 0.0kWh
+add = (x:float64):>void => {
+    script += x*kWh
+}
+total_of = (items:array<Item>) => {
+    let total = 0.0kWh
+    loop i in items {
+        total += i.power * (i.hours * 1hour)
+    }
+    total
+}
+main = () => {
+    printl(total_of(ITEMS) as kWh)
+    let ua = 0.0BTU/hour/°F
+    let f:float64 = 2.5
+    ua = ua + f*BTU/hour/°F
+    printl("{ua as BTU/hour/°F:.1f}")
+    # (never written a float, it stays exact)
+    let exact = 0.0m
+    exact += 1.5m
+    exact += 1m/3
+    printl(exact)
+    add(1.25)
+    printl(script as kWh)
+    let scaled = 1.0m
+    scaled *= yearly
+    printl(scaled)
+}

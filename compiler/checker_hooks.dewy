@@ -5,7 +5,7 @@ from p"icount_ops.dewy" import (ic_mod ic_restore)
 from p"types.jo" import (T_VOID zonk)
 from p"expr.jo" import (coerce lit_default)
 from p"definite_walk.dewy" import (da_record)
-from p"decimal_ops.dewy" import (decimal_assign_begin decimal_binding_type decimal_check_body decimal_local decimal_wants)
+from p"decimal_ops.dewy" import (decimal_assign_begin decimal_binding_type decimal_check_body decimal_local decimal_quantity_start decimal_wants)
 from p"growth_ops.dewy" import (growth_assign growth_decl_after growth_decl_before)
 from p"ide.jo" import (ide_hint_local)
 from p"string_domain_ops.dewy" import (int_domain_declare string_domain_declare)
@@ -40,6 +40,12 @@ decl_literal=(s:int64):>int64=>$unsafe {
     let value=coerce(HKWord(nodes.ptr[s].b) t)
     nodes.ptr[s].b = int32(value)
     t
+}
+# (an unannotated binding of a constant decimal with a unit: its type on this check; 0 for any other)
+decl_quantity_literal=(s:int64 t:int64):>int64=>$unsafe {
+    let wanted=decimal_quantity_start(nodes.ptr[s].pos HKWord(nodes.ptr[s].b) t)
+    if wanted not=? t {nodes.ptr[s].b=int32(coerce(HKWord(nodes.ptr[s].b) wanted))}
+    wanted
 }
 decl_after=(s:int64 l:int64 t:int64 code:int64):>void=>$unsafe {
     if code =? 1 {growth_decl_before(s)}

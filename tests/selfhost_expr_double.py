@@ -90,5 +90,6 @@ def isolate_hooks(modules):
         'decl_annotated': ('s:int64 t:int64 member:int64', 's t member', 'void'),
         'decl_sibling': ('s:int64 t:int64 code:int64', 's t code', 'int64'),
         'decl_literal': ('s:int64', 's', 'int64'),
+        'decl_quantity_literal': ('s:int64 t:int64', 's t', 'int64'),
         'decl_after': ('s:int64 l:int64 t:int64 code:int64', 's l t code', 'void'),
     })

@@ -23,14 +23,20 @@ use 'growth_ops.dewy'
 use 'node_store.dewy'
 
 decimal_let = (n: int):
-    if nodes[n].kind == .vardecl and nodes[n].a == 0 and nodes[n].b != 0 and not has_flag(n, NF_RDONLY) and decimal_literal_tree(int(nodes[n].b)): decimal_lets += 1
+    if nodes[n].kind == .vardecl and nodes[n].a == 0 and nodes[n].b != 0 and not has_flag(n, NF_RDONLY) and decimal_start(int(nodes[n].b)): decimal_lets += 1
+# (what may start a decimal binding: a decimal, or a decimal with a unit, `0.0kWh` or `0.0BTU/hour`)
+decimal_start = (n: int) -> bool: decimal_literal_tree(n) or decimal_unit_tree(n)
+decimal_unit_tree = (n: int) -> bool:
+    if nodes[n].kind != .binary or (nodes[n].op != 60 and nodes[n].op != 61): return false
+    a = int(nodes[n].a)
+    (nodes[a].kind == .float_lit and nodes[a].sval != 0) or decimal_unit_tree(a)
 # an unannotated, assignable binding that a decimal literal initializes, among the
 # statements of n or of a lambda inside them (its float write starts the enclosing body over)
 decimal_binding_in = (n: int) -> bool:
     if n == 0: return false
     k = nodes[n].kind
     if k == .vardecl:
-        if nodes[n].a == 0 and nodes[n].b != 0 and nodes[n].nlist == 0 and not has_flag(n, NF_RDONLY) and decimal_literal_tree(int(nodes[n].b)): return true
+        if nodes[n].a == 0 and nodes[n].b != 0 and nodes[n].nlist == 0 and not has_flag(n, NF_RDONLY) and decimal_start(int(nodes[n].b)): return true
         return decimal_lambda_in(int(nodes[n].b))
     if k != .block and k != .if_ and k != .iflet and k != .while_ and k != .for_ and k != .exprstmt and k != .match_ and k != .arm and k != .defer_ and k != .when_: return decimal_lambda_in(n)
     if decimal_binding_in(int(nodes[n].a)) or decimal_binding_in(int(nodes[n].b)) or decimal_binding_in(kid_c(n)) or decimal_binding_in(kid_d(n)): return true
@@ -217,14 +223,24 @@ decimal_binding_type = (pos: int, t: int) -> int:
     if decimal_floats.len() == 0 or not bundled_rational_type(t) or not dewy_at(pos): return t
     if decimal_floats.has(pos): return T_FLOAT
     t
+# The type of an unannotated binding of value `b` (type t): for a constant decimal with a unit, its float
+# quantity once a float one was written to it. A temperature keeps its point-or-difference reading, so
+# its write stays an error.
+decimal_quantity_at = 0 # (the last binding decimal_quantity_start found: only those may start over)
+decimal_quantity_start = (pos: int, b: int, t: int) -> int:
+    if not decimal_exact_quantity(t) or quantity_constant_scale(b) < 0: return t
+    decimal_quantity_at = pos
+    if decimal_floats.len() == 0 or not decimal_floats.has(pos): return t
+    mk_quantity(T_FLOAT, quantity_dimension(t))
+decimal_exact_quantity = (t: int) -> bool: is_quantity(t) and bundled_rational_type(quantity_base(t)) and quantity_dimension(t) != base_dimension(4)
 decimal_local = (l: int, pos: int, t: int):
-    if bundled_rational_type(t) and dewy_at(pos):
+    if (bundled_rational_type(t) or decimal_exact_quantity(t) and decimal_quantity_at == pos) and dewy_at(pos):
         decimal_locals[l] = pos
         decimal_watch()
         decimal_local_fns[l] = decimal_root()
     else if decimal_adapted.len() > 0 and decimal_adapted.has(pos): decimal_adapted_locals[l] = pos
 decimal_global = (g: int, pos: int, t: int):
-    if bundled_rational_type(t) and dewy_at(pos) and decimal_global_inits.has(g):
+    if (bundled_rational_type(t) or decimal_exact_quantity(t) and decimal_quantity_at == pos) and dewy_at(pos) and decimal_global_inits.has(g):
         decimal_globals[g] = pos
         statement_watch.decimal_globals = decimal_globals.len()
 # a use of a decimal global while it is exact: who would check again if it became float
@@ -259,14 +275,17 @@ decimal_assign_begin = (s: int) -> int:
 # starts over. False when the code that saw it exact cannot be checked again: the write is
 # then the usual type error.
 decimal_float_write = (from: int, to: int) -> bool:
-    if decimal_target == 0 or tkind(prune(from)) != .float_ or not bundled_rational_type(prune(to)): return false
+    if decimal_target == 0: return false
+    source = prune(from)
+    quantity = decimal_exact_quantity(prune(to)) and is_quantity(source) and tkind(quantity_base(source)) == .float_ and quantity_dimension(source) == quantity_dimension(prune(to))
+    if not quantity and (tkind(source) != .float_ or not bundled_rational_type(prune(to))): return false
     if decimal_frame == 0 or decimal_root() != decimal_frame: return false
     if decimal_target_ref >= 0:
         l = decimal_target_ref
         if (decimal_local_fns.get(l) ?? 0) != decimal_frame: return false
         decimal_floats[decimal_target] = true
         decimal_adapted_warn(decimal_target, name_of(int(locals[l].name)))
-        locals[l].type = i32(T_FLOAT)
+        locals[l].type = i32(if quantity: mk_quantity(T_FLOAT, quantity_dimension(source)) else: T_FLOAT)
         decimal_again = true
         return true
     g = -1 - decimal_target_ref
@@ -300,7 +319,7 @@ decimal_writers_first = ():
     loop m in modules:
         if m.is_prelude: continue
         loop d in m.decls:
-            if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and not has_flag(d, NF_RDONLY) and dewy_at(nodes[d].pos) and decimal_literal_tree(int(nodes[d].b)):
+            if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and not has_flag(d, NF_RDONLY) and dewy_at(nodes[d].pos) and decimal_start(int(nodes[d].b)):
                 g = int(nodes[d].sym)
                 if g > 0 and globals[g].state == 0 and int(globals[g].decl) == d:
                     names[int(nodes[d].name)] = true
@@ -347,7 +366,7 @@ decimal_input_globals = (m: int, stmts: int[]):
         decimal_watch()
     if decimal_lets == 0: return
     loop d in stmts:
-        if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and not has_flag(d, NF_RDONLY) and dewy_at(nodes[d].pos) and decimal_literal_tree(int(nodes[d].b)):
+        if nodes[d].kind == .vardecl and nodes[d].nlist == 0 and nodes[d].a == 0 and nodes[d].b != 0 and not has_flag(d, NF_RDONLY) and dewy_at(nodes[d].pos) and decimal_start(int(nodes[d].b)):
             g = int(nodes[d].sym)
             if g > 0 and globals[g].state == 0 and int(globals[g].decl) == d:
                 decimal_global_inits[g] = clone(int(nodes[d].b))

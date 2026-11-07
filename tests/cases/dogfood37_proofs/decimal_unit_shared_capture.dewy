@@ -1,0 +1,9 @@
+# A shared capture writes the binding itself.
+from units import m
+main = () => {
+    let t = 0.0m
+    let f:float64 = 1.0
+    let g = ($capture @t):>void => { t += f*m }
+    g()
+    printl(t)
+}
