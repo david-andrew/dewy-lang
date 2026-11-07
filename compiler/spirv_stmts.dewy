@@ -1,0 +1,1416 @@
+$runtime_checks
+from p"type_ops.dewy" import tsd
+from p"spirv_emit.dewy" import sv_shift
+from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"@lib/core/os.jo" import (env write_file)
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_INCLUSIVE has_flag kid nkids nodes)
+from p"check.jo" import (LF_ALIAS LF_MUTPARAM check_struct_fields fns locals modules)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"checks_thin_expr.dewy" import (is_gpu_buffer swizzle_index)
+from p"expr.jo" import (CV gpu_buffer_elem ntype)
+from p"glsl.jo" import (builtin_map sl_turns_fns)
+from p"glsl_ops.dewy" import (sl_type)
+from p"spirv.jo" import (SC_FUNCTION SC_INPUT SC_OUTPUT SC_PSB SV_PC_DEPTH SV_PC_FLIP SV_PC_INSTS SV_PC_ISTRIDE SV_PC_PARAMS SV_PC_VERTS SV_PC_VSTRIDE SvRef sv_atomic_ops sv_bound sv_cache sv_minmax sv_caps sv_cf sv_dead sv_dec sv_dumped sv_fns sv_glob sv_group sv_iface sv_label sv_loops sv_lref sv_lvar sv_stage sv_std sv_std_ops sv_translated sv_utype)
+from p"spirv_emit.dewy" import (sv_branch sv_cbool sv_drain sv_field_offset sv_finish_fn sv_fn_id sv_fntype sv_gbuf_elem sv_gbuf_inside sv_gbuf_store sv_global sv_intrinsic sv_invocation sv_logic sv_loop_body sv_loop_start sv_narrow sv_null sv_param_type sv_rawptr sv_rawptr_w sv_rebuild sv_reset sv_start_fn sv_store_sub sv_strw sv_subgroup_builtin sv_subword sv_texture sv_type_key sv_val sv_varyings sv_word sv_word_ptr)
+from p"spirv_ops.dewy" import (sv_addr_at sv_begin sv_bool sv_builtin_var sv_cap sv_ci sv_code sv_cond_branch sv_cu sv_deco sv_err sv_f32 sv_gbuf_len sv_gbuf_ptr sv_gbuf_type sv_i32 sv_image_type sv_ins sv_instance_id sv_is_floaty sv_is_gbuf_op sv_is_vector sv_load sv_mat4 sv_ncomp sv_new sv_pc_get sv_pick sv_ptr sv_splat sv_stmts sv_store sv_store_word sv_u32 sv_unsigned sv_uv2 sv_var sv_vecb sv_vecf sv_veci sv_vertex_id sv_void)
+from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
+from p"types.jo" import (T_FLOAT T_I32 T_IVEC2 T_IVEC3 T_MAT4 T_MATH_INT T_VEC4 fields is_vec prune structs tkind tsize types)
+from p"util.jo" import (name_of)
+
+SpirvStmtWord:type=int64<overflow='wrap'>
+# the SPIR-V type of a Sloppy type (ints are 32-bit and floats f32, as in GLSL; a Texture is the
+# index of its descriptor)
+sv_type=(t0:SpirvStmtWord pos:SpirvStmtWord):>int64=>$unsafe {
+    let t=sl_type(t0)
+    let k=types.ptr[t].kind
+    if k =? 'float_' {return sv_f32()}
+    if k =? 'int_' {return sv_i32()}
+    if k =? 'bool_' {return sv_bool()}
+    if k =? 'void_' {return sv_void()}
+    if k =? 'vec' {
+        if t =? T_MAT4 {return sv_mat4()}
+        if types.ptr[t].sign {return sv_veci(SpirvStmtWord(types.ptr[t].bits))}
+        return sv_vecf(SpirvStmtWord(types.ptr[t].bits))
+    }
+    if k =? 'struct_' {
+        let si=SpirvStmtWord(types.ptr[t].st)
+        if is_lib_texture(si) {return sv_u32()}
+        if is_gpu_buffer(t) {return sv_gbuf_type()}
+        let key="s{si}"
+        let id=sv_cache.get(key)
+        if id not=? none {return id}
+        check_struct_fields(si)
+        let ms:array<int64>=[]
+        loop i in [0..SpirvStmtWord(structs.ptr[si].nfields)) {ms.push(sv_type(SpirvStmtWord(fields.ptr[SpirvStmtWord(structs.ptr[si].fields) + i].type) pos))}
+        return sv_type_key(key 30 ms)
+    }
+    if k =? 'fixed' {
+        let el=sv_type(SpirvStmtWord(types.ptr[t].elem) pos)
+        let n=sv_cu(fixed_len(t))
+        return sv_type_key("a{el}x{fixed_len(t)}" 28 [el n])
+    }
+    sv_err(pos "type {dt(t)} cannot be used in shaders (use numbers, bools, vectors, matrices, structs and Texture)")
+    0
+}
+# an f64 (its two words) as an f32, rounded to nearest (too small: 0; too large: infinity)
+sv_f64=(lo:SpirvStmtWord hi:SpirvStmtWord):>int64=>{
+    let u=sv_u32()
+    let sign=sv_val(199 u [hi sv_cu(0x80000000)])
+    let e=sv_val(199 u [sv_val(194 u [hi sv_cu(20)]) sv_cu(0x7FF)])
+    let m=sv_val(197 u [sv_val(196 u [sv_val(199 u [hi sv_cu(0xFFFFF)]) sv_cu(3)]) sv_val(194 u [lo sv_cu(29)])])
+    let rnd=sv_val(199 u [sv_val(194 u [lo sv_cu(28)]) sv_cu(1)])
+    let ne=sv_val(130 u [e sv_cu(896)])
+    let bits=sv_val(128 u [sv_val(197 u [sv_val(196 u [ne sv_cu(23)]) m]) rnd])
+    let b=sv_bool()
+    let inf=sv_cu(0x7F800000)
+    let big=sv_val(166 b [sv_val(174 b [e sv_cu(1151)]) sv_val(174 b [bits inf])])
+    let r=sv_val(169 u [big inf bits])
+    r=sv_val(169 u [sv_val(178 b [e sv_cu(896)]) sv_cu(0) r])
+    let nan=sv_val(167 b [sv_val(170 b [e sv_cu(0x7FF)]) sv_val(171 b [sv_val(197 u [m lo]) sv_cu(0)])])
+    r=sv_val(169 u [nan sv_cu(0x7FC00000) r])
+    sv_val(124 sv_f32() [sv_val(197 u [r sign])])
+}
+# a value of type t stored (as the CPU lays it out) at byte offset (c + d) of base
+sv_read=(t0:SpirvStmtWord base:SpirvStmtWord c:SpirvStmtWord d:SpirvStmtWord pos:SpirvStmtWord):>int64=>$unsafe {
+    let t=sl_type(t0)
+    let k=types.ptr[t].kind
+    if k =? 'float_' {
+        if SpirvStmtWord(types.ptr[t].bits) =? 64 {return sv_f64(sv_word(base c d) sv_word(base c + 4 d))}
+        return sv_val(124 sv_f32() [sv_word(base c d)])
+    }
+    if k =? 'int_' {
+        let bits=SpirvStmtWord(types.ptr[t].bits)
+        if bits >=? 32 {return sv_val(124 sv_i32() [sv_word(base c d)])}
+        return sv_subword(base c d bits types.ptr[t].sign)
+    }
+    if k =? 'bool_' {return sv_val(171 sv_bool() [sv_subword(base c d 8 false) sv_ci(0)])}
+    let ty=sv_type(t pos)
+    let parts:array<int64>=[]
+    if k =? 'vec' {
+        if t =? T_MAT4 {
+            loop col in [0..4) {parts.push(sv_read(T_VEC4 base c + 16 * col d pos))}
+        }
+        else {
+            let ct=sv_f32()
+            if types.ptr[t].sign {ct=sv_i32()}
+            loop i in [0..SpirvStmtWord(types.ptr[t].bits)) {parts.push(sv_val(124 ct [sv_word(base c + 4 * i d)]))}
+        }
+        return sv_val(80 ty parts)
+    }
+    if k =? 'struct_' {
+        let si=SpirvStmtWord(types.ptr[t].st)
+        layout(t)
+        if is_lib_texture(si) {return sv_word(base c + sv_field_offset(si "id") d)}
+        if is_gpu_buffer(t) {
+            let ao=c + sv_field_offset(si "addr")
+            let a=sv_val(80 sv_uv2() [sv_word(base ao d) sv_word(base ao + 4 d)])
+            return sv_val(80 sv_gbuf_type() [a sv_val(124 sv_i32() [sv_word(base c + sv_field_offset(si "n") d)])])
+        }
+        loop i in [0..SpirvStmtWord(structs.ptr[si].nfields)) {
+            let f=SpirvStmtWord(structs.ptr[si].fields) + i
+            parts.push(sv_read(SpirvStmtWord(fields.ptr[f].type) base c + SpirvStmtWord(fields.ptr[f].offset) d pos))
+        }
+        return sv_val(80 ty parts)
+    }
+    if k =? 'fixed' {
+        let el=SpirvStmtWord(types.ptr[t].elem)
+        layout(el)
+        loop i in [0..fixed_len(t)) {parts.push(sv_read(el base c + i * tsize(el) d pos))}
+        return sv_val(80 ty parts)
+    }
+    sv_err(pos "type {dt(t)} cannot be read by a shader")
+    0
+}
+# the uniforms (or a part of them) an expression stands for, if it does (base 0 if not)
+sv_ref=(e:SpirvStmtWord):>SvRef=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'ident' and nodes.ptr[e].aux =? int32(1) {
+        let l=SpirvStmtWord(nodes.ptr[e].sym)
+        if SpirvStmtWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 {return sv_ref(SpirvStmtWord(locals.ptr[l].alias))}
+        let p=sv_lref.get(l)
+        if p not=? none {return SvRef(p 0 0 ntype(e))}
+        return SvRef()
+    }
+    if k =? 'field' and nodes.ptr[e].aux >=? 0 {
+        let a=SpirvStmtWord(nodes.ptr[e].a)
+        let r=sv_ref(a)
+        if r.base =? 0 {return r}
+        let bt=prune(ntype(a))
+        if types.ptr[bt].kind not=? 'struct_' {return SvRef()}
+        layout(bt)
+        let f=SpirvStmtWord(structs.ptr[SpirvStmtWord(types.ptr[bt].st)].fields) + SpirvStmtWord(nodes.ptr[e].aux)
+        return SvRef(r.base r.c + SpirvStmtWord(fields.ptr[f].offset) r.d ntype(e))
+    }
+    if k =? 'index' {
+        let a=SpirvStmtWord(nodes.ptr[e].a)
+        let r=sv_ref(a)
+        if r.base =? 0 {return r}
+        let bt=prune(ntype(a))
+        let stride:SpirvStmtWord=4
+        if bt =? T_MAT4 {stride=16} else if types.ptr[bt].kind =? 'fixed' {
+            layout(SpirvStmtWord(types.ptr[bt].elem))
+            stride=tsize(SpirvStmtWord(types.ptr[bt].elem))
+        }
+        let b=SpirvStmtWord(nodes.ptr[e].b)
+        if nodes.ptr[b].kind =? 'int_lit' {return SvRef(r.base r.c + SpirvStmtWord(nodes.ptr[b].ival) * stride r.d ntype(e))}
+        let off=sv_val(132 sv_i32() [sv_expr(b) sv_ci(stride)])
+        if r.d not=? 0 {off=sv_val(128 sv_i32() [r.d off])}
+        return SvRef(r.base r.c off ntype(e))
+    }
+    if sv_is_gbuf_op(e "[]") {return sv_gbuf_elem(e)}
+    SvRef()
+}
+# translate a function (the ones it calls are translated later: see sv_pending)
+sv_function=(f:SpirvStmtWord):>void=>$unsafe {
+    let decl=SpirvStmtWord(fns.ptr[f].decl)
+    if decl =? 0 or (nodes.ptr[decl].kind not=? 'fn_' and nodes.ptr[decl].kind not=? 'lambda') {sv_err(0 "only named functions can be used in shaders")}
+    if fns.ptr[f].caps.length >? 0 {sv_err(nodes.ptr[decl].pos "a function that captures variables cannot run on the GPU")}
+    let rt=SpirvStmtWord(fns.ptr[f].ret)
+    let ret=sv_type(rt nodes.ptr[decl].pos)
+    let ptys:array<int64>=[]
+    loop l in fns.ptr[f].params {ptys.push(sv_param_type(l))}
+    let id=sv_fn_id(f)
+    let head:array<int64>=[]
+    sv_ins(@head 54 [ret id 0 sv_fntype(ret ptys)])
+    let pids:array<int64>=[]
+    loop i in 0.. and l in fns.ptr[f].params {
+        let p=sv_new()
+        sv_ins(@head 55 [ptys[i] p])
+        if prune(SpirvStmtWord(locals.ptr[l].type)) =? sv_utype {sv_deco(p 19 [])}
+        pids.push(p)
+    }
+    sv_start_fn()
+    loop i in 0.. and l in fns.ptr[f].params {
+        let t=SpirvStmtWord(locals.ptr[l].type)
+        if prune(t) =? sv_utype {sv_lref[l]=pids[i]} else if SpirvStmtWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {sv_lvar[l]=pids[i]}
+        else {
+            let v=sv_var(ptys[i])
+            sv_store(v pids[i])
+            sv_lvar[l]=v
+        }
+    }
+    let body=SpirvStmtWord(fns.ptr[f].body)
+    let want=tkind(rt) not=? 'void_'
+    let n=nkids(body)
+    loop i in [0..n) {
+        let s=kid(body i)
+        if i =? n - 1 and want and nodes.ptr[body].aux not=? 0 {
+            let v=sv_expr(SpirvStmtWord(nodes.ptr[s].a))
+            sv_code(254 [v])
+            sv_dead=true
+            continue
+        }
+        sv_stmt(s)
+    }
+    if not sv_dead {
+        if want {sv_code(255 [])} else {sv_code(253 [])}
+        sv_dead=true
+    }
+    sv_finish_fn(head)
+}
+sv_stmt=(s:SpirvStmtWord):>void=>$unsafe {
+    let k=nodes.ptr[s].kind
+    if k =? 'vardecl' {
+        if nodes.ptr[s].nlist >? 0 {sv_err(nodes.ptr[s].pos "tuple destructuring is not supported in shaders")}
+        let l=SpirvStmtWord(nodes.ptr[s].sym)
+        let t=SpirvStmtWord(locals.ptr[l].type)
+        if prune(t) =? sv_utype {
+            # (another name for the uniforms, or a part of them: their address)
+            let r=SvRef()
+            if nodes.ptr[s].b not=? 0 {r=sv_ref(SpirvStmtWord(nodes.ptr[s].b))}
+            if r.base =? 0 or r.c not=? 0 or r.d not=? 0 {sv_err(nodes.ptr[s].pos "the uniforms ({dt(t)}) can only be read in shader code")}
+            sv_lref[l]=r.base
+            return
+        }
+        let ty=sv_type(t nodes.ptr[s].pos)
+        let v=sv_var(ty)
+        sv_lvar[l]=v
+        if nodes.ptr[s].b not=? 0 {sv_store(v sv_expr(SpirvStmtWord(nodes.ptr[s].b)))} else {sv_store(v sv_null(ty))}
+    }
+    else if k =? 'assign' {
+        if nodes.ptr[s].aux not=? 0 {sv_err(nodes.ptr[s].pos "unsupported assignment in shader")}
+        sv_assign(SpirvStmtWord(nodes.ptr[s].a) cx_token_values.ptr[SpirvStmtWord(nodes.ptr[s].op)] SpirvStmtWord(nodes.ptr[s].b) nodes.ptr[s].pos)
+    }
+    else if k =? 'exprstmt' {
+        let e=SpirvStmtWord(nodes.ptr[s].a)
+        if nodes.ptr[e].kind =? 'if_' or nodes.ptr[e].kind =? 'match_' {
+            sv_if_stmt(e)
+            return
+        }
+        sv_expr(e);
+    }
+    else if k =? 'if_' {sv_if_stmt(s)} else if k =? 'return_' {
+        if nodes.ptr[s].a not=? 0 {
+            let v=sv_expr(SpirvStmtWord(nodes.ptr[s].a))
+            sv_code(254 [v])
+        }
+        else {sv_code(253 [])}
+        sv_dead=true
+    }
+    else if k =? 'while_' {
+        let [header body cont merge]=sv_loop_start()
+        let c=sv_expr(SpirvStmtWord(nodes.ptr[s].a))
+        sv_cond_branch(c body merge)
+        sv_begin(body)
+        sv_loop_body(SpirvStmtWord(nodes.ptr[s].b) merge cont)
+        sv_branch(header);
+        sv_begin(merge)
+    }
+    else if k =? 'for_' and (nodes.ptr[s].aux =? 1 or nodes.ptr[s].aux =? 2) and tkind(ntype(SpirvStmtWord(nodes.ptr[s].a))) =? 'fixed' {
+        sv_for_fixed(s)
+    }
+    else if k =? 'for_' {
+        if nodes.ptr[s].aux not=? 0 {sv_err(nodes.ptr[s].pos "only `loop i in [a..b)` loops and loops over fixed-size arrays are supported in shaders")}
+        let l=SpirvStmtWord(nodes.ptr[s].sym)
+        let it=SpirvStmtWord(nodes.ptr[s].a)
+        let v=sv_var(sv_i32())
+        sv_lvar[l]=v
+        sv_store(v sv_expr(SpirvStmtWord(nodes.ptr[it].a)))
+        let [header body cont merge]=sv_loop_start()
+        let op:SpirvStmtWord=177
+        if has_flag(it NF_INCLUSIVE) {op=179}
+        let c=sv_val(op sv_bool() [sv_load(sv_i32() v) sv_expr(SpirvStmtWord(nodes.ptr[it].b))])
+        sv_cond_branch(c body merge)
+        sv_begin(body)
+        sv_loop_body(SpirvStmtWord(nodes.ptr[s].b) merge cont)
+        sv_store(v sv_val(128 sv_i32() [sv_load(sv_i32() v) sv_ci(1)]))
+        sv_branch(header);
+        sv_begin(merge)
+    }
+    else if k =? 'break_' {
+        if sv_loops.length >? 0 {sv_branch(sv_loops[sv_loops.length - 1][0]);}
+    }
+    else if k =? 'continue_' {
+        if sv_loops.length >? 0 {sv_branch(sv_loops[sv_loops.length - 1][1]);}
+    }
+    else if k =? 'block' {sv_stmts(s)} else if k =? 'const_' {}
+    else {sv_err(nodes.ptr[s].pos "unsupported statement in shader")}
+}
+# loop [mut] x in xs, xs a fixed-size array: an index loop (without `mut`, over a copy; xs in the
+# uniforms: over its elements there, read one at a time)
+sv_for_fixed=(s:SpirvStmtWord):>void=>$unsafe {
+    let ct=prune(ntype(SpirvStmtWord(nodes.ptr[s].a)))
+    let el=SpirvStmtWord(nodes.ptr[s].sym)
+    let n=fixed_len(ct)
+    let et=SpirvStmtWord(types.ptr[ct].elem)
+    let iv=sv_var(sv_i32())
+    sv_lvar[SpirvStmtWord(nodes.ptr[s].c)]=iv
+    sv_store(iv sv_ci(0))
+    let copy:SpirvStmtWord=0
+    let r=SvRef()
+    if nodes.ptr[s].aux =? 1 {
+        r=sv_ref(SpirvStmtWord(nodes.ptr[s].a))
+        if r.base =? 0 {
+            copy=sv_var(sv_type(ct nodes.ptr[s].pos))
+            sv_lvar[SpirvStmtWord(nodes.ptr[s].d)]=copy
+            sv_store(copy sv_expr(SpirvStmtWord(nodes.ptr[s].a)))
+        }
+    }
+    let [header body cont merge]=sv_loop_start()
+    let c=sv_val(177 sv_bool() [sv_load(sv_i32() iv) sv_ci(n)])
+    sv_cond_branch(c body merge)
+    sv_begin(body)
+    if nodes.ptr[s].aux =? 1 {
+        let ety=sv_type(et nodes.ptr[s].pos)
+        let ev=sv_var(ety)
+        sv_lvar[el]=ev
+        let i=sv_load(sv_i32() iv)
+        if r.base not=? 0 {
+            layout(et)
+            let off=sv_val(132 sv_i32() [i sv_ci(tsize(et))])
+            if r.d not=? 0 {off=sv_val(128 sv_i32() [r.d off])}
+            sv_store(ev sv_read(et r.base r.c off nodes.ptr[s].pos))
+        }
+        else {
+            let p=sv_val(65 sv_ptr(SC_FUNCTION ety) [copy i])
+            sv_store(ev sv_load(ety p))
+        }
+    }
+    sv_loop_body(SpirvStmtWord(nodes.ptr[s].b) merge cont)
+    sv_store(iv sv_val(128 sv_i32() [sv_load(sv_i32() iv) sv_ci(1)]))
+    sv_branch(header);
+    sv_begin(merge)
+}
+sv_if_stmt=(e:SpirvStmtWord):>void=>$unsafe {
+    if nodes.ptr[e].kind not=? 'if_' {sv_err(nodes.ptr[e].pos "match is not supported in shaders")}
+    let c=sv_expr(SpirvStmtWord(nodes.ptr[e].a))
+    let merge=sv_new()
+    let then=sv_new()
+    let els=merge
+    if nodes.ptr[e].c not=? 0 {els=sv_new()}
+    sv_code(247 [merge 0])
+    sv_cond_branch(c then els)
+    sv_begin(then)
+    sv_stmts(SpirvStmtWord(nodes.ptr[e].b))
+    sv_branch(merge);
+    if nodes.ptr[e].c not=? 0 {
+        sv_begin(els)
+        sv_stmts(SpirvStmtWord(nodes.ptr[e].c))
+        sv_branch(merge);
+    }
+    sv_begin(merge)
+}
+# ---------------- places (what can be assigned) ----------------
+# a pointer to what e names, or 0 if it is not a variable (or a part of one)
+sv_place=(e:SpirvStmtWord):>int64=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'ident' and nodes.ptr[e].aux =? int32(1) {
+        let l=SpirvStmtWord(nodes.ptr[e].sym)
+        if SpirvStmtWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 {return sv_place(SpirvStmtWord(locals.ptr[l].alias))}
+        let v=sv_lvar.get(l)
+        if v not=? none {return v}
+        return 0
+    }
+    if k =? 'field' {
+        let a=SpirvStmtWord(nodes.ptr[e].a)
+        if nodes.ptr[e].aux =? -4 {
+            let nm=name_of(SpirvStmtWord(nodes.ptr[e].name))
+            if (nm as array<uint8>).length not=? 1 {return 0}
+            let p=sv_place(a)
+            if p =? 0 {return 0}
+            return sv_val(65 sv_ptr(SC_FUNCTION sv_type(ntype(e) nodes.ptr[e].pos)) [p sv_ci(swizzle_index((nm as array<uint8>)[0]))])
+        }
+        if nodes.ptr[e].aux <? 0 {return 0}
+        let p=sv_place(a)
+        if p =? 0 {return 0}
+        return sv_val(65 sv_ptr(SC_FUNCTION sv_type(ntype(e) nodes.ptr[e].pos)) [p sv_ci(SpirvStmtWord(nodes.ptr[e].aux))])
+    }
+    if k =? 'index' {
+        let p=sv_place(SpirvStmtWord(nodes.ptr[e].a))
+        if p =? 0 {return 0}
+        let i=sv_expr(SpirvStmtWord(nodes.ptr[e].b))
+        return sv_val(65 sv_ptr(SC_FUNCTION sv_type(ntype(e) nodes.ptr[e].pos)) [p i])
+    }
+    0
+}
+sv_assign=(target:SpirvStmtWord op:Tok rhs:SpirvStmtWord pos:SpirvStmtWord):>void=>$unsafe {
+    let tt=ntype(target)
+    let swz=nodes.ptr[target].kind =? 'field' and nodes.ptr[target].aux =? -4 and (name_of(SpirvStmtWord(nodes.ptr[target].name)) as array<uint8>).length >? 1
+    # (as on the CPU: x = v computes v first; x op= v finds x and reads it first)
+    let v:SpirvStmtWord=0
+    if op =? 'assign' or swz {v=sv_expr(rhs)}
+    # v.xy = ...: the vector with those components replaced
+    if swz {
+        let a=SpirvStmtWord(nodes.ptr[target].a)
+        let p=sv_place(a)
+        if p =? 0 {sv_err(pos "unsupported assignment in shader")}
+        let bt=ntype(a)
+        let bty=sv_type(bt pos)
+        let old=sv_load(bty p)
+        if op not=? 'assign' {v=sv_arith(sv_assign_op(op) tt sv_expr(target) ntype(rhs) v tt pos)}
+        let nm=name_of(SpirvStmtWord(nodes.ptr[target].name))
+        let n=SpirvStmtWord(types.ptr[prune(bt)].bits)
+        let sel:array<int64>=[old v]
+        loop j in [0..n) {
+            let src=j
+            loop q in [0..(nm as array<uint8>).length) {
+                if swizzle_index((nm as array<uint8>)[q]) =? j {src=n + q}
+            }
+            sel.push(src)
+        }
+        sv_store(p sv_val(79 bty sel))
+        return
+    }
+    let p=sv_place(target)
+    if p =? 0 {sv_err(pos "unsupported assignment in shader")}
+    if op not=? 'assign' {
+        let ty=sv_type(tt pos)
+        let bop=sv_assign_op(op)
+        let cur=sv_load(ty p)
+        v=sv_expr(rhs)
+        if types.ptr[prune(tt)].kind =? 'bool_' {
+            # (and= or= xor= on bools: logical)
+            v=sv_val(sv_pick(bop =? 'amp' 167 sv_pick(bop =? 'pipe' 166 165)) sv_bool() [cur v])
+        }
+        else {v=sv_arith(bop tt cur ntype(rhs) v tt pos)}
+    }
+    sv_store(p v)
+}
+sv_assign_op=(op:Tok):>Tok=>{
+    if op =? 'pluseq' {return 'plus'}
+    if op =? 'minuseq' {return 'minus'}
+    if op =? 'stareq' {return 'star'}
+    if op =? 'slasheq' {return 'slash'}
+    if op =? 'percenteq' {return 'percent'}
+    if op =? 'ampeq' {return 'amp'}
+    if op =? 'pipeeq' {return 'pipe'}
+    if op =? 'careteq' {return 'caret'}
+    if op =? 'shleq' {return 'shl'}
+    if op =? 'shreq' {return 'shr'}
+    'plus'
+}
+# a op b for numbers and vectors (rt: the result's type)
+sv_arith=(op:Tok ta0:SpirvStmtWord a0:SpirvStmtWord tb0:SpirvStmtWord b0:SpirvStmtWord rt:SpirvStmtWord pos:SpirvStmtWord):>int64=>{
+    let ta=prune(ta0)
+    let tb=prune(tb0)
+    let a=a0
+    let b=b0
+    let ty=sv_type(rt pos)
+    let fl=sv_is_floaty(rt)
+    if ta =? T_MAT4 or tb =? T_MAT4 {
+        if ta =? T_MAT4 and tb =? T_MAT4 and op =? 'star' {return sv_val(146 ty [a b])}
+        if ta =? T_MAT4 and tb =? T_VEC4 and op =? 'star' {return sv_val(145 ty [a b])}
+        if ta =? T_MAT4 and not is_vec(tb) and op =? 'star' {return sv_val(143 ty [a b])}
+        if tb =? T_MAT4 and not is_vec(ta) and op =? 'star' {return sv_val(143 ty [b a])}
+        if ta =? T_MAT4 and not is_vec(tb) and op =? 'slash' {return sv_val(143 ty [a sv_val(136 sv_f32() [sv_cf(1.0) b])])}
+        # (+ and - a column at a time)
+        let cols:array<int64>=[]
+        loop c in [0..4) {
+            let x=sv_val(81 sv_vecf(4) [a c])
+            let y=b
+            if tb =? T_MAT4 {y=sv_val(81 sv_vecf(4) [b c])}
+            cols.push(sv_arith(op T_VEC4 x sv_pick(tb =? T_MAT4 T_VEC4 tb) y T_VEC4 pos))
+        }
+        return sv_val(80 ty cols)
+    }
+    if sv_is_vector(rt) {
+        if not is_vec(ta) {
+            if fl and op =? 'star' {return sv_val(142 ty [b a])}
+            a=sv_splat(rt a pos)
+        }
+        if not is_vec(tb) {
+            if fl and op =? 'star' {return sv_val(142 ty [a b])}
+            b=sv_splat(rt b pos)
+        }
+    }
+    # (unsigned integers divide, take remainders and shift right as unsigned numbers)
+    let us=sv_unsigned(rt)
+    let q:SpirvStmtWord=0
+    if op =? 'slash' or op =? 'percent' {
+        if fl {q=sv_val(136 ty [a b])} else if us {
+            # (OpUDiv works on an unsigned type: the same bits)
+            let u=sv_u32()
+            q=sv_val(124 ty [sv_val(134 u [sv_val(124 u [a]) sv_val(124 u [b])])])
+        }
+        else {
+            # (the smallest integer / -1 wraps, as on the CPU; OpSDiv leaves it undefined, and
+            # drivers differ: by -1 it divides by 1 and negates)
+            let m1=sv_ci(-1)
+            let one=sv_ci(1)
+            let bt=sv_bool()
+            if sv_is_vector(rt) {
+                m1=sv_splat(rt m1 pos)
+                one=sv_splat(rt one pos)
+                bt=sv_vecb(sv_ncomp(rt))
+            }
+            let neg=sv_val(170 bt [b m1])
+            let safe=sv_val(169 ty [neg one b])
+            q=sv_val(169 ty [neg sv_val(126 ty [a]) sv_val(135 ty [a safe])])
+        }
+    }
+    if op =? 'plus' {return sv_narrow(sv_val(sv_pick(fl 129 128) ty [a b]) rt)}
+    if op =? 'minus' {return sv_narrow(sv_val(sv_pick(fl 131 130) ty [a b]) rt)}
+    if op =? 'star' {return sv_narrow(sv_val(sv_pick(fl 133 132) ty [a b]) rt)}
+    if op =? 'slash' {return sv_narrow(q rt)}
+    if op =? 'percent' {
+        # (the dividend's sign, as on the CPU: x - y * trunc(x / y), the way glsl.jo does it,
+        # rather than OpSRem / OpFRem, which drivers get wrong for negative numbers)
+        if fl {
+            let tq=sv_val(12 ty [sv_std 3 q])
+            return sv_val(131 ty [a sv_val(133 ty [b tq])])
+        }
+        return sv_narrow(sv_val(130 ty [a sv_val(132 ty [q b])]) rt)
+    }
+    if op =? 'amp' {return sv_val(199 ty [a b])}
+    if op =? 'pipe' {return sv_val(197 ty [a b])}
+    if op =? 'caret' {return sv_val(198 ty [a b])}
+    if op =? 'shl' {return sv_narrow(sv_shift(196 ty a b rt) rt)}
+    if op =? 'shr' {return sv_shift(sv_pick(us 194 195) ty a b rt)}
+    sv_err(pos "unsupported operator in shader")
+    0
+}
+# float v to integer type t, as on the CPU: toward zero, saturating at t's range (32 bits at
+# most here), NaN to 0
+sv_float_to_int=(v:SpirvStmtWord t0:SpirvStmtWord):>int64=>$unsafe {
+    let t=sl_type(t0)
+    let bits=SpirvStmtWord(types.ptr[t].bits)
+    if bits >? 32 {bits=32}
+    let sg=types.ptr[t].sign
+    let lo=0.0
+    let hi_word:SpirvStmtWord=(SpirvStmtWord(1) << bits) - 1
+    if sg {
+        lo=-float64(SpirvStmtWord(1) << (bits - 1))
+        hi_word=(SpirvStmtWord(1) << (bits - 1)) - 1
+    }
+    let hi=float64(hi_word)
+    let f=sv_f32()
+    let i=sv_i32()
+    let bo=sv_bool()
+    # (2^31 - 1 and 2^32 - 1 are not f32s: the largest f32 below them, and the top above it)
+    let top=hi
+    if bits =? 32 and sg {top=2147483520.0} else if bits =? 32 {top=4294967040.0}
+    let c=sv_val(12 f [sv_std 43 v sv_cf(lo) sv_cf(top)])
+    let r:SpirvStmtWord=0
+    if sg {r=sv_val(110 i [c])} else {r=sv_val(124 i [sv_val(109 sv_u32() [c])])}
+    if bits =? 32 {r=sv_val(169 i [sv_val(190 bo [v sv_cf(hi + 1.0)]) sv_ci(hi_word) r])}
+    sv_val(169 i [sv_val(156 bo [v]) sv_ci(0) r])
+}
+# a == b, a < b...: a bool
+sv_compare=(op:Tok t0:SpirvStmtWord a:SpirvStmtWord b:SpirvStmtWord pos:SpirvStmtWord):>int64=>$unsafe {
+    let t=sl_type(t0)
+    let bo=sv_bool()
+    if types.ptr[t].kind =? 'bool_' {
+        if op =? 'eq' {return sv_val(164 bo [a b])}
+        if op =? 'ne' {return sv_val(165 bo [a b])}
+        sv_err(pos "bools can only be compared with {tsd("== and !=" "=? and not=?")}")
+    }
+    if t =? T_MAT4 {
+        # (equal if every column is)
+        let r:SpirvStmtWord=0
+        loop c in [0..4) {
+            let x=sv_compare(op T_VEC4 sv_val(81 sv_vecf(4) [a c]) sv_val(81 sv_vecf(4) [b c]) pos)
+            if c =? 0 {r=x} else if op =? 'eq' {r=sv_val(167 bo [r x])}
+            else {r=sv_val(166 bo [r x])}
+        }
+        return r
+    }
+    let fl=sv_is_floaty(t)
+    let us=sv_unsigned(t)
+    let code:SpirvStmtWord=0
+    if op =? 'eq' {code=sv_pick(fl 180 170)} else if op =? 'ne' {code=sv_pick(fl 183 171)}
+    else if op =? 'lt' {code=sv_pick(fl 184 sv_pick(us 176 177))} else if op =? 'le' {code=sv_pick(fl 188 sv_pick(us 178 179))}
+    else if op =? 'gt' {code=sv_pick(fl 186 sv_pick(us 172 173))} else if op =? 'ge' {code=sv_pick(fl 190 sv_pick(us 174 175))}
+    else {sv_err(pos "unsupported comparison in shader")}
+    if sv_is_vector(t) {
+        let v=sv_val(code sv_vecb(sv_ncomp(t)) [a b])
+        if op =? 'ne' {return sv_val(154 bo [v])}
+        return sv_val(155 bo [v])
+    }
+    sv_val(code bo [a b])
+}
+# value e converted to the scalar type of t (int <-> float), for operands the checker left mixed
+sv_as=(e:SpirvStmtWord v:SpirvStmtWord t:SpirvStmtWord pos:SpirvStmtWord):>int64=>$unsafe {
+    let from_=prune(ntype(e))
+    if sv_is_floaty(t) and not sv_is_floaty(from_) and types.ptr[from_].kind not=? 'bool_' {
+        let n=sv_ncomp(from_)
+        let ty=sv_f32()
+        if n >? 1 {ty=sv_vecf(n)}
+        return sv_val(sv_pick(sv_unsigned(from_) 112 111) ty [v])
+    }
+    if not sv_is_floaty(t) and sv_is_floaty(from_) and types.ptr[prune(t)].kind not=? 'bool_' {
+        let n=sv_ncomp(from_)
+        let ty=sv_i32()
+        if n >? 1 {ty=sv_veci(n)}
+        return sv_val(110 ty [v])
+    }
+    v
+}
+sv_expr=(e:SpirvStmtWord):>int64=>$unsafe {
+    let k=nodes.ptr[e].kind
+    let t=sl_type(ntype(e))
+    if t =? T_MATH_INT {sv_err(nodes.ptr[e].pos "checked mathematical int is not yet supported in shaders; use an explicit fixed width")}
+    let pos=nodes.ptr[e].pos
+    # (the uniforms, or a part of them: read from memory)
+    if k =? 'ident' or k =? 'field' or k =? 'index' or sv_is_gbuf_op(e "[]") {
+        let r=sv_ref(e)
+        if r.base not=? 0 {
+            if prune(r.t) =? sv_utype {sv_err(pos "the uniforms ({dt(t)}) can only be read in shader code")}
+            return sv_read(r.t r.base r.c r.d pos)
+        }
+    }
+    if k =? 'int_lit' {
+        if types.ptr[t].kind =? 'float_' {return sv_cf(float64(nodes.ptr[e].ival))}
+        if nodes.ptr[e].ival <? -2147483648 or nodes.ptr[e].ival >? 4294967295 {sv_err(nodes.ptr[e].pos "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")}
+        return sv_ci(SpirvStmtWord(nodes.ptr[e].ival))
+    }
+    if k =? 'float_lit' {return sv_cf(nodes.ptr[e].fval)}
+    if k =? 'bool_lit' {return sv_cbool(nodes.ptr[e].ival not=? 0)}
+    if k =? 'ident' {
+        if nodes.ptr[e].aux not=? int32(1) {sv_err(pos "shaders can only use local variables, parameters and constants (a value of the program's: `const SPEED = 2.0` at the top, or a field of the uniforms struct, given at each draw)")}
+        let l=SpirvStmtWord(nodes.ptr[e].sym)
+        if SpirvStmtWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 {return sv_expr(SpirvStmtWord(locals.ptr[l].alias))}
+        let v=sv_lvar.get(l)
+        if v not=? none {return sv_load(sv_type(t pos) v)}
+        sv_err(pos "unsupported variable in shader")
+    }
+    if k =? 'field' {
+        let a=SpirvStmtWord(nodes.ptr[e].a)
+        if nodes.ptr[e].aux =? -4 {
+            let v=sv_expr(a)
+            let nm=name_of(SpirvStmtWord(nodes.ptr[e].name))
+            if (nm as array<uint8>).length =? 1 {return sv_val(81 sv_type(t pos) [v swizzle_index((nm as array<uint8>)[0])])}
+            let sel:array<int64>=[v v]
+            loop c in (nm as array<uint8>) {sel.push(swizzle_index(c))}
+            return sv_val(79 sv_type(t pos) sel)
+        }
+        if nodes.ptr[e].aux <? 0 {sv_err(pos "unsupported field access in shader")}
+        return sv_val(81 sv_type(t pos) [sv_expr(a) SpirvStmtWord(nodes.ptr[e].aux)])
+    }
+    if k =? 'index' {
+        let a=SpirvStmtWord(nodes.ptr[e].a)
+        let b=SpirvStmtWord(nodes.ptr[e].b)
+        let bt=prune(ntype(a))
+        if types.ptr[bt].kind not=? 'vec' and types.ptr[bt].kind not=? 'fixed' {sv_err(pos "only vectors, matrices and fixed-size arrays (T[N]) can be indexed in shaders")}
+        let ty=sv_type(t pos)
+        if nodes.ptr[b].kind =? 'int_lit' {return sv_val(81 ty [sv_expr(a) SpirvStmtWord(nodes.ptr[b].ival)])}
+        if sv_is_vector(bt) {return sv_val(77 ty [sv_expr(a) sv_expr(b)])}
+        # (an array or a matrix at a computed index: through memory)
+        let p=sv_place(a)
+        if p =? 0 {
+            p=sv_var(sv_type(bt pos))
+            sv_store(p sv_expr(a))
+        }
+        let q=sv_val(65 sv_ptr(SC_FUNCTION ty) [p sv_expr(b)])
+        return sv_load(ty q)
+    }
+    if k =? 'binary' {
+        let a=SpirvStmtWord(nodes.ptr[e].a)
+        let b=SpirvStmtWord(nodes.ptr[e].b)
+        let op=cx_token_values.ptr[SpirvStmtWord(nodes.ptr[e].op)]
+        let ta=ntype(a)
+        let tb=ntype(b)
+        if op =? 'eq' or op =? 'ne' or op =? 'lt' or op =? 'le' or op =? 'gt' or op =? 'ge' {
+            let x=sv_expr(a)
+            let y=sv_expr(b)
+            let ct=ta
+            # (an int compared with a float: as floats)
+            if sv_is_floaty(ta) not=? sv_is_floaty(tb) and types.ptr[prune(ta)].kind not=? 'bool_' {
+                if sv_is_floaty(tb) {
+                    x=sv_as(a x tb pos)
+                    ct=tb
+                }
+                else {y=sv_as(b y ta pos)}
+            }
+            return sv_compare(op ct x y pos)
+        }
+        let x=sv_as(a sv_expr(a) t pos)
+        let y=sv_as(b sv_expr(b) t pos)
+        if types.ptr[t].kind =? 'bool_' {
+            if op =? 'amp' {return sv_val(167 sv_bool() [x y])}
+            if op =? 'pipe' {return sv_val(166 sv_bool() [x y])}
+            if op =? 'caret' {return sv_val(165 sv_bool() [x y])}
+        }
+        return sv_arith(op ta x tb y t pos)
+    }
+    if k =? 'unary' {
+        if nodes.ptr[e].op =? int32(58) {return sv_expr(SpirvStmtWord(nodes.ptr[e].a))}
+        let v=sv_expr(SpirvStmtWord(nodes.ptr[e].a))
+        let ty=sv_type(t pos)
+        if nodes.ptr[e].op =? int32(59) {
+            if t =? T_MAT4 {return sv_val(143 ty [v sv_cf(-1.0)])}
+            if sv_is_floaty(t) {return sv_val(127 ty [v])}
+            return sv_narrow(sv_val(126 ty [v]) t)
+        }
+        return sv_narrow(sv_val(200 ty [v]) t)
+    }
+    if k =? 'not_' {return sv_val(168 sv_bool() [sv_expr(SpirvStmtWord(nodes.ptr[e].a))])}
+    if k =? 'and_' or k =? 'or_' {return sv_logic(e k =? 'and_')}
+    if k =? 'conv' {
+        let cv=nodes.ptr[e].aux
+        let a=SpirvStmtWord(nodes.ptr[e].a)
+        let v=sv_expr(a)
+        let from_=sl_type(ntype(a))
+        if cv =? int32(int64(CV.int2float)) {return sv_val(sv_pick(sv_unsigned(from_) 112 111) sv_type(t pos) [v])}
+        if cv =? int32(int64(CV.float2int)) {
+            if types.ptr[t].kind =? 'int_' {return sv_float_to_int(v t)}
+            return sv_val(110 sv_type(t pos) [v])
+        }
+        if (cv =? int32(int64(CV.int_)) or cv =? int32(int64(CV.wrap_int))) and types.ptr[t].kind =? 'int_' {
+            if types.ptr[from_].kind =? 'bool_' {return sv_val(169 sv_i32() [v sv_ci(1) sv_ci(0)])}
+            return sv_narrow(v t)
+        }
+        if cv =? int32(int64(CV.float_)) or cv =? int32(int64(CV.none_)) or cv =? int32(int64(CV.quantity_const)) {return v}
+        sv_err(pos "unsupported conversion in shader")
+    }
+    if k =? 'if_' {return sv_if_expr(e)}
+    if k =? 'intrinsic' {return sv_intrinsic(e)}
+    if k =? 'call' {return sv_call(e)}
+    if k =? 'array' and types.ptr[t].kind =? 'fixed' {
+        let ty=sv_type(t pos)
+        let parts:array<int64>=[]
+        if nodes.ptr[e].b not=? 0 {
+            let v=sv_expr(kid(e 0))
+            loop i in [0..fixed_len(t)) {parts.push(v)}
+        }
+        else if nkids(e) =? 0 {return sv_null(ty)} else {
+            loop i in [0..nkids(e)) {parts.push(sv_expr(kid(e i)))}
+        }
+        return sv_val(80 ty parts)
+    }
+    if k =? 'array' {sv_err(pos "growable arrays ({tsd("T[]" "array<T>")}) cannot be used in shaders; use a fixed-size array {tsd("T[N]" "array<T length=N>")}")}
+    sv_err(pos "unsupported expression in shader")
+    0
+}
+# if c: a else: b as a value
+sv_if_expr=(e:SpirvStmtWord):>int64=>$unsafe {
+    let t=ntype(e)
+    let ty=sv_type(t nodes.ptr[e].pos)
+    let c=sv_expr(SpirvStmtWord(nodes.ptr[e].a))
+    let merge=sv_new()
+    let then=sv_new()
+    let els=sv_new()
+    sv_code(247 [merge 0])
+    sv_cond_branch(c then els)
+    let ins:array<int64>=[]
+    loop arm in [SpirvStmtWord(nodes.ptr[e].b) SpirvStmtWord(nodes.ptr[e].c)] {
+        sv_begin(sv_pick(arm =? SpirvStmtWord(nodes.ptr[e].b) then els))
+        let n=nkids(arm)
+        loop i in [0..n - 1) {sv_stmt(kid(arm i))}
+        let v=sv_expr(block_value(arm))
+        let lab=sv_label
+        if sv_branch(merge) {
+            ins.push(v)
+            ins.push(lab)
+        }
+    }
+    sv_begin(merge)
+    if ins.length =? 0 {return sv_val(1 ty [])}
+    sv_val(245 ty ins)
+}
+sv_vec_ctor=(e:SpirvStmtWord):>int64=>$unsafe {
+    let t=sl_type(ntype(e))
+    let pos=nodes.ptr[e].pos
+    let ty=sv_type(t pos)
+    let n=nkids(e)
+    let integer=types.ptr[t].sign
+    sv_f32();
+    if integer {sv_i32();}
+    if t =? T_MAT4 {
+        if n =? 0 or (n =? 1 and not is_vec(ntype(kid(e 0)))) {
+            # (the identity, or a value along the diagonal)
+            let d=sv_cf(1.0)
+            if n =? 1 {d=sv_expr(kid(e 0))}
+            let z=sv_cf(0.0)
+            let cols:array<int64>=[]
+            loop c in [0..4) {
+                let parts:array<int64>=[]
+                loop r in [0..4) {parts.push(sv_pick(r =? c d z))}
+                cols.push(sv_val(80 sv_vecf(4) parts))
+            }
+            return sv_val(80 ty cols)
+        }
+        let comps=sv_components(e)
+        let cols:array<int64>=[]
+        if comps.length =? 4 {
+            # (four columns)
+            return sv_val(80 ty comps)
+        }
+        loop c in [0..4) {cols.push(sv_val(80 sv_vecf(4) [comps[4 * c] comps[4 * c + 1] comps[4 * c + 2] comps[4 * c + 3]]))}
+        return sv_val(80 ty cols)
+    }
+    if n =? 0 {return sv_null(ty)}
+    if n =? 1 and not is_vec(ntype(kid(e 0))) {return sv_splat(t sv_as(kid(e 0) sv_expr(kid(e 0)) t pos) pos)}
+    let parts:array<int64>=[]
+    loop i in [0..n) {
+        let a=kid(e i)
+        let at=prune(ntype(a))
+        let v=sv_expr(a)
+        if is_vec(at) and types.ptr[at].sign not=? integer {
+            # (a vector of the other kind: each component converted as a scalar is)
+            loop j in [0..sv_ncomp(at)) {
+                let c=sv_val(81 sv_pick(integer sv_f32() sv_i32()) [v j])
+                if integer {parts.push(sv_float_to_int(c T_I32))} else {parts.push(sv_val(111 sv_f32() [c]))}
+            }
+        }
+        else if is_vec(at) and n =? 1 {return v} else {parts.push(sv_as(a v t pos))}
+    }
+    sv_val(80 ty parts)
+}
+# a matrix constructor's arguments: four vec4 columns as they are, or else every component
+sv_components=(e:SpirvStmtWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    let all_cols=nkids(e) =? 4
+    loop i in [0..nkids(e)) {
+        if prune(ntype(kid(e i))) not=? T_VEC4 {all_cols=false}
+    }
+    loop i in [0..nkids(e)) {
+        let a=kid(e i)
+        let v=sv_expr(a)
+        let at=prune(ntype(a))
+        if all_cols {out.push(v)} else if not is_vec(at) {out.push(sv_as(a v T_FLOAT nodes.ptr[e].pos))}
+        else if types.ptr[at].sign {
+            # (an integer vector's components, as floats)
+            loop j in [0..sv_ncomp(at)) {out.push(sv_val(111 sv_f32() [sv_val(81 sv_i32() [v j])]))}
+        }
+        else {
+            loop j in [0..sv_ncomp(at)) {out.push(sv_val(81 sv_f32() [v j]))}
+        }
+    }
+    out
+}
+sv_call=(e:SpirvStmtWord):>int64=>$unsafe {
+    let t=sl_type(ntype(e))
+    let pos=nodes.ptr[e].pos
+    let aux=SpirvStmtWord(nodes.ptr[e].aux)
+    if aux =? 2 {
+        # a struct constructor (fields left out are zero)
+        let si=SpirvStmtWord(types.ptr[t].st)
+        let ty=sv_type(t pos)
+        let parts:array<int64>=[]
+        loop i in [0..SpirvStmtWord(structs.ptr[si].nfields)) {
+            let a=kid(e i)
+            if a =? 0 {parts.push(sv_null(sv_type(SpirvStmtWord(fields.ptr[SpirvStmtWord(structs.ptr[si].fields) + i].type) pos)))} else {parts.push(sv_expr(a))}
+        }
+        return sv_val(80 ty parts)
+    }
+    if aux not=? 0 {sv_err(pos "function values cannot be called in shaders")}
+    let f=SpirvStmtWord(nodes.ptr[e].sym)
+    let decl=SpirvStmtWord(fns.ptr[f].decl)
+    let nm=name_of(SpirvStmtWord(nodes.ptr[decl].name))
+    if modules[SpirvStmtWord(nodes.ptr[decl].mod)].is_prelude {
+        if nm =? "discard" {
+            if sv_stage not=? "fragment" {sv_err(pos "discard() can only be used in the fragment shader")}
+            sv_code(252 [])
+            sv_dead=true
+            return 0
+        }
+        if nm =? "vertex_id" or nm =? "instance_id" {
+            if sv_stage not=? "vertex" {sv_err(pos "{nm}() can only be used in the vertex shader")}
+            if nm =? "vertex_id" {return sv_vertex_id()}
+            return sv_instance_id()
+        }
+        if nm =? "sample" or nm =? "sample_lod" {
+            let img=sv_texture(sv_expr(kid(e 0)))
+            let uv=sv_expr(kid(e 1))
+            if nm =? "sample" and sv_stage =? "fragment" {return sv_val(87 sv_vecf(4) [img uv])}
+            let lod=sv_cf(0.0)
+            if nm =? "sample_lod" {lod=sv_expr(kid(e 2))}
+            return sv_val(88 sv_vecf(4) [img uv 2 lod])
+        }
+        if nm =? "texel" or nm =? "texture_size" {
+            let img=sv_val(100 sv_image_type() [sv_texture(sv_expr(kid(e 0)))])
+            if nm =? "texture_size" {return sv_val(103 sv_veci(2) [img sv_ci(0)])}
+            return sv_val(95 sv_vecf(4) [img sv_expr(kid(e 1)) 2 sv_ci(0)])
+        }
+        let g=sl_turns_fns.get(nm)
+        if g not=? none {
+            # (GLSL.std.450 Fract, then Sin, Cos or Tan of 2π times it)
+            f=sv_f32()
+            let radians=sv_val(133 f [sv_cf(6.283185307179586) sv_val(12 f [sv_std 10 sv_expr(kid(e 0))])])
+            return sv_val(12 f [sv_std (sv_std_ops.get(g) ?? [0 0])[0] radians])
+        }
+        if builtin_map.get(nm) not=? none {return sv_math(nm e)}
+        if nkids(e) >? 0 and is_gpu_buffer(ntype(kid(e 0))) {
+            if nm =? "len" {return sv_gbuf_len(sv_expr(kid(e 0)))}
+            if nm =? "[]=" {
+                sv_gbuf_store(e)
+                return 0
+            }
+            let op=sv_atomic_ops.get(nm)
+            if op not=? none {return sv_atomic(e nm op)}
+        }
+        if starts_with(nm "subgroup_") {return sv_subgroup(e nm)}
+    }
+    # (prelude helpers written in Sloppy are translated like user code)
+    let args:array<int64>=[]
+    let back:array<[int64 int64]>=[]
+    loop i in [0..nkids(e)) {
+        let a=kid(e i)
+        let l=fns.ptr[f].params[i]
+        let pt=SpirvStmtWord(locals.ptr[l].type)
+        if prune(pt) =? sv_utype {
+            let r=sv_ref(a)
+            if r.base =? 0 or r.c not=? 0 or r.d not=? 0 {sv_err(nodes.ptr[a].pos "the uniforms can only be passed on as they are")}
+            args.push(r.base)
+        }
+        else if SpirvStmtWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 {
+            let v=sv_var(sv_type(pt pos))
+            sv_store(v sv_expr(a))
+            args.push(v)
+            back.push([a v])
+        }
+        else {args.push(sv_expr(a))}
+    }
+    let fid=sv_fn_id(f)
+    let rty=sv_type(SpirvStmtWord(fns.ptr[f].ret) pos)
+    let call:array<int64>=[fid]
+    loop x in args {call.push(x)}
+    let r=sv_val(57 rty call)
+    loop b in back {
+        let p=sv_place(b[0])
+        if p not=? 0 {sv_store(p sv_load(sv_type(ntype(b[0]) pos) b[1]))}
+    }
+    r
+}
+# the prelude's math functions: GLSL.std.450 instructions (or core ones), with scalars spread to
+# vectors where the result is a vector (min(v, 0.0), mix(a, b, t), step(edge, v))
+sv_math=(nm:string e:SpirvStmtWord):>int64=>$unsafe {
+    let t=sl_type(ntype(e))
+    let pos=nodes.ptr[e].pos
+    if nm =? "norm" and nkids(e) not=? 1 {sv_err(nodes.ptr[e].pos "the p-norm is not available in shaders: write the length, v.norm")}
+    let ty=sv_type(t pos)
+    let n=nkids(e)
+    let args:array<int64>=[]
+    loop i in [0..n) {
+        let a=kid(e i)
+        let v=sv_expr(a)
+        let at=prune(ntype(a))
+        if sv_is_vector(t) and not is_vec(at) and nm not=? "norm" and nm not=? "distance" and nm not=? "dot" {
+            v=sv_splat(t sv_as(a v t pos) pos)
+        }
+        args.push(v)
+    }
+    if nm =? "dot" {
+        if not is_vec(ntype(kid(e 0))) {return sv_val(133 ty [args[0] args[1]])}
+        return sv_val(148 ty args)
+    }
+    if (nm =? "min" or nm =? "max") and sv_is_floaty(t) {
+        let result=args[0]
+        loop i in [1..args.length) {result=sv_minmax(t result args[i] nm =? "min" pos)}
+        return result
+    }
+    if nm =? "hypot" {return sv_hypot(args[0] args[1])}
+    if nm =? "transpose" {return sv_val(84 ty args)}
+    if nm =? "fwidth" {
+        if sv_stage not=? "fragment" {sv_err(nodes.ptr[e].pos "fwidth() can only be used in the fragment shader")}
+        return sv_val(209 ty args)
+    }
+    if nm =? "mod" {
+        if sv_is_floaty(t) {return sv_val(141 ty args)}
+        return sv_val(139 ty args)
+    }
+    if nm =? "abs" and not sv_is_floaty(t) and types.ptr[t].kind not=? 'bool_' {
+        # (x below 0 negated, which wraps: abs of the smallest integer is itself, as on the CPU;
+        # SAbs leaves that undefined)
+        let zero=sv_ci(0)
+        let bt=sv_bool()
+        if sv_is_vector(t) {
+            zero=sv_splat(t zero pos)
+            bt=sv_vecb(sv_ncomp(t))
+        }
+        return sv_narrow(sv_val(169 ty [sv_val(177 bt [args[0] zero]) sv_val(126 ty [args[0]]) args[0]]) t)
+    }
+    let ops=sv_std_ops.get(nm) ?? [0 0]
+    let op=ops[0]
+    if not sv_is_floaty(t) and types.ptr[t].kind not=? 'bool_' and ops[1] not=? 0 {op=ops[1]}
+    # (unsigned: UMin, UMax, UClamp)
+    if sv_unsigned(t) and (nm =? "min" or nm =? "max" or nm =? "clamp") {op -= 1}
+    if nm =? "atan" and n =? 2 {op=25}
+    if op =? 0 {sv_err(pos "{nm}() is not available in shaders")}
+    let w:array<int64>=[sv_std op]
+    loop a in args {w.push(a)}
+    # (abs(i8(-128)) is -128, as on the CPU)
+    sv_narrow(sv_val(12 ty w) t)
+}
+# The same float32 power-of-two scaling as sl_hypot_body in GLSL/Metal.
+sv_hypot=(x:SpirvStmtWord y:SpirvStmtWord):>int64=>{
+    let u=sv_u32()
+    let f=sv_f32()
+    let b=sv_bool()
+    let ax=sv_val(199 u [sv_val(124 u [x]) sv_cu(0x7FFFFFFF)])
+    let ay=sv_val(199 u [sv_val(124 u [y]) sv_cu(0x7FFFFFFF)])
+    let hi=sv_val(12 u [sv_std 41 ax ay])
+    let inf=sv_cu(0x7F800000)
+    let exponent=sv_val(199 u [hi inf])
+    let scale=sv_val(124 f [sv_val(12 u [sv_std 41 exponent sv_cu(0x00800000)])])
+    let sx=sv_val(136 f [x scale])
+    let sy=sv_val(136 f [y scale])
+    let squared=sv_val(129 f [sv_val(133 f [sx sx]) sv_val(133 f [sy sy])])
+    let result=sv_val(133 f [scale sv_val(12 f [sv_std 31 squared])])
+    result=sv_val(169 f [sv_val(172 b [hi inf]) sv_val(129 f [x y]) result])
+    let infinite=sv_val(166 b [sv_val(170 b [ax inf]) sv_val(170 b [ay inf])])
+    sv_val(169 f [infinite sv_val(124 f [inf]) result])
+}
+# an f32 as an f64's two words (low, high); numbers too small for an f32's normal range become 0
+sv_to_f64=(v:SpirvStmtWord):>[int64 int64]=>{
+    let u=sv_u32()
+    let b=sv_bool()
+    let bits=sv_val(124 u [v])
+    let sign=sv_val(199 u [bits sv_cu(0x80000000)])
+    let e=sv_val(199 u [sv_val(194 u [bits sv_cu(23)]) sv_cu(0xFF)])
+    let m=sv_val(199 u [bits sv_cu(0x7FFFFF)])
+    let mhi=sv_val(194 u [m sv_cu(3)])
+    let lo=sv_val(196 u [m sv_cu(29)])
+    let hi=sv_val(197 u [sign sv_val(197 u [sv_val(196 u [sv_val(128 u [e sv_cu(896)]) sv_cu(20)]) mhi])])
+    hi=sv_val(169 u [sv_val(170 b [e sv_cu(0xFF)]) sv_val(197 u [sign sv_val(197 u [sv_cu(0x7FF00000) mhi])]) hi])
+    let zero=sv_val(170 b [e sv_cu(0)])
+    [sv_val(169 u [zero sv_cu(0) lo]) sv_val(169 u [zero sign hi])]
+}
+# value v of type t written at byte offset (c + d) of buffer memory base, laid out as the CPU does
+sv_write=(t0:SpirvStmtWord base:SpirvStmtWord c:SpirvStmtWord d:SpirvStmtWord v:SpirvStmtWord pos:SpirvStmtWord):>void=>$unsafe {
+    let t=sl_type(t0)
+    let k=types.ptr[t].kind
+    let u=sv_u32()
+    if k =? 'float_' {
+        if SpirvStmtWord(types.ptr[t].bits) =? 64 {
+            let [lo hi]=sv_to_f64(v)
+            sv_store_word(base c d lo)
+            sv_store_word(base c + 4 d hi)
+        }
+        else {sv_store_word(base c d sv_val(124 u [v]))}
+        return
+    }
+    if k =? 'int_' {
+        let bits=SpirvStmtWord(types.ptr[t].bits)
+        if bits <? 32 {
+            sv_store_sub(base c d bits v);
+            return
+        }
+        sv_store_word(base c d sv_val(124 u [v]))
+        if bits =? 64 {
+            let hi=sv_cu(0)
+            if types.ptr[t].sign {hi=sv_val(124 u [sv_val(195 sv_i32() [v sv_ci(31)])])}
+            sv_store_word(base c + 4 d hi)
+        }
+        return
+    }
+    if k =? 'bool_' {
+        sv_store_sub(base c d 8 sv_val(169 sv_i32() [v sv_ci(1) sv_ci(0)]));
+        return
+    }
+    if k =? 'vec' {
+        if t =? T_MAT4 {
+            loop col in [0..4) {sv_write(T_VEC4 base c + 16 * col d sv_val(81 sv_vecf(4) [v col]) pos)}
+            return
+        }
+        let ct=sv_f32()
+        if types.ptr[t].sign {ct=sv_i32()}
+        loop i in [0..SpirvStmtWord(types.ptr[t].bits)) {sv_store_word(base c + 4 * i d sv_val(124 u [sv_val(81 ct [v i])]))}
+        return
+    }
+    if k =? 'struct_' {
+        let si=SpirvStmtWord(types.ptr[t].st)
+        if is_lib_texture(si) or is_gpu_buffer(t) {sv_err(pos "a {structs.ptr[si].name} cannot be written into a GPU buffer")}
+        layout(t)
+        loop i in [0..SpirvStmtWord(structs.ptr[si].nfields)) {
+            let f=SpirvStmtWord(structs.ptr[si].fields) + i
+            let ft=SpirvStmtWord(fields.ptr[f].type)
+            sv_write(ft base c + SpirvStmtWord(fields.ptr[f].offset) d sv_val(81 sv_type(ft pos) [v i]) pos)
+        }
+        return
+    }
+    if k =? 'fixed' {
+        let el=SpirvStmtWord(types.ptr[t].elem)
+        layout(el)
+        loop i in [0..fixed_len(t)) {sv_write(el base c + i * tsize(el) d sv_val(81 sv_type(el pos) [v i]) pos)}
+        return
+    }
+    sv_err(pos "type {dt(t)} cannot be written into a GPU buffer")
+}
+# atomic_op(b, i, v...): the element's old value (0 past the ends, where nothing is done)
+sv_atomic=(e:SpirvStmtWord nm:string ops:[int64 int64]):>int64=>$unsafe {
+    let pos=nodes.ptr[e].pos
+    if sv_stage not=? "compute" {sv_err(pos "{nm}() can be used in compute programs only")}
+    let et=prune(gpu_buffer_elem(ntype(kid(e 0))))
+    if types.ptr[et].kind not=? 'int_' or SpirvStmtWord(types.ptr[et].bits) not=? 32 {sv_err(pos "atomic operations work on {tsd("GpuBuffer[i32] and GpuBuffer[u32]" "GpuBuffer<int32> and GpuBuffer<uint32>")}")}
+    let u=sv_u32()
+    let b=sv_expr(kid(e 0))
+    let i=sv_expr(kid(e 1))
+    let vals:array<int64>=[]
+    loop j in [2..nkids(e)) {vals.push(sv_val(124 u [sv_expr(kid(e j))]))}
+    let [from_ merge]=sv_gbuf_inside(b i)
+    let p=sv_word_ptr(sv_gbuf_ptr(b) 0 sv_val(132 sv_i32() [i sv_ci(4)]))
+    let op=ops[0]
+    if not types.ptr[et].sign {op=ops[1]}
+    let r:SpirvStmtWord=0
+    # (compare_exchange(b, i, expected, desired): the value is the desired one)
+    if op =? 230 {r=sv_val(op u [p sv_cu(1) sv_cu(0) sv_cu(0) vals[1] vals[0]])} else {r=sv_val(op u [p sv_cu(1) sv_cu(0) vals[0]])}
+    let then_end=sv_label
+    sv_branch(merge);
+    sv_begin(merge)
+    sv_val(124 sv_i32() [sv_val(245 u [r then_end sv_cu(0) from_])])
+}
+# subgroup_add(x) and the others (lib/game/gpubuffer.jo): OpGroupNonUniform* over the subgroup
+sv_subgroup=(e:SpirvStmtWord nm:string):>int64=>$unsafe {
+    let pos=nodes.ptr[e].pos
+    if sv_stage not=? "compute" {sv_err(pos "{nm}() can be used in compute functions only")}
+    sv_cap(61)
+    let sc=sv_ci(3)
+    if nm =? "subgroup_size" {return sv_subgroup_builtin(36)}
+    if nm =? "subgroup_invocation_id" {return sv_subgroup_builtin(41)}
+    if nm =? "subgroup_elect" {return sv_val(333 sv_bool() [sc])}
+    if nm =? "subgroup_all" or nm =? "subgroup_any" {
+        sv_cap(62)
+        return sv_val(sv_pick(nm =? "subgroup_all" 334 335) sv_bool() [sc sv_expr(kid(e 0))])
+    }
+    let t=sl_type(ntype(e))
+    let ty=sv_type(t pos)
+    let x=sv_expr(kid(e 0))
+    if nm =? "subgroup_broadcast_first" {
+        sv_cap(64)
+        return sv_val(338 ty [sc x])
+    }
+    sv_cap(63)
+    let k=types.ptr[t].kind
+    let fl=k =? 'float_' or (k =? 'vec' and not types.ptr[t].sign and t not=? T_MAT4)
+    let it=k =? 'int_' or (k =? 'vec' and types.ptr[t].sign)
+    let un=sv_unsigned(t)
+    let op:SpirvStmtWord=0
+    let grp:SpirvStmtWord=0
+    if nm =? "subgroup_add" or nm =? "subgroup_inclusive_add" or nm =? "subgroup_exclusive_add" {
+        if fl {op=350} else if it {op=349}
+        if nm =? "subgroup_inclusive_add" {grp=1}
+        if nm =? "subgroup_exclusive_add" {grp=2}
+    }
+    else if nm =? "subgroup_min" {
+        if fl {op=355} else if it {op=sv_pick(un 354 353)}
+    }
+    else if nm =? "subgroup_max" {
+        if fl {op=358} else if it {op=sv_pick(un 357 356)}
+    }
+    else if nm =? "subgroup_and" or nm =? "subgroup_or" or nm =? "subgroup_xor" {
+        let b=sv_pick(nm =? "subgroup_and" 0 sv_pick(nm =? "subgroup_or" 1 2))
+        if it {op=359 + b} else if k =? 'bool_' {op=362 + b}
+    }
+    else {sv_err(pos "{nm}() is not available in compute functions")}
+    if op =? 0 {sv_err(pos "{nm}() takes numbers or vectors here (found {dt(t)})")}
+    let r=sv_val(op ty [sc grp x])
+    if op =? 349 {return sv_narrow(r t)}
+    r
+}
+# the module's bytes
+sv_module=(model:SpirvStmtWord main:SpirvStmtWord):>string=>{
+    let w:array<int64>=[0x07230203 0x00010500 0 sv_bound + 1 0]
+    loop x in sv_caps {w.push(x)}
+    let imp:array<int64>=[sv_std]
+    loop x in sv_strw("GLSL.std.450") {imp.push(x)}
+    sv_ins(@w 11 imp)
+    sv_ins(@w 14 [5348 1])
+    let ep:array<int64>=[model main]
+    loop x in sv_strw("main") {ep.push(x)}
+    loop v in sv_iface {ep.push(v)}
+    sv_ins(@w 15 ep)
+    if model =? 4 {sv_ins(@w 16 [main 7])}
+    if model =? 5 {sv_ins(@w 16 [main 17 sv_group[0] sv_group[1] sv_group[2]])}
+    loop x in sv_dec {w.push(x)}
+    loop x in sv_glob {w.push(x)}
+    loop x in sv_fns {w.push(x)}
+    let b:array<uint8>=[]
+    loop x in w {
+        loop j in [0..4) {b.push(uint8((x >> (8 * j)) & 0xFF))}
+    }
+    __str_from_bytes(b)
+}
+# the vertex stage: read this vertex (and instance), call the vertex function, write the clip
+# position (in Vulkan's conventions) and the varyings
+sv_vertex=(vsf:SpirvStmtWord):>string=>$unsafe {
+    sv_reset("vertex")
+    let pos=nodes.ptr[SpirvStmtWord(fns.ptr[vsf].decl)].pos
+    let np=fns.ptr[vsf].ptypes.length
+    let vtype_=SpirvStmtWord(fns.ptr[vsf].ptypes[0])
+    let itype:SpirvStmtWord=0
+    if np =? 3 {itype=SpirvStmtWord(fns.ptr[vsf].ptypes[1])}
+    sv_utype=prune(SpirvStmtWord(fns.ptr[vsf].ptypes[np - 1]))
+    let otype=SpirvStmtWord(fns.ptr[vsf].ret)
+    sv_fn_id(vsf);
+    sv_drain()
+    let main=sv_new()
+    let head:array<int64>=[]
+    sv_ins(@head 54 [sv_void() main 0 sv_fntype(sv_void() [])])
+    sv_start_fn()
+    let out_pos=sv_builtin_var(sv_vecf(4) SC_OUTPUT 0)
+    let [leaves outs]=sv_varyings(otype SC_OUTPUT pos)
+    let voff=sv_val(132 sv_i32() [sv_vertex_id() sv_pc_get(SV_PC_VSTRIDE)])
+    let args:array<int64>=[sv_read(vtype_ sv_pc_get(SV_PC_VERTS) 0 voff pos)]
+    if itype not=? 0 {
+        let ioff=sv_val(132 sv_i32() [sv_instance_id() sv_pc_get(SV_PC_ISTRIDE)])
+        args.push(sv_read(itype sv_pc_get(SV_PC_INSTS) 0 ioff pos))
+    }
+    args.push(sv_pc_get(SV_PC_PARAMS))
+    let call:array<int64>=[sv_fn_id(vsf)]
+    loop a in args {call.push(a)}
+    let o=sv_val(57 sv_type(otype pos) call)
+    # (y turned over when drawing to the window; z from -1..1 to 0..1)
+    let p=sv_val(81 sv_vecf(4) [o 0])
+    let f=sv_f32()
+    let x=sv_val(81 f [p 0])
+    let y=sv_val(81 f [p 1])
+    let z=sv_val(81 f [p 2])
+    let w=sv_val(81 f [p 3])
+    let flip=sv_val(186 sv_bool() [sv_pc_get(SV_PC_FLIP) sv_cf(0.0)])
+    y=sv_val(169 f [flip sv_val(127 f [y]) y])
+    z=sv_val(133 f [sv_val(129 f [z w]) sv_cf(0.5)])
+    sv_store(out_pos sv_val(80 sv_vecf(4) [x y z w]))
+    loop i in 0.. and lf in leaves {
+        let ex:array<int64>=[sv_type(lf[1] pos) sv_new() o]
+        loop j in lf[0] {ex.push(j)}
+        sv_code(81 ex)
+        sv_store(outs[i] ex[1])
+    }
+    sv_code(253 [])
+    sv_dead=true
+    sv_finish_fn(head)
+    sv_drain()
+    sv_module(0 main)
+}
+# the fragment stage: the varyings (and the window position, as OpenGL has it) into the fragment
+# function, its color out
+sv_fragment=(fsf:SpirvStmtWord):>string=>$unsafe {
+    sv_reset("fragment")
+    let pos=nodes.ptr[SpirvStmtWord(fns.ptr[fsf].decl)].pos
+    let np=fns.ptr[fsf].ptypes.length
+    let itype=SpirvStmtWord(fns.ptr[fsf].ptypes[0])
+    sv_utype=prune(SpirvStmtWord(fns.ptr[fsf].ptypes[np - 1]))
+    sv_fn_id(fsf);
+    sv_drain()
+    let main=sv_new()
+    let head:array<int64>=[]
+    sv_ins(@head 54 [sv_void() main 0 sv_fntype(sv_void() [])])
+    sv_start_fn()
+    let fc_var=sv_builtin_var(sv_vecf(4) SC_INPUT 15)
+    let [leaves ins]=sv_varyings(itype SC_INPUT pos)
+    let out=sv_global(sv_ptr(SC_OUTPUT sv_vecf(4)) SC_OUTPUT)
+    sv_deco(out 30 [0])
+    # (OpenGL counts rows from the bottom of the window)
+    let f=sv_f32()
+    let fc=sv_load(sv_vecf(4) fc_var)
+    let flip=sv_pc_get(SV_PC_FLIP)
+    let y=sv_val(81 f [fc 1])
+    y=sv_val(169 f [sv_val(186 sv_bool() [flip sv_cf(0.0)]) sv_val(131 f [flip y]) y])
+    fc=sv_val(82 sv_vecf(4) [y fc 1])
+    let vals:array<int64>=[]
+    loop i in 0.. and lf in leaves {vals.push(sv_load(sv_type(lf[1] pos) ins[i]))}
+    let si=SpirvStmtWord(types.ptr[prune(itype)].st)
+    let parts:array<int64>=[fc]
+    loop i in [1..SpirvStmtWord(structs.ptr[si].nfields)) {parts.push(sv_rebuild(SpirvStmtWord(fields.ptr[SpirvStmtWord(structs.ptr[si].fields) + i].type) [i] leaves vals pos))}
+    let inv=sv_val(80 sv_type(itype pos) parts)
+    let color=sv_val(57 sv_vecf(4) [sv_fn_id(fsf) inv sv_pc_get(SV_PC_PARAMS)])
+    sv_store(out color)
+    sv_code(253 [])
+    sv_dead=true
+    sv_finish_fn(head)
+    sv_drain()
+    sv_module(4 main)
+}
+spirv_kernel=(f:SpirvStmtWord desc:string):>string=>$unsafe {
+    sv_translated=dict<int64 bool>()
+    sv_reset("kernel")
+    sv_utype=0
+    let pos=nodes.ptr[SpirvStmtWord(fns.ptr[f].decl)].pos
+    sv_fn_id(f);
+    sv_drain()
+    let main=sv_new()
+    let head:array<int64>=[]
+    sv_ins(@head 54 [sv_void() main 0 sv_fntype(sv_void() [])])
+    sv_start_fn()
+    let i=sv_i32()
+    let bo=sv_bool()
+    let params=sv_pc_get(SV_PC_PARAMS)
+    let idx=sv_invocation()
+    let total=sv_val(124 i [sv_word(params 24 0)])
+    let done=sv_new()
+    let body=sv_new()
+    let past=sv_val(175 bo [idx total])
+    sv_code(247 [done 0])
+    sv_cond_branch(past done body)
+    sv_begin(body)
+    let od:array<int64>=[]
+    loop k in [0..4) {od.push(sv_val(124 i [sv_word(params 8 + 4 * k 0)]))}
+    let i3=sv_val(138 i [idx od[3]])
+    let q=sv_val(135 i [idx od[3]])
+    let i2=sv_val(138 i [q od[2]])
+    q=sv_val(135 i [q od[2]])
+    let i1=sv_val(138 i [q od[1]])
+    let i0=sv_val(135 i [q od[1]])
+    let nt:SpirvStmtWord=0
+    loop c in (desc as array<uint8>) {
+        if c =? b't' or c =? b'i' {nt += 1}
+    }
+    let sbase=32 + 24 * nt
+    let nf:SpirvStmtWord=0
+    loop c in (desc as array<uint8>) {
+        if c =? b's' {nf += 1}
+    }
+    let args:array<int64>=[]
+    let kt:SpirvStmtWord=0
+    let kf:SpirvStmtWord=0
+    let ki:SpirvStmtWord=0
+    loop c in (desc as array<uint8>) {
+        if c =? b't' or c =? b'i' {
+            let w0=8 + 6 * kt
+            let p=sv_addr_at(params w0 sv_rawptr())
+            let o=sv_val(132 i [i0 sv_val(124 i [sv_word(params (w0 + 2) * 4 0)])])
+            o=sv_val(128 i [o sv_val(132 i [i1 sv_val(124 i [sv_word(params (w0 + 3) * 4 0)])])])
+            o=sv_val(128 i [o sv_val(132 i [i2 sv_val(124 i [sv_word(params (w0 + 4) * 4 0)])])])
+            o=sv_val(128 i [o sv_val(132 i [i3 sv_val(124 i [sv_word(params (w0 + 5) * 4 0)])])])
+            let v=sv_word(p 0 sv_val(132 i [o sv_ci(4)]))
+            if c =? b'i' {args.push(sv_val(124 i [v]))} else {args.push(sv_val(124 sv_f32() [v]))}
+            kt += 1
+        }
+        else if c =? b's' {
+            args.push(sv_val(124 sv_f32() [sv_word(params sbase + 4 * kf 0)]))
+            kf += 1
+        }
+        else {
+            args.push(sv_val(124 i [sv_word(params sbase + 4 * (nf + ki) 0)]))
+            ki += 1
+        }
+    }
+    let rt=prune(SpirvStmtWord(fns.ptr[f].ret))
+    let call:array<int64>=[sv_fn_id(f)]
+    loop a in args {call.push(a)}
+    let r=sv_val(57 sv_type(rt pos) call)
+    let bits:SpirvStmtWord=0
+    if types.ptr[rt].kind =? 'int_' {bits=sv_val(124 sv_u32() [r])} else if types.ptr[rt].kind =? 'bool_' {bits=sv_val(124 sv_u32() [sv_val(169 sv_f32() [r sv_cf(1.0) sv_cf(0.0)])])}
+    else {bits=sv_val(124 sv_u32() [r])}
+    let out=sv_addr_at(params 0 sv_rawptr_w())
+    let dst=sv_val(65 sv_ptr(SC_PSB sv_u32()) [out sv_ci(0) idx])
+    sv_code(62 [dst bits 2 4])
+    sv_branch(done);
+    sv_begin(done)
+    sv_code(253 [])
+    sv_dead=true
+    sv_finish_fn(head)
+    sv_drain()
+    let m=sv_module(5 main)
+    let dir=env("DEWY_SPIRV_DUMP")
+    if dir not=? none {
+        write_file("{dir}/{sv_dumped}.comp.spv" m);
+        sv_dumped += 1
+    }
+    m
+}
+# ---------------- compute programs ----------------
+# compute(f) (lib/game/gpubuffer.jo): f(id, params) for each id in [0, n). The push constants hold
+# the parameters' address (as for the stages) and n (where the vertex stride is).
+# A grid's (f(id: ivec2, params)) are in groups of 8 x 8, its width and height in the push
+# constants where the strides are; a 3D grid's (f(id: ivec3, params)) in groups of 4 x 4 x 4,
+# its depth in the push constants' padding.
+spirv_compute=(f:SpirvStmtWord):>string=>$unsafe {
+    sv_translated=dict<int64 bool>()
+    sv_reset("compute")
+    sv_utype=prune(SpirvStmtWord(fns.ptr[f].ptypes[1]))
+    let grid=prune(fns.ptr[f].ptypes[0]) =? T_IVEC2 or prune(fns.ptr[f].ptypes[0]) =? T_IVEC3
+    let grid3=prune(fns.ptr[f].ptypes[0]) =? T_IVEC3
+    sv_fn_id(f);
+    sv_drain()
+    let main=sv_new()
+    let head:array<int64>=[]
+    sv_ins(@head 54 [sv_void() main 0 sv_fntype(sv_void() [])])
+    sv_start_fn()
+    let params=sv_pc_get(SV_PC_PARAMS)
+    let idx:SpirvStmtWord=0
+    let inside:SpirvStmtWord=0
+    if grid {
+        sv_group=[8 8 1]
+        if grid3 {sv_group=[4 4 4]}
+        let i=sv_i32()
+        let uv3=sv_type_key("uv3" 23 [sv_u32() 3])
+        let gid=sv_load(uv3 sv_builtin_var(uv3 SC_INPUT 28))
+        let x=sv_val(124 i [sv_val(81 sv_u32() [gid 0])])
+        let y=sv_val(124 i [sv_val(81 sv_u32() [gid 1])])
+        idx=sv_val(80 sv_veci(2) [x y])
+        inside=sv_val(167 sv_bool() [sv_val(177 sv_bool() [x sv_pc_get(SV_PC_VSTRIDE)]) sv_val(177 sv_bool() [y sv_pc_get(SV_PC_ISTRIDE)])])
+        if grid3 {
+            let z=sv_val(124 i [sv_val(81 sv_u32() [gid 2])])
+            idx=sv_val(80 sv_veci(3) [x y z])
+            inside=sv_val(167 sv_bool() [inside sv_val(177 sv_bool() [z sv_pc_get(SV_PC_DEPTH)])])
+        }
+    }
+    else {
+        idx=sv_invocation()
+        inside=sv_val(177 sv_bool() [idx sv_pc_get(SV_PC_VSTRIDE)])
+    }
+    let done=sv_new()
+    let body=sv_new()
+    sv_code(247 [done 0])
+    sv_cond_branch(inside body done)
+    sv_begin(body)
+    sv_val(57 sv_void() [sv_fn_id(f) idx params]);
+    sv_branch(done);
+    sv_begin(done)
+    sv_code(253 [])
+    sv_dead=true
+    sv_finish_fn(head)
+    sv_drain()
+    let m=sv_module(5 main)
+    let dir=env("DEWY_SPIRV_DUMP")
+    if dir not=? none {
+        write_file("{dir}/{sv_dumped}.comp.spv" m);
+        sv_dumped += 1
+    }
+    m
+}

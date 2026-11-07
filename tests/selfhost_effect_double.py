@@ -48,6 +48,7 @@ LEAF_HOMES = {
     'safe_path_walk': 'safe_paths.jo',
     'glsl_stmts': 'glsl.jo',
     'msl_stmts': 'msl.jo',
+    'spirv_stmts': 'spirv.jo',
 }
 
 
