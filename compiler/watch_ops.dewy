@@ -1,0 +1,1362 @@
+$runtime_checks
+from p"checks_text.dewy" import (byte_rfind)
+from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"@lib/core/os.jo" import (delete_file eprint file_exists list_dir read_bytes read_file write_bytes write_file)
+from p"@lib/core/str.jo" import (to_int as jo_to_int)
+from p"@lib/core/str.jo" import (ends_with split starts_with trim)
+from p"arm64_emit.dewy" import (M_FLOAT M_SIGNED VF VI VS a_call_fix a_data_fix a_faddr_fix a_stub_fix)
+from p"arm64_encode.dewy" import (rd32)
+from p"ast.jo" import (NF_CHECKED NF_GLOBAL add_flag has_flag kid kid2 kid_c kid_d mk nkids nkids2 nodes set_list)
+from p"check.jo" import (FK_INIT FK_LAMBDA LF_ASSIGNED LF_EXPOSED LF_VALUECAP fns globals locals modules target_arm64 target_macos test_mode update_fn watch_build)
+from p"checks_thin.dewy" import (new_inst)
+from p"driver_pipeline.dewy" import (emit_function)
+from p"expr.jo" import (IN embedded_files)
+from p"inline_ops.dewy" import (rel_collect)
+from p"ir_builders.dewy" import (e_addi e_bin e_call e_copy e_iconst e_load e_mov e_ret e_store e_zero emit vreg)
+from p"lower.jo" import (BOX_HDR HK LFunc LK_HELPER LK_INST VC_AGG ctl data_size ffi_keys ffi_offs ffi_slot global_off glsl_of lfuncs opt_release ro_starts rodata)
+from p"lower_closures.dewy" import (env_layout)
+from p"lower_functions.dewy" import (begin_fn lower_function)
+from p"lower_helpers.dewy" import (field_list helper_params)
+from p"lower_primitives.dewy" import (e_gaddr lf_of_inst rt)
+from p"lower_scalars.dewy" import (push_i64)
+from p"lower_storage.dewy" import (blk br_to brif_to copy_at endc field_store_type hdr_load iff is_shared load_val lop mem_mode store_type store_val vc vt_of)
+from p"macho_format.dewy" import (MACHO_WATCH_AT MACHO_WATCH_CODE MACHO_WATCH_SIZE)
+from p"main.jo" import (img_data_addr img_ro_addr img_text_addr)
+from p"poly_closure.jo" import (poly_families)
+from p"repl.jo" import (repl_code_end)
+from p"type_ops.dewy" import (fixed_len type_str)
+from p"types.jo" import (T_VOID align_up fields prune structs talign targ tsize types variants)
+from p"util.jo" import (fatal files ice intern name_of pos_file pos_off)
+from p"watch.jo" import (WATCH_DATA_RESERVE WATCH_REGION WATCH_REGION_SIZE WH0 g_ids g_offs rl_form rl_kind rl_off rl_pos rl_tgt w32_dir_count w32_mtime w32_mtimes w_added w_assets w_changed w_decl_deps w_decl_hashes w_decl_stack w_emit w_ext w_failed_path w_init_inst w_init_lf w_kept w_mig_fns w_mig_lf w_mig_lfs w_mig_nt w_mig_od w_mig_todo w_migrate w_missing_inputs w_patch w_reset w_veneers wc_default wd_path wd_structs wk_lam wm_data_end wm_data_next wm_fcanon wm_fhash wm_fidx wm_files wm_fkeys wm_flatest wm_gaddr wm_game wm_gdesc wm_gidx wm_ginit wm_gkeys wm_gsig wm_gsize wm_loop wm_next wm_ro wm_stubs wm_top)
+from p"x64.jo" import (WATCH_CODE_AT WATCH_CODE_SIZE code data_fix fn_addr fn_len)
+from p"x64_emit.dewy" import (call_fix stub_fix)
+from p"x64_module.dewy" import (stub_addr)
+
+WatchWord:type=int64<overflow='wrap'>
+w_region=():>int64=>{
+    if target_macos {return MACHO_WATCH_AT}
+    WATCH_REGION
+}
+w_region_size=():>int64=>{
+    if target_macos {return MACHO_WATCH_SIZE}
+    WATCH_REGION_SIZE
+}
+wm_clear=():>void=>{
+    wm_fkeys=[]
+    wm_fcanon=[]
+    wm_flatest=[]
+    wm_fhash=[]
+    wm_fidx=dict<string int64>()
+    wm_gkeys=[]
+    wm_gaddr=[]
+    wm_gsize=[]
+    wm_gsig=[]
+    wm_ginit=[]
+    wm_gdesc=[]
+    wm_gidx=dict<string int64>()
+    wm_ro=dict<int64 int64>()
+    wm_stubs=[]
+    wm_files=[]
+}
+wm_add_fn=(k:string canon:WatchWord latest:WatchWord h:WatchWord):>void=>{
+    wm_fidx[k]=wm_fkeys.length
+    wm_fkeys.push(k)
+    wm_fcanon.push(canon)
+    wm_flatest.push(latest)
+    wm_fhash.push(h)
+}
+wm_add_glob=(k:string addr:WatchWord size:WatchWord sig:string ih:WatchWord desc:string):>void=>{
+    let i=wm_gidx.get(k)
+    if i not=? none {
+        wm_gaddr[i]=addr
+        wm_gsize[i]=size
+        wm_gsig[i]=sig
+        wm_ginit[i]=ih
+        wm_gdesc[i]=desc
+        return
+    }
+    wm_gidx[k]=wm_gkeys.length
+    wm_gkeys.push(k)
+    wm_gaddr.push(addr)
+    wm_gsize.push(size)
+    wm_gsig.push(sig)
+    wm_ginit.push(ih)
+    wm_gdesc.push(desc)
+}
+# ---- hashing ----
+wh_byte=(h:WatchWord b:WatchWord):>int64=>{
+    (h xor (b & 255)) * 1099511628211
+}
+wh_int=(h0:WatchWord v:WatchWord):>int64=>{
+    let h=h0
+    loop k in [0..8) {h=wh_byte(h v >> (8 * k))}
+    h
+}
+wh_str=(h0:WatchWord s:string):>int64=>{
+    let h=h0
+    loop c in (s as array<uint8>) {h=wh_byte(h WatchWord(c))}
+    wh_byte(h 0)
+}
+# ---- stable names for what a build contains ----
+wk_mod=(m:WatchWord):>string=>{
+    if m <? 0 or m >=? modules.length {return "?"}
+    files[WatchWord(modules[m].file)].path
+}
+wk_inst=(f:WatchWord):>string=>$unsafe {
+    let s=fns.ptr[f].sym
+    let base=s
+    if starts_with(base "f_") {base=base.byte_slice(2 (base as array<uint8>).length)}
+    let u=byte_rfind(base "_")
+    if u >? 0 {base=base.byte_slice(0 u)}
+    let t=""
+    if fns.ptr[f].fntype not=? 0 {t=wk_sig(WatchWord(fns.ptr[f].fntype) 0)}
+    let ta=""
+    loop a in fns.ptr[f].targs {ta="{ta},{wk_sig(a 0)}"}
+    let family=""
+    if fns.ptr[f].kind =? FK_LAMBDA and fns.ptr[f].target not=? 0 {family=wk_poly_layout(WatchWord(fns.ptr[f].target) 0)}
+    "{wk_mod(WatchWord(fns.ptr[f].mod))}|{base}|{fns.ptr[f].kind}|{t}|{ta}|{family}"
+}
+wk_lambda_keys=():>void=>$unsafe {
+    wk_lam=dict<int64 string>()
+    let insts:array<int64>=[]
+    let encl:array<int64>=[]
+    loop i in [0..lfuncs.length) {
+        if lfuncs.ptr[i].kind not=? LK_INST {continue}
+        let f=lfuncs.ptr[i].inst
+        if f <? 0 or fns.ptr[f].kind not=? FK_LAMBDA or fns.ptr[f].decl =? 0 {continue}
+        insts.push(f)
+        encl.push(wk_enclosing(f))
+    }
+    loop k in 0.. and f in insts {
+        let p=nodes.ptr[WatchWord(fns.ptr[f].decl)].pos
+        let rank:WatchWord=0
+        loop j in 0.. and g in insts {
+            if encl[j] =? encl[k] and nodes.ptr[WatchWord(fns.ptr[g].decl)].pos <? p {rank += 1}
+        }
+        let caps=""
+        loop c in fns.ptr[f].caps {
+            let inn=int64(c.inner)
+            let mode=WatchWord(locals.ptr[inn].flags) & LF_VALUECAP
+            caps="{caps},{name_of(WatchWord(locals.ptr[inn].name))}:{type_str(store_type(inn))}:{mode}"
+        }
+        let en="?"
+        if encl[k] not=? 0 and nodes.ptr[encl[k]].name not=? 0 {en=name_of(WatchWord(nodes.ptr[encl[k]].name))}
+        let t=""
+        if fns.ptr[f].fntype not=? 0 {t=wk_sig(WatchWord(fns.ptr[f].fntype) 0)}
+        let ta=""
+        loop a in fns.ptr[f].targs {ta="{ta},{wk_sig(a 0)}"}
+        let family=""
+        if fns.ptr[f].target not=? 0 {family=wk_poly_layout(WatchWord(fns.ptr[f].target) 0)}
+        wk_lam[f]="{wk_mod(WatchWord(fns.ptr[f].mod))}|lambda@{en}#{rank}|{FK_LAMBDA}|{t}|{caps}|{ta}|{family}"
+    }
+}
+# the top-level declaration a lambda is written in (0: none found)
+wk_enclosing=(f:WatchWord):>int64=>$unsafe {
+    let p=nodes.ptr[WatchWord(fns.ptr[f].decl)].pos
+    let m=WatchWord(fns.ptr[f].mod)
+    if m <? 0 or m >=? modules.length {return 0}
+    let best:WatchWord=0
+    loop d in modules[m].decls {
+        let dp=nodes.ptr[d].pos
+        if pos_file(dp) =? pos_file(p) and dp <=? p and (best =? 0 or dp >? nodes.ptr[best].pos) {best=d}
+    }
+    best
+}
+# a key per lfunc ("" for those without code); the same key in two builds is the same function
+wk_fn_keys=():>array<string>=>$unsafe {
+    wk_lambda_keys()
+    let out:array<string>=[]
+    let seen=dict<string int64>()
+    loop i in [0..lfuncs.length) {
+        if i >=? fn_addr.length or fn_addr[i] <? 0 {
+            out.push("")
+            continue
+        }
+        let k=""
+        if w_mig_lfs.get(i) not=? none {k="watch-mig|{lfuncs.ptr[i].name}"} else if lfuncs.ptr[i].kind =? LK_HELPER {
+            k="h|{lfuncs.ptr[i].hkind}|{wk_sig(lfuncs.ptr[i].htype 0)}"
+            if lfuncs.ptr[i].inst >=? 0 and lfuncs.ptr[i].inst <? fns.length and (lfuncs.ptr[i].hkind =? HK.thunk or lfuncs.ptr[i].hkind =? HK.partial or lfuncs.ptr[i].hkind =? HK.envdrop or lfuncs.ptr[i].hkind =? HK.envcopy) {k="{k}|{wk_inst(lfuncs.ptr[i].inst)}"}
+        }
+        else if lfuncs.ptr[i].inst =? w_init_inst {k="watch-init"} else if wk_lam.get(lfuncs.ptr[i].inst) not=? none {k=wk_lam[lfuncs.ptr[i].inst]}
+        else {k=wk_inst(lfuncs.ptr[i].inst)}
+        # (the same key twice: numbered in the order found, which builds keep)
+        let n=seen.get(k) ?? 0
+        seen[k]=n + 1
+        if n >? 0 {k="{k}#{n}"}
+        out.push(k)
+    }
+    out
+}
+# what a person calls the function of a key (for messages)
+wk_pretty=(k:string):>string=>{
+    let p=split(k "|")
+    if p.length <? 2 or p[0] =? "h" {return ""}
+    let nm=p[1]
+    if p.length >? 2 and p[2] =? "{FK_INIT}" {return ""}
+    if starts_with(nm "lambda@") {return "a lambda in {nm.byte_slice(7 byte_rfind(nm "#"))}"}
+    if starts_with(nm "__") {return ""}
+    nm
+}
+wk_glob=(g:WatchWord):>string=>$unsafe {
+    "{wk_mod(WatchWord(globals.ptr[g].mod))}|{name_of(WatchWord(globals.ptr[g].name))}"
+}
+# the layout of a type, as far as code depends on it
+wk_sig=(t0:WatchWord depth:WatchWord):>string=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    if k =? 'polyfn' {return wk_poly_layout(WatchWord(types.ptr[t].st) depth)}
+    if depth >? 6 {return type_str(t)}
+    if k =? 'fn_' or k =? 'cfn' {
+        let out="{k}:{types.ptr[t].mutmask}:{name_of(WatchWord(types.ptr[t].st))}("
+        loop i in [0..WatchWord(types.ptr[t].nargs)) {out="{out}{wk_sig(targ(t i) depth + 1)},"}
+        return "{out})->{wk_sig(WatchWord(types.ptr[t].elem) depth + 1)}"
+    }
+    if k =? 'struct_' or k =? 'enum_' {
+        let si=WatchWord(types.ptr[t].st)
+        let out="{type_str(t)}:{tsize(t)}("
+        loop i in [0..WatchWord(structs.ptr[si].nfields)) {
+            let f=WatchWord(structs.ptr[si].fields) + i
+            out="{out}{name_of(WatchWord(fields.ptr[f].name))}={wk_sig(field_store_type(f) depth + 1)}@{fields.ptr[f].offset},"
+        }
+        loop i in [0..WatchWord(structs.ptr[si].nvariants)) {
+            let v=WatchWord(structs.ptr[si].variants) + i
+            out="{out}|{name_of(WatchWord(variants.ptr[v].name))}"
+        }
+        "{out})"
+    }
+    else if k =? 'array' or k =? 'opt' or k =? 'ptr' or k =? 'box' {"{k}({wk_sig(WatchWord(types.ptr[t].elem) depth + 1)})"} else if k =? 'fixed' {"{k}{fixed_len(t)}({wk_sig(WatchWord(types.ptr[t].elem) depth + 1)})"}
+    else if k =? 'tuple' {
+        let out="("
+        loop fo in field_list(t) {out="{out}{wk_sig(fo[0] depth + 1)},"}
+        "{out})"
+    }
+    else {type_str(t)}
+}
+# Family IDs are compilation-local. Watch keys use source identity, enclosing
+# concrete type arguments, and the complete canonical environment layout.
+wk_poly_layout=(family:WatchWord depth:WatchWord):>string=>$unsafe {
+    let d=poly_families[family].decl
+    let out="generic@{files[pos_file(nodes.ptr[d].pos)].path}:{pos_off(nodes.ptr[d].pos)}"
+    if depth >? 6 {return out}
+    loop frame in poly_families[family].scope.frames {
+        let f=int64(frame.inst)
+        if f <=? 0 {continue}
+        loop t in fns.ptr[f].targs {out="{out}<{wk_sig(t depth + 1)}>"}
+    }
+    let env=poly_families[family].envfn
+    env_layout(env)
+    out="{out}[{fns.ptr[env].env_size}:"
+    loop cap in fns.ptr[env].caps {
+        let inner=int64(cap.inner)
+        let mode=WatchWord(locals.ptr[inner].flags) & (LF_VALUECAP | LF_ASSIGNED | LF_EXPOSED)
+        out="{out}{name_of(WatchWord(locals.ptr[inner].name))}@{locals.ptr[inner].env_off}:{mode}:{is_shared(inner)}={wk_sig(store_type(inner) depth + 1)},"
+    }
+    "{out}]"
+}
+# a global's declaration, as text without comments (a change re-runs it)
+wk_decl_hash=(g:WatchWord):>int64=>$unsafe {
+    let cached=w_decl_hashes.get(g)
+    if cached not=? none {return cached}
+    if w_decl_stack.contains(g) {return wh_str(WH0 wk_glob(g))}
+    let d=WatchWord(globals.ptr[g].decl)
+    if d =? 0 {return 0}
+    w_decl_stack.push(g)
+    let h=wk_text_hash(nodes.ptr[d].pos WH0)
+    # and what it is made from that is not its text: the GPU programs made from shader functions,
+    # and files named in it (an image loaded with embed or read_bytes...)
+    let refs:array<int64>=[]
+    let seen:array<int64>=[]
+    h=wk_init_scan(WatchWord(nodes.ptr[d].b) WatchWord(globals.ptr[g].mod) h @refs @seen)
+    w_decl_deps[g]=refs
+    loop other in refs {
+        h=wh_str(h wk_glob(other))
+        h=wh_int(h wk_decl_hash(other))
+    }
+    w_decl_stack.pop();
+    w_decl_hashes[g]=h
+    h
+}
+# the text of the statement or declaration at p (without comments)
+wk_text_hash=(p:WatchWord h0:WatchWord):>int64=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return h0}
+    let src=files[f].src
+    let i=pos_off(p)
+    let h=h0
+    # its line, and the lines after it indented more (or blank)
+    let ls=i
+    loop ls >? 0 and (src as array<uint8>)[ls - 1] not=? b'\n' {ls -= 1}
+    let ind=i - ls
+    let first=true
+    loop i <? (src as array<uint8>).length {
+        let e=find_byte(src b'\n' i)
+        if e <? 0 {e=(src as array<uint8>).length}
+        let line=src.byte_slice(i e)
+        if not first {
+            let t=trim(line)
+            let lead=(line as array<uint8>).length - (trim_start(line) as array<uint8>).length
+            if (t as array<uint8>).length >? 0 and lead <=? ind {break}
+        }
+        first=false
+        h=wh_str(h trim(line.byte_slice(0 repl_code_end(line))))
+        i=e + 1
+    }
+    h
+}
+# the program's top-level statements (not declarations), which run once, at start
+wk_top_hash=():>int64=>$unsafe {
+    let h=WH0
+    loop m in modules {
+        if m.is_prelude {continue}
+        loop d in m.inits {
+            if has_flag(d NF_GLOBAL) or nodes.ptr[d].pos =? 0 {continue}
+            h=wk_text_hash(nodes.ptr[d].pos h)
+        }
+    }
+    h
+}
+wk_loop=():>int64=>{
+    let out:WatchWord=0
+    if update_fn not=? 0 {out=1}
+    if draw_present() {out |= 2}
+    out
+}
+# Follow statically resolved calls made by an initializer. Merely creating a
+# closure does not execute its body. Each specialization is scanned once per
+# initializer, including mutually recursive helpers; indirect calls stay opaque.
+wk_init_scan=(n:WatchWord m:WatchWord h0:WatchWord @refs:array<int64> @seen:array<int64>):>int64=>$unsafe {
+    if n <=? 0 or n >=? nodes.length {return h0}
+    let h=h0
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fnref' and nodes.ptr[n].aux not=? 2 {return h}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(2) {
+        let g=WatchWord(nodes.ptr[n].sym)
+        if not refs.contains(g) {refs.push(g)}
+    }
+    if k =? 'call' and (nodes.ptr[n].aux =? 0 or nodes.ptr[n].aux =? 1 and nodes.ptr[WatchWord(nodes.ptr[n].a)].kind =? 'fnref' and nodes.ptr[WatchWord(nodes.ptr[n].a)].aux =? 2) {
+        let f=if nodes.ptr[n].aux =? 0 {WatchWord(nodes.ptr[n].sym)} else {WatchWord(nodes.ptr[WatchWord(nodes.ptr[n].a)].sym)}
+        if f >? 0 and f <? fns.length and not seen.contains(f) {
+            seen.push(f)
+            h=wk_init_scan(WatchWord(fns.ptr[f].body) WatchWord(fns.ptr[f].mod) h @refs @seen)
+        }
+    }
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.shader)) {
+        let src=glsl_of.get(n)
+        if src not=? none {h=wh_str(h src)}
+    }
+    if k =? 'str_lit' {
+        let nm=name_of(WatchWord(nodes.ptr[n].sval))
+        if (nm as array<uint8>).length >? 0 and (nm as array<uint8>).length <? 400 and find_byte(nm b'\n') <? 0 {
+            let p=nm
+            if not starts_with(p "/") and m >=? 0 and m <? modules.length and file_exists("{modules[m].dir}/{nm}") {p="{modules[m].dir}/{nm}"}
+            if file_exists(p) {
+                let b=read_file(p)
+                if b not=? none {
+                    h=wh_str(h b)
+                    if not w_assets.contains(p) {w_assets.push(p)}
+                }
+            }
+        }
+    }
+    h=wk_init_scan(WatchWord(nodes.ptr[n].a) m h @refs @seen)
+    h=wk_init_scan(WatchWord(nodes.ptr[n].b) m h @refs @seen)
+    h=wk_init_scan(kid_c(n) m h @refs @seen)
+    h=wk_init_scan(kid_d(n) m h @refs @seen)
+    loop i in [0..nkids(n)) {h=wk_init_scan(kid(n i) m h @refs @seen)}
+    loop i in [0..nkids2(n)) {h=wk_init_scan(kid2(n i) m h @refs @seen)}
+    h
+}
+watch_record_image=():>void=>$unsafe {
+    wm_clear()
+    let keys=wk_fn_keys()
+    relocs_collect()
+    if env("DEWY_WATCH_TRACE") not=? none {watch_trace(keys)}
+    loop i in [0..keys.length) {
+        if (keys[i] as array<uint8>).length =? 0 {continue}
+        let a=img_text_addr + fn_addr[i]
+        wm_add_fn(keys[i] a a fn_hash(i keys))
+    }
+    loop [k off] in global_off {
+        wd_path=[]
+        wm_add_glob(wk_glob(k) img_data_addr + off gsize(k) wk_sig(WatchWord(globals.ptr[k].type) 0) wk_decl_hash(k) wd_desc(WatchWord(globals.ptr[k].type)))
+    }
+    wm_add_glob("__sp0" img_data_addr 8 "" 0 "")
+    loop i in [0..ffi_offs.length) {wm_add_glob(ffi_keys[i] img_data_addr + ffi_offs[i] 8 "" 0 "")}
+    loop k in [0..ro_starts.length) {
+        let h=ro_item_hash(k)
+        if wm_ro.get(h) =? none {wm_ro[h]=img_ro_addr + ro_starts[k]}
+    }
+    wm_stubs=[]
+    loop s in stub_addr {
+        if s >=? 0 {wm_stubs.push(img_text_addr + s)} else {wm_stubs.push(0)}
+    }
+    wm_next=WATCH_REGION + 4096
+    # (macOS: the region holds the program's own code too)
+    if target_macos {wm_next=MACHO_WATCH_CODE + ((code.length + 15) & ~15) + rodata.length}
+    wm_data_next=align_up(img_data_addr + data_size + 8 16)
+    wm_data_end=img_data_addr + data_size + 8 + WATCH_DATA_RESERVE
+    wm_game=not test_mode and (update_fn not=? 0 or draw_present())
+    wm_loop=wk_loop()
+    wm_top=wk_top_hash()
+    wm_files_collect()
+}
+draw_present=():>bool=>{
+    loop m in modules {
+        if m.is_main {return m.names.get(intern("draw")) not=? none}
+    }
+    false
+}
+wm_files_collect=():>void=>{
+    wm_files=[]
+    loop m in modules {wm_files.push(files[int64(m.file)].path)}
+    # A newly created, higher-priority named module can replace a fallback.
+    loop p in w_missing_inputs {
+        if not wm_files.contains(p) {wm_files.push(p)}
+    }
+    loop a in w_assets {
+        if not wm_files.contains(a) {wm_files.push(a)}
+    }
+    loop a in embedded_files {
+        if not wm_files.contains(a) {wm_files.push(a)}
+    }
+}
+gsize=(g:WatchWord):>int64=>$unsafe {
+    let sz=tsize(WatchWord(globals.ptr[g].type))
+    if sz <? 8 {sz=8}
+    sz
+}
+rl_len=(r:WatchWord):>int64=>{
+    if rl_form[r] =? 2 {return 8}
+    4
+}
+relocs_collect=():>void=>{
+    g_offs=[]
+    g_ids=[]
+    let pairs:array<int64>=[]
+    loop [k off] in global_off {pairs.push(k)}
+    pairs.sort(key=(g:int64)=>global_off[g])
+    loop g in pairs {
+        g_offs.push(global_off[g])
+        g_ids.push(g)
+    }
+    let order:array<int64>=[]
+    # (arm64: calls by BL, function addresses by ADRP + ADD, as x86-64's calls and data)
+    let cf=call_fix
+    let df=data_fix
+    let sf=stub_fix
+    let forms:array<int64>=[]
+    if target_arm64 {
+        cf=[a_call_fix... a_faddr_fix...]
+        df=a_data_fix
+        sf=a_stub_fix
+        loop f in a_call_fix {forms.push(1)}
+        loop f in a_faddr_fix {forms.push(2)}
+        loop f in a_data_fix {forms.push(2)}
+        loop f in a_stub_fix {forms.push(1)}
+    }
+    let n=cf.length + df.length + sf.length
+    let pos_all:array<int64>=[]
+    loop f in cf {pos_all.push(f[0])}
+    loop f in df {pos_all.push(f[0])}
+    loop f in sf {pos_all.push(f[0])}
+    loop i in [0..n) {order.push(i)}
+    order.sort(key=(i:int64)=>pos_all[i])
+    rl_pos=[]
+    rl_kind=[]
+    rl_tgt=[]
+    rl_off=[]
+    rl_form=[]
+    let nc=cf.length
+    let nd=df.length
+    loop i in order {
+        rl_pos.push(pos_all[i])
+        if target_arm64 {rl_form.push(forms[i])} else {rl_form.push(0)}
+        if i <? nc {
+            rl_kind.push(0)
+            rl_tgt.push(cf[i][1])
+            rl_off.push(0)
+        }
+        else if i <? nc + nd {
+            let f=df[i - nc]
+            if f[1] =? 0 {
+                let it=ro_item_of(f[2])
+                rl_kind.push(1)
+                rl_tgt.push(it)
+                rl_off.push(f[2] - ro_starts[it])
+            }
+            else if ffi_slot.get(f[2]) not=? none {
+                rl_kind.push(4)
+                rl_tgt.push(f[2])
+                rl_off.push(0)
+            }
+            else {
+                let g=global_at(f[2])
+                rl_kind.push(2)
+                rl_tgt.push(g)
+                if g <? 0 {rl_off.push(f[2])} else {rl_off.push(f[2] - global_off[g])}
+            }
+        }
+        else {
+            rl_kind.push(3)
+            rl_tgt.push(sf[i - nc - nd][1])
+            rl_off.push(0)
+        }
+    }
+}
+ro_item_of=(off:WatchWord):>int64=>{
+    let lo:WatchWord=0
+    let hi=ro_starts.length
+    loop lo <? hi {
+        let mid=(lo + hi) // 2
+        if ro_starts[mid] <=? off {lo=mid + 1} else {hi=mid}
+    }
+    if lo =? 0 {ice("read-only data at {off} is in no item")}
+    lo - 1
+}
+ro_item_end=(k:WatchWord):>int64=>{
+    if k + 1 <? ro_starts.length {return ro_starts[k + 1]}
+    rodata.length
+}
+ro_item_hash=(k:WatchWord):>int64=>{
+    let h=WH0
+    loop j in [ro_starts[k]..ro_item_end(k)) {h=wh_byte(h WatchWord(rodata[j]))}
+    h
+}
+# the global holding data offset off (-1: the initial stack pointer's word at 0)
+global_at=(off:WatchWord):>int64=>{
+    if off <? 8 {return -1}
+    let lo:WatchWord=0
+    let hi=g_offs.length
+    loop lo <? hi {
+        let mid=(lo + hi) // 2
+        if g_offs[mid] <=? off {lo=mid + 1} else {hi=mid}
+    }
+    if lo =? 0 {ice("data at {off} is in no global")}
+    let g=g_ids[lo - 1]
+    if off >=? g_offs[lo - 1] + gsize(g) {ice("data at {off} is in no global")}
+    g
+}
+# the first reference at or after code position p
+rl_first=(p:WatchWord):>int64=>{
+    let lo:WatchWord=0
+    let hi=rl_pos.length
+    loop lo <? hi {
+        let mid=(lo + hi) // 2
+        if rl_pos[mid] <? p {lo=mid + 1} else {hi=mid}
+    }
+    lo
+}
+# a function's code with what it refers to by name rather than by place: equal hashes in two
+# builds mean the same code
+fn_hash=(lf:WatchWord keys:array<string>):>int64=>{
+    let s=fn_addr[lf]
+    let e=s + fn_len[lf]
+    let h=WH0
+    let r=rl_first(s)
+    let p=s
+    loop p <? e {
+        if r <? rl_pos.length and rl_pos[r] =? p {
+            h=wh_int(h p - s)
+            h=wh_str(h rl_name(r keys))
+            h=wh_int(h rl_off[r])
+            # (arm64: the instructions without their offsets)
+            if rl_form[r] =? 1 {h=wh_int(h rd32(p) & 0xFC000000)} else if rl_form[r] =? 2 {
+                h=wh_int(h rd32(p) & 0x9F00001F)
+                h=wh_int(h rd32(p + 4) & 0xFFC003FF)
+            }
+            p += rl_len(r)
+            r += 1
+        }
+        else {
+            h=wh_byte(h WatchWord(code[p]))
+            p += 1
+        }
+    }
+    h
+}
+rl_name=(r:WatchWord keys:array<string>):>string=>{
+    let k=rl_kind[r]
+    let t=rl_tgt[r]
+    if k =? 0 {return "F{keys[t]}"}
+    if k =? 1 {return "R{ro_item_hash(t)}"}
+    if k =? 2 {
+        if t <? 0 {return "G__sp0"}
+        return "G{wk_glob(t)}"
+    }
+    if k =? 4 {return "G{ffi_keys[ffi_slot[t]]}"}
+    "S{t}"
+}
+watch_globals_to_init=():>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    loop [k off] in global_off {
+        let key=wk_glob(k)
+        let i=wm_gidx.get(key)
+        if i not=? none {
+            if wm_ginit[i] =? wk_decl_hash(k) {
+                # (unchanged, or a layout to convert: watch_globals_to_migrate)
+                if wm_gsig[i] =? wk_sig(WatchWord(globals.ptr[k].type) 0) or (wm_gdesc[i] as array<uint8>).length >? 0 {continue}
+            }
+        }
+        if globals.ptr[k].decl =? 0 {continue}
+        out.push(k)
+    }
+    out.sort()
+    # Module registration order can differ from initialization order. Initialize
+    # changed dependencies before their consumers, including across imports.
+    let ordered:array<int64>=[]
+    let seen:array<int64>=[]
+    loop g in out {wk_init_order(g out @seen @ordered)}
+    ordered
+}
+wk_init_order=(g:WatchWord selected:array<int64> @seen:array<int64> @out:array<int64>):>void=>{
+    if seen.contains(g) {return}
+    seen.push(g)
+    let deps=w_decl_deps.get(g)
+    if deps not=? none {
+        loop other in deps {
+            if selected.contains(other) {wk_init_order(other selected @seen @out)}
+        }
+    }
+    out.push(g)
+}
+# (after the program's functions are lowered) a function initializing them, lowered too (the
+# globals it refers to have room already: the modules' own initialization refers to them)
+watch_lower_inits=():>void=>$unsafe {
+    let decls:array<int64>=[]
+    loop g in watch_globals_to_init() {
+        let d=WatchWord(globals.ptr[g].decl)
+        if nodes.ptr[d].b not=? 0 and nkids(d) =? 0 {
+            let old=wm_gidx.get(wk_glob(g))
+            if old not=? none {
+                if wm_gsig[old] =? wk_sig(WatchWord(globals.ptr[g].type) 0) {
+                    # Reusing live storage is an assignment, not first-time
+                    # initialization: retain the new value and release the old.
+                    let id=mk('ident' nodes.ptr[d].pos)
+                    nodes.ptr[id].name=globals.ptr[g].name
+                    nodes.ptr[id].sym=int32(g)
+                    nodes.ptr[id].aux=int32(2)
+                    nodes.ptr[id].type=globals.ptr[g].type
+                    add_flag(id NF_CHECKED)
+                    let assign=mk('assign' nodes.ptr[d].pos)
+                    nodes.ptr[assign].op=int32(47)
+                    nodes.ptr[assign].a=int32(id)
+                    nodes.ptr[assign].b=nodes.ptr[d].b
+                    d=assign
+                }
+            }
+        }
+        if not decls.contains(d) {decls.push(d)}
+    }
+    w_init_inst=new_inst(FK_INIT 0 "watch_init")
+    let b=mk('block' 0)
+    set_list(b decls)
+    fns.ptr[w_init_inst].body=int32(b)
+    fns.ptr[w_init_inst].ret=int32(T_VOID)
+    fns.ptr[w_init_inst].state=2
+    let nl=lfuncs.length
+    w_init_lf=lf_of_inst(w_init_inst)
+    let i=nl
+    loop i <? lfuncs.length {
+        lower_function(i)
+        if opt_release {rel_collect()} else {emit_function()}
+        i += 1
+    }
+}
+# ---- a patch for the running program ----
+# messages (lib/std/watch.jo): words [op, a, b], then for op 1 and 4 b bytes
+#   1 write the bytes at address a    2 run the function at a    3 jump from a to b
+#   4 show text over the game (a: 1 for errors; empty: nothing)   5 the end: apply
+wp_put=(op:WatchWord a:WatchWord bytes:array<uint8>):>void=>{
+    push_i64(@w_patch op)
+    push_i64(@w_patch a)
+    push_i64(@w_patch bytes.length)
+    loop x in bytes {w_patch.push(x)}
+}
+wp_jump=(from_:WatchWord to:WatchWord):>void=>{
+    push_i64(@w_patch 3)
+    push_i64(@w_patch from_)
+    push_i64(@w_patch to)
+}
+wp_run=(a:WatchWord):>void=>{
+    push_i64(@w_patch 2)
+    push_i64(@w_patch a)
+    push_i64(@w_patch 0)
+}
+wp_end=():>void=>{
+    push_i64(@w_patch 5)
+    push_i64(@w_patch 0)
+    push_i64(@w_patch 0)
+}
+w_place=(n:WatchWord):>int64=>{
+    let a=align_up(wm_next 16)
+    wm_next=a + n
+    if wm_next >? w_region() + w_region_size() {fatal(0 "dewy-core watch: no room left for new code (restart the program: r)")}
+    a
+}
+# (DEWY_WATCH_TRACE=file: each function's key, then what its code refers to and its bytes)
+watch_trace=(keys:array<string>):>void=>{
+    let out=""
+    loop i in [0..keys.length) {
+        if (keys[i] as array<uint8>).length =? 0 {continue}
+        out="{out}{keys[i]}\n"
+        let s=fn_addr[i]
+        let r=rl_first(s)
+        loop r <? rl_pos.length and rl_pos[r] <? s + fn_len[i] {
+            out="{out}  @{rl_pos[r] - s} {rl_name(r keys)}+{rl_off[r]}\n"
+            if rl_kind[r] =? 1 {
+                let t=rl_tgt[r]
+                let b=""
+                loop q in [ro_starts[t]..ro_item_end(t)) {
+                    let c=rodata[q]
+                    if c >=? 32 and c <? 127 {b="{b}{__str_from_bytes(rodata[q..q + 1))}"} else {b="{b}\\{WatchWord(c)}"}
+                }
+                out="{out}   = ({ro_item_end(t) - ro_starts[t]}) {b}\n"
+            }
+            r += 1
+        }
+        let h=""
+        loop p in [s..s + fn_len[i]) {h="{h}{WatchWord(code[p])} "}
+        out="{out}  {h}\n"
+    }
+    write_file(env("DEWY_WATCH_TRACE") ?? "" out);
+}
+watch_make_patch=():>bool=>$unsafe {
+    w_patch=[]
+    w_changed=[]
+    w_reset=[]
+    w_added=[]
+    let keys=wk_fn_keys()
+    relocs_collect()
+    if env("DEWY_WATCH_TRACE") not=? none {watch_trace(keys)}
+    let inits=watch_globals_to_init()
+    w_kept=[]
+    loop g in w_migrate {
+        let nm=name_of(WatchWord(globals.ptr[g].name))
+        if not starts_with(nm "__") {w_kept.push(nm)}
+    }
+    loop g in inits {
+        let nm=name_of(WatchWord(globals.ptr[g].name))
+        if starts_with(nm "__") {continue}
+        if wm_gidx.get(wk_glob(g)) =? none {w_added.push(nm)} else {w_reset.push(nm)}
+    }
+    # globals: where each is in the program (new ones, and those whose layout changed, get new
+    # room)
+    let gaddr=dict<int64 int64>()
+    let moved=dict<int64 bool>()
+    loop [k off] in global_off {
+        let key=wk_glob(k)
+        let sig=wk_sig(WatchWord(globals.ptr[k].type) 0)
+        let ih=wk_decl_hash(k)
+        let sz=gsize(k)
+        let a:WatchWord=0
+        let i=wm_gidx.get(key)
+        if i not=? none {
+            if wm_gsig[i] =? sig {a=wm_gaddr[i]}
+        }
+        if a =? 0 {
+            let al=talign(WatchWord(globals.ptr[k].type))
+            if al <? 16 {al=16}
+            a=align_up(wm_data_next al)
+            wm_data_next=a + sz
+            if wm_data_next >? wm_data_end {fatal(0 "dewy-core watch: no room left for new globals (restart the program: r)")}
+            moved[k]=true
+        }
+        gaddr[k]=a
+        wd_path=[]
+        wm_add_glob(key a sz sig ih wd_desc(WatchWord(globals.ptr[k].type)))
+    }
+    let ffi_addr=dict<int64 int64>()
+    loop fi in [0..ffi_offs.length) {
+        let off=ffi_offs[fi]
+        let k=ffi_keys[fi]
+        let i=wm_gidx.get(k)
+        if i not=? none {ffi_addr[off]=wm_gaddr[i]} else {
+            let a=align_up(wm_data_next 8)
+            wm_data_next=a + 8
+            ffi_addr[off]=a
+            wm_add_glob(k a 8 "" 0 "")
+        }
+    }
+    # read-only data: what the program does not have yet goes into the code region
+    let ro_addr=fill(0 ro_starts.length)
+    loop k in [0..ro_starts.length) {
+        let h=ro_item_hash(k)
+        let got=wm_ro.get(h)
+        if got not=? none {ro_addr[k]=got} else {
+            let n=ro_item_end(k) - ro_starts[k]
+            let a=w_place(n)
+            ro_addr[k]=a
+            wm_ro[h]=a
+            let ro0=ro_starts[k]
+            wp_put(1 a rodata[ro0..ro_item_end(k)))
+        }
+    }
+    # functions: new ones, and those whose code changed or whose globals moved, get new code
+    let place=fill(0 keys.length)
+    loop i in [0..keys.length) {
+        let k=keys[i]
+        if (k as array<uint8>).length =? 0 {continue}
+        let h=fn_hash(i keys)
+        let fresh=true
+        let j=wm_fidx.get(k)
+        if j not=? none {
+            if wm_fhash[j] =? h and not refers_moved(i moved) {fresh=false}
+        }
+        if not fresh {continue}
+        let a=w_place(fn_len[i])
+        place[i]=a
+        let j=wm_fidx.get(k)
+        if j not=? none {
+            wm_flatest[j]=a
+            wm_fhash[j]=h
+            let p=wk_pretty(k)
+            # (the program's own functions: not the library's, nor what is made for types)
+            let user=lfuncs.ptr[i].kind =? LK_INST and lfuncs.ptr[i].inst >=? 0 and not modules[WatchWord(fns.ptr[lfuncs.ptr[i].inst].mod)].is_prelude
+            if user and (p as array<uint8>).length >? 0 and not w_changed.contains(p) {w_changed.push(p)}
+        }
+        else {wm_add_fn(k a a h)}
+    }
+    # their code, with what it refers to where it is in the program
+    loop i in [0..keys.length) {
+        if place[i] =? 0 {continue}
+        let a=place[i]
+        let s=fn_addr[i]
+        let n=fn_len[i]
+        let b=code[s..s + n)
+        let r=rl_first(s)
+        loop r <? rl_pos.length and rl_pos[r] <? s + n {
+            let p=rl_pos[r] - s
+            let k=rl_kind[r]
+            let t=rl_tgt[r]
+            let target:WatchWord=0
+            if k =? 0 {
+                target=wm_fcanon[wm_fidx[keys[t]]]
+            }
+            else if k =? 1 {target=ro_addr[t] + rl_off[r]} else if k =? 2 {
+                if t <? 0 {target=wm_gaddr[wm_gidx["__sp0"]] + rl_off[r]} else {target=gaddr[t] + rl_off[r]}
+            }
+            else if k =? 4 {target=ffi_addr[t]} else {target=wm_stubs[t]}
+            let f=rl_form[r]
+            if f =? 0 {
+                let d=target - (a + p + 4)
+                loop q in [0..4) {b[p + q]=uint8((d >> (8 * q)) & 255)}
+            }
+            else if f =? 1 {
+                # (BL reaches 128 MB: further, through a veneer in the region)
+                if target - (a + p) >=? 1 << 27 or target - (a + p) <? -(1 << 27) {target=w_veneer(target)}
+                put32(@b p (get32(b p) & 0xFC000000) | (((target - (a + p)) // 4) & 0x3FFFFFF))
+            }
+            else {
+                let pages=(target >> 12) - ((a + p) >> 12)
+                put32(@b p (get32(b p) & 0x9F00001F) | ((pages & 3) << 29) | (((pages >> 2) & 0x7FFFF) << 5))
+                put32(@b p + 4 (get32(b p + 4) & 0xFFC003FF) | ((target & 0xFFF) << 10))
+            }
+            r += 1
+        }
+        wp_put(1 a b)
+    }
+    # replaced functions: a jump from their first address
+    loop i in [0..keys.length) {
+        if place[i] =? 0 {continue}
+        let j=wm_fidx[keys[i]]
+        if wm_fcanon[j] not=? place[i] {wp_jump(wm_fcanon[j] place[i])}
+    }
+    # then globals whose layout changed are converted, and new and changed ones initialized
+    if w_mig_lf >=? 0 {w_run_fn(wm_flatest[wm_fidx[keys[w_mig_lf]]])}
+    if w_init_lf >=? 0 and fn_addr.length >? w_init_lf and fn_addr[w_init_lf] >=? 0 and inits.length >? 0 {
+        w_run_fn(wm_flatest[wm_fidx[keys[w_init_lf]]])
+    }
+    wp_put(4 0 [])
+    wp_end()
+    wm_loop=wk_loop()
+    wm_top=wk_top_hash()
+    wm_files_collect()
+    true
+}
+get32=(b:array<uint8> p:WatchWord):>int64=>{
+    WatchWord(b[p]) | (WatchWord(b[p + 1]) << 8) | (WatchWord(b[p + 2]) << 16) | (WatchWord(b[p + 3]) << 24)
+}
+put32=(@b:array<uint8> p:WatchWord x:WatchWord):>void=>{
+    loop q in [0..4) {b[p + q]=uint8((x >> (8 * q)) & 255)}
+}
+w_veneer=(target:WatchWord):>int64=>{
+    let got=w_veneers.get(target)
+    if got not=? none {return got}
+    let v=w_place(16)
+    let b:array<uint8>=[]
+    loop x in [0x58000050 0xD61F0200 target & 0xFFFFFFFF (target >> 32) & 0xFFFFFFFF] {
+        loop q in [0..4) {b.push(uint8((x >> (8 * q)) & 255))}
+    }
+    wp_put(1 v b)
+    w_veneers[target]=v
+    v
+}
+# run a function in the program (through an entry that keeps the stack aligned as calls expect)
+w_run_fn=(a:WatchWord):>void=>{
+    if target_arm64 {
+        # stp x29, x30, [sp, #-16]!; mov x29, sp; ldr x16, a; blr x16; ldp x29, x30, [sp], #16; ret
+        let e=w_place(32)
+        let st:array<uint8>=[]
+        loop x in [0xA9BF7BFD 0x910003FD 0x58000090 0xD63F0200 0xA8C17BFD 0xD65F03C0 a & 0xFFFFFFFF (a >> 32) & 0xFFFFFFFF] {
+            loop q in [0..4) {st.push(uint8((x >> (8 * q)) & 255))}
+        }
+        wp_put(1 e st)
+        wp_run(e)
+        return
+    }
+    let e=w_place(16)
+    let stub:array<uint8>=[0x48 0x83 0xEC 0x08 0xE8 0 0 0 0 0x48 0x83 0xC4 0x08 0xC3]
+    let d=a - (e + 9)
+    loop q in [0..4) {stub[5 + q]=uint8((d >> (8 * q)) & 255)}
+    wp_put(1 e stub)
+    wp_run(e)
+}
+refers_moved=(lf:WatchWord moved:dict<int64 bool>):>bool=>{
+    if moved.length =? 0 {return false}
+    let s=fn_addr[lf]
+    let r=rl_first(s)
+    loop r <? rl_pos.length and rl_pos[r] <? s + fn_len[lf] {
+        if rl_kind[r] =? 2 and rl_tgt[r] >=? 0 and moved.get(rl_tgt[r]) not=? none {return true}
+        r += 1
+    }
+    false
+}
+w_dir=(f:string):>string=>{
+    let s=byte_rfind(f "/")
+    if s <? 0 {return "."}
+    if s =? 0 {return "/"}
+    f.byte_slice(0 s)
+}
+w_base=(f:string):>string=>{
+    let s=byte_rfind(f "/")
+    if s <? 0 {return f}
+    f.byte_slice(s + 1 (f as array<uint8>).length)
+}
+watch_missing_input=(path:string):>void=>{
+    # Test watching uses ordinary code generation, but still needs failed
+    # import candidates so creating the missing file can recover the build.
+    if watch_build or (w_failed_path as array<uint8>).length >? 0 {w_missing_inputs.push(path)}
+}
+watch_save_failed_inputs=():>void=>{
+    if (w_failed_path as array<uint8>).length =? 0 {return}
+    let inputs:array<string>=[]
+    loop f in files {inputs.push(f.path)}
+    loop f in embedded_files {inputs.push(f)}
+    loop f in w_assets {inputs.push(f)}
+    loop f in w_missing_inputs {inputs.push(f)}
+    write_file(w_failed_path inputs.join("\n"));
+}
+watch_read_failed_inputs=(path:string):>void=>{
+    loop f in split(read_file(path) ?? "" "\n") {
+        if (f as array<uint8>).length >? 0 and not wm_files.contains(f) {wm_files.push(f)}
+    }
+    delete_file(path);
+}
+watch_write_result=(res:string):>void=>{
+    let gm:WatchWord=0
+    if wm_game {gm=1}
+    let t="N\t{wm_next}\t{wm_data_next}\t{wm_data_end}\t{gm}\t{wm_loop}\t{wm_top}\n"
+    t="{t}S"
+    loop a in wm_stubs {t="{t}\t{a}"}
+    t="{t}\n"
+    let lines:array<string>=[]
+    loop i in [0..wm_fkeys.length) {lines.push("F\t{wm_fkeys[i]}\t{wm_fcanon[i]}\t{wm_flatest[i]}\t{wm_fhash[i]}")}
+    loop i in [0..wm_gkeys.length) {lines.push("G\t{wm_gkeys[i]}\t{wm_gaddr[i]}\t{wm_gsize[i]}\t{wm_ginit[i]}\t{wm_gsig[i]}\t{wm_gdesc[i]}")}
+    loop [h a] in wm_ro {lines.push("R\t{h}\t{a}")}
+    loop f in wm_files {lines.push("W\t{f}")}
+    loop c in w_changed {lines.push("C\t{c}")}
+    loop c in w_reset {lines.push("Z\t{c}")}
+    loop c in w_added {lines.push("A\t{c}")}
+    loop c in w_kept {lines.push("K\t{c}")}
+    t="{t}{lines.join("\n")}"
+    let out:array<uint8>=[]
+    push_i64(@out (t as array<uint8>).length)
+    loop c in (t as array<uint8>) {out.push(c)}
+    push_i64(@out w_patch.length)
+    loop x in w_patch {out.push(x)}
+    write_bytes(res out);
+}
+watch_read_result=(res:string):>bool=>{
+    let b=read_bytes(res) ?? []
+    if b.length <? 16 {return false}
+    let tl=w_i64(b 0)
+    let t=__str_from_bytes(b[8..8 + tl))
+    let pl=w_i64(b 8 + tl)
+    w_patch=b[16 + tl..16 + tl + pl)
+    wm_clear()
+    w_changed=[]
+    w_reset=[]
+    w_added=[]
+    w_kept=[]
+    loop line in split(t "\n") {
+        let p=split(line "\t")
+        if p.length =? 0 {continue}
+        let k=p[0]
+        if k =? "N" and p.length >=? 7 {
+            wm_next=jo_to_int(p[1]) ?? 0
+            wm_data_next=jo_to_int(p[2]) ?? 0
+            wm_data_end=jo_to_int(p[3]) ?? 0
+            wm_game=p[4] =? "1"
+            wm_loop=jo_to_int(p[5]) ?? 0
+            wm_top=jo_to_int(p[6]) ?? 0
+        }
+        else if k =? "S" {
+            loop i in [1..p.length) {wm_stubs.push(jo_to_int(p[i]) ?? 0)}
+        }
+        else if k =? "F" and p.length >=? 5 {wm_add_fn(p[1] jo_to_int(p[2]) ?? 0 jo_to_int(p[3]) ?? 0 jo_to_int(p[4]) ?? 0)} else if k =? "G" and p.length >=? 7 {wm_add_glob(p[1] jo_to_int(p[2]) ?? 0 jo_to_int(p[3]) ?? 0 p[5] jo_to_int(p[4]) ?? 0 p[6])}
+        else if k =? "R" and p.length >=? 3 {wm_ro[jo_to_int(p[1]) ?? 0]=jo_to_int(p[2]) ?? 0} else if k =? "W" and p.length >=? 2 {wm_files.push(p[1])}
+        else if k =? "C" and p.length >=? 2 {w_changed.push(p[1])} else if k =? "Z" and p.length >=? 2 {w_reset.push(p[1])}
+        else if k =? "A" and p.length >=? 2 {w_added.push(p[1])} else if k =? "K" and p.length >=? 2 {w_kept.push(p[1])}
+    }
+    true
+}
+w_i64=(b:array<uint8> at:WatchWord):>int64=>{
+    let v:WatchWord=0
+    loop k in [0..8) {v=v | (WatchWord(b[at + k]) << (8 * k))}
+    v
+}
+# (DEWY_WATCH_LOG=1: each step of a reload, to standard error)
+w_log=(msg:string):>void=>{
+    if env("DEWY_WATCH_LOG") not=? none {eprint("dewy-core watch log: {msg}")}
+}
+w32_note_file=(f:string):>void=>{
+    if w32_mtimes.get(f) =? none {w32_mtimes[f]=w32_mtime(f)}
+}
+# source files in a directory (a new one may be one a failed build looked for)
+w32_sources_in=(d:string):>int64=>{
+    let n:WatchWord=0
+    loop nm in list_dir(d) {
+        if (ends_with(nm ".jo") or ((w_ext as array<uint8>).length >? 0 and ends_with(nm w_ext))) and not starts_with(nm ".") {n += 1}
+    }
+    n
+}
+# did a file built from change (or a source file appear)? (and take note of how things are now)
+w32_files_changed=():>bool=>{
+    let any=false
+    let now:array<[string int64]>=[]
+    loop [f t] in w32_mtimes {
+        let m=w32_mtime(f)
+        if m not=? t {
+            now.push([f m])
+            any=true
+        }
+    }
+    loop x in now {w32_mtimes[x[0]]=x[1]}
+    let counts:array<[string int64]>=[]
+    loop [d n] in w32_dir_count {
+        let c=w32_sources_in(d)
+        if c not=? n {
+            counts.push([d c])
+            if c >? n {any=true}
+        }
+    }
+    loop x in counts {w32_dir_count[x[0]]=x[1]}
+    any
+}
+wd_desc=(t0:WatchWord):>string=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    let sz=tsize(t)
+    if k =? 'int_' {
+        if types.ptr[t].sign {return "i{sz};"}
+        return "u{sz};"
+    }
+    if k =? 'float_' {return "f{sz};"}
+    if k =? 'bool_' {return "b;"}
+    if k =? 'str_' {return "s;"}
+    if k =? 'array' {return "A{tsize(WatchWord(types.ptr[t].elem))}({wd_desc(WatchWord(types.ptr[t].elem))})"}
+    if k =? 'fixed' {return "F{tsize(WatchWord(types.ptr[t].elem))},{fixed_len(t)}({wd_desc(WatchWord(types.ptr[t].elem))})"}
+    if k =? 'opt' {return "O{tsize(WatchWord(types.ptr[t].elem))}({wd_desc(WatchWord(types.ptr[t].elem))})"}
+    if k =? 'box' {return "B{tsize(WatchWord(types.ptr[t].elem))}({wd_desc(WatchWord(types.ptr[t].elem))})"}
+    if k =? 'struct_' {
+        let nm=type_str(t)
+        if wd_path.contains(nm) {return "R<{nm}>;"}
+        wd_path.push(nm)
+        let si=WatchWord(types.ptr[t].st)
+        let out="S{sz}<{nm}>\{"
+        loop i in [0..WatchWord(structs.ptr[si].nfields)) {
+            let f=WatchWord(structs.ptr[si].fields) + i
+            out="{out}{name_of(WatchWord(fields.ptr[f].name))}@{fields.ptr[f].offset}:{wd_desc(field_store_type(f))},"
+        }
+        wd_path.pop();
+        return "{out}}"
+    }
+    if k =? 'tuple' {
+        let out="T{sz}\{"
+        loop fo in field_list(t) {out="{out}@{fo[1]}:{wd_desc(fo[0])},"}
+        return "{out}}"
+    }
+    "X{sz}<{wk_sig(t 0)}>;"
+}
+# where the description starting at i ends
+wd_end=(s:string i:WatchWord):>int64=>{
+    let c=(s as array<uint8>)[i]
+    if c =? b'A' or c =? b'O' or c =? b'F' or c =? b'B' {
+        let j=find_byte(s b'(' i)
+        let e=wd_end(s j + 1)
+        return e + 1
+    }
+    if c =? b'S' or c =? b'T' {
+        let j=find_byte(s b'\{' i)
+        if c =? b'S' {
+            # (past the name: <...> may hold any character but '>')
+            j=find_byte(s b'\{' find_byte(s b'>' i))
+        }
+        j += 1
+        loop (s as array<uint8>)[j] not=? b'}' {
+            j=find_byte(s b':' j) + 1
+            j=wd_end(s j) + 1
+        }
+        return j + 1
+    }
+    if c =? b'X' or c =? b'R' {return find_byte(s b';' find_byte(s b'>' i)) + 1}
+    find_byte(s b';' i) + 1
+}
+wd_num=(s:string i:WatchWord):>int64=>{
+    let v:WatchWord=0
+    let j=i
+    loop j <? (s as array<uint8>).length and (s as array<uint8>)[j] >=? b'0' and (s as array<uint8>)[j] <=? b'9' {
+        v=v * 10 + WatchWord((s as array<uint8>)[j] - b'0')
+        j += 1
+    }
+    v
+}
+# the fields of a struct description: (name, offset, description)
+wd_fields=(s:string):>array<[string int64 string]>=>{
+    let out:array<[string int64 string]>=[]
+    let j:WatchWord=0
+    if (s as array<uint8>)[0] =? b'S' {j=find_byte(s b'\{' find_byte(s b'>' 0)) + 1} else {j=find_byte(s b'\{' 0) + 1}
+    loop (s as array<uint8>)[j] not=? b'}' {
+        let at=find_byte(s b'@' j)
+        let nm=s.byte_slice(j at)
+        let off=wd_num(s at + 1)
+        let d0=find_byte(s b':' at) + 1
+        let d1=wd_end(s d0)
+        out.push([nm off s.byte_slice(d0 d1)])
+        j=d1 + 1
+    }
+    out
+}
+wd_name=(s:string):>string=>{
+    let a=find_byte(s b'<' 0)
+    s.byte_slice(a + 1 find_byte(s b'>' a))
+}
+wd_collect=(s:string):>void=>{
+    let i:WatchWord=0
+    loop i <? (s as array<uint8>).length {
+        if (s as array<uint8>)[i] =? b'S' and i + 1 <? (s as array<uint8>).length and (s as array<uint8>)[i + 1] >=? b'0' and (s as array<uint8>)[i + 1] <=? b'9' {
+            let e=wd_end(s i)
+            let nm=wd_name(s.byte_slice(i e))
+            if wd_structs.get(nm) =? none {wd_structs[nm]=s.byte_slice(i e)}
+        }
+        i += 1
+    }
+}
+watch_globals_to_migrate=():>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    loop [k off] in global_off {
+        if globals.ptr[k].decl =? 0 {continue}
+        let i=wm_gidx.get(wk_glob(k))
+        if i not=? none {
+            if (wm_gdesc[i] as array<uint8>).length =? 0 or wm_gsig[i] =? wk_sig(WatchWord(globals.ptr[k].type) 0) {continue}
+            if wm_ginit[i] not=? wk_decl_hash(k) {continue}
+            out.push(k)
+        }
+    }
+    out.sort()
+    out
+}
+w_new_lf=(name:string):>int64=>{
+    lfuncs.push(LFunc(LK_HELPER (-1) HK.drop 0 name))
+    let lf=lfuncs.length - 1
+    w_mig_lfs[lf]=true
+    lf
+}
+watch_lower_migrate=():>void=>$unsafe {
+    w_migrate=watch_globals_to_migrate()
+    if w_migrate.length =? 0 {return}
+    wd_structs=dict<string string>()
+    loop g in w_migrate {wd_collect(wm_gdesc[wm_gidx[wk_glob(g)]])}
+    w_mig_lf=w_new_lf("watch_migrate")
+    begin_fn("watch_migrate" w_mig_lf)
+    loop g in w_migrate {
+        let i=wm_gidx[wk_glob(g)]
+        let op=e_iconst(wm_gaddr[i])
+        let np=e_gaddr(global_off[g])
+        wc_conv(wm_gdesc[i] op np WatchWord(globals.ptr[g].type));
+    }
+    e_ret(-1);
+    w_emit();
+    # the conversion functions for structs (which may need more)
+    let k:WatchWord=0
+    loop k <? w_mig_todo.length {
+        let lf=w_mig_todo[k]
+        begin_fn("watch_convert_{k}" lf)
+        let ps=helper_params(2)
+        let t=w_mig_nt[k]
+        let si=WatchWord(types.ptr[prune(t)].st)
+        let olds=wd_fields(w_mig_od[k])
+        loop i in [0..WatchWord(structs.ptr[si].nfields)) {
+            let f=WatchWord(structs.ptr[si].fields) + i
+            let fnm=name_of(WatchWord(fields.ptr[f].name))
+            let found=false
+            loop ofield in olds {
+                if ofield[0] =? fnm {
+                    found=true
+                    wc_conv(ofield[2] e_addi(ps[0] ofield[1]) e_addi(ps[1] WatchWord(fields.ptr[f].offset)) field_store_type(f));
+                }
+            }
+            if not found {wc_default(f ps[1])}
+        }
+        e_ret(-1);
+        w_emit();
+        k += 1
+    }
+}
+# convert the value at op (laid out as od) into the zeroed place np of type nt
+wc_conv=(od:string op:WatchWord np:WatchWord nt0:WatchWord):>void=>$unsafe {
+    let nt=prune(nt0)
+    wd_path=[]
+    let nd=wd_desc(nt)
+    let tk=types.ptr[nt].kind
+    let sz=tsize(nt)
+    let c=(od as array<uint8>)[0]
+    if od =? nd {
+        # the same layout: a copy (and the references in it are now held twice)
+        if vc(nt) =? VC_AGG {e_copy(np op sz);} else {store_val(nt np 0 load_val(nt op 0))}
+        copy_at(np nt);
+        return
+    }
+    if c =? b'i' or c =? b'u' or c =? b'f' or c =? b'b' {
+        # a number of another type
+        let osz=wd_num(od 1)
+        if c =? b'b' {osz=1}
+        let mode=osz
+        if c =? b'i' {mode=osz | M_SIGNED}
+        if c =? b'f' {mode=osz | M_FLOAT}
+        let ovt=VI
+        if c =? b'f' {
+            ovt=VF
+            if osz =? 4 {ovt=VS}
+        }
+        let v=e_load(ovt op 0 mode)
+        if tk =? 'float_' {
+            if ovt =? VI {
+                let d=vreg(vt_of(nt))
+                emit('i2f' vt_of(nt) d v 0 0 0);
+                v=d
+            }
+            else if ovt not=? vt_of(nt) {
+                let d=vreg(vt_of(nt))
+                emit('f2f' vt_of(nt) d v 0 0 0);
+                v=d
+            }
+            e_store(np 0 v mem_mode(nt));
+        }
+        else if tk =? 'int_' or tk =? 'bool_' {
+            if ovt not=? VI {
+                let d=vreg(VI)
+                emit('f2i' ovt d v 0 0 0);
+                v=d
+            }
+            e_store(np 0 v mem_mode(nt));
+        }
+        return
+    }
+    if (c =? b'S' or c =? b'R') and tk =? 'struct_' {
+        let sd=od
+        if c =? b'R' {sd=wd_structs.get(wd_name(od)) ?? ""}
+        if (sd as array<uint8>).length =? 0 {return}
+        e_call(wc_struct_fn(sd nt) [op np] (-1));
+        return
+    }
+    if c =? b'A' and tk =? 'array' {
+        let oes=wd_num(od 1)
+        let ed=od.byte_slice(find_byte(od b'(' 0) + 1 (od as array<uint8>).length - 1)
+        let et=WatchWord(types.ptr[nt].elem)
+        let nes=tsize(et)
+        let oa=e_load(VI op 0 8)
+        let n=vreg(VI)
+        e_mov(n e_iconst(0));
+        iff(e_bin('ne' VI oa e_iconst(0)));
+        e_mov(n hdr_load(oa 8));
+        endc();
+        let na=e_call(rt("__arr_repeat") [n e_iconst(nes)] VI)
+        e_store(np 0 na 8);
+        let i=vreg(VI)
+        e_mov(i e_iconst(0));
+        blk();
+        lop();
+        brif_to(e_bin('ges' VI i n) ctl - 1);
+        let oe=e_bin('add' VI e_addi(oa 24) e_bin('mul' VI i e_iconst(oes)))
+        let ne=e_bin('add' VI e_addi(na 24) e_bin('mul' VI i e_iconst(nes)))
+        wc_conv(ed oe ne et);
+        e_mov(i e_addi(i 1));
+        br_to(ctl);
+        endc();
+        endc();
+        return
+    }
+    if c =? b'F' and tk =? 'fixed' {
+        # element by element, as many as both sizes have (the rest stays zero)
+        let oes=wd_num(od 1)
+        let on=wd_num(od find_byte(od b',' 0) + 1)
+        let ed=od.byte_slice(find_byte(od b'(' 0) + 1 (od as array<uint8>).length - 1)
+        let et=WatchWord(types.ptr[nt].elem)
+        let nes=tsize(et)
+        let n=min(on fixed_len(nt))
+        let i=vreg(VI)
+        e_mov(i e_iconst(0));
+        blk();
+        lop();
+        brif_to(e_bin('ges' VI i e_iconst(n)) ctl - 1);
+        wc_conv(ed e_bin('add' VI op e_bin('mul' VI i e_iconst(oes))) e_bin('add' VI np e_bin('mul' VI i e_iconst(nes))) et);
+        e_mov(i e_addi(i 1));
+        br_to(ctl);
+        endc();
+        endc();
+        return
+    }
+    if c =? b'O' and tk =? 'opt' {
+        let ops=wd_num(od 1)
+        let ed=od.byte_slice(find_byte(od b'(' 0) + 1 (od as array<uint8>).length - 1)
+        let et=WatchWord(types.ptr[nt].elem)
+        iff(e_bin('ne' VI e_load(VI op ops 1) e_iconst(0)));
+        e_store(np tsize(et) e_iconst(1) 1);
+        wc_conv(ed op np et);
+        endc();
+        return
+    }
+    if c =? b'B' and tk =? 'box' {
+        # (a new box, its value converted)
+        let ed=od.byte_slice(find_byte(od b'(' 0) + 1 (od as array<uint8>).length - 1)
+        let et=WatchWord(types.ptr[nt].elem)
+        let ob=e_load(VI op 0 8)
+        iff(e_bin('ne' VI ob e_iconst(0)));
+        let nb=e_call(rt("__box_new") [e_iconst(tsize(et))] VI)
+        e_zero(e_addi(nb BOX_HDR) tsize(et));
+        e_store(np 0 nb 8);
+        wc_conv(ed e_addi(ob BOX_HDR) e_addi(nb BOX_HDR) et);
+        endc();
+        return
+    }
+    if c =? b'T' and tk =? 'tuple' {
+        let olds=wd_fields(od)
+        let news=field_list(nt)
+        if olds.length not=? news.length {return}
+        loop i in 0.. and fo in news {wc_conv(olds[i][2] e_addi(op olds[i][1]) e_addi(np fo[1]) fo[0])}
+        return
+    }
+    # (anything else: no value kept)
+}
+wc_struct_fn=(sd:string nt:WatchWord):>int64=>{
+    let key="{sd}|{type_str(nt)}"
+    let got=w_mig_fns.get(key)
+    if got not=? none {return got}
+    let lf=w_new_lf("watch_convert")
+    w_mig_fns[key]=lf
+    w_mig_todo.push(lf)
+    w_mig_od.push(sd)
+    w_mig_nt.push(nt)
+    lf
+}
