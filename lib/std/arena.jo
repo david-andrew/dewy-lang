@@ -185,7 +185,7 @@ __arena_capacity = (list: *u8) -> int:
 __arena_control = (list: *u8) -> int: ((list + 24) as **u8)[0] as int + 24
 
 # Every block back at once: the newest chunk (the largest) is kept for the next blocks, the
-# others go back to the heap. Debug builds fill what was handed out with 0xdb first, so a
+# others go back to the heap. A `-g` build fills what was handed out with 0xdb first, so a
 # value that wrongly outlived its arena shows itself.
 __arena_reset = (list0: *u8):
     if list0 == null: return

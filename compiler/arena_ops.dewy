@@ -3,11 +3,11 @@ from p"arena.jo" import (ArenaRoot ArenaScope arena_enter_decl arena_fns arena_k
 from p"lower.jo" import (BOX_HDR HK VC_AGG Val ctl)
 from p"effect_types.dewy" import (EffectEvent)
 from p"expr.jo" import (IN last_checked ntype)
-from p"check.jo" import (LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_ELEMALIAS LF_MUTPARAM LF_PARAM LF_SOAELEM LF_VALUECAP LF_VALUEPARAM ctxs cx demand_name fns globals lib_dir locals prelude release_build runtime_fn syms)
+from p"check.jo" import (LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_ELEMALIAS LF_MUTPARAM LF_PARAM LF_SOAELEM LF_VALUECAP LF_VALUEPARAM ctxs cx demand_name fns globals lib_dir locals prelude runtime_fn syms)
 from p"ast.jo" import (NF_CHECKED NF_EXTERN NF_GENERIC NF_SPREAD has_flag kid kids nkids nodes)
 from p"node_store.dewy" import (Node)
 from p"lower_storage.dewy" import (V blk borrow br_to brif_to endc field_store_type hdr_load iff load_val lop new_temp opt_has store_val vc)
-from p"ir.jo" import (VI)
+from p"ir.jo" import (VI dbg_on)
 from p"directives.jo" import (dir_explicit_copies)
 from p"ir_builders.dewy" import (e_addi e_bin e_call1 e_call2 e_copy e_iconst e_load e_mov e_ret e_slot e_store vreg)
 from p"util.jo" import (fatal files ice intern name_of pos_file pos_in_lib pos_str)
@@ -40,7 +40,8 @@ runtime_switch=():>void=>$unsafe {
 }
 arena_enable=():>void=>$unsafe {
     runtime_switch_on("__ARENAS");
-    if not release_build {runtime_switch_on("__ARENA_POISON");}
+    # (for a debugger: a default build reuses the storage untouched, a compiler proof keeping values from it)
+    if dbg_on {runtime_switch_on("__ARENA_POISON");}
 }
 arena_reset=():>void=>$unsafe {
     arena_fns=dict<int64 bool>()

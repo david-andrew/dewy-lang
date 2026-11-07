@@ -46,7 +46,8 @@ runtime_switch = ():
 
 arena_enable = ():
     runtime_switch_on("__ARENAS")
-    if not release_build: runtime_switch_on("__ARENA_POISON")
+    # (for a debugger: a default build reuses the storage untouched, a compiler proof keeping values from it)
+    if dbg_on: runtime_switch_on("__ARENA_POISON")
 
 
 arena_reset = ():

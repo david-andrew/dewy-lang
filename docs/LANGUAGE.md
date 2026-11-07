@@ -4513,8 +4513,8 @@ included: end the expression with `.copy()` to ask for it
 
 The bundled library's raw-memory code (output, the allocator, system calls) is
 trusted not to keep what it is given; starting threads or tasks is not. An `Arena` is a value: a copy is another
-arena, and dropping one gives its memory back. Debug builds fill reset storage
-with `0xdb`.
+arena, and dropping one gives its memory back. A build with `-g` fills reset
+storage with `0xdb`.
 
 `arena(bytes)` makes an arena with its whole capacity acquired at once; it
 gives `Arena | OutOfMemory`, the latter when the system refuses the memory. It
