@@ -40,6 +40,7 @@ from p"reflect_ops.dewy" import (reflect_bind reflect_loop)
 from p"reflection.jo" import (reflect_active)
 from p"temperature_ops.dewy" import (temperature_binding)
 from p"types.jo" import (T_FLOAT T_NEVER dt is_int is_soa prune telem tkind type_has_fn types)
+from p"units.jo" import (bundled_rational_type)
 from p"util.jo" import (fatal files intern name_of pos_file)
 
 StmtHookWord:type=int64<overflow='wrap'>
@@ -193,6 +194,8 @@ for_error=(n:int64 t0:int64 code:int64):>void=>$unsafe {
     if code =? 2 {fatal(pos "text is joined with `+` (or put in a string: \"\{a}\{b}\"); `..` makes a range of numbers")}
     if code =? 3 {
         if is_int(t) {t=T_FLOAT}
+        # (`loop d in [start..stop)` over dates or instants: a range of those holds its two ends)
+        if dewy_at(pos) and tkind(t) =? 'struct_' and not bundled_rational_type(t) {fatal(pos "a range of {dt(t)} holds its two ends, not a list of its points, so a loop cannot walk it: step a value yourself, `let d = first` then `loop d <? last \{ ...; d = d + 1day }`")}
         fatal(pos "a range counts in whole numbers, not {dt(t)} (for 0.0 to 1.0 in tenths, count to 10 and divide: {jd(pos "`loop i in [0..10): x = f64(i) / 10.0`" "`loop i in [0..10] \{ let x = float64(i) / 10 }`")})")
     }
     if code =? 4 {fatal(pos "a range loop has one loop variable")}

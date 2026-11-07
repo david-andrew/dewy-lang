@@ -3463,7 +3463,7 @@ dewy_arithmetic_call = (n: int, name: int, args: int[], expected: int) -> int:
         nodes[n] = Node(kind = .binary, pos = nodes[n].pos, a = i32(a), b = i32(b))
         r = op_overload(n, op)
         if r != 0: return r
-        fatal(nodes[n].pos, "operator {op} is not defined for {dt(ntype(a))} and {dt(ntype(b))}")
+        fatal(nodes[n].pos, "operator {op} is not defined for {dt(ntype(a))} and {dt(ntype(b))}{calendar_period_why(a, b)}")
     if is_quantity(ntype(a)) or is_quantity(ntype(b)):
         quantity_left_literal = q_name_a
         quantity_right_literal = q_name_b
@@ -4499,12 +4499,23 @@ union_or_optional = (t0: int) -> bool:
 # a == b, a < b with types that do not compare
 # An arithmetic or comparison operand that is a union: the member to narrow to, as it
 # is spelled, and when the other members are all failures (`to_int(s)`), the fallback.
+# (`z + 1day` of a zoned time known at run time: a gap or repeated hour is the program's to answer)
+time_zone_failure = (m: int) -> bool:
+    if tkind(m) != .struct_: return false
+    nm = structs[int(types[prune(m)].st)].name
+    d = int(structs[int(types[prune(m)].st)].decl)
+    (nm == "Gap" or nm == "Ambiguous") and d != 0 and pos_in_lib(nodes[d].pos)
+
+time_policy_why = () -> str: " (a zoned time's date can land in a clock change's gap or repeated hour: say what that means with `z.add(1day fold='later' gap='next')`, or `$time.fold` and `$time.gap` for the scope; a `const` zoned time is checked while compiling)"
+
 union_operand_why = (n: int, u: int) -> str:
     if not dewy_at(nodes[n].pos): return " (find out which it holds first: `if x is int: ...` or a `match`)"
     member = 0
     others = 0
     loop m in value_members(prune(u)):
-        if exception_member(m): continue
+        if exception_member(m):
+            if time_core_type(m, "Gap") or time_zone_failure(m): return time_policy_why()
+            continue
         if member == 0 and is_numeric(m): member = m
         else: others += 1
     if member != 0 and others == 0: return " (it may hold a failure instead of the {dt(member)}: fall back with `x ?? 0`, pass the failure on with `or_throw`, or test it first, `if x is? {dt(member)} \{ ... }`)"
@@ -6873,6 +6884,8 @@ binary_rest = (n: int, expected: int, a0: int, b0: int, ta0: int, tb0: int, hint
             if dewy_at(nodes[n].pos): why = " (a record has the operators defined for it, such as `__add__ = (a:{dt(ta)} b:{dt(ta)}):>{dt(ta)} => ...` for + or `__lt__` for <?)"
         never_cascade(nodes[n].pos, ta)
         never_cascade(nodes[n].pos, tb)
+        if dewy_at(nodes[n].pos):
+            if nodes[n].a != 0 and nodes[n].b != 0: why += calendar_period_why(int(nodes[n].a), int(nodes[n].b)) + hidden_unit_why(n, int(nodes[n].a), int(nodes[n].b))
         fatal(nodes[n].pos, "operator {opn} is not defined for {dt(ta)} and {dt(tb)}{why}")
     if is_shift and dewy_at(nodes[n].pos) and nodes[b].kind == .int_lit and nodes[b].ival < 0 and not has_flag(b, NF_U64):
         fatal(nodes[b].pos, "a shift count is unsigned, and {nodes[b].ival} is negative")
@@ -7035,6 +7048,7 @@ binary_rest = (n: int, expected: int, a0: int, b0: int, ta0: int, tb0: int, hint
                     break
         never_cascade(nodes[n].pos, ta)
         never_cascade(nodes[n].pos, tb)
+        if dewy_at(nodes[n].pos): why += calendar_period_why(a, b) + hidden_unit_why(n, a, b)
         fatal(nodes[n].pos, "operator {tok_text(op)} is not defined for {dt(ta)} and {dt(tb)}{why}")
     binary_numeric(n, op, a, b, ta, tb, is_cmp)
 

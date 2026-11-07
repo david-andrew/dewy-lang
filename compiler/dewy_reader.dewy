@@ -10858,6 +10858,7 @@ rd_dc_unread=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     }
     rd_dc_foreign_habit(@reader_ctx at);
     rd_dc_optional_chain(@reader_ctx at);
+    rd_dc_as_number(@reader_ctx at);
     rd_dc_as_precedence(@reader_ctx at);
     rd_dc_place_type(@reader_ctx at);
     reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[at].start) "could not parse the statement starting here; check the syntax near the underlined token");
@@ -10888,6 +10889,28 @@ rd_dc_as_precedence=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
             let name:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)])
             let op:string=dn_token_text(after.symbol)
             reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[k].start) "`as` binds looser than `{op}`, so `{name} {op} ...` is read as the type: parenthesize the conversion, as in `(x as {name}) {op} ...`");
+        }
+        k = (int64<overflow='wrap'>(k) + 1)
+    }
+}
+
+# (`x as (BTU/24hour)`: `as` names a unit, and a number is not part of one, in the line of an
+# unread statement. An exponent's number is: `m^2`.)
+rd_dc_as_number=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
+    let k:int64=at
+    loop (reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].kind not=? 'eof') and (not reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)].newline) {
+        if (reader_ctx.tokens[k].symbol =? 'kw_as') {
+            let j:int64=(int64<overflow='wrap'>(k) + 1)
+            loop (reader_ctx.tokens[j].kind not=? 'eof') and (not reader_ctx.tokens[j].newline) {
+                let t:DewyLexeme=reader_ctx.tokens[j]
+                if ((t.kind =? 'integer') or (t.kind =? 'source_integer') or (t.kind =? 'source_real')) and (reader_ctx.tokens[(int64<overflow='wrap'>(j) - 1)].symbol not=? 'caret') {
+                    reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file t.start) "`as` names a unit, made of unit names, and a number is not part of one: scale the value and convert it to the rest, as in `(x*24hour) as BTU` rather than `x as BTU/(24hour)`");
+                }
+                if not ((t.kind =? 'identifier') or (t.symbol =? 'lparen') or (t.symbol =? 'rparen') or (t.symbol =? 'slash') or (t.symbol =? 'star') or (t.symbol =? 'caret') or (t.kind =? 'integer') or (t.kind =? 'source_integer')) {
+                    break
+                }
+                j = (int64<overflow='wrap'>(j) + 1)
+            }
         }
         k = (int64<overflow='wrap'>(k) + 1)
     }
@@ -11590,6 +11613,9 @@ rd_dn_string=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexe
             reader_ctx.stores.host[0].dn_error(reader_ctx.tokens[reader_ctx.at].start "expected one interpolation expression");
         }
         reader_ctx.reader.dn_in_interpolation = (int64<overflow='wrap'>(reader_ctx.reader.dn_in_interpolation) - 1)
+        if (expression =? 0) {
+            rd_dc_as_number(@reader_ctx 0);
+        }
         reader_ctx.tokens = saved_tokens
         reader_ctx.at = saved_at
         reader_ctx.reader.dn_angles = saved_angles

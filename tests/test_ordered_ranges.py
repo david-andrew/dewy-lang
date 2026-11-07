@@ -65,7 +65,7 @@ def test_what_a_range_of_points_cannot_do(compiler, tmp_path):
     t = 'let a = instant"2027-01-01T00:00:00Z"\n'
     ran = run(compiler, tmp_path, t + 'loop x in [a..a+5s) { printl(x) }\n')
     assert ran.returncode != 0
-    assert 'a range counts in whole numbers, not Instant' in ran.stderr
+    assert 'a range of Instant holds its two ends, not a list of its points' in ran.stderr
     ran = run(compiler, tmp_path, t + 'let s = [a, a+1s..a+5s)\n')
     assert ran.returncode != 0
     assert 'only a range of integers has a step for now' in ran.stderr
