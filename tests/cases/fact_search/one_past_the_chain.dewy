@@ -1,0 +1,16 @@
+# Near miss: the chain reaches one past the end, so the slice is not proven.
+F:type = [n:int64<n >=? 3> a:array<float32 length=[n n]> b:array<float32 length=[n n]>]
+f = (@g:F x:int64 y:int64 r:int64):>void => {
+    let ih=g.n-1
+    let iw=g.n-2
+    let top=max(1 y-r)
+    let bottom=min(ih y+r)
+    let left=max(1 x-r)
+    let right=min(iw x+r)
+    if left >? right or top >? bottom return
+    g.a[[top..bottom+1] [left..right]] = 0.5
+}
+main = ():>void => {
+    let g = F[4 zeros<float32>(4 4) zeros<float32>(4 4)]
+    f(@g 1 1 1)
+}

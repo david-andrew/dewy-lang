@@ -1,0 +1,19 @@
+# A short chain of relations is found however many unrelated ones the state holds.
+F:type = [n:int64<n >=? 3> a:array<float32 length=[n n]> b:array<float32 length=[n n]>]
+f = (@g:F x:int64 y:int64 r:int64):>void => {
+    let ih=g.n-2
+    let iw=g.n-2
+    let top=max(1 y-r)
+    let bottom=min(ih y+r)
+    let left=max(1 x-r)
+    let right=min(iw x+r)
+    if left >? right or top >? bottom return
+    g.a[[top..bottom] [left..right]] = 0.5
+    g.b[[top..bottom] [left..right]] = 0.25
+}
+main = ():>void => {
+    let g = F[4 zeros<float32>(4 4) zeros<float32>(4 4)]
+    f(@g 1 1 1)
+    printl(g.a[1 1])
+    printl(g.b[2 2])
+}

@@ -2054,13 +2054,10 @@ fact_distance = (s: FactState, a: int, b: int, limit: int) -> bool:
         if not x.wide and not y.wide and x.hi != FACT_MAX and y.lo != FACT_MIN and fact_add_fits(x.hi, -y.lo):
             gap = x.hi - y.lo
             if fact_add_fits(gap, distance) and gap + distance <= limit: return true
-        previous = -1
         ri = fact_difference_head(s, source, 0)
         loop ri >= 0:
             row = s.differences[ri]
-            # Charge the original ordered scan's budget, including skipped rows.
-            visits += ri - previous
-            previous = ri
+            visits += 1
             ri = fact_difference_next(s, ri, 0)
             if visits > 256: return false
             if not fact_add_fits(distance, row.limit): continue
@@ -2079,7 +2076,6 @@ fact_distance = (s: FactState, a: int, b: int, limit: int) -> bool:
             else if value < distances[slot]:
                 distances[slot] = value
                 pending.push(slot)
-        visits += s.differences.len() - 1 - previous
     false
 
 # The smallest d found with a - b <= d (FACT_MAX: none), by fact_distance's
@@ -2101,12 +2097,10 @@ fact_shortest = (s: FactState, a: int, b: int) -> int:
         cursor += 1
         source = terms[index]
         distance = distances[index]
-        previous = -1
         ri = fact_difference_head(s, source, 0)
         loop ri >= 0:
             row = s.differences[ri]
-            visits += ri - previous
-            previous = ri
+            visits += 1
             ri = fact_difference_next(s, ri, 0)
             if visits > 256: return best
             if not fact_add_fits(distance, row.limit): continue
@@ -2126,7 +2120,6 @@ fact_shortest = (s: FactState, a: int, b: int) -> int:
             else if value < distances[slot]:
                 distances[slot] = value
                 pending.push(slot)
-        visits += s.differences.len() - 1 - previous
     best
 
 # Rows for a sum of two symbolic operands, v = a + b, through terms already
@@ -2796,12 +2789,10 @@ fact_relational = (s: FactState, v: int, upper: bool) -> int:
         source = terms[cursor]
         distance = distances[cursor]
         cursor += 1
-        previous = -1
         ri = fact_difference_head(s, source, int(upper))
         loop ri >= 0:
             row = s.differences[ri]
-            visits += ri - previous
-            previous = ri
+            visits += 1
             ri = fact_difference_next(s, ri, int(upper))
             if visits > 256: return best
             if not fact_add_fits(distance, row.limit): continue
@@ -2814,7 +2805,6 @@ fact_relational = (s: FactState, v: int, upper: bool) -> int:
                 seen[other] = true
                 terms.push(other)
                 distances.push(value)
-        visits += s.differences.len() - 1 - previous
     best
 
 # Only a quotient/shift consumer requests a 65-bit mathematical sum term.
