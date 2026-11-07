@@ -1,0 +1,7 @@
+BadTime:type = type of error & [message:string]
+seconds = (text:string):>Duration|BadTime => {
+    let total = to_int(text) ?? return BadTime["not a number: {text}"]
+    let t = total * 1s
+    t
+}
+main = () => printl(seconds("90"))

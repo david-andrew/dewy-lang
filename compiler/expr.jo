@@ -737,6 +737,20 @@ coerce_int_literal = (n: int, to: int) -> int:
     n
 
 # coerce node n to `target` (rewrites n in place); returns n
+# (`let d:Duration = q` or a result `:>Duration | ParseError`, q a time known at run time
+# or a float: only a constant is known to fit) "" for anything else. O(union members)
+duration_hint = (n: int, from: int, to: int) -> str:
+    if tkind(from) != .quantity or quantity_dimension(from) != base_dimension(0): return ""
+    member = false
+    if is_union(to):
+        loop m in union_members(to):
+            if time_core_type(m, "Duration"): member = true
+    if not member and not time_core_type(to, "Duration"): return ""
+    shown = if nodes[n].kind == .ident: name_of(int(nodes[n].name)) else: "x"
+    if is_float(quantity_base(from)): return " (a float time enters through `quantize({shown} rounding='nearest_even')`, which says what is lost)"
+    if member: return " (a time known only at run time may not fit: `convert<Duration>({shown})` gives the `Duration` or the failure, `OffGrid | OutOfRange`; take it with `?? fallback` or `or_throw`)"
+    " (a time known only at run time may not fit: `convert<Duration>({shown})` gives the `Duration` or the failure)"
+
 coerce = (n: int, target: int) -> int:
     if target == 0: return n
     # (a settled value already of the type: none of the cases below applies but to literals,
@@ -939,7 +953,7 @@ coerce = (n: int, target: int) -> int:
         return n
     if tk == .enum_ and not is_union(from) and is_union(to):
         vi = union_target(n, from, to)
-        if vi < 0: fatal(nodes[n].pos, "type mismatch: expected {dt_named(to)}, found {dt_named(from)}")
+        if vi < 0: fatal(nodes[n].pos, "type mismatch: expected {dt_named(to)}, found {dt_named(from)}{duration_hint(n, from, to)}")
         coerce(n, union_members(to)[vi])
         wrap_union(n, vi, to)
         return n
@@ -1015,9 +1029,9 @@ coerce = (n: int, target: int) -> int:
     if fk == .typeval: fatal(nodes[n].pos, "expected a value of type {dt(to)}, found a type name")
     why = variant_hint(n, to)
     # (`let d:Duration = q`, q a time known at run time or a float: only a constant is known to fit)
-    if fk == .quantity and time_core_type(to, "Duration") and quantity_dimension(from) == base_dimension(0):
-        shown = if nodes[n].kind == .ident: name_of(int(nodes[n].name)) else: "x"
-        why = if is_float(quantity_base(from)): " (a float time enters through `quantize({shown} rounding='nearest_even')`, which says what is lost)" else: " (a time known only at run time may not fit: `convert<Duration>({shown})` gives the `Duration` or the failure)"
+    if fk == .quantity:
+        hint = duration_hint(n, from, to)
+        if hint != "": why = hint
     if fk == .opt and tk != .opt: why = if dewy_at(nodes[n].pos): optional_hint(n, from) else: " (this value may be none; narrow it before using its value)"
     # (shown += c with c from a loop over a string: a character's code)
     if len(why) == 0 and tkind(to) == .str_ and type_eq(prune(from), T_U8): why = " (a string's elements are character codes, numbers: `chr(c)` is the character as text)"
