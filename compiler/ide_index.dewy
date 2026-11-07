@@ -1,0 +1,293 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (byte_str ends_with starts_with trim)
+from p"ast.jo" import (NF_LITERAL NF_MUT NF_VOID has_flag kid kids kids2 nkids nodes)
+from p"check.jo" import (LF_CAPTURE globals lib_dir locals modules narrowed_var prelude syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checks_hints.dewy" import (type_names visible_names)
+from p"checks_thin.dewy" import (readonly_global)
+from p"checks_thin_expr.dewy" import (surface_sees)
+from p"expr.jo" import (intrinsics)
+from p"ide.jo" import (IK_CONST IK_ENUM IK_FN IK_GLOBAL IK_LOCAL IK_MODULE IK_STRUCT IK_TYPE IK_VARIANT IdeRef ide_alias_of ide_dewy_alt ide_dewy_type_node ide_doc ide_doc_of ide_files ide_find_name ide_finish ide_flush ide_fn_header ide_hint_locals ide_line_end ide_line_start ide_on ide_refs ide_sentinel ide_skippable ide_skipped_never ide_snippet ide_sym_decls ide_sym_detail ide_wide next_error_run)
+from p"ide_ops.dewy" import (ide_decl ide_emit ide_is_name_byte ide_local_kind ide_pos_str ide_type_str)
+from p"lex.jo" import (is_ident_char is_ident_start)
+from p"module_paths.dewy" import (path_norm)
+from p"type_ops.dewy" import (zonk)
+from p"types.jo" import (T_NEVER prune structs types)
+from p"util.jo" import (files intern mkpos more_errors name_of pos_file pos_off quiet_errors stop)
+
+IdeIndexWord:type=int64<overflow='wrap'>
+ide_esc=(s:string):>string=>{
+    if find_byte(s b'\t') <? 0 and find_byte(s b'\n') <? 0 and find_byte(s b'\\') <? 0 {return s}
+    let out=""
+    loop c in (s as array<uint8>) {
+        if c =? b'\t' {out="{out}\\t"} else if c =? b'\n' {out="{out}\\n"}
+        else if c =? b'\\' {out="{out}\\\\"} else {out="{out}{byte_str(IdeIndexWord(c))}"}
+    }
+    out
+}
+ide_indexed=(f:IdeIndexWord):>bool=>{
+    if f <? 0 or f >=? files.length {return false}
+    loop ide_files.length <=? f {ide_files.push(0)}
+    if ide_files[f] =? 0 {
+        let p=path_norm(files[f].path)
+        ide_files[f]=1
+        if p not=? ide_doc and (not ide_wide or starts_with(p "{path_norm(lib_dir)}/")) {ide_files[f]=2}
+    }
+    ide_files[f] =? 1
+}
+# where name is written at or after p, on the same line (-1 if it is not)
+ide_name_at=(p:IdeIndexWord name:IdeIndexWord):>int64=>{
+    if p <=? 0 or name <=? 0 {return -1}
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return -1}
+    let r=ide_find_name(f pos_off(p) name)
+    if r >=? 0 {return r}
+    # (or before it on the line: x = 1 is positioned at its =)
+    ide_find_name(f ide_line_start(files[f].src pos_off(p)) name)
+}
+ide_ref=(pos:IdeIndexWord name:IdeIndexWord kind:IdeIndexWord decl:IdeIndexWord ref_type:IdeIndexWord inst:IdeIndexWord):>void=>{
+    if not ide_on or not ide_indexed(pos_file(pos)) {return}
+    let p=ide_name_at(pos name)
+    if p <? 0 and files[pos_file(pos)].is_dewy {
+        let alt=ide_dewy_alt(name)
+        if alt not=? 0 {p=ide_name_at(pos alt)}
+    }
+    if p <? 0 {return}
+    let d:IdeIndexWord=-1
+    if decl >? 0 {d=ide_name_at(decl name)}
+    # (a name imported as another: its declaration has the original name)
+    if d <? 0 and decl >? 0 {
+        let orig=ide_alias_of.get(name)
+        if orig not=? none {d=ide_name_at(decl orig)}
+    }
+    ide_refs.push(IdeRef(p d int32(kind) int32(ref_type) int32(inst)))
+}
+# the variable a local stands for (a closure's copy, or a narrowed name, is its variable)
+ide_local_root=(l0:IdeIndexWord):>int64=>$unsafe {
+    let l=l0
+    loop true {
+        if IdeIndexWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 and locals.ptr[l].outer not=? 0 {l=IdeIndexWord(locals.ptr[l].outer)} else {
+            let v=narrowed_var(l)
+            if v =? 0 {return l}
+            l=v
+        }
+    }
+    l
+}
+# a name resolved to symbol s (at n's position)
+ide_sym_ref=(n:IdeIndexWord s:IdeIndexWord):>void=>$unsafe {
+    if not ide_on {return}
+    let sk=syms.ptr[s].kind
+    let nm=IdeIndexWord(nodes.ptr[n].name)
+    let p=nodes.ptr[n].pos
+    if sk =? 'local' {
+        let l=IdeIndexWord(syms.ptr[s].ref)
+        if starts_with(name_of(nm) "$index_end") {
+            ide_ref(p intern("end") IK_LOCAL 0 IdeIndexWord(locals.ptr[l].type) 0)
+            return
+        }
+        let r=ide_local_root(l)
+        ide_ref(p nm ide_local_kind(r) locals.ptr[r].pos IdeIndexWord(locals.ptr[l].type) 0)
+    }
+    else if sk =? 'global' {
+        let g=IdeIndexWord(syms.ptr[s].ref)
+        let kind=if readonly_global(g) {IK_CONST} else {IK_GLOBAL}
+        ide_ref(p nm kind nodes.ptr[IdeIndexWord(syms.ptr[s].decl)].pos IdeIndexWord(globals.ptr[g].type) 0)
+    }
+    else if sk =? 'const_' {
+        let g=IdeIndexWord(syms.ptr[s].ref)
+        let dp:IdeIndexWord=0
+        if globals.ptr[g].decl not=? 0 {dp=nodes.ptr[IdeIndexWord(globals.ptr[g].decl)].pos}
+        ide_ref(p nm IK_CONST dp IdeIndexWord(globals.ptr[g].type) 0)
+    }
+    else if sk =? 'struct_' {ide_ref(p nm IK_STRUCT nodes.ptr[IdeIndexWord(syms.ptr[s].ref)].pos 0 0)} else if sk =? 'enum_' {ide_ref(p nm IK_ENUM nodes.ptr[IdeIndexWord(syms.ptr[s].ref)].pos 0 0)}
+    else if sk =? 'alias_' {ide_ref(p nm IK_TYPE nodes.ptr[IdeIndexWord(syms.ptr[s].ref)].pos 0 0)} else if sk =? 'type_' {ide_ref(p nm IK_TYPE 0 IdeIndexWord(syms.ptr[s].ref) 0)}
+    else if sk =? 'module' {
+        let m=IdeIndexWord(syms.ptr[s].ref)
+        ide_ref(p nm IK_MODULE mkpos(IdeIndexWord(modules[m].file) 0) 0 IdeIndexWord(modules[m].file))
+    }
+}
+ide_variant_ref=(p:IdeIndexWord name:IdeIndexWord et:IdeIndexWord vi:IdeIndexWord):>void=>$unsafe {
+    if not ide_on {return}
+    let t=prune(et)
+    if types.ptr[t].kind not=? 'enum_' {return}
+    let d=IdeIndexWord(structs.ptr[IdeIndexWord(types.ptr[t].st)].decl)
+    if vi <? 0 or vi >=? nkids(d) {return}
+    ide_ref(p name IK_VARIANT nodes.ptr[kid(d vi)].pos t 0)
+}
+# does the declaration at offset i start its line (after keywords such as let or const only)?
+ide_leads_line=(src:string i:IdeIndexWord):>bool=>{
+    loop k in [ide_line_start(src i)..i) {
+        let c=(src as array<uint8>)[k]
+        if c not=? b' ' and c not=? b'\t' and not is_ident_char(c) {return false}
+    }
+    true
+}
+ide_dewy_fn_header=(d:IdeIndexWord):>string=>$unsafe {
+    let params:array<string>=[]
+    loop param in kids(d) {
+        let text=name_of(IdeIndexWord(nodes.ptr[param].name))
+        if has_flag(param NF_MUT) {text="@{text}"}
+        if nodes.ptr[param].a not=? 0 {text="{text}:{ide_dewy_type_node(IdeIndexWord(nodes.ptr[param].a))}"}
+        if nodes.ptr[param].b not=? 0 {text="{text}=…"}
+        params.push(text)
+    }
+    let generics:array<string>=[]
+    loop param in kids2(d) {generics.push(name_of(IdeIndexWord(nodes.ptr[param].name)))}
+    let prefix=""
+    if generics.length >? 0 {prefix="<{generics.join(" ")}>"}
+    let text="{name_of(IdeIndexWord(nodes.ptr[d].name))}={prefix}({params.join(" ")})"
+    if nodes.ptr[d].a not=? 0 {text="{text}:>{ide_dewy_type_node(IdeIndexWord(nodes.ptr[d].a))}"} else if has_flag(d NF_VOID) {text="{text}:>void"}
+    text
+}
+ide_ref_name=(p:IdeIndexWord):>string=>{
+    let src=files[pos_file(p)].src
+    let e=pos_off(p)
+    loop e <? (src as array<uint8>).length and ide_is_name_byte((src as array<uint8>)[e]) {e += 1}
+    src.byte_slice(pos_off(p) e)
+}
+# a declaration node d of kind k (with its name at p)
+ide_decl_node=(d:IdeIndexWord p:IdeIndexWord kind:IdeIndexWord):>void=>$unsafe {
+    let nm=IdeIndexWord(nodes.ptr[d].name)
+    if kind =? IK_FN {ide_decl(p nm kind ide_fn_header(d) ide_doc_of(nodes.ptr[d].pos))} else if kind =? IK_STRUCT or kind =? IK_ENUM {ide_decl(p nm kind ide_snippet(nodes.ptr[d].pos true) ide_doc_of(nodes.ptr[d].pos))}
+    else {ide_decl(p nm kind ide_snippet(nodes.ptr[d].pos false) ide_doc_of(nodes.ptr[d].pos))}
+}
+# the declarations made in an indexed module
+ide_module_decls=(m:IdeIndexWord):>void=>$unsafe {
+    loop [nm s0] in modules[m].names {
+        ide_sym_decls(s0)
+    }
+    if modules[m].is_prelude {
+        loop [nm s0] in prelude {
+            let d=IdeIndexWord(syms.ptr[s0].decl)
+            if d not=? 0 and pos_file(nodes.ptr[d].pos) =? IdeIndexWord(modules[m].file) {ide_sym_decls(s0)}
+        }
+    }
+}
+# a variable declared as `name = value`: worth a hint unless the value says its type
+ide_hint_local=(s:IdeIndexWord l:IdeIndexWord):>void=>$unsafe {
+    if not ide_on or not ide_indexed(pos_file(nodes.ptr[s].pos)) {return}
+    # (a Dewy value parameter's binding: its type is the parameter's)
+    if nodes.ptr[s].aux2 =? 1 {return}
+    let b=IdeIndexWord(nodes.ptr[s].b)
+    if b =? 0 or has_flag(b NF_LITERAL) {return}
+    let k=nodes.ptr[b].kind
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'bool_lit' {return}
+    # Point(...), vec2(...), f32(...): the type is written already
+    let t=ide_type_str(zonk(IdeIndexWord(locals.ptr[l].type)))
+    let src=files[pos_file(nodes.ptr[s].pos)].src
+    let i=pos_off(nodes.ptr[s].pos)
+    let e=ide_line_end(src i)
+    let eq=find_byte(src b'=' i)
+    if eq >=? 0 and eq <? e {
+        let rest=trim(src.byte_slice(eq + 1 e))
+        if starts_with(rest "{t}(") or starts_with(rest "{t}[") or starts_with(rest "[") and ends_with(rest "]") and ends_with(t "[]") and rest not=? "[]" {return}
+    }
+    ide_hint_locals.push(l)
+}
+# (a value of type t used where `never` does not fit: when the never is the inferred result of a
+# body left out after an earlier error, the error would only follow from that one, so the
+# function using it is left out too, unreported. The language server drops it as following.)
+never_cascade=(p:IdeIndexWord t:IdeIndexWord):>void=>{
+    if t not=? T_NEVER or not ide_skipped_never {return}
+    if ide_on {ide_fatal(p "this follows from an earlier error: the value never exists" true)}
+    if quiet_errors {stop(1)}
+    if more_errors {next_error_run()}
+    stop(1)
+}
+# (cascade: the error only follows from a body left out after an earlier one, which the
+# language server drops)
+ide_fatal=(p:IdeIndexWord msg:string cascade:bool=false):>void=>{
+    let skip:IdeIndexWord=-1
+    if p >=? 0 {skip=ide_skippable()}
+    let ps="-1"
+    if p >=? 0 {ps=ide_pos_str(p)}
+    let sk="-1"
+    if skip >=? 0 {sk=ide_pos_str(skip)}
+    let tag=""
+    if cascade {tag="\tcascade"}
+    ide_emit("E\t{ps}\t{ide_esc(msg)}\t{sk}{tag}")
+    if ide_sentinel =? 0 {ide_finish()} else {ide_flush()}
+    stop(0)
+}
+# (the symbol to offer for s: the first of its overloads the document's language can call, or
+# 0 when none can, as for the Sloppy library's spellings in a Dewy file; the checker's surface_sees)
+ide_offered=(s:IdeIndexWord):>int64=>$unsafe {
+    if syms.ptr[s].kind not=? 'fns' {return s}
+    let dewy=ends_with(ide_doc ".dewy")
+    let o=s
+    loop o not=? 0 {
+        if surface_sees(o dewy) {return o}
+        o=IdeIndexWord(syms.ptr[o].next)
+    }
+    0
+}
+ide_completion_name=(nm:IdeIndexWord s:IdeIndexWord):>string=>$unsafe {
+    if ends_with(ide_doc ".dewy") and syms.ptr[s].kind =? 'type_' {
+        return ide_type_str(IdeIndexWord(syms.ptr[s].ref))
+    }
+    # (Dewy writes a line with printl)
+    if ends_with(ide_doc ".dewy") and name_of(nm) =? "print" {return "printl"}
+    if ends_with(ide_doc ".dewy") and name_of(nm) =? "__dewy_print" {return "print"}
+    name_of(nm)
+}
+ide_complete_names=():>void=>$unsafe {
+    let seen=dict<int64 bool>()
+    seen[ide_sentinel]=true
+    loop nm in visible_names() {
+        if seen.get(nm) not=? none {continue}
+        seen[nm]=true
+        let nms=name_of(nm)
+        if (nms as array<uint8>).length =? 0 or not is_ident_start((nms as array<uint8>)[0]) {continue}
+        let s=lookup(nm)
+        if s not=? 0 {s=ide_offered(s)}
+        if s =? 0 {continue}
+        if ends_with(ide_doc ".dewy") and syms.ptr[s].kind =? 'type_' {continue}
+        let [kind detail]=ide_sym_detail(s)
+        ide_emit("C\t{ide_esc(ide_completion_name(nm s))}\t{kind}\t{ide_esc(detail)}")
+    }
+    loop it in intrinsics {
+        let nm=intern(it.name)
+        if seen.get(nm) not=? none {continue}
+        seen[nm]=true
+        let label=it.name
+        if ends_with(ide_doc ".dewy") and label =? "print" {label="printl"} else if ends_with(ide_doc ".dewy") and label =? "__dewy_print" {label="print"}
+        else if label =? "__dewy_print" {continue}
+        ide_emit("C\t{label}\t{IK_FN}\tbuiltin")
+    }
+    ide_flush()
+    stop(0)
+}
+# what `from m import ` can bring in: m's names (its private ones too)
+ide_complete_module=(m:IdeIndexWord):>void=>$unsafe {
+    let tab=modules[m].names
+    if modules[m].is_prelude {tab=prelude}
+    loop [nm s] in tab {
+        if nm =? ide_sentinel or syms.ptr[s].kind =? 'module' {continue}
+        let nms=name_of(nm)
+        if starts_with(nms "__") {continue}
+        let d=IdeIndexWord(syms.ptr[s].decl)
+        if modules[m].is_prelude and (d =? 0 or IdeIndexWord(nodes.ptr[d].mod) not=? m) {continue}
+        let o=ide_offered(s)
+        if o =? 0 {continue}
+        let [kind detail]=ide_sym_detail(o)
+        ide_emit("C\t{ide_esc(ide_completion_name(nm o))}\t{kind}\t{ide_esc(detail)}")
+    }
+    ide_flush()
+    stop(0)
+}
+ide_complete_types=():>void=>{
+    if ends_with(ide_doc ".dewy") {
+        ide_emit("C\tarray\t{IK_TYPE}\tarray<Element>")
+        ide_emit("C\tdict\t{IK_TYPE}\tdict<Key Value>")
+    }
+    loop nm in type_names() {
+        if nm =? ide_sentinel {continue}
+        let s=lookup(nm)
+        if s =? 0 {continue}
+        let [kind detail]=ide_sym_detail(s)
+        ide_emit("C\t{ide_esc(ide_completion_name(nm s))}\t{kind}\t{ide_esc(detail)}")
+    }
+    ide_flush()
+    stop(0)
+}

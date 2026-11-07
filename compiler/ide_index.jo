@@ -1,0 +1,259 @@
+use 'ide.jo'
+use 'checker_signature.dewy'
+use 'checker_expr.dewy'
+use 'effect_panics.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'dewy_lex.dewy'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_hints.dewy'
+use 'expr.jo'
+use 'checks_thin_expr.dewy'
+use 'checks_index_hooks.dewy'
+use 'lex.jo'
+use 'effects.jo'
+use 'ide_ops.dewy'
+
+ide_esc = (s: str) -> str:
+    if find_byte(s, '\t') < 0 and find_byte(s, '\n') < 0 and find_byte(s, '\\') < 0: return s
+    out = ""
+    loop c in s:
+        if c == '\t': out += "\\t"
+        else if c == '\n': out += "\\n"
+        else if c == '\\': out += "\\\\"
+        else: out += byte_str(int(c))
+    out
+ide_indexed = (f: int) -> bool:
+    if f < 0 or f >= files.len(): return false
+    loop ide_files.len() <= f: ide_files.push(0)
+    if ide_files[f] == 0:
+        p = path_norm(files[f].path)
+        ide_files[f] = 1
+        if p != ide_doc and (not ide_wide or starts_with(p, path_norm(lib_dir) + "/")): ide_files[f] = 2
+    ide_files[f] == 1
+# where name is written at or after p, on the same line (-1 if it is not)
+ide_name_at = (p: int, name: int) -> int:
+    if p <= 0 or name <= 0: return -1
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return -1
+    r = ide_find_name(f, pos_off(p), name)
+    if r >= 0: return r
+    # (or before it on the line: x = 1 is positioned at its =)
+    ide_find_name(f, ide_line_start(files[f].src, pos_off(p)), name)
+ide_ref = (pos: int, name: int, kind: int, decl: int, type: int, inst: int):
+    if not ide_on or not ide_indexed(pos_file(pos)): return
+    p = ide_name_at(pos, name)
+    if p < 0 and files[pos_file(pos)].is_dewy:
+        alt = ide_dewy_alt(name)
+        if alt != 0: p = ide_name_at(pos, alt)
+    if p < 0: return
+    d = -1
+    if decl > 0: d = ide_name_at(decl, name)
+    # (a name imported as another: its declaration has the original name)
+    if d < 0 and decl > 0:
+        if let orig = ide_alias_of.get(name): d = ide_name_at(decl, orig)
+    ide_refs.push(IdeRef(p, d, i32(kind), i32(type), i32(inst)))
+# the variable a local stands for (a closure's copy, or a narrowed name, is its variable)
+ide_local_root = (l0: int) -> int:
+    l = l0
+    loop true:
+        if int(locals[l].flags) & LF_CAPTURE != 0 and locals[l].outer != 0: l = int(locals[l].outer)
+        else:
+            v = narrowed_var(l)
+            if v == 0: return l
+            l = v
+    l
+# a name resolved to symbol s (at n's position)
+ide_sym_ref = (n: int, s: int):
+    if not ide_on: return
+    sk = syms[s].kind
+    nm = int(nodes[n].name)
+    p = nodes[n].pos
+    if sk == .local:
+        l = int(syms[s].ref)
+        if starts_with(name_of(nm), "$index_end"):
+            ide_ref(p, intern("end"), IK_LOCAL, 0, int(locals[l].type), 0)
+            return
+        r = ide_local_root(l)
+        ide_ref(p, nm, ide_local_kind(r), locals[r].pos, int(locals[l].type), 0)
+    else if sk == .global:
+        g = int(syms[s].ref)
+        kind = if readonly_global(g): IK_CONST else: IK_GLOBAL
+        ide_ref(p, nm, kind, nodes[int(syms[s].decl)].pos, int(globals[g].type), 0)
+    else if sk == .const_:
+        g = int(syms[s].ref)
+        dp = 0
+        if globals[g].decl != 0: dp = nodes[int(globals[g].decl)].pos
+        ide_ref(p, nm, IK_CONST, dp, int(globals[g].type), 0)
+    else if sk == .struct_: ide_ref(p, nm, IK_STRUCT, nodes[int(syms[s].ref)].pos, 0, 0)
+    else if sk == .enum_: ide_ref(p, nm, IK_ENUM, nodes[int(syms[s].ref)].pos, 0, 0)
+    else if sk == .alias_: ide_ref(p, nm, IK_TYPE, nodes[int(syms[s].ref)].pos, 0, 0)
+    else if sk == .type_: ide_ref(p, nm, IK_TYPE, 0, int(syms[s].ref), 0)
+    else if sk == .module:
+        m = int(syms[s].ref)
+        ide_ref(p, nm, IK_MODULE, mkpos(int(modules[m].file), 0), 0, int(modules[m].file))
+ide_variant_ref = (p: int, name: int, et: int, vi: int):
+    if not ide_on: return
+    t = prune(et)
+    if types[t].kind != .enum_: return
+    d = int(structs[int(types[t].st)].decl)
+    if vi < 0 or vi >= nkids(d): return
+    ide_ref(p, name, IK_VARIANT, nodes[kid(d, vi)].pos, t, 0)
+# does the declaration at offset i start its line (after keywords such as let or const only)?
+ide_leads_line = (src: str, i: int) -> bool:
+    loop k in [ide_line_start(src, i)..i):
+        c = src[k]
+        if c != ' ' and c != '\t' and not is_ident_char(c): return false
+    true
+ide_dewy_fn_header = (d: int) -> str:
+    params: str[]
+    loop param in kids(d):
+        text = name_of(int(nodes[param].name))
+        if has_flag(param, NF_MUT): text = "@" + text
+        if nodes[param].a != 0: text += ":" + ide_dewy_type_node(int(nodes[param].a))
+        if nodes[param].b != 0: text += "=…"
+        params.push(text)
+    generics: str[]
+    loop param in kids2(d): generics.push(name_of(int(nodes[param].name)))
+    prefix = ""
+    if generics.len() > 0: prefix = "<" + generics.join(" ") + ">"
+    text = name_of(int(nodes[d].name)) + "=" + prefix + "(" + params.join(" ") + ")"
+    if nodes[d].a != 0: text += ":>" + ide_dewy_type_node(int(nodes[d].a))
+    else if has_flag(d, NF_VOID): text += ":>void"
+    text
+ide_ref_name = (p: int) -> str:
+    src = files[pos_file(p)].src
+    e = pos_off(p)
+    loop e < len(src) and ide_is_name_byte(src[e]): e += 1
+    src[pos_off(p)..e)
+# a declaration node d of kind k (with its name at p)
+ide_decl_node = (d: int, p: int, kind: int):
+    nm = int(nodes[d].name)
+    if kind == IK_FN: ide_decl(p, nm, kind, ide_fn_header(d), ide_doc_of(nodes[d].pos))
+    else if kind == IK_STRUCT or kind == IK_ENUM: ide_decl(p, nm, kind, ide_snippet(nodes[d].pos, true), ide_doc_of(nodes[d].pos))
+    else: ide_decl(p, nm, kind, ide_snippet(nodes[d].pos, false), ide_doc_of(nodes[d].pos))
+# the declarations made in an indexed module
+ide_module_decls = (m: int):
+    loop nm, s0 in modules[m].names:
+        ide_sym_decls(s0)
+    if modules[m].is_prelude:
+        loop nm, s0 in prelude:
+            d = int(syms[s0].decl)
+            if d != 0 and pos_file(nodes[d].pos) == int(modules[m].file): ide_sym_decls(s0)
+# a variable declared as `name = value`: worth a hint unless the value says its type
+ide_hint_local = (s: int, l: int):
+    if not ide_on or not ide_indexed(pos_file(nodes[s].pos)): return
+    # (a Dewy value parameter's binding: its type is the parameter's)
+    if nodes[s].aux2 == 1: return
+    b = int(nodes[s].b)
+    if b == 0 or has_flag(b, NF_LITERAL): return
+    k = nodes[b].kind
+    if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit: return
+    # Point(...), vec2(...), f32(...): the type is written already
+    t = ide_type_str(zonk(int(locals[l].type)))
+    src = files[pos_file(nodes[s].pos)].src
+    i = pos_off(nodes[s].pos)
+    e = ide_line_end(src, i)
+    eq = find_byte(src, '=', i)
+    if eq >= 0 and eq < e:
+        rest = trim(src[eq + 1..e))
+        if starts_with(rest, t + "(") or starts_with(rest, t + "[") or starts_with(rest, "[") and ends_with(rest, "]") and ends_with(t, "[]") and rest != "[]": return
+    ide_hint_locals.push(l)
+# (a value of type t used where `never` does not fit: when the never is the inferred result of a
+# body left out after an earlier error, the error would only follow from that one, so the
+# function using it is left out too, unreported. The language server drops it as following.)
+never_cascade = (p: int, t: int):
+    if t != T_NEVER or not ide_skipped_never: return
+    if ide_on: ide_fatal(p, "this follows from an earlier error: the value never exists", true)
+    if quiet_errors: stop(1)
+    if more_errors: next_error_run()
+    stop(1)
+# (cascade: the error only follows from a body left out after an earlier one, which the
+# language server drops)
+ide_fatal = (p: int, msg: str, cascade: bool = false):
+    skip = -1
+    if p >= 0: skip = ide_skippable()
+    ps = "-1"
+    if p >= 0: ps = ide_pos_str(p)
+    sk = "-1"
+    if skip >= 0: sk = ide_pos_str(skip)
+    tag = ""
+    if cascade: tag = "\tcascade"
+    ide_emit("E\t{ps}\t{ide_esc(msg)}\t{sk}{tag}")
+    if ide_sentinel == 0: ide_finish()
+    else: ide_flush()
+    stop(0)
+# (the symbol to offer for s: the first of its overloads the document's language can call, or
+# 0 when none can, as for the Sloppy library's spellings in a Dewy file; the checker's surface_sees)
+ide_offered = (s: int) -> int:
+    if syms[s].kind != .fns: return s
+    dewy = ends_with(ide_doc, ".dewy")
+    o = s
+    loop o != 0:
+        if surface_sees(o, dewy): return o
+        o = int(syms[o].next)
+    0
+ide_completion_name = (nm: int, s: int) -> str:
+    if ends_with(ide_doc, ".dewy") and syms[s].kind == .type_:
+        return ide_type_str(int(syms[s].ref))
+    # (Dewy writes a line with printl)
+    if ends_with(ide_doc, ".dewy") and name_of(nm) == "print": return "printl"
+    if ends_with(ide_doc, ".dewy") and name_of(nm) == "__dewy_print": return "print"
+    name_of(nm)
+ide_complete_names = ():
+    seen: {int: bool} = {}
+    seen[ide_sentinel] = true
+    loop nm in visible_names():
+        if seen.get(nm) != none: continue
+        seen[nm] = true
+        nms = name_of(nm)
+        if len(nms) == 0 or not is_ident_start(nms[0]): continue
+        s = lookup(nm)
+        if s != 0: s = ide_offered(s)
+        if s == 0: continue
+        if ends_with(ide_doc, ".dewy") and syms[s].kind == .type_: continue
+        kd = ide_sym_detail(s)
+        ide_emit("C\t{ide_esc(ide_completion_name(nm, s))}\t{kd.0}\t{ide_esc(kd.1)}")
+    loop it in intrinsics:
+        nm = intern(it.name)
+        if seen.get(nm) != none: continue
+        seen[nm] = true
+        label = it.name
+        if ends_with(ide_doc, ".dewy") and label == "print": label = "printl"
+        else if ends_with(ide_doc, ".dewy") and label == "__dewy_print": label = "print"
+        else if label == "__dewy_print": continue
+        ide_emit("C\t{label}\t{IK_FN}\tbuiltin")
+    ide_flush()
+    stop(0)
+# what `from m import ` can bring in: m's names (its private ones too)
+ide_complete_module = (m: int):
+    tab = modules[m].names
+    if modules[m].is_prelude: tab = prelude
+    loop nm, s in tab:
+        if nm == ide_sentinel or syms[s].kind == .module: continue
+        nms = name_of(nm)
+        if starts_with(nms, "__"): continue
+        d = int(syms[s].decl)
+        if modules[m].is_prelude and (d == 0 or int(nodes[d].mod) != m): continue
+        o = ide_offered(s)
+        if o == 0: continue
+        kd = ide_sym_detail(o)
+        ide_emit("C\t{ide_esc(ide_completion_name(nm, o))}\t{kd.0}\t{ide_esc(kd.1)}")
+    ide_flush()
+    stop(0)
+ide_complete_types = ():
+    if ends_with(ide_doc, ".dewy"):
+        ide_emit("C\tarray\t{IK_TYPE}\tarray<Element>")
+        ide_emit("C\tdict\t{IK_TYPE}\tdict<Key Value>")
+    loop nm in type_names():
+        if nm == ide_sentinel: continue
+        s = lookup(nm)
+        if s == 0: continue
+        kd = ide_sym_detail(s)
+        ide_emit("C\t{ide_esc(ide_completion_name(nm, s))}\t{kd.0}\t{ide_esc(kd.1)}")
+    ide_flush()
+    stop(0)
