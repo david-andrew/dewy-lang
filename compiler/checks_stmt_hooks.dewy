@@ -1,0 +1,499 @@
+$runtime_checks
+from p"refine.jo" import (ref_holder_arm)
+from p"expr.jo" import (CV)
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_CHECKED NF_FLOW_RETURNS NF_INBOUNDS NF_MUT NF_STMT add_flag clone dewy_live_sources has_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (FK_INIT SINK_NONE binding_leaves check_binding_input check_block check_stmt check_struct_fields collide_local copy_write_warnings ctx_for_inst ctx_in_progress ctxs cx dewy_at dewy_cursor_loop dewy_iterator_loop dewy_nested_loop_bindings dewy_sequence_loop ensure_global expectation_ifs fns has_break jd library_exit_call local_place_decl locals map_loop_values map_tidy_first modules mutable_loop_syntax new_local resolve_binding_type returned_place route_text scope_mark scope_reset shape_checked_value shape_dim_decl sink_body_mode sink_fn sink_void_error sinks soa_loop union_has_void unpack_loop unused_value)
+from p"checked_eval.dewy" import (LF_ALIAS)
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_sinks.dewy" import (sink_body_kind sink_express sink_open sink_pack_body sink_written)
+from p"checks_hints.dewy" import (empty_hint)
+from p"checks_loop_copies.dewy" import (check_live_loop soa_alias)
+from p"checks_program.dewy" import (synth_call)
+from p"checks_static.dewy" import (expectation_refuted)
+from p"checks_unpack.dewy" import (unpack_binding)
+from p"definite_walk.dewy" import (da_check_fn)
+from p"directives.jo" import (dir_function_entry)
+from p"dwarf_format.dewy" import (LF_PARAM)
+from p"effect_sources.dewy" import (effect_storage_type)
+from p"errors.jo" import (infer_finish infer_note_return infer_returns infer_throws)
+from p"exact.jo" import (exact_owners)
+from p"expr.jo" import (a_type bc_block bc_map_keys check_place coerce copy_place cp_inner int_intervals is_map_entries_type is_map_type last_checked mk_ident_local ntype spawn_value_error void_rec_hint wrap_conv)
+from p"facts.jo" import (fact_open_range fact_requests)
+from p"frontend.jo" import (source_force_body)
+from p"icount.jo" import (IC_LOAD)
+from p"icount_ops.dewy" import (ic_fn ic_restore)
+from p"ide.jo" import (ide_hint_fns ide_indexed ide_on ide_skip never_cascade)
+from p"member_admit.dewy" import (member_scope)
+from p"node_store.dewy" import (NK Node)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"pcheck.jo" import (pc_missing pc_restore)
+from p"place_method_ops.dewy" import (place_let_decl)
+from p"refine.jo" import (refine_bindings str_set_of)
+from p"refinement_types.dewy" import (FactRequest)
+from p"reflect_ops.dewy" import (reflect_bind reflect_loop)
+from p"reflection.jo" import (reflect_active)
+from p"temperature_ops.dewy" import (temperature_binding)
+from p"types.jo" import (T_FLOAT T_NEVER dt is_int is_soa prune telem tkind type_has_fn types)
+from p"util.jo" import (fatal files intern name_of pos_file)
+
+StmtHookWord:type=int64<overflow='wrap'>
+stmt_terminates=(s:int64):>bool=>$unsafe {
+    if s =? 0 {return false}
+    let k=nodes.ptr[s].kind
+    if k =? 'return_' or k =? 'break_' or k =? 'continue_' {return true}
+    if k =? 'block' {return has_flag(s NF_FLOW_RETURNS) or (nkids(s) >? 0 and stmt_terminates(kid(s nkids(s) - 1)))}
+    if k =? 'if_' {return nodes.ptr[s].c not=? 0 and stmt_terminates(StmtHookWord(nodes.ptr[s].b)) and stmt_terminates(StmtHookWord(nodes.ptr[s].c))}
+    if k =? 'exprstmt' {
+        let e=StmtHookWord(nodes.ptr[s].a)
+        if StmtHookWord(nodes.ptr[e].type) =? T_NEVER {return true}
+        if library_exit_call(e) {return true}
+        if nodes.ptr[e].kind =? 'match_' {
+            let all=true
+            let wild=false
+            loop i in [0..nkids(e)) {
+                let arm=kid(e i)
+                if not stmt_terminates(StmtHookWord(nodes.ptr[arm].b)) {all=false}
+                loop j in [0..nkids(arm)) {
+                    if nodes.ptr[kid(arm j)].kind =? 'pwild' {wild=true}
+                }
+            }
+            return all and (wild or nodes.ptr[e].aux2 not=? 0)
+        }
+        if nodes.ptr[e].kind =? 'if_' {return nodes.ptr[e].c not=? 0 and stmt_terminates(StmtHookWord(nodes.ptr[e].b)) and stmt_terminates(StmtHookWord(nodes.ptr[e].c))}
+        return false
+    }
+    if k =? 'while_' {return nodes.ptr[StmtHookWord(nodes.ptr[s].a)].kind =? 'bool_lit' and nodes.ptr[StmtHookWord(nodes.ptr[s].a)].ival not=? 0 and not has_break(StmtHookWord(nodes.ptr[s].b))}
+    false
+}
+# For loops run in checker_for_loops.dewy; these are its services.
+# (the source's rewrites: true when the loop was made another statement, and checked)
+for_rewrite=(s:int64):>bool=>$unsafe {
+    if dewy_live_sources.has(StmtHookWord(nodes.ptr[s].a)) and dewy_at(nodes.ptr[s].pos) {
+        check_live_loop(s)
+        return true
+    }
+    if dewy_at(nodes.ptr[s].pos) and reflect_loop(s) {return true}
+    if has_flag(s NF_MUT) and files[pos_file(nodes.ptr[s].pos)].is_dewy {
+        let source_type=prune(check_expr(StmtHookWord(nodes.ptr[s].a) 0))
+        nodes.ptr[s].a=int32(last_checked)
+        if types.ptr[source_type].kind not=? 'array' and types.ptr[source_type].kind not=? 'fixed' {
+            fatal(nodes.ptr[s].pos "`loop @item in items` needs stored array elements; ordinary iteration yields values")
+        }
+        # (loop @acct in accounts.values: a new array, whose changes nothing would keep)
+        let source=StmtHookWord(nodes.ptr[s].a)
+        if nodes.ptr[source].kind =? 'call' {
+            let of_map=false
+            loop a in kids(source) {
+                if nodes.ptr[a].type not=? 0 and is_map_type(ntype(a)) {of_map=true}
+            }
+            if of_map {fatal(nodes.ptr[s].pos "`loop @item in items` changes the elements where they are stored, and a dictionary's `values` is a new array: change each entry through its key, `loop key in d.keys \{ d[key]... }`")}
+            fatal(nodes.ptr[s].pos "`loop @item in items` changes the elements where they are stored, so `items` is an array held by a variable or a field, not a new array a call gives")
+        }
+    }
+    soa_loop(s)
+    unpack_loop(s)
+    dewy_nested_loop_bindings(s)
+    if dewy_cursor_loop(s) {return true}
+    if map_tidy_first(s) {return true}
+    if dewy_iterator_loop(s) {return true}
+    if dewy_sequence_loop(s) {return true}
+    false
+}
+for_open_range=(s:int64):>void=>{
+    if fact_open_range(s) {fact_requests.push(FactRequest(s StmtHookWord(ctxs[cx].inst)))}
+}
+# (a map with entries removed has them still in place, marked gone: the loop goes over a
+# copy without them; a `loop mut` had the map itself made so, by map_tidy_first)
+for_map_view=(s:int64 t0:int64):>int64=>$unsafe {
+    let t=t0
+    let it=StmtHookWord(nodes.ptr[s].a)
+    let pos=nodes.ptr[s].pos
+    if is_map_type(t) and not has_flag(s NF_MUT) and not ownership_fact_type(t) {
+        add_flag(it NF_CHECKED)
+        let lv=StmtHookWord(nodes.ptr[synth_call("__map_entries" [it] pos)].a)
+        t=prune(check_expr(lv 0))
+        it=last_checked
+        nodes.ptr[s].a=int32(it)
+    }
+    if (is_map_type(t) or is_map_entries_type(t)) and nodes.ptr[s].ival =? 1 {
+        # `i in 0.. and key in map` counts keys. The native two-binding
+        # map loop otherwise means key/value, so iterate its key snapshot.
+        add_flag(it NF_CHECKED)
+        t=prune(check_expr(bc_map_keys(it pos) 0))
+        it=last_checked
+        nodes.ptr[s].a=int32(it)
+    }
+    t
+}
+for_collide=(s:int64):>void=>{
+    collide_local(s)
+    return
+}
+# `loop @x in xs`: x is xs[i] itself (only the elements change, not the array's length)
+for_element=(s:int64 name:int64 et:int64 idx:int64 fixed:bool):>int64=>$unsafe {
+    let it=StmtHookWord(nodes.ptr[s].a)
+    let pos=nodes.ptr[s].pos
+    cp_inner += 1
+    check_place(it true)
+    cp_inner -= 1
+    let el=new_local(name et pos)
+    locals.ptr[el].flags=int32(StmtHookWord(locals.ptr[el].flags) | LF_ALIAS)
+    let ix=mk('index' pos)
+    # (it is checked; m[k] of a map was made the place in it by check_place)
+    let base=copy_place(it)
+    nodes.ptr[ix].a=int32(base)
+    nodes.ptr[ix].b=int32(mk_ident_local(idx pos))
+    nodes.ptr[ix].type=int32(et)
+    add_flag(ix NF_CHECKED)
+    if fixed {add_flag(ix NF_INBOUNDS)}
+    locals.ptr[el].alias=int32(ix)
+    el
+}
+for_route=(it:int64):>bool=>{
+    route_text(it) not=? ""
+}
+for_struct_fields=(si:int64):>void=>{
+    check_struct_fields(si)
+    return
+}
+# `loop k, @v in m`: v is the entry's value in place
+for_map_value=(s:int64 name:int64 vt:int64 idx:int64):>int64=>$unsafe {
+    let it=StmtHookWord(nodes.ptr[s].a)
+    let pos=nodes.ptr[s].pos
+    check_place(it true)
+    let vl=new_local(name telem(vt) pos)
+    locals.ptr[vl].flags=int32(StmtHookWord(locals.ptr[vl].flags) | LF_ALIAS)
+    let f=mk('field' pos)
+    nodes.ptr[f].a=int32(clone(it))
+    nodes.ptr[f].name=int32(intern("vals"))
+    let ix=mk('index' pos)
+    nodes.ptr[ix].a=int32(f)
+    nodes.ptr[ix].b=int32(mk_ident_local(idx pos))
+    check_expr(ix 0);
+    locals.ptr[vl].alias=int32(last_checked)
+    vl
+}
+for_map_value_ref=(vl:int64):>void=>{
+    map_loop_values[vl]=true
+}
+for_body=(b:int64):>void=>{
+    check_block(b 0 false);
+    return
+}
+for_error=(n:int64 t0:int64 code:int64):>void=>$unsafe {
+    let t=t0
+    let pos=nodes.ptr[n].pos
+    if code =? 1 {fatal(pos "a loop range needs a start")}
+    if code =? 2 {fatal(pos "text is joined with `+` (or put in a string: \"\{a}\{b}\"); `..` makes a range of numbers")}
+    if code =? 3 {
+        if is_int(t) {t=T_FLOAT}
+        fatal(pos "a range counts in whole numbers, not {dt(t)} (for 0.0 to 1.0 in tenths, count to 10 and divide: {jd(pos "`loop i in [0..10): x = f64(i) / 10.0`" "`loop i in [0..10] \{ let x = float64(i) / 10 }`")})")
+    }
+    if code =? 4 {fatal(pos "a range loop has one loop variable")}
+    if code =? 5 {fatal(pos "`{mutable_loop_syntax(pos)}` needs an array (a range's numbers are not stored anywhere)")}
+    if code =? 6 {fatal(pos "strings are immutable; 'for mut' needs an array")}
+    if code =? 7 {fatal(pos "'for mut' over a map needs key and value variables")}
+    never_cascade(pos t)
+    fatal(pos "cannot iterate over a value of type {dt(t)}")
+}
+# Declarations run in checker_vardecls.dewy; these are its services.
+# (the other forms: 1 a spawn's handle, 2 a soa element, 4 a lent place, 5 a local place,
+# 6 a shaped value, 8 a global; 9: whether definite assignment follows a `let x:T` without
+# a value)
+decl_form=(s:int64 code:int64):>bool=>$unsafe {
+    if code =? 1 {
+        # (a task's result is kept by `let name = spawn ...` written directly in its group's block,
+        # which dewy_nodes.jo dw_task_group renames; elsewhere the binding would hold its private handle)
+        if not starts_with(name_of(StmtHookWord(nodes.ptr[s].name)) "$task") {spawn_value_error(nodes.ptr[StmtHookWord(nodes.ptr[s].b)].pos)}
+        return false
+    }
+    if code =? 2 {
+        soa_alias(s)
+        return true
+    }
+    if code =? 4 {return place_let_decl(s)}
+    if code =? 5 {return local_place_decl(s)}
+    if code =? 6 {
+        shape_checked_value(s)
+        return false
+    }
+    if code =? 8 {
+        ensure_global(StmtHookWord(nodes.ptr[s].sym) nodes.ptr[s].pos true)
+        return true
+    }
+    let nm=name_of(StmtHookWord(nodes.ptr[s].name))
+    (nm as array<uint8>).length >? 0 and (nm as array<uint8>)[0] not=? b'$' and (nm as array<uint8>)[0] not=? b'_'
+}
+# A pattern's or element alias's parts (checker_vardecls.dewy vd_pattern, vd_element_alias):
+# 1 a global pattern declared there (1; 0 when all are discards), 2 the value checked and
+# unpacked (its type), 3 a value of another shape refused, 4 an element alias's value
+# checked as a place (it), a soa array's element refused
+decl_pattern=(s:int64 t:int64 code:int64):>int64=>$unsafe {
+    if code =? 1 {
+        loop binding in binding_leaves(kids(s)) {
+            if nodes.ptr[binding].kind not=? 'hole' {
+                ensure_global(StmtHookWord(nodes.ptr[binding].sym) nodes.ptr[s].pos true)
+                return 1
+            }
+        }
+        # With only discards, no global initializer checks the source for us.
+        return 0
+    }
+    if code =? 2 {
+        let vt=check_binding_input(s)
+        let unpacked=unpack_binding(StmtHookWord(nodes.ptr[s].b) vt kids(s) nodes.ptr[s].pos)
+        set_list(s unpacked[1])
+        nodes.ptr[s].b=int32(last_checked)
+        return unpacked[0]
+    }
+    if code =? 3 {fatal(nodes.ptr[s].pos "expected a tuple with {nkids(s)} elements (or an array), found {dt(t)}")}
+    let arr0:StmtHookWord=0
+    if nodes.ptr[StmtHookWord(nodes.ptr[s].b)].kind =? 'index' {arr0=StmtHookWord(nodes.ptr[StmtHookWord(nodes.ptr[s].b)].a)}
+    check_expr(StmtHookWord(nodes.ptr[s].b) 0);
+    let ix=last_checked
+    if arr0 not=? 0 and nodes.ptr[arr0].type not=? 0 and is_soa(ntype(arr0)) {fatal(nodes.ptr[s].pos "a soa array's `mut` elements go in a loop of their own, `loop mut p in ps:`; with a count beside them, by index: `loop i in [0..ps.len()): ps[i].x += ...`")}
+    check_place(ix true)
+    ix
+}
+decl_binding_type=(s:int64):>int64=>$unsafe {
+    let previous_self=refine_bindings.self
+    refine_bindings.self=StmtHookWord(nodes.ptr[s].name)
+    ref_holder_arm(StmtHookWord(nodes.ptr[s].a) StmtHookWord(nodes.ptr[s].name));
+    let t=resolve_binding_type(StmtHookWord(nodes.ptr[s].a))
+    refine_bindings.self=previous_self
+    t
+}
+# (1: `let shapes = [Circle[...] Square[...]]`, 2: `let s = Circle[...]`, later given a Square)
+decl_storage=(s:int64 t:int64):>int64=>$unsafe {
+    if not type_has_fn(t) {return t}
+    let storage=effect_storage_type(t)
+    if storage not=? t {wrap_conv(StmtHookWord(nodes.ptr[s].b) CV.none_ storage)}
+    storage
+}
+decl_value_param=(s:int64 t:int64):>int64=>$unsafe {
+    let v=StmtHookWord(nodes.ptr[s].b)
+    if nodes.ptr[v].kind =? 'ident' and nodes.ptr[v].aux =? int32(1) {
+        let pt=StmtHookWord(locals.ptr[StmtHookWord(nodes.ptr[v].sym)].type)
+        let [known _]=int_intervals(pt)
+        if StmtHookWord(locals.ptr[StmtHookWord(nodes.ptr[v].sym)].flags) & LF_PARAM not=? 0 and tkind(pt) =? 'refined' and (known or str_set_of(pt) not=? 0) {
+            nodes.ptr[s].b=int32(coerce(v pt))
+            return pt
+        }
+    }
+    t
+}
+decl_temperature=(s:int64 t:int64 unit:int64):>int64=>{
+    temperature_binding(s t unit false)
+}
+# (1 growth's reading of the value; 3 a sibling literal's known contents, 4 a decimal
+# literal's binding, 5 growth's binding, 6 a text domain, 7 an integer domain, 8 a
+# constant's view, 9 definite assignment, 10 an editor's type hint)
+decl_error=(s:int64 t:int64 code:int64):>void=>$unsafe {
+    let nm=name_of(StmtHookWord(nodes.ptr[s].name))
+    let pos=nodes.ptr[s].pos
+    if code =? 1 {fatal(pos "cannot infer the type of '{nm}' from 'none'; add a type: {nm}: T? = none")}
+    if code =? 2 {fatal(pos "variable needs a type or a value")}
+    if code =? 3 {
+        never_cascade(pos t)
+        fatal(pos "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(StmtHookWord(nodes.ptr[s].b))}")
+    }
+    if code =? 4 {fatal(pos "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(pos "`{nm}: Enemy? = none`" "`let {nm}:Enemy? = none`")}")}
+    fatal(pos "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
+}
+# (1 an exact-width measure's owner, 2 a shaped parameter's dimension, 3 a reflected scope,
+# 4 an `if` statement checked whole, 5 a `$expect` test after its `if`)
+stmt_special=(s:int64 code:int64):>void=>$unsafe {
+    if code =? 1 {
+        let owner=StmtHookWord(ctxs[cx].inst)
+        if owner >? 0 {exact_owners[owner]=true}
+    }
+    else if code =? 2 {shape_dim_decl(s)} else if code =? 3 {
+        let mark=scope_mark()
+        reflect_bind(s)
+        let body=StmtHookWord(nodes.ptr[s].b)
+        let active=reflect_active
+        reflect_active=true
+        if not member_scope(s) {check_block(StmtHookWord(nodes.ptr[s].b) 0 false);}
+        body=StmtHookWord(nodes.ptr[s].b)
+        reflect_active=active
+        scope_reset(mark)
+        nodes.ptr[s]=nodes.ptr[body]
+    }
+    else if code =? 5 {
+        if expectation_ifs.has(s) {expectation_refuted(s)}
+    }
+    else {
+        add_flag(s NF_STMT)
+        check_expr(s 0);
+        if last_checked not=? s {nodes.ptr[s]=nodes.ptr[last_checked]}
+        if expectation_ifs.has(s) {expectation_refuted(s)}
+    }
+}
+stmt_error=(s:int64 code:int64):>void=>$unsafe {
+    if code =? 1 {fatal(nodes.ptr[s].pos "declarations are only allowed at the top level")}
+    if code =? 2 {fatal(nodes.ptr[s].pos "invalid statement")}
+    spawn_value_error(nodes.ptr[StmtHookWord(nodes.ptr[s].b)].pos)
+}
+# Loop statements run in checker_loops.dewy; these are its services.
+loop_body=(b:int64):>void=>{
+    check_block(b 0 false);
+    return
+}
+loop_error=(n:int64 t:int64 code:int64):>void=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    if code =? 1 {fatal(pos "'loop let x = value' needs an optional value, found {dt(t)}")}
+    if code =? 2 {fatal(pos jd(pos "`loop cond:` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n):` (`loop _ in` when it is not used)" "`loop cond \{ }` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n) \{ }` (`loop _ in` when it is not used)"))}
+    if code =? 3 {
+        let w="continue"
+        if nodes.ptr[n].kind =? 'break_' {w="break"}
+        fatal(pos "'{w}' outside of a loop")
+    }
+    if code =? 4 {fatal(pos "unknown loop label '${name_of(StmtHookWord(nodes.ptr[n].name))}'")}
+    fatal(pos "duplicate active loop label '${name_of(StmtHookWord(nodes.ptr[n].sval))}'")
+}
+statement_check=(s:int64):>void=>{
+    check_stmt(s)
+    return
+}
+statement_block=(b:int64):>void=>{
+    check_block(b 0 false);
+    return
+}
+# (`void | E` expresses E when it fails, and nothing when it succeeds)
+exprstmt_express=(s:int64 t:int64 pack:bool):>void=>{
+    if union_has_void(t) {sink_void_error(s t)}
+    sink_express(s t pack false)
+}
+exprstmt_unused_value=(code:int64 op:int64 a:int64 pos:int64 t:int64):>void=>{
+    let kinds:array<NK>=['nil' 'binary' 'and_' 'or_' 'not_' 'bool_lit' 'int_lit' 'float_lit' 'ident' 'none_lit']
+    unused_value(Node(kind=kinds[code] op=int32(op) a=int32(a) pos=pos) t)
+}
+exprstmt_error=(e:int64):>void=>$unsafe {
+    let nm=name_of(StmtHookWord(nodes.ptr[e].name))
+    fatal(nodes.ptr[e].pos "'{nm}' is a function and is not called here: `{nm}()` calls it")
+}
+# Return statements run in checker_returns.dewy; these are its services.
+return_place=(v:int64):>void=>{
+    returned_place(v)
+    return
+}
+return_throws=(inst:int64):>bool=>{
+    infer_throws.has(inst)
+}
+return_note=(s:int64):>void=>{
+    infer_note_return(s)
+    return
+}
+return_void_value=(s:int64 rt:int64):>void=>$unsafe {
+    check_expr(bc_block([] nodes.ptr[s].pos) rt);
+    nodes.ptr[s].a=int32(coerce(last_checked rt))
+}
+return_error=(s:int64 t:int64 code:int64):>void=>$unsafe {
+    let pos=nodes.ptr[s].pos
+    if code =? 1 {fatal(pos "'return' outside of a function")}
+    if code =? 2 {fatal(pos "a function giving `never` does not return")}
+    if code =? 3 {fatal(pos "this function does not return a value")}
+    fatal(pos "missing return value (function returns {dt(t)})")
+}
+body_restore=(f:int64):>void=>{
+    if pc_missing.has(f) {pc_restore(f)}
+}
+body_force=(decl:int64 f:int64):>void=>{
+    let icl=ic_fn(IC_LOAD f)
+    source_force_body(decl)
+    ic_restore(icl)
+}
+body_skip=(decl:int64):>bool=>$unsafe {
+    ide_skip.length >? 0 and ide_skip.get(nodes.ptr[decl].pos) not=? none
+}
+body_infer=(f:int64 decl:int64):>void=>$unsafe {
+    if decl not=? 0 and nodes.ptr[decl].kind =? 'fn_' and fns.ptr[f].kind not=? FK_INIT and files[pos_file(nodes.ptr[decl].pos)].is_dewy {
+        infer_throws[f]=[]
+        infer_returns[f]=[]
+    }
+}
+body_context=(f:int64):>int64=>{
+    let c=ctx_for_inst(f)
+    if c <? 0 {c=ctx_in_progress(f)}
+    c
+}
+body_recursive_error=(f:int64 use_pos:int64):>void=>$unsafe {
+    fatal(use_pos "recursive function '{name_of(StmtHookWord(nodes.ptr[StmtHookWord(fns.ptr[f].decl)].name))}' needs an explicit return type (add {jd(use_pos "`-> Type`" "`:>Type`")})")
+}
+body_result_init=(f:int64 body:int64):>void=>{
+    let saved_sink=sink_fn
+    sink_open(body SINK_NONE)
+    sink_fn=sinks.length - 1
+    loop i in [0..nkids(body)) {check_stmt(kid(body i))}
+    sinks.pop();
+    sink_fn=saved_sink
+}
+body_result_check=(f:int64 decl:int64 body:int64 infer:bool want:bool expected:int64):>int64=>$unsafe {
+    let saved_sink=sink_fn
+    let exp=expected
+    if want and nkids(body) >? 0 and nodes.ptr[kid(body nkids(body) - 1)].kind =? 'exprstmt' {returned_place(StmtHookWord(nodes.ptr[kid(body nkids(body) - 1)].a))}
+    sink_body_mode=sink_body_kind(body infer want StmtHookWord(ctxs[cx].ret) not infer and sink_written(decl))
+    if fns.ptr[f].pack_n >? 0 {exp=sink_pack_body(f)}
+    sink_fn=sinks.length
+    let bt=check_block(body exp want)
+    sink_fn=saved_sink
+    bt
+}
+body_result_throws=(f:int64 body:int64):>void=>{
+    if infer_throws.has(f) {
+        infer_finish(f body);
+        infer_throws.remove(f);
+        infer_returns.remove(f);
+    }
+}
+body_result_hint=(f:int64 decl:int64):>void=>$unsafe {
+    if ide_on and decl not=? 0 and nodes.ptr[decl].kind =? 'fn_' and ide_indexed(pos_file(nodes.ptr[decl].pos)) {ide_hint_fns.push(f)}
+}
+body_result_entry=(decl:int64 body:int64):>void=>{
+    dir_function_entry(decl body)
+    return
+}
+body_result_error=(n:int64 code:int64 r:int64 decl:int64):>void=>$unsafe {
+    if code =? 1 {fatal(nodes.ptr[decl].pos "function must return a value of type {dt(r)} on all paths")}
+    if code =? 2 {fatal(nodes.ptr[decl].pos "recursive function '{name_of(StmtHookWord(nodes.ptr[decl].name))}' returns a value; add an explicit return type ({jd(nodes.ptr[decl].pos "`-> Type`" "`:>Type`")})")}
+    if code =? 3 {fatal(nodes.ptr[decl].pos "a function giving `never` must not finish: end each path with `exit(...)`, a panic or an endless loop")}
+    let body=n
+    let nb=nkids(body)
+    let p=nodes.ptr[body].pos
+    if decl not=? 0 {p=nodes.ptr[decl].pos}
+    # (total = a + b as the last line: total is made, and not given back)
+    if nb >? 0 {
+        let ls=kid(body nb - 1)
+        let vn=""
+        if nodes.ptr[ls].kind =? 'vardecl' and nodes.ptr[ls].name >? 0 {vn=name_of(StmtHookWord(nodes.ptr[ls].name))} else if nodes.ptr[ls].kind =? 'assign' and nodes.ptr[ls].a not=? 0 and nodes.ptr[StmtHookWord(nodes.ptr[ls].a)].kind =? 'ident' {vn=name_of(StmtHookWord(nodes.ptr[StmtHookWord(nodes.ptr[ls].a)].name))}
+        if (vn as array<uint8>).length >? 0 {
+            fatal(nodes.ptr[ls].pos "the function gives back {a_type(r)}, but its last line gives nothing: a last line `{vn}` gives {vn} back")
+        }
+        # (if n > 0: x, with no else: nothing when it does not hold)
+        if (nodes.ptr[ls].kind =? 'if_' or nodes.ptr[ls].kind =? 'iflet') and nodes.ptr[ls].c =? 0 {
+            fatal(nodes.ptr[ls].pos "the function gives back {a_type(r)}, but an `if` without `else` gives nothing when it does not hold: add {jd(nodes.ptr[ls].pos "`else:` and the value then" "`else` and the value then")}")
+        }
+        fatal(nodes.ptr[ls].pos "the function gives back {a_type(r)}, but its last line gives nothing: end it with the value to give back (or `return value`)")
+    }
+    fatal(p "missing return value: function returns {dt(r)}")
+}
+zonk_prelude=(m:int64):>bool=>{
+    modules[m].is_prelude
+}
+zonk_local_error=(l:int64):>void=>$unsafe {
+    let ln=name_of(StmtHookWord(locals.ptr[l].name))
+    # (a variable the compiler made, as for a loop: said of what it holds)
+    if (ln as array<uint8>).length =? 0 or starts_with(ln "__") {fatal(locals.ptr[l].pos "cannot infer the type of what this goes through: write the type where the array is made, as {jd(locals.ptr[l].pos "`xs: int[] = []`" "`let xs:array<int64> = []`")}")}
+    # (a comprehension whose body ends in a statement collects nothing)
+    if starts_with(ln "$dewy_collection") {fatal(locals.ptr[l].pos "this loop collects nothing: its body must end with the value to collect, as `[loop i in xs \{ i * 2 }]`")}
+    fatal(locals.ptr[l].pos "cannot infer the type of '{ln}'; add a type annotation{empty_hint(ln StmtHookWord(locals.ptr[l].type))}")
+}
+zonk_copy_warnings=(f:int64):>void=>{
+    copy_write_warnings(f)
+    return
+}
+zonk_definite=(body:int64 mark:int64):>void=>{
+    da_check_fn(body mark)
+    return
+}

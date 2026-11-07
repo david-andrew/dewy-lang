@@ -7,7 +7,8 @@ from p"type_inference.dewy" import (tu_prune tu_equal)
 from p"checker_expr.dewy" import check_expr
 from p"expr.jo" import (check_to coerce finalize_literal cond_block cond_narrow opt_filled is_map_type narrow_optional_source)
 from p"checks_cond_hooks.dewy" import (cond_returned cond_reset cond_restore cond_merge cond_promote cond_fill_subject cond_fill_end cond_then_literal cond_sink cond_union cond_join cond_error)
-from p"check.jo" import (stmt_terminates union_has_void new_local)
+from p"check.jo" import (union_has_void new_local)
+from p"checks_stmt_hooks.dewy" import (stmt_terminates)
 # `if` and `if let` own branch order, narrowing lifetimes, chain-ending tests, fills of
 # optionals and the joined result. Work is O(branches) plus the demanded checking of
 # the test and bodies. Branch bodies, narrowing logs and joins are host services that

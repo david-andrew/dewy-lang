@@ -1,0 +1,494 @@
+use 'check.jo'
+use 'secret_checks.dewy'
+use 'checks_type_hooks.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_program.dewy'
+use 'checks_unpack.dewy'
+use 'checks_main.dewy'
+use 'checks_imports.dewy'
+use 'checks_hints.dewy'
+use 'checks_text.dewy'
+use 'isolation_ops.dewy'
+use 'checker_program.dewy'
+use 'checker_hooks.dewy'
+use 'checker_sinks.dewy'
+use 'checker_value_calls.dewy'
+use 'checker_values.dewy'
+use 'host_binds.jo'
+use 'checker_call_queries.dewy'
+use 'checker_expr.dewy'
+use 'effect_lattice.dewy'
+use 'checker_blocks.dewy'
+use 'checker_assigns.dewy'
+use 'checker_vardecls.dewy'
+use 'checker_for_loops.dewy'
+use 'checker_statements.dewy'
+use 'checker_exprstmts.dewy'
+use 'checker_returns.dewy'
+use 'checker_loops.dewy'
+use 'checker_zonk.dewy'
+use 'checker_body_results.dewy'
+use 'checker_bodies.dewy'
+use 'checker_instances.dewy'
+use 'checker_signature.dewy'
+use 'checker_resolve.dewy'
+use 'checker_alias.dewy'
+use 'checker_fields.dewy'
+use 'checker_results.dewy'
+use 'type_substitute.dewy'
+use 'constant_eval.dewy'
+use 'constant_host.dewy'
+use 'source_types.dewy'
+use 'evaluator_state.dewy'
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'partition.jo'
+use 'lazy_bodies.jo'
+use 'lazy_force.dewy'
+use 'frontend.jo'
+use 'pcheck.jo'
+use 'spelling.dewy'
+use 'habits.dewy'
+use 'units.jo'
+use 'definite.jo'
+use 'definite_walk.dewy'
+use 'import_cycles.jo'
+use 'cycle_ops.dewy'
+use 'decimals.jo'
+use 'growth.jo'
+use 'safe_paths.jo'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'constant_checks.dewy'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'deadlock.jo'
+use 'errors.jo'
+use 'settings.jo'
+use 'host_target.dewy'
+use 'targets.dewy'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'watch.jo'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'pkg.jo'
+use 'pkg_ops.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'parse.jo'
+use 'types.jo'
+use 'expr.jo'
+use 'ide.jo'
+use 'poly_closure.jo'
+use 'prelude.jo'
+use 'comptime.jo'
+use 'facts.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'ownership.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'juxtapose.dewy'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'temperature_kinds.jo'
+use 'temperature_ops.dewy'
+use 'dewy_methods.jo'
+use 'secrets.jo'
+use 'directives.jo'
+use 'ffi.jo'
+use 'floats.jo'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'concurrency_tasks.dewy'
+
+stmt_terminates = (s: int) -> bool:
+    if s == 0: return false
+    k = nodes[s].kind
+    if k == .return_ or k == .break_ or k == .continue_: return true
+    if k == .block: return has_flag(s, NF_FLOW_RETURNS) or (nkids(s) > 0 and stmt_terminates(kid(s, nkids(s) - 1)))
+    if k == .if_: return nodes[s].c != 0 and stmt_terminates(int(nodes[s].b)) and stmt_terminates(int(nodes[s].c))
+    if k == .exprstmt:
+        e = int(nodes[s].a)
+        if int(nodes[e].type) == T_NEVER: return true
+        if library_exit_call(e): return true
+        if nodes[e].kind == .match_:
+            all = true
+            wild = false
+            loop i in [0..nkids(e)):
+                arm = kid(e, i)
+                if not stmt_terminates(int(nodes[arm].b)): all = false
+                loop j in [0..nkids(arm)):
+                    if nodes[kid(arm, j)].kind == .pwild: wild = true
+            return all and (wild or nodes[e].aux2 != 0)
+        if nodes[e].kind == .if_: return nodes[e].c != 0 and stmt_terminates(int(nodes[e].b)) and stmt_terminates(int(nodes[e].c))
+        return false
+    if k == .while_: return nodes[int(nodes[s].a)].kind == .bool_lit and nodes[int(nodes[s].a)].ival != 0 and not has_break(int(nodes[s].b))
+    false
+# For loops run in checker_for_loops.dewy; these are its services.
+# (the source's rewrites: true when the loop was made another statement, and checked)
+for_rewrite = (s: int) -> bool:
+    if dewy_live_sources.has(int(nodes[s].a)) and dewy_at(nodes[s].pos):
+        check_live_loop(s)
+        return true
+    if dewy_at(nodes[s].pos) and reflect_loop(s): return true
+    if has_flag(s, NF_MUT) and files[pos_file(nodes[s].pos)].is_dewy:
+        source_type = prune(check_expr(int(nodes[s].a), 0))
+        nodes[s].a = i32(last_checked)
+        if types[source_type].kind != .array and types[source_type].kind != .fixed:
+            fatal(nodes[s].pos, "`loop @item in items` needs stored array elements; ordinary iteration yields values")
+        # (loop @acct in accounts.values: a new array, whose changes nothing would keep)
+        source = int(nodes[s].a)
+        if nodes[source].kind == .call:
+            of_map = false
+            loop a in kids(source):
+                if nodes[a].type != 0 and is_map_type(ntype(a)): of_map = true
+            if of_map: fatal(nodes[s].pos, "`loop @item in items` changes the elements where they are stored, and a dictionary's `values` is a new array: change each entry through its key, `loop key in d.keys \{ d[key]... }`")
+            fatal(nodes[s].pos, "`loop @item in items` changes the elements where they are stored, so `items` is an array held by a variable or a field, not a new array a call gives")
+    soa_loop(s)
+    unpack_loop(s)
+    dewy_nested_loop_bindings(s)
+    if dewy_cursor_loop(s): return true
+    if map_tidy_first(s): return true
+    if dewy_iterator_loop(s): return true
+    if dewy_sequence_loop(s): return true
+    false
+for_open_range = (s: int):
+    if fact_open_range(s): fact_requests.push(FactRequest(s, int(ctxs[cx].inst)))
+# (a map with entries removed has them still in place, marked gone: the loop goes over a
+# copy without them; a `loop mut` had the map itself made so, by map_tidy_first)
+for_map_view = (s: int, t0: int) -> int:
+    t = t0
+    it = int(nodes[s].a)
+    pos = nodes[s].pos
+    if is_map_type(t) and not has_flag(s, NF_MUT) and not ownership_fact_type(t):
+        add_flag(it, NF_CHECKED)
+        lv = int(nodes[synth_call("__map_entries", [it], pos)].a)
+        t = prune(check_expr(lv, 0))
+        it = last_checked
+        nodes[s].a = i32(it)
+    if (is_map_type(t) or is_map_entries_type(t)) and nodes[s].ival == 1:
+        # `i in 0.. and key in map` counts keys. The native two-binding
+        # map loop otherwise means key/value, so iterate its key snapshot.
+        add_flag(it, NF_CHECKED)
+        t = prune(check_expr(bc_map_keys(it, pos), 0))
+        it = last_checked
+        nodes[s].a = i32(it)
+    t
+for_collide = (s: int):
+    collide_local(s)
+    return
+# `loop @x in xs`: x is xs[i] itself (only the elements change, not the array's length)
+for_element = (s: int, name: int, et: int, idx: int, fixed: bool) -> int:
+    it = int(nodes[s].a)
+    pos = nodes[s].pos
+    cp_inner += 1
+    check_place(it, true)
+    cp_inner -= 1
+    el = new_local(name, et, pos)
+    locals[el].flags = i32(int(locals[el].flags) | LF_ALIAS)
+    ix = mk(.index, pos)
+    # (it is checked; m[k] of a map was made the place in it by check_place)
+    base = copy_place(it)
+    nodes[ix].a = i32(base)
+    nodes[ix].b = i32(mk_ident_local(idx, pos))
+    nodes[ix].type = i32(et)
+    add_flag(ix, NF_CHECKED)
+    if fixed: add_flag(ix, NF_INBOUNDS)
+    locals[el].alias = i32(ix)
+    el
+for_route = (it: int) -> bool: route_text(it) != ""
+for_struct_fields = (si: int):
+    check_struct_fields(si)
+    return
+# `loop k, @v in m`: v is the entry's value in place
+for_map_value = (s: int, name: int, vt: int, idx: int) -> int:
+    it = int(nodes[s].a)
+    pos = nodes[s].pos
+    check_place(it, true)
+    vl = new_local(name, telem(vt), pos)
+    locals[vl].flags = i32(int(locals[vl].flags) | LF_ALIAS)
+    f = mk(.field, pos)
+    nodes[f].a = i32(clone(it))
+    nodes[f].name = i32(intern("vals"))
+    ix = mk(.index, pos)
+    nodes[ix].a = i32(f)
+    nodes[ix].b = i32(mk_ident_local(idx, pos))
+    check_expr(ix, 0)
+    locals[vl].alias = i32(last_checked)
+    vl
+for_map_value_ref = (vl: int): map_loop_values[vl] = true
+for_body = (b: int):
+    check_block(b, 0, false)
+    return
+for_error = (n: int, t0: int, code: int):
+    t = t0
+    pos = nodes[n].pos
+    if code == 1: fatal(pos, "a loop range needs a start")
+    if code == 2: fatal(pos, "text is joined with `+` (or put in a string: \"\{a}\{b}\"); `..` makes a range of numbers")
+    if code == 3:
+        if is_int(t): t = T_FLOAT
+        fatal(pos, "a range counts in whole numbers, not {dt(t)} (for 0.0 to 1.0 in tenths, count to 10 and divide: {jd(pos, "`loop i in [0..10): x = f64(i) / 10.0`", "`loop i in [0..10] \{ let x = float64(i) / 10 }`")})")
+    if code == 4: fatal(pos, "a range loop has one loop variable")
+    if code == 5: fatal(pos, "`{mutable_loop_syntax(pos)}` needs an array (a range's numbers are not stored anywhere)")
+    if code == 6: fatal(pos, "strings are immutable; 'for mut' needs an array")
+    if code == 7: fatal(pos, "'for mut' over a map needs key and value variables")
+    never_cascade(pos, t)
+    fatal(pos, "cannot iterate over a value of type {dt(t)}")
+# Declarations run in checker_vardecls.dewy; these are its services.
+# (the other forms: 1 a spawn's handle, 2 a soa element, 4 a lent place, 5 a local place,
+# 6 a shaped value, 8 a global; 9: whether definite assignment follows a `let x:T` without
+# a value)
+decl_form = (s: int, code: int) -> bool:
+    if code == 1:
+        # (a task's result is kept by `let name = spawn ...` written directly in its group's block,
+        # which dewy_nodes.jo dw_task_group renames; elsewhere the binding would hold its private handle)
+        if not starts_with(name_of(int(nodes[s].name)), "$task"): spawn_value_error(nodes[int(nodes[s].b)].pos)
+        return false
+    if code == 2:
+        soa_alias(s)
+        return true
+    if code == 4: return place_let_decl(s)
+    if code == 5: return local_place_decl(s)
+    if code == 6:
+        shape_checked_value(s)
+        return false
+    if code == 8:
+        ensure_global(int(nodes[s].sym), nodes[s].pos, true)
+        return true
+    nm = name_of(int(nodes[s].name))
+    len(nm) > 0 and nm[0] != '$' and nm[0] != '_'
+# A pattern's or element alias's parts (checker_vardecls.dewy vd_pattern, vd_element_alias):
+# 1 a global pattern declared there (1; 0 when all are discards), 2 the value checked and
+# unpacked (its type), 3 a value of another shape refused, 4 an element alias's value
+# checked as a place (it), a soa array's element refused
+decl_pattern = (s: int, t: int, code: int) -> int:
+    if code == 1:
+        loop binding in binding_leaves(kids(s)):
+            if nodes[binding].kind != .hole:
+                ensure_global(int(nodes[binding].sym), nodes[s].pos, true)
+                return 1
+        # With only discards, no global initializer checks the source for us.
+        return 0
+    if code == 2:
+        vt = check_binding_input(s)
+        unpacked = unpack_binding(int(nodes[s].b), vt, kids(s), nodes[s].pos)
+        set_list(s, unpacked.1)
+        nodes[s].b = i32(last_checked)
+        return unpacked.0
+    if code == 3: fatal(nodes[s].pos, "expected a tuple with {nkids(s)} elements (or an array), found {dt(t)}")
+    arr0 = 0
+    if nodes[int(nodes[s].b)].kind == .index: arr0 = int(nodes[int(nodes[s].b)].a)
+    check_expr(int(nodes[s].b), 0)
+    ix = last_checked
+    if arr0 != 0 and nodes[arr0].type != 0 and is_soa(ntype(arr0)): fatal(nodes[s].pos, "a soa array's `mut` elements go in a loop of their own, `loop mut p in ps:`; with a count beside them, by index: `loop i in [0..ps.len()): ps[i].x += ...`")
+    check_place(ix, true)
+    ix
+decl_binding_type = (s: int) -> int:
+    previous_self = refine_bindings.self
+    refine_bindings.self = int(nodes[s].name)
+    ref_holder_arm(int(nodes[s].a), int(nodes[s].name))
+    t = resolve_binding_type(int(nodes[s].a))
+    refine_bindings.self = previous_self
+    t
+# (1: `let shapes = [Circle[...] Square[...]]`, 2: `let s = Circle[...]`, later given a Square)
+decl_storage = (s: int, t: int) -> int:
+    if not type_has_fn(t): return t
+    storage = effect_storage_type(t)
+    if storage != t: wrap_conv(int(nodes[s].b), .none_, storage)
+    storage
+decl_value_param = (s: int, t: int) -> int:
+    v = int(nodes[s].b)
+    if nodes[v].kind == .ident and nodes[v].aux == i32(int(SK.local)):
+        pt = int(locals[int(nodes[v].sym)].type)
+        known, _ = int_intervals(pt)
+        if int(locals[int(nodes[v].sym)].flags) & LF_PARAM != 0 and tkind(pt) == .refined and (known or str_set_of(pt) != 0):
+            nodes[s].b = i32(coerce(v, pt))
+            return pt
+    t
+decl_temperature = (s: int, t: int, unit: int) -> int: temperature_binding(s, t, unit, false)
+# (1 growth's reading of the value; 3 a sibling literal's known contents, 4 a decimal
+# literal's binding, 5 growth's binding, 6 a text domain, 7 an integer domain, 8 a
+# constant's view, 9 definite assignment, 10 an editor's type hint)
+decl_error = (s: int, t: int, code: int):
+    nm = name_of(int(nodes[s].name))
+    pos = nodes[s].pos
+    if code == 1: fatal(pos, "cannot infer the type of '{nm}' from 'none'; add a type: {nm}: T? = none")
+    if code == 2: fatal(pos, "variable needs a type or a value")
+    if code == 3:
+        never_cascade(pos, t)
+        fatal(pos, "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(int(nodes[s].b))}")
+    if code == 4: fatal(pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(pos, "`{nm}: Enemy? = none`", "`let {nm}:Enemy? = none`")}")
+    fatal(pos, "'{nm}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
+# (1 an exact-width measure's owner, 2 a shaped parameter's dimension, 3 a reflected scope,
+# 4 an `if` statement checked whole, 5 a `$expect` test after its `if`)
+stmt_special = (s: int, code: int):
+    if code == 1:
+        owner = int(ctxs[cx].inst)
+        if owner > 0: exact_owners[owner] = true
+    else if code == 2: shape_dim_decl(s)
+    else if code == 3:
+        mark = scope_mark()
+        reflect_bind(s)
+        body = int(nodes[s].b)
+        active = reflect_active
+        reflect_active = true
+        if not member_scope(s): check_block(int(nodes[s].b), 0, false)
+        body = int(nodes[s].b)
+        reflect_active = active
+        scope_reset(mark)
+        nodes[s] = nodes[body]
+    else if code == 5:
+        if expectation_ifs.has(s): expectation_refuted(s)
+    else:
+        add_flag(s, NF_STMT)
+        check_expr(s, 0)
+        if last_checked != s: nodes[s] = nodes[last_checked]
+        if expectation_ifs.has(s): expectation_refuted(s)
+stmt_error = (s: int, code: int):
+    if code == 1: fatal(nodes[s].pos, "declarations are only allowed at the top level")
+    if code == 2: fatal(nodes[s].pos, "invalid statement")
+    spawn_value_error(nodes[int(nodes[s].b)].pos)
+# Loop statements run in checker_loops.dewy; these are its services.
+loop_body = (b: int):
+    check_block(b, 0, false)
+    return
+loop_error = (n: int, t: int, code: int):
+    pos = nodes[n].pos
+    if code == 1: fatal(pos, "'loop let x = value' needs an optional value, found {dt(t)}")
+    if code == 2: fatal(pos, jd(pos, "`loop cond:` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n):` (`loop _ in` when it is not used)", "`loop cond \{ }` repeats while cond is true; to go through a range or an array, name the element: `loop i in [0..n) \{ }` (`loop _ in` when it is not used)"))
+    if code == 3:
+        w = "continue"
+        if nodes[n].kind == .break_: w = "break"
+        fatal(pos, "'{w}' outside of a loop")
+    if code == 4: fatal(pos, "unknown loop label '${name_of(int(nodes[n].name))}'")
+    fatal(pos, "duplicate active loop label '${name_of(int(nodes[n].sval))}'")
+statement_check = (s: int):
+    check_stmt(s)
+    return
+statement_block = (b: int):
+    check_block(b, 0, false)
+    return
+# (`void | E` expresses E when it fails, and nothing when it succeeds)
+exprstmt_express = (s: int, t: int, pack: bool):
+    if union_has_void(t): sink_void_error(s, t)
+    sink_express(s, t, pack, false)
+exprstmt_unused_value = (code: int, op: int, a: int, pos: int, t: int):
+    kinds: NK[] = [.nil, .binary, .and_, .or_, .not_, .bool_lit, .int_lit, .float_lit, .ident, .none_lit]
+    unused_value(Node(kind = kinds[code], op = i32(op), a = i32(a), pos = pos), t)
+exprstmt_error = (e: int):
+    nm = name_of(int(nodes[e].name))
+    fatal(nodes[e].pos, "'{nm}' is a function and is not called here: `{nm}()` calls it")
+# Return statements run in checker_returns.dewy; these are its services.
+return_place = (v: int):
+    returned_place(v)
+    return
+return_throws = (inst: int) -> bool: infer_throws.has(inst)
+return_note = (s: int):
+    infer_note_return(s)
+    return
+return_void_value = (s: int, rt: int):
+    check_expr(bc_block([], nodes[s].pos), rt)
+    nodes[s].a = i32(coerce(last_checked, rt))
+return_error = (s: int, t: int, code: int):
+    pos = nodes[s].pos
+    if code == 1: fatal(pos, "'return' outside of a function")
+    if code == 2: fatal(pos, "a function giving `never` does not return")
+    if code == 3: fatal(pos, "this function does not return a value")
+    fatal(pos, "missing return value (function returns {dt(t)})")
+body_restore = (f: int):
+    if pc_missing.has(f): pc_restore(f)
+body_force = (decl: int, f: int):
+    icl = ic_fn(IC_LOAD, f)
+    source_force_body(decl)
+    ic_restore(icl)
+body_skip = (decl: int) -> bool: ide_skip.len() > 0 and ide_skip.get(nodes[decl].pos) != none
+body_infer = (f: int, decl: int):
+    if decl != 0 and nodes[decl].kind == .fn_ and fns[f].kind != FK_INIT and files[pos_file(nodes[decl].pos)].is_dewy:
+        infer_throws[f] = []
+        infer_returns[f] = []
+body_context = (f: int) -> int:
+    c = ctx_for_inst(f)
+    if c < 0: c = ctx_in_progress(f)
+    c
+body_recursive_error = (f: int, use_pos: int):
+    fatal(use_pos, "recursive function '{name_of(int(nodes[int(fns[f].decl)].name))}' needs an explicit return type (add {jd(use_pos, "`-> Type`", "`:>Type`")})")
+body_result_init = (f: int, body: int):
+    saved_sink = sink_fn
+    sink_open(body, SINK_NONE)
+    sink_fn = sinks.len() - 1
+    loop i in [0..nkids(body)): check_stmt(kid(body, i))
+    sinks.pop()
+    sink_fn = saved_sink
+body_result_check = (f: int, decl: int, body: int, infer: bool, want: bool, expected: int) -> int:
+    saved_sink = sink_fn
+    exp = expected
+    if want and nkids(body) > 0 and nodes[kid(body, nkids(body) - 1)].kind == .exprstmt: returned_place(int(nodes[kid(body, nkids(body) - 1)].a))
+    sink_body_mode = sink_body_kind(body, infer, want, int(ctxs[cx].ret), not infer and sink_written(decl))
+    if fns[f].pack_n > 0: exp = sink_pack_body(f)
+    sink_fn = sinks.len()
+    bt = check_block(body, exp, want)
+    sink_fn = saved_sink
+    bt
+body_result_throws = (f: int, body: int):
+    if infer_throws.has(f):
+        infer_finish(f, body)
+        infer_throws.remove(f)
+        infer_returns.remove(f)
+body_result_hint = (f: int, decl: int):
+    if ide_on and decl != 0 and nodes[decl].kind == .fn_ and ide_indexed(pos_file(nodes[decl].pos)): ide_hint_fns.push(f)
+body_result_entry = (decl: int, body: int):
+    dir_function_entry(decl, body)
+    return
+body_result_error = (n: int, code: int, r: int, decl: int):
+    if code == 1: fatal(nodes[decl].pos, "function must return a value of type {dt(r)} on all paths")
+    if code == 2: fatal(nodes[decl].pos, "recursive function '{name_of(int(nodes[decl].name))}' returns a value; add an explicit return type ({jd(nodes[decl].pos, "`-> Type`", "`:>Type`")})")
+    if code == 3: fatal(nodes[decl].pos, "a function giving `never` must not finish: end each path with `exit(...)`, a panic or an endless loop")
+    body = n
+    nb = nkids(body)
+    p = nodes[body].pos
+    if decl != 0: p = nodes[decl].pos
+    # (total = a + b as the last line: total is made, and not given back)
+    if nb > 0:
+        ls = kid(body, nb - 1)
+        vn = ""
+        if nodes[ls].kind == .vardecl and nodes[ls].name > 0: vn = name_of(int(nodes[ls].name))
+        else if nodes[ls].kind == .assign and nodes[ls].a != 0 and nodes[int(nodes[ls].a)].kind == .ident: vn = name_of(int(nodes[int(nodes[ls].a)].name))
+        if len(vn) > 0:
+            fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: a last line `{vn}` gives {vn} back")
+        # (if n > 0: x, with no else: nothing when it does not hold)
+        if (nodes[ls].kind == .if_ or nodes[ls].kind == .iflet) and nodes[ls].c == 0:
+            fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but an `if` without `else` gives nothing when it does not hold: add {jd(nodes[ls].pos, "`else:` and the value then", "`else` and the value then")}")
+        fatal(nodes[ls].pos, "the function gives back {a_type(r)}, but its last line gives nothing: end it with the value to give back (or `return value`)")
+    fatal(p, "missing return value: function returns {dt(r)}")
+zonk_prelude = (m: int) -> bool: modules[m].is_prelude
+zonk_local_error = (l: int):
+    ln = name_of(int(locals[l].name))
+    # (a variable the compiler made, as for a loop: said of what it holds)
+    if len(ln) == 0 or starts_with(ln, "__"): fatal(locals[l].pos, "cannot infer the type of what this goes through: write the type where the array is made, as {jd(locals[l].pos, "`xs: int[] = []`", "`let xs:array<int64> = []`")}")
+    # (a comprehension whose body ends in a statement collects nothing)
+    if starts_with(ln, "$dewy_collection"): fatal(locals[l].pos, "this loop collects nothing: its body must end with the value to collect, as `[loop i in xs \{ i * 2 }]`")
+    fatal(locals[l].pos, "cannot infer the type of '{ln}'; add a type annotation{empty_hint(ln, int(locals[l].type))}")
+zonk_copy_warnings = (f: int):
+    copy_write_warnings(f)
+    return
+zonk_definite = (body: int, mark: int):
+    da_check_fn(body, mark)
+    return

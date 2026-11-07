@@ -3,7 +3,7 @@ from p"node_store.dewy" import Node
 from p"checker_types.dewy" import TypeInfo
 from p"checker_state.dewy" import (FnInst Local Global)
 from p"type_inference.dewy" import (tu_prune tu_zonk)
-from p"check.jo" import (zonk_prelude zonk_local_error zonk_copy_warnings zonk_definite)
+from p"checks_stmt_hooks.dewy" import (zonk_prelude zonk_local_error zonk_copy_warnings zonk_definite)
 # Body finalization owns zonking: every node's type with an inference variable is
 # replaced by what it resolved to, index and user-global summaries are counted, and
 # write sites are collected for integer write proofs; a body that made no variable
