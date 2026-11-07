@@ -361,6 +361,28 @@ main = () => {
 - **Taken:** infer the result for `spawn` bodies, as for a function with no declared result. A failed task already fails its group, so forwarding fits.
 - **Considered:** keep the error; infer it for every lambda.
 
+### D29. Spellings added while building time (all built, all reversible)
+Turn these on and each works as shown; say no to any and it is removed.
+
+```dewy
+$error_if true "write 24hour"                                # calling this overload is a compile error with that text
+day_length = (n:float64):>Duration => 24hour
+
+$check_constant date_error(text) "not a date"                # checks a constant argument at compile time and folds the result; library-only until string shapes replace it
+parse_day = (text:string):>Date|ParseError => date(text)
+
+let born = date"1990-03-15"
+let d = date"2024-01-31"
+let s = d - born
+printl"{s.months} {s.days} {s.years} {s.total_days}"         # fields on the Span from Date - Date
+printl"{d.add(1month overflow='next')}"                      # first of the next month instead of clamping
+printl"{age(born on=d leap_day='february_28')}"              # overrides the 1 March default
+printl"{d.weekday} {d.weekday_name} {d.month_name}"          # 0 is Monday; carried over from the old Date
+```
+
+- **Rec:** keep all of them. `$check_constant` is alternative D in [string-shapes](proposals/string-shapes/round1.md), so it may be replaced by D11's answer.
+- **Reversible:** yes.
+
 ---
 
 ## P4: open-ended
