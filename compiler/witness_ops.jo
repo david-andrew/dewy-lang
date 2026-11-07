@@ -402,6 +402,11 @@ wit_holds = (op: Tok, x: int, y: int) -> bool:
     x != y
 wit_candidates = (b: FactBound) -> int[]:
     wit_bound_candidates(b.lo, b.hi, b.nz, b.wide)
+wit_difference_holds = (x: int, y: int, limit: int) -> bool:
+    # Compare the mathematical difference without negating the minimum int.
+    if y > 0 and x < FACT_MIN + y: return true
+    if y < 0 and x > FACT_MAX + y: return false
+    x - y <= limit
 # A valuation of the two sides that violates `a op b` and satisfies their
 # intervals and every direct difference row between them. Other constraints
 # are not solved, so this is only ever reported as a possible witness.
@@ -412,8 +417,8 @@ wit_counterexample = (s: FactState, op: Tok, a: int, b: int) -> (bool, int, int)
             if wit_holds(op, x, y): continue
             ok = true
             loop row in s.differences:
-                if row.a == a and row.b == b and (not fact_add_fits(x, -y) or x - y > row.limit): ok = false
-                if row.a == b and row.b == a and (not fact_add_fits(y, -x) or y - x > row.limit): ok = false
+                if row.a == a and row.b == b and not wit_difference_holds(x, y, row.limit): ok = false
+                if row.a == b and row.b == a and not wit_difference_holds(y, x, row.limit): ok = false
             if ok: return (true, x, y)
     (false, 0, 0)
 # The same evaluation, or two constants with one value (each literal capture
