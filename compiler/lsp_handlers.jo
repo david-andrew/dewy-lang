@@ -1,0 +1,557 @@
+use 'lsp.jo'
+use 'checker_program.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'ide.jo'
+use 'fmt.jo'
+use 'lex.jo'
+use 'main.jo'
+use 'json_doc.dewy'
+use 'lsp_ops.dewy'
+
+# Drain only bytes already available. A partial editor frame must not block a running check.
+lsp_drain = ():
+    loop true:
+        if lsp_have_msg():
+            if let m = lsp_read(): lsp_queue.push(m)
+        else:
+            if in_eof or not lsp_input_ready(): break
+            if not lsp_fill(): break
+lsp_watch = (req: str, uri: str):
+    lsp_watching = true
+    lsp_req = req
+    lsp_req_uri = uri
+    lsp_stop = 0
+    lsp_seen = 0
+# The active handler still reads jdoc: queued envelopes are read into a document of their
+# own. (Matching raw substrings could mistake document text for a cancellation.)
+lsp_should_stop = () -> bool:
+    if not lsp_watching: return false
+    if lsp_stop != 0: return true
+    lsp_drain()
+    q = JsonDoc([])
+    loop lsp_seen < lsp_queue.len():
+        root = json_parse(q, lsp_queue[lsp_seen])
+        lsp_seen += 1
+        method = json_str(q, json_get(q, root, "method"))
+        params = json_get(q, root, "params")
+        if method == "$/cancelRequest" and len(lsp_req) > 0 and json_raw(q, json_get(q, params, "id")) == lsp_req:
+            lsp_stop = -32800
+            break
+        if (method == "textDocument/didChange" or method == "textDocument/didClose") and len(lsp_req_uri) > 0 and json_str(q, json_path(q, params, "textDocument", "uri")) == lsp_req_uri:
+            lsp_stop = -32801
+            break
+        if method == "shutdown" or method == "exit":
+            lsp_stop = -32800
+            break
+    if in_eof: lsp_stop = -32800
+    lsp_stop != 0
+lsp_next = () -> str?:
+    loop true:
+        if lsp_queue.len() == 0:
+            if let m = lsp_read(): lsp_queue.push(m)
+            else: return none
+        lsp_drain()
+        m = lsp_queue.remove(0)
+        root = json_parse(jdoc, m)
+        method = jstr(jget(root, "method"))
+        # Let the main loop retry dirty diagnostics after a cancelled request.
+        if method == "$/cancelRequest": return m
+        id = jget(root, "id")
+        if id == 0 or method == "initialize" or method == "shutdown": return m
+        key = jraw(id)
+        uri = jstr(jget(jget(jget(root, "params"), "textDocument"), "uri"))
+        stale = 0
+        loop later in lsp_queue:
+            r = json_parse(jdoc, later)
+            lm = jstr(jget(r, "method"))
+            if lm == "$/cancelRequest" and jraw(jget(jget(r, "params"), "id")) == key:
+                stale = -32800
+                break
+            if lm == "textDocument/didChange" and len(uri) > 0 and jstr(jget(jget(jget(r, "params"), "textDocument"), "uri")) == uri: stale = -32801
+        # (json_parse starts its nodes afresh: the id is answered as text)
+        if stale == -32800: lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{key},\"error\":\{\"code\":-32800,\"message\":\"cancelled\"\}\}")
+        else if stale == -32801: lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{key},\"error\":\{\"code\":-32801,\"message\":\"the document changed\"\}\}")
+        else: return m
+    none
+lsp_error = (id: int, code: int, msg: str) -> int:
+    out_code = code
+    out_msg = msg
+    # A handler may discover no reference in its unfinished result (for example rename).
+    # Cancellation still takes precedence over an error derived from that partial result.
+    if lsp_stop != 0:
+        out_code = lsp_stop
+        out_msg = "cancelled"
+        if lsp_stop == -32801: out_msg = "the document changed"
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{jraw(id)},\"error\":\{\"code\":{out_code},\"message\":{json_quote(out_msg)}\}\}")
+    0
+line_starts_of = (text: str) -> int[]:
+    ls = [0]
+    loop i in 0.. and c in text:
+        if c == '\n': ls.push(i + 1)
+    ls
+# the line holding byte offset off (binary search in line starts ls)
+line_of = (ls: int[], off: int) -> int:
+    lo = 0
+    hi = ls.len() - 1
+    loop lo < hi:
+        mid = (lo + hi + 1) / 2
+        if ls[mid] <= off: lo = mid
+        else: hi = mid - 1
+    lo
+esc_split = (line: str) -> str[]:
+    out: str[]
+    cur: u8[]
+    i = 0
+    loop i < len(line):
+        c = line[i]
+        if c == '\t':
+            out.push(str_from_bytes(cur))
+            cur.clear()
+        else if c == '\\' and i + 1 < len(line):
+            i += 1
+            e = line[i]
+            if e == 't': cur.push('\t')
+            else if e == 'n': cur.push('\n')
+            else: cur.push(e)
+        else: cur.push(c)
+        i += 1
+    out.push(str_from_bytes(cur))
+    out
+# text with [a, b) made blank (spaces; line breaks kept, so positions after it do not move)
+blank_out = (text: str, a: int, b: int) -> str:
+    out: u8[]
+    loop i in 0.. and c in text:
+        if i >= a and i < b and c != '\n': out.push(' ')
+        else: out.push(c)
+    str_from_bytes(out)
+# check document d and publish its errors
+refresh = (d: int):
+    docs[d].dirty = false
+    docs[d].lowered = false
+    r = check_doc(docs[d].path, -1, false, false)
+    if lsp_stop != 0:
+        docs[d].dirty = true
+        return
+    r.texts = ide_texts
+    docs[d].res = r
+    if not docs[d].has_good or r.diags.len() == 0 or r.refs.len() >= docs[d].good.refs.len():
+        docs[d].good = r
+        docs[d].has_good = true
+    publish(d)
+# check document d again, lowering it too (when the editor has been quiet for a moment)
+refresh_lowered = (d: int):
+    docs[d].lowered = true
+    r = check_doc(docs[d].path, -1, true, false)
+    if lsp_stop != 0:
+        docs[d].lowered = false
+        return
+    r.texts = ide_texts
+    if r.diags.len() == 0 and docs[d].res.diags.len() == 0:
+        # (nothing new to say, but hovers learn what only lowering settles: `& panics`)
+        if r.refs.len() == docs[d].res.refs.len(): docs[d].res = r
+        return
+    docs[d].res = r
+    publish(d)
+# map an offset in the current text of path to the text result r was made from (-1: changed)
+map_off = (r: Result, path: str, off: int) -> int:
+    cur = text_of(path)
+    old = r.texts.get(path) ?? cur
+    if old == cur: return off
+    n = min(len(old), len(cur))
+    pre = 0
+    loop pre < n and old[pre] == cur[pre]: pre += 1
+    if off < pre: return off
+    suf = 0
+    loop suf < n - pre and old[len(old) - 1 - suf] == cur[len(cur) - 1 - suf]: suf += 1
+    if off >= len(cur) - suf: return off - len(cur) + len(old)
+    -1
+# and back: an offset in the old text of path to the current one
+unmap_off = (r: Result, path: str, off: int) -> int:
+    cur = text_of(path)
+    old = r.texts.get(path) ?? cur
+    if old == cur: return off
+    n = min(len(old), len(cur))
+    pre = 0
+    loop pre < n and old[pre] == cur[pre]: pre += 1
+    if off < pre: return off
+    suf = 0
+    loop suf < n - pre and old[len(old) - 1 - suf] == cur[len(cur) - 1 - suf]: suf += 1
+    if off >= len(old) - suf: return off - len(old) + len(cur)
+    -1
+loc_json = (r: Result, f: int, off: int, n: int) -> str:
+    path = r.paths[f]
+    o = unmap_off(r, path, off)
+    if o < 0: o = off
+    text = text_of(path)
+    ls = line_starts_of(text)
+    "\{\"uri\":{json_quote(uri_of(path))},\"range\":\{\"start\":{jpos(lpos_of(text, ls, o))},\"end\":{jpos(lpos_of(text, ls, o + n))}\}\}"
+kind_name = (k: int) -> str:
+    if k == IK_LOCAL: return "variable"
+    if k == IK_PARAM: return "parameter"
+    if k == IK_GLOBAL: return "global"
+    if k == IK_CONST: return "constant"
+    if k == IK_FN: return "function"
+    if k == IK_STRUCT: return "struct"
+    if k == IK_ENUM: return "enum"
+    if k == IK_FIELD: return "field"
+    if k == IK_VARIANT: return "variant"
+    if k == IK_MODULE: return "module"
+    "type"
+on_definition = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0: return lsp_reply(id, "null")
+    ensure_checked(d)
+    off = req_off(d, params)
+    # use 'file.jo': the file
+    u = use_target(d, off)
+    if len(u) > 0: return lsp_reply(id, "\{\"uri\":{json_quote(path_to_uri(u))},\"range\":\{\"start\":\{\"line\":0,\"character\":0\},\"end\":\{\"line\":0,\"character\":0\}\}\}")
+    h = ref_at(d, off)
+    if not h.found or len(h.ref.decl) == 0: return lsp_reply(id, "null")
+    p = split_pos(h.ref.decl)
+    if p.0 < 0 or p.0 >= h.res.paths.len(): return lsp_reply(id, "null")
+    n = 0
+    if let dc = h.res.decls.get(h.ref.decl): n = dc.len
+    lsp_reply(id, loc_json(h.res, p.0, p.1, n))
+# document i's result with all the uses in its program (r: its result, when that is the
+# document's only file; else one that indexed them all)
+wide_of = (i: int, r: Result) -> Result:
+    n = 0
+    loop p in r.paths:
+        if not starts_with(p, root_lib + "/") and p != empty_main: n += 1
+    if n <= 1 and not starts_with(docs[i].path, root_lib + "/"): return r
+    if not docs[i].has_wide:
+        w = check_doc(docs[i].path, -1, false, true)
+        if lsp_stop != 0: return r
+        w.texts = ide_texts
+        docs[i].wide = w
+        docs[i].has_wide = true
+    docs[i].wide
+# every reference to the declaration under the cursor
+refs_of = (d: int, off: int, with_decl: bool) -> str[]:
+    out: str[]
+    h = ref_at(d, off)
+    if not h.found or len(h.ref.decl) == 0: return out
+    seen: {str: bool} = {}
+    loop u in uses_of(d, h):
+        loop x in u.res.refs:
+            if x.decl != u.decl or x.file < 0: continue
+            if not with_decl and "{x.file}:{x.off}" == x.decl: continue
+            k = "{u.res.paths[x.file]}:{x.off}"
+            if seen.get(k) != none: continue
+            seen[k] = true
+            out.push(loc_json(u.res, x.file, x.off, x.len))
+    out
+on_references = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0: return lsp_reply(id, "null")
+    ensure_checked(d)
+    inc = jbool(jpath(params, "context", "includeDeclaration"))
+    lsp_reply(id, "[{join(refs_of(d, req_off(d, params), inc), ",")}]")
+on_highlight = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0: return lsp_reply(id, "null")
+    ensure_checked(d)
+    h = ref_at(d, req_off(d, params))
+    if not h.found or len(h.ref.decl) == 0: return lsp_reply(id, "[]")
+    f = file_in(h.res, docs[d].path)
+    out: str[]
+    seen: {int: bool} = {}
+    text = docs[d].text
+    ls = line_starts_of(text)
+    loop x in h.res.refs:
+        if x.decl != h.ref.decl or x.file != f or seen.get(x.off) != none: continue
+        seen[x.off] = true
+        o = unmap_off(h.res, docs[d].path, x.off)
+        if o < 0: continue
+        out.push("\{\"range\":\{\"start\":{jpos(lpos_of(text, ls, o))},\"end\":{jpos(lpos_of(text, ls, o + x.len))}\}\}")
+    lsp_reply(id, "[{join(out, ",")}]")
+# why the name at h cannot be renamed ("" if it can)
+no_rename = (d: int, h: Hit) -> str:
+    if not h.found or len(h.ref.decl) == 0: return "nothing to rename here"
+    if let dc = h.res.decls.get(h.ref.decl):
+        if dc.kind == IK_MODULE: return "nothing to rename here: this is a module"
+    # (a name imported as another is this file's)
+    if len(h.ref.alias) > 0: return ""
+    p = split_pos(h.ref.decl)
+    if p.0 >= 0 and starts_with(h.res.paths[p.0], root_lib + "/") and h.res.paths[p.0] != docs[d].path: return "this is declared in the standard library"
+    ""
+on_prepare_rename = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0: return lsp_reply(id, "null")
+    ensure_checked(d)
+    h = ref_at(d, req_off(d, params))
+    why = no_rename(d, h)
+    if len(why) > 0: return lsp_error(id, -32803, why)
+    text = docs[d].text
+    ls = line_starts_of(text)
+    o = unmap_off(h.res, docs[d].path, h.ref.off)
+    lsp_reply(id, "\{\"start\":{jpos(lpos_of(text, ls, o))},\"end\":{jpos(lpos_of(text, ls, o + h.ref.len))}\}")
+on_rename = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0: return lsp_reply(id, "null")
+    refresh(d)
+    nn = jstr(jget(params, "newName"))
+    if len(nn) == 0 or not is_ident_start(nn[0]): return lsp_error(id, -32602, "'{nn}' is not a name")
+    loop c in nn:
+        if not is_ident_char(c): return lsp_error(id, -32602, "'{nn}' is not a name")
+    if keywords.get(nn) != none: return lsp_error(id, -32602, "'{nn}' is a keyword")
+    if docs[d].res.diags.len() > 0:
+        loop x in docs[d].res.diags:
+            if not x.warning: return lsp_error(id, -32803, "the program has errors; fix them first (a rename might miss uses)")
+    h = ref_at(d, req_off(d, params))
+    why = no_rename(d, h)
+    if len(why) > 0: return lsp_error(id, -32803, why)
+    # a name imported as another: its binding and uses (in this file); else the declaration and
+    # its uses (not those through another name)
+    us: Use[]
+    if len(h.ref.alias) > 0: us.push(Use(h.res, h.ref.decl))
+    else: us = uses_of(d, h)
+    by_uri: {str: str[]} = {}
+    seen: {str: bool} = {}
+    touched: {str: bool} = {}
+    loop u in us:
+        loop x in u.res.refs:
+            if x.file < 0: continue
+            if len(h.ref.alias) > 0:
+                if x.alias != h.ref.alias: continue
+            else if x.decl != u.decl or len(x.alias) > 0: continue
+            path = u.res.paths[x.file]
+            k = "{path}:{x.off}"
+            if seen.get(k) != none: continue
+            seen[k] = true
+            touched[path] = true
+            u2 = uri_of(path)
+            loc = loc_json(u.res, x.file, x.off, x.len)
+            rg = loc[find(loc, "\"range\":") + 8..len(loc) - 1)
+            lst = by_uri.get(u2) ?? []
+            lst.push("\{\"range\":{rg},\"newText\":{json_quote(nn)}\}")
+            by_uri[u2] = lst
+    if by_uri.len() == 0: return lsp_error(id, -32803, "nothing to rename here")
+    kind = 0
+    if let dc = h.res.decls.get(h.ref.decl): kind = dc.kind
+    clash = rename_clash(us, h, kind, touched, nn)
+    if len(clash) > 0: return lsp_error(id, -32803, clash)
+    parts: str[]
+    loop u, edits in by_uri: parts.push("{json_quote(u)}:[{join(edits, ",")}]")
+    lsp_reply(id, "\{\"changes\":\{{join(parts, ",")}\}\}")
+# why renaming what h is to as nn could change what names mean ("" if it cannot): nn is declared
+# already, or names something used, in a file the rename changes (for a local: in its function;
+# for a field or variant: another of its struct or enum)
+rename_clash = (us: Use[], h: Hit, kind: int, touched: {str: bool}, nn: str) -> str:
+    local = kind == IK_LOCAL or kind == IK_PARAM
+    member = kind == IK_FIELD or kind == IK_VARIANT
+    dp = split_pos(h.ref.decl)
+    dpath = h.res.paths[dp.0]
+    it = Item(-1, -1, "")
+    if local or member: it = top_item(h.res.texts.get(dpath) ?? text_of(dpath), dp.1)
+    loop u in us:
+        loop key, dc in u.res.decls:
+            if dc.name != nn or dc.file < 0 or dc.file >= u.res.paths.len(): continue
+            path = u.res.paths[dc.file]
+            if touched.get(path) == none or path == dpath and dc.off == dp.1: continue
+            inside = path == dpath and dc.off >= it.a and dc.off < it.b
+            dm = dc.kind == IK_FIELD or dc.kind == IK_VARIANT
+            if member and not (dm and inside) or not member and dm: continue
+            if local and not inside and (dc.kind == IK_LOCAL or dc.kind == IK_PARAM): continue
+            return "'{nn}' is declared already ({where_str(u.res, dc.file, dc.off)})"
+        if member: continue
+        loop x in u.res.refs:
+            if x.file < 0 or x.len != len(nn) or x.decl == u.decl: continue
+            path = u.res.paths[x.file]
+            if touched.get(path) == none: continue
+            if local and (path != dpath or x.off < it.a or x.off >= it.b): continue
+            t = u.res.texts.get(path) ?? text_of(path)
+            if x.off + x.len > len(t) or t[x.off..x.off + x.len) != nn: continue
+            if let dc = u.res.decls.get(x.decl):
+                if dc.kind == IK_FIELD or dc.kind == IK_VARIANT: continue
+            return "'{nn}' names something used already ({where_str(u.res, x.file, x.off)})"
+    ""
+# the keywords to complete: the lexer's, and the words that are keywords where they start something
+comp_words = (dewy: bool = false) -> str[]:
+    if dewy: return ["let", "const", "if", "else", "loop", "in", "return", "break", "continue", "match", "true", "false", "none", "void", "import", "from", "as", "and", "or", "xor", "nand", "nor", "xnor", "not", "of", "or_throw", "transmute", "type"]
+    out: str[]
+    loop k, _ in keywords: out.push(k)
+    loop k in ["type", "from", "soa"]: out.push(k)
+    out
+comp_kind = (k: int) -> int:
+    if k == IK_LOCAL or k == IK_PARAM or k == IK_GLOBAL: return 6
+    if k == IK_CONST: return 21
+    if k == IK_FN: return 3
+    if k == IK_STRUCT: return 22
+    if k == IK_ENUM: return 13
+    if k == IK_FIELD: return 5
+    if k == IK_VARIANT: return 20
+    if k == IK_MODULE: return 9
+    7
+# does word w end with an operator (`a +`, `x <?`), not a complete value (`xs`, `f()`, `v?`)?
+dewy_ends_op = (w: str) -> bool:
+    c = w[len(w) - 1]
+    if not dewy_op_byte(c): return false
+    # (an optional type or value, `T?`: complete; an operator, `<?`, `is?`: not)
+    if c == '?': return len(w) >= 2 and dewy_op_byte(w[len(w) - 2]) or dewy_op_word(w)
+    true
+on_inlay = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0: return lsp_reply(id, "null")
+    if docs[d].dirty and not lsp_input_ready(): refresh(d)
+    text = docs[d].text
+    ls = line_starts_of(text)
+    rg = jget(params, "range")
+    a = off_of(text, ls, jint(jpath(rg, "start", "line")), jint(jpath(rg, "start", "character")))
+    b = off_of(text, ls, jint(jpath(rg, "end", "line")), jint(jpath(rg, "end", "character")))
+    r = docs[d].res
+    f = file_in(r, docs[d].path)
+    out: str[]
+    if f >= 0:
+        loop h in r.hints:
+            if h.file != f: continue
+            o = unmap_off(r, docs[d].path, h.off)
+            if o < a or o > b or o < 0: continue
+            lbl = h.label
+            pad = "false"
+            if starts_with(lbl, " "):
+                lbl = trim(lbl)
+                pad = "true"
+            out.push("\{\"position\":{jpos(lpos_of(text, ls, o))},\"label\":{json_quote(lbl)},\"kind\":1,\"paddingLeft\":{pad}\}")
+    lsp_reply(id, "[{join(out, ",")}]")
+sem_type = (k: int) -> int:
+    if k == IK_MODULE: return 0
+    if k == IK_TYPE: return 1
+    if k == IK_STRUCT: return 2
+    if k == IK_ENUM: return 3
+    if k == IK_PARAM: return 4
+    if k == IK_LOCAL or k == IK_GLOBAL or k == IK_CONST: return 5
+    if k == IK_FIELD: return 6
+    if k == IK_VARIANT: return 7
+    if k == IK_FN: return 8
+    -1
+on_symbols = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0: return lsp_reply(id, "null")
+    sy_text = docs[d].text
+    sy_dewy = ends_with(docs[d].path, ".dewy")
+    sy_lines = split(sy_text, "\n")
+    sy_ls = line_starts_of(sy_text)
+    sy_ok = stmt_lines(sy_text, sy_ls)
+    out = symbols_in(sy_lines, 0, sy_lines.len(), 0)
+    lsp_reply(id, "[{join(out, ",")}]")
+# the last line of the block that starts at line i (its indented lines)
+block_end = (lines_: str[], i: int, ind: int) -> int:
+    e = i
+    j = i + 1
+    loop j < lines_.len():
+        t = trim(lines_[j])
+        if len(t) > 0:
+            if sy_ok[j] and indent_of(lines_[j]) <= ind: break
+            e = j
+        j += 1
+    e
+# (columns are bytes of sy_lines, sent as UTF-16 units; the range ends with line endl)
+sym_json = (name: str, kind: int, line: int, col: int, endl: int, kids: str[]) -> str:
+    c = utf16_units(sy_lines[line], 0, col)
+    if sy_flat:
+        ws_found.push(WsSym(name, kind, line, c, c + utf16_units(name, 0, len(name)), sy_container))
+        return ""
+    ec = utf16_units(sy_lines[endl], 0, len(sy_lines[endl]))
+    rg = "\{\"start\":\{\"line\":{line},\"character\":0\},\"end\":\{\"line\":{endl},\"character\":{ec}\}\}"
+    sel = "\{\"start\":\{\"line\":{line},\"character\":{c}\},\"end\":\{\"line\":{line},\"character\":{c + utf16_units(name, 0, len(name))}\}\}"
+    s = "\{\"name\":{json_quote(name)},\"kind\":{kind},\"range\":{rg},\"selectionRange\":{sel}"
+    if kids.len() > 0: s += ",\"children\":[{join(kids, ",")}]"
+    s + "\}"
+# .jo files under d (not in hidden directories or build output), up to a few thousand
+ws_walk = (d: str, depth: int):
+    if depth > 12 or ws_files.len() >= 5000: return
+    loop n in list_dir(d):
+        if starts_with(n, ".") or n == "build" or n == "node_modules" or n == "target" or n == "__dewycache__": continue
+        full = d + "/" + n
+        if ends_with(n, ".jo") or ends_with(n, ".dewy"): ws_files.push(full)
+        else if find_byte(n, '.') < 0 or file_exists(full + "/."): ws_walk(full, depth + 1)
+ws_symbols_of = (path: str, text: str) -> WsSym[]:
+    ws_found = []
+    sy_flat = true
+    sy_container = ""
+    sy_text = text
+    sy_dewy = ends_with(path, ".dewy")
+    sy_lines = split(text, "\n")
+    sy_ls = line_starts_of(text)
+    sy_ok = stmt_lines(text, sy_ls)
+    symbols_in(sy_lines, 0, sy_lines.len(), 0)
+    sy_flat = false
+    ws_found
+# how well name matches the query: 0 it starts with it, 1 has it, 2 has its characters in order
+# (case aside), 3 not at all
+ws_match = (name: str, q: str) -> int:
+    n = name.lower()
+    ql = q.lower()
+    if starts_with(n, ql): return 0
+    if find(n, ql) >= 0: return 1
+    k = 0
+    loop c in n.bytes():
+        if k < len(ql) and c == ql[k]: k += 1
+    if k == len(ql): return 2
+    3
+# does text have w as a whole word?
+has_word = (text: str, w: str) -> bool:
+    i = find(text, w)
+    loop i >= 0:
+        if (i == 0 or not is_ident_char(text[i - 1])) and (i + len(w) >= len(text) or not is_ident_char(text[i + len(w)])): return true
+        i = find(text, w, i + 1)
+    false
+ws_ensure_scanned = ():
+    if ws_scanned: return
+    ws_scanned = true
+    ws_files = []
+    loop r in ws_roots: ws_walk(r, 0)
+# Language-specific layout as one edit of the current buffer.
+on_formatting = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0: return lsp_reply(id, "null")
+    text = docs[d].text
+    quiet_errors = true
+    out = fmt_checked(docs[d].path, text)
+    quiet_errors = false
+    if out == text: return lsp_reply(id, "[]")
+    end = jpos(lpos_of(text, line_starts_of(text), len(text)))
+    lsp_reply(id, "[\{\"range\":\{\"start\":\{\"line\":0,\"character\":0\},\"end\":{end}\},\"newText\":{json_quote(out)}\}]")
+# a quick fix: replace text [a, b) of document d with new_
+qf_json = (d: int, title: str, diag: int, a: int, b: int, new_: str) -> str:
+    text = docs[d].text
+    ls = line_starts_of(text)
+    rg = "\{\"start\":{jpos(lpos_of(text, ls, a))},\"end\":{jpos(lpos_of(text, ls, b))}\}"
+    edit = "\{\"changes\":\{{json_quote(docs[d].uri)}:[\{\"range\":{rg},\"newText\":{json_quote(new_)}\}]\}\}"
+    "\{\"title\":{json_quote(title)},\"kind\":\"quickfix\",\"isPreferred\":true,\"diagnostics\":[{jraw(diag)}],\"edit\":{edit}\}"
+# the text between the first two quotes ' in s, from offset k
+quoted = (s: str, k: int) -> str:
+    a = find(s, "'", k)
+    if a < 0: return ""
+    b = find(s, "'", a + 1)
+    if b < 0: return ""
+    s[a + 1..b)
+# the folders of the workspace, from initialize's parameters
+ws_init = (params: int):
+    ws_roots = []
+    loop f in jitems(jget(params, "workspaceFolders")): ws_roots.push(uri_to_path(jstr(jget(f, "uri"))))
+    if ws_roots.len() == 0:
+        u = jstr(jget(params, "rootUri"))
+        if len(u) > 0: ws_roots.push(uri_to_path(u))
+on_open = (params: int):
+    td = jget(params, "textDocument")
+    uri = jstr(jget(td, "uri"))
+    path = uri_to_path(uri)
+    text = jstr(jget(td, "text"))
+    d = doc_of(uri)
+    if d < 0:
+        docs.push(Doc(uri = uri, path = path))
+        d = docs.len() - 1
+        doc_by_uri[uri] = d
+    docs[d].text = text
+    docs[d].version = jint(jget(td, "version"))
+    docs[d].open = true
+    docs[d].dirty = true
+    ide_texts[path] = text
+    users_dirty(d)

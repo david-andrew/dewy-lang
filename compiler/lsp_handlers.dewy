@@ -1,0 +1,647 @@
+$runtime_checks
+from p"checks_text.dewy" import (byte_find)
+from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"@lib/core/os.jo" import (file_exists list_dir)
+from p"@lib/core/str.jo" import (ends_with lower split starts_with trim)
+from p"fmt.jo" import (fmt_checked)
+from p"ide.jo" import (IK_CONST IK_ENUM IK_FIELD IK_FN IK_GLOBAL IK_LOCAL IK_MODULE IK_PARAM IK_STRUCT IK_TYPE IK_VARIANT ide_texts)
+from p"json_doc.dewy" import (JsonDoc json_get json_parse json_path json_quote json_raw json_str)
+from p"lex.jo" import (is_ident_char is_ident_start keywords)
+from p"lsp.jo" import (Doc Hit Item Result Use WsSym check_doc doc_by_uri docs empty_main in_eof indent_of jdoc lsp_fill lsp_queue lsp_read lsp_req lsp_req_uri lsp_seen lsp_send lsp_stop lsp_watching off_of publish ref_at root_lib split_pos stmt_lines sy_container sy_dewy sy_flat sy_lines sy_ls sy_ok sy_text symbols_in top_item use_target uses_of utf16_units where_str ws_files ws_found ws_roots ws_scanned)
+from p"lsp_ops.dewy" import (dewy_op_byte dewy_op_word doc_of ensure_checked file_in jbool jget jint jitems jpath jpos jraw jstr lpos_of lsp_have_msg lsp_input_ready lsp_reply req_off text_of text_params_doc uri_of uri_to_path users_dirty)
+from p"module_paths.dewy" import (path_to_uri)
+from p"util.jo" import (quiet_errors)
+
+LspHandlerWord:type=int64<overflow='wrap'>
+# Drain only bytes already available. A partial editor frame must not block a running check.
+lsp_drain=():>void=>{
+    loop true {
+        if lsp_have_msg() {
+            let m=lsp_read()
+            if m not=? none {lsp_queue.push(m)}
+        }
+        else {
+            if in_eof or not lsp_input_ready() {break}
+            if not lsp_fill() {break}
+        }
+    }
+}
+lsp_watch=(req:string uri:string):>void=>{
+    lsp_watching=true
+    lsp_req=req
+    lsp_req_uri=uri
+    lsp_stop=0
+    lsp_seen=0
+}
+# The active handler still reads jdoc: queued envelopes are read into a document of their
+# own. (Matching raw substrings could mistake document text for a cancellation.)
+lsp_should_stop=():>bool=>{
+    if not lsp_watching {return false}
+    if lsp_stop not=? 0 {return true}
+    lsp_drain()
+    let q=JsonDoc([])
+    loop lsp_seen <? lsp_queue.length {
+        let root=json_parse(@q lsp_queue[lsp_seen])
+        lsp_seen += 1
+        let method=json_str(q json_get(q root "method"))
+        let params=json_get(q root "params")
+        if method =? "$/cancelRequest" and (lsp_req as array<uint8>).length >? 0 and json_raw(q json_get(q params "id")) =? lsp_req {
+            lsp_stop=-32800
+            break
+        }
+        if (method =? "textDocument/didChange" or method =? "textDocument/didClose") and (lsp_req_uri as array<uint8>).length >? 0 and json_str(q json_path(q params "textDocument" "uri")) =? lsp_req_uri {
+            lsp_stop=-32801
+            break
+        }
+        if method =? "shutdown" or method =? "exit" {
+            lsp_stop=-32800
+            break
+        }
+    }
+    if in_eof {lsp_stop=-32800}
+    lsp_stop not=? 0
+}
+lsp_next=():>string | none=>{
+    loop true {
+        if lsp_queue.length =? 0 {
+            let m=lsp_read()
+            if m not=? none {lsp_queue.push(m)} else {return none}
+        }
+        lsp_drain()
+        let m=lsp_queue.pop(0)
+        let root=json_parse(@jdoc m)
+        let method=jstr(jget(root "method"))
+        # Let the main loop retry dirty diagnostics after a cancelled request.
+        if method =? "$/cancelRequest" {return m}
+        let id=jget(root "id")
+        if id =? 0 or method =? "initialize" or method =? "shutdown" {return m}
+        let key=jraw(id)
+        let uri=jstr(jget(jget(jget(root "params") "textDocument") "uri"))
+        let stale:LspHandlerWord=0
+        loop later in lsp_queue {
+            let r=json_parse(@jdoc later)
+            let lm=jstr(jget(r "method"))
+            if lm =? "$/cancelRequest" and jraw(jget(jget(r "params") "id")) =? key {
+                stale=-32800
+                break
+            }
+            if lm =? "textDocument/didChange" and (uri as array<uint8>).length >? 0 and jstr(jget(jget(jget(r "params") "textDocument") "uri")) =? uri {stale=-32801}
+        }
+        # (json_parse starts its nodes afresh: the id is answered as text)
+        if stale =? -32800 {lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{key},\"error\":\{\"code\":-32800,\"message\":\"cancelled\"\}\}")} else if stale =? -32801 {lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{key},\"error\":\{\"code\":-32801,\"message\":\"the document changed\"\}\}")}
+        else {return m}
+    }
+    none
+}
+lsp_error=(id:LspHandlerWord code:LspHandlerWord msg:string):>int64=>{
+    let out_code=code
+    let out_msg=msg
+    # A handler may discover no reference in its unfinished result (for example rename).
+    # Cancellation still takes precedence over an error derived from that partial result.
+    if lsp_stop not=? 0 {
+        out_code=lsp_stop
+        out_msg="cancelled"
+        if lsp_stop =? -32801 {out_msg="the document changed"}
+    }
+    lsp_send("\{\"jsonrpc\":\"2.0\",\"id\":{jraw(id)},\"error\":\{\"code\":{out_code},\"message\":{json_quote(out_msg)}\}\}")
+    0
+}
+line_starts_of=(text:string):>array<int64>=>{
+    let ls:array<int64>=[0]
+    loop i in 0.. and c in (text as array<uint8>) {
+        if c =? b'\n' {ls.push(i + 1)}
+    }
+    ls
+}
+# the line holding byte offset off (binary search in line starts ls)
+line_of=(ls:array<int64> off:LspHandlerWord):>int64=>{
+    let lo:LspHandlerWord=0
+    let hi=ls.length - 1
+    loop lo <? hi {
+        let mid=(lo + hi + 1) // 2
+        if ls[mid] <=? off {lo=mid} else {hi=mid - 1}
+    }
+    lo
+}
+esc_split=(line:string):>array<string>=>{
+    let out:array<string>=[]
+    let cur:array<uint8>=[]
+    let i:LspHandlerWord=0
+    loop i <? (line as array<uint8>).length {
+        let c=(line as array<uint8>)[i]
+        if c =? b'\t' {
+            out.push(__str_from_bytes(cur))
+            cur.clear()
+        }
+        else if c =? b'\\' and i + 1 <? (line as array<uint8>).length {
+            i += 1
+            let e=(line as array<uint8>)[i]
+            if e =? b't' {cur.push(b'\t')} else if e =? b'n' {cur.push(b'\n')}
+            else {cur.push(e)}
+        }
+        else {cur.push(c)}
+        i += 1
+    }
+    out.push(__str_from_bytes(cur))
+    out
+}
+# text with [a, b) made blank (spaces; line breaks kept, so positions after it do not move)
+blank_out=(text:string a:LspHandlerWord b:LspHandlerWord):>string=>{
+    let out:array<uint8>=[]
+    loop i in 0.. and c in (text as array<uint8>) {
+        if i >=? a and i <? b and c not=? b'\n' {out.push(b' ')} else {out.push(c)}
+    }
+    __str_from_bytes(out)
+}
+# check document d and publish its errors
+refresh=(d:LspHandlerWord):>void=>{
+    docs[d].dirty=false
+    docs[d].lowered=false
+    let r=check_doc(docs[d].path (-1) false false)
+    if lsp_stop not=? 0 {
+        docs[d].dirty=true
+        return
+    }
+    r.texts=ide_texts
+    docs[d].res=r
+    if not docs[d].has_good or r.diags.length =? 0 or r.refs.length >=? docs[d].good.refs.length {
+        docs[d].good=r
+        docs[d].has_good=true
+    }
+    publish(d)
+}
+# check document d again, lowering it too (when the editor has been quiet for a moment)
+refresh_lowered=(d:LspHandlerWord):>void=>{
+    docs[d].lowered=true
+    let r=check_doc(docs[d].path (-1) true false)
+    if lsp_stop not=? 0 {
+        docs[d].lowered=false
+        return
+    }
+    r.texts=ide_texts
+    if r.diags.length =? 0 and docs[d].res.diags.length =? 0 {
+        # (nothing new to say, but hovers learn what only lowering settles: `& panics`)
+        if r.refs.length =? docs[d].res.refs.length {docs[d].res=r}
+        return
+    }
+    docs[d].res=r
+    publish(d)
+}
+# map an offset in the current text of path to the text result r was made from (-1: changed)
+map_off=(r:Result path:string off:LspHandlerWord):>int64=>{
+    let cur=text_of(path)
+    let old=r.texts.get(path) ?? cur
+    if old =? cur {return off}
+    let n=min((old as array<uint8>).length (cur as array<uint8>).length)
+    let pre:LspHandlerWord=0
+    loop pre <? n and (old as array<uint8>)[pre] =? (cur as array<uint8>)[pre] {pre += 1}
+    if off <? pre {return off}
+    let suf:LspHandlerWord=0
+    loop suf <? n - pre and (old as array<uint8>)[(old as array<uint8>).length - 1 - suf] =? (cur as array<uint8>)[(cur as array<uint8>).length - 1 - suf] {suf += 1}
+    if off >=? (cur as array<uint8>).length - suf {return off - (cur as array<uint8>).length + (old as array<uint8>).length}
+    -1
+}
+# and back: an offset in the old text of path to the current one
+unmap_off=(r:Result path:string off:LspHandlerWord):>int64=>{
+    let cur=text_of(path)
+    let old=r.texts.get(path) ?? cur
+    if old =? cur {return off}
+    let n=min((old as array<uint8>).length (cur as array<uint8>).length)
+    let pre:LspHandlerWord=0
+    loop pre <? n and (old as array<uint8>)[pre] =? (cur as array<uint8>)[pre] {pre += 1}
+    if off <? pre {return off}
+    let suf:LspHandlerWord=0
+    loop suf <? n - pre and (old as array<uint8>)[(old as array<uint8>).length - 1 - suf] =? (cur as array<uint8>)[(cur as array<uint8>).length - 1 - suf] {suf += 1}
+    if off >=? (old as array<uint8>).length - suf {return off - (old as array<uint8>).length + (cur as array<uint8>).length}
+    -1
+}
+loc_json=(r:Result f:LspHandlerWord off:LspHandlerWord n:LspHandlerWord):>string=>{
+    let path=r.paths[f]
+    let o=unmap_off(r path off)
+    if o <? 0 {o=off}
+    let text=text_of(path)
+    let ls=line_starts_of(text)
+    "\{\"uri\":{json_quote(uri_of(path))},\"range\":\{\"start\":{jpos(lpos_of(text ls o))},\"end\":{jpos(lpos_of(text ls o + n))}\}\}"
+}
+kind_name=(k:LspHandlerWord):>string=>{
+    if k =? IK_LOCAL {return "variable"}
+    if k =? IK_PARAM {return "parameter"}
+    if k =? IK_GLOBAL {return "global"}
+    if k =? IK_CONST {return "constant"}
+    if k =? IK_FN {return "function"}
+    if k =? IK_STRUCT {return "struct"}
+    if k =? IK_ENUM {return "enum"}
+    if k =? IK_FIELD {return "field"}
+    if k =? IK_VARIANT {return "variant"}
+    if k =? IK_MODULE {return "module"}
+    "type"
+}
+on_definition=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    ensure_checked(d)
+    let off=req_off(d params)
+    # use 'file.jo': the file
+    let u=use_target(d off)
+    if (u as array<uint8>).length >? 0 {return lsp_reply(id "\{\"uri\":{json_quote(path_to_uri(u))},\"range\":\{\"start\":\{\"line\":0,\"character\":0\},\"end\":\{\"line\":0,\"character\":0\}\}\}")}
+    let h=ref_at(d off)
+    if not h.found or (h.ref.decl as array<uint8>).length =? 0 {return lsp_reply(id "null")}
+    let p=split_pos(h.ref.decl)
+    if p[0] <? 0 or p[0] >=? h.res.paths.length {return lsp_reply(id "null")}
+    let n:LspHandlerWord=0
+    let dc=h.res.decls.get(h.ref.decl)
+    if dc not=? none {n=dc.len}
+    lsp_reply(id loc_json(h.res p[0] p[1] n))
+}
+# document i's result with all the uses in its program (r: its result, when that is the
+# document's only file; else one that indexed them all)
+wide_of=(i:LspHandlerWord r:Result):>Result=>{
+    let n:LspHandlerWord=0
+    loop p in r.paths {
+        if not starts_with(p "{root_lib}/") and p not=? empty_main {n += 1}
+    }
+    if n <=? 1 and not starts_with(docs[i].path "{root_lib}/") {return r}
+    if not docs[i].has_wide {
+        let w=check_doc(docs[i].path (-1) false true)
+        if lsp_stop not=? 0 {return r}
+        w.texts=ide_texts
+        docs[i].wide=w
+        docs[i].has_wide=true
+    }
+    docs[i].wide
+}
+# every reference to the declaration under the cursor
+refs_of=(d:LspHandlerWord off:LspHandlerWord with_decl:bool):>array<string>=>{
+    let out:array<string>=[]
+    let h=ref_at(d off)
+    if not h.found or (h.ref.decl as array<uint8>).length =? 0 {return out}
+    let seen=dict<string bool>()
+    loop u in uses_of(d h) {
+        loop x in u.res.refs {
+            if x.decl not=? u.decl or x.file <? 0 {continue}
+            if not with_decl and "{x.file}:{x.off}" =? x.decl {continue}
+            let k="{u.res.paths[x.file]}:{x.off}"
+            if seen.get(k) not=? none {continue}
+            seen[k]=true
+            out.push(loc_json(u.res x.file x.off x.len))
+        }
+    }
+    out
+}
+on_references=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    ensure_checked(d)
+    let inc=jbool(jpath(params "context" "includeDeclaration"))
+    lsp_reply(id "[{join(refs_of(d req_off(d params) inc) ",")}]")
+}
+on_highlight=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    ensure_checked(d)
+    let h=ref_at(d req_off(d params))
+    if not h.found or (h.ref.decl as array<uint8>).length =? 0 {return lsp_reply(id "[]")}
+    let f=file_in(h.res docs[d].path)
+    let out:array<string>=[]
+    let seen=dict<int64 bool>()
+    let text=docs[d].text
+    let ls=line_starts_of(text)
+    loop x in h.res.refs {
+        if x.decl not=? h.ref.decl or x.file not=? f or seen.get(x.off) not=? none {continue}
+        seen[x.off]=true
+        let o=unmap_off(h.res docs[d].path x.off)
+        if o <? 0 {continue}
+        out.push("\{\"range\":\{\"start\":{jpos(lpos_of(text ls o))},\"end\":{jpos(lpos_of(text ls o + x.len))}\}\}")
+    }
+    lsp_reply(id "[{join(out ",")}]")
+}
+# why the name at h cannot be renamed ("" if it can)
+no_rename=(d:LspHandlerWord h:Hit):>string=>{
+    if not h.found or (h.ref.decl as array<uint8>).length =? 0 {return "nothing to rename here"}
+    let dc=h.res.decls.get(h.ref.decl)
+    if dc not=? none {
+        if dc.kind =? IK_MODULE {return "nothing to rename here: this is a module"}
+    }
+    # (a name imported as another is this file's)
+    if (h.ref.alias as array<uint8>).length >? 0 {return ""}
+    let p=split_pos(h.ref.decl)
+    if p[0] >=? 0 and starts_with(h.res.paths[p[0]] "{root_lib}/") and h.res.paths[p[0]] not=? docs[d].path {return "this is declared in the standard library"}
+    ""
+}
+on_prepare_rename=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    ensure_checked(d)
+    let h=ref_at(d req_off(d params))
+    let why=no_rename(d h)
+    if (why as array<uint8>).length >? 0 {return lsp_error(id (-32803) why)}
+    let text=docs[d].text
+    let ls=line_starts_of(text)
+    let o=unmap_off(h.res docs[d].path h.ref.off)
+    lsp_reply(id "\{\"start\":{jpos(lpos_of(text ls o))},\"end\":{jpos(lpos_of(text ls o + h.ref.len))}\}")
+}
+on_rename=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    refresh(d)
+    let nn=jstr(jget(params "newName"))
+    if (nn as array<uint8>).length =? 0 or not is_ident_start((nn as array<uint8>)[0]) {return lsp_error(id (-32602) "'{nn}' is not a name")}
+    loop c in (nn as array<uint8>) {
+        if not is_ident_char(c) {return lsp_error(id (-32602) "'{nn}' is not a name")}
+    }
+    if keywords.get(nn) not=? none {return lsp_error(id (-32602) "'{nn}' is a keyword")}
+    if docs[d].res.diags.length >? 0 {
+        loop x in docs[d].res.diags {
+            if not x.warning {return lsp_error(id (-32803) "the program has errors; fix them first (a rename might miss uses)")}
+        }
+    }
+    let h=ref_at(d req_off(d params))
+    let why=no_rename(d h)
+    if (why as array<uint8>).length >? 0 {return lsp_error(id (-32803) why)}
+    # a name imported as another: its binding and uses (in this file); else the declaration and
+    # its uses (not those through another name)
+    let us:array<Use>=[]
+    if (h.ref.alias as array<uint8>).length >? 0 {us.push(Use(h.res h.ref.decl))} else {us=uses_of(d h)}
+    let by_uri=dict<string array<string>>()
+    let seen=dict<string bool>()
+    let touched=dict<string bool>()
+    loop u in us {
+        loop x in u.res.refs {
+            if x.file <? 0 {continue}
+            if (h.ref.alias as array<uint8>).length >? 0 {
+                if x.alias not=? h.ref.alias {continue}
+            }
+            else if x.decl not=? u.decl or (x.alias as array<uint8>).length >? 0 {continue}
+            let path=u.res.paths[x.file]
+            let k="{path}:{x.off}"
+            if seen.get(k) not=? none {continue}
+            seen[k]=true
+            touched[path]=true
+            let u2=uri_of(path)
+            let loc=loc_json(u.res x.file x.off x.len)
+            let rg=loc.byte_slice(byte_find(loc "\"range\":") + 8 (loc as array<uint8>).length - 1)
+            let lst=by_uri.get(u2) ?? []
+            lst.push("\{\"range\":{rg},\"newText\":{json_quote(nn)}\}")
+            by_uri[u2]=lst
+        }
+    }
+    if by_uri.length =? 0 {return lsp_error(id (-32803) "nothing to rename here")}
+    let kind:LspHandlerWord=0
+    let dc=h.res.decls.get(h.ref.decl)
+    if dc not=? none {kind=dc.kind}
+    let clash=rename_clash(us h kind touched nn)
+    if (clash as array<uint8>).length >? 0 {return lsp_error(id (-32803) clash)}
+    let parts:array<string>=[]
+    loop [u edits] in by_uri {parts.push("{json_quote(u)}:[{join(edits ",")}]")}
+    lsp_reply(id "\{\"changes\":\{{join(parts ",")}\}\}")
+}
+# why renaming what h is to as nn could change what names mean ("" if it cannot): nn is declared
+# already, or names something used, in a file the rename changes (for a local: in its function;
+# for a field or variant: another of its struct or enum)
+rename_clash=(us:array<Use> h:Hit kind:LspHandlerWord touched:dict<string bool> nn:string):>string=>{
+    let local=kind =? IK_LOCAL or kind =? IK_PARAM
+    let member=kind =? IK_FIELD or kind =? IK_VARIANT
+    let dp=split_pos(h.ref.decl)
+    let dpath=h.res.paths[dp[0]]
+    let it=Item((-1) (-1) "")
+    if local or member {it=top_item(h.res.texts.get(dpath) ?? text_of(dpath) dp[1])}
+    loop u in us {
+        loop [key dc] in u.res.decls {
+            if dc.name not=? nn or dc.file <? 0 or dc.file >=? u.res.paths.length {continue}
+            let path=u.res.paths[dc.file]
+            if touched.get(path) =? none or path =? dpath and dc.off =? dp[1] {continue}
+            let inside=path =? dpath and dc.off >=? it.a and dc.off <? it.b
+            let dm=dc.kind =? IK_FIELD or dc.kind =? IK_VARIANT
+            if member and not (dm and inside) or not member and dm {continue}
+            if local and not inside and (dc.kind =? IK_LOCAL or dc.kind =? IK_PARAM) {continue}
+            return "'{nn}' is declared already ({where_str(u.res dc.file dc.off)})"
+        }
+        if member {continue}
+        loop x in u.res.refs {
+            if x.file <? 0 or x.len not=? (nn as array<uint8>).length or x.decl =? u.decl {continue}
+            let path=u.res.paths[x.file]
+            if touched.get(path) =? none {continue}
+            if local and (path not=? dpath or x.off <? it.a or x.off >=? it.b) {continue}
+            let t=u.res.texts.get(path) ?? text_of(path)
+            if x.off + x.len >? (t as array<uint8>).length or t[x.off..x.off + x.len) not=? nn {continue}
+            let dc=u.res.decls.get(x.decl)
+            if dc not=? none {
+                if dc.kind =? IK_FIELD or dc.kind =? IK_VARIANT {continue}
+            }
+            return "'{nn}' names something used already ({where_str(u.res x.file x.off)})"
+        }
+    }
+    ""
+}
+# the keywords to complete: the lexer's, and the words that are keywords where they start something
+comp_words=(dewy:bool=false):>array<string>=>{
+    if dewy {return ["let" "const" "if" "else" "loop" "in" "return" "break" "continue" "match" "true" "false" "none" "void" "import" "from" "as" "and" "or" "xor" "nand" "nor" "xnor" "not" "of" "or_throw" "transmute" "type"]}
+    let out:array<string>=[]
+    loop [k _] in keywords {out.push(k)}
+    loop k in ["type" "from" "soa"] {out.push(k)}
+    out
+}
+comp_kind=(k:LspHandlerWord):>int64=>{
+    if k =? IK_LOCAL or k =? IK_PARAM or k =? IK_GLOBAL {return 6}
+    if k =? IK_CONST {return 21}
+    if k =? IK_FN {return 3}
+    if k =? IK_STRUCT {return 22}
+    if k =? IK_ENUM {return 13}
+    if k =? IK_FIELD {return 5}
+    if k =? IK_VARIANT {return 20}
+    if k =? IK_MODULE {return 9}
+    7
+}
+# does word w end with an operator (`a +`, `x <?`), not a complete value (`xs`, `f()`, `v?`)?
+dewy_ends_op=(w:string):>bool=>{
+    let c=(w as array<uint8>)[(w as array<uint8>).length - 1]
+    if not dewy_op_byte(c) {return false}
+    # (an optional type or value, `T?`: complete; an operator, `<?`, `is?`: not)
+    if c =? b'?' {return (w as array<uint8>).length >=? 2 and dewy_op_byte((w as array<uint8>)[(w as array<uint8>).length - 2]) or dewy_op_word(w)}
+    true
+}
+on_inlay=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    if docs[d].dirty and not lsp_input_ready() {refresh(d)}
+    let text=docs[d].text
+    let ls=line_starts_of(text)
+    let rg=jget(params "range")
+    let a=off_of(text ls jint(jpath(rg "start" "line")) jint(jpath(rg "start" "character")))
+    let b=off_of(text ls jint(jpath(rg "end" "line")) jint(jpath(rg "end" "character")))
+    let r=docs[d].res
+    let f=file_in(r docs[d].path)
+    let out:array<string>=[]
+    if f >=? 0 {
+        loop h in r.hints {
+            if h.file not=? f {continue}
+            let o=unmap_off(r docs[d].path h.off)
+            if o <? a or o >? b or o <? 0 {continue}
+            let lbl=h.label
+            let pad="false"
+            if starts_with(lbl " ") {
+                lbl=trim(lbl)
+                pad="true"
+            }
+            out.push("\{\"position\":{jpos(lpos_of(text ls o))},\"label\":{json_quote(lbl)},\"kind\":1,\"paddingLeft\":{pad}\}")
+        }
+    }
+    lsp_reply(id "[{join(out ",")}]")
+}
+sem_type=(k:LspHandlerWord):>int64=>{
+    if k =? IK_MODULE {return 0}
+    if k =? IK_TYPE {return 1}
+    if k =? IK_STRUCT {return 2}
+    if k =? IK_ENUM {return 3}
+    if k =? IK_PARAM {return 4}
+    if k =? IK_LOCAL or k =? IK_GLOBAL or k =? IK_CONST {return 5}
+    if k =? IK_FIELD {return 6}
+    if k =? IK_VARIANT {return 7}
+    if k =? IK_FN {return 8}
+    -1
+}
+on_symbols=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    sy_text=docs[d].text
+    sy_dewy=ends_with(docs[d].path ".dewy")
+    sy_lines=split(sy_text "\n")
+    sy_ls=line_starts_of(sy_text)
+    sy_ok=stmt_lines(sy_text sy_ls)
+    let out=symbols_in(sy_lines 0 sy_lines.length 0)
+    lsp_reply(id "[{join(out ",")}]")
+}
+# the last line of the block that starts at line i (its indented lines)
+block_end=(lines_:array<string> i:LspHandlerWord ind:LspHandlerWord):>int64=>{
+    let e=i
+    let j=i + 1
+    loop j <? lines_.length {
+        let t=trim(lines_[j])
+        if (t as array<uint8>).length >? 0 {
+            if sy_ok[j] and indent_of(lines_[j]) <=? ind {break}
+            e=j
+        }
+        j += 1
+    }
+    e
+}
+# (columns are bytes of sy_lines, sent as UTF-16 units; the range ends with line endl)
+sym_json=(name:string kind:LspHandlerWord line:LspHandlerWord col:LspHandlerWord endl:LspHandlerWord kids:array<string>):>string=>{
+    let c=utf16_units(sy_lines[line] 0 col)
+    if sy_flat {
+        ws_found.push(WsSym(name kind line c c + utf16_units(name 0 (name as array<uint8>).length) sy_container))
+        return ""
+    }
+    let ec=utf16_units(sy_lines[endl] 0 (sy_lines[endl] as array<uint8>).length)
+    let rg="\{\"start\":\{\"line\":{line},\"character\":0\},\"end\":\{\"line\":{endl},\"character\":{ec}\}\}"
+    let sel="\{\"start\":\{\"line\":{line},\"character\":{c}\},\"end\":\{\"line\":{line},\"character\":{c + utf16_units(name 0 (name as array<uint8>).length)}\}\}"
+    let s="\{\"name\":{json_quote(name)},\"kind\":{kind},\"range\":{rg},\"selectionRange\":{sel}"
+    if kids.length >? 0 {s="{s},\"children\":[{join(kids ",")}]"}
+    "{s}\}"
+}
+# .jo files under d (not in hidden directories or build output), up to a few thousand
+ws_walk=(d:string depth:LspHandlerWord):>void=>{
+    if depth >? 12 or ws_files.length >=? 5000 {return}
+    loop n in list_dir(d) {
+        if starts_with(n ".") or n =? "build" or n =? "node_modules" or n =? "target" or n =? "__dewycache__" {continue}
+        let full="{d}/{n}"
+        if ends_with(n ".jo") or ends_with(n ".dewy") {ws_files.push(full)} else if find_byte(n b'.') <? 0 or file_exists("{full}/.") {ws_walk(full depth + 1)}
+    }
+}
+ws_symbols_of=(path:string text:string):>array<WsSym>=>{
+    ws_found=[]
+    sy_flat=true
+    sy_container=""
+    sy_text=text
+    sy_dewy=ends_with(path ".dewy")
+    sy_lines=split(text "\n")
+    sy_ls=line_starts_of(text)
+    sy_ok=stmt_lines(text sy_ls)
+    symbols_in(sy_lines 0 sy_lines.length 0);
+    sy_flat=false
+    ws_found
+}
+# how well name matches the query: 0 it starts with it, 1 has it, 2 has its characters in order
+# (case aside), 3 not at all
+ws_match=(name:string q:string):>int64=>{
+    let n=lower(name)
+    let ql=lower(q)
+    if starts_with(n ql) {return 0}
+    if byte_find(n ql) >=? 0 {return 1}
+    let k:LspHandlerWord=0
+    loop c in n.bytes() {
+        if k <? (ql as array<uint8>).length and c =? (ql as array<uint8>)[k] {k += 1}
+    }
+    if k =? (ql as array<uint8>).length {return 2}
+    3
+}
+# does text have w as a whole word?
+has_word=(text:string w:string):>bool=>{
+    let i=byte_find(text w)
+    loop i >=? 0 {
+        if (i =? 0 or not is_ident_char((text as array<uint8>)[i - 1])) and (i + (w as array<uint8>).length >=? (text as array<uint8>).length or not is_ident_char((text as array<uint8>)[i + (w as array<uint8>).length])) {return true}
+        i=byte_find(text w i + 1)
+    }
+    false
+}
+ws_ensure_scanned=():>void=>{
+    if ws_scanned {return}
+    ws_scanned=true
+    ws_files=[]
+    loop r in ws_roots {ws_walk(r 0)}
+}
+# Language-specific layout as one edit of the current buffer.
+on_formatting=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    let text=docs[d].text
+    quiet_errors=true
+    let out=fmt_checked(docs[d].path text)
+    quiet_errors=false
+    if out =? text {return lsp_reply(id "[]")}
+    let end_=jpos(lpos_of(text line_starts_of(text) (text as array<uint8>).length))
+    lsp_reply(id "[\{\"range\":\{\"start\":\{\"line\":0,\"character\":0\},\"end\":{end_}\},\"newText\":{json_quote(out)}\}]")
+}
+# a quick fix: replace text [a, b) of document d with new_
+qf_json=(d:LspHandlerWord title:string diag:LspHandlerWord a:LspHandlerWord b:LspHandlerWord new_:string):>string=>{
+    let text=docs[d].text
+    let ls=line_starts_of(text)
+    let rg="\{\"start\":{jpos(lpos_of(text ls a))},\"end\":{jpos(lpos_of(text ls b))}\}"
+    let edit="\{\"changes\":\{{json_quote(docs[d].uri)}:[\{\"range\":{rg},\"newText\":{json_quote(new_)}\}]\}\}"
+    "\{\"title\":{json_quote(title)},\"kind\":\"quickfix\",\"isPreferred\":true,\"diagnostics\":[{jraw(diag)}],\"edit\":{edit}\}"
+}
+# the text between the first two quotes ' in s, from offset k
+quoted=(s:string k:LspHandlerWord):>string=>{
+    let a=byte_find(s "'" k)
+    if a <? 0 {return ""}
+    let b=byte_find(s "'" a + 1)
+    if b <? 0 {return ""}
+    s.byte_slice(a + 1 b)
+}
+# the folders of the workspace, from initialize's parameters
+ws_init=(params:LspHandlerWord):>void=>{
+    ws_roots=[]
+    loop f in jitems(jget(params "workspaceFolders")) {ws_roots.push(uri_to_path(jstr(jget(f "uri"))))}
+    if ws_roots.length =? 0 {
+        let u=jstr(jget(params "rootUri"))
+        if (u as array<uint8>).length >? 0 {ws_roots.push(uri_to_path(u))}
+    }
+}
+on_open=(params:LspHandlerWord):>void=>{
+    let td=jget(params "textDocument")
+    let uri=jstr(jget(td "uri"))
+    let path=uri_to_path(uri)
+    let text=jstr(jget(td "text"))
+    let d=doc_of(uri)
+    if d <? 0 {
+        docs.push(Doc(uri=uri path=path))
+        d=docs.length - 1
+        doc_by_uri[uri]=d
+    }
+    docs[d].text=text
+    docs[d].version=jint(jget(td "version"))
+    docs[d].open=true
+    docs[d].dirty=true
+    ide_texts[path]=text
+    users_dirty(d)
+}
