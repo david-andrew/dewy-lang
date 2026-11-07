@@ -1,0 +1,481 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (env)
+from p"@lib/core/str.jo" import (find is_digit split starts_with)
+from p"ast.jo" import (NF_GENERIC NF_INBOUNDS add_flag has_flag nodes)
+from p"check.jo" import (FK_LAMBDA decl_info decl_infos fns lib_dir modules)
+from p"directives.jo" import (DIR_DEFAULT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirScope DirSite dir_assumed_bounds_any dir_builtin dir_bundles dir_bundles_loaded dir_copies_any dir_deadlocks_any dir_entry_functions dir_entry_positions dir_find dir_floats_any dir_forced dir_mixed_files dir_module_start dir_name_assumed_bounds dir_name_audited dir_name_confine dir_name_copies dir_name_deadlocks dir_name_local_asserts dir_name_no_inf dir_name_no_nan dir_name_prototype dir_name_row dir_name_runtime dir_name_warnings dir_obligations dir_panic_sites dir_panics_demanded dir_policy dir_prior_static dir_proven dir_row_scopes dir_rows_any dir_scopes dir_scopes_gen dir_sites dir_static_body dir_uniform_files dir_value)
+from p"effect_contracts.dewy" import (callable_contract effect_subst)
+from p"effect_control.dewy" import (effect_name)
+from p"effect_panics.dewy" import (effect_panics panic_reaches)
+from p"effect_types.dewy" import (EffectAtom)
+from p"effects.jo" import (effect_contracts effect_obligations effect_panics_settled panic_edge_at panic_edge_end panic_edges panic_via panic_witness)
+from p"expr.jo" import (ntype)
+from p"facts.jo" import (fact_policy fact_policy_default fn_in_lib)
+from p"ide.jo" import (ide_emit ide_esc ide_on ide_pos_str)
+from p"main.jo" import (DEWY_CORE_VERSION)
+from p"panic_inventory.dewy" import (effect_panic_reason effect_shown_name)
+from p"settings.jo" import (settings_path)
+from p"util.jo" import (fatal files intern mkpos name_of pos_file pos_in_lib pos_str warn)
+from p"witness.jo" import (wit_measure)
+
+DirWord:type=int64<overflow='wrap'>
+directives_reset=():>void=>{
+    dir_entry_positions=dict<int64 int64>()
+    dir_entry_functions=dict<int64 bool>()
+    dir_scopes=[]
+    dir_mixed_files=dict<int64 bool>()
+    dir_uniform_files=dict<int64 bool>()
+    dir_bundles=[]
+    dir_sites=[]
+    dir_proven=dict<int64 bool>()
+    dir_row_scopes=dict<int64 int64>()
+    dir_panic_sites=[]
+    dir_forced=false
+    dir_prior_static=false
+    dir_copies_any=false
+    dir_rows_any=false
+    dir_floats_any=false
+    dir_deadlocks_any=false
+    dir_bundles_loaded=false
+    dir_assumed_bounds_any=false
+    dir_name_runtime=0
+    fact_policy_default=DIR_DEFAULT =? DIR_STATIC and fact_policy =? 'RuntimeAllowed'
+    if DIR_DEFAULT =? DIR_STATIC {fact_policy='RequireStatic'}
+    if dir_obligations {dir_force()}
+}
+# (names are interned on first use: an ordinary program interns none)
+dir_names=():>void=>{
+    if dir_name_runtime not=? 0 {return}
+    dir_name_runtime=intern("runtime_checks")
+    dir_name_prototype=intern("prototype")
+    dir_name_warnings=intern("prototype_warnings")
+    dir_name_copies=intern("explicit_copies")
+    dir_name_row=intern("default_row")
+    dir_name_no_nan=intern("no_nan")
+    dir_name_no_inf=intern("no_inf")
+    dir_name_local_asserts=intern("assume_local_asserts")
+    dir_name_confine=intern("confine_external_paths")
+    dir_name_deadlocks=intern("no_deadlocks")
+    dir_name_audited=intern("audited_wait")
+    dir_name_assumed_bounds=intern("no_assumed_bounds")
+}
+# Metatags the compiler gives a meaning of its own; any other `$name` in a
+# source may be a bundle (or a loop label), so the bundles are read first.
+dw_dir_known=(name:string):>bool=>{
+    name in? ["assert" "runtime_assert" "expect" "fail" "breakpoint" "lend" "test" "proof" "capture" "include_bytes" "clamp" "target" "build" "supported_targets" "field" "unsafe_assume" "abstract" "allocator" "no_prelude" "runtime_checks" "prototype" "prototype_warnings" "explicit_copies" "fast_math" "no_nan" "no_inf" "unsafe" "assume_local_asserts" "no_assumed_bounds" "extern" "intrinsic" "export" "realtime" "explicit_allocation_failure" "warn_if" "parallel_safe" "confine_external_paths" "no_deadlocks" "audited_wait" "__copy__" "__drop__" "__move__" "__consume__" "send" "sync"]
+}
+# The settings holding a name in quotes (their value: the name's id + 2).
+dir_valued_name=(name:string):>bool=>{
+    name =? "dewy.version" or name =? "time.zone" or name =? "time.zone_source" or name =? "time.rules" or name =? "time.gap" or name =? "time.fold"
+}
+dir_valued_check=(name:string value:string start:DirWord at:DirWord):>void=>{
+    if name =? "dewy.version" {
+        if start not=? dir_module_start(pos_file(start)) {fatal(at "`$dewy.version` says what a whole module means: put it at the top of the module")}
+        if dir_scope_written(intern(name) pos_file(start)) {fatal(at "`$dewy.version` is set twice")}
+        if not version_well_formed(value) {fatal(at "`$dewy.version` is three numbers in quotes, as `$dewy.version = '0.1.0'`")}
+        if toolchain_tagged() and version_newer(value toolchain_version()) {fatal(at "this module says `$dewy.version = '{value}'`, newer than this toolchain ({toolchain_version()}): update Dewy, or set a version it knows")}
+    }
+    else if name =? "time.zone_source" {
+        fatal(at "`${name}` is part of the design but not implemented yet")
+    }
+    else if name =? "time.rules" {
+        if files[pos_file(start)].path not=? settings_path or start not=? dir_module_start(pos_file(start)) {fatal(at "`$time.rules` says which rules the whole program uses: put it at the top of the main file")}
+    }
+    else if name =? "time.gap" {
+        if not (value in? ["reject" "skip" "preserve_displacement" "next"]) {fatal(at "`$time.gap` is one of 'reject', 'skip', 'preserve_displacement' or 'next'")}
+    }
+    else if name =? "time.fold" {
+        if not (value in? ["reject" "earlier" "later"]) {fatal(at "`$time.fold` is one of 'reject', 'earlier' or 'later'")}
+    }
+}
+dir_scope_written=(name:DirWord file:DirWord):>bool=>{
+    loop s in dir_scopes {
+        if s.setting =? name and pos_file(s.start) =? file {return true}
+    }
+    false
+}
+version_well_formed=(v:string):>bool=>{
+    let parts=split(v ".")
+    if parts.length not=? 3 {return false}
+    loop p in parts {
+        if (p as array<uint8>).length =? 0 {return false}
+        loop i in [0..(p as array<uint8>).length) {
+            if not is_digit((p as array<uint8>)[i]) {return false}
+        }
+    }
+    true
+}
+# (dotted decimal versions, both well formed)
+version_newer=(a:string b0:string):>bool=>{
+    let b=b0
+    let dash=find(b "-") ?? (-1)
+    if dash >=? 0 {b=b[..dash)}
+    let x=split(a ".")
+    let y=split(b ".")
+    loop i in [0..min(x.length y.length)) {
+        let p=to_int(x[i]) ?? 0
+        let q=to_int(y[i]) ?? 0
+        if p not=? q {return p >? q}
+    }
+    false
+}
+# The toolchain's version; a tagged toolchain makes the `$dewy.version` promise (docs/design/time.md).
+toolchain_version=():>string=>{
+    env("DEWY_TOOLCHAIN_VERSION") ?? DEWY_CORE_VERSION
+}
+toolchain_tagged=():>bool=>{
+    (find(toolchain_version() "-dev") ?? (-1)) <? 0
+}
+# `$time.zone` in the main file pins the whole program: another value anywhere else is an error
+# naming both. O(scopes), once, and nothing unless some scope sets a zone.
+dir_zone_pin=():>void=>{
+    let name=intern("time.zone")
+    let pin:DirWord=-1
+    loop i in [0..dir_scopes.length) {
+        let s=dir_scopes[i]
+        if s.setting =? name and files[pos_file(s.start)].path =? settings_path and s.start =? dir_module_start(pos_file(s.start)) {pin=i}
+    }
+    if pin <? 0 {return}
+    let held=dir_scopes[pin]
+    loop s in dir_scopes {
+        if s.setting not=? name or s.value =? held.value {continue}
+        fatal(s.at "`$time.zone = '{name_of(s.value - 2)}'` differs from `$time.zone = '{name_of(held.value - 2)}'` at {pos_str(held.at)}, which pins the whole program: remove one, or set the same zone")
+    }
+}
+# A Dewy module of the program with no `$dewy.version`, on a tagged toolchain: a warning with the fix.
+dir_version_warnings=():>void=>{
+    dir_zone_pin()
+    if not toolchain_tagged() {return}
+    let name=intern("dewy.version")
+    loop m in modules {
+        let f=int64(m.file)
+        if not files[f].is_dewy or m.is_prelude or starts_with(files[f].path "{lib_dir}/") {continue}
+        if not dir_scope_written(name f) {warn(mkpos(f 0) "this module does not say which Dewy it means: add `$dewy.version = '{toolchain_version()}'` at the top")}
+    }
+}
+dir_bundle_index=(name:DirWord):>DirWord=>{
+    loop i in [0..dir_bundles.length) {
+        if dir_bundles[i].name =? name {return i}
+    }
+    -1
+}
+# A bundle's included bundles, merged into its own settings and row, transitively, once.
+# O(bundles x settings): a handful of each.
+dir_bundle_resolve=(b:DirWord @chain:array<int64>):>void=>{
+    if dir_bundles[b].state =? 2 {return}
+    let name=dir_bundles[b].name
+    if dir_bundles[b].state =? 1 {
+        let cycle=""
+        let on=false
+        loop c in chain {
+            if c =? name {on=true}
+            if on {cycle="{cycle}`${name_of(c)}` includes "}
+        }
+        fatal(dir_bundles[b].at "bundles include each other: {cycle}`${name_of(name)}`")
+    }
+    dir_bundles[b].state=1
+    chain.push(name)
+    loop k in [0..dir_bundles[b].includes.length) {
+        let member=dir_bundles[b].includes[k]
+        let at=dir_bundles[b].include_at[k]
+        let inner=dir_bundle_index(member)
+        if inner <? 0 {fatal(at "unknown member `${name_of(member)}` in the bundle `${name_of(name)}`: a bundle lists builtin settings, other bundles and `$default_row`")}
+        dir_bundle_resolve(inner @chain)
+        let included=dir_bundles[inner]
+        loop i in [0..included.settings.length) {
+            dir_bundle_merge(b included.settings[i] included.values[i] member at)
+        }
+        if included.allocation_failure {dir_bundles[b].allocation_failure=true}
+        if included.row not=? 0 {
+            if dir_bundles[b].row not=? 0 and dir_bundles[b].row not=? included.row {fatal(at "the bundle `${name_of(name)}` gets a second `$default_row` from `${name_of(member)}`: a bundle has one default effect row")}
+            dir_bundles[b].row=included.row
+        }
+    }
+    chain.pop();
+    dir_bundles[b].state=2
+}
+# One setting an included bundle brings; two members may not disagree on it.
+dir_bundle_merge=(b:DirWord setting:DirWord value:DirWord member:DirWord at:DirWord):>void=>{
+    loop i in [0..dir_bundles[b].settings.length) {
+        if dir_bundles[b].settings[i] not=? setting {continue}
+        if dir_bundles[b].values[i] =? value {return}
+        let spelled=if value =? 0 {"=false"} else {""}
+        let other=if value =? 0 {"on"} else {"off"}
+        fatal(at "`${name_of(member)}` sets `${name_of(setting)}{spelled}` in the bundle `${name_of(dir_bundles[b].name)}`, which already sets it {other}")
+    }
+    dir_bundles[b].settings.push(setting)
+    dir_bundles[b].values.push(value)
+}
+# Every bundle defined so far, resolved: an unknown member or a cycle is reported where it is
+# defined, used or not.
+dir_bundles_resolve=():>void=>{
+    loop b in [0..dir_bundles.length) {
+        if dir_bundles[b].state not=? 2 {
+            let chain:array<int64>=[]
+            dir_bundle_resolve(b @chain)
+        }
+    }
+}
+# Unproven obligations are analyzed when some scope needs them decided.
+dir_force=():>void=>{
+    if dir_forced {return}
+    dir_forced=true
+    dir_prior_static=fact_policy =? 'RequireStatic'
+    fact_policy='RequireStatic'
+}
+dir_spelled=(s:DirScope):>string=>{
+    let v=if s.value =? 1 {""} else if s.value =? 0 {"=false"} else {"=default"}
+    "`${name_of(s.setting)}{v}`"
+}
+# A setting written directly inside a bundle's scope cannot undo the bundle.
+dir_conflict=(i:DirWord):>void=>{
+    let s=dir_scopes[i]
+    if s.bundle not=? 0 {return}
+    let o=dir_find(s.setting s.start i)
+    if o <? 0 {return}
+    let outer=dir_scopes[o]
+    if outer.end <? s.end {return}
+    if outer.bundle =? 0 and outer.start =? s.start {
+        let where=if s.start =? dir_module_start(pos_file(s.start)) {"module"} else {"scope"}
+        fatal(s.at "`${name_of(s.setting)}` may be set only once per {where}")
+    }
+    if outer.bundle =? 0 or outer.value =? -1 or outer.value =? s.value {return}
+    let b=name_of(outer.bundle)
+    fatal(s.at "{dir_spelled(s)} is not allowed inside `${b}`, which sets {dir_spelled(outer)}; opt this scope out first with `${b}=false`")
+}
+dir_push=(s:DirScope):>void=>{
+    dir_scopes.push(s)
+    dir_scopes_gen += 1
+    if s.setting =? dir_name_runtime or s.setting =? dir_name_prototype {
+        dir_uniform_files.remove(pos_file(s.start));
+        if s.start not=? dir_module_start(pos_file(s.start)) {dir_mixed_files[pos_file(s.start)]=true}
+    }
+    if s.setting =? dir_name_assumed_bounds and s.value =? 1 {dir_assumed_bounds_any=true}
+    if s.setting =? dir_name_copies and s.value =? 1 {dir_copies_any=true}
+    if s.setting =? dir_name_row and s.value >? 0 {dir_rows_any=true}
+    if (s.setting =? dir_name_no_nan or s.setting =? dir_name_no_inf) and s.value =? 1 {dir_floats_any=true}
+    if s.setting =? dir_name_deadlocks and s.value =? 1 {dir_deadlocks_any=true}
+    if s.setting =? dir_name_runtime and s.value =? 0 or s.setting =? dir_name_prototype and s.value =? 1 {dir_force()}
+    if s.setting =? dir_name_runtime and s.value =? 1 and ide_on {dir_force()}
+    if s.bundle =? 0 {
+        dir_conflict(dir_scopes.length - 1)
+        return
+    }
+    # (a bundle written after a setting it governs: check that setting again)
+    loop i in [0..dir_scopes.length - 1) {
+        if dir_scopes[i].bundle =? 0 and dir_scopes[i].start >=? s.start and dir_scopes[i].end <=? s.end {dir_conflict(i)}
+    }
+}
+# `$realtime` and the bundles: a scope for each of a bundle's settings.
+dir_set=(name:DirWord value:DirWord start:DirWord end_:DirWord at:DirWord):>void=>{
+    dir_names()
+    let text=name_of(name)
+    if text =? "realtime" {fatal(at "`$realtime` is reserved for a future bundle stronger than `$no_hidden_costs` (no blocking, a bounded stack); use `$no_hidden_costs`")}
+    if dir_valued_name(text) {
+        dir_valued_check(text name_of(value - 2) start at)
+        dir_push(DirScope(start end_ name value 0 at))
+        return
+    }
+    if dir_builtin(text) {
+        # (an audit covers the adapter it is written in, never a whole module)
+        if text =? "audited_wait" and start =? dir_module_start(pos_file(start)) {fatal(at "`$audited_wait` marks one audited adapter: write it in the body of the function that wraps the foreign call, not for a whole module")}
+        dir_push(DirScope(start end_ name value 0 at))
+        return
+    }
+    let b=dir_bundle_index(name)
+    if b <? 0 {fatal(at "unknown directive `${text}`")}
+    if dir_bundles[b].state not=? 2 {
+        let chain:array<int64>=[]
+        dir_bundle_resolve(b @chain)
+    }
+    let bundle=dir_bundles[b]
+    dir_push(DirScope(start end_ name value 0 at))
+    loop i in [0..bundle.settings.length) {
+        let setting_value=if value =? 1 {bundle.values[i]} else {-1}
+        dir_push(DirScope(start end_ bundle.settings[i] setting_value name at))
+    }
+    if bundle.row not=? 0 {
+        let row_value=if value =? 1 {bundle.row} else {-1}
+        dir_push(DirScope(start end_ dir_name_row row_value name at))
+    }
+}
+dir_obligation_text=(what:string):>string=>{
+    if starts_with(what "cannot prove ") {return what[13..]}
+    what
+}
+# After the analysis: proven indexes lose their checks; the listing.
+directives_after_facts=():>void=>{
+    loop [n proven] in dir_proven {
+        if proven {add_flag(n NF_INBOUNDS)}
+    }
+    dir_proven=dict<int64 bool>()
+}
+dir_policy_name=(policy:DirWord at:DirWord):>string=>{
+    if policy =? DIR_RUNTIME {return "$runtime_checks"}
+    if policy =? DIR_PROTOTYPE {return "$prototype"}
+    # (no traps is the default: only the library's own and Sloppy sources
+    # keep implicit checks)
+    if files[pos_file(at)].is_dewy {"library"} else {"Sloppy source"}
+}
+# `check --obligations`: each unproven obligation that compiles to a runtime
+# check, in source order, with the setting that made it one.
+dir_print_obligations=():>void=>{
+    dir_sites.extend(dir_panic_sites)
+    let order:array<int64>=[]
+    loop i in [0..dir_sites.length) {
+        if pos_in_lib(dir_sites[i].at) {continue}
+        let seen=false
+        loop j in order {
+            if dir_sites[j].at =? dir_sites[i].at and dir_sites[j].what =? dir_sites[i].what {seen=true}
+        }
+        if not seen {order.push(i)}
+    }
+    # (insertion sort: a handful of sites)
+    loop i in [1..order.length) {
+        let j=i
+        loop j >? 0 and dir_sites[order[j - 1]].at >? dir_sites[order[j]].at {
+            let t=order[j]
+            order[j]=order[j - 1]
+            order[j - 1]=t
+            j -= 1
+        }
+    }
+    loop i in order {
+        let s=dir_sites[i]
+        let kind=if starts_with(s.what "may panic: ") {""} else {"runtime check: "}
+        printl("{pos_str(s.at)}: {kind}{dir_obligation_text(s.what)} ({dir_policy_name(s.policy s.at)})")
+    }
+}
+dir_panics_finalize=():>void=>$unsafe {
+    dir_panic_sites=[]
+    if not dir_panics_demanded() {return}
+    effect_panics_settled=true
+    loop f in [1..fns.length) {
+        if fns.ptr[f].body =? 0 or fns.ptr[f].state not=? 2 or fn_in_lib(f) {continue}
+        if not dir_obligations and not ide_on and not dir_static_body(DirWord(fns.ptr[f].body)) {continue}
+        effect_panics(f);
+        let first:DirWord=panic_edge_at[f]
+        let edge_count:DirWord=(DirWord(panic_edge_end[f]) - first) // 2
+        loop i in [0..edge_count) {
+            let e=first + 2 * i
+            let g=panic_edges[e]
+            let n=panic_edges[e + 1]
+            # (a closure written here: its own body answers for its calls)
+            if nodes.ptr[n].kind =? 'lambda' or not panic_reaches(f g) {continue}
+            let p=nodes.ptr[n].pos
+            # (code the compiler made, as the test runner: no source scope)
+            if p <=? 0 {continue}
+            let policy=dir_policy(p)
+            if policy not=? DIR_STATIC {
+                # (listed where the program calls the library: its own panics are its sites)
+                if (dir_obligations or ide_on and policy =? DIR_RUNTIME) and fn_in_lib(g) and not pos_in_lib(p) {
+                    let what="may panic: {dir_panic_call(n g)}"
+                    dir_panic_sites.push(DirSite(p what policy))
+                    if ide_on and policy =? DIR_RUNTIME {ide_emit("I\t{ide_pos_str(p)}\t{ide_esc(what)}")}
+                }
+                continue
+            }
+            # (the deepest such call: a callee of the program's own that panics only
+            # through a call its own no-traps scope forbids is reported there)
+            loop depth in [0..64) {
+                let h=panic_via[g]
+                let w=panic_witness[g]
+                if h =? 0 or fn_in_lib(g) or nodes.ptr[w].kind =? 'lambda' or dir_policy(nodes.ptr[w].pos) not=? DIR_STATIC or not panic_reaches(g h) {break}
+                n=w
+                g=h
+            }
+            p=nodes.ptr[n].pos
+            # (the measuring harness builds anyway: it reports the analysis's cost)
+            if wit_measure {continue}
+            let reason=effect_panic_reason(g)
+            # (an atomic counter's add: a payload that wraps never fails)
+            let wrap=if contains(reason "exact atomic result does not fit") {"; or keep a counter whose payload wraps, `atomic<int64<overflow='wrap'>>(0)`"} else {""}
+            fatal(p "{dir_panic_call(n g)} may panic ({reason}), and this scope has no runtime checks (no traps): {dir_panic_fix(p)}{wrap}")
+        }
+    }
+    loop f in [1..fns.length) {
+        let d=DirWord(fns.ptr[f].decl)
+        if d =? 0 or nodes.ptr[d].sval =? 0 or fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 {continue}
+        let contract=if fns.ptr[f].kind =? FK_LAMBDA and not has_flag(d NF_GENERIC) {callable_contract(DirWord(fns.ptr[f].fntype))} else {effect_subst(DirWord(decl_infos[decl_info(d)].sig.contract) fns.ptr[f].targs)}
+        if contract =? 0 or not effect_contracts[contract].exclusions.contains(EffectAtom('panic')) {continue}
+        if not effect_panics(f) or wit_measure {continue}
+        let n=panic_witness[f]
+        let at=if n not=? 0 and not pos_in_lib(nodes.ptr[n].pos) {nodes.ptr[n].pos} else {nodes.ptr[d].pos}
+        fatal(at "effect contract violation in '{effect_name(f)}': it may panic, and its row excludes panics; {effect_panic_reason(f)}{dir_row_origin(d)}")
+    }
+    # (a callable bound that excludes panics: each reaching source)
+    loop obligation in effect_obligations {
+        let bound=obligation.bound
+        if bound =? 0 or not effect_contracts[bound].exclusions.contains(EffectAtom('panic')) {continue}
+        dir_panic_source(obligation.source 0)
+    }
+}
+dir_panic_source=(n:DirWord depth:DirWord):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'conv' {
+        dir_panic_source(DirWord(nodes.ptr[n].a) depth + 1)
+        return
+    }
+    let c=callable_contract(ntype(n))
+    if c not=? 0 and effect_contracts[c].exclusions.contains(EffectAtom('panic')) {return}
+    if (k =? 'fnref' or k =? 'lambda' or k =? 'partial' and nodes.ptr[n].aux =? 0) and nodes.ptr[n].sym >? 0 {
+        let g=DirWord(nodes.ptr[n].sym)
+        if not effect_panics(g) {return}
+        fatal(nodes.ptr[n].pos "cannot prove callable effect contract: '{effect_name(g)}' may panic, and the row excludes panics; {effect_panic_reason(g)}")
+    }
+    fatal(nodes.ptr[n].pos "cannot prove callable effect contract: this function value may panic, and the row excludes panics (declare `& no panics` where it comes from)")
+}
+dir_panic_call=(n:DirWord g:DirWord):>string=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'fnref' or k =? 'partial' {return "a handle to `{effect_shown_name(g)}`, which may be called,"}
+    let name=effect_shown_name(g)
+    if name =? "[]" {return "indexing with `[]`"}
+    "calling `{name}`"
+}
+# The repairs: prove what the callee checks (a guard, a refined parameter, or
+# a value-returning form such as `xs.get(i)`), or opt in to runtime checks.
+dir_panic_fix=(p:DirWord operation:bool=false):>string=>{
+    let where=if operation {"operation"} else {"call"}
+    let i=dir_find(dir_name_runtime p)
+    if i >=? 0 and dir_scopes[i].bundle not=? 0 {
+        let b=name_of(dir_scopes[i].bundle)
+        return "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt this function out of `${b}` with `${b}=false` and add `$runtime_checks`"
+    }
+    "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt in to the check with `$runtime_checks` on a line of its own in this function or block"
+}
+# A `$runtime_assert` at p is its module's own handling, not `panics` for the
+# module's callers, unless the scope says `$assume_local_asserts=false`
+# (docs/design/assumptions.md).
+dir_assume_local_asserts=(p:DirWord):>bool=>{
+    if dir_scopes.length =? 0 {return true}
+    dir_names()
+    dir_value(dir_name_local_asserts p) not=? 0
+}
+# `$confine_external_paths` (provisional spelling, docs/design/assumptions.md): a path taken
+# whole from outside must be proven inside a base too, where a file-system call gets it.
+dir_confine_paths=(p:DirWord):>bool=>{
+    if dir_scopes.length =? 0 {return false}
+    dir_names()
+    dir_value(dir_name_confine p) =? 1
+}
+# `$no_deadlocks` (docs/design/safety_and_concurrency.md, "Deadlock freedom"): every wait at p
+# needs a certificate (compiler/deadlock.jo).
+dir_no_deadlocks=(p:DirWord):>bool=>{
+    if not dir_deadlocks_any {return false}
+    dir_value(dir_name_deadlocks p) =? 1
+}
+# `$audited_wait` (provisional spelling, docs/design/assumptions.md): a foreign call at p that may
+# block is audited to wait only on the outside world, never on a task of this program.
+dir_audited_wait=(p:DirWord):>bool=>{
+    if dir_scopes.length =? 0 {return false}
+    dir_names()
+    dir_value(dir_name_audited p) =? 1
+}
+# Where a function's row came from, for an effect diagnostic.
+dir_row_origin=(d:DirWord):>string=>{
+    let i=dir_row_scopes.get(d) ?? -1
+    if i <? 0 {return ""}
+    let b=name_of(dir_scopes[i].bundle)
+    "; `${b}` gives functions without a row of their own this one (opt a function out with `${b}=false` in its body)"
+}

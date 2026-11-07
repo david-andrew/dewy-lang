@@ -161,7 +161,7 @@ main = ():
 def test_dewy_directive_ops_twins(compiler, tmp_path, release):  # noqa: F811
     outputs = compare_narrow(compiler, tmp_path, release, STEMS, DRIVER,
                              doubles={'services.jo': SERVICES, 'dewy_directives.jo': 'dw_dir_dollars = true\n'},
-                             services=('util', 'ast', 'ide', 'check', 'effects', 'directives', 'dewy_nodes', 'dewy_fast', 'dewy_direct', 'isolation', 'oom', 'oom_ops', 'isolation_ops', 'dewy_context'),
+                             services=('util', 'ast', 'ide', 'check', 'effects', 'directives', 'directive_ops', 'dewy_nodes', 'dewy_fast', 'dewy_direct', 'isolation', 'oom', 'oom_ops', 'isolation_ops', 'dewy_context'),
                              invocations=[((), 0), (('made',), 41), (('module',), 41)])
     assert outputs[0].endswith(b'directive ops ok\n')
     assert b'lib/directives.dewy defines bundles only' in outputs[1] and b'a module policy' in outputs[2]
