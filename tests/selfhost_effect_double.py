@@ -38,6 +38,7 @@ LEAF_HOMES = {
     'msl_emit': 'msl.jo',
     'fmt_ops': 'fmt.jo',
     'lsp_fixes': 'lsp.jo',
+    'ide_decls': 'ide.jo',
 }
 
 
