@@ -2174,6 +2174,8 @@ rfc_arg_message = (d: int, fi: int, a: int, ptx: int, cd: Cand) -> str:
     else: last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' has the wrong type (expects {sig_dt(d, ptx)})"
     last_err += uncalled_hint(a, ptx)
     fnm = name_of(int(nodes[int(cd.decl)].name))
+    # (Python's `map(f, xs)`: the array comes first)
+    if fi == 0 and nodes[a].kind == .lambda and (fnm == "map" or fnm == "filter"): last_err = "the array comes first: `xs.{fnm}(f)`, or `{fnm}(xs f)`"
     # (text("Score:", score, pos): Scratch's join, or Python's print, pieces in a row)
     if (fnm == "text" or fnm == "text_centered") and fi == 1 and nodes[cd.args[0]].kind == .str_lit and nodes[a].type != 0 and tkind(ntype(a)) != .vec:
         last_err = "text takes one piece of text, then where it goes: put the value inside it, `\"Score: \{score}\"`"
@@ -3234,6 +3236,10 @@ conversion = (n: int, to0: int, args: int[]) -> int:
             hint = " (`to_int(s)` reads a number from text: it gives {a_type(mk_opt(read_int))}, none when the text is not one)"
             if dewy_at(nodes[n].pos): hint = " (`to_int(s)` reads a number from text: it gives an int, or `NotAnInteger` when the text is not one; `to_int(s) ?? 0` falls back)"
         if fk == .str_ and tk == .float_: hint = " (`to_float(s)` reads a number from text: it gives {a_type(mk_opt(T_FLOAT))}, none when the text is not one)"
+        # (`int(input("n? "))`: what a failure there would mean is the program's to say)
+        if hint == "" and dewy_at(nodes[n].pos) and is_union(ft):
+            loop m in union_members(ft):
+                if exception_member(prune(m)): hint = " (it may hold a failure such as {dt(m)}: handle that first, with `?? fallback` or `or_throw`)"
         fatal(nodes[n].pos, "cannot convert {dt(ft)} to {dt(to)}{hint}")
     if type_eq(ft, to):
         nodes[n] = nodes[a]

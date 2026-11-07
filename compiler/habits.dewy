@@ -116,6 +116,9 @@ dewy_habit=(name:string):>string=>match name {
     <"while"> => "`loop condition \{ ... }`, which repeats while the condition holds"
     <"elif"> => "`else if`"
     <"append"> => "`push`"
+    <"def"> => "`name = (x:int):>int => x + 1`: a function is a name given a value"
+    <"class"> => "`Name:type = [field:int]`: a record, and a function taking it first is its method"
+    <"pass"> => "`\{}`, an empty body"
     _ => ""
 }
 

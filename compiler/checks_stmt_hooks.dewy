@@ -297,6 +297,11 @@ decl_temperature=(s:int64 t:int64 unit:int64):>int64=>{
 # (1 growth's reading of the value; 3 a sibling literal's known contents, 4 a decimal
 # literal's binding, 5 growth's binding, 6 a text domain, 7 an integer domain, 8 a
 # constant's view, 9 definite assignment, 10 an editor's type hint)
+# (`let m = \{}`: a Python dictionary, which reads as an empty block)
+empty_braces=(b:StmtHookWord):>bool=>$unsafe {
+    b not=? 0 and nodes.ptr[b].kind =? 'block' and nkids(b) =? 0
+}
+empty_braces_text=(nm:string):>string=>"`\{}` is an empty block, which gives no value: an empty dictionary is `[]` with its type, `let {nm}:dict<string int> = []`"
 decl_error=(s:int64 t:int64 code:int64):>void=>$unsafe {
     let nm=name_of(StmtHookWord(nodes.ptr[s].name))
     let pos=nodes.ptr[s].pos
@@ -304,6 +309,7 @@ decl_error=(s:int64 t:int64 code:int64):>void=>$unsafe {
     if code =? 2 {fatal(pos "variable needs a type or a value")}
     if code =? 3 {
         never_cascade(pos t)
+        if empty_braces(StmtHookWord(nodes.ptr[s].b)) {fatal(pos empty_braces_text(nm))}
         fatal(pos "cannot assign a value with no type (void) to '{nm}'{void_rec_hint(StmtHookWord(nodes.ptr[s].b))}")
     }
     if code =? 4 {fatal(pos "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(pos "`{nm}: Enemy? = none`" "`let {nm}:Enemy? = none`")}")}

@@ -331,6 +331,9 @@ decl_temperature = (s: int, t: int, unit: int) -> int: temperature_binding(s, t,
 # (1 growth's reading of the value; 3 a sibling literal's known contents, 4 a decimal
 # literal's binding, 5 growth's binding, 6 a text domain, 7 an integer domain, 8 a
 # constant's view, 9 definite assignment, 10 an editor's type hint)
+# (`let m = \{}`: a Python dictionary, which reads as an empty block)
+empty_braces = (b: int) -> bool: b != 0 and nodes[b].kind == .block and nkids(b) == 0
+empty_braces_text = (nm: str) -> str: "`\{}` is an empty block, which gives no value: an empty dictionary is `[]` with its type, `let {nm}:dict<string int> = []`"
 decl_error = (s: int, t: int, code: int):
     nm = name_of(int(nodes[s].name))
     pos = nodes[s].pos

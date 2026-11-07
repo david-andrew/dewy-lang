@@ -7317,6 +7317,10 @@ rd_dc_no_body=(@reader_ctx:ParserContext @reader_nodes:array<Node> keyword:DewyL
     if (((((next =? 'gt') or (next =? 'lt')) or (next =? 'rangle')) or (next =? 'ge')) or (next =? 'le')) {
         habit = " (comparisons end with `?`: `x >? y`, `x <=? y`)"
     }
+    # (`a if c else b`: Python's conditional, in the order Dewy reads a statement)
+    if (next =? 'kw_else') {
+        habit = " (a conditional value is `if c a else b`)"
+    }
     reader_ctx.stores.host[0].dn_error(reader_ctx.tokens[reader_ctx.at].start "expected a body after '{dn_token_text(keyword.symbol)}'{habit}")
 }
 
@@ -10897,7 +10901,7 @@ rd_dc_as_precedence=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
 }
 
 # (`if a < b`, `a <= b`: a `<` reads as a type's arguments, so the comparison leaves the line unread, and
-# `(x, y) => ...`, commas between parameters. `a<b` with no closing `>` on the line is a comparison too.)
+# `(x, y) => ...` or `(1, 2)`, commas in a group. `a<b` with no closing `>` on the line is a comparison too.)
 rd_dc_line_habit=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     let k:int64=at
     let closed:bool=false
@@ -10910,14 +10914,20 @@ rd_dc_line_habit=(@reader_ctx:ParserContext at:int64):>void=>$unsafe {
     }
     let last:int64=k
     k = at
+    let parens:int64=0
+    let brackets:int64=0
     loop k <? last {
         let t:DewyLexeme=reader_ctx.tokens[k]
         let next:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(k) + 1)]
+        if (t.symbol =? 'lparen') {parens += 1}
+        if (t.symbol =? 'rparen') {parens -= 1}
+        if (t.symbol =? 'lbrack') {brackets += 1}
+        if (t.symbol =? 'rbrack') {brackets -= 1}
         let before:DewyLexeme=reader_ctx.tokens[(if (k >? 0) (int64<overflow='wrap'>(k) - 1) else k)]
         if ((t.symbol =? 'langle') and (k >? 0) and (not t.newline) and ((before.kind =? 'identifier') or (before.kind =? 'integer') or (before.kind =? 'source_integer') or (before.symbol =? 'rparen') or (before.symbol =? 'rbrack')) and (((t.space and next.space) or ((next.symbol =? 'assign') and (not next.space))) or (not closed))) {
             reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file t.start) "comparisons end with `?`: `x <? y`, `x <=? y`");
         }
-        if ((t.symbol =? 'comma') and (k >=? (int64<overflow='wrap'>(at) + 2)) and (reader_ctx.tokens[(int64<overflow='wrap'>(k) - 1)].kind =? 'identifier') and (reader_ctx.tokens[(int64<overflow='wrap'>(k) - 2)].symbol =? 'lparen')) {
+        if ((t.symbol =? 'comma') and (parens >? 0) and (brackets <=? 0)) {
             reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file t.start) "Dewy separates arguments, parameters and elements with spaces, not commas: `add(1 2)`, `(a:int64 b:int64) => ...`, `[1 2 3]` (a comma steps a range, as in `[0,2..10]`)");
         }
         k = (int64<overflow='wrap'>(k) + 1)

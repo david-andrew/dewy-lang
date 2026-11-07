@@ -1458,7 +1458,9 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
             vk = nodes[int(nodes[d].b)].kind
             if nodes[d].a == 0 and vk == .array and nkids(int(nodes[d].b)) == 0 and tkind(t) == .array: open_globals.push(g)
             else: fatal(nodes[d].pos, "cannot infer the type of '{name_of(int(globals[g].name))}'; add a type annotation{empty_hint(name_of(int(globals[g].name)), t)}")
-        if tkind(t) == .void_: fatal(nodes[d].pos, "cannot assign a value of type void")
+        if tkind(t) == .void_:
+            if empty_braces(int(nodes[d].b)): fatal(nodes[d].pos, empty_braces_text(name_of(int(globals[g].name))))
+            fatal(nodes[d].pos, "cannot assign a value of type void")
         if tkind(t) == .null_: fatal(nodes[d].pos, "`null` is for C's pointers; a value that may be missing is `none`, with its type written: {jd(nodes[d].pos, "`{name_of(int(globals[g].name))}: Enemy? = none`", "`let {name_of(int(globals[g].name))}:Enemy? = none`")}")
         if tkind(t) == .typeval or tkind(t) == .module: fatal(nodes[d].pos, "'{name_of(int(globals[g].name))}' cannot hold a type or module (a value of a type is made by calling it: `T()`)")
         globals[g].type = i32(t)
