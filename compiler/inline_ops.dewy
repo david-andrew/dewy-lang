@@ -1,7 +1,7 @@
 $runtime_checks
 from p"callback_specialize.jo" import (callback_calls)
 from p"check.jo" import (target_wasm)
-from p"inline.jo" import (FAST_CALLBACK_MAX INLINE_LOOPY_CALLER_MAX INLINE_LOOP_MAX INLINE_MAX INLINE_SPECIALIZE_CALLER_MAX INLINE_SPECIALIZE_GROWTH INLINE_SPECIALIZE_MAX INLINE_WRAPPER_MAX defines_value fast_by_index fast_callback_sites fast_fns fast_inline_into fast_loop_only fast_moves inl_calls inl_const_growth inl_const_target inline_body_cache inline_branch_body inline_branch_cache inline_live_cache inline_nv_cache rel_by_index rel_fns)
+from p"inline.jo" import (FAST_CALLBACK_MAX INLINE_LOOPY_CALLER_MAX INLINE_LOOP_MAX INLINE_MAX INLINE_SPECIALIZE_CALLER_MAX INLINE_SPECIALIZE_GROWTH INLINE_SPECIALIZE_MAX INLINE_WRAPPER_MAX defines_value fast_by_index fast_callback_sites fast_fns fast_inline_into fast_inline_loop_only fast_loop_only fast_moves inl_calls inl_const_growth inl_const_target inline_body_cache inline_branch_body inline_branch_cache inline_live_cache inline_nv_cache rel_by_index rel_fns)
 from p"ir.jo" import (VI VK dbg_on ir kc_fn)
 from p"ir_builders.dewy" import (is_kv)
 from p"ir_types.dewy" import (Ins IrFn)
@@ -102,23 +102,29 @@ fast_inline_prepare=(fs:array<IrFn>):>void=>{
     loop k in wrappers {
         let f=fs[k]
         let leaf:InlineWord=-1
+        let equality=false
         loop ins in f.code {
             if ins.op not=? 'call' or ins.c not=? 0 {continue}
             if ins.imm >=? fast_by_index.length {break}
             let j=fast_by_index[int64(ins.imm)]
-            if j >=? 0 and j <? leaves and not fast_loop_only[j] and int64(ins.b) =? fast_fns[j].nparams {leaf=j}
+            if j <? 0 or j >=? leaves or int64(ins.b) not=? fast_fns[j].nparams {continue}
+            if not fast_loop_only[j] {leaf=j}
+            # (around the string comparison, which goes only into loops: so does this)
+            else if fast_fns[j].code[0].op =? 'streq' {equality=true}
         }
-        if leaf <? 0 {continue}
+        if leaf <? 0 and not equality {continue}
         ir=f
         # k_vreg's register cache belongs to one function, including this
         # preparation step before ordinary emission starts.
         kc_fn += 1
+        fast_inline_loop_only=leaf <? 0
         fast_inline_into()
+        fast_inline_loop_only=false
         if ir.code.length >? 48 {continue}
         loop fast_by_index.length <=? f.fn_index {fast_by_index.push(-1)}
         fast_by_index[f.fn_index]=fast_fns.length
         fast_fns.push(ir)
-        fast_loop_only.push(false)
+        fast_loop_only.push(leaf <? 0)
         fast_moves.push(false)
     }
     ir=saved

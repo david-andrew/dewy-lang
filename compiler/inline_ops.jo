@@ -83,22 +83,28 @@ fast_inline_prepare = (fs: IrFn[]):
     loop k in wrappers:
         f = fs[k]
         leaf = -1
+        equality = false
         loop ins in f.code:
             if ins.op != .call or ins.c != 0: continue
             if ins.imm >= fast_by_index.len(): break
             j = fast_by_index[int(ins.imm)]
-            if j >= 0 and j < leaves and not fast_loop_only[j] and int(ins.b) == fast_fns[j].nparams: leaf = j
-        if leaf < 0: continue
+            if j < 0 or j >= leaves or int(ins.b) != fast_fns[j].nparams: continue
+            if not fast_loop_only[j]: leaf = j
+            # (around the string comparison, which goes only into loops: so does this)
+            else if fast_fns[j].code[0].op == .streq: equality = true
+        if leaf < 0 and not equality: continue
         ir = f
         # k_vreg's register cache belongs to one function, including this
         # preparation step before ordinary emission starts.
         kc_fn += 1
+        fast_inline_loop_only = leaf < 0
         fast_inline_into()
+        fast_inline_loop_only = false
         if ir.code.len() > 48: continue
         loop fast_by_index.len() <= f.fn_index: fast_by_index.push(-1)
         fast_by_index[f.fn_index] = fast_fns.len()
         fast_fns.push(ir)
-        fast_loop_only.push(false)
+        fast_loop_only.push(leaf < 0)
         fast_moves.push(false)
     ir = saved
 rel_collect = ():

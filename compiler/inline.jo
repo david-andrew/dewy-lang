@@ -37,6 +37,7 @@ fast_fns: IrFn[]
 fast_by_index: int[]
 fast_loop_only: bool[]
 fast_moves: bool[]
+fast_inline_loop_only = false   # (a wrapper being made that itself goes only into loops)
 
 # Sites calling each known-callback version: a version with one site moves there.
 fast_callback_sites: {int: int}
@@ -46,7 +47,7 @@ fast_inline_target = (ins: Ins, in_loop: bool) -> int:
     if ins.op != .call or ins.c != 0 or ins.imm >= fast_by_index.len(): return -1
     j = fast_by_index[int(ins.imm)]
     if j < 0 or fast_fns[j].fn_index == ir.fn_index or int(ins.b) != fast_fns[j].nparams: return -1
-    if fast_loop_only[j] and not in_loop: return -1
+    if fast_loop_only[j] and not in_loop and not fast_inline_loop_only: return -1
     j
 
 # (in a large caller, what a moved loop keeps in registers may not get them; asked only of
