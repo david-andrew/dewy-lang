@@ -1,0 +1,13 @@
+# A broadcast writes nothing of the caller's, so facts about an `@` record survive it.
+R:type = [n:int64<n >=? 3> values:array<float64 length=[n]>]
+f = (@r:R):>int64 => {
+    let h = r.n-1
+    let a = r.values[[1..h)]
+    let twice = a .* 2.0
+    let again = r.values[[1..h)] .+ twice
+    return again.length
+}
+main = ():>void => {
+    let r = R[3 [1.0 2.0 3.0]]
+    printl(f(@r))
+}

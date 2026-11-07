@@ -1,0 +1,15 @@
+# Near miss: a helper that resizes the array in the same statement still ends what was known.
+take = (@xs:array<float64>):>float64 => {
+    xs = []
+    1.0
+}
+f = (@xs:array<float64>):>float64 => {
+    if xs.length <? 2 return 0.0
+    let twice = xs .* 2.0
+    let n = take(@xs)
+    return xs[1]+n+twice[0]
+}
+main = ():>void => {
+    let a = [1.0 2.0]
+    printl(f(@a))
+}

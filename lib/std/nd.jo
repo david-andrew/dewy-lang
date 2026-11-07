@@ -457,7 +457,7 @@ __bcast_offset = (r: int, out: int[], st: int[]) -> int:
     i = out.len() - 2
     loop i >= 0:
         o += (q % out[i]) * st[i]
-        q /= out[i]
+        q = q / out[i]
         i -= 1
     o
 
@@ -470,10 +470,9 @@ __bcast_index = (row: int, width: int, offset: int) -> int: row * width + offset
 
 # the length of the innermost loop: the whole array when every operand has the result's shape
 # (arrays' shapes and their broadcast: nonnegative dimensions)
-__bcast_inner = (shapes: int[][], out: int[]) -> int:
-    n = __nd_count(out)
-    loop s in shapes:
-        if __nd_count(s) != n: return out[out.len() - 1]
+__bcast_inner = (counts: int[], n: int, out: int[]) -> int:
+    loop count in counts:
+        if count != n: return out[out.len() - 1]
     n
 
 # the step of the innermost loop through an operand of `size` elements: an operand of the
