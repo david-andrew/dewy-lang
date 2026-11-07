@@ -1,0 +1,280 @@
+use 'expr.jo'
+use 'secret_checks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'witness.jo'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'ownership.jo'
+use 'units.jo'
+use 'errors.jo'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'settings.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'ide.jo'
+use 'dewy_methods.jo'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+
+# A bare name arm matches every value and binds it, shadowing what the name meant:
+# `_` is the idiom; any other name warns (`limit => ...` does not compare with limit)
+bare_arm_warning = (p: int, name: int):
+    s = lookup(name)
+    k = if s != 0: syms[s].kind else: SK.none_
+    w = name_of(name)
+    what = if k == .struct_ or k == .enum_ or k == .type_ or k == .alias_ or k == .builtin: ", shadowing the type '{w}': `<{w}>` matches the type" else if s != 0: ", shadowing the value '{w}' (an arm does not compare with it)" else: ""
+    warn(p, "the bare name '{w}' matches every value and binds it{what}; `_` is the catch-all, `{w}:T` binds with a type")
+# The value a bare-name catch-all arm binds: the scrutinee (hidden local h, of type st) narrowed
+# to what the arms above leave, as `_` narrows it (`e:Oops => ...  other => ...`: other is
+# not an Oops). seen: the union members covered above; finite: bit 1 the optional's value
+# covered, bit 2 its none; opt_ms: the members of an optional union matched above. O(members).
+catch_all_value = (h: int, st: int, seen: bool[], finite: int, opt_ms: int[], pos: int) -> int:
+    whole = mk_ident_local(h, pos)
+    if types[st].kind == .opt:
+        if finite & 1 != 0: return whole
+        u = prune(telem(st))
+        keep: int[]
+        if opt_ms.len() > 0 and is_union(u):
+            loop m in union_members(u):
+                if not opt_ms.contains(m): keep.push(m)
+        if keep.len() == 0:
+            if finite & 2 == 0: return whole
+            keep.push(u)
+        if finite & 2 == 0: return opt_rest_expr(h, keep, pos)
+        e = mk(.unwrap, pos)
+        nodes[e].a = i32(whole)
+        nodes[e].type = i32(u)
+        add_flag(e, NF_CHECKED)
+        if keep.len() == 1 and type_eq(keep[0], u): return e
+        return union_part(e, u, keep, pos)
+    if not is_union(st): return whole
+    keep: int[]
+    loop vi in 0.. and um in union_members(st):
+        if vi >= seen.len() or not seen[vi]: keep.push(um)
+    if keep.len() == 0 or keep.len() == union_members(st).len(): return whole
+    union_part(whole, st, keep, pos)
+# e (a value of union u) as its members keep, all of which it is known to hold
+union_part = (e: int, u: int, keep: int[], pos: int) -> int:
+    r = 0
+    t = keep[0]
+    if keep.len() == 1:
+        r = mk(.narrow, pos)
+        nodes[r].aux = i32(union_index(u, keep[0]))
+    else:
+        t = mk_union(keep)
+        r = mk(.conv, pos)
+        nodes[r].aux = i32(int(CV.union_))
+    nodes[r].a = i32(e)
+    nodes[r].type = i32(t)
+    add_flag(r, NF_CHECKED)
+    r
+check_match = (m: int, expected: int) -> int:
+    if nodes[int(nodes[m].a)].kind == .call and nodes[int(nodes[m].a)].aux2 == i32(AUX2_PLACE): return place_match(m, expected)
+    if files[pos_file(nodes[m].pos)].is_dewy and shape_match_wanted(m): return check_shaped_match(m, expected)
+    xh_match(m, expected)
+# `match` runs in checker_match.dewy; these are its services.
+match_intervals = (t: int, domain: mut int[], high: mut int[]) -> bool:
+    known, d, h = int_intervals_wide(t)
+    domain = d
+    high = h
+    known
+match_refined = (arm: int, domain: int[], st: int, high: int[]):
+    refined_patterns(arm, domain, st, high)
+    return
+match_string_patterns = (arm: int, st: int, covered: str[], lits: str[]):
+    str_set_patterns(arm, st, covered, lits)
+    return
+match_wrap_union = (n: int, t: int):
+    wrap_conv(n, .union_, t)
+    return
+match_none_name = () -> int: intern("none")
+match_narrow_local = (l: int, ms: int[], pos: int):
+    narrow_local(l, ms, pos)
+    return
+match_opt_wild = (l: int, st: int, ms: int[], none_seen: bool, pos: int):
+    opt_wild_narrow(l, st, ms, none_seen, pos)
+    return
+match_opt_wild_path = (sc: int, key: str, st: int, ms: int[], none_seen: bool, pos: int):
+    opt_wild_narrow_path(sc, key, st, ms, none_seen, pos)
+    return
+match_narrow_path = (sc: int, ms: int[], pos: int, key: str):
+    narrow_expr(copy_path(sc), ms, pos, path_name(key))
+    return
+match_block = (b: int, expected: int, value: bool, jumps: mut int) -> int:
+    jumps = narrow_jumps.len()
+    check_block(b, expected, value)
+match_returned = (changes: int, jumps: int, body: int):
+    narrow_returned(changes, jumps, body)
+    return
+match_reset = (mark: int):
+    scope_reset(mark)
+    return
+match_merge = (changed: int[]):
+    narrow_merge(changed)
+    return
+match_sink = (m: int, body: int):
+    sink_arm(m, body)
+    return
+# (one arm prints, another gives a number: as a function's last line, the match is
+# what it gives back)
+match_void_hint = (on: bool):
+    if on: coerce_hint = " (an arm above gives no value, so this match gives none: where it ends a function, its arms are what the function gives back; `-> void` after the function's parameters says it gives back nothing)"
+    else: coerce_hint = ""
+match_member_arms = (arms: int[], result: int):
+    member_arms_as_variants(arms, result)
+    return
+match_enum_missing = (m: int, st: int, seen: bool[], union_lits: str[]):
+    dewy = files[pos_file(nodes[m].pos)].is_dewy
+    miss = ""
+    si = int(types[st].st)
+    loop vi in 0.. and s in seen:
+        if s: continue
+        if len(miss) > 0: miss += ", "
+        # (a union's members by their type names: a family's parent is one of its own)
+        if dewy and structs[si].union_: miss += union_literal_missing(vi, struct_targ(si, vi), union_lits)
+        else: miss += ".{name_of(int(variants[int(structs[si].variants) + vi].name))}"
+    fatal(nodes[m].pos, "this match has no arm for {miss} (add one, or a {jd(nodes[m].pos, "`_:`", "`_ => ...`")} arm for the rest)")
+# (match word { <'go'> ... <'stop'> ... } on a string, even after `word is? Cmd`: a string
+# is not narrowed to the union, so other text still needs an arm)
+match_string_missing = (m: int):
+    written: str[]
+    loop arm in kids(m):
+        loop p in kids(arm):
+            if nodes[p].kind == .plit and nodes[int(nodes[p].a)].kind == .str_lit: written.push(name_of(int(nodes[int(nodes[p].a)].sval)))
+    if written.len() > 0:
+        spelled: str[]
+        loop w in written: spelled.push("'{w}'")
+        fatal(nodes[m].pos, "match is not exhaustive: this is a string, which may hold other text than {join(spelled, ", ")} (add a `_ => ...` arm, or match the literal union instead: `match x as U \{...}` after `x is? U` holds)")
+# (an optional subject: name what no arm takes, `none` or a member of the payload)
+match_optional_missing = (m: int, st: int, finite: int, opt_members: int[]):
+    miss: str[]
+    if finite & 2 == 0: miss.push("none")
+    u = prune(telem(st))
+    if finite & 1 == 0:
+        if is_union(u):
+            loop member in union_members(u):
+                taken = false
+                loop o in opt_members:
+                    if type_eq(o, member): taken = true
+                if not taken: miss.push(dt(member))
+        else: miss.push(dt(u))
+    if miss.len() > 0: fatal(nodes[m].pos, "this match has no arm for {join(miss, ", ")} (add one, or a `_ => ...` arm for the rest)")
+match_error = (n: int, code: int, a: int, b: int, text: str):
+    pos = nodes[n].pos
+    if code == 1: fatal(pos, "this arm is unreachable: an earlier arm already matches every value")
+    if code == 2: fatal(pos, "type pattern {type_str(a, true)} is not a member of {type_str(b, true)}")
+    if code == 3: fatal(pos, "literal pattern is not a member of {type_str(a, true)}")
+    if code == 4: fatal(pos, "literal patterns need an integer, bool or string member")
+    if code == 5: fatal(pos, "{dt(a)} has no variant '{name_of(int(nodes[n].name))}'{variant_hint_for(a, name_of(int(nodes[n].name)))}")
+    if code == 6: fatal(pos, "this arm is unreachable: earlier arms already match every {dt(a)}")
+    if code == 7: fatal(pos, "variant '{name_of(int(variants[a].name))}' has {variants[a].nfields} field(s), pattern binds {nkids(n)}")
+    if code == 8: fatal(pos, "patterns with bindings cannot be combined with other patterns")
+    if code == 9: fatal(pos, "variant patterns need an enum value")
+    if code == 10: fatal(pos, "this arm is unreachable: an earlier arm already matches '{text}'")
+    if code == 11: fatal(pos, "range patterns need an integer value")
+    if code == 12: fatal(pos, "invalid pattern")
+    if code == 13: fatal(pos, "this arm is unreachable: earlier arms already match every value it does")
+    if code == 14: fatal(pos, "match arm has no value")
+    if code == 15 or code == 16: fatal(pos, "this match has no arm for {text} (add one, or a `_ => ...` arm for the rest)")
+    if a != 0: fatal(pos, "match is not exhaustive (add a `_ => ...` arm or `else`)")
+    fatal(pos, "match expression is not exhaustive (add a `_:` arm)")
+# A literal arm naming a member of a union of string literals (`<'lparen'>`) becomes the variant
+# pattern a Sloppy enum's arm is, so the match dispatches through a table instead of comparing
+# with each arm in turn. Not for a match giving an `int`: lower.jo's lookup table writes its
+# constants as plain words, which an `int` does not hold.
+member_arms_as_variants = (ps: int[], result: int):
+    if prune(result) == T_MATH_INT: return
+    loop p in ps:
+        e = int(nodes[p].a)
+        if nodes[e].kind != .dotname: continue
+        nodes[p].kind = .pvariant
+        nodes[p].aux2 = nodes[e].aux

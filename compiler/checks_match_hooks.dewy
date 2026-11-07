@@ -1,0 +1,229 @@
+$runtime_checks
+from p"check.jo" import jd
+from p"expr.jo" import (CV)
+from p"ast.jo" import (NF_CHECKED add_flag kids mk nkids nodes)
+from p"check.jo" import (check_block narrow_jumps narrow_merge narrow_returned scope_reset syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checker_match.dewy" import (xh_match)
+from p"checker_sinks.dewy" import (sink_arm)
+from p"checker_state.dewy" import (SK)
+from p"dewy_reader.dewy" import (AUX2_PLACE)
+from p"expr.jo" import (CV check_shaped_match coerce_hint copy_path int_intervals_wide mk_ident_local narrow_expr narrow_local opt_rest_expr opt_wild_narrow opt_wild_narrow_path path_name refined_patterns shape_match_wanted str_set_patterns union_literal_missing variant_hint_for wrap_conv)
+from p"place_method_ops.dewy" import (place_match)
+from p"types.jo" import (T_MATH_INT dt is_union mk_union prune struct_targ structs telem type_eq type_str types union_index union_members variants)
+from p"util.jo" import (fatal files intern name_of pos_file warn)
+
+MatchHookWord:type=int64<overflow='wrap'>
+# A bare name arm matches every value and binds it, shadowing what the name meant:
+# `_` is the idiom; any other name warns (`limit => ...` does not compare with limit)
+bare_arm_warning=(p:int64 name:int64):>void=>$unsafe {
+    let s=lookup(name)
+    let k=if s not=? 0 {syms.ptr[s].kind} else {SK.none_}
+    let w=name_of(name)
+    let what=if k =? 'struct_' or k =? 'enum_' or k =? 'type_' or k =? 'alias_' or k =? 'builtin' {", shadowing the type '{w}': `<{w}>` matches the type"} else if s not=? 0 {", shadowing the value '{w}' (an arm does not compare with it)"} else {""}
+    warn(p "the bare name '{w}' matches every value and binds it{what}; `_` is the catch-all, `{w}:T` binds with a type")
+}
+# The value a bare-name catch-all arm binds: the scrutinee (hidden local h, of type st) narrowed
+# to what the arms above leave, as `_` narrows it (`e:Oops => ...  other => ...`: other is
+# not an Oops). seen: the union members covered above; finite: bit 1 the optional's value
+# covered, bit 2 its none; opt_ms: the members of an optional union matched above. O(members).
+catch_all_value=(h:int64 st:int64 seen:array<bool> finite:int64 opt_ms:array<int64> pos:int64):>int64=>$unsafe {
+    let whole=mk_ident_local(h pos)
+    if types.ptr[st].kind =? 'opt' {
+        if finite & 1 not=? 0 {return whole}
+        let u=prune(telem(st))
+        let keep:array<int64>=[]
+        if opt_ms.length >? 0 and is_union(u) {
+            loop m in union_members(u) {
+                if not opt_ms.contains(m) {keep.push(m)}
+            }
+        }
+        if keep.length =? 0 {
+            if finite & 2 =? 0 {return whole}
+            keep.push(u)
+        }
+        if finite & 2 =? 0 {return opt_rest_expr(h keep pos)}
+        let e=mk('unwrap' pos)
+        nodes.ptr[e].a=int32(whole)
+        nodes.ptr[e].type=int32(u)
+        add_flag(e NF_CHECKED)
+        if keep.length =? 1 and type_eq(keep[0] u) {return e}
+        return union_part(e u keep pos)
+    }
+    if not is_union(st) {return whole}
+    let keep:array<int64>=[]
+    loop vi in 0.. and um in union_members(st) {
+        if vi >=? seen.length or not seen[vi] {keep.push(um)}
+    }
+    if keep.length =? 0 or keep.length =? union_members(st).length {return whole}
+    union_part(whole st keep pos)
+}
+# e (a value of union u) as its members keep, all of which it is known to hold
+union_part=(e:int64 u:int64 keep:array<int64> pos:int64):>int64=>$unsafe {
+    let r:MatchHookWord=0
+    let t=keep[0]
+    if keep.length =? 1 {
+        r=mk('narrow' pos)
+        nodes.ptr[r].aux=int32(union_index(u keep[0]))
+    }
+    else {
+        t=mk_union(keep)
+        r=mk('conv' pos)
+        nodes.ptr[r].aux=int32(int64(CV.union_))
+    }
+    nodes.ptr[r].a=int32(e)
+    nodes.ptr[r].type=int32(t)
+    add_flag(r NF_CHECKED)
+    r
+}
+check_match=(m:int64 expected:int64):>int64=>$unsafe {
+    if nodes.ptr[MatchHookWord(nodes.ptr[m].a)].kind =? 'call' and nodes.ptr[MatchHookWord(nodes.ptr[m].a)].aux2 =? int32(AUX2_PLACE) {return place_match(m expected)}
+    if files[pos_file(nodes.ptr[m].pos)].is_dewy and shape_match_wanted(m) {return check_shaped_match(m expected)}
+    xh_match(m expected)
+}
+# `match` runs in checker_match.dewy; these are its services.
+match_intervals=(t:int64 @domain:array<int64> @high:array<int64>):>bool=>{
+    let [known d h]=int_intervals_wide(t)
+    domain=d
+    high=h
+    known
+}
+match_refined=(arm:int64 domain:array<int64> st:int64 high:array<int64>):>void=>{
+    refined_patterns(arm domain st high)
+    return
+}
+match_string_patterns=(arm:int64 st:int64 covered:array<string> lits:array<string>):>void=>{
+    str_set_patterns(arm st covered lits)
+    return
+}
+match_wrap_union=(n:int64 t:int64):>void=>{
+    wrap_conv(n CV.union_ t)
+    return
+}
+match_none_name=():>int64=>{
+    intern("none")
+}
+match_narrow_local=(l:int64 ms:array<int64> pos:int64):>void=>{
+    narrow_local(l ms pos)
+    return
+}
+match_opt_wild=(l:int64 st:int64 ms:array<int64> none_seen:bool pos:int64):>void=>{
+    opt_wild_narrow(l st ms none_seen pos)
+    return
+}
+match_opt_wild_path=(sc:int64 key:string st:int64 ms:array<int64> none_seen:bool pos:int64):>void=>{
+    opt_wild_narrow_path(sc key st ms none_seen pos)
+    return
+}
+match_narrow_path=(sc:int64 ms:array<int64> pos:int64 key:string):>void=>{
+    narrow_expr(copy_path(sc) ms pos path_name(key))
+    return
+}
+match_block=(b:int64 expected:int64 value:bool @jumps:int64):>int64=>{
+    jumps=narrow_jumps.length
+    check_block(b expected value)
+}
+match_returned=(changes:int64 jumps:int64 body:int64):>void=>{
+    narrow_returned(changes jumps body)
+    return
+}
+match_reset=(mark:int64):>void=>{
+    scope_reset(mark)
+    return
+}
+match_merge=(changed:array<int64>):>void=>{
+    narrow_merge(changed)
+    return
+}
+match_sink=(m:int64 body:int64):>void=>{
+    sink_arm(m body)
+    return
+}
+# (one arm prints, another gives a number: as a function's last line, the match is
+# what it gives back)
+match_void_hint=(on:bool):>void=>{
+    if on {coerce_hint=" (an arm above gives no value, so this match gives none: where it ends a function, its arms are what the function gives back; `-> void` after the function's parameters says it gives back nothing)"} else {coerce_hint=""}
+}
+match_member_arms=(arms:array<int64> result:int64):>void=>{
+    member_arms_as_variants(arms result)
+    return
+}
+match_enum_missing=(m:int64 st:int64 seen:array<bool> union_lits:array<string>):>void=>$unsafe {
+    let dewy=files[pos_file(nodes.ptr[m].pos)].is_dewy
+    let miss=""
+    let si=MatchHookWord(types.ptr[st].st)
+    loop vi in 0.. and s in seen {
+        if s {continue}
+        if (miss as array<uint8>).length >? 0 {miss="{miss}, "}
+        # (a union's members by their type names: a family's parent is one of its own)
+        if dewy and structs.ptr[si].union_ {miss="{miss}{union_literal_missing(vi struct_targ(si vi) union_lits)}"} else {miss="{miss}.{name_of(MatchHookWord(variants.ptr[MatchHookWord(structs.ptr[si].variants) + vi].name))}"}
+    }
+    fatal(nodes.ptr[m].pos "this match has no arm for {miss} (add one, or a {jd(nodes.ptr[m].pos "`_:`" "`_ => ...`")} arm for the rest)")
+}
+# (match word { <'go'> ... <'stop'> ... } on a string, even after `word is? Cmd`: a string
+# is not narrowed to the union, so other text still needs an arm)
+match_string_missing=(m:int64):>void=>$unsafe {
+    let written:array<string>=[]
+    loop arm in kids(m) {
+        loop p in kids(arm) {
+            if nodes.ptr[p].kind =? 'plit' and nodes.ptr[MatchHookWord(nodes.ptr[p].a)].kind =? 'str_lit' {written.push(name_of(MatchHookWord(nodes.ptr[MatchHookWord(nodes.ptr[p].a)].sval)))}
+        }
+    }
+    if written.length >? 0 {
+        let spelled:array<string>=[]
+        loop w in written {spelled.push("'{w}'")}
+        fatal(nodes.ptr[m].pos "match is not exhaustive: this is a string, which may hold other text than {join(spelled ", ")} (add a `_ => ...` arm, or match the literal union instead: `match x as U \{...}` after `x is? U` holds)")
+    }
+}
+# (an optional subject: name what no arm takes, `none` or a member of the payload)
+match_optional_missing=(m:int64 st:int64 finite:int64 opt_members:array<int64>):>void=>$unsafe {
+    let miss:array<string>=[]
+    if finite & 2 =? 0 {miss.push("none")}
+    let u=prune(telem(st))
+    if finite & 1 =? 0 {
+        if is_union(u) {
+            loop member in union_members(u) {
+                let taken=false
+                loop o in opt_members {
+                    if type_eq(o member) {taken=true}
+                }
+                if not taken {miss.push(dt(member))}
+            }
+        }
+        else {miss.push(dt(u))}
+    }
+    if miss.length >? 0 {fatal(nodes.ptr[m].pos "this match has no arm for {join(miss ", ")} (add one, or a `_ => ...` arm for the rest)")}
+}
+match_error=(n:int64 code:int64 a:int64 b:int64 text:string):>void=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    if code =? 1 {fatal(pos "this arm is unreachable: an earlier arm already matches every value")}
+    if code =? 2 {fatal(pos "type pattern {type_str(a true)} is not a member of {type_str(b true)}")}
+    if code =? 3 {fatal(pos "literal pattern is not a member of {type_str(a true)}")}
+    if code =? 4 {fatal(pos "literal patterns need an integer, bool or string member")}
+    if code =? 5 {fatal(pos "{dt(a)} has no variant '{name_of(MatchHookWord(nodes.ptr[n].name))}'{variant_hint_for(a name_of(MatchHookWord(nodes.ptr[n].name)))}")}
+    if code =? 6 {fatal(pos "this arm is unreachable: earlier arms already match every {dt(a)}")}
+    if code =? 7 {fatal(pos "variant '{name_of(MatchHookWord(variants.ptr[a].name))}' has {variants.ptr[a].nfields} field(s), pattern binds {nkids(n)}")}
+    if code =? 8 {fatal(pos "patterns with bindings cannot be combined with other patterns")}
+    if code =? 9 {fatal(pos "variant patterns need an enum value")}
+    if code =? 10 {fatal(pos "this arm is unreachable: an earlier arm already matches '{text}'")}
+    if code =? 11 {fatal(pos "range patterns need an integer value")}
+    if code =? 12 {fatal(pos "invalid pattern")}
+    if code =? 13 {fatal(pos "this arm is unreachable: earlier arms already match every value it does")}
+    if code =? 14 {fatal(pos "match arm has no value")}
+    if code =? 15 or code =? 16 {fatal(pos "this match has no arm for {text} (add one, or a `_ => ...` arm for the rest)")}
+    if a not=? 0 {fatal(pos "match is not exhaustive (add a `_ => ...` arm or `else`)")}
+    fatal(pos "match expression is not exhaustive (add a `_:` arm)")
+}
+# A literal arm naming a member of a union of string literals (`<'lparen'>`) becomes the variant
+# pattern a Sloppy enum's arm is, so the match dispatches through a table instead of comparing
+# with each arm in turn. Not for a match giving an `int`: lower.jo's lookup table writes its
+# constants as plain words, which an `int` does not hold.
+member_arms_as_variants=(ps:array<int64> result:int64):>void=>$unsafe {
+    if prune(result) =? T_MATH_INT {return}
+    loop p in ps {
+        let e=MatchHookWord(nodes.ptr[p].a)
+        if nodes.ptr[e].kind not=? 'dotname' {continue}
+        nodes.ptr[p].kind='pvariant'
+        nodes.ptr[p].aux2=nodes.ptr[e].aux
+    }
+}
