@@ -1,0 +1,375 @@
+use 'expr.jo'
+use 'secret_checks.dewy'
+use 'checks_read_code.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'unit_ops.dewy'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_const_views.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'settings.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'ide.jo'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+use 'checks_shaped.dewy'
+
+# `int(p)`, p of a string-literal union: its members are unordered words, as text is, with
+# no number (how one is stored is a detail: one set's word for a member is not another's)
+str_set_unnumbered = (pos: int, t: int):
+    fatal(pos, "{dt(t)} has no numbers: the members of a union of string literals are unordered, as text is; compare one (`p =? '{str_sets[str_set_of(t)][0]}'`), `match` it, or keep a number for each member in a dictionary")
+# a plain string or a string set (not yet optional)
+str_text_or_set = (t: int) -> bool: prune(t) == T_STR or str_set_of(t) != 0
+str_set_within = (a: int, b: int) -> bool:
+    loop value in str_sets[a]:
+        if not str_sets[b].contains(value): return false
+    true
+# every member of union a is one of union b's
+union_within = (a: int, b: int) -> bool:
+    loop m in union_members(a):
+        if union_holder(b, m, true) < 0: return false
+    true
+# an array literal that can be the fixed-size array type `to` (its elements are checked later)
+fixed_literal_ok = (n: int, to: int) -> bool:
+    if nodes[n].kind != .array or nodes[n].aux == 2: return false
+    if nodes[n].b != 0: return true
+    nkids(n) == 0 or nkids(n) == fixed_len(to)
+is_map_type = (t: int) -> bool: types[prune(t)].kind == .struct_ and structs[int(types[prune(t)].st)].name == "Map"
+place_fatal = (pos: int, message: str):
+    if place_method != 0: fatal(pos, "'{name_of(place_method)}' changes its object: {message}")
+    fatal(pos, message)
+dewy_set_literal = (a: int) -> bool:
+    nodes[a].kind == .call and nodes[a].type == 0 and nkids(a) == 1 and nodes[int(nodes[a].a)].kind == .ident and name_of(int(nodes[int(nodes[a].a)].name)) == "__dewy_set"
+oversized_literal = (a: int) -> bool:
+    if nodes[a].kind == .unary and nodes[a].op == i32(int(Tok.minus)): return oversized_literal(int(nodes[a].a))
+    nodes[a].kind == .call and nodes[a].aux2 == -1
+# `to_int(text max_digits=n)` with a literal n from 1 to 18 (lib/math_runtime.jo, __mi_parse_word).
+to_int_word_limit = (a0: int) -> bool:
+    if nodes[a0].kind == .namedarg and name_of(int(nodes[a0].name)) != "max_digits": return false
+    a = unnamed(a0)
+    nodes[a].kind == .int_lit and not has_flag(a, NF_U64) and nodes[a].ival >= 1 and nodes[a].ival <= 18
+text_literal = (a: int) -> bool: nodes[a].kind == .str_lit and nodes[a].aux != 1
+expected_bind_fits = (b: int) -> bool: b != 0 and not has_var(b) and not is_union(b) and tkind(b) != .opt
+call_waits_skips = (name: int) -> bool: name < call_waits_never.len() and call_waits_never[name]
+call_waits_local = (name: int) -> bool:
+    s = lookup(name)
+    s != 0 and syms[s].kind == .local
+# (a name that has answered no, or whose first function has no type parameters: not asked again)
+call_waits_mark = (name: int):
+    if literal_typed_names.has(name): return
+    loop call_waits_never.len() <= name: call_waits_never.push(false)
+    call_waits_never[name] = true
+# (a marker for type parameter id, the others open)
+call_waits_binds = (ntp: int, id: int) -> int[]:
+    binds = fill(0, ntp)
+    binds[id] = T_INT
+    binds
+# type parameter id is a member of a union in type t
+param_in_union = (t0: int, id: int) -> bool: tm_param_in_union(t0, id)
+subst_partial = (pat0: int, binds: mut int[]) -> int: ts_partial(pat0, binds)
+mutable_index = (n: int) -> int:
+    let n = n
+    loop nodes[n].kind == .conv: n = int(nodes[n].a)
+    n
+# Is place n written with a leading `@` (`@x`, `@r.a`, `@xs[i]`)? Receivers are flagged as
+# places without one, and `@box.scaled()` partially applies a method: its `@` is the call's.
+written_at = (n: int) -> bool: has_flag(n, NF_AT)
+has_hole = (args: int[]) -> bool:
+    loop a in args:
+        if nodes[unnamed(a)].kind == .hole: return true
+    false
+ref_literal_holds = (op: Tok, x: int, y: int) -> bool: if op == .lt: x < y else if op == .le: x <= y else: x != y
+# (a declaration with constant checks warns after them: a call they folded has nothing left to assume)
+call_warn_unsettled = (n: int, f: int, decl: int):
+    if nodes[decl].c != 0 and cc_decls.has(decl): wi_call(n, f, decl)
+# the order a struct's fields print in: as declared. An anonymous record's shape is shared by
+# every site writing those fields, so it prints in its one canonical (name-sorted) order: no
+# site's written order, which would make the output depend on unrelated code.
+fmt_field_order = (si: int) -> int[]:
+    order: int[]
+    loop i in [0..int(structs[si].nfields)): order.push(i)
+    order
+# The object type a positional literal `[3 4]` builds, or 0: one declared in Dewy, expected
+# here, and a literal of plain items (no spread).
+dewy_positional_record = (n: int, expected: int) -> int:
+    target = dewy_record_target(expected)
+    if target == 0 or not dewy_positional_fits(n, target): return 0
+    target
+# T() for the compiler's own use: the type's defaults, zero where it has none
+struct_ctor_zero = (n: int, st_type: int, decl: int) -> int:
+    ctor_fills_zero = true
+    struct_ctor(n, st_type, decl, [], st_type)
+# (Python's bytes.decode(): formatting bytes as text gives the numbers)
+bytes_text_warning = (n: int, ft: int):
+    if ft == mk_array(T_U8) or (tkind(ft) == .fixed and prune(int(types[ft].elem)) == T_U8):
+        warn(nodes[n].pos, "this formats the bytes as numbers, as in [104 105]; `bytes as string | none` decodes UTF-8 text, giving none when it is not valid")
+# (a Sloppy library operation that Dewy spells another way whatever its arguments)
+dewy_renamed = (name: int) -> bool: name == intern("unix_time") or name == intern("parse_date") or name == intern("date_text") or name == intern("utc_offset") or name == intern("sort_by") or name == intern("sorted_by") or name == intern("eprint") or name == intern("zip") or name == intern("enumerate")
+# (does code in Dewy (dewy) or Sloppy see the library declaration of symbol o? see dewy_surface)
+surface_sees = (o: int, dewy: bool) -> bool: syms[o].surface == 0 or (syms[o].surface == 1) == dewy
+# (an import added: a module's reach may grow, and so may the exact families it collects)
+import_edge_added = ():
+    import_edges += 1
+    exact_families_changed()
+# a field formatting leaves out: a record literal's method, and in Dewy any function
+fmt_hidden = (ft: int, aux2: i32) -> bool:
+    dewy_method_field(ft) != 0 or (int(aux2) & FMT_DEWY != 0 and is_fn_type(ft))
+# a minted Dewy type (`type of error & [...]`): its values print with its name, Name[x=1]
+fmt_minted = (si: int) -> bool:
+    d = int(structs[si].decl)
+    # (a Dewy `type of` declaration, or a library type with `@nominal` metadata)
+    d != 0 and nodes[d].kind == .struct_ and nodes[d].a != 0
+# the library's last-resort __fmt, (buf, x): __fmt_fields(buf, x), rather than one for the type
+fmt_fallback = (inst: int) -> bool:
+    sig = fn_sig(int(fns[inst].decl))
+    sig.params.len() == 2 and tkind(sig.params[1]) == .param
+# an unchecked copy of a variable or field path (each arm tests and narrows it afresh)
+ud_path = (a: int) -> int:
+    if nodes[a].kind == .ident: return bc_ident(name_of(int(nodes[a].name)), nodes[a].pos)
+    bc_field(ud_path(int(nodes[a].a)), name_of(int(nodes[a].name)), nodes[a].pos)
+# `value ?? fallback` where value may be an exception other than none (`to_int(text) ?? 0`):
+# the fallback stands for every failure, none and each exception kind, and the value for the
+# rest. The editor shows which failures it covers.
+coalesce_exceptions = (t: int) -> bool:
+    loop m in value_members(t):
+        if m != T_NONE and exception_member(m): return true
+    false
+# The name of the length operation an indexed sequence of type t has: a `length`
+# function written in Dewy, else the library's `len`.
+sequence_length_name = (t: int) -> str:
+    if library_len_fits(t) and not (fn_name_for(t, intern("length")) and receiver_fits("length", t)): return "len"
+    "length"
+check_copy = (n: int, receiver: int, t: int) -> int:
+    nodes[n] = Node(kind = .conv, pos = nodes[n].pos, a = i32(receiver), aux = i32(int(CV.explicit_copy)), type = i32(t), flags = i32(NF_CHECKED))
+    last_checked = n
+    t
+spawn_value_error = (pos: int):
+    fatal(pos, "a spawned task's result is kept only by `let name = spawn ...` written directly in its `concurrent` block, and read after the closing brace: spawn a varying number of tasks as statements, `loop x in xs \{ spawn work(x out) }`, and have each send its result over a channel or store it under a `Mutex`")
+resolve_from_types = (name: int, decls: int[], ts: int[], pos: int, required: bool) -> int:
+    if not choose_from_types(name, decls, ts, pos, required): return 0
+    get_fn_inst(by_types_decl, by_types_binds, pos)
+is_dewy_grapheme_iter = (t: int) -> bool:
+    p = prune(t)
+    types[p].kind == .struct_ and structs[int(types[p].st)].name == "__DewyGraphemeIter"
+is_dewy_cursor_iter = (t: int) -> bool:
+    is_dewy_grapheme_iter(t) or is_dewy_range_type(t, "__DewyRangeIter") or is_dewy_range_type(t, "__DewyOpenRangeIter")
+# ---------------- vectors ----------------
+vec_n = (t: int) -> int: int(types[prune(t)].bits)
+vec_comp_type = (t: int) -> int:
+    if types[prune(t)].sign: return T_I32
+    T_F32
+swizzle_index = (c: u8) -> int:
+    i = find_byte(swizzle_chars, c)
+    if i < 0: return -1
+    i % 4
+array_has_spread = (n: int) -> bool:
+    loop i in [0..nkids(n)):
+        if has_flag(kid(n, i), NF_SPREAD): return true
+    false
+# check_binary runs in checker_expr.dewy (xe_binary); these are its services.
+binary_juxt = (n: int): juxt_group_product(n)
+binary_char_code = (n: int): charlike_to_int(n)
+# (one operand a quantity, the other a record of its own, not one of the bundled numbers)
+quantity_record_operand = (ta: int, tb: int) -> bool:
+    other = if types[ta].kind == .quantity: tb else: ta
+    tkind(other) == .struct_ and not bundled_rational_type(other) and not bundled_bigint_type(other)
+binary_quantity_hint = (t: int) -> int: if is_float(quantity_base(t)): quantity_base(t) else: 0
+binary_secret = (n: int, a: int, b: int) -> int: secret_binary(n, nodes[n].op as Tok, a, b)
+# ---------------- match ----------------
+# The values an integer type admits, as sorted inclusive intervals
+# [lo0 hi0 lo1 hi1 ...]: its own range, narrowed by a refinement of constant bounds.
+# Unknown for a uint64 that may hold values above int64's range (int_intervals_wide has them).
+int_intervals = (t0: int) -> (bool, int[]):
+    ref_type_intervals(types, ref_predicates, t0, T_MATH_INT)
+int_intervals_wide = (t0: int) -> (bool, int[], int[]):
+    ref_type_intervals_wide(types, ref_predicates, t0, T_MATH_INT)
+# ---------------- lambdas ----------------
+# Lambdas run in checker_lambdas.dewy; these are its services.
+check_lambda = (lam: int, expected: int) -> int: xm_lambda(lam, expected)
+is_fn_type = (t: int) -> bool:
+    k = tkind(t)
+    k == .fn_ or k == .cfn or k == .polyfn or k == .callable
+bare_fn_error = (n: int, text: str, needs_args: bool):
+    if needs_args: fatal(nodes[n].pos, "'{text}' needs arguments: call it, `{text}(...)`, or write `@{text}` for the function itself")
+    fatal(nodes[n].pos, "'{text}' is a function: write `@{text}` for the function itself")
+# A default that is the same whenever it is evaluated.
+constant_default = (d: int) -> bool:
+    k = nodes[d].kind
+    k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit or (k == .str_lit and nodes[d].aux == 0)
+# ---------------- main expression checker: checker_expr.dewy ----------------
+# (the expected type as checking reads it: a refinement's representation)
+ce_expected = (expected: int) -> int:
+    if expected == 0: return 0
+    xl_expected(expected)
+ce_finish = (n: int, t: int, expected: int) -> int: xl_finish(n, t, expected)
+literal_interpolation_warning = (e: int):
+    interpolation_last = e
+    # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
+    if (nodes[e].kind == .int_lit or (nodes[e].kind == .tuple and nkids(e) > 0 and nodes[kid(e, 0)].kind == .int_lit)) and not pos_in_lib(nodes[e].pos) and not files[pos_file(nodes[e].pos)].is_dewy and brace_before(nodes[e].pos):
+        warn(nodes[e].pos, "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
+literal_float_error = (n: int): fatal(nodes[n].pos, "real literal exceeds float64")
+float_constant_named = (name: str) -> bool: name in ["max", "min", "min_positive", "min_subnormal", "epsilon", "max_exact_int", "inf", "nan"]
+# A Dewy `is?` test ending an else-less if (checked or not).
+is_chain_end = (cond: int) -> bool:
+    nodes[cond].kind == .istype and files[pos_file(nodes[cond].pos)].is_dewy
+# the expression a nonempty block ends in
+block_tail = (b: int) -> int:
+    last = kid(b, nkids(b) - 1)
+    if nodes[last].kind == .exprstmt: int(nodes[last].a) else: last
+# ---------------- ranges as values ----------------
+# a range used as a value is the array of its numbers: [0..n) is [0, 1, ... n-1]
+# A range as a value runs in checker_range_values.dewy; these are its services.
+check_range_value = (n: int, expected: int) -> int: xn_check(n, expected)
+# a fresh copy of expression e (evaluated again where it is used)
+soa_again = (e: int) -> int: clone(e)
+dewy_index_end = (source: int, pos: int) -> int:
+    bc_bin(.minus, bc_field(source, "length", pos), bc_int(1, pos), pos)
+dewy_axis_new = (e: int) -> bool: nodes[e].kind == .ident and name_of(int(nodes[e].name)) == "$new"
+dewy_axis_full = (e: int) -> bool:
+    nodes[e].kind == .range and nodes[e].a == 0 and nodes[e].b == 0 and not has_flag(e, NF_STEP)
+dewy_axis_end_name = (base: str, i: int) -> str:
+    if base == "" or i == 0: return base
+    "{base}_{i}"
+# int(x != 1): the step through an operand's dimension of length x (0 when it is broadcast)
+bc_step = (x: int, pos: int) -> int: bc_call("int", [bc_bin(.ne, x, bc_int(1, pos), pos)], pos)
+bc_bcast_index = (args: int[], pos: int) -> int:
+    call = bc_call("__bcast_index", args, pos)
+    add_flag(call, NF_PRIVATE_COORD)
+    call
+# a GpuBuffer[T] (lib/game/gpubuffer.jo), and its element type T (that of the field `host: *T`)
+is_gpu_buffer = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .struct_ and structs[int(types[t].st)].decl != 0 and name_of(int(nodes[int(structs[int(types[t].st)].decl)].name)) == "GpuBuffer"
+is_gpu_array = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .struct_ and structs[int(types[t].st)].decl != 0 and name_of(int(nodes[int(structs[int(types[t].st)].decl)].name)) == "GpuArray"
+# the checked value of operand k of a dotted expression (the let in front of the loop)
+d0_leaf = (stmts: int[], k: int) -> int: int(nodes[stmts[k]].b)
+nd_elem = (t: int) -> int: struct_targ(int(types[prune(t)].st), 0)
+# a variable, or fields of one (a.b.c): what `is` can narrow
+plain_path = (e: int) -> bool:
+    k = nodes[e].kind
+    if k == .ident: return true
+    k == .field and plain_path(int(nodes[e].a))
+opt_rest_expr = (l: int, keep: int[], pos: int) -> int:
+    e = opt_rest_of(mk_ident_local(l, pos), keep, pos)
+    opt_rest_aliases[e] = true
+    e
+call_search_name = (name: int) -> int: intern("__dewy_{name_of(name)}")

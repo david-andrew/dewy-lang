@@ -1,0 +1,384 @@
+$runtime_checks
+from p"ast.jo" import NF_SQUOTE
+from p"checked_eval.dewy" import (cx_token_values)
+from p"ast.jo" import (NF_AT NF_CHECKED NF_PRIVATE_COORD NF_SPREAD NF_STEP NF_U64 add_flag clone has_flag kid nkids nodes)
+from p"check.jo" import (fns get_fn_inst syms)
+from p"check_constant.jo" import (cc_decls)
+from p"checker_expr.dewy" import (lookup)
+from p"checker_lambdas.dewy" import (xm_lambda)
+from p"checker_literals.dewy" import (xl_expected xl_finish)
+from p"checker_numeric.dewy" import (xw_numeric)
+from p"checker_range_values.dewy" import (xn_check)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_builders.dewy" import (bc_call bc_field bc_ident bc_int)
+from p"checks_call_hints.dewy" import (brace_before)
+from p"error_ops.dewy" import (exception_member value_members)
+from p"expr.jo" import (CV FMT_DEWY bc_bin binary_literal_context bundled_bigint_type by_types_binds by_types_decl charlike_to_int choose_from_types ctor_fills_zero dewy_method_field dewy_positional_fits dewy_record_target exact_families_changed fn_name_for import_edges interpolation_last is_dewy_range_type last_checked library_len_fits literal_typed_names mk_ident_local opt_rest_aliases opt_rest_of place_method receiver_fits struct_ctor swizzle_chars unnamed)
+from p"juxtapose.dewy" import (juxt_group_product)
+from p"node_store.dewy" import (Node call_waits_never)
+from p"refine.jo" import (ref_predicates str_set_of str_sets)
+from p"refine_intervals.dewy" import (ref_type_intervals ref_type_intervals_wide)
+from p"secret_checks.dewy" import (secret_binary)
+from p"type_match.dewy" import (tm_param_in_union)
+from p"type_substitute.dewy" import (ts_partial)
+from p"types.jo" import (T_F32 T_I32 T_INT T_MATH_INT T_NONE T_STR T_U8 has_var is_float is_union prune struct_targ structs tkind types union_members dt fixed_len mk_array union_holder)
+from p"units.jo" import (bundled_rational_type quantity_base)
+from p"util.jo" import (fatal files intern name_of pos_file pos_in_lib warn)
+from p"warn_if_ops.dewy" import (wi_call)
+
+ThinExprWord:type=int64<overflow='wrap'>
+# `int(p)`, p of a string-literal union: its members are unordered words, as text is, with
+# no number (how one is stored is a detail: one set's word for a member is not another's)
+str_set_unnumbered=(pos:ThinExprWord t:ThinExprWord):>void=>{
+    fatal(pos "{dt(t)} has no numbers: the members of a union of string literals are unordered, as text is; compare one (`p =? '{str_sets[str_set_of(t)][0]}'`), `match` it, or keep a number for each member in a dictionary")
+}
+# a plain string or a string set (not yet optional)
+str_text_or_set=(t:ThinExprWord):>bool=>{
+    prune(t) =? T_STR or str_set_of(t) not=? 0
+}
+str_set_within=(a:ThinExprWord b:ThinExprWord):>bool=>{
+    loop value in str_sets[a] {
+        if not str_sets[b].contains(value) {return false}
+    }
+    true
+}
+# every member of union a is one of union b's
+union_within=(a:int64 b:int64):>bool=>{
+    loop m in union_members(a) {
+        if union_holder(b m true) <? 0 {return false}
+    }
+    true
+}
+# an array literal that can be the fixed-size array type `to` (its elements are checked later)
+fixed_literal_ok=(n:ThinExprWord to:ThinExprWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'array' or nodes.ptr[n].aux =? 2 {return false}
+    if nodes.ptr[n].b not=? 0 {return true}
+    nkids(n) =? 0 or nkids(n) =? fixed_len(to)
+}
+is_map_type=(t:int64):>bool=>$unsafe {
+    types.ptr[prune(t)].kind =? 'struct_' and structs.ptr[ThinExprWord(types.ptr[prune(t)].st)].name =? "Map"
+}
+place_fatal=(pos:ThinExprWord message:string):>void=>{
+    if place_method not=? 0 {fatal(pos "'{name_of(place_method)}' changes its object: {message}")}
+    fatal(pos message)
+}
+dewy_set_literal=(a:ThinExprWord):>bool=>$unsafe {
+    nodes.ptr[a].kind =? 'call' and nodes.ptr[a].type =? 0 and nkids(a) =? 1 and nodes.ptr[ThinExprWord(nodes.ptr[a].a)].kind =? 'ident' and name_of(ThinExprWord(nodes.ptr[ThinExprWord(nodes.ptr[a].a)].name)) =? "__dewy_set"
+}
+oversized_literal=(a:ThinExprWord):>bool=>$unsafe {
+    if nodes.ptr[a].kind =? 'unary' and nodes.ptr[a].op =? int32(59) {return oversized_literal(ThinExprWord(nodes.ptr[a].a))}
+    nodes.ptr[a].kind =? 'call' and nodes.ptr[a].aux2 =? -1
+}
+# `to_int(text max_digits=n)` with a literal n from 1 to 18 (lib/math_runtime.jo, __mi_parse_word).
+to_int_word_limit=(a0:ThinExprWord):>bool=>$unsafe {
+    if nodes.ptr[a0].kind =? 'namedarg' and name_of(ThinExprWord(nodes.ptr[a0].name)) not=? "max_digits" {return false}
+    let a=unnamed(a0)
+    nodes.ptr[a].kind =? 'int_lit' and not has_flag(a NF_U64) and nodes.ptr[a].ival >=? 1 and nodes.ptr[a].ival <=? 18
+}
+text_literal=(a:ThinExprWord):>bool=>$unsafe {
+    nodes.ptr[a].kind =? 'str_lit' and nodes.ptr[a].aux not=? 1
+}
+expected_bind_fits=(b:ThinExprWord):>bool=>{
+    b not=? 0 and not has_var(b) and not is_union(b) and tkind(b) not=? 'opt'
+}
+call_waits_skips=(name:ThinExprWord):>bool=>{
+    name <? call_waits_never.length and call_waits_never[name]
+}
+call_waits_local=(name:ThinExprWord):>bool=>$unsafe {
+    let s=lookup(name)
+    s not=? 0 and syms.ptr[s].kind =? 'local'
+}
+# (a name that has answered no, or whose first function has no type parameters: not asked again)
+call_waits_mark=(name:ThinExprWord):>void=>{
+    if literal_typed_names.has(name) {return}
+    loop call_waits_never.length <=? name {call_waits_never.push(false)}
+    call_waits_never[name]=true
+}
+# (a marker for type parameter id, the others open)
+call_waits_binds=(ntp:ThinExprWord id:ThinExprWord):>array<int64>=>{
+    let binds:array<int64>=fill(0 ntp)
+    binds[id]=T_INT
+    binds
+}
+# type parameter id is a member of a union in type t
+param_in_union=(t0:ThinExprWord id:ThinExprWord):>bool=>{
+    tm_param_in_union(t0 id)
+}
+subst_partial=(pat0:ThinExprWord @binds:array<int64>):>int64=>{
+    ts_partial(pat0 @binds)
+}
+mutable_index=(n:ThinExprWord):>int64=>$unsafe {
+    let n=n
+    loop nodes.ptr[n].kind =? 'conv' {n=ThinExprWord(nodes.ptr[n].a)}
+    n
+}
+# Is place n written with a leading `@` (`@x`, `@r.a`, `@xs[i]`)? Receivers are flagged as
+# places without one, and `@box.scaled()` partially applies a method: its `@` is the call's.
+written_at=(n:ThinExprWord):>bool=>{
+    has_flag(n NF_AT)
+}
+has_hole=(args:array<int64>):>bool=>$unsafe {
+    loop a in args {
+        if nodes.ptr[unnamed(a)].kind =? 'hole' {return true}
+    }
+    false
+}
+ref_literal_holds=(op:Tok x:ThinExprWord y:ThinExprWord):>bool=>{
+    if op =? 'lt' {x <? y} else if op =? 'le' {x <=? y} else {x not=? y}
+}
+# (a declaration with constant checks warns after them: a call they folded has nothing left to assume)
+call_warn_unsettled=(n:ThinExprWord f:ThinExprWord decl:ThinExprWord):>void=>$unsafe {
+    if nodes.ptr[decl].c not=? 0 and cc_decls.has(decl) {wi_call(n f decl)}
+}
+# the order a struct's fields print in: as declared. An anonymous record's shape is shared by
+# every site writing those fields, so it prints in its one canonical (name-sorted) order: no
+# site's written order, which would make the output depend on unrelated code.
+fmt_field_order=(si:ThinExprWord):>array<int64>=>$unsafe {
+    let order:array<int64>=[]
+    loop i in [0..ThinExprWord(structs.ptr[si].nfields)) {order.push(i)}
+    order
+}
+# The object type a positional literal `[3 4]` builds, or 0: one declared in Dewy, expected
+# here, and a literal of plain items (no spread).
+dewy_positional_record=(n:int64 expected:int64):>int64=>{
+    let target=dewy_record_target(expected)
+    if target =? 0 or not dewy_positional_fits(n target) {return 0}
+    target
+}
+# T() for the compiler's own use: the type's defaults, zero where it has none
+struct_ctor_zero=(n:ThinExprWord st_type:ThinExprWord decl:ThinExprWord):>int64=>{
+    ctor_fills_zero=true
+    struct_ctor(n st_type decl [] st_type)
+}
+# (Python's bytes.decode(): formatting bytes as text gives the numbers)
+bytes_text_warning=(n:ThinExprWord ft:ThinExprWord):>void=>$unsafe {
+    if ft =? mk_array(T_U8) or (tkind(ft) =? 'fixed' and prune(ThinExprWord(types.ptr[ft].elem)) =? T_U8) {
+        warn(nodes.ptr[n].pos "this formats the bytes as numbers, as in [104 105]; `bytes as string | none` decodes UTF-8 text, giving none when it is not valid")
+    }
+}
+# (a Sloppy library operation that Dewy spells another way whatever its arguments)
+dewy_renamed=(name:ThinExprWord):>bool=>{
+    name =? intern("unix_time") or name =? intern("parse_date") or name =? intern("date_text") or name =? intern("utc_offset") or name =? intern("sort_by") or name =? intern("sorted_by") or name =? intern("eprint") or name =? intern("zip") or name =? intern("enumerate")
+}
+# (does code in Dewy (dewy) or Sloppy see the library declaration of symbol o? see dewy_surface)
+surface_sees=(o:ThinExprWord dewy:bool):>bool=>$unsafe {
+    syms.ptr[o].surface =? 0 or (syms.ptr[o].surface =? 1) =? dewy
+}
+# (an import added: a module's reach may grow, and so may the exact families it collects)
+import_edge_added=():>void=>{
+    import_edges += 1
+    exact_families_changed()
+}
+# a field formatting leaves out: a record literal's method, and in Dewy any function
+fmt_hidden=(ft:ThinExprWord aux2:int32):>bool=>{
+    dewy_method_field(ft) not=? 0 or (ThinExprWord(aux2) & FMT_DEWY not=? 0 and is_fn_type(ft))
+}
+# a minted Dewy type (`type of error & [...]`): its values print with its name, Name[x=1]
+fmt_minted=(si:ThinExprWord):>bool=>$unsafe {
+    let d=ThinExprWord(structs.ptr[si].decl)
+    # (a Dewy `type of` declaration, or a library type with `@nominal` metadata)
+    d not=? 0 and nodes.ptr[d].kind =? 'struct_' and nodes.ptr[d].a not=? 0
+}
+# the library's last-resort __fmt, (buf, x): __fmt_fields(buf, x), rather than one for the type
+fmt_fallback=(inst:ThinExprWord):>bool=>$unsafe {
+    let sig=fn_sig(ThinExprWord(fns.ptr[inst].decl))
+    sig.params.length =? 2 and tkind(sig.params[1]) =? 'param'
+}
+# an unchecked copy of a variable or field path (each arm tests and narrows it afresh)
+ud_path=(a:ThinExprWord):>int64=>$unsafe {
+    if nodes.ptr[a].kind =? 'ident' {return bc_ident(name_of(ThinExprWord(nodes.ptr[a].name)) nodes.ptr[a].pos)}
+    bc_field(ud_path(ThinExprWord(nodes.ptr[a].a)) name_of(ThinExprWord(nodes.ptr[a].name)) nodes.ptr[a].pos)
+}
+# `value ?? fallback` where value may be an exception other than none (`to_int(text) ?? 0`):
+# the fallback stands for every failure, none and each exception kind, and the value for the
+# rest. The editor shows which failures it covers.
+coalesce_exceptions=(t:int64):>bool=>{
+    loop m in value_members(t) {
+        if m not=? T_NONE and exception_member(m) {return true}
+    }
+    false
+}
+# The name of the length operation an indexed sequence of type t has: a `length`
+# function written in Dewy, else the library's `len`.
+sequence_length_name=(t:ThinExprWord):>string=>{
+    if library_len_fits(t) and not (fn_name_for(t intern("length")) and receiver_fits("length" t)) {return "len"}
+    "length"
+}
+check_copy=(n:ThinExprWord receiver:ThinExprWord t:ThinExprWord):>int64=>$unsafe {
+    nodes.ptr[n]=Node(kind='conv' pos=nodes.ptr[n].pos a=int32(receiver) aux=int32(int64(CV.explicit_copy)) type=int32(t) flags=int32(NF_CHECKED))
+    last_checked=n
+    t
+}
+spawn_value_error=(pos:int64):>void=>{
+    fatal(pos "a spawned task's result is kept only by `let name = spawn ...` written directly in its `concurrent` block, and read after the closing brace: spawn a varying number of tasks as statements, `loop x in xs \{ spawn work(x out) }`, and have each send its result over a channel or store it under a `Mutex`")
+}
+resolve_from_types=(name:ThinExprWord decls:array<int64> ts:array<int64> pos:ThinExprWord required:bool):>int64=>{
+    if not choose_from_types(name decls ts pos required) {return 0}
+    get_fn_inst(by_types_decl by_types_binds pos)
+}
+is_dewy_grapheme_iter=(t:ThinExprWord):>bool=>$unsafe {
+    let p=prune(t)
+    types.ptr[p].kind =? 'struct_' and structs.ptr[ThinExprWord(types.ptr[p].st)].name =? "__DewyGraphemeIter"
+}
+is_dewy_cursor_iter=(t:ThinExprWord):>bool=>{
+    is_dewy_grapheme_iter(t) or is_dewy_range_type(t "__DewyRangeIter") or is_dewy_range_type(t "__DewyOpenRangeIter")
+}
+# ---------------- vectors ----------------
+vec_n=(t:ThinExprWord):>int64=>$unsafe {
+    ThinExprWord(types.ptr[prune(t)].bits)
+}
+vec_comp_type=(t:ThinExprWord):>int64=>$unsafe {
+    if types.ptr[prune(t)].sign {return T_I32}
+    T_F32
+}
+swizzle_index=(c:uint8):>int64=>{
+    let i=find_byte(swizzle_chars c)
+    if i <? 0 {return -1}
+    i % 4
+}
+array_has_spread=(n:ThinExprWord):>bool=>{
+    loop i in [0..nkids(n)) {
+        if has_flag(kid(n i) NF_SPREAD) {return true}
+    }
+    false
+}
+# check_binary runs in checker_expr.dewy (xe_binary); these are its services.
+binary_juxt=(n:ThinExprWord):>void=>{
+    juxt_group_product(n)
+}
+binary_char_code=(n:ThinExprWord):>void=>{
+    charlike_to_int(n)
+}
+# (one operand a quantity, the other a record of its own, not one of the bundled numbers)
+quantity_record_operand=(ta:ThinExprWord tb:ThinExprWord):>bool=>$unsafe {
+    let other=if types.ptr[ta].kind =? 'quantity' {tb} else {ta}
+    tkind(other) =? 'struct_' and not bundled_rational_type(other) and not bundled_bigint_type(other)
+}
+binary_quantity_hint=(t:ThinExprWord):>int64=>{
+    if is_float(quantity_base(t)) {quantity_base(t)} else {0}
+}
+binary_secret=(n:ThinExprWord a:ThinExprWord b:ThinExprWord):>int64=>$unsafe {
+    secret_binary(n cx_token_values.ptr[ThinExprWord(nodes.ptr[n].op)] a b)
+}
+# ---------------- match ----------------
+# The values an integer type admits, as sorted inclusive intervals
+# [lo0 hi0 lo1 hi1 ...]: its own range, narrowed by a refinement of constant bounds.
+# Unknown for a uint64 that may hold values above int64's range (int_intervals_wide has them).
+int_intervals=(t0:int64):>[bool array<int64>]=>{
+    ref_type_intervals(@types @ref_predicates t0 T_MATH_INT)
+}
+int_intervals_wide=(t0:ThinExprWord):>[bool array<int64> array<int64>]=>{
+    ref_type_intervals_wide(@types @ref_predicates t0 T_MATH_INT)
+}
+# ---------------- lambdas ----------------
+# Lambdas run in checker_lambdas.dewy; these are its services.
+check_lambda=(lam:ThinExprWord expected:ThinExprWord):>int64=>{
+    xm_lambda(lam expected)
+}
+is_fn_type=(t:ThinExprWord):>bool=>{
+    let k=tkind(t)
+    k =? 'fn_' or k =? 'cfn' or k =? 'polyfn' or k =? 'callable'
+}
+bare_fn_error=(n:ThinExprWord text:string needs_args:bool):>void=>$unsafe {
+    if needs_args {fatal(nodes.ptr[n].pos "'{text}' needs arguments: call it, `{text}(...)`, or write `@{text}` for the function itself")}
+    fatal(nodes.ptr[n].pos "'{text}' is a function: write `@{text}` for the function itself")
+}
+# A default that is the same whenever it is evaluated.
+constant_default=(d:ThinExprWord):>bool=>$unsafe {
+    let k=nodes.ptr[d].kind
+    k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit' or k =? 'none_lit' or (k =? 'str_lit' and nodes.ptr[d].aux =? 0)
+}
+# ---------------- main expression checker: checker_expr.dewy ----------------
+# (the expected type as checking reads it: a refinement's representation)
+ce_expected=(expected:ThinExprWord):>int64=>{
+    if expected =? 0 {return 0}
+    xl_expected(expected)
+}
+ce_finish=(n:ThinExprWord t:ThinExprWord expected:ThinExprWord):>int64=>{
+    xl_finish(n t expected)
+}
+literal_interpolation_warning=(e:ThinExprWord):>void=>$unsafe {
+    interpolation_last=e
+    # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
+    if (nodes.ptr[e].kind =? 'int_lit' or (nodes.ptr[e].kind =? 'tuple' and nkids(e) >? 0 and nodes.ptr[kid(e 0)].kind =? 'int_lit')) and not pos_in_lib(nodes.ptr[e].pos) and not files[pos_file(nodes.ptr[e].pos)].is_dewy and brace_before(nodes.ptr[e].pos) {
+        warn(nodes.ptr[e].pos "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
+    }
+}
+literal_float_error=(n:ThinExprWord):>void=>$unsafe {
+    fatal(nodes.ptr[n].pos "real literal exceeds float64")
+}
+float_constant_named=(name:string):>bool=>{
+    name in? ["max" "min" "min_positive" "min_subnormal" "epsilon" "max_exact_int" "inf" "nan"]
+}
+# A Dewy `is?` test ending an else-less if (checked or not).
+is_chain_end=(cond:ThinExprWord):>bool=>$unsafe {
+    nodes.ptr[cond].kind =? 'istype' and files[pos_file(nodes.ptr[cond].pos)].is_dewy
+}
+# the expression a nonempty block ends in
+block_tail=(b:ThinExprWord):>int64=>$unsafe {
+    let last=kid(b nkids(b) - 1)
+    if nodes.ptr[last].kind =? 'exprstmt' {ThinExprWord(nodes.ptr[last].a)} else {last}
+}
+# ---------------- ranges as values ----------------
+# a range used as a value is the array of its numbers: [0..n) is [0, 1, ... n-1]
+# A range as a value runs in checker_range_values.dewy; these are its services.
+check_range_value=(n:ThinExprWord expected:ThinExprWord):>int64=>{
+    xn_check(n expected)
+}
+# a fresh copy of expression e (evaluated again where it is used)
+soa_again=(e:ThinExprWord):>int64=>{
+    clone(e)
+}
+dewy_index_end=(source:ThinExprWord pos:ThinExprWord):>int64=>{
+    bc_bin('minus' bc_field(source "length" pos) bc_int(1 pos) pos)
+}
+dewy_axis_new=(e:ThinExprWord):>bool=>$unsafe {
+    nodes.ptr[e].kind =? 'ident' and name_of(ThinExprWord(nodes.ptr[e].name)) =? "$new"
+}
+dewy_axis_full=(e:ThinExprWord):>bool=>$unsafe {
+    nodes.ptr[e].kind =? 'range' and nodes.ptr[e].a =? 0 and nodes.ptr[e].b =? 0 and not has_flag(e NF_STEP)
+}
+dewy_axis_end_name=(base:string i:ThinExprWord):>string=>{
+    if base =? "" or i =? 0 {return base}
+    "{base}_{i}"
+}
+# int(x != 1): the step through an operand's dimension of length x (0 when it is broadcast)
+bc_step=(x:ThinExprWord pos:ThinExprWord):>int64=>{
+    bc_call("int" [bc_bin('ne' x bc_int(1 pos) pos)] pos)
+}
+bc_bcast_index=(args:array<int64> pos:ThinExprWord):>int64=>{
+    let call=bc_call("__bcast_index" args pos)
+    add_flag(call NF_PRIVATE_COORD)
+    call
+}
+# a GpuBuffer[T] (lib/game/gpubuffer.jo), and its element type T (that of the field `host: *T`)
+is_gpu_buffer=(t0:ThinExprWord):>bool=>$unsafe {
+    let t=prune(t0)
+    types.ptr[t].kind =? 'struct_' and structs.ptr[ThinExprWord(types.ptr[t].st)].decl not=? 0 and name_of(ThinExprWord(nodes.ptr[ThinExprWord(structs.ptr[ThinExprWord(types.ptr[t].st)].decl)].name)) =? "GpuBuffer"
+}
+is_gpu_array=(t0:ThinExprWord):>bool=>$unsafe {
+    let t=prune(t0)
+    types.ptr[t].kind =? 'struct_' and structs.ptr[ThinExprWord(types.ptr[t].st)].decl not=? 0 and name_of(ThinExprWord(nodes.ptr[ThinExprWord(structs.ptr[ThinExprWord(types.ptr[t].st)].decl)].name)) =? "GpuArray"
+}
+# the checked value of operand k of a dotted expression (the let in front of the loop)
+d0_leaf=(stmts:array<int64> k:ThinExprWord):>int64=>$unsafe {
+    ThinExprWord(nodes.ptr[stmts[k]].b)
+}
+nd_elem=(t:ThinExprWord):>int64=>$unsafe {
+    struct_targ(ThinExprWord(types.ptr[prune(t)].st) 0)
+}
+# a variable, or fields of one (a.b.c): what `is` can narrow
+plain_path=(e:ThinExprWord):>bool=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'ident' {return true}
+    k =? 'field' and plain_path(ThinExprWord(nodes.ptr[e].a))
+}
+opt_rest_expr=(l:ThinExprWord keep:array<int64> pos:ThinExprWord):>int64=>{
+    let e=opt_rest_of(mk_ident_local(l pos) keep pos)
+    opt_rest_aliases[e]=true
+    e
+}
+call_search_name=(name:ThinExprWord):>int64=>{
+    intern("__dewy_{name_of(name)}")
+}
