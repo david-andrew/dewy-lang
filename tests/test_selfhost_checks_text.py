@@ -1,10 +1,8 @@
-"""Byte positions in text agree with frozen Jo, on text with multi-byte characters."""
-import subprocess
+"""Byte positions in text and symbol kind ordinals agree with frozen Jo, on text with multi-byte characters."""
+from tests.selfhost_narrow import compare_narrow
+from tests.support import compiler  # noqa: F401
 
-from tests.support import ROOT, compiler  # noqa: F401
-
-DRIVER = '''use '@@'
-main = ():
+DRIVER = '''main = ():
     texts = ["", "a", "abcabc", "é(x(é", "((", "日本語.dewy"]
     parts = ["", "a", "(", "bc", "é", "語", ".dewy", "zzzzzzzzzzzz"]
     loop t in texts:
@@ -12,23 +10,9 @@ main = ():
             print("{byte_rfind(t, p)}")
             loop start in [-1, 0, 1, 2, 3, 40]:
                 print("{byte_find(t, p, start)}")
+    loop k in [0..12): print("{sym_kind_ordinal(sym_kind_of(k))}")
 '''
 
 
-def test_checks_text_twins(compiler, tmp_path, monkeypatch):
-    monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
-    outputs = []
-    for leaf in ('checks_text.dewy', 'checks_text.jo'):
-        directory = tmp_path / leaf.replace('.', '_')
-        directory.mkdir()
-        (directory / leaf).write_text((ROOT / 'compiler' / leaf).read_text())
-        (directory / 'driver.jo').write_text(DRIVER.replace('@@', leaf))
-        binary = directory / 'driver'
-        built = subprocess.run([compiler, 'build', directory / 'driver.jo', '-o', binary],
-                               capture_output=True, text=True, timeout=60)
-        assert built.returncode == 0, built.stdout + built.stderr
-        ran = subprocess.run([binary], capture_output=True, text=True, timeout=30)
-        assert ran.returncode == 0, ran.stderr
-        outputs.append(ran.stdout)
-    assert outputs[0] == outputs[1]
-    assert outputs[0]
+def test_checks_text_twins(compiler, tmp_path):
+    assert compare_narrow(compiler, tmp_path, False, ['checks_text'], DRIVER)

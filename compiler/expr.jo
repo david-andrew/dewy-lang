@@ -1,4 +1,5 @@
 use 'secret_checks.dewy'
+use 'checks_cast_hooks.dewy'
 use 'checks_match_hooks.dewy'
 use 'checker_call_values.dewy'
 use 'checker_sinks.dewy'
@@ -8447,131 +8448,7 @@ unary_error = (n: int, at: int, code: int):
     if code == 2: fatal(nodes[n].pos, "unary '+' needs a number")
     never_cascade(nodes[n].pos, at)
     fatal(nodes[n].pos, "cannot negate {dt(at)}")
-cast_unit = (n: int) -> int:
-    if not quantity_unit_syntax(int(nodes[n].b)): return -1
-    quantity_as_unit(n)
-cast_size = (t: int) -> int: tsize(t)
-cast_refine = (n: int, t: int):
-    refine_coerce(n, t)
-    return
-cast_type_text = (n: int, ft: int) -> int:
-    nodes[n] = nodes[bc_str(type_str(int(types[ft].elem), true), nodes[n].pos)]
-    check_expr(n, T_STR)
-cast_set_coerce = (n: int, t: int):
-    str_set_coerce(n, t)
-    return
-cast_bundled = (t: int, bigint: bool) -> bool:
-    if bigint: return bundled_bigint_type(t)
-    bundled_rational_type(t)
-cast_conversion = (n: int, t: int, a: int) -> int: conversion(n, t, [a])
-cast_helper = (n: int, a: int, decode: bool, expected: int) -> int:
-    helper = "bytes"
-    if decode: helper = "__dewy_decode_utf8"
-    nodes[n] = nodes[bc_call(helper, [a], nodes[n].pos)]
-    check_expr(n, expected)
-# (a record's own conversion, `__as__ = (x:T):>U => ...`: `x as U` calls it)
-cast_record = (n: int, a: int, ft: int, tt: int) -> int:
-    conv = as_conversion(ft, tt)
-    if conv == 0: return -1
-    add_flag(a, NF_CHECKED)
-    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(bc_ident("__as__", nodes[n].pos)))
-    set_list(n, [a])
-    t = resolve_fn_call(n, intern("__as__"), [conv], [a], tt)
-    nodes[n].type = i32(t)
-    add_flag(n, NF_CHECKED)
-    last_checked = n
-    t
-# (any other value converts to string as it prints: "{x}")
-cast_text = (n: int, a: int, expected: int) -> int:
-    text = mk(.str_lit, nodes[n].pos)
-    nodes[text].aux = 1
-    part = mk(.pair, nodes[n].pos)
-    nodes[part].a = i32(a)
-    nodes[part].sval = -1
-    set_list(text, [part])
-    nodes[n] = nodes[text]
-    check_expr(n, expected)
-cast_storage = (a: int) -> void: note_storage_access(a)
-cast_error = (n: int, a: int, ft: int, tt: int, code: int):
-    pos = nodes[n].pos
-    if code == 1: fatal(pos, "transmute requires an explicit fixed-width type; mathematical int has no fixed bit representation")
-    if code == 2: fatal(pos, "transmute needs integer or float values of equal width (found {dt(ft)} to {dt(tt)})")
-    if code == 3: fatal(pos, "a {dt(ft)} converts to no other type: its value is hidden{secret_hint(a)}")
-    if code == 4: fatal(pos, "`bytes as string` needs a proof that the bytes are valid UTF-8: `bytes as string | none` decodes them, giving none when they are not valid, and `bytes as string ?? fallback` replaces that none")
-    if code == 5:
-        # (Rust's `x as f64` converts: here it would keep the bits)
-        conv = "{dt(tt)}(x)"
-        bits = "f64_bits(x) / f64_from_bits(b)"
-        if tsize(ft) == 4 or tsize(tt) == 4: bits = "f32_bits(x) / f32_from_bits(b)"
-        fatal(pos, "`as` between a whole number and a float keeps the bits, not the number: {conv} converts the value ({bits} for the bits themselves)")
-    if code == 6: str_set_unnumbered(pos, ft)
-    # (the runtime's: the header; a program means the bytes, which data(x) gives)
-    if code == 7: fatal(pos, "`x as {dt(tt)}` would be where the {dt(ft)}'s header is, not its contents: `data(x)` is a pointer to its first element (what C wants; a str's bytes end with a 0)")
-    why = ""
-    if is_union(ft) and union_index(ft, tt) >= 0: why = if dewy_at(pos): " (a union is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one)" else: " (a union is not cast: after `if x is {dt(tt)}:` (or in `x is {dt(tt)} and ...`), x is one)"
-    # (`(int64 | string)? as int64`: the payload's member, tested the same way)
-    fo = prune(ft)
-    if why == "" and dewy_at(pos) and types[fo].kind == .opt:
-        inner = int(types[fo].elem)
-        if type_eq(inner, tt) or (is_union(inner) and union_index(inner, tt) >= 0):
-            why = " (an optional is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one; `match x` takes each member, `x ?? fallback` gives a default)"
-    fatal(pos, "cannot cast {dt(ft)} to {dt(tt)}{why}")
-collection_float_key = (t: int) -> bool: key_holds_float(t)
-collection_float_obligation = (key: int) -> void: float_key_obligation(key)
-# ({x: 1, y: 2}: JavaScript's object, with names the program does not have)
-collection_key_name = (key: int) -> void:
-    if lookup(int(nodes[key].name)) != 0: return
-    kn = name_of(int(nodes[key].name))
-    if dewy_at(nodes[key].pos): fatal(nodes[key].pos, "unknown name '{kn}' (a dictionary's keys are values: `[\"{kn}\" -> ...]`; for named fields, a record: `[{kn}=...]`)")
-    fatal(nodes[key].pos, "unknown name '{kn}' (a map's keys are values: `\{\"{kn}\": ...}`; for named fields, declare `struct Name:` with them and make one with `Name({kn} = ...)`)")
-collection_map_decl = (n: int) -> int:
-    ms = prelude.get(intern("Map")) ?? 0
-    if ms == 0: fatal(nodes[n].pos, "Map is not available")
-    int(syms[ms].ref)
-collection_instance = (md: int, kt: int, vt: int) -> int: get_struct_inst(md, [kt, vt])
-collection_setter = (n: int, t: int, kt: int, vt: int) -> int: resolve_by_types(intern("[]="), [t, kt, vt], nodes[n].pos, true)
-collection_error = (n: int, code: int, vt: int, bt: int) -> void:
-    if code == 1: fatal(nodes[n].pos, "cannot infer the type of an empty map; add a type annotation: {jd(nodes[n].pos, "`m: \{K: V} = \{}`", "`let m:dict<K V> = []`")}")
-    # ({"name": "Drone", "cost": 10.0}: JavaScript's object, values of several types)
-    fatal(nodes[n].pos, "a map's values are all of one type, and the first is {a_type(vt)}, this {a_type(bt)}: for a record with named fields of their own types, declare {jd(nodes[n].pos, "`struct Name:`", "`Name:type = [field:T ...]`")} with them")
-place_contract = (a: int, at: int) -> bool: ref_storage_contract(refine_storage(a, at))
-place_storage = (a: int) -> void: note_storage_access(a)
-place_error = (n: int, code: int) -> void:
-    if code == 1: fatal(nodes[n].pos, "mutable refinement access awaits storage invariant checking")
-    if code == 2: fatal(nodes[n].pos, "can only take the address of a variable, field or element")
-    if code == 3: fatal(nodes[n].pos, "cannot take the address of a captured variable")
-    if code == 4: fatal(nodes[n].pos, "'_' can only be used as a function argument (partial application)")
-    fatal(nodes[n].pos, "named arguments are only allowed in calls")
-variant_fields = (si: int) -> void: check_struct_fields(si)
-variant_complete = (ex: int) -> void: ide_complete_variants(ex)
-variant_reference = (n: int, et: int, vi: int) -> void: ide_variant_ref(nodes[n].pos, int(nodes[n].name), et, vi)
-variant_error = (n: int, et: int, code: int) -> void:
-    nm = int(nodes[n].name)
-    if code == 1:
-        vh = bare_variant_hint(nm)
-        if len(vh) > 0:
-            # (screen = .title where nothing says it is a Screen: the enum's name says it)
-            en = vh[find(vh, "else `") + 6..len(vh) - 2)
-            fatal(nodes[n].pos, "which enum '.{name_of(nm)}' belongs to is not known here: write `{en}`")
-        fatal(nodes[n].pos, "cannot infer the enum type for '.{name_of(nm)}'")
-    if code == 2: fatal(nodes[n].pos, "{dt(et)} has no variant '{name_of(nm)}'{variant_hint_for(et, name_of(nm))}")
-    fatal(nodes[n].pos, "variant '{name_of(nm)}' needs arguments")
 
-optional_error = (n: int, at: int, unwrap: bool):
-    if unwrap: fatal(nodes[n].pos, "'!' needs an optional value, found {dt(at)}")
-    lhs = int(nodes[n].a)
-    # Index operators have already become checked calls; their source position
-    # need not point at '[' (Dewy's mapping[key] points at the receiver).
-    if nodes[lhs].kind == .call and nodes[lhs].aux == 0 and nodes[lhs].sym > 0 and nkids(lhs) == 2:
-        f = int(nodes[lhs].sym)
-        d = int(fns[f].decl)
-        if d > 0 and name_of(int(nodes[d].name)) == "[]" and is_map_type(ntype(kid(lhs, 0))):
-            fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}; dictionary indexing gives the value itself; use `mapping.get(key) ?? fallback`")
-    lp = int(nodes[lhs].pos)
-    lf = pos_file(lp)
-    if lf >= 0 and lf < files.len() and pos_off(lp) < len(files[lf].src) and files[lf].src[pos_off(lp)] == '[':
-        fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)} (indexing gives the element itself; m.get(k) gives an optional, m.get(k, default) a value)")
-    fatal(nodes[n].pos, "'??' needs an optional on the left, found {dt(at)}")
 
 # The interpolation checked last, for an unknown name inside one: ident_unknown.
 interpolation_last = 0
@@ -9306,23 +9183,6 @@ cond_error = (n: int, t: int, code: int) -> void:
     if code == 2: fatal(nodes[n].pos, "an if expression needs an else branch")
     if code == 3: fatal(nodes[n].pos, "both branches of an if expression need a value")
     fatal(nodes[int(nodes[n].a)].pos, "'if let x = value' needs an optional value, found {dt(t)}")
-# `f<T>` runs in checker_type_apply.dewy; these are its services.
-apply_lookup = (name: int, mod: int, kind: mut int) -> int:
-    s = 0
-    if mod < 0: s = lookup(name)
-    else: s = module_lookup(mod, name)
-    kind = 0
-    if s != 0: kind = int(syms[s].kind)
-    s
-apply_fn_value = (n: int, expected: int, targs: int[], mod: int, closure: int) -> int: fn_value(n, expected, targs, mod, closure)
-apply_reference = (pos: int, name: int, sym: int):
-    ide_fn_ref(pos, name, sym)
-    return
-apply_error = (n: int, name: int, code: int):
-    if code == 1: bare_fn_error(n, "{name_of(name)}<...>", true)
-    if code == 2: bare_fn_error(n, "{name_of(name)}<...>", false)
-    if code == 3: fatal(nodes[n].pos, "'{name_of(name)}<...>' needs arguments: call it, or write `@{name_of(name)}<...>` for the function itself")
-    fatal(nodes[n].pos, "type arguments require a generic callable")
 # Array and record literals run in checker_aggregates.dewy; these are its services.
 # (thorns = Rect[]: an empty array of Rects is declared with a colon)
 aggregate_type_error = (n: int):

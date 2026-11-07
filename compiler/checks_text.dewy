@@ -35,3 +35,11 @@ byte_match=(s:string sub:string at:TextWord):>bool=>{
 # A symbol kind from the frozen ordinal a node holds.
 let sym_kinds:array<SK>=['none_' 'local' 'global' 'fns' 'struct_' 'enum_' 'const_' 'module' 'type_' 'builtin' 'alias_' 'reflected']
 sym_kind_of=(ordinal:TextWord):>SK=>sym_kinds[ordinal]
+sym_kind_ordinal=(kind:SK):>TextWord=>{
+    let i:TextWord=0
+    loop i <? sym_kinds.length {
+        if sym_kinds[i] =? kind {return i}
+        i += 1
+    }
+    0
+}

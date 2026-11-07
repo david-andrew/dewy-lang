@@ -1,0 +1,213 @@
+$runtime_checks
+from p"checks_text.dewy" import (sym_kind_ordinal)
+from p"check.jo" import jd
+from p"checks_text.dewy" import (byte_find)
+
+from p"ast.jo" import (NF_CHECKED add_flag kid mk nkids nodes set_list)
+from p"check.jo" import (check_struct_fields dewy_at fns module_lookup prelude syms)
+from p"checker_call_resolve.dewy" import (resolve_fn_call)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"expr.jo" import (a_type as_conversion bare_fn_error bare_variant_hint bc_call bc_ident bc_str bundled_bigint_type conversion fn_value is_map_type last_checked note_storage_access ntype resolve_by_types str_set_unnumbered variant_hint_for)
+from p"floats.jo" import (float_key_obligation key_holds_float)
+from p"ide.jo" import (ide_complete_variants ide_fn_ref ide_variant_ref)
+from p"lower_storage.dewy" import (V)
+from p"node_store.dewy" import (Node)
+from p"refine.jo" import (ref_storage_contract refine_coerce refine_storage str_set_coerce)
+from p"secret_checks.dewy" import (secret_hint)
+from p"types.jo" import (T_STR dt get_struct_inst is_union prune tsize type_eq type_str types union_index)
+from p"units.jo" import (bundled_rational_type quantity_as_unit quantity_unit_syntax)
+from p"util.jo" import (fatal files intern name_of pos_file pos_off)
+
+CastHookWord:type=int64<overflow='wrap'>
+cast_unit=(n:int64):>int64=>$unsafe {
+    if not quantity_unit_syntax(CastHookWord(nodes.ptr[n].b)) {return -1}
+    quantity_as_unit(n)
+}
+cast_size=(t:int64):>int64=>{
+    tsize(t)
+}
+cast_refine=(n:int64 t:int64):>void=>{
+    refine_coerce(n t);
+    return
+}
+cast_type_text=(n:int64 ft:int64):>int64=>$unsafe {
+    nodes.ptr[n]=nodes.ptr[bc_str(type_str(CastHookWord(types.ptr[ft].elem) true) nodes.ptr[n].pos)]
+    check_expr(n T_STR)
+}
+cast_set_coerce=(n:int64 t:int64):>void=>{
+    str_set_coerce(n t);
+    return
+}
+cast_bundled=(t:int64 is_bigint:bool):>bool=>{
+    if is_bigint {return bundled_bigint_type(t)}
+    bundled_rational_type(t)
+}
+cast_conversion=(n:int64 t:int64 a:int64):>int64=>{
+    conversion(n t [a])
+}
+cast_helper=(n:int64 a:int64 decode:bool expected:int64):>int64=>$unsafe {
+    let helper="bytes"
+    if decode {helper="__dewy_decode_utf8"}
+    nodes.ptr[n]=nodes.ptr[bc_call(helper [a] nodes.ptr[n].pos)]
+    check_expr(n expected)
+}
+# (a record's own conversion, `__as__ = (x:T):>U => ...`: `x as U` calls it)
+cast_record=(n:int64 a:int64 ft:int64 tt:int64):>int64=>$unsafe {
+    let conv=as_conversion(ft tt)
+    if conv =? 0 {return -1}
+    add_flag(a NF_CHECKED)
+    nodes.ptr[n]=Node(kind='call' pos=nodes.ptr[n].pos a=int32(bc_ident("__as__" nodes.ptr[n].pos)))
+    set_list(n [a])
+    let t=resolve_fn_call(n intern("__as__") [conv] [a] tt)
+    nodes.ptr[n].type=int32(t)
+    add_flag(n NF_CHECKED)
+    last_checked=n
+    t
+}
+# (any other value converts to string as it prints: "{x}")
+cast_text=(n:int64 a:int64 expected:int64):>int64=>$unsafe {
+    let text=mk('str_lit' nodes.ptr[n].pos)
+    nodes.ptr[text].aux=1
+    let part=mk('pair' nodes.ptr[n].pos)
+    nodes.ptr[part].a=int32(a)
+    nodes.ptr[part].sval=-1
+    set_list(text [part])
+    nodes.ptr[n]=nodes.ptr[text]
+    check_expr(n expected)
+}
+cast_storage=(a:int64):>void=>{
+    note_storage_access(a)
+}
+cast_error=(n:int64 a:int64 ft:int64 tt:int64 code:int64):>void=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    if code =? 1 {fatal(pos "transmute requires an explicit fixed-width type; mathematical int has no fixed bit representation")}
+    if code =? 2 {fatal(pos "transmute needs integer or float values of equal width (found {dt(ft)} to {dt(tt)})")}
+    if code =? 3 {fatal(pos "a {dt(ft)} converts to no other type: its value is hidden{secret_hint(a)}")}
+    if code =? 4 {fatal(pos "`bytes as string` needs a proof that the bytes are valid UTF-8: `bytes as string | none` decodes them, giving none when they are not valid, and `bytes as string ?? fallback` replaces that none")}
+    if code =? 5 {
+        # (Rust's `x as f64` converts: here it would keep the bits)
+        let conv="{dt(tt)}(x)"
+        let bits="f64_bits(x) / f64_from_bits(b)"
+        if tsize(ft) =? 4 or tsize(tt) =? 4 {bits="f32_bits(x) / f32_from_bits(b)"}
+        fatal(pos "`as` between a whole number and a float keeps the bits, not the number: {conv} converts the value ({bits} for the bits themselves)")
+    }
+    if code =? 6 {str_set_unnumbered(pos ft)}
+    # (the runtime's: the header; a program means the bytes, which data(x) gives)
+    if code =? 7 {fatal(pos "`x as {dt(tt)}` would be where the {dt(ft)}'s header is, not its contents: `data(x)` is a pointer to its first element (what C wants; a str's bytes end with a 0)")}
+    let why=""
+    if is_union(ft) and union_index(ft tt) >=? 0 {why=if dewy_at(pos) {" (a union is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one)"} else {" (a union is not cast: after `if x is {dt(tt)}:` (or in `x is {dt(tt)} and ...`), x is one)"}}
+    # (`(int64 | string)? as int64`: the payload's member, tested the same way)
+    let fo=prune(ft)
+    if why =? "" and dewy_at(pos) and types.ptr[fo].kind =? 'opt' {
+        let inner=CastHookWord(types.ptr[fo].elem)
+        if type_eq(inner tt) or (is_union(inner) and union_index(inner tt) >=? 0) {
+            why=" (an optional is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one; `match x` takes each member, `x ?? fallback` gives a default)"
+        }
+    }
+    fatal(pos "cannot cast {dt(ft)} to {dt(tt)}{why}")
+}
+collection_float_key=(t:int64):>bool=>{
+    key_holds_float(t)
+}
+collection_float_obligation=(key:int64):>void=>{
+    float_key_obligation(key)
+}
+# ({x: 1, y: 2}: JavaScript's object, with names the program does not have)
+collection_key_name=(key:int64):>void=>$unsafe {
+    if lookup(CastHookWord(nodes.ptr[key].name)) not=? 0 {return}
+    let kn=name_of(CastHookWord(nodes.ptr[key].name))
+    if dewy_at(nodes.ptr[key].pos) {fatal(nodes.ptr[key].pos "unknown name '{kn}' (a dictionary's keys are values: `[\"{kn}\" -> ...]`; for named fields, a record: `[{kn}=...]`)")}
+    fatal(nodes.ptr[key].pos "unknown name '{kn}' (a map's keys are values: `\{\"{kn}\": ...}`; for named fields, declare `struct Name:` with them and make one with `Name({kn} = ...)`)")
+}
+collection_map_decl=(n:int64):>int64=>$unsafe {
+    let ms=prelude.get(intern("Map")) ?? 0
+    if ms =? 0 {fatal(nodes.ptr[n].pos "Map is not available")}
+    CastHookWord(syms.ptr[ms].ref)
+}
+collection_instance=(md:int64 kt:int64 vt:int64):>int64=>{
+    get_struct_inst(md [kt vt])
+}
+collection_setter=(n:int64 t:int64 kt:int64 vt:int64):>int64=>$unsafe {
+    resolve_by_types(intern("[]=") [t kt vt] nodes.ptr[n].pos true)
+}
+collection_error=(n:int64 code:int64 vt:int64 bt:int64):>void=>$unsafe {
+    if code =? 1 {fatal(nodes.ptr[n].pos "cannot infer the type of an empty map; add a type annotation: {jd(nodes.ptr[n].pos "`m: \{K: V} = \{}`" "`let m:dict<K V> = []`")}")}
+    # ({"name": "Drone", "cost": 10.0}: JavaScript's object, values of several types)
+    fatal(nodes.ptr[n].pos "a map's values are all of one type, and the first is {a_type(vt)}, this {a_type(bt)}: for a record with named fields of their own types, declare {jd(nodes.ptr[n].pos "`struct Name:`" "`Name:type = [field:T ...]`")} with them")
+}
+place_contract=(a:int64 at:int64):>bool=>{
+    ref_storage_contract(refine_storage(a at))
+}
+place_storage=(a:int64):>void=>{
+    note_storage_access(a)
+}
+place_error=(n:int64 code:int64):>void=>$unsafe {
+    if code =? 1 {fatal(nodes.ptr[n].pos "mutable refinement access awaits storage invariant checking")}
+    if code =? 2 {fatal(nodes.ptr[n].pos "can only take the address of a variable, field or element")}
+    if code =? 3 {fatal(nodes.ptr[n].pos "cannot take the address of a captured variable")}
+    if code =? 4 {fatal(nodes.ptr[n].pos "'_' can only be used as a function argument (partial application)")}
+    fatal(nodes.ptr[n].pos "named arguments are only allowed in calls")
+}
+variant_fields=(si:int64):>void=>{
+    check_struct_fields(si)
+}
+variant_complete=(ex:int64):>void=>{
+    ide_complete_variants(ex)
+}
+variant_reference=(n:int64 et:int64 vi:int64):>void=>$unsafe {
+    ide_variant_ref(nodes.ptr[n].pos CastHookWord(nodes.ptr[n].name) et vi)
+}
+variant_error=(n:int64 et:int64 code:int64):>void=>$unsafe {
+    let nm=CastHookWord(nodes.ptr[n].name)
+    if code =? 1 {
+        let vh=bare_variant_hint(nm)
+        if (vh as array<uint8>).length >? 0 {
+            # (screen = .title where nothing says it is a Screen: the enum's name says it)
+            let en=vh.byte_slice(byte_find(vh "else `") + 6 (vh as array<uint8>).length - 2)
+            fatal(nodes.ptr[n].pos "which enum '.{name_of(nm)}' belongs to is not known here: write `{en}`")
+        }
+        fatal(nodes.ptr[n].pos "cannot infer the enum type for '.{name_of(nm)}'")
+    }
+    if code =? 2 {fatal(nodes.ptr[n].pos "{dt(et)} has no variant '{name_of(nm)}'{variant_hint_for(et name_of(nm))}")}
+    fatal(nodes.ptr[n].pos "variant '{name_of(nm)}' needs arguments")
+}
+optional_error=(n:int64 at:int64 unwrap:bool):>void=>$unsafe {
+    if unwrap {fatal(nodes.ptr[n].pos "'!' needs an optional value, found {dt(at)}")}
+    let lhs=CastHookWord(nodes.ptr[n].a)
+    # Index operators have already become checked calls; their source position
+    # need not point at '[' (Dewy's mapping[key] points at the receiver).
+    if nodes.ptr[lhs].kind =? 'call' and nodes.ptr[lhs].aux =? 0 and nodes.ptr[lhs].sym >? 0 and nkids(lhs) =? 2 {
+        let f=CastHookWord(nodes.ptr[lhs].sym)
+        let d=CastHookWord(fns.ptr[f].decl)
+        if d >? 0 and name_of(CastHookWord(nodes.ptr[d].name)) =? "[]" and is_map_type(ntype(kid(lhs 0))) {
+            fatal(nodes.ptr[n].pos "'??' needs an optional on the left, found {dt(at)}; dictionary indexing gives the value itself; use `mapping.get(key) ?? fallback`")
+        }
+    }
+    let lp=CastHookWord(nodes.ptr[lhs].pos)
+    let lf=pos_file(lp)
+    if lf >=? 0 and lf <? files.length and pos_off(lp) <? (files[lf].src as array<uint8>).length and (files[lf].src as array<uint8>)[pos_off(lp)] =? b'[' {
+        fatal(nodes.ptr[n].pos "'??' needs an optional on the left, found {dt(at)} (indexing gives the element itself; m.get(k) gives an optional, m.get(k, default) a value)")
+    }
+    fatal(nodes.ptr[n].pos "'??' needs an optional on the left, found {dt(at)}")
+}
+# `f<T>` runs in checker_type_apply.dewy; these are its services.
+apply_lookup=(name:int64 mod:int64 @kind:int64):>int64=>$unsafe {
+    let s:CastHookWord=0
+    if mod <? 0 {s=lookup(name)} else {s=module_lookup(mod name)}
+    kind=0
+    if s not=? 0 {kind=sym_kind_ordinal(syms.ptr[s].kind)}
+    s
+}
+apply_fn_value=(n:int64 expected:int64 targs:array<int64> mod:int64 closure:int64):>int64=>{
+    fn_value(n expected targs mod closure)
+}
+apply_reference=(pos:int64 name:int64 sym:int64):>void=>{
+    ide_fn_ref(pos name sym)
+    return
+}
+apply_error=(n:int64 name:int64 code:int64):>void=>$unsafe {
+    if code =? 1 {bare_fn_error(n "{name_of(name)}<...>" true)}
+    if code =? 2 {bare_fn_error(n "{name_of(name)}<...>" false)}
+    if code =? 3 {fatal(nodes.ptr[n].pos "'{name_of(name)}<...>' needs arguments: call it, or write `@{name_of(name)}<...>` for the function itself")}
+    fatal(nodes.ptr[n].pos "type arguments require a generic callable")
+}
