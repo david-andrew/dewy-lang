@@ -362,7 +362,7 @@ arg_finish_rest = (a: int, pt: int, is_mut: bool):
     if is_mut and refine_active:
         ref_mutable_authority(a)
         storage = refine_storage(a, ntype(a))
-        if not type_eq(storage, pt) and (ref_storage_contract(storage) or ref_storage_contract(pt)):
+        if not type_eq(storage, pt) and (ref_storage_contract(storage) or ref_storage_contract(pt)) and not ref_self_direct_place(a):
             # (a totaldict's mutations keep every key: pop and clear are refused where they are called)
             total = is_total_dict(storage) and type_eq(int(types[prune(storage)].elem), pt)
             if not total: call_argument_error(1, a, pt)
@@ -383,6 +383,7 @@ arg_finish_rest = (a: int, pt: int, is_mut: bool):
         if path_narrows > 0 and path_rooted(a): path_forget(path_key(a))
         actual = if refine_active: refine_storage(a, ntype(a)) else: ntype(a)
         if refine_active and is_total_dict(actual): actual = int(types[prune(actual)].elem)
+        if ref_self_direct_place(a): actual = representation_type(actual)
         if not type_eq(actual, pt) and not unify(actual, pt): call_argument_error(4, a, pt)
         add_flag(a, NF_MUT)
         return

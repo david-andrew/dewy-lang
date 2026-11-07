@@ -780,6 +780,13 @@ __requirement_fail = (requirement: str, loc: str, left: str, a: int, right: str,
     if len(observed) == 0: __panic("{loc}: {requirement}")
     __panic("{loc}: {requirement} (observed: {observed})")
 
+# The first position whose element is above the bound, or -1: a self-length
+# array's check of a whole value, under `$runtime_checks` only.
+__first_element_above = (xs: int[], bound: int) -> int:
+    loop i in [0..xs.len()):
+        if xs[i] > bound: return i
+    -1
+
 __print_str = (s: str):
     __out(data(s), len(s), false)
     __out(data("\n"), 1, true)

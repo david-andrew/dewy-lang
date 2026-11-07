@@ -1,0 +1,9 @@
+R:type=[p:array<int64<(<? p.length)>>]
+f=(c:bool i:int64):>void=>{
+    let r = R[[0]]
+    if c { r.p.push(0) }
+    let q:array<int64<(<? q.length)>> = r.p
+    printl(q)
+    if i >=? 0 and i <? r.p.length { printl(r.p[r.p[i]]) }
+}
+main=():>void=>{f(true 1); f(false 0)}

@@ -1,0 +1,22 @@
+R:type=[parent:array<int64<(<? parent.length)>>=[] n:int64=0]
+grow=(@r:R):>void=>{
+    r.parent.push(r.parent.length)
+}
+same=(@x:array<int64<(<? x.length)>>):>void=>{
+    x.push(0)
+}
+main=():>void=>{
+    let r = R[]
+    grow(@r)
+    r.parent.push(r.parent.length)
+    if r.parent.length >? 1 {
+        r.parent[1] = 0
+        printl(r.parent[r.parent[1]])
+    }
+    same(@r.parent)
+    printl(r.parent)
+    let s = R[[0 0] 3]
+    printl(s.parent[s.parent[1]])
+    s = r
+    printl(s.parent.length)
+}

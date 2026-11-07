@@ -1091,9 +1091,12 @@ wit_divisor = (n: int, s: FactState, divisor: int, zero: int, operand: int, refu
         return
     wit_unknown(n, fact_bound(s, divisor), "divisor is nonzero", 0, wit_relation_text(.ne, side, nil), missing, divisor = operand)
 
+# (the array a store's element goes into: refine.jo sets it for the check at hand)
+wit_holder_text = ""
 wit_ref_text = (term: RefTerm, self: str) -> str:
     text = ""
     if term.kind == 0: text = self
+    else if term.kind == 6: text = wit_holder_text
     else if term.kind == 1: return if term.unsigned: "" else: "{term.value}"
     else if term.kind == 3: text = name_of(int(locals[term.value].name))
     if text == "": return ""

@@ -1,0 +1,16 @@
+grow=(@x:array<int64<(<? x.length)>>):>void=>{
+    x.push(x.length)
+    let i = x.length - 1
+    if i >=? 1 { x[i] = x[i - 1] }
+}
+read=(x:array<int64<(<? x.length)>>):>int64=>{
+    if x.length =? 0 {return -1}
+    x[x[0]]
+}
+main=():>void=>{
+    let p:array<int64<(<? p.length)>> = [0]
+    grow(@p)
+    grow(@p)
+    printl(p)
+    printl(read(p))
+}

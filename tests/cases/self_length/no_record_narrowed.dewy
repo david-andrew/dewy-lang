@@ -1,0 +1,6 @@
+R:type=[p:array<int64<(<? p.length)>>]
+f=(o:R|none):>void=>{
+    let c = o
+    if c isnt? none { c.p.push(99) }
+}
+main=():>void=>f(R[[0]])

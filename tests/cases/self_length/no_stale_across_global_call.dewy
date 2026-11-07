@@ -1,0 +1,10 @@
+let g:array<int64<(<? g.length)>> = [1 0]
+sh=():>void=>{ g.clear(); g.push(0) }
+f=():>void=>{
+    if g.length >? 0 {
+        let j = g[0]
+        sh()
+        printl(g[j])
+    }
+}
+f()

@@ -1345,6 +1345,8 @@ field_enter = (d: int, si: int) -> CheckerFieldScope:
     targs: int[]
     loop i in [0..int(structs[si].ntargs)): targs.push(struct_targ(si, i))
     saved = cx
+    if nodes[d].kind == .struct_:
+        loop i in [0..nkids(d)): ref_holder_candidate(kid(d, i))
     ctxs.push(FnCtx(i32(new_inst(FK_INIT, int(nodes[d].mod), "fielddef")), -1, i32(T_VOID), false, 0, nodes[d].mod, i32(check_scopes.names.len())))
     cx = ctxs.len() - 1
     mark = scope_mark()
@@ -1433,6 +1435,7 @@ signature_enter = (decl: int) -> CheckerSignatureScope:
     ctxs.push(FnCtx(0, i32(parent), i32(T_VOID), false, 0, nodes[decl].mod, floor))
     cx = ctxs.len() - 1
     mark = scope_mark()
+    loop i in [0..nkids(decl)): ref_holder_candidate(kid(decl, i))
     ntp = nkids2(decl)
     loop i in [0..ntp):
         nm = int(nodes[kid2(decl, i)].name)
@@ -1903,7 +1906,9 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
     d = int(globals[g].decl)
     if globals[g].is_const:
         t = 0
-        if nodes[d].a != 0: t = resolve_binding_type(int(nodes[d].a))
+        if nodes[d].a != 0:
+            ref_holder_arm(int(nodes[d].a), int(nodes[d].name))
+            t = resolve_binding_type(int(nodes[d].a))
         cl = clone(int(nodes[d].b))
         et = values_init(cl, t)
         cl = last_checked
@@ -1931,7 +1936,9 @@ ensure_global = (g: int, use_pos: int, in_flow: bool = false):
             nodes[d].type = i32(t)
     else:
         t = 0
-        if nodes[d].a != 0: t = resolve_binding_type(int(nodes[d].a))
+        if nodes[d].a != 0:
+            ref_holder_arm(int(nodes[d].a), int(nodes[d].name))
+            t = resolve_binding_type(int(nodes[d].a))
         if refine_active and types[prune(t)].kind == .refined and nodes[d].b == 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
         # (x: T, a struct with default field values: it starts with them)
         if nodes[d].b == 0 and t != 0: nodes[d].b = i32(struct_default(t, nodes[d].pos))
@@ -3915,7 +3922,9 @@ assign_refine = (s: int, lt: int, code: int) -> int:
     lhs = int(nodes[s].a)
     op = int(nodes[s].op)
     if code == 1: return refine_storage(lhs, lt)
-    if code == 2: return ref_field_store(s, lt)
+    if code == 2:
+        if ref_self_active and ref_self_stored(lt): return ref_self_store(s, lt)
+        return ref_field_store(s, lt)
     if code == 3: string_domain_write(lhs, if op == int(Tok.assign): int(nodes[s].b) else: 0)
     else: int_domain_write(lhs, int(nodes[s].b), if op == int(Tok.assign): 0 else: op)
     0
@@ -4208,6 +4217,7 @@ decl_pattern = (s: int, t: int, code: int) -> int:
 decl_binding_type = (s: int) -> int:
     previous_self = refine_bindings.self
     refine_bindings.self = int(nodes[s].name)
+    ref_holder_arm(int(nodes[s].a), int(nodes[s].name))
     t = resolve_binding_type(int(nodes[s].a))
     refine_bindings.self = previous_self
     t

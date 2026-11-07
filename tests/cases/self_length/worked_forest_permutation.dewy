@@ -1,0 +1,109 @@
+# Self-length arrays: union-find, a permutation and a list threaded through an
+# array. Every index here is proved at compile time; there is no runtime check.
+# tests/test_self_length_reference.py recomputes this output in Python.
+Forest:type = [parent:array<int64<(<? parent.length)>>]
+
+make_forest = (n:int64):>Forest => {
+    let f = Forest[[]]
+    loop _ in [0..n) { f.parent.push(f.parent.length) }
+    f
+}
+
+find = (@f:Forest x:int64):>int64 => {
+    if x <? 0 or x >=? f.parent.length { return -1 }
+    let root = x
+    loop f.parent[root] not=? root { root = f.parent[root] }
+    let at = x
+    loop f.parent[at] not=? at {
+        let next = f.parent[at]
+        f.parent[at] = root
+        at = next
+    }
+    root
+}
+
+union = (@f:Forest a:int64 b:int64):>bool => {
+    let x = find(@f a)
+    let y = find(@f b)
+    if x <? 0 or y <? 0 or x =? y { return false }
+    if y >=? f.parent.length or x >=? f.parent.length { return false }
+    f.parent[x] = y
+    true
+}
+
+# A permutation built by shuffling the identity with swaps.
+shuffled = (n:int64 seed0:int64):>int64 => {
+    let p:array<int64<(<? p.length)>> = []
+    loop _ in [0..n) { p.push(p.length) }
+    let seed = seed0
+    loop i in [1..p.length) {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        let j = seed % (i + 1)
+        p.swap(i j)
+    }
+    # Its cycles, walked through the permutation itself.
+    let seen = fill(false p.length)
+    let cycles:int64 = 0
+    let longest:int64 = 0
+    loop start in [0..p.length) {
+        if seen[start] { continue }
+        cycles += 1
+        let size:int64 = 0
+        let at = start
+        loop not seen[at] {
+            seen[at] = true
+            size += 1
+            at = p[at]
+        }
+        longest = max(longest size)
+    }
+    # p[p[i]] needs no check: an element of p is a valid index of p.
+    let twice:int64 = 0
+    loop i in [0..p.length) { twice = (twice * 31 + p[p[i]]) % 1000000007 }
+    printl("permutation {cycles} {longest} {twice}")
+    twice
+}
+
+# A list threaded through `next`, -1 ending it: a guard proves the lower bound.
+threaded = (n:int64):>void => {
+    let next:array<int64<v => -1 <=? v and v <? next.length>> = []
+    let head:int64 = -1
+    loop i in [0..n) {
+        next.push(-1)
+        if head >=? 0 and head <? next.length {
+            let last = next.length - 1
+            next[last] = head
+        }
+        head = next.length - 1
+    }
+    let total = 0
+    let at = head
+    loop at >=? 0 and at <? next.length {
+        total += at
+        at = next[at]
+    }
+    printl("list {next.length} {total}")
+}
+
+main = ():>void => {
+    let f = make_forest(64)
+    let seed:int64 = 7
+    let joined:int64 = 0
+    loop _ in [0..48) {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        let a = seed % 64
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        let b = seed % 64
+        if union(@f a b) { joined += 1 }
+    }
+    let roots:int64 = 0
+    let checksum:int64 = 0
+    loop i in [0..f.parent.length) {
+        let r = find(@f i)
+        if r =? i { roots += 1 }
+        checksum = (checksum * 131 + r) % 1000000007
+    }
+    printl("forest {joined} {roots} {checksum}")
+    shuffled(257 42);
+    threaded(100)
+}

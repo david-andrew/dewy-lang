@@ -28,6 +28,8 @@ use 'types.jo'
 use 'check.jo'
 use 'expr.jo'
 use 'facts.jo'
+use 'facts_elements.dewy'
+use 'directives.jo'
 use 'nd_contracts.jo'
 use 'lower.jo'
 use 'ir.jo'
@@ -54,6 +56,22 @@ refine_owners: {int: bool} = {}
 ref_narrowing: {int: int} = {}
 refine_entry: int[]
 refine_ir_entry: int[]
+# The element type nodes that may name their binding, by node. O(1) per typed binding.
+ref_holder_elems: {int: int} = {}
+ref_holder_name = 0
+# The binding last declared with a type: named by a misplaced refinement, it gets a better error.
+ref_declaring = 0
+ref_self_active = false
+# A self-length array type's stored element type
+ref_self_elements: {int: int} = {}
+# Candidate publications whose contract holds by what was done to them
+ref_self_established: {int: bool} = {}
+# Candidate publications that may shorten the array, for their diagnostic: (place, operation)
+ref_self_shrinks: {int: (int, IN)} = {}
+# `xs` in a `xs.swap(i j)`, which works on the array itself
+ref_self_direct: {int: bool} = {}
+ref_fact_holder = 0
+ref_gen_site = 0
 
 representation_type = (t0: int) -> int:
     t = prune(t0)
@@ -181,6 +199,13 @@ refine_reset = ():
     refine_owners = {}
     ref_narrowing = {}
     ref_spans = {}
+    ref_holder_elems = {}
+    ref_holder_name = 0
+    ref_self_active = false
+    ref_self_elements = {}
+    ref_self_established = {}
+    ref_self_shrinks = {}
+    ref_self_direct = {}
 
 ref_span_copy = (from: int, to: int):
     if from != to and not ref_spans.has(to):
@@ -193,6 +218,7 @@ mk_refined = (base0: int, predicate: int) -> int: tr_make(base0, predicate)
 
 ref_resolve_value = (n: int) -> RefTerm:
     name = int(nodes[n].name)
+    if ref_holder_name != 0 and name == ref_holder_name: return RefTerm(6)
     sym = lookup(name)
     # (a module const, `const N = NAMES.length` too: its value while compiling)
     if sym != 0 and (syms[sym].kind == .const_ or syms[sym].kind == .global and readonly_global(int(syms[sym].ref)) and dewy_at(nodes[n].pos)):
@@ -206,6 +232,7 @@ ref_resolve_value = (n: int) -> RefTerm:
         if cx < 0 or locals[l].owner != ctxs[cx].inst: fatal(nodes[n].pos, "captured refinement dependencies await closure invariant checking")
         if int(locals[l].flags) & LF_CONST == 0: fatal(nodes[n].pos, "refinement dependency must be a stable binding")
         return RefTerm(3, l)
+    if name == ref_declaring: fatal(nodes[n].pos, "'{name_of(name)}' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? {name_of(name)}.length)>>`, and nothing else")
     fatal(nodes[n].pos, "unsupported refinement term '{name_of(name)}'")
     RefTerm()
 
@@ -238,16 +265,30 @@ ref_atoms = (n: int, binder: int, out: mut RefAtom[], depth: int = 0):
     ref_resolve_atoms(nodes, types, names, refine_bindings, ref_resolve_host, n, binder, out, depth)
 
 resolve_refinement = (n: int) -> int:
+    if nodes[n].b == 0: return ref_self_resolve(n)
     # (a refinement of a module whose declarations were not asked for yet, met another way)
     if not refine_active and refine_deferred.len() > 0:
         loop m, _ in refine_deferred: refine_resume(m)
     base = resolve_type(int(nodes[n].a))
     binder = if nodes[n].name != 0: int(nodes[n].name) else: refine_bindings.self
+    if ref_self_active and ref_self_contract(base): fatal(nodes[n].pos, "a self-length array cannot have a length contract as well")
     atoms: RefAtom[]
     previous_base = refine_bindings.base_type
     refine_bindings.base_type = base
+    # (the direct element of an array that names its own binding: that name is the array)
+    previous_holder = ref_holder_name
+    ref_holder_name = if ref_holder_elems.len() > 0: ref_holder_elems.get(n) ?? 0 else: 0
+    fields_before = refine_bindings.fields
+    formals_before = refine_bindings.formals
+    if ref_holder_name != 0:
+        refine_bindings.fields = ref_without_name(refine_bindings.fields, ref_holder_name)
+        refine_bindings.formals = ref_without_name(refine_bindings.formals, ref_holder_name)
     ref_resolve_atoms(nodes, types, names, refine_bindings, ref_resolve_host, int(nodes[n].b), binder, atoms, 0)
+    ref_holder_name = previous_holder
+    refine_bindings.fields = fields_before
+    refine_bindings.formals = formals_before
     refine_bindings.base_type = previous_base
+    if ref_atoms_have_kind(atoms, 6): ref_self_validate(atoms, base, nodes[n].pos)
     expected = if tkind(representation_type(base)) == .array or tkind(representation_type(base)) == .str_: T_INT else: representation_type(base)
     loop atom in atoms:
         loop term in [atom.a, atom.b]:
@@ -271,6 +312,8 @@ refine_storage = (n: int, fallback: int) -> int:
             return int(fields[int(structs[int(types[t].st)].fields) + int(nodes[n].aux)].type)
     if nodes[n].kind == .index and nodes[n].aux == 0:
         t = representation_type(ntype(int(nodes[n].a)))
+        if ref_self_active and types[t].kind == .array:
+            if let element = ref_self_elements.get(prune(refine_storage(int(nodes[n].a), ntype(int(nodes[n].a))))): return element
         if types[t].kind == .array or types[t].kind == .fixed: return int(types[t].elem)
     if nodes[n].kind == .ident:
         if nodes[n].aux == i32(int(SK.local)):
@@ -428,6 +471,7 @@ ref_value = (term: RefTerm, self: int, args: int[], base: int, s: mut FactState)
     else if term.kind == 3:
         e = mk_ident_local(term.value, locals[term.value].pos)
         value = fact_read(s, e)
+    else if term.kind == 6: value = ref_fact_holder
     else if term.kind != 0: fatal(-1, "unresolved generic refinement bound")
     value = ref_project(term, value, s)
     if value != 0 and term.offset != 0:
@@ -452,6 +496,11 @@ ref_assume = (t0: int, self: int, args: int[], s: mut FactState):
     if types[t].kind != .refined: return
     base = int(types[t].elem)
     loop atom in ref_predicates[int(types[t].st)]:
+        if atom.a.kind == 6:
+            ref_self_assume(s, self, atom)
+            continue
+        # (a store's element type says nothing without the array it is stored in)
+        if atom.b.kind == 6 and ref_fact_holder == 0: continue
         a = ref_value(atom.a, self, args, base, s)
         b = ref_value(atom.b, self, args, base, s)
         v = fact_new(s, fact_domain(T_BOOL), FactTerm(atom.op, a, b))
@@ -465,12 +514,27 @@ ref_interval = (t0: int, b: FactBound) -> FactBound:
     ref_atoms_interval(ref_predicates[int(types[t].st)], b)
 
 ref_check = (n: int, self: int, args: int[], s: mut FactState):
+    held = ref_fact_holder
+    ref_fact_holder = 0
+    if ref_self_active and nodes[n].b != 0:
+        ref_fact_holder = fact_capture(int(nodes[n].b), s)
+        wit_holder_text = wit_text(int(nodes[n].b))
+    ref_check_held(n, self, args, s)
+    ref_fact_holder = held
+
+ref_check_held = (n: int, self: int, args: int[], s: mut FactState):
     if fact_speculating > 0:
         ref_assume(zonk(int(nodes[n].aux2)), self, args, s)
         return
     t = zonk(int(nodes[n].aux2))
     nodes[n].aux2 = i32(t)
     if not s.live: return
+    # (a permutation of the array, or a growth whose new values were checked: ref_self_establish)
+    if ref_self_active and ref_self_established.has(n):
+        nodes[n].ival = 1
+        fact_validated[n] = true
+        ref_assume(t, self, args, s)
+        return
     # (a binding whose every written value the type holds: string_domains.jo)
     if int_domain_proven.has(n):
         nodes[n].ival = 1
@@ -480,6 +544,13 @@ ref_check = (n: int, self: int, args: int[], s: mut FactState):
     base = int(types[t].elem)
     proven = true
     loop atom in ref_predicates[int(types[t].st)]:
+        if atom.a.kind == 6:
+            truth = ref_self_truth(s, self, ref_self_k(atom))
+            if truth == 0: ref_self_fail(n, t, self, s, true)
+            if truth < 0:
+                proven = false
+                if fact_policy == .RequireStatic: ref_self_fail(n, t, self, s, false)
+            continue
         a = ref_value(atom.a, self, args, base, s)
         b = ref_value(atom.b, self, args, base, s)
         truth = fact_compare(s, atom.op, a, b)
@@ -518,6 +589,9 @@ refine_implies = (from: int, to: int) -> bool:
     ref_assume(from, value, args, s)
     ok = true
     loop atom in ref_predicates[int(types[prune(to)].st)]:
+        if atom.a.kind == 6:
+            if ref_self_truth(s, value, ref_self_k(atom)) != 1: ok = false
+            continue
         a = ref_value(atom.a, value, args, to, s)
         b = ref_value(atom.b, value, args, to, s)
         if fact_compare(s, atom.op, a, b) != 1: ok = false
@@ -541,6 +615,9 @@ ref_ir_term = (term: RefTerm, self: int, args: int[], self_type: int, arg_types:
     else if term.kind == 3:
         t = int(locals[term.value].type)
         value = gen_expr(mk_ident_local(term.value, locals[term.value].pos)).v
+    else if term.kind == 6:
+        ref_term_type = T_INT
+        return ref_ir_holder_length()
     else if term.kind != 0: fatal(-1, "unresolved generic refinement bound")
     loop selector in term.path:
         t = representation_type(t)
@@ -583,7 +660,12 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
     unsigned = is_int(representation_type(t)) and not types[representation_type(t)].sign
     shown = wit_text(int(nodes[n].a))
     if shown == "": shown = "the value"
+    ref_gen_site = n
+    if ref_self_active and nodes[n].b != 0: wit_holder_text = wit_text(int(nodes[n].b))
     loop atom in ref_predicates[int(types[t].st)]:
+        if atom.a.kind == 6:
+            ref_self_gen(n, atom, self)
+            continue
         a = ref_ir_term(atom.a, self, args, int(types[t].elem), arg_types)
         a_type = ref_term_type
         b = ref_ir_term(atom.b, self, args, int(types[t].elem), arg_types)
@@ -809,6 +891,7 @@ ref_validate_record = (t: int, pos: int):
         loop i in [0..count):
             if done[i]: continue
             ft = prune(int(fields[int(structs[si].fields) + i].type))
+            if types[ft].kind != .refined: ref_self_misplaced(ft, i, int(fields[int(structs[si].fields) + i].name), pos, 0)
             ready = true
             if types[ft].kind == .refined:
                 loop atom in ref_predicates[int(types[ft].st)]:
@@ -938,6 +1021,8 @@ ref_length_mutation = (n: int, r: int) -> int:
     place = kid(n, 0)
     t = prune(refine_storage(place, ntype(place)))
     if types[t].kind != .refined and not ref_dependent_ancestor(place): return r
+    # (a dependent record's sibling may bound this length: it publishes a candidate whole)
+    if ref_self_active and ref_self_contract(t) and not ref_dependent_ancestor(place) and ref_self_grow(n, id, place, t): return r
     before: int[]
     args = kids(n)
     if id == .insert:
@@ -960,8 +1045,10 @@ ref_length_mutation = (n: int, r: int) -> int:
     if r != T_VOID: result = capture_value(operation, r, before)
     else: before.push(bc_stmt(operation, nodes[n].pos))
     store = bc_assign(place, copy_checked(candidate), nodes[n].pos)
+    assigned = store
     store = check_assign(store)
     before.push(store)
+    if ref_self_active and ref_self_contract(t): ref_self_shrink(assigned, place, id)
     if result != 0: before.push(bc_stmt(result, nodes[n].pos))
     nodes[n] = nodes[bc_block(before, nodes[n].pos)]
     nodes[n].type = i32(r)
@@ -1036,6 +1123,7 @@ struct RefArrayCall:
     before: int[]
     place: int = 0
     candidate: int = 0
+    self_length: bool = false
 
 ref_array_call_prepare = (decl: int, args: mut int[], ptypes: int[], written: int[]) -> RefArrayCall:
     out = RefArrayCall()
@@ -1048,6 +1136,11 @@ ref_array_call_prepare = (decl: int, args: mut int[], ptypes: int[], written: in
     if not type_eq(representation_type(t), ptypes[0]): return out
     ref_mutable_authority(place)
     check_place(place, true)
+    self_length = ref_self_active and ref_self_contract(t)
+    # (a swap changes neither the length nor the values, and has no callback to see it)
+    if self_length and name == "swap":
+        ref_self_direct[place] = true
+        return out
     # Receiver selectors, then explicit operands in source order, once.
     path = index_update_path(place)
     j = path.len() - 1
@@ -1059,9 +1152,16 @@ ref_array_call_prepare = (decl: int, args: mut int[], ptypes: int[], written: in
         loop i in [1..args.len()):
             if args[i] != a: continue
             finish_arg(a, ptypes[i], false)
-            args[i] = capture_value(a, ptypes[i], out.before)
+            args[i] = capture_value(a, representation_type(ptypes[i]), out.before)
             break
+    # (an inserted value's check stands alone, after every operand ran: the
+    # argument keeps its parameter's type)
+    if self_length and name == "__dewy_insert" and args.len() > 1:
+        checked = copy_checked(args[1])
+        ref_self_value(checked, t, 1, place)
+        out.before.push(bc_stmt(checked, nodes[checked].pos))
     out.place = place
+    out.self_length = self_length
     out.candidate = capture_value(copy_place(place), representation_type(t), out.before)
     args[0] = copy_checked(out.candidate)
     add_flag(args[0], NF_MUT)
@@ -1071,8 +1171,310 @@ ref_array_call_finish = (n: int, prepared: RefArrayCall) -> int:
     before = prepared.before
     before.push(bc_stmt(copy_checked(n), nodes[n].pos))
     store = bc_assign(prepared.place, copy_checked(prepared.candidate), nodes[n].pos)
+    assigned = store
     before.push(check_assign(store))
+    if prepared.self_length: ref_self_establish(assigned)
     nodes[n] = nodes[bc_block(before, nodes[n].pos)]
     nodes[n].type = i32(T_VOID)
     add_flag(n, NF_CHECKED)
     T_VOID
+
+# ---------------- self-length contracts (docs/design/refinement.md) ----------------
+# An array type holds `every element op length + c` as one atom on the array,
+# with term kind 6 on its left: every element. Stores check a transient element
+# type whose atom has term kind 6 on its right: the length of the array stored
+# into, named by the check's `.b` (a check with no such place is unproven). All
+# of it is demanded: nothing here runs before the first such type is made.
+
+# A binding's declared type: a plain array whose direct element's refinement names
+# the binding's length becomes a wrapper (.trefined with no predicate, naming the
+# binding) that resolve_refinement turns into the array's contract. Nothing else is
+# armed, so any other spot resolves the name as usual. O(1), plus the predicate's
+# syntax for a refined element.
+# A parameter or field: most have no array type, so O(1) without a call deeper.
+ref_holder_candidate = (binding: int):
+    tn = int(nodes[binding].a)
+    if tn != 0 and (nodes[tn].kind == .tarray or nodes[tn].kind == .trefined): ref_holder_mark(tn, int(nodes[binding].name))
+
+ref_holder_arm = (tn: int, name: int):
+    ref_declaring = name
+    ref_holder_mark(tn, name)
+
+ref_holder_mark = (tn: int, name: int):
+    if tn == 0 or name == 0: return
+    node = tn
+    if nodes[node].kind == .trefined:
+        if nodes[node].b == 0: return
+        node = int(nodes[node].a)
+    if nodes[node].kind != .tarray or nodes[node].ival != 0 or nodes[node].b != 0 or nodes[node].aux >= 2: return
+    element = int(nodes[node].a)
+    if element == 0 or nodes[element].kind != .trefined or not ref_holder_mentioned(int(nodes[element].b), name, 0): return
+    if node != tn: fatal(nodes[tn].pos, "a self-length array cannot have a length contract as well")
+    inner = nodes.len()
+    nodes.push(nodes[tn])
+    nodes[tn] = Node(kind = .trefined, pos = nodes[inner].pos, a = i32(inner), name = i32(name))
+
+# Does the predicate say `name.length`? O(predicate syntax).
+ref_holder_mentioned = (n: int, name: int, depth: int) -> bool:
+    if n == 0 or depth > 32: return false
+    k = nodes[n].kind
+    if k == .field:
+        base = int(nodes[n].a)
+        if nodes[base].kind == .ident and int(nodes[base].name) == name and name_of(int(nodes[n].name)) == "length": return true
+        return ref_holder_mentioned(base, name, depth + 1)
+    if k == .binary or k == .and_: return ref_holder_mentioned(int(nodes[n].a), name, depth + 1) or ref_holder_mentioned(int(nodes[n].b), name, depth + 1)
+    if k == .not_: return ref_holder_mentioned(int(nodes[n].a), name, depth + 1)
+    false
+
+# The self-length array written at wrapper n. O(1) past its element's resolution.
+ref_self_resolve = (n: int) -> int:
+    inner = int(nodes[n].a)
+    ref_holder_elems[int(nodes[inner].a)] = int(nodes[n].name)
+    ref_self_array(prune(resolve_type(inner)), nodes[n].pos)
+
+ref_without_name = (names0: int[], name: int) -> int[]:
+    out: int[]
+    loop other in names0: out.push(if other == name: 0 else: other)
+    out
+
+# Only `value op name.length + c`, with op < or <=: growing keeps it.
+ref_self_validate = (atoms: RefAtom[], base: int, pos: int):
+    if has_var(base) or not type_eq(representation_type(base), T_INT): fatal(pos, "the elements of a self-length array are int64 or addr, found {dt(base)}")
+    loop atom in atoms:
+        if not ref_atoms_have_kind([atom], 6): continue
+        if atom.a.kind == 0 and atom.a.path.len() == 0 and atom.b.kind == 6 and ref_path_length(atom.b.path) and (atom.op == .lt or atom.op == .le): continue
+        if atom.a.kind == 6 or ref_path_length(atom.b.path): fatal(pos, "a self-length refinement is an upper bound, `<? name.length` or `<=? name.length`, so that growing the array keeps it")
+        fatal(pos, "only the length of the array being declared can bound its elements")
+    ref_self_active = true
+
+# (a field's name deeper inside its own type than its direct element: it would mean no one array)
+ref_self_misplaced = (t0: int, field: int, name: int, pos: int, depth: int):
+    t = prune(t0)
+    if depth > 32: return
+    k = types[t].kind
+    if k == .refined:
+        loop atom in ref_predicates[int(types[t].st)]:
+            loop term in [atom.a, atom.b]:
+                if term.kind == 5 and term.value == field and ref_path_length(term.path): fatal(pos, "'{name_of(name)}' is the field being declared: its length can bound the direct element of its array, as in `array<int64<(<? {name_of(name)}.length)>>`, and nothing else")
+    if k == .refined or k == .array or k == .fixed or k == .opt: ref_self_misplaced(int(types[t].elem), field, name, pos, depth + 1)
+
+ref_path_length = (path: int[]) -> bool: path.len() == 1 and path[0] == -1
+
+ref_self_lower_bound = (atoms: RefAtom[]) -> bool:
+    loop atom in atoms:
+        if atom.b.kind == 0 and atom.b.path.len() == 0 and atom.a.kind == 1 and (atom.op == .lt or atom.op == .le): return true
+    false
+
+# array<int64<(<? name.length)>> resolved: the contract moves onto the array.
+ref_self_array = (array_type: int, pos: int) -> int:
+    if not ref_self_active: return array_type
+    element = prune(int(types[array_type].elem))
+    if types[element].kind != .refined or not ref_atoms_have_kind(ref_predicates[int(types[element].st)], 6): return array_type
+    written = ref_predicates[int(types[element].st)]
+    rest: RefAtom[]
+    whole: RefAtom[]
+    stored: RefAtom[]
+    loop atom in written:
+        if atom.b.kind == 6:
+            whole.push(RefAtom(atom.op, RefTerm(6), RefTerm(0, path = [-1], offset = atom.b.offset)))
+            stored.push(atom)
+        else: rest.push(atom)
+    # (an upper bound on a signed index means a valid index, unless a lower bound is written)
+    if not ref_self_lower_bound(rest): rest.push(RefAtom(.le, RefTerm(1, 0), RefTerm(0)))
+    base = int(types[element].elem)
+    plain = mk_refined(base, ref_intern(rest))
+    predicate = ref_intern(whole)
+    span = ref_spans.get(int(types[element].st)) ?? pos
+    if not ref_spans.has(predicate): ref_spans[predicate] = span
+    out = mk_refined(mk_array(plain), predicate)
+    ref_self_elements[prune(out)] = mk_refined(plain, ref_intern(stored))
+    # (its whole-value check under `$runtime_checks`: only programs with such a type carry it)
+    runtime_fn("__first_element_above")
+    out
+
+ref_self_contract = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .refined and ref_atoms_have_kind(ref_predicates[int(types[t].st)], 6) and tkind(representation_type(t)) == .array
+
+# `every element <= length + k`, in one number
+ref_self_k = (atom: RefAtom) -> int:
+    if atom.op == .lt: atom.b.offset - 1 else: atom.b.offset
+
+ref_self_assume = (s: mut FactState, value: int, atom: RefAtom):
+    if value == 0 or s.projections.len() >= FACT_CAP: return
+    if fact_projection_find(s, value, FACT_SELF_BOUND, false) >= 0: return
+    fact_add_projection(s, FactProjection(value, FACT_SELF_BOUND, false, fact_constant(s, ref_self_k(atom))))
+
+# A place's current value holds the place's contract, every write to it having been
+# checked, whatever a join kept of the fact. O(route), only with such a type about.
+ref_self_place_read = (place: int, value: int, s: mut FactState):
+    t = refine_storage(place, ntype(place))
+    if ref_self_contract(t): ref_assume(t, value, [], s)
+
+# An element read from a value known to hold the contract: O(1).
+ref_self_element_row = (s: mut FactState, base: int, v: int):
+    i = fact_projection_find(s, base, FACT_SELF_BOUND, false)
+    if i < 0: return
+    k = fact_bound(s, s.projections[i].value).hi
+    if k == FACT_MAX: return
+    fact_difference(s, v, fact_project(s, base, -1, false, T_INT), k, 0, 16)
+
+# Does every element of the value stay within its length + k? (A value joining
+# another array owes this much too, its elements being below a shorter length.)
+# 1, 0 refuted, -1 unknown. O(inventory).
+ref_self_truth = (s: mut FactState, value: int, k: int) -> int:
+    if value == 0: return -1
+    held = fact_projection_find(s, value, FACT_SELF_BOUND, false)
+    if held >= 0 and fact_bound(s, s.projections[held].value).hi <= k: return 1
+    length = fact_project(s, value, -1, false, T_INT)
+    if length == 0: return -1
+    if fact_bound(s, length).hi == 0: return 1
+    limit = ref_value(RefTerm(0, path = [-1], offset = k), value, [], T_INT, s)
+    # (each element of a literal)
+    parts = fact_inventory(s, value)
+    if parts.len() > 0:
+        truth = 1
+        loop part in parts:
+            one = fact_compare(s, .le, part, limit)
+            if one == 0: return 0
+            if one < 0: truth = -1
+        return truth
+    # (every element is one value, or lies under a bound: an element exists only if length >= 1)
+    copy = fact_projection_find(s, value, FACT_ELEMENT_COPY, false)
+    if copy >= 0:
+        c = s.projections[copy].value
+        if fact_compare(s, .le, c, limit) == 1 or k < FACT_MAX and fact_bound(s, c).hi <= k + 1: return 1
+    hull = fact_projection_find(s, value, FACT_ELEMENT_VALUE, false)
+    if hull >= 0 and k < FACT_MAX and fact_bound(s, s.projections[hull].value).hi <= k + 1: return 1
+    below = fact_projection_find(s, value, FACT_ELEMENT_BELOW, false)
+    if below >= 0 and fact_compare(s, .lt, s.projections[below].value, ref_value(RefTerm(0, path = [-1], offset = k + 2), value, [], T_INT, s)) == 1: return 1
+    -1
+
+ref_self_fail = (n: int, t: int, self: int, s: FactState, refuted: bool):
+    contract = ref_spans.get(int(types[t].st)) ?? 0
+    shown = wit_text(int(nodes[n].a))
+    if shown == "": shown = "this array"
+    what = "cannot prove every element of {shown} is a valid index of it"
+    help = "help: a literal, `fill`, a `push` loop or an array with this same contract proves it; a slice or another call's result does not, so build it with `push`, or put `$runtime_checks` on this statement to check every element when it runs"
+    if refuted: what = "refinement refuted: an element of {shown} is not a valid index of it"
+    if let shrink = ref_self_shrinks.get(n):
+        name = wit_text(shrink.0)
+        if name == "": name = "this array"
+        what = "cannot prove every element of {name} stays a valid index: this makes it shorter, and an element may be past its new end"
+        if refuted: what = "refinement refuted: {name} gets shorter, and an element is past its new end"
+        help = "help: only `{name}.clear()` shortens it for certain; to shorten it otherwise, build a new array with `push`, or put `$runtime_checks` on this statement to check every element when it runs"
+    if not refuted and dir_defer(n, what, true): return
+    err_notes.push((-1, help))
+    wit_context(contract)
+    wit_fail(nodes[n].pos, what)
+
+# The length of the array the check at ref_gen_site stores into. O(route).
+ref_ir_holder_length = () -> int:
+    place = int(nodes[ref_gen_site].b)
+    if place == 0: fatal(nodes[ref_gen_site].pos, "this element's array is not known here, so its length bound cannot be checked")
+    held = gen_expr(place)
+    length = arr_len(held.v)
+    if held.owned: release(held.v, representation_type(ntype(place)))
+    length
+
+# Every element of a whole array value: a loop, only under `$runtime_checks`. O(length).
+ref_self_gen = (n: int, atom: RefAtom, self: int):
+    bound = e_bin(.add, VI, arr_len(self), e_iconst(ref_self_k(atom)))
+    if nodes[n].b != 0: bound = e_bin(.add, VI, bound, ref_ir_holder_length())
+    at = e_call(rt("__first_element_above"), [self, bound], VI)
+    iff(e_bin(.les, VI, e_iconst(0), at))
+    message = "refinement failed: an element is not a valid index of its array"
+    e_call_nr(rt("__requirement_fail"), [e_daddr(str_data(message)), e_daddr(loc_data(nodes[n].pos)), e_daddr(str_data("the position of the element")), at, e_daddr(str_data("the bound")), bound], -1)
+    endc()
+
+# A route to the array stored into, read again by the check: its selectors are simple.
+ref_holder_place = (place: int) -> int:
+    value = ref_place_alias(place)
+    loop nodes[value].kind == .field or nodes[value].kind == .index:
+        if nodes[value].kind == .index and not ref_simple_selector(int(nodes[value].b)): fatal(nodes[value].pos, ref_selector_message)
+        value = ref_place_alias(int(nodes[value].a))
+    copy_place(place)
+
+ref_selector_message = "a store into a self-length array selects with names, literals, arithmetic, lengths and element reads, none of which can change the array: give this selector a name first, `let at = ...`"
+
+# (no call in it: it cannot change an array. O(selector))
+ref_simple_selector = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .ident or k == .int_lit: return true
+    if k == .conv or k == .unary or k == .field: return ref_simple_selector(int(nodes[n].a))
+    if k == .intrinsic: return nodes[n].aux == i32(int(IN.len)) and nkids(n) == 1 and ref_simple_selector(kid(n, 0))
+    if k == .index: return ref_simple_selector(int(nodes[n].a)) and ref_simple_selector(int(nodes[n].b))
+    k == .binary and nodes[n].aux == 0 and ref_simple_selector(int(nodes[n].a)) and ref_simple_selector(int(nodes[n].b))
+
+# The stored element type with `grown` more elements behind it.
+ref_self_grown = (t0: int, grown: int) -> int:
+    t = prune(t0)
+    atoms: RefAtom[]
+    loop atom in ref_predicates[int(types[t].st)]:
+        atoms.push(RefAtom(atom.op, RefTerm(0), RefTerm(6, path = [-1], offset = atom.b.offset + grown)))
+    mk_refined(int(types[representation_type(t)].elem), ref_intern(atoms))
+
+# A value going into the array: checked against its length, with `grown` more elements.
+ref_self_value = (value: int, t: int, grown: int, place: int):
+    stored = ref_self_grown(t, grown)
+    if representation_type(ntype(value)) == int(types[stored].elem):
+        wrap_conv(value, .refinement, int(types[stored].elem))
+        nodes[value].aux2 = i32(stored)
+        owner = if cx >= 0: int(ctxs[cx].inst) else: 0
+        refine_requests.push(FactRequest(value, owner))
+        refine_owners[owner] = true
+    else: refine_coerce(value, stored)
+    nodes[value].b = i32(ref_holder_place(place))
+
+# Growing keeps every element valid, so only the new value owes anything and
+# the array grows in place, in its usual amortized O(1). (A plain store's value is
+# checked to the element's representation and wrapped once; see assign_refine.)
+ref_self_grow = (n: int, id: IN, place: int, t: int) -> bool:
+    if id == .clear: return true
+    if id == .push and nkids(n) == 2:
+        ref_self_value(kid(n, 1), t, 1, place)
+        return true
+    if id == .extend and nkids(n) == 2:
+        value = kid(n, 1)
+        refine_coerce(value, t)
+        nodes[value].b = i32(ref_holder_place(place))
+        return true
+    false
+
+# Does a swap have the array itself, in place of a private candidate?
+ref_self_direct_place = (a: int) -> bool: ref_self_active and ref_self_direct.has(a)
+
+ref_self_stored = (t0: int) -> bool:
+    t = prune(t0)
+    types[t].kind == .refined and ref_atoms_have_kind(ref_predicates[int(types[t].st)], 6) and tkind(t) != .array and is_int(representation_type(t))
+
+# `xs[i] = v` and `xs[i] += d`: one check of the value the store writes, after the
+# right side ran, against the length then. The whole store, as ref_field_store's is.
+ref_self_store = (statement: int, element: int) -> int:
+    lhs = ref_place_alias(int(nodes[statement].a))
+    if nodes[lhs].kind != .index: fatal(nodes[statement].pos, "this element's array is not known here, so its length bound cannot be checked")
+    # (the value is checked before the selector runs: a selector must leave the array alone)
+    if not ref_simple_selector(int(nodes[lhs].b)): fatal(nodes[lhs].pos, ref_selector_message)
+    result = statement
+    if nodes[statement].op == i32(int(Tok.assign)):
+        assign_value(statement, representation_type(element), 1)
+        nodes[statement].b = i32(refine_coerce(int(nodes[statement].b), element))
+    else: result = assign_update(statement, element, 0, 1)
+    nodes[int(nodes[statement].b)].b = i32(ref_holder_place(int(nodes[lhs].a)))
+    result
+
+ref_self_published = (statement: int) -> int:
+    value = int(nodes[statement].b)
+    if nodes[value].kind == .conv and nodes[value].aux == i32(int(CV.refinement)): return value
+    0
+
+ref_self_establish = (statement: int):
+    value = ref_self_published(statement)
+    if value == 0: return
+    nodes[value].ival = 1
+    ref_self_established[value] = true
+
+ref_self_shrink = (statement: int, place: int, id: IN):
+    value = ref_self_published(statement)
+    if value != 0: ref_self_shrinks[value] = (place, id)

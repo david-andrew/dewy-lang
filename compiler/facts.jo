@@ -341,6 +341,9 @@ const FACT_MAP_GROWN = -29
 # elements (fact_map_of): its value's projection on each field name is that
 # dictionary, so a loop element's field is a key of it (fact_loop_elements).
 const FACT_FIELD_KEYS = -30
+# A value holding a self-length contract: every element <= length + this constant
+# (ref_self_assume). A place's new value gets it again from the place's type.
+const FACT_SELF_BOUND = -31
 # Component c (< 8) of every element of this array of tuples, an integer: its
 # hull (FACT_COMPONENT_FACTS - 2c) and a value it is below (one less), as
 # FACT_ELEMENT_VALUE and FACT_ELEMENT_BELOW for an integer array (`[loop i in
@@ -1006,6 +1009,7 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
         if parts.len() > 0: fact_inventory_bound(s, v, parts, t, 0)
     if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(base, selector, element, v))
     if refine_active:
+        if element and ref_self_active: ref_self_element_row(s, base, v)
         # A field's contract may name its siblings: every stored record was
         # validated whole, so the field's value relates to theirs in base.
         args: int[]
@@ -1130,6 +1134,8 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
     loop pi >= 0:
         p = old[pi]
         pi = fact_projection_next_in(old, links, pi)
+        # (it held for the value replaced)
+        if not p.element and p.selector == FACT_SELF_BOUND: continue
         if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE or p.selector == FACT_FIELD_KEYS or p.selector == FACT_KEYS_POSITIONS or p.selector == FACT_ELEMENT_SAME_LENGTH or p.selector == FACT_ELEMENT_BELOW or fact_component_fact(p.selector)):
             if p.selector == FACT_ELEMENT_COPY: fact_fill_remainder(s, base, v, selector, p.value)
             # (a row stored back with the one length every row has, as
@@ -1167,7 +1173,9 @@ fact_read = (s: mut FactState, e: int) -> int:
     p = fact_place(e)
     if p.declaration == 0: return fact_new(s, FactBound(reason = .unsupported, witness = e), FactTerm(type = ntype(e)))
     i = fact_binding(s, p)
-    if i >= 0: return s.bindings[i].value
+    if i >= 0:
+        if ref_self_active: ref_self_place_read(e, s.bindings[i].value, s)
+        return s.bindings[i].value
     if p.root == .global and readonly_global(p.declaration) and fact_constant_global(p.declaration):
         value = fact_capture(int(nodes[int(globals[p.declaration].decl)].b), s)
         if value != 0:
@@ -1414,7 +1422,12 @@ fact_store_route = (s: mut FactState, route: FactRoute, value0: int, at: int, bo
     loop i >= 0:
         t = if i == 0: ntype(route.root) else: route.types[i - 1]
         value = fact_replace(s, values[i], route.selectors[i], route.elements[i], value, t)
+        # (a place with a self-length contract holds it for every checked value it gets)
+        if ref_self_active and i > 0 and ref_self_contract(route.types[i - 1]): ref_assume(route.types[i - 1], value, [], s)
         i -= 1
+    if ref_self_active:
+        held = refine_storage(route.root, ntype(route.root))
+        if ref_self_contract(held): ref_assume(held, value, [], s)
     if fact_exposed(p): fact_forget(s, at, .write, false, p)
     fact_rebind(s, p, value, at, if values.len() > 0: values[0] else: 0)
 
@@ -4550,6 +4563,10 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if k == .block:
             if nkids(n) > 0: values.push(kid(n, nkids(n) - 1))
         else if k == .for_ or k == .while_: values.push(int(nodes[n].a))
+        # (a store's check reads the array it stores into)
+        else if k == .conv and nodes[n].b != 0 and nodes[n].aux == i32(int(CV.refinement)):
+            values.push(int(nodes[n].a))
+            values.push(int(nodes[n].b))
         # (a fork closure's creation reads its captures, pushed above, not its body)
         else if k == .lambda: pass
         else if k == .call and fact_nd_call(n) != 0:
@@ -5124,7 +5141,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     if k == .field and (nodes[n].aux >= 0 and tkind(ntype(int(nodes[n].a))) == .struct_ or nodes[n].aux == -2 and tkind(ntype(int(nodes[n].a))) == .tuple):
         base = fact_capture(int(nodes[n].a), s)
         selector = if nodes[n].aux == -2: int(nodes[n].ival) else: int(nodes[n].name)
-        return fact_project(s, base, selector, false, refine_storage(n, ntype(n)))
+        held = fact_project(s, base, selector, false, refine_storage(n, ntype(n)))
+        if ref_self_active: ref_self_place_read(n, held, s)
+        return held
     if k == .tuple:
         value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
         loop i in [0..nkids(n)):

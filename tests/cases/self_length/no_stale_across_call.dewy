@@ -1,0 +1,9 @@
+R:type=[p:array<int64<(<? p.length)>>]
+shrink=(@r:R):>void=>{ r.p.clear(); r.p.push(0) }
+f=():>void=>{
+    let r = R[[1 0]]
+    let j = r.p[0]
+    shrink(@r)
+    printl(r.p[j])
+}
+main=():>void=>f()
