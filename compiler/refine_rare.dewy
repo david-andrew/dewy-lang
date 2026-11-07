@@ -1,0 +1,621 @@
+$runtime_checks
+from p"expr.jo" import (CV)
+from p"ast.jo" import (NF_CHECKED NF_MUT NF_RDONLY add_flag clone has_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (LF_CONST LF_MUTPARAM assign_value ceval ctxs cx dewy_at fns globals locals runtime_fn syms)
+from p"checker_expr.dewy" import (check_expr check_intrinsic lookup)
+from p"checks_assign_hooks.dewy" import (assign_update)
+from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_stmt bc_str)
+from p"checks_thin.dewy" import (check_assign readonly_global)
+from p"checks_thin_expr.dewy" import (ref_literal_holds)
+from p"expr.jo" import (CV IN bc_assign bc_bin callable_shape_eq capture_value coerce copy_place kid_lit last_checked ntype wrap_conv)
+from p"facts.jo" import (FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FACT_SELF_BOUND FactProjection FactState fact_add_projection fact_bound fact_compare fact_constant fact_difference fact_domain fact_new fact_project fact_projection_find fact_terms)
+from p"facts_elements.dewy" import (fact_inventory)
+from p"host_binds.jo" import (ref_resolve_host)
+from p"lower_group.dewy" import (gen_expr)
+from p"lower_storage.dewy" import (arr_len release)
+from p"math_ops.dewy" import (math_call math_word)
+from p"node_store.dewy" import (Node)
+from p"refine.jo" import (RefArrayCall is_total_dict mk_refined ref_addr_type ref_assume ref_declaring ref_dependent_ancestor ref_gen_site ref_holder_name ref_intern ref_interval ref_place_alias ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_span_copy ref_spans ref_value refine_bindings refine_coerce refine_owners refine_requests refine_storage representation_type str_set_of str_sets total_literals)
+from p"refine_ops.dewy" import (call_result_type copy_checked ref_addr_max ref_length_literal ref_own_length ref_path_length ref_self_contract ref_self_k ref_self_lower_bound ref_self_published ref_type_contains str_set_const total_dict_keys)
+from p"refine_predicates.dewy" import (ref_atoms_have_kind)
+from p"refine_resolve.dewy" import (ref_resolve_atoms)
+from p"refine_resolve_host.dewy" import (RefResolveLimit)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactRequest FactTerm RefAtom RefTerm)
+from p"string_domain_ops.dewy" import (string_domain_conversion)
+from p"string_domains.jo" import (string_domain_conversion_stops string_domains)
+from p"type_ops.dewy" import (dt mk_array)
+from p"type_refinement.dewy" import (tr_limit)
+from p"types.jo" import (T_I16 T_I32 T_I8 T_INT T_MATH_INT T_STR T_U16 T_U32 T_U64 T_U8 T_VOID fields has_var is_int prune struct_targ structs tkind type_eq types)
+from p"util.jo" import (fatal name_of names)
+
+RefineRareWord:type=int64<overflow='wrap'>
+# a dictionary literal given for a totaldict: an entry for every key
+total_literal_check=(n:RefineRareWord t:RefineRareWord):>void=>$unsafe {
+    let [_ keys]=total_dict_keys(struct_targ(RefineRareWord(types.ptr[prune(RefineRareWord(types.ptr[prune(t)].elem))].st) 0))
+    let given:array<string>=[]
+    loop pair in kids(n) {
+        let key=kid_lit(RefineRareWord(nodes.ptr[pair].a))
+        if nodes.ptr[key].kind =? 'str_lit' {given.push("'{name_of(RefineRareWord(nodes.ptr[key].sval))}'")} else if nodes.ptr[key].kind =? 'int_lit' {given.push("{nodes.ptr[key].ival}")}
+        else if nodes.ptr[key].kind =? 'unary' and nodes.ptr[kid_lit(RefineRareWord(nodes.ptr[key].a))].kind =? 'int_lit' {given.push("{-nodes.ptr[kid_lit(RefineRareWord(nodes.ptr[key].a))].ival}")} else {fatal(nodes.ptr[RefineRareWord(nodes.ptr[pair].a)].pos "a totaldict literal's keys are literals, so every key is seen to be there")}
+    }
+    let missing:array<string>=[]
+    loop key in keys {
+        if not given.contains(key) {missing.push(key)}
+    }
+    if missing.length >? 0 {fatal(nodes.ptr[n].pos "this totaldict has no entry for {join(missing ", ")}")}
+    total_literals[n]=true
+}
+total_dict_coerce=(n:RefineRareWord t:RefineRareWord):>int64=>$unsafe {
+    let base=RefineRareWord(types.ptr[prune(t)].elem)
+    if total_literals.has(n) {
+        coerce(n base);
+        return n
+    }
+    let source=prune(refine_storage(n ntype(n)))
+    if source =? prune(t) or nodes.ptr[n].kind =? 'call' and is_total_dict(call_result_type(n)) or total_const(n t) {
+        coerce(n base);
+        return n
+    }
+    fatal(nodes.ptr[n].pos "a {dt(representation_type(ntype(n)))} may be missing keys, so it is not a {dt(t)} (a totaldict is made from a literal with every key)")
+    n
+}
+# a `const` dictionary whose literal has every key is total wherever it is used
+total_const=(n:RefineRareWord t:RefineRareWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? int32(2) {return false}
+    let g=globals.ptr[RefineRareWord(nodes.ptr[n].sym)]
+    let decl=int64(g.decl)
+    if decl =? 0 or nodes.ptr[decl].kind not=? 'vardecl' or not has_flag(decl NF_RDONLY) {return false}
+    let init=RefineRareWord(nodes.ptr[decl].b)
+    if init =? 0 or nodes.ptr[init].kind not=? 'map_lit' {return false}
+    if not type_eq(representation_type(int64(g.type)) RefineRareWord(types.ptr[prune(t)].elem)) {return false}
+    let [_ keys]=total_dict_keys(struct_targ(RefineRareWord(types.ptr[prune(RefineRareWord(types.ptr[prune(t)].elem))].st) 0))
+    let given:array<string>=[]
+    loop pair in kids(init) {
+        let key=kid_lit(RefineRareWord(nodes.ptr[pair].a))
+        if nodes.ptr[key].kind =? 'str_lit' {given.push("'{name_of(RefineRareWord(nodes.ptr[key].sval))}'")} else if nodes.ptr[key].kind =? 'dotname' and str_set_of(ntype(key)) not=? 0 {given.push("'{str_sets[str_set_of(ntype(key))][RefineRareWord(nodes.ptr[key].aux)]}'")}
+        else if nodes.ptr[key].kind =? 'int_lit' {given.push("{nodes.ptr[key].ival}")}
+    }
+    loop key in keys {
+        if not given.contains(key) {return false}
+    }
+    true
+}
+str_set_text=(id:int64):>string=>{
+    let text=""
+    loop value in str_sets[id] {
+        if (text as array<uint8>).length >? 0 {text="{text} | "}
+        text="{text}'{value}'"
+    }
+    text
+}
+ref_resolve_value=(n:int64):>RefTerm=>$unsafe {
+    let name=RefineRareWord(nodes.ptr[n].name)
+    if ref_holder_name not=? 0 and name =? ref_holder_name {return RefTerm(6)}
+    let sym=lookup(name)
+    # (a module const, `const N = NAMES.length` too: its value while compiling)
+    if sym not=? 0 and (syms.ptr[sym].kind =? 'const_' or syms.ptr[sym].kind =? 'global' and readonly_global(RefineRareWord(syms.ptr[sym].ref)) and dewy_at(nodes.ptr[n].pos)) {
+        let value=clone(n)
+        check_expr(value 0);
+        if not is_int(ntype(value)) {fatal(nodes.ptr[n].pos "refinement bound must be an integer")}
+        let result=ceval(value)
+        return RefTerm(1 result.i ntype(value) =? T_U64 and result.i <? 0)
+    }
+    if sym not=? 0 and syms.ptr[sym].kind =? 'local' {
+        let l=RefineRareWord(syms.ptr[sym].ref)
+        if cx <? 0 or locals.ptr[l].owner not=? ctxs[cx].inst {fatal(nodes.ptr[n].pos "captured refinement dependencies await closure invariant checking")}
+        if RefineRareWord(locals.ptr[l].flags) & LF_CONST =? 0 {fatal(nodes.ptr[n].pos "refinement dependency must be a stable binding")}
+        return RefTerm(3 l)
+    }
+    if name =? ref_declaring {fatal(nodes.ptr[n].pos "'{name_of(name)}' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? {name_of(name)}.length)>>`, and nothing else")}
+    fatal(nodes.ptr[n].pos "unsupported refinement term '{name_of(name)}'")
+    RefTerm()
+}
+ref_resolve_limit=(n:int64):>RefResolveLimit=>$unsafe {
+    let base=RefineRareWord(nodes.ptr[n].a)
+    let spelling=name_of(RefineRareWord(nodes.ptr[base].name))
+    let ty=T_VOID
+    if spelling =? "int64" {ty=T_INT} else if spelling =? "int8" {ty=T_I8}
+    else if spelling =? "int16" {ty=T_I16} else if spelling =? "int32" {ty=T_I32}
+    else if spelling =? "uint64" {ty=T_U64} else if spelling =? "uint8" {ty=T_U8}
+    else if spelling =? "uint16" {ty=T_U16} else if spelling =? "uint32" {ty=T_U32}
+    if ty =? T_VOID {
+        let symbol=lookup(RefineRareWord(nodes.ptr[base].name))
+        if symbol not=? 0 and syms.ptr[symbol].kind =? 'type_' {ty=RefineRareWord(syms.ptr[symbol].ref)}
+    }
+    let member=name_of(RefineRareWord(nodes.ptr[n].name))
+    if ty not=? T_VOID and has_var(ty) and (member =? "min" or member =? "max") {return RefResolveLimit(true RefTerm(4 ty member =? "max"))}
+    if ty not=? T_VOID and (member =? "min" or member =? "max") {
+        if ty =? T_U64 {
+            let top:RefineRareWord=if member =? "max" {-1} else {0}
+            return RefResolveLimit(true RefTerm(1 top member =? "max"))
+        }
+        if ty =? ref_addr_type {
+            let top:RefineRareWord=if member =? "max" {ref_addr_max()} else {0}
+            return RefResolveLimit(true RefTerm(1 top))
+        }
+        let bound=fact_domain(ty)
+        let edge=if member =? "max" {bound.hi} else {bound.lo}
+        return RefResolveLimit(true RefTerm(1 edge))
+    }
+    RefResolveLimit()
+}
+# A string stored as a string set: a member literal is its word, another
+# literal an error, and any other string is looked up when it runs (a string
+# that is not a member panics). A set's value in a smaller or larger set is
+# mapped member by member.
+str_set_coerce=(n:RefineRareWord t:RefineRareWord):>int64=>$unsafe {
+    let id=str_set_of(t)
+    let source=str_set_of(ntype(n))
+    let pos=nodes.ptr[n].pos
+    if source =? id {return n}
+    let tracked:RefineRareWord=-1
+    if source =? 0 and string_domains.length >? 0 {tracked=string_domain_conversion(n id)}
+    if source not=? 0 {
+        if nodes.ptr[n].kind =? 'dotname' {
+            let text=str_sets[source][RefineRareWord(nodes.ptr[n].aux)]
+            let k=str_sets[id].index_of(text) ?? (-1)
+            if k <? 0 {fatal(pos "'{text}' is not one of {str_set_text(id)}")}
+            let moved_node=str_set_const(id k pos)
+            nodes.ptr[n]=nodes.ptr[moved_node]
+            return n
+        }
+        str_set_text_of(n)
+    }
+    else {coerce(n T_STR);}
+    let e=kid_lit(n)
+    if nodes.ptr[e].kind =? 'str_lit' and nodes.ptr[e].aux not=? 1 {
+        let text=name_of(RefineRareWord(nodes.ptr[e].sval))
+        let k=str_sets[id].index_of(text) ?? (-1)
+        if k <? 0 {fatal(pos "'{text}' is not one of {str_set_text(id)}")}
+        let moved_node=str_set_const(id k pos)
+        nodes.ptr[n]=nodes.ptr[moved_node]
+        return n
+    }
+    let inner=nodes.length
+    nodes.push(nodes.ptr[n])
+    let held="__set{inner}"
+    let out=bc_call("panic" [bc_str("a string that is not one of {str_set_text(id)}" pos)] pos)
+    let stop=out
+    let k=str_sets[id].length - 1
+    loop k >=? 0 {
+        let same=bc_bin('eq' bc_ident(held pos) bc_str(str_sets[id][k] pos) pos)
+        out=str_set_choice(same str_set_const(id k pos) out pos)
+        k -= 1
+    }
+    let moved_node=bc_block([bc_assign(bc_ident(held pos) inner pos) bc_stmt(out pos)] pos)
+    nodes.ptr[n]=nodes.ptr[moved_node]
+    check_expr(n t);
+    # (a binding's finite domain, settled after checking, may prove it: string_domains_materialize)
+    if tracked >=? 0 {string_domain_conversion_stops[tracked]=stop}
+    n
+}
+# if c a else b, as a value
+str_set_choice=(c:RefineRareWord a:RefineRareWord b:RefineRareWord pos:RefineRareWord):>int64=>$unsafe {
+    let n=mk('if_' pos)
+    nodes.ptr[n].a=int32(c)
+    nodes.ptr[n].b=int32(bc_block([bc_stmt(a pos)] pos))
+    nodes.ptr[n].c=int32(bc_block([bc_stmt(b pos)] pos))
+    n
+}
+# A set's value where a string is wanted: its member's text
+str_set_text_of=(n:RefineRareWord):>void=>$unsafe {
+    let id=str_set_of(ntype(n))
+    let pos=nodes.ptr[n].pos
+    if nodes.ptr[n].kind =? 'dotname' {
+        let moved_node=bc_str(str_sets[id][RefineRareWord(nodes.ptr[n].aux)] pos)
+        nodes.ptr[n]=nodes.ptr[moved_node]
+        check_expr(n T_STR);
+        return
+    }
+    # (any other value: its member's text from the set's table, lower.jo's set_text_table)
+    let inner=nodes.length
+    nodes.push(nodes.ptr[n])
+    let c=mk('conv' pos)
+    nodes.ptr[c].a=int32(inner)
+    nodes.ptr[c].aux=int32(int64(CV.set_text))
+    nodes.ptr[c].aux2=int32(id)
+    nodes.ptr[c].type=int32(T_STR)
+    add_flag(c NF_CHECKED)
+    nodes.ptr[n]=nodes.ptr[c]
+}
+refine_implies=(from_:int64 to:int64):>bool=>$unsafe {
+    if type_eq(from_ to) {return true}
+    if not callable_shape_eq(representation_type(from_) representation_type(to)) {return false}
+    if types.ptr[prune(to)].kind not=? 'refined' {return true}
+    # Formal slots are alpha-normalized; distinct lexical declarations remain
+    # distinct terms. Implication never synthesizes a runtime callable wrapper.
+    let saved=fact_terms
+    fact_terms=[FactTerm()]
+    let s=FactState()
+    let value=fact_new(@s fact_domain(representation_type(from_)))
+    let args:array<int64>=[]
+    loop _ in [0..32) {args.push(fact_new(@s FactBound()))}
+    ref_assume(from_ value args @s)
+    let ok=true
+    loop atom in ref_predicates[RefineRareWord(types.ptr[prune(to)].st)] {
+        if atom.a.kind =? 6 {
+            if ref_self_truth(@s value ref_self_k(atom)) not=? 1 {ok=false}
+            continue
+        }
+        let a=ref_value(atom.a value args to @s)
+        let b=ref_value(atom.b value args to @s)
+        if fact_compare(s atom.op a b) not=? 1 {ok=false}
+    }
+    fact_terms=saved
+    ok
+}
+# A word of type t as a Dewy `int` (a tagged word; math_lower.jo); made gets it when it is new.
+ref_math_term=(value:RefineRareWord t:RefineRareWord @made:array<int64>):>int64=>$unsafe {
+    if t =? T_MATH_INT {return value}
+    if t not=? 0 and is_int(t) and not types.ptr[t].sign and RefineRareWord(types.ptr[t].bits) =? 64 {
+        let out=math_call("__mi_unsigned" [value]).v
+        made.push(out)
+        return out
+    }
+    let out=math_word(value)
+    if out.owned {made.push(out.v)}
+    out.v
+}
+# Does function f's own signature contain the refined type t, so that its
+# formals are f's parameters?
+ref_signature_has=(f:RefineRareWord t:RefineRareWord):>bool=>$unsafe {
+    if f <=? 0 or f >=? fns.length {return false}
+    if ref_type_contains(RefineRareWord(fns.ptr[f].ret) t 0) {return true}
+    loop p in fns.ptr[f].ptypes {
+        if ref_type_contains(p t 0) {return true}
+    }
+    false
+}
+ref_decl_mask=(decl:RefineRareWord):>int64=>{
+    let mask:RefineRareWord=0
+    loop i in [0..nkids(decl)) {
+        if has_flag(kid(decl i) NF_MUT) {mask |= 1 << i}
+    }
+    mask
+}
+# Generic type limits are substituted together with the base. Dependencies in
+# the descriptor's argument list propagate TF_HAS_VAR without a new type field.
+ref_resolve_limit=(term:RefTerm):>RefTerm=>{
+    tr_limit(term)
+}
+# Dependent field updates construct a private candidate. Every sibling reads
+# the same captured parent; only a validated complete value replaces storage.
+# Whether field `at` of record t has no contract and no sibling's contract names it. O(fields + atoms).
+ref_field_free=(t:RefineRareWord at:RefineRareWord):>bool=>$unsafe {
+    if at <? 0 {return false}
+    let si=RefineRareWord(types.ptr[t].st)
+    loop i in [0..RefineRareWord(structs.ptr[si].nfields)) {
+        let ft=prune(RefineRareWord(fields.ptr[RefineRareWord(structs.ptr[si].fields) + i].type))
+        if types.ptr[ft].kind not=? 'refined' {continue}
+        if i =? at {return false}
+        loop atom in ref_predicates[RefineRareWord(types.ptr[ft].st)] {
+            if atom.a.kind =? 5 and atom.a.value =? at or atom.b.kind =? 5 and atom.b.value =? at {return false}
+        }
+    }
+    true
+}
+# A contract comparing only this array's own length with literals needs no
+# candidate: the length an operation leaves is checked with the array as it is,
+# after every operand ran and before the write, so it works in place and a failed
+# check changes nothing. Any other contract, or a place an operation does not
+# write directly, publishes a candidate. O(atoms + route).
+ref_length_route=(place:RefineRareWord t:RefineRareWord):>bool=>$unsafe {
+    if not ref_length_only(t) or ref_dependent_ancestor(place) {return false}
+    let route=place
+    loop nodes.ptr[route].kind =? 'field' or nodes.ptr[route].kind =? 'index' and nodes.ptr[route].aux =? 0 {route=RefineRareWord(nodes.ptr[route].a)}
+    nodes.ptr[route].kind =? 'ident'
+}
+ref_length_only=(t:RefineRareWord):>bool=>$unsafe {
+    if types.ptr[t].kind not=? 'refined' or tkind(representation_type(t)) not=? 'array' {return false}
+    loop atom in ref_predicates[RefineRareWord(types.ptr[t].st)] {
+        if not (ref_own_length(atom.a) and ref_length_literal(atom.b)) and not (ref_own_length(atom.b) and ref_length_literal(atom.a)) {return false}
+    }
+    true
+}
+# t's contract on a value other than the array itself: the array's length + delta
+# (place's own length), a plain count (`path` empty), or literals alone.
+ref_length_contract=(t:RefineRareWord delta:RefineRareWord path:array<int64>):>int64=>$unsafe {
+    let atoms:array<RefAtom>=[]
+    loop atom in ref_predicates[RefineRareWord(types.ptr[t].st)] {
+        if ref_own_length(atom.a) {atoms.push(RefAtom(atom.op RefTerm(0 path=path) RefTerm(1 atom.b.value - delta)))} else {atoms.push(RefAtom(atom.op RefTerm(1 atom.a.value - delta) RefTerm(0 path=path)))}
+    }
+    let predicate=ref_intern(atoms)
+    ref_span_copy(RefineRareWord(types.ptr[t].st) predicate)
+    predicate
+}
+# What op owes before it writes: a check to run (> 0), nothing (0), or it cannot
+# say (< 0: a candidate).
+ref_length_direct=(id:IN place:RefineRareWord t:RefineRareWord args:array<int64> pos:RefineRareWord):>int64=>$unsafe {
+    if id =? IN.push or id =? IN.insert or id =? IN.pop or id =? IN.remove {
+        let check=copy_place(place)
+        let delta=if id =? IN.push or id =? IN.insert {1} else {-1}
+        refine_coerce(check mk_refined(RefineRareWord(types.ptr[t].elem) ref_length_contract(t delta [-1])));
+        return check
+    }
+    let upper=true
+    let empty=true
+    loop atom in ref_predicates[RefineRareWord(types.ptr[t].st)] {
+        if not ref_own_length(atom.a) or atom.op =? 'ne' {upper=false}
+        if ref_own_length(atom.a) {
+            if not ref_literal_holds(atom.op 0 atom.b.value) {empty=false}
+        }
+        else if not ref_literal_holds(atom.op atom.a.value 0) {empty=false}
+    }
+    if id =? IN.clear {return if empty {0} else {-1}}
+    # (a shorter array under an upper bound; the count's own failure comes after)
+    if id =? IN.truncate {return if upper {0} else {-1}}
+    if id not=? IN.extend {return -1}
+    let length=mk('call' pos)
+    check_intrinsic(length int64(IN.len) [copy_place(place)] 0);
+    add_flag(length NF_CHECKED)
+    let added=mk('call' pos)
+    check_intrinsic(added int64(IN.len) [copy_checked(args[1])] 0);
+    add_flag(added NF_CHECKED)
+    let sum=bc_bin('plus' length added pos)
+    check_expr(sum T_INT);
+    sum=last_checked
+    refine_coerce(sum mk_refined(T_INT ref_length_contract(t 0 [])));
+    sum
+}
+ref_convert_record=(n:RefineRareWord target:RefineRareWord):>int64=>$unsafe {
+    let source=copy_checked(n)
+    let before:array<int64>=[]
+    source=capture_value(source ntype(source) @before)
+    let si=RefineRareWord(types.ptr[target].st)
+    let args:array<int64>=[]
+    loop i in [0..RefineRareWord(structs.ptr[si].nfields)) {
+        let field=fields.ptr[RefineRareWord(structs.ptr[si].fields) + i]
+        let value=bc_field(source name_of(int64(field.name)) nodes.ptr[n].pos)
+        check_expr(value 0);
+        value=last_checked
+        coerce(value int64(field.type));
+        args.push(value)
+    }
+    let ctor=mk('call' nodes.ptr[n].pos)
+    nodes.ptr[ctor]=Node(kind='call' pos=nodes.ptr[n].pos aux=2 type=int32(target) flags=int32(NF_CHECKED))
+    set_list(ctor args)
+    before.push(bc_stmt(ctor nodes.ptr[n].pos))
+    let moved_node=bc_block(before nodes.ptr[n].pos)
+    nodes.ptr[n]=nodes.ptr[moved_node]
+    nodes.ptr[n].type=int32(target)
+    nodes.ptr[n].aux=1
+    add_flag(n NF_CHECKED)
+    n
+}
+ref_mutable_result=(f:int64):>bool=>$unsafe {
+    let t=prune(RefineRareWord(fns.ptr[f].ret))
+    loop types.ptr[t].kind =? 'opt' {t=prune(RefineRareWord(types.ptr[t].elem))}
+    if types.ptr[t].kind not=? 'refined' {return false}
+    loop atom in ref_predicates[RefineRareWord(types.ptr[t].st)] {
+        loop term in [atom.a atom.b] {
+            if term.kind not=? 2 or term.value >=? fns.ptr[f].params.length {continue}
+            if RefineRareWord(locals.ptr[fns.ptr[f].params[term.value]].flags) & LF_MUTPARAM not=? 0 {return true}
+        }
+    }
+    false
+}
+ref_array_call_finish=(n:RefineRareWord prepared:RefArrayCall):>int64=>$unsafe {
+    let before=prepared.before
+    before.push(bc_stmt(copy_checked(n) nodes.ptr[n].pos))
+    let store=bc_assign(prepared.place copy_checked(prepared.candidate) nodes.ptr[n].pos)
+    let assigned=store
+    before.push(check_assign(store))
+    if prepared.self_length {ref_self_establish(assigned)}
+    let moved_node=bc_block(before nodes.ptr[n].pos)
+    nodes.ptr[n]=nodes.ptr[moved_node]
+    nodes.ptr[n].type=int32(T_VOID)
+    add_flag(n NF_CHECKED)
+    T_VOID
+}
+# Does the predicate say `name.length`? O(predicate syntax).
+ref_holder_mentioned=(n:RefineRareWord name:RefineRareWord depth:RefineRareWord):>bool=>$unsafe {
+    if n =? 0 or depth >? 32 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'field' {
+        let base=RefineRareWord(nodes.ptr[n].a)
+        if nodes.ptr[base].kind =? 'ident' and RefineRareWord(nodes.ptr[base].name) =? name and name_of(RefineRareWord(nodes.ptr[n].name)) =? "length" {return true}
+        return ref_holder_mentioned(base name depth + 1)
+    }
+    if k =? 'binary' or k =? 'and_' {return ref_holder_mentioned(RefineRareWord(nodes.ptr[n].a) name depth + 1) or ref_holder_mentioned(RefineRareWord(nodes.ptr[n].b) name depth + 1)}
+    if k =? 'not_' {return ref_holder_mentioned(RefineRareWord(nodes.ptr[n].a) name depth + 1)}
+    false
+}
+# Only `value op name.length + c`, with op < or <=: growing keeps it.
+ref_self_validate=(atoms:array<RefAtom> base:RefineRareWord pos:RefineRareWord):>void=>{
+    if has_var(base) or not type_eq(representation_type(base) T_INT) {fatal(pos "the elements of a self-length array are int64 or addr, found {dt(base)}")}
+    loop atom in atoms {
+        if not ref_atoms_have_kind([atom] 6) {continue}
+        if atom.a.kind =? 0 and atom.a.path.length =? 0 and atom.b.kind =? 6 and ref_path_length(atom.b.path) and (atom.op =? 'lt' or atom.op =? 'le') {continue}
+        if atom.a.kind =? 6 or ref_path_length(atom.b.path) {fatal(pos "a self-length refinement is an upper bound, `<? name.length` or `<=? name.length`, so that growing the array keeps it")}
+        fatal(pos "only the length of the array being declared can bound its elements")
+    }
+    ref_self_active=true
+}
+# array<int64<(<? name.length)>> resolved: the contract moves onto the array.
+ref_self_array=(array_type:RefineRareWord pos:RefineRareWord):>int64=>$unsafe {
+    if not ref_self_active {return array_type}
+    let element=prune(RefineRareWord(types.ptr[array_type].elem))
+    if types.ptr[element].kind not=? 'refined' or not ref_atoms_have_kind(ref_predicates[RefineRareWord(types.ptr[element].st)] 6) {return array_type}
+    let written=ref_predicates[RefineRareWord(types.ptr[element].st)]
+    let rest:array<RefAtom>=[]
+    let whole:array<RefAtom>=[]
+    let stored:array<RefAtom>=[]
+    loop atom in written {
+        if atom.b.kind =? 6 {
+            whole.push(RefAtom(atom.op RefTerm(6) RefTerm(0 path=[-1] offset=atom.b.offset)))
+            stored.push(atom)
+        }
+        else {rest.push(atom)}
+    }
+    # (an upper bound on a signed index means a valid index, unless a lower bound is written)
+    if not ref_self_lower_bound(rest) {rest.push(RefAtom('le' RefTerm(1 0) RefTerm(0)))}
+    let base=RefineRareWord(types.ptr[element].elem)
+    let plain=mk_refined(base ref_intern(rest))
+    let predicate=ref_intern(whole)
+    let span=ref_spans.get(RefineRareWord(types.ptr[element].st)) ?? pos
+    if not ref_spans.has(predicate) {ref_spans[predicate]=span}
+    let out=mk_refined(mk_array(plain) predicate)
+    ref_self_elements[prune(out)]=mk_refined(plain ref_intern(stored))
+    # (its whole-value check under `$runtime_checks`: only programs with such a type carry it)
+    runtime_fn("__first_element_above");
+    out
+}
+ref_self_assume=(@s:FactState value:RefineRareWord atom:RefAtom):>void=>{
+    if value =? 0 or s.projections.length >=? FACT_CAP {return}
+    if fact_projection_find(s value FACT_SELF_BOUND false) >=? 0 {return}
+    fact_add_projection(@s FactProjection(value FACT_SELF_BOUND false fact_constant(@s ref_self_k(atom))))
+}
+# A place's current value holds the place's contract, every write to it having been
+# checked, whatever a join kept of the fact. O(route), only with such a type about.
+ref_self_place_read=(place:RefineRareWord value:RefineRareWord @s:FactState):>void=>{
+    let t=refine_storage(place ntype(place))
+    if ref_self_contract(t) {ref_assume(t value [] @s)}
+}
+# An element read from a value known to hold the contract: O(1).
+ref_self_element_row=(@s:FactState base:RefineRareWord v:RefineRareWord):>void=>{
+    let i=fact_projection_find(s base FACT_SELF_BOUND false)
+    if i <? 0 {return}
+    let k=fact_bound(s s.projections[i].value).hi
+    if k =? FACT_MAX {return}
+    fact_difference(@s v fact_project(@s base (-1) false T_INT) k 0 16)
+}
+# Does every element of the value stay within its length + k? (A value joining
+# another array owes this much too, its elements being below a shorter length.)
+# 1, 0 refuted, -1 unknown. O(inventory).
+ref_self_truth=(@s:FactState value:RefineRareWord k:RefineRareWord):>int64=>{
+    if value =? 0 {return -1}
+    let held=fact_projection_find(s value FACT_SELF_BOUND false)
+    if held >=? 0 and fact_bound(s s.projections[held].value).hi <=? k {return 1}
+    let length=fact_project(@s value (-1) false T_INT)
+    if length =? 0 {return -1}
+    if fact_bound(s length).hi =? 0 {return 1}
+    let limit=ref_value(RefTerm(0 path=[-1] offset=k) value [] T_INT @s)
+    # (each element of a literal)
+    let parts=fact_inventory(s value)
+    if parts.length >? 0 {
+        let truth:RefineRareWord=1
+        loop part in parts {
+            let one=fact_compare(s 'le' part limit)
+            if one =? 0 {return 0}
+            if one <? 0 {truth=-1}
+        }
+        return truth
+    }
+    # (every element is one value, or lies under a bound: an element exists only if length >= 1)
+    let copy=fact_projection_find(s value FACT_ELEMENT_COPY false)
+    if copy >=? 0 {
+        let c=s.projections[copy].value
+        if fact_compare(s 'le' c limit) =? 1 or k <? FACT_MAX and fact_bound(s c).hi <=? k + 1 {return 1}
+    }
+    let hull=fact_projection_find(s value FACT_ELEMENT_VALUE false)
+    if hull >=? 0 and ref_self_hull_holds(@s fact_bound(s s.projections[hull].value).hi length k) {return 1}
+    let below=fact_projection_find(s value FACT_ELEMENT_BELOW false)
+    if below >=? 0 and fact_compare(s 'lt' s.projections[below].value ref_value(RefTerm(0 path=[-1] offset=k + 2) value [] T_INT @s)) =? 1 {return 1}
+    -1
+}
+# Is every element at most hi within the length + k, whatever the length is, or for its least?
+ref_self_hull_holds=(@s:FactState hi:RefineRareWord length:RefineRareWord k:RefineRareWord):>bool=>{
+    if k >=? FACT_MAX or hi >=? FACT_MAX {return false}
+    if hi <=? k + 1 {return true}
+    let least=fact_bound(s length).lo
+    least >? FACT_MIN and least >=? 0 and hi <=? least + k
+}
+# A shrink keeps the bound written on every element, as `v <? 1` in
+# `array<int64<v => v <? p.length and v <? 1>>`: each store of one has proven it. O(atoms).
+ref_self_written_truth=(@s:FactState self:RefineRareWord t:RefineRareWord k:RefineRareWord):>int64=>$unsafe {
+    let array=prune(RefineRareWord(types.ptr[t].elem))
+    if types.ptr[array].kind not=? 'array' {return -1}
+    let element=RefineRareWord(types.ptr[array].elem)
+    let length=fact_project(@s self (-1) false T_INT)
+    if self not=? 0 and length not=? 0 and ref_self_hull_holds(@s ref_interval(element fact_domain(element)).hi length k) {return 1}
+    -1
+}
+# The length of the array the check at ref_gen_site stores into. O(route).
+ref_ir_holder_length=():>int64=>$unsafe {
+    let place=RefineRareWord(nodes.ptr[ref_gen_site].b)
+    if place =? 0 {fatal(nodes.ptr[ref_gen_site].pos "this element's array is not known here, so its length bound cannot be checked")}
+    let held=gen_expr(place)
+    let length=arr_len(held.v)
+    if held.owned {release(held.v representation_type(ntype(place)))}
+    length
+}
+# A route to the array stored into, read again by the check: its selectors are simple.
+ref_holder_place=(place:RefineRareWord):>int64=>$unsafe {
+    let value=ref_place_alias(place)
+    loop nodes.ptr[value].kind =? 'field' or nodes.ptr[value].kind =? 'index' {
+        if nodes.ptr[value].kind =? 'index' and not ref_simple_selector(RefineRareWord(nodes.ptr[value].b)) {fatal(nodes.ptr[value].pos ref_selector_message)}
+        value=ref_place_alias(RefineRareWord(nodes.ptr[value].a))
+    }
+    copy_place(place)
+}
+# (no call in it: it cannot change an array. O(selector))
+ref_simple_selector=(n:RefineRareWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' or k =? 'int_lit' {return true}
+    if k =? 'conv' or k =? 'unary' or k =? 'field' {return ref_simple_selector(RefineRareWord(nodes.ptr[n].a))}
+    if k =? 'intrinsic' {return nodes.ptr[n].aux =? int32(int64(IN.len)) and nkids(n) =? 1 and ref_simple_selector(kid(n 0))}
+    if k =? 'index' {return ref_simple_selector(RefineRareWord(nodes.ptr[n].a)) and ref_simple_selector(RefineRareWord(nodes.ptr[n].b))}
+    k =? 'binary' and nodes.ptr[n].aux =? 0 and ref_simple_selector(RefineRareWord(nodes.ptr[n].a)) and ref_simple_selector(RefineRareWord(nodes.ptr[n].b))
+}
+# The stored element type with `grown` more elements behind it.
+ref_self_grown=(t0:RefineRareWord grown:RefineRareWord):>int64=>$unsafe {
+    let t=prune(t0)
+    let atoms:array<RefAtom>=[]
+    loop atom in ref_predicates[RefineRareWord(types.ptr[t].st)] {
+        atoms.push(RefAtom(atom.op RefTerm(0) RefTerm(6 path=[-1] offset=atom.b.offset + grown)))
+    }
+    mk_refined(RefineRareWord(types.ptr[representation_type(t)].elem) ref_intern(atoms))
+}
+# A value going into the array: checked against its length, with `grown` more elements.
+ref_self_value=(value:RefineRareWord t:RefineRareWord grown:RefineRareWord place:RefineRareWord):>void=>$unsafe {
+    let stored=ref_self_grown(t grown)
+    if representation_type(ntype(value)) =? RefineRareWord(types.ptr[stored].elem) {
+        wrap_conv(value CV.refinement RefineRareWord(types.ptr[stored].elem))
+        nodes.ptr[value].aux2=int32(stored)
+        let owner=if cx >=? 0 {RefineRareWord(ctxs[cx].inst)} else {0}
+        refine_requests.push(FactRequest(value owner))
+        refine_owners[owner]=true
+    }
+    else {refine_coerce(value stored);}
+    nodes.ptr[value].b=int32(ref_holder_place(place))
+}
+# Growing keeps every element valid, so only the new value owes anything and
+# the array grows in place, in its usual amortized O(1). (A plain store's value is
+# checked to the element's representation and wrapped once; see assign_refine.)
+ref_self_grow=(n:RefineRareWord id:IN place:RefineRareWord t:RefineRareWord):>bool=>$unsafe {
+    if id =? IN.clear {return true}
+    if id =? IN.push and nkids(n) =? 2 {
+        ref_self_value(kid(n 1) t 1 place)
+        return true
+    }
+    if id =? IN.extend and nkids(n) =? 2 {
+        let value=kid(n 1)
+        refine_coerce(value t);
+        nodes.ptr[value].b=int32(ref_holder_place(place))
+        return true
+    }
+    false
+}
+# `xs[i] = v` and `xs[i] += d`: one check of the value the store writes, after the
+# right side ran, against the length then. The whole store, as ref_field_store's is.
+ref_self_store=(statement:RefineRareWord element:RefineRareWord):>int64=>$unsafe {
+    let lhs=ref_place_alias(RefineRareWord(nodes.ptr[statement].a))
+    if nodes.ptr[lhs].kind not=? 'index' {fatal(nodes.ptr[statement].pos "this element's array is not known here, so its length bound cannot be checked")}
+    # (the value is checked before the selector runs: a selector must leave the array alone)
+    if not ref_simple_selector(RefineRareWord(nodes.ptr[lhs].b)) {fatal(nodes.ptr[lhs].pos ref_selector_message)}
+    let result=statement
+    if nodes.ptr[statement].op =? int32(47) {
+        assign_value(statement representation_type(element) 1);
+        nodes.ptr[statement].b=int32(refine_coerce(RefineRareWord(nodes.ptr[statement].b) element))
+    }
+    else {result=assign_update(statement element 0 1)}
+    nodes.ptr[RefineRareWord(nodes.ptr[statement].b)].b=int32(ref_holder_place(RefineRareWord(nodes.ptr[lhs].a)))
+    result
+}
+ref_self_establish=(statement:RefineRareWord):>void=>$unsafe {
+    let value=ref_self_published(statement)
+    if value =? 0 {return}
+    nodes.ptr[value].ival=1
+    ref_self_established[value]=true
+}
