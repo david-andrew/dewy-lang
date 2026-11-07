@@ -1,0 +1,402 @@
+$runtime_checks
+from p"checks_text.dewy" import (byte_find)
+from p"@lib/core/os.jo" import (eprint is_dir list_dir)
+from p"@lib/core/str.jo" import (ends_with starts_with)
+from p"checker_tokens.dewy" import (Tok)
+from p"dewy_fmt.jo" import (df_text df_tokens)
+from p"fmt.jo" import (FK_AT FK_CLOSE FK_COLON FK_COMMA FK_COMMENT FK_CONT FK_DOT FK_DOTDOT FK_NL FK_OP FK_OPEN FK_POST FK_STR FK_WORD FTok F_OPS f_depth_at f_src f_toks fmt_failed fmt_lexes)
+from p"ide_text.dewy" import (ide_skip_str ide_str_start)
+from p"lex.jo" import (Token is_ident_char is_ident_start keywords lex)
+from p"util.jo" import (files)
+
+FmtWord:type=int64<overflow='wrap'>
+f_scan=():>void=>{
+    let s=f_src
+    let n=(s as array<uint8>).length
+    f_toks=[]
+    let i:FmtWord=0
+    loop i <? n {
+        let c=(s as array<uint8>)[i]
+        if c =? b' ' or c =? b'\t' or c =? b'\r' {
+            i += 1
+            continue
+        }
+        if c =? b'\n' {
+            f_toks.push(FTok(FK_NL i + 1 i + 1))
+            i += 1
+            continue
+        }
+        if c =? b'\\' and i + 1 <? n and ((s as array<uint8>)[i + 1] =? b'\n' or (s as array<uint8>)[i + 1] =? b'\r') {
+            f_toks.push(FTok(FK_CONT i i + 1))
+            i += 1
+            continue
+        }
+        if c =? b'#' {
+            let e=i
+            loop e <? n and (s as array<uint8>)[e] not=? b'\n' {e += 1}
+            f_toks.push(FTok(FK_COMMENT i e))
+            i=e
+            continue
+        }
+        if ide_str_start(s i) {
+            let e=ide_skip_str(s i)
+            f_toks.push(FTok(FK_STR i e))
+            i=e
+            continue
+        }
+        if c >=? b'0' and c <=? b'9' {
+            let e=i + 1
+            if c =? b'0' and e <? n and ((s as array<uint8>)[e] =? b'x' or (s as array<uint8>)[e] =? b'X' or (s as array<uint8>)[e] =? b'b' or (s as array<uint8>)[e] =? b'B' or (s as array<uint8>)[e] =? b'o' or (s as array<uint8>)[e] =? b'O') {
+                e += 1
+                loop e <? n and (is_ident_char((s as array<uint8>)[e])) {e += 1}
+            }
+            else {
+                loop e <? n and ((s as array<uint8>)[e] >=? b'0' and (s as array<uint8>)[e] <=? b'9' or (s as array<uint8>)[e] =? b'_') {e += 1}
+                if e + 1 <? n and (s as array<uint8>)[e] =? b'.' and (s as array<uint8>)[e + 1] >=? b'0' and (s as array<uint8>)[e + 1] <=? b'9' {
+                    e += 1
+                    loop e <? n and ((s as array<uint8>)[e] >=? b'0' and (s as array<uint8>)[e] <=? b'9' or (s as array<uint8>)[e] =? b'_') {e += 1}
+                }
+                if e + 1 <? n and ((s as array<uint8>)[e] =? b'e' or (s as array<uint8>)[e] =? b'E') and ((s as array<uint8>)[e + 1] >=? b'0' and (s as array<uint8>)[e + 1] <=? b'9' or ((s as array<uint8>)[e + 1] =? b'-' or (s as array<uint8>)[e + 1] =? b'+') and e + 2 <? n and (s as array<uint8>)[e + 2] >=? b'0' and (s as array<uint8>)[e + 2] <=? b'9') {
+                    e += 2
+                    loop e <? n and (s as array<uint8>)[e] >=? b'0' and (s as array<uint8>)[e] <=? b'9' {e += 1}
+                }
+                loop e <? n and is_ident_char((s as array<uint8>)[e]) {e += 1}
+            }
+            f_toks.push(FTok(FK_WORD i e))
+            i=e
+            continue
+        }
+        if is_ident_start(c) {
+            let e=i + 1
+            loop e <? n and is_ident_char((s as array<uint8>)[e]) {e += 1}
+            let w=s.byte_slice(i e)
+            if (w =? "and" or w =? "or" or w =? "xor") and e <? n and (s as array<uint8>)[e] =? b'=' and (e + 1 >=? n or (s as array<uint8>)[e + 1] not=? b'=') {
+                # (and=, or=, xor=: compound assignments, only without a space)
+                f_toks.push(FTok(FK_OP i e + 1))
+                i=e + 1
+                continue
+            }
+            f_toks.push(FTok(FK_WORD i e))
+            i=e
+            continue
+        }
+        if c =? b'[' and i + 2 <? n and (s as array<uint8>)[i + 1] =? b']' and (s as array<uint8>)[i + 2] =? b'=' and i >? 0 and (s as array<uint8>)[i - 1] =? b'(' {
+            # (the name of the operator that sets an element: ([]=))
+            f_toks.push(FTok(FK_WORD i i + 3))
+            i += 3
+            continue
+        }
+        let k=FK_OP
+        let len_:FmtWord=1
+        if c =? b'(' or c =? b'[' or c =? b'\{' {k=FK_OPEN} else if c =? b')' or c =? b']' or c =? b'\}' {k=FK_CLOSE}
+        else if c =? b',' or c =? b';' {k=FK_COMMA} else if c =? b':' {k=FK_COLON}
+        else if c =? b'@' {k=FK_AT} else if c =? b'.' {
+            k=FK_DOT
+            if i + 1 <? n and (s as array<uint8>)[i + 1] =? b'.' {
+                k=FK_DOTDOT
+                len_=2
+                if i + 2 <? n and (s as array<uint8>)[i + 2] =? b'.' {len_=3}
+            }
+            else if i + 1 <? n and ((s as array<uint8>)[i + 1] =? b'+' or (s as array<uint8>)[i + 1] =? b'-' or (s as array<uint8>)[i + 1] =? b'*' or (s as array<uint8>)[i + 1] =? b'/' or (s as array<uint8>)[i + 1] =? b'%' or (s as array<uint8>)[i + 1] =? b'^' or (s as array<uint8>)[i + 1] =? b'<' or (s as array<uint8>)[i + 1] =? b'>' or i + 2 <? n and ((s as array<uint8>)[i + 1] =? b'=' or (s as array<uint8>)[i + 1] =? b'!') and (s as array<uint8>)[i + 2] =? b'=') {
+                # (a dotted operator: .+ .* .== .<= ...)
+                k=FK_OP
+                len_=2
+                if i + 2 <? n and (s as array<uint8>)[i + 2] =? b'=' and (s as array<uint8>)[i + 1] not=? b'+' and (s as array<uint8>)[i + 1] not=? b'-' and (s as array<uint8>)[i + 1] not=? b'*' and (s as array<uint8>)[i + 1] not=? b'/' and (s as array<uint8>)[i + 1] not=? b'%' and (s as array<uint8>)[i + 1] not=? b'^' {len_=3}
+                # (xs .+= 1: the = only without a space)
+                if i + len_ <? n and (s as array<uint8>)[i + len_] =? b'=' and (i + len_ + 1 >=? n or (s as array<uint8>)[i + len_ + 1] not=? b'=') {len_ += 1}
+            }
+        }
+        else {
+            loop o in F_OPS {
+                if i + (o as array<uint8>).length <=? n and s.byte_slice(i i + (o as array<uint8>).length) =? o {
+                    len_=(o as array<uint8>).length
+                    break
+                }
+            }
+            if len_ =? 1 and (c =? b'?' or c =? b'!') {k=FK_POST}
+        }
+        f_toks.push(FTok(k i i + len_))
+        i += len_
+    }
+}
+f_text=(t:FTok):>string=>{
+    f_src.byte_slice(t.s t.e)
+}
+# a keyword that is a value (an operand), not a word an operand follows
+f_value_kw=(w:string):>bool=>{
+    w =? "true" or w =? "false" or w =? "none" or w =? "null"
+}
+f_is_kw=(w:string):>bool=>{
+    keywords.get(w) not=? none and not f_value_kw(w)
+}
+# does an operator after t act on what comes before it (t ends a value)?
+f_ends_value=(t:FTok):>bool=>{
+    if t.k =? FK_WORD {return not f_is_kw(f_text(t))}
+    t.k =? FK_STR or t.k =? FK_CLOSE or t.k =? FK_POST
+}
+# the spaces between a and b on a line
+f_gap=(a:FTok b:FTok):>int64=>{
+    if b.keep {return min(b.s - a.e 1)}
+    if b.sep {return 1}
+    if a.k =? FK_OPEN or b.k =? FK_CLOSE or b.k =? FK_COMMA or b.k =? FK_COLON {return 0}
+    if a.k =? FK_COMMA or a.k =? FK_COLON {return 1}
+    if a.k =? FK_DOTDOT and b.k =? FK_WORD and f_is_kw(f_text(b)) {return 1}
+    if a.k =? FK_AT or a.k =? FK_DOT or a.k =? FK_DOTDOT or b.k =? FK_DOTDOT {return 0}
+    if a.k =? FK_OP and a.unary {return 0}
+    if b.k =? FK_POST and f_ends_value(a) {return 0}
+    if b.k =? FK_DOT {
+        if f_ends_value(a) {return 0}
+        return 1
+    }
+    if b.k =? FK_OPEN and (f_src as array<uint8>)[b.s] not=? b'\{' and f_ends_value(a) {return 0}
+    if b.k =? FK_OPEN and a.k =? FK_POST {return 0}
+    1
+}
+# mark each operator that comes before its operand (nothing comes before a statement's first token)
+f_mark_unary=():>void=>{
+    let prev:FmtWord=-1
+    let d:FmtWord=0
+    let arr:array<bool>=[]
+    let first=true
+    let cont=false
+    loop i in [0..f_toks.length) {
+        let t=f_toks[i]
+        if t.k =? FK_NL {
+            first=true
+            continue
+        }
+        if t.k =? FK_COMMENT {continue}
+        if t.k =? FK_CONT {
+            cont=true
+            continue
+        }
+        if first and d =? 0 and not cont {prev=-1}
+        first=false
+        cont=false
+        if t.k =? FK_OP {
+            let c=(f_src as array<uint8>)[t.s]
+            if t.e - t.s =? 1 and (c =? b'-' or c =? b'+' or c =? b'*' or c =? b'&' or c =? b'~') or f_text(t) =? "**" {
+                f_toks[i].unary=prev <? 0 or not f_ends_value(f_toks[prev])
+                # (in an array, a sign with a space before it and none after starts an element)
+                if (c =? b'-' or c =? b'+') and arr.length >? 0 and arr[arr.length - 1] and prev >=? 0 and t.s >? f_toks[prev].e and i + 1 <? f_toks.length and f_toks[i + 1].s =? t.e {
+                    f_toks[i].unary=true
+                    f_toks[i].sep=true
+                }
+            }
+        }
+        # (whether ( or [ after a value has a space before it: a call or an index, or another element)
+        if t.k =? FK_OPEN and prev >=? 0 and f_ends_value(f_toks[prev]) and (f_src as array<uint8>)[t.s] not=? b'\{' {f_toks[i].keep=true}
+        if t.k =? FK_OPEN {
+            d += 1
+            # (an array, not an index: [ not right after a value)
+            arr.push((f_src as array<uint8>)[t.s] =? b'[' and (prev <? 0 or not f_ends_value(f_toks[prev]) or t.s >? f_toks[prev].e))
+            # (a unit after a number or an array, 9.81(m/s^2), [1 2](mm): as it is written)
+            if (f_src as array<uint8>)[t.s] =? b'(' and prev >=? 0 and t.s =? f_toks[prev].e and (f_toks[prev].k =? FK_WORD and (f_src as array<uint8>)[f_toks[prev].s] >=? b'0' and (f_src as array<uint8>)[f_toks[prev].s] <=? b'9' or (f_src as array<uint8>)[f_toks[prev].s] =? b']') {
+                let k=i + 1
+                let dd:FmtWord=1
+                loop k <? f_toks.length and dd >? 0 and f_toks[k].k not=? FK_NL {
+                    if f_toks[k].k =? FK_OPEN {dd += 1} else if f_toks[k].k =? FK_CLOSE {dd -= 1}
+                    f_toks[k].keep=true
+                    k += 1
+                }
+            }
+        }
+        else if t.k =? FK_CLOSE and d >? 0 {
+            d -= 1
+            arr.pop();
+        }
+        prev=i
+    }
+}
+f_depths=():>void=>{
+    f_depth_at=[]
+    let d:FmtWord=0
+    loop t in f_toks {
+        if t.k =? FK_OPEN {d += 1} else if t.k =? FK_CLOSE and d >? 0 {d -= 1}
+        f_depth_at.push(d)
+    }
+}
+# the width of the indentation at s (tabs to the next multiple of 4)
+f_indent_width=(s:FmtWord):>int64=>{
+    let w:FmtWord=0
+    let i=s
+    loop i <? (f_src as array<uint8>).length {
+        let c=(f_src as array<uint8>)[i]
+        if c =? b' ' {w += 1} else if c =? b'\t' {w=(w + 4) & ~3}
+        else {break}
+        i += 1
+    }
+    w
+}
+# the indentation of the next line with code after the line break at token j (-1: none)
+f_next_indent=(j:FmtWord):>int64=>{
+    let k=j
+    loop k <? f_toks.length {
+        if f_toks[k].k =? FK_NL and k + 1 <? f_toks.length and f_toks[k + 1].k not=? FK_NL and f_toks[k + 1].k not=? FK_COMMENT {return f_indent_width(f_toks[k].s)}
+        k += 1
+    }
+    -1
+}
+# the column (in bytes) of offset p on its line
+f_col=(p:FmtWord):>int64=>{
+    let a=p
+    loop a >? 0 and (f_src as array<uint8>)[a - 1] not=? b'\n' {a -= 1}
+    p - a
+}
+fmt_text=(src:string):>string=>{
+    f_src=src
+    f_scan()
+    f_depths()
+    f_mark_unary()
+    let crlf=byte_find(src "\r\n") >=? 0
+    let out=""
+    let stack=[0]
+    let delta:FmtWord=0
+    let depth:FmtWord=0
+    let cont=false
+    let blanks:FmtWord=0
+    let i:FmtWord=0
+    let line_start:FmtWord=0
+    loop i <=? f_toks.length {
+        # one physical line: tokens up to the next line break
+        let j=i
+        loop j <? f_toks.length and f_toks[j].k not=? FK_NL {j += 1}
+        if j =? i {
+            blanks += 1
+        }
+        else {
+            if blanks >? 0 and (out as array<uint8>).length >? 0 {
+                loop _ in [0..min(blanks 2)) {out="{out}\n"}
+            }
+            blanks=0
+            let ow=f_indent_width(line_start)
+            let iw:FmtWord=0
+            if f_toks[i].k =? FK_COMMENT and depth =? 0 and not cont {
+                # a comment line: as deep as the block it is at the indentation of (or the block
+                # the next line starts), else where it was (moved as the line before)
+                let k=stack.index_of(ow) ?? (-1)
+                if k >=? 0 {iw=4 * k} else if ow >? stack[stack.length - 1] and f_next_indent(j) =? ow {iw=4 * stack.length}
+                else {iw=max(0 ow + delta)}
+            }
+            else if depth =? 0 and not cont {
+                if ow >? stack[stack.length - 1] {stack.push(ow)} else {
+                    loop stack.length >? 1 and ow <? stack[stack.length - 1] {stack.pop();}
+                    if ow not=? stack[stack.length - 1] {return src}
+                }
+                iw=4 * (stack.length - 1)
+                delta=iw - ow
+            }
+            else {iw=max(0 ow + delta)}
+            let line=""
+            loop _ in [0..iw) {line="{line} "}
+            loop k in [i..j) {
+                let t=f_toks[k]
+                if t.k =? FK_COMMENT {
+                    let s=trim_right(f_text(t))
+                    if k =? i {line="{line}{s}"} else {
+                        # (keep the comment's column, if the code leaves room for it)
+                        let gap=t.s - f_toks[k - 1].e
+                        let want=f_col(t.s) + iw - ow
+                        if gap <=? 1 {line="{line} "} else {
+                            loop (line as array<uint8>).length <? want or (line as array<uint8>).length <? (trim_right(line) as array<uint8>).length + 2 {line="{line} "}
+                        }
+                        line="{line}{s}"
+                    }
+                    continue
+                }
+                if k >? i {
+                    let g=f_gap(f_toks[k - 1] t)
+                    if t.k =? FK_CONT {g=1}
+                    loop _ in [0..g) {line="{line} "}
+                }
+                line="{line}{f_text(t)}"
+            }
+            out="{out}{trim_right(line)}"
+            out="{out}\n"
+            cont=f_toks[j - 1].k =? FK_CONT
+            depth=f_depth_at[j - 1]
+        }
+        if j >=? f_toks.length {break}
+        line_start=f_toks[j].s
+        i=j + 1
+    }
+    # (CRLF files stay so, strings over several lines included)
+    if crlf {out=out.replace("\r\n" "\n").replace("\n" "\r\n")}
+    out
+}
+trim_right=(s:string):>string=>{
+    let e=(s as array<uint8>).length
+    loop e >? 0 and ((s as array<uint8>)[e - 1] =? b' ' or (s as array<uint8>)[e - 1] =? b'\t' or (s as array<uint8>)[e - 1] =? b'\r') {e -= 1}
+    s.byte_slice(0 e)
+}
+# the tokens the lexer makes of src, as text, with what the parser asks about the spaces between
+# them (parse.jo, space_before): before ( or [ after a value (a call or an index, or another
+# element of an array, or a unit), before the = of and=, or=, xor= and .+=, and around a sign in
+# an array ([a -b] is two elements)
+fmt_tokens=(file:FmtWord src:string):>array<string>=>{
+    if files[file].is_dewy {return df_tokens(file src)}
+    let toks=lex(file src)
+    let out:array<string>=[]
+    let arr:array<bool>=[]
+    loop i in 0.. and t in toks {
+        let k=t.kind
+        let sig="{k} {src.byte_slice(int64(t.start) int64(t.start) + int64(t.len))}"
+        let pv=Tok.newline
+        if i >? 0 {pv=toks[i - 1].kind}
+        let after_value=i >? 0 and fmt_value_end(pv)
+        if (k =? 'lparen' or k =? 'lbrack') and after_value {sig="{sig} s{fmt_space(toks i)}"}
+        if k =? 'assign' and (pv =? 'kw_and' or pv =? 'kw_or' or pv =? 'kw_xor' or pv =? 'dotop') {sig="{sig} s{fmt_space(toks i)}"}
+        if (k =? 'minus' or k =? 'plus') and arr.length >? 0 and arr[arr.length - 1] and i + 1 <? toks.length {
+            sig="{sig} m{fmt_space(toks i) and not fmt_space(toks i + 1)}"
+        }
+        if k =? 'lparen' or k =? 'lbrace' {arr.push(false)} else if k =? 'lbrack' {arr.push(not after_value or fmt_space(toks i))}
+        else if (k =? 'rparen' or k =? 'rbrack' or k =? 'rbrace') and arr.length >? 0 {arr.pop();}
+        out.push(sig)
+    }
+    out
+}
+fmt_value_end=(k:Tok):>bool=>{
+    k =? 'ident' or k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'rparen' or k =? 'rbrack' or k =? 'rbrace' or k =? 'question' or k =? 'bang' or k =? 'kw_true' or k =? 'kw_false' or k =? 'kw_none' or k =? 'kw_null'
+}
+# as parse.jo's space_before
+fmt_space=(toks:array<Token> i:FmtWord):>bool=>{
+    if i =? 0 {return true}
+    let prev_end=FmtWord(toks[i - 1].start) + FmtWord(toks[i - 1].len)
+    let s=FmtWord(toks[i].start)
+    if toks[i].kind =? 'str_lit' {s -= 1}
+    if toks[i - 1].kind =? 'str_lit' {prev_end += 1}
+    s >? prev_end
+}
+# src formatted, or src itself where it does not lex or formatting would change its tokens
+fmt_checked=(path:string src:string):>string=>{
+    let a=fmt_lexes(path src) ?? ["?"]
+    if a =? ["?"] {
+        fmt_failed=true
+        return src
+    }
+    let out=src
+    if ends_with(path ".dewy") {
+        let formatted=df_text(src)
+        if formatted not=? none {out=formatted} else {
+            fmt_failed=true
+            eprint("dewy-core fmt: {path}: unbalanced or excessively nested delimiters; left unchanged")
+            return src
+        }
+    }
+    else {out=fmt_text(src)}
+    if out =? src {return src}
+    let b=fmt_lexes(path out) ?? ["?"]
+    if a not=? b {
+        fmt_failed=true
+        eprint("dewy-core fmt: {path}: left unchanged because formatting would change its tokens or meaningful spacing")
+        return src
+    }
+    out
+}
+fmt_walk=(d:string @out:array<string>):>void=>{
+    loop n in list_dir(d) {
+        if starts_with(n ".") or n =? "build" or n =? "node_modules" {continue}
+        let full="{d}/{n}"
+        if is_dir(full) {fmt_walk(full @out)} else if ends_with(n ".jo") or ends_with(n ".dewy") {out.push(full)}
+    }
+}

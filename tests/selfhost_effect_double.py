@@ -36,6 +36,7 @@ LEAF_HOMES = {
     'spirv_emit': 'spirv.jo',
     'glsl_emit': 'glsl.jo',
     'msl_emit': 'msl.jo',
+    'fmt_ops': 'fmt.jo',
 }
 
 
