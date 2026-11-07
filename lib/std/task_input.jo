@@ -56,7 +56,9 @@ input_int = (prompt: str = "") -> (int | InputFailure):
         write(prompt)
         result = __task_input_line()
         if result is str:
-            if let value = to_int(trim(result)): return value
+            text = trim(result)
+            if let value = to_int(text): return value
+            print("'{text}' is not a whole number: try again")
         else: return __task_input_failure(result)
 
 input_float = (prompt: str = "") -> (f64 | InputFailure):

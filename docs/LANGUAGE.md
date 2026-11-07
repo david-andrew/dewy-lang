@@ -4045,7 +4045,9 @@ the others as a file operation's (see "Files, paths and processes"), so a loop o
 the input stops at any of them with `if line is? exception break`, after which
 `line` is the `string`.
 `input(prompt)` shows the prompt and reads a line; `input_int` and `input_float` ask
-again until a number comes. They give `string`, `int64` and `float64` with
+again until a number comes. `input_int` explains a bad line as
+`'<text>' is not a whole number: try again` before asking again. They give
+`string`, `int64` and `float64` with
 `InputFailure`, the alias for `EndOfInput | FileError | Canceled`, so a program
 decides what the end of the input means: `input("name? ") or_throw` passes it on,
 and an unhandled one reaches `main` as `error: EndOfInput`, exit 1 (its own
