@@ -473,7 +473,7 @@ b24=(x:XWord):>void=>$unsafe {
 b32=(x:XWord):>void=>$unsafe {let p=x_bytes(4) as ptr<uint32>; p[0]=uint32(x & 0xFFFFFFFF)}
 b64=(x:XWord):>void=>$unsafe {let p=x_bytes(8) as ptr<XWord>; p[0]=x}
 patch32=(pos:XWord v:XWord):>void=>$unsafe {
-    if pos <? 0 or pos >? XWord(x_code[0].length) - 4 {panic("fixup outside code buffer")}
+    if pos <? 0 or pos >? XWord(x_code[0].length) - 4 {panic("fixup outside x_code[0] buffer")}
     let bytes=x_code[0].ptr
     let word=(bytes + pos) as ptr<uint32>
     word[0]=uint32(v & 0xFFFFFFFF)

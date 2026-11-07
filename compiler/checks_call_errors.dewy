@@ -216,7 +216,7 @@ call_no_candidate=(n:CallErrorWord name:CallErrorWord decls:array<int64> args:ar
         fatal(nodes.ptr[n].pos "there is no set type: a map to bool (`seen: \{str: bool} = \{}`, `seen[x] = true`, `x in seen`), or `unique(xs)`")
     }
     if name_of(name) =? "join" and args.length =? 2 and nodes.ptr[unnamed(args[1])].type not=? 0 and tkind(prune(ntype(unnamed(args[1])))) =? 'array' {
-        fatal(nodes.ptr[n].pos "join puts text together: {jd(nodes.ptr[n].pos "`[loop x in? xs: str(x)]`" "`[loop x in? xs string(x)]`")} makes text of each first")
+        fatal(nodes.ptr[n].pos "join puts text together: {jd(nodes.ptr[n].pos "`[loop x in xs: str(x)]`" "`[loop x in xs string(x)]`")} makes text of each first")
     }
     # (xs.size() and the like: a name that means something else here)
     let hh=habit_name(name_of(name))

@@ -70,7 +70,7 @@ ident_unknown=(n:int64 expected:int64 nm:int64):>void=>$unsafe {
     if dewy_at(nodes.ptr[n].pos) and sug =? "" and interpolation_last not=? 0 and written_interpolation(interpolation_last) and node_within(interpolation_last n) {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}': braces in a string interpolate, so this puts in the value of {name_of(nm)}; for braces in the text, write `\\\{` and `\\}`, or make it a raw string, `r\"...\"` or `r\"\"\"...\"\"\"`")}
     # ("I have {i}plans": a tag as Ren'Py's, in braces that put a value in the text)
     if braced_alone(nodes.ptr[n].pos (name_of(nm) as array<uint8>).length) {
-        let escaped=jd(nodes.ptr[n].pos "\{\{{name_of(nm)}}}}}" "\\\{{name_of(nm)}\\}")
+        let escaped=jd(nodes.ptr[n].pos "\{\{{name_of(nm)}}}" "\\\{{name_of(nm)}\\}")
         fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}': `\{{name_of(nm)}}` in a string puts in the value of {name_of(nm)}; for the braces in the text (a tag), write `{escaped}`, or make it a raw string, r\"...\"{sug}")
     }
     if name_of(nm) =? "INF" and dewy_at(nodes.ptr[n].pos) {fatal(nodes.ptr[n].pos "unknown name `INF`; infinity is `float64.inf`")}

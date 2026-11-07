@@ -21,6 +21,7 @@ CASES = [
     'empty_literal/wrong_context_rejected',
     'expected_args/disagree_method',
     'x="a" % 3\nprintl(x)\n',
+    'let xs=[1 2 3]\nprintl(join("," xs))\n',
 ]
 
 

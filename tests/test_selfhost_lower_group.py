@@ -62,6 +62,20 @@ def test_lower_group_twins(compiler, tmp_path):
     assert ran.stdout == b'16\n-7\n18446744073709551615\n9\n[8 2]\ntrue\n2\n'
 
 
+def test_lower_group_function_text_twins(compiler, tmp_path):
+    # A Sloppy program printing a function shows `<fn>`; only a Sloppy source reaches that text.
+    source, output = tmp_path / 'input.jo', tmp_path / 'program'
+    source.write_text('f = (x: int) -> int: x\nmain = ():\n    print(f)\n')
+    driver = ("use 'main.jo'\nmain = ():\n    lower_test_cli()\n"
+              f'    print(read_file({json.dumps(str(output))}) ?? "")\n')
+    image = compare_leaf(compiler, tmp_path, False, driver,
+                         extra_stems=('lower_group',),
+                         jo_doubles=modules_for(source, output))
+    assert image == output.read_bytes() + b'\n'
+    ran = subprocess.run([output], capture_output=True, timeout=30)
+    assert (ran.returncode, ran.stdout) == (0, b'<fn>\n')
+
+
 @pytest.mark.parametrize(('kind', 'message'), [
     ('nil', 'unsupported expression in codegen (nil)'),
     ('intrinsic', 'intrinsic not supported in codegen'),

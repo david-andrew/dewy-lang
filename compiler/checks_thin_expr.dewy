@@ -303,7 +303,7 @@ literal_interpolation_warning=(e:ThinExprWord):>void=>$unsafe {
     interpolation_last=e
     # ("[0-9]{4}" for a regular expression: {4} puts the number 4 in the text)
     if (nodes.ptr[e].kind =? 'int_lit' or (nodes.ptr[e].kind =? 'tuple' and nkids(e) >? 0 and nodes.ptr[kid(e 0)].kind =? 'int_lit')) and not pos_in_lib(nodes.ptr[e].pos) and not files[pos_file(nodes.ptr[e].pos)].is_dewy and brace_before(nodes.ptr[e].pos) {
-        warn(nodes.ptr[e].pos "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}}}`, or a raw string `r\"[0-9]\{4}\"`")
+        warn(nodes.ptr[e].pos "`\{...}` with a number in it puts that number in the text: for the characters themselves (a regular expression's repeat), write `\{\{4}}`, or a raw string `r\"[0-9]\{4}\"`")
     }
 }
 literal_float_error=(n:ThinExprWord):>void=>$unsafe {

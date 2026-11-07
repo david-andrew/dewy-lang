@@ -16,6 +16,7 @@ CASES = [
     'dogfood31_proofs/string_brace_misspelling',
     'float_constants/reject_old_inf',
     'float_constants/reject_old_nan',
+    'jo:main = ():\n    print("<{tag}>")\n',
 ]
 
 

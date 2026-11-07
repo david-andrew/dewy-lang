@@ -25,8 +25,9 @@ def compare_checks(compiler, tmp_path, monkeypatch, cases, flags=()):
     compiled = rejected = 0
     for case in cases:
         if '\n' in case:
-            source = tmp_path / 'program.dewy'
-            source.write_text(case)
+            # (text is a Dewy program; `jo:` starts a Sloppy one)
+            source = tmp_path / ('program.jo' if case.startswith('jo:') else 'program.dewy')
+            source.write_text(case.removeprefix('jo:'))
         else:
             source = ROOT / 'tests/cases' / (case + '.dewy')
         expected = subprocess.run([compiler, 'build', source, '-o', output, *flags],

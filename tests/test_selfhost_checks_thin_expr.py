@@ -45,6 +45,7 @@ CASES = [
     'handle/closure_needs_arguments',
     'handle/function_expected',
     'object/const_receiver',
+    'jo:main = ():\n    print("[0-9]{4}")\n',
 ]
 
 
