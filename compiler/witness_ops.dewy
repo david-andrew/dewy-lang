@@ -906,7 +906,11 @@ wit_key=(n:WitWord):>void=>$unsafe {
         wit_fail(nodes.ptr[n].pos "cannot prove the value is in the set")
         return
     }
-    if base not=? "" and key not=? "" {err_notes.push([(-1) "help: or take the missing key as a value: `{base}.get({key})` gives none for it"])}
+    # (`d.pop(k)` takes it as a value through its own default, as a set's pop does)
+    let callee=if nodes.ptr[n].kind =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {WitWord(fns.ptr[WitWord(nodes.ptr[n].sym)].decl)} else {0}
+    let popping=callee not=? 0 and name_of(WitWord(nodes.ptr[callee].name)) =? "pop"
+    if base not=? "" and key not=? "" and popping {err_notes.push([(-1) "help: or take the missing key as a value: `{base}.pop({key} default=none)` gives none for it"])}
+    else if base not=? "" and key not=? "" {err_notes.push([(-1) "help: or take the missing key as a value: `{base}.get({key})` gives none for it"])}
     # (a key of a finite literal type, `p.severity` of `'a' | 'b'`, in a plain dict:
     # a totaldict has every key, so its reads need no guard)
     let dict=representation_type(ntype(kid(n 0)))
