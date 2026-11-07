@@ -1,0 +1,113 @@
+# modes: native native-release
+# stdin: # date sport distance time note\n2026-10-26 run 5.2km 27:31 easy loop\n2026-10-27 bike 20km 48:10 commute\n2026-10-28 run 10km 52:05 tempo\n2026-10-29 swim 1500m 31:40\n2026-10-30 run 800m 2:58 track rep\n2026-10-31 run 21.1km 1:52:30 half marathon\n2026-11-01 bike 42.5km 1:35:02 hills\n\n2026-11-02 run 6km 31:00 recovery\n2026-11-03 row 5000m 21:15 erg\n2026-11-04 run 5km x easy\n2026-13-04 run 5km 25:00\n2026-11-05 run five 25:00\n2026-11-05 bike 18km\n2026-11-06 swim 2km 41:20 open water\n2026-11-07 run 12km 1:01:45 long\n2026-11-08 bike 30km 1:10:00 \n2026-11-08 run 5km 24:10 parkrun\n
+# A training journal: read workouts from standard input, report per sport,
+# per week, and personal bests. Bad lines are reported with their line number.
+from units import km, m
+
+LineError:type = type of error & [line:int message:string]
+
+Workout:type = [day:Date sport:string distance:float64*Length time:Duration note:string]
+
+Totals:type = [count:int distance:float64*Length time:Duration longest:float64*Length]
+
+parse_clock = (text:string):>Duration|LineError => {
+    let parts = text.split(":")
+    if parts.length <? 2 or parts.length >? 3 return LineError[0 "bad time '{text}'"]
+    let total = 0
+    loop p in parts {
+        let n = to_int(p) ?? return LineError[0 "bad time '{text}'"]
+        if n <? 0 or n >=? 60 and total >? 0 return LineError[0 "bad time '{text}'"]
+        total = total * 60 + n
+    }
+    convert<Duration>(total * 1s) ?? LineError[0 "time out of range"]
+}
+
+parse_distance = (text:string):>float64*Length|LineError => {
+    if text.endswith("km") {
+        let v = to_float(text.remove_suffix("km")) ?? return LineError[0 "bad distance '{text}'"]
+        return v * 1km
+    }
+    if text.endswith("m") {
+        let v = to_float(text.remove_suffix("m")) ?? return LineError[0 "bad distance '{text}'"]
+        return v * 1m
+    }
+    LineError[0 "distance needs a unit: '{text}'"]
+}
+
+parse_line = (text:string number:int):>Workout|LineError => {
+    let fields = text.split()
+    if fields.length <? 4 return LineError[number "expected 4 fields, got {fields.length}"]
+    let day = date(fields[0])
+    if day is? error return LineError[number "bad date '{fields[0]}'"]
+    let dist = parse_distance(fields[2])
+    if dist is? LineError return LineError[number dist.message]
+    let time = parse_clock(fields[3])
+    if time is? LineError return LineError[number time.message]
+    let note = " ".join(fields[4..])
+    Workout[day fields[1] dist time note]
+}
+
+pace = (w:Workout):>string => {
+    let secs = w.time / 1s
+    let per_km = float64(secs) / (w.distance / 1km)
+    if not is_finite(per_km) return "-"
+    let whole = int(per_km)
+    "{whole // 60}:{whole % 60:02}/km"
+}
+
+clock = (d:Duration):>string => {
+    let s = int(d / 1s)
+    if s >=? 3600 return "{s // 3600}:{s // 60 % 60:02}:{s % 60:02}"
+    "{s // 60}:{s % 60:02}"
+}
+
+monday = (d:Date):>Date => d - d.weekday * 1day
+
+main = () => {
+    let workouts:array<Workout> = []
+    let errors:array<LineError> = []
+    let number = 0
+    loop true {
+        let line = read_line()
+        if line is? exception break
+        number += 1
+        if line.trim().is_empty or line.startswith("#") continue
+        match parse_line(line number) {
+            w:Workout => workouts.push(w)
+            e:LineError => errors.push(e)
+        }
+    }
+    printl("{workouts.length} workouts, {errors.length} rejected")
+    loop e in errors printl("  line {e.line}: {e.message}")
+
+    let by_sport:dict<string Totals> = []
+    loop w in workouts {
+        if w.sport not in? by_sport by_sport[w.sport] = Totals[0 0.0km 0s 0.0km]
+        let t = by_sport[w.sport]
+        t.count += 1
+        t.distance += w.distance
+        t.time += w.time
+        if w.distance >? t.longest t.longest = w.distance
+        by_sport[w.sport] = t
+    }
+    let sports = by_sport.keys.sorted(key=(s) => -(by_sport[s].distance / 1km))
+    printl("")
+    printl("{"sport":<6} {"n":>3} {"km":>7} {"time":>8} {"longest":>8}")
+    loop s in sports {
+        let t = by_sport[s]
+        printl("{s:<6} {t.count:>3} {t.distance / 1km:>7.1f} {clock(t.time):>8} {t.longest / 1km:>8.2f}")
+    }
+
+    let weeks:dict<Date float64> = []
+    loop w in workouts {
+        let k = monday(w.day)
+        weeks[k] = (weeks.get(k) ?? 0.0) + w.distance / 1km
+    }
+    printl("")
+    loop k in weeks.keys.sorted() printl("week of {k.format("d MMM")}: {weeks[k]:.1f} km")
+
+    printl("")
+    let runs = [loop w in workouts if w.sport =? "run" w]
+    let fastest = runs.sorted(key=(w) => w.time / 1s / (w.distance / 1m))
+    loop w in fastest[$clamp ..3) printl("{w.day} {w.distance / 1km:.1f}km {clock(w.time)} {pace(w)} {w.note}")
+}

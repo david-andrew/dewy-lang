@@ -1,0 +1,66 @@
+> add 2 Write release notes #docs
+added 1
+> add 4 Fix login crash #bug #auth
+added 2
+> add 1 Tidy CSS #ui
+added 3
+> add 4 Rotate keys #auth
+added 4
+> add 9 Too urgent
+error: priority must be 1 to 5
+> add three Bad prio
+error: not a task number: 'three'
+> move 2 doing
+2 -> doing
+> move 7 doing
+error: no task 7
+> move 3 review
+error: no column 'review'
+> done 4
+4 -> done
+> list
+  2 p4 doing  Fix login crash [bug, auth]
+  4 p4 done   Rotate keys [auth]
+  1 p2 todo   Write release notes [docs]
+  3 p1 todo   Tidy CSS [ui]
+> list doing
+  2 p4 doing  Fix login crash [bug, auth]
+> list --tag auth
+  2 p4 doing  Fix login crash [bug, auth]
+  4 p4 done   Rotate keys [auth]
+> stats
+todo=2 doing=1 done=1 (25% done)
+> undo
+restored 4 to todo
+> undo
+restored 2 to todo
+> list
+  2 p4 todo   Fix login crash [bug, auth]
+  4 p4 todo   Rotate keys [auth]
+  1 p2 todo   Write release notes [docs]
+  3 p1 todo   Tidy CSS [ui]
+> frobnicate 3
+error: unknown command 'frobnicate'
+> add 3 Profile startup #perf
+added 5
+> done 5
+5 -> done
+> stats
+todo=4 doing=0 done=1 (20% done)
+> list done
+  5 p3 done   Profile startup [perf]
+> undo
+restored 5 to todo
+> undo
+removed 5
+> undo
+removed 4
+> undo
+removed 3
+> undo
+removed 2
+> undo
+removed 1
+> list
+  (none)
+29 commands

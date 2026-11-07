@@ -1,0 +1,132 @@
+# modes: native native-release
+# stdin: add 2 Write release notes #docs\nadd 4 Fix login crash #bug #auth\nadd 1 Tidy CSS #ui\nadd 4 Rotate keys #auth\nadd 9 Too urgent\nadd three Bad prio\nmove 2 doing\nmove 7 doing\nmove 3 review\ndone 4\nlist\nlist doing\nlist --tag auth\nstats\nundo\nundo\nlist\nfrobnicate 3\nadd 3 Profile startup #perf\ndone 5\nstats\nlist done\nundo\nundo\nundo\nundo\nundo\nundo\nlist\n
+# A small task board driven by commands on standard input, like a REPL:
+#   add <prio> <title words...> [#tag ...]   move <id> <column>   done <id>
+#   list [column] [--tag t]   undo   stats
+UnknownCommand:type = type of error & [message:string]
+NoSuchTask:type = type of error & [id:int]
+BadArgument:type = type of error & [message:string]
+
+COLUMNS = ["todo" "doing" "done"]
+
+Task:type = [id:int title:string prio:int column:string tags:array<string>]
+
+Board:type = [tasks:dict<int Task> next_id:int history:array<[string Task]>]
+
+CommandError:type = UnknownCommand | NoSuchTask | BadArgument
+
+parse_id = (word:string):>int|BadArgument => {
+    let n = to_int(word) ?? return BadArgument["not a task number: '{word}'"]
+    n
+}
+
+find = (b:Board id:int):>Task|NoSuchTask => b.tasks.get(id) ?? NoSuchTask[id]
+
+add = (@b:Board words:array<string>):>string|BadArgument => {
+    if words.length <? 2 return BadArgument["add needs a priority and a title"]
+    let prio = parse_id(words[0]) or_throw
+    if prio <? 1 or prio >? 5 return BadArgument["priority must be 1 to 5"]
+    let title_words = [loop w in words[1..] if not w.startswith("#") w]
+    let tags = [loop w in words[1..] if w.startswith("#") w.remove_prefix("#")]
+    let t = Task[b.next_id " ".join(title_words) prio "todo" tags]
+    b.tasks[t.id] = t
+    b.history.push(["add" t])
+    b.next_id += 1
+    "added {t.id}"
+}
+
+move = (@b:Board id:int column:string):>string|CommandError => {
+    if column not in? COLUMNS return BadArgument["no column '{column}'"]
+    let t = find(b id) or_throw
+    b.history.push(["move" t])
+    t.column = column
+    b.tasks[id] = t
+    "{id} -> {column}"
+}
+
+undo = (@b:Board):>string => {
+    if b.history.is_empty return "nothing to undo"
+    let [what old] = b.history.pop()
+    if what =? "add" {
+        b.tasks.pop(old.id default=none);
+        return "removed {old.id}"
+    }
+    b.tasks[old.id] = old
+    "restored {old.id} to {old.column}"
+}
+
+show = (t:Task):>string => {
+    let tags = if t.tags.is_empty "" else " [{", ".join(t.tags)}]"
+    "{t.id:>3} p{t.prio} {t.column:<6} {t.title}{tags}"
+}
+
+list = (b:Board words:array<string>):>string|BadArgument => {
+    let column = ""
+    let tag = ""
+    let i = 0
+    loop i <? words.length {
+        if words[i] =? "--tag" {
+            if i + 1 >=? words.length return BadArgument["--tag needs a value"]
+            tag = words[i + 1]
+            i += 2
+        } else {
+            column = words[i]
+            i += 1
+        }
+    }
+    let picked = [loop [id t] in b.tasks if (column =? "" or t.column =? column) and (tag =? "" or tag in? t.tags) t]
+    # highest priority first, then oldest
+    let ordered = picked.sorted(key=(t):>[int int] => [-t.prio t.id])
+    if ordered.is_empty return "  (none)"
+    "\n".join([loop t in ordered show(t)])
+}
+
+stats = (b:Board):>string => {
+    let per:dict<string int> = []
+    loop c in COLUMNS per[c] = 0
+    loop [id t] in b.tasks per[t.column] = (per.get(t.column) ?? 0) + 1
+    let parts = [loop c in COLUMNS "{c}={per.get(c) ?? 0}"]
+    let total = b.tasks.length
+    let done = per.get("done") ?? 0
+    let pct = if total >? 0 done * 100 / total else 0.0
+    "{" ".join(parts)} ({pct:.0f}% done)"
+}
+
+run = (@b:Board line:string):>string|CommandError => {
+    let words = line.split()
+    if words.is_empty return ""
+    let rest = words[1..]
+    match words[0] {
+        <"add"> => add(@b rest) or_throw
+        <"move"> => {
+            if rest.length not=? 2 return BadArgument["move needs an id and a column"]
+            move(@b parse_id(rest[0]) or_throw rest[1]) or_throw
+        }
+        <"done"> => {
+            if rest.length not=? 1 return BadArgument["done needs an id"]
+            move(@b parse_id(rest[0]) or_throw "done") or_throw
+        }
+        <"list"> => list(b rest) or_throw
+        <"undo"> => undo(@b)
+        <"stats"> => stats(b)
+        _ => UnknownCommand["unknown command '{words[0]}'"]
+    }
+}
+
+main = () => {
+    let board = Board[[] 1 []]
+    let n = 0
+    loop true {
+        let line = read_line()
+        if line is? exception break
+        n += 1
+        printl("> {line}")
+        match run(@board line) {
+            out:string => if out not=? "" printl(out)
+            e:NoSuchTask => printl("error: no task {e.id}")
+            e:BadArgument => printl("error: {e.message}")
+            e:UnknownCommand => printl("error: {e.message}")
+        }
+    }
+    printl("{n} commands")
+}

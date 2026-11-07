@@ -1,0 +1,107 @@
+# Simulate a four-way intersection: cars arrive at random, queue per lane,
+# and a light controller decides which direction is green each tick.
+
+# a fixed-capacity ring buffer, generic over what it holds
+Ring:type = <T>[items:array<T> head:int64<v => 0 <=? v and v <? items.length> count:int64<v => 0 <=? v and v <=? items.length>]
+
+ring_new = <T>(capacity:int fill:T):>Ring<T> => {
+    let items = [loop i in [0..max(capacity 1)) fill]
+    Ring<T>[items 0 0]
+}
+
+push = <T>(@r:Ring<T> x:T):>bool => {
+    if r.count >=? r.items.length return false
+    let at = (r.head + r.count) % r.items.length
+    r.items[at] = x
+    r.count += 1
+    true
+}
+
+pop = <T>(@r:Ring<T>):>T? => {
+    if r.count =? 0 return none
+    let x = r.items[r.head]
+    r.head = (r.head + 1) % r.items.length
+    r.count -= 1
+    x
+}
+
+Car:type = [id:int arrived:int lane:int]
+
+# a small linear congruential generator, so runs repeat
+Rng:type = [state:int]
+next_int = (@g:Rng bound:int):>int => {
+    g.state = (g.state * 1103515245 + 12345) % 2147483648
+    if bound <=? 0 return 0
+    g.state % bound
+}
+
+LANES = ["north" "east" "south" "west"]
+
+# which lanes are green for a phase: 0 = north/south, 1 = east/west
+green = (phase:int lane:int):>bool => lane % 2 =? phase
+
+# controllers: given the waiting counts, choose the next phase
+Controller:type = ([int int int int] int):>int
+
+fixed_cycle = (_waiting:[int int int int] tick:int):>int => (tick // 6) % 2
+
+busiest = (waiting:[int int int int] _tick:int):>int => {
+    let ns = waiting[0] + waiting[2]
+    let ew = waiting[1] + waiting[3]
+    if ew >? ns 1 else 0
+}
+
+Stats:type = [passed:int total_wait:int worst:int dropped:int]
+
+simulate = (name:string choose:Controller ticks:int seed:int):>Stats => {
+    let rng = Rng[seed]
+    let lanes = [loop l in LANES ring_new<Car>(8 Car[0 0 0])]
+    let stats = Stats[0 0 0 0]
+    let next_id = 1
+    let waiting:[int int int int] = [0 0 0 0]
+    let phase = 0
+    loop t in [0..ticks) {
+        # arrivals: the north lane is busiest (50%), the others 30% per tick
+        loop l in [0..4) {
+            if next_int(@rng 10) <? (if l =? 0 5 else 3) {
+                if push(@lanes[l] Car[next_id t l]) next_id += 1 else stats.dropped += 1
+            }
+        }
+        loop l in [0..4) waiting[l] = lanes[l].count
+        phase = choose(waiting t)
+        # one car per green lane leaves each tick
+        loop l in [0..4) {
+            if not green(phase l) continue
+            let car = pop(@lanes[l]) ?? continue
+            let wait = t - car.arrived
+            stats.passed += 1
+            stats.total_wait += wait
+            if wait >? stats.worst stats.worst = wait
+        }
+    }
+    let left = [loop r in lanes r.count]
+    printl("{name:<12} passed {stats.passed:>3}  dropped {stats.dropped:>2}  left {left}")
+    stats
+}
+
+report = (name:string s:Stats) => {
+    let avg = if s.passed >? 0 s.total_wait / s.passed else 0.0
+    printl("{name:<12} avg wait {avg:.2f} ticks, worst {s.worst}")
+}
+
+main = () => {
+    let controllers:dict<string Controller> = ["fixed" -> @fixed_cycle "busiest" -> @busiest]
+    let results:array<[string Stats]> = []
+    loop seed in [7 2026] {
+        printl("seed {seed}")
+        loop name in controllers.keys.values.sorted() {
+            let s = simulate(name controllers[name] 120 seed)
+            results.push([name s])
+        }
+    }
+    printl("")
+    loop [name s] in results.sorted(key=(r) => r[1].worst) report(name s)
+    if results.is_empty return
+    let best = results.min_by((r) => r[1].total_wait)
+    printl("least total wait: {best[0]} ({best[1].total_wait})")
+}
