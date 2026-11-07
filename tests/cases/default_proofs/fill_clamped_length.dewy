@@ -1,0 +1,11 @@
+f=(n:int64):>float64=>{
+    let a = fill(0.5 max(0 n))
+    let s=0.0
+    loop i in [0..n) {s=s+a[i]}
+    return s
+}
+g=(n:int64):>float64=>{
+    let a = fill(0.5 max(1 n))
+    return a[0]
+}
+main=()=>{printl"{f(3)} {g(-1)}"}

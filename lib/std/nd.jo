@@ -569,12 +569,7 @@ randn = (a: int, b: int, c: int, d: int) -> f64[,]:
 
 # n evenly spaced values from a to b (both included)
 linspace = (a: f64, b: f64, n: int) -> f64[]:
-    out: f64[]
-    out.reserve(n)
-    if n == 1: out.push(a)
-    else:
-        loop i in [0..n): out.push(a + (b - a) * f64(i) / f64(n - 1))
-    out
+    [loop i in [0..n): (if n == 1: a else: a + (b - a) * f64(i) / f64(n - 1))]
 
 reshape[T] = (xs: T[], shape: int[]) -> T[,]: ndarray(xs, shape)
 reshape[T] = (xs: T[], a: int) -> T[,]: ndarray(xs, [a])

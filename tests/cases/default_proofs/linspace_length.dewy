@@ -1,0 +1,15 @@
+total=(n:int64):>float64=>{
+    let a = linspace(0.0 1.0 n)
+    let s=0.0
+    loop i in [0..n) {s=s+a[i]}
+    return s
+}
+top=(n:int64<(>? 2)>):>float64=>{
+    let a = linspace(0.0 1.0 n)
+    return a[2]
+}
+main=()=>{
+    let a = linspace(0.0 1.0 5)
+    let n:int64 = -2
+    printl"{a} {a[4]} {linspace(2.0 4.0 1)} {linspace(0.0 1.0 0)} {linspace(0.0 1.0 n)} {total(5)} {top(3)}"
+}
