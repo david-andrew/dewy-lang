@@ -3303,11 +3303,7 @@ add_universe = ():
     nodes[order].aux = -7
     universe[intern("MemoryOrder")] = new_sym(intern("MemoryOrder"), .alias_, order, order)
     tv = mk(.str_lit, 0)
-    tgt = "linux"
-    if target_wasm: tgt = "wasm"
-    if target_windows: tgt = "windows"
-    if target_macos: tgt = "macos"
-    nodes[tv].sval = i32(intern(tgt))
+    nodes[tv].sval = i32(intern(target_const()))
     # (the processor: x86_64, arm64 or wasm32)
     av = mk(.str_lit, 0)
     arch = "x86_64"
@@ -3334,6 +3330,14 @@ add_universe = ():
     register_quantity_names()
     register_intrinsics()
     ml_bump()
+
+# TARGET's value
+target_const = () -> str:
+    tgt = "linux"
+    if target_wasm: tgt = "wasm"
+    if target_windows: tgt = "windows"
+    if target_macos: tgt = "macos"
+    tgt
 
 load_prelude = ():
     # all .jo files in lib/core, lib/std and lib/game are loaded into the shared prelude scope

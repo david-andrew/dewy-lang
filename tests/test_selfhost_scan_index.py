@@ -107,6 +107,13 @@ main = ():
         show(read_file(a[i]) ?? "")
     loop src in ["", "\n", "#", "x", "x = 1", "\tx = 1\n", "when A:\n", "when A:\n    b = 1", "else\n", "@", "@a", "a.b = 1\n", "1 = 2\n", "é = 1\n", "\"", "x = '", "x = \"\\", "x = r\"\\\"\ny = 1\n", "t", "s", "e", "c", "type", "e\n", "en", "ex"]:
         show(src)
+    # (indexed for a target: branches false for it declare nothing)
+    sc_target = "linux"
+    print("target linux")
+    show(read_file(a[1]) ?? "")
+    loop src in ["when TARGET == \"linux\":\n    a = 1\nelse:\n    b = 2\n", "when TARGET != \"linux\" and TARGET != \"wasm\":\n    a = 1\nelse when TARGET == \"wasm\" or TARGET == \"linux\":\n    b = 2\nelse:\n    c = 3\n", "when TARGET == \"x\" or A:\n    a = 1\n", "@x when TARGET == \"x\":\n    a = 1\nelse:\n    b = 2\n"]:
+        show(src)
+    sc_target = ""
     print("scan ok")
 '''
 
@@ -122,3 +129,8 @@ def test_scan_index_twins(compiler, tmp_path, release):  # noqa: F811
     assert output.endswith(b'scan ok\n')
     for name in (b'"shallow2"', b'"Nominal"', b'"inside_c"', b'"nested_else"', b'"InWhen"', b'"Generic"', b'"[]="', b'"exported"'):
         assert name in output, name
+    targeted = output.split(b'target linux\n')[1]
+    for name in (b'"inside_a"', b'"other"', b'"shallow2"'):
+        assert name not in targeted, name
+    for name in (b'"last"', b'"after_when"', b'"eight"', b'"two"'):
+        assert name in targeted, name

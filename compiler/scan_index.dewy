@@ -1,6 +1,6 @@
 $runtime_checks
 from p"scan.jo" import SU_NOMINAL
-from p"scan.jo" import (SC_NAME SC_STR SU_EAGER SU_EXPORT SU_WHEN sc_attr_open sc_cls sc_n sc_p sc_src sc_unit su_end su_flags su_name0 su_name_at su_name_len su_start)
+from p"scan.jo" import (SC_NAME SC_STR SU_EAGER SU_EXPORT SU_WHEN sc_attr_open sc_cls sc_n sc_p sc_src sc_target sc_unit sc_when_taken su_end su_flags su_name0 su_name_at su_name_len su_start)
 
 ScanWord:type=int64<overflow='wrap'>
 sc_ident_char=(c:uint8):>bool=>$unsafe {
@@ -280,6 +280,7 @@ scan_source=(src:string):>[ScanWord ScanWord]=>$unsafe {
 # deeper than the innermost branch are skipped in bulk where its indentation is 4 or 8. Returns
 # where the next line that is not indented starts.
 sc_when_lines=(i0:ScanWord):>ScanWord=>$unsafe {
+    if sc_branch_dead(i0) {return sc_next_line(i0 0)}
     let p=sc_p
     let n=sc_n
     # (the branches' indentations, innermost last: branch[0..nb), its top bt; -1 until a
@@ -332,6 +333,71 @@ sc_when_lines=(i0:ScanWord):>ScanWord=>$unsafe {
         i=sc_next_line(j w)
     }
     n
+}
+# Whether the top-level `when` (or `else`) branch whose header is at i0 is false for sc_target, so
+# that it declares nothing: its condition, or an earlier branch's, compares only TARGET with strings
+sc_branch_dead=(i0:ScanWord):>bool=>$unsafe {
+    if (sc_target as array<uint8>).length =? 0 {return false}
+    let j=i0
+    if not sc_word_is(j "else") {
+        sc_when_taken=false
+        if not sc_word_is(j "when") {return false}
+    }
+    else {
+        if sc_when_taken {return true}
+        j=sc_spaces(j + 4)
+        if not sc_word_is(j "when") {return false}
+    }
+    let v=sc_target_cond(sc_spaces(j + 4))
+    if v =? 1 {sc_when_taken=true}
+    v =? 0
+}
+# The condition at j0, up to the header's ':' and the end of its line: 1 true, 0 false for
+# sc_target, -1 when it is anything but TARGET == or != a plain string, joined by all `and` or all `or`
+sc_target_cond=(j0:ScanWord):>ScanWord=>$unsafe {
+    let p=sc_p
+    let n=sc_n
+    let t=data(sc_target)
+    let tn:ScanWord=(sc_target as array<uint8>).length
+    let j=j0
+    let result:ScanWord=-1
+    let joiner:ScanWord=0
+    loop true {
+        if not sc_word_is(j "TARGET") {return -1}
+        j=sc_spaces(j + 6)
+        if j + 1 >=? n or p[j + 1] not=? b'=' or (p[j] not=? b'=' and p[j] not=? b'!') {return -1}
+        let eq=p[j] =? b'='
+        j=sc_spaces(j + 2)
+        if j >=? n or p[j] not=? b'"' {return -1}
+        let s=j + 1
+        let e=s
+        loop e <? n and p[e] not=? b'"' and p[e] not=? b'\\' and p[e] not=? b'\n' and p[e] not=? 123 {e += 1}
+        if e >=? n or p[e] not=? b'"' {return -1}
+        let same=e - s =? tn
+        let k:ScanWord=0
+        loop same and k <? tn {
+            if p[s + k] not=? t[k] {same=false}
+            k += 1
+        }
+        let v:ScanWord=0
+        if same =? eq {v=1}
+        if joiner =? 0 {result=v}
+        else if joiner =? 1 {result=result & v}
+        else {result=result | v}
+        j=sc_spaces(e + 1)
+        if j <? n and p[j] =? b':' {
+            let c=sc_spaces(j + 1)
+            if c >=? n or p[c] =? b'\n' or p[c] =? b'\r' or p[c] =? b'#' {return result}
+            return -1
+        }
+        let next:ScanWord=2
+        if sc_word_is(j "and") {next=1}
+        else if not sc_word_is(j "or") {return -1}
+        if joiner not=? 0 and joiner not=? next {return -1}
+        joiner=next
+        j=sc_spaces(j + 4 - next)
+    }
+    -1
 }
 # from i, inside a line, past strings and comments to the start of the next line indented by at
 # most w columns (0, 4 or 8; any other w: the next line)

@@ -69,7 +69,9 @@ defer_prelude = (path: str, sub: str) -> bool:
     module_added(mi)
     module_by_path[module_path_key(path)] = mi
     icb = ic_switch(IC_LOAD, IC_LIB)
+    sc_target = target_const()
     r = scan_source(src!)
+    sc_target = ""
     eager: int[]
     # (a unit's module and parsed mark; then its names posted to the index)
     first = pu_mod.len()

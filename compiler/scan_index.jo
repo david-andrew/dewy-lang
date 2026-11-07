@@ -231,6 +231,7 @@ scan_source = (src: str) -> (int, int):
 # deeper than the innermost branch are skipped in bulk where its indentation is 4 or 8. Returns
 # where the next line that is not indented starts.
 sc_when_lines = (i0: int) -> int:
+    if sc_branch_dead(i0): return sc_next_line(i0, 0)
     p = sc_p
     n = sc_n
     # (the branches' indentations, innermost last: branch[0..nb), its top bt; -1 until a
@@ -274,6 +275,64 @@ sc_when_lines = (i0: int) -> int:
             w = bt
         i = sc_next_line(j, w)
     n
+# Whether the top-level `when` (or `else`) branch whose header is at i0 is false for sc_target, so
+# that it declares nothing: its condition, or an earlier branch's, compares only TARGET with strings
+sc_branch_dead = (i0: int) -> bool:
+    if len(sc_target) == 0: return false
+    j = i0
+    if not sc_word_is(j, "else"):
+        sc_when_taken = false
+        if not sc_word_is(j, "when"): return false
+    else:
+        if sc_when_taken: return true
+        j = sc_spaces(j + 4)
+        if not sc_word_is(j, "when"): return false
+    v = sc_target_cond(sc_spaces(j + 4))
+    if v == 1: sc_when_taken = true
+    v == 0
+# The condition at j0, up to the header's ':' and the end of its line: 1 true, 0 false for
+# sc_target, -1 when it is anything but TARGET == or != a plain string, joined by all `and` or all `or`
+sc_target_cond = (j0: int) -> int:
+    p = sc_p
+    n = sc_n
+    t = data(sc_target)
+    tn = len(sc_target)
+    j = j0
+    result = -1
+    joiner = 0
+    loop true:
+        if not sc_word_is(j, "TARGET"): return -1
+        j = sc_spaces(j + 6)
+        if j + 1 >= n or p[j + 1] != '=' or (p[j] != '=' and p[j] != '!'): return -1
+        eq = p[j] == '='
+        j = sc_spaces(j + 2)
+        if j >= n or p[j] != '"': return -1
+        s = j + 1
+        e = s
+        loop e < n and p[e] != '"' and p[e] != '\\' and p[e] != '\n' and p[e] != '{{': e += 1
+        if e >= n or p[e] != '"': return -1
+        same = e - s == tn
+        k = 0
+        loop same and k < tn:
+            if p[s + k] != t[k]: same = false
+            k += 1
+        v = 0
+        if same == eq: v = 1
+        if joiner == 0: result = v
+        else if joiner == 1: result = result & v
+        else: result = result | v
+        j = sc_spaces(e + 1)
+        if j < n and p[j] == ':':
+            c = sc_spaces(j + 1)
+            if c >= n or p[c] == '\n' or p[c] == '\r' or p[c] == '#': return result
+            return -1
+        next = 2
+        if sc_word_is(j, "and"): next = 1
+        else if not sc_word_is(j, "or"): return -1
+        if joiner != 0 and joiner != next: return -1
+        joiner = next
+        j = sc_spaces(j + 4 - next)
+    -1
 # from i, inside a line, past strings and comments to the start of the next line indented by at
 # most w columns (0, 4 or 8; any other w: the next line)
 sc_next_line = (i0: int, w: int) -> int:
