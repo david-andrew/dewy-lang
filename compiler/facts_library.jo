@@ -208,6 +208,7 @@ fact_nonempty_call = (n: int) -> bool:
     path = files[pos_file(nodes[d].pos)].path
     if name == fact_name_least or name == fact_name_most:
         rk = tkind(fact_type(ntype(kid(n, 0))))
+        if path == "{lib_dir}/game/gpuarray.jo": return is_gpu_array(representation_type(ntype(kid(n, 0))))
         # (an N-D array's reduces its flat storage: `m.data.length >? 0`)
         if path == lib_dir + "/std/nd.jo": return is_nd(representation_type(ntype(kid(n, 0))))
         return path == lib_dir + "/core/array.jo" and (rk == .array or rk == .fixed)
@@ -217,7 +218,8 @@ fact_nonempty_check = (n: int, s: mut FactState, values: int[]):
     if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
     t = fact_type(ntype(kid(n, 0)))
     nd = is_nd(representation_type(t))
-    length = if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else if nd: fact_nd_data_length(s, fact_map_receiver(s, n, values[0])) else: fact_project(s, fact_map_receiver(s, n, values[0]), -1, false, T_INT)
+    gpu = is_gpu_array(representation_type(t))
+    length = if gpu: fact_project(s, fact_map_receiver(s, n, values[0]), intern("n"), false, T_INT) else if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else if nd: fact_nd_data_length(s, fact_map_receiver(s, n, values[0])) else: fact_project(s, fact_map_receiver(s, n, values[0]), -1, false, T_INT)
     # (the constant first: the state is taken before later arguments run)
     one = fact_constant(s, 1)
     c = fact_compare(s, .ge, length, one)
@@ -226,9 +228,10 @@ fact_nonempty_check = (n: int, s: mut FactState, values: int[]):
         return
     if c == 1: return
     receiver = wit_text(kid(n, 0))
-    if nd and receiver != "": receiver = "{receiver}.data"
+    if gpu and receiver != "": receiver = "cpu({receiver}).data"
+    else if nd and receiver != "": receiver = "{receiver}.data"
     rk = tkind(t)
-    what = if rk == .array or rk == .fixed or nd: "array" else if is_dewy_set_type(representation_type(ntype(kid(n, 0)))): "set" else: "heap"
+    what = if rk == .array or rk == .fixed or nd or gpu: "array" else if is_dewy_set_type(representation_type(ntype(kid(n, 0)))): "set" else: "heap"
     shown = if receiver != "": "`{receiver}`" else: "the {what}"
     relation = if receiver != "": "{receiver}.length >? 0" else: ""
     if c == 0:

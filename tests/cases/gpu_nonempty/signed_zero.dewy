@@ -1,0 +1,9 @@
+main=()=>{
+loop z in [float32(-0.0) float32(0.0)] {
+let a=fill(z 257)
+a[256]=-z
+let g=gpu(a)
+printl(1.0/min(g) <? 0.0)
+printl(1.0/max(g) >? 0.0)
+}
+}

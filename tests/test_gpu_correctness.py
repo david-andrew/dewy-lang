@@ -10,7 +10,7 @@ from tests.support import Scripts, compiler  # noqa: F401
 from tools.headless import headless
 
 CASES = Path(__file__).parent / 'cases'
-GROUPS = ['gpu_float_sum', 'gpu_upload_shape', 'gpu_integer_upload', 'gpu_ieee']
+GROUPS = ['gpu_nonempty', 'gpu_float_sum', 'gpu_upload_shape', 'gpu_integer_upload', 'gpu_ieee']
 
 
 @pytest.mark.parametrize('group', GROUPS)

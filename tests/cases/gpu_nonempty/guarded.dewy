@@ -1,0 +1,6 @@
+minimum=(a:array<float32>):>float32=>{
+let g=gpu(a)
+if cpu(g).data.length >? 0 {return min(g)}
+return 0.0
+}
+main=()=>{printl(minimum([3.0 1.0 2.0])) printl(minimum([]))}

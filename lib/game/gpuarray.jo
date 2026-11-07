@@ -225,7 +225,7 @@ void main() \{
     vec4 r = vec4(0.0);
     for (int c = 0; c < 4; c++) \{
         int j = (base + c) * 64;
-        float acc = op == 0 ? 0.0 : (op == 1 ? 3.4e38 : -3.4e38);
+        float acc = op == 0 ? 0.0 : (op == 1 ? uintBitsToFloat(0x7f800000u) : uintBitsToFloat(0xff800000u));
         for (int k = 0; k < 16; k++) \{
             int ti = j / 4 + k;
             vec4 v = texelFetch(t, ivec2(ti % w, ti / w), 0);
@@ -306,8 +306,8 @@ struct __GvkRed:
     op: int
 __gvk_reduce = (id: int, u: __GvkRed):
     acc = f32(0)
-    if u.op == 1: acc = f32(3.4e38)
-    if u.op == 2: acc = f32(-3.4e38)
+    if u.op == 1: acc = f32(__INF)
+    if u.op == 2: acc = f32(-__INF)
     n = len(u.src)
     loop k in [0..64):
         i = id * 64 + k

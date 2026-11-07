@@ -3,7 +3,7 @@ from p"ast.jo" import (kid nkids nodes)
 from p"check.jo" import (dewy_at fns lib_dir modules)
 from p"directives.jo" import (dir_defer)
 from p"expr.jo" import (is_dewy_set_type is_nd ntype)
-from p"checks_thin_expr.dewy" import (is_map_type nd_elem)
+from p"checks_thin_expr.dewy" import (is_gpu_array is_map_type nd_elem)
 from p"facts.jo" import (FACT_CAP FACT_CLAMPED FACT_ELEMENT_COPY FACT_ELEMENT_VALUE FactProjection FactState fact_add_projection fact_bound fact_compare fact_constant fact_difference fact_domain fact_hull_owner fact_length_max fact_name_count fact_name_first fact_name_graphemes fact_name_last fact_name_least fact_name_len fact_name_max_by fact_name_min_by fact_name_most fact_name_peek fact_name_peek_priority fact_name_sorted fact_name_sorted_by fact_name_sorted_with fact_name_sum fact_name_take fact_new fact_owner fact_policy fact_probe_on fact_project fact_projection_find fact_query fact_set_bound fact_speculating fact_terms fact_type)
 from p"facts_numeric.dewy" import (fact_offset_value)
 from p"facts_routes.dewy" import (fact_route fact_route_values)
@@ -184,6 +184,7 @@ fact_nonempty_call=(n:LibraryWord):>bool=>$unsafe {
     let path=files[pos_file(nodes.ptr[d].pos)].path
     if name =? fact_name_least or name =? fact_name_most {
         let rk=tkind(fact_type(ntype(kid(n 0))))
+        if path =? "{lib_dir}/game/gpuarray.jo" {return is_gpu_array(representation_type(ntype(kid(n 0))))}
         # (an N-D array's reduces its flat storage: `m.data.length >? 0`)
         if path =? "{lib_dir}/std/nd.jo" {return is_nd(representation_type(ntype(kid(n 0))))}
         return path =? "{lib_dir}/core/array.jo" and (rk =? 'array' or rk =? 'fixed')
@@ -195,7 +196,8 @@ fact_nonempty_check=(n:LibraryWord @s:FactState values:array<int64>):>void=>$uns
     if fact_speculating not=? 0 or not (fact_policy =? 'RequireStatic' or fact_query) {return}
     let t=fact_type(ntype(kid(n 0)))
     let nd=is_nd(representation_type(t))
-    let length=if tkind(t) =? 'fixed' {fact_constant(@s fixed_len(t))} else if nd {fact_nd_data_length(@s fact_map_receiver(@s n values[0]))} else {fact_project(@s fact_map_receiver(@s n values[0]) (-1) false T_INT)}
+    let gpu=is_gpu_array(representation_type(t))
+    let length=if gpu {fact_project(@s fact_map_receiver(@s n values[0]) intern("n") false T_INT)} else if tkind(t) =? 'fixed' {fact_constant(@s fixed_len(t))} else if nd {fact_nd_data_length(@s fact_map_receiver(@s n values[0]))} else {fact_project(@s fact_map_receiver(@s n values[0]) (-1) false T_INT)}
     # (the constant first: the state is taken before later arguments run)
     let one=fact_constant(@s 1)
     let c=fact_compare(s 'ge' length one)
@@ -205,9 +207,10 @@ fact_nonempty_check=(n:LibraryWord @s:FactState values:array<int64>):>void=>$uns
     }
     if c =? 1 {return}
     let receiver=wit_text(kid(n 0))
-    if nd and receiver not=? "" {receiver="{receiver}.data"}
+    if gpu and receiver not=? "" {receiver="cpu({receiver}).data"}
+    else if nd and receiver not=? "" {receiver="{receiver}.data"}
     let rk=tkind(t)
-    let what=if rk =? 'array' or rk =? 'fixed' or nd {"array"} else if is_dewy_set_type(representation_type(ntype(kid(n 0)))) {"set"} else {"heap"}
+    let what=if rk =? 'array' or rk =? 'fixed' or nd or gpu {"array"} else if is_dewy_set_type(representation_type(ntype(kid(n 0)))) {"set"} else {"heap"}
     let shown=if receiver not=? "" {"`{receiver}`"} else {"the {what}"}
     let relation=if receiver not=? "" {"{receiver}.length >? 0"} else {""}
     if c =? 0 {

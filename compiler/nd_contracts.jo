@@ -652,18 +652,21 @@ fact_nd_download = (n: int, s: mut FactState, input: int) -> int:
     result = fact_fresh(s, ntype(n))
     shape = if input != 0: fact_projection_find(s, input, intern("shape"), false) else: -1
     if shape >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("shape"), false, s.projections[shape].value))
+    # Downloaded storage and reductions refer to the same immutable count.
+    length = fact_project(s, input, intern("n"), false, T_INT)
+    data = fact_project(s, result, intern("data"), false, mk_array(nd_elem(representation_type(ntype(n)))))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(data, -1, false, length))
     fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
     result
 
 fact_nd_upload = (n: int, s: mut FactState, input: int) -> int:
     t = representation_type(ntype(kid(n, 0)))
-    if not is_nd(t):
-        length = if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, input, -1, false, T_INT)
-        # A fresh rank-one shape retains the input snapshot's length, including
-        # symbolic shaped parameters. No alias to later changes of the input.
-        return fact_nd_make(n, s, [length])
-    result = fact_fresh(s, ntype(n))
-    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("shape"), false, fact_nd_shape(s, input)))
+    nd = is_nd(t)
+    length = if nd: fact_nd_data_length(s, input) else if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, input, -1, false, T_INT)
+    # Upload owns a shape snapshot and retains the exact flat element count.
+    result = if nd: fact_fresh(s, ntype(n)) else: fact_nd_make(n, s, [length])
+    if nd and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("shape"), false, fact_nd_shape(s, input)))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("n"), false, length))
     result
 
 # A transpose reverses axes and copies exactly the input storage count.
