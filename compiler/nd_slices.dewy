@@ -254,7 +254,23 @@ fact_nd_slice=(n:SliceWord @s:FactState values:array<int64> kind:SliceWord):>Sli
         if kind >=? 151 and kind <=? 153 {fact_nd_store(n @s n 'write')}
         return fact_fresh(@s ntype(n))
     }
-    if kind =? 152 or kind =? 153 {
+    # (an array whose extents match the selection axis by axis, with its data matching its shape,
+    # has the selected count: no symbolic product is needed. O(rank))
+    let matched=false
+    if kind =? 153 and fact_bound(s fact_nd_valid(@s values[2])).lo =? 1 {
+        let assigned=fact_nd_shape(@s values[2])
+        let assigned_count=fact_project(@s assigned (-1) false T_INT)
+        let assigned_rank=fact_bound(s assigned_count)
+        if assigned_rank.lo =? assigned_rank.hi and assigned_rank.lo =? selected.length {
+            matched=true
+            loop axis in [0..selected.length) {
+                let axis_value=fact_constant(@s axis)
+                let extent=fact_project(@s assigned axis_value true T_INT)
+                if fact_compare(s 'eq' extent selected[axis]) not=? 1 {matched=false}
+            }
+        }
+    }
+    if (kind =? 152 or kind =? 153) and not matched {
         let length=if kind =? 153 {fact_nd_data_length(@s values[2])} else {fact_project(@s values[2] (-1) false T_INT)}
         let total=fact_constant(@s 1)
         let origin=bc_int(0 nodes.ptr[n].pos)

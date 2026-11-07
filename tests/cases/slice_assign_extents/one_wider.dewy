@@ -1,0 +1,11 @@
+# Near miss: the selection has one more row than the array assigned to it.
+f = (@m:array<float64 length=[r c]>):>void => {
+    if r <? 3 or c <? 3 return
+    let h = r-1 let w = c-1
+    let a = m[[1..h) [1..w)]
+    m[[0..h) [1..w)] = a
+}
+main = ():>void => {
+    let m = zeros(3 3)
+    f(@m)
+}
