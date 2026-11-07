@@ -1,0 +1,173 @@
+$runtime_checks
+from p"check.jo" import jd
+from p"ast.jo" import (NF_CHECKED NF_U64 add_flag mk nodes)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_block bc_bool bc_ident bc_int bc_stmt bc_str)
+from p"errors.jo" import (exception_member family_holds_generic value_members)
+from p"expr.jo" import (a_type bc_assign bc_bin bc_logic copy_path plain_path type_node_of)
+from p"facts.jo" import (fact_add_fits)
+from p"refine.jo" import (ref_predicates representation_type str_set_of str_sets)
+from p"refinement_types.dewy" import (RefAtom RefTerm)
+from p"types.jo" import (T_NONE T_STR dt is_int is_union type_eq types union_index union_members)
+from p"util.jo" import (fatal)
+
+IstypeWord:type=int64<overflow='wrap'>
+# `x is? T`'s rewrites; the selection runs in checker_type_tests.dewy. A rewrite
+# that does not apply answers -1.
+istype_original=(a:int64):>int64=>{
+    # (a variable or field path, copied before it is checked: the rewrites test it again)
+    if plain_path(a) {return copy_path(a)}
+    0
+}
+# Family annotations denote every descendant, but only alternatives of the
+# tested value participate. Include none when testing exception itself.
+istype_family=(n:int64 orig:int64 at:int64 tt:int64):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let selected:array<int64>=[]
+    let wanted=value_members(tt)
+    let actual=value_members(at)
+    loop member in actual {
+        if wanted.contains(member) or family_holds_generic(tt member) {selected.push(member)}
+    }
+    let subj=is_subject(n orig)
+    let condition:IstypeWord=0
+    if selected.length =? 0 or selected.length =? actual.length {
+        condition=mk('bool_lit' pos)
+        if selected.length >? 0 {nodes.ptr[condition].ival=1}
+    }
+    else {condition=members_test(subj selected pos)}
+    is_rewritten(n orig condition)
+}
+# x is A | B, where x: (A | B | C)?: x != none and (x is A or x is B); without the
+# optional: x is A or x is B
+istype_members=(n:int64 orig:int64 u:int64 tt:int64 optional:bool):>int64=>$unsafe {
+    let ms=sub_members(u tt)
+    if ms.length =? 0 {return -1}
+    let pos=nodes.ptr[n].pos
+    let subj=is_subject(n orig)
+    if not optional {return is_rewritten(n orig members_test(subj ms pos))}
+    let c=bc_logic('and_' bc_bin('ne' copy_path(subj) mk('none_lit' pos) pos) members_test(subj ms pos) pos)
+    is_rewritten(n orig c)
+}
+# x is? 'a', x is? BasePrefix on a string: x compared with each member
+# (on a set's word: its words for the members both have)
+istype_set=(n:int64 orig:int64 at:int64 set:int64):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let subj=is_subject(n orig)
+    let c:IstypeWord=0
+    loop value in str_sets[set] {
+        if at not=? T_STR and not str_sets[str_set_of(at)].contains(value) {continue}
+        let same=bc_bin('eq' copy_path(subj) bc_str(value pos) pos)
+        c=if c =? 0 {same} else {bc_logic('or_' c same pos)}
+    }
+    if c =? 0 {c=bc_bool(false pos)}
+    is_rewritten(n orig c)
+}
+# x is? 1, x is? 'fast' on a union with an integer or string member: that member, then its value
+istype_member_value=(n:int64 orig:int64 at:int64 tt:int64 set:int64):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    loop m in (if is_union(at) {union_members(at)} else {[at]}) {
+        if type_eq(representation_type(m) representation_type(tt)) or set not=? 0 and str_set_of(m) not=? 0 {
+            let subj=is_subject(n orig)
+            let held=mk('istype' pos)
+            nodes.ptr[held].a=int32(copy_path(subj))
+            nodes.ptr[held].b=int32(type_node_of(m pos))
+            let value=mk('istype' pos)
+            nodes.ptr[value].a=int32(copy_path(subj))
+            nodes.ptr[value].b=int32(type_node_of(tt pos))
+            return is_rewritten(n orig bc_logic('and_' held value pos))
+        }
+    }
+    -1
+}
+# x is? 1, x is? -1|1, x is? int64<(<? 100)>: the comparisons of the refinement
+istype_refined=(n:int64 orig:int64 tt:int64):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let subj=is_subject(n orig)
+    let c:IstypeWord=0
+    loop atom0 in ref_predicates[IstypeWord(types.ptr[tt].st)] {
+        let atom=ref_is_atom(atom0 pos)
+        let check=bc_bin(atom.op ref_is_term(atom.a subj pos) ref_is_term(atom.b subj pos) pos)
+        c=if c =? 0 {check} else {bc_logic('and_' c check pos)}
+    }
+    if c =? 0 {
+        c=mk('bool_lit' pos)
+        nodes.ptr[c].ival=1
+    }
+    is_rewritten(n orig c)
+}
+# The member a test most likely meant: a search's `Missing` for `is? none`,
+# `int64` for `is? int`. "" when no member stands out. O(members).
+istype_member_hint=(at:int64 tt:int64):>string=>{
+    let absent:IstypeWord=0
+    let number:IstypeWord=0
+    loop m in union_members(at) {
+        if m not=? T_NONE and exception_member(m) and absent =? 0 {absent=m}
+        if is_int(representation_type(m)) and number =? 0 {number=m}
+    }
+    if tt =? T_NONE and absent not=? 0 {return ": it holds {dt(absent)} when there is no value, so test `is? {dt(absent)}`, or give a fallback with `??`"}
+    if is_int(representation_type(tt)) and number not=? 0 {return ": its number is {a_type(number)}, so test `is? {dt(number)}`"}
+    ""
+}
+istype_error=(n:int64 at:int64 tt:int64 code:int64):>void=>$unsafe {
+    if code =? 1 {fatal(nodes.ptr[IstypeWord(nodes.ptr[n].b)].pos "{dt(tt)} is not one of the types of {dt(at)}{istype_member_hint(at tt)}")}
+    if code =? 2 {fatal(nodes.ptr[IstypeWord(nodes.ptr[n].b)].pos "a {dt(at)} is either a {dt(IstypeWord(types.ptr[at].elem))} or none, never a {dt(tt)}")}
+    fatal(nodes.ptr[n].pos "{jd(nodes.ptr[n].pos "`is`" "`is?`")} tests which type a union (A | B) or optional value holds; this is always {a_type(at)}")
+}
+# (`c < x + k` keeps k on the value's side (refine.jo ref_offset_right): as `c - k < x`, which
+# cannot overflow where x + k would)
+ref_is_atom=(atom0:RefAtom pos:int64):>RefAtom=>{
+    let atom=atom0
+    if atom.a.kind not=? 1 or atom.b.offset =? 0 {return atom}
+    if atom.a.unsigned or not fact_add_fits(atom.a.value (-atom.b.offset)) {fatal(pos "`is?` tests a refinement whose bound, less its offset, is within int64's range")}
+    atom.a.value -= atom.b.offset
+    atom.b.offset=0
+    atom
+}
+# what `x is ...` tests again: x itself (a variable or field path), or else its value put in a
+# variable of its own (computed once)
+ref_is_term=(term:RefTerm subj:int64 pos:int64):>int64=>{
+    if term.kind =? 0 and term.path.length =? 0 and term.offset =? 0 {return copy_path(subj)}
+    if term.kind not=? 1 {fatal(pos "`is?` tests a refinement whose bounds are constants")}
+    let e=bc_int(term.value pos)
+    if term.unsigned {add_flag(e NF_U64)}
+    e
+}
+is_subject=(n:int64 orig:int64):>int64=>$unsafe {
+    if orig not=? 0 {return orig}
+    add_flag(IstypeWord(nodes.ptr[n].a) NF_CHECKED)
+    bc_ident("__is{n}" nodes.ptr[n].pos)
+}
+# node n is now test c (after setting is_subject's variable, when there is one)
+is_rewritten=(n:int64 orig:int64 c:int64):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    if orig not=? 0 {nodes.ptr[n]=nodes.ptr[c]} else {
+        let set_v=bc_assign(bc_ident("__is{n}" pos) IstypeWord(nodes.ptr[n].a) pos)
+        nodes.ptr[n]=nodes.ptr[bc_block([set_v bc_stmt(c pos)] pos)]
+    }
+    check_expr(n 0)
+}
+# the members of union u that t is (t one of them, or a union of some of them); none: it is not
+sub_members=(u:int64 t:int64):>array<int64>=>{
+    let out:array<int64>=[]
+    if union_index(u t) >=? 0 {
+        out.push(t)
+        return out
+    }
+    if not is_union(t) {return out}
+    loop m in union_members(t) {
+        if union_index(u m) >=? 0 {out.push(m)}
+    }
+    out
+}
+# subj is ms[0] or subj is ms[1] ... (subj: a variable or field path, copied for each test)
+members_test=(subj:int64 ms:array<int64> pos:int64):>int64=>$unsafe {
+    let c:IstypeWord=0
+    loop m in ms {
+        let t=mk('istype' pos)
+        nodes.ptr[t].a=int32(copy_path(subj))
+        nodes.ptr[t].b=int32(type_node_of(m pos))
+        if c =? 0 {c=t} else {c=bc_logic('or_' c t pos)}
+    }
+    c
+}

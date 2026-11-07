@@ -1,4 +1,5 @@
 use 'secret_checks.dewy'
+use 'checks_istype.dewy'
 use 'checks_builders.dewy'
 use 'checks_value_hooks.dewy'
 use 'checks_cond_hooks.dewy'
@@ -9664,148 +9665,13 @@ map_presence_fn = (call: int) -> int:
             return get_fn_inst(candidate, fns[f].targs, nodes[call].pos)
     0
 
-# `x is? T`'s rewrites; the selection runs in checker_type_tests.dewy. A rewrite
-# that does not apply answers -1.
-istype_original = (a: int) -> int:
-    # (a variable or field path, copied before it is checked: the rewrites test it again)
-    if plain_path(a): return copy_path(a)
-    0
-# Family annotations denote every descendant, but only alternatives of the
-# tested value participate. Include none when testing exception itself.
-istype_family = (n: int, orig: int, at: int, tt: int) -> int:
-    pos = nodes[n].pos
-    selected: int[]
-    wanted = value_members(tt)
-    actual = value_members(at)
-    loop member in actual:
-        if wanted.contains(member) or family_holds_generic(tt, member): selected.push(member)
-    subj = is_subject(n, orig)
-    condition = 0
-    if selected.len() == 0 or selected.len() == actual.len():
-        condition = mk(.bool_lit, pos)
-        if selected.len() > 0: nodes[condition].ival = 1
-    else: condition = members_test(subj, selected, pos)
-    is_rewritten(n, orig, condition)
-# x is A | B, where x: (A | B | C)?: x != none and (x is A or x is B); without the
-# optional: x is A or x is B
-istype_members = (n: int, orig: int, u: int, tt: int, optional: bool) -> int:
-    ms = sub_members(u, tt)
-    if ms.len() == 0: return -1
-    pos = nodes[n].pos
-    subj = is_subject(n, orig)
-    if not optional: return is_rewritten(n, orig, members_test(subj, ms, pos))
-    c = bc_logic(.and_, bc_bin(.ne, copy_path(subj), mk(.none_lit, pos), pos), members_test(subj, ms, pos), pos)
-    is_rewritten(n, orig, c)
-# x is? 'a', x is? BasePrefix on a string: x compared with each member
-# (on a set's word: its words for the members both have)
-istype_set = (n: int, orig: int, at: int, set: int) -> int:
-    pos = nodes[n].pos
-    subj = is_subject(n, orig)
-    c = 0
-    loop value in str_sets[set]:
-        if at != T_STR and not str_sets[str_set_of(at)].contains(value): continue
-        same = bc_bin(.eq, copy_path(subj), bc_str(value, pos), pos)
-        c = if c == 0: same else: bc_logic(.or_, c, same, pos)
-    if c == 0: c = bc_bool(false, pos)
-    is_rewritten(n, orig, c)
-# x is? 1, x is? 'fast' on a union with an integer or string member: that member, then its value
-istype_member_value = (n: int, orig: int, at: int, tt: int, set: int) -> int:
-    pos = nodes[n].pos
-    loop m in (if is_union(at): union_members(at) else: [at]):
-        if type_eq(representation_type(m), representation_type(tt)) or set != 0 and str_set_of(m) != 0:
-            subj = is_subject(n, orig)
-            held = mk(.istype, pos)
-            nodes[held].a = i32(copy_path(subj))
-            nodes[held].b = i32(type_node_of(m, pos))
-            value = mk(.istype, pos)
-            nodes[value].a = i32(copy_path(subj))
-            nodes[value].b = i32(type_node_of(tt, pos))
-            return is_rewritten(n, orig, bc_logic(.and_, held, value, pos))
-    -1
-# x is? 1, x is? -1|1, x is? int64<(<? 100)>: the comparisons of the refinement
-istype_refined = (n: int, orig: int, tt: int) -> int:
-    pos = nodes[n].pos
-    subj = is_subject(n, orig)
-    c = 0
-    loop atom0 in ref_predicates[int(types[tt].st)]:
-        atom = ref_is_atom(atom0, pos)
-        check = bc_bin(atom.op, ref_is_term(atom.a, subj, pos), ref_is_term(atom.b, subj, pos), pos)
-        c = if c == 0: check else: bc_logic(.and_, c, check, pos)
-    if c == 0:
-        c = mk(.bool_lit, pos)
-        nodes[c].ival = 1
-    is_rewritten(n, orig, c)
-# The member a test most likely meant: a search's `Missing` for `is? none`,
-# `int64` for `is? int`. "" when no member stands out. O(members).
-istype_member_hint = (at: int, tt: int) -> str:
-    absent = 0
-    number = 0
-    loop m in union_members(at):
-        if m != T_NONE and exception_member(m) and absent == 0: absent = m
-        if is_int(representation_type(m)) and number == 0: number = m
-    if tt == T_NONE and absent != 0: return ": it holds {dt(absent)} when there is no value, so test `is? {dt(absent)}`, or give a fallback with `??`"
-    if is_int(representation_type(tt)) and number != 0: return ": its number is {a_type(number)}, so test `is? {dt(number)}`"
-    ""
 
-istype_error = (n: int, at: int, tt: int, code: int) -> void:
-    if code == 1: fatal(nodes[int(nodes[n].b)].pos, "{dt(tt)} is not one of the types of {dt(at)}{istype_member_hint(at, tt)}")
-    if code == 2: fatal(nodes[int(nodes[n].b)].pos, "a {dt(at)} is either a {dt(int(types[at].elem))} or none, never a {dt(tt)}")
-    fatal(nodes[n].pos, "{jd(nodes[n].pos, "`is`", "`is?`")} tests which type a union (A | B) or optional value holds; this is always {a_type(at)}")
 
-# (`c < x + k` keeps k on the value's side (refine.jo ref_offset_right): as `c - k < x`, which
-# cannot overflow where x + k would)
-ref_is_atom = (atom0: RefAtom, pos: int) -> RefAtom:
-    atom = atom0
-    if atom.a.kind != 1 or atom.b.offset == 0: return atom
-    if atom.a.unsigned or not fact_add_fits(atom.a.value, -atom.b.offset): fatal(pos, "`is?` tests a refinement whose bound, less its offset, is within int64's range")
-    atom.a.value -= atom.b.offset
-    atom.b.offset = 0
-    atom
 
-# what `x is ...` tests again: x itself (a variable or field path), or else its value put in a
-# variable of its own (computed once)
-ref_is_term = (term: RefTerm, subj: int, pos: int) -> int:
-    if term.kind == 0 and term.path.len() == 0 and term.offset == 0: return copy_path(subj)
-    if term.kind != 1: fatal(pos, "`is?` tests a refinement whose bounds are constants")
-    e = bc_int(term.value, pos)
-    if term.unsigned: add_flag(e, NF_U64)
-    e
 
-is_subject = (n: int, orig: int) -> int:
-    if orig != 0: return orig
-    add_flag(int(nodes[n].a), NF_CHECKED)
-    bc_ident("__is{n}", nodes[n].pos)
 
-# node n is now test c (after setting is_subject's variable, when there is one)
-is_rewritten = (n: int, orig: int, c: int) -> int:
-    pos = nodes[n].pos
-    if orig != 0: nodes[n] = nodes[c]
-    else:
-        set_v = bc_assign(bc_ident("__is{n}", pos), int(nodes[n].a), pos)
-        nodes[n] = nodes[bc_block([set_v, bc_stmt(c, pos)], pos)]
-    check_expr(n, 0)
 
-# the members of union u that t is (t one of them, or a union of some of them); none: it is not
-sub_members = (u: int, t: int) -> int[]:
-    out: int[]
-    if union_index(u, t) >= 0:
-        out.push(t)
-        return out
-    if not is_union(t): return out
-    loop m in union_members(t):
-        if union_index(u, m) >= 0: out.push(m)
-    out
 
-# subj is ms[0] or subj is ms[1] ... (subj: a variable or field path, copied for each test)
-members_test = (subj: int, ms: int[], pos: int) -> int:
-    c = 0
-    loop m in ms:
-        t = mk(.istype, pos)
-        nodes[t].a = i32(copy_path(subj))
-        nodes[t].b = i32(type_node_of(m, pos))
-        if c == 0: c = t
-        else: c = bc_logic(.or_, c, t, pos)
-    c
 
 # a variable, or fields of one (a.b.c): what `is` can narrow
 plain_path = (e: int) -> bool:
