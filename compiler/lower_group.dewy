@@ -197,8 +197,18 @@ gen_place=(e:LGWord write:bool):>Place=>$unsafe {
         let bk=types.ptr[bt].kind
         if bk =? 'ptr' {
             ir.raw_mem = true;
-            let p=if nodes.ptr[a].kind =? 'intrinsic' and (nodes.ptr[a].aux as IN) =? IN.arrdata and nkids(a) =? 1 {arrdata_elements(a)} else {gen_expr(a).v}
-            let i=gen_index(LGWord(nodes.ptr[e].b))
+            let direct=nodes.ptr[a].kind =? 'intrinsic' and (nodes.ptr[a].aux as IN) =? IN.arrdata and nkids(a) =? 1
+            let p:LGWord=0
+            let i:LGWord=0
+            if direct and nodes.ptr[kid(a 0)].kind =? 'ident' {
+                # As with checked array indexing, a call in the index may grow the
+                # named array. Locate its current elements after that call.
+                i=gen_index(LGWord(nodes.ptr[e].b))
+                p=arrdata_elements(a)
+            } else {
+                p=if direct {arrdata_elements(a)} else {gen_expr(a).v}
+                i=gen_index(LGWord(nodes.ptr[e].b))
+            }
             let sz=tsize(LGWord(types.ptr[bt].elem))
             return Place[true e_bin('add' VI p e_bin('mul' VI i e_iconst(sz)))]
         }

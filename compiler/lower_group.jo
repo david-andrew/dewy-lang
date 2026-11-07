@@ -177,8 +177,17 @@ gen_place = (e: int, write: bool) -> Place:
         bk = types[bt].kind
         if bk == .ptr:
             ir.raw_mem = true
-            p = if nodes[a].kind == .intrinsic and (nodes[a].aux as IN) == .arrdata and nkids(a) == 1: arrdata_elements(a) else: gen_expr(a).v
-            i = gen_index(int(nodes[e].b))
+            direct = nodes[a].kind == .intrinsic and (nodes[a].aux as IN) == .arrdata and nkids(a) == 1
+            p = 0
+            i = 0
+            if direct and nodes[kid(a, 0)].kind == .ident:
+                # As with checked array indexing, a call in the index may grow the
+                # named array. Locate its current elements after that call.
+                i = gen_index(int(nodes[e].b))
+                p = arrdata_elements(a)
+            else:
+                p = if direct: arrdata_elements(a) else: gen_expr(a).v
+                i = gen_index(int(nodes[e].b))
             sz = tsize(int(types[bt].elem))
             return Place(true, e_bin(.add, VI, p, e_bin(.mul, VI, i, e_iconst(sz))))
         if bk == .array:
