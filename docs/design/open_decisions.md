@@ -461,6 +461,31 @@ Today the same contract works on a `let`, a parameter or a record field, so a fu
 - **Rec:** add it, as the next step if returning these arrays turns out to matter. It would be the first alias allowed to refer to itself this way.
 - **Reversible:** yes.
 
+### D35. `in_zone` on a zoned time
+Turn this on and a zoned time shows the same moment in another zone directly, as an `Instant` already does. Not built.
+
+```dewy
+let slot = zoned("2026-11-01T09:00" zone=zone"America/New_York")
+printl(slot.in_zone(zone"Europe/Berlin"))            # proposed
+printl(slot.nominal.in_zone(zone"Europe/Berlin"))    # today
+```
+
+- **Rec:** add it.
+- **Reversible:** yes.
+
+### D36. Names for common derived unit dimensions
+Turn this on and `units` names the common derived dimensions, as it already names `RValue`, so a field reads `power:float64*Power` instead of `float64*Mass*Length^2/Time^3`. Not built.
+
+```dewy
+from units import kW, Power
+Appliance:type = [name:string power:float64*Power]
+let kettle = Appliance["kettle" 2.2kW]
+```
+
+- **Names:** `Area`, `Volume`, `Speed`, `Acceleration`, `Force`, `Energy`, `Power`, `Pressure`.
+- **Rec:** add them.
+- **Reversible:** yes.
+
 ---
 
 ## P4: open-ended
