@@ -1,0 +1,433 @@
+$runtime_checks
+from p"directives.jo" import DIR_IMPLICIT
+from p"directives.jo" import dir_policy
+from p"util.jo" import pos_in_lib
+from p"facts.jo" import FactSummary
+from p"facts.jo" import FactProbeRun
+from p"facts.jo" import FactKeyParam
+from p"facts.jo" import FactForkEntry
+from p"ast.jo" import (NF_GLOBAL NF_INBOUNDS has_flag kid nkids nodes set_list)
+from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM fns globals locals)
+from p"directives.jo" import (dir_defer dir_floats_any dir_forced dir_index dir_name_assumed_bounds dir_obligations dir_proven dir_uniform_runtime dir_value directives_after_facts)
+from p"draw_ops.dewy" import (draw_context_finalize draw_context_reset)
+from p"effects.jo" import (effect_panic_nodes effect_panic_pending effect_panic_texts effect_unavailable loan_owners)
+from p"exact.jo" import (exact_decided exact_fact_store exact_finish exact_has_store exact_marks exact_owners exact_proof_demands exact_reset exact_stores)
+from p"expr.jo" import (CV IN ntype)
+from p"facts.jo" import (FactPlanDependency FACT_LENT FactBinding FactSlice FactState fact_add_fits fact_bound fact_call_field_types fact_capture fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_domain fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_index_put fact_internal_policy fact_key_params fact_new fact_obliged fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_forget fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_root_key fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_slice_prepare fact_slice_push_children fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_type fact_validated fn_dewy fn_in_lib)
+from p"facts_elements.dewy" import (fact_fixed_check fact_fixed_node)
+from p"facts_forgets.dewy" import (fact_holds_contract fact_written_root)
+from p"facts_forks.dewy" import (fact_fork_seed)
+from p"facts_library.dewy" import (fact_library_call)
+from p"facts_members.dewy" import (fact_member_candidate fact_member_decide)
+from p"facts_probes.dewy" import (fact_probe_record fact_probe_reusable)
+from p"floats.jo" import (ff_conversions)
+from p"icount.jo" import (IC_FACTS)
+from p"icount_ops.dewy" import (ic_fn ic_restore)
+from p"ide.jo" import (ide_on)
+from p"isolation.jo" import (isolation_limit)
+from p"ownership.jo" import (ownership_decls)
+from p"ownership_types.dewy" import (ownership_fact_type)
+from p"predicate_facts.jo" import (FactPredicate fact_predicate_nodes fact_predicates)
+from p"proofs.jo" import (proof_active proof_calls proof_decls proof_erase proof_exit proof_prepare result_active result_contracts result_exit)
+from p"refine.jo" import (ref_wrapped_check refine_active refine_entry refine_fact_entry refine_owners refine_requests)
+from p"refinement_types.dewy" import (FACT_MIN FactBound FactPolicy FactTerm)
+from p"types.jo" import (tkind types)
+from p"util.jo" import (err_flush err_held err_held_on err_notes errors_only fatal more_errors quiet_errors stop)
+from p"warn_if.jo" import (wi_fact_finish wi_fact_requests)
+from p"witness.jo" import (wit_collect wit_collected wit_fail wit_measure wit_skipped wit_tentative)
+
+LifeWord:type=int64<overflow='wrap'>
+# `parallel i in [a..b)` (a range runs at most 2^63 - 1 values: lib/std/thread.jo).
+fact_parallel_range_call=(n:LifeWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 {return false}
+    if not fact_library_call(n "__dewy_parallel_each") and not fact_library_call(n "__dewy_parallel_collect") {return false}
+    dir_value(dir_name_assumed_bounds nodes.ptr[n].pos) =? 1 and tkind(fact_type(ntype(kid(n 0)))) not=? 'array'
+}
+fact_through_conv=(n0:LifeWord):>LifeWord=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' {n=LifeWord(nodes.ptr[n].a)}
+    n
+}
+# Under `$no_assumed_bounds` that cap is not assumed away: the range's size is proven below
+# it from its endpoints' bounds, whatever its step. O(1), demanded by the tag.
+fact_parallel_count_check=(n:LifeWord @s:FactState):>void=>$unsafe {
+    if fact_speculating not=? 0 or fact_summary_owner not=? 0 or not (fact_policy =? 'RequireStatic' or fact_query or fact_probe_on) {return}
+    let range=kid(n 0)
+    let proven=false
+    # (`__dewy_range(first second last stepped inclusive)`)
+    if fact_library_call(range "__dewy_range") and nkids(range) =? 5 {
+        let first=fact_through_conv(kid(range 0))
+        let last=fact_through_conv(kid(range 2))
+        let lo=if nodes.ptr[first].kind =? 'int_lit' {FactBound(nodes.ptr[first].ival nodes.ptr[first].ival)} else {fact_bound(s fact_capture(first @s))}
+        let hi=if nodes.ptr[last].kind =? 'int_lit' {FactBound(nodes.ptr[last].ival nodes.ptr[last].ival)} else {fact_bound(s fact_capture(last @s))}
+        proven=not lo.wide and not hi.wide and lo.lo not=? FACT_MIN and fact_add_fits(hi.hi (-lo.lo))
+    }
+    if fact_probe_on {
+        fact_probe_record(n proven)
+        return
+    }
+    if proven {return}
+    let message="cannot prove this `parallel` range has fewer than 2^63 values (`$no_assumed_bounds`)"
+    if dir_defer(n message true) {return}
+    err_notes.push([(-1) "help: bound its endpoints first, as `if lo <? 0 return` does for `[lo..hi)`"])
+    wit_fail(nodes.ptr[n].pos message)
+}
+fact_bounded_index=(n:LifeWord):>bool=>$unsafe {
+    let t=types.ptr[fact_type(ntype(LifeWord(nodes.ptr[n].a)))].kind
+    t =? 'array' or t =? 'fixed'
+}
+# A block's own declarations go out of scope at its end: nothing can name
+# them again, so their bindings leave the state (their values stay until a
+# compaction finds nothing reaching them). The state then grows with the live
+# places, not with every declaration a body ever made: joins, calls and loops
+# visit bindings. O(bindings bound inside the block).
+fact_scope_exit=(@s:FactState n:LifeWord first:LifeWord):>void=>$unsafe {
+    let owner:LifeWord=0
+    let declared:array<int64>=[]
+    loop j in [0..nkids(n)) {
+        let c=kid(n j)
+        if nodes.ptr[c].kind not=? 'vardecl' or has_flag(c NF_GLOBAL) {continue}
+        if nkids(c) =? 0 {
+            if nodes.ptr[c].sym not=? 0 {declared.push(LifeWord(nodes.ptr[c].sym))}
+        }
+        else {
+            loop ki in [0..nkids(c)) {
+                let d=kid(c ki)
+                if nodes.ptr[d].sym not=? 0 and not has_flag(d NF_GLOBAL) {declared.push(LifeWord(nodes.ptr[d].sym))}
+            }
+        }
+    }
+    if declared.length =? 0 {return}
+    let kept:array<FactBinding>=[]
+    loop i in [first..s.bindings.length) {
+        let b=s.bindings[i]
+        if b.place.root =? 'local' and declared.contains(b.place.declaration) and LifeWord(locals.ptr[b.place.declaration].flags) & (LF_CAPTURED | LF_SHARED) =? 0 {continue}
+        kept.push(b)
+    }
+    if kept.length =? s.bindings.length - first {return}
+    s.bindings.truncate(first)
+    loop b in kept {
+        fact_index_put(@s.index[0].roots fact_root_key(b.place) s.bindings.length)
+        s.bindings.push(b)
+    }
+}
+fact_refinements_unreachable=(root:LifeWord):>void=>$unsafe {
+    if fact_speculating not=? 0 or fact_summary_owner not=? 0 or fact_probe_on or fact_query or wit_tentative or not refine_owners.has(fact_owner) {return}
+    let work:array<int64>=[root]
+    loop work.length >? 0 {
+        let n=work.pop()
+        if n =? 0 or fact_dead_refinements.has(n) {continue}
+        fact_dead_refinements[n]=true
+        if nodes.ptr[n].kind =? 'lambda' {continue}
+        if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.refinement)) {fact_validated[n]=true}
+        fact_slice_push_children(@work n)
+    }
+}
+facts_finalize=():>void=>$unsafe {
+    draw_context_finalize()
+    if proof_active {proof_prepare()}
+    if loan_owners.length =? 0 and fact_requests.length =? 0 and fact_fixed_requests.length =? 0 and refine_requests.length =? 0 and wi_fact_requests.length =? 0 and proof_calls.length =? 0 and not proof_active and not result_active and fact_policy =? 'RuntimeAllowed' and exact_stores.length =? 0 and exact_owners.length =? 0 and not dir_floats_any and ff_conversions.length =? 0 {return}
+    let demanded=dict<int64 bool>()
+    loop request in wi_fact_requests {demanded[request.owner]=true}
+    loop [f _] in loan_owners {demanded[f]=true}
+    if proof_active {
+        loop call in proof_calls {demanded[call.owner]=true}
+        loop f in [1..fns.length) {
+            if proof_decls.has(LifeWord(fns.ptr[f].decl)) {demanded[f]=true}
+        }
+    }
+    loop request in fact_requests {demanded[request.owner]=true}
+    if result_active {
+        loop f in [1..fns.length) {
+            if result_contracts.has(LifeWord(fns.ptr[f].decl)) {demanded[f]=true}
+        }
+    }
+    let mandatory=demanded
+    loop request in fact_fixed_requests {demanded[request.owner]=true}
+    loop request in refine_requests {demanded[request.owner]=true}
+    loop [f _] in exact_proof_demands {demanded[f]=true}
+    if fact_policy =? 'RequireStatic' or dir_floats_any or ff_conversions.length >? 0 {
+        loop f in [1..fns.length) {
+            if (fact_policy =? 'RequireStatic' or dir_floats_any or ff_conversions.has(f)) and fns.ptr[f].body not=? 0 and fns.ptr[f].state =? 2 and not fn_in_lib(f) and fn_dewy(f) {demanded[f]=true}
+        }
+    }
+    # (an unproven obligation is held: every function's first is shown when the pass ends)
+    err_held_on=more_errors and not ide_on and not quiet_errors and not wit_collect and not wit_tentative
+    # (closures after the functions that create them: a fork's entry facts)
+    let order:array<int64>=[]
+    loop [f _] in demanded {
+        if f >? 0 and f <? fns.length and fns.ptr[f].kind not=? FK_LAMBDA {order.push(f)}
+    }
+    loop [f _] in demanded {
+        if f <=? 0 or f >=? fns.length or fns.ptr[f].kind =? FK_LAMBDA {order.push(f)}
+    }
+    loop f in order {
+        # (another process's body: it decides its own; a body already
+        # decided here is not decided again)
+        if effect_unavailable.has(f) or fact_decided.has(f) {continue}
+        fact_decided[f]=true
+        if f <=? 0 or f >=? isolation_limit or fns.ptr[f].state not=? 2 {fatal((-1) "cannot prove assertion: unsettled checked body")}
+        # (a body left out after an error, in the run for the next errors: not checked)
+        if errors_only and wit_skipped.has(f) {continue}
+        let icb=ic_fn(IC_FACTS f)
+        let run=fact_probe_runs.get(f)
+        if run not=? none {
+            if fact_probe_reusable(f run) {
+                loop [n _] in run.proven {
+                    if (nodes.ptr[n].kind =? 'index' or nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.arr2fixed))) and not has_flag(n NF_INBOUNDS) {dir_index(n true)}
+                    if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.arr2fixed)) {fact_validated[n]=true}
+                }
+                ic_restore(icb)
+                continue
+            }
+        }
+        fact_owner=f
+        fact_terms=[FactTerm()]
+        fact_constructor_actuals=dict<int64 array<int64>>()
+        let state=FactState()
+        let previous_policy=fact_policy
+        if proof_active and proof_decls.has(LifeWord(fns.ptr[f].decl)) {fact_policy='RequireStatic'}
+        # (a body with no partial operation, assertion or contract has
+        # nothing to decide: its loops and calls are not walked for it)
+        fact_has_deferred=false
+        fact_panic_collect=true
+        fact_panic_pending=[]
+        let uniform_defer=not dir_obligations and not ide_on and not dir_forced and not exact_proof_demands.has(f) and dir_uniform_runtime(nodes.ptr[LifeWord(fns.ptr[f].body)].pos)
+        if not mandatory.has(f) and not result_active and not (proof_active and proof_decls.has(LifeWord(fns.ptr[f].decl))) and ownership_decls.length =? 0 and not loan_owners.has(f) and (uniform_defer or not fact_obliged(LifeWord(fns.ptr[f].body))) {
+            if not uniform_defer and fact_panic_collect {fact_panic_sites[f]=fact_panic_pending}
+            fact_panic_collect=false
+            if uniform_defer or fact_has_deferred {fact_deferred[f]=true}
+            fact_policy=previous_policy
+            ic_restore(icb)
+            continue
+        }
+        fact_panic_collect=false
+        if fact_member_candidate(f) and fact_member_decide(f) {
+            fact_policy=previous_policy
+            ic_restore(icb)
+            continue
+        }
+        if refine_active or refine_requests.length >? 0 {refine_fact_entry(f @state)}
+        if fact_fork_entries.length >? 0 or fact_parallel_bounds.length >? 0 {fact_fork_seed(f @state)}
+        fact_slice_prepare(f)
+        let result=fact_capture(LifeWord(fns.ptr[f].body) @state)
+        if result_active {result_exit(f result LifeWord(fns.ptr[f].body) @state)}
+        if proof_active and proof_decls.has(LifeWord(fns.ptr[f].decl)) {proof_exit(f LifeWord(fns.ptr[f].body) @state)}
+        fact_policy=previous_policy
+        ic_restore(icb)
+    }
+    fact_owner=0
+    fact_slice=FactSlice()
+    exact_finish()
+    # A conservative transfer must never silently lose an obligation (opaque
+    # controls, deferred cleanup, or checked nodes absent from a published body).
+    # Retry such a request with no evidence, never as compile-time execution.
+    loop request in fact_requests {
+        if not fact_validated.has(request.node) {
+            fact_terms=[FactTerm()]
+            fact_constructor_actuals=dict<int64 array<int64>>()
+            let state=FactState()
+            fact_retry_owner=request.owner
+            fact_capture(request.node @state);
+        }
+    }
+    loop request in refine_requests {
+        if not fact_validated.has(request.node) and not fact_validated.has(ref_wrapped_check(request.node)) {
+            fact_terms=[FactTerm()]
+            fact_constructor_actuals=dict<int64 array<int64>>()
+            let state=FactState()
+            refine_entry=[]
+            fact_retry_owner=request.owner
+            fact_capture(request.node @state);
+        }
+    }
+    loop request in fact_fixed_requests {
+        let n=fact_fixed_node(request.node)
+        if fact_validated.has(n) {continue}
+        fact_terms=[FactTerm()]
+        fact_constructor_actuals=dict<int64 array<int64>>()
+        let state=FactState()
+        fact_retry_owner=request.owner
+        # Runtime-enabled bodies remain deferred until a caller needs their
+        # panic answer. Do not evaluate their operand to report the boundary.
+        fact_fixed_check(n @state 0)
+    }
+    fact_fixed_requests=[]
+    fact_retry_owner=0
+    loop request in fact_requests {
+        # (an unpacking's length left unproven stays, a runtime check)
+        if nodes.ptr[request.node].kind =? 'intrinsic' and nodes.ptr[request.node].aux =? int32(int64(IN.static_assert)) {set_list(request.node [])}
+    }
+    fact_requests=[]
+    fact_terms=[]
+    fact_constructor_actuals=dict<int64 array<int64>>()
+    if proof_active {proof_erase()}
+    if wi_fact_requests.length >? 0 {wi_fact_finish()}
+    if err_held.length >? 0 {err_flush()}
+    err_held_on=false
+    if wit_collected >? 0 and not wit_measure {stop(1)}
+}
+facts_reset=():>void=>{
+    fact_predicates=dict<int64 int64>()
+    fact_predicate_nodes=[FactPredicate()]
+    fact_shared_literals=[]
+    fact_saving=false
+    fact_sum_operand=0
+    fact_constant_globals=dict<int64 bool>()
+    fact_text_sinks=dict<int64 bool>()
+    fact_regex_counts=dict<int64 int64>()
+    fact_call_field_types=dict<[int64 int64] int64>()
+    draw_context_reset()
+    fact_search_predicate=0
+    exact_reset()
+    fact_slice=FactSlice()
+    fact_slice_cache=dict<int64 FactSlice>()
+    fact_plan_dependencies=dict<int64 FactPlanDependency>()
+    fact_plan_serial=0
+    fact_fork_nodes=dict<int64 bool>()
+    fact_fork_entries=dict<int64 FactForkEntry>()
+    fact_parallel_bounds=dict<int64 FactBound>()
+    fact_key_params=dict<int64 FactKeyParam>()
+    fact_decided=dict<int64 bool>()
+    fact_deferred=dict<int64 bool>()
+    fact_deferred_checks=dict<int64 array<int64>>()
+    fact_deferred_proving=false
+    fact_panic_sites=dict<int64 array<int64>>()
+    fact_panic_collect=false
+    fact_panic_pending=[]
+    fact_policy_default=false
+    fact_probe_runs=dict<int64 FactProbeRun>()
+    fact_returns_cache=dict<int64 bool>()
+    fact_return_escapes_cache=dict<int64 bool>()
+    fact_carried_cache=dict<int64 array<int64>>()
+    fact_pushed_rows_cache=dict<int64 array<int64>>()
+    fact_comprehensions=dict<int64 int64>()
+    fact_comprehension_sources=dict<int64 int64>()
+    fact_grown_roots=dict<int64 bool>()
+    fact_owner=0
+    fact_summaries=dict<int64 FactSummary>()
+    fact_selector_sources=dict<int64 int64>()
+    fact_shape_summaries=dict<int64 int64>()
+    fact_summary_shape_mask=0
+    fact_summary_shapes=[]
+    fact_constructor_types=dict<int64 bool>()
+    fact_constructor_bodies=dict<int64 bool>()
+    fact_constructor_calls=dict<int64 bool>()
+    fact_summary_field=0
+    fact_constructor_budget=-1
+    fact_summary_owner=0
+    fact_summary_assumed=[]
+    fact_summary_used=false
+    fact_requests=[]
+    fact_fixed_requests=[]
+    fact_divisors=dict<int64 int64>()
+    fact_validated=dict<int64 bool>()
+    fact_dead_refinements=dict<int64 bool>()
+    fact_query=false
+    fact_policy=FactPolicy.RuntimeAllowed
+    if (fact_internal_policy as array<uint8>).length >? 0 {
+        let policy=fact_internal_policy
+        if policy =? "require-static" or policy =? "require-static-all" or policy =? "require-static-measure" {fact_policy='RequireStatic'}
+        wit_collect=policy =? "require-static-all" or policy =? "require-static-measure"
+        # (measure: report every failure and build anyway, so `build --time`
+        # shows what analysing every function costs)
+        wit_measure=policy =? "require-static-measure"
+    }
+}
+# An owning boundary may execute a non-value-preserving lifecycle hook.
+# Captured scalar results remain values; only the transferred aggregate loses
+# its identity, and hook effects invalidate facts about exposed storage.
+fact_owner_value=(n:LifeWord value:LifeWord @s:FactState):>LifeWord=>$unsafe {
+    if n =? 0 or not ownership_fact_type(ntype(n)) {return value}
+    let k=nodes.ptr[n].kind
+    if k not=? 'ident' and k not=? 'field' {return value}
+    fact_forget_hooked(@s n)
+    fact_new(@s fact_domain(ntype(n) 'call' n) FactTerm(type=ntype(n)))
+}
+# A hook reaches its own value and what other code can reach: globals and
+# locals exposed, lent, captured or aliased. Every other local keeps its facts;
+# the transferred value's own root does not. O(bindings).
+fact_forget_hooked=(@s:FactState n:LifeWord):>void=>$unsafe {
+    let moved=fact_written_root(n)
+    loop i in [0..s.bindings.length) {
+        let p=s.bindings[i].place
+        if p.root =? 'local' and p.declaration >? 0 and LifeWord(locals.ptr[p.declaration].flags) & FACT_LENT =? 0 and not (moved.root =? 'local' and moved.declaration =? p.declaration) {continue}
+        let t=if p.root =? 'local' {LifeWord(locals.ptr[p.declaration].type)} else {LifeWord(globals.ptr[p.declaration].type)}
+        let v=fact_new(@s fact_domain(t 'call' n) FactTerm(type=t))
+        fact_holds_contract(@s t v)
+        s.bindings[i]=FactBinding(p v n s.bindings[i].value)
+    }
+}
+fact_literal_nonzero=(n0:LifeWord):>bool=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.none_)) {n=LifeWord(nodes.ptr[n].a)}
+    nodes.ptr[n].kind =? 'int_lit' and nodes.ptr[n].ival not=? 0
+}
+# A plain library body's obligations are the library's invariants: it notes no
+# panic (dir_defer), so proving them cannot change an answer. Generic instances
+# can carry a program's refinement, so they still decide.
+fact_deferred_implicit=(f:LifeWord):>bool=>$unsafe {
+    let p=nodes.ptr[LifeWord(fns.ptr[f].body)].pos
+    fns.ptr[f].targs.length =? 0 and pos_in_lib(p) and dir_uniform_runtime(p) and dir_policy(p) =? DIR_IMPLICIT
+}
+# Runtime-enabled bodies need no proof until a static caller asks whether
+# they can panic. Each deferred body is visited at most once on that demand.
+fact_complete_deferred=(f:LifeWord):>void=>$unsafe {
+    if not fact_deferred.has(f) or fact_deferred_implicit(f) {return}
+    fact_deferred.remove(f);
+    let previous_proving=fact_deferred_proving
+    fact_deferred_proving=true
+    fact_plan_forget(f);
+    let pending=fact_deferred_checks.get(f) ?? []
+    fact_deferred_checks.remove(f);
+    if pending.length >? 0 {
+        # These were evidence-free fallback answers, not visits of the body.
+        # The full transfer below decides every path, then retries any omitted
+        # boundary. Never retain a provisional panic after its check is proved.
+        if effect_panic_pending.has(f) {
+            effect_panic_nodes.remove(f);
+            effect_panic_texts.remove(f);
+            effect_panic_pending.remove(f);
+        }
+        loop n in pending {
+            if exact_has_store(n) {exact_marks[n] &= 231}
+            fact_validated.remove(n);
+            if nodes.ptr[n].kind =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.arr2fixed)) {dir_proven.remove(n);}
+        }
+    }
+    let icb=ic_fn(IC_FACTS f)
+    fact_owner=f
+    fact_terms=[FactTerm()]
+    fact_constructor_actuals=dict<int64 array<int64>>()
+    let state=FactState()
+    # Width conversions request refinements without enabling declared contracts.
+    # A summary/deferred walk still needs its own entry, never its caller's slots.
+    refine_entry=[]
+    if refine_active or refine_owners.has(f) {refine_fact_entry(f @state)}
+    if fact_fork_entries.length >? 0 or fact_parallel_bounds.length >? 0 {fact_fork_seed(f @state)}
+    fact_slice_prepare(f)
+    fact_capture(LifeWord(fns.ptr[f].body) @state);
+    # Evidence-free retries have no function entry to refresh, but retain
+    # their owner for any panic obligation they cannot prove.
+    fact_owner=0
+    fact_retry_owner=f
+    loop n in pending {
+        fact_terms=[FactTerm()]
+        fact_constructor_actuals=dict<int64 array<int64>>()
+        state=FactState()
+        if exact_has_store(n) {
+            if not exact_decided(n) {exact_fact_store(n 0 @state);}
+        }
+        else if not fact_validated.has(n) {
+            refine_entry=[]
+            fact_capture(n @state);
+        }
+    }
+    fact_retry_owner=0
+    fact_terms=[]
+    fact_constructor_actuals=dict<int64 array<int64>>()
+    fact_slice=FactSlice()
+    directives_after_facts()
+    fact_deferred_proving=previous_proving
+    ic_restore(icb)
+}
