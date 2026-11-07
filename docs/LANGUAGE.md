@@ -835,8 +835,7 @@ other was in; `pool.get(h)` takes a missing handle as a value.
 A stepped range's nonzero step is the caller's obligation too, as a divisor is,
 in a slice (`xs[a,b..]`, `m[a,b..c ..]`) and an open counter (`[a,b..]`) as in a loop.
 A literal can rule a failure out: a power with a literal exponent `>=? 0` and a
-rational with a literal nonzero denominator cannot panic. Other library failures (a bad format
-specification) still make the call panic. Running out of memory or GPU capacity
+rational with a literal nonzero denominator cannot panic. Running out of memory or GPU capacity
 (buffer room, texture slots, or driver allocation), a GPU lacking an operation a
 compute function uses, and a system that gives no random bytes are environmental failures:
 each reports the failure and exits with status 1, and none is a `panics` effect. The editor's hover
@@ -858,8 +857,8 @@ comparisons and prefix tests read; interpolation, `trim`, `split`, `join`,
 `replace`, case changes, `find` and `+ - *` on an `int` allocate. String indexing
 and slicing, narrowing an `int` to a fixed width, converting a float to an
 integer, shifting an `int` by a signed count and a stepped range, may fail unless the
-function's facts prove them; a format specification may fail unless it is a
-literal one the value accepts (`{x:.2f}`). Library bodies receive the same analysis as user functions. Intrinsic
+function's facts prove them; `fmt` with a pattern known only when running may
+fail with a `ParseError`. Library bodies receive the same analysis as user functions. Intrinsic
 costs use resolved compiler identities. Dynamic growth, formatting, managed
 copies, closure construction and recursive boxes retain allocation costs;
 unknown storage conditions remain conservative. Defaults, defers and known drop
@@ -1505,10 +1504,8 @@ with the simplest fraction (`m/3` is `1/3m`). Zero prints in the kind's own
 unit (`0s`). The unit attaches to the number, as it is written; a unit with
 nothing above the line puts the number there (`1/s^2`, not `1 1/s^2`). Other dimensions print in canonical units, using one named unit
 where that needs fewer factors (`m/s^2`, `N*s`, `kg/m^3`, `V/Hz^(1/2)`,
-`°/s`). Text from `string(x)` is the same. A format spec such as `{x:.2f}`
-formats the number alone: in the unit a value converted with `as` or a temperature
-scale prints in (`{1500m as km:.1f}` is `1.5`, `{20°C:.1f}` is `20.0`), and otherwise
-the canonical number (`{1500m:.1f}` is `1500.0`).
+`°/s`). Text from `string(x)` is the same. `fmt` formats plain numbers: divide by a unit to format a
+quantity's number in it, `fmt'.1f'(1500m/1km)` being `1.5`.
 
 `x as unit` converts a quantity to a constant unit of the same dimension:
 `30cm as inches` prints `1500/127inches` and `25m/s as km/hour` prints
@@ -1567,11 +1564,11 @@ Table), `kJ`, `kW` and `kWh` are in `units` too:
 from units import inch, ft, m, K, W, BTU, °F, R, RSI, RValue
 let layers:array<float64*RValue> = [0.68R 5.5inch*4.2R/inch 0.17R]   # R per inch times thickness
 let wall = layers.sum                                 # R values in series add
-printl"{wall as R:.2f} {wall as RSI:.3f}"             # 23.95 4.218
+printl"{fmt'.2f'(wall/1R)} {fmt'.3f'(wall/1RSI)}"     # 23.95 4.218
 let u = 1/wall                                        # U-factor
-printl"{u as (W/(m^2*K)):.3f}"                        # 0.237
+printl"{fmt'.3f'(u/(1W/(m^2*K)))}"                   # 0.237
 let rise = 70°F - 30°F                                # a difference, so it can scale
-printl"{(100ft^2)*rise/wall as (BTU/hour):.1f}"       # 167.0
+printl"{fmt'.1f'((100ft^2)*rise/wall/(1BTU/hour))}"  # 167.0
 ```
 
 `1RSI` is exactly `52752792631/9290304000*R`, from the unit definitions. A reading in
@@ -1826,9 +1823,9 @@ value made from written fractions (`1/3`, `rational(1 4)`) prints as
 `numerator/denominator`. Where both take part, it prints as a decimal when the
 digits end, otherwise as a fraction: `19.99*(8/100)` is `1.5992`, `1/3+0.5` is
 `5/6`. How a value prints never changes the value: `0.5 =? 1/2`, and both are
-the same dictionary key. `rational<int64>` prints the same way. A width alone adds
-no digits, `"{x:>7}"` of `rational(120)` being `    120`; a precision formats it as
-a `float64`, `{x:.2f}`.
+the same dictionary key. `rational<int64>` prints the same way. Under `fmt`, a width alone adds
+no digits, `fmt'>7'(rational(120))` being `    120`; a precision formats it as
+a `float64`, `fmt'.2f'(x)`.
 
 A `rational` binding without an annotation that a loop carries through `*`, `/`
 or `^` gets a warning: its parts can grow every iteration (`balance *= 1.05`,
@@ -4771,37 +4768,37 @@ absent optional prints `none`. A function handle shows its type's spelling,
 `"{@f}"` as `(x:int64:>int64)`, and so does a type: `printl(Point)`,
 `"{int64}"` and `int64 as string`.
 
-`format(value spec)` formats machine numbers or text, including inside an
-interpolation, where `{value:spec}` is short for it: `"{angle:.1f}°"`. The
-specification is an ordinary string and may be computed:
+`fmt` is the formatter: `fmt'.2f'` is a function that writes a number with two
+decimals. Call it in an interpolation, or make it once and use it often:
 
 ```dewy
-printl(format(3.14159 ".2f"))        # 3.14
-printl(format(255 "#06x"))          # 0x00ff
-printl(format(1234567 ","))         # 1,234,567
-printl(format("θ" "^5"))           # two spaces on each side
-let angle = 12.25
-printl("θ = {format(angle ".1f")}°")
+let x = 3.14159
+printl'result is {fmt'.2f'(x)}'     # result is 3.14
+let f2 = fmt'.2f'
+printl(f2(x))                       # 3.14
+printl(fmt'#06x'(255))              # 0x00ff
+printl(fmt','(1234567))             # 1,234,567
+printl(fmt'^5'("θ"))                # two spaces on each side
 ```
 
-The shape is `[[fill]align][+][#][0][width][,|_][.precision][type]`.
-Alignment is `<`, `>` or `^`, with an optional ASCII fill character. Floating
-formats are `f`, `e`/`E`, `g`/`G` and `%`; integer bases are `d`, `x`/`X`, `b`
-and `o`. `#` adds a radix prefix; grouping applies to decimal formats. An omitted
-type keeps ordinary value formatting, or fixed decimals when precision is given.
-Decimal/radix integer formats retain every bit. Floating formats on integers
-convert to `float64`; exact library numbers require an explicit `.to_float64()`
-for this kind of formatting. Fixed decimal rounding uses ties to even.
+A pattern is `[[fill]align][+][#][0][width][,|_][.precision][type]`, as Python's
+format specs. Alignment is `<`, `>` or `^`, with an optional ASCII fill character.
+Floating types are `f`, `e`/`E`, `g`/`G` and `%`; integer bases are `d`, `x`/`X`, `b`
+and `o`; `s` is text. `#` adds a radix prefix; grouping applies to decimal formats.
+What a pattern says decides what its function takes: an integer base takes
+integers; a floating type, a precision, a sign, zeros or grouping take numbers
+(integers convert to `float64` for a floating type, and a `rational` does too);
+`s` takes text; fill, alignment and width alone take numbers or text. A literal
+pattern is checked while compiling: one that does not read, or a value it does
+not take (`fmt'x'(1.5)`, `fmt'.2f'("hi")`), is a compile error. A pattern known
+only when running, `fmt(p)`, gives a function whose result can fail: a pattern
+that does not read or does not apply to the value is a `ParseError`.
+Decimal/radix integer formats retain every bit. Fixed decimal rounding uses ties
+to even. Text widths count grapheme clusters; text is never truncated (slice it
+to truncate). Format other values with `string(value)` first.
 `s.pad_start(n)`, `s.pad_end(n)` and `s.pad_center(n)` pad text with a computed
 width, around it for `pad_center` (any odd space after: `"hi".pad_center(5)` is
 ` hi  `), each with an optional fill: `"hi".pad_center(6 "*")`.
-
-Text takes alignment, fill and minimum width, optionally ending in `s`. Its
-width counts grapheme clusters; it does not truncate. Use a string slice to
-truncate explicitly. Invalid specs or options for the wrong value type fail: a
-spec not proven valid is a compile error by default, and panics under
-`$runtime_checks`.
-
 
 `bytes.read<uint64>(i)` loads the eight bytes at offset `i` of an `array<uint8>` as one
 little-endian `uint64`, at any alignment and without `$unsafe`; `read<uint32>` and
