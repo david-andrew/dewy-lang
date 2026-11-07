@@ -255,14 +255,13 @@ parse_day = (text:string):>Date|ParseError => date(text)
 
 let born = date"1990-03-15"
 let d = date"2024-01-31"
-let s = d - born
-printl"{s.months} {s.days} {s.years} {s.total_days}"         # fields on the Span from Date - Date
 printl"{d.add(1month overflow='next')}"                      # first of the next month instead of clamping
 printl"{age(born on=d leap_day='february_28')}"              # overrides the 1 March default
 printl"{d.weekday} {d.weekday_name} {d.month_name}"          # 0 is Monday; carried over from the old Date
 ```
 
-- **Rec:** keep all of them. `$check_constant` is alternative D in [string-shapes](proposals/string-shapes/round1.md), so it may be replaced by D11's answer.
+- **Rec:** keep all of them. `$check_constant` is alternative D in [string-shapes](proposals/string-shapes/round1.md), so it may be replaced by D11's answer. The `Span` fields left this item: batch 3 decided `Date - Date` gives a `Period`.
+- **Names tested cold** (Sonnet, Haiku and Fable, names only, 2026-11-07): all three readers read every name here correctly, including `$error_if`, `$check_constant`, `overflow='next'` and `leap_day='february_28'`.
 - **Reversible:** yes.
 
 ### D30. Function types without the outer parentheses
@@ -298,6 +297,7 @@ printl"{date"2026-11-01".format("EEEE d MMMM y")} {date("1/11/2026" "d/M/y")}"  
 ```
 
 - **Rec:** keep all of them. `Name<option=N>` standing for `Name_option_N` is the one to look at hardest, as it is a naming convention the compiler knows about.
+- **Names tested cold** (Sonnet, Haiku and Fable, 2026-11-07): all three read `$time.rules`, `Instant<width=64>`, the `Range` fields, the rounding names, `time_of_day"…"`, `local"…"`, `fold='later'` and `d.at(t)` correctly.
 - **Reversible:** yes.
 
 ### D32. Unicode-licensed time zone data in the repository
@@ -313,17 +313,19 @@ Mapping Windows zone names to IANA names uses Unicode's CLDR table, now stored i
 Turn on a difference type and passing a reading where a difference belongs is a compile error naming the fix, instead of silently counting from absolute zero. Today the same call compiles and gives 517 W where 39 W is right.
 
 ```dewy
-from units import ft, °F, BTU, R, RValue, Length, Temperature
-heat_loss = (area:float64*Length^2 rise:float64*TemperatureDifference r:float64*RValue) => area*rise/r
+from units import ft, °F, BTU, r_value_us, ThermalResistance, Length, Temperature
+heat_loss = (area:float64*Length^2 rise:float64*TemperatureDifference r:float64*ThermalResistance) => area*rise/r
 let a:float64*Length^2 = 8ft*40ft
-let wall:float64*RValue = 25.0R
+let wall:float64*ThermalResistance = 25.0r_value_us
 let rise = 70°F - 30°F
 printl"{heat_loss(a rise wall) as (BTU/hour):.1f}"           # fine
 printl"{heat_loss(a 70°F wall) as (BTU/hour):.1f}"           # compile error, names `70°F - 30°F`
 ```
 
 - **Rec:** add `TemperatureDifference`. It is not built. An unannotated parameter already rejects a reading.
-- **Also built provisionally, for you to see:** the names `R`, `RSI` and `RValue`, plus `BTU`, `kJ`, `kW`, `kWh`, `ft`/`foot`/`feet`, `yd`/`yard`/`yards`, `mile`/`miles`.
+- **Names tested cold** (Sonnet, Haiku and Fable, 2026-11-07): all three read `TemperatureDifference` correctly. The built names `RValue` and `RSI` failed: two of three readers took `RValue` for an electrical resistance or an rvalue, and `RSI` for the Relative Strength Index. In a second round all three read `ThermalResistance`, `r_value_us` and `r_value_si` correctly, so the example uses them; `InsulationR` and `R_si` were read unsurely.
+- **Rec, names:** rename `RValue` to `ThermalResistance`, and `R`/`RSI` to `r_value_us`/`r_value_si`. Built now under the old names, so the rename is a small change.
+- **Also built provisionally:** `BTU`, `kJ`, `kW`, `kWh`, `ft`/`foot`/`feet`, `yd`/`yard`/`yards`, `mile`/`miles`.
 - **Reversible:** yes.
 
 ### D33. A type alias that names itself in a self-length refinement
@@ -353,6 +355,7 @@ printl(slot.nominal.in_zone(zone"Europe/Berlin"))    # today
 ```
 
 - **Rec:** add it.
+- **Names tested cold** (2026-11-07): all three readers read `zoned_time.in_zone(zone)` correctly.
 - **Reversible:** yes.
 
 ### D36. Names for common derived unit dimensions
@@ -366,6 +369,7 @@ let kettle = Appliance["kettle" 2.2kW]
 
 - **Names:** `Area`, `Volume`, `Speed`, `Acceleration`, `Force`, `Energy`, `Power`, `Pressure`.
 - **Rec:** add them.
+- **Names tested cold** (2026-11-07): all three read `Power` and `Pressure` correctly; the rest of the list follows the same pattern and was not tested separately.
 - **Reversible:** yes.
 
 ---
