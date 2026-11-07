@@ -1,0 +1,67 @@
+use 'safe_paths.jo'
+use 'checker_program.dewy'
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'ast.jo'
+use 'util.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'lex.jo'
+use 'ide.jo'
+use 'units.jo'
+use 'expr.jo'
+use 'refine.jo'
+use 'directives.jo'
+use 'directive_ops.dewy'
+use 'warn_if.jo'
+
+# resolve_type: a type name the program's own code writes
+ut_note_type_name = (nm: int, pos: int):
+    if nm == ut_safe_name and not ut_safe_used and not pos_in_lib(pos) and dewy_at(pos): ut_safe_used = true
+ut_names_path = (tn: int) -> bool: tn != 0 and nodes[tn].kind == .tname and int(nodes[tn].name) == ut_path_name and nkids(tn) == 0
+ut_callee_decl = (n: int) -> int:
+    f = int(nodes[n].sym)
+    if f <= 0 or f >= fns.len(): return 0
+    int(fns[f].decl)
+ut_is_path = (t0: int) -> bool: t0 != 0 and ut_type_bits(t0) & UT_T_PATH != 0
+ut_text_type = (t0: int) -> bool: t0 == 0 or ut_type_bits(t0) & UT_T_TEXT != 0
+ut_comp_type = (t0: int) -> bool: t0 != 0 and ut_type_bits(t0) & UT_T_COMP != 0
+ut_single = (l: int) -> bool: int(locals[l].flags) & LF_ASSIGNED == 0
+ut_global_single = (g: int) -> bool: not globals[g].fn_written and not globals[g].init_written
+ut_enqueue = (f: int):
+    if ut_queued[f] != 0: return
+    ut_queued[f] = 1
+    ut_queue.push(f)
+ut_owner = (l: int) -> int: int(locals[l].owner)
+# a parameter given a traversal by a caller
+ut_mark_in = (pl: int, origin: int):
+    if origin == 0 or ut_li[pl] != 0: return
+    ut_li[pl] = origin
+    ut_wake(3, pl)
+# a parameter given unproven text by a caller
+ut_mark_unproven = (pl: int, origin: int):
+    if origin == 0 or ut_lu[pl] != 0: return
+    ut_lu[pl] = origin
+    ut_wake(3, pl)
+# n's origin, or the incoming origin of a parameter it holds: is it a traversal at all
+ut_traversal = (n: int) -> int:
+    o = ut_val(n)
+    if o != 0: return o
+    ut_concrete(ut_cur, ut_m)
+ut_add = (o: int, m: int):
+    if ut_o == 0: ut_o = o
+    ut_m |= m
+ut_origin = (n: int, what: str) -> int:
+    o = nodes[n].pos + 1
+    if not ut_origin_what.has(o): ut_origin_what[o] = what
+    o
+# (a vardecl among a module's top-level statements declares a global)
+ut_global_decl = (s: int, id: int) -> bool:
+    fns[ut_cur].kind == i32(FK_INIT) and id < globals.len() and int(globals[id].decl) == s
+ut_shown = (x: int) -> str:
+    arg = ut_arg_text(x)
+    if len(arg) > 0: "`{arg}`" else: "this path"
+ut_unproven = (x: int, what: str):
+    fatal(nodes[x].pos, "{ut_shown(x)} is not proven to stay inside its base, but {what}: {ut_fixes(x)}")

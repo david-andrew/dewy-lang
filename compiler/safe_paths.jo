@@ -50,6 +50,7 @@ use 'refine.jo'
 use 'directives.jo'
 use 'directive_ops.dewy'
 use 'warn_if.jo'
+use 'safe_path_ops.dewy'
 
 ut_safe_used = false        # the program's own code names SafePath (resolve_type)
 ut_paths_used = false       # a call from the program's own code has a SafePath soft precondition
@@ -177,10 +178,6 @@ ut_reset = ():
     ut_sink_calls = []
     ut_linit = []
 
-# resolve_type: a type name the program's own code writes
-ut_note_type_name = (nm: int, pos: int):
-    if nm == ut_safe_name and not ut_safe_used and not pos_in_lib(pos) and dewy_at(pos): ut_safe_used = true
-
 ut_names_safe = (tn: int) -> bool:
     if tn == 0: return false
     k = nodes[tn].kind
@@ -205,8 +202,6 @@ ut_decl_kind = (d: int) -> int:
     ut_decl_kinds[d] = k
     k
 
-ut_names_path = (tn: int) -> bool: tn != 0 and nodes[tn].kind == .tname and int(nodes[tn].name) == ut_path_name and nkids(tn) == 0
-
 # what the function a call calls is, by instance (cached)
 ut_callee_kind = (n: int) -> int:
     f = int(nodes[n].sym)
@@ -215,11 +210,6 @@ ut_callee_kind = (n: int) -> int:
     k = ut_decl_kind(int(fns[f].decl))
     if f < ut_fk.len(): ut_fk[f] = k + 1
     k
-
-ut_callee_decl = (n: int) -> int:
-    f = int(nodes[n].sym)
-    if f <= 0 or f >= fns.len(): return 0
-    int(fns[f].decl)
 
 ut_user_fn = (f: int) -> bool:
     if f <= 0 or f >= fns.len() or fns[f].state != 2 or fns[f].body == 0: return false
@@ -259,10 +249,6 @@ ut_type_bits = (t0: int) -> int:
     else: ut_types[t] = b
     b
 
-ut_is_path = (t0: int) -> bool: t0 != 0 and ut_type_bits(t0) & UT_T_PATH != 0
-ut_text_type = (t0: int) -> bool: t0 == 0 or ut_type_bits(t0) & UT_T_TEXT != 0
-ut_comp_type = (t0: int) -> bool: t0 != 0 and ut_type_bits(t0) & UT_T_COMP != 0
-
 # a string-set (`'png' | 'jpg'`): text the program wrote (UT_HARD), each member one component
 # (UT_COMP) or not; 0 for other types
 ut_set_class = (t0: int) -> int:
@@ -290,10 +276,6 @@ ut_root = (l0: int) -> int:
         else if narrowed_var(l) != 0: l = narrowed_var(l)
         else: break
     l
-
-ut_single = (l: int) -> bool: int(locals[l].flags) & LF_ASSIGNED == 0
-
-ut_global_single = (g: int) -> bool: not globals[g].fn_written and not globals[g].init_written
 
 # (a local's own function is its reader without an entry: the walk stamps what it read)
 ut_read = (kind: int, id: int):
@@ -323,11 +305,6 @@ ut_wake = (kind: int, id: int):
         ut_enqueue(ut_rfn[i])
         i = ut_rnext[i]
 
-ut_enqueue = (f: int):
-    if ut_queued[f] != 0: return
-    ut_queued[f] = 1
-    ut_queue.push(f)
-
 # Each fact is an origin (where a traversal was built, + 1, or 0) and a mask over the parameters
 # of the function the local belongs to: bit i, it holds what parameter i holds; bit 31 + i,
 # parameter i's text is joined to a base in it. A function's result is the same pair, so a
@@ -335,8 +312,6 @@ ut_enqueue = (f: int):
 # is unproven: a helper given hardcoded text at one call and unproven text at another warns only
 # at the second (a summary per function). What callers pass a parameter is its incoming facts,
 # which a file-system call or a store into a global reads through the mask.
-
-ut_owner = (l: int) -> int: int(locals[l].owner)
 
 # the incoming origin of the first parameter of f that mask m names, or 0: a traversal it is
 # given (bits 0..30), or unproven text given one joined to a base (bits 31..61)
@@ -399,18 +374,6 @@ ut_mark_field = (l0: int, field: int, origin: int, mask: int):
         ut_fmask[key] = old | m
         changed = true
     if changed: ut_wake(0, l)
-
-# a parameter given a traversal by a caller
-ut_mark_in = (pl: int, origin: int):
-    if origin == 0 or ut_li[pl] != 0: return
-    ut_li[pl] = origin
-    ut_wake(3, pl)
-
-# a parameter given unproven text by a caller
-ut_mark_unproven = (pl: int, origin: int):
-    if origin == 0 or ut_lu[pl] != 0: return
-    ut_lu[pl] = origin
-    ut_wake(3, pl)
 
 # what value v holds reaches local l: a record built in place, or another local, field by field
 ut_flow = (l: int, v: int):
@@ -520,16 +483,6 @@ ut_val = (n: int) -> int:
     ut_m = 0
     ut_acc(n)
     ut_o
-
-# n's origin, or the incoming origin of a parameter it holds: is it a traversal at all
-ut_traversal = (n: int) -> int:
-    o = ut_val(n)
-    if o != 0: return o
-    ut_concrete(ut_cur, ut_m)
-
-ut_add = (o: int, m: int):
-    if ut_o == 0: ut_o = o
-    ut_m |= m
 
 # a local's fact, as the current function sees it
 ut_add_local = (l: int, whole: bool, field: int):
@@ -652,11 +605,6 @@ ut_pieces = (n: int, out: mut int[]):
         loop x in kids(n): out.push(x)
         return
     out.push(n)
-
-ut_origin = (n: int, what: str) -> int:
-    o = nodes[n].pos + 1
-    if not ut_origin_what.has(o): ut_origin_what[o] = what
-    o
 
 # how origin o was built, seen from a warning at p: "built from unproven text on line 8"
 ut_origin_text = (o: int, p: int) -> str:
@@ -1045,10 +993,6 @@ ut_visit = (n: int):
     if k != .match_ and k != .fn_:
         loop i in [0..nkids2(n)): ut_visit(kid2(n, i))
 
-# (a vardecl among a module's top-level statements declares a global)
-ut_global_decl = (s: int, id: int) -> bool:
-    fns[ut_cur].kind == i32(FK_INIT) and id < globals.len() and int(globals[id].decl) == s
-
 ut_call = (n: int):
     f = int(nodes[n].sym)
     d = ut_callee_decl(n)
@@ -1132,20 +1076,12 @@ ut_base_text = (x0: int) -> str:
                     if len(t) > 0: return t
     "root"
 
-
 # (the fixes, as the editor offers them: lsp.jo reads the first)
 ut_fixes = (x: int) -> str:
     arg = ut_arg_text(x)
     base = ut_base_text(x)
     fix = if len(arg) > 0: arg else: "..."
     "validate it, `{base}.confine({fix}) or_throw`, or test it first, `if {base}.contains({fix}) \{...}`"
-
-ut_shown = (x: int) -> str:
-    arg = ut_arg_text(x)
-    if len(arg) > 0: "`{arg}`" else: "this path"
-
-ut_unproven = (x: int, what: str):
-    fatal(nodes[x].pos, "{ut_shown(x)} is not proven to stay inside its base, but {what}: {ut_fixes(x)}")
 
 ut_warn_sinks = ():
     seen: {int: bool} = {}

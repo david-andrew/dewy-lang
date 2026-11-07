@@ -1,0 +1,80 @@
+$runtime_checks
+from p"ast.jo" import (nkids nodes)
+from p"check.jo" import (FK_INIT LF_ASSIGNED dewy_at fns globals locals)
+from p"safe_paths.jo" import (UT_T_COMP UT_T_PATH UT_T_TEXT ut_arg_text ut_concrete ut_cur ut_fixes ut_li ut_lu ut_m ut_o ut_origin_what ut_path_name ut_queue ut_queued ut_safe_name ut_safe_used ut_type_bits ut_val ut_wake)
+from p"util.jo" import (fatal pos_in_lib)
+
+SafePathWord:type=int64<overflow='wrap'>
+# resolve_type: a type name the program's own code writes
+ut_note_type_name=(nm:SafePathWord pos:SafePathWord):>void=>{
+    if nm =? ut_safe_name and not ut_safe_used and not pos_in_lib(pos) and dewy_at(pos) {ut_safe_used=true}
+}
+ut_names_path=(tn:SafePathWord):>bool=>$unsafe {
+    tn not=? 0 and nodes.ptr[tn].kind =? 'tname' and SafePathWord(nodes.ptr[tn].name) =? ut_path_name and nkids(tn) =? 0
+}
+ut_callee_decl=(n:SafePathWord):>int64=>$unsafe {
+    let f=SafePathWord(nodes.ptr[n].sym)
+    if f <=? 0 or f >=? fns.length {return 0}
+    SafePathWord(fns.ptr[f].decl)
+}
+ut_is_path=(t0:SafePathWord):>bool=>{
+    t0 not=? 0 and ut_type_bits(t0) & UT_T_PATH not=? 0
+}
+ut_text_type=(t0:SafePathWord):>bool=>{
+    t0 =? 0 or ut_type_bits(t0) & UT_T_TEXT not=? 0
+}
+ut_comp_type=(t0:SafePathWord):>bool=>{
+    t0 not=? 0 and ut_type_bits(t0) & UT_T_COMP not=? 0
+}
+ut_single=(l:SafePathWord):>bool=>$unsafe {
+    SafePathWord(locals.ptr[l].flags) & LF_ASSIGNED =? 0
+}
+ut_global_single=(g:SafePathWord):>bool=>$unsafe {
+    not globals.ptr[g].fn_written and not globals.ptr[g].init_written
+}
+ut_enqueue=(f:SafePathWord):>void=>{
+    if ut_queued[f] not=? 0 {return}
+    ut_queued[f]=1
+    ut_queue.push(f)
+}
+ut_owner=(l:SafePathWord):>int64=>$unsafe {
+    SafePathWord(locals.ptr[l].owner)
+}
+# a parameter given a traversal by a caller
+ut_mark_in=(pl:SafePathWord origin:SafePathWord):>void=>{
+    if origin =? 0 or ut_li[pl] not=? 0 {return}
+    ut_li[pl]=origin
+    ut_wake(3 pl)
+}
+# a parameter given unproven text by a caller
+ut_mark_unproven=(pl:SafePathWord origin:SafePathWord):>void=>{
+    if origin =? 0 or ut_lu[pl] not=? 0 {return}
+    ut_lu[pl]=origin
+    ut_wake(3 pl)
+}
+# n's origin, or the incoming origin of a parameter it holds: is it a traversal at all
+ut_traversal=(n:SafePathWord):>int64=>{
+    let o=ut_val(n)
+    if o not=? 0 {return o}
+    ut_concrete(ut_cur ut_m)
+}
+ut_add=(o:SafePathWord m:SafePathWord):>void=>{
+    if ut_o =? 0 {ut_o=o}
+    ut_m |= m
+}
+ut_origin=(n:SafePathWord what:string):>int64=>$unsafe {
+    let o=nodes.ptr[n].pos + 1
+    if not ut_origin_what.has(o) {ut_origin_what[o]=what}
+    o
+}
+# (a vardecl among a module's top-level statements declares a global)
+ut_global_decl=(s:SafePathWord id:SafePathWord):>bool=>$unsafe {
+    fns.ptr[ut_cur].kind =? int32(FK_INIT) and id <? globals.length and SafePathWord(globals.ptr[id].decl) =? s
+}
+ut_shown=(x:SafePathWord):>string=>{
+    let arg=ut_arg_text(x)
+    if (arg as array<uint8>).length >? 0 {"`{arg}`"} else {"this path"}
+}
+ut_unproven=(x:SafePathWord what:string):>void=>$unsafe {
+    fatal(nodes.ptr[x].pos "{ut_shown(x)} is not proven to stay inside its base, but {what}: {ut_fixes(x)}")
+}
