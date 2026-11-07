@@ -1,0 +1,16 @@
+# Proven contracts add no relations, so reading often does not crowd out a later proof.
+Ring:type = [values:array<int64>]
+get = (r:Ring i:int64<0 <=? i <? r.values.length>):>int64 => r.values[i]
+size = (r:Ring):>int64 => r.values.length
+main = () => {
+    let r = Ring[[1 2 3 4]]
+    r.values.push(5)
+    if size(r) <? 4 { return }
+    printl"{get(r 0)} {get(r 0)} {get(r 3)} {get(r 3)}"
+    printl"{get(r 0)} {get(r 1)} {get(r 2)} {get(r 3)}"
+    printl"{get(r 0)} {get(r 1)} {get(r 2)} {get(r 3)}"
+    let n = size(r)
+    let total = 0
+    loop i in [0..n) { total += get(r i) }
+    printl(total)
+}
