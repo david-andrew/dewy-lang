@@ -45,6 +45,7 @@ LEAF_HOMES = {
     'unit_rare': 'units.jo',
     'arm64_ops': 'arm64.jo',
     'x64_ops': 'x64.jo',
+    'safe_path_walk': 'safe_paths.jo',
 }
 
 
