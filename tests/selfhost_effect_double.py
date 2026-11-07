@@ -41,6 +41,7 @@ LEAF_HOMES = {
     'ide_decls': 'ide.jo',
     'directive_rules': 'directives.jo',
     'dewy_node_rare': 'dewy_nodes.jo',
+    'constant_fold_ops': 'constant_folds.jo',
 }
 
 

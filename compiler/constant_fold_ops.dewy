@@ -1,0 +1,108 @@
+$runtime_checks
+from p"checks_text.dewy" import (sym_kind_of)
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (binding_const_init fns)
+from p"checker_state.dewy" import (SK)
+from p"comptime.jo" import (ct_literal ct_run ct_values)
+from p"directives.jo" import (dir_rules_from_host)
+from p"error_ops.dewy" import (exception_member)
+from p"expr.jo" import (ntype)
+from p"types.jo" import (fields is_int is_union prune structs tkind types union_members)
+from p"unit_ops.dewy" import (quantity_constant_scale)
+from p"units.jo" import (is_quantity)
+from p"util.jo" import (name_of)
+from p"warn_if.jo" import (wi_decls)
+
+FoldWord:type=int64<overflow='wrap'>
+# (a record of scalars, however nested, holding nothing a run would have to allocate)
+cc_plain=(t:FoldWord):>bool=>$unsafe {
+    if tkind(t) not=? 'struct_' {return is_int(t) or tkind(t) =? 'bool_'}
+    let si=FoldWord(types.ptr[t].st)
+    loop i in [0..FoldWord(structs.ptr[si].nfields)) {
+        if not cc_plain(FoldWord(fields.ptr[FoldWord(structs.ptr[si].fields) + i].type)) {return false}
+    }
+    true
+}
+# (does this checked expression need no run-time value? a literal, a constant, a record of them,
+# or an operator over them: evaluating one at compile time can have no effect)
+cc_closed_expr=(x:FoldWord depth:FoldWord):>bool=>$unsafe {
+    if depth >? 16 {return false}
+    if is_quantity(ntype(x)) and quantity_constant_scale(x) >=? 0 {return true}
+    let k=nodes.ptr[x].kind
+    if k =? 'int_lit' or k =? 'str_lit' or k =? 'bool_lit' or k =? 'none_lit' or k =? 'float_lit' or k =? 'dotname' {return nkids(x) =? 0}
+    if k =? 'conv' or k =? 'narrow' {return nodes.ptr[x].a not=? 0 and cc_closed_expr(FoldWord(nodes.ptr[x].a) depth + 1)}
+    if k =? 'ident' {
+        let b=sym_kind_of(FoldWord(nodes.ptr[x].aux))
+        if b not=? 'const_' and b not=? 'global' and b not=? 'local' {return false}
+        let initial=binding_const_init(b FoldWord(nodes.ptr[x].sym) nodes.ptr[x].pos)
+        return initial not=? 0 and cc_closed_expr(initial depth + 1)
+    }
+    if k =? 'call' {
+        # (a record, or a value wrapped in a union)
+        if nodes.ptr[x].aux not=? 2 and nodes.ptr[x].aux not=? 3 {
+            if nodes.ptr[x].sym <=? 0 or nodes.ptr[x].aux not=? 0 {return false}
+            let d=FoldWord(fns.ptr[FoldWord(nodes.ptr[x].sym)].decl)
+            if d =? 0 {return false}
+            let name=name_of(FoldWord(nodes.ptr[d].name))
+            if name not=? "__mul__" and name not=? "__add__" and name not=? "__sub__" and name not=? "__unary_sub__" {return false}
+        }
+        loop i in [0..nkids(x)) {
+            if not cc_closed_expr(kid(x i) depth + 1) {return false}
+        }
+        return true
+    }
+    false
+}
+# A call whose success type is one plain record, every argument closed: evaluated now, and when it
+# succeeds its value replaces the call, with no validator run needed. 0 when it stays a call: a
+# failure then goes to the validator, for the message.
+# Does this call have an argument known only when the program runs? `$time.zone = 'system'`, or
+# a none its `$warn_if` warns of, as `zoned` with no zone set. Then folding could reach what a
+# compile cannot read, so the validators speak first, and what they pass assumes nothing. O(kids).
+cc_waits_for_validators=(n:FoldWord decl:FoldWord):>bool=>$unsafe {
+    loop i in [0..nkids(n)) {
+        let x=kid(n i)
+        if nodes.ptr[x].kind =? 'conv' and nodes.ptr[x].a not=? 0 {x=FoldWord(nodes.ptr[x].a)}
+        if nodes.ptr[x].kind =? 'str_lit' and name_of(FoldWord(nodes.ptr[x].sval)) =? "system" {return true}
+    }
+    if wi_decls.has(decl) {
+        loop w in wi_decls[decl] {
+            if w.param <? 0 or w.param >=? nkids(n) {continue}
+            let x=kid(n w.param)
+            if nodes.ptr[x].kind =? 'conv' and nodes.ptr[x].a not=? 0 {x=FoldWord(nodes.ptr[x].a)}
+            if nodes.ptr[x].kind =? 'none_lit' {return true}
+        }
+    }
+    false
+}
+# (every argument constant and the value a plain record: the value, nothing at run time)
+cc_fold_first=(n:FoldWord decl:FoldWord):>int64=>{
+    # (a fold could reach zone rules that exist only when the program runs: the validators say)
+    if dir_rules_from_host or cc_waits_for_validators(n decl) {return 0}
+    cc_fold_value(n)
+}
+# (after the validators passed a call that waited for them)
+cc_fold_after=(n:FoldWord decl:FoldWord):>int64=>{
+    if dir_rules_from_host or not cc_waits_for_validators(n decl) {return 0}
+    cc_fold_value(n)
+}
+cc_fold_value=(n:FoldWord):>int64=>$unsafe {
+    let rt=prune(ntype(n))
+    if not is_union(rt) {return 0}
+    let kept:array<int64>=[]
+    loop m in union_members(rt) {
+        if not exception_member(m) {kept.push(m)}
+    }
+    if kept.length not=? 1 or kept.length =? union_members(rt).length {return 0}
+    let t=kept[0]
+    if tkind(t) not=? 'struct_' or not cc_plain(t) {return 0}
+    loop i in [0..nkids(n)) {
+        if not cc_closed_expr(kid(n i) 0) {return 0}
+    }
+    let value=ct_values[ct_run(n)]
+    # (a union's value holds the member's)
+    if value.items.length <? 1 or prune(ct_values[value.items[0]].type) not=? t {return 0}
+    let made=ct_literal(value.items[0] nodes.ptr[n].pos)
+    nodes.ptr[n]=nodes.ptr[made]
+    t
+}
