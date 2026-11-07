@@ -1,0 +1,268 @@
+$runtime_checks
+from p"callback_specialize.jo" import (callback_calls)
+from p"check.jo" import (target_wasm)
+from p"inline.jo" import (FAST_CALLBACK_MAX INLINE_LOOPY_CALLER_MAX INLINE_LOOP_MAX INLINE_MAX INLINE_SPECIALIZE_CALLER_MAX INLINE_SPECIALIZE_GROWTH INLINE_SPECIALIZE_MAX INLINE_WRAPPER_MAX defines_value fast_by_index fast_callback_sites fast_fns fast_inline_into fast_loop_only fast_moves inl_calls inl_const_growth inl_const_target inline_body_cache inline_branch_body inline_branch_cache inline_live_cache inline_nv_cache rel_by_index rel_fns)
+from p"ir.jo" import (VI VK dbg_on ir kc_fn)
+from p"ir_builders.dewy" import (is_kv)
+from p"ir_types.dewy" import (Ins IrFn)
+from p"opt.jo" import (kills_memory o_simplify_kind)
+from p"partition.jo" import (partition_active)
+from p"partition_ops.dewy" import (partition_inline_body)
+
+InlineWord:type=int64<overflow='wrap'>
+# Its body takes the place of its only call, in a loop: the environment stays in the
+# caller's registers. Not its loop into a one-shot web frame, as release; O(body).
+fast_callback_movable=(f:IrFn):>bool=>{
+    if fast_callback_sites.length =? 0 or f.cabi or f.noinline or (f.export_name as array<uint8>).length >? 0 or target_wasm or f.code.length >? FAST_CALLBACK_MAX or (fast_callback_sites.get(f.fn_index) ?? 0) not=? 1 {return false}
+    loop ins in f.code {
+        if ins.op =? 'intr' and ins.imm >=? 2 {return false}
+        if ins.op =? 'call' and ins.imm =? f.fn_index {return false}
+    }
+    true
+}
+# (what this path already takes keeps its own rules; a wrapper around a version moves with it)
+fast_moves_alone=(f:IrFn kind:InlineWord):>bool=>{
+    (kind =? 0 or kind =? 2) and fast_callback_movable(f)
+}
+fast_inline_kind=(f:IrFn):>InlineWord=>{
+    let kind=fast_plain_kind(f)
+    if fast_moves_alone(f kind) {return 3}
+    kind
+}
+fast_plain_kind=(f:IrFn):>InlineWord=>{
+    if f.cabi or f.noinline or (f.export_name as array<uint8>).length >? 0 {return 0}
+    # The native string helper is a bounded comparison plus return. Expand
+    # only in loops: its machine body is larger than its two IR instructions.
+    # Debug builds retain the scalar runtime body instead of this intrinsic.
+    if f.code.length =? 2 and f.code[0].op =? 'streq' and f.code[1].op =? 'ret' {return 3}
+    # Small record leaves need expansion before SRA can keep caller state in
+    # registers. Bound their raw size and expand only at loop call sites.
+    let record=f.slot_size.length >? 0
+    let most:InlineWord=64
+    if record {most=96}
+    if f.code.length >? most {return 0}
+    let checked_leaf=not record and f.code.length >? 24
+    let overflow_ops:InlineWord=0
+    if record {
+        loop size in f.slot_size {
+            if size >? 32 {return 0}
+        }
+    }
+    let calls:InlineWord=0
+    # A nonreturning failure path does not add a call to successful execution.
+    # Retain it when expanding bounds-checked helpers, just as release does.
+    loop ins in f.code {
+        if ins.op =? 'overflow_add' or ins.op =? 'overflow_sub' or ins.op =? 'overflow_mul' {overflow_ops += 1}
+        if ins.op =? 'call' and ins.c not=? 1 {
+            if ins.c not=? 0 or calls not=? 0 {return 0}
+            calls += 1
+        }
+        if ins.op =? 'calli' or ins.op =? 'callc' or ins.op =? 'syscall' or ins.op =? 'intr' or ins.op =? 'loop' or ins.op =? 'streq' {return 0}
+    }
+    if record {
+        if calls not=? 0 {return 0}
+        return 3
+    }
+    # Exact arithmetic adds a cold fallback to a small scalar expression.
+    # Retain bounded leaf expansion in loops despite that fallback's size.
+    if checked_leaf {
+        if calls not=? 0 or overflow_ops =? 0 {return 0}
+        return 3
+    }
+    1 + calls
+}
+fast_inline_prepare=(fs:array<IrFn>):>void=>{
+    inline_cache_clear()
+    fast_callback_sites=dict<int64 int64>()
+    if callback_calls.length >? 0 {
+        loop [_ lf] in callback_calls {fast_callback_sites[lf]=(fast_callback_sites.get(lf) ?? 0) + 1}
+    }
+    fast_fns=[]
+    fast_by_index=[]
+    fast_loop_only=[]
+    fast_moves=[]
+    let wrappers:array<int64>=[]
+    loop k in 0.. and f in fs {
+        let plain=fast_plain_kind(f)
+        let moves=fast_moves_alone(f plain)
+        let kind=if moves {3} else {plain}
+        if kind =? 0 {continue}
+        if kind =? 2 {
+            wrappers.push(k)
+            continue
+        }
+        loop fast_by_index.length <=? f.fn_index {fast_by_index.push(-1)}
+        fast_by_index[f.fn_index]=fast_fns.length
+        fast_fns.push(f)
+        fast_loop_only.push(kind =? 3)
+        fast_moves.push(moves)
+    }
+    let leaves=fast_fns.length
+    let saved=ir
+    loop k in wrappers {
+        let f=fs[k]
+        let leaf:InlineWord=-1
+        loop ins in f.code {
+            if ins.op not=? 'call' or ins.c not=? 0 {continue}
+            if ins.imm >=? fast_by_index.length {break}
+            let j=fast_by_index[int64(ins.imm)]
+            if j >=? 0 and j <? leaves and not fast_loop_only[j] and int64(ins.b) =? fast_fns[j].nparams {leaf=j}
+        }
+        if leaf <? 0 {continue}
+        ir=f
+        # k_vreg's register cache belongs to one function, including this
+        # preparation step before ordinary emission starts.
+        kc_fn += 1
+        fast_inline_into()
+        if ir.code.length >? 48 {continue}
+        loop fast_by_index.length <=? f.fn_index {fast_by_index.push(-1)}
+        fast_by_index[f.fn_index]=fast_fns.length
+        fast_fns.push(ir)
+        fast_loop_only.push(false)
+        fast_moves.push(false)
+    }
+    ir=saved
+}
+rel_collect=():>void=>{
+    if rel_fns.length =? 0 {inline_cache_clear()}
+    loop rel_by_index.length <=? ir.fn_index {rel_by_index.push(-1)}
+    rel_by_index[ir.fn_index]=rel_fns.length
+    rel_fns.push(ir)
+}
+# 0: not inlined, 1: small (inlined anywhere), 2: a leaf inlined into loops, 3: the same with a
+# loop of its own (into callers that are not large: in a large one, what its loop keeps in
+# registers may not get them, and a call costs little next to a loop); 4: a bounded
+# loop-free body eligible only for constant-controlled entry specialization.
+inlinable=(f:IrFn):>int64=>{
+    let borrowed_body=partition_active and partition_inline_body(f.fn_index)
+    let limit=if borrowed_body {192} else {INLINE_SPECIALIZE_MAX}
+    if f.cabi or f.noinline or (f.export_name as array<uint8>).length >? 0 or f.code.length >? limit {return 0}
+    let leaf=true
+    let has_loop=false
+    let size=f.code.length
+    let loops:InlineWord=0
+    let tiny_read_loop=size <=? 32 and f.nparams <=? 2 and f.ret =? VI and f.slot_size.length =? 0 and not f.raw_mem
+    loop ins in f.code {
+        if ins.op =? 'loop' {
+            has_loop=true
+            loops += 1
+        }
+        if tiny_read_loop and ((kills_memory(ins.op) and not (ins.op =? 'call' and ins.c =? 1)) or ins.op =? 'vst') {tiny_read_loop=false}
+        if ins.op =? 'streq' {
+            # Match the existing string helper plus its bounded comparison.
+            size += 81
+            has_loop=true
+        }
+        if ins.op =? 'findbyte' or ins.op =? 'scanbytes' {
+            size += 30
+            has_loop=true
+        }
+        if ins.op =? 'memeq' {
+            # A variable-length comparison expands to several size cases and
+            # a vector loop. Charge it as a substantial body, not one scalar
+            # instruction, while still allowing its small callers to inline.
+            size += 47
+            has_loop=true
+        }
+        if ins.op =? 'call' and ins.imm =? f.fn_index {return 0}
+        if ins.op =? 'intr' and ins.imm >=? 2 {return 0}
+        # (calls on rarely taken paths, like the out-of-line refcounting during a parallel job,
+        # do not count)
+        if (ins.op =? 'call' and ins.c =? 0) or ins.op =? 'calli' or ins.op =? 'callc' or ins.op =? 'syscall' {leaf=false}
+    }
+    # Keep a web loop kernel independently callable. Repeated calls let the
+    # runtime tier it up; embedding it in a one-shot outer loop can keep the
+    # entire workload in baseline machine code for that invocation.
+    if target_wasm and has_loop {return 0}
+    if size >? limit {return 0}
+    # A checked fork adapter only selects a branch and constructs borrowed
+    # descriptors. Inlining its literal-index call removes the unused arm and
+    # stack environment; the recursive activation itself stays noinline.
+    if borrowed_body and not has_loop {return 1}
+    if size <=? INLINE_MAX {return 1}
+    # A single tiny read-only search has bounded register needs even in a large
+    # caller. Keep larger/allocating loops under the existing caller-size cap.
+    if leaf and has_loop and loops =? 1 and tiny_read_loop {return 1}
+    if leaf and has_loop and (borrowed_body or size <=? INLINE_LOOP_MAX) {return 3}
+    if leaf and not has_loop and size <=? INLINE_LOOP_MAX {return 2}
+    if not has_loop and f.nparams <=? 8 {return 4}
+    0
+}
+inline_branch_mask=(callee:IrFn):>InlineWord=>$unsafe {
+    let index=callee.fn_index
+    loop inline_branch_cache.length <=? index {
+        inline_branch_cache.push(0)
+        inline_branch_body.push([])
+    }
+    if data(inline_branch_body[index]) =? data(callee.code) {return inline_branch_cache[index]}
+    inline_branch_body[index]=callee.code
+    inline_branch_cache[index]=0
+    # Keep explicit failure frames. The existing small-leaf policy is unchanged.
+    loop ins in callee.code {
+        if ins.op =? 'call' and ins.c =? 1 {return 0}
+        if ins.op =? 'checked_add' or ins.op =? 'checked_sub' or ins.op =? 'checked_mul' {return 0}
+    }
+    let deps=fill(256 callee.vtypes.length)
+    loop v in [0..callee.vtypes.length) {
+        if InlineWord(callee.vtypes[v]) =? VK {deps.ptr[v]=0}
+    }
+    loop p in [0..min(8 callee.nparams)) {deps.ptr[p]=1 << p}
+    let result:InlineWord=0
+    loop ins in callee.code {
+        let op=ins.op
+        if kills_memory(op) or op =? 'loop' or op =? 'intr' {break}
+        if op =? 'if_' or op =? 'brif' {
+            let mask=deps.ptr[int64(ins.a)]
+            if mask >? 0 and mask <? 256 and mask & (mask - 1) =? 0 {result |= mask}
+        }
+        else if defines_value(op) and ins.dst >=? 0 {
+            let kind=o_simplify_kind(op)
+            let mask:InlineWord=256
+            if kind =? 1 {mask=0}
+            else if kind =? 2 or kind =? 3 {mask=deps.ptr[int64(ins.a)]}
+            else if kind =? 4 {mask=deps.ptr[int64(ins.a)] | deps.ptr[int64(ins.b)]}
+            deps.ptr[int64(ins.dst)]=mask
+        }
+    }
+    inline_branch_cache[index]=result
+    inline_branch_body[index]=callee.code
+    result
+}
+inline_cache_clear=():>void=>{
+    inline_branch_cache=[]
+    inline_branch_body=[]
+    inline_live_cache=[]
+    inline_body_cache=[]
+    inline_nv_cache=[]
+}
+# the callee to inline for a call in a loop nest `depth` deep (-1: none)
+inline_target=(ins:Ins depth:InlineWord self_pos:InlineWord snap:array<IrFn> can:array<int64>):>InlineWord=>{
+    inl_const_target=false
+    let j=inline_callee(ins self_pos snap)
+    if j <? 0 {return -1}
+    if can[j] =? 1 or (can[j] =? 2 and depth >? 0) {return j}
+    if can[j] =? 3 and depth >? 0 and ir.code.length <=? INLINE_LOOPY_CALLER_MAX {return j}
+    # a leaf into a caller that is little more than the call (a wrapper, like a map's get around
+    # its lookup): the caller becomes a leaf itself, which loops can then take in
+    if (can[j] =? 2 or can[j] =? 3) and ir.code.length <=? INLINE_WRAPPER_MAX and inl_calls =? 1 {return j}
+    # New non-leaf expansion outside loops only: loop pressure and padding must
+    # continue to use the established leaf policy.
+    if not dbg_on and depth =? 0 and (can[j] =? 2 or can[j] =? 4) and int64(ins.b) <=? 8 and ir.code.length <=? INLINE_SPECIALIZE_CALLER_MAX and inl_const_growth + snap[j].code.length <=? INLINE_SPECIALIZE_GROWTH {
+        let constants:InlineWord=0
+        loop k in [0..int64(ins.b)) {
+            if is_kv(InlineWord(ir.args[int64(ins.a) + k])) {constants |= 1 << k}
+        }
+        if constants not=? 0 and inline_branch_mask(snap[j]) & constants not=? 0 {
+            inl_const_target=true
+            return j
+        }
+    }
+    -1
+}
+# the function a direct call (that returns) calls, if it was collected (-1: none)
+inline_callee=(ins:Ins self_pos:InlineWord snap:array<IrFn>):>InlineWord=>{
+    if ins.op not=? 'call' or ins.c =? 1 or ins.imm >=? rel_by_index.length {return -1}
+    let j=rel_by_index[int64(ins.imm)]
+    if j <? 0 or j =? self_pos or int64(ins.b) not=? snap[j].nparams {return -1}
+    j
+}

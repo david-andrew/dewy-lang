@@ -11,6 +11,7 @@ use 'partition.jo'
 use 'partition_ops.dewy'
 use 'ir_builders.dewy'
 use 'callback_specialize.jo'
+use 'inline_ops.dewy'
 
 const FAST_CALLBACK_MAX = 256
 const INLINE_MAX = 24       # callee size limit, in IR instructions
@@ -40,104 +41,6 @@ fast_moves: bool[]
 # Sites calling each known-callback version: a version with one site moves there.
 fast_callback_sites: {int: int}
 fast_callback_depth = 0
-
-# Its body takes the place of its only call, in a loop: the environment stays in the
-# caller's registers. Not its loop into a one-shot web frame, as release; O(body).
-fast_callback_movable = (f: IrFn) -> bool:
-    if fast_callback_sites.len() == 0 or f.cabi or f.noinline or len(f.export_name) > 0 or target_wasm or f.code.len() > FAST_CALLBACK_MAX or (fast_callback_sites.get(f.fn_index) ?? 0) != 1: return false
-    loop ins in f.code:
-        if ins.op == .intr and ins.imm >= 2: return false       # setjmp-like intrinsics
-        if ins.op == .call and ins.imm == f.fn_index: return false
-    true
-
-# (what this path already takes keeps its own rules; a wrapper around a version moves with it)
-fast_moves_alone = (f: IrFn, kind: int) -> bool: (kind == 0 or kind == 2) and fast_callback_movable(f)
-
-fast_inline_kind = (f: IrFn) -> int:
-    kind = fast_plain_kind(f)
-    if fast_moves_alone(f, kind): return 3
-    kind
-
-fast_plain_kind = (f: IrFn) -> int:
-    if f.cabi or f.noinline or len(f.export_name) > 0: return 0
-    # The native string helper is a bounded comparison plus return. Expand
-    # only in loops: its machine body is larger than its two IR instructions.
-    # Debug builds retain the scalar runtime body instead of this intrinsic.
-    if f.code.len() == 2 and f.code[0].op == .streq and f.code[1].op == .ret: return 3
-    # Small record leaves need expansion before SRA can keep caller state in
-    # registers. Bound their raw size and expand only at loop call sites.
-    record = f.slot_size.len() > 0
-    if f.code.len() > (if record: 96 else: 64): return 0
-    checked_leaf = not record and f.code.len() > 24
-    overflow_ops = 0
-    if record:
-        loop size in f.slot_size:
-            if size > 32: return 0
-    calls = 0
-    # A nonreturning failure path does not add a call to successful execution.
-    # Retain it when expanding bounds-checked helpers, just as release does.
-    loop ins in f.code:
-        if ins.op == .overflow_add or ins.op == .overflow_sub or ins.op == .overflow_mul: overflow_ops += 1
-        if ins.op == .call and ins.c != 1:
-            if ins.c != 0 or calls != 0: return 0
-            calls += 1
-        if ins.op == .calli or ins.op == .callc or ins.op == .syscall or ins.op == .intr or ins.op == .loop or ins.op == .streq: return 0
-    if record:
-        if calls != 0: return 0
-        return 3
-    # Exact arithmetic adds a cold fallback to a small scalar expression.
-    # Retain bounded leaf expansion in loops despite that fallback's size.
-    if checked_leaf:
-        if calls != 0 or overflow_ops == 0: return 0
-        return 3
-    1 + calls
-
-fast_inline_prepare = (fs: IrFn[]):
-    inline_cache_clear()
-    fast_callback_sites = {}
-    if callback_calls.len() > 0:
-        loop _, lf in callback_calls: fast_callback_sites[lf] = (fast_callback_sites.get(lf) ?? 0) + 1
-    fast_fns = []
-    fast_by_index = []
-    fast_loop_only = []
-    fast_moves = []
-    wrappers: int[]
-    loop k in 0.. and f in fs:
-        plain = fast_plain_kind(f)
-        moves = fast_moves_alone(f, plain)
-        kind = if moves: 3 else: plain
-        if kind == 0: continue
-        if kind == 2:
-            wrappers.push(k)
-            continue
-        loop fast_by_index.len() <= f.fn_index: fast_by_index.push(-1)
-        fast_by_index[f.fn_index] = fast_fns.len()
-        fast_fns.push(f)
-        fast_loop_only.push(kind == 3)
-        fast_moves.push(moves)
-    leaves = fast_fns.len()
-    saved = ir
-    loop k in wrappers:
-        f = fs[k]
-        leaf = -1
-        loop ins in f.code:
-            if ins.op != .call or ins.c != 0: continue
-            if ins.imm >= fast_by_index.len(): break
-            j = fast_by_index[int(ins.imm)]
-            if j >= 0 and j < leaves and not fast_loop_only[j] and int(ins.b) == fast_fns[j].nparams: leaf = j
-        if leaf < 0: continue
-        ir = f
-        # k_vreg's register cache belongs to one function, including this
-        # preparation step before ordinary emission starts.
-        kc_fn += 1
-        fast_inline_into()
-        if ir.code.len() > 48: continue
-        loop fast_by_index.len() <= f.fn_index: fast_by_index.push(-1)
-        fast_by_index[f.fn_index] = fast_fns.len()
-        fast_fns.push(ir)
-        fast_loop_only.push(false)
-        fast_moves.push(false)
-    ir = saved
 
 fast_inline_target = (ins: Ins, in_loop: bool) -> int:
     if ins.op != .call or ins.c != 0 or ins.imm >= fast_by_index.len(): return -1
@@ -185,66 +88,6 @@ fast_inline_into = ():
         fast_callback_depth -= 1
         return
     o_copy_forward()
-
-rel_collect = ():
-    if rel_fns.len() == 0: inline_cache_clear()
-    loop rel_by_index.len() <= ir.fn_index: rel_by_index.push(-1)
-    rel_by_index[ir.fn_index] = rel_fns.len()
-    rel_fns.push(ir)
-
-# 0: not inlined, 1: small (inlined anywhere), 2: a leaf inlined into loops, 3: the same with a
-# loop of its own (into callers that are not large: in a large one, what its loop keeps in
-# registers may not get them, and a call costs little next to a loop); 4: a bounded
-# loop-free body eligible only for constant-controlled entry specialization.
-inlinable = (f: IrFn) -> int:
-    borrowed_body = partition_active and partition_inline_body(f.fn_index)
-    limit = if borrowed_body: 192 else: INLINE_SPECIALIZE_MAX
-    if f.cabi or f.noinline or len(f.export_name) > 0 or f.code.len() > limit: return 0
-    leaf = true
-    has_loop = false
-    size = f.code.len()
-    loops = 0
-    tiny_read_loop = size <= 32 and f.nparams <= 2 and f.ret == VI and f.slot_size.len() == 0 and not f.raw_mem
-    loop ins in f.code:
-        if ins.op == .loop:
-            has_loop = true
-            loops += 1
-        if tiny_read_loop and ((kills_memory(ins.op) and not (ins.op == .call and ins.c == 1)) or ins.op == .vst): tiny_read_loop = false
-        if ins.op == .streq:
-            # Match the existing string helper plus its bounded comparison.
-            size += 81
-            has_loop = true
-        if ins.op == .findbyte or ins.op == .scanbytes:
-            size += 30
-            has_loop = true
-        if ins.op == .memeq:
-            # A variable-length comparison expands to several size cases and
-            # a vector loop. Charge it as a substantial body, not one scalar
-            # instruction, while still allowing its small callers to inline.
-            size += 47
-            has_loop = true
-        if ins.op == .call and ins.imm == f.fn_index: return 0         # recursive
-        if ins.op == .intr and ins.imm >= 2: return 0                 # setjmp-like intrinsics
-        # (calls on rarely taken paths, like the out-of-line refcounting during a parallel job,
-        # do not count)
-        if (ins.op == .call and ins.c == 0) or ins.op == .calli or ins.op == .callc or ins.op == .syscall: leaf = false
-    # Keep a web loop kernel independently callable. Repeated calls let the
-    # runtime tier it up; embedding it in a one-shot outer loop can keep the
-    # entire workload in baseline machine code for that invocation.
-    if target_wasm and has_loop: return 0
-    if size > limit: return 0
-    # A checked fork adapter only selects a branch and constructs borrowed
-    # descriptors. Inlining its literal-index call removes the unused arm and
-    # stack environment; the recursive activation itself stays noinline.
-    if borrowed_body and not has_loop: return 1
-    if size <= INLINE_MAX: return 1
-    # A single tiny read-only search has bounded register needs even in a large
-    # caller. Keep larger/allocating loops under the existing caller-size cap.
-    if leaf and has_loop and loops == 1 and tiny_read_loop: return 1
-    if leaf and has_loop and (borrowed_body or size <= INLINE_LOOP_MAX): return 3
-    if leaf and not has_loop and size <= INLINE_LOOP_MAX: return 2
-    if not has_loop and f.nparams <= 8: return 4
-    0
 
 defines_value = (op: Op) -> bool:
     match op:
@@ -300,54 +143,12 @@ inline_span = (out: mut Ins[], source: *Ins, start: int, count: int):
 inline_branch_cache: int[]
 inline_branch_body: Ins[][]
 
-inline_branch_mask = (callee: IrFn) -> int:
-    index = callee.fn_index
-    loop inline_branch_cache.len() <= index:
-        inline_branch_cache.push(0)
-        inline_branch_body.push([])
-    if data(inline_branch_body[index]) == data(callee.code): return inline_branch_cache[index]
-    inline_branch_body[index] = callee.code
-    inline_branch_cache[index] = 0
-    # Keep explicit failure frames. The existing small-leaf policy is unchanged.
-    loop ins in callee.code:
-        if ins.op == .call and ins.c == 1: return 0
-        if ins.op == .checked_add or ins.op == .checked_sub or ins.op == .checked_mul: return 0
-    deps = fill(256, callee.vtypes.len())
-    d = data(deps)
-    loop v in [0..callee.vtypes.len()):
-        if int(callee.vtypes[v]) == VK: d[v] = 0
-    loop p in [0..min(8, callee.nparams)): d[p] = 1 << p
-    result = 0
-    loop ins in callee.code:
-        op = ins.op
-        if kills_memory(op) or op == .loop or op == .intr: break
-        if op == .if_ or op == .brif:
-            mask = d[int(ins.a)]
-            if mask > 0 and mask < 256 and mask & (mask - 1) == 0: result |= mask
-        else if defines_value(op) and ins.dst >= 0:
-            kind = o_simplify_kind(op)
-            mask = 256
-            if kind == 1: mask = 0
-            else if kind == 2 or kind == 3: mask = d[int(ins.a)]
-            else if kind == 4: mask = d[int(ins.a)] | d[int(ins.b)]
-            d[int(ins.dst)] = mask
-    inline_branch_cache[index] = result
-    inline_branch_body[index] = callee.code
-    result
-
 # The same body identity guards the final-IR register summary. O(body + vregs
 # + call operands) once per demanded body. Each copy still initializes a dense
 # O(vregs) map, but adds only live vregs to the caller's later analyses.
 inline_live_cache: int[][]
 inline_body_cache: Ins[][]
 inline_nv_cache: int[]
-
-inline_cache_clear = ():
-    inline_branch_cache = []
-    inline_branch_body = []
-    inline_live_cache = []
-    inline_body_cache = []
-    inline_nv_cache = []
 
 inline_live_regs = (callee: IrFn) -> int[]:
     index = callee.fn_index
@@ -415,34 +216,6 @@ inline_call = (call: Ins, callee: IrFn, out: mut Ins[]):
         if op == .block or op == .loop or op == .if_: depth += 1
         else if op == .end: depth -= 1
     out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
-
-# the callee to inline for a call in a loop nest `depth` deep (-1: none)
-inline_target = (ins: Ins, depth: int, self_pos: int, snap: IrFn[], can: int[]) -> int:
-    inl_const_target = false
-    j = inline_callee(ins, self_pos, snap)
-    if j < 0: return -1
-    if can[j] == 1 or (can[j] == 2 and depth > 0): return j
-    if can[j] == 3 and depth > 0 and ir.code.len() <= INLINE_LOOPY_CALLER_MAX: return j
-    # a leaf into a caller that is little more than the call (a wrapper, like a map's get around
-    # its lookup): the caller becomes a leaf itself, which loops can then take in
-    if (can[j] == 2 or can[j] == 3) and ir.code.len() <= INLINE_WRAPPER_MAX and inl_calls == 1: return j
-    # New non-leaf expansion outside loops only: loop pressure and padding must
-    # continue to use the established leaf policy.
-    if not dbg_on and depth == 0 and (can[j] == 2 or can[j] == 4) and int(ins.b) <= 8 and ir.code.len() <= INLINE_SPECIALIZE_CALLER_MAX and inl_const_growth + snap[j].code.len() <= INLINE_SPECIALIZE_GROWTH:
-        constants = 0
-        loop k in [0..int(ins.b)):
-            if is_kv(int(ir.args[int(ins.a) + k])): constants |= 1 << k
-        if constants != 0 and inline_branch_mask(snap[j]) & constants != 0:
-            inl_const_target = true
-            return j
-    -1
-
-# the function a direct call (that returns) calls, if it was collected (-1: none)
-inline_callee = (ins: Ins, self_pos: int, snap: IrFn[]) -> int:
-    if ins.op != .call or ins.c == 1 or ins.imm >= rel_by_index.len(): return -1
-    j = rel_by_index[int(ins.imm)]
-    if j < 0 or j == self_pos or int(ins.b) != snap[j].nparams: return -1
-    j
 
 # inline small callees into the current function (ir); returns true if anything changed
 inline_into = (self_pos: int, snap: IrFn[], can: int[]) -> bool:

@@ -52,6 +52,8 @@ def effect_services(text, modules):
         text = text.replace('copy_ops.dewy', 'copies.jo').replace('copy_ops.jo', 'copies.jo')
     if _doubled(modules.get('partition.jo', ''), ('partition_scalar', 'partition_slice', 'partition_root', 'partition_bound', 'partition_disjoint', 'partition_parameter', 'partition_formal', 'partition_body', 'partition_function', 'partition_descriptor', 'partition_arg', 'partition_call_needed', 'partition_call', 'partition_arm', 'partition_shared_root', 'partition_fork', 'partition_fork_calls', 'partition_fork_safe', 'partition_local_arg', 'partition_finalize', 'partition_begin', 'partition_inline_body')):
         text = text.replace('partition_ops.dewy', 'partition.jo').replace('partition_ops.jo', 'partition.jo')
+    if _doubled(modules.get('inline.jo', ''), ('fast_callback_movable', 'fast_moves_alone', 'fast_inline_kind', 'fast_plain_kind', 'fast_inline_prepare', 'rel_collect', 'inlinable', 'inline_branch_mask', 'inline_cache_clear', 'inline_target', 'inline_callee')):
+        text = text.replace('inline_ops.dewy', 'inline.jo').replace('inline_ops.jo', 'inline.jo')
     if 'struct ParSafeVia:' not in modules.get('concurrency.jo', ''):
         for stem in ('concurrency_types', 'concurrency_tasks'):
             text = text.replace(stem + '.dewy', 'concurrency.jo').replace(
