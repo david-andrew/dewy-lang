@@ -1,0 +1,19 @@
+inv=(r:rational):>rational=>{
+    if r >? 0 {return 1/r}
+    if r <? 0 {return 1/r}
+    return 0
+}
+keep=(r:rational):>rational=>{
+    if r <=? 0 {return 0}
+    return 1/r
+}
+turned=(r:rational):>rational=>{
+    if 0 <? r {return 2/r}
+    if 0 >? r {return 3/r}
+    return 0
+}
+tested=(a:rational b:rational):>rational=>{
+    if b >? 0 and a >? 0 {return a/b+b/a}
+    return 0
+}
+main=()=>{printl"{inv(2)} {inv(-2)} {inv(0)} {keep(4)} {keep(-1)} {turned(4)} {turned(-3)} {tested(1 2)}"}

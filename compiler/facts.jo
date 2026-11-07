@@ -3445,17 +3445,21 @@ fact_extremum = (s: mut FactState, n: int, a: int, b: int, lower: bool) -> int:
             else if not lower and fact_compare(s, .le, other, peer) == 1: fact_difference(s, v, peer, 0, n)
     v
 
-# `b =? 0` for an exact rational b (the library's `__eq__` with a rational
-# constant zero, expr.jo rational_constants): b's numerator is zero, the
-# projection an exact division's divisor obligation reads (fact_divisor).
+# `b =? 0`, `b <? 0` or `0 <? b` for an exact rational b (the library's `__eq__`
+# or `__lt__` with a rational constant zero, expr.jo rational_constants): what
+# b's numerator says, since its denominator is positive; the projection an exact
+# division's divisor obligation reads (fact_divisor).
 # The other operand's position, or -1.
 fact_name_rational_eq = 0
+fact_name_rational_lt = 0
 fact_rational_zero_test = (n: int) -> int:
     if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2 or rational_constants.len() == 0: return -1
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0: return -1
-    if fact_name_rational_eq == 0: fact_name_rational_eq = intern("__eq__")
-    if int(nodes[d].name) != fact_name_rational_eq or files[pos_file(nodes[d].pos)].path != lib_dir + "/rational.dewy": return -1
+    if fact_name_rational_eq == 0:
+        fact_name_rational_eq = intern("__eq__")
+        fact_name_rational_lt = intern("__lt__")
+    if int(nodes[d].name) != fact_name_rational_eq and int(nodes[d].name) != fact_name_rational_lt or files[pos_file(nodes[d].pos)].path != lib_dir + "/rational.dewy": return -1
     loop i in [0..2):
         e = kid(n, i)
         loop nodes[e].kind == .conv: e = int(nodes[e].a)
@@ -6077,7 +6081,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         zero_test = fact_rational_zero_test(n)
         if zero_test >= 0 and values[zero_test] != 0:
             numerator = fact_project(s, values[zero_test], intern("numerator"), false, T_MATH_INT)
-            return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, numerator, fact_constant(s, 0)))
+            nothing = fact_constant(s, 0)
+            if int(nodes[int(fns[int(nodes[n].sym)].decl)].name) == fact_name_rational_lt:
+                return fact_new(s, fact_domain(T_BOOL), if zero_test == 0: FactTerm(.lt, numerator, nothing) else: FactTerm(.lt, nothing, numerator))
+            return fact_new(s, fact_domain(T_BOOL), FactTerm(.eq, numerator, nothing))
         if values.len() == 2 and values[0] != 0 and values[1] != 0 and fact_rational_constructor(n): return fact_rational_made(s, n, values[0], values[1])
         if values.len() == 1 and values[0] != 0 and fact_rational_promotion(n):
             result = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
