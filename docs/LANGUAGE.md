@@ -1624,6 +1624,14 @@ anywhere, and a program links them only if it reaches a zone operation. For an u
 or test data, `$time.rules = 'urgent.bin'` at the top of the main file names a pack beside it,
 made with `tools/time/gen_rules.py`.
 
+`d.format("EEEE d MMMM y")` writes a value by a pattern of Unicode's date letters, in English: `y`
+year; `M` month, `MM` with a zero, `MMM` and `MMMM` by name; `d` day; `EEE` and `EEEE` weekday; `H`
+hour; `h` and `a` a twelve-hour hour and AM or PM; `m`, `s`; `S` fraction digits; on a zoned time
+`XXX` offset and `VV` zone name. Other letters go in quotes (`'T'`). A letter the value has no field
+for is an error, while compiling for a constant pattern. An `Instant` writes in UTC. `date(text
+"d/M/y")`, `time_of_day(text "h:mm a")` and `local(text pattern)` read by the same letters, all of
+the text, with no guess: `yy` is not a form, so a two-digit year does not read.
+
 A zoned time reads as `.date`, `.time_of_day`, `.local`, `.year`, `.month`, `.day`, `.hour`, `.minute`,
 `.second`, `.nanosecond` and `.weekday` (0 is Monday). `t.in_zone(z)` shows an `Instant` in a zone.
 `time_of_day"09:30"` is a `TimeOfDay`, and `local"2026-11-01T01:30"` or `d.at(t)` a `LocalDateTime`,

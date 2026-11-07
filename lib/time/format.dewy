@@ -1,0 +1,224 @@
+# Writing and reading times by a pattern, with Unicode's date pattern letters (TR35), in English:
+#   y year  M month  d day  E weekday  H hour  h 12-hour hour  a AM or PM  m minute  s second
+#   S fraction of a second  XXX offset  VV zone name  'text' as written; other punctuation as itself
+# A letter's count picks its form: `M` 3, `MM` 03, `MMM` Mar, `MMMM` March. A pattern is checked
+# while compiling when it is a constant, and a letter the value has no field for is a mistake there.
+from p"core.dewy" import (_Cursor _byte days_in_month days_from_civil pad _year_text)
+
+const _MONTHS=["January" "February" "March" "April" "May" "June" "July" "August" "September" "October" "November" "December"]
+const _WEEKDAYS=["Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday" "Sunday"]
+
+# What a value offers: which groups of fields it has, and them.
+Parts:type=[has_date:bool has_time:bool has_zone:bool year:int month:int64 day:int64 weekday:int64 hour:int64 minute:int64 second:int64 nanosecond:int64 offset:int64 zone:string]
+
+# (one run of a pattern: a letter and its count, or literal text)
+_is_letter=(b:int64):>bool=>(b >=? 65 and b <=? 90) or (b >=? 97 and b <=? 122)
+_run=(pattern:string at:int64):>int64=>$unsafe {
+    let bytes=pattern as array<uint8>
+    let first=bytes[at]
+    let stop=at
+    loop stop <? bytes.length and bytes[stop] =? first {stop=stop+1}
+    stop-at
+}
+_closing=(pattern:string at:int64):>int64=>$unsafe {
+    let bytes=pattern as array<uint8>
+    let i=at+1
+    loop i <? bytes.length and bytes[i] not=? 39 {i=i+1}
+    i
+}
+_slice=(text:string a:int64 b:int64):>string=>$unsafe {
+    let bytes=text as array<uint8>
+    let out:array<uint8>=[]
+    loop i in [a..b) {out.push(bytes[i])}
+    str_from_bytes(out)
+}
+
+# (is this letter, this many times, a form of a field? which group: 1 date, 2 time, 3 zone; 0 no)
+_form=(letter:int64 count:int64):>int64=>{
+    if letter =? 121 {return if count =? 1 or count =? 4 {1} else {0}}    # y yyyy
+    if letter =? 77 {return if count <=? 4 {1} else {0}}                  # M to MMMM
+    if letter =? 100 {return if count <=? 2 {1} else {0}}                 # d dd
+    if letter =? 69 {return if count =? 3 or count =? 4 {1} else {0}}     # EEE EEEE
+    if letter =? 72 or letter =? 104 or letter =? 109 or letter =? 115 {return if count <=? 2 {2} else {0}} # H h m s
+    if letter =? 83 {return if count <=? 9 {2} else {0}}                  # S
+    if letter =? 97 {return if count =? 1 {2} else {0}}                   # a
+    if letter =? 88 {return if count =? 3 {3} else {0}}                   # XXX
+    if letter =? 86 {return if count =? 2 {3} else {0}}                   # VV
+    0
+}
+# What is wrong with a pattern for a value with these fields, or none.
+pattern_error=(pattern:string has_date:bool has_time:bool has_zone:bool):>string?=>$unsafe {
+    let bytes=pattern as array<uint8>
+    let at:int64=0
+    loop at <? bytes.length {
+        let b=int64(bytes[at])
+        if b =? 39 {
+            let close=_closing(pattern at)
+            if close >=? bytes.length {return "a quote in a pattern closes with a quote"}
+            at=close+1
+            continue
+        }
+        if not _is_letter(b) {
+            at=at+1
+            continue
+        }
+        let count=_run(pattern at)
+        let shown=_slice(pattern at at+count)
+        let group=_form(b count)
+        if group =? 0 {return "'{shown}' is not a pattern field: there are y M d E H h a m s S XXX VV, and other text goes in quotes"}
+        if group =? 1 and not has_date {return "'{shown}' is part of a date, and this value has none"}
+        if group =? 2 and not has_time {return "'{shown}' is part of a time of day, and this value has none"}
+        if group =? 3 and not has_zone {return "'{shown}' is part of a zone, and this value has none"}
+        at=at+count
+    }
+    none
+}
+_two=(n:int64 count:int64):>string=>if count >=? 2 {pad(n 2)} else {"{n}"}
+_offset_text=(offset:int64):>string=>{
+    let size=if offset <? 0 {-offset} else {offset}
+    "{if offset <? 0 {"-"} else {"+"}}{pad(size//3600 2)}:{pad((size%3600)//60 2)}"
+}
+# The value by the pattern. pattern_error names what this leaves out or writes as it stands.
+render=(p:Parts pattern:string):>string=>$unsafe {
+    let bytes=pattern as array<uint8>
+    let out=""
+    let at:int64=0
+    loop at <? bytes.length {
+        let b=int64(bytes[at])
+        if b =? 39 {
+            let close=_closing(pattern at)
+            if close =? at+1 {out="{out}'"} else {out="{out}{_slice(pattern at+1 close)}"}
+            at=close+1
+            continue
+        }
+        if not _is_letter(b) {
+            out="{out}{_slice(pattern at at+1)}"
+            at=at+1
+            continue
+        }
+        let count=_run(pattern at)
+        let piece=match b {
+            <121>=>_year_text(p.year)
+            <77>=>if count =? 3 {_MONTHS[p.month-1][0..3)} else {if count =? 4 {_MONTHS[p.month-1]} else {_two(p.month count)}}
+            <100>=>_two(p.day count)
+            <69>=>if count =? 3 {_WEEKDAYS[p.weekday][0..3)} else {_WEEKDAYS[p.weekday]}
+            <72>=>_two(p.hour count)
+            <104>=>_two(if p.hour%12 =? 0 {12} else {p.hour%12} count)
+            <97>=>if p.hour <? 12 {"AM"} else {"PM"}
+            <109>=>_two(p.minute count)
+            <115>=>_two(p.second count)
+            <83>=>pad(p.nanosecond 9)[0..count)
+            <88>=>_offset_text(p.offset)
+            <86>=>p.zone
+            _=>""
+        }
+        out="{out}{piece}"
+        at=at+count
+    }
+    out
+}
+
+# ---------------- reading by a pattern ----------------
+Read:type=[year:int month:int64 day:int64 hour:int64 minute:int64 second:int64 nanosecond:int64 afternoon:int64]
+# (digits, at most `most`, at least `least`: a value, or -1)
+_number=(@c:_Cursor least:int64 most:int64):>int64=>{
+    let v:int64=0
+    let n:int64=0
+    loop n <? most {
+        let b=_byte(c c.at)
+        if b <? 48 or b >? 57 {break}
+        v=v*10+b-48
+        c.at=c.at+1
+        n=n+1
+    }
+    if n <? least {return -1}
+    v
+}
+# (text at the cursor, ignoring case, whole: true and past it)
+_word=(@c:_Cursor word:string):>bool=>$unsafe {
+    let bytes=word as array<uint8>
+    loop i in [0..bytes.length) {
+        let b=_byte(c c.at+i)
+        let w=int64(bytes[i])
+        let lower_b=if b >=? 65 and b <=? 90 {b+32} else {b}
+        let lower_w=if w >=? 65 and w <=? 90 {w+32} else {w}
+        if lower_b not=? lower_w {return false}
+    }
+    c.at=c.at+bytes.length
+    true
+}
+_bad=(text:string pattern:string wanted:string):>ParseError=>ParseError["'{text}' does not read as `{pattern}`: expected {wanted}"]
+# The fields of text read by a pattern, every byte of both used.
+read_pattern=(text:string pattern:string):>Read|ParseError=>$unsafe {
+    let bytes=pattern as array<uint8>
+    let c=_Cursor[text 0]
+    let r=Read[0 1 1 0 0 0 0 -1]
+    let at:int64=0
+    loop at <? bytes.length {
+        let b=int64(bytes[at])
+        if b =? 39 {
+            let close=_closing(pattern at)
+            if close >=? bytes.length {return ParseError["a quote in a pattern closes with a quote"]}
+            let quoted=_slice(pattern at+1 close)
+            if not _word(@c quoted) {return _bad(text pattern "'{quoted}'")}
+            at=close+1
+            continue
+        }
+        if not _is_letter(b) {
+            if _byte(c c.at) not=? b {return _bad(text pattern "'{_slice(pattern at at+1)}'")}
+            c.at=c.at+1
+            at=at+1
+            continue
+        }
+        let count=_run(pattern at)
+        if _form(b count) =? 0 {return ParseError["'{_slice(pattern at at+count)}' is not a pattern field"]}
+        if b =? 121 {
+            let negative=_byte(c c.at) =? 45
+            if negative {c.at=c.at+1}
+            let v=_number(@c if count =? 4 {4} else {1} 9)
+            if v <? 0 {return _bad(text pattern "a year")}
+            r.year=if negative {-int(v)} else {int(v)}
+        } else if b =? 77 and count >=? 3 {
+            let found:int64=0
+            loop i in [0..12) {
+                let name=if count =? 3 {_MONTHS[i][0..3)} else {_MONTHS[i]}
+                if found =? 0 and _word(@c name) {found=i+1}
+            }
+            if found =? 0 {return _bad(text pattern "a month's name")}
+            r.month=found
+        } else if b =? 69 {
+            let found=false
+            loop i in [0..7) {
+                let name=if count =? 3 {_WEEKDAYS[i][0..3)} else {_WEEKDAYS[i]}
+                if not found and _word(@c name) {found=true}
+            }
+            if not found {return _bad(text pattern "a weekday's name")}
+        } else if b =? 97 {
+            if _word(@c "AM") {r.afternoon=0} else if _word(@c "PM") {r.afternoon=1} else {return _bad(text pattern "AM or PM")}
+        } else if b =? 83 {
+            let v=_number(@c count count)
+            if v <? 0 {return _bad(text pattern "{count} digits of a fraction")}
+            let scale=9-count
+            loop i in [0..scale) {v=v*10}
+            r.nanosecond=v
+        } else if b =? 88 or b =? 86 {
+            return ParseError["a pattern for a value with no zone has no 'XXX' or 'VV'; read those with `zoned`"]
+        } else {
+            let v=_number(@c count 2)
+            if v <? 0 {return _bad(text pattern "a number")}
+            if b =? 77 {r.month=v}
+            else if b =? 100 {r.day=v}
+            else if b =? 72 {r.hour=v}
+            else if b =? 104 {r.hour=if v =? 12 {0} else {v}}
+            else if b =? 109 {r.minute=v}
+            else {r.second=v}
+        }
+        at=at+count
+    }
+    if c.at not=? (text as array<uint8>).length {return ParseError["'{text}' has more than `{pattern}` reads"]}
+    if r.afternoon =? 1 {r.hour=r.hour+12}
+    if r.month <? 1 or r.month >? 12 {return ParseError["month {r.month} is not 1 to 12"]}
+    if r.day <? 1 or r.day >? days_in_month(r.year r.month) {return ParseError["{_year_text(r.year)}-{pad(r.month 2)} has no day {r.day}"]}
+    if r.hour >? 23 or r.minute >? 59 or r.second >? 59 {return ParseError["{pad(r.hour 2)}:{pad(r.minute 2)}:{pad(r.second 2)} is not a time of day"]}
+    r
+}

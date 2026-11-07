@@ -2,6 +2,8 @@
 # counts of nanoseconds from J0 on the TT-rate axis, the UTC segment table, the
 # `instant` and `utc` readers, and RFC 3339 display. It maps no zone data.
 
+import p"format.dewy" as pattern
+
 _W:type=uint64<overflow='wrap'>
 _I:type=int64<overflow='wrap'>
 
@@ -93,9 +95,10 @@ _of_int=(q:int*Time):>Duration=>{
     _duration(seconds*_NS)
 }
 _of_rational=(q:rational*Time):>Duration|OffGrid=>{
-    let count:rational=_seconds(q)*rational(1000000000)
-    if count.denominator not=? 1 {return OffGrid}
-    _duration(count.numerator)
+    # (on the grid exactly when the denominator divides a billion: no fraction arithmetic needed)
+    let exact=_seconds(q)
+    if exact.denominator >? 1000000000 or _NS%exact.denominator not=? 0 {return OffGrid}
+    _duration(exact.numerator*(_NS//exact.denominator))
 }
 _grid_error=(q:rational*Time):>string?=>{
     if _of_rational(q) is? OffGrid {
@@ -136,10 +139,22 @@ __sub__=(a:Duration q:rational*Time):>Duration|OffGrid=>a-(_of_rational(q) or_th
 $check_constant _grid_error(q) "off the nanosecond grid"
 __sub__=(q:rational*Time a:Duration):>Duration|OffGrid=>(_of_rational(q) or_throw)-a
 # (comparing never needs the grid: both sides are exact)
-__lt__=(a:Duration q:rational*Time):>bool=>rational(ns_count(a) 1) <? _seconds(q)*rational(1000000000)
-__lt__=(q:rational*Time a:Duration):>bool=>_seconds(q)*rational(1000000000) <? rational(ns_count(a) 1)
-__eq__=(a:Duration q:rational*Time):>bool=>rational(ns_count(a) 1) =? _seconds(q)*rational(1000000000)
-__eq__=(q:rational*Time a:Duration):>bool=>rational(ns_count(a) 1) =? _seconds(q)*rational(1000000000)
+# (comparing a quantity on the grid is comparing durations; off it, exact fractions)
+_less_than_time=(a:Duration q:rational*Time):>bool=>match _of_rational(q) {
+    d:Duration=>a <? d
+    <OffGrid>=>rational(ns_count(a) 1) <? _seconds(q)*rational(1000000000)
+}
+_time_less_than=(q:rational*Time a:Duration):>bool=>match _of_rational(q) {
+    d:Duration=>d <? a
+    <OffGrid>=>_seconds(q)*rational(1000000000) <? rational(ns_count(a) 1)
+}
+__lt__=(a:Duration q:rational*Time):>bool=>_less_than_time(a q)
+__lt__=(q:rational*Time a:Duration):>bool=>_time_less_than(q a)
+__eq__=(a:Duration q:rational*Time):>bool=>match _of_rational(q) {
+    d:Duration=>a =? d
+    <OffGrid>=>false
+}
+__eq__=(q:rational*Time a:Duration):>bool=>a =? q
 __mul__=(a:Duration k:int):>Duration=>_duration(ns_count(a)*k)
 __mul__=(k:int a:Duration):>Duration=>_duration(ns_count(a)*k)
 # (dividing leaves the grid freely, so the answer is an exact quantity: `d/3`, `d/1s`, `d/other`)
@@ -832,3 +847,20 @@ __as__=(t:Instant):>string=>{
     "{_label_text(mjd in_day)}Z"
 }
 __as__=(u:UtcLabel):>string=>"{_year_text(u.year)}-{pad(u.month 2)}-{pad(u.day 2)}T{pad(u.hour 2)}:{pad(u.minute 2)}:{pad(u.second 2)}{_fraction_text(int(u.nanosecond))}Z"
+
+# ---------------- by a pattern: an instant reads in UTC, `:60` and all ----------------
+instant_pattern_error=(p:string):>string?=>pattern.pattern_error(p true true true)
+$check_constant instant_pattern_error(p) "not a pattern"
+format=(t:Instant p:string):>string|ParseError|OutsideCoverage=>{
+    let wrong=instant_pattern_error(p)
+    if wrong isnt? none {return ParseError[wrong]}
+    let label=_axis_to_utc(ns_count(t))
+    if label is? none {return OutsideCoverage["UTC starts in 1961, so this instant has no UTC fields"]}
+    let [mjd in_day]=label
+    let [year month day]=civil_from_days(mjd-40587)
+    let inserted=in_day >=? _DAY_NS
+    let seconds=if inserted {int(86399)} else {in_day//_NS}
+    let weekday=((mjd-40587+3)%7).to_int64() ?? 0
+    let whole=seconds.to_int64() ?? 0
+    pattern.render(pattern.Parts[true true true year month day weekday whole//3600 (whole%3600)//60 whole%60+(if inserted {1} else {0}) ((in_day%_NS).to_int64() ?? 0) 0 "UTC"] p)
+}

@@ -166,6 +166,7 @@ Anything taking an interval uses range syntax: `[a..b)`, `[a..b]`, `(a..b)`. Ove
 
 ## Formats
 
+- **By a pattern.** `x.format("yyyy-MM-dd")` and `date(text "d/M/y")` use Unicode's date pattern letters (TR35), in English for now; a locale and declared losses are still to come.
 - **Parsing never guesses.** Each parse names its grammar, result type and locale. Offsetless text gives local fields. Ambiguous numeric dates give candidates unless a profile supplies a convention.
 - **Display** returns text plus declared losses. `$time.require_loss` makes accepting them explicit.
 - **Codecs** decode exactly on their own tick and origin; conversion to `Instant` is a separate checked step. A `ClockReading` and a process-local handle are never on the wire. See v5 §11.

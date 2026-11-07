@@ -1,6 +1,7 @@
 # Civil time of docs/design/time.md without zones: dates and their calendars, periods, ages.
 # Gregorian (arithmetic proleptic Gregorian, astronomical years, year zero) is the only calendar
 # so far. It maps no data.
+import p"format.dewy" as pattern
 from p"core.dewy" import (Instant Days Months days_from_civil civil_from_days days_in_month read_fields _Cursor Fields _year_text _fraction_text pad)
 
 # `_days` counts from 1970-01-01, and the calendar is part of the type: bare `Date` is `Date<Gregorian>`.
@@ -167,3 +168,69 @@ __lt__=(a:LocalDateTime b:LocalDateTime):>bool=>a.date <? b.date or (a.date =? b
 __as__=(l:LocalDateTime):>string=>"{l.date}T{l.time}"
 __add__=(l:LocalDateTime p:Days):>LocalDateTime=>LocalDateTime<Gregorian>[l.date+p l.time]
 __sub__=(l:LocalDateTime p:Days):>LocalDateTime=>LocalDateTime<Gregorian>[l.date-p l.time]
+
+# ---------------- by a pattern: `d.format("EEEE d MMMM y")`, `date(text "d/M/y")` ----------------
+_date_parts=(d:Date):>pattern.Parts=>{
+    let [y m dd]=fields(d)
+    pattern.Parts[true false false y m dd weekday(d) 0 0 0 0 0 ""]
+}
+date_pattern_error=(p:string):>string?=>pattern.pattern_error(p true false false)
+time_pattern_error=(p:string):>string?=>pattern.pattern_error(p false true false)
+local_pattern_error=(p:string):>string?=>pattern.pattern_error(p true true false)
+$check_constant date_pattern_error(p) "not a pattern"
+format=(d:Date p:string):>string|ParseError=>{
+    let wrong=date_pattern_error(p)
+    if wrong isnt? none {return ParseError[wrong]}
+    pattern.render(_date_parts(d) p)
+}
+$check_constant time_pattern_error(p) "not a pattern"
+format=(t:TimeOfDay p:string):>string|ParseError=>{
+    let wrong=time_pattern_error(p)
+    if wrong isnt? none {return ParseError[wrong]}
+    pattern.render(pattern.Parts[false true false 0 1 1 0 hour(t) minute(t) second(t) nanosecond(t) 0 ""] p)
+}
+$check_constant local_pattern_error(p) "not a pattern"
+format=(l:LocalDateTime p:string):>string|ParseError=>{
+    let wrong=local_pattern_error(p)
+    if wrong isnt? none {return ParseError[wrong]}
+    let [y m dd]=fields(l.date)
+    pattern.render(pattern.Parts[true true false y m dd weekday(l.date) hour(l.time) minute(l.time) second(l.time) nanosecond(l.time) 0 ""] p)
+}
+# (the time fields of what a pattern read)
+_time_of_read=(r:pattern.Read):>TimeOfDay=>TimeOfDay[r.hour*3600000000000+r.minute*60000000000+r.second*1000000000+r.nanosecond]
+date_read=(text:string p:string):>Date|ParseError=>{
+    let wrong=date_pattern_error(p)
+    if wrong isnt? none {return ParseError[wrong]}
+    let r=pattern.read_pattern(text p) or_throw
+    date_of(r.year r.month r.day)
+}
+time_of_day_read=(text:string p:string):>TimeOfDay|ParseError=>{
+    let wrong=time_pattern_error(p)
+    if wrong isnt? none {return ParseError[wrong]}
+    let r=pattern.read_pattern(text p) or_throw
+    _time_of_read(r)
+}
+local_read=(text:string p:string):>LocalDateTime|ParseError=>{
+    let wrong=local_pattern_error(p)
+    if wrong isnt? none {return ParseError[wrong]}
+    let r=pattern.read_pattern(text p) or_throw
+    LocalDateTime<Gregorian>[date_of(r.year r.month r.day) _time_of_read(r)]
+}
+
+# (a constant text by a constant pattern is checked whole; a constant pattern alone only makes a
+# bad pattern an error, and empty text promises nothing about the text to come)
+date_read_error=(text:string p:string):>string?=>match date_read(text p) {
+    d:Date=>none
+    e:ParseError=>e.message
+}
+time_read_error=(text:string p:string):>string?=>match time_of_day_read(text p) {
+    t:TimeOfDay=>none
+    e:ParseError=>e.message
+}
+local_read_error=(text:string p:string):>string?=>match local_read(text p) {
+    l:LocalDateTime=>none
+    e:ParseError=>e.message
+}
+date_pattern_only=(p:string):>string?=>date_pattern_error(p) ?? ""
+time_pattern_only=(p:string):>string?=>time_pattern_error(p) ?? ""
+local_pattern_only=(p:string):>string?=>local_pattern_error(p) ?? ""
