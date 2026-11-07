@@ -16,9 +16,61 @@
 
 ## P1: blocking current work
 
-### D4. One unified `parallel` surface
-- **Status:** revising into v3 after your notes. Accepted parts and directions are in decisions.md (batch 3).
-- **v3 will answer:** dependency-aware block items; `?? void` filtering; opt-in cancellation; the `select` signature and how to tell channels apart without `.then`; why `Tasks` is its own type; ranges as sequences; plain rewrites of C7, C9 and C11; and the Zig cancellation design.
+### D4. One unified `parallel` surface: v3
+- **BLUF:** v3 applies your notes. The semantics pass both tests and are taken, so only the spellings are below. Full design with complete examples: `docs/design/proposals/concurrency/unified/proposal-v3.md`.
+
+**Semantics taken:**
+- **Block form, your rule.** Every top-level statement is an item. An item that uses an earlier item's data waits for it, so values come out as they would sequentially.
+  - A `printl` with no data link can print first; hover shows it.
+  - A channel `close` racing another item's sends is a compile error.
+  - Setup through a file can't be seen; wrap both steps in `{ }`.
+
+```dewy
+parallel {
+    let config = load_config or_throw            # starts at once
+    let map = load_map(config) or_throw          # waits for config
+    let sprites = load_sprites(config) or_throw  # waits for config, then runs beside map
+    let sounds = load_sounds or_throw            # starts at once
+}
+```
+
+- **`?? void` drops failures** wherever an `if` without `else` may give no value (collectors, statements). It's an error where a value is required.
+
+```dewy
+let ages = [parallel t in texts parse_age(t) ?? void]   # [31 45]: failures dropped
+```
+
+- **`or_throw` leaves the function, as anywhere.** For fail-fast over one part, use a small named function.
+- **Cancellation:** compute runs to completion by default. `check_cancel or_throw` inside a body opts in to stopping early, an idea taken from Zig's `checkCancel`. The first Ctrl-C cancels cleanly; a second ends the process at once.
+- **`select` takes handles, and names tell results apart.** No `Op<T>`, `.receiving`, `timeout(d)` or `.then`:
+
+```dewy
+match select(command=@commands.receive  message=@chat.receive  timeout=1s) {
+    [command:string] => printl"command: {command}"
+    [message:string] => printl"chat: {message}"
+    [command:Closed] => return "commands closed"
+    [message:Closed] => return "chat closed"
+    <Timeout> => printl"idle"
+    <Canceled> => return Canceled
+}
+```
+
+- **`Tasks` stays its own type.** It owns lifetimes: it can't return until every task has ended, and one failure cancels the rest. An array of task handles could leak tasks.
+- **Ranges are never turned into arrays.** A parameter that only loops takes `Iterable<T>`.
+- **C7:** a loop over a channel gives `void` when the channel closes and `Canceled` when canceled, so a partial total can't pass for a whole one.
+- **C9:** running out of memory while starting tasks is like any allocation failure, with no `OutOfMemory` in every signature.
+- **C11:** see D22.
+
+**Spellings to review** (each name was read correctly, cold, by three readers; scoring in `proposals/concurrency/unified/names.md`):
+1. `check_cancel`.
+2. `select(name=@ch.receive … timeout=1s ties='fair')`, with `ties='first'` for priority and `Sent` as a send's result.
+3. Metatags:
+   - in a scope: `$parallel.max_concurrent`, `$parallel.chunk_size`, `$parallel.threads`, `$parallel.off`, `$placement.device`, `$placement.cores`, `$memory.layout`;
+   - program-wide, once in the main file: `$program.max_cores = 1` (single core), `$program.max_memory`, `$program.max_tasks`.
+4. `sum(xs grouping='tree')`.
+5. `Iterable<T>`.
+
+- **Flagged, not questions:** the Ctrl-C behavior; a `parallel` block gives its items' values in source order; `?? void` as the whole body of a function with no written result is an error.
 
 ---
 
@@ -193,6 +245,7 @@ printl"{fmt'<{w}'(x)}"     # computed width: an ordinary interpolated string
 - **Rec:** (a), with the name `fmt`.
 
 ### D22. Delete `$parallel_safe`?
+- **v3 checked your question:** once items may wait, the tag only means race freedom. Every other risk (deadlocks, resources, panics, secrets) is checked elsewhere, so "race-free" leaves nothing unsafe unchecked. If kept, it should be named `$race_free`.
 - **Why it isn't the default:** the safety requirement is already inferred, with no tag. The compiler works out, per argument, which callbacks reach parallel code, and checks only those at each call. A function that writes a global really isn't parallel-safe, so it can't be "on" for everything.
 - **What the tag adds:** only a promise on an exported function that a later edit can't stop passing the callback into parallel code. It's the only thing here that asks every callback to be parallel. That's what makes it reject this example:
 
