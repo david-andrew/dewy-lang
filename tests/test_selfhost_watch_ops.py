@@ -49,14 +49,14 @@ def test_watch_game_matches_twin(compiler, tmp_path, monkeypatch):
 
 def test_watch_program_matches_twin(compiler, tmp_path, monkeypatch):
     steps = [
-        ('expect', 'first version'),
+        ('expect', 'first version'), ('expect', r'program ended \(exit status 0\)'),
         ('save', 'main.dewy', 'main=():>void=>printl"second version"'),
-        ('expect', 'second version'),
+        ('expect', 'second version'), ('expect', r'program ended \(exit status 0\)'),
         ('save', 'main.dewy', 'main=():>void=>printl missing'),
-        ('expect', 'waiting for changes'),
+        ('expect', 'unknown name'), ('expect', 'waiting for changes'),
         ('save', 'main.dewy', 'main=():>void=>printl"third version"'),
-        ('expect', 'third version'), ('expect', 'waiting for changes'),
-        ('key', 'r\n'), ('expect', 'third version'),
+        ('expect', 'third version'), ('expect', r'program ended \(exit status 0\)'),
+        ('key', 'r\n'), ('expect', 'third version'), ('expect', r'program ended \(exit status 0\)'),
     ]
     compare_watch(compiler, tmp_path, monkeypatch, ('watch_ops',),
                   {'main.dewy': 'main=():>void=>printl"first version"'}, steps)

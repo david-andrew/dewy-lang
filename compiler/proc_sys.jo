@@ -1,0 +1,104 @@
+# The raw system calls of the compiler's process code (the watch, the prompt, fused and parallel
+# builds), as small functions Dewy code calls: Linux numbering (macOS's are mapped), and the one
+# question about the host this code needs. Pointers into arrays stay here.
+
+ps_windows = () -> bool:
+    when TARGET == "windows":
+        return true
+    else:
+        return false
+
+# pipe2 (closed by exec, or not): [the read end, the write end]
+ps_pipe = (cloexec: bool) -> int[]:
+    when TARGET == "windows":
+        return [-1, -1]
+    else:
+        ep: i32[] = [-1, -1]
+        flags = 0
+        if cloexec: flags = 0x80000
+        syscall(293, data(ep), flags)
+        return [int(ep[0]), int(ep[1])]
+
+# this process's id (for names of files of its own)
+ps_self_id = () -> int:
+    when TARGET == "windows":
+        return int(GetCurrentProcessId())
+    else:
+        return syscall(39)
+
+# a built program's file extension
+ps_exe_ext = () -> str:
+    when TARGET == "windows":
+        return ".exe"
+    else:
+        return ".bin"
+
+ps_fork = () -> int:
+    when TARGET == "windows":
+        return -1
+    else:
+        return syscall(57)
+
+ps_dup2 = (fd: int, to: int):
+    when TARGET == "windows":
+        pass
+    else:
+        syscall(33, fd, to)
+
+ps_close = (fd: int):
+    when TARGET == "windows":
+        pass
+    else:
+        syscall(3, fd)
+
+# end this process at once (no handlers run, nothing flushed)
+ps_exit = (code: int):
+    when TARGET == "windows":
+        pass
+    else:
+        syscall(60, code)
+
+# wait for a child: its status
+ps_wait = (pid: int) -> int:
+    when TARGET == "windows":
+        return -1
+    else:
+        st = [0]
+        syscall(61, pid, data(st), 0, 0)
+        return st[0]
+
+ps_kill = (pid: int, sig: int):
+    when TARGET == "windows":
+        pass
+    else:
+        syscall(62, pid, sig)
+
+ps_setsid = () -> int:
+    when TARGET == "windows":
+        return -1
+    else:
+        return syscall(112)
+
+# fcntl(F_SETFD, 0): kept open by exec
+ps_keep_open = (fd: int):
+    when TARGET == "windows":
+        pass
+    else:
+        syscall(72, fd, 2, 0)
+
+# read up to n bytes into buf at an offset (0: the end, < 0: an error)
+ps_read = (fd: int, buf: u8[], at: int, n: int) -> int:
+    when TARGET == "windows":
+        return -1
+    else:
+        return syscall(0, fd, data(buf) + at, n)
+
+ps_write_fd = (fd: int, buf: u8[], n: int):
+    __write_fd(fd, data(buf), n)
+
+# poll(fds, n, wait): pf holds a pollfd in each word
+ps_poll = (pf: int[], n: int, wait: int) -> int:
+    when TARGET == "windows":
+        return -1
+    else:
+        return syscall(7, data(pf), n, wait)

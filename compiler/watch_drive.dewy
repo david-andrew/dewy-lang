@@ -1,0 +1,430 @@
+$runtime_checks
+from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"@lib/core/os.jo" import (__exec_unslid delete_file env eprint exit is_dir time write_bytes)
+from p"@lib/core/str.jo" import (ends_with starts_with trim)
+from p"ast.jo" import (nodes)
+from p"check.jo" import (test_mode watch_build)
+from p"driver_pipeline.dewy" import (emit_function)
+from p"inline_ops.dewy" import (rel_collect)
+from p"ir_builders.dewy" import (e_fconst e_iconst e_store)
+from p"lower.jo" import (opt_release)
+from p"lower_functions.dewy" import (lower_finish)
+from p"lower_primitives.dewy" import (e_daddr str_data)
+from p"lower_storage.dewy" import (mem_mode vt_of)
+from p"main.jo" import (bss_reserve compile)
+from p"module_paths.dewy" import (strip_ext)
+from p"pkg_ops.dewy" import (core_cache)
+from p"proc_sys.jo" import (ps_close ps_dup2 ps_exe_ext ps_exit ps_fork ps_keep_open ps_kill ps_pipe ps_poll ps_read ps_self_id ps_setsid ps_wait ps_windows ps_write_fd)
+from p"types.jo" import (fields prune types)
+from p"util.jo" import (more_errors name_of)
+from p"watch.jo" import (WATCH_DATA_RESERVE w32_dir_count w_added w_args w_cache w_changed w_dirs w_enter w_errors w_ext w_failed_path w_from w_kept w_out w_patch w_pid w_r w_ready w_reset w_stdin_done w_to w_watched w_wds w_write_err watch_first wm_files wm_game wm_loop wm_top)
+from p"watch_ops.dewy" import (w32_files_changed w32_note_file w32_sources_in w_base w_dir w_i64 w_log watch_read_failed_inputs watch_read_result watch_write_result wm_clear wm_files_collect wp_end wp_put)
+from p"watch_sys.jo" import (w32_compile w32_run w32_wait ws_add_watch ws_inotify ws_read_some ws_reap ws_settle ws_terminate ws_test_signals ws_write_some)
+
+DriveWord:type=int64<overflow='wrap'>
+watch_main=(path:string args:array<string>):>void=>{
+    # Diagnostic retries re-exec the original command; a watcher must not start
+    # another watcher inside its build child after a type error.
+    more_errors=false
+    if test_mode {ws_test_signals();}
+    w_cache=core_cache()
+    w_out="{w_cache}/watch-{ps_self_id()}{ps_exe_ext()}"
+    w_args=args
+    w_ext=path.byte_slice((strip_ext(path) as array<uint8>).length (path as array<uint8>).length)
+    let _ino=ws_inotify()
+    w_dirs=dict<string bool>()
+    let keys="{w_r} restarts, q{w_enter} quits"
+    if test_mode {eprint("dewy-core test --watch: {path} (saving a file reruns tests; {keys})")} else {eprint("dewy-core watch: {path} (saving a file reloads it; {keys})")}
+    let fresh=true
+    loop true {
+        let start=false
+        let failed=false
+        if fresh {
+            watch_stop();
+            if watch_compile(path true) {
+                start=true
+                fresh=false
+            }
+            else {failed=true}
+        }
+        watch_observe(path _ino);
+        if start {watch_run();} else if failed {eprint("dewy-core watch: waiting for changes");}
+        # wait for a change, the program ending, or a command
+        let ev:DriveWord=0
+        if ps_windows() {ev=w32_wait()} else {ev=watch_wait(_ino)}
+        w_log("event {ev}");
+        if ev =? 1 {
+            # a file changed: wait a moment for the editor to finish, then build
+            ws_settle();
+            if ps_windows() {w32_files_changed();} else {watch_drain(_ino);}
+            if w_pid <? 0 or not wm_game or not w_ready {
+                w_log("starting again (pid {w_pid}, game {wm_game}, ready {w_ready})");
+                fresh=true
+                continue
+            }
+            let t0=time()
+            let loop0=wm_loop
+            let top0=wm_top
+            w_log("building");
+            if watch_compile(path false) {
+                w_log("built");
+                if wm_loop not=? loop0 {
+                    # (the game loop runs with the update and draw it started with)
+                    eprint("dewy-core watch: update or draw was added or removed: starting the program again");
+                    fresh=true
+                    continue
+                }
+                watch_observe(path _ino);
+                watch_send(t0);
+                if wm_top not=? top0 {eprint("dewy-core watch: (top-level statements changed: they ran once, at start; {w_r} starts the program again)")}
+            }
+            else {
+                watch_observe(path _ino);
+                eprint("dewy-core watch: the program keeps running the last version that compiled");
+                # (and shows the errors)
+                w_patch=[]
+                wp_put(4 1 bytes(w_errors));
+                wp_end();
+                watch_send_note();
+            }
+        }
+        else if ev =? 2 {
+            let st=watch_reap()
+            if st =? 0 and wm_game {
+                eprint("dewy-core watch: the game was closed");
+                exit(0);
+            }
+            if st >=? 0 {eprint("dewy-core watch: the program ended ({watch_status_str(st)}); waiting for changes ({w_r} runs it again)")}
+        }
+        else if ev =? 3 {fresh=true} else if ev =? 4 {
+            watch_stop();
+            exit(0);
+        }
+    }
+}
+# Install monitoring before running new code: even a program's first output can
+# cause an immediate edit (or the program itself can write an embedded asset).
+watch_observe=(path:string ino:DriveWord):>void=>{
+    # (each time: a build may name files it did not before)
+    let fl=wm_files
+    if fl.length =? 0 {fl.push(path)}
+    loop f in fl {
+        let d=w_dir(f)
+        let input="{d}/{w_base(f)}"
+        w_watched[input]=true
+        # A missing input can also have missing parent directories. Watch the
+        # nearest existing ancestor and wake when its next path component appears.
+        loop not is_dir(d) {
+            let parent=w_dir(d)
+            if parent =? d {break}
+            w_watched["{parent}/{w_base(d)}"]=true
+            d=parent
+        }
+        # (no inotify, on Windows and macOS: files watched by when they were last written)
+        if ino <? 0 {
+            w32_note_file(input);
+            if w_dirs.get(d) =? none {
+                w_dirs[d]=true
+                w32_dir_count[d]=w32_sources_in(d)
+            }
+        }
+        else if w_dirs.get(d) =? none {
+            let wd=ws_add_watch(ino d)
+            if wd >=? 0 {
+                w_dirs[d]=true
+                w_wds[wd]=d
+            }
+        }
+    }
+}
+watch_status_str=(st:DriveWord):>string=>{
+    if ps_windows() {
+        # (Windows: the exit code itself)
+        if st =? 101 {return "a panic"}
+        if st >=? 0xC0000000 {return "a crash (exception 0x{st:x})"}
+        return "exit status {st}"
+    }
+    if st & 127 not=? 0 {return "signal {st & 127}"}
+    let c=(st >> 8) & 255
+    if c =? 101 {return "a panic"}
+    "exit status {c}"
+}
+# poll: 1 a file changed, 2 the program ended, 3 restart, 4 quit
+watch_wait=(ino:DriveWord):>int64=>{
+    loop true {
+        # (no inotify, ino < 0: files are looked at four times a second; macOS's poll does not
+        # pass over a descriptor of -1, so then the terminal's takes its place)
+        let pf:array<int64>=[ino | (1 << 32) 0 | (1 << 32) (-1)]
+        # (input that has ended, not a terminal: not looked at again)
+        if w_stdin_done {pf[1]=-1 | (1 << 32)}
+        if ino <? 0 {pf[0]=0 | (1 << 32)}
+        let n:DriveWord=2
+        if w_from >=? 0 {
+            pf[2]=w_from | (1 << 32)
+            n=3
+        }
+        let wait:DriveWord=-1
+        if ino <? 0 {wait=250}
+        let r=ps_poll(pf n wait)
+        if r <? 0 {continue}
+        if ino <? 0 and w32_files_changed() {return 1}
+        if ino >=? 0 and (pf[0] >> 48) & 0xFFFF not=? 0 {
+            if watch_drain(ino) {return 1}
+        }
+        if not w_stdin_done and (pf[1] >> 48) & 0xFFFF not=? 0 {
+            let buf=fill(uint8(0) 256)
+            let got=ps_read(0 buf 0 256)
+            # (no input any more: only files and the program, which are still looked at below)
+            if got <=? 0 {w_stdin_done=true} else {
+                let line=trim(__str_from_bytes(buf[..got)))
+                if line =? "r" {return 3}
+                if line =? "q" {return 4}
+                if (line as array<uint8>).length >? 0 {eprint("dewy-core watch: r + enter restarts the program, q + enter quits");}
+            }
+        }
+        if n =? 3 and (pf[2] >> 48) & 0xFFFF not=? 0 {
+            # the program: gone, or saying (once its game loop starts) whether it takes patches
+            let b=fill(uint8(0) 8)
+            let got=ps_read(w_from b 0 8)
+            if got <=? 0 {return 2}
+            w_ready=w_i64(b 0) =? 0
+        }
+    }
+    0
+}
+# read pending file events: was a source file written?
+watch_drain=(ino:DriveWord):>bool=>{
+    if ino <? 0 {return false}
+    let any=false
+    let buf=fill(uint8(0) 8192)
+    loop true {
+        let n=ps_read(ino buf 0 8192)
+        if n <=? 0 {break}
+        let i:DriveWord=0
+        loop i + 16 <=? n {
+            let ln=DriveWord(buf[i + 12]) | (DriveWord(buf[i + 13]) << 8) | (DriveWord(buf[i + 14]) << 16)
+            let nm=""
+            let j=i + 16
+            loop j <? i + 16 + ln and buf[j] not=? 0 {
+                nm="{nm}{__str_from_bytes(buf[j..j + 1))}"
+                j += 1
+            }
+            let wd=DriveWord(buf[i]) | (DriveWord(buf[i + 1]) << 8) | (DriveWord(buf[i + 2]) << 16) | (DriveWord(buf[i + 3]) << 24)
+            # (a new source file may be one a failed build looked for)
+            if (ends_with(nm ".jo") or ((w_ext as array<uint8>).length >? 0 and ends_with(nm w_ext))) and not starts_with(nm ".") {any=true} else {
+                let dir=w_wds.get(wd)
+                if dir not=? none and w_watched.get("{dir}/{nm}") not=? none {any=true}
+            }
+            i += 16 + ln
+        }
+    }
+    any
+}
+watch_compile=(path:string first:bool):>bool=>{
+    if ps_windows() {return w32_compile(path first)}
+    let res="{w_cache}/watch-{ps_self_id()}.res"
+    let failed_inputs="{res}.inputs"
+    delete_file(failed_inputs);
+    let ep=ps_pipe(true)
+    let pid=ps_fork()
+    if pid =? 0 {
+        ps_dup2(ep[1] 2);
+        watch_first=first
+        watch_build=not test_mode
+        w_failed_path=failed_inputs
+        if first {wm_clear();}
+        if not test_mode {bss_reserve=WATCH_DATA_RESERVE}
+        let out=compile(path w_out)
+        if (out as array<uint8>).length =? 0 {ps_exit(1);}
+        if test_mode {wm_files_collect();}
+        watch_write_result(res);
+        ps_exit(0);
+    }
+    ps_close(ep[1]);
+    w_errors=""
+    let buf=fill(uint8(0) 4096)
+    loop true {
+        let n=ps_read(ep[0] buf 0 4096)
+        if n <=? 0 {break}
+        ps_write_fd(2 buf n);
+        if (w_errors as array<uint8>).length <? 4000 {w_errors="{w_errors}{__str_from_bytes(buf[..n))}"}
+    }
+    ps_close(ep[0]);
+    let st=ps_wait(pid)
+    if st not=? 0 {
+        watch_read_failed_inputs(failed_inputs);
+        w_log("the build ended with status {st}");
+        return false
+    }
+    let ok=watch_read_result(res)
+    delete_file(res);
+    ok
+}
+# start the program built, with its end of two pipes as fds 3 and 4
+watch_run=():>void=>{
+    if ps_windows() {
+        w32_run();
+        return
+    }
+    let a=ps_pipe(true)
+    let b=ps_pipe(true)
+    let c=ps_pipe(true)
+    let pid=ps_fork()
+    if pid =? 0 {
+        # Test runners fork their active test. Give the whole run its own
+        # process group so restart/quit also stops a test that has not ended.
+        if test_mode and ps_setsid() <? 0 {ps_exit(127);}
+        ps_dup2(a[0] 3);
+        ps_dup2(b[1] 4);
+        # (dup2 onto the descriptor itself leaves it closed by exec: where nothing else took
+        # 3 first, as no inotify does on macOS)
+        ps_keep_open(3);
+        ps_keep_open(4);
+        let argv=[w_out]
+        loop x in w_args {argv.push(x)}
+        __exec_unslid(w_out argv);
+        ps_exit(127);
+    }
+    ps_close(a[0]);
+    ps_close(b[1]);
+    ps_close(c[1]);
+    w_to=a[1]
+    w_from=b[0]
+    w_pid=pid
+    # the running program keeps its file: nothing is left behind (also after ctrl-c)
+    let one=fill(uint8(0) 1)
+    ps_read(c[0] one 0 1);
+    ps_close(c[0]);
+    # (DEWY_WATCH_KEEP=1: kept until it ends, for qemu-user, which opens the file after exec)
+    if env("DEWY_WATCH_KEEP") =? none {delete_file(w_out);}
+}
+watch_stop=():>void=>{
+    if w_pid <? 0 {return}
+    if ps_windows() {ws_terminate();} else {
+        let target=w_pid
+        if test_mode {target=-w_pid}
+        ps_kill(target 15);
+    }
+    watch_reap();
+}
+# the program ended: its status (-1: none was running)
+watch_reap=():>int64=>{
+    if w_pid <? 0 {return -1}
+    let st:DriveWord=0
+    if ps_windows() {st=ws_reap()} else {
+        st=ps_wait(w_pid)
+        ps_close(w_to);
+        ps_close(w_from);
+        if env("DEWY_WATCH_KEEP") not=? none {delete_file(w_out);}
+    }
+    w_to=-1
+    w_from=-1
+    w_pid=-1
+    w_ready=false
+    st
+}
+# send a patch; the program applies it at its next frame and answers
+watch_send=(t0:float64):>void=>{
+    let dp=env("DEWY_WATCH_DUMP")
+    if dp not=? none {write_bytes(dp w_patch);}
+    w_log("sending a patch of {w_patch.length} bytes");
+    if not w_write_all(w_to w_patch) {
+        eprint("dewy-core watch: the program did not take the new code (writing to it failed: {w_write_err}); r + enter starts it again");
+        return
+    }
+    w_log("sent; waiting for the program");
+    if w_read8() <? 0 {
+        let st=watch_reap()
+        eprint("dewy-core watch: the program ended ({watch_status_str(st)}); waiting for changes");
+        return
+    }
+    let ms=int64((time() - t0) * 1000.0)
+    let what="no code changed"
+    if w_reset.length + w_added.length + w_kept.length >? 0 {what="the same code"}
+    if w_changed.length >? 0 {
+        let shown=w_changed
+        if shown.length >? 6 {shown=shown[..6)}
+        what=shown.join(", ")
+        if w_changed.length >? 6 {what="{what} and {w_changed.length - 6} more"}
+    }
+    let msg="dewy-core watch: reloaded in {ms} ms: {what}"
+    if w_added.length >? 0 {msg="{msg}; new: {w_added.join(", ")}"}
+    if w_reset.length >? 0 {msg="{msg}; set again: {w_reset.join(", ")}"}
+    if w_kept.length >? 0 {msg="{msg}; kept, in their new layout: {w_kept.join(", ")}"}
+    eprint("{msg}");
+}
+watch_send_note=():>void=>{
+    if not w_ready or not w_write_all(w_to w_patch) {return}
+    if w_read8() <? 0 {
+        let st=watch_reap()
+        eprint("dewy-core watch: the program ended ({watch_status_str(st)}); waiting for changes");
+    }
+}
+w_write_all=(fd:DriveWord b:array<uint8>):>bool=>{
+    let got:DriveWord=0
+    loop got <? b.length {
+        let r=ws_write_some(fd b got)
+        if r =? -4 {continue}
+        if r <=? 0 {
+            w_write_err="{r} after {got} of {b.length} bytes"
+            return false
+        }
+        got += r
+    }
+    true
+}
+# the program's answer (a word); -1: it is gone
+w_read8=():>int64=>{
+    let b=fill(uint8(0) 8)
+    let got:DriveWord=0
+    loop got <? 8 {
+        let r=ws_read_some(w_from b got)
+        if r <=? 0 {return -1}
+        got += r
+    }
+    w_i64(b 0)
+}
+watch_build_child=(path:string state:string res:string first:bool out:string):>void=>{
+    watch_first=first
+    watch_build=not test_mode
+    w_failed_path="{res}.inputs"
+    if first {wm_clear();} else {watch_read_result(state);}
+    if not test_mode {bss_reserve=WATCH_DATA_RESERVE}
+    w_out=out
+    if (compile(path w_out) as array<uint8>).length =? 0 {exit(1);}
+    if test_mode {wm_files_collect();}
+    watch_write_result(res);
+    exit(0);
+}
+w_emit=():>void=>{
+    lower_finish();
+    if opt_release {rel_collect();} else {emit_function();}
+}
+# a new field: its default when that is a literal (memory is zero already)
+wc_default=(f:DriveWord np:DriveWord):>void=>$unsafe {
+    let d=DriveWord(fields.ptr[f].defval)
+    if d =? 0 {return}
+    let t=prune(DriveWord(fields.ptr[f].type))
+    let k=nodes.ptr[d].kind
+    let neg=false
+    if k =? 'unary' and nodes.ptr[DriveWord(nodes.ptr[d].a)].kind not=? 'nil' {
+        neg=true
+        d=DriveWord(nodes.ptr[d].a)
+        k=nodes.ptr[d].kind
+    }
+    let off=DriveWord(fields.ptr[f].offset)
+    let tk=types.ptr[t].kind
+    let v=0.0
+    if k =? 'int_lit' {v=float64(nodes.ptr[d].ival)} else if k =? 'float_lit' {v=nodes.ptr[d].fval}
+    else if k =? 'bool_lit' and tk =? 'bool_' {
+        e_store(np off e_iconst(nodes.ptr[d].ival) 1);
+        return
+    }
+    else if k =? 'str_lit' and tk =? 'str_' {
+        e_store(np off e_daddr(str_data(name_of(DriveWord(nodes.ptr[d].sval)))) 8);
+        return
+    }
+    else {return}
+    if neg {v=-v}
+    if tk =? 'float_' {e_store(np off e_fconst(v vt_of(t)) mem_mode(t));} else if tk =? 'int_' {e_store(np off e_iconst(int64(v)) mem_mode(t));}
+}

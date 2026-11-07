@@ -39,6 +39,7 @@ LEAF_HOMES = {
     'fmt_ops': 'fmt.jo',
     'lsp_fixes': 'lsp.jo',
     'watch_ops': 'watch.jo',
+    'watch_drive': 'watch.jo',
     'repl_ops': 'repl.jo',
     'fused_ops': 'fused.jo',
     'par_ops': 'par.jo',
