@@ -427,6 +427,23 @@ Mapping Windows zone names to IANA names uses Unicode's CLDR table, now stored i
 - **Rec:** (a). Windows machines report only their Windows name, so without the table every Windows program needs a setting.
 - **Reversible:** yes.
 
+### D34. A temperature difference type, and the names for R-values
+Turn on a difference type and passing a reading where a difference belongs is a compile error naming the fix, instead of silently counting from absolute zero. Today the same call compiles and gives 517 W where 39 W is right.
+
+```dewy
+from units import ft, °F, BTU, R, RValue, Length, Temperature
+heat_loss = (area:float64*Length^2 rise:float64*TemperatureDifference r:float64*RValue) => area*rise/r
+let a:float64*Length^2 = 8ft*40ft
+let wall:float64*RValue = 25.0R
+let rise = 70°F - 30°F
+printl"{heat_loss(a rise wall) as (BTU/hour):.1f}"           # fine
+printl"{heat_loss(a 70°F wall) as (BTU/hour):.1f}"           # compile error, names `70°F - 30°F`
+```
+
+- **Rec:** add `TemperatureDifference`. It is not built. An unannotated parameter already rejects a reading.
+- **Also built provisionally, for you to see:** the names `R`, `RSI` and `RValue`, plus `BTU`, `kJ`, `kW`, `kWh`, `ft`/`foot`/`feet`, `yd`/`yard`/`yards`, `mile`/`miles`.
+- **Reversible:** yes.
+
 ---
 
 ## P4: open-ended
