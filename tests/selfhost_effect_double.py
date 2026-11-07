@@ -32,6 +32,7 @@ LEAF_HOMES = {
     'dewy_node_builds': 'dewy_nodes.jo',
     'ide_text': 'ide.jo',
     'lsp_text': 'lsp.jo',
+    'lsp_requests': 'lsp.jo',
 }
 
 

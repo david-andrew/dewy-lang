@@ -1,0 +1,763 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (is_dir list_dir read_file time)
+from p"@lib/core/str.jo" import (ends_with is_digit starts_with trim)
+from p"checks_text.dewy" import (byte_find byte_rfind)
+from p"ide.jo" import (IK_BUILTIN IK_CONST IK_FIELD IK_FN IK_LOCAL IK_PARAM IK_TYPE IK_VARIANT ide_str_end ide_texts)
+from p"ide_text.dewy" import (ide_comment_end ide_str_start)
+from p"json_doc.dewy" import (json_quote)
+from p"lex.jo" import (is_ident_char keywords)
+from p"lsp.jo" import (Decl Diag Hit Item Result SemTok Use docs empty_main lsp_stop no_items root_lib run_child split_pos sy_container sy_dewy sy_ok take_lines ws_files)
+from p"lsp_handlers.dewy" import (blank_out block_end comp_kind comp_words dewy_ends_op has_word line_starts_of refresh sem_type sym_json unmap_off wide_of ws_ensure_scanned)
+from p"lsp_ops.dewy" import (dewy_op_byte dewy_op_word ensure_checked file_in in_comment_or_str jpath jpos jstr lpos_of lsp_input_ready lsp_reply open_doc_at req_off text_of text_params_doc)
+from p"lsp_text.dewy" import (count_lead count_trail dewy_joins fn_decl_at ident_prefix indent_of name_end name_start ref_at skip_blanks utf16_units)
+from p"module_paths.dewy" import (is_abs_path module_search_stems path_norm)
+
+LspRequestWord:type=int64<overflow='wrap'>
+# the top-level item (declaration or statement) around offset off: [a, b) and its name
+top_item=(text:string off:LspRequestWord):>Item=>{
+    let a=max(0 min(off (text as array<uint8>).length))
+    loop a >? 0 and (text as array<uint8>)[a - 1] not=? b'\n' {a -= 1}
+    loop true {
+        let e=a
+        loop e <? (text as array<uint8>).length and (text as array<uint8>)[e] not=? b'\n' {e += 1}
+        let t=text.byte_slice(a e)
+        if (t as array<uint8>).length >? 0 and (t as array<uint8>)[0] not=? b' ' and (t as array<uint8>)[0] not=? b'\t' and (t as array<uint8>)[0] not=? b'#' and not starts_with(t "else") {break}
+        if a =? 0 {return Item((-1) (-1) "")}
+        a -= 1
+        loop a >? 0 and (text as array<uint8>)[a - 1] not=? b'\n' {a -= 1}
+    }
+    let first=a
+    # (with its @attributes)
+    loop a >? 0 {
+        let p=a - 1
+        loop p >? 0 and (text as array<uint8>)[p - 1] not=? b'\n' {p -= 1}
+        if p <? a and (text as array<uint8>)[p] =? b'@' {a=p} else {break}
+    }
+    let e=first
+    loop e <? (text as array<uint8>).length and (text as array<uint8>)[e] not=? b'\n' {e += 1}
+    let line=text.byte_slice(first e)
+    if starts_with(line "use ") or starts_with(line "import ") or starts_with(line "build:") {return Item((-1) (-1) "")}
+    let b=e
+    loop b <? (text as array<uint8>).length {
+        let n=b + 1
+        if n >=? (text as array<uint8>).length {
+            b=(text as array<uint8>).length
+            break
+        }
+        let c=(text as array<uint8>)[n]
+        if c not=? b' ' and c not=? b'\t' and c not=? b'\n' and c not=? b'#' and not starts_with(text.byte_slice(n min(n + 4 (text as array<uint8>).length)) "else") {break}
+        b=n
+        loop b <? (text as array<uint8>).length and (text as array<uint8>)[b] not=? b'\n' {b += 1}
+    }
+    if b <? (text as array<uint8>).length {b += 1}
+    let name=""
+    let t=line
+    loop kw in ["struct " "enum " "const " "type " "extern "] {
+        if starts_with(t kw) {t=trim(t[(kw as array<uint8>).length..])}
+    }
+    name=ident_prefix(t)
+    Item(a b name)
+}
+# check a document; after an error in a function, again without checking that function's body
+# (and after other errors in the program's files, again without that top-level item), for more
+# errors and for names and types in the rest of the program. completing >= 0: completions at that
+# offset of path are wanted (the item there is never left out)
+check_doc=(path:string completing:LspRequestWord lower:bool wide:bool):>Result=>{
+    let r=Result()
+    let sentinel=completing >=? 0
+    let main_path=path
+    if starts_with(path "{root_lib}/") {main_path=empty_main}
+    let skips:array<string>=[]
+    let blanked:array<string>=[]
+    let saved=dict<string string>()
+    let unsaved:array<string>=[]
+    let t0=time()
+    loop rnd in [0..10) {
+        let o=run_child(main_path path sentinel skips lower wide)
+        if lsp_stop not=? 0 {break}
+        let nd=r.diags.length
+        let nskips=r.skips.length
+        take_lines(@r o.lines)
+        if not o.ok and r.diags.length =? nd {
+            r.diags.push(Diag(path 0 "internal compiler error while checking this file" false))
+            break
+        }
+        if sentinel and r.comps.length >? 0 {break}
+        let ei:LspRequestWord=-1
+        loop i in [nd..r.diags.length) {
+            if not r.diags[i].warning {ei=i}
+        }
+        if ei <? 0 {break}
+        let e=r.diags[ei]
+        # (errors that follow from leaving something out are not the program's)
+        let follows=e.cascade
+        loop nm in blanked {
+            if contains(e.msg "'{nm}'") {follows=true}
+        }
+        if follows {
+            r.diags.pop(ei);
+            # (in a function: go on without it)
+            if r.skips.length =? nskips or skips.contains(r.skips[r.skips.length - 1]) {break}
+        }
+        if r.skips.length >? nskips {
+            let sk=r.skips[r.skips.length - 1]
+            if skips.contains(sk) {
+                r.diags.pop(ei);
+                break
+            }
+            skips.push(sk)
+        }
+        else {
+            if (e.path as array<uint8>).length =? 0 or e.path =? empty_main or starts_with(e.path "{root_lib}/") and e.path not=? path {break}
+            let text=text_of(e.path)
+            let it=top_item(text e.off)
+            if it.a <? 0 or e.path =? path and completing >=? it.a and completing <? it.b {break}
+            if saved.get(e.path) =? none {
+                let old=ide_texts.get(e.path)
+                if old not=? none {saved[e.path]=old} else {
+                    saved[e.path]=text
+                    unsaved.push(e.path)
+                }
+            }
+            ide_texts[e.path]=blank_out(text it.a it.b)
+            if (it.name as array<uint8>).length >? 0 {blanked.push(it.name)}
+        }
+        if time() - t0 >? 1.5 {break}
+    }
+    loop [p t] in saved {
+        if unsaved.contains(p) {ide_texts.remove(p);} else {ide_texts[p]=t}
+    }
+    r
+}
+# the file named by a `use` line at off, or ""
+use_target=(d:LspRequestWord off:LspRequestWord):>string=>{
+    let text=docs[d].text
+    let a=off
+    loop a >? 0 and (text as array<uint8>)[a - 1] not=? b'\n' {a -= 1}
+    let b=off
+    loop b <? (text as array<uint8>).length and (text as array<uint8>)[b] not=? b'\n' {b += 1}
+    let line=trim(text.byte_slice(a b))
+    if not starts_with(line "use ") and not starts_with(line "import ") and not starts_with(line "from ") {return ""}
+    # (from m import a, b: on a name, that name's definition)
+    if starts_with(line "from ") {
+        let im=byte_find(text.byte_slice(a b) " import ")
+        if im >=? 0 and off >? a + im {return ""}
+    }
+    let dir=docs[d].path
+    let s=byte_rfind(dir "/")
+    if s >=? 0 {dir=dir.byte_slice(0 s)}
+    let q=find_byte(line b'\'')
+    if q <? 0 {q=find_byte(line b'"')}
+    if q >=? 0 {
+        let e=find_byte(line (line as array<uint8>)[q] q + 1)
+        if e <? 0 {return ""}
+        let rel=line.byte_slice(q + 1 e)
+        if is_abs_path(rel) {return path_norm(rel)}
+        return path_norm("{dir}/{rel}")
+    }
+    let nm=trim(line.byte_slice(find_byte(line b' ') + 1 (line as array<uint8>).length))
+    let k=byte_find(nm " as ")
+    if k >=? 0 {nm=nm.byte_slice(0 k)}
+    let rel=replace(nm "." "/")
+    loop stem in module_search_stems(dir root_lib rel) {
+        if file_exists("{stem}.jo") {return path_norm("{stem}.jo")}
+    }
+    ""
+}
+# results with all the uses of what reference h (in document d) is to: d's, and those of the
+# other open documents whose programs include the declaration's file
+uses_of=(d:LspRequestWord h:Hit):>array<Use>=>{
+    let out:array<Use>=[]
+    let [pf po]=split_pos(h.ref.decl)
+    if pf <? 0 or pf >=? h.res.paths.length {return out}
+    let path=h.res.paths[pf]
+    loop i in [0..docs.length) {
+        let r=h.res
+        if i not=? d {
+            if not docs[i].open or not docs[i].res.paths.contains(path) {continue}
+            ensure_checked(i)
+            r=docs[i].res
+        }
+        let w=wide_of(i r)
+        let f=file_in(w path)
+        if f >=? 0 {out.push(Use(w "{f}:{po}"))}
+    }
+    # (the workspace's other programs that may use it: files not open that name it, checked when
+    # they include the declaration's file; not the standard library's users)
+    if starts_with(path "{root_lib}/") {return out}
+    let name=""
+    let dc=h.res.decls.get(h.ref.decl)
+    if dc not=? none {
+        # (a function's locals and parameters stay in its file)
+        if dc.kind not=? IK_LOCAL and dc.kind not=? IK_PARAM {name=dc.name}
+    }
+    if (name as array<uint8>).length =? 0 {return out}
+    ws_ensure_scanned()
+    let t0=time()
+    loop wf in ws_files {
+        if time() - t0 >? 3.0 or lsp_stop not=? 0 {break}
+        if wf =? path or ends_with(path ".dewy") and not ends_with(wf ".dewy") {continue}
+        if open_doc_at(wf) >=? 0 {continue}
+        let known=false
+        loop u in out {
+            if u.res.paths.contains(wf) {known=true}
+        }
+        if known {continue}
+        if not has_word(read_file(wf) ?? "" name) {continue}
+        let w=check_doc(wf (-1) false true)
+        if lsp_stop not=? 0 {break}
+        w.texts=ide_texts
+        let f=file_in(w path)
+        if f >=? 0 {out.push(Use(w "{f}:{po}"))}
+    }
+    out
+}
+# for each cursor position in text up to b: 1 if it is inside a string or a comment (not in a
+# string's {interpolations}), the text read from its start as the lexer reads it
+str_mask=(text:string b0:LspRequestWord dewy:bool=false):>array<uint8>=>{
+    let b=max(0 min(b0 (text as array<uint8>).length))
+    let m:array<uint8>=[]
+    m.resize(b + 1)
+    let i:LspRequestWord=0
+    loop i <? b {
+        if (text as array<uint8>)[i] =? b'#' {
+            let e=ide_comment_end(text i dewy)
+            # (inside a line comment up to its line end; inside a block comment before its }#)
+            let last=e
+            if dewy and i + 1 <? (text as array<uint8>).length and (text as array<uint8>)[i + 1] =? b'\{' and e >=? 2 and (text as array<uint8>)[e - 1] =? b'#' {last=e - 1}
+            loop k in [i + 1..min(last b) + 1) {m[k]=1}
+            i=e
+        }
+        else if ide_str_start(text i) {i=ide_str_end(text i @m 0 dewy)} else {i += 1}
+    }
+    m
+}
+# In a Dewy import's path, from p"dir/na|": the .dewy and .jo files and folders there, replacing
+# the part after the last / ("" when the cursor is not in one)
+import_paths=(d:LspRequestWord off:LspRequestWord):>string=>{
+    if not ends_with(docs[d].path ".dewy") {return ""}
+    let text=docs[d].text
+    let a=off
+    loop a >? 0 and (text as array<uint8>)[a - 1] not=? b'\n' {a -= 1}
+    let pre=text.byte_slice(a off)
+    let t=trim(pre)
+    if not starts_with(t "from ") and not starts_with(t "import ") {return ""}
+    let q=byte_rfind(pre "p\"")
+    if q <? 0 or find_byte(pre b'"' q + 2) >=? 0 {return ""}
+    let typed=pre.byte_slice(q + 2 (pre as array<uint8>).length)
+    let sl=byte_rfind(typed "/")
+    let base=docs[d].path.byte_slice(0 byte_rfind(docs[d].path "/"))
+    let dir=base
+    if sl >=? 0 {
+        if is_abs_path(typed.byte_slice(0 sl + 1)) {dir=typed.byte_slice(0 sl + 1)} else {dir=path_norm("{base}/{typed.byte_slice(0 sl + 1)}")}
+    }
+    let from_=a + q + 2 + sl + 1
+    let text_ls=line_starts_of(text)
+    let rg="\{\"start\":{jpos(lpos_of(text text_ls from_))},\"end\":{jpos(lpos_of(text text_ls off))}\}"
+    let items:array<string>=[]
+    loop n in list_dir(dir) {
+        if starts_with(n ".") or n =? "__dewycache__" or n =? "node_modules" {continue}
+        let full="{dir}/{n}"
+        if is_dir(full) {
+            items.push("\{\"label\":{json_quote("{n}/")},\"kind\":19,\"sortText\":{json_quote("1{n}")},\"textEdit\":\{\"range\":{rg},\"newText\":{json_quote("{n}/")}\},\"command\":\{\"title\":\"\",\"command\":\"editor.action.triggerSuggest\"\}\}")
+        }
+        else if (ends_with(n ".dewy") or ends_with(n ".jo")) and full not=? docs[d].path {
+            items.push("\{\"label\":{json_quote(n)},\"kind\":17,\"sortText\":{json_quote("0{n}")},\"textEdit\":\{\"range\":{rg},\"newText\":{json_quote(n)}\}\}")
+        }
+    }
+    if items.length =? 0 {return no_items}
+    "\{\"isIncomplete\":false,\"items\":[{join(items ",")}]\}"
+}
+on_completion=(id:LspRequestWord params:LspRequestWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    let text=docs[d].text
+    let off=req_off(d params)
+    let paths=import_paths(d off)
+    if (paths as array<uint8>).length >? 0 {return lsp_reply(id paths)}
+    # (typed / or ": only paths are wanted; $: directives)
+    let trig=jstr(jpath(params "context" "triggerCharacter"))
+    if (trig =? "/" or trig =? "\"") or trig =? "$" and (off <? 1 or (text as array<uint8>)[off - 1] not=? b'$') {return lsp_reply(id no_items)}
+    if in_comment_or_str(text off ends_with(docs[d].path ".dewy")) {return lsp_reply(id no_items)}
+    let a=name_start(text off)
+    let b=name_end(text off)
+    let prefix=text.byte_slice(a off)
+    let member=a >? 0 and (text as array<uint8>)[a - 1] =? b'.'
+    if a >? 0 and (text as array<uint8>)[a - 1] =? b'$' and ends_with(docs[d].path ".dewy") {
+        # (the directives this compiler implements)
+        let dv:array<string>=[]
+        loop w in ["assert" "runtime_assert" "expect" "fail" "test" "capture" "include_bytes"] {dv.push("\{\"label\":{json_quote(w)},\"kind\":14,\"detail\":\"directive\"\}")}
+        return lsp_reply(id "\{\"isIncomplete\":false,\"items\":[{join(dv ",")}]\}")
+    }
+    if member and a >? 1 and (text as array<uint8>)[a - 2] =? b'.' {return lsp_reply(id no_items)}
+    if not member and (prefix as array<uint8>).length >? 0 and is_digit(prefix[0]) {return lsp_reply(id no_items)}
+    let sent="__dewy_complete__"
+    let saved=text
+    let tries:array<string>=[]
+    tries.push("{text.byte_slice(0 a)}{sent}{text.byte_slice(b (text as array<uint8>).length)}")
+    # (an unfinished line: end it after the name, closing what it opened)
+    let le=b
+    loop le <? (text as array<uint8>).length and (text as array<uint8>)[le] not=? b'\n' {le += 1}
+    let ls0=a
+    loop ls0 >? 0 and (text as array<uint8>)[ls0 - 1] not=? b'\n' {ls0 -= 1}
+    let closers=""
+    loop c in (text.byte_slice(ls0 a) as array<uint8>) {
+        if c =? b'(' {closers="){closers}"} else if c =? b'[' {closers="]{closers}"}
+        else if c =? b'\{' {closers="\}{closers}"} else if (c =? b')' or c =? b']' or c =? b'}') and (closers as array<uint8>).length >? 0 {closers=closers.byte_slice(1 (closers as array<uint8>).length)}
+    }
+    let line0=trim(text.byte_slice(ls0 a))
+    # (the names after `from m import` are the module's, not statements)
+    if starts_with(line0 "from ") and byte_find(line0 " import") >=? 0 {member=true}
+    let tail=closers
+    if (starts_with(line0 "if ") or starts_with(line0 "else if ") or starts_with(line0 "loop ") or starts_with(line0 "match ") or starts_with(line0 "while ")) and find_byte(text.byte_slice(a le) b':') <? 0 {tail="{tail}: pass"}
+    tries.push("{text.byte_slice(0 a)}{sent}{tail}{text.byte_slice(le (text as array<uint8>).length)}")
+    let r=Result()
+    loop t in tries {
+        ide_texts[docs[d].path]=t
+        r=check_doc(docs[d].path a false false)
+        if lsp_stop not=? 0 or r.comps.length >? 0 {break}
+    }
+    ide_texts[docs[d].path]=saved
+    let items:array<string>=[]
+    let seen=dict<string bool>()
+    loop c in r.comps {
+        let label=c[0]
+        if seen.get(label) not=? none or label =? sent {continue}
+        if starts_with(label "__") and not starts_with(prefix "_") {continue}
+        seen[label]=true
+        let k=to_int(c[1]) ?? 0
+        # (the program's own names and fields first, then the library's)
+        let so="1"
+        if k =? IK_LOCAL or k =? IK_PARAM or k =? IK_FIELD or k =? IK_VARIANT {so="0"}
+        items.push("\{\"label\":{json_quote(label)},\"kind\":{comp_kind(k)},\"detail\":{json_quote(c[2])},\"sortText\":{json_quote("{so}{label}")}\}")
+    }
+    if not member and r.comps.length >? 0 or not member and items.length =? 0 {
+        loop kw in comp_words(ends_with(docs[d].path ".dewy")) {
+            if seen.get(kw) =? none {items.push("\{\"label\":{json_quote(kw)},\"kind\":14,\"sortText\":{json_quote("2{kw}")}\}")}
+        }
+    }
+    lsp_reply(id "\{\"isIncomplete\":false,\"items\":[{join(items ",")}]\}")
+}
+dewy_arg_at=(text:string m:array<uint8> a:LspRequestWord b:LspRequestWord):>[int64 string]=>{
+    let words:array<string>=[]
+    let j=a
+    let depth:LspRequestWord=0
+    let w0:LspRequestWord=-1
+    loop j <? b {
+        let c=(text as array<uint8>)[j]
+        let inside=m[j] not=? 0 and m[j + 1] not=? 0
+        let space=not inside and depth =? 0 and (c =? b' ' or c =? b'\t' or c =? b'\n' or c =? b'\r')
+        if space {
+            if w0 >=? 0 {
+                words.push(text.byte_slice(w0 j))
+                w0=-1
+            }
+        }
+        else {
+            if w0 <? 0 {w0=j}
+            if not inside {
+                if c =? b'(' or c =? b'[' or c =? b'\{' {depth += 1} else if (c =? b')' or c =? b']' or c =? b'}') and depth >? 0 {depth -= 1}
+            }
+        }
+        j += 1
+    }
+    let open_word=w0 >=? 0
+    if open_word {
+        words.push(text.byte_slice(w0 b))
+    }
+    let index:LspRequestWord=-1
+    let first:LspRequestWord=-1
+    loop k in [0..words.length) {
+        let w=words[k]
+        if k =? 0 or not dewy_joins(words[k - 1] w) {
+            index += 1
+            first=k
+        }
+    }
+    # (after a space that ends a complete argument: the next one)
+    if not open_word and words.length >? 0 {
+        let last=words[words.length - 1]
+        if not dewy_op_word(last) and not dewy_ends_op(last) {
+            index += 1
+            first=-1
+        }
+    }
+    if index <? 0 {index=0}
+    let name=""
+    if first >=? 0 {
+        let w=words[first]
+        let e:LspRequestWord=0
+        loop e <? (w as array<uint8>).length and is_ident_char((w as array<uint8>)[e]) {e += 1}
+        if e >? 0 and e <? (w as array<uint8>).length and (w as array<uint8>)[e] =? b'=' and (e + 1 >=? (w as array<uint8>).length or (w as array<uint8>)[e + 1] not=? b'=' and (w as array<uint8>)[e + 1] not=? b'?' and (w as array<uint8>)[e + 1] not=? b'>') {name=w.byte_slice(0 e)}
+    }
+    [index name]
+}
+# the parameters of a signature label (UTF-16 offsets [start, end] of each, and their names):
+# Dewy's are separated by spaces, (a:int64 @b:T c=…); the implementation language's by commas
+sig_params=(label:string dewy:bool):>[array<string> array<string>]=>{
+    let ps:array<string>=[]
+    let names:array<string>=[]
+    let a=find_byte(label b'(')
+    if a <? 0 {return [ps names]}
+    let lm=str_mask(label (label as array<uint8>).length)
+    let k=a + 1
+    let dep:LspRequestWord=0
+    let st=k
+    loop k <? (label as array<uint8>).length {
+        let c=(label as array<uint8>)[k]
+        if lm[k] not=? 0 or lm[k + 1] not=? 0 {
+            k += 1
+            continue
+        }
+        if c =? b'(' or c =? b'[' or c =? b'\{' or c =? b'<' and dewy {dep += 1} else if c =? b')' or c =? b']' or c =? b'}' or c =? b'>' and dewy and (label as array<uint8>)[k - 1] not=? b':' and (label as array<uint8>)[k - 1] not=? b'=' {
+            if dep =? 0 {
+                sig_param(label st k @ps @names)
+                break
+            }
+            dep -= 1
+        }
+        else if dep =? 0 and (not dewy and c =? b',' or dewy and c =? b' ') {
+            let split=true
+            if dewy {
+                let pv=k - 1
+                loop pv >? st and (label as array<uint8>)[pv] =? b' ' {pv -= 1}
+                let nx=k + 1
+                loop nx <? (label as array<uint8>).length and (label as array<uint8>)[nx] =? b' ' {nx += 1}
+                if pv <? st or nx >=? (label as array<uint8>).length {split=false} else if dewy_op_byte((label as array<uint8>)[pv]) or (label as array<uint8>)[nx] =? b'=' or (label as array<uint8>)[nx] =? b':' or (label as array<uint8>)[nx] =? b'|' or (label as array<uint8>)[nx] =? b'&' or (label as array<uint8>)[nx] =? b')' or (label as array<uint8>)[nx] >=? 0x80 {split=false}
+            }
+            if split {
+                sig_param(label st k @ps @names)
+                st=k + 1
+            }
+        }
+        k += 1
+    }
+    [ps names]
+}
+sig_param=(label:string x:LspRequestWord y:LspRequestWord @ps:array<string> @names:array<string>):>void=>{
+    let x0=x + count_lead(label x)
+    let y0=y - count_trail(label y)
+    if y0 <=? x0 {return}
+    ps.push("[{utf16_units(label 0 x0)},{utf16_units(label 0 y0)}]")
+    let q=x0
+    if (label as array<uint8>)[q] =? b'@' {q += 1}
+    let e=q
+    loop e <? y0 and is_ident_char((label as array<uint8>)[e]) {e += 1}
+    names.push(label.byte_slice(q e))
+}
+on_signature=(id:LspRequestWord params:LspRequestWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    let text=docs[d].text
+    let off=req_off(d params)
+    let dewy=ends_with(docs[d].path ".dewy")
+    # the call the cursor is in: back to its unmatched ( (past strings and comments)
+    let m=str_mask(text off dewy)
+    let i=off
+    let depth:LspRequestWord=0
+    let commas:LspRequestWord=0
+    let stop=max(0 off - 4000)
+    loop i >? stop {
+        i -= 1
+        if m[i] not=? 0 or m[i + 1] not=? 0 {continue}
+        let c=(text as array<uint8>)[i]
+        if c =? b')' or c =? b']' or c =? b'}' {depth += 1} else if c =? b'(' or c =? b'[' or c =? b'\{' {
+            if depth =? 0 {
+                if c not=? b'(' {return lsp_reply(id "null")}
+                break
+            }
+            depth -= 1
+        }
+        else if c =? b',' and depth =? 0 {commas += 1}
+    }
+    if i <? stop or i >=? (text as array<uint8>).length or (text as array<uint8>)[i] not=? b'(' {return lsp_reply(id "null")}
+    let e=i
+    loop e >? 0 and (text as array<uint8>)[e - 1] =? b' ' {e -= 1}
+    # (f<int64>(...): past the type arguments)
+    if dewy and e >? 0 and (text as array<uint8>)[e - 1] =? b'>' {
+        let g=e - 1
+        let dg:LspRequestWord=0
+        loop g >? 0 {
+            if (text as array<uint8>)[g] =? b'>' {dg += 1} else if (text as array<uint8>)[g] =? b'<' {
+                dg -= 1
+                if dg =? 0 {break}
+            }
+            g -= 1
+        }
+        if g >? 0 {e=g}
+    }
+    let s=name_start(text e)
+    if s =? e {return lsp_reply(id "null")}
+    if docs[d].dirty and not lsp_input_ready() {refresh(d)}
+    let h=ref_at(d s)
+    if not h.found {return lsp_reply(id "null")}
+    let dc=h.res.decls.get(h.ref.decl) ?? Decl()
+    if dc.kind not=? IK_FN or (dc.snippet as array<uint8>).length =? 0 {return lsp_reply(id "null")}
+    let label=dc.snippet
+    # (the instance used here, as hover shows it: its parameters' types)
+    if dewy and starts_with(h.ref.info "(") and (dc.name as array<uint8>).length >? 0 {label="{dc.name}={h.ref.info}"}
+    let sp=sig_params(label dewy)
+    let ps=sp[0]
+    # x.f(a): the receiver is the first argument (m.f(a) of a module m is not)
+    let active=commas
+    let named=""
+    if dewy {
+        let ai=dewy_arg_at(text m i + 1 off)
+        active=ai[0]
+        named=ai[1]
+    }
+    if s >? 0 and (text as array<uint8>)[s - 1] =? b'.' {
+        active += 1
+        let rs=name_start(text s - 1)
+        if rs <? s - 1 {
+            let rh=ref_at(d rs)
+            if rh.found and starts_with(rh.ref.info "module ") {active -= 1}
+        }
+    }
+    if (named as array<uint8>).length >? 0 {
+        let k=sp[1].index_of(named) ?? (-1)
+        if k >=? 0 {active=k}
+    }
+    let pj:array<string>=[]
+    loop p in ps {pj.push("\{\"label\":{p}\}")}
+    let sig="\{\"label\":{json_quote(label)},\"parameters\":[{join(pj ",")}]"
+    if (dc.doc as array<uint8>).length >? 0 {sig="{sig},\"documentation\":\{\"kind\":\"markdown\",\"value\":{json_quote(dc.doc)}\}"}
+    sig="{sig}\}"
+    lsp_reply(id "\{\"signatures\":[{sig}],\"activeSignature\":0,\"activeParameter\":{active}\}")
+}
+on_semantic=(id:LspRequestWord params:LspRequestWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "null")}
+    if docs[d].dirty and not lsp_input_ready() {refresh(d)}
+    let text=docs[d].text
+    let ls=line_starts_of(text)
+    let toks=dict<int64 SemTok>()
+    # (the latest result; then the last good one, for what the latest left out after an error)
+    loop which in [0..2) {
+        let r=docs[d].res
+        if which =? 1 {
+            if not docs[d].has_good {break}
+            r=docs[d].good
+        }
+        let f=file_in(r docs[d].path)
+        if f <? 0 {continue}
+        loop x in r.refs {
+            if x.file not=? f {continue}
+            let o=unmap_off(r docs[d].path x.off)
+            if o <? 0 or o + x.len >? (text as array<uint8>).length or toks.get(o) not=? none {continue}
+            let dco=r.decls.get(x.decl)
+            if dco =? none {
+                # (the language's own types and builtin functions: no declaration to show)
+                let bt:LspRequestWord=-1
+                if x.kind =? IK_TYPE {bt=1} else if x.kind =? IK_BUILTIN {
+                    bt=8
+                    if o >? 0 and (text as array<uint8>)[o - 1] =? b'.' {
+                        # (xs.length: a property; xs.push(x): a method)
+                        bt=6
+                        if o + x.len <? (text as array<uint8>).length and (text as array<uint8>)[o + x.len] =? b'(' {bt=9}
+                    }
+                }
+                if bt >=? 0 {toks[o]=SemTok(x.len bt 4)}
+                continue
+            }
+            let dc=dco
+            let t=sem_type(dc.kind)
+            if t <? 0 {continue}
+            if t =? 8 and o >? 0 and (text as array<uint8>)[o - 1] =? b'.' {t=9}
+            let mods:LspRequestWord=0
+            if dc.file =? f and dc.off =? x.off {mods |= 1}
+            if dc.kind =? IK_CONST {mods |= 2}
+            # (the library's own top-level names)
+            let top=dc.kind not=? IK_LOCAL and dc.kind not=? IK_PARAM and dc.kind not=? IK_FIELD
+            if top and dc.file >=? 0 and dc.file <? r.paths.length and starts_with(r.paths[dc.file] "{root_lib}/") {mods |= 4}
+            toks[o]=SemTok(x.len t mods)
+        }
+    }
+    let offs:array<int64>=[]
+    loop [o _] in toks {offs.push(o)}
+    offs.sort()
+    let out:array<string>=[]
+    let line:LspRequestWord=0
+    let ch:LspRequestWord=0
+    loop o in offs {
+        let tk=toks[o]
+        let p=lpos_of(text ls o)
+        if p.line not=? line {ch=0}
+        out.push("{p.line - line},{p.ch - ch},{utf16_units(text o o + tk.len)},{tk.type},{tk.mods}")
+        line=p.line
+        ch=p.ch
+    }
+    lsp_reply(id "\{\"data\":[{join(out ",")}]\}")
+}
+# Which lines start a statement, outside brackets or strings. Sloppy recovers
+# an unclosed bracket at its original indentation; Dewy braces ignore indentation.
+stmt_lines=(text:string ls:array<int64>):>array<bool>=>{
+    let ok:array<bool>=[]
+    loop _ in ls {ok.push(true)}
+    let depth:LspRequestWord=0
+    let ind:LspRequestWord=0
+    let oind:LspRequestWord=0
+    let l:LspRequestWord=0
+    let i:LspRequestWord=0
+    loop true {
+        loop l <? ls.length and ls[l] <=? i {
+            if ls[l] <? i {ok[l]=false} else {
+                ind=indent_of(text.byte_slice(i min(i + 200 (text as array<uint8>).length)))
+                let k=i + ind
+                if not sy_dewy and depth >? 0 and k <? (text as array<uint8>).length and (text as array<uint8>)[k] not=? b'\n' and ind <=? oind and (text as array<uint8>)[k] not=? b')' and (text as array<uint8>)[k] not=? b']' and (text as array<uint8>)[k] not=? b'}' {depth=0}
+                ok[l]=depth =? 0
+            }
+            l += 1
+        }
+        if i >=? (text as array<uint8>).length {break}
+        let c=(text as array<uint8>)[i]
+        if c =? b'#' {
+            i=ide_comment_end(text i sy_dewy)
+            continue
+        }
+        if ide_str_start(text i) {
+            let marks:array<uint8>=[]
+            i=ide_str_end(text i @marks 0 sy_dewy)
+            continue
+        }
+        if c =? b'(' or c =? b'[' or c =? b'\{' {
+            if depth =? 0 {oind=ind}
+            depth += 1
+        }
+        else if (c =? b')' or c =? b']' or c =? b'}') and depth >? 0 {depth -= 1}
+        i += 1
+    }
+    ok
+}
+symbols_in=(lines_:array<string> from_:LspRequestWord to:LspRequestWord ind:LspRequestWord):>array<string>=>{
+    let out:array<string>=[]
+    let i=from_
+    loop i <? to {
+        let raw=lines_[i]
+        let t=trim(raw)
+        if (t as array<uint8>).length =? 0 or (t as array<uint8>)[0] =? b'#' or indent_of(raw) not=? ind or not sy_ok[i] {
+            i += 1
+            continue
+        }
+        let col=indent_of(raw)
+        let e=block_end(lines_ i ind)
+        if sy_dewy {
+            let word=ident_prefix(t)
+            let constant=word =? "const" or word =? "local_const"
+            if constant or word =? "let" {
+                let prefix=skip_blanks(t (word as array<uint8>).length)
+                col += prefix
+                t=t.byte_slice(prefix (t as array<uint8>).length)
+            }
+            let nm=ident_prefix(t)
+            let rest=trim(t.byte_slice((nm as array<uint8>).length (t as array<uint8>).length))
+            if (nm as array<uint8>).length >? 0 and keywords.get(nm) =? none {
+                let kind=if constant {14} else {13}
+                let declared=starts_with(rest "=") and not starts_with(rest "==") or starts_with(rest ":")
+                if fn_decl_at(i col + (nm as array<uint8>).length) {
+                    kind=12
+                }
+                else if starts_with(rest ":") and ident_prefix(trim(rest.byte_slice(1 (rest as array<uint8>).length))) =? "type" {
+                    kind=5
+                    let equal=find_byte(rest b'=')
+                    if equal >=? 0 {
+                        let value=trim(rest.byte_slice(equal + 1 (rest as array<uint8>).length))
+                        if starts_with(value "<") {
+                            let close=find_byte(value b'>')
+                            if close >=? 0 {value=trim(value.byte_slice(close + 1 (value as array<uint8>).length))}
+                        }
+                        if starts_with(value "[") {kind=23}
+                    }
+                }
+                if declared {out.push(sym_json(nm kind i col e []))}
+            }
+            i=e + 1
+            continue
+        }
+        if starts_with(t "@") {
+            i += 1
+            continue
+        }
+        if starts_with(t "when ") and ends_with(t ":") {
+            let j=i + 1
+            loop j <=? e and (trim(lines_[j]) as array<uint8>).length =? 0 {j += 1}
+            if j <=? e {
+                loop x in symbols_in(lines_ j e + 1 indent_of(lines_[j])) {out.push(x)}
+            }
+            i=e + 1
+            continue
+        }
+        if starts_with(t "else:") or starts_with(t "else ") {
+            let j=i + 1
+            loop j <=? e and (trim(lines_[j]) as array<uint8>).length =? 0 {j += 1}
+            if j <=? e and ind =? 0 {
+                loop x in symbols_in(lines_ j e + 1 indent_of(lines_[j])) {out.push(x)}
+            }
+            i=e + 1
+            continue
+        }
+        if starts_with(t "struct ") or starts_with(t "enum ") {
+            let isst=starts_with(t "struct ")
+            let rest=t.byte_slice(find_byte(t b' ') + 1 (t as array<uint8>).length)
+            let nm=ident_prefix(rest)
+            sy_container=nm
+            let kids:array<string>=[]
+            # (enum E: a, b on one line)
+            let colon=find_byte(t b':')
+            if not isst and colon >=? 0 and (trim(t.byte_slice(colon + 1 (t as array<uint8>).length)) as array<uint8>).length >? 0 {
+                loop part in split(t.byte_slice(colon + 1 (t as array<uint8>).length) ",") {
+                    let pn=ident_prefix(trim(part))
+                    if (pn as array<uint8>).length >? 0 {kids.push(sym_json(pn 22 i col + max(0 byte_find(t pn colon)) i []))}
+                }
+            }
+            loop j in [i + 1..e + 1) {
+                let ft=trim(lines_[j])
+                if (ft as array<uint8>).length =? 0 or (ft as array<uint8>)[0] =? b'#' or not sy_ok[j] {continue}
+                let fc=indent_of(lines_[j])
+                if isst {
+                    let fnm=ident_prefix(ft)
+                    if (fnm as array<uint8>).length >? 0 {kids.push(sym_json(fnm 8 j fc j []))}
+                }
+                else {
+                    loop part in split(ft ",") {
+                        let pn=ident_prefix(trim(part))
+                        if (pn as array<uint8>).length >? 0 {kids.push(sym_json(pn 22 j fc + max(0 byte_find(ft pn)) j []))}
+                    }
+                }
+            }
+            let k:LspRequestWord=23
+            if not isst {k=10}
+            sy_container=""
+            out.push(sym_json(nm k i col + byte_find(t nm) e kids))
+        }
+        else if starts_with(t "const ") {
+            let nm=ident_prefix(t.byte_slice(6 (t as array<uint8>).length))
+            if (nm as array<uint8>).length >? 0 {out.push(sym_json(nm 14 i col + 6 e []))}
+        }
+        else if starts_with(t "type ") {
+            let nm=ident_prefix(t.byte_slice(5 (t as array<uint8>).length))
+            if (nm as array<uint8>).length >? 0 {out.push(sym_json(nm 5 i col + 5 e []))}
+        }
+        else if starts_with(t "test ") {
+            let q=trim(t.byte_slice(5 (t as array<uint8>).length))
+            if ends_with(q ":") {q=q.byte_slice(0 (q as array<uint8>).length - 1)}
+            out.push(sym_json("test {q}" 24 i col e []))
+        }
+        else if starts_with(t "extern ") {
+            let nm=ident_prefix(t.byte_slice(7 (t as array<uint8>).length))
+            if (nm as array<uint8>).length >? 0 {out.push(sym_json(nm 12 i col + 7 e []))}
+        }
+        else {
+            let nm=ident_prefix(t)
+            let rest=trim(t.byte_slice((nm as array<uint8>).length (t as array<uint8>).length))
+            if (nm as array<uint8>).length >? 0 and keywords.get(nm) =? none {
+                # name = (params) ...: a function; name = value or name: T: a variable
+                if fn_decl_at(i col + (nm as array<uint8>).length) {out.push(sym_json(nm 12 i col e []))} else if starts_with(rest "=") and not starts_with(rest "==") or starts_with(rest ":") and not ends_with(rest ":") {
+                    out.push(sym_json(nm 13 i col e []))
+                }
+            }
+        }
+        i=e + 1
+    }
+    out
+}
