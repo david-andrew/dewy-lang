@@ -129,7 +129,7 @@ compile errors unless `$runtime_checks` is on.*
 
 ## Self-length refinements
 
-Decided by David, 2026-11 (D17, #138). An array can require that its elements are valid indexes of itself. Union-find, tries, permutations and entity arrays need this, and it removes their bounds checks. This section is the design; the rest of this document's rules apply unless it says otherwise.
+Decided by David, 2026-11-06 (D17, #138). An array can require that its elements are valid indexes of itself. Union-find, tries, permutations and entity arrays need this, and it removes their bounds checks. This section is the design; the rest of this document's rules apply unless it says otherwise.
 
 ### Spelling
 
@@ -142,7 +142,7 @@ Forest:type = [parent:array<int64<(<? parent.length)>>]
 find = (@parent:array<int64<(<? parent.length)>> x:int64):>int64 => { ... }
 ```
 
-The binding can be a `let` or `const`, a record field or a parameter, and the name takes priority over any outer binding with that name. Only `name.length` may be written, with an optional constant offset (`<=? p.length`, `<? p.length - 1`). It may only be an upper bound, because growth must preserve the contract: a contract that growth could break (`>? p.length`, `not=? p.length`) is a declaration error. Any other position is also a declaration error that says where the name may go: a nested array (`array<array<int64<(<? g.length)>>>`), a tuple, an optional element, a fixed array (write the constant bound instead), a type alias, or a result type (none of these has a name to refer to). The element base must be an integer whose comparison with a length is already allowed (`int64`, `addr`, `uint64`, or an alias of them).
+The binding can be a `let` or `const`, a named record's field or a function's parameter, and the name takes priority over any outer binding with that name. An anonymous record's field and a lambda's parameter are declaration errors for now. Only `name.length` may be written, with an optional constant offset (`<=? p.length`, `<? p.length - 1`). It may only be an upper bound, because growth must preserve the contract: a contract that growth could break (`>? p.length`, `not=? p.length`) is a declaration error. Any other position is also a declaration error: a nested array (`array<array<int64<(<? g.length)>>>`), a tuple, an optional element or optional array, a fixed array (write the constant bound instead), a type alias, a result type or a callable type's parameter (these last ones have no binding to name). The element base is `int64` or an alias or refinement of it, such as `addr`. `uint64` is excluded because lengths compare with it through a separate biased interval, so `xs[xs[i]]` could not prove its bound.
 
 **Provisional: an upper bound on a signed element also means nonnegative.** `int64<(<? parent.length)>` also requires `>=? 0`, unless the contract states its own lower bound. D17 calls these elements valid indexes, and its example only proves `parent[parent[i]]` if they are. A sentinel is still easy to write: `int64<v => -1 <=? v and v <? next.length>` admits `-1`, and such an element needs a guard before it indexes.
 
@@ -169,22 +169,24 @@ Let `n` be the length before the operation.
 | Operation | Obligation | Notes |
 |---|---|---|
 | `let p:… = [a b c]`, `p = [...]` | each element `op` the literal's length | Uses the literal's element inventory. A constant outside the range is refuted. `[]` holds vacuously. |
-| `= [loop i in [0..n) i]`, `= fill(0 n)` | elements below the length, or a uniform value valid for any nonempty array | From the existing element-below, hull and uniform-copy facts. |
+| `= fill(0 n)` and other values with a known element hull | a uniform value or hull valid for any nonempty array | From the existing hull, uniform-copy and element-below facts. A comprehension is not proved yet: build with `push(p.length)`. |
 | `p = q`, `R[p=q]`, by-value argument | `q` holds the contract | Holds if `q`'s value is known to hold it, as when `q` is such a place or an unchanged snapshot of one. A slice, a `map` result or an unchecked call result is unproven. |
-| `xs[i] = v`, `xs[i] += d`, `.+=`, element alias, tuple unpack | `v op xs.length + c`, read after the right-hand side runs | `xs[i] = g(@xs)` checks against the length `g` left. A selector in the holder's route must be simple (a name, a literal or arithmetic on them), because a call there would have to run twice. Otherwise it is a compile error asking for a named place. |
+| `xs[i] = v`, `xs[i] += d`, `let e = @xs[i]`, `loop @e in xs`, `let a = @xs` | `v op xs.length + c`, read after the right-hand side runs | `xs[i] = g(@xs)` checks against the length `g` left. Every selector in the route must be free of calls (names, literals, arithmetic, lengths and element reads), because the value is checked before the selector runs and a call could change the array in between. Otherwise it is a compile error asking for a named place. A record in a dictionary is selected through a call, so it is rejected too. Pattern stores (`[xs[0] xs[1]] = ...`) do not parse. |
 | `xs.push(v)` | `v op n + 1 + c` | In place, with no candidate: the existing elements stay valid because the length only grew, so a push is not O(n). |
-| `xs.insert(v at)` | `v op n + 1 + c` | Operands are captured first. Existing elements keep their values, so they stay valid. |
+| `xs.insert(v at)` | `v op n + 1 + c` | Checked after both operands run, then done on a private candidate. Existing elements keep their values, so they stay valid. |
 | `xs.extend(ys)` | every `y op n + ys.length + c` | Proved when `ys` holds the same contract, because its elements are below its own, shorter length. Otherwise unproven: push each element. |
 | `xs.reserve(k)` | none | The length does not change. |
 | `xs.clear()` | none | Vacuous at length 0. |
 | `xs.swap(i j)` | none, beyond the bounds of `i` and `j` | In place. A swap keeps the length and the set of values. |
 | `reverse`, `sort`, `sort_by`, `sort_with` | none | A private candidate, as for any refined array. A permutation keeps the contract, whatever a callback does, because it holds for the candidate alone. |
-| `xs.pop()`, `xs.pop(i)`, `xs.truncate(k)`, `xs.resize(k)` | every remaining element `op` the new length | **Shrink.** See below. |
-| `xs[a..b) = ys`, `.data`, a mutable slice, `@xs` to a weaker `@` formal | rejected | The existing route rejects them. |
+| `xs.pop()`, `xs.pop(i)`, `xs.truncate(k)` | every remaining element `op` the new length | **Shrink.** See below. |
+| `xs.resize(k)` | rejected | It would create elements by zero initialization, which refined elements never allow. |
+| `xs .+= d` | every element of the result | The new whole array is unproven unless its values are known. |
+| raw `data(xs)`, a mutable slice, `@xs` to a weaker `@` formal, `@xs[i]` to a plain `@` formal | rejected | The existing route rejects them. |
 
 ### Shrinking
 
-Making an array shorter can invalidate elements that were valid: in `[2 0 1]`, a `pop` leaves a `2` that no longer indexes anything. The compiler has no fact about the largest remaining element, so a shrink that does not end at length 0 is unproven, and that is a compile error. The diagnostic says why and names the three fixes: `clear()`, rebuilding into a new binding, or `$runtime_checks`. Under `$runtime_checks`, the operation runs on the private candidate and a loop checks every remaining element before anything is published, so it is O(n) and its cost is visible. A failure leaves the array unchanged.
+Making an array shorter can invalidate elements that were valid: in `[2 0 1]`, a `pop` leaves a `2` that no longer indexes anything. The compiler has no fact about the largest remaining element, so a shrink that does not end at length 0 is unproven, and that is a compile error. The exceptions are values the facts already bound: a hull or a uniform value survives a shrink, because it never depended on the length. The diagnostic says why and names the three fixes: `clear()`, rebuilding into a new binding, or `$runtime_checks`. Under `$runtime_checks`, the operation runs on the private candidate and a loop checks every remaining element before anything is published, so it is O(n) and its cost is visible. A failure leaves the array unchanged.
 
 ### Moves and aliases
 
@@ -196,4 +198,4 @@ The contract is on the storage, and `refine_storage` follows element aliases to 
 
 ### Cost
 
-The feature adds no work to programs that do not use it. A flag set when the first such type is made guards the new branches in `refine_storage` and `fact_project`. A store is one comparison, the same as any refined element. A read adds one indexed projection lookup and one difference row, O(1). Literal proof is O(elements), capped by the existing inventory. Reads and stores do no work per element of the array. Only `$runtime_checks` on a shrink, or a whole-array value with no static proof, runs an O(n) loop.
+The feature adds no work to programs that do not use it. A flag set when the first such type is made guards the new branches in `refine_storage` and `fact_project`. A store is one comparison, the same as any refined element. A read adds one indexed projection lookup and one difference row, O(1). Literal proof is O(elements), capped by the existing inventory. Reads and stores do no work per element of the array. Only `$runtime_checks` on a shrink, or a whole-array value with no static proof, runs an O(n) loop, in the helper `__first_element_above`. A dependent record whose sibling could bound this array's length publishes a whole candidate instead, so `push` on such a field is unproven rather than in place.

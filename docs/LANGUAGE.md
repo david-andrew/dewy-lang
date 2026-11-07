@@ -1204,6 +1204,37 @@ whose fit is not proven by facts or the enabled 64-bit counter-progress
 assumption are unproven like any other obligation. `xs.swap(i j)` keeps an
 element refinement without a proof per element.
 
+An array can require that its elements are valid indexes of itself, by naming its
+own length in its direct element's refinement:
+
+```dewy
+let parent:array<int64<(<? parent.length)>> = [0]
+parent.push(parent.length)         # checked against the length after the push
+parent[1] = parent[0]              # checked against the current length
+let root = parent[parent[1]]       # no bounds check: every element indexes parent
+```
+
+The array can be a `let`, `const`, named record's field or function's parameter, and its elements are
+`int64` or `addr`. The contract also means `>=? 0` unless it states its own lower
+bound, so `int64<v => -1 <=? v and v <? next.length>` admits `-1` as a list's end;
+such an element needs a guard before it indexes. `<=?` and a constant offset work
+too; a bound that growth could break is a declaration error.
+
+Every store is checked. A literal is checked element by element, `xs[i] = v` against
+the length after the right side runs, and `push` and `insert` against the length they
+leave. A selector in such a store can't contain a call. Growing, `clear`,
+`swap`, `reverse` and the `sort` family keep the contract with no proof per element,
+and `push` and `swap` work in place. A shrink (`pop`, `truncate`) can leave an element
+past the new end, so it is a compile error unless it ends at length 0 or
+the element values are bounded. Under `$runtime_checks` it checks every element before
+changing the array. `resize` is an error, as for any refined element.
+
+Another array with the same contract can be assigned or passed to `@` directly.
+Reading such an array into a plain binding (`let c = p`) or through a generic forgets
+the contract and can't change `p`. Making a value with the contract again needs a proof:
+a slice or a call's result is unproven. A function result has no name to write in the
+contract, so return a record with such a field or fill an `@` parameter.
+
 `array<int64 length <? 10>` is a dynamic array with a checked length contract;
 `array<int64 length=10>` remains a fixed-size array. Length-changing operations
 check a private candidate before publishing it. `addr` is a nonnegative index
