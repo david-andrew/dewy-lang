@@ -848,7 +848,15 @@ ref_dependent_record = (t: int) -> bool:
         if ref_has_fields(int(fields[int(structs[si].fields) + i].type)): return true
     false
 
+# (a record's own declaration errors: the notes of the statement whose type named
+# it first, a tuple slot write's among them, are not theirs)
 ref_validate_record = (t: int, pos: int):
+    held = err_notes
+    err_notes = []
+    ref_validate_record_fields(t, pos)
+    err_notes = held
+
+ref_validate_record_fields = (t: int, pos: int):
     si = int(types[prune(t)].st)
     count = int(structs[si].nfields)
     done = fill(false, count)
@@ -873,7 +881,12 @@ ref_validate_record = (t: int, pos: int):
                         dep = int(fields[int(structs[si].fields) + j].type)
                         bound = ref_projection_type(dep, term.path, pos)
                         expected = if tkind(representation_type(ft)) == .array or tkind(representation_type(ft)) == .str_ or is_nd(representation_type(ft)): T_INT else: representation_type(ft)
-                        if not ref_repr_match(bound, expected, term.path): fatal(pos, "dependent field refinement requires matching integer representations")
+                        if not ref_repr_match(bound, expected, term.path):
+                            # (`head:int<v => v <? items.length>`: a length is an int64, so the
+                            # field holding a position is one too)
+                            name = name_of(int(fields[int(structs[si].fields) + i].name))
+                            if tkind(ft) == .refined and is_int(expected) and is_int(bound): fatal(pos, "dependent field refinement requires matching integer representations: field '{name}' is {dt(expected)} and what it is compared with is {dt(bound)}, so declare it `{name}:{dt(bound)}<...>`")
+                            fatal(pos, "dependent field refinement requires matching integer representations")
             if ready: done[i] = true
     loop yes in done:
         if not yes: fatal(pos, "cyclic dependent field refinements")

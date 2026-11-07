@@ -1,0 +1,9 @@
+# The record is first met in a tuple slot write; its declaration's error carries
+# no note from that write.
+Ring:type = <T>[items:array<T> head:int<v => 0 <=? v and v <? items.length>]
+main = () => {
+    let lanes = [Ring<int>[[1] 0] Ring<int>[[2] 0]]
+    let waiting:[int int] = [0 0]
+    loop l in [0..2) waiting[l] = lanes[l].head
+    printl(waiting)
+}
