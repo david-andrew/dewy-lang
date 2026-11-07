@@ -11030,6 +11030,7 @@ narrow_by = (c: int, holds: bool):
         tests: int[]
         if or_tests(c, tests): narrow_some(tests)
     else if k == .and_ and not holds: narrow_opt_rest_by(c)
+    else if k == .binary: position_guard_note(c, holds)
 
 # `x is? C` on x: (A | B | C)? is `x != none and x is? C` (check_istype); when it fails,
 # x is none or one of the other members: an (A | B)?. x a field path or a global: as the `_`

@@ -111,7 +111,7 @@ xf_none_test=(c:XFWord):>bool=>$unsafe {
 # Only type tests, tests against none and their logical combinations narrow.
 xf_narrow=(c:XFWord holds:bool):>void=>$unsafe {
     let k=xf_nodes[0].ptr[c].kind
-    if k =? 'istype' or k =? 'not_' or k =? 'and_' or k =? 'or_' or xf_none_test(c) {cond_narrow(c holds)}
+    if k =? 'istype' or k =? 'not_' or k =? 'and_' or k =? 'or_' or k =? 'binary' or xf_none_test(c) {cond_narrow(c holds)}
 }
 # Scope rollback has work only when the branch bound names.
 xf_reset=(mark:XFWord):>void=>$unsafe {

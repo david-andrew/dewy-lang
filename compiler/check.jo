@@ -261,6 +261,13 @@ scope_add_module = (m: int, name: int, kind: SK, r: int, decl: int) -> int:
             own_consts[name] = true
     s
 
+# (a dominating `i =? k` on a local, in force until its branch's scope closes)
+struct PositionGuard:
+    local: i32
+    value: i32
+    mark: i32
+position_guards: PositionGuard[]
+
 # Scopes are one stack of (name, symbol); each name also links its bindings, newest first, so
 # a lookup is one step instead of a scan: check_scopes.top[name] -> newest index, check_scopes.prev[i] -> older one.
 
@@ -273,6 +280,7 @@ push_scope_sym = (name: int, sym: int):
 
 scope_mark = () -> int: check_scopes.names.len()
 scope_reset = (mark: int):
+    loop position_guards.len() > 0 and int(position_guards[position_guards.len() - 1].mark) >= mark: position_guards.pop()
     i = check_scopes.names.len() - 1
     loop i >= mark:
         check_scopes.top[check_scopes.names[i]] = check_scopes.prev[i]
@@ -3732,6 +3740,32 @@ assign_element = (s: int) -> int:
 # 1 Dewy ranges made values, 2 a range of an array's elements, 3 a stepped range off an
 # n-dimensional array refused, 4 a record's soa element, part or `[]=` call, 5 an array's
 # elements picked by a mask or indexes; the rewritten statement, or 0
+# A condition that has just been found to hold or not: `i =? k` on a local is noted, with a scope
+# entry so that the branch's reset takes it back. O(1).
+position_guard_note = (c: int, holds: bool):
+    op = int(nodes[c].op)
+    if not (op == int(Tok.eq) and holds or op == int(Tok.ne) and not holds): return
+    a = int(nodes[c].a)
+    b = int(nodes[c].b)
+    if nodes[a].kind == .int_lit: a, b = b, a
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) or nodes[b].kind != .int_lit: return
+    position_guards.push(PositionGuard(local = nodes[a].sym, value = i32(nodes[b].ival), mark = i32(scope_mark())))
+    push_scope_sym(intern("$position_guard"), 0)
+
+# The position a dominating guard holds a runtime index to, or -1. A guard only names the position
+# to write: the store's bound is still proven there, so a guard no longer true is a rejected store.
+tuple_guarded = (b: int, count: int) -> int:
+    if position_guards.len() == 0: return -1
+    check_expr(clone(b), 0)
+    c = last_checked
+    if nodes[c].kind != .ident or nodes[c].aux != i32(int(SK.local)): return -1
+    i = position_guards.len() - 1
+    loop i >= 0:
+        g = position_guards[i]
+        if g.local == nodes[c].sym: return if int(g.value) >= 0 and int(g.value) < count: int(g.value) else: -1
+        i -= 1
+    -1
+
 # The positions a runtime index can reach: its refined value set's, when it has one, else all.
 tuple_reachable = (b: int, count: int) -> int[]:
     out: int[]
@@ -3786,7 +3820,8 @@ tuple_slot_write = (s: int, bt: int) -> int:
     if b == 0 or nkids(lhs) != 1 or nodes[b].kind == .range or nodes[b].kind == .namedarg: return 0
     known, _ = dewy_position_known(b, pos)
     if known: return 0
-    positions = tuple_reachable(b, count)
+    guarded = tuple_guarded(b, count)
+    positions = if guarded >= 0: [guarded] else: tuple_reachable(b, count)
     place = int(nodes[lhs].a)
     loop at in positions:
         before = err_notes.len()
@@ -3795,18 +3830,20 @@ tuple_slot_write = (s: int, bt: int) -> int:
         loop err_notes.len() > before: err_notes.pop()
     name = "$slot{s}"
     table = "$position_values{s}"
+    # (under a guard, a table of one, and the index must be proven to be that position)
+    reach = if guarded >= 0: 1 else: count
     zeros: int[]
-    loop at in [0..count): zeros.push(bc_int(0, pos))
+    loop at in [0..reach): zeros.push(bc_int(0, pos))
     values = mk(.array, pos)
     set_list(values, zeros)
     shape = mk(.tname, pos)
     nodes[shape].aux = -7
-    nodes[shape].ival = mk_fixed(T_INT, count)
+    nodes[shape].ival = mk_fixed(T_INT, reach)
     bound_values = bc_let(table, values, pos)
     nodes[bound_values].a = i32(shape)
     bound = mk(.index, pos)
     nodes[bound].a = i32(bc_ident(table, pos))
-    nodes[bound].b = i32(bc_ident(name, pos))
+    nodes[bound].b = i32(if guarded > 0: bc_bin(.minus, bc_ident(name, pos), bc_int(guarded, pos), pos) else: bc_ident(name, pos))
     set_list(bound, [int(nodes[bound].b)])
     chain = tuple_slot_stmt(s, place, positions[positions.len() - 1], bt, pos)
     i = positions.len() - 2

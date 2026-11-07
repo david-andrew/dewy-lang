@@ -2388,7 +2388,8 @@ proven in bounds like an array index. A write through such an index (`t[i] += 1`
 is made at the position the index holds, so it must be valid at every position
 the index can reach, and for each member of a union position: `t[i] += 1` works on
 a `[int64 int64|float64]`, and on a `[int64 int64|string]` is an error naming
-position 1. `.length` is the number of positions,
+position 1. A dominating `i =? 0` holds it to position 0, so `if i =? 0 {t[i] = 42}` works on a
+`[int64 string]`. `.length` is the number of positions,
 and `let [n name] = entry` unpacks it. It prints as an array, `[7 "seven"]`, and
 is how implementation-language tuples such as `(str, u8[])` appear in Dewy.
 

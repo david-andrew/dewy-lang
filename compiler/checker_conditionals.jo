@@ -88,7 +88,7 @@ xf_none_test = (c: int) -> bool:
     xf_nodes[0][c].kind == .binary and (op == 69 or op == 70) and xf_nodes[0][int(xf_nodes[0][c].b)].kind == .none_lit
 xf_narrow = (c: int, holds: bool):
     k = xf_nodes[0][c].kind
-    if k == .istype or k == .not_ or k == .and_ or k == .or_ or xf_none_test(c): cond_narrow(c, holds)
+    if k == .istype or k == .not_ or k == .and_ or k == .or_ or k == .binary or xf_none_test(c): cond_narrow(c, holds)
 xf_reset = (mark: int):
     if xf_mark() != mark: cond_reset(mark)
 xf_branch = (b: int, expected: int, value: bool, changes: int) -> int:
