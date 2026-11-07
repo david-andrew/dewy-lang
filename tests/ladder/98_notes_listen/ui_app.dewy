@@ -25,7 +25,7 @@ let in_flight:array<ApiCall> = []
 let editing_tags = false
 
 main = () => {
-    window("Dewy Notes" 960 640)
+    window("Dewy Notes" 960 640) or_throw;
     server = net.connect(env("NOTES_HOST") ?? "127.0.0.1" SERVER_PORT)
     dispatch(@ui Boot)
 }

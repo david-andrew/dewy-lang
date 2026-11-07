@@ -18,3 +18,10 @@ next_int = (@r:Rng lo:int64 hi:int64<(>? lo)>):>int64<n => lo <=? n and n <? hi>
     if lo <=? n and n <? hi return n
     lo
 }
+
+# Random bytes, two ways. Both spellings are provisional (open decision D10 Q1): rename them here.
+# random_bytes: fast, from the program's generator (seed_random repeats them), and never fails;
+# not for secrets. secure_random_bytes: the operating system's secure source, for keys, tokens
+# and nonces; NoEntropy from a system that gives none.
+random_bytes = (n:int64):>array<uint8> => __random_bytes_from(n)
+secure_random_bytes = (n:int64):>array<uint8> | NoEntropy => __secure_bytes_from(n) ?? NoEntropy()

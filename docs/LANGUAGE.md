@@ -4917,7 +4917,8 @@ Custom containers can provide a `contains(container needle):>bool` overload;
 a callable field named `contains` is not used by membership.
 
 Random numbers: `random()` gives a float in `[0, 1)`, `random_int(lo hi)` a
-whole number in `[lo..hi)`, and `rng(seed)` a generator of its own whose
+whole number in `[lo..hi)`, `random_bytes(n)` an `array<uint8>` from the same
+generator (it never fails), and `rng(seed)` a generator of its own whose
 `next_int(lo hi)`, `next_float()` and friends repeat for the same seed. Both
 integer forms give a result in `[lo..hi)`, so `xs[random_int(0 xs.length)]`
 needs no guard. The
@@ -4927,10 +4928,10 @@ no number to give, so `hi >? lo` is an obligation of `random_int` and
 `next_int`: a refuted one (`random_int(10 3)`) is a compile error, and an
 unproven one follows the obligation settings. These generators are predictable
 from their state and are not for secrets: keys, tokens and nonces come from
-`crypto.random_bytes(n)` (`import crypto`), which reads the operating system's
-secure random source (getrandom, getentropy, RtlGenRandom, or
-`crypto.getRandomValues` on the web); it gives `array<uint8> | NoEntropy`, the
-latter from a system that gives none.
+`secure_random_bytes(n)`, which reads the operating system's secure random
+source (getrandom, getentropy, RtlGenRandom, or `crypto.getRandomValues` on the
+web); it gives `array<uint8> | NoEntropy`, the latter from a system that gives
+none. (Both spellings are provisional.)
 
 ## Directives
 
@@ -5258,7 +5259,13 @@ Start a game with the built-in template, then edit it while it runs:
 ```
 
 The web build produces `/tmp/game.html`. Games use `main()` for setup,
-`update(dt:float64)` each frame, and `draw()` for rendering. A drawing call
+`update(dt:float64)` each frame, and `draw()` for rendering.
+`window(title width height)` opens the window, giving `Window | WindowError`:
+the `Window` handle, or, with no display or driver to open one on, a
+`WindowError` whose `.message` says which, so `main` writes
+`window("Pong" 1280 720) or_throw;`. A game that opens none has one opened for
+it before the first frame, and if that fails the program reports it and ends
+with exit 1. A drawing call
 must run inside `draw` or a helper reached only from `draw`; an unproven
 drawing context needs `$runtime_checks`. Drawing in that context needs no
 opt-in for GPU capacity: exhaustion reports and exits as an environmental

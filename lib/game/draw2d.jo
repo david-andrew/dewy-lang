@@ -367,7 +367,7 @@ __gfx_init_gl_only = ():
     # (a texture or font made before the window: a game's opens it; a script, with no update or
     # draw, draws pictures with no window: render_image)
     if not __win_open:
-        if __is_game: window(__win_title, __win_w, __win_h)
+        if __is_game: __window_open()
         else: __open_offscreen()
 
 set_repeat = (t: Texture, on: bool):

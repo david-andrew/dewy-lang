@@ -6,7 +6,7 @@ from p"physics_scene.dewy" import Scene, fresh, add_box, add_ball, advance
 let scene = fresh()
 let grab:physics.Joint? = none
 
-main = ():>void => { window("Dewy / Physics" 1280 720) }
+main = () => { window("Dewy / Physics" 1280 720) or_throw; }
 
 update = (dt:float64):>void => {
     if key_pressed(Key.escape) quit()

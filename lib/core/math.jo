@@ -842,7 +842,7 @@ shuffle[T] = (r: mut Rng, xs: mut T[]):
 # The random numbers differ from run to run: random() starts from a seed the operating system
 # gives, the first time it is used. seed_random(n), or an Rng of its own (rng(seed)), makes them
 # the same every run (for a level made from a seed, a replay, a test). They are not for secrets:
-# keys, tokens and nonces come from crypto.random_bytes.
+# keys, tokens and nonces come from secure_random_bytes (lib/prelude/random.dewy).
 __global_rng = rng(12345)
 __rng_seed = 12345
 __rng_ready = false
@@ -900,6 +900,34 @@ __random_int_from = (lo: int, hi: int) -> int:
     if (t != 0 or __rng_in_job) and t * 4 < __thread_rngs.len(): return __next_int_from(__thread_rngs[t * 4], lo, hi)
     if not __rng_ready: __rng_start()
     __next_int_from(__global_rng, lo, hi)
+# (Dewy's random_bytes and secure_random_bytes, lib/prelude/random.dewy: n bytes from the program's
+# generator, which never fails; and n from the operating system's secure source (getrandom,
+# getentropy, RtlGenRandom, crypto.getRandomValues), none from a system that gives none)
+__random_bytes_from = (n: int) -> u8[]:
+    b = fill(u8(0), max(n, 0))
+    i = 0
+    loop i < b.len():
+        w = __random_word()
+        k = 0
+        loop k < 8 and i < b.len():
+            b[i] = u8((w >> u64(k * 8)) & u64(255))
+            i += 1
+            k += 1
+    b
+__secure_bytes_from = (n: int) -> u8[]?:
+    b = fill(u8(0), max(n, 0))
+    if b.len() == 0: return b
+    if not __os_entropy(data(b), b.len()): return none
+    b
+# (a word from the generator random_int draws from: the task's, the thread's or the program's)
+__random_word = () -> u64:
+    when not BOOTSTRAP:
+        if __task_slot() >= 0: return next_u64(__task_context().rng)
+    t = __tid()
+    if (t != 0 or __rng_in_job) and t * 4 < __thread_rngs.len(): return next_u64(__thread_rngs[t * 4])
+    if not __rng_ready: __rng_start()
+    next_u64(__global_rng)
+
 # a random element of xs (which must not be empty)
 random_item[T] = (xs: T[]) -> T:
     if xs.len() == 0: panic("random_item of an empty array")

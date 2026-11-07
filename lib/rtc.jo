@@ -256,7 +256,7 @@ rtc_turn_servers: (str, str, str)[]
 
 __ice_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 __ice_text = (n: int) -> str:
-    r = crypto.__random_bytes(n)
+    r = crypto.__secure_random_bytes(n)
     out: u8[]
     loop b in r: out.push(__ice_chars[int(b) & 63])
     str_from_bytes(out)
@@ -268,7 +268,7 @@ __rtc_new = (controlling: bool) -> int:
     if c.sock < 0: return -1
     c.port = net.udp_port(c.sock)
     c.controlling = controlling
-    c.tiebreak = crypto.__random_bytes(8)
+    c.tiebreak = crypto.__secure_random_bytes(8)
     c.ufrag = __ice_text(8)
     c.pwd = __ice_text(24)
     c.since = time()
@@ -282,7 +282,7 @@ __rtc_new = (controlling: bool) -> int:
         hp = split(rtc_stun_servers[0], ":")
         c.stun_host = hp[0]
         c.stun_port = to_int(hp[hp.len() - 1]) ?? 3478
-        c.stun_tid = crypto.__random_bytes(12)
+        c.stun_tid = crypto.__secure_random_bytes(12)
         c.stun_sent = time()
         if not net.udp_send(c.sock, c.stun_host, c.stun_port, __stun_make(__STUN_REQUEST, c.stun_tid, [], [])): c.gathered = true
     else: c.gathered = true
@@ -338,7 +338,7 @@ __ice_poll = (id: int):
             if p.ok and c.controlling and p.nominate and now - p.sent < 0.2: continue
             if not p.ok and now - p.sent < 0.1: continue
             if p.tries > 60: continue
-            p.tid = crypto.__random_bytes(12)
+            p.tid = crypto.__secure_random_bytes(12)
             p.sent = now
             p.tries += 1
             # (controlling: once a check has been answered, the next nominates the path)
@@ -358,7 +358,7 @@ __ice_poll = (id: int):
     # (keep the path open, as browsers expect: a check now and then)
     if c.state == __ICE_CONNECTED and now - c.stun_sent > 2.0 and c.remote != none:
         c.stun_sent = now
-        __rtc_out(c, __ice_check(c, c.remote!, crypto.__random_bytes(12), false))
+        __rtc_out(c, __ice_check(c, c.remote!, crypto.__secure_random_bytes(12), false))
     __conns[id] = c
 
 # a datagram from host:port (through the relay: relay), for ICE or, once connected, DTLS
@@ -382,7 +382,7 @@ __rtc_out = (c: mut __Conn, data: u8[]): __rtc_out_to(c, c.sel_host, c.sel_port,
 
 # ask for the relay address
 __turn_allocate = (c: mut __Conn):
-    c.t_tid = crypto.__random_bytes(12)
+    c.t_tid = crypto.__secure_random_bytes(12)
     c.t_sent = time()
     c.t_tries += 1
     attrs: (int, u8[])[] = [(0x0019, [u8(17), 0, 0, 0])]           # (REQUESTED-TRANSPORT: UDP)
@@ -455,7 +455,7 @@ __turn_upkeep = (c: mut __Conn, now: f64):
         if now - c.since > 4.0: c.t_state = 3
         else if now - c.t_sent > 0.5: __turn_allocate(c)
     if c.t_state == 2 and now > c.t_refresh_at:
-        c.t_tid = crypto.__random_bytes(12)
+        c.t_tid = crypto.__secure_random_bytes(12)
         c.t_refresh_at = now + 20.0                 # (again then, if no answer comes)
         lt: u8[]
         __put32(lt, 600)
@@ -466,7 +466,7 @@ __turn_permit = (c: mut __Conn, host: str):
     if let t = c.t_perms.get(host):
         if time() - t < 240.0: return
     c.t_perms[host] = time()
-    net.udp_send(c.sock, c.t_host, c.t_port, __turn_msg(c, 0x0008, crypto.__random_bytes(12), [(0x0012, __xor_addr(host, 0))]))
+    net.udp_send(c.sock, c.t_host, c.t_port, __turn_msg(c, 0x0008, crypto.__secure_random_bytes(12), [(0x0012, __xor_addr(host, 0))]))
 
 # a datagram to host:port, straight or through this side's relay (a Send indication)
 __rtc_out_to = (c: mut __Conn, host: str, port: int, data: u8[], relay: bool):
@@ -476,7 +476,7 @@ __rtc_out_to = (c: mut __Conn, host: str, port: int, data: u8[], relay: bool):
     if c.t_state != 2: return
     __turn_permit(c, host)
     attrs: (int, u8[])[] = [(0x0012, __xor_addr(host, port)), (0x0013, data)]
-    net.udp_send(c.sock, c.t_host, c.t_port, __stun_make(0x0016, crypto.__random_bytes(12), attrs, []))
+    net.udp_send(c.sock, c.t_host, c.t_port, __stun_make(0x0016, crypto.__secure_random_bytes(12), attrs, []))
 
 __ice_check = (c: __Conn, r: RtcDesc, tid: u8[], nominate: bool) -> u8[]:
     attrs: (int, u8[])[]
@@ -668,7 +668,7 @@ __dtls_exts = (client: bool) -> u8[]:
 __dtls_start = (c: mut __Conn):
     c.d_state = 1
     if not c.d_client: return
-    c.d_crand = crypto.__random_bytes(32)
+    c.d_crand = crypto.__secure_random_bytes(32)
     __dtls_client_hello(c)
 
 __dtls_client_hello = (c: mut __Conn):
@@ -686,7 +686,7 @@ __dtls_client_hello = (c: mut __Conn):
 # the server's first flight: hello, certificate, its ECDHE key (signed), a request for the
 # client's certificate, done
 __dtls_server_flight = (c: mut __Conn):
-    c.d_srand = crypto.__random_bytes(32)
+    c.d_srand = crypto.__secure_random_bytes(32)
     c.d_eph = crypto.p256_key()
     sh: u8[] = [u8(0xFE), 0xFD]
     sh.extend(c.d_srand)
@@ -1054,8 +1054,8 @@ __sctp_init_fields = (c: __Conn) -> u8[]:
 
 __sctp_start = (c: mut __Conn):
     c.s_state = 1
-    c.s_my_tag = int(__be32(crypto.__random_bytes(4), 0)) | 1
-    c.s_tsn = int(__be32(crypto.__random_bytes(4), 0)) & 0x7FFFFFFF
+    c.s_my_tag = int(__be32(crypto.__secure_random_bytes(4), 0)) | 1
+    c.s_tsn = int(__be32(crypto.__secure_random_bytes(4), 0)) & 0x7FFFFFFF
     # (the DTLS client starts the association; the server answers, or starts too when its INIT
     # comes first: both work)
     if c.d_client:
@@ -1102,8 +1102,8 @@ __sctp_in = (c: mut __Conn, p: u8[]):
             __sctp_peer_init(c, v)
             if c.s_state == 0:
                 c.s_state = 1
-                c.s_my_tag = int(__be32(crypto.__random_bytes(4), 0)) | 1
-                c.s_tsn = int(__be32(crypto.__random_bytes(4), 0)) & 0x7FFFFFFF
+                c.s_my_tag = int(__be32(crypto.__secure_random_bytes(4), 0)) | 1
+                c.s_tsn = int(__be32(crypto.__secure_random_bytes(4), 0)) & 0x7FFFFFFF
             f = __sctp_init_fields(c)
             __put16(f, 7)                   # State Cookie
             __put16(f, 12)
@@ -1361,7 +1361,7 @@ __rtc_sdp = (d: RtcDesc, offer: bool) -> str:
     fp: str[]
     loop b in d.fingerprint: fp.push(upper(crypto.hex_text([b])))
     setup = if offer: "actpass" else: (if d.active: "active" else: "passive")
-    s = "v=0\r\no=- {int(__be32(crypto.__random_bytes(4), 0)) & 0x7FFFFFFF} 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+    s = "v=0\r\no=- {int(__be32(crypto.__secure_random_bytes(4), 0)) & 0x7FFFFFFF} 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
     s += "a=group:BUNDLE 0\r\na=msid-semantic: WMS\r\n"
     s += "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\n"
     loop i in 0.. and cd in d.candidates:

@@ -84,7 +84,11 @@ struct Overflow:
 @nominal(error)
 struct EndOfInput:
     exit_code: int = 1
-# The operating system gave no random bytes (`crypto.random_bytes`).
+# `window` could not open one: no display, or no driver (`message` says which).
+@nominal(error)
+struct WindowError:
+    message: str
+# The operating system gave no random bytes (`secure_random_bytes`).
 @nominal(error)
 struct NoEntropy:
     pass

@@ -1,6 +1,5 @@
-import crypto
 main = () => {
-    let key = crypto.random_bytes(16) or_throw
-    let more = crypto.random_bytes(4)
+    let key = secure_random_bytes(16) or_throw
+    let more = secure_random_bytes(4)
     if more is? NoEntropy { printl("none") } else { printl("{key.length} {more.length}") }
 }

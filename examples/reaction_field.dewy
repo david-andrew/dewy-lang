@@ -26,8 +26,8 @@ seed = ():>void => {
     loop i in [0..128) advance(@field feed as float32 remove as float32)
 }
 
-main = ():>void => {
-    window("Dewy / Pattern field" 1280 720)
+main = () => {
+    window("Dewy / Pattern field" 1280 720) or_throw;
     field_texture = texture(pixels smooth=false)
     hud_style.text = ink
     hud_style.button = paper

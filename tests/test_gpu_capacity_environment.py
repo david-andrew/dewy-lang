@@ -9,7 +9,7 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
-DRAWS = '''main=():>void=>{ window("x" 320 200) }
+DRAWS = '''main=()=>{ window("x" 320 200) or_throw; }
 draw=():>void=>{
     let ink=rgb(0.1 0.2 0.3)
     clear(rgb(0.9 0.9 0.9))

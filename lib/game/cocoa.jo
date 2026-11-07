@@ -106,15 +106,10 @@ when TARGET == "macos":
         v = __oc_p(o, __sel("valueForKey:"), __nsstr(key))
         if v != null: __oc_pi(v, __sel("getValue:size:"), data(__ns_val) as *u8, size)
 
-    __need = (ok: bool, what: str):
-        if not ok:
-            eprint("error: cannot open a window: {what}")
-            exit(1)
-
-    __platform_open = ():
+    __platform_open = () -> str:
         __soft = __soft_kept or (env("DEWY_SOFTWARE") ?? "") == "1"
         pool = objc_autoreleasePoolPush()
-        __need(dl_open("/System/Library/Frameworks/AppKit.framework/AppKit") != null, "AppKit is missing")
+        if dl_open("/System/Library/Frameworks/AppKit.framework/AppKit") == null: return "AppKit is missing"
         __ns_app = __oc(__cls("NSApplication"), __sel("sharedApplication"))
         __oc_i(__ns_app, __sel("setActivationPolicy:"), 0)                  # regular: a Dock icon, a menu bar
         if len(PROGRAM_ICON) > 0:
@@ -126,7 +121,7 @@ when TARGET == "macos":
         # titled, closable, miniaturizable, resizable; buffered
         w = __oc(__cls("NSWindow"), __sel("alloc"))
         __ns_win = __oc_rect(w, __sel("initWithContentRect:styleMask:backing:defer:"), 0.0, 0.0, f64(__win_w), f64(__win_h), 15, 2, 0)
-        __need(__ns_win != null, "NSWindow failed")
+        if __ns_win == null: return "NSWindow failed"
         __oc_i(__ns_win, __sel("setReleasedWhenClosed:"), 0)
         __oc_p(__ns_win, __sel("setTitle:"), __nsstr(__win_title))
         __oc_i(__ns_win, __sel("setAcceptsMouseMovedEvents:"), 1)
@@ -152,6 +147,7 @@ when TARGET == "macos":
             __oc_i(__ns_view, __sel("setWantsLayer:"), 1)
             __sw_init_window(__win_w, __win_h)
         objc_autoreleasePoolPop(pool)
+        ""
 
     # Metal drawing into the view's layer (lib/game/metal.jo); "" or why not
     __ns_metal_open = () -> str:
@@ -456,7 +452,7 @@ when TARGET == "macos":
     __platform_finger = () -> bool: false
 
     __game_run = (update: (f64) -> void, draw: () -> void):
-        window(__win_title, __win_w, __win_h)
+        __window_open()
         __fixed_step = env("DEWY_SCREENSHOT") != none
         when WATCH:
             __watch_init()

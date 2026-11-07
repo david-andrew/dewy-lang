@@ -406,7 +406,7 @@ __inv_room_shut = ():
 # a new code for this computer's room (the old one, and links with it, no longer lead here)
 new_room_code = ():
     __inv_room = __inv_random_code()
-    __inv_room_key = crypto.hex_text(crypto.__random_bytes(12))
+    __inv_room_key = crypto.hex_text(crypto.__secure_random_bytes(12))
     save_data("invite_room", "{__inv_room} {__inv_room_key}")
     if __inv_hosting and __inv_rv_up: __inv_rv_hello()
 
@@ -414,7 +414,7 @@ new_room_code = ():
 __inv_random_code = () -> str:
     abc = "ACDEFGHJKMNPQRTUVWXY34679"
     out = ""
-    loop b in crypto.__random_bytes(5): out += byte_str(abc[int(b) % len(abc)])
+    loop b in crypto.__secure_random_bytes(5): out += byte_str(abc[int(b) % len(abc)])
     out
 
 __inv_room_load = ():

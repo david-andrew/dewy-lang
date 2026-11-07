@@ -347,8 +347,14 @@ __icon_argb = (max_words: int) -> int[]:
                 out.push(v)
     out
 
-# Open the game window (called automatically when the program defines update/draw).
-window = (title: str = "", width: int = 1280, height: int = 720):
+# The game's window, once open: what `window` gives. A program has one window, so the handle
+# holds nothing; what it stands for is that the window is open.
+struct Window:
+    pass
+
+# Open the game window (called automatically when the program defines update/draw): the window,
+# or WindowError when there is no display or driver to open one on.
+window = (title: str = "", width: int = 1280, height: int = 720) -> Window | WindowError:
     __input_init()
     name = title
     if len(name) == 0: name = __program_name()
@@ -357,7 +363,7 @@ window = (title: str = "", width: int = 1280, height: int = 720):
         if name != __win_title:
             __win_title = name
             __platform_title()
-        return
+        return Window()
     # (pictures drawn before it, with no window: the software renderer, which has their textures)
     if __offscreen:
         __offscreen = false
@@ -380,12 +386,22 @@ window = (title: str = "", width: int = 1280, height: int = 720):
             __win_w = to_int(ws[..x)) ?? width
             __win_h = to_int(ws[x + 1..]) ?? height
     # (sloppy test: the tests run with no window, and no display needed)
-    if __testing: return
-    __platform_open()
+    if __testing: return Window()
+    why = __platform_open()
+    if len(why) > 0: return WindowError(why)
     __win_open = true
     __time0 = time()
     if __mouse_lock_want: __platform_mouse_lock(true)
     if __cursor_hidden: __platform_show_cursor(false)
+    Window()
+
+# (the library's own opening, for a game that did not open one: with no program code to hand the
+# failure to, it is reported, as an unhandled one reaching `main` is)
+__window_open = ():
+    w = window(__win_title, __win_w, __win_h)
+    if w is WindowError:
+        eprint("error: cannot open a window: {w.message}")
+        exit(1)
 
 when TARGET == "wasm":
     extern __web_canvas_open = (title: *u8, title_len: i32, w: i32, h: i32)
@@ -426,7 +442,9 @@ when TARGET == "wasm":
     __web_pasted_frame = -10
     __web_keyboard_on = false
 
-    __platform_open = (): __web_canvas_open(data(__win_title), i32(len(__win_title)), i32(__win_w), i32(__win_h))
+    __platform_open = () -> str:
+        __web_canvas_open(data(__win_title), i32(len(__win_title)), i32(__win_w), i32(__win_h))
+        ""
     __platform_title = (): __web_set_title(data(__win_title), i32(len(__win_title)))
 
     # the page calls this every animation frame
@@ -493,7 +511,7 @@ when TARGET == "wasm":
     __web_touch = (id: i32, kind: i32, x: f32, y: f32): __touch_event(int(id), int(kind), x, y)
 
     __game_run = (update: (f64) -> void, draw: () -> void):
-        window(__win_title, __win_w, __win_h)
+        __window_open()
         __web_update = update
         __web_draw = draw
 else when TARGET == "windows":
@@ -600,7 +618,7 @@ else when TARGET == "windows":
     const __WS_POPUP = 0x80000000
     const __WS_VISIBLE = 0x10000000
 
-    __platform_open = ():
+    __platform_open = () -> str:
         __soft = __soft_kept or (env("DEWY_SOFTWARE") ?? "") == "1"
         __w32_any_size = env("DEWY_SCREENSHOT") != none
         # (a screenshot run through Vulkan with DEWY_HEADLESS=1, as over ssh, where there is no
@@ -609,7 +627,7 @@ else when TARGET == "windows":
             why = __vk_open("", () -> int: 0)
             if len(why) == 0:
                 __vk = true
-                return
+                return ""
             __vk_note("{why}; using a window")
         SetProcessDPIAware()
         inst = GetModuleHandleW(null)
@@ -631,7 +649,7 @@ else when TARGET == "windows":
         title = __wide(__win_title)
         cw = i32(0x80000000 as int)                             # CW_USEDEFAULT
         __w32_hwnd = CreateWindowExW(0, data(cls), data(title), u32(__WS_OVERLAPPEDWINDOW | __WS_VISIBLE), cw, cw, r[2] - r[0], r[3] - r[1], null, null, inst, null)
-        __need(__w32_hwnd != null, "CreateWindowExW failed")
+        if __w32_hwnd == null: return "CreateWindowExW failed"
         ShowWindow(__w32_hwnd, 1)
         __w32_dc = GetDC(__w32_hwnd)
         __w32_msg = fill(u8(0), 48)
@@ -650,6 +668,7 @@ else when TARGET == "windows":
                 eprint("note: {why}; using the software renderer")
                 __soft = true
         if __soft: __sw_init_window(__win_w, __win_h)
+        ""
 
     __vk_win32_surface = () -> int:
         info = VkWin32SurfaceCreateInfo(stype = 1000009000, hinstance = GetModuleHandleW(null), hwnd = __w32_hwnd)
@@ -696,11 +715,6 @@ else when TARGET == "windows":
         v = p as int
         if v >= -1 and v <= 3: p = GetProcAddress(__w32_lib("opengl32.dll"), data(__zstr(name)))
         p
-
-    __need = (ok: bool, what: str):
-        if not ok:
-            eprint("error: cannot open a window: {what}")
-            exit(1)
 
     __platform_title = ():
         if __w32_hwnd != null:
@@ -968,7 +982,7 @@ else when TARGET == "windows":
     __platform_finger = () -> bool: false
 
     __game_run = (update: (f64) -> void, draw: () -> void):
-        window(__win_title, __win_w, __win_h)
+        __window_open()
         __fixed_step = env("DEWY_SCREENSHOT") != none
         when WATCH:
             __watch_init()
@@ -1091,15 +1105,10 @@ else when TARGET == "linux":
     __wayland = false            # connected through wayland.jo
 
     # a missing display or driver is an environment problem, not a program bug: say so and exit
-    __need = (ok: bool, what: str):
-        if not ok:
-            eprint("error: cannot open a window: {what}")
-            exit(1)
-
     # a display named by the environment (empty means none, as unset)
     __display_named = (name: str) -> bool: len(env(name) ?? "") > 0
 
-    __platform_open = ():
+    __platform_open = () -> str:
         __soft = __soft_kept or (env("DEWY_SOFTWARE") ?? "") == "1"
         # (the software renderer with no display to show it on: frames drawn, no window, as for
         # a benchmark with DEWY_FRAMES and DEWY_STATS)
@@ -1110,7 +1119,7 @@ else when TARGET == "linux":
             why = __vk_open("", () -> int: 0)
             if len(why) == 0:
                 __vk = true
-                return
+                return ""
             __vk_note("{why}; using the software renderer")
             __soft = true
             headless = true
@@ -1133,8 +1142,8 @@ else when TARGET == "linux":
                         eprint("note: {why2}; using the software renderer")
                         __soft = true
                 if __soft: __sw_init_window(__win_w, __win_h)
-                return
-            if plat == "wayland": __need(false, why)
+                return ""
+            if plat == "wayland": return why
         if not lib_available("libX11.so.6") or (env("DEWY_X11") ?? "") == "protocol":
             # no Xlib: talk to the X server directly and render in software
             __soft = true
@@ -1148,14 +1157,14 @@ else when TARGET == "linux":
                     loop x in icon: __put32(v, x)
                     __xp_property(__xp_intern("_NET_WM_ICON"), 6, 32, v)     # CARDINAL
             # a screenshot run can render without any display
-            else if not headless: __need(false, "libX11 is not available and {why}")
+            else if not headless: return "libX11 is not available and {why}"
             __sw_init_window(__win_w, __win_h)
-            return
+            return ""
         __xdpy = XOpenDisplay(null)
         if __xdpy == null and headless:
             __sw_init_window(__win_w, __win_h)
-            return
-        __need(__xdpy != null, "cannot connect to the X server (is DISPLAY set?)")
+            return ""
+        if __xdpy == null: return "cannot connect to the X server (is DISPLAY set?)"
         __xscr = XDefaultScreen(__xdpy)
         root = XRootWindow(__xdpy, __xscr)
         __xwin = XCreateSimpleWindow(__xdpy, root, 0, 0, u32(__win_w), u32(__win_h), 0, 0, 0)
@@ -1181,6 +1190,7 @@ else when TARGET == "linux":
                 eprint("note: {why}; using the software renderer")
                 __soft = true
         if __soft: __sw_init_window(__win_w, __win_h)
+        ""
 
     __platform_title = ():
         if __wayland: __wl_set_title(__win_title)
@@ -1591,7 +1601,7 @@ else when TARGET == "linux":
         else: eglSwapBuffers(__egl_dpy, __egl_surf)
 
     __game_run = (update: (f64) -> void, draw: () -> void):
-        window(__win_title, __win_w, __win_h)
+        __window_open()
         __fixed_step = env("DEWY_SCREENSHOT") != none
         when WATCH:
             __watch_init()

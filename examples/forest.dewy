@@ -11,8 +11,8 @@ let camera = orbit_camera(vec3(0 1 0) 24.0 0.0 0.38)
 let time:float64 = 0.0
 let orbit:bool = true
 
-main = ():>void => {
-    window("Dewy / Forest" 1280 720)
+main = () => {
+    window("Dewy / Forest" 1280 720) or_throw;
     terrain = terrain_mesh(120 120 @hill @ground_color)
     trunk = cylinder_mesh(0.15 1.2 8)
     crown = cone_mesh(0.9 2.2 10)

@@ -1,0 +1,8 @@
+# The control for reject_secure_random_bytes_length: plain random bytes are never a failure.
+main = ():>void => {
+    seed_random(7)
+    let a:array<uint8> = random_bytes(19)
+    seed_random(7)
+    let b:array<uint8> = random_bytes(19)
+    printl("{a.length} {a =? b} {random_bytes(0).length}")
+}

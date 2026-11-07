@@ -495,7 +495,7 @@ let shading=shader(@vs @fs)
 let program=make_shader(shading)
 let triangle=mesh([V(vec2(-1 -1)) V(vec2(3 -1)) V(vec2(-1 3))])
 let count:int64=0
-main=():>void=>window("Shader reload" 64 64)
+main=()=>{ window("Shader reload" 64 64) or_throw; }
 update=(dt:float64):>void=>{count+=1 sleep(5ms);}
 draw=():>void=>{
 clear(BLACK) program.draw(triangle U(1))

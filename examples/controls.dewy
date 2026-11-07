@@ -11,8 +11,8 @@ let running = true
 
 reset_pendulum = ():>void => { angle = release_angle*PI/180.0 omega = 0.0 }
 
-main = ():>void => {
-    window("Dewy / Pendulum controls" 1280 720)
+main = () => {
+    window("Dewy / Pendulum controls" 1280 720) or_throw;
     ui_style = ui_light_style()
     ui_style.size = 20.0
     ui_style.spacing = 54.0
