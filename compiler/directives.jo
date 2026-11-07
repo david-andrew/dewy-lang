@@ -26,6 +26,7 @@ use 'effect_contracts.dewy'
 use 'effect_control.dewy'
 use 'panic_inventory.dewy'
 use 'isolation_ops.dewy'
+use 'directive_rules.dewy'
 
 struct DirScope:
     start: int
@@ -191,19 +192,6 @@ dir_find = (setting: int, p: int, skip: int = -1) -> int:
         dir_cache_best[c] = best
     best
 
-dir_find_scan = (setting: int, p: int, skip: int) -> int:
-    best = -1
-    loop i in [0..dir_scopes.len()):
-        if i == skip: continue
-        s = dir_scopes[i]
-        if s.setting != setting or p < s.start or p > s.end: continue
-        if best >= 0:
-            b = dir_scopes[best]
-            if s.start < b.start: continue
-            if s.start == b.start and s.bundle != 0 and b.bundle == 0: continue
-        best = i
-    best
-
 dir_value = (setting: int, p: int) -> int:
     if dir_scopes.len() == 0: return -1
     i = dir_find(setting, p)
@@ -234,40 +222,6 @@ dir_policy = (p: int) -> int:
     static = if dir_forced: dir_prior_static else: fact_policy == .RequireStatic
     if static: DIR_STATIC else: DIR_IMPLICIT
 
-# The decision for an unproven (or refuted) obligation the analysis reports:
-# true when its scope defers it to a runtime check, which lowering keeps.
-dir_defer = (n: int, what: str, deferrable: bool) -> bool:
-    # (an `$assert` condition, and what it reads, must be proven)
-    if not deferrable or n <= 0 or fact_query: return false
-    # (a shared member decision is tentative: the body is decided again)
-    if fact_member_shared:
-        fact_member_failed = true
-        return true
-    # (erased proofs have no runtime fallback)
-    if proof_active and fact_owner > 0 and fact_owner < fns.len() and proof_decls.has(int(fns[fact_owner].decl)): return false
-    p = nodes[n].pos
-    # (`pool[h].hp -= 1` indexes `items` at `__pool_index`'s answer: the
-    # library's invariant, which keeps its check, as the library's own do)
-    lib_index = nodes[n].kind == .index and has_flag(n, NF_LIB_INDEX)
-    policy = if lib_index: DIR_IMPLICIT else: dir_policy(p)
-    if policy == DIR_STATIC: return false
-    err_notes = []
-    dir_sites.push(DirSite(p, what, policy))
-    owner = fact_retry_owner
-    if fact_owner > 0: owner = fact_owner
-    # (a pool update's own failure is its `__pool_index` membership, an obligation of its
-    # own: the index it answers is the library's invariant, no panic of the caller's)
-    if (policy != DIR_IMPLICIT or not pos_in_lib(p)) and not lib_index: effect_panic_note(owner, n, what, fact_deferred.has(owner))
-    if fact_deferred.has(owner):
-        pending = fact_deferred_checks.get(owner) ?? []
-        pending.push(n)
-        fact_deferred_checks[owner] = pending
-    if policy == DIR_PROTOTYPE and dir_value(dir_name_warnings, p) != 0: warn(p, "prototype: {what}; it is checked at run time")
-    if ide_on and policy == DIR_RUNTIME:
-        hint = "runtime check: " + dir_obligation_text(what)
-        ide_emit("I\t{ide_pos_str(p)}\t{ide_esc(hint)}")
-    true
-
 # Every analyzed visit of an index must prove it before its check is dropped.
 dir_index = (n: int, proven: bool):
     if fact_speculating > 0: return
@@ -275,34 +229,10 @@ dir_index = (n: int, proven: bool):
     if not proven: dir_proven[n] = false
     else if not dir_proven.has(n): dir_proven[n] = true
 
-# ---------------- panics ----------------
-# After facts settle which obligations became runtime checks: a no-traps scope
-# may not call (or hand out a handle to) code that may panic, and a row that
-# excludes panics holds. Only the program's own bodies are walked for sites;
-# effect_panics walks a callee once. O(reached nodes + call edges).
-# (also while checking: a row excluding panics, parsed before any body, needs a
-# divisor registered as the caller's obligation before facts force the policy)
-dir_panics_demanded = () -> bool: effect_panics_demanded or fact_policy == .RequireStatic
-
 # `$explicit_copies`, written for the module, a function or a block.
 dir_explicit_copies = (p: int) -> bool:
     if not dir_copies_any: return false
     dir_value(dir_name_copies, p) == 1
-
-# A declared function without an effect row takes its scope's default row.
-dir_apply_rows = (first: int):
-    if not dir_rows_any: return
-    loop f in [first..nodes.len()):
-        if nodes[f].kind != .fn_ or nodes[f].sval != 0: continue
-        body = int(nodes[f].b)
-        p = if body != 0: nodes[body].pos else: nodes[f].pos
-        i = dir_find(dir_name_row, p)
-        if i < 0 or dir_scopes[i].value <= 0: continue
-        nodes[f].sval = i32(dir_scopes[i].value)
-        dir_row_scopes[f] = i
-        effects_active = true
-        loop entry in effect_syntax[dir_scopes[i].value]:
-            if entry.kind == .panic: effect_panics_demanded = true
 
 # Only bodies containing a no-traps scope demand the panic graph.
 # O(body nodes), stopping at the first such scope; nested lambdas own their bodies.
@@ -335,23 +265,3 @@ dir_uniform_runtime = (p: int) -> bool:
     dir_uniform_files[file] = runtime
     runtime
 
-# Synthetic entry bindings keep parameter locations for diagnostics but use
-# their function body's policy. Index only parameter syntax, never body nodes;
-# nested blocks keep their own scopes. O(signature nodes), once per declaration.
-dir_function_entry = (decl: int, body: int):
-    if decl == 0 or body == 0 or not dir_mixed_files.has(pos_file(nodes[decl].pos)) or dir_entry_functions.has(decl) or not dewy_at(nodes[decl].pos): return
-    dir_entry_functions[decl] = true
-    if dir_policy(nodes[body].pos) == dir_policy(nodes[decl].pos): return
-    work: int[]
-    loop i in [0..nkids(decl)):
-        p = kid(decl, i)
-        dir_entry_positions[nodes[p].pos] = nodes[body].pos
-        work.push(int(nodes[p].a))
-        loop j in [0..nkids(p)): work.push(kid(p, j))
-    loop work.len() > 0:
-        n = work.pop()
-        if n <= 0: continue
-        dir_entry_positions[nodes[n].pos] = nodes[body].pos
-        if nodes[n].a != 0: work.push(int(nodes[n].a))
-        if nodes[n].b != 0: work.push(int(nodes[n].b))
-        loop i in [0..nkids(n)): work.push(kid(n, i))

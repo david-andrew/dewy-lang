@@ -39,6 +39,7 @@ LEAF_HOMES = {
     'fmt_ops': 'fmt.jo',
     'lsp_fixes': 'lsp.jo',
     'ide_decls': 'ide.jo',
+    'directive_rules': 'directives.jo',
 }
 
 

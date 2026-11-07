@@ -1,0 +1,118 @@
+$runtime_checks
+from p"ast.jo" import NF_LOOPCOUNT
+from p"ast.jo" import (NF_LIB_INDEX has_flag kid nkids nodes)
+from p"check.jo" import (dewy_at fns)
+from p"directive_ops.dewy" import (dir_obligation_text)
+from p"directives.jo" import (DIR_IMPLICIT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirSite dir_entry_functions dir_entry_positions dir_find dir_mixed_files dir_name_row dir_name_warnings dir_policy dir_row_scopes dir_rows_any dir_scopes dir_sites dir_value)
+from p"effects.jo" import (effect_panics_demanded effect_syntax effects_active)
+from p"facts.jo" import (fact_deferred fact_deferred_checks fact_member_failed fact_member_shared fact_owner fact_policy fact_query fact_retry_owner)
+from p"ide.jo" import (ide_on)
+from p"ide_index.dewy" import (ide_esc)
+from p"ide_ops.dewy" import (ide_emit ide_pos_str)
+from p"panic_inventory.dewy" import (effect_panic_note)
+from p"proofs.jo" import (proof_active proof_decls)
+from p"util.jo" import (err_notes pos_file pos_in_lib warn)
+
+DirRuleWord:type=int64<overflow='wrap'>
+dir_find_scan=(setting:DirRuleWord p:DirRuleWord skip:DirRuleWord):>int64=>{
+    let best:DirRuleWord=-1
+    loop i in [0..dir_scopes.length) {
+        if i =? skip {continue}
+        let s=dir_scopes[i]
+        if s.setting not=? setting or p <? s.start or p >? s.end {continue}
+        if best >=? 0 {
+            let b=dir_scopes[best]
+            if s.start <? b.start {continue}
+            if s.start =? b.start and s.bundle not=? 0 and b.bundle =? 0 {continue}
+        }
+        best=i
+    }
+    best
+}
+# The decision for an unproven (or refuted) obligation the analysis reports:
+# true when its scope defers it to a runtime check, which lowering keeps.
+dir_defer=(n:DirRuleWord what:string deferrable:bool):>bool=>$unsafe {
+    # (an `$assert` condition, and what it reads, must be proven)
+    if not deferrable or n <=? 0 or fact_query {return false}
+    # (a shared member decision is tentative: the body is decided again)
+    if fact_member_shared {
+        fact_member_failed=true
+        return true
+    }
+    # (erased proofs have no runtime fallback)
+    if proof_active and fact_owner >? 0 and fact_owner <? fns.length and proof_decls.has(DirRuleWord(fns.ptr[fact_owner].decl)) {return false}
+    let p=nodes.ptr[n].pos
+    # (`pool[h].hp -= 1` indexes `items` at `__pool_index`'s answer: the
+    # library's invariant, which keeps its check, as the library's own do)
+    let lib_index=nodes.ptr[n].kind =? 'index' and has_flag(n NF_LIB_INDEX)
+    let policy=if lib_index {DIR_IMPLICIT} else {dir_policy(p)}
+    if policy =? DIR_STATIC {return false}
+    err_notes=[]
+    dir_sites.push(DirSite(p what policy))
+    let owner=fact_retry_owner
+    if fact_owner >? 0 {owner=fact_owner}
+    # (a pool update's own failure is its `__pool_index` membership, an obligation of its
+    # own: the index it answers is the library's invariant, no panic of the caller's)
+    if (policy not=? DIR_IMPLICIT or not pos_in_lib(p)) and not lib_index {effect_panic_note(owner n what fact_deferred.has(owner))}
+    if fact_deferred.has(owner) {
+        let pending=fact_deferred_checks.get(owner) ?? []
+        pending.push(n)
+        fact_deferred_checks[owner]=pending
+    }
+    if policy =? DIR_PROTOTYPE and dir_value(dir_name_warnings p) not=? 0 {warn(p "prototype: {what}; it is checked at run time")}
+    if ide_on and policy =? DIR_RUNTIME {
+        let hint="runtime check: {dir_obligation_text(what)}"
+        ide_emit("I\t{ide_pos_str(p)}\t{ide_esc(hint)}")
+    }
+    true
+}
+# ---------------- panics ----------------
+# After facts settle which obligations became runtime checks: a no-traps scope
+# may not call (or hand out a handle to) code that may panic, and a row that
+# excludes panics holds. Only the program's own bodies are walked for sites;
+# effect_panics walks a callee once. O(reached nodes + call edges).
+# (also while checking: a row excluding panics, parsed before any body, needs a
+# divisor registered as the caller's obligation before facts force the policy)
+dir_panics_demanded=():>bool=>{
+    effect_panics_demanded or fact_policy =? 'RequireStatic'
+}
+# A declared function without an effect row takes its scope's default row.
+dir_apply_rows=(first:DirRuleWord):>void=>$unsafe {
+    if not dir_rows_any {return}
+    loop f in [first..nodes.length) {
+        if nodes.ptr[f].kind not=? 'fn_' or nodes.ptr[f].sval not=? 0 {continue}
+        let body=DirRuleWord(nodes.ptr[f].b)
+        let p=if body not=? 0 {nodes.ptr[body].pos} else {nodes.ptr[f].pos}
+        let i=dir_find(dir_name_row p)
+        if i <? 0 or dir_scopes[i].value <=? 0 {continue}
+        nodes.ptr[f].sval=int32(dir_scopes[i].value)
+        dir_row_scopes[f]=i
+        effects_active=true
+        loop entry in effect_syntax[dir_scopes[i].value] {
+            if entry.kind =? 'panic' {effect_panics_demanded=true}
+        }
+    }
+}
+# Synthetic entry bindings keep parameter locations for diagnostics but use
+# their function body's policy. Index only parameter syntax, never body nodes;
+# nested blocks keep their own scopes. O(signature nodes), once per declaration.
+dir_function_entry=(decl:DirRuleWord body:DirRuleWord):>void=>$unsafe {
+    if decl =? 0 or body =? 0 or not dir_mixed_files.has(pos_file(nodes.ptr[decl].pos)) or dir_entry_functions.has(decl) or not dewy_at(nodes.ptr[decl].pos) {return}
+    dir_entry_functions[decl]=true
+    if dir_policy(nodes.ptr[body].pos) =? dir_policy(nodes.ptr[decl].pos) {return}
+    let work:array<int64>=[]
+    loop i in [0..nkids(decl)) {
+        let p=kid(decl i)
+        dir_entry_positions[nodes.ptr[p].pos]=nodes.ptr[body].pos
+        work.push(DirRuleWord(nodes.ptr[p].a))
+        loop j in [0..nkids(p)) {work.push(kid(p j))}
+    }
+    loop work.length >? 0 {
+        let n=work.pop()
+        if n <=? 0 {continue}
+        dir_entry_positions[nodes.ptr[n].pos]=nodes.ptr[body].pos
+        if nodes.ptr[n].a not=? 0 {work.push(DirRuleWord(nodes.ptr[n].a))}
+        if nodes.ptr[n].b not=? 0 {work.push(DirRuleWord(nodes.ptr[n].b))}
+        loop i in [0..nkids(n)) {work.push(kid(n i))}
+    }
+}
