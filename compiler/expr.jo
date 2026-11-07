@@ -5254,6 +5254,38 @@ nargs_check = (n: int, nargs: int, lo: int, hi: int, name: str):
         if lo == hi: fatal(nodes[n].pos, "{name} expects {lo} argument(s), got {nargs}")
         fatal(nodes[n].pos, "{name} expects {lo} to {hi} arguments, got {nargs}")
 
+# Format a union through its selected member, with the same spec a narrowed value
+# would receive. Only spec-bearing unions demand this O(members) dispatch.
+fmt_union_spec = (part: int, t: int, pos: int) -> int:
+    name = "__fmt_union_{part}"
+    value = int(nodes[part].a)
+    add_flag(value, NF_CHECKED)
+    members = if is_union(t): union_members(t) else: [int(types[t].elem), T_NONE]
+    chain = 0
+    i = members.len() - 1
+    loop i >= 0:
+        item = mk(.pair, pos)
+        nodes[item].a = i32(if members[i] == T_NONE: bc_str("none", pos) else if tkind(members[i]) == .void_: bc_str("void", pos) else: bc_ident(name, pos))
+        nodes[item].sval = nodes[part].sval
+        text = mk(.str_lit, pos)
+        nodes[text].aux = 1
+        set_list(text, [item])
+        body = bc_block([bc_stmt(text, pos)], pos)
+        if chain == 0: chain = body
+        else:
+            condition = mk(.istype, pos)
+            nodes[condition].a = i32(bc_ident(name, pos))
+            nodes[condition].b = i32(type_node_of(members[i], pos))
+            branch = mk(.if_, pos)
+            nodes[branch].a = i32(condition)
+            nodes[branch].b = i32(body)
+            nodes[branch].c = i32(chain)
+            chain = bc_block([bc_stmt(branch, pos)], pos)
+        i -= 1
+    shown = bc_block([bc_let(name, value, pos), bc_stmt(chain, pos)], pos)
+    check_expr(shown, T_STR)
+    last_checked
+
 fmt_part = (part: int, pos: int):
     # Formatting observes the exact result; it is not a uint64 store.
     # Reveal an unsigned arithmetic node to mathematical int before overload selection.
@@ -5261,6 +5293,11 @@ fmt_part = (part: int, pos: int):
     if dewy_at(pos) and exact_type(ntype(observed), pos) and not types[exact_representation(ntype(observed))].sign and exact_potential(observed): exact_int_result(observed, true)
     t = prune(ntype(int(nodes[part].a)))
     oom_unhandled(t, pos, "showing it")
+    if nodes[part].sval >= 0 and dewy_at(pos) and (is_union(t) or types[t].kind == .opt):
+        shown = fmt_union_spec(part, t, pos)
+        nodes[part].a = i32(shown)
+        nodes[part].sval = -1
+        t = T_STR
     shown = if is_quantity(t) and nodes[part].sval < 0 and dewy_at(pos): quantity_display(int(nodes[part].a)) else: 0
     if shown != 0:
         nodes[part].a = i32(shown)
