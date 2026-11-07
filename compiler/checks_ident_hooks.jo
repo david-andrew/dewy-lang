@@ -1,0 +1,266 @@
+use 'expr.jo'
+use 'secret_checks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'witness.jo'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'ownership.jo'
+use 'units.jo'
+use 'errors.jo'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'check.jo'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'settings.jo'
+use 'refine.jo'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'ide.jo'
+use 'dewy_methods.jo'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+
+# A name read as a value runs in checker_idents.dewy once looked up; these are its services.
+ident_unknown = (n: int, expected: int, nm: int):
+    ex = ce_expected(expected)
+    exk = TK.void_
+    if ex != 0: exk = types[ex].kind
+    if ex != 0 and exk == .enum_:
+        loop v in variant_names(ex):
+            if v == nm: fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (the {dt(ex)} is written `.{name_of(nm)}`)")
+    # (score += 1 with Score = 0 above: its capitals)
+    capsug = suggestion(name_of(nm), visible_names())
+    if find(capsug, "capital letters") >= 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{capsug}")
+    if cur_assign != 0 and nodes[cur_assign].a == i32(n) and nodes[cur_assign].op != i32(int(Tok.assign)): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")
+    # (score = score + 1: the same, written out)
+    if cur_assign != 0 and nodes[int(nodes[cur_assign].a)].kind == .ident and int(nodes[int(nodes[cur_assign].a)].name) == nm: fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")
+    ph = phaser_hint(name_of(nm), member_after(nodes[n].pos, len(name_of(nm))))
+    if len(ph) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{ph}")
+    # (load_texture(cat1.png): a file's name, without its quotes)
+    fx = file_ext_after(nodes[n].pos, len(name_of(nm)))
+    if len(fx) > 0: fatal(nodes[n].pos, "{name_of(nm)}{fx} looks like a file's name: put it in quotes, `\"{name_of(nm)}{fx}\"`")
+    # (as the name is written: macOS and Windows find lib/physics.jo for Physics too)
+    if len(lib_root) > 0 and name_of(nm) == lower(name_of(nm)) and file_exists("{lib_root}/{name_of(nm)}.jo"): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (a module of the library: `import {name_of(nm)}` at the top of the file)")
+    # (cos(x*rad), 9.81m/s^2 with `m` not imported: a unit of the bundled library)
+    if dewy_at(nodes[n].pos) and unit_library_names().contains(name_of(nm)): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (a unit of the library: `from units import {name_of(nm)}` at the top of the file)")
+    gl = gone_local_hint(nm, nodes[n].pos)
+    if len(gl) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{gl}")
+    uh = unused_file_hint(nm)
+    if len(uh) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{uh}")
+    sug = suggestion(name_of(nm), surface_names(visible_names(), nodes[n].pos))
+    # (print(hello), window(Firefly, ...): words meant as text, a whole argument)
+    if in_text_call(nodes[n].pos) and is_word_arg(nodes[n].pos, name_of(nm)) and not starts_with(sug, " (use "): fatal(nodes[n].pos, "unknown name '{name_of(nm)}' (text goes in quotes: `\"{name_of(nm)}\"`){sug}")
+    if len(name_of(nm)) > 1:
+        vh = bare_variant_hint(nm)
+        if len(vh) > 0: fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{vh}")
+    # (`"""if x < 3 { y }"""`: braces meant as text in a Dewy string, when the
+    # name is no misspelling)
+    if dewy_at(nodes[n].pos) and sug == "" and interpolation_last != 0 and written_interpolation(interpolation_last) and node_within(interpolation_last, n): fatal(nodes[n].pos, "unknown name '{name_of(nm)}': braces in a string interpolate, so this puts in the value of {name_of(nm)}; for braces in the text, write `\\\{` and `\\}`, or make it a raw string, `r\"...\"` or `r\"\"\"...\"\"\"`")
+    # ("I have {i}plans": a tag as Ren'Py's, in braces that put a value in the text)
+    if braced_alone(nodes[n].pos, len(name_of(nm))):
+        escaped = jd(nodes[n].pos, "\{\{{name_of(nm)}}}}}", "\\\{{name_of(nm)}\\}")
+        fatal(nodes[n].pos, "unknown name '{name_of(nm)}': `\{{name_of(nm)}}` in a string puts in the value of {name_of(nm)}; for the braces in the text (a tag), write `{escaped}`, or make it a raw string, r\"...\"{sug}")
+    if name_of(nm) == "INF" and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "unknown name `INF`; infinity is `float64.inf`")
+    if name_of(nm) == "NAN" and dewy_at(nodes[n].pos): fatal(nodes[n].pos, "unknown name `NAN`; not a number is `float64.nan`")
+    if name_of(nm) == "Cancelled": fatal(nodes[n].pos, "unknown name `Cancelled`; use `Canceled` (US spelling)")
+    fatal(nodes[n].pos, "unknown name '{name_of(nm)}'{private_hint(nm)}{sug}")
+ident_ide_ref = (n: int, s: int):
+    ide_sym_ref(n, s)
+    return
+ident_capture = (l0: int, narrowed: bool, pos: int) -> int:
+    if narrowed: return capture_narrowed(l0, pos)
+    capture_local(l0)
+ident_const_view = (l0: int, pos: int):
+    const_view_use(l0, pos)
+    return
+ident_ensure_global = (g: int, pos: int):
+    ensure_global(g, pos)
+    return
+ident_quantity = (n: int, g: int, expected: int) -> int:
+    juxt_spaced_unit(n)
+    q = quantity_scales[quantity_constant_scale(int(globals[g].init))]
+    hint = expected
+    if nodes[int(globals[g].decl)].a != 0: hint = int(globals[g].type)
+    quantity_constant(n, q.numerator, q.denominator, quantity_dimension(int(globals[g].type)), hint, q.shown)
+    quantity_retag(n, quantity_tag(int(globals[g].type)))
+# (top-level code runs in order: above the line that sets it, a global is still zero)
+ident_early_use = (n: int, g: int):
+    nm = int(nodes[n].name)
+    dp = nodes[int(globals[g].decl)].pos
+    if pos_file(dp) == pos_file(nodes[n].pos) and not early_set.has(g):
+        # (set above its line, as `runs = 3` in a block before `runs = 0`: read after that)
+        if cur_assign != 0 and nodes[cur_assign].a == i32(n) and nodes[cur_assign].op == i32(int(Tok.assign)): early_set[g] = true
+        else:
+            ln, c = line_col(dp)
+            fatal(nodes[n].pos, "'{name_of(nm)}' is used before line {ln} gives it its value (the program runs from the top down)")
+ident_decimal_use = (g: int):
+    decimal_use(g)
+    return
+ident_path_alias = (n: int, t: int) -> int:
+    al = path_alias(n)
+    if al < 0: return t
+    nodes[n] = nodes[mk_ident_local(al, nodes[n].pos)]
+    int(locals[al].type)
+ident_constant = (n: int, g: int, expected: int) -> int:
+    if globals[g].decl != 0: ensure_global(g, nodes[n].pos)
+    if nodes[int(globals[g].init)].kind == .unit_lit: juxt_spaced_unit(n)
+    v = clone(int(globals[g].init))
+    p = nodes[n].pos
+    nodes[n] = nodes[v]
+    nodes[n].pos = p
+    declared = globals[g].type != 0 and globals[g].decl != 0 and nodes[int(globals[g].decl)].a != 0 and not has_var(prune(int(globals[g].type)))
+    check_expr(n, if declared: int(globals[g].type) else: expected)
+    if declared: coerce(n, int(globals[g].type))
+    last_checked = n
+    return ntype(n)
+ident_function = (n: int, expected: int, is_callee: bool) -> int:
+    nm = int(nodes[n].name)
+    ex = ce_expected(expected)
+    fpos = nodes[n].pos
+    if dewy_bare_fn(n, is_callee):
+        ex_fn = expected != 0 and is_fn_type(ex)
+        calls = bare_fns_call(nm, -1)
+        if ex_fn and calls != 2: bare_fn_error(n, name_of(nm), false)
+        if calls == 0: bare_fn_error(n, name_of(nm), true)
+        return bare_call(n, expected)
+    t = fn_value(n, expected)
+    if ide_on: ide_fn_ref(fpos, nm, int(nodes[n].sym))
+    last_checked = n
+    return t
+ident_type_value = (n: int, kind: int, s: int) -> int:
+    sk = kind as SK
+    if sk == .struct_ or sk == .enum_:
+        d = int(syms[s].ref)
+        if nkids2(d) > 0: return mk_typeval(0)
+        return mk_typeval(get_struct_inst(d, []))
+    if sk == .alias_:
+        d = int(syms[s].ref)
+        if nkids2(d) > 0: return mk_typeval(0)
+        return mk_typeval(resolve_alias(d, [], nodes[n].pos))
+    if sk == .type_:
+        jo_type_spelling(int(nodes[n].name), s, nodes[n].pos)
+        return mk_typeval(int(syms[s].ref))
+    mk_modval(int(syms[s].ref))
+ident_bare_value = (n: int, t: int, local: bool, is_callee: bool, expected: int) -> int:
+    if not dewy_bare_fn(n, is_callee) or (local and in_generic_instance()): return -1
+    bare_fn_value(n, t, name_of(int(nodes[n].name)), expected)
+ident_type_use = (n: int, t: int, is_callee: bool, expected: int) -> int:
+    nm = int(nodes[n].name)
+    tt = telem(t)
+    # (`<T N>` given `64`: a type parameter bound to one integer reads as that constant;
+    # instance bodies are copies, so the name becomes the literal in place)
+    if nodes[n].aux == 8 and not is_callee and in_generic_instance() and tkind(tt) == .refined:
+        known, values = int_intervals(tt)
+        if known and values.len() == 2 and values[0] == values[1]:
+            nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = values[0])
+            return check_expr(n, expected)
+    if nominal_parent.has(tt) and tt != error_type:
+        si = int(types[tt].st)
+        check_struct_fields(si)
+        # (`E[]` keeps the type, to construct it as any record type is)
+        if structs[si].nfields == 0 and n != empty_index_receiver:
+            return struct_ctor(n, tt, int(structs[si].decl), [], expected)
+    # (a record type whose every field has a default, named where a value goes, is its
+    # construction, as a function whose parameters all have defaults is called by its name;
+    # `E.member` and `E[...]` keep the type)
+    if dewy_bare_type_value(n, tt, is_callee, expected):
+        callee = mk(.ident, nodes[n].pos)
+        nodes[callee].name = i32(nm)
+        call = mk(.call, nodes[n].pos)
+        nodes[call].a = i32(callee)
+        nodes[n] = nodes[call]
+        return check_expr(n, expected)
+    -1
+ident_error = (n: int, kind: int):
+    nm = int(nodes[n].name)
+    sk = kind as SK
+    if sk == .builtin: fatal(nodes[n].pos, "'{name_of(nm)}' must be called")
+    if sk == .reflected: fatal(nodes[n].pos, "field descriptors cannot escape into runtime storage; use .name or .type")
+    fatal(nodes[n].pos, "invalid use of '{name_of(nm)}'")

@@ -1,0 +1,208 @@
+$runtime_checks
+from p"checks_text.dewy" import (sym_kind_of)
+from p"checks_text.dewy" import (byte_find)
+from p"@lib/core/os.jo" import (file_exists)
+from p"@lib/core/str.jo" import (lower starts_with)
+from p"ast.jo" import (clone mk nkids2 nodes)
+from p"check.jo" import (capture_local capture_narrowed check_struct_fields const_view_use dewy_at ensure_global globals jd jo_type_spelling locals resolve_alias syms)
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_state.dewy" import (SK)
+from p"checker_types.dewy" import (TK)
+from p"checks_hints.dewy" import (gone_local_hint suggestion visible_names)
+from p"decimals.jo" import (decimal_use)
+from p"errors.jo" import (error_type nominal_parent)
+from p"expr.jo" import (bare_call bare_fn_error bare_fn_value bare_fns_call bare_variant_hint braced_alone ce_expected coerce cur_assign dewy_bare_fn dewy_bare_type_value early_set empty_index_receiver file_ext_after fn_value in_generic_instance in_text_call int_intervals interpolation_last is_fn_type is_word_arg last_checked member_after mk_ident_local node_within ntype path_alias phaser_hint private_hint struct_ctor surface_names unit_library_names unused_file_hint variant_names written_interpolation)
+from p"ide.jo" import (ide_fn_ref ide_on ide_sym_ref)
+from p"juxtapose.dewy" import (juxt_spaced_unit)
+from p"node_store.dewy" import (Node)
+from p"types.jo" import (dt get_struct_inst has_var mk_modval mk_typeval prune structs telem tkind types)
+from p"units.jo" import (quantity_constant quantity_constant_scale quantity_dimension quantity_retag quantity_scales quantity_tag)
+from p"util.jo" import (fatal lib_root line_col name_of pos_file)
+
+IdentHookWord:type=int64<overflow='wrap'>
+# A name read as a value runs in checker_idents.dewy once looked up; these are its services.
+ident_unknown=(n:int64 expected:int64 nm:int64):>void=>$unsafe {
+    let ex=ce_expected(expected)
+    let exk=TK.void_
+    if ex not=? 0 {exk=types.ptr[ex].kind}
+    if ex not=? 0 and exk =? 'enum_' {
+        loop v in variant_names(ex) {
+            if v =? nm {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}' (the {dt(ex)} is written `.{name_of(nm)}`)")}
+        }
+    }
+    # (score += 1 with Score = 0 above: its capitals)
+    let capsug=suggestion(name_of(nm) visible_names())
+    if byte_find(capsug "capital letters") >=? 0 {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}'{capsug}")}
+    if cur_assign not=? 0 and nodes.ptr[cur_assign].a =? int32(n) and nodes.ptr[cur_assign].op not=? int32(47) {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")}
+    # (score = score + 1: the same, written out)
+    if cur_assign not=? 0 and nodes.ptr[IdentHookWord(nodes.ptr[cur_assign].a)].kind =? 'ident' and IdentHookWord(nodes.ptr[IdentHookWord(nodes.ptr[cur_assign].a)].name) =? nm {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}' (to change it, it needs a value first: `{name_of(nm)} = 0`, at the top of the file to keep it from one frame to the next)")}
+    let ph=phaser_hint(name_of(nm) member_after(nodes.ptr[n].pos (name_of(nm) as array<uint8>).length))
+    if (ph as array<uint8>).length >? 0 {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}'{ph}")}
+    # (load_texture(cat1.png): a file's name, without its quotes)
+    let fx=file_ext_after(nodes.ptr[n].pos (name_of(nm) as array<uint8>).length)
+    if (fx as array<uint8>).length >? 0 {fatal(nodes.ptr[n].pos "{name_of(nm)}{fx} looks like a file's name: put it in quotes, `\"{name_of(nm)}{fx}\"`")}
+    # (as the name is written: macOS and Windows find lib/physics.jo for Physics too)
+    if (lib_root as array<uint8>).length >? 0 and name_of(nm) =? lower(name_of(nm)) and file_exists("{lib_root}/{name_of(nm)}.jo") {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}' (a module of the library: `import {name_of(nm)}` at the top of the file)")}
+    # (cos(x*rad), 9.81m/s^2 with `m` not imported: a unit of the bundled library)
+    if dewy_at(nodes.ptr[n].pos) and unit_library_names().contains(name_of(nm)) {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}' (a unit of the library: `from units import {name_of(nm)}` at the top of the file)")}
+    let gl=gone_local_hint(nm nodes.ptr[n].pos)
+    if (gl as array<uint8>).length >? 0 {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}'{gl}")}
+    let uh=unused_file_hint(nm)
+    if (uh as array<uint8>).length >? 0 {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}'{uh}")}
+    let sug=suggestion(name_of(nm) surface_names(visible_names() nodes.ptr[n].pos))
+    # (print(hello), window(Firefly, ...): words meant as text, a whole argument)
+    if in_text_call(nodes.ptr[n].pos) and is_word_arg(nodes.ptr[n].pos name_of(nm)) and not starts_with(sug " (use ") {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}' (text goes in quotes: `\"{name_of(nm)}\"`){sug}")}
+    if (name_of(nm) as array<uint8>).length >? 1 {
+        let vh=bare_variant_hint(nm)
+        if (vh as array<uint8>).length >? 0 {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}'{vh}")}
+    }
+    # (`"""if x < 3 { y }"""`: braces meant as text in a Dewy string, when the
+    # name is no misspelling)
+    if dewy_at(nodes.ptr[n].pos) and sug =? "" and interpolation_last not=? 0 and written_interpolation(interpolation_last) and node_within(interpolation_last n) {fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}': braces in a string interpolate, so this puts in the value of {name_of(nm)}; for braces in the text, write `\\\{` and `\\}`, or make it a raw string, `r\"...\"` or `r\"\"\"...\"\"\"`")}
+    # ("I have {i}plans": a tag as Ren'Py's, in braces that put a value in the text)
+    if braced_alone(nodes.ptr[n].pos (name_of(nm) as array<uint8>).length) {
+        let escaped=jd(nodes.ptr[n].pos "\{\{{name_of(nm)}}}}}" "\\\{{name_of(nm)}\\}")
+        fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}': `\{{name_of(nm)}}` in a string puts in the value of {name_of(nm)}; for the braces in the text (a tag), write `{escaped}`, or make it a raw string, r\"...\"{sug}")
+    }
+    if name_of(nm) =? "INF" and dewy_at(nodes.ptr[n].pos) {fatal(nodes.ptr[n].pos "unknown name `INF`; infinity is `float64.inf`")}
+    if name_of(nm) =? "NAN" and dewy_at(nodes.ptr[n].pos) {fatal(nodes.ptr[n].pos "unknown name `NAN`; not a number is `float64.nan`")}
+    if name_of(nm) =? "Cancelled" {fatal(nodes.ptr[n].pos "unknown name `Cancelled`; use `Canceled` (US spelling)")}
+    fatal(nodes.ptr[n].pos "unknown name '{name_of(nm)}'{private_hint(nm)}{sug}")
+}
+ident_ide_ref=(n:int64 s:int64):>void=>{
+    ide_sym_ref(n s)
+    return
+}
+ident_capture=(l0:int64 narrowed:bool pos:int64):>int64=>{
+    if narrowed {return capture_narrowed(l0 pos)}
+    capture_local(l0)
+}
+ident_const_view=(l0:int64 pos:int64):>void=>{
+    const_view_use(l0 pos)
+    return
+}
+ident_ensure_global=(g:int64 pos:int64):>void=>{
+    ensure_global(g pos)
+    return
+}
+ident_quantity=(n:int64 g:int64 expected:int64):>int64=>$unsafe {
+    juxt_spaced_unit(n)
+    let q=quantity_scales[quantity_constant_scale(IdentHookWord(globals.ptr[g].init))]
+    let hint=expected
+    if nodes.ptr[IdentHookWord(globals.ptr[g].decl)].a not=? 0 {hint=IdentHookWord(globals.ptr[g].type)}
+    quantity_constant(n q.numerator q.denominator quantity_dimension(IdentHookWord(globals.ptr[g].type)) hint q.shown);
+    quantity_retag(n quantity_tag(IdentHookWord(globals.ptr[g].type)))
+}
+# (top-level code runs in order: above the line that sets it, a global is still zero)
+ident_early_use=(n:int64 g:int64):>void=>$unsafe {
+    let nm=IdentHookWord(nodes.ptr[n].name)
+    let dp=nodes.ptr[IdentHookWord(globals.ptr[g].decl)].pos
+    if pos_file(dp) =? pos_file(nodes.ptr[n].pos) and not early_set.has(g) {
+        # (set above its line, as `runs = 3` in a block before `runs = 0`: read after that)
+        if cur_assign not=? 0 and nodes.ptr[cur_assign].a =? int32(n) and nodes.ptr[cur_assign].op =? int32(47) {early_set[g]=true} else {
+            let [ln c]=line_col(dp)
+            fatal(nodes.ptr[n].pos "'{name_of(nm)}' is used before line {ln} gives it its value (the program runs from the top down)")
+        }
+    }
+}
+ident_decimal_use=(g:int64):>void=>{
+    decimal_use(g)
+    return
+}
+ident_path_alias=(n:int64 t:int64):>int64=>$unsafe {
+    let al=path_alias(n)
+    if al <? 0 {return t}
+    nodes.ptr[n]=nodes.ptr[mk_ident_local(al nodes.ptr[n].pos)]
+    IdentHookWord(locals.ptr[al].type)
+}
+ident_constant=(n:int64 g:int64 expected:int64):>int64=>$unsafe {
+    if globals.ptr[g].decl not=? 0 {ensure_global(g nodes.ptr[n].pos)}
+    if nodes.ptr[IdentHookWord(globals.ptr[g].init)].kind =? 'unit_lit' {juxt_spaced_unit(n)}
+    let v=clone(IdentHookWord(globals.ptr[g].init))
+    let p=nodes.ptr[n].pos
+    nodes.ptr[n]=nodes.ptr[v]
+    nodes.ptr[n].pos=p
+    let declared=globals.ptr[g].type not=? 0 and globals.ptr[g].decl not=? 0 and nodes.ptr[IdentHookWord(globals.ptr[g].decl)].a not=? 0 and not has_var(prune(IdentHookWord(globals.ptr[g].type)))
+    check_expr(n if declared {IdentHookWord(globals.ptr[g].type)} else {expected});
+    if declared {coerce(n IdentHookWord(globals.ptr[g].type));}
+    last_checked=n
+    return ntype(n)
+}
+ident_function=(n:int64 expected:int64 is_callee:bool):>int64=>$unsafe {
+    let nm=IdentHookWord(nodes.ptr[n].name)
+    let ex=ce_expected(expected)
+    let fpos=nodes.ptr[n].pos
+    if dewy_bare_fn(n is_callee) {
+        let ex_fn=expected not=? 0 and is_fn_type(ex)
+        let calls=bare_fns_call(nm (-1))
+        if ex_fn and calls not=? 2 {bare_fn_error(n name_of(nm) false)}
+        if calls =? 0 {bare_fn_error(n name_of(nm) true)}
+        return bare_call(n expected)
+    }
+    let t=fn_value(n expected)
+    if ide_on {ide_fn_ref(fpos nm IdentHookWord(nodes.ptr[n].sym))}
+    last_checked=n
+    return t
+}
+ident_type_value=(n:int64 kind:int64 s:int64):>int64=>$unsafe {
+    let sk=sym_kind_of(IdentHookWord(kind))
+    if sk =? 'struct_' or sk =? 'enum_' {
+        let d=IdentHookWord(syms.ptr[s].ref)
+        if nkids2(d) >? 0 {return mk_typeval(0)}
+        return mk_typeval(get_struct_inst(d []))
+    }
+    if sk =? 'alias_' {
+        let d=IdentHookWord(syms.ptr[s].ref)
+        if nkids2(d) >? 0 {return mk_typeval(0)}
+        return mk_typeval(resolve_alias(d [] nodes.ptr[n].pos))
+    }
+    if sk =? 'type_' {
+        jo_type_spelling(IdentHookWord(nodes.ptr[n].name) s nodes.ptr[n].pos)
+        return mk_typeval(IdentHookWord(syms.ptr[s].ref))
+    }
+    mk_modval(IdentHookWord(syms.ptr[s].ref))
+}
+ident_bare_value=(n:int64 t:int64 local:bool is_callee:bool expected:int64):>int64=>$unsafe {
+    if not dewy_bare_fn(n is_callee) or (local and in_generic_instance()) {return -1}
+    bare_fn_value(n t name_of(IdentHookWord(nodes.ptr[n].name)) expected)
+}
+ident_type_use=(n:int64 t:int64 is_callee:bool expected:int64):>int64=>$unsafe {
+    let nm=IdentHookWord(nodes.ptr[n].name)
+    let tt=telem(t)
+    # (`<T N>` given `64`: a type parameter bound to one integer reads as that constant;
+    # instance bodies are copies, so the name becomes the literal in place)
+    if nodes.ptr[n].aux =? 8 and not is_callee and in_generic_instance() and tkind(tt) =? 'refined' {
+        let [known values]=int_intervals(tt)
+        if known and values.length =? 2 and values[0] =? values[1] {
+            nodes.ptr[n]=Node(kind='int_lit' pos=nodes.ptr[n].pos ival=values[0])
+            return check_expr(n expected)
+        }
+    }
+    if nominal_parent.has(tt) and tt not=? error_type {
+        let si=IdentHookWord(types.ptr[tt].st)
+        check_struct_fields(si)
+        # (`E[]` keeps the type, to construct it as any record type is)
+        if structs.ptr[si].nfields =? 0 and n not=? empty_index_receiver {
+            return struct_ctor(n tt IdentHookWord(structs.ptr[si].decl) [] expected)
+        }
+    }
+    # (a record type whose every field has a default, named where a value goes, is its
+    # construction, as a function whose parameters all have defaults is called by its name;
+    # `E.member` and `E[...]` keep the type)
+    if dewy_bare_type_value(n tt is_callee expected) {
+        let callee=mk('ident' nodes.ptr[n].pos)
+        nodes.ptr[callee].name=int32(nm)
+        let call=mk('call' nodes.ptr[n].pos)
+        nodes.ptr[call].a=int32(callee)
+        nodes.ptr[n]=nodes.ptr[call]
+        return check_expr(n expected)
+    }
+    -1
+}
+ident_error=(n:int64 kind:int64):>void=>$unsafe {
+    let nm=IdentHookWord(nodes.ptr[n].name)
+    let sk=sym_kind_of(IdentHookWord(kind))
+    if sk =? 'builtin' {fatal(nodes.ptr[n].pos "'{name_of(nm)}' must be called")}
+    if sk =? 'reflected' {fatal(nodes.ptr[n].pos "field descriptors cannot escape into runtime storage; use .name or .type")}
+    fatal(nodes.ptr[n].pos "invalid use of '{name_of(nm)}'")
+}
