@@ -1,0 +1,38 @@
+$runtime_checks
+from p"ast.jo" import NF_EXCL_FIRST
+from p"ast.jo" import (NF_JUXT has_flag nodes)
+from p"check.jo" import (lib_dir locals)
+from p"expr.jo" import (ntype)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (is_float is_numeric prune structs types)
+from p"unit_ops.dewy" import (base_dimension quantity_constant_scale quantity_dimension)
+from p"units.jo" import (quantity_base)
+from p"util.jo" import (files line_col name_of pos_file)
+
+UnitRareWord:type=int64<overflow='wrap'>
+# The time library's own type by name, as a program sees it (0 when t is another type).
+time_core_type=(t0:UnitRareWord name:string):>bool=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'struct_' {return false}
+    let d=UnitRareWord(structs.ptr[UnitRareWord(types.ptr[t].st)].decl)
+    d not=? 0 and structs.ptr[UnitRareWord(types.ptr[t].st)].name =? name and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/time/core.dewy"
+}
+# A constant time meets a `Duration` directly (time.md: "they mix"), so it is one where a `Duration` is
+# wanted: `let total:Duration = 0s`. A time known only at run time goes through `convert<Duration>`.
+time_constant_duration=(n:UnitRareWord from_:UnitRareWord to:UnitRareWord):>bool=>$unsafe {
+    n not=? 0 and types.ptr[prune(from_)].kind =? 'quantity' and quantity_dimension(prune(from_)) =? base_dimension(0) and time_core_type(to "Duration") and not is_float(quantity_base(prune(from_))) and quantity_constant_scale(n) >=? 0
+}
+# (`d*1day` next to a quantity: what a calendar period is, for an operator's error)
+calendar_period_why=(a:UnitRareWord b:UnitRareWord):>string=>{
+    if time_core_type(ntype(a) "Days") or time_core_type(ntype(b) "Days") {return " (`1day` and `1week` are calendar periods, whose length depends on the date, so they add to dates and zoned times: for a length of time write `24hour`, or `7*24hour`)"}
+    if time_core_type(ntype(a) "Months") or time_core_type(ntype(b) "Months") {return " (`1month` and `1year` are calendar periods, whose length depends on the date, so they add to dates and zoned times: for a length of time write the hours it means, such as `30*24hour`)"}
+    ""
+}
+# (`0s` with a local `s`: what a unit written against a number means here, for an operator's error)
+hidden_unit_why=(n:UnitRareWord a:UnitRareWord b:UnitRareWord):>string=>$unsafe {
+    if not has_flag(n NF_JUXT) or nodes.ptr[a].kind not=? 'int_lit' and nodes.ptr[a].kind not=? 'float_lit' or nodes.ptr[b].kind not=? 'ident' or nodes.ptr[b].aux not=? int32(1) or is_numeric(ntype(b)) {return ""}
+    let made=locals.ptr[UnitRareWord(nodes.ptr[b].sym)].pos
+    let [ln c]=line_col(made)
+    let nm=name_of(UnitRareWord(nodes.ptr[b].name))
+    " (`{nm}` here is the local variable made on line {ln}, a {dt(ntype(b))}, which hides any unit named `{nm}`: rename the variable to use the unit)"
+}
