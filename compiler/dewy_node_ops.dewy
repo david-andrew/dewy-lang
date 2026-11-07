@@ -1,0 +1,63 @@
+$runtime_checks
+from p"ast.jo" import (NF_EXTERN has_flag lists mk nodes parsafe_tags)
+from p"check.jo" import (release_build)
+from p"dewy_builders.dewy" import (db_finish_function db_range_value db_singleton_and db_singleton_int db_singleton_value db_value_name)
+from p"dewy_context.jo" import (dc_parser)
+from p"dewy_nodes.jo" import (PARSAFE_PLACE dewy_reserved_text dw_builder_host dw_renamed_init dw_target_name)
+from p"dewy_syntax.dewy" import (syntax_target_field_value)
+from p"util.jo" import (fatal files intern names pos_file pos_off)
+
+NodeOpWord:type=int64<overflow='wrap'>
+# The compact name of a Dewy identifier used as a value (printl is the library's print).
+dw_value_name=(name:int32 pos:int64):>int32=>{
+    if dc_parser.reader.dw_renamed.length =? 0 {dw_renamed_init()}
+    db_value_name(@dc_parser.reader.dw_renamed name pos)
+}
+dw_fail_pos=(pos:int64 what:string):>int64=>{
+    fatal(pos "Dewy does not yet support {what}")
+    0
+}
+dw_build_mode=():>string=>{
+    if release_build {return "release"}
+    "debug"
+}
+dw_target_field_value=(field:NodeOpWord):>string=>{
+    syntax_target_field_value(field dw_target_name() dw_build_mode())
+}
+dw_text=(text:string pos:NodeOpWord):>int64=>$unsafe {
+    let n=mk('str_lit' pos)
+    nodes.ptr[n].sval=int32(intern(text))
+    n
+}
+# `$shadowable` before a module-level `const`
+dw_module_text=(id:NodeOpWord):>string=>{
+    let n=dc_parser.reader.module_nodes[-1 - id]
+    files[pos_file(n.pos)].src.byte_slice(pos_off(n.pos) + 1 n.ival)
+}
+dw_singleton_and=(a:NodeOpWord b:NodeOpWord pos:NodeOpWord):>int64=>{
+    db_singleton_and(@nodes a b pos)
+}
+dw_singleton_value=(binder:NodeOpWord pos:NodeOpWord):>int64=>{
+    db_singleton_value(@nodes binder pos)
+}
+dw_singleton_int=(v:NodeOpWord pos:NodeOpWord):>int64=>{
+    db_singleton_int(@nodes v pos)
+}
+# Both constructors synthesize the same local bindings for value parameters.
+dw_finish_function=(n:NodeOpWord parameters:array<int64> body:NodeOpWord name:string):>int64=>{
+    db_finish_function(@nodes @lists @dw_builder_host @names n parameters body name)
+}
+# Words with a fixed meaning cannot be bound: variables, constants, functions,
+# parameters, fields, methods, loop and pattern names, and import aliases.
+dewy_reserved_name=(name:string pos:NodeOpWord):>void=>{
+    let text=dewy_reserved_text(name)
+    if text not=? "" {fatal(pos text)}
+}
+dw_range_value=(range:NodeOpWord):>int64=>$unsafe {
+    if nodes.ptr[range].a =? 0 or nodes.ptr[range].b =? 0 {fatal(nodes.ptr[range].pos "a stored range needs both endpoints; open ranges can be used directly in loops or membership")}
+    db_range_value(@nodes @lists @dw_builder_host range)
+}
+dw_parsafe_attach=(made:array<int64> pos:NodeOpWord):>void=>$unsafe {
+    if made.length not=? 1 or nodes.ptr[made[0]].kind not=? 'fn_' or has_flag(made[0] NF_EXTERN) {fatal(pos PARSAFE_PLACE)}
+    parsafe_tags[made[0]]=pos
+}

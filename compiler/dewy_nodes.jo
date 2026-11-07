@@ -38,14 +38,9 @@ use 'place_split.dewy'
 use 'node_store.dewy'
 use 'dewy_builders.dewy'
 use 'oom_ops.dewy'
+use 'dewy_node_ops.dewy'
 
 dw_builder_host = ParserBuilderHost(intern, dw_fail_pos)
-
-
-# The compact name of a Dewy identifier used as a value (printl is the library's print).
-dw_value_name = (name: i32, pos: int) -> i32:
-    if dc_parser.reader.dw_renamed.len() == 0: dw_renamed_init()
-    db_value_name(dc_parser.reader.dw_renamed, name, pos)
 
 dw_renamed_init = (): dc_parser.reader.dw_renamed = [intern("printl"), intern("print"), intern("print"), intern("__dewy_print"), intern("int"), intern("__dewy_int"), intern("bigint")]
 
@@ -60,10 +55,6 @@ dw_add_receiver = (fn_: int, receiver: int, receiver_type: int):
     nodes[param].a = i32(receiver_type)
     set_list(fn_, [param] + kids(fn_))
 
-dw_fail_pos = (pos: int, what: str) -> int:
-    fatal(pos, "Dewy does not yet support {what}")
-    0
-
 # `$target`: the full name of the target being compiled for (docs/LANGUAGE.md,
 # "Targets"). A name has only the fields it needs: the processor (or `c`, `wasm32`),
 # then the system. A processor alone asks for the current machine, so `$target` is
@@ -74,12 +65,6 @@ dw_target_name = () -> str:
     if target_arm64: return "aarch64-linux"
     if target_windows: return "x86_64-windows"
     "x86_64-linux"
-
-dw_build_mode = () -> str:
-    if release_build: return "release"
-    "debug"
-
-dw_target_field_value = (field: int) -> str: syntax_target_field_value(field, dw_target_name(), dw_build_mode())
 
 dw_target_dropped_name = (nm: int, pos: int):
     if not dewy_target_dropped.has(nm): dewy_target_dropped[nm] = []
@@ -188,11 +173,6 @@ dw_expectation = (pos: int, where: int, described: str, said: int, notes: int, v
     statement_watch.expectations = expectation_ifs.len()
     n
 
-dw_text = (text: str, pos: int) -> int:
-    n = mk(.str_lit, pos)
-    nodes[n].sval = i32(intern(text))
-    n
-
 # The two operands of a comparison as written, split at its operator outside
 # brackets and quotes ([] when the operator is not found once).
 dw_comparison_sides = (text: str, op: DewyToken) -> str[]:
@@ -221,11 +201,6 @@ dw_comparison_sides = (text: str, op: DewyToken) -> str[]:
         i += 1
     if at < 0: return []
     [trim(text[0..at)), trim(text[at + len(spelled)..len(text)))]
-
-# `$shadowable` before a module-level `const`
-dw_module_text = (id: int) -> str:
-    n = dc_parser.reader.module_nodes[-1 - id]
-    files[pos_file(n.pos)].src[pos_off(n.pos) + 1..n.ival)
 
 # The function a `$test` line marks: it names the test, and its parameters must
 # take the cases (or there are none, and no cases).
@@ -262,18 +237,6 @@ dw_type_name = (name: str) -> str:
     if name == "addr": refine_active = true
     db_type_name(name)
 
-dw_singleton_bound = (op: Tok, a: int, b: int, pos: int) -> int:
-    db_singleton_bound(nodes, int(op), a, b, pos)
-
-dw_singleton_and = (a: int, b: int, pos: int) -> int:
-    db_singleton_and(nodes, a, b, pos)
-
-dw_singleton_value = (binder: int, pos: int) -> int:
-    db_singleton_value(nodes, binder, pos)
-
-dw_singleton_int = (v: int, pos: int) -> int:
-    db_singleton_int(nodes, v, pos)
-
 # A union of integer singletons is an int64 whose value set is its invariant:
 # `lo <= v <= hi` and `v != g` for each gap g.
 dw_int_singleton_type = (values: int[], pos: int) -> int:
@@ -296,10 +259,6 @@ dw_int_singleton_type = (values: int[], pos: int) -> int:
     nodes[n].b = i32(predicate)
     refine_active = true
     n
-
-# Both constructors synthesize the same local bindings for value parameters.
-dw_finish_function = (n: int, parameters: int[], body: int, name: str) -> int:
-    db_finish_function(nodes, lists, dw_builder_host, names, n, parameters, body, name)
 
 # The compact operator of a combined assignment token.
 dn_assign_tok = (op: DewyToken) -> Tok:
@@ -353,12 +312,6 @@ dw_const_number = (n: int) -> bool:
         return dw_const_number(int(nodes[n].a)) and dw_const_number(int(nodes[n].b))
     false
 
-# Words with a fixed meaning cannot be bound: variables, constants, functions,
-# parameters, fields, methods, loop and pattern names, and import aliases.
-dewy_reserved_name = (name: str, pos: int):
-    text = dewy_reserved_text(name)
-    if text != "": fatal(pos, text)
-
 # (its mistake, "" for a name that may be bound)
 dewy_reserved_text = (name: str) -> str:
     if len(name) < 3: return ""
@@ -402,10 +355,6 @@ dw_method_finish = (fn_: int, struct_: int, type_params: int[], receiver: int):
         set_list2(fn_, params + own)
         add_flag(fn_, NF_GENERIC)
     dw_add_receiver(fn_, receiver, object_type)
-
-dw_range_value = (range: int) -> int:
-    if nodes[range].a == 0 or nodes[range].b == 0: fatal(nodes[range].pos, "a stored range needs both endpoints; open ranges can be used directly in loops or membership")
-    db_range_value(nodes, lists, dw_builder_host, range)
 
 # The clamped slice of index n (its receiver read) by range r (dw_clamp_slice).
 dw_clamp_block = (n: int, r: int) -> int:
@@ -464,10 +413,6 @@ dw_warn_if_pending: int[]
 # rejects a function with no callback parameter once its types are known).
 PARSAFE_PLACE = "`$parallel_safe` marks a module-level function that runs its callbacks on many threads at once: put it before one, on its line or the line above"
 dw_parsafe_pos = 0
-
-dw_parsafe_attach = (made: int[], pos: int):
-    if made.len() != 1 or nodes[made[0]].kind != .fn_ or has_flag(made[0], NF_EXTERN): fatal(pos, PARSAFE_PLACE)
-    parsafe_tags[made[0]] = pos
 
 # The declarations a module statement the direct grammar read makes (dewy_direct.jo's dn_statement):
 # positive IDs are declarations; negative IDs select module-only checker nodes.
@@ -586,3 +531,6 @@ dw_task_group = (pos: int, name: str, serial: int, body: int, transparent: bool)
     block = bc_block(statements, pos)
     if transparent: nodes[block].aux = 5
     block
+
+dw_singleton_bound = (op: Tok, a: int, b: int, pos: int) -> int:
+    db_singleton_bound(nodes, int(op), a, b, pos)
