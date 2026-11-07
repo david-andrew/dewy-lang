@@ -383,6 +383,20 @@ printl"{d.weekday} {d.weekday_name} {d.month_name}"          # 0 is Monday; carr
 - **Rec:** keep all of them. `$check_constant` is alternative D in [string-shapes](proposals/string-shapes/round1.md), so it may be replaced by D11's answer.
 - **Reversible:** yes.
 
+### D30. Function types without the outer parentheses
+Turn this on and `f:int:>int` works in annotations, but `(x:int:>int)` then means different things in a lambda and in a type, unless the labeled form becomes `((x:int):>int)`.
+
+```dewy
+apply = (f:int:>int x:int):>int => f(x)              # bare: parses and runs
+g = (x:int64:>int64) => x(1)                         # a parameter x of type int64:>int64
+let h:(x:int64:>int64) = (v:int64):>int64 => v+1     # a function type with labeled parameter x:int64
+```
+
+It also doesn't work in a lambda's result (`g=():>int64:>int64=>...`) or after `is?`, and `f:int:>int?` can only mean an optional result. `f:(int:>int)` is built and is what docs and printed types use.
+
+- **Rec:** leave bare off. Today it gets the hint "a function type takes parentheses here".
+- **Reversible:** yes.
+
 ---
 
 ## P4: open-ended
