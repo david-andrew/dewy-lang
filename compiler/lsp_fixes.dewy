@@ -1,0 +1,420 @@
+$runtime_checks
+from p"checks_text.dewy" import (byte_find)
+from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"@lib/core/os.jo" import (read_file)
+from p"@lib/core/str.jo" import (contains ends_with find_byte is_digit join lower split starts_with trim)
+from p"@lib/core/str.jo" import (to_int as jo_to_int)
+from p"ide.jo" import (IK_CONST)
+from p"ide_text.dewy" import (ide_comment_end)
+from p"json_doc.dewy" import (json_quote)
+from p"lex.jo" import (is_ident_char is_ident_start)
+from p"lsp.jo" import (Decl Diag Hint Ref Result WsSym docs in_eof inbuf inpos lsp_fill ws_cache ws_files)
+from p"lsp_handlers.dewy" import (esc_split line_starts_of qf_json quoted unmap_off ws_ensure_scanned ws_match ws_symbols_of)
+from p"lsp_ops.dewy" import (ensure_checked jget jint jitems jstr lens_json lsp_reply open_doc_at remap_key text_params_doc uri_of)
+from p"lsp_text.dewy" import (ident_prefix is_word name_end off_of ref_at word_near)
+from p"module_paths.dewy" import (path_norm)
+
+LspFixWord:type=int64<overflow='wrap'>
+# the end of the headers of the next message (after \r\n\r\n), or -1
+lsp_header_end=():>int64=>{
+    let i=inpos
+    let n=inbuf.length
+    loop i + 3 <? n {
+        if inbuf[i] =? b'\r' and inbuf[i + 1] =? b'\n' and inbuf[i + 2] =? b'\r' and inbuf[i + 3] =? b'\n' {return i + 4}
+        i += 1
+    }
+    -1
+}
+lsp_body_len=(h0:LspFixWord h1:LspFixWord):>int64=>{
+    let hs=lower(__str_from_bytes(inbuf[h0..h1)))
+    let k=byte_find(hs "content-length:")
+    if k <? 0 {return 0}
+    let e=find_byte(hs b'\r' k)
+    jo_to_int(trim(hs.byte_slice(k + 15 e))) ?? 0
+}
+lsp_read=():>string | none=>{
+    loop true {
+        let he=lsp_header_end()
+        if he >=? 0 {
+            let n=lsp_body_len(inpos he)
+            if inbuf.length - he >=? n {
+                let body=__str_from_bytes(inbuf[he..he + n))
+                inpos=he + n
+                return body
+            }
+        }
+        if in_eof or not lsp_fill() {return none}
+    }
+    none
+}
+# "file:offset"
+split_pos=(s:string):>[int64 int64]=>{
+    let c=find_byte(s b':')
+    if c <? 0 {return [(-1) (-1)]}
+    [jo_to_int(s.byte_slice(0 c)) ?? -1 jo_to_int(s.byte_slice(c + 1 (s as array<uint8>).length)) ?? -1]
+}
+# parse a child's lines into r (files are renumbered into r.paths)
+take_lines=(@r:Result lines_:array<string>):>void=>{
+    let fmap:array<int64>=[]
+    # (files first: an error comes before them)
+    loop line in lines_ {
+        if not starts_with(line "F\t") {continue}
+        let f=esc_split(line)
+        if f.length >=? 3 {
+            let i=jo_to_int(f[1]) ?? 0
+            loop fmap.length <=? i {fmap.push(-1)}
+            let p=path_norm(f[2])
+            let j:LspFixWord=-1
+            loop q in 0.. and pp in r.paths {
+                if pp =? p {j=q}
+            }
+            if j <? 0 {
+                r.paths.push(p)
+                j=r.paths.length - 1
+            }
+            fmap[i]=j
+        }
+    }
+    loop line in lines_ {
+        if (line as array<uint8>).length <? 2 {continue}
+        let f=esc_split(line)
+        let k=f[0]
+        if k =? "R" and f.length >=? 5 {
+            let p=remap(fmap f[1])
+            let d=""
+            if (f[3] as array<uint8>).length >? 0 {d=remap_key(fmap f[3])}
+            let key="R{p[0]}:{p[1]}:{d}"
+            if r.seen.get(key) not=? none {continue}
+            r.seen[key]=true
+            let al=""
+            if f.length >=? 6 and (f[5] as array<uint8>).length >? 0 {al=remap_key(fmap f[5])}
+            let rk:LspFixWord=0
+            if f.length >=? 7 {rk=jo_to_int(f[6]) ?? 0}
+            r.refs.push(Ref(p[0] p[1] jo_to_int(f[2]) ?? 0 d f[4] al rk))
+        }
+        else if k =? "D" and f.length >=? 7 {
+            let p=remap(fmap f[1])
+            let key="{p[0]}:{p[1]}"
+            if r.decls.get(key) =? none {r.decls[key]=Decl(p[0] p[1] jo_to_int(f[2]) ?? 0 jo_to_int(f[3]) ?? 0 f[4] f[5] f[6])}
+        }
+        else if k =? "H" and f.length >=? 3 {
+            let p=remap(fmap f[1])
+            let key="H{p[0]}:{p[1]}"
+            if r.seen.get(key) not=? none {continue}
+            r.seen[key]=true
+            r.hints.push(Hint(p[0] p[1] f[2]))
+        }
+        else if k =? "C" and f.length >=? 4 {
+            r.comps.push([f[1] f[2] f[3]])
+        }
+        else if (k =? "E" or k =? "W" or k =? "I") and f.length >=? 3 {
+            let path=""
+            let off:LspFixWord=0
+            if f[1] not=? "-1" {
+                let p=remap(fmap f[1])
+                if p[0] >=? 0 and p[0] <? r.paths.length {path=r.paths[p[0]]}
+                off=p[1]
+            }
+            let cascade=k =? "E" and f.length >=? 5 and f[4] =? "cascade"
+            r.diags.push(Diag(path off f[2] k not=? "E" k =? "I" cascade))
+            if k =? "E" and f.length >=? 4 and f[3] not=? "-1" {r.skips.push(f[3])}
+        }
+    }
+}
+remap=(fmap:array<int64> s:string):>[int64 int64]=>{
+    let p=split_pos(s)
+    let f:LspFixWord=-1
+    if p[0] >=? 0 and p[0] <? fmap.length {f=fmap[p[0]]}
+    [f p[1]]
+}
+on_workspace_symbol=(id:LspFixWord params:LspFixWord):>int64=>{
+    let q=jstr(jget(params "query"))
+    ws_ensure_scanned()
+    let out:array<array<string>>=[[] [] []]
+    loop f in ws_files {
+        let syms:array<WsSym>=[]
+        let d=open_doc_at(f)
+        let c=ws_cache.get(f)
+        if d >=? 0 {syms=ws_symbols_of(f docs[d].text)} else if c not=? none {syms=c}
+        else {
+            syms=ws_symbols_of(f read_file(f) ?? "")
+            ws_cache[f]=syms
+        }
+        let uri=uri_of(f)
+        loop y in syms {
+            let m=ws_match(y.name q)
+            if y.kind =? 24 or m =? 3 or out[m].length >=? 1000 {continue}
+            let rg="\{\"start\":\{\"line\":{y.line},\"character\":{y.c0}\},\"end\":\{\"line\":{y.line},\"character\":{y.c1}\}\}"
+            let e="\{\"name\":{json_quote(y.name)},\"kind\":{y.kind},\"location\":\{\"uri\":{json_quote(uri)},\"range\":{rg}\}"
+            if (y.container as array<uint8>).length >? 0 {e="{e},\"containerName\":{json_quote(y.container)}"}
+            out[m].push("{e}\}")
+        }
+    }
+    let all=[out[0]... out[1]... out[2]...]
+    lsp_reply(id "[{join(all[0..min(all.length 1000)) ",")}]")
+}
+# the start of the nearest line above p whose text pred accepts (-1: none)
+line_above=(text:string p:LspFixWord pred:<(l:string):>bool>):>int64=>{
+    let a=p
+    loop a >? 0 and (text as array<uint8>)[a - 1] not=? b'\n' {a -= 1}
+    loop a >? 0 {
+        let b=a - 1
+        a=b
+        loop a >? 0 and (text as array<uint8>)[a - 1] not=? b'\n' {a -= 1}
+        if pred(text.byte_slice(a b)) {return a}
+    }
+    -1
+}
+# A Dewy element-update fix must use the declaration actually resolved by the
+# checker, not a nearby loop mentioning the same name. Offer it only for the
+# supported single-binder, stored-array form with a block body.
+qf_dewy_space=(text:string at:LspFixWord):>int64=>{
+    let i=at
+    loop i <? (text as array<uint8>).length {
+        if (text as array<uint8>)[i] =? b' ' or (text as array<uint8>)[i] =? b'\t' or (text as array<uint8>)[i] =? b'\r' or (text as array<uint8>)[i] =? b'\n' {i += 1} else if (text as array<uint8>)[i] =? b'#' {i=ide_comment_end(text i true)}
+        else {break}
+    }
+    i
+}
+# The end of the name declaring the variable used at off, when its declaration has no type
+# (`let x=1.5` or `x=1.5`): where `:float64` goes. -1 otherwise.
+qf_dewy_untyped_decl=(d:LspFixWord off:LspFixWord):>int64=>{
+    let text=docs[d].text
+    let e=off
+    loop e <? (text as array<uint8>).length and is_ident_char((text as array<uint8>)[e]) {e += 1}
+    if e =? off {return -1}
+    let name=text.byte_slice(off e)
+    let h=ref_at(d off)
+    if not h.found or (h.ref.decl as array<uint8>).length =? 0 {return -1}
+    let dp=split_pos(h.ref.decl)
+    if dp[0] <? 0 or dp[0] >=? h.res.paths.length or h.res.paths[dp[0]] not=? docs[d].path {return -1}
+    let at=unmap_off(h.res docs[d].path dp[1])
+    if at <? 0 or not starts_with(text.byte_slice(at (text as array<uint8>).length) name) or (at + (name as array<uint8>).length <? (text as array<uint8>).length and is_ident_char((text as array<uint8>)[at + (name as array<uint8>).length])) {return -1}
+    let i=qf_dewy_space(text at + (name as array<uint8>).length)
+    if i >=? (text as array<uint8>).length or (text as array<uint8>)[i] not=? b'=' or (i + 1 <? (text as array<uint8>).length and (text as array<uint8>)[i + 1] =? b'=') {return -1}
+    at + (name as array<uint8>).length
+}
+qf_dewy_element=(d:LspFixWord off:LspFixWord name:string):>int64=>{
+    let h=ref_at(d off)
+    if not h.found or (h.ref.decl as array<uint8>).length =? 0 {return -1}
+    let dp=split_pos(h.ref.decl)
+    if dp[0] <? 0 or dp[0] >=? h.res.paths.length or h.res.paths[dp[0]] not=? docs[d].path {return -1}
+    let at=unmap_off(h.res docs[d].path dp[1])
+    let text=docs[d].text
+    if at <? 0 or not starts_with(text.byte_slice(at (text as array<uint8>).length) name) {return -1}
+    let before=at
+    loop before >? 0 and ((text as array<uint8>)[before - 1] =? b' ' or (text as array<uint8>)[before - 1] =? b'\t' or (text as array<uint8>)[before - 1] =? b'\n' or (text as array<uint8>)[before - 1] =? b'\r') {before -= 1}
+    if before <? 4 or text.byte_slice(before - 4 before) not=? "loop" {return -1}
+    if before >? 4 and is_ident_char((text as array<uint8>)[before - 5]) {return -1}
+    let i=qf_dewy_space(text at + (name as array<uint8>).length)
+    if not starts_with(text.byte_slice(i (text as array<uint8>).length) "in") or (i + 2 <? (text as array<uint8>).length and is_ident_char((text as array<uint8>)[i + 2])) {return -1}
+    i=qf_dewy_space(text i + 2)
+    let root=i
+    let last=i
+    loop true {
+        if i >=? (text as array<uint8>).length or not is_ident_start((text as array<uint8>)[i]) {return -1}
+        last=i
+        loop i <? (text as array<uint8>).length and is_ident_char((text as array<uint8>)[i]) {i += 1}
+        i=qf_dewy_space(text i)
+        if i >=? (text as array<uint8>).length or (text as array<uint8>)[i] not=? b'.' {break}
+        i=qf_dewy_space(text i + 1)
+    }
+    if i >=? (text as array<uint8>).length or (text as array<uint8>)[i] not=? b'\{' {return -1}
+    let source=ref_at(d last)
+    if not source.found or not starts_with(source.ref.info "array<") {return -1}
+    let base=ref_at(d root)
+    if not base.found {return -1}
+    let declaration=base.res.decls.get(base.ref.decl)
+    if declaration not=? none {
+        if declaration.kind =? IK_CONST {return -1}
+    }
+    at
+}
+# A fix a Dewy message spells out in backquotes: "write `@f` for the function itself" (an @ before
+# the name at p), "write `s.startswith(...)`" or "removes by position with pop: `xs.pop(i)`" (the
+# member after `s.` on p's line). [title, start, end, text], or [] when the text does not fit.
+dewy_fixit=(d:LspFixWord p:LspFixWord msg:string):>array<string>=>{
+    if not ends_with(docs[d].path ".dewy") {return []}
+    let text=docs[d].text
+    let k=byte_find(msg "`")
+    loop k >=? 0 {
+        let e=byte_find(msg "`" k + 1)
+        if e <? 0 {break}
+        let want=msg.byte_slice(k + 1 e)
+        k=byte_find(msg "`" e + 1)
+        if starts_with(want "@") and (want as array<uint8>).length >? 1 and is_ident_start((want as array<uint8>)[1]) {
+            let nm=ident_prefix(want.byte_slice(1 (want as array<uint8>).length))
+            if p <? (text as array<uint8>).length and starts_with(text.byte_slice(p (text as array<uint8>).length) nm) and (p =? 0 or (text as array<uint8>)[p - 1] not=? b'@') and name_end(text p) =? p + (nm as array<uint8>).length {
+                return ["Write `@{nm}` for the function itself" "{p}" "{p}" "@"]
+            }
+            continue
+        }
+        # recv.member(...)
+        let dot=find_byte(want b'.')
+        let open=find_byte(want b'(')
+        if dot <=? 0 or open <=? dot {continue}
+        let recv=want.byte_slice(0 dot)
+        let member=want.byte_slice(dot + 1 open)
+        if not is_word(member) or (member as array<uint8>).length =? 0 {continue}
+        let at=word_near(text p recv)
+        loop at >=? 0 {
+            let m0=at + (recv as array<uint8>).length
+            if m0 <? (text as array<uint8>).length and (text as array<uint8>)[m0] =? b'.' {
+                let m1=name_end(text m0 + 1)
+                let old=text.byte_slice(m0 + 1 m1)
+                if (old as array<uint8>).length >? 0 and old not=? member {return ["Change '{old}' to '{member}'" "{m0 + 1}" "{m1}" member]}
+            }
+            # (the next use of recv on the line)
+            let nx=byte_find(text recv at + 1)
+            let le=byte_find(text "\n" at)
+            if nx <? 0 or le >=? 0 and nx >? le {break}
+            at=nx
+        }
+    }
+    []
+}
+on_code_action=(id:LspFixWord params:LspFixWord):>int64=>{
+    let d=text_params_doc(params)
+    if d <? 0 {return lsp_reply(id "[]")}
+    let text=docs[d].text
+    let ls=line_starts_of(text)
+    let out:array<string>=[]
+    loop dg in jitems(jget(jget(params "context") "diagnostics")) {
+        let msg=jstr(jget(dg "message"))
+        let st=jget(jget(dg "range") "start")
+        let p=off_of(text ls jint(jget(st "line")) jint(jget(st "character")))
+        let k=byte_find(msg "(did you mean '")
+        if k >=? 0 {
+            # a name misspelled: the one the message names first
+            let want=quoted(msg k)
+            let bad=quoted(msg 0)
+            let at=word_near(text p bad)
+            if (want as array<uint8>).length >? 0 and (bad as array<uint8>).length >? 0 and at >=? 0 {out.push(qf_json(d "Change '{bad}' to '{want}'" dg at at + (bad as array<uint8>).length want))}
+            continue
+        }
+        k=byte_find(msg "(use `")
+        if k >=? 0 {
+            # a name from another language: True, append, float
+            let e=byte_find(msg "`)" k + 6)
+            let want=""
+            if e >? 0 {want=msg.byte_slice(k + 6 e)}
+            let bad=quoted(msg 0)
+            let at=word_near(text p bad)
+            if (want as array<uint8>).length >? 0 and is_word(want) and (bad as array<uint8>).length >? 0 and at >=? 0 {
+                out.push(qf_json(d "Change '{bad}' to '{want}'" dg at at + (bad as array<uint8>).length want))
+                continue
+            }
+        }
+        # operators and keywords from other languages, at the diagnostic's place
+        let swap=["use `and`" "&&" "and" "use `or`" "||" "or" "use `else if`" "elif" "else if" "`x ^ y` is x to the power y" "**" "^"]
+        let si:LspFixWord=0
+        loop si <? swap.length {
+            if starts_with(msg swap[si]) and starts_with(text.byte_slice(p (text as array<uint8>).length) swap[si + 1]) {out.push(qf_json(d "Change '{swap[si + 1]}' to '{swap[si + 2]}'" dg p p + (swap[si + 1] as array<uint8>).length swap[si + 2]))}
+            si += 3
+        }
+        if starts_with(msg "use `not`") and starts_with(text.byte_slice(p (text as array<uint8>).length) "!") {out.push(qf_json(d "Change '!' to 'not'" dg p p + 1 "not "))}
+        # (`[1 2; 3 4]`: the attached `;` after the value at p meant as a row break)
+        if starts_with(msg "this `;` is attached to the value before it") {
+            let semi=byte_find(text ";" p)
+            let le=byte_find(text "\n" p)
+            if semi >? 0 and (le <? 0 or semi <? le) and (text as array<uint8>)[semi - 1] not=? b' ' {
+                out.push(qf_json(d "Make it a row break: ` ;`" dg semi semi " "))
+                continue
+            }
+        }
+        # the spelling a message gives: `@f` for a function itself, `xs.pop(i)` for a member
+        let fx=dewy_fixit(d p msg)
+        if fx.length >? 0 {
+            out.push(qf_json(d fx[0] dg jo_to_int(fx[1]) ?? 0 jo_to_int(fx[2]) ?? 0 fx[3]))
+            continue
+        }
+        # (a path not proven to stay inside its base: validate it where it is used)
+        k=byte_find(msg "validate it, `")
+        if k >=? 0 and (byte_find(msg "is not proven to stay inside its base") >=? 0 or byte_find(msg "may escape its base") >=? 0) {
+            let e=byte_find(msg " or_throw`" k)
+            let ci=byte_find(msg ".confine(" k)
+            if e >? 0 and ci >? 0 and ci <? e {
+                let arg=msg.byte_slice(ci + 9 e - 1)
+                let fix=msg.byte_slice(k + 14 e + 9)
+                if (arg as array<uint8>).length >? 0 and arg not=? "..." and starts_with(text.byte_slice(p (text as array<uint8>).length) arg) {
+                    let after=p + (arg as array<uint8>).length
+                    # (a method's receiver: `(root.confine(f) or_throw).read_text`)
+                    if after <? (text as array<uint8>).length and (text as array<uint8>)[after] =? b'.' {fix="({fix})"}
+                    out.push(qf_json(d "Validate it: `{fix}`" dg p after fix))
+                }
+            }
+            continue
+        }
+        if starts_with(msg "this exact value grows each iteration") or byte_find(msg "annotate `float64` (or another explicit representation) to state it") >=? 0 {
+            if ends_with(docs[d].path ".dewy") {
+                ensure_checked(d)
+                let at=qf_dewy_untyped_decl(d p)
+                if at >=? 0 {out.push(qf_json(d "Annotate it `float64`" dg at at ":float64"))}
+            }
+            continue
+        }
+        if contains(msg "' is changed here but never read afterwards:") and contains(msg "`loop @") {
+            let nm=quoted(msg 0)
+            ensure_checked(d)
+            let at=qf_dewy_element(d p nm)
+            if at >=? 0 {out.push(qf_json(d "Update stored elements with `@{nm}`" dg at at "@"))}
+            continue
+        }
+        if starts_with(msg "cannot modify loop variable '") {
+            let nm=quoted(msg 0)
+            if ends_with(docs[d].path ".dewy") {
+                if contains(msg "`loop @item`") {
+                    ensure_checked(d)
+                    let at=qf_dewy_element(d p nm)
+                    if at >=? 0 {out.push(qf_json(d "Update stored elements with `@{nm}`" dg at at "@"))}
+                }
+                continue
+            }
+            let hd=line_above(text p (l:string)=>starts_with(trim(l) "loop ") and not starts_with(trim(l) "loop mut ") and byte_find(l " {nm} ") >=? 0)
+            if hd >=? 0 {
+                let lp=byte_find(text "loop " hd)
+                out.push(qf_json(d "Make it `loop mut`" dg lp + 5 lp + 5 "mut "))
+            }
+            continue
+        }
+        if starts_with(msg "cannot modify parameter '") {
+            let nm=quoted(msg 0)
+            let hd=line_above(text p (l:string)=>byte_find(l "({nm}:") >=? 0 or byte_find(l ", {nm}:") >=? 0)
+            if hd >=? 0 {
+                let e=byte_find(text "\n" hd)
+                if e <? 0 {e=(text as array<uint8>).length}
+                let c=byte_find(text "({nm}:" hd)
+                if c <? 0 or c >? e {c=byte_find(text ", {nm}:" hd) + 1}
+                c=c + 1 + (nm as array<uint8>).length + 1
+                loop c <? e and (text as array<uint8>)[c] =? b' ' {c += 1}
+                if c <? e and not starts_with(text.byte_slice(c e) "mut ") {out.push(qf_json(d "Mark '{nm}' `mut` (changes reach the caller)" dg c c "mut "))}
+            }
+            continue
+        }
+        let ex=byte_find(msg "expected ")
+        let el:LspFixWord=9
+        if ex <? 0 {
+            ex=byte_find(msg " expects ")
+            el=9
+        }
+        let fd=byte_find(msg ", found ")
+        if ex >=? 0 and fd >? ex {
+            # a number of another type: a conversion (or 2.0 -> 2), where the value is one word
+            let to=msg.byte_slice(ex + el fd)
+            let fr=msg.byte_slice(fd + 8 (msg as array<uint8>).length)
+            let sp=byte_find(fr " ")
+            if sp >=? 0 {fr=fr.byte_slice(0 sp)}
+            let nums=["int" "i64" "i32" "i16" "i8" "u64" "u32" "u16" "u8" "f64" "f32"]
+            if not nums.contains(to) or not nums.contains(fr) {continue}
+            let e=p
+            loop e <? (text as array<uint8>).length and (is_ident_char((text as array<uint8>)[e]) or (text as array<uint8>)[e] =? b'.') {e += 1}
+            if e =? p {continue}
+            let q=e
+            loop q <? (text as array<uint8>).length and (text as array<uint8>)[q] =? b' ' {q += 1}
+            if q <? (text as array<uint8>).length and byte_find(",)]:\n#" text.byte_slice(q q + 1)) <? 0 {continue}
+            let w=text.byte_slice(p e)
+            if (to as array<uint8>)[0] not=? b'f' and is_digit((w as array<uint8>)[0]) and ends_with(w ".0") and jo_to_int(w.byte_slice(0 (w as array<uint8>).length - 2)) not=? none {out.push(qf_json(d "Write it as {w.byte_slice(0 (w as array<uint8>).length - 2)}" dg p e w.byte_slice(0 (w as array<uint8>).length - 2)))} else {out.push(qf_json(d "Convert it: {to}({w})" dg p e "{to}({w})"))}
+        }
+    }
+    lsp_reply(id "[{join(out ",")}]")
+}

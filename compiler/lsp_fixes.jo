@@ -1,0 +1,361 @@
+use 'lsp.jo'
+use 'checker_program.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'ide.jo'
+use 'ide_text.dewy'
+use 'fmt.jo'
+use 'lex.jo'
+use 'main.jo'
+use 'json_doc.dewy'
+use 'lsp_ops.dewy'
+use 'lsp_handlers.dewy'
+use 'lsp_text.dewy'
+use 'lsp_requests.dewy'
+
+# the end of the headers of the next message (after \r\n\r\n), or -1
+lsp_header_end = () -> int:
+    i = inpos
+    n = inbuf.len()
+    loop i + 3 < n:
+        if inbuf[i] == '\r' and inbuf[i + 1] == '\n' and inbuf[i + 2] == '\r' and inbuf[i + 3] == '\n': return i + 4
+        i += 1
+    -1
+lsp_body_len = (h0: int, h1: int) -> int:
+    hs = lower(str_from_bytes(inbuf[h0..h1)))
+    k = find(hs, "content-length:")
+    if k < 0: return 0
+    e = find_byte(hs, '\r', k)
+    to_int(trim(hs[k + 15..e))) ?? 0
+lsp_read = () -> str?:
+    loop true:
+        he = lsp_header_end()
+        if he >= 0:
+            n = lsp_body_len(inpos, he)
+            if inbuf.len() - he >= n:
+                body = str_from_bytes(inbuf[he..he + n))
+                inpos = he + n
+                return body
+        if in_eof or not lsp_fill(): return none
+    none
+# "file:offset"
+split_pos = (s: str) -> (int, int):
+    c = find_byte(s, ':')
+    if c < 0: return (-1, -1)
+    (to_int(s[..c)) ?? -1, to_int(s[c + 1..]) ?? -1)
+# parse a child's lines into r (files are renumbered into r.paths)
+take_lines = (r: mut Result, lines_: str[]):
+    fmap: int[]
+    # (files first: an error comes before them)
+    loop line in lines_:
+        if not starts_with(line, "F\t"): continue
+        f = esc_split(line)
+        if f.len() >= 3:
+            i = to_int(f[1]) ?? 0
+            loop fmap.len() <= i: fmap.push(-1)
+            p = path_norm(f[2])
+            j = -1
+            loop q in 0.. and pp in r.paths:
+                if pp == p: j = q
+            if j < 0:
+                r.paths.push(p)
+                j = r.paths.len() - 1
+            fmap[i] = j
+    loop line in lines_:
+        if len(line) < 2: continue
+        f = esc_split(line)
+        k = f[0]
+        if k == "R" and f.len() >= 5:
+            p = remap(fmap, f[1])
+            d = ""
+            if len(f[3]) > 0: d = remap_key(fmap, f[3])
+            key = "R{p.0}:{p.1}:{d}"
+            if r.seen.get(key) != none: continue
+            r.seen[key] = true
+            al = ""
+            if f.len() >= 6 and len(f[5]) > 0: al = remap_key(fmap, f[5])
+            rk = 0
+            if f.len() >= 7: rk = to_int(f[6]) ?? 0
+            r.refs.push(Ref(p.0, p.1, to_int(f[2]) ?? 0, d, f[4], al, rk))
+        else if k == "D" and f.len() >= 7:
+            p = remap(fmap, f[1])
+            key = "{p.0}:{p.1}"
+            if r.decls.get(key) == none: r.decls[key] = Decl(p.0, p.1, to_int(f[2]) ?? 0, to_int(f[3]) ?? 0, f[4], f[5], f[6])
+        else if k == "H" and f.len() >= 3:
+            p = remap(fmap, f[1])
+            key = "H{p.0}:{p.1}"
+            if r.seen.get(key) != none: continue
+            r.seen[key] = true
+            r.hints.push(Hint(p.0, p.1, f[2]))
+        else if k == "C" and f.len() >= 4:
+            r.comps.push([f[1], f[2], f[3]])
+        else if (k == "E" or k == "W" or k == "I") and f.len() >= 3:
+            path = ""
+            off = 0
+            if f[1] != "-1":
+                p = remap(fmap, f[1])
+                if p.0 >= 0 and p.0 < r.paths.len(): path = r.paths[p.0]
+                off = p.1
+            cascade = k == "E" and f.len() >= 5 and f[4] == "cascade"
+            r.diags.push(Diag(path, off, f[2], k != "E", k == "I", cascade))
+            if k == "E" and f.len() >= 4 and f[3] != "-1": r.skips.push(f[3])
+remap = (fmap: int[], s: str) -> (int, int):
+    p = split_pos(s)
+    f = -1
+    if p.0 >= 0 and p.0 < fmap.len(): f = fmap[p.0]
+    (f, p.1)
+on_workspace_symbol = (id: int, params: int) -> int:
+    q = jstr(jget(params, "query"))
+    ws_ensure_scanned()
+    out: str[][] = [[], [], []]      # (by how well they match)
+    loop f in ws_files:
+        syms: WsSym[]
+        d = open_doc_at(f)
+        if d >= 0: syms = ws_symbols_of(f, docs[d].text)
+        else if let c = ws_cache.get(f): syms = c
+        else:
+            syms = ws_symbols_of(f, read_file(f) ?? "")
+            ws_cache[f] = syms
+        uri = uri_of(f)
+        loop y in syms:
+            m = ws_match(y.name, q)
+            if y.kind == 24 or m == 3 or out[m].len() >= 1000: continue
+            rg = "\{\"start\":\{\"line\":{y.line},\"character\":{y.c0}\},\"end\":\{\"line\":{y.line},\"character\":{y.c1}\}\}"
+            e = "\{\"name\":{json_quote(y.name)},\"kind\":{y.kind},\"location\":\{\"uri\":{json_quote(uri)},\"range\":{rg}\}"
+            if len(y.container) > 0: e += ",\"containerName\":{json_quote(y.container)}"
+            out[m].push(e + "\}")
+    all = out[0] + out[1] + out[2]
+    lsp_reply(id, "[{join(all[..min(all.len(), 1000)), ",")}]")
+# the start of the nearest line above p whose text pred accepts (-1: none)
+line_above = (text: str, p: int, pred: (str) -> bool) -> int:
+    a = p
+    loop a > 0 and text[a - 1] != '\n': a -= 1
+    loop a > 0:
+        b = a - 1
+        a = b
+        loop a > 0 and text[a - 1] != '\n': a -= 1
+        if pred(text[a..b)): return a
+    -1
+# A Dewy element-update fix must use the declaration actually resolved by the
+# checker, not a nearby loop mentioning the same name. Offer it only for the
+# supported single-binder, stored-array form with a block body.
+qf_dewy_space = (text: str, at: int) -> int:
+    i = at
+    loop i < len(text):
+        if text[i] == ' ' or text[i] == '\t' or text[i] == '\r' or text[i] == '\n': i += 1
+        else if text[i] == '#': i = ide_comment_end(text, i, true)
+        else: break
+    i
+# The end of the name declaring the variable used at off, when its declaration has no type
+# (`let x=1.5` or `x=1.5`): where `:float64` goes. -1 otherwise.
+qf_dewy_untyped_decl = (d: int, off: int) -> int:
+    text = docs[d].text
+    e = off
+    loop e < len(text) and is_ident_char(text[e]): e += 1
+    if e == off: return -1
+    name = text[off..e)
+    h = ref_at(d, off)
+    if not h.found or len(h.ref.decl) == 0: return -1
+    dp = split_pos(h.ref.decl)
+    if dp.0 < 0 or dp.0 >= h.res.paths.len() or h.res.paths[dp.0] != docs[d].path: return -1
+    at = unmap_off(h.res, docs[d].path, dp.1)
+    if at < 0 or not starts_with(text[at..], name) or (at + len(name) < len(text) and is_ident_char(text[at + len(name)])): return -1
+    i = qf_dewy_space(text, at + len(name))
+    if i >= len(text) or text[i] != '=' or (i + 1 < len(text) and text[i + 1] == '='): return -1
+    at + len(name)
+qf_dewy_element = (d: int, off: int, name: str) -> int:
+    h = ref_at(d, off)
+    if not h.found or len(h.ref.decl) == 0: return -1
+    dp = split_pos(h.ref.decl)
+    if dp.0 < 0 or dp.0 >= h.res.paths.len() or h.res.paths[dp.0] != docs[d].path: return -1
+    at = unmap_off(h.res, docs[d].path, dp.1)
+    text = docs[d].text
+    if at < 0 or not starts_with(text[at..], name): return -1
+    before = at
+    loop before > 0 and (text[before - 1] == ' ' or text[before - 1] == '\t' or text[before - 1] == '\n' or text[before - 1] == '\r'): before -= 1
+    if before < 4 or text[before - 4..before) != "loop": return -1
+    if before > 4 and is_ident_char(text[before - 5]): return -1
+    i = qf_dewy_space(text, at + len(name))
+    if not starts_with(text[i..], "in") or (i + 2 < len(text) and is_ident_char(text[i + 2])): return -1
+    i = qf_dewy_space(text, i + 2)
+    root = i
+    last = i
+    loop true:
+        if i >= len(text) or not is_ident_start(text[i]): return -1
+        last = i
+        loop i < len(text) and is_ident_char(text[i]): i += 1
+        i = qf_dewy_space(text, i)
+        if i >= len(text) or text[i] != '.': break
+        i = qf_dewy_space(text, i + 1)
+    if i >= len(text) or text[i] != '{{': return -1
+    source = ref_at(d, last)
+    if not source.found or not starts_with(source.ref.info, "array<"): return -1
+    base = ref_at(d, root)
+    if not base.found: return -1
+    if let declaration = base.res.decls.get(base.ref.decl):
+        if declaration.kind == IK_CONST: return -1
+    at
+# A fix a Dewy message spells out in backquotes: "write `@f` for the function itself" (an @ before
+# the name at p), "write `s.startswith(...)`" or "removes by position with pop: `xs.pop(i)`" (the
+# member after `s.` on p's line). [title, start, end, text], or [] when the text does not fit.
+dewy_fixit = (d: int, p: int, msg: str) -> str[]:
+    if not ends_with(docs[d].path, ".dewy"): return []
+    text = docs[d].text
+    k = find(msg, "`")
+    loop k >= 0:
+        e = find(msg, "`", k + 1)
+        if e < 0: break
+        want = msg[k + 1..e)
+        k = find(msg, "`", e + 1)
+        if starts_with(want, "@") and len(want) > 1 and is_ident_start(want[1]):
+            nm = ident_prefix(want[1..])
+            if p < len(text) and starts_with(text[p..], nm) and (p == 0 or text[p - 1] != '@') and name_end(text, p) == p + len(nm):
+                return ["Write `@{nm}` for the function itself", "{p}", "{p}", "@"]
+            continue
+        # recv.member(...)
+        dot = find_byte(want, '.')
+        open = find_byte(want, '(')
+        if dot <= 0 or open <= dot: continue
+        recv = want[..dot)
+        member = want[dot + 1..open)
+        if not is_word(member) or len(member) == 0: continue
+        at = word_near(text, p, recv)
+        loop at >= 0:
+            m0 = at + len(recv)
+            if m0 < len(text) and text[m0] == '.':
+                m1 = name_end(text, m0 + 1)
+                old = text[m0 + 1..m1)
+                if len(old) > 0 and old != member: return ["Change '{old}' to '{member}'", "{m0 + 1}", "{m1}", member]
+            # (the next use of recv on the line)
+            nx = find(text, recv, at + 1)
+            le = find(text, "\n", at)
+            if nx < 0 or le >= 0 and nx > le: break
+            at = nx
+    []
+on_code_action = (id: int, params: int) -> int:
+    d = text_params_doc(params)
+    if d < 0: return lsp_reply(id, "[]")
+    text = docs[d].text
+    ls = line_starts_of(text)
+    out: str[]
+    loop dg in jitems(jget(jget(params, "context"), "diagnostics")):
+        msg = jstr(jget(dg, "message"))
+        st = jget(jget(dg, "range"), "start")
+        p = off_of(text, ls, jint(jget(st, "line")), jint(jget(st, "character")))
+        k = find(msg, "(did you mean '")
+        if k >= 0:
+            # a name misspelled: the one the message names first
+            want = quoted(msg, k)
+            bad = quoted(msg, 0)
+            at = word_near(text, p, bad)
+            if len(want) > 0 and len(bad) > 0 and at >= 0: out.push(qf_json(d, "Change '{bad}' to '{want}'", dg, at, at + len(bad), want))
+            continue
+        k = find(msg, "(use `")
+        if k >= 0:
+            # a name from another language: True, append, float
+            e = find(msg, "`)", k + 6)
+            want = ""
+            if e > 0: want = msg[k + 6..e)
+            bad = quoted(msg, 0)
+            at = word_near(text, p, bad)
+            if len(want) > 0 and is_word(want) and len(bad) > 0 and at >= 0:
+                out.push(qf_json(d, "Change '{bad}' to '{want}'", dg, at, at + len(bad), want))
+                continue
+        # operators and keywords from other languages, at the diagnostic's place
+        swap = ["use `and`", "&&", "and", "use `or`", "||", "or", "use `else if`", "elif", "else if", "`x ^ y` is x to the power y", "**", "^"]
+        si = 0
+        loop si < swap.len():
+            if starts_with(msg, swap[si]) and starts_with(text[p..], swap[si + 1]): out.push(qf_json(d, "Change '{swap[si + 1]}' to '{swap[si + 2]}'", dg, p, p + len(swap[si + 1]), swap[si + 2]))
+            si += 3
+        if starts_with(msg, "use `not`") and starts_with(text[p..], "!"): out.push(qf_json(d, "Change '!' to 'not'", dg, p, p + 1, "not "))
+        # (`[1 2; 3 4]`: the attached `;` after the value at p meant as a row break)
+        if starts_with(msg, "this `;` is attached to the value before it"):
+            semi = find(text, ";", p)
+            le = find(text, "\n", p)
+            if semi > 0 and (le < 0 or semi < le) and text[semi - 1] != ' ':
+                out.push(qf_json(d, "Make it a row break: ` ;`", dg, semi, semi, " "))
+                continue
+        # the spelling a message gives: `@f` for a function itself, `xs.pop(i)` for a member
+        fx = dewy_fixit(d, p, msg)
+        if len(fx) > 0:
+            out.push(qf_json(d, fx[0], dg, to_int(fx[1]) ?? 0, to_int(fx[2]) ?? 0, fx[3]))
+            continue
+        # (a path not proven to stay inside its base: validate it where it is used)
+        k = find(msg, "validate it, `")
+        if k >= 0 and (find(msg, "is not proven to stay inside its base") >= 0 or find(msg, "may escape its base") >= 0):
+            e = find(msg, " or_throw`", k)
+            ci = find(msg, ".confine(", k)
+            if e > 0 and ci > 0 and ci < e:
+                arg = msg[ci + 9..e - 1)
+                fix = msg[k + 14..e + 9)
+                if len(arg) > 0 and arg != "..." and starts_with(text[p..], arg):
+                    after = p + len(arg)
+                    # (a method's receiver: `(root.confine(f) or_throw).read_text`)
+                    if after < len(text) and text[after] == '.': fix = "({fix})"
+                    out.push(qf_json(d, "Validate it: `{fix}`", dg, p, after, fix))
+            continue
+        if starts_with(msg, "this exact value grows each iteration") or find(msg, "annotate `float64` (or another explicit representation) to state it") >= 0:
+            if ends_with(docs[d].path, ".dewy"):
+                ensure_checked(d)
+                at = qf_dewy_untyped_decl(d, p)
+                if at >= 0: out.push(qf_json(d, "Annotate it `float64`", dg, at, at, ":float64"))
+            continue
+        if contains(msg, "' is changed here but never read afterwards:") and contains(msg, "`loop @"):
+            nm = quoted(msg, 0)
+            ensure_checked(d)
+            at = qf_dewy_element(d, p, nm)
+            if at >= 0: out.push(qf_json(d, "Update stored elements with `@{nm}`", dg, at, at, "@"))
+            continue
+        if starts_with(msg, "cannot modify loop variable '"):
+            nm = quoted(msg, 0)
+            if ends_with(docs[d].path, ".dewy"):
+                if contains(msg, "`loop @item`"):
+                    ensure_checked(d)
+                    at = qf_dewy_element(d, p, nm)
+                    if at >= 0: out.push(qf_json(d, "Update stored elements with `@{nm}`", dg, at, at, "@"))
+                continue
+            hd = line_above(text, p, (l: str) -> bool: starts_with(trim(l), "loop ") and not starts_with(trim(l), "loop mut ") and find(l, " {nm} ") >= 0)
+            if hd >= 0:
+                lp = find(text, "loop ", hd)
+                out.push(qf_json(d, "Make it `loop mut`", dg, lp + 5, lp + 5, "mut "))
+            continue
+        if starts_with(msg, "cannot modify parameter '"):
+            nm = quoted(msg, 0)
+            hd = line_above(text, p, (l: str) -> bool: find(l, "({nm}:") >= 0 or find(l, ", {nm}:") >= 0)
+            if hd >= 0:
+                e = find(text, "\n", hd)
+                if e < 0: e = len(text)
+                c = find(text, "({nm}:", hd)
+                if c < 0 or c > e: c = find(text, ", {nm}:", hd) + 1
+                c = c + 1 + len(nm) + 1
+                loop c < e and text[c] == ' ': c += 1
+                if c < e and not starts_with(text[c..e), "mut "): out.push(qf_json(d, "Mark '{nm}' `mut` (changes reach the caller)", dg, c, c, "mut "))
+            continue
+        ex = find(msg, "expected ")
+        el = 9
+        if ex < 0:
+            ex = find(msg, " expects ")
+            el = 9
+        fd = find(msg, ", found ")
+        if ex >= 0 and fd > ex:
+            # a number of another type: a conversion (or 2.0 -> 2), where the value is one word
+            to = msg[ex + el..fd)
+            fr = msg[fd + 8..]
+            sp = find(fr, " ")
+            if sp >= 0: fr = fr[..sp)
+            nums = ["int", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8", "f64", "f32"]
+            if not nums.contains(to) or not nums.contains(fr): continue
+            e = p
+            loop e < len(text) and (is_ident_char(text[e]) or text[e] == '.'): e += 1
+            if e == p: continue
+            q = e
+            loop q < len(text) and text[q] == ' ': q += 1
+            if q < len(text) and find(",)]:\n#", text[q..q + 1)) < 0: continue
+            w = text[p..e)
+            if to[0] != 'f' and is_digit(w[0]) and ends_with(w, ".0") and to_int(w[..len(w) - 2)) != none: out.push(qf_json(d, "Write it as {w[..len(w) - 2)}", dg, p, e, w[..len(w) - 2)))
+            else: out.push(qf_json(d, "Convert it: {to}({w})", dg, p, e, "{to}({w})"))
+    lsp_reply(id, "[{join(out, ",")}]")
