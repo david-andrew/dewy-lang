@@ -1,0 +1,42 @@
+$runtime_checks
+from p"arm64_module.dewy" import (arm64_emit_entry arm64_emit_entry_mac arm64_emit_stubs arm64_patch_module)
+from p"check.jo" import (watch_build)
+from p"elf_format.dewy" import (elf_syms)
+from p"ir.jo" import (main_code)
+from p"lower.jo" import (lfuncs)
+from p"util.jo" import (ice)
+from p"x64.jo" import (WATCH_CODE_AT WATCH_CODE_SIZE code entry_end_lf fn_addr row_line)
+from p"x64_emit.dewy" import (line_rows row_pos)
+from p"x64_module.dewy" import (stub_addr)
+
+Arm64OpsWord:type=int64<overflow='wrap'>
+# ---------------- stubs ----------------
+arm64_stubs=():>void=>{
+    line_rows.push(code.length)
+    line_rows.push(0)
+    row_pos=0
+    row_line=0
+    arm64_emit_stubs(@stub_addr)
+}
+arm64_entry=(inits:array<int64> main_lf:Arm64OpsWord):>int64=>{
+    line_rows.push(code.length)
+    line_rows.push(0)
+    row_pos=0
+    row_line=0
+    let start=arm64_emit_entry(inits main_lf main_code entry_end_lf watch_build WATCH_CODE_AT WATCH_CODE_SIZE)
+    elf_syms.push(["_start" start code.length - start])
+    start
+}
+arm64_entry_mac=(inits:array<int64> main_lf:Arm64OpsWord):>int64=>{
+    line_rows.push(code.length)
+    line_rows.push(0)
+    row_pos=0
+    row_line=0
+    let start=arm64_emit_entry_mac(inits main_lf main_code entry_end_lf)
+    elf_syms.push(["_main" start code.length - start])
+    start
+}
+arm64_resolve=(text_addr:Arm64OpsWord ro_addr:Arm64OpsWord data_addr:Arm64OpsWord):>void=>$unsafe {
+    let missing=arm64_patch_module(text_addr ro_addr data_addr @fn_addr @stub_addr)
+    if missing >=? 0 {ice("unresolved function {lfuncs.ptr[missing].name}")}
+}

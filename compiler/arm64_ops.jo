@@ -1,0 +1,48 @@
+use 'arm64.jo'
+use 'native_debug.dewy'
+use 'elf_format.dewy'
+use 'x64_module.dewy'
+use 'x64_emit.dewy'
+use 'x64_allocate.dewy'
+use 'x64_encode.dewy'
+use 'arm64_module.dewy'
+use 'arm64_encode.dewy'
+use 'arm64_emit.dewy'
+use 'arm64_allocate.dewy'
+use 'backend_analysis.dewy'
+use 'ir_types.dewy'
+use 'util.jo'
+use 'ir.jo'
+use 'lower.jo'
+use 'types.jo'
+use 'check.jo'
+use 'ast.jo'
+use 'x64.jo'
+use 'fused.jo'
+
+# ---------------- stubs ----------------
+arm64_stubs = ():
+    line_rows.push(code.len())
+    line_rows.push(0)
+    row_pos = 0
+    row_line = 0
+    arm64_emit_stubs(stub_addr)
+arm64_entry = (inits: int[], main_lf: int) -> int:
+    line_rows.push(code.len())
+    line_rows.push(0)
+    row_pos = 0
+    row_line = 0
+    start = arm64_emit_entry(inits, main_lf, main_code, entry_end_lf, watch_build, WATCH_CODE_AT, WATCH_CODE_SIZE)
+    elf_syms.push(("_start", start, code.len() - start))
+    start
+arm64_entry_mac = (inits: int[], main_lf: int) -> int:
+    line_rows.push(code.len())
+    line_rows.push(0)
+    row_pos = 0
+    row_line = 0
+    start = arm64_emit_entry_mac(inits, main_lf, main_code, entry_end_lf)
+    elf_syms.push(("_main", start, code.len() - start))
+    start
+arm64_resolve = (text_addr: int, ro_addr: int, data_addr: int):
+    missing = arm64_patch_module(text_addr, ro_addr, data_addr, fn_addr, stub_addr)
+    if missing >= 0: ice("unresolved function {lfuncs[missing].name}")

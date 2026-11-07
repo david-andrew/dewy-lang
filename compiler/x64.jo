@@ -22,6 +22,7 @@ use 'check.jo'
 use 'ast.jo'
 use 'fused.jo'
 use 'ir_builders.dewy'
+use 'x64_ops.dewy'
 
 code: u8[]
 fn_addr: int[]            # lfunc index -> code offset (-1 = not yet)
@@ -31,12 +32,6 @@ x_encoder_binding = x64_encoder_bind(&code, &data_fix)
 
 const WATCH_CODE_AT = 0x50000000
 const WATCH_CODE_SIZE = 0x20000000
-
-backend_debug_bindings = ():
-    backend_debug_vregs.clear()
-    loop l in ir.dbg_locals:
-        if locals[l].offset >= 0 or int(locals[l].flags) & (LF_CAPTURE | LF_ALIAS) != 0: continue
-        backend_debug_vregs.push(int(locals[l].vreg))
 
 ra_spill_cost = 0
 ra_total = 0
@@ -139,42 +134,7 @@ dbg_aggregate = (t: int) -> bool: vc(t) == VC_AGG
 dbg_function = (start: int, body: int, dwreg: int[], fp_base: int, fp_dw: int, frame: int):
     native_debug_function(&ir, code.len(), start, body, dwreg, fp_base, fp_dw, frame, dbg_aggregate)
 
-# the entry point of a Windows program: called with the stack 8 bytes off 16-byte alignment;
-# the initializers and main, then ExitProcess(0) from the import table
-# VirtualAlloc(at, size, kind, read/write/run) through the import table: its result in rax
-x64_entry_win = (inits: int[], main_lf: int) -> int:
-    start = x64_emit_entry_win(inits, main_lf, main_code, entry_end_lf, watch_build, WATCH_CODE_AT, WATCH_CODE_SIZE, pe_iat_off(0))
-    elf_syms.push(("_start", start, code.len() - start))
-    unwind_fns.push((start, code.len(), UW_ENTRY, 8))
-    start
-
-x64_cabi_adapter = (lf: int, ptypes: int[]) -> int:
-    nin = 0
-    loop t in ptypes:
-        if t == VI: nin += 1
-    if nin > 6 or ptypes.len() - nin > 8: fatal(0, "a @cabi function called from C on Windows takes at most 6 integer and 8 float parameters ({lfuncs[lf].name} takes {ptypes.len()})")
-    x64_emit_adapter(lf, ptypes)
-
-x64_entry = (inits: int[], main_lf: int) -> int:
-    row_line = 0
-    start = x64_emit_entry(inits, main_lf, main_code, entry_end_lf, watch_build, WATCH_CODE_AT, WATCH_CODE_SIZE)
-    elf_syms.push(("_start", start, code.len() - start))
-    start
-
 row_file = -1
-
-# (a row where the position changes; dwarf.jo leaves out those on the same line)
-x64_stubs = ():
-    row_line = 0
-    x64_emit_stubs()
-
-lf_is_cabi = (lf: int) -> bool: lfuncs[lf].kind == LK_INST and fns[lfuncs[lf].inst].cabi
-
-x64_resolve = (text_addr: int, ro_addr: int, data_addr: int):
-    error, lf = x64_patch_module(text_addr, ro_addr, data_addr, fn_addr)
-    if error == 1: ice("stubs not emitted")
-    if error == 2: ice("no adapter for {lfuncs[lf].name}")
-    if error == 3: ice("unresolved function {lfuncs[lf].name}")
 
 x_emit_host = X64EmitHost(fz_note_ro)
 x_emit_binding = x64_emitter_bind(&rodata, &ro_starts, &uw_data, &fused_on, &x_emit_host)

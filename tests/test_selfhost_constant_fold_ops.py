@@ -14,4 +14,4 @@ time/machine_zone time/zoned_meetings'''.split()
 def test_constant_fold_ops_match_twin(compiler, tmp_path, monkeypatch):
     results = compare_builds(compiler, tmp_path, monkeypatch, ('constant_fold_ops',),
                              [f'tests/cases/{c}.dewy' for c in CASES])
-    assert any(r[1] == 0 for r in results) and any(r[1] != 0 for r in results)
+    assert any(r[2] == 0 for r in results) and any(r[2] != 0 for r in results)

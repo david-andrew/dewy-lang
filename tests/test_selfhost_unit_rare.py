@@ -20,5 +20,5 @@ def test_unit_rare_match_twin(compiler, tmp_path, monkeypatch):
               ('constant_coerces', 'float_time_rejected', 'of_a_variable_rejected', 'off_grid_rejected', 'other_dimension_rejected')]
     results = compare_builds(compiler, tmp_path, monkeypatch, ('unit_rare',), [*cases, *PROGRAMS])
     by = {Path(r[0]).name: r for r in results}
-    assert 'calendar periods' in by['days.dewy'][3] and 'calendar periods' in by['months.dewy'][3]
-    assert any(r[1] == 0 for r in results)
+    assert 'calendar periods' in by['days.dewy'][4] and 'calendar periods' in by['months.dewy'][4]
+    assert any(r[2] == 0 for r in results)

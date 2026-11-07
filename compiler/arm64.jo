@@ -32,7 +32,9 @@ use 'types.jo'
 use 'check.jo'
 use 'ast.jo'
 use 'x64.jo'
+use 'x64_ops.dewy'
 use 'fused.jo'
+use 'arm64_ops.dewy'
 
 # Bind the shared code-array variable once, including Mach-O/REPL users.
 a_encoder_binding = arm64_encoder_bind(&code)
@@ -82,32 +84,3 @@ a_dbg = (fn_start: int, body: int):
     dbg_cfi.push(dbg_epis.len())
     loop e in dbg_epis: dbg_cfi.push(e - fn_start)
 
-# ---------------- stubs ----------------
-arm64_stubs = ():
-    line_rows.push(code.len())
-    line_rows.push(0)
-    row_pos = 0
-    row_line = 0
-    arm64_emit_stubs(stub_addr)
-
-arm64_entry = (inits: int[], main_lf: int) -> int:
-    line_rows.push(code.len())
-    line_rows.push(0)
-    row_pos = 0
-    row_line = 0
-    start = arm64_emit_entry(inits, main_lf, main_code, entry_end_lf, watch_build, WATCH_CODE_AT, WATCH_CODE_SIZE)
-    elf_syms.push(("_start", start, code.len() - start))
-    start
-
-arm64_entry_mac = (inits: int[], main_lf: int) -> int:
-    line_rows.push(code.len())
-    line_rows.push(0)
-    row_pos = 0
-    row_line = 0
-    start = arm64_emit_entry_mac(inits, main_lf, main_code, entry_end_lf)
-    elf_syms.push(("_main", start, code.len() - start))
-    start
-
-arm64_resolve = (text_addr: int, ro_addr: int, data_addr: int):
-    missing = arm64_patch_module(text_addr, ro_addr, data_addr, fn_addr, stub_addr)
-    if missing >= 0: ice("unresolved function {lfuncs[missing].name}")
