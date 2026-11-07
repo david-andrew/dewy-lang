@@ -27,3 +27,4 @@ These folders record, for each design decision, what was considered and why one 
 | [compile-speed/](compile-speed/) | Compile-speed redesigns | Fact state round 1: measured bound below the bar; nothing adopted. |
 
 The earliest time-design inputs were built from David's private notes and are kept outside the repo.
+| [integration/](integration/) | Cross-design conventions, dogfood passes, consistency audits, name tests (2026-11-07) | Shared rules for D4, D10, D11, D22, D28, D29, D31, D33–D37 |

@@ -475,3 +475,7 @@ section linked. ROADMAP.md lists them in one line each.
   `format(x spec)` goes too. Considered: keeping `{x:spec}` as shorthand.
   ([resources/discussion_points.md](../../resources/discussion_points.md), "Format
   string specifiers".)
+- **D26 and D27 closed** (2026-11-07): the parallel v4 design carries both
+  ([proposals/concurrency/unified/](proposals/concurrency/unified/)). A
+  `group.spawn` task can't write outer variables, and `or_throw` in a spawned lambda
+  forwards to its inferred result.
