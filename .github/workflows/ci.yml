@@ -111,7 +111,9 @@ jobs:
         run: python -m pip install pytest==9.0.2 pytest-xdist==3.8.0 pillow==12.3.0
       - name: Ensure offscreen GLES shader validation
         run: |
-          if ! python -c 'from tests.core_glsl_driver import ShaderDriver; ShaderDriver().close()'; then
+          # (the first try is expected to fail on a fresh runner: keep its traceback out of the
+          # log, where setup-python's problem matcher turns it into an error annotation)
+          if ! python -c 'from tests.core_glsl_driver import ShaderDriver; ShaderDriver().close()' 2>/dev/null; then
             sudo apt-get update
             sudo apt-get install -y libegl1 libgles2 libgl1-mesa-dri
           fi
@@ -128,27 +130,13 @@ jobs:
           DEWY_EMIT_WORKERS: '1'
           DEWY_PYTEST_SHARD: ${{ matrix.shard }}/2
           DEWY_TEST_TRACE: ${{ runner.temp }}/test-trace
-        run: |
-          free -m
-          echo "pid_max $(cat /proc/sys/kernel/pid_max)"
-          python - <<'PY'
-          import subprocess
-          import sys
-          from tools.core import TESTS
-
-          raise SystemExit(subprocess.call([
-              sys.executable, '-m', 'pytest', '-q', '-o', 'addopts=',
-              '--junitxml=core-results.xml', '-p', 'xdist.plugin',
-              '-p', 'tools.compiler.pytest_parallel', '-n', '4',
-              '--dist=loadgroup', '-m', 'not nightly', *TESTS,
-          ]))
-          PY
+        run: python -m tools.compiler.ci_pytest
       - name: Show the machine's state after a failure
-        if: failure()
+        if: failure() || cancelled()
         run: |
           free -m
           sudo dmesg | tail -40 || true
-          tail -n +1 "$RUNNER_TEMP"/test-trace/sigterm-*.log || true
+          tail -n +1 "$RUNNER_TEMP"/test-trace/sigterm-*.log "$RUNNER_TEMP"/test-trace/sigterm.senders || true
       - name: Preserve test results
         if: always()
         uses: actions/upload-artifact@v4
