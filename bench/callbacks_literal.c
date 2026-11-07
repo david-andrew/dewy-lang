@@ -7,8 +7,10 @@ static int64_t visit(const int64_t *values, int64_t threshold, int64_t bias) {
 }
 static int64_t kernel(const int64_t *values, int64_t count) {
     int64_t total = 0;
-    for (int64_t i = 0; i < count; i++)
-        total += 2 * visit(values, i % 8, i % 127);
+    for (int64_t i = 0; i < count; i++) {
+        total += visit(values, i % 8, i % 127);
+        total += visit(values, i % 8, i % 127);
+    }
     return total;
 }
 int main(int argc, char **argv) {
