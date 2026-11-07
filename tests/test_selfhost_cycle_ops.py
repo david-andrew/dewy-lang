@@ -200,7 +200,7 @@ everything = ():
     lists2.push(i32(global_read(g2, 27)))
     show("second list", second_list)
     assign = fresh(.assign, 2); nodes[assign].op = i32(int(Tok.assign)); nodes[assign].a = i32(global_read(g1, 28)); nodes[assign].b = i32(global_read(g2, 29))
-    show("assign skips target", assign)
+    show("assign needs target", assign)
     compound = fresh(.assign, 2); nodes[compound].op = i32(int(Tok.pluseq)); nodes[compound].a = i32(global_read(g1, 30)); nodes[compound].b = i32(global_read(g2, 31))
     show("compound reads target", compound)
     target_field = fresh(.field, 2); nodes[target_field].a = i32(global_read(g1, 32))
@@ -388,5 +388,5 @@ def test_cycle_ops_twins(compiler, tmp_path, release):  # noqa: F811
                              invocations=CASES,
                              services=('ast', 'check', 'isolation', 'isolation_ops', 'lower', 'lower_helpers', 'prelude', 'util'))
     assert outputs[0].endswith(b'all ok\n')
-    for output, text in zip(outputs[1:], (b'is used before it has its value', b'a value cycle across modules', b'has no order that gives it first', b' -> reads ', b'which needs ')):
+    for output, text in zip(outputs[1:], (b'is used before it has its value', b'a value cycle across modules', b'has no order that gives it first', b' -> accesses ', b'which needs ')):
         assert text in output, (text, output)

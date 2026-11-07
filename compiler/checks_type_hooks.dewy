@@ -1,6 +1,4 @@
 $runtime_checks
-# (types.jo first: entering the cycle here, it reaches host_binds.jo only after that module has initialized what it binds)
-from p"types.jo" import (T_NEVER T_VOID dt fields is_soa mk_param plain_problem prune soa_decl soa_inst struct_targ structs tkind type_str types union_alias_note zonk)
 from p"proof_ops.dewy" import (result_signature)
 from p"proof_ops.dewy" import (proof_atom_type)
 from p"error_ops.dewy" import (nominal_descends)
@@ -31,6 +29,7 @@ from p"nd_contracts.jo" import (nd_signature)
 from p"proofs.jo" import (proof_active proof_decls proof_predicates result_active)
 from p"refine.jo" import (ref_atoms ref_intern ref_storage_contract ref_validate_signature refine_active str_set_type)
 from p"refinement_types.dewy" import (RefAtom)
+from p"types.jo" import (T_NEVER T_VOID dt fields is_soa mk_param plain_problem prune soa_decl soa_inst struct_targ structs tkind type_str types union_alias_note zonk)
 from p"util.jo" import (err_notes fatal files intern name_of pl_inst_decls pl_on pos_file pos_in_lib)
 from p"warn_if_ops.dewy" import (wi_read_decl)
 

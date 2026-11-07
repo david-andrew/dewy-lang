@@ -5143,23 +5143,24 @@ active toolchain's library directory and also works with selected imports.
 Modules may import each other in cycles, Dewy and Sloppy (`.jo`) modules alike:
 a program runs as if its modules were one file. Each module sees the others'
 functions, types and values whichever imports first. Each module's top-level code
-runs in its own order; within a cycle, a line that reads another module's value
-(directly, or through a function it calls) runs after that value is given, and
+runs in its own order; within a cycle, a line that reads or writes another
+module's value (directly, or through a function it calls) runs after that value
+is initialized, so its initializer cannot overwrite the write, and
 otherwise imported modules go first, each running as far as it can.
 The only errors are the ones one file would have: values that need each other's
 first values, or a module's own order putting a line before a value it needs.
 Both name the chain of values and lines. A top-level call must also wait until
-values read by its functions have been initialized, including through recursive
-call chains. In one file, calling such a function before the value's declaration
+values read or written by its functions have been initialized, including through
+recursive call chains. In one file, calling such a function before the value's declaration
 is an error naming the statement, functions, value and declaration; statements
 are never reordered to make the call work. Defining a function, or passing and
 storing it for a later call, does not read the values in its body.
 
-This check follows statically known calls. Reads on all branches of a called
-function count, even if the branch will not run; move the call after the value's
+This check follows statically known calls. Reads and writes on all branches of
+a called function count, even if the branch will not run; move the call after the value's
 declaration in that case. Calls through opaque function values (for example,
 callbacks returned by another function or read from mutable storage) are not
-assigned guessed targets, so their indirect reads are not checked here.
+assigned guessed targets, so their indirect accesses are not checked here.
 
 `--target` and `$target` use the design's target names. A name has only the
 fields it needs: the processor, then the system.

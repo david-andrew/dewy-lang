@@ -2,8 +2,8 @@ use 'lower_helpers.dewy'
 # Import cycles (docs/design/modules.md): a program runs as if its modules were
 # one file. Modules outside a cycle initialize in import order (order_modules);
 # a cycle containing a Dewy module merges its members' top-level statements into
-# one init function, each statement after the other members' values it reads.
-# The same read summaries check single files, without moving their statements.
+# one init function, each statement after the other members' values it reads or writes.
+# The same access summaries check single files, without moving their statements.
 use 'checker_state.dewy'
 use 'checker_tokens.dewy'
 use 'check.jo'
@@ -30,12 +30,12 @@ tj_comps: int[][]
 
 
 # ---------------- merging a cycle's top-level code ----------------
-# What a statement reads: (global, first use, called function) triples, directly
+# What a statement accesses: (global, first use, called function) triples, directly
 # or through known calls. Making a function value does not call it. Branches
-# count even if not taken. Each function's transitive reads are found once per
+# count even if not taken. Each function's transitive accesses are found once per
 # program, on demand from initialization, and shared
 # by its call graph component (Tarjan, as for modules), so the cost is one walk
-# of the reachable code plus a union per call, not a walk per statement. A read
+# of the reachable code plus a union per call, not a walk per statement. An access
 # through a call is placed at the statement's call, so the sets need no positions.
 cr_member: bool[]    # per module: user initialization to check
 cr_index: int[]      # per function: its visit number, -1 when not yet visited
@@ -44,8 +44,8 @@ cr_on: bool[]
 cr_stack: int[]
 cr_next = 0
 cr_comp: int[]       # per function: its component, an index into cr_sets
-cr_events: int[][]   # per visit, retained for error-only witness search: the body's reads (g) and calls (-f), in order
-cr_sets: int[][]     # per component: the members' globals its functions read, transitively, first read first
+cr_events: int[][]   # per visit, retained for error-only witness search: the body's accesses (g) and calls (-f), in order
+cr_sets: int[][]     # per component: the members' globals its functions access, transitively, first use first
 cr_mark: int[]       # per global: the last cr_stamp that added it to a set
 cr_stamp = 0
 cr_taken: int[]      # per global: the last statement (cr_stmt) that took it

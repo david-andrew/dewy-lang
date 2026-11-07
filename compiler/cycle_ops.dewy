@@ -153,8 +153,8 @@ cyc_take=(g:CycleWord pos:CycleWord via:CycleWord):>void=>{
     cr_ev.push(pos)
     cr_ev.push(via)
 }
-# In function f's body (f > 0), ev gets its reads and calls; in a statement of
-# the program (f == 0), ev gets the statement's reads.
+# In function f's body (f > 0), ev gets its accesses and calls; in a statement of
+# the program (f == 0), ev gets the statement's accesses.
 cyc_walk=(root:CycleWord):>void=>$unsafe {
     # Checking is finished: this read-only walk and its call-graph visits do
     # not grow or rewrite nodes. Keep that stable view across recursive calls.
@@ -183,11 +183,9 @@ cyc_walk=(root:CycleWord):>void=>$unsafe {
         if cr_helpers and (k =? 'binary' or k =? 'intrinsic') {
             loop helper in value_helper_calls(n) {cyc_call(helper n)}
         }
-        if k =? 'assign' and ns[n].op =? int32(47) {
-            cyc_write(CycleWord(ns[n].a))
-            n=CycleWord(ns[n].b)
-            continue
-        }
+        # Assignment destinations need their declaration too: a later initializer
+        # must not overwrite a module-level write. The normal child walk includes
+        # plain, destructured and field/index destinations in the same summary.
         let mask=isolation_children(k)
         if mask =? 0 {return}
         # Tail-walk chains of field accesses and coercions without a stack
@@ -217,15 +215,6 @@ cyc_walk=(root:CycleWord):>void=>$unsafe {
         }
         return
     }
-}
-# A plain assignment does not read its destination; accessing a field/index
-# does read the container. Destructuring is a collection of destinations.
-cyc_write=(n:CycleWord):>void=>$unsafe {
-    if n <=? 0 or nodes.ptr[n].kind =? 'ident' {return}
-    if nodes.ptr[n].kind =? 'tuple' {
-        loop i in [0..nkids(n)) {cyc_write(kid(n i))}
-    }
-    else {cyc_walk(n)}
 }
 # Resolve literal function values at a call site. Handles returned by calls,
 # passed as parameters or stored in mutable places remain opaque; guessing
@@ -348,7 +337,7 @@ merge_cycle_inits=(order:array<int64>):>void=>{
     init_fns=merged
 }
 # Each member's statements stay in their order; a statement waits for the
-# declarations it reads; among the ready ones the earliest member goes first.
+# declarations it accesses; among the ready ones the earliest member goes first.
 merge_cycle_group=(group:array<int64>):>void=>$unsafe {
     let n=group.length
     let flat:array<int64>=[]
@@ -465,7 +454,7 @@ cyc_stuck=(group:array<int64> flat:array<int64> start:array<int64> needs:array<a
                     let d=CycleWord(fns.ptr[h].decl)
                     parts.push("'{name_of(CycleWord(nodes.ptr[d].name))}' ({cyc_where(nodes.ptr[d].pos)})")
                 }
-                route="; {cyc_where(nodes.ptr[s].pos)} calls {join(parts " -> ")} -> reads '{name_of(CycleWord(globals.ptr[g].name))}'"
+                route="; {cyc_where(nodes.ptr[s].pos)} calls {join(parts " -> ")} -> accesses '{name_of(CycleWord(globals.ptr[g].name))}'"
             }
         }
         routes.push(route)

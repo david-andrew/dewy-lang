@@ -28,9 +28,10 @@ imports first. Within a cycle (a strongly connected component of the import
 graph that contains a Dewy module), the members' top-level statements are
 merged into one initialization sequence:
 
-- a statement that reads a value declared by another member of the cycle runs
-  after that value's declaration; a read through a function it calls (or makes)
-  counts too, as the functions may read the value while initialization runs;
+- a statement that reads or writes a value declared by another member of the cycle runs
+  after that value's declaration; an access through a statically known function it
+  calls counts too. A write waits for the declaration so its initializer cannot
+  overwrite the write. Merely making or storing a function does not call it;
 - otherwise statements keep the import order: the module that would have run
   first without the cycle runs as far as it can before the next one starts.
 

@@ -130,8 +130,8 @@ cyc_take = (g: int, pos: int, via: int):
     cr_ev.push(g)
     cr_ev.push(pos)
     cr_ev.push(via)
-# In function f's body (f > 0), ev gets its reads and calls; in a statement of
-# the program (f == 0), ev gets the statement's reads.
+# In function f's body (f > 0), ev gets its accesses and calls; in a statement of
+# the program (f == 0), ev gets the statement's accesses.
 cyc_walk = (root: int):
     # Checking is finished: this read-only walk and its call-graph visits do
     # not grow or rewrite nodes. Keep that stable view across recursive calls.
@@ -155,10 +155,9 @@ cyc_walk = (root: int):
         if h > 0: cyc_call(h, n)
         if cr_helpers and (k == .binary or k == .intrinsic):
             loop helper in value_helper_calls(n): cyc_call(helper, n)
-        if k == .assign and ns[n].op == i32(int(Tok.assign)):
-            cyc_write(int(ns[n].a))
-            n = int(ns[n].b)
-            continue
+        # Assignment destinations need their declaration too: a later initializer
+        # must not overwrite a module-level write. The normal child walk includes
+        # plain, destructured and field/index destinations in the same summary.
         mask = isolation_children(k)
         if mask == 0: return
         # Tail-walk chains of field accesses and coercions without a stack
@@ -182,13 +181,6 @@ cyc_walk = (root: int):
         if mask & 32 != 0:
             loop i in [0..nkids2(n)): cyc_walk(kid2(n, i))
         return
-# A plain assignment does not read its destination; accessing a field/index
-# does read the container. Destructuring is a collection of destinations.
-cyc_write = (n: int):
-    if n <= 0 or nodes[n].kind == .ident: return
-    if nodes[n].kind == .tuple:
-        loop i in [0..nkids(n)): cyc_write(kid(n, i))
-    else: cyc_walk(n)
 # Resolve literal function values at a call site. Handles returned by calls,
 # passed as parameters or stored in mutable places remain opaque; guessing
 # their targets would reject callbacks that are only stored and called later.
@@ -291,7 +283,7 @@ merge_cycle_inits = (order: int[]):
         merged.push(f)
     init_fns = merged
 # Each member's statements stay in their order; a statement waits for the
-# declarations it reads; among the ready ones the earliest member goes first.
+# declarations it accesses; among the ready ones the earliest member goes first.
 merge_cycle_group = (group: int[]):
     n = group.len()
     flat: int[]
@@ -391,7 +383,7 @@ cyc_stuck = (group: int[], flat: int[], start: int[], needs: int[][], nxt: int[]
                 loop h in path:
                     d = int(fns[h].decl)
                     parts.push("'{name_of(int(nodes[d].name))}' ({cyc_where(nodes[d].pos)})")
-                route = "; {cyc_where(nodes[s].pos)} calls " + join(parts, " -> ") + " -> reads '{name_of(int(globals[g].name))}'"
+                route = "; {cyc_where(nodes[s].pos)} calls " + join(parts, " -> ") + " -> accesses '{name_of(int(globals[g].name))}'"
         routes.push(route)
         first_pos.push(need[b + 2])
         names.push(name_of(int(globals[g].name)))
