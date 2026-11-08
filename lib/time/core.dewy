@@ -270,14 +270,8 @@ $error_if true "a float time is rounded first: `let [d loss] = quantize(x roundi
 __sub__=(t:Instant q:float64*Time):>Instant=>t
 
 # ---------------- onto a grid: rounding says how, and what was lost is returned ----------------
-_Rounding:type='nearest_even'|'nearest_away'|'floor'|'ceil'|'toward_zero'
-_rounded=(count:rational rounding:_Rounding):>int=>match rounding {
-    <'nearest_even'>=>round(count ties='even')
-    <'nearest_away'>=>round(count ties='away')
-    <'floor'>=>count.numerator//count.denominator
-    <'ceil'>=>-((-count.numerator)//count.denominator)
-    <'toward_zero'>=>if count.numerator <? 0 {-((-count.numerator)//count.denominator)} else {count.numerator//count.denominator}
-}
+_Rounding:type='nearest_even'|'nearest_away'|'nearest_toward_zero'|'nearest_up'|'nearest_down'|'floor'|'ceil'|'toward_zero'|'away_from_zero'
+_rounded=(count:rational rounding:_Rounding):>int=>round(count rounding=rounding)
 # (a tick in nanoseconds; none when it is not a positive whole number of them)
 _tick_ns=(tick:rational*Time):>int?=>{
     let count=_seconds(tick)*rational(1000000000)

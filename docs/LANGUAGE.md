@@ -1857,9 +1857,12 @@ returns both. `.floor()`, `.ceil()` and `.round()` return `int`, and `int(q)`
 truncates toward zero. Exact numbers round as people do, a half away from zero:
 `round(5/2)` and `round(2.5)` are 3, `round(-2.5)` is −3. Floats follow IEEE
 754 instead, a half to the even neighbour: `round(f)` is `2.0` for
-`f:float64 = 2.5`. Both take `ties=` to choose the rule: `'away'`, `'even'`,
-`'zero'` (toward zero), `'up'` (toward +∞) or `'down'` (toward −∞), as in
-`round(f ties='away')`. `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return
+`f:float64 = 2.5`. Both take `rounding=` to choose the rule: `'nearest_away'`,
+`'nearest_even'`, `'nearest_toward_zero'`, `'nearest_up'`, `'nearest_down'`,
+`'floor'`, `'ceil'`, `'toward_zero'` or `'away_from_zero'`, as in
+`round(f rounding='nearest_away')`. The five nearest modes choose where a
+half goes; the other four direct every non-integral value. Time's `round`
+and `quantize` use the same nine modes. `.abs()`, `.reciprocal()` and `.pow(signed_exponent)` return
 fractions. `abs`, `min` and `max` of fractions (an integer beside one included) are
 exact fractions, and `sign(q)` is an `int`; beside a float they give a float. A nonzero divisor of `/`, `//` and `%` is an obligation, as an
 integer division's, when the divisor is an integer or a constant (`x/n` after

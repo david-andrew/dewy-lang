@@ -71,7 +71,7 @@ main = ():>void => {
     # Rounding: ties to even; floor, ceil and round keep the sign of zero.
     let half:float64 = 2.5
     let neg:float64 = -0.4
-    printl"{round(half)} {round(-half)} {round(half ties='away')} {neg.ceil()} {round(neg)}"
+    printl"{round(half)} {round(-half)} {round(half rounding='nearest_away')} {neg.ceil()} {round(neg)}"
     # Float-to-integer conversion keeps the value (truncating toward zero).
     let f:float64 = -2.75
     let g:float64 = 1e20

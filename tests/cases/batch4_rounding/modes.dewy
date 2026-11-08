@@ -1,0 +1,20 @@
+main=()=>{
+    let floats:array<float64>=[2.25 -2.25 2.5 -2.5 2.75 -2.75 3.5 -3.5]
+    let small:array<float32>=[2.25 -2.25 2.5 -2.5 2.75 -2.75 3.5 -3.5]
+    let exact:array<rational>=[9/4 -9/4 5/2 -5/2 11/4 -11/4 7/2 -7/2]
+    let n0:rational<int64>=(9)/4
+    let n1:rational<int64>=(-9)/4
+    let n2:rational<int64>=(5)/2
+    let n3:rational<int64>=(-5)/2
+    let n4:rational<int64>=(11)/4
+    let n5:rational<int64>=(-11)/4
+    let n6:rational<int64>=(7)/2
+    let n7:rational<int64>=(-7)/2
+    let narrow=[n0 n1 n2 n3 n4 n5 n6 n7]
+    loop mode in (['nearest_away' 'nearest_even' 'nearest_toward_zero' 'nearest_up' 'nearest_down' 'floor' 'ceil' 'toward_zero' 'away_from_zero'] as array<'nearest_away'|'nearest_even'|'nearest_toward_zero'|'nearest_up'|'nearest_down'|'floor'|'ceil'|'toward_zero'|'away_from_zero'>) {
+        printl([loop x in floats round(x rounding=mode)])
+        printl([loop x in small round(x rounding=mode)])
+        printl([loop x in exact round(x rounding=mode)])
+        printl([loop x in narrow round(x rounding=mode)])
+    }
+}
