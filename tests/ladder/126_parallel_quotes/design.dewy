@@ -1,7 +1,6 @@
 # Reusable pricing transforms preserve order through an inferred wrapper.
 apply = (f:(x:int:>int) xs:array<int>):>array<int> => [parallel x in xs f(x)]
 forward = (f:(x:int:>int) xs:array<int>):>array<int> => apply(@f xs)
-$parallel_safe
 quote = (f:(x:int:>int) xs:array<int>):>array<int> => forward(@f xs)
 with_tax = (x:int):>int => x * 105
 main = () => {

@@ -67,7 +67,6 @@ metatag_fail_text = (name: str) -> str:
     if name == "supported_targets" or name == "explicit_allocation_failure": return "`${name}` is a module directive; put it at file scope"
     if dir_builtin(name): return "`${name}` is a setting: write it on a line of its own in a module, function body or block"
     if name == "test": return "`$test` goes alone on the line just before a module-level function declaration"
-    if name == "parallel_safe": return PARSAFE_PLACE
     if name == "shadowable": return "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file"
     if name == "expect" or name == "fail": return "`${name}` is a statement in a function: a test, or a helper a test calls"
     if dw_designed_directive(name): return "`${name}` is part of the design but not implemented yet"

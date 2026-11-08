@@ -11,6 +11,7 @@ CASES = [
     'template_proofs/input_unregistered',
     'directives/forbid_copies_off',
     'effects/no_blocks_io',
+    'frontend/batch4_parallel_safe_removed',
 ]
 
 

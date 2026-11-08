@@ -217,23 +217,3 @@ parsafe_finalize = ():
                 if not parsafe_req.has(parsafe_key(h, j)): continue
                 parsafe_notes(h, j)
                 fatal(nodes[v].pos, "{parsafe_fn_name(h)} runs its parameter '{parsafe_param_name(h, j)}' on many threads at once, so it can only be called directly (where the compiler checks the function given for '{parsafe_param_name(h, j)}'), not used as a value or partially applied")
-    if parsafe_tags.len() > 0: parsafe_tags_check()
-
-
-# `$parallel_safe` (parsafe_tags, by declaration): each checked instance must take a callback and
-# still pass every callback parameter into parallel code, so an edit to the body cannot quietly
-# drop the requirement its callers are held to. O(tagged instances x parameters).
-parsafe_tags_check = ():
-    loop d, pos in parsafe_tags:
-        di = int(nodes[d].sym)
-        if di <= 0: continue
-        loop f in decl_infos[di].insts:
-            if fns[f].state != 2 or fns[f].body == 0: continue
-            callback = false
-            loop t in fns[f].ptypes:
-                if tkind(t) == .fn_: callback = true
-            if not callback: fatal(pos, "`$parallel_safe` holds callers to giving a parallel-safe function for each callback parameter, but {parsafe_fn_name(f)} takes no function, so the tag would check nothing: remove it")
-            loop i in [0..fns[f].ptypes.len()):
-                if tkind(fns[f].ptypes[i]) != .fn_ or i >= fns[f].params.len() or parsafe_req.has(parsafe_key(f, i)): continue
-                fatal(pos, "`$parallel_safe` says {parsafe_fn_name(f)} runs its callback '{parsafe_param_name(f, i)}' on many threads at once, so its callers must give a parallel-safe function, but its body no longer passes '{parsafe_param_name(f, i)}' into parallel code: pass it into parallel code again, or remove the tag (this loosens what callers are held to)")
-

@@ -6,7 +6,7 @@ from p"check.jo" import (expectation_ifs statement_watch target_arm64 target_mac
 from p"checks_builders.dewy" import (bc_block bc_call bc_ident bc_if bc_int bc_let bc_stmt)
 from p"dewy_grammar.dewy" import (dw_designed_directive)
 from p"dewy_node_ops.dewy" import (dw_singleton_and dw_singleton_int dw_singleton_value dw_text)
-from p"dewy_nodes.jo" import (DW_BIGINT_ALIAS PARSAFE_PLACE dw_bigint_import dw_chain_count dw_pending_decls dw_singleton_bound dw_targets_listed)
+from p"dewy_nodes.jo" import (DW_BIGINT_ALIAS dw_bigint_import dw_chain_count dw_pending_decls dw_singleton_bound dw_targets_listed)
 from p"directives.jo" import (dir_builtin)
 from p"expr.jo" import (bc_assign bc_bin)
 from p"refine.jo" import (refine_active)
@@ -46,7 +46,6 @@ metatag_fail_text=(name:string):>string=>{
     if name =? "supported_targets" or name =? "explicit_allocation_failure" {return "`${name}` is a module directive; put it at file scope"}
     if dir_builtin(name) {return "`${name}` is a setting: write it on a line of its own in a module, function body or block"}
     if name =? "test" {return "`$test` goes alone on the line just before a module-level function declaration"}
-    if name =? "parallel_safe" {return PARSAFE_PLACE}
     if name =? "shadowable" {return "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file"}
     if name =? "expect" or name =? "fail" {return "`${name}` is a statement in a function: a test, or a helper a test calls"}
     if dw_designed_directive(name) {return "`${name}` is part of the design but not implemented yet"}

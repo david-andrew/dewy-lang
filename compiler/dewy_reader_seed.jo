@@ -6634,7 +6634,7 @@ rt_dc_breakpoint = (token: DewyLexeme) -> int:
 
 rt_dc_marker = (token: DewyLexeme) -> int:
     name = rt_dn_payload(token)
-    if not (name == "test" or name == "proof" or name == "export" or name == "shadowable" or name == "explicit_allocation_failure" or name == "parallel_safe"): return 0
+    if not (name == "test" or name == "proof" or name == "export" or name == "shadowable" or name == "explicit_allocation_failure"): return 0
     next = dc_parser.tokens[dc_parser.at + 1]
     if next.kind != .eof and not (next.newline and dn_power(next.symbol) == 0 and next.symbol != .kw_not):
         if not next.space or dn_power(next.symbol) > 0 or next.symbol == .kw_not or next.symbol == .semi or next.symbol == .dot or next.symbol == .question or next.symbol == .ellipsis: return 0

@@ -75,6 +75,3 @@ dewy_reserved_name = (name: str, pos: int):
 dw_range_value = (range: int) -> int:
     if nodes[range].a == 0 or nodes[range].b == 0: fatal(nodes[range].pos, "a stored range needs both endpoints; open ranges can be used directly in loops or membership")
     db_range_value(nodes, lists, dw_builder_host, range)
-dw_parsafe_attach = (made: int[], pos: int):
-    if made.len() != 1 or nodes[made[0]].kind != .fn_ or has_flag(made[0], NF_EXTERN): fatal(pos, PARSAFE_PLACE)
-    parsafe_tags[made[0]] = pos

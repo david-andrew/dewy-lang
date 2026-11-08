@@ -712,9 +712,8 @@ a pointer to each rule. The wording is David's.
 
 David's decision (#114): inferred, with no required tag. A function that passes
 a callback parameter into parallel code gets "this argument must be
-parallel-safe" in its signature, checked at call sites like effects. An optional
-`$parallel_safe` only enforces the contract on exported APIs, and is rejected on
-a function that takes no callback. Ordinary code never writes anything.
+parallel-safe" in its signature, checked at call sites like effects.
+The requirement is always inferred; no annotation is needed (batch 4).
 
 - **Parallel-safe** is exactly what a `parallel` body already must be: no
   writes to globals or captured variables, also through called functions
@@ -752,12 +751,6 @@ a function that takes no callback. Ordinary code never writes anything.
   apply's parameter 'f', which must be parallel-safe"), each wrapper passing it
   on, and the parallel use ("apply runs 'f' on many threads at once here,
   through `parallel`").
-- **`$parallel_safe`** is a marker like `$export`: first in a module-level
-  function declaration, on its line or the line before. After inference, each
-  checked instance is examined: with no parameter of function type (aliases
-  resolved) the tag is rejected, as it would check nothing; otherwise every
-  callback parameter must carry the requirement, or the tag is an error saying
-  the body no longer passes it into parallel code.
 - **Gaps** (conservative errors, not unsoundness): a parallel body that hands
   a callback parameter to a helper that calls it, and a callback parameter
   given to `spawn`, are still rejected as calls the compiler cannot see.

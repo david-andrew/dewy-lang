@@ -3268,11 +3268,6 @@ call, from a record field, a table or a local copy, is an error. In a task the
 callback may wait; a function's callback parameter a task calls is checked at each
 call of that function.
 
-`$parallel_safe`, first in a function declaration (on its line or the line
-before), pins this contract on an exported API: each callback parameter must
-still reach parallel code, so an edit to the body cannot quietly loosen what
-callers are held to. On a function that takes no callback it is an error.
-
 Native programs use a persistent worker pool. `DEWY_THREADS = 2` limits it to
 two threads including the caller; `DEWY_THREADS = 1` runs on the caller. Nested
 operations share the same pool, and a caller waiting at a join helps run ready

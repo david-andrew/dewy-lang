@@ -1,9 +1,9 @@
 $runtime_checks
-from p"ast.jo" import (NF_EXTERN has_flag lists mk nodes parsafe_tags)
+from p"ast.jo" import (lists mk nodes)
 from p"check.jo" import (release_build)
 from p"dewy_builders.dewy" import (db_finish_function db_range_value db_singleton_and db_singleton_int db_singleton_value db_value_name)
 from p"dewy_context.jo" import (dc_parser)
-from p"dewy_nodes.jo" import (PARSAFE_PLACE dw_builder_host)
+from p"dewy_nodes.jo" import (dw_builder_host)
 from p"dewy_node_rare.dewy" import (dewy_reserved_text dw_renamed_init)
 from p"dewy_node_builds.dewy" import (dw_target_name)
 from p"dewy_syntax.dewy" import (syntax_target_field_value)
@@ -58,8 +58,4 @@ dewy_reserved_name=(name:string pos:NodeOpWord):>void=>{
 dw_range_value=(range:NodeOpWord):>int64=>$unsafe {
     if nodes.ptr[range].a =? 0 or nodes.ptr[range].b =? 0 {fatal(nodes.ptr[range].pos "a stored range needs both endpoints; open ranges can be used directly in loops or membership")}
     db_range_value(@nodes @lists @dw_builder_host range)
-}
-dw_parsafe_attach=(made:array<int64> pos:NodeOpWord):>void=>$unsafe {
-    if made.length not=? 1 or nodes.ptr[made[0]].kind not=? 'fn_' or has_flag(made[0] NF_EXTERN) {fatal(pos PARSAFE_PLACE)}
-    parsafe_tags[made[0]]=pos
 }

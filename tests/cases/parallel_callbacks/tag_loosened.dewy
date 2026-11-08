@@ -1,5 +1,0 @@
-# The body no longer runs its callback in parallel code: the tag catches the loosened contract.
-$parallel_safe
-apply = (f:(x:int:>int) xs:array<int>):>array<int> => [loop x in xs f(x)]
-square = (x:int):>int => x*x
-main = () => printl(apply(@square [1 2 3]))

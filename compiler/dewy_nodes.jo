@@ -86,12 +86,6 @@ dw_type_members: {int: {int: {int: int}}} = {}   # file -> type name -> its memb
 # (compiler/warn_if.jo), kept as the declaration's `warn_if` attribute (condition, message).
 dw_warn_if_pending: int[]
 
-# `$parallel_safe` before a module function: its callers are held to giving a parallel-safe
-# function for each callback parameter (compiler/concurrency.jo, parsafe_tags_check, which also
-# rejects a function with no callback parameter once its types are known).
-PARSAFE_PLACE = "`$parallel_safe` marks a module-level function that runs its callbacks on many threads at once: put it before one, on its line or the line above"
-dw_parsafe_pos = 0
-
 # The declarations a module statement the direct grammar read makes (dewy_direct.jo's dn_statement):
 # positive IDs are declarations; negative IDs select module-only checker nodes.
 # Keep the statement head separately: a declaration's own position may name its binding.
@@ -107,9 +101,6 @@ dw_top_declarations = (id: int, pos: int) -> int[]:
                 proof_active = true
                 refine_active = true
             else if text == "export": dw_export_at(pos, "")
-            else if text == "parallel_safe":
-                if dw_parsafe_pos != 0: fatal(pos, "a second `$parallel_safe`: one marks the function just after it")
-                dw_parsafe_pos = pos
             else if text == "explicit_allocation_failure": oom_module(pos_file(pos), pos)
         else if form == 2: dw_export_at(pos, name_of(int(nodes[int(result.a)].sval)))
         else if form == 3:
@@ -119,14 +110,11 @@ dw_top_declarations = (id: int, pos: int) -> int[]:
         else if form == 4: dw_warn_if_pending.push(int(result.a))
         return []
     exported = dw_export_pos != 0
-    parsafe = dw_parsafe_pos
-    dw_parsafe_pos = 0
     pending = proof_pending
     soft = dw_warn_if_pending
     dw_warn_if_pending = []
     made = dw_top_declarations_inner(id)
     if exported: dw_export_attach(made)
-    if parsafe != 0: dw_parsafe_attach(made, parsafe)
     if soft.len() > 0:
         if made.len() != 1 or nodes[made[0]].kind != .fn_: fatal(nodes[soft[0]].pos, "`$warn_if` goes on the line before the function declaration whose callers it warns")
         dw_ffi_attach(made[0], soft)

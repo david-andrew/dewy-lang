@@ -73,7 +73,7 @@ def test_concurrency_parsafe_execution(compiler, tmp_path, monkeypatch, optimize
 
 
 @pytest.mark.parametrize('optimized', [False, True], ids=['default', 'release'])
-@pytest.mark.parametrize('case', ['two_wrappers', 'tag_holds'])
+@pytest.mark.parametrize('case', ['two_wrappers', 'inferred_wrappers'])
 def test_concurrency_parsafe_program(compiler, tmp_path, monkeypatch, optimized, case):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     source = ROOT / 'tests/cases/parallel_callbacks' / (case + '.dewy')
@@ -90,7 +90,7 @@ def test_concurrency_parsafe_program(compiler, tmp_path, monkeypatch, optimized,
     assert ran.stdout == source.with_suffix('.out').read_bytes()
 
 
-@pytest.mark.parametrize('case', ['tag_loosened', 'value_use'])
+@pytest.mark.parametrize('case', ['value_use'])
 def test_concurrency_parsafe_diagnostics(compiler, tmp_path, monkeypatch, case):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     source = ROOT / 'tests/cases/parallel_callbacks' / (case + '.dewy')

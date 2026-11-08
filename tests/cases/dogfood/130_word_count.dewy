@@ -25,7 +25,6 @@ tokens = (line:string):>array<string> => {
 # Only words of four letters or more.
 long_tokens = (line:string):>array<string> => [loop w in tokens(line) if w.length >=? 4 w]
 
-$parallel_safe
 map_reduce = (docs:array<string> split:(line:string:>array<string>)):>dict<string int> => {
     let parts = [parallel d in docs split(d)]
     let counts:dict<string int> = []
