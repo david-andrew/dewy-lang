@@ -5,18 +5,18 @@ $runtime_checks
 # no function value, so effects, facts and deadlock certificates follow the call. Only a function
 # that states a constant check and whose body only hands its parameters on (cc_forward_read), and
 # only for constant string arguments. Demand-driven: O(declarations + arguments) per such call.
-from p"check_constant.jo" import (cc_forwards)
+from p"check_constant.jo" import (cc_forwards cc_passed)
 from p"constant_checks.dewy" import (cc_constant)
-from p"ast.jo" import (NF_CHECKED add_flag kid kids mk nkids nkids2 nodes set_list)
+from p"ast.jo" import (NF_CHECKED NF_SPREAD add_flag has_flag kid kids mk nkids nkids2 nodes set_list)
 from p"frontend.jo" import (source_force_body)
 from p"expr.jo" import (AUX2_PARTIAL call_collect_named last_checked ntype)
-from p"check.jo" import (fns syms universe)
+from p"check.jo" import (bound_here check_scopes ctxs cur_mod cx demand_name fns modules prelude syms universe use_home)
 from p"checker_expr.dewy" import (call_by_name check_expr)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)
 from p"comptime.jo" import (checked_const_init)
-from p"types.jo" import (T_STR prune)
+from p"types.jo" import (T_MATH_INT T_STR prune types)
 from p"units.jo" import (bundled_rational_type bundled_word_rational_type)
-from p"util.jo" import (name_of)
+from p"util.jo" import (fatal files intern name_of pos_file)
 
 FwdWord:type=int64<overflow='wrap'>
 # A constant-checked function whose body only hands its parameters on, as a partial application
@@ -191,4 +191,62 @@ value_binding_forward=(n:FwdWord callee:FwdWord args:array<int64> expected:FwdWo
     let initial=checked_const_init(FwdWord(nodes.ptr[callee].aux) FwdWord(nodes.ptr[callee].sym) nodes.ptr[callee].pos)
     if initial =? 0 or nodes.ptr[initial].kind not=? 'call' or nodes.ptr[initial].aux not=? 0 or nodes.ptr[initial].sym <=? 0 {return -1}
     value_call_forward(n initial [FwdWord(fns.ptr[FwdWord(nodes.ptr[initial].sym)].decl)] args expected)
+}
+
+# Literal fmt calls need no formatter module in the program being checked. Compile the
+# library's own validators into the compiler: one grammar and the same error messages.
+from p"@lib/format_patterns.dewy" import (_fmt_on_integer _fmt_on_float _fmt_on_text)
+# Before lookup can demand fmt's prelude module, establish that no lexical, module or
+# imported binding shadows it. Indexed scope/module probes; O(uses) only for mixed imports.
+fmt_literal_builtin=(name:FwdWord):>bool=>$unsafe {
+    let floor=if cx >=? 0 {FwdWord(ctxs.ptr[cx].floor)} else {0}
+    if name <? check_scopes.top.length and check_scopes.top[name] >=? floor {return false}
+    let m=cur_mod()
+    if m <? 0 or not files.ptr[FwdWord(modules.ptr[m].file)].is_dewy or bound_here(name) {return false}
+    let home=use_home(m name)
+    if home >=? 0 {return false}
+    if home =? -2 {
+        loop u in modules.ptr[m].uses {
+            if modules.ptr[u].names.has(name) {return false}
+        }
+    }
+    true
+}
+# Only an immediate application with one literal pattern and one scalar value. Other
+# cases retain ordinary forwarding/closure checks. O(pattern bytes), on demand; no pass.
+fmt_literal_call=(n:FwdWord giver:FwdWord args:array<int64> expected:FwdWord):>FwdWord=>$unsafe {
+    if nodes.ptr[giver].kind not=? 'call' or nodes.ptr[giver].type not=? 0 or nkids(giver) not=? 1 or args.length not=? 1 {return -1}
+    let head=FwdWord(nodes.ptr[giver].a)
+    if nodes.ptr[head].kind not=? 'ident' or name_of(FwdWord(nodes.ptr[head].name)) not=? "fmt" {return -1}
+    let pattern=kid(giver 0)
+    if nodes.ptr[pattern].kind not=? 'str_lit' or nkids(pattern) not=? 0 or has_flag(args[0] NF_SPREAD) or nodes.ptr[args[0]].kind =? 'namedarg' {return -1}
+    if not fmt_literal_builtin(FwdWord(nodes.ptr[head].name)) {return -1}
+    check_expr(args[0] 0);
+    let value=last_checked
+    add_flag(value NF_CHECKED)
+    let t=prune(ntype(value))
+    let k=types.ptr[t].kind
+    if t not=? T_MATH_INT and t not=? T_STR and k not=? 'int_' and k not=? 'float_' {return -1}
+    let text=name_of(FwdWord(nodes.ptr[pattern].sval))
+    let why=if t =? T_STR {_fmt_on_text(text)} else if k =? 'float_' {_fmt_on_float(text)} else {_fmt_on_integer(text)}
+    if why isnt? none {fatal(nodes.ptr[giver].pos "cannot format this value: {why}")}
+    let name=intern("__format_valid")
+    demand_name(name)
+    let decls:array<int64>=[]
+    let s=prelude.get(name) ?? 0
+    loop s not=? 0 {
+        if syms.ptr[s].kind =? 'fns' {decls.push(FwdWord(syms.ptr[s].decl))}
+        s=FwdWord(syms.ptr[s].next)
+    }
+    let callhead=mk('ident' nodes.ptr[n].pos)
+    nodes.ptr[callhead].name=int32(name)
+    nodes.ptr[n].a=int32(callhead)
+    nodes.ptr[n].aux=0
+    nodes.ptr[n].sym=0
+    set_list(n [value pattern])
+    let result=resolve_fn_call(n name decls [value pattern] expected)
+    # Preserve the ordinary constant check's certificate: the panic inventory must
+    # not rediscover the validated writer's preconditions through its runtime graph.
+    cc_passed[n]=true
+    result
 }
