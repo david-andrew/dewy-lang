@@ -1650,6 +1650,15 @@ fact_assume = (s: mut FactState, v: int, truth: bool):
         # (below an `int` literal in [2^63, 2^64): a row, the only place
         # that ceiling fits, for a conversion to uint64)
         if y.wide and not x.wide and fact_u64_literal(b) < 0: fact_difference(s, a, b, (if op == .lt: -1 else: 0), t.origin)
+    # Excluding zero does not require a host-word interval. Keep this fact
+    # for a 65-bit difference or an arbitrarily wide mathematical integer.
+    if op == .ne and (x.wide or y.wide):
+        if not y.wide and y.lo == 0 and y.hi == 0:
+            x.nz = true
+            fact_set_bound(s, a, x)
+        if not x.wide and x.lo == 0 and x.hi == 0:
+            y.nz = true
+            fact_set_bound(s, b, y)
     if x.wide or y.wide: return
     exact = false
     if op == .eq:

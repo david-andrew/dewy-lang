@@ -4,7 +4,7 @@ from p"check.jo" import (LF_ALIAS locals sa_fits)
 from p"checker_tokens.dewy" import (Tok)
 from p"exact.jo" import (exact_has_node exact_marks exact_unsigned_fact)
 from p"expr.jo" import (ntype)
-from p"facts.jo" import (FactDifference FactState fact_add_fits fact_bound fact_difference fact_difference_head fact_difference_next fact_domain fact_incident fact_literal fact_new fact_open_endpoint fact_project fact_set_bound fact_shared_literals fact_shortest fact_slot fact_sum_operand fact_sum_rows fact_terms fact_type fact_unmodeled)
+from p"facts.jo" import (FactDifference FactState fact_add_fits fact_bound fact_constant fact_difference fact_difference_head fact_difference_next fact_domain fact_incident fact_literal fact_new fact_open_endpoint fact_project fact_set_bound fact_shared_literals fact_shortest fact_slot fact_sum_operand fact_sum_rows fact_terms fact_type fact_unmodeled)
 from p"facts_joins.dewy" import (fact_host_finite)
 from p"facts_loops.dewy" import (fact_entails)
 from p"facts_numeric.dewy" import (fact_offset_value fact_open_bound fact_open_product fact_reuse_tighten fact_scaled_again fact_scaled_open fact_scaled_quotient fact_word_type)
@@ -158,6 +158,8 @@ fact_sum_source=(n:ArithWord):>ArithWord=>$unsafe {
 }
 fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>ArithWord=>{
     if fact_type(ntype(n)) =? T_U64 {return exact_unsigned_fact(@s n op a b)}
+    # Captured term identity is stronger than intervals, even for wide integers.
+    if op =? 'minus' and a not=? 0 and a =? b {return fact_constant(@s 0)}
     let x=fact_bound(s a)
     let y=fact_bound(s b)
     if x.wide or y.wide {return fact_unmodeled(@s n 'unsupported')}

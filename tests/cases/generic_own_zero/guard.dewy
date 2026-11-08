@@ -1,0 +1,19 @@
+from units import m
+frac=<T>(value:T low:T high:T):>float64=>{
+    let span=high-low
+    if span =? low-low {return 0.0}
+    if span not=? low-low {return (value-low)/span as float64}
+    return 0.0
+}
+wide=(n:int low:int):>int=>{
+    if n not=? low-low {return n//n}
+    return 0
+}
+main=()=>{
+    printl(frac(90.0m/s 0.0m/s 360.0m/s))
+    printl(frac(int64(90) int64(60) int64(120)))
+    printl(frac(0.5 0.0 1.0))
+    printl(frac(1.0 1.0 1.0))
+    printl(frac(int64(0) int64(-9223372036854775808) int64(9223372036854775807)))
+    printl(wide(1<<100 7))
+}

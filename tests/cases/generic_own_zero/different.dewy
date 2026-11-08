@@ -1,0 +1,6 @@
+f=(value:rational low:rational high:rational other:rational):>float64=>{
+    let span=high-low
+    if span not=? low-other {return (value-low)/span as float64}
+    return 0.0
+}
+printl(f(1.0 0.0 0.0 1.0))
