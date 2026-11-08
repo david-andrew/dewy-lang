@@ -1,4 +1,4 @@
-# Amendments to the four revisions (integration pass, final, 2026-11-07)
+# Amendments to the four revisions (integration pass, final, with the owner's answers of 2026-11-07)
 
 Each revision file plus this page is the full design. The open-item texts are in `open-items.md`. Where this page and a revision disagree, this page wins. The rules are numbered as in `conventions.md` (C1–C18), and † marks a name that still needs a cold read.
 
@@ -21,8 +21,8 @@ Each revision file plus this page is the full design. The open-item texts are in
 | `checked_add` (time library) | `strict_add`; the prefix is `strict_` everywhere (round 6: `checked_today` read as "checked today") |
 | `Task.cancel`, `group.cancel` | `.stop` (C1) |
 | `Child` | `Process`† |
-| `x or_throw<E>` | `x or_throw_only<E>`† (all three readers read `or_throw<E>` as "throw an `E`") |
-| `to_int(text)`, `to_float(text)` | `int(text)`, `float64(text)` (C7; owner question, as it renames a decided spelling) |
+| `x or_throw<E>` | Unchanged: the owner chose `or_throw<E>` over `or_throw_only<E>` for orthogonality with `??<E>` (2026-11-07). The cold read, where all three readers took it as "throw an `E`", is background only |
+| `to_int(text)`, `to_float(text)` | Unchanged for now: renames wait for the owner's naming-style study (snake_case or Julia-style joined words) |
 | `plot(kind=)` | `plot(style=)` (C15) |
 | `slider(@v low high)`, `plot(low= high=)` | `slider(@v [low..high])`, `plot(range=[…])` (D15d) |
 
@@ -53,12 +53,12 @@ Each revision file plus this page is the full design. The open-item texts are in
   - `timeout:Duration | MonoPoint | Instant | none` (C9). A `MonoPoint` is a monotonic deadline (`now + 1s`), and an `Instant` is a wall-clock deadline.
   - `ticker(1s)` delivers `ClockReading`s, and `Ticker` gains `.stop` and `.running`.
   - The protocol is `Waitable<R>`.
-  - The one-wait idiom is `match select(…) or_throw_only<Canceled> { … }`. If the spelling is refused, it is the one arm `<Canceled> => return Canceled`.
+  - The one-wait idiom is `match select(…) or_throw<Canceled> { … }`.
 - **§7, add: waits take any time quantity** (F22). `sleep`, `within`, `timeout=` and `ticker` accept `rational*Time` and round up to the tick. `sleep(until=t)`† takes a `MonoPoint` or an `Instant`.
 - **§9, add (F33):** a `$parallel.*` tag that governs no construct is an error. As the first line inside a `parallel` loop or comprehension body, it governs that construct.
 - **§11:** D22, D26 and D27 are unchanged in substance. `music.cancel` in §6 becomes `music.stop`.
 - **§17 notes:**
-  - The `;` friction is settled by receipts (C5).
+  - A statement that ignores a useful result writes `;` (C5; owner, 2026-11-07).
   - The process call is `start_process` → `Process`.
   - `Atomic.add` follows the counter rule (safety §4).
 
@@ -82,15 +82,12 @@ Each revision file plus this page is the full design. The open-item texts are in
   - `f.relative_to(base)` on a `SafePath` under `base` gives a `SubPath`†, a sequence of `FileName`s that joins to any base with no confinement (F1).
   - `dir.glob["*.jpg" "*.png"]` takes several literal patterns through the approved `f[…]` call (F27). A computed pattern gives plain `Path`s.
 - **§6:** `random(range)` takes any type with a sampler: integers, floats, quantities, `Duration` and `Date` (F32).
-- **§7 → receipts (C5):** this replaces "dropped before the end of a body".
-  - A receipt is kept wherever a value is taken: a binding, an argument, a collector, or the last line of an inferred-result body. It is dropped silently elsewhere, including on `main`'s last line and anywhere in a written `:>void` body.
-  - Inference: a function whose inferred result is a receipt on every path is itself one (F48: `log = (m) => file.append_text(m) or_throw`).
-  - Tagged by category: handle types (`Task`, `PlayingSound`, `Process`), file-system writes returning their path (gate-enforced), `Atomic.add`, `Controls.rebind`, and `Process.wait` (the `ExitStatus`).
-  - Not receipts: `xs.pop`, `d.pop(k)`, `window(…)`, `ticker(…)`, `try_send` (its `Unsent` is a failure: `?? void` or `;`), and every reader.
-  - **Fallback if declined:** keep the path and handle results and write `;`. The `void` fallback is withdrawn (stem rule; recheck 6).
+- **§7, decided by the owner (2026-11-07): `$discardable_result` is rejected.** Calls keep returning useful values (handles, paths, new values), and a statement that ignores one writes an attached `;`, as the multi-expression rules already say.
+  - The owner's reason: "I don't want to allow there to be some special case just to skip `;` if `;` is the obvious way to suppress the value."
+  - The `void` fallback is withdrawn too, since results carry something useful (stem rule; recheck 6).
 - **§8:**
-  - **Readers:** `int(text)` and `float64(text)` replace `to_int` and `to_float`, with `max_digits=` and `allow_nonfinite=` kept. All readers give `ValidationError` (C7).
-  - **Process:** `start_process(program args)` gives a `Process`† with `.stop` (polite), `.kill`, `.wait` (`ExitStatus | Canceled`, a receipt), `.running` and `.id`.
+  - **Readers:** all readers give `ValidationError` (C7). Renaming `to_int` and `to_float` to `int(text)` and `float64(text)` waits for the naming-style study (owner, 2026-11-07).
+  - **Process:** `start_process(program args)` gives a `Process`† with `.stop` (polite), `.kill`, `.wait` (`ExitStatus | Canceled`), `.running` and `.id`.
   - **Added (F25):** `config_dir(app)`, `data_dir(app)`, `cache_dir(app)`, `home_dir` and `temp_dir`, each giving `Path | Missing` and each a confinement base.
   - **Added (F2):** `copy_to(target progress=@f)`, with `f:(chunk:DataSize :>void)` called after each chunk is copied.
   - **Added (F3):** `p.size` gives `int64*B`, a `DataSize`.
@@ -149,11 +146,11 @@ Each revision file plus this page is the full design. The open-item texts are in
   - Ported validators are renamed `…_problem`.
 - **§3:** `Action(s)` gives `Action | ValidationError`.
 - **§4 audio:**
-  - `play` gives a `PlayingSound`, a receipt, with `.stop .wait .running .paused .pause .resume .position .volume`. `.playing` goes, and `loop p.running` is the poll.
+  - `play` gives a `PlayingSound` (a statement that ignores it writes `play(s);`), with `.stop .wait .running .paused .pause .resume .position .volume`. `.playing` goes, and `loop p.running` is the poll.
   - `tone(440Hz 500ms)` and `Sound.length` are unchanged.
 - **§5:**
-  - `input.save(path)` gives the path (a receipt).
-  - `rebind` gives `Action | none` (a receipt).
+  - `input.save(path)` gives the path.
+  - `rebind` gives `Action | none`.
   - `listen_for_press` replaces `capture`, with `.next`.
 - **§6.3 slider:** `slider(title @v range step= …)`.
   - The range is the interval (D15d), and a two-thumb slider binds `@band:Range<T>` over a range.
@@ -202,7 +199,7 @@ The prefix stays `strict_`.
   - In a scoped `tasks(…)` group, a failure also fails the group, as before.
   - In the program's group (`BackgroundTasks`), it doesn't: the error prints once on stderr, naming the task's function, and stays on the handle.
   - `BackgroundTasks` has the `Tasks` API. Its own type exists for the different failure policy and so that the lifetime is visible at the declaration.
-- **§6 sources** (P8): `Ticker` has `.next` (wait for the next tick; gives `ClockReading | Closed | Canceled`; a receipt), `.next(timeout=…)`, `.stop` and `.running`. It has no `.wait`, and `@tick.next` replaces `@tick.receive` in `select`. The interrupt listener has the same shape.
+- **§6 sources** (P8): `Ticker` has `.next` (wait for the next tick; gives `ClockReading | Closed | Canceled`; a statement writes `tick.next or_throw;`), `.next(timeout=…)`, `.stop` and `.running`. It has no `.wait`, and `@tick.next` replaces `@tick.receive` in `select`. The interrupt listener has the same shape.
 - **§6, frame code:**
   - In `update`, `draw` and helpers reached only from them, these are compile errors: waiting on a channel (`receive`, `send` that may block), a task's `.wait`, `sleep`, `select`, `within`, and a `.next` on a source. The error names `drain`, `try_send` or `app.spawn`.
   - File, terminal and process-start calls compile, with a hover note, so a settings screen saves in one line.
@@ -215,13 +212,13 @@ The prefix stays `strict_`.
 - **§6:** `secure_random(range)` gives a plain value, `T | NoEntropy`. `secure_token` and `secure_random_bytes` stay secrets.
 - **§8, files:**
   - `p.modified`, `p.created` and `p.accessed` give `Instant`s.
-  - `remove_file` and `remove_dir` give the removed path, which is a receipt.
+  - `remove_file` and `remove_dir` give the removed path.
   - The progress example shows the capture: `progress=(chunk $capture @stats) => stats.bytes += chunk`. The missing-capture error's fix-it inserts it.
 - **§8, processes:** `start_process(program args cwd=Path env=dict<string string> stdin= stdout= stderr= new_group=false)`.
   - Each stream is `'inherit'` (the default), `'null'`, `'pipe'`, a `Path`, or another process's pipe, so `a | b` is `let a = start_process(… stdout='pipe')` followed by `start_process(… stdin=a.stdout)`.
   - With `'pipe'`, `.stdout` and `.stderr` are line and byte streams, and `.stdin` is a writer.
   - `ExitStatus` is `[success:bool code:int64? signal:int64?]`.
-  - `set_current_dir(path)` gives the previous folder (a receipt).
+  - `set_current_dir(path)` gives the previous folder.
 - **§8, secrets:** `to_json(x secrets='reveal')` gives `secret<string>`. `write_text` and `write_bytes` of a secret create the file `0o600` unless `permissions=` says otherwise, and `.reveal` on the text gives ordinary text that is written with ordinary permissions.
 - **§5, `is_close`:** on temperature points (and any offset dimension), `abs=` is required and is the difference type. `rel=` is a compile error there.
 
@@ -292,3 +289,30 @@ The prefix stays `strict_`.
   - `CountHoleTemplate`: it and `CountedPattern` both failed.
   - `input.pressed_at` and `sound.position_at`: mediocre.
 - **The prefix:** round 7 read `strict_in_zone` 2 of 3 times as "strictly inside a zone". The prefix is an owner question again (D31 Q6), and the recommendation is to keep `strict_`.
+
+---
+
+## The owner's answers (2026-11-07)
+
+The full entries are in `decisions-batch4.md`; this section says where each answer lands in the designs.
+
+- **No `$discardable_result`, and no receipts** (safety §7, C5): calls keep returning useful values, and a statement that ignores one writes `;`.
+  - Every example in `open-items.md` and `conventions.md` now writes `;` where it drops a value.
+  - The decided exception stands: a callback whose result is `void` only by context (`update`, `draw`, a `tasks` body) drops its values.
+- **`or_throw<E>`** (parallel §7): kept as the spelling, and `or_throw_only<E>` is withdrawn.
+- **`@(m.lock)`** (safety §9): decided.
+- **Literal unions and shaped types** (ui-strings §3): `let a:Action = s` and `s as Action` are proven obligations, never run-time panics. Decided.
+- **`$parallel_safe`** (parallel §11, D22): deleted.
+- **`rounding=`** replaces `ties=` (time §4.3, C15): decided, with the nine values.
+- **`Canceled` through `??`** (parallel §4–5, C3): decided. Proposed for `$bulletproof`, and not yet cold-read: `$explicit_cancellation`.
+  - It makes every implicit forwarding of `Canceled` a compile error: a `??`, a `?? void`, a `?? return/break/continue`, or a collector.
+  - The fix-it writes `or_throw<Canceled>`, or `??<Canceled>` to default it on purpose.
+  - It changes no type or behavior.
+- **Renames wait for the naming-style study** (safety §8): `starts_with`, `set_permissions`, and `int(text)` for `to_int` stay unapplied. Examples use the decided `startswith`, `chmod` and `to_int`.
+- **Entry points** (parallel §9 "Program" class, time §10, C13):
+  - only the `main` of the file given to `dewy` runs;
+  - a splat import never brings in another file's `main`;
+  - `$program.*` settings go at the top of the entry file, or inside a `main` in any file, where they apply only when that file is the entry;
+  - anywhere else, they are a compile error naming both places.
+
+  This replaces "set once, by the main file, at the top level" in parallel §9 and "set once in the main file" in time §10. `$target` and `$build.mode` are untouched; whether they follow the same rule is a separate question.

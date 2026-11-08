@@ -1,8 +1,6 @@
 # Decisions waiting on David
 
 - **Only open items.** Once you answer one, it moves to [decisions.md](decisions.md), with what was considered and why, and is removed from here.
-- **Revised 2026-11-07:** D4, D10, D11, D22, D28, D29, D31 and D33–D37 were revised together. Independent agents dogfooded them twice, they were made consistent with each other, and every name was read cold by three readers with no context. Each item states its floors and whether it is ready. Shared rules: `docs/design/proposals/integration/conventions.md`.
-- **Question kinds:** (a) changes something you decided; (b) new syntax or surface; (c) names only.
 - **What gets asked:** a semantic question only appears here if it fails one of two tests:
   1. Is the common (80%) path easy, ergonomic and fast?
   2. If the common path doesn't fit, is it straightforward to adjust?
@@ -13,36 +11,36 @@
   - Arguments are space-separated, `=?` is equality, and zero-argument calls drop their parentheses.
   - `or_throw` forwards an error to the caller, `??` substitutes a default for any error or `none`, and `??<E>` does so only for error type `E`.
   - `@f` is a handle to function `f`, and `$name` is a metatag.
+- **Revised 2026-11-07:** D4, D10, D11, D28, D29, D31 and D33–D37 were revised together. Independent agents dogfooded them twice, they were made consistent with each other, and every name was read cold. Each item states its floors and whether it is ready.
+- **Closed:** D22 (`$parallel_safe` deleted), D26 and D27. Your answers of 2026-11-07 are in decisions.md, batch 4.
+- **Question kinds:** (a) changes something you decided; (b) new syntax or surface; (c) names only. Question numbers are kept as first asked, so answered ones leave gaps.
 
----
-
-## The questions at a glance
-
-**(a) Changes something you already decided**
-1. D4 Q1: no `??` (or collector) can swallow Ctrl-C (`Canceled`); it passes through as `or_throw` would.
-2. D10 Q1: `@(m.lock)` is the idiom for the place a zero-argument method gives.
-3. D10 Q2: results that report on a write, removal or start can be dropped without `;` (`$discardable_result`). This changes the multi-expression rules.
-4. D10 Q3: `starts_with`/`ends_with`, `set_permissions` and `int(text)`/`float64(text)` replace `startswith`, `chmod` and `to_int`/`to_float`.
-5. D11 Q1: `let a:Action = s` and `s as Action` must be proven instead of panicking at run time.
-6. D22 Q1: delete `$parallel_safe`.
-7. D31 Q1: zoned arithmetic defaults to Temporal's "compatible" gap and fold policies instead of "never guesses".
-8. D31 Q2: `$program.time_zone`, `$program.time_zone_rules` and `$program.time_zone_source`, set in the main file only.
-9. D31 Q3: `rounding=` replaces `ties=`; your per-type defaults don't change.
-10. D31 Q6: the prefix for "same call, failures as values" (rec: keep `strict_`).
-
-**(b) New syntax or surface**
-11. D4 Q2: `x or_throw_only<E>`.
-12. D4 Q3: `main = (app:BackgroundTasks)`.
-13. D11 Q2: the validation keyword `check=` (or `valid_if=`).
-14. D11 Q3: `__read__` for a type's text reader.
-15. D11 Q4: the checked record constructor `Roll(count=… sides=…)`.
-16. D31 Q5: `Instant<width=64>` as a value parameter computed while compiling.
-17. D33 Q1: an alias that names itself in a self-length refinement.
-18. D37 Q1: the `iso_basic` pattern word and the `""` field joiner.
-
-**(c) Names only**, rec yes to all: D4 Q4–Q5, D10 Q4–Q8, D11 Q5–Q6, D28 Q1–Q4, D29 Q1, D31 Q4 and Q7, D34 Q1, D35 Q1, D36 Q1, D37 Q2.
-
-**Unchanged from before:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
+**Questions at a glance**
+- **(a) Changes something you decided:**
+  - D31 Q1: default gap and fold policies;
+  - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
+  - D31 Q6: the prefix (`strict_`, `try_`, or per function).
+- **(b) New syntax or surface:**
+  - D4 Q3: `main = (app:BackgroundTasks)`;
+  - D11 Q2: `check=` or `valid_if=`;
+  - D11 Q3: `__read__` or `$reader`;
+  - D11 Q4: the checked constructor `Roll(count=…)`;
+  - D31 Q5: `Instant<width=64>`;
+  - D33 Q1: a self-naming alias;
+  - D37 Q1: `iso_basic` and `""`.
+- **(c) Names only:**
+  - D4 Q1: `$explicit_cancellation`, a new tag that answers your question on handling Ctrl-C explicitly;
+  - D4 Q4, Q5;
+  - D10 Q4–Q8;
+  - D11 Q5, Q6;
+  - D28 Q1–Q4;
+  - D29 Q1;
+  - D31 Q4, Q7;
+  - D34 Q1;
+  - D35 Q1;
+  - D36 Q1;
+  - D37 Q2.
+- **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
 
@@ -71,14 +69,14 @@ load_sounds = () => {
     sleep(30ms) or_throw
     "sounds"
 }
-parse_age = (text:string):>int | Invalid => int(text) ?? Invalid
+parse_age = (text:string):>int | Invalid => to_int(text) ?? Invalid
 score = (n:int):>int => (n * n) % 7
 autosave = () => loop true {
     sleep(30s) or_throw
     printl"saved"
 }
 relay = (commands:Channel<string> chat:Channel<string>) => loop true {
-    match select(command=@commands.receive  message=@chat.receive  timeout=1s) or_throw_only<Canceled> {
+    match select(command=@commands.receive  message=@chat.receive  timeout=1s) or_throw<Canceled> {
         [command:string] => printl"command: {command}"
         [message:string] => printl"chat: {message}"
         [command:Closed] => return "commands closed"
@@ -114,7 +112,7 @@ main = () => {
     tasks((group:Tasks) => {
         let saver = group.spawn(@autosave)          # a Task
         let tick = ticker(500ms)
-        loop i in [0..4) tick.next or_throw        # wait for four ticks; .next is a receipt
+        loop i in [0..4) tick.next or_throw;       # wait for four ticks; `;` drops each tick
         saver.stop                                  # stops this one task; the group ends normally
     }) or_throw
     printl"{map} {sounds} {ages} {total} {why}"
@@ -178,22 +176,26 @@ main = (app:BackgroundTasks) => {                  # tasks here live as long as 
   - **A sound nobody holds** belongs to the program's group: exit waits for it, a looping one stops at exit, and Ctrl-C stops it.
   - **`select`:** every wait's result must be distinguishable. A send that loses keeps its payload. A channel's element type can't be `Closed` or `Canceled`.
   - **Cores are one unit:** program cap, scoped cap, pinning, `available_cores`, and an environment variable that can only lower it.
+- **Decided by you (2026-11-07):**
+  - **`Canceled` passes through `??`.** `??`, `?? void`, `?? return/break/continue` and `??<E>` (unless `E` names `Canceled`) don't default it, and a collector never holds it; it leaves the function as `or_throw` would.
+  - **`or_throw<E>`** forwards only `E`, mirroring `??<E>`, for orthogonality. `or_throw_only<E>` is withdrawn. Readers took `or_throw<E>` cold as "throw an `E`"; the docs teach it beside `??<E>`.
 - **Questions for you:**
-  1. **(a) Turn this on, and no `??` can swallow Ctrl-C.**
-     - `??`, `?? void`, `?? return/break/continue` and `??<E>` (unless `E` names `Canceled`) don't default `Canceled`; it leaves the function as `or_throw` would. A collector never holds `Canceled`.
-     - A program that wants Ctrl-C for itself holds `catch_ctrl_c` (Q4), so nothing is canceled and nothing needs defaulting.
-     - It changes:
-       - your 2026-10-23 `??` rule, which gains "except `Canceled`";
-       - D14's `?? return/break/continue`;
-       - C3's "errors stay per-item values".
-     - Without it, `input_int("n? ") ?? 0` turns Ctrl-C into 0, and a receive loop with `?? ""` spins. Python's `except Exception` and Trio make the same choice.
-     - **Rec:** yes. Reversible.
-  2. **(b) `x or_throw_only<E>`** forwards only `E` and keeps the rest as values, mirroring `??<E>`. It shortens `match select(…)` and `within(…)`. Read correctly in round 6, where `or_throw<E>` read 0/3. Without it, write the arm `<Canceled> => return Canceled`. **Rec:** yes. Reversible.
-  3. **(b) `main = (app:BackgroundTasks) => …`** gives a group whose tasks live as long as the program. In a UI program, that is until the window closes. A task that fails there doesn't end the program. Without it, a UI program has nowhere to put background work, because `update` and `draw` run after `main` returns. `BackgroundTasks` read 4/3/4, against 3/2/3 for `ProgramTasks`. **Rec:** yes. Reversible.
-  4. **(c) `catch_ctrl_c`**, a handle that takes Ctrl-C while held, with `Interrupted` for an interrupted console read. Read 5/4/3, against 4/3/3 for `listen_for_interrupt`.
+  - **Q1 (c)** **Your question: should a tag make Ctrl-C handling explicit, or is it cleaner to let something higher up handle it?**
+     - **Both, by layer.** In ordinary code, the higher-up handling is cleaner. Cancellation is one event for the whole program, and the right place to act on it is where the work is owned:
+       - `main` exits with 130;
+       - a `tasks(…)` group joins its tasks;
+       - `protect_from_cancel` saves on the way out;
+       - `catch_ctrl_c` takes Ctrl-C in a shell.
+
+       Handling it at every `??` would be the noise Go's `ctx.Err()` checks are.
+     - **What already forces handling:** a function with a declared result that leaves out `Canceled`. There, the `??` that would forward it is a compile error naming both fixes (add `| Canceled`, or `??<Canceled …>`). That gives per-function control today. It doesn't reach inferred functions, where `Canceled` joins the inferred result silently. Dewy has no cancellation effect row, and adding one would duplicate the result type.
+     - **So for `$bulletproof`, a tag is worth having:** `$explicit_cancellation`, in the `$explicit_allocation_failure` family. Turn it on, and every place where `Canceled` would pass through without being written is a compile error: a `??`, a `?? void`, a `?? return/break/continue`, or a collector receiving it. The fix-it writes `or_throw<Canceled>` at that spot, or `??<Canceled>` if you mean to default it. It changes no type and no behavior, only what must be written, so every exit path for a cancel is visible in the source. It goes into `$bulletproof`.
+     - **Rec:** add `$explicit_cancellation` to `$bulletproof` and keep the default implicit. The name is not yet cold-read; `$no_implicit_cancel` is the candidate beside it.
+  - **Q3 (b)** **`main = (app:BackgroundTasks) => …`** gives a group whose tasks live as long as the program. In a UI program, that is until the window closes. A task that fails there doesn't end the program. Without it, a UI program has nowhere to put background work, because `update` and `draw` run after `main` returns. `BackgroundTasks` read 4/3/4, against 3/2/3 for `ProgramTasks`. **Rec:** yes. Reversible.
+  - **Q4 (c)** **`catch_ctrl_c`**, a handle that takes Ctrl-C while held, with `Interrupted` for an interrupted console read. Read 5/4/3, against 4/3/3 for `listen_for_interrupt`.
      - `ctrl_c.discard_pending` forgets presses not yet handled. It is **untested**: the tested `.clear` read 3/3 as "remove the registered handlers".
      - **Rec:** yes.
-  5. **(c) Names** (read fine):
+  - **Q5 (c)** **Names** (read fine):
      - `check_cancel`;
      - `select(name=@ch.receive … timeout=1s ties='fair')`, `ties='first'`, `Sent`, `Waitable<R>`;
      - the metatags `$parallel.max_concurrent`, `.chunk_size`, `.max_cores`, `.off`, `$placement.device`, `.cores`, `$memory.layout`, `$program.max_cores`, `.max_memory`, `.max_tasks`;
@@ -222,7 +224,7 @@ main = (app:BackgroundTasks) => {                  # tasks here live as long as 
   - Joined paths become an error without breaking the common loops.
   - No tag changes a type.
   - `$bulletproof` compiles hello world.
-  - A result that reports on a write, a removal or a start can be dropped without `;`.
+  - `@(m.lock)` gives the locked place, and calls keep returning useful values (a statement that ignores one writes `;`).
   - Processes get the full surface a shell needs.
 
   Full design: `proposals/bulletproof/round3.md`.
@@ -239,12 +241,12 @@ save = (slot:string data:string) => {
 }
 
 main = () => {
-    saves.make_dirs or_throw                         # gives back the path; a statement drops it
+    saves.make_dirs or_throw;                        # gives back the path; `;` drops it
     loop name in saves.list or_throw printl'{name}: {p"{saves}/{name}".size or_throw}'   # FileName: confined; a DataSize
     let slot = input("save name? ") or_throw
     let f = save(slot "level=3") ?? { printl"pick a plain name"; return }      # "../x" is a PathEscape
-    save(sanitize_file_name(slot) "level=4") or_throw                          # any text made one safe name; result dropped
-    let level = int(input("level? ") or_throw) ?? 1   # bad text gives 1; Ctrl-C still stops (D4 Q1)
+    save(sanitize_file_name(slot) "level=4") or_throw;                         # any text made one safe name; `;` drops the path
+    let level = to_int(input("level? ") or_throw) ?? 1   # bad text gives 1; Ctrl-C still stops (D4)
     let winner = secure_random([1..100]) or_throw    # unpredictable, and public: a plain int64
     let r = issue("ann") or_throw
     printl"{f} {level} {winner} {r} {r.token =? "guess"}"   # token=<redacted>; =? is constant-time
@@ -307,28 +309,13 @@ main = () => {
 | `$prove_library_asserts`, `_runtime_checks`, `_arena_safety`, `_drop_cannot_fail`; `$no_trusted_library` (all four) | Library code reached must be proven; argument-dependent cases take a guard at your call |
 | `$bulletproof` | All of the strict tags above, plus `$no_hidden_costs`, `$no_deadlocks` and `$time.strict`; the permissions are rejected inside it |
 
+- **Decided by you (2026-11-07):**
+  - **`@(m.lock)` is the idiom** for the place a zero-argument method gives. `@(m.lock())` stays legal, and `@m.lock` is the method handle.
+  - **No `$discardable_result`.** Calls keep returning useful values (handles, paths, new values), and a statement that ignores one writes `;`.
+  - **Renames wait:** naming style (snake_case vs Julia-style joined words) is being studied separately, and the renames (`starts_with`, `set_permissions`, `int(text)` for `to_int`, …) wait for it.
 - **Questions for you:**
-  1. **(a) `@(m.lock)` as the idiom** for the place a zero-argument method gives. It replaces the ownership doc's "write the optional parentheses", and `@(m.lock())` stays legal. **Rec:** yes.
-  2. **(a) Turn this on, and a result that only reports on a write, a removal or a start can be dropped without `;`.**
-     - A *receipt* is kept wherever a value is taken (a binding, an argument, a collector, an inferred function's last line) and dropped silently elsewhere. Its failure still needs handling.
-     - Receipts:
-       - handles;
-       - an event from `.next`;
-       - file-system writes and removals that return their path (the library gate enforces this, so no list can drift);
-       - `Atomic.add` and `rebind`;
-       - any function whose every result path ends in one.
-     - Not receipts: `xs.pop` and readers.
-     - This changes your multi-expression rule (a written `:>void` body expresses nothing; an inferred body expresses every value). In two dogfoods, it removed every `;` after `make_dirs`, `write_text`, `play`, `spawn` and `append_text`.
-     - Spelling: `$discardable_result` (read fine).
-     - **Rec:** yes. If declined, results stay useful and statements write `;`.
-  3. **(a) Library renames of names you decided:**
-     - `starts_with`/`ends_with` for `startswith`/`endswith`;
-     - `set_permissions` for `chmod`;
-     - `int(text)` and `float64(text)` for `to_int` and `to_float`, keeping `max_digits=` and `allow_nonfinite=`, so every reader is named for what it builds.
-
-     All read fine. **Rec:** yes.
-  4. **(c) Tag names:** `$prove_local_asserts` (replaces `$count_local_asserts_as_panics`, read 2/3), `$allow_unproven_narrowing` and `$prove_no_counter_overflow`. All read fine. **Rec:** yes.
-  5. **(c) Random and secure names:**
+  - **Q4 (c)** **Tag names:** `$prove_local_asserts` (replaces `$count_local_asserts_as_panics`, read 2/3), `$allow_unproven_narrowing` and `$prove_no_counter_overflow`. All read fine. **Rec:** yes.
+  - **Q5 (c)** **Random and secure names:**
      - `random(range)` for ints, floats, quantities, durations and dates;
      - `fast_random_bytes` and `secure_random_bytes`, with no bare `random_bytes`;
      - `secure_token`;
@@ -336,16 +323,16 @@ main = () => {
      - `rng` with no argument and `.seed`.
 
      All read fine. **Rec:** yes.
-  6. **(c) Path names:** `FileName`, `base.confine(text)` and `sanitize_file_name` (read fine), and `SubPath` (3/3/3, acceptable; `RelativePath` missed that it can't escape). **Rec:** yes.
-  7. **(c) Other library names** (read fine):
+  - **Q6 (c)** **Path names:** `FileName`, `base.confine(text)` and `sanitize_file_name` (read fine), and `SubPath` (3/3/3, acceptable; `RelativePath` missed that it can't escape). **Rec:** yes.
+  - **Q7 (c)** **Other library names** (read fine):
      - `find_last`, `make_dir`, `remove_dir`, `append_text`, `stdin_lines`;
      - `config_dir(app)`, `data_dir`, `cache_dir`, `home_dir`, `temp_dir`, `p.follow_lines`;
      - `copy_to(… progress=)`, `write_bytes(… permissions=)`, `input(… hidden=)`, `to_json(… secrets='reveal')`;
      - `start_process(… cwd= env= stdin= stdout= stderr= new_group=)`, `Process`, `.kill`, `ExitStatus` (`.success .code .signal`), `set_current_dir`;
      - one name for each file operation's method and function forms.
 
-     **Rec:** yes.
-  8. **(c) Float extras:** `a.is_close(b rel= abs=)`, where `abs=` defaults to the zero of the operand's type. On temperature readings, `abs=` is a required `TemperatureDifference` and there is no `rel=` (D34). Also `allow_nonfinite=true` and `Finite` (read fine). **Rec:** yes.
+     The naming-style study may respell the multi-word ones. **Rec:** yes.
+  - **Q8 (c)** **Float extras:** `a.is_close(b rel= abs=)`, where `abs=` defaults to the zero of the operand's type. On temperature readings, `abs=` is a required `TemperatureDifference` and there is no `rel=` (D34). Also `allow_nonfinite=true` and `Finite` (read fine). **Rec:** yes.
 - **Float constants:** as before, with `x.is_finite` as the guard and a `float64.min` fix-it.
 - **Floors:** a string builder, `which`, and HTTP are library items.
 - **Ready:** yes.
@@ -360,7 +347,7 @@ main = () => {
 
 ```dewy
 sku_problem = (text:string):>string | none =>
-    if text.length =? 8 and text.starts_with("SKU-") none
+    if text.length =? 8 and text.startswith("SKU-") none
     else "'{text}' is not a SKU: SKU- and four characters, like SKU-12AB"
 Sku:type = string<check=@sku_problem>
 Port:type = int64<(1 <=? x <=? 65535)>
@@ -368,7 +355,7 @@ Roll:type = [count:int64<(1 <=? x <=? 100)> sides:int64<(2 <=? x <=? 1000)>]
 __read__ = (text:string):>Roll | ValidationError => {          # how a Roll reads from text, like "3d6"
     let parts = text.split("d")
     if parts.length not=? 2 return ValidationError[message="write dice like 3d6" input=text]
-    Roll(count=int(parts[0]) or_throw sides=int(parts[1]) or_throw)  # checked constructor: Roll | ValidationError
+    Roll(count=to_int(parts[0]) or_throw sides=to_int(parts[1]) or_throw)  # checked constructor: Roll | ValidationError
 }
 price = (item:Sku):>rational => 9.99
 Action:type = 'jump' | 'left' | 'right'
@@ -385,7 +372,7 @@ main = () => {
     let a:Action = typed                       # compile error: cannot prove typed is an Action
     let b = Action(typed) ?? 'jump'            # never a panic
     let tune = play(melody("E4/2 E4/2 G4*3"))  # a PlayingSound: tune.running, tune.stop, tune.wait
-    play(tone(440Hz 80ms))                     # a statement drops the handle; the sound still plays to the end
+    play(tone(440Hz 80ms));                    # `;` drops the handle; the sound still plays to the end
     printl'{item} {port} {dice} {b} {f2(1.5)} {day(date"2026-11-07")}'
     f2("hi")                                   # compile error: fmt'.2f' formats numbers; found string
     tune.stop
@@ -421,7 +408,7 @@ let input = Controls<Action>[binds=[
 main = () => {
     printl(input.pressed('jump'))                        # 'jmup' is a compile error naming the actions
     let lost = input.rebind('jump' 0 Input.key(Key.w))   # the action that had W; it takes Jump's old key
-    input.save(p"controls.txt") or_throw                 # only the player's changes; the path is dropped
+    input.save(p"controls.txt") or_throw;                # only the player's changes; `;` drops the path
     let unknown = input.load(p"controls.txt") or_throw   # names a stale file had; never a crash
     printl"{lost} {unknown}"
 }
@@ -437,22 +424,22 @@ main = () => {
 - `w.remove(ball); w.pos(ball)` is a compile error even under `$allow_unproven`;
 - `w.has` replaces `alive` and `joint_alive`.
 
+- **Decided by you (2026-11-07):** `let a:Action = s` and `s as Action` must be proven, like `x as uint8`: making a value fit a narrower type never panics at run time. `Action(s)` gives the failure as a value.
 - **Questions for you:**
-  1. **(a) Turn this on, and `let a:Action = s` and `s as Action` must be proven, like `x as uint8`.** Today they compile and panic on bad text, which changes LANGUAGE.md's "any other string is checked when the program runs". **Rec:** yes.
-  2. **(b) The validation keyword:**
+  - **Q2 (b)** **The validation keyword:**
      - `check=@sku_problem` keeps the validator's message.
      - `valid_if=@is_sku` read best cold, but it implies a `bool`, and a bool can't say what's wrong.
      - `shape=` read poorly.
 
      **Rec:** `check=`.
-  3. **(b) How your own type reads text:**
+  - **Q3 (b)** **How your own type reads text:**
      - a protocol function, `__read__ = (text:string):>Roll | ValidationError => …`, found by its result type like the library's `__as__` and `__add__` (read fine);
      - or a tag above an ordinary function, `$reader parse_roll = …`.
 
      `Roll(text)`, `input_field` and union readers then use it. **Rec:** `__read__`: one mechanism with the library's protocols.
-  4. **(b) The checked constructor `Roll(count=3 sides=6)`.** It builds a record and gives `Roll | ValidationError` when a field breaks its rule, while `Roll[…]` stays the proven literal. Read fine. **Rec:** yes.
-  5. **(c) `ValidationError`** is the one error for "this isn't a valid T": every shape conversion, checked constructor and text reader. It replaces `ShapeError`, `ParseError` and `TextError` (read fine). **Rec:** yes.
-  6. **(c) Names:**
+  - **Q4 (b)** **The checked constructor `Roll(count=3 sides=6)`.** It builds a record and gives `Roll | ValidationError` when a field breaks its rule, while `Roll[…]` stays the proven literal. Read fine. **Rec:** yes.
+  - **Q5 (c)** **`ValidationError`** is the one error for "this isn't a valid T": every shape conversion, checked constructor and text reader. It replaces `ShapeError`, `ParseError` and `TextError` (read fine). **Rec:** yes.
+  - **Q6 (c)** **Names:**
      - `PlayingSound` with `.stop .wait .running .paused .pause .resume .position`, and `Sound.length`;
      - `E4/2` and `E4*3`;
      - `rebind(action slot input conflict=)`, `reset`, `save`, `load`, `bindings`, `controls_editor`, `input_hint`, `listen_for_press` with `.next`;
@@ -525,7 +512,7 @@ pause_menu = ():>void => {
         button('quit' "Quit to the title" tip="Played {label(played)}")
     ]))
     if changed("Full screen") set_fullscreen(fullscreen)
-    if picked =? 'save' p"settings.txt".write_text("{player} {port} {keep}") ?? { news = "not saved" }   # file I/O in draw compiles
+    if picked =? 'save' p"settings.txt".write_text("{player} {port} {keep}") ?? { news = "not saved" };  # file I/O in draw compiles; `;` drops the path
     else if picked =? 'resume' screen = 'playing'
     else if picked =? 'quit' screen = 'title'
 }
@@ -555,9 +542,9 @@ pause_menu = ():>void => {
 - **Cost:** 378K instructions for a 238-element screen (desktop, release), about 0.5% of a 60 Hz frame.
 - **Risk:** `scroll`, `grid`, `floating`, wrapping, `table` column sizing and drag and drop are the least proven, and there's no `no allocates` builder yet.
 - **Questions for you:**
-  1. **(c) Round 1's names:** `column row box grid scroll floating tooltip modal spacer text image button checkbox slider choice progress`, `ui` and `show`, `pick=` and `id=`, `pad`, the sizes, the nine-point `align`, `back=`. **Rec:** yes.
-  2. **(c) Input names:** `input_field` with `valid(id)`, `hidden=`, `lines=`, `read=` and `error=`; `T.parse_human(text)` (3/3/4; `from_label` read as an enum lookup). **Rec:** yes.
-  3. **(c) Widget names** (read fine):
+  - **Q1 (c)** **Round 1's names:** `column row box grid scroll floating tooltip modal spacer text image button checkbox slider choice progress`, `ui` and `show`, `pick=` and `id=`, `pad`, the sizes, the nine-point `align`, `back=`. **Rec:** yes.
+  - **Q2 (c)** **Input names:** `input_field` with `valid(id)`, `hidden=`, `lines=`, `read=` and `error=`; `T.parse_human(text)` (3/3/4; `from_label` read as an enum lookup). **Rec:** yes.
+  - **Q3 (c)** **Widget names** (read fine):
      - `changed`, `committed`, `label`, `choice`'s `style='dropdown' 'segments' 'list' 'tabs'`;
      - `slider(title @v [low..high] step= value_text= scale='log' suffix= descending=)`;
      - `table`, `heading`, `TableSort`, `plot(range= style=)`, `divider`;
@@ -566,29 +553,12 @@ pause_menu = ():>void => {
      - `drag=`, `ui(drop=)`, `right_clicked`, `double_clicked`, `dragged`, `ui(focus= player=)`.
 
      **Rec:** yes.
-  4. **(c) `checkbox(title checked=expr)`** for derived state. Two of three readers took it for a two-way binding, so a plain variable written there gets the hint "to let the checkbox change it, write `@x`". **Rec:** yes, with the hint.
+  - **Q4 (c)** **`checkbox(title checked=expr)`** for derived state. Two of three readers took it for a two-way binding, so a plain variable written there gets the hint "to let the checkbox change it, write `@x`". **Rec:** yes, with the hint.
 - **Ready:** yes.
 
 ---
 
 ## P3: lower stakes
-
-### D22. Delete `$parallel_safe`?
-- **BLUF:** delete it. Since items may wait, "parallel-safe" means only race-free, and the compiler already infers it per callback, with no tag.
-
-```dewy
-apply_then_report = (xs:array<int> f:(int:>int) report:(array<int> :>void)) => {
-    let ys = [parallel x in xs f(x)]   # inferred: f must be parallel-safe
-    report(ys)                         # report runs once: no requirement
-}
-main = () => apply_then_report([1 2 3] (x) => x * 2 (ys) => printl(ys))
-```
-
-- **The common path:** write nothing. Hover, printed signatures (`f: parallel-safe`) and generated docs show the requirement, and each call is checked.
-- **What the tag would add:** only a promise that a later edit can't stop passing the callback into parallel code. A change to an exported signature is caught in general, without a concurrency tag.
-- **Questions for you:**
-  1. **(a) Delete the optional `$parallel_safe`** you allowed on 2026-11-01. **Rec:** delete. If kept, name it `$race_free`.
-- **Ready:** yes.
 
 ### D29. Dates: weekday names, dates from numbers, stepping (all reversible)
 Turn this on and:
@@ -630,7 +600,7 @@ printl(lesson.next('friday'))                          # 2026-09-11T09:00-04:00:
   - `overflow='next'` and `leap_day=` stay as built.
   - `$error_if` and `$check_constant` leave the user-facing design, replaced by shapes (D11).
 - **Questions for you:**
-  1. **(c) Names:**
+  - **Q1 (c)** **Names:**
      - `Weekday` and its seven members, `iso_weekday`, `d.next(w)` and `z.next(w)`, `nth_weekday_of_month`, `next_anniversary(after=)`, `d.floor`, `r.step(s)`;
      - `days_of_week` (5/4/5; `weekdays` read as Monday to Friday);
      - `date(year month day)` and `time_of_day(hour minute second=0)`.
@@ -662,8 +632,8 @@ Turn this on and:
 - the call that gives its failures as values has one prefix.
 
 ```dewy
-$program.time_zone = 'America/New_York'                    # program settings: main file only
-$program.time_zone_rules = 'urgent.bin'                    # a rule pack beside the main file
+$program.time_zone = 'America/New_York'                    # program settings: top of the entry file, or inside a main
+$program.time_zone_rules = 'urgent.bin'                    # a rule pack beside the entry file
 Box:type = <T=int64>[v:T]                                  # bare Box means Box<int64>
 let b:Box = Box[1]
 let meet = zoned"2026-10-31T09:00[America/New_York]"
@@ -679,6 +649,17 @@ let r = [date"2026-01-01"..date"2026-02-01")
 printl'{r.start} {r.end} {r.includes_start} {r.includes_end} {(date"2026-01-01"..date"2026-01-02").is_empty}'   # … true
 let l = local"2026-11-01T01:30"
 printl(l.in_zone(zone"America/New_York" fold='later'))
+```
+
+A library file can carry its own test run, with its own settings:
+
+```dewy
+# meetings.dewy: a library; `dewy meetings.dewy` runs this main, and importing the file never does
+next_meeting = (after:Instant):>ZonedDateTime => (after.in_zone(zone"Asia/Tokyo") + 1day).at(time_of_day"09:00")
+main = () => {
+    $program.time_zone = 'Asia/Tokyo'          # applies only when this file is the entry
+    printl(next_meeting(now.nominal))
+}
 ```
 
 - **Common path:**
@@ -699,18 +680,25 @@ printl(l.in_zone(zone"America/New_York" fold='later'))
   - An integer times an on-grid tick is on the grid, and a proven-nonzero divisor gives a plain value.
   - Every text reader gives `T | ValidationError`.
   - No tag changes a result type: strict tags point to the prefixed functions (Q6), and `$time.require_*` becomes `$time.no_assumed_*`.
+- **Decided by you (2026-11-07):** one keyword, `rounding=`, replaces `ties=` on `round`, and `round`, `quantize`, time's `round` and `fmt` share it. Your per-type defaults don't change, and `ties=` keeps only `select`'s fairness. Its nine values:
+  - `'nearest_away'` and `'nearest_even'` (the defaults);
+  - `'nearest_toward_zero'`, `'nearest_up'` and `'nearest_down'`;
+  - `'floor'`, `'ceil'`, `'toward_zero'` and `'away_from_zero'`.
 - **Questions for you:**
-  1. **(a) Default gap and fold policies** (Temporal's "compatible") in place of the accepted time design's "never guesses". A literal that hits a gap or fold warns. **Rec:** yes. It is what Temporal, Python's `zoneinfo` and jiff do, and the union stays one argument away.
-  2. **(a) `$program.time_zone`, `$program.time_zone_rules` and `$program.time_zone_source`** replace your `$time.zone`, `$time.rules` and `$time.zone_source`. Only the main file sets them, which narrows D15a's module and scope clause. Read fine. **Rec:** yes. It stops a library from compiling alone and failing when imported.
-  3. **(a) One keyword, `rounding=`, replaces your decided `ties=`** on `round`, and `round`, `quantize`, time's `round` and `fmt` share it. Your per-type defaults don't change, and `ties=` then means only `select`'s fairness. Its nine values:
-     - `'nearest_away'` and `'nearest_even'`;
-     - `'nearest_toward_zero'`, `'nearest_up'` and `'nearest_down'` (your `'zero'`, `'up'` and `'down'`);
-     - `'floor'`, `'ceil'`, `'toward_zero'` and `'away_from_zero'`.
+  - **Q1 (a)** **Default gap and fold policies** (Temporal's "compatible") in place of the accepted time design's "never guesses". A literal that hits a gap or fold warns. **Rec:** yes. It is what Temporal, Python's `zoneinfo` and jiff do, and the union stays one argument away.
+  - **Q2 (a)** **`$program.time_zone`, `$program.time_zone_rules` and `$program.time_zone_source`** replace your `$time.zone`, `$time.rules` and `$time.zone_source`, and follow your entry-point direction of 2026-11-07:
+     - they are set at the top of the entry file, or inside a `main` in any file, where they apply only when that file is the one given to `dewy`;
+     - set anywhere else, they are a compile error that names both places.
 
-     Read fine; `half_up` was avoided because readers split between "toward +∞" and "away from zero". **Rec:** yes. `floor` and `toward_zero` aren't tie rules, so `ties=` can't hold them, and one keyword is easier to find than two. The alternative is to keep `ties=` on `round` and use `rounding=` only where a directed mode is meaningful.
-  4. **(c) `.start`/`.end`/`.includes_start`/`.includes_end`** replace the built `.first`/`.last`/… on `Range<T>`. Arrays' `.first`/`.last` are members, and a half-open range's `.last` isn't one. Read fine. **Rec:** yes.
-  5. **(b) `Instant<width=64>` as a value parameter** whose alias body is computed while compiling. This is a general facility, also wanted for `uint<bits>` families. Read fine. **Rec:** yes; the fallback is a separate type, `CompactInstant`.
-  6. **(a) The prefix for "the same call, with its failures as values"** (`strict_today` is yours, from D15e). No prefix reads well on every function:
+     What this changes in D15a: today a `$time.zone` in the main file holds in every module, and a main file that sets none leaves modules and scopes free to set their own. That freedom goes:
+     - a library never picks the program's zone, so it can't compile alone and then fail when imported;
+     - it can still set one for its own test `main`;
+     - code that needs a particular zone passes `zone=` or calls `t.in_zone(z)`.
+
+     Read fine. **Rec:** yes.
+  - **Q4 (c)** **`.start`/`.end`/`.includes_start`/`.includes_end`** replace the built `.first`/`.last`/… on `Range<T>`. Arrays' `.first`/`.last` are members, and a half-open range's `.last` isn't one. Read fine. **Rec:** yes.
+  - **Q5 (b)** **`Instant<width=64>` as a value parameter** whose alias body is computed while compiling. This is a general facility, also wanted for `uint<bits>` families. Read fine. **Rec:** yes; the fallback is a separate type, `CompactInstant`.
+  - **Q6 (a)** **The prefix for "the same call, with its failures as values"** (`strict_today` is yours, from D15e). No prefix reads well on every function:
 
      | Name | Readers' confidence (1–5) | How it was read |
      |---|---|---|
@@ -731,7 +719,7 @@ printl(l.in_zone(zone"America/New_York" fold='later'))
        - `try_` read a little better on arithmetic, but in Rust and C# `try_` means "returns an Option or a bool", not "returns the failure", and `try_today` read no better.
        - Per-function names lose the one thing the prefix gives: finding the careful twin of any call by typing `strict_`.
        - `strict_in_zone`'s misreading is answered by its hover and its fix-it, which name what it returns.
-  7. **(c) Names:**
+  - **Q7 (c)** **Names:**
      - `t.floor`, `t.ceil`, `t.round`, `z.at`, `$time.no_assumed_zone` and the `$time.no_assumed_*` family, `$time.no_dropped_zone`, `time_of_day"…"`, `local"…"`, `fold='later'`, `d.at(t)`;
      - `strict_elapsed` and `strict_zone`, which follow Q6.
 
@@ -766,7 +754,7 @@ printl'{fmt'<8'"parents"} {tree}'                         # parents  [0 1 2 3 4]
 - **To adjust:** today the same contract works on a `let`, a parameter or a record field, so a function can fill one given by `@` or return it inside a record.
 - **Semantics taken:** only a self-length refinement may refer to its own alias. Any other self-reference stays an error.
 - **Questions for you:**
-  1. **(b) Allow an alias to name itself in a self-length refinement.** It would be the first alias allowed to refer to itself this way. **Rec:** add it when returning these arrays matters.
+  - **Q1 (b)** **Allow an alias to name itself in a self-length refinement.** It would be the first alias allowed to refer to itself this way. **Rec:** add it when returning these arrays matters.
 - **Reversible:** yes.
 - **Ready:** yes.
 
@@ -800,7 +788,7 @@ printl(room / 1°C)                                          # compile error: di
   - `q.value_in(unit)` works on every quantity. `/ unit` is the same thing on quantities that aren't readings, and on a reading it is refused with that fix-it.
   - `is_close` on readings requires `abs=` as a difference and has no `rel=`.
 - **Questions for you:**
-  1. **(c) Names:**
+  - **Q1 (c)** **Names:**
      - add `TemperatureDifference`;
      - rename the built `RValue`, `R` and `RSI` to `ThermalResistance`, `r_value_us` and `r_value_si`;
      - add `q.value_in(unit)`.
@@ -825,7 +813,7 @@ printl(slot.nominal.strict_in_zone(zone"Asia/Tokyo"))      # ZonedDateTime | Out
 - **To adjust:** `strict_in_zone` reports when the answer extends the zone's data past its last transition or before its first. `$time.no_assumed_extrapolation` requires it.
 - **Semantics taken:** `in_zone` uses the zone's TZif footer rule forward and local mean time back.
 - **Questions for you:**
-  1. **(c) Names:** `zoned_time.in_zone(zone)` (read fine) and `strict_in_zone`, whose prefix follows D31 Q6. **Rec:** add both.
+  - **Q1 (c)** **Names:** `zoned_time.in_zone(zone)` (read fine) and `strict_in_zone`, whose prefix follows D31 Q6. **Rec:** add both.
 - **Reversible:** yes.
 - **Ready:** yes.
 
@@ -867,7 +855,7 @@ main = () => {
   - `Quantity(text)` gives a value whose dimension is known only at run time (`.dimension`). `Unit(text)` looks a unit up by its written name: the unit table links only into programs that call it. `q.to(u)` gives `Quantity | DimensionMismatch`.
 - **Next item, named, not in this round:** money. User-declared base dimensions (`USD:unit = base_unit("USD")`) make `5USD + 3EUR` a compile error. Until then, money is an exact `rational`, and adding currencies isn't caught.
 - **Questions for you:**
-  1. **(c) Names:**
+  - **Q1 (c)** **Names:**
      - **Dimensions:** `Area`, `Volume`, `Speed`, `Acceleration`, `Force`, `Energy`, `Power`, `Pressure`, `ThermalResistance`, `DataSize` (replaces `Information`, which read as a log message), `Frequency`, `Charge`, `Voltage`, `Resistance`, `Density`, `Torque`.
      - **Units:** `lb oz stone short_ton long_ton tonne nmi acre hectare ha gallon_us gallon_uk quart_us pint_us pint_uk fl_oz_us cup_us tbsp_us tsp_us tbsp tsp stick_butter_us mph knot kPa MPa hPa bar mbar atm psi mmHg inHg Wh MWh GWh cal kcal eV therm hp lbf standard_gravity C Ah mAh rpm bit B byte kB MB GB TB KiB MiB GiB TiB kbit Mbit Gbit`.
        - `stick_butter_us` read weakly (one reader took it for a joke). It is niche, and `butter_stick_us` is the alternative.
@@ -935,12 +923,12 @@ fmt'HH:mm'                                                        # compile erro
   - A hole in a pattern must be a count.
   - TR35 letters, `x.format(…)` and `format(x spec)` are gone, following your D19e.
 - **Questions for you:**
-  1. **(b) Two pattern spellings:**
+  - **Q1 (b)** **Two pattern spellings:**
      - `iso_basic`, one word for the compact ISO form, so iCalendar, AWS signatures and stamped file names need no member-by-member padding (read fine);
      - `""`, an empty literal that joins two fields, for other compact stamps.
 
      **Rec:** yes to both.
-  2. **(c) Names:**
+  - **Q2 (c)** **Names:**
      - **Fields** (the word patterns read fine): `year`, `month`, `month_name`, `month_short`, `day`, `weekday`, `weekday_short`, `hour`, `hour12`, `am_pm`, `minute`, `second`, `millisecond`, `microsecond`, `nanosecond`, `offset`, `zone`, `zone_short`.
      - **Kinds:** `TextPattern`, `NumberPattern`, `IntegerPattern`, `DatePattern`, `TimePattern`, `DateTimePattern`, `ZonedPattern`.
 

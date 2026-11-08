@@ -1,6 +1,6 @@
 # Cross-design conventions (integration pass, final, 2026-11-07)
 
-These rules apply to `parallel-v4`, `safety-round3`, `time-units-format` and `ui-strings` together, and they win where one of those files says otherwise. `amendments.md` lists every section each convention changes, and `changes-2.md` lists what round 2 changed. Every name here went through the final cold read (round 7, `new-names.md`). A † marks the few that read weakly or weren't tested, and a ? marks a question for the owner.
+These rules apply to `parallel-v4`, `safety-round3`, `time-units-format` and `ui-strings` together, and they win where one of those files says otherwise. `amendments.md` lists every section each convention changes, and `changes-2.md` lists what round 2 changed. Every name here went through the final cold read (round 7, `new-names.md`), and the owner's answers of 2026-11-07 are applied (`decisions-batch4.md`). A † marks the few that read weakly or weren't tested, and a ? marks a question for the owner.
 
 ## Things that run
 
@@ -14,10 +14,10 @@ These rules apply to `parallel-v4`, `safety-round3`, `time-units-format` and `ui
    - a `Process` gives its `ExitStatus`.
 
    `.pause`, `.resume` and `.paused` exist only on `PlayingSound`.
-   - **A source of events has `.next`, not `.wait`.** This applies to `Ticker` and the Ctrl-C listener (`catch_ctrl_c`). `.next` waits for the next event and is a receipt, while `.wait` would mean "until it ends", which a source never does.
+   - **A source of events has `.next`, not `.wait`.** This applies to `Ticker` and the Ctrl-C listener (`catch_ctrl_c`). `.next` waits for the next event and gives it, while `.wait` would mean "until it ends", which a source never does.
    - **How each thing ends after `.stop`:** a sound and a ticker at once, a task at its next cancellation point, and a process when it handles the signal (`.kill` ends it at once).
 
-   `music.stop; music.wait or_throw` · `tick.next or_throw` · `tick.next(timeout=at)`
+   `music.stop; music.wait or_throw` · `tick.next or_throw;` · `tick.next(timeout=at) or_throw;`
 2. **Dropping a handle never stops what it started.**
    - A task belongs to its group.
    - A sound nobody holds belongs to the program's group: the program waits for it at exit, a looping one stops at exit, and Ctrl-C stops it.
@@ -29,6 +29,7 @@ These rules apply to `parallel-v4`, `safety-round3`, `time-units-format` and `ui
      - a child process still gets the terminal's signal itself.
      - `ctrl_c.discard_pending`† forgets presses not yet handled.
    - Three presses within one second end the process anyway, so a stuck program can always be stopped. Dropping the handle restores the default.
+   - **`$explicit_cancellation`†?** (in `$bulletproof`) makes each place where `Canceled` would pass through silently a compile error: a `??`, a `?? void` or a collector. You write `or_throw<Canceled>` there or handle it. It changes no type.
 
    `let line = input("$ ") ??<Interrupted> continue ?? break`
 4. **Long-lived background work lives in the program's group.** `main = (app:BackgroundTasks) => …`? gets a group that lasts as long as the program. In a UI or game program, that is until the window closes. The group is then stopped and joined.
@@ -38,16 +39,12 @@ These rules apply to `parallel-v4`, `safety-round3`, `time-units-format` and `ui
 
 ## Values and text
 
-5. **Receipts: a useful result you may drop.** A result is a receipt when:
-   - the function is tagged `$discardable_result`?;
-   - it is a handle to something that keeps running (rule 1);
-   - it is an event from `.next`;
-   - it is an inferred result that ends in a receipt on every path.
+5. **Dropping a value takes `;`** (owner, 2026-11-07). Calls keep returning useful values (handles, paths, new values). A statement that ignores one writes an attached `;`, the one way to suppress a value, with no special case for particular functions.
+   - As decided earlier, a function whose result is `void` only by context (a callback, `update`, `draw`) still drops its values.
 
-   A receipt is kept wherever a value is taken (a binding, an argument, a collector, an inferred body's last line) and dropped silently elsewhere. Its failure still needs handling.
-   - **Categories, not a list:** handles; file-system writes and removals returning their path (the library gate checks this); `Atomic.add`; `rebind`.
+   `out.make_dirs or_throw;` · `play(click);` · `let job = app.spawn(@work)`
 6. **Results carry something useful.** A call that starts something gives its handle, and a write or removal gives the path. A failed wait or send keeps its payload.
-7. **Reading text: `T(text)` gives `T | ValidationError`.** Every reader is named for what it builds: `date`, `instant`, `Duration`, `Mass`, `int`, `float64`, `rational`, `FileName`, `Action`, `NumberPattern`, `from_json<T>`.
+7. **Reading text: `T(text)` gives `T | ValidationError`.** Every reader is named for what it builds: `date`, `instant`, `Duration`, `Mass`, `rational`, `FileName`, `Action`, `NumberPattern`, `from_json<T>`. Numbers keep `to_int` and `to_float` until the naming-style study decides on renames.
    - A refinement or shape alias reads automatically, through its base reader and then its check. For example, `Port(text)` says "must be 1 to 65535".
    - A record or other user type declares its reader as `__read__ = (text:string):>Roll | ValidationError => …`?, and then `Roll(text)`, `input_field` and union readers find it.
    - `Roll(count=n sides=s)` is the checked constructor: it gives `Roll | ValidationError` where `Roll[…]` needs proof.
@@ -84,7 +81,9 @@ These rules apply to `parallel-v4`, `safety-round3`, `time-units-format` and `ui
     - A strict tag makes the lax call an error naming the strict one.
     - `$finite_floats` asks for proofs; a signature that promises finiteness writes `Finite`.
     - `$explicit_allocation_failure` is the one flagged exception.
-    - `$program.*` settings go in the main file only. `$parallel.*` settings are lexical; as the first line of a `parallel` body, a tag governs that construct. A tag that governs nothing is an error.
+    - **Entry points** (owner, 2026-11-07):
+      - only the `main` of the file given to `dewy` runs, and a splat import never brings in another file's `main`;
+      - `$program.*` settings go at the top of the entry file, or inside a `main` in any file, where they apply only when that file is the entry. So a library can carry its own test `main` with its own settings. `$parallel.*` settings are lexical; as the first line of a `parallel` body, a tag governs that construct. A tag that governs nothing is an error.
 
 ## Shared vocabulary
 
@@ -93,7 +92,7 @@ These rules apply to `parallel-v4`, `safety-round3`, `time-units-format` and `ui
     - A range of a discrete type loops; `r.step(s)` sets the step for any discrete range, ints included. `[a,b..c)` stays the arithmetic form for numbers, and `.step` is the only form for calendar steps (`.step(1month)`).
     - A type is discrete when it has `next_up`, and dense when it is declared `$no_next_value`†. Discreteness is never inferred from a missing member.
 15. **Each keyword has one meaning.**
-    - **Rounding:** exact values round half away from zero and floats half to even, as you decided, and this includes `fmt`. One keyword, `rounding=`, replaces your `ties=`? and also takes the directed modes.
+    - **Rounding:** exact values round half away from zero and floats half to even, as you decided, and this includes `fmt`. One keyword, `rounding=`, replaces `ties=` (owner, 2026-11-07) and also takes the directed modes.
     - `grouping=` is a reduction's association, and `ties=` (if `rounding=` is taken) is only `select`'s fairness.
     - `style=` is how a widget looks, and `descending=` reverses an order.
 16. **Units go all the way through.**

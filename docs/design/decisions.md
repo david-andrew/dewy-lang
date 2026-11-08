@@ -479,3 +479,54 @@ section linked. ROADMAP.md lists them in one line each.
   ([proposals/concurrency/unified/](proposals/concurrency/unified/)). A
   `group.spawn` task can't write outer variables, and `or_throw` in a spawned lambda
   forwards to its inferred result.
+- Batch 4 from [open_decisions.md](open_decisions.md) (David, 2026-11-07):
+  - **Orthogonality and context** (standing):
+    - Spellings should be orthogonal unless there is a good reason not to be. "In general we should be striving for orthogonality where we can unless there's good reason to not be orthogonal."
+    - Behavior should not depend on context unless there is a good reason. "In general I don't want to be introducing context sensitivity unless there's a good reason for it."
+  - **`;` is the way to drop a value** (D10 Q2). Calls keep returning useful values (a handle from a call that starts something, the path from a write), and a statement that ignores one writes `;`, as the multi-expression rules already say. The earlier decision that a callback whose result is `void` only by context drops its values stands.
+    - Considered: a `$discardable_result` contract on functions (receipts) whose results a statement could drop silently; and making writes return `void`.
+    - Reason: "I don't want to allow there to be some special case just to skip `;` if `;` is the obvious way to suppress the value." Receipts would make the meaning of a statement depend on which function it calls.
+    - [proposals/bulletproof/](proposals/bulletproof/), [proposals/integration/](proposals/integration/)
+  - **`@(m.lock)` is the idiom** for the place a zero-argument method gives (D10 Q1). Inside `@( … )` the expression is ordinary, so a zero-argument method is called as it is everywhere else. `@(m.lock())` stays legal, and `@m.lock` is the method handle.
+    - Considered: keeping the ownership doc's "write the optional parentheses".
+    - Reason: the no-parentheses style then holds everywhere, with no exception for places.
+    - [proposals/bulletproof/](proposals/bulletproof/)
+  - **Narrowing never panics at run time** (D11 Q1). `let a:Action = s`, `s as Action`, and passing or returning text where a literal union or shaped type is expected are proven obligations, like `x as uint8`. `Action(s)` reads text and gives the failure as a value (`Action | ValidationError`).
+    - This replaces LANGUAGE.md's "any other string is checked when the program runs".
+    - Considered: keeping the run-time check.
+    - Reason: "If that's just making some value fit within some narrower type, absolutely yes there should never be a runtime panic."
+    - [proposals/string-shapes/](proposals/string-shapes/)
+  - **`$parallel_safe` is deleted** (D22). Whether a callback is parallel-safe is inferred, shown in hover, printed signatures and generated docs, and checked at each call.
+    - Considered: keeping it as an optional contract on exported functions (2026-11-01), or renaming it `$race_free`.
+    - Reason: since items may wait, the tag means only race-free, and inference already enforces that with no tag.
+    - [proposals/concurrency/unified/](proposals/concurrency/unified/)
+  - **One rounding keyword, `rounding=`** (D31 Q3). It replaces `ties=` on `round`, and `round`, `quantize`, time's `round` and `fmt` share it.
+    - Values: `'nearest_away'`, `'nearest_even'`, `'nearest_toward_zero'`, `'nearest_up'`, `'nearest_down'`, `'floor'`, `'ceil'`, `'toward_zero'` and `'away_from_zero'`.
+    - The per-type defaults are unchanged: exact values round half away from zero and floats half to even, and `fmt` follows them.
+    - `ties=` keeps only `select`'s fairness.
+    - Considered: keeping `ties=` on `round` and using `rounding=` only for directed modes; and the spelling `half_up`, which cold readers read both as "toward +∞" and as "away from zero".
+    - Reason: directed modes aren't tie rules, and one keyword with one meaning is easier to find.
+    - [proposals/time/](proposals/time/)
+  - **`x or_throw<E>` forwards only the failures matched by `E`** and leaves the rest in the value (D4 Q2), mirroring `??<E>`.
+    - Considered: `or_throw_only<E>`, which cold readers read correctly, where all three read `or_throw<E>` as "throw an `E`".
+    - Reason: orthogonality with `??<E>`. The docs teach the two together.
+    - [proposals/concurrency/unified/](proposals/concurrency/unified/)
+  - **`Canceled` passes through `??`** (D4 Q1). `??`, `?? void`, `?? return/break/continue` and `??<E>` (unless `E` names `Canceled`) don't default it, and a collector never holds it; it leaves the function as `or_throw` would. A program that wants Ctrl-C for itself catches it explicitly (`catch_ctrl_c`, D4 Q4).
+    - Considered: `??` defaulting `Canceled` like any other failure, which turns Ctrl-C into a default value and lets a receive loop spin after cancellation.
+    - Reason: Ctrl-C must never become a default value or a silent exit 0.
+    - **Follow-up requested by David:** a metatag in `$bulletproof` that makes this explicit. The proposal is `$explicit_cancellation` (D4 Q1, open, name not yet cold-read).
+    - [proposals/concurrency/unified/](proposals/concurrency/unified/)
+  - **Entry points** (direction; it reshapes D31 Q2):
+    - Only the `main` of the file given to the `dewy` command runs: `dewy somefile.dewy` runs `somefile.dewy`'s `main`, even if it imports files that define their own `main`. So any library file can carry a `main` as a local test script, like Python's `if __name__ == '__main__'` without the guard.
+    - Program-wide settings (`$program.*`, the time-zone settings included) may be set at the top of the entry file, or inside a `main` function in any file. Inside a non-entry file's `main`, they apply only when that file is the entry, so a library can set up its own test configuration.
+    - Considered: settings only at the top of the main file (the earlier `$program.*` rule); and D15a's freedom for modules and scopes to set their own zone when the main file sets none.
+    - Reason: a library's own test run should need no separate file, and a library should never pick the zone of a program that imports it.
+    - [proposals/integration/](proposals/integration/), [proposals/time/](proposals/time/)
+  - **Naming style is studied separately** (D10 Q3): snake_case or Julia-style joined words. The proposed renames (`starts_with`/`ends_with` for `startswith`/`endswith`, `set_permissions` for `chmod`, `int(text)` and `float64(text)` for `to_int` and `to_float`) wait for that study. [proposals/bulletproof/](proposals/bulletproof/)
+
+---
+  - **Supersedes in this file:** "`??` defaults any exception value" gains "except
+    `Canceled`, which passes through unless named"; `??<E>` covers `Canceled` only when
+    `E` names it; D14's `?? return/break/continue` and batch 3's C3 follow the same rule;
+    rounding's `ties=` becomes `rounding=`; the optional `$parallel_safe` sentence
+    (2026-11-01) goes; D15a's module and scope clause gives way to the entry-point rule.
