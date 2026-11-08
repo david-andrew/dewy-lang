@@ -1,0 +1,75 @@
+use 'ast.jo'
+use 'check.jo'
+use 'dewy_method_ops.dewy'
+use 'directives.jo'
+use 'panic_inventory.dewy'
+use 'settings.jo'
+use 'util.jo'
+
+dir_program_setting = (name: str) -> bool:
+    name == "time.zone" or name == "time.rules" or name == "time.zone_source"
+
+dir_program_disagree = (a: DirScope, b: DirScope):
+    fatal(a.at, "program-wide `${name_of(a.setting)} = '{name_of(a.value - 2)}'` at {pos_str(a.at)} conflicts with `${name_of(b.setting)} = '{name_of(b.value - 2)}'` at {pos_str(b.at)}: reachable main functions must agree on program-wide settings")
+
+dir_program_prepare = ():
+    if not dir_program_any: return
+    dir_program_values = {}
+    dir_program_mains = {}
+    dir_rules_from_host = false
+    mains: {int: int} = {}
+    loop m in modules:
+        loop d in m.decls:
+            if nodes[d].kind != .fn_ or name_of(int(nodes[d].name)) != "main" or dewy_is_method(d) or nodes[d].b == 0: continue
+            mains[nodes[int(nodes[d].b)].pos] = d
+    loop i in [0..dir_scopes.len()):
+        s = dir_scopes[i]
+        if not dir_program_setting(name_of(s.setting)): continue
+        entry = files[pos_file(s.start)].path == settings_path
+        header = s.start == dir_module_start(pos_file(s.start))
+        d = mains.get(s.start) ?? 0
+        placed = entry and header or d > 0
+        if d > 0:
+            body = int(nodes[d].b)
+            loop k in [0..nkids(body)):
+                n = kid(body, k)
+                if nodes[n].pos > s.start and nodes[n].pos < s.at:
+                    placed = false
+                    break
+            scopes = dir_program_mains.get(d) ?? []
+            scopes.push(i)
+            dir_program_mains[d] = scopes
+        if not placed: fatal(s.at, "`${name_of(s.setting)}` is program-wide: put it at the top of the entry file or as the first lines of any file's main")
+        if not entry: continue
+        old = dir_program_values.get(s.setting) ?? -1
+        if old >= 0 and dir_scopes[old].value != s.value: dir_program_disagree(s, dir_scopes[old])
+        dir_program_values[s.setting] = i
+        if name_of(s.setting) == "time.zone_source": dir_rules_from_host = true
+
+dir_program_finalize = ():
+    if not dir_program_any: return
+    dir_program_prepare()
+    held = dir_program_values
+    possible = false
+    loop d, scopes in dir_program_mains:
+        loop i in scopes:
+            s = dir_scopes[i]
+            old = held.get(s.setting) ?? -1
+            if old >= 0 and dir_scopes[old].value != s.value: possible = true
+            held[s.setting] = i
+    if not possible or main_fn == 0: return
+    held = dir_program_values
+    seen: {int: bool} = {}
+    pending = [main_fn]
+    loop pending.len() > 0:
+        f = pending.pop()
+        if f <= 0 or f >= fns.len() or seen.has(f): continue
+        seen[f] = true
+        d = int(fns[f].decl)
+        scopes = dir_program_mains.get(d) ?? []
+        loop i in scopes:
+            s = dir_scopes[i]
+            old = held.get(s.setting) ?? -1
+            if old >= 0 and dir_scopes[old].value != s.value: dir_program_disagree(s, dir_scopes[old])
+            held[s.setting] = i
+        loop g in panic_call_edges(f): pending.push(g)

@@ -1,3 +1,4 @@
+use 'program_settings.dewy'
 use 'secret_checks.dewy'
 use 'checks_read_code.dewy'
 use 'checks_call_hints.dewy'
@@ -5216,12 +5217,8 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         # call a parameter's default is filled in for; none when no scope sets it
         pos = nodes[n].pos
         scope = dir_find(int(nodes[args[0]].sval), if setting_site != 0: setting_site else: pos)
-        # (`$time.zone` in the main file pins the whole program: what a module without its own reads)
-        if scope < 0 and (name_of(int(nodes[args[0]].sval)) == "time.zone" or name_of(int(nodes[args[0]].sval)) == "time.zone_source"):
-            loop i in [0..files.len()):
-                if files[i].path == settings_path:
-                    scope = dir_find(int(nodes[args[0]].sval), dir_module_start(i))
-                    break
+        if dir_program_setting(name_of(int(nodes[args[0]].sval))):
+            scope = dir_program_values.get(int(nodes[args[0]].sval)) ?? -1
         if scope < 0 or dir_scopes[scope].value < 2:
             nodes[n] = Node(kind = .none_lit, pos = pos)
             return check_expr(n, expected)
@@ -7321,17 +7318,15 @@ dewy_index_ranges = (n: int, receiver: int):
 time_rules_path = (path: str) -> str:
     if path != path_norm(lib_dir + "/time/rules/current.bin"): return path
     setting = intern("time.rules")
-    loop i in [0..files.len()):
-        if files[i].path != settings_path: continue
-        scope = dir_find(setting, dir_module_start(i))
-        if scope < 0 or dir_scopes[scope].value < 2: return path
-        rel = name_of(dir_scopes[scope].value - 2)
-        chosen = if is_abs_path(rel): rel else: "{files[i].dir}/{rel}"
-        d = read_file(chosen)
-        if d == none: fatal(dir_scopes[scope].at, "`$time.rules`: cannot read '{chosen}'")
-        if len(d!) < 4 or d![..4) != "DZP2": fatal(dir_scopes[scope].at, "`$time.rules`: '{chosen}' is not a rule pack; tools/time/gen_rules.py makes one")
-        return path_norm(chosen)
-    path
+    scope = dir_program_values.get(setting) ?? -1
+    if scope < 0 or dir_scopes[scope].value < 2: return path
+    rel = name_of(dir_scopes[scope].value - 2)
+    i = pos_file(dir_scopes[scope].start)
+    chosen = if is_abs_path(rel): rel else: "{files[i].dir}/{rel}"
+    d = read_file(chosen)
+    if d == none: fatal(dir_scopes[scope].at, "`$time.rules`: cannot read '{chosen}'")
+    if len(d!) < 4 or d![..4) != "DZP2": fatal(dir_scopes[scope].at, "`$time.rules`: '{chosen}' is not a rule pack; tools/time/gen_rules.py makes one")
+    path_norm(chosen)
 
 # `[a..b)` of values that are not integers (Instant, rational, text: anything with `<?`): a Range of
 # lib/ranges.dewy rather than the IntRange of `__dewy_range`. -1 for integers, whose range this leaves.

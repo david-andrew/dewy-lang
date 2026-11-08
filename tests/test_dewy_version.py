@@ -86,10 +86,10 @@ READ = """f = (zone:string|none=$time.zone) => {
 
 
 def test_default_reads_the_callers_setting(compiler, tmp_path):
-    source = READ + "g = () => {\n    $time.zone = 'system'\n    f\n}\nf\ng\nf(\"mine\")\n"
+    source = READ.replace("$time.zone", "$time.gap") + "g = () => {\n    $time.gap = 'next'\n    f\n}\nf\ng\nf(\"mine\")\n"
     ran = run(compiler, tmp_path, source)
     assert ran.returncode == 0, ran.stderr
-    assert ran.stdout == 'no zone\nzone system\nzone mine\n'
+    assert ran.stdout == 'no zone\nzone next\nzone mine\n'
 
 
 def test_module_setting_reaches_a_library_default(compiler, tmp_path):

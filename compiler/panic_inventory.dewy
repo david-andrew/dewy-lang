@@ -9,7 +9,7 @@ from p"ast.jo" import (NF_EXTERN NF_U64 RANGE_EXHAUSTION has_flag kid nkids node
 from p"types.jo" import (T_INT T_MATH_INT T_STR is_int tkind)
 from p"draw_context.jo" import (draw_context_guard draw_required)
 from p"effect_control.dewy" import (effect_name)
-from p"effects.jo" import (effect_panic_nodes effect_panic_pending effect_panic_texts effect_panics_demanded effect_panics_settled panic_answer panic_draw panic_edge_at panic_edge_end panic_edges panic_index panic_lib panic_local panic_local_via panic_low panic_name_format panic_name_fraction panic_name_policy_power panic_name_pow panic_name_pow_op panic_name_power panic_name_rational panic_name_to panic_serial panic_stack panic_stop panic_via panic_witness)
+from p"effects.jo" import (panic_calls_only effect_panic_nodes effect_panic_pending effect_panic_texts effect_panics_demanded effect_panics_settled panic_answer panic_draw panic_edge_at panic_edge_end panic_edges panic_index panic_lib panic_local panic_local_via panic_low panic_name_format panic_name_fraction panic_name_policy_power panic_name_pow panic_name_pow_op panic_name_power panic_name_rational panic_name_to panic_serial panic_stack panic_stop panic_via panic_witness)
 from p"effect_sites.dewy" import (effect_write_sites)
 from p"exact.jo" import (exact_has_node)
 from p"facts.jo" import (fact_divisors fact_panic_sites fn_in_lib positive_bound)
@@ -29,6 +29,7 @@ from p"isolation_ops.dewy" import (isolation_children)
 # Demanded panic inventory; shared state has one owner in effects.jo.
 PanicWord:type=int64<overflow='wrap'>
 effect_panics_reset=():>void=>$unsafe {
+    panic_calls_only=false
     effect_panics_demanded=false
     effect_panics_settled=false
     effect_panic_nodes=dict<int64 int64>()
@@ -307,7 +308,7 @@ panic_site=(f:PanicWord n:PanicWord):>void=>$unsafe {
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
         }
-        if nodes.ptr[n].sym >? 0 and not (k =? 'call' and (fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_floor_call(n) not=? 0 or fact_divisors.has(n) or fact_rational_constructor(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or panic_atomic_progress(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_rational_divmod(n)) or panic_gpu_total(n) or panic_literal_safe(n))) {panic_edge(f PanicWord(nodes.ptr[n].sym) n);}
+        if nodes.ptr[n].sym >? 0 and (panic_calls_only or not (k =? 'call' and (fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_floor_call(n) not=? 0 or fact_divisors.has(n) or fact_rational_constructor(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or panic_atomic_progress(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_rational_divmod(n)) or panic_gpu_total(n) or panic_literal_safe(n)))) {panic_edge(f PanicWord(nodes.ptr[n].sym) n);}
     }
     if k =? 'binary' or k =? 'intrinsic' {
         loop g in value_helper_calls(n) {panic_edge(f g n);}
@@ -415,4 +416,30 @@ effect_panic_reason=(f:PanicWord):>string=>$unsafe {
 dir_text=(what:string):>string=>$unsafe {
     if starts_with(what "cannot prove ") {return remove_prefix(what "cannot prove ")}
     return what
+}
+
+# Reuse the complete node inventory without panic pruning or a library's
+# early stop. Restore the panic solver's witnesses and edge ranges afterwards.
+panic_call_edges=(f:PanicWord):>array<int64>=>$unsafe {
+    let result:array<int64>=[]
+    if fns.ptr[f].state not=? 2 or fns.ptr[f].body =? 0 {return result}
+    if panic_witness.length <? fns.length {panic_witness.resize(fns.length); panic_local.resize(fns.length)}
+    let witness=panic_witness[f]
+    let local=panic_local[f]
+    let stop=panic_stop
+    let draw=panic_draw
+    let start=panic_edges.length
+    panic_stop=false
+    panic_draw=false
+    panic_calls_only=true
+    panic_node(f PanicWord(fns.ptr[f].body))
+    panic_calls_only=false
+    panic_stop=stop
+    panic_draw=draw
+    panic_witness[f]=witness
+    panic_local[f]=local
+    let i=start
+    loop i <? panic_edges.length {result.push(panic_edges[i]); i += 2}
+    panic_edges.truncate(start)
+    result
 }

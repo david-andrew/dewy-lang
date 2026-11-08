@@ -1,3 +1,4 @@
+use 'program_settings.dewy'
 use 'lower_views.dewy'
 use 'lower_determinism.dewy'
 use 'checker_program.dewy'
@@ -433,6 +434,7 @@ compile = (path: str, out0: str) -> str:
     floats_after_facts()
     ic_switch(IC_EFFECTS, IC_SHARED)
     dir_panics_finalize()
+    dir_program_finalize()
     ic_switch(IC_OWNERSHIP, IC_SHARED)
     copies_reset()
     if ownership_decls.len() != 0:

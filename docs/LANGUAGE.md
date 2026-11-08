@@ -1685,14 +1685,17 @@ can be arguments (`zoned(text zone=z fold='later')`), or settings for a scope: `
 'earlier'`, `$time.gap = 'next'`. A constant zoned time or `const` operand is proved while
 compiling, so it needs neither.
 
-`$time.zone = 'America/New_York'` pins the program to one zone: set in the main file, it holds in
-every module, and a different setting in an inner scope or another module is a compile error. A
-main file that sets none leaves modules and scopes free to set their own. `'system'` reads the
+`$time.zone = 'America/New_York'` pins the program to one zone in every module.
+Like `$time.rules` and `$time.zone_source`, it is program-wide: write it at the top
+of the entry file or as the first lines of any file's `main`. A non-entry file's
+settings apply only when that file is run as the entry. Other locations are compile
+errors. If the running `main` reaches another `main`, directly or transitively,
+conflicting settings are a compile error naming both files and values. `'system'` reads the
 name of the machine's zone when the program runs, and `'build'` pins the zone of the machine building it.
 `today` is the date there, and `zoned(s)` reads text that names no zone there; with no zone set each warns, naming what it assumes. `strict_today` is the careful `today`: `Date | AmbiguousToday | UnknownToday`, where `.dates` holds the dates the clock's error bound spans near midnight, and `.message` says why there is no date (a clock reading before 2017; a system that gives no error bound, which for now is any but Linux). A machine with no zone to read reads as UTC, and the program says so once on standard error. A literal cannot assume a zone. Zone rules are not the machine's: each
 Dewy version ships its own (IANA data in `lib/time/rules`), so a program means the same thing
 anywhere, and a program links them only if it reaches a zone operation. For an urgent law change
-or test data, `$time.rules = 'urgent.bin'` at the top of the main file names a pack beside it,
+or test data, `$time.rules = 'urgent.bin'` in the entry configuration names a pack beside that file,
 made with `tools/time/gen_rules.py`. `$time.zone_source = 'host'` there follows the machine's own
 zone files when the program runs instead (under `TZDIR`, else `/usr/share/zoneinfo`), so a
 `zoned` literal is a compile error; a machine without a zone's file keeps Dewy's rules and says so once.
@@ -3726,6 +3729,14 @@ does not bring it in, so a library can carry a local test `main` without
 colliding with the program's. An explicitly imported `main` is an ordinary
 callable function.
 
+Program-wide settings (currently `$time.zone`, `$time.rules`, and
+`$time.zone_source`) go at the top of the entry file or as the first lines of any
+file's `main`. A file's `main` settings configure the program only when that file
+is the entry; a library can carry its own test configuration. Elsewhere these
+settings are a compile error naming the allowed locations. Calling another file's
+`main` directly or transitively requires their explicit program-wide settings to
+agree; a conflict names both files and both values.
+
 `main` returns `void` or the errors that reach it, an ordinary `void | E` type,
 declared or inferred. It gives no exit code: success exits 0, and a script that
 needs a particular code calls `exit(n)`. An error reaching `main` is printed on
@@ -5019,8 +5030,8 @@ development toolchain does neither.
 
 A metatag read in a parameter's default is read where the function is called, so
 a library can take the caller's setting: `f = (zone:string|none=$time.zone) => ...`
-gives the zone set around the call, or `none`. Such settings hold a name in quotes
-and hold throughout their scope, like the others.
+gives the program's zone, or `none`. Valued settings hold a name in quotes.
+Lexical ones, such as `$time.gap` and `$time.fold`, hold throughout their scope.
 
 ### Making code prove
 

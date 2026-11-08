@@ -11,6 +11,7 @@ use 'isolation.jo'
 use 'main.jo'
 use 'settings.jo'
 use 'directive_ops.dewy'
+use 'program_settings.dewy'
 use 'ast.jo'
 use 'util.jo'
 use 'facts.jo'
@@ -52,6 +53,9 @@ const DIR_DEFAULT = 0
 dir_scopes: DirScope[]
 # (`$time.zone_source = 'host'`: zone rules exist only when the program runs)
 dir_rules_from_host = false
+dir_program_any = false
+dir_program_values: {int: int} = {}
+dir_program_mains: {int: int[]} = {}
 # dir_find's index: the scopes of each setting in each file, chained in scope order from
 # dir_index_head through dir_index_next; a file's chains (one per setting written in it, a few)
 # are listed from dir_index_file (group + 1, 0 none) through dir_index_group_next. Pushes extend

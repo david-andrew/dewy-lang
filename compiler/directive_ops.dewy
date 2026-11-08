@@ -3,7 +3,8 @@ from p"@lib/core/os.jo" import (env)
 from p"@lib/core/str.jo" import (find as jo_find is_digit split starts_with to_int as jo_to_int)
 from p"ast.jo" import (NF_GENERIC NF_INBOUNDS add_flag has_flag nodes)
 from p"check.jo" import (FK_LAMBDA decl_info decl_infos fns lib_dir modules)
-from p"directives.jo" import (dir_rules_from_host DIR_DEFAULT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirScope DirSite dir_assumed_bounds_any dir_builtin dir_bundles dir_bundles_loaded dir_copies_any dir_deadlocks_any dir_entry_functions dir_entry_positions dir_find dir_floats_any dir_forced dir_mixed_files dir_module_start dir_name_assumed_bounds dir_name_audited dir_name_confine dir_name_copies dir_name_deadlocks dir_name_local_asserts dir_name_no_inf dir_name_no_nan dir_name_prototype dir_name_row dir_name_runtime dir_name_warnings dir_obligations dir_panic_sites dir_policy dir_prior_static dir_proven dir_row_scopes dir_rows_any dir_scopes dir_scopes_gen dir_sites dir_static_body dir_uniform_files dir_value)
+from p"program_settings.dewy" import (dir_program_prepare dir_program_setting)
+from p"directives.jo" import (dir_program_any dir_program_values dir_program_mains dir_rules_from_host DIR_DEFAULT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirScope DirSite dir_assumed_bounds_any dir_builtin dir_bundles dir_bundles_loaded dir_copies_any dir_deadlocks_any dir_entry_functions dir_entry_positions dir_find dir_floats_any dir_forced dir_mixed_files dir_module_start dir_name_assumed_bounds dir_name_audited dir_name_confine dir_name_copies dir_name_deadlocks dir_name_local_asserts dir_name_no_inf dir_name_no_nan dir_name_prototype dir_name_row dir_name_runtime dir_name_warnings dir_obligations dir_panic_sites dir_policy dir_prior_static dir_proven dir_row_scopes dir_rows_any dir_scopes dir_scopes_gen dir_sites dir_static_body dir_uniform_files dir_value)
 from p"directive_rules.dewy" import (dir_panics_demanded)
 from p"effect_contracts.dewy" import (callable_contract effect_subst)
 from p"effect_control.dewy" import (effect_name)
@@ -23,6 +24,10 @@ from p"witness.jo" import (wit_measure)
 
 DirWord:type=int64<overflow='wrap'>
 directives_reset=():>void=>{
+    dir_program_any=false
+    dir_program_values=dict<int64 int64>()
+    dir_program_mains=dict<int64 array<int64>>()
+    dir_rules_from_host=false
     dir_entry_positions=dict<int64 int64>()
     dir_entry_functions=dict<int64 bool>()
     dir_scopes=[]
@@ -72,6 +77,7 @@ dir_valued_name=(name:string):>bool=>{
     name =? "dewy.version" or name =? "time.zone" or name =? "time.zone_source" or name =? "time.rules" or name =? "time.gap" or name =? "time.fold"
 }
 dir_valued_check=(name:string value:string start:DirWord at:DirWord):>void=>{
+    if dir_program_setting(name) {dir_program_any=true}
     if name =? "dewy.version" {
         if start not=? dir_module_start(pos_file(start)) {fatal(at "`$dewy.version` says what a whole module means: put it at the top of the module")}
         if dir_scope_written(intern(name) pos_file(start)) {fatal(at "`$dewy.version` is set twice")}
@@ -79,12 +85,7 @@ dir_valued_check=(name:string value:string start:DirWord at:DirWord):>void=>{
         if toolchain_tagged() and version_newer(value toolchain_version()) {fatal(at "this module says `$dewy.version = '{value}'`, newer than this toolchain ({toolchain_version()}): update Dewy, or set a version it knows")}
     }
     else if name =? "time.zone_source" {
-        if files[pos_file(start)].path not=? settings_path or start not=? dir_module_start(pos_file(start)) {fatal(at "`$time.zone_source` says whose rules the whole program follows: put it at the top of the main file")}
         if value not=? "host" {fatal(at "`$time.zone_source` is 'host', this machine's rules when the program runs; with none set, the program follows the rules this Dewy ships")}
-        dir_rules_from_host=true
-    }
-    else if name =? "time.rules" {
-        if files[pos_file(start)].path not=? settings_path or start not=? dir_module_start(pos_file(start)) {fatal(at "`$time.rules` says which rules the whole program uses: put it at the top of the main file")}
     }
     else if name =? "time.gap" {
         if not (value in? ["reject" "skip" "preserve_displacement" "next"]) {fatal(at "`$time.gap` is one of 'reject', 'skip', 'preserve_displacement' or 'next'")}
@@ -131,25 +132,9 @@ toolchain_version=():>string=>{
 toolchain_tagged=():>bool=>{
     jo_find(toolchain_version() "-dev") <? 0
 }
-# `$time.zone` in the main file pins the whole program: another value anywhere else is an error
-# naming both. O(scopes), once, and nothing unless some scope sets a zone.
-dir_zone_pin=():>void=>{
-    let name=intern("time.zone")
-    let pin:DirWord=-1
-    loop i in [0..dir_scopes.length) {
-        let s=dir_scopes[i]
-        if s.setting =? name and files[pos_file(s.start)].path =? settings_path and s.start =? dir_module_start(pos_file(s.start)) {pin=i}
-    }
-    if pin <? 0 {return}
-    let held=dir_scopes[pin]
-    loop s in dir_scopes {
-        if s.setting not=? name or s.value =? held.value {continue}
-        fatal(s.at "`$time.zone = '{name_of(s.value - 2)}'` differs from `$time.zone = '{name_of(held.value - 2)}'` at {pos_str(held.at)}, which pins the whole program: remove one, or set the same zone")
-    }
-}
 # A Dewy module of the program with no `$dewy.version`, on a tagged toolchain: a warning with the fix.
 dir_version_warnings=():>void=>{
-    dir_zone_pin()
+    dir_program_prepare()
     if not toolchain_tagged() {return}
     let name=intern("dewy.version")
     loop m in modules {
