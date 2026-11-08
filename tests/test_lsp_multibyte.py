@@ -1,0 +1,193 @@
+"""The language server never panics on multi-byte text or bytes that are not UTF-8: requests at every
+UTF-16 column, code actions for messages quoting such text, and incremental edits inside a character."""
+import json
+import os
+import select
+import time
+
+from tests.support import compiler  # noqa: F401
+from tests.test_core_editor import Client
+
+DOCUMENTS = {
+    # (an identifier of emoji and CJK letters, a statement whose next line starts with a wide character)
+    'wide.dewy': 'Pté:type=struct{xé:int64 y中:int64}\naddé=(aé:int64 b中:int64):>int64=>aé + b中\n'
+                 'main=():>void=>{\n    let p=Pté[xé=1 y中=2]\n    let 😀z=addé(p.xé p.y中)\n'
+                 '    printl(😀z)\n    printl(missing_é)\n}\n',
+    'mixed.dewy': '# héllo 中文\nmain=():>void=>{\n    let é="中😀 e\\u{301}"\n    let x=2.0\n'
+                  '    let y:int64=x é\n    let z=x 中, 3.0 😀\n    printl("{é} {y}")\n}\n',
+    'keywords.dewy': 'é=(a:int64):>int64=>{\n    loop i in [0..a) { printl(i) }\n    a\n}\n'
+                     'if é(1) =? 1 { printl("é") }\nlet 中=1\nconst é2=3\né(中 é2)\n',
+}
+RAW = [  # bytes that are not UTF-8: stray continuation bytes at the start of a line and of a word
+    b'\x80main=():>void=>{\n\x80\n    let a=1\n\xbf\xbf  let b=\x80 2\n    printl(a b\x80)\n}\n',
+    b'f\x80=(\xbfa:int64):>int64=>a\nmain=():>void=>{\n    printl(f\x80(1))\n    printl(\xc3)\n}\n',
+]
+MESSAGES = [
+    "unknown name 'é' (did you mean 'è'?)", "unknown name 'appendé' (use `push`)",
+    "write `@é` for the function itself", "write `中.é(1)`", "use `and`", "use `not`",
+    "cannot modify loop variable 'é'", "cannot modify parameter 'aé'",
+    "'é' is changed here but never read afterwards: use `loop @é`",
+    "path is not proven to stay inside its base; validate it, `root.confine(é) or_throw`",
+    "expected int, found f64", "expected f64, found int", "expected i32, found f64 é",
+    "this `;` is attached to the value before it", "expected ", "`", "(did you mean '",
+]
+
+
+class Tolerant(Client):
+    """A client that reads replies whose text is not valid UTF-8 (the server echoes such files' bytes)."""
+
+    def receive(self):
+        deadline = time.monotonic() + 20
+        while True:
+            if b'\r\n\r\n' in self.buffer:
+                header, body = self.buffer.split(b'\r\n\r\n', 1)
+                length = int(next(line.split(b':', 1)[1] for line in header.split(b'\r\n')
+                                  if line.lower().startswith(b'content-length:')))
+                if len(body) >= length:
+                    self.buffer = body[length:]
+                    return json.loads(body[:length].decode('utf-8', 'replace'))
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, 'language server response timed out'
+            ready, _, _ = select.select([self.process.stdout], [], [], remaining)
+            assert ready, 'language server response timed out'
+            chunk = os.read(self.process.stdout.fileno(), 65536)
+            assert chunk, 'language server exited before responding'
+            self.buffer += chunk
+
+
+def positions(text):
+    lines = text.split('\n')
+    for number, line in enumerate(lines):
+        width = sum(2 if ord(c) > 0xFFFF else 1 for c in line)
+        for character in range(width + 2):
+            yield number, character
+
+
+def open_raw(client, uri, data):
+    """didOpen carrying bytes as they are: JSON escapes only what it must."""
+    escaped = bytearray()
+    for byte in data:
+        if byte in (0x22, 0x5C) or byte < 0x20:
+            escaped += b'\\u%04x' % byte
+        else:
+            escaped.append(byte)
+    head = json.dumps({'jsonrpc': '2.0', 'method': 'textDocument/didOpen', 'params': {'textDocument': {
+        'uri': uri, 'languageId': 'dewy', 'version': 1, 'text': '@@'}}}).encode()
+    body = head.replace(b'@@', bytes(escaped))
+    client.process.stdin.write(f'Content-Length: {len(body)}\r\n\r\n'.encode() + body)
+    client.process.stdin.flush()
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        message = client.receive()
+        if message.get('method') == 'textDocument/publishDiagnostics' and message['params']['uri'] == uri:
+            return message['params']['diagnostics']
+    raise AssertionError('no diagnostics')
+
+
+def ask(client, method, params):
+    """The reply to a request, error replies included: the server must answer, not die."""
+    client.serial += 1
+    client.send(method, params, client.serial)
+    while True:
+        message = client.receive()
+        if message.get('id') == client.serial:
+            return message
+        client.messages.append(message)
+
+
+def alive(client):
+    reply = ask(client, 'workspace/symbol', {'query': 'a'})
+    assert client.process.poll() is None and 'result' in reply
+    return reply
+
+
+def requests_at(uri, text):
+    document = {'uri': uri}
+    for turn, (line, character) in enumerate(positions(text)):
+        position = {'line': line, 'character': character}
+        yield 'textDocument/hover', {'textDocument': document, 'position': position}
+        yield 'textDocument/definition', {'textDocument': document, 'position': position}
+        yield 'textDocument/prepareRename', {'textDocument': document, 'position': position}
+        yield 'textDocument/signatureHelp', {'textDocument': document, 'position': position}
+        if turn % 3 == 0:  # (the requests that check the program again, at every third position)
+            yield 'textDocument/completion', {'textDocument': document, 'position': position}
+            yield 'textDocument/rename', {'textDocument': document, 'position': position, 'newName': 'zé'}
+            yield 'textDocument/references', {'textDocument': document, 'position': position,
+                                              'context': {'includeDeclaration': True}}
+        end = {'line': line, 'character': character + 1}
+        for message in MESSAGES:
+            diagnostic = {'range': {'start': position, 'end': end}, 'message': message, 'severity': 1}
+            yield 'textDocument/codeAction', {'textDocument': document, 'range': diagnostic['range'],
+                                              'context': {'diagnostics': [diagnostic]}}
+    yield 'textDocument/documentSymbol', {'textDocument': document}
+    yield 'textDocument/formatting', {'textDocument': document, 'options': {'tabSize': 4, 'insertSpaces': True}}
+    yield 'textDocument/inlayHint', {'textDocument': document,
+                                     'range': {'start': {'line': 0, 'character': 0}, 'end': {'line': 99, 'character': 0}}}
+    yield 'textDocument/codeLens', {'textDocument': document}
+    yield 'textDocument/semanticTokens/full', {'textDocument': document}
+    yield 'workspace/symbol', {'query': 'é'}
+
+
+def drive(client, uri, text):
+    for method, params in requests_at(uri, text):
+        ask(client, method, params)
+    alive(client)
+
+
+def test_multibyte_documents(compiler, tmp_path):
+    client = Tolerant(compiler, tmp_path)
+    try:
+        for name, text in DOCUMENTS.items():
+            path = tmp_path / name
+            path.write_text(text)
+            client.set_text(path.as_uri(), text, 1)
+            drive(client, path.as_uri(), text)
+    finally:
+        client.close()
+
+
+def test_bytes_that_are_not_utf8(compiler, tmp_path):
+    client = Tolerant(compiler, tmp_path)
+    try:
+        for index, data in enumerate(RAW):
+            path = tmp_path / f'raw{index}.dewy'
+            path.write_bytes(data)
+            open_raw(client, path.as_uri(), data)
+            drive(client, path.as_uri(), data.decode('utf-8', 'replace'))
+    finally:
+        client.close()
+
+
+def test_documents_on_disk_with_multibyte_text(compiler, tmp_path):
+    """Files the server reads itself: an import of a module whose text starts with a stray byte."""
+    (tmp_path / 'é中.dewy').write_bytes(b'\x80f' + 'é'.encode() + b'=(a:int64):>int64=>a\n\xbfg=():>int64=>1\n')
+    main = 'from p"é中.dewy" import (fé)\nmain=():>void=>{\n    printl(fé(1))\n}\n'
+    path = tmp_path / 'main.dewy'
+    path.write_text(main)
+    client = Tolerant(compiler, tmp_path)
+    try:
+        client.set_text(path.as_uri(), main, 1)
+        drive(client, path.as_uri(), main)
+    finally:
+        client.close()
+
+
+def test_edits_inside_a_character(compiler, tmp_path):
+    """Incremental changes address UTF-16 columns: one inside an emoji's surrogate pair, one between marks."""
+    text = 'main=():>void=>{\n    let s="😀é中"\n    printl(s)\n}\n'
+    path = tmp_path / 'edit.dewy'
+    path.write_text(text)
+    client = Tolerant(compiler, tmp_path)
+    try:
+        client.set_text(path.as_uri(), text, 1)
+        version = 1
+        for start, end in [(13, 14), (14, 14), (15, 17), (16, 18), (12, 20), (13, 99), (0, 1)]:
+            version += 1
+            client.send('textDocument/didChange', {'textDocument': {'uri': path.as_uri(), 'version': version},
+                                                  'contentChanges': [{'range': {
+                                                      'start': {'line': 1, 'character': start},
+                                                      'end': {'line': 1, 'character': end}}, 'text': 'é'}]})
+            ask(client, 'textDocument/documentSymbol', {'textDocument': {'uri': path.as_uri()}})
+        alive(client)
+    finally:
+        client.close()

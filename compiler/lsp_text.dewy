@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"checks_text.dewy" import (byte_find byte_rfind)
 from p"@lib/core/str.jo" import (ends_with starts_with)
 from p"ide.jo" import (IK_CONST IK_ENUM IK_FIELD IK_FN IK_GLOBAL IK_LOCAL IK_PARAM IK_STRUCT ide_texts)
@@ -111,9 +112,9 @@ on_hover=(id:LspTextWord params:LspTextWord):>int64=>{
             let hdr=dc.snippet
             let ip=x.info
             let ar=byte_find(ip ") -> ")
-            if ar >=? 0 {ip=ip.byte_slice(0 ar + 1)}
+            if ar >=? 0 {ip=__str_slice(ip 0 ar + 1)}
             if contains(hdr ip) {
-                if not contains(hdr "->") and ar >=? 0 {code="{hdr}{x.info.byte_slice(ar + 1 (x.info as array<uint8>).length)}"}
+                if not contains(hdr "->") and ar >=? 0 {code="{hdr}{__str_slice(x.info ar + 1 (x.info as array<uint8>).length)}"}
             }
             else {code="{hdr}\n# here: {dc.name}{x.info}"}
         }
@@ -135,7 +136,7 @@ on_hover=(id:LspTextWord params:LspTextWord):>int64=>{
 where_str=(r:Result f:LspTextWord off:LspTextWord):>string=>{
     let path=r.paths[f]
     let t=r.texts.get(path) ?? text_of(path)
-    "{path.byte_slice(byte_rfind(path "/") + 1 (path as array<uint8>).length)}:{line_of(line_starts_of(t) off) + 1}"
+    "{__str_slice(path byte_rfind(path "/") + 1 (path as array<uint8>).length)}:{line_of(line_starts_of(t) off) + 1}"
 }
 # where a name ends / starts around off
 name_start=(text:string off:LspTextWord):>int64=>{
@@ -234,7 +235,7 @@ on_change=(params:LspTextWord):>void=>{
             let rg=jget(ch "range")
             let a=off_of(text ls jint(jpath(rg "start" "line")) jint(jpath(rg "start" "character")))
             let b=off_of(text ls jint(jpath(rg "end" "line")) jint(jpath(rg "end" "character")))
-            docs[d].text="{text.byte_slice(0 a)}{jstr(jget(ch "text"))}{text.byte_slice(b (text as array<uint8>).length)}"
+            docs[d].text="{__str_slice(text 0 a)}{jstr(jget(ch "text"))}{__str_slice(text b (text as array<uint8>).length)}"
         }
     }
     docs[d].version=jint(jpath(params "textDocument" "version"))

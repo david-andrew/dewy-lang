@@ -1,7 +1,7 @@
 $runtime_checks
 from p"lsp_text.dewy" import ident_prefix
 from p"checks_text.dewy" import (byte_find)
-from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"@lib/core/rt.jo" import (__str_from_bytes __str_slice)
 from p"@lib/core/os.jo" import (file_exists list_dir)
 from p"@lib/core/str.jo" import (ends_with join lower split starts_with trim)
 from p"fmt_ops.dewy" import (fmt_checked)
@@ -384,7 +384,7 @@ on_rename=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
             touched[path]=true
             let u2=uri_of(path)
             let loc=loc_json(u.res x.file x.off x.len)
-            let rg=loc.byte_slice(byte_find(loc "\"range\":") + 8 (loc as array<uint8>).length - 1)
+            let rg=__str_slice(loc byte_find(loc "\"range\":") + 8 (loc as array<uint8>).length - 1)
             let lst=by_uri.get(u2) ?? []
             lst.push("\{\"range\":{rg},\"newText\":{json_quote(nn)}\}")
             by_uri[u2]=lst
@@ -621,7 +621,7 @@ quoted=(s:string k:LspHandlerWord):>string=>{
     if a <? 0 {return ""}
     let b=byte_find(s "'" a + 1)
     if b <? 0 {return ""}
-    s.byte_slice(a + 1 b)
+    __str_slice(s a + 1 b)
 }
 # the folders of the workspace, from initialize's parameters
 ws_init=(params:LspHandlerWord):>void=>{
@@ -667,7 +667,7 @@ on_code_lens=(id:LspHandlerWord params:LspHandlerWord):>int64=>{
         if j >=? text_lines.length {continue}
         let decl=trim(text_lines[j])
         let word=ident_prefix(decl)
-        if word =? "let" or word =? "const" {decl=trim(decl.byte_slice((word as array<uint8>).length (decl as array<uint8>).length))}
+        if word =? "let" or word =? "const" {decl=trim(__str_slice(decl (word as array<uint8>).length (decl as array<uint8>).length))}
         let name=ident_prefix(decl)
         if (name as array<uint8>).length =? 0 {continue}
         if tests =? 0 {lenses.push([i lens_json(i "Run all tests" "dewy.core.test" u)])}

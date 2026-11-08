@@ -1,6 +1,7 @@
 $runtime_checks
 from p"@lib/core/os.jo" import (is_dir list_dir read_file time)
 from p"@lib/core/str.jo" import (ends_with is_digit starts_with trim)
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"checks_text.dewy" import (byte_find byte_rfind)
 from p"ide.jo" import (IK_BUILTIN IK_CONST IK_FIELD IK_FN IK_LOCAL IK_PARAM IK_TYPE IK_VARIANT ide_texts)
 from p"ide_decls.dewy" import (ide_str_end)
@@ -23,7 +24,7 @@ top_item=(text:string off:LspRequestWord):>Item=>{
     loop true {
         let e=a
         loop e <? (text as array<uint8>).length and (text as array<uint8>)[e] not=? b'\n' {e += 1}
-        let t=text.byte_slice(a e)
+        let t=__str_slice(text a e)
         if (t as array<uint8>).length >? 0 and (t as array<uint8>)[0] not=? b' ' and (t as array<uint8>)[0] not=? b'\t' and (t as array<uint8>)[0] not=? b'#' and not starts_with(t "else") {break}
         if a =? 0 {return Item((-1) (-1) "")}
         a -= 1
@@ -38,7 +39,7 @@ top_item=(text:string off:LspRequestWord):>Item=>{
     }
     let e=first
     loop e <? (text as array<uint8>).length and (text as array<uint8>)[e] not=? b'\n' {e += 1}
-    let line=text.byte_slice(first e)
+    let line=__str_slice(text first e)
     if starts_with(line "use ") or starts_with(line "import ") or starts_with(line "build:") {return Item((-1) (-1) "")}
     let b=e
     loop b <? (text as array<uint8>).length {
@@ -48,7 +49,7 @@ top_item=(text:string off:LspRequestWord):>Item=>{
             break
         }
         let c=(text as array<uint8>)[n]
-        if c not=? b' ' and c not=? b'\t' and c not=? b'\n' and c not=? b'#' and not starts_with(text.byte_slice(n min(n + 4 (text as array<uint8>).length)) "else") {break}
+        if c not=? b' ' and c not=? b'\t' and c not=? b'\n' and c not=? b'#' and not starts_with(__str_slice(text n min(n + 4 (text as array<uint8>).length)) "else") {break}
         b=n
         loop b <? (text as array<uint8>).length and (text as array<uint8>)[b] not=? b'\n' {b += 1}
     }
@@ -139,28 +140,28 @@ use_target=(d:LspRequestWord off:LspRequestWord):>string=>{
     loop a >? 0 and (text as array<uint8>)[a - 1] not=? b'\n' {a -= 1}
     let b=off
     loop b <? (text as array<uint8>).length and (text as array<uint8>)[b] not=? b'\n' {b += 1}
-    let line=trim(text.byte_slice(a b))
+    let line=trim(__str_slice(text a b))
     if not starts_with(line "use ") and not starts_with(line "import ") and not starts_with(line "from ") {return ""}
     # (from m import a, b: on a name, that name's definition)
     if starts_with(line "from ") {
-        let im=byte_find(text.byte_slice(a b) " import ")
+        let im=byte_find(__str_slice(text a b) " import ")
         if im >=? 0 and off >? a + im {return ""}
     }
     let dir=docs[d].path
     let s=byte_rfind(dir "/")
-    if s >=? 0 {dir=dir.byte_slice(0 s)}
+    if s >=? 0 {dir=__str_slice(dir 0 s)}
     let q=find_byte(line b'\'')
     if q <? 0 {q=find_byte(line b'"')}
     if q >=? 0 {
         let e=find_byte(line (line as array<uint8>)[q] q + 1)
         if e <? 0 {return ""}
-        let rel=line.byte_slice(q + 1 e)
+        let rel=__str_slice(line q + 1 e)
         if is_abs_path(rel) {return path_norm(rel)}
         return path_norm("{dir}/{rel}")
     }
-    let nm=trim(line.byte_slice(find_byte(line b' ') + 1 (line as array<uint8>).length))
+    let nm=trim(__str_slice(line find_byte(line b' ') + 1 (line as array<uint8>).length))
     let k=byte_find(nm " as ")
-    if k >=? 0 {nm=nm.byte_slice(0 k)}
+    if k >=? 0 {nm=__str_slice(nm 0 k)}
     let rel=replace(nm "." "/")
     loop stem in module_search_stems(dir root_lib rel) {
         if file_exists("{stem}.jo") {return path_norm("{stem}.jo")}
@@ -242,17 +243,17 @@ import_paths=(d:LspRequestWord off:LspRequestWord):>string=>{
     let text=docs[d].text
     let a=off
     loop a >? 0 and (text as array<uint8>)[a - 1] not=? b'\n' {a -= 1}
-    let pre=text.byte_slice(a off)
+    let pre=__str_slice(text a off)
     let t=trim(pre)
     if not starts_with(t "from ") and not starts_with(t "import ") {return ""}
     let q=byte_rfind(pre "p\"")
     if q <? 0 or find_byte(pre b'"' q + 2) >=? 0 {return ""}
-    let typed=pre.byte_slice(q + 2 (pre as array<uint8>).length)
+    let typed=__str_slice(pre q + 2 (pre as array<uint8>).length)
     let sl=byte_rfind(typed "/")
-    let base=docs[d].path.byte_slice(0 byte_rfind(docs[d].path "/"))
+    let base=__str_slice(docs[d].path 0 byte_rfind(docs[d].path "/"))
     let dir=base
     if sl >=? 0 {
-        if is_abs_path(typed.byte_slice(0 sl + 1)) {dir=typed.byte_slice(0 sl + 1)} else {dir=path_norm("{base}/{typed.byte_slice(0 sl + 1)}")}
+        if is_abs_path(__str_slice(typed 0 sl + 1)) {dir=__str_slice(typed 0 sl + 1)} else {dir=path_norm("{base}/{__str_slice(typed 0 sl + 1)}")}
     }
     let from_=a + q + 2 + sl + 1
     let text_ls=line_starts_of(text)
@@ -284,7 +285,7 @@ on_completion=(id:LspRequestWord params:LspRequestWord):>int64=>{
     if in_comment_or_str(text off ends_with(docs[d].path ".dewy")) {return lsp_reply(id no_items)}
     let a=name_start(text off)
     let b=name_end(text off)
-    let prefix=text.byte_slice(a off)
+    let prefix=__str_slice(text a off)
     let member=a >? 0 and (text as array<uint8>)[a - 1] =? b'.'
     if a >? 0 and (text as array<uint8>)[a - 1] =? b'$' and ends_with(docs[d].path ".dewy") {
         # (the directives this compiler implements)
@@ -297,23 +298,23 @@ on_completion=(id:LspRequestWord params:LspRequestWord):>int64=>{
     let sent="__dewy_complete__"
     let saved=text
     let tries:array<string>=[]
-    tries.push("{text.byte_slice(0 a)}{sent}{text.byte_slice(b (text as array<uint8>).length)}")
+    tries.push("{__str_slice(text 0 a)}{sent}{__str_slice(text b (text as array<uint8>).length)}")
     # (an unfinished line: end it after the name, closing what it opened)
     let le=b
     loop le <? (text as array<uint8>).length and (text as array<uint8>)[le] not=? b'\n' {le += 1}
     let ls0=a
     loop ls0 >? 0 and (text as array<uint8>)[ls0 - 1] not=? b'\n' {ls0 -= 1}
     let closers=""
-    loop c in (text.byte_slice(ls0 a) as array<uint8>) {
+    loop c in (__str_slice(text ls0 a) as array<uint8>) {
         if c =? b'(' {closers="){closers}"} else if c =? b'[' {closers="]{closers}"}
-        else if c =? b'\{' {closers="\}{closers}"} else if (c =? b')' or c =? b']' or c =? b'}') and (closers as array<uint8>).length >? 0 {closers=closers.byte_slice(1 (closers as array<uint8>).length)}
+        else if c =? b'\{' {closers="\}{closers}"} else if (c =? b')' or c =? b']' or c =? b'}') and (closers as array<uint8>).length >? 0 {closers=__str_slice(closers 1 (closers as array<uint8>).length)}
     }
-    let line0=trim(text.byte_slice(ls0 a))
+    let line0=trim(__str_slice(text ls0 a))
     # (the names after `from m import` are the module's, not statements)
     if starts_with(line0 "from ") and byte_find(line0 " import") >=? 0 {member=true}
     let tail=closers
-    if (starts_with(line0 "if ") or starts_with(line0 "else if ") or starts_with(line0 "loop ") or starts_with(line0 "match ") or starts_with(line0 "while ")) and find_byte(text.byte_slice(a le) b':') <? 0 {tail="{tail}: pass"}
-    tries.push("{text.byte_slice(0 a)}{sent}{tail}{text.byte_slice(le (text as array<uint8>).length)}")
+    if (starts_with(line0 "if ") or starts_with(line0 "else if ") or starts_with(line0 "loop ") or starts_with(line0 "match ") or starts_with(line0 "while ")) and find_byte(__str_slice(text a le) b':') <? 0 {tail="{tail}: pass"}
+    tries.push("{__str_slice(text 0 a)}{sent}{tail}{__str_slice(text le (text as array<uint8>).length)}")
     let r=Result()
     loop t in tries {
         ide_texts[docs[d].path]=t
@@ -352,7 +353,7 @@ dewy_arg_at=(text:string m:array<uint8> a:LspRequestWord b:LspRequestWord):>[int
         let space=not inside and depth =? 0 and (c =? b' ' or c =? b'\t' or c =? b'\n' or c =? b'\r')
         if space {
             if w0 >=? 0 {
-                words.push(text.byte_slice(w0 j))
+                words.push(__str_slice(text w0 j))
                 w0=-1
             }
         }
@@ -366,7 +367,7 @@ dewy_arg_at=(text:string m:array<uint8> a:LspRequestWord b:LspRequestWord):>[int
     }
     let open_word=w0 >=? 0
     if open_word {
-        words.push(text.byte_slice(w0 b))
+        words.push(__str_slice(text w0 b))
     }
     let index:LspRequestWord=-1
     let first:LspRequestWord=-1
@@ -391,7 +392,7 @@ dewy_arg_at=(text:string m:array<uint8> a:LspRequestWord b:LspRequestWord):>[int
         let w=words[first]
         let e:LspRequestWord=0
         loop e <? (w as array<uint8>).length and is_ident_char((w as array<uint8>)[e]) {e += 1}
-        if e >? 0 and e <? (w as array<uint8>).length and (w as array<uint8>)[e] =? b'=' and (e + 1 >=? (w as array<uint8>).length or (w as array<uint8>)[e + 1] not=? b'=' and (w as array<uint8>)[e + 1] not=? b'?' and (w as array<uint8>)[e + 1] not=? b'>') {name=w.byte_slice(0 e)}
+        if e >? 0 and e <? (w as array<uint8>).length and (w as array<uint8>)[e] =? b'=' and (e + 1 >=? (w as array<uint8>).length or (w as array<uint8>)[e + 1] not=? b'=' and (w as array<uint8>)[e + 1] not=? b'?' and (w as array<uint8>)[e + 1] not=? b'>') {name=__str_slice(w 0 e)}
     }
     [index name]
 }
@@ -446,7 +447,7 @@ sig_param=(label:string x:LspRequestWord y:LspRequestWord @ps:array<string> @nam
     if (label as array<uint8>)[q] =? b'@' {q += 1}
     let e=q
     loop e <? y0 and is_ident_char((label as array<uint8>)[e]) {e += 1}
-    names.push(label.byte_slice(q e))
+    names.push(__str_slice(label q e))
 }
 on_signature=(id:LspRequestWord params:LspRequestWord):>int64=>{
     let d=text_params_doc(params)
@@ -605,7 +606,7 @@ stmt_lines=(text:string ls:array<int64>):>array<bool>=>{
     loop true {
         loop l <? ls.length and ls[l] <=? i {
             if ls[l] <? i {ok[l]=false} else {
-                ind=indent_of(text.byte_slice(i min(i + 200 (text as array<uint8>).length)))
+                ind=indent_of(__str_slice(text i min(i + 200 (text as array<uint8>).length)))
                 let k=i + ind
                 if not sy_dewy and depth >? 0 and k <? (text as array<uint8>).length and (text as array<uint8>)[k] not=? b'\n' and ind <=? oind and (text as array<uint8>)[k] not=? b')' and (text as array<uint8>)[k] not=? b']' and (text as array<uint8>)[k] not=? b'}' {depth=0}
                 ok[l]=depth =? 0
@@ -650,24 +651,24 @@ symbols_in=(lines_:array<string> from_:LspRequestWord to:LspRequestWord ind:LspR
             if constant or word =? "let" {
                 let prefix=skip_blanks(t (word as array<uint8>).length)
                 col += prefix
-                t=t.byte_slice(prefix (t as array<uint8>).length)
+                t=__str_slice(t prefix (t as array<uint8>).length)
             }
             let nm=ident_prefix(t)
-            let rest=trim(t.byte_slice((nm as array<uint8>).length (t as array<uint8>).length))
+            let rest=trim(__str_slice(t (nm as array<uint8>).length (t as array<uint8>).length))
             if (nm as array<uint8>).length >? 0 and keywords.get(nm) =? none {
                 let kind=if constant {14} else {13}
                 let declared=starts_with(rest "=") and not starts_with(rest "==") or starts_with(rest ":")
                 if fn_decl_at(i col + (nm as array<uint8>).length) {
                     kind=12
                 }
-                else if starts_with(rest ":") and ident_prefix(trim(rest.byte_slice(1 (rest as array<uint8>).length))) =? "type" {
+                else if starts_with(rest ":") and ident_prefix(trim(__str_slice(rest 1 (rest as array<uint8>).length))) =? "type" {
                     kind=5
                     let equal=find_byte(rest b'=')
                     if equal >=? 0 {
-                        let value=trim(rest.byte_slice(equal + 1 (rest as array<uint8>).length))
+                        let value=trim(__str_slice(rest equal + 1 (rest as array<uint8>).length))
                         if starts_with(value "<") {
                             let close=find_byte(value b'>')
-                            if close >=? 0 {value=trim(value.byte_slice(close + 1 (value as array<uint8>).length))}
+                            if close >=? 0 {value=trim(__str_slice(value close + 1 (value as array<uint8>).length))}
                         }
                         if starts_with(value "[") {kind=23}
                     }
@@ -701,14 +702,14 @@ symbols_in=(lines_:array<string> from_:LspRequestWord to:LspRequestWord ind:LspR
         }
         if starts_with(t "struct ") or starts_with(t "enum ") {
             let isst=starts_with(t "struct ")
-            let rest=t.byte_slice(find_byte(t b' ') + 1 (t as array<uint8>).length)
+            let rest=__str_slice(t find_byte(t b' ') + 1 (t as array<uint8>).length)
             let nm=ident_prefix(rest)
             sy_container=nm
             let kids:array<string>=[]
             # (enum E: a, b on one line)
             let colon=find_byte(t b':')
-            if not isst and colon >=? 0 and (trim(t.byte_slice(colon + 1 (t as array<uint8>).length)) as array<uint8>).length >? 0 {
-                loop part in split(t.byte_slice(colon + 1 (t as array<uint8>).length) ",") {
+            if not isst and colon >=? 0 and (trim(__str_slice(t colon + 1 (t as array<uint8>).length)) as array<uint8>).length >? 0 {
+                loop part in split(__str_slice(t colon + 1 (t as array<uint8>).length) ",") {
                     let pn=ident_prefix(trim(part))
                     if (pn as array<uint8>).length >? 0 {kids.push(sym_json(pn 22 i col + max(0 byte_find(t pn colon)) i []))}
                 }
@@ -734,25 +735,25 @@ symbols_in=(lines_:array<string> from_:LspRequestWord to:LspRequestWord ind:LspR
             out.push(sym_json(nm k i col + byte_find(t nm) e kids))
         }
         else if starts_with(t "const ") {
-            let nm=ident_prefix(t.byte_slice(6 (t as array<uint8>).length))
+            let nm=ident_prefix(__str_slice(t 6 (t as array<uint8>).length))
             if (nm as array<uint8>).length >? 0 {out.push(sym_json(nm 14 i col + 6 e []))}
         }
         else if starts_with(t "type ") {
-            let nm=ident_prefix(t.byte_slice(5 (t as array<uint8>).length))
+            let nm=ident_prefix(__str_slice(t 5 (t as array<uint8>).length))
             if (nm as array<uint8>).length >? 0 {out.push(sym_json(nm 5 i col + 5 e []))}
         }
         else if starts_with(t "test ") {
-            let q=trim(t.byte_slice(5 (t as array<uint8>).length))
-            if ends_with(q ":") {q=q.byte_slice(0 (q as array<uint8>).length - 1)}
+            let q=trim(__str_slice(t 5 (t as array<uint8>).length))
+            if ends_with(q ":") {q=__str_slice(q 0 (q as array<uint8>).length - 1)}
             out.push(sym_json("test {q}" 24 i col e []))
         }
         else if starts_with(t "extern ") {
-            let nm=ident_prefix(t.byte_slice(7 (t as array<uint8>).length))
+            let nm=ident_prefix(__str_slice(t 7 (t as array<uint8>).length))
             if (nm as array<uint8>).length >? 0 {out.push(sym_json(nm 12 i col + 7 e []))}
         }
         else {
             let nm=ident_prefix(t)
-            let rest=trim(t.byte_slice((nm as array<uint8>).length (t as array<uint8>).length))
+            let rest=trim(__str_slice(t (nm as array<uint8>).length (t as array<uint8>).length))
             if (nm as array<uint8>).length >? 0 and keywords.get(nm) =? none {
                 # name = (params) ...: a function; name = value or name: T: a variable
                 if fn_decl_at(i col + (nm as array<uint8>).length) {out.push(sym_json(nm 12 i col e []))} else if starts_with(rest "=") and not starts_with(rest "==") or starts_with(rest ":") and not ends_with(rest ":") {
