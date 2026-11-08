@@ -627,6 +627,13 @@ cx_convert = (e: int, v: int) -> int:
         else: x = CTValue(type = t, i = 1, items = [v])
         return cx_add(x)
     if cv == .union_:
+        source_set = cx_host[0].str_set_of(x.type)
+        target_set = cx_host[0].str_set_of(t)
+        if source_set != 0 and target_set != 0:
+            word = cx_str_sets[0][source_set][x.i]
+            index = cx_str_sets[0][target_set].index_of(word)
+            if index < 0: cx_fail(e, "the value is not a member of {cx_dt(t)}")
+            return cx_add(CTValue(type = t, i = index))
         member = tu_union_members(x.type)[x.i]
         x.i = uu_holder(t, member, false)
         if x.i < 0: cx_fail(e, "the value is not a member of {cx_dt(t)}")

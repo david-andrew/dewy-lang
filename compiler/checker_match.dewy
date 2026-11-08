@@ -303,7 +303,12 @@ xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hid
         }
     }
     if binding not=? 0 {
-        if pk =? 'plit' and xh_nodes[0].ptr[p].type not=? 0 and xh_set(XHWord(xh_nodes[0].ptr[value].type)) =? 0 {xh_nodes[0][value].type=xh_nodes[0].ptr[p].type}
+        if pk =? 'plit' and xh_nodes[0].ptr[p].type not=? 0 {
+            let bound=XHWord(xh_nodes[0].ptr[p].type)
+            if xh_set(bound) not=? 0 and xh_set(XHWord(xh_nodes[0].ptr[value].type)) not=? 0 {xh_host[0].wrap_union(value bound)}
+            else if xh_set(bound) not=? 0 {xh_host[0].coerce(value bound);}
+            else if xh_set(XHWord(xh_nodes[0].ptr[value].type)) =? 0 {xh_nodes[0][value].type=int32<overflow='wrap'>(bound)}
+        }
         let d=node_mk(@xh_nodes[0] 'vardecl' pos)
         xh_nodes[0][d].name=int32<overflow='wrap'>(binding)
         xh_nodes[0][d].b=int32<overflow='wrap'>(value)

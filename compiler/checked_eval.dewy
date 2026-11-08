@@ -774,6 +774,14 @@ cx_convert=(e:CWord v:CWord):>CWord=>$unsafe {
         return cx_add(x)
     }
     if cv =? 'union_' {
+        let source_set=cx_host[0].str_set_of(x.type)
+        let target_set=cx_host[0].str_set_of(t)
+        if source_set not=? 0 and target_set not=? 0 {
+            let word=cx_str_sets[0][source_set][x.i]
+            let index=cx_str_sets[0][target_set].index_of(word) ?? -1
+            if index <? 0 {cx_fail(e "the value is not a member of {cx_dt(t)}")}
+            return cx_add(CTValue[type=t i=index])
+        }
         let member=tu_union_members(x.type)[x.i]
         x.i = uu_holder(t  member  false)
         if x.i <? 0 {cx_fail(e  "the value is not a member of {cx_dt(t)}")}

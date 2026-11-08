@@ -1,0 +1,12 @@
+Column:type='on'|'what'|'amount'|'category'
+Pick:type='add'|'delete'|Column
+use_column=(c:Column)=>printl(c)
+f=(p0:Pick)=>{
+    let p=p0
+    if p is? Column {
+        use_column(p)
+        p='delete'
+        use_column(p)
+    }
+}
+main=()=>f('on')

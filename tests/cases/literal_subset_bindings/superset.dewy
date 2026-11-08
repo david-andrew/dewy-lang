@@ -1,0 +1,8 @@
+Column:type='on'|'what'|'amount'|'category'
+Actions:type='add'|'delete'|Column
+width=<T>(_value:T):>int64=>members(T).length
+read=(c:Column):>int64=>{
+    if c is? Actions return width(c)
+    0
+}
+main=()=>printl(read('on'))

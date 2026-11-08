@@ -2444,6 +2444,7 @@ gen_conv = (e: int) -> Val:
         emit(.f2f, vt_of(to), d, v, 0, 0, 0)
         return V(d, false)
     if cv == .union_:
+        if str_set_of(from) != 0 and str_set_of(to) != 0: return V(set_word_moved(gen_expr(a).v, from, to, nodes[e].pos), false)
         # the same value in a union with other members: the tag maps to the member's new
         # index and the payload moves along (a member the new union lacks cannot be here)
         layout(from)

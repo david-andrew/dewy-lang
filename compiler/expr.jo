@@ -8243,6 +8243,7 @@ narrow_promote = (first: int, limit: int):
 
 # where condition c is `holds` (true or false), variables it tests with `is` stand for the member
 narrow_by = (c: int, holds: bool):
+    if holds and string_set_tests.has(c): narrow_string_set(c)
     k = nodes[c].kind
     if k == .istype: narrow_var(c, holds)
     else if k == .binary and (nodes[c].op == i32(int(Tok.ne)) or nodes[c].op == i32(int(Tok.eq))) and nodes[int(nodes[c].b)].kind == .none_lit:
@@ -8264,6 +8265,24 @@ narrow_by = (c: int, holds: bool):
         if or_tests(c, tests): narrow_some(tests)
     else if k == .and_ and not holds: narrow_opt_rest_by(c)
     else if k == .binary: position_guard_note(c, holds)
+
+# A successful literal-subset test keeps its exact set, with its own ordinal
+# representation, rather than only the containing union's string-set member.
+narrow_string_set = (c: int):
+    source = string_set_tests[c].0
+    if str_set_of(ntype(source)) == 0: return
+    if str_set_within(str_set_of(ntype(source)), string_set_tests[c].1): return
+    key = path_key(source)
+    if len(key) == 0: return
+    target = str_set_type(str_sets[string_set_tests[c].1])
+    value = copy_path(source)
+    wrap_conv(value, CV.union_, target)
+    name = if nodes[source].kind == .ident and nodes[source].aux == i32(int(SK.local)): int(nodes[source].name) else: path_name(key)
+    nl = new_local(name, target, nodes[c].pos)
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(value)
+    if nodes[source].kind != .ident or nodes[source].aux == i32(int(SK.global)): path_narrows += 1
+    narrow_store_register(nl)
 
 # `x is? C` on x: (A | B | C)? is `x != none and x is? C` (check_istype); when it fails,
 # x is none or one of the other members: an (A | B)?. x a field path or a global: as the `_`

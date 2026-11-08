@@ -1,3 +1,4 @@
+from p"refine.jo" import (str_set_of)
 from p"lower_primitives.dewy" import (rt_const rt_global rt_global_word bounds_check call_eval_order data_writable e_call_nr e_call_nr1 e_call_nr2 e_call_nr3 e_call_nr4 e_daddr e_faddr e_gaddr fixed_index_domain fmt_field global_addr_off inst_mutmask json_field json_key lf_helper lf_of_inst lit loc_data loc_str null_check rt set_text_table set_word_moved str_data tuple_off)
 from p"lower_closures.dewy" import (closure_env_shareable closure_scalar_environment closure_size drop_stack_closure env_layout partial_layout spawn_body spawn_owned_capture stack_closure_local stack_closure_target)
 from p"lower_scalars.dewy" import (all_const byte_eq_type byte_offset_plain const_array f2i_i32 float_op gen_eq gen_match_lookup gen_value_dotname gen_value_float_lit gen_value_int_lit gen_value_none_lit int_op is_plain_ctor is_slice math_int_guard negate_cmp never_after never_value pat_int positive_modulus range_cmp range_tail same_range_read saturate_binary saturate_shift sdiv_wrap stepped_done text_source vec_comps wide_shift)
@@ -2742,6 +2743,7 @@ gen_conv=(e:LGWord):>Val=>$unsafe {
         return V(d false)
     }
     if cv =? CV.union_ {
+        if str_set_of(source_type) not=? 0 and str_set_of(to) not=? 0 {return V(set_word_moved(gen_expr(a).v source_type to nodes.ptr[e].pos) false)}
         # the same value in a union with other members: the tag maps to the member's new
         # index and the payload moves along (a member the new union lacks cannot be here)
         layout(source_type);

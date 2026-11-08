@@ -1,0 +1,46 @@
+Column:type='on'|'what'|'amount'|'category'
+Row:type=[i:int64]
+Pick:type='add'|'delete'|Column|Row
+Box:type=[pick:Pick]
+let selected:Pick='amount'
+width=<T>(_value:T):>int64=>members(T).length
+global_guard=():>string=>{
+    if selected is? Column {return "global {selected} {width(selected)}"}
+    "other"
+}
+matched=(p:Pick):>string=>match p {
+    c:Column=>"match {c} {width(c)}"
+    r:Row=>"row {r.i}"
+    _=>"other"
+}
+guarded=(p:Pick):>string=>{
+    if p is? Column {return "guard {p} {width(p)}"}
+    "other"
+}
+field_guard=(box:Box):>string=>{
+    if box.pick is? Column {return "field {box.pick} {width(box.pick)}"}
+    "other"
+}
+captured=(p:Pick):>string=>{
+    if p is? Column {
+        let read=()=>"capture {p} {width(p)}"
+        return read()
+    }
+    "other"
+}
+const folded=guarded('what')
+main=()=>{
+    printl(matched('on'))
+    printl(matched('what'))
+    printl(matched('amount'))
+    printl(matched('category'))
+    printl(matched('add'))
+    printl(matched(Row[7]))
+    printl(guarded('on'))
+    printl(guarded('amount'))
+    printl(guarded('delete'))
+    printl(field_guard(Box['category']))
+    printl(captured('what'))
+    printl(folded)
+    printl(global_guard())
+}

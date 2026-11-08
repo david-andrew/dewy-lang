@@ -263,7 +263,11 @@ xh_pattern = (ms: mut MatchState, arm_state: mut ArmState, arm: int, p: int, st:
             present = xh_node(.unwrap, value, 0, u, pos)
             value = xh_host[0].union_part(present, u, [pt], pos)
     if binding != 0:
-        if pk == .plit and xh_nodes[0][p].type != 0 and xh_set(int(xh_nodes[0][value].type)) == 0: xh_nodes[0][value].type = xh_nodes[0][p].type
+        if pk == .plit and xh_nodes[0][p].type != 0:
+            bound = int(xh_nodes[0][p].type)
+            if xh_set(bound) != 0 and xh_set(int(xh_nodes[0][value].type)) != 0: xh_host[0].wrap_union(value, bound)
+            else if xh_set(bound) != 0: xh_host[0].coerce(value, bound)
+            else if xh_set(int(xh_nodes[0][value].type)) == 0: xh_nodes[0][value].type = i32(bound)
         d = int(node_mk(mut xh_nodes[0], .vardecl, pos))
         xh_nodes[0][d].name = i32(binding)
         xh_nodes[0][d].b = i32(value)
