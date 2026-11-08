@@ -27,7 +27,7 @@ from p"string_domains.jo" import (string_domain_conversion_stops string_domain_p
 from p"type_ops.dewy" import (dt mk_array)
 from p"type_refinement.dewy" import (tr_limit)
 from p"types.jo" import (T_I16 T_I32 T_I8 T_INT T_MATH_INT T_STR T_U16 T_U32 T_U64 T_U8 T_VOID fields has_var is_int prune struct_targ structs tkind type_eq types)
-from p"util.jo" import (fatal name_of names)
+from p"util.jo" import (fatal files name_of names pos_file pos_off)
 
 RefineRareWord:type=int64<overflow='wrap'>
 # a dictionary literal given for a totaldict: an entry for every key
@@ -108,8 +108,22 @@ ref_resolve_value=(n:int64):>RefTerm=>$unsafe {
         return RefTerm(3 l)
     }
     if name =? ref_declaring {fatal(nodes.ptr[n].pos "'{name_of(name)}' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? {name_of(name)}.length)>>`, and nothing else")}
+    # (`Port:type = int64<1 <=? p ...>`: a name that is neither the value's nor a binding's)
+    let v=name_of(name)
+    if sym =? 0 and ref_holder_name =? 0 and ref_declaring =? 0 and not ref_projected_name(nodes.ptr[n].pos (v as array<uint8>).length) {
+        fatal(nodes.ptr[n].pos "'{v}' names nothing here: a refinement names its value with a lambda, `int64<{v} => 0 <=? {v} and {v} <=? 9>`, by its parameter's, field's or binding's own name, or tests it with a partial operator, `int64<(>=? 0)>`")
+    }
     fatal(nodes.ptr[n].pos "unsupported refinement term '{name_of(name)}'")
     RefTerm()
+}
+# Whether the name of n characters at p is followed by a dot (`r.length`): a projection
+# of a binding, not the value itself. O(1), on the error path only.
+ref_projected_name=(p:int64 n:int64):>bool=>$unsafe {
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return false}
+    let src=files[f].src as array<uint8>
+    let o=pos_off(p) + n
+    o <? src.length and src[o] =? b'.'
 }
 ref_resolve_limit=(n:int64):>RefResolveLimit=>$unsafe {
     let base=RefineRareWord(nodes.ptr[n].a)

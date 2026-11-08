@@ -1,0 +1,5 @@
+# modes: native native-release
+# The lambda form names the value of a type's refinement.
+HeaderWords:type=int64<h => 5 <=? h and h <=? 15>
+words=(x:HeaderWords):>int64 => x * 4
+main=():>void=>printl(words(6))

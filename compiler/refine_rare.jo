@@ -119,8 +119,20 @@ ref_resolve_value = (n: int) -> RefTerm:
         if int(locals[l].flags) & LF_CONST == 0: fatal(nodes[n].pos, "refinement dependency must be a stable binding")
         return RefTerm(3, l)
     if name == ref_declaring: fatal(nodes[n].pos, "'{name_of(name)}' is the binding being declared: its length can bound the direct element of its array, as in `array<int64<(<? {name_of(name)}.length)>>`, and nothing else")
+    # (`Port:type = int64<1 <=? p ...>`: a name that is neither the value's nor a binding's)
+    v = name_of(name)
+    if sym == 0 and ref_holder_name == 0 and ref_declaring == 0 and not ref_projected_name(nodes[n].pos, len(v)):
+        fatal(nodes[n].pos, "'{v}' names nothing here: a refinement names its value with a lambda, `int64<{v} => 0 <=? {v} and {v} <=? 9>`, by its parameter's, field's or binding's own name, or tests it with a partial operator, `int64<(>=? 0)>`")
     fatal(nodes[n].pos, "unsupported refinement term '{name_of(name)}'")
     RefTerm()
+# Whether the name of n characters at p is followed by a dot (`r.length`): a projection
+# of a binding, not the value itself. O(1), on the error path only.
+ref_projected_name = (p: int, n: int) -> bool:
+    f = pos_file(p)
+    if f < 0 or f >= files.len(): return false
+    src = files[f].src
+    o = pos_off(p) + n
+    o < len(src) and src[o] == '.'
 ref_resolve_limit = (n: int) -> RefResolveLimit:
     base = int(nodes[n].a)
     spelling = name_of(int(nodes[base].name))
