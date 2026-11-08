@@ -1,0 +1,12 @@
+from units import kW, kWh
+Appliance:type=[power:float64*Mass*Length^2/Time^3 hours:float64*Time]
+main=()=>{
+    let days=(date"2026-12-01" - date"2026-11-01").total_days
+    let energy=0.0kWh
+    loop a in [Appliance[3.5kW 6.0hour] Appliance[4.5kW 2.0hour]] {
+        energy+=a.power*a.hours*days
+    }
+    printl(days)
+    printl(energy as kWh)
+    printl(energy/(days*24hour) as kW)
+}
