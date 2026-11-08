@@ -1,5 +1,6 @@
 $runtime_checks
 from p"@lib/core/os.jo" import (env eprint exit file_exists list_dir mkdir read_file run_program temp_dir write_file)
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"@lib/core/str.jo" import (ends_with starts_with)
 from p"manifest.dewy" import (pkg_block_at pkg_declares pkg_default_name pkg_fetch_dir pkg_insert pkg_is_commit pkg_is_git pkg_lock_key pkg_lock_read pkg_lock_text pkg_ls_remote_commit pkg_ls_remote_names pkg_pin pkg_scan_at pkg_short pkg_unsafe_git pkg_url)
 from p"module_paths.dewy" import (is_abs_path os_path)
@@ -46,7 +47,7 @@ core_cache=():>string=>{
 pkg_mkdirs=(d:string):>void=>{
     if (d as array<uint8>).length =? 0 or file_exists("{d}/.") {return}
     let s=pkg_last_slash(d)
-    if s >? 0 {pkg_mkdirs(d.byte_slice(0 s))}
+    if s >? 0 {pkg_mkdirs(__str_slice(d 0 s))}
     mkdir(d);
 }
 # git, run with these arguments: its exit code and output (-1: git is not there)
@@ -100,7 +101,7 @@ pkg_resolve_all=(main_path:string):>void=>{
     if pkg_specs.length =? 0 {return}
     let d="."
     let s=pkg_last_slash(main_path)
-    if s >=? 0 {d=main_path.byte_slice(0 s)}
+    if s >=? 0 {d=__str_slice(main_path 0 s)}
     let lock_path="{d}/dewy.lock"
     let locked=pkg_lock_read(read_file(lock_path) ?? "")
     let pins:array<string>=[]

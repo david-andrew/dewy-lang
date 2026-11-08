@@ -2,6 +2,7 @@ $runtime_checks
 
 # Complete MSF/PDB and CodeView construction. Shared debug metadata comes
 # from the same borrowed headers and growth-safe services as DWARF.
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"elf_format.dewy" import (elf_append_bytes elf_syms put16 put32 put64)
 from p"module_paths.dewy" import (is_abs_path)
 from p"dwarf_format.dewy" import (DL_CONST DL_MEM DL_MEMAT DL_REG DW_BOX DW_BOXP DW_BYTE DW_FLEX DW_HDR DW_LONG DW_PTR DW_STRHDR DW_STRPTR DW_TAGS DW_VARIANT DW_VOIDP dbg_vars dw_align_up dw_inputs dw_pos_file dw_prune dw_talign dw_targ dw_tkind dw_tsize)
@@ -41,7 +42,7 @@ pdb_name=(path:string):>string=>$unsafe {
     let bytes=path as array<uint8>
     let i=PWord(bytes.length) - 1
     loop i >=? 0 and bytes[i] not=? 47 {i -= 1}
-    if i >=? 0 {return path.byte_slice(i + 1 bytes.length)}
+    if i >=? 0 {return __str_slice(path i + 1 bytes.length)}
     path
 }
 pdb_cstr=(@out:array<uint8> s:string):>void=>$unsafe {

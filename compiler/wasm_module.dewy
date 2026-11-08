@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"ir_types.dewy" import (IrFn)
 from p"wasm_emit.dewy" import (RO_BASE WT_I32 data_base max_frame sig_index table_funcs type_sigs w_sites wasm_align_up wasm_body wasm_data_size wasm_error wasm_grow wasm_import_params wasm_import_results wasm_mt_active_off wfn_index wt)
 from p"leb128.dewy" import (sleb uleb)
@@ -297,7 +298,7 @@ w_line_section=(@out:array<uint8> code_at:WWord body_at:array<int64> body_sites:
                     fidx[f] = fnames.length
                     let path=files[f].path
                     let sl=wm_slash(path)
-                    if sl >=? 0 {path=path.byte_slice(sl + 1  (path as array<uint8>).length)}
+                    if sl >=? 0 {path=__str_slice(path sl + 1  (path as array<uint8>).length)}
                     fnames.push(path)
                 }
                 if ni <? 0 {

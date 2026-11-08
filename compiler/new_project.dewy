@@ -1,6 +1,7 @@
 $runtime_checks
 # Small Dewy starting points, using the same native/web runtime as ordinary builds.
 from p"@lib/core/os.jo" import (eprint exit file_exists make_dirs read_file write_file)
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"@lib/core/str.jo" import (byte_str is_alnum lower replace starts_with)
 
 new_usage=():>void=>{
@@ -12,10 +13,10 @@ new_project_name=(dir:string fallback:string):>string=>{
     let path=replace(dir "\\" "/")
     let stop=(path as array<uint8>).length
     loop stop >? 0 and (path as array<uint8>)[stop - 1] =? b'/' {stop-=1}
-    path=path.byte_slice(0 stop)
+    path=__str_slice(path 0 stop)
     let slash=stop - 1
     loop slash >=? 0 and (path as array<uint8>)[slash] not=? b'/' {slash-=1}
-    path=path.byte_slice(slash + 1 stop)
+    path=__str_slice(path slash + 1 stop)
     let name=""
     loop c in (lower(path) as array<uint8>) {
         if is_alnum(c) or c =? b'_' {name="{name}{byte_str(int64(c))}"}
@@ -23,7 +24,7 @@ new_project_name=(dir:string fallback:string):>string=>{
     }
     let kept=(name as array<uint8>).length
     loop kept >? 0 and (name as array<uint8>)[kept - 1] =? b'-' {kept-=1}
-    name=name.byte_slice(0 kept)
+    name=__str_slice(name 0 kept)
     if kept =? 0 {name=fallback}
     "{name}.dewy"
 }

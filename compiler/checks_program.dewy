@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"directive_ops.dewy" import (dir_version_warnings)
 from p"dewy_method_ops.dewy" import (dewy_is_method)
 from p"check.jo" import (word_count)
@@ -58,7 +59,7 @@ program_name_default=(main_path:string):>void=>{
     if (program_name as array<uint8>).length =? 0 {
         program_name=main_path
         let s=byte_rfind(program_name "/")
-        if s >=? 0 {program_name=program_name.byte_slice(s + 1 (program_name as array<uint8>).length)}
+        if s >=? 0 {program_name=__str_slice(program_name s + 1 (program_name as array<uint8>).length)}
         program_name=strip_ext(program_name)
     }
 }
@@ -164,7 +165,7 @@ program_tests=(mainm:ProgramWord main_path:string):>void=>$unsafe {
             if (pyt as array<uint8>).length >? 0 {fatal(nodes.ptr[ProgramWord(syms.ptr[modules[mainm].names[intern(pyt)]].decl)].pos "'{pyt}' is a function, not a test: put `$test` on the line before it")}
             fatal((-1) "no tests in {main_path}: a test is a function marked `$test` on the line before it (`$test` then `let adds = () => $expect add(1 2) =? 3`)")
         }
-        if (pyt as array<uint8>).length >? 0 {fatal(nodes.ptr[ProgramWord(syms.ptr[modules[mainm].names[intern(pyt)]].decl)].pos "'{pyt}' is a function, not a test: a test is written `test \"{pyt.byte_slice(5 (pyt as array<uint8>).length)}\":` with its lines below it (`assert(...)` in them)")}
+        if (pyt as array<uint8>).length >? 0 {fatal(nodes.ptr[ProgramWord(syms.ptr[modules[mainm].names[intern(pyt)]].decl)].pos "'{pyt}' is a function, not a test: a test is written `test \"{__str_slice(pyt 5 (pyt as array<uint8>).length)}\":` with its lines below it (`assert(...)` in them)")}
         fatal((-1) "no tests in {main_path}: a test is written `test \"adds\":` with its lines below it, as `assert(add(1, 2) == 3)`")
     }
     if test_mode {
@@ -198,7 +199,7 @@ program_tests=(mainm:ProgramWord main_path:string):>void=>$unsafe {
                 }
                 continue
             }
-            if not files[pos_file(pos)].is_dewy and (nm as array<uint8>).length >=? 2 and (nm as array<uint8>)[0] =? b'"' {nm=nm.byte_slice(1 (nm as array<uint8>).length - 1)}
+            if not files[pos_file(pos)].is_dewy and (nm as array<uint8>).length >=? 2 and (nm as array<uint8>)[0] =? b'"' {nm=__str_slice(nm 1 (nm as array<uint8>).length - 1)}
             let body=ProgramWord(nodes.ptr[d].b)
             modules[mainm].inits.push(test_entry(synth_str(nm pos) kids(body) pos))
             count += 1

@@ -13,6 +13,7 @@ $runtime_checks
 # compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
 # interface and give the same answers (tests/test_selfhost_module_paths.py).
 
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"json_doc.dewy" import json_hex
 
 # a path that does not start from the current directory ("/x", or "c:/x" on Windows)
@@ -29,7 +30,7 @@ strip_ext=(path:string):>string=>{
     let dot:int64=b.length - 1
     loop dot >? slash + 1 and b[dot] not=? b'.' {dot-=1}
     if dot <=? slash + 1 {return path}
-    path.byte_slice(0 dot)
+    __str_slice(path 0 dot)
 }
 
 # a path as the compiler keeps it: parts separated by / (on Windows, windows_path)
@@ -43,7 +44,7 @@ os_path=(p:string):>string=>{
 windows_path=(p:string):>string=>{
     let q=p.replace("\\" "/")
     let b=q as array<uint8>
-    if b.length >=? 2 and b[1] =? b':' and b[0] >=? b'A' and b[0] <=? b'Z' {return "{lower(q.byte_slice(0 1))}{q.byte_slice(1 b.length)}"}
+    if b.length >=? 2 and b[1] =? b':' and b[0] >=? b'A' and b[0] <=? b'Z' {return "{lower(__str_slice(q 0 1))}{__str_slice(q 1 b.length)}"}
     q
 }
 
@@ -89,7 +90,7 @@ path_dir=(path:string):>string=>{
     let slash:int64=b.length - 1
     loop slash >=? 0 and b[slash] not=? b'/' {slash-=1}
     if slash <? 0 {return "."}
-    path.byte_slice(0 slash)
+    __str_slice(path 0 slash)
 }
 
 # a file's name without its directory and extension: its module's name ("dir/game.jo" -> "game")
@@ -104,7 +105,7 @@ path_stem=(path:string):>string=>{
         let parts=path.split("/")
         return strip_ext(parts[parts.length - 1])
     }
-    strip_ext(path.byte_slice(slash + 1 n))
+    strip_ext(__str_slice(path slash + 1 n))
 }
 
 # a module's identity: its path, absolute (from cwd) and normal
@@ -124,7 +125,7 @@ package_name=(rel:string):>string=>{
     let slash:int64=0
     loop slash <? b.length and b[slash] not=? b'/' {slash+=1}
     if slash =? 0 or slash =? b.length {return ""}
-    rel.byte_slice(0 slash)
+    __str_slice(rel 0 slash)
 }
 
 # the file a `use 'package/file.jo'` names in the package's directory pd

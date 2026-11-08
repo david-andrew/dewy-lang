@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"ir_types.dewy" import (IrFn)
 from p"dwarf_format.dewy" import (DL_ADDR DL_CONST DL_FCONST DL_MEM DL_MEMAT DL_NONE DL_REG LF_MUTPARAM LF_PARAM dw_inputs dw_pos_file)
 from p"x64_allocate.dewy" import (slot_off vspill)
@@ -106,13 +107,13 @@ native_debug_function=(input:ptr<IrFn> code_end:NWord start:NWord body:NWord dwr
 }
 sym_name=(n:string):>string=>$unsafe {
     if not n.startswith("f_") {return n}
-    let s=n.byte_slice(2  (n as array<uint8>).length)
+    let s=__str_slice(n 2  (n as array<uint8>).length)
     let u=nd_rfind(s  95)
     if u >? 0 {
-        loop c in (s.byte_slice(u + 1  (s as array<uint8>).length) as array<uint8>) {
+        loop c in (__str_slice(s u + 1  (s as array<uint8>).length) as array<uint8>) {
             if c <? 48 or c >? 57 {return s}
         }
-        return s.byte_slice(0  u)
+        return __str_slice(s 0  u)
     }
     s
 }
@@ -155,7 +156,7 @@ x64_line_table=():>array<uint8>=>$unsafe {
             file_index[f] = fnames.length
             let path=files[f].path
             let s=nd_rfind(path  47)
-            if s >=? 0 {path=path.byte_slice(s + 1  (path as array<uint8>).length)}
+            if s >=? 0 {path=__str_slice(path s + 1  (path as array<uint8>).length)}
             fnames.push(path)
         }
         entries[ne]=calls[k]

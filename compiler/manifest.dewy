@@ -41,7 +41,7 @@ pkg_scan_at=(@specs:array<PkgSpec> path:string src:string at:int64):>void=>{
     let p=path as array<uint8>
     let s:int64=p.length - 1
     loop s >=? 0 and p[s] not=? b'/' and p[s] not=? b'\\' {s-=1}
-    let d=if s >=? 0 path.byte_slice(0 s) else "."
+    let d=if s >=? 0 __str_slice(path 0 s) else "."
     let b=src as array<uint8>
     let n:int64=b.length
     let i:int64=at
@@ -52,7 +52,7 @@ pkg_scan_at=(@specs:array<PkgSpec> path:string src:string at:int64):>void=>{
         # (a line starting beyond ASCII is not blank, a comment or indented: the block
         # ends, and in malformed text the line could start inside a character)
         if j >? i + 1 and b[i + 1] >=? 0x80 {break}
-        let line=src.byte_slice(i + 1 j)
+        let line=__str_slice(src i + 1 j)
         i=j
         let t=line.trim
         if t.is_empty or t.startswith("#") {continue}
@@ -108,7 +108,7 @@ pkg_is_commit=(ref:string):>bool=>{
 # a commit as directories and messages show it: its first 12 digits
 pkg_short=(commit:string):>string=>{
     let n=(commit as array<uint8>).length
-    commit.byte_slice(0 if n <? 12 n else 12)
+    __str_slice(commit 0 if n <? 12 n else 12)
 }
 
 # a URL as a directory name: each ASCII byte not a letter, digit, '_', '.' or '-' is '_'
@@ -201,7 +201,7 @@ pkg_insert=(text:string name:string src:string):>string=>{
     let line="    {name} = package(\"{src}\"){nl}"
     let at=pkg_block_at(text)
     if at <? 0 {return "build:{nl}{line}{nl}{text}"}
-    let sides=text.byte_slice(at (text as array<uint8>).length).split("\n" 1)
+    let sides=__str_slice(text at (text as array<uint8>).length).split("\n" 1)
     if sides.length <? 2 {return "{text}{nl}{line}"}
-    "{text.byte_slice(0 at)}{sides[0]}\n{line}{sides[1]}"
+    "{__str_slice(text 0 at)}{sides[0]}\n{line}{sides[1]}"
 }

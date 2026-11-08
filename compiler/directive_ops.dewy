@@ -1,5 +1,6 @@
 $runtime_checks
 from p"@lib/core/os.jo" import (env)
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"@lib/core/str.jo" import (find as jo_find is_digit split starts_with to_int as jo_to_int)
 from p"ast.jo" import (NF_GENERIC NF_INBOUNDS add_flag has_flag nodes)
 from p"check.jo" import (FK_LAMBDA decl_info decl_infos fns lib_dir modules)
@@ -115,7 +116,7 @@ version_well_formed=(v:string):>bool=>{
 version_newer=(a:string b0:string):>bool=>{
     let b=b0
     let dash=jo_find(b "-")
-    if dash >=? 0 {b=b.byte_slice(0 dash)}
+    if dash >=? 0 {b=__str_slice(b 0 dash)}
     let x=split(a ".")
     let y=split(b ".")
     loop i in [0..min(x.length y.length)) {
