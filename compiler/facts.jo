@@ -1103,6 +1103,14 @@ fact_summary_shapes: (int, int, int)[] # demanded N-D shape/data-length entry id
 # scalar result by its length). Cached per type; O(fields) once.
 fact_record_array_types: {int: bool} = {}
 
+# A raw pointer's reinterpretation, `p as ptr<U>` (or an array's or string's elements as
+# one): it reads its operand and writes nothing; writes through it are a store's or a call's.
+fact_pointer_cast = (n: int) -> bool:
+    if nodes[n].kind != .cast or nodes[n].a == 0: return false
+    to = tkind(representation_type(ntype(n)))
+    from = tkind(representation_type(ntype(int(nodes[n].a))))
+    to == .ptr and (from == .ptr or from == .array or from == .str_)
+
 fact_exposed = (p: PlaceIdentity) -> bool:
     # Checked references record escape while names are resolved (O(1) per use).
     # Only its own initializer may treat a closed script binding as a local;
@@ -2279,7 +2287,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
             else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nodes[n].op == i32(int(Tok.slash)) or nodes[n].op == i32(int(Tok.percent)) or fact_shift_obliged(n)): values.push(n)
         # (a closure writes only when called: fact_capture)
         else if k == .lambda and ownership_decls.len() == 0: pass
-        else if k == .lambda or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n) or k == .map_lit or k == .cast and not fact_enum_cast(n) or mask < 0: opaque_writes.push(n)
+        else if k == .lambda or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n) or k == .map_lit or k == .cast and not fact_enum_cast(n) and not fact_pointer_cast(n) or mask < 0: opaque_writes.push(n)
         else if k == .str_lit and nodes[n].aux != 0: exposed_writes.push(n)
         if not summary and nd_mutable_signatures.len() != 0 and nd_mutable_handle(n): values.push(n)
     # (a fork closure's creation reads its captures: their definitions)
@@ -3102,7 +3110,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             return v
         if nodes[n].aux != 0 and not fact_pure_binary(n): fact_forget(s, n, .call)
         return fact_unmodeled(s, n, .unsupported)
-    if fact_enum_cast(n):
+    if fact_enum_cast(n) or fact_pointer_cast(n):
         fact_capture(int(nodes[n].a), s)
         return fact_fresh(s, ntype(n))
     if k == .conv:
@@ -3211,6 +3219,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         # (a GPU program, compiled from its literal function: the call runs nothing here)
         if nodes[n].aux == i32(int(IN.gpu_kernel)): return fact_fresh(s, ntype(n))
         id = nodes[n].aux as IN
+        # (an array's or string's raw pointer reads its value and may make the array its own,
+        # which changes no value; later writes through it are a call's or a store's)
+        if id == .arrdata and nkids(n) == 1:
+            fact_capture(kid(n, 0), s)
+            return fact_fresh(s, ntype(n))
         if id == .setlen:
             size = fact_capture(kid(n, 1), s)
             route = fact_route(kid(n, 0), s)

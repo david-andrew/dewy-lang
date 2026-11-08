@@ -123,7 +123,7 @@ fact_forget=(@s:FactState at:ForgetWord reason:FactReason all:bool=false written
         let v=fact_new(@s fact_domain(t reason at) FactTerm(type=t))
         fact_holds_contract(@s t v)
         let old=s.bindings.ptr[i].value
-        if fact_raw_exposed_array(p) and old not=? 0 and v not=? 0 {
+        if not all and fact_raw_exposed_array(p) and old not=? 0 and v not=? 0 {
             let length=fact_project(@s old (-1) false T_INT)
             if length not=? 0 and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(v (-1) false length))}
         }

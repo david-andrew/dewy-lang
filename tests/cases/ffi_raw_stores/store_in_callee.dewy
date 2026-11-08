@@ -1,0 +1,9 @@
+# modes: native
+# A function that stores through a pointer it is given changes the array too.
+zero=(q:ptr<int64>):>void=>$unsafe { q[0]=0 }
+main=():>void=>{
+    let xs:array<int64>=[1 2 3]
+    let p=xs.ptr
+    $unsafe zero(p)
+    printl(10 // xs[0])
+}

@@ -1,0 +1,15 @@
+# modes: native native-release
+# Taking a raw pointer or reinterpreting one changes no value: guards on
+# other locals still hold, and C fills only the elements.
+strnlen=(s:ptr<uint8> max:uint32):>uint64 => $extern
+memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8> => $extern
+
+main=():>void=>{
+    let data:array<uint8>=bytes("hello")
+    let n=data.length
+    if n >? 1000 return
+    printl($unsafe strnlen(data.ptr uint32(n)))
+    let words:array<int64>=[5 6 7]
+    $unsafe memset(words.ptr as ptr<uint8> 0 8);
+    printl(words[0] words[2] uint32(n))
+}

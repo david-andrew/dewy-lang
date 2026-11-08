@@ -161,7 +161,7 @@ fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false,
         v = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
         fact_holds_contract(s, t, v)
         old = s.bindings[i].value
-        if fact_raw_exposed_array(p) and old != 0 and v != 0:
+        if not all and fact_raw_exposed_array(p) and old != 0 and v != 0:
             length = fact_project(s, old, -1, false, T_INT)
             if length != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, -1, false, length))
         s.bindings[i] = FactBinding(p, v, at, old)
