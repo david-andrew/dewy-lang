@@ -13,6 +13,8 @@ CASES = [
     'deadlock/channel_self',
     'notraps17_keys/method',
     'errors/or_throw_optional_error',
+    'batch4_throw/select',
+    'batch4_throw/generic_family',
     'dogfood36_proofs/or_throw_names_every_alternative_rejected',
     'input_failure/reject_unhandled_or_throw',
 ]

@@ -3744,6 +3744,22 @@ rd_dc_expr=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
             let n:int64=node_mk(@reader_nodes 'propagate' pos)
             reader_nodes[n].a = int32<overflow='wrap'>(left)
+            let next:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
+            if not next.space and (next.symbol =? 'langle' or next.symbol =? 'lt') {
+                reader_ctx.tokens[reader_ctx.at].symbol = 'langle'
+                reader_ctx.at = int64<overflow='wrap'>(reader_ctx.at) + 1
+                reader_ctx.reader.dc_type_args = int64<overflow='wrap'>(reader_ctx.reader.dc_type_args) + 1
+                let kinds:int64=rd_dc_annotation(@reader_ctx @reader_nodes)
+                reader_ctx.reader.dc_type_args = int64<overflow='wrap'>(reader_ctx.reader.dc_type_args) - 1
+                if kinds =? 0 {return 0}
+                if not rd_dn_accept(@reader_ctx 'rangle') {
+                    if not (reader_ctx.reader.dn_edits_on and rd_dn_closer_joined(@reader_ctx)) {
+                        return rd_dc_hint(@reader_ctx pos "`or_throw<...>` names the failures to forward as one type: `or_throw<Missing | ParseError>`")
+                    }
+                    rd_dn_split_closer(@reader_ctx);
+                }
+                reader_nodes[n].b = int32<overflow='wrap'>(kinds)
+            }
             left = n
             juxt_head = false
             continue

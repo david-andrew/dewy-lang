@@ -3685,8 +3685,14 @@ twice = (text:string):>int|ParseError => {
 
 Errors are direct union alternatives. Postfix `or_throw` evaluates its operand
 once, returns an encountered exception, or yields its success value. It binds
-just below `as`. The enclosing function must declare a result type accepting
-every propagated alternative. Early returns clean up pending expressions and
+just below `as`. The enclosing function's declared or inferred result must
+accept every propagated alternative. `x or_throw<E>` forwards only failures matched
+by `E`, leaving all others in the value. Like `x ??<E> fallback`, the angle
+brackets select failures; they do not construct an `E`. `or_throw<error>`
+forwards errors while keeping `none`, and `or_throw<Canceled>` forwards
+cancellation while leaving ordinary errors to be handled here. `E` may be a
+union or an exception family. The operand is evaluated once in both forms.
+Early returns clean up pending expressions and
 enclosing scopes. `none` also belongs to `exception`, alongside `error` and
 user-defined descendants. `is? error`, `is? exception`, and tests of individual
 types select family members; parent-typed storage preserves the child's identity

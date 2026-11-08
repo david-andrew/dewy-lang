@@ -1399,6 +1399,18 @@ rt_dc_expr = (minimum: int) -> int:
             dc_parser.at += 1
             n = mk(.propagate, pos)
             nodes[n].a = i32(left)
+            next = dc_parser.tokens[dc_parser.at]
+            if not next.space and (next.symbol == .langle or next.symbol == .lt):
+                dc_parser.tokens[dc_parser.at].symbol = .langle
+                dc_parser.at += 1
+                dc_parser.reader.dc_type_args += 1
+                kinds = rt_dc_annotation()
+                dc_parser.reader.dc_type_args -= 1
+                if kinds == 0: return 0
+                if not rt_dn_accept(.rangle):
+                    if not (dc_parser.reader.dn_edits_on and rt_dn_closer_joined()): return rt_dc_hint(pos, "`or_throw<...>` names the failures to forward as one type: `or_throw<Missing | ParseError>`")
+                    rt_dn_split_closer()
+                nodes[n].b = i32(kinds)
             left = n
             juxt_head = false
             continue

@@ -1,0 +1,39 @@
+$runtime_checks
+A:type=type of error & [code:int64]
+B:type=type of error & [code:int64]
+let calls=0
+source=(x:int64):>int64|A|B|none=>{
+    calls+=1
+    if x =? 1 return A[x]
+    if x =? 2 return B[x]
+    if x =? 3 return none
+    x+10
+}
+partial=(x:int64):>string|A=>{
+    let value=source(x) or_throw<A>
+    if value is? B return "kept B"
+    if value is? none return "kept none"
+    "ok {value}"
+}
+family=(x:int64):>int64?|error=>source(x) or_throw<error>
+listed=(x:int64):>int64?|A|B=>source(x) or_throw<A | B>
+optional=(x:int64):>int64?=>{
+    let value=source(x) or_throw<none>
+    if value is? A return -1
+    if value is? B return -2
+    value
+}
+inferred=(x:int64)=>{
+    let value=source(x) or_throw<A>
+    if value is? B return -2
+    if value is? none return -3
+    value
+}
+main=()=>{
+    loop x in [0..4) {printl(partial(x))}
+    printl(calls)
+    loop x in [0..4) {printl(family(x))}
+    loop x in [0..4) {printl(listed(x))}
+    loop x in [0..4) {printl(optional(x))}
+    loop x in [0..4) {printl(inferred(x))}
+}

@@ -1,0 +1,10 @@
+A:type=type of error & []
+B:type=type of error & []
+source=(x:int64):>int64|A|B|none=>if x =? 1 A[] else if x =? 2 B[] else if x =? 3 none else x
+chain=(x:int64):>int64?|A|B=>source(x) or_throw<A> or_throw<B>
+main=()=>{
+    printl(chain(0))
+    printl(chain(1) is? A)
+    printl(chain(2) is? B)
+    printl(chain(3) is? none)
+}

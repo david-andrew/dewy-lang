@@ -1,0 +1,11 @@
+source=(x:int64):>int64|Canceled|Timeout=>if x =? 1 Canceled[] else if x =? 2 Timeout[] else x
+keep=(x:int64):>string|Canceled=>{
+    let value=source(x) or_throw<Canceled>
+    if value is? Timeout return "timeout"
+    "ok {value}"
+}
+main=()=>{
+    printl(keep(0))
+    printl(keep(1) is? Canceled)
+    printl(keep(2))
+}
