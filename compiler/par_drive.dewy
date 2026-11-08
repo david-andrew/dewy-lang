@@ -1,0 +1,202 @@
+$runtime_checks
+from p"@lib/core/rt.jo" import (__olen)
+from p"@lib/core/os.jo" import (env eprint exit time)
+
+from p"check.jo" import (target_arm64 target_wasm watch_build)
+from p"driver_pipeline.dewy" import (emit_now)
+from p"ir.jo" import (ir)
+from p"ir_types.dewy" import (IrFn)
+from p"lower.jo" import (rodata)
+from p"main.jo" import (repl_image)
+from p"par.jo" import (emit_workers par_here par_join par_read)
+from p"par_ops.dewy" import (pw pw_ints)
+from p"elf_format.dewy" import (elf_syms)
+from p"native_debug.dewy" import (dbg_cfi dbg_raw)
+from p"pe_format.dewy" import (unwind_fns uw_data)
+from p"proc_sys.dewy" import (ps_close ps_fork ps_pipe ps_wait ps_write_fd)
+from p"x64.jo" import (code data_fix fn_addr fn_len)
+from p"x64_allocate.dewy" import (ra_dump)
+from p"x64_emit.dewy" import (cabi_fix call_fix call_sites line_rows pad_moves ra_stat ro_new rsp_rows stub_fix)
+from p"x64_module.dewy" import (cabi_adapter)
+
+ParWord:type=int64<overflow='wrap'>
+# true when the queued functions' code was made in parallel (and joined)
+emit_parallel=(q:array<IrFn> fin:array<bool>):>bool=>{
+    if $target.os =? 'windows' or $target.arch =? 'wasm32' {
+        return false
+    } else {
+        if target_wasm or target_arm64 or ra_stat or watch_build or repl_image or (ra_dump as array<uint8>).length >? 0 {return false}
+        let total:ParWord=0
+        loop f in q {total += f.code.length}
+        let n=emit_workers()
+        # (each worker should have enough to make the fork worth it)
+        n=min(n total // 20000)
+        let forced=env("DEWY_EMIT_FORCE") not=? none
+        if forced {n=max(emit_workers() 1)}
+        if (n <? 2 and not forced) or q.length <? n {return false}
+        # runs of consecutive functions with about the same amount of IR each
+        let cuts=[0]
+        let acc:ParWord=0
+        loop k in 0.. and f in q {
+            acc += f.code.length
+            if acc * n >=? total * cuts.length and cuts.length <? n and k + 1 <? q.length {cuts.push(k + 1)}
+        }
+        cuts.push(q.length)
+        # (forked one by one and read in order: each pipe holds what a worker writes until read)
+        let r0=rodata.length
+        let tm=env("DEWY_PAR_TIME") not=? none
+        let ta=time()
+        let pids:array<int64>=[]
+        let fds:array<int64>=[]
+        loop w in [0..cuts.length - 1) {
+            let pfd=ps_pipe(true)
+            if pfd[0] <? 0 {
+                pids.push(-1)
+                fds.push(-1)
+                continue
+            }
+            let rfd=pfd[0]
+            let wfd=pfd[1]
+            let pid=ps_fork()
+            if pid =? 0 {
+                ps_close(rfd)
+                if (env("DEWY_EMIT_FAIL_WORKER") ?? "") =? "{w}" {exit(1)}
+                par_worker(q fin cuts[w] cuts[w + 1] r0 wfd)
+            }
+            ps_close(wfd)
+            if pid <? 0 {
+                ps_close(rfd)
+                pids.push(-1)
+                fds.push(-1)
+            }
+            else {
+                pids.push(pid)
+                fds.push(rfd)
+            }
+        }
+        let tb=time()
+        let tread=0.0
+        let tjoin=0.0
+        loop w in [0..cuts.length - 1) {
+            let got:array<uint8>=[]
+            let ok=fds[w] >=? 0
+            if ok {
+                let t_0=time()
+                got=par_read(fds[w])
+                tread += time() - t_0
+                ps_close(fds[w])
+                ok=ps_wait(pids[w]) & 0xFFFF =? 0 and got.length >=? 8
+            }
+            if ok {
+                let t_1=time()
+                par_join(got r0 q fin cuts[w])
+                tjoin += time() - t_1
+            }
+            else {
+                # (that run, here)
+                loop k in [cuts[w]..cuts[w + 1]) {
+                    ir=q[k]
+                    emit_now(fin[k])
+                }
+            }
+        }
+        if tm {eprint("emit: {cuts.length - 1} workers, fork {(tb - ta) * 1000.0} ms, waiting and reading {tread * 1000.0} ms, joining {tjoin * 1000.0} ms, {par_here} functions again here")}
+        true
+    }
+}
+# ---- a worker: emit q[a..b), write what came of it to fd, end ----
+par_worker=(q:array<IrFn> fin:array<bool> a:ParWord b:ParWord r0:ParWord fd:ParWord):>void=>{
+    code=[]
+    call_fix=[]
+    data_fix=[]
+    stub_fix=[]
+    cabi_fix=[]
+    cabi_adapter=[]
+    elf_syms=[]
+    line_rows=[]
+    call_sites=[]
+    unwind_fns=[]
+    uw_data=[]
+    dbg_raw=[]
+    dbg_cfi=[]
+    ro_new=[]
+    rsp_rows=[]
+    let tw0=time()
+    let out:array<uint8>=[]
+    pw(@out b - a)
+    loop k in [a..b) {
+        ir=q[k]
+        # (where it starts in each table: par_join's marks)
+        let at:array<int64>=[code.length call_fix.length data_fix.length stub_fix.length cabi_fix.length elf_syms.length line_rows.length call_sites.length unwind_fns.length uw_data.length dbg_raw.length dbg_cfi.length ro_new.length rsp_rows.length]
+        emit_now(fin[k])
+        pw(@out ir.fn_index)
+        pw(@out fn_addr[ir.fn_index])
+        pw(@out fn_len[ir.fn_index])
+        let moved:ParWord=0
+        if pad_moves {moved=1}
+        pw(@out moved)
+        loop x in at {pw(@out x)}
+    }
+    let tw1=time()
+    pw(@out code.length)
+    out.reserve(out.length + code.length + 16 * (call_fix.length + data_fix.length + line_rows.length + call_sites.length) + 1024)
+    out.extend(code)
+    pw(@out call_fix.length)
+    loop f in call_fix {
+        pw(@out f[0])
+        pw(@out f[1])
+    }
+    pw(@out data_fix.length)
+    loop f in data_fix {
+        pw(@out f[0])
+        pw(@out f[1])
+        pw(@out f[2])
+    }
+    pw(@out stub_fix.length)
+    loop f in stub_fix {
+        pw(@out f[0])
+        pw(@out f[1])
+    }
+    pw(@out cabi_fix.length)
+    loop f in cabi_fix {
+        pw(@out f[0])
+        pw(@out f[1])
+    }
+    pw(@out cabi_adapter.length)
+    loop [k2 v] in cabi_adapter {
+        pw(@out k2)
+        pw(@out v)
+    }
+    pw(@out elf_syms.length)
+    loop s in elf_syms {
+        pw(@out (s[0] as array<uint8>).length)
+        loop c in bytes(s[0]) {out.push(c)}
+        pw(@out s[1])
+        pw(@out s[2])
+    }
+    pw_ints(@out line_rows)
+    pw_ints(@out call_sites)
+    pw(@out unwind_fns.length)
+    loop u in unwind_fns {
+        pw(@out u[0])
+        pw(@out u[1])
+        pw(@out u[2])
+        pw(@out u[3])
+    }
+    pw_ints(@out uw_data)
+    pw_ints(@out dbg_raw)
+    pw_ints(@out dbg_cfi)
+    let news:array<int64>=[]
+    loop c in ro_new {
+        news.push(c[0])
+        news.push(c[1])
+    }
+    pw_ints(@out news)
+    pw_ints(@out rsp_rows)
+    let tw2=time()
+    # (the compiler's own output, not yet written, is the parent's to write)
+    __olen=0
+    ps_write_fd(fd out out.length)
+    if env("DEWY_PAR_TIME") not=? none {eprint("  worker {a}..{b}: emit {(tw1 - tw0) * 1000.0} ms, pack {(tw2 - tw1) * 1000.0} ms, write {(time() - tw2) * 1000.0} ms, {out.length} bytes")}
+    exit(0)
+}
