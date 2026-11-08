@@ -34,7 +34,8 @@ MESSAGES = [
 
 
 class Tolerant(Client):
-    """A client that reads replies whose text is not valid UTF-8 (the server echoes such files' bytes)."""
+    """A strict client: every reply must be one JSON document of valid UTF-8 whose Content-Length counts its
+    bytes, as clients that refuse anything else require (the server echoes bytes of files that are not UTF-8)."""
 
     def receive(self):
         deadline = time.monotonic() + 20
@@ -45,7 +46,7 @@ class Tolerant(Client):
                                   if line.lower().startswith(b'content-length:')))
                 if len(body) >= length:
                     self.buffer = body[length:]
-                    return json.loads(body[:length].decode('utf-8', 'replace'))
+                    return json.loads(body[:length].decode('utf-8', 'strict'))
             remaining = deadline - time.monotonic()
             assert remaining > 0, 'language server response timed out'
             ready, _, _ = select.select([self.process.stdout], [], [], remaining)
@@ -189,5 +190,65 @@ def test_edits_inside_a_character(compiler, tmp_path):
                                                       'end': {'line': 1, 'character': end}}, 'text': 'é'}]})
             ask(client, 'textDocument/documentSymbol', {'textDocument': {'uri': path.as_uri()}})
         alive(client)
+    finally:
+        client.close()
+
+
+# Byte sequences that are not UTF-8, each the start of a family: a stray continuation byte, truncated
+# two-, three- and four-byte sequences, overlong forms, surrogates, beyond U+10FFFF, never-valid bytes.
+INVALID = [b'\x80', b'\xbf\xbf', b'\xc3', b'\xe4\xb8', b'\xf0\x9f\x98', b'\xc0\x80', b'\xe0\x80\x80',
+           b'\xed\xa0\x80', b'\xf4\x90\x80\x80', b'\xf8\x88\x80\x80\x80', b'\xff\xfe', b'\xc3\xa9\x80\xe4\xb8\xad',
+           b'\xe4\xb8x', b'\xf0\x9f\x98\x80\xf0\x9f']
+
+
+def every_string(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from every_string(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from every_string(item)
+
+
+def test_replies_quoting_bytes_that_are_not_utf8_are_valid_json(compiler, tmp_path):
+    """Names in files on disk that hold stray bytes (a client's own text cannot: it reads as empty) come back
+    with U+FFFD for each maximal subpart, what a WHATWG decoder gives, in a reply a strict client accepts."""
+    expected = {}
+    for index, bad in enumerate(INVALID):
+        name = f'zq{index}'.encode() + bad + b'x'
+        (tmp_path / f'mod{index}.dewy').write_bytes(
+            b'# ' + bad + b' comment\n' + name + b'=(a' + bad + b':int64):>int64=>1\nconst K' + bad + b'=3\n')
+        expected[name.decode('utf-8', 'replace')] = bad
+    main = 'main=():>void=>{\n    printl(1)\n}\n'
+    path = tmp_path / 'main.dewy'
+    path.write_text(main)
+    client = Tolerant(compiler, tmp_path)
+    try:
+        client.set_text(path.as_uri(), main, 1)
+        names = set(every_string(ask(client, 'workspace/symbol', {'query': 'zq'})['result']))
+        assert set(expected) <= names, (sorted(set(expected) - names), sorted(names))
+        names = set(every_string(ask(client, 'workspace/symbol', {'query': ''})['result']))
+        assert {'K' + bad.decode('utf-8', 'replace') for bad in INVALID} <= names
+        drive(client, path.as_uri(), main)
+    finally:
+        client.close()
+
+
+def test_valid_text_in_replies_is_unchanged(compiler, tmp_path):
+    """Valid text passes byte for byte: names with an emoji, CJK, a combining mark, a character outside the BMP."""
+    names = ['é中😀', 'e\u0301x', '\U0001f600\U0001f601', 'z\u4e2dz', 'w\U00010348']
+    for index, name in enumerate(names):
+        (tmp_path / f'ok{index}.dewy').write_text(f'zq{name}=(a:int64):>int64=>1\n')
+    main = 'main=():>void=>{\n    printl(1)\n}\n'
+    path = tmp_path / 'main.dewy'
+    path.write_text(main)
+    client = Tolerant(compiler, tmp_path)
+    try:
+        client.set_text(path.as_uri(), main, 1)
+        got = set(every_string(ask(client, 'workspace/symbol', {'query': 'zq'})['result']))
+        assert {f'zq{name}' for name in names} <= got, got
     finally:
         client.close()

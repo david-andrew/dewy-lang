@@ -20,6 +20,7 @@ from p"lsp_text.dewy" import (on_change on_close on_hover)
 from p"main.jo" import (compile lower_only)
 from p"module_paths.dewy" import (is_abs_path os_path path_norm)
 from p"type_ops.dewy" import (init_types)
+from p"utf8_text.dewy" import (utf8_clean)
 from p"util.jo" import (intern mkpos)
 
 LspWord:type=int64<overflow='wrap'>
@@ -64,7 +65,9 @@ lsp_wait_input=(ms:LspWord):>bool=>$unsafe {
         return syscall(7 data(fds) 1 ms) >? 0
     }
 }
-lsp_send=(body:string):>void=>$unsafe {
+# (every message goes out through here: source text that is not UTF-8 reaches a reply as U+FFFD)
+lsp_send=(body0:string):>void=>$unsafe {
+    let body=utf8_clean(body0)
     let msg="Content-Length: {(body as array<uint8>).length}\r\n\r\n{body}"
     __write_fd(1 data(msg) (msg as array<uint8>).length)
 }

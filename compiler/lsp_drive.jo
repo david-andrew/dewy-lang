@@ -19,6 +19,7 @@ use 'lsp_handlers.dewy'
 use 'lsp_text.dewy'
 use 'lsp_requests.dewy'
 use 'lsp_fixes.dewy'
+use 'utf8_text.dewy'
 
 lsp_fill = () -> bool:
     if inpos > 0 and inpos == inbuf.len():
@@ -53,7 +54,8 @@ lsp_wait_input = (ms: int) -> bool:
     else:
         fds = [0 | (1 << 32)]                   # struct pollfd: fd 0, events POLLIN
         return syscall(7, data(fds), 1, ms) > 0
-lsp_send = (body: str):
+lsp_send = (body0: str):                    # (every message goes out through here: source text that is not UTF-8 reaches a reply as U+FFFD)
+    body = utf8_clean(body0)
     msg = "Content-Length: {len(body)}\r\n\r\n{body}"
     __write_fd(1, data(msg), len(msg))
 # check the program in a child process; its findings, as lines
