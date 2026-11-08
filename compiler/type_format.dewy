@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"checker_types.dewy" import (TK TypeInfo StructInfo Field)
 from p"type_inference.dewy" import (tu_prune tu_struct_targ tu_is_union tu_targ)
 
@@ -38,9 +39,9 @@ tf_split_labels=(s:string):>array<string>=>$unsafe {
     let out:array<string>=[]
     let start:int64=0
     loop i in [0..int64(bytes.length)) {
-        if bytes[i] =? 10 {out.push(s.byte_slice(start i)); start=i+1}
+        if bytes[i] =? 10 {out.push(__str_slice(s start i)); start=i+1}
     }
-    out.push(s.byte_slice(start int64(bytes.length)))
+    out.push(__str_slice(s start int64(bytes.length)))
     out
 }
 tf_join=(parts:array<string> sep:string):>string=>{

@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 # JSON for the language server (lsp.jo): messages read into a tree of nodes, values
 # read from it, and values written back as text. Reading is lenient: an editor's
 # message is taken as far as it makes sense, and a missing or malformed piece reads as
@@ -85,7 +86,7 @@ json_string=(@r:JsonReader):>string=>{
     loop r.at <? b.length and b[r.at] not=? b'"' and b[r.at] not=? b'\\' {r.at+=1}
     if r.at <? b.length and b[r.at] =? b'"' {
         r.at+=1
-        return r.text.byte_slice(start r.at - 1)
+        return __str_slice(r.text start r.at - 1)
     }
     let out:array<uint8>=[]
     loop k in [start..r.at) {out.push(b[k])}
@@ -240,7 +241,7 @@ json_number=(@doc:JsonDoc @r:JsonReader):>int64=>{
     loop r.at <? b.length and (b[r.at] >=? b'0' and b[r.at] <=? b'9' or b[r.at] =? b'-' or b[r.at] =? b'+' or b[r.at] =? b'.' or b[r.at] =? b'e' or b[r.at] =? b'E') {r.at+=1}
     if r.at =? start {return 0}
     let v=json_new(@doc 'number')
-    doc.nodes[v].s=r.text.byte_slice(start r.at)
+    doc.nodes[v].s=__str_slice(r.text start r.at)
     doc.nodes[v].n=json_integer(r.text start r.at)
     v
 }

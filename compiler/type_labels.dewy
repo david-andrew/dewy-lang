@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"node_store.dewy" import Node
 from p"source_types.dewy" import SrcFile
 
@@ -37,12 +38,12 @@ tn_label_names=(key:NWord count:NWord):>array<int64>=>$unsafe {
     let start:NWord=0
     loop i in [NWord(0)..NWord(bytes.length)) {
         if bytes.ptr[i] =? 10 {
-            let name=text.byte_slice(start i)
+            let name=__str_slice(text start i)
             out.push(if name =? "" {0} else {tn_inputs[0].intern(name)})
             start=i+1
         }
     }
-    let name=text.byte_slice(start NWord(bytes.length))
+    let name=__str_slice(text start NWord(bytes.length))
     out.push(if name =? "" {0} else {tn_inputs[0].intern(name)})
     out
 }
