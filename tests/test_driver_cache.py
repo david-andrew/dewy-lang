@@ -50,6 +50,7 @@ def test_every_input_is_in_the_key(tmp_path, monkeypatch):
     library.mkdir()
     (library / 'rt.jo').write_text('x = 1\n')
     monkeypatch.setenv('DEWY_CORE_LIB', str(library))
+    monkeypatch.delenv('DEWY_EMIT_WORKERS', raising=False)   # (CI sets it; the key must see a change)
     modules = graph(1)
     base = identity(fake, modules)
     assert identity(fake, dict(modules)) == base
