@@ -1,0 +1,502 @@
+$runtime_checks
+# The driver's once-per-run pieces: the command line's refusals, where the library is, the target,
+# the main file's build block and settings read before checking, running from standard input and
+# the run cache, and `dewy-core test` over a directory.
+from p"@lib/core/rt.jo" import (__read_fd __str_from_bytes __str_slice)
+from p"@lib/core/os.jo" import (cwd delete_file env eprint exe_path exec exit file_exists file_size file_time is_dir list_dir read_file rename_file run_program spawn_detached time_ns write_file)
+from p"@lib/core/str.jo" import (byte_str ends_with find_byte join lower split starts_with trim)
+from p"@lib/core/str.jo" import (find as jo_find rfind as jo_rfind)
+from p"ast.jo" import (nodes)
+from p"check.jo" import (collide_locals fns lib_dir modules program_name release_build target_arm64 target_macos target_wasm target_windows)
+from p"checks_thin.dewy" import (jd)
+from p"directive_ops.dewy" import (dw_dir_known)
+from p"facts.jo" import (fact_internal_policy)
+from p"host_target.dewy" import (host_target_name)
+from p"ide.jo" import (ide_texts)
+from p"ide_decls.dewy" import (read_source)
+from p"json_doc.dewy" import (JsonDoc json_get json_parse json_quote json_str)
+from p"lower.jo" import (opt_release)
+from p"main.jo" import (build_output compile)
+from p"manifest.dewy" import (pkg_block_at pkg_scan_at)
+from p"module_paths.dewy" import (os_path path_hash path_norm)
+from p"pkg.jo" import (pkg_dirs pkg_errs pkg_fetch pkg_specs)
+from p"pkg_ops.dewy" import (core_cache pkg_resolve_all)
+from p"prelude.jo" import (prelude_game_hint)
+from p"settings.jo" import (build_target build_target_at build_target_seen cli_mode cli_target file_mode file_mode_at file_mode_seen native_only settings_path)
+from p"targets.dewy" import (supported_target_names target_problem)
+from p"types.jo" import (ptr_size)
+from p"util.jo" import (error_exit files mkpos more_errors name_of pos_in_lib warn)
+
+CliWord:type=int64<overflow='wrap'>
+usage=(status:CliWord=2):>void=>{
+    eprint("usage: dewy-core                         (a terminal: the interactive prompt; piped input: run it as a program)\n       dewy-core [run] [--release|--debug] [--target T] file.dewy [args...]\n       dewy-core [--release|--debug] [--target T] [--web] [--time]   (the program read from standard input)\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release|--debug] [--time] [--exit-codes]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release|--debug] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\n--release and --debug choose the build mode and --target the target, overriding the file's\n`$build.mode = ...` and `$target = ...` (with a warning where they differ); the default is a\ndebug build for this machine.\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
+    exit(status)
+}
+# An option the command line does not have. A metatag's name (`--runtime-checks`,
+# `$no_hidden_costs=false`) gets the reason: a program's safety and meaning are set in its
+# source, never on the command line, which sets only the build mode and the target.
+cli_option_refused=(x:string):>void=>{
+    let name=x
+    loop (name as array<uint8>).length >? 0 and ((name as array<uint8>)[0] =? b'-' or (name as array<uint8>)[0] =? b'$') {name=__str_slice(name 1 (name as array<uint8>).length)}
+    let eq=jo_find(name "=")
+    if eq >=? 0 {name=__str_slice(name 0 eq)}
+    let tag=""
+    loop c in (name as array<uint8>) {
+        if c =? b'-' {tag="{tag}_"} else {tag="{tag}{byte_str(CliWord(c))}"}
+    }
+    # (the metatags the compiler knows, and the bundles of lib/directives.dewy)
+    let bundles=read_file("{lib_dir}/directives.dewy") ?? ""
+    let known=(tag as array<uint8>).length >? 0 and (dw_dir_known(tag) or tag =? "default_row" or starts_with(bundles "${tag} ") or jo_find(bundles "\n${tag} ") >=? 0)
+    if known and tag not=? "target" and tag not=? "build" {
+        eprint("dewy-core: `${tag}` cannot be set from the command line; write it in the program's source (the command line sets only the build mode, --release or --debug, and the target, --target)")
+        exit(2)
+    }
+    eprint("dewy-core: unknown option '{x}'")
+    usage()
+}
+find_lib_dir=():>string=>{
+    let e=env("DEWY_CORE_LIB")
+    if e not=? none {
+        if (e as array<uint8>).length >? 0 {return os_path(e)}
+    }
+    let exe=os_path(exe_path())
+    let d=exe
+    let s=jo_rfind(d "/")
+    if s >=? 0 {d=__str_slice(d 0 s)}
+    s=jo_rfind(d "/")
+    if s >=? 0 {d=__str_slice(d 0 s)}
+    if not file_exists("{d}/lib/core/rt.jo") {
+        eprint("dewy-core: cannot find the standard library next to {exe} (expected {d}/lib); set DEWY_CORE_LIB to its location")
+        exit(2)
+    }
+    "{d}/lib"
+}
+# the target, from the command line or else the main file: for building, checking and the
+# language server alike
+setup_target=():>void=>{
+    let host=host_target_name()
+    let tgt=build_target
+    # (one the file names wrongly: the checker says where)
+    if (target_problem(tgt host) as array<uint8>).length >? 0 {tgt=""}
+    if (cli_target as array<uint8>).length >? 0 {tgt=cli_target}
+    if native_only {tgt=host}
+    if tgt =? "" {tgt=host}
+    let why=target_problem(tgt host)
+    if (why as array<uint8>).length >? 0 {
+        eprint("dewy-core: {why}")
+        exit(2)
+    }
+    # (a processor alone: this machine)
+    if not (tgt in? supported_target_names()) {tgt=host}
+    target_wasm=tgt =? "wasm32"
+    target_windows=tgt =? "x86_64-windows"
+    target_macos=tgt =? "aarch64-mac"
+    target_arm64=tgt =? "aarch64-linux" or target_macos
+    if target_wasm {ptr_size=4}
+}
+# (a game's update or draw, as the checker finds it: a top-level `name =` or `let name =`, at
+# the start of a line; a method call such as hasher.update(...) is not one)
+declares_top=(src:string name:string):>bool=>{
+    let sb=src as array<uint8>
+    let n:CliWord=sb.length
+    let at:CliWord=jo_find(src name)
+    loop at >=? 0 {
+        let b=at
+        if b >=? 4 and sb[b - 1] =? b' ' and sb[b - 4] =? b'l' and sb[b - 3] =? b'e' and sb[b - 2] =? b't' {b -= 4}
+        let e=at + (name as array<uint8>).length
+        loop e <? n and sb[e] =? b' ' {e += 1}
+        if (b =? 0 or sb[b - 1] =? b'\n') and e <? n and sb[e] =? b'=' and (e + 1 >=? n or sb[e + 1] not=? b'=') {return true}
+        at=jo_find(src name at + (name as array<uint8>).length)
+    }
+    false
+}
+# (a quick read of the main file's build block before anything is checked; check_build_block
+# reports its mistakes)
+scan_build_block=(path:string):>void=>{
+    let src=read_source(path) ?? ""
+    # Games reach most of the game prelude. Avoid indexing/hashing it only to
+    # load it all again. False positives merely choose eager loading; names
+    # discovered later still work through ordinary demand loading.
+    prelude_game_hint=declares_top(src "update") or declares_top(src "draw")
+    # find a top-level `build:` line, then read its indented lines
+    let at=pkg_block_at(src)
+    # (the packages it names: where they are, fetched if need be)
+    pkg_specs=[]
+    pkg_dirs=dict<string string>()
+    pkg_errs=dict<string string>()
+    pkg_scan_at(@pkg_specs path src at)
+    pkg_resolve_all(path)
+    build_target=""
+    build_target_at=-1
+    build_target_seen=false
+    file_mode=""
+    file_mode_at=-1
+    file_mode_seen=false
+    settings_path=path
+    if at >=? 0 {scan_build_lines(src at)}
+    if ends_with(path ".dewy") {scan_settings(src)}
+    let mode=if (cli_mode as array<uint8>).length >? 0 {cli_mode} else if (file_mode as array<uint8>).length >? 0 {file_mode} else {"debug"}
+    opt_release=mode =? "release"
+    release_build=opt_release
+}
+# A Sloppy build block's indented `name = value` lines, from the `build:` line at at.
+scan_build_lines=(src:string at:CliWord):>void=>{
+    let n:CliWord=(src as array<uint8>).length
+    let i:CliWord=find_byte(src b'\n' at)
+    loop i >=? 0 and i <? n {
+        let j:CliWord=find_byte(src b'\n' i + 1)
+        if j <? 0 {j=n}
+        let line=__str_slice(src i + 1 j)
+        i=j
+        let t=trim(line)
+        let tb=t as array<uint8>
+        if tb.length =? 0 or tb[0] =? b'#' {continue}
+        if (line as array<uint8>)[0] not=? b' ' and (line as array<uint8>)[0] not=? b'\t' {break}
+        let eq=jo_find(t "=")
+        if eq <? 0 {continue}
+        let key=trim(__str_slice(t 0 eq))
+        let val=trim(__str_slice(t eq + 1 tb.length))
+        let h=jo_find(val "#")
+        if h >=? 0 {val=trim(__str_slice(val 0 h))}
+        if (val as array<uint8>).length >=? 2 and (val as array<uint8>)[0] =? b'"' {val=__str_slice(val 1 (val as array<uint8>).length - 1)}
+        if key =? "target" {build_target=val}
+        else if key =? "output" {build_output=val}
+        else if key =? "name" {program_name=val}
+        else if key =? "opt" {file_mode=if val =? "release" {"release"} else {"debug"}}
+    }
+}
+# A Dewy file's `$target = 'name'` and `$build.mode = 'name'` lines (at the start of a line,
+# outside comments and multi-line strings, the value a string literal, then nothing but a
+# comment). The parser checks each in place: dw_build_setting.
+scan_settings=(src:string):>void=>{
+    if jo_find(src "$") <? 0 {return}
+    let sb=src as array<uint8>
+    let n:CliWord=sb.length
+    let depth:CliWord=0
+    let i:CliWord=0
+    loop i <? n {
+        let c=sb[i]
+        if c =? b'#' and i + 1 <? n and sb[i + 1] =? 123 {
+            depth += 1
+            i += 2
+        }
+        else if depth >? 0 and c =? 125 and i + 1 <? n and sb[i + 1] =? b'#' {
+            depth -= 1
+            i += 2
+        }
+        else if depth >? 0 {i += 1}
+        else if c =? b'#' {
+            loop i <? n and sb[i] not=? b'\n' {i += 1}
+        }
+        else if c =? b'"' or c =? b'\'' {
+            # (a string: a triple-quoted one may span lines, any other ends with its line)
+            if i + 2 <? n and sb[i + 1] =? c and sb[i + 2] =? c {
+                let e=jo_find(src __str_slice(src i i + 3) i + 3)
+                i=if e <? 0 {n} else {e + 3}
+            }
+            else {
+                i += 1
+                loop i <? n and sb[i] not=? c and sb[i] not=? b'\n' {
+                    if sb[i] =? b'\\' {i += 1}
+                    i += 1
+                }
+                if i <? n and sb[i] =? c {i += 1}
+            }
+        }
+        else if c =? b'$' and (i =? 0 or sb[i - 1] =? b'\n') {
+            scan_setting(src i)
+            i += 1
+        }
+        else {i += 1}
+    }
+}
+# The setting on the line starting at i, if it is one.
+scan_setting=(src:string i:CliWord):>void=>{
+    let j:CliWord=find_byte(src b'\n' i)
+    if j <? 0 {j=(src as array<uint8>).length}
+    let t=__str_slice(src i j)
+    let tb=t as array<uint8>
+    let n:CliWord=tb.length
+    let key=""
+    if starts_with(t "$target") {key="target"}
+    else if starts_with(t "$build.mode") {key="mode"}
+    if (key as array<uint8>).length =? 0 {return}
+    let k:CliWord=11
+    if key =? "target" {k=7}
+    loop k <? n and (tb[k] =? b' ' or tb[k] =? b'\t') {k += 1}
+    if k + 1 >=? n or tb[k] not=? b'=' or tb[k + 1] =? b'=' or tb[k + 1] =? b'?' {return}
+    k += 1
+    loop k <? n and (tb[k] =? b' ' or tb[k] =? b'\t') {k += 1}
+    if k >=? n or (tb[k] not=? b'\'' and tb[k] not=? b'"') {return}
+    let e:CliWord=find_byte(t tb[k] k + 1)
+    if e <? 0 {return}
+    let val=__str_slice(t k + 1 e)
+    let rest=trim(__str_slice(t e + 1 n))
+    if (rest as array<uint8>).length >? 0 and (rest as array<uint8>)[0] not=? b'#' {return}
+    # (the first of each: a second is an error the parser reports)
+    if key =? "target" and build_target_at <? 0 {
+        build_target=val
+        build_target_at=i
+    }
+    else if key =? "mode" and file_mode_at <? 0 {
+        file_mode=val
+        file_mode_at=i
+    }
+}
+# Count physical source lines, including comments and blank lines. Loaded
+# library bodies may remain lazy, so this is input volume, not checked LOC.
+source_counts=():>void=>{
+    let dewy_lines:CliWord=0
+    let dewy_bytes:CliWord=0
+    let impl_lines:CliWord=0
+    let impl_bytes:CliWord=0
+    loop file in files {
+        let lines:CliWord=0
+        loop byte in (file.src as array<uint8>) {
+            if byte =? b'\n' {lines += 1}
+        }
+        if (file.src as array<uint8>).length >? 0 and (file.src as array<uint8>)[(file.src as array<uint8>).length - 1] not=? b'\n' {lines += 1}
+        if file.is_dewy {
+            dewy_lines += lines
+            dewy_bytes += (file.src as array<uint8>).length
+        }
+        else {
+            impl_lines += lines
+            impl_bytes += (file.src as array<uint8>).length
+        }
+    }
+    eprint("sources: {files.length} files, {dewy_lines} Dewy lines ({dewy_bytes} bytes), {impl_lines} implementation lines ({impl_bytes} bytes)")
+}
+open_in_browser=(path:string):>bool=>{
+    if $target.os =? 'windows' {
+        return spawn_detached("C:\\Windows\\System32\\cmd.exe" ["cmd" "/c" "start" "" path])
+    } else {
+        return spawn_detached("/usr/bin/xdg-open" ["xdg-open" path])
+    }
+}
+# `dewy-core --internal-fact-policy=require-static check ...`: the test tools' fact policy
+# (facts.jo), right after the program's name, where no command or program argument goes
+internal_options=(a:array<string>):>array<string>=>{
+    if a.length >? 2 and starts_with(a[1] "--internal-fact-policy=") {
+        fact_internal_policy=__str_slice(a[1] ("--internal-fact-policy=" as array<uint8>).length (a[1] as array<uint8>).length)
+        return [a[0] a[2..a.length)...]
+    }
+    if a.length >? 2 and a[1] =? "--internal-collide-locals" {
+        collide_locals=true
+        return internal_options([a[0] a[2..a.length)...])
+    }
+    a
+}
+# dewy-core with no file and input that is not a terminal: the program on standard input, read
+# whole, as a file named <stdin> in the current directory (its `use`s are relative to it)
+run_stdin=():>void=>{
+    pkg_fetch=true
+    more_errors=true
+    let buf:array<uint8>=[]
+    let chunk:array<uint8>=fill(uint8(0) 65536)
+    loop true {
+        let r:CliWord=$unsafe __read_fd(0 data(chunk) 65536)
+        if r <=? 0 {break}
+        buf=[buf... chunk[0..r)...]
+    }
+    let text=__str_from_bytes(buf)
+    let path="<stdin>.dewy"
+    ide_texts[path_norm(path)]=text
+    let full="{os_path(cwd())}/{path}"
+    build_and_exec(path "stdin" "{full}\n{text}" [path])
+}
+# standard input is a terminal (not a file or a pipe)
+stdin_is_terminal=():>bool=>$unsafe {
+    if $target.os =? 'windows' {
+        let m:array<uint32>=[uint32(0)]
+        return GetConsoleMode(GetStdHandle(uint32(0xFFFFFFF6)) data(m)) not=? 0
+    } else {
+        let t:array<uint8>=fill(uint8(0) 64)
+        return syscall(16 0 0x5401 data(t)) =? 0
+    }
+}
+# build the program at path into the run cache (named base, its key hashed into the name) and
+# run it with run_args
+build_and_exec=(path:string base:string key:string run_args:array<string>):>void=>{
+    let cache=core_cache()
+    let name="{base}-{path_hash(key)}"
+    if (time_ns() // 1000) % 64 =? 0 {clean_cache(cache)}
+    let out="{cache}/{name}.bin"
+    # (made beside it, then put in its place: a copy of the program still running is not
+    # written over; Windows cannot replace a running program, so there it is written in place)
+    let tmp=out
+    if not target_windows and not target_wasm and cli_target not=? "wasm32" and cli_target not=? "x86_64-windows" {tmp="{cache}/{name}.{time_ns()}.new"}
+    let built=compile(path tmp)
+    if (built as array<uint8>).length =? 0 {exit(error_exit)}
+    if built =? tmp and tmp not=? out and not target_wasm {
+        if rename_file(tmp out) {built=out}
+    }
+    if target_wasm {
+        # open the page in the default browser, detached (the browser's output does not
+        # reach this terminal, and dewy returns at once)
+        if open_in_browser(built) {eprint("dewy-core: opened {built} in the browser")}
+        else {eprint("dewy-core: built {built}; open it in a browser")}
+        exit(0)
+    }
+    exec(built run_args);
+    eprint("dewy-core: failed to run {built}")
+    exit(1)
+}
+# dewy-core test directory: each .dewy file under it with a line starting `$test` (not in hidden
+# directories or __dewycache__) tested in a process of its own, one line per file, then the
+# failures' output and the counts. The status is the failures (at most 100), or 101 when a test
+# aborted, 102 when a file did not build.
+test_directory=(dir:string words:array<string> json:bool):>CliWord=>{
+    let found:array<string>=[]
+    test_files(dir @found)
+    found.sort()
+    let passed:CliWord=0
+    let failed:CliWord=0
+    let aborted=false
+    let broken=false
+    let failures:array<string>=[]
+    let doc=JsonDoc([])
+    loop f in found {
+        let args=["test"]
+        if (cli_mode as array<uint8>).length >? 0 {args.push("--{cli_mode}")}
+        args=[args... "--json" f words...]
+        let ran=run_program(exe_path() args)
+        let marks=""
+        let filed:CliWord=0
+        let ran_tests:CliWord=0
+        loop line in split(ran[1] "\n") {
+            if (line as array<uint8>).length =? 0 {continue}
+            let root=json_parse(@doc line)
+            let named=json_get(doc root "test")
+            if named =? 0 {
+                # (the file's summary: none when its tests' names do not match the words)
+                if json and ran_tests >? 0 {printl("{__str_slice(line 0 (line as array<uint8>).length - 1)},\"file\":{json_quote(f)}\}")}
+                continue
+            }
+            ran_tests += 1
+            if json {printl(line)}
+            let status=json_str(doc json_get(doc root "status"))
+            if status =? "pass" {
+                passed += 1
+                marks="{marks}."
+            }
+            else {
+                failed += 1
+                filed += 1
+                marks="{marks}F"
+                failures.push("{f}: {json_str(doc named)}")
+                failures.push(json_str(doc json_get(doc root "output")))
+            }
+        }
+        if ran[0] =? 101 {aborted=true}
+        if ran[0] =? 102 or ran[0] <? 0 {
+            broken=true
+            marks="{marks}(did not build)"
+        }
+        else if ran_tests =? 0 {continue}
+        if not json {printl("{f} {marks}")}
+    }
+    if passed + failed =? 0 and not broken {
+        if words.length >? 0 {eprint("no test's name under {dir} has any of {join(words ", ")} in it")}
+        else {eprint("no tests under {dir}: a test is a function marked `$test` on the line before it")}
+        return 1
+    }
+    let status:CliWord=min(failed 100)
+    if aborted {status=101}
+    if broken {status=102}
+    if json {
+        printl("\{\"passed\":{passed},\"failed\":{failed},\"files\":{found.length},\"exit\":{status}\}")
+        return status
+    }
+    let i:CliWord=0
+    loop i + 1 <? failures.length {
+        printl("--- FAIL {failures[i]}")
+        print(failures[i + 1])
+        if (failures[i + 1] as array<uint8>).length >? 0 and not ends_with(failures[i + 1] "\n") {printl("")}
+        i += 2
+    }
+    let summary="{passed} passed"
+    if failed >? 0 {summary="{failed} failed, {summary}"}
+    printl(summary)
+    status
+}
+test_files=(dir:string @found:array<string>):>void=>{
+    loop name in list_dir(dir) {
+        if starts_with(name ".") or name =? "__dewycache__" {continue}
+        let p="{dir}/{name}"
+        if is_dir(p) {test_files(p @found)}
+        else if ends_with(name ".dewy") {
+            let text=read_file(p)
+            if text not=? none {
+                loop line in split(text "\n") {
+                    if starts_with(line "$test") {
+                        found.push(p)
+                        break
+                    }
+                }
+            }
+        }
+    }
+}
+# (@lib("libc.so.6") in a Windows build: the program fails when it calls the function)
+extern_lib_check=(fi:CliWord):>void=>$unsafe {
+    let d=CliWord(fns.ptr[fi].decl)
+    if pos_in_lib(nodes.ptr[d].pos) {return}
+    let cl=fns.ptr[fi].clib
+    let lc=lower(cl)
+    let other=""
+    if target_windows and (jo_find(lc ".so") >=? 0 or ends_with(lc ".dylib")) {other="a Windows program loads DLLs (msvcrt.dll has the C library)"}
+    else if not target_windows and ends_with(lc ".dll") {other="a Linux or macOS program loads .so or .dylib libraries"}
+    else if target_macos and jo_find(lc ".so") >=? 0 {other="a macOS program loads .dylib libraries (/usr/lib/libSystem.B.dylib has the C library)"}
+    else if not target_macos and not target_windows and ends_with(lc ".dylib") {other="a Linux program loads .so libraries (libc.so.6 has the C library)"}
+    if (other as array<uint8>).length >? 0 {warn(nodes.ptr[d].pos "{jd(nodes.ptr[d].pos "@lib(\"{cl}\")" "lib='{cl}'")} is another system's library: {other}; {jd(nodes.ptr[d].pos "`when TARGET == \"windows\":` gives each system its own @lib" "`if $target.os =? \"windows\" \{...}` gives each system its own declaration")} (as it is, the program stops when it calls {name_of(CliWord(nodes.ptr[d].name))})")}
+}
+# programs left in the run cache: those not run for a week go (and half-made ones of crashed
+# builds); past 500 MB, the oldest go until it is half that
+clean_cache=(cache:string):>void=>{
+    # (now, as the file system tells time: a file just written)
+    write_file("{cache}/.now" "");
+    let now=file_time("{cache}/.now") ?? 0.0
+    if now =? 0.0 {return}
+    let kept:array<[float64 string int64]>=[]
+    let total:CliWord=0
+    loop f in list_dir(cache) {
+        let p="{cache}/{f}"
+        let t=file_time(p)
+        if t not=? none {
+            if now - t >? 7.0 * 86400.0 or (ends_with(f ".new") and now - t >? 3600.0) {delete_file(p);}
+            else if f not=? ".now" {
+                let n:CliWord=file_size(p) ?? 0
+                kept.push([t p n])
+                total += n
+            }
+        }
+    }
+    if total <=? 500 << 20 {return}
+    kept.sort(key=(k:[float64 string int64]):>float64=>k[0])
+    loop k in kept {
+        if total <=? 250 << 20 {break}
+        if delete_file(k[1]) {total -= k[2]}
+    }
+}
+# (a web page that saves, with no name in its build block: pages on one site, as itch.io's,
+# share their browser's storage, and every game.jo would read and write the others' saves)
+web_save_name_check=():>void=>$unsafe {
+    loop fi in [1..fns.length) {
+        let d=CliWord(fns.ptr[fi].decl)
+        if fns.ptr[fi].state not=? 2 or d =? 0 or not pos_in_lib(nodes.ptr[d].pos) {continue}
+        let nm=name_of(CliWord(nodes.ptr[d].name))
+        if nm =? "save_data" or nm =? "save_value" {
+            let at:CliWord=-1
+            let hint="give it a name of its own: `build:` and `name = \"Drone Arena\"` below it"
+            loop m in modules {
+                if m.is_main {
+                    at=mkpos(int64(m.file) 0)
+                    if files[int64(m.file)].is_dewy {hint="choose a distinct .dewy source filename before publishing, and keep it the same for native and web builds"}
+                }
+            }
+            warn(at "this web page saves under the name '{program_name}' (its file's): pages on one site, as itch.io's, share their storage, so {hint}")
+            return
+        }
+    }
+}

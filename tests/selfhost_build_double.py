@@ -13,8 +13,9 @@ def build_all(binary, tmp_path, label, paths, flags=((),)):
     for i, path in enumerate(paths):
         for j, extra in enumerate(flags):
             target = out / f'p{i}-{j}'
+            # (messages may quote source bytes that are not UTF-8: kept exactly)
             r = subprocess.run([binary, 'build', *extra, path, '-o', target], cwd=tmp_path, capture_output=True,
-                               text=True, timeout=120, check=False)
+                               text=True, errors='surrogateescape', timeout=120, check=False)
             # (everything the build wrote: a Windows build adds .exe and .pdb)
             made = {p.name: p.read_bytes() for p in sorted(out.glob(f'p{i}-{j}*')) if p.is_file()}
             results.append((str(path), extra, r.returncode, r.stdout,

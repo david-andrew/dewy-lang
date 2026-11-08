@@ -47,6 +47,7 @@ LEAF_HOMES = {
     'repl_drive': 'repl.jo',
     'fused_ir': 'fused.jo',
     'par_drive': 'par.jo',
+    'driver_cli': 'main.jo',
     'refine_rare': 'refine.jo',
     'ide_decls': 'ide.jo',
     'directive_rules': 'directives.jo',

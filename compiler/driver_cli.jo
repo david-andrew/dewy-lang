@@ -1,0 +1,497 @@
+use 'main.jo'
+use 'program_settings.dewy'
+use 'lower_views.dewy'
+use 'lower_determinism.dewy'
+use 'checker_program.dewy'
+use 'effect_loans.dewy'
+use 'native_debug.dewy'
+use 'dwarf_format.dewy'
+use 'macho_format.dewy'
+use 'pe_format.dewy'
+use 'elf_format.dewy'
+use 'x64_emit.dewy'
+use 'driver_pipeline.dewy'
+use 'x64_allocate.dewy'
+use 'ir_types.dewy'
+use 'errors.jo'
+use 'host_binds.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'lazy_bodies.jo'
+use 'lazy_force.dewy'
+use 'frontend.jo'
+use 'effects.jo'
+use 'concurrency.jo'
+use 'settings.jo'
+use 'host_target.dewy'
+use 'targets.dewy'
+use 'json_doc.dewy'
+use 'manifest.dewy'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'pcheck.jo'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'parse.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_static.dewy'
+use 'checks_main.dewy'
+use 'spelling.dewy'
+use 'facts.jo'
+use 'facts_lifecycle.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'exact.jo'
+use 'prelude.jo'
+use 'prelude_ops.dewy'
+use 'expr.jo'
+use 'ir.jo'
+use 'lower.jo'
+use 'arena.jo'
+use 'isolation.jo'
+use 'copies.jo'
+use 'copy_ops.dewy'
+use 'ownership.jo'
+use 'opt.jo'
+use 'opt_returns.dewy'
+use 'inline.jo'
+use 'inline_ops.dewy'
+use 'callback_specialize.jo'
+use 'callback_ops.dewy'
+use 'loops.jo'
+use 'x64.jo'
+use 'x64_ops.dewy'
+use 'arm64.jo'
+use 'arm64_ops.dewy'
+use 'macho_output.dewy'
+use 'dwarf.jo'
+use 'dwarf_output.dewy'
+use 'native_output.dewy'
+use 'pdb_format.dewy'
+use 'wasm.jo'
+use 'wasm_output.dewy'
+use 'ide.jo'
+use 'ide_decls.dewy'
+use 'lsp.jo'
+use 'lsp_handlers.dewy'
+use 'repl.jo'
+use 'repl_drive.dewy'
+use 'repl_ops.dewy'
+use 'watch.jo'
+use 'watch_drive.dewy'
+use 'watch_ops.dewy'
+use 'new_project.dewy'
+use 'fmt.jo'
+use 'par.jo'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'fused.jo'
+use 'fused_ops.dewy'
+use 'pkg.jo'
+use 'pkg_ops.dewy'
+use 'directives.jo'
+use 'directive_ops.dewy'
+use 'lower_ffi.dewy'
+use 'lower_functions.dewy'
+use 'lower_primitives.dewy'
+use 'ir_builders.dewy'
+use 'arena_ops.dewy'
+use 'isolation_ops.dewy'
+use 'par_drive.dewy'
+
+usage = (status: int = 2):
+    eprint("usage: dewy-core                         (a terminal: the interactive prompt; piped input: run it as a program)\n       dewy-core [run] [--release|--debug] [--target T] file.dewy [args...]\n       dewy-core [--release|--debug] [--target T] [--web] [--time]   (the program read from standard input)\n       dewy-core build file.dewy [-o output] [--target x86_64-linux|aarch64-linux|aarch64-mac|x86_64-windows|wasm32] [--release|--debug] [--time] [--exit-codes]\n       dewy-core check [--obligations] file.dewy\n       dewy-core test [--watch] [--release|--debug] [--json] file.dewy [name filters...]\n       dewy-core watch file.dewy [args...]\n       dewy-core new <directory> [game|arcade|platformer|3d|story|online|program]\n       dewy-core lsp\n       dewy-core --version\n       dewy-core --print-lib\n\n--release and --debug choose the build mode and --target the target, overriding the file's\n`$build.mode = ...` and `$target = ...` (with a warning where they differ); the default is a\ndebug build for this machine.\n\nExperimental Dewy compiler. Implementation/library .jo sources are also accepted.\nBuild from this repository to update; see docs/DEVELOPMENT.md.")
+    exit(status)
+# An option the command line does not have. A metatag's name (`--runtime-checks`,
+# `$no_hidden_costs=false`) gets the reason: a program's safety and meaning are set in its
+# source, never on the command line, which sets only the build mode and the target.
+cli_option_refused = (x: str):
+    name = x
+    loop len(name) > 0 and (name[0] == '-' or name[0] == '$'): name = name[1..]
+    eq = find(name, "=")
+    if eq >= 0: name = name[..eq)
+    tag = ""
+    loop c in name: tag += if c == '-': "_" else: byte_str(int(c))
+    # (the metatags the compiler knows, and the bundles of lib/directives.dewy)
+    bundles = read_file("{lib_dir}/directives.dewy") ?? ""
+    known = len(tag) > 0 and (dw_dir_known(tag) or tag == "default_row" or starts_with(bundles, "${tag} ") or find(bundles, "\n${tag} ") >= 0)
+    if known and tag != "target" and tag != "build":
+        eprint("dewy-core: `${tag}` cannot be set from the command line; write it in the program's source (the command line sets only the build mode, --release or --debug, and the target, --target)")
+        exit(2)
+    eprint("dewy-core: unknown option '{x}'")
+    usage()
+find_lib_dir = () -> str:
+    if let e = env("DEWY_CORE_LIB"):
+        if len(e) > 0: return os_path(e)
+    exe = os_path(exe_path())
+    d = exe
+    s = rfind(d, "/")
+    if s >= 0: d = d[..s)
+    s = rfind(d, "/")
+    if s >= 0: d = d[..s)
+    if not file_exists("{d}/lib/core/rt.jo"):
+        eprint("dewy-core: cannot find the standard library next to {exe} (expected {d}/lib); set DEWY_CORE_LIB to its location")
+        exit(2)
+    "{d}/lib"
+# the target, from the command line or else the main file: for building, checking and the
+# language server alike
+setup_target = ():
+    host = host_target_name()
+    tgt = build_target
+    # (one the file names wrongly: the checker says where)
+    if len(target_problem(tgt, host)) > 0: tgt = ""
+    if len(cli_target) > 0: tgt = cli_target
+    if native_only: tgt = host
+    if tgt == "": tgt = host
+    why = target_problem(tgt, host)
+    if len(why) > 0:
+        eprint("dewy-core: {why}")
+        exit(2)
+    # (a processor alone: this machine)
+    if not (tgt in supported_target_names()): tgt = host
+    target_wasm = tgt == "wasm32"
+    target_windows = tgt == "x86_64-windows"
+    target_macos = tgt == "aarch64-mac"
+    target_arm64 = tgt == "aarch64-linux" or target_macos
+    if target_wasm: ptr_size = 4
+# (a game's update or draw, as the checker finds it: a top-level `name =` or `let name =`, at
+# the start of a line; a method call such as hasher.update(...) is not one)
+declares_top = (src: str, name: str) -> bool:
+    at = find(src, name)
+    loop at >= 0:
+        b = at
+        if b >= 4 and src[b - 1] == ' ' and src[b - 4] == 'l' and src[b - 3] == 'e' and src[b - 2] == 't': b -= 4
+        e = at + len(name)
+        loop e < len(src) and src[e] == ' ': e += 1
+        if (b == 0 or src[b - 1] == '\n') and e < len(src) and src[e] == '=' and (e + 1 >= len(src) or src[e + 1] != '='): return true
+        at = find(src, name, at + len(name))
+    false
+# (a quick read of the main file's build block before anything is checked; check_build_block
+# reports its mistakes)
+scan_build_block = (path: str):
+    src = read_source(path) ?? ""
+    # Games reach most of the game prelude. Avoid indexing/hashing it only to
+    # load it all again. False positives merely choose eager loading; names
+    # discovered later still work through ordinary demand loading.
+    prelude_game_hint = declares_top(src, "update") or declares_top(src, "draw")
+    # find a top-level `build:` line, then read its indented lines
+    at = pkg_block_at(src)
+    # (the packages it names: where they are, fetched if need be)
+    pkg_specs = []
+    pkg_dirs = {}
+    pkg_errs = {}
+    pkg_scan_at(pkg_specs, path, src, at)
+    pkg_resolve_all(path)
+    build_target = ""
+    build_target_at = -1
+    build_target_seen = false
+    file_mode = ""
+    file_mode_at = -1
+    file_mode_seen = false
+    settings_path = path
+    if at >= 0: scan_build_lines(src, at)
+    if ends_with(path, ".dewy"): scan_settings(src)
+    mode = if len(cli_mode) > 0: cli_mode else if len(file_mode) > 0: file_mode else: "debug"
+    opt_release = mode == "release"
+    release_build = opt_release
+# A Sloppy build block's indented `name = value` lines, from the `build:` line at at.
+scan_build_lines = (src: str, at: int):
+    i = find_byte(src, '\n', at)
+    loop i >= 0 and i < len(src):
+        j = find_byte(src, '\n', i + 1)
+        if j < 0: j = len(src)
+        line = src[i + 1..j)
+        i = j
+        t = trim(line)
+        if len(t) == 0 or t[0] == '#': continue
+        if line[0] != ' ' and line[0] != '\t': break
+        eq = find(t, "=")
+        if eq < 0: continue
+        key = trim(t[..eq))
+        val = trim(t[eq + 1..])
+        h = find(val, "#")
+        if h >= 0: val = trim(val[..h))
+        if len(val) >= 2 and val[0] == '"': val = val[1..len(val) - 1)
+        if key == "target": build_target = val
+        else if key == "output": build_output = val
+        else if key == "name": program_name = val
+        else if key == "opt": file_mode = if val == "release": "release" else: "debug"
+# A Dewy file's `$target = 'name'` and `$build.mode = 'name'` lines (at the start of a line,
+# outside comments and multi-line strings, the value a string literal, then nothing but a
+# comment). The parser checks each in place: dw_build_setting.
+scan_settings = (src: str):
+    if find(src, "$") < 0: return
+    depth = 0                   # (inside `#{ ... }#`, nesting)
+    i = 0
+    loop i < len(src):
+        c = src[i]
+        if c == '#' and i + 1 < len(src) and src[i + 1] == 123:
+            depth += 1
+            i += 2
+        else if depth > 0 and c == 125 and i + 1 < len(src) and src[i + 1] == '#':
+            depth -= 1
+            i += 2
+        else if depth > 0: i += 1
+        else if c == '#':
+            loop i < len(src) and src[i] != '\n': i += 1
+        else if c == '"' or c == '\'':
+            # (a string: a triple-quoted one may span lines, any other ends with its line)
+            if i + 2 < len(src) and src[i + 1] == c and src[i + 2] == c:
+                e = find(src, src[i..i + 3), i + 3)
+                i = if e < 0: len(src) else: e + 3
+            else:
+                i += 1
+                loop i < len(src) and src[i] != c and src[i] != '\n':
+                    if src[i] == '\\': i += 1
+                    i += 1
+                if i < len(src) and src[i] == c: i += 1
+        else if c == '$' and (i == 0 or src[i - 1] == '\n'):
+            scan_setting(src, i)
+            i += 1
+        else: i += 1
+# The setting on the line starting at i, if it is one.
+scan_setting = (src: str, i: int):
+    j = find_byte(src, '\n', i)
+    if j < 0: j = len(src)
+    t = src[i..j)
+    key = ""
+    if starts_with(t, "$target"): key = "target"
+    else if starts_with(t, "$build.mode"): key = "mode"
+    if len(key) == 0: return
+    k = if key == "target": 7 else: 11
+    loop k < len(t) and (t[k] == ' ' or t[k] == '\t'): k += 1
+    if k + 1 >= len(t) or t[k] != '=' or t[k + 1] == '=' or t[k + 1] == '?': return
+    k += 1
+    loop k < len(t) and (t[k] == ' ' or t[k] == '\t'): k += 1
+    if k >= len(t) or (t[k] != '\'' and t[k] != '"'): return
+    e = find_byte(t, t[k], k + 1)
+    if e < 0: return
+    val = t[k + 1..e)
+    rest = trim(t[e + 1..])
+    if len(rest) > 0 and rest[0] != '#': return
+    # (the first of each: a second is an error the parser reports)
+    if key == "target" and build_target_at < 0:
+        build_target = val
+        build_target_at = i
+    else if key == "mode" and file_mode_at < 0:
+        file_mode = val
+        file_mode_at = i
+# Count physical source lines, including comments and blank lines. Loaded
+# library bodies may remain lazy, so this is input volume, not checked LOC.
+source_counts = ():
+    dewy_lines = 0
+    dewy_bytes = 0
+    impl_lines = 0
+    impl_bytes = 0
+    loop file in files:
+        lines = 0
+        loop byte in file.src:
+            if byte == '\n': lines += 1
+        if len(file.src) > 0 and file.src[len(file.src) - 1] != '\n': lines += 1
+        if file.is_dewy:
+            dewy_lines += lines
+            dewy_bytes += len(file.src)
+        else:
+            impl_lines += lines
+            impl_bytes += len(file.src)
+    eprint("sources: {files.len()} files, {dewy_lines} Dewy lines ({dewy_bytes} bytes), {impl_lines} implementation lines ({impl_bytes} bytes)")
+open_in_browser = (path: str) -> bool:
+    when TARGET == "windows":
+        return spawn_detached("C:\\Windows\\System32\\cmd.exe", ["cmd", "/c", "start", "", path])
+    else:
+        return spawn_detached("/usr/bin/xdg-open", ["xdg-open", path])
+# `dewy-core --internal-fact-policy=require-static check ...`: the test tools' fact policy
+# (facts.jo), right after the program's name, where no command or program argument goes
+internal_options = (a: str[]) -> str[]:
+    if a.len() > 2 and starts_with(a[1], "--internal-fact-policy="):
+        fact_internal_policy = a[1][len("--internal-fact-policy=")..]
+        return [a[0]] + a[2..]
+    if a.len() > 2 and a[1] == "--internal-collide-locals":
+        collide_locals = true
+        return internal_options([a[0]] + a[2..])
+    a
+# dewy-core with no file and input that is not a terminal: the program on standard input, read
+# whole, as a file named <stdin> in the current directory (its `use`s are relative to it)
+run_stdin = ():
+    pkg_fetch = true
+    more_errors = true
+    buf: u8[]
+    loop true:
+        n = buf.len()
+        buf.resize(n + 65536)
+        r = __read_fd(0, data(buf) + n, 65536)
+        if r <= 0:
+            buf.resize(n)
+            break
+        buf.resize(n + r)
+    text = str_from_bytes(buf)
+    path = "<stdin>.dewy"
+    ide_texts[path_norm(path)] = text
+    full = os_path(cwd()) + "/" + path
+    build_and_exec(path, "stdin", full + "\n" + text, [path])
+# standard input is a terminal (not a file or a pipe)
+stdin_is_terminal = () -> bool:
+    when TARGET == "windows":
+        m: u32[] = [0]
+        return GetConsoleMode(GetStdHandle(u32(0xFFFFFFF6)), data(m)) != 0
+    else:
+        t = fill(u8(0), 64)
+        return syscall(16, 0, 0x5401, data(t)) == 0
+# build the program at path into the run cache (named base, its key hashed into the name) and
+# run it with run_args
+build_and_exec = (path: str, base: str, key: str, run_args: str[]):
+    cache = core_cache()
+    name = "{base}-{path_hash(key)}"
+    if (time_ns() / 1000) % 64 == 0: clean_cache(cache)
+    out = "{cache}/{name}.bin"
+    # (made beside it, then put in its place: a copy of the program still running is not
+    # written over; Windows cannot replace a running program, so there it is written in place)
+    tmp = out
+    if not target_windows and not target_wasm and cli_target != "wasm32" and cli_target != "x86_64-windows": tmp = "{cache}/{name}.{time_ns()}.new"
+    built = compile(path, tmp)
+    if len(built) == 0: exit(error_exit)
+    if built == tmp and tmp != out and not target_wasm:
+        if rename_file(tmp, out): built = out
+    if target_wasm:
+        # open the page in the default browser, detached (the browser's output does not
+        # reach this terminal, and dewy returns at once)
+        if open_in_browser(built): eprint("dewy-core: opened {built} in the browser")
+        else: eprint("dewy-core: built {built}; open it in a browser")
+        exit(0)
+    exec(built, run_args)
+    eprint("dewy-core: failed to run {built}")
+    exit(1)
+# dewy-core test directory: each .dewy file under it with a line starting `$test` (not in hidden
+# directories or __dewycache__) tested in a process of its own, one line per file, then the
+# failures' output and the counts. The status is the failures (at most 100), or 101 when a test
+# aborted, 102 when a file did not build.
+test_directory = (dir: str, words: str[], json: bool) -> int:
+    files: str[]
+    test_files(dir, files)
+    files.sort()
+    passed = 0
+    failed = 0
+    aborted = false
+    broken = false
+    failures: str[]
+    doc = JsonDoc([])
+    loop f in files:
+        args = ["test"]
+        if len(cli_mode) > 0: args.push("--{cli_mode}")
+        args = args + ["--json", f] + words
+        ran = run_program(exe_path(), args)
+        marks = ""
+        filed = 0
+        ran_tests = 0
+        loop line in split(ran.1, "\n"):
+            if len(line) == 0: continue
+            root = json_parse(doc, line)
+            named = json_get(doc, root, "test")
+            if named == 0:
+                # (the file's summary: none when its tests' names do not match the words)
+                if json and ran_tests > 0: print(line[..len(line) - 1) + ",\"file\":{json_quote(f)}\}")
+                continue
+            ran_tests += 1
+            if json: print(line)
+            status = json_str(doc, json_get(doc, root, "status"))
+            if status == "pass":
+                passed += 1
+                marks += "."
+            else:
+                failed += 1
+                filed += 1
+                marks += "F"
+                failures.push("{f}: {json_str(doc, named)}")
+                failures.push(json_str(doc, json_get(doc, root, "output")))
+        if ran.0 == 101: aborted = true
+        if ran.0 == 102 or ran.0 < 0:
+            broken = true
+            marks += "(did not build)"
+        else if ran_tests == 0: continue
+        if not json: print("{f} {marks}")
+    if passed + failed == 0 and not broken:
+        if words.len() > 0: eprint("no test's name under {dir} has any of {join(words, ", ")} in it")
+        else: eprint("no tests under {dir}: a test is a function marked `$test` on the line before it")
+        return 1
+    status = min(failed, 100)
+    if aborted: status = 101
+    if broken: status = 102
+    if json:
+        print("\{\"passed\":{passed},\"failed\":{failed},\"files\":{files.len()},\"exit\":{status}\}")
+        return status
+    i = 0
+    loop i + 1 < failures.len():
+        print("--- FAIL {failures[i]}")
+        write(failures[i + 1])
+        if len(failures[i + 1]) > 0 and not ends_with(failures[i + 1], "\n"): print("")
+        i += 2
+    summary = "{passed} passed"
+    if failed > 0: summary = "{failed} failed, " + summary
+    print(summary)
+    status
+test_files = (dir: str, found: mut str[]):
+    loop name in list_dir(dir):
+        if starts_with(name, ".") or name == "__dewycache__": continue
+        p = "{dir}/{name}"
+        if is_dir(p): test_files(p, found)
+        else if ends_with(name, ".dewy"):
+            if let text = read_file(p):
+                loop line in split(text, "\n"):
+                    if starts_with(line, "$test"):
+                        found.push(p)
+                        break
+# (@lib("libc.so.6") in a Windows build: the program fails when it calls the function)
+extern_lib_check = (fi: int):
+    d = int(fns[fi].decl)
+    if pos_in_lib(nodes[d].pos): return
+    cl = fns[fi].clib
+    lc = lower(cl)
+    other = ""
+    if target_windows and (find(lc, ".so") >= 0 or ends_with(lc, ".dylib")): other = "a Windows program loads DLLs (msvcrt.dll has the C library)"
+    else if not target_windows and ends_with(lc, ".dll"): other = "a Linux or macOS program loads .so or .dylib libraries"
+    else if target_macos and find(lc, ".so") >= 0: other = "a macOS program loads .dylib libraries (/usr/lib/libSystem.B.dylib has the C library)"
+    else if not target_macos and not target_windows and ends_with(lc, ".dylib"): other = "a Linux program loads .so libraries (libc.so.6 has the C library)"
+    if len(other) > 0: warn(nodes[d].pos, "{jd(nodes[d].pos, "@lib(\"{cl}\")", "lib='{cl}'")} is another system's library: {other}; {jd(nodes[d].pos, "`when TARGET == \"windows\":` gives each system its own @lib", "`if $target.os =? \"windows\" \{...}` gives each system its own declaration")} (as it is, the program stops when it calls {name_of(int(nodes[d].name))})")
+# programs left in the run cache: those not run for a week go (and half-made ones of crashed
+# builds); past 500 MB, the oldest go until it is half that
+clean_cache = (cache: str):
+    # (now, as the file system tells time: a file just written)
+    write_file(cache + "/.now", "")
+    now = file_time(cache + "/.now") ?? 0.0
+    if now == 0.0: return
+    kept: (f64, str, int)[]
+    total = 0
+    loop f in list_dir(cache):
+        p = cache + "/" + f
+        if let t = file_time(p):
+            if now - t > 7.0 * 86400.0 or (ends_with(f, ".new") and now - t > 3600.0): delete_file(p)
+            else if f != ".now":
+                n = file_size(p) ?? 0
+                kept.push((t, p, n))
+                total += n
+    if total <= 500 << 20: return
+    kept.sort_by((k): k.0)
+    loop k in kept:
+        if total <= 250 << 20: break
+        if delete_file(k.1): total -= k.2
+# (a web page that saves, with no name in its build block: pages on one site, as itch.io's,
+# share their browser's storage, and every game.jo would read and write the others' saves)
+web_save_name_check = ():
+    loop fi in [1..fns.len()):
+        d = int(fns[fi].decl)
+        if fns[fi].state != 2 or d == 0 or not pos_in_lib(nodes[d].pos): continue
+        nm = name_of(int(nodes[d].name))
+        if nm == "save_data" or nm == "save_value":
+            at = -1
+            hint = "give it a name of its own: `build:` and `name = \"Drone Arena\"` below it"
+            loop m in modules:
+                if m.is_main:
+                    at = mkpos(int(m.file), 0)
+                    if files[int(m.file)].is_dewy: hint = "choose a distinct .dewy source filename before publishing, and keep it the same for native and web builds"
+            warn(at, "this web page saves under the name '{program_name}' (its file's): pages on one site, as itch.io's, share their storage, so {hint}")
+            return
