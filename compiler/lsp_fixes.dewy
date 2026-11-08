@@ -3,7 +3,7 @@ from p"checks_text.dewy" import (byte_find)
 from p"@lib/core/rt.jo" import (__str_from_bytes __str_slice)
 from p"@lib/core/os.jo" import (read_file)
 from p"@lib/core/str.jo" import (contains ends_with find_byte is_digit join lower split starts_with trim)
-from p"@lib/core/str.jo" import (to_int as jo_to_int)
+from p"@lib/core/str.jo" import (to_int)
 from p"ide.jo" import (IK_CONST)
 from p"ide_text.dewy" import (ide_comment_end)
 from p"json_doc.dewy" import (json_quote)
@@ -31,7 +31,7 @@ lsp_body_len=(h0:LspFixWord h1:LspFixWord):>int64=>{
     let k=byte_find(hs "content-length:")
     if k <? 0 {return 0}
     let e=find_byte(hs b'\r' k)
-    jo_to_int(trim(__str_slice(hs k + 15 e))) ?? 0
+    to_int(trim(__str_slice(hs k + 15 e))) ?? 0
 }
 lsp_read=():>string | none=>{
     loop true {
@@ -52,7 +52,7 @@ lsp_read=():>string | none=>{
 split_pos=(s:string):>[int64 int64]=>{
     let c=find_byte(s b':')
     if c <? 0 {return [(-1) (-1)]}
-    [jo_to_int(__str_slice(s 0 c)) ?? -1 jo_to_int(__str_slice(s c + 1 (s as array<uint8>).length)) ?? -1]
+    [to_int(__str_slice(s 0 c)) ?? -1 to_int(__str_slice(s c + 1 (s as array<uint8>).length)) ?? -1]
 }
 # parse a child's lines into r (files are renumbered into r.paths)
 take_lines=(@r:Result lines_:array<string>):>void=>{
@@ -62,7 +62,7 @@ take_lines=(@r:Result lines_:array<string>):>void=>{
         if not starts_with(line "F\t") {continue}
         let f=esc_split(line)
         if f.length >=? 3 {
-            let i=jo_to_int(f[1]) ?? 0
+            let i=to_int(f[1]) ?? 0
             loop fmap.length <=? i {fmap.push(-1)}
             let p=path_norm(f[2])
             let j:LspFixWord=-1
@@ -90,13 +90,13 @@ take_lines=(@r:Result lines_:array<string>):>void=>{
             let al=""
             if f.length >=? 6 and (f[5] as array<uint8>).length >? 0 {al=remap_key(fmap f[5])}
             let rk:LspFixWord=0
-            if f.length >=? 7 {rk=jo_to_int(f[6]) ?? 0}
-            r.refs.push(Ref(p[0] p[1] jo_to_int(f[2]) ?? 0 d f[4] al rk))
+            if f.length >=? 7 {rk=to_int(f[6]) ?? 0}
+            r.refs.push(Ref(p[0] p[1] to_int(f[2]) ?? 0 d f[4] al rk))
         }
         else if k =? "D" and f.length >=? 7 {
             let p=remap(fmap f[1])
             let key="{p[0]}:{p[1]}"
-            if r.decls.get(key) =? none {r.decls[key]=Decl(p[0] p[1] jo_to_int(f[2]) ?? 0 jo_to_int(f[3]) ?? 0 f[4] f[5] f[6])}
+            if r.decls.get(key) =? none {r.decls[key]=Decl(p[0] p[1] to_int(f[2]) ?? 0 to_int(f[3]) ?? 0 f[4] f[5] f[6])}
         }
         else if k =? "H" and f.length >=? 3 {
             let p=remap(fmap f[1])
@@ -326,7 +326,7 @@ on_code_action=(id:LspFixWord params:LspFixWord):>int64=>{
         # the spelling a message gives: `@f` for a function itself, `xs.pop(i)` for a member
         let fx=dewy_fixit(d p msg)
         if fx.length >? 0 {
-            out.push(qf_json(d fx[0] dg jo_to_int(fx[1]) ?? 0 jo_to_int(fx[2]) ?? 0 fx[3]))
+            out.push(qf_json(d fx[0] dg to_int(fx[1]) ?? 0 to_int(fx[2]) ?? 0 fx[3]))
             continue
         }
         # (a path not proven to stay inside its base: validate it where it is used)
@@ -414,7 +414,7 @@ on_code_action=(id:LspFixWord params:LspFixWord):>int64=>{
             loop q <? (text as array<uint8>).length and (text as array<uint8>)[q] =? b' ' {q += 1}
             if q <? (text as array<uint8>).length and byte_find(",)]:\n#" __str_slice(text q q + 1)) <? 0 {continue}
             let w=__str_slice(text p e)
-            if (to as array<uint8>)[0] not=? b'f' and is_digit((w as array<uint8>)[0]) and ends_with(w ".0") and jo_to_int(__str_slice(w 0 (w as array<uint8>).length - 2)) not=? none {out.push(qf_json(d "Write it as {__str_slice(w 0 (w as array<uint8>).length - 2)}" dg p e __str_slice(w 0 (w as array<uint8>).length - 2)))} else {out.push(qf_json(d "Convert it: {to}({w})" dg p e "{to}({w})"))}
+            if (to as array<uint8>)[0] not=? b'f' and is_digit((w as array<uint8>)[0]) and ends_with(w ".0") and to_int(__str_slice(w 0 (w as array<uint8>).length - 2)) not=? none {out.push(qf_json(d "Write it as {__str_slice(w 0 (w as array<uint8>).length - 2)}" dg p e __str_slice(w 0 (w as array<uint8>).length - 2)))} else {out.push(qf_json(d "Convert it: {to}({w})" dg p e "{to}({w})"))}
         }
     }
     lsp_reply(id "[{join(out ",")}]")

@@ -1,7 +1,7 @@
 $runtime_checks
 from p"@lib/core/os.jo" import (env)
 from p"@lib/core/rt.jo" import (__str_slice)
-from p"@lib/core/str.jo" import (find as jo_find is_digit split starts_with to_int as jo_to_int)
+from p"@lib/core/str.jo" import (find is_digit split starts_with to_int)
 from p"ast.jo" import (NF_GENERIC NF_INBOUNDS add_flag has_flag nodes)
 from p"check.jo" import (FK_LAMBDA decl_info decl_infos fns lib_dir modules)
 from p"program_settings.dewy" import (dir_program_prepare dir_program_setting)
@@ -115,13 +115,13 @@ version_well_formed=(v:string):>bool=>{
 # (dotted decimal versions, both well formed)
 version_newer=(a:string b0:string):>bool=>{
     let b=b0
-    let dash=jo_find(b "-")
+    let dash=find(b "-")
     if dash >=? 0 {b=__str_slice(b 0 dash)}
     let x=split(a ".")
     let y=split(b ".")
     loop i in [0..min(x.length y.length)) {
-        let p=jo_to_int(x[i]) ?? 0
-        let q=jo_to_int(y[i]) ?? 0
+        let p=to_int(x[i]) ?? 0
+        let q=to_int(y[i]) ?? 0
         if p not=? q {return p >? q}
     }
     false
@@ -131,7 +131,7 @@ toolchain_version=():>string=>{
     env("DEWY_TOOLCHAIN_VERSION") ?? DEWY_CORE_VERSION
 }
 toolchain_tagged=():>bool=>{
-    jo_find(toolchain_version() "-dev") <? 0
+    find(toolchain_version() "-dev") <? 0
 }
 # A Dewy module of the program with no `$dewy.version`, on a tagged toolchain: a warning with the fix.
 dir_version_warnings=():>void=>{

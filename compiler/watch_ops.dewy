@@ -2,7 +2,7 @@ $runtime_checks
 from p"checks_text.dewy" import (byte_rfind)
 from p"@lib/core/rt.jo" import (__str_from_bytes)
 from p"@lib/core/os.jo" import (__zstr delete_file eprint file_exists list_dir read_bytes read_file write_bytes write_file)
-from p"@lib/core/str.jo" import (to_int as jo_to_int)
+from p"@lib/core/str.jo" import (to_int)
 from p"@lib/core/str.jo" import (ends_with split starts_with trim)
 from p"arm64_emit.dewy" import (M_FLOAT M_SIGNED VF VI VS a_call_fix a_data_fix a_faddr_fix a_stub_fix)
 from p"arm64_encode.dewy" import (rd32)
@@ -994,18 +994,18 @@ watch_read_result=(res:string):>bool=>{
         if p.length =? 0 {continue}
         let k=p[0]
         if k =? "N" and p.length >=? 7 {
-            wm_next=jo_to_int(p[1]) ?? 0
-            wm_data_next=jo_to_int(p[2]) ?? 0
-            wm_data_end=jo_to_int(p[3]) ?? 0
+            wm_next=to_int(p[1]) ?? 0
+            wm_data_next=to_int(p[2]) ?? 0
+            wm_data_end=to_int(p[3]) ?? 0
             wm_game=p[4] =? "1"
-            wm_loop=jo_to_int(p[5]) ?? 0
-            wm_top=jo_to_int(p[6]) ?? 0
+            wm_loop=to_int(p[5]) ?? 0
+            wm_top=to_int(p[6]) ?? 0
         }
         else if k =? "S" {
-            loop i in [1..p.length) {wm_stubs.push(jo_to_int(p[i]) ?? 0)}
+            loop i in [1..p.length) {wm_stubs.push(to_int(p[i]) ?? 0)}
         }
-        else if k =? "F" and p.length >=? 5 {wm_add_fn(p[1] jo_to_int(p[2]) ?? 0 jo_to_int(p[3]) ?? 0 jo_to_int(p[4]) ?? 0)} else if k =? "G" and p.length >=? 7 {wm_add_glob(p[1] jo_to_int(p[2]) ?? 0 jo_to_int(p[3]) ?? 0 p[5] jo_to_int(p[4]) ?? 0 p[6])}
-        else if k =? "R" and p.length >=? 3 {wm_ro[jo_to_int(p[1]) ?? 0]=jo_to_int(p[2]) ?? 0} else if k =? "W" and p.length >=? 2 {wm_files.push(p[1])}
+        else if k =? "F" and p.length >=? 5 {wm_add_fn(p[1] to_int(p[2]) ?? 0 to_int(p[3]) ?? 0 to_int(p[4]) ?? 0)} else if k =? "G" and p.length >=? 7 {wm_add_glob(p[1] to_int(p[2]) ?? 0 to_int(p[3]) ?? 0 p[5] to_int(p[4]) ?? 0 p[6])}
+        else if k =? "R" and p.length >=? 3 {wm_ro[to_int(p[1]) ?? 0]=to_int(p[2]) ?? 0} else if k =? "W" and p.length >=? 2 {wm_files.push(p[1])}
         else if k =? "C" and p.length >=? 2 {w_changed.push(p[1])} else if k =? "Z" and p.length >=? 2 {w_reset.push(p[1])}
         else if k =? "A" and p.length >=? 2 {w_added.push(p[1])} else if k =? "K" and p.length >=? 2 {w_kept.push(p[1])}
     }

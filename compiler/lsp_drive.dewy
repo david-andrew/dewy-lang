@@ -4,7 +4,7 @@ $runtime_checks
 from p"@lib/core/rt.jo" import (__read_fd __str_from_bytes __write_fd)
 from p"@lib/core/os.jo" import (args cwd env exe_path exit sleep time)
 from p"@lib/core/str.jo" import (join split starts_with)
-from p"@lib/core/str.jo" import (to_int as jo_to_int)
+from p"@lib/core/str.jo" import (to_int)
 from p"check.jo" import (lib_dir test_mode)
 from p"checker_program.dewy" import (check_program)
 from p"driver_cli.dewy" import (scan_build_block setup_target)
@@ -138,7 +138,7 @@ check_child=(main_path:string doc_path:string sentinel:bool skips:array<string> 
     # Deterministic protocol tests can wait until the child is running before cancelling it.
     let delay=env("DEWY_LSP_CHECK_DELAY_MS")
     if delay not=? none {
-        let ms:LspWord=jo_to_int(delay ?? "") ?? 0
+        let ms:LspWord=to_int(delay ?? "") ?? 0
         if ms >? 0 {
             lsp_log("test checker started")
             sleep(float64(ms) / 1000.0)
@@ -295,7 +295,7 @@ child_main=():>void=>$unsafe {
     loop at <? buf.length {
         let c=at
         loop c <? buf.length and buf[c] not=? b':' {c += 1}
-        let k:LspWord=jo_to_int(__str_from_bytes(buf[at..c))) ?? 0
+        let k:LspWord=to_int(__str_from_bytes(buf[at..c))) ?? 0
         xs.push(__str_from_bytes(buf[c + 1..min(c + 1 + k buf.length))))
         at=c + 1 + k
     }
@@ -303,10 +303,10 @@ child_main=():>void=>$unsafe {
     let main_path=xs[0]
     let doc_path=xs[1]
     let flags="{xs[2]}000" as array<uint8>
-    let ns:LspWord=jo_to_int(xs[3]) ?? 0
+    let ns:LspWord=to_int(xs[3]) ?? 0
     let skips=xs[4..4 + ns)
     at=4 + ns
-    let nt:LspWord=jo_to_int(xs[at]) ?? 0
+    let nt:LspWord=to_int(xs[at]) ?? 0
     loop i in [0..nt) {ide_texts[xs[at + 1 + 2 * i]]=xs[at + 2 + 2 * i]}
     check_child(main_path doc_path flags[0] =? b'1' skips flags[1] =? b'1' flags[2] =? b'1' 1)
 }

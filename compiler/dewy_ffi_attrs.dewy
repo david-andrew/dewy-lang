@@ -1,5 +1,5 @@
 $runtime_checks
-from p"@lib/core/str.jo" import (find as jo_find)
+from p"@lib/core/str.jo" import (find)
 from p"ast.jo" import (NF_CABI NF_EXTERN NF_GENERIC NF_MUT NF_VOID add_flag has_flag kids mk nodes set_list)
 from p"check.jo" import (target_macos target_windows)
 from p"dewy_ffi.jo" import (dw_export_name dw_export_pos)
@@ -11,7 +11,7 @@ FfiWord:type=int64<overflow='wrap'>
 # None, or 'c', is the C library; 'm' its math library; another bare name is the
 # system's usual file name for it. A name with a dot or slash is a file name.
 dw_ffi_library=(lib:string):>string=>{
-    if jo_find(lib ".") >=? 0 or jo_find(lib "/") >=? 0 {return lib}
+    if find(lib ".") >=? 0 or find(lib "/") >=? 0 {return lib}
     if lib =? "" or lib =? "c" or lib =? "m" {
         if target_windows {return "msvcrt.dll"}
         if target_macos {return "/usr/lib/libSystem.B.dylib"}
