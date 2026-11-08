@@ -189,8 +189,9 @@ cx_mk=(kind:NK pos:CWord):>CWord=>$unsafe {
 cx_set_list=(n:CWord xs:array<int64>):>void=>$unsafe {
     node_set_list(@cx_nodes[0]  @cx_lists[0]  n  xs)
 }
-# Ordinary checked Dewy bodies, interpreted on demand. Values are immutable;
-# frames and places belong to the evaluator, never to the checker or backend.
+# Ordinary checked Dewy bodies, interpreted on demand. Values are immutable, but for what one
+# place alone holds (cx_own); frames and places belong to the evaluator, never to the checker
+# or backend.
 # No fuel counter: general compile-time execution is trusted.
 let cx_frames:array<CTFrame>=[]
 let cx_places:array<CTPlace>=[]
@@ -406,16 +407,50 @@ cx_read_place=(p:CTPlace):>CWord=>$unsafe {
     loop index in p.path {v=cx_value(v).items[index]}
     v
 }
-cx_replace=(v:CWord path:array<int64> at:CWord value:CWord):>CWord=>$unsafe {
-    if at =? path.length {return value}
-    let copy=cx_value(v)
-    copy.items[path[at]] = cx_replace(copy.items[path[at]]  path  at + 1  value)
-    cx_add(copy)
+# A value a write reaches is changed where it is when only that place holds it: cx_owner[v] is
+# the value whose items hold v (a local's value: -1 - (frame << 32 | local)), set when the write
+# made v, and 0 once v may be held anywhere else (cx_expr hands it out). Any other value is
+# copied once on the way down and the copy kept, so n writes into one array cost O(n), not
+# O(n^2) copies that are never freed.
+let cx_owner:array<int64>=[]
+cx_disown=(v:CWord):>void=>$unsafe {
+    if v >? 0 and v <? cx_owner.length {cx_owner[v] = 0}
+}
+# (v's copy, held only by `owner`)
+cx_own_copy=(v:CWord owner:CWord):>CWord=>$unsafe {
+    let x=cx_value(v)
+    let c=cx_add(CTValue[type = x.type  i = x.i  f = x.f  s = x.s  items = [x.items...]])
+    loop cx_owner.length <=? c {cx_owner.push(0)}
+    cx_owner[c] = owner
+    c
+}
+# (the value at p's first `depth` steps, held by p alone: changing it changes nothing else)
+cx_own=(p:CTPlace depth:CWord):>CWord=>$unsafe {
+    let key=-1 - ((p.frame << 32) | p.local)
+    let v=cx_frames[p.frame].values[p.local]
+    if v <=? 0 or v >=? cx_owner.length or cx_owner[v] not=? key {
+        v=cx_own_copy(v  key)
+        cx_frames[p.frame].values[p.local] = v
+    }
+    loop at in [0..depth) {
+        let index=p.path[at]
+        let child=cx_ct_values[0][v].items[index]
+        if child <=? 0 or child >=? cx_owner.length or cx_owner[child] not=? v {
+            child=cx_own_copy(child  v)
+            cx_ct_values[0][v].items[index] = child
+        }
+        v=child
+    }
+    v
 }
 cx_write_place=(p:CTPlace value:CWord):>void=>$unsafe {
-    let old=cx_frames[p.frame].values[p.local]
-    let produced1=cx_replace(old  p.path  0  value)
-    cx_frames[p.frame].values[p.local] = produced1
+    cx_disown(value)
+    if p.path.length =? 0 {
+        cx_frames[p.frame].values[p.local] = value
+        return
+    }
+    let at=cx_own(p  p.path.length - 1)
+    cx_ct_values[0][at].items[p.path[p.path.length - 1]] = value
 }
 cx_place=(e:CWord):>CTPlace=>$unsafe {
     let k=cx_nodes[0].ptr[e].kind
@@ -537,14 +572,19 @@ cx_raw_call=(e:CWord step:CWord):>CWord=>$unsafe {
         return cx_add(CTValue[type = cx_ntype(e)  s = cx_host[0].str_from_bytes(bytes)])
     }
     let p=cx_place(cx_kid(e  0))
-    let x=cx_value(cx_read_place(p))
     if step =? 2 {
         let source=cx_value(cx_expr(cx_kid(e  1)))
         let n=cx_value(cx_expr(cx_kid(e  2))).i
-        loop i in [0..n) {x.items.push(cx_load(e  source  i  cx_T_U8[0]))}
+        let bytes:array<int64>=[]
+        loop i in [0..n) {bytes.push(cx_load(e  source  i  cx_T_U8[0]))}
+        let at=cx_own(p  p.path.length)
+        loop b in bytes {cx_ct_values[0][at].items.push(b)}
     }
-    else {x.items.push(cx_int(cx_T_U8[0]  cx_value(cx_expr(cx_kid(e  1))).i & 0xff))}
-    cx_write_place(p  cx_add(x))
+    else {
+        let b=cx_int(cx_T_U8[0]  cx_value(cx_expr(cx_kid(e  1))).i & 0xff)
+        let at=cx_own(p  p.path.length)
+        cx_ct_values[0][at].items.push(b)
+    }
     0
 }
 cx_call=(e:CWord):>CWord=>$unsafe {
@@ -780,7 +820,7 @@ cx_intrinsic=(e:CWord):>CWord=>$unsafe {
         return 0
     }
     if id =? 'len' {
-        let x=cx_value(cx_expr(cx_kid(e  0)))
+        let x=cx_value(cx_peek(cx_kid(e  0)))
         return cx_int(t  if cx_tkind(x.type) =? 'str_' {cx_bytes(x.s).length} else {x.items.length})
     }
     if id =? 'to_bytes' {
@@ -823,10 +863,14 @@ cx_intrinsic=(e:CWord):>CWord=>$unsafe {
             args.push(cx_expr(cx_kid(e  i)))
             if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
         }
-        let x=cx_value(cx_read_place(p))
+        let at=cx_own(p  p.path.length)
+        if id =? 'push' {
+            cx_ct_values[0][at].items.push(args[0])
+            return 0
+        }
+        let x=cx_value(at)
         let result:CWord=0
-        if id =? 'push' {x.items.push(args[0])}
-        else if id =? 'extend' {
+        if id =? 'extend' {
             let extra=cx_value(args[0]).items
             x.items = [x.items... extra...]
         }
@@ -854,7 +898,8 @@ cx_intrinsic=(e:CWord):>CWord=>$unsafe {
                 }
             }
         }
-        cx_write_place(p  cx_add(x))
+        cx_ct_values[0][at].items = x.items
+        cx_disown(result)
         return result
     }
     if id =? 'sqrt' {return cx_float(t  sqrt(cx_value(cx_expr(cx_kid(e  0))).f))}
@@ -894,7 +939,14 @@ cx_pattern=(p:CWord v:CWord):>bool=>$unsafe {
     cx_fail(p  "unsupported match pattern")
     false
 }
+# (e's value, which may now be held anywhere)
 cx_expr=(e:CWord):>CWord=>$unsafe {
+    let v=cx_peek(e)
+    cx_disown(v)
+    v
+}
+# (e's value only looked at, to read a part or the length of)
+cx_peek=(e:CWord):>CWord=>$unsafe {
     if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
     let v=cx_expr_impl(e)
     if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
@@ -967,14 +1019,14 @@ cx_expr_impl=(e:CWord):>CWord=>$unsafe {
         return cx_add(v)
     }
     if k =? 'field' {
-        let v=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a)))
+        let v=cx_value(cx_peek(CWord(cx_nodes[0].ptr[e].a)))
         if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
         let index=cx_member(e)
         if index <? 0 or index >=? v.items.length {cx_fail(e  "unsupported field access")}
         return v.items[index]
     }
     if k =? 'index' {
-        let v=cx_value(cx_expr(CWord(cx_nodes[0].ptr[e].a)))
+        let v=cx_value(cx_peek(CWord(cx_nodes[0].ptr[e].a)))
         if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
         if cx_nodes[0].ptr[e].aux =? 1 {
             let range=CWord(cx_nodes[0].ptr[e].b)
@@ -1185,6 +1237,8 @@ cx_stmt=(s:CWord):>CWord=>$unsafe {
         let p=cx_place(CWord(cx_nodes[0].ptr[s].a))
         if cx_frames[cx_frame].signal not=? 0 {return cx_frames[cx_frame].result}
         let old=cx_read_place(p)
+        # (what `x op= v` reads stays as it was while v is worked out)
+        if cx_nodes[0].ptr[s].op not=? int32<overflow='wrap'>(47) {cx_disown(old)}
         let v=cx_expr(CWord(cx_nodes[0].ptr[s].b))
         if cx_frames[cx_frame].signal not=? 0 {return v}
         if cx_nodes[0].ptr[s].op not=? int32<overflow='wrap'>(47) {

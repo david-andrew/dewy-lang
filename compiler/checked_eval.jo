@@ -338,15 +338,21 @@ cx_read_place = (p: CTPlace) -> int:
     loop index in p.path: v = cx_value(v).items[index]
     v
 
-cx_replace = (v: int, path: int[], at: int, value: int) -> int:
-    if at == path.len(): return value
-    copy = cx_value(v)
-    copy.items[path[at]] = cx_replace(copy.items[path[at]], path, at + 1, value)
-    cx_add(copy)
-
 cx_write_place = (p: CTPlace, value: int):
-    old = cx_frames[p.frame].values[p.local]
-    cx_frames[p.frame].values[p.local] = cx_replace(old, p.path, 0, value)
+    # (each value on the way down, then from the bottom up a copy with the next one replaced)
+    along: int[]
+    v = cx_frames[p.frame].values[p.local]
+    loop index in p.path:
+        along.push(v)
+        v = cx_value(v).items[index]
+    made = value
+    i = p.path.len()
+    loop i > 0:
+        i -= 1
+        copy = cx_value(along[i])
+        copy.items[p.path[i]] = made
+        made = cx_add(copy)
+    cx_frames[p.frame].values[p.local] = made
 
 cx_place = (e: int) -> CTPlace:
     k = cx_nodes[0][e].kind

@@ -47,7 +47,7 @@ def frozen_evaluator(compiler, tmp_path_factory):  # noqa: F811
 def test_checked_eval_twins(compiler, frozen_evaluator, tmp_path, release):  # noqa: F811
     sources = [ROOT / f'tests/cases/comptime/{name}.dewy' for name in
                ('arrays', 'functions', 'control', 'storage', 'semantics', 'interpolation',
-                'reflection', 'divide_zero', 'host_effect', 'overflow', 'selfhost_growth')]
+                'reflection', 'divide_zero', 'host_effect', 'overflow', 'selfhost_growth', 'shared_writes')]
     env = {**os.environ, 'DEWY_CORE_LIB': str(ROOT / 'lib'), 'DEWY_EMIT_WORKERS': '1'}
     for source in sources:
         results = []

@@ -1,0 +1,36 @@
+$runtime_checks
+# Writes at compile time change only the value written: copies taken before stay as they were.
+Box:type=[xs:array<int64> n:int64]
+grow=(@xs:array<int64>):>int64=> { xs.push(7) return xs.length }
+take=(xs:array<int64>):>array<int64>=> { let ys=xs ys.push(1) return ys }
+compute=(k:int64):>array<int64>=> {
+    let a:array<int64>=[1 2 3]
+    a.push(4)
+    let b=a
+    a.push(5)
+    a[0]=k
+    let c=take(a)
+    a[1]=9
+    let box=Box[xs=a n=0]
+    let d=box.xs
+    box.xs.push(6)
+    box.xs[0]=8
+    let nested=[a a]
+    nested[0].push(11)
+    nested[1][2]=12
+    let e=nested[0]
+    nested[0][0]=13
+    let out:array<int64>=[]
+    let snapshot=a
+    loop v in snapshot { out.push(v) a.push(0) }
+    let n=grow(@a)
+    a.extend(a)
+    return [b... c... d... box.xs... nested[0]... nested[1]... e... out... a... [n]...]
+}
+const VALUES=compute(20)
+$assert VALUES =? [1 2 3 4 20 2 3 4 5 1 20 9 3 4 5 8 9 3 4 5 6 13 9 3 4 5 11 20 9 12 4 5 20 9 3 4 5 11 20 9 3 4 5 20 9 3 4 5 0 0 0 0 0 7 20 9 3 4 5 0 0 0 0 0 7 11]
+main=()=> {
+    let k:int64=20
+    $runtime_assert VALUES =? compute(k)
+    printl("shared writes agree")
+}
