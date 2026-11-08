@@ -1111,7 +1111,9 @@ wit_refinement=(n:WitWord t:WitWord atom:RefAtom self:WitWord a:WitWord b:WitWor
         wit_fail(nodes.ptr[n].pos "{shown} does not fit {dt(ref_narrowing[n])}")
         return
     }
-    let contract=ref_spans.get(WitWord(types.ptr[t].st)) ?? 0
+    # (a narrowing's check is the conversion's own, not a declared contract
+    # that happens to share its interned predicate)
+    let contract=if ref_narrowing.has(n) {0} else {ref_spans.get(WitWord(types.ptr[t].st)) ?? 0}
     # (a shape contract: the parameter of the call this argument is for, and
     # its storage relation said as one, with no internal marker's bounds)
     let storage=false
@@ -1151,7 +1153,7 @@ wit_refinement=(n:WitWord t:WitWord atom:RefAtom self:WitWord a:WitWord b:WitWor
         wit_fail(nodes.ptr[n].pos "refinement refuted: {shown} violates the declared contract")
         return
     }
-    let what=if relation not=? "" {"refinement `{relation}`"} else {"refinement"}
+    let what=if relation not=? "" and ref_narrowing.has(n) {"`{relation}` for the conversion to {dt(ref_narrowing[n])}"} else if relation not=? "" {"refinement `{relation}`"} else {"refinement"}
     wit_unknown(n fact_bound(s self) what contract relation missing)
 }
 # A record field's refinement that names its siblings (`head:int64<v => v <? items.length>`),

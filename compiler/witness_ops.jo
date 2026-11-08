@@ -923,7 +923,9 @@ wit_refinement = (n: int, t: int, atom: RefAtom, self: int, a: int, b: int, s: F
         wit_help(relation)
         wit_fail(nodes[n].pos, "{shown} does not fit {dt(ref_narrowing[n])}")
         return
-    contract = ref_spans.get(int(types[t].st)) ?? 0
+    # (a narrowing's check is the conversion's own, not a declared contract
+    # that happens to share its interned predicate)
+    contract = if ref_narrowing.has(n): 0 else: ref_spans.get(int(types[t].st)) ?? 0
     # (a shape contract: the parameter of the call this argument is for, and
     # its storage relation said as one, with no internal marker's bounds)
     storage = false
@@ -954,7 +956,7 @@ wit_refinement = (n: int, t: int, atom: RefAtom, self: int, a: int, b: int, s: F
         wit_help(relation)
         wit_fail(nodes[n].pos, "refinement refuted: {shown} violates the declared contract")
         return
-    what = if relation != "": "refinement `{relation}`" else: "refinement"
+    what = if relation != "" and ref_narrowing.has(n): "`{relation}` for the conversion to {dt(ref_narrowing[n])}" else if relation != "": "refinement `{relation}`" else: "refinement"
     wit_unknown(n, fact_bound(s, self), what, contract, relation, missing)
 wit_formal_text = (term: RefTerm, f: int, self: int) -> str:
     index = if term.kind == 0: self else if term.kind == 2 or term.kind == 5: term.value else: -1
