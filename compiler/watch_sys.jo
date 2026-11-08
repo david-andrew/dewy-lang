@@ -4,7 +4,7 @@ use 'settings.jo'
 use 'watch.jo'
 use 'watch_drive.dewy'
 use 'watch_ops.dewy'
-use 'proc_sys.jo'
+use 'proc_sys.dewy'
 # The watch's target- and bootstrap-conditional pieces (lib/std/watch.jo's signals, Windows's
 # processes, pipes and console, inotify), for watch_drive.dewy: the rest of the watch is Dewy.
 
@@ -14,61 +14,6 @@ ws_test_signals = ():
         __test_process_group()
     when not BOOTSTRAP and TARGET != "windows" and TARGET != "wasm":
         __watch_tests_signals(&w_pid)
-
-# inotify_init1(IN_NONBLOCK | IN_CLOEXEC) on Linux (-1 elsewhere: files are watched by time)
-ws_inotify = () -> int:
-    when TARGET == "linux":
-        return syscall(294, 0x800 | 0x80000)
-    else:
-        return -1
-
-# watch a directory: writes, moves, creation and deletion
-ws_add_watch = (ino: int, d: str) -> int:
-    when TARGET == "windows":
-        return -1
-    else:
-        return syscall(254, ino, data(__zstr(d)), 0x8 | 0x40 | 0x80 | 0x100 | 0x200)
-
-# (a file changed: a moment for the editor to finish)
-ws_settle = ():
-    when TARGET != "wasm":
-        sleep(0.03)
-
-ws_terminate = ():
-    when TARGET == "windows":
-        TerminateProcess(w_pid as *u8, 1)
-
-# (Windows) the program ended: its exit code, and its handles closed
-ws_reap = () -> int:
-    when TARGET == "windows":
-        WaitForSingleObject(w_pid as *u8, u32(0xFFFFFFFF))
-        code: u32[] = [0]
-        GetExitCodeProcess(w_pid as *u8, data(code))
-        CloseHandle(w_pid as *u8)
-        CloseHandle(w_to as *u8)
-        CloseHandle(w_from as *u8)
-        delete_file(w_out)                            # (a running program's file cannot go before)
-        return int(code[0])
-    else:
-        return -1
-
-# write some of b from at (< 0: an error; -4 on Linux: interrupted, again)
-ws_write_some = (fd: int, b: u8[], at: int) -> int:
-    when TARGET == "windows":
-        n: u32[] = [0]
-        if WriteFile(fd as *u8, data(b) + at, u32(min(b.len() - at, 1 << 30)), data(n), null) != 0: return int(n[0])
-        return 0
-    else:
-        return syscall(1, fd, data(b) + at, b.len() - at)
-
-# read the rest of a word into b from at
-ws_read_some = (fd: int, b: u8[], at: int) -> int:
-    when TARGET == "windows":
-        n: u32[] = [0]
-        if ReadFile(fd as *u8, data(b) + at, u32(8 - at), data(n), null) != 0: return int(n[0])
-        return 0
-    else:
-        return ps_read(fd, b, at, 8 - at)
 
 # ---- Windows: what fork, pipes, inotify and poll do on Linux ----
 # Each build runs in a new process (dewy-core watch --build) given the link map in a file; the

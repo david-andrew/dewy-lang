@@ -1,0 +1,107 @@
+$runtime_checks
+# The raw system calls of the compiler's process code (the watch, the prompt, fused and parallel
+# builds), as small functions Dewy code calls: Linux numbering (macOS's are mapped), and the one
+# question about the host this code needs. Only the arm for the target is compiled.
+from p"@lib/core/rt.jo" import (__write_fd)
+
+PsWord:type=int64<overflow='wrap'>
+ps_windows=():>bool=>$target.os =? 'windows'
+
+# pipe2 (closed by exec, or not): [the read end, the write end]
+ps_pipe=(cloexec:bool):>array<PsWord>=>$unsafe {
+    if $target.os =? 'windows' {
+        return [PsWord(-1) PsWord(-1)]
+    } else {
+        let ep:array<int32>=[int32(-1) int32(-1)]
+        let flags:PsWord=0
+        if cloexec {flags=0x80000}
+        syscall(293 data(ep) flags);
+        return [PsWord(ep[0]) PsWord(ep[1])]
+    }
+}
+
+# this process's id (for names of files of its own)
+ps_self_id=():>PsWord=>$unsafe {
+    if $target.os =? 'windows' {
+        return PsWord(GetCurrentProcessId())
+    } else {
+        return syscall(39)
+    }
+}
+
+# a built program's file extension
+ps_exe_ext=():>string=>{
+    if $target.os =? 'windows' {return ".exe"}
+    return ".bin"
+}
+
+ps_fork=():>PsWord=>$unsafe {
+    if $target.os =? 'windows' {
+        return -1
+    } else {
+        return syscall(57)
+    }
+}
+
+ps_dup2=(fd:PsWord to:PsWord):>void=>$unsafe {
+    if $target.os not=? 'windows' {syscall(33 fd to);}
+}
+
+ps_close=(fd:PsWord):>void=>$unsafe {
+    if $target.os not=? 'windows' {syscall(3 fd);}
+}
+
+# end this process at once (no handlers run, nothing flushed)
+ps_exit=(code:PsWord):>void=>$unsafe {
+    if $target.os not=? 'windows' {syscall(60 code);}
+}
+
+# wait for a child: its status
+ps_wait=(pid:PsWord):>PsWord=>$unsafe {
+    if $target.os =? 'windows' {
+        return -1
+    } else {
+        let st:array<PsWord>=[PsWord(0)]
+        syscall(61 pid data(st) 0 0);
+        return st[0]
+    }
+}
+
+ps_kill=(pid:PsWord sig:PsWord):>void=>$unsafe {
+    if $target.os not=? 'windows' {syscall(62 pid sig);}
+}
+
+ps_setsid=():>PsWord=>$unsafe {
+    if $target.os =? 'windows' {
+        return -1
+    } else {
+        return syscall(112)
+    }
+}
+
+# fcntl(F_SETFD, 0): kept open by exec
+ps_keep_open=(fd:PsWord):>void=>$unsafe {
+    if $target.os not=? 'windows' {syscall(72 fd 2 0);}
+}
+
+# read up to n bytes into buf at an offset (0: the end, < 0: an error)
+ps_read=(fd:PsWord @buf:array<uint8> at:PsWord n:PsWord):>PsWord=>$unsafe {
+    if $target.os =? 'windows' {
+        return -1
+    } else {
+        return syscall(0 fd data(buf) + at n)
+    }
+}
+
+ps_write_fd=(fd:PsWord buf:array<uint8> n:PsWord):>void=>$unsafe {
+    __write_fd(fd data(buf) n)
+}
+
+# poll(fds, n, wait): pf holds a pollfd in each word
+ps_poll=(@pf:array<int64> n:PsWord wait:PsWord):>PsWord=>$unsafe {
+    if $target.os =? 'windows' {
+        return -1
+    } else {
+        return syscall(7 data(pf) n wait)
+    }
+}

@@ -1,6 +1,6 @@
 $runtime_checks
 from p"@lib/core/rt.jo" import (__str_from_bytes)
-from p"@lib/core/os.jo" import (__exec_unslid delete_file env eprint exit is_dir time write_bytes)
+from p"@lib/core/os.jo" import (__exec_unslid __zstr delete_file env eprint exit is_dir time write_bytes)
 from p"@lib/core/str.jo" import (ends_with starts_with trim)
 from p"@lib/std/backtrace.jo" import (__hex_text)
 from p"ast.jo" import (nodes)
@@ -15,12 +15,12 @@ from p"lower_storage.dewy" import (mem_mode vt_of)
 from p"main.jo" import (bss_reserve compile)
 from p"module_paths.dewy" import (strip_ext)
 from p"pkg_ops.dewy" import (core_cache)
-from p"proc_sys.jo" import (ps_close ps_dup2 ps_exe_ext ps_exit ps_fork ps_keep_open ps_kill ps_pipe ps_poll ps_read ps_self_id ps_setsid ps_wait ps_windows ps_write_fd)
+from p"proc_sys.dewy" import (ps_close ps_dup2 ps_exe_ext ps_exit ps_fork ps_keep_open ps_kill ps_pipe ps_poll ps_read ps_self_id ps_setsid ps_wait ps_windows ps_write_fd)
 from p"types.jo" import (fields prune types)
 from p"util.jo" import (more_errors name_of)
 from p"watch.jo" import (WATCH_DATA_RESERVE w32_dir_count w_added w_args w_cache w_changed w_dirs w_enter w_errors w_ext w_failed_path w_from w_kept w_out w_patch w_pid w_r w_ready w_reset w_stdin_done w_to w_watched w_wds w_write_err watch_first wm_files wm_game wm_loop wm_top)
 from p"watch_ops.dewy" import (w32_files_changed w32_note_file w32_sources_in w_base w_dir w_i64 w_log watch_read_failed_inputs watch_read_result watch_write_result wm_clear wm_files_collect wp_end wp_put)
-from p"watch_sys.jo" import (w32_compile w32_run w32_wait ws_add_watch ws_inotify ws_read_some ws_reap ws_settle ws_terminate ws_test_signals ws_write_some)
+from p"watch_sys.jo" import (w32_compile w32_run w32_wait ws_test_signals)
 
 DriveWord:type=int64<overflow='wrap'>
 watch_main=(path:string args:array<string>):>void=>{
@@ -166,7 +166,7 @@ watch_wait=(ino:DriveWord):>int64=>{
         }
         let wait:DriveWord=-1
         if ino <? 0 {wait=250}
-        let r=ps_poll(pf n wait)
+        let r=ps_poll(@pf n wait)
         if r <? 0 {continue}
         if ino <? 0 and w32_files_changed() {return 1}
         if ino >=? 0 and (pf[0] >> 48) & 0xFFFF not=? 0 {
@@ -174,7 +174,7 @@ watch_wait=(ino:DriveWord):>int64=>{
         }
         if not w_stdin_done and (pf[1] >> 48) & 0xFFFF not=? 0 {
             let buf=fill(uint8(0) 256)
-            let got=ps_read(0 buf 0 256)
+            let got=ps_read(0 @buf 0 256)
             # (no input any more: only files and the program, which are still looked at below)
             if got <=? 0 {w_stdin_done=true} else {
                 let line=trim(__str_from_bytes(buf[..got)))
@@ -186,7 +186,7 @@ watch_wait=(ino:DriveWord):>int64=>{
         if n =? 3 and (pf[2] >> 48) & 0xFFFF not=? 0 {
             # the program: gone, or saying (once its game loop starts) whether it takes patches
             let b=fill(uint8(0) 8)
-            let got=ps_read(w_from b 0 8)
+            let got=ps_read(w_from @b 0 8)
             if got <=? 0 {return 2}
             w_ready=w_i64(b 0) =? 0
         }
@@ -199,7 +199,7 @@ watch_drain=(ino:DriveWord):>bool=>{
     let any=false
     let buf=fill(uint8(0) 8192)
     loop true {
-        let n=ps_read(ino buf 0 8192)
+        let n=ps_read(ino @buf 0 8192)
         if n <=? 0 {break}
         let i:DriveWord=0
         loop i + 16 <=? n {
@@ -245,7 +245,7 @@ watch_compile=(path:string first:bool):>bool=>{
     w_errors=""
     let buf=fill(uint8(0) 4096)
     loop true {
-        let n=ps_read(ep[0] buf 0 4096)
+        let n=ps_read(ep[0] @buf 0 4096)
         if n <=? 0 {break}
         ps_write_fd(2 buf n);
         if (w_errors as array<uint8>).length <? 4000 {w_errors="{w_errors}{__str_from_bytes(buf[..n))}"}
@@ -294,7 +294,7 @@ watch_run=():>void=>{
     w_pid=pid
     # the running program keeps its file: nothing is left behind (also after ctrl-c)
     let one=fill(uint8(0) 1)
-    ps_read(c[0] one 0 1);
+    ps_read(c[0] @one 0 1);
     ps_close(c[0]);
     # (DEWY_WATCH_KEEP=1: kept until it ends, for qemu-user, which opens the file after exec)
     if env("DEWY_WATCH_KEEP") =? none {delete_file(w_out);}
@@ -379,7 +379,7 @@ w_read8=():>int64=>{
     let b=fill(uint8(0) 8)
     let got:DriveWord=0
     loop got <? 8 {
-        let r=ws_read_some(w_from b got)
+        let r=ws_read_some(w_from @b got)
         if r <=? 0 {return -1}
         got += r
     }
@@ -428,4 +428,70 @@ wc_default=(f:DriveWord np:DriveWord):>void=>$unsafe {
     else {return}
     if neg {v=-v}
     if tk =? 'float_' {e_store(np off e_fconst(v vt_of(t)) mem_mode(t));} else if tk =? 'int_' {e_store(np off e_iconst(int64(v)) mem_mode(t));}
+}
+
+# inotify_init1(IN_NONBLOCK | IN_CLOEXEC) on Linux (-1 elsewhere: files are watched by time)
+ws_inotify=():>DriveWord=>$unsafe {
+    if $target.os =? 'linux' {
+        return syscall(294 0x800 | 0x80000)
+    } else {
+        return -1
+    }
+}
+
+# watch a directory: writes, moves, creation and deletion
+ws_add_watch=(ino:DriveWord d:string):>DriveWord=>$unsafe {
+    if $target.os =? 'windows' {
+        return -1
+    } else {
+        return syscall(254 ino data(__zstr(d)) 0x8 | 0x40 | 0x80 | 0x100 | 0x200)
+    }
+}
+
+# (a file changed: a moment for the editor to finish)
+ws_settle=():>void=>{
+    if $target.arch not=? 'wasm32' {sleep(30ms);}
+}
+
+ws_terminate=():>void=>$unsafe {
+    if $target.os =? 'windows' {TerminateProcess(w_pid as ptr<uint8> uint32(1));}
+}
+
+# (Windows) the program ended: its exit code, and its handles closed
+ws_reap=():>DriveWord=>$unsafe {
+    if $target.os =? 'windows' {
+        WaitForSingleObject(w_pid as ptr<uint8> uint32(0xFFFFFFFF));
+        let code:array<uint32>=[uint32(0)]
+        GetExitCodeProcess(w_pid as ptr<uint8> data(code));
+        CloseHandle(w_pid as ptr<uint8>);
+        CloseHandle(w_to as ptr<uint8>);
+        CloseHandle(w_from as ptr<uint8>);
+        # (a running program's file cannot go before)
+        delete_file(w_out);
+        return DriveWord(code[0])
+    } else {
+        return -1
+    }
+}
+
+# write some of b from at (< 0: an error; -4 on Linux: interrupted, again)
+ws_write_some=(fd:DriveWord b:array<uint8> at:DriveWord):>DriveWord=>$unsafe {
+    if $target.os =? 'windows' {
+        let n:array<uint32>=[uint32(0)]
+        if WriteFile(fd as ptr<uint8> data(b) + at uint32(min(b.length - at 1 << 30)) data(n) (uint64(0) as ptr<uint8>)) not=? 0 {return DriveWord(n[0])}
+        return 0
+    } else {
+        return syscall(1 fd data(b) + at b.length - at)
+    }
+}
+
+# read the rest of a word into b from at
+ws_read_some=(fd:DriveWord @b:array<uint8> at:DriveWord):>DriveWord=>$unsafe {
+    if $target.os =? 'windows' {
+        let n:array<uint32>=[uint32(0)]
+        if ReadFile(fd as ptr<uint8> data(b) + at uint32(8 - at) data(n) (uint64(0) as ptr<uint8>)) not=? 0 {return DriveWord(n[0])}
+        return 0
+    } else {
+        return ps_read(fd @b at 8 - at)
+    }
 }

@@ -87,7 +87,7 @@ ps_keep_open = (fd: int):
         syscall(72, fd, 2, 0)
 
 # read up to n bytes into buf at an offset (0: the end, < 0: an error)
-ps_read = (fd: int, buf: u8[], at: int, n: int) -> int:
+ps_read = (fd: int, buf: mut u8[], at: int, n: int) -> int:
     when TARGET == "windows":
         return -1
     else:
@@ -97,7 +97,7 @@ ps_write_fd = (fd: int, buf: u8[], n: int):
     __write_fd(fd, data(buf), n)
 
 # poll(fds, n, wait): pf holds a pollfd in each word
-ps_poll = (pf: int[], n: int, wait: int) -> int:
+ps_poll = (pf: mut int[], n: int, wait: int) -> int:
     when TARGET == "windows":
         return -1
     else:
