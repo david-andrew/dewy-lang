@@ -3302,15 +3302,16 @@ integers; `atomic<T>(value)` selects another width. `load`, `store`, `add`,
 optional compile-time `MemoryOrder` literal: `'relaxed'`, `'acquire'`,
 `'release'`, `'acq_rel'`, or `'seq_cst'` (the default). Loads reject release
 orders; stores reject acquire orders. `add` returns the new value (discard it
-with `;` as a statement, `hits.add(1);`). It panics when the exact result does
-not fit the payload, which no fact proves yet, so for now code that calls it,
-and its callers, need `$runtime_checks` (as below), or a payload that wraps
-(`atomic<int64<overflow='wrap'>>(0)`), whose `add` never fails. The current
+with `;` as a statement, `hits.add(1);`). The counter-progress axiom covers
+`Atomic<int64>.add` with literal or bounded increments and immutable scalar
+parameters. Other increments need a proof that the exact result fits, or
+`$runtime_checks` to allow an overflow check; `$no_assumed_bounds` requires
+that proof or check even for these counter updates. A wrapping payload
+(`atomic<int64<overflow='wrap'>>(0)`) makes `add` never fail. The current
 native backend implements every order with sequentially consistent instructions,
 which is stronger than requested. For example:
 
 ```dewy
-$runtime_checks
 let hits = atomic(0)
 parallel i in [0..1000) { hits.add(1 'relaxed') }
 $runtime_assert(hits.load'acquire' =? 1000)
