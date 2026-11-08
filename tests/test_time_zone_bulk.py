@@ -136,6 +136,22 @@ def generate():
                 local = dt.datetime(year, month, 15, 9, 41, 7)
                 reads(local, zone)
                 steps(local, zone)
+    # Total Instant.in_zone, independently of the UTC reader's 1961 lower bound.
+    # Before that bound the projection uses TT civil labels; Python supplies only the
+    # zone mapping of those coordinates, never an invented historical UTC realization.
+    epoch = dt.datetime(1977, 1, 1)
+    for zone in ZONES:
+        info = ZoneInfo(zone)
+        for year in (1800, 1850, 1900, 1950, 2200, 2400, 2500, 9998):
+            for month in (1, 7):
+                moment = dt.datetime(year, month, 15, 9, 41, 7)
+                reading = moment.replace(tzinfo=UTC).astimezone(info)
+                answer = zoned_text(reading.replace(tzinfo=None), reading.utcoffset(), zone)
+                if year < 1961:
+                    count = (moment - epoch) // dt.timedelta(seconds=1) * 10**9 - 32184000000
+                    cases.append(('tt_moment', str(count), zone, answer))
+                else:
+                    cases.append(('moment', moment.strftime('%Y-%m-%dT%H:%M:%SZ'), zone, answer))
     return cases
 
 
@@ -151,8 +167,11 @@ def lines_of(cases):
 
 
 def program(cases):
-    calls = '\n'.join(f'check_{name}("{text}" "{zone}")' for name, text, zone, _ in cases)
-    return """show = (r:ZonedDateTime|Gap|Ambiguous|OutsideCoverage|ParseError|UnknownZone|MissingContext|InvalidFields|InvalidDate|OffGrid) => {
+    calls = '\n'.join(f'check_tt_moment({text} "{zone}")' if name == 'tt_moment'
+                      else f'check_{name}("{text}" "{zone}")'
+                      for name, text, zone, _ in cases)
+    return '''import p"@lib/time/core.dewy" as core
+show = (r:ZonedDateTime|Gap|Ambiguous|OutsideCoverage|ParseError|UnknownZone|MissingContext|InvalidFields|InvalidDate|OffGrid) => {
     if r is? ZonedDateTime {printl(r)}
     else if r is? Gap {printl"gap"}
     else if r is? Ambiguous {printl"ambiguous"}
@@ -167,6 +186,10 @@ check_later = (text:string name:string) => show(zoned(text zone=at(name) fold='l
 check_moment = (text:string name:string) => {
     let t = instant(text)
     if t is? Instant {show(in_zone(t at(name)))} else {printl"failed"}
+}
+check_tt_moment = (count:int name:string) => {
+    let z:ZonedDateTime = core.instant_at(count).in_zone(at(name))
+    printl(z)
 }
 check_day = (text:string name:string) => {
     let z = zoned(text zone=at(name))
@@ -184,7 +207,7 @@ check_month = (text:string name:string) => {
         show(moved)
     } else {printl"failed"}
 }
-""" + calls + '\n'
+''' + calls + '\n'
 
 
 def stored():
@@ -204,7 +227,7 @@ def test_library_matches_the_generated_answers(compiler, tmp_path):
 
 
 def test_every_printed_reading_reads_back(compiler, tmp_path):
-    readings = sorted({answer for _, _, _, answer in stored() if '[' in answer})
+    readings = sorted({answer for name, _, _, answer in stored() if '[' in answer and name != 'tt_moment'})
     calls = '\n'.join(f'back("{text}")' for text in readings)
     path = tmp_path / 'main.dewy'
     path.write_text(f"back = (text:string) => printl(zoned(text))\n{calls}\n")
@@ -213,6 +236,46 @@ def test_every_printed_reading_reads_back(compiler, tmp_path):
     wrong = [(want, got) for want, got in zip(readings, ran.stdout.splitlines()) if want != got]
     assert len(ran.stdout.splitlines()) == len(readings)
     assert not wrong, wrong[:20]
+
+
+def test_total_projection_preserves_extreme_instants(compiler, tmp_path):
+    # Python's calendar repeats every 400 years. Reduce the day into datetime's
+    # domain, restoring the cycles in the printed year. The positive end uses
+    # continuous UTC's inherited 37s; the negative end uses the TT label.
+    cases = []
+    base = dt.datetime(2400, 1, 1)
+    epoch_days = (dt.datetime(1977, 1, 1) - base).days
+    for count in (-2**127, 2**127 - 1):
+        label_ns = count + (32184000000 if count < 0 else -37000000000)
+        seconds, nanos = divmod(label_ns, 10**9)
+        days, in_day = divmod(seconds, 86400)
+        cycles, within = divmod(days + epoch_days, 146097)
+        coordinate = base + dt.timedelta(days=within, seconds=in_day)
+        for name in ('UTC', 'Africa/Monrovia', 'America/New_York'):
+            info = ZoneInfo(name)
+            if count < 0:
+                # All three zones are still on their first offset in 1800.
+                offset = dt.datetime(1800, 1, 1, tzinfo=info).utcoffset()
+            else:
+                offset = coordinate.replace(tzinfo=UTC).astimezone(info).utcoffset()
+            local = coordinate + offset
+            year = local.year + cycles * 400
+            year_text = f'{year:04}' if year >= 0 else f'-{abs(year):04}'
+            fraction = f'.{nanos:09}'.rstrip('0') if nanos else ''
+            answer = (f'{year_text}-{local.month:02}-{local.day:02}T'
+                      f'{local.hour:02}:{local.minute:02}:{local.second:02}'
+                      f'{fraction}{offset_text(offset)}[{name}]')
+            cases.append((count, name, answer))
+    calls = '\n'.join(f'show({count} "{name}")' for count, name, _ in cases)
+    path = tmp_path / 'main.dewy'
+    path.write_text('import p"@lib/time/core.dewy" as core\n'
+                    'show=(count:int name:string)=>{\n'
+                    'let t=core.instant_at(count)\n'
+                    'let z:ZonedDateTime=t.in_zone(zone(name) ?? zone"UTC")\n'
+                    'printl(z)\nprintl(z.nominal =? t)\n}\n' + calls)
+    ran = subprocess.run([compiler, path], capture_output=True, text=True, timeout=120, check=False, cwd=tmp_path)
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout.splitlines() == [line for _, _, answer in cases for line in (answer, 'true')]
 
 
 @same_rules

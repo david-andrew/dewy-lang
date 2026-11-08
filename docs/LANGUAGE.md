@@ -1704,6 +1704,10 @@ the text, with no guess: `yy` is not a form, so a two-digit year does not read.
 
 A zoned time reads as `.date`, `.time_of_day`, `.local`, `.year`, `.month`, `.day`, `.hour`, `.minute`,
 `.second`, `.nanosecond` and `.weekday` (0 is Monday). `t.in_zone(z)` shows an `Instant` in a zone.
+**Provisional:** it returns a plain `ZonedDateTime`, using the TZif footer rule beyond the last
+transition and the zone's first (local mean time) offset before its first. Before UTC's 1961
+coverage, it projects the instant's TT civil label; it does not make ancient `Z` input valid.
+The coverage-checked projection remains private pending its public name.
 `time_of_day"09:30"` is a `TimeOfDay`, and `local"2026-11-01T01:30"` or `d.at(t)` a `LocalDateTime`,
 with no zone and so no moment yet: `l.in_zone(z fold='later')` gives the moment, under the same
 policies as `zoned`.

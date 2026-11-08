@@ -78,7 +78,7 @@ $check_constant local_read_error(text pattern) "not a local time"
 $check_constant local_pattern_only(pattern) "not a pattern"
 local=(text:string pattern:string):>LocalDateTime|ParseError=>civil.local_read(text pattern)
 # A moment as it reads in a zone, or a local time as a moment there.
-in_zone=(t:Instant z:Zone):>ZonedDateTime|OutsideCoverage=>zones.in_zone(t z)
+in_zone=(t:Instant z:Zone):>ZonedDateTime=>zones.in_zone(t z)
 $check_constant local_zone_error(l z fold gap) "this local time has no one moment"
 $check_constant policy_gap(fold gap) "unused"
 in_zone=(l:LocalDateTime z:Zone fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>zones.local_in_zone(l z fold gap)

@@ -242,7 +242,7 @@ _host_record=(z:Zone):>int64=>$unsafe {
     record
 }
 # The number of changes at or before a POSIX second, by binary search.
-_changes_before=(record:int64 moment:int64):>int64=>{
+_changes_before=(record:int64 moment:int):>int64=>{
     let count=_u32(record+4)
     let lo:int64=0
     let hi=count
@@ -257,7 +257,7 @@ _offset_after=(record:int64 changes:int64):>int64=>{
     _i32(record+16+_u32(record+4)*8+(changes-1)*4)
 }
 # Seconds east of UTC at a POSIX second, by the table and then by the zone's POSIX rule.
-offset_at=(z:Zone moment:int64):>int64=>{
+offset_at=(z:Zone moment:int):>int64=>{
     let record=_record(z)
     let count=_u32(record+4)
     let changes=_changes_before(record moment)
@@ -335,7 +335,7 @@ _rule_date=(@r:_Rule year:int):>int=>{
     }
     days*86400+int(time)
 }
-_rule_offset=(record:int64 moment:int64):>int64=>{
+_rule_offset=(record:int64 moment:int):>int64=>{
     let start=_u32(record+8)
     let r=_Rule[start start+_u32(record+12)]
     _skip_name(@r)
@@ -364,13 +364,29 @@ _posix_of=(t:Instant):>int64|OutsideCoverage=>{
     let seconds=(mjd-_MJD_1970)*86400+(if in_day >=? _DAY_NS {86399} else {in_day//_NS})
     seconds.to_int64() ?? 0
 }
-in_zone=(t:Instant z:Zone):>ZonedDateTime|OutsideCoverage=>ZonedDateTime[t z offset_at(z _posix_of(t) or_throw)]
+# The old coverage-checked projection stays private until its public spelling is decided.
+_checked_in_zone=(t:Instant z:Zone):>ZonedDateTime|OutsideCoverage=>ZonedDateTime[t z offset_at(z _posix_of(t) or_throw)]
+# Provisional total projection: UTC where defined; otherwise the instant's TT civil label.
+# This does not extend the UTC reader or invent a historical UTC standard. The zone's first
+# offset is LMT, and its footer governs the future. Keep seconds exact across the whole axis.
+_zone_label=(t:Instant):>[int int]=>{
+    let axis=ns_count(t)
+    let utc=_axis_to_utc(axis)
+    if utc isnt? none {return utc}
+    let tt=axis+32184000000
+    [43144+tt//_DAY_NS tt%_DAY_NS]
+}
+_zone_seconds=(t:Instant):>int=>{
+    let [mjd in_day]=_zone_label(t)
+    (mjd-_MJD_1970)*86400+(if in_day >=? _DAY_NS {86399} else {in_day//_NS})
+}
+in_zone=(t:Instant z:Zone):>ZonedDateTime=>ZonedDateTime[t z offset_at(z _zone_seconds(t))]
 _at=(moment:int64 nanos:int z:Zone offset:int64):>ZonedDateTime|OutsideCoverage|OffGrid|InvalidFields=>{
     let days=int(moment)//86400
     let axis=_utc_to_axis(days+_MJD_1970 (int(moment)%86400)*_NS+nanos) or_throw
     ZonedDateTime[instant_at(axis) z offset]
 }
-_local_text=(local:int64):>string=>{
+_local_text=(local:int):>string=>{
     let [y m d]=civil_from_days(int(local)//86400)
     let t=local%86400
     "{_year_text(y)}-{pad(m 2)}-{pad(d 2)}T{pad(t//3600 2)}:{pad((t%3600)//60 2)}:{pad(t%60 2)}"
@@ -496,21 +512,16 @@ zoned_error=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|non
 zoned_text_error=(text:string fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>zoned_error(text none fold gap scope)
 
 # ---------------- zoned values ----------------
-_local=(z:ZonedDateTime):>int64=>(_posix_of(z.nominal) ?? 0)+z.offset
+_local=(z:ZonedDateTime):>int=>_zone_seconds(z.nominal)+int(z.offset)
 __as__=(z:ZonedDateTime):>string=>{
-    let local=(_posix_of(z.nominal) ?? 0)+z.offset
-    let label=_axis_to_utc(ns_count(z.nominal))
-    let nanos:int=if label is? none {0} else {
-        let [_m in_day]=label
-        in_day%_NS
-    }
-    "{_local_text(local)}{_fraction_text(nanos)}{_pair_text(z.offset)}[{name(z.zone)}]"
+    let [_m in_day]=_zone_label(z.nominal)
+    "{_local_text(_local(z))}{_fraction_text(in_day%_NS)}{_pair_text(z.offset)}[{name(z.zone)}]"
 }
 # Elapsed time: a zoned value moves as its instant does.
-__add__=(z:ZonedDateTime d:Duration):>ZonedDateTime=>in_zone(z.nominal+d z.zone) ?? z
-__sub__=(z:ZonedDateTime d:Duration):>ZonedDateTime=>in_zone(z.nominal-d z.zone) ?? z
-__add__=(z:ZonedDateTime q:int*Time):>ZonedDateTime=>in_zone(z.nominal+q z.zone) ?? z
-__sub__=(z:ZonedDateTime q:int*Time):>ZonedDateTime=>in_zone(z.nominal-q z.zone) ?? z
+__add__=(z:ZonedDateTime d:Duration):>ZonedDateTime=>in_zone(z.nominal+d z.zone)
+__sub__=(z:ZonedDateTime d:Duration):>ZonedDateTime=>in_zone(z.nominal-d z.zone)
+__add__=(z:ZonedDateTime q:int*Time):>ZonedDateTime=>in_zone(z.nominal+q z.zone)
+__sub__=(z:ZonedDateTime q:int*Time):>ZonedDateTime=>in_zone(z.nominal-q z.zone)
 __sub__=(a:ZonedDateTime b:ZonedDateTime):>Duration=>a.nominal-b.nominal
 __eq__=(a:ZonedDateTime b:ZonedDateTime):>bool=>a.nominal =? b.nominal and a.zone =? b.zone
 __lt__=(a:ZonedDateTime b:ZonedDateTime):>bool=>a.nominal <? b.nominal
@@ -525,11 +536,11 @@ _civil=(r:ZonedDateTime|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields):>Zo
     <OffGrid>=>Gap["that label falls between nanoseconds under the UTC rate of its time" 0 0]
 }
 _day_add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>{
-    _civil(_resolve(_local(z)+p.count*86400 int(_nanos(z)) z.zone fold gap))
+    _civil(_resolve((_local(z)+int(p.count)*86400).to_int64() ?? 0 int(_nanos(z)) z.zone fold gap))
 }
 _month_add=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>{
     let local=_local(z)
-    let t=local%86400
+    let t=(local%86400).to_int64() ?? 0
     let [y m d]=civil_from_days(int(local)//86400)
     let total=y*12+int(m)-1+int(p.count)
     let ny=total//12
@@ -565,11 +576,9 @@ local_days=(t:Instant z:Zone):>int=>{
 }
 
 # ---------------- what a zoned time reads as ----------------
-_seconds_today=(z:ZonedDateTime):>int64=>_local(z)%86400
+_seconds_today=(z:ZonedDateTime):>int64=>(_local(z)%86400).to_int64() ?? 0
 _nanos=(z:ZonedDateTime):>int64=>{
-    let label=_axis_to_utc(ns_count(z.nominal))
-    if label is? none {return 0}
-    let [_m in_day]=label
+    let [_m in_day]=_zone_label(z.nominal)
     (in_day%_NS).to_int64() ?? 0
 }
 date=(z:ZonedDateTime):>Date=>_of_days(int(_local(z))//86400)
