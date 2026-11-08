@@ -81,3 +81,13 @@ def test_phase_gate_never_skipped_by_line_counts(monkeypatch):
     assert speed.processed_report(base, 'x', required=False) is None
     with pytest.raises(ValueError):
         speed.processed_report(base, 'x')
+
+
+def test_throughput_gate_waits_for_counters(monkeypatch):
+    """Without hardware counters (CI's virtual machines) build --time counts no lines: the throughput gate
+    notes it and passes; with counters, a candidate that counts nothing fails."""
+    monkeypatch.setattr(speed, 'time_run', lambda toolchain, source: 'instructions: 1000\n')
+    candidate = speed.Toolchain('candidate', None, None)
+    assert speed.throughput_gate(candidate, None, {}, {}, 1.0, counters=False) == []
+    with pytest.raises(RuntimeError, match='does not count processed lines'):
+        speed.throughput_gate(candidate, None, {}, {}, 1.0)

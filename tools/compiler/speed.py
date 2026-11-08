@@ -595,7 +595,7 @@ def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> list[str]:
 
 
 def throughput_gate(candidate: Toolchain, base: Toolchain | None, counts: dict[str, int],
-                    base_counts: dict[str, int], limit: float) -> list[str]:
+                    base_counts: dict[str, int], limit: float, counters: bool = True) -> list[str]:
     """The flagship panel's all-lines throughput against the base's: a drop of more than `limit` percent in
     processed lines per instruction fails unless the panel also got cheaper (a fan-out cut that pays for
     itself). A base that does not count lines cannot be compared."""
@@ -603,6 +603,10 @@ def throughput_gate(candidate: Toolchain, base: Toolchain | None, counts: dict[s
     sources = {name: source for name, source, _ in panel(False)}
     new_lines = [processed_report(candidate, sources[n]) for n in names]
     if any(x is None for x in new_lines):
+        if not counters:
+            # (build --time counts lines and nodes only with hardware counters, which CI's virtual machines lack)
+            print('throughput gate: no hardware counters on this host, so no processed lines; not gated here')
+            return []
         raise RuntimeError('the candidate does not count processed lines: the throughput gate cannot run')
     if base is None:
         return []
@@ -976,7 +980,8 @@ def main(argv: list[str], current: Path) -> int:
             print(f'  ({note})')
         hello_failures = yardstick(candidate, counts)
         base_toolchain = references['base'][2]
-        throughput_failures = throughput_gate(candidate, base_toolchain, counts, base_counts, args.limit)
+        throughput_failures = throughput_gate(candidate, base_toolchain, counts, base_counts, args.limit,
+                                             counter.kind == 'perf')
         for row, change in cost_model(candidate, base_toolchain, args.limit):
             failures.append(('base', f'phase {row} (flagships)', change))
         print(f'  ({time.perf_counter() - started:.0f} s)')
