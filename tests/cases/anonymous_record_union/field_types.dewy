@@ -1,0 +1,8 @@
+pick=(flag:bool)=>if flag [value=7] else [value="job"]
+show=(flag:bool)=>{
+    match pick(flag) {
+        n:[value:int]=>printl"number {n.value}"
+        s:[value:string]=>printl"text {s.value}"
+    }
+}
+main=()=>{show(true) show(false)}

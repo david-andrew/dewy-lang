@@ -1201,6 +1201,9 @@ join_types = (a: int, b: int, pos: int) -> int:
             coerce(a, tb)
             return tb
         t = exception_join(ta, tb)
+        # Distinct anonymous shapes are distinct union members. Compatible
+        # numeric fields still use the ordinary structural conversion above.
+        if types[ta].kind == .struct_ and types[tb].kind == .struct_ and structs[int(types[ta].st)].record_ and structs[int(types[tb].st)].record_: t = mk_union([ta, tb])
         if t != 0:
             coerce(a, t)
             coerce(b, t)

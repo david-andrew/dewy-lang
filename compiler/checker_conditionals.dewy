@@ -227,9 +227,10 @@ xf_if=(n:XFWord ex:XFWord):>XFWord=>$unsafe {
     xf_narrow(cond false)
     let else_expected=branch_expected
     # `if flag xs else []`: a container literal takes the other branch's type.
+    # Anonymous records infer their own fields before the structural join.
     if else_expected =? 0 and xf_nodes[0].ptr[n].aux2 not=? -8 and xf_container_tail(c) and t1 not=? xf_never_type[0] and XFWord(xf_types[0].ptr[t1].flags) & 1 =? 0 {
         let tk=xf_kind(t1)
-        if tk =? 'array' or tk =? 'fixed' or tk =? 'struct_' or (tk =? 'enum_' and xf_union(t1)) {else_expected=t1}
+        if tk =? 'array' or tk =? 'fixed' or (tk =? 'struct_' and not xf_structs[0].ptr[XFWord(xf_types[0].ptr[t1].st)].record_) or (tk =? 'enum_' and xf_union(t1)) {else_expected=t1}
     }
     if n =? xf_sink[0] {cond_sink(n c)}
     let t2=xf_branch(c else_expected true changes)

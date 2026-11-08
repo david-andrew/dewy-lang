@@ -1,0 +1,8 @@
+pick=(k:int)=>if k =? 0 [cmd=7] else [job=3]
+show=(k:int)=>{
+    match pick(k) {
+        [cmd:int]=>printl"command {cmd}"
+        [job:int]=>printl"job {job}"
+    }
+}
+main=()=>{show(0) show(1)}

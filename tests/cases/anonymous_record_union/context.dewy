@@ -1,0 +1,11 @@
+Pick:type=([cmd:int64]|[job:int64])
+pick=(k:int):>Pick=>if k =? 0 [cmd=7] else [job=3]
+same=(k:int value:int64)=>if k =? 0 [left=value right=1] else [right=2 left=3]
+main=()=>{
+    match pick(1) {
+        [cmd:int64]=>printl(cmd)
+        [job:int64]=>printl(job)
+    }
+    let result:[left:int64 right:int]=same(1 7)
+    printl(result.left result.right)
+}
