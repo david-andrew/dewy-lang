@@ -2360,6 +2360,16 @@ A member call that needs no other arguments may omit its parentheses: `xs.pop`,
 function, exactly as `xs.pop()` does. A record field of the same name wins and
 is read, not called; a function with required arguments still needs them.
 
+Style: a zero-argument call that gives a value drops its parentheses (`now`,
+`xs.length`, `text.trim`), and one that returns `void` and is called for its side
+effect keeps them (`numbers.close()`, `c.increment()`), so a side effect is easy
+to see. The compiler warns where a call is written the other way: "write `f()`:
+it is called for its side effect" and "drop the `()`". It stays quiet where the
+parentheses are needed: calling a function value (`counter()`), a call whose
+result is a function, a statement that discards a value (`xs.pop()`), and a name
+inside an argument list, index or range, where a bare function name is the
+function itself, not a call.
+
 Low-level code can obtain an owned growable array's element pointer with
 `.data()`. This first detaches shared storage, including containing arrays along
 a field/index path, so existing value copies remain independent:

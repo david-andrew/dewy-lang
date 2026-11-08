@@ -537,6 +537,9 @@ for _table in (IDENT_JO, LITERAL_JO, CONDITIONAL_JO, LOGIC_JO, MEMBER_JO, INDEX_
         JO_DOUBLES[_module] = _existing + jo_doubles({_module: _missing}).get(_module, '')
 
 # The expression differential isolates the resolver at its new module boundary.
+# (the zero-argument call style check has its own differential: here it asks nothing)
+JO_DOUBLES['call_style.dewy'] = 'call_style_form=(n:int64):>int64=>0\ncall_style_check=(n:int64 packed:int64 t:int64):>void=>{}\n'
+JO_DOUBLES['call_style.jo'] = "call_style_form = (n: int) -> int: 0\ncall_style_check = (n: int, packed: int, t: int): return\n"
 JO_DOUBLES['checker_call_resolve.jo'] = "use 'driver.jo'\n" + 'resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, closure: int = 0, ufcs: bool = false) -> int:\n    if decls.len() != 1: events.push("pick:{name}:{decls}:{closure}:{ufcs}")\n    xe_call_host(n, expected)\n'
 JO_DOUBLES['checker_call_resolve.dewy'] = r'''from p"expr.jo" import call_resolver_double
 resolve_fn_call=(n:int64 name:int64 decls:array<int64> args:array<int64> expected:int64 closure:int64=0 ufcs:bool=false):>int64=>call_resolver_double(n name decls args expected closure ufcs)

@@ -1,3 +1,4 @@
+from p"call_style.dewy" import (call_style_check call_style_form)
 from p"checker_sinks.dewy" import (sink_pack_call)
 from p"checker_value_calls.dewy" import (values_call)
 $runtime_checks
@@ -665,10 +666,19 @@ check_call_expr=(n:XEWord expected:XEWord):>XEWord=>$unsafe {
         xe_add_flag(n 524288)
         return check_expr(n expected)
     }
-    # AUX2_PARTIAL -10; NF_JUXT 536870912
-    if xe_nodes[0].ptr[n].aux2 =? -10 {
-        if xe_flag(n 536870912) and juxt_head_numeric(n) {juxt_factor(n);}
-        return dewy_partial(n expected)
+    # AUX2_PARTIAL -10, AUX2_EMPTY_PARENS -13 (`f()` with no arguments: a style hint may follow); NF_JUXT 536870912
+    if xe_nodes[0].ptr[n].aux2 <=? -10 {
+        if xe_nodes[0].ptr[n].aux2 =? -10 {
+            if xe_flag(n 536870912) and juxt_head_numeric(n) {juxt_factor(n);}
+            return dewy_partial(n expected)
+        }
+        if xe_nodes[0].ptr[n].aux2 =? -13 {
+            xe_nodes[0][n].aux2=0
+            let style=call_style_form(n)
+            let typed=check_expr(n expected)
+            if style not=? 0 {call_style_check(n style typed)}
+            return typed
+        }
     }
     if xe_nodes[0].ptr[n].nlist >? 0 and xe_nodes[0].ptr[n].aux2 =? 0 and xe_dewy_at(xe_nodes[0].ptr[n].pos) and not xe_numeric_head(n) {
         if not values_settled(n) {

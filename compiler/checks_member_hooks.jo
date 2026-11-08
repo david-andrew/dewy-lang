@@ -1,4 +1,5 @@
 use 'expr.jo'
+use 'call_style.dewy'
 use 'checks_thin_expr.dewy'
 use 'checks_compare_hints.dewy'
 use 'error_ops.dewy'
@@ -261,7 +262,9 @@ member_vector = (n: int, bt: int, expected: int, bypass: mut bool) -> int:
         nodes[method].name = i32(fname)
         nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method), aux2 = -9)
         bypass = true
-        return check_expr(n, expected)
+        t = check_expr(n, expected)
+        call_style_implicit(n, fname * 8 + 5, t)
+        return t
     t = check_swizzle(n, bt)
     if ide_on: ide_ref(nodes[n].pos, fname, IK_FIELD, 0, t, 0)
     t

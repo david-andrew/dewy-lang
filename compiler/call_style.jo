@@ -1,0 +1,98 @@
+use 'ast.jo'
+use 'expr.jo'
+use 'types.jo'
+use 'settings.jo'
+use 'util.jo'
+
+# Style of a call with no arguments: one that returns nothing and is made for its side effect keeps
+# its `()` (`numbers.close()`), one that gives a value drops them (`now`, `xs.length`). A call's
+# form is read before it is checked and the answer given once its type is known. Dewy source only.
+# O(1) per call, and no work for a call with arguments.
+# Whether the call whose name starts at p, `name()` with name n bytes long, is the value of a `let`
+# or `return` that ends its line, outside brackets: there a bare name calls, where in an argument
+# list, an index, a range or before an operator it may be a function value, and a hint must not ask
+# for what would then mean something else. O(the line).
+call_style_value_context = (p: int, n: int) -> bool:
+    src = files[pos_file(p)].src
+    at = pos_off(p)
+    # (only `name()` and the end of the line)
+    after = at + n
+    if after >= len(src) or src[after] != 40: return false
+    after += 1
+    loop after < len(src) and (src[after] == 32 or src[after] == 9): after += 1
+    if after >= len(src) or src[after] != 41: return false
+    after += 1
+    loop after < len(src) and (src[after] == 32 or src[after] == 9): after += 1
+    if after < len(src) and src[after] != 10 and src[after] != 35 and src[after] != 125 and src[after] != 59: return false
+    i = at - 1
+    loop i >= 0 and (src[i] == 32 or src[i] == 9): i -= 1
+    if i < 0: return false
+    start = i
+    loop start >= 0 and src[start] != 10: start -= 1
+    start += 1
+    depth = 0
+    loop j in [start..i + 1):
+        c = src[j]
+        next = if j + 1 < len(src): src[j + 1] else: u8(0)
+        before = if j > 0: src[j - 1] else: u8(0)
+        if c == 40 or c == 91 or (c == 60 and next != 63 and next != 61): depth += 1
+        if c == 41 or c == 93 or (c == 62 and before != 63 and before != 61 and before != 45 and before != 58): depth -= 1
+    if depth != 0: return false
+    if src[i] == 61 and i > 0 and src[i - 1] != 61 and src[i - 1] != 33 and src[i - 1] != 60 and src[i - 1] != 62 and src[i - 1] != 63:
+        first = start
+        loop first < i and (src[first] == 32 or src[first] == 9): first += 1
+        return src[first..first + 4) == "let "
+    i >= 5 and src[i - 5..i + 1) == "return" and (i == 5 or not call_style_word(src[i - 6]))
+# Whether the word before p is `in`: a loop's header, which treats a bare member as a sequence.
+call_style_after_in = (p: int) -> bool:
+    src = files[pos_file(p)].src
+    i = pos_off(p) - 1
+    loop i >= 0 and (src[i] == 32 or src[i] == 9): i -= 1
+    i >= 1 and src[i] == 110 and src[i - 1] == 105 and (i == 1 or not call_style_word(src[i - 2]))
+call_style_word = (c: u8) -> bool: c >= 97 and c <= 122 or c >= 65 and c <= 90 or c >= 48 and c <= 57 or c == 95
+# For a call written `f()` or `x.f()` with no arguments (AUX2_EMPTY_PARENS): 0 when a hint would not
+# be right, else the call's name (interned) times 8, plus 4 for a member, plus 2. The name is read
+# now: checking may replace the callee.
+call_style_form = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].pos <= 0: return 0
+    if not files[pos_file(nodes[n].pos)].is_dewy: return 0
+    callee = int(nodes[n].a)
+    if callee <= 0: return 0
+    k = nodes[callee].kind
+    if k != .ident and k != .field: return 0
+    # (the compiler's own Dewy modules, and those of any implementation-language program, are not style-checked)
+    if ends_with(settings_path, ".jo"): return 0
+    # (generic code is checked once for each type: bare may read differently for another)
+    if in_generic_instance(): return 0
+    # (a plain name is dropped to only where it would still be called; a member is asked once checked)
+    if k == .ident and not call_style_value_context(nodes[callee].pos, len(name_of(int(nodes[callee].name)))): return 0
+    if k == .field and call_style_after_in(nodes[n].pos): return 0
+    int(nodes[callee].name) * 8 + (if k == .field: 4 else: 0) + 2
+# A call written `f` or `x.f` (packed as call_style_form's, plus 1), now checked as type t: a hint when
+# it returns nothing.
+call_style_implicit = (n: int, packed: int, t: int):
+    if not call_style_nothing(t) or nodes[n].kind != .call or nodes[n].pos <= 0: return
+    if files[pos_file(nodes[n].pos)].is_dewy and not ends_with(settings_path, ".jo"):
+        name = name_of(packed / 8)
+        shown = if (packed / 4) % 2 == 1: ".{name}" else: name
+        warn(nodes[n].pos, "write `{shown}()`: it is called for its side effect")
+# A result that is a value to use: not a function or type, which `f()` may be needed to reach.
+call_style_value = (t0: int) -> bool:
+    k = tkind(t0)
+    not (k == .var or k == .param or k == .fn_ or k == .polyfn or k == .cfn or k == .callable or k == .typeval or k == .module)
+# Whether the bare form of member call n reads as the call: the same question the checker asks of
+# `x.f` (a function f that takes x and nothing else). A plain name was settled by its context.
+call_style_droppable = (n: int, packed: int) -> bool:
+    if (packed / 4) % 2 == 0: return true
+    if nkids(n) < 1: return false
+    name = packed / 8
+    bt = prune(ntype(kid(n, 0)))
+    not call_style_has_field(bt, name) and not swizzle_name(name) and fn_name_for(bt, name) and member_call_without_arguments(bt, name)
+# The hint for call n of the form call_style_form gave, once n has type t. A call used as a
+# statement keeps its `()` whatever it returns: it is there for its effect.
+call_style_check = (n: int, packed: int, t: int):
+    if nodes[n].kind != .call or call_style_nothing(t): return
+    name = name_of(packed / 8)
+    shown = if (packed / 4) % 2 == 1: ".{name}" else: name
+    if nodes[n].aux == 0 and nodes[n].sym > 0 and not has_flag(n, NF_STMT) and call_style_value(t) and call_style_droppable(n, packed):
+        warn(nodes[n].pos, "drop the `()`: `{shown}` gives a value")

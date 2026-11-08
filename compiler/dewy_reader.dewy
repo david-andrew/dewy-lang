@@ -18,6 +18,7 @@ from p"node_store.dewy" import NK, Node, node_kids, node_kids2, node_mk, node_se
 from p"targets.dewy" import target_arches, target_names, target_os_of, target_oses
 const AUX2_PARTIAL:int64=(-10)
 const AUX2_PLACE:int64=(-11)
+const AUX2_EMPTY_PARENS:int64=(-13)
 const DC_ADDR:int64=9
 const DC_ALLOCATES:int64=13
 const DC_ARRAY:int64=5
@@ -3682,6 +3683,14 @@ rd_dc_expr=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>
             }
             if (not rd_dc_arguments(@reader_ctx @reader_nodes n 'rparen')) {
                 return 0
+            }
+            if (rd_nkids(@reader_nodes n) =? 0) {
+                # (`f()` whose `()` a style check may ask to drop: not before what would then read as its argument)
+                let after:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
+                let joined:bool=(after.symbol =? 'lbrack') or (after.symbol =? 'lparen') or (after.kind =? 'quoted') or (after.kind =? 'rawquoted') or ((after.symbol =? 'lbrace') and (not after.space))
+                if not joined {
+                    reader_nodes[n].aux2 = int32<overflow='wrap'>(AUX2_EMPTY_PARENS)
+                }
             }
             left = n
             last_call = n

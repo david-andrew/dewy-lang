@@ -7,6 +7,7 @@ from p"checks_thin.dewy" import (rational_one_spelling)
 from p"checker_expr.dewy" import (check_expr)
 from p"checks_loop_copies.dewy" import (soa_alias_field)
 from p"concurrency_types.dewy" import (concurrency_builtin_type)
+from p"call_style.dewy" import (call_style_implicit)
 from p"expr.jo" import (CV bare_call bare_fn_value callee_at check_expr_in_module check_swizzle dewy_bare_fn dewy_len_check find_variant float_constant fn_name_for last_checked member_call_without_arguments mk_ident_local path_alias receiver_text swizzle_name synthetic_copy)
 from p"checks_thin_expr.dewy" import (bare_fn_error check_copy float_constant_named vec_n)
 from p"checks_compare_hints.dewy" import (variant_hint_for)
@@ -188,7 +189,9 @@ member_vector=(n:int64 bt:int64 expected:int64 @bypass:bool):>int64=>$unsafe {
         nodes.ptr[method].name=int32(fname)
         nodes.ptr[n]=Node(kind='call' pos=nodes.ptr[n].pos a=int32(method) aux2=-9)
         bypass=true
-        return check_expr(n expected)
+        let t=check_expr(n expected)
+        call_style_implicit(n fname*8 + 5 t)
+        return t
     }
     let t=check_swizzle(n bt)
     if ide_on {ide_ref(nodes.ptr[n].pos fname IK_FIELD 0 t 0)}

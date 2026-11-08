@@ -1,0 +1,20 @@
+# Zero-argument calls: `void` calls keep `()`, value-giving calls drop it (warnings only).
+Counter:type=[value:int64 bump=()=>{value+=1} get=():>int64=>value]
+tick=():>void=>printl"tick"
+five=():>int64=>5
+make=():>(():>int64)=>()=>7
+size=(c:Counter):>int64=>c.value
+twice=(x:int64):>int64=>x*2
+main=():>void=>{
+    tick()
+    let a=five
+    let b=twice(five())
+    let c=Counter[1]
+    c.bump()
+    let g=make()
+    let h=g()
+    let s=size(c)
+    printl"{a} {b} {h} {s} {c.get}"
+}
+
+$runtime_checks

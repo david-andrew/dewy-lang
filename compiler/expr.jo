@@ -1,5 +1,6 @@
 use 'data_access.dewy'
 use 'program_settings.dewy'
+use 'call_style.dewy'
 use 'secret_checks.dewy'
 use 'checks_read_code.dewy'
 use 'checks_call_hints.dewy'
@@ -211,6 +212,7 @@ setting_site = 0               # the call whose parameter default is being fille
 const AUX2_PARTIAL = -10       # a call node that `@` makes a partial evaluation
 grouped_place_call = (n: int) -> bool: place_grouped_call(n)
 
+const AUX2_EMPTY_PARENS = -13   # a call written `f()` or `x.f()` with no arguments whose `()` a style hint may ask to drop (call_style.dewy)
 const AUX2_PLACE = -11         # a call `@(m.lock())` taking the place a method returns (place_methods.jo)
 callee_at = 0                  # the callee a call is resolving: a Dewy function name there is not called by itself
 embedded_files: str[]          # actual compile-time inputs, including those used inside functions
@@ -4297,6 +4299,28 @@ shown_fn_name = (name: str) -> str:
 # Whether `x.name` alone can call a function of x: an array or text builtin
 # that takes nothing else, or a visible function whose other parameters all
 # have defaults.
+# A result with nothing in it: `void`, or `void` with the errors a call may give (the zero-argument
+# call style check, call_style.dewy).
+call_style_nothing = (t0: int) -> bool:
+    t = prune(t0)
+    if tkind(t) == .void_: return true
+    if not is_union(t) and tkind(t) != .opt: return false
+    loop m in value_members(t):
+        if not (tkind(m) == .void_ or exception_member(m)): return false
+    true
+
+# Whether the receiver type t has a field called name: `x.name` then reads the field, not a call
+# of the function (the call style check, call_style.dewy).
+call_style_has_field = (t0: int, name: int) -> bool:
+    t = prune(t0)
+    if tkind(t) == .ptr: t = prune(int(types[t].elem))
+    if tkind(t) != .struct_: return false
+    si = int(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        if int(fields[int(structs[si].fields) + i].name) == name: return true
+    false
+
 member_call_without_arguments = (t: int, name: int) -> bool:
     tk = types[t].kind
     ii = intrinsic_of(name)
@@ -6788,6 +6812,7 @@ bare_call = (n: int, expected: int) -> int:
     nodes[callee].type = 0
     nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee))
     t = check_expr(n, expected)
+    call_style_implicit(n, int(nodes[callee].name) * 8 + 1, t)
     last_checked = n
     t
 
@@ -7140,7 +7165,9 @@ member_missing = (n: int, bt: int, expected: int, bypass: mut bool) -> int:
                     nodes[method].name = i32(fname)
                     nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method), aux2 = -9)
                     bypass = true
-                    return check_expr(n, expected)
+                    t = check_expr(n, expected)
+                    call_style_implicit(n, fname * 8 + 5, t)
+                    return t
                 fatal(nodes[n].pos, "'{name_of(fname)}' needs arguments: `{receiver_text(int(nodes[n].a))}.{name_of(fname)}(...)`")
             fatal(nodes[n].pos, "'{name_of(fname)}' is a function: call it, `x.{name_of(fname)}()`")
         if is_union(bt):

@@ -1,3 +1,4 @@
+use 'call_style.dewy'
 use 'checker_sinks.dewy'
 use 'checker_value_calls.dewy'
 use 'checker_call_services.dewy'
@@ -500,9 +501,16 @@ check_call_expr = (n: int, expected: int) -> int:
         xe_nodes[0][n].b = i32(i)
         xe_add_flag(n, 524288)
         return check_expr(n, expected)
-    if xe_nodes[0][n].aux2 == -10:
-        if xe_flag(n, 536870912) and juxt_head_numeric(n): juxt_factor(n)
-        return dewy_partial(n, expected)
+    if xe_nodes[0][n].aux2 <= -10:
+        if xe_nodes[0][n].aux2 == -10:
+            if xe_flag(n, 536870912) and juxt_head_numeric(n): juxt_factor(n)
+            return dewy_partial(n, expected)
+        if xe_nodes[0][n].aux2 == -13:
+            xe_nodes[0][n].aux2 = 0
+            style = call_style_form(n)
+            typed = check_expr(n, expected)
+            if style != 0: call_style_check(n, style, typed)
+            return typed
     if xe_nodes[0][n].nlist > 0 and xe_nodes[0][n].aux2 == 0 and xe_dewy_at(xe_nodes[0][n].pos) and not xe_numeric_head(n):
         if not values_settled(n):
             vt = values_call(n, expected)
