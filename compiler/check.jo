@@ -915,10 +915,13 @@ fixed_size = (n: int) -> int:
 
 # A generic type's arguments with those left out filled in from its declaration: `Date` is
 # `Date<Gregorian>` when it says `<C=Gregorian>`. The defaults read in the declaration's own scope.
-type_param_defaults = (d: int, targs: int[]) -> int[]:
+type_param_defaults = (d: int, targs: int[], inferred: int[] = []) -> int[]:
     if targs.len() >= nkids2(d): return targs
     out = targs
     loop i in [targs.len()..nkids2(d)):
+        if i < inferred.len() and inferred[i] != 0:
+            out.push(inferred[i])
+            continue
         fallback = int(nodes[kid2(d, i)].b)
         if fallback == 0: return targs
         saved = cx

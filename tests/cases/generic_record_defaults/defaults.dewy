@@ -1,0 +1,33 @@
+from units import m
+Box:type=<T=int64>[v:T]
+Area:type=<T=float64>(T*Length^2)
+g=(b:Box):>int64=>b.v
+area=(a:Area)=>a
+Plain:type=<T>[v:T]
+Both:type=<T=int64>[a:T b:T]
+show=(b:Both<float64>)=>printl(b.a b.b)
+Reverse:type=<T=int64 U>[first:T second:U]
+Pair:type=<T U=int64>[first:T second:U]
+main=()=>{
+    printl(g(Box[1]))
+    let box:Box=Box[v=2]
+    printl(box.v)
+    printl(g(Box<int64>[3]))
+    let n:int=4
+    let inferred:Box<int>=Box[n]
+    printl(inferred.v)
+    let explicit:Box<float64>=Box<float64>[5]
+    printl(explicit.v)
+    let pair:Pair<string int64>=Pair["hello" 6]
+    printl(pair.first pair.second)
+    let from_literals:Pair<int int64>=Pair[8 9]
+    printl(from_literals.first from_literals.second)
+    let reverse:Reverse<int64 string>=Reverse[10 "world"]
+    printl(reverse.first reverse.second)
+    printl(area(2.0m*3.0m))
+    let plain:Plain<int>=Plain[7]
+    printl(plain.v)
+    let seed:float64=1.0
+    let mixed=Both[seed 2]
+    show(mixed)
+}

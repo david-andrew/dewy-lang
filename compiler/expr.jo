@@ -2595,11 +2595,34 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
             if len(err) > 0: fatal(nodes[n].pos, err)
             loop i in [0..nkids(decl)):
                 a = mapped[i]
-                if a == 0 or ctx_dependent(a): continue
+                if a == 0 or ctx_dependent(a) or is_lit(a): continue
                 f = kid(decl, i)
                 if nodes[f].a == 0: continue
                 pat = resolve_type(int(nodes[f].a))
-                if is_lit(a): finalize_literal(a)
+                match_type(pat, ntype(a), binds, 0)
+            # A literal does not override a declared type default. Known
+            # nonliteral fields constrain the type before defaults are filled.
+            loop i in [0..nkids(decl)):
+                a = mapped[i]
+                if a == 0 or not is_lit(a): continue
+                f = kid(decl, i)
+                if nodes[f].a == 0: continue
+                inferred = binds
+                match_type(resolve_type(int(nodes[f].a)), lit_default(a), inferred, 0)
+                loop j in [0..ntp):
+                    if binds[j] == 0 and nodes[kid2(decl, j)].b == 0: binds[j] = inferred[j]
+            defaults = type_param_defaults(decl, [], binds)
+            loop i in [0..defaults.len()):
+                if binds[i] == 0: binds[i] = defaults[i]
+            loop i in [0..nkids(decl)):
+                a = mapped[i]
+                if a == 0 or not is_lit(a): continue
+                f = kid(decl, i)
+                if nodes[f].a == 0: continue
+                pat = resolve_type(int(nodes[f].a))
+                hint = subst_partial(pat, binds)
+                if has_var(hint): finalize_literal(a)
+                else: coerce(a, hint)
                 match_type(pat, ntype(a), binds, 0)
             # As with function calls, first collect known argument types, then
             # check contextual literals/callbacks against the partially bound
