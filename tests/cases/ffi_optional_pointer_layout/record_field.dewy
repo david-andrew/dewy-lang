@@ -1,0 +1,10 @@
+# modes: native
+# A record with an optional pointer field has no C layout either.
+Tm:type=[sec:int32 min:int32 hour:int32 mday:int32 mon:int32 year:int32 wday:int32 yday:int32 isdst:int32 gmtoff:int64 zone:ptr<uint8>?]
+gmtime_r=(t:ptr<int64> out:ptr<Tm>):>ptr<Tm>? => $extern
+main=():>void=>$unsafe {
+    let when:array<int64>=[0]
+    let out:array<Tm>=[Tm[0 0 0 0 0 0 0 0 0 0 none]]
+    gmtime_r(when.ptr out.ptr);
+    printl(out[0].year)
+}

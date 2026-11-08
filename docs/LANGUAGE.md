@@ -4069,7 +4069,11 @@ main = ():>void => $unsafe {
 ```
 
 A record holding a string, an array or another managed value has no C layout,
-and a pointer to one is rejected in an `$extern` signature.
+and a pointer to one is rejected in an `$extern` signature. So is a pointer to
+`ptr<T>?`, or to a record with such a field: an optional pointer is C's nullable
+pointer only as an argument or a result, and two words in memory. For C's
+`T **` out-parameter, pass `uint64` words and read a nonzero one back through
+`words.ptr as ptr<ptr<T>>`.
 
 Calling a `$extern` function, or naming it as a value, and reading or writing
 through a `ptr<T>` need an unsafe boundary: `$unsafe` before the expression,

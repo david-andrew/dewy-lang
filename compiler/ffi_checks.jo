@@ -71,7 +71,9 @@ ffi_c_layout = (t0: int, seen: mut {int: bool}) -> str:
     k = types[t].kind
     if t == T_MATH_INT: return "`int` has no fixed size"
     if k == .int_ or k == .float_ or k == .bool_ or k == .ptr or k == .cfn or k == .void_: return ""
-    if k == .opt and tkind(int(types[t].elem)) == .ptr: return ""
+    # (an optional pointer is a pointer and its presence in Dewy's memory;
+    # only an argument or a result becomes C's one nullable word)
+    if k == .opt and tkind(int(types[t].elem)) == .ptr: return "`{dt(t)}` is two words in Dewy's memory, C's nullable pointer one: hold it as a `uint64`, test that for 0 and read the words as `ptr<{dt(int(types[t].elem))}>`"
     if k == .fixed: return ffi_c_layout(int(types[t].elem), seen)
     if k == .struct_:
         si = int(types[t].st)

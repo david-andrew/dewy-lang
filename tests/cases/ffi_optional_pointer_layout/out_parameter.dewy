@@ -1,0 +1,8 @@
+# modes: native
+# An optional pointer is two words in Dewy's memory, so C cannot fill one
+# through a pointer: it would write the address and leave the presence.
+strtol=(s:string stop_at:ptr<ptr<uint8>?> base:int32):>int64 => $extern
+main=():>void=>{
+    let slot:array<ptr<uint8>?>=[none]
+    printl($unsafe strtol("12ab" slot.ptr 10))
+}
