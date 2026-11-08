@@ -1,0 +1,18 @@
+# quick
+# from_json fills secret fields; a mistake in one is reported without its text.
+Login:type = [user:string pass:secret<string>]
+Vault:type = [name:string keys:array<secret<string>> pin:secret<int64>?=none]
+main = ():>void|TextError => {
+    let l = from_json<Login>("\{\"user\":\"ann\",\"pass\":\"hunter2\"\}") or_throw
+    printl(l)
+    printl(l.pass =? "hunter2" l.pass.reveal)
+    let back = from_json<Login>(to_json([user=l.user pass=l.pass.reveal])) or_throw
+    printl(back.pass =? l.pass)
+    let bad = from_json<Login>("\{\"user\":\"ann\",\"pass\":12345\}")
+    if bad is? TextError {printl(bad.message)}
+    let bad2 = from_json<Login>("\{\"user\":\"ann\",\"pass\":\"ab\\ud800x\"\}")
+    if bad2 is? TextError {printl(bad2.message)}
+    let v = from_json<Vault>("\{\"name\":\"v\",\"keys\":[\"a\",\"b\"],\"pin\":1234\}") or_throw
+    printl(v v.keys[1].reveal (v.pin ?? secret(0)).reveal)
+}
+$runtime_checks

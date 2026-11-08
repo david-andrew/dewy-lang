@@ -519,3 +519,16 @@ __read[T] = (r: mut __TextIn, x: mut T?):
 # structs, tuples, enums, unions, vectors, fixed-size arrays: read field by field (the compiler
 # writes the code for each type)
 __read[T] = (r: mut __TextIn, x: mut T): __read_fields(r, x)
+
+# a secret: its value read as a T (compiler/secrets.jo); a mistake in it is reported without the
+# text it found, which may be part of the secret
+when not BOOTSTRAP:
+    __read[T] = (r: mut __TextIn, x: mut secret[T]):
+        v: T
+        __default_init(v)
+        clean = len(r.err) == 0
+        __read(r, v)
+        if clean and len(r.err) > 0:
+            r.err = "this hidden value cannot be read (its text is not shown)"
+            return
+        x = v

@@ -3760,7 +3760,8 @@ errors holding one, and the error report from `main`, even a debug build's full
 payload. The editor's hover, `gdb`, `lldb` and Visual Studio show `<redacted>`
 too. A failing runtime check on a value on its way into a secret leaves its value
 out of the report. JSON has no writer for a secret, so writing one is a compile
-error.
+error. `from_json` reads one: a `secret<T>` field is read as a `T`, and a mistake
+in it is reported without the text found there. (Provisional.)
 
 `write_text` and `write_bytes` take a secret too, of a `string` or an
 `array<uint8>`, and write its value to a file only its owner can read: a new file is
