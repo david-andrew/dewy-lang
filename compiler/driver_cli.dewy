@@ -4,8 +4,7 @@ $runtime_checks
 # the run cache, and `dewy-core test` over a directory.
 from p"@lib/core/rt.jo" import (__read_fd __str_from_bytes __str_slice)
 from p"@lib/core/os.jo" import (cwd delete_file env eprint exe_path exec exit file_exists file_size file_time is_dir list_dir read_file rename_file run_program spawn_detached time_ns write_file)
-from p"@lib/core/str.jo" import (byte_str ends_with find_byte join lower split starts_with trim)
-from p"@lib/core/str.jo" import (find as jo_find rfind as jo_rfind)
+from p"@lib/core/str.jo" import (byte_str ends_with find find_byte join lower rfind split starts_with trim)
 from p"ast.jo" import (nodes)
 from p"check.jo" import (collide_locals fns lib_dir modules program_name release_build target_arm64 target_macos target_wasm target_windows)
 from p"checks_thin.dewy" import (jd)
@@ -38,7 +37,7 @@ usage=(status:CliWord=2):>void=>{
 cli_option_refused=(x:string):>void=>{
     let name=x
     loop (name as array<uint8>).length >? 0 and ((name as array<uint8>)[0] =? b'-' or (name as array<uint8>)[0] =? b'$') {name=__str_slice(name 1 (name as array<uint8>).length)}
-    let eq=jo_find(name "=")
+    let eq=find(name "=")
     if eq >=? 0 {name=__str_slice(name 0 eq)}
     let tag=""
     loop c in (name as array<uint8>) {
@@ -46,7 +45,7 @@ cli_option_refused=(x:string):>void=>{
     }
     # (the metatags the compiler knows, and the bundles of lib/directives.dewy)
     let bundles=read_file("{lib_dir}/directives.dewy") ?? ""
-    let known=(tag as array<uint8>).length >? 0 and (dw_dir_known(tag) or tag =? "default_row" or starts_with(bundles "${tag} ") or jo_find(bundles "\n${tag} ") >=? 0)
+    let known=(tag as array<uint8>).length >? 0 and (dw_dir_known(tag) or tag =? "default_row" or starts_with(bundles "${tag} ") or find(bundles "\n${tag} ") >=? 0)
     if known and tag not=? "target" and tag not=? "build" {
         eprint("dewy-core: `${tag}` cannot be set from the command line; write it in the program's source (the command line sets only the build mode, --release or --debug, and the target, --target)")
         exit(2)
@@ -61,9 +60,9 @@ find_lib_dir=():>string=>{
     }
     let exe=os_path(exe_path())
     let d=exe
-    let s=jo_rfind(d "/")
+    let s=rfind(d "/")
     if s >=? 0 {d=__str_slice(d 0 s)}
-    s=jo_rfind(d "/")
+    s=rfind(d "/")
     if s >=? 0 {d=__str_slice(d 0 s)}
     if not file_exists("{d}/lib/core/rt.jo") {
         eprint("dewy-core: cannot find the standard library next to {exe} (expected {d}/lib); set DEWY_CORE_LIB to its location")
@@ -99,14 +98,14 @@ setup_target=():>void=>{
 declares_top=(src:string name:string):>bool=>{
     let sb=src as array<uint8>
     let n:CliWord=sb.length
-    let at:CliWord=jo_find(src name)
+    let at:CliWord=find(src name)
     loop at >=? 0 {
         let b=at
         if b >=? 4 and sb[b - 1] =? b' ' and sb[b - 4] =? b'l' and sb[b - 3] =? b'e' and sb[b - 2] =? b't' {b -= 4}
         let e=at + (name as array<uint8>).length
         loop e <? n and sb[e] =? b' ' {e += 1}
         if (b =? 0 or sb[b - 1] =? b'\n') and e <? n and sb[e] =? b'=' and (e + 1 >=? n or sb[e + 1] not=? b'=') {return true}
-        at=jo_find(src name at + (name as array<uint8>).length)
+        at=find(src name at + (name as array<uint8>).length)
     }
     false
 }
@@ -152,11 +151,11 @@ scan_build_lines=(src:string at:CliWord):>void=>{
         let tb=t as array<uint8>
         if tb.length =? 0 or tb[0] =? b'#' {continue}
         if (line as array<uint8>)[0] not=? b' ' and (line as array<uint8>)[0] not=? b'\t' {break}
-        let eq=jo_find(t "=")
+        let eq=find(t "=")
         if eq <? 0 {continue}
         let key=trim(__str_slice(t 0 eq))
         let val=trim(__str_slice(t eq + 1 tb.length))
-        let h=jo_find(val "#")
+        let h=find(val "#")
         if h >=? 0 {val=trim(__str_slice(val 0 h))}
         if (val as array<uint8>).length >=? 2 and (val as array<uint8>)[0] =? b'"' {val=__str_slice(val 1 (val as array<uint8>).length - 1)}
         if key =? "target" {build_target=val}
@@ -169,7 +168,7 @@ scan_build_lines=(src:string at:CliWord):>void=>{
 # outside comments and multi-line strings, the value a string literal, then nothing but a
 # comment). The parser checks each in place: dw_build_setting.
 scan_settings=(src:string):>void=>{
-    if jo_find(src "$") <? 0 {return}
+    if find(src "$") <? 0 {return}
     let sb=src as array<uint8>
     let n:CliWord=sb.length
     let depth:CliWord=0
@@ -191,7 +190,7 @@ scan_settings=(src:string):>void=>{
         else if c =? b'"' or c =? b'\'' {
             # (a string: a triple-quoted one may span lines, any other ends with its line)
             if i + 2 <? n and sb[i + 1] =? c and sb[i + 2] =? c {
-                let e=jo_find(src __str_slice(src i i + 3) i + 3)
+                let e=find(src __str_slice(src i i + 3) i + 3)
                 i=if e <? 0 {n} else {e + 3}
             }
             else {
@@ -445,9 +444,9 @@ extern_lib_check=(fi:CliWord):>void=>$unsafe {
     let cl=fns.ptr[fi].clib
     let lc=lower(cl)
     let other=""
-    if target_windows and (jo_find(lc ".so") >=? 0 or ends_with(lc ".dylib")) {other="a Windows program loads DLLs (msvcrt.dll has the C library)"}
+    if target_windows and (find(lc ".so") >=? 0 or ends_with(lc ".dylib")) {other="a Windows program loads DLLs (msvcrt.dll has the C library)"}
     else if not target_windows and ends_with(lc ".dll") {other="a Linux or macOS program loads .so or .dylib libraries"}
-    else if target_macos and jo_find(lc ".so") >=? 0 {other="a macOS program loads .dylib libraries (/usr/lib/libSystem.B.dylib has the C library)"}
+    else if target_macos and find(lc ".so") >=? 0 {other="a macOS program loads .dylib libraries (/usr/lib/libSystem.B.dylib has the C library)"}
     else if not target_macos and not target_windows and ends_with(lc ".dylib") {other="a Linux program loads .so libraries (libc.so.6 has the C library)"}
     if (other as array<uint8>).length >? 0 {warn(nodes.ptr[d].pos "{jd(nodes.ptr[d].pos "@lib(\"{cl}\")" "lib='{cl}'")} is another system's library: {other}; {jd(nodes.ptr[d].pos "`when TARGET == \"windows\":` gives each system its own @lib" "`if $target.os =? \"windows\" \{...}` gives each system its own declaration")} (as it is, the program stops when it calls {name_of(CliWord(nodes.ptr[d].name))})")}
 }

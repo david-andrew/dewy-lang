@@ -6392,7 +6392,7 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
         loop d in decls:
             if proof_decls.has(d): fatal(nodes[n].pos, "a proof cannot be used as a value")
     # (`@sin`: the trigonometry takes angles, so it is no function of a plain number)
-    if mod < 0 and closure == 0 and dewy_quantity_name(int(nodes[n].name)) and nodes[n].name != i32(quantity_call_names[0]) and dewy_at(nodes[n].pos) and decls.len() > 0 and decl_in_prelude(decls[0]):
+    if mod < 0 and closure == 0 and dewy_quantity_name(int(nodes[n].name)) and nodes[n].name != i32(quantity_call_names[0]) and dewy_at(nodes[n].pos) and decls.len() > 0 and decl_in_prelude(decls[0]) and not bound_here(int(nodes[n].name)):
         fname = name_of(int(nodes[n].name))
         fatal(nodes[n].pos, "{fname} takes an angle, so `@{fname}` is no function of a plain number: write `(x:float64) => {fname}(x * rad)` for radians (`from units import rad`)")
     et = callable_base(expected)

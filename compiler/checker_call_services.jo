@@ -252,7 +252,7 @@ call_name_early = (n: int, name: int, mod_scope: int, args: int[], expected: int
             ide_complete_members(ntype(args[0]))
         ide_complete_names()
     # (`find(text part)` and `index_of(xs x)` written as calls: Dewy's searches, giving Missing)
-    if not ufcs and mod_scope < 0 and args.len() >= 1 and (name == id_find or name == id_rfind or name == id_index_of or name == id_chars) and (args.len() >= 2 or name == id_chars) and files[pos_file(nodes[n].pos)].is_dewy and nodes[args[0]].kind != .namedarg:
+    if not ufcs and mod_scope < 0 and args.len() >= 1 and (name == id_find or name == id_rfind or name == id_index_of or name == id_chars) and (args.len() >= 2 or name == id_chars) and files[pos_file(nodes[n].pos)].is_dewy and nodes[args[0]].kind != .namedarg and not bound_here(name):
         s = lookup(name)
         if s != 0 and syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl)):
             a0 = args[0]
@@ -279,7 +279,7 @@ call_name_early = (n: int, name: int, mod_scope: int, args: int[], expected: int
     if not ufcs and mod_scope < 0 and args.len() == 2 and (name == ci(3, "__floor_div") or name == ci(4, "__floor_mod") or name == ci(5, "__dewy_power") or name == ci(6, "__dewy_divide")) and (files[pos_file(nodes[n].pos)].is_dewy or pos_in_lib(nodes[n].pos)):
         if nodes[args[0]].kind != .namedarg and nodes[args[1]].kind != .namedarg:
             return dewy_arithmetic_call(n, name, args, expected)
-    if not ufcs and mod_scope < 0 and args.len() == 1 and dewy_quantity_name(name) and nodes[args[0]].kind != .namedarg and files[pos_file(nodes[n].pos)].is_dewy:
+    if not ufcs and mod_scope < 0 and args.len() == 1 and dewy_quantity_name(name) and nodes[args[0]].kind != .namedarg and files[pos_file(nodes[n].pos)].is_dewy and not bound_here(name):
         s = lookup(name)
         if s != 0 and syms[s].kind == .fns and decl_in_prelude(int(syms[s].decl)):
             a0 = args[0]
@@ -287,7 +287,7 @@ call_name_early = (n: int, name: int, mod_scope: int, args: int[], expected: int
             add_flag(a0, NF_CHECKED)
             r = dewy_quantity_call(n, name, a0, expected)
             if r != 0: return r
-    if name == ci(28, "abs") and mod_scope < 0 and args.len() == 1 and dewy_at(nodes[n].pos) and not program_fn_named(name):
+    if name == ci(28, "abs") and mod_scope < 0 and args.len() == 1 and dewy_at(nodes[n].pos) and not program_fn_named(name) and not bound_here(name):
         a = args[0]
         if not has_flag(a, NF_CHECKED):
             check_expr(a, 0)
@@ -395,7 +395,7 @@ call_name_collect = (n: int, name: int, mod_scope: int, args: int[], expected: i
         if mod_scope >= 0: call_collect_module(mod_scope, name, decls)
         else: call_collect_fns(name, decls)
     else: call_collect_named(name, mod_scope, decls)
-    if name == ci(7, "to_int") and mod_scope < 0 and files[pos_file(nodes[n].pos)].is_dewy:
+    if name == ci(7, "to_int") and mod_scope < 0 and files[pos_file(nodes[n].pos)].is_dewy and not bound_here(name):
         own = false
         loop d in decls:
             if not decl_in_prelude(d): own = true

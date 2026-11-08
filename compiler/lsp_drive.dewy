@@ -2,8 +2,7 @@ $runtime_checks
 # The language server's process code: reading messages, waiting for input, checking in a child
 # process (fork; on Windows, this program again), and the loop that answers the editor.
 from p"@lib/core/rt.jo" import (__read_fd __str_from_bytes __write_fd)
-from p"@lib/core/os.jo" import (args cwd env exe_path exit time)
-from p"@lib/core/os.jo" import (sleep as jo_sleep)
+from p"@lib/core/os.jo" import (args cwd env exe_path exit sleep time)
 from p"@lib/core/str.jo" import (join split starts_with)
 from p"@lib/core/str.jo" import (to_int as jo_to_int)
 from p"check.jo" import (lib_dir test_mode)
@@ -139,7 +138,7 @@ check_child=(main_path:string doc_path:string sentinel:bool skips:array<string> 
         let ms:LspWord=jo_to_int(delay ?? "") ?? 0
         if ms >? 0 {
             lsp_log("test checker started")
-            jo_sleep(float64(ms) / 1000.0)
+            sleep(float64(ms) / 1000.0)
         }
     }
     ide_on=true
