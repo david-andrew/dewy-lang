@@ -11648,6 +11648,22 @@ rd_dn_statement_read=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bo
     value
 }
 
+# (`{n:05}`: Python's format spec after an interpolation's top-level colon, which Dewy
+# writes with fmt) O(interpolation tokens).
+rd_dn_spec_habit=(@reader_ctx:ParserContext source:string first:int64 close:int64):>void=>$unsafe {
+    let depth=0
+    loop k in [0..reader_ctx.tokens.length) {
+        let t=reader_ctx.tokens[k]
+        if t.symbol =? 'lparen' or t.symbol =? 'lbrack' or t.symbol =? 'lbrace' {depth += 1}
+        else if t.symbol =? 'rparen' or t.symbol =? 'rbrack' or t.symbol =? 'rbrace' {depth -= 1}
+        else if t.symbol =? 'colon' and depth =? 0 and k >? 0 and t.stop <? close {
+            let value=reader_ctx.stores.host[0].bytes_slice(source first t.start).trim()
+            let spec=reader_ctx.stores.host[0].bytes_slice(source t.stop close)
+            reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file t.start) "`\{{value}:{spec}}` is Python's format spec: Dewy formats with fmt, `\{fmt'{spec}'({value})}`");
+        }
+    }
+}
+
 rd_dn_string=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexeme):>int64=>$unsafe {
     let source:string=reader_ctx.source
     let raw:bool=(token.kind =? 'rawquoted')
@@ -11691,6 +11707,7 @@ rd_dn_string=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexe
         reader_ctx.flags.comma_stop = false
         reader_ctx.reader.dn_in_interpolation = (int64<overflow='wrap'>(reader_ctx.reader.dn_in_interpolation) + 1)
         let expression:int64=rd_dc_expr(@reader_ctx @reader_nodes 0)
+        if expression =? 0 or reader_ctx.tokens[reader_ctx.at].kind not=? 'eof' {rd_dn_spec_habit(@reader_ctx source first i);}
         if ((expression not=? 0) and (reader_ctx.tokens[reader_ctx.at].kind not=? 'eof')) {
             reader_ctx.stores.host[0].dn_error(reader_ctx.tokens[reader_ctx.at].start "expected one interpolation expression");
         }
