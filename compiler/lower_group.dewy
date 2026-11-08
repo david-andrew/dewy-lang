@@ -21,6 +21,7 @@ from p"checked_eval.dewy" import (cx_token_values)
 from p"facts.jo" import (array_len_expr fact_storage_loop fixed_array_len fixed_array_local index_safety len_of_local lower_length_guard lower_length_guards positive_bound range_facts_begin range_facts_end stable_loop_index)
 from p"facts_elements.dewy" import (fact_fixed_comprehension fact_fixed_comprehension_exact)
 from p"facts_library.dewy" import (fact_library_call)
+from p"secrets.jo" import (secret_compares)
 from p"util.jo" import (call_args_text fatal files ice name_of pos_file pos_off pos_str)
 from p"effects.jo" import (effect_policy effects_active)
 from p"callback_specialize.jo" import (callback_calls)
@@ -1207,7 +1208,7 @@ left_operand_addr=(a:LGWord t:LGWord keep:bool):>LGWord=>$unsafe {
     if keep {return kept_operand_addr(a t)}
     return place_addr(gen_place(a false) t)
 }
-gen_byte_eq=(a:LGWord b:LGWord t:LGWord keep_left:bool):>LGWord=>$unsafe {
+gen_byte_eq=(a:LGWord b:LGWord t:LGWord keep_left:bool secret:bool):>LGWord=>$unsafe {
     # (a slice's source need be kept only if evaluating b could change it)
     let keep=keep_left
     if is_slice(a) {keep=not unchanged_by(text_source(LGWord(nodes.ptr[a].a)) b)}
@@ -1216,7 +1217,7 @@ gen_byte_eq=(a:LGWord b:LGWord t:LGWord keep_left:bool):>LGWord=>$unsafe {
     let r=vreg(VI)
     e_mov(r e_iconst(0));
     iff(e_bin('eq' VI na nb));
-    e_mov(r e_call3(rt("__mem_eq") da db e_bin('mul' VI na e_iconst(owner_stride(LGWord(types.ptr[t].elem)))) VI));
+    e_mov(r e_call3(rt(if secret {"__ct_mem_eq"} else {"__mem_eq"}) da db e_bin('mul' VI na e_iconst(owner_stride(LGWord(types.ptr[t].elem)))) VI));
     endc();
     return r
 }
@@ -1268,7 +1269,7 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
         if not plain_string and not plain_resource and place_var(a) not=? 0 {keep_left=not unchanged_by(a b)}
     }
     if aux =? 1 and byte_eq_type(lt) {
-        let r=gen_byte_eq(a b lt keep_left)
+        let r=gen_byte_eq(a b lt keep_left secret_compares.get(e) not=? none)
         if op =? 'ne' {r=e_bin('xor' VI r e_iconst(1))}
         return V(r false)
     }
@@ -1300,7 +1301,9 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
         let vb=gen_borrowed(b).v
         if op =? 'plus' {return V(e_call2(rt("__str_concat") va vb VI) true)}
         if op =? 'eq' or op =? 'ne' {
-            let r=e_call2(rt("__str_eq") va vb VI)
+            # (a secret operand: constant-time, secrets.jo)
+            let eq=if secret_compares.get(e) not=? none {"__ct_str_eq"} else {"__str_eq"}
+            let r=e_call2(rt(eq) va vb VI)
             if op =? 'ne' {r=e_bin('xor' VI r e_iconst(1))}
             return V(r false)
         }

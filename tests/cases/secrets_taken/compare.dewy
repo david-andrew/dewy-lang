@@ -1,0 +1,23 @@
+# quick
+# =? and not=? with a secret operand compare strings and byte arrays in constant time
+# (lib/core/rt.jo's __ct_str_eq): the answers match the ordinary comparison.
+let pw:secret<string> = "correct horse battery staple"
+printl(pw =? "correct horse battery staple" pw =? "correct horse battery stapla" pw =? "correct")
+printl("correct horse battery staple" =? pw pw not=? "x" pw not=? "correct horse battery staple")
+let empty:secret<string> = ""
+printl(empty =? "" empty =? "a" "" =? empty)
+let built = ["correct horse" " battery staple"].join("")
+printl(pw =? built pw =? secret(built) secret(built) not=? pw)
+let short:secret<string> = "abcdefg"
+printl(short =? "abcdefg" short =? "abcdefh" short =? "bbcdefg")
+let raw:array<uint8> = [1 2 3 4 5 6 7 8 9 10 11]
+let key = secret(raw)
+let same:array<uint8> = [1 2 3 4 5 6 7 8 9 10 11]
+let last:array<uint8> = [1 2 3 4 5 6 7 8 9 10 12]
+let first:array<uint8> = [0 2 3 4 5 6 7 8 9 10 11]
+let shorter:array<uint8> = [1 2 3]
+printl(key =? same key =? last key =? first key =? shorter key not=? last)
+let words:array<int64> = [1 -2 3]
+let wide = secret(words)
+let other_words:array<int64> = [1 -2 4]
+printl(wide =? words wide =? other_words)

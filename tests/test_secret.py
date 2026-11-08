@@ -1,6 +1,6 @@
-"""secret<T> (compiler/secrets.jo): zero-cost, and redacted where cases cannot look: the code is
-the plain program's, `main`'s error report (also with -g), runtime-check reports, editor hovers
-and the debugger. (The language rules: tests/cases/secret.)"""
+"""secret<T> (compiler/secrets.jo): zero-cost but for constant-time equality, and redacted where
+cases cannot look: the code is the plain program's, `main`'s error report (also with -g),
+runtime-check reports, editor hovers and the debugger. (The language rules: tests/cases/secret.)"""
 import re
 import shutil
 import subprocess
@@ -11,15 +11,17 @@ from tests.support import compiler  # noqa: F401
 from tests.test_core_editor import Client
 
 # One program, written with secrets (`@S<T>` and `.@R`) and without: the IR must be the same.
+# (Except `=?` with a secret string or array operand, also a dictionary's key, which is
+# constant-time instead: tests/test_secrets_taken.py.)
 PROBE = '''Login:type = [user:string pass:@S<string>]
-check = (pw:@S<string> attempt:string):>bool => pw =? attempt
+check = (pw:@S<string> attempt:string):>bool => pw.@R =? attempt
 scale = (k:@S<int64> x:int64):>@S<int64> => k * x + 7
 total = (ks:array<@S<int64>>):>@S<int64> => {
     let t:@S<int64> = 0
     loop k in ks { t = t + k }
     t
 }
-lookup = (vault:dict<@S<string> int64> key:@S<string>):>int64 => if vault.has(key) vault[key] else -1
+lookup = (vault:dict<string @S<int64>> key:string):>int64 => if vault.has(key) vault[key].@R else -1
 pick = (o:@S<float64>?):>float64 => if o is? none 0.0 else o.@R * 2.0
 bump = (@k:@S<int64>):>void => { k += 1 }
 main = () => {
@@ -29,8 +31,8 @@ main = () => {
     printl(check(l.pass a[1]))
     printl(scale(a.length a.length).@R)
     printl(total([1 2 3]).@R)
-    let vault:dict<@S<string> int64> = ["pw" -> 7]
-    printl(lookup(vault l.pass))
+    let vault:dict<string @S<int64>> = ["pw" -> 7]
+    printl(lookup(vault l.pass.@R))
     let o:@S<float64>? = 1.5
     printl(pick(o))
     let n:@S<int64> = 41

@@ -1035,6 +1035,26 @@ __str_eq = (a: str, b: str) -> bool:
     if n != (pb as *int)[1]: return false
     __mem_eq(pa + 24, pb + 24, n)
 
+# Equality with a secret operand (=?, not=?: compiler/secrets.jo): the time depends only on
+# the lengths. Every byte is read and the differences are or-ed together, so no branch or
+# exit depends on the contents or on where they differ. Lengths stay public.
+__ct_mem_eq = (a: *u8, b: *u8, n: int) -> bool:
+    d = 0
+    i = 0
+    loop i + 8 <= n:
+        d = d | (((a + i) as *int)[0] xor ((b + i) as *int)[0])
+        i += 8
+    loop i < n:
+        d = d | ((a[i] as int) xor (b[i] as int))
+        i += 1
+    d == 0
+
+__ct_str_eq = (a: str, b: str) -> bool:
+    n = len(a)
+    if n != len(b): return false
+    # (with a nil input n is zero: the payload pointers are never read)
+    __ct_mem_eq((a as *u8) + 24, (b as *u8) + 24, n)
+
 __str_cmp = (a: str, b: str) -> int:
     la = len(a)
     lb = len(b)

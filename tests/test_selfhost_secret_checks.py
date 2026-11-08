@@ -11,6 +11,7 @@ DRIVER = RESOLVER.split('main = ():')[0] + r'''
 last_checked = 0
 secret_reveal_name = 2
 secret_checks: {int: bool}
+secret_compares: {int: bool}
 check_result = 0
 replacement = 0
 coercible = true
@@ -116,6 +117,7 @@ JO = jo_doubles({
         'name_of': 'name_of = (n: int) -> str: names[n]',
         'fatal': 'fatal = (p: int, message: str): print(message); exit(41)',
     },
+    'check.jo': {'runtime_fn': 'runtime_fn = (name: str) -> int: 0'},
     'secrets.jo': {},
     'lex.jo': {},
 })
@@ -127,7 +129,7 @@ for module, names in {
     'ast.jo': ('nodes',),
     'types.jo': ('types', 'T_BOOL', 'T_NEVER'),
     'expr.jo': ('last_checked',),
-    'secrets.jo': ('secret_reveal_name', 'secret_checks'),
+    'secrets.jo': ('secret_reveal_name', 'secret_checks', 'secret_compares'),
 }.items():
     for name in names:
         declaration = re.search(r'(?m)^' + name + r'\s*[:=][^\n]*\n', DRIVER)
