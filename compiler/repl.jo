@@ -47,6 +47,8 @@ use 'lower_ffi.dewy'
 use 'lower_functions.dewy'
 use 'lower_primitives.dewy'
 use 'repl_ops.dewy'
+use 'proc_sys.dewy'
+use 'repl_drive.dewy'
 
 const REPL_REGION = 0x10000000          # where inputs' code goes in the session (within 2 GB of
 const REPL_REGION_SIZE = 0x10000000     # its globals: code reaches them by 32-bit offsets; arm64's
@@ -77,98 +79,6 @@ repl_region = () -> int:
     when TARGET == "macos":
         return MACHO_BASE + 0x20000000
     REPL_REGION
-
-repl_start = () -> str:
-    repl_next = repl_region()
-    src = "__repl_main = (): __repl_serve({repl_next}, {REPL_REGION_SIZE})\n"
-    cache = os_path(temp_dir()) + "/dewy-repl"
-    mkdir(cache)
-    me = 0
-    when TARGET == "windows":
-        me = int(GetCurrentProcessId())
-    else:
-        me = syscall(39)
-    path = "{cache}/repl-{me}.bin"
-    when TARGET == "windows":
-        path = "{cache}/repl-{me}.exe"
-    # read_source looks up virtual text by its normalized path. TMPDIR often
-    # ends in a slash (including on macOS), so normalize the stored key too.
-    main_src = path_norm("{cache}/<input>")
-    ide_texts[main_src] = src
-    repl_image = true
-    bss_reserve = REPL_DATA_RESERVE
-    # (the session's module is the one the inputs add to)
-    built = compile(main_src, path)
-    if len(built) == 0: return "could not build the session program"
-    loop i in 0.. and m in modules:
-        if m.is_main: repl_mainm = i
-    late_binding = true
-    # (inputs `use` files relative to the current directory)
-    modules[repl_mainm].dir = cwd()
-    files[int(modules[repl_mainm].file)].is_dewy = true
-    mod_bits[repl_mainm] |= 2
-    loop f in init_fns: repl_modules_inited[int(fns[f].mod)] = true
-    loop i in [0..lfuncs.len()):
-        a = 0
-        if i < fn_addr.len() and fn_addr[i] >= 0: a = img_text_addr + fn_addr[i]
-        lf_abs.push(a)
-    ro_segs.push((0, rodata.len(), img_ro_addr))
-    ro_shipped = rodata.len()
-    loop lf, off in cabi_adapter: repl_cabi_abs[lf] = img_text_addr + off
-    loop g in global_ids:
-        if modules[int(globals[g].mod)].is_prelude and global_off.get(g) != none: repl_inited[g] = true
-    when TARGET == "windows":
-        # start it with two pipes, their handles in DEWY_REPL_PIPES
-        sa = fill(0, 3)
-        sa[0] = 24
-        sa[2] = 1                                     # inheritable
-        to_r: *u8[] = [null]
-        to_w: *u8[] = [null]
-        from_r: *u8[] = [null]
-        from_w: *u8[] = [null]
-        CreatePipe(data(to_r), data(to_w), data(sa) as *u8, 0)
-        CreatePipe(data(from_r), data(from_w), data(sa) as *u8, 0)
-        SetHandleInformation(to_w[0], 1, 0)           # (this side's ends stay here)
-        SetHandleInformation(from_r[0], 1, 0)
-        name = __wide("DEWY_REPL_PIPES")
-        val = __wide("{to_r[0] as int},{from_w[0] as int}")
-        SetEnvironmentVariableW(data(name), data(val))
-        wcmd = __wide(__w32_cmdline([path]))
-        wexe = __wide(path)
-        si = fill(0, 13)
-        si[0] = 104
-        pi = fill(0, 3)
-        ok = CreateProcessW(data(wexe), data(wcmd), null, null, 1, 0, null, null, data(si) as *u8, data(pi) as *u8) != 0
-        SetEnvironmentVariableW(data(name), null)
-        CloseHandle(to_r[0])
-        CloseHandle(from_w[0])
-        if not ok: return "could not start the session program"
-        CloseHandle(pi[1] as *u8)
-        repl_pid = pi[0]
-        repl_to = to_w[0] as int
-        repl_from = from_r[0] as int
-        repl_exe = path
-        if not repl_started(): return "the session program did not start"
-    else:
-        # start it, with its end of two pipes as fds 3 and 4
-        a: i32[] = [-1, -1]
-        b: i32[] = [-1, -1]
-        syscall(293, data(a), 0)
-        syscall(293, data(b), 0)
-        pid = syscall(57)
-        if pid == 0:
-            syscall(33, int(a[0]), 3)
-            syscall(33, int(b[1]), 4)
-            __exec_unslid(path, [path])
-            syscall(60, 127)
-        syscall(3, int(a[0]))
-        syscall(3, int(b[1]))
-        repl_to = int(a[1])
-        repl_from = int(b[0])
-        if not repl_started(): return "the session program did not start"
-        delete_file(path)
-    repl_jbuf = __alloc(192)                    # (arm64's __setjmp keeps 168 bytes)
-    ""
 
 repl_write = (p: *u8, n: int):
     when TARGET == "windows":
@@ -277,29 +187,6 @@ repl_run = (text: str) -> bool:
         return status != 2
     false
 
-# 0: completed, 1: failed input (keep the session), 2: session ended.
-repl_run_input = (text: str) -> int:
-    c = repl_try(text, true)
-    if not c.ok: return 1
-    o = c.out
-    repl_inputs += 1
-    repl_send(1, o.addr, o.code)
-    # (with the end of the globals: what the session copies before running it, on Windows)
-    h = [2, o.addr + o.entry, img_data_addr + data_size + 8]
-    repl_write(data(h) as *u8, 24)
-    r = repl_wait_reply()
-    if r < 0:
-        eprint("the session ended")
-        return 2
-    if r >= 512:
-        if r - 512 == 101: return 1             # a panic (it said why)
-        repl_end()
-        exit(r - 512)                          # exit() in the input
-    if r == 256 + 2: eprint("interrupted; the session is as it was before this input")
-    else if r >= 256: eprint("crashed (signal {r - 256}); the session is as it was before this input")
-    if r >= 256: return 1
-    0
-
 # ---- reading input ----
 
 repl_tty = false
@@ -362,57 +249,7 @@ repl_getc = () -> int:
     if __read_fd(0, data(b), 1) != 1: return -1
     int(b[0])
 
-# names that could go at the end of text (what is typed of the name being completed is dropped):
-# the checker, at a placeholder name (as the language server does), then the compiler's memory
-# put back as it was
-repl_completions = (text: str) -> str[]:
-    a = len(text)
-    loop a > 0 and (is_alnum(text[a - 1]) or text[a - 1] >= 0x80): a -= 1
-    probe = text[..a) + "__dewy_complete__\n"
-    got = ""
-    when not BOOTSTRAP:
-        lo, n = __image_data()
-        s = __snap_take(lo, lo + n)
-        ide_on = true
-        ide_fd = -1
-        ide_out = ""
-        ide_sentinel = intern("__dewy_complete__")
-        if __setjmp(repl_jbuf) == 0:
-            __repl_jmp = repl_jbuf
-            repl_compile(probe, repl_inputs)
-        __repl_jmp = null
-        k = __snap_keep(ide_out)
-        __snap_restore(s)
-        __snap_drop(s)
-        got = __snap_unkeep(k)
-    prefix = text[a..]
-    out: str[]
-    loop l in split(got, "\n"):
-        if not starts_with(l, "C\t"): continue
-        e = find_byte(l, '\t', 2)
-        if e < 0: e = len(l)
-        name = l[2..e)
-        if not starts_with(name, prefix) or out.contains(name): continue
-        if starts_with(name, "__") and not starts_with(prefix, "_"): continue
-        out.push(name)
-    out.sort()
-    out
-
 repl_before = ""          # (the lines of the input typed so far, for completion)
-
-repl_load_history = ():
-    if let path = env("DEWY_REPL_HISTORY"):
-        repl_hist_path = path
-    else:
-        home = env("HOME") ?? ""
-        when TARGET == "windows":
-            if len(home) == 0: home = os_path(env("USERPROFILE") ?? "")
-        if len(home) == 0: return
-        repl_hist_path = "{home}/.dewy_history"
-    if len(repl_hist_path) == 0: return
-    if let h = read_file(repl_hist_path):
-        loop l in lines(h):
-            if len(l) > 0: repl_history.push(l)
 
 # ---- the prompt ----
 
@@ -432,65 +269,6 @@ An input that fails leaves session values and declarations as they were.
 External effects, such as printed output or file writes, are not rolled back.
 "
 
-repl_main = ():
-    ide_doc = "<input>.dewy"
-    when TARGET == "windows":
-        m: u32[] = [0]
-        repl_tty = GetConsoleMode(GetStdHandle(u32(0xFFFFFFF6)), data(m)) != 0
-        # (the prompt's line: drawn with terminal sequences)
-        hout = GetStdHandle(u32(0xFFFFFFF5))
-        if repl_tty and GetConsoleMode(hout, data(m)) != 0: SetConsoleMode(hout, m[0] | u32(0x4 | 0x1))   # VIRTUAL_TERMINAL_PROCESSING
-    else:
-        t = fill(u8(0), 64)
-        repl_tty = syscall(16, 0, 0x5401, data(t)) == 0
-        # (ctrl-c stops what an input is running, not the prompt)
-        act = [1, 0, 0, 0]                             # struct sigaction: SIG_IGN
-        syscall(13, 2, data(act), 0, 8)                # rt_sigaction(SIGINT)
-    why = repl_start()
-    if len(why) > 0:
-        eprint("dewy-core: {why}")
-        exit(1)
-    when TARGET == "windows":
-        # (ctrl-c stops what an input is running, not the prompt; set after the session started,
-        # which would have this too)
-        SetConsoleCtrlHandler(null, 1)
-    if repl_tty:
-        repl_out("Dewy (:help for help; braces may span lines; ctrl-d quits)\n")
-        repl_load_history()
-    loop true:
-        repl_raw(true)
-        text0 = repl_read()
-        repl_raw(false)
-        if text0 == none: break
-        text = text0!
-        if len(trim(text)) == 0: continue
-        t1 = trim(text)
-        if t1 == "exit" or t1 == "quit" or t1 == ":q" or t1 == ":quit" or t1 == ":exit": break
-        if t1 == ":help" or t1 == ":h" or t1 == "help":
-            repl_out(repl_help)
-            continue
-        if starts_with(t1, ":type ") or starts_with(t1, ":t ") or starts_with(t1, ":doc "):
-            what = trim(t1[find_byte(t1, ' ') + 1..])
-            # (built into the language: print, len of an array, ...: what they are, as API.md says)
-            bi = repl_builtin_doc(what)
-            if len(bi) > 0: repl_out(bi)
-            repl_sig_query = true
-            repl_sig = ""
-            quiet = len(bi) > 0
-            if quiet: quiet_errors = true
-            c = repl_try(what + "\n", false)
-            quiet_errors = false
-            repl_sig_query = false
-            repl_sig = ""
-            if c.ok:
-                if c.show: repl_out(c.type + "\n")
-                else if not quiet: repl_out("void\n")
-            continue
-        if not repl_run(text): break
-    repl_save_history()
-    repl_end()
-    exit(0)
-
 when TARGET == "windows":
     @lib("kernel32.dll")
     extern SetConsoleMode = (h: *u8, mode: u32) -> i32
@@ -509,3 +287,84 @@ REPL_BUILTINS = ["print", "print(value)    writes a value without a line break",
     "len", "len(values)    number of elements; for strings, bytes (text.length counts graphemes)",
     "bytes", "bytes(text)    UTF-8 bytes as array<uint8>"]
 
+# ---- the prompt's target- and bootstrap-conditional pieces, for repl_drive.dewy ----
+
+# (Windows) start the session program with two pipes, their handles in DEWY_REPL_PIPES ("": started)
+rs_start_windows = (path: str) -> str:
+    when TARGET == "windows":
+        # start it with two pipes, their handles in DEWY_REPL_PIPES
+        sa = fill(0, 3)
+        sa[0] = 24
+        sa[2] = 1                                     # inheritable
+        to_r: *u8[] = [null]
+        to_w: *u8[] = [null]
+        from_r: *u8[] = [null]
+        from_w: *u8[] = [null]
+        CreatePipe(data(to_r), data(to_w), data(sa) as *u8, 0)
+        CreatePipe(data(from_r), data(from_w), data(sa) as *u8, 0)
+        SetHandleInformation(to_w[0], 1, 0)           # (this side's ends stay here)
+        SetHandleInformation(from_r[0], 1, 0)
+        name = __wide("DEWY_REPL_PIPES")
+        val = __wide("{to_r[0] as int},{from_w[0] as int}")
+        SetEnvironmentVariableW(data(name), data(val))
+        wcmd = __wide(__w32_cmdline([path]))
+        wexe = __wide(path)
+        si = fill(0, 13)
+        si[0] = 104
+        pi = fill(0, 3)
+        ok = CreateProcessW(data(wexe), data(wcmd), null, null, 1, 0, null, null, data(si) as *u8, data(pi) as *u8) != 0
+        SetEnvironmentVariableW(data(name), null)
+        CloseHandle(to_r[0])
+        CloseHandle(from_w[0])
+        if not ok: return "could not start the session program"
+        CloseHandle(pi[1] as *u8)
+        repl_pid = pi[0]
+        repl_to = to_w[0] as int
+        repl_from = from_r[0] as int
+        repl_exe = path
+        if not repl_started(): return "the session program did not start"
+        return ""
+    else:
+        return ""
+
+# the checker's completions for probe, the compiler's memory then put back as it was
+rs_complete = (probe: str) -> str:
+    got = ""
+    when not BOOTSTRAP:
+        lo, n = __image_data()
+        s = __snap_take(lo, lo + n)
+        ide_on = true
+        ide_fd = -1
+        ide_out = ""
+        ide_sentinel = intern("__dewy_complete__")
+        if __setjmp(repl_jbuf) == 0:
+            __repl_jmp = repl_jbuf
+            repl_compile(probe, repl_inputs)
+        __repl_jmp = null
+        k = __snap_keep(ide_out)
+        __snap_restore(s)
+        __snap_drop(s)
+        got = __snap_unkeep(k)
+    got
+
+# is input a terminal (and the prompt's line drawn with terminal sequences; ctrl-c stops what an
+# input is running, not the prompt)
+rs_terminal = () -> bool:
+    when TARGET == "windows":
+        m: u32[] = [0]
+        tty = GetConsoleMode(GetStdHandle(u32(0xFFFFFFF6)), data(m)) != 0
+        hout = GetStdHandle(u32(0xFFFFFFF5))
+        if tty and GetConsoleMode(hout, data(m)) != 0: SetConsoleMode(hout, m[0] | u32(0x4 | 0x1))   # VIRTUAL_TERMINAL_PROCESSING
+        return tty
+    else:
+        t = fill(u8(0), 64)
+        tty = syscall(16, 0, 0x5401, data(t)) == 0
+        act = [1, 0, 0, 0]                             # struct sigaction: SIG_IGN
+        syscall(13, 2, data(act), 0, 8)                # rt_sigaction(SIGINT)
+        return tty
+
+# (Windows: ctrl-c stops what an input is running, not the prompt; set after the session started,
+# which would have this too)
+rs_console_keys = ():
+    when TARGET == "windows":
+        SetConsoleCtrlHandler(null, 1)
