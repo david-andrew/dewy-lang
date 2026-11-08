@@ -132,16 +132,34 @@ def node_total(time_stderr: str) -> int | None:
     return sum(map(int, found.groups())) if found else None
 
 
+SOURCES = re.compile(r'^source: (root|library) (-?\d+) (\S.*)$', re.MULTILINE)
+
+
+def counted_sources(time_stderr: str) -> list[tuple[str, int, str]]:
+    """The files `build --time` counted, as (side, code lines, path) rows, each file once: the program's files
+    (side root) and the library files parsed, whole or by unit (side library), each net of the lazy bodies
+    nobody asked for. Empty for a compiler that does not list them."""
+    return [(side, int(lines), path) for side, lines, path in SOURCES.findall(time_stderr)]
+
+
 def processed(time_stderr: str) -> dict[str, int] | None:
     """What `build --time` says the compile processed, or None (a compiler without the counts):
     root (the program's own code lines), library (the code lines of the library files it parsed, less the
     lazy bodies nobody asked for), instance (the code lines of each generic instance's declaration, once per
     instance), instances, and nodes (every syntax node made: root, library and shared). Total throughput
-    counts all three line kinds; the fan-out is library + instance."""
+    counts all three line kinds; the fan-out is library + instance. Where the compiler lists the files it
+    counted, root and library must be those files' lines (a listing that disagrees is an error, not a count)."""
     lines, nodes = LINES.search(time_stderr), node_total(time_stderr)
     if not lines or nodes is None:
         return None
     root, library, instance, instances = map(int, lines.groups())
+    rows = counted_sources(time_stderr)
+    if rows:
+        paths = [path for _, _, path in rows]
+        listed = {side: sum(n for s, n, _ in rows if s == side) for side in ('root', 'library')}
+        if len(set(paths)) != len(paths) or listed != {'root': root, 'library': library}:
+            raise ValueError(f'the counted files do not add up to the reported lines: root {root}, library {library}'
+                             f' against {listed}' + (' (a file counted twice)' if len(set(paths)) != len(paths) else ''))
     return {'root': root, 'library': library, 'instance': instance, 'instances': instances,
             'all': root + library + instance, 'nodes': nodes}
 

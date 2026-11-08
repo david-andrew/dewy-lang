@@ -11,6 +11,7 @@ SERVICES = r'''use 'source_types.dewy'
 use 'node_store.dewy'
 use 'checker_state.dewy'
 const NF_LAZY = 4
+const DC_LAZY_SPAN = -315
 const LK_INST = 0
 struct ModuleD:
     is_prelude: bool
@@ -114,10 +115,16 @@ main = ():
     lazy = n_(.block, at(0, 1)); nodes[lazy].flags = i32(NF_LAZY); nodes[lazy].ival = 0; nodes[lazy].aux = 8
     plain = n_(.block, at(0, 1))
     outside = n_(.block, at(9, 1)); nodes[outside].flags = i32(NF_LAZY)
-    waiting = n_(.block, at(0, 1)); nodes[waiting].ival = 0
+    waiting = n_(.block, at(0, 1)); nodes[waiting].ival = 0; nodes[waiting].aux2 = DC_LAZY_SPAN
     dc_parser.reader.dc_lazy_span_end[waiting] = 4
-    away = n_(.block, at(9, 1))
+    away = n_(.block, at(9, 1)); nodes[away].aux2 = DC_LAZY_SPAN
     dc_parser.reader.dc_lazy_span_end[away] = 4
+    # (a body read already: its block holds the body, and its span from the file's start is not waiting)
+    read = n_(.block, at(0, 1)); nodes[read].ival = 0
+    dc_parser.reader.dc_lazy_span_end[read] = 8
+    # (the same span twice, as a copied declaration leaves it: counted once)
+    twin = n_(.block, at(0, 1)); nodes[twin].flags = i32(NF_LAZY); nodes[twin].ival = 0; nodes[twin].aux = 8
+    pl_reached = [0, 0, 4, 0, 0, 4]
     pl_inst_decls = [d, d, leaf]
     ic_lines_report()
     print("counts ok")
@@ -127,5 +134,5 @@ main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_icount_ops_twins(compiler, tmp_path, release):  # noqa: F811
     output = compare_narrow(compiler, tmp_path, release, ('source_types', 'node_store', 'checker_types', 'checker_state', 'icount_ops'), DRIVER,
-                            doubles={'services.jo': SERVICES, 'icount.jo': STATE}, services=('check', 'lower', 'util', 'ast', 'dewy_context'))
+                            doubles={'services.jo': SERVICES, 'icount.jo': STATE}, services=('check', 'lower', 'util', 'ast', 'dewy_context', 'lazy_bodies'))
     assert output.endswith(b'counts ok\n')

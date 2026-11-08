@@ -22,6 +22,20 @@ def test_processed_counts_from_time_output():
     assert corpus.processed('no counts') is None
 
 
+def test_processed_checks_the_counted_files_against_the_totals():
+    head = 'nodes: root 7, library 36643, shared 28\n'
+    total = 'lines: root 3, library 20, instance 12; 3 instances; library parsed 1, bodies reached 1 of 1\n'
+    rows = 'source: root 3 /w/main.dewy\nsource: library 5 /lib/a.jo\nsource: library 15 /lib/b.dewy\n'
+    assert corpus.counted_sources(head + total + rows) == [('root', 3, '/w/main.dewy'), ('library', 5, '/lib/a.jo'),
+                                                           ('library', 15, '/lib/b.dewy')]
+    assert corpus.processed(head + total + rows)['all'] == 35
+    with pytest.raises(ValueError, match='do not add up'):
+        corpus.processed(head + total + 'source: root 3 /w/main.dewy\nsource: library 19 /lib/a.jo\n')
+    with pytest.raises(ValueError, match='counted twice'):
+        corpus.processed(head + total + rows + 'source: library 0 /lib/a.jo\n')
+    assert corpus.counted_sources(head + total) == []
+
+
 def test_root_files_follow_relative_imports_only(tmp_path):
     (tmp_path / 'main.dewy').write_text('from p"model.dewy" import x\nfrom p"@lib/game/image.jo" import deflate\n'
                                         '# from p"ignored.dewy" import y\n')

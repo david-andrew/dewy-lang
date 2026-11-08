@@ -4,6 +4,7 @@ from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (NF_LAZY has_flag kid_c kid_d kids kids2 nodes)
 from p"check.jo" import (fns modules)
 from p"dewy_context.jo" import (dc_parser)
+from p"lazy_bodies.jo" import (DC_LAZY_SPAN)
 from p"icount.jo" import (IC_LIB IC_PHASES IC_ROOT IC_SHARED ic_bucket ic_counts ic_fd ic_last ic_on)
 from p"lower.jo" import (LK_INST lfuncs)
 from p"util.jo" import (code_lines files lib_root pl_files pl_inst_decls pl_on pl_reached pl_units pos_file pos_off)
@@ -162,37 +163,73 @@ ic_decl_lines=(decl:int64):>int64=>$unsafe {
 }
 # The source lines the compile processed: the program's files; the library files parsed, less the
 # bodies nobody asked for, plus (once per instance, as each is checked and lowered again) the
-# declaration of every generic instance made.
+# declaration of every generic instance made. A `source:` row names each file counted and its lines.
+ic_is_lib=(f:int64):>bool=>$unsafe {
+    (lib_root as array<uint8>).length >? 0 and starts_with(files[f].path lib_root)
+}
 ic_lines_report=():>void=>$unsafe {
     if not pl_on {return}
-    let root:CountWord=0
-    let library:CountWord=0
+    let per=dict<int64 int64>()
+    let parsed:CountWord=0
     loop f in pl_files {
         let n=code_lines(files[f].src 0 (files[f].src as array<uint8>).length)
-        if (lib_root as array<uint8>).length >? 0 and starts_with(files[f].path lib_root) {library += n}
-        else {root += n}
+        per[f]=(per.get(f) ?? 0) + n
+        if ic_is_lib(f) {parsed += n}
     }
     let for_u:CountWord=0
     loop for_u <? pl_units.length {
-        library += code_lines(files[pl_units[for_u]].src pl_units[for_u + 1] pl_units[for_u + 2])
+        let f=pl_units[for_u]
+        let n=code_lines(files[f].src pl_units[for_u + 1] pl_units[for_u + 2])
+        per[f]=(per.get(f) ?? 0) + n
+        parsed += n
         for_u += 3
     }
+    # (a span counts once, though generic instances copy declarations that share a waiting body)
     let reached:CountWord=0
+    let seen=dict<int64 int64>()
     let for_i:CountWord=0
     loop for_i <? pl_reached.length {
-        reached += code_lines(files[pl_reached[for_i]].src pl_reached[for_i + 1] pl_reached[for_i + 2])
+        let f=pl_reached[for_i]
+        let key=(f << 32) | pl_reached[for_i + 1]
+        if not seen.has(key) {
+            seen[key]=1
+            let n=code_lines(files[f].src pl_reached[for_i + 1] pl_reached[for_i + 2])
+            per[f]=(per.get(f) ?? 0) + n
+            reached += n
+        }
         for_i += 3
     }
+    # (a body not asked for: still waiting, its text parsed or lexed as part of its file or unit)
     let unasked:CountWord=0
+    let waiting=dict<int64 int64>()
     loop i in [1..nodes.length) {
         if nodes.ptr[i].kind =? 'block' and has_flag(i NF_LAZY) {
             let f=pos_file(nodes.ptr[i].pos)
-            if f >=? 0 and f <? files.length {unasked += code_lines(files[f].src CountWord(nodes.ptr[i].ival) CountWord(nodes.ptr[i].ival) + CountWord(nodes.ptr[i].aux))}
+            let key=(f << 32) | nodes.ptr[i].ival
+            if f >=? 0 and f <? files.length and not waiting.has(key) {
+                waiting[key]=1
+                let n=code_lines(files[f].src CountWord(nodes.ptr[i].ival) CountWord(nodes.ptr[i].ival) + CountWord(nodes.ptr[i].aux))
+                per[f]=(per.get(f) ?? 0) - n
+                unasked += n
+            }
         }
     }
+    # (a body already read stays in the span table, its block now holding the body: only a block still marked is waiting)
     loop [b stop] in dc_parser.reader.dc_lazy_span_end {
         let f=pos_file(nodes.ptr[b].pos)
-        if f >=? 0 and f <? files.length {unasked += code_lines(files[f].src CountWord(nodes.ptr[b].ival) stop)}
+        let key=(f << 32) | nodes.ptr[b].ival
+        if nodes.ptr[b].aux2 =? DC_LAZY_SPAN and f >=? 0 and f <? files.length and not waiting.has(key) {
+            waiting[key]=1
+            let n=code_lines(files[f].src CountWord(nodes.ptr[b].ival) stop)
+            per[f]=(per.get(f) ?? 0) - n
+            unasked += n
+        }
+    }
+    let root:CountWord=0
+    let library:CountWord=0
+    loop [f n] in per {
+        if ic_is_lib(f) {library += n}
+        else {root += n}
     }
     let made=dict<int64 int64>()
     loop d in pl_inst_decls {made[d]=(made.get(d) ?? 0) + 1}
@@ -203,5 +240,10 @@ ic_lines_report=():>void=>$unsafe {
             made.remove(d);
         }
     }
-    eprint("lines: root {root}, library {library - unasked + reached}, instance {inst_lines}; {pl_inst_decls.length} instances; library parsed {library}, bodies reached {reached} of {unasked}")
+    eprint("lines: root {root}, library {library}, instance {inst_lines}; {pl_inst_decls.length} instances; library parsed {parsed}, bodies reached {reached} of {unasked}")
+    loop [f n] in per {
+        let side="root"
+        if ic_is_lib(f) {side="library"}
+        eprint("source: {side} {n} {files[f].path}")
+    }
 }

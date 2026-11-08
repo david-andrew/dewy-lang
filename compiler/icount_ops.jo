@@ -4,6 +4,7 @@ use 'check.jo'
 use 'lower.jo'
 use 'util.jo'
 use 'ast.jo'
+use 'lazy_bodies.jo'
 
 ic_read = () -> int:
     buf = [0]
@@ -136,32 +137,62 @@ ic_decl_lines = (decl: int) -> int:
     code_lines(src, a, b)
 # The source lines the compile processed: the program's files; the library files parsed, less the
 # bodies nobody asked for, plus (once per instance, as each is checked and lowered again) the
-# declaration of every generic instance made.
+# declaration of every generic instance made. A `source:` row names each file counted and its lines.
+ic_is_lib = (f: int) -> bool: len(lib_root) > 0 and starts_with(files[f].path, lib_root)
 ic_lines_report = ():
     if not pl_on: return
-    root = 0
-    library = 0
+    per: {int: int} = {}
+    parsed = 0
     loop f in pl_files:
         n = code_lines(files[f].src, 0, len(files[f].src))
-        if len(lib_root) > 0 and starts_with(files[f].path, lib_root): library += n
-        else: root += n
+        per[f] = (per.get(f) ?? 0) + n
+        if ic_is_lib(f): parsed += n
     for_u = 0
     loop for_u < pl_units.len():
-        library += code_lines(files[pl_units[for_u]].src, pl_units[for_u + 1], pl_units[for_u + 2])
+        f = pl_units[for_u]
+        n = code_lines(files[f].src, pl_units[for_u + 1], pl_units[for_u + 2])
+        per[f] = (per.get(f) ?? 0) + n
+        parsed += n
         for_u += 3
+    # (a span counts once, though generic instances copy declarations that share a waiting body)
     reached = 0
+    seen: {int: int} = {}
     for_i = 0
     loop for_i < pl_reached.len():
-        reached += code_lines(files[pl_reached[for_i]].src, pl_reached[for_i + 1], pl_reached[for_i + 2])
+        f = pl_reached[for_i]
+        key = (f << 32) | pl_reached[for_i + 1]
+        if not seen.has(key):
+            seen[key] = 1
+            n = code_lines(files[f].src, pl_reached[for_i + 1], pl_reached[for_i + 2])
+            per[f] = (per.get(f) ?? 0) + n
+            reached += n
         for_i += 3
+    # (a body not asked for: still waiting, its text parsed or lexed as part of its file or unit)
     unasked = 0
+    waiting: {int: int} = {}
     loop i in [1..nodes.len()):
         if nodes[i].kind == .block and has_flag(i, NF_LAZY):
             f = pos_file(nodes[i].pos)
-            if f >= 0 and f < files.len(): unasked += code_lines(files[f].src, int(nodes[i].ival), int(nodes[i].ival) + int(nodes[i].aux))
+            key = (f << 32) | int(nodes[i].ival)
+            if f >= 0 and f < files.len() and not waiting.has(key):
+                waiting[key] = 1
+                n = code_lines(files[f].src, int(nodes[i].ival), int(nodes[i].ival) + int(nodes[i].aux))
+                per[f] = (per.get(f) ?? 0) - n
+                unasked += n
+    # (a body already read stays in the span table, its block now holding the body: only a block still marked is waiting)
     loop b, stop in dc_parser.reader.dc_lazy_span_end:
         f = pos_file(nodes[b].pos)
-        if f >= 0 and f < files.len(): unasked += code_lines(files[f].src, int(nodes[b].ival), stop)
+        key = (f << 32) | int(nodes[b].ival)
+        if nodes[b].aux2 == DC_LAZY_SPAN and f >= 0 and f < files.len() and not waiting.has(key):
+            waiting[key] = 1
+            n = code_lines(files[f].src, int(nodes[b].ival), stop)
+            per[f] = (per.get(f) ?? 0) - n
+            unasked += n
+    root = 0
+    library = 0
+    loop f, n in per:
+        if ic_is_lib(f): library += n
+        else: root += n
     made: {int: int} = {}
     loop d in pl_inst_decls: made[d] = (made.get(d) ?? 0) + 1
     inst_lines = 0
@@ -169,4 +200,8 @@ ic_lines_report = ():
         if made.has(d):
             inst_lines += ic_decl_lines(d) * (made.get(d) ?? 0)
             made.remove(d)
-    eprint("lines: root {root}, library {library - unasked + reached}, instance {inst_lines}; {pl_inst_decls.len()} instances; library parsed {library}, bodies reached {reached} of {unasked}")
+    eprint("lines: root {root}, library {library}, instance {inst_lines}; {pl_inst_decls.len()} instances; library parsed {parsed}, bodies reached {reached} of {unasked}")
+    loop f, n in per:
+        side = "root"
+        if ic_is_lib(f): side = "library"
+        eprint("source: {side} {n} {files[f].path}")
