@@ -1,0 +1,10 @@
+# modes: native
+# A raw pointer does not keep an array's length across a call it is lent to.
+memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8> => $extern
+shrink=(@xs:array<uint8>):>void=>{ xs.clear() }
+main=():>void=>{
+    let buf:array<uint8>=[1 2 3 4]
+    $unsafe memset(buf.ptr 0 4);
+    shrink(@buf)
+    printl(buf[0])
+}

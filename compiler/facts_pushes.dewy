@@ -214,7 +214,7 @@ fact_counted_pushes=(n:PushWord @s:FactState):>array<[int64 int64]>=>$unsafe {
     let candidates:array<int64>=[]
     fact_push_candidates(body @candidates)
     loop l in candidates {
-        if PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) not=? 0 {continue}
+        if PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM) not=? 0 {continue}
         if tkind(fact_type(PushWord(locals.ptr[l].type))) not=? 'array' {continue}
         if fact_mentions(PushWord(nodes.ptr[n].a) l) or fact_push_count(body l) not=? 1 {continue}
         let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[l].owner) l))
@@ -288,7 +288,7 @@ fact_scaled_pushes=(n:PushWord @s:FactState):>array<[int64 int64 int64]>=>$unsaf
     let queried=false
     let trips=dict<int64 FactBound>()
     loop l in candidates {
-        if PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) not=? 0 {continue}
+        if PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM) not=? 0 {continue}
         if tkind(fact_type(PushWord(locals.ptr[l].type))) not=? 'array' or fact_mentions(PushWord(nodes.ptr[n].a) l) {continue}
         let k=fact_push_count(body l)
         if k =? -1 {
@@ -368,7 +368,7 @@ fact_growing_pushes=(n:PushWord @s:FactState counted:array<[int64 int64]>):>arra
         loop c in counted {
             if c[0] =? l {known=true}
         }
-        if known or PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) not=? 0 {continue}
+        if known or PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM) not=? 0 {continue}
         if tkind(fact_type(PushWord(locals.ptr[l].type))) not=? 'array' or fact_mentions(PushWord(nodes.ptr[n].a) l) {continue}
         let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[l].owner) l))
         if i <? 0 {continue}

@@ -1,0 +1,25 @@
+# modes: native native-release
+# A raw pointer reaches an array's elements, never its length: after C fills
+# the elements, the length is still known, so indexing needs no guard.
+gettimeofday=(now:ptr<int64> zone:ptr<uint8>?):>int32 => $extern
+memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8> => $extern
+strnlen=(s:ptr<uint8> max:uint64):>uint64 => $extern
+
+main=():>void=>{
+    let now:array<int64>=[0 0]
+    $unsafe gettimeofday(now.ptr none);
+    printl(now[0] >? 1000000000 now[1] <? 1000000)
+    let buf:array<uint8>=[104 105 33 0 7 7]
+    let k=$unsafe strnlen(buf.ptr 6)
+    if k >? uint64(buf.length) return
+    let shown:array<uint8>=[]
+    loop i in [0..int64(k)) { shown.push(buf[i]) }
+    printl(shown buf[5])
+    $unsafe memset(buf.ptr 0 6);
+    printl(buf[0] buf[5])
+    # (a counted push loop's length survives the call too)
+    let rows:array<int64>=[]
+    loop i in [0..40) { rows.push(i) }
+    $unsafe memset(rows.ptr as ptr<uint8> 0 8);
+    printl(rows[0] rows[39])
+}

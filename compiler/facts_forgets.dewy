@@ -2,7 +2,7 @@ $runtime_checks
 from p"facts_summaries.dewy" import fact_record_arrays
 from p"effect_library.jo" import EffectClass
 from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (FK_INIT LF_ALIAS LF_MUTPARAM dewy_at fns globals lib_dir locals modules runtime_insts)
+from p"check.jo" import (FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM dewy_at fns globals lib_dir locals modules runtime_insts)
 from p"checks_thin.dewy" import (library_exit_call)
 from p"effect_classifiers.dewy" import (effect_library_class)
 from p"effect_control.dewy" import (effects_demand)
@@ -122,8 +122,22 @@ fact_forget=(@s:FactState at:ForgetWord reason:FactReason all:bool=false written
         let t=if p.root =? 'local' {ForgetWord(locals.ptr[p.declaration].type)} else {ForgetWord(globals.ptr[p.declaration].type)}
         let v=fact_new(@s fact_domain(t reason at) FactTerm(type=t))
         fact_holds_contract(@s t v)
-        s.bindings.ptr[i]=FactBinding(p v at s.bindings.ptr[i].value)
+        let old=s.bindings.ptr[i].value
+        if fact_raw_exposed_array(p) and old not=? 0 and v not=? 0 {
+            let length=fact_project(@s old (-1) false T_INT)
+            if length not=? 0 and s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(v (-1) false length))}
+        }
+        s.bindings.ptr[i]=FactBinding(p v at old)
     }
+}
+# An array local exposed only as raw storage (`xs.ptr`, `data(xs)`): the
+# pointer reaches its elements, never its descriptor, so a call may change
+# its elements but not its length. O(1).
+fact_raw_exposed_array=(p:PlaceIdentity):>bool=>$unsafe {
+    if p.root not=? 'local' or p.declaration <=? 0 {return false}
+    let l=p.declaration
+    let lent=LF_ADDR | LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_EXPOSED | LF_ALIAS | LF_ELEMALIAS | LF_SOAELEM | LF_PARTBORROW | LF_OWNERBORROW
+    ForgetWord(locals.ptr[l].flags) & lent =? LF_EXPOSED and tkind(fact_type(ForgetWord(locals.ptr[l].type))) =? 'array' and fact_dewy_local(l)
 }
 # A program function's `@` parameter: a text sink writes only the library's
 # own output state, whose globals only the runtime names, so `printl` keeps the

@@ -160,7 +160,18 @@ fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false,
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         v = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
         fact_holds_contract(s, t, v)
-        s.bindings[i] = FactBinding(p, v, at, s.bindings[i].value)
+        old = s.bindings[i].value
+        if fact_raw_exposed_array(p) and old != 0 and v != 0:
+            length = fact_project(s, old, -1, false, T_INT)
+            if length != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(v, -1, false, length))
+        s.bindings[i] = FactBinding(p, v, at, old)
+# An array local exposed only as raw storage (`xs.ptr`, `data(xs)`): the
+# pointer reaches its elements, never its descriptor, so a call may change
+# its elements but not its length. O(1).
+fact_raw_exposed_array = (p: PlaceIdentity) -> bool:
+    if p.root != .local or p.declaration <= 0: return false
+    l = p.declaration
+    int(locals[l].flags) & FACT_LENT == LF_EXPOSED and tkind(fact_type(int(locals[l].type))) == .array and fact_dewy_local(l)
 # A program function's `@` parameter: a text sink writes only the library's
 # own output state, whose globals only the runtime names, so `printl` keeps the
 # facts of `@pos` and `@inv`. O(1).
