@@ -386,8 +386,20 @@ ff_arith_signed = (n: int, m: int, sym: str, a: FR, b: FR, op: Tok) -> FR:
     r.nan = m & FF_NAN == 0 and (nan or a.nan or b.nan)
     r
 # A call of a bundled math function: its obligations and bounds.
+ff_rational_bounds = (n: int) -> FR:
+    if let constant = rational_constants.get(n): return ff_literal(f64(constant.0)/f64(constant.1))
+    if bundled_word_rational_type(ntype(n)): return FR(-9223372036854775808.0, 9223372036854775808.0)
+    l = if nodes[n].kind == .ident and nodes[n].aux == i32(1): int(nodes[n].sym) else: 0
+    if l > 0 and ff_env.has(l): return ff_env[l]
+    FR(-__INF, __INF)
 ff_math = (n: int, name: str, args: FR[]) -> FR:
     m = ff_mode_at(nodes[n].pos)
+    if nkids(n) == 1 and name in ["to_float64", "to_float32", "_word_float64", "_word_float32"]:
+        d = int(fns[int(nodes[n].sym)].decl)
+        if files[pos_file(nodes[d].pos)].path == "{lib_dir}/rational.dewy":
+            r = ff_rational_bounds(kid(n, 0))
+            if ff_may_inf(r) and m & FF_INF != 0: ff_obligation(n, FF_INF, "the rational fits a float")
+            return r
     x = if args.len() > 0: args[0] else: ff_top()
     nan = false
     inf = false
@@ -548,6 +560,12 @@ ff_eval_node = (n: int) -> FR:
         # (a loop's variable holds elements: they enter)
         lv = if k == .for_: int(nodes[n].sym) else: 0
         if lv > 0 and lv < locals.len() and ff_tracked(lv) and int(locals[lv].type) > 0 and is_float(int(locals[lv].type)): ff_env[lv] = ff_enter()
+        if lv > 0 and int(locals[lv].flags) & (LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_ELEMALIAS | LF_SOAELEM | LF_CAPTURE) == 0 and (ff_tracked(lv) or int(locals[lv].flags) & LF_VALUEITER != 0) and bundled_rational_type(int(locals[lv].type)):
+            source = int(nodes[n].a)
+            if nodes[source].kind == .array and nkids(source) > 0 and not array_has_spread(source):
+                r = ff_rational_bounds(kid(source, 0))
+                loop i in [1..nkids(source)): r = ff_hull(r, ff_rational_bounds(kid(source, i)))
+                ff_env[lv] = r
         ff_children(n)
         ff_forget_assigned(n)
         return ff_top()

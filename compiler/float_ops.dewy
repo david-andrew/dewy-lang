@@ -1,11 +1,11 @@
 $runtime_checks
 from p"checked_eval.dewy" import (cx_token_values)
 from p"ast.jo" import (NF_GLOBAL has_flag kid kids nkids nodes)
-from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_SOAELEM ctxs cx dewy_at fns locals record_value_member)
+from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_SOAELEM LF_VALUEITER ctxs cx dewy_at fns lib_dir locals record_value_member)
 from p"checker_tokens.dewy" import (Tok)
 from p"directives.jo" import (dir_floats_any dir_name_no_inf dir_name_no_nan dir_scopes dir_value)
 from p"directive_rules.dewy" import (dir_defer dir_panics_demanded)
-from p"expr.jo" import (CV IN is_dewy_set_type ntype)
+from p"expr.jo" import (CV IN is_dewy_set_type ntype rational_constants)
 from p"checks_thin_expr.dewy" import (array_has_spread is_map_type)
 from p"facts.jo" import (FactState fact_bound fact_domain fact_open_endpoint fact_owner fact_speculating fact_type)
 from p"floats.jo" import (FF_ENTER FF_ENTER_INF FF_INF FF_MAX FF_NAN FK_EACH FK_ELEMENT FK_KEY FR ff_assume ff_callers ff_checks ff_checks_any ff_conversions ff_direct ff_env ff_files ff_fn ff_indirect ff_int_proven ff_integer_bounds ff_keys ff_operands ff_owners ff_probe ff_probing ff_ranged ff_ranging float_keys float_keys_any key_float_types)
@@ -21,8 +21,8 @@ from p"refine.jo" import (ref_interval refine_storage)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN)
 from p"types.jo" import (T_MATH_INT T_NEVER T_U64 fields is_float is_int prune struct_targ structs targ tkind tsize types)
 from p"type_ops.dewy" import (dt)
-from p"units.jo" import (quantity_base)
-from p"util.jo" import (err_notes fatal name_of pos_file pos_in_lib)
+from p"units.jo" import (bundled_rational_type bundled_word_rational_type quantity_base)
+from p"util.jo" import (err_notes fatal files name_of pos_file pos_in_lib)
 
 FloatWord:type=int64<overflow='wrap'>
 # Checks that float v (of IR type ft) truncates to a value of integer type
@@ -462,8 +462,26 @@ ff_arith_signed=(n:FloatWord m:FloatWord sym:string a:FR b:FR op:Tok):>FR=>{
     r
 }
 # A call of a bundled math function: its obligations and bounds.
+ff_rational_bounds=(n:FloatWord):>FR=>$unsafe {
+    let constant=rational_constants.get(n)
+    if constant not=? none {return ff_literal(float64(constant[0])/float64(constant[1]))}
+    # Normalized word rationals have a positive integer denominator.
+    if bundled_word_rational_type(ntype(n)) {return FR((-9223372036854775808.0) 9223372036854775808.0)}
+    let l=if nodes.ptr[n].kind =? 'ident' and nodes.ptr[n].aux =? int32(1) {FloatWord(nodes.ptr[n].sym)} else {0}
+    if l >? 0 and ff_env.has(l) {return ff_env[l]}
+    # Exact rationals cannot be NaN, but an unbounded numerator can round to infinity.
+    FR((-__INF) __INF)
+}
 ff_math=(n:FloatWord name:string args:array<FR>):>FR=>$unsafe {
     let m=ff_mode_at(nodes.ptr[n].pos)
+    if nkids(n) =? 1 and name in? ["to_float64" "to_float32" "_word_float64" "_word_float32"] {
+        let d=FloatWord(fns.ptr[FloatWord(nodes.ptr[n].sym)].decl)
+        if files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/rational.dewy" {
+            let r=ff_rational_bounds(kid(n 0))
+            if ff_may_inf(r) and m & FF_INF not=? 0 {ff_obligation(n FF_INF "the rational fits a float")}
+            return r
+        }
+    }
     let x=if args.length >? 0 {args[0]} else {ff_top()}
     let nan=false
     let inf=false
@@ -663,6 +681,16 @@ ff_eval_node=(n:FloatWord):>FR=>$unsafe {
         # (a loop's variable holds elements: they enter)
         let lv=if k =? 'for_' {FloatWord(nodes.ptr[n].sym)} else {0}
         if lv >? 0 and lv <? locals.length and ff_tracked(lv) and FloatWord(locals.ptr[lv].type) >? 0 and is_float(FloatWord(locals.ptr[lv].type)) {ff_env[lv]=ff_enter()}
+        # Only a literal inventory supplies rational element bounds. O(elements),
+        # demanded by this float-policy walk; other rational arrays stay unbounded.
+        if lv >? 0 and FloatWord(locals.ptr[lv].flags) & (LF_CAPTURED | LF_ADDR | LF_ALIAS | LF_ELEMALIAS | LF_SOAELEM | LF_CAPTURE) =? 0 and (ff_tracked(lv) or FloatWord(locals.ptr[lv].flags) & LF_VALUEITER not=? 0) and bundled_rational_type(FloatWord(locals.ptr[lv].type)) {
+            let source=FloatWord(nodes.ptr[n].a)
+            if nodes.ptr[source].kind =? 'array' and nkids(source) >? 0 and not array_has_spread(source) {
+                let r=ff_rational_bounds(kid(source 0))
+                loop i in [1..nkids(source)) {r=ff_hull(r ff_rational_bounds(kid(source i)))}
+                ff_env[lv]=r
+            }
+        }
         ff_children(n)
         ff_forget_assigned(n)
         return ff_top()
