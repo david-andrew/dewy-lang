@@ -224,6 +224,26 @@ __task_cleanup = (g: TaskGroup, previous: TaskGroup):
 
 __task_noop = () -> void: pass
 
+# The program's group, `main = (app:BackgroundTasks)` (D4 Q3): its tasks live as long as
+# the program, past `main` into the frame hooks. At the program's end (after `main`, after
+# the last frame, or at `exit`) the runtime stops and joins them. Made on first demand.
+struct BackgroundTasks:
+    __group: TaskGroup
+
+__program_group = TaskGroup()
+
+__program_tasks = () -> BackgroundTasks:
+    if __program_group.__state.len() == 0:
+        __program_group = __task_new_group()
+        if __program_group.__state.len() != 0: __at_end(__program_tasks_end)
+    BackgroundTasks(__program_group)
+
+__program_tasks_end = () -> void:
+    g = __program_group
+    if g.__state.len() != 0 and not g.__p.closed:
+        cancel(g)
+        __task_join(g)
+
 __task_seconds = (seconds: f64) -> int: int(seconds * 1000000000.0)
 __task_sleep_seconds = (seconds: f64) -> (void | Canceled): __task_sleep_ns(__task_seconds(seconds))
 __task_deadline = (ns: int) -> int:

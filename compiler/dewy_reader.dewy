@@ -5126,6 +5126,9 @@ rd_dc_function_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> name
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
         }
     }
+    if not rd_dc_main_params(@reader_ctx @reader_nodes ps name) {
+        return 0
+    }
     if ((name =? "main") and ((ps.length >? 1) or ((ps.length =? 1) and rd_has_flag(@reader_nodes ps[0] NF_MUT)))) {
         return 0
     }
@@ -11069,6 +11072,21 @@ rd_dc_unspelled=(@reader_ctx:ParserContext token:DewyLexeme):>int64=>$unsafe {
 }
 
 # `what` is not supported (dw_fail's mistake).
+# `main`'s parameters: command-line arguments or `BackgroundTasks` (D4 Q3), not yet both.
+rd_dc_main_params=(@reader_ctx:ParserContext @reader_nodes:array<Node> ps:array<int64> name:string):>bool=>$unsafe {
+    if name not=? "main" or ps.length <? 2 {
+        return true
+    }
+    loop p in ps {
+        let t:int64=int64<overflow='wrap'>(reader_nodes[p].a)
+        if t not=? 0 and reader_nodes[t].kind =? 'tname' and rd_name_of(@reader_ctx int64<overflow='wrap'>(reader_nodes[t].name)) =? "BackgroundTasks" {
+            rd_dc_hint(@reader_ctx reader_nodes[p].pos "Dewy does not yet support `main` taking both command-line arguments and `BackgroundTasks`: how they combine is still being designed, so take one or the other");
+            return false
+        }
+    }
+    true
+}
+
 rd_dc_unsupported=(@reader_ctx:ParserContext pos:int64 what:string):>void=>$unsafe {
     rd_dc_report(@reader_ctx pos "Dewy does not yet support {what}");
 }

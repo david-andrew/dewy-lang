@@ -80,6 +80,16 @@ rt_reader_word_name = (host: mut SeedParserHost, store: mut Node[], texts: mut s
 
 rt_reader_name_host = SeedParserHost(dw_value_name, intern_new)
 
+# `main`'s parameters: command-line arguments or `BackgroundTasks` (D4 Q3), not yet both.
+rt_dc_main_params = (ps: int[], name: str) -> bool:
+    if name != "main" or ps.len() < 2: return true
+    loop p in ps:
+        t = int(nodes[p].a)
+        if t != 0 and nodes[t].kind == .tname and name_of(int(nodes[t].name)) == "BackgroundTasks":
+            rt_dc_hint(nodes[p].pos, "Dewy does not yet support `main` taking both command-line arguments and `BackgroundTasks`: how they combine is still being designed, so take one or the other")
+            return false
+    true
+
 rt_dc_report = (pos: int, msg: str): dc_parser_report(dc_parser.status, pos, msg)
 
 # A mistake certain where it is read: reported now, after one noted earlier, when it may be.
@@ -6023,6 +6033,7 @@ rt_dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] 
         if rt_dn_peek() == .comma and commas:
             rt_dc_comma_mistake(mkpos(dc_parser.file, first.start))
             dc_parser.at += 1
+    if not rt_dc_main_params(ps, name): return 0
     if name == "main" and (ps.len() > 1 or (ps.len() == 1 and has_flag(ps[0], NF_MUT))): return 0
     if dc_parser.reader.dc_kinds.len() > kinds_at:
         any_kind = false

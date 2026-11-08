@@ -146,6 +146,11 @@ db_shape_prologue=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHos
     }
 }
 
+# Whether type syntax t names the program's task group, `BackgroundTasks`.
+db_background_tasks=(@store:array<Node> @texts:array<string> t:int64):>bool=>{
+    t not=? 0 and store[t].kind =? 'tname' and texts[int64(store[t].name)] =? "BackgroundTasks"
+}
+
 db_finish_function=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHost @texts:array<string> n:int64 parameters:array<int64> body:int64 name:string):>int64=>{
     let ps=parameters
     let prefix:array<int64>=[]
@@ -160,7 +165,8 @@ db_finish_function=(@store:array<Node> @lists:array<int32> @host:ParserBuilderHo
         store[value].aux2 = 1 # the parameter's value itself, even a function
         if name =? "main" {
             if ps.length not=? 1 {return host.unsupported(store[n].pos "multiple entry-point parameters")}
-            store[value].name = int32(host.intern_name("args"))
+            # (`main = (app:BackgroundTasks)`: the program's group, D4 Q3)
+            store[value].name = int32(host.intern_name(if db_background_tasks(@store @texts int64(store[param].a)) {"__program_tasks"} else {"args"}))
             let call=node_mk(@store 'call' store[param].pos)
             store[call].a = int32(value)
             value=call

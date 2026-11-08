@@ -3430,6 +3430,14 @@ array forwards per element (`[loop v in xs v or_throw<Canceled>]...`); a
 `parallel` loop's body cannot write `or_throw` yet, so under the tag such a loop
 whose elements may be `Canceled` is an error.
 
+`main = (app:BackgroundTasks) => ...` gives `main` the program's task group, whose
+tasks live as long as the program: past `main`, into `update` and `draw`. When the
+program ends (after `main`, after the last frame, or at `exit`) the runtime stops
+the group's tasks and joins them. `main` takes either this group or its
+command-line arguments (`main = (argv) => ...`), not yet both: how the two combine
+is still being designed. *Provisional:* the group's own operations (spawning a
+`Task` into it, and what a failed task there does) wait for the task API's design.
+
 Use parallel work for substantial independent calculations; scheduling and atomic
 reference counts can cost more than a small callback saves. Keep drawing and
 window/input operations on the main thread. The

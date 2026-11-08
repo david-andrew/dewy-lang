@@ -130,6 +130,10 @@ db_shape_prologue = (store: mut Node[], lists: mut i32[], host: mut ParserBuilde
             out.push(local)
         else: out.push(db_stmt(store, db_call(store, lists, host, "__shape_check", [db_parameter_value(store, param), db_singleton_int(store, i, pos), node_clone(store, lists, dim)], pos), pos))
 
+# Whether type syntax t names the program's task group, `BackgroundTasks`.
+db_background_tasks = (store: Node[], texts: str[], t: int) -> bool:
+    t != 0 and store[t].kind == .tname and texts[int(store[t].name)] == "BackgroundTasks"
+
 db_finish_function = (store: mut Node[], lists: mut i32[], host: mut ParserBuilderHost, texts: mut str[], n: int, parameters: int[], body: int, name: str) -> int:
     let ps = parameters
     prefix: int[]
@@ -144,7 +148,8 @@ db_finish_function = (store: mut Node[], lists: mut i32[], host: mut ParserBuild
         store[value].aux2 = 1   # the parameter's value itself, even a function
         if name == "main":
             if ps.len() != 1: return host.unsupported(store[n].pos, "multiple entry-point parameters")
-            store[value].name = i32(host.intern_name("args"))
+            # (`main = (app:BackgroundTasks)`: the program's group, D4 Q3)
+            store[value].name = i32(host.intern_name(if db_background_tasks(store, texts, int(store[param].a)): "__program_tasks" else: "args"))
             call = node_mk(store, .call, store[param].pos)
             store[call].a = i32(value)
             value = call
