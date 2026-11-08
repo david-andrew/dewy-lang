@@ -13,6 +13,7 @@ $runtime_checks
 # interface and give the same answers (tests/test_selfhost_dewy_grammar.py). The lexemes are
 # the parser's, passed by place with the position being read.
 
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"dewy_tokens.dewy" import DewyToken, DewyKind, DewyLexeme
 from p"dewy_lex.dewy" import DewyLexer, dn_quote_end
 from p"literals.dewy" import literal_spec_problem
@@ -232,7 +233,7 @@ dn_spec_colon=(@lx:DewyLexer source:string start:int64 stop:int64):>int64=>{
     # at, reads as a letter no spec gives a meaning to)
     let j=found + 1
     loop j <? stop and b[j] >=? 0x80 and b[j] <? 0xC0 {j+=1}
-    let spec=source.byte_slice(j stop)
+    let spec=__str_slice(source j stop)
     loop j >? found + 1 {
         spec="z{spec}"
         j-=1

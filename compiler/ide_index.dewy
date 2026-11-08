@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"@lib/core/str.jo" import (byte_str ends_with starts_with trim)
 from p"ast.jo" import (NF_LITERAL NF_MUT NF_VOID has_flag kid kids kids2 nkids nodes)
 from p"check.jo" import (LF_CAPTURE globals lib_dir locals modules narrowed_var prelude syms)
@@ -146,7 +147,7 @@ ide_ref_name=(p:IdeIndexWord):>string=>{
     let src=files[pos_file(p)].src
     let e=pos_off(p)
     loop e <? (src as array<uint8>).length and ide_is_name_byte((src as array<uint8>)[e]) {e += 1}
-    src.byte_slice(pos_off(p) e)
+    __str_slice(src pos_off(p) e)
 }
 # a declaration node d of kind k (with its name at p)
 ide_decl_node=(d:IdeIndexWord p:IdeIndexWord kind:IdeIndexWord):>void=>$unsafe {
@@ -182,7 +183,7 @@ ide_hint_local=(s:IdeIndexWord l:IdeIndexWord):>void=>$unsafe {
     let e=ide_line_end(src i)
     let eq=find_byte(src b'=' i)
     if eq >=? 0 and eq <? e {
-        let rest=trim(src.byte_slice(eq + 1 e))
+        let rest=trim(__str_slice(src eq + 1 e))
         if starts_with(rest "{t}(") or starts_with(rest "{t}[") or starts_with(rest "[") and ends_with(rest "]") and ends_with(t "[]") and rest not=? "[]" {return}
     }
     ide_hint_locals.push(l)

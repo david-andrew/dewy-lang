@@ -1,6 +1,6 @@
 $runtime_checks
 from p"@lib/std/path.jo" import (file_name)
-from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"@lib/core/rt.jo" import (__str_from_bytes __str_slice)
 from p"@lib/core/str.jo" import (join replace trim)
 from p"arena_ops.dewy" import (arena_enable arena_return_at)
 from p"ast.jo" import (dewy_live_sources dewy_note_member dewy_param_kinds)
@@ -54,7 +54,7 @@ rs_build_setting_apply=(target:bool text:string pos:int64 value_pos:int64 name:s
     return
 }
 rs_bytes_slice=(source:string first:int64 stop:int64):>string=>{
-    source.byte_slice(first stop)
+    __str_slice(source first stop)
 }
 rs_decimal_let=(n:int64):>void=>{
     decimal_let(n)

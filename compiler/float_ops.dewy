@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"ast.jo" import (NF_GLOBAL has_flag kid kids nkids nodes)
 from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_SOAELEM LF_VALUEITER ctxs cx dewy_at fns lib_dir locals record_value_member)
@@ -1053,7 +1054,7 @@ ff_int_obligation=(n:FloatWord to:FloatWord):>void=>$unsafe {
         effect_panic_note(ff_fn n claim);
         return
     }
-    let name=if (shown as array<uint8>)[0] =? b'`' and (shown as array<uint8>)[1] not=? b'.' {shown.byte_slice(1 (shown as array<uint8>).length - 1)} else {"x"}
+    let name=if (shown as array<uint8>)[0] =? b'`' and (shown as array<uint8>)[1] not=? b'.' {__str_slice(shown 1 (shown as array<uint8>).length - 1)} else {"x"}
     let r=ff_int_range(to)
     let low=if FloatWord(types.ptr[to].bits) =? 64 and types.ptr[to].sign {"float64(int64.min)"} else {"{int64(r.lo)}.0"}
     let high=if FloatWord(types.ptr[to].bits) =? 64 and types.ptr[to].sign {"float64(int64.max)"} else if FloatWord(types.ptr[to].bits) =? 64 {"1.8e19"} else {"{int64(r.hi)}.0"}

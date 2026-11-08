@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"checks_text.dewy" import (sym_kind_ordinal)
 from p"checks_thin.dewy" import (jd)
 from p"checks_text.dewy" import (byte_find)
@@ -172,7 +173,7 @@ variant_error=(n:int64 et:int64 code:int64):>void=>$unsafe {
         let vh=bare_variant_hint(nm)
         if (vh as array<uint8>).length >? 0 {
             # (screen = .title where nothing says it is a Screen: the enum's name says it)
-            let en=vh.byte_slice(byte_find(vh "else `") + 6 (vh as array<uint8>).length - 2)
+            let en=__str_slice(vh byte_find(vh "else `") + 6 (vh as array<uint8>).length - 2)
             fatal(nodes.ptr[n].pos "which enum '.{name_of(nm)}' belongs to is not known here: write `{en}`")
         }
         fatal(nodes.ptr[n].pos "cannot infer the enum type for '.{name_of(nm)}'")

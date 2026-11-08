@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"ast.jo" import (lists mk nodes)
 from p"check.jo" import (release_build)
 from p"dewy_builders.dewy" import (db_finish_function db_range_value db_singleton_and db_singleton_int db_singleton_value db_value_name)
@@ -34,7 +35,7 @@ dw_text=(text:string pos:NodeOpWord):>int64=>$unsafe {
 # `$shadowable` before a module-level `const`
 dw_module_text=(id:NodeOpWord):>string=>{
     let n=dc_parser.reader.module_nodes[-1 - id]
-    files[pos_file(n.pos)].src.byte_slice(pos_off(n.pos) + 1 n.ival)
+    __str_slice(files[pos_file(n.pos)].src pos_off(n.pos) + 1 n.ival)
 }
 dw_singleton_and=(a:NodeOpWord b:NodeOpWord pos:NodeOpWord):>int64=>{
     db_singleton_and(@nodes a b pos)

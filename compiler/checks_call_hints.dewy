@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"types.jo" import (ts_dewy)
 from p"type_ops.dewy" import (dt)
 from p"@lib/core/str.jo" import (is_alnum lower)
@@ -48,7 +49,7 @@ member_after=(p:CallHintWord n:CallHintWord):>string=>{
     if o >=? (src as array<uint8>).length or (src as array<uint8>)[o] not=? b'.' {return ""}
     let e=o + 1
     loop e <? (src as array<uint8>).length and (is_alnum((src as array<uint8>)[e]) or (src as array<uint8>)[e] =? b'_') {e += 1}
-    src.byte_slice(o + 1 e)
+    __str_slice(src o + 1 e)
 }
 # (this.tweens.add, this.time.delayedCall, game.config.width: Phaser's, through its scene)
 phaser_hint=(nm:string member:string):>string=>{
@@ -71,9 +72,9 @@ file_ext_after=(p:CallHintWord n:CallHintWord):>string=>{
     if o >=? (src as array<uint8>).length or (src as array<uint8>)[o] not=? b'.' {return ""}
     let e=o + 1
     loop e <? (src as array<uint8>).length and is_alnum((src as array<uint8>)[e]) {e += 1}
-    let ext=lower(src.byte_slice(o + 1 e))
+    let ext=lower(__str_slice(src o + 1 e))
     loop x in ["png" "jpg" "jpeg" "wav" "ogg" "mp3" "txt" "json" "csv" "ttf" "otf" "glb" "gltf" "tmx" "jo"] {
-        if ext =? x {return src.byte_slice(o e)}
+        if ext =? x {return __str_slice(src o e)}
     }
     ""
 }

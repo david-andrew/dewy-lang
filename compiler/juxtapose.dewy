@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"ast.jo" import (NF_CHECKED NF_EXCL_FIRST NF_JUXT NF_SPREAD add_flag has_flag kid kids nkids nodes set_kid)
 from p"check.jo" import (check_struct_fields ensure_global globals locals syms)
 from p"checker_expr.dewy" import (check_expr lookup)
@@ -220,7 +221,7 @@ juxt_spaced_before=(pos:JuxtWord):>string=>{
     if bytes[i - 1] =? b')' or bytes[i - 1] =? b']' {return src.byte_slice(i - 1 stop)}
     loop i >? 0 and (is_ident_char(bytes[i - 1]) or bytes[i - 1] =? b'.') {i -= 1}
     if i =? stop {return ""}
-    src.byte_slice(i stop)
+    __str_slice(src i stop)
 }
 # `9.81 m`: a unit (a constant quantity) written apart from its number is two expressions.
 juxt_spaced_unit=(n:JuxtWord):>void=>$unsafe {
