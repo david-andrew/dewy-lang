@@ -530,3 +530,9 @@ section linked. ROADMAP.md lists them in one line each.
     `E` names it; D14's `?? return/break/continue` and batch 3's C3 follow the same rule;
     rounding's `ties=` becomes `rounding=`; the optional `$parallel_safe` sentence
     (2026-11-01) goes; D15a's module and scope clause gives way to the entry-point rule.
+  - **Calling another file's `main`** (David, 2026-11-07): `main` is an ordinary
+    function, so it can be imported and called. If a running `main` reaches, possibly
+    transitively, another `main` that sets a program-wide `$program.*` tag differently,
+    that is a compile error naming both settings. No way to ignore conflicting inner tags
+    is added: calling another file's `main` is unidiomatic outside rare cases such as test
+    libraries. Considered: a call-site override that ignores the callee's tags.
