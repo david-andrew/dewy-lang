@@ -1,0 +1,18 @@
+BigKey:type=[values:secret<array<int>>]
+main=()=>{
+let xs:array<int>=[0 1 -1 100000000000000000000000000000000000000 -100000000000000000000000000000000000000]
+loop a in xs {loop b in xs {
+let s=secret(a)
+if (s <? b).reveal not=? (a <? b) panic("lt")
+if (s >=? b).reveal not=? (a >=? b) panic("ge")
+if (s =? b) not=? (a =? b) panic("eq")
+}}
+let a:array<int>=[1 100000000000000000000000000000000000000 3]
+let b:array<int>=[1 100000000000000000000000000000000000001 3]
+if BigKey[a] =? BigKey[b] panic("record array")
+if BigKey[a] not=? BigKey[a.copy] panic("equal record array")
+if secret(a) =? secret(b) panic("array")
+if secret(a) not=? secret(a.copy) panic("equal array")
+printl("ok")
+}
+$runtime_checks

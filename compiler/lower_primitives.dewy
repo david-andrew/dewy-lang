@@ -47,7 +47,7 @@ lf_of_inst=(f:LPWord):>int64=>$unsafe {
 }
 lf_helper=(hk:HK t0:LPWord p:LPWord):>int64=>$unsafe {
     # (a secret's helpers are its value's: secrets.jo)
-    let t=if secrets_seen {secret_repr(t0)} else {t0}
+    let t=if secrets_seen and hk not=? HK.eq {secret_repr(t0)} else {t0}
     if helper_slots.length =? 0 {helper_slots=fill(int32(0) 64)}
     let slot=helper_slot(hk t p)
     if helper_slots.ptr[slot] not=? 0 {

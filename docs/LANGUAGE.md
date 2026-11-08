@@ -3831,11 +3831,14 @@ and set members, and they work in generic code.
 
 A secret costs nothing. It is stored and passed exactly as its `T`, and a program
 built with secrets compiles to the same machine code as the one without them,
-except equality. `=?` and `not=?` with a secret operand, against another secret or
-a plain value, compare strings and arrays of integers in constant time: every byte
-is read, so the time depends only on the lengths, never on where the values differ.
-Lengths stay public, as in Python's `hmac.compare_digest`. A dictionary with secret
-keys compares them the same way. Ordering is not constant-time yet. (Provisional.)
+except comparisons. `=?` and `not=?` with a secret operand, against another secret
+or a plain value, compare strings and arrays of integers in constant time: every
+byte is read, so the time depends only on the lengths, never on where the values
+differ. Record equality compares secret fields this way too, and array membership
+does so for each secret element it visits. Ordering on secret strings and integers
+also reads every byte or limb. Lengths stay public, as in Python's
+`hmac.compare_digest`. A dictionary with secret keys compares them the same way.
+(Provisional.)
 
 ## Files, paths and processes
 

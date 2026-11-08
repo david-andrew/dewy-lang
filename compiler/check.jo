@@ -3466,6 +3466,15 @@ check_value_members = (t0: int, hashing: bool, seen: mut {int: bool}):
         # Their backing-storage representation does not need value helpers.
         return
     k = types[t].kind
+    if k == .secret:
+        # Implicit equality of a field/element needs its runtime helpers checked
+        # before lowering, even without a directly written secret comparison.
+        if not hashing:
+            et = quantity_base(int(types[t].elem))
+            if et == T_STR or tkind(et) == .array or tkind(et) == .fixed or tkind(et) == .struct_ or tkind(et) == .tuple: runtime_fn("__ct_str_eq")
+            if et == T_MATH_INT or tkind(et) == .array and quantity_base(telem(et)) == T_MATH_INT: runtime_fn("__mi_ct_compare")
+        check_value_members(int(types[t].elem), hashing, seen)
+        return
     if k == .struct_:
         f = 0
         if hashing:

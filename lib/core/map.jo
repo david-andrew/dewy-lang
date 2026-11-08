@@ -19,6 +19,14 @@ __map_slot_equal = (keys: int[], e: int, k: int) -> bool: true
 __map_slot_equal = (keys: u64[], e: int, k: u64) -> bool: true
 __map_slot_equal[K] = (keys: K[], e: int, k: K) -> bool: __at(keys, e) == k
 
+# Secret keys have their value's representation. Full-word tags still identify
+# integer keys completely, so equality needs no dense-array read.
+when not BOOTSTRAP:
+    __map_tag = (k: secret[int], h: u64) -> u64: u64(k.reveal)
+    __map_tag = (k: secret[u64], h: u64) -> u64: k.reveal
+    __map_slot_equal = (keys: secret[int][], e: int, k: secret[int]) -> bool: true
+    __map_slot_equal = (keys: secret[u64][], e: int, k: secret[u64]) -> bool: true
+
 struct Map[K, V]:
     __keys: K[]
     vals: V[]

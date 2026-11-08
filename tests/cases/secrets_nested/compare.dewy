@@ -1,0 +1,30 @@
+# quick
+Login:type=[name:string pass:secret<string>]
+Key:type=[bytes:secret<array<uint8>>]
+main=()=>{
+    let a=Login["ann" "abc"]
+    printl(a =? Login["ann" "abc"] a not=? Login["ann" "abd"])
+    let bytes:array<uint8>=[1 2 3]
+    let other:array<uint8>=[1 2 4]
+    printl(Key[bytes] =? Key[bytes.copy] Key[bytes] not=? Key[other])
+    let values:array<secret<string>>=["abc" "def"]
+    printl(values.contains(secret("def")) values.contains(secret("xyz")))
+    let words=["" "a" "aa" "ab" "b" "é"]
+    loop a in words {loop b in words {
+        let s=secret(a)
+        if (s <? b).reveal not=? (a <? b) panic("lt")
+        if (s <=? b).reveal not=? (a <=? b) panic("le")
+        if (s >? b).reveal not=? (a >? b) panic("gt")
+        if (s >=? b).reveal not=? (a >=? b) panic("ge")
+    }}
+    let keys=dict<secret<int64> string>()
+    keys[secret(1)]="one"
+    keys[secret(-1)]="minus one"
+    keys[secret(1)]="updated"
+    printl(keys[secret(1)] keys[secret(-1)] keys.length)
+    let wide=dict<secret<uint64> string>()
+    wide[secret(18446744073709551615 as uint64)]="max"
+    printl(wide[secret(18446744073709551615 as uint64)])
+    printl("ordering ok")
+}
+$runtime_checks

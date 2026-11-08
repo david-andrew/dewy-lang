@@ -127,7 +127,7 @@ JO['lex.jo'] = "use 'driver.jo'\n"
 # Direct imports resolve each state name at its owning module, as in the compiler.
 for module, names in {
     'ast.jo': ('nodes',),
-    'types.jo': ('types', 'T_BOOL', 'T_NEVER'),
+    'types.jo': ('types', 'T_BOOL', 'T_MATH_INT', 'T_NEVER'),
     'expr.jo': ('last_checked',),
     'secrets.jo': ('secret_reveal_name', 'secret_checks', 'secret_compares'),
 }.items():

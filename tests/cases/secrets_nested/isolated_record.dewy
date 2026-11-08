@@ -1,0 +1,13 @@
+# Only aggregate comparisons: no direct secret comparison preloads a helper.
+Password:type=[value:secret<string>]
+Key:type=[value:secret<array<uint8>>]
+Number:type=[value:secret<int>]
+main=(args:array<string>)=>{
+    let text=args[0]
+    let bytes=text as array<uint8>
+    printl(Password[text] =? Password[text])
+    printl(Key[bytes] =? Key[bytes.copy])
+    let n=int(args.length)
+    printl(Number[n] =? Number[n+1])
+}
+$runtime_checks

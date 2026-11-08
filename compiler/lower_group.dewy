@@ -1282,7 +1282,8 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
         let bd:LGWord=0
         if is_slice(b) {bd=kept_operand_addr(b lt)}
         else {bd=place_addr(gen_place(b false) lt)}
-        let r=gen_eq(lt ad bd)
+        let mode=if secret_compares.get(e) =? none {0} else if tkind(lt) =? 'array' and telem(lt) =? T_MATH_INT {1} else {2}
+        let r=if mode not=? 0 {e_call2(lf_helper(HK.eq lt mode) ad bd VI)} else {gen_eq(lt ad bd)}
         if op =? 'ne' {r=e_bin('xor' VI r e_iconst(1))}
         return V(r false)
     }
@@ -1308,7 +1309,8 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
             if op =? 'ne' {r=e_bin('xor' VI r e_iconst(1))}
             return V(r false)
         }
-        let c=e_call2(rt("__str_cmp") va vb VI)
+        let cmp=if secret_compares.get(e) not=? none {"__ct_str_cmp"} else {"__str_cmp"}
+        let c=e_call2(rt(cmp) va vb VI)
         return V(e_bin(int_op(op true) VI c e_iconst(0)) false)
     }
     if aux =? 3 {
@@ -1355,7 +1357,7 @@ gen_binary=(e:LGWord):>Val=>$unsafe {
         let va=gen_left(a lt keep_left)
         if op =? 'shl' or op =? 'shr' {return math_shift(op va math_shift_count(b) types.ptr[prune(ntype(b))].sign)}
         let vb=gen_borrowed(b).v
-        if is_cmp {return V(math_compare(op va vb) false)}
+        if is_cmp {return V(math_compare(op va vb secret_compares.get(e) not=? none) false)}
         return math_binary(op va vb)
     }
     if aux >=? 7 {return gen_vec_binary(e keep_left)}

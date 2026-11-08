@@ -99,7 +99,7 @@ math_count=(e:MathWord):>int64=>$unsafe {
     if prune(ntype(e)) =? T_MATH_INT {return math_signed(value.v)}
     return value.v
 }
-math_compare=(op:Tok a:MathWord b:MathWord):>int64=>$unsafe {
+math_compare=(op:Tok a:MathWord b:MathWord secret:bool=false):>int64=>$unsafe {
     let result=vreg(VI)
     let tag=math_tag(e_bin('or_' VI a b))
     iff(e_bin('eq' VI tag e_iconst(0)));
@@ -107,7 +107,7 @@ math_compare=(op:Tok a:MathWord b:MathWord):>int64=>$unsafe {
     els();
     let old=ir_cold
     ir_cold=true
-    let comparison=e_call(rt("__mi_compare") [a b] VI)
+    let comparison=e_call(rt(if secret {"__mi_ct_compare"} else {"__mi_compare"}) [a b] VI)
     e_mov(result e_bin(int_op(op true) VI comparison e_iconst(0)));
     ir_cold=old
     endc();

@@ -1055,6 +1055,22 @@ __ct_str_eq = (a: str, b: str) -> bool:
     # (with a nil input n is zero: the payload pointers are never read)
     __ct_mem_eq((a as *u8) + 24, (b as *u8) + 24, n)
 
+# Lexicographic ordering without an exit at the first unequal byte. The
+# accumulated flags select that first difference using only integer masks.
+__ct_str_cmp = (a: str, b: str) -> int:
+    la = len(a)
+    lb = len(b)
+    n = min(la, lb)
+    pa = (a as *u8) + 24
+    pb = (b as *u8) + 24
+    less = 0
+    greater = 0
+    loop i in [0..n):
+        undecided = 1 xor (less | greater)
+        less |= int(pa[i] < pb[i]) & undecided
+        greater |= int(pa[i] > pb[i]) & undecided
+    greater - less + (int(la > lb) - int(la < lb)) * (1 xor (less | greater))
+
 __str_cmp = (a: str, b: str) -> int:
     la = len(a)
     lb = len(b)

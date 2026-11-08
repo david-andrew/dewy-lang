@@ -8,7 +8,7 @@ $runtime_checks
 from p"lower.jo" import (BOX_HDR VC_AGG VC_FLT VC_INT Val ctl hk_key lfuncs value_member_cache)
 from p"check.jo" import (FK_PARTIAL LF_ASSIGNED LF_EXPOSED LF_VALUECAP fns locals prelude syms value_equal_fns value_hash_fns)
 from p"ir.jo" import (M_FLOAT VI VS ir mulh_ok)
-from p"types.jo" import (T_MATH_INT T_STR fields prune ptr_size structs targ telem tkind tsize types variants)
+from p"types.jo" import (T_MATH_INT T_STR fields prune secrets_seen ptr_size structs targ telem tkind tsize types variants)
 from p"type_ops.dewy" import (fixed_len is_managed layout math_optional type_has_fn)
 from p"checker_state.dewy" import (SK)
 from p"lower.jo" import (HK)
@@ -325,7 +325,36 @@ helper_boxuniq=(t:LHWord):>void=>$unsafe {
     endc();
     e_ret(r);
 }
-helper_eq=(t:LHWord):>void=>$unsafe {
+# Only demanded equality helpers ask this indexed type-graph query. Each
+# query visits reachable types and fields once; recursive boxes terminate.
+eq_has_secret=(t0:LHWord):>bool=>$unsafe {
+    if not secrets_seen {return false}
+    let work:array<int64>=[t0]
+    let seen=dict<int64 bool>()
+    loop work.length >? 0 {
+        let t=prune(work.pop())
+        if tkind(t) =? 'secret' {return true}
+        t=quantity_base(t)
+        if seen.has(t) {continue}
+        seen[t]=true
+        let k=tkind(t)
+        if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'box' {work.push(telem(t))}
+        else if k =? 'struct_' or k =? 'tuple' {
+            loop fo in field_list(t) {work.push(fo[0])}
+        }
+        else if k =? 'enum_' {
+            let si=LHWord(types.ptr[t].st)
+            loop i in [0..LHWord(structs.ptr[si].nvariants)) {
+                let vi=LHWord(structs.ptr[si].variants) + i
+                loop j in [0..LHWord(variants.ptr[vi].nfields)) {
+                    work.push(LHWord(fields.ptr[LHWord(variants.ptr[vi].fields) + j].type))
+                }
+            }
+        }
+    }
+    false
+}
+helper_eq=(t:LHWord force:bool=false):>void=>$unsafe {
     let ps=helper_params(2)
     if t =? T_MATH_INT {
         ir.ret = VI;
@@ -355,13 +384,25 @@ helper_eq=(t:LHWord):>void=>$unsafe {
     blk();
     let fail=ctl
     let k=types.ptr[t].kind
+    let protected=false
     if k =? 'struct_' or k =? 'tuple' {
-        loop fo in field_list(t) {eq_member(fo[0] e_addi(a fo[1]) e_addi(b fo[1]) fail);}
+        let members=field_list(t)
+        protected=force or eq_has_secret(t)
+        if protected {
+            # Accumulate every field: an early return would reveal which
+            # secret field differed, beyond the one bit equality reveals.
+            e_mov(r e_iconst(1));
+            loop fo in members {e_mov(r e_bin('and_' VI r eq_member_value(fo[0] e_addi(a fo[1]) e_addi(b fo[1]) force)));}
+        }
+        else {loop fo in members {eq_member(fo[0] e_addi(a fo[1]) e_addi(b fo[1]) fail);}}
     }
     else if k =? 'fixed' {
         let et:LHWord=LHWord(types.ptr[t].elem)
+        protected=force or eq_has_secret(et)
+        if protected {e_mov(r e_iconst(1));}
         let i=fixed_loop_begin(t)
-        eq_member(et fixed_elem_addr(a i et) fixed_elem_addr(b i et) fail);
+        if protected {e_mov(r e_bin('and_' VI r eq_member_value(et fixed_elem_addr(a i et) fixed_elem_addr(b i et) force)));}
+        else {eq_member(et fixed_elem_addr(a i et) fixed_elem_addr(b i et) fail);}
         fixed_loop_end(i);
     }
     else if k =? 'opt' {
@@ -369,10 +410,14 @@ helper_eq=(t:LHWord):>void=>$unsafe {
         let ha=opt_has(a inner)
         let hb=opt_has(b inner)
         brif_to(e_bin('ne' VI ha hb) fail);
+        protected=force or eq_has_secret(inner)
+        if protected {e_mov(r e_iconst(1));}
         iff(ha);
-        if math_optional(t) {
-            brif_to(e_bin('eq' VI math_compare('eq' opt_value(a inner) opt_value(b inner)) e_iconst(0)) fail);
+        if protected {
+            if math_optional(t) {e_mov(r math_compare('eq' opt_value(a inner) opt_value(b inner) true));}
+            else {e_mov(r eq_member_value(inner a b force));}
         }
+        else if math_optional(t) {brif_to(e_bin('eq' VI math_compare('eq' opt_value(a inner) opt_value(b inner)) e_iconst(0)) fail);}
         else {eq_member(inner a b fail);}
         endc();
     }
@@ -381,13 +426,16 @@ helper_eq=(t:LHWord):>void=>$unsafe {
         layout(t);
         let ta=e_load(VI a 0 4)
         brif_to(e_bin('ne' VI ta e_load(VI b 0 4)) fail);
+        protected=force or eq_has_secret(t)
+        if protected {e_mov(r e_iconst(1));}
         loop v in [0..LHWord(structs.ptr[si].nvariants)) {
             let vi:LHWord=LHWord(structs.ptr[si].variants) + v
             if variants.ptr[vi].nfields =? 0 {continue}
             iff(e_bin('eq' VI ta e_iconst(v)));
             loop i in [0..LHWord(variants.ptr[vi].nfields)) {
                 f=LHWord(variants.ptr[vi].fields) + i
-                eq_member(field_store_type(f) e_addi(a LHWord(fields.ptr[f].offset)) e_addi(b LHWord(fields.ptr[f].offset)) fail);
+                if protected {e_mov(r e_bin('and_' VI r eq_member_value(field_store_type(f) e_addi(a LHWord(fields.ptr[f].offset)) e_addi(b LHWord(fields.ptr[f].offset)) force)));}
+                else {eq_member(field_store_type(f) e_addi(a LHWord(fields.ptr[f].offset)) e_addi(b LHWord(fields.ptr[f].offset)) fail); }
             }
             endc();
         }
@@ -398,6 +446,20 @@ helper_eq=(t:LHWord):>void=>$unsafe {
         let pb=e_load(VI b 0 ptr_size)
         let na=arr_len(pa)
         brif_to(e_bin('ne' VI na arr_len(pb)) fail);
+        protected=force or eq_has_secret(et)
+        if protected {
+            e_mov(r e_iconst(1));
+            let i=vreg(VI)
+            e_mov(i e_iconst(0));
+            blk(); lop();
+            brif_to(e_bin('ges' VI i na) ctl - 1);
+            let off=e_bin('mul' VI i e_iconst(owner_stride(et)))
+            e_mov(r e_bin('and_' VI r eq_member_value(et e_bin('add' VI e_addi(pa 24) off) e_bin('add' VI e_addi(pb 24) off) force)));
+            e_mov(i e_addi(i 1));
+            br_to(ctl);
+            endc(); endc();
+        }
+        else {
         let ek=types.ptr[prune(et)].kind
         let bits_equal=(ek =? 'int_' and et not=? T_MATH_INT) or ek =? 'bool_'
         if bits_equal {
@@ -452,6 +514,7 @@ helper_eq=(t:LHWord):>void=>$unsafe {
             endc();
             endc();
         }
+        }
     }
     else if k =? 'vec' {
         loop i in [0..vec_comps(t)) {
@@ -464,7 +527,7 @@ helper_eq=(t:LHWord):>void=>$unsafe {
         }
     }
     else {eq_member(t a b fail);}
-    e_mov(r e_iconst(1));
+    if not protected {e_mov(r e_iconst(1));}
     endc();
     if snapshot {
         drop_at(a t);
@@ -472,9 +535,81 @@ helper_eq=(t:LHWord):>void=>$unsafe {
     }
     e_ret(r);
 }
+# A secret array of arbitrary-precision integers must also visit every
+# element; each integer comparison visits all its public limbs.
+helper_ct_int_array_eq=(t:LHWord):>void=>$unsafe {
+    let ps=helper_params(2)
+    ir.ret=VI
+    let a=e_load(VI ps.ptr[0] 0 ptr_size)
+    let b=e_load(VI ps.ptr[1] 0 ptr_size)
+    let n=arr_len(a)
+    let r=vreg(VI)
+    e_mov(r e_iconst(0));
+    blk();
+    brif_to(e_bin('ne' VI n arr_len(b)) ctl);
+    e_mov(r e_iconst(1));
+    let i=vreg(VI)
+    e_mov(i e_iconst(0));
+    blk(); lop();
+    brif_to(e_bin('ges' VI i n) ctl - 1);
+    let off=e_bin('mul' VI i e_iconst(owner_stride(telem(t))))
+    let left=e_load(VI e_bin('add' VI a off) 24 8)
+    let right=e_load(VI e_bin('add' VI b off) 24 8)
+    e_mov(r e_bin('and_' VI r math_compare('eq' left right true)));
+    e_mov(i e_addi(i 1));
+    br_to(ctl);
+    endc(); endc(); endc();
+    e_ret(r);
+}
+# A field's Boolean result, without branching on a secret comparison.
+eq_member_value=(t0:LHWord a:LHWord b:LHWord force:bool=false):>LHWord=>$unsafe {
+    let t=quantity_base(t0)
+    let k=tkind(t)
+    let secret=force or tkind(prune(t0)) =? 'secret'
+    if k =? 'str_' {return e_call2(rt(if secret {"__ct_str_eq"} else {"__str_eq"}) load_val(t a 0) load_val(t b 0) VI)}
+    if t =? T_MATH_INT {return math_compare('eq' load_val(t a 0) load_val(t b 0) secret)}
+    if vc(t) =? VC_INT and k not=? 'array' {return e_bin('eq' VI load_val(t a 0) load_val(t b 0))}
+    if vc(t) =? VC_FLT {return e_bin('feq' vt_of(t) load_val(t a 0) load_val(t b 0))}
+    if secret and k =? 'array' {
+        let et=quantity_base(telem(t))
+        if et =? T_MATH_INT {return e_call2(lf_helper(HK.eq t 1) a b VI)}
+        if tkind(et) =? 'int_' or tkind(et) =? 'bool_' {
+            let pa=e_load(VI a 0 ptr_size)
+            let pb=e_load(VI b 0 ptr_size)
+            let na=arr_len(pa)
+            let result=vreg(VI)
+            e_mov(result e_iconst(0));
+            iff(e_bin('eq' VI na arr_len(pb)));
+            let bytes=e_bin('mul' VI na e_iconst(owner_stride(et)))
+            e_mov(result e_call(rt("__ct_mem_eq") [e_addi(pa 24) e_addi(pb 24) bytes] VI));
+            endc();
+            return result
+        }
+    }
+    e_call2(lf_helper(HK.eq t0 (if secret {2} else {0})) a b VI)
+}
 eq_member=(t0:LHWord a:LHWord b:LHWord fail:LHWord):>void=>$unsafe {
     let t=quantity_base(t0)
+    let secret=tkind(prune(t0)) =? 'secret'
     let k=types.ptr[t].kind
+    if secret and k =? 'array' {
+        let et=quantity_base(telem(t))
+        if et =? T_MATH_INT {
+            let same=e_call2(lf_helper(HK.eq t 1) a b VI)
+            brif_to(e_bin('eq' VI same e_iconst(0)) fail);
+            return
+        }
+        if (tkind(et) =? 'int_' and et not=? T_MATH_INT) or tkind(et) =? 'bool_' {
+            let pa=e_load(VI a 0 ptr_size)
+            let pb=e_load(VI b 0 ptr_size)
+            let na=arr_len(pa)
+            brif_to(e_bin('ne' VI na arr_len(pb)) fail);
+            let bytes=e_bin('mul' VI na e_iconst(owner_stride(et)))
+            let same=e_call(rt("__ct_mem_eq") [e_addi(pa 24) e_addi(pb 24) bytes] VI)
+            brif_to(e_bin('eq' VI same e_iconst(0)) fail);
+            return
+        }
+    }
     if k =? 'box' {
         # (the same box, or both empty: equal without looking inside)
         let pa=e_load(VI a 0 ptr_size)
@@ -500,7 +635,7 @@ eq_member=(t0:LHWord a:LHWord b:LHWord fail:LHWord):>void=>$unsafe {
         return
     }
     if k =? 'str_' {
-        let r=e_call2(rt("__str_eq") e_load(VI a 0 ptr_size) e_load(VI b 0 ptr_size) VI)
+        let r=e_call2(rt(if secret {"__ct_str_eq"} else {"__str_eq"}) e_load(VI a 0 ptr_size) e_load(VI b 0 ptr_size) VI)
         brif_to(e_bin('eq' VI r e_iconst(0)) fail);
         return
     }
@@ -510,7 +645,7 @@ eq_member=(t0:LHWord a:LHWord b:LHWord fail:LHWord):>void=>$unsafe {
         return
     }
     if t =? T_MATH_INT {
-        brif_to(e_bin('eq' VI math_compare('eq' load_val(t a 0) load_val(t b 0)) e_iconst(0)) fail);
+        brif_to(e_bin('eq' VI math_compare('eq' load_val(t a 0) load_val(t b 0) secret) e_iconst(0)) fail);
         return
     }
     if c =? VC_INT and k not=? 'array' {
@@ -848,7 +983,7 @@ lower_helper=(lf:LHWord):>void=>$unsafe {
         <3> => {helper_arrrel(t);}
         <4> => {helper_arruniq(t);}
         <5> => {helper_owner_arrcopy(t);}
-        <6> => {helper_eq(t);}
+        <6> => {if h.inst =? 1 {helper_ct_int_array_eq(t)} else {helper_eq(t h.inst =? 2 or tkind(prune(h.htype)) =? 'secret');}}
         <7> => {helper_hash(t h.inst not=? 0);}
         <8> => {helper_thunk(h.inst);}
         <10> => {helper_partial(h.inst);}

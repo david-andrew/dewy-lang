@@ -69,6 +69,31 @@ __mi_compare = (a: __dewy_int, b: __dewy_int) -> int:
         return int(((a as int) >> 1) > ((b as int) >> 1))
     __bi._compare(__mi_big(a), __mi_big(b))
 
+# Small values use two limbs even at zero; sign and magnitude need no branch.
+# Boxed values already have their canonical, public limb count.
+__mi_ct_parts = (value: __dewy_int) -> __bi.BigInt:
+    if (value as int) & 1 != 0: return __mi_payload(value)[0]
+    word = (value as int) >> 1
+    mask = word >> 63
+    magnitude = u64((word xor mask) - mask)
+    __bi.BigInt(int(word > 0) - int(word < 0), [magnitude & u64(4294967295), magnitude >> 32])
+
+__mi_ct_compare = (a: __dewy_int, b: __dewy_int) -> int:
+    x = __mi_ct_parts(a)
+    y = __mi_ct_parts(b)
+    nx = x._limbs.len()
+    ny = y._limbs.len()
+    order = 0
+    loop i in [0..min(nx, ny)):
+        left = __at(x._limbs, i)
+        right = __at(y._limbs, i)
+        difference = int(left > right) - int(left < right)
+        order = difference + int(difference == 0) * order
+    lengths = int(nx > ny) - int(nx < ny)
+    magnitude = lengths + int(lengths == 0) * order
+    signs = int(x._sign > y._sign) - int(x._sign < y._sign)
+    signs + int(signs == 0) * x._sign * magnitude
+
 __mi_shift = (a: __dewy_int, count: int, right: bool) -> __dewy_int:
     if count < 0: panic("shift count must be nonnegative")
     if right: return __mi_pack(__bi.__rshift__(__mi_big(a), count))

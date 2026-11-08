@@ -101,7 +101,7 @@ math_count = (e: int) -> int:
     value.v
 
 
-math_compare = (op: Tok, a: int, b: int) -> int:
+math_compare = (op: Tok, a: int, b: int, secret: bool = false) -> int:
     result = vreg(VI)
     tag = math_tag(e_bin(.or_, VI, a, b))
     iff(e_bin(.eq, VI, tag, e_iconst(0)))
@@ -109,7 +109,7 @@ math_compare = (op: Tok, a: int, b: int) -> int:
     els()
     old = ir_cold
     ir_cold = true
-    comparison = e_call(rt("__mi_compare"), [a, b], VI)
+    comparison = e_call(rt(if secret: "__mi_ct_compare" else: "__mi_compare"), [a, b], VI)
     e_mov(result, e_bin(int_op(op, true), VI, comparison, e_iconst(0)))
     ir_cold = old
     endc()
