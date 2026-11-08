@@ -13,9 +13,10 @@ contains=<T U>(r:Range<T> value:U):>bool=>{
     if not r.includes_last and value =? r.last {return false}
     true
 }
-is_empty=<T>(r:Range<T>):>bool=>{
-    if r.last <? r.first {return true}
-    if r.first =? r.last {return not (r.includes_first and r.includes_last)}
+is_empty=<T>(r:Range<T>):>bool=>r.first._range_is_empty(r.last r.includes_first r.includes_last)
+_range_is_empty=<T>(first:T last:T includes_first:bool includes_last:bool):>bool=>{
+    if last <? first {return true}
+    if first =? last {return not (includes_first and includes_last)}
     false
 }
 __eq__=<T>(a:Range<T> b:Range<T>):>bool=>a.first =? b.first and a.last =? b.last and a.includes_first =? b.includes_first and a.includes_last =? b.includes_last

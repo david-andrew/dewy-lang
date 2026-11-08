@@ -10,7 +10,11 @@ Date:type=<C=Gregorian>[_days:int64]
 const _MONTHS:array<string length=12>=["January" "February" "March" "April" "May" "June" "July" "August" "September" "October" "November" "December"]
 const _WEEKDAYS:array<string length=7>=["Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday" "Sunday"]
 
-_of_days=(days:int):>Date=>Date<Gregorian>[days.to_int64() ?? 0]
+_date_too_far=():>never=>{
+    __environment_failure("date is outside the int64 day range")
+    exit(101)
+}
+_of_days=(days:int):>Date=>Date<Gregorian>[days.to_int64() ?? _date_too_far()]
 date_of=(year:int month:int64 day:int64):>Date=>_of_days(days_from_civil(year month day))
 date_parse=(text:string):>Date|ParseError=>{
     let c=_Cursor[text 0]
@@ -40,6 +44,11 @@ weekday_name=(d:Date):>string=>_WEEKDAYS[weekday(d)]
 
 __eq__=(a:Date b:Date):>bool=>a._days =? b._days
 __lt__=(a:Date b:Date):>bool=>a._days <? b._days
+# Dates are discrete: there is no date strictly between adjacent days.
+_range_is_empty=<C>(first:Date<C> last:Date<C> includes_first:bool includes_last:bool):>bool=>{
+    let count=int(last._days)-int(first._days)+1
+    count <=? (if includes_first {0} else {1})+(if includes_last {0} else {1})
+}
 __as__=(d:Date):>string=>{
     let [y m dd]=fields(d)
     "{_year_text(y)}-{pad(m 2)}-{pad(dd 2)}"
