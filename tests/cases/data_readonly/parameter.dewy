@@ -1,0 +1,8 @@
+# quick
+first=(p:ptr<int64>):>int64=>$unsafe p[0]
+read=(xs:array<int64>):>int64=>{
+    let p=xs.data()
+    let q=(p + 1) as ptr<int64>
+    first(q)
+}
+main=()=>{let xs:array<int64>=[10 20] printl(read(xs) xs)}

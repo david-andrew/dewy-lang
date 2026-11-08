@@ -94,7 +94,9 @@ ps_read=(fd:PsWord @buf:array<uint8> at:PsWord n:PsWord):>PsWord=>$unsafe {
 }
 
 ps_write_fd=(fd:PsWord buf:array<uint8> n:PsWord):>void=>$unsafe {
-    __write_fd(fd data(buf) n)
+    # The recursive output helper has no proved read-only pointer summary.
+    let bytes=buf
+    __write_fd(fd data(bytes) n)
 }
 
 # poll(fds, n, wait): pf holds a pollfd in each word

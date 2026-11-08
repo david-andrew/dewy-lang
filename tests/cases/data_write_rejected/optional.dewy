@@ -1,0 +1,3 @@
+put=(p:ptr<int64>?):>void=>$unsafe {if p isnt? none p[0]=42}
+write=(xs:array<int64>):>void=>put(xs.data())
+main=()=>write([10])

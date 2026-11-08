@@ -1,0 +1,10 @@
+# modes: native native-release
+if $target.os =? 'linux' {
+    output=(xs:array<uint8>):>void=>{syscall(1 1 xs.data() xs.length);}
+} else {
+    output=(xs:array<uint8>):>void=>{
+        let p=xs.data()
+        $unsafe printl(if p[0] =? 65 "A" else "unexpected byte")
+    }
+}
+main=()=>output([65 10])

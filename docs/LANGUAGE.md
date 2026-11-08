@@ -2373,6 +2373,16 @@ $unsafe p[0] = 42
 # original.values is [20 22]; copy.values is [42 22]
 ```
 
+An ordinary parameter's array (including a field or element of it) may supply
+this pointer only when its uses are proved read-only. Writing through it, passing
+it to a possible writer or letting it escape is an error: take `@xs` and pass
+`@xs` to fill the caller's array, or first bind a local copy to work privately.
+An explicitly `$unsafe` pointer extraction permits these uses with a warning
+that the caller cannot see the writes. Taking the pointer itself needs no unsafe
+boundary; dereferencing it still does. The compiler follows local pointer aliases,
+offsets, pointer casts and direct read-only helpers. Opaque calls are possible
+writers; the buffer of Linux `write`/`pwrite64` and `mem_copy`'s source are read-only.
+
 The receiver's indices run once. A private closure capture keeps its independent
 state when accessed this way; `$capture @name` still shares the binding explicitly.
 The pointer is a low-level view: keep its owner alive and do not resize or replace

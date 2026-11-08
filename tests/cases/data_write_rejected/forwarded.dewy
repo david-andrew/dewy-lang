@@ -1,0 +1,7 @@
+put=(p:ptr<int64>):>void=>$unsafe {p[0]=42}
+write=(xs:array<int64>):>void=>{
+    let p=xs.data()
+    let q=(p + 0) as ptr<int64>
+    put(q)
+}
+main=()=>write([10])

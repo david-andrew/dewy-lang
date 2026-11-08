@@ -1,0 +1,43 @@
+use 'ast.jo'
+use 'check.jo'
+use 'expr.jo'
+use 'types.jo'
+use 'refine.jo'
+use 'lower_ptr_reads.dewy'
+use 'ffi_checks.dewy'
+use 'util.jo'
+# Frozen parameter-data diagnostics for the independent bootstrap.
+data_functions: {int: bool}
+data_access_reset = ():
+    data_functions.clear(); ptr_reads_reset()
+data_parameter = (source: int) -> int:
+    n = source
+    loop n > 0:
+        k = nodes[n].kind
+        if k == .index and tkind(ntype(int(nodes[n].a))) == .ptr: return 0
+        if k == .field or k == .index or k == .unwrap or k == .narrow or k == .conv or k == .cast:
+            n = int(nodes[n].a); continue
+        if k != .ident or nodes[n].aux != 1: return 0
+        l = int(nodes[n].sym)
+        flags = int(locals[l].flags)
+        if flags & LF_ALIAS != 0:
+            n = int(locals[l].alias); continue
+        if flags & (LF_PARAM | LF_VALUEPARAM) != 0 and flags & LF_MUTPARAM == 0: return l
+        return 0
+    0
+data_access_note = (n: int, source: int, f: int):
+    if dewy_at(nodes[n].pos) and data_parameter(source) != 0: data_functions[f] = true
+data_access_finalize = ():
+    if data_functions.len() == 0: return
+    loop f, _ in data_functions: ptr_reads(f)
+    loop n, _ in pr_parent:
+        if n <= 0 or not dewy_at(nodes[n].pos): continue
+        if nodes[n].kind != .intrinsic or (nodes[n].aux as IN) != .arrdata: continue
+        if tkind(representation_type(ntype(kid(n, 0)))) != .array: continue
+        if not pr_written.has(pr_find(n)): continue
+        l = data_parameter(kid(n, 0))
+        if l == 0: continue
+        name = name_of(int(locals[l].name))
+        message = "data() of plain parameter '{name}' may be written through or escape; the caller cannot see writes to its private copy: take `@{name}` and pass `@{name}`, or copy into a local first"
+        if ffi_unsafe_at(nodes[n].pos): warn(nodes[n].pos, message)
+        else: fatal(nodes[n].pos, message)

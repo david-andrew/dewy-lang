@@ -1,0 +1,51 @@
+$runtime_checks
+from p"ast.jo" import (kid nodes)
+from p"check.jo" import (LF_ALIAS LF_MUTPARAM LF_PARAM LF_VALUEPARAM dewy_at locals)
+from p"expr.jo" import (IN ntype)
+from p"types.jo" import tkind
+from p"refine.jo" import representation_type
+from p"lower_ptr_reads.dewy" import (pr_find pr_parent pr_written ptr_reads ptr_reads_reset)
+from p"ffi_checks.dewy" import ffi_unsafe_at
+from p"util.jo" import (fatal name_of warn)
+# Only data() sites rooted in value parameters demand a check. Reuse the indexed
+# pointer-use summary after all bodies are typed, before lowering or inlining.
+# Cost: O(path) at extraction, then the existing O(body) summary per demanded fn.
+DAWord:type=int64<overflow='wrap'>
+let data_functions:dict<int64 bool>=dict<int64 bool>()
+data_access_reset=():>void=>{data_functions.clear();ptr_reads_reset()}
+data_parameter=(source:DAWord):>DAWord=>$unsafe {
+    let n=source
+    loop n >? 0 {
+        let k=nodes.ptr[n].kind
+        if k =? 'index' and tkind(ntype(DAWord(nodes.ptr[n].a))) =? 'ptr' {return 0}
+        if k =? 'field' or k =? 'index' or k =? 'unwrap' or k =? 'narrow' or k =? 'conv' or k =? 'cast' {n=DAWord(nodes.ptr[n].a);continue}
+        if k not=? 'ident' or nodes.ptr[n].aux not=? 1 {return 0}
+        let l=DAWord(nodes.ptr[n].sym)
+        let flags=DAWord(locals.ptr[l].flags)
+        if flags & LF_ALIAS not=? 0 {n=DAWord(locals.ptr[l].alias);continue}
+        if flags & (LF_PARAM | LF_VALUEPARAM) not=? 0 and flags & LF_MUTPARAM =? 0 {return l}
+        return 0
+    }
+    0
+}
+data_access_note=(n:DAWord source:DAWord f:DAWord):>void=>$unsafe {
+    if dewy_at(nodes.ptr[n].pos) and data_parameter(source) not=? 0 {data_functions[f]=true}
+}
+data_access_finalize=():>void=>$unsafe {
+    if data_functions.length =? 0 {return}
+    loop [f _] in data_functions {ptr_reads(f)}
+    # Summaries index the final extraction nodes, even when coercion moved the
+    # original data() into an optional/union wrapper after it was checked.
+    loop [n _] in pr_parent {
+        if n <=? 0 or not dewy_at(nodes.ptr[n].pos) {continue}
+        if nodes.ptr[n].kind not=? 'intrinsic' or (nodes.ptr[n].aux as IN) not=? IN.arrdata {continue}
+        if tkind(representation_type(ntype(kid(n 0)))) not=? 'array' {continue}
+        if not pr_written.has(pr_find(n)) {continue}
+        let l=data_parameter(kid(n 0))
+        if l =? 0 {continue}
+        let name=name_of(DAWord(locals.ptr[l].name))
+        let message="data() of plain parameter '{name}' may be written through or escape; the caller cannot see writes to its private copy: take `@{name}` and pass `@{name}`, or copy into a local first"
+        if ffi_unsafe_at(nodes.ptr[n].pos) {warn(nodes.ptr[n].pos message)}
+        else {fatal(nodes.ptr[n].pos message)}
+    }
+}

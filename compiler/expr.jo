@@ -1,3 +1,4 @@
+use 'data_access.dewy'
 use 'program_settings.dewy'
 use 'secret_checks.dewy'
 use 'checks_read_code.dewy'
@@ -4811,6 +4812,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         else: fatal(nodes[n].pos, "data() needs an array or string")
         if not permute and refine_active and ref_storage_contract(t): fatal(nodes[n].pos, "mutable refinement access through raw data is not supported")
         note_storage_access(args[0])
+        if cx >= 0 and types[t].kind == .array: data_access_note(n, args[0], int(ctxs[cx].inst))
     else if id == .integer_mode:
         # Private library dispatch: signedness and overflow policy, erased now.
         nargs_check(n, nargs, 1, 1, "__integer_mode")

@@ -1132,6 +1132,7 @@ wasm_group=(t:int64):>int64=>$unsafe {
 # where each value is first and last live (positions in the code; -1: never used), extended
 # over loops it is live in (as the x86-64 backend's analysis)
 wasm_live=(f:IrFn):>[array<int64> array<int64>]=>$unsafe {
+    let f=f
     let nv=f.vtypes.length
     let np=f.nparams
     let nc=f.code.length

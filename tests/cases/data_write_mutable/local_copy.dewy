@@ -1,0 +1,13 @@
+write=(xs:array<int64>):>array<int64>=>{
+    let copy=xs
+    let p=copy.data()
+    $unsafe p[0]=42
+    copy
+}
+main=()=>{
+    let xs:array<int64>=[10 20]
+    printl(write(xs) xs)
+    let p=xs.data()
+    $unsafe p[0]=30
+    printl(xs)
+}

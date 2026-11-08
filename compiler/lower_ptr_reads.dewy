@@ -23,6 +23,10 @@ let pr_exposed:dict<int64 bool>=dict<int64 bool>()
 let pr_done:dict<int64 int64>=dict<int64 int64>()
 let pr_busy:dict<int64 bool>=dict<int64 bool>()
 let pr_sites:array<int64>=[]
+ptr_reads_reset=():>void=>{
+    pr_parent.clear();pr_written.clear();pr_exposed.clear()
+    pr_done.clear();pr_busy.clear();pr_sites=[]
+}
 pr_find=(k:PRWord):>PRWord=>$unsafe {
     if not pr_parent.has(k) {
         pr_parent[k] = k
@@ -82,6 +86,15 @@ pr_is_ptr=(c:PRWord):>bool=>$unsafe {
 pr_use=(n:PRWord c:PRWord call_index:PRWord):>void=>$unsafe {
     let k=nodes.ptr[n].kind
     if k =? 'index' and PRWord(nodes.ptr[n].a) =? c and not has_flag(n NF_MUT) and not has_flag(n NF_AT) {return}
+    if k =? 'intrinsic' {
+        let id=nodes.ptr[n].aux as IN
+        # memcpy reads its source; Linux write/pwrite64 only read their buffer.
+        if id =? IN.memcpy and nkids(n) =? 3 and kid(n 1) =? c {return}
+        if id =? IN.syscall and nkids(n) >=? 4 and kid(n 2) =? c {
+            let number=kid(n 0)
+            if nodes.ptr[number].kind =? 'int_lit' and (nodes.ptr[number].ival =? 1 or nodes.ptr[number].ival =? 18) {return}
+        }
+    }
     if k =? 'binary' {
         if nodes.ptr[n].aux =? 4 or nodes.ptr[n].type not=? 0 and tkind(ntype(n)) =? 'bool_' {return}
     }
@@ -123,7 +136,10 @@ pr_walk=(n:PRWord):>void=>$unsafe {
             if mm & (1 << i) not=? 0 or has_flag(kid(n i) NF_MUT) or has_flag(kid(n i) NF_AT) {pr_target(kid(n i))}
         }
     }
-    else if k =? 'intrinsic' and nkids(n) >? 0 {pr_target(kid(n 0))}
+    else if k =? 'intrinsic' and nkids(n) >? 0 {
+        let id=nodes.ptr[n].aux as IN
+        if id =? IN.arrdata or id =? IN.push or id =? IN.pop or id =? IN.insert or id =? IN.remove or id =? IN.clear or id =? IN.reserve or id =? IN.resize or id =? IN.truncate or id =? IN.setlen or id =? IN.extend {pr_target(kid(n 0))}
+    }
     pr_child(n PRWord(nodes.ptr[n].a) -1)
     pr_child(n PRWord(nodes.ptr[n].b) -1)
     if k not=? 'for_' {

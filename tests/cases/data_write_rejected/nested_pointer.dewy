@@ -1,0 +1,8 @@
+write=(xs:array<array<int64>>):>void=>{
+    let p=xs.data()
+    $unsafe {
+        let q=p[0].data()
+        q[0]=42
+    }
+}
+main=()=>{let xs:array<array<int64>>=[[10]] write(xs) printl(xs)}

@@ -1,0 +1,11 @@
+# quick
+write=(@xs:array<int64>):>void=>{
+    let p=xs.data()
+    $unsafe p[0]=42
+}
+main=()=>{
+    let xs:array<int64>=[10 20]
+    let snapshot=xs
+    write(@xs)
+    printl(xs snapshot)
+}

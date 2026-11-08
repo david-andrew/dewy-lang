@@ -1,0 +1,7 @@
+Box:type=[values:array<int64>]
+write=(box:Box):>void=>{
+    let alias=@box.values
+    let p=alias.data()
+    $unsafe p[0]=42
+}
+main=()=>write(Box[[10]])

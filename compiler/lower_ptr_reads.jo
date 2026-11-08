@@ -24,6 +24,10 @@ pr_done: {int: int}            # function -> the body walked
 pr_busy: {int: bool}
 pr_sites: int[]                # the data() nodes of the function being walked
 
+ptr_reads_reset = ():
+    pr_parent.clear(); pr_written.clear(); pr_exposed.clear()
+    pr_done.clear(); pr_busy.clear(); pr_sites = []
+
 pr_find = (k: int) -> int:
     if not pr_parent.has(k):
         pr_parent[k] = k
@@ -84,6 +88,12 @@ pr_is_ptr = (c: int) -> bool: c > 0 and nodes[c].type != 0 and tkind(ntype(c)) =
 pr_use = (n: int, c: int, call_index: int):
     k = nodes[n].kind
     if k == .index and int(nodes[n].a) == c and not has_flag(n, NF_MUT) and not has_flag(n, NF_AT): return
+    if k == .intrinsic:
+        id = nodes[n].aux as IN
+        if id == .memcpy and nkids(n) == 3 and kid(n, 1) == c: return
+        if id == .syscall and nkids(n) >= 4 and kid(n, 2) == c:
+            number = kid(n, 0)
+            if nodes[number].kind == .int_lit and (nodes[number].ival == 1 or nodes[number].ival == 18): return
     if k == .binary:
         # (offsetting gives the same pointer on; comparing only reads it)
         if nodes[n].aux == 4 or nodes[n].type != 0 and tkind(ntype(n)) == .bool_: return
@@ -117,7 +127,9 @@ pr_walk = (n: int):
         mm = checked_call_mutmask(n)
         loop i in [0..nkids(n)):
             if mm & (1 << i) != 0 or has_flag(kid(n, i), NF_MUT) or has_flag(kid(n, i), NF_AT): pr_target(kid(n, i))
-    else if k == .intrinsic and nkids(n) > 0: pr_target(kid(n, 0))
+    else if k == .intrinsic and nkids(n) > 0:
+        id = nodes[n].aux as IN
+        if id == .arrdata or id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .reserve or id == .resize or id == .truncate or id == .setlen or id == .extend: pr_target(kid(n, 0))
     pr_child(n, int(nodes[n].a), -1)
     pr_child(n, int(nodes[n].b), -1)
     if k != .for_:

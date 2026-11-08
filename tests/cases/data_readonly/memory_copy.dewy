@@ -1,0 +1,6 @@
+copy=(xs:array<int64>):>array<int64>=>{
+    let result:array<int64>=[0 0]
+    mem_copy(result.data() xs.data() 16)
+    result
+}
+main=()=>printl(copy([10 20]))

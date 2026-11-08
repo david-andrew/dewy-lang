@@ -1,3 +1,4 @@
+use 'data_access.dewy'
 use 'checker_hooks.dewy'
 # Frozen program checking and phase orchestration from check.jo.
 use 'check.jo'
@@ -68,6 +69,7 @@ use 'concurrency_types.dewy'
 use 'concurrency_tasks.dewy'
 
 check_program = (main_path: str):
+    data_access_reset()
     member_reset()
     console_type_id = -1
     ut_reset()
@@ -301,6 +303,7 @@ check_program = (main_path: str):
     string_domains_finish()
     string_domains_materialize()
     int_domains_finish()
+    data_access_finalize()
     if not errors_only:
         icb = ic_switch(IC_FACTS, IC_SHARED)
         exact_prepare()
