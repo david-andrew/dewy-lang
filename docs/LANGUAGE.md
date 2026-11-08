@@ -1657,7 +1657,10 @@ An interval is a range: `[a..b)`, `[a..b]`, `(a..b]`, `(a..b)`. A range over any
 that is not an integer (an `Instant`, a `Date`, a time, a fraction, text) is a `Range<T>` holding
 its two ends as written, with `.first`, `.last`, `.includes_first`, `.includes_last` and
 `.is_empty`; `x in? [a..b)` tests it, and it prints as written. It is not a list of its points:
-looping over one is an error, and a step is only for integer ranges so far.
+**Provisional:** a Date range loops by calendar days, as an integer range loops by integers:
+`loop d in [date"2024-02-28"..date"2024-03-02")` visits February 28, February 29 and March 1.
+Stored Date ranges loop too. Other ordered ranges cannot be walked, and a written step
+is only for integer ranges so far.
 
 `instant"..."`, `utc"..."`, `date"..."`, `zone"..."` and `zoned"..."` with constant text are
 checked while compiling: a date that does not exist, a leap second that never happened, a
@@ -1703,7 +1706,10 @@ for is an error, while compiling for a constant pattern. An `Instant` writes in 
 the text, with no guess: `yy` is not a form, so a two-digit year does not read.
 
 A zoned time reads as `.date`, `.time_of_day`, `.local`, `.year`, `.month`, `.day`, `.hour`, `.minute`,
-`.second`, `.nanosecond` and `.weekday` (0 is Monday). `t.in_zone(z)` shows an `Instant` in a zone.
+`.second`, `.nanosecond` and `.weekday` (0 is Monday).
+**Provisional:** civil field types carry their ranges: month 1–12, day 1–31, weekday 0–6,
+hour 0–23, minute and second 0–59, and nanosecond 0–999999999. A `UtcLabel` permits second 60.
+These refinements can prove indexing and parameter bounds without caller runtime checks. `t.in_zone(z)` shows an `Instant` in a zone.
 **Provisional:** it returns a plain `ZonedDateTime`, using the TZif footer rule beyond the last
 transition and the zone's first (local mean time) offset before its first. Before UTC's 1961
 coverage, it projects the instant's TT civil label; it does not make ancient `Z` input valid.

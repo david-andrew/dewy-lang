@@ -7,8 +7,8 @@ from p"core.dewy" import (Instant Days Months days_from_civil civil_from_days da
 # `_days` counts from 1970-01-01, and the calendar is part of the type: bare `Date` is `Date<Gregorian>`.
 Gregorian:type=[]
 Date:type=<C=Gregorian>[_days:int64]
-const _MONTHS=["January" "February" "March" "April" "May" "June" "July" "August" "September" "October" "November" "December"]
-const _WEEKDAYS=["Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday" "Sunday"]
+const _MONTHS:array<string length=12>=["January" "February" "March" "April" "May" "June" "July" "August" "September" "October" "November" "December"]
+const _WEEKDAYS:array<string length=7>=["Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday" "Sunday"]
 
 _of_days=(days:int):>Date=>Date<Gregorian>[days.to_int64() ?? 0]
 date_of=(year:int month:int64 day:int64):>Date=>_of_days(days_from_civil(year month day))
@@ -26,13 +26,16 @@ date_error=(text:string):>string?=>{
     }
 }
 
-fields=(d:Date):>[int int64 int64]=>civil_from_days(int(d._days))
+fields=(d:Date):>[int int64<n => n >=? 1 and n <=? 12> int64<n => n >=? 1 and n <=? 31>]=>civil_from_days(int(d._days))
 year=(d:Date):>int=>fields(d)[0]
-month=(d:Date):>int64=>fields(d)[1]
-day=(d:Date):>int64=>fields(d)[2]
+month=(d:Date):>int64<n => n >=? 1 and n <=? 12>=>fields(d)[1]
+day=(d:Date):>int64<n => n >=? 1 and n <=? 31>=>fields(d)[2]
 # 0 for Monday to 6 for Sunday (1970-01-01 was a Thursday).
-weekday=(d:Date):>int64=>(((int(d._days)+3)%7).to_int64() ?? 0)
-month_name=(d:Date):>string=>_MONTHS[month(d)-1]
+weekday=(d:Date):>int64<n => n >=? 0 and n <=? 6>=>(((int(d._days)+3)%7).to_int64() ?? 0)
+month_name=(d:Date):>string=>{
+    $runtime_checks=false
+    _MONTHS[month(d)-1]
+}
 weekday_name=(d:Date):>string=>_WEEKDAYS[weekday(d)]
 
 __eq__=(a:Date b:Date):>bool=>a._days =? b._days
@@ -128,14 +131,14 @@ age_on=(born:Date on:Date leap_day:_LeapDay):>int=>{
 }
 
 # ---------------- a time of day, and a date with one: no zone, so no moment yet ----------------
-TimeOfDay:type=[_ns:int64]
+TimeOfDay:type=[_ns:int64<n => n >=? 0 and n <? 86400000000000>]
 LocalDateTime:type=<C=Gregorian>[date:Date<C> time:TimeOfDay]
 const _NS_PER_DAY:int64=86400000000000
 
-hour=(t:TimeOfDay):>int64=>t._ns//3600000000000
-minute=(t:TimeOfDay):>int64=>(t._ns%3600000000000)//60000000000
-second=(t:TimeOfDay):>int64=>(t._ns%60000000000)//1000000000
-nanosecond=(t:TimeOfDay):>int64=>t._ns%1000000000
+hour=(t:TimeOfDay):>int64<n => n >=? 0 and n <=? 23>=>t._ns//3600000000000
+minute=(t:TimeOfDay):>int64<n => n >=? 0 and n <=? 59>=>(t._ns%3600000000000)//60000000000
+second=(t:TimeOfDay):>int64<n => n >=? 0 and n <=? 59>=>(t._ns%60000000000)//1000000000
+nanosecond=(t:TimeOfDay):>int64<n => n >=? 0 and n <=? 999999999>=>t._ns%1000000000
 __eq__=(a:TimeOfDay b:TimeOfDay):>bool=>a._ns =? b._ns
 __lt__=(a:TimeOfDay b:TimeOfDay):>bool=>a._ns <? b._ns
 __as__=(t:TimeOfDay):>string=>"{pad(hour(t) 2)}:{pad(minute(t) 2)}:{pad(second(t) 2)}{_fraction_text(int(nanosecond(t)))}"

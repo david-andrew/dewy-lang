@@ -10,7 +10,16 @@ _I:type=int64<overflow='wrap'>
 Instant:type=[_hi:int64 _lo:uint64]
 Duration:type=[_hi:int64 _lo:uint64]
 # A UTC label as written, which keeps `:60`; `nominal` is the instant it names.
-UtcLabel:type=[year:int month:int64 day:int64 hour:int64 minute:int64 second:int64 nanosecond:int64 nominal:Instant]
+UtcLabel:type=[
+    year:int
+    month:int64<n => n >=? 1 and n <=? 12>
+    day:int64<n => n >=? 1 and n <=? 31>
+    hour:int64<n => n >=? 0 and n <=? 23>
+    minute:int64<n => n >=? 0 and n <=? 59>
+    second:int64<n => n >=? 0 and n <=? 60>
+    nanosecond:int64<n => n >=? 0 and n <=? 999999999>
+    nominal:Instant
+]
 
 const _NS:int=1000000000
 const _DAY_NS:int=86400000000000
@@ -658,7 +667,7 @@ days_from_civil=(year:int month:int64 day:int64):>int=>{
     let doe=yoe*365+yoe//4-yoe//100+doy
     era*146097+doe-719468
 }
-civil_from_days=(days:int):>[int int64 int64]=>{
+civil_from_days=(days:int):>[int int64<n => n >=? 1 and n <=? 12> int64<n => n >=? 1 and n <=? 31>]=>{
     let z=days+719468
     let era=z//146097
     let doe=z-era*146097
@@ -670,7 +679,7 @@ civil_from_days=(days:int):>[int int64 int64]=>{
     let year=yoe+era*400+(if month <=? 2 {1} else {0})
     [year month.to_int64() ?? 1 day.to_int64() ?? 1]
 }
-days_in_month=(year:int month:int64):>int64=>{
+days_in_month=(year:int month:int64):>int64<n => n >=? 28 and n <=? 31>=>{
     if month =? 2 {
         if year%4 =? 0 and (year%100 not=? 0 or year%400 =? 0) {return 29}
         return 28
@@ -707,7 +716,16 @@ _eat=(@c:_Cursor b:int64):>bool=>{
 
 # The fields of `YYYY-MM-DD[Thh:mm[:ss[.fraction]]]`, read and range-checked. `:60` is checked by
 # whatever gives the label a meaning.
-Fields:type=[year:int month:int64 day:int64 hour:int64 minute:int64 second:int64 nanosecond:int64 has_time:bool]
+Fields:type=[
+    year:int
+    month:int64<n => n >=? 1 and n <=? 12>
+    day:int64<n => n >=? 1 and n <=? 31>
+    hour:int64<n => n >=? 0 and n <=? 23>
+    minute:int64<n => n >=? 0 and n <=? 59>
+    second:int64<n => n >=? 0 and n <=? 60>
+    nanosecond:int64<n => n >=? 0 and n <=? 999999999>
+    has_time:bool
+]
 _read_year=(@c:_Cursor):>int?=>{
     let sign:int=1
     let width:int64=4

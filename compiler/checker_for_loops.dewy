@@ -8,7 +8,7 @@ from p"checker_loops.dewy" import (xb_enter xb_leave)
 from p"checker_expr.dewy" import check_expr
 from p"check.jo" import (new_local scope_reset)
 from p"checks_thin.dewy" import (for_copied_binders)
-from p"checks_stmt_hooks.dewy" import (for_rewrite for_open_range for_map_view for_collide for_element for_route for_struct_fields for_map_value for_map_value_ref for_body for_error)
+from p"checks_stmt_hooks.dewy" import (for_rewrite for_open_range for_map_view for_collide for_element for_route for_struct_fields for_map_value for_map_value_ref for_body for_error for_date_range)
 from p"expr.jo" import (coerce lit_default is_map_entries_type)
 # `loop x in source`, once the source's rewrites (live, reflected, soa, unpacked,
 # nested, cursor, tidied-map, iterator and sequence loops) are done: a range's
@@ -101,7 +101,10 @@ fl_range=(s:FWord it:FWord nv:FWord n1:FWord is_mut:bool pos:FWord):>void=>$unsa
     }
     if la and lb and (not step or fl_flag(FWord(fl_nodes[0].ptr[it].c) 256)) {t=lit_default(FWord(fl_nodes[0].ptr[it].a))}
     if fl_kind(t) =? 'str_' {for_error(it 0 2)}
-    if fl_kind(t) not=? 'int_' or fl_nodes[0].ptr[FWord(fl_nodes[0].ptr[it].a)].kind =? 'float_lit' or fl_nodes[0].ptr[FWord(fl_nodes[0].ptr[it].b)].kind =? 'float_lit' {for_error(it t 3)}
+    if fl_kind(t) not=? 'int_' or fl_nodes[0].ptr[FWord(fl_nodes[0].ptr[it].a)].kind =? 'float_lit' or fl_nodes[0].ptr[FWord(fl_nodes[0].ptr[it].b)].kind =? 'float_lit' {
+        if for_date_range(s it t) {return}
+        for_error(it t 3)
+    }
     fl_nodes[0][it].a=int32<overflow='wrap'>(coerce(FWord(fl_nodes[0].ptr[it].a) t))
     if fl_nodes[0].ptr[it].b not=? 0 {fl_nodes[0][it].b=int32<overflow='wrap'>(coerce(FWord(fl_nodes[0].ptr[it].b) t))}
     if step {fl_nodes[0][it].c=int32<overflow='wrap'>(coerce(FWord(fl_nodes[0].ptr[it].c) t))}

@@ -166,6 +166,7 @@ FOR_JO = {
         'for_copied_binders': 'for_copied_binders = (s: int): return',
         'scope_reset': 'scope_reset = (mark: int): fl_reset_host(mark)',
         'for_error': 'for_error = (n: int, t0: int, code: int): fl_error_host(n, t0, code)',
+        'for_date_range': 'for_date_range = (s: int, it: int, t: int) -> bool: false',
     },
     'expr.jo': {
         'coerce': 'coerce = (n: int, target: int) -> int: fl_coerce_host(n, target)',

@@ -506,3 +506,85 @@ zonk_copy_warnings = (f: int):
 zonk_definite = (body: int, mark: int):
     da_check_fn(body, mark)
     return
+
+# Frozen bootstrap support for check.jo's stored Date-range dispatch.
+for_date_type = (t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind != .struct_: return false
+    st = int(types[t].st)
+    decl = int(structs[st].decl)
+    decl != 0 and structs[st].name == "Date" and files[pos_file(nodes[decl].pos)].path == "{lib_dir}/time/civil.dewy"
+
+for_date_range_value = (s: int, it: int, t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind != .struct_: return false
+    st = int(types[t].st)
+    decl = int(structs[st].decl)
+    if decl == 0 or structs[st].name != "Range" or files[pos_file(nodes[decl].pos)].path != "{lib_dir}/ranges.dewy": return false
+    check_struct_fields(st)
+    date_type = int(fields[int(structs[st].fields)].type)
+    if not for_date_type(date_type): return false
+    if nkids(s) != 1: for_error(s, 0, 4)
+    if has_flag(s, NF_MUT): for_error(s, 0, 5)
+    pos = nodes[s].pos
+    tag = "$date_range{bc_count}"
+    bc_count += 1
+    add_flag(it, NF_CHECKED)
+    held = bc_let(tag, it, pos)
+    first = bc_field(bc_field(bc_ident(tag, pos), "first", pos), "_days", pos)
+    last = bc_field(bc_field(bc_ident(tag, pos), "last", pos), "_days", pos)
+    range = mk(.range, pos)
+    nodes[range].a = i32(first)
+    nodes[range].b = i32(last)
+    add_flag(range, NF_INCLUSIVE)
+    loop_ = mk(.for_, pos)
+    nodes[loop_].a = i32(range)
+    nodes[loop_].sval = nodes[s].sval
+    ordinal = "{tag}_ordinal"
+    set_list(loop_, [bc_ident(ordinal, pos)])
+    ensure_bundled_import("time/civil.dewy", "$date_civil", pos)
+    value = mk(.call, pos)
+    nodes[value].a = i32(bc_field(bc_ident("$date_civil", pos), "Date", pos))
+    set_list(value, [bc_ident(ordinal, pos)])
+    binder = kid(s, 0)
+    d = bc_let(name_of(int(nodes[binder].name)), value, pos)
+    nodes[d].a = if nodes[binder].a != 0: nodes[binder].a else: i32(type_node_of(date_type, pos))
+    no_first = bc_bin(.eq, bc_field(bc_ident(tag, pos), "includes_first", pos), bc_bool(false, pos), pos)
+    no_last = bc_bin(.eq, bc_field(bc_ident(tag, pos), "includes_last", pos), bc_bool(false, pos), pos)
+    skip = bc_if(bc_bin(.eq, bc_ident(ordinal, pos), clone(first), pos), [bc_if(no_first, [mk(.continue_, pos)], [], pos)], [], pos)
+    stop = bc_if(bc_bin(.eq, bc_ident(ordinal, pos), clone(last), pos), [bc_if(no_last, [mk(.break_, pos)], [], pos)], [], pos)
+    nodes[loop_].b = i32(bc_block([skip, stop, d] + kids(int(nodes[s].b)), pos))
+    nodes[s] = nodes[bc_block([held, loop_], pos)]
+    check_stmt(s)
+    true
+
+for_date_range = (s: int, it: int, t: int) -> bool:
+    if not for_date_type(t) or nodes[it].b == 0 or has_flag(it, NF_STEP): return false
+    if nkids(s) != 1: for_error(s, 0, 4)
+    if has_flag(s, NF_MUT): for_error(s, 0, 5)
+    pos = nodes[s].pos
+    first = coerce(int(nodes[it].a), t)
+    last = coerce(int(nodes[it].b), t)
+    add_flag(first, NF_CHECKED)
+    add_flag(last, NF_CHECKED)
+    nodes[it].a = i32(bc_field(first, "_days", pos))
+    nodes[it].b = i32(bc_field(last, "_days", pos))
+    check_expr(int(nodes[it].a), T_INT)
+    nodes[it].a = i32(last_checked)
+    check_expr(int(nodes[it].b), T_INT)
+    nodes[it].b = i32(last_checked)
+    ordinal = "$date_ordinal{bc_count}"
+    bc_count += 1
+    l = new_local(intern(ordinal), T_INT, pos)
+    nodes[s].sym = i32(l)
+    nodes[s].aux = 0
+    ensure_bundled_import("time/civil.dewy", "$date_civil", pos)
+    value = mk(.call, pos)
+    nodes[value].a = i32(bc_field(bc_ident("$date_civil", pos), "Date", pos))
+    set_list(value, [mk_ident_local(l, pos)])
+    binder = kid(s, 0)
+    d = bc_let(name_of(int(nodes[binder].name)), value, pos)
+    nodes[d].a = if nodes[binder].a != 0: nodes[binder].a else: i32(type_node_of(t, pos))
+    body = int(nodes[s].b)
+    set_list(body, [d] + kids(body))
+    true

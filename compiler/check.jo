@@ -1724,6 +1724,7 @@ dewy_sequence_loop = (s: int) -> bool:
     if nodes[it].kind == .range: return false
     t = prune(ntype(it))
     if types[t].kind != .struct_ or is_map_type(t) or is_map_entries_type(t) or is_soa(t) or is_dewy_cursor_iter(t): return false
+    if structs[int(types[t].st)].name == "Range" and for_date_range_value(s, it, t): return true
     pos = nodes[s].pos
     if has_flag(s, NF_MUT): fatal(pos, "custom sequence iteration yields values; update the container through its indices")
     tag = "__sequence{bc_count}"

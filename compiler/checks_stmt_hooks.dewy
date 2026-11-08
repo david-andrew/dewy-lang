@@ -5,8 +5,8 @@ from p"error_ops.dewy" import (infer_finish)
 from p"refine.jo" import (ref_holder_arm)
 from p"expr.jo" import (CV)
 from p"@lib/core/str.jo" import (starts_with)
-from p"ast.jo" import (NF_CHECKED NF_FLOW_RETURNS NF_INBOUNDS NF_MUT NF_STMT add_flag clone dewy_live_sources has_flag kid kids mk nkids nodes set_list)
-from p"check.jo" import (FK_INIT SINK_NONE binding_leaves check_binding_input check_block check_struct_fields collide_local copy_write_warnings ctx_for_inst ctx_in_progress ctxs cx dewy_at dewy_cursor_loop dewy_iterator_loop dewy_nested_loop_bindings dewy_sequence_loop ensure_global expectation_ifs fns has_break local_place_decl locals map_loop_values map_tidy_first modules new_local returned_place route_text scope_mark scope_reset shape_checked_value shape_dim_decl sink_body_mode sink_fn sinks soa_loop union_has_void unpack_loop unused_value)
+from p"ast.jo" import (NF_INCLUSIVE NF_STEP NF_CHECKED NF_FLOW_RETURNS NF_INBOUNDS NF_MUT NF_STMT add_flag clone dewy_live_sources has_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (FK_INIT SINK_NONE binding_leaves check_binding_input check_block check_struct_fields collide_local copy_write_warnings ctx_for_inst ctx_in_progress ctxs cx dewy_at dewy_cursor_loop dewy_iterator_loop dewy_nested_loop_bindings dewy_sequence_loop ensure_global expectation_ifs fns has_break local_place_decl locals map_loop_values map_tidy_first modules lib_dir ensure_bundled_import new_local returned_place route_text scope_mark scope_reset shape_checked_value shape_dim_decl sink_body_mode sink_fn sinks soa_loop union_has_void unpack_loop unused_value)
 from p"checks_thin.dewy" import (check_stmt jd library_exit_call mutable_loop_syntax resolve_binding_type)
 from p"checks_assign_hooks.dewy" import (sink_void_error)
 from p"checked_eval.dewy" import (LF_ALIAS)
@@ -23,11 +23,11 @@ from p"dwarf_format.dewy" import (LF_PARAM)
 from p"effect_sources.dewy" import (effect_storage_type)
 from p"errors.jo" import (infer_returns infer_throws)
 from p"exact.jo" import (exact_owners)
-from p"expr.jo" import (check_place coerce copy_place cp_inner is_map_entries_type last_checked mk_ident_local ntype wrap_conv)
+from p"expr.jo" import (bc_count bc_bin type_node_of check_place coerce copy_place cp_inner is_map_entries_type last_checked mk_ident_local ntype wrap_conv)
 from p"checks_thin_expr.dewy" import (int_intervals is_map_type spawn_value_error)
 from p"checks_call_hints.dewy" import (a_type)
 from p"checks_compare_hints.dewy" import (void_rec_hint)
-from p"checks_builders.dewy" import (bc_block bc_map_keys)
+from p"checks_builders.dewy" import (bc_block bc_map_keys bc_field bc_ident bc_let bc_if bc_bool)
 from p"facts.jo" import (fact_requests)
 from p"frontend.jo" import (source_force_body)
 from p"icount.jo" import (IC_LOAD)
@@ -44,7 +44,7 @@ from p"refinement_types.dewy" import (FactRequest)
 from p"reflect_ops.dewy" import (reflect_bind reflect_loop)
 from p"reflection.jo" import (reflect_active)
 from p"temperature_ops.dewy" import (temperature_binding)
-from p"types.jo" import (T_FLOAT T_NEVER is_int prune telem tkind types)
+from p"types.jo" import (T_INT structs fields T_FLOAT T_NEVER is_int prune telem tkind types)
 from p"type_ops.dewy" import (dt is_soa type_has_fn)
 from p"units.jo" import (bundled_rational_type)
 from p"util.jo" import (fatal files intern name_of pos_file)
@@ -210,6 +210,95 @@ for_error=(n:int64 t0:int64 code:int64):>void=>$unsafe {
     if code =? 7 {fatal(pos "'for mut' over a map needs key and value variables")}
     never_cascade(pos t)
     fatal(pos "cannot iterate over a value of type {dt(t)}")
+}
+# Only the library's Date has a built-in calendar successor. These hooks are
+# reached from the existing unsupported-range paths, never for integer loops.
+# O(1) AST nodes and one local per loop, plus checking the two bounds and body.
+for_date_type=(t0:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'struct_' {return false}
+    let st=StmtHookWord(types.ptr[t].st)
+    let decl=StmtHookWord(structs.ptr[st].decl)
+    decl not=? 0 and structs.ptr[st].name =? "Date" and files[pos_file(nodes.ptr[decl].pos)].path =? "{lib_dir}/time/civil.dewy"
+}
+# Retain the ordinary counted-loop backend (including its endpoint-overflow
+# handling); only its cursor is an ordinal. A fresh Date belongs to each step.
+for_date_range=(s:int64 it:int64 t:int64):>bool=>$unsafe {
+    if not for_date_type(t) or nodes.ptr[it].b =? 0 or has_flag(it NF_STEP) {return false}
+    if nkids(s) not=? 1 {for_error(s 0 4)}
+    if has_flag(s NF_MUT) {for_error(s 0 5)}
+    let pos=nodes.ptr[s].pos
+    let first=coerce(StmtHookWord(nodes.ptr[it].a) t)
+    let last=coerce(StmtHookWord(nodes.ptr[it].b) t)
+    add_flag(first NF_CHECKED)
+    add_flag(last NF_CHECKED)
+    nodes.ptr[it].a=int32(bc_field(first "_days" pos))
+    nodes.ptr[it].b=int32(bc_field(last "_days" pos))
+    check_expr(StmtHookWord(nodes.ptr[it].a) T_INT);
+    nodes.ptr[it].a=int32(last_checked)
+    check_expr(StmtHookWord(nodes.ptr[it].b) T_INT);
+    nodes.ptr[it].b=int32(last_checked)
+    let ordinal="$date_ordinal{bc_count}"
+    bc_count=bc_count+1
+    let l=new_local(intern(ordinal) T_INT pos)
+    nodes.ptr[s].sym=int32(l)
+    nodes.ptr[s].aux=0
+    ensure_bundled_import("time/civil.dewy" "$date_civil" pos)
+    let value=mk('call' pos)
+    nodes.ptr[value].a=int32(bc_field(bc_ident("$date_civil" pos) "Date" pos))
+    set_list(value [mk_ident_local(l pos)])
+    let binder=kid(s 0)
+    let d=bc_let(name_of(StmtHookWord(nodes.ptr[binder].name)) value pos)
+    nodes.ptr[d].a=if nodes.ptr[binder].a not=? 0 {nodes.ptr[binder].a} else {int32(type_node_of(t pos))}
+    let body=StmtHookWord(nodes.ptr[s].b)
+    set_list(body [d kids(body)...])
+    true
+}
+# A stored Range<Date> is evaluated once, including a range returned by a call.
+# Walk the inclusive ordinal interval and test the written open ends in the body;
+# no endpoint adjustment can overflow at Date's minimum or maximum ordinal.
+for_date_range_value=(s:int64 it:int64 t0:int64):>bool=>$unsafe {
+    let t=prune(t0)
+    if types.ptr[t].kind not=? 'struct_' {return false}
+    let st=StmtHookWord(types.ptr[t].st)
+    let decl=StmtHookWord(structs.ptr[st].decl)
+    if decl =? 0 or structs.ptr[st].name not=? "Range" or files[pos_file(nodes.ptr[decl].pos)].path not=? "{lib_dir}/ranges.dewy" {return false}
+    check_struct_fields(st)
+    let date_type=StmtHookWord(fields.ptr[StmtHookWord(structs.ptr[st].fields)].type)
+    if not for_date_type(date_type) {return false}
+    if nkids(s) not=? 1 {for_error(s 0 4)}
+    if has_flag(s NF_MUT) {for_error(s 0 5)}
+    let pos=nodes.ptr[s].pos
+    let tag="$date_range{bc_count}"
+    bc_count=bc_count+1
+    add_flag(it NF_CHECKED)
+    let held=bc_let(tag it pos)
+    let first=bc_field(bc_field(bc_ident(tag pos) "first" pos) "_days" pos)
+    let last=bc_field(bc_field(bc_ident(tag pos) "last" pos) "_days" pos)
+    let range=mk('range' pos)
+    nodes.ptr[range].a=int32(first)
+    nodes.ptr[range].b=int32(last)
+    add_flag(range NF_INCLUSIVE)
+    let loop_=mk('for_' pos)
+    nodes.ptr[loop_].a=int32(range)
+    nodes.ptr[loop_].sval=nodes.ptr[s].sval
+    let ordinal="{tag}_ordinal"
+    set_list(loop_ [bc_ident(ordinal pos)])
+    ensure_bundled_import("time/civil.dewy" "$date_civil" pos)
+    let value=mk('call' pos)
+    nodes.ptr[value].a=int32(bc_field(bc_ident("$date_civil" pos) "Date" pos))
+    set_list(value [bc_ident(ordinal pos)])
+    let binder=kid(s 0)
+    let d=bc_let(name_of(StmtHookWord(nodes.ptr[binder].name)) value pos)
+    nodes.ptr[d].a=if nodes.ptr[binder].a not=? 0 {nodes.ptr[binder].a} else {int32(type_node_of(date_type pos))}
+    let no_first=bc_bin('eq' bc_field(bc_ident(tag pos) "includes_first" pos) bc_bool(false pos) pos)
+    let no_last=bc_bin('eq' bc_field(bc_ident(tag pos) "includes_last" pos) bc_bool(false pos) pos)
+    let skip=bc_if(bc_bin('eq' bc_ident(ordinal pos) clone(first) pos) [bc_if(no_first [mk('continue_' pos)] [] pos)] [] pos)
+    let stop=bc_if(bc_bin('eq' bc_ident(ordinal pos) clone(last) pos) [bc_if(no_last [mk('break_' pos)] [] pos)] [] pos)
+    nodes.ptr[loop_].b=int32(bc_block([skip stop d kids(StmtHookWord(nodes.ptr[s].b))...] pos))
+    nodes.ptr[s]=nodes.ptr[bc_block([held loop_] pos)]
+    check_stmt(s)
+    true
 }
 # Declarations run in checker_vardecls.dewy; these are its services.
 # (the other forms: 1 a spawn's handle, 2 a soa element, 4 a lent place, 5 a local place,

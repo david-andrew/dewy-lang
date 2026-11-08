@@ -576,7 +576,7 @@ local_days=(t:Instant z:Zone):>int=>{
 }
 
 # ---------------- what a zoned time reads as ----------------
-_seconds_today=(z:ZonedDateTime):>int64=>(_local(z)%86400).to_int64() ?? 0
+_seconds_today=(z:ZonedDateTime):>int64<n => n >=? 0 and n <=? 86399>=>(_local(z)%86400).to_int64() ?? 0
 _nanos=(z:ZonedDateTime):>int64=>{
     let [_m in_day]=_zone_label(z.nominal)
     (in_day%_NS).to_int64() ?? 0
@@ -585,14 +585,14 @@ date=(z:ZonedDateTime):>Date=>_of_days(int(_local(z))//86400)
 time_of_day=(z:ZonedDateTime):>TimeOfDay=>TimeOfDay[_seconds_today(z)*1000000000+_nanos(z)]
 local=(z:ZonedDateTime):>LocalDateTime=>LocalDateTime<Gregorian>[date(z) time_of_day(z)]
 year=(z:ZonedDateTime):>int=>civil_from_days(int(_local(z))//86400)[0]
-month=(z:ZonedDateTime):>int64=>civil_from_days(int(_local(z))//86400)[1]
-day=(z:ZonedDateTime):>int64=>civil_from_days(int(_local(z))//86400)[2]
-hour=(z:ZonedDateTime):>int64=>_seconds_today(z)//3600
-minute=(z:ZonedDateTime):>int64=>(_seconds_today(z)%3600)//60
-second=(z:ZonedDateTime):>int64=>_seconds_today(z)%60
-nanosecond=(z:ZonedDateTime):>int64=>_nanos(z)
+month=(z:ZonedDateTime):>int64<n => n >=? 1 and n <=? 12>=>civil_from_days(int(_local(z))//86400)[1]
+day=(z:ZonedDateTime):>int64<n => n >=? 1 and n <=? 31>=>civil_from_days(int(_local(z))//86400)[2]
+hour=(z:ZonedDateTime):>int64<n => n >=? 0 and n <=? 23>=>_seconds_today(z)//3600
+minute=(z:ZonedDateTime):>int64<n => n >=? 0 and n <=? 59>=>(_seconds_today(z)%3600)//60
+second=(z:ZonedDateTime):>int64<n => n >=? 0 and n <=? 59>=>_seconds_today(z)%60
+nanosecond=(z:ZonedDateTime):>int64<n => n >=? 0 and n <=? 999999999>=>_nanos(z)
 # 0 for Monday to 6 for Sunday.
-weekday=(z:ZonedDateTime):>int64=>((int(_local(z))//86400+3)%7).to_int64() ?? 0
+weekday=(z:ZonedDateTime):>int64<n => n >=? 0 and n <=? 6>=>((int(_local(z))//86400+3)%7).to_int64() ?? 0
 
 # A local time in a zone: the moment under the policies, or the Gap or Ambiguous with no policy.
 local_in_zone=(l:LocalDateTime z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>{
