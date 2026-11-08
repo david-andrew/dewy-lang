@@ -12,12 +12,19 @@ WITH_FMT = "let x=3.14159\nprintl\"{fmt'.2f'(x)}\"\n"
 FMT_FILES = {'prelude/formats.dewy', 'bigint.dewy', 'rational.dewy'}
 
 
+def needs_counters(time_stderr):
+    """build --time reports nodes and lines only with hardware counters, which CI's virtual machines lack."""
+    if corpus.node_total(time_stderr) is None:
+        pytest.skip('no hardware counters on this host: build --time counts nothing')
+
+
 def counted(compiler, tmp_path, name, text):
     program = tmp_path / f'{name}.dewy'
     program.write_text(text)
     run = subprocess.run([compiler, 'build', program, '--time', '-o', tmp_path / name], capture_output=True, text=True,
                          timeout=120, env={'PATH': '/usr/bin:/bin', 'DEWY_CORE_LIB': str(ROOT / 'lib')})
     assert run.returncode == 0, run.stdout + run.stderr
+    needs_counters(run.stderr)
     rows = corpus.counted_sources(run.stderr)
     found = corpus.processed(run.stderr)
     assert found is not None
@@ -50,6 +57,7 @@ def test_flagship_lines_are_never_negative(compiler, tmp_path, entry):
     run = subprocess.run([compiler, 'build', program, '--time', '-o', tmp_path / 'program'], capture_output=True, text=True,
                          timeout=300, env={'PATH': '/usr/bin:/bin', 'DEWY_CORE_LIB': str(ROOT / 'lib')})
     assert run.returncode == 0, run.stdout + run.stderr
+    needs_counters(run.stderr)
     found = corpus.processed(run.stderr)     # raises on a negative or inconsistent count
     assert found is not None and found['library'] > 0 and found['all'] > found['root']
     assert all(lines >= 0 for _, lines, _ in corpus.counted_sources(run.stderr))
