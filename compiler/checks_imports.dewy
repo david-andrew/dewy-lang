@@ -185,7 +185,7 @@ bind_splat=(d:ImportWord m:ImportWord im:ImportWord):>void=>$unsafe {
     loop p in pairs {
         let name=p[0]
         let s=p[1]
-        if is_private(name) {continue}
+        if is_private(name) or name_of(name) =? "main" {continue}
         let owned=import_owned(s im)
         if owned.length =? 0 {continue}
         if files[ImportWord(modules[im].file)].path =? "{lib_dir}/rational.dewy" and (name_of(name) =? "Rational" or name_of(name) =? "RationalWord") {continue}

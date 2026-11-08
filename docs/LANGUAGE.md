@@ -3716,6 +3716,11 @@ A function without a declared result type infers the kinds it throws: each
 `main` is optional: without it a file runs top to bottom as a script. With it,
 the top-level statements run first and then `main` runs by itself, exactly once;
 calling `main()` at the top level is an error (recursion inside `main` is fine).
+Only the `main` declared in the file given to `dewy` runs; an imported file's
+`main` never runs automatically. Each file owns its `main`: a splat import
+does not bring it in, so a library can carry a local test `main` without
+colliding with the program's. An explicitly imported `main` is an ordinary
+callable function.
 
 `main` returns `void` or the errors that reach it, an ordinary `void | E` type,
 declared or inferred. It gives no exit code: success exits 0, and a script that

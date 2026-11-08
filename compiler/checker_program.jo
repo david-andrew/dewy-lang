@@ -174,7 +174,7 @@ check_program = (main_path: str):
             sk = syms[s].kind
             if (sk == .struct_ or sk == .enum_) and syms[s].decl != 0 and nkids2(int(syms[s].decl)) == 0 and (nodes[int(syms[s].decl)].kind == .struct_ or nodes[int(syms[s].decl)].kind == .enum_):
                 layout(get_struct_inst(int(syms[s].decl), []))
-    if let s = modules[mainm].names.get(intern("main")):
+    if let s = game_fn(mainm, "main"):
         # (main() at the end of the file, as in Python: it runs once, there)
         calls_main = false
         loop st in modules[mainm].inits:

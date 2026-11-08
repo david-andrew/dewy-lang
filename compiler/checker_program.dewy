@@ -153,7 +153,7 @@ check_program=(main_path:string):>void=>$unsafe {
             }
         }
     }
-    let program_option1=modules.ptr[mainm].names.get(intern("main"))
+    let program_option1=game_fn(mainm "main")
     if program_option1 not=? none {
         let s=program_option1
         let calls_main=false

@@ -251,7 +251,7 @@ bind_splat = (d: int, m: int, im: int):
     loop p in pairs:
         name = p.0
         s = p.1
-        if is_private(name): continue
+        if is_private(name) or name_of(name) == "main": continue
         owned = import_owned(s, im)
         if owned.len() == 0: continue
         if files[int(modules[im].file)].path == lib_dir + "/rational.dewy" and (name_of(name) == "Rational" or name_of(name) == "RationalWord"): continue

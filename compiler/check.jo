@@ -544,6 +544,7 @@ game_fn = (m: int, name: str) -> int?:
     e = modules[m].names.get(intern(name)) ?? 0
     loop e != 0 and syms[e].kind == .fns and syms[e].decl != 0 and dewy_is_method(int(syms[e].decl)): e = int(syms[e].next)
     if e == 0: return none
+    if name == "main" and files[int(modules[m].file)].is_dewy and (syms[e].decl == 0 or int(nodes[int(syms[e].decl)].mod) != m): return none
     e
 
 # ---------------- modules ----------------

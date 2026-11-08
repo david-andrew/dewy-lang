@@ -6,6 +6,7 @@ CASES = [
     'modules/splat_selective_collision',
     'modules/splat_collision',
     'modules/splat_own',
+    'batch4_entry/splat',
     'rational/library_name',
 ]
 
