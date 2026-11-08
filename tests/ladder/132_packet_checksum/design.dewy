@@ -1,0 +1,80 @@
+# Tier 6 / 132 / milestone 49
+# Acceptance: Build and parse IPv4/UDP datagrams with big-endian fields, a header length
+# refined to its legal range and a wrapping ones-complement checksum; a corrupted
+# header fails its checksum and a short or truncated packet is reported, all proven.
+HeaderWords:type = int64<h => 5 <=? h and h <=? 15>
+Datagram:type = [source:array<uint8> dest:array<uint8> sport:uint16 dport:uint16 payload:string]
+
+be16 = (b:array<uint8> at:int64<0 <=? at and at+2 <=? b.length>):>int64 => int64(b[at]) * 256 + int64(b[at+1])
+
+put16 = (@b:array<uint8> v:int64<0 <=? v and v <=? 65535>):>void => {
+    b.push(uint8(v // 256))
+    b.push(uint8(v % 256))
+}
+
+checksum = (b:array<uint8> start:int64<(>=? 0)> stop:int64<(<=? b.length)>):>uint16 => {
+    let sum:uint32<overflow='wrap'> = 0
+    let i = start
+    loop i + 1 <? stop {
+        sum += (uint32(b[i]) << 8) or uint32(b[i+1])
+        i += 2
+    }
+    if i <? stop and i >=? 0 sum += uint32(b[i]) << 8
+    loop sum >? 0xffff { sum = (sum and 0xffff) + (sum >> 16) }
+    uint16(0xffff - sum)
+}
+
+build = (d:Datagram):>array<uint8> => {
+    let body = bytes(d.payload)
+    let total = 28 + body.length
+    if total >? 65535 return []
+    let p:array<uint8> = [0x45 0]
+    put16(@p total)
+    p.extend([0x12 0x34 0x40 0 64 17 0 0])
+    p.extend(d.source)
+    p.extend(d.dest)
+    let sum = checksum(p 0 p.length)
+    if p.length >? 11 {
+        p[10] = uint8(sum >> 8)
+        p[11] = uint8(sum and 0xff)
+    }
+    put16(@p int64(d.sport))
+    put16(@p int64(d.dport))
+    put16(@p 8 + body.length)
+    p.extend([0 0])
+    p.extend(body)
+    p
+}
+
+parse = (p:array<uint8>):>string => {
+    if p.length <? 20 return "short"
+    let version = p[0] >> 4
+    let words = int64(p[0] and 0x0f)
+    if version not=? 4 or words <? 5 return "not IPv4"
+    let ihl:HeaderWords = words
+    let header = ihl * 4
+    if header + 8 >? p.length return "truncated"
+    let valid = checksum(p 0 header) =? 0
+    let total = be16(p 2)
+    let ttl = p[8]
+    let proto = p[9]
+    let src = "{p[12]}.{p[13]}.{p[14]}.{p[15]}"
+    let dst = "{p[16]}.{p[17]}.{p[18]}.{p[19]}"
+    let sport = be16(p header)
+    let dport = be16(p header + 2)
+    let ulen = be16(p header + 4)
+    if ulen <? 8 return "bad udp length"
+    let stop = min(header + ulen p.length)
+    let text = p[$clamp header + 8..stop) as string ?? "<binary>"
+    "{src}:{sport} -> {dst}:{dport} len {total} ttl {ttl} proto {proto} checksum {if valid "ok" else "BAD"} payload '{text}'"
+}
+
+main = ():>void => {
+    let d = Datagram[[192 168 1 79] [10 0 0 1] 53000 53 "hello, resolver"]
+    let packet = build(d)
+    printl(parse(packet))
+    let corrupt = packet
+    if corrupt.length >? 15 corrupt[15] = corrupt[15] xor 1
+    printl(parse(corrupt))
+    printl(parse([0x46 0 0 20]))
+}
