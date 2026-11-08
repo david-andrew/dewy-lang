@@ -66,6 +66,10 @@ when TARGET == "windows":
     @lib("kernel32.dll")
     extern GetFileSizeEx = (h: *u8, size: *int) -> i32
     @lib("kernel32.dll")
+    extern LocalFree = (p: *u8) -> *u8
+    @lib("advapi32.dll")
+    extern ConvertStringSecurityDescriptorToSecurityDescriptorW = (sddl: *u16, revision: u32, sd: *int, size: *u32) -> i32
+    @lib("kernel32.dll")
     extern CloseHandle = (h: *u8) -> i32
     @lib("kernel32.dll")
     extern FlushFileBuffers = (h: *u8) -> i32

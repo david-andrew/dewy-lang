@@ -182,8 +182,9 @@ __fsys_read = (path: str) -> u8[]?:
 # Write (or replace) a file; false when it cannot be, with why kept. The text goes to a new file
 # beside it, pushed to the disk, then renamed over it: a reader (or a crash) sees the old file
 # or the new one, never a part. A symbolic link there is not followed (nor replaced): ELOOP, a
-# FileError. A device or pipe is written as it is.
-__fsys_write = (path: str, contents: str) -> bool:
+# FileError. A device or pipe is written as it is. A private file (a secret's: write_text) is
+# made 0o600 from the start, and a file it replaces keeps only its owner's permissions.
+__fsys_write = (path: str, contents: str, private: bool = false) -> bool:
     __fsys_begin()
     when TARGET == "wasm":
         r = __wasm_write_file(data(path), len(path), data(contents), len(contents))
@@ -197,11 +198,24 @@ __fsys_write = (path: str, contents: str) -> bool:
             if a & u32(0x10) != u32(0): return __ferr(-21)
         h: *u8 = null
         tmp = ""
+        # (a private file: a protected DACL giving the owner, SYSTEM and Administrators full
+        # access and no one else any, as 0o600 does; a replaced file's own is not kept)
+        sa: int[] = [24, 0, 0]                       # SECURITY_ATTRIBUTES: length, descriptor, inherit
+        sd: int[] = [0]
+        if private:
+            if ConvertStringSecurityDescriptorToSecurityDescriptorW(data(__wide("D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)")), u32(1), data(sd), null) == 0: return __w32_ferr()
+            sa[1] = sd[0]
+        sec: *u8 = null
+        if private: sec = data(sa) as *u8
         loop attempt in [0..100):
             tmp = __fsys_temp_name(path, attempt)
-            h = CreateFileW(data(__wide(tmp)), u32(0x40000000), 0, null, 1, 0x80, null)  # GENERIC_WRITE, CREATE_NEW
+            h = CreateFileW(data(__wide(tmp)), u32(0x40000000), 0, sec, 1, 0x80, null)  # GENERIC_WRITE, CREATE_NEW
             if (h as int) != -1 or int(GetLastError()) != 80: break           # (80: it exists)
-        if (h as int) == -1: return __w32_ferr()
+        if (h as int) == -1:
+            failed = __w32_ferr()                    # (why, before LocalFree)
+            if private: LocalFree(sd[0] as *u8)
+            return failed
+        if private: LocalFree(sd[0] as *u8)
         off = 0
         n = len(contents)
         w: u32[] = [0]
@@ -227,10 +241,15 @@ __fsys_write = (path: str, contents: str) -> bool:
             if a < 0: return __ferr(a)
         fd = -17
         tmp = ""
+        perm = 0x1A4                                                        # 0o644
+        keep = 0x1FF
+        if private:
+            perm = 0x180                                                    # 0o600
+            keep = 0x1C0
         loop attempt in [0..100):
             if fd != -17: break
             tmp = __fsys_temp_name(path, attempt)
-            fd = syscall(2, data(__zstr(tmp)), 0x800C1, 0x1A4)           # O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC
+            fd = syscall(2, data(__zstr(tmp)), 0x800C1, perm)           # O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC
         if fd < 0: return __ferr(fd)
         r = 0
         off = 0
@@ -242,8 +261,8 @@ __fsys_write = (path: str, contents: str) -> bool:
                 r = min(w, -28)
                 break
             off += w
-        # (the old file's permissions kept)
-        if r == 0 and mode >= 0: r = min(syscall(90, data(__zstr(tmp)), mode & 0x1FF), 0)
+        # (the old file's permissions kept: a private file's owner's only)
+        if r == 0 and mode >= 0: r = min(syscall(90, data(__zstr(tmp)), mode & keep), 0)
         if r == 0: r = min(syscall(74, fd), 0)                            # fsync
         syscall(3, fd)
         if r == 0: r = min(syscall(82, data(__zstr(tmp)), data(__zstr(path))), 0)   # rename
@@ -309,14 +328,14 @@ __fsys_read_text = (path: str) -> str | __FileFailure | InvalidUtf8:
         return InvalidUtf8()
     __file_failure()
 
-__fsys_write_text = (path: str, text: str) -> int | __FileFailure:
+__fsys_write_text = (path: str, text: str, private: bool = false) -> int | __FileFailure:
     if __task_canceled(): return Canceled
-    if __fsys_write(path, text): return len(text)
+    if __fsys_write(path, text, private): return len(text)
     __file_failure()
 
-__fsys_write_bytes = (path: str, b: u8[]) -> int | __FileFailure:
+__fsys_write_bytes = (path: str, b: u8[], private: bool = false) -> int | __FileFailure:
     if __task_canceled(): return Canceled
-    if __fsys_write(path, str_from_bytes(b)): return b.len()
+    if __fsys_write(path, str_from_bytes(b), private): return b.len()
     __file_failure()
 
 __fsys_append = (path: str, text: str) -> int | __FileFailure:
@@ -504,6 +523,12 @@ write_text = (path: str, text: str) -> int | __FileFailure: __fsys_write_text(pa
 write_bytes = (path: str, b: u8[]) -> int | __FileFailure: __fsys_write_bytes(path, b)
 @warn_if(p(path) is not SafePath, "may escape its base")
 append_file = (path: str, text: str) -> int | __FileFailure: __fsys_append(path, text)
+# (a secret is written as its value, to a file only its owner can read: __fsys_write)
+when not BOOTSTRAP:
+    @warn_if(p(path) is not SafePath, "may escape its base")
+    write_text = (path: str, text: secret[str]) -> int | __FileFailure: __fsys_write_text(path, __secret_value(text), true)
+    @warn_if(p(path) is not SafePath, "may escape its base")
+    write_bytes = (path: str, b: secret[u8[]]) -> int | __FileFailure: __fsys_write_bytes(path, __secret_value(b), true)
 @warn_if(p(path) is not SafePath, "may escape its base")
 is_file = (path: str) -> bool: __fsys_kind(path) == 1
 @warn_if(p(path) is not SafePath, "may escape its base")
@@ -535,6 +560,11 @@ read_bytes = (path: Path) -> u8[] | __FileFailure: __fsys_read_bytes(path.path)
 write_text = (path: Path, text: str) -> int | __FileFailure: __fsys_write_text(path.path, text)
 @warn_if(path is not SafePath, "may escape its base")
 write_bytes = (path: Path, b: u8[]) -> int | __FileFailure: __fsys_write_bytes(path.path, b)
+when not BOOTSTRAP:
+    @warn_if(path is not SafePath, "may escape its base")
+    write_text = (path: Path, text: secret[str]) -> int | __FileFailure: __fsys_write_text(path.path, __secret_value(text), true)
+    @warn_if(path is not SafePath, "may escape its base")
+    write_bytes = (path: Path, b: secret[u8[]]) -> int | __FileFailure: __fsys_write_bytes(path.path, __secret_value(b), true)
 @warn_if(path is not SafePath, "may escape its base")
 mkdir = (path: Path) -> bool | __FileFailure: __fsys_mkdir(path.path)
 @warn_if(path is not SafePath, "may escape its base")

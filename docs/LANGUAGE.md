@@ -3762,7 +3762,14 @@ too. A failing runtime check on a value on its way into a secret leaves its valu
 out of the report. JSON has no writer for a secret, so writing one is a compile
 error.
 
-Anything that would use a secret as its `T` is a compile error that names
+`write_text` and `write_bytes` take a secret too, of a `string` or an
+`array<uint8>`, and write its value to a file only its owner can read: a new file is
+created `0o600`, not narrowed after it is made, and a file a secret replaces keeps
+only its owner's permissions. On Windows the file gets a
+protected access list giving only its owner, SYSTEM and Administrators access.
+(Provisional.)
+
+Anything else that would use a secret as its `T` is a compile error that names
 `.reveal`:
 
 - a `secret<T>` where a `T` is wanted (a binding, an argument, a result, a
