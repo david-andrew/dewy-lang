@@ -1,0 +1,11 @@
+# modes: native
+# A store through a raw pointer changes the array it points into: what was
+# known of its elements is forgotten, so the division needs a proof.
+main=():>void=>{
+    let xs:array<int64>=[1 2 3]
+    let p=xs.ptr
+    if xs.length <? 3 return
+    xs[0]=1
+    $unsafe { p[0]=0 }
+    printl(10 // xs[0])
+}

@@ -56,17 +56,27 @@ fact_change_route=(@s:FactState target:ChangeWord resize:bool at:ChangeWord reas
     }
     let p=fact_place(e)
     if e =? 0 or nodes.ptr[e].kind not=? 'ident' or p.declaration =? 0 {
-        fact_forget(@s at reason true)
+        fact_forget(@s at reason not fact_route_through_pointer(chain))
         return
     }
     # (the root's own prior value first: forgetting exposed roots replaces it)
     let i=fact_binding(s p)
     let old=if i >=? 0 {s.bindings[i].value} else {0}
     if fact_exposed(p) {fact_forget(@s at reason false p)}
+    # (a store through a raw pointer, `p[i] = v`, writes storage the pointer
+    # reaches, which raw access exposed: every exposed root)
+    else if fact_route_through_pointer(chain) {fact_forget(@s at reason)}
     let fresh=fact_new(@s fact_domain(ntype(e) reason at) FactTerm(type=ntype(e)))
     fact_holds_contract(@s refine_storage(e ntype(e)) fresh)
     fact_bind(@s p fresh)
     fact_change_shape(@s old fresh chain chain.length - 1 resize at reason paths)
+}
+# Whether a store route indexes a raw pointer. O(route depth).
+fact_route_through_pointer=(chain:array<int64>):>bool=>$unsafe {
+    loop c in chain {
+        if nodes.ptr[c].kind =? 'index' and tkind(fact_type(ntype(ChangeWord(nodes.ptr[c].a)))) =? 'ptr' {return true}
+    }
+    false
 }
 # Havoc a route without evaluating its selectors. An indexed write can hit
 # ANY tracked element; recursively havoc each one's affected descendants.

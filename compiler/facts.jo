@@ -2142,10 +2142,14 @@ fact_slice_prepare = (f: int, summary: bool = false):
             fact_slice_target(writers, target, n)
             if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_shift_obliged(n): values.push(n)
             root = target
-            loop nodes[root].kind == .field or nodes[root].kind == .index: root = int(nodes[root].a)
+            raw = false
+            loop nodes[root].kind == .field or nodes[root].kind == .index:
+                if nodes[root].kind == .index and tkind(fact_type(ntype(int(nodes[root].a)))) == .ptr: raw = true
+                root = int(nodes[root].a)
             p = fact_place(root)
-            if p.declaration == 0: opaque_writes.push(n)
-            else if fact_exposed(p): exposed_writes.push(n)
+            # (a store through a raw pointer writes what raw access exposed: fact_route_raw)
+            if raw or p.declaration != 0 and fact_exposed(p): exposed_writes.push(n)
+            else if p.declaration == 0: opaque_writes.push(n)
         if k == .for_ or k == .iflet or k == .match_:
             l = int(nodes[n].sym)
             if l > 0: fact_slice_writer(writers, PlaceIdentity(.local, int(locals[l].owner), l), n)

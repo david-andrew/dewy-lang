@@ -91,16 +91,24 @@ fact_change_route = (s: mut FactState, target: int, resize: bool, at: int, reaso
         else: break
     p = fact_place(e)
     if e == 0 or nodes[e].kind != .ident or p.declaration == 0:
-        fact_forget(s, at, reason, true)
+        fact_forget(s, at, reason, not fact_route_through_pointer(chain))
         return
     # (the root's own prior value first: forgetting exposed roots replaces it)
     i = fact_binding(s, p)
     old = if i >= 0: s.bindings[i].value else: 0
     if fact_exposed(p): fact_forget(s, at, reason, false, p)
+    # (a store through a raw pointer, `p[i] = v`, writes storage the pointer
+    # reaches, which raw access exposed: every exposed root)
+    else if fact_route_through_pointer(chain): fact_forget(s, at, reason)
     fresh = fact_new(s, fact_domain(ntype(e), reason, at), FactTerm(type = ntype(e)))
     fact_holds_contract(s, refine_storage(e, ntype(e)), fresh)
     fact_bind(s, p, fresh)
     fact_change_shape(s, old, fresh, chain, chain.len() - 1, resize, at, reason, paths)
+# Whether a store route indexes a raw pointer. O(route depth).
+fact_route_through_pointer = (chain: int[]) -> bool:
+    loop c in chain:
+        if nodes[c].kind == .index and tkind(fact_type(ntype(int(nodes[c].a)))) == .ptr: return true
+    false
 # Havoc a route without evaluating its selectors. An indexed write can hit
 # ANY tracked element; recursively havoc each one's affected descendants.
 # This preserves inner lengths only when the write cannot resize them, even

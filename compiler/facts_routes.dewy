@@ -334,7 +334,7 @@ fact_route_values=(@s:FactState route:FactRoute):>array<int64>=>{
 }
 fact_store_route=(@s:FactState route:FactRoute value0:RouteWord at:RouteWord bounds:bool=false):>void=>{
     let p=fact_place(route.root)
-    if p.declaration =? 0 {fact_forget(@s at 'write' true); return}
+    if p.declaration =? 0 {fact_forget(@s at 'write' not fact_route_raw(route)); return}
     let values=fact_route_values(@s route)
     if bounds and fact_speculating =? 0 and fact_probe_on {fact_probe_route(@s route values)}
     else if bounds and fact_speculating =? 0 and (fact_policy =? 'RequireStatic' or fact_query) {fact_route_bounds(@s route values)}
@@ -353,9 +353,20 @@ fact_store_route=(@s:FactState route:FactRoute value0:RouteWord at:RouteWord bou
         if ref_self_contract(held) {ref_assume(held value [] @s)}
     }
     if fact_exposed(p) {fact_forget(@s at 'write' false p)}
+    # (a store through a raw pointer, `p[i] = v`, writes storage the pointer
+    # reaches, which raw access exposed: every exposed root)
+    else if fact_route_raw(route) {fact_forget(@s at 'write')}
     let old:RouteWord=0
     if values.length >? 0 {old=values[0]}
     fact_rebind(@s p value at old)
+}
+# Whether a route selects through a raw pointer. O(route depth).
+fact_route_raw=(route:FactRoute):>bool=>$unsafe {
+    loop i in [0..route.selectors.length) {
+        let t=if i =? 0 {ntype(route.root)} else {route.types[i - 1]}
+        if tkind(fact_type(t)) =? 'ptr' {return true}
+    }
+    false
 }
 # Component i of an unpacked value of type t0: a tuple's field or an array's
 # element (a record's is not tracked by position).
