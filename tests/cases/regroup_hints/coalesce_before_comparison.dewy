@@ -1,0 +1,6 @@
+# `??` binds tighter than `>?`, so the fallback is just `b.length`: the hint shows the grouping meant.
+main = () => {
+    let flag:bool | none = none
+    let b:array<uint8> = [1 2 3]
+    printl(flag ?? b.length >? 3)
+}

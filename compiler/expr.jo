@@ -1083,6 +1083,7 @@ coerce = (n: int, target: int) -> int:
             why = " (`{held}` names a {dt(from)} here, not the function `{held}`: give that {dt(from)} another name to reach the function)"
     # (`[1 2 ; 3 4]` where one row is wanted: a row break makes the literal 2-D)
     if dewy and tk == .array and is_nd(from) and pos_off(nodes[n].pos) < len(files[pos_file(nodes[n].pos)].src) and files[pos_file(nodes[n].pos)].src[pos_off(nodes[n].pos)] == '[': why = " (this literal has rows, so it is 2-D: for one row, leave out the row breaks, and end a line with `\\` to continue the row on the next line)"
+    regroup_note(n)
     fatal(nodes[n].pos, "type mismatch: expected {dt_named(to)}, found {dt_named(from)}{why}{coerce_hint}")
     n
 
@@ -3516,6 +3517,119 @@ id_draw = intern("draw")
 id_update = intern("update")
 
 coerce_hint = ""     # (said after a type mismatch, by what asked for the type)
+
+# `as` and `??` bind looser and tighter than the operators beside them (docs/LANGUAGE.md's operator
+# table): `ok and b[0..4) as string` converts all of `ok and b[0..4)`, and `m ?? x >? 3` is
+# `(m ?? x) >? 3`. Nothing is recorded while checking: when a type error is reported, regroup_note
+# looks through the nodes for an `as`, or a comparison, `and` or `or`, written around the node at
+# fault so that the other grouping would have held it, and says what to parenthesize.
+
+# the operator inside the operand of the `as` at c that its right edge ends in, and that right operand
+regroup_edge = (c: int) -> (int, int):
+    r = int(nodes[c].a)
+    op = 0
+    loop true:
+        k = nodes[r].kind
+        if k == .and_ or k == .or_ or k == .binary:
+            op = r
+            r = int(nodes[r].b)
+        else if k == .not_ or k == .unary:
+            op = r
+            r = int(nodes[r].a)
+        else: break
+    (op, r)
+
+regroup_op_name = (p: int) -> str:
+    k = nodes[p].kind
+    if k == .and_: return "and"
+    if k == .or_: return "or"
+    if k == .not_: return "not"
+    op_text(nodes[p].op as Tok, nodes[p].pos)
+
+# the source between two places of one file, on one line, without the blanks around it ("" if not)
+regroup_source = (f: int, from0: int, to0: int) -> str:
+    src = files[f].src
+    from = from0
+    to = to0
+    loop from < to and (src[from] == ' ' or src[from] == '\t'): from += 1
+    loop to > from and (src[to - 1] == ' ' or src[to - 1] == '\t'): to -= 1
+    if from >= to or to > len(src) or to - from > 80: return ""
+    loop i in [from..to):
+        if src[i] == '\n': return ""
+    src[from..to)
+
+# whether text closes no bracket it did not open (else its operand was written inside parentheses)
+regroup_balanced = (text: str) -> bool:
+    depth = 0
+    loop c in text:
+        if c == '(' or c == '[': depth += 1
+        else if c == ')' or c == ']': depth -= 1
+        if depth < 0: return false
+    true
+
+# the text of the type a cast names: a name, with its type arguments
+regroup_type_text = (c: int) -> str:
+    t = int(nodes[c].b)
+    f = pos_file(nodes[t].pos)
+    src = files[f].src
+    from = pos_off(nodes[t].pos)
+    to = from
+    depth = 0
+    loop to < len(src):
+        ch = src[to]
+        if ch == '<': depth += 1
+        else if ch == '>': depth -= 1
+        else if depth == 0 and not is_ident_char(ch) and ch != '.': break
+        to += 1
+    if depth != 0: return ""
+    src[from..to)
+
+# the help for a type error at node n if `as` at cast c would have held it under the other grouping
+regroup_as_note = (c: int, n: int) -> bool:
+    p = nodes[n].pos
+    op, r = regroup_edge(c)
+    if op == 0 or nodes[r].pos != p: return false
+    f = pos_file(p)
+    name = regroup_op_name(op)
+    ty = regroup_type_text(c)
+    src = files[f].src
+    as_at = pos_off(nodes[int(nodes[c].b)].pos)
+    loop as_at > 0 and (src[as_at - 1] == ' ' or src[as_at - 1] == '\t'): as_at -= 1
+    if as_at < 2 or src[as_at - 2..as_at) != "as" or ty == "": return false
+    operand = regroup_source(f, pos_off(p), as_at - 2)
+    if operand == "" or not regroup_balanced(operand): return false
+    err_notes.push((-1, "help: `as` binds looser than `{name}`, so it converts everything before it, not just `{operand}`: parenthesize what you mean to convert, as in `{name} ({operand} as {ty} ...)`"))
+    true
+
+# the same, if the `??` on the left of operator par has the node at fault as its fallback
+regroup_coalesce_note = (par: int, n: int) -> bool:
+    p = nodes[n].pos
+    co = int(nodes[par].a)
+    if nodes[co].kind != .coalesce or nodes[int(nodes[co].b)].pos != p or nodes[par].kind == .not_: return false
+    name = regroup_op_name(par)
+    f = pos_file(p)
+    right = int(nodes[par].b)
+    if right == 0 or pos_file(nodes[right].pos) != f: return false
+    fallback = regroup_source(f, pos_off(p), pos_off(nodes[right].pos))
+    if len(fallback) > len(name) and fallback[len(fallback) - len(name)..len(fallback)) == name:
+        fallback = fallback[0..len(fallback) - len(name))
+    loop len(fallback) > 0 and fallback[len(fallback) - 1] == ' ': fallback = fallback[0..len(fallback) - 1)
+    if fallback == "" or not regroup_balanced(fallback): return false
+    err_notes.push((-1, "help: `??` binds tighter than `{name}`, so its fallback is just `{fallback}` and `{name}` compares the result: parenthesize what you mean as the fallback, as in `?? ({fallback} {name} ...)`"))
+    true
+
+# the help for a type error at node n, if the other grouping of an `as` or `??` around it would hold it
+# (a search of the nodes: it runs only for an error, and only in Dewy source)
+regroup_note = (n: int):
+    if not dewy_at(nodes[n].pos): return
+    i = 1
+    loop i < len(nodes):
+        k = nodes[i].kind
+        if k == .cast:
+            if nodes[i].aux2 != 1 and regroup_as_note(i, n): return
+        else if k == .and_ or k == .or_ or (k == .binary and nodes[i].op >= 69 and nodes[i].op <= 74):
+            if regroup_coalesce_note(i, n): return
+        i += 1
 
 fn_used: {int: bool}            # the program's functions called or used as a value (by decl)
 drew_in: {int: bool}            # (functions, by instance, that have drawn something so far)
