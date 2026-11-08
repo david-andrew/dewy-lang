@@ -1,0 +1,8 @@
+# modes: native
+# The bound a guard on `k + x` gives x is exact: one past it is unproven.
+need=(v:int64<0 <=? v and v <=? 65506>):>int64 => v
+window=(n:int64<0 <=? n and n <=? 1000000>):>int64=>{
+    if 28 + n >? 65535 return -1
+    need(n)
+}
+main=():>void=>printl(window(5))

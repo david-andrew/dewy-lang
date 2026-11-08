@@ -1726,19 +1726,24 @@ fact_offset_narrow = (s: mut FactState, v: int, b: FactBound):
     t = fact_terms[v]
     if t.op != .plus and t.op != .minus or t.a == 0 or t.b == 0: return
     c = fact_bound(s, t.b)
+    operand = t.a
+    # (`k + x`, the constant first, is the same offset of x)
+    if (c.lo != c.hi or c.lo == FACT_MIN or c.lo == FACT_MAX) and t.op == .plus:
+        c = fact_bound(s, t.a)
+        operand = t.b
     if c.lo != c.hi or c.lo == FACT_MIN or c.lo == FACT_MAX: return
     k = if t.op == .plus: c.lo else: -c.lo
-    x = fact_bound(s, t.a)
+    x = fact_bound(s, operand)
     if x.reason == .budget and x.lo == FACT_MIN and x.hi == FACT_MAX: return
     if b.hi != FACT_MAX and fact_add_fits(b.hi, -k): x.hi = min(x.hi, b.hi - k)
     if b.lo != FACT_MIN and fact_add_fits(b.lo, -k): x.lo = max(x.lo, b.lo - k)
-    fact_set_bound(s, t.a, x)
+    fact_set_bound(s, operand, x)
     # Once a guard brought the exact offset into range, retain its identity
     # as well as its interval. The next evaluation of i+k then finds the
     # guarded value through fact_offset_value. O(1), indexed rows.
     if not b.wide:
-        fact_difference(s, v, t.a, k, 0, 16)
-        fact_difference(s, t.a, v, -k, 0, 16)
+        fact_difference(s, v, operand, k, 0, 16)
+        fact_difference(s, operand, v, -k, 0, 16)
 
 struct FactPaths:
     yes: FactState

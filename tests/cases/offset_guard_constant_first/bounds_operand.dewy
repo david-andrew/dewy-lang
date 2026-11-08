@@ -1,0 +1,13 @@
+# modes: native native-release
+# A guard on `k + x` bounds x as one on `x + k` does.
+need=(v:int64<0 <=? v and v <=? 65535>):>int64 => v
+frame=(body:array<uint8>):>int64=>{
+    let total=28 + body.length
+    if total >? 65535 return -1
+    need(8 + body.length)
+}
+window=(n:int64<0 <=? n and n <=? 1000000>):>int64=>{
+    if 100 + n >? 65535 or 100 + n <? 200 return -1
+    need(n)
+}
+main=():>void=>printl(frame([1 2 3]) window(150) window(50) window(70000))
