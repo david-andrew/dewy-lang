@@ -1,0 +1,19 @@
+# The compiler's utf8_text.dewy: `utf8_width text...` prints, for each text, the terminal columns of
+# each of its characters (an invalid byte is a character of its own).
+$runtime_checks
+from p"../../../compiler/utf8_text.dewy" import utf8_next, utf8_width
+
+main=():>void=>{
+    let words=args()
+    loop w in [1..words.length) {
+        let text=words[w]
+        let n=(text as array<uint8>).length as int64
+        let out="w"
+        let at:int64=0
+        loop at <? n {
+            out="{out} {utf8_width(text at)}"
+            at=utf8_next(text at)
+        }
+        printl"{out}"
+    }
+}

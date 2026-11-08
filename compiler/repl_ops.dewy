@@ -24,7 +24,7 @@ from p"checks_imports.dewy" import (bind_from_imports)
 from p"checks_program.dewy" import (synth_call)
 from p"checks_thin.dewy" import (check_pending_functions check_stmt leave_module_context new_inst zonk_tree)
 from p"decimal_ops.dewy" import (decimal_check_body decimal_input_globals decimal_wants)
-from p"utf8_text.dewy" import (utf8_floor utf8_next utf8_prev)
+from p"utf8_text.dewy" import (utf8_floor utf8_next utf8_prev utf8_width)
 from p"driver_pipeline.dewy" import (emit_function)
 from p"expr.jo" import (ntype)
 from p"frontend.jo" import (source_declarations)
@@ -340,14 +340,15 @@ repl_code_end=(s:string):>int64=>{
     }
     (s as array<uint8>).length
 }
-# display width of a line's first n bytes (one column per character; an invalid byte is one)
+# display width of a line's first n bytes in terminal columns (wide characters take two, combining
+# marks none; an invalid byte is one)
 repl_cols=(s:string n:ReplWord):>int64=>{
     let c:ReplWord=0
     let i:ReplWord=0
     let stop=min(n (s as array<uint8>).length)
     loop i <? stop {
+        c += utf8_width(s i)
         i=utf8_next(s i)
-        c += 1
     }
     c
 }

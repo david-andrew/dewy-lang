@@ -1,0 +1,14 @@
+# The compiler's frozen utf8_text.jo, with the same command line as utf8_width_dewy.dewy.
+use '../../../compiler/utf8_text.jo'
+
+main = ():
+    words = args()
+    loop w in [1..words.len()):
+        text = words[w]
+        n = len(text)
+        out = "w"
+        at = 0
+        loop at < n:
+            out += " {utf8_width(text, at)}"
+            at = utf8_next(text, at)
+        print(out)

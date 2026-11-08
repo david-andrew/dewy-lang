@@ -183,7 +183,7 @@ def _type_lines(process, master, data, deadline):
     return seen
 
 
-def run_prompt(binary, text, directory, timeout, paced=False):
+def run_prompt(binary, text, directory, timeout, paced=False, raw=False):
     """Feed text (or bytes) to the prompt through a pseudo-terminal (as tests/repl_pty.py does); its whole
     process group ends with it."""
     import pty
@@ -215,11 +215,12 @@ def run_prompt(binary, text, directory, timeout, paced=False):
             os.killpg(process.pid, signal.SIGKILL)
         process.wait(timeout=10)
         os.close(master)
-    out = REDRAW.sub(b'', ANSI.sub(b'', out)).replace(BANNER, b'', 1).replace(b'\r', b'')
+    if not raw:  # (raw keeps the prompt's drawing: where it puts the cursor)
+        out = REDRAW.sub(b'', ANSI.sub(b'', out)).replace(BANNER, b'', 1).replace(b'\r', b'')
     return process.returncode, out.decode(errors='replace'), err.decode(errors='replace')
 
 
-def compare_repl(compiler, tmp_path, monkeypatch, leaves, transcripts, paced=False):
+def compare_repl(compiler, tmp_path, monkeypatch, leaves, transcripts, paced=False, raw=False):
     """transcripts: texts typed at the prompt, each a fresh prompt; stdout, stderr and exit codes."""
     dewy, jo = _compilers(compiler, tmp_path, monkeypatch, leaves)
     results = []
@@ -228,7 +229,7 @@ def compare_repl(compiler, tmp_path, monkeypatch, leaves, transcripts, paced=Fal
         for i, text in enumerate(transcripts):
             directory = tmp_path / f'{label}{i}'
             directory.mkdir()
-            code, out, err = run_prompt(binary, text, directory, patience(60), paced)
+            code, out, err = run_prompt(binary, text, directory, patience(60), paced, raw)
             history = directory / 'repl-history'
             runs.append((code, out.replace(str(binary), 'dewy-core'), err.replace(str(binary), 'dewy-core'),
                          history.read_bytes() if history.exists() else b''))

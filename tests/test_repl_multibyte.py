@@ -1,5 +1,7 @@
 """The prompt's line editing and completion on multi-byte text agree with frozen Jo, which cuts the
 line at bytes: Delete and ctrl-d on a character, completions that share only part of a character."""
+import re
+
 from tests.selfhost_process_double import compare_repl
 from tests.support import compiler  # noqa: F401
 
@@ -71,3 +73,32 @@ def test_completion_stops_between_characters(compiler, tmp_path, monkeypatch):
     run = compare_repl(compiler, tmp_path, monkeypatch, ('repl_ops',), [b''.join(lines)], paced=True)[0]
     assert 'panic' not in run[2], run
     assert run[3].split(b'\n')[2] == b'\xc3\xa9a', run[3]
+
+
+# (typed keys, the column the cursor is moved to when the line is drawn last): the prompt is four columns, a wide
+# character takes two, and a combining mark none
+CURSOR_COLUMNS = [
+    (ZHONG, 6),
+    (SMILE, 6),
+    (b'e' + MARK, 5),
+    (b'a' + ZHONG + SMILE + b'e' + MARK, 10),
+    (ZHONG + LEFT, 4),
+    (b'x' + ZHONG + LEFT, 5),
+    (b'x' + ZHONG + LEFT * 2, 4),
+    (b'e' + MARK + LEFT, 5),
+    (b'e' + MARK + LEFT * 2, 4),
+    (SMILE + ZHONG + LEFT + RIGHT, 8),
+    (ZHONG + SMILE + HOME + RIGHT, 6),
+    (ZHONG + b'ab' + HOME + DELETE, 4),
+]
+
+
+def test_cursor_goes_by_display_columns(compiler, tmp_path, monkeypatch):
+    """After wide characters and combining marks the cursor is drawn where they leave it, in both builds."""
+    transcripts = [keys + CTRL_D + b'\n:quit\n' for keys, _ in CURSOR_COLUMNS]
+    runs = compare_repl(compiler, tmp_path, monkeypatch, ('repl_ops',), transcripts, paced=True, raw=True)
+    for (keys, columns), run in zip(CURSOR_COLUMNS, runs):
+        assert 'panic' not in run[2], (keys, run)
+        drawn = run[1].split('\r\n')[0]  # (what was drawn before the line was submitted)
+        moves = re.findall(r'\x1b\[(\d+)C', drawn)
+        assert moves and int(moves[-1]) == columns, (keys, columns, moves)
