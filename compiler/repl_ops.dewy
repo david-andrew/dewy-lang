@@ -13,7 +13,7 @@ from p"arm64_emit.dewy" import a_data_fix
 from p"arm64_emit.dewy" import a_faddr_fix
 from p"arm64_emit.dewy" import a_stub_fix
 from p"arm64_emit.dewy" import a_call_fix
-from p"@lib/core/rt.jo" import (__str_from_bytes)
+from p"@lib/core/rt.jo" import (__str_from_bytes __str_slice)
 from p"@lib/core/str.jo" import (byte_str is_alnum)
 from p"arm64_encode.dewy" import (a_bl a_br a_patch_adrp a_ret rd32 w32 wr32)
 from p"ast.jo" import (NF_EXTERN has_flag mk nodes set_list)
@@ -367,7 +367,7 @@ repl_edit=(prompt:string initial:string):>string | none=>{
                 repl_out("\r\n")
                 return none
             }
-            if cur <? (line as array<uint8>).length {line="{line.byte_slice(0 cur)}{line.byte_slice(cur + 1 (line as array<uint8>).length)}"}
+            if cur <? (line as array<uint8>).length {line="{__str_slice(line 0 cur)}{__str_slice(line cur + 1 (line as array<uint8>).length)}"}
         }
         else if c =? 3 {
             repl_out("^C\r\n")
@@ -377,37 +377,37 @@ repl_edit=(prompt:string initial:string):>string | none=>{
             if cur >? 0 {
                 let k=cur - 1
                 loop k >? 0 and (line as array<uint8>)[k] >=? 0x80 and (line as array<uint8>)[k] <? 0xC0 {k -= 1}
-                line="{line.byte_slice(0 k)}{line.byte_slice(cur (line as array<uint8>).length)}"
+                line="{__str_slice(line 0 k)}{__str_slice(line cur (line as array<uint8>).length)}"
                 cur=k
             }
         }
         else if c =? 1 {cur=0} else if c =? 5 {cur=(line as array<uint8>).length}
-        else if c =? 11 {line=line.byte_slice(0 cur)} else if c =? 21 {
-            line=line.byte_slice(cur (line as array<uint8>).length)
+        else if c =? 11 {line=__str_slice(line 0 cur)} else if c =? 21 {
+            line=__str_slice(line cur (line as array<uint8>).length)
             cur=0
         }
         else if c =? 23 {
             let k=cur
             loop k >? 0 and (line as array<uint8>)[k - 1] =? b' ' {k -= 1}
             loop k >? 0 and (line as array<uint8>)[k - 1] not=? b' ' {k -= 1}
-            line="{line.byte_slice(0 k)}{line.byte_slice(cur (line as array<uint8>).length)}"
+            line="{__str_slice(line 0 k)}{__str_slice(line cur (line as array<uint8>).length)}"
             cur=k
         }
         else if c =? 12 {repl_out("\u{1b}[H\u{1b}[2J")} else if c =? 9 {
-            if (trim(line.byte_slice(0 cur)) as array<uint8>).length =? 0 {
+            if (trim(__str_slice(line 0 cur)) as array<uint8>).length =? 0 {
                 # (at the start of a line: indent)
-                line="{line.byte_slice(0 cur)}    {line.byte_slice(cur (line as array<uint8>).length)}"
+                line="{__str_slice(line 0 cur)}    {__str_slice(line cur (line as array<uint8>).length)}"
                 cur += 4
             }
             else {
-                let cands=repl_completions("{repl_before}{line.byte_slice(0 cur)}")
+                let cands=repl_completions("{repl_before}{__str_slice(line 0 cur)}")
                 let a=cur
                 loop a >? 0 and (is_alnum((line as array<uint8>)[a - 1]) or (line as array<uint8>)[a - 1] >=? 0x80) {a -= 1}
-                let typed=line.byte_slice(a cur)
+                let typed=__str_slice(line a cur)
                 let common=repl_common(cands)
                 if cands.length =? 1 {common=cands[0]}
                 if (common as array<uint8>).length >? (typed as array<uint8>).length {
-                    line="{line.byte_slice(0 a)}{common}{line.byte_slice(cur (line as array<uint8>).length)}"
+                    line="{__str_slice(line 0 a)}{common}{__str_slice(line cur (line as array<uint8>).length)}"
                     cur=a + (common as array<uint8>).length
                 }
                 else if cands.length >? 1 {
@@ -458,13 +458,13 @@ repl_edit=(prompt:string initial:string):>string | none=>{
                     let c4=repl_getc()
                     if c4 =? b'~' {
                         if c3 =? b'1' or c3 =? b'7' {cur=0} else if c3 =? b'4' or c3 =? b'8' {cur=(line as array<uint8>).length}
-                        else if c3 =? b'3' and cur <? (line as array<uint8>).length {line="{line.byte_slice(0 cur)}{line.byte_slice(cur + 1 (line as array<uint8>).length)}"}
+                        else if c3 =? b'3' and cur <? (line as array<uint8>).length {line="{__str_slice(line 0 cur)}{__str_slice(line cur + 1 (line as array<uint8>).length)}"}
                     }
                 }
             }
         }
         else if c >=? 32 {
-            line="{line.byte_slice(0 cur)}{byte_str(c)}{line.byte_slice(cur (line as array<uint8>).length)}"
+            line="{__str_slice(line 0 cur)}{byte_str(c)}{__str_slice(line cur (line as array<uint8>).length)}"
             cur += 1
         }
     }
@@ -490,7 +490,7 @@ repl_common=(xs:array<string>):>string=>{
     loop x in xs {
         let n:ReplWord=0
         loop n <? (c as array<uint8>).length and n <? (x as array<uint8>).length and (c as array<uint8>)[n] =? (x as array<uint8>)[n] {n += 1}
-        c=c.byte_slice(0 n)
+        c=__str_slice(c 0 n)
     }
     c
 }

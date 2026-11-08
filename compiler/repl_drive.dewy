@@ -1,5 +1,6 @@
 $runtime_checks
 from p"@lib/core/os.jo" import (cwd delete_file env eprint exit mkdir read_file)
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"@lib/core/str.jo" import (is_alnum split starts_with trim)
 from p"check.jo" import (fns global_ids globals init_fns mod_bits modules repl_sig repl_sig_query)
 from p"ide.jo" import (ide_doc ide_texts)
@@ -105,15 +106,15 @@ repl_run_input=(text:string):>int64=>{
 repl_completions=(text:string):>array<string>=>{
     let a=(text as array<uint8>).length
     loop a >? 0 and (is_alnum((text as array<uint8>)[a - 1]) or (text as array<uint8>)[a - 1] >=? 0x80) {a -= 1}
-    let probe="{text.byte_slice(0 a)}__dewy_complete__\n"
+    let probe="{__str_slice(text 0 a)}__dewy_complete__\n"
     let got=rs_complete(probe)
-    let prefix=text.byte_slice(a (text as array<uint8>).length)
+    let prefix=__str_slice(text a (text as array<uint8>).length)
     let out:array<string>=[]
     loop l in split(got "\n") {
         if not starts_with(l "C\t") {continue}
         let e=find_byte(l b'\t' 2)
         if e <? 0 {e=(l as array<uint8>).length}
-        let name=l.byte_slice(2 e)
+        let name=__str_slice(l 2 e)
         if not starts_with(name prefix) or out.contains(name) {continue}
         if starts_with(name "__") and not starts_with(prefix "_") {continue}
         out.push(name)
@@ -169,7 +170,7 @@ repl_main=():>void=>{
             continue
         }
         if starts_with(t1 ":type ") or starts_with(t1 ":t ") or starts_with(t1 ":doc ") {
-            let what=trim(t1.byte_slice(find_byte(t1 b' ') + 1 (t1 as array<uint8>).length))
+            let what=trim(__str_slice(t1 find_byte(t1 b' ') + 1 (t1 as array<uint8>).length))
             # (built into the language: print, len of an array, ...: what they are, as API.md says)
             let bi=repl_builtin_doc(what)
             if (bi as array<uint8>).length >? 0 {repl_out(bi)}
