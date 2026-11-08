@@ -1,0 +1,37 @@
+# The compiler's utf8_text.dewy: `utf8_text text...` prints, for each text, its bytes cleaned of
+# invalid sequences in hex, where its characters end walking forward, where the character before
+# each of those ends starts, and the start of the character holding each byte.
+$runtime_checks
+from p"../../../compiler/utf8_text.dewy" import utf8_clean, utf8_floor, utf8_next, utf8_prev
+
+hex=(b:array<uint8>):>string=>{
+    let digits=b"0123456789abcdef"
+    let out:array<uint8>=[]
+    loop c in b {
+        out.push(digits[(c >> 4) as int64])
+        out.push(digits[(c & 15) as int64])
+    }
+    out as string ?? ""
+}
+
+main=():>void=>{
+    let words=args()
+    loop w in [1..words.length) {
+        let text=words[w]
+        let n=(text as array<uint8>).length as int64
+        printl"clean {hex(utf8_clean(text) as array<uint8>)}"
+        let ends=""
+        let starts=""
+        let at:int64=0
+        loop at <? n {
+            at=utf8_next(text at)
+            ends="{ends} {at}"
+            starts="{starts} {utf8_prev(text at)}"
+        }
+        printl"next{ends}"
+        printl"prev{starts}"
+        let floors=""
+        loop i in [0..n] {floors="{floors} {utf8_floor(text i)}"}
+        printl"floor{floors}"
+    }
+}

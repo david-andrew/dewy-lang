@@ -153,8 +153,38 @@ def compare_watch(compiler, tmp_path, monkeypatch, leaves, files, steps, **optio
     return expected
 
 
-def run_prompt(binary, text, directory, timeout):
-    """Feed text to the prompt through a pseudo-terminal (as tests/repl_pty.py does); its whole
+def _type_lines(process, master, data, deadline):
+    """Type data one line at a time, each after the prompt has drawn again; what the prompt wrote meanwhile."""
+    import select
+    prompt = re.compile(rb'\r\n[\s\S]*(?:>>> |\.\.\. )')
+    fd = process.stdout.fileno()
+    seen = b''
+
+    def wait(pattern, start):
+        nonlocal seen
+        while not pattern.search(seen, start):
+            ready, _, _ = select.select([fd], [], [], max(deadline - time.monotonic(), 0))
+            if not ready:
+                raise subprocess.TimeoutExpired(process.args, 0)
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                return False
+            seen += chunk
+        return True
+
+    alive = wait(re.compile(rb'>>> '), 0)
+    for line in re.findall(rb'[^\n]*\n|[^\n]+', data):
+        if not alive:
+            break
+        start = len(seen)
+        with contextlib.suppress(OSError):
+            os.write(master, line)
+        alive = wait(prompt, start)
+    return seen
+
+
+def run_prompt(binary, text, directory, timeout, paced=False):
+    """Feed text (or bytes) to the prompt through a pseudo-terminal (as tests/repl_pty.py does); its whole
     process group ends with it."""
     import pty
     from tests.repl_pty import ANSI, BANNER, REDRAW
@@ -171,9 +201,15 @@ def run_prompt(binary, text, directory, timeout):
                 pass
 
     threading.Thread(target=drain, daemon=True).start()
+    ahead = b''
     try:
-        os.write(master, text.encode())
+        data = text if isinstance(text, bytes) else text.encode()
+        if paced:  # (the terminal is raw only while a line is read: keys wait for each prompt, as a typist's do)
+            ahead = _type_lines(process, master, data, time.monotonic() + timeout)
+        else:
+            os.write(master, data)
         out, err = process.communicate(timeout=timeout)
+        out = ahead + out
     finally:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(process.pid, signal.SIGKILL)
@@ -183,7 +219,7 @@ def run_prompt(binary, text, directory, timeout):
     return process.returncode, out.decode(errors='replace'), err.decode(errors='replace')
 
 
-def compare_repl(compiler, tmp_path, monkeypatch, leaves, transcripts):
+def compare_repl(compiler, tmp_path, monkeypatch, leaves, transcripts, paced=False):
     """transcripts: texts typed at the prompt, each a fresh prompt; stdout, stderr and exit codes."""
     dewy, jo = _compilers(compiler, tmp_path, monkeypatch, leaves)
     results = []
@@ -192,7 +228,7 @@ def compare_repl(compiler, tmp_path, monkeypatch, leaves, transcripts):
         for i, text in enumerate(transcripts):
             directory = tmp_path / f'{label}{i}'
             directory.mkdir()
-            code, out, err = run_prompt(binary, text, directory, patience(60))
+            code, out, err = run_prompt(binary, text, directory, patience(60), paced)
             history = directory / 'repl-history'
             runs.append((code, out.replace(str(binary), 'dewy-core'), err.replace(str(binary), 'dewy-core'),
                          history.read_bytes() if history.exists() else b''))

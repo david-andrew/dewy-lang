@@ -1,0 +1,29 @@
+# The compiler's frozen utf8_text.jo, with the same command line as utf8_text_dewy.dewy.
+use '../../../compiler/utf8_text.jo'
+
+hex = (s: str) -> str:
+    digits = "0123456789abcdef"
+    out: u8[]
+    loop c in s:
+        out.push(digits[int(c) >> 4])
+        out.push(digits[int(c) & 15])
+    str_from_bytes(out)
+
+main = ():
+    words = args()
+    loop w in [1..words.len()):
+        text = words[w]
+        n = len(text)
+        print("clean {hex(utf8_clean(text))}")
+        ends = ""
+        starts = ""
+        at = 0
+        loop at < n:
+            at = utf8_next(text, at)
+            ends += " {at}"
+            starts += " {utf8_prev(text, at)}"
+        print("next{ends}")
+        print("prev{starts}")
+        floors = ""
+        loop i in [0..n]: floors += " {utf8_floor(text, i)}"
+        print("floor{floors}")

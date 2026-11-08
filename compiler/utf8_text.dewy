@@ -1,0 +1,97 @@
+$runtime_checks
+# UTF-8 text in bytes that need not be UTF-8: where each character ends, by the rule of
+# WHATWG's decoder and Unicode's "maximal subpart" practice (no overlong forms, no
+# surrogates, nothing above U+10FFFF).
+#
+# A module of the compiler written in Dewy. utf8_text.jo is its frozen twin for the
+# compilers without the Dewy frontend (tools/compiler/build.py); the two keep the same
+# interface and give the same answers.
+
+# The character at i of s (i < its length): its length in bytes when s holds a whole valid
+# sequence there, otherwise minus the length of the longest start of one (at least one byte)
+utf8_run=(s:string i:int64):>int64=>{
+    let b=s as array<uint8>
+    let c=b[i]
+    if c <? 0x80 {return 1}
+    let more:int64=0
+    let lo:uint8=0x80
+    let hi:uint8=0xBF
+    if c >=? 0xC2 and c <=? 0xDF {more=1}
+    else if c >=? 0xE0 and c <=? 0xEF {
+        more=2
+        if c =? 0xE0 {lo=0xA0} else if c =? 0xED {hi=0x9F}
+    }
+    else if c >=? 0xF0 and c <=? 0xF4 {
+        more=3
+        if c =? 0xF0 {lo=0x90} else if c =? 0xF4 {hi=0x8F}
+    }
+    else {return -1}
+    let k:int64=1
+    loop k <=? more {
+        if i + k >=? b.length {return -k}
+        let d=b[i + k]
+        if d <? lo or d >? hi {return -k}
+        lo=0x80
+        hi=0xBF
+        k += 1
+    }
+    more + 1
+}
+
+# The end of the character at i of s, an invalid byte being a character of its own
+utf8_next=(s:string i:int64):>int64=>{
+    let r=utf8_run(s i)
+    if r >? 0 {i + r} else {i + 1}
+}
+
+# The start of the character before i of s (0 < i <= its length), found from the start of s so
+# that its characters are the ones utf8_next walks
+utf8_prev=(s:string i:int64):>int64=>{
+    let p:int64=0
+    loop true {
+        let e=utf8_next(s p)
+        if e >=? i {return p}
+        p=e
+    }
+    0
+}
+
+# The start of the character that holds byte i of s (0 <= i <= its length)
+utf8_floor=(s:string i:int64):>int64=>{
+    let n=(s as array<uint8>).length
+    let p:int64=0
+    loop p <? n {
+        let e=utf8_next(s p)
+        if e >? i {return p}
+        p=e
+    }
+    n
+}
+
+# text with each invalid sequence replaced by U+FFFD, one for each maximal subpart; text that
+# is valid comes back as it is
+utf8_clean=(text:string):>string=>{
+    let b=text as array<uint8>
+    let i:int64=0
+    loop i <? b.length {
+        let r=utf8_run(text i)
+        if r <=? 0 {break}
+        i += r
+    }
+    if i >=? b.length {return text}
+    let out:array<uint8>=b[0..i)
+    loop i <? b.length {
+        let r=utf8_run(text i)
+        if r >? 0 {
+            loop k in [i..i + r) {out.push(b[k])}
+            i += r
+        }
+        else {
+            out.push(0xEF)
+            out.push(0xBF)
+            out.push(0xBD)
+            i -= r
+        }
+    }
+    out as string ?? ""
+}

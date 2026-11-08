@@ -24,6 +24,7 @@ from p"checks_imports.dewy" import (bind_from_imports)
 from p"checks_program.dewy" import (synth_call)
 from p"checks_thin.dewy" import (check_pending_functions check_stmt leave_module_context new_inst zonk_tree)
 from p"decimal_ops.dewy" import (decimal_check_body decimal_input_globals decimal_wants)
+from p"utf8_text.dewy" import (utf8_floor utf8_next utf8_prev)
 from p"driver_pipeline.dewy" import (emit_function)
 from p"expr.jo" import (ntype)
 from p"frontend.jo" import (source_declarations)
@@ -339,15 +340,19 @@ repl_code_end=(s:string):>int64=>{
     }
     (s as array<uint8>).length
 }
-# display width of a line's bytes (UTF-8: one column per character)
+# display width of a line's first n bytes (one column per character; an invalid byte is one)
 repl_cols=(s:string n:ReplWord):>int64=>{
     let c:ReplWord=0
-    loop i in [0..min(n (s as array<uint8>).length)) {
-        if (s as array<uint8>)[i] <? 0x80 or (s as array<uint8>)[i] >=? 0xC0 {c += 1}
+    let i:ReplWord=0
+    let stop=min(n (s as array<uint8>).length)
+    loop i <? stop {
+        i=utf8_next(s i)
+        c += 1
     }
     c
 }
-# read a line with editing (arrows, home/end, history, ctrl-a/e/k/u/w/l/c/d); none at the end
+# read a line with editing (arrows, home/end, history, ctrl-a/e/k/u/w/l/c/d); none at the end.
+# Characters are whole UTF-8 sequences, and each invalid byte is a character of its own.
 repl_edit=(prompt:string initial:string):>string | none=>{
     let line=initial
     let cur=(line as array<uint8>).length
@@ -358,6 +363,8 @@ repl_edit=(prompt:string initial:string):>string | none=>{
         if (prompt as array<uint8>).length + cur =? 0 {repl_out("\r")}
         let c=repl_getc()
         if c <? 0 {return none}
+        # (a key other than text starts on a character: bytes typed before a continuation byte can leave the cursor inside one)
+        if c <? 32 or c =? 127 {cur=utf8_floor(line cur)}
         if c =? 13 or c =? 10 {
             repl_out("\r\n")
             return line
@@ -367,7 +374,7 @@ repl_edit=(prompt:string initial:string):>string | none=>{
                 repl_out("\r\n")
                 return none
             }
-            if cur <? (line as array<uint8>).length {line="{__str_slice(line 0 cur)}{__str_slice(line cur + 1 (line as array<uint8>).length)}"}
+            if cur <? (line as array<uint8>).length {line="{__str_slice(line 0 cur)}{__str_slice(line utf8_next(line cur) (line as array<uint8>).length)}"}
         }
         else if c =? 3 {
             repl_out("^C\r\n")
@@ -375,8 +382,7 @@ repl_edit=(prompt:string initial:string):>string | none=>{
         }
         else if c =? 127 or c =? 8 {
             if cur >? 0 {
-                let k=cur - 1
-                loop k >? 0 and (line as array<uint8>)[k] >=? 0x80 and (line as array<uint8>)[k] <? 0xC0 {k -= 1}
+                let k=utf8_prev(line cur)
                 line="{__str_slice(line 0 k)}{__str_slice(line cur (line as array<uint8>).length)}"
                 cur=k
             }
@@ -434,12 +440,10 @@ repl_edit=(prompt:string initial:string):>string | none=>{
             let c3=repl_getc()
             if c2 =? b'[' or c2 =? b'O' {
                 if c3 =? b'D' and cur >? 0 {
-                    cur -= 1
-                    loop cur >? 0 and (line as array<uint8>)[cur] >=? 0x80 and (line as array<uint8>)[cur] <? 0xC0 {cur -= 1}
+                    cur=utf8_prev(line cur)
                 }
                 else if c3 =? b'C' and cur <? (line as array<uint8>).length {
-                    cur += 1
-                    loop cur <? (line as array<uint8>).length and (line as array<uint8>)[cur] >=? 0x80 and (line as array<uint8>)[cur] <? 0xC0 {cur += 1}
+                    cur=utf8_next(line cur)
                 }
                 else if c3 =? b'H' {cur=0} else if c3 =? b'F' {cur=(line as array<uint8>).length}
                 else if c3 =? b'A' and hi >? 0 {
@@ -458,7 +462,7 @@ repl_edit=(prompt:string initial:string):>string | none=>{
                     let c4=repl_getc()
                     if c4 =? b'~' {
                         if c3 =? b'1' or c3 =? b'7' {cur=0} else if c3 =? b'4' or c3 =? b'8' {cur=(line as array<uint8>).length}
-                        else if c3 =? b'3' and cur <? (line as array<uint8>).length {line="{__str_slice(line 0 cur)}{__str_slice(line cur + 1 (line as array<uint8>).length)}"}
+                        else if c3 =? b'3' and cur <? (line as array<uint8>).length {line="{__str_slice(line 0 cur)}{__str_slice(line utf8_next(line cur) (line as array<uint8>).length)}"}
                     }
                 }
             }
@@ -483,14 +487,14 @@ repl_plain=():>string | none=>{
     }
     none
 }
-# the longest start all of xs share
+# the longest start all of xs share that ends between characters
 repl_common=(xs:array<string>):>string=>{
     if xs.length =? 0 {return ""}
     let c=xs[0]
     loop x in xs {
         let n:ReplWord=0
         loop n <? (c as array<uint8>).length and n <? (x as array<uint8>).length and (c as array<uint8>)[n] =? (x as array<uint8>)[n] {n += 1}
-        c=__str_slice(c 0 n)
+        c=__str_slice(c 0 utf8_floor(c n))
     }
     c
 }

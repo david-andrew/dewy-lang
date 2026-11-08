@@ -36,6 +36,7 @@ use 'decimal_ops.dewy'
 use 'lower_ffi.dewy'
 use 'lower_functions.dewy'
 use 'lower_primitives.dewy'
+use 'utf8_text.dewy'
 
 # the session's main: __repl_main in the input module
 repl_set_main = ():
@@ -289,13 +290,17 @@ repl_code_end = (s: str) -> int:
         else if c == '#': return i
         i += 1
     len(s)
-# display width of a line's bytes (UTF-8: one column per character)
+# display width of a line's first n bytes (one column per character; an invalid byte is one)
 repl_cols = (s: str, n: int) -> int:
     c = 0
-    loop i in [0..min(n, len(s))):
-        if s[i] < 0x80 or s[i] >= 0xC0: c += 1
+    i = 0
+    stop = min(n, len(s))
+    loop i < stop:
+        i = utf8_next(s, i)
+        c += 1
     c
-# read a line with editing (arrows, home/end, history, ctrl-a/e/k/u/w/l/c/d); none at the end
+# read a line with editing (arrows, home/end, history, ctrl-a/e/k/u/w/l/c/d); none at the end.
+# Characters are whole UTF-8 sequences, and each invalid byte is a character of its own.
 repl_edit = (prompt: str, initial: str) -> str?:
     line = initial
     cur = len(line)
@@ -306,6 +311,8 @@ repl_edit = (prompt: str, initial: str) -> str?:
         if len(prompt) + cur == 0: repl_out("\r")
         c = repl_getc()
         if c < 0: return none
+        # (a key other than text starts on a character: bytes typed before a continuation byte can leave the cursor inside one)
+        if c < 32 or c == 127: cur = utf8_floor(line, cur)
         if c == 13 or c == 10:
             repl_out("\r\n")
             return line
@@ -313,14 +320,13 @@ repl_edit = (prompt: str, initial: str) -> str?:
             if len(line) == 0:
                 repl_out("\r\n")
                 return none
-            if cur < len(line): line = line[..cur) + line[cur + 1..]
+            if cur < len(line): line = line[..cur) + line[utf8_next(line, cur)..]
         else if c == 3:                         # ctrl-c: drop the line
             repl_out("^C\r\n")
             return "\x03"
         else if c == 127 or c == 8:
             if cur > 0:
-                k = cur - 1
-                loop k > 0 and line[k] >= 0x80 and line[k] < 0xC0: k -= 1
+                k = utf8_prev(line, cur)
                 line = line[..k) + line[cur..]
                 cur = k
         else if c == 1: cur = 0
@@ -370,11 +376,9 @@ repl_edit = (prompt: str, initial: str) -> str?:
             c3 = repl_getc()
             if c2 == '[' or c2 == 'O':
                 if c3 == 'D' and cur > 0:
-                    cur -= 1
-                    loop cur > 0 and line[cur] >= 0x80 and line[cur] < 0xC0: cur -= 1
+                    cur = utf8_prev(line, cur)
                 else if c3 == 'C' and cur < len(line):
-                    cur += 1
-                    loop cur < len(line) and line[cur] >= 0x80 and line[cur] < 0xC0: cur += 1
+                    cur = utf8_next(line, cur)
                 else if c3 == 'H': cur = 0
                 else if c3 == 'F': cur = len(line)
                 else if c3 == 'A' and hi > 0:
@@ -392,7 +396,7 @@ repl_edit = (prompt: str, initial: str) -> str?:
                     if c4 == '~':
                         if c3 == '1' or c3 == '7': cur = 0
                         else if c3 == '4' or c3 == '8': cur = len(line)
-                        else if c3 == '3' and cur < len(line): line = line[..cur) + line[cur + 1..]
+                        else if c3 == '3' and cur < len(line): line = line[..cur) + line[utf8_next(line, cur)..]
         else if c >= 32:
             line = line[..cur) + byte_str(c) + line[cur..]
             cur += 1
@@ -407,14 +411,14 @@ repl_plain = () -> str?:
         if c == 10: return str_from_bytes(out)
         out.push(u8(c))
     none
-# the longest start all of xs share
+# the longest start all of xs share that ends between characters
 repl_common = (xs: str[]) -> str:
     if xs.len() == 0: return ""
     c = xs[0]
     loop x in xs:
         n = 0
         loop n < len(c) and n < len(x) and c[n] == x[n]: n += 1
-        c = c[..n)
+        c = c[..utf8_floor(c, n))
     c
 # brackets and strings still open at the end of text
 repl_open = (text: str) -> int:

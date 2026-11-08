@@ -1,0 +1,78 @@
+# The frozen implementation-language twin of utf8_text.dewy, for the compilers without the
+# Dewy frontend (tools/compiler/build.py). Change both, or neither.
+
+# The character at i of s (i < its length): its length in bytes when s holds a whole valid
+# sequence there, otherwise minus the length of the longest start of one (at least one byte)
+utf8_run = (s: str, i: int) -> int:
+    c = s[i]
+    if c < 0x80: return 1
+    more = 0
+    lo = 0x80
+    hi = 0xBF
+    if c >= 0xC2 and c <= 0xDF: more = 1
+    else if c >= 0xE0 and c <= 0xEF:
+        more = 2
+        if c == 0xE0: lo = 0xA0
+        else if c == 0xED: hi = 0x9F
+    else if c >= 0xF0 and c <= 0xF4:
+        more = 3
+        if c == 0xF0: lo = 0x90
+        else if c == 0xF4: hi = 0x8F
+    else: return -1
+    k = 1
+    loop k <= more:
+        if i + k >= len(s): return -k
+        d = int(s[i + k])
+        if d < lo or d > hi: return -k
+        lo = 0x80
+        hi = 0xBF
+        k += 1
+    more + 1
+
+# The end of the character at i of s, an invalid byte being a character of its own
+utf8_next = (s: str, i: int) -> int:
+    r = utf8_run(s, i)
+    if r > 0: return i + r
+    i + 1
+
+# The start of the character before i of s (0 < i <= its length), found from the start of s so
+# that its characters are the ones utf8_next walks
+utf8_prev = (s: str, i: int) -> int:
+    p = 0
+    loop true:
+        e = utf8_next(s, p)
+        if e >= i: return p
+        p = e
+    0
+
+# The start of the character that holds byte i of s (0 <= i <= its length)
+utf8_floor = (s: str, i: int) -> int:
+    p = 0
+    loop p < len(s):
+        e = utf8_next(s, p)
+        if e > i: return p
+        p = e
+    len(s)
+
+# text with each invalid sequence replaced by U+FFFD, one for each maximal subpart; text that
+# is valid comes back as it is
+utf8_clean = (text: str) -> str:
+    i = 0
+    loop i < len(text):
+        r = utf8_run(text, i)
+        if r <= 0: break
+        i += r
+    if i >= len(text): return text
+    out: u8[]
+    loop k in [0..i): out.push(text[k])
+    loop i < len(text):
+        r = utf8_run(text, i)
+        if r > 0:
+            loop k in [i..i + r): out.push(text[k])
+            i += r
+        else:
+            out.push(0xEF)
+            out.push(0xBF)
+            out.push(0xBD)
+            i -= r
+    str_from_bytes(out)
