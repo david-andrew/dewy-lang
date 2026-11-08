@@ -49,6 +49,8 @@
 ## P1: blocking current work
 
 ### D4. One unified `parallel` surface: v4
+- **Status (2026-11-08):** your answers are in decisions.md (batch 5). Being redesigned now: `select` with same-typed waits, Ctrl-C/`check_cancel`/`protect_from_cancel` as visible scopes, cancellation as a possible effect row, metatag placement before or inside a construct, `main`'s background tasks alongside command-line arguments, and where `tasks` comes from. Skip the rest of D4 until the revision lands.
+
 - **BLUF:** turn this on, and three forms cover all parallel and concurrent work:
   - a block whose steps wait only for the data they use;
   - a loop or comprehension that may write only its own element;

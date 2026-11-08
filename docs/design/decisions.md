@@ -536,3 +536,33 @@ section linked. ROADMAP.md lists them in one line each.
     that is a compile error naming both settings. No way to ignore conflicting inner tags
     is added: calling another file's `main` is unidiomatic outside rare cases such as test
     libraries. Considered: a call-site override that ignores the callee's tags.
+- Batch 5 (David, 2026-11-08), from D4:
+  - **The right design, not what exists** (standing): "the decider should be what is
+    the right design for dewy... not stay locked into some legacy design that is
+    suboptimal because it happens to be what is there at the moment." A proposal never
+    argues from "Dewy has no X today".
+  - **No environment variables** (standing) unless truly unavoidable; settings are
+    metatags in source. `DEWY_MAX_CORES` is dropped. Per-environment settings are
+    idiomatically either a separate entrypoint file per environment that sets the tags
+    and then imports and calls the program, or one entrypoint with a function per
+    environment that sets them, where `main` calls the right one.
+  - **Zero-argument calls** (standing; refines "zero-argument calls drop their
+    parentheses"): a zero-argument call that returns `void`, made for its side effects,
+    keeps `()` (`numbers.close()`); a call that gives a value drops them (`now`,
+    `xs.length`). Reason: it should be clear that a side effect happens.
+  - **`$explicit_cancellation`** (D4 Q1): yes, and `$bulletproof` includes it. Where
+    `Canceled` would pass through a `??`, `?? void` or collector silently, it's a
+    compile error with a fix-it to `or_throw<Canceled>`.
+  - **`main = (app:BackgroundTasks)`** (D4 Q3): yes for now; how it combines with
+    command-line arguments is being designed.
+  - **Names accepted** (D4 Q5): the `$parallel.*` metatags, `sum(xs grouping=)`,
+    `iterable<T>`, `available_cores`, `ticker`/`tick.next`, `partition_failures`, `Task`
+    with `.stop`, `.wait`, `.running` and `.error`, `ch.drain`, `sleep(until=t)`, and
+    `select`'s `timeout=`, `ties=` and `Sent`.
+  - Being redesigned ([proposals/concurrency/unified/](proposals/concurrency/unified/)):
+    - how `select` tells same-typed waits apart;
+    - Ctrl-C, `check_cancel` and `protect_from_cancel` as visible scopes;
+    - whether cancellation is an effect row;
+    - where a metatag that applies to a construct is written (before it, like a label,
+      or first line inside);
+    - where `tasks` comes from.
