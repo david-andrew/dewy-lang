@@ -17,6 +17,7 @@
 
 **Questions at a glance**
 - **(a) Changes something you decided:**
+  - D38 Q1: snake_case naming style;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
@@ -39,7 +40,8 @@
   - D34 Q1;
   - D35 Q1;
   - D36 Q1;
-  - D37 Q2.
+  - D37 Q2;
+  - D38 Q2: prefer familiar words.
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -935,6 +937,29 @@ fmt'HH:mm'                                                        # compile erro
      **Rec:** yes.
 - **Reversible:** yes.
 - **Ready:** yes.
+
+### D38. Naming style: snake_case or Julia-style joined words
+- **BLUF:** both reviews and both tests point to snake_case: `_` between English words, everywhere. Full study, second opinion and tests: `docs/design/proposals/naming-style/`.
+
+```dewy
+"report.txt".starts_with("rep")        # snake_case (rec)
+"report.txt".startswith("rep")         # Julia style
+d.nth_weekday_of_month(2 'tuesday')    # vs nthweekdayofmonth
+```
+
+- **What Dewy has today:** about 300 underscored multi-word names and about 12 joined ones, the most visible being `startswith`, `endswith`, `rfind` and `printl`. Going snake_case is about 10 renames; going Julia style is 120+ plus metatags, keyword arguments and literal-union members.
+- **Evidence:**
+  - Julia itself switched its style guide to recommending snake_case for packages in March 2025, saying Base has no principled way of choosing.
+  - Readability studies only compare camelCase with underscores; word boundaries mattered more as names got longer, and nothing favors joined names.
+  - **Our test:** given the words of 24 new Dewy names, three readers agreed on Julia-style spellings for only 12 (`nthweekdayofmonth` vs `nth_weekday_of_month`, `catch_ctrlc`). Under snake_case the spelling is mechanical.
+  - **A second finding:** when readers guessed names from a description, no miss was ever about the separator. Every miss was a different word, the familiar one (`capitalize`, `rfind`, `lines`, `contains_key`). So Dewy should also prefer the most familiar word for each name.
+- **The rule (rec):**
+  - Put `_` between English words.
+  - A word is whatever English writes as one word (`weekday`, `uppercase`, `filename`).
+  - No abbreviations except a short fixed list (`dir`, `len`, math names, `printl`).
+  - The "did you mean" hint ignores `_` and case, so typing `startswith` points to `starts_with`.
+- **Q1 (a).** snake_case with this rule, replacing your earlier `startswith`/`endswith`? Rec: yes. The renames that were waiting in D10 then go ahead.
+- **Q2 (c).** When choosing a name's words, prefer the one most programmers already know from Python, Rust, JavaScript or Go, unless it's misleading in Dewy. Rec: yes.
 
 ---
 

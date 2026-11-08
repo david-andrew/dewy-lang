@@ -28,3 +28,4 @@ These folders record, for each design decision, what was considered and why one 
 
 The earliest time-design inputs were built from David's private notes and are kept outside the repo.
 | [integration/](integration/) | Cross-design conventions, dogfood passes, consistency audits, name tests (2026-11-07) | Shared rules for D4, D10, D11, D22, D28, D29, D31, D33–D37 |
+| [naming-style/](naming-style/) | snake_case vs Julia-style joined names | Study, second opinion, guessability tests. Open (D38). |
