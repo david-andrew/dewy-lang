@@ -13,10 +13,13 @@ use 'util.jo'
 use 'errors.jo'
 use 'error_ops.dewy'
 
-# (a record of scalars, however nested, holding nothing a run would have to allocate)
+# (a record of scalars, however nested, holding nothing a run would have to allocate; its fields are
+# read once resolved, since an unresolved record shows none; a refined scalar is its base)
 cc_plain = (t: int) -> bool:
+    if tkind(t) == .refined: return cc_plain(int(types[prune(t)].elem))
     if tkind(t) != .struct_: return is_int(t) or tkind(t) == .bool_
     si = int(types[t].st)
+    check_struct_fields(si)
     loop i in [0..int(structs[si].nfields)):
         if not cc_plain(int(fields[int(structs[si].fields) + i].type)): return false
     true

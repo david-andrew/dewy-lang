@@ -1,7 +1,7 @@
 $runtime_checks
 from p"checks_text.dewy" import (sym_kind_of)
 from p"ast.jo" import (kid nkids nodes)
-from p"check.jo" import (binding_const_init fns)
+from p"check.jo" import (binding_const_init check_struct_fields fns)
 from p"checker_state.dewy" import (SK)
 from p"comptime.jo" import (ct_literal ct_run ct_values)
 from p"directives.jo" import (dir_rules_from_host)
@@ -14,10 +14,13 @@ from p"util.jo" import (name_of)
 from p"warn_if.jo" import (wi_decls)
 
 FoldWord:type=int64<overflow='wrap'>
-# (a record of scalars, however nested, holding nothing a run would have to allocate)
+# (a record of scalars, however nested, holding nothing a run would have to allocate; its fields are
+# read once resolved, since an unresolved record shows none; a refined scalar is its base)
 cc_plain=(t:FoldWord):>bool=>$unsafe {
+    if tkind(t) =? 'refined' {return cc_plain(FoldWord(types.ptr[prune(t)].elem))}
     if tkind(t) not=? 'struct_' {return is_int(t) or tkind(t) =? 'bool_'}
     let si=FoldWord(types.ptr[t].st)
+    check_struct_fields(si)
     loop i in [0..FoldWord(structs.ptr[si].nfields)) {
         if not cc_plain(FoldWord(fields.ptr[FoldWord(structs.ptr[si].fields) + i].type)) {return false}
     }
