@@ -1,4 +1,5 @@
 $runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
 from p"checks_text.dewy" import (byte_find)
 from p"@lib/core/os.jo" import (eprint is_dir list_dir)
 from p"@lib/core/str.jo" import (ends_with starts_with)
@@ -69,7 +70,7 @@ f_scan=():>void=>{
         if is_ident_start(c) {
             let e=i + 1
             loop e <? n and is_ident_char((s as array<uint8>)[e]) {e += 1}
-            let w=s.byte_slice(i e)
+            let w=__str_slice(s i e)
             if (w =? "and" or w =? "or" or w =? "xor") and e <? n and (s as array<uint8>)[e] =? b'=' and (e + 1 >=? n or (s as array<uint8>)[e + 1] not=? b'=') {
                 # (and=, or=, xor=: compound assignments, only without a space)
                 f_toks.push(FTok(FK_OP i e + 1))
@@ -108,7 +109,7 @@ f_scan=():>void=>{
         }
         else {
             loop o in F_OPS {
-                if i + (o as array<uint8>).length <=? n and s.byte_slice(i i + (o as array<uint8>).length) =? o {
+                if i + (o as array<uint8>).length <=? n and __str_slice(s i i + (o as array<uint8>).length) =? o {
                     len_=(o as array<uint8>).length
                     break
                 }
@@ -120,7 +121,7 @@ f_scan=():>void=>{
     }
 }
 f_text=(t:FTok):>string=>{
-    f_src.byte_slice(t.s t.e)
+    __str_slice(f_src t.s t.e)
 }
 # a keyword that is a value (an operand), not a word an operand follows
 f_value_kw=(w:string):>bool=>{
@@ -327,7 +328,7 @@ fmt_text=(src:string):>string=>{
 trim_right=(s:string):>string=>{
     let e=(s as array<uint8>).length
     loop e >? 0 and ((s as array<uint8>)[e - 1] =? b' ' or (s as array<uint8>)[e - 1] =? b'\t' or (s as array<uint8>)[e - 1] =? b'\r') {e -= 1}
-    s.byte_slice(0 e)
+    __str_slice(s 0 e)
 }
 # the tokens the lexer makes of src, as text, with what the parser asks about the spaces between
 # them (parse.jo, space_before): before ( or [ after a value (a call or an index, or another
@@ -340,7 +341,7 @@ fmt_tokens=(file:FmtWord src:string):>array<string>=>{
     let arr:array<bool>=[]
     loop i in 0.. and t in toks {
         let k=t.kind
-        let sig="{k} {src.byte_slice(int64(t.start) int64(t.start) + int64(t.len))}"
+        let sig="{k} {__str_slice(src int64(t.start) int64(t.start) + int64(t.len))}"
         let pv=Tok.newline
         if i >? 0 {pv=toks[i - 1].kind}
         let after_value=i >? 0 and fmt_value_end(pv)

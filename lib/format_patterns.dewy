@@ -63,16 +63,28 @@ _fmt_problem=(p:string):>string|none=>{
     let kind:uint8=0
     if i <? n {
         kind=b[i]
-        if not "feEgG%xXbods".contains(p.byte_slice(i i + 1)) {return "'{p.byte_slice(i n)}' in '{p}' is not a format type (f e E g G % x X b o d s)"}
+        let known=false
+        loop t in ("feEgG%xXbods" as array<uint8>) {
+            if t =? kind {known=true}
+        }
+        if not known {return "'{_fmt_rest(p i)}' in '{p}' is not a format type (f e E g G % x X b o d s)"}
         i+=1
     }
-    if i <? n {return "'{p.byte_slice(i n)}' after the format type in '{p}' is not part of one"}
+    if i <? n {return "'{_fmt_rest(p i)}' after the format type in '{p}' is not part of one"}
     let base=kind =? b'x' or kind =? b'X' or kind =? b'b' or kind =? b'o'
     if alt and not base {return "'#' in '{p}' adds a radix prefix, so it needs an integer base: x, X, b or o"}
     if group and base {return "grouping in '{p}' needs a decimal format, not an integer base"}
     if precision and (base or kind =? b'd') {return "a precision in '{p}' needs a floating format, not an integer one"}
     if kind =? b's' and (p.contains("+") or alt or group or precision) {return "'{p}' formats text, which takes fill, alignment and width only"}
     none
+}
+
+# The pattern from byte i on, from the start of a character (malformed text may have stray bytes there).
+_fmt_rest=(p:string i:int64):>string=>{
+    let b=p as array<uint8>
+    let j=i
+    loop j <? b.length and b[j] >=? 0x80 and b[j] <? 0xC0 {j+=1}
+    p.byte_slice(j b.length)
 }
 
 # The validators: none when the pattern reads and is of their kind or takes their type.
