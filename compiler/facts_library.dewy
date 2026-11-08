@@ -165,7 +165,7 @@ fact_same_length_call=(n:LibraryWord):>bool=>$unsafe {
 # The length of e's value when its argument is not captured (a dictionary is lent): its place's
 # current value's, or through nested length-preserving calls (`[d.keys...]`); 0 for unknown.
 fact_length_through=(e:LibraryWord @s:FactState depth:LibraryWord):>LibraryWord=>$unsafe {
-    if depth <? 4 and nodes.ptr[e].kind =? 'call' and fact_same_length_call(e) {return fact_length_through(kid(e 0) @s depth + 1)}
+    if depth <? 4 and nodes.ptr[e].kind =? 'call' and (fact_same_length_call(e) or fact_copy_length_call(e)) {return fact_length_through(kid(e 0) @s depth + 1)}
     let held=fact_route_values(@s fact_route(e @s))
     if held.length =? 0 {return 0}
     fact_project(@s held[held.length - 1] (-1) false T_INT)

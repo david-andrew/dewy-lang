@@ -1,0 +1,8 @@
+take=(xs:array<int64 length <=? 2>):>void=>printl(xs.length)
+main=()=>{
+let d=dict<string int64>()
+loop k in ["a" "b"] {d[k]=2}
+let results:array<int64>=[]
+loop seed in [7 11] {loop k in d.keys {results.push(seed)}}
+take(results)
+}

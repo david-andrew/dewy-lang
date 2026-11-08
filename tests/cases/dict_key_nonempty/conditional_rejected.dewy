@@ -1,0 +1,6 @@
+main=()=>{
+let d:dict<string int64>=["a"->1 "b"->2]
+let results:array<int64>=[]
+loop seed in [7 11] {loop k in d.keys {if seed >? 100 results.push(seed)}}
+printl(results.min_by((x)=>x))
+}

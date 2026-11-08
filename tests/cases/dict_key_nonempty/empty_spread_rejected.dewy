@@ -1,0 +1,8 @@
+main=()=>{
+let d=dict<string int64>()
+let empty:array<string>=[]
+loop k in [empty...] {d[k]=2}
+let results:array<int64>=[]
+loop seed in [7 11] {loop k in d.keys {results.push(seed)}}
+printl(results.min_by((x)=>x))
+}

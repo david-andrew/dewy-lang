@@ -6,14 +6,14 @@ from p"effect_types.dewy" import (PlaceIdentity)
 from p"exact.jo" import (exact_demands exact_has_node exact_has_store exact_proof_demands)
 from p"expr.jo" import (CV IN is_nd ntype)
 from p"checks_thin_expr.dewy" import (oversized_literal)
-from p"facts.jo" import (FACT_ACTIVE FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_ELEMENT_VALUE FACT_MEMBER FACT_ROW_ELEMENTS FACT_ROW_SOURCE FactLoop FactProjection FactPushes FactState fact_add_fits fact_add_projection fact_assume fact_bind fact_binding fact_bound fact_carried_cache fact_compare fact_comprehensions fact_constant fact_difference fact_difference_head fact_difference_next fact_distance fact_domain fact_exact_demand fact_hull_owner fact_incident fact_length_max fact_loop_exhausted fact_new fact_owner fact_project fact_projection_after fact_projection_find fact_projection_first fact_projection_origin fact_push_frames fact_pushed_rows_cache fact_scalar fact_set_bound fact_shortest fact_slice fact_slice_flags fact_slot fact_speculating fact_summary_owner fact_terms fact_type)
+from p"facts.jo" import (FACT_ACTIVE FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_ELEMENT_VALUE FACT_MEMBER FACT_ROW_ELEMENTS FACT_ROW_SOURCE FactLoop FactProjection FactPushes FactState fact_add_fits fact_add_projection fact_assume fact_bind fact_binding fact_bound fact_carried_cache fact_compare fact_comprehensions fact_constant fact_difference fact_difference_head fact_difference_next fact_distance fact_domain fact_exact_demand fact_hull_owner fact_incident fact_length_max fact_loop_exhausted fact_new fact_owner fact_place fact_project fact_projection_after fact_projection_find fact_projection_first fact_projection_origin fact_push_frames fact_pushed_rows_cache fact_scalar fact_set_bound fact_shortest fact_slice fact_slice_flags fact_slot fact_speculating fact_summary_owner fact_terms fact_type)
 from p"facts_arith.dewy" import (fact_fresh)
 from p"facts_plans.dewy" import (fact_component_selector fact_int_component fact_int_components fact_int_rows)
 from p"facts_changes.dewy" import (fact_changes fact_partial_opaque)
 from p"facts_conditions.dewy" import (fact_implication)
 from p"facts_elements.dewy" import (fact_inventory fact_loop_elements fact_loop_index)
 from p"facts_joins.dewy" import (fact_hull)
-from p"facts_library.dewy" import (fact_element_hull)
+from p"facts_library.dewy" import (fact_copy_length_call fact_element_hull fact_length_through fact_same_length_call)
 from p"facts_loops.dewy" import (fact_entails fact_loop_body fact_loop_header fact_loop_stable fact_may_return)
 from p"facts_progress.dewy" import (fact_progress_same fact_progress_strip)
 from p"isolation_ops.dewy" import (isolation_children)
@@ -119,7 +119,7 @@ fact_literal_trips=(n:PushWord):>PushWord=>$unsafe {
     }
     nkids(it)
 }
-fact_push_flow=(n:PushWord l:PushWord):>[int64 int64]=>$unsafe {
+fact_push_flow=(n:PushWord l:PushWord trips:dict<int64 FactBound>=dict<int64 FactBound>() minimum:bool=false):>[int64 int64]=>$unsafe {
     if n =? 0 {return [0 (-2)]}
     let k=nodes.ptr[n].kind
     if k =? 'break_' {return [(-1) (-1)]}
@@ -127,10 +127,10 @@ fact_push_flow=(n:PushWord l:PushWord):>[int64 int64]=>$unsafe {
         if nodes.ptr[n].name not=? 0 or nodes.ptr[n].ival not=? 0 {return [(-1) (-1)]}
         return [(-2) 0]
     }
-    if k =? 'return_' {return fact_push_then(fact_push_flow(PushWord(nodes.ptr[n].a) l) [(-2) (-2)])}
+    if k =? 'return_' {return fact_push_then(fact_push_flow(PushWord(nodes.ptr[n].a) l trips minimum) [(-2) (-2)])}
     if k =? 'lambda' {return [0 (-2)]}
     if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.push)) and nkids(n) =? 2 and fact_push_receiver(kid(n 0)) =? l {
-        return fact_push_then(fact_push_flow(kid(n 1) l) [1 (-2)])
+        return fact_push_then(fact_push_flow(kid(n 1) l trips minimum) [1 (-2)])
     }
     if k =? 'assign' and fact_mentions(PushWord(nodes.ptr[n].a) l) {return [(-1) (-1)]}
     if (k =? 'addr' or k =? 'intrinsic' and nodes.ptr[n].aux not=? int32(int64(IN.len))) and fact_mentions(n l) {return [(-1) (-1)]}
@@ -143,22 +143,26 @@ fact_push_flow=(n:PushWord l:PushWord):>[int64 int64]=>$unsafe {
         if fact_labeled_exit(n) {return [(-1) (-1)]}
         if not fact_mentions(n l) {return [0 (-2)]}
         let m=fact_literal_trips(n)
+        if m <? 0 {
+            let known=trips.get(n)
+            if known not=? none and (minimum or known.lo =? known.hi) {m=known.lo}
+        }
         if m <? 0 or fact_mentions(PushWord(nodes.ptr[n].a) l) {return [(-1) (-1)]}
-        let inner=fact_push_flow(PushWord(nodes.ptr[n].b) l)
+        let inner=fact_push_flow(PushWord(nodes.ptr[n].b) l trips minimum)
         if inner[0] <? 0 or inner[0] >? 64 or inner[1] not=? -2 and inner[1] not=? inner[0] {return [(-1) (-1)]}
         return [m * inner[0] (-2)]
     }
     if k =? 'and_' or k =? 'or_' or k =? 'coalesce' {
         if fact_mentions(n l) {return [(-1) (-1)]}
-        let a=fact_push_flow(PushWord(nodes.ptr[n].a) l)
-        let b=fact_push_flow(PushWord(nodes.ptr[n].b) l)
+        let a=fact_push_flow(PushWord(nodes.ptr[n].a) l trips minimum)
+        let b=fact_push_flow(PushWord(nodes.ptr[n].b) l trips minimum)
         return fact_push_then(a [fact_push_merge(0 b[0]) b[1]])
     }
     if k =? 'if_' or k =? 'iflet' {
-        let condition=fact_push_flow(PushWord(nodes.ptr[n].a) l)
+        let condition=fact_push_flow(PushWord(nodes.ptr[n].a) l trips minimum)
         if fact_mentions(PushWord(nodes.ptr[n].a) l) {return [(-1) (-1)]}
-        let y=fact_push_flow(PushWord(nodes.ptr[n].b) l)
-        let z=fact_push_flow(PushWord(nodes.ptr[n].c) l)
+        let y=fact_push_flow(PushWord(nodes.ptr[n].b) l trips minimum)
+        let z=fact_push_flow(PushWord(nodes.ptr[n].c) l trips minimum)
         return fact_push_then(condition [fact_push_merge(y[0] z[0]) fact_push_merge(y[1] z[1])])
     }
     if k =? 'match_' {
@@ -169,7 +173,7 @@ fact_push_flow=(n:PushWord l:PushWord):>[int64 int64]=>$unsafe {
             let arm=kid(n i)
             if fact_mentions(PushWord(nodes.ptr[arm].a) l) or fact_mentions(PushWord(nodes.ptr[arm].c) l) {return [(-1) (-1)]}
             loop guard in [PushWord(nodes.ptr[arm].a) PushWord(nodes.ptr[arm].c)] {
-                let g=fact_push_flow(guard l)
+                let g=fact_push_flow(guard l trips minimum)
                 if g[0] =? -1 or g[1] not=? -2 {return [(-1) (-1)]}
             }
             loop j in [0..nkids(arm)) {
@@ -177,11 +181,11 @@ fact_push_flow=(n:PushWord l:PushWord):>[int64 int64]=>$unsafe {
                 if fact_mentions(p l) {return [(-1) (-1)]}
                 if nodes.ptr[p].kind =? 'pwild' and nodes.ptr[arm].a =? 0 and nodes.ptr[arm].c =? 0 {exhaustive=true}
             }
-            let c=fact_push_flow(PushWord(nodes.ptr[arm].b) l)
+            let c=fact_push_flow(PushWord(nodes.ptr[arm].b) l trips minimum)
             common=[fact_push_merge(common[0] c[0]) fact_push_merge(common[1] c[1])]
         }
         if not exhaustive {common[0]=fact_push_merge(common[0] 0)}
-        return fact_push_then(fact_push_flow(PushWord(nodes.ptr[n].a) l) common)
+        return fact_push_then(fact_push_flow(PushWord(nodes.ptr[n].a) l trips minimum) common)
     }
     if k =? 'ident' {return [0 (-2)]}
     let mask=isolation_children(k)
@@ -194,7 +198,7 @@ fact_push_flow=(n:PushWord l:PushWord):>[int64 int64]=>$unsafe {
     if mask & 16 not=? 0 {parts.extend(kids(n))}
     loop c in parts {
         if total[0] =? -2 {break}
-        total=fact_push_then(total fact_push_flow(c l))
+        total=fact_push_then(total fact_push_flow(c l trips minimum))
         if total[0] =? -1 or total[1] =? -1 {return [(-1) (-1)]}
     }
     total
@@ -219,18 +223,88 @@ fact_counted_pushes=(n:PushWord @s:FactState):>array<[int64 int64]>=>$unsafe {
     }
     found
 }
-# Each local of loop n that every iteration pushes onto a fixed k >= 2 times
-# (`[loop x in xs {x x*x}]`), with its entry length and k. O(candidate arrays).
+# Stable nested sources reuse their entry lengths. Havoc the enclosing body
+# once so a write anywhere before/between iterations cannot supply a stale count.
+# Only a failed syntactic count demands this O(body + bounded havoc) query;
+# the existing push-flow walk and eight-candidate budget remain unchanged.
+fact_nested_push_trips=(body:PushWord s:FactState):>dict<int64 FactBound>=>$unsafe {
+    let result=dict<int64 FactBound>()
+    let nested:array<int64>=[]
+    let entry=s
+    let work:array<int64>=[body]
+    loop work.length >? 0 {
+        let n=work.pop()
+        if n =? 0 {continue}
+        let k=nodes.ptr[n].kind
+        if k =? 'for_' and nodes.ptr[n].aux =? 1 and fact_literal_trips(n) <? 0 {
+            # Demand havoc only for a useful length already held at entry.
+            # Unsupported calls/iterators cannot contribute a trip count.
+            let source=PushWord(nodes.ptr[n].a)
+            let root=source
+            let depth:PushWord=0
+            loop depth <? 8 {
+                depth += 1
+                let kind=nodes.ptr[root].kind
+                if kind =? 'conv' or kind =? 'addr' or kind =? 'narrow' or kind =? 'field' {root=PushWord(nodes.ptr[root].a)}
+                else if kind =? 'call' and (fact_same_length_call(root) or fact_copy_length_call(root)) {root=kid(root 0)}
+                else {break}
+            }
+            if nodes.ptr[root].kind =? 'ident' and fact_binding(s fact_place(root)) >=? 0 {
+                let length=fact_length_through(source @entry 0)
+                if length not=? 0 {
+                    let b=fact_bound(entry length)
+                    if not b.wide and b.lo >=? 0 and b.lo <=? 64 and (b.lo >? 0 or b.lo =? b.hi) {nested.push(n)}
+                }
+            }
+        }
+        let mask=isolation_children(k)
+        if mask <? 0 {continue}
+        if mask & 1 not=? 0 {work.push(PushWord(nodes.ptr[n].a))}
+        if mask & 2 not=? 0 {work.push(PushWord(nodes.ptr[n].b))}
+        if mask & 4 not=? 0 {work.push(PushWord(nodes.ptr[n].c))}
+        if mask & 16 not=? 0 {work.extend(kids(n))}
+    }
+    if nested.length =? 0 {return result}
+    let stable=s
+    fact_changes(body @stable body)
+    loop n in nested {
+        let source=PushWord(nodes.ptr[n].a)
+        let length=fact_length_through(source @stable 0)
+        if length =? 0 {continue}
+        let bound=fact_bound(stable length)
+        if not bound.wide and bound.lo >=? 0 and bound.lo <=? 64 {
+            result[n]=bound
+        }
+    }
+    result
+}
+# Each local with a fixed k pushes per iteration, or a positive lower bound
+# through stable nested sources. A negative k encodes that lower bound only.
 fact_scaled_pushes=(n:PushWord @s:FactState):>array<[int64 int64 int64]>=>$unsafe {
     let found:array<[int64 int64 int64]>=[]
     let body=PushWord(nodes.ptr[n].b)
     let candidates:array<int64>=[]
     fact_push_candidates(body @candidates)
+    let queried=false
+    let trips=dict<int64 FactBound>()
     loop l in candidates {
         if PushWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM | LF_EXPOSED) not=? 0 {continue}
         if tkind(fact_type(PushWord(locals.ptr[l].type))) not=? 'array' or fact_mentions(PushWord(nodes.ptr[n].a) l) {continue}
         let k=fact_push_count(body l)
-        if k <? 2 or k >? 64 {continue}
+        if k =? -1 {
+            if not queried {trips=fact_nested_push_trips(body s); queried=true}
+            if trips.length =? 0 {continue}
+            let exact=fact_push_flow(body l trips)
+            k=fact_push_merge(exact[0] exact[1])
+            if k <? 1 {
+                let lower=fact_push_flow(body l trips true)
+                k=fact_push_merge(lower[0] lower[1])
+                if k <? 1 or k >? 64 {continue}
+                k=-k
+            }
+        }
+        else if k <? 2 {continue}
+        if k >? 64 {continue}
         let i=fact_binding(s PlaceIdentity('local' PushWord(locals.ptr[l].owner) l))
         if i <? 0 {continue}
         found.push([l fact_project(@s s.bindings[i].value (-1) false T_INT) k])
@@ -245,15 +319,16 @@ fact_scaled_lengths=(n:PushWord @s:FactState pushes:array<[int64 int64 int64]> c
         if i <? 0 {continue}
         let c=fact_bound(s count)
         let e=fact_bound(s entry[1])
-        let k=entry[2]
+        let minimum=entry[2] <? 0
+        let k=if minimum {-entry[2]} else {entry[2]}
         if c.wide or e.wide or c.lo <? 0 or e.lo <? 0 or e.lo not=? e.hi or c.hi >? fact_length_max() {continue}
         # (the array holds count*k elements, so the product is a length too:
         # within the enabled ceiling)
         let cap=fact_length_max()
-        let added=fact_new(@s FactBound(min(PushWord(c.lo) * PushWord(k) PushWord(cap)) min(PushWord(c.hi) * PushWord(k) PushWord(cap))) FactTerm('star' count fact_constant(@s k) n T_INT))
+        let added=fact_new(@s FactBound(min(PushWord(c.lo) * PushWord(k) PushWord(cap)) (if minimum {cap} else {min(PushWord(c.hi) * PushWord(k) PushWord(cap))})) (if minimum {FactTerm(type=T_INT)} else {FactTerm('star' count fact_constant(@s k) n T_INT)}))
         let total=added
         if e.lo not=? 0 {
-            total=fact_new(@s FactBound(min(PushWord(c.lo) * PushWord(k) + PushWord(e.lo) PushWord(cap)) min(PushWord(c.hi) * PushWord(k) + PushWord(e.lo) PushWord(cap))) FactTerm('plus' entry[1] added n T_INT))
+            total=fact_new(@s FactBound(min(PushWord(c.lo) * PushWord(k) + PushWord(e.lo) PushWord(cap)) (if minimum {cap} else {min(PushWord(c.hi) * PushWord(k) + PushWord(e.lo) PushWord(cap))})) FactTerm('plus' entry[1] added n T_INT))
             fact_difference(@s total added e.lo n)
             fact_difference(@s added total (-e.lo) n)
         }

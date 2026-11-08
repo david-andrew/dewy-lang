@@ -1,0 +1,10 @@
+# quick
+main=()=>{
+let values:dict<string int64>=["b"->2 "a"->1]
+let results:array<[string int64]>=[]
+loop seed in [7 11] {
+loop name in values.keys.values.sorted() {results.push([name seed+values[name]])}
+}
+let best=results.min_by((p)=>p[1])
+printl(best[0] best[1] results.length results[3][0])
+}

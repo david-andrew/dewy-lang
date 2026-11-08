@@ -1,0 +1,27 @@
+# An unsupported inner iterator must not run speculative call/length summaries.
+const LINKS="""
+a -> b, c
+b -> c
+"""
+number=(@index:dict<string int> @names:array<string> page:string):>int=>{
+    let known=index.get(page)
+    if known isnt? none return known
+    index[page]=names.length
+    names.push(page)
+    names.length-1
+}
+main=()=>{
+    let index:dict<string int>=[]
+    let names:array<string>=[]
+    let edges:array<[int int]>=[]
+    loop line in LINKS.trim.lines {
+        let parts=line.split("->")
+        if parts.length not=? 2 continue
+        let source=number(@index @names parts[0].trim)
+        loop target in parts[1].split(",") {
+            if target.trim.is_empty continue
+            edges.push([source number(@index @names target.trim)])
+        }
+    }
+    printl(names.length edges.length)
+}
