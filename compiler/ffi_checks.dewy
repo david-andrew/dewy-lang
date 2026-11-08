@@ -44,6 +44,11 @@ ffi_check_type=(t0:MoveWord pos:MoveWord extern_:bool param:bool):>void=>$unsafe
 ffi_check_nested_type=(t0:MoveWord pos:MoveWord extern_:bool param:bool nested:bool @seen:dict<int64 bool>):>void=>$unsafe {
     let t=prune(t0)
     let k=types.ptr[t].kind
+    # (a refined `$extern` result is the declaration's claim: its base crosses)
+    if k =? 'refined' and extern_ and not param and not nested {
+        ffi_check_nested_type(MoveWord(types.ptr[t].elem) pos extern_ param nested @seen);
+        return
+    }
     let side=if nested {"a C function pointer"} else if extern_ {"a `$extern` function"} else {"a `$export` function"}
     if t =? T_MATH_INT {fatal(pos "`int` cannot cross the C boundary (its size is not fixed): {side} uses int32, int64, uint8, … instead");}
     if k =? 'ptr' {

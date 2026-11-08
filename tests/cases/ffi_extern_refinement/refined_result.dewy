@@ -1,4 +1,7 @@
-# modes: native
-# Nothing checks what C returns, so a refined C result says to check it in Dewy.
-toupper=(c:int32):>int32<(<=? 255)> => $extern
-main=():>void=>printl($unsafe toupper(97))
+# modes: native native-release
+# A refined C result is the `$extern` declaration's claim, trusted like a
+# `ptr<T>` result being non-null: here it proves the conversion to uint8.
+Byte:type = int32<b => b >=? 0 and b <=? 255>
+toupper = (c:int32):>Byte => $extern
+upper = (c:int32):>uint8 => uint8($unsafe toupper(c))
+main = ():>void => printl(upper(97) $unsafe toupper(98))

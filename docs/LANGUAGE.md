@@ -4050,7 +4050,10 @@ rejected, because it could violate their storage contract.
 `ptr<T>` is a raw pointer, never null; `ptr<T>?` may be null, which is `none` on
 the Dewy side. `p[i]` reads and writes the `i`th `T` from `p`, `p + n` is `n`
 elements on, and `p as ptr<U>` reinterprets it. A C function's result is the
-claim of its declaration: one declared `ptr<T>` must not return null.
+claim of its declaration: one declared `ptr<T>` must not return null, and a
+refined result (`toupper = (c:int32):>int32<b => b >=? 0 and b <=? 255> => $extern`)
+is trusted to satisfy its refinement, so `uint8($unsafe toupper(c))` needs no
+check. A parameter cannot state a refinement: check the value in Dewy first.
 `xs.ptr` (provisional spelling) is the pointer to an array's elements, for C to
 read or fill; it is valid until the array next changes length or is replaced.
 An empty array's is not null either, though there is nothing to reach through it.

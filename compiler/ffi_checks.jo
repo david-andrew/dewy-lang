@@ -41,6 +41,9 @@ ffi_check_signature = (f: int, decl: int):
 ffi_check_type = (t0: int, pos: int, extern_: bool, param: bool):
     t = prune(t0)
     k = types[t].kind
+    if k == .refined and extern_ and not param:
+        ffi_check_type(int(types[t].elem), pos, extern_, param)
+        return
     side = if extern_: "a `$extern` function" else: "a `$export` function"
     if t == T_MATH_INT: fatal(pos, "`int` cannot cross the C boundary (its size is not fixed): {side} uses int32, int64, uint8, … instead")
     if k == .ptr:

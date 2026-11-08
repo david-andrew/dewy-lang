@@ -205,8 +205,10 @@ signature_finish=(decl:int64 @sig:FnSig shaped:bool mask:int64):>void=>$unsafe {
     if refine_active {
         ref_validate_signature(sig.params int64(sig.ret) mask nodes.ptr[decl].pos)
         if has_flag(decl NF_EXTERN) {
-            loop t in [sig.params... int64(sig.ret)] {
-                if ref_storage_contract(t) {fatal(nodes.ptr[decl].pos "a `$extern` declaration cannot state a refinement: nothing checks what C passes or returns. Declare the plain C type and check it in a Dewy wrapper, as in `upper = (c:int32):>uint8 => \{ let r = $unsafe toupper(c); if r <? 0 or r >? 255 return 0; uint8(r) }`")}
+            # (a refined result is the unsafe declaration's claim, trusted like
+            # `ptr<T>` being non-null; a parameter would be a claim about Dewy's values)
+            loop t in sig.params {
+                if ref_storage_contract(t) {fatal(nodes.ptr[decl].pos "a `$extern` parameter cannot state a refinement: declare the plain C type and check the value in a Dewy wrapper before the call. A refined result is allowed, as the declaration's claim about what C returns")}
             }
         }
     }
