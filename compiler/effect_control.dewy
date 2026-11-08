@@ -293,6 +293,9 @@ effects_demand=(f:ControlWord footprints:bool=false):>bool=>$unsafe {
         effect_value_cache=dict<int64 bool>()
     }
     if f <=? 0 or f >=? effect_limit {return false}
+    # Checking and fact rewrites can append nodes after an early callable
+    # summary sized the marks. Cover those nodes before scanning a new row.
+    loop effect_seen.length <? nodes.length {effect_seen.push(0);}
     if effect_summaries.ptr[f].index =? 0 {
         let icb=ic_phase(IC_EFFECTS)
         effect_visit(f);
@@ -300,11 +303,7 @@ effects_demand=(f:ControlWord footprints:bool=false):>bool=>$unsafe {
     }
     return effect_summaries.ptr[f].done
 }
-# Lowering consults summaries too. Cover nodes made since the arena was sized
-# before a fresh visit scans them; later functions remain unknown.
+# Lowering uses the same demand path; later functions remain unknown.
 effects_demand_late=(f:ControlWord):>bool=>$unsafe {
-    if effect_limit not=? 0 {
-        loop effect_seen.length <? nodes.length {effect_seen.push(0);}
-    }
     return effects_demand(f)
 }

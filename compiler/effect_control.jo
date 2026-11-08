@@ -261,6 +261,9 @@ effects_demand = (f: int, footprints: bool = false) -> bool:
         effect_share_cache = {}
         effect_value_cache = {}
     if f <= 0 or f >= effect_limit: return false
+    # Checking and fact rewrites can append nodes after an early callable
+    # summary sized the marks. Cover those nodes before scanning a new row.
+    loop effect_seen.len() < nodes.len(): effect_seen.push(0)
     if effect_summaries[f].index == 0:
         icb = ic_phase(IC_EFFECTS)
         effect_visit(f)
@@ -268,9 +271,6 @@ effects_demand = (f: int, footprints: bool = false) -> bool:
     effect_summaries[f].done
 
 
-# Lowering consults summaries too. Cover nodes made since the arena was sized
-# before a fresh visit scans them; later functions remain unknown.
+# Lowering uses the same demand path; later functions remain unknown.
 effects_demand_late = (f: int) -> bool:
-    if effect_limit != 0:
-        loop effect_seen.len() < nodes.len(): effect_seen.push(0)
     effects_demand(f)
