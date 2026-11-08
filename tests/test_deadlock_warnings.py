@@ -19,7 +19,7 @@ FUNCTION_VALUE = 'main = () => {\n    let m = mutex<int64>(0)\n    let handlers 
 
 NO_TASKS_CYCLE = 'forward = (a:Mutex<int64> b:Mutex<int64>):>void => {\n    let x = @(a.lock())\n    let y = @(b.lock())\n    x += y\n}\nmain = () => {\n    let p = mutex<int64>(1)\n    let q = mutex<int64>(2)\n    forward(p q)\n    forward(q p)\n}\n'
 
-POLLING = 'main = () => {\n    let ready = atomic(1)\n    parallel i in [0..4) {\n        loop ready.load() =? 0 { }\n    }\n    ready.store(0)\n}\n'
+POLLING = 'main = () => {\n    let ready = atomic(1)\n    parallel i in [0..4) {\n        loop ready.load =? 0 { }\n    }\n    ready.store(0)\n}\n'
 
 
 def test_elements_of_one_array_taken_nested_warn(compiler, tmp_path):  # noqa: F811

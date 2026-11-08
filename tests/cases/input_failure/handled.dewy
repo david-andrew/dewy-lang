@@ -3,15 +3,15 @@
 # The near misses: a fallback, a test and the alias handle each failure in place.
 ask = ():>string|InputFailure => {
     let s = input("") or_throw
-    s.upper()
+    s.upper
 }
 main = () => {
     let xs = [10 20 30]
     printl(xs.get(input_int("") ?? 0) ?? 0)
     printl(input_float("") ?? 0.5)
-    let a = ask()
+    let a = ask
     if a is? EndOfInput { printl("ended") } else { printl(a) }
-    let rest = read_stdin()
+    let rest = read_stdin
     if rest is? exception { printl("no rest") } else { printl(rest.length) }
     printl(input_int("") ?? -1)
     printl(input_float("") ?? 0.5)

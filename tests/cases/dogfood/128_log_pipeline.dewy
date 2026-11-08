@@ -69,7 +69,7 @@ main = () => {
     concurrent {
         spawn {
             loop line in RAW { if tx.send(line) is? Unsent<string> break }
-            tx.close
+            tx.close()
         }
         spawn {
             loop true {
@@ -78,7 +78,7 @@ main = () => {
                 if line is? Canceled break
                 if jobs.send(parse(line)) is? Unsent<Entry> break
             }
-            jobs.close
+            jobs.close()
         }
         let a = spawn work(jobs)
         let b = spawn work(jobs)

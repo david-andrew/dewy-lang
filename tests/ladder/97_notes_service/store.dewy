@@ -51,7 +51,7 @@ normalize_tags = (tags:array<string>):>array<string> => {
     let seen:set<string> = set[]
     let out:array<string> = []
     loop raw in tags {
-        let tag = raw.trim().lower()
+        let tag = raw.trim.lower
         if tag not in? seen {
             seen.push(tag)
             out.push(tag)
@@ -79,7 +79,7 @@ tick = (@store:Store):>int64 => {
 }
 
 create = (@store:Store input:NoteInput):>Note|Invalid => {
-    let title = input.title.trim()
+    let title = input.title.trim
     let tags = normalize_tags(input.tags)
     let problems = check(title input.body tags)
     if problems.length >? 0 return Invalid[problems]
@@ -105,7 +105,7 @@ precondition = (note:Note expected:string):>void|Stale => {
 replace = (@store:Store id:int64 input:NoteInput expected:string=""):>Note|NotFound|Invalid|Stale => {
     let note = get(store id) or_throw
     precondition(note expected) or_throw
-    let title = input.title.trim()
+    let title = input.title.trim
     let tags = normalize_tags(input.tags)
     let problems = check(title input.body tags)
     if problems.length >? 0 return Invalid[problems]
@@ -117,7 +117,7 @@ replace = (@store:Store id:int64 input:NoteInput expected:string=""):>Note|NotFo
 patch = (@store:Store id:int64 change:NotePatch expected:string=""):>Note|NotFound|Invalid|Stale => {
     let note = get(store id) or_throw
     precondition(note expected) or_throw
-    let title = if change.title isnt? none change.title.trim() else note.title
+    let title = if change.title isnt? none change.title.trim else note.title
     let body = change.body ?? note.body
     let tags = if change.tags isnt? none normalize_tags(change.tags) else note.tags
     let problems = check(title body tags)
@@ -151,13 +151,13 @@ matches = (note:Note filter:Filter):>bool => {
     if filter.tag.length >? 0 and filter.tag not in? note.tags return false
     if filter.done isnt? none and note.done not=? filter.done return false
     if filter.text.length >? 0 {
-        let needle = filter.text.lower()
-        if needle not in? note.title.lower() and needle not in? note.body.lower() return false
+        let needle = filter.text.lower
+        if needle not in? note.title.lower and needle not in? note.body.lower return false
     }
     return true
 }
 
-by_title = (note:Note):>string => note.title.lower()
+by_title = (note:Note):>string => note.title.lower
 by_updated = (note:Note):>int64 => -note.updated
 
 list = (store:Store filter:Filter):>Page => {

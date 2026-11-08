@@ -4,7 +4,7 @@ work=():>void=>{
 let huge:bigint=123456789012345678901234567890
 loop n in [1..20) {
 let value=huge/(huge+n)
-if value.to_float64() <? 0.99 or value.to_float32() <? 0.99 panic("lost ratio")
+if value.to_float64 <? 0.99 or value.to_float32 <? 0.99 panic("lost ratio")
 if huge.to_float64() <? 1e20 or huge.to_float32() <? 1e20 panic("lost integer")
 }
 }

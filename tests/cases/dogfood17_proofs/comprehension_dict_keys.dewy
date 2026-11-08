@@ -5,7 +5,7 @@ count = (people:array<string> votes:array<string>):>void => {
     let tally = [loop p in people p -> 0]
     loop v in votes if v in? tally tally[v] += 1
     loop p in people printl"{p}: {tally[p]}"
-    let sorted = people.sorted()
+    let sorted = people.sorted
     if sorted.length >? 0 printl"{tally[sorted[0]]}"
 }
 main = () => {

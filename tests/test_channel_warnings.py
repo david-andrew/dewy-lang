@@ -15,7 +15,7 @@ def diagnostics(compiler, tmp_path, program):  # noqa: F811
 
 PING = '''ping = (out:Channel<int64> back:Channel<int64> n:int64):>void | Unsent<int64> | Closed | Canceled => {
     loop i in [0..n) { out.send(i) or_throw }
-    loop i in [0..n) { back.receive() or_throw; }
+    loop i in [0..n) { back.receive or_throw; }
 }
 main = () => {
     let a = channel<int64>(4)
@@ -33,7 +33,7 @@ PIPELINE = '''produce = (out:Channel<int64> n:int64):>void | Unsent<int64> | Clo
 }
 square = (input:Channel<int64> out:Channel<int64>):>void | Unsent<int64> | Closed | Canceled => {
     loop true {
-        let n = input.receive() or_throw
+        let n = input.receive or_throw
         out.send(n * n) or_throw
     }
     out.close()
@@ -46,7 +46,7 @@ main = () => {
         spawn produce(numbers 100)
         spawn square(numbers squares)
         loop true {
-            let s = squares.receive()
+            let s = squares.receive
             if s is? Closed break
             if s is? int64 { total += s }
         }
@@ -57,7 +57,7 @@ main = () => {
 
 WORKERS = '''work = (jobs:Channel<int64> results:Channel<int64>):>void | Unsent<int64> | Closed | Canceled => {
     loop true {
-        let j = jobs.receive() or_throw
+        let j = jobs.receive or_throw
         results.send(j * 2) or_throw
     }
 }
@@ -68,14 +68,14 @@ main = () => {
         loop w in [0..4) { spawn work(jobs results) }
         loop i in [0..50) { jobs.send(i) or_throw }
         jobs.close()
-        loop i in [0..50) { results.receive() or_throw; }
+        loop i in [0..50) { results.receive or_throw; }
     }
 }
 '''
 
 REQUEST_REPLY = '''serve = (requests:Channel<int64> replies:Channel<int64>):>void | Unsent<int64> | Closed | Canceled => {
     loop true {
-        let r = requests.receive() or_throw
+        let r = requests.receive or_throw
         replies.send(r + 1) or_throw
     }
 }
@@ -86,7 +86,7 @@ main = () => {
         spawn serve(requests replies)
         loop i in [0..10) {
             requests.send(i) or_throw
-            printl"{replies.receive()}"
+            printl"{replies.receive}"
         }
         requests.close()
     }
@@ -111,6 +111,6 @@ def test_pipelines_workers_and_request_reply_are_quiet(compiler, tmp_path):  # n
 
 
 def test_taking_turns_is_quiet(compiler, tmp_path):  # noqa: F811
-    program = PING.replace('    loop i in [0..n) { out.send(i) or_throw }\n    loop i in [0..n) { back.receive() or_throw; }\n',
-                           '    loop i in [0..n) {\n        out.send(i) or_throw\n        back.receive() or_throw;\n    }\n')
+    program = PING.replace('    loop i in [0..n) { out.send(i) or_throw }\n    loop i in [0..n) { back.receive or_throw; }\n',
+                           '    loop i in [0..n) {\n        out.send(i) or_throw\n        back.receive or_throw;\n    }\n')
     assert diagnostics(compiler, tmp_path, program) == []

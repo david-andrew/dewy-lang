@@ -11,16 +11,16 @@ counter = (start:int64) => [
 
 main = () => {
     let a = Tally(0)
-    a.bump
+    a.bump()
     let b = a
-    b.bump
-    b.bump
+    b.bump()
+    b.bump()
     let c = counter(40)
-    c.increment
+    c.increment()
     let d = c
-    d.increment
-    d.increment
+    d.increment()
+    d.increment()
     let all = [c d]
-    all[0].increment
+    all[0].increment()
     printl"{a.count} {b.count} {c.value} {d.value} {all[0].value} {all[1].value}"
 }

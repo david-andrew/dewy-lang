@@ -1,12 +1,12 @@
 # modes: native native-release
 send_concrete=():>void|Unsent<int64>=>{
     let q=channel<int64>(1)
-    q.close
+    q.close()
     q.try_send(42) or_throw<Unsent<int64>>
 }
 send_family=():>void|Unsent<int64>=>{
     let q=channel<int64>(1)
-    q.close
+    q.close()
     q.try_send(43) or_throw<exception>
 }
 main=()=>{

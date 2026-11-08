@@ -5,7 +5,7 @@ main = () => {
     let ready = atomic(0)
     concurrent {
         spawn ready.store(1)
-        loop ready.load() =? 0 { }
+        loop ready.load =? 0 { }
     }
     printl"ok"
 }

@@ -9,7 +9,7 @@ main=():>void=>{
     printl(target_arches().join(" "))
     printl(target_oses().join(" "))
     let hosts=["x86_64-linux" "aarch64-linux" "aarch64-mac" "x86_64-windows"]
-    let words=args()
+    let words=args
     loop i in [1..words.length) {
         let name=words[i]
         printl"{name}|{target_arch_of(name)}|{target_os_of(name)}"

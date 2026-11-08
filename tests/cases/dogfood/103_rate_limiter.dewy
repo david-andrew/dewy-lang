@@ -52,7 +52,7 @@ admit = (@recent:array<int64> plan:Plan now:int64):>bool => {
 }
 
 parse = (line:string):>Request? => {
-    let words = line.split()
+    let words = line.split
     if words.length <? 3 return none
     let at = to_int(words[0])
     if at is? exception or at <? 0 or at >? 86400000 return none

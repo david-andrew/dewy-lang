@@ -37,7 +37,7 @@ parse_amount = (words:array<string>):>[amount:rational used:int64] => {
 }
 
 parse_line = (line:string):>Ingredient | none => {
-    let words = line.split()
+    let words = line.split
     let [amount used] = parse_amount(words)
     if used <=? 0 or used >=? words.length - 1 return none
     Ingredient[amount words[used] words[used + 1..].join(" ")]
@@ -45,7 +45,7 @@ parse_line = (line:string):>Ingredient | none => {
 
 # 7/4 -> "1 3/4", 1/2 -> "1/2", 3 -> "3"
 show = (q:rational):>string => {
-    let whole = q.floor()
+    let whole = q.floor
     let rest = q - whole
     if rest =? 0 return "{whole}"
     if whole =? 0 return "{rest}"
@@ -65,7 +65,7 @@ friendly = (amount:rational unit:string):>[amount:rational unit:string] => {
         if size <=? 0 or step =? 0 continue
         let count = tsp / size
         let steps = count / step
-        if count >=? s.step and steps.floor() =? steps return [amount=count unit=s.unit]
+        if count >=? s.step and steps.floor =? steps return [amount=count unit=s.unit]
     }
     [amount=tsp unit="tsp"]
 }
@@ -73,7 +73,7 @@ friendly = (amount:rational unit:string):>[amount:rational unit:string] => {
 main = () => {
     let lines = RECIPE.lines
     if lines.length =? 0 return
-    let header = lines[0].split()
+    let header = lines[0].split
     if header.length =? 0 return
     let serves = to_int(header.last) ?? 1
     if serves <=? 0 return

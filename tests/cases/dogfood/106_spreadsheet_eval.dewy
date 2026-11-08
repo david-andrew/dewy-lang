@@ -63,8 +63,8 @@ cells_between = (first:string last:string):>array<string> => {
 
 combine = (name:string values:array<int>):>Result => {
     if values.length =? 0 return fail("#EMPTY")
-    if name =? "MAX" return Result[values.max()]
-    if name =? "SUM" Result[values.sum()] else fail("#NAME?")
+    if name =? "MAX" return Result[values.max]
+    if name =? "SUM" Result[values.sum] else fail("#NAME?")
 }
 
 factor = (@sheet:Sheet @p:Parser):>Result => {

@@ -16,7 +16,7 @@ Account:type = [
 counter = (start:int64) => [
     value = start
     step = () => (value += 1)
-    steps = (n:int64) => { loop i in [1..n] step }
+    steps = (n:int64) => { loop i in [1..n] step() }
     report = ():>string => "at {value}"
 ]
 

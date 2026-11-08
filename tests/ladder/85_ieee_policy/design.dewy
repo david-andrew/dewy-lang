@@ -63,7 +63,7 @@ main = ():>void => {
     printl"{in_order(xs)} {in_order(ys)} {sum(xs)} {sum(ys)}"
     # totalOrder: -NaN, -inf, negatives, -0.0, 0.0, positives, inf, NaN.
     let values:array<float64> = [3.0 nan -0.0 0.0 -1.5 -nan inf -inf tiny]
-    let sorted = values.sorted()
+    let sorted = values.sorted
     printl"{sorted}"
     $runtime_assert sorted.length =? values.length
     $runtime_assert (1.0/sorted[3]) <? 0.0
@@ -71,7 +71,7 @@ main = ():>void => {
     # Rounding: ties to even; floor, ceil and round keep the sign of zero.
     let half:float64 = 2.5
     let neg:float64 = -0.4
-    printl"{round(half)} {round(-half)} {round(half rounding='nearest_away')} {neg.ceil()} {round(neg)}"
+    printl"{round(half)} {round(-half)} {round(half rounding='nearest_away')} {neg.ceil} {round(neg)}"
     # Float-to-integer conversion keeps the value (truncating toward zero).
     let f:float64 = -2.75
     let g:float64 = 1e20

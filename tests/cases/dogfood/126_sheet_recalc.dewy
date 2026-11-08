@@ -27,7 +27,7 @@ name_of = (column:int row:int):>string => "{"ABCDEFGH"[$clamp column..column + 1
 # Every cell a formula reads: single names and the rectangles of A1:B3 ranges.
 refs_of = (formula:string):>array<string> => {
     let out:array<string> = []
-    let words = formula.replace("SUM(" " ").replace(")" " ").replace("+" " ").replace("*" " ").replace("-" " ").split()
+    let words = formula.replace("SUM(" " ").replace(")" " ").replace("+" " ").replace("*" " ").replace("-" " ").split
     loop word in words {
         let ends = word.split(":")
         if ends.length =? 2 {
@@ -45,10 +45,10 @@ refs_of = (formula:string):>array<string> => {
 evaluate = (formula:string known:dict<string rational>):>rational? => {
     let total:rational = 0
     loop chunk in formula.replace("-" "+-").split("+") {
-        if chunk.trim() =? "" continue
+        if chunk.trim =? "" continue
         let product:rational = 1
         loop factor in chunk.split("*") {
-            let f = factor.trim()
+            let f = factor.trim
             let negative = f.startswith("-")
             if negative f = f[1..]
             let v:rational? = none

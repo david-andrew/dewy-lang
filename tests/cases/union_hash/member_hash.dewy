@@ -1,26 +1,26 @@
 # A union or optional hashes as its member, and a nested hash cannot cancel the fields before it.
 Slot:type = [i:int64]
 Key:type = [id:int64 note:string]
-hash = (k:Key):>uint64 => k.id.hash()
+hash = (k:Key):>uint64 => k.id.hash
 Pair:type = [a:int64 b:Slot]
 P:type = 'a' | Slot
 U:type = Key | int64
 main = () => {
   let q:P = Slot[i=1]
   let p:P = 'a'
-  printl(q.hash() =? Slot[i=1].hash())
-  printl(p.hash() =? "a".hash())
+  printl(q.hash() =? Slot[i=1].hash)
+  printl(p.hash() =? "a".hash)
   let u:U = Key[1 "n"]
-  printl(u.hash() =? Key[1 "other"].hash())
+  printl(u.hash() =? Key[1 "other"].hash)
   let five:U = 5
   let n:int64 = 5
-  printl(five.hash() =? n.hash())
+  printl(five.hash() =? n.hash)
   let o:int64? = 5
-  printl(o.hash() =? n.hash())
+  printl(o.hash() =? n.hash)
   let z:int64? = none
-  printl(z.hash() =? false.hash())
-  printl(Pair[1 Slot[1]].hash() not=? 0)
+  printl(z.hash() =? false.hash)
+  printl(Pair[1 Slot[1]].hash not=? 0)
   let codes:set<uint64> = []
-  loop i in [0..1000) { codes.push(Pair[i Slot[i]].hash()) }
+  loop i in [0..1000) { codes.push(Pair[i Slot[i]].hash) }
   printl(codes.length)
 }

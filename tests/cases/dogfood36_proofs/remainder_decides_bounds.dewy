@@ -1,13 +1,13 @@
 # A decided remainder moves the dividend to the next multiple; quotients follow.
 median = (xs:array<int>):>float64? => {
-    let s = xs.sorted()
+    let s = xs.sorted
     if s.length =? 0 return none
     let mid = s.length // 2
     if s.length % 2 =? 1 return float64(s[mid])
     float64(s[mid - 1] + s[mid]) / 2.0
 }
 median2 = (xs:array<int>):>float64? => {
-    let s = xs.sorted()
+    let s = xs.sorted
     let n = s.length
     if n =? 0 return none
     if n % 2 =? 0 return float64(s[n // 2 - 1] + s[n // 2]) / 2.0

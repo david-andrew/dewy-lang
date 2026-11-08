@@ -23,7 +23,7 @@ main = () => {
         report(tx.send(Message[3 "three"]))
     }
     printl"received {(rx.receive or_throw).id}"
-    rx.close
+    rx.close()
     report(tx.send(Message[4 "four"]))
     report(tx.try_send(Message[5 "five"]))
     let [tx2 rx2] = spsc<Message 4>().split

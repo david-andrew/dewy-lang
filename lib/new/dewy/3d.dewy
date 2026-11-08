@@ -58,9 +58,9 @@ let flash:float64 = 0.0
 let hits = 0
 let run_time:float64 = 0.0
 let done = false
-let snd_shot = sfx_laser()
-let snd_pop = sfx_chime()
-let snd_jump = sfx_jump()
+let snd_shot = sfx_laser
+let snd_pop = sfx_chime
+let snd_jump = sfx_jump
 
 let walls:array<Vertex3D> = []
 add_wall = (center:vec3 size:vec3 color:vec4):>void => {
@@ -109,8 +109,8 @@ eye = ():>vec3 => player.feet+vec3(0 EYE 0)
 shoot = ():>void => {
     play(snd_shot 0.4);
     flash = 1.0
-    let origin = eye()
-    let direction = forward()
+    let origin = eye
+    let direction = forward
     let hit = world.raycast(origin origin+direction*1000.0)
     let blocked_at = match hit { h:physics3d.Hit => h.fraction*1000.0 <none> => 1000.0 }
     let best = shot_target(orbs origin direction run_time blocked_at)
@@ -141,7 +141,7 @@ update = (dt:float64):>void => {
     if is_mouse_locked() look += mouse_delta()*LOOK
     yaw -= look.x
     pitch = clamp(pitch-look.y -1.5 1.5)
-    let axis = input_axis()
+    let axis = input_axis
     let ahead = vec3(-sin(yaw*rad) 0 -cos(yaw*rad))
     let side = vec3(cos(yaw*rad) 0 -sin(yaw*rad))
     let move = ahead*(-axis.y)+side*axis.x
@@ -160,7 +160,7 @@ draw = ():>void => {
     sun(vec3(-0.5 0.9 0.6))
     shadows(true)
     fog(vec3(0.8 0.85 0.9) 0.004)
-    let eye_pos = eye()
+    let eye_pos = eye
     camera3d(eye_pos eye_pos+forward() 70.0)
     draw_mesh(ground mat4() rgb(0.42 0.5 0.36))
     draw_mesh(walls_mesh)

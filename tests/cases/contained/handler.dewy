@@ -22,7 +22,7 @@ handle=(req:Request):>void | PathEscape | FileError=>{
 }
 main=():>void=>{
     let fine=handle(Request["css/site.css"])
-    let line=read_line()
+    let line=read_line
     let name=if line is? string line else "index.html"
     let bad=handle(Request[name])
     printl"{fine is? error} {bad is? PathEscape}"

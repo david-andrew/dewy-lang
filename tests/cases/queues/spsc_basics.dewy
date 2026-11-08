@@ -13,6 +13,6 @@ main = () => {
         printl"{rx.receive or_throw} {rx.try_receive or_throw} {rx.receive or_throw} empty: {rx.try_receive is? Empty}"
     }
     tx.send("last") or_throw
-    tx.close
+    tx.close()
     printl"{rx.receive or_throw}, then closed: {rx.receive is? Closed} {rx.try_receive is? Closed}"
 }

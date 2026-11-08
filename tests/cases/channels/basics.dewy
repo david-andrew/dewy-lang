@@ -7,10 +7,10 @@ main = () => {
     loop round in [0..3) {
         c.send(Point[round round * 2 "p{round}"]) or_throw
         c.send(Point[10 + round 0 "q{round}"]) or_throw
-        let a = c.receive() or_throw
-        let b = c.receive() or_throw
+        let a = c.receive or_throw
+        let b = c.receive or_throw
         printl"{a.label} {a.x} {a.y}, {b.label} {b.x}"
     }
     c.close()
-    printl"closed: {c.receive() is? Closed}"
+    printl"closed: {c.receive is? Closed}"
 }

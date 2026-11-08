@@ -94,8 +94,8 @@ count_prefix = (t:Trie prefix:string):>int => {
 apply_all = (xs:array<int64> f:(int64:>int)):>array<int> => [loop x in xs f(x)]
 
 main = () => {
-    let f = new_forest()
-    let trie = trie_new()
+    let f = new_forest
+    let trie = trie_new
     let ids:dict<string int64> = []
     let names = []
     let threshold = input_float("threshold? ") ?? 0.5

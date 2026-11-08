@@ -37,12 +37,12 @@ key_of = (word:string):>int => {
 }
 
 build_index = (notes:array<Note>):>Index => {
-    let n = bucket_count()
+    let n = bucket_count
     let index = Index[[loop _ in [0..n) []] 0]
     loop note in notes {
         loop word in note.body.split(" ") {
             if word.length =? 0 continue
-            let w = word.lower()
+            let w = word.lower
             let slot = key_of(w) % n
             let bucket = index.buckets.get(slot) ?? []
             if w not in? bucket {
@@ -59,7 +59,7 @@ build_index = (notes:array<Note>):>Index => {
 self_check = (notes:array<Note> index:Index):>string => {
     if $build.mode =? 'debug' {
         let seen:set<string> = []
-        loop note in notes loop word in note.body.split(" ") if word.length >? 0 seen.push(word.lower())
+        loop note in notes loop word in note.body.split(" ") if word.length >? 0 seen.push(word.lower)
         $runtime_assert seen.length =? index.words
         return "self-check passed for {seen.length} words"
     }
@@ -67,7 +67,7 @@ self_check = (notes:array<Note> index:Index):>string => {
 }
 
 lookup = (index:Index word:string):>bool => {
-    let w = word.lower()
+    let w = word.lower
     let bucket = index.buckets.get(key_of(w) % bucket_count()) ?? []
     w in? bucket
 }

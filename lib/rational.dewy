@@ -316,7 +316,7 @@ _decimal_text=(numerator:int denominator:int repeats:bool):>string=>{
 }
 
 # Equal values hash alike, however they print.
-hash=(value:Rational):>uint64=>uint64<overflow='wrap'>(value.numerator.hash()*11400714819323198485) xor value.denominator.hash()
+hash=(value:Rational):>uint64=>uint64<overflow='wrap'>(value.numerator.hash*11400714819323198485) xor value.denominator.hash
 __unary_sub__ = ((value:Rational):>Rational=>_neg(value))
     & ((value:RationalWord):>RationalWord|Overflow=>_narrow(_neg(_widen(value))))
 

@@ -25,7 +25,7 @@ words = (a:int64 b:int64):>array<int64> => [a//b a%b -a//b -a%b]
 const WORDS = [words(17 9) words(-17 9) words(17 -9) words(-17 -9) words(18 9) words(-18 9)]
 const AT_COMPILE = all_of()
 main = () => {
-    let at_run = all_of()
+    let at_run = all_of
     $runtime_assert at_run.length =? AT_COMPILE.length
     let differ = 0
     loop x in at_run and y in AT_COMPILE {

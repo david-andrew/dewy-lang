@@ -22,7 +22,7 @@ main = () => {
     # Looping over a bound iterator's place lets the body steer it.
     let c=Countdown[6]
     loop n in @c {
-        if n =? 5 { c.skip }
+        if n =? 5 { c.skip() }
         printl(n)
     }
     loop n in Countdown[0] { printl(n) } else { printl("empty") }

@@ -32,7 +32,7 @@ to_roman = (n:int):>string => {
 }
 
 from_roman = (text:string):>int | BadNumeral => {
-    let word = text.trim().upper()
+    let word = text.trim.upper
     if word.length =? 0 return BadNumeral[text "empty"]
     let values:array<int> = []
     loop c in word.chars {
@@ -53,7 +53,7 @@ from_roman = (text:string):>int | BadNumeral => {
 
 # A ledger entry is a Roman numeral or a decimal number.
 read_entry = (text:string):>int | BadNumeral => {
-    let n = to_int(text.trim())
+    let n = to_int(text.trim)
     if n is? int {
         if 0 <? n <? 4000 return n
         return BadNumeral[text "{n} has no Roman form"]
@@ -86,7 +86,7 @@ main = () => {
             }
             bad:BadNumeral => {
                 rejected += 1
-                printl"  ! `{bad.text.trim()}`: {bad.reason}"
+                printl"  ! `{bad.text.trim}`: {bad.reason}"
             }
         }
     }

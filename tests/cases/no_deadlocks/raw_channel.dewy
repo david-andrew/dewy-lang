@@ -5,6 +5,6 @@ main = ():>void | Closed | Canceled => {
     let c = channel<int64>(4)
     concurrent {
         spawn c.send(1)
-        printl"{c.receive() or_throw}"
+        printl"{c.receive or_throw}"
     }
 }

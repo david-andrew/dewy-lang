@@ -37,12 +37,12 @@ Bookmark:type = [position:StorySave background:vec4 shown:dict<string string>]
 Reading:type = [
     script:Story step:StoryStep = StoryStep[kind = StoryKind.end]
     background:vec4 = rgb(0.1 0.1 0.14) shown:dict<string string> = []
-    bookmark:Bookmark = Bookmark[script.save() background shown]
+    bookmark:Bookmark = Bookmark[script.save background shown]
 ]
 advance = (@reading:Reading):>void => {
     loop true {
-        reading.bookmark = Bookmark[reading.script.save() reading.background reading.shown]
-        reading.step = reading.script.next()
+        reading.bookmark = Bookmark[reading.script.save reading.background reading.shown]
+        reading.step = reading.script.next
         if reading.step.kind not=?StoryKind.command return
         let words = reading.step.words
         if words.length<?2 continue
@@ -77,7 +77,7 @@ choose = (@reading:Reading index:int64):>void => {
 
 $test
 a_resumed_line_keeps_its_scene_and_characters = () => {
-    let reading = fresh()
+    let reading = fresh
     advance(@reading)
     $expect reading.step.speaker=?"Mira" and reading.shown.get("mira")=?"left"
     let loaded = resume(reading.bookmark)
@@ -86,7 +86,7 @@ a_resumed_line_keeps_its_scene_and_characters = () => {
 
 $test
 the_two_choices_lead_to_different_replies = () => {
-    let reading = fresh()
+    let reading = fresh
     loop reading.step.kind not=?StoryKind.choice { advance(@reading) }
     let other = reading
     choose(@reading 0)

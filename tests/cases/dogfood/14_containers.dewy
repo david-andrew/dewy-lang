@@ -75,12 +75,12 @@ main = () => {
     # strings
     let q = Queue<string>[]
     loop word in ["alpha" "beta" "gamma"] q.enqueue(word)
-    printl("dequeued {q.dequeue()}")
+    printl("dequeued {q.dequeue}")
     q.enqueue("delta")
     loop q.size >? 0 {
-        printl("  next: {q.dequeue() ?? "?"}")
+        printl("  next: {q.dequeue ?? "?"}")
     }
-    printl("empty queue gives {q.dequeue()}")
+    printl("empty queue gives {q.dequeue}")
 
     # records
     let cache = LRU<string Point>[capacity=2]

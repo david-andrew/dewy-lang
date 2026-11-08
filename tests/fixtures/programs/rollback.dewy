@@ -8,7 +8,7 @@ main=(args:array<string>):>void=>{
     let simulation=if delayed fresh() else fresh(0.0 0.0 0.0)
     let original=simulation.left.state
     loop frame in [0..900) {advance(@simulation)}
-    let confirmed=min(min(simulation.left.confirmed() simulation.right.confirmed())
+    let confirmed=min(min(simulation.left.confirmed simulation.right.confirmed)
                       min(simulation.left.tick simulation.right.tick))-1
     printl(confirmed)
     printl(to_json(simulation.left.__states[confirmed%128]))

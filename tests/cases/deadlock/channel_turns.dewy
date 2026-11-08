@@ -5,7 +5,7 @@ ping = (out:Channel<int64> back:Channel<int64>):>int64 | Unsent<int64> | Closed 
     let total:int64 = 0
     loop i in [0..1000) {
         out.send(i) or_throw
-        total += back.receive() or_throw
+        total += back.receive or_throw
     }
     total
 }

@@ -7,7 +7,7 @@ produce = (out:Channel<int64> first:int64 count:int64):>void | Unsent<int64> => 
 }
 render = (input:Channel<int64> out:Channel<string>):>void | Unsent<string> | Canceled => {
     loop true {
-        let n = input.receive()
+        let n = input.receive
         if n is? Closed break
         out.send("<{n}>") or_throw
     }
@@ -29,7 +29,7 @@ main = () => {
             numbers.close()
         }
         loop true {
-            let t = texts.receive()
+            let t = texts.receive
             if t is? Closed break
             if t is? Canceled break
             chars += t.length

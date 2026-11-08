@@ -12,7 +12,7 @@ iterate=(xs:array<int> i:int j:int):>int=>{
 }
 sorted=(xs:array<int> i:int j:int):>int=>{
     if i <? 0 or i >=? xs.length or j <? 0 or j >=? xs.length return 0
-    let choices=[i j].sorted()
+    let choices=[i j].sorted
     xs[choices[0]]
 }
 printl(choose([4 8] 1 0 1) iterate([4 8] 1 0) sorted([4 8] 1 0))

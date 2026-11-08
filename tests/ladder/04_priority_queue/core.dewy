@@ -8,7 +8,7 @@ run_events = (events:array<Event>):>array<string> => {
     }
     let out:array<string> = []
     loop pending.length >? 0 {
-        let event = pending.pop()
+        let event = pending.pop
         out.push(event.name)
     }
     return out
@@ -21,10 +21,10 @@ main = ():>void => {
     pending.push(8 8.0)
     pending.push(2 2.0)
     let saved = pending
-    $runtime_assert(pending.pop() =? 2)
-    $runtime_assert(pending.pop() =? 8)
-    $runtime_assert(saved.pop() =? 2)
-    $runtime_assert(saved.pop() =? 8)
+    $runtime_assert(pending.pop =? 2)
+    $runtime_assert(pending.pop =? 8)
+    $runtime_assert(saved.pop =? 2)
+    $runtime_assert(saved.pop =? 8)
     let empty:array<Event> = []
     $runtime_assert(run_events(empty).length =? 0)
     printl(ordered)

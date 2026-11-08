@@ -7,7 +7,7 @@ Handler:type=((@s:S word:string):>int64)
 M:type=[name:string run:Handler]
 bump=(@s:S word:string):>int64=>{
     s.count+=word.length
-    s.log.push(word.lower())
+    s.log.push(word.lower)
     return s.count
 }
 table=():>array<M>=>[M["a" @bump]]

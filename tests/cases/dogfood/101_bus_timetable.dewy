@@ -38,7 +38,7 @@ parse = (line:string):>Trip? => {
     let [head body] = parts
     let stops:array<Stop> = []
     loop part in body.split(" | ") {
-        let words = part.trim.split()
+        let words = part.trim.split
         if words.length <? 2 return none
         let at = minutes(words[end])
         if at is? none return none

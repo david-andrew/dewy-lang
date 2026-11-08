@@ -85,7 +85,7 @@ convert = (doc:string):>array<string> => {
     let quote:array<string> = []
     let in_code = false
     loop raw in doc.lines {
-        let line = raw.trim_end()
+        let line = raw.trim_end
         if line.startswith("```") {
             if in_code html.push("</code></pre>") else html.push("<pre><code>")
             in_code = not in_code
@@ -111,7 +111,7 @@ convert = (doc:string):>array<string> => {
         }
         let level = heading_level(line)
         if level >? 0 html.push("<h{level}>{inline(line[$clamp level + 1..])}</h{level}>")
-        else if line.startswith(">") quote.push(line[1..].trim())
+        else if line.startswith(">") quote.push(line[1..].trim)
         else if line not=? "" paragraph.push(line)
     }
     if list not=? "" html.push("</{list}>")

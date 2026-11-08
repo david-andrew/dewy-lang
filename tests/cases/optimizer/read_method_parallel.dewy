@@ -4,7 +4,7 @@ $runtime_checks
 first=(xs:array<int64>):>int64=>xs[0]
 run=()=>{
 let values=[20 22]
-let results=parallel_range(17 (i:int64)=>values.first()+i)
+let results=parallel_range(17 (i:int64)=>values.first+i)
 loop i in [0..17) {if results[i] not=? 20+i return 1}
 if values not=? [20 22] return 2
 return 42

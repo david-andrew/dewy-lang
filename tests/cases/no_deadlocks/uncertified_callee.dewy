@@ -6,6 +6,6 @@ relay = (n:int64):>int64 | Unsent<int64> | Closed | Canceled => {
     $no_deadlocks=false
     let c = channel<int64>(1)
     c.send(n) or_throw
-    c.receive()
+    c.receive
 }
 main = () => printl"{relay(5)}"

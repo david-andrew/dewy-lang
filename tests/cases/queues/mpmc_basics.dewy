@@ -15,8 +15,8 @@ main = () => {
         printl"{q.receive or_throw} {q.try_receive or_throw} {q.receive or_throw} empty: {q.try_receive is? Empty}"
     }
     q.send("last") or_throw
-    q.close
-    q.close
+    q.close()
+    q.close()
     match q.send("late") {
         u:Unsent<string> => printl"{u.value} closed: {u.reason is? Closed}"
         _ => printl"sent after close"

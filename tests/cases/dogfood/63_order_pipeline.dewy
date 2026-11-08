@@ -25,7 +25,7 @@ Order:type = [id:int customer:string item:string quantity:int]
 Priced:type = [order:Order cents:int note:string]
 
 parse_order = (line:string):>Order | string => {
-    let fields = line.split()
+    let fields = line.split
     if fields.length not=? 4 return "expected 4 fields, got {fields.length}"
     let id = to_int(fields[0])
     let quantity = to_int(fields[3])
@@ -54,7 +54,7 @@ read_orders = (text:string out:Channel<Order> rejects:Channel<string>):>void | U
 
 price_orders = (input:Channel<Order> out:Channel<Priced>):>void | Unsent<Priced> | Canceled => {
     loop true {
-        let next = input.receive()
+        let next = input.receive
         if next is? Closed break
         let order = next or_throw
         let found = within(100ms @lookup_price(order.item))
@@ -86,7 +86,7 @@ main = () => {
             priced.close()
         }
         loop true {
-            let p = priced.receive()
+            let p = priced.receive
             if p is? exception break
             results.push(p)
         }
@@ -111,7 +111,7 @@ main = () => {
         printl"biggest spender: {best}"
     }
     loop true {
-        let r = rejects.receive()
+        let r = rejects.receive
         if r is? exception break
         printl"rejected {r}"
     }

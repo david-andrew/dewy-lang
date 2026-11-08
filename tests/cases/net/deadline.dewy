@@ -4,7 +4,7 @@ import net
 
 main=():>void | net.NetError=>{
     let server=net.tcp_listen(0) or_throw
-    let started=time()
+    let started=time
     let got=within(100ms @net.tcp_accept(server))
     printl(got is? Timeout)
     printl(time() - started <? 2.0)

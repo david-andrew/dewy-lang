@@ -64,7 +64,7 @@ json 1.2.0 log <1.2.0
 parse_index = (text:string):>array<Release> => {
     let out:array<Release> = []
     loop line in text.lines {
-        let words = line.split()
+        let words = line.split
         if words.length <? 2 or words.length % 2 not=? 0 continue
         let v = parse_version(words[1])
         if v is? none continue

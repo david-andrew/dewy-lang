@@ -55,7 +55,7 @@ Parser:type = [
                     at += 1
                     return List[items tok.pos]
                 }
-                items.push(parse() or_throw)
+                items.push(parse or_throw)
             }
         }
         if tok.text =? ")" return LispError["unexpected )" tok.pos]
@@ -176,7 +176,7 @@ eval = (e:Expr @frames:array<Frame> env:int64):>Value | LispError => match e {
 run = (src:string @frames:array<Frame>):>void => {
     let p = Parser[tokenize(src)]
     loop p.at <? p.tokens.length {
-        let e = p.parse()
+        let e = p.parse
         if e is? LispError {
             printl("parse error at {e.pos}: {e.message}")
             return

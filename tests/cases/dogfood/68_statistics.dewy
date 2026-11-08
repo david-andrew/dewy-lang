@@ -27,7 +27,7 @@ Sample:type = [
     }
     median = ():>float64 | TooFewPoints => {
         if values.length =? 0 return TooFewPoints[1 0]
-        let sorted = values.sorted()
+        let sorted = values.sorted
         let mid = sorted.length // 2
         if sorted.length % 2 =? 1 return sorted[mid]
         # (an even, nonempty length has mid >= 1; the facts do not see parity)

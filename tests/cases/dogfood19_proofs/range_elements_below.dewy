@@ -1,7 +1,7 @@
 # The elements of `[loop i in [0..n) i]` are below n, filtered, sorted or not:
 # Python's `for i in sorted(range(len(names)))`.
 f = (names:array<string>) => {
-    let order = [loop i in [0..names.length) i].sorted()
+    let order = [loop i in [0..names.length) i].sorted
     loop i in order printl(names[i])
     let n = names.length
     let even = [loop i in [0..n) if i % 2 =? 0 i]

@@ -29,7 +29,7 @@ Token:type = [kind:Kind text:string]
 # a cased letter changes under upper or lower: that covers Latin, Greek and Cyrillic
 is_letter = (c:string):>bool => upper(c) not=? lower(c)
 is_digit = (c:string):>bool => c.length =? 1 and "0" <=? c <=? "9"
-is_space = (c:string):>bool => c.trim().is_empty
+is_space = (c:string):>bool => c.trim.is_empty
 
 fold = (text:string):>string => {
     let out:array<string> = []
@@ -38,7 +38,7 @@ fold = (text:string):>string => {
 }
 
 # collapse runs of whitespace to one space and trim the ends
-squeeze = (text:string):>string => text.split().join(" ")
+squeeze = (text:string):>string => text.split.join(" ")
 
 kind_of = (c:string):>Kind => {
     if is_letter(c) or c =? "_" or c =? "'" return "word"
@@ -110,10 +110,10 @@ main = () => {
         }
     }
     printl"collisions:"
-    loop [key words] in groups if words.length >? 1 printl"  {key}: {words.sorted().join(" ")}"
+    loop [key words] in groups if words.length >? 1 printl"  {key}: {words.sorted.join(" ")}"
 
     # reversing by character keeps flags and skin tones whole
     let thumbs = "ok 👍🏽 🇨🇦!"
-    printl"reversed: {[loop c in thumbs c].reversed().join("")}"
+    printl"reversed: {[loop c in thumbs c].reversed.join("")}"
     printl"upper: {upper("straße ελληνικά москва")}"
 }

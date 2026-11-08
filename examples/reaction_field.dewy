@@ -43,7 +43,7 @@ update = (_dt:float64):>void => {
     if key_pressed(Key.escape) quit()
     if key_pressed(Key.space) running = not running
     if key_pressed(Key.r) seed()
-    let mouse = mouse_pos()
+    let mouse = mouse_pos
     if mouse_down(Mouse.left) and mouse.x >=? 32 and mouse.x <? 800
         and mouse.y >=? 144 and mouse.y <? 656 {
             paint(@field ((mouse.x-32.0)/8.0) as int64 ((mouse.y-144.0)/8.0) as int64 2)
@@ -75,7 +75,7 @@ draw = ():>void => {
     text("{field.steps} steps" vec2(606 113) 18 muted mono=true)
     sprite(field_texture vec2(32 144) vec2(768 512))
     rect_outline(31 143 770 514 1 sea)
-    let mouse = mouse_pos()
+    let mouse = mouse_pos
     if mouse.x >=? 32 and mouse.x <? 800 and mouse.y >=? 144 and mouse.y <? 656 {
         ring(mouse 20 1.5 paper)
     }

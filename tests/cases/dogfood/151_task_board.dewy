@@ -93,7 +93,7 @@ stats = (b:Board):>string => {
 }
 
 run = (@b:Board line:string):>string|CommandError => {
-    let words = line.split()
+    let words = line.split
     if words.is_empty return ""
     let rest = words[1..]
     match words[0] {
@@ -117,7 +117,7 @@ main = () => {
     let board = Board[[] 1 []]
     let n = 0
     loop true {
-        let line = read_line()
+        let line = read_line
         if line is? exception break
         n += 1
         printl("> {line}")

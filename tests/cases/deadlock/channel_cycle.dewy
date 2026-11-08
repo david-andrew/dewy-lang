@@ -3,7 +3,7 @@
 # receives from the other's, so each waits for room the other never makes.
 ping = (out:Channel<int64> back:Channel<int64>):>void | Unsent<int64> | Closed | Canceled => {
     loop i in [0..10) { out.send(i) or_throw }
-    loop i in [0..10) { back.receive() or_throw; }
+    loop i in [0..10) { back.receive or_throw; }
 }
 main = () => {
     let a = channel<int64>(4)

@@ -4,5 +4,5 @@
 main = () => {
     let c = channel<int64>(2)
     loop i in [0..3) { c.send(i) or_throw }
-    printl"{c.receive()}"
+    printl"{c.receive}"
 }

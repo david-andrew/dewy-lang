@@ -28,8 +28,8 @@ main = (argv:array<string>):>void => {
     let entities:Pool<Entity> = []
     let handles = [loop i in [0..64) entities.add(Entity[fill(0 32)])]
     let snapshot = entities
-    let started = time_ns()
+    let started = time_ns
     mutate_inventory(@entities handles count)
-    let finished = time_ns()
+    let finished = time_ns
     printl"{inventory_checksum(entities)} {inventory_checksum(snapshot)} {finished-started}"
 }

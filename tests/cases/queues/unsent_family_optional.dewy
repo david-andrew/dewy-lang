@@ -7,7 +7,7 @@ show = (r:Unsent<int64>?):>void => {
 }
 main = () => {
     let q = channel<int64>(1)
-    q.close
+    q.close()
     match q.try_send(8) { u:Unsent<int64> => show(u) _ => {} }
     show(none)
 }

@@ -1,4 +1,4 @@
 # modes: native native-release
 wait=(ready:Channel<int> q:Channel<int>):>int|Closed|Canceled|Unsent<int>=>{ready.send(1) or_throw q.receive}
 fail=(ready:Channel<int> closed:Channel<int>):>void|Closed|Canceled|Unsent<int>=>{ready.receive or_throw; closed.send(42)}
-main=()=>{let ready=channel<int>(1) let q=channel<int>(1) let closed=channel<int>(1) closed.close concurrent {let w=spawn wait(ready q) let f=spawn fail(ready closed)} printl(w is? Canceled) match f {u:Unsent<int>=>printl(u.reason is? Closed) _=>printl("bad")}}
+main=()=>{let ready=channel<int>(1) let q=channel<int>(1) let closed=channel<int>(1) closed.close() concurrent {let w=spawn wait(ready q) let f=spawn fail(ready closed)} printl(w is? Canceled) match f {u:Unsent<int>=>printl(u.reason is? Closed) _=>printl("bad")}}

@@ -41,7 +41,7 @@ parse = (text:string):>Graph => {
         let halves = line.split(":")
         if halves.length not=? 2 continue
         let [head tail] = halves
-        let target = intern(@g head.trim())
+        let target = intern(@g head.trim)
         loop dep in tail.split() {
             let d = intern(@g dep)
             if 0 <=? target <? g.needs.length g.needs[target].push(d)
@@ -115,7 +115,7 @@ main = () => {
     let built = 0
     let plan = layers(g)
     loop i in 0.. and layer in plan {
-        let names = [loop t in layer g.names.get(t) ?? "?"].sorted()
+        let names = [loop t in layer g.names.get(t) ?? "?"].sorted
         printl"layer {i}: {names.join(" ")}"
         built += layer.length
     }

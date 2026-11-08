@@ -70,7 +70,7 @@ step = (@session:Session line:string):>void|DiskError => {
         if done is? (error|Canceled) {
             printl("compaction failed")
         } else {
-            printl("compacted keys={session.store.length()} generation={session.store.manifest.generation}")
+            printl("compacted keys={session.store.length} generation={session.store.manifest.generation}")
         }
     } else if command =? ".crash-compact" {
         session.store.disk.fault = if words.get(1) ?? "" =? "before_cleanup" Fault['before_cleanup'] else Fault['before_manifest']
@@ -78,10 +78,10 @@ step = (@session:Session line:string):>void|DiskError => {
         printl(if done is? Crashed "crashed {done.step}" else "compaction finished")
         restart(@session) or_throw
     } else if command =? ".check" {
-        let problem = session.store.index.check()
+        let problem = session.store.index.check
         let replayed = open_store(Disk[session.store.disk.root]) or_throw
         let same = replayed.index.entries =? session.store.index.entries
-        printl(if problem.length =? 0 and same "check ok keys={session.store.length()}" else "check failed {problem}")
+        printl(if problem.length =? 0 and same "check ok keys={session.store.length}" else "check failed {problem}")
     } else {
         let result = session.execute(line)
         match result {
@@ -110,7 +110,7 @@ main = ():>void => {
     }
     let session = Session[opened]
     loop true {
-        let line = read_line()
+        let line = read_line
         if line is? none break
         if line is? (Canceled|FileError) exit(1)
         if line.length =? 0 or line.startswith("--") continue
@@ -141,7 +141,7 @@ main = ():>void => {
     }
     let final = open_store(Disk["kvwork"])
     if final is? DiskError exit(1)
-    printl("workload keys={final.length()} fingerprint={fingerprint(final.index.entries)}")
+    printl("workload keys={final.length} fingerprint={fingerprint(final.index.entries)}")
     clear("kvdata")
     clear("kvwork")
 }

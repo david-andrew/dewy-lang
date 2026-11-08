@@ -20,8 +20,8 @@ main = () => {
         }
         spawn {
             loop i in [0..100) { if tx.send(i) is? Unsent<int64> break }
-            tx.close
+            tx.close()
         }
     }
-    printl"sum {sum.load()}, in order: {ordered.load() =? 1}"
+    printl"sum {sum.load}, in order: {ordered.load =? 1}"
 }

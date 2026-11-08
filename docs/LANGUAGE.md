@@ -1789,7 +1789,7 @@ main = ():>void => {
     printl"{(2/3)^(-3)}"  # 27/8
     printl"{kelvin(20)}"  # 293.15
     printl"{0.1/3} {1/3+0.5}"  # 0.0(3) 5/6
-    printl"{(rational("-7/3") ?? 0).floor()}"  # -3
+    printl"{(rational("-7/3") ?? 0).floor}"  # -3
 }
 ```
 
@@ -1885,7 +1885,7 @@ floating context. An explicit conversion also works, for example when passing
 an exact time step to a vector or rendering API:
 
 ```dewy
-let step = (1/60).to_float32()
+let step = (1/60).to_float32
 let movement = vec2(step 2.0*step)
 ```
 
@@ -2210,7 +2210,7 @@ main = () => {
     let s = Span(3 7)
     s.grow(2)                       # s is 3..9
     let c = counter(40)
-    c.increment                     # a zero-argument method is called on access
+    c.increment()                   # a zero-argument method called for its effect keeps its ()
     printl"{s.width} {c.value}"     # 6 41
 }
 ```
@@ -2279,7 +2279,7 @@ Dictionary and set keys can define `hash` alongside their record type:
 ```dewy
 Key:type = [id:uint64 label:string]
 __eq__ = (a:Key b:Key):>bool => a.id =? b.id
-hash = (key:Key):>uint64 => key.id.hash()
+hash = (key:Key):>uint64 => key.id.hash
 
 ```
 
@@ -3806,7 +3806,7 @@ connect = (host:string):>void|Offline => {
     printl"connected to {host}"
 }
 main = ():>void|UsageError|Offline => {
-    let argv = args()
+    let argv = args
     if argv.length <? 2 return UsageError["usage: fetch HOST"]
     connect(argv[1]) or_throw
 }

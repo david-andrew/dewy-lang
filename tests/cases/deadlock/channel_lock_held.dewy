@@ -7,7 +7,7 @@ main = () => {
     concurrent {
         spawn {
             let v = @(m.lock())
-            let x = c.receive()
+            let x = c.receive
             if x is? int64 { v += x }
         }
         spawn {

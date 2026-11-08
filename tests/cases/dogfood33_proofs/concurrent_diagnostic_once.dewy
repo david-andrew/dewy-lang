@@ -1,6 +1,6 @@
 # modes: native native-release
 bad = (text:string):>string => text[..text.length - 2)
-work = (jobs:Mpmc<string>):>string => { jobs.close; bad("x") }
+work = (jobs:Mpmc<string>):>string => { jobs.close(); bad("x") }
 main = () => {
     let jobs = mpmc<string>(4)
     concurrent { let a = spawn work(jobs) }

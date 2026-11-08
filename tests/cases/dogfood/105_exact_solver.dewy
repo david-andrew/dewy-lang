@@ -20,7 +20,7 @@ parse = (text:string):>array<Row>? => {
         let sides = part.split("=")
         if sides.length not=? 2 return none
         let row:Row = []
-        loop word in [sides[0].split()... sides[1].trim] {
+        loop word in [sides[0].split... sides[1].trim] {
             let q = rational(word)
             if q is? none return none
             row.push(q)

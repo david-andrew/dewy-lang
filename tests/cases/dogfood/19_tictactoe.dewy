@@ -68,7 +68,7 @@ main = () => {
         if turn =? "X" {
             let line = input("Your move (1-9): ")
             if line is? exception exit(1)
-            let n = to_int(line.trim())
+            let n = to_int(line.trim)
             if n is? error or n <? 1 or n >? 9 or board.cells[n-1] not=? " " {
                 printl("invalid move '{line}'")
                 continue

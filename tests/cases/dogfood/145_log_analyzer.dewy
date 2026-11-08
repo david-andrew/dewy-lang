@@ -23,7 +23,7 @@ main = () => {
     let entries:array<Entry> = []
     let bad = 0
     loop true {
-        let line = read_line()
+        let line = read_line
         if line is? exception break
         if line =? "" continue
         let e = parse_line(line)
@@ -62,7 +62,7 @@ main = () => {
     printl("busiest hour {busiest} with {most}")
 
     loop [name times] in by_service {
-        let s = times.sorted()
+        let s = times.sorted
         if s.length =? 0 continue
         let total = s.sum
         let avg = float64(total) / float64(s.length)

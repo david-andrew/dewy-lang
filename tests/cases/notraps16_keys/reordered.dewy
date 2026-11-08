@@ -2,7 +2,7 @@ show=(d:dict<string int64>):>void=>{
     let ks=d.keys.values
     ks.sort(reverse=true)
     loop key in ks {printl(d[key])}
-    let ordered=ks.sorted()
+    let ordered=ks.sorted
     loop key in ordered {printl(d[key])}
 }
 main=()=>show(["b"->2 "a"->1])

@@ -30,7 +30,7 @@ exercise=():>int=>{
     return 42
 }
 run=()=>{
-    let before=alloc_count()
+    let before=alloc_count
     loop i in [0..20) {let result=exercise() if result not=?42 return result}
     return if alloc_count()=?before 42 else 13
 }

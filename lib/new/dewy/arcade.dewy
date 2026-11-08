@@ -17,7 +17,7 @@ Game:type = [
     rocks:array<Rock> = [] score:int64 = 0 elapsed:float64 = 0.0 rock_wait:float64 = 1.0
     over:bool = false random:Rng = rng(1)
 ]
-random_between = (@random:Rng low:float64 high:float64):>float64 => low+(high-low)*random.next_float()
+random_between = (@random:Rng low:float64 high:float64):>float64 => low+(high-low)*random.next_float
 
 new_gold = (@game:Game):>void => {
     loop true {
@@ -99,8 +99,8 @@ let sparks = Particles[gravity = vec2(0 0) drag = 2.5]
 let best = to_int(load_data("best")??"0")??0
 let shake = Shake[]
 let t:float64 = 0.0
-let snd_gold = sfx_coin()
-let snd_crash = sfx_explosion()
+let snd_gold = sfx_coin
+let snd_crash = sfx_explosion
 
 start = ():>void => {
     game = fresh(random_int(1 1000000000))
@@ -148,7 +148,7 @@ draw_rock = (rock:Rock):>void => {
 }
 draw = ():>void => {
     clear(rgb(0.06 0.07 0.11))
-    camera2d(vec2(640 360)+shake.offset())
+    camera2d(vec2(640 360)+shake.offset)
     loop x in [0..33) { loop y in [0..19) circle(vec2(x*40 y*40) 1.5 rgba(1 1 1 0.06)) }
     if screen not=?Screen.title {
         let pulse:float64 = 1.0+0.15*sin(t*6.0*rad)

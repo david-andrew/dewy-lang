@@ -25,7 +25,7 @@ Game:type = [white:string black:string score:float64]
 Best:type = [opponent:string rating:float64]
 
 parse = (line:string):>Game? => {
-    let words = line.split()
+    let words = line.split
     if words.length not=? 3 return none
     let score = match words[2] {
         <"1-0"> => 1.0
@@ -81,7 +81,7 @@ main = () => {
         printl"{fmt'>4'(i + 1)}  {fmt'<6'(row.name)}  {fmt'6.1f'(row.rating)}  {fmt'>5'(row.played)}  {note}"
     }
     printl""
-    let names = players.keys.sorted()
+    let names = players.keys.sorted
     printl"      {[loop n in names fmt'>5'(n)].join}"
     loop a in names {
         let cells = [loop b in names {

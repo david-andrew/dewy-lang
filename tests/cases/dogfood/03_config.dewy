@@ -24,7 +24,7 @@ fail = (p:Parser msg:string):>ParseError => ParseError[msg p.pos]
 
 parse_value = (@p:Parser):>Value|ParseError => {
     p.skip_ws()
-    let c = p.peek()
+    let c = p.peek
     if c =? "\{" { return parse_object(@p) }
     if c =? "[" { return parse_list(@p) }
     if c =? "\"" {
@@ -43,7 +43,7 @@ parse_string = (@p:Parser):>string|ParseError => {
         p.pos += 1
         if c =? "\"" { return out }
         if c =? "\\" {
-            let e = p.peek()
+            let e = p.peek
             p.pos += 1
             let decoded = match e {
                 <"n"> => "\n"
@@ -82,11 +82,11 @@ parse_list = (@p:Parser):>Value|ParseError => {
     p.pos += 1
     let items:array<Value> = []
     p.skip_ws()
-    if p.peek() =? "]" { p.pos += 1 return List[items] }
+    if p.peek =? "]" { p.pos += 1 return List[items] }
     loop true {
         items.push(parse_value(@p) or_throw)
         p.skip_ws()
-        let c = p.peek()
+        let c = p.peek
         p.pos += 1
         if c =? "]" { return List[items] }
         if c not=? "," { return fail(p "expected , or ]") }
@@ -100,15 +100,15 @@ parse_object = (@p:Parser):>Value|ParseError => {
     let vals:array<Value> = []
     loop true {
         p.skip_ws()
-        if p.peek() =? "\}" { p.pos += 1 return Obj[keys vals] }
-        if p.peek() not=? "\"" { return fail(p "expected key") }
+        if p.peek =? "\}" { p.pos += 1 return Obj[keys vals] }
+        if p.peek not=? "\"" { return fail(p "expected key") }
         keys.push(parse_string(@p) or_throw)
         p.skip_ws()
-        if p.peek() not=? ":" { return fail(p "expected :") }
+        if p.peek not=? ":" { return fail(p "expected :") }
         p.pos += 1
         vals.push(parse_value(@p) or_throw)
         p.skip_ws()
-        if p.peek() =? "," { p.pos += 1 }
+        if p.peek =? "," { p.pos += 1 }
     }
     return fail(p "unreachable")
 }

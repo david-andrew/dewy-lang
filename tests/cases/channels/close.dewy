@@ -6,7 +6,7 @@
 drain = (c:Channel<int64>):>int64 => {
     let got:int64 = 0
     loop true {
-        let v = c.receive()
+        let v = c.receive
         if v is? Closed return got
         if v is? Canceled return -1
         got += 1
@@ -31,8 +31,8 @@ main = () => {
         u:Unsent<string> => printl"send after close: {u.reason is? Closed}, gave back {u.value}"
         _ => printl"sent after close"
     }
-    printl"buffered: {c.receive()} {c.receive()}"
-    printl"then: {c.receive() is? Closed}"
+    printl"buffered: {c.receive} {c.receive}"
+    printl"then: {c.receive is? Closed}"
     let empty = channel<int64>(1)
     let full = channel<int64>(2)
     concurrent {

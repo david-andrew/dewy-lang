@@ -1,6 +1,6 @@
 # quick
 # A value cycle through a function: `a` calls what reads `b`, which needs `a`.
 import p"../../fixtures/import_cycles/value_cycle_call_peer.dewy" as peer
-let a:int=read_b()
+let a:int=read_b
 read_b=():>int => peer.b
 printl(a)

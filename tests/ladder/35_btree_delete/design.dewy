@@ -6,7 +6,7 @@ split = (@parent:Node i:int64):>void => {
     $runtime_assert (0 <=? i and i <? parent.children.length)
     let child = parent.children[i]
     $runtime_assert (child.keys.length =? 3)
-    let right = leaf()
+    let right = leaf
     right.keys = [child.keys[2]]
     let middle = child.keys[1]
     child.keys.truncate(1)
@@ -221,7 +221,7 @@ valid = (node:Node root:bool):>bool => {
     return true
 }
 main = ():>void => {
-    let tree = leaf()
+    let tree = leaf
     loop i in [0..64) {
         insert(@tree (i*37)%64)
     }

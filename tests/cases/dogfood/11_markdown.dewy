@@ -70,11 +70,11 @@ convert = (markdown:string):>string => {
     }
 
     loop raw in markdown.split("\n") {
-        let line = raw.trim_end()
+        let line = raw.trim_end
         let heading = line.find(regex(r"^(#{1,6})\s+(.*)$"))
         let bullet = line.find(regex(r"^\s*[-*]\s+(.*)$"))
         let numbered = line.find(regex(r"^\s*\d+\.\s+(.*)$"))
-        if line.trim() =? "" {
+        if line.trim =? "" {
             flush_paragraph()
             close_list()
         } else if heading isnt? Missing {
@@ -96,7 +96,7 @@ convert = (markdown:string):>string => {
             html.push("  <li>{inline(item)}</li>")
         } else {
             close_list()
-            paragraph.push(line.trim())
+            paragraph.push(line.trim)
         }
     }
     flush_paragraph()

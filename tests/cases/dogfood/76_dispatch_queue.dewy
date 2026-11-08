@@ -37,7 +37,7 @@ schedule = (tasks:array<Task> stop:rational * Time):>Report => {
         if ready.length =? 0 {
             printl"{now}: idle"
         } else {
-            let task = ready.pop()
+            let task = ready.pop
             task.work -= 1s
             printl"{now}: run {task.name}; {task.work} left"
             if task.work >? 0s {

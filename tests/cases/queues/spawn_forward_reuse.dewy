@@ -1,5 +1,5 @@
 # modes: native
-consume = (tx:SpscSender<int64>):>void => tx.close
+consume = (tx:SpscSender<int64>):>void => tx.close()
 main = () => {
     let [tx rx] = spsc<int64 2>().split
     concurrent {

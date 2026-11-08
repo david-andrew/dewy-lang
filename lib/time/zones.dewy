@@ -67,7 +67,7 @@ rules_version=():>string=>_text_at(_u32(8) _u32(12))
 
 zone_parse=(name:string):>Zone|UnknownZone=>{
     let lo:int64=0
-    let hi=_zone_count()
+    let hi=_zone_count
     loop lo <? hi {
         let mid=(lo+hi)//2
         let c=_compare(mid name)
@@ -119,7 +119,7 @@ _machine_named=(name:string):>Zone|UnknownZone=>{
 _system:Zone|none=none
 system_zone=():>Zone=>{
     if _system isnt? none {return _system}
-    let name=__system_zone_name()
+    let name=__system_zone_name
     let chosen:Zone=match _machine_named(name) {
         z:Zone=>z
         e:UnknownZone=>{
@@ -141,7 +141,7 @@ zone_scope_error=(scope:string|none):>string?=>{
 }
 # A named zone or the machine's, as `$time.zone` says.
 scope_zone=(scope:string|none):>Zone|UnknownZone=>{
-    if scope is? none or scope =? 'system' {return system_zone()}
+    if scope is? none or scope =? 'system' {return system_zone}
     _machine_named(scope)
 }
 
@@ -460,7 +460,7 @@ _zone_for=(written:Zone|none given:Zone|none scope:string|none running:bool):>Zo
         return MissingContext["there is no zone to read this in, and a literal cannot assume one: write it in the text, `2026-10-26T09:00[America/New_York]`, pass `zone=`, or set `$time.zone`"]
     }
     # (unspecified means the running machine, and the call has already warned)
-    if scope is? none or scope =? 'system' {return system_zone()}
+    if scope is? none or scope =? 'system' {return system_zone}
     _machine_named(scope)
 }
 # `2026-10-26T09:00[America/New_York]`, or local text with a `zone`, or the scope's `$time.zone`.

@@ -48,14 +48,14 @@ main = () => {
     let clock:int64 = 0
     let finished:array<string> = []
     loop queue.length >? 0 {
-        let job = queue.pop()
+        let job = queue.pop
         let next = run_slice(job clock)
         clock += 1
         if next is? none {
             printl("  -> {job.name} finished at t={clock}")
             finished.push(job.name)
         } else {
-            printl("  -> requeue {next.describe()}")
+            printl("  -> requeue {next.describe}")
             queue.push(next next.priority)
         }
         if clock >? 50 { printl("too many steps") break }

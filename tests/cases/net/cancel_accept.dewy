@@ -23,11 +23,11 @@ wait_for_bytes=(stream:net.TcpStream ready:Atomic<int64>):>string=>{
 
 main=():>void | net.NetError | Canceled=>{
     let server=net.tcp_listen(0) or_throw
-    let started=time()
+    let started=time
     let ready=atomic(0)
     concurrent g {
         let accepting=spawn(g) wait_for_client(server ready)
-        loop ready.load() =? 0 {sleep(1ms);}
+        loop ready.load =? 0 {sleep(1ms);}
         sleep(50ms);
         cancel(g)
     }
@@ -37,7 +37,7 @@ main=():>void | net.NetError | Canceled=>{
     let peer=net.tcp_accept(server) or_throw
     concurrent h {
         let receiving=spawn(h) wait_for_bytes(peer ready)
-        loop ready.load() =? 0 {sleep(1ms);}
+        loop ready.load =? 0 {sleep(1ms);}
         sleep(50ms);
         cancel(h)
     }

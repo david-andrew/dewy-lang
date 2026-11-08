@@ -48,7 +48,7 @@ show_tree = ():>void => {
     let walk = tree.walk
     let visible:array<string> = []
     loop name in @walk {
-        if name =? "closed" walk.skip_children
+        if name =? "closed" walk.skip_children()
         visible.push(name)
     }
     printl"visible tree {visible}"

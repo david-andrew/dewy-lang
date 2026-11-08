@@ -4,14 +4,14 @@ from p"paddle_model.dewy" import fresh, advance
 
 $test
 fresh_world = () => {
-    let world = fresh()
+    let world = fresh
     $expect world.score =? 0 and world.misses =? 0
     $expect world.position.x =? 640.0
 }
 
 $test
 side_wall_bounce = () => {
-    let world = fresh()
+    let world = fresh
     world.position.x = 1259.0
     advance(@world 0.1 640.0)
     $expect world.position.x =? 1260.0
@@ -20,7 +20,7 @@ side_wall_bounce = () => {
 
 $test
 miss_resets_the_ball = () => {
-    let world = fresh()
+    let world = fresh
     world.position.y = 759.0
     advance(@world 0.1 80.0)
     $expect world.misses =? 1 and world.score =? 0

@@ -21,7 +21,7 @@ BadReading:type = type of error & [message:string]
 
 # Text to a reading: every way it can fail is a value.
 parse_reading = (text:string):>(Reading | BadReading) & allocates => {
-    let n = to_int(text.trim() max_digits=7)
+    let n = to_int(text.trim max_digits=7)
     if n is? NotAnInteger return BadReading["not a number"]
     if n is? TooManyDigits return BadReading["too long"]
     if n <? -limit or n >? limit return BadReading["out of range"]
@@ -90,7 +90,7 @@ main = ():>(void | OutOfMemory) & no panics => {
     let log = Log[[loop _ in [0..capacity) Reading(0)] 0 0]
     let lines:int64 = 0
     loop lines <? max_lines {
-        let line = read_line()
+        let line = read_line
         if line is? none break
         if line is? Canceled or line is? FileError {
             printl"input failed after {lines} lines"

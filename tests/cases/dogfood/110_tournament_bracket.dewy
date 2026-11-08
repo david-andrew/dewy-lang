@@ -21,7 +21,7 @@ Record:type = [wins:int=0 losses:int=0 out_in:int=0]
 parse = (text:string):>array<Player> => {
     let players:array<Player> = []
     loop line in text.lines {
-        let parts = line.split()
+        let parts = line.split
         if parts.length not=? 2 continue
         players.push(Player[parts[0] to_int(parts[1]) ?? 0])
     }

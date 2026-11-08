@@ -110,7 +110,7 @@ open_store = (disk:Disk):>Store|DiskError => {
     # Cut the log back to its intact prefix so new appends follow a clean record.
     if replay.valid <? data.length store.disk.write(manifest.log data[0..replay.valid)) or_throw
     # Logs other than the live one are leftovers of an interrupted compaction.
-    let names = store.disk.list() or_throw
+    let names = store.disk.list or_throw
     loop name in names {
         if name.startswith("log-") and name not=? manifest.log {
             store.disk.remove(name) or_throw

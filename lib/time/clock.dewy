@@ -27,7 +27,7 @@ monotonic=():>MonoPoint=>MonoPoint[time_ns()]
 # For `strict_today`: how far off the wall clock may be, negative when the system cannot say, and
 # whether it reads before 2017 (the last leap second), which a clock that was ever set has passed.
 wall_error=():>Duration|none=>{
-    let ns:int64=__wall_error_ns()
+    let ns:int64=__wall_error_ns
     if ns <? 0 {return none}
     duration_word(ns)
 }

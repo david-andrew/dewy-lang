@@ -32,7 +32,7 @@ sample_at = (ring:Ring offset:int64<o => 0 <=? o and o <? 8>):>Frame => {
 }
 
 process = (samples:array<int length=84> peak:CachePadded<Atomic<int64>> count:CachePadded<Atomic<int64>>):>Ring => {
-    let ring = new_ring()
+    let ring = new_ring
     loop i in [0..samples.length) {
         let dry = samples.get(i) ?? 0
         let wet = samples.get((i+3) % samples.length) ?? 0

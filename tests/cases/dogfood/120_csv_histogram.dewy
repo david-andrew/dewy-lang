@@ -29,7 +29,7 @@ Stats:type = [count:int total:rational worst:rational]
 
 # A row, or the reason it is rejected.
 parse_row = (line:string):>Row | string => {
-    let cells = [loop c in line.split(",") c.trim()]
+    let cells = [loop c in line.split(",") c.trim]
     if cells.length not=? 4 return "expected 4 cells, got {cells.length}"
     let [region courier minutes rating] = cells
     let m = rational(minutes)
@@ -42,7 +42,7 @@ parse_row = (line:string):>Row | string => {
 }
 
 bucket_of = (minutes:rational):>int => {
-    let b = (minutes / WIDTH).floor()
+    let b = (minutes / WIDTH).floor
     min(max(b 0) BUCKETS - 1)
 }
 
@@ -55,7 +55,7 @@ bar = (n:int scale:int):>string => "#" * (n * scale)
 
 main = () => {
     let rows:array<Row> = []
-    let lines = [loop l in CSV.split("\n") if l.trim().length >? 0 l]
+    let lines = [loop l in CSV.split("\n") if l.trim.length >? 0 l]
     loop i in [1..lines.length) {
         let got = parse_row(lines[i])
         match got {
@@ -72,7 +72,7 @@ main = () => {
         by_region[r.region].total += r.minutes
         by_region[r.region].worst = max(by_region[r.region].worst r.minutes)
     }
-    let names = by_region.keys.sorted()
+    let names = by_region.keys.sorted
     printl""
     printl"region  count   mean   worst"
     loop name in names {

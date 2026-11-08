@@ -21,7 +21,7 @@ Rng:type = [
         state = state*6364136223846793005+1442695040888963407
         return state >> 33
     }
-    below = (n:int64<(>? 0)>):>int64<r => 0 <=? r and r <? n> => (next() as int64) % n
+    below = (n:int64<(>? 0)>):>int64<r => 0 <=? r and r <? n> => (next as int64) % n
 ]
 
 Tally:type = [
@@ -83,7 +83,7 @@ WorkloadError:type = type of error & [message:string]
 reopen = (@store:Store @tally:Tally model:dict<string string>):>void|DiskError => {
     store = open_store(Disk[store.disk.root]) or_throw
     tally.recoveries += 1
-    let problem = store.index.check()
+    let problem = store.index.check
     if problem.length >? 0 or store.index.entries not=? model_entries(model) tally.mismatches += 1
 }
 

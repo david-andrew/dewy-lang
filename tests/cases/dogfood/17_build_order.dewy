@@ -9,14 +9,14 @@ Graph:type = [deps:dict<string array<string>>]
 parse_graph = (text:string):>Graph => {
     let deps:dict<string array<string>>= []
     loop line in text.split("\n") {
-        let line = line.trim()
+        let line = line.trim
         if line.length =? 0 or line.startswith("#") continue
         let parts = line.split(":")
-        let name = parts[0].trim()
+        let name = parts[0].trim
         let needs:array<string> = []
         if parts.length >? 1 {
             loop d in parts[1].split(" ") {
-                if d.trim().length >? 0 needs.push(d.trim())
+                if d.trim.length >? 0 needs.push(d.trim)
             }
         }
         deps[name] = needs

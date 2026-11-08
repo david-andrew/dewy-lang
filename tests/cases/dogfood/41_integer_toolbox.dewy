@@ -125,7 +125,7 @@ loop x in [uint64(0) 1 7 8 255 1023 4096] {
     printl"{fmt'>5'(x)} popcount={popcount(x)} bits={bits(x 12)} pow2={is_power_of_two(x)} next={next_power_of_two(x)}"
 }
 
-let seen = bs_new()
+let seen = bs_new
 loop w in ["apple" "banana" "cherry"] {
     bs_add(@seen hash_a(w))
     bs_add(@seen hash_b(w))

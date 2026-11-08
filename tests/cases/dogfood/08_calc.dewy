@@ -26,9 +26,9 @@ tokenize = (src:string):>array<Token>|CalcError => {
             let start = i
             loop i <? chars.length and (chars[i] in? DIGITS or chars[i] =? ".") { i += 1 }
             tokens.push(Token["num" chars[start..i).join("") start])
-        } else if c.lower() in? LETTERS {
+        } else if c.lower in? LETTERS {
             let start = i
-            loop i <? chars.length and (chars[i].lower() in? LETTERS or chars[i] in? DIGITS) { i += 1 }
+            loop i <? chars.length and (chars[i].lower in? LETTERS or chars[i] in? DIGITS) { i += 1 }
             tokens.push(Token["name" chars[start..i).join("") start])
         } else if c in? "+-*/%^()," {
             tokens.push(Token["op" c i])
@@ -78,7 +78,7 @@ term = (@p:Parser):>float64|CalcError => {
             value /= d
         } else if accept(@p "%") {
             let d = factor(@p) or_throw
-            value = value - d * (value / d).floor()
+            value = value - d * (value / d).floor
         } else { break }
     }
     return value
@@ -94,7 +94,7 @@ factor = (@p:Parser):>float64|CalcError => {
 call = (name:string arg:float64 pos:int):>float64|CalcError => match name {
     <"sqrt"> => sqrt(arg)
     <"abs"> => abs(arg)
-    <"floor"> => arg.floor()
+    <"floor"> => arg.floor
     _ => CalcError["unknown function {name}" pos]
 }
 

@@ -8,7 +8,7 @@ show=(digest:array<uint8>):>void=>{
 }
 
 main=():>void=>{
-    let arguments=args()
+    let arguments=args
     loop i in [1..arguments.length) {
         let data=read_bytes(arguments[i])
         if not (data is? array<uint8>) {exit(1)}

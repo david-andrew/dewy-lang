@@ -9,7 +9,7 @@ main=()=>{
     printl"{max(nan 1.0)} {max(1.0 nan)} {min(nan 1.0)} {min(1.0 nan)}"
     printl"{min(0.0 -0.0)} {min(-0.0 0.0)} {max(0.0 -0.0)} {max(-0.0 0.0)} {min(2.0 1.0)} {max(2.0 1.0)}"
     printl"{min(float32(1.0) float32(nan))} {max(float32(-0.0) float32(0.0))}"
-    printl"{[1.0 nan 2.0].max()} {[nan 1.0].min()} {[1.0 2.0 nan].min()} {[1.0 3.0 2.0].max()}"
+    printl"{[1.0 nan 2.0].max} {[nan 1.0].min} {[1.0 2.0 nan].min} {[1.0 3.0 2.0].max}"
     let xs:array<R>=[R["a" 3.0] R["c" 1.0] R["d" -0.0] R["e" 0.0] R["h" -1.0] R["i" 0.0] R["j" -0.0]]
     xs.sort(key=(r):>[float64 string]=>[r.score r.name] reverse=true)
     printl(xs.map((r)=>r.name).join(""))

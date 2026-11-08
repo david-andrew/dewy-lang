@@ -120,8 +120,8 @@ check = (world:World map:dict<string Room>):>bool => {
     return true
 }
 selfcheck = ():>void => {
-    let map = rooms()
-    let world = fresh()
+    let map = rooms
+    let world = fresh
     $runtime_assert command(@world map "") =? "empty"
     $runtime_assert command(@world map "go") =? "syntax"
     $runtime_assert command(@world map "go west") =? "blocked"
@@ -138,7 +138,7 @@ selfcheck = ():>void => {
     $runtime_assert saved.room =? "vault"
     $runtime_assert check(world map)
     $runtime_assert check(saved map)
-    let dark = fresh()
+    let dark = fresh
     $runtime_assert command(@dark map "go east") =? "entered garden"
     $runtime_assert command(@dark map "go north") =? "dark"
     $runtime_assert command(@dark map "use key") =? "not held"
@@ -146,8 +146,8 @@ selfcheck = ():>void => {
 }
 
 boundaries = ():>void => {
-    let map = rooms()
-    let world = fresh()
+    let map = rooms
+    let world = fresh
     $runtime_assert words(" go  north ") =? ["go" "north"]
     $runtime_assert command(@world map "dance now") =? "unknown"
     $runtime_assert command(@world map "go north extra") =? "syntax"
@@ -184,8 +184,8 @@ boundaries = ():>void => {
 main = ():>void => {
     boundaries()
     selfcheck()
-    let map = rooms()
-    let world = fresh()
+    let map = rooms
+    let world = fresh
     let script:array<string> = [
         "look"
         "take lamp"

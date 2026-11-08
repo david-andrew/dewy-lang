@@ -19,7 +19,7 @@ Inventory:type = [
         return w
     }
     add = (it:Item):>bool => {
-        if total_weight() + it.weight >? capacity return false
+        if total_weight + it.weight >? capacity return false
         items.push(it)
         return true
     }
@@ -32,10 +32,10 @@ Inventory:type = [
 ]
 
 describe = (it:Item):>string => match it {
-    w:Weapon => "weapon {w.label()} hits for {w.damage}, {w.durability}% durable"
-    a:Armor => "armor {a.label()} blocks {a.defense}"
-    p:Potion => "potion {p.label()} heals {p.heal} x{p.doses}"
-    _ => "item {it.label()}"
+    w:Weapon => "weapon {w.label} hits for {w.damage}, {w.durability}% durable"
+    a:Armor => "armor {a.label} blocks {a.defense}"
+    p:Potion => "potion {p.label} heals {p.heal} x{p.doses}"
+    _ => "item {it.label}"
 }
 
 use_item = (@player_hp:int64 it:Item):>string => match it {
@@ -58,7 +58,7 @@ main = () => {
     loop it in loot {
         if bag.add(it) printl("picked up {it.name}") else printl("too heavy: {it.name}")
     }
-    printl("carrying {fmt'.1f'(bag.total_weight())} / {bag.capacity} kg")
+    printl("carrying {fmt'.1f'(bag.total_weight)} / {bag.capacity} kg")
     loop it in bag.items printl("  {describe(it)}")
 
     let worth = 0

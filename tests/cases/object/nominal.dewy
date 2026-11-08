@@ -13,7 +13,7 @@ Unit = type of error & [hint = ():>string => "a unit error"]
 show = (error:Base):>string => describe(error)
 main = () => {
     let p = Payload(message='bad')
-    p.bump
+    p.bump()
     printl"{p.detail} {p.describe} {p}"
     let b = Base['plain']
     let u = Unit

@@ -11,7 +11,7 @@ bob,27,berlin
 carol,45,lisbon"""
 
 clean = (word:string):>string => {
-    let w = word.lower()
+    let w = word.lower
     loop w.length >? 0 and (w.endswith(".") or w.endswith(",")) {
         w = w[0..w.length-1)
     }
@@ -40,19 +40,19 @@ loop [w n] in ranked[$clamp 0..5) {
 
 # initials of each line
 loop line in lines {
-    let parts = line.split()
+    let parts = line.split
     let initials = [loop p in parts p[0]].join
     printl"initials: {initials}"
 }
 
 # first and last word of first line
-let first = (lines.get(0) ?? "").split()
+let first = (lines.get(0) ?? "").split
 if first.length >? 0 {
     printl"first word: {first[0]}, last word: {clean(first[end])}"
 }
 
 # middle three characters of each word in line 2
-let second = (lines.get(1) ?? "").split()
+let second = (lines.get(1) ?? "").split
 loop w in second {
     if w.length >=? 3 {
         let mid = w.length // 2

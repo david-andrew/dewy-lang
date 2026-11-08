@@ -42,7 +42,7 @@ fetch = (url:string fetches:Atomic<Count>):>Page? | Canceled => {
     sleep(if url in? SLOW 5s else 2ms) or_throw
     let body = SITE.get(url)
     if body is? none return none
-    Page[url links_in(body) body.split().length]
+    Page[url links_in(body) body.split.length]
 }
 
 fetch_with_deadline = (url:string fetches:Atomic<Count>):>Fetched => {
@@ -98,11 +98,11 @@ main = () => {
         depth += 1
     }
 
-    printl"fetched {fetches.load()} pages, {pages.length} readable"
-    printl"broken: {broken.sorted().join(" ")}"
-    printl"external: {external.sorted().join(" ")}"
+    printl"fetched {fetches.load} pages, {pages.length} readable"
+    printl"broken: {broken.sorted.join(" ")}"
+    printl"external: {external.sorted.join(" ")}"
     let unreached = set[SITE.keys...] - seen
-    printl"never reached: {unreached.sorted().join(" ")}"
+    printl"never reached: {unreached.sorted.join(" ")}"
 
     # who links here: invert the link graph
     let incoming:dict<string set<string>> = []

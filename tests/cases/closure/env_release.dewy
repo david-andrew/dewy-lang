@@ -36,7 +36,7 @@ work=(k:int64):>int64=>{
  total+=private(1)+closure(1)
  return total}
 run=()=>{let first=work(1)
-let before=alloc_count()
+let before=alloc_count
 loop i in [0..25) if work(1) not=?first return 1
 if alloc_count() not=?before return 2
 let keep=counter(5)

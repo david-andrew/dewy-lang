@@ -13,7 +13,7 @@ Service:type = <Q R>[
             u:Unsent<__Request<Q R>> => return (if u.reason is? Canceled Canceled else Closed)
             _ => {}
         }
-        reply.receive()
+        reply.receive
     }
 ]
 
@@ -22,7 +22,7 @@ Service:type = <Q R>[
 # canceled, so no caller waits on it)
 __serve_loop = <Q R>(requests:Channel<__Request<Q R>> handler:<(q:Q):>R>):>void => {
     loop true {
-        let r = requests.receive()
+        let r = requests.receive
         if r is? Closed break
         if r is? Canceled break
         # (canceled: the reply is not sent, so its caller gets Closed)
@@ -37,7 +37,7 @@ __serve_loop = <Q R>(requests:Channel<__Request<Q R>> handler:<(q:Q):>R>):>void 
     }
     requests.close()
     loop true {
-        let r = requests.__drain()
+        let r = requests.__drain
         if r is? Closed break
         r.reply.close()
     }
@@ -60,7 +60,7 @@ __Flight:type = <V>[value:V]
 # (the stage: works through what it receives until the input closes)
 __pipeline_stage = <T R>(input:Channel<__Flight<T>> output:Channel<__Flight<R>> work:<(item:T):>R>):>void => {
     loop true {
-        let item = input.receive()
+        let item = input.receive
         if item is? Closed break
         if item is? Canceled break
         output.send(__Flight<R>[work(item.value)]);
@@ -86,7 +86,7 @@ pipeline = <T R>(window:int64<(>? 0)> seeds:array<T> work:<(item:T):>R> feedback
                 flight += 1
             }
             if flight =? 0 break
-            let r = output.receive()
+            let r = output.receive
             if r is? Closed or r is? Canceled {
                 canceled = true
                 break

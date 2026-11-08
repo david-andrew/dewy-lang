@@ -118,9 +118,9 @@ show = (train:Train):>void => {
 }
 
 main = () => {
-    let train = new_train()
+    let train = new_train
     loop line in REQUESTS.lines {
-        let words = line.split()
+        let words = line.split
         if words.length <? 2 continue
         if words[0] =? "book" and words.length =? 3 book(@train words[1] to_int(words[2]) ?? 0)
         else if words[0] =? "cancel" cancel(@train words[1])

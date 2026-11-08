@@ -13,7 +13,7 @@ main = () => {
     printl([loop name in files.walk() name])
     let w=files.walk
     loop name in @w {
-        if name =? "drafts" { w.skip_children }
+        if name =? "drafts" { w.skip_children() }
         printl(name)
     }
 }

@@ -94,7 +94,7 @@ main = ():>void => {
         printl("cannot write {path}")
         exit(1)
     }
-    let back = path.read_bytes()
+    let back = path.read_bytes
     if back is? (error|Canceled) {
         printl("cannot read {path}")
         exit(1)
@@ -108,5 +108,5 @@ main = ():>void => {
         _:array<Record> => printl("corruption missed!")
         e:FormatError => printl("corrupted: {e.message}")
     }
-    path.unlink();
+    path.unlink;
 }

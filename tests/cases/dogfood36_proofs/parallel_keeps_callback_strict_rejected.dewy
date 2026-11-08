@@ -9,7 +9,7 @@ main = () => {
             let got = c.receive
             if got is? int got + v else v
         } 7)
-        spawn { c.close }
+        spawn { c.close() }
     }
     printl(a or_throw)
     printl(each((v) => {

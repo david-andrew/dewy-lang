@@ -29,7 +29,7 @@ const SYNONYMS = ["n"->"north" "s"->"south" "e"->"east" "w"->"west"
                   "get"->"take" "grab"->"take" "l"->"look" "i"->"inventory"]
 
 parse = (line:string):>Command => {
-    let words = line.lower().split()
+    let words = line.lower.split
     if words.length =? 0 return Command["" ""]
     let verb = SYNONYMS.get(words[0]) ?? words[0]
     let noun = if words.length >? 1 words[1..].join(" ") else ""

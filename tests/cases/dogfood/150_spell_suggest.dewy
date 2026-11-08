@@ -51,9 +51,9 @@ load = (path:Path) => {
     let counts:dict<string int> = []
     let text = path.read_text or_throw
     loop line in text.lines {
-        let s = line.trim()
+        let s = line.trim
         if s.is_empty or s.startswith("#") continue
-        let parts = s.split()
+        let parts = s.split
         if parts.length not=? 2 continue
         counts[parts[0]] = to_int(parts[1]) ?? 0
     }
@@ -91,7 +91,7 @@ main = () => {
     let counts = load(path) or_throw
     printl("loaded {counts.length} words, top {opts.top}, max distance {opts.max_dist}")
     loop raw in opts.words {
-        let w = if opts.lower raw.lower() else raw
+        let w = if opts.lower raw.lower else raw
         if w in? counts {
             printl("{w}: ok ({counts[w]})")
             continue

@@ -16,7 +16,7 @@ const comment = regex(r"^\s*(#.*)?$")
 read_settings = ():>dict<string string> => {
     let out:dict<string string> = []
     loop true {
-        let line = read_line()
+        let line = read_line
         if line is? none break
         if line is? (Canceled|FileError) exit(1)
         if line.matches(comment) continue
@@ -78,7 +78,7 @@ load = (raw:dict<string string>):>Config => {
 }
 
 main = () => {
-    let raw = read_settings()
+    let raw = read_settings
     printl"read {raw.length} settings"
     let config = load(raw)
     printl"name {config.name}, port {config.port}, workers {config.workers}, max_body {config.max_body}"

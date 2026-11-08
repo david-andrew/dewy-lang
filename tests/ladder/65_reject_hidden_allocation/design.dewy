@@ -52,10 +52,10 @@ control = ():>int64 => {
     $runtime_assert make(5).length =? 5
     $runtime_assert checksum(make(0)) =? 0
     $runtime_assert checksum(make(1)) =? 1
-    return verify()
+    return verify
 }
 main = ():>void => {
-    let witness = control()
+    let witness = control
     forbidden(5);
     $runtime_assert witness >? 0
 }

@@ -6,11 +6,11 @@ produce = (out:Channel<int64> n:int64):>void | Unsent<int64> => {
 }
 main = () => {
     let c = channel<int64>(4)
-    c.close
+    c.close()
     let r = produce(c 3)
     printl"forwarded: {r is? Unsent<int64>} {r is? exception}"
     let d = channel<int64>(1)
-    d.close
+    d.close()
     concurrent {
         let t = spawn produce(d 2)
     }

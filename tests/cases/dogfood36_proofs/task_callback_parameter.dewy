@@ -18,7 +18,7 @@ main = () => {
         spawn {
             let sent = c.send(apply((v) => v * 2 21))
             if sent is? Unsent<int> printl"unsent"
-            c.close
+            c.close()
         }
         let e = spawn apply((v) => { let got = c.receive; if got is? int got + v else v } 7)
     }

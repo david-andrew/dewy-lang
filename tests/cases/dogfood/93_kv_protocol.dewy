@@ -9,7 +9,7 @@ Store:type = [values:dict<string string> hits:int=0 misses:int=0]
 
 # One command line in, one reply line out.
 handle = (@store:Store line:string):>string => {
-    let words = line.split()
+    let words = line.split
     if words.is_empty return "ERR empty"
     let verb = words[0].upper
     match verb {

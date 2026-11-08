@@ -1,7 +1,7 @@
 $explicit_copies
 make=():>array<int64>=>[42]
 work=(flag:bool):>int64=>{
- let owner=make()
+ let owner=make
  read=():>int64=>if owner.length>?0 owner[0] else 0
  const selected:array<int64>=if flag owner else []
  let observed=read()

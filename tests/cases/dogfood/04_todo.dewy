@@ -36,7 +36,7 @@ show = (t:Task):>string => {
 }
 
 run_command = (argv:array<string>):>int => {
-    let path = store_path()
+    let path = store_path
     let store = load(path)
     if argv.length =? 0 {
         printl("usage: todo add|done|undo|rm|list|clear")
@@ -86,7 +86,7 @@ run_command = (argv:array<string>):>int => {
 }
 
 main = ():>void => {
-    let argv = args()
+    let argv = args
     if argv.length >? 1 { exit(run_command(argv[1..])) }
     # Demo session: each line is one invocation of the CLI.
     let session = [

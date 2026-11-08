@@ -41,7 +41,7 @@ main = () => {
     let last_token:secret<string> = ""
 
     loop true {
-        let line = read_line()
+        let line = read_line
         if line is? none break
         if line is? (Canceled|FileError) exit(1)
         let parts = words(line)

@@ -14,7 +14,7 @@ main = () => {
         wire.try_send(m) or_throw
         printl"retried {(wire.try_receive or_throw).body}"
     }
-    wire.close
+    wire.close()
     match wire.try_send(Message[3 "refund"]) {
         u:Unsent<Message> => printl"saved {u.value.body}, closed {u.reason is? Closed}"
         _ => {}

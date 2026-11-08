@@ -28,7 +28,7 @@ tokenize = (src:string):>array<Token> | ParseError => {
             tokens.push(Token["num" chars[start..i).join])
             continue
         }
-        if c.upper() =? c and c in? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
+        if c.upper =? c and c in? "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
             let start = i
             i += 1
             loop i <? chars.length and chars[i] in? "0123456789" i += 1
@@ -55,7 +55,7 @@ Parser:type = [
 Sheet:type = [
     cells:dict<string string>
     put = (name:string text:string):>void => { cells[name] = text }
-    names = ():>array<string> => [cells.keys...].sorted()
+    names = ():>array<string> => [cells.keys...].sorted
 ]
 
 Failure:type = ParseError | RefError | CycleError

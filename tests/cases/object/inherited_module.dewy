@@ -14,7 +14,7 @@ Early:type = type of error & [early = ():>string => "early"]
 kind = ():>string => "module kind"
 main = () => {
     let l = Leaf(message='m')
-    l.bump
+    l.bump()
     printl"{l.full} | {l.shadow('arg')} | {l.named} | {l.rank} | {l}"
     printl"{Later().both} {l.describe()} {l.tag} {Leaf.tag}"
 }

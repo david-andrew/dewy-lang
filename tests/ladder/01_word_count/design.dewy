@@ -15,7 +15,7 @@ count_text = (text:string):>Counts => {
 show = (c:Counts):>string => "{c.lines} {c.words} {c.graphemes}"
 main = ():>void => {
     let input = "hello world\nhello café\n"
-    let argv = args()
+    let argv = args
     if argv.length >? 1 {
         let loaded = read_text(argv[1])
         if loaded is? (error|Canceled) { exit(1) }

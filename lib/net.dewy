@@ -30,19 +30,19 @@ tcp_listen=(port:int64 host:string="127.0.0.1" backlog:int32=128):>TcpListener |
     # (a socket address is a few dozen bytes)
     let size=int32(address.bytes.length)
     if __bind(handle address.bytes.ptr size) not=? 0 {
-        let code=__last_error()
+        let code=__last_error
         __close(handle)
         return __failure("cannot listen on {host}:{port}" code)
     }
     if __listen(handle backlog) not=? 0 {
-        let code=__last_error()
+        let code=__last_error
         __close(handle)
         return __failure("cannot listen on {host}:{port}" code)
     }
     let bound:array<uint8 length =? 28>=fill(uint8(0) 28)
     let length:array<int32>=[28]
     if __name(handle bound.ptr length.ptr) not=? 0 {
-        let code=__last_error()
+        let code=__last_error
         __close(handle)
         return __failure("cannot listen on {host}:{port}" code)
     }
@@ -60,7 +60,7 @@ tcp_accept=(server:TcpListener):>TcpStream | NetError | Canceled=>{
             __prepare(handle)
             return TcpStream[handle]
         }
-        let code=__last_error()
+        let code=__last_error
         if not __again(code) return __failure("cannot accept a connection" code)
     }
 }
@@ -74,7 +74,7 @@ tcp_connect=(host:string port:int64):>TcpStream | NetError | Canceled=>{
     # (a socket address is a few dozen bytes)
     let size=int32(address.bytes.length)
     if __connect(handle address.bytes.ptr size) not=? 0 {
-        let code=__last_error()
+        let code=__last_error
         if not __in_progress(code) {
             __close(handle)
             return __failure("cannot connect to {host}:{port}" code)
@@ -104,7 +104,7 @@ tcp_send=(stream:TcpStream data:array<uint8>):>void | NetError | Canceled=>{
         if sent >=? 0 {
             at+=sent
         } else {
-            let code=__last_error()
+            let code=__last_error
             if not __again(code) return __failure("cannot send" code)
         }
     }
@@ -124,7 +124,7 @@ __tcp_receive=(stream:TcpStream largest:int64):>array<uint8> | none | NetError |
         if got >? buffer.length return __failure("cannot receive" 0)
         if got >? 0 return buffer[0..got)
         if got =? 0 return none
-        let code=__last_error()
+        let code=__last_error
         if not __again(code) return __failure("cannot receive" code)
     }
 }
@@ -290,7 +290,7 @@ if $target.os =? "windows" {
     __socket_error=(fd:int64):>int32=>{
         let code:array<int32 length =? 1>=[0]
         let length:array<uint32>=[4]
-        if __getsockopt(__fd(fd) __SOL_SOCKET __SO_ERROR code.ptr length.ptr) not=? 0 return __last_error()
+        if __getsockopt(__fd(fd) __SOL_SOCKET __SO_ERROR code.ptr length.ptr) not=? 0 return __last_error
         return code[0]
     }
 

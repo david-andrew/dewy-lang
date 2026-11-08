@@ -226,7 +226,7 @@ request_length = (buffer:string largest:int64=65536):>int64 | none => {
     let declared:int64 = 0
     loop line in buffer[$clamp 0..head).split("\n") {
         let prefix = "Content-Length: "
-        if line.startswith(prefix) and line.length >=? prefix.length declared = integer(line[prefix.length..].trim_end()) ?? 0
+        if line.startswith(prefix) and line.length >=? prefix.length declared = integer(line[prefix.length..].trim_end) ?? 0
     }
     let total = head+blank.length+max(declared 0)
     if total >? largest return largest

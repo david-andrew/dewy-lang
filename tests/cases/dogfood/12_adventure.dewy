@@ -33,11 +33,11 @@ look = (w:World):>void => {
     printl("== {room.title} ==")
     printl(room.description)
     if room.items.length >? 0 { printl("You see: {room.items.join(", ")}") }
-    printl("Exits: {[room.exits.keys...].sorted().join(" ")}")
+    printl("Exits: {[room.exits.keys...].sorted.join(" ")}")
 }
 
 do_command = (@w:World line:string):>void => {
-    let words = line.lower().split(" ").filter((s) => s.length >? 0)
+    let words = line.lower.split(" ").filter((s) => s.length >? 0)
     if words.length =? 0 { return }
     let verb = words[0]
     let noun = if words.length >? 1 words[1] else ""
@@ -98,7 +98,7 @@ go east
 
 main = ():>void => {
     let path = "dewy_adventure_script.txt"
-    let argv = args()
+    let argv = args
     if argv.length >? 1 {
         path = argv[1]
     } else {
@@ -109,9 +109,9 @@ main = ():>void => {
         printl("cannot read {path}")
         exit(1)
     }
-    let world = make_world()
+    let world = make_world
     loop line in script.split("\n") {
-        if line.trim() =? "" { continue }
+        if line.trim =? "" { continue }
         printl("> {line}")
         do_command(@world line)
         if world.done { break }

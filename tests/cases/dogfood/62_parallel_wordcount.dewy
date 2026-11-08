@@ -22,7 +22,7 @@ PUNCTUATION = ",.;:!?\"'()—-"
 Tally:type = [words:dict<string int> lines:int total:int]
 
 # lowercase a word and strip punctuation from both ends
-clean = (raw:string):>string => raw.lower().trim(PUNCTUATION)
+clean = (raw:string):>string => raw.lower.trim(PUNCTUATION)
 
 count_chunk = (lines:array<string>):>Tally => {
     let words:dict<string int> = []
@@ -94,12 +94,12 @@ main = () => {
     }
     loop i in 0.. and t in tallies {
         let only = [loop word in t.words.keys if (seen_in.get(word) ?? set[]).length =? 1 word]
-        printl"  only in chunk {i}: {only.sorted().join(" ")}"
+        printl"  only in chunk {i}: {only.sorted.join(" ")}"
     }
 
     # words with letters outside ASCII
     let accented = [loop word in total.keys if (word as array<uint8>).length >? word.length word]
-    printl"accented: {accented.sorted().join(", ")}"
+    printl"accented: {accented.sorted.join(", ")}"
 
     # the parallel result must match a sequential count
     let sequential = count_chunk(lines)

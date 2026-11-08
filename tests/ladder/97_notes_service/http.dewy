@@ -180,7 +180,7 @@ parse_header = (line:string):>Header|HttpError => {
     loop b in bytes(name) {
         if not is_token_byte(b) return bad(400 "invalid header name")
     }
-    return Header[name.lower() trim_ows(value)]
+    return Header[name.lower trim_ows(value)]
 }
 
 parse_decimal = (text:string limit:int64):>int64|HttpError => {
@@ -305,7 +305,7 @@ frame = (data:array<uint8> limits:Limits):>Framed|Incomplete|HttpError => {
     let body = Body["" head.stop]
     if encoding isnt? none {
         if length isnt? none return bad(400 "length with transfer coding")
-        if encoding.lower() not=? "chunked" return bad(501 "transfer coding {encoding}")
+        if encoding.lower not=? "chunked" return bad(501 "transfer coding {encoding}")
         let chunked = read_chunked(data head.stop limits) or_throw
         if chunked is? Incomplete return Incomplete
         body = chunked
@@ -332,7 +332,7 @@ frame = (data:array<uint8> limits:Limits):>Framed|Incomplete|HttpError => {
 
 # Whether the connection stays open after answering `request`.
 keeps_alive = (request:Request):>bool => {
-    let connection = (header(request.headers "connection") ?? "").lower()
+    let connection = (header(request.headers "connection") ?? "").lower
     if request.version =? "HTTP/1.0" return connection =? "keep-alive"
     return connection not=? "close"
 }

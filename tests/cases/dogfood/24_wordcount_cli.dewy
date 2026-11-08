@@ -13,12 +13,12 @@ EXIT_IO = 4
 parse_config = (text:string):>Config|ConfigError => {
     let c = Config[]
     loop i in 0.. and raw in text.split("\n") {
-        let line = raw.trim()
+        let line = raw.trim
         if line.length =? 0 or line.startswith("#") continue
         let eq = line.find("=")
         if eq is? Missing return ConfigError[i+1 "expected key = value"]
-        let key = line[..eq).trim()
-        let value = line[eq+1..].trim()
+        let key = line[..eq).trim
+        let value = line[eq+1..].trim
         if key =? "min_length" or key =? "top" {
             let n = to_int(value)
             if n is? error return ConfigError[i+1 "'{key}' needs a number, got '{value}'"]
@@ -61,7 +61,7 @@ parse_args = (argv:array<string>):>Options|UsageError => {
 }
 
 count_words = (text:string c:Config @counts:dict<string int64>):>void => {
-    let cleaned = text.lower().replace(regex(r"[^a-z\s]") " ")
+    let cleaned = text.lower.replace(regex(r"[^a-z\s]") " ")
     loop w in cleaned.split() {
         if w.length <? c.min_length or w in? c.ignore continue
         if w in? counts counts[w] += 1 else counts[w] = 1

@@ -29,7 +29,7 @@ parse_duration = (text:string):>(float64 * Time) | ParseError => {
 }
 
 parse_line = (line:string):>Workout | ParseError => {
-    let f = line.split()
+    let f = line.split
     if f.length not=? 5 return ParseError["expected 5 fields: {line}"]
     let day = to_int64(to_int(f[0]) ?? 0) ?? 0
     let sport:Sport = if f[1] =? "run" 'run' else if f[1] =? "ride" 'ride' else return ParseError["unknown sport {f[1]}"]

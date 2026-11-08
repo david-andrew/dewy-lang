@@ -8,7 +8,7 @@ Nobody expects the Spanish Inquisition... or the fox.
 """
 
 is_letter = (c:string):>bool => {
-    let lower = c.lower()
+    let lower = c.lower
     return (lower >=? "a" and lower <=? "z") or c =? "'"
 }
 
@@ -17,7 +17,7 @@ tokenize = (text:string):>array<string> => {
     let current = ""
     loop c in text {
         if is_letter(c) {
-            current = "{current}{c.lower()}"
+            current = "{current}{c.lower}"
         } else if current.length >? 0 {
             words.push(current)
             current = ""
@@ -44,7 +44,7 @@ top_n = (counts:dict<string int> n:int):>array<[word:string count:int]> => {
 
 main = ():>void => {
     let path = "dewy_wordfreq_input.txt"
-    let argv = args()
+    let argv = args
     let n = 5
     if argv.length >? 1 {
         n = to_int(argv[1]) ?? 5

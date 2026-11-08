@@ -52,10 +52,10 @@ control = ():>int64 => {
     $runtime_assert checksum(second) =? 35
     first[0] = 0
     $runtime_assert second[0] =? 1
-    return verify()
+    return verify
 }
 main = ():>void => {
-    let witness = control()
+    let witness = control
     forbidden();
     $runtime_assert witness >? 0
 }

@@ -15,7 +15,7 @@ run=()=>{
     let pending:Heap<string>=[]
     pending.push("later" 2.0) pending.push("first" 1.0)
     let saved=pending
-    if pending.pop() not=? "first" or pending.pop() not=? "later" or saved.peek() not=? "first" return 5
+    if pending.pop not=? "first" or pending.pop not=? "later" or saved.peek not=? "first" return 5
     let arrays:Pool<array<string>>=[] let handle=arrays.add(["hello"])
     let original=arrays let updated=arrays[handle] updated[0]="changed" arrays[handle]=updated
     return if original[handle][0] =? "hello" and arrays[handle][0] =? "changed" 42 else 6

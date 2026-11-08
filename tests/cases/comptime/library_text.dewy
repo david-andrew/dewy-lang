@@ -1,6 +1,6 @@
 # Library text operations run in compile-time evaluation, so a validator need not be a byte loop.
-$assert "é".upper() =? "É"
-$assert "ÉA".lower() =? "éa"
+$assert "é".upper =? "É"
+$assert "ÉA".lower =? "éa"
 note_error = (word:string):>string|none => {
     if word.length <? 2 { return "'{word}' is too short" }
     let parts = word.split("=")
@@ -18,25 +18,25 @@ $assert tags("a=b c=d") =? none
 $assert tags("a=b cd") =? "'cd' needs one ="
 $assert "a,b,c".split(",").length =? 3
 $assert "a--b".split("--").length =? 2
-$assert "a b  c".split().length =? 3
+$assert "a b  c".split.length =? 3
 $assert "k=v=w".split("=" 1).length =? 2
 $assert "hello".find("ll") =? 2
 $assert "hello world again".find("again") =? 12
 $assert "hello".contains("ell")
 $assert "hello".startswith("he")
 $assert "hello".endswith("lo")
-$assert "hello".upper() =? "HELLO"
-$assert "HeLLo".lower() =? "hello"
-$assert "  x ".trim() =? "x"
+$assert "hello".upper =? "HELLO"
+$assert "HeLLo".lower =? "hello"
+$assert "  x ".trim =? "x"
 $assert "banana".count("an") =? 2
 $assert "banana".replace("an" "AN") =? "bANANa"
 $assert ["a" "b"].join("-") =? "a-b"
-$assert "a\nb".lines().length =? 2
-$assert "a b".words().length =? 2
+$assert "a\nb".lines.length =? 2
+$assert "a b".words.length =? 2
 $assert "hello"[1..3) =? "el"
 $assert "abc".rfind("b") =? 1
-$assert "12".to_int() =? 12
-$assert "hello".chars().length =? 5
+$assert "12".to_int =? 12
+$assert "hello".chars.length =? 5
 $assert ("x" * 3) =? "xxx"
 $assert "é".bytes().length =? 2
 $assert "abc" <? "abd"

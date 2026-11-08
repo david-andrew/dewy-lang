@@ -1,6 +1,6 @@
 # modes: native native-release
 main = () => {
     let [tx rx] = spsc<int64 4>().split
-    concurrent { spawn { tx.send(1); tx.close } }
+    concurrent { spawn { tx.send(1); tx.close() } }
     tx.try_send(2);
 }

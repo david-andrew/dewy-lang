@@ -22,7 +22,7 @@ GET /home 200 11
 """
 
 parse_hit = (line:string):>Hit? => {
-    let f = line.split()
+    let f = line.split
     if f.length not=? 4 return none
     let status = to_int(f[2])
     let ms = to_int(f[3])
@@ -42,7 +42,7 @@ work = (jobs:Channel<string> stats:Mutex<dict<string Stats>> errors:Atomic<int64
     $runtime_checks    # atomic add may overflow: no way to prove it
     let handled:int64 = 0
     loop true {
-        let line = jobs.receive()
+        let line = jobs.receive
         if line is? Closed break
         let text = line or_throw
         let hit = parse_hit(text)
@@ -91,7 +91,7 @@ main = () => {
     loop r in rows {
         if r.st.count =? 0 continue
         let avg = r.st.total_ms / r.st.count
-        printl"{r.path}: {r.st.count} hits, avg {fmt'.1f'(avg.to_float64())} ms, slowest {r.st.slowest} ms"
+        printl"{r.path}: {r.st.count} hits, avg {fmt'.1f'(avg.to_float64)} ms, slowest {r.st.slowest} ms"
     }
     let candidates = [loop i in [1..60] i*i + 1]
     let flags = [parallel n in candidates is_prime(n)]

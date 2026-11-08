@@ -1,7 +1,7 @@
 # modes: native
 main = () => {
     let q = channel<int64>(1)
-    q.close
+    q.close()
     match q.try_send(7) {
         e:error => printl"error"
         _ => {}

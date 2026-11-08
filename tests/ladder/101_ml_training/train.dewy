@@ -22,7 +22,7 @@ scale = (@xs:array<float64> by:float64):>void => {
 }
 
 sum_grads = (steps:array<Step> count:int64):>Mlp => {
-    let total = empty_mlp()
+    let total = empty_mlp
     loop s in steps {
         accumulate(@total.w1 s.grad.w1)
         accumulate(@total.b1 s.grad.b1)

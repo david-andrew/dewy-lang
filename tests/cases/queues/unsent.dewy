@@ -27,7 +27,7 @@ main = () => {
         report(r)
     }
     loop m in saved { printl"saved: {m.body}" }
-    c.close
+    c.close()
     report(c.send(Message[5 "five"]))
     report(c.try_send(Message[6 "six"]))
     printl"closed: {c.try_receive is? Closed} {c.receive is? Closed}"

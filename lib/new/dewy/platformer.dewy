@@ -108,7 +108,7 @@ collect = (@coins:array<Coin> at:vec2 dt:float64):>int64 => {
 
 $test
 landing_and_jumping_keep_the_previous_player_value = () => {
-    let map = make_level()
+    let map = make_level
     let at = markers("@").get(0) ?? vec2(T T)
     let p = spawn(at)
     loop i in [0..30) p = tick(p map at Pad[] 1.0/120.0).player
@@ -151,11 +151,11 @@ make_tiles = ():>Texture => {
 }
 
 make_scene = ():>Tilemap => {
-    let map = make_level()
+    let map = make_level
     map.tilesets = [tileset(make_tiles() T T)]
     return map
 }
-let level = make_scene()
+let level = make_scene
 let start = markers("@").get(0) ?? vec2(T T)   # top left if the level has no @
 let player = spawn(start)
 let coins = [loop at in markers("o") Coin[pos = at]]
@@ -164,16 +164,16 @@ let run_time:float64 = 0.0
 let t:float64 = 0.0
 let cam = start
 let shake = Shake[]
-let snd_jump = sfx_jump()
-let snd_coin = sfx_coin()
-let snd_land = sfx_hit()
+let snd_jump = sfx_jump
+let snd_coin = sfx_coin
+let snd_land = sfx_hit
 action("Jump" [Input.key(Key.space) Input.key(Key.up) Input.key(Key.w) Input.button(PadButton.a)])
 
 update = (dt:float64):>void => {
     if key_pressed(Key.escape) quit()
     t += dt
     if got<?coins.length run_time += dt
-    let axis = input_axis()
+    let axis = input_axis
     let pad = Pad[move = axis.x pressed = action_pressed("Jump") held = action_down("Jump") drop = axis.y>?0.5]
     let step = tick(player level start pad dt)
     player = step.player
@@ -192,15 +192,15 @@ update = (dt:float64):>void => {
 
 draw = ():>void => {
     clear(rgb(0.45 0.68 0.9))
-    camera2d(cam+shake.offset())
+    camera2d(cam+shake.offset)
     draw_tilemap(level)
     loop coin in coins {
         if not coin.taken {
             let bob = sin((t*4.0+coin.pos.x*0.05)*rad)*4.0
             circle(coin.pos+vec2(0 bob) 12 rgb(1.0 0.82 0.25))
             circle(coin.pos+vec2(-3 bob-3) 4 rgb(1.0 0.95 0.7))
-        } else if not coin.pop.done() {
-            let k = coin.pop.value()
+        } else if not coin.pop.done {
+            let k = coin.pop.value
             circle(coin.pos-vec2(0 30.0*k) 12.0+14.0*k rgba(1.0 0.82 0.25 1.0-k))
         }
     }

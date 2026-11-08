@@ -53,7 +53,7 @@ listing = (request:string) => {
     let wanted = p"{root}/{target_of(request)}"
     let dir = root.confine(wanted) or_throw
     if not dir.is_dir return Response[404 "Not Found" "text/plain" "not a directory"]
-    let names = (dir.list or_throw).sorted()
+    let names = (dir.list or_throw).sorted
     Response[200 "OK" "text/plain" names.join(" ")]
 }
 
@@ -78,7 +78,7 @@ first_line = (text:string):>string => {
 main = () => {
     setup() or_throw
     loop true {
-        let line = read_line()
+        let line = read_line
         if line is? none break
         if line is? (Canceled|FileError) exit(1)
         let [method target] = [loop w in line.split(" ") if w.length >? 0 w]

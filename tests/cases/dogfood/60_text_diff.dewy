@@ -36,7 +36,7 @@ lcs_table = (a:array<string> b:array<string>):>array<array<int>> => {
         rows.push(row)
         below = row
     }
-    rows.reversed()
+    rows.reversed
 }
 
 cell = (table:array<array<int>> i:int64 j:int64):>int => (table.get(i) ?? []).get(j) ?? 0
@@ -99,8 +99,8 @@ header = (h:array<Edit>):>string => {
 }
 
 similarity = (a:string b:string):>int => {
-    let x = a.split()
-    let y = b.split()
+    let x = a.split
+    let y = b.split
     if x.length + y.length =? 0 return 100
     let common = cell(lcs_table(x y) 0 0)
     200 * common // (x.length + y.length)

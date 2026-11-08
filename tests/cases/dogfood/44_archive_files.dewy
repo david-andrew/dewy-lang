@@ -8,7 +8,7 @@ Kind:type = 'docs' | 'data' | 'images' | 'other'
 KINDS:dict<string Kind> = ["txt"->"docs" "md"->"docs" "csv"->"data" "json"->"data" "jpg"->"images" "png"->"images"]
 
 kind_of = (f:Path):>Kind => {
-    let suffix = f.suffix.remove_prefix(".").lower()
+    let suffix = f.suffix.remove_prefix(".").lower
     KINDS.get(suffix) ?? "other"
 }
 

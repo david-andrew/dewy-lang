@@ -134,12 +134,12 @@ main = () => {
         Event[96 "warn" "media" 385]
     ]
     let wire = channel<Event>(4)
-    let summary = make_summary()
+    let summary = make_summary
     let by_service:dict<string int> = []
     concurrent {
         spawn produce(wire batch)
         loop true {
-            match wire.receive() {
+            match wire.receive {
                 e:Event => record(@summary e @by_service)
                 <Closed> => break
                 <Canceled> => break

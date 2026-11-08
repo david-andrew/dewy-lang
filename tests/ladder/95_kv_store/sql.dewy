@@ -128,13 +128,13 @@ Parser:type = [
     # Is the next token this keyword (any case) or symbol?
     sees = (text:string):>bool => {
         let token = tokens[at]
-        if token.kind =? 'word' return token.text.upper() =? text
+        if token.kind =? 'word' return token.text.upper =? text
         return token.kind =? 'symbol' and token.text =? text
     }
 
     accept = (text:string):>bool => {
         if not sees(text) return false
-        advance();
+        advance;
         return true
     }
 
@@ -143,7 +143,7 @@ Parser:type = [
     }
 
     string_literal = ():>string|SqlError => {
-        let token = advance()
+        let token = advance
         if token.kind not=? 'string' return SqlError["expected a string"]
         return token.text
     }
@@ -160,18 +160,18 @@ Parser:type = [
 
     # expr := term (OR term)*
     expression = ():>Expr|SqlError => {
-        let left = conjunction() or_throw
+        let left = conjunction or_throw
         loop accept("OR") {
-            let right = conjunction() or_throw
+            let right = conjunction or_throw
             left = Expr['or' left=left right=right]
         }
         return left
     }
 
     conjunction = ():>Expr|SqlError => {
-        let left = negation() or_throw
+        let left = negation or_throw
         loop accept("AND") {
-            let right = negation() or_throw
+            let right = negation or_throw
             left = Expr['and' left=left right=right]
         }
         return left
@@ -179,42 +179,42 @@ Parser:type = [
 
     negation = ():>Expr|SqlError => {
         if accept("NOT") {
-            let inner = negation() or_throw
+            let inner = negation or_throw
             return Expr['not' left=inner]
         }
-        return primary()
+        return primary
     }
 
     primary = ():>Expr|SqlError => {
         if accept("(") {
-            let inner = expression() or_throw
+            let inner = expression or_throw
             expect(")") or_throw
             return inner
         }
-        let column = column() or_throw
+        let column = column or_throw
         if accept("LIKE") {
-            let pattern = string_literal() or_throw
+            let pattern = string_literal or_throw
             return Expr['like' column text=pattern]
         }
         if accept("BETWEEN") {
-            let low = string_literal() or_throw
+            let low = string_literal or_throw
             expect("AND") or_throw
-            let high = string_literal() or_throw
+            let high = string_literal or_throw
             return Expr['and' left=Expr['compare' column ">=" low] right=Expr['compare' column "<=" high]]
         }
-        let token = advance()
+        let token = advance
         if token.kind not=? 'symbol' or token.text not in? ["=" "!=" "<>" "<" "<=" ">" ">="] {
             return SqlError["expected a comparison"]
         }
         let op = if token.text =? "<>" "!=" else token.text
-        let text = string_literal() or_throw
+        let text = string_literal or_throw
         return Expr['compare' column op text]
     }
 
     # The optional WHERE clause, into the statement.
     where_clause = (@statement:Statement):>void|SqlError => {
         if not accept("WHERE") return
-        statement.where = expression() or_throw
+        statement.where = expression or_throw
     }
 
     select = ():>Statement|SqlError => {
@@ -227,9 +227,9 @@ Parser:type = [
         } else if accept("*") {
             statement.columns = ['key' 'value']
         } else {
-            statement.columns.push(column() or_throw)
+            statement.columns.push(column or_throw)
             loop accept(",") {
-                statement.columns.push(column() or_throw)
+                statement.columns.push(column or_throw)
             }
         }
         expect("FROM") or_throw
@@ -245,7 +245,7 @@ Parser:type = [
             }
         }
         if accept("LIMIT") {
-            let token = advance()
+            let token = advance
             let n = to_int(token.text)
             if token.kind not=? 'number' or n is? error or n >? 1000000 return SqlError["expected a row count"]
             statement.limit = n
@@ -260,9 +260,9 @@ Parser:type = [
         let statement = Statement[kind]
         loop true {
             expect("(") or_throw
-            let key = string_literal() or_throw
+            let key = string_literal or_throw
             expect(",") or_throw
-            let value = string_literal() or_throw
+            let value = string_literal or_throw
             expect(")") or_throw
             statement.rows.push(Entry[key value])
             if not accept(",") break
@@ -274,10 +274,10 @@ Parser:type = [
         let result:Statement = Statement['begin']
         if accept("EXPLAIN") {
             expect("SELECT") or_throw
-            result = select() or_throw
+            result = select or_throw
             result.explain = true
         } else if accept("SELECT") {
-            result = select() or_throw
+            result = select or_throw
         } else if accept("INSERT") {
             result = values('insert') or_throw
         } else if accept("REPLACE") {
@@ -287,7 +287,7 @@ Parser:type = [
             expect("SET") or_throw
             expect("VALUE") or_throw
             expect("=") or_throw
-            result = Statement['update' value=string_literal() or_throw]
+            result = Statement['update' value=string_literal or_throw]
             where_clause(@result) or_throw
         } else if accept("DELETE") {
             expect("FROM") or_throw
@@ -304,7 +304,7 @@ Parser:type = [
             return SqlError["unknown statement"]
         }
         accept(";");
-        if peek().kind not=? 'end' return SqlError["unexpected {peek().text}"]
+        if peek.kind not=? 'end' return SqlError["unexpected {peek.text}"]
         return result
     }
 ]
@@ -313,7 +313,7 @@ parse = (source:string):>Statement|SqlError => {
     let tokens = lex(source) or_throw
     if tokens.length =? 0 return SqlError["empty statement"]
     let parser = Parser[tokens]
-    return parser.statement()
+    return parser.statement
 }
 
 # ---------------------------------------------------------------- evaluation

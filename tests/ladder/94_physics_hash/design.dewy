@@ -134,7 +134,7 @@ step = (@world:World):>void => {
     $runtime_assert valid(world)
 }
 selfcheck = ():>void => {
-    let world = seed()
+    let world = seed
     let saved = world.copy()
     let initial = energy(world)
     step(@world)
@@ -196,7 +196,7 @@ boundaries = ():>void => {
 main = ():>void => {
     boundaries()
     selfcheck()
-    let world = seed()
+    let world = seed
     let saved = world.copy()
     let initial = energy(world)
     loop tick in [0..80) {

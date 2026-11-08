@@ -35,7 +35,7 @@ parse_distance = (text:string):>float64*Length|LineError => {
 }
 
 parse_line = (text:string number:int):>Workout|LineError => {
-    let fields = text.split()
+    let fields = text.split
     if fields.length <? 4 return LineError[number "expected 4 fields, got {fields.length}"]
     let day = date(fields[0])
     if day is? error return LineError[number "bad date '{fields[0]}'"]
@@ -68,10 +68,10 @@ main = () => {
     let errors:array<LineError> = []
     let number = 0
     loop true {
-        let line = read_line()
+        let line = read_line
         if line is? exception break
         number += 1
-        if line.trim().is_empty or line.startswith("#") continue
+        if line.trim.is_empty or line.startswith("#") continue
         match parse_line(line number) {
             w:Workout => workouts.push(w)
             e:LineError => errors.push(e)

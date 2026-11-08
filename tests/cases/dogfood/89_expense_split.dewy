@@ -19,7 +19,7 @@ Expense:type = [payer:string amount:rational what:string shares:array<string>]
 const PEOPLE = ["ana" "ben" "cleo" "dev"]
 
 parse_line = (line:string):>Expense | string => {
-    let words = line.split()
+    let words = line.split
     if words.length <? 3 return "too few fields"
     let payer = words[0]
     if payer not in? PEOPLE return "unknown payer {payer}"

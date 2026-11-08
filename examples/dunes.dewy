@@ -91,7 +91,7 @@ let dust:array<vec3> = []
 loop k in [0..400) { dust.push(vec3(float32(random(-30.0 30.0)) float32(random(0.0 10.0)) float32(random(-30.0 30.0)))) }
 
 let wind_snd = tone(220.0 4.0 Wave.noise 0.05 1.5 1.5)
-let chime = sfx_chime()
+let chime = sfx_chime
 let step_snd = tone(140.0 0.05 Wave.noise 0.08 0.001 0.04)
 let theme = mix([melody("A3 - C4 E4 - D4 C4 - B3 - - - A3 - - - . . E4 - G4 A4 - G4 E4 - D4 - - - C4 - - -" 70.0 Wave.sine 0.18)
     melody("A2 - - - - - - - F2 - - - - - - - C3 - - - - - - - E2 - - - - - - -" 70.0 Wave.triangle 0.15)])
@@ -136,7 +136,7 @@ update = (dt:float64) => {
     if mouse_down(Mouse.right) { yaw += float64(mouse_delta().x) * 0.006 }
     yaw += float64(right_stick().x) * 2.2 * dt
     # movement relative to the camera
-    let inp = input_axis()
+    let inp = input_axis
     let fwd = vec3(float32(-sin(yaw*rad)) 0 float32(-cos(yaw*rad)))
     let right = vec3(float32(cos(yaw*rad)) 0 float32(-sin(yaw*rad)))
     let wish = right * inp.x - fwd * inp.y
@@ -214,7 +214,7 @@ draw = () => {
     post_effects(0.55 0.78 0.3 1.05 vec3(1.03 1.0 0.96))
     camera3d(cam_pos pos + vec3(0 2.9 0) 50.0 0.1 700.0)
     draw_custom(() => {
-        let shadow = scene_shadow_map()
+        let shadow = scene_shadow_map
         let taps:float32 = if soft_rendering() 4.0 else 9.0
         let p = SandParams(scene_view_proj() scene_shadow_vp() scene_camera() scene_sun() scene_sun_color() scene_sky_color()
             scene_fog_color() scene_fog() float32(elapsed()) scene_shadow_strength() shadow

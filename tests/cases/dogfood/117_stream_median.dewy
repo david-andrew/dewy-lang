@@ -78,7 +78,7 @@ largest = (xs:array<int> k:int):>array<int> => {
         let x = pop(@h)
         if x isnt? none out.push(x)
     }
-    out.reversed()
+    out.reversed
 }
 
 main = () => {
@@ -91,6 +91,6 @@ main = () => {
         printl"{fmt'>2'(k)}. read {fmt'>2'(x)}  median {fmt'>4'(median(low high))}  halves {low.items.length}/{high.items.length}"
     }
     printl"largest three: {largest(READINGS 3)}"
-    let sorted = READINGS.sorted()
+    let sorted = READINGS.sorted
     printl"check: sorted middle is {sorted[sorted.length // 2]}"
 }

@@ -45,7 +45,7 @@ main = () => {
     let stats = Stats[waits=[]]
 
     loop events.length >? 0 {
-        let e = events.pop()
+        let e = events.pop
         if e.kind =? 'arrive' {
             printl("{fmt'>4'(e.time)}  {e.patient.name} arrives ({e.patient.severity})")
             waiting.push(e.patient RANK[e.patient.severity] * 1000 + e.patient.arrived)
@@ -56,7 +56,7 @@ main = () => {
         # hand waiting patients to free doctors
         loop d in [0..free.length) {
             if free[d] and waiting.length >? 0 {
-                let p = waiting.pop()
+                let p = waiting.pop
                 free[d] = false
                 stats.record(p e.time)
                 let done = e.time + TREAT_MINUTES[p.severity]

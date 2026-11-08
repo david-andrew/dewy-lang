@@ -32,7 +32,7 @@ parse_clock = (text:string):>int | none => {
 clock = (minutes:int):>string => "{fmt'02'(minutes // 60)}:{fmt'02'(minutes % 60)}"
 
 parse_meeting = (line:string):>Meeting | none => {
-    let words = line.split()
+    let words = line.split
     if words.length not=? 2 return none
     let span = words[1].split("-")
     if span.length not=? 2 return none

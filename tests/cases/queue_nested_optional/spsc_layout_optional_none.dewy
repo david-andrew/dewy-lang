@@ -1,2 +1,2 @@
 # modes: native native-release
-main=()=>{let [tx rx]=spsc<int? 2>().split concurrent {spawn {tx.send(none); tx.close} let received=rx.receive if received is? Closed or received is? Canceled {printl("bad") return} let v:int?=received printl(v is? none)}}
+main=()=>{let [tx rx]=spsc<int? 2>().split concurrent {spawn {tx.send(none); tx.close()} let received=rx.receive if received is? Closed or received is? Canceled {printl("bad") return} let v:int?=received printl(v is? none)}}

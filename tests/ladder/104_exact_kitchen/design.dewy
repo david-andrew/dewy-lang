@@ -82,7 +82,7 @@ main = () => {
     let h:rational = 0
     loop k in [1..10] h += 1/k
     printl"  H(10) = {h}"
-    let chances = dice()
+    let chances = dice
     printl"  P(7) = {chances[7]}, P(2) = {chances[2]}, P(10) = {chances[10]}"
     let total:rational = 0
     loop [_ p] in chances total += p
@@ -91,7 +91,7 @@ main = () => {
     printl"-- floats where they belong --"
     printl"  sqrt(2) ~ {newton_sqrt(2.0)}"
     # Converting on purpose rounds once, to the nearest float.
-    printl"  a third as a float {third.to_float64()}, as a fraction {third}"
+    printl"  a third as a float {third.to_float64}, as a fraction {third}"
 
     printl"-- a sack of flour --"
     let sack = 2.5kg

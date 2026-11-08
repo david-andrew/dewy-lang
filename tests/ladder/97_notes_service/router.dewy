@@ -60,7 +60,7 @@ parse_filter = (query:dict<string string>):>Filter|BadQuery => {
     let filter = Filter()
     loop [key value] in query {
         if key =? "tag" {
-            filter.tag = value.trim().lower()
+            filter.tag = value.trim.lower
         } else if key =? "done" {
             if value =? "true" filter.done = true
             else if value =? "false" filter.done = false

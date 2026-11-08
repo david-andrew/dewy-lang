@@ -33,7 +33,7 @@ glorot = (@r:Rng fan_in:int64<0 <=? fan_in and fan_in <=? 1000> fan_out:int64<0 
 }
 
 init_mlp = (@r:Rng):>Mlp => {
-    let model = empty_mlp()
+    let model = empty_mlp
     model.w1 = glorot(@r INPUTS HIDDEN)
     model.w2 = glorot(@r HIDDEN HIDDEN)
     model.w3 = glorot(@r HIDDEN OUTPUTS)

@@ -47,7 +47,7 @@ Session:type = [
         let candidates = visible(plan_for(statement.where))
         let where = statement.where
         let rows = if where is? none candidates else [loop e in candidates if matches(where e.key e.value) e]
-        if statement.descending rows = rows.reversed()
+        if statement.descending rows = rows.reversed
         if statement.limit >=? 0 and rows.length >? statement.limit rows.truncate(statement.limit)
         return rows
     }

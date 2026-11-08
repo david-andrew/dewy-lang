@@ -23,7 +23,7 @@ percentile = (sorted_values:array<float64> q:float64):>float64 => {
 histogram = (values:array<float64> width:float64) => {
     let buckets:dict<int64 int64> = []
     loop v in values {
-        let b = int64((v / width).floor())
+        let b = int64((v / width).floor)
         buckets[b] = (buckets.get(b) ?? 0) + 1
     }
     let top = max(buckets.values)
@@ -34,7 +34,7 @@ histogram = (values:array<float64> width:float64) => {
     }
 }
 
-exponential = (@r:Rng mean:float64):>float64 => -mean * log(1.0 - r.next_float())
+exponential = (@r:Rng mean:float64):>float64 => -mean * log(1.0 - r.next_float)
 
 simulate = (lanes:int64 minutes:float64 seed:int64):>Report => {
     let r = rng(seed)

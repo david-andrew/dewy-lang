@@ -23,10 +23,10 @@ check=(capacity:int<(>? 0)>):>void=>{
             spawn produce(q 200)
             spawn produce(q 400)
         }
-        q.close
+        q.close()
     }
     let values=@(bag.lock())
-    printl(values.sorted() =? [loop i in [0..600) i])
+    printl(values.sorted =? [loop i in [0..600) i])
 }
 main=()=>{check(1) check(2) check(3)}
 $runtime_checks

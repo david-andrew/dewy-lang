@@ -1,5 +1,5 @@
 # An end moved into a function cannot be used again.
-take = (tx:SpscSender<int64>):>void => tx.close
+take = (tx:SpscSender<int64>):>void => tx.close()
 main = () => {
     let [tx rx] = spsc<int64 4>().split
     take(tx)

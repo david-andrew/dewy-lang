@@ -8,12 +8,12 @@ main=()=>{
     let nan=abs(zero/zero)
     let inf=one/zero
     let xs:array<float64>=[3.0 nan 0.0 -0.0 -1.5 -nan inf -inf 5e-324]
-    let up=xs.sorted()
+    let up=xs.sorted
     printl"{up}"
     printl"{xs.sorted(reverse=true)}"
     printl"{1.0/up[3]} {1.0/up[4]}"
     let ys:array<float32>=[float32(nan) 2.0 -0.0 0.0 float32(-inf)]
-    printl"{ys.sorted()}"
+    printl"{ys.sorted}"
     let items=[Item[0.0 0] Item[nan 1] Item[-0.0 2] Item[-2.5 3]]
     printl"{[loop item in items.sorted(key=(item:Item):>float64=>item.score) item.id]}"
 }

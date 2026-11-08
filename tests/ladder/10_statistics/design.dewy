@@ -14,7 +14,7 @@ statistics = (xs:array<float64>):>Stats => {
 }
 median = (xs:array<float64>):>float64 => {
     let values = xs
-    values.sort
+    values.sort()
     let n = values.length
     $runtime_assert n >? 0
     if n%2 =? 1 or n <? 2 { return values[n//2] }

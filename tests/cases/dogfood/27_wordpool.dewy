@@ -39,7 +39,7 @@ main = () => {
     concurrent {
         spawn produce_all(docs results)
         loop true {
-            let c = results.receive()
+            let c = results.receive
             if c is? exception break
             per_doc.push(c)
             loop [word n] in c.words { total[word] = (total.get(word) ?? 0) + n }

@@ -201,7 +201,7 @@ BTree:type = [
     range = (low:Bound? high:Bound? limit:int64=-1):>array<Entry> => {
         let out:array<Entry> = []
         if limit =? 0 return out
-        let leaf = if low is? none first_leaf() else leaf_for(low.key)
+        let leaf = if low is? none first_leaf else leaf_for(low.key)
         $runtime_assert 0 <=? leaf and leaf <? nodes.length
         let at = if low is? none 0 else lower_bound(nodes[leaf].keys low.key)
         loop leaf >=? 0 {
@@ -244,7 +244,7 @@ BTree:type = [
         if problem.length >? 0 return problem
         let seen:int64 = 0
         let previous:string? = none
-        let leaf = first_leaf()
+        let leaf = first_leaf
         loop leaf >=? 0 {
             $runtime_assert leaf <? nodes.length
             let node = nodes[leaf]

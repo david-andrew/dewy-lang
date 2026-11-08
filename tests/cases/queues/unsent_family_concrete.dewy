@@ -1,7 +1,7 @@
 # modes: native native-release
 main = () => {
     let q = channel<int64>(1)
-    q.close
+    q.close()
     let r = q.try_send(42)
     if r is? Unsent<int64> {
         match r {

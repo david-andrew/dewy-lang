@@ -91,7 +91,7 @@ main = () => {
     let visitors = set[loop r in requests r.ip]
     let browsers = set[loop r in requests if r.agent.startswith("Mozilla") r.ip]
     printl"\n{visitors.length} visitors, {browsers.length} with a browser"
-    printl"  without a browser: {(visitors - browsers).sorted().join(" ")}"
+    printl"  without a browser: {(visitors - browsers).sorted.join(" ")}"
 
     # a client with three or more failed logins is suspicious
     let failures:dict<string int> = []
@@ -109,7 +109,7 @@ main = () => {
     }
     loop name in agents.keys.sorted() {
         let methods = agents.get(name) ?? set[]
-        printl"  {fmt'<16'(name)} {methods.sorted().join(",")}"
+        printl"  {fmt'<16'(name)} {methods.sorted.join(",")}"
     }
 
     log.unlink or_throw;

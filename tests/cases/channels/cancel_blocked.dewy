@@ -5,7 +5,7 @@
 Failed:type = type of error
 waiter = (c:Channel<int64> waiting:Atomic<int64>):>int64 | Closed | Canceled => {
     waiting.store(1)
-    let v = c.receive() or_throw
+    let v = c.receive or_throw
     v
 }
 filler = (c:Channel<int64> filled:Atomic<int64>):>int64 | Unsent<int64> => {
@@ -20,7 +20,7 @@ filler = (c:Channel<int64> filled:Atomic<int64>):>int64 | Unsent<int64> => {
 # (it fails once the waiter has started and the filler has filled the channel: a task that
 # starts after its group is canceled is skipped, and a canceled send gives Canceled at once)
 quitter = (waiting:Atomic<int64> filled:Atomic<int64>):>void | Failed | Canceled => {
-    loop waiting.load() =? 0 or filled.load() =? 0 { sleep(1ms) or_throw }
+    loop waiting.load =? 0 or filled.load =? 0 { sleep(1ms) or_throw }
     sleep(0.01s) or_throw
     return Failed
 }
@@ -40,15 +40,15 @@ main = () => {
         _ => printl"send not canceled"
     }
     # (the full channel kept what was sent before the send waited)
-    printl"kept: {full.receive()} {full.receive()}"
+    printl"kept: {full.receive} {full.receive}"
     # Level-triggered: in a canceled group, every later wait gives Canceled, even one that
     # would not wait; the value stays for a receive outside it.
     empty.send(7) or_throw
     let gave_canceled = false
     concurrent g {
         cancel(g)
-        gave_canceled = empty.receive() is? Canceled
+        gave_canceled = empty.receive is? Canceled
     }
     printl"in the canceled group: {gave_canceled}"
-    printl"after it: {empty.receive()}"
+    printl"after it: {empty.receive}"
 }

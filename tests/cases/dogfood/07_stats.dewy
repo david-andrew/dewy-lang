@@ -17,7 +17,7 @@ variance = (xs:array<float64>):>float64 => {
 stddev = (xs:array<float64>):>float64 => sqrt(variance(xs))
 
 median = (xs:array<float64>):>float64 => {
-    let s = xs.sorted()
+    let s = xs.sorted
     let n = s.length
     if n % 2 =? 1 { return s[n // 2] }
     return (s[n//2 - 1] + s[n//2]) / 2
@@ -83,7 +83,7 @@ main = () => {
     let weights:array<float64> = [52.0 58.0 63.0 66.0 72.0 77.0 85.0]
     printl("heights: mean={fmt'.2f'(mean(heights))} median={median(heights)} sd={fmt'.3f'(stddev(heights))}")
     printl("weights: mean={fmt'.2f'(mean(weights))} median={median(weights)} sd={fmt'.3f'(stddev(weights))}")
-    printl("min/max weight: {weights.min()} / {weights.max()}")
+    printl("min/max weight: {weights.min} / {weights.max}")
     printl("correlation: {fmt'.4f'(correlation(heights weights))}")
     let fit = linear_fit(heights weights)
     printl("fit: weight = {fmt'.3f'(fit.slope)} * height + {fmt'.2f'(fit.intercept)}  (r^2={fmt'.4f'(fit.r2)})")
