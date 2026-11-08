@@ -47,6 +47,11 @@ Calls (corrected 2026-10-23):
   `(f)(x)`, `(f)[1 2]`, `(p)"..."`, `(p)r"..."`, like `f[1 2]` and `printl'...'`;
 - a parenthesized callable followed by a name or number is an error ("write
   `f(x)`"), as is a parenthesized non-number (`(s)x` for a string `s`);
+- a quoted call's result followed by a name or number needs parentheses:
+  write `g'.2f'(x)`, including inside another call such as `printl(...)`;
+- inside string interpolation, `{fmt'.2f'x}` is the decided shorthand for
+  `{fmt'.2f'(x)}` when the value is a bare name. Outside interpolation, or
+  for a larger value expression, use the parenthesized call;
 - a member or index right after a call's parentheses (`a(x).abs()`, `a(x)[i]`)
   is rejected only when `a` is a number, where it would bind to the group, not
   the product (idiomatic: `abs(a(x))`). With a callable `a` it is an ordinary

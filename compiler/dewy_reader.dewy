@@ -3590,6 +3590,25 @@ rd_dc_expr=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>
                 juxt_head = false
                 continue
             }
+            if left =? last_call and reader_nodes[left].kind =? 'call' and (pk =? 'quoted' or pk =? 'rawquoted') and op not=? 'lparen' {
+                let callee=int64(reader_nodes[left].a)
+                # The decided formatting shorthand is local to interpolation.
+                if reader_ctx.reader.dn_in_interpolation >? 0 and token.kind =? 'identifier' and op =? 'none' and reader_nodes[callee].kind =? 'ident' and rd_name_of(@reader_ctx int64(reader_nodes[callee].name)) =? "fmt" {
+                    let arg=rd_dc_atom(@reader_ctx @reader_nodes)
+                    if arg =? 0 {return 0}
+                    let n=node_mk(@reader_nodes 'call' pos)
+                    reader_nodes[n].a=int32(left)
+                    node_set_list(@reader_nodes @reader_ctx.stores.lists[0] n [arg]);
+                    left=n
+                    last_call=n
+                    juxt_head=false
+                    continue
+                }
+                let head=reader_ctx.stores.host[0].bytes_slice(reader_ctx.source opening.start token.start)
+                let argument=reader_ctx.stores.host[0].bytes_slice(reader_ctx.source token.start token.stop)
+                rd_dc_report(@reader_ctx pos "a quoted callable followed by a name or number needs parentheses: write `{head}({argument})`");
+                return 0
+            }
             if ((op not=? 'lparen') and dn_juxt_excluded(@reader_ctx.tokens reader_ctx.at)) {
                 return rd_dc_juxt_mistake(@reader_ctx)
             }

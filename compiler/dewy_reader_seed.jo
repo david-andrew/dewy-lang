@@ -1294,6 +1294,23 @@ rt_dc_expr = (minimum: int) -> int:
                 add_flag(left, NF_JUXT)
                 juxt_head = false
                 continue
+            if left == last_call and nodes[left].kind == .call and (pk == .quoted or pk == .rawquoted) and op != .lparen:
+                callee = int(nodes[left].a)
+                # The decided formatting shorthand is local to interpolation.
+                if dc_parser.reader.dn_in_interpolation > 0 and token.kind == .identifier and op == .none and nodes[callee].kind == .ident and name_of(int(nodes[callee].name)) == "fmt":
+                    arg = rt_dc_atom()
+                    if arg == 0: return 0
+                    n = mk(.call, pos)
+                    nodes[n].a = i32(left)
+                    set_list(n, [arg])
+                    left = n
+                    last_call = n
+                    juxt_head = false
+                    continue
+                head = dc_parser.source[opening.start..token.start)
+                argument = dc_parser.source[token.start..token.stop)
+                rt_dc_report(pos, "a quoted callable followed by a name or number needs parentheses: write `{head}({argument})`")
+                return 0
             if op != .lparen and dn_juxt_excluded(dc_parser.tokens, dc_parser.at): return rt_dc_juxt_mistake()
         if op == .dot and minimum <= 170:
             dc_parser.at += 1
