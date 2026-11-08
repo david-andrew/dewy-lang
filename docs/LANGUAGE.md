@@ -4023,7 +4023,8 @@ sockets. The game library's WebSocket messages (`net.listen`, `net.connect`,
 ## Foreign functions
 
 A function whose body is the metatag `$extern` is a C function. Its signature is
-the C one: fixed-width numbers, `bool`, raw pointers `ptr<T>`, and as
+the C one: fixed-width numbers, `bool`, raw pointers `ptr<T>`, C structs (records
+with C's layout, below), and as
 parameters also strings (passed as a zero-terminated `char *`) and function types
 (C function pointers). `int` is rejected, since its size is not fixed. Optional
 keyword arguments give the C name and the library:
@@ -4067,6 +4068,24 @@ main = ():>void => $unsafe {
     if now.length >? 0 { printl(now[0].seconds) }
 }
 ```
+
+Such a record also crosses by value, as C's struct: an `$extern` parameter or
+result of type `Vec2:type = [x:float64 y:float64]` is C's `Vec2` argument or
+result, passed in registers or memory as the C compiler would (System V on
+x86-64 Linux, AAPCS64 on arm64), whatever its size:
+
+```dewy
+DivT:type = [quot:int32 rem:int32]
+div = (numerator:int32 denominator:int32):>DivT => $extern
+main = ():>void => $unsafe {
+    let d = div(47 5)
+    printl(d.quot d.rem)   # 9 2
+}
+```
+
+Not yet on Windows, in a web build, as an argument to a variadic C function,
+in a C function type or in an `$export` function: pass a `ptr<T>` there. On
+macOS a struct must still fit in the argument registers.
 
 `size_of<T>` and `align_of<T>` give a type's size and alignment in bytes, read
 like an integer literal fixed at compile time. For a record with C's layout they

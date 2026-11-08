@@ -1,0 +1,12 @@
+# modes: native native-release
+# C's div returns a struct of two ints by value: div_t is [quot rem].
+DivT:type = [quot:int32 rem:int32]
+div = (numerator:int32 denominator:int32):>DivT => $extern
+LDivT:type = [quot:int64 rem:int64]
+ldiv = (numerator:int64 denominator:int64):>LDivT => $extern
+main = ():>void => $unsafe {
+    let d = div(47 5)
+    printl(d.quot d.rem)
+    let l = ldiv(-100000000007 10)
+    printl(l.quot l.rem)
+}

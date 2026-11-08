@@ -52,9 +52,16 @@ ffi_check_type = (t0: int, pos: int, extern_: bool, param: bool):
         if extern_: return
         fatal(pos, "`$export` takes and returns `ptr<T>` but not yet `ptr<T>?`: C callers would see an optional's layout")
     if k == .str_ and extern_ and param: return
+    if k == .struct_ and extern_:
+        fields_seen: {int: bool}
+        why = ffi_c_layout(t, fields_seen)
+        if why != "": fatal(pos, "{dt(t)} has no C layout ({why}): a C struct passed by value holds fixed-width numbers, bools, pointers, or records of them")
+        if target_wasm: fatal(pos, "a C struct cannot cross by value to a web page: pass a `ptr<{dt(t)}>` to it")
+        if target_windows: fatal(pos, "C structs cannot cross by value on Windows yet: pass a `ptr<{dt(t)}>` to it")
+        return
     what = dt(t)
     if k == .str_ and extern_: fatal(pos, "a C function cannot return a string: declare its result as `ptr<uint8>` and copy the bytes it points to")
-    more = if extern_: ", `ptr<T>?`, strings (a `char *`) and function types (C function pointers)" else: ""
+    more = if extern_: ", `ptr<T>?`, strings (a `char *`), function types (C function pointers) and records with C's layout (C structs)" else: ""
     fatal(pos, "{what} cannot cross the C boundary: {side} takes and returns fixed-width numbers, bools, `ptr<T>`{more}")
 
 

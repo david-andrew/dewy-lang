@@ -2,14 +2,15 @@ from p"lower_primitives.dewy" import (e_daddr e_gaddr rt str_data)
 from p"lower_functions.dewy" import (begin_fn)
 $runtime_checks
 from p"lower.jo" import (VC_AGG VC_INT data_size ffi_keys ffi_offs ffi_slot late_binding mac_imports)
-from p"ir.jo" import (VF VI VS ir)
-from p"types.jo" import (align_up prune tkind tsize types)
+from p"ir.jo" import (M_FLOAT VF VI VS ir)
+from p"types.jo" import (align_up fields prune structs tkind tsize types)
+from p"type_ops.dewy" import (fixed_len)
 from p"lower_storage.dewy" import (endc iff norm opt_has ret_vt vc vt_of)
 from p"util.jo" import (fatal name_of)
-from p"check.jo" import (fns target_macos target_windows)
+from p"check.jo" import (fns target_arm64 target_macos target_windows)
 from p"ast.jo" import (nodes)
 from p"pe_format.dewy" import (pe_imports)
-from p"ir_builders.dewy" import (e_bin e_call1 e_call2 e_calli e_iconst e_load e_mov e_ret e_store e_zero emit vreg)
+from p"ir_builders.dewy" import (e_bin e_call1 e_call2 e_calli e_copy e_fconst e_iconst e_load e_mov e_ret e_slot e_store e_zero emit new_slot vreg)
 # Direct recursive lowering; shared state has one owner in lower.jo.
 LFFWord:type=int64<overflow='wrap'>
 mac_bound_lib=(lib:string):>string=>$unsafe {
@@ -27,6 +28,10 @@ lower_extern_thunk=(lf:LFFWord f:LFFWord):>void=>$unsafe {
     let nm=name_of(LFFWord(nodes.ptr[LFFWord(fns.ptr[f].decl)].name))
     if (fns.ptr[f].csym).length >? 0 {nm=fns.ptr[f].csym}
     let ret:LFFWord=LFFWord(fns.ptr[f].ret)
+    if c_struct(ret) or c_struct_params(f) {
+        c_struct_thunk(f lib nm ret);
+        return
+    }
     # (Dewy's ptr<T>?: an optional held as a value, null to C when it is none)
     let sret=if c_nullable(ret) {vreg(VI)} else {-1}
     let ps:array<int64>=[]
@@ -59,6 +64,22 @@ lower_extern_thunk=(lf:LFFWord f:LFFWord):>void=>$unsafe {
     }
     if vc(ret) =? VC_AGG and sret <? 0 {fatal(nodes.ptr[LFFWord(fns.ptr[f].decl)].pos "C functions can only return scalars or pointers");}
     ir.ret = ret_vt(ret);
+    let fp=extern_target(f lib nm)
+    let r=e_calli(fp cps (if sret >=? 0 {VI} else {ret_vt(ret)}) true)
+    # (C's variadic arguments: on Apple's arm64 they go on the stack)
+    if fns.ptr[f].cvariadic >? 0 {ir.code.ptr[ir.code.length - 1].imm = LFFWord(fns.ptr[f].cvariadic);}
+    if sret >=? 0 {
+        e_zero(sret tsize(ret));
+        e_store(sret 0 r 8);
+        e_store(sret 8 e_bin('ne' VI r e_iconst(0)) 1);
+        e_ret(sret);
+        return
+    }
+    if vc(ret) =? VC_INT {r=norm(r ret)}
+    e_ret(r);
+}
+# The C function's address: resolved on first use into its slot (or imported).
+extern_target=(f:LFFWord lib:string nm:string):>int64=>$unsafe {
     data_size=align_up(data_size 8)
     let slot=data_size
     data_size += 8;
@@ -89,9 +110,280 @@ lower_extern_thunk=(lf:LFFWord f:LFFWord):>void=>$unsafe {
         e_store(e_gaddr(slot) 0 fp 8);
         endc();
     }
-    let r=e_calli(fp cps (if sret >=? 0 {VI} else {ret_vt(ret)}) true)
-    # (C's variadic arguments: on Apple's arm64 they go on the stack)
-    if fns.ptr[f].cvariadic >? 0 {ir.code.ptr[ir.code.length - 1].imm = LFFWord(fns.ptr[f].cvariadic);}
+    fp
+}
+
+# ---------- C structs by value ----------
+# A record with C's layout crosses as C's struct: System V x86-64 and AAPCS64
+# classification decides which registers carry it, else the stack or a copy in
+# memory. The thunk places every C argument itself and hands the backend scalar
+# words in the order it assigns registers; a struct result comes back through a
+# frame slot the backend fills from the result registers (`callc` imm < 0).
+c_struct=(t0:LFFWord):>bool=>$unsafe {
+    let t=prune(t0)
+    vc(t) =? VC_AGG and not c_nullable(t) and types.ptr[t].kind =? 'struct_'
+}
+c_struct_params=(f:LFFWord):>bool=>$unsafe {
+    loop t in fns.ptr[f].ptypes {
+        if c_struct(t) {return true}
+    }
+    false
+}
+# The scalar leaves of a C-layout type: [offset size class], class 0 an integer
+# or pointer, 1 float32, 2 float64.
+c_leaves=(t0:LFFWord base:LFFWord @out:array<[int64 int64 int64]>):>void=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    if k =? 'struct_' {
+        let si=LFFWord(types.ptr[t].st)
+        loop i in [0..LFFWord(structs.ptr[si].nfields)) {
+            let fi=LFFWord(structs.ptr[si].fields) + i
+            c_leaves(LFFWord(fields.ptr[fi].type) base + LFFWord(fields.ptr[fi].offset) @out)
+        }
+        return
+    }
+    if k =? 'fixed' {
+        let e=LFFWord(types.ptr[t].elem)
+        loop i in [0..fixed_len(t)) {c_leaves(e base + i * tsize(e) @out)}
+        return
+    }
+    let size=tsize(t)
+    if k =? 'float_' {
+        out.push([base size if size =? 4 {1} else {2}])
+        return
+    }
+    out.push([base size 0])
+}
+# AAPCS64's homogeneous floating-point aggregate: 1 to 4 floats of one width.
+# Its class (1 float32, 2 float64), or 0.
+c_hfa=(leaves:array<[int64 int64 int64]>):>int64=>$unsafe {
+    if leaves.length =? 0 or leaves.length >? 4 {return 0}
+    let c=leaves[0][2]
+    if c =? 0 {return 0}
+    loop l in leaves {
+        if l[2] not=? c {return 0}
+    }
+    c
+}
+# System V: is eightbyte e of the struct all floats (SSE class)?
+c_sse=(leaves:array<[int64 int64 int64]>  e:LFFWord):>bool=>$unsafe {
+    loop l in leaves {
+        if l[0] >=? 8 * e and l[0] <? 8 * e + 8 and l[2] =? 0 {return false}
+    }
+    true
+}
+# (the C arguments placed so far: each word's vreg and where it goes, 0 an
+# integer register, 1 a floating-point one, 2 the stack)
+let cs_words:array<int64>=[]
+let cs_where:array<int64>=[]
+let cs_ngr:int64=0
+let cs_nfr:int64=0
+cs_put=(v:LFFWord where:LFFWord):>void=>$unsafe {
+    cs_words.push(v);
+    cs_where.push(where);
+}
+cs_int=(v:LFFWord gmax:LFFWord):>void=>$unsafe {
+    if cs_ngr <? gmax {
+        cs_ngr += 1
+        cs_put(v 0);
+    }
+    else {cs_put(v 2);}
+}
+cs_float=(v:LFFWord):>void=>$unsafe {
+    if cs_nfr <? 8 {
+        cs_nfr += 1
+        cs_put(v 1);
+    }
+    else {cs_put(v 2);}
+}
+# A zeroed copy of the struct at p, padded to whole words, in a frame slot.
+cs_copy=(p:LFFWord size:LFFWord):>int64=>$unsafe {
+    let words=align_up(size 8)
+    let a=e_slot(new_slot(words 8))
+    e_zero(a words);
+    e_copy(a p size);
+    a
+}
+cs_stack_words=(p:LFFWord size:LFFWord):>void=>$unsafe {
+    let a=cs_copy(p size)
+    loop w in [0..align_up(size 8) // 8) {cs_put(e_load(VI a 8 * w 8) 2);}
+    return
+}
+# One struct argument, p pointing at it.
+cs_struct=(t:LFFWord p:LFFWord arm:bool):>void=>$unsafe {
+    let size=tsize(t)
+    let leaves:array<[int64 int64 int64]>=[]
+    c_leaves(t 0 @leaves);
+    if arm {
+        let h=c_hfa(leaves)
+        if h >? 0 {
+            if cs_nfr + leaves.length <=? 8 {
+                loop l in leaves {
+                    cs_nfr += 1
+                    cs_put(e_load(if h =? 1 {VS} else {VF} p l[0] (l[1] | M_FLOAT)) 1);
+                }
+            }
+            else {
+                cs_nfr = 8
+                cs_stack_words(p size);
+            }
+            return
+        }
+        # (larger: C gets a pointer to a copy it may change)
+        if size >? 16 {
+            cs_int(cs_copy(p size) 8);
+            return
+        }
+        let n=align_up(size 8) // 8
+        if cs_ngr + n <=? 8 {
+            let a=cs_copy(p size)
+            loop w in [0..n) {
+                cs_ngr += 1
+                cs_put(e_load(VI a 8 * w 8) 0);
+            }
+        }
+        else {
+            cs_ngr = 8
+            cs_stack_words(p size);
+        }
+        return
+    }
+    # (System V: larger structs are MEMORY class, copied onto the stack)
+    if size >? 16 {
+        cs_stack_words(p size);
+        return
+    }
+    let n=align_up(size 8) // 8
+    let nf:LFFWord=0
+    loop e in [0..n) {
+        if c_sse(leaves e) {nf += 1}
+    }
+    if cs_ngr + n - nf <=? 6 and cs_nfr + nf <=? 8 {
+        let a=cs_copy(p size)
+        loop e in [0..n) {
+            if c_sse(leaves e) {
+                cs_nfr += 1
+                cs_put(e_load(VF a 8 * e (8 | M_FLOAT)) 1);
+            }
+            else {
+                cs_ngr += 1
+                cs_put(e_load(VI a 8 * e 8) 0);
+            }
+        }
+    }
+    else {cs_stack_words(p size);}
+}
+# How the backend stores a struct result's registers into slot s: per register
+# 0 the next integer one (8 bytes), 1 the next floating-point one (8 bytes), 2
+# a float32 one (4 bytes); `x8` passes the slot's address in x8 instead.
+cs_result_code=(entries:array<int64> x8:bool s:LFFWord):>int64=>$unsafe {
+    let code=entries.length
+    loop i in [0..entries.length) and e in entries {code=code | (e << (3 + 2 * i))}
+    if x8 {code=code | 2048}
+    -(code | (s << 16)) - 1
+}
+c_struct_thunk=(f:LFFWord lib:string nm:string ret:LFFWord):>void=>$unsafe {
+    let pos=nodes.ptr[LFFWord(fns.ptr[f].decl)].pos
+    # (web pages and Windows are refused by its signature's check: ffi_checks.dewy)
+    if fns.ptr[f].cvariadic >? 0 {fatal(pos "a variadic C function cannot take or return a struct by value: pass a `ptr<T>` to it");}
+    let arm=target_arm64 or target_macos
+    let gmax:LFFWord=if arm {8} else {6}
+    let agg_ret=c_struct(ret)
+    let sret=if agg_ret or c_nullable(ret) {vreg(VI)} else {-1}
+    let ps:array<int64>=[]
+    loop t in fns.ptr[f].ptypes {
+        if tkind(t) =? 'array' {fatal(pos "a C function cannot take an array: declare the parameter as a pointer (*f32) and pass data(xs)");}
+        if vc(t) =? VC_AGG and not c_nullable(t) and not c_struct(t) {fatal(pos "C functions can only take scalars, pointers or C structs");}
+        ps.push(vreg(vt_of(t)));
+    }
+    ir.nparams = ir.vtypes.length;
+    if vc(ret) =? VC_AGG and sret <? 0 {fatal(pos "C functions can only return scalars, pointers or C structs");}
+    ir.ret = if agg_ret {-1} else {ret_vt(ret)}
+    cs_words=[]
+    cs_where=[]
+    cs_ngr=0
+    cs_nfr=0
+    # The result: in registers when small enough, else C writes it to memory
+    # whose address goes first (System V) or in x8 (AAPCS64).
+    let rslot:LFFWord=-1
+    let rcode:LFFWord=0
+    if agg_ret {
+        let size=tsize(ret)
+        let leaves:array<[int64 int64 int64]>=[]
+        c_leaves(ret 0 @leaves);
+        rslot=new_slot(max(align_up(size 8) 16) 8)
+        let entries:array<int64>=[]
+        let h=if arm {c_hfa(leaves)} else {0}
+        if h >? 0 {
+            loop l in leaves {entries.push(if h =? 1 {2} else {1});}
+        }
+        else if size <=? 16 {
+            loop e in [0..align_up(size 8) // 8) {entries.push(if not arm and c_sse(leaves e) {1} else {0});}
+        }
+        if entries.length >? 0 {rcode=cs_result_code(entries false rslot)}
+        else if arm {rcode=cs_result_code([] true rslot)}
+        else {cs_int(e_slot(rslot) gmax);}
+    }
+    loop i in [0..fns.ptr[f].ptypes.length) and t in fns.ptr[f].ptypes {
+        if c_struct(t) {cs_struct(t ps.ptr[i] arm);}
+        else if c_nullable(t) {
+            let p=vreg(VI)
+            e_mov(p e_iconst(0));
+            iff(opt_has(ps.ptr[i] LFFWord(types.ptr[prune(t)].elem)));
+            e_mov(p e_load(VI ps.ptr[i] 0 8));
+            endc();
+            cs_int(p gmax);
+        }
+        else if tkind(t) =? 'str_' {cs_int(e_call1(rt("__c_str") ps.ptr[i] VI) gmax);}
+        else if vt_of(t) =? VI {cs_int(ps.ptr[i] gmax);}
+        else {cs_float(ps.ptr[i]);}
+    }
+    # The backend gives registers in order within each class and puts the rest
+    # on the stack in order: with stack words, fill both register files first.
+    let stacked=false
+    loop w in cs_where {
+        if w =? 2 {stacked=true}
+    }
+    if stacked and target_macos {fatal(pos "C structs that reach the stack are not supported on macOS yet: pass a `ptr<T>` to it");}
+    let cps:array<int64>=[]
+    if not stacked {cps=cs_words}
+    else {
+        let ng:LFFWord=0
+        let nf:LFFWord=0
+        loop i in [0..cs_words.length) and w in cs_where {
+            if w =? 0 {
+                cps.push(cs_words[i]);
+                ng += 1
+            }
+        }
+        loop ng <? gmax {
+            cps.push(e_iconst(0));
+            ng += 1
+        }
+        loop i in [0..cs_words.length) and w in cs_where {
+            if w =? 1 {
+                cps.push(cs_words[i]);
+                nf += 1
+            }
+        }
+        loop nf <? 8 {
+            cps.push(e_fconst(0.0 VF));
+            nf += 1
+        }
+        loop i in [0..cs_words.length) and w in cs_where {
+            if w =? 2 {cps.push(cs_words[i]);}
+        }
+    }
+    # (the result slot goes last, for the backend alone: C does not see it)
+    if rcode not=? 0 {cps.push(e_slot(rslot));}
+    let fp=extern_target(f lib nm)
+    let r=e_calli(fp cps (if agg_ret {-1} else if c_nullable(ret) {VI} else {ret_vt(ret)}) true)
+    if rcode not=? 0 {ir.code.ptr[ir.code.length - 1].imm = rcode;}
+    if agg_ret {
+        e_copy(sret e_slot(rslot) tsize(ret));
+        e_ret(sret);
+        return
+    }
     if sret >=? 0 {
         e_zero(sret tsize(ret));
         e_store(sret 0 r 8);

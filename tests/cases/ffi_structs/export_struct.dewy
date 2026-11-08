@@ -1,0 +1,5 @@
+# `$export` functions take and return scalars and pointers only.
+Pair:type = [a:int32 b:int32]
+$export
+total = (p:Pair):>int32 => p.a + p.b
+main = ():>void => printl(total(Pair[1 2]))

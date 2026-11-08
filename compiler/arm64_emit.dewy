@@ -322,6 +322,27 @@ a_call_args=(ins:Ins):>void=>$unsafe {
         }
     }
 }
+# A C struct result in x0/x1 or v0-v3, stored in order into its slot.
+a_store_c_result=(code:ArmWord):>void=>$unsafe {
+    let off=a_slot_view[code >> 16]
+    let ni:ArmWord=0
+    let nf:ArmWord=0
+    loop i in [0..(code & 7)) {
+        let e=(code >> (3 + 2 * i)) & 3
+        if e =? 0 {
+            a_mem(false  ni  A_SP  off  8  false  false)
+            ni += 1
+            off += 8
+        }
+        else {
+            let size:ArmWord=if e =? 2 {4} else {8}
+            a_mem(false  nf  A_SP  off  size  false  true)
+            nf += 1
+            off += size
+        }
+    }
+    return
+}
 a_result=(ins:Ins):>void=>$unsafe {
     let d=ArmWord(ins.dst)
     if d <? 0 or vloc[d] =? LOC_NONE {
@@ -1114,10 +1135,20 @@ arm64_ins=(pos:ArmWord ins:Ins):>void=>$unsafe {
             }
         }
         <'calli' | 'callc'> => {
-            a_call_args(ins)
+            # (a C struct result: its slot's address is the last operand, not C's; lower_ffi.dewy)
+            let result_code:ArmWord=if op =? 'callc' and ins.imm <? 0 {-ins.imm - 1} else {0}
+            if result_code not=? 0 {
+                let c_args=ins
+                c_args.b = int32<overflow='wrap'>(ArmWord(ins.b) - 1)
+                a_call_args(c_args)
+            }
+            else {a_call_args(ins)}
             a_ld(16  ArmWord(ins.c))
+            # (a larger one is written where x8 points)
+            if result_code & 2048 not=? 0 {a_add_imm(8  A_SP  a_slot_view[result_code >> 16])}
             a_blr(16)
             a_call_site(ins)
+            if result_code not=? 0 {a_store_c_result(result_code)}
             a_result(ins)
         }
         <'syscall'> => {

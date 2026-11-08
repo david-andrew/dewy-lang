@@ -3137,6 +3137,9 @@ x_emit_calli=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     let op=ins[0].op
     let a=XWord(ins[0].a)
     let bb=XWord(ins[0].b)
+    # (a C struct result: its slot's address is the last operand, not C's; lower_ffi.dewy)
+    let result_code:XWord=if op =? 'callc' and ins[0].imm <? 0 {-ins[0].imm - 1} else {0}
+    if result_code not=? 0 {bb -= 1}
     if op =? 'callc' and xe_windows {emit_call_args_win64(a  bb  XWord(ins[0].c)  R11)}
     else {
         emit_call_args(a  bb  XWord(ins[0].c)  R11)
@@ -3154,7 +3157,27 @@ x_emit_calli=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     b24(0xD3FF41) # call r11
     call_site(ins[0])
     pop_call_stack()
+    if result_code not=? 0 {x_store_c_result(result_code)}
     store_result(ins[0])
+}
+# A C struct result in rax/rdx and xmm0/xmm1, stored in order into its slot.
+x_store_c_result=(code:XWord):>void=>$unsafe {
+    let off=xe_slots[code >> 16]
+    let ni:XWord=0
+    let nf:XWord=0
+    loop i in [0..(code & 7)) {
+        let e=(code >> (3 + 2 * i)) & 3
+        if e =? 0 {
+            mov_mr(RBP  off  if ni =? 0 {RAX} else {RDX})
+            ni += 1
+        }
+        else {
+            sse_rm(0xF2  0x11  nf  RBP  off) # movsd [rbp + off], xmm(nf)
+            nf += 1
+        }
+        off += 8
+    }
+    return
 }
 x_emit_syscall=(pos:XWord ins:ptr<Ins>):>void=>$unsafe {
     let d=XWord(ins[0].dst)

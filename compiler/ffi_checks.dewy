@@ -2,7 +2,7 @@ $runtime_checks
 from p"ast.jo" import (NF_EXTERN has_flag kid nodes)
 from p"types.jo" import (T_MATH_INT T_VOID fields prune structs targ tkind types)
 from p"type_ops.dewy" import (dt)
-from p"check.jo" import (check_struct_fields fns)
+from p"check.jo" import (check_struct_fields fns target_wasm target_windows)
 from p"directives.jo" import (dir_scopes dir_value)
 from p"util.jo" import (fatal files intern name_of pos_file)
 from p"ffi.jo" import (ffi_unsafe_name)
@@ -67,9 +67,18 @@ ffi_check_nested_type=(t0:MoveWord pos:MoveWord extern_:bool param:bool nested:b
         fatal(pos "`$export` takes and returns `ptr<T>` but not yet `ptr<T>?`: C callers would see an optional's layout");
     }
     if k =? 'str_' and extern_ and param {return}
+    # (a record with C's layout is C's struct by value: compiler/lower_ffi.dewy)
+    if k =? 'struct_' and extern_ and not nested {
+        let fields_seen:dict<int64 bool>=dict<int64 bool>()
+        let why=ffi_c_layout(t @fields_seen)
+        if why not=? "" {fatal(pos "{dt(t)} has no C layout ({why}): a C struct passed by value holds fixed-width numbers, bools, pointers, or records of them");}
+        if target_wasm {fatal(pos "a C struct cannot cross by value to a web page: pass a `ptr<{dt(t)}>` to it");}
+        if target_windows {fatal(pos "C structs cannot cross by value on Windows yet: pass a `ptr<{dt(t)}>` to it");}
+        return
+    }
     let what=dt(t)
     if k =? 'str_' and extern_ {fatal(pos "a C function cannot return a string: declare its result as `ptr<uint8>` and copy the bytes it points to");}
-    let more=if extern_ {", `ptr<T>?`, strings (a `char *`) and function types (C function pointers)"} else {""}
+    let more=if extern_ and not nested {", `ptr<T>?`, strings (a `char *`), function types (C function pointers) and records with C's layout (C structs)"} else if extern_ {", `ptr<T>?`, strings (a `char *`) and function types (C function pointers)"} else {""}
     fatal(pos "{what} cannot cross the C boundary: {side} takes and returns fixed-width numbers, bools, `ptr<T>`{more}");
 }
 ffi_check_pointee=(t0:MoveWord pos:MoveWord):>void=>$unsafe {

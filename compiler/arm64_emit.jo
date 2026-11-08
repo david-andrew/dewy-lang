@@ -217,6 +217,22 @@ a_call_args = (ins: Ins):
                 a_mem(false, 16, A_SP, 8 * ns, 8, false, true)
                 ns += 1
 
+a_store_c_result = (code: int):
+    off = a_slots[code >> 16]
+    ni = 0
+    nf = 0
+    loop i in [0..(code & 7)):
+        e = (code >> (3 + 2 * i)) & 3
+        if e == 0:
+            a_mem(false, ni, A_SP, off, 8, false, false)
+            ni += 1
+            off += 8
+        else:
+            size = if e == 2: 4 else: 8
+            a_mem(false, nf, A_SP, off, size, false, true)
+            nf += 1
+            off += size
+
 a_result = (ins: Ins):
     d = int(ins.dst)
     if d < 0 or vloc[d] == LOC_NONE: return
@@ -752,10 +768,18 @@ arm64_ins = (pos: int, ins: Ins):
                 a_call_site(ins)
                 a_result(ins)
         calli, callc:
-            a_call_args(ins)
+            # (a C struct result: its slot's address is the last operand, not C's; lower_ffi.dewy)
+            result_code = if op == .callc and ins.imm < 0: -ins.imm - 1 else: 0
+            if result_code != 0:
+                c_args = ins
+                c_args.b = i32(int(ins.b) - 1)
+                a_call_args(c_args)
+            else: a_call_args(ins)
             a_ld(16, int(ins.c))
+            if result_code & 2048 != 0: a_add_imm(8, A_SP, a_slots[result_code >> 16])
             a_blr(16)
             a_call_site(ins)
+            if result_code != 0: a_store_c_result(result_code)
             a_result(ins)
         syscall: a_syscall(ins)
         intr:

@@ -1,0 +1,4 @@
+# A record holding a string has no C layout, so it cannot cross by value.
+Named:type = [name:string id:int32]
+show = (n:Named):>int32 => $extern(lib='m')
+main = ():>void => $unsafe printl(show(Named["a" 1]))

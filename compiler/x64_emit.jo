@@ -2642,6 +2642,9 @@ x_emit_calli = (pos: int, ins: *Ins):
     op = ins.op
     a = int(ins.a)
     bb = int(ins.b)
+    # (a C struct result: its slot's address is the last operand, not C's; lower_ffi.dewy)
+    result_code = if op == .callc and ins.imm < 0: -ins.imm - 1 else: 0
+    if result_code != 0: bb -= 1
     if op == .callc and xe_windows: emit_call_args_win64(a, bb, int(ins.c), R11)
     else:
         emit_call_args(a, bb, int(ins.c), R11)
@@ -2656,7 +2659,23 @@ x_emit_calli = (pos: int, ins: *Ins):
     b24(0xD3FF41)     # call r11
     call_site(ins[0])
     pop_call_stack()
+    if result_code != 0: x_store_c_result(result_code)
     store_result(ins[0])
+
+x_store_c_result = (code: int):
+    off = slot_off[code >> 16]
+    ni = 0
+    nf = 0
+    loop i in [0..(code & 7)):
+        e = (code >> (3 + 2 * i)) & 3
+        if e == 0:
+            r = if ni == 0: RAX else: RDX
+            mov_mr(RBP, off, r)
+            ni += 1
+        else:
+            sse_rm(0xF2, 0x11, nf, RBP, off)  # movsd [rbp + off], xmm(nf)
+            nf += 1
+        off += 8
 
 x_emit_syscall = (pos: int, ins: *Ins):
     d = int(ins.dst)

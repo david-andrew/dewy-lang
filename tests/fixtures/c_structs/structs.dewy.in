@@ -1,0 +1,100 @@
+# Dewy records with C layout passed to and returned from C by value
+# (test_c_structs.py: structs.c is the C side).
+S1:type = [a:int32]
+S1_sum = (s:S1):>int64 => $extern(lib=LIBRARY)
+S1_make = (a:int32):>S1 => $extern(lib=LIBRARY)
+S1_twice = (s:S1):>S1 => $extern(lib=LIBRARY)
+D1:type = [x:float64]
+D1_sum = (s:D1):>int64 => $extern(lib=LIBRARY)
+D1_make = (x:float64):>D1 => $extern(lib=LIBRARY)
+D1_twice = (s:D1):>D1 => $extern(lib=LIBRARY)
+F2:type = [x:float32 y:float32]
+F2_sum = (s:F2):>int64 => $extern(lib=LIBRARY)
+F2_make = (x:float32 y:float32):>F2 => $extern(lib=LIBRARY)
+F2_twice = (s:F2):>F2 => $extern(lib=LIBRARY)
+Vec2:type = [x:float64 y:float64]
+Vec2_sum = (s:Vec2):>int64 => $extern(lib=LIBRARY)
+Vec2_make = (x:float64 y:float64):>Vec2 => $extern(lib=LIBRARY)
+Vec2_twice = (s:Vec2):>Vec2 => $extern(lib=LIBRARY)
+F3:type = [x:float32 y:float32 z:float32]
+F3_sum = (s:F3):>int64 => $extern(lib=LIBRARY)
+F3_make = (x:float32 y:float32 z:float32):>F3 => $extern(lib=LIBRARY)
+F3_twice = (s:F3):>F3 => $extern(lib=LIBRARY)
+D4:type = [a:float64 b:float64 c:float64 d:float64]
+D4_sum = (s:D4):>int64 => $extern(lib=LIBRARY)
+D4_make = (a:float64 b:float64 c:float64 d:float64):>D4 => $extern(lib=LIBRARY)
+D4_twice = (s:D4):>D4 => $extern(lib=LIBRARY)
+IF:type = [i:int32 f:float32]
+IF_sum = (s:IF):>int64 => $extern(lib=LIBRARY)
+IF_make = (i:int32 f:float32):>IF => $extern(lib=LIBRARY)
+IF_twice = (s:IF):>IF => $extern(lib=LIBRARY)
+DI:type = [d:float64 i:int64]
+DI_sum = (s:DI):>int64 => $extern(lib=LIBRARY)
+DI_make = (d:float64 i:int64):>DI => $extern(lib=LIBRARY)
+DI_twice = (s:DI):>DI => $extern(lib=LIBRARY)
+ID:type = [i:int64 d:float64]
+ID_sum = (s:ID):>int64 => $extern(lib=LIBRARY)
+ID_make = (i:int64 d:float64):>ID => $extern(lib=LIBRARY)
+ID_twice = (s:ID):>ID => $extern(lib=LIBRARY)
+B3:type = [a:uint8 b:int16 c:uint8]
+B3_sum = (s:B3):>int64 => $extern(lib=LIBRARY)
+B3_make = (a:uint8 b:int16 c:uint8):>B3 => $extern(lib=LIBRARY)
+B3_twice = (s:B3):>B3 => $extern(lib=LIBRARY)
+Big3:type = [a:int64 b:int64 c:int64]
+Big3_sum = (s:Big3):>int64 => $extern(lib=LIBRARY)
+Big3_make = (a:int64 b:int64 c:int64):>Big3 => $extern(lib=LIBRARY)
+Big3_twice = (s:Big3):>Big3 => $extern(lib=LIBRARY)
+Mix4:type = [a:int32 b:float64 c:int8 d:float32]
+Mix4_sum = (s:Mix4):>int64 => $extern(lib=LIBRARY)
+Mix4_make = (a:int32 b:float64 c:int8 d:float32):>Mix4 => $extern(lib=LIBRARY)
+Mix4_twice = (s:Mix4):>Mix4 => $extern(lib=LIBRARY)
+FID:type = [a:float32 b:int32 c:float64]
+FID_sum = (s:FID):>int64 => $extern(lib=LIBRARY)
+FID_make = (a:float32 b:int32 c:float64):>FID => $extern(lib=LIBRARY)
+FID_twice = (s:FID):>FID => $extern(lib=LIBRARY)
+U2:type = [a:uint16 b:uint8]
+U2_sum = (s:U2):>int64 => $extern(lib=LIBRARY)
+U2_make = (a:uint16 b:uint8):>U2 => $extern(lib=LIBRARY)
+U2_twice = (s:U2):>U2 => $extern(lib=LIBRARY)
+many_vec = (a:Vec2 b:Vec2 c:Vec2 d:Vec2 e:Vec2 f:float64 g:Vec2):>float64 => $extern(lib=LIBRARY)
+many_ints = (a:int64 b:int64 c:int64 d:int64 e:int64 s:B3 g:int64 t:IF h:int64):>int64 => $extern(lib=LIBRARY)
+big_mixed = (k:int32 a:Big3 scale:float64 m:Mix4 b:Big3 f:F3):>int64 => $extern(lib=LIBRARY)
+d4_add = (a:D4 b:D4 c:D4):>D4 => $extern(lib=LIBRARY)
+big_after = (a:int64 b:int64 c:int64 d:int64 e:int64 f:int64 g:int64 x:Big3):>Big3 => $extern(lib=LIBRARY)
+main = ():>void => $unsafe {
+    let s1 = S1_make(7)
+    printl"S1 {S1_sum(s1)} {S1_sum(S1_twice(s1))} {s1.a}"
+    let d1 = D1_make(1.25)
+    printl"D1 {D1_sum(d1)} {D1_sum(D1_twice(d1))} {d1.x}"
+    let f2 = F2_make(1.5 (-2.25))
+    printl"F2 {F2_sum(f2)} {F2_sum(F2_twice(f2))} {f2.x} {f2.y}"
+    let vec2 = Vec2_make(0.5 4.0)
+    printl"Vec2 {Vec2_sum(vec2)} {Vec2_sum(Vec2_twice(vec2))} {vec2.x} {vec2.y}"
+    let f3 = F3_make(1.0 2.5 (-3.0))
+    printl"F3 {F3_sum(f3)} {F3_sum(F3_twice(f3))} {f3.x} {f3.y} {f3.z}"
+    let d4 = D4_make(1.0 2.0 3.5 (-4.0))
+    printl"D4 {D4_sum(d4)} {D4_sum(D4_twice(d4))} {d4.a} {d4.b} {d4.c} {d4.d}"
+    let if_ = IF_make((-9) 0.75)
+    printl"IF {IF_sum(if_)} {IF_sum(IF_twice(if_))} {if_.i} {if_.f}"
+    let di = DI_make(2.5 (-123456789012))
+    printl"DI {DI_sum(di)} {DI_sum(DI_twice(di))} {di.d} {di.i}"
+    let id = ID_make(42 (-0.125))
+    printl"ID {ID_sum(id)} {ID_sum(ID_twice(id))} {id.i} {id.d}"
+    let b3 = B3_make(200 (-300) 17)
+    printl"B3 {B3_sum(b3)} {B3_sum(B3_twice(b3))} {b3.a} {b3.b} {b3.c}"
+    let big3 = Big3_make(1 (-2) 3000000000)
+    printl"Big3 {Big3_sum(big3)} {Big3_sum(Big3_twice(big3))} {big3.a} {big3.b} {big3.c}"
+    let mix4 = Mix4_make((-5) 6.5 (-7) 8.25)
+    printl"Mix4 {Mix4_sum(mix4)} {Mix4_sum(Mix4_twice(mix4))} {mix4.a} {mix4.b} {mix4.c} {mix4.d}"
+    let fid = FID_make(0.5 11 (-1.5))
+    printl"FID {FID_sum(fid)} {FID_sum(FID_twice(fid))} {fid.a} {fid.b} {fid.c}"
+    let u2 = U2_make(65000 9)
+    printl"U2 {U2_sum(u2)} {U2_sum(U2_twice(u2))} {u2.a} {u2.b}"
+    printl(many_vec(vec2 vec2 vec2 vec2 Vec2[1.0 2.0] 3.0 Vec2[4.0 0.5]))
+    printl(many_ints(1 2 3 4 5 b3 7 if_ 9))
+    printl(big_mixed(3 big3 0.5 mix4 Big3[10 20 30] f3))
+    let sum4 = d4_add(d4 d4 D4[0.5 0.5 0.5 0.5])
+    printl"{sum4.a} {sum4.b} {sum4.c} {sum4.d}"
+    let after = big_after(1 2 3 4 5 6 7 big3)
+    printl"{after.a} {after.b} {after.c}"
+}

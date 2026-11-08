@@ -10,6 +10,7 @@ use 'pe_format.dewy'
 use 'lower_functions.dewy'
 use 'lower_primitives.dewy'
 use 'ir_builders.dewy'
+use 'type_ops.dewy'
 
 mac_bound_lib = (lib: str) -> str:
     if starts_with(lib, "/"): return lib
@@ -28,6 +29,9 @@ lower_extern_thunk = (lf: int, f: int):
     nm = name_of(int(nodes[int(fns[f].decl)].name))
     if len(fns[f].csym) > 0: nm = fns[f].csym
     ret = int(fns[f].ret)
+    if c_struct(ret) or c_struct_params(f):
+        c_struct_thunk(f, lib, nm, ret)
+        return
     # (Dewy's ptr<T>?: an optional held as a value, null to C when it is none)
     sret = if c_nullable(ret): vreg(VI) else: -1
     ps: int[]
@@ -56,6 +60,22 @@ lower_extern_thunk = (lf: int, f: int):
         else: cps.push(ps[i])
     if vc(ret) == VC_AGG and sret < 0: fatal(nodes[int(fns[f].decl)].pos, "C functions can only return scalars or pointers")
     ir.ret = ret_vt(ret)
+    fp = extern_target(f, lib, nm)
+    result_type = if sret >= 0: VI else: ret_vt(ret)
+    r = e_calli(fp, cps, result_type, true)
+    # (C's variadic arguments: on Apple's arm64 they go on the stack)
+    if fns[f].cvariadic > 0: ir.code[ir.code.len() - 1].imm = int(fns[f].cvariadic)
+    if sret >= 0:
+        e_zero(sret, tsize(ret))
+        e_store(sret, 0, r, 8)
+        e_store(sret, 8, e_bin(.ne, VI, r, e_iconst(0)), 1)
+        e_ret(sret)
+        return
+    if vc(ret) == VC_INT: r = norm(r, ret)
+    e_ret(r)
+
+
+extern_target = (f: int, lib: str, nm: str) -> int:
     data_size = align_up(data_size, 8)
     slot = data_size
     data_size += 8
@@ -83,10 +103,235 @@ lower_extern_thunk = (lf: int, f: int):
         e_mov(fp, e_call2(rt("__ffi_resolve"), e_daddr(str_data(rlib)), e_daddr(str_data(nm)), VI))
         e_store(e_gaddr(slot), 0, fp, 8)
         endc()
-    result_type = if sret >= 0: VI else: ret_vt(ret)
+    fp
+
+
+# ---------- C structs by value (lower_ffi.dewy) ----------
+c_struct = (t0: int) -> bool:
+    t = prune(t0)
+    vc(t) == VC_AGG and not c_nullable(t) and types[t].kind == .struct_
+
+
+c_struct_params = (f: int) -> bool:
+    loop t in fns[f].ptypes:
+        if c_struct(t): return true
+    false
+
+
+c_leaves = (t0: int, base: int, out: mut (int, int, int)[]):
+    t = prune(t0)
+    k = types[t].kind
+    if k == .struct_:
+        si = int(types[t].st)
+        loop i in [0..int(structs[si].nfields)):
+            fi = int(structs[si].fields) + i
+            c_leaves(int(fields[fi].type), base + int(fields[fi].offset), out)
+        return
+    if k == .fixed:
+        e = int(types[t].elem)
+        loop i in [0..fixed_len(t)): c_leaves(e, base + i * tsize(e), out)
+        return
+    size = tsize(t)
+    if k == .float_:
+        cls = if size == 4: 1 else: 2
+        out.push((base, size, cls))
+        return
+    out.push((base, size, 0))
+
+
+c_hfa = (leaves: (int, int, int)[]) -> int:
+    if leaves.len() == 0 or leaves.len() > 4: return 0
+    c = leaves[0].2
+    if c == 0: return 0
+    loop l in leaves:
+        if l.2 != c: return 0
+    c
+
+
+c_sse = (leaves: (int, int, int)[], e: int) -> bool:
+    loop l in leaves:
+        if l.0 >= 8 * e and l.0 < 8 * e + 8 and l.2 == 0: return false
+    true
+
+
+cs_words: int[]
+cs_where: int[]
+cs_ngr = 0
+cs_nfr = 0
+cs_put = (v: int, where: int):
+    cs_words.push(v)
+    cs_where.push(where)
+
+
+cs_int = (v: int, gmax: int):
+    if cs_ngr < gmax:
+        cs_ngr += 1
+        cs_put(v, 0)
+    else: cs_put(v, 2)
+
+
+cs_float = (v: int):
+    if cs_nfr < 8:
+        cs_nfr += 1
+        cs_put(v, 1)
+    else: cs_put(v, 2)
+
+
+cs_copy = (p: int, size: int) -> int:
+    words = align_up(size, 8)
+    a = e_slot(new_slot(words, 8))
+    e_zero(a, words)
+    e_copy(a, p, size)
+    a
+
+
+cs_stack_words = (p: int, size: int):
+    a = cs_copy(p, size)
+    loop w in [0..align_up(size, 8) / 8): cs_put(e_load(VI, a, 8 * w, 8), 2)
+
+
+cs_struct = (t: int, p: int, arm: bool):
+    size = tsize(t)
+    leaves: (int, int, int)[]
+    c_leaves(t, 0, leaves)
+    if arm:
+        h = c_hfa(leaves)
+        if h > 0:
+            if cs_nfr + leaves.len() <= 8:
+                ty = if h == 1: VS else: VF
+                loop l in leaves:
+                    cs_nfr += 1
+                    cs_put(e_load(ty, p, l.0, l.1 | M_FLOAT), 1)
+            else:
+                cs_nfr = 8
+                cs_stack_words(p, size)
+            return
+        if size > 16:
+            cs_int(cs_copy(p, size), 8)
+            return
+        n = align_up(size, 8) / 8
+        if cs_ngr + n <= 8:
+            a = cs_copy(p, size)
+            loop w in [0..n):
+                cs_ngr += 1
+                cs_put(e_load(VI, a, 8 * w, 8), 0)
+        else:
+            cs_ngr = 8
+            cs_stack_words(p, size)
+        return
+    if size > 16:
+        cs_stack_words(p, size)
+        return
+    n = align_up(size, 8) / 8
+    nf = 0
+    loop e in [0..n):
+        if c_sse(leaves, e): nf += 1
+    if cs_ngr + n - nf <= 6 and cs_nfr + nf <= 8:
+        a = cs_copy(p, size)
+        loop e in [0..n):
+            if c_sse(leaves, e):
+                cs_nfr += 1
+                cs_put(e_load(VF, a, 8 * e, 8 | M_FLOAT), 1)
+            else:
+                cs_ngr += 1
+                cs_put(e_load(VI, a, 8 * e, 8), 0)
+    else: cs_stack_words(p, size)
+
+
+cs_result_code = (entries: int[], x8: bool, s: int) -> int:
+    code = entries.len()
+    loop i in 0.. and e in entries: code = code | (e << (3 + 2 * i))
+    if x8: code = code | 2048
+    -(code | (s << 16)) - 1
+
+
+c_struct_thunk = (f: int, lib: str, nm: str, ret: int):
+    pos = nodes[int(fns[f].decl)].pos
+    if fns[f].cvariadic > 0: fatal(pos, "a variadic C function cannot take or return a struct by value: pass a `ptr<T>` to it")
+    arm = target_arm64 or target_macos
+    gmax = if arm: 8 else: 6
+    agg_ret = c_struct(ret)
+    sret = if agg_ret or c_nullable(ret): vreg(VI) else: -1
+    ps: int[]
+    loop t in fns[f].ptypes:
+        if tkind(t) == .array: fatal(pos, "a C function cannot take an array: declare the parameter as a pointer (*f32) and pass data(xs)")
+        if vc(t) == VC_AGG and not c_nullable(t) and not c_struct(t): fatal(pos, "C functions can only take scalars, pointers or C structs")
+        ps.push(vreg(vt_of(t)))
+    ir.nparams = ir.vtypes.len()
+    if vc(ret) == VC_AGG and sret < 0: fatal(pos, "C functions can only return scalars, pointers or C structs")
+    ir.ret = if agg_ret: -1 else: ret_vt(ret)
+    cs_words = []
+    cs_where = []
+    cs_ngr = 0
+    cs_nfr = 0
+    rslot = -1
+    rcode = 0
+    if agg_ret:
+        size = tsize(ret)
+        leaves: (int, int, int)[]
+        c_leaves(ret, 0, leaves)
+        rslot = new_slot(max(align_up(size, 8), 16), 8)
+        entries: int[]
+        h = if arm: c_hfa(leaves) else: 0
+        if h > 0:
+            entry = if h == 1: 2 else: 1
+            loop l in leaves: entries.push(entry)
+        else if size <= 16:
+            loop e in [0..align_up(size, 8) / 8):
+                sse = not arm and c_sse(leaves, e)
+                entry = if sse: 1 else: 0
+                entries.push(entry)
+        if entries.len() > 0: rcode = cs_result_code(entries, false, rslot)
+        else if arm: rcode = cs_result_code([], true, rslot)
+        else: cs_int(e_slot(rslot), gmax)
+    loop i in 0.. and t in fns[f].ptypes:
+        if c_struct(t): cs_struct(t, ps[i], arm)
+        else if c_nullable(t):
+            p = vreg(VI)
+            e_mov(p, e_iconst(0))
+            iff(opt_has(ps[i], int(types[prune(t)].elem)))
+            e_mov(p, e_load(VI, ps[i], 0, 8))
+            endc()
+            cs_int(p, gmax)
+        else if tkind(t) == .str_: cs_int(e_call1(rt("__c_str"), ps[i], VI), gmax)
+        else if vt_of(t) == VI: cs_int(ps[i], gmax)
+        else: cs_float(ps[i])
+    stacked = false
+    loop w in cs_where:
+        if w == 2: stacked = true
+    if stacked and target_macos: fatal(pos, "C structs that reach the stack are not supported on macOS yet: pass a `ptr<T>` to it")
+    cps: int[]
+    if not stacked: cps = cs_words
+    else:
+        ng = 0
+        nf = 0
+        loop i in 0.. and w in cs_where:
+            if w == 0:
+                cps.push(cs_words[i])
+                ng += 1
+        loop ng < gmax:
+            cps.push(e_iconst(0))
+            ng += 1
+        loop i in 0.. and w in cs_where:
+            if w == 1:
+                cps.push(cs_words[i])
+                nf += 1
+        loop nf < 8:
+            cps.push(e_fconst(0.0, VF))
+            nf += 1
+        loop i in 0.. and w in cs_where:
+            if w == 2: cps.push(cs_words[i])
+    if rcode != 0: cps.push(e_slot(rslot))
+    fp = extern_target(f, lib, nm)
+    result_type = ret_vt(ret)
+    if c_nullable(ret): result_type = VI
+    if agg_ret: result_type = -1
     r = e_calli(fp, cps, result_type, true)
-    # (C's variadic arguments: on Apple's arm64 they go on the stack)
-    if fns[f].cvariadic > 0: ir.code[ir.code.len() - 1].imm = int(fns[f].cvariadic)
+    if rcode != 0: ir.code[ir.code.len() - 1].imm = rcode
+    if agg_ret:
+        e_copy(sret, e_slot(rslot), tsize(ret))
+        e_ret(sret)
+        return
     if sret >= 0:
         e_zero(sret, tsize(ret))
         e_store(sret, 0, r, 8)
