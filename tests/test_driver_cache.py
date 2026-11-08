@@ -100,3 +100,17 @@ def test_least_recently_used_entries_are_evicted(compiler, tmp_path):
     assert binaries[0].exists()
     evict(cache, cap=1, protect=0)
     assert not any(b.exists() for b in binaries)
+
+
+def test_evict_tolerates_a_stage_removed_meanwhile(tmp_path, monkeypatch):
+    """A worker's build can finish and remove its stage between eviction listing and stat-ing it."""
+    from pathlib import Path
+    (tmp_path / 'stage' / 'build-gone').mkdir(parents=True)
+    real = Path.stat
+
+    def vanishing(self, *args, **kwargs):
+        if self.name == 'build-gone':
+            raise FileNotFoundError(self)
+        return real(self, *args, **kwargs)
+    monkeypatch.setattr(Path, 'stat', vanishing)
+    evict(tmp_path)

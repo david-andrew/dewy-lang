@@ -131,7 +131,11 @@ def evict(cache: Path, cap: int = CAP_BYTES, protect: float = PROTECT_SECONDS):
         stage = cache / 'stage'
         if stage.is_dir():
             for leftover in stage.iterdir():
-                if now - leftover.stat().st_mtime > STALE_STAGE_SECONDS:
+                try:
+                    stale = now - leftover.stat().st_mtime > STALE_STAGE_SECONDS
+                except OSError:
+                    continue  # (its build finished and removed it meanwhile)
+                if stale:
                     shutil.rmtree(leftover, ignore_errors=True)
         entries = []
         for shard in cache.iterdir():
