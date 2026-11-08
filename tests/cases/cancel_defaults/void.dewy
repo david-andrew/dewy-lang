@@ -1,0 +1,4 @@
+fail=():>void|Canceled=>Canceled
+let reached=false
+run=():>void|Canceled=>{fail() ?? void; reached=true}
+main=()=>{let r=run(); printl"{r is? Canceled} {reached}"}

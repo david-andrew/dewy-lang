@@ -192,7 +192,7 @@ ud_path=(a:ThinExprWord):>int64=>$unsafe {
     bc_field(ud_path(ThinExprWord(nodes.ptr[a].a)) name_of(ThinExprWord(nodes.ptr[a].name)) nodes.ptr[a].pos)
 }
 # `value ?? fallback` where value may be an exception other than none (`to_int(text) ?? 0`):
-# the fallback stands for every failure, none and each exception kind, and the value for the
+# the fallback stands for none and each named exception kind except unnamed Canceled, and the value for the
 # rest. The editor shows which failures it covers.
 coalesce_exceptions=(t:int64):>bool=>{
     loop m in value_members(t) {

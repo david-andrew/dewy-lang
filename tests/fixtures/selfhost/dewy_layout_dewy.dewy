@@ -28,7 +28,7 @@ number=(s:string):>int64=>{
     v
 }
 
-main=():>void=>{
+main=():>void|Canceled=>{
     let list=read_text(args()[1]) ?? ""
     loop line in list.lines {
         let files=line.split("\t")

@@ -1,4 +1,5 @@
 $runtime_checks
+from p"expr.jo" import (collection_value collection_array)
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo TK)
 from p"source_types.dewy" import SrcFile
@@ -152,6 +153,7 @@ xr_elements=(n:XRWord expected:XRWord ex:XRWord et:XRWord):>CheckerAggregateResu
             let saved=xr_pack_site[0]
             xr_pack_site[0]=c
             let st=tu_prune(xr_host[0].check(c h))
+            if xr_dewy(n) {st=collection_array(c st)}
             xr_pack_site[0]=saved
             let hit=xr_pack_hit[0] not=? 0
             xr_pack_hit[0]=0
@@ -168,6 +170,7 @@ xr_elements=(n:XRWord expected:XRWord ex:XRWord et:XRWord):>CheckerAggregateResu
         let saved=xr_pack_site[0]
         xr_pack_site[0]=c
         let it=xr_host[0].check(c elt)
+        if xr_dewy(n) {it=collection_value(c it)}
         xr_pack_site[0]=saved
         if xr_pack_hit[0] not=? 0 {
             xr_pack_hit[0]=0
@@ -230,10 +233,16 @@ xr_array=(n:XRWord expected:XRWord ex:XRWord exk:TK):>CheckerAggregateResult=>$u
     if ex not=? 0 and exk =? 'fixed' and XRWord(xr_nodes[0].ptr[n].aux) not=? 2 and (repeat not=? 0 or xr_count(n) =? 0 or xr_count(n) =? XRWord(xr_types[0].ptr[tu_prune(ex)].bits)) {
         let et=XRWord(xr_types[0].ptr[ex].elem)
         if repeat not=? 0 {
-            xr_host[0].check(xr_kid(n 0) et);
+            let v=xr_kid(n 0)
+            let vt=xr_host[0].check(v et)
+            if xr_dewy(n) {collection_value(v vt);}
             xr_host[0].check_to(repeat xr_int_type[0]);
         } else {
-            loop i in [0..xr_count(n)) {xr_host[0].check(xr_kid(n i) et);}
+            loop i in [0..xr_count(n)) {
+                let v=xr_kid(n i)
+                let vt=xr_host[0].check(v et)
+                if xr_dewy(n) {collection_value(v vt);}
+            }
         }
         xr_nodes[0][n].type=int32<overflow='wrap'>(tb_mk_array(et))
         xr_host[0].fixed(n ex)
@@ -257,6 +266,7 @@ xr_array=(n:XRWord expected:XRWord ex:XRWord exk:TK):>CheckerAggregateResult=>$u
     if repeat not=? 0 {
         let v=xr_kid(n 0)
         let vt=xr_host[0].check(v et)
+        if xr_dewy(n) {vt=collection_value(v vt)}
         if et not=? 0 {xr_host[0].coerce(v et);} else {vt=xr_host[0].finalize(v)}
         xr_host[0].check_to(XRWord(xr_nodes[0].ptr[n].b) xr_int_type[0]);
         let t=if et not=? 0 {tb_mk_array(et)} else {tb_mk_array(vt)}

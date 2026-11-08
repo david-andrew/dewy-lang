@@ -6,7 +6,7 @@ from p"ast.jo" import (NF_INDEX_CAPTURED NF_CHECKED NF_MUT NF_STMT NF_WRITTEN_VO
 from p"checker_exprstmts.dewy" import (Sink)
 from p"types.jo" import (T_VOID prune targ types)
 from p"type_ops.dewy" import (is_values mk_array mk_values)
-from p"expr.jo" import (can_coerce capture_value coerce finalize_literal is_lit last_checked lit_default mk_ident_local ntype type_node_of)
+from p"expr.jo" import (collection_array collection_value can_coerce capture_value coerce finalize_literal is_lit last_checked lit_default mk_ident_local ntype type_node_of)
 from p"checks_builders.dewy" import (bc_block)
 from p"checker_expr.dewy" import (check_expr)
 from p"util.jo" import (files intern pos_file)
@@ -69,6 +69,7 @@ sink_make_acc=(i:int64 elem:int64 pos:int64):>void=>$unsafe {
 }
 sink_push=(i:int64 s:int64 pack:bool):>void=>$unsafe {
     let v:SNWord=SNWord(nodes.ptr[s].a)
+    if pack {collection_array(v ntype(v));} else {collection_value(v ntype(v));}
     let pos=nodes.ptr[v].pos
     if sinks.ptr[i].tuple and sinks.ptr[i].vague =? 0 {
         sink_hold(i s pack)

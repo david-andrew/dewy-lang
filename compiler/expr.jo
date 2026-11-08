@@ -3837,6 +3837,115 @@ dewy_byte_read = (n: int, callee: int, base: int, args: int[], expected: int) ->
     nodes[n] = nodes[bc_call(helper, [recv, args[0]], nodes[n].pos)]
     check_expr(n, expected)
 
+# Only naming Canceled selects it: a broad exception family does not opt in.
+# Resolve aliases as types; inspect union syntax before families can absorb members.
+coalesce_names_canceled = (tn: int, canceled: int) -> bool:
+    if nodes[tn].kind == .tunion:
+        loop c in kids(tn):
+            if coalesce_names_canceled(c, canceled): return true
+        return false
+    t = prune(resolve_type(tn))
+    if family_annotation(t): return false
+    value_members(t).contains(canceled)
+
+# Generated collector arguments retain their original syntax for contextual
+# overload selection. The expression flag demands one indexed callback only.
+collection_contributions: {int: bool} = {}
+collection_check = (n: int, expected: int) -> int:
+    if not collection_contributions.has(n): return -1
+    pack = collection_contributions[n]
+    collection_contributions.remove(n)
+    clear_flag(n, NF_CABI)
+    t = check_expr(n, expected)
+    if pack: collection_array(n, t) else: collection_value(n, t)
+
+# A collector's direct contribution forwards cancellation, never storing it as
+# an element. Indexed type membership is demand-only; O(type members + rewrite).
+collection_value = (n: int, t: int) -> int:
+    if not dewy_at(nodes[n].pos): return t
+    if not is_union(t) and tkind(t) != .opt and tkind(t) != .struct_: return t
+    canceled = int(syms[universe[intern("Canceled")]].ref)
+    members = value_members(t)
+    if not members.contains(canceled): return t
+    pos = nodes[n].pos
+    inner = nodes.len()
+    nodes.push(nodes[n])
+    add_flag(inner, NF_CHECKED)
+    name = "$collect{n}"
+    ret = mk(.return_, pos)
+    or_throw_returns[pos] = true
+    nodes[ret].a = i32(bc_ident(name, pos))
+    stmts = [bc_let(name, inner, pos)]
+    if members.len() == 1: stmts.push(ret)
+    else:
+        condition = mk(.istype, pos)
+        nodes[condition].a = i32(bc_ident(name, pos))
+        nodes[condition].b = i32(type_node_of(canceled, pos))
+        branch = mk(.if_, pos)
+        nodes[branch].a = i32(condition)
+        nodes[branch].b = i32(bc_block([ret], pos))
+        add_flag(branch, NF_STMT)
+        stmts.push(branch)
+        stmts.push(bc_stmt(bc_ident(name, pos), pos))
+    nodes[n] = nodes[bc_block(stmts, pos)]
+    check_expr(n, 0)
+
+# A spread or parallel collector drains the retained array contributions before
+# exposing its result. O(element-type members) checking; O(elements) at runtime,
+# only for an element type that includes Canceled.
+collection_array = (n: int, t0: int) -> int:
+    t = prune(t0)
+    if not dewy_at(nodes[n].pos): return t0
+    kind = tkind(t)
+    set_source = kind == .struct_ and is_dewy_set_type(t)
+    if kind != .array and kind != .fixed and not set_source: return t0
+    elem = if set_source: struct_targ(int(types[t].st), 0) else: int(types[t].elem)
+    if not is_union(elem) and tkind(elem) != .opt and tkind(elem) != .struct_: return t0
+    canceled = int(syms[universe[intern("Canceled")]].ref)
+    members = value_members(elem)
+    if not members.contains(canceled): return t0
+    # Normalize only a demanded failure-bearing spread, preserving ordinary
+    # fixed-array and set contextual typing on the common path.
+    if kind == .fixed: coerce(n, mk_array(elem))
+    else if set_source:
+        source_node = nodes.len()
+        nodes.push(nodes[n])
+        add_flag(source_node, NF_CHECKED)
+        nodes[n] = nodes[bc_call("__dewy_set_values", [source_node], nodes[n].pos)]
+        check_expr(n, mk_array(elem))
+    kept: int[]
+    loop m in members:
+        if m != canceled: kept.push(m)
+    success = if kept.len() == 0: T_NEVER else if kept.len() == 1: kept[0] else: mk_union(kept)
+    pos = nodes[n].pos
+    inner = nodes.len()
+    nodes.push(nodes[n])
+    add_flag(inner, NF_CHECKED)
+    source = "$collect_array{n}"
+    item = "$collect_item{n}"
+    result = "$collect_result{n}"
+    empty = mk(.array, pos)
+    output = bc_let(result, empty, pos)
+    nodes[output].a = i32(type_node_of(mk_array(success), pos))
+    each = mk(.for_, pos)
+    set_list(each, [bc_ident(item, pos)])
+    nodes[each].a = i32(bc_ident(source, pos))
+    condition = mk(.istype, pos)
+    nodes[condition].a = i32(bc_ident(item, pos))
+    nodes[condition].b = i32(type_node_of(canceled, pos))
+    ret = mk(.return_, pos)
+    or_throw_returns[pos] = true
+    nodes[ret].a = i32(bc_ident(item, pos))
+    branch = mk(.if_, pos)
+    nodes[branch].a = i32(condition)
+    nodes[branch].b = i32(bc_block([ret], pos))
+    add_flag(branch, NF_STMT)
+    body = [branch]
+    if success != T_NEVER: body.push(bc_stmt(bc_method(bc_ident(result, pos), "push", [bc_ident(item, pos)], pos), pos))
+    nodes[each].b = i32(bc_block(body, pos))
+    nodes[n] = nodes[bc_block([bc_let(source, inner, pos), output, each, bc_stmt(bc_ident(result, pos), pos)], pos)]
+    check_expr(n, 0)
+
 # `??<A | B>` (nodes[n].c, the kinds' type) covers only those kinds (none only when listed),
 # and what it does not cover passes through as a value.
 coalesce_failures = (n: int, at: int, expected: int) -> int:
@@ -3845,6 +3954,8 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
     add_flag(a, NF_CHECKED)
     name = "$coalesce{n}"
     members = value_members(at)
+    canceled = int(syms[universe[intern("Canceled")]].ref)
+    cancel_named = nodes[n].c != 0 and coalesce_names_canceled(int(nodes[n].c), canceled)
     listed: int[]
     if nodes[n].c != 0:
         lt = prune(resolve_type(int(nodes[n].c)))
@@ -3854,7 +3965,7 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
             held = false
             loop m in members:
                 if m == l or m != T_NONE and l != T_NONE and nominal_descends(m, l): held = true
-            if not held: fatal(pos, "`??<...>` lists {dt(l)}, which {dt(at)} never holds")
+            if not held and not family_annotation(lt): fatal(pos, "`??<...>` lists {dt(l)}, which {dt(at)} never holds")
     covered: str[]
     passed: str[]
     covers: bool[]
@@ -3864,6 +3975,7 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
         else:
             loop l in listed:
                 if m == l or m != T_NONE and l != T_NONE and nominal_descends(m, l): c = true
+        if m == canceled and not cancel_named: c = false
         covers.push(c)
         if c: covered.push(if m == T_NONE: "none" else: dt(m))
         else if exception_member(m): passed.push(if m == T_NONE: "none" else: dt(m))
@@ -3872,11 +3984,13 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
         if passed.len() > 0: text += "; passes on " + join(passed, ", ")
         ide_emit("I\t{ide_pos_str(pos)}\t{ide_esc(text)}")
     fallback = int(nodes[n].b)
+    void_fallback = nodes[fallback].kind == .ident and nodes[fallback].name == i32(intern("void"))
+    if void_fallback: fallback = bc_block([], nodes[fallback].pos)
     # (the fallback converts to the value's type, as an optional's does; an optional
     # fallback keeps the result optional)
     values: int[]
     loop i in 0.. and m in members:
-        if not covers[i]: values.push(m)
+        if not covers[i] and (m != canceled or cancel_named): values.push(m)
     target = if expected != 0 and is_union(expected): expected else if values.len() == 1: values[0] else: mk_union(values)
     probe = clone(fallback)
     # (`sleep(1s) ?? 0`: the call gives nothing when it succeeds, so there is no value to default)
@@ -3885,6 +3999,7 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
         called = if nodes[a].kind == .call and nodes[a].a != 0 and nodes[int(nodes[a].a)].kind == .ident: "`{name_of(int(nodes[int(nodes[a].a)].name))}`" else: "this call"
         coerce_hint = " ({called} gives no value when it succeeds, so `??` has no value to default: `or_throw` passes its failure on, or `match` it)"
     pt = prune(check_expr(probe, target))
+    if prune(target) == T_VOID and pt != T_VOID and pt != T_NEVER: coerce(probe, T_VOID)
     if tkind(pt) == .opt or pt == T_NONE: target = mk_opt(target)
     chain = 0
     j = members.len() - 1
@@ -3893,7 +4008,15 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
         member = members[j]
         failure = covers[j]
         value = bc_ident(name, pos)
-        if failure:
+        if member == canceled and not cancel_named:
+            ret = mk(.return_, pos)
+            or_throw_returns[pos] = true
+            nodes[ret].a = i32(value)
+            value = bc_block([ret], pos)
+        else if failure and (void_fallback or prune(target) == T_VOID):
+            value = if used: clone(fallback) else: fallback
+            used = true
+        else if failure:
             typed = bc_let("{name}_fallback", (if used: clone(fallback) else: fallback), pos)
             nodes[typed].a = i32(type_node_of(target, pos))
             value = bc_block([typed, bc_stmt(bc_ident("{name}_fallback", pos), pos)], pos)

@@ -1,0 +1,10 @@
+# modes: native native-release
+let reached=atomic(0)
+nap=(d:Duration):>int64|Canceled=>{sleep(d) or_throw; 1}
+slow=()=>{
+    let a=nap(200ms) ?? 0
+    let b=nap(200ms) ?? 0
+    reached.store(if a =? 0 and b =? 0 1 else 2)
+    a
+}
+main=()=>{let r=within(10ms @slow); printl"{r is? Timeout} {reached.load}"}

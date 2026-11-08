@@ -47,7 +47,7 @@ EXTRA = {'check.jo': {'LF_QUIET': 'const LF_QUIET = 65536',
               'sinks': 'sinks: Sink[]',
               'union_has_void': 'union_has_void = (t: int) -> bool: false'},
  'ast.jo': {'NF_STMT': 'const NF_STMT = 16'},
- 'expr.jo': {'type_node_of': 'type_node_of = (t: int, pos: int) -> int: 0'},
+ 'expr.jo': {'collection_array': 'collection_array = (n: int, t: int) -> int: t', 'collection_value': 'collection_value = (n: int, t: int) -> int: t', 'type_node_of': 'type_node_of = (t: int, pos: int) -> int: 0'},
  'util.jo': {'intern': 'intern = (s: str) -> int: 0'}}
 
 EXTRA['check.jo']['use_sink'] = "use 'checker_exprstmts.dewy'"

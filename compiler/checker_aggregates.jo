@@ -1,3 +1,4 @@
+use 'expr.jo'
 # Frozen array and record literal checker extracted from expr.jo.
 use 'node_store.dewy'
 use 'checker_types.dewy'
@@ -129,6 +130,7 @@ xr_elements = (n: int, expected: int, ex: int, et: int) -> CheckerAggregateResul
             saved = xr_pack_site[0]
             xr_pack_site[0] = c
             st = int(tu_prune(xr_host[0].check(c, h)))
+            if xr_dewy(n): st = collection_array(c, st)
             xr_pack_site[0] = saved
             hit = xr_pack_hit[0] != 0
             xr_pack_hit[0] = 0
@@ -142,6 +144,7 @@ xr_elements = (n: int, expected: int, ex: int, et: int) -> CheckerAggregateResul
         saved = xr_pack_site[0]
         xr_pack_site[0] = c
         it = xr_host[0].check(c, elt)
+        if xr_dewy(n): it = collection_value(c, it)
         xr_pack_site[0] = saved
         if xr_pack_hit[0] != 0:
             xr_pack_hit[0] = 0
@@ -188,10 +191,15 @@ xr_array = (n: int, expected: int, ex: int, exk: TK) -> CheckerAggregateResult:
     if ex != 0 and exk == .fixed and int(xr_nodes[0][n].aux) != 2 and (repeat != 0 or xr_count(n) == 0 or xr_count(n) == int(xr_types[0][int(tu_prune(ex))].bits)):
         et = int(xr_types[0][ex].elem)
         if repeat != 0:
-            xr_host[0].check(xr_kid(n, 0), et)
+            v = xr_kid(n, 0)
+            vt = xr_host[0].check(v, et)
+            if xr_dewy(n): collection_value(v, vt)
             xr_host[0].check_to(repeat, xr_int_type[0])
         else:
-            loop i in [0..xr_count(n)): xr_host[0].check(xr_kid(n, i), et)
+            loop i in [0..xr_count(n)):
+                v = xr_kid(n, i)
+                vt = xr_host[0].check(v, et)
+                if xr_dewy(n): collection_value(v, vt)
         xr_nodes[0][n].type = i32(int(tb_mk_array(et)))
         xr_host[0].fixed(n, ex)
         return CheckerAggregateResult(ex, false)
@@ -209,6 +217,7 @@ xr_array = (n: int, expected: int, ex: int, exk: TK) -> CheckerAggregateResult:
     if repeat != 0:
         v = xr_kid(n, 0)
         vt = xr_host[0].check(v, et)
+        if xr_dewy(n): vt = collection_value(v, vt)
         if et != 0: xr_host[0].coerce(v, et)
         else: vt = xr_host[0].finalize(v)
         xr_host[0].check_to(int(xr_nodes[0][n].b), xr_int_type[0])

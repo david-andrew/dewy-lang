@@ -1,0 +1,19 @@
+# quick
+fixed_values=(bad:bool):>array<int64|Canceled length=2>=>{
+    let result:array<int64|Canceled length=2>=[int64(1) int64(2)]
+    if bad result[1]=Canceled
+    result
+}
+set_values=(bad:bool):>set<int64|Canceled>=>{
+    let result:set<int64|Canceled>=set[]
+    result.push(int64(1))
+    if bad result.push(Canceled) else result.push(int64(2))
+    result
+}
+fixed_spread=(bad:bool)=>[fixed_values(bad)...]
+set_spread=(bad:bool)=>[set_values(bad)...]
+main=()=>{
+    printl"{fixed_spread(true) is? Canceled} {set_spread(true) is? Canceled}"
+    printl(fixed_spread(false))
+    printl(set_spread(false))
+}

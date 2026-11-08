@@ -358,6 +358,8 @@ aggregate_spread = (n: int, ex: int, expected: int) -> int:
             clear_flag(c, NF_SPREAD)
             nodes[callee].name = i32(intern("extend"))
         else: nodes[callee].name = i32(intern("push"))
+        collection_contributions[c] = name_of(int(nodes[callee].name)) == "extend"
+        add_flag(c, NF_CABI)
         call = mk(.call, pos)
         nodes[call].a = i32(callee)
         set_list(call, [c])

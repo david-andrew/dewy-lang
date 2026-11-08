@@ -1,3 +1,4 @@
+use 'expr.jo'
 # Frozen address-of and checker-made form checker extracted from expr.jo.
 use 'node_store.dewy'
 use 'checker_state.dewy'
@@ -29,6 +30,7 @@ xp_check = (n: int, expected: int) -> int:
     k = xp_nodes[0][n].kind
     if k == .parallel_region:
         t = xp_host[0].check(int(xp_nodes[0][n].a), expected)
+        t = collection_array(xp_last[0], t)
         xp_nodes[0][n].a = i32(xp_last[0])
         return t
     if k == .addr:

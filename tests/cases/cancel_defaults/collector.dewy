@@ -1,0 +1,8 @@
+outcome=(c:bool):>int64|Canceled=>if c Canceled else 7
+literal=()=>[outcome(false) outcome(true)]
+looped=()=>[loop c in [false true] outcome(c)]
+fixed=()=>{let xs:array<int64 length=2>=[outcome(false) outcome(true)]; xs}
+main=()=>{
+    printl"{literal() is? Canceled} {looped() is? Canceled} {fixed() is? Canceled}"
+    printl([outcome(false) outcome(false)])
+}

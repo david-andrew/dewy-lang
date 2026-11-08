@@ -269,7 +269,8 @@ main = () => printl(add(twice(20)))  # 42
 A block expresses each non-`void` value its expressions give, in order, through
 nested `if`/`match` arms and loops. A collector takes them all: `[{1 2} 3]` is
 `[1 2 3]`, `[if c 1]` is `[1]` or `[]`, and loop capture collects every value of
-every iteration. A place for one value (an operand, an index, a condition, a
+every iteration. A `Canceled` contribution leaves the enclosing function, as
+`or_throw` would; it is never collected. A place for one value (an operand, an index, a condition, a
 result written `:>T`) takes a block's last expression, and an earlier value
 there is an error. A function without a written result may express several
 values: `pair = () => { 1 2 }` or `pair = () => (1 2)` makes `[pair()]` `[1 2]`.
@@ -4082,7 +4083,8 @@ again until a number comes. `input_int` explains a bad line as
 decides what the end of the input means: `input("name? ") or_throw` passes it on,
 and an unhandled one reaches `main` as `error: EndOfInput`, exit 1 (its own
 `exit_code`, unless the program's errors pin that code);
-`input_int("n? ") ?? 0` gives 0. `read_stdin()` gives `string | FileError | Canceled`.
+`input_int("n? ") ?? 0` gives 0 for input failures other than `Canceled`, which
+leaves the enclosing function. `read_stdin()` gives `string | FileError | Canceled`.
 A failed write to standard output does not stop `printl`, which stays `void`: the
 program ends with `error: could not write standard output` and exit 1. Output to a
 closed pipe (`| head`) ends the program quietly.
@@ -4110,7 +4112,12 @@ and nested `array<array<uint16>?>?`. `none` represents an absent value.
 Use `value ?? fallback` to unwrap an optional or provide a default. The left side
 runs once; the fallback runs only when it is `none` or an exception value (an
 error such as `to_int`'s `NotAnInteger`, or a search's `Missing`), and the editor
-shows which failures a `??` covers. `value ??<Missing | ParseError> fallback`
+shows which failures a `??` covers. `Canceled` instead leaves the enclosing function,
+as `or_throw` would; it never becomes a default. This also applies to `?? void`,
+`?? return`, `?? break` and `?? continue`, and a collector forwards `Canceled`
+instead of holding it as an element. Only `??<Canceled>` (or an explicit list
+naming it) opts into handling cancellation; a broad `exception` family does not.
+`value ??<Missing | ParseError> fallback`
 covers only the kinds listed (and `none` only when it is listed); any other
 failure passes on as the result, for `or_throw` or a `match`. Listing a kind the
 value never holds is an error. The fallback may also be `return x`, `break` or

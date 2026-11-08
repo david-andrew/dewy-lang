@@ -25,7 +25,7 @@ scan=(@lx:DewyLexer src:string):>void=>{
     printl("s {lx.suspect_brace} {lx.interpolation_open}")
 }
 
-main=():>void=>{
+main=():>void|Canceled=>{
     let list=read_text(args()[1]) ?? ""
     loop path in list.lines {
         if path.is_empty {continue}

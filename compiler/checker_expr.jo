@@ -606,6 +606,9 @@ xe_numeric_head = (n: int) -> bool:
 xe_fn_pack = (t: int) -> bool: xe_types[0][t].kind == .fn_ and xe_types[0][t].sign
 check_expr = (n: int, expected: int) -> int:
     xe_last[0] = n
+    if int(xe_nodes[0][n].flags) & 8192 != 0:
+        contribution = collection_check(n, expected)
+        if contribution >= 0: return contribution
     if xe_nodes[0][n].type != 0 and int(xe_nodes[0][n].flags) & 128 != 0: return int(xe_nodes[0][n].type)
     k = xe_nodes[0][n].kind
     if k == .ident: return xe_ident(n, expected)

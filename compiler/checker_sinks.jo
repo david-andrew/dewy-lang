@@ -66,6 +66,8 @@ sink_make_acc = (i: int, elem: int, pos: int):
 
 sink_push = (i: int, s: int, pack: bool):
     v = int(nodes[s].a)
+    if pack: collection_array(v, ntype(v))
+    else: collection_value(v, ntype(v))
     pos = nodes[v].pos
     if sinks[i].tuple and sinks[i].vague == 0:
         sink_hold(i, s, pack)

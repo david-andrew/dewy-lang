@@ -1,0 +1,4 @@
+# A library may return failure-bearing arrays; a collector must forward cancellation.
+make_values = (bad: bool) -> (int | Canceled)[]:
+    if bad: return [1, Canceled]
+    [1, 2]

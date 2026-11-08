@@ -1,4 +1,5 @@
 $runtime_checks
+from p"expr.jo" import (collection_array)
 from p"node_store.dewy" import Node
 from p"checker_state.dewy" import Local
 from p"type_constructors.dewy" import tb_mk_ptr
@@ -37,6 +38,7 @@ xp_check=(n:XPWord expected:XPWord):>XPWord=>$unsafe {
     let k=xp_nodes[0].ptr[n].kind
     if k =? 'parallel_region' {
         let t=xp_host[0].check(XPWord(xp_nodes[0].ptr[n].a) expected)
+        t=collection_array(xp_last[0] t)
         xp_nodes[0][n].a=int32<overflow='wrap'>(xp_last[0])
         return t
     }

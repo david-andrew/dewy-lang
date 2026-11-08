@@ -1,0 +1,24 @@
+# quick
+outcome=(kind:int64):>int64|Missing|Canceled=>{
+    if kind =? 0 return Canceled
+    if kind =? 1 return Missing
+    9
+}
+plain=(kind:int64)=>outcome(kind) ?? 0
+listed=(kind:int64)=>outcome(kind) ??<Missing> 0
+named=(kind:int64)=>outcome(kind) ??<Canceled|Missing> 0
+family=(kind:int64)=>outcome(kind) ??<exception> 0
+jump_return=()=>{outcome(0) ?? return 7}
+jump_break=()=>{
+    loop i in [0..1) {let n=outcome(0) ?? break; printl(n)}
+    7
+}
+jump_continue=()=>{
+    loop i in [0..1) {let n=outcome(0) ?? continue; printl(n)}
+    7
+}
+main=()=>{
+    printl"{plain(0) is? Canceled} {listed(0) is? Canceled} {family(0) is? Canceled}"
+    printl"{plain(1)} {listed(1)} {named(0)} {plain(2)}"
+    printl"{jump_return() is? Canceled} {jump_break() is? Canceled} {jump_continue() is? Canceled}"
+}

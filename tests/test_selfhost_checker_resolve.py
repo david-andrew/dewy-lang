@@ -286,6 +286,9 @@ RESOLVE_JO = {
         'nominal_family': 'nominal_family = (t: int) -> int: nominal(t)',
     },
     'expr.jo': {
+        'collection_array': 'collection_array = (n: int, t: int) -> int: t',
+        'collection_check': 'collection_check = (n: int, expected: int) -> int: -1',
+        'collection_value': 'collection_value = (n: int, t: int) -> int: t',
         'decimal_type': 'decimal_type = (pos: int) -> int: decimal(pos)',
         'word_rational_type': 'word_rational_type = (pos: int) -> int: word_rational(pos)',
         'dewy_record_schema': 'dewy_record_schema = (n: int, args: int[]) -> int: record(n, args)',
