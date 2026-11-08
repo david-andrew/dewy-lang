@@ -2,6 +2,7 @@
 
     python3 -m tools.core test [-k expression]
     python3 -m tools.core test --quick
+    python3 -m tools.core test --base origin/master
     python3 -m tools.core build example.dewy --release -o /tmp/example
     python3 -m tools.core fmt example.dewy
     python3 -m tools.core --bootstrap test
@@ -222,7 +223,50 @@ def pytest_python(root: Path = ROOT) -> Path | None:
     return None
 
 
-def test(binary: Path, arguments: list[str], quick: bool) -> int:
+def take_base(arguments: list[str]) -> tuple[list[str], str | None]:
+    """The arguments without `--base REV` (or `--base=REV`), and REV."""
+    rest, base, items = [], None, iter(arguments)
+    for arg in items:
+        if arg == '--base':
+            base = next(items, None)
+            if not base:
+                raise SystemExit('tools.core test: --base needs a revision')
+        elif arg.startswith('--base='):
+            base = arg.split('=', 1)[1]
+        else:
+            rest.append(arg)
+    return rest, base
+
+
+def twin_scope_env(base: str | None, directory: str) -> dict[str, str]:
+    """With --base REV, the twin test files none of whose inputs changed since the merge base of REV
+    and HEAD (tools/twin_scope.py) join the nightly tier; this environment tells tests/conftest.py."""
+    report = {'DEWY_TWIN_SCOPE_REPORT': str(Path(directory) / 'twin-scope-report.json')}
+    if base is None:
+        return report
+    from tools import twin_scope
+    merge_base, changed = twin_scope.changed_files(base)
+    listed = Path(directory) / 'twin-scoped-out.json'
+    listed.write_text(json.dumps({'base': base, 'merge_base': merge_base, 'changed': len(changed),
+                                  'files': twin_scope.scoped_out(changed)}))
+    return {**report, 'DEWY_TWIN_SCOPED_OUT': str(listed)}
+
+
+def twin_scope_summary(env: dict[str, str]):
+    try:
+        done = json.loads(Path(env['DEWY_TWIN_SCOPE_REPORT']).read_text())
+    except (OSError, ValueError):
+        return
+    if 'DEWY_TWIN_SCOPED_OUT' not in env:
+        print('Twin tests scoped out: 0 (no --base: every twin test runs)', file=sys.stderr)
+        return
+    listed = json.loads(Path(env['DEWY_TWIN_SCOPED_OUT']).read_text())
+    print(f"Twin tests scoped out to the nightly tier: {done['tests']} tests in {done['files']} of {done['twin_files']} twin files "
+          f"({listed['changed']} files changed since merge base {listed['merge_base'][:9]} with {listed['base']}); "
+          f"run them with: python3 -m tools.core test tests --base {listed['base']} -m nightly", file=sys.stderr)
+
+
+def test(binary: Path, arguments: list[str], quick: bool, base: str | None = None) -> int:
     """Golden cases, then the ladder's core versions and ratchet, then pytest."""
     from tools import cases, ladder
     # (before the cases, so a missing pytest never ends the gate silently after them)
@@ -262,6 +306,8 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
     env = {k: v for k, v in os.environ.items()
            if not k.startswith('DEWY_') or k in ('DEWY_GATE_SLOT_HELD', 'DEWY_PYTEST_SHARD')}
     env.update(DEWY_CORE_COMPILER=str(binary), PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
+    scope_directory = tempfile.mkdtemp(prefix='twin-scope-', dir=scratch.activate())
+    env.update(twin_scope_env(None if quick else base, scope_directory))
     if quick:
         arguments = ['-m', 'core_quick', *arguments]
     # The nightly tier (repeated coverage, run by the scheduled workflow) is left out unless -m names it.
@@ -272,6 +318,8 @@ def test(binary: Path, arguments: list[str], quick: bool) -> int:
                f"--basetemp={tempfile.mkdtemp(prefix='pytest-', dir=scratch.activate())}",
                *test_runner_options(python, arguments), *TESTS, *tier, *arguments]
     status = subprocess.call(command, cwd=ROOT, env=env)
+    if not quick:
+        twin_scope_summary(env)
     if status == 5 and selected:
         status = 0  # -k matched only golden cases or ladder programs
     return 1 if failed else status
@@ -297,8 +345,18 @@ def main(argv: list[str] | None = None) -> int:
         print('usage: python3 -m tools.core [--bootstrap] test [--quick] [-k WORDS] [pytest options]\n\n'
               'Golden cases, then the acceptance ladder and site examples (full suite only), then pytest.\n'
               '--quick runs the smoke suite; -k selects cases, ladder programs and tests by keyword;\n'
-              '--maxfail=0 reports every failure; other options go to pytest.')
+              '--maxfail=0 reports every failure; other options go to pytest.\n\n'
+              '--base REV scopes the self-hosting twin tests (tests/test_selfhost_*.py) to a landing: a twin\n'
+              'file runs only when a file it reads changed since the merge base of REV and HEAD (work tree\n'
+              'changes and untracked files count); the others join the nightly tier, which\n'
+              '`test tests --base REV -m nightly` runs. A twin file reads itself, the helpers it imports,\n'
+              'the files its strings name, lib/, stage0/, bootstrap/, the build tools and the compiler files\n'
+              'in the import closure of each compiler module it names (all of compiler/ when it links the\n'
+              'whole compiler). Without --base every twin test runs. The summary line counts the tests scoped out.')
         return 0
+    base = None
+    if args.command == 'test':
+        args.arguments, base = take_base(args.arguments)
     quick = args.command == 'test' and '--quick' in args.arguments
     if quick:
         if any(arg.startswith('-m') for arg in args.arguments):
@@ -344,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
         scratch.activate()
         status = 1
         try:
-            status = test(binary, args.arguments, quick)
+            status = test(binary, args.arguments, quick, base)
             return status
         finally:
             scratch.finish(status)
