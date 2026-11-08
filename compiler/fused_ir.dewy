@@ -1,0 +1,79 @@
+$runtime_checks
+from p"fused.jo" import (FzRec fz_d0 fz_int_op fz_op_int fz_r0 fz_rd)
+from p"fused_ops.dewy" import (fz_get_str fz_map_in fz_map_lf fz_pos fz_put_str)
+from p"ir.jo" import (ir_positions)
+from p"ir_types.dewy" import (Ins IrFn)
+from p"lower.jo" import (lfuncs)
+from p"par.jo" import (pr)
+from p"par_ops.dewy" import (pr_ints pw pw_ints)
+
+FusedWord:type=int64<overflow='wrap'>
+# (IR positions travel as source positions)
+fz_pack_ir=(@out:array<uint8> f:IrFn):>void=>{
+    pw(@out f.nparams)
+    pw(@out f.ret)
+    pw(@out if f.cabi {1} else {0})
+    pw(@out if f.noinline {1} else {0})
+    pw(@out if f.raw_mem {1} else {0})
+    pw(@out ir_positions[f.decl_pos])
+    fz_put_str(@out f.export_name)
+    pw(@out f.vtypes.length)
+    loop v in f.vtypes {pw(@out FusedWord(v))}
+    pw(@out f.slot_size.length)
+    loop v in f.slot_size {pw(@out FusedWord(v))}
+    pw(@out f.slot_align.length)
+    loop v in f.slot_align {pw(@out FusedWord(v))}
+    pw(@out f.args.length)
+    loop v in f.args {pw(@out FusedWord(v))}
+    pw_ints(@out f.kval)
+    pw(@out f.code.length)
+    loop x in f.code {
+        pw(@out fz_op_int(x.op))
+        pw(@out FusedWord(x.ty))
+        pw(@out FusedWord(x.dst))
+        pw(@out FusedWord(x.a))
+        pw(@out FusedWord(x.b))
+        pw(@out FusedWord(x.c))
+        pw(@out x.imm)
+        pw(@out ir_positions[FusedWord(x.pos)])
+    }
+}
+fz_unpack_ir=(x:FzRec lf:FusedWord):>IrFn=>$unsafe {
+    let w=x.w
+    fz_rd[w].i=x.irp
+    let f=IrFn(name=lfuncs.ptr[lf].name fn_index=lf)
+    f.nparams=pr(@fz_rd[w])
+    f.ret=pr(@fz_rd[w])
+    f.cabi=pr(@fz_rd[w]) not=? 0
+    f.noinline=pr(@fz_rd[w]) not=? 0
+    f.raw_mem=pr(@fz_rd[w]) not=? 0
+    f.decl_pos=fz_pos(pr(@fz_rd[w]))
+    f.export_name=fz_get_str(@fz_rd[w])
+    loop _ in [0..pr(@fz_rd[w])) {f.vtypes.push(int8(pr(@fz_rd[w])))}
+    loop _ in [0..pr(@fz_rd[w])) {f.slot_size.push(int32(pr(@fz_rd[w])))}
+    loop _ in [0..pr(@fz_rd[w])) {f.slot_align.push(int32(pr(@fz_rd[w])))}
+    loop _ in [0..pr(@fz_rd[w])) {f.args.push(int32(pr(@fz_rd[w])))}
+    f.kval=pr_ints(@fz_rd[w])
+    let n=pr(@fz_rd[w])
+    f.code.reserve(n)
+    loop _ in [0..n) {
+        let op=pr(@fz_rd[w])
+        let ty=pr(@fz_rd[w])
+        let dst=pr(@fz_rd[w])
+        let a=pr(@fz_rd[w])
+        let b=pr(@fz_rd[w])
+        let c=pr(@fz_rd[w])
+        let imm=pr(@fz_rd[w])
+        let pos=fz_pos(pr(@fz_rd[w]))
+        let ins=Ins(fz_int_op(op) int32(ty) int32(dst) int32(a) int32(b) int32(c) imm int32(pos))
+        let o=ins.op
+        if o =? 'call' or o =? 'faddr' or o =? 'checked_add' or o =? 'checked_sub' or o =? 'checked_mul' {ins.imm=fz_map_lf(x.w ins.imm)}
+        else if o =? 'scanbytes' and ins.imm >=? 4 {
+            ins.imm=((fz_map_in(x.w 0 (ins.imm >> 2) - 1 fz_r0) + 1) << 2) | (ins.imm & 3)
+        }
+        else if o =? 'daddr' {ins.imm=fz_map_in(x.w 0 ins.imm fz_r0)}
+        else if o =? 'gaddr' {ins.imm=fz_map_in(x.w 1 ins.imm fz_d0)}
+        f.code.push(ins)
+    }
+    f
+}

@@ -44,6 +44,7 @@ use 'opt.jo'
 use 'lower_functions.dewy'
 use 'lower_primitives.dewy'
 use 'fused_ops.dewy'
+use 'fused_ir.dewy'
 
 struct FzLocal:
     lf: int
@@ -608,68 +609,6 @@ fz_place = (x: FzRec, lf: int):
         else if d.1 == 1: off = fz_map_in(x.w, 1, off, fz_d0)
         data_fix.push((d.0, d.1, off))
 
-# (IR positions travel as source positions)
-fz_pack_ir = (out: mut u8[], f: IrFn):
-    pw(out, f.nparams)
-    pw(out, f.ret)
-    pw(out, if f.cabi: 1 else: 0)
-    pw(out, if f.noinline: 1 else: 0)
-    pw(out, if f.raw_mem: 1 else: 0)
-    pw(out, ir_positions[f.decl_pos])
-    fz_put_str(out, f.export_name)
-    pw(out, f.vtypes.len())
-    loop v in f.vtypes: pw(out, int(v))
-    pw(out, f.slot_size.len())
-    loop v in f.slot_size: pw(out, int(v))
-    pw(out, f.slot_align.len())
-    loop v in f.slot_align: pw(out, int(v))
-    pw(out, f.args.len())
-    loop v in f.args: pw(out, int(v))
-    pw_ints(out, f.kval)
-    pw(out, f.code.len())
-    loop x in f.code:
-        pw(out, int(x.op))
-        pw(out, int(x.ty))
-        pw(out, int(x.dst))
-        pw(out, int(x.a))
-        pw(out, int(x.b))
-        pw(out, int(x.c))
-        pw(out, x.imm)
-        pw(out, ir_positions[int(x.pos)])
-
-fz_unpack_ir = (x: FzRec, lf: int) -> IrFn:
-    w = x.w
-    fz_rd[w].i = x.irp
-    f = IrFn(name = lfuncs[lf].name, fn_index = lf)
-    f.nparams = pr(fz_rd[w])
-    f.ret = pr(fz_rd[w])
-    f.cabi = pr(fz_rd[w]) != 0
-    f.noinline = pr(fz_rd[w]) != 0
-    f.raw_mem = pr(fz_rd[w]) != 0
-    f.decl_pos = fz_pos(pr(fz_rd[w]))
-    f.export_name = fz_get_str(fz_rd[w])
-    loop _ in [0..pr(fz_rd[w])): f.vtypes.push(i8(pr(fz_rd[w])))
-    loop _ in [0..pr(fz_rd[w])): f.slot_size.push(i32(pr(fz_rd[w])))
-    loop _ in [0..pr(fz_rd[w])): f.slot_align.push(i32(pr(fz_rd[w])))
-    loop _ in [0..pr(fz_rd[w])): f.args.push(i32(pr(fz_rd[w])))
-    f.kval = pr_ints(fz_rd[w])
-    n = pr(fz_rd[w])
-    f.code.reserve(n)
-    loop _ in [0..n):
-        op = pr(fz_rd[w])
-        ty = pr(fz_rd[w])
-        dst = pr(fz_rd[w])
-        a = pr(fz_rd[w])
-        b = pr(fz_rd[w])
-        c = pr(fz_rd[w])
-        imm = pr(fz_rd[w])
-        pos = fz_pos(pr(fz_rd[w]))
-        ins = Ins(op as Op, i32(ty), i32(dst), i32(a), i32(b), i32(c), imm, i32(pos))
-        o = ins.op
-        if o == .call or o == .faddr or o == .checked_add or o == .checked_sub or o == .checked_mul: ins.imm = fz_map_lf(x.w, ins.imm)
-        else if o == .scanbytes and ins.imm >= 4:
-            ins.imm = ((fz_map_in(x.w, 0, (ins.imm >> 2) - 1, fz_r0) + 1) << 2) | (ins.imm & 3)
-        else if o == .daddr: ins.imm = fz_map_in(x.w, 0, ins.imm, fz_r0)
-        else if o == .gaddr: ins.imm = fz_map_in(x.w, 1, ins.imm, fz_d0)
-        f.code.push(ins)
-    f
+# an instruction's operation as its number, and back (fused_ir.dewy packs IR as words)
+fz_op_int = (op: Op) -> int: int(op)
+fz_int_op = (i: int) -> Op: i as Op
