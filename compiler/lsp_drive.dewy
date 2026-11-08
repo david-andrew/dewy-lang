@@ -1,0 +1,412 @@
+$runtime_checks
+# The language server's process code: reading messages, waiting for input, checking in a child
+# process (fork; on Windows, this program again), and the loop that answers the editor.
+from p"@lib/core/rt.jo" import (__read_fd __str_from_bytes __write_fd)
+from p"@lib/core/os.jo" import (args cwd env exe_path exit time)
+from p"@lib/core/os.jo" import (sleep as jo_sleep)
+from p"@lib/core/str.jo" import (join split starts_with)
+from p"@lib/core/str.jo" import (to_int as jo_to_int)
+from p"check.jo" import (lib_dir test_mode)
+from p"checker_program.dewy" import (check_program)
+from p"driver_cli.dewy" import (scan_build_block setup_target)
+from p"ide.jo" import (ide_doc ide_fd ide_on ide_sentinel ide_skip ide_texts ide_wide)
+from p"ide_decls.dewy" import (ide_finish)
+from p"json_doc.dewy" import (json_parse)
+from p"lsp.jo" import (RunOut WsSym capabilities docs empty_main in_eof inbuf inpos jdoc lsp_queue lsp_stop root_lib ws_cache ws_roots ws_scanned)
+from p"lsp_fixes.dewy" import (on_code_action on_workspace_symbol split_pos)
+from p"lsp_handlers.dewy" import (lsp_error lsp_next lsp_should_stop lsp_watch on_code_lens on_definition on_formatting on_highlight on_inlay on_open on_prepare_rename on_references on_rename on_symbols refresh refresh_lowered ws_init)
+from p"lsp_ops.dewy" import (jget jitems jpath jraw jstr lsp_have_msg lsp_log lsp_pending lsp_reply uri_to_path)
+from p"lsp_requests.dewy" import (on_completion on_semantic on_signature)
+from p"lsp_text.dewy" import (on_change on_close on_hover)
+from p"main.jo" import (compile lower_only)
+from p"module_paths.dewy" import (is_abs_path os_path path_norm)
+from p"type_ops.dewy" import (init_types)
+from p"util.jo" import (intern mkpos)
+
+LspWord:type=int64<overflow='wrap'>
+lsp_fill=():>bool=>$unsafe {
+    if inpos >? 0 and inpos =? inbuf.length {
+        inbuf.clear()
+        inpos=0
+    }
+    let n=inbuf.length
+    inbuf.resize(n + 65536)
+    let r=__read_fd(0 data(inbuf) + n 65536)
+    if r <=? 0 {
+        inbuf.resize(n)
+        in_eof=true
+        return false
+    }
+    inbuf.resize(n + r)
+    true
+}
+# input waiting, or arriving within ms milliseconds?
+lsp_wait_input=(ms:LspWord):>bool=>$unsafe {
+    if lsp_have_msg() {return true}
+    if $target.os =? 'windows' {
+        # (standard input is a pipe from the editor: look into it until there is something)
+        let h=GetStdHandle(uint32(0xFFFFFFF6))
+        let avail:array<uint32>=[uint32(0)]
+        let until=time() + float64(ms) / 1000.0
+        loop true {
+            if PeekNamedPipe(h (uint64(0) as ptr<uint8>) uint32(0) (uint64(0) as ptr<uint32>) data(avail) (uint64(0) as ptr<uint32>)) =? 0 {
+                # (input that cannot be looked into, as under Wine: there is nothing until a read
+                # finds something; otherwise the editor is gone, and reading says so)
+                return GetLastError() not=? uint32(50)
+            }
+            if avail[0] >? 0 {return true}
+            if time() >=? until {return false}
+            Sleep(uint32(1));
+        }
+        return false
+    } else {
+        # struct pollfd: fd 0, events POLLIN
+        let fds:array<int64>=[0 | (1 << 32)]
+        return syscall(7 data(fds) 1 ms) >? 0
+    }
+}
+lsp_send=(body:string):>void=>$unsafe {
+    let msg="Content-Length: {(body as array<uint8>).length}\r\n\r\n{body}"
+    __write_fd(1 data(msg) (msg as array<uint8>).length)
+}
+# check the program in a child process; its findings, as lines
+run_child=(main_path:string doc_path:string sentinel:bool skips:array<string> lower:bool wide:bool):>RunOut=>$unsafe {
+    if lsp_should_stop() {return RunOut([] false)}
+    if $target.os =? 'windows' {
+        return run_child_w32(main_path doc_path sentinel skips lower wide)
+    } else {
+        # pipe2(O_CLOEXEC)
+        let fds:array<int64>=[0]
+        if syscall(293 data(fds) 0x80000) not=? 0 {return RunOut([] false)}
+        let rfd=fds[0] & 0xFFFFFFFF
+        let wfd=fds[0] >> 32
+        # fork
+        let pid=syscall(57)
+        if pid <? 0 {return RunOut([] false)}
+        if pid =? 0 {
+            syscall(3 rfd);
+            check_child(main_path doc_path sentinel skips lower wide wfd)
+        }
+        syscall(3 wfd);
+        let out:array<uint8>=[]
+        let deadline=time() + 20.0
+        let killed=false
+        loop true {
+            let pfd:array<int64>=[rfd | (1 << 32)]
+            let left:LspWord=int64((deadline - time()) * 1000.0)
+            if lsp_should_stop() or left <=? 0 {
+                # kill
+                syscall(62 pid 9);
+                killed=true
+                break
+            }
+            let pr=syscall(7 data(pfd) 1 min(left 50))
+            if pr <? 0 {continue}
+            if pr =? 0 {continue}
+            let n=out.length
+            out.resize(n + 65536)
+            let r=syscall(0 rfd data(out) + n 65536)
+            if r <=? 0 {
+                out.resize(n)
+                break
+            }
+            out.resize(n + r)
+        }
+        syscall(3 rfd);
+        # wait4
+        let status:array<int64>=[0]
+        syscall(61 pid data(status) 0 0);
+        if lsp_stop not=? 0 {return RunOut([] false)}
+        if killed {
+            lsp_log("checking {doc_path} took too long")
+            return RunOut([] false)
+        }
+        let st=status[0] & 0xFFFF
+        let text=__str_from_bytes(out)
+        let ok=st =? 0
+        if not ok {
+            let sig=st & 127
+            lsp_log("the checker failed on {doc_path} (status {st}, signal {sig})")
+        }
+        return RunOut(split(text "\n") ok)
+    }
+}
+# (the child: check, write the findings to fd, and end)
+check_child=(main_path:string doc_path:string sentinel:bool skips:array<string> lower:bool wide:bool fd:LspWord):>void=>{
+    # Deterministic protocol tests can wait until the child is running before cancelling it.
+    let delay=env("DEWY_LSP_CHECK_DELAY_MS")
+    if delay not=? none {
+        let ms:LspWord=jo_to_int(delay ?? "") ?? 0
+        if ms >? 0 {
+            lsp_log("test checker started")
+            jo_sleep(float64(ms) / 1000.0)
+        }
+    }
+    ide_on=true
+    ide_fd=fd
+    ide_doc=doc_path
+    ide_wide=wide
+    if sentinel {ide_sentinel=intern("__dewy_complete__")}
+    # (file numbers are the same in every check of the same texts)
+    loop s in skips {
+        let fp=split_pos(s)
+        ide_skip[mkpos(fp[0] fp[1])]=true
+    }
+    test_mode=true
+    if lower {
+        # (lowering finds some errors too: in shader code, data races)
+        lower_only=true
+        compile(main_path "");
+    }
+    else {
+        scan_build_block(main_path)
+        setup_target()
+        init_types()
+        check_program(main_path);
+    }
+    ide_finish()
+    exit(0)
+}
+# Windows has no fork: the child is this program again (dewy lsp --child), told what to check,
+# and the editor's texts, on its standard input; each string as "<length>:<bytes>"
+run_child_w32=(main_path:string doc_path:string sentinel:bool skips:array<string> lower:bool wide:bool):>RunOut=>$unsafe {
+    if $target.os =? 'windows' {
+        let parts:array<string>=[main_path doc_path "{int64(sentinel)}{int64(lower)}{int64(wide)}" "{skips.length}" skips... "{ide_texts.length}"]
+        loop [p t] in ide_texts {
+            parts.push(p)
+            parts.push(t)
+        }
+        let req:array<string>=[]
+        loop s in parts {
+            req.push("{(s as array<uint8>).length}:")
+            req.push(s)
+        }
+        let msg=join(req "")
+        # pipes for the child's input and output; this side's ends are not inherited
+        let sa:array<int64>=fill(int64(0) 3)
+        sa[0]=24
+        # bInheritHandle
+        sa[2]=1
+        let in_r:array<int64>=[0]
+        let in_w:array<int64>=[0]
+        let out_r:array<int64>=[0]
+        let out_w:array<int64>=[0]
+        if CreatePipe(data(in_r) as ptr<ptr<uint8>> data(in_w) as ptr<ptr<uint8>> data(sa) as ptr<uint8> uint32(1 << 16)) =? 0 {return RunOut([] false)}
+        if CreatePipe(data(out_r) as ptr<ptr<uint8>> data(out_w) as ptr<ptr<uint8>> data(sa) as ptr<uint8> uint32(1 << 16)) =? 0 {
+            CloseHandle(in_r[0] as ptr<uint8>);
+            CloseHandle(in_w[0] as ptr<uint8>);
+            return RunOut([] false)
+        }
+        SetHandleInformation(in_w[0] as ptr<uint8> uint32(1) uint32(0));
+        SetHandleInformation(out_r[0] as ptr<uint8> uint32(1) uint32(0));
+        # STARTUPINFOW
+        let si:array<int64>=fill(int64(0) 13)
+        si[0]=104
+        # STARTF_USESTDHANDLES
+        let flags=data(si) as ptr<uint32>
+        flags[15]=uint32(0x100)
+        si[10]=in_r[0]
+        si[11]=out_w[0]
+        let handles=data(si) as ptr<ptr<uint8>>
+        handles[12]=GetStdHandle(uint32(0xFFFFFFF4))
+        let pi:array<int64>=fill(int64(0) 3)
+        let exe=exe_path()
+        let wcmd=__wide("\"{exe}\" lsp --child")
+        let wexe=__wide(exe)
+        # CREATE_NO_WINDOW
+        let started=CreateProcessW(data(wexe) data(wcmd) (uint64(0) as ptr<uint8>) (uint64(0) as ptr<uint8>) int32(1) uint32(0x08000000) (uint64(0) as ptr<uint8>) (uint64(0) as ptr<uint16>) data(si) as ptr<uint8> data(pi) as ptr<uint8>) not=? 0
+        CloseHandle(in_r[0] as ptr<uint8>);
+        CloseHandle(out_w[0] as ptr<uint8>);
+        if not started {
+            CloseHandle(in_w[0] as ptr<uint8>);
+            CloseHandle(out_r[0] as ptr<uint8>);
+            lsp_log("could not start the checker ({exe})")
+            return RunOut([] false)
+        }
+        let proc=pi[0] as ptr<uint8>
+        CloseHandle(pi[1] as ptr<uint8>);
+        let w:array<uint32>=[uint32(0)]
+        let n:LspWord=(msg as array<uint8>).length
+        let off:LspWord=0
+        loop off <? n {
+            if WriteFile(in_w[0] as ptr<uint8> data(msg) + off uint32(min(n - off 1 << 20)) data(w) (uint64(0) as ptr<uint8>)) =? 0 {break}
+            off += int64(w[0])
+        }
+        CloseHandle(in_w[0] as ptr<uint8>);
+        let out:array<uint8>=[]
+        let deadline=time() + 20.0
+        let killed=false
+        let avail:array<uint32>=[uint32(0)]
+        loop true {
+            if lsp_should_stop() or time() >? deadline {
+                TerminateProcess(proc uint32(1));
+                killed=true
+                break
+            }
+            # (fails once the child has ended and everything it wrote is read)
+            if PeekNamedPipe(out_r[0] as ptr<uint8> (uint64(0) as ptr<uint8>) uint32(0) (uint64(0) as ptr<uint32>) data(avail) (uint64(0) as ptr<uint32>)) =? 0 {break}
+            if avail[0] =? 0 {
+                WaitForSingleObject(proc uint32(5));
+                continue
+            }
+            let k=out.length
+            out.resize(k + int64(avail[0]))
+            if ReadFile(out_r[0] as ptr<uint8> data(out) + k avail[0] data(w) (uint64(0) as ptr<uint8>)) =? 0 {
+                out.resize(k)
+                break
+            }
+            out.resize(k + int64(w[0]))
+        }
+        CloseHandle(out_r[0] as ptr<uint8>);
+        WaitForSingleObject(proc uint32(0xFFFFFFFF));
+        let code:array<uint32>=[uint32(0)]
+        GetExitCodeProcess(proc data(code));
+        CloseHandle(proc);
+        if lsp_stop not=? 0 {return RunOut([] false)}
+        if killed {
+            lsp_log("checking {doc_path} took too long")
+            return RunOut([] false)
+        }
+        let ok=code[0] =? 0
+        if not ok {lsp_log("the checker failed on {doc_path} (exit code {code[0]})")}
+        return RunOut(split(__str_from_bytes(out) "\n") ok)
+    } else {
+        return RunOut([] false)
+    }
+}
+# dewy lsp --child: the check run_child_w32 asks for
+child_main=():>void=>$unsafe {
+    let buf:array<uint8>=[]
+    loop true {
+        let n=buf.length
+        buf.resize(n + 65536)
+        let r=__read_fd(0 data(buf) + n 65536)
+        if r <=? 0 {
+            buf.resize(n)
+            break
+        }
+        buf.resize(n + r)
+    }
+    # the strings, in order
+    let xs:array<string>=[]
+    let at:LspWord=0
+    loop at <? buf.length {
+        let c=at
+        loop c <? buf.length and buf[c] not=? b':' {c += 1}
+        let k:LspWord=jo_to_int(__str_from_bytes(buf[at..c))) ?? 0
+        xs.push(__str_from_bytes(buf[c + 1..min(c + 1 + k buf.length))))
+        at=c + 1 + k
+    }
+    loop xs.length <? 5 {xs.push("")}
+    let main_path=xs[0]
+    let doc_path=xs[1]
+    let flags="{xs[2]}000" as array<uint8>
+    let ns:LspWord=jo_to_int(xs[3]) ?? 0
+    let skips=xs[4..4 + ns)
+    at=4 + ns
+    let nt:LspWord=jo_to_int(xs[at]) ?? 0
+    loop i in [0..nt) {ide_texts[xs[at + 1 + 2 * i]]=xs[at + 2 + 2 * i]}
+    check_child(main_path doc_path flags[0] =? b'1' skips flags[1] =? b'1' flags[2] =? b'1' 1)
+}
+lsp_main=():>void=>{
+    root_lib=path_norm(lib_dir)
+    ide_texts[empty_main]=""
+    let a=args()
+    if a.length >=? 3 and a[2] =? "--child" {
+        child_main()
+        return
+    }
+    if a.length >=? 4 and a[2] =? "--dump" {
+        # (debugging: what a check of a file reports)
+        let path=path_norm(os_path(a[3]))
+        if not is_abs_path(path) {path=path_norm("{os_path(cwd())}/{path}")}
+        let main_path=path
+        if starts_with(path "{root_lib}/") {main_path=empty_main}
+        let sk:array<string>=[]
+        let s=env("DEWY_SKIP")
+        if s not=? none {sk.push(s)}
+        let o=run_child(main_path path env("DEWY_SENTINEL") not=? none sk env("DEWY_LOWER") not=? none env("DEWY_WIDE") not=? none)
+        loop l in o.lines {printl(l)}
+        exit(0)
+    }
+    let shutdown=false
+    loop true {
+        # check edited documents once the editor has said everything it had to say
+        if not lsp_pending() {
+            loop i in [0..docs.length) {
+                if docs[i].open and docs[i].dirty {
+                    lsp_watch("" docs[i].uri)
+                    refresh(i)
+                    if lsp_pending() {break}
+                }
+            }
+        }
+        # and lower them when it has been quiet for a moment
+        loop i in [0..docs.length) {
+            if docs[i].open and not docs[i].dirty and not docs[i].lowered {
+                if lsp_queue.length >? 0 or lsp_wait_input(300) {break}
+                lsp_watch("" docs[i].uri)
+                refresh_lowered(i)
+            }
+        }
+        let m=lsp_next()
+        if m =? none {exit(0)}
+        let root=json_parse(@jdoc m ?? "")
+        let method=jstr(jget(root "method"))
+        let id=jget(root "id")
+        let params=jget(root "params")
+        let key=""
+        if id not=? 0 {key=jraw(id)}
+        lsp_watch(key jstr(jpath(params "textDocument" "uri")))
+        if method =? "initialize" {
+            ws_init(params)
+            lsp_reply(id "\{\"capabilities\":{capabilities},\"serverInfo\":\{\"name\":\"dewy-core\"\}\}");
+        }
+        else if method =? "initialized" {}
+        else if method =? "shutdown" {
+            shutdown=true
+            lsp_reply(id "null");
+        }
+        else if method =? "exit" {
+            if shutdown {exit(0)}
+            exit(1)
+        }
+        else if method =? "textDocument/didOpen" {on_open(params)}
+        else if method =? "textDocument/didChange" {on_change(params)}
+        else if method =? "textDocument/didClose" {on_close(params)}
+        else if method =? "workspace/symbol" {on_workspace_symbol(id params);}
+        else if method =? "textDocument/formatting" {on_formatting(id params);}
+        else if method =? "textDocument/codeAction" {on_code_action(id params);}
+        else if method =? "workspace/didChangeWorkspaceFolders" {
+            let ev=jget(params "event")
+            loop f in jitems(jget(ev "removed")) {
+                let k=ws_roots.index_of(uri_to_path(jstr(jget(f "uri")))) ?? (-1)
+                if k >=? 0 {ws_roots.pop(k);}
+            }
+            loop f in jitems(jget(ev "added")) {ws_roots.push(uri_to_path(jstr(jget(f "uri"))))}
+            ws_scanned=false
+        }
+        else if method =? "textDocument/didSave" or method =? "workspace/didChangeWatchedFiles" {
+            ws_cache=dict<string array<WsSym>>()
+            if method =? "workspace/didChangeWatchedFiles" {ws_scanned=false}
+            # other open files may use this one (or files changed on disk)
+            loop i in [0..docs.length) {
+                if docs[i].open {docs[i].dirty=true}
+                docs[i].has_wide=false
+            }
+        }
+        else if method =? "textDocument/hover" {on_hover(id params);}
+        else if method =? "textDocument/definition" {on_definition(id params);}
+        else if method =? "textDocument/references" {on_references(id params);}
+        else if method =? "textDocument/documentHighlight" {on_highlight(id params);}
+        else if method =? "textDocument/prepareRename" {on_prepare_rename(id params);}
+        else if method =? "textDocument/rename" {on_rename(id params);}
+        else if method =? "textDocument/completion" {on_completion(id params);}
+        else if method =? "textDocument/signatureHelp" {on_signature(id params);}
+        else if method =? "textDocument/inlayHint" {on_inlay(id params);}
+        else if method =? "textDocument/semanticTokens/full" {on_semantic(id params);}
+        else if method =? "textDocument/documentSymbol" {on_symbols(id params);}
+        else if method =? "textDocument/codeLens" {on_code_lens(id params);}
+        else if id not=? 0 {lsp_error(id (-32601) "unsupported: {method}");}
+    }
+}

@@ -48,6 +48,7 @@ LEAF_HOMES = {
     'fused_ir': 'fused.jo',
     'par_drive': 'par.jo',
     'driver_cli': 'main.jo',
+    'lsp_drive': 'lsp.jo',
     'refine_rare': 'refine.jo',
     'ide_decls': 'ide.jo',
     'directive_rules': 'directives.jo',
