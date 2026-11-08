@@ -1,0 +1,29 @@
+# quick
+$explicit_cancellation
+outcome=(kind:int64):>int64|Missing|Canceled=>{
+    if kind =? 0 return Canceled
+    if kind =? 1 return Missing
+    9
+}
+safe=(kind:int64):>int64|Missing=>if kind =? 1 Missing else 5
+fail=():>void|Canceled=>Canceled
+forwarded=(kind:int64)=>outcome(kind) or_throw<Canceled> ?? 0
+named=(kind:int64)=>outcome(kind) ??<Canceled|Missing> 0
+plain=(kind:int64)=>safe(kind) ?? 0
+voided=()=>{fail() or_throw<Canceled>; 1}
+step=():>int64|Canceled=>{outcome(1) or_throw<Canceled> ?? void; 1}
+collected=(k:int64)=>[outcome(2) or_throw<Canceled> outcome(k) or_throw<Canceled>]
+looped=()=>[loop k in [2 2] outcome(k) or_throw<Canceled>]
+inner=(k:int64)=>outcome(k) or_throw<Canceled>
+nested=(k:int64)=>inner(inner(k) or_throw<Canceled> ?? 3) or_throw<Canceled> ?? 4
+optout=(kind:int64)=>{
+    $explicit_cancellation=false
+    outcome(kind) ?? 0
+}
+main=()=>{
+    let xs:array<int64|Canceled>=[1 2]
+    printl(spread(xs))
+    printl"{forwarded(0) is? Canceled} {forwarded(1)} {named(0)} {plain(1)} {voided() is? Canceled} {step()}"
+    printl"{collected(2)} {collected(0) is? Canceled} {looped()} {nested(2)} {nested(0) is? Canceled} {optout(0) is? Canceled}"
+}
+spread=(xs:array<int64|Canceled>)=>[int64(0) [loop v in xs v or_throw<Canceled>]...]

@@ -109,12 +109,13 @@ dir_name_confine = 0
 dir_name_deadlocks = 0
 dir_name_audited = 0
 dir_name_assumed_bounds = 0
+dir_name_cancellation = 0
 
 # The builtin boolean settings. (`$fast_math` permits reassociation and FMA
 # contraction; the backends do neither yet, so it changes no code. `$unsafe` is
 # the unsafe boundary: compiler/ffi.jo.)
 dir_builtin = (name: str) -> bool:
-    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe" or name == "assume_local_asserts" or name == "confine_external_paths" or name == "no_deadlocks" or name == "audited_wait" or name == "no_assumed_bounds"
+    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe" or name == "assume_local_asserts" or name == "confine_external_paths" or name == "no_deadlocks" or name == "audited_wait" or name == "no_assumed_bounds" or name == "explicit_cancellation"
 
 dir_module_start = (file: int) -> int: file << 40
 

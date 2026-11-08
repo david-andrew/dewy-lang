@@ -5,7 +5,7 @@ from p"@lib/core/str.jo" import (find is_digit split starts_with to_int)
 from p"ast.jo" import (NF_GENERIC NF_INBOUNDS add_flag has_flag nodes)
 from p"check.jo" import (FK_LAMBDA decl_info decl_infos fns lib_dir modules)
 from p"program_settings.dewy" import (dir_program_prepare dir_program_setting)
-from p"directives.jo" import (dir_program_any dir_program_values dir_program_mains dir_rules_from_host DIR_DEFAULT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirScope DirSite dir_assumed_bounds_any dir_builtin dir_bundles dir_bundles_loaded dir_copies_any dir_deadlocks_any dir_entry_functions dir_entry_positions dir_find dir_floats_any dir_forced dir_mixed_files dir_module_start dir_name_assumed_bounds dir_name_audited dir_name_confine dir_name_copies dir_name_deadlocks dir_name_local_asserts dir_name_no_inf dir_name_no_nan dir_name_prototype dir_name_row dir_name_runtime dir_name_warnings dir_obligations dir_panic_sites dir_policy dir_prior_static dir_proven dir_row_scopes dir_rows_any dir_scopes dir_scopes_gen dir_sites dir_static_body dir_uniform_files dir_value)
+from p"directives.jo" import (dir_program_any dir_program_values dir_program_mains dir_rules_from_host DIR_DEFAULT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC DirScope DirSite dir_assumed_bounds_any dir_builtin dir_bundles dir_bundles_loaded dir_copies_any dir_deadlocks_any dir_entry_functions dir_entry_positions dir_find dir_floats_any dir_forced dir_mixed_files dir_module_start dir_name_assumed_bounds dir_name_audited dir_name_cancellation dir_name_confine dir_name_copies dir_name_deadlocks dir_name_local_asserts dir_name_no_inf dir_name_no_nan dir_name_prototype dir_name_row dir_name_runtime dir_name_warnings dir_obligations dir_panic_sites dir_policy dir_prior_static dir_proven dir_row_scopes dir_rows_any dir_scopes dir_scopes_gen dir_sites dir_static_body dir_uniform_files dir_value)
 from p"directive_rules.dewy" import (dir_panics_demanded)
 from p"effect_contracts.dewy" import (callable_contract effect_subst)
 from p"effect_control.dewy" import (effect_name)
@@ -67,11 +67,12 @@ dir_names=():>void=>{
     dir_name_deadlocks=intern("no_deadlocks")
     dir_name_audited=intern("audited_wait")
     dir_name_assumed_bounds=intern("no_assumed_bounds")
+    dir_name_cancellation=intern("explicit_cancellation")
 }
 # Metatags the compiler gives a meaning of its own; any other `$name` in a
 # source may be a bundle (or a loop label), so the bundles are read first.
 dw_dir_known=(name:string):>bool=>{
-    name in? ["assert" "runtime_assert" "expect" "fail" "breakpoint" "lend" "test" "proof" "capture" "include_bytes" "clamp" "target" "build" "supported_targets" "field" "unsafe_assume" "abstract" "allocator" "no_prelude" "runtime_checks" "prototype" "prototype_warnings" "explicit_copies" "fast_math" "no_nan" "no_inf" "unsafe" "assume_local_asserts" "no_assumed_bounds" "extern" "intrinsic" "export" "realtime" "explicit_allocation_failure" "warn_if" "confine_external_paths" "no_deadlocks" "audited_wait" "__copy__" "__drop__" "__move__" "__consume__" "send" "sync"]
+    name in? ["assert" "runtime_assert" "expect" "fail" "breakpoint" "lend" "test" "proof" "capture" "include_bytes" "clamp" "target" "build" "supported_targets" "field" "unsafe_assume" "abstract" "allocator" "no_prelude" "runtime_checks" "prototype" "prototype_warnings" "explicit_copies" "fast_math" "no_nan" "no_inf" "unsafe" "assume_local_asserts" "no_assumed_bounds" "extern" "intrinsic" "export" "realtime" "explicit_allocation_failure" "warn_if" "confine_external_paths" "no_deadlocks" "audited_wait" "explicit_cancellation" "__copy__" "__drop__" "__move__" "__consume__" "send" "sync"]
 }
 # The settings holding a name in quotes (their value: the name's id + 2).
 dir_valued_name=(name:string):>bool=>{
@@ -462,6 +463,13 @@ dir_audited_wait=(p:DirWord):>bool=>{
     if dir_scopes.length =? 0 {return false}
     dir_names()
     dir_value(dir_name_audited p) =? 1
+}
+# `$explicit_cancellation` (D4 Q1): `Canceled` may not pass through a `??` or a collector at p
+# unless the source says so (`or_throw<Canceled>`, or `??<Canceled>` to default it).
+dir_explicit_cancellation=(p:DirWord):>bool=>{
+    if dir_scopes.length =? 0 {return false}
+    dir_names()
+    dir_value(dir_name_cancellation p) =? 1
 }
 # Where a function's row came from, for an effect diagnostic.
 dir_row_origin=(d:DirWord):>string=>{

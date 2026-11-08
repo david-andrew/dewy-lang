@@ -1,0 +1,4 @@
+$explicit_cancellation
+outcome=(n:int64):>int64|Canceled=>if n =? 3 Canceled else n * 2
+doubled=(xs:array<int64>)=>[loop x in xs outcome(x)]
+main=()=>{printl(doubled([1 2]))}

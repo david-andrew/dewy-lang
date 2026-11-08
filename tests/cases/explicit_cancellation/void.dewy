@@ -1,0 +1,7 @@
+$explicit_cancellation
+step=(k:int64):>void|Missing|Canceled=>{
+    if k =? 0 return Canceled
+    if k =? 1 return Missing
+}
+run=()=>{step(1) ?? void; 1}
+main=()=>{printl(run())}

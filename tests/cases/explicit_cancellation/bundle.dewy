@@ -1,0 +1,7 @@
+$careful = {
+    $explicit_cancellation
+}
+$careful
+outcome=(kind:int64):>int64|Missing|Canceled=>if kind =? 0 Canceled else 9
+plain=(kind:int64)=>outcome(kind) ?? 0
+main=()=>{printl(plain(1))}

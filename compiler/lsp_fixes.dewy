@@ -329,6 +329,17 @@ on_code_action=(id:LspFixWord params:LspFixWord):>int64=>{
             out.push(qf_json(d fx[0] dg to_int(fx[1]) ?? 0 to_int(fx[2]) ?? 0 fx[3]))
             continue
         }
+        # (`$explicit_cancellation`: forward Canceled where the expression at p is written)
+        k=byte_find(msg "under `$explicit_cancellation`: write `")
+        if k >=? 0 {
+            let e=byte_find(msg " or_throw<Canceled>` to forward it" k)
+            let arg=if e >? 0 {__str_slice(msg k + 39 e)} else {""}
+            if (arg as array<uint8>).length >? 0 and not starts_with(arg "[") and starts_with(__str_slice(text p (text as array<uint8>).length) arg) {
+                let after=p + (arg as array<uint8>).length
+                out.push(qf_json(d "Forward cancellation: `{arg} or_throw<Canceled>`" dg after after " or_throw<Canceled>"))
+            }
+            continue
+        }
         # (a path not proven to stay inside its base: validate it where it is used)
         k=byte_find(msg "validate it, `")
         if k >=? 0 and (byte_find(msg "is not proven to stay inside its base") >=? 0 or byte_find(msg "may escape its base") >=? 0) {

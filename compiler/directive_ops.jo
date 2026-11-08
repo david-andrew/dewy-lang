@@ -65,10 +65,11 @@ dir_names = ():
     dir_name_deadlocks = intern("no_deadlocks")
     dir_name_audited = intern("audited_wait")
     dir_name_assumed_bounds = intern("no_assumed_bounds")
+    dir_name_cancellation = intern("explicit_cancellation")
 # Metatags the compiler gives a meaning of its own; any other `$name` in a
 # source may be a bundle (or a loop label), so the bundles are read first.
 dw_dir_known = (name: str) -> bool:
-    name in ["assert", "runtime_assert", "expect", "fail", "breakpoint", "lend", "test", "proof", "capture", "include_bytes", "clamp", "target", "build", "supported_targets", "field", "unsafe_assume", "abstract", "allocator", "no_prelude", "runtime_checks", "prototype", "prototype_warnings", "explicit_copies", "fast_math", "no_nan", "no_inf", "unsafe", "assume_local_asserts", "no_assumed_bounds", "extern", "intrinsic", "export", "realtime", "explicit_allocation_failure", "warn_if", "confine_external_paths", "no_deadlocks", "audited_wait", "__copy__", "__drop__", "__move__", "__consume__", "send", "sync"]
+    name in ["assert", "runtime_assert", "expect", "fail", "breakpoint", "lend", "test", "proof", "capture", "include_bytes", "clamp", "target", "build", "supported_targets", "field", "unsafe_assume", "abstract", "allocator", "no_prelude", "runtime_checks", "prototype", "prototype_warnings", "explicit_copies", "fast_math", "no_nan", "no_inf", "unsafe", "assume_local_asserts", "no_assumed_bounds", "extern", "intrinsic", "export", "realtime", "explicit_allocation_failure", "warn_if", "confine_external_paths", "no_deadlocks", "audited_wait", "explicit_cancellation", "__copy__", "__drop__", "__move__", "__consume__", "send", "sync"]
 # The settings holding a name in quotes (their value: the name's id + 2).
 dir_valued_name = (name: str) -> bool:
     name == "dewy.version" or name == "time.zone" or name == "time.zone_source" or name == "time.rules" or name == "time.gap" or name == "time.fold"
@@ -380,6 +381,12 @@ dir_audited_wait = (p: int) -> bool:
     if dir_scopes.len() == 0: return false
     dir_names()
     dir_value(dir_name_audited, p) == 1
+# `$explicit_cancellation` (D4 Q1): `Canceled` may not pass through a `??` or a collector at p
+# unless the source says so (`or_throw<Canceled>`, or `??<Canceled>` to default it).
+dir_explicit_cancellation = (p: int) -> bool:
+    if dir_scopes.len() == 0: return false
+    dir_names()
+    dir_value(dir_name_cancellation, p) == 1
 # Where a function's row came from, for an effect diagnostic.
 dir_row_origin = (d: int) -> str:
     i = dir_row_scopes.get(d) ?? -1

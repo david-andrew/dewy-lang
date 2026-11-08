@@ -3419,6 +3419,17 @@ currently diagnose waiting-lane tasks; portable `parallel` remains available.
 `Canceled` reaching `main` is an error like any other: it is reported and exits
 with its kind's code.
 
+`??`, `?? void`, `?? return/break/continue` and a collector pass `Canceled` on
+without a word in the source (see "Loops, text and optional values"). `$explicit_cancellation`,
+written like the other settings and held by `$bulletproof`, makes each such place
+an error that names the expression and shows the rewrite: write
+`outcome(k) or_throw<Canceled> ?? 0` to forward cancellation where it can arise,
+or `??<Canceled>` to default it. `$explicit_cancellation = false` opts a scope
+out. It changes no type and no behavior, only what must be written. A spread's
+array forwards per element (`[loop v in xs v or_throw<Canceled>]...`); a
+`parallel` loop's body cannot write `or_throw` yet, so under the tag such a loop
+whose elements may be `Canceled` is an error.
+
 Use parallel work for substantial independent calculations; scheduling and atomic
 reference counts can cost more than a small callback saves. Keep drawing and
 window/input operations on the main thread. The
@@ -4194,6 +4205,8 @@ as `or_throw` would; it never becomes a default. This also applies to `?? void`,
 `?? return`, `?? break` and `?? continue`, and a collector forwards `Canceled`
 instead of holding it as an element. Only `??<Canceled>` (or an explicit list
 naming it) opts into handling cancellation; a broad `exception` family does not.
+Under `$explicit_cancellation` a `??` or collector that would pass `Canceled` on
+this way is an error; write `or_throw<Canceled>` before the `??` (see "Parallel CPU work").
 `value ??<Missing | ParseError> fallback`
 covers only the kinds listed (and `none` only when it is listed); any other
 failure passes on as the result, for `or_throw` or a `match`. Listing a kind the
@@ -5176,8 +5189,8 @@ that may panic is an error too (the `panics` effect, "Functions and values"). Th
 `$explicit_copies` (described with `.copy` above) is a setting like these, for
 a module, a function or a block. So are the float settings `$fast_math`,
 `$no_nan` and `$no_inf`, and the library bundle `$finite_floats` (both of the
-latter), described with the numeric types, and `$no_deadlocks`, described with
-channels. `$unsafe`, the unsafe boundary, is
+latter), described with the numeric types, `$no_deadlocks`, described with
+channels, and `$explicit_cancellation`, described with waiting tasks. `$unsafe`, the unsafe boundary, is
 different: it covers only the next expression or declaration (see "Foreign
 functions"), and no bundle may hold it.
 
@@ -5213,7 +5226,8 @@ inventory is still partial (see "Functions and values"): an operation it does
 not classify is rejected there. `$realtime` is reserved for a stronger future bundle.
 
 `$bulletproof`, at the top of a module, is the strictest of everything:
-`$no_hidden_costs`, `$explicit_allocation_failure`, `$finite_floats`,
+`$no_hidden_costs`, `$explicit_allocation_failure`, `$explicit_cancellation`
+(described with waiting tasks), `$finite_floats`,
 `$no_deadlocks`, and each assumption the compiler can be told not to make
 (`$no_assumed_bounds`, `$assume_local_asserts = false`, `$confine_external_paths`; the list is
 docs/design/assumptions.md).

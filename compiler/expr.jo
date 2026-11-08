@@ -106,6 +106,7 @@ use 'warn_if_ops.dewy'
 use 'check_constant.jo'
 use 'directives.jo'
 use 'directive_rules.dewy'
+use 'directive_ops.dewy'
 use 'settings.jo'
 use 'refine.jo'
 use 'refine_rare.dewy'
@@ -3979,6 +3980,101 @@ dewy_byte_read = (n: int, callee: int, base: int, args: int[], expected: int) ->
     nodes[n] = nodes[bc_call(helper, [recv, args[0]], nodes[n].pos)]
     check_expr(n, expected)
 
+# ---------------- `$explicit_cancellation` ----------------
+# Under the tag (D4 Q1) `Canceled` may not leave through a `??` or a collector unwritten.
+# The error shows the expression as written with `or_throw<Canceled>` after it. Only a
+# rejected site pays: O(the expression's nodes and characters).
+cancel_first_pos = (n: int, file: int, best0: int) -> int:
+    if n == 0: return best0
+    best = best0
+    p = nodes[n].pos
+    if p > 0 and pos_file(p) == file and (best == 0 or p < best): best = p
+    best = cancel_first_pos(int(nodes[n].a), file, best)
+    best = cancel_first_pos(int(nodes[n].b), file, best)
+    best = cancel_first_pos(int(nodes[n].c), file, best)
+    loop k in kids(n): best = cancel_first_pos(k, file, best)
+    best
+
+cancel_last_pos = (n: int, file: int, best0: int) -> int:
+    if n == 0: return best0
+    best = best0
+    p = nodes[n].pos
+    if p > 0 and pos_file(p) == file and p > best: best = p
+    best = cancel_last_pos(int(nodes[n].a), file, best)
+    best = cancel_last_pos(int(nodes[n].b), file, best)
+    best = cancel_last_pos(int(nodes[n].c), file, best)
+    loop k in kids(n): best = cancel_last_pos(k, file, best)
+    best
+
+# The source text of expression n, to where its last token ends; "" when it spans lines
+# or is long.
+cancel_text = (n: int) -> str:
+    pos = nodes[n].pos
+    if pos <= 0: return ""
+    file = pos_file(pos)
+    src = files[file].src
+    first = cancel_first_pos(n, file, 0)
+    if first == 0: return ""
+    start = pos_off(first)
+    # (from the last node's token on: balanced brackets and quotes, up to a space, a `?`
+    # or a closer at depth 0; bytes by code, which the seed compiler reads)
+    last = pos_off(cancel_last_pos(n, file, 0))
+    depth = 0
+    i = start
+    loop i < len(src):
+        c = src[i]
+        if c == u8(34) or c == u8(39):
+            q = c
+            i += 1
+            loop i < len(src) and src[i] != q and src[i] != u8(10):
+                if src[i] == u8(92): i += 1
+                i += 1
+        else if c == u8(40) or c == u8(91) or c == u8(123): depth += 1
+        else if c == u8(41) or c == u8(93) or c == u8(125):
+            if depth == 0: break
+            depth -= 1
+        else if depth == 0 and i > last and (c == u8(32) or c == u8(9) or c == u8(10) or c == u8(59) or c == u8(44) or c == u8(63)): break
+        i += 1
+    stop = i
+    loop stop > start and (src[stop - 1] == u8(32) or src[stop - 1] == u8(9)): stop -= 1
+    if stop <= start or stop - start > 80: return ""
+    text = src[start..stop)
+    if contains(text, "\n"): return ""
+    text
+
+# (a `parallel` loop's collected result: the keyword where the expression starts)
+cancel_parallel_at = (p: int) -> bool:
+    if p <= 0: return false
+    src = files[pos_file(p)].src
+    off = pos_off(p)
+    off + 9 <= len(src) and src[off..off + 8) == "parallel" and not is_ident_char(src[off + 8])
+
+cancel_reject = (n: int, coalesce: bool, what0: str):
+    what = what0
+    text = cancel_text(n)
+    at = nodes[n].pos
+    shown = "this value"
+    fix = "`or_throw<Canceled>` after it"
+    if text.len() > 0:
+        at = cancel_first_pos(n, pos_file(at), 0)
+        shown = "`{text}`"
+        fix = "`{text} or_throw<Canceled>`"
+    other = if coalesce: ", or `??<Canceled>` to default it" else: ""
+    # (a `??` with nothing else to default: the rewrite replaces it)
+    if what == "this `??`" and not coalesce:
+        fix += " in place of the whole `??`"
+        other = " (it has no other failure to default), or `??<Canceled>` to default it"
+    # (an array a collector takes whole: a spread forwards per element; a `parallel` body
+    # cannot forward yet)
+    if what == "this collector" and ends_with(text, "..."):
+        source = text[0..text.len() - 3)
+        shown = "`{source}`"
+        fix = "`[loop v in {source} v or_throw<Canceled>]...`"
+        what = "this spread"
+    else if what == "this collector" and cancel_parallel_at(cancel_first_pos(n, pos_file(nodes[n].pos), 0)):
+        fatal(at, "this `parallel` loop's elements may be `Canceled`, which it would pass on unwritten under `$explicit_cancellation`, and a `parallel` body cannot forward it with `or_throw<Canceled>` yet: default it in the body with `??<Canceled>`, or opt this scope out with `$explicit_cancellation=false`")
+    fatal(at, "{shown} may be `Canceled`, which {what} would pass on unwritten under `$explicit_cancellation`: write {fix} to forward it{other}")
+
 # Only naming Canceled selects it: a broad exception family does not opt in.
 # Resolve aliases as types; inspect union syntax before families can absorb members.
 coalesce_names_canceled = (tn: int, canceled: int) -> bool:
@@ -4010,6 +4106,7 @@ collection_value = (n: int, t: int) -> int:
     members = value_members(t)
     if not members.contains(canceled): return t
     pos = nodes[n].pos
+    if dir_explicit_cancellation(pos): cancel_reject(n, false, "this collector")
     inner = nodes.len()
     nodes.push(nodes[n])
     add_flag(inner, NF_CHECKED)
@@ -4046,6 +4143,7 @@ collection_array = (n: int, t0: int) -> int:
     canceled = int(syms[universe[intern("Canceled")]].ref)
     members = value_members(elem)
     if not members.contains(canceled): return t0
+    if dir_explicit_cancellation(nodes[n].pos): cancel_reject(n, false, "this collector")
     # Normalize only a demanded failure-bearing spread, preserving ordinary
     # fixed-array and set contextual typing on the common path.
     if kind == .fixed: coerce(n, mk_array(elem))
@@ -4121,6 +4219,7 @@ coalesce_failures = (n: int, at: int, expected: int) -> int:
         covers.push(c)
         if c: covered.push(if m == T_NONE: "none" else: dt(m))
         else if exception_member(m): passed.push(if m == T_NONE: "none" else: dt(m))
+    if members.contains(canceled) and not cancel_named and dir_explicit_cancellation(pos): cancel_reject(a, covered.len() > 0, "this `??`")
     if ide_on and not pos_in_lib(pos):
         text = "?? gives the fallback for " + join(covered, ", ")
         if passed.len() > 0: text += "; passes on " + join(passed, ", ")

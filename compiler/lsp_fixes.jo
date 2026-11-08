@@ -285,6 +285,15 @@ on_code_action = (id: int, params: int) -> int:
         if len(fx) > 0:
             out.push(qf_json(d, fx[0], dg, to_int(fx[1]) ?? 0, to_int(fx[2]) ?? 0, fx[3]))
             continue
+        # (`$explicit_cancellation`: forward Canceled where the expression at p is written)
+        k = find(msg, "under `$explicit_cancellation`: write `")
+        if k >= 0:
+            e = find(msg, " or_throw<Canceled>` to forward it", k)
+            arg = if e > 0: msg[k + 39..e) else: ""
+            if len(arg) > 0 and not starts_with(arg, "[") and starts_with(text[p..], arg):
+                after = p + len(arg)
+                out.push(qf_json(d, "Forward cancellation: `{arg} or_throw<Canceled>`", dg, after, after, " or_throw<Canceled>"))
+            continue
         # (a path not proven to stay inside its base: validate it where it is used)
         k = find(msg, "validate it, `")
         if k >= 0 and (find(msg, "is not proven to stay inside its base") >= 0 or find(msg, "may escape its base") >= 0):
