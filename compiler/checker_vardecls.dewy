@@ -191,7 +191,7 @@ vd_forms=(s:VWord):>bool=>$unsafe {
     if b not=? 0 {
         let c=b
         if vd_nodes[0].ptr[c].kind =? 'propagate' {c=VWord(vd_nodes[0].ptr[c].a)}
-        if vd_nodes[0].ptr[c].kind =? 'call' and vd_nodes[0].ptr[c].aux2 =? -11 and decl_form(s 4) {return true}
+        if (vd_nodes[0].ptr[c].kind =? 'call' or vd_nodes[0].ptr[c].kind =? 'field') and vd_nodes[0].ptr[c].aux2 =? -11 and decl_form(s 4) {return true}
         if vd_nodes[0].ptr[s].a =? 0 and vd_nodes[0].ptr[s].nlist =? 0 and VWord(vd_nodes[0].ptr[s].flags) & 2048 =? 0 and VWord(vd_nodes[0].ptr[s].flags) & 262144 =? 0 and VWord(vd_nodes[0].ptr[b].flags) & 1 not=? 0 and vd_file_dewy(vd_nodes[0].ptr[s].pos) and decl_form(s 5) {return true}
     }
     let tn=VWord(vd_nodes[0].ptr[s].a)

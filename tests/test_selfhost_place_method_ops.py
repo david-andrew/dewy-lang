@@ -32,6 +32,9 @@ ctxs: FnCtx[] = [FnCtx(inst=2)]
 cx = 0
 types: TypeInfo[] = [TypeInfo(), TypeInfo(kind=.void_), TypeInfo(kind=.int_), TypeInfo(kind=.struct_, st=0), TypeInfo(kind=.str_)]
 structs: StructInfo[] = [StructInfo(decl=0)]
+fields: Field[]
+check_struct_fields = (si: int): pass
+fn_name_for = (t: int, name: int) -> bool: false
 files: SrcFile[] = [SrcFile(path="a.dewy"), SrcFile(path="lib/prelude/locks.dewy")]
 lib_dir = "lib"
 deadlock_fns: {int: bool} = {}

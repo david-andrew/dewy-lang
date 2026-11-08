@@ -1,17 +1,17 @@
 $runtime_checks
 from p"ast.jo" import (NF_ALIASDECL NF_AT NF_GLOBAL NF_LITERAL NF_LOOPCOUNT NF_MUT NF_RDONLY NF_STMT add_flag clear_flag clone has_flag kid kid_c kid_d kids mk nkids nodes set_kid set_list)
-from p"check.jo" import (check_block ctxs cx fns lib_dir locals scope_mark scope_reset syms)
+from p"check.jo" import (check_block check_struct_fields ctxs cx fns lib_dir locals scope_mark scope_reset syms)
 from p"checks_thin.dewy" import (check_stmt check_vardecl push_type_params resolve_type)
 from p"checks_stmt_hooks.dewy" import (stmt_terminates)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"deadlock.jo" import (deadlock_fns)
-from p"expr.jo" import (AUX2_PLACE mk_ident_local)
+from p"expr.jo" import (AUX2_PLACE fn_name_for mk_ident_local)
 from p"checks_builders.dewy" import (bc_block bc_ident bc_let bc_method bc_stmt)
 from p"place_methods.jo" import (AUX2_PLACE_TAKEN PlaceMethod place_call_decl place_count place_hidden place_methods)
 from p"places.jo" import (place_locked)
 from p"refine.jo" import (refine_storage)
 from p"sibling_types.jo" import (sibling_block sibling_index)
-from p"types.jo" import (T_VOID prune structs tkind type_eq types)
+from p"types.jo" import (T_VOID fields prune structs tkind type_eq types)
 from p"type_ops.dewy" import (dt)
 from p"util.jo" import (fatal files intern name_of pos_file pos_in_lib)
 
@@ -29,6 +29,38 @@ place_names_used=(n:PlaceWord names:dict<int64 bool>):>PlaceWord=>$unsafe {
         if found not=? 0 {return found}
     }
     0
+}
+# Grouping gives an ordinary member expression. A callable member is invoked;
+# a data field remains the same place as @m.field. O(receiver + record fields),
+# only when the parser marked a grouped @ operand.
+place_grouped_call=(n:PlaceWord):>bool=>$unsafe {
+    if n =? 0 or nodes.ptr[n].kind not=? 'field' or nodes.ptr[n].aux2 not=? int32(AUX2_PLACE) {return false}
+    nodes.ptr[n].aux2=0
+    let recv=clone(PlaceWord(nodes.ptr[n].a))
+    let t=prune(check_expr(recv 0))
+    let name=PlaceWord(nodes.ptr[n].name)
+    let callable=false
+    let found=false
+    if tkind(t) =? 'struct_' {
+        let si=PlaceWord(types.ptr[t].st)
+        check_struct_fields(si)
+        loop i in [0..PlaceWord(structs.ptr[si].nfields)) {
+            let f=PlaceWord(structs.ptr[si].fields) + i
+            if PlaceWord(fields.ptr[f].name) not=? name {continue}
+            found=true
+            let k=tkind(PlaceWord(fields.ptr[f].type))
+            callable=k =? 'polyfn' or k =? 'fn_' or k =? 'cfn' or k =? 'callable'
+        }
+    }
+    if not found {callable=fn_name_for(t name)}
+    if not callable {return false}
+    let callee=clone(n)
+    clear_flag(callee NF_MUT | NF_AT)
+    let call=mk('call' nodes.ptr[n].pos)
+    nodes.ptr[call].a=int32(callee)
+    nodes.ptr[call].aux2=int32(AUX2_PLACE)
+    nodes.ptr[n]=nodes.ptr[call]
+    true
 }
 # check_call reached a call: a place method only through `@(...)`, and `@(...)` only of one.
 place_call_seen=(n:PlaceWord decl:PlaceWord):>void=>$unsafe {
@@ -132,6 +164,7 @@ place_written_check=(info:PlaceMethod decl:PlaceWord g:PlaceWord l:PlaceWord pos
 place_let_decl=(s:PlaceWord):>bool=>$unsafe {
     if lock_all_decl(s) {return true}
     let init=PlaceWord(nodes.ptr[s].b)
+    place_grouped_call(init);
     if init =? 0 or nodes.ptr[init].kind not=? 'call' or nodes.ptr[init].aux2 not=? int32(AUX2_PLACE) {return false}
     let pos=nodes.ptr[s].pos
     if nodes.ptr[s].a not=? 0 or nkids(s) >? 0 or has_flag(s NF_GLOBAL) or has_flag(s NF_RDONLY) {fatal(pos "a returned place is bound by name alone: `let a = @(acct.lock())`")}
@@ -279,6 +312,7 @@ place_range=(b:PlaceWord i:PlaceWord name:PlaceWord root:PlaceWord pos:PlaceWord
     last
 }
 place_lends=(c:PlaceWord root:PlaceWord):>bool=>$unsafe {
+    place_grouped_call(c);
     nodes.ptr[c].kind =? 'call' and nodes.ptr[c].aux2 =? int32(AUX2_PLACE) and nodes.ptr[PlaceWord(nodes.ptr[c].a)].kind =? 'field' and place_route_base(PlaceWord(nodes.ptr[PlaceWord(nodes.ptr[c].a)].a)) =? root
 }
 place_route_base=(n0:PlaceWord):>PlaceWord=>$unsafe {

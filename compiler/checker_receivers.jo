@@ -59,6 +59,7 @@ xs_soa = (t0: int) -> bool:
     t = int(tu_prune(t0))
     xs_types[0][t].kind == .struct_ and xs_structs[0][int(xs_types[0][t].st)].soa_
 xs_field = (n: int, expected: int) -> int:
+    if xs_nodes[0][n].aux2 == -11 and grouped_place_call(n): return check_expr(n, expected)
     if xs_flag(n, 536870912): field_juxt(n)
     if xs_nodes[0][n].b != 0: field_reflect_name(n)
     if xs_reflecting[0] and reflect_member(n): return int(xs_nodes[0][n].type)

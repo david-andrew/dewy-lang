@@ -535,6 +535,9 @@ rt_dc_atom = () -> int:
         if e == 0: return 0
         # (`@(m.lock())`: the operand is one group, whose call takes the place it returns)
         if nodes[e].kind == .call and dc_parser.tokens[operand].symbol == .lparen and rt_dc_closing(operand) == dc_parser.at - 1: nodes[e].aux2 = i32(AUX2_PLACE)
+        else if nodes[e].kind == .field and dc_parser.tokens[operand].symbol == .lparen and rt_dc_closing(operand) == dc_parser.at - 1:
+            nodes[e].aux2 = i32(AUX2_PLACE)
+            add_flag(e, NF_MUT | NF_AT)
         else if nodes[e].kind == .call: nodes[e].aux2 = i32(AUX2_PARTIAL)
         else: add_flag(e, NF_MUT | NF_AT)
         return e

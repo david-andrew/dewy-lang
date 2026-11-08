@@ -1,0 +1,15 @@
+# quick
+let acquired=false
+Box:type=[
+    value:int64
+    lock=()=>{acquired=true; @value}
+]
+main=()=>{
+    let b=Box[3]
+    printl(acquired)
+    let field=@(b.value)
+    field+=1
+    let value=@(b.lock)
+    value+=2
+    printl(value)
+}

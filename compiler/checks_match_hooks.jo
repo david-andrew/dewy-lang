@@ -163,6 +163,7 @@ union_part = (e: int, u: int, keep: int[], pos: int) -> int:
     add_flag(r, NF_CHECKED)
     r
 check_match = (m: int, expected: int) -> int:
+    place_grouped_call(int(nodes[m].a))
     if nodes[int(nodes[m].a)].kind == .call and nodes[int(nodes[m].a)].aux2 == i32(AUX2_PLACE): return place_match(m, expected)
     if files[pos_file(nodes[m].pos)].is_dewy and shape_match_wanted(m): return check_shaped_match(m, expected)
     xh_match(m, expected)

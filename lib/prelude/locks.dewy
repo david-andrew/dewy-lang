@@ -1,6 +1,6 @@
 # Dewy's prelude: locks. `mutex(value)` makes a `Mutex<T>` holding the value; tasks
-# share it by copying the handle. `@(m.lock())` lends the payload as a place,
-# held until the place's last use; `@(m.try_lock())` gives `Busy` when another
+# share it by copying the handle. `@(m.lock)` lends the payload as a place,
+# held until the place's last use; `@(m.try_lock)` gives `Busy` when another
 # holder has it:
 #
 #     let total = mutex(0)

@@ -156,7 +156,7 @@ vd_forms = (s: int) -> bool:
     if b != 0:
         c = b
         if vd_nodes[0][c].kind == .propagate: c = int(vd_nodes[0][c].a)
-        if vd_nodes[0][c].kind == .call and vd_nodes[0][c].aux2 == -11 and decl_form(s, 4): return true
+        if (vd_nodes[0][c].kind == .call or vd_nodes[0][c].kind == .field) and vd_nodes[0][c].aux2 == -11 and decl_form(s, 4): return true
         if vd_nodes[0][s].a == 0 and vd_nodes[0][s].nlist == 0 and not vd_flag(s, 2048) and not vd_flag(s, 262144) and vd_flag(b, 1) and vd_file_dewy(vd_nodes[0][s].pos) and decl_form(s, 5): return true
     tn = int(vd_nodes[0][s].a)
     if tn != 0 and b != 0 and vd_nodes[0][tn].kind == .tarray and vd_nodes[0][tn].ival == 1: decl_form(s, 6)

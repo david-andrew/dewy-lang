@@ -1054,10 +1054,11 @@ go to an `@` parameter instead. A place is declared in a function or block: a
 top-level `let p = @xs[0]` would make `p` a global, which is an error for now. `@` of a function value is still its handle.
 A function gives back a value: `return @a` is an error.
 
+Inside `@(...)` the expression is ordinary: a zero-argument method is called.
 A method can lend a place inside its object. One whose body gives `@member` (its
 last statement, `return @balance` or just `@balance`) returns that place; the
 result can also be written, `lock = () :> @int64 => …`. The caller takes it with
-`let a = @(acct.lock())` (write the parentheses of a zero-argument method), and
+`let a = @(acct.lock)`, or `let a = @(acct.lock())`, and
 `a` is a local place like `let a = @acct.balance`. The method's own locals (a
 guard with a `$__drop__` hook, say) are kept until the place's last use and
 dropped right after the statement holding it, or with the block on an earlier

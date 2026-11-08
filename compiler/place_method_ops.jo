@@ -27,6 +27,33 @@ place_names_used = (n: int, names: {int: bool}) -> int:
         found = place_names_used(child, names)
         if found != 0: return found
     0
+# Grouped member expressions call callable members before taking their place.
+place_grouped_call = (n: int) -> bool:
+    if n == 0 or nodes[n].kind != .field or nodes[n].aux2 != i32(AUX2_PLACE): return false
+    nodes[n].aux2 = 0
+    recv = clone(int(nodes[n].a))
+    t = prune(check_expr(recv, 0))
+    name = int(nodes[n].name)
+    callable = false
+    found = false
+    if tkind(t) == .struct_:
+        si = int(types[t].st)
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            if int(fields[f].name) != name: continue
+            found = true
+            k = tkind(int(fields[f].type))
+            callable = k == .polyfn or k == .fn_ or k == .cfn or k == .callable
+    if not found: callable = fn_name_for(t, name)
+    if not callable: return false
+    callee = clone(n)
+    clear_flag(callee, NF_MUT | NF_AT)
+    call = mk(.call, nodes[n].pos)
+    nodes[call].a = i32(callee)
+    nodes[call].aux2 = i32(AUX2_PLACE)
+    nodes[n] = nodes[call]
+    true
 # check_call reached a call: a place method only through `@(...)`, and `@(...)` only of one.
 place_call_seen = (n: int, decl: int):
     nm = name_of(int(nodes[decl].name))
@@ -119,6 +146,7 @@ place_written_check = (info: PlaceMethod, decl: int, g: int, l: int, pos: int):
 place_let_decl = (s: int) -> bool:
     if lock_all_decl(s): return true
     init = int(nodes[s].b)
+    place_grouped_call(init)
     if init == 0 or nodes[init].kind != .call or nodes[init].aux2 != i32(AUX2_PLACE): return false
     pos = nodes[s].pos
     if nodes[s].a != 0 or nkids(s) > 0 or has_flag(s, NF_GLOBAL) or has_flag(s, NF_RDONLY): fatal(pos, "a returned place is bound by name alone: `let a = @(acct.lock())`")
@@ -252,6 +280,7 @@ place_range = (b: int, i: int, name: int, root: int, pos: int) -> int:
     loop j in [i + 1..last + 1): place_scan(kid(b, j), name, root, false, false)
     last
 place_lends = (c: int, root: int) -> bool:
+    place_grouped_call(c)
     nodes[c].kind == .call and nodes[c].aux2 == i32(AUX2_PLACE) and nodes[int(nodes[c].a)].kind == .field and place_route_base(int(nodes[int(nodes[c].a)].a)) == root
 place_route_base = (n0: int) -> int:
     n = n0

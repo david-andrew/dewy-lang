@@ -874,6 +874,11 @@ rd_dc_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
         if (((reader_nodes[e].kind =? 'call') and (reader_ctx.tokens[operand].symbol =? 'lparen')) and (rd_dc_closing(@reader_ctx operand) =? (int64<overflow='wrap'>(reader_ctx.at) - 1))) {
             reader_nodes[e].aux2 = int32<overflow='wrap'>(AUX2_PLACE)
         }
+        else if (reader_nodes[e].kind =? 'field') and (reader_ctx.tokens[operand].symbol =? 'lparen') and (rd_dc_closing(@reader_ctx operand) =? (int64<overflow='wrap'>(reader_ctx.at) - 1)) {
+            # Resolve the ordinary grouped member before taking its place.
+            reader_nodes[e].aux2 = int32<overflow='wrap'>(AUX2_PLACE)
+            rd_add_flag(@reader_nodes e (NF_MUT or NF_AT));
+        }
         else if (reader_nodes[e].kind =? 'call') {
             reader_nodes[e].aux2 = int32<overflow='wrap'>(AUX2_PARTIAL)
         }
