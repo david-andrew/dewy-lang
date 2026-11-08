@@ -1,7 +1,7 @@
 $runtime_checks
 from p"checks_text.dewy" import (byte_rfind)
 from p"@lib/core/rt.jo" import (__str_from_bytes)
-from p"@lib/core/os.jo" import (delete_file eprint file_exists list_dir read_bytes read_file write_bytes write_file)
+from p"@lib/core/os.jo" import (__zstr delete_file eprint file_exists list_dir read_bytes read_file write_bytes write_file)
 from p"@lib/core/str.jo" import (to_int as jo_to_int)
 from p"@lib/core/str.jo" import (ends_with split starts_with trim)
 from p"arm64_emit.dewy" import (M_FLOAT M_SIGNED VF VI VS a_call_fix a_data_fix a_faddr_fix a_stub_fix)
@@ -29,7 +29,6 @@ from p"types.jo" import (T_VOID align_up fields prune structs talign targ tsize 
 from p"util.jo" import (fatal files ice intern name_of pos_file pos_off)
 from p"watch.jo" import (WATCH_DATA_RESERVE WATCH_REGION WATCH_REGION_SIZE WH0 g_ids g_offs rl_form rl_kind rl_off rl_pos rl_tgt w32_dir_count w32_mtimes w_added w_assets w_changed w_decl_deps w_decl_hashes w_decl_stack w_ext w_failed_path w_init_inst w_init_lf w_kept w_mig_fns w_mig_lf w_mig_lfs w_mig_nt w_mig_od w_mig_todo w_migrate w_missing_inputs w_patch w_reset w_veneers wd_path wd_structs wk_lam wm_data_end wm_data_next wm_fcanon wm_fhash wm_fidx wm_files wm_fkeys wm_flatest wm_gaddr wm_game wm_gdesc wm_gidx wm_ginit wm_gkeys wm_gsig wm_gsize wm_loop wm_next wm_ro wm_stubs wm_top)
 from p"watch_drive.dewy" import (w_emit wc_default)
-from p"watch_sys.jo" import (w32_mtime)
 from p"x64.jo" import (WATCH_CODE_AT WATCH_CODE_SIZE code data_fix fn_addr fn_len)
 from p"x64_emit.dewy" import (call_fix stub_fix)
 from p"x64_module.dewy" import (stub_addr)
@@ -1020,6 +1019,23 @@ w_i64=(b:array<uint8> at:WatchWord):>int64=>{
 # (DEWY_WATCH_LOG=1: each step of a reload, to standard error)
 w_log=(msg:string):>void=>{
     if env("DEWY_WATCH_LOG") not=? none {eprint("dewy-core watch log: {msg}")}
+}
+# when a file was last written (< 0: it cannot be read); Windows and macOS (Linux uses inotify)
+w32_mtime=(f:string):>int64=>$unsafe {
+    if $target.os =? 'windows' {
+        let wf=__wide(f)
+        # WIN32_FILE_ATTRIBUTE_DATA
+        let info:array<uint8>=fill(uint8(0) 40)
+        if GetFileAttributesExW(data(wf) int32(0) data(info)) =? 0 {return -1}
+        return int64(((data(info) + 20) as ptr<uint32>)[0]) | (int64(((data(info) + 24) as ptr<uint32>)[0]) << 32)
+    } else if $target.os =? 'mac' {
+        # (struct stat: st_mtimespec at 48)
+        let st:array<int64>=fill(int64(0) 18)
+        if __c_stat(data(__zstr(f)) data(st) as ptr<uint8>) not=? 0 {return -1}
+        return st[6] * 1000000000 + st[7]
+    } else {
+        return -1
+    }
 }
 w32_note_file=(f:string):>void=>{
     if w32_mtimes.get(f) =? none {w32_mtimes[f]=w32_mtime(f)}

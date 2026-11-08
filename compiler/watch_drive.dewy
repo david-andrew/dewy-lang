@@ -1,10 +1,11 @@
 $runtime_checks
-from p"@lib/core/rt.jo" import (__str_from_bytes)
-from p"@lib/core/os.jo" import (__exec_unslid __zstr delete_file env eprint exit is_dir time write_bytes)
+from p"@lib/core/rt.jo" import (__str_from_bytes __str_slice __write_fd)
+from p"@lib/core/os.jo" import (__exec_unslid __zstr delete_file env eprint exe_path exit is_dir time write_bytes)
 from p"@lib/core/str.jo" import (ends_with starts_with trim)
 from p"@lib/std/backtrace.jo" import (__hex_text)
 from p"ast.jo" import (nodes)
 from p"check.jo" import (test_mode watch_build)
+from p"checks_text.dewy" import (byte_find)
 from p"driver_pipeline.dewy" import (emit_function)
 from p"inline_ops.dewy" import (rel_collect)
 from p"ir_builders.dewy" import (e_fconst e_iconst e_store)
@@ -15,12 +16,13 @@ from p"lower_storage.dewy" import (mem_mode vt_of)
 from p"main.jo" import (bss_reserve compile)
 from p"module_paths.dewy" import (strip_ext)
 from p"pkg_ops.dewy" import (core_cache)
+from p"settings.jo" import (cli_mode)
 from p"proc_sys.dewy" import (ps_close ps_dup2 ps_exe_ext ps_exit ps_fork ps_keep_open ps_kill ps_pipe ps_poll ps_read ps_self_id ps_setsid ps_wait ps_windows ps_write_fd)
 from p"types.jo" import (fields prune types)
 from p"util.jo" import (more_errors name_of)
-from p"watch.jo" import (WATCH_DATA_RESERVE w32_dir_count w_added w_args w_cache w_changed w_dirs w_enter w_errors w_ext w_failed_path w_from w_kept w_out w_patch w_pid w_r w_ready w_reset w_stdin_done w_to w_watched w_wds w_write_err watch_first wm_files wm_game wm_loop wm_top)
+from p"watch.jo" import (WATCH_DATA_RESERVE w32_dir_count w32_line w_added w_args w_cache w_changed w_dirs w_enter w_errors w_ext w_failed_path w_from w_kept w_out w_patch w_pid w_r w_ready w_reset w_stdin_done w_to w_watched w_wds w_write_err watch_first wm_files wm_game wm_loop wm_top)
 from p"watch_ops.dewy" import (w32_files_changed w32_note_file w32_sources_in w_base w_dir w_i64 w_log watch_read_failed_inputs watch_read_result watch_write_result wm_clear wm_files_collect wp_end wp_put)
-from p"watch_sys.jo" import (w32_compile w32_run w32_wait ws_test_signals)
+from p"watch_sys.jo" import (ws_test_signals)
 
 DriveWord:type=int64<overflow='wrap'>
 watch_main=(path:string args:array<string>):>void=>{
@@ -493,5 +495,193 @@ ws_read_some=(fd:DriveWord @b:array<uint8> at:DriveWord):>DriveWord=>$unsafe {
         return 0
     } else {
         return ps_read(fd @b at 8 - at)
+    }
+}
+
+# ---- Windows: what fork, pipes, inotify and poll do on Linux ----
+# Each build runs in a new process (dewy-core watch --build) given the link map in a file; the
+# program gets its pipes' handles in DEWY_WATCH_PIPES; files are watched by when they were
+# last written, checked a few times a second.
+
+# r or q typed in the terminal (0: nothing; 114 r, 113 q)
+w32_key=():>int64=>$unsafe {
+    if $target.os =? 'windows' {
+        let h=GetStdHandle(uint32(0xFFFFFFF6))
+        let mode:array<uint32>=[uint32(0)]
+        if GetConsoleMode(h data(mode)) not=? 0 {
+            let n:array<uint32>=[uint32(0)]
+            GetNumberOfConsoleInputEvents(h data(n));
+            if n[0] =? 0 {return 0}
+            # INPUT_RECORDs
+            let rec:array<uint8>=fill(uint8(0) 20 * 16)
+            let got:array<uint32>=[uint32(0)]
+            ReadConsoleInputW(h data(rec) uint32(16) data(got));
+            loop i in [0..int64(got[0])) {
+                let r=data(rec) + i * 20
+                # a key going down: its character
+                if (r as ptr<uint16>)[0] =? 1 and ((r + 4) as ptr<int32>)[0] not=? 0 {
+                    let c=int64(((r + 14) as ptr<uint16>)[0])
+                    if c =? 114 or c =? 82 {return 114}
+                    if c =? 113 or c =? 81 {return 113}
+                }
+            }
+            return 0
+        }
+        # (not a terminal: lines, as on Linux)
+        let avail:array<uint32>=[uint32(0)]
+        if PeekNamedPipe(h (uint64(0) as ptr<uint8>) uint32(0) (uint64(0) as ptr<uint32>) data(avail) (uint64(0) as ptr<uint32>)) =? 0 or avail[0] =? 0 {return 0}
+        let b:array<uint8>=fill(uint8(0) int64(avail[0]))
+        let got:array<uint32>=[uint32(0)]
+        ReadFile(h data(b) avail[0] data(got) (uint64(0) as ptr<uint8>));
+        w32_line="{w32_line}{__str_from_bytes(b[0..int64(got[0])))}"
+        let k=byte_find(w32_line "\n")
+        if k <? 0 {return 0}
+        let line=trim(__str_slice(w32_line 0 k))
+        w32_line=__str_slice(w32_line k + 1 (w32_line as array<uint8>).length)
+        if line =? "r" {return 114}
+        if line =? "q" {return 113}
+        return 0
+    } else {
+        return 0
+    }
+}
+
+# 1 a file changed, 2 the program ended, 3 restart, 4 quit
+w32_wait=():>int64=>$unsafe {
+    if $target.os =? 'windows' {
+        loop true {
+            # (the program first: whether it takes patches must be known when a change comes)
+            if w_pid >=? 0 {
+                # the program: gone, or saying (once its game loop starts) whether it takes patches
+                let avail:array<uint32>=[uint32(0)]
+                if PeekNamedPipe(w_from as ptr<uint8> (uint64(0) as ptr<uint8>) uint32(0) (uint64(0) as ptr<uint32>) data(avail) (uint64(0) as ptr<uint32>)) =? 0 {return 2}
+                if avail[0] >=? 8 {
+                    let v=w_read8()
+                    if v <? 0 {return 2}
+                    w_ready=v =? 0
+                    continue
+                }
+            }
+            if w32_files_changed() {return 1}
+            let k=w32_key()
+            if k =? 114 {return 3}
+            if k =? 113 {return 4}
+            Sleep(uint32(40));
+        }
+        return 0
+    } else {
+        return 0
+    }
+}
+
+# start the program built, with two pipes whose handles it finds in DEWY_WATCH_PIPES
+w32_run=():>void=>$unsafe {
+    if $target.os =? 'windows' {
+        let sa:array<int64>=fill(int64(0) 3)
+        sa[0]=24
+        # inheritable
+        sa[2]=1
+        let to_r:array<int64>=[0]
+        let to_w:array<int64>=[0]
+        let from_r:array<int64>=[0]
+        let from_w:array<int64>=[0]
+        CreatePipe(data(to_r) as ptr<ptr<uint8>> data(to_w) as ptr<ptr<uint8>> data(sa) as ptr<uint8> uint32(0));
+        CreatePipe(data(from_r) as ptr<ptr<uint8>> data(from_w) as ptr<ptr<uint8>> data(sa) as ptr<uint8> uint32(0));
+        # (this side's ends stay here)
+        SetHandleInformation(to_w[0] as ptr<uint8> uint32(1) uint32(0));
+        SetHandleInformation(from_r[0] as ptr<uint8> uint32(1) uint32(0));
+        let name=__wide("DEWY_WATCH_PIPES")
+        let val=__wide("{to_r[0]},{from_w[0]}")
+        SetEnvironmentVariableW(data(name) data(val));
+        let argv:array<string>=[w_out]
+        loop x in w_args {argv.push(x)}
+        let wcmd=__wide(__w32_cmdline(argv))
+        let wexe=__wide(w_out)
+        let si:array<int64>=fill(int64(0) 13)
+        si[0]=104
+        let pi:array<int64>=fill(int64(0) 3)
+        let ok=CreateProcessW(data(wexe) data(wcmd) (uint64(0) as ptr<uint8>) (uint64(0) as ptr<uint8>) int32(1) uint32(0) (uint64(0) as ptr<uint8>) (uint64(0) as ptr<uint16>) data(si) as ptr<uint8> data(pi) as ptr<uint8>) not=? 0
+        SetEnvironmentVariableW(data(name) (uint64(0) as ptr<uint16>));
+        CloseHandle(to_r[0] as ptr<uint8>);
+        CloseHandle(from_w[0] as ptr<uint8>);
+        if not ok {
+            CloseHandle(to_w[0] as ptr<uint8>);
+            CloseHandle(from_r[0] as ptr<uint8>);
+            eprint("dewy-core watch: could not start {w_out}")
+            return
+        }
+        CloseHandle(pi[1] as ptr<uint8>);
+        w_pid=pi[0]
+        w_to=to_w[0]
+        w_from=from_r[0]
+    }
+}
+
+# build in a new process given the link map; its errors go to the terminal (and are kept for the
+# game)
+w32_compile=(path:string first:bool):>bool=>$unsafe {
+    if $target.os =? 'windows' {
+        let state="{w_cache}/watch-{ps_self_id()}.state"
+        let res="{w_cache}/watch-{ps_self_id()}.res"
+        if not first {watch_write_result(state);}
+        delete_file(res);
+        delete_file("{res}.inputs");
+        let sa:array<int64>=fill(int64(0) 3)
+        sa[0]=24
+        sa[2]=1
+        let er:array<int64>=[0]
+        let ew:array<int64>=[0]
+        CreatePipe(data(er) as ptr<ptr<uint8>> data(ew) as ptr<ptr<uint8>> data(sa) as ptr<uint8> uint32(0));
+        SetHandleInformation(er[0] as ptr<uint8> uint32(1) uint32(0));
+        let exe=exe_path()
+        let f="0"
+        if first {f="1"}
+        let testing="0"
+        let release="0"
+        if test_mode {testing="1"}
+        if cli_mode =? "release" {release="1"} else if cli_mode =? "debug" {release="d"}
+        let wcmd=__wide(__w32_cmdline([exe "watch" "--build" path state res f w_out testing release]))
+        let wexe=__wide(exe)
+        let si:array<int64>=fill(int64(0) 13)
+        si[0]=104
+        # STARTF_USESTDHANDLES
+        let flags=data(si) as ptr<uint32>
+        flags[15]=uint32(0x100)
+        let handles=data(si) as ptr<ptr<uint8>>
+        handles[10]=GetStdHandle(uint32(0xFFFFFFF6))
+        handles[11]=GetStdHandle(uint32(0xFFFFFFF5))
+        si[12]=ew[0]
+        let pi:array<int64>=fill(int64(0) 3)
+        let started=CreateProcessW(data(wexe) data(wcmd) (uint64(0) as ptr<uint8>) (uint64(0) as ptr<uint8>) int32(1) uint32(0) (uint64(0) as ptr<uint8>) (uint64(0) as ptr<uint16>) data(si) as ptr<uint8> data(pi) as ptr<uint8>) not=? 0
+        CloseHandle(ew[0] as ptr<uint8>);
+        w_errors=""
+        if not started {
+            CloseHandle(er[0] as ptr<uint8>);
+            eprint("dewy-core watch: could not start the compiler ({exe})")
+            return false
+        }
+        CloseHandle(pi[1] as ptr<uint8>);
+        let buf:array<uint8>=fill(uint8(0) 4096)
+        let got:array<uint32>=[uint32(0)]
+        loop ReadFile(er[0] as ptr<uint8> data(buf) uint32(4096) data(got) (uint64(0) as ptr<uint8>)) not=? 0 and got[0] >? 0 {
+            let n=int64(got[0])
+            __write_fd(2 data(buf) n)
+            if (w_errors as array<uint8>).length <? 4000 {w_errors="{w_errors}{__str_from_bytes(buf[0..n))}"}
+        }
+        CloseHandle(er[0] as ptr<uint8>);
+        WaitForSingleObject(pi[0] as ptr<uint8> uint32(0xFFFFFFFF));
+        let code:array<uint32>=[uint32(0)]
+        GetExitCodeProcess(pi[0] as ptr<uint8> data(code));
+        CloseHandle(pi[0] as ptr<uint8>);
+        delete_file(state);
+        if code[0] not=? 0 {
+            watch_read_failed_inputs("{res}.inputs");
+            return false
+        }
+        let ok=watch_read_result(res)
+        delete_file(res);
+        return ok
+    } else {
+        return false
     }
 }

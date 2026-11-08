@@ -1,6 +1,5 @@
 use 'watch.jo'
 use 'watch_drive.dewy'
-use 'watch_sys.jo'
 use 'lower_closures.dewy'
 use 'lower_scalars.dewy'
 use 'lower_storage.dewy'
@@ -878,6 +877,20 @@ w_i64 = (b: u8[], at: int) -> int:
 # (DEWY_WATCH_LOG=1: each step of a reload, to standard error)
 w_log = (msg: str):
     if env("DEWY_WATCH_LOG") != none: eprint("dewy-core watch log: {msg}")
+# when a file was last written (< 0: it cannot be read); Windows and macOS (Linux uses inotify)
+w32_mtime = (f: str) -> int:
+    when TARGET == "windows":
+        wf = __wide(f)
+        info = fill(u8(0), 40)                        # WIN32_FILE_ATTRIBUTE_DATA
+        if GetFileAttributesExW(data(wf), 0, data(info)) == 0: return -1
+        return int(((data(info) + 20) as *u32)[0]) | (int(((data(info) + 24) as *u32)[0]) << 32)
+    else when TARGET == "macos":
+        # (struct stat: st_mtimespec at 48)
+        st = fill(0, 18)
+        if __c_stat(data(__zstr(f)), data(st) as *u8) != 0: return -1
+        return st[6] * 1000000000 + st[7]
+    else:
+        return -1
 w32_note_file = (f: str):
     if w32_mtimes.get(f) == none: w32_mtimes[f] = w32_mtime(f)
 # source files in a directory (a new one may be one a failed build looked for)
