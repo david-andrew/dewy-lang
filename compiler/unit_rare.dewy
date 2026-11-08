@@ -1,15 +1,50 @@
 $runtime_checks
 from p"ast.jo" import NF_EXCL_FIRST
-from p"ast.jo" import (NF_JUXT has_flag nodes)
-from p"check.jo" import (lib_dir locals universe)
-from p"expr.jo" import (ntype)
+from p"ast.jo" import (NF_JUXT has_flag kid nkids nodes)
+from p"check.jo" import (fns lib_dir locals universe)
+from p"expr.jo" import (CV integer_constant ntype)
 from p"type_ops.dewy" import (dt)
-from p"types.jo" import (is_float is_numeric prune structs types)
+from p"types.jo" import (is_float is_int is_numeric prune structs types)
 from p"unit_ops.dewy" import (base_dimension quantity_constant_scale quantity_dimension)
-from p"units.jo" import (quantity_base)
+from p"units.jo" import (quantity_base quantity_scales)
 from p"util.jo" import (files line_col name_of pos_file)
 
 UnitRareWord:type=int64<overflow='wrap'>
+# A conservative denominator multiple, demanded only by a grid check. The
+# bounded expression walk is O(nodes visited), with at most 16 levels. A
+# zero result means unknown; every nonzero result divides a billion.
+time_grid_denominator=(n:UnitRareWord depth:UnitRareWord=0):>UnitRareWord=>$unsafe {
+    if n =? 0 or depth >? 16 or is_float(quantity_base(ntype(n))) {return 0}
+    if is_int(quantity_base(ntype(n))) {return 1}
+    let constant=quantity_constant_scale(n)
+    if constant >=? 0 {
+        let den=quantity_scales[constant].denominator
+        return if 1000000000%den =? 0 {den} else {0}
+    }
+    if nodes.ptr[n].kind =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.none_)) or nodes.ptr[n].aux =? int32(int64(CV.quantity_const))) {return time_grid_denominator(UnitRareWord(nodes.ptr[n].a) depth+1)}
+    if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].sym <=? 0 {return 0}
+    let d=UnitRareWord(fns.ptr[UnitRareWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/rational.dewy" {return 0}
+    let name=name_of(UnitRareWord(nodes.ptr[d].name))
+    if name =? "rational" and nkids(n) =? 2 {
+        let [known den]=integer_constant(kid(n 1))
+        if known and den >? 0 and den <=? 1000000000 and 1000000000%den =? 0 {return den}
+        return 0
+    }
+    if name =? "__unary_sub__" and nkids(n) =? 1 {return time_grid_denominator(kid(n 0) depth+1)}
+    if nkids(n) not=? 2 or not (name in? ["__mul__" "__add__" "__sub__"]) {return 0}
+    let a=time_grid_denominator(kid(n 0) depth+1)
+    let b=time_grid_denominator(kid(n 1) depth+1)
+    if a =? 0 or b =? 0 {return 0}
+    # For sums, a*b is a conservative common denominator too. Rejecting a
+    # product beyond the grid loses a proof, never admits an off-grid value.
+    if a >? 1000000000//b {return 0}
+    let den=a*b
+    if 1000000000%den =? 0 {den} else {0}
+}
+time_grid_proven=(validator:UnitRareWord n:UnitRareWord):>bool=>$unsafe {
+    name_of(UnitRareWord(nodes.ptr[validator].name)) in? ["_grid_error" "_grid_only"] and files[pos_file(nodes.ptr[validator].pos)].path =? "{lib_dir}/time/core.dewy" and quantity_dimension(ntype(n)) =? base_dimension(0) and time_grid_denominator(n) >? 0
+}
 # The time library's own type by name, as a program sees it (0 when t is another type).
 time_core_type=(t0:UnitRareWord name:string):>bool=>$unsafe {
     let t=prune(t0)

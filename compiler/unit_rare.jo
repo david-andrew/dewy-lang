@@ -18,6 +18,34 @@ use 'checks_builders.dewy'
 use 'node_store.dewy'
 use 'unit_ops.dewy'
 
+# A conservative denominator multiple, demanded only by a time grid check.
+time_grid_denominator = (n: int, depth: int = 0) -> int:
+    if n == 0 or depth > 16 or is_float(quantity_base(ntype(n))): return 0
+    if is_int(quantity_base(ntype(n))): return 1
+    constant = quantity_constant_scale(n)
+    if constant >= 0:
+        den = quantity_scales[constant].denominator
+        return if 1000000000%den == 0: den else: 0
+    if nodes[n].kind == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.quantity_const))): return time_grid_denominator(int(nodes[n].a), depth+1)
+    if nodes[n].kind != .call or nodes[n].sym <= 0: return 0
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or files[pos_file(nodes[d].pos)].path != "{lib_dir}/rational.dewy": return 0
+    name = name_of(int(nodes[d].name))
+    if name == "rational" and nkids(n) == 2:
+        known, den = integer_constant(kid(n, 1))
+        if known and den > 0 and den <= 1000000000 and 1000000000%den == 0: return den
+        return 0
+    if name == "__unary_sub__" and nkids(n) == 1: return time_grid_denominator(kid(n, 0), depth+1)
+    if nkids(n) != 2 or not (name in ["__mul__", "__add__", "__sub__"]): return 0
+    a = time_grid_denominator(kid(n, 0), depth+1)
+    b = time_grid_denominator(kid(n, 1), depth+1)
+    if a == 0 or b == 0: return 0
+    if a > 1000000000/b: return 0
+    den = a*b
+    if 1000000000%den == 0: den else: 0
+time_grid_proven = (validator: int, n: int) -> bool:
+    name_of(int(nodes[validator].name)) in ["_grid_error", "_grid_only"] and files[pos_file(nodes[validator].pos)].path == "{lib_dir}/time/core.dewy" and quantity_dimension(ntype(n)) == base_dimension(0) and time_grid_denominator(n) > 0
+
 # The time library's own type by name, as a program sees it (0 when t is another type).
 time_core_type = (t0: int, name: str) -> bool:
     t = prune(t0)

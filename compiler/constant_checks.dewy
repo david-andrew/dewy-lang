@@ -9,11 +9,12 @@ from p"check.jo" import (fns get_fn_inst syms)
 from p"expr.jo" import (CV ntype)
 from p"constant_fold_ops.dewy" import (cc_closed_expr cc_fold_first cc_fold_after)
 from p"types.jo" import (T_STR is_union prune tkind union_members)
-from p"type_ops.dewy" import (mk_union union_index)
+from p"type_ops.dewy" import (dt mk_union union_index)
 from p"util.jo" import (fatal name_of pos_in_lib)
 from p"error_ops.dewy" import (exception_member)
 from p"comptime.jo" import (checked_const_init ct_run ct_values)
 from p"warn_if_ops.dewy" import (wi_param)
+from p"unit_rare.dewy" import (time_grid_proven)
 
 ConstantWord:type=int64<overflow='wrap'>
 let CC_LOCAL:ConstantWord=1 # SK.local
@@ -86,6 +87,7 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
     if folded not=? 0 {return folded}
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl] {
+        if c.params.length =? 1 and c.params[0] <? nkids(n) and time_grid_proven(c.validator kid(n c.params[0])) {return cc_narrow(n "OffGrid")}
         let args=cc_arguments(kids(n) c)
         if args.length not=? c.params.length {continue}
         let pos=cc_check_pos(n c)
@@ -197,13 +199,13 @@ cc_arguments=(xs:array<int64> c:CheckConstant):>array<int64>=>$unsafe {
     args
 }
 # A call that cannot fail: its type without the exceptions, or its value when that is one plain record.
-cc_narrow=(n:ConstantWord):>ConstantWord=>$unsafe {
+cc_narrow=(n:ConstantWord only:string=""):>ConstantWord=>$unsafe {
     # (it cannot fail: what is left of the result once its exceptions are gone)
     let rt=prune(ntype(n))
     if not is_union(rt) {return 0}
     let kept:array<int64>=[]
     loop m in union_members(rt) {
-        if not exception_member(m) {kept.push(m)}
+        if not exception_member(m) or only not=? "" and dt(m) not=? only {kept.push(m)}
     }
     if kept.length =? 0 or kept.length =? union_members(rt).length {return 0}
     let inner=nodes.length

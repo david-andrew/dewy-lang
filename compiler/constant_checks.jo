@@ -11,6 +11,7 @@ use 'errors.jo'
 use 'error_ops.dewy'
 use 'comptime.jo'
 use 'warn_if_ops.dewy'
+use 'unit_rare.dewy'
 use 'constant_folds.jo'
 use 'constant_fold_ops.dewy'
 
@@ -77,6 +78,7 @@ cc_call = (n: int, f: int, decl: int) -> int:
     if folded != 0: return folded
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl]:
+        if c.params.len() == 1 and c.params[0] < nkids(n) and time_grid_proven(c.validator, kid(n, c.params[0])): return cc_narrow(n, "OffGrid")
         args = cc_arguments(n, c)
         if args.len() != c.params.len(): continue
         pos = nodes[n].pos
@@ -127,13 +129,13 @@ cc_arguments = (n: int, c: CheckConstant) -> int[]:
     args
 
 # A call that cannot fail: its type without the exceptions, or its value when that is one plain record.
-cc_narrow = (n: int) -> int:
+cc_narrow = (n: int, only: str = "") -> int:
     # (it cannot fail: what is left of the result once its exceptions are gone)
     rt = prune(ntype(n))
     if not is_union(rt): return 0
     kept: int[]
     loop m in union_members(rt):
-        if not exception_member(m): kept.push(m)
+        if not exception_member(m) or only != "" and dt(m) != only: kept.push(m)
     if kept.len() == 0 or kept.len() == union_members(rt).len(): return 0
     inner = nodes.len()
     nodes.push(nodes[n])

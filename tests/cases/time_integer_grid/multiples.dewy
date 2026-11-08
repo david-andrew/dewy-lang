@@ -1,0 +1,20 @@
+import p"@lib/time/core.dewy" as core
+add=(count:int):>Duration=>{let d:Duration=0s; d+count*1ms}
+sub=(count:int64):>Duration=>{let d:Duration=2s; d-count*1ms}
+reverse=(count:uint64):>Duration=>{let d:Duration=0s; count*1ms+d}
+nanos=(count:int64):>Duration=>{let d:Duration=0s; d+count*1ns}
+small=(count:int64):>Duration|OffGrid=>{let d:Duration=0s; d+count*(1ns/1000)}
+compact=(count:int64):>Duration<width=64>|OutOfRange=>{
+    let d=core.Duration_width_64[0]
+    d+count*1ms
+}
+main=()=>{
+    printl(add(3))
+    printl(sub(3))
+    printl(reverse(3))
+    printl(nanos(-3))
+    printl(small(1) is? OffGrid)
+    printl(small(1000) is? Duration)
+    printl(compact(3))
+    printl(compact(9223372036854775807) is? OutOfRange)
+}
