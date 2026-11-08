@@ -9,7 +9,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 
 | Measure | Now (2026-11-07) | Goal |
 |---|---|---|
-| Acceptance ladder, design surface | 130/130 | all |
+| Acceptance ladder, design surface | 132/132 | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
 | No traps by default | census 2,557 sites in 1,032 of 2,252 programs, down from 3,600 on 10-26 | ordinary code proves without opt-ins |
 | Compile throughput, single thread, default build, every processed line | flagships 164k lines/s (min 100_rtos_kernel 130.9k, 99_dewy_frontend 137.1k; self-build 75.4k) | 200–250k on every flagship |
