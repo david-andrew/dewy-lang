@@ -439,10 +439,13 @@ HELLO_BUDGET_MS = 20.0
 HELLO_GATED = True      # hello is under its 20 ms budget: a regression past it fails
 
 
-def phase_totals(toolchain: Toolchain, sources: list[str]) -> tuple[dict[str, int], int, int | None] | None:
+def phase_totals(toolchain: Toolchain, sources: list[str],
+                 lines_required: bool = True) -> tuple[dict[str, int], int, int | None] | None:
     """Each build --time phase's instructions (root, library and shared work alike), summed over sources, with
-    their processed nodes and processed lines (None where the compiler does not count them); None for a
-    compiler without the phase split."""
+    their processed nodes and processed lines; None for a compiler without the phase split. The phase gate
+    reads instructions and nodes only, so a base whose line counts are missing or negative still gates
+    (its lines come back None); the candidate's must be usable (`lines_required`): a bad count fails loudly
+    (ValueError, RuntimeError) instead of skipping the gate."""
     totals: dict[str, int] = {}
     nodes, lines = 0, 0
     for source in sources:
@@ -452,7 +455,14 @@ def phase_totals(toolchain: Toolchain, sources: list[str]) -> tuple[dict[str, in
         if not split or count is None or not any('optimize' in side for side in split.values()):
             return None
         nodes += count
-        found = speed_corpus.processed(report)
+        try:
+            found = speed_corpus.processed(report)
+        except ValueError:
+            if lines_required:
+                raise
+            found = None
+        if found is None and lines_required:
+            raise RuntimeError(f'{source}: the candidate does not count processed lines')
         lines = lines + found['all'] if found and lines is not None else None
         for side in split.values():
             for phase, n in side.items():
@@ -466,14 +476,12 @@ def cost_model(candidate: Toolchain, base: Toolchain | None, limit: float) -> li
     that grew more than `limit` percent over the base's."""
     sources = [source for name, source, _ in panel(False) if name.startswith('flagship ')]
     new = phase_totals(candidate, sources)
-    old = phase_totals(base, sources) if base is not None else None
+    old = phase_totals(base, sources, lines_required=False) if base is not None else None
     if new is None:
         print('  (no phase split: build --time needs Linux x86-64 hardware counters)')
         return []
     totals, nodes, lines = new
-    if lines is None:
-        print('  (this compiler does not count processed lines)')
-        return []
+    assert lines is not None
     per_node = IPS / GOAL_LINES_PER_SECOND / NODES_PER_LINE
     print(f'cost model, flagship panel ({len(sources)} programs, {lines} processed lines, {nodes} processed nodes, '
           f'{nodes / lines:.1f} nodes/line; instructions per processed node, library and instance work included)'
@@ -499,8 +507,15 @@ def cost_model(candidate: Toolchain, base: Toolchain | None, limit: float) -> li
     return failures
 
 
-def processed_report(toolchain: Toolchain, source: str) -> dict | None:
-    return speed_corpus.processed(time_run(toolchain, source))
+def processed_report(toolchain: Toolchain, source: str, required: bool = True) -> dict | None:
+    """The processed lines of one compile. A compiler that does not count them (or counts below nothing, as
+    older bases did) gives None when not `required`; a required count that is unusable raises."""
+    try:
+        return speed_corpus.processed(time_run(toolchain, source))
+    except ValueError:
+        if required:
+            raise
+        return None
 
 
 def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> list[str]:
@@ -521,7 +536,7 @@ def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> list[str]:
         except CompileError:
             print(f'  {name:30}(cannot build)')
             continue
-        found[name] = (counts[name], speed_corpus.instruction_split(report) or {}, speed_corpus.processed(report))
+        found[name] = (counts[name], speed_corpus.instruction_split(report) or {}, processed_report(toolchain, source))
     phases = ('load', 'check', 'facts', 'effects', 'ownership', 'lower', 'optimize', 'codegen')
     print(f'  latency {"":22}{"G inst":>9}{"est ms":>8}{"root M":>9}{"lib M":>9}{"shared M":>9}{"lib lines":>10}{"inst lines":>11}'
           '   library M by phase')
@@ -587,9 +602,11 @@ def throughput_gate(candidate: Toolchain, base: Toolchain | None, counts: dict[s
     names = [name for name, _, _ in panel(False) if name.startswith('flagship ')]
     sources = {name: source for name, source, _ in panel(False)}
     new_lines = [processed_report(candidate, sources[n]) for n in names]
-    if base is None or any(x is None for x in new_lines):
+    if any(x is None for x in new_lines):
+        raise RuntimeError('the candidate does not count processed lines: the throughput gate cannot run')
+    if base is None:
         return []
-    old_lines = [processed_report(base, sources[n]) for n in names]
+    old_lines = [processed_report(base, sources[n], required=False) for n in names]
     if any(x is None for x in old_lines) or any(n not in base_counts for n in names):
         print('throughput gate: the base does not count processed lines; not gated this time')
         return []

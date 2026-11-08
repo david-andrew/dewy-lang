@@ -122,7 +122,7 @@ def root_counts(entry: Path) -> tuple[int, int]:
     return sum(map(source_lines, texts)), sum(map(physical_lines, texts))
 
 
-LINES = re.compile(r'^lines: root (\d+), library (\d+), instance (\d+); (\d+) instances', re.MULTILINE)
+LINES = re.compile(r'^lines: root (-?\d+), library (-?\d+), instance (-?\d+); (\d+) instances', re.MULTILINE)
 NODES = re.compile(r'^nodes: root (\d+), library (\d+), shared (\d+)', re.MULTILINE)
 
 
@@ -148,11 +148,15 @@ def processed(time_stderr: str) -> dict[str, int] | None:
     lazy bodies nobody asked for), instance (the code lines of each generic instance's declaration, once per
     instance), instances, and nodes (every syntax node made: root, library and shared). Total throughput
     counts all three line kinds; the fan-out is library + instance. Where the compiler lists the files it
-    counted, root and library must be those files' lines (a listing that disagrees is an error, not a count)."""
+    counted, root and library must be those files' lines (a listing that disagrees is an error, not a count);
+    a negative count is an error too (ValueError), never None."""
     lines, nodes = LINES.search(time_stderr), node_total(time_stderr)
     if not lines or nodes is None:
         return None
     root, library, instance, instances = map(int, lines.groups())
+    if min(root, library, instance) < 0:
+        # (a count below nothing is a counting bug: reporting it as "no count" would let callers skip their gates)
+        raise ValueError(f'negative processed lines: root {root}, library {library}, instance {instance}')
     rows = counted_sources(time_stderr)
     if rows:
         paths = [path for _, _, path in rows]

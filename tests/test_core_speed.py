@@ -60,3 +60,24 @@ def test_speed_critical_path_reads_final_line():
     assert speed.critical_result('note\n{"own":5,"workers":[3,4],"critical":9,"total":12}\n') == (9, 12)
     with pytest.raises(ValueError):
         speed.critical_result('no count\n')
+
+
+def fake_report(check: int, library_lines: int) -> str:
+    return (f'instructions: 1000; shared 10: check {check} optimize 1; root 10: load 5 optimize 1\n'
+            'nodes: root 8, library 0, shared 0\n'
+            f'lines: root 1, library {library_lines}, instance 0; 0 instances; library parsed 1, bodies reached 0 of 0\n')
+
+
+def test_phase_gate_never_skipped_by_line_counts(monkeypatch):
+    """An old base counted library lines below nothing; the phase gate still runs, and a negative count in
+    the candidate fails loudly instead of skipping the gate."""
+    reports = {'base': fake_report(100, -4000), 'good': fake_report(150, 40), 'bad': fake_report(100, -4000)}
+    monkeypatch.setattr(speed, 'time_run', lambda toolchain, source: reports[toolchain.label])
+    base, good, bad = (speed.Toolchain(label, None, None) for label in ('base', 'good', 'bad'))
+    failures = speed.cost_model(good, base, 1.0)
+    assert [row for row, _ in failures] == ['resolve+check']
+    with pytest.raises(ValueError, match='negative processed lines'):
+        speed.cost_model(bad, base, 1.0)
+    assert speed.processed_report(base, 'x', required=False) is None
+    with pytest.raises(ValueError):
+        speed.processed_report(base, 'x')

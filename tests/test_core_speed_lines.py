@@ -42,3 +42,14 @@ def test_counted_files_are_the_loaded_files(compiler, tmp_path, name, text, uses
     names = {str(path.relative_to(ROOT / 'lib')) for path in library}
     assert FMT_FILES <= names if uses_fmt else not FMT_FILES & names
     assert found['all'] == found['root'] + found['library'] + found['instance'] > 0
+
+
+@pytest.mark.parametrize('entry', ['97_notes_service/design.dewy', '101_ml_training/core.dewy', '95_kv_store/design.dewy'])
+def test_flagship_lines_are_never_negative(compiler, tmp_path, entry):
+    program = ROOT / 'tests/ladder' / entry
+    run = subprocess.run([compiler, 'build', program, '--time', '-o', tmp_path / 'program'], capture_output=True, text=True,
+                         timeout=300, env={'PATH': '/usr/bin:/bin', 'DEWY_CORE_LIB': str(ROOT / 'lib')})
+    assert run.returncode == 0, run.stdout + run.stderr
+    found = corpus.processed(run.stderr)     # raises on a negative or inconsistent count
+    assert found is not None and found['library'] > 0 and found['all'] > found['root']
+    assert all(lines >= 0 for _, lines, _ in corpus.counted_sources(run.stderr))
