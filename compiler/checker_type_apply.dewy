@@ -19,6 +19,7 @@ CheckerTypeApplyHost:type=[
     fn_value:<(node:int64 expected:int64 targs:array<int64> module:int64 closure:int64):>int64>
     reference:<(pos:int64 name:int64 symbol:int64):>void>
     error:<(node:int64 name:int64 code:int64):>void>
+    layout:<(node:int64 name:int64):>bool>
 ]
 CheckerTypeApplyInput:type=[
     nodes:ptr<array<Node>>
@@ -94,5 +95,7 @@ xa_check=(n:XAWord expected:XAWord ex:XAWord):>CheckerTypeApplyResult=>$unsafe {
         let targs=xa_targs(n)
         return [type=xa_host[0].fn_value(n expected targs -1 base) bypass=false]
     }
+    # (`size_of<T>` and `align_of<T>`, builtins (SK 9), become the integer literal they read as)
+    if (s =? 0 or kind =? 9) and xa_nodes[0].ptr[base].kind =? 'ident' and xa_host[0].layout(n name) {return [type=xa_host[0].check(n expected) bypass=true]}
     [type=tb_mk_typeval(ct_resolve_type(XAWord(xa_nodes[0].ptr[n].c))) bypass=false]
 }

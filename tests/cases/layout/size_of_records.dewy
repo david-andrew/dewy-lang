@@ -1,0 +1,15 @@
+# modes: native native-release
+# `size_of<T>` and `align_of<T>` read a type's in-memory layout as integer
+# literals. A record of fixed-width fields has C's, padding included.
+$runtime_checks
+Item:type = [sku:uint32 qty:int16 bin:uint8 price_cents:int64]
+Named:type = [name:string id:int32]
+bytes_for = <T>(count:int64):>int64 => count * size_of<T>
+main = ():>void => {
+    printl"{size_of<Item>} {align_of<Item>}"
+    printl"{size_of<uint8>} {size_of<float32>} {align_of<int16>} {size_of<ptr<Item>>}"
+    let total:uint64 = size_of<Item> * 3
+    printl(total)
+    printl(bytes_for<Item>(4) bytes_for<uint16>(4))
+    printl"{size_of<Named>} {align_of<Named>}"
+}

@@ -4068,6 +4068,13 @@ main = ():>void => $unsafe {
 }
 ```
 
+`size_of<T>` and `align_of<T>` give a type's size and alignment in bytes, read
+like an integer literal fixed at compile time. For a record with C's layout they
+are C's `sizeof` and `alignof`, padding included, so a C call needs no
+hand-counted size: `qsort(items.ptr uint64(items.length) size_of<Item> @by_sku)`.
+Other types report Dewy's own representation for the target (a `string` field
+is one pointer word).
+
 A record holding a string, an array or another managed value has no C layout,
 and a pointer to one is rejected in an `$extern` signature. So is a pointer to
 `ptr<T>?`, or to a record with such a field: an optional pointer is C's nullable

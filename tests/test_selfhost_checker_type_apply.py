@@ -43,7 +43,13 @@ xa_error_host = (n: int, name: int, code: int):
     print(events)
     print("error:{n}:{name}:{code}")
     exit(19)
-xa_services = CheckerTypeApplyHost(xa_check_host, xa_lookup_host, xa_bare_host, xa_bare_calls_host, xa_bare_call_host, xa_generic_host, xa_fn_value_host, xa_reference_host, xa_error_host)
+xa_layout_name = 8
+xa_layout_host = (n: int, name: int) -> bool:
+    events.push("layout:{n}:{name}")
+    if name != xa_layout_name: return false
+    nodes[n] = Node(kind = .int_lit, ival = 16, type = i32(T_INT))
+    true
+xa_services = CheckerTypeApplyHost(xa_check_host, xa_lookup_host, xa_bare_host, xa_bare_calls_host, xa_bare_call_host, xa_generic_host, xa_fn_value_host, xa_reference_host, xa_error_host, xa_layout_host)
 xa_inputs = CheckerTypeApplyInput(&nodes, &lists, &types, &xa_callee_at, &xa_ide_on, &xa_services)
 xa_binding = checker_type_apply_bind(&xa_inputs)
 targ = (t: int) -> int:
@@ -86,10 +92,16 @@ main = ():
     run(apply(g, [targ(T_STR)]), T_INT)
     held = named(.field, 6, operand_of(T_INT)); nodes[held].type = i32(poly)
     run(apply(held, [targ(T_BOOL)]))
+    xa_symbol = 0; xa_layout_name = 0
+    run(apply(named(.ident, 8), [targ(T_INT)]))
+    xa_layout_name = 8; xa_kind = 4; xa_symbol = 3
+    run(apply(named(.ident, 8), [targ(T_INT)]))
+    # A layout query (`size_of<T>`) by an unbound or builtin name becomes its literal.
     xa_symbol = 0
+    run(apply(named(.ident, 8), [targ(T_INT)]), T_INT)
+    xa_kind = 9; xa_symbol = 4
     run(apply(named(.ident, 8), [targ(T_INT)]))
-    xa_kind = 4; xa_symbol = 3
-    run(apply(named(.ident, 8), [targ(T_INT)]))
+    run(apply(named(.ident, 2), [targ(T_INT)]))
     print(events)
     print("ok")
 '''

@@ -4822,6 +4822,9 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         return T_INT
     else if id == .sizeof or id == .alignof:
         nargs_check(n, nargs, 1, 1, "size_of")
+        if files[pos_file(nodes[n].pos)].is_dewy:
+            nm = if id == .sizeof: "size_of" else: "align_of"
+            fatal(nodes[n].pos, "write `{nm}<T>`: the type goes in angle brackets")
         t = expr_as_type(args[0])
         layout(t)
         v = tsize(t)
@@ -6549,6 +6552,20 @@ bare_fns_call = (name: int, mod: int) -> int:
             sig = fn_sig(d)
             return if sig.ret != 0 and is_fn_type(int(sig.ret)): 2 else: 1
     0
+
+# `size_of<T>` / `align_of<T>` (docs/design/user_managed_storage.md): T's in-memory
+# layout, read like the integer literal it becomes. Records of C-layout fields
+# match C's sizeof and alignof.
+apply_layout = (n: int, name: int) -> bool:
+    nm = name_of(name)
+    if nm != "size_of" and nm != "align_of": return false
+    if nodes[n].nlist != 1: fatal(nodes[n].pos, "`{nm}<T>` takes one type argument")
+    t = resolve_type(kid(n, 0))
+    layout(t)
+    v = tsize(t)
+    if nm == "align_of": v = talign(t)
+    nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = v, flags = i32(NF_LITERAL))
+    true
 
 # `f` alone: the call f(), checked in place of n.
 bare_call = (n: int, expected: int) -> int:

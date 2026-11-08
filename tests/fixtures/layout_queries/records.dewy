@@ -1,0 +1,23 @@
+# The records of records.c, each printed as "name size_of<T> align_of<T>".
+A:type = [x:uint8]
+B:type = [x:uint8 y:int32]
+C:type = [x:int64 y:uint8]
+D:type = [a:uint8 b:uint16 c:uint8]
+E:type = [f:float32 d:float64 g:float32]
+F:type = [b:bool p:ptr<uint8> q:int16]
+G:type = [inner:B tail:uint8]
+H:type = [xs:array<int16 length=3> k:uint8]
+I:type = [xs:array<float32 length=5>]
+J:type = [c:C d:D e:E]
+main = ():>void => {
+    printl"A {size_of<A>} {align_of<A>}"
+    printl"B {size_of<B>} {align_of<B>}"
+    printl"C {size_of<C>} {align_of<C>}"
+    printl"D {size_of<D>} {align_of<D>}"
+    printl"E {size_of<E>} {align_of<E>}"
+    printl"F {size_of<F>} {align_of<F>}"
+    printl"G {size_of<G>} {align_of<G>}"
+    printl"H {size_of<H>} {align_of<H>}"
+    printl"I {size_of<I>} {align_of<I>}"
+    printl"J {size_of<J>} {align_of<J>}"
+}

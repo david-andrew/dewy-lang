@@ -21,7 +21,7 @@ by_value_desc = (a:ptr<Item> b:ptr<Item>):>int32 => $unsafe {
 lookup_sku = (items:array<Item> sku:uint32):>Item | none => $unsafe {
     let key:array<Item> = [Item[sku 0 0 0]]
     let sorted = items
-    let found = bsearch(key.ptr sorted.ptr uint64(sorted.length) 16 @by_sku)
+    let found = bsearch(key.ptr sorted.ptr uint64(sorted.length) size_of<Item> @by_sku)
     if found is? none return none
     let at:ptr<Item> = found
     at[0]
@@ -38,7 +38,7 @@ main = ():>void => {
         let price = int64(seed % 9973) + 99
         items.push(Item[sku qty bin price])
     }
-    $unsafe qsort(items.ptr uint64(items.length) 16 @by_sku)
+    $unsafe qsort(items.ptr uint64(items.length) size_of<Item> @by_sku)
     let sorted = true
     loop i in [1..items.length) {
         if items[i - 1].sku >? items[i].sku sorted = false
@@ -51,7 +51,7 @@ main = ():>void => {
         printl"found {h.sku} qty={h.qty} bin={h.bin} price={h.price_cents}"
     }
     printl"missing: {lookup_sku(items 100001) is? none}"
-    $unsafe qsort(items.ptr uint64(items.length) 16 @by_value_desc)
+    $unsafe qsort(items.ptr uint64(items.length) size_of<Item> @by_value_desc)
     loop i in [0..5) {
         let it = items[i]
         printl"{it.sku} {it.qty}x{it.price_cents} = {int64(it.qty) * it.price_cents}"

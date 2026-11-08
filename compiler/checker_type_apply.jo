@@ -14,6 +14,7 @@ struct CheckerTypeApplyHost:
     fn_value: (int, int, int[], int, int) -> int
     reference: (int, int, int) -> void
     error: (int, int, int) -> void
+    layout: (int, int) -> bool
 struct CheckerTypeApplyInput:
     nodes: *(Node[])
     lists: *(i32[])
@@ -78,4 +79,5 @@ xa_check = (n: int, expected: int, ex: int) -> CheckerTypeApplyResult:
         if xa_types[0][int(tu_prune(int(xa_nodes[0][base].type)))].kind != .polyfn: xa_host[0].error(n, name, 4)
         targs = xa_targs(n)
         return CheckerTypeApplyResult(xa_host[0].fn_value(n, expected, targs, -1, base), false)
+    if (s == 0 or kind == 9) and xa_nodes[0][base].kind == .ident and xa_host[0].layout(n, name): return CheckerTypeApplyResult(xa_host[0].check(n, expected), true)
     CheckerTypeApplyResult(int(tb_mk_typeval(ct_resolve_type(int(xa_nodes[0][n].c)))), false)
