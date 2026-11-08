@@ -1,0 +1,4 @@
+# modes: native
+# Nothing checks what C returns, so a refined C result says to check it in Dewy.
+toupper=(c:int32):>int32<(<=? 255)> => $extern
+main=():>void=>printl($unsafe toupper(97))

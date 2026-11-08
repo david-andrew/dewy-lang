@@ -206,7 +206,7 @@ signature_finish=(decl:int64 @sig:FnSig shaped:bool mask:int64):>void=>$unsafe {
         ref_validate_signature(sig.params int64(sig.ret) mask nodes.ptr[decl].pos)
         if has_flag(decl NF_EXTERN) {
             loop t in [sig.params... int64(sig.ret)] {
-                if ref_storage_contract(t) {fatal(nodes.ptr[decl].pos "extern refinement contracts require a checked implementation")}
+                if ref_storage_contract(t) {fatal(nodes.ptr[decl].pos "a `$extern` declaration cannot state a refinement: nothing checks what C passes or returns. Declare the plain C type and check it in a Dewy wrapper, as in `upper = (c:int32):>uint8 => \{ let r = $unsafe toupper(c); if r <? 0 or r >? 255 return 0; uint8(r) }`")}
             }
         }
     }
