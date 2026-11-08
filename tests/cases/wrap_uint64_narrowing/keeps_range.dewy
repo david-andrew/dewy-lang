@@ -1,0 +1,11 @@
+# modes: native native-release
+# A wrapping uint64's remainder converts to a narrower type with its range,
+# as a plain uint64's does, so arithmetic on the result proves.
+quantity=(s:uint64<overflow='wrap'>):>int16=>int16((s >> 20) % 41) - 10
+main=():>void=>{
+    let s:uint64<overflow='wrap'>=0x9e3779b97f4a7c15
+    loop i in [0..3) {
+        s=s * 6364136223846793005 + 1442695040888963407
+        printl(quantity(s))
+    }
+}

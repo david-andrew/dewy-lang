@@ -1,0 +1,4 @@
+# modes: native
+# The range is exact: one past int16's top is still unproven.
+over=(s:uint64<overflow='wrap'>):>int16=>int16(s % 32768) + 1
+main=():>void=>printl(over(5))

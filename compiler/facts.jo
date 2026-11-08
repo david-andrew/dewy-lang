@@ -3196,11 +3196,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             top = if b.wide or b.hi == FACT_MAX and fact_open_endpoint(s, a, true): FACT_MAX else: b.hi xor FACT_MIN
             return fact_new(s, FactBound(b.lo xor FACT_MIN, top), FactTerm(type = T_U64))
         if from == to and nodes[n].aux == i32(int(CV.int_)): return a
-        if ntype(n) != ntype(int(nodes[n].a)) and (ntype(n) == T_U64 or ntype(int(nodes[n].a)) == T_U64):
+        # (uint64 values, `uint64<overflow='wrap'>` too, hold encoded intervals: fact_type)
+        if from != to and (to == T_U64 or from == T_U64):
             # (a value both types hold converts exactly: decode or encode its interval)
             if fact_scalar(ntype(n)) and fact_scalar(ntype(int(nodes[n].a))) and nodes[n].aux == i32(int(CV.int_)):
-                if ntype(n) == T_U64 and b.lo >= 0: return fact_new(s, FactBound(b.lo xor FACT_MIN, b.hi xor FACT_MIN), FactTerm(type = T_U64))
-                if ntype(n) != T_U64 and b.hi < 0 and sa_fits(b.lo xor FACT_MIN, ntype(n)) and sa_fits(b.hi xor FACT_MIN, ntype(n)):
+                if to == T_U64 and b.lo >= 0: return fact_new(s, FactBound(b.lo xor FACT_MIN, b.hi xor FACT_MIN), FactTerm(type = T_U64))
+                if to != T_U64 and b.hi < 0 and sa_fits(b.lo xor FACT_MIN, ntype(n)) and sa_fits(b.hi xor FACT_MIN, ntype(n)):
                     r = FactBound(b.lo xor FACT_MIN, b.hi xor FACT_MIN)
                     r.nz = r.lo > 0
                     return fact_new(s, r, FactTerm(type = ntype(n)))
