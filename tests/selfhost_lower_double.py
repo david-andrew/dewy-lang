@@ -1,10 +1,8 @@
 """Link one lowering leaf or its twin against the real compiler services."""
 import json
-import hashlib
-import os
 import re
-import subprocess
 
+from tests.driver_cache import build_driver
 from tests.support import ROOT
 
 
@@ -23,35 +21,13 @@ class CompilerModules(dict):
 
 
 def cached_driver(compiler, tmp_path, release, modules):
-    """Reuse byte-identical builds within this pytest worker's temporary session.
+    """The driver built from this module graph, reused from the persistent cache (tests/driver_cache.py).
 
-    Hash the entire supplied graph, including service doubles and the driver.
-    A changed leaf body therefore cannot reuse its previous executable. Runtime
-    inputs and outputs stay in each test's own directory and are never cached.
+    The key hashes the entire supplied graph, including service doubles and the driver, with the
+    compiler and library. A changed leaf body therefore cannot reuse its previous executable.
+    Runtime inputs and outputs stay in each test's own directory and are never cached.
     """
-    identity = hashlib.sha256(compiler.read_bytes())
-    identity.update(json.dumps([release, sorted((k, v) for k, v in os.environ.items()
-                                               if k.startswith('DEWY_'))]).encode())
-    library = os.environ.get('DEWY_CORE_LIB')
-    if library:
-        from pathlib import Path
-        for path in sorted(Path(library).rglob('*')):
-            if path.is_file():
-                identity.update(str(path).encode() + b'\0' + path.read_bytes())
-    for name, text in sorted(modules.items()):
-        identity.update(name.encode() + b'\0' + text.encode() + b'\0')
-    directory = tmp_path.parent / 'selfhost-builds' / identity.hexdigest()
-    binary = directory / 'driver'
-    if not (directory / 'ready').exists():
-        directory.mkdir(parents=True, exist_ok=True)
-        for name, text in modules.items():
-            (directory / name).write_text(text)
-        built = subprocess.run([compiler, 'build', directory / 'driver.jo', '-o', binary,
-                                *(['--release'] if release else [])],
-                               capture_output=True, text=True, timeout=90)
-        assert built.returncode == 0, built.stdout + built.stderr
-        (directory / 'ready').touch()
-    return binary
+    return build_driver(compiler, modules, release)
 
 
 def modules_for(source, output, leaf="lower_group", flags=()):

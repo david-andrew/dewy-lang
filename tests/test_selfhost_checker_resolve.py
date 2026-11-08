@@ -4,6 +4,7 @@ import subprocess
 
 import pytest
 
+from tests.driver_cache import build_driver
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_effect_double import effect_services
 from tests.test_selfhost_type_constructors import DRIVER as CONSTRUCTORS
@@ -228,18 +229,7 @@ def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubl
                     text = text.replace(f'p"{stem}.dewy"', f'p"{stem}.jo"')
             modules[name] = effect_services(text, jo_doubles)
         modules['driver.jo'] = ''.join(f"use '{s}.{extension}'\n" for s in stems) + driver
-        if arguments:
-            from tests.selfhost_lower_double import cached_driver
-            binary = cached_driver(compiler, tmp_path, release, modules)
-        else:
-            directory = tmp_path / extension
-            directory.mkdir()
-            for name, text in modules.items():
-                (directory / name).write_text(text)
-            source, binary = directory / 'driver.jo', directory / 'driver'
-            built = subprocess.run([compiler, 'build', source, '-o', binary,
-                                    *(['--release'] if release else [])], capture_output=True, text=True, timeout=90)
-            assert built.returncode == 0, built.stdout + built.stderr
+        binary = build_driver(compiler, modules, release)
         ran = subprocess.run([binary, *arguments], capture_output=True, timeout=60)
         assert ran.returncode == status, ran.stdout[-6000:] + ran.stderr
         outputs.append(ran.stdout + ran.stderr if with_stderr else ran.stdout)
