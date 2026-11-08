@@ -250,6 +250,7 @@ compile = (path: str, out0: str) -> str:
         init_fns.insert(1, runtime_fn("__owner_start"))
     if concurrency_ffi_start != 0: init_fns.insert(1, concurrency_ffi_start)
     find_unique_globals(not watch_build and not repl_image and not lower_only)
+    once_prepare(not watch_build and not repl_image and not lower_only)
     if not dbg_on and not watch_build and not repl_image and not lower_only: callback_prepare()
     t1 = time()
     ic_switch(IC_LOWER, IC_SHARED)

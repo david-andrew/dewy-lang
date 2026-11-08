@@ -139,6 +139,33 @@ local_place = (l: int, write: bool) -> Place:
     if locals[l].offset >= 0: return Place(true, e_slot(int(locals[l].offset)))
     Place(false, int(locals[l].vreg))
 
+# A value made once where it is written (lower.jo once_prepare): the hidden global g once a
+# run has made it, else made here, borrowed for the statement, and kept in g while no parallel
+# job runs (as refcounts are plain then), so a thread only ever reads a value whole. A run that
+# reaches it in a job before that makes its own, as an ordinary call.
+once_place = (g: int, a: int, ut: int) -> Place:
+    kept = e_gaddr(global_addr_off(g))
+    built = e_gaddr(global_addr_off(g + 1))
+    at = vreg(VI)
+    e_mov(at, kept)
+    iff(e_bin(.eq, VI, e_load(VI, built, 0, 8), e_iconst(0)))
+    was = ir_cold
+    ir_cold = true
+    enter_cond()
+    val = gen_expr(a)
+    borrow(val, ut)
+    e_mov(at, val.v)
+    iff(e_bin(.eq, VI, rt_global("__mt_active"), e_iconst(0)))
+    e_copy(kept, val.v, tsize(ut))
+    e_zero(val.v, tsize(ut))
+    e_store(built, 0, e_iconst(1), 8)
+    e_mov(at, kept)
+    endc()
+    leave_cond()
+    ir_cold = was
+    endc()
+    Place(true, at)
+
 gen_index = (n: int) -> int:
     if frozen.len() > 0:
         if let v = frozen.get(n): return v
@@ -306,7 +333,7 @@ gen_place = (e: int, write: bool) -> Place:
         a = int(nodes[e].a)
         ut = prune(ntype(a))
         layout(ut)
-        base = gen_place(a, write)
+        base = if not write and once_slots.len() > 0 and once_slots.has(e) and tl_items.len() > 0: once_place(once_slots[e], a, ut) else: gen_place(a, write)
         addr = place_addr(base, ut)
         vi = int(nodes[e].aux)
         iff(e_bin(.ne, VI, e_load(VI, addr, 0, 4), e_iconst(vi)))

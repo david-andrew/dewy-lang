@@ -44,6 +44,8 @@ use 'ast.jo'
 use 'types.jo'
 use 'type_ops.dewy'
 use 'check.jo'
+use 'check_constant.jo'
+use 'constant_checks.dewy'
 use 'expr.jo'
 use 'effects.jo'
 use 'ir.jo'
@@ -600,6 +602,32 @@ uniq_locals: int[]          # locals known to be unique while lowering the curre
 # never copied or exposed cannot require detaching at an element write. Keep
 # this separate from loop-local uniqueness: it holds across calls as well.
 uniq_globals: bool[]
+
+# ---------------- values made once where they are written ----------------
+# A literal regex, `s.find(regex(r"\d+"))` in a loop, is the same value each time: its narrowed
+# call (constant_checks.dewy cc_narrow) -> a hidden global holding the value, and the next one,
+# a word set once it does (lower_group.dewy once_place). O(constant-checked calls), before
+# lowering, so fused workers see the same globals. Not for builds that keep running and
+# reload (watch, the prompt) or make no code.
+once_slots: {int: int} = {}
+
+once_prepare = (enabled: bool):
+    once_slots = {}
+    if not enabled or cc_passed.len() == 0: return
+    name = intern("regex")
+    path = lib_dir + "/std/regex.jo"
+    loop n, _ in cc_passed:
+        if nodes[n].kind != .narrow: continue
+        a = int(nodes[n].a)
+        if a <= 0 or nodes[a].kind != .call or nodes[a].aux != 0 or nodes[a].sym <= 0 or nkids(a) != 1: continue
+        d = int(fns[int(nodes[a].sym)].decl)
+        if d == 0 or int(nodes[d].name) != name or files[pos_file(nodes[d].pos)].path != path: continue
+        if cc_constant(kid(a, 0)) < 0: continue
+        g = globals.len()
+        m = int(nodes[d].mod)
+        globals.push(Global(name = i32(name), type = i32(prune(ntype(a))), mod = i32(m), sym = "g_regex_once_{g}", state = 2))
+        globals.push(Global(name = i32(name), type = i32(T_INT), mod = i32(m), sym = "g_regex_built_{g}", state = 2))
+        once_slots[n] = g
 
 # a loop condition that is cheap to test twice and computes nothing the body could reuse:
 # comparisons of variables and literals (i < j, k != 0, done), and/or/not of those

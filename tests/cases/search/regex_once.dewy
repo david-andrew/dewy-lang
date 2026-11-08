@@ -1,0 +1,32 @@
+# A literal regex is made once where it is written and kept: each place its own, the same value
+# on every pass, and a copy changed changes only the copy.
+first=(s:string):>int64=>{
+    let m=s.find(regex(r"o w(or)ld"))
+    if m isnt? Missing {return m.start}
+    -1
+}
+second=(s:string):>int64=>{
+    let m=s.find(regex(r"o w(or)ld"))
+    if m isnt? Missing {return m.groups.length}
+    -1
+}
+changed=():>string=>{
+    let r=regex(r"(a)(b)")
+    r.groups=7
+    r.pattern="changed"
+    "{r.pattern} {r.groups}"
+}
+kept=():>string=>{
+    let r=regex(r"(a)(b)")
+    "{r.pattern} {r.groups} {"xaby".replace(r "<$2$1>")}"
+}
+main=()=>{
+    loop i in [0..3) {
+        printl("{first("hello world")} {second("hello world")} {first("nothing")} {changed()} {kept()}")
+    }
+    let words:array<string>=[]
+    loop line in ["a1 b22" "c333" ""] {
+        loop m in line.find_all(regex(r"[a-z](\d+)")) {words.push(m.text)}
+    }
+    printl(words)
+}

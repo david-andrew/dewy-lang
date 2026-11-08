@@ -7,7 +7,7 @@ from p"lower_storage.dewy" import (V arr_len arr_unique blk borrow box_put box_v
 from p"lower_analysis.dewy" import (assign_rhs_effects borrow_may_change copy_through index_stable lm_change_at lm_resizing_call lpath_key lpath_root may_write_root mentions_local mut_alias_check mut_may_reach path_within place_steps place_text place_var same_var shares_mut_root unchanged_by write_root)
 from p"lower_helpers.dewy" import (field_list fixed_elem_addr fixed_loop_begin fixed_loop_end)
 $runtime_checks
-from p"lower.jo" import (BOX_HDR BuildItem CopyBack FixedPath HK LF_ELEMENTVIEW LF_HELDVIEW LoanCapacity LoopInfo Place VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_slot building comprehension_push_index copy_backs ctl cur_block cur_block_i cur_fn cur_ret env_v fixed_fill_count fixed_fill_exact fixed_fill_push fixed_fill_slot fixed_fill_type fixed_paths fp_bases fp_calls fp_escape fp_kill fp_lambda fp_written frozen held_views loan_capacities loops lower_entry opt_release pinned_box pinned_type scope_defers scope_locals sret_v stack_closure_passed stack_closure_targets tl_items tl_values uniq_locals)
+from p"lower.jo" import (once_slots BOX_HDR BuildItem CopyBack FixedPath HK LF_ELEMENTVIEW LF_HELDVIEW LoanCapacity LoopInfo Place VC_AGG VC_FLT VC_INT VC_VOID Val arg_snapshots box_slot building comprehension_push_index copy_backs ctl cur_block cur_block_i cur_fn cur_ret env_v fixed_fill_count fixed_fill_exact fixed_fill_push fixed_fill_slot fixed_fill_type fixed_paths fp_bases fp_calls fp_escape fp_kill fp_lambda fp_written frozen held_views loan_capacities loops lower_entry opt_release pinned_box pinned_type scope_defers scope_locals sret_v stack_closure_passed stack_closure_targets tl_items tl_values uniq_locals)
 from p"expr.jo" import (CV FMT_DEWY IN int_widens integer_constant mk_ident_local ntype swizzle_run)
 from p"checks_thin_expr.dewy" import (fmt_field_order fmt_hidden fmt_minted is_map_type swizzle_index)
 from p"check.jo" import (target_wasm LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_VALUECAP compound_op dewy_at fns globals lib_dir locals runtime_fn target_macos target_windows)
@@ -151,6 +151,33 @@ local_place=(l:LGWord write:bool):>Place=>$unsafe {
     }
     if locals.ptr[l].offset >=? 0 {return Place[true e_slot(LGWord(locals.ptr[l].offset))]}
     return Place[false LGWord(locals.ptr[l].vreg)]
+}
+# A value made once where it is written (lower.jo once_prepare): the hidden global g once a
+# run has made it, else made here, borrowed for the statement, and kept in g while no parallel
+# job runs (as refcounts are plain then), so a thread only ever reads a value whole. A run that
+# reaches it in a job before that makes its own, as an ordinary call.
+once_place=(g:LGWord a:LGWord ut:LGWord):>Place=>{
+    let kept=e_gaddr(global_addr_off(g))
+    let built=e_gaddr(global_addr_off(g + 1))
+    let at=vreg(VI)
+    e_mov(at kept);
+    iff(e_bin('eq' VI e_load(VI built 0 8) e_iconst(0)));
+    let was=ir_cold
+    ir_cold=true
+    enter_cond();
+    let val=gen_expr(a)
+    borrow(val ut);
+    e_mov(at val.v);
+    iff(e_bin('eq' VI rt_global("__mt_active") e_iconst(0)));
+    e_copy(kept val.v tsize(ut));
+    e_zero(val.v tsize(ut));
+    e_store(built 0 e_iconst(1) 8);
+    e_mov(at kept);
+    endc();
+    leave_cond();
+    ir_cold=was
+    endc();
+    Place[true at]
 }
 gen_index=(n:LGWord):>LGWord=>$unsafe {
     if frozen.length >? 0 {
@@ -349,7 +376,7 @@ gen_place=(e:LGWord write:bool):>Place=>$unsafe {
         let a:LGWord=LGWord(nodes.ptr[e].a)
         let ut=prune(ntype(a))
         layout(ut);
-        let base=gen_place(a write)
+        let base=if not write and once_slots.length >? 0 and once_slots.has(e) and tl_items.length >? 0 {once_place(once_slots[e] a ut)} else {gen_place(a write)}
         let addr=place_addr(base ut)
         let vi:LGWord=LGWord(nodes.ptr[e].aux)
         iff(e_bin('ne' VI e_load(VI addr 0 4) e_iconst(vi)));
