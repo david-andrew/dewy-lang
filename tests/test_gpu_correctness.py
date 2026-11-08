@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import Scripts, compiler  # noqa: F401
+from tools.cores import on_cores
 from tools.headless import headless
 
 CASES = Path(__file__).parent / 'cases'
@@ -19,7 +20,7 @@ GROUPS = ['gpu_nonempty', 'gpu_float_sum', 'gpu_upload_shape', 'gpu_integer_uplo
 def test_gpu_correctness(compiler, tmp_path, group, target, release):
     env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
     headless(env)
-    env.update(DEWY_THREADS='1', LP_NUM_THREADS='1', DEWY_VK_PIPELINE_CACHE='0')
+    env.update(LP_NUM_THREADS='1', DEWY_VK_PIPELINE_CACHE='0')
     profiles = [{}, {'DEWY_VULKAN': '0', 'EGL_PLATFORM': 'surfaceless'},
                 {'DEWY_NO_GPU': '1'}, {'DEWY_SOFTWARE': '1'}]
     if target == 'wasm':
@@ -45,5 +46,5 @@ def test_gpu_correctness(compiler, tmp_path, group, target, release):
             command = ['node', runner]
         expected = source.with_suffix('.out').read_text()
         for profile in profiles:
-            ran = subprocess.run(command, env=dict(env, **profile), capture_output=True, text=True, timeout=20)
+            ran = subprocess.run(on_cores(command, 1), env=dict(env, **profile), capture_output=True, text=True, timeout=20)
             assert ran.returncode == 0 and ran.stdout == expected, f'{source.name} {profile}\n{ran.stdout}{ran.stderr}'

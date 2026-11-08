@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import Scripts, target_name
+from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
 RUNTIME_CHECKS = '\n$runtime_checks\n'
@@ -49,7 +50,7 @@ def test_parallel_syntax(compiler, tmp_path, target, release):
     source = tmp_path / 'main.dewy'
     source.write_text(PROGRAM + RUNTIME_CHECKS)
     output = tmp_path / 'main'
-    env = dict(os.environ, DEWY_THREADS='2', DEWY_EMIT_WORKERS='1')
+    env = dict(os.environ, DEWY_EMIT_WORKERS='1')
     built = subprocess.run([compiler, 'build', source, '-o', output, '--target', target_name(target),
                             *(['--release'] if release else [])], env=env,
                            capture_output=True, text=True, timeout=60)
@@ -62,8 +63,7 @@ def test_parallel_syntax(compiler, tmp_path, target, release):
         runner.write_text('\n'.join(scripts.parts))
         command = ['node', runner]
     for threads in (1, 2):
-        env['DEWY_THREADS'] = str(threads)
-        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(on_cores(command, threads), env=env, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stdout + result.stderr
 
 

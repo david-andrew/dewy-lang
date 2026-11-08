@@ -166,7 +166,7 @@ def main() -> int:
             rows[label] = {}
             for workers in args.workers:
                 command = [shutil.which('taskset'), '-c', ','.join(map(str, cpus[:workers])), str(binary), str(size)]
-                run_env = dict(env, DEWY_THREADS=str(workers))
+                run_env = env
                 readings = []
                 for repeat in range(args.runs):
                     if debug:

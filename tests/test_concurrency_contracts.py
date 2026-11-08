@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from tests.support import compiler
+from tools.cores import on_cores
 
 
 def check(compiler, tmp_path, text, mode='check'):
@@ -68,7 +69,7 @@ $runtime_checks
 ''', 'build')
     assert result.returncode == 0, result.stderr
     for threads in (1, 2):
-        ran = subprocess.run([tmp_path / 'program'], env=dict(os.environ, DEWY_THREADS=str(threads)),
+        ran = subprocess.run(on_cores([tmp_path / 'program'], threads),
                              capture_output=True, text=True, timeout=20)
         assert ran.returncode == 0, ran.stderr
 

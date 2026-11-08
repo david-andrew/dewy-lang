@@ -8,6 +8,7 @@ import subprocess
 import pytest
 
 from tests.support import compiler
+from tools.cores import on_cores
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('forkjoin_bench', ROOT / 'bench/parallel/run.py')
@@ -32,9 +33,9 @@ def test_kernel_checksum(compiler, tmp_path, kernel):
     assert built.returncode == 0, built.stderr
     expected = None
     for threads, serial in ((1, True), (1, False), (2, False), (4, False)):
-        env = dict(os.environ, DEWY_THREADS=str(threads), OMP_NUM_THREADS=str(threads))
+        env = dict(os.environ, OMP_NUM_THREADS=str(threads))
         for binary in (c, dewy):
-            result = subprocess.run([binary, str(BENCH.SMALL[kernel]), *(['serial'] if serial else [])],
+            result = subprocess.run(on_cores([binary, str(BENCH.SMALL[kernel]), *(['serial'] if serial else [])], threads),
                                     env=env, capture_output=True, text=True, timeout=30)
             assert result.returncode == 0, result.stderr
             value, ns = map(int, result.stdout.split())

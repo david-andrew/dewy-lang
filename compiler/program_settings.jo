@@ -7,10 +7,15 @@ use 'settings.jo'
 use 'util.jo'
 
 dir_program_setting = (name: str) -> bool:
-    name == "time.zone" or name == "time.rules" or name == "time.zone_source"
+    name == "time.zone" or name == "time.rules" or name == "time.zone_source" or name == "program.max_cores"
+
+# (a core count is a number, every other program-wide setting a name in quotes)
+dir_program_spelled = (s: DirScope) -> str:
+    if name_of(s.setting) == "program.max_cores": return "${name_of(s.setting)} = {name_of(s.value - 2)}"
+    "${name_of(s.setting)} = '{name_of(s.value - 2)}'"
 
 dir_program_disagree = (a: DirScope, b: DirScope):
-    fatal(a.at, "program-wide `${name_of(a.setting)} = '{name_of(a.value - 2)}'` at {pos_str(a.at)} conflicts with `${name_of(b.setting)} = '{name_of(b.value - 2)}'` at {pos_str(b.at)}: reachable main functions must agree on program-wide settings")
+    fatal(a.at, "program-wide `{dir_program_spelled(a)}` at {pos_str(a.at)} conflicts with `{dir_program_spelled(b)}` at {pos_str(b.at)}: reachable main functions must agree on program-wide settings")
 
 dir_program_prepare = ():
     if not dir_program_any: return

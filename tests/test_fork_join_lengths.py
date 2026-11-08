@@ -1,11 +1,11 @@
 """Fixed fork collectors keep their length even when no array is materialized."""
-import os
 import shutil
 import subprocess
 
 import pytest
 
 from tests.support import Scripts, compiler, target_name
+from tools.cores import on_cores
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm'])
@@ -38,7 +38,7 @@ $runtime_checks
         command = [shutil.which('node'), runner]
         workers = (1,)
     for n in workers:
-        result = subprocess.run(command, env=dict(os.environ, DEWY_THREADS=str(n)),
+        result = subprocess.run(on_cores(command, n),
                                 capture_output=True, text=True, timeout=20)
         assert result.returncode == 0, result.stderr
         assert result.stdout == expected
@@ -59,7 +59,7 @@ $runtime_checks
                            capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stderr
     for n in (1, 4):
-        result = subprocess.run([binary], env=dict(os.environ, DEWY_THREADS=str(n)),
+        result = subprocess.run(on_cores([binary], n),
                                 capture_output=True, text=True, timeout=20)
         assert result.returncode != 0
         assert 'assertion failed: parts.length =? 3' in result.stderr
@@ -83,7 +83,7 @@ $runtime_checks
                            capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stderr
     for n in (1, 4):
-        result = subprocess.run([binary], env=dict(os.environ, DEWY_THREADS=str(n)),
+        result = subprocess.run(on_cores([binary], n),
                                 capture_output=True, text=True, timeout=20)
         assert result.returncode != 0
         assert 'length-only child ran' in result.stderr

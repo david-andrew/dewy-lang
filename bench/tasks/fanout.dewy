@@ -3,7 +3,7 @@ work=():>int64|Canceled=>{sleep(1ms) or_throw return 1}
 fanout=(n:int64):>void=>{concurrent {loop i in [0..n) {spawn work()}}}
 main=(args:array<string>)=>{
  let n=size_argument(args 10000)
- let start=clock()
+ let start=clock
  let result=within(20ms @fanout(n))
  let elapsed=clock()-start
  $runtime_assert(result is? Timeout)

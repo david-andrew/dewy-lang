@@ -1,5 +1,5 @@
 # Pure per-particle work reads the previous frame and returns the next value.
-# Run: DEWY_THREADS=2 tools/dewy --release examples/parallel_particles.dewy
+# Run: tools/dewy --release examples/parallel_particles.dewy
 # The same program builds for the web, where parallel_map runs serially.
 Particle:type = [x:float64 y:float64 vx:float64 vy:float64]
 make = (count:int64):>array<Particle> => [loop i in [0..count) Particle[(i%32) as float64 (i//32) as float64 0.0 0.0]]
@@ -20,6 +20,8 @@ advance = (particles:array<Particle> dt:float64 threaded:bool):>array<Particle> 
     return [loop p in particles step(p particles dt)]
 }
 main = ():>void => {
+    # (two threads including the caller: the program's cap when this file is the one run)
+    $program.max_cores = 2
     let original = make(128)
     let serial = original let threaded = original
     loop i in [0..4) {

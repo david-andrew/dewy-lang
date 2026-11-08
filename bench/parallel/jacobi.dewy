@@ -35,7 +35,7 @@ main=(args:array<string>):>void=>{
     let a=[loop p in [0..n*n) (((p//n)+(p%n))%17) as float64]
     let tmp:array<float64>=[loop p in [0..n*n) 0.0]
     let threaded=args.length <=? 2
-    let start=clock()
+    let start=clock
     loop round in [0..20) {
         step(a @tmp[..] 0 n threaded)
         let old=a a=tmp tmp=old

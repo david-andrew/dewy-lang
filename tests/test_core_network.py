@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import patience
+from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
 RUNTIME_CHECKS = '\n$runtime_checks\n'
@@ -188,7 +189,7 @@ def test_core_netpong_winning_state(compiler, tmp_path, release):
     env = environment()
     env.update(HOST='1', DEWY_NETPONG_PORT=str(port), DEWY_SOFTWARE='1', DEWY_FRAMES='180',
                DEWY_SCREENSHOT=str(tmp_path / 'host.png'))
-    server = subprocess.Popen([binary], env=env, stdout=subprocess.PIPE,
+    server = subprocess.Popen(on_cores([binary], 1), env=env, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, text=True)
     try:
         ready(server)
@@ -248,7 +249,7 @@ def room_server(binary, work):
     rooms.write_text('game/SAVED saved-key 1792300000\n')
     env = environment()
     env.update(PORT=str(port), ROOMS=str(rooms), TURN='', TURN_SECRET='', MAX_CLIENTS='20')
-    server = subprocess.Popen([binary], env=env, stdout=subprocess.PIPE,
+    server = subprocess.Popen(on_cores([binary], 1), env=env, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, text=True)
     try:
         with selectors.DefaultSelector() as selector:
@@ -278,10 +279,10 @@ def test_core_room_native_peers(room_binaries, tmp_path):
         def start(name, room=''):
             env = environment()
             env.update(DEWY_MATCH_SERVER=f'ws://127.0.0.1:{port}', DEWY_SOFTWARE='1',
-                       DEWY_THREADS='1', DEWY_FRAMES='900', ROLE='join' if room else 'host',
+                       DEWY_FRAMES='900', ROLE='join' if room else 'host',
                        NAME=name, ROOM=room, XDG_DATA_HOME=str(tmp_path / name),
                        DEWY_SCREENSHOT=str(tmp_path / f'{name}.png'))
-            process = subprocess.Popen([room_binaries[1]], env=env, stdout=subprocess.PIPE,
+            process = subprocess.Popen(on_cores([room_binaries[1]], 1), env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True)
             processes.append(process)
             return process
@@ -386,10 +387,10 @@ update=(dt:float64)=>{
         def start_peer(role, room=''):
             env = environment()
             env.update(DEWY_MATCH_SERVER=f'ws://127.0.0.1:{port}', DEWY_SOFTWARE='1',
-                       DEWY_THREADS='1', DEWY_FRAMES='900', ROLE=role,
+                       DEWY_FRAMES='900', ROLE=role,
                        ROOM=room, XDG_DATA_HOME=str(tmp_path / role),
                        DEWY_SCREENSHOT=str(tmp_path / f'{role}.png'))
-            process = subprocess.Popen([binary], env=env, stdout=subprocess.PIPE,
+            process = subprocess.Popen(on_cores([binary], 1), env=env, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, text=True)
             processes.append(process)
             return process

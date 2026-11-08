@@ -23,6 +23,7 @@ from tests.support import build_case_batch, build_exit_batch, case_source, exit_
 from tests.repl_pty import run_repl
 from tests.support import compiler  # noqa: F401 (fixture)
 from tools.compiler.bench import CHECKSUMS_1000, prepare_source
+from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
 RUNTIME_CHECKS = '\n$runtime_checks\n'
@@ -2169,7 +2170,7 @@ def test_core_numeric_example(compiler, tmp_path, target, release):
 def test_core_gpu_arrays(compiler, tmp_path, target, backend, release, request):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith('DEWY_')}
-    env.update(DEWY_THREADS='2', LP_NUM_THREADS='2', DEWY_VK_PIPELINE_CACHE='0')
+    env.update(LP_NUM_THREADS='2', DEWY_VK_PIPELINE_CACHE='0')
     if backend == 'fallback':
         env['DEWY_SOFTWARE'] = '1'
     else:
@@ -2232,7 +2233,7 @@ $runtime_assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
     command, error = build_case_batch(compiler, tmp_path, {'gpu': program, 'terrain': example.read_text()},
                                       ['case_0()', 'case_1()'], release, target)
     assert error is None, error
-    ran = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20, check=False)
+    ran = subprocess.run(on_cores(command, 2), env=env, capture_output=True, text=True, timeout=20, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     expected = {'fallback': 'false false\n', 'gles': 'true false\n', 'vulkan': 'true true\n'}
     available = 'false' if backend == 'fallback' else 'true'
@@ -3020,8 +3021,8 @@ def test_core_software_raster_chunks(compiler, tmp_path, release):
     assert built.returncode == 0, built.stdout + built.stderr
     for threads in [1, 2]:
         env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
-        env.update(DEWY_THREADS=str(threads), DEWY_SOFT_SCALE='0.5')
-        ran = subprocess.run([binary], env=env, capture_output=True, text=True,
+        env.update(DEWY_SOFT_SCALE='0.5')
+        ran = subprocess.run(on_cores([binary], threads), env=env, capture_output=True, text=True,
                              timeout=10, check=False)
         assert ran.returncode == 42, (threads, ran.stdout, ran.stderr)
 
@@ -3275,9 +3276,9 @@ def test_core_new_project(compiler, tmp_path, kind):
                            text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
     env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
-    env.update(DEWY_SOFTWARE='1', DEWY_THREADS='2', DEWY_FRAMES='3',
+    env.update(DEWY_SOFTWARE='1', DEWY_FRAMES='3',
                DEWY_SCREENSHOT=str(project / 'frame.png'), DEWY_SAVE_DIR=str(project / 'saves'))
-    ran = subprocess.run([binary], env=env, capture_output=True, text=True, timeout=10, check=False)
+    ran = subprocess.run(on_cores([binary], 2), env=env, capture_output=True, text=True, timeout=10, check=False)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     if kind == 'program':
         assert ran.stdout == 'Hello, Dewy!\n'
@@ -3545,9 +3546,8 @@ main=()=>{
 @pytest.mark.parametrize(('kind', 'count'), [('platformer', 2), ('3d', 1), ('arcade', 2), ('story', 2)])
 def test_core_game_starter_tests(compiler, tmp_path, flags, kind, count):
     template = Path(__file__).resolve().parents[1] / f'lib/new/dewy/{kind}.dewy'
-    env = {**os.environ, 'DEWY_THREADS': '2',
-           'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
-    result = subprocess.run([compiler, 'test', *flags, template], env=env, capture_output=True,
+    env = {**os.environ, 'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
+    result = subprocess.run(on_cores([compiler, 'test', *flags, template], 2), env=env, capture_output=True,
                             text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.endswith(f'\n{count} passed\n'), result.stdout
@@ -3620,10 +3620,9 @@ save_round = () => {
 $test
 load_round = () => $expect best=?7
 ''')
-    env = {**os.environ, 'DEWY_THREADS': '2',
-           'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
+    env = {**os.environ, 'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
     for name in ['save_round', 'load_round']:
-        result = subprocess.run([compiler, 'test', *flags, source, name], env=env,
+        result = subprocess.run(on_cores([compiler, 'test', *flags, source, name], 2), env=env,
                                 capture_output=True, text=True, timeout=30, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
         assert '\n1 passed (' in result.stdout
@@ -3648,10 +3647,9 @@ load_reading = () => {
     $expect "square" in? SCENES and reading.background=?SCENES["square"]
 }
 ''')
-    env = {**os.environ, 'DEWY_THREADS': '2',
-           'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
+    env = {**os.environ, 'DEWY_SAVE_DIR': str(tmp_path / 'saves')}
     for name in ['save_reading', 'load_reading']:
-        result = subprocess.run([compiler, 'test', *flags, source, name], env=env,
+        result = subprocess.run(on_cores([compiler, 'test', *flags, source, name], 2), env=env,
                                 capture_output=True, text=True, timeout=30, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
         assert '\n1 passed (' in result.stdout
@@ -6133,7 +6131,7 @@ exit(42)
         runner = tmp_path / 'products.cjs'
         runner.write_text('\n'.join(scripts.parts))
         command = [node, runner]
-    ran = subprocess.run(command, env={**os.environ, 'DEWY_THREADS': str(threads)},
+    ran = subprocess.run(on_cores(command, threads),
                          capture_output=True, text=True, timeout=15)
     assert ran.returncode == 42, (ran.returncode, ran.stdout, ran.stderr)
 

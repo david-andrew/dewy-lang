@@ -24,7 +24,8 @@ also builds for the web. See the
 
 [`parallel_particles.dewy`](parallel_particles.dewy) computes particle forces
 through the worker pool and checks every resulting value against the serial
-simulation. Run `DEWY_THREADS=2 ./tools/dewy --release examples/parallel_particles.dewy`.
+simulation on two threads (`$program.max_cores = 2`). Run
+`./tools/dewy --release examples/parallel_particles.dewy`.
 The same source builds for the web using the serial fallback. See the
 [parallel CPU guide](../docs/LANGUAGE.md#parallel-cpu-work) for the APIs and benchmark.
 

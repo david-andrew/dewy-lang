@@ -72,7 +72,7 @@ dw_dir_known = (name: str) -> bool:
     name in ["assert", "runtime_assert", "expect", "fail", "breakpoint", "lend", "test", "proof", "capture", "include_bytes", "clamp", "target", "build", "supported_targets", "field", "unsafe_assume", "abstract", "allocator", "no_prelude", "runtime_checks", "prototype", "prototype_warnings", "explicit_copies", "fast_math", "no_nan", "no_inf", "unsafe", "assume_local_asserts", "no_assumed_bounds", "extern", "intrinsic", "export", "realtime", "explicit_allocation_failure", "warn_if", "confine_external_paths", "no_deadlocks", "audited_wait", "explicit_cancellation", "__copy__", "__drop__", "__move__", "__consume__", "send", "sync"]
 # The settings holding a name in quotes (their value: the name's id + 2).
 dir_valued_name = (name: str) -> bool:
-    name == "dewy.version" or name == "time.zone" or name == "time.zone_source" or name == "time.rules" or name == "time.gap" or name == "time.fold"
+    name == "dewy.version" or name == "time.zone" or name == "time.zone_source" or name == "time.rules" or name == "time.gap" or name == "time.fold" or name == "program.max_cores"
 dir_valued_check = (name: str, value: str, start: int, at: int):
     if dir_program_setting(name): dir_program_any = true
     if name == "dewy.version":

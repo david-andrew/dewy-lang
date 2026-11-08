@@ -8,6 +8,7 @@ import sys
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tools.cores import on_cores
 
 DRAWS = '''main=()=>{ window("x" 320 200) or_throw; }
 draw=():>void=>{
@@ -33,8 +34,8 @@ draw=():>void=>{
 
 
 def invoke(compiler, cwd, *arguments, **extra):
-    env = {**os.environ, 'DEWY_EMIT_WORKERS': '1', 'DEWY_THREADS': '1', **extra}
-    return subprocess.run([compiler, *arguments], capture_output=True, text=True, env=env, timeout=120, cwd=cwd)
+    env = {**os.environ, 'DEWY_EMIT_WORKERS': '1', **extra}
+    return subprocess.run(on_cores([compiler, *arguments], 1), capture_output=True, text=True, env=env, timeout=120, cwd=cwd)
 
 
 @pytest.mark.parametrize('target', ['native', 'wasm32'])

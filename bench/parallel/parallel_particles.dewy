@@ -6,7 +6,7 @@ main=(args:array<string>):>void=>{
     let n=size_argument(args 2048)
     let particles=make(n)
     let threaded=args.length <=? 2
-    let start=clock()
+    let start=clock
     loop frame in [0..4) {particles=advance(particles 0.01 threaded)}
     let elapsed=clock()-start
     let checksum:int64=0

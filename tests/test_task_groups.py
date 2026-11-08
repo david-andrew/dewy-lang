@@ -5,6 +5,7 @@ import subprocess
 import pytest
 
 from tests.support import compiler
+from tools.cores import on_cores
 
 
 def run(compiler, tmp_path, source, *, expected_error=None):
@@ -17,7 +18,7 @@ def run(compiler, tmp_path, source, *, expected_error=None):
         assert expected_error in built.stderr, built.stderr
         return
     assert built.returncode == 0, built.stderr
-    result = subprocess.run([binary], env=dict(os.environ, DEWY_THREADS='2'), capture_output=True, text=True, timeout=10)
+    result = subprocess.run(on_cores([binary], 2), capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
 
 

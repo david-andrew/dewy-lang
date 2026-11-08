@@ -6,14 +6,15 @@ import subprocess
 import pytest
 
 from tests.support import compiler  # noqa: F401
+from tools.cores import on_cores
 
 
 CASES = Path(__file__).parent / 'cases/draw_context'
 
 
 def invoke(compiler, path, *arguments, flags=(), **extra):
-    env = {**os.environ, 'DEWY_EMIT_WORKERS': '1', 'DEWY_THREADS': '2', **extra}
-    return subprocess.run([compiler, *arguments, path, *flags], capture_output=True,
+    env = {**os.environ, 'DEWY_EMIT_WORKERS': '1', **extra}
+    return subprocess.run(on_cores([compiler, *arguments, path, *flags], 2), capture_output=True,
                           text=True, env=env, timeout=60)
 
 

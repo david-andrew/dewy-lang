@@ -7,6 +7,7 @@ import subprocess
 import pytest
 
 from tests.support import compiler
+from tools.cores import on_cores
 
 
 @pytest.mark.parametrize('fields', [2, 4, 8])
@@ -60,11 +61,11 @@ $runtime_checks
                                       text=True, timeout=10)
             assert expected.returncode == 0, expected.stderr
             for sse in (False, True):
-                env = dict(os.environ, DEWY_THREADS='1')
+                env = dict(os.environ)
                 env.pop('DEWY_NO_AVX', None)
                 if sse:
                     env['DEWY_NO_AVX'] = '1'
-                ran = subprocess.run([binaries[0], str(n), str(mode)], env=env,
+                ran = subprocess.run(on_cores([binaries[0], str(n), str(mode)], 1), env=env,
                                      capture_output=True, text=True, timeout=10)
                 assert ran.returncode == 0, ran.stderr
                 # LANGUAGE permits NaN sign/payload differences, including

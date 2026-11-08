@@ -1,10 +1,10 @@
 """Exact offset folding retains the signed storage boundary and callback bounds."""
-import os
 import subprocess
 
 import pytest
 
 from tests.support import compiler
+from tools.cores import on_cores
 
 
 @pytest.mark.parametrize('release', [False, True])
@@ -40,7 +40,7 @@ $runtime_checks
     built = subprocess.run([compiler, 'build', source, '-o', binary] + (['--release'] if release else []),
                            capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stderr
-    ran = subprocess.run([binary], env=dict(os.environ, DEWY_THREADS=str(workers)),
+    ran = subprocess.run(on_cores([binary], workers),
                          capture_output=True, text=True, timeout=30)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == 'ok\n'
@@ -63,7 +63,7 @@ $runtime_checks
                            capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stderr
     for workers in (1, 4):
-        ran = subprocess.run([binary], env=dict(os.environ, DEWY_THREADS=str(workers)),
+        ran = subprocess.run(on_cores([binary], workers),
                              capture_output=True, text=True, timeout=30)
         assert ran.returncode != 0
         assert 'overflow' in ran.stderr

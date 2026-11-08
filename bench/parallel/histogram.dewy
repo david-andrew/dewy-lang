@@ -3,9 +3,9 @@ main=(args:array<string>)=>{
  let n=size_argument(args 1000000)
  let values=[loop i in [0..n) (i*17)%64]
  let bins=[loop i in [0..64) atomic(0)]
- let start=clock()
+ let start=clock
  parallel x in values {if x >=? 0 and x <? bins.length {bins[x].add(1 'relaxed')}}
- let counts=[loop bin in bins bin.load()]
+ let counts=[loop bin in bins bin.load]
  $runtime_assert(sum(counts) =? n)
  let checksum:int64=0
  loop i in [0..counts.length) {checksum+=counts[i]*(i+1)}

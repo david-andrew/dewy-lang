@@ -1779,9 +1779,10 @@ rd_dc_valued_place=(@reader_ctx:ParserContext at:int64):>bool=>$unsafe {
     let token:DewyLexeme=reader_ctx.tokens[at]
     if token.kind not=? 'metatag' {return false}
     let name:string=rd_dn_payload(@reader_ctx token)
-    if (name not=? "dewy") and (name not=? "time") {return false}
+    if (name not=? "dewy") and (name not=? "time") and (name not=? "program") {return false}
     let dot:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(at) + 1)]
     let member:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(at) + 2)]
+    if (name =? "program") and (rd_dn_payload(@reader_ctx member) not=? "max_cores") {return false}
     (dot.symbol =? 'dot') and (not dot.space) and (not member.space) and (member.kind =? 'identifier') and (reader_ctx.tokens[(int64<overflow='wrap'>(at) + 3)].symbol =? 'assign')
 }
 
@@ -1789,6 +1790,19 @@ rd_dc_valued_place=(@reader_ctx:ParserContext at:int64):>bool=>$unsafe {
 # name's id + 2 (0 and 1 are the off and on of a boolean setting).
 rd_dc_valued_value=(@reader_ctx:ParserContext @reader_nodes:array<Node> text:string):>int64=>$unsafe {
     let value:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 4)]
+    if text =? "program.max_cores" {
+        # (a whole number: its digits, interned like a name, so one value form serves every setting)
+        let digits:string=rd_dn_payload(@reader_ctx value)
+        let bytes:array<uint8>=(digits as array<uint8>)
+        let ok:bool=((value.kind =? 'integer') or (value.kind =? 'source_integer')) and (bytes.length >? 0) and (bytes.length <=? 9) and (bytes[0] not=? 48)
+        loop i in [0..bytes.length) {
+            if bytes[i] <? 48 or bytes[i] >? 57 {ok=false}
+        }
+        if not ok {
+            reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file value.start) "`$program.max_cores` is a whole number of at least 1, as `$program.max_cores = 2`");
+        }
+        return int64<overflow='wrap'>(reader_ctx.stores.host[0].intern(digits)) + 2
+    }
     let literal:int64=(if (((value.kind =? 'quoted') and rd_dc_plain_quote(@reader_ctx value)) or (value.kind =? 'rawquoted')) rd_dn_string(@reader_ctx @reader_nodes value) else int64(0))
     if (literal =? 0) or (reader_nodes[literal].kind not=? 'str_lit') or (rd_nkids(@reader_nodes literal) >? 0) {
         reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file value.start) "`${text}` is set to a name in quotes");

@@ -3176,8 +3176,8 @@ including array comprehensions and fused dotted expressions; release builds
 apply broader optimization. Bounds and overlap guards select a scalar fallback
 when a whole loop cannot safely use SIMD; tail elements also use scalar code.
 Web builds use the same scalar
-operations. `DEWY_THREADS = 1` restricts native execution to the
-calling thread.
+operations. `$program.max_cores = 1` in the entry file restricts native
+execution to the calling thread.
 
 `value.to(device)` places a value's arrays on a device, and computation
 follows the data. This build has one device: `'cpu'`, which `'best'` chooses,
@@ -3281,8 +3281,13 @@ call, from a record field, a table or a local copy, is an error. In a task the
 callback may wait; a function's callback parameter a task calls is checked at each
 call of that function.
 
-Native programs use a persistent worker pool. `DEWY_THREADS = 2` limits it to
-two threads including the caller; `DEWY_THREADS = 1` runs on the caller. Nested
+Native programs use a persistent worker pool. `$program.max_cores = 2`, written
+at the top of the entry file, limits it to two threads including the caller;
+`$program.max_cores = 1` runs on the caller. There is no environment variable for
+this: to run one program at several core counts, give each count its own entry
+file that sets the tag and then imports and calls the program, or one entry point
+with a function per count. *Provisional: where this tag is written is being
+redesigned with the other parallel tags.* Nested
 operations share the same pool, and a caller waiting at a join helps run ready
 work. Forks stay local until a heartbeat exposes work to another worker; small
 scoped joins use direct calls on the sequential path. Web builds run serially with
@@ -3443,10 +3448,11 @@ reference counts can cost more than a small callback saves. Keep drawing and
 window/input operations on the main thread. The
 [particle example](../examples/parallel_particles.dewy) computes each
 particle's forces from a shared previous-frame snapshot and checks the result
-against the serial calculation. Run it on two threads:
+against the serial calculation. Its `main` sets `$program.max_cores = 2`, so it runs on
+two threads:
 
 ```sh
-DEWY_THREADS=2 ./tools/dewy --release examples/parallel_particles.dewy
+./tools/dewy --release examples/parallel_particles.dewy
 ```
 
 ## Channels
@@ -3759,11 +3765,11 @@ does not bring it in, so a library can carry a local test `main` without
 colliding with the program's. An explicitly imported `main` is an ordinary
 callable function.
 
-Program-wide settings (currently `$time.zone`, `$time.rules`, and
-`$time.zone_source`) go at the top of the entry file or as the first lines of any
-file's `main`. A file's `main` settings configure the program only when that file
-is the entry; a library can carry its own test configuration. Elsewhere these
-settings are a compile error naming the allowed locations. Calling another file's
+Program-wide settings (currently `$time.zone`, `$time.rules`,
+`$time.zone_source` and `$program.max_cores`) go at the top of the entry file or as
+the first lines of any file's `main`. A file's `main` settings configure the program
+only when that file is the entry; a library can carry its own test configuration.
+Elsewhere these settings are a compile error naming the allowed locations. Calling another file's
 `main` directly or transitively requires their explicit program-wide settings to
 agree; a conflict names both files and both values.
 

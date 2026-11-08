@@ -139,7 +139,7 @@ def main() -> int:
             samples = {label: [] for label in binaries}
             counts = {label: [] for label in binaries}
             cycles = {label: [] for label in binaries}
-            run_env = dict(env, DEWY_THREADS=str(workers), OMP_NUM_THREADS=str(workers),
+            run_env = dict(env, OMP_NUM_THREADS=str(workers),
                            OMP_PROC_BIND='true', OMP_PLACES='cores')
             for repeat in range(args.runs):
                 order = list(binaries)

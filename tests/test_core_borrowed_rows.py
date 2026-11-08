@@ -1,10 +1,10 @@
 """Borrowed array elements retain value semantics through mutation and escape."""
-import os
 import subprocess
 
 import pytest
 
 from tests.support import compiler
+from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
 RUNTIME_CHECKS = '\n$runtime_checks\n'
@@ -49,6 +49,6 @@ def test_borrowed_row_snapshots(compiler, tmp_path, release):
                             *(['--release'] if release else [])], capture_output=True, text=True)
     assert build.returncode == 0, build.stderr
     for workers in (1, 2):
-        run = subprocess.run([output], env=dict(os.environ, DEWY_THREADS=str(workers)),
+        run = subprocess.run(on_cores([output], workers),
                              capture_output=True, text=True, timeout=30)
         assert run.returncode == 0, run.stderr

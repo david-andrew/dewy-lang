@@ -1,10 +1,10 @@
 """Arena allocation contexts remain local to worker and waiting-task stacks."""
-import os
 import subprocess
 
 import pytest
 
 from tests.support import compiler
+from tools.cores import on_cores
 
 
 @pytest.mark.parametrize('release', [False, True])
@@ -70,7 +70,7 @@ main=()=>{
                            capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stdout + built.stderr
     for threads in ('1', '4'):
-        ran = subprocess.run([binary], env=dict(os.environ, DEWY_THREADS=threads),
+        ran = subprocess.run(on_cores([binary], threads),
                              capture_output=True, text=True, timeout=30)
         assert ran.returncode == 0, ran.stdout + ran.stderr
         assert ran.stdout == 'ok\n'

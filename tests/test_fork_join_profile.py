@@ -8,6 +8,7 @@ import pytest
 
 from tests.support import compiler
 from tests.test_fork_join_kernels import BENCH, ROOT
+from tools.cores import on_cores
 
 
 def profiler():
@@ -52,8 +53,8 @@ def test_debug_runtime_ablation_preserves_results(compiler, tmp_path, kernel):
                                  '--release', '-o', binary], env=env, capture_output=True, text=True, timeout=90)
         assert result.returncode == 0, result.stderr
         for workers in (1, 2, 4):
-            result = subprocess.run([binary, str(BENCH.SMALL[kernel])],
-                                    env=dict(env, DEWY_THREADS=str(workers)),
+            result = subprocess.run(on_cores([binary, str(BENCH.SMALL[kernel])], workers),
+                                    env=env,
                                     capture_output=True, text=True, timeout=30)
             assert result.returncode == 0, result.stderr
             checksum, _ = map(int, result.stdout.split())

@@ -9,10 +9,15 @@ from p"util.jo" import (fatal files name_of pos_file pos_str)
 ProgramWord:type=int64<overflow='wrap'>
 # Classification, not a namespace prefix: renaming a setting changes only this list.
 dir_program_setting=(name:string):>bool=>{
-    name =? "time.zone" or name =? "time.rules" or name =? "time.zone_source"
+    name =? "time.zone" or name =? "time.rules" or name =? "time.zone_source" or name =? "program.max_cores"
+}
+# A core count is a number, every other program-wide setting a name in quotes.
+dir_program_spelled=(s:DirScope):>string=>{
+    if name_of(s.setting) =? "program.max_cores" {return "${name_of(s.setting)} = {name_of(s.value - 2)}"}
+    "${name_of(s.setting)} = '{name_of(s.value - 2)}'"
 }
 dir_program_disagree=(a:DirScope b:DirScope):>void=>{
-    fatal(a.at "program-wide `${name_of(a.setting)} = '{name_of(a.value - 2)}'` at {pos_str(a.at)} conflicts with `${name_of(b.setting)} = '{name_of(b.value - 2)}'` at {pos_str(b.at)}: reachable main functions must agree on program-wide settings")
+    fatal(a.at "program-wide `{dir_program_spelled(a)}` at {pos_str(a.at)} conflicts with `{dir_program_spelled(b)}` at {pos_str(b.at)}: reachable main functions must agree on program-wide settings")
 }
 # Before checking values, select only the invoked file's configuration. The same
 # validation runs after checking to include bodies parsed on demand. No work

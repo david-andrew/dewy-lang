@@ -21,7 +21,7 @@ main=(args:array<string>):>void=>{
     let a=[loop i in [0..n*n) (i%7) as float64]
     let b=[loop i in [0..n*n) (i%5) as float64]
     let count=((n+31)//32)^2
-    let start=clock()
+    let start=clock
     let out:array<array<float64>>=if args.length >? 2 [loop i in [0..count) tile(a b n i)] else parallel_range(count (i:int64)=>tile(a b n i))
     let elapsed=clock()-start
     let result:int64=0 loop part in out {result+=sum(part) as int64}

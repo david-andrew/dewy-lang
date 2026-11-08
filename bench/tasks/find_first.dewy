@@ -12,14 +12,14 @@ main=(args:array<string>)=>{
  let values:array<int64>=[loop i in [0..n) i*17]
  let found=atomic(-1)
  let signaled=atomic(0)
- let start=clock()
+ let start=clock
  concurrent g {
   spawn(g) scan(g values 0 n//2 (n//4)*17 found signaled)
   spawn(g) scan(g values n//2 n (n//4)*17 found signaled)
  }
- let finish=clock()
- $runtime_assert(found.load() =? n//4)
- printl"{found.load()} {finish-start} {finish-signaled.load()}"
+ let finish=clock
+ $runtime_assert(found.load =? n//4)
+ printl"{found.load} {finish-start} {finish-signaled.load}"
 }
 
 $runtime_checks

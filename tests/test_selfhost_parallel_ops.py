@@ -1,6 +1,5 @@
 """Parallel lowering preserves scalar jobs, captures and nonzero range offsets."""
 import json
-import os
 import subprocess
 
 import pytest
@@ -8,6 +7,7 @@ import pytest
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
+from tools.cores import on_cores
 
 SOURCE = r'''
 $runtime_checks
@@ -39,7 +39,6 @@ def test_parallel_ops_twins(compiler, tmp_path, monkeypatch, optimized):
                                                 flags=('--release',) if optimized else ()))
     assert image == output.read_bytes() + b'\n'
     for workers in (1, 2):
-        ran = subprocess.run([output], capture_output=True, timeout=30,
-                             env=os.environ | {'DEWY_THREADS': str(workers)})
+        ran = subprocess.run(on_cores([output], workers), capture_output=True, timeout=30)
         assert ran.returncode == 0, ran.stderr
         assert ran.stdout == b'21\n6 12\n-5 2\n'

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import Scripts, target_name
+from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
 RUNTIME_CHECKS = '\n$runtime_checks\n'
@@ -92,7 +93,7 @@ def test_core_parallel_values(compiler, tmp_path, name, release, target):
     output = tmp_path / 'program'
     flags = ['--release'] if release else []
     env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
-    env.update(DEWY_EMIT_WORKERS='1', DEWY_THREADS='2')
+    env.update(DEWY_EMIT_WORKERS='1')
     built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', output, *flags],
                            env=env, capture_output=True, text=True, timeout=30, check=False)
     assert built.returncode == 0, built.stdout + built.stderr
@@ -109,10 +110,9 @@ def test_core_parallel_values(compiler, tmp_path, name, release, target):
     if target == 'native' and name.startswith('matrix-product'):
         modes.append(('2', True))
     for threads, no_avx in modes:
-        env['DEWY_THREADS'] = threads
         if no_avx:
             env['DEWY_NO_AVX'] = '1'
-        result = subprocess.run(args, env=env, capture_output=True, text=True,
+        result = subprocess.run(on_cores(args, int(threads)), env=env, capture_output=True, text=True,
                                 timeout=15, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
 

@@ -9,8 +9,12 @@ import os
 from pathlib import Path
 import statistics
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from tools.cores import on_cores  # noqa: E402
 
 
 def main():
@@ -32,8 +36,8 @@ def main():
                 checksum = None
                 for repeat in range(args.runs):
                     for index in ((0, 1) if repeat % 2 else (1, 0)):
-                        result = subprocess.run([binaries[index], str(args.count), *(['padded'] if padded else [])],
-                                                env=dict(os.environ, DEWY_THREADS=str(workers), OMP_NUM_THREADS=str(workers)),
+                        result = subprocess.run(on_cores([binaries[index], str(args.count), *(['padded'] if padded else [])], workers),
+                                                env=dict(os.environ, OMP_NUM_THREADS=str(workers)),
                                                 capture_output=True, text=True, check=True, timeout=60)
                         value, ns = map(int, result.stdout.split())
                         assert checksum is None or value == checksum, result.stdout

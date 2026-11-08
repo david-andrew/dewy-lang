@@ -1,11 +1,11 @@
 """Scoped collectors: direct forks, source order, and conservative escape fallbacks."""
-import os
 import re
 import subprocess
 
 import pytest
 
 from tests.support import compiler
+from tools.cores import on_cores
 
 
 def build(compiler, tmp_path, source, *, release=True):
@@ -21,7 +21,7 @@ def build(compiler, tmp_path, source, *, release=True):
 
 
 def execute(output, workers=1):
-    return subprocess.run([output], env=dict(os.environ, DEWY_THREADS=str(workers)),
+    return subprocess.run(on_cores([output], workers),
                           capture_output=True, text=True, timeout=30)
 
 

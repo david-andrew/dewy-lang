@@ -4,12 +4,12 @@ main=(args:array<string>)=>{
  let n=size_argument(args 1000000)
  let padded=args.length >? 2
  let counters=__counter_cells(padded)
- let start=clock()
+ let start=clock
  parallel cell in counters {
   loop j in [0..n) {cell.add(1 'relaxed')}
  }
  let checksum:int64=0
- loop cell in counters {checksum+=cell.load()}
+ loop cell in counters {checksum+=cell.load}
  printl"{checksum} {clock()-start}"
 }
 

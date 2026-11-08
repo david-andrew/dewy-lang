@@ -4,7 +4,6 @@ The program prints one labelled result per input.  One build per target keeps
 the matrix inexpensive while every result is checked against a Python oracle.
 """
 
-import os
 import math
 import shutil
 import struct
@@ -14,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from tests.support import Scripts, compiler, target_name  # noqa: F401
+from tools.cores import on_cores
 
 
 LENGTHS = (*range(18), 31, 32, 33)
@@ -208,7 +208,7 @@ def test_differential_paths(binaries):
     for mode, binary in binaries.items():
         command = ([shutil.which('node'), binary] if mode == 'wasm' else
                    [shutil.which('qemu-aarch64'), binary] if mode == 'arm64' else [binary])
-        result = subprocess.run(command, env=dict(os.environ, DEWY_THREADS='2'),
+        result = subprocess.run(on_cores(command, 2),
                                 capture_output=True, text=True, timeout=30)
         assert result.returncode == 0, f'{mode}: {result.stdout}{result.stderr}'
         rows = dict(line.rsplit(':', 1) for line in result.stdout.splitlines())

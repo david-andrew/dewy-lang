@@ -13,7 +13,7 @@ quickly. `--gate` exits unsuccessfully below 0.9× OpenMP at any requested worke
 or above 1.1× the sequential time; it also requires 2/4-worker speedups
 to reach 0.9× OpenMP's speedup over its own one-worker time. Use it on a quiet host. Artifacts stay under `build/forkjoin-bench` by default.
 An extra argument to a kernel selects its sequential implementation; worker
-count comes from `DEWY_THREADS` or `OMP_NUM_THREADS`.
+count comes from the cores the process may use (the runner limits them with `taskset`; a program's own cap is its `$program.max_cores` setting) or, for the C counterparts, `OMP_NUM_THREADS`.
 
 The kernels are recursive fib(32), a 16M-element sum with fixed 4096-element
 reduction leaves, 1024² matmul with 32² output tiles, twenty 1024² Jacobi steps,

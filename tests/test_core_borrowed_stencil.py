@@ -1,10 +1,10 @@
 """Flat stencil offsets retain scalar meaning and checked borrowed buffers."""
-import os
 import subprocess
 
 import pytest
 
 from tests.support import ROOT, compiler
+from tools.cores import on_cores
 
 
 @pytest.mark.parametrize('release', [False, True])
@@ -24,7 +24,7 @@ def test_borrowed_stencil_odd_sizes(compiler, tmp_path, release):
             a = b
         expected = sum(int(x*1024) for row in a for x in row)
         for tail in ([], ['serial']):
-            run = subprocess.run([output, str(n), *tail], capture_output=True, text=True,
-                                 env=dict(os.environ, DEWY_THREADS='2'), timeout=30)
+            run = subprocess.run(on_cores([output, str(n), *tail], 2), capture_output=True, text=True,
+                                 timeout=30)
             assert run.returncode == 0, run.stderr
             assert int(run.stdout.split()[0]) == expected

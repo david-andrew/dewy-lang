@@ -5,7 +5,7 @@ main=(args:array<string>)=>{
  let right="lookup-right.txt"
  if write_text(left "found") is? exception exit(1)
  if write_text(right "found") is? exception exit(1)
- let start=clock()
+ let start=clock
  loop i in [0..n) {
   let result=race(@read_text(left) @read_text(right))
   $runtime_assert(result is? string and result =? "found")

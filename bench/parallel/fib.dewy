@@ -9,7 +9,7 @@ fork_fib=(n:int64):>int64=>{
 main=(args:array<string>):>void=>{
     let n=size_argument(args 32)
     let serial=args.length >? 2
-    let start=clock()
+    let start=clock
     let result:int64=if serial fib(n) else fork_fib(n)
     printl"{result} {clock()-start}"
 }

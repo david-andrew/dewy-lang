@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.cases import ROOT, clean_environment, default_workers, keyword_filter
+from tools.cores import on_cores
 from tools.scratch import lock_path, run_dir
 
 LADDER = ROOT / 'tests' / 'ladder'
@@ -112,7 +113,7 @@ def evaluate(compiler: Path, directory: Path, version: str, scratch: Path, env: 
         binary = binary.with_suffix('.exe')
     stdin = directory / 'stdin.txt'
     with run_dir(f'{directory.name}-{version}', work) as cwd:
-        ran = step([str(binary)], RUN_TIMEOUT, stdin if stdin.exists() else None, cwd)
+        ran = step(on_cores([binary], 2), RUN_TIMEOUT, stdin if stdin.exists() else None, cwd)
     expected = (directory / 'expected.out').read_text()
     if ran.returncode != 0:
         detail = first_error(ran.stderr + ran.stdout) if (ran.stderr + ran.stdout).strip() else ''
@@ -122,7 +123,7 @@ def evaluate(compiler: Path, directory: Path, version: str, scratch: Path, env: 
                       f'printed {ran.stdout.strip()[:120]!r}, expected {expected.strip()[:120]!r}')
     if version == 'design' and scores_tests(entry):
         with run_dir(f'{directory.name}-tests', work) as cwd:
-            tested = step([str(compiler), 'test', '--release', '--json', str(source)], RUN_TIMEOUT, cwd=cwd)
+            tested = step(on_cores([compiler, 'test', '--release', '--json', source], 2), RUN_TIMEOUT, cwd=cwd)
         problem = test_mismatch(tested, json.loads((directory / 'expected-tests.json').read_text()), ran.stdout)
         if problem:
             return Result(directory.name, version, False, True, problem)
@@ -263,7 +264,6 @@ def run(compiler: Path, *, keyword: str = '', workers: int = 2, update_ratchet: 
         return 0
     scratch = Path(tempfile.mkdtemp(prefix='dewy-ladder-'))
     env = clean_environment()
-    env['DEWY_THREADS'] = '2'
     jobs = [(name, version) for name in names for version in ('design', 'core')
             if version == 'design' or has_core(name)]
     parallel = [job for job in jobs if not programs[job[0]].get('serial')]

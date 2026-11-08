@@ -253,7 +253,9 @@ __fj_start = ():
     __fj_workers = 0
     when TARGET != "wasm":
         n = cpu_count() - 1
-        if let t = env("DEWY_THREADS"): n = (to_int(t) ?? (n + 1)) - 1      # DEWY_THREADS caps the threads used
+        # (`$program.max_cores = N` in the entry file: N threads including the caller)
+        cap: str? = __setting_read("program.max_cores")
+        if let t = cap: n = (to_int(t) ?? (n + 1)) - 1
         if n > __MAX_THREADS: n = __MAX_THREADS
         if n < 1: return
         __fj_ctl = __alloc(64) as *int

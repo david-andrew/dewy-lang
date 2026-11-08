@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from tests.support import compiler
+from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
 RUNTIME_CHECKS = '\n$runtime_checks\n'
@@ -96,7 +97,7 @@ def test_mutable_slice_fork(compiler, tmp_path, release):
                             *(['--release'] if release else [])], capture_output=True, text=True)
     assert build.returncode == 0, build.stderr
     for workers in (1, 2):
-        run = subprocess.run([output], env=dict(os.environ, DEWY_THREADS=str(workers)),
+        run = subprocess.run(on_cores([output], workers),
                              capture_output=True, text=True, timeout=30)
         assert run.returncode == 0, run.stderr
 
@@ -150,7 +151,7 @@ def test_readonly_input_shared_by_disjoint_fork(compiler, tmp_path, release):
                             *(['--release'] if release else [])], capture_output=True, text=True)
     assert build.returncode == 0, build.stderr
     for workers in (1, 2):
-        run = subprocess.run([binary], env=dict(os.environ, DEWY_THREADS=str(workers)),
+        run = subprocess.run(on_cores([binary], workers),
                              capture_output=True, text=True, timeout=30)
         assert run.returncode == 0, run.stderr
 

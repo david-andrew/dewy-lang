@@ -1,10 +1,10 @@
 """Scoped jobs survive promotion, nested helping, wraparound and failure."""
-import os
 import subprocess
 
 import pytest
 
 from tests.support import compiler
+from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
 RUNTIME_CHECKS = '\n$runtime_checks\n'
@@ -22,7 +22,7 @@ def build(compiler, tmp_path, source, suffix='dewy'):
 
 
 def run(binary, workers):
-    return subprocess.run([binary], env=dict(os.environ, DEWY_THREADS=str(workers)),
+    return subprocess.run(on_cores([binary], workers),
                           capture_output=True, text=True, timeout=30)
 
 
