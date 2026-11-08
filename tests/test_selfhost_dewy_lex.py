@@ -280,9 +280,13 @@ def generated(rng, count):
     return texts
 
 
-def corpus():
+def corpus(full=True):
+    """Every Dewy file of the repository and the generated texts; the landing tier takes every
+    second file (the full corpus is the nightly tier's). The oracle's lines hit are the same
+    with the half corpus: the generated texts and the other half cover every scanner branch."""
     files = [*sorted((ROOT / 'compiler').glob('*.dewy')), *sorted((ROOT / 'lib').rglob('*.dewy')),
              *sorted((ROOT / 'tests/ladder').rglob('*.dewy'))]
+    files = files if full else files[::2]
     texts = [p.read_text(encoding='utf-8') for p in files]
     return texts + generated(random.Random(11), 600)
 
@@ -295,12 +299,16 @@ def build(compiler, source, binary, release):
     return binary
 
 
-@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
-def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release):
+@pytest.mark.parametrize('release, full', [
+    pytest.param(False, False, id='default'),
+    pytest.param(True, True, id='release'),
+    pytest.param(False, True, id='full', marks=pytest.mark.nightly),
+])
+def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full):
     sys.setrecursionlimit(20000)
     dewy = build(compiler, FIXTURES / 'dewy_lex_dewy.dewy', tmp_path / 'lex-dewy', release)
     jo = build(compiler, FIXTURES / 'dewy_lex_jo.jo', tmp_path / 'lex-jo', release)
-    texts = corpus()
+    texts = corpus(full)
     cases = tmp_path / 'cases'
     cases.mkdir()
     paths = []
