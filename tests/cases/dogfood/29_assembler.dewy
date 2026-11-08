@@ -64,7 +64,7 @@ parse_line = (text:string line:int64 @labels:dict<string int64> at:int64 @errors
     if body.is_empty return none
     let words = body.split()
     let mnemonic = words[0]
-    if mnemonic not in? members(Op) {
+    if mnemonic isnt? Op {
         errors.push(AsmError[line "unknown opcode '{mnemonic}'"])
         return none
     }

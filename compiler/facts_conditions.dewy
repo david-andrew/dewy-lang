@@ -1,7 +1,8 @@
 $runtime_checks
+from p"string_domains.jo" import (string_set_owners string_set_tests)
 from p"ast.jo" import (NF_GLOBAL has_flag kid nkids nodes)
 from p"checker_tokens.dewy" import (Tok)
-from p"facts.jo" import (FACT_CAP FactImplication FactPaths FactState fact_assume fact_binding fact_bound fact_capture fact_compare fact_comparison fact_constant fact_domain fact_either_wanted fact_implications fact_inverse fact_new fact_project fact_projection_origin fact_query fact_slot fact_speculating fact_terms fact_type)
+from p"facts.jo" import (FACT_CAP FactImplication FactPaths FactState fact_assume fact_binding fact_bound fact_capture fact_owner fact_compare fact_comparison fact_constant fact_domain fact_either_wanted fact_implications fact_inverse fact_new fact_project fact_projection_origin fact_query fact_slot fact_speculating fact_string_set fact_terms fact_type)
 from p"facts_lifecycle.dewy" import (fact_scope_exit)
 from p"facts_joins.dewy" import (fact_join fact_projection_value)
 from p"facts_summaries.dewy" import (fact_summary_payload)
@@ -15,11 +16,12 @@ ConditionWord:type=int64<overflow='wrap'>
 # success can only narrow the old captured value, not its replacement.
 fact_condition=(n:ConditionWord entry:FactState):>FactPaths=>$unsafe {
     let k=nodes.ptr[n].kind
-    if k =? 'not_' {
+    let membership=string_set_owners.length >? 0 and string_set_owners.has(fact_owner) and string_set_tests.has(n)
+    if not membership and k =? 'not_' {
         let p=fact_condition(ConditionWord(nodes.ptr[n].a) entry)
         return FactPaths(p.no p.yes p.reason)
     }
-    if k =? 'and_' or k =? 'or_' {
+    if not membership and (k =? 'and_' or k =? 'or_') {
         let a=fact_condition(ConditionWord(nodes.ptr[n].a) entry)
         let b=fact_condition(ConditionWord(nodes.ptr[n].b) if k =? 'and_' {a.yes} else {a.no})
         let reason=if a.yes.live and a.no.live {a.reason} else {b.reason}
@@ -48,7 +50,7 @@ fact_condition=(n:ConditionWord entry:FactState):>FactPaths=>$unsafe {
         return p
     }
     let yes=entry
-    let v=fact_capture(n @yes)
+    let v=if membership {fact_string_set(n @yes)} else {fact_capture(n @yes)}
     let no=yes
     let reason=fact_bound(yes v)
     let entry_state=if fact_query {yes} else {FactState(live=false)}

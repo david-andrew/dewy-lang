@@ -14,11 +14,11 @@ def test_imported_alias_call_converts(compiler, tmp_path):  # noqa: F811
     (tmp_path / 'show.dewy').write_text('from p"colors.dewy" import Color\nshow = (c:Color) => printl"shown {c}"\n')
     source = tmp_path / 'main.dewy'
     source.write_text('from p"colors.dewy" import Color\nfrom p"show.dewy" import show\n'
-                      "let c = Color('red')\nmain = () => show(c)\n")
+                      "main = () => {let c = Color('red') or_throw; show(c)}\n")
     ran = run(compiler, source)
     assert ran.returncode == 0 and ran.stdout == 'shown red\n', ran.stderr
     (tmp_path / 'qualified.dewy').write_text('import p"colors.dewy" as colors\n'
-                                             "main = () => printl(colors.Color('green'))\n")
+                                             "main = () => printl(colors.Color('green') or_throw)\n")
     ran = run(compiler, tmp_path / 'qualified.dewy')
     assert ran.returncode == 0 and ran.stdout == 'green\n', ran.stderr
 

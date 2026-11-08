@@ -1,0 +1,5 @@
+Small:type='a'|'c'
+Wide:type='a'|'b'|'c'
+accept=(v:Small):>Small=>v
+read=(v:Wide):>Small=>accept(v)
+main=()=>{printl(read('b'))}

@@ -1,0 +1,8 @@
+Action:type='jump'|'left'
+read=(s:string):>Action=>{
+    let v="jump"
+    v=s
+    if v is? Action return v
+    'left'
+}
+main=()=>{printl(read("jump")); printl(read("bad"))}

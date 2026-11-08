@@ -1,0 +1,9 @@
+# quick
+Action:type='jump'|'left'|'right'
+read=(s:string):>Action|ValidationError=>Action(s)
+main=()=>{
+    printl(read("jump") ?? 'left')
+    printl(read("jmup") ?? 'right')
+    let r=read("jmup")
+    if r is? ValidationError printl"{r.message}: {r.input}"
+}

@@ -132,6 +132,14 @@ string_domains_materialize = ():
         binding = request.1
         set = request.2
         values = string_domain_values(binding)
+        proof = string_domain_proofs.get(i) ?? 0
+        if proof != 0:
+            fits = values.len() > 0
+            loop value in values:
+                if not str_sets[set].contains(name_of(value)): fits = false
+            if fits: set_list(proof, [])
+            continue
+        if values.len() == 0: fatal(pos, "cannot prove this string is one of {str_set_text(set)}; test it with `is?`, or read it with the literal-union type constructor")
         loop value in values:
             if not str_sets[set].contains(name_of(value)): fatal(pos, "inferred string domain contains '{name_of(value)}', which is not one of {str_set_text(set)}")
         # (a settled domain inside the set never reaches the failing arm: no panic is left)

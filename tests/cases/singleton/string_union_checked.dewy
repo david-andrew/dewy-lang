@@ -1,6 +1,7 @@
-# exit: 101
-$runtime_checks
 Dir:type = 'n' | 's'
-pick = (text:string):>Dir => text
-printl(pick("n"))
-printl(pick("q"))
+pick = (text:string):>Dir | ValidationError => Dir(text)
+main = () => {
+    printl(pick("n") ?? 's')
+    let bad=pick("q")
+    if bad is? ValidationError printl(bad.message)
+}

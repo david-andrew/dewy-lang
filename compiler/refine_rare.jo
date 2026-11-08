@@ -144,26 +144,12 @@ ref_resolve_limit = (n: int) -> RefResolveLimit:
         bound = fact_domain(ty)
         return RefResolveLimit(true, RefTerm(1, if member == "max": bound.hi else: bound.lo))
     RefResolveLimit()
-# A string stored as a string set: a member literal is its word, another
-# literal an error, and any other string is looked up when it runs (a string
-# that is not a member panics). A set's value in a smaller or larger set is
-# mapped member by member.
-str_set_coerce = (n: int, t: int) -> int:
+# Narrowing is a proven obligation, with deferred finite-domain checks.
+str_set_coerce = (n: int, t: int, proven: bool = false) -> int:
     id = str_set_of(t)
     source = str_set_of(ntype(n))
     pos = nodes[n].pos
     if source == id: return n
-    tracked = -1
-    if source == 0 and string_domains.len() > 0: tracked = string_domain_conversion(n, id)
-    if source != 0:
-        if nodes[n].kind == .dotname:
-            text = str_sets[source][int(nodes[n].aux)]
-            k = str_sets[id].index_of(text)
-            if k < 0: fatal(pos, "'{text}' is not one of {str_set_text(id)}")
-            nodes[n] = nodes[str_set_const(id, k, pos)]
-            return n
-        str_set_text_of(n)
-    else: coerce(n, T_STR)
     e = kid_lit(n)
     if nodes[e].kind == .str_lit and nodes[e].aux != 1:
         text = name_of(int(nodes[e].sval))
@@ -171,21 +157,65 @@ str_set_coerce = (n: int, t: int) -> int:
         if k < 0: fatal(pos, "'{text}' is not one of {str_set_text(id)}")
         nodes[n] = nodes[str_set_const(id, k, pos)]
         return n
+    if source != 0 and nodes[n].kind == .dotname:
+        text = str_sets[source][int(nodes[n].aux)]
+        k = str_sets[id].index_of(text)
+        if k < 0: fatal(pos, "'{text}' is not one of {str_set_text(id)}")
+        nodes[n] = nodes[str_set_const(id, k, pos)]
+        return n
+    tracked = -1
+    if source == 0 and string_domains.len() > 0: tracked = string_domain_conversion(n, id)
+    known = proven or source != 0 and str_set_within(source, id)
+    if not known and source == 0:
+        literals: int[]
+        if domain_literals(n, true, literals) and literals.len() > 0:
+            known = true
+            loop literal in literals:
+                if not str_sets[id].contains(name_of(literal)): known = false
     inner = nodes.len()
     nodes.push(nodes[n])
+    add_flag(inner, NF_CHECKED)
     held = "__set{inner}"
-    out = bc_call("panic", [bc_str("a string that is not one of {str_set_text(id)}", pos)], pos)
-    stop = out
+    statements = [bc_let(held, inner, pos)]
+    if not known:
+        condition = mk(.istype, pos)
+        nodes[condition].a = i32(bc_ident(held, pos))
+        nodes[condition].b = i32(type_node_of(t, pos))
+        guard = bc_call("$assert", [condition], pos)
+        string_set_obligations[guard] = t
+        if tracked >= 0: string_domain_proofs[tracked] = guard
+        statements.push(bc_stmt(guard, pos))
+    text = mk(.cast, pos)
+    nodes[text].a = i32(bc_ident(held, pos))
+    nodes[text].b = i32(type_node_of(T_STR, pos))
+    text_name = "__set_text{inner}"
+    statements.push(bc_let(text_name, text, pos))
+    out = str_set_const(id, 0, pos)
+    k = str_sets[id].len() - 1
+    loop k > 0:
+        same = bc_bin(.eq, bc_ident(text_name, pos), bc_str(str_sets[id][k], pos), pos)
+        out = str_set_choice(same, str_set_const(id, k, pos), out, pos)
+        k -= 1
+    statements.push(bc_stmt(out, pos))
+    nodes[n] = nodes[bc_block(statements, pos)]
+    check_expr(n, t)
+    n
+str_set_read = (n: int, a: int, t: int, expected: int) -> int:
+    pos = nodes[n].pos
+    check_expr(a, T_STR)
+    coerce(a, T_STR)
+    add_flag(a, NF_CHECKED)
+    id = str_set_of(t)
+    held = "__read_set{n}"
+    out = bc_call("ValidationError", [bc_str("must be one of {str_set_text(id)}", pos), bc_ident(held, pos)], pos)
     k = str_sets[id].len() - 1
     loop k >= 0:
         same = bc_bin(.eq, bc_ident(held, pos), bc_str(str_sets[id][k], pos), pos)
         out = str_set_choice(same, str_set_const(id, k, pos), out, pos)
+        nodes[out].aux2 = -8
         k -= 1
-    nodes[n] = nodes[bc_block([bc_assign(bc_ident(held, pos), inner, pos), bc_stmt(out, pos)], pos)]
-    check_expr(n, t)
-    # (a binding's finite domain, settled after checking, may prove it: string_domains_materialize)
-    if tracked >= 0: string_domain_conversion_stops[tracked] = stop
-    n
+    nodes[n] = nodes[bc_block([bc_let(held, a, pos), bc_stmt(out, pos)], pos)]
+    check_expr(n, expected)
 # if c a else b, as a value
 str_set_choice = (c: int, a: int, b: int, pos: int) -> int:
     n = mk(.if_, pos)

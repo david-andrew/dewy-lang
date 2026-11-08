@@ -12,7 +12,7 @@ from p"node_store.dewy" import (Node)
 from p"refine.jo" import (representation_type str_sets)
 from p"refine_rare.dewy" import (str_set_text)
 from p"refine_ops.dewy" import (str_set_const)
-from p"string_domains.jo" import (domain_leaf domain_literals int_domain_conversions int_domain_matches int_domain_proven int_domain_states int_log string_domain_captures string_domain_conversion_stops string_domain_conversions string_domain_matches string_domain_sequence_fns string_domain_sequences string_domains)
+from p"string_domains.jo" import (domain_leaf domain_literals int_domain_conversions int_domain_matches int_domain_proven int_domain_states int_log string_domain_captures string_domain_conversion_stops string_domain_conversions string_domain_proofs string_domain_matches string_domain_sequence_fns string_domain_sequences string_domains)
 from p"text_domains.dewy" import (sd_capture sd_values sd_write)
 from p"types.jo" import (T_MATH_INT T_NEVER T_STR)
 from p"type_ops.dewy" import (mk_array mk_fn)
@@ -150,6 +150,14 @@ string_domains_materialize=():>void=>$unsafe {
         let binding=request[1]
         let set=request[2]
         let values=string_domain_values(binding)
+        let proof=string_domain_proofs.get(i) ?? 0
+        if proof not=? 0 {
+            let fits=values.length >? 0
+            loop value in values {if not str_sets[set].contains(name_of(value)) {fits=false}}
+            if fits {set_list(proof [])}
+            continue
+        }
+        if values.length =? 0 {fatal(pos "cannot prove this string is one of {str_set_text(set)}; test it with `is?`, or read it with the literal-union type constructor") }
         loop value in values {
             if not str_sets[set].contains(name_of(value)) {fatal(pos "inferred string domain contains '{name_of(value)}', which is not one of {str_set_text(set)}")}
         }

@@ -350,6 +350,8 @@ const FACT_FIELD_KEYS = -30
 # A value holding a self-length contract: every element <= length + this constant
 # (ref_self_assume). A place's new value gets it again from the place's type.
 const FACT_SELF_BOUND = -31
+# Injective text identities, materialized only in a demanded narrowing proof.
+const FACT_TEXT_ID = -32
 # Component c (< 8) of every element of this array of tuples, an integer: its
 # hull (FACT_COMPONENT_FACTS - 2c) and a value it is below (one less), as
 # FACT_ELEMENT_VALUE and FACT_ELEMENT_BELOW for an integer array (`[loop i in
@@ -850,6 +852,10 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
             if p.element and (p.selector == selector or fact_compare(s, .eq, p.selector, selector) == 1): return p.value
         i = fact_projection_find(s, base, FACT_ELEMENT_COPY, false)
         if i >= 0: return s.projections[i].value
+    if not element and selector == FACT_TEXT_ID:
+        origin = fact_terms[base].origin
+        if origin > 0 and nodes[origin].kind == .str_lit and nodes[origin].aux == 0 and nodes[origin].sval >= 0:
+            return fact_constant(s, int(nodes[origin].sval))
     v = fact_new(s, fact_domain(t), FactTerm(type = t))
     if not element and selector == -1:
         fact_set_bound(s, v, FactBound(0, fact_length_max()))
@@ -2550,6 +2556,25 @@ fact_literal = (s: mut FactState, n: int) -> int:
 # into a nested function. Indexed visits cost O(nodes in demanded dead paths).
 fact_dead_refinements: {int: bool}
 
+# Explicit string membership is one boolean projection of the captured value.
+# Keep it across joins without approximating a finite text set by an interval.
+# Only narrowing proofs consume it: O(1) indexed state, O(members)
+# comparisons at an unproved test, and no extra body walk.
+fact_string_set = (n: int, s: mut FactState) -> int:
+    test_info = string_set_tests[n]
+    source = fact_capture(test_info.0, s)
+    selector = -1073741824 - test_info.1
+    old = fact_projection_find(s, source, selector, false)
+    if old >= 0: return s.projections[old].value
+    # Evaluate the ordinary comparisons when no matching guard is held. This
+    # preserves equality/disjunction proofs, while explicit type guards share
+    # their captured membership value through joins.
+    string_set_tests.remove(n)
+    value = fact_capture(n, s)
+    string_set_tests[n] = test_info
+    if source != 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(source, selector, false, value))
+    value
+
 fact_capture_value = (n: int, s: mut FactState) -> int:
     if n == 0: return 0
     if not s.live:
@@ -2598,7 +2623,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         loop c in text:
             if c >= 128 or c == 13: ascii = false
         if ascii:
-            value = fact_new(s, FactBound(), FactTerm(type = T_STR))
+            origin = if string_set_owners.len() > 0 and string_set_owners.has(fact_owner): n else: 0
+            value = fact_new(s, FactBound(), FactTerm(origin = origin, type = T_STR))
             # (and its byte view's: `"abc" as array<uint8>` has 3 elements)
             if s.projections.len() + 4 < FACT_CAP:
                 fact_add_projection(s, FactProjection(value, FACT_ASCII_TEXT, false, fact_constant(s, 1)))
@@ -2910,6 +2936,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if mark & FACT_VALUE != 0: fact_join_length(s, joined, paths.yes, y, paths.no, z, n)
         return joined
     if k == .and_ or k == .or_:
+        if string_set_owners.len() > 0 and string_set_owners.has(fact_owner) and string_set_tests.has(n): return fact_string_set(n, s)
         if fact_summary_owner != 0 or mark != 0 and mark & FACT_VALUE == 0:
             paths = fact_condition(n, s)
             result = fact_domain(T_BOOL)
@@ -3017,8 +3044,17 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             return fact_new(s, fact_domain(T_BOOL), FactTerm(nodes[n].op as Tok, tag, zero))
         b = fact_capture(int(nodes[n].b), s)
         op = nodes[n].op as Tok
+        set_proof = string_set_owners.len() > 0 and string_set_owners.has(fact_owner)
+        if set_proof and string_set_tests.has(n): return fact_string_set(n, s)
         if (op == .shl or op == .shr) and fact_shift_obliged(n): fact_nonnegative(n, s, b, int(nodes[n].b), "the shift count")
-        if nodes[n].aux == 0 and fact_scalar(ntype(int(nodes[n].a))) and fact_scalar(ntype(int(nodes[n].b))) and fact_comparison(op):
+        if set_proof and nodes[n].aux == 2 and (op == .eq or op == .ne):
+            x = fact_project(s, a, FACT_TEXT_ID, false, T_INT)
+            y = fact_project(s, b, FACT_TEXT_ID, false, T_INT)
+            truth = fact_compare(s, op, x, y)
+            result = if truth >= 0: FactBound(truth, truth, truth != 0) else: fact_domain(T_BOOL)
+            return fact_new(s, result, FactTerm(op, x, y, n))
+        literal_words = set_proof and (op == .eq or op == .ne) and str_set_of(ntype(int(nodes[n].a))) != 0 and str_set_of(ntype(int(nodes[n].b))) != 0
+        if nodes[n].aux == 0 and (literal_words or fact_scalar(ntype(int(nodes[n].a))) and fact_scalar(ntype(int(nodes[n].b)))) and fact_comparison(op):
             unsigned_a = fact_type(ntype(int(nodes[n].a))) == T_U64
             unsigned_b = fact_type(ntype(int(nodes[n].b))) == T_U64
             if unsigned_a != unsigned_b:
@@ -3334,6 +3370,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             fact_query = true
             paths = fact_condition(kid(n, 0), s)
             fact_query = false
+            if (not paths.yes.live or paths.no.live) and string_set_obligations.has(n): fatal(nodes[n].pos, "cannot prove this value is {dt(string_set_obligations[n])}; test it with `is?`, or read it with the literal-union type constructor")
             if not paths.yes.live or paths.no.live: wit_assertion(kid(n, 0), (if nkids(n) > 1: kid(n, 1) else: 0), paths, s)
             return 0
         if id == .assert and nodes[n].aux2 == i32(UNPACK_OBLIGATION) and fact_speculating == 0 and nkids(n) > 0:

@@ -71,10 +71,11 @@ use 'facts_probes.dewy'
 # success can only narrow the old captured value, not its replacement.
 fact_condition = (n: int, entry: FactState) -> FactPaths:
     k = nodes[n].kind
-    if k == .not_:
+    membership = string_set_owners.len() > 0 and string_set_owners.has(fact_owner) and string_set_tests.has(n)
+    if not membership and k == .not_:
         p = fact_condition(int(nodes[n].a), entry)
         return FactPaths(p.no, p.yes, p.reason)
-    if k == .and_ or k == .or_:
+    if not membership and (k == .and_ or k == .or_):
         a = fact_condition(int(nodes[n].a), entry)
         b = fact_condition(int(nodes[n].b), if k == .and_: a.yes else: a.no)
         reason = if a.yes.live and a.no.live: a.reason else: b.reason
@@ -100,7 +101,7 @@ fact_condition = (n: int, entry: FactState) -> FactPaths:
         if p.no.live and p.no.bindings.len() > first: fact_scope_exit(p.no, n, first)
         return p
     yes = entry
-    v = fact_capture(n, yes)
+    v = if membership: fact_string_set(n, yes) else: fact_capture(n, yes)
     no = yes
     reason = fact_bound(yes, v)
     entry_state = if fact_query: yes else: FactState(live = false)

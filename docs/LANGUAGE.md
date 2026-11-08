@@ -1164,8 +1164,10 @@ the program chooses, such as a key (`xs.sorted(key=(p:BasePrefix) => RANK[p])` w
 `RANK` a `totaldict<BasePrefix int64>`) or the text (`"{p}" <? "{q}"`). `int(p)` is
 an error too. A member
 literal stores as it is, another literal is a compile error, and any other string
-is checked when the program runs; `s as BasePrefix` and `BasePrefix(s)` convert
-the same way. On a string, `head is? BasePrefix` compares it with each
+must be proven to be a member. Assigning, passing, returning and `s as BasePrefix`
+all carry this obligation; narrow with `if s is? BasePrefix` first.
+`BasePrefix(s)` reads text and gives `BasePrefix | ValidationError`, with no panic.
+Its error has `message` describing the expected literals and `input` holding the text. On a string, `head is? BasePrefix` compares it with each
 member. Literal unions mix with each other and with other types
 (`<1 | 2 | "fast" | "slow">`, `'auto' | int64`): `m is? 1` and `m is? "fast"`
 test the member and its value. A literal-typed parameter specializes an overload: `((n:int64 d:0):>DivZero => ...)

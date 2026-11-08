@@ -1,18 +1,18 @@
 # stdin: green\n
 # modes: native native-release
-# A string-literal union alias called on a value converts to it, as `as` does: a member literal
-# as it is, other text checked when it runs, a value of another set member by member.
+# A literal-union reader returns checked values; proven stores and casts keep
+# their obligation, and a subset widens without a reader.
 Color:type = 'red' | 'green'
 Wide:type = 'red' | 'green' | 'blue'
 name = (c:Color):>string => match c {
     <'red'> => "R"
     <'green'> => "G"
 }
-main = () => {
+main = ():>void | ValidationError | Canceled => {
     let text = read_line() ?? "red"
-    let c = Color(text)
-    let w = Wide(c)
-    let back = Color(w)
-    let same = text as Color
-    printl"{name(Color('red'))} {name(c)} {w} {back} {same} {c =? same} {'green' as Color}"
+    let c = Color(text) or_throw
+    let w:Wide = c
+    let back = Color(w) or_throw
+    let same = if text is? Color text as Color else 'red'
+    printl"{name(Color('red') or_throw)} {name(c)} {w} {back} {same} {c =? same} {'green' as Color}"
 }

@@ -34,6 +34,12 @@ struct TooManyDigits:
 @nominal(error)
 struct RegexError:
     message: str
+# A checked text reader preserves the reason and the original input.
+@nominal(error)
+struct ValidationError:
+    message: str
+    input: str
+
 # Time (lib/time): text that does not read, fields no calendar or UTC day has, an exact value
 # off a tick's grid or past a width, and a time no pinned table covers.
 @nominal(error)

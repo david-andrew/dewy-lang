@@ -536,7 +536,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
         fs = str_set_of(from)
         ts = str_set_of(to)
         # (by type alone, as library overloads are chosen, a set is not its text)
-        if ts != 0 and (fk == .str_ and n != 0 or fs != 0 and str_set_within(fs, ts)): return true
+        if ts != 0 and (fk == .str_ and n != 0 or fs != 0 and (str_set_within(fs, ts) or n != 0 and dewy_at(nodes[n].pos))): return true
         if fs != 0 and tk == .str_ and n != 0: return true
     if fk == .refined or tk == .refined: return can_coerce(n, representation_type(from), representation_type(to))
     if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return true
@@ -1809,7 +1809,7 @@ call_string_cost = (a: int, p: int, sp: int, binds: mut int[]) -> int:
         r = arg_cost(a, int(types[sp].elem), binds)
         return if r < 0: -1 else: r + 2
     if str_sets.len() > 1 and str_set_of(sp) != 0 and (nodes[a].type != 0 or nodes[a].kind == .str_lit):
-        # (a member literal fits a string set; another string is checked when it runs)
+        # (a member literal fits a string set; another string carries a proof obligation)
         p = sp
         ps = str_set_of(p)
         if nodes[a].kind == .str_lit and nodes[a].aux != 1:
@@ -1817,7 +1817,7 @@ call_string_cost = (a: int, p: int, sp: int, binds: mut int[]) -> int:
             return if str_sets[ps].contains(name_of(int(nodes[a].sval))): 0 else: -1
         at = prune(ntype(a))
         if at == p: return 0
-        if str_set_of(at) != 0: return if str_set_within(str_set_of(at), ps): 1 else: -1
+        if str_set_of(at) != 0: return if str_set_within(str_set_of(at), ps): 1 else if dewy_at(nodes[a].pos): 2 else: -1
         if at != T_STR: return -1
         e = kid_lit(a)
         if nodes[e].kind == .str_lit and nodes[e].aux != 1:
@@ -3440,7 +3440,9 @@ call_name_unknown = (n: int, name: int, mod_scope: int, args: int[], expected: i
         # (Reading(n), Reading a refined alias: the conversion `n as Reading`, its
         # refinement an obligation; Color('red'), Color a union of string literals:
         # likewise `'red' as Color`)
-        if (tkind(at) == .refined or str_set_of(at) != 0) and dewy_at(nodes[n].pos) and args.len() == 1 and nodes[args[0]].kind != .namedarg:
+        if str_set_of(at) != 0 and dewy_at(nodes[n].pos) and args.len() == 1 and nodes[args[0]].kind != .namedarg:
+            return str_set_read(n, args[0], at, expected)
+        if (tkind(at) == .refined) and dewy_at(nodes[n].pos) and args.len() == 1 and nodes[args[0]].kind != .namedarg:
             target = mk(.tname, nodes[n].pos)
             nodes[target].name = i32(name)
             if qualified and lookup(name) != ts:
@@ -4701,7 +4703,11 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         if cx >= 0 and fns[int(ctxs[cx].inst)].caps.len() > captures_before and fact_open(args[0]):
             err_notes.push((nodes[args[0]].pos, "note: an erased operand would introduce a runtime capture here"))
             fatal(nodes[n].pos, "cannot prove assertion: unsupported erased operand; erased operand would introduce a runtime capture")
-        fact_queue(n, args[0], if nargs == 2: args[1] else: 0)
+        if string_set_obligations.has(n):
+            owner = if cx >= 0: int(ctxs[cx].inst) else: 0
+            string_set_owners[owner] = true
+            fact_requests.push(FactRequest(n, owner))
+        else: fact_queue(n, args[0], if nargs == 2: args[1] else: 0)
     else if id == .print or id == .dewy_print:
         # (Dewy's print: no line break; its printl is the library's print)
         s = mk(.str_lit, nodes[n].pos)
@@ -5501,7 +5507,10 @@ membership_str_set = (n: int) -> int:
     nodes[callee].a = i32(mk_ident_local(source, pos))
     nodes[callee].name = i32(intern("contains"))
     nodes[call].a = i32(callee)
-    set_list(call, [mk_ident_local(held, pos)])
+    key = mk_ident_local(held, pos)
+    add_flag(key, NF_CHECKED)
+    str_set_coerce(key, u, true)  # the generated membership guard dominates this use
+    set_list(call, [key])
     guarded = bc_logic(.and_, shape_is(mk_ident_local(held, pos), u, pos), call, pos)
     if prune(check_expr(guarded, T_BOOL)) != T_BOOL: fatal(pos, "membership's contains function must return bool")
     result = mk(.exprstmt, pos)
@@ -5550,7 +5559,7 @@ method_str_set_key = (n: int, recv: int, rt: int, fname: int, args: mut int[], e
     # (in the test's true branch the text is a member: converted, it is no string)
     key = mk_ident_local(held, pos)
     add_flag(key, NF_CHECKED)
-    str_set_coerce(key, u)
+    str_set_coerce(key, u, true)  # checked by the generated shape_is guard below
     rest: int[] = [key]
     absent = 0
     if not one:

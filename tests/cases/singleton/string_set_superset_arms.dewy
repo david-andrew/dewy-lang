@@ -10,7 +10,7 @@ show=(p:ABC)=>match p {
     <'c'> => "C"
 }
 main=()=>{
-    loop s in ['b' 'c'] {
+    loop s in (['b' 'c'] as array<BC>) {
         let q:BC=s
         let u:BC|int64=q
         printl(match u {
@@ -22,7 +22,7 @@ main=()=>{
             x:ABC => "q {show(x)}"
         })
     }
-    loop s in ['a' 'b' 'c'] {
+    loop s in (['a' 'b' 'c'] as array<ABC>) {
         let p:ABC=s
         printl(match p {
             y:CA => "ca {y}"

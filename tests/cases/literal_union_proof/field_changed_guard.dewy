@@ -1,0 +1,11 @@
+# quick
+Action:type='jump'|'left'|'right'
+Box:type=[text:string]
+read=(box:Box):>Action=>{
+    if box.text is? Action {
+        box.text="rights"
+        return box.text as Action
+    }
+    'left'
+}
+main=()=>printl(read(Box["right"]))

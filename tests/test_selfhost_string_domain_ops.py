@@ -337,7 +337,7 @@ FAILS = (('open match', b'domain is open'), ('missing arm', b"no arm for 'n2', '
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_string_domain_twins(compiler, tmp_path, release):  # noqa: F811
     state = (ROOT / 'compiler/string_domains.jo').read_text()
-    state = state[state.index('string_domains: {int'):]
+    state = state[state.index('string_set_obligations: {int'):]
     outputs = compare_narrow(compiler, tmp_path, release,
                              ('checker_tokens', 'node_store', 'checker_types', 'checker_state', 'literal_domains', 'int_domains', 'intervals', 'text_domains', 'string_domain_ops'), DRIVER,
                              doubles={'services.jo': SERVICES, 'string_domains.jo': "use 'services.jo'\nuse 'node_store.dewy'\nuse 'checker_tokens.dewy'\nuse 'literal_domains.dewy'\nuse 'int_domains.dewy'\n" + state},

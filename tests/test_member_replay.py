@@ -15,8 +15,10 @@ U:type='aa'|'bbb'
 make=(text:string):>dict<string U>=>{
     let table:dict<string U>=[]
     loop s in members(U) {table[s]=s}
-    let converted:U=text
-    table["converted"]=converted
+    if text is? U {
+        let converted:U=text
+        table["converted"]=converted
+    }
     return table
 }
 printl(make("aa"))

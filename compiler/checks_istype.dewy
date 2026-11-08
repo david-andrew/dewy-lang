@@ -1,4 +1,5 @@
 $runtime_checks
+from p"string_domains.jo" import (string_set_tests)
 from p"error_ops.dewy" import (value_members)
 from p"error_ops.dewy" import (family_holds_generic)
 from p"error_ops.dewy" import (exception_member)
@@ -61,13 +62,18 @@ istype_set=(n:int64 orig:int64 at:int64 set:int64):>int64=>$unsafe {
     let pos=nodes.ptr[n].pos
     let subj=is_subject(n orig)
     let c:IstypeWord=0
+    let source:IstypeWord=0
     loop value in str_sets[set] {
         if at not=? T_STR and not str_sets[str_set_of(at)].contains(value) {continue}
-        let same=bc_bin('eq' copy_path(subj) bc_str(value pos) pos)
+        let read=copy_path(subj)
+        if source =? 0 {source=read}
+        let same=bc_bin('eq' read bc_str(value pos) pos)
         c=if c =? 0 {same} else {bc_logic('or_' c same pos)}
     }
     if c =? 0 {c=bc_bool(false pos)}
-    is_rewritten(n orig c)
+    let result=is_rewritten(n orig c)
+    if orig not=? 0 and source not=? 0 and plain_path(source) {string_set_tests[n]=[source set]}
+    result
 }
 # x is? 1, x is? 'fast' on a union with an integer or string member: that member, then its value
 istype_member_value=(n:int64 orig:int64 at:int64 tt:int64 set:int64):>int64=>$unsafe {

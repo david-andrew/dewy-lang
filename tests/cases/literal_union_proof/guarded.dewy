@@ -1,0 +1,10 @@
+# quick
+Action:type='jump'|'left'|'right'
+accept=(a:Action):>Action=>a
+convert=(s:string):>Action=>{
+    if not (s is? Action) return 'jump'
+    let a:Action=s
+    let b=s as Action
+    accept(b)
+}
+main=()=>{printl(convert("left")); printl(convert("bad"))}

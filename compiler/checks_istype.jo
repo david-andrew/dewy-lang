@@ -157,12 +157,17 @@ istype_set = (n: int, orig: int, at: int, set: int) -> int:
     pos = nodes[n].pos
     subj = is_subject(n, orig)
     c = 0
+    source = 0
     loop value in str_sets[set]:
         if at != T_STR and not str_sets[str_set_of(at)].contains(value): continue
-        same = bc_bin(.eq, copy_path(subj), bc_str(value, pos), pos)
+        read = copy_path(subj)
+        if source == 0: source = read
+        same = bc_bin(.eq, read, bc_str(value, pos), pos)
         c = if c == 0: same else: bc_logic(.or_, c, same, pos)
     if c == 0: c = bc_bool(false, pos)
-    is_rewritten(n, orig, c)
+    result = is_rewritten(n, orig, c)
+    if orig != 0 and source != 0 and plain_path(source): string_set_tests[n] = (source, set)
+    result
 # x is? 1, x is? 'fast' on a union with an integer or string member: that member, then its value
 istype_member_value = (n: int, orig: int, at: int, tt: int, set: int) -> int:
     pos = nodes[n].pos
