@@ -1,0 +1,139 @@
+$runtime_checks
+# How an error is shown: its source line with a caret, a library error moved to the program's
+# call, the generic calls that made it as notes, and the held errors in source order.
+from p"@lib/core/rt.jo" import (__str_slice)
+from p"@lib/core/os.jo" import (eprint)
+from p"@lib/core/str.jo" import (starts_with trim)
+from p"ide_decls.dewy" import (trail_sig)
+from p"lazy_force.dewy" import (dc_replay)
+from p"util.jo" import (err_held err_held_on err_more_note err_notes err_prior err_trail err_trail_fns err_trail_names files lib_root line_col pos_file pos_in_lib pos_off pos_str stop)
+
+ErrWord:type=int64<overflow='wrap'>
+source_line=(p:ErrWord):>string=>{
+    let f=pos_file(p)
+    if f <? 0 or f >=? files.length {return ""}
+    let text=files[f].src
+    let src=text as array<uint8>
+    let off:ErrWord=pos_off(p)
+    let a=off
+    loop a >? 0 and src[a - 1] not=? b'\n' {a -= 1}
+    let b=off
+    loop b <? src.length and src[b] not=? b'\n' {b += 1}
+    __str_slice(text a b)
+}
+# what is between the parentheses of the call at p, as written (on one line; "" otherwise):
+# assert's message shows the condition that failed
+call_args_text=(p:ErrWord):>string=>{
+    let f=pos_file(p)
+    if p <=? 0 or f <? 0 or f >=? files.length {return ""}
+    let text=files[f].src
+    let src=text as array<uint8>
+    let i:ErrWord=pos_off(p)
+    loop i <? src.length and src[i] not=? b'(' and src[i] not=? b'\n' {i += 1}
+    if i >=? src.length or src[i] not=? b'(' {return ""}
+    let a=i + 1
+    let depth:ErrWord=1
+    i += 1
+    loop i <? src.length and depth >? 0 {
+        let c=src[i]
+        if c =? b'\n' {return ""}
+        if c =? b'"' or c =? b'\'' {
+            let q=c
+            i += 1
+            loop i <? src.length and src[i] not=? q and src[i] not=? b'\n' {
+                if src[i] =? b'\\' {i += 1}
+                i += 1
+            }
+        }
+        else if c =? b'(' or c =? b'[' {depth += 1}
+        else if c =? b')' or c =? b']' {depth -= 1}
+        i += 1
+    }
+    if depth not=? 0 {return ""}
+    trim(__str_slice(text a i - 1))
+}
+# (an error's place and message, moved to the program's call when it is inside the library, and
+# the trail entries to note: the calls that made the generic code it is in, innermost first)
+err_locate=(p0:ErrWord msg0:string):>[int64 string array<int64>]=>{
+    let p=p0
+    let msg=msg0
+    let k:ErrWord=err_trail.length - 1
+    if k >=? 0 and pos_in_lib(p) {
+        loop k >=? 0 and (err_trail[k] <=? 0 or pos_in_lib(err_trail[k])) {k -= 1}
+        if k >=? 0 {
+            let at=pos_str(p)
+            if starts_with(at lib_root) {at="lib{__str_slice(at (lib_root as array<uint8>).length (at as array<uint8>).length)}"}
+            msg="in this call to {err_trail_names[k]}: {msg} ({at})"
+            p=err_trail[k]
+            k -= 1
+        }
+    }
+    # (in the program's own generic code: the calls that made it, innermost first, as notes)
+    let notes:array<int64>=[]
+    loop k >=? 0 and notes.length <? 4 {
+        # (a body checked while another is: its chain is on the trail twice)
+        let seen=false
+        loop n in notes {seen=seen or err_trail_fns[n] =? err_trail_fns[k]}
+        if err_trail[k] >? 0 and not pos_in_lib(err_trail[k]) and not seen {notes.push(k)}
+        k -= 1
+    }
+    [p msg notes]
+}
+# an error as shown: its line, the calls noted and the extra notes (p >= 0)
+err_block=(p:ErrWord msg:string notes:array<int64> extra:array<[int64 string]>):>string=>{
+    let out="{pos_str(p)}: error: {msg}{line_text(p)}"
+    loop n in notes {out="{out}\n{pos_str(err_trail[n])}: note: in {trail_sig(n)}, called here{line_text(err_trail[n])}"}
+    loop e in extra {
+        if e[0] >? 0 {out="{out}\n{pos_str(e[0])}: {e[1]}{line_text(e[0])}"}
+        else {out="{out}\n    {e[1]}"}
+    }
+    out
+}
+err_hold=(p0:ErrWord msg0:string):>void=>{
+    dc_replay()
+    let [p msg notes]=err_locate(p0 msg0)
+    let extra=err_notes
+    err_notes=[]
+    err_held.push([p err_block(p msg notes extra)])
+}
+# the held errors, with the runs' before, in source order, each once; then the compile stops
+err_flush=():>void=>{
+    err_prior=[err_prior... err_held...]
+    err_held=[]
+    err_held_on=false
+    stop(1)
+}
+err_prior_show=():>void=>{
+    let held=err_prior
+    err_prior=[]
+    loop i in [1..held.length) {
+        let j=i
+        loop j >? 0 and held[j - 1][0] >? held[j][0] {
+            let t=held[j]
+            held[j]=held[j - 1]
+            held[j - 1]=t
+            j -= 1
+        }
+    }
+    loop i in [0..held.length) {
+        if i >? 0 and held[i][0] =? held[i - 1][0] and held[i][1] =? held[i - 1][1] {continue}
+        if i >? 0 {eprint("")}
+        eprint(held[i][1])
+    }
+    if err_more_note {
+        err_more_note=false
+        eprint("(there may be more errors: these first)")
+    }
+}
+# the source line at p, and a caret under p's column (after a newline), or nothing
+line_text=(p:ErrWord):>string=>{
+    let line=source_line(p)
+    if (line as array<uint8>).length =? 0 {return ""}
+    let [l c]=line_col(p)
+    let caret=""
+    loop i in [0..c - 1) {
+        if i <? (line as array<uint8>).length and (line as array<uint8>)[i] =? b'\t' {caret="{caret}\t"}
+        else {caret="{caret} "}
+    }
+    "\n    {line}\n    {caret}^"
+}

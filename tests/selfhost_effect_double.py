@@ -49,6 +49,7 @@ LEAF_HOMES = {
     'par_drive': 'par.jo',
     'driver_cli': 'main.jo',
     'lsp_drive': 'lsp.jo',
+    'error_display': 'util.jo',
     'refine_rare': 'refine.jo',
     'ide_decls': 'ide.jo',
     'directive_rules': 'directives.jo',
