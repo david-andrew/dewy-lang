@@ -17,12 +17,13 @@
 
 **Questions at a glance**
 - **(a) Changes something you decided:**
+  - D4 Q6: metatags go before the construct they affect, language-wide;
+  - D4 Q7: separate entry files when environments need different program settings;
   - D38 Q1: snake_case naming style;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
 - **(b) New syntax or surface:**
-  - D4 Q3: `main = (app:BackgroundTasks)`;
   - D11 Q2: `check=` or `valid_if=`;
   - D11 Q3: `__read__` or `$reader`;
   - D11 Q4: the checked constructor `Roll(count=…)`;
@@ -30,8 +31,7 @@
   - D33 Q1: a self-naming alias;
   - D37 Q1: `iso_basic` and `""`.
 - **(c) Names only:**
-  - D4 Q1: `$explicit_cancellation`, a new tag that answers your question on handling Ctrl-C explicitly;
-  - D4 Q4, Q5;
+  - D4 Q4: `catch_ctrl_c` taking a callback;
   - D10 Q4–Q8;
   - D11 Q5, Q6;
   - D28 Q1–Q4;
@@ -48,17 +48,15 @@
 
 ## P1: blocking current work
 
-### D4. One unified `parallel` surface: v4
-- **Status (2026-11-08):** your answers are in decisions.md (batch 5). Being redesigned now: `select` with same-typed waits, Ctrl-C/`check_cancel`/`protect_from_cancel` as visible scopes, cancellation as a possible effect row, metatag placement before or inside a construct, `main`'s background tasks alongside command-line arguments, and where `tasks` comes from. Skip the rest of D4 until the revision lands.
+### D4. One unified `parallel` surface: v5
 
-- **BLUF:** turn this on, and three forms cover all parallel and concurrent work:
-  - a block whose steps wait only for the data they use;
-  - a loop or comprehension that may write only its own element;
-  - task groups for background work, including one that lasts as long as the program.
-
-  Values come out as they would sequentially, except for what handles (channels, atomics, files) return. Ctrl-C can't turn into a default value, and a program that wants Ctrl-C for itself, such as a shell, can catch it. Full design: `proposals/concurrency/unified/proposal-v4.md`.
+- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` labels each wait with an ordinary one-field record, so same-typed channels are unambiguous. Ctrl-C catching and cleanup protection have visible callback scopes; compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
+- **Status:** first-pass paper dogfood covered fourteen scenarios; independent dogfood in `proposals/concurrency/unified/v5-dogfood.md` found must-fix issues, now corrected in this text. Your approved names, `$explicit_cancellation` and `main`'s `BackgroundTasks` parameter stay. The remaining surface questions are below; no repeated Q1 or Q3. Full design and complete sources: `~/dev/tmp/par5/parallel-v5.md`, `~/dev/tmp/par5/programs/`.
 
 ```dewy
+# v5 design program; standard concurrency API is explicit at its use.
+import p"@lib/std/tasks.jo" as task
+
 Config:type = [root:string]
 Invalid:type = type of error
 load_config = () => {
@@ -80,24 +78,24 @@ autosave = () => loop true {
     printl"saved"
 }
 relay = (commands:Channel<string> chat:Channel<string>) => loop true {
-    match select(command=@commands.receive  message=@chat.receive  timeout=1s) or_throw<Canceled> {
-        [command:string] => printl"command: {command}"
-        [message:string] => printl"chat: {message}"
-        [command:Closed] => return "commands closed"
-        [message:Closed] => return "chat closed"
+    match select([command=@commands.receive] [message=@chat.receive] timeout=1s) or_throw<Canceled> {
+        [command: string] => printl"command: {command}"
+        [message: string] => printl"chat: {message}"
+        [command: Closed] => return "commands closed"
+        [message: Closed] => return "chat closed"
         <Timeout> => printl"idle"
     }
 }
 main = () => {
     parallel {
-        let config = load_config or_throw          # starts at once
-        let map = load_map(config) or_throw        # waits for config
-        let sounds = load_sounds or_throw          # starts at once
+        let config = load_config or_throw
+        let map = load_map(config) or_throw
+        let sounds = load_sounds or_throw
     }
-    let ages = [parallel t in ["31" "abc" "45"] parse_age(t) ?? void]   # [31 45]
-    let rounds = input_int("rounds? ") ?? 10       # bad text gives 10; Ctrl-C still stops the program (exit 130)
+    let ages = [parallel t in ["31" "abc" "45"] parse_age(t) ?? void]
+    let rounds = input_int("rounds? ") ?? 10
     let total = sum([parallel i in [0..rounds * 100_000) {
-        check_cancel or_throw                       # opt in: Ctrl-C stops this early
+        check_cancel() or_throw
         score(i)
     }])
     let commands = channel<string>(4)
@@ -105,119 +103,189 @@ main = () => {
     parallel {
         {
             chat.send("hi") or_throw
-            chat.close
+            chat.close()
         }
         {
             commands.send("quit") or_throw
-            commands.close
+            commands.close()
         }
         let why = relay(commands chat) or_throw
     }
-    tasks((group:Tasks) => {
-        let saver = group.spawn(@autosave)          # a Task
+    task.tasks((group:Tasks) => {
+        let saver = group.spawn(@autosave)
         let tick = ticker(500ms)
-        loop i in [0..4) tick.next or_throw;       # wait for four ticks; `;` drops each tick
-        saver.stop                                  # stops this one task; the group ends normally
+        defer tick.stop()
+        loop i in [0..4) tick.next or_throw;
+        saver.stop()
     }) or_throw
     printl"{map} {sounds} {ages} {total} {why}"
 }
 ```
 
-A program that catches Ctrl-C for itself, and one whose background work outlives `main`:
+- **The common path:**
+  - Write steps in order in `parallel { ... }`; independent steps can run together. Ordinary successful values match source order given the same handle results.
+  - `[parallel x in xs f(x)]` maps; `?? void` filters ordinary failures, and `.partition_failures` retains successes and failures.
+  - `select([command=@commands.receive] [message=@chat.receive] timeout=1s)` gives `[command:string|Closed] | [message:string|Closed] | Timeout | Canceled`. `or_throw<Canceled>` removes only the final alternative by forwarding it. Ordinary record field patterns distinguish the waits, including their `Closed` outcomes.
+  - `task.tasks` is a function imported from the standard task module, not a language keyword or hidden local. It passes a fresh `Tasks` group to the callback, joins, then returns the callback's value. Void callbacks stay void; a useful group result needs a binding or `;`.
+- **How to adjust:**
+  - Link a step to an earlier result, group ordered statements in `{ ... }`, or put work after the parallel block to order it.
+  - Prefix a loop/comprehension with `$parallel.max_concurrent=4` to cap work in flight. A collector spells the prefix inside its `[...]`, before `parallel`.
+  - Prefix a block/function with `$parallel.off` for source-priority cooperative replay. One core is a separate resource policy.
+  - Put `check_cancel() or_throw` at a safe point in compute. The function's result includes `Canceled`; no guard variable activates anything.
+  - `task.protect_from_cancel(5s () => save(value))` lets a save run despite the parent's pending cancel. Its own deadline is cooperative, and the result still reports save errors or `Timeout`.
+  - Put a prompt loop inside `task.catch_ctrl_c((ctrl_c) => { ... })` to take Ctrl-C as an event or `Interrupted` input result. The scope ends with the call, regardless of aliases to its listener.
+
+- **A prompt with its own Ctrl-C behavior:** all application names below are declared; `input`, `Interrupted`, and the clock/printing types are standard-library/prelude names.
 
 ```dewy
-repl = () => {
-    let ctrl_c = catch_ctrl_c                      # while held, Ctrl-C cancels nothing
+# Ctrl-C during input clears the line; EOF/quit leaves the visible scope.
+import p"@lib/std/tasks.jo" as task
+
+repl = () => task.catch_ctrl_c((ctrl_c) => {
     loop true {
-        let line = input("> ") ??<Interrupted> { printl""; continue } ?? break   # Ctrl-C clears the line; end of input leaves
+        let line = input("> ") ??<Interrupted> { printl(""); continue } ?? break
         if line =? "quit" break
         printl"you said {line}"
     }
-}
-
-fetch_news = (out:Channel<string>) => loop true {
-    out.send("patch 1.2 is out") or_throw          # stands in for a network call
-    sleep(10minute) or_throw
-}
-
-main = (app:BackgroundTasks) => {                  # tasks here live as long as the program
-    let news = channel<string>(4)
-    let job = app.spawn(@fetch_news(news))         # a Task<Unsent<string> | Canceled>
-    repl
-    if job.error is? error printl"news failed: {job.error}"   # a failed task here doesn't end the program
+})
+main = () => {
+    repl() or_throw
+    # The catcher has ended even though ctrl_c was never dropped explicitly.
+    printl"normal Ctrl-C behavior restored"
+    sleep(100ms) or_throw
 }
 ```
 
-- **The common path:**
-  - write the steps in order in `parallel { }`, and the compiler runs whatever doesn't depend on something else;
-  - `[parallel x in xs f(x)]` for maps;
-  - `?? void` to drop failures, `.partition_failures` to keep both sides;
-  - `check_cancel or_throw` to make a long computation stoppable.
-- **How to adjust:**
-  - to force an order, use the earlier result, wrap the steps in `{ }`, or move a step after the block;
-  - `$parallel.max_concurrent = 4` as the first line of a loop body caps that loop;
-  - `$parallel.off` replays a scope in source order;
-  - `$program.max_cores = 1` keeps a program on one core;
-  - `protect_from_cancel(5s @save(x))` saves after a cancel;
-  - `catch_ctrl_c` takes Ctrl-C.
+- **Save on Ctrl-C:** normal cancellation stops the search; a protected save handles its own errors and then preserves the original `Canceled` (exit 130).
+
+```dewy
+# Ctrl-C requests ordinary cancellation. Save, then preserve exit status 130.
+import p"@lib/std/tasks.jo" as task
+
+search = (@best:int):>void | Canceled => {
+    loop n in [0..1_000_000_000) {
+        check_cancel() or_throw
+        if n % 7919 =? 0 best = n
+    }
+}
+save = (best:int) => p"best.txt".write_text("{best}\n")
+main = () => {
+    let best:int = 0
+    search(@best) ??<Canceled> {
+        match task.protect_from_cancel(5s () => save(best)) or_throw<Canceled> {
+            saved:Path => printl"saved to {saved}"
+            <Timeout> => printl("save deadline expired" file=stderr)
+            problem:error => printl("save failed: {problem}" file=stderr)
+        }
+        return Canceled
+    }
+    save(best) or_throw;
+}
+```
+
+- **Arguments and program-lifetime tasks compose:** both parameter types are supplied at entry, in either order; an ordinary explicit call supplies both normally. `argparse` keeps its descriptor design. This complete CLI includes its HTTP helper; it saves full HTTP responses from localhost:8080.
+
+```dewy
+# Example command: dewy 08_cli_arguments_and_tasks.dewy /index.html count=3
+import argparse
+import p"@lib/std/tasks.jo" as task
+import net
+
+fetch = (resource:string output:Path) => {
+    let stream = net.tcp_connect("127.0.0.1" 8080) or_throw
+    defer net.tcp_close(stream)
+    net.tcp_send(stream "GET {resource} HTTP/1.0\r\nHost: localhost\r\n\r\n") or_throw
+    let response:array<uint8> = []
+    loop true {
+        let received = net.tcp_receive(stream)
+        if received is? none break
+        let bytes = received or_throw
+        response.extend(bytes)
+    }
+    output.write_bytes(response) or_throw
+}
+
+const Args = [
+    resource = argparse.Positional<string>(help="HTTP resource at localhost:8080")
+    count = argparse.Named<int<1 <=? value <=? 100>>(default=1 help="number of captures")
+]
+progress = (completed:Channel<Path>) => {
+    loop output in completed { printl"completed {output}" } or_throw
+}
+main = (argv:array<string> app:BackgroundTasks) => {
+    let args = argparse.parse(Args argv about="capture HTTP responses")
+    let completed = channel<Path>(4)
+    let reporter = app.spawn(@progress(completed))
+    defer completed.close()
+    loop i in [0..args.count) {
+        let output = within(5s @fetch(args.resource p"capture-{i}.http")) or_throw
+        completed.send(output) or_throw
+    }
+    completed.close()
+    reporter.wait() ?? void
+    if reporter.error is? error printl"reporter failed: {reporter.error}"
+}
+```
+
+- **Source-defined environments:**
+  - Separate entry files import units/shared code first, then set a contiguous module header before declarations or prefix their entry `main`. Caps are fixed when compiling, with no environment-variable override.
+  - One entry file may dispatch ordinary functions with ordinary application config values. It cannot choose different compiled process caps from runtime arguments. The first pass's program 10 is withdrawn. Q7 asks how to reconcile your second idiom; these are the corrected separate-entry and single-file application-config forms.
+
+```dewy
+# entry-small.dewy
+from units import MiB
+import p"09_environment_program.dewy" as program
+
+$program.max_cores = 2
+$program.max_memory = 512MiB
+main = (argv:array<string> app:BackgroundTasks) => program.run(argv app)
+```
+
+```dewy
+from units import MiB
+
+Config:type = [workers:int]
+run = (config:Config):>void => printl"{config.workers} requested workers; {available_cores} cores allowed"
+laptop = ():>void => run(Config[2])
+server = ():>void => run(Config[8])
+
+$program.max_cores = 8
+$program.max_memory = 512MiB
+main = (argv:array<string> app:BackgroundTasks):>void => {
+    let environment = argv.get(0) ?? "laptop"
+    if environment =? "laptop" laptop()
+    else if environment =? "server" server()
+    else { printl("choose laptop or server" file=stderr); exit(2) }
+}
+```
+
 - **Semantics taken:**
-  - **Block rule:** an item waits for an earlier one whose data it uses. If every item succeeds, ordinary values are the sequential ones; a handle's result depends on timing. On failure, pending items never start, running ones are canceled and joined, and nothing is rolled back. A cycle through a channel is an error, and so is a `close` that races the sends.
-  - **Who may write:** block items may write the function's variables, and those writes are ordered. Loop bodies may write only their own element (`xs[i]` with their own `i`). A spawned task can't write outer variables; the error names a channel or a block item (D26, restated).
-  - **`?? void`** works wherever `if` without `else` works.
-  - **Handles share one set of verbs:**
-    - `Task`, `PlayingSound`, `Process` and groups have `.stop`, `.wait` and `.running`. Sources of events (`Ticker`, the Ctrl-C catcher) have `.next`.
-    - `Task<E>.wait` gives `void | E | Canceled`, and `.error` gives `E | none`.
-    - Stopping something you started isn't a failure.
-    - `or_throw` in a spawned lambda forwards to its inferred result (D27, restated).
-  - **Program-lifetime group:** in a `BackgroundTasks` group, a failed task doesn't fail the group; its error prints once on stderr and stays on its handle. A scoped `tasks(…)` group fails fast, as decided.
-  - **Ctrl-C while caught:**
-    - a press is an event (`.next`, or `@ctrl_c.next` in `select`), and a console read in progress gives `Interrupted`;
-    - three presses within one second still end the process;
-    - a child process still gets the terminal's signal itself;
-    - dropping the catcher restores the default.
-  - **Clocks:** `timeout=` and `sleep(until=…)` take a monotonic deadline (`now + 1s`) or a wall-clock `Instant`, and waits accept any time quantity.
-  - **Frame code:** `update` and `draw` may read and write files and the terminal. Waiting on a channel, task, `sleep` or `select` there is a compile error, and `ch.drain` reads what has arrived.
-  - **A sound nobody holds** belongs to the program's group: exit waits for it, a looping one stops at exit, and Ctrl-C stops it.
-  - **`select`:** every wait's result must be distinguishable. A send that loses keeps its payload. A channel's element type can't be `Closed` or `Canceled`.
-  - **Cores are one unit:** program cap, scoped cap, pinning, `available_cores`, and an environment variable that can only lower it.
-- **Decided by you (2026-11-07):**
-  - **`Canceled` passes through `??`.** `??`, `?? void`, `?? return/break/continue` and `??<E>` (unless `E` names `Canceled`) don't default it, and a collector never holds it; it leaves the function as `or_throw` would.
-  - **`or_throw<E>`** forwards only `E`, mirroring `??<E>`, for orthogonality. `or_throw_only<E>` is withdrawn. Readers took `or_throw<E>` cold as "throw an `E`"; the docs teach it beside `??<E>`.
-- **Questions for you:**
-  - **Q1 (c)** **Your question: should a tag make Ctrl-C handling explicit, or is it cleaner to let something higher up handle it?**
-     - **Both, by layer.** In ordinary code, the higher-up handling is cleaner. Cancellation is one event for the whole program, and the right place to act on it is where the work is owned:
-       - `main` exits with 130;
-       - a `tasks(…)` group joins its tasks;
-       - `protect_from_cancel` saves on the way out;
-       - `catch_ctrl_c` takes Ctrl-C in a shell.
-
-       Handling it at every `??` would be the noise Go's `ctx.Err()` checks are.
-     - **What already forces handling:** a function with a declared result that leaves out `Canceled`. There, the `??` that would forward it is a compile error naming both fixes (add `| Canceled`, or `??<Canceled …>`). That gives per-function control today. It doesn't reach inferred functions, where `Canceled` joins the inferred result silently. Dewy has no cancellation effect row, and adding one would duplicate the result type.
-     - **So for `$bulletproof`, a tag is worth having:** `$explicit_cancellation`, in the `$explicit_allocation_failure` family. Turn it on, and every place where `Canceled` would pass through without being written is a compile error: a `??`, a `?? void`, a `?? return/break/continue`, or a collector receiving it. The fix-it writes `or_throw<Canceled>` at that spot, or `??<Canceled>` if you mean to default it. It changes no type and no behavior, only what must be written, so every exit path for a cancel is visible in the source. It goes into `$bulletproof`.
-     - **Rec:** add `$explicit_cancellation` to `$bulletproof` and keep the default implicit. The name is not yet cold-read; `$no_implicit_cancel` is the candidate beside it.
-  - **Q3 (b)** **`main = (app:BackgroundTasks) => …`** gives a group whose tasks live as long as the program. In a UI program, that is until the window closes. A task that fails there doesn't end the program. Without it, a UI program has nowhere to put background work, because `update` and `draw` run after `main` returns. `BackgroundTasks` read 4/3/4, against 3/2/3 for `ProgramTasks`. **Rec:** yes. Reversible.
-  - **Q4 (c)** **`catch_ctrl_c`**, a handle that takes Ctrl-C while held, with `Interrupted` for an interrupted console read. Read 5/4/3, against 4/3/3 for `listen_for_interrupt`.
-     - `ctrl_c.discard_pending` forgets presses not yet handled. It is **untested**: the tested `.clear` read 3/3 as "remove the registered handlers".
-     - **Rec:** yes.
-  - **Q5 (c)** **Names** (read fine):
-     - `check_cancel`;
-     - `select(name=@ch.receive … timeout=1s ties='fair')`, `ties='first'`, `Sent`, `Waitable<R>`;
-     - the metatags `$parallel.max_concurrent`, `.chunk_size`, `.max_cores`, `.off`, `$placement.device`, `.cores`, `$memory.layout`, `$program.max_cores`, `.max_memory`, `.max_tasks`;
-     - `sum(xs grouping='tree')`, `iterable<T>`, `available_cores`, `DEWY_MAX_CORES`, `ticker`, `tick.next`, `partition_failures`;
-     - `Task`, `.stop`, `.wait`, `.running`, `.error`;
-     - `ch.drain`, `sleep(until=t)`, `protect_from_cancel`.
-
-     **Rec:** yes.
-- **Flagged, not questions:**
-  - the Ctrl-C default and exit status 130;
-  - a block gives its items' values in source order;
-  - a block's top-level `let`s are visible after it;
-  - `( … )` is one item;
-  - `$parallel.off` is a deterministic replay;
-  - a `$parallel.*` tag that governs nothing is an error;
-  - `$program.max_tasks` gives `OutOfMemory` only under `$explicit_allocation_failure`.
-- **Floors:** setup through the file system is invisible to the block analysis. The HTTP client, file-change notification and terminal hand-off for job control are library items.
-- **Ready:** yes.
+  - **Block ordering:** conflict/data edges wait for successful predecessors; on failure, pending work never starts, running work is canceled/joined, and no writes are rolled back. Handle outcomes depend on timing. Channel wait cycles and racing sends/closes retain the v4 checks.
+  - **Writes:** block items may write outer variables under the dependency graph; loop items may write only their own partition; spawned tasks cannot write outer variables. Helpers preserve these rules.
+  - **Scope results:** block items' values remain source-ordered; top-level block `let`s remain visible after the block; `( ... )` is one ordered item. The unusual binding scope stays flagged.
+  - **Select diagnostics:** unknown named waits teach `[key=@operation]`; hover offers both labelled `Closed` arms plus `Timeout` where applicable. A misplaced comprehension tag above `let` says “move this inside the brackets, before `parallel`”.
+  - **Group-body result:** `task.tasks(body)` preserves the body's value after joining, just like the other callback scopes; early `return` is local to the callback. Child failure/parent cancellation joins before returning a failure instead. No contextual-void suppression of useful group values.
+  - **Select protocol:** positional arguments are distinct-key one-field records of `Waitable<R_i>`; return their corresponding `[key:R_i]` union plus top-level cancellation and applicable timeout. Losing receives consume nothing; losing sends retain their caller-owned payload. Match labels never come from arbitrary call keywords.
+  - **Cancellation is result-typed:** `Canceled` remains visible in results and ordinary error handling. No second, hidden exception mechanism or cancellation row is needed for these programs. A result excluding `Canceled` forbids an unhandled cancel, without claiming the function never checks it locally.
+  - **Explicit cancellation:** `$explicit_cancellation` is approved and included in `$bulletproof`. It rejects implicit forwarding through `??` and collectors. `or_throw<Canceled>` writes the forwarding; `or_throw<E>` with some other E leaves cancellation in the value.
+  - **Ctrl-C scopes:** default Ctrl-C requests root cancellation; an unhandled Ctrl-C-derived cancel exits 130. Catching redirects presses only for the callback's lifetime, without masking other stop sources. Console signatures always include `Interrupted`; scope context does not rewrite their types. Three rapid presses force exit even while caught. Child-process signal/job-control behavior is unchanged.
+  - **Protection:** run the body in a new scope despite a pending parent cancel, apply its own cooperative deadline, then restore the parent without clearing its request. A callback's intrinsic errors remain. Save failures must be reported; protection is not guaranteed persistence.
+  - **Task policies:** a scoped group fails fast; `BackgroundTasks` reports a child error without ending the program. An owner/self/group stop is normal group shutdown: a canceled child does not fail the group or print a task error. `Task<E>.wait()` still gives `void|E|Canceled`; `.error` retains `E|none` for ordinary errors. Consume an expected child cancellation explicitly while still checking the caller for a concurrent stop. Event sources use `.next`.
+  - **Frame code:** use nonwaiting `ch.drain` and background jobs; channel/task/timer waits remain errors in `update`/`draw`. The injected group survives `main` until the window closes.
+  - **Entrypoint arguments:** accept at most one `array<string>` and one `BackgroundTasks`, by exact type rather than parameter name; no extra injections into ordinary helpers. Only the selected file's entry `main` runs automatically.
+  - **Limits:** settings are in source, caps count cores, and `available_cores` combines hardware/affinity and source limits. No environment-variable cap. Program task admission retains the decided explicit-allocation-failure policy.
+- **Surface questions for you:**
+  - **Q4 (c): keep `catch_ctrl_c`, now taking a callback rather than returning an activating guard?** The callback's extent is the catching extent; its `ctrl_c` parameter receives presses. It unblocks shells and prompt loops without a policy-changing assignment. **Rec:** yes. Reversible library call-shape choice. The spelling was previously cold-read; its new invocation shape has been paper dogfooded, not independently retested. No new tag/member spelling is introduced.
+  - **Q6 (a, b): make construct settings prefix their target language-wide?** Tags and labels sit before loops, blocks, and declarations. One contiguous module header may be at file start or after the initial imports, before the first ordinary declaration/statement; imported units are in scope. Later prefixes apply only to their next construct. Program settings may also directly prefix entry `main`, and are fixed at compile time. This replaces both current containing-scope placement and the first-line-inside-parallel exception. It unblocks consistent examples in every design item. **Rec:** yes. Reversible before the surface ships; broader than concurrency, and explicitly changes the prior placement direction.
+  - **Q7 (a, b): use separate entry files when environments need different process caps, and ordinary config records when one entrypoint chooses at runtime?** Your second idiom cannot select compiled `$program.*` settings from runtime `argv`; putting them on ordinary functions would give a prefix tag a second, process-changing meaning. A one-file process configuration would need an environment already known when compiling, selected through an agreed target/build-mode/compile-time source value; no such environment selector is invented here. **Rec:** separate entry files for process settings; keep one-file functions for application config under one fixed process cap (complete examples above). This preserves compile-time settings and ordinary function-call semantics. It unblocks environment packaging; reversible source organization. Your proposed second idiom remains an explicit owner choice, not silently implemented as runtime configuration.
+- **Flagged, not new questions:**
+  - `check_cancel()` is an explicit checkpoint, not an ambient opt-in; it has no active lifetime to bracket. It lives inside an ordinary computation function whose result carries `Canceled`.
+  - `protect_from_cancel` and `within` are cooperative: nonchecking compute or an uninterruptible foreign call can exceed the requested duration while being joined.
+  - A foreground-task restriction keeps two unrelated background tasks from racing to own process signal policy; nested catchers restore the prior owner.
+  - The standard console failure sets gain `Interrupted` uniformly. No metatag changes their type.
+  - `$parallel.*` settings that govern nothing are errors. Declaration settings retain target checks.
+- **Floors:** block-local bindings escaping braces remain unusual; different compiled process caps need separate entry files (Q7); full HTTP and real shell job control are library work. Several discoverability scores remain 4. There are no claims of compiler validation or fresh-reader scores.
+- **Ready:** design review and syntax/name answers; not implementation landing. Approved Q1, Q3 and approved names are omitted from the questions.
 
 ---
 
