@@ -1,0 +1,7 @@
+# One unbounded word keeps the difference unbounded.
+Counter:type = [n:int64]
+add = (xs:array<int64> @t:Counter d:int64):>void => { t.n += xs.length-d }
+main = ():>void => {
+    let t = Counter[0]
+    add([1 2 3] @t 1)
+}

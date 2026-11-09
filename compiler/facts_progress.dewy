@@ -231,10 +231,11 @@ fact_progress_stable=(n0:ProgressWord):>bool=>$unsafe {
     }
     false
 }
-# Upper bound of a nonnegative increment, or -1: positive_bound's syntax, seeing
-# through immutable locals' initializers and sums of them (`let d = i%7`, `d+1`).
-# The bound rests on syntax, so a later change to `i` cannot matter. Shares the
-# query's 64-node budget.
+# Upper bound of an increment's magnitude, or -1: positive_bound's syntax, seeing
+# through immutable locals' initializers, sums of them (`let d = i%7`, `d+1`)
+# and a difference of two bounded parts (`xs.length-1`, between minus the
+# smaller and the larger bound). The bound rests on syntax, so a later change
+# to `i` cannot matter. Shares the query's 64-node budget.
 fact_progress_bound=(n0:ProgressWord):>ProgressWord=>$unsafe {
     let known=positive_bound(n0 false)
     if known >=? 0 {return known}
@@ -247,11 +248,15 @@ fact_progress_bound=(n0:ProgressWord):>ProgressWord=>$unsafe {
         if ProgressWord(locals.ptr[l].flags) & (LF_ASSIGNED | LF_PARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_EXPOSED) not=? 0 {return -1}
         return fact_progress_bound(exact_initializers[l])
     }
-    if nodes.ptr[n].kind not=? 'binary' or nodes.ptr[n].aux not=? 0 or cx_token_values.ptr[ProgressWord(nodes.ptr[n].op)] not=? 'plus' {return -1}
+    if nodes.ptr[n].kind not=? 'binary' or nodes.ptr[n].aux not=? 0 {return -1}
+    let op=cx_token_values.ptr[ProgressWord(nodes.ptr[n].op)]
+    if op not=? 'plus' and op not=? 'minus' {return -1}
     let a=fact_progress_bound(ProgressWord(nodes.ptr[n].a))
     if a <? 0 {return -1}
     let b=fact_progress_bound(ProgressWord(nodes.ptr[n].b))
-    if b <? 0 or a >? 9223372036854775807-b {return -1}
+    if b <? 0 {return -1}
+    if op =? 'minus' {return max(a b)}
+    if a >? 9223372036854775807-b {return -1}
     return a+b
 }
 fact_progress_note=(assignment:ProgressWord):>void=>$unsafe {

@@ -1,0 +1,7 @@
+# A step read from the counter itself is a recurrence, not progress.
+Counter:type = [n:int64]
+add = (@t:Counter):>void => { t.n += t.n-1 }
+main = ():>void => {
+    let t = Counter[0]
+    add(@t)
+}

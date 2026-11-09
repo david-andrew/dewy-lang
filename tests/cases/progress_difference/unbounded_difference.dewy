@@ -1,0 +1,7 @@
+# The difference of two unbounded words is not a bounded step.
+Counter:type = [n:int64]
+add = (@t:Counter a:int64 b:int64):>void => { t.n += a-b }
+main = ():>void => {
+    let t = Counter[0]
+    add(@t 1 2)
+}

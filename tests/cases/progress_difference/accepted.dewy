@@ -1,0 +1,23 @@
+# A counter field or local grows by a bounded difference: `xs.length-1` is
+# at least -1 and at most a length, like `xs.length` itself.
+Inner:type = [n:int64]
+Totals:type = [n:int64 inner:Inner rows:array<int64 length=2>]
+add = (xs:array<int64> @t:Totals):>void => {
+    t.n += xs.length-1
+    t.inner.n += xs.length-1
+    t.rows[1] += xs.length-2
+    t.n -= xs.length-1
+    t.n += xs.length-1
+}
+lengths = (xss:array<array<int64>>):>int64 => {
+    let n:int64 = 0
+    loop xs in xss { n += xs.length-1 }
+    n
+}
+main = ():>void => {
+    let t = Totals[0 Inner[0] [0 0]]
+    add([1 2 3] @t)
+    add([] @t)
+    printl("{t.n} {t.inner.n} {t.rows}")
+    printl(lengths([[1 2] [3] [4 5 6]]))
+}

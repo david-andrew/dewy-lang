@@ -1,0 +1,7 @@
+# The axiom covers 64-bit counters only.
+Counter:type = [n:int32]
+add = (xs:array<int64> @t:Counter):>void => { t.n += xs.length-1 }
+main = ():>void => {
+    let t = Counter[0]
+    add([1 2 3] @t)
+}
