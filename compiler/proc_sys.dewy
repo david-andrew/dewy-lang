@@ -67,6 +67,15 @@ ps_wait=(pid:PsWord):>PsWord=>$unsafe {
     }
 }
 
+# wait4 into st: the child's id, or an error (-4: interrupted, -10: not a child)
+ps_wait_into=(pid:PsWord @st:array<int64>):>PsWord=>$unsafe {
+    if $target.os =? 'windows' {
+        return -1
+    } else {
+        return syscall(61 pid data(st) 0 0)
+    }
+}
+
 ps_kill=(pid:PsWord sig:PsWord):>void=>$unsafe {
     if $target.os not=? 'windows' {syscall(62 pid sig);}
 }

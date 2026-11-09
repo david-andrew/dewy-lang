@@ -1,0 +1,508 @@
+$runtime_checks
+from p"@lib/core/rt.jo" import (__olen __write_fd)
+from p"@lib/core/os.jo" import (__zstr env eprint exit)
+from p"ast.jo" import (NF_EXTERN has_flag kid kid2 nkids nkids2 nodes)
+from p"check.jo" import (FK_LAMBDA FK_NORMAL FK_PARTIAL check_all fns global_read globals modules open_globals target_arm64 target_macos target_wasm target_windows test_mode watch_build)
+from p"checks_thin.dewy" import (check_fn_body)
+from p"comptime.jo" import (ct_values)
+from p"directive_ops.dewy" import (directives_after_facts)
+from p"directives.jo" import (dir_copies_any dir_forced dir_rows_any)
+from p"driver_pipeline.dewy" import (queue_emit)
+from p"effects.jo" import (effect_limit effect_policy effect_unavailable effects_active loan_owners)
+from p"exact.jo" import (exact_owners)
+from p"expr.jo" import (CV IN embedded_files fn_used)
+from p"facts.jo" import (fact_decided fact_policy fact_policy_default fact_requests fact_slice_cache fact_summaries)
+from p"facts_lifecycle.dewy" import (facts_finalize)
+from p"frontend.jo" import (source_force_body)
+from p"fused_drive.dewy" import (fz_read_all)
+from p"fused_ops.dewy" import (fz_get_str fz_put_str fz_small fz_weight)
+from p"ide.jo" import (ide_on)
+from p"ir.jo" import (dbg_on)
+from p"lazy_bodies.jo" import (dc_eager dc_lazy_used)
+from p"lazy_force.dewy" import (dc_replay)
+from p"lower.jo" import (FnWrites fr_direct fw_direct opt_release)
+from p"lower_analysis.dewy" import (fn_resizes_direct fn_writes_direct)
+from p"main.jo" import (host_ir lower_only repl_image)
+from p"ownership.jo" import (ownership_decls)
+from p"par.jo" import (ParIn emit_workers par_read pr)
+from p"par_ops.dewy" import (pr_ints pw pw_ints)
+from p"pcheck.jo" import (pc_active pc_child pc_collect pc_emit pc_fds pc_missing pc_owner pc_pids pc_prechecking pc_prefix pc_reordered pc_smalls pc_tried pc_warn_pos pc_warn_text pc_weights pc_workers)
+from p"poly_closure.jo" import (poly_families)
+from p"proc_sys.dewy" import (ps_close ps_dup2 ps_fork ps_kill ps_read ps_wait_into)
+from p"proofs.jo" import (proof_active proof_calls result_active)
+from p"refine.jo" import (refine_active refine_requests)
+from p"types.jo" import (has_var types)
+from p"util.jo" import (append_bytes errors_only pos_in_lib shown_warnings warn)
+from p"witness.jo" import (wit_collect wit_tentative wit_tentative_failed)
+from p"x64_allocate.dewy" import (ra_dump)
+from p"x64_emit.dewy" import (ra_stat)
+
+PcWord:type=int64<overflow='wrap'>
+# (the no-traps default's obligations are decided in each process for its own
+# bodies: pc_after_facts)
+pc_static=():>bool=>{
+    fact_policy =? 'RequireStatic' and fact_policy_default and not dir_forced and not wit_collect
+}
+pc_features=():>bool=>{
+    if (fact_policy not=? 'RuntimeAllowed' and not pc_static()) or effects_active or effect_policy.prohibitions not=? 0 or refine_active or proof_active or result_active or ownership_decls.length not=? 0 or loan_owners.length not=? 0 or fact_requests.length not=? 0 or refine_requests.length not=? 0 or proof_calls.length not=? 0 or poly_families.length >? 1 {return false}
+    if dir_copies_any or dir_rows_any {return false}
+    loop f in fns {
+        if f.kind =? FK_LAMBDA or f.kind =? FK_PARTIAL or f.parallel_api or f.deterministic {return false}
+    }
+    true
+}
+pc_root=(f:PcWord):>bool=>$unsafe {
+    f >? 0 and fns.ptr[f].state =? 0 and fns.ptr[f].kind =? FK_NORMAL and fns.ptr[f].decl not=? 0 and not modules[PcWord(fns.ptr[f].mod)].is_prelude and not has_flag(PcWord(fns.ptr[f].decl) NF_EXTERN)
+}
+# a pipe (or a socket pair, for control): its read end, and its write end shifted up 32 bits
+pc_pipe=(control:bool=false):>PcWord=>{
+    let p:array<int32>=[int32(0) int32(0)]
+    if pc_pipe_fill(control @p) not=? 0 {return -1}
+    (PcWord(p[0]) & 0xFFFFFFFF) | (PcWord(p[1]) << 32)
+}
+pc_pipe_fill=(control:bool @p:array<int32>):>PcWord=>$unsafe {
+    if $target.os =? 'windows' {
+        return -1
+    } else {
+        # A reply can race a dead worker: use send(MSG_NOSIGNAL), not a pipe write.
+        if control {return syscall(53 1 1 | 0x80000 0 data(p))}
+        return syscall(293 data(p) 0x80000)
+    }
+}
+pc_send=(fd:PcWord b:array<uint8>):>void=>$unsafe {
+    if $target.os not=? 'windows' {
+        let bytes=b
+        let sent:PcWord=0
+        loop sent <? bytes.length {
+            let n=syscall(44 fd data(bytes) + sent bytes.length - sent 0x4000 0 0)
+            if n =? -4 {continue}
+            if n <=? 0 {return}  # its missing emission will be lowered by the parent
+            sent += n
+        }
+    }
+}
+pc_restore=(f:PcWord):>void=>$unsafe {
+    if not pc_missing.has(f) {return}
+    pc_missing.remove(f);
+    effect_unavailable.remove(f);
+    fns.ptr[f].state=0
+    check_fn_body(f)
+}
+# Called at the serial check cursor, after a small prefix has populated shared instances.
+pc_try=(start:PcWord):>void=>$unsafe {
+    if $target.os not=? 'linux' or $target.arch not=? 'x86_64' {
+        return
+    } else {
+        if pc_tried or dc_eager or shown_warnings.length >? 0 or not pc_root(start) {return}
+        pc_prefix += 1
+        if pc_prefix <=? 2 {return}
+        pc_tried=true
+        if emit_workers() <? 2 or (env("DEWY_PCHECK") ?? "") =? "0" or (env("DEWY_FUSED") ?? "") =? "0" {return}
+        if target_wasm or target_arm64 or target_windows or target_macos or opt_release or dbg_on or watch_build or repl_image or lower_only or host_ir or ra_stat or (ra_dump as array<uint8>).length >? 0 or not queue_emit or ide_on or errors_only or test_mode or check_all {return}
+        if open_globals.length not=? 0 or not pc_features() {return}
+        let roots:array<int64>=[]
+        let other_pending=false
+        loop f in [start..fns.length) {
+            if not pc_root(f) and fns.ptr[f].state =? 0 {other_pending=true}
+            if pc_root(f) {
+                if other_pending {return}
+                if fns.ptr[f].ret =? 0 or has_var(PcWord(fns.ptr[f].ret)) {return}
+                roots.push(f)
+            }
+        }
+        # Enough work to pay for the barrier; the normal fused gate must also pass.
+        if roots.length <? 128 {return}
+        loop node in nodes {
+            if node.kind =? 'lambda' and node.pos >? 0 and not pos_in_lib(node.pos) {return}
+        }
+        # Pending library instances have canonical identities already. Check their
+        # closure once so the continuing parent and every worker inherit it.
+        pc_reordered=true
+        pc_prechecking=true
+        let lib_cursor=start
+        let lib_checked:PcWord=0
+        loop lib_cursor <? fns.length {
+            if fns.ptr[lib_cursor].state =? 0 and fns.ptr[lib_cursor].kind =? FK_NORMAL and modules[PcWord(fns.ptr[lib_cursor].mod)].is_prelude {
+                check_fn_body(lib_cursor)
+                lib_checked += 1
+            }
+            lib_cursor += 1
+        }
+        pc_prechecking=false
+        if env("DEWY_PAR_TIME") not=? none {eprint("pcheck: checked {lib_checked} pending library instances before fork")}
+        if open_globals.length not=? 0 or not pc_features() {return}
+        let n=min(4 emit_workers())
+        pc_workers=n
+        let parses:array<int64>=[]
+        let reads:array<int64>=[]
+        let controls:array<int64>=[]
+        pc_pids=[]
+        pc_fds=[]
+        loop i in [0..roots.length) {pc_owner[roots[i]]=min(n - 1 i * n // roots.length)}
+        loop w in [0..n) {
+            let parsed=if dc_lazy_used {pc_pipe()} else {0}
+            let summary=pc_pipe()
+            let control=pc_pipe(true)
+            let output=pc_pipe()
+            if parsed <? 0 or summary <? 0 or control <? 0 or output <? 0 {
+                loop p in [summary control output] {
+                    if p >=? 0 {
+                        ps_close(p & 0xFFFFFFFF)
+                        ps_close(p >> 32)
+                    }
+                }
+                if dc_lazy_used {
+                    if parsed >=? 0 {
+                        ps_close(parsed & 0xFFFFFFFF)
+                        ps_close(parsed >> 32)
+                    }
+                    parses.push(-1)
+                }
+                reads.push(-1)
+                controls.push(-1)
+                pc_fds.push(-1)
+                pc_pids.push(-1)
+                continue
+            }
+            let pid=ps_fork()
+            if pid =? 0 {
+                loop fd in parses {ps_close(fd)}
+                if dc_lazy_used {ps_close(parsed & 0xFFFFFFFF)}
+                loop fd in reads {ps_close(fd)}
+                loop fd in controls {ps_close(fd)}
+                loop fd in pc_fds {ps_close(fd)}
+                ps_close(summary & 0xFFFFFFFF)
+                ps_close(control >> 32)
+                ps_close(output & 0xFFFFFFFF)
+                pc_child=w
+                pc_emit=output >> 32
+                if env("DEWY_FUSED_TRACE") =? none {
+                    let nullfd=syscall(2 data(__zstr("/dev/null")) 1 0)
+                    if nullfd >=? 0 {
+                        ps_dup2(nullfd 1)
+                        ps_dup2(nullfd 2)
+                        ps_close(nullfd)
+                    }
+                }
+                __olen=0
+                let parsefd=if dc_lazy_used {parsed >> 32} else {-1}
+                pc_check(roots summary >> 32 control & 0xFFFFFFFF parsefd)
+                return
+            }
+            if dc_lazy_used {
+                ps_close(parsed >> 32)
+                if pid <? 0 {
+                    ps_close(parsed & 0xFFFFFFFF)
+                    parses.push(-1)
+                }
+                else {parses.push(parsed & 0xFFFFFFFF)}
+            }
+            ps_close(summary >> 32)
+            ps_close(control & 0xFFFFFFFF)
+            ps_close(output >> 32)
+            if pid <? 0 {
+                ps_close(summary & 0xFFFFFFFF)
+                ps_close(control >> 32)
+                ps_close(output & 0xFFFFFFFF)
+                reads.push(-1)
+                controls.push(-1)
+                pc_fds.push(-1)
+            }
+            else {
+                reads.push(summary & 0xFFFFFFFF)
+                controls.push(control >> 32)
+                pc_fds.push(output & 0xFFFFFFFF)
+            }
+            pc_pids.push(pid)
+        }
+        # A separate EOF-delimited parse summary keeps check diagnostics behind
+        # all partitions' parsing. Workers wait for one acknowledgement word.
+        if dc_lazy_used {
+            let parsed=fz_read_all(parses)
+            let parse_ok=true
+            loop w in [0..n) {
+                if parses[w] >=? 0 {ps_close(parses[w])}
+                if parsed[w].length not=? 8 {parse_ok=false}
+            }
+            if not parse_ok {
+                loop fd in controls {
+                    if fd >=? 0 {ps_close(fd)}
+                }
+                loop fd in reads {
+                    if fd >=? 0 {ps_close(fd)}
+                }
+                dc_replay()
+            }
+            if env("DEWY_PAR_TIME") not=? none {eprint("pcheck: parsed deferred bodies before checking")}
+            let ack:array<uint8>=[]
+            pw(@ack 1)
+            loop fd in controls {pc_send(fd ack)}
+        }
+        let got=fz_read_all(reads)
+        let good=true
+        loop w in [0..n) {
+            if reads[w] >=? 0 {ps_close(reads[w])}
+            if got[w].length <? 8 {good=false}
+            else {
+                let r=ParIn(got[w] got[w].length - 8)
+                if pr(@r) not=? 0x5043484B {good=false}
+            }
+        }
+        if not good {
+            loop w in [0..n) {
+                if controls[w] >=? 0 {ps_close(controls[w])}
+                if pc_fds[w] >=? 0 {
+                    ps_close(pc_fds[w])
+                    pc_fds[w]=-1
+                }
+                pc_reap(w);
+            }
+            pc_pids=[]
+            pc_fds=[]
+            pc_owner=[]
+            if env("DEWY_PAR_TIME") not=? none {eprint("pcheck: closed-state check rejected")}
+            return
+        }
+        # Broadcast in partition order, which is also serial root order.
+        let merged:array<uint8>=[]
+        pw(@merged n)
+        loop b in got {
+            pw(@merged b.length)
+            append_bytes(@merged b)
+        }
+        loop fd in controls {
+            pc_send(fd merged)
+            ps_close(fd)
+        }
+        pc_merge(merged)
+        pc_active=true
+        if env("DEWY_PAR_TIME") not=? none {eprint("pcheck: {n} workers checked {roots.length} roots")}
+    }
+}
+pc_check=(roots:array<int64> outfd:PcWord infd:PcWord parsefd:PcWord):>void=>$unsafe {
+    if (env("DEWY_PCHECK_FAIL") ?? "") =? "check" {exit(1)}
+    let f0=fns.length
+    let t0=types.length
+    let g0=globals.length
+    let m0=modules.length
+    let e0=embedded_files.length
+    let ct0=ct_values.length
+    let gs:array<int64>=[]
+    let reads0:array<bool>=[]
+    loop read in global_read {reads0.push(read)}
+    loop g in globals {
+        gs.push(int64(g.state))
+        gs.push(if g.fn_written {1} else {0})
+    }
+    # Counts do not catch inference of an existing type variable or checking a
+    # foreign body. Layout caches are pure memoization; inference is not.
+    let refs:array<int32>=[]
+    loop t in types {refs.push(t.ref)}
+    let signatures:array<[int32 int32 int32]>=[]
+    loop f in fns {signatures.push([f.state f.ret f.fntype])}
+    let mine:array<int64>=[]
+    loop f in roots {
+        if pc_owner[f] =? pc_child {mine.push(f)}
+    }
+    if parsefd >=? 0 {
+        loop f in mine {source_force_body(PcWord(fns.ptr[f].decl))}
+        let ready:array<uint8>=[]
+        pw(@ready 1)
+        __write_fd(parsefd data(ready) ready.length)
+        ps_close(parsefd)
+        let ack:array<uint8>=fill(uint8(0) 8)
+        let received:PcWord=0
+        loop received <? 8 {
+            let size=ps_read(infd @ack received 8 - received)
+            if size =? -4 {continue}
+            if size <=? 0 {exit(1)}
+            received += size
+        }
+    }
+    let out:array<uint8>=[]
+    pw(@out mine.length)
+    pc_collect=true
+    loop f in mine {
+        pc_warn_pos=[]
+        pc_warn_text=[]
+        check_fn_body(f)
+        let wr=fn_writes_direct(f)
+        let rz=fn_resizes_direct(f)
+        if fns.length not=? f0 or types.length not=? t0 or globals.length not=? g0 or modules.length not=? m0 or embedded_files.length not=? e0 or ct_values.length not=? ct0 or not fns.ptr[f].no_user_globals or wr.mentions.length not=? 0 or not pc_tree(PcWord(fns.ptr[f].body)) {exit(1)}
+        pw(@out f)
+        pw(@out fz_weight(f))
+        pw(@out if fz_small(f) {1} else {0})
+        pw(@out if fns.ptr[f].no_indexes {1} else {0})
+        pw(@out if exact_owners.has(f) {1} else {0})
+        pw(@out if wr.all {1} else {0})
+        pw_ints(@out wr.globals)
+        pw_ints(@out wr.calls)
+        pw_ints(@out wr.mentions)
+        pw_ints(@out rz)
+        pw(@out pc_warn_pos.length)
+        loop i in [0..pc_warn_pos.length) {
+            pw(@out pc_warn_pos[i])
+            fz_put_str(@out pc_warn_text[i])
+        }
+    }
+    pc_collect=false
+    if not pc_features() or open_globals.length not=? 0 {exit(1)}
+    loop g in [0..globals.length) {
+        if globals.ptr[g].state not=? int32(gs[g * 2]) or (if globals.ptr[g].fn_written {1} else {0}) not=? gs[g * 2 + 1] {exit(1)}
+    }
+    if global_read.length not=? reads0.length {exit(1)}
+    loop g in [0..global_read.length) {
+        if global_read[g] not=? reads0[g] {exit(1)}
+    }
+    loop t in [0..types.length) {
+        if types.ptr[t].ref not=? refs[t] {exit(1)}
+    }
+    loop f in [0..fns.length) {
+        if fns.ptr[f].ret not=? signatures[f][1] or fns.ptr[f].fntype not=? signatures[f][2] {exit(1)}
+        if (pc_owner.get(f) ?? -1) not=? pc_child and fns.ptr[f].state not=? signatures[f][0] {exit(1)}
+    }
+    pw(@out fn_used.length)
+    loop [d _] in fn_used {pw(@out d)}
+    pw(@out 0x5043484B)
+    let barrier_fail=(env("DEWY_PCHECK_FAIL") ?? "") =? "barrier"
+    if barrier_fail {ps_close(infd)}
+    __write_fd(outfd data(out) out.length)
+    ps_close(outfd)
+    if barrier_fail {exit(1)}
+    let merged=par_read(infd)
+    ps_close(infd)
+    if merged.length =? 0 {exit(1)}
+    pc_merge(merged)
+    pc_active=true
+}
+pc_merge=(b:array<uint8>):>void=>$unsafe {
+    let r=ParIn(b)
+    let count=pr(@r)
+    loop _ in [0..count) {
+        let length=pr(@r)
+        let end_=r.i + length
+        let nr=pr(@r)
+        loop _ in [0..nr) {
+            let f=pr(@r)
+            pc_weights[f]=pr(@r)
+            pc_smalls[f]=pr(@r) not=? 0
+            let no_indexes=pr(@r) not=? 0
+            if pr(@r) not=? 0 {exact_owners[f]=true}
+            let all=pr(@r) not=? 0
+            let gs=pr_ints(@r)
+            let calls=pr_ints(@r)
+            let mentions=pr_ints(@r)
+            fw_direct[f]=FnWrites(all gs calls mentions)
+            fr_direct[f]=pr_ints(@r)
+            let nw=pr(@r)
+            loop _ in [0..nw) {
+                let pos=pr(@r)
+                let msg=fz_get_str(@r)
+                if pc_child <? 0 {warn(pos msg)}
+            }
+            if fns.ptr[f].state not=? 2 {
+                pc_missing[f]=true
+                effect_unavailable[f]=true
+                fns.ptr[f].state=2
+                fns.ptr[f].no_indexes=no_indexes
+                fns.ptr[f].no_user_globals=true
+            }
+        }
+        let used=pr(@r)
+        loop _ in [0..used) {fn_used[pr(@r)]=true}
+        r.i=end_
+    }
+}
+# The first stage transports only scalar/array control flow and ordinary direct calls.
+# Other checker products can carry side tables or declaration changes, and remain serial.
+pc_tree=(n:PcWord):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k not=? 'block' and k not=? 'vardecl' and k not=? 'assign' and k not=? 'exprstmt' and k not=? 'while_' and k not=? 'for_' and k not=? 'return_' and k not=? 'break_' and k not=? 'continue_' and k not=? 'if_' and k not=? 'int_lit' and k not=? 'float_lit' and k not=? 'str_lit' and k not=? 'bool_lit' and k not=? 'ident' and k not=? 'field' and k not=? 'call' and k not=? 'index' and k not=? 'unary' and k not=? 'binary' and k not=? 'and_' and k not=? 'or_' and k not=? 'not_' and k not=? 'range' and k not=? 'conv' and k not=? 'intrinsic' and k not=? 'tname' and k not=? 'tarray' and k not=? 'array' {return false}
+    if k =? 'binary' and nodes.ptr[n].aux not=? 0 {return false}
+    if k =? 'call' and nodes.ptr[n].aux not=? 0 {return false}
+    if k =? 'intrinsic' and nodes.ptr[n].aux not=? int32(int64(IN.len)) and nodes.ptr[n].aux not=? int32(int64(IN.sqrt)) {return false}
+    if k =? 'conv' {
+        let cv=nodes.ptr[n].aux
+        if cv not=? int32(int64(CV.int_)) and cv not=? int32(int64(CV.int2float)) and cv not=? int32(int64(CV.float2int)) and cv not=? int32(int64(CV.float_)) {return false}
+    }
+    if not pc_tree(PcWord(nodes.ptr[n].a)) or not pc_tree(PcWord(nodes.ptr[n].b)) {return false}
+    if k not=? 'for_' {
+        if not pc_tree(PcWord(nodes.ptr[n].c)) or not pc_tree(PcWord(nodes.ptr[n].d)) {return false}
+    }
+    loop i in [0..nkids(n)) {
+        if not pc_tree(kid(n i)) {return false}
+    }
+    loop i in [0..nkids2(n)) {
+        if not pc_tree(kid2(n i)) {return false}
+    }
+    true
+}
+# A PID is an owned child only until wait reaps it. Keep the worker slot but
+# retire its PID immediately; fused emission and cancellation share this path.
+pc_reap=(w:PcWord):>PcWord=>{
+    let pid=pc_pids[w]
+    if pid <=? 0 {return -1}
+    let st:array<int64>=[0]
+    let r:PcWord=-4
+    loop r =? -4 {r=ps_wait_into(pid @st)}
+    if r =? pid or r =? -10 {pc_pids[w]=-1}
+    if r not=? pid {return -1}
+    st[0]
+}
+pc_cancel=():>void=>{
+    if $target.os not=? 'linux' or $target.arch not=? 'x86_64' {
+        return
+    } else {
+        if pc_child >=? 0 {exit(1)}
+        loop pid in pc_pids {
+            if pid >? 0 {ps_kill(pid 15)}
+        }
+        loop fd in pc_fds {
+            if fd >=? 0 {ps_close(fd)}
+        }
+        pc_fds=[]
+        loop w in [0..pc_pids.length) {pc_reap(w);}
+        pc_active=false
+    }
+}
+# Before facts: a process decides its obligations tentatively (its other
+# roots' bodies are opaque here). After: a worker that could not prove its
+# own exits, which its parent sees as a missing emission; the parent, failing
+# or abandoning its workers, decides the rest serially (pc_facts_serial).
+pc_before_facts=():>void=>{
+    if pc_active and pc_static() {wit_tentative=true}
+}
+pc_after_facts=():>void=>{
+    if not wit_tentative {return}
+    wit_tentative=false
+    if not wit_tentative_failed {return}
+    if pc_child >=? 0 {exit(1)}
+    pc_cancel()
+    fact_decided=[]
+    pc_facts_serial()
+}
+# Every body the workers had: checked here, then decided here (errors are
+# reported as in a serial compile), with what a serial compile would know.
+pc_facts_serial=():>void=>{
+    if not pc_static() {return}
+    let restored:array<int64>=[]
+    loop f in [1..fns.length) {
+        if pc_missing.has(f) {
+            pc_restore(f)
+            restored.push(f)
+        }
+    }
+    if restored.length =? 0 and fact_decided.length not=? 0 {return}
+    fact_summaries=[]
+    fact_slice_cache=[]
+    effect_limit=0
+    facts_finalize()
+    directives_after_facts()
+}
+pc_finish=():>void=>{
+    if not pc_active or pc_features() {return}
+    pc_cancel()
+    # Restore in the original check order, before any whole-program walk.
+    loop f in [1..fns.length) {pc_restore(f)}
+}

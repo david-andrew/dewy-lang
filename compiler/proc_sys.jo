@@ -67,6 +67,12 @@ ps_wait = (pid: int) -> int:
         syscall(61, pid, data(st), 0, 0)
         return st[0]
 
+ps_wait_into = (pid: int, st: mut int[]) -> int:
+    when TARGET == "windows":
+        return -1
+    else:
+        return syscall(61, pid, data(st), 0, 0)
+
 ps_kill = (pid: int, sig: int):
     when TARGET == "windows":
         pass

@@ -19,9 +19,9 @@ def function(path, name):
 @pytest.mark.skipif(not sys.platform.startswith('linux') or platform.machine().lower() not in ('x86_64', 'amd64'),
                     reason='partitioned checking only runs on x86-64 Linux')
 def test_worker_cancel_retires_children(compiler, tmp_path, emitted):
-    source = function('compiler/pcheck.jo', 'pc_cancel')
+    source = function('compiler/pcheck_drive.jo', 'pc_cancel')
     if 'pc_reap(' in source:
-        source += function('compiler/pcheck.jo', 'pc_reap')
+        source += function('compiler/pcheck_drive.jo', 'pc_reap')
     fused = (ROOT / 'compiler/fused_drive.jo').read_text()
     start = fused.index('            syscall(3, fds[w])\n')
     end = fused.index('            if st[0] & 0xFFFF', start)
