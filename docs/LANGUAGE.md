@@ -4759,10 +4759,12 @@ validated. Indexing scans from the beginning; use string iteration to visit
 every grapheme in one pass.
 
 `upper(text)` and `lower(text)` (also `text.upper()` and `text.lower()`)
-return independent strings using the core's current simple mappings for ASCII
-and supported Latin, Greek and Cyrillic letters. For example, `upper("café")`
-is `"CAFÉ"`. Unmapped characters and malformed UTF-8 bytes are preserved;
-these byte-oriented transformations do not perform grapheme validation.
+return independent strings using Unicode's default full case mapping (as
+Python's `str.upper` and `str.lower`, locale-free), so a result may be longer or
+shorter than the text: `upper("café")` is `"CAFÉ"`, `upper("straße")` is
+`"STRASSE"`, `lower("İ")` is `"i̇"` and `upper("ǅ")` is `"Ǆ"`. A capital sigma that
+ends a word lowers to `ς`. Unmapped characters and malformed UTF-8 bytes are
+preserved; these byte-oriented transformations do not perform grapheme validation.
 `text.startswith(prefix)` and `text.endswith(suffix)` test the ends of a string.
 Success with a known nonempty pattern proves the text is nonempty, so
 `if not text.startswith("=") return ...` permits `text[1..]` afterward;
