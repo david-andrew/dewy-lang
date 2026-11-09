@@ -1,0 +1,5 @@
+# modes: native
+# Two different values multiply to any sign: only a square is nonnegative.
+need = (v:int<(>=? 0)>):>int => v
+product = (x:int y:int):>int => need(x*y)
+main = ():>void => printl(product(-3 4))

@@ -222,6 +222,10 @@ fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
         # operands need the same four endpoint products as fixed exact ints;
         # a wrapping product is the mathematical one only when every corner
         # fits its type (the sa_fits check below).
+        # (a square of one captured value: fact_square)
+        if a != 0 and a == b:
+            square = fact_square(s, n, a, x, xlo_open, xhi_open)
+            if square != 0: return square
         if xlo_open or xhi_open or ylo_open or yhi_open: return fact_open_product(s, n, a, b, x, y, xlo_open, xhi_open, ylo_open, yhi_open)
         if math_word_overflow(2, x.lo, y.lo) or math_word_overflow(2, x.lo, y.hi) or math_word_overflow(2, x.hi, y.lo) or math_word_overflow(2, x.hi, y.hi):
             # (an exact fixed-width product is the mathematical one: corners

@@ -1,0 +1,12 @@
+# modes: native native-release
+# A square of one value is never negative, and keeps the nearer end's square
+# when the value keeps one sign.
+need = (v:int<(>=? 0)>):>int => v
+need_four = (v:int<(>=? 4)>):>int => v
+exact = (x:int):>int => need(x*x)
+word = (x:int64):>int => need(x*x)
+small = (x:int64<-10 <=? x and x <=? 10>):>int => need(x*x)
+wide = (x:int<-10000000000 <=? x and x <=? 10000000000>):>int => need(x*x)
+negative = (x:int<x <=? -2>):>int => need_four(x*x)
+stored = (x:int64<-1000 <=? x and x <=? 1000>):>int64 => x*x
+main = ():>void => printl(exact(-3) word(-4000000000) small(-4) wide(-5) negative(-6) stored(-7))

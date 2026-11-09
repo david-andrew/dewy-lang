@@ -21,6 +21,28 @@ from p"util.jo" import (files intern pos_file pos_in_lib)
 from p"witness_ops.dewy" import (wit_divisor)
 
 NumericWord:type=int64<overflow='wrap'>
+# A square, `x*x` of one captured value: never negative, and at least the
+# nearer end's square when x keeps one sign. A far end beyond the host word
+# opens the top, as fact_scaled_open does. O(1), demanded only by a product
+# whose operands are one value.
+fact_square=(@s:FactState n:NumericWord a:NumericWord x:FactBound lo_open:bool hi_open:bool):>NumericWord=>{
+    if x.wide {return 0}
+    let near:NumericWord=0
+    if x.lo >? 0 {near=x.lo}
+    else if x.hi <? 0 {near=x.hi}
+    if math_word_overflow(2 near near) {return 0}
+    let lo=near * near
+    let far_open=lo_open or hi_open or math_word_overflow(2 x.lo x.lo) or math_word_overflow(2 x.hi x.hi)
+    let hi:NumericWord=FACT_MAX
+    if not far_open {hi=max(NumericWord(x.lo) * NumericWord(x.lo) NumericWord(x.hi) * NumericWord(x.hi))}
+    if far_open and prune(ntype(n)) not=? T_MATH_INT and not exact_has_node(n) {return 0}
+    if not far_open and not exact_has_node(n) and not sa_fits(hi ntype(n)) {return 0}
+    # (an exact fixed-width square beyond the word is an `int`, as in
+    # fact_open_product: its top is open, never the word's MAX)
+    let t=fact_word_type(s n a a lo hi)
+    if far_open {t=if exact_has_node(n) {T_MATH_INT} else {ntype(n)}}
+    fact_new(@s fact_open_bound(lo hi false far_open) FactTerm('star' a a n t))
+}
 # A symbolic value scaled by a constant again (`xs.length*3`, `2*i`, in either
 # order): the same product, as a comprehension's length is, so a guard on one
 # evaluation (`loop 2*i+1 <? n`) bounds the next. O(values), this shape only.

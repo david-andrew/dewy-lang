@@ -1,0 +1,5 @@
+# modes: native
+# A value that crosses zero has a square as small as 0, not its nearer end's.
+need_four = (v:int<(>=? 4)>):>int => v
+f = (x:int<-2 <=? x and x <=? 5>):>int => need_four(x*x)
+main = ():>void => printl(f(3))

@@ -7,7 +7,7 @@ from p"expr.jo" import (ntype)
 from p"facts.jo" import (FactDifference FactState fact_add_fits fact_bound fact_constant fact_difference fact_difference_head fact_difference_next fact_domain fact_incident fact_literal fact_new fact_open_endpoint fact_project fact_set_bound fact_shared_literals fact_shortest fact_slot fact_sum_operand fact_sum_rows fact_terms fact_type fact_unmodeled)
 from p"facts_joins.dewy" import (fact_host_finite)
 from p"facts_loops.dewy" import (fact_entails)
-from p"facts_numeric.dewy" import (fact_offset_value fact_open_bound fact_open_product fact_reuse_tighten fact_scaled_again fact_scaled_open fact_scaled_quotient fact_word_type)
+from p"facts_numeric.dewy" import (fact_offset_value fact_open_bound fact_open_product fact_reuse_tighten fact_scaled_again fact_scaled_open fact_scaled_quotient fact_square fact_word_type)
 from p"facts_routes.dewy" import (fact_read)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"types.jo" import (T_MATH_INT T_U64 is_int prune types)
@@ -186,6 +186,11 @@ fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>Arith
         # operands need the same four endpoint products as fixed exact ints;
         # a wrapping product is the mathematical one only when every corner
         # fits its type (the sa_fits check below).
+        # (a square of one captured value: fact_square)
+        if a not=? 0 and a =? b {
+            let square=fact_square(@s n a x xlo_open xhi_open)
+            if square not=? 0 {return square}
+        }
         if xlo_open or xhi_open or ylo_open or yhi_open {return fact_open_product(@s n a b x y xlo_open xhi_open ylo_open yhi_open)}
         if math_word_overflow(2 x.lo y.lo) or math_word_overflow(2 x.lo y.hi) or math_word_overflow(2 x.hi y.lo) or math_word_overflow(2 x.hi y.hi) {
             # (an exact fixed-width product is the mathematical one: corners
