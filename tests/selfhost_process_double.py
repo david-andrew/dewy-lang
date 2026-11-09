@@ -238,10 +238,10 @@ def compare_repl(compiler, tmp_path, monkeypatch, leaves, transcripts, paced=Fal
     return results[0]
 
 
-def compare_workers(compiler, tmp_path, monkeypatch, leaves, paths, workers=(2, 4), extra=None):
-    """Build each path with fused and parallel workers (forced even for a small program): the same
-    exit codes, messages and bytes, which also match one process. The timed report of the leaf
-    build: what ran."""
+def compare_workers(compiler, tmp_path, monkeypatch, leaves, paths, workers=(2, 4), extra=None, flags=((),)):
+    """Build each path (with each of flags) with fused and parallel workers (forced even for a small
+    program): the same exit codes, messages and bytes, which also match one process. The timed report
+    of the leaf build: what ran."""
     dewy, jo = _compilers(compiler, tmp_path, monkeypatch, leaves)
     paths = [p if (tmp_path / p).exists() else ROOT / p for p in paths]
     serial = None
@@ -250,8 +250,8 @@ def compare_workers(compiler, tmp_path, monkeypatch, leaves, paths, workers=(2, 
         with monkeypatch.context() as m:
             for key, value in settings.items():
                 m.setenv(key, value)
-            expected = build_all(jo, tmp_path, f'jo{n}', paths)
-            got = build_all(dewy, tmp_path, f'dewy{n}', paths)
+            expected = build_all(jo, tmp_path, f'jo{n}', paths, flags)
+            got = build_all(dewy, tmp_path, f'dewy{n}', paths, flags)
         for a, b in zip(got, expected):
             assert a[2:5] == b[2:5] and list(a[5].values()) == list(b[5].values()), (a[0], n, a[2:5], b[2:5])
         if serial is None:
