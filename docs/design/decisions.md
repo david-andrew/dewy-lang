@@ -566,3 +566,30 @@ section linked. ROADMAP.md lists them in one line each.
     - where a metatag that applies to a construct is written (before it, like a label,
       or first line inside);
     - where `tasks` comes from.
+- Batch 6 (David, 2026-11-09), array literal separators (his proposal):
+  - **`;` by context, not spacing.** Directly inside an array literal or comprehension
+    `[…]`, `;` separates dimensions; everywhere else, including record and dict
+    literals, `{…}` blocks and `(…)` groups inside an array, it discards the value
+    before it. Attached versus unattached `;` no longer matters. To discard inside an
+    array, open a group: `[1 (2;) 3 4]` is `[1 3 4]`; `[1 2 (f();) ; 3 4]` is 2×2.
+    Index and slice brackets and type arguments are not array context. A `[…]` is a
+    record if it has a `name=` field, a dict if it has a `->` entry, otherwise an array.
+  - **Separator levels.** Each gap between elements has a level: a space is 0; one line
+    break or `;` is 1; one blank line or `;;` is 2; k−1 blank lines or k semicolons is k.
+    A gap holding several separators takes the highest. The lowest level present in the
+    literal is dimension 0 and each higher level is the next dimension, so a one-per-line
+    list is 1-D, `[1 2⏎3 4]` is 2×2, `[1; 2; 3]` is 1-D, and rows separated by blank
+    lines stack into a third dimension. Skipped levels (`[1 2 ;; 3 4]`) are an error.
+    The line breaks after `[` and before `]` are not gaps; comment-only lines are
+    ignored; a break inside a nested bracket or after a binary operator is not a gap;
+    the formatter preserves blank lines inside arrays. A wrapped 1-D list needs `\` at
+    each line end (or one item per line).
+  - **Shape order:** outermost first, as NumPy (`length=[2 3]` is 2 rows of 3). Storage
+    layout (row- or column-major) would be a property of the array type, not a metatag.
+  - **Dewy keeps true 1-D arrays**; a literal never becomes a 1×N or N×1 matrix by
+    accident. Considered: Julia's scheme (`;` is dimension 1, space and `;;` are
+    dimension 2, `[1 2 3]` is 1×3) and a fixed "space is dimension 0" rule; both lose
+    1-D one-per-line lists or need a special case.
+  - Being designed ([proposals/array-literals/](proposals/array-literals/)): how
+    separators interact with comprehensions and loop capture, and whether nested
+    rectangular literals (`[[1 2 3]]`, `xs[new]`) and n-D arrays are one thing.
