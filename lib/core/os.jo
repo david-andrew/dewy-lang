@@ -1,6 +1,9 @@
 # Operating system access: files, arguments, environment, time.
 
-exit = (code: int):
+exit = (code: int): __exit_program(code)
+
+# (Dewy's `exit`, lib/prelude/process.dewy, ends the program here: a code from 0 to 255)
+__exit_program = (code: int):
     # (a test that ends the program: it did not reach its end)
     if __test_child:
         __write_err("the test called exit({code}) before its end\n")

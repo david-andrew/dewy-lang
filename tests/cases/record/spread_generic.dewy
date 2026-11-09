@@ -3,4 +3,4 @@ Box:type=<T>[value:T]
 change=<T>(box:Box<T> value:T):>Box<T>=>[box... value=value]
 run=()=>{let a=change(Box<int64>[1] 42) let b=change(Box<string>["a"] "b")
 return if b.value =? "b" a.value else 1}
-main=()=>exit(run())
+main=()=>exit(run() & 255)

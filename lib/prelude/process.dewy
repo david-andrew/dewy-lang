@@ -1,0 +1,5 @@
+# Dewy's prelude: ending the program. `exit(n)` takes a `uint8`, the codes 0 to 255 that every
+# system reports alike: Linux and macOS keep only the low 8 bits (`exit(256)` would report
+# success there) and Windows keeps 32. A constant in range needs nothing, one out of range is a
+# compile error, and a computed code needs a proof (`exit(n & 255)`) or `$runtime_checks`.
+exit = (code:uint8):>void => __exit_program(int64(code))

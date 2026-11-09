@@ -117,7 +117,7 @@ f=(a:int64):>int64=>{
     if r is? Yes {$assert a >? 0; return 1}
     else {$assert a <=? 0; return 0}
 }
-main=():>void=>{exit(f(2)+f(-2)-1)}
+main=():>void=>{exit((f(2)+f(-2)-1) & 255)}
 ''')
     output = tmp_path / 'program'
     result = subprocess.run([compiler, 'build', source, '-o', output,

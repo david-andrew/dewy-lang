@@ -2,4 +2,4 @@
 pick=(v:bool|string):>int64=>match v {
 <true>=>20 <false>=>19 _=>v.length}
 run=()=>pick(true)+pick(false)+pick("abc")
-main=()=>exit(run())
+main=()=>exit(run() & 255)

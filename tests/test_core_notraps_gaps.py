@@ -28,7 +28,7 @@ main=():>void=>if f([1 2 3] 2) =? 2 exit(0) else exit(1)
     if i <? xs.length {t+=xs[i]}
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(f([1 2 3] 1)-8))
+main=():>void=>exit(int64<overflow='wrap'>(f([1 2 3] 1)-8) & 255)
 ''',
     # first+j against a guarded first+n: the shared operand's partner rows.
     'sum_shared_operand': '''g=(a:array<int64> first:int64 n:int64):>int64=>{
@@ -38,7 +38,7 @@ main=():>void=>exit(int64<overflow='wrap'>(f([1 2 3] 1)-8))
     loop j in [1..n-1) {let p=first+j t+=a[p-1];t+=a[p+1]}
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(g([1 2 3 4] 1 3)-12))
+main=():>void=>exit(int64<overflow='wrap'>(g([1 2 3 4] 1 3)-12) & 255)
 ''',
     # col+j with j below n-col: the difference term's rows bound the sum.
     'sum_complement': '''f=(xs:array<int64> n:int64 col:int64):>int64=>{
@@ -47,7 +47,7 @@ main=():>void=>exit(int64<overflow='wrap'>(g([1 2 3 4] 1 3)-12))
     loop j in [0..min(32 n-col)) {t+=xs[col+j]}
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(f([1 2 3] 3 1)-5))
+main=():>void=>exit(int64<overflow='wrap'>(f([1 2 3] 3 1)-5) & 255)
 ''',
     # A fork closure starts from what its creator knew of its snapshot
     # captures and of the lengths of the arrays it borrows by partition.
@@ -70,7 +70,7 @@ main=():>void=>{
     let a:array<int64>=[0 0 0 0]
     let t:array<int64>=[0 0 0 0]
     sort(@a @t)
-    exit(int64<overflow='wrap'>(0))
+    exit(int64<overflow='wrap'>(0) & 255)
 }
 ''',
     # `% 128` is a mask: below 128 whatever the dividend.
@@ -81,7 +81,7 @@ main=():>void=>{
     let b:uint8=((count+1)%128) as uint8
     return total+int64<overflow='wrap'>(b)
 }
-main=():>void=>exit(int64<overflow='wrap'>(k([1] 3)))
+main=():>void=>exit(int64<overflow='wrap'>(k([1] 3)) & 255)
 ''',
     # A counter that only moves down stays at most its entry value.
     'decreasing_counter': '''reverse=(@values:array<int64>):>void=>{
@@ -98,7 +98,7 @@ main=():>void=>exit(int64<overflow='wrap'>(k([1] 3)))
 main=():>void=>{
     let v:array<int64>=[1 2 3]
     reverse(@v)
-    exit(int64<overflow='wrap'>(0))
+    exit(int64<overflow='wrap'>(0) & 255)
 }
 ''',
     # `pool[h].field -= x` indexes the pool's items at its own checked answer.
@@ -107,7 +107,7 @@ main=():>void=>{
     let enemies:Pool<Enemy>=[]
     let scout=enemies.add(Enemy[name="scout"])
     if enemies.has(scout) {enemies[scout].health-=10}
-    exit(int64<overflow='wrap'>(0))
+    exit(int64<overflow='wrap'>(0) & 255)
 }
 ''',
 }
@@ -119,7 +119,7 @@ REJECTED = {
     loop j in [0..max(n xs.length)) {t+=xs[j]}
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(f([1] 1)))
+main=():>void=>exit(int64<overflow='wrap'>(f([1] 1)) & 255)
 ''', 'cannot prove index is in bounds'),
     # A loose guard on the shared operand's partner proves nothing.
     'sum_loose_partner': ('''g=(a:array<int64> first:int64 n:int64):>int64=>{
@@ -128,7 +128,7 @@ main=():>void=>exit(int64<overflow='wrap'>(f([1] 1)))
     loop j in [0..n+1) {t+=a[first+j]}
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(g([1 2] 0 1)))
+main=():>void=>exit(int64<overflow='wrap'>(g([1 2] 0 1)) & 255)
 ''', 'cannot prove index is in bounds'),
     # Its entry value itself is past the end.
     'decreasing_from_length': ('''f=(xs:array<int64>):>int64=>{
@@ -140,14 +140,14 @@ main=():>void=>exit(int64<overflow='wrap'>(g([1 2] 0 1)))
     }
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(f([1])))
+main=():>void=>exit(int64<overflow='wrap'>(f([1])) & 255)
 ''', 'cannot prove index is in bounds'),
     # A closure that is not a fork's runs later: its creator's facts say nothing.
     'stored_closure': ('''main=():>void=>{
     let xs:array<int64>=[1 2 3 4]
     let mid:int64=xs.length//2
     let later=(i:int64):>int64=>int64<overflow='wrap'>(xs[..mid).length)+int64<overflow='wrap'>(i)
-    exit(int64<overflow='wrap'>(later(0)-2))
+    exit(int64<overflow='wrap'>(later(0)-2) & 255)
 }
 ''', 'cannot prove slice is in bounds'),
 }

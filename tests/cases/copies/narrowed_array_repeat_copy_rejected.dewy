@@ -5,6 +5,6 @@ main=():>void=>{
     if value is? none exit(1)
     let rows:array<array<int64>>=[]
     loop i in [0..2) {rows.push(value)}
-    if rows.length>=?2 {rows[0].clear exit((if rows[1].length>?0 rows[1][0] else 3))}
+    if rows.length>=?2 {rows[0].clear exit((if rows[1].length>?0 rows[1][0] else 3) & 255)}
     exit(2)
 }

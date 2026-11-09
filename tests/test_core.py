@@ -306,8 +306,8 @@ def test_core_copy_warning_dewy_syntax(compiler, tmp_path, scope):
     body = 'item.hp-=5 return xs[0].hp'
     source = tmp_path / 'copy.dewy'
     source.write_text('Item:type=[hp:int64]\n' +
-                      (bindings + f'main=():>void=>exit(entry()) entry=()=>{{{body}}}' if scope == 'global'
-                       else f'main=():>void=>exit(entry()) entry=()=>{{{bindings}{body}}}'))
+                      (bindings + f'main=():>void=>exit(entry() & 255) entry=()=>{{{body}}}' if scope == 'global'
+                       else f'main=():>void=>exit(entry() & 255) entry=()=>{{{bindings}{body}}}'))
     checked = subprocess.run([compiler, 'check', source], capture_output=True, text=True,
                              timeout=30, check=False)
     assert checked.returncode == 0, checked.stdout + checked.stderr
@@ -1127,7 +1127,7 @@ def test_core_bounded_remainder_ir(compiler, tmp_path, target, release):
 def test_core_constant_floor_ir(compiler, tmp_path, target):
     source = tmp_path / 'constant.dewy'
     source.write_text('''probe=(a:int64<overflow='wrap'>):>int64<overflow='wrap'>=>a%3+a//3+a%8+a//8
-main=():>void=>exit(entry()) entry=()=>probe(-7)
+main=():>void=>exit(entry() & 255) entry=()=>probe(-7)
 ''')
     built = subprocess.run([compiler, 'build', source, '--ir', '--target', target_name(target),
                             '-o', tmp_path / 'constant'],
@@ -3250,7 +3250,7 @@ def test_core_cli_identity(compiler):
 def test_core_build_source_counts(compiler, tmp_path):
     source = tmp_path / 'main.dewy'
     helper = tmp_path / 'helper.dewy'
-    body = 'import p"helper.dewy" as h\n# 🙂\n\nmain=():>void=>exit(h.answer())'
+    body = 'import p"helper.dewy" as h\n# 🙂\n\nmain=():>void=>printl(h.answer())'
     imported = 'answer=():>int64=>42\n'
     source.write_text(body)
     helper.write_text(imported)
@@ -5817,7 +5817,7 @@ def test_core_grapheme_length_blocks(compiler, tmp_path, release, target):
 def test_core_grapheme_length_invalid_tail(compiler, tmp_path, prefix):
     source = tmp_path / 'invalid.dewy'
     source.write_text('main=():>void=>{let text=str_from_bytes([' + '97 '*prefix +
-                      '226 130]) exit(text.length)}\n')
+                      '226 130]) exit(text.length & 255)}\n')
     binary = tmp_path / 'invalid'
     built = subprocess.run([compiler, 'build', source, '-o', binary],
                            capture_output=True, text=True, timeout=30)

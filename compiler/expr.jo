@@ -2987,14 +2987,15 @@ dewy_surface_table = () -> {int: str}:
 
 # (for a library declaration of the name: 1 when only Dewy sees it, 2 when only Sloppy does, 0 both;
 # the Sloppy library's are those of a path's text, `read_bytes(f: File n)` stays both's)
-# (Dewy's cancelable spellings of these: lib/std/task_input.jo's, and files.jo's read_bytes)
+# (Dewy's cancelable spellings of these: lib/std/task_input.jo's, and files.jo's read_bytes; and
+# lib/prelude/process.dewy's `exit`, which takes a code from 0 to 255)
 task_surface_names: {int: bool}
 dewy_surface = (name: int, decl: int) -> int:
     if task_surface_names.len() == 0:
-        loop word in ["read_line", "read_stdin", "input", "input_int", "input_float", "open_file", "read_bytes"]: task_surface_names[intern(word)] = true
+        loop word in ["read_line", "read_stdin", "input", "input_int", "input_float", "open_file", "read_bytes", "exit"]: task_surface_names[intern(word)] = true
     if task_surface_names.has(name):
         path = files[pos_file(nodes[decl].pos)].path
-        if path == lib_dir + "/std/task_input.jo" or path == lib_dir + "/std/files.jo": return 1
+        if path == lib_dir + "/std/task_input.jo" or path == lib_dir + "/std/files.jo" or path == lib_dir + "/prelude/process.dewy": return 1
         if path == lib_dir + "/core/os.jo": return 2
     if not dewy_surface_table().has(name): return 0
     if dewy_renamed(name): return 2

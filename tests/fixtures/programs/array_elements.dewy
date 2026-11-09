@@ -32,5 +32,5 @@ let main = ():>void => {
     if copy.length =? 4 and copy[0] =? "p0-0" { total += 1 }
     let words = "a,bb,ccc".split","
     let sizes = [loop w in words w.length]
-    exit(total + 7 - sizes.length)            # (4 + 27 + 6) + 1 + 7 - 3 = 42
+    exit((total + 7 - sizes.length) & 255)            # (4 + 27 + 6) + 1 + 7 - 3 = 42
 }

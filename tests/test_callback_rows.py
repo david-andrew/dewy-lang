@@ -106,7 +106,7 @@ def test_callback_place_is_not_nonlocal_remainder(compiler, tmp_path, explicit_p
     source.write_text('forward=<E:Effect>(f:<(@x:int64):>void & ' + permission
                       + 'E> @y:int64):>void & ' + wrapper_permission + 'E=>f(@y)\n'
                       'mutator=(@x:int64):>void & mutates<x>=>{x=7}\n'
-                      'main=():>void=>{let cell:int64=0; forward(@mutator @cell); exit(cell)}\n')
+                      'main=():>void=>{let cell:int64=0; forward(@mutator @cell); exit(cell & 255)}\n')
     result = compile_source(compiler, source, tmp_path, 'check')
     assert (result.returncode == 0) == explicit_place, result.stderr
     if not explicit_place:
@@ -200,7 +200,7 @@ def test_qualified_resources_remain_nominal(compiler, tmp_path, same_resource):
 Filesystem:type=[]
 reader=():>int64 & reads<resources.Filesystem>=>42
 invoke=(f:(():>int64 & reads<''' + permission + '''>)):>int64=>f()
-main=():>void=>exit(entry()) entry=():>int64=>invoke(@reader)
+main=():>void=>exit(entry() & 255) entry=():>int64=>invoke(@reader)
 ''')
     result = compile_source(compiler, source, tmp_path, 'check')
     assert (result.returncode == 0) == same_resource, result.stdout + result.stderr

@@ -17,7 +17,7 @@ PROVED = {
     loop i in [0..n) {t+=xs[i]}
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(pairs(3)))
+main=():>void=>exit(int64<overflow='wrap'>(pairs(3)) & 255)
 ''',
     # A local function's result length follows its count parameter.
     'count_parameter_result': '''make=(n:int64):>array<int64>=>{
@@ -28,7 +28,7 @@ squares=(n:int64):>array<int64>=>[loop i in [0..n) int64<overflow='wrap'>(i*i)]
 main=():>void=>{
     let r=make(5)
     let q=squares(4)
-    exit(int64<overflow='wrap'>(r[4]+q[3]-16))
+    exit(int64<overflow='wrap'>(r[4]+q[3]-16) & 255)
 }
 ''',
     # A field's contract naming a sibling holds for every stored record.
@@ -39,7 +39,7 @@ total=(w:Soa):>int64=>{
     loop i in [0..w.used) {t+=w.ids[i]}
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(total(Soa[[1 2] [3 4] 1])))
+main=():>void=>exit(int64<overflow='wrap'>(total(Soa[[1 2] [3 4] 1])) & 255)
 ''',
     # Contract bounds take a constant offset; callers prove it like any bound.
     'offset_contract': '''load16=(b:array<uint8> at:int64<0 <=? at and at+2 <=? b.length>):>int64=>(b[at] as int64)+(b[at+1] as int64)*256
@@ -54,7 +54,7 @@ scan=(src:array<uint8> start:int64<(>=? 0)> stop:int64<(<=? src.length)>):>int64
 }
 main=():>void=>{
     let xs:array<uint8>=[1 2 35 35 5]
-    exit(int64<overflow='wrap'>(load16(xs 3)-140+scan(xs 0 xs.length)+scan(xs 1 3)))
+    exit(int64<overflow='wrap'>(load16(xs 3)-140+scan(xs 0 xs.length)+scan(xs 1 3)) & 255)
 }
 ''',
     # A counter its loop tests at an offset relates to the bound through the
@@ -69,14 +69,14 @@ main=():>void=>{
     }
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(triples([1 2 3 4])))
+main=():>void=>exit(int64<overflow='wrap'>(triples([1 2 3 4])) & 255)
 ''',
     # A run of constant offsets after one guard keeps every offset's rows.
     'offset_run': '''g=(b:array<uint8> p:int64):>uint8=>{
     if p <? 0 or p >? b.length-16 return 0
     return b[p+1] or b[p+2] or b[p+3] or b[p+4] or b[p+5] or b[p+6]
 }
-main=():>void=>exit(int64<overflow='wrap'>(g([1 2 3] 0) as int64))
+main=():>void=>exit(int64<overflow='wrap'>(g([1 2 3] 0) as int64) & 255)
 ''',
     # A vector constructor reads its operands and writes nothing.
     'vector_constructor': '''f=():>int64=>{
@@ -85,7 +85,7 @@ main=():>void=>exit(int64<overflow='wrap'>(g([1 2 3] 0) as int64))
     b[1]=3
     return b[0]
 }
-main=():>void=>exit(int64<overflow='wrap'>(f()))
+main=():>void=>exit(int64<overflow='wrap'>(f()) & 255)
 ''',
     # extend grows by its operand's length, truncate never grows, and neither
     # forgets what it does not write.
@@ -99,7 +99,7 @@ main=():>void=>exit(int64<overflow='wrap'>(f()))
     ys.extend([4])
     return int64<overflow='wrap'>(out.length)+int64<overflow='wrap'>(data[k..].length)+int64<overflow='wrap'>(ys[3])
 }
-main=():>void=>exit(int64<overflow='wrap'>(f([1 2] 1)))
+main=():>void=>exit(int64<overflow='wrap'>(f([1 2] 1)) & 255)
 ''',
     # A range loop's argmax holds its entry value or an earlier index.
     'argmax_index': '''nearest=(xs:array<int64 length >? 0> k:int64):>int64<r => 0 <=? r and r <? xs.length>=>{
@@ -113,7 +113,7 @@ argmin=(xs:array<int64>):>int64=>{
     if u <? 0 return 0
     return xs[u]
 }
-main=():>void=>exit(int64<overflow='wrap'>(nearest([3 1 2] 0)+argmin([3 1 2])))
+main=():>void=>exit(int64<overflow='wrap'>(nearest([3 1 2] 0)+argmin([3 1 2])) & 255)
 ''',
     # Reviewed prelude contracts: parallel results have one value per input.
     'parallel_lengths': '''main=():>void=>{
@@ -134,7 +134,7 @@ main=():>void=>exit(int64<overflow='wrap'>(nearest([3 1 2] 0)+argmin([3 1 2])))
 main=():>void=>{
     let xs:array<int64>=[]
     let i=append(@xs 3)
-    exit(int64<overflow='wrap'>(xs[i]))
+    exit(int64<overflow='wrap'>(xs[i]) & 255)
 }
 ''',
 }
@@ -148,7 +148,7 @@ REJECTED = {
     loop i in [0..xs.length) {t+=ys[i]}
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(pairs(3 3)))
+main=():>void=>exit(int64<overflow='wrap'>(pairs(3 3)) & 255)
 ''', 'cannot prove index is in bounds: missing upper bound'),
     # A counter that steps past its offset guard's slack is not kept in bounds.
     'offset_guard_too_loose': ('''pairs=(b:array<uint8>):>int64=>{
@@ -160,7 +160,7 @@ main=():>void=>exit(int64<overflow='wrap'>(pairs(3 3)))
     }
     return t
 }
-main=():>void=>exit(int64<overflow='wrap'>(pairs([1 2 3])))
+main=():>void=>exit(int64<overflow='wrap'>(pairs([1 2 3])) & 255)
 ''', 'cannot prove index is in bounds'),
     # Set to something other than the loop's value, the argmax proves nothing.
     'argmax_other_value': ('''pick=(xs:array<int64>):>int64=>{
@@ -169,13 +169,13 @@ main=():>void=>exit(int64<overflow='wrap'>(pairs([1 2 3])))
     loop i in [1..xs.length) {if xs[i] <? 0 {best=i+1}}
     return xs[best]
 }
-main=():>void=>exit(int64<overflow='wrap'>(pick([3 1 2])))
+main=():>void=>exit(int64<overflow='wrap'>(pick([3 1 2])) & 255)
 ''', 'cannot prove index is in bounds'),
     'offset_contract_too_short': ('''load16=(b:array<uint8> at:int64<0 <=? at and at+2 <=? b.length>):>int64=>(b[at] as int64)+(b[at+2] as int64)
-main=():>void=>exit(int64<overflow='wrap'>(load16([1 2 3] 0)))
+main=():>void=>exit(int64<overflow='wrap'>(load16([1 2 3] 0)) & 255)
 ''', 'cannot prove index is in bounds: missing upper bound'),
     'offset_argument_refuted': ('''load16=(b:array<uint8> at:int64<0 <=? at and at+2 <=? b.length>):>int64=>b[at] as int64
-main=():>void=>exit(int64<overflow='wrap'>(load16([1 2 3] 2)))
+main=():>void=>exit(int64<overflow='wrap'>(load16([1 2 3] 2)) & 255)
 ''', 'refinement refuted'),
 }
 

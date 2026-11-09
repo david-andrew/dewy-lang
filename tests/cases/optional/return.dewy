@@ -3,4 +3,4 @@
 choose=(yes:bool):>int64?=>if yes 42 else none
 run=()=>{let a=choose(true) let b=choose(false)
 return if a is? int64 and b is? none a else 1}
-main=()=>exit(run())
+main=()=>exit(run() & 255)

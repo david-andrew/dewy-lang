@@ -3797,9 +3797,12 @@ agree; a conflict names both files and both values.
 
 `main` returns `void` or the errors that reach it, an ordinary `void | E` type,
 declared or inferred. It gives no exit code: success exits 0, and a script that
-needs a particular code calls `exit(n)`, with `n` from 0 to 255 to mean the same
-everywhere: Linux and macOS keep only its low 8 bits (`exit(256)` reports success
-there), while Windows keeps 32. An error reaching `main` is printed on
+needs a particular code calls `exit(n)`. `n` is a `uint8` (provisional), the range that
+means the same everywhere: Linux and macOS keep only the low 8 bits (`exit(256)` would
+report success there), while Windows keeps 32. A constant outside 0–255 is a compile
+error, a computed code is an obligation like any other (`exit(n & 255)` or
+`exit(min(failures.length 255))` proves it, `$runtime_checks` checks it), and an
+in-range constant proves for free. An error reaching `main` is printed on
 standard error as its kind and its `message` text field, if it has one
 (`error: ParseError: ...`; the rest of a payload may hold secrets, so only a
 debug build, `-g`, prints it whole: `error: ParseError[message="..."]`) and ends

@@ -4,4 +4,4 @@ let source:int64|string="answer"
 next=():>int64|string=>{calls+=1 return source}
 run=()=>{let result=match next() {s:"answer"=>{source=99 s.length} _=>0}
 return if calls=?1 and source is? int64 result*7 else 1}
-main=()=>exit(run())
+main=()=>exit(run() & 255)

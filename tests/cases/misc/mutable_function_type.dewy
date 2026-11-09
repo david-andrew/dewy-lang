@@ -3,4 +3,4 @@
 Fn:type=(@x:int64):>void
 apply=(f:Fn @x:int64):>void=>{f(@x)}
 run=()=>{let x:int64=40 apply((@a:int64):>void=>{a+=2} @x) return x}
-main=()=>exit(run())
+main=()=>exit(run() & 255)
