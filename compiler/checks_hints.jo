@@ -210,12 +210,23 @@ gone_local_hint = (nm: int, at: int) -> str:
             return " (the '{name_of(nm)}' made on line {ln} belongs to {fname}; for both to use it, give it its first value at the top level, outside the functions)"
         l -= 1
     ""
+# (a name whose every overload the caller's language does not see, as Sloppy's `eprint` from Dewy:
+# there is nothing under it to call)
+unseen_here = (s: int, dewy: bool) -> bool:
+    o = s
+    loop o != 0:
+        surface = int(syms[o].surface)
+        if surface == 0 or (surface == 1) == dewy: return false
+        o = int(syms[o].next)
+    true
 # names visible from the current scope: locals, the module, the standard library, built-ins
 visible_names = () -> int[]:
     prelude_demand_all()
     out = check_scopes.names
+    dewy = files[int(modules[cur_mod()].file)].is_dewy
     loop k, v in modules[cur_mod()].names: out.push(k)
-    loop k, v in prelude: out.push(k)
+    loop k, v in prelude:
+        if not unseen_here(v, dewy): out.push(k)
     loop k, v in universe: out.push(k)
     out
 type_names = () -> int[]:
