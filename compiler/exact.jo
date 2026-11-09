@@ -1140,6 +1140,26 @@ exact_shift_fact = (n: int, value: int, s: FactState):
         else: limit = max(previous, limit)
     exact_shifts[n] = limit
 
+# value within t's range through fact_compare's relations. An interval end
+# that is real and fits needs no compare; a 64-bit word's MIN/MAX (sentinel
+# constants) is approached as > MIN, < MAX. Two compares: O(fact_compare).
+exact_fits_relation = (s: mut FactState, value: int, t: int) -> bool:
+    bits = int(types[t].bits)
+    sign = types[t].sign
+    if bits <= 0 or bits > 64: return false
+    low = if not sign: 0 else if bits >= 64: FACT_MIN + 1 else: -(1 << (bits - 1))
+    high = if bits >= 64: FACT_MAX - 1 else if sign: (1 << (bits - 1)) - 1 else: (1 << bits) - 1
+    b = fact_bound(s, value)
+    lo_real = b.lo != FACT_MIN and b.lo >= low or b.lo == FACT_MIN and sign and bits >= 64 and not fact_open_endpoint(s, value, false)
+    hi_real = b.hi != FACT_MAX and b.hi <= high or b.hi == FACT_MAX and bits >= 64 and not fact_open_endpoint(s, value, true)
+    # (each constant first: an argument copies the state before it is added)
+    if not lo_real:
+        floor = fact_constant(s, low)
+        if fact_compare(s, .ge, value, floor) != 1: return false
+    if hi_real: return true
+    ceiling = fact_constant(s, high)
+    fact_compare(s, .le, value, ceiling) == 1
+
 exact_fact_store = (n: int, value: int, s: mut FactState) -> int:
     if not s.live:
         if not exact_decided(n): exact_decide(n, true)
@@ -1148,6 +1168,11 @@ exact_fact_store = (n: int, value: int, s: mut FactState) -> int:
     b = fact_bound(s, value)
     # Values outside the interval engine's signed word range remain unknown.
     ok = not b.wide and b.reason != .unsupported and sa_fits(b.lo, t) and sa_fits(b.hi, t)
+    # (an open `int` end is infinite, not the word's MIN/MAX)
+    if ok and value != 0 and (b.hi == FACT_MAX and fact_open_endpoint(s, value, true) or b.lo == FACT_MIN and fact_open_endpoint(s, value, false)): ok = false
+    # (an open end may still sit inside the word through a relation:
+    # `r*cols` below `rows*cols =? cells.length`. Only an unproven store asks)
+    if not ok and value != 0 and t != T_U64 and not b.wide and b.reason != .unsupported: ok = exact_fits_relation(s, value, t)
     if t == T_U64: ok = not b.wide and value != 0 and fact_terms[value].type == T_U64 and b.reason != .unsupported
     assumed = exact_marks[n] & 32 != 0
     if assumed:
@@ -1999,7 +2024,9 @@ exact_value_fact = (n: int, value: int, s: FactState):
     old = int(exact_range_meta[n])
     if old & 4 != 0: flags &= old
     exact_range_meta[n] = u8(flags | 4)
-    if b.wide or b.reason == .unsupported or exact_representation(ntype(n)) == T_MATH_INT and not fact_host_finite(s, value):
+    # (an exact word's value may itself be an open `int`, `r*cols` of two
+    # unbounded int64s: its MIN/MAX ends are infinite, never 64 bits)
+    if b.wide or b.reason == .unsupported or (exact_representation(ntype(n)) == T_MATH_INT or fact_type(fact_terms[value].type) == T_MATH_INT) and not fact_host_finite(s, value):
         exact_ranges[n] = -1
         return
     if exact_ranges[n] < 0: return

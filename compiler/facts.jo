@@ -1405,7 +1405,8 @@ fact_below = (s: FactState, v: int, b: int, d: int) -> bool:
 # also <= (dy+1)*wl + dx: `r*w + c <? xs.length` from `xs.length =? h*w`,
 # `0 <=? c <? w` and `r <? h`. Retained arithmetic terms are exact (a product
 # that may wrap is never kept), so the algebra is the mathematical one.
-# Only a compare whose left side is a product or a sum with one gets here.
+# Only a compare whose left side is a product, or a sum with one (nested
+# once, `(k*n + col) + j`), gets here.
 # O(active terms) per factor order, plus two bounded relaxations and 16
 # incident rows per retained product sharing w.
 fact_product_compare = (s: FactState, a: int, b: int, limit: int) -> bool:
@@ -1413,17 +1414,33 @@ fact_product_compare = (s: FactState, a: int, b: int, limit: int) -> bool:
     t = fact_terms[a]
     if t.a == 0 or t.b == 0: return false
     if t.op != .star and t.op != .plus: return false
-    loop pick in [0..2):
+    if fact_bound(s, a).wide: return false
+    # (the product and up to two addends: `p`, `p + x`, `(p + x) + x2`)
+    loop pick in [0..6):
         p = a
         x = 0
-        if t.op == .plus:
+        x2 = 0
+        if t.op == .star:
+            if pick > 0: break
+        else if pick < 2:
             p = if pick == 0: t.a else: t.b
             x = if pick == 0: t.b else: t.a
-        else if pick == 1: break
+        else:
+            u = if pick < 4: t.a else: t.b
+            x2 = if pick < 4: t.b else: t.a
+            ut = fact_terms[u]
+            if ut.op != .plus or ut.a == 0 or ut.b == 0: continue
+            p = if pick % 2 == 0: ut.a else: ut.b
+            x = if pick % 2 == 0: ut.b else: ut.a
         pt = fact_terms[p]
         if pt.op != .star or pt.a == 0 or pt.b == 0: continue
-        if fact_bound(s, a).wide or fact_bound(s, p).wide: continue
+        if fact_bound(s, p).wide: continue
         xb = if x == 0: FactBound(0, 0) else: fact_signed_bound(s, x)
+        if x2 != 0:
+            extra = fact_signed_bound(s, x2)
+            xb.wide = xb.wide or extra.wide
+            xb.lo = if xb.lo != FACT_MIN and extra.lo != FACT_MIN and fact_add_fits(xb.lo, extra.lo): xb.lo + extra.lo else: FACT_MIN
+            xb.hi = if xb.hi != FACT_MAX and extra.hi != FACT_MAX and fact_add_fits(xb.hi, extra.hi): xb.hi + extra.hi else: FACT_MAX
         if xb.wide: continue
         loop side in [0..2):
             y = if side == 0: pt.a else: pt.b
@@ -1432,7 +1449,7 @@ fact_product_compare = (s: FactState, a: int, b: int, limit: int) -> bool:
             wb = fact_signed_bound(s, w)
             if wb.wide: continue
             wl = wb.lo
-            dx = if x == 0: FACT_MAX else: fact_gap(s, x, w)
+            dx = if x == 0: FACT_MAX else if x2 == 0: fact_gap(s, x, w) else: fact_pair_gap(s, x, x2, w)
             # (x <= w + dx with x >= x.lo: w >= x.lo - dx)
             if wl < 0 and dx != FACT_MAX and dx != FACT_MIN and xb.lo != FACT_MIN and fact_add_fits(xb.lo, -dx): wl = max(wl, xb.lo - dx)
             if wl < 0: continue
@@ -1451,6 +1468,22 @@ fact_product_compare = (s: FactState, a: int, b: int, limit: int) -> bool:
                 if up == FACT_MAX or up == FACT_MIN or not fact_add_fits(limit, -up): continue
                 if fact_below(s, v, b, limit - up): return true
     false
+
+# x + x2 - w <= d with no term for x + x2: through a retained w - x
+# (`j <? n - col` bounds `col + j` below n), else the intervals.
+# O(active terms) plus one bounded relaxation per such difference.
+fact_pair_gap = (s: FactState, x: int, x2: int, w: int) -> int:
+    best = FACT_MAX
+    p = fact_signed_bound(s, x)
+    q = fact_signed_bound(s, x2)
+    r = fact_signed_bound(s, w)
+    if not p.wide and not q.wide and not r.wide and p.hi != FACT_MAX and q.hi != FACT_MAX and r.lo != FACT_MIN and fact_add_fits(p.hi, q.hi) and fact_add_fits(p.hi + q.hi, -r.lo): best = p.hi + q.hi - r.lo
+    loop v in s.ids:
+        m = fact_terms[v]
+        if m.op != .minus or m.a != w or m.b != x and m.b != x2: continue
+        d = fact_gap(s, (if m.b == x: x2 else: x), v)
+        if d < best: best = d
+    best
 
 # Selected affine rows share a single symbolic root. Normalize only on query,
 # with a 32-node budget; unrelated roots and nonlinear products stay unknown.
@@ -3973,8 +4006,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         fact_capture(int(nodes[n].a), s)
         return fact_fresh(s, ntype(n))
     if k == .field and nodes[n].aux == -4 and is_vec(ntype(int(nodes[n].a))):
-        # (a vector lane or swizzle read, `p.x`: reads its vector, writes nothing)
-        fact_capture(int(nodes[n].a), s)
+        # (a vector lane or swizzle read, `p.x`: reads its vector, writes
+        # nothing. One lane is a projection of the vector's value, as a
+        # field is, so `id.x` read twice is one value; a swizzle stays fresh)
+        base = fact_capture(int(nodes[n].a), s)
+        if base != 0 and not is_vec(ntype(n)): return fact_project(s, base, int(nodes[n].name), false, ntype(n))
         return fact_fresh(s, ntype(n))
     # Opaque forms cannot export facts; evaluate each child from top so control
     # alternatives, implicit hooks and raw aliases cannot mint stale evidence.

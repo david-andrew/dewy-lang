@@ -40,14 +40,15 @@ init_mlp = (@r:Rng):>Mlp => {
     return model
 }
 
-# One dense layer: out[j] = bias[j] + sum_i x[i]*w[i*cols+j].
+# One dense layer: out[j] = bias[j] + sum_i x[i]*w[i*cols+j]. Weights of
+# another shape give no layer.
 dense = (x:array<float64> w:array<float64> bias:array<float64> cols:int64):>array<float64> => {
-    if cols <? 0 or cols >? 1000 or x.length >? 1000 return []
+    if cols <? 0 or cols >? 1000 or x.length >? 1000 or w.length not=? x.length*cols return []
     let out:array<float64> = []
     loop j in [0..cols) {
         let acc = bias.get(j) ?? 0.0
         loop i in 0.. and xi in x {
-            acc += xi*(w.get(i*cols+j) ?? 0.0)
+            acc += xi*w[i*cols+j]
         }
         out.push(acc)
     }
@@ -95,12 +96,12 @@ argmax = (y:array<float64>):>int64 => {
 # Back through one dense layer: the gradient for its inputs, given the
 # gradient for its outputs, through the weights `w` with `cols` outputs.
 back = (dz:array<float64> w:array<float64> rows:int64 cols:int64):>array<float64> => {
-    if rows <? 0 or rows >? 1000 or cols <? 0 or cols >? 1000 or dz.length >? 1000 return []
+    if rows <? 0 or rows >? 1000 or cols <? 0 or cols >? 1000 or dz.length >? cols or w.length not=? rows*cols return []
     let out:array<float64> = []
     loop i in [0..rows) {
         let acc:float64 = 0.0
         loop j in 0.. and dzj in dz {
-            acc += (w.get(i*cols+j) ?? 0.0)*dzj
+            acc += w[i*cols+j]*dzj
         }
         out.push(acc)
     }

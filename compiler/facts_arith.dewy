@@ -183,13 +183,17 @@ fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>Arith
     let yhi_open=y.hi =? FACT_MAX and fact_open_endpoint(s b true)
     if op =? 'star' {
         # Mathematical ints multiply exactly too. Two bounded variable
-        # operands need the same four endpoint products as fixed exact ints.
-        if not exact_has_node(n) and prune(ntype(n)) not=? T_MATH_INT and x.lo not=? x.hi and y.lo not=? y.hi {return fact_unmodeled(@s n 'unsupported')}
+        # operands need the same four endpoint products as fixed exact ints;
+        # a wrapping product is the mathematical one only when every corner
+        # fits its type (the sa_fits check below).
         if xlo_open or xhi_open or ylo_open or yhi_open {return fact_open_product(@s n a b x y xlo_open xhi_open ylo_open yhi_open)}
         if math_word_overflow(2 x.lo y.lo) or math_word_overflow(2 x.lo y.hi) or math_word_overflow(2 x.hi y.lo) or math_word_overflow(2 x.hi y.hi) {
-            # (an exact `int` scaled by a constant keeps the end that fits and
-            # opens the other: `2*i` of a widened i >= 0 is still at least 0)
-            if prune(ntype(n)) not=? T_MATH_INT or exact_has_node(n) {return fact_unmodeled(@s n 'unsupported')}
+            # (an exact fixed-width product is the mathematical one: corners
+            # beyond the word are its open ends. An exact `int` scaled by a
+            # constant keeps the end that fits and opens the other: `2*i` of
+            # a widened i >= 0 is still at least 0)
+            if exact_has_node(n) {return fact_open_product(@s n a b x y false false false false)}
+            if prune(ntype(n)) not=? T_MATH_INT {return fact_unmodeled(@s n 'unsupported')}
             let again=fact_scaled_again(s a b x y)
             if again not=? 0 {return again}
             return fact_scaled_open(@s n a b x y)
@@ -211,7 +215,7 @@ fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>Arith
     if op =? 'plus' and a not=? 0 and b not=? 0 and x.lo not=? x.hi and y.lo not=? y.hi {
         loop i in [0..s.ids.length) {
             let t=fact_terms[s.ids[i]]
-            if t.op =? 'plus' and t.type =? ntype(n) and (t.a =? a and t.b =? b or t.a =? b and t.b =? a) {
+            if t.op =? 'plus' and (t.type =? ntype(n) or t.type =? T_MATH_INT and exact_has_node(n)) and (t.a =? a and t.b =? b or t.a =? b and t.b =? a) {
                 # (an open end is infinite: only a real end of both tightens)
                 let lo_real=fact_add_fits(x.lo y.lo) and not (x.lo =? FACT_MIN and fact_open_endpoint(s a false)) and not (y.lo =? FACT_MIN and fact_open_endpoint(s b false))
                 let hi_real=fact_add_fits(x.hi y.hi) and not (x.hi =? FACT_MAX and fact_open_endpoint(s a true)) and not (y.hi =? FACT_MAX and fact_open_endpoint(s b true))
@@ -269,7 +273,14 @@ fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>Arith
             }
         }
     }
-    if not low or not high {
+    # (an exact fixed-width sum with an infinite operand end is infinite at
+    # that end too: an open `int` end, never the word's)
+    let exact_open=exact_has_node(n) and (low or xlo_open or ylo_open) and (high or xhi_open or yhi_open)
+    if (not low or not high) and exact_open {
+        if not low {lo=FACT_MIN; lo_open=true}
+        if not high {hi=FACT_MAX; hi_open=true}
+    }
+    if (not low or not high) and not exact_open {
         if exact_has_node(n) or n =? fact_sum_operand and fact_type(ntype(n)) =? T_MATH_INT and fact_host_finite(s a) and fact_host_finite(s b) or n <? exact_marks.length and exact_marks[n] & 32 not=? 0 {return fact_new(@s FactBound(lo hi lo >? 0 or hi <? 0 wide=true) FactTerm(op a b n ntype(n)))}
         # (an `int` end beyond the host word is open, not unknown: a counter
         # at most int64's MAX plus one keeps its lower bound)
@@ -287,7 +298,10 @@ fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>Arith
         let same=fact_offset_value(s a y.lo)
         if same not=? 0 {return same}
     }
-    let value=fact_new(@s fact_open_bound(lo hi lo_open and lo =? FACT_MIN hi_open and hi =? FACT_MAX) FactTerm(op a b n (if lo_open or hi_open {ntype(n)} else {fact_word_type(s n a b lo hi)})))
+    let term_type=ntype(n)
+    if (lo_open or hi_open) and exact_has_node(n) {term_type=T_MATH_INT}
+    if not lo_open and not hi_open {term_type=fact_word_type(s n a b lo hi)}
+    let value=fact_new(@s fact_open_bound(lo hi lo_open and lo =? FACT_MIN hi_open and hi =? FACT_MAX) FactTerm(op a b n term_type))
     loop r in sums {fact_difference(@s (if r.a =? 0 {value} else {r.a}) (if r.b =? 0 {value} else {r.b}) r.limit n)}
     if y.lo =? y.hi and y.lo not=? FACT_MIN {
         fact_difference(@s value a y.lo 0 16)

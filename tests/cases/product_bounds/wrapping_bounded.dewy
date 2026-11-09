@@ -1,0 +1,8 @@
+# Wrapping factors whose corner products fit the type multiply exactly.
+W:type=int32<overflow='wrap'>
+get=(xs:array<int> w:W h:W x:W y:W):>int=>{
+    if w >? 4096 or h >? 4096 or x <? 0 or y <? 0 or x >=? w or y >=? h return 0
+    if xs.length =? int(w)*int(h) { return xs[y*w+x] }
+    return 0
+}
+main=()=>printl(get([1 2 3 4 5 6] 3 2 1 1))

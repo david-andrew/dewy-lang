@@ -113,8 +113,14 @@ fact_open_product=(@s:FactState n:NumericWord a:NumericWord b:NumericWord x:Fact
         let qe:NumericWord=0
         if i % 2 =? 0 and ylo_open {qe=-1}
         else if i % 2 not=? 0 and yhi_open {qe=1}
+        if pe =? 0 and qe =? 0 and math_word_overflow(2 p q) {
+            # (an exact fixed-width product computes the mathematical value:
+            # a corner beyond the word is infinite with its sign)
+            if not exact_has_node(n) {return fact_unmodeled(@s n 'unsupported')}
+            if (p <? 0) =? (q <? 0) {above=true} else {below=true}
+            continue
+        }
         if pe =? 0 and qe =? 0 {
-            if math_word_overflow(2 p q) {return fact_unmodeled(@s n 'unsupported')}
             lo=min(lo p * q)
             hi=max(hi p * q)
             continue
@@ -130,18 +136,21 @@ fact_open_product=(@s:FactState n:NumericWord a:NumericWord b:NumericWord x:Fact
     if below {lo=FACT_MIN}
     if above {hi=FACT_MAX}
     if lo >? hi {return fact_unmodeled(@s n 'unsupported')}
+    # (an exact fixed-width product with an infinite end is an `int`: its
+    # MIN/MAX ends are open, never the word's real ones)
+    let ty=if (below or above) and exact_has_node(n) {T_MATH_INT} else {ntype(n)}
     # (the same product again, `r*w` in a guard and in the index it guards:
     # one value. O(values))
     if a not=? 0 and b not=? 0 {
         loop i in [0..s.ids.length) {
             let t=fact_terms[s.ids[i]]
-            if t.op =? 'star' and t.type =? ntype(n) and (t.a =? a and t.b =? b or t.a =? b and t.b =? a) {
+            if t.op =? 'star' and t.type =? ty and (t.a =? a and t.b =? b or t.a =? b and t.b =? a) {
                 fact_reuse_tighten(@s s.ids[i] lo hi not below not above)
                 return s.ids[i]
             }
         }
     }
-    fact_new(@s fact_open_bound(lo hi below above) FactTerm('star' a b n ntype(n)))
+    fact_new(@s fact_open_bound(lo hi below above) FactTerm('star' a b n ty))
 }
 # A named sum or product evaluated again keeps the bounds its guards gave it,
 # and takes any real end its operands now have: both hold for the one value.

@@ -1,0 +1,22 @@
+# int64 operands multiply exactly: r*cols + c fits the word below rows*cols,
+# which equals the length.
+get=(cells:array<int64> rows:int64 cols:int64 r:int64 c:int64):>int64=>{
+    if cells.length =? rows*cols and r >=? 0 and r <? rows and c >=? 0 and c <? cols { return cells[r*cols+c] }
+    return 0
+}
+Matrix:type=[rows:int64 cols:int64 cells:array<int64>]
+total=(m:Matrix):>int64=>{
+    let t:int64=0
+    if m.cells.length not=? m.rows*m.cols return 0
+    loop r in [0..m.rows) {
+        loop c in [0..m.cols) {
+            let i=r*m.cols+c
+            t = t or m.cells[i]
+        }
+    }
+    t
+}
+main=()=>{
+    printl(get([1 2 3 4 5 6] 2 3 1 2))
+    printl(total(Matrix[2 3 [1 2 4 8 16 32]]))
+}

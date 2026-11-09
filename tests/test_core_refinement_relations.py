@@ -12,7 +12,9 @@ RUNTIME_CHECKS = '\n$runtime_checks\n'
 @pytest.mark.parametrize('body,success', [
     ('if a <? b and b <=? c {$assert a <? c}', True),
     ('if a >=? 0 and a <? 100 {$assert a*2 >=? a; $assert (a+2)*3 =? a*3+6}', True),
-    ('if a >=? 0 {$assert a*2 >=? a}', False),
+    # (an exact int64 product is the mathematical one, even past the word)
+    ('if a >=? 0 {$assert a*2 >=? a}', True),
+    ('if a >=? 0 {$assert a*2 >? a}', False),
     ('if a <? b and b <=? c {$assert c <? a}', False),
     ('if a >=? 0 and a <? 100 {let x=a+1; $assert x >? a}', True),
     ('if a >=? 0 and a <? 100 {let x=a+1; $assert x =? a}', False),

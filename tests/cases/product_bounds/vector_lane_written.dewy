@@ -1,0 +1,10 @@
+# Writing a lane replaces the value its guard bounded.
+f=(xs:array<int32> id:ivec2):>int32=>{
+    let v=id
+    if v.x >=? 0 and v.x <? xs.length {
+        v.x=100
+        return xs[v.x]
+    }
+    return 0
+}
+main=()=>printl(f([int32(1) 2 3] ivec2(1 0)))

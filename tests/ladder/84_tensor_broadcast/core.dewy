@@ -16,22 +16,20 @@ make = (rows:int64 cols:int64):>Matrix => {
 broadcast = (matrix:Matrix row:array<int64> column:array<int64>):>Matrix => {
     $runtime_assert row.length =? matrix.cols
     $runtime_assert column.length =? matrix.rows
+    $runtime_assert matrix.cells.length =? matrix.rows*matrix.cols
     loop r in [0..matrix.rows) {
         loop c in [0..matrix.cols) {
-            let i = r*matrix.cols+c
-            $runtime_assert 0 <=? i and i <? matrix.cells.length
-            matrix.cells[i] += row[c]+column[r]
+            matrix.cells[r*matrix.cols+c] += row[c]+column[r]
         }
     }
     return matrix
 }
 transpose = (matrix:Matrix):>Matrix => {
     let cells:array<int64> = []
+    $runtime_assert matrix.cells.length =? matrix.rows*matrix.cols
     loop c in [0..matrix.cols) {
         loop r in [0..matrix.rows) {
-            let i = r*matrix.cols+c
-            $runtime_assert 0 <=? i and i <? matrix.cells.length
-            cells.push(matrix.cells[i])
+            cells.push(matrix.cells[r*matrix.cols+c])
         }
     }
     return Matrix[matrix.cols matrix.rows cells]

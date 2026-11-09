@@ -1,0 +1,6 @@
+# rows*cols is not the length: r*cols + c may run past it.
+get=(cells:array<int64> rows:int64 cols:int64 r:int64 c:int64):>int64=>{
+    if cells.length >=? 1 and rows*cols >=? 0 and r >=? 0 and r <? rows and c >=? 0 and c <? cols { return cells[r*cols+c] }
+    return 0
+}
+main=()=>printl(get([1] 2 3 1 2))
