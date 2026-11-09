@@ -1500,6 +1500,7 @@ block_open = (b: int, mode: int) -> int:
     if mode >= 0:
         sink_open(b, mode)
         return mode
+    if refine_active and nkids(b) == 1: ref_pair_discard(b)
     block_sink_mode(b, mode == -2)
 
 # A union with a void member (`:>void | E`): a bare return or the end of the body gives it.

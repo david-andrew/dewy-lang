@@ -52,6 +52,7 @@ use 'ir_builders.dewy'
 use 'math_ops.dewy'
 use 'refine_ops.dewy'
 use 'refine_rare.dewy'
+use 'sibling_types.jo'
 
 ref_predicates: RefAtom[][] = [[]]
 # Declaration spans for diagnostics only; never part of predicate identity.
@@ -345,8 +346,9 @@ ref_check_held = (n: int, self: int, args: int[], s: mut FactState):
         fact_validated[n] = true
         ref_assume(t, self, args, s)
         return
-    # (a binding whose every written value the type holds: string_domains.jo)
-    if int_domain_proven.has(n):
+    # (a binding whose every written value the type holds: string_domains.jo; a record's tied
+    # fields read before a run changes them: ref_pair_reads)
+    if int_domain_proven.has(n) or ref_pair_held.len() > 0 and ref_pair_held.has(n):
         nodes[n].ival = 1
         fact_validated[n] = true
         ref_assume(t, self, args, s)
@@ -365,6 +367,7 @@ ref_check_held = (n: int, self: int, args: int[], s: mut FactState):
         a = ref_value(atom.a, self, args, base, s)
         b = ref_value(atom.b, self, args, base, s)
         truth = fact_compare(s, atom.op, a, b)
+        if (truth == 0 or truth < 0 and fact_policy == .RequireStatic) and ref_pair_hints.len() > 0 and ref_pair_hints.has(n): err_notes.push((-1, ref_pair_hints[n]))
         if truth == 0: wit_refinement(n, t, atom, self, a, b, s, true)
         if truth < 0:
             proven = false
@@ -742,6 +745,297 @@ ref_nd_receivers: {int: bool} = {}
 ref_mutable_authority = (n: int):
     if ref_dependent_ancestor(n): fatal(nodes[n].pos, "mutable refinement access needs the full record invariant authority; pass the whole record with `@`")
 
+# ---------------- paired length operations (docs/LANGUAGE.md, records) ----------------
+# Fields whose contracts tie their lengths, `values:array<V length =? keys.length>`, change
+# together: a run of consecutive statements, each changing one such field of the same record in
+# place (`p.keys.push(k)` then `p.values.push(v)`), is checked once, after its last statement,
+# against the whole record. Nothing between them can see the record: a later statement's operands
+# neither name its root nor call anything, and the root is a local or parameter. Before the run,
+# the tied fields' lengths are read while the record still holds its contract; inside it, reading
+# a field assumes nothing of the contract (fact_pair_transient). A lone operation keeps the
+# private candidate below and is refuted with a note naming the paired one. Demanded: O(run
+# statements x operand size), only for a field of a dependent record.
+ref_pair_stmts: {int: bool} = {}
+ref_pair_checks: {int: bool} = {}
+ref_pair_after: {int: int} = {}
+ref_pair_hints: {int: str} = {}
+fact_pair_transient = false
+# (the open run: its record's place, as written in the statement that opened it)
+ref_pair_open = 0
+ref_pair_block = 0
+ref_pair_index = -1
+
+ref_pair_op = (name: str) -> bool:
+    name == "push" or name == "pop" or name == "insert" or name == "remove" or name == "clear" or name == "extend" or name == "truncate"
+
+# The array fields of record t whose lengths a contract ties to array field at's, in either
+# direction (`values:array<V length =? keys.length>`). O(fields x atoms).
+ref_pair_tied = (t: int, at: int) -> int[]:
+    tied: int[]
+    si = int(types[t].st)
+    if at < 0 or at >= int(structs[si].nfields): return tied
+    own = prune(int(fields[int(structs[si].fields) + at].type))
+    if tkind(representation_type(own)) != .array: return tied
+    loop i in [0..int(structs[si].nfields)):
+        if i == at: continue
+        ft = prune(int(fields[int(structs[si].fields) + i].type))
+        if tkind(representation_type(ft)) != .array: continue
+        named = false
+        if types[ft].kind == .refined:
+            loop atom in ref_predicates[int(types[ft].st)]:
+                loop term in [atom.a, atom.b]:
+                    if term.kind == 5 and term.value == at and term.path.len() == 1 and term.path[0] == -1: named = true
+        if types[own].kind == .refined:
+            loop atom in ref_predicates[int(types[own].st)]:
+                loop term in [atom.a, atom.b]:
+                    if term.kind == 5 and term.value == i and term.path.len() == 1 and term.path[0] == -1: named = true
+        if named: tied.push(i)
+    tied
+
+# The field of record t named name, or -1. O(fields).
+ref_pair_field = (t: int, name: int) -> int:
+    si = int(types[t].st)
+    loop i in [0..int(structs[si].nfields)):
+        if int(fields[int(structs[si].fields) + i].name) == name: return i
+    -1
+
+# The record whose tied field place is, when place can join a run: an array field whose length
+# a contract ties to a sibling's, of a record no contract above holds, reached through names and
+# literals. O(route + fields x atoms).
+ref_pair_record = (place: int) -> int:
+    if nodes[place].kind != .field or nodes[place].aux < 0: return 0
+    r = int(nodes[place].a)
+    t = representation_type(ntype(r))
+    if not ref_dependent_record(t) or ref_dependent_ancestor(r) or ref_pair_tied(t, int(nodes[place].aux)).len() == 0: return 0
+    route = r
+    loop nodes[route].kind == .field or nodes[route].kind == .index:
+        if nodes[route].kind == .index:
+            selector = int(nodes[route].b)
+            if nodes[route].aux != 0 or selector == 0: return 0
+            if nodes[selector].kind != .int_lit and not (nodes[selector].kind == .ident and nodes[selector].aux == i32(int(SK.local))): return 0
+        route = int(nodes[route].a)
+    if nodes[route].kind != .ident or nodes[route].aux != i32(int(SK.local)): return 0
+    r
+
+# Do two routes name the same place: the same names, fields and selectors? Works on checked
+# and unchecked nodes alike. O(route).
+ref_pair_same = (a0: int, b0: int) -> bool:
+    a = a0; b = b0
+    loop depth in [0..32):
+        ka = nodes[a].kind
+        kb = nodes[b].kind
+        if ka != kb: return false
+        if ka == .ident: return nodes[a].name == nodes[b].name
+        if ka == .field:
+            if nodes[a].name != nodes[b].name: return false
+        else if ka == .index:
+            x = int(nodes[a].b); y = int(nodes[b].b)
+            if x == 0 or y == 0 or nodes[x].kind != nodes[y].kind: return false
+            if nodes[x].kind == .int_lit and nodes[x].ival != nodes[y].ival: return false
+            if nodes[x].kind == .ident and nodes[x].name != nodes[y].name: return false
+            if nodes[x].kind != .int_lit and nodes[x].kind != .ident: return false
+        else: return false
+        a = int(nodes[a].a); b = int(nodes[b].a)
+    false
+
+# Does an unchecked operand read the name root, call anything or leave? O(operand size).
+ref_pair_touches = (n: int, root: int, depth: int) -> bool:
+    if n == 0: return false
+    if depth > 32: return true
+    k = nodes[n].kind
+    if k == .ident:
+        if nodes[n].name == root: return true
+        # (a function's name alone calls it when it takes nothing)
+        sym = lookup(int(nodes[n].name))
+        return sym != 0 and (syms[sym].kind == .fns or syms[sym].kind == .builtin or syms[sym].kind == .alias_ or syms[sym].kind == .module or syms[sym].kind == .reflected)
+    # (values and operators only: no call, block, `or_throw`, `?? return` or other exit, which
+    # could see the record or leave it before the run ends)
+    plain = k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .none_lit or k == .null_lit or k == .field or k == .dotname or k == .index or k == .unary or k == .binary or k == .and_ or k == .or_ or k == .not_ or k == .coalesce or k == .array or k == .tuple or k == .cast or k == .range or k == .namedarg or k == .pair or k == .hole
+    if not plain: return true
+    if nodes[n].a != 0 and ref_pair_touches(int(nodes[n].a), root, depth + 1): return true
+    if nodes[n].b != 0 and ref_pair_touches(int(nodes[n].b), root, depth + 1): return true
+    loop c in kids(n):
+        if ref_pair_touches(c, root, depth + 1): return true
+    false
+
+# The root name of a route. O(route).
+ref_pair_root = (r: int) -> int:
+    route = r
+    loop nodes[route].kind == .field or nodes[route].kind == .index: route = int(nodes[route].a)
+    int(nodes[route].name)
+
+# The statement of block b at i, through an attached `;`.
+ref_pair_unwrap = (s0: int) -> int:
+    s = s0
+    if nodes[s].kind == .block and nkids(s) == 1: s = kid(s, 0)
+    s
+
+# (a one-statement discarding block, `p.keys.pop(at);`, opened in the statement i of block b:
+# the run is in b, check.jo's block_open)
+ref_pair_outer = 0
+ref_pair_outer_block = 0
+ref_pair_outer_index = -1
+ref_pair_discard = (b: int):
+    ref_pair_outer = b
+    ref_pair_outer_block = sibling_block
+    ref_pair_outer_index = sibling_index
+
+# The block and statement being checked, seen through a discarding block.
+ref_pair_through = () -> bool:
+    ref_pair_outer != 0 and sibling_block == ref_pair_outer
+ref_pair_here_block = () -> int:
+    if ref_pair_through(): return ref_pair_outer_block
+    sibling_block
+ref_pair_here_index = () -> int:
+    if ref_pair_through(): return ref_pair_outer_index
+    sibling_index
+
+# Does the statement after the current one change the length of another tied field of r in
+# place, with operands that cannot see r? O(statement).
+ref_pair_follows = (r: int) -> bool:
+    b = ref_pair_here_block()
+    i = ref_pair_here_index()
+    if b == 0 or i < 0 or i + 1 >= nkids(b): return false
+    s = ref_pair_unwrap(kid(b, i + 1))
+    e = 0
+    if nodes[s].kind == .exprstmt: e = int(nodes[s].a)
+    # (`p.values.pop(at);` drops its value: `_ = p.values.pop(at)` until it is checked)
+    if nodes[s].kind == .assign and nodes[s].op == i32(int(Tok.assign)) and nodes[int(nodes[s].a)].kind == .hole: e = int(nodes[s].b)
+    if e == 0: return false
+    if nodes[e].kind != .call: return false
+    callee = int(nodes[e].a)
+    if nodes[callee].kind != .field or not ref_pair_op(name_of(int(nodes[callee].name))): return false
+    receiver = int(nodes[callee].a)
+    if nodes[receiver].kind != .field or not ref_pair_same(int(nodes[receiver].a), r): return false
+    # (an untied field's change checks nothing: it cannot close the run)
+    if ref_pair_tied(representation_type(ntype(r)), ref_pair_field(representation_type(ntype(r)), int(nodes[receiver].name))).len() == 0: return false
+    root = ref_pair_root(r)
+    loop c in kids(e):
+        if ref_pair_touches(c, root, 0): return false
+    true
+
+# The role of the length operation n on place in a run: 0 none, else 1 when it opens the
+# run, plus 2 when it closes it. Only the whole expression of the statement being checked.
+ref_pair_role = (n: int, place: int) -> int:
+    b = ref_pair_here_block()
+    i = ref_pair_here_index()
+    if b == 0 or i < 0 or i >= nkids(b): return 0
+    s = ref_pair_unwrap(kid(b, i))
+    if nodes[s].kind != .exprstmt: return 0
+    if n != 0 and int(nodes[s].a) != n: return 0
+    # (a library operation, `p.keys.insert(k at)`: its receiver is the statement's)
+    if n == 0:
+        e = int(nodes[s].a)
+        if nodes[e].kind != .call or nodes[int(nodes[e].a)].kind != .field: return 0
+        if not ref_pair_same(int(nodes[int(nodes[e].a)].a), place): return 0
+    r = ref_pair_record(place)
+    if r == 0: return 0
+    continuing = ref_pair_open != 0 and ref_pair_block == b and ref_pair_index + 1 == i and ref_pair_same(ref_pair_open, r)
+    if ref_pair_open != 0 and ref_pair_block == b and ref_pair_index + 1 == i and not continuing: fatal(nodes[place].pos, "this statement was taken to continue the changes to {wit_text(ref_pair_open)}'s tied fields before it, but changes another record: name the record the same way in both")
+    more = ref_pair_follows(r)
+    ref_pair_open = if more: r else: 0
+    ref_pair_block = b
+    ref_pair_index = i
+    if not continuing and not more: return 0
+    role = 4
+    if not continuing: role |= 1
+    if not more: role |= 2
+    role
+
+# The record read whole while it still holds its contract, so the tied fields' relation is
+# known before the run changes them: every write outside a run checks the whole record, and
+# every run ends with that check, so its checks hold without proof (ref_pair_held). O(fields).
+ref_pair_held: {int: bool} = {}
+ref_pair_reads = (r: int, before: mut int[], pos: int):
+    held = refine_requests.len()
+    before.push(ref_pair_validation(r, pos, false))
+    loop k in [held..refine_requests.len()): ref_pair_held[refine_requests[k].node] = true
+
+# The whole record r checked as it now is: every field's contract against its siblings, as a
+# constructor checks it. The record is not rebuilt. O(fields).
+ref_pair_validation = (r: int, pos: int, transient: bool = true) -> int:
+    t = representation_type(ntype(r))
+    si = int(types[t].st)
+    held = refine_requests.len()
+    args: int[]
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        field = bc_field(copy_place(r), name_of(int(fields[f].name)), pos)
+        check_expr(field, 0)
+        field = copy_checked(last_checked)
+        coerce(field, int(fields[f].type))
+        args.push(field)
+    ctor = mk(.call, pos)
+    nodes[ctor] = Node(kind = .call, pos = pos, aux = 2, type = i32(t), flags = i32(NF_CHECKED))
+    set_list(ctor, args)
+    s = bc_stmt(ctor, pos)
+    ref_pair_checks[s] = true
+    if transient:
+        ref_pair_stmts[s] = true
+        hint = "help: the statements ending here change {wit_text(r)}'s tied fields together: they must leave every field's contract holding, so change each tied length by the same amount"
+        loop k in [held..refine_requests.len()): ref_pair_hints[refine_requests[k].node] = hint
+    s
+
+# n, a member of a run, in place: the reads opening it, the operation, and the check closing it.
+ref_pair_rewrite = (n: int, r: int, role: int, place: int, result_type: int) -> int:
+    pos = nodes[n].pos
+    before: int[]
+    if role & 1 != 0: ref_pair_reads(int(nodes[place].a), before, pos)
+    operation = copy_checked(n)
+    add_flag(operation, NF_CHECKED)
+    result = 0
+    if result_type != T_VOID: result = capture_value(operation, result_type, before)
+    else: before.push(bc_stmt(operation, pos))
+    ref_pair_stmts[before[before.len() - 1]] = true
+    if role & 2 != 0: before.push(ref_pair_validation(int(nodes[place].a), pos))
+    if result != 0: before.push(bc_stmt(result, pos))
+    nodes[n] = nodes[bc_block(before, pos)]
+    nodes[n].type = i32(result_type)
+    nodes[n].aux = 1
+    add_flag(n, NF_CHECKED)
+    result_type
+
+# Is s a record check of a run (ref_pair_validation, ref_pair_reads) whose every contract is
+# proven? Then it is facts only, and lowering emits nothing for it. O(fields).
+ref_pair_erased = (s: int) -> bool:
+    if ref_pair_checks.len() == 0 or not ref_pair_checks.has(s): return false
+    loop c in kids(int(nodes[s].a)):
+        if nodes[c].kind == .conv and nodes[c].aux == i32(int(CV.refinement)) and nodes[c].ival != 1: return false
+    true
+
+# A library operation in a run (`insert`): the call runs on the field itself.
+ref_pair_call_finish = (n: int, prepared: RefArrayCall) -> int:
+    before = prepared.before
+    pos = nodes[n].pos
+    before.push(bc_stmt(copy_checked(n), pos))
+    ref_pair_stmts[before[before.len() - 1]] = true
+    if let check = ref_pair_after.get(prepared.place): before.push(check)
+    nodes[n] = nodes[bc_block(before, pos)]
+    nodes[n].type = i32(T_VOID)
+    add_flag(n, NF_CHECKED)
+    T_VOID
+
+# What a lone operation on a tied field is told: the fields its contract ties it to, and
+# the paired operation. O(fields x atoms).
+ref_pair_hint = (place: int, op: str) -> str:
+    t = representation_type(ntype(int(nodes[place].a)))
+    at = int(nodes[place].aux)
+    si = int(types[t].st)
+    tied: str[]
+    loop i in ref_pair_tied(t, at): tied.push(name_of(int(fields[int(structs[si].fields) + i].name)))
+    if tied.len() == 0: return ""
+    record = wit_text(int(nodes[place].a))
+    field = name_of(int(fields[int(structs[si].fields) + at].name))
+    others = ""
+    loop j in [0..tied.len()):
+        if j > 0: others += if j == tied.len() - 1: " and " else: ", "
+        others += "`{record}.{tied[j]}`"
+    them = "it"
+    if tied.len() > 1: them = "them"
+    first = tied[0]
+    root = name_of(ref_pair_root(int(nodes[place].a)))
+    "help: `{op}` changes {record}.{field}.length, and the record's contract ties it to {others}: change {them} too, in the statements right after this one (`{record}.{first}.{op}(...)`), with nothing between them and with operands that neither read `{root}`, call a function nor leave early"
+
 # Other length-changing operations execute on a private candidate. Later argument
 # effects run before that candidate is published, so callbacks cannot observe
 # an intermediate violation of the destination's storage contract.
@@ -753,6 +1047,13 @@ ref_length_mutation = (n: int, r: int) -> int:
     if types[t].kind != .refined and not ref_dependent_ancestor(place): return r
     # (a dependent record's sibling may bound this length: it publishes a candidate whole)
     if ref_self_active and ref_self_contract(t) and not ref_dependent_ancestor(place) and ref_self_grow(n, id, place, t): return r
+    # (fields whose lengths are tied change in a run of statements: ref_pair_role)
+    hints_from = -1
+    if id != .resize and id != .setlen and ref_pair_record(place) != 0:
+        role = ref_pair_role(n, place)
+        if role != 0: return ref_pair_rewrite(n, ref_pair_record(place), role, place, r)
+        hints_from = refine_requests.len()
+    hint = if hints_from >= 0: ref_pair_hint(place, ref_pair_op_name(id)) else: ""
     before: int[]
     args = kids(n)
     # The receiver's selectors, then the operands, as gen_intrinsic evaluates them.
@@ -788,7 +1089,18 @@ ref_length_mutation = (n: int, r: int) -> int:
     nodes[n].type = i32(r)
     nodes[n].aux = 1
     add_flag(n, NF_CHECKED)
+    if hint != "":
+        loop k in [hints_from..refine_requests.len()): ref_pair_hints[refine_requests[k].node] = hint
     r
+
+ref_pair_op_name = (id: IN) -> str:
+    if id == .push: return "push"
+    if id == .pop: return "pop"
+    if id == .insert: return "insert"
+    if id == .remove: return "remove"
+    if id == .clear: return "clear"
+    if id == .extend: return "extend"
+    "truncate"
 
 # Structural record conversion checks target fields after one source capture.
 # Nominal records and mutable element-contract changes retain exact identity.
@@ -835,6 +1147,18 @@ ref_array_call_prepare = (decl: int, args: mut int[], ptypes: int[], written: in
     t = prune(refine_storage(place, ntype(place)))
     if tkind(representation_type(t)) != .array or (types[t].kind != .refined and not ref_dependent_ancestor(place)): return out
     if not type_eq(representation_type(t), ptypes[0]): return out
+    # (an insertion into a field whose length another's is tied to: a run, ref_pair_role)
+    if name == "__dewy_insert" and ref_pair_record(place) != 0:
+        role = ref_pair_role(0, place)
+        if role == 0:
+            lone = ref_pair_hint(place, "insert")
+            fatal(nodes[place].pos, lone[6..])
+        ref_nd_receivers[place] = true
+        if role & 1 != 0: ref_pair_reads(int(nodes[place].a), out.before, nodes[place].pos)
+        if role & 2 != 0: ref_pair_after[place] = ref_pair_validation(int(nodes[place].a), nodes[place].pos)
+        out.place = place
+        out.candidate = -1
+        return out
     ref_mutable_authority(place)
     check_place(place, true)
     self_length = ref_self_active and ref_self_contract(t)

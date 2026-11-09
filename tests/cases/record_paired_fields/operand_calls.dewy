@@ -1,0 +1,8 @@
+# A later statement of a run may not call anything: the call could see the record.
+Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+label = ():>string => "x"
+add = (@ix:Index key:int64):>void => {
+    ix.keys.push(key)
+    ix.values.push(label)
+}
+main = ():>void => { let ix = Index[[] []] add(@ix 1) }

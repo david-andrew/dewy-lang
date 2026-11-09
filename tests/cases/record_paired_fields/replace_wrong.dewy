@@ -1,0 +1,4 @@
+# Replacing a whole tied field checks it against its siblings.
+Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+swap = (@ix:Index):>void => { ix.values = ["a" "b" "c"] }
+main = ():>void => { let ix = Index[[1 2] ["a" "b"]] swap(@ix) printl(ix.values.length) }

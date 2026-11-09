@@ -2961,6 +2961,15 @@ parameter still needs `$runtime_checks`; direct calls can prove its entry shape.
 A record field's shape names sibling fields or constants, as
 `Grid:type = [rows:int64 cols:int64 cells:array<float64 length=[rows cols]>]`: every
 stored value is checked, every read knows it, and writing elements keeps it.
+A one-dimensional field's length contract names a sibling's length the same way:
+`Index:type = [keys:array<int64> values:array<string length =? keys.length>]`, or
+`children:array<int64 length =? keys.length + 1>`. Such fields change together, in
+consecutive statements: each pushes, inserts, pops, truncates, extends or clears one
+of them on the same record, works in place, and the record is checked once, after
+the last. The later statements' operands may not read the record or call a function.
+A lone change, or a run that leaves the lengths unequal, is an error naming the paired
+operation. Construction and replacing a whole field check the contract, and every
+read knows it, so `loop i in [0..ix.keys.length) printl(ix.values[i])` checks no bounds.
 
 
 ```dewy

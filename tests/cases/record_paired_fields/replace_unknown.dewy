@@ -1,0 +1,8 @@
+# Replacing a tied field with a value of unknown length is checked, and unproven.
+Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+f = (@ix:Index xs:array<int64>):>string => {
+    ix.keys = xs
+    if ix.keys.length >? 0 { return ix.values[0] }
+    ""
+}
+main = ():>void => { let ix = Index[[1] ["a"]] printl(f(@ix [5])) }

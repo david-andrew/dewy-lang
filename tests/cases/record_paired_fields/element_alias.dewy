@@ -1,0 +1,10 @@
+# A run through an element alias of a loop.
+Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+main = ():>void => {
+    let all = [Index[[1] ["a"]] Index[[2] ["b"]]]
+    loop @e in all {
+        e.keys.push(7)
+        e.values.push("z")
+    }
+    printl(all[1].values)
+}

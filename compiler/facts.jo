@@ -898,7 +898,10 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
         # A field's contract may name its siblings: every stored record was
         # validated whole, so the field's value relates to theirs in base.
         args: int[]
-        if not element and selector >= 0 and ref_has_fields(t): args = fact_field_args(s, base)
+        if not element and selector >= 0 and ref_has_fields(t):
+            # (inside a run changing tied fields the record may not hold its contract yet)
+            if fact_pair_transient: return v
+            args = fact_field_args(s, base)
         ref_assume(t, v, args, s)
     v
 
@@ -2960,6 +2963,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if nodes[c].kind == .defer_:
                 defers.push(int(nodes[c].a))
                 fact_pending_defers += 1
+            else if ref_pair_stmts.len() > 0 and ref_pair_stmts.has(c):
+                # (a statement of a run changing tied fields: the record's contract may not hold)
+                held = fact_pair_transient
+                fact_pair_transient = true
+                r = fact_capture(c, s)
+                fact_pair_transient = held
             else:
                 r = fact_capture(c, s)
                 # A statement can finish a temporary or lexical owner whose
@@ -3447,7 +3456,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 # row where an interval cannot say it (`let i=xs.length`,
                 # `xs.push(v)`, `return i` below the new length), outside
                 # loops, and for a removal in them, which an insertion can undo)
-                if old.lo != old.hi and (fact_loops.len() == 0 or delta < 0):
+                # (and in a run changing a record's tied fields, which its end checks together)
+                if old.lo != old.hi and (fact_loops.len() == 0 or delta < 0 or fact_pair_transient):
                     fact_difference(s, size, length, delta, n)
                     fact_difference(s, length, size, -delta, n)
                 # (in a loop, an insertion's row only says it grew: a head keeps a length the backedge
@@ -3481,6 +3491,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 count = fact_bound(s, operand)
                 size = fact_new(s, FactBound(min(old.lo, max(0, count.lo)), min(old.hi, max(0, count.hi)), reason = .write, witness = n))
                 fact_difference(s, size, length, 0, n)
+                # (a count known within the length is the new length exactly: `truncate(half)`)
+                if not count.wide and count.lo >= 0 and fact_compare(s, .le, operand, length) == 1:
+                    fact_difference(s, size, operand, 0, n)
+                    fact_difference(s, operand, size, 0, n)
             else:
                 ot = fact_type(ntype(kid(n, 1)))
                 added = if tkind(ot) == .fixed: fact_constant(s, fixed_len(ot)) else if tkind(ot) == .array: fact_project(s, operand, -1, false, T_INT) else: 0

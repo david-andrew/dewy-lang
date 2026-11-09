@@ -1,0 +1,4 @@
+# A lone push to one of two tied fields breaks the record's contract.
+Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+add = (@ix:Index key:int64):>void => { ix.keys.push(key) }
+main = ():>void => { let ix = Index[[] []] add(@ix 1) printl(ix.keys.length) }

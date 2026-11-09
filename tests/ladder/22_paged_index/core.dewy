@@ -1,5 +1,4 @@
-$runtime_checks
-Page:type = [keys:array<int64> values:array<string>]
+Page:type = [keys:array<int64> values:array<string length =? keys.length>]
 Index:type = [pages:array<Page>]
 # Places key in its page; a full page moves its upper half to right.
 place = (@p:Page @right:Page key:int64 value:string):>void => {
@@ -8,7 +7,6 @@ place = (@p:Page @right:Page key:int64 value:string):>void => {
     p.keys.insert(key pos)
     p.values.insert(value pos)
     if p.keys.length <=? 4 { return }
-    $runtime_assert p.values.length =? p.keys.length
     right = Page[p.keys[2..] p.values[2..]]
     p.keys.truncate(2)
     p.values.truncate(2)
@@ -20,14 +18,14 @@ insert = (@index:Index key:int64 value:string):>void => {
         if index.pages[i].keys.length =? 0 or key <? index.pages[i].keys[0] { break }
         page = i
     }
-    $runtime_assert 0 <=? page and page <? index.pages.length
     let right = Page[[] []]
     place(@index.pages[page] @right key value)
+    # (place wrote one page through `@`: the page count is not known to survive it)
+    $runtime_assert page+1 <=? index.pages.length
     if right.keys.length >? 0 { index.pages.insert(right page+1) }
 }
 lookup = (index:Index key:int64):>string? => {
     loop page in index.pages {
-        $runtime_assert page.values.length =? page.keys.length
         loop i in [0..page.keys.length) {
             if page.keys[i] =? key { return page.values[i] }
         }

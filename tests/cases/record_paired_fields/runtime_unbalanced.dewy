@@ -1,0 +1,15 @@
+# exit: 101
+# A run whose lengths are not known is checked at run time, and fails when they differ.
+Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+both = (@ix:Index ks:array<int64> vs:array<string>):>void => {
+    $runtime_checks
+    ix.keys.extend(ks)
+    ix.values.extend(vs)
+}
+main = ():>void => {
+    let ix = Index[[1] ["a"]]
+    both(@ix [2 3] ["b" "c"])
+    printl(ix.values)
+    both(@ix [4] ["d" "e"])
+    printl(ix.values)
+}

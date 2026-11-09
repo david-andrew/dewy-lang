@@ -402,6 +402,7 @@ ref_mutable_result = (f: int) -> bool:
             if int(locals[fns[f].params[term.value]].flags) & LF_MUTPARAM != 0: return true
     false
 ref_array_call_finish = (n: int, prepared: RefArrayCall) -> int:
+    if prepared.candidate < 0: return ref_pair_call_finish(n, prepared)
     before = prepared.before
     before.push(bc_stmt(copy_checked(n), nodes[n].pos))
     store = bc_assign(prepared.place, copy_checked(prepared.candidate), nodes[n].pos)

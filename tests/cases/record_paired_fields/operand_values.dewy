@@ -1,0 +1,7 @@
+# A later statement's operands may compute with values and operators.
+Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+add = (@ix:Index key:int64 v:string? w:array<string>):>void => {
+    ix.keys.push(key // 2)
+    ix.values.push(v ?? "x")
+}
+main = ():>void => { let ix = Index[[] []] add(@ix 1 none ["a"]) printl(ix.values) }

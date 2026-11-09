@@ -1,0 +1,4 @@
+# A lone insert into one of two tied fields.
+Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+add = (@ix:Index key:int64):>void => { ix.keys.insert(key 0) }
+main = ():>void => { let ix = Index[[] []] add(@ix 1) printl(ix.keys.length) }

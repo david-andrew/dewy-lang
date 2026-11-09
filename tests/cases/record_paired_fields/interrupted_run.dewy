@@ -1,0 +1,8 @@
+# A statement between the two halves of a paired change breaks the run.
+Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+add = (@ix:Index key:int64 v:string):>void => {
+    ix.keys.push(key)
+    printl(ix.keys.length)
+    ix.values.push(v)
+}
+main = ():>void => { let ix = Index[[] []] add(@ix 1 "a") }

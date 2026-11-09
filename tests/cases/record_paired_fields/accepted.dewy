@@ -1,0 +1,54 @@
+# Fields whose contracts tie their lengths change together, in consecutive statements.
+Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+Tree:type = [keys:array<int64> children:array<int64 length =? keys.length + 1>]
+add = (@ix:Index key:int64 value:string):>void => {
+    ix.keys.push(key)
+    ix.values.push(value)
+}
+place = (@ix:Index key:int64 value:string):>void => {
+    let at = 0
+    loop at <? ix.keys.length and ix.keys[at] <? key { at += 1 }
+    ix.keys.insert(key at)
+    ix.values.insert(value at)
+}
+drop = (@ix:Index at:int64):>void => {
+    if 0 <=? at <? ix.keys.length {
+        ix.values.pop(at);
+        ix.keys.pop(at);
+    }
+}
+keep = (@ix:Index count:int64):>void => {
+    if 0 <=? count <=? ix.keys.length {
+        ix.keys.truncate(count)
+        ix.values.truncate(count)
+    }
+}
+# Every read knows the relation: no bounds checks on values.
+show = (ix:Index):>void => {
+    loop i in [0..ix.keys.length) { printl("{ix.keys[i]} {ix.values[i]}") }
+}
+grow = (@t:Tree key:int64 child:int64):>void => {
+    t.keys.push(key)
+    t.children.push(child)
+}
+main = ():>void => {
+    let ix = Index[[] []]
+    loop k in [0..5) {
+        if k % 2 =? 0 { add(@ix k "v{k}") } else { place(@ix k "w{k}") }
+    }
+    drop(@ix 1)
+    keep(@ix 3)
+    show(ix)
+    let pages = [Index[[1] ["a"]] Index[[2] ["b"]]]
+    loop j in [0..pages.length) {
+        pages[j].keys.push(9)
+        pages[j].values.push("z")
+    }
+    show(pages[1])
+    let t = Tree[[] [0]]
+    grow(@t 4 7)
+    loop i in [0..t.keys.length] { printl(t.children[i]) }
+    ix.keys.clear()
+    ix.values.clear()
+    printl(ix.values.length)
+}

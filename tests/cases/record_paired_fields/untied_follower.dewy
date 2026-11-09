@@ -1,0 +1,7 @@
+# A change to an untied field does not close a run: the tied change before it stands alone.
+Index:type = [keys:array<int64> values:array<string length =? keys.length> extra:array<int64>]
+add = (@ix:Index key:int64):>void => {
+    ix.keys.push(key)
+    ix.extra.push(key)
+}
+main = ():>void => { let ix = Index[[] [] []] add(@ix 1) printl(ix.keys.length) }

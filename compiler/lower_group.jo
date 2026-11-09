@@ -4224,6 +4224,8 @@ gen_stmt = (s: int):
         if eg_stack.len() > 0: eg_write(int(nodes[s].a))
         stmt_end()
     else if k == .exprstmt:
+        # (a run's record check whose contracts are proven: facts only)
+        if ref_pair_erased(s): return
         a = int(nodes[s].a)
         ak = nodes[a].kind
         if ak == .match_ or ak == .if_ or ak == .iflet:
