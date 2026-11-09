@@ -258,6 +258,11 @@ parentheses. A single delimited argument may also follow a function directly:
 pass the string. A function's final expression is its result; `return` exits early.
 A function declared `:>never` never returns: every path ends in `exit(...)`, a
 panic or an endless loop, and a call to it ends its branch like `exit` does.
+How deep calls can nest depends on the target. The main thread and each task have
+an 8 MB stack (the main thread's is the system's on Linux, usually 8 MB) and each
+`parallel` worker 7 MB, and the same function takes more of it on arm64 than on x86-64, so
+a recursion that fits on one target can overflow on another. An overflow ends the
+program with `panic: stack overflow` and exit code 101 on every target.
 
 ```dewy
 twice = (x) => x+x
@@ -994,7 +999,9 @@ is NaN, `-0.0 =? 0.0` is true while `1.0/-0.0` is `-inf`, and NaN is unequal to
 everything, itself included. Results round to nearest, ties to even, and
 arithmetic is never reassociated or contracted into fused multiply-adds, so a
 float expression gives the same result on every CPU target and optimization
-level (only the sign and payload of a NaN may differ).
+level (only the sign and payload of a NaN may differ). A NaN that arithmetic makes,
+as `0.0/0.0` does, is negative on x86-64 and positive on arm64, so sorting puts it
+first on one and last on the other; `float64.nan` is the same NaN on every target.
 Reductions run in a fixed order: `sum` of a float array adds pairwise halves,
 `loop` accumulations add left to right, matrix products add each element's
 products in order, and parallel work never reassociates (see "Parallel CPU
@@ -3785,7 +3792,9 @@ agree; a conflict names both files and both values.
 
 `main` returns `void` or the errors that reach it, an ordinary `void | E` type,
 declared or inferred. It gives no exit code: success exits 0, and a script that
-needs a particular code calls `exit(n)`. An error reaching `main` is printed on
+needs a particular code calls `exit(n)`, with `n` from 0 to 255 to mean the same
+everywhere: Linux and macOS keep only its low 8 bits (`exit(256)` reports success
+there), while Windows keeps 32. An error reaching `main` is printed on
 standard error as its kind and its `message` text field, if it has one
 (`error: ParseError: ...`; the rest of a payload may hold secrets, so only a
 debug build, `-g`, prints it whole: `error: ParseError[message="..."]`) and ends
@@ -4073,7 +4082,9 @@ sleep_ms = (ms:uint32):>void => $extern(name='Sleep' lib='kernel32')
 ```
 
 Without `lib=`, or with `lib='c'`, the function is in the C library
-(`libc.so.6`, `libSystem` or `msvcrt.dll`); `lib='m'` is the math library. Another
+(`libc.so.6`, `libSystem` or `msvcrt.dll`); `lib='m'` is the math library.
+Windows' `msvcrt.dll` predates C99: it has no `fma`, and its `strtod` reads no
+hexadecimal floats, so name `lib='ucrtbase'` for those. Another
 bare name is the system's usual file for it (`kernel32.dll`, `libz.so`,
 `libz.dylib`), and a name with a dot or a slash is used as written
 (`lib='libsqlite3.so.0'`). The library is loaded when the function is first
