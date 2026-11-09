@@ -17,6 +17,7 @@ PROGRAMS = (
     ('tests.test_windows_cmdline', 'RUNNER', '.dewy'),
     ('tests.test_windows_batch', 'DETECTOR', '.jo'),
     ('tests.test_windows_batch', 'RUNNER', '.dewy'),
+    ('tests.test_windows_software_headless', 'GAME', '.dewy'),
 )
 
 

@@ -618,9 +618,21 @@ else when TARGET == "windows":
     const __WS_POPUP = 0x80000000
     const __WS_VISIBLE = 0x10000000
 
+    # (Wine, with neither DISPLAY nor WAYLAND_DISPLAY set: a desktop is not there to show a window)
+    __w32_wine_without_display = () -> bool:
+        if len(env("DISPLAY") ?? "") > 0 or len(env("WAYLAND_DISPLAY") ?? "") > 0: return false
+        ntdll = __w32_lib("ntdll.dll")
+        ntdll != null and GetProcAddress(ntdll, data("wine_get_version")) != null
+
     __platform_open = () -> str:
         __soft = __soft_kept or (env("DEWY_SOFTWARE") ?? "") == "1"
         __w32_any_size = env("DEWY_SCREENSHOT") != none
+        # (the software renderer as on Linux: with a screenshot to take, or where there is no
+        # desktop to show a window on (DEWY_HEADLESS=1, or Wine with no display named), frames
+        # are drawn and no window opens)
+        if __soft and (__w32_any_size or env("DEWY_HEADLESS") != none or __w32_wine_without_display()):
+            __sw_init_window(__win_w, __win_h)
+            return ""
         # (a screenshot run through Vulkan with DEWY_HEADLESS=1, as over ssh, where there is no
         # desktop to show a window on: no window, frames are only drawn)
         if not __soft and __vk_wanted() and __w32_any_size and env("DEWY_HEADLESS") != none:
