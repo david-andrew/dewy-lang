@@ -208,6 +208,8 @@ facts_finalize = ():
         state = FactState()
         previous_policy = fact_policy
         if proof_active and proof_decls.has(int(fns[f].decl)): fact_policy = .RequireStatic
+        # (a shader cannot run a check: a GPU function's obligations are proved)
+        if exact_shader_owners.has(f): fact_policy = .RequireStatic
         # (a body with no partial operation, assertion or contract has
         # nothing to decide: its loops and calls are not walked for it)
         fact_has_deferred = false

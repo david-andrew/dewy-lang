@@ -3234,8 +3234,8 @@ WebGL 2 where available. `gpu_available()` reports whether the driver path is
 active. Otherwise—including Node and `DEWY_SOFTWARE = 1`—the same expression runs
 on the CPU. GPU functions must use shader-compatible numeric values and cannot
 capture closures or allocate managed collections. A shader cannot run a check, so
-fixed-width arithmetic there (`x+1` into an `int32`) must be proven to fit, even under
-`$runtime_checks`, or use a wrapping type. These restrictions are checked
+every obligation in a GPU function (`x+1` into an `int32`, a divisor, a conversion) must be
+proven, even under `$runtime_checks`; wrapping types need no overflow proof. These restrictions are checked
 at compilation even if execution will use the CPU fallback. Exact rational
 integer division is therefore a CPU-array operation; use floating GPU inputs
 for `./`. Single-precision GPU math can differ slightly from CPU results.

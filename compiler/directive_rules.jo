@@ -10,6 +10,7 @@ use 'directive_ops.dewy'
 use 'ast.jo'
 use 'util.jo'
 use 'facts.jo'
+use 'exact.jo'
 use 'effects.jo'
 use 'proofs.jo'
 use 'ide.jo'
@@ -46,6 +47,10 @@ dir_defer = (n: int, what: str, deferrable: bool) -> bool:
         return true
     # (erased proofs have no runtime fallback)
     if proof_active and fact_owner > 0 and fact_owner < fns.len() and proof_decls.has(int(fns[fact_owner].decl)): return false
+    # (nor has GPU code: a shader cannot run a check)
+    if fact_owner > 0 and exact_shader_owners.has(fact_owner):
+        err_notes.push((-1, "note: this is GPU code: a shader cannot run a check, so neither `$runtime_checks` nor `$runtime_assert` applies here: prove it"))
+        return false
     p = nodes[n].pos
     # (`pool[h].hp -= 1` indexes `items` at `__pool_index`'s answer: the
     # library's invariant, which keeps its check, as the library's own do)
