@@ -48,9 +48,10 @@ changes. Wall clock only on a quiet pinned machine or a CI runner. Kernels:
 5. **Decided surface still to build** ([decisions.md](docs/design/decisions.md)):
    the rest of the time system; self-length refinements (D17); R-value units;
    examples needing `$runtime_checks`, 21 of 29 as of 11-06, toward zero.
-6. **In David's design rounds, build nothing:** D4 parallel (later: metatags that
-   direct allowed resources, and `DEWY_THREADS` becomes a metatag), D10 safety
-   tags, D11 game APIs, D21 packages, D22 `$parallel_safe`.
+6. **In David's design rounds, build nothing:** D4 parallel (`select`, cancel
+   scopes, metatag placement, `tasks`), D10 safety tags, D11 game APIs, D21
+   packages. Remaining user-facing environment variables wait for their metatag
+   names (inventory: 31 knobs, mostly `$window.*` under D11).
 
 ## Decided (David; full text in [docs/design/decisions.md](docs/design/decisions.md))
 
