@@ -1,0 +1,8 @@
+# Exponent formats write a float's exact value, rounded to even: subnormals and long precisions too.
+main = ():>void => {
+    let xs:array<float64> = [5e-324 1e-323 4.9e-322 2.5e-320 2.2250738585072014e-308 0.1 1e23 123456789.125 -2.5e-7 9.9999996e15]
+    loop x in xs {
+        printl"{fmt'.6e'(x)} {fmt'.0e'(x)} {fmt'.20E'(x)} {fmt'g'(x)}"
+    }
+    printl"{fmt'.2e'(0.125)} {fmt'.2e'(0.375)} {fmt'.0e'(2.5)} {fmt'.0e'(-0.0)}"
+}
