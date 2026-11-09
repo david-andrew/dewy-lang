@@ -80,7 +80,7 @@ rt_reader_word_name = (host: mut SeedParserHost, store: mut Node[], texts: mut s
 
 rt_reader_name_host = SeedParserHost(dw_value_name, intern_new)
 
-# `main`'s parameters: command-line arguments or `BackgroundTasks` (D4 Q3), not yet both.
+# `main`'s parameters: none, command-line arguments or `BackgroundTasks` (D4 Q3), one at most; both together is not yet supported.
 rt_dc_main_params = (ps: int[], name: str) -> bool:
     if name != "main" or ps.len() < 2: return true
     loop p in ps:
@@ -88,7 +88,8 @@ rt_dc_main_params = (ps: int[], name: str) -> bool:
         if t != 0 and nodes[t].kind == .tname and name_of(int(nodes[t].name)) == "BackgroundTasks":
             rt_dc_hint(nodes[p].pos, "Dewy does not yet support `main` taking both command-line arguments and `BackgroundTasks`: how they combine is still being designed, so take one or the other")
             return false
-    true
+    rt_dc_hint(nodes[ps[1]].pos, "`main` takes at most one parameter: none, the command-line arguments (`main = (argv) => ...`), or the program's task group (`main = (app:BackgroundTasks) => ...`)")
+    false
 
 rt_dc_report = (pos: int, msg: str): dc_parser_report(dc_parser.status, pos, msg)
 

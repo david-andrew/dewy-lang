@@ -11095,7 +11095,7 @@ rd_dc_unspelled=(@reader_ctx:ParserContext token:DewyLexeme):>int64=>$unsafe {
 }
 
 # `what` is not supported (dw_fail's mistake).
-# `main`'s parameters: command-line arguments or `BackgroundTasks` (D4 Q3), not yet both.
+# `main`'s parameters: none, command-line arguments or `BackgroundTasks` (D4 Q3), one at most; both together is not yet supported.
 rd_dc_main_params=(@reader_ctx:ParserContext @reader_nodes:array<Node> ps:array<int64> name:string):>bool=>$unsafe {
     if name not=? "main" or ps.length <? 2 {
         return true
@@ -11107,7 +11107,8 @@ rd_dc_main_params=(@reader_ctx:ParserContext @reader_nodes:array<Node> ps:array<
             return false
         }
     }
-    true
+    rd_dc_hint(@reader_ctx reader_nodes[ps[1]].pos "`main` takes at most one parameter: none, the command-line arguments (`main = (argv) => ...`), or the program's task group (`main = (app:BackgroundTasks) => ...`)");
+    false
 }
 
 rd_dc_unsupported=(@reader_ctx:ParserContext pos:int64 what:string):>void=>$unsafe {
