@@ -1,0 +1,8 @@
+# modes: native
+# A counting loop over literals is exact `int`, which shaders lack: the error says what to write.
+f=(x:float32):>float32=>{
+    let s:float32=0.0
+    loop i in [0..4) { s += x }
+    return s
+}
+main=()=>{printl(cpu(f.(gpu([float32(1.0) 2.0]))).data)}

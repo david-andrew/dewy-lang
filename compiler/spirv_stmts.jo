@@ -537,6 +537,7 @@ sv_as = (e: int, v: int, t: int, pos: int) -> int:
 sv_expr = (e: int) -> int:
     k = nodes[e].kind
     t = sl_type(ntype(e))
+    if t == T_MATH_INT and nodes[e].kind == .int_lit: sv_err(nodes[e].pos, "this number is an exact `int` here, which shaders do not have: give it a width, `int32(...)` (a counting loop: `loop i in [int32(0)..4)`)")
     if t == T_MATH_INT: sv_err(nodes[e].pos, "checked mathematical int is not yet supported in shaders; use an explicit fixed width")
     pos = nodes[e].pos
     # (the uniforms, or a part of them: read from memory)

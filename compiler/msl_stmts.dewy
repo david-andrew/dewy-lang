@@ -252,6 +252,7 @@ ml_stmt_if=(e:MslStmtWord depth:MslStmtWord):>void=>$unsafe {
 ml_expr=(e:MslStmtWord):>string=>$unsafe {
     let k=nodes.ptr[e].kind
     let t=sl_type(ntype(e))
+    if t =? T_MATH_INT and nodes.ptr[e].kind =? 'int_lit' {ml_err(nodes.ptr[e].pos "this number is an exact `int` here, which shaders do not have: give it a width, `int32(...)` (a counting loop: `loop i in [int32(0)..4)`)")}
     if t =? T_MATH_INT {ml_err(nodes.ptr[e].pos "checked mathematical int is not yet supported in shaders; use an explicit fixed width")}
     let pos=nodes.ptr[e].pos
     # (the uniforms, or a part of them: read from memory)
