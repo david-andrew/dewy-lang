@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -18,8 +19,12 @@ ROOT = HERE.parents[1]
 #      frontends in place of compiler/'s: it has no Dewy frontend.
 #   2. core-bootstrap builds dewy-core-bootstrap from compiler/: the first
 #      compiler with the Dewy frontend.
-#   3. dewy-core-bootstrap builds dewy-core from compiler/, which builds itself
-#      byte-identically (the fixed point). A --seed build is this step alone.
+#   3. dewy-core-bootstrap builds dewy-core from compiler/. A --seed build is
+#      this step alone.
+#   4. With --fixed-point, dewy-core builds itself again at the same path, and
+#      the two executables must be byte-identical (check_fixed_point). That holds
+#      when the seed runs the logic of these sources (a bootstrap, or a seed built
+#      from them); a seed of older logic needs one more generation first.
 # Steps 1 and 2 cannot read Dewy, so there every `use 'X.dewy'` in compiler/
 # names X.dewy's frozen implementation-language twin instead. Steps 3 on
 # compile the Dewy modules, so the compiler that ships runs them.
@@ -57,7 +62,36 @@ def use_frozen_twins(compiler: Path, stubbed: bool = False) -> dict[Path, str]:
     return originals
 
 
-def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) -> Path:
+def first_difference(left: Path, right: Path, chunk: int = 1 << 20) -> int | None:
+    """The offset of the first byte where two files differ (the shorter length when one is a
+    prefix of the other), or None when they are identical."""
+    with left.open('rb') as a, right.open('rb') as b:
+        offset = 0
+        while True:
+            x, y = a.read(chunk), b.read(chunk)
+            if x != y:
+                common = min(len(x), len(y))
+                return offset + next((i for i in range(common) if x[i] != y[i]), common)
+            if not x:
+                return None
+            offset += len(x)
+
+
+def check_fixed_point(binary: Path, rebuild: Callable[[Path, Path], None]) -> None:
+    """Generation N is `binary`. Move it aside, have it rebuild itself at the same path (so every
+    embedded path agrees) through rebuild(compiler, output), and require generation N+1 to match
+    N byte for byte. A mismatch keeps both files and names the first differing offset."""
+    previous = binary.with_name(binary.name + '.generation-n')
+    binary.rename(previous)
+    rebuild(previous, binary)
+    at = first_difference(previous, binary)
+    if at is not None:
+        raise RuntimeError(f'not a fixed point: {binary} (generation N+1, {binary.stat().st_size} bytes) differs from '
+                           f'{previous} (generation N, {previous.stat().st_size} bytes) at byte offset {at}')
+    previous.unlink()
+
+
+def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fixed_point: bool = False) -> Path:
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     for name in ('compiler', 'lib', 'stage0', 'bootstrap'):
@@ -135,6 +169,9 @@ def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False) ->
             for path, text in originals.items():
                 path.write_text(text)
         run([interim, 'build', output / 'compiler/main.jo', '-o', binary], 'core-build.log')
+    if fixed_point:
+        check_fixed_point(binary, lambda compiler, target: run(
+            [compiler, 'build', output / 'compiler/main.jo', '-o', target], 'fixed-point.log'))
     (output / 'build.json').write_text(json.dumps({
         'seed_sha256': identity(seed),
         'core_sha256': identity(binary),
@@ -151,5 +188,7 @@ if __name__ == '__main__':
     seeds.add_argument('--seed', type=Path, help='existing native Dewy core compiler')
     seeds.add_argument('--bootstrap', action='store_true', help='build from the independent C bootstrap')
     cli.add_argument('--output', type=Path, required=True, help='new directory for the standalone toolchain')
+    cli.add_argument('--fixed-point', action='store_true',
+                     help='rebuild the compiler with itself and fail unless the bytes are identical')
     args = cli.parse_args()
-    print(build(args.output, seed=args.seed, bootstrap=args.bootstrap))
+    print(build(args.output, seed=args.seed, bootstrap=args.bootstrap, fixed_point=args.fixed_point))
