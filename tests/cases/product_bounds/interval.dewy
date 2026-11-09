@@ -1,0 +1,6 @@
+# Two factors with constant bounds have a constant-bounded product.
+get=(xs:array<int> i:int j:int):>int=>{
+    if xs.length >=? 100 and i >=? 0 and i <? 10 and j >=? 0 and j <? 10 { return xs[i*j] }
+    return 0
+}
+main=()=>printl(get([loop k in [0..100) k] 3 4))

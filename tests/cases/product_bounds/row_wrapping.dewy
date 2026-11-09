@@ -1,0 +1,7 @@
+# A wrapping product is not the mathematical one: y*w may wrap below h*w.
+W:type=int32<overflow='wrap'>
+get=(xs:array<int> w:W h:W x:W y:W):>int=>{
+    if xs.length =? int(w)*int(h) and x >=? 0 and x <? w and y >=? 0 and y <? h { return xs[y*w+x] }
+    return 0
+}
+main=()=>printl(get([1 2 3 4 5 6] 3 2 1 1))

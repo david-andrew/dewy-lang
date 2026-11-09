@@ -1,0 +1,7 @@
+# y <=? 100 is no bound against h=1: unsigned bounds are biased, never read
+# as signed ones. y=1 w=6 h=1 x=0 gives 6 with h*w = 6.
+get=(xs:array<int> w:int h:int x:int y:uint64):>int=>{
+    if xs.length =? w*h and x >=? 0 and x <? w and y <=? 100 and h >=? 1 { return xs[int(y)*w+x] }
+    return 0
+}
+main=()=>printl(get([1 2 3 4 5 6] 6 1 0 1))

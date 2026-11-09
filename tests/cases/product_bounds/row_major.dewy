@@ -1,0 +1,23 @@
+# A row-major position `y*w + x` stays below `h*w` when 0 <=? x <? w and
+# y <? h: one guard on the length proves every cell read.
+get=(xs:array<int> w:int h:int x:int y:int):>int=>{
+    if xs.length =? w*h and x >=? 0 and x <? w and y >=? 0 and y <? h { return xs[y*w+x] }
+    return 0
+}
+total=(xs:array<int> w:int h:int):>int=>{
+    let t=0
+    if xs.length =? h*w { loop r in [0..h) { loop c in [0..w) { t += xs[r*w+c] } } }
+    t
+}
+column=(xs:array<float64> rows:int cols:int j:int):>float64=>{
+    if cols >? 1000 or j <? 0 or j >=? cols or xs.length not=? rows*cols return 0.0
+    let acc=0.0
+    loop i in [0..rows) { acc += xs[i*cols+j] }
+    acc
+}
+main=()=>{
+    printl(get([1 2 3 4 5 6] 3 2 1 1))
+    printl(get([1 2 3 4 5 6] 3 2 3 1))
+    printl(total([1 2 3 4 5 6] 3 2))
+    printl(column([1.0 2.0 3.0 4.0 5.0 6.0] 2 3 2))
+}

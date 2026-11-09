@@ -1,0 +1,6 @@
+# y <? h without w >=? 0: w=-1 h=2 y=0 gives y*w = 0 above h*w = -2.
+first=(xs:array<int> w:int h:int y:int):>int=>{
+    if xs.length >=? h*w and y >=? 0 and y <? h and y*w >=? 0 { return xs[y*w] }
+    return 0
+}
+main=()=>printl(first([] -1 2 0))

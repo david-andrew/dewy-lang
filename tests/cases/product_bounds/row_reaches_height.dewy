@@ -1,0 +1,6 @@
+# y <=? h lets y*w + x reach h*w: out of bounds.
+get=(xs:array<int> w:int h:int x:int y:int):>int=>{
+    if xs.length =? w*h and x >=? 0 and x <? w and y >=? 0 and y <=? h { return xs[y*w+x] }
+    return 0
+}
+main=()=>printl(get([1 2 3 4 5 6] 3 2 0 2))

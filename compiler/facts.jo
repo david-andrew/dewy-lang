@@ -1365,6 +1365,93 @@ fact_sum_compare = (s: FactState, a: int, b: int, limit: int) -> bool:
             if fact_add_fits(total, tail) and total + tail <= limit: return true
     false
 
+# v's interval as signed values: a uint64's biased ends count as unknown (wide).
+fact_signed_bound = (s: FactState, v: int) -> FactBound:
+    b = fact_bound(s, v)
+    if v != 0 and fact_type(fact_terms[v].type) == T_U64: b.wide = true
+    b
+
+# y - h <= d: the shortest row path, else the operands' intervals. FACT_MAX: none.
+fact_gap = (s: FactState, y: int, h: int) -> int:
+    if y == h: return 0
+    best = fact_shortest(s, y, h)
+    p = fact_signed_bound(s, y)
+    q = fact_signed_bound(s, h)
+    if not p.wide and not q.wide and p.hi != FACT_MAX and q.lo != FACT_MIN and fact_add_fits(p.hi, -q.lo): best = min(best, p.hi - q.lo)
+    best
+
+# v - b <= d: a bounded row path, else v's interval or one row from v to an
+# interval, against b's lower end (`h*w <=? INT64_MAX` through
+# `xs.length =? h*w`). O(fact_distance + 16 incident rows).
+fact_below = (s: FactState, v: int, b: int, d: int) -> bool:
+    if fact_distance(s, v, b, d): return true
+    low = fact_signed_bound(s, b)
+    top = fact_signed_bound(s, v)
+    if low.wide or top.wide or low.lo == FACT_MIN: return false
+    best = top.hi
+    ri = fact_difference_head(s, v, 1)
+    seen = 0
+    loop ri >= 0 and seen < 16:
+        row = s.differences[ri]
+        ri = fact_difference_next(s, ri, 1)
+        seen += 1
+        o = fact_signed_bound(s, row.b)
+        if not o.wide and o.hi != FACT_MAX and fact_add_fits(o.hi, row.limit): best = min(best, o.hi + row.limit)
+    best != FACT_MAX and fact_add_fits(best, -low.lo) and best - low.lo <= d
+
+# A product with a shared factor, on demand: a = y*w (+ x) against a
+# retained t = h*w, then t - b. With w >= wl >= 0 and y - h <= dy <= 0,
+# a - t = (y-h)*w + x <= dy*wl + x, and with dy <= -1 and x - w <= dx,
+# also <= (dy+1)*wl + dx: `r*w + c <? xs.length` from `xs.length =? h*w`,
+# `0 <=? c <? w` and `r <? h`. Retained arithmetic terms are exact (a product
+# that may wrap is never kept), so the algebra is the mathematical one.
+# Only a compare whose left side is a product or a sum with one gets here.
+# O(active terms) per factor order, plus two bounded relaxations and 16
+# incident rows per retained product sharing w.
+fact_product_compare = (s: FactState, a: int, b: int, limit: int) -> bool:
+    if a == 0 or b == 0: return false
+    t = fact_terms[a]
+    if t.a == 0 or t.b == 0: return false
+    if t.op != .star and t.op != .plus: return false
+    loop pick in [0..2):
+        p = a
+        x = 0
+        if t.op == .plus:
+            p = if pick == 0: t.a else: t.b
+            x = if pick == 0: t.b else: t.a
+        else if pick == 1: break
+        pt = fact_terms[p]
+        if pt.op != .star or pt.a == 0 or pt.b == 0: continue
+        if fact_bound(s, a).wide or fact_bound(s, p).wide: continue
+        xb = if x == 0: FactBound(0, 0) else: fact_signed_bound(s, x)
+        if xb.wide: continue
+        loop side in [0..2):
+            y = if side == 0: pt.a else: pt.b
+            w = if side == 0: pt.b else: pt.a
+            if side == 1 and y == w: break
+            wb = fact_signed_bound(s, w)
+            if wb.wide: continue
+            wl = wb.lo
+            dx = if x == 0: FACT_MAX else: fact_gap(s, x, w)
+            # (x <= w + dx with x >= x.lo: w >= x.lo - dx)
+            if wl < 0 and dx != FACT_MAX and dx != FACT_MIN and xb.lo != FACT_MIN and fact_add_fits(xb.lo, -dx): wl = max(wl, xb.lo - dx)
+            if wl < 0: continue
+            loop v in s.ids:
+                tt = fact_terms[v]
+                if tt.op != .star or tt.a != w and tt.b != w: continue
+                h = if tt.a == w: tt.b else: tt.a
+                if h == 0 or fact_bound(s, v).wide: continue
+                dy = fact_gap(s, y, h)
+                if dy == FACT_MAX or dy > 0 or math_word_overflow(2, dy, wl): continue
+                up = FACT_MAX
+                if x == 0: up = dy * wl
+                else:
+                    if xb.hi != FACT_MAX and fact_add_fits(dy * wl, xb.hi): up = dy * wl + xb.hi
+                    if dy <= -1 and dx != FACT_MAX and not math_word_overflow(2, dy + 1, wl) and fact_add_fits((dy + 1) * wl, dx): up = min(up, (dy + 1) * wl + dx)
+                if up == FACT_MAX or up == FACT_MIN or not fact_add_fits(limit, -up): continue
+                if fact_below(s, v, b, limit - up): return true
+    false
+
 # Selected affine rows share a single symbolic root. Normalize only on query,
 # with a 32-node budget; unrelated roots and nonlinear products stay unknown.
 struct FactAffine:
@@ -1510,6 +1597,7 @@ fact_compare = (s: FactState, op: Tok, a: int, b: int) -> int:
         if x.hi <= y.lo and (x.hi != FACT_MAX or fact_host_endpoint(s, a, true)) and (y.lo != FACT_MIN or fact_host_endpoint(s, b, false)): return 1
         if x.lo > y.hi: return 0
     if (op == .lt or op == .le) and fact_sum_compare(s, a, b, (if op == .lt: -1 else: 0)): return 1
+    if (op == .lt or op == .le) and fact_product_compare(s, a, b, (if op == .lt: -1 else: 0)): return 1
     fact_affine_compare(s, op, a, b)
 
 fact_inverse = (op: Tok) -> Tok:
