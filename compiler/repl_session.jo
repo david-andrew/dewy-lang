@@ -1,0 +1,291 @@
+use 'repl.jo'
+use 'checker_hooks.dewy'
+use 'checker_signature.dewy'
+use 'macho_format.dewy'
+use 'elf_format.dewy'
+use 'x64_module.dewy'
+use 'x64_emit.dewy'
+use 'driver_pipeline.dewy'
+use 'x64_encode.dewy'
+use 'arm64_emit.dewy'
+use 'arm64_encode.dewy'
+use 'source_types.dewy'
+use 'frontend.jo'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'dewy_lex.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'parse.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_program.dewy'
+use 'checks_imports.dewy'
+use 'expr.jo'
+use 'ir.jo'
+use 'lower.jo'
+use 'x64.jo'
+use 'arm64.jo'
+use 'main.jo'
+use 'ide.jo'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'lower_ffi.dewy'
+use 'lower_functions.dewy'
+use 'lower_primitives.dewy'
+use 'repl_ops.dewy'
+use 'proc_sys.dewy'
+use 'repl_drive.dewy'
+
+when TARGET == "windows":
+    @lib("kernel32.dll")
+    extern SetConsoleMode = (h: *u8, mode: u32) -> i32
+    @lib("kernel32.dll")
+    extern ReadConsoleW = (h: *u8, buf: *u16, n: u32, got: *u32, ctl: *u8) -> i32
+    @lib("kernel32.dll")
+    extern SetConsoleCtrlHandler = (f: *u8, add: i32) -> i32
+
+# ---- the session ----
+
+# (macOS: where the session is asked to put it, above the program, which starts at 4 GB with
+# nothing below it; the session says where it is, within 4 GB of its globals)
+repl_region = () -> int:
+    when TARGET == "macos":
+        return MACHO_BASE + 0x20000000
+    REPL_REGION
+
+repl_write = (p: *u8, n: int):
+    when TARGET == "windows":
+        k: u32[] = [0]
+        off = 0
+        loop off < n:
+            if WriteFile(repl_to as *u8, p + off, u32(min(n - off, 1 << 30)), data(k), null) == 0: return
+            off += int(k[0])
+    else:
+        __write_fd(repl_to, p, n)
+
+repl_send = (op: int, addr: int, bytes: u8[]):
+    h = [op, addr, bytes.len()]
+    repl_write(data(h) as *u8, 24)
+    if bytes.len() > 0: repl_write(data(bytes), bytes.len())
+
+# the session's reply to a run (-1: it is gone)
+
+repl_wait_reply = () -> int:
+    w = [0]
+    got = 0
+    loop got < 8:
+        r = 0
+        when TARGET == "windows":
+            k: u32[] = [0]
+            if ReadFile(repl_from as *u8, (data(w) as *u8) + got, u32(8 - got), data(k), null) != 0: r = int(k[0])
+        else:
+            r = syscall(0, repl_from, (data(w) as *u8) + got, 8 - got)
+        if r <= 0:
+            when TARGET == "windows":
+                # (gone: exit() in an input ends the prompt with its status)
+                WaitForSingleObject(repl_pid as *u8, u32(0xFFFFFFFF))
+                code: u32[] = [0]
+                GetExitCodeProcess(repl_pid as *u8, data(code))
+                c = int(code[0])
+                if c != 101 and c < 256: return 512 + c
+            return -1
+        got += r
+    when TARGET != "windows":
+        # (reap the processes the session left behind)
+        st = [0]
+        loop syscall(61, -1, data(st), 1, 0) > 0: pass
+    w[0]
+
+# the end of the session (Windows: then its program can be deleted)
+
+repl_end = ():
+    repl_send(3, 0, [])
+    when TARGET == "windows":
+        if repl_pid >= 0: WaitForSingleObject(repl_pid as *u8, u32(5000))
+        if len(repl_exe) > 0: delete_file(repl_exe)
+
+# ---- compiling an input ----
+
+# Compile an input, keeping it ready to send, or restore state after a type query.
+# Errors always restore the compiler's memory (lib/std/snapshot.jo).
+repl_try = (text: str, keep: bool) -> ReplTry:
+    t = ReplTry()
+    when not BOOTSTRAP:
+        lo, n = __image_data()
+        s = __snap_take(lo, lo + n)
+        box = __os_raw_pages(4096) as *int          # (what it found: kept when memory is put back)
+        if __setjmp(repl_jbuf) == 0:
+            __repl_jmp = repl_jbuf
+            o = repl_compile(text, repl_inputs)
+            __repl_jmp = null
+            if keep:
+                __snap_drop(s)
+                __os_raw_free(box as *u8, 4096)
+                return ReplTry(true, o.show, o.type, o)
+            box[0] = 1
+            if o.show: box[1] = 1
+            box[2] = __snap_keep(o.type) as int
+        __repl_jmp = null
+        __snap_restore(s)
+        __snap_drop(s)
+        if box[0] == 1:
+            t.ok = true
+            t.show = box[1] == 1
+            t.type = __snap_unkeep(box[2] as *u8)
+        __os_raw_free(box as *u8, 4096)
+    t
+
+# run an input: compile, send, run; false if the session ended
+
+repl_run = (text: str) -> bool:
+    # A failed runtime input must roll back its declarations and compiled-code
+    # bookkeeping too. Keep owned compilation temporaries in the helper, so
+    # they are released before restoring the compiler's heap.
+    when not BOOTSTRAP:
+        lo, n = __image_data()
+        snapshot = __snap_take(lo, lo + n)
+        status = repl_run_input(text)
+        if status != 0: __snap_restore(snapshot)
+        __snap_drop(snapshot)
+        return status != 2
+    false
+
+# ---- reading input ----
+
+repl_raw = (on: bool):
+    if not repl_tty: return
+    when TARGET == "windows":
+        # (keys as the terminal sequences Linux has: ESC [ A for up...; ctrl-c a key, not a signal)
+        hin = GetStdHandle(u32(0xFFFFFFF6))
+        if on:
+            m: u32[] = [0]
+            GetConsoleMode(hin, data(m))
+            repl_mode_saved = int(m[0])
+            SetConsoleMode(hin, u32((repl_mode_saved & ~(0x1 | 0x2 | 0x4)) | 0x200))   # PROCESSED, LINE, ECHO off; VIRTUAL_TERMINAL_INPUT
+        else if repl_mode_saved >= 0: SetConsoleMode(hin, u32(repl_mode_saved))
+    else:
+        if on:
+            t = fill(u8(0), 64)
+            syscall(16, 0, 0x5401, data(t))         # TCGETS
+            repl_termios_saved = t
+            r = t
+            lflag = int(r[12]) | (int(r[13]) << 8)
+            lflag = lflag & ~(0x2 | 0x8 | 0x1)      # ICANON, ECHO, ISIG
+            r[12] = u8(lflag & 255)
+            r[13] = u8((lflag >> 8) & 255)
+            iflag = int(r[0]) | (int(r[1]) << 8)
+            iflag = iflag & ~(0x100 | 0x400)        # ICRNL, IXON
+            r[0] = u8(iflag & 255)
+            r[1] = u8((iflag >> 8) & 255)
+            r[17 + 6] = 1                           # VMIN
+            r[17 + 5] = 0                           # VTIME
+            syscall(16, 0, 0x5402, data(r))         # TCSETS
+        else if repl_termios_saved.len() > 0: syscall(16, 0, 0x5402, data(repl_termios_saved))
+
+repl_out = (s: str): __write_fd(1, data(s), len(s))
+
+repl_getc = () -> int:
+    when TARGET == "windows":
+        if repl_tty:
+            if repl_pending.len() == 0:
+                # (the console gives UTF-16: a character, two units for one past U+FFFF)
+                w: u16[] = [0, 0]
+                k: u32[] = [0]
+                hin = GetStdHandle(u32(0xFFFFFFF6))
+                if ReadConsoleW(hin, data(w), 1, data(k), null) == 0 or k[0] == 0: return -1
+                c = int(w[0])
+                if c >= 0xD800 and c < 0xDC00:
+                    if ReadConsoleW(hin, data(w) + 1, 1, data(k), null) != 0 and k[0] == 1: c = 0x10000 + ((c - 0xD800) << 10) + (int(w[1]) - 0xDC00)
+                repl_pending = bytes(chr(c))
+            c = int(repl_pending[0])
+            repl_pending.remove(0)
+            return c
+    b: u8[] = [0]
+    if __read_fd(0, data(b), 1) != 1: return -1
+    int(b[0])
+
+# (Windows) start the session program with two pipes, their handles in DEWY_REPL_PIPES ("": started)
+rs_start_windows = (path: str) -> str:
+    when TARGET == "windows":
+        # start it with two pipes, their handles in DEWY_REPL_PIPES
+        sa = fill(0, 3)
+        sa[0] = 24
+        sa[2] = 1                                     # inheritable
+        to_r: *u8[] = [null]
+        to_w: *u8[] = [null]
+        from_r: *u8[] = [null]
+        from_w: *u8[] = [null]
+        CreatePipe(data(to_r), data(to_w), data(sa) as *u8, 0)
+        CreatePipe(data(from_r), data(from_w), data(sa) as *u8, 0)
+        SetHandleInformation(to_w[0], 1, 0)           # (this side's ends stay here)
+        SetHandleInformation(from_r[0], 1, 0)
+        name = __wide("DEWY_REPL_PIPES")
+        val = __wide("{to_r[0] as int},{from_w[0] as int}")
+        SetEnvironmentVariableW(data(name), data(val))
+        wcmd = __wide(__w32_cmdline([path]))
+        wexe = __wide(path)
+        si = fill(0, 13)
+        si[0] = 104
+        pi = fill(0, 3)
+        ok = CreateProcessW(data(wexe), data(wcmd), null, null, 1, 0, null, null, data(si) as *u8, data(pi) as *u8) != 0
+        SetEnvironmentVariableW(data(name), null)
+        CloseHandle(to_r[0])
+        CloseHandle(from_w[0])
+        if not ok: return "could not start the session program"
+        CloseHandle(pi[1] as *u8)
+        repl_pid = pi[0]
+        repl_to = to_w[0] as int
+        repl_from = from_r[0] as int
+        repl_exe = path
+        if not repl_started(): return "the session program did not start"
+        return ""
+    else:
+        return ""
+
+# the checker's completions for probe, the compiler's memory then put back as it was
+
+rs_complete = (probe: str) -> str:
+    got = ""
+    when not BOOTSTRAP:
+        lo, n = __image_data()
+        s = __snap_take(lo, lo + n)
+        ide_on = true
+        ide_fd = -1
+        ide_out = ""
+        ide_sentinel = intern("__dewy_complete__")
+        if __setjmp(repl_jbuf) == 0:
+            __repl_jmp = repl_jbuf
+            repl_compile(probe, repl_inputs)
+        __repl_jmp = null
+        k = __snap_keep(ide_out)
+        __snap_restore(s)
+        __snap_drop(s)
+        got = __snap_unkeep(k)
+    got
+
+# is input a terminal (and the prompt's line drawn with terminal sequences; ctrl-c stops what an
+# input is running, not the prompt)
+
+rs_terminal = () -> bool:
+    when TARGET == "windows":
+        m: u32[] = [0]
+        tty = GetConsoleMode(GetStdHandle(u32(0xFFFFFFF6)), data(m)) != 0
+        hout = GetStdHandle(u32(0xFFFFFFF5))
+        if tty and GetConsoleMode(hout, data(m)) != 0: SetConsoleMode(hout, m[0] | u32(0x4 | 0x1))   # VIRTUAL_TERMINAL_PROCESSING
+        return tty
+    else:
+        t = fill(u8(0), 64)
+        tty = syscall(16, 0, 0x5401, data(t)) == 0
+        act = [1, 0, 0, 0]                             # struct sigaction: SIG_IGN
+        syscall(13, 2, data(act), 0, 8)                # rt_sigaction(SIGINT)
+        return tty
+
+# (Windows: ctrl-c stops what an input is running, not the prompt; set after the session started,
+# which would have this too)
+
+rs_console_keys = ():
+    when TARGET == "windows":
+        SetConsoleCtrlHandler(null, 1)

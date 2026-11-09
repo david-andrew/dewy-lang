@@ -1,14 +1,13 @@
 $runtime_checks
 from p"dewy_lex.dewy" import dewy_block_comment_end
 from p"frontend.jo" import source_quote_end
+from p"repl_session.dewy" import (repl_getc repl_out repl_wait_reply)
 from p"repl_drive.dewy" import repl_completions
 from p"@lib/core/os.jo" import (write_file)
 from p"repl.jo" import REPL_BUILTINS
 from p"repl.jo" import repl_hist_path
 from p"repl.jo" import repl_tty
 from p"repl.jo" import repl_before
-from p"repl.jo" import repl_getc
-from p"repl.jo" import repl_out
 from p"arm64_emit.dewy" import a_data_fix
 from p"arm64_emit.dewy" import a_faddr_fix
 from p"arm64_emit.dewy" import a_stub_fix
@@ -33,7 +32,7 @@ from p"lower_ffi.dewy" import (lower_extern_thunk)
 from p"lower_functions.dewy" import (lower_function)
 from p"lower_primitives.dewy" import (lf_of_inst)
 from p"main.jo" import (img_data_addr img_text_addr)
-from p"repl.jo" import (ReplOut lf_abs repl_cabi_abs repl_history repl_inited repl_mainm repl_modules_inited repl_next repl_wait_reply ro_segs ro_shipped)
+from p"repl.jo" import (ReplOut lf_abs repl_cabi_abs repl_history repl_inited repl_mainm repl_modules_inited repl_next ro_segs ro_shipped)
 from p"source_types.dewy" import (SrcFile)
 from p"type_ops.dewy" import (type_str zonk)
 from p"types.jo" import (T_NEVER T_VOID prune tkind)

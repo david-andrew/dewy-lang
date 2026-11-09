@@ -1,0 +1,301 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (delete_file)
+from p"@lib/core/str.jo" import (chr)
+from p"@lib/core/rt.jo" import (__os_raw_free __os_raw_pages __read_fd __write_fd)
+from p"@lib/std/repl.jo" import (__repl_jmp)
+from p"@lib/std/snapshot.jo" import (__image_data __snap_drop __snap_keep __snap_restore __snap_take __snap_unkeep)
+from p"ide.jo" import (ide_fd ide_on ide_out ide_sentinel)
+from p"macho_format.dewy" import (MACHO_BASE)
+from p"repl.jo" import (REPL_REGION ReplTry repl_termios_saved repl_exe repl_from repl_inputs repl_jbuf repl_mode_saved repl_pending repl_pid repl_to repl_tty)
+from p"repl_drive.dewy" import (repl_run_input)
+from p"repl_ops.dewy" import (repl_compile repl_started)
+from p"util.jo" import (intern)
+
+SessionWord:type=int64<overflow='wrap'>
+
+$unsafe
+if $target.os =? 'windows' {
+    SetConsoleMode=(h:ptr<uint8> mode:uint32):>int32 => $extern(name='SetConsoleMode' lib='kernel32')
+    ReadConsoleW=(h:ptr<uint8> buf:ptr<uint16> n:uint32 got:ptr<uint32> ctl:ptr<uint8>):>int32 => $extern(name='ReadConsoleW' lib='kernel32')
+    SetConsoleCtrlHandler=(f:ptr<uint8> add:int32):>int32 => $extern(name='SetConsoleCtrlHandler' lib='kernel32')
+}
+
+# ---- the session ----
+
+# (macOS: where the session is asked to put it, above the program, which starts at 4 GB with
+# nothing below it; the session says where it is, within 4 GB of its globals)
+repl_region=():>int64=>{
+    if $target.os =? 'mac' {return MACHO_BASE + 0x20000000}
+    REPL_REGION
+}
+
+repl_write=(p:ptr<uint8> n:int64):>void=>$unsafe {
+    if $target.os =? 'windows' {
+        let k:array<uint32>=[uint32(0)]
+        let off:SessionWord=0
+        loop off <? n {
+            if WriteFile(repl_to as ptr<uint8> p + off uint32(min(n - off 1 << 30)) data(k) (uint64(0) as ptr<uint8>)) =? 0 {return}
+            off += SessionWord(k[0])
+        }
+    } else {
+        __write_fd(repl_to p n);
+    }
+}
+
+repl_send=(op:int64 addr:int64 bytes:array<uint8>):>void=>$unsafe {
+    let h:array<int64>=[op addr bytes.length]
+    repl_write(data(h) as ptr<uint8> 24)
+    if bytes.length >? 0 {repl_write(data(bytes) bytes.length)}
+}
+
+# the session's reply to a run (-1: it is gone)
+repl_wait_reply=():>int64=>$unsafe {
+    let w:array<int64>=[0]
+    let got:SessionWord=0
+    loop got <? 8 {
+        let r:SessionWord=0
+        if $target.os =? 'windows' {
+            let k:array<uint32>=[uint32(0)]
+            if ReadFile(repl_from as ptr<uint8> (data(w) as ptr<uint8>) + got uint32(8 - got) data(k) (uint64(0) as ptr<uint8>)) not=? 0 {r=SessionWord(k[0])}
+        } else {
+            r=syscall(0 repl_from (data(w) as ptr<uint8>) + got 8 - got)
+        }
+        if r <=? 0 {
+            if $target.os =? 'windows' {
+                # (gone: exit() in an input ends the prompt with its status)
+                WaitForSingleObject(repl_pid as ptr<uint8> uint32(0xFFFFFFFF));
+                let code:array<uint32>=[uint32(0)]
+                GetExitCodeProcess(repl_pid as ptr<uint8> data(code));
+                let c=SessionWord(code[0])
+                if c not=? 101 and c <? 256 {return 512 + c}
+            }
+            return -1
+        }
+        got += r
+    }
+    if $target.os not=? 'windows' {
+        # (reap the processes the session left behind)
+        let st:array<int64>=[0]
+        loop syscall(61 -1 data(st) 1 0) >? 0 {}
+    }
+    w[0]
+}
+
+# the end of the session (Windows: then its program can be deleted)
+repl_end=():>void=>$unsafe {
+    repl_send(3 0 [])
+    if $target.os =? 'windows' {
+        if repl_pid >=? 0 {WaitForSingleObject(repl_pid as ptr<uint8> uint32(5000));}
+        if (repl_exe as array<uint8>).length >? 0 {delete_file(repl_exe);}
+    }
+}
+
+# ---- compiling an input ----
+
+# Compile an input, keeping it ready to send, or restore state after a type query.
+# Errors always restore the compiler's memory (lib/std/snapshot.jo).
+repl_try=(text:string keep:bool):>ReplTry=>$unsafe {
+    let t=ReplTry()
+    let [lo n]=__image_data()
+    let s=__snap_take(lo lo + n)
+    # (what it found: kept when memory is put back)
+    let box=__os_raw_pages(4096) as ptr<int64>
+    if __setjmp(repl_jbuf) =? 0 {
+        __repl_jmp=repl_jbuf
+        let o=repl_compile(text repl_inputs)
+        __repl_jmp=uint64(0) as ptr<uint8>
+        if keep {
+            __snap_drop(s)
+            __os_raw_free(box as ptr<uint8> 4096)
+            let k=ReplTry()
+            k.ok=true
+            k.show=o.show
+            k.type=o.type
+            k.out=o
+            return k
+        }
+        box[0]=1
+        if o.show {box[1]=1}
+        box[2]=__snap_keep(o.type) as int64
+    }
+    __repl_jmp=uint64(0) as ptr<uint8>
+    __snap_restore(s)
+    __snap_drop(s)
+    if box[0] =? 1 {
+        t.ok=true
+        t.show=box[1] =? 1
+        t.type=__snap_unkeep(box[2] as ptr<uint8>)
+    }
+    __os_raw_free(box as ptr<uint8> 4096)
+    t
+}
+
+# run an input: compile, send, run; false if the session ended
+repl_run=(text:string):>bool=>$unsafe {
+    # A failed runtime input must roll back its declarations and compiled-code
+    # bookkeeping too. Keep owned compilation temporaries in the helper, so
+    # they are released before restoring the compiler's heap.
+    let [lo n]=__image_data()
+    let snapshot=__snap_take(lo lo + n)
+    let status=repl_run_input(text)
+    if status not=? 0 {__snap_restore(snapshot)}
+    __snap_drop(snapshot)
+    status not=? 2
+}
+
+# ---- reading input ----
+
+repl_raw=(on:bool):>void=>$unsafe {
+    if not repl_tty {return}
+    if $target.os =? 'windows' {
+        # (keys as the terminal sequences Linux has: ESC [ A for up...; ctrl-c a key, not a signal)
+        let hin=GetStdHandle(uint32(0xFFFFFFF6))
+        if on {
+            let m:array<uint32>=[uint32(0)]
+            GetConsoleMode(hin data(m));
+            repl_mode_saved=SessionWord(m[0])
+            # PROCESSED, LINE, ECHO off; VIRTUAL_TERMINAL_INPUT
+            SetConsoleMode(hin uint32((repl_mode_saved & ~(0x1 | 0x2 | 0x4)) | 0x200));
+        } else if repl_mode_saved >=? 0 {SetConsoleMode(hin uint32(repl_mode_saved));}
+    } else {
+        if on {
+            let t:array<uint8>=fill(uint8(0) 64)
+            # TCGETS
+            syscall(16 0 0x5401 data(t));
+            repl_termios_saved=t.copy
+            let r=t
+            let lflag:SessionWord=SessionWord(r[12]) | (SessionWord(r[13]) << 8)
+            # ICANON, ECHO, ISIG
+            lflag=lflag & ~(0x2 | 0x8 | 0x1)
+            r[12]=uint8(lflag & 255)
+            r[13]=uint8((lflag >> 8) & 255)
+            let iflag:SessionWord=SessionWord(r[0]) | (SessionWord(r[1]) << 8)
+            # ICRNL, IXON
+            iflag=iflag & ~(0x100 | 0x400)
+            r[0]=uint8(iflag & 255)
+            r[1]=uint8((iflag >> 8) & 255)
+            # VMIN, VTIME
+            r[17 + 6]=1
+            r[17 + 5]=0
+            # TCSETS
+            syscall(16 0 0x5402 data(r));
+        } else if repl_termios_saved.length >? 0 {syscall(16 0 0x5402 data(repl_termios_saved));}
+    }
+}
+
+repl_out=(s:string):>void=>$unsafe {__write_fd(1 data(s) (s as array<uint8>).length);}
+
+repl_getc=():>int64=>$unsafe {
+    if $target.os =? 'windows' {
+        if repl_tty {
+            if repl_pending.length =? 0 {
+                # (the console gives UTF-16: a character, two units for one past U+FFFF)
+                let w:array<uint16>=[uint16(0) uint16(0)]
+                let k:array<uint32>=[uint32(0)]
+                let hin=GetStdHandle(uint32(0xFFFFFFF6))
+                if ReadConsoleW(hin data(w) uint32(1) data(k) (uint64(0) as ptr<uint8>)) =? 0 or k[0] =? 0 {return -1}
+                let c:SessionWord=SessionWord(w[0])
+                if c >=? 0xD800 and c <? 0xDC00 {
+                    if ReadConsoleW(hin data(w) + 1 uint32(1) data(k) (uint64(0) as ptr<uint8>)) not=? 0 and k[0] =? 1 {c=0x10000 + ((c - 0xD800) << 10) + (SessionWord(w[1]) - 0xDC00)}
+                }
+                let ch=chr(c)
+                loop u in (ch as array<uint8>) {repl_pending.push(u)}
+            }
+            let c=SessionWord(repl_pending[0])
+            repl_pending.pop(0);
+            return c
+        }
+    }
+    let b:array<uint8>=[uint8(0)]
+    if __read_fd(0 data(b) 1) not=? 1 {return -1}
+    SessionWord(b[0])
+}
+
+# ---- the prompt's target-conditional pieces ----
+
+# (Windows) start the session program with two pipes, their handles in DEWY_REPL_PIPES ("": started)
+rs_start_windows=(path:string):>string=>$unsafe {
+    if $target.os =? 'windows' {
+        # start it with two pipes, their handles in DEWY_REPL_PIPES
+        let sa:array<int64>=fill(int64(0) 3)
+        sa[0]=24
+        # inheritable
+        sa[2]=1
+        let to_r:array<int64>=[0]
+        let to_w:array<int64>=[0]
+        let from_r:array<int64>=[0]
+        let from_w:array<int64>=[0]
+        CreatePipe(data(to_r) as ptr<ptr<uint8>> data(to_w) as ptr<ptr<uint8>> data(sa) as ptr<uint8> uint32(0));
+        CreatePipe(data(from_r) as ptr<ptr<uint8>> data(from_w) as ptr<ptr<uint8>> data(sa) as ptr<uint8> uint32(0));
+        # (this side's ends stay here)
+        SetHandleInformation(to_w[0] as ptr<uint8> uint32(1) uint32(0));
+        SetHandleInformation(from_r[0] as ptr<uint8> uint32(1) uint32(0));
+        let name=__wide("DEWY_REPL_PIPES")
+        let val=__wide("{to_r[0]},{from_w[0]}")
+        SetEnvironmentVariableW(data(name) data(val));
+        let wcmd=__wide(__w32_cmdline([path]))
+        let wexe=__wide(path)
+        let si:array<int64>=fill(int64(0) 13)
+        si[0]=104
+        let pi:array<int64>=fill(int64(0) 3)
+        let ok=CreateProcessW(data(wexe) data(wcmd) (uint64(0) as ptr<uint8>) (uint64(0) as ptr<uint8>) int32(1) uint32(0) (uint64(0) as ptr<uint8>) (uint64(0) as ptr<uint16>) data(si) as ptr<uint8> data(pi) as ptr<uint8>) not=? 0
+        SetEnvironmentVariableW(data(name) (uint64(0) as ptr<uint16>));
+        CloseHandle(to_r[0] as ptr<uint8>);
+        CloseHandle(from_w[0] as ptr<uint8>);
+        if not ok {return "could not start the session program"}
+        CloseHandle(pi[1] as ptr<uint8>);
+        repl_pid=pi[0]
+        repl_to=to_w[0]
+        repl_from=from_r[0]
+        repl_exe=path
+        if not repl_started() {return "the session program did not start"}
+        return ""
+    }
+    ""
+}
+
+# the checker's completions for probe, the compiler's memory then put back as it was
+rs_complete=(probe:string):>string=>$unsafe {
+    let [lo n]=__image_data()
+    let s=__snap_take(lo lo + n)
+    ide_on=true
+    ide_fd=-1
+    ide_out=""
+    ide_sentinel=intern("__dewy_complete__")
+    if __setjmp(repl_jbuf) =? 0 {
+        __repl_jmp=repl_jbuf
+        repl_compile(probe repl_inputs);
+    }
+    __repl_jmp=uint64(0) as ptr<uint8>
+    let k=__snap_keep(ide_out)
+    __snap_restore(s)
+    __snap_drop(s)
+    __snap_unkeep(k)
+}
+
+# is input a terminal (and the prompt's line drawn with terminal sequences; ctrl-c stops what an
+# input is running, not the prompt)
+rs_terminal=():>bool=>$unsafe {
+    if $target.os =? 'windows' {
+        let m:array<uint32>=[uint32(0)]
+        let tty=GetConsoleMode(GetStdHandle(uint32(0xFFFFFFF6)) data(m)) not=? 0
+        let hout=GetStdHandle(uint32(0xFFFFFFF5))
+        # VIRTUAL_TERMINAL_PROCESSING
+        if tty and GetConsoleMode(hout data(m)) not=? 0 {SetConsoleMode(hout m[0] | uint32(0x4 | 0x1));}
+        return tty
+    } else {
+        let t:array<uint8>=fill(uint8(0) 64)
+        let tty=syscall(16 0 0x5401 data(t)) =? 0
+        # struct sigaction: SIG_IGN
+        let act:array<int64>=[1 0 0 0]
+        # rt_sigaction(SIGINT)
+        syscall(13 2 data(act) 0 8);
+        return tty
+    }
+}
+
+# (Windows: ctrl-c stops what an input is running, not the prompt; set after the session started,
+# which would have this too)
+rs_console_keys=():>void=>$unsafe {
+    if $target.os =? 'windows' {SetConsoleCtrlHandler(uint64(0) as ptr<uint8> int32(1));}
+}

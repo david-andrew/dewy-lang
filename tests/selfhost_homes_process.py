@@ -13,4 +13,5 @@ LEAF_HOMES = {
     'fused_ir': 'fused.jo',
     'par_drive': 'par.jo',
     'driver_cli': 'main.jo',
+    'repl_session': 'repl.jo',
 }
