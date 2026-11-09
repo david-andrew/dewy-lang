@@ -292,7 +292,7 @@ Each stage is measured on named kernels. Core scaling needs a dedicated machine,
 ## Deadlock freedom (adopted direction, 2026-10-23)
 
 Scheduled after the current concurrency stages (task groups, `Canceled`,
-channels). It came from a brainstorm with Astra and Sol, reviewed by David.
+channels). It came from a design brainstorm, reviewed by David.
 
 **Default, with zero annotations.** The compiler infers lock identities,
 held-lock sets and acquisition order across the program, and derives a partial
@@ -343,7 +343,7 @@ Their spellings go to David then.
 
 **Timeouts are recovery, not proofs.**
 
-**Acceptance (from Sol):**
+**Acceptance (from the design review):**
 - the grant-versus-cancel race;
 - cancellation during cleanup;
 - callbacks taken under a lock;

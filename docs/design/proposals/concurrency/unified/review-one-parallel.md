@@ -2,7 +2,7 @@
 
 ## Verdict
 
-- One `parallel` ("items start together; the construct ends when they all end") is the right surface. Pool versus tasks is an implementation fact. No colours, structured join, and per-item values unless `or_throw` should stay. Sol's conditions are load-bearing: a waiting task releases its worker, opaque blocking gets capacity or a hard error, and a weak target diagnoses. Skip those and inferred waiting deadlocks.
+- One `parallel` ("items start together; the construct ends when they all end") is the right surface. Pool versus tasks is an implementation fact. No colours, structured join, and per-item values unless `or_throw` should stay. The soundness check's conditions are load-bearing: a waiting task releases its worker, opaque blocking gets capacity or a hard error, and a weak target diagnoses. Skip those and inferred waiting deadlocks.
 - Inferring whether a wait is **legal** is right. Using today's `blocks` bit as a binary strategy switch is the surprise factory. `& no blocks` already rejects I/O and unclassified calls, not only parks. A log, a file write, or an opaque helper then moves a compute loop onto one stack per item, drops GPU offload, and changes what cancellation can stop. Result order stays. Memory, placement, and cancellation do not.
 - Unknown effects are top. They take the conservative scheduler and name the forcing call. That is also how a harmless helper flips the loop.
 - No required tag:

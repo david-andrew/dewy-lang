@@ -1,6 +1,6 @@
 # Time, dates, clocks and calendars (v5)
 
-v5 merges the v4 review round (Grok's critique, Astra's representation review, Sol's correctness review) with David's fixed decisions. Names are proposals unless §14 lists them as settled.
+v5 merges the v4 review round (the v4 critique, the representation review, the correctness review) with David's fixed decisions. Names are proposals unless §14 lists them as settled.
 
 ## What changed from v4
 
@@ -1063,7 +1063,7 @@ report = (reading context) => {
 
 ## Examples
 
-> **BLUF:** Fifteen motivating programs, from a stopwatch to Mars. Sol's corrected set replaces Grok's. Literals and proved operations are unwrapped; `or_throw` marks real partial boundaries. `civil`, `science` and `mars` abbreviate `time.civil`, `time.science` and `time.science.mars`. `rules` is an imported descriptor module, as in Example 10. `mission`, `payroll` and similar are application modules, not proposed stdlib names.
+> **BLUF:** Fifteen motivating programs, from a stopwatch to Mars. The correctness review's corrected set replaces the critique's. Literals and proved operations are unwrapped; `or_throw` marks real partial boundaries. `civil`, `science` and `mars` abbreviate `time.civil`, `time.science` and `time.science.mars`. `rules` is an imported descriptor module, as in Example 10. `mission`, `payroll` and similar are application modules, not proposed stdlib names.
 
 **1. Time a build, pace a frame, bound a fetch.** *Shows:* monotonic elapsed time, float `dt`, no civil code linked.
 
@@ -1247,7 +1247,7 @@ let lunar = science.lunar_time(earth realization='ltc') ??<StandardNotDefined> n
 
 ## Prior art
 
-> **BLUF:** Grok's survey, corrected by Sol. Every mature library converged on an integer instant, a type split between instants and civil values, and periods distinct from durations. Their bugs come from hidden fallbacks, silent fold/gap repair, mutable global data and one value doing two jobs.
+> **BLUF:** The critique's survey, corrected by the correctness review. Every mature library converged on an integer instant, a type split between instants and civil values, and periods distinct from durations. Their bugs come from hidden fallbacks, silent fold/gap repair, mutable global data and one value doing two jobs.
 
 | System | Lesson | How Dewy handles it |
 |---|---|---|
@@ -1313,7 +1313,7 @@ let lunar = science.lunar_time(earth realization='ltc') ??<StandardNotDefined> n
 2. **Clock operators.** The stopwatch is the most common use, and wall subtraction lies across NTP steps. Go's lesson is to make the clock visible in the type. *Unblocks:* the trivial tier, games and timeouts.
 3. **`today`.** Most programs want a date, not a union. Strict ones get the honest union. *Unblocks:* the trivial tier.
 4. **Literals.** This contract removes most `or_throw`s without hiding real failures. It extends the existing `regex` literal rule with success-type refinement. *Unblocks:* §5 and the examples.
-5. **Edition spelling.** `$build` facets are root-only and global; an edition is per module. `$build.edition` (Astra's choice) would need a documented exception to that rule. *Unblocks:* calendar evolution, and later any language default.
+5. **Edition spelling.** `$build` facets are root-only and global; an edition is per module. `$build.edition` (the representation review's choice) would need a documented exception to that rule. *Unblocks:* calendar evolution, and later any language default.
 6. **Calendar name.** *Unblocks:* public signatures and stored identities.
 7. **`day` / `week`.** A Duration-typed `day` breaks substitution invariance. *Unblocks:* DST-safe civil arithmetic. The `$time.gap` / `$time.fold` spellings are new.
 8. **`age` default.** Jurisdictions differ (some use 28 February), so `legal_age` always takes one. The default is flagged because it's a convention. *Unblocks:* short birthday code.

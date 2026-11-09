@@ -1,11 +1,11 @@
-# Astra review: time core, representation and performance
+# Review: time core, representation and performance
 
 - **Scope:** one focused design pass; acceptance is a concrete recommendation for each of the five requested items, a replacement §5 example, and a complete approval list for this review. Owned output: this file only. No repository edits, implementation, comprehensive standards audit, or duplicate correctness survey. Budget: one reading/review pass, a small arithmetic code-generation probe, and targeted primary-source checks; no optimization campaign.
-- **Inputs read:** v4, Grok's entire critique/brainstorm, GOALS, decisions, assumptions, precision inference, `$build`/`$target` rules, and relevant LANGUAGE syntax. Recommendations below are proposals for David, not adopted semantics.
+- **Inputs read:** v4, the v4 critique/brainstorm, GOALS, decisions, assumptions, precision inference, `$build`/`$target` rules, and relevant LANGUAGE syntax. Recommendations below are proposals for David, not adopted semantics.
 
 ## BLUF
 
-- Adopt **plain `Instant` = signed int128 nanoseconds since J0**, exactly 16 bytes. Keep tick and storage width independent; reject Grok's tick-dependent default-width heuristic.
+- Adopt **plain `Instant` = signed int128 nanoseconds since J0**, exactly 16 bytes. Keep tick and storage width independent; reject the critique's tick-dependent default-width heuristic.
 - Give plain **`Duration` the same 16-byte storage**, with explicit 8-byte forms. Exact arithmetic widens intermediates; fixed storage requires proof or a checked conversion. No wrapping, saturation, implicit heap promotion, or time-specific exception to Dewy's integer rules.
 - Int128 add/subtract costs **two arithmetic instructions** on x86-64 and AArch64, versus one for int64. The material costs are doubled storage/register use and software general division, not bigint arithmetic on every timestamp.
 - Keep a **32-byte pointer-free `ClockReading`**, but make clock identity include provider and generation. Its subtraction measures monotonic elapsed; `.nominal` asks the wall question. Dynamically incompatible readings remain fallible.
@@ -14,7 +14,7 @@
 - Keep scale-branded exact science coordinates, preferably by specializing v4's `TimePoint<Domain>` machinery. A finer tick cannot turn TT into TCB, UT1, or a spacecraft clock.
 - Literal validation eliminates actual parsing/resolution failures only with **known definitions, pinned data, coverage, unique resolution, grid and range proofs**. It does not establish future law or physical accuracy.
 - Put editions and pack selections in **`.dewy` source metatags/constants**, with definition-site semantics across imports. Editions govern source defaults; packs govern dated rules; neither renumbers old instants.
-- Grok is directionally right but overstates cheapness and infallibility. In particular, Go `Add` retains monotonic data, width overflow is not `OffGrid`, old readings cannot acquire historical accuracy from today's calibration, and ancient `Z` labels do not become valid merely because int128 has enough range.
+- The critique is directionally right but overstates cheapness and infallibility. In particular, Go `Add` retains monotonic data, width overflow is not `OffGrid`, old readings cannot acquire historical accuracy from today's calibration, and ancient `Z` labels do not become valid merely because int128 has enough range.
 
 ## 1. Representation, arithmetic, coordinates and `OffGrid`
 
@@ -53,12 +53,12 @@
   - `quantize` requires an explicit rounding policy and returns value plus signed loss, **original minus rounded**. It can still fail for range/domain reasons. Rounding must not saturate silently.
   - Example: `−0.25s` decomposed at a 1-second tick gives count −1 and remainder 0.75s. Rounding `1ns/3` to nearest-even nanoseconds gives 0ns and loss +1ns/3.
   - For cross-tick comparisons, either prove an exact conversion or compare scaled integers in sufficiently wide intermediates. Equality is mathematically defined even when one direction of conversion fails; lack of divisibility does not make equality inherently erroneous. Start with explicit conversion and homogeneous hash-key types; defer heterogeneous hash canonicalization.
-  - A representable successor exists except at a finite maximum. Do not erase interval endpoint flags merely because the storage is discrete: rewriting `[a,b]` to `[a,b+tick)` fails at max and changes endpoint-distance calculations. Arithmetic calendar-day domains can also have successors; Grok's blanket ban there is wrong.
+  - A representable successor exists except at a finite maximum. Do not erase interval endpoint flags merely because the storage is discrete: rewriting `[a,b]` to `[a,b+tick)` fails at max and changes endpoint-distance calculations. Arithmetic calendar-day domains can also have successors; the critique's blanket ban there is wrong.
 
 - **Recommendation — science coordinates:**
   - Keep a science-only `Coordinate<Scale>` as an exact affine coordinate with a statically named origin/definition and rational seconds representation. Prefer an alias/specialization of `TimePoint<Domain>` over a competing point algebra. `Scale` must resolve to a complete domain definition, not just a string such as `TCB`.
   - A named constant tick is sufficient for an NTP binary fraction, PTP correction, or a fixed affine transform whose denominators are bounded at compile time. It is insufficient as the sole interface for runtime rational input, arbitrary model composition, and all the distinct scientific domains.
-  - `Instant<tick=1ns/3>` remains an **Instant specialization** on TT/J0. It is not the plain `Instant` alias, but Grok's claim that it is not an instant is misleading.
+  - `Instant<tick=1ns/3>` remains an **Instant specialization** on TT/J0. It is not the plain `Instant` alias, but the critique's claim that it is not an instant is misleading.
   - A rational science coordinate is not a physical observation or exact solution of an approximate model. Such transforms return `Estimate<Coordinate<Scale>>` or bounded numeric results with model errors. Raw SCLK remains a clock-domain count until correlation.
   - Keep rational dependencies, denominator growth and allocation entirely outside the core. Merely using `now`, `Duration`, or `Instant<tick=1ns/3>` must not load science code.
 
@@ -99,7 +99,7 @@ let tt = t as Coordinate<TT>                        # representation/domain defi
 
 - **Recommendation — sampling and cost:**
   - Portable healthy `now`: one wall read + one suspend-inclusive monotonic read, conversion from normalized wall seconds/subseconds to int128, current UTC/POSIX segment-offset addition, and a 32-byte result construction. Provider state/segment checks are constant-time on the current segment; no zone, locale, ephemeris, rational, per-reading allocation, or full history search.
-  - **No fixed nanosecond latency claim:** vDSO/shared-page availability, syscalls, clock source, virtualization and contention determine it. Go's Linux amd64 adapter actually calls the clock interface twice, once for realtime and once for monotonic; it does not establish Grok's claimed single-read cached-offset design. [Go runtime adapter](https://go.dev/src/runtime/time_linux_amd64.s)
+  - **No fixed nanosecond latency claim:** vDSO/shared-page availability, syscalls, clock source, virtualization and contention determine it. Go's Linux amd64 adapter actually calls the clock interface twice, once for realtime and once for monotonic; it does not establish the critique's claimed single-read cached-offset design. [Go runtime adapter](https://go.dev/src/runtime/time_linux_amd64.s)
   - The ordinary two samples are acquired during the same operation, **not asserted simultaneous**. `nominal` is the wall sample's coordinate; the monotonic field is the elapsed sample's coordinate. Subtraction never estimates a wall offset.
   - Strict cross-clock correlation uses monotonic-before, wall, monotonic-after, plus a stable provider/correlation revision, or an OS/hardware paired facility. A bracket bounds acquisition ordering, not physical clock accuracy or a hidden wall step. A changed revision yields an unresolved/discontinuous correlation, not a false tiny error bar.
   - A true shared-page snapshot of both clock mappings can optimize this. A cached user-space wall offset alone cannot track steps, slews or source changes. Maintaining a background synchronizer has costs and assumptions; do not hide one in `now`.
@@ -187,7 +187,7 @@ let next = appointments.next(after=meeting_time) ??<NoOccurrence> none
 
 - **Results:** `meeting` is 09:00 −04:00; `repeated` is the later 01:30 −05:00; `shifted` is 03:30 −04:00; `feb` is February 28; `age` and `leap_age` are both 26. `meeting_time` is the resolved nominal instant. No `or_throw` is justified on those proven constant results.
 - **Alternatives:** retain fallible `parse_instant` for dynamic labels/envelopes and use `instant"…"` for a nominal integer coordinate; do not silently change the former's return type. A constant `date` call with a runtime calendar is not an infallible literal. Keeping every constructor fallible would preserve a simpler API signature but squander the existing literal-proof model.
-- **New spellings/semantics:** `instant`, `zone` delimited calls; `date`/`zoned` are already v4 names, now with compile-time success refinement. `.nominal` on resolved civil values makes extraction consistent. Reject Grok's unsolicited March-1 default: the explicit policy above already gives clean code and leaves legal/conventional semantics with David.
+- **New spellings/semantics:** `instant`, `zone` delimited calls; `date`/`zoned` are already v4 names, now with compile-time success refinement. `.nominal` on resolved civil values makes extraction consistent. Reject the critique's unsolicited March-1 default: the explicit policy above already gives clean code and leaves legal/conventional semantics with David.
 
 ## 4. Editions, source settings and versioned defaults
 
@@ -218,7 +218,7 @@ billing = () => {
   - Each distributable module pins its edition, directly or through its own imported `.dewy` settings constant. A dependency cannot silently acquire the application's edition. A root file cannot rewrite a dependency's calendar by setting a metatag.
   - An omitted edition keeps a **permanently specified baseline**; it must not mean “whatever this compiler currently prefers.” New project scaffolding writes the current edition. Warn when edition-sensitive bare source omits an explicit selection; strict `require_calendar` requires explicit calendar/numbering semantics regardless.
   - `$calendar` applies lexically to its declaration/block and resolves bare `Date`, `date` and `today` there to a concrete calendar type. Provider context must agree or convert explicitly. Inferred types and exported signatures record the resolved calendar identity.
-  - Public libraries should spell `Date<ProlepticGregorian>` rather than an edition-sensitive alias; importing an old function never rebinds its defaults at the call site. Use one canonical name consistently; Grok alternates `Gregorian` and `ProlepticGregorian` without deciding whether they differ.
+  - Public libraries should spell `Date<ProlepticGregorian>` rather than an edition-sensitive alias; importing an old function never rebinds its defaults at the call site. Use one canonical name consistently; the critique alternates `Gregorian` and `ProlepticGregorian` without deciding whether they differ.
   - `$time.rules` selects an immutable rule-pack descriptor in source. Descriptor constants include authority/definition IDs, content digests, coverage and continuation profiles. Generated transition tables can themselves be `.dewy` source. External signed/raw packs may remain transport data when needed; their selection/verification contract stays in source, with no second semantic manifest or lockfile required.
   - A compile-time literal with unavailable pack bytes fails the build. A runtime rule-loader exposes acquisition failure at its boundary. Pinning does not fetch/load every named dataset or turn absent data into an empty successful table.
 
@@ -240,10 +240,10 @@ billing = () => {
 - **Alternatives:** a top-level `$edition` is semantically cleaner if David reserves `$build` for global build facets; it adds another root spelling. A single process-global edition is easier to implement but breaks mixed-edition dependencies. A manifest key contradicts the requested source-first direction. Recommendation is `$build.edition`, subject to the explicit module-local exception above.
 - **New spellings/semantics:** `$build.edition`, `$time.rules`, `$calendar`, `ProlepticGregorian` as the canonical explicit calendar identity. `$edition` is an alternative **not also proposed for adoption**. Dataset constant names are ordinary user declarations.
 
-## 5. Disagreements with Grok and bounded follow-ups
+## 5. Disagreements with the critique and bounded follow-ups
 
 - **Recommendation:** keep the fixed integer core, lightweight readings, explicit wall extraction, lazy layers, literal proofs and versioned defaults; correct the following claims before incorporating the critique.
-- **Width policy:** reject “64 if tick covers a million years”; use a predictable default and explicit compact types. Grok does not fully specify `Duration`, intermediate widening, or the endpoint difference requiring 129 bits.
+- **Width policy:** reject “64 if tick covers a million years”; use a predictable default and explicit compact types. The critique does not fully specify `Duration`, intermediate widening, or the endpoint difference requiring 129 bits.
 - **Overflow:** reject `OffGrid` for inability to prove width. Distinguish missing proof, actual off-grid input and actual range failure. Exact arithmetic cannot be silently replaced by checked int128-at-every-operator semantics.
 - **Go:** adopt its monotonic lesson, but correct the `Add`, `==`, and single-sample/cached-offset claims as described above. v4's wall-only subtraction is the older stopwatch mistake, not Go's current subtraction rule.
 - **Sampling and status:** reject a permanent cached wall offset and a leap cache refreshed only when the pack changes. A known transition inside the same pack matters. Do not invent synchronization/step detection from fields the OS does not supply.
@@ -254,7 +254,7 @@ billing = () => {
 - **Intervals:** discrete successors do not eliminate max-endpoint problems or preserve continuous duration measure automatically. Calendar-day successors are not universally forbidden. Retain v4's explicit interval semantics until the intended measure is chosen.
 - **Negative leaps:** agree on one general skipped-label mechanism and no new type. Do not infer that negative adjustments are impossible forever, or that UTC leap/smear/codec validation is identical to a zone gap merely because candidate resolution can share code.
 - **Calendar policy:** reject the external project-file key. Do not silently approve `age`'s March-1 default, the global `day`/`week` unit change, or nominal-only `today` as representation cleanups; these are separate surface/semantic choices David owns. `today` near an uncertain date boundary still needs its explicit nominal/uncertain contract.
-- **Scope boundary:** full recurrence, legal-age, observational-calendar, codec and scientific coverage review belongs with Sol. No additional implementation or standards survey is justified by this pass.
+- **Scope boundary:** full recurrence, legal-age, observational-calendar, codec and scientific coverage review belongs with the correctness and coverage review (`review-correctness-coverage.md`). No additional implementation or standards survey is justified by this pass.
 
 - **Dewy counterexamples and retained idiom:**
 
@@ -270,7 +270,7 @@ let b = a + 0.1s                        # exact decimal, exactly 100000000ns
 printl(b - a =? 100ms)
 ```
 
-- **Alternatives:** accept Grok wholesale only by changing established integer semantics, weakening coverage requirements, and assuming undocumented clock services. Those costs are unnecessary; the corrected design retains its useful ergonomic improvements.
+- **Alternatives:** accept the critique wholesale only by changing established integer semantics, weakening coverage requirements, and assuming undocumented clock services. Those costs are unnecessary; the corrected design retains its useful ergonomic improvements.
 - **New spellings:** none in this section beyond those inventoried below. `@job()` lint behavior is already fixed by David.
 
 ## Approval inventory: every new public spelling or changed meaning in this review

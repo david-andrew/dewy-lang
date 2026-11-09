@@ -37,7 +37,7 @@ David owns the Dewy programming language's surface and semantics. The repo is at
   - `Mutex`/`lock_all`, `$no_deadlocks` with certificates, `Atomic` with explicit orders;
   - a model-checked expert library (`spsc`, `mpmc`, ...).
 - **Latest proposal:** `docs/design/proposals/concurrency/unified/proposal-v2.md`. One `parallel` keyword (loop, comprehension and block), with the strategy inferred from what bodies may wait on, plus library `tasks` and `select`.
-  - Reviews of it: `docs/design/proposals/concurrency/unified/sol-check.md` and `docs/design/proposals/concurrency/unified/grok-review.md`.
+  - Reviews of it: `docs/design/proposals/concurrency/unified/soundness-check.md` and `docs/design/proposals/concurrency/unified/review-one-parallel.md`.
   - David hasn't decided anything in it. He wants this big-picture pass first, and he's skeptical of accumulating many overlapping loop- or capture-shaped constructs.
 - **Already decided by David:**
   - parallel-safety of callback parameters is inferred, with no required tag;

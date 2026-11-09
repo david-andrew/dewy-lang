@@ -2,7 +2,7 @@
 
 Decided 2026-10-23. This restricted, type-directed rule replaces the reference's
 fully general juxtaposition design (operators-and-precedence.md:24-35). It came
-from a brainstorm with Astra and Sol, reviewed by David.
+from a design brainstorm, reviewed by David.
 
 ## Eligible forms
 

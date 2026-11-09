@@ -1,4 +1,4 @@
-# Astra — concurrency design, round 1
+# Concurrency design, round 1 (independent pass)
 
 ## BLUF
 
@@ -14,7 +14,7 @@
 
 ## Review contract
 
-- **Scope/acceptance:** independently review Sol decisions 1–15, both flags, #118 and #114; distinguish accepted rules, current code, and new recommendations; list candidate spellings. All 19 sections follow below.
+- **Scope/acceptance:** independently review the round-0 decisions 1–15, both flags, #118 and #114; distinguish accepted rules, current code, and new recommendations; list candidate spellings. All 19 sections follow below.
 - **Owned file:** this scratch document only. **Non-goals:** implementation, repository edits, commits, a new scheduler, a new general proof system, or running performance experiments. **Budget:** one focused read-only session.
 - **Authority:** David's 10-26 answers supersede older status prose. In particular #63 accepts noncanceling `lock`, #65 the certificate spellings, #72 layered services, #80 preservation of a child's causal error, and #110 the provisional task-backend setting. The opening ordinary-runtime-check language in `effects.md` predates the ledger's no-traps decision.
 - **Evidence:** source inspected at HEAD `42a7ce9b1`; no compiler or benchmark runs. Examples of stage-4 APIs, collection, and tags below are proposed Dewy, not claims of current acceptance. Application helper names in examples are illustrative local functions, not proposed library members.
@@ -41,7 +41,7 @@
 - **New spellings needing approval:** `Full`, `Empty`, `Unsent<P>`, its `.reason` and `.value`; `Unpublished<T>` is explicitly not recommended. `Busy`, `Closed`, `Canceled` already exist.
 - **What it unblocks:** move-only transfers and explicit retry/storage without payload loss.
 - **Reversibility:** envelope names easy before release; ownership and error-matching semantics expensive afterward.
-- **Where I disagree with Sol and why:** one envelope suffices; the proposal needs to explain that wrapping cancellation changes catch behavior and that `try`/waiting failure sets differ.
+- **Where I disagree with round 0 and why:** one envelope suffices; the proposal needs to explain that wrapping cancellation changes catch behavior and that `try`/waiting failure sets differ.
 
 ## 2. SPSC construction and consuming split — agree, tighten uniqueness
 
@@ -62,7 +62,7 @@
 - **New spellings needing approval:** `spsc<T N>()`, `.split()`, `SpscSender<T N>`, `SpscReceiver<T N>`; confirm the concrete API of already design-named `Spsc<T N>`.
 - **What it unblocks:** a statically single-producer/single-consumer specialization.
 - **Reversibility:** names easy; unique endpoint ownership fundamental.
-- **Where I disagree with Sol and why:** the unsplit queue's copyability and the backing-storage lifetime must be explicit; endpoint `Send`/`Sync` facts alone do not establish either.
+- **Where I disagree with round 0 and why:** the unsplit queue's copyability and the backing-storage lifetime must be explicit; endpoint `Send`/`Sync` facts alone do not establish either.
 
 ## 3. SPSC verbs and closure — agree
 
@@ -83,7 +83,7 @@
 - **New spellings needing approval:** `.try_send`, `.try_receive`, and the five members on these new endpoint types; `.send`, `.receive`, `.close` reuse existing channel vocabulary. Rejected aliases: `push`, `pop`, `finish` in this API.
 - **What it unblocks:** familiar expert transfers with an explicit nonwaiting path.
 - **Reversibility:** names easy; drain/drop behavior costly.
-- **Where I disagree with Sol and why:** no surface disagreement; qualify the whole-operation progress claim and specify cleanup of unread values after receiver loss.
+- **Where I disagree with round 0 and why:** no surface disagreement; qualify the whole-operation progress claim and specify cleanup of unread values after receiver loss.
 
 ## 4. MPMC — improve progress and ordering contract
 
@@ -100,7 +100,7 @@
   ```
 
 - Concrete problem: producer A reserves the next slot and pauses before publishing; producer B publishes a later slot and returns. A consumer cannot truthfully report `Empty` after B's completed send, cannot preserve FIFO by skipping A, and cannot meet `no blocks` by waiting for A. Return `Busy`, or implement a genuinely helping algorithm with a proved contract.
-- Crossbeam's actual source separates reservation from publication and contains stamp-wait loops. My conclusion is that directly porting that algorithm cannot establish Sol's stronger nonwaiting contract. [Crossbeam ArrayQueue source](https://docs.rs/crossbeam-queue/latest/src/crossbeam_queue/array_queue.rs.html)
+- Crossbeam's actual source separates reservation from publication and contains stamp-wait loops. My conclusion is that directly porting that algorithm cannot establish round 0's stronger nonwaiting contract. [Crossbeam ArrayQueue source](https://docs.rs/crossbeam-queue/latest/src/crossbeam_queue/array_queue.rs.html)
 - For the first implementation, bound contention retries and return `Busy` without consuming the payload. Strong CAS can avoid spurious-failure ambiguity. Reuse decision 1's envelope with `reason=Busy` for sends. Blocking wrappers retry/park and expose cancellation.
 - Concurrent sends may linearize in either order; a send completed before another begins must retain that order. Per-producer FIFO alone is unnecessarily weaker and complicates the meaning of readiness and selection.
 - Keep copyable `Send`/`Sync` handles when `T: Send`; explicit `.close()` while handles remain. Close must participate in the commit protocol, so a stalled reservation cannot make a receive announce final `Closed` before a committed item appears.
@@ -109,7 +109,7 @@
 - **New spellings needing approval:** `mpmc<T>(capacity)`, the five queue members on `Mpmc<T>`; confirm `Mpmc<T>`'s concrete API. `Busy` is reused with new documented outcomes.
 - **What it unblocks:** truthful `no blocks`, stable ordering, and a benchmark with explicit contention semantics.
 - **Reversibility:** implementation can improve; weakening shipped progress/order claims is hard.
-- **Where I disagree with Sol and why:** its lock-free assertion is unsupported, and “FIFO per producer” underspecifies a queue otherwise discussed in linearization terms.
+- **Where I disagree with round 0 and why:** its lock-free assertion is unsupported, and “FIFO per producer” underspecifies a queue otherwise discussed in linearization terms.
 
 ## 5. Sequencer publishing — improve atomicity and lifecycle
 
@@ -134,7 +134,7 @@
 - **New spellings needing approval:** `sequencer<T N>()`, `.subscribe`, `.try_publish`, `.publish`, `.close`; confirm `Sequencer<T N>`. `.claim`/`.ack` deferred; no public sequence-number spelling proposed.
 - **What it unblocks:** bounded broadcast batches with a complete failure/closure contract.
 - **Reversibility:** names and writer serialization easy; accepted-data delivery semantics hard.
-- **Where I disagree with Sol and why:** “complete or tombstone on internal failure” is not enough to guarantee all-or-nothing delivery; registration and subscriber disappearance also need enforceable rules.
+- **Where I disagree with round 0 and why:** “complete or tombstone on internal failure” is not enough to guarantee all-or-nothing delivery; registration and subscriber disappearance also need enforceable rules.
 
 ## 6. Sequencer readers — agree, tighten copy requirements
 
@@ -155,7 +155,7 @@
 - **New spellings needing approval:** `SequenceReader<T N>`, `.try_next`, `.next`; acknowledgment and sequence-access members deferred.
 - **What it unblocks:** safe fan-out without exposed slot lifetimes.
 - **Reversibility:** names easy; broadcast and copy semantics costly.
-- **Where I disagree with Sol and why:** `T: Send` and copyable does not alone justify simultaneous source-side copying, and copied identity handles are not deeply independent values.
+- **Where I disagree with round 0 and why:** `T: Send` and copyable does not alone justify simultaneous source-side copying, and copied identity handles are not deeply independent values.
 
 ## 7. SeqLock — agree with explicit representation and wrap obligations
 
@@ -181,7 +181,7 @@
 - **New spellings needing approval:** `seqlock(value)`, `.try_read`, `.read`, `.store`, `.update` on design-named `SeqLock<T>`; reuse `Busy`. No public atomic-copyable trait proposed.
 - **What it unblocks:** safe, allocation-free attempts for small read-mostly records.
 - **Reversibility:** eligibility can expand; coherent-value and cancellation promises costly.
-- **Where I disagree with Sol and why:** its wrap and callback phase contracts are incomplete; starting with arbitrary waiting callbacks under writer serialization expands the deadlock surface unnecessarily.
+- **Where I disagree with round 0 and why:** its wrap and callback phase contracts are incomplete; starting with arbitrary waiting callbacks under writer serialization expands the deadlock surface unnecessarily.
 
 ## 8. Snapshot registration, publication, reclamation — improve separation
 
@@ -205,7 +205,7 @@
 - **New spellings needing approval:** `snapshot(value)`, `.reader`, `.publish`, `.collect` on design-named `Snapshot<T>`; no extra preparation or reclamation members proposed in this round.
 - **What it unblocks:** a cheap registered read with explicit lifetime and reclamation ownership.
 - **Reversibility:** reclamation machinery replaceable if costs/contracts hold; lifetime guarantees expensive.
-- **Where I disagree with Sol and why:** keep reclamation off publish initially, and make the last-owner case explicit; bounded pin release is otherwise defeated by hidden final destruction.
+- **Where I disagree with round 0 and why:** keep reclamation off publish initially, and make the last-owner case explicit; bounded pin release is otherwise defeated by hidden final destruction.
 
 ## 9. `SnapshotReader.load` and `Version.value` — agree, narrow transfer initially
 
@@ -230,7 +230,7 @@
 - **New spellings needing approval:** `SnapshotReader<T>`, `.load`, `Version<T>`, `.value`; approve the scoped semantics separately from those names.
 - **What it unblocks:** stable reads of nontrivial values without per-load allocation.
 - **Reversibility:** permitting more proven transfers later is easy; accepting dangling pins first is not.
-- **Where I disagree with Sol and why:** its move-only `Send` version plus reader-bound lifetime needs an additional proof rule. The initial safe subset should not promise it implicitly.
+- **Where I disagree with round 0 and why:** its move-only `Send` version plus reader-bound lifetime needs an additional proof rule. The initial safe subset should not promise it implicitly.
 
 ## 10. Public `Freeze` property — agree to defer
 
@@ -250,7 +250,7 @@
 - **New spellings needing approval:** none recommended now; `Freeze` explicitly deferred, not reserved or approved by this review.
 - **What it unblocks:** correct eligibility without a second public property vocabulary.
 - **Reversibility:** adding a public predicate later easy; weakening immutability costly.
-- **Where I disagree with Sol and why:** no directional disagreement; require diagnosable proof and strict-mode handling, not an invisible convenience assumption.
+- **Where I disagree with round 0 and why:** no directional disagreement; require diagnosable proof and strict-mode handling, not an invisible convenience assumption.
 
 ## 11. Contextual `select` and `_` — agree, tighten evaluation/ownership
 
@@ -273,7 +273,7 @@
 - **New spellings needing approval:** contextual `select`, operation-arm grammar, and `_`'s readiness meaning. Existing `match`, `=>`, `_`, and `=` tokens are reused; `select` is the sole new contextual word recommended here.
 - **What it unblocks:** multi-channel waits without cancel-unsafe partially executed operations.
 - **Reversibility:** syntax easy before adoption; evaluation/move semantics hard.
-- **Where I disagree with Sol and why:** its source-order preparation is right, but “stable temporary” does not itself solve conditional moves or prove a simultaneous fallback observation.
+- **Where I disagree with round 0 and why:** its source-order preparation is right, but “stable temporary” does not itself solve conditional moves or prove a simultaneous fallback observation.
 
 ## 12. Arm binding and send success — replace the `none` conversion
 
@@ -293,12 +293,12 @@
 - The example uses today's Channel result. If David adopts lossless Channel failures (flag B), its send branch instead handles `failed:Unsent<Message>` and `failed.value`. That is an API decision, not a select-specific conversion.
 - Bind/select the same outcome representation ordinary `let result = operation` / `match operation` use. A `void` success contributes no expressed value of its own; the arm body may still produce `"sent"`. If ordinary outcome binding has an implementation gap, fix that generally or initially require an unbound send arm; do not create a select-only `none` rule.
 - Arm bodies follow the existing sink/arity rules. A collector gathers their values; a one-value context requires one on every completing path; multi-value bindings require compatible fixed counts. No wrapper record is mandated.
-- **Alternatives considered:** Sol's success `none` — visually simple, but confuses absence with successful no-value completion and violates substitution expectations.
+- **Alternatives considered:** Round 0's success `none` — visually simple, but confuses absence with successful no-value completion and violates substitution expectations.
 - **Alternatives considered:** send failures always escape the whole select — simpler, but removes useful arm-local recovery of the failed payload.
 - **New spellings needing approval:** arm-local `name = operation()` binding rule; no new outcome type/value. Proposed local `none` conversion rejected.
 - **What it unblocks:** consistent local error handling and ordinary multi-expression composition.
 - **Reversibility:** binding syntax easy; special conversions become costly to remove.
-- **Where I disagree with Sol and why:** the existing language already has `void | E`; a second meaning for success inside one construct is unnecessary.
+- **Where I disagree with round 0 and why:** the existing language already has `void | E`; a second meaning for success inside one construct is unnecessary.
 
 ## 13. Select cancellation and close — agree, define the race precisely
 
@@ -322,7 +322,7 @@
 - **New spellings needing approval:** none beyond decision 11; cancellation, fallback, and close arbitration are semantic approvals.
 - **What it unblocks:** cancellation/close litmus tests with an unambiguous ownership outcome.
 - **Reversibility:** costly after users rely on commit behavior.
-- **Where I disagree with Sol and why:** agree in direction; add a resolution point for fallback and distinguish arm resolution from data transfer.
+- **Where I disagree with round 0 and why:** agree in direction; add a resolution point for fallback and distinguish arm resolution from data transfer.
 
 ## 14. `no blocks` and `$no_deadlocks` — agree, remove blanket primitive exemptions
 
@@ -348,7 +348,7 @@
 - **New spellings needing approval:** none; reuse `& no blocks`, `& no allocates`, `& no panics`, `$no_deadlocks`. Positive `& blocks` remains disallowed. This review proposes no new strictness opt-out tags.
 - **What it unblocks:** stage-4 APIs that do not bypass existing safety analyses.
 - **Reversibility:** analysis representation flexible; shipped effect/certificate guarantees costly.
-- **Where I disagree with Sol and why:** its categorical syscall ban is too broad, and some proposed try/read/select implementations need more than “does not park” to exclude `blocks`.
+- **Where I disagree with round 0 and why:** its categorical syscall ban is too broad, and some proposed try/read/select implementations need more than “does not park” to exclude `blocks`.
 
 ## 15. Nightly and performance gates — agree on verification, stage thresholds
 
@@ -376,7 +376,7 @@
 - **New spellings needing approval:** none; tool names and benchmark labels are not language surface.
 - **What it unblocks:** reproducible safety evidence and honest performance acceptance.
 - **Reversibility:** tooling/budgets/targets adjustable; required invariants remain.
-- **Where I disagree with Sol and why:** agree on actual-core exploration; stage numeric gates after baseline equivalence, and do not conflate bounded testing with strict proof.
+- **Where I disagree with round 0 and why:** agree on actual-core exploration; stage numeric gates after baseline equivalence, and do not conflate bounded testing with strict proof.
 
 ## Flag A. `Mutex.lock` versus cancellation — preserve David's accepted exception
 
@@ -397,7 +397,7 @@
 - **New spellings needing approval:** none recommended.
 - **What it unblocks:** consistent implementation without reopening an already answered question.
 - **Reversibility:** changing cancellation behavior later is source- and behavior-sensitive.
-- **Where I disagree with Sol and why:** its flag predates the explicit acceptance. Preserve the decision, and distinguish blocking effects from cancellation points.
+- **Where I disagree with round 0 and why:** its flag predates the explicit acceptance. Preserve the decision, and distinguish blocking effects from cancellation points.
 
 ## Flag B. Failed `Channel.send` payload recovery — decide before move-only select
 
@@ -420,7 +420,7 @@
 - **New spellings needing approval:** no additional name beyond decision 1; the changed Channel `.send` result is a separate semantic approval. No second send verb recommended.
 - **What it unblocks:** coherent move-only messaging, including selected failed sends.
 - **Reversibility:** substantial before release but manageable; costly after error handlers proliferate.
-- **Where I disagree with Sol and why:** don't silently change Channel, but don't defer the decision past the stage-4 ownership design either. This round should ask David to approve the migration direction.
+- **Where I disagree with round 0 and why:** don't silently change Channel, but don't defer the decision past the stage-4 ownership design either. This round should ask David to approve the migration direction.
 
 ## #118. Gathering task results — retain `concurrent` in the comprehension
 
@@ -451,7 +451,7 @@
 - **New spellings needing approval:** **no new keyword**; the new grammar `[concurrent x in xs body]` and its gather/failure contract need approval. Reuse existing errors. No new lane-setting name proposed.
 - **What it unblocks:** ordered many-task results without a result Channel/Mutex scaffold.
 - **Reversibility:** grammar easy; failure policy and sequential-execution permission hard.
-- **Where I disagree with Sol and why:** agree with the comprehension direction, but include body errors and specify admission, failure, ordering, and cleanup. “Like asyncio.gather” is too imprecise to define Dewy's already structured semantics.
+- **Where I disagree with round 0 and why:** agree with the comprehension direction, but include body errors and specify admission, failure, ordering, and cleanup. “Like asyncio.gather” is too imprecise to define Dewy's already structured semantics.
 
 ## #114. Passing callback parameters into parallel calls — prefer inference
 
@@ -501,11 +501,11 @@
 - **New spellings needing approval:** none for inference with existing rows; optional `$parallel_safe` and its precise scope/meaning if selected. `$parallel`, `$thread_safe`, and hypothetical row atoms `parallel_safe`/`thread_safe` are evaluated alternatives, not recommended additions. `PureStep`, `apply`, and `myfn` are local example names.
 - **What it unblocks:** ordinary higher-order parallel helpers, including safe first-class wrapper functions, without Sloppy syntax or a blanket trust flag.
 - **Reversibility:** inferred internal summaries easy to evolve; exported callable constraints and tag meaning require compatibility care.
-- **Where I disagree with Sol and why:** the coordinator's marker proposal exposes an implementation workaround. Solve the underlying per-parameter contract; use a marker only as optional explicit documentation/verification, not as the gate that turns on safety checking.
+- **Where I disagree with round 0 and why:** the coordinator's marker proposal exposes an implementation workaround. Solve the underlying per-parameter contract; use a marker only as optional explicit documentation/verification, not as the gate that turns on safety checking.
 
 ## Evidence and handoff notes
 
-- Primary local sources: `docs/design/{safety_and_concurrency,effects,decisions,resource_exhaustion,multi_expressions}.md`; concurrency sections of `docs/LANGUAGE.md`; requested pending questions; Sol's stage-4 proposal and M:N plan; the earlier concurrency research report. Older research claims are background, not fresh verification of external runtimes.
+- Primary local sources: `docs/design/{safety_and_concurrency,effects,decisions,resource_exhaustion,multi_expressions}.md`; concurrency sections of `docs/LANGUAGE.md`; requested pending questions; the round-0 stage-4 proposal (`primitives-proposal.md`) and M:N plan; the earlier concurrency research report. Older research claims are background, not fresh verification of external runtimes.
 - Implementation anchors: `compiler/concurrency.jo:139` (wait summaries), `:209` (callback checks), `:250` (task/parallel finalization); `compiler/lower.jo:1831` (race checks and forwarding restriction); `compiler/dewy_nodes.jo:542` (task-scope expansion); `lib/std/thread.jo:43` (parallel library), `:221` (noncanceling mutex acquire), `:314` (channel send); `lib/std/tasks.jo:148` (spawn/join); `lib/prelude/{channels,locks}.dewy` (public wrappers). Stage-4 primitives were not found in `lib/` or `compiler/` during this inspection.
 - Cross-cutting implementation acceptance: control outcomes must stay distinguishable when payload types overlap `Empty`, `Busy`, `Closed`, or `Canceled`; decision 1 recommends an explicit first-slice restriction, with ordinary record wrapping available. No implicit sentinel ambiguity, guessed capacity, hidden allocation, or “counter cannot wrap in practice” may become an unlisted strict-mode assumption.
 - Round-2 reconciliation priorities: MPMC nonwaiting progress; sequencer commit/drop invariants; ordinary `void` outcome binding in select; Channel error migration; inferred callback constraints versus an optional tag. Each has a recommendation above, not an open-ended request for another design brainstorm.

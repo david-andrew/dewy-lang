@@ -1,6 +1,6 @@
-# Claude (Opus) critical pass on Grok's critique of v4
+# Critical pass on the v4 critique
 
-## Points to adopt from Grok
+## Points to adopt from the critique
 - **`Instant` storage:** plain `Instant` = int128 count of 1 ns ticks since J0. int64 ns only spans 1685–2269, which fails the 10,000-year priority. `width=64` stays an explicit packed form.
 - **Elapsed time is monotonic:** `now - start` uses the monotonic sample, and wall time is `.nominal`. The type change at `.nominal` is the fix for Go's hidden-monotonic bug.
 - **No `L_G` or leap-table work in `now`:** it uses one cached offset.
@@ -18,7 +18,7 @@
 - **A discrete successor on `Instant`;** density only on `Coordinate`.
 - **Prior-art table:** keep the Go, jiff, Temporal and C++ chrono lessons.
 
-## Where I disagree with Grok or would change its proposal
+## Where I disagree with the critique or would change its proposal
 
 1. **Edition in a "project file"** conflicts with David's "everything in `.dewy` source".
    - Use a main-file metatag, `$edition = 2026`, set like `$build`/`$target`: a statement sets it, an expression checks it.
@@ -30,7 +30,7 @@
      - `Instant + 1day` and `sleep(1day)` give 86400 s;
      - `ZonedDateTime + 1day` and `Date + 1day` give a calendar day, the same local time tomorrow under the scope's gap/fold policy;
      - `month` and `year` stay calendar-only, as already decided.
-   - The trap Grok worries about, `meeting + 1day` drifting across DST, is exactly the zoned case, and it gets the civil meaning.
+   - The trap the critique worries about, `meeting + 1day` drifting across DST, is exactly the zoned case, and it gets the civil meaning.
    - This needs David's decision.
 3. **Lazy clock acquisition makes the first `now` fallible,** which reintroduces an error branch.
    - Keep v4's entry acquisition, but only for providers the program statically reaches.
@@ -41,7 +41,7 @@
    - A deadline must never be serialized as an `Instant` without `.nominal`.
 5. **`age` defaulting to `leap_day='march_1'`:** jurisdictions differ (e.g. Feb 28 in some), so a silent convention here contradicts least surprise.
    - Keep the default only for `age`, which counts completed anniversaries, and note it under `$time.require_profile`.
-   - `legal_age` always requires a jurisdiction. Grok already says this; just make sure the docs don't blur the two.
+   - `legal_age` always requires a jurisdiction. The critique already says this; just make sure the docs don't blur the two.
 6. **`Coordinate<Scale>` as a rational** keeps a rational in the language. It's acceptable because it is opt-in and science-only, but name the cost: it allocates and has a variable denominator.
    - Alternative: `Instant<tick=…>` with caller-named ticks covers most uses.
    - Keep `Coordinate` only for exact affine scale maps (TT↔TCG, TCB↔TDB) and uncertainty work.

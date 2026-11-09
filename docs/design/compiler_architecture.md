@@ -1,6 +1,6 @@
 # Lean compiler architecture (Track B1)
 
-Round 3, 2026-10-22, revises `b8690d021` against both Sol audits, B0 and
+Round 3, 2026-10-22, revises `b8690d021` against both audits, B0 and
 `97f57afad`'s evidence. Scope/ownership: this document only. Acceptance: preserve
 round-2 correctness and specify a converging, falsifiable migration. Budget:
 60 minutes; no implementation, surface changes, persistent cache or rewrite.
@@ -265,8 +265,8 @@ No pass-removal assumption finances this row. Require semantic goldens and ≤3%
 runtime regression on named default/release kernels, including 101.
 
 **2 — `fact_call_effects` → effect footprints.** Own `facts.jo:587`'s call kill
-and `effects.jo`'s footprint export only. Build on Opus's `wt/effectsfast`
-effects-bitset summaries and Astra's queued `e27a24739` demand-driven facts;
+and `effects.jo`'s footprint export only. Build on the `wt/effectsfast`
+effects-bitset summaries and the queued `e27a24739` demand-driven facts;
 reprofile their combined landing
 before claiming incremental savings. Export one generation-tagged, settled footprint
 per instance: interned place bases, content/length/storage/sharing epochs and opaque
@@ -354,7 +354,7 @@ states.*
   Track A: the five structural fixes (milestone: flagship median ≥ 50k lines/s
   single-thread). Track B: B0 per-phase per-node cost budgets gated on the
   flagship panel (~1.2k instructions/node total); B1 an architecture design
-  (docs/design/compiler_architecture.md; Astra designs, Sol audits; internal
+  (docs/design/compiler_architecture.md; one pass designs, another audits; internal
   architecture needs no sign-off, so B2 starts once the audit agrees the budgets
   can plausibly reach the goal); B2 phase-by-phase migration behind stable interfaces, most
   expensive first; B3 new import-cycle-leaf modules written in Dewy. Track C:

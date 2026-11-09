@@ -283,7 +283,7 @@ let pin = secure_random([0..1_000_000)) or_throw   # secret<int64> | NoEntropy
 | `$audited_wait`, `$assume_external_wait` | `$assume_extern_never_waits_on_tasks` | LANGUAGE, assumptions, safety_and_concurrency | bulletproof |
 | `$no_assumed_waits` | `$no_unverified_extern_waits` | none | bulletproof |
 | `$assume_local_asserts=false`, `$explicit_local_panics`, `$count_local_asserts_as_panics` | `$prove_local_asserts` | LANGUAGE, assumptions, `lib/directives.dewy` | bulletproof |
-| `$no_assumed_bounds`, `$prove_size_bounds` | `$prove_no_counter_overflow` | LANGUAGE, assumptions, `lib/directives.dewy` | bulletproof, time/astra-review |
+| `$no_assumed_bounds`, `$prove_size_bounds` | `$prove_no_counter_overflow` | LANGUAGE, assumptions, `lib/directives.dewy` | bulletproof, time/review-representation-performance |
 | `$no_nan_or_inf` | `$finite_floats` (kept by David) | none | bulletproof |
 | `$explicit_graphics_failure`, `$explicit_environment_failure`, `$verify_protocols`, `$prove_finite_inputs` | Removed (batch 3) | none outside decisions.md | bulletproof |
 | `$prove_library`, `_obligations`, `_cleanup` | `$no_trusted_library`, `$prove_library_runtime_checks`, `$prove_library_drop_cannot_fail` | none | bulletproof |

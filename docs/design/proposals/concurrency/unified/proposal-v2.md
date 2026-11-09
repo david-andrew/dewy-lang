@@ -1,6 +1,6 @@
 # One `parallel`: a unified concurrency surface for Dewy (proposal v2, 2026-11-01)
 
-v2 folds in Grok's review (`grok-review.md`) and Sol's soundness check (`sol-check.md`). Where the reviewers disagreed with v1, §6 shows both sides.
+v2 folds in the surface review (`review-one-parallel.md`) and the soundness check (`soundness-check.md`). Where the reviewers disagreed with v1, §6 shows both sides.
 
 ## BLUF
 
@@ -46,7 +46,7 @@ v2 folds in Grok's review (`grok-review.md`) and Sol's soundness check (`sol-che
     - the forcing call is not an obvious wait (`sleep`, `send`, `receive`, `lock`, `within`, `select`), for example a logging helper that turned out to wait on a lock;
     - the strategy is task-per-item and the trip count is large or unknown.
   - Nothing warns on every `parallel`. `& no blocks` pins a hot path to the pool.
-- **The runtime's duties (Sol):**
+- **The runtime's duties (soundness check):**
   - a parked task releases its worker;
   - opaque foreign blocking gets compensating capacity, or a hard error;
   - long CPU stretches inside tasks get preemption (threads) or safepoints (M:N);
@@ -270,9 +270,9 @@ main = () => {
     printl"{[parallel i in [0..2) step(ch i)]}"   # [42 0]: item 0 waits for item 1
 }
 ```
-- **v1 (Claude):** any `blocks` in the body gives one task per item, unbounded. A separate concurrency cap was deferred.
-- **Grok:** that costs a stack per item, flips on harmless I/O, and drops GPU offload. Use three strategies keyed on "may park or unknown", with a default window.
-- **Recommendation:** Grok's three strategies (§1), surfaced in hover and `explain`, with no required tag. A cap metatag is deferred until a program needs one; the window covers the common case.
+- **v1 (original draft):** any `blocks` in the body gives one task per item, unbounded. A separate concurrency cap was deferred.
+- **Review:** that costs a stack per item, flips on harmless I/O, and drops GPU offload. Use three strategies keyed on "may park or unknown", with a default window.
+- **Recommendation:** the review's three strategies (§1), surfaced in hover and `explain`, with no required tag. A cap metatag is deferred until a program needs one; the window covers the common case.
 - **Spellings:** none new. This retires "a `parallel` body must not block".
 
 **C2. How are items written in the block form?**
@@ -288,9 +288,9 @@ main = () => {
     printl"{a} {b}"
 }
 ```
-- **v1 (Claude):** every top-level statement is an item.
-- **Grok:** then braces stop meaning "in order", and a stray statement silently becomes a racing item. Make each item a `let` or a `{…}` group, with a fix-it on a bare expression.
-- **Recommendation:** Grok's rule.
+- **v1 (original draft):** every top-level statement is an item.
+- **Review:** then braces stop meaning "in order", and a stray statement silently becomes a racing item. Make each item a `let` or a `{…}` group, with a fix-it on a bare expression.
+- **Recommendation:** the review's rule.
   - Braces keep meaning "sequential", and items are marked visibly.
   - `let` items bind after the join; reading another item's `let` is an error naming both.
   - Wrapping everything in braces (`parallel { {a} {b} }`) would hide the `let` results inside their inner blocks.
@@ -320,7 +320,7 @@ main = () => {
   - (a) it runs to completion (v1);
   - (b) it always stops, adding `Canceled` to every enclosing function, which is noise for every caller;
   - (c) it checks at chunk boundaries and stops only where the enclosing result type already carries `Canceled`.
-- **Recommendation:** (c). Grok asked for boundary checks, and (c) keeps them without adding new outcomes. A sibling's `or_throw` always stops chunks.
+- **Recommendation:** (c). The review asked for boundary checks, and (c) keeps them without adding new outcomes. A sibling's `or_throw` always stops chunks.
 - **Spellings:** none.
 
 **C5. Should `select` be a library function over operation values, used with `match`?**
@@ -338,15 +338,15 @@ main = () => {
     }
 }
 ```
-- **Tie-break, v1 (Claude):** the earliest argument wins, giving priority and deterministic tests.
-- **Tie-break, Grok:** priority starves a later op that is always ready, so choose fairly.
+- **Tie-break, v1 (original draft):** the earliest argument wins, giving priority and deterministic tests.
+- **Tie-break, review:** priority starves a later op that is always ready, so choose fairly.
 - **Recommendation:** `select` + `match`, with a **fair** random choice. The test runner fixes the seed. When priority is needed, call `try_receive` first.
 - **Spellings:** adds `select`, `Op<T>`, `.receiving`, `.sending(v)`, `timeout(d)` and `Sent` (on `Channel`, the `spsc` ends and `mpmc`). Removes the `select { x = … => … }` grammar.
 
 **C6. Does `op.then(f)` ship now?**
 - Example: `dispatch` in §3, which needs it to tell `control` closing from `jobs` closing.
-- **v1 (Claude):** defer it until a program needs it.
-- **Grok:** ship it now, because same-typed results and two `Closed`s are otherwise indistinguishable.
+- **v1 (original draft):** defer it until a program needs it.
+- **Review:** ship it now, because same-typed results and two `Closed`s are otherwise indistinguishable.
 - **Recommendation:** ship it now. Without it, two channels can't both be selected safely.
 - **Spellings:** adds `.then` on `Op`.
 
@@ -366,9 +366,9 @@ main = () => {
     printl"{total}"
 }
 ```
-- **v1 (Claude):** `loop x in rx` stops on `Canceled` with nothing to show for it, and `parallel x in rx` is uncapped.
-- **Grok:** that reports success after a partial consume, and an uncapped accept loop has no bound.
-- **Recommendation:** Grok's version.
+- **v1 (original draft):** `loop x in rx` stops on `Canceled` with nothing to show for it, and `parallel x in rx` is uncapped.
+- **Review:** that reports success after a partial consume, and an uncapped accept loop has no bound.
+- **Recommendation:** the review's version.
   - `loop x in rx` gives `void` at `Closed` and `Canceled` on cancel.
   - `parallel x in rx` is windowed.
 - **Spellings:** adds iteration over receivers, and a receiver loop's value (`void | Canceled`).

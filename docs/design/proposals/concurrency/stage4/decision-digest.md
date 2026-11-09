@@ -50,7 +50,7 @@
 - Try reasons: `Full`/`Closed`, plus MPMC `Busy`; waiting reasons: `Closed`/`Canceled`. Try operations do not observe cancellation.
 - Reject flattened receive payload types overlapping control alternatives initially; wrap such payloads in ordinary records.
 - Alternative: separate generic error types for each reason.
-- Astra/Sol: agree after removing redundant `Unpublished`.
+- Rounds 0 and 1: agree after removing redundant `Unpublished`.
 - **Unblocks:** move-only messages and unambiguous outcomes.
 
 ## 2. SPSC construction
@@ -58,7 +58,7 @@
 - **Recommend:** unique, noncopyable unsplit queue and ends; split consumes the queue; each endpoint has one exclusive operator. Positive compile-time capacity is exact, not necessarily stack storage.
 - Example: `let [tx rx] = spsc<Message 64>().split()`
 - Alternative: shared handle with runtime producer/consumer leases.
-- Astra/Sol: agree; round 0 omitted unsplit uniqueness.
+- Rounds 0 and 1: agree; round 0 omitted unsplit uniqueness.
 - **Unblocks:** safe single-producer specialization.
 
 ## 3. SPSC operations
@@ -66,7 +66,7 @@
 - **Recommend:** `try_send`, `send`, `try_receive`, `receive`, `close`; FIFO. Sender close/drop drains; receiver drop wakes failed senders and destroys unread items once. Waiting operations check established cancellation even when ready.
 - Example: `tx.send(message) or_throw` followed by `tx.close()`.
 - Alternative: `push`/`pop`/`finish` vocabulary.
-- Astra/Sol: agree; bounded bookkeeping excludes arbitrary payload hooks.
+- Rounds 0 and 1: agree; bounded bookkeeping excludes arbitrary payload hooks.
 - **Unblocks:** familiar bounded transfers and explicit polling.
 
 ## 4. MPMC
@@ -75,7 +75,7 @@
 - Example: `let queue = mpmc<Message>(64)`; `queue.try_send(message) or_throw`.
 - A stalled earlier reservation means `Busy`, not a false `Empty`; bound try retries. Waiting wrappers retry cancellably. No initial lock-free guarantee.
 - Alternative: helping algorithm with independently verified stronger progress.
-- Astra/Sol: agree; retract round-0 lock freedom and per-producer-only ordering.
+- Rounds 0 and 1: agree; retract round-0 lock freedom and per-producer-only ordering.
 - **Unblocks:** truthful nonwaiting queue API.
 
 ## 5. Sequencer publication
@@ -91,7 +91,7 @@
 
 - Success guarantees every live subscriber the batch; no tombstone may erase accepted data. Prepare before reservation; reserved installation cannot fail or call user code.
 - Alternative: public reservation/acknowledgment tokens.
-- Astra/Sol: agree after tightening commit/drop rules.
+- Rounds 0 and 1: agree after tightening commit/drop rules.
 - **Unblocks:** safe bounded broadcast batching.
 
 ## 6. Sequencer readers
@@ -99,7 +99,7 @@
 - **Recommend:** `try_next`/`next` return ordinary copied values; advance only after copying. Require `Send`, copyability, and proven simultaneous source-read safety; initially exclude unsupported fallible copy hooks. Copying identity handles still shares identity.
 - Example: `let event = audit.next() or_throw`
 - Alternative: scoped ring view plus explicit acknowledgment.
-- Astra/Sol: agree; retract round-0 promise of universally independent copies.
+- Rounds 0 and 1: agree; retract round-0 promise of universally independent copies.
 - **Unblocks:** fan-out without exposed slot lifetimes.
 
 ## 7. SeqLock
@@ -114,7 +114,7 @@
   ```
 - Initially require nonblocking, nonreentrant update callbacks; their external effects are not rolled back.
 - Alternative: immutable versions for arbitrary payloads.
-- Astra/Sol: agree; narrow callback eligibility and add wrap proof.
+- Rounds 0 and 1: agree; narrow callback eligibility and add wrap proof.
 - **Unblocks:** coherent cheap reads of small records.
 
 ## 8. Snapshot management
@@ -122,7 +122,7 @@
 - **Recommend:** explicit registration and collection. Publication prepares storage, swaps, and retires; collection/final owner teardown runs destruction. Owner outlives readers; collection never waits for pins. State retention bounds and resource-policy obligations.
 - Example: `let reader = state.reader()`; `state.publish(next_config)`; `state.collect()`.
 - Alternative: hidden registration and opportunistic reclamation.
-- Astra/Sol: agree after keeping destruction off publish initially.
+- Rounds 0 and 1: agree after keeping destruction off publish initially.
 - **Unblocks:** predictable registered reads and reclamation ownership.
 
 ## 9. Pinned Snapshot values
@@ -138,7 +138,7 @@
   ```
 
 - Alternative: copy `T` on every load.
-- Astra/Sol: agree after narrowing transfer promises.
+- Rounds 0 and 1: agree after narrowing transfer promises.
 - **Unblocks:** stable nontrivial reads without per-load allocation.
 
 ## 10. Deep immutability
@@ -146,7 +146,7 @@
 - **Recommend:** internal derived predicate; `Sync` and `const` do not establish immutable reachable state. Reject mutable shared handles in published values.
 - Example: `let state = snapshot([name="production" retries=3])`
 - Alternative: approve public `Freeze` now.
-- Astra/Sol: agree to defer that spelling.
+- Rounds 0 and 1: agree to defer that spelling.
 - **Unblocks:** safe eligibility without another public property.
 
 ## 11. Selection surface
@@ -162,7 +162,7 @@
   ```
 
 - Alternative: first-class operation values combined with `match`.
-- Astra/Sol: agree; fallback needs a validated observation across all arms.
+- Rounds 0 and 1: agree; fallback needs a validated observation across all arms.
 - **Unblocks:** atomic choice without partially executed calls.
 
 ## 12. Selection outcomes
@@ -180,7 +180,7 @@
   ```
 
 - Alternative: convert send success to `none` only here.
-- Astra/Sol: agree; retract that round-0 conversion.
+- Rounds 0 and 1: agree; retract that round-0 conversion.
 - **Unblocks:** consistent local failure recovery.
 
 ## 13. Selection cancellation and closure
@@ -188,7 +188,7 @@
 - **Recommend:** established cancellation wins before operand preparation. Later cancellation, transfer, closed-arm resolution, and fallback arbitrate once; winner stands. Cancellation runs no arm. Close readies sends; receives drain first. Remove losing registrations before return.
 - Example: `let value = (select { x = inbox.receive() => x }) or_throw`
 - Alternative: cancellation as an ordinary competing arm.
-- Astra/Sol: agree; one arm resolves, at most one payload transfers.
+- Rounds 0 and 1: agree; one arm resolves, at most one payload transfers.
 - **Unblocks:** precise close/cancel/fallback ownership tests.
 
 ## 14. Effects and certificates
@@ -196,7 +196,7 @@
 - **Recommend:** waiting for peer progress is `blocks`, including spins. Nonwaiting attempts require reviewed implementations; `_` alone cannot remove internal lock waits. Allocation, panics, latency, and deadlock freedom are separate obligations. Extend existing demanded analysis and protocol certificates, including ranked services accepted in #72.
 - Example: `poll = () => queue.try_receive()` can exclude `blocks` only with a proved nonwaiting core.
 - Alternative: exempt all “lock-free” primitives from wait analysis.
-- Astra/Sol: agree; retract blanket syscall exclusion.
+- Rounds 0 and 1: agree; retract blanket syscall exclusion.
 - **Unblocks:** honest hot-path rows and `$no_deadlocks`.
 
 ## 15. Verification and performance
@@ -205,7 +205,7 @@
 - Example: `tx.try_send(7) or_throw`; `let value = rx.try_receive() or_throw`; `$runtime_assert(value =? 7)`.
 - Match SPSC/Rigtorp, MPMC/Crossbeam, broadcast/Disruptor, channel/Go semantics. Calibrate throughput and tail targets; old 0.9×/1.25× ratios remain candidates.
 - Alternative: randomized stress alone.
-- Astra/Sol: agree after staging numeric gates.
+- Rounds 0 and 1: agree after staging numeric gates.
 - **Unblocks:** reviewable implementation acceptance.
 
 ## A. Mutex cancellation — already answered
@@ -213,7 +213,7 @@
 - **Recommend:** preserve #63: `lock` does not cancel; `lock_all` may. Level triggering applies to designated cancellation points.
 - Example: `let payload = @(m.lock())`; `let [a b] = @(lock_all(m n)) or_throw`.
 - Alternative: reopen `lock`'s result contract.
-- Astra/Sol: agree; my round-0 flag was stale.
+- Rounds 0 and 1: agree; my round-0 flag was stale.
 - **Unblocks:** consistent implementation without another approval.
 
 ## B. Failed Channel sends
@@ -221,7 +221,7 @@
 - **Recommend:** explicitly approve `Channel.send` → `void | Unsent<T>` alongside expert sends. Typed catches stay flat: `??<Canceled>` does not catch an envelope; inspect `.reason`. Preserve #80 causal-child-error reporting for canceled send failures.
 - Example: `match out.send(message) { failed:Unsent<Message> => save(failed.value) _ => {} }`
 - Alternative: retain current `void | Closed | Canceled`; reject move-only selected sends meanwhile.
-- Astra/Sol: agree to decide migration now; round 0 deferred it.
+- Rounds 0 and 1: agree to decide migration now; round 0 deferred it.
 - **Unblocks:** coherent recovery for selected move-only payloads.
 
 ## #118. Can gathering reuse `parallel`?
@@ -244,7 +244,7 @@
 - Renaming gather to `parallel` would replace per-item exception values with fail-fast group errors, add task-admission failure, and require concurrency support on targets currently using serial fallback. These are semantic changes, not scheduler optimizations.
 - Preserve errors per item with `[concurrent x in xs [value=work(x)]]`; outer cancellation/admission can still fail.
 - Alternative: redefine **all** `parallel` to guarantee structured concurrency. Coherent, but loses permission for arbitrary serial fallback and changes failure/admission/target contracts. Effect-based dual meanings make those contracts change with helper implementations.
-- Astra/Sol: agree; no round-0 position existed on this later question.
+- Rounds 0 and 1: agree; no round-0 position existed on this later question.
 - **Unblocks:** many ordered task results without Channel/Mutex scaffolding.
 
 ## #114. Tag spelling and `let`/`const`
@@ -265,7 +265,7 @@
 - Order: **tags → optional `let`/`const` → name → optional type → `=` → function**. Tag applies to one declaration; no callback means no extra obligation. Serial-only callback parameters stay unrestricted.
 - Initial direct-call restriction may remain until callable metadata carries requirements through partial application/indirection; later assignments must preserve them. `& no blocks` alone does not prove race or transfer safety.
 - Alternative: automatic forwarding inference without any required tag.
-- Astra/Sol: agree on spelling/meaning; Astra prefers inference first and a redundant optional tag. I favor the requested explicit bridge now, with automatic forwarding later.
+- Rounds 0 and 1: agree on spelling/meaning; round 1 prefers inference first and a redundant optional tag. I favor the requested explicit bridge now, with automatic forwarding later.
 - **Unblocks:** checked higher-order parallel helpers without Sloppy's `@parallel`.
 
 ## Spelling approvals — complete inventory

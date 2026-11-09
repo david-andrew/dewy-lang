@@ -1,6 +1,6 @@
 # Dewy's 80/20 performance model: synthesis (2026-11-01)
 
-This synthesis combines Astra (`astra.md`), Sol (`sol.md`) and Grok (`grok.md`), all in this folder, and comes after proposal-v2 and its reviews.
+This synthesis combines three independent designs, all in this folder: Design A (`design-a.md`), Design B (`design-b.md`) and Design C (`design-c.md`), and comes after proposal-v2 and its reviews.
 
 ## BLUF
 
@@ -13,10 +13,10 @@ This synthesis combines Astra (`astra.md`), Sol (`sol.md`) and Grok (`grok.md`),
 - **Explain is part of the language promise.** Hover and `explain` show what ran where and what blocked the next rung ("not parallelized: iteration 3 reads iteration 2's write"). All three reviewers rank this as essential as the syntax.
 - **Expert code replaces one leaf behind the same value interface:** SIMD types, atomics, lock-free queues, custom GPU kernels. This is the Rust "unsafe inside a safe API", Julia dispatch and Halide algorithm/schedule lesson.
 - **Two splits remain:**
-  - Should `parallel` items be allowed to wait on *each other*? Astra says yes. Grok says no, like Chapel's `forall`. Sol says you can't also bound memory then.
+  - Should `parallel` items be allowed to wait on *each other*? Design A says yes. Design C says no, like Chapel's `forall`. Design B says you can't also bound memory then.
   - Should GPU use ever be automatic?
 
-## Where other languages landed (Sol's survey, condensed)
+## Where other languages landed (Design B's survey, condensed)
 
 | Lesson | Who learned it | What Dewy takes |
 |---|---|---|
@@ -99,10 +99,10 @@ Expert leaves also include the lock-free queues (`spsc`, `mpmc`), `select`, and 
   let r = [parallel i in [0..2) step(i)]
   ```
 
-  - **(a) Yes.** This matches your reading ("they run at the same time"). The cost: the compiler can't bound memory when it can't tell which items wait on which, so it uses a task per item and `explain` warns on large or unknown counts. That's Astra's position.
-  - **(b) No.** A wait on a sibling is a compile error that names the call; use explicit channels between `tasks` instead. This is Chapel `forall` and Grok's position: memory stays bounded and strategies stay simple, but your example becomes an error.
-  - Rec: (a), since it's the reading you gave and the warning covers the cost. Sol notes that (a) means `$window` must be rejected when it conflicts with a sibling wait.
-- **B3. Is concurrent I/O fan-out spelled with the same `parallel`?** (Grok wants a separate `tasks.over(urls @fetch)`.)
+  - **(a) Yes.** This matches your reading ("they run at the same time"). The cost: the compiler can't bound memory when it can't tell which items wait on which, so it uses a task per item and `explain` warns on large or unknown counts. That's Design A's position.
+  - **(b) No.** A wait on a sibling is a compile error that names the call; use explicit channels between `tasks` instead. This is Chapel `forall` and Design C's position: memory stays bounded and strategies stay simple, but your example becomes an error.
+  - Rec: (a), since it's the reading you gave and the warning covers the cost. Design B notes that (a) means `$window` must be rejected when it conflicts with a sibling wait.
+- **B3. Is concurrent I/O fan-out spelled with the same `parallel`?** (Design C wants a separate `tasks.over(urls @fetch)`.)
   - Rec: same word. One concept, "these at the same time"; the strategy is a representation.
 - **B4. GPU:** explicit placement (`$device = 'gpu'` or `xs.to(dev)`) first; automatic offload only later, behind a cost and residency model.
   - Rec: yes.
@@ -112,11 +112,11 @@ Expert leaves also include the lock-free queues (`spsc`, `mpmc`), `select`, and 
   - Rec: yes.
 - **B7. `explain` and actionable "why not" diagnostics** are a language deliverable, shipped before more concurrency surface.
   - Rec: yes.
-- **B8. Keep the block form `parallel { let a = f()  { … } }`** for running different things at once, e.g. producer plus consumer. It replaces `concurrent {}` + `spawn`. Grok calls it a third construct.
+- **B8. Keep the block form `parallel { let a = f()  { … } }`** for running different things at once, e.g. producer plus consumer. It replaces `concurrent {}` + `spawn`. Design C calls it a third construct.
   - Alternative: `tasks` only.
   - Rec: keep. It's the same word and replaces two keywords.
 
-**Effect on C1–C11:** B2 decides C1. C4 (cancellation that depends on the result type) gets rethought, since Sol finds it unstable. C7's default window on receivers applies only when items are independent. The rest stand.
+**Effect on C1–C11:** B2 decides C1. C4 (cancellation that depends on the result type) gets rethought, since Design B finds it unstable. C7's default window on receivers applies only when items are independent. The rest stand.
 
 ## 80/20 beyond concurrency
 

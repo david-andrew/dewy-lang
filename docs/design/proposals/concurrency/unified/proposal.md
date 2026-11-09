@@ -39,7 +39,7 @@
   - *Cancellation* adds nothing to the construct's type, because scopes report it at their boundaries (§5).
   - When a helper starts to block, the loop silently moves from the pool to tasks. Its *cost* changes and its *meaning* does not. That is the whole point of having no colours.
   - When the cost matters, say so with `& no blocks` on the helper or the callback type.
-- **The runtime's duties (from Sol's soundness check):**
+- **The runtime's duties (from the soundness check):**
   - a waiting task releases its worker;
   - opaque foreign blocking gets compensating capacity, or a diagnostic;
   - long CPU stretches inside tasks get preemption (on the threads backend) or safepoints (M:N);
@@ -316,7 +316,7 @@ Each decision lists its new and removed spellings. All of them are reversible be
    - *Spellings:* none.
 4. **Long-lived groups go through the library: `tasks(body)`, `Tasks`, `g.spawn(@f(x))`, `g.cancel`.**
    - *Recommend:* yes.
-   - *Alternative names:* `scope`/`Scope` (Sol's suggestion), `nursery`, `group`.
+   - *Alternative names:* `scope`/`Scope` (the soundness check's suggestion), `nursery`, `group`.
    - *Removes* `concurrent g {…}`, `spawn(g) e`, `cancel(g)` and `TaskGroup`.
 5. **`select(ops…)` + `match`, with `Op<T>`, `ch.receiving`, `ch.sending(v)` and `timeout(d)` (also on `spsc` ends and `mpmc`).**
    - *Recommend:* yes, with argument order as priority.
