@@ -5446,6 +5446,8 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         if fns[f].ptypes.len() != 2 or (it0 != T_INT and it0 != T_IVEC2 and it0 != T_IVEC3) or tkind(fns[f].ptypes[1]) != .struct_:
             fatal(nodes[a].pos, "a compute function takes (id: int, params: P), P a struct (or id: ivec2 or ivec3, over a grid)")
         if tkind(int(fns[f].ret)) != .void_: fatal(nodes[a].pos, "a compute function returns nothing: it writes its results into GPU buffers")
+        if fns[f].decl != 0 and files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy and not pos_in_lib(nodes[int(fns[f].decl)].pos):
+            gpu_word_memory(fns[f].ptypes[1], dt(prune(fns[f].ptypes[1])), nodes[a].pos, 0)
         exact_shader_roots.push(f)
         ref = mk(.fnref, nodes[a].pos)
         nodes[ref].sym = nodes[a].sym
@@ -8224,6 +8226,29 @@ bc_body1 = (tmpl: int, arrs: str[], pre: str, epre: str, out: str, stretched: bo
     nodes[asg].op = i32(int(Tok.assign))
     body.push(asg)
     body
+
+# What a GPU function reads and writes in GPU memory -- its parameters' struct and the elements of
+# the buffers in it -- shaders hold in 32-bit words: a 64-bit integer there would lose its high
+# word (5000000000 reads as 705032704), so it is an error naming the 32-bit type to use. `what`
+# names the place. O(fields).
+gpu_word_memory = (t0: int, what: str, pos: int, depth: int):
+    t = representation_type(prune(t0))
+    if depth > 8: return
+    k = types[t].kind
+    if k == .int_ and int(types[t].bits) > 32:
+        want = if types[t].sign: "int32" else: "uint32"
+        fatal(pos, "`{what}` is {dt(t)} in GPU memory, which shaders read and write as 32-bit words: declare it `{want}`, a width a shader holds whole")
+    if k == .fixed: gpu_word_memory(int(types[t].elem), "{what}[i]", pos, depth + 1)
+    if k != .struct_: return
+    si = int(types[t].st)
+    if is_lib_texture(si): return
+    if is_gpu_buffer(t):
+        gpu_word_memory(gpu_buffer_elem(t), "{what}[i]", pos, depth + 1)
+        return
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        gpu_word_memory(int(fields[f].type), "{what}.{name_of(int(fields[f].name))}", pos, depth + 1)
 
 gpu_buffer_elem = (t0: int) -> int:
     si = int(types[prune(t0)].st)

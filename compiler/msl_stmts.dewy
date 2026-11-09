@@ -9,9 +9,9 @@ from p"checker_tokens.dewy" import (Tok)
 from p"checks_assign_hooks.dewy" import (block_value)
 from p"checks_thin_expr.dewy" import (is_gpu_buffer)
 from p"expr.jo" import (CV gpu_buffer_elem ntype)
-from p"glsl.jo" import (sl_turns_fns)
+from p"glsl.jo" import (sl_exact_defs sl_turns_fns)
 from p"glsl_emit.dewy" import (gl_narrow gl_struct_fields)
-from p"glsl_ops.dewy" import (gl_store_check gl_unsigned ind sl_type)
+from p"glsl_ops.dewy" import (gl_store_check gl_unsigned ind sl_exact_range sl_type)
 from p"glsl_stmts.dewy" import (gl_binop gl_compound_op sl_hypot_body)
 from p"msl.jo" import (MlRef ml_decls ml_dumped ml_float ml_lref ml_math_names ml_out ml_stage ml_temps ml_utype)
 from p"msl_emit.dewy" import (ml_as ml_block ml_compare ml_field_offset ml_fn ml_gbuf_elem ml_gbuf_store ml_int ml_intrinsic ml_mat_from ml_floor ml_reset ml_sdiv ml_shift_decls ml_target ml_type ml_varyings ml_zero)
@@ -136,6 +136,7 @@ ml_stmt=(s:MslStmtWord depth:MslStmtWord):>void=>$unsafe {
     if k =? 'vardecl' {
         if nodes.ptr[s].nlist >? 0 {ml_err(nodes.ptr[s].pos "tuple destructuring is not supported in shaders")}
         let l=MslStmtWord(nodes.ptr[s].sym)
+        if prune(MslStmtWord(locals.ptr[l].type)) =? T_MATH_INT {sl_exact_defs[l]=s}
         let t=MslStmtWord(locals.ptr[l].type)
         if prune(t) =? ml_utype {
             # (another name for the uniforms, or a part of them: their address)
@@ -224,6 +225,7 @@ ml_stmt=(s:MslStmtWord depth:MslStmtWord):>void=>$unsafe {
     else if k =? 'for_' {
         if nodes.ptr[s].aux not=? 0 {ml_err(nodes.ptr[s].pos "only `loop i in [a..b)` loops and loops over fixed-size arrays are supported in shaders")}
         let l=MslStmtWord(nodes.ptr[s].sym)
+        if prune(MslStmtWord(locals.ptr[l].type)) =? T_MATH_INT {sl_exact_defs[l]=s}
         let it=MslStmtWord(nodes.ptr[s].a)
         let v=ml_local(l)
         let cmp="<"
@@ -252,8 +254,11 @@ ml_stmt_if=(e:MslStmtWord depth:MslStmtWord):>void=>$unsafe {
 ml_expr=(e:MslStmtWord):>string=>$unsafe {
     let k=nodes.ptr[e].kind
     let t=sl_type(ntype(e))
-    if t =? T_MATH_INT and nodes.ptr[e].kind =? 'int_lit' {ml_err(nodes.ptr[e].pos "this number is an exact `int` here, which shaders do not have: give it a width, `int32(...)` (a counting loop: `loop i in [int32(0)..4)`)")}
-    if t =? T_MATH_INT {ml_err(nodes.ptr[e].pos "checked mathematical int is not yet supported in shaders; use an explicit fixed width")}
+    # (an exact `int` proven to fit in an int32 is one: sl_exact_range)
+    if t =? T_MATH_INT and sl_exact_range(e).length =? 0 {
+        if nodes.ptr[e].kind =? 'int_lit' {ml_err(nodes.ptr[e].pos "this number is an exact `int` here, and a shader holds only 32 bits: give it a width, `int32(...)`")}
+        ml_err(nodes.ptr[e].pos "this exact `int` is not proven to fit in 32 bits, all a shader holds: give it a width, `int32(...)`, or bound it (a counting loop over literals is)")
+    }
     let pos=nodes.ptr[e].pos
     # (the uniforms, or a part of them: read from memory)
     if k =? 'ident' or k =? 'field' or k =? 'index' or ml_is_gbuf_op(e "[]") {

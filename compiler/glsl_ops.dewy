@@ -1,11 +1,12 @@
 $runtime_checks
-from p"ast.jo" import (nodes)
-from p"check.jo" import (fns locals)
+from p"ast.jo" import (NF_INCLUSIVE has_flag nodes)
+from p"check.jo" import (LF_ALIAS LF_ASSIGNED LF_MUTPARAM fns locals)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"exact.jo" import (exact_proved)
-from p"glsl.jo" import (gl_done gl_param_copies)
+from p"expr.jo" import (ntype)
+from p"glsl.jo" import (gl_done gl_param_copies sl_exact_defs)
 from p"glsl_emit.dewy" import (gl_elem_type gl_name)
-from p"types.jo" import (prune types)
+from p"types.jo" import (T_MATH_INT prune types)
 from p"type_ops.dewy" import (dt)
 from p"util.jo" import (fatal name_of)
 
@@ -43,6 +44,66 @@ gl_store_check=(e:GlslWord t:GlslWord):>void=>$unsafe {
 # A value a shader word holds exactly: no arithmetic of its own. O(1).
 sl_plain=(e:GlslWord):>bool=>$unsafe {
     nodes.ptr[e].kind not=? 'binary' and nodes.ptr[e].kind not=? 'unary'
+}
+# The range [lo, hi] of an exact `int` value a shader computes in a 32-bit word, or [] when its
+# value is not proven to fit in an int32 (a shader cannot hold more): a literal, a fixed-width
+# value of at most 31 bits, a counting loop's variable or a `let` never assigned again (their
+# declarations: sl_exact_defs), and +, -, * and negation of these, each step fitting too. O(nodes under it).
+sl_exact_range=(e:GlslWord):>array<int64>=>$unsafe {
+    let unknown:array<int64>=[]
+    let k=nodes.ptr[e].kind
+    let t=sl_type(ntype(e))
+    if t not=? T_MATH_INT {
+        if types.ptr[t].kind not=? 'int_' {return unknown}
+        let bits=GlslWord(types.ptr[t].bits)
+        if types.ptr[t].sign and bits <=? 32 {return [-(GlslWord(1) << (bits - 1)) (GlslWord(1) << (bits - 1)) - 1]}
+        if not types.ptr[t].sign and bits <? 32 {return [0 (GlslWord(1) << bits) - 1]}
+        return unknown
+    }
+    if k =? 'int_lit' {return sl_i32_range(nodes.ptr[e].ival nodes.ptr[e].ival)}
+    if k =? 'conv' and types.ptr[sl_type(ntype(GlslWord(nodes.ptr[e].a)))].kind =? 'int_' {return sl_exact_range(GlslWord(nodes.ptr[e].a))}
+    if k =? 'ident' {
+        if nodes.ptr[e].aux not=? int32(1) {return unknown}
+        let l=GlslWord(nodes.ptr[e].sym)
+        let flags=GlslWord(locals.ptr[l].flags)
+        if flags & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {return sl_exact_range(GlslWord(locals.ptr[l].alias))}
+        let d=sl_exact_defs.get(l) ?? 0
+        if d =? 0 or flags & (LF_ASSIGNED | LF_MUTPARAM) not=? 0 {return unknown}
+        if nodes.ptr[d].kind =? 'vardecl' {
+            if nodes.ptr[d].b =? 0 {return unknown}
+            return sl_exact_range(GlslWord(nodes.ptr[d].b))
+        }
+        let it=GlslWord(nodes.ptr[d].a)
+        let a=sl_exact_range(GlslWord(nodes.ptr[it].a))
+        let b=sl_exact_range(GlslWord(nodes.ptr[it].b))
+        if a.length =? 0 or b.length =? 0 {return unknown}
+        # (the variable steps past its last value once: that must fit too)
+        let last=if has_flag(it NF_INCLUSIVE) {b[1]} else {b[1] - 1}
+        if last >=? 2147483647 {return unknown}
+        return [a[0] max(a[1] last)]
+    }
+    if k =? 'unary' and cx_token_values.ptr[GlslWord(nodes.ptr[e].op)] =? 'minus' {
+        let a=sl_exact_range(GlslWord(nodes.ptr[e].a))
+        if a.length =? 0 {return unknown}
+        return sl_i32_range(-a[1] (-a[0]))
+    }
+    if k not=? 'binary' or nodes.ptr[e].aux not=? 0 {return unknown}
+    let op=cx_token_values.ptr[GlslWord(nodes.ptr[e].op)]
+    let a=sl_exact_range(GlslWord(nodes.ptr[e].a))
+    let b=sl_exact_range(GlslWord(nodes.ptr[e].b))
+    if a.length =? 0 or b.length =? 0 {return unknown}
+    if op =? 'plus' {return sl_i32_range(a[0] + b[0] a[1] + b[1])}
+    if op =? 'minus' {return sl_i32_range(a[0] - b[1] a[1] - b[0])}
+    if op =? 'star' {
+        let p=[a[0] * b[0] a[0] * b[1] a[1] * b[0] a[1] * b[1]]
+        return sl_i32_range(min(min(p[0] p[1]) min(p[2] p[3])) max(max(p[0] p[1]) max(p[2] p[3])))
+    }
+    unknown
+}
+sl_i32_range=(lo:int64 hi:int64):>array<int64>=>{
+    let unknown:array<int64>=[]
+    if lo <? -2147483648 or hi >? 2147483647 {return unknown}
+    [lo hi]
 }
 # true the first time a helper is asked for (its declarations are then made by the caller)
 gl_first=(name:string):>bool=>{

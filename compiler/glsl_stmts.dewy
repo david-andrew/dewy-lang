@@ -9,9 +9,9 @@ from p"checker_tokens.dewy" import (Tok)
 from p"checks_assign_hooks.dewy" import (block_value)
 from p"checks_thin_expr.dewy" import (is_gpu_buffer)
 from p"expr.jo" import (CV IN gpu_buffer_elem ntype)
-from p"glsl.jo" import (builtin_map gl_decls gl_done gl_done_fns gl_done_structs gl_float gl_out gl_param_copies gl_stage sl_turns_fns)
+from p"glsl.jo" import (builtin_map gl_decls gl_done gl_done_fns gl_done_structs gl_float gl_out gl_param_copies gl_stage sl_exact_defs sl_turns_fns)
 from p"glsl_emit.dewy" import (gl_attrib_comps gl_block gl_float_to_int gl_gbuf_reader gl_narrow gl_floor gl_param_copy gl_sdiv gl_shift_decls gl_stmt_if gl_struct_fields gl_target gl_type gl_udesc gl_zero sl_abs_body)
-from p"glsl_ops.dewy" import (gl_err gl_store_check gl_first gl_fn_name gl_local gl_unsigned gl_wrap gl_wrapped ind sl_type)
+from p"glsl_ops.dewy" import (gl_err gl_store_check gl_first gl_fn_name gl_local gl_unsigned gl_wrap gl_wrapped ind sl_exact_range sl_type)
 from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
 from p"types.jo" import (T_I32 T_MAT4 T_MATH_INT T_VEC4 fields is_float is_vec prune structs tkind tsize types)
 from p"util.jo" import (name_of)
@@ -83,6 +83,7 @@ gl_stmt=(s:GlslStmtWord depth:GlslStmtWord):>void=>$unsafe {
         if nodes.ptr[s].nlist >? 0 {gl_err(nodes.ptr[s].pos "tuple destructuring is not supported in shaders")}
         if gl_param_copy(s) {return}
         let l=GlslStmtWord(nodes.ptr[s].sym)
+        if prune(GlslStmtWord(locals.ptr[l].type)) =? T_MATH_INT {sl_exact_defs[l]=s}
         if is_gpu_buffer(GlslStmtWord(locals.ptr[l].type)) {gl_err(nodes.ptr[s].pos "a GpuBuffer cannot be kept in a variable in shaders (use it where it is, e.g. u.particles[i])")}
         let t=gl_type(GlslStmtWord(locals.ptr[l].type) nodes.ptr[s].pos)
         if nodes.ptr[s].b not=? 0 {gl_out.push("{pre}{t} {gl_local(l)} = {gl_expr(GlslStmtWord(nodes.ptr[s].b))};\n")} else {gl_out.push("{pre}{t} {gl_local(l)} = {gl_zero(GlslStmtWord(locals.ptr[l].type) nodes.ptr[s].pos)};\n")}
@@ -138,6 +139,7 @@ gl_stmt=(s:GlslStmtWord depth:GlslStmtWord):>void=>$unsafe {
     else if k =? 'for_' {
         if nodes.ptr[s].aux not=? 0 {gl_err(nodes.ptr[s].pos "only `loop i in [a..b)` loops and loops over fixed-size arrays are supported in shaders")}
         let l=GlslStmtWord(nodes.ptr[s].sym)
+        if prune(GlslStmtWord(locals.ptr[l].type)) =? T_MATH_INT {sl_exact_defs[l]=s}
         let it=GlslStmtWord(nodes.ptr[s].a)
         let v=gl_local(l)
         let cmp="<"
@@ -174,8 +176,11 @@ gl_binop=(op:Tok):>string=>{
 gl_expr=(e:GlslStmtWord):>string=>$unsafe {
     let k=nodes.ptr[e].kind
     let t=sl_type(ntype(e))
-    if t =? T_MATH_INT and nodes.ptr[e].kind =? 'int_lit' {gl_err(nodes.ptr[e].pos "this number is an exact `int` here, which shaders do not have: give it a width, `int32(...)` (a counting loop: `loop i in [int32(0)..4)`)")}
-    if t =? T_MATH_INT {gl_err(nodes.ptr[e].pos "checked mathematical int is not yet supported in shaders; use an explicit fixed width")}
+    # (an exact `int` proven to fit in an int32 is one: sl_exact_range)
+    if t =? T_MATH_INT and sl_exact_range(e).length =? 0 {
+        if nodes.ptr[e].kind =? 'int_lit' {gl_err(nodes.ptr[e].pos "this number is an exact `int` here, and a shader holds only 32 bits: give it a width, `int32(...)`")}
+        gl_err(nodes.ptr[e].pos "this exact `int` is not proven to fit in 32 bits, all a shader holds: give it a width, `int32(...)`, or bound it (a counting loop over literals is)")
+    }
     if k =? 'int_lit' {
         if types.ptr[t].kind =? 'float_' {return gl_float(float64(nodes.ptr[e].ival))}
         if nodes.ptr[e].ival <? -2147483648 or nodes.ptr[e].ival >? 4294967295 {gl_err(nodes.ptr[e].pos "shader integers are 32 bits, and this number does not fit in one (a hash written for 64 bits gives other values here)")}

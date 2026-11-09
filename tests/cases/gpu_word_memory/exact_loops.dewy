@@ -1,0 +1,25 @@
+# Exact `int` values proven to fit in an int32 (counting loops over literals, constants and what
+# +, - and * make of them) are shader words: no `int32(...)` widths needed.
+$runtime_checks
+P:type=[dst:GpuBuffer<float32>]
+k=(id:int64 u:P):>void=>{
+    if id <? 0 or id >=? u.dst.length { return }
+    let s:float32=0.0
+    let base=3
+    loop i in [0..4) {
+        loop j in [1..3] { s += float32(i*base+j-2) }
+    }
+    let neg=-5
+    u.dst[id]=s+float32(neg*3)
+}
+f=(x:float32):>float32=>{
+    let s:float32=0.0
+    loop i in [0..4) { s += x*float32(i) }
+    return s
+}
+main=()=>{
+    let b=gpu_buffer<float32>(2)
+    dispatch(compute(@k) 2 P(b))
+    printl(cpu(b))
+    printl(cpu(f.(gpu([float32(1.0) 2.0]))).data)
+}

@@ -34,6 +34,59 @@ gl_store_check = (e: int, t: int):
     if not sl_ring_exact(int(nodes[e].a)): gl_err(nodes[e].pos, "this integer expression needs intermediates wider than a shader's 32-bit words: store each step that divides or shifts right in its own variable, or use a wrapping type")
 # A value a shader word holds exactly: no arithmetic of its own. O(1).
 sl_plain = (e: int) -> bool: nodes[e].kind != .binary and nodes[e].kind != .unary
+# The range [lo, hi] of an exact `int` value a shader computes in a 32-bit word, or [] when its
+# value is not proven to fit in an int32 (a shader cannot hold more): a literal, a fixed-width
+# value of at most 31 bits, a counting loop's variable or a `let` never assigned again (their
+# declarations: sl_exact_defs), and +, -, * and negation of these, each step fitting too. O(nodes under it).
+sl_exact_range = (e: int) -> int[]:
+    unknown: int[]
+    k = nodes[e].kind
+    t = sl_type(ntype(e))
+    if t != T_MATH_INT:
+        if types[t].kind != .int_: return unknown
+        bits = int(types[t].bits)
+        if types[t].sign and bits <= 32: return [-(1 << (bits - 1)), (1 << (bits - 1)) - 1]
+        if not types[t].sign and bits < 32: return [0, (1 << bits) - 1]
+        return unknown
+    if k == .int_lit: return sl_i32_range(nodes[e].ival, nodes[e].ival)
+    if k == .conv and types[sl_type(ntype(int(nodes[e].a)))].kind == .int_: return sl_exact_range(int(nodes[e].a))
+    if k == .ident:
+        if nodes[e].aux != i32(int(SK.local)): return unknown
+        l = int(nodes[e].sym)
+        flags = int(locals[l].flags)
+        if flags & LF_ALIAS != 0 and locals[l].alias != 0: return sl_exact_range(int(locals[l].alias))
+        d = sl_exact_defs.get(l) ?? 0
+        if d == 0 or flags & (LF_ASSIGNED | LF_MUTPARAM) != 0: return unknown
+        if nodes[d].kind == .vardecl:
+            if nodes[d].b == 0: return unknown
+            return sl_exact_range(int(nodes[d].b))
+        it = int(nodes[d].a)
+        a = sl_exact_range(int(nodes[it].a))
+        b = sl_exact_range(int(nodes[it].b))
+        if a.len() == 0 or b.len() == 0: return unknown
+        # (the variable steps past its last value once: that must fit too)
+        last = if has_flag(it, NF_INCLUSIVE): b[1] else: b[1] - 1
+        if last >= 2147483647: return unknown
+        return [a[0], max(a[1], last)]
+    if k == .unary and nodes[e].op == i32(int(Tok.minus)):
+        a = sl_exact_range(int(nodes[e].a))
+        if a.len() == 0: return unknown
+        return sl_i32_range(-a[1], -a[0])
+    if k != .binary or nodes[e].aux != 0: return unknown
+    op = nodes[e].op as Tok
+    a = sl_exact_range(int(nodes[e].a))
+    b = sl_exact_range(int(nodes[e].b))
+    if a.len() == 0 or b.len() == 0: return unknown
+    if op == .plus: return sl_i32_range(a[0] + b[0], a[1] + b[1])
+    if op == .minus: return sl_i32_range(a[0] - b[1], a[1] - b[0])
+    if op == .star:
+        p = [a[0] * b[0], a[0] * b[1], a[1] * b[0], a[1] * b[1]]
+        return sl_i32_range(min(min(p[0], p[1]), min(p[2], p[3])), max(max(p[0], p[1]), max(p[2], p[3])))
+    unknown
+sl_i32_range = (lo: int, hi: int) -> int[]:
+    unknown: int[]
+    if lo < -2147483648 or hi > 2147483647: return unknown
+    [lo, hi]
 # A type as shaders hold it (GLSL, Metal and SPIR-V alike): a physical quantity's unit is checked
 # at compilation, so on the GPU it is its plain number, in canonical units (an angle in turns).
 sl_type = (t0: int) -> int:

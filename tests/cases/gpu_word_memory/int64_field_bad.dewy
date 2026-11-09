@@ -1,0 +1,9 @@
+# A GPU function's parameters are GPU memory too: a 64-bit field is an error naming uint32.
+$runtime_checks
+P:type=[dst:GpuBuffer<int32> seed:uint64]
+k=(id:int64 u:P):>void=>{ if id >=? 0 and id <? u.dst.length { u.dst[id]=1 } }
+main=()=>{
+    let b=gpu_buffer<int32>(3)
+    dispatch(compute(@k) 3 P(b 7))
+    printl(cpu(b))
+}

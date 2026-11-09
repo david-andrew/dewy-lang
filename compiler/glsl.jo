@@ -30,6 +30,8 @@ gl_done_structs: {int: bool} = {}
 gl_done: {str: bool} = {}   # helper declarations already made (by name)
 gl_decls: str[]          # struct and function definitions, in dependency order
 gl_param_copies: {int: int} = {}  # read-only local copies of immutable parameters
+# the declaration (a vardecl or a counting loop) of each exact `int` local a shader has met: sl_exact_range
+sl_exact_defs: {int: int} = {}
 
 gl_stage = ""            # "vertex" or "fragment": the stage being translated
 

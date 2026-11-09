@@ -113,6 +113,7 @@ ml_stmt = (s: int, depth: int):
     if k == .vardecl:
         if nodes[s].nlist > 0: ml_err(nodes[s].pos, "tuple destructuring is not supported in shaders")
         l = int(nodes[s].sym)
+        if prune(int(locals[l].type)) == T_MATH_INT: sl_exact_defs[l] = s
         t = int(locals[l].type)
         if prune(t) == ml_utype:
             # (another name for the uniforms, or a part of them: their address)
@@ -189,6 +190,7 @@ ml_stmt = (s: int, depth: int):
     else if k == .for_:
         if nodes[s].aux != 0: ml_err(nodes[s].pos, "only `loop i in [a..b)` loops and loops over fixed-size arrays are supported in shaders")
         l = int(nodes[s].sym)
+        if prune(int(locals[l].type)) == T_MATH_INT: sl_exact_defs[l] = s
         it = int(nodes[s].a)
         v = ml_local(l)
         cmp = "<"
@@ -214,8 +216,10 @@ ml_stmt_if = (e: int, depth: int):
 ml_expr = (e: int) -> str:
     k = nodes[e].kind
     t = sl_type(ntype(e))
-    if t == T_MATH_INT and nodes[e].kind == .int_lit: ml_err(nodes[e].pos, "this number is an exact `int` here, which shaders do not have: give it a width, `int32(...)` (a counting loop: `loop i in [int32(0)..4)`)")
-    if t == T_MATH_INT: ml_err(nodes[e].pos, "checked mathematical int is not yet supported in shaders; use an explicit fixed width")
+    # (an exact `int` proven to fit in an int32 is one: sl_exact_range)
+    if t == T_MATH_INT and sl_exact_range(e).len() == 0:
+        if nodes[e].kind == .int_lit: ml_err(nodes[e].pos, "this number is an exact `int` here, and a shader holds only 32 bits: give it a width, `int32(...)`")
+        ml_err(nodes[e].pos, "this exact `int` is not proven to fit in 32 bits, all a shader holds: give it a width, `int32(...)`, or bound it (a counting loop over literals is)")
     pos = nodes[e].pos
     # (the uniforms, or a part of them: read from memory)
     if k == .ident or k == .field or k == .index or ml_is_gbuf_op(e, "[]"):
