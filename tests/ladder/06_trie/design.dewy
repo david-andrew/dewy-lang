@@ -1,33 +1,32 @@
-$runtime_checks
-Trie:type = [edges:dict<string int64> terminal:array<bool>]
+Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
 insert = (@trie:Trie word:string):>void => {
-    # (node handles come from the edge table: checked where they are used)
-    $runtime_checks
     let node = 0
     loop letter in word {
         let key = "{node}:{letter}"
         let next = trie.edges.get(key)
         if next is? none {
-            let fresh = trie.terminal.length
             trie.terminal.push(false)
+            let fresh = trie.terminal.length - 1
             trie.edges[key] = fresh
             node = fresh
         } else { node = next }
     }
+    # (the root, node 0, is there from the start)
+    $runtime_checks
     trie.terminal[node] = true
 }
 contains_word = (trie:Trie word:string):>bool => {
-    $runtime_checks
     let node = 0
     loop letter in word {
         let next = trie.edges.get("{node}:{letter}")
         if next is? none { return false }
         node = next
     }
+    $runtime_checks
     return trie.terminal[node]
 }
 main = ():>void => {
-    let t:Trie = [edges=[] terminal=[false]]
+    let t:Trie = [terminal=[false] edges=[]]
     loop word in ["cat" "car" "café" "dog"] { insert(@t word) }
     $runtime_assert (contains_word(t "cat"))
     $runtime_assert (contains_word(t "café"))
