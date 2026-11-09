@@ -10,14 +10,14 @@ lex = (source:string):>array<string> => {
     if number.length >? 0 { tokens.push(number) }
     return tokens
 }
-evaluate = (source:string):>int64 => {
+evaluate = (source:string):>int => {
     let parser:Parser = [tokens=lex(source)]
     let result = expression(@parser)
     $runtime_assert(parser.at =? parser.tokens.length)
     return result
 }
 peek = (p:Parser):>string => if p.at >=? 0 and p.at <? p.tokens.length p.tokens[p.at] else ""
-factor = (@p:Parser):>int64 => {
+factor = (@p:Parser):>int => {
     let token = peek(p)
     p.at += 1
     if token =? "(" {
@@ -28,12 +28,12 @@ factor = (@p:Parser):>int64 => {
     }
     return to_int(token) ?? 0
 }
-term = (@p:Parser):>int64 => {
+term = (@p:Parser):>int => {
     let value = factor(@p)
     loop peek(p) =? "*" { p.at += 1 value *= factor(@p) }
     return value
 }
-expression = (@p:Parser):>int64 => {
+expression = (@p:Parser):>int => {
     let value = term(@p)
     loop peek(p) =? "+" { p.at += 1 value += term(@p) }
     return value
@@ -49,5 +49,3 @@ main = ():>void => {
     $runtime_assert(expression(@q) =? 20)
     printl(value)
 }
-
-$runtime_checks

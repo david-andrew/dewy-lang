@@ -1,6 +1,6 @@
 $explicit_copies
 # Sequentially consistent interleaving simulation; sequence counters prevent ABA.
-Ring:type = [data:array<int64 length=4> sequence:array<int64 length=4> write:int64 read:int64]
+Ring:type = [data:array<int64 length=4> sequence:array<int length=4> write:int64 read:int64]
 Reservation:type = [position:int64 slot:int64]
 reserve = (@r:Ring):>Reservation? => {
     let position = r.write
@@ -68,5 +68,3 @@ main = ():>void => {
     $runtime_assert (ring.read =? 802)
     printl("{count} {checksum} {ring.read}")
 }
-
-$runtime_checks

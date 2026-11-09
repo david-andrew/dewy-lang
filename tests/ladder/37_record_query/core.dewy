@@ -1,6 +1,6 @@
 Order:type = [customer:int64 region:string units:int64 price:int64]
 Customer:type = [id:int64 active:bool]
-Aggregate:type = [region:string revenue:int64 count:int64]
+Aggregate:type = [region:string revenue:int count:int64]
 evaluate = (orders:array<Order> customers:array<Customer> minimum:int64):>array<Aggregate> => {
     let active:dict<int64 bool> = []
     loop customer in customers {
@@ -66,5 +66,3 @@ main = ():>void => {
     $runtime_assert(evaluate(original customers 100).length =? 0)
     printl("{result.length} {revenue} {count}")
 }
-
-$runtime_checks

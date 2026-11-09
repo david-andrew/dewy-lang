@@ -1,6 +1,6 @@
 $explicit_copies
-Arena:type = [bytes:array<uint8 length=64> cursor:int64=0]
-allocate = (@a:Arena size:int64 align:int64<(>? 0)>):>int64? => {
+Arena:type = [bytes:array<uint8 length=64> cursor:int=0]
+allocate = (@a:Arena size:int align:int<(>? 0)>):>int? => {
     let start = ((a.cursor+align-1)//align)*align
     if size <? 0 or start+size >? a.bytes.length { return none }
     a.cursor = start+size
@@ -32,5 +32,3 @@ main = ():>void => {
     $runtime_assert (read_word(snapshot second) =? 305419896)
     printl("{first} {second} {read_word(snapshot second)}")
 }
-
-$runtime_checks

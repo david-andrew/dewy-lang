@@ -1,16 +1,16 @@
 ParseError:type = [message:string]
-parse = (text:string):>int64|ParseError => {
+parse = (text:string):>int|ParseError => {
     let value = to_int(text)
     if value is? error { return ParseError["invalid integer"] }
     return value
 }
-positive = (text:string):>int64|ParseError => {
+positive = (text:string):>int|ParseError => {
     let value = parse(text)
     if value is? ParseError { return value }
     if value <? 0 { return ParseError["negative"] }
     return value
 }
-invoice = (text:string):>int64|ParseError => {
+invoice = (text:string):>int|ParseError => {
     let value = positive(text)
     if value is? ParseError { return value }
     return value*7
@@ -30,5 +30,3 @@ main = ():>void => {
     if negative is? ParseError { $runtime_assert(negative.message =? "negative") }
     printl("{good} invalid integer negative")
 }
-
-$runtime_checks

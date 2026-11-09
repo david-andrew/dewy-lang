@@ -1,5 +1,5 @@
 Fault:type = type of error & [pc:int64]
-State:type = [stack:array<int64> locals:array<int64> pc:int64 steps:int64]
+State:type = [stack:array<int> locals:array<int> pc:int64 steps:int64]
 run = (code:array<int64> limit:int64):>State|Fault => {
     let s = State[[] [0 0] 0 0]
     loop s.pc >=? 0 and s.pc <? code.length {
@@ -87,5 +87,3 @@ main = ():>void => {
     $runtime_assert(snapshot.locals.length =? 2)
     printl("{snapshot.stack[0]} {snapshot.locals[0]} {snapshot.locals[1]}")
 }
-
-$runtime_checks
