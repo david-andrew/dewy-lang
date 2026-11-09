@@ -479,7 +479,7 @@ main = () => {
   - Text from outside must be checked before it can crash, and every check that fails gives one error type, `ValidationError`.
   - It replaces `$check_constant` and `$error_if`.
 
-  Full design: `proposals/string-shapes/round2.md`.
+  Full design: `proposals/ui/round2-with-string-shapes.md` (shared with D28).
 
 ```dewy
 sku_problem = (text:string):>string | none =>
@@ -592,7 +592,7 @@ main = () => {
   - Nothing is ever "open", widgets write straight into your variables, and picks come back typed against your own union.
   - Fields show and read text the way people write it.
   - Background work lives in the program's group (D4), where a failure becomes a message rather than a closed window.
-  - No new syntax. Full design: `proposals/ui/round2.md`.
+  - No new syntax. Full design: `proposals/ui/round2-with-string-shapes.md` (shared with D11).
 
 ```dewy
 Choice:type = 'resume' | 'quit' | 'save'
