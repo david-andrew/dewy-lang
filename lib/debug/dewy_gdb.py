@@ -6,7 +6,9 @@
 # (or `source` this file in gdb, or in ~/.gdbinit).
 #
 # A string or an array is a pointer to [rc][len][cap][data...] (null: empty); an
-# optional `T?` is its value followed by a flag; a field whose type holds the
+# optional `T?` is its value followed by a flag, except `int?` and `ptr<T>?`, which
+# are one word (zero: none; an `int?` word has its low bit flipped; a `ptr<T>?` is
+# the pointer); a field whose type holds the
 # record it is in (next: Node?) is a pointer to [rc][value] (null: none). An
 # `int` is a word: even, the value shifted left one bit; odd, one more than the
 # address of a one-element BigInt array header ([sign:int64 limbs:array<uint64>],
@@ -87,6 +89,15 @@ def _elements(val):
     return data[0].type.strip_typedefs().target() if data else None
 
 
+def _word_optional(name, t):
+    """an `int?` or `ptr<T>?`: one word, zero for none (not a boxed `Node?`, which is named so too)"""
+    if not name.endswith("?"):
+        return False
+    if t.code == gdb.TYPE_CODE_PTR:
+        return not (t.target().strip_typedefs().name or "").endswith(" box")
+    return t.code == gdb.TYPE_CODE_INT
+
+
 def show(val):
     """a value as Dewy text"""
     t = val.type.strip_typedefs()
@@ -95,6 +106,11 @@ def show(val):
         return "<redacted>"
     if name == "int" and t.code == gdb.TYPE_CODE_INT:
         return str(tagged_int(int(val)))
+    if _word_optional(name, t):
+        word = int(val) & MASK
+        if word == 0:
+            return "none"
+        return str(tagged_int(word ^ 1)) if t.code == gdb.TYPE_CODE_INT else "0x%x" % word
     if name == "string":
         return _text(int(val) & MASK)
     if t.code == gdb.TYPE_CODE_PTR:
@@ -171,6 +187,8 @@ def lookup(val):
     t = val.type.strip_typedefs()
     name = _name(val.type)
     if name == "int" and t.code == gdb.TYPE_CODE_INT:
+        return DewyPrinter(val)
+    if _word_optional(name, t):
         return DewyPrinter(val)
     if name == "string" or name.startswith("array<"):
         return DewyPrinter(val)

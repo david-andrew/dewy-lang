@@ -5,7 +5,7 @@ $runtime_checks
 from p"@lib/core/rt.jo" import (__str_slice)
 from p"elf_format.dewy" import (elf_append_bytes elf_syms put16 put32 put64)
 from p"module_paths.dewy" import (is_abs_path)
-from p"dwarf_format.dewy" import (DL_CONST DL_MEM DL_MEMAT DL_REG DW_BOX DW_BOXP DW_BYTE DW_FLEX DW_HDR DW_LONG DW_PTR DW_STRHDR DW_STRPTR DW_TAGS DW_VARIANT DW_VOIDP dbg_vars dw_align_up dw_inputs dw_pos_file dw_prune dw_talign dw_targ dw_tkind dw_tsize)
+from p"dwarf_format.dewy" import (DL_CONST DL_MEM DL_MEMAT DL_REG DW_BOX DW_BOXP DW_BYTE DW_FLEX DW_HDR DW_LONG DW_PTR DW_STRHDR DW_STRPTR DW_TAGS DW_VARIANT DW_VOIDP dbg_vars dw_align_up dw_inputs dw_pos_file dw_prune dw_talign dw_targ dw_tkind dw_tsize dw_word_optional)
 PWord:type=int64<overflow='wrap'>
 const PDB_BLOCK=4096
 
@@ -851,6 +851,8 @@ cv_type_new=(t0:PWord):>PWord=>$unsafe {
     let t=dw_prune(t0)
     let k=dw_inputs[0].types[0].ptr[t].kind
     let size=dw_tsize(t)
+    # (an optional kept in one word is that word's own type: zero is none)
+    if k =? 'opt' and dw_word_optional(t) {return cv_type(PWord(dw_inputs[0].types[0].ptr[t].elem))}
     if k =? 'int_' {
         let b=PWord(dw_inputs[0].types[0].ptr[t].bits)
         if b =? 8 {

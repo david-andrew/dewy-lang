@@ -6,7 +6,9 @@
 # (or put that command in ~/.lldbinit; CodeLLDB in VS Code: "initCommands").
 #
 # A string or an array is a pointer to [rc][len][cap][data...] (null: empty); an
-# optional `T?` is its value followed by a flag; a field whose type holds the
+# optional `T?` is its value followed by a flag, except `int?` and `ptr<T>?`, which
+# are one word (zero: none; an `int?` word has its low bit flipped; a `ptr<T>?` is
+# the pointer); a field whose type holds the
 # record it is in (next: Node?) is a pointer to [rc][value] (null: none). An
 # `int` is a word: even, the value shifted left one bit; odd, one more than the
 # address of a one-element BigInt array header ([sign:int64 limbs:array<uint64>],
@@ -100,6 +102,12 @@ def show(v, depth=0):
         return "<redacted>"
     c = t.GetCanonicalType()
     process = v.GetProcess()
+    if name.endswith("?") and (c.GetTypeClass() == lldb.eTypeClassBuiltin or (
+            c.IsPointerType() and not (c.GetPointeeType().GetName() or "").endswith(" box"))):
+        word = v.GetValueAsUnsigned(0)
+        if word == 0:
+            return "none"
+        return "0x%x" % word if c.IsPointerType() else str(tagged_int(process, word ^ 1))
     if name == "int" and c.GetTypeClass() == lldb.eTypeClassBuiltin:
         return str(tagged_int(process, v.GetValueAsUnsigned(0)))
     if name == "string":
@@ -213,7 +221,7 @@ def _is_dewy(t, internal_dict):
 def __lldb_init_module(debugger, internal_dict):
     m = __name__
     run = debugger.HandleCommand
-    for pattern in ("^int$", "^string$", "^array<.+>$", "^secret<.+>$"):
+    for pattern in ("^int$", "^int\\?$", "^ptr<.+>\\?$", "^string$", "^array<.+>$", "^secret<.+>$"):
         run('type summary add -w dewy -v -x "%s" -F %s.dewy_summary' % (pattern, m))
         run('type synthetic add -w dewy -x "%s" -l %s.NoChildren' % (pattern, m))
     # records, optionals, unions and dictionaries by what they hold: an lldb with

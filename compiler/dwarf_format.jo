@@ -648,6 +648,14 @@ dw_type_die = (t0: int):
         else:
             loop i in [0..n): dw_member("m{i}", e, 4 * i)
         dw_tb.push(0)
+    else if k == .opt and dw_word_optional(t):
+        # (a name over the word: lib/debug's printers read zero as none, and an `int?` word with its
+        # low bit flipped back as the int)
+        e = int(dw_inputs[0].types[0][t].elem)
+        if dw_prune(e) == dw_inputs[0].T_MATH_INT[0]: e = dw_inputs[0].T_INT[0]
+        dw_tb.push(4)
+        cstr(dw_tb, dw_name(t))
+        dw_ref(0, e)
     else if k == .opt:
         e = int(dw_inputs[0].types[0][t].elem)
         dw_tb.push(5)
@@ -749,6 +757,13 @@ dw_prune = (t0: int) -> int:
     loop t != 0 and dw_inputs[0].types[0][t].kind == .var and dw_inputs[0].types[0][t].ref != 0: t = int(dw_inputs[0].types[0][t].ref)
     t
 dw_tkind = (t: int) -> TK: dw_inputs[0].types[0][dw_prune(t)].kind
+# An optional kept in one word: `int?` (the int word with its low bit inverted) and `ptr<T>?` (the
+# pointer itself), where zero is none. Debuggers see the word, not a value beside a flag.
+dw_word_optional = (t: int) -> bool:
+    if dw_inputs[0].types[0][t].kind != .opt: return false
+    e = dw_prune(int(dw_inputs[0].types[0][t].elem))
+    if e != dw_inputs[0].T_MATH_INT[0] and dw_inputs[0].types[0][e].kind != .ptr: return false
+    dw_tsize(t) == dw_tsize(e)
 dw_targ = (t: int, i: int) -> int: int(dw_inputs[0].type_args[0][int(dw_inputs[0].types[0][t].args) + i])
 dw_tsize = (t: int) -> int:
     dw_inputs[0].host[0].layout(t)

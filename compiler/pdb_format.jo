@@ -748,6 +748,8 @@ cv_type_new = (t0: int) -> int:
     t = dw_prune(t0)
     k = dw_inputs[0].types[0][t].kind
     size = dw_tsize(t)
+    # (an optional kept in one word is that word's own type: zero is none)
+    if k == .opt and dw_word_optional(t): return cv_type(int(dw_inputs[0].types[0][t].elem))
     if k == .int_:
         b = int(dw_inputs[0].types[0][t].bits)
         if b == 8:
