@@ -2,7 +2,7 @@ $runtime_checks
 from p"ast.jo" import (kid kids nkids nodes)
 from p"check.jo" import (fns lib_dir)
 from p"expr.jo" import (ntype)
-from p"facts.jo" import (FACT_CAP FACT_ELEMENT_COPY FactProjection FactState fact_add_projection fact_bound fact_capture fact_compare fact_constant fact_name_bcast fact_name_insert fact_name_permutations fact_name_put_slice fact_name_reads fact_name_reshape fact_name_swap fact_policy fact_probe_on fact_project fact_projection_after fact_projection_find fact_projection_first fact_query fact_speculating fact_type)
+from p"facts.jo" import (FACT_CAP FACT_ELEMENT_COPY FactProjection FactState fact_add_projection fact_bound fact_capture fact_compare fact_constant fact_length_max fact_name_bcast fact_name_insert fact_name_permutations fact_name_put_slice fact_name_reads fact_name_reshape fact_name_swap fact_policy fact_probe_on fact_project fact_projection_after fact_projection_find fact_projection_first fact_query fact_speculating fact_type)
 from p"facts_arith.dewy" import (fact_arithmetic)
 from p"facts_routes.dewy" import (fact_receiver_route fact_route_values)
 from p"facts_loops.dewy" import (fact_entails)
@@ -12,7 +12,7 @@ from p"nd_contracts.jo" import (fact_nd_call fact_nd_check)
 from p"refine.jo" import (representation_type)
 from p"types.jo" import (T_INT tkind)
 from p"type_ops.dewy" import (fixed_len)
-from p"util.jo" import (files intern name_of pos_file pos_in_lib)
+from p"util.jo" import (err_notes files intern name_of pos_file pos_in_lib)
 from p"witness.jo" import (wit_slice_at wit_text)
 from p"witness_ops.dewy" import (wit_index wit_unknown)
 
@@ -176,19 +176,35 @@ fact_reshape_check=(n:ArrayWord @s:FactState values:array<int64> length:ArrayWor
 fact_bcast_check=(n:ArrayWord @s:FactState):>void=>{
     let one=fact_constant(@s 1)
     let first:ArrayWord=0
+    let first_node:ArrayWord=0
     loop c in kids(kid(n 0)) {
         let v=fact_capture(c @s)
         if fact_compare(s 'eq' v one) =? 1 {continue}
         if first =? 0 {
             first=v
+            first_node=c
             continue
         }
         if fact_compare(s 'eq' v first) =? 1 {continue}
         if fact_probe_on {fact_probe_record(n false)}
-        else {wit_unknown(n fact_bound(s v) "the operands of this elementwise operation have matching lengths" 0 "")}
+        else {
+            # (both operands named, with what is known of their lengths)
+            let a=wit_text(first_node)
+            let b=wit_text(c)
+            fact_bcast_length_note(s a first)
+            fact_bcast_length_note(s b v)
+            let relation=if a not=? "" and b not=? "" {"{a} =? {b}"} else {""}
+            wit_unknown(n fact_bound(s v) "the operands of this elementwise operation have matching lengths" 0 relation)
+        }
         return
     }
     if fact_probe_on {fact_probe_record(n true)}
+}
+fact_bcast_length_note=(s:FactState text:string v:ArrayWord):>void=>{
+    if text =? "" {return}
+    let b=fact_bound(s v)
+    if b.lo =? b.hi {err_notes.push([(-1) "note: `{text}` is {b.lo}"])}
+    else if b.lo >? 0 or b.hi <? fact_length_max() {err_notes.push([(-1) "note: `{text}` is between {b.lo} and {b.hi}"])}
 }
 # A slice assignment's bounds (fact_string_slice's) and, for an array, its length.
 fact_put_slice_check=(n:ArrayWord @s:FactState values:array<int64> length:ArrayWord many:bool):>void=>$unsafe {
