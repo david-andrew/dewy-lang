@@ -1,0 +1,4 @@
+put = <K V>(@m:dict<K V> k:K v:V):>void => { m[k] = v }
+let m:dict<string int64<(>=? 0)>> = ["a"->1]
+put(@m "a" -5)
+printl(m["a"])
