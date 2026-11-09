@@ -11,7 +11,7 @@ from p"facts.jo" import (FACT_SELF_BOUND FACT_SIB_BOUND FACT_CAP FACT_ELEMENT_BE
 from p"facts_arith.dewy" import (fact_fresh)
 from p"facts_forgets.dewy" import (fact_forget)
 from p"facts_plans.dewy" import (fact_component_fact)
-from p"facts_library.dewy" import (fact_fill_remainder)
+from p"facts_library.dewy" import (fact_fill_remainder fact_heap_type)
 from p"facts_pools.dewy" import (fact_pool_type)
 from p"facts_probes.dewy" import (fact_probe_route)
 from p"facts_text.dewy" import (fact_lines_call fact_split_call fact_words_call)
@@ -70,6 +70,8 @@ fact_replace=(@s:FactState base:RouteWord selector:RouteWord element:bool value:
         if p.selector =? FACT_MAP_DENSE and not p.element and (element or selector not=? fact_name_vals) {continue}
         # (an N-D header's validity marker describes the value replaced)
         if not p.element and p.selector =? ND_STORAGE_VALID {continue}
+        # (a heap's entry count is its items' length: writing a field of it, `h.items.clear()`, ends it)
+        if not p.element and p.selector =? (-1) and not element and selector >=? 0 and fact_heap_type(fact_terms[base].type) {continue}
         if p.element =? element {
             if not element and p.selector =? selector {continue}
             # Different selector identities do not prove different elements.

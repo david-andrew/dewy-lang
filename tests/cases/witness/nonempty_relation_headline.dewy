@@ -1,6 +1,7 @@
 # A heap popped without a length guard: the headline names the relation it lacks.
+take = (@q:Heap<string>) => printl(q.pop)
 main = () => {
     let q:Heap<string> = []
     q.push("a" 1.0)
-    printl(q.pop)
+    take(@q)
 }

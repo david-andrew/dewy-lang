@@ -227,6 +227,27 @@ fact_length_through = (e: int, s: mut FactState, depth: int) -> int:
     held = fact_route_values(s, fact_route(e, s))
     if held.len() == 0: return 0
     fact_project(s, held[held.len() - 1], -1, false, T_INT)
+# A heap's (lib/std/heap.jo `Heap`) type, and its `push(h x priority)` (1) or
+# `pop(h)` (2) call, else 0: the two that change its entry count by exactly one. O(1).
+fact_heap_type = (t: int) -> bool:
+    p = prune(t)
+    if types[p].kind != .struct_: return false
+    st = int(types[p].st)
+    if structs[st].name != "Heap": return false
+    d = int(structs[st].decl)
+    d != 0 and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/heap.jo"
+fact_heap_call = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or fns[int(nodes[n].sym)].decl == 0: return 0
+    k = nkids(n)
+    if k != 1 and k != 3: return 0
+    if fact_name_push == 0:
+        fact_name_push = intern("push")
+        fact_name_take = intern("pop")
+    d = int(fns[int(nodes[n].sym)].decl)
+    name = int(nodes[d].name)
+    wanted = if k == 3: fact_name_push else: fact_name_take
+    if name != wanted or files[pos_file(nodes[d].pos)].path != lib_dir + "/std/heap.jo": return 0
+    if k == 3: 1 else: 2
 fact_nonempty_call = (n: int) -> bool:
     if nkids(n) != 1 or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or fns[int(nodes[n].sym)].decl == 0: return false
     if fact_name_peek == 0:

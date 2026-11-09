@@ -1,0 +1,44 @@
+# A heap's entry count moves by exactly one per push and pop: a pop after a
+# proven push, and a second after a second push, needs no guard.
+from heap import Heap
+drain = ():>void => {
+    let h = Heap<int64>()
+    h.push(8 8.0)
+    h.push(2 2.0)
+    printl(h.pop)
+    printl(h.pop)
+}
+interleaved = ():>void => {
+    let h = Heap<int64>()
+    h.push(5 5.0)
+    printl(h.pop)
+    h.push(7 7.0)
+    h.push(1 1.0)
+    printl(h.pop)
+    printl(h.pop)
+}
+guarded = (n:int64<(>=? 0)>):>void => {
+    let h = Heap<int64>()
+    loop i in [0..n) h.push(i i as float64)
+    if h.length >? 1 {
+        printl(h.pop)
+        printl(h.pop)
+    }
+}
+copied = ():>void => {
+    let h = Heap<int64>()
+    h.push(3 3.0)
+    h.push(4 4.0)
+    let saved = h
+    printl(h.pop)
+    printl(h.pop)
+    printl(saved.pop)
+    printl(saved.pop)
+}
+main = ():>void => {
+    drain()
+    interleaved()
+    guarded(3)
+    guarded(1)
+    copied()
+}

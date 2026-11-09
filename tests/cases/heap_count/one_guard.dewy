@@ -1,0 +1,14 @@
+# A guard for one entry covers one pop.
+from heap import Heap
+take_two = (h:Heap<int64>):>void => {
+    let copy = h
+    if copy.length >? 0 {
+        printl(copy.pop)
+        printl(copy.pop)
+    }
+}
+main = ():>void => {
+    let h = Heap<int64>()
+    h.push(1 1.0)
+    take_two(h)
+}
