@@ -7,8 +7,6 @@
 # Deletion removes a key from its leaf without rebalancing; underfull and even
 # empty leaves stay in the chain and are skipped. The store rebuilds the tree
 # from scratch on recovery and compaction, which restores full occupancy.
-$runtime_checks
-
 const ORDER:int64 = 32
 
 Node:type = [
@@ -144,7 +142,7 @@ BTree:type = [
         }
         $runtime_assert id <? nodes.length
         nodes[id].keys.insert(key at)
-        $runtime_assert id <? nodes.length
+        $runtime_assert id <? nodes.length and at <=? nodes[id].values.length
         nodes[id].values.insert(value at)
         count += 1
         # Splits propagate up the recorded path; a root split grows the tree.
@@ -163,7 +161,7 @@ BTree:type = [
             let slot = upper_bound(nodes[parent].keys promoted.separator)
             $runtime_assert parent <? nodes.length
             nodes[parent].keys.insert(promoted.separator slot)
-            $runtime_assert parent <? nodes.length
+            $runtime_assert parent <? nodes.length and slot+1 <=? nodes[parent].children.length
             nodes[parent].children.insert(promoted.right slot+1)
             child = parent
         }

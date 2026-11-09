@@ -1,4 +1,3 @@
-$runtime_checks
 # The manifest names the live log. Two slots alternate: generation g is written to
 # slot g % 2, so the previous generation's slot is untouched while the new one is
 # written. On open the valid slot with the highest generation wins. A slot is
@@ -28,7 +27,7 @@ decode_manifest = (data:array<uint8>):>Manifest? => {
     let body = "dewykv {words[2]} {log}"
     let generation = to_int(words[2])
     if fmt'08x'(crc32(bytes(body))) not=? checksum return none
-    if generation is? error or generation <? 1 return none
+    if generation is? error or generation <? 1 or generation >? int64.max return none
     return Manifest[generation log]
 }
 

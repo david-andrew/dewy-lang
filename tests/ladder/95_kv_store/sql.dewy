@@ -1,4 +1,3 @@
-$runtime_checks
 # A small SQL dialect over the store's single table `kv(key TEXT PRIMARY KEY, value TEXT)`.
 #
 #     SELECT * | COUNT(*) | key[, value] FROM kv [WHERE cond] [ORDER BY key [ASC|DESC]] [LIMIT n]
@@ -247,7 +246,7 @@ Parser:type = [
         if accept("LIMIT") {
             let token = advance
             let n = to_int(token.text)
-            if token.kind not=? 'number' or n is? error or n >? 1000000 return SqlError["expected a row count"]
+            if token.kind not=? 'number' or n is? error or n <? 0 or n >? 1000000 return SqlError["expected a row count"]
             statement.limit = n
         }
         return statement

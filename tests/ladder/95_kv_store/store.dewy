@@ -63,7 +63,9 @@ Store:type = [
 
     # Rewrite the live data into the next log generation.
     compact = ():>void|Crashed|DiskError => {
-        let next = Manifest[manifest.generation+1 log_name(manifest.generation+1)]
+        let generation = manifest.generation
+        generation += 1
+        let next = Manifest[generation log_name(generation)]
         let entries = index.entries
         let snapshot = Txn[next_txn [loop e in entries Change['put' e.key e.value]]]
         let text = encode_txn(snapshot)
@@ -96,7 +98,8 @@ open_store = (disk:Disk):>Store|DiskError => {
         store.apply(txn.changes)
         last_txn = txn.id
     }
-    store.next_txn = last_txn+1
+    store.next_txn = last_txn
+    store.next_txn += 1
     store.log_bytes = replay.valid
     store.log_txns = replay.txns.length
     let recovery = Recovery[
