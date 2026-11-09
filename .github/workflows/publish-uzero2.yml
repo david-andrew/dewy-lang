@@ -1,0 +1,60 @@
+---
+name: Publish uzero2
+
+# Builds the μZero2 demo for wasm32 and publishes it as index.html on
+# david-andrew/uzero2, whose GitHub Pages site serves it. Runs whenever the
+# udewy sources change on this archive branch; a build identical to the
+# published page commits nothing. Pushes with the UZERO2_DEPLOY_KEY secret,
+# a write deploy key on the uzero2 repository.
+"on":
+  push:
+    branches: [archive/udewy]
+    paths:
+      - "udewy/**"
+      - ".github/workflows/publish-uzero2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One publish at a time; a newer push replaces a pending run.
+concurrency:
+  group: publish-uzero2
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install wabt
+        run: sudo apt-get update -q && sudo apt-get install -y -q wabt
+
+      - name: Build
+        run: python -m udewy -c --target wasm32 udewy/tests/uzero2/uzero2.udewy
+
+      - uses: actions/checkout@v4
+        with:
+          repository: david-andrew/uzero2
+          ssh-key: ${{ secrets.UZERO2_DEPLOY_KEY }}
+          path: uzero2-site
+
+      - name: Publish
+        run: |
+          cp __dewycache__/udewy/tests/uzero2/uzero2.html uzero2-site/index.html
+          author_name=$(git log -1 --format=%an)
+          author_email=$(git log -1 --format=%ae)
+          message="Build dewy-lang@$(git rev-parse --short=9 HEAD): $(git log -1 --format=%s)"
+          cd uzero2-site
+          if git diff --quiet; then
+            echo "index.html is already up to date"
+            exit 0
+          fi
+          git -c user.name="$author_name" -c user.email="$author_email" commit -q -am "$message"
+          git push origin HEAD
+          echo "Published: https://david-andrew.github.io/uzero2/"
