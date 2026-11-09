@@ -1,0 +1,7 @@
+# A divisor of either sign gives no sign for the remainder: 7.mod(-3) is -2.
+bad = (n:int64 c:int64<(not=? 0)>):>int64 => {
+    let r = n.mod(c)
+    $assert 0 <=? r
+    r
+}
+main = ():>void => printl(bad(7 -3))

@@ -1,0 +1,7 @@
+# The truncating kind keeps the dividend's sign: mod(-7 3 'trunc') is -1, not in [0, 3).
+bad = (n:int64 c:int64<(>=? 1)>):>int64 => {
+    let r = mod(n c 'trunc')
+    $assert 0 <=? r
+    r
+}
+main = ():>void => printl(bad(-7 3))

@@ -1,0 +1,30 @@
+# `a.mod(b)` is the floored remainder `a % b`: [0, b) for a positive divisor and
+# (b, 0] for a negative one, written as a method, a call, or with its kind named.
+positive = (n:int64 c:int64<(>=? 1)>):>int64 => {
+    let r = n.mod(c)
+    $assert 0 <=? r and r <? c
+    r
+}
+negative = (n:int64 c:int64<(<=? -1)>):>int64 => {
+    let r = mod(n c)
+    $assert c <? r and r <=? 0
+    r
+}
+named = (n:int c:int<(>? 0)>):>int => {
+    let r = mod(n c 'floor')
+    $assert 0 <=? r and r <? c
+    r
+}
+slot = (xs:array<int64<(>=? 0)>> n:int64):>int64 => {
+    if xs.length =? 0 return -1
+    return xs[n.mod(xs.length)]
+}
+main = ():>void => {
+    printl(positive(-7 3))
+    printl(positive(7 3))
+    printl(negative(7 -3))
+    printl(negative(-7 -3))
+    printl(named(-8 5))
+    printl(slot([10 20 30] -1))
+    printl(slot([] 4))
+}

@@ -569,6 +569,16 @@ fact_bitwise = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     if op == .amp and y.lo >= 0 and y.lo != y.hi: fact_difference(s, v, b, 0, n)
     if op == .amp and x.lo >= 0 and x.lo != x.hi and (y.lo < 0 or y.lo != y.hi): fact_difference(s, v, a, 0, n)
     v
+# The prelude's integer `mod(a b kind)` with the floor kind (the default, or
+# written `'floor'`), `a % b` by another spelling (the function is `let r=a % b`
+# and nothing else for this kind), so it gets the operator's remainder facts.
+# Only calls of the library's own `mod` get here. O(1).
+fact_mod_call = (n: int) -> bool:
+    if nkids(n) != 3 or not fact_scalar(ntype(n)) or not is_int(ntype(n)) or fact_type(ntype(n)) == T_U64 or not fact_library_call(n, "mod"): return false
+    if files[pos_file(nodes[int(fns[int(nodes[n].sym)].decl)].pos)].path != lib_dir + "/prelude/numbers.dewy": return false
+    k = kid(n, 2)
+    if nodes[k].kind == .dotname: return name_of(int(nodes[k].name)) == "floor"
+    nodes[k].kind == .str_lit and nodes[k].aux == 0 and nodes[k].sval >= 0 and name_of(int(nodes[k].sval)) == "floor"
 fact_extremum_call = (n: int) -> bool:
     nkids(n) == 2 and fact_scalar(ntype(n)) and is_int(ntype(n)) and fact_type(ntype(n)) != T_U64 and (fact_prelude_call(n, "min") or fact_prelude_call(n, "max"))
 # The prelude's integer `min(a b)` (or `max`): one of its operands, so its

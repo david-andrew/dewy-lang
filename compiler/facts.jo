@@ -2552,7 +2552,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         # (a length-preserving call's length is its receiver's: `let ks = d.keys` then `ks.values`
         # needs ks's definition)
         else if k == .call and (fact_copy_length_call(n) or fact_endpoint_call(n) != 0 or fact_same_length_call(n) or fact_chosen_call(n)): values.push(kid(n, 0))
-        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and not fact_rational_constructor(n) and not fact_rational_promotion(n) and not fact_rational_divmod(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
+        else if k == .call and nodes[n].aux == 0 and not result_active and not proof_active and not fact_divisors.has(n) and not fact_rational_constructor(n) and not fact_rational_promotion(n) and not fact_rational_divmod(n) and fact_floor_call(n) == 0 and fact_string_call(n) == 0 and not fact_extremum_call(n) and not fact_mod_call(n) and not fact_empty_array_call(n) and not fact_entry_count_call(n) and not fact_split_call(n) and not fact_words_call(n) and not fact_lines_call(n) and not fact_search_call(n) and not fact_affix_call(n) and not fact_parallel_array(n) and not ref_refined_result(int(fns[int(nodes[n].sym)].ret)):
             # Ordinary summaries start from unknown formals: their return
             # facts do not depend on the actual values. Argument obligations
             # and effects remain separate roots of this slice.
@@ -3866,6 +3866,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         floor = fact_floor_call(n)
         if floor != 0 and fact_type(ntype(n)) == T_U64: return fact_floor_unsigned(s, n, floor, values[0], values[1])
         if floor != 0: return fact_floor(s, n, floor, values[0], values[1], true)
+        # (the prelude's `mod(a b)`, floored: the same remainder as `a % b`)
+        if fact_mod_call(n): return fact_floor(s, n, 2, values[0], values[1], true)
         if fact_extremum_call(n): return fact_extremum(s, n, values[0], values[1], fact_prelude_call(n, "min"))
         if fact_ends_path(n): s.live = false
         result = fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))

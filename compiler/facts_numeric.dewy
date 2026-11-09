@@ -9,7 +9,7 @@ from p"expr.jo" import (ntype rational_constant_parts rational_constants)
 from p"facts.jo" import (fact_name_rational_lt FACT_CAP FactDifference FactProjection FactState fact_add_fits fact_add_projection fact_assume fact_bound fact_compare fact_constant fact_difference fact_difference_head fact_difference_next fact_domain fact_name_divmod fact_name_pow fact_name_pow_op fact_name_power fact_name_rational fact_name_rational_eq fact_new fact_open_endpoint fact_probe_on fact_project fact_row_find fact_scalar fact_set_bound fact_slot fact_speculating fact_terms fact_type fact_unmodeled same_value)
 from p"facts_arith.dewy" import (fact_relational)
 from p"facts_joins.dewy" import (fact_host_finite fact_hull_type)
-from p"facts_library.dewy" import (fact_prelude_call)
+from p"facts_library.dewy" import (fact_library_call fact_prelude_call)
 from p"facts_probes.dewy" import (fact_probe_record)
 from p"facts_ranges.dewy" import (fact_floor_call fact_host_endpoint fact_nonnegative)
 from p"proof_ops.dewy" import (result_activate)
@@ -17,7 +17,7 @@ from p"refine.jo" import (ref_encoded representation_type)
 from p"refinement_types.dewy" import (FACT_MAX FACT_MIN FactBound FactTerm)
 from p"types.jo" import (T_BOOL T_INT T_MATH_INT T_U64 is_int prune structs types)
 from p"word_overflow.dewy" import (math_word_overflow)
-from p"util.jo" import (files intern pos_file pos_in_lib)
+from p"util.jo" import (files intern name_of pos_file pos_in_lib)
 from p"witness_ops.dewy" import (wit_divisor)
 
 NumericWord:type=int64<overflow='wrap'>
@@ -612,6 +612,17 @@ fact_bitwise=(@s:FactState n:NumericWord op:Tok a:NumericWord b:NumericWord):>Nu
     if op =? 'amp' and y.lo >=? 0 and y.lo not=? y.hi {fact_difference(@s v b 0 n)}
     if op =? 'amp' and x.lo >=? 0 and x.lo not=? x.hi and (y.lo <? 0 or y.lo not=? y.hi) {fact_difference(@s v a 0 n)}
     v
+}
+# The prelude's integer `mod(a b kind)` with the floor kind (the default, or
+# written `'floor'`), `a % b` by another spelling (the function is `let r=a % b`
+# and nothing else for this kind), so it gets the operator's remainder facts.
+# Only calls of the library's own `mod` get here. O(1).
+fact_mod_call=(n:NumericWord):>bool=>$unsafe {
+    if nkids(n) not=? 3 or not fact_scalar(ntype(n)) or not is_int(ntype(n)) or fact_type(ntype(n)) =? T_U64 or not fact_library_call(n "mod") {return false}
+    if files[pos_file(nodes.ptr[NumericWord(fns.ptr[NumericWord(nodes.ptr[n].sym)].decl)].pos)].path not=? "{lib_dir}/prelude/numbers.dewy" {return false}
+    let k=kid(n 2)
+    if nodes.ptr[k].kind =? 'dotname' {return name_of(NumericWord(nodes.ptr[k].name)) =? "floor"}
+    nodes.ptr[k].kind =? 'str_lit' and nodes.ptr[k].aux =? 0 and nodes.ptr[k].sval >=? 0 and name_of(NumericWord(nodes.ptr[k].sval)) =? "floor"
 }
 fact_extremum_call=(n:NumericWord):>bool=>{
     nkids(n) =? 2 and fact_scalar(ntype(n)) and is_int(ntype(n)) and fact_type(ntype(n)) not=? T_U64 and (fact_prelude_call(n "min") or fact_prelude_call(n "max"))
