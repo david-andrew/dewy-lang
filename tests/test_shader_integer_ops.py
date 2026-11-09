@@ -13,7 +13,8 @@ from tests.support import compiler  # noqa: F401
 PROGRAM = r'''$runtime_checks
 Shift:type=[src:GpuBuffer<int32> dst:GpuBuffer<int32>]
 back=(id:int64 u:Shift):>void=>{
-    if id >? 0 and id <? 1000000 { u.dst[id]=u.src[id-1] // 4 } else { u.dst[id]=u.src[id] % 3 }
+    if id <? 0 or id >=? u.dst.length or id >=? u.src.length { return }
+    if id >? 0 { u.dst[id]=u.src[id-1] // 4 } else { u.dst[id]=u.src[id] % 3 }
 }
 step=(x:int32):>int32=>{
     if x <? 1000 and x >? -1000 {

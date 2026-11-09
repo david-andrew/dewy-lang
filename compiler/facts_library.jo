@@ -175,7 +175,38 @@ fact_entry_count_call = (n: int) -> bool:
     if int(nodes[int(fns[int(nodes[n].sym)].decl)].name) != fact_name_len: return false
     t = representation_type(ntype(kid(n, 0)))
     path = files[pos_file(nodes[int(fns[int(nodes[n].sym)].decl)].pos)].path
-    is_map_type(t) and path == lib_dir + "/core/map.jo" or is_dewy_set_type(t) and path == lib_dir + "/std/dewy_sets.jo" or path == lib_dir + "/std/heap.jo"
+    is_map_type(t) and path == lib_dir + "/core/map.jo" or is_dewy_set_type(t) and path == lib_dir + "/std/dewy_sets.jo" or path == lib_dir + "/std/heap.jo" or path == lib_dir + "/game/gpubuffer.jo" and is_gpu_buffer(t)
+# A GpuBuffer's element access (lib/game/gpubuffer.jo): `b[i]`, `b[i] = v` and the atomic
+# operations. Its index's range is its obligation, as an array index's is: proven, an error
+# (always in a GPU function: a shader cannot check) or the library's own check. O(1).
+fact_gpu_index_call = (n: int) -> bool:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) < 2 or nkids(n) > 4: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0: return false
+    if fact_gpu_file < 0 and fact_gpu_files_seen != files.len():
+        fact_gpu_files_seen = files.len()
+        loop i in [0..files.len()):
+            if files[i].path == lib_dir + "/game/gpubuffer.jo": fact_gpu_file = i
+    if pos_file(nodes[d].pos) != fact_gpu_file: return false
+    if fact_name_gpu_read == 0:
+        fact_name_gpu_read = intern("[]")
+        fact_name_gpu_write = intern("[]=")
+        fact_name_gpu_atomics = [intern("atomic_add"), intern("atomic_sub"), intern("atomic_and"), intern("atomic_or"), intern("atomic_xor"), intern("atomic_exchange"), intern("atomic_min"), intern("atomic_max"), intern("atomic_compare_exchange")]
+    name = int(nodes[d].name)
+    if name != fact_name_gpu_read and name != fact_name_gpu_write and not (name in fact_name_gpu_atomics): return false
+    is_gpu_buffer(representation_type(ntype(kid(n, 0))))
+# 0 <=? i <? b.length for fact_gpu_index_call's index i (b.length: fact_entry_count_call).
+fact_gpu_index_check = (n: int, s: mut FactState, values: int[]):
+    if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
+    zero = fact_constant(s, 0)
+    length = fact_project(s, fact_map_receiver(s, n, values[0]), -1, false, T_INT)
+    lo = fact_compare(s, .le, zero, values[1])
+    hi = fact_compare(s, .lt, values[1], length)
+    if fact_probe_on:
+        fact_probe_record(n, lo == 1 and hi == 1)
+        return
+    if lo == 1 and hi == 1: return
+    wit_index(n, s, values[1], length, lo, hi, kid(n, 0), kid(n, 1))
 # Reviewed length-preserving calls: `d.keys` (__dewy_keys), a dictionary's `keys` and
 # `values`, and a set's members as an array (__dewy_set_values, `s.values`) have one
 # element per entry, so the result's length is the receiver's entry count. O(1).

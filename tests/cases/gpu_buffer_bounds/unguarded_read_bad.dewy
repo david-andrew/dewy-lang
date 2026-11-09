@@ -1,0 +1,11 @@
+# A GPU function's buffer index is proved, even under `$runtime_checks`: a shader cannot
+# check it, and the CPU fallback must not clamp it either.
+$runtime_checks
+P:type=[src:GpuBuffer<int32> dst:GpuBuffer<int32>]
+k=(id:int64 u:P):>void=>{ if id >=? 0 and id <? u.dst.length { u.dst[id]=u.src[id] } }
+main=()=>{
+    let a=gpu_buffer([int32(1) 2 3])
+    let b=gpu_buffer<int32>(3)
+    dispatch(compute(@k) 3 P(a b))
+    printl(cpu(b))
+}

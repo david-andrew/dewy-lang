@@ -17,7 +17,7 @@ from p"facts.jo" import (fact_divisors fact_panic_sites fn_in_lib positive_bound
 from p"facts_lifecycle.dewy" import (fact_complete_deferred)
 from p"facts_numeric.dewy" import (fact_power_call fact_rational_constructor fact_rational_divmod)
 from p"facts_ranges.dewy" import (fact_floor_call fact_range_call fact_range_first)
-from p"facts_library.dewy" import (fact_exact_sum_call fact_nonempty_call)
+from p"facts_library.dewy" import (fact_exact_sum_call fact_gpu_index_call fact_nonempty_call)
 from p"facts_text.dewy" import (fact_string_call)
 from p"facts_arrays.dewy" import (fact_array_call)
 from p"facts_maps.dewy" import (fact_map_call)
@@ -309,7 +309,7 @@ panic_site=(f:PanicWord n:PanicWord):>void=>$unsafe {
         # (a call whose precondition is the caller's obligation, as a string
         # index or a divisor: proven, an error, or a check of the caller's own)
         }
-        if nodes.ptr[n].sym >? 0 and (panic_calls_only or not (k =? 'call' and (fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_floor_call(n) not=? 0 or fact_divisors.has(n) or fact_rational_constructor(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or panic_atomic_progress(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_rational_divmod(n)) or panic_gpu_total(n) or panic_literal_safe(n)))) {panic_edge(f PanicWord(nodes.ptr[n].sym) n);}
+        if nodes.ptr[n].sym >? 0 and (panic_calls_only or not (k =? 'call' and (fact_string_call(n) >=? 2 or fact_array_call(n) not=? 0 or fact_floor_call(n) not=? 0 or fact_divisors.has(n) or fact_rational_constructor(n) or fact_power_call(n) or panic_format_literal(n) or panic_device_literal(n) or panic_atomic_progress(n) or not panic_lib and (panic_map_obligation(n) or fact_range_call(n) or fact_nonempty_call(n) or fact_exact_sum_call(n) or fact_gpu_index_call(n) or fact_rational_divmod(n)) or panic_gpu_total(n) or panic_literal_safe(n)))) {panic_edge(f PanicWord(nodes.ptr[n].sym) n);}
     }
     if k =? 'binary' or k =? 'intrinsic' {
         loop g in value_helper_calls(n) {panic_edge(f g n);}

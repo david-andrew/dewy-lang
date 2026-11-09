@@ -1,0 +1,20 @@
+# Guards prove each buffer index: a shifted read, a store and an atomic's bin.
+$runtime_checks
+P:type=[src:GpuBuffer<int32> dst:GpuBuffer<int32>]
+shift=(id:int64 u:P):>void=>{
+    if id >=? 0 and id <? u.dst.length and id + 1 <? u.src.length { u.dst[id]=u.src[id+1] }
+}
+H:type=[data:GpuBuffer<int32> bins:GpuBuffer<int32>]
+count=(id:int64 u:H):>void=>{
+    if id <? 0 or id >=? u.data.length or u.bins.length <? 4 { return }
+    atomic_add(u.bins (u.data[id] % 4) 1);
+}
+main=()=>{
+    let a=gpu_buffer([int32(1) 2 3 -5])
+    let b=gpu_buffer<int32>(3)
+    dispatch(compute(@shift) 5 P(a b))
+    printl(cpu(b))
+    let bins=gpu_buffer<int32>(4)
+    dispatch(compute(@count) 6 H(a bins))
+    printl(cpu(bins))
+}

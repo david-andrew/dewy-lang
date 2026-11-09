@@ -1,0 +1,12 @@
+$runtime_checks
+H:type=[data:GpuBuffer<int32> bins:GpuBuffer<int32>]
+count=(id:int64 u:H):>void=>{
+    if id <? 0 or id >=? u.data.length { return }
+    atomic_add(u.bins (u.data[id] % 16) 1);
+}
+main=()=>{
+    let data=gpu_buffer([int32(1) 2 3])
+    let bins=gpu_buffer<int32>(16)
+    dispatch(compute(@count) 3 H(data bins))
+    printl(cpu(bins))
+}
