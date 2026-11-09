@@ -34,9 +34,14 @@ put_be = (b: mut u8[], at: int, size: int, v: int):
     __bytes_room(b, at, size)
     loop i in [0..size): b[at + i] = u8((v >> (8 * (size - 1 - i))) & 0xFF)
 
+put_le = (b: mut u8[], at: int, size: int, v: u64): put_le(b, at, size, int(v))
+put_be = (b: mut u8[], at: int, size: int, v: u64): put_be(b, at, size, int(v))
+
 # v as size bytes at the end of b
 append_le = (b: mut u8[], v: int, size: int): put_le(b, b.len(), size, v)
 append_be = (b: mut u8[], v: int, size: int): put_be(b, b.len(), size, v)
+append_le = (b: mut u8[], v: u64, size: int): put_le(b, b.len(), size, v)
+append_be = (b: mut u8[], v: u64, size: int): put_be(b, b.len(), size, v)
 
 __bytes_check = (b: u8[], at: int, size: int):
     if size != 1 and size != 2 and size != 4 and size != 8: panic("a size of {size} bytes (1, 2, 4 or 8)")
@@ -54,18 +59,20 @@ __sign_extend = (v: int, size: int) -> int:
     v
 
 # ---------------- bits ----------------
-# how many bits are 1
-popcount = (x: int) -> int:
-    v = u64(x)
+# how many bits are 1 (a negative number as its 64 bits; a uint64 as it is)
+popcount = (x: int) -> int: popcount(u64(x))
+popcount = (x: u64) -> int:
+    v = x
     v = v - ((v >> 1) & 0x5555555555555555)
     v = (v & 0x3333333333333333) + ((v >> 2) & 0x3333333333333333)
     v = (v + (v >> 4)) & 0x0F0F0F0F0F0F0F0F
     int((v * 0x0101010101010101) >> 56)
 
 # how many 0 bits come before the highest 1 (64 for 0)
-leading_zeros = (x: int) -> int:
+leading_zeros = (x: int) -> int: leading_zeros(u64(x))
+leading_zeros = (x: u64) -> int:
     if x == 0: return 64
-    v = u64(x)
+    v = x
     n = 0
     loop s in [32, 16, 8, 4, 2, 1]:
         if v >> u64(64 - s) == 0:
@@ -74,9 +81,10 @@ leading_zeros = (x: int) -> int:
     n
 
 # how many 0 bits come after the lowest 1 (64 for 0)
-trailing_zeros = (x: int) -> int:
+trailing_zeros = (x: int) -> int: trailing_zeros(u64(x))
+trailing_zeros = (x: u64) -> int:
     if x == 0: return 64
-    v = u64(x)
+    v = x
     n = 0
     loop s in [32, 16, 8, 4, 2, 1]:
         if v << u64(64 - s) == 0:
@@ -85,16 +93,19 @@ trailing_zeros = (x: int) -> int:
     n
 
 # the bits turned by n places (those going out at one end come back at the other)
-rotate_left = (x: int, n: int) -> int:
+rotate_left = (x: int, n: int) -> int: int(rotate_left(u64(x), n))
+rotate_left = (x: u64, n: int) -> u64:
     k = n & 63
     if k == 0: return x
-    int((u64(x) << u64(k)) | (u64(x) >> u64(64 - k)))
+    (x << u64(k)) | (x >> u64(64 - k))
 rotate_right = (x: int, n: int) -> int: rotate_left(x, 64 - (n & 63))
+rotate_right = (x: u64, n: int) -> u64: rotate_left(x, 64 - (n & 63))
 
 # the bytes of a size-byte number in the other order (0x1234, 2 -> 0x3412)
-byte_swap = (x: int, size: int = 8) -> int:
-    v = 0
-    loop i in [0..size): v = (v << 8) | ((x >> (8 * i)) & 0xFF)
+byte_swap = (x: int, size: int = 8) -> int: int(byte_swap(u64(x), size))
+byte_swap = (x: u64, size: int = 8) -> u64:
+    v = u64(0)
+    loop i in [0..size): v = (v << 8) | ((x >> u64(8 * i)) & 0xFF)
     v
 
 # ---------------- from C ----------------
