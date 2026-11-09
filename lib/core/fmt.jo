@@ -586,7 +586,9 @@ __fmt_spec = (buf: mut u8[], x: f64, spec: str):
 # x as d.ddde+XX (prec digits after the point), from x's exact decimal value, rounded to even
 __fmt_exp = (buf: mut u8[], x: f64, prec: int, upper: bool) -> int:
     if x != x or x - x != 0.0:
+        at = len(buf)
         __fmt(buf, x)
+        loop j in [at..len(buf)): buf[j] = u8(int(buf[j]) - 32 * int(upper and buf[j] >= 'a'))
         return 0
     digits: u8[]
     e = 0
@@ -656,8 +658,7 @@ __fmt_general = (buf: mut u8[], x: f64, prec0: int, upper: bool):
     if p == 0: p = 1
     at = len(buf)
     if x != x or x - x != 0.0:
-        __fmt(buf, x)
-        loop j in [at..len(buf)): buf[j] = u8(int(buf[j]) - 32 * int(upper and buf[j] >= 'a'))
+        __fmt_exp(buf, x, 0, upper)
         return
     e = __fmt_exp(buf, x, p - 1, upper)
     k = at
