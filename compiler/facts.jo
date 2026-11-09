@@ -1490,6 +1490,28 @@ fact_pair_gap = (s: FactState, x: int, x2: int, w: int) -> int:
         if d < best: best = d
     best
 
+# A sum p + q against b through a retained difference m = x - p: q - m <= u and
+# x - b <= t give p + q - b = (q - m) + (x - b) <= u + t, so `start+size <? len`
+# from the guard `size <? len-start`. Retained arithmetic terms are exact, so the
+# algebra is the mathematical one; a uint64's biased terms are never composed.
+# Only a compare whose left side is a sum gets here. O(active terms) with two
+# bounded distance queries per difference of an operand.
+fact_guard_compare = (s: FactState, a: int, b: int, limit: int) -> bool:
+    if a == 0 or b == 0: return false
+    sum = fact_terms[a]
+    if sum.op != .plus or sum.a == 0 or sum.b == 0 or fact_type(sum.type) == T_U64 or fact_type(fact_terms[b].type) == T_U64: return false
+    loop m in s.ids:
+        term = fact_terms[m]
+        if term.op != .minus or term.a == 0 or term.b == 0 or term.b != sum.a and term.b != sum.b: continue
+        if fact_type(term.type) == T_U64 or fact_type(fact_terms[term.a].type) == T_U64: continue
+        other = if term.b == sum.a: sum.b else: sum.a
+        if fact_type(fact_terms[other].type) == T_U64: continue
+        up = fact_shortest(s, other, m)
+        if up == FACT_MAX: continue
+        tail = fact_shortest(s, term.a, b)
+        if tail != FACT_MAX and fact_add_fits(up, tail) and up + tail <= limit: return true
+    false
+
 # Selected affine rows share a single symbolic root. Normalize only on query,
 # with a 32-node budget; unrelated roots and nonlinear products stay unknown.
 struct FactAffine:
@@ -1588,6 +1610,7 @@ fact_compare = (s: FactState, op: Tok, a: int, b: int) -> int:
     x = fact_bound(s, a)
     y = fact_bound(s, b)
     if x.wide or y.wide:
+        if (op == .lt or op == .le) and fact_guard_compare(s, a, b, (if op == .lt: -1 else: 0)): return 1
         # (a wide value marked nonzero still differs from a zero)
         if (op == .eq or op == .ne) and (x.nz and not y.wide and y.lo == 0 and y.hi == 0 or y.nz and not x.wide and x.lo == 0 and x.hi == 0): return int(op == .ne)
         return -1
@@ -1636,6 +1659,7 @@ fact_compare = (s: FactState, op: Tok, a: int, b: int) -> int:
         if x.lo > y.hi: return 0
     if (op == .lt or op == .le) and fact_sum_compare(s, a, b, (if op == .lt: -1 else: 0)): return 1
     if (op == .lt or op == .le) and fact_product_compare(s, a, b, (if op == .lt: -1 else: 0)): return 1
+    if (op == .lt or op == .le) and fact_guard_compare(s, a, b, (if op == .lt: -1 else: 0)): return 1
     fact_affine_compare(s, op, a, b)
 
 fact_inverse = (op: Tok) -> Tok:

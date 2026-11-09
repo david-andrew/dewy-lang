@@ -1,0 +1,7 @@
+# A wrapping sum or difference is not the mathematical one.
+W:type = int64<overflow='wrap'>
+reach = (len:W start:W size:W):>int64 => {
+    if size <? len-start { $assert start+size <? len return 1 }
+    return 0
+}
+main = ():>void => printl(reach(5 -9223372036854775807 9223372036854775807))

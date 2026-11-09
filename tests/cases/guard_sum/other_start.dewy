@@ -1,0 +1,6 @@
+# The guard bounds another start.
+reach = (xs:array<int64> start:int64 other:int64 size:int64):>int64 => {
+    if size <? xs.length-other { $assert start+size <? xs.length return 1 }
+    return 0
+}
+main = ():>void => printl(reach([1 2 3] 2 1 1))

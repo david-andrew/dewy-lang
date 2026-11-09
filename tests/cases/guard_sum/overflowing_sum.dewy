@@ -1,0 +1,6 @@
+# Unguarded, start+size may leave int64: it is not stored without a proof.
+sum = (start:int64 size:int64):>int64 => {
+    let stop:int64 = start+size
+    return stop
+}
+main = ():>void => printl(sum(9223372036854775807 1))

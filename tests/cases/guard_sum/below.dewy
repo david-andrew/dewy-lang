@@ -1,0 +1,26 @@
+# `size <? len-start` bounds `start+size <? len`, in either order and through a
+# stored sum, with operands that may be negative or huge: the sum is exact.
+strict = (xs:array<int64> start:int64 size:int64):>int64 => {
+    if size <? xs.length-start { $assert start+size <? xs.length return 1 }
+    return 0
+}
+loose = (xs:array<int64> start:int64 size:int64):>int64 => {
+    if size <=? xs.length-start { $assert size+start <=? xs.length return 1 }
+    return 0
+}
+words = (len:int64 start:int64 size:int64):>int64 => {
+    if size <? len-start { $assert start+size <? len return 1 }
+    return 0
+}
+slice = (xs:array<int64> start:int64<(>=? 0)> size:int64<(>=? 0)>):>int64 => {
+    if size <=? xs.length-start { return xs[start..start+size).length }
+    return -1
+}
+main = ():>void => {
+    printl(strict([1 2 3] 1 1))
+    printl(strict([1 2 3] 1 2))
+    printl(loose([1 2 3] 1 2))
+    printl(words(5 -3 7))
+    printl(slice([1 2 3 4] 1 2))
+    printl(slice([1 2 3 4] 3 2))
+}
