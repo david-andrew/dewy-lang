@@ -584,10 +584,10 @@ __fmt_spec = (buf: mut u8[], x: f64, spec: str):
     __spec_finish(buf, start, sp, true)
 
 # x as d.ddde+XX (prec digits after the point), from x's exact decimal value, rounded to even
-__fmt_exp = (buf: mut u8[], x: f64, prec: int, upper: bool):
+__fmt_exp = (buf: mut u8[], x: f64, prec: int, upper: bool) -> int:
     if x != x or x - x != 0.0:
         __fmt(buf, x)
-        return
+        return 0
     digits: u8[]
     e = 0
     if x == 0.0:
@@ -627,6 +627,7 @@ __fmt_exp = (buf: mut u8[], x: f64, prec: int, upper: bool):
     ae = abs(e)
     if ae < 10: __buf_byte(buf, '0')
     __fmt(buf, ae)
+    e
 
 # a positive finite float's exact value as (digits, p): the integer the digits spell, times 10^-p
 __exact_decimal = (v: f64) -> (str, int):
@@ -647,22 +648,22 @@ __exact_decimal = (v: f64) -> (str, int):
         __big_shr(a, p)
     (__big_to_dec(a), p)
 
-# as Python's g: prec significant digits (6 when not given), as an exponent when the number is
-# very small or large, without trailing zeros
+# as Python's g: prec significant digits (6 when not given), as an exponent when the number
+# (rounded to those digits) is very small or large, without trailing zeros: 0, -0, inf, nan
 __fmt_general = (buf: mut u8[], x: f64, prec0: int, upper: bool):
     p = prec0
     if p < 0: p = 6
     if p == 0: p = 1
-    if x == 0.0 or x != x or x - x != 0.0:
-        __fmt(buf, x)
-        return
-    e = int(floor(log10(abs(x))))
     at = len(buf)
+    if x != x or x - x != 0.0:
+        __fmt(buf, x)
+        loop j in [at..len(buf)): buf[j] = u8(int(buf[j]) - 32 * int(upper and buf[j] >= 'a'))
+        return
+    e = __fmt_exp(buf, x, p - 1, upper)
+    k = at
+    loop k < len(buf) and buf[k] != 'e' and buf[k] != 'E': k += 1
     if e < -4 or e >= p:
-        __fmt_exp(buf, x, p - 1, upper)
         # (no trailing zeros in the digits before the exponent)
-        k = at
-        loop k < len(buf) and buf[k] != 'e' and buf[k] != 'E': k += 1
         z = k
         loop z > at and buf[z - 1] == '0': z -= 1
         if z > at and buf[z - 1] == '.': z -= 1
@@ -671,7 +672,8 @@ __fmt_general = (buf: mut u8[], x: f64, prec0: int, upper: bool):
         buf.truncate(z)
         loop c in tail: buf.push(c)
     else:
-        __fmt_fixed(buf, x, max(p - 1 - e, 0))
+        buf.truncate(at)
+        __fmt_fixed(buf, x, p - 1 - e)
         z = len(buf)
         dot = false
         loop j in [at..len(buf)):
