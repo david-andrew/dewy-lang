@@ -12,6 +12,7 @@
   - `or_throw` forwards an error to the caller, `??` substitutes a default for any error or `none`, and `??<E>` does so only for error type `E`.
   - `@f` is a handle to function `f`, and `$name` is a metatag.
 - **Revised 2026-11-07:** D4, D10, D11, D28, D29, D31 and D33–D37 were revised together. Independent agents dogfooded them twice, they were made consistent with each other, and every name was read cold. Each item states its floors and whether it is ready.
+- **Revised 2026-11-08:** D4's `select` after your review (v6): arms match by type, `race` cancels, `merged` drains. Seven rounds, three independent regrades, every new name read cold.
 - **Closed:** D22 (`$parallel_safe` deleted), D26 and D27. Your answers of 2026-11-07 are in decisions.md, batch 4.
 - **Question kinds:** (a) changes something you decided; (b) new syntax or surface; (c) names only. Question numbers are kept as first asked, so answered ones leave gaps.
 
@@ -19,11 +20,14 @@
 - **(a) Changes something you decided:**
   - D4 Q6: metatags go before the construct they affect, language-wide;
   - D4 Q7: separate entry files when environments need different program settings;
+  - D4 Q8: `select` arms match by type, same-typed waits merged;
+  - D4 Q9: `priority=` replaces `ties=`, and `Sent` is withdrawn;
   - D38 Q1: snake_case naming style;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
 - **(b) New syntax or surface:**
+  - D4 Q10–Q13: `type of string`, `ticker<T>`, `send(timeout=)`, `reserve`, `merged`, `race` with many calls, `first_ok`;
   - D11 Q2: `check=` or `valid_if=`;
   - D11 Q3: `__read__` or `$reader`;
   - D11 Q4: the checked constructor `Roll(count=…)`;
@@ -32,6 +36,7 @@
   - D37 Q1: `iso_basic` and `""`.
 - **(c) Names only:**
   - D4 Q4: `catch_ctrl_c` taking a callback;
+  - D4 Q14: `Closed<T>`, `Unsent<T>`, `Tick`, `CtrlC` and friends;
   - D10 Q4–Q8;
   - D11 Q5, Q6;
   - D28 Q1–Q4;
@@ -50,7 +55,7 @@
 
 ### D4. One unified `parallel` surface: v5
 
-- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` labels each wait with an ordinary one-field record, so same-typed channels are unambiguous. Ctrl-C catching and cleanup protection have visible callback scopes; compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
+- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` waits on channel operations and its arms match the outcomes by type; `race` is the word that cancels the losers. Ctrl-C catching and cleanup protection have visible callback scopes; compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
 - **Status:** first-pass paper dogfood covered fourteen scenarios; independent dogfood in `proposals/concurrency/unified/v5-dogfood.md` found must-fix issues, now corrected in this text. Your approved names, `$explicit_cancellation` and `main`'s `BackgroundTasks` parameter stay. The remaining surface questions are below; no repeated Q1 or Q3. Full design and complete sources: `~/dev/tmp/par5/parallel-v5.md`, `~/dev/tmp/par5/programs/`.
 
 ```dewy
@@ -77,13 +82,13 @@ autosave = () => loop true {
     sleep(30s) or_throw
     printl"saved"
 }
-relay = (commands:Channel<string> chat:Channel<string>) => loop true {
-    match select([command=@commands.receive] [message=@chat.receive] timeout=1s) or_throw<Canceled> {
-        [command: string] => printl"command: {command}"
-        [message: string] => printl"chat: {message}"
-        [command: Closed] => return "commands closed"
-        [message: Closed] => return "chat closed"
-        <Timeout> => printl"idle"
+Command:type = [verb:string]
+relay = (commands:Channel<Command> chat:Channel<string>) => {
+    loop item in merged(@commands.receive @chat.receive stop_when_idle=30s) or_throw {
+        match item {
+            command:Command => printl"command: {command.verb}"
+            message:string => printl"chat: {message}"
+        }
     }
 }
 main = () => {
@@ -98,7 +103,7 @@ main = () => {
         check_cancel() or_throw
         score(i)
     }])
-    let commands = channel<string>(4)
+    let commands = channel<Command>(4)
     let chat = channel<string>(4)
     parallel {
         {
@@ -106,10 +111,10 @@ main = () => {
             chat.close()
         }
         {
-            commands.send("quit") or_throw
+            commands.send(Command["quit"]) or_throw
             commands.close()
         }
-        let why = relay(commands chat) or_throw
+        relay(commands chat) or_throw
     }
     task.tasks((group:Tasks) => {
         let saver = group.spawn(@autosave)
@@ -118,14 +123,14 @@ main = () => {
         loop i in [0..4) tick.next or_throw;
         saver.stop()
     }) or_throw
-    printl"{map} {sounds} {ages} {total} {why}"
+    printl"{map} {sounds} {ages} {total}"
 }
 ```
 
 - **The common path:**
   - Write steps in order in `parallel { ... }`; independent steps can run together. Ordinary successful values match source order given the same handle results.
   - `[parallel x in xs f(x)]` maps; `?? void` filters ordinary failures, and `.partition_failures` retains successes and failures.
-  - `select([command=@commands.receive] [message=@chat.receive] timeout=1s)` gives `[command:string|Closed] | [message:string|Closed] | Timeout | Canceled`. `or_throw<Canceled>` removes only the final alternative by forwarding it. Ordinary record field patterns distinguish the waits, including their `Closed` outcomes.
+  - `merged(@commands.receive @chat.receive)` yields each value until both channels close; `match` tells a `Command` from a `string` by type. A one-shot `select(...)` gives the union of its waits' outcomes plus `Canceled` (and `Timeout` with `timeout=`); `or_throw<Canceled>` forwards only the cancellation. See the `select` section below.
   - `task.tasks` is a function imported from the standard task module, not a language keyword or hidden local. It passes a fresh `Tasks` group to the callback, joins, then returns the callback's value. Void callbacks stay void; a useful group result needs a binding or `;`.
 - **How to adjust:**
   - Link a step to an earlier result, group ordered statements in `{ ... }`, or put work after the parallel block to order it.
@@ -263,9 +268,9 @@ main = (argv:array<string> app:BackgroundTasks):>void => {
   - **Block ordering:** conflict/data edges wait for successful predecessors; on failure, pending work never starts, running work is canceled/joined, and no writes are rolled back. Handle outcomes depend on timing. Channel wait cycles and racing sends/closes retain the v4 checks.
   - **Writes:** block items may write outer variables under the dependency graph; loop items may write only their own partition; spawned tasks cannot write outer variables. Helpers preserve these rules.
   - **Scope results:** block items' values remain source-ordered; top-level block `let`s remain visible after the block; `( ... )` is one ordered item. The unusual binding scope stays flagged.
-  - **Select diagnostics:** unknown named waits teach `[key=@operation]`; hover offers both labelled `Closed` arms plus `Timeout` where applicable. A misplaced comprehension tag above `let` says “move this inside the brackets, before `parallel`”.
+  - **Select diagnostics:** a plain `select` in a loop whose `Closed` arm neither leaves nor changes the waits is an error pointing to `merged`; hover lists the outcome types, including each `Closed<T>` and `Timeout` where applicable. A misplaced comprehension tag above `let` says “move this inside the brackets, before `parallel`”.
   - **Group-body result:** `task.tasks(body)` preserves the body's value after joining, just like the other callback scopes; early `return` is local to the callback. Child failure/parent cancellation joins before returning a failure instead. No contextual-void suppression of useful group values.
-  - **Select protocol:** positional arguments are distinct-key one-field records of `Waitable<R_i>`; return their corresponding `[key:R_i]` union plus top-level cancellation and applicable timeout. Losing receives consume nothing; losing sends retain their caller-owned payload. Match labels never come from arbitrary call keywords.
+  - **Select protocol:** the arguments are operations (or `none`, skipped, or a spread of one type); the result is the union of their outcomes with duplicates merged, plus top-level `Canceled` and `Timeout` when a timeout is given. Exactly one operation commits; a losing receive takes nothing. `select` never cancels work; `race`, `first_ok` and `within` do, and join before returning.
   - **Cancellation is result-typed:** `Canceled` remains visible in results and ordinary error handling. No second, hidden exception mechanism or cancellation row is needed for these programs. A result excluding `Canceled` forbids an unhandled cancel, without claiming the function never checks it locally.
   - **Explicit cancellation:** `$explicit_cancellation` is approved and included in `$bulletproof`. It rejects implicit forwarding through `??` and collectors. `or_throw<Canceled>` writes the forwarding; `or_throw<E>` with some other E leaves cancellation in the value.
   - **Ctrl-C scopes:** default Ctrl-C requests root cancellation; an unhandled Ctrl-C-derived cancel exits 130. Catching redirects presses only for the callback's lifetime, without masking other stop sources. Console signatures always include `Interrupted`; scope context does not rewrite their types. Three rapid presses force exit even while caught. Child-process signal/job-control behavior is unchanged.
@@ -274,10 +279,49 @@ main = (argv:array<string> app:BackgroundTasks):>void => {
   - **Frame code:** use nonwaiting `ch.drain` and background jobs; channel/task/timer waits remain errors in `update`/`draw`. The injected group survives `main` until the window closes.
   - **Entrypoint arguments:** accept at most one `array<string>` and one `BackgroundTasks`, by exact type rather than parameter name; no extra injections into ordinary helpers. Only the selected file's entry `main` runs automatically.
   - **Limits:** settings are in source, caps count cores, and `available_cores` combines hardware/affinity and source limits. No environment-variable cap. Program task admission retains the decided explicit-allocation-failure policy.
+- **`select`, `race` and channel waits (v6, after your review of v5's record labels):**
+  - **The rule:** `select(...)` takes the operations themselves and returns the union of what they produce, plus `Canceled`, plus `Timeout` when `timeout=` is given. Arms match by type, like any other `match`.
+  - **Same-typed waits are one arm, as you asked.** `string | string` is `string`, so `result:string` handles every source. Giving a channel its own type is how you opt in to telling sources apart. A close is `Closed<T>` of that operation's type, so closes of the same type merge too.
+  - **`select` never cancels anything. `race` does.** `race` runs work, returns the first result and cancels and joins the rest. Your mirror fetch is `race(@load.(sources)...)`: by the existing rule, every argument group in an ungrouped `@` chain partially applies, and `.( )` is one, so `@load.(sources)` is an array of ready-to-run calls. `first_ok` is the same but skips failures until one succeeds, returning the first failure only if all fail. `within` stays the deadline on one piece of work. A bound receive is work too: `race(@cache.receive @load(url))`.
+  - **Draining several channels until they all close** is `loop item in merged(@a.receive @b.receive) or_throw { … }`. `merged` stops waiting on a channel once it closes, so it can't spin. `stop_when_idle=30s` ends the loop after 30 s with nothing new and leaves the channels open. A plain `select` in a loop whose close arm neither leaves nor changes the waits is a compile error that points to `merged`.
+  - **Single waits with a deadline:** `replies.receive(timeout=2s)`, `tick.next(timeout=)`. `send(job timeout=50ms)` gives `void | Unsent<Job> | Canceled`; the job comes back in `Unsent`, whose `.reason` is `Timeout` or `Closed`. A pump that should take a job only once there is room uses `@out.reserve` in a `select`, then `permit.send(job)`. Sends inside `select` and the `Sent` type are withdrawn: `reserve` and `send(timeout=)` cover every case written.
+  - **Deadlines keep no state between calls.** A relative `timeout=` restarts each call; `timeout=0s` is a poll where a ready operation wins; an absolute deadline already past wins under `priority='fair'`. `priority='listed'` takes the written waits in order, deadline last.
+  - **What matching by type costs:** you only pay when you need to know the source. Then two same-typed sources need two declared types, and senders wrap: `Stderr:type = type of string`, `err.send(Stderr(text))`. The process library declares `Stdout` and `Stderr` itself, so ordinary users never do. Go, Tokio and Swift need no declaration there, because the case label is the identity. Dewy is shorter when you don't care which source fired (one arm instead of one case per channel).
+
+```dewy
+FetchError:type = type of exception & [url:string]
+load = (url:string):>string | FetchError => ...
+
+fastest = (sources:array<string>) => {
+    match race(@load.(sources)...) or_throw<Canceled> {
+        page:string => printl'result is {page}'
+        err:FetchError => printl'error: {err}'
+    }
+}
+
+Command:type = [verb:string]
+relay = (commands:Channel<Command> chat:Channel<string>) => {
+    loop item in merged(@commands.receive @chat.receive stop_when_idle=30s) or_throw {
+        match item {
+            command:Command => printl"command: {command.verb}"
+            message:string => printl"chat: {message}"
+        }
+    }
+}
+```
+
+  - **Dogfood:** 17 programs over seven rounds, three independent regrades (`proposals/concurrency/unified/select-v6-review-round3.md`, `-round4.md`, `-round6.md`). Final floor 3, only from the cost above: two same-typed sources told apart (two programs) and three `Closed` spellings in one program (`<Closed<Event>>` arm, `or_throw<Closed<Event>>`, `or_throw<Closed>`). Every fixable sub-5 the reviews found is fixed. Full text: `proposals/concurrency/unified/select-v6.md`; grades: `select-v6-dogfood.md`; programs: `~/dev/tmp/par6/programs-r7/`.
 - **Surface questions for you:**
   - **Q4 (c): keep `catch_ctrl_c`, now taking a callback rather than returning an activating guard?** The callback's extent is the catching extent; its `ctrl_c` parameter receives presses. It unblocks shells and prompt loops without a policy-changing assignment. **Rec:** yes. Reversible library call-shape choice. The spelling was previously cold-read; its new invocation shape has been paper dogfooded, not independently retested. No new tag/member spelling is introduced.
   - **Q6 (a, b): make construct settings prefix their target language-wide?** Tags and labels sit before loops, blocks, and declarations. One contiguous module header may be at file start or after the initial imports, before the first ordinary declaration/statement; imported units are in scope. Later prefixes apply only to their next construct. Program settings may also directly prefix entry `main`, and are fixed at compile time. This replaces both current containing-scope placement and the first-line-inside-parallel exception. It unblocks consistent examples in every design item. **Rec:** yes. Reversible before the surface ships; broader than concurrency, and explicitly changes the prior placement direction.
   - **Q7 (a, b): use separate entry files when environments need different process caps, and ordinary config records when one entrypoint chooses at runtime?** Your second idiom cannot select compiled `$program.*` settings from runtime `argv`; putting them on ordinary functions would give a prefix tag a second, process-changing meaning. A one-file process configuration would need an environment already known when compiling, selected through an agreed target/build-mode/compile-time source value; no such environment selector is invented here. **Rec:** separate entry files for process settings; keep one-file functions for application config under one fixed process cap (complete examples above). This preserves compile-time settings and ordinary function-call semantics. It unblocks environment packaging; reversible source organization. Your proposed second idiom remains an explicit owner choice, not silently implemented as runtime configuration.
+  - **Q8 (a): match `select` arms by type, with same-typed waits merged into one arm, instead of v5's one-field record labels?** `select(@commands.receive @chat.receive)` gives `Command | Closed<Command> | string | Closed<string> | Canceled`; you write one arm per type you care about. Distinguishing two same-typed sources takes a declared type each. **Rec:** yes. Unblocks every channel program; reversible.
+  - **Q9 (a): `priority='fair' | 'listed'` replaces your approved `ties=`, and `Sent` is withdrawn?** Cold read: two of three readers took `ties='first'` as "whichever became ready first in time"; all three read `priority='listed'` as "in the order written". `Sent` existed only for sends inside `select`, which are withdrawn (`reserve` and `send(timeout=)` replace them). **Rec:** yes; reversible.
+  - **Q10 (b): `Stderr:type = type of string`, built with `Stderr(text)`, and `ticker<Heartbeat>(1s)`?** `type of` with a concrete parent is listed as planned in LANGUAGE.md; the existing family rule applies (a `Stderr` passes where a `string` is wanted, not the reverse). A ticker's type parameter names what `.next` gives (default `Tick`), so two tickers can be told apart. Cold read: `type of string` read as usable where a string is wanted (two of three); `ticker<Heartbeat>(1s)` read correctly by all three.. **Rec:** yes; reversible.
+  - **Q11 (b): `out.send(job timeout=50ms)` and `@out.reserve`?** The send gives `void | Unsent<Job> | Canceled`, the job coming back in `Unsent` (hover says so; no reader guessed it). `reserve` waits for room and gives `Reserved<Job>` (then `permit.send(job)` can't fail) or `Closed<Reserved<Job>>`, kept apart from the input's `Closed<Job>` so a pump can drain on one and stop on the other. Cold read: `send(timeout=)`, `reserve` and `Reserved` read correctly by all three; `Closed<Reserved<Job>>` by two of three (the third read it vaguely as "the reserve path closed").. **Rec:** yes; reversible.
+  - **Q12 (b): `loop item in merged(@a.receive @b.receive stop_when_idle=30s) or_throw { … }`?** `merged` (also a held value with `.next` and `.open`) yields values until every source closes; `stop_when_idle=` ends early and leaves channels open. `or_throw` after a loop's iterable is the binding v4 §12 proposed; it isn't in LANGUAGE.md yet. Cold read: `merged` and `stop_when_idle` read correctly by all three (`select_set` and `timeout=` did not). **Rec:** yes; reversible.
+  - **Q13 (b): `race` takes any number of calls or a spread, and `first_ok(…)` returns the first success?** `race` today takes two functions. `first_ok` returns the first failure only when all fail. Cold read: `race` (losers canceled) and `first_ok` read correctly by all three; `first_success` read equally well, if you prefer it. **Rec:** yes, `first_ok`; reversible.
+  - **Q14 (c): `Closed<T>`, `Unsent<T>`, `Tick`, `CtrlC`, `task.CtrlCListener` and `receive(timeout=)`?** All read correctly by three fresh readers. **Rec:** yes.
 - **Flagged, not new questions:**
   - `check_cancel()` is an explicit checkpoint, not an ambient opt-in; it has no active lifetime to bracket. It lives inside an ordinary computation function whose result carries `Canceled`.
   - `protect_from_cancel` and `within` are cooperative: nonchecking compute or an uninterruptible foreign call can exceed the requested duration while being joined.
