@@ -21,10 +21,10 @@ fold_values = <T U>(values:array<T> initial:U combine:((a:U b:T):>U)):>U => {
     }
     return result
 }
-double = (x:int64):>int64 => 2*x
-square = (x:int64):>int64 => x*x
-even = (x:int64):>bool => x%2 =? 0
-add_int = (a:int64 b:int64):>int64 => a+b
+double = (x:int64):>int => 2*x
+square = (x:int64):>int => x*x
+even = (x:int):>bool => x%2 =? 0
+add_int = (a:int b:int):>int => a+b
 counter = (start:int64) => {
     let value = start
     return (x:int64 $capture value):>int64 => {
@@ -34,10 +34,10 @@ counter = (start:int64) => {
 }
 main = ():>void => {
     let source:array<int64> = [loop i in [0..20) i]
-    let handlers:dict<string (x:int64:>int64)>= ["double"->@double "square"->@square]
+    let handlers:dict<string (x:int64:>int)>= ["double"->@double "square"->@square]
     let transformed = map_values(source handlers["square"])
     let selected = filter_values(transformed @even)
-    let sum = fold_values<int64 int64>(selected 0 @add_int)
+    let sum = fold_values<int int>(selected 0 @add_int)
     $runtime_assert (sum =? 1140)
     let running = counter(0)
     let saved = @running
@@ -52,12 +52,10 @@ main = ():>void => {
     let words = map_values<int64 string>([1 2 3] (x:int64):>string => "v{x}")
     $runtime_assert (words =? ["v1" "v2" "v3"])
     $runtime_assert (filter_values([] @even).length =? 0)
-    $runtime_assert (fold_values<int64 int64>([] 9 @add_int) =? 9)
+    $runtime_assert (fold_values<int int>([] 9 @add_int) =? 9)
     let tablecopy = handlers
     handlers["square"] = @double
     $runtime_assert (tablecopy["square"](9) =? 81)
     $runtime_assert (handlers["square"](9) =? 18)
     printl("{sum} {cumulative[3]} {shifted[19]} {words.length}")
 }
-
-$runtime_checks

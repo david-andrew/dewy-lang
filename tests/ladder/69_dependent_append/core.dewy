@@ -21,7 +21,7 @@ read_found = (xs:array<int64> needle:int64):>int64 => {
 }
 main = ():>void => {
     let xs:array<int64> = []
-    let signature:int64 = 0
+    let signature = 0
     loop n in [0..32) {
         let i = append(@xs n*n)
         $runtime_assert i <? xs.length
@@ -61,5 +61,3 @@ main = ():>void => {
     $runtime_assert read_found(saved 36) =? 36
     printl("{signature} {last}")
 }
-
-$runtime_checks

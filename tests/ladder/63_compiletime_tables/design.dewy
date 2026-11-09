@@ -1,6 +1,6 @@
 # Ordinary Dewy algorithms evaluated for compile-time constants in design.
-reverse_table = ():>array<int64> => {
-    let output:array<int64> = []
+reverse_table = ():>array<int> => {
+    let output:array<int> = []
     loop value in [0..256) {
         let bits = value
         let reversed = 0
@@ -96,5 +96,3 @@ main = ():>void => {
     $runtime_assert (trial_count =? primes.length)
     printl("{primes.length} {checksum} {reverse_sum} {word}")
 }
-
-$runtime_checks

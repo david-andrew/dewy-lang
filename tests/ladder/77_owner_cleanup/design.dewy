@@ -7,14 +7,14 @@ Ticket = type of [id:int64
         released += id
     }
 ]
-consume = (ticket:Ticket):>int64 => {
+consume = (ticket:Ticket):>int => {
     return ticket.id*2
 }
-normal = (n:int64):>int64 => {
+normal = (n:int64):>int => {
     let ticket = Ticket[n]
     return consume(ticket)
 }
-early = (n:int64):>int64 => {
+early = (n:int64):>int => {
     let ticket = Ticket[n]
     if n >? 0 return ticket.id
     return -ticket.id
@@ -36,7 +36,7 @@ continue_path = ():>int64 => {
     return total
 }
 main = ():>void => {
-    let total:int64 = 0
+    let total = 0
     loop n in [1..9) {
         total += normal(n)
     }
@@ -60,5 +60,3 @@ main = ():>void => {
     $runtime_assert released =? 61
     printl("{total} {released}")
 }
-
-$runtime_checks

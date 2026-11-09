@@ -1,5 +1,5 @@
 # Structure-of-arrays ECS, stable IDs, dense swap removal and a sparse map.
-World:type = [ids:array<int64> x:array<int64> y:array<int64> vx:array<int64> vy:array<int64> slot:dict<int64 int64>]
+World:type = [ids:array<int64> x:array<int> y:array<int> vx:array<int> vy:array<int> slot:dict<int64 int64>]
 spawn_entity = (@w:World id:int64):>void => {
     w.slot[id] = w.ids.length
     w.ids.push(id)
@@ -49,7 +49,7 @@ tick = (@w:World):>void => {
         }
     }
 }
-checksum = (w:World):>int64 => {
+checksum = (w:World):>int => {
     let result = 0
     let n = w.ids.length
     $runtime_assert n <=? w.x.length and n <=? w.y.length and n <=? w.vx.length and n <=? w.vy.length
@@ -92,5 +92,3 @@ main = ():>void => {
     }
     printl("{world.ids.length} {checksum(world)} {checksum(snapshot)}")
 }
-
-$runtime_checks

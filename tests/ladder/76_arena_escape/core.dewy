@@ -3,16 +3,16 @@
 # Acceptance: Copies escaping nested allocator scopes survive reset and preserve independent aggregates.
 # OPEN: Typed allocation capabilities and allocator exhaustion result contract remain provisional.
 # This executable projection does not establish the OPEN obligation.
-Packet:type = [id:int64 values:array<int64>]
+Packet:type = [id:int64 values:array<int>]
 build = (n:int64):>Packet => {
-    let values:array<int64> = []
+    let values:array<int> = []
     loop i in [0..n) {
         values.push(i*i)
     }
     return Packet[n values]
 }
-sum = (xs:array<int64>):>int64 => {
-    let total:int64 = 0
+sum = (xs:array<int>):>int => {
+    let total = 0
     loop x in xs {
         total += x
     }
@@ -22,7 +22,7 @@ main = ():>void => {
     let arena:int64 = 0
     let other:int64 = 0
     let kept:array<Packet> = []
-    let total:int64 = 0
+    let total = 0
     loop round in [1..17) {
         let packet = {
             let temporary = build(round)
@@ -61,5 +61,3 @@ main = ():>void => {
     $runtime_assert sum(saved[5].values) =? 55
     printl("{total} {sum(nested.values)} {saved.length}")
 }
-
-$runtime_checks

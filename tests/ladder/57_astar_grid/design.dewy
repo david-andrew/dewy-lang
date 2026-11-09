@@ -1,8 +1,8 @@
-Entry:type = [node:int64 cost:int64 score:int64]
-heuristic = (node:int64 goal:int64 width:int64<(>? 0)>):>int64 => abs(node%width-goal%width)+abs(node//width-goal//width)
+Entry:type = [node:int64 cost:int score:int]
+heuristic = (node:int64 goal:int64 width:int64<(>? 0)>):>int => abs(node%width-goal%width)+abs(node//width-goal//width)
 search = (grid:array<int64> width:int64<(>? 0)> start:int64<0 <=? start and start <? grid.length> goal:int64):>array<int64> => {
     let distance = [loop cell in grid 1000000]
-    let parent = [loop cell in grid -1]
+    let parent:array<int64> = [loop cell in grid -1]
     let open:array<Entry> = [Entry[start 0 heuristic(start goal width)]]
     distance[start] = 0
     loop open.length >? 0 {
@@ -85,5 +85,3 @@ main = ():>void => {
     }
     printl("{path.length-1} {path[0]} {path[path.length-1]} {sum}")
 }
-
-$runtime_checks
