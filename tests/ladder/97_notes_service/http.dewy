@@ -1,4 +1,3 @@
-$runtime_checks
 # HTTP/1.1 messages over bytes: incremental request framing with explicit
 # limits, chunked bodies, percent-decoding, and response encoding/parsing.
 # Network input is bytes, so framing never assumes valid UTF-8; only a complete
@@ -226,10 +225,11 @@ decode_text = (data:array<uint8>):>string|HttpError => {
 
 chunk_size = (digits:string):>int64|HttpError => {
     if digits.length =? 0 or digits.length >? 6 return bad(400 "invalid chunk size")
-    let size = 0
+    let size:int64<(>=? 0)> = 0
     loop b in bytes(digits) {
         let v = hex_value(b)
-        if v <? 0 return bad(400 "invalid chunk size")
+        # (six hex digits at most: below 0x100000 before the last one)
+        if v <? 0 or size >? 0xFFFFF return bad(400 "invalid chunk size")
         size = size*16+v
     }
     return size

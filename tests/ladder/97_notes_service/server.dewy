@@ -2,7 +2,6 @@
 # answers every complete pipelined request in order, and closes after a
 # framing error or when the client asks. The transport (a socket, a test
 # harness, a WebSocket from the browser UI) only moves bytes.
-$runtime_checks
 from p"http.dewy" import Request, Response, HttpError, Incomplete, Framed, Header, frame, encode, keeps_alive
 from p"router.dewy" import Service, route, fail
 
@@ -28,8 +27,7 @@ feed = (@service:Service @conn:Connection chunk:array<uint8>):>array<uint8> => {
             break
         }
         let request = framed.request
-        $runtime_assert 0 <=? framed.consumed and framed.consumed <=? conn.pending.length
-        conn.pending = conn.pending[framed.consumed..]
+        conn.pending = conn.pending[$clamp framed.consumed..]
         let response = route(@service request)
         let close = not keeps_alive(request)
         out.extend(encode(response head_only=request.method =? "HEAD" close=close))

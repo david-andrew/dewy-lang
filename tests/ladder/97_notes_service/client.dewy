@@ -10,7 +10,7 @@ ApiCall:type = [
     if_match:string=""
 ]
 
-const HEX = "0123456789ABCDEF"
+const HEX = b"0123456789ABCDEF"
 
 unreserved = (b:uint8):>bool => {
     if 0x61 <=? b <=? 0x7a or 0x41 <=? b <=? 0x5a or 0x30 <=? b <=? 0x39 return true
@@ -20,13 +20,12 @@ unreserved = (b:uint8):>bool => {
 # Percent-encode every byte outside the unreserved set.
 quote = (text:string):>string => {
     let out:array<uint8> = []
-    let digits = bytes(HEX)
+    let digits = HEX
     loop b in bytes(text) {
         if unreserved(b) {
             out.push(b)
         } else {
             out.push(0x25)
-            $runtime_assert digits.length =? 16
             out.push(digits[int64(b) >> 4])
             out.push(digits[int64(b) & 15])
         }
@@ -53,8 +52,7 @@ receive_bytes = (@client:ClientConn data:array<uint8>):>array<Response>|HttpErro
         let framed = parse_response(client.pending client.limits) or_throw
         if framed is? Incomplete break
         out.push(framed.response)
-        $runtime_assert 0 <=? framed.consumed and framed.consumed <=? client.pending.length
-        client.pending = client.pending[framed.consumed..]
+        client.pending = client.pending[$clamp framed.consumed..]
     }
     return out
 }

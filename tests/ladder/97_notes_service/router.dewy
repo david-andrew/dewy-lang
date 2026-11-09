@@ -1,6 +1,5 @@
 # Routing: a table of path patterns with per-method handlers, JSON bodies,
 # content negotiation, conditional requests and static files.
-$runtime_checks
 from p"http.dewy" import Request, Response, Header, header, Limits
 from p"store.dewy" import Store, Note, NoteInput, NotePatch, Filter, Page, TagCount,
     BatchOp, BatchResult, BatchFailed, Invalid, NotFound, Stale,
@@ -46,9 +45,10 @@ note_response = (status:int64 note:Note):>Response => {
 # A small decimal for ids and paging: 1–6 digits, no sign.
 small_number = (text:string):>int64? => {
     if text.length =? 0 or text.length >? 6 return none
-    let value:int64 = 0
+    let value:int64<(>=? 0)> = 0
     loop b in bytes(text) {
-        if not (0x30 <=? b <=? 0x39) return none
+        # (six digits at most: below 100000 before the last one)
+        if not (0x30 <=? b <=? 0x39) or value >? 99999 return none
         value = value*10+(int64(b)-0x30)
     }
     return value

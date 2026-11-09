@@ -1,4 +1,3 @@
-$runtime_checks
 # The notes store: typed records, validation, revisions and listing.
 # The store is an ordinary value: a batch edits a copy and commits it whole,
 # so a failed batch leaves the caller's store exactly as it was.
@@ -109,7 +108,9 @@ replace = (@store:Store id:int64 input:NoteInput expected:string=""):>Note|NotFo
     let tags = normalize_tags(input.tags)
     let problems = check(title input.body tags)
     if problems.length >? 0 return Invalid[problems]
-    let updated = Note[id title input.body tags input.done note.revision+1 tick(@store)]
+    let revision = note.revision
+    revision += 1
+    let updated = Note[id title input.body tags input.done revision tick(@store)]
     store.notes[id] = updated
     return updated
 }
@@ -122,7 +123,9 @@ patch = (@store:Store id:int64 change:NotePatch expected:string=""):>Note|NotFou
     let tags = if change.tags isnt? none normalize_tags(change.tags) else note.tags
     let problems = check(title body tags)
     if problems.length >? 0 return Invalid[problems]
-    let updated = Note[id title body tags change.done ?? note.done note.revision+1 tick(@store)]
+    let revision = note.revision
+    revision += 1
+    let updated = Note[id title body tags change.done ?? note.done revision tick(@store)]
     store.notes[id] = updated
     return updated
 }
@@ -141,8 +144,8 @@ Filter:type = [
     done:bool?=none
     text:string=""
     sort:string="id"
-    limit:int64=10
-    offset:int64=0
+    limit:int64<(>=? 0)>=10
+    offset:int64<(>=? 0)>=0
 ]
 
 Page:type = [total:int64 offset:int64 limit:int64 items:array<Note>]
@@ -158,7 +161,7 @@ matches = (note:Note filter:Filter):>bool => {
 }
 
 by_title = (note:Note):>string => note.title.lower
-by_updated = (note:Note):>int64 => -note.updated
+by_updated = (note:Note):>int => -note.updated
 
 list = (store:Store filter:Filter):>Page => {
     let selected = [loop note in store.notes.values() if matches(note filter) note]
@@ -168,14 +171,13 @@ list = (store:Store filter:Filter):>Page => {
         selected.sort(key=@by_updated)
     }
     let start = min(filter.offset selected.length)
-    let stop = min(start+filter.limit selected.length)
-    $runtime_assert 0 <=? start and start <=? stop and stop <=? selected.length
+    let stop = start+min(filter.limit selected.length-start)
     return Page[selected.length filter.offset filter.limit selected[start..stop)]
 }
 
 TagCount:type = [name:string count:int64]
 
-by_count = (t:TagCount):>int64 => -t.count
+by_count = (t:TagCount):>int => -t.count
 by_name = (t:TagCount):>string => t.name
 
 tag_counts = (store:Store):>array<TagCount> => {
