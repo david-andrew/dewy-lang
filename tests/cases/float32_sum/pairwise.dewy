@@ -1,0 +1,18 @@
+# A float32 sum adds pairwise halves in float32, as float64's does: over 100000 elements its
+# error stays near log2(n) float32 epsilons, where a running sum loses about 1e-4.
+main=()=>{
+    let n=100000
+    let tenths:array<float32>=[loop i in [0..n) float32(0.1)]
+    let s:float32=sum(tenths)
+    let exact=sum([loop x in tenths float64(x)])
+    printl(s)
+    printl(abs(float64(s)-exact)/exact <? 1.0e-6)
+    let mixed:array<float32>=[loop i in [0..n) float32((i*37) % 1001)-500.0+float32(0.25)]
+    let m=sum(mixed)
+    let mexact=sum([loop x in mixed float64(x)])
+    printl(abs(float64(m)-mexact)/abs(mexact) <? 1.0e-6)
+    let small:array<float32>=[1.5 2.25 -0.75]
+    printl(sum(small))
+    let empty:array<float32>=[]
+    printl(sum(empty))
+}

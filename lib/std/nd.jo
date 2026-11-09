@@ -629,12 +629,13 @@ min[T] = (m: T[,]) -> T: min(m.data)
 max[T] = (m: T[,]) -> T: max(m.data)
 # the sum of the elements
 # (floats: added in pairs of halves, so the rounding errors stay small however long the array is:
-# a million 0.1s make 100000.0, as NumPy's sum does)
+# a million 0.1s make 100000.0, as NumPy's sum does; float32 adds in float32, as NumPy's does)
 sum = (xs: f64[]) -> f64: __pairwise_sum(xs, 0, xs.len())
-__pairwise_sum = (xs: f64[], lo: int, hi: int) -> f64:
+sum = (xs: f32[]) -> f32: __pairwise_sum(xs, 0, xs.len())
+__pairwise_sum[T] = (xs: T[], lo: int, hi: int) -> T:
     n = hi - lo
     if n < 8:
-        t = 0.0
+        t: T
         loop i in [lo..hi): t += __at(xs, i)
         return t
     if n <= 128:
