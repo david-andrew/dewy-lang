@@ -3517,6 +3517,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if nd != 0: return fact_nd_capture(n, s, values, nd)
         array = fact_array_call(n)
         if array != 0: fact_array_call_check(n, s, values, array)
+        # (a dotted expression's common length: its operands', proven equal)
+        if array == 40:
+            common = fact_bcast_common(n, s)
+            if common != 0: return common
         if fact_nonempty_call(n): fact_nonempty_check(n, s, values)
         else if fact_exact_sum_call(n): fact_exact_sum_check(n, s, values)
         if array == 4 and (ownership_decls.len() == 0 or not ownership_fact_type(ntype(kid(n, 0)))):
@@ -3901,6 +3905,21 @@ fn_in_lib = (f: int) -> bool:
         file = int(modules[m].file)
         return len(lib_root) > 0 and file >= 0 and file < files.len() and starts_with(files[file].path, lib_root)
     pos_in_lib(nodes[int(fns[f].body)].pos)
+
+# __bcast(lengths) of 1-D operands each proven equal to one length, or to 1: that length
+# (all ones: 1), as the elementwise result's. 0 when unknown. O(operands).
+fact_bcast_common = (n: int, s: mut FactState) -> int:
+    lengths = kid(n, 0)
+    if nodes[lengths].kind != .array: return 0
+    one = fact_constant(s, 1)
+    first = 0
+    loop c in kids(lengths):
+        v = fact_capture(c, s)
+        if fact_compare(s, .eq, v, one) == 1: continue
+        if first == 0: first = v
+        else if fact_compare(s, .eq, v, first) != 1: return 0
+    if first == 0: return one
+    first
 
 fact_exact_demand = (n: int) -> bool:
     (exact_has_store(n) and not exact_decided(n) and (fact_deferred_proving or dir_obligations or dir_policy(nodes[n].pos) == DIR_STATIC or exact_shader_owners.has(exact_stores.get(n) ?? 0))) or (n >= 0 and n < exact_marks.len() and exact_marks[n] & 128 != 0)

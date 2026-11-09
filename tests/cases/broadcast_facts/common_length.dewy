@@ -1,0 +1,11 @@
+# A dotted expression over arrays of one proven length has that length: comparing a GPU
+# result with its CPU reference needs no guard for `max`.
+main=()=>{
+    let n=100
+    let xs:array<float32>=[loop i in [0..n) float32(i)]
+    let ys=abs.(xs .- xs)
+    printl(max(ys))
+    let g=cpu(gpu(xs))
+    $runtime_assert(g.data.length =? xs.length)
+    printl(max(abs.(g.data .- xs)))
+}
