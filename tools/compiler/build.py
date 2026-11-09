@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -91,13 +92,62 @@ def check_fixed_point(binary: Path, rebuild: Callable[[Path, Path], None]) -> No
     previous.unlink()
 
 
+# Written first into every output directory, so a later run may replace one
+# (a failed build too) and never a directory that is something else.
+OUTPUT_MARKER = '.dewy-build-output'
+
+
+class OutputDirectoryError(RuntimeError):
+    """--output names something that is not an earlier build's output."""
+
+
+def is_build_output(path: Path) -> bool:
+    return path.is_dir() and any((path / name).is_file() for name in (OUTPUT_MARKER, 'build.json'))
+
+
+def claim_output(output: Path) -> Path | None:
+    """Make `output` a new, empty build directory. An earlier build's output there moves to
+    `<output>.previous` (replacing the one before it) and its path is returned: the new build
+    runs at `output` itself, since the executables embed their own paths. Anything else already
+    there is an error, never overwritten."""
+    previous = output.with_name(output.name + '.previous')
+    if output.exists() or output.is_symlink():
+        if not is_build_output(output):
+            raise OutputDirectoryError(f'{output} exists and is not the output of an earlier build; pass a new directory to --output')
+        if previous.exists() or previous.is_symlink():
+            if not is_build_output(previous):
+                raise OutputDirectoryError(f'{previous} exists and is not the output of an earlier build; remove it or pass a new directory to --output')
+            shutil.rmtree(previous)
+        output.rename(previous)
+    else:
+        previous = None
+    output.mkdir(parents=True)
+    (output / OUTPUT_MARKER).write_text('')
+    return previous
+
+
 def build(output: Path, *, seed: Path | None = None, bootstrap: bool = False, fixed_point: bool = False) -> Path:
+    """Build into `output`, replacing an earlier build's output there. A failed build keeps both
+    its own files (logs, a non-fixed-point pair of executables) and the earlier output, at
+    `<output>.previous`."""
     output = output.resolve()
-    output.mkdir(parents=True, exist_ok=False)
+    previous = claim_output(output)
+    try:
+        binary = build_into(output, seed=seed, bootstrap=bootstrap, fixed_point=fixed_point)
+    except BaseException:
+        if previous is not None:
+            print(f'build failed; the earlier output is kept at {previous}', file=sys.stderr)
+        raise
+    if previous is not None:
+        shutil.rmtree(previous)
+    return binary
+
+
+def build_into(output: Path, *, seed: Path | None, bootstrap: bool, fixed_point: bool) -> Path:
     for name in ('compiler', 'lib', 'stage0', 'bootstrap'):
         shutil.copytree(ROOT / name, output / name, ignore=shutil.ignore_patterns('sloppy0', '__pycache__'))
     shutil.copy2(ROOT / 'LICENSE', output / 'LICENSE')
-    sources = {str(p.relative_to(output)): identity(p) for p in sorted(output.rglob('*')) if p.is_file()}
+    sources = {str(p.relative_to(output)): identity(p) for p in sorted(output.rglob('*')) if p.is_file() and p != output / OUTPUT_MARKER}
     binary_dir = output / 'bin'
     binary_dir.mkdir()
     env = {k: v for k, v in os.environ.items() if not k.startswith('DEWY_')}
@@ -187,8 +237,11 @@ if __name__ == '__main__':
     seeds = cli.add_mutually_exclusive_group(required=True)
     seeds.add_argument('--seed', type=Path, help='existing native Dewy core compiler')
     seeds.add_argument('--bootstrap', action='store_true', help='build from the independent C bootstrap')
-    cli.add_argument('--output', type=Path, required=True, help='new directory for the standalone toolchain')
+    cli.add_argument('--output', type=Path, required=True, help='directory for the standalone toolchain (an earlier build'"'"'s output there is replaced)')
     cli.add_argument('--fixed-point', action='store_true',
                      help='rebuild the compiler with itself and fail unless the bytes are identical')
     args = cli.parse_args()
-    print(build(args.output, seed=args.seed, bootstrap=args.bootstrap, fixed_point=args.fixed_point))
+    try:
+        print(build(args.output, seed=args.seed, bootstrap=args.bootstrap, fixed_point=args.fixed_point))
+    except OutputDirectoryError as error:
+        raise SystemExit(f'build.py: {error}') from None
