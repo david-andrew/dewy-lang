@@ -81,21 +81,3 @@ quantity_named_powers: int[][] = [[-1, 0, 0, 0], [-2, 1, 1, 0], [-2, -1, 1, 0], 
 quantity_algebra_input = QuantityAlgebraInput(&quantity_dimensions, &quantity_dimension_names, &quantity_scales, &quantity_units, &quantity_tags, &quantity_si_prefixes, &quantity_base_order, &quantity_base_symbols, &quantity_named_symbols, &quantity_named_powers, fatal)
 quantity_algebra_binding = quantity_algebra_bind(&quantity_algebra_input)
 
-register_quantity_names = ():
-    loop i in [0..8):
-        dim = base_dimension(i)
-        nm = intern(quantity_dimension_names[i])
-        universe[nm] = new_sym(nm, .type_, mk_dimension(dim), 0)
-    # Time is prelude surface. Other unit values live in units.dewy.
-    loop item in [("s", 1, 1), ("second", 1, 1), ("seconds", 1, 1),
-        ("ms", 1, 1000), ("millisecond", 1, 1000), ("milliseconds", 1, 1000),
-        ("us", 1, 1000000), ("microsecond", 1, 1000000), ("microseconds", 1, 1000000),
-        ("ns", 1, 1000000000), ("nanosecond", 1, 1000000000), ("nanoseconds", 1, 1000000000),
-        ("minute", 60, 1), ("hour", 3600, 1)]:
-        nm = intern(item.0)
-        n = mk(.unit_lit, 0)
-        nodes[n].ival = item.1
-        nodes[n].aux = i32(item.2)
-        nodes[n].aux2 = 1
-        globals.push(Global(name = i32(nm), is_const = true, init = i32(n), state = 2))
-        universe[nm] = new_sym(nm, .const_, globals.len() - 1, 0)

@@ -1,13 +1,14 @@
 $runtime_checks
 from p"ast.jo" import NF_EXCL_FIRST
-from p"ast.jo" import (NF_JUXT has_flag kid nkids nodes)
-from p"check.jo" import (fns lib_dir locals universe)
+from p"ast.jo" import (NF_JUXT has_flag kid mk nkids nodes)
+from p"check.jo" import (fns globals lib_dir locals new_sym universe)
+from p"checker_state.dewy" import (Global)
 from p"expr.jo" import (CV integer_constant ntype)
 from p"type_ops.dewy" import (dt)
 from p"types.jo" import (is_float is_int is_numeric prune structs types)
-from p"unit_ops.dewy" import (base_dimension quantity_constant_scale quantity_dimension)
-from p"units.jo" import (quantity_base quantity_scales)
-from p"util.jo" import (files line_col name_of pos_file)
+from p"unit_ops.dewy" import (base_dimension mk_dimension quantity_constant_scale quantity_dimension)
+from p"units.jo" import (quantity_base quantity_dimension_names quantity_scales)
+from p"util.jo" import (files intern line_col name_of pos_file)
 
 UnitRareWord:type=int64<overflow='wrap'>
 # A conservative denominator multiple, demanded only by a grid check. The
@@ -93,4 +94,27 @@ hidden_unit_why=(n:UnitRareWord a:UnitRareWord b:UnitRareWord):>string=>$unsafe 
     let [ln c]=line_col(made)
     let nm=name_of(UnitRareWord(nodes.ptr[b].name))
     " (`{nm}` here is the local variable made on line {ln}, a {dt(ntype(b))}, which hides any unit named `{nm}`: rename the variable to use the unit)"
+}
+# The dimension type names and the prelude's time units, once at the start of checking.
+register_quantity_names=():>void=>$unsafe {
+    loop i in [0..8) {
+        let dim=base_dimension(i)
+        let nm=intern(quantity_dimension_names[i])
+        universe[nm]=new_sym(nm 'type_' mk_dimension(dim) 0)
+    }
+    # Time is prelude surface. Other unit values live in units.dewy.
+    let items:array<[string int64 int64]>=[["s" 1 1] ["second" 1 1] ["seconds" 1 1]
+        ["ms" 1 1000] ["millisecond" 1 1000] ["milliseconds" 1 1000]
+        ["us" 1 1000000] ["microsecond" 1 1000000] ["microseconds" 1 1000000]
+        ["ns" 1 1000000000] ["nanosecond" 1 1000000000] ["nanoseconds" 1 1000000000]
+        ["minute" 60 1] ["hour" 3600 1]]
+    loop item in items {
+        let nm=intern(item[0])
+        let n=mk('unit_lit' 0)
+        nodes.ptr[n].ival=item[1]
+        nodes.ptr[n].aux=int32(item[2])
+        nodes.ptr[n].aux2=1
+        globals.push(Global(name=int32(nm) is_const=true init=int32(n) state=2))
+        universe[nm]=new_sym(nm 'const_' globals.length - 1 0)
+    }
 }
