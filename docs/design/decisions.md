@@ -590,6 +590,5 @@ section linked. ROADMAP.md lists them in one line each.
     accident. Considered: Julia's scheme (`;` is dimension 1, space and `;;` are
     dimension 2, `[1 2 3]` is 1×3) and a fixed "space is dimension 0" rule; both lose
     1-D one-per-line lists or need a special case.
-  - Being designed ([proposals/array-literals/](proposals/array-literals/)): how
-    separators interact with comprehensions and loop capture, and whether nested
-    rectangular literals (`[[1 2 3]]`, `xs[new]`) and n-D arrays are one thing.
+  - Open as D39 ([proposals/array-literals/](proposals/array-literals/)): whether
+    bracketed nests are arrays of arrays or n-D, and how comprehensions interact.

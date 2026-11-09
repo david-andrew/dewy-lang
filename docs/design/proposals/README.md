@@ -27,5 +27,6 @@ These folders record, for each design decision, what was considered and why one 
 | [compile-speed/](compile-speed/) | Compile-speed redesigns | Fact state round 1: measured bound below the bar; nothing adopted. |
 | [integration/](integration/) | Cross-design conventions, dogfood passes, consistency audits, name tests (2026-11-07) | Shared rules for D4, D10, D11, D22, D28, D29, D31, D33–D37 |
 | [naming-style/](naming-style/) | snake_case vs Julia-style joined names | Study, second opinion, guessability tests. Open (D38). |
+| [array-literals/](array-literals/) | `;`, separator levels, nested literals vs n-D arrays | Rounds 1–2 and a review; separators decided (batch 6). Open (D39). |
 
 The earliest time-design inputs were built from David's private notes and are kept outside the repo.

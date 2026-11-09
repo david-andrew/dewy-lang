@@ -28,6 +28,7 @@
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
 - **(b) New syntax or surface:**
+  - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D4 Q11–Q13: `send(timeout=)`, `reserve`, `merged`, `race` with many calls, `first_ok`;
   - D4 Q15: `$named[...]`;
   - D11 Q2: `check=` or `valid_if=`;
@@ -49,7 +50,8 @@
   - D35 Q1;
   - D36 Q1;
   - D37 Q2;
-  - D38 Q2: prefer familiar words.
+  - D38 Q2: prefer familiar words;
+  - D39 Q2: `stack` and `Ragged`.
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -1094,6 +1096,28 @@ d.nth_weekday_of_month(2 'tuesday')    # vs nthweekdayofmonth
   - The "did you mean" hint ignores `_` and case, so typing `startswith` points to `starts_with`.
 - **Q1 (a).** snake_case with this rule, replacing your earlier `startswith`/`endswith`? Rec: yes. The renames that were waiting in D10 then go ahead.
 - **Q2 (c).** When choosing a name's words, prefer the one most programmers already know from Python, Rust, JavaScript or Go, unless it's misleading in Dewy. Rec: yes.
+
+### D39. Nested array literals: brackets nest, separators make dimensions
+- **BLUF:** your batch 6 separator rule stands. The open part is what a bracketed nest is. Rec: separators make n-D arrays from scalars; brackets make arrays of arrays; a nest becomes n-D only when a shaped type asks for it, or through a fallible `stack(rows)` for rows whose lengths are only known at run time. Full design, review and 100+ parser fixtures: `docs/design/proposals/array-literals/` (round 2 is current).
+
+```dewy
+m = [1 2 ; 3 4]                          # 2×2 n-D (batch 6)
+grid = [[1 2] [3 4]]                     # array of arrays: grid[1][0], grid[1].push(5) still work
+let t:array<int length=[2 2]> = [[1 2] [3 4]]   # asked for n-D: checked, 2×2
+rows = [loop line in lines line.split(",")]     # array of arrays; lengths unknown until run time
+table = stack(rows) or_throw             # n-D, or Ragged if rows differ in length (or there are none)
+row = [1 2 3 ;]                          # 1×3; also v[new]
+col = v[.. new]                          # 3×1; also length=[n 1]
+[loop x in xs {1.0 x x^2}]               # comprehensions add values flat, 1-D: spacing in the body is not a dimension
+```
+
+- **Why not collapse every rectangular nest into n-D** (round 1's proposal): it breaks the repo's own grid idiom (`seen[y][x]`, `seen[i].push`, about 57 nested comprehensions), and rows whose lengths are only known at run time (CSV rows, words per line, adjacency lists) can't be proved equal, so ordinary data code would need annotations. On the programs where the options differ, collapse floors at 2 and this option at 4; the run-time-length programs score 3 vs 5.
+- **What changes from today:** `[xs ; ys]` no longer stacks two arrays as rows; it's an array of arrays like `[xs ys]`, and stacking is `stack(...)`. `[[1 2 3]]` is an array holding one array, not 1×3. `xs[new]` on a 1-D array gives the n-D `length=[1 n]`.
+- **Comprehensions** (your loop-capture question): a `loop` inside `[…]` contributes its values as one flat run. A loop body is one statement or a `{…}` block, which are not element lists, so separators inside them never make dimensions. Matrices from loops: `[loop y in rows [loop x in cols f(x y)]]` (array of arrays) plus a shaped type or `stack` when you want n-D.
+- **Floor:** 2, from `(f();)`, the cost your batch 6 rule accepts for discarding inside an array.
+- **Parser:** local to the array-literal reader in both readers (seed and `compiler/dewy_reader.dewy`), one forward scan per gap that skips comments; linear, no backtracking.
+- **Q1 (b).** Brackets nest, separators make dimensions, n-D from a nest only by shaped type or `stack`? Rec: yes. Reversible.
+- **Q2 (c).** `stack(rows)` returning the n-D array or `Ragged` (also for an empty list)? Cold read: `stack` and `Ragged` read correctly by all three readers; `stack_rows` read best but implies 2-D, and `stack` also builds cubes from frames. Rec: `stack` and `Ragged`.
 
 ---
 
