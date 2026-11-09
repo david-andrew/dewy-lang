@@ -14,13 +14,8 @@ use 'lower.jo'
 use 'exact.jo'
 use 'checked_eval.dewy'
 use 'lower_primitives.dewy'
-checked_const_init = (kind: int, ref: int, pos: int) -> int: binding_const_init(kind as SK, ref, pos)
-checked_wrap = (n: int, cv: int, to: int): wrap_conv(n, cv as CV, to)
+use 'comptime_ops.dewy'
 ct_values: CTValue[] = [CTValue()]
-checked_bytes = (data: u8[]) -> str: str_from_bytes(data)
-checked_byte_cut = (text: str, start: int, end_: int) -> str: text[start..end_)
 checked_host = CheckedEvalHost(checked_const_init, call_eval_order, check_fn_body, check_struct_fields, compound_op, dewy_at, exact_type, fatal, int_fits, int_widens, intern, math_rep_type, pos_str, representation_type, runtime_fn, str_set_of, checked_wrap, checked_byte_cut, checked_bytes)
 checked_input = CheckedEvalInput(&ct_values, &nodes, &lists, &names, &types, &type_args, &structs, &fields, &variants, &fns, &globals, &locals, &files, &ref_predicates, &ref_narrowing, &str_sets, &T_BOOL, &T_INT, &T_MATH_INT, &T_STR, &T_U64, &T_U8, &ts_dewy, &lib_dir, &checked_host)
 checked_binding = checked_eval_bind(&checked_input)
-ct_literal = (v: int, pos: int) -> int: cx_literal(v, pos)
-ct_run = (e: int) -> int: cx_run(e)

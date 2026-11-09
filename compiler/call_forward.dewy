@@ -5,6 +5,7 @@ $runtime_checks
 # no function value, so effects, facts and deadlock certificates follow the call. Only a function
 # that states a constant check and whose body only hands its parameters on (cc_forward_read), and
 # only for constant string arguments. Demand-driven: O(declarations + arguments) per such call.
+from p"comptime_ops.dewy" import (checked_const_init)
 from p"check_constant.jo" import (cc_forwards cc_passed)
 from p"constant_checks.dewy" import (cc_constant)
 from p"ast.jo" import (NF_CHECKED NF_SPREAD add_flag has_flag kid kids mk nkids nkids2 nodes set_list)
@@ -13,7 +14,6 @@ from p"expr.jo" import (AUX2_PARTIAL call_collect_named last_checked ntype)
 from p"check.jo" import (bound_here check_scopes ctxs cur_mod cx demand_name fns modules prelude syms universe use_home)
 from p"checker_expr.dewy" import (call_by_name check_expr)
 from p"checker_call_resolve.dewy" import (resolve_fn_call)
-from p"comptime.jo" import (checked_const_init)
 from p"types.jo" import (T_MATH_INT T_STR prune types)
 from p"units.jo" import (bundled_rational_type bundled_word_rational_type)
 from p"util.jo" import (fatal files intern name_of pos_file)

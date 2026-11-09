@@ -2,6 +2,7 @@ $runtime_checks
 # Demand-driven: nothing is read unless a declaration has a constant check. Cost: O(1) per
 # declaration, O(1) per call of one, and one compile-time run of the validator per call with a
 # constant argument.
+from p"comptime_ops.dewy" import (checked_const_init ct_run)
 from p"check_constant.jo" import (cc_passed CheckConstant cc_any cc_decls cc_errors cc_forwards cc_verdicts)
 from p"checker_expr.dewy" import lookup
 from p"ast.jo" import (NF_CHECKED add_flag kid kids mk nkids nodes set_list)
@@ -12,7 +13,7 @@ from p"types.jo" import (T_STR is_union prune tkind union_members)
 from p"type_ops.dewy" import (dt mk_union union_index)
 from p"util.jo" import (fatal name_of pos_in_lib)
 from p"error_ops.dewy" import (exception_member)
-from p"comptime.jo" import (checked_const_init ct_run ct_values)
+from p"comptime.jo" import (ct_values)
 from p"warn_if_ops.dewy" import (wi_param)
 from p"unit_rare.dewy" import (time_grid_proven)
 

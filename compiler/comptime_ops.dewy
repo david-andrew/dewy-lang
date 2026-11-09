@@ -1,0 +1,14 @@
+$runtime_checks
+from p"@lib/core/rt.jo" import (__str_from_bytes __str_slice)
+from p"check.jo" import (binding_const_init)
+from p"checked_eval.dewy" import (cx_literal cx_run)
+from p"checks_text.dewy" import (sym_kind_of)
+from p"expr.jo" import (CV wrap_conv)
+
+# (the checked evaluator's host: Jo's enums as numbers, and Jo's byte-wise string cuts)
+checked_const_init=(kind:int64 ref:int64 pos:int64):>int64=>binding_const_init(sym_kind_of(kind) ref pos)
+checked_wrap=(n:int64 cv:int64 to:int64):>void=>{wrap_conv(n cv as CV to)}
+checked_bytes=(data:array<uint8>):>string=>__str_from_bytes(data)
+checked_byte_cut=(text:string start:int64 end_:int64):>string=>__str_slice(text start end_)
+ct_literal=(v:int64 pos:int64):>int64=>cx_literal(v pos)
+ct_run=(e:int64):>int64=>cx_run(e)

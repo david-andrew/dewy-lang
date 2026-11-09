@@ -24,6 +24,7 @@ LEAF_HOMES = {
     'constant_fold_ops': 'constant_folds.jo',
     'unit_rare': 'units.jo',
     'safe_path_walk': 'safe_paths.jo',
+    'comptime_ops': 'comptime.jo',
 }
 
 

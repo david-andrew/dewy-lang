@@ -35,6 +35,9 @@ def frozen_evaluator(compiler, tmp_path_factory):  # noqa: F811
     shutil.copytree(ROOT / 'compiler', sources)
     path = sources / 'comptime.jo'
     path.write_text(path.read_text().replace("use 'checked_eval.dewy'", "use 'checked_eval.jo'"))
+    # (the host adapters' leaf runs the same evaluator)
+    path = sources / 'comptime_ops.dewy'
+    path.write_text(path.read_text().replace('from p"checked_eval.dewy"', 'from p"checked_eval.jo"'))
     binary = directory / 'dewy-core'
     built = subprocess.run([compiler, 'build', sources / 'main.jo', '-o', binary],
                            env={**os.environ, 'DEWY_CORE_LIB': str(ROOT / 'lib'), 'DEWY_EMIT_WORKERS': '1'},

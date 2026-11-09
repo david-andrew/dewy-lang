@@ -1,0 +1,25 @@
+use 'comptime.jo'
+use 'checker_state.dewy'
+use 'evaluator_state.dewy'
+use 'checker_tokens.dewy'
+use 'refinement_types.dewy'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'refine.jo'
+use 'ast.jo'
+use 'lex.jo'
+use 'types.jo'
+use 'expr.jo'
+use 'util.jo'
+use 'lower.jo'
+use 'exact.jo'
+use 'checked_eval.dewy'
+use 'lower_primitives.dewy'
+
+# (the checked evaluator's host: Jo's enums as numbers, and Jo's byte-wise string cuts)
+checked_const_init = (kind: int, ref: int, pos: int) -> int: binding_const_init(kind as SK, ref, pos)
+checked_wrap = (n: int, cv: int, to: int): wrap_conv(n, cv as CV, to)
+checked_bytes = (data: u8[]) -> str: str_from_bytes(data)
+checked_byte_cut = (text: str, start: int, end_: int) -> str: text[start..end_)
+ct_literal = (v: int, pos: int) -> int: cx_literal(v, pos)
+ct_run = (e: int) -> int: cx_run(e)
