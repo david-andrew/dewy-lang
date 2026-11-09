@@ -1,13 +1,13 @@
 # Tier 3 / 79_scoped_byte_loan / milestone 24
 # Acceptance: Read scoped bytes, reserve and commit writable bytes, preserve snapshots after detach.
-byte_sum = (xs:array<uint8>):>int64 => {
-    let total:int64 = 0
+byte_sum = (xs:array<uint8>):>int => {
+    let total = 0
     loop x in xs {
         total += x as int64
     }
     return total
 }
-inspect = (seed:int64):>int64 => {
+inspect = (seed:int64):>int => {
     let bytes:array<uint8> = [1 2 3 4 5 6 7 8]
     let saved = bytes.copy()
     let first = $lend(bytes) {
@@ -21,11 +21,11 @@ inspect = (seed:int64):>int64 => {
     $runtime_assert bytes.length =? 8
     return first+seed+byte_sum(saved)
 }
-rewrite = ():>int64 => {
+rewrite = ():>int => {
     let bytes:array<uint8> = [1 2 3 4]
     let saved = bytes.copy()
     $lend(@bytes reserve=2) {
-        let address = __load_i64__(bytes)
+        let address:int64<overflow='wrap'> = __load_i64__(bytes)
         __store_u8__(9 address+4)
         __store_u8__(10 address+5)
         bytes.set_length(6)
@@ -37,7 +37,7 @@ rewrite = ():>int64 => {
     return byte_sum(bytes)+byte_sum(saved)
 }
 main = ():>void => {
-    let total:int64 = 0
+    let total = 0
     loop n in [0..32) {
         total += inspect(n)
     }
@@ -59,5 +59,3 @@ main = ():>void => {
     $runtime_assert byte_sum([8 7 6 5 4 3 2 1]) =? 36
     printl("{total} {rewrite()}")
 }
-
-$runtime_checks

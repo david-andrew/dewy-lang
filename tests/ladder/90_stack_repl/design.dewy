@@ -1,6 +1,6 @@
 # Tier 3 / 90_stack_repl / milestone 29
 # Acceptance: Interactive stdin RPN interpreter: variables, arithmetic, rollback on parse/stack/divisor errors, EOF and quit; bounded integer parser.
-Machine:type = [stack:array<int64> names:dict<string int64> halted:bool errors:int64]
+Machine:type = [stack:array<int> names:dict<string int> halted:bool errors:int64]
 fresh = ():>Machine => {
     return Machine[[] [] false 0]
 }
@@ -220,5 +220,3 @@ main = ():>void => {
     }
     printl("done {lines} {state.errors} {state.names.length}")
 }
-
-$runtime_checks

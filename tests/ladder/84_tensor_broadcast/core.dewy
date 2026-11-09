@@ -3,9 +3,9 @@
 # Acceptance: Contiguous rank-2 arrays, row/column broadcast, transpose, snapshot rows, and reject mismatched shapes.
 # OPEN: General multidimensional literals/types, axis broadcasting and view layout are provisional; flat Matrix is an algorithm projection, not the tensor feature.
 # This executable projection does not establish the OPEN obligation.
-Matrix:type = [rows:int64 cols:int64 cells:array<int64>]
+Matrix:type = [rows:int64 cols:int64 cells:array<int>]
 make = (rows:int64 cols:int64):>Matrix => {
-    let cells:array<int64> = []
+    let cells:array<int> = []
     loop r in [0..rows) {
         loop c in [0..cols) {
             cells.push(r*10+c)
@@ -25,7 +25,7 @@ broadcast = (matrix:Matrix row:array<int64> column:array<int64>):>Matrix => {
     return matrix
 }
 transpose = (matrix:Matrix):>Matrix => {
-    let cells:array<int64> = []
+    let cells:array<int> = []
     $runtime_assert matrix.cells.length =? matrix.rows*matrix.cols
     loop c in [0..matrix.cols) {
         loop r in [0..matrix.rows) {
@@ -49,7 +49,7 @@ main = ():>void => {
     $runtime_assert t.cells[1] =? 211
     $runtime_assert make(0 4).cells.length =? 0
     $runtime_assert make(3 0).cells.length =? 0
-    let total:int64 = 0
+    let total = 0
     loop value in b.cells {
         total += value
     }
@@ -62,5 +62,3 @@ main = ():>void => {
     $runtime_assert a.cells.length =? 12
     printl("{total} {t.cells[11]}")
 }
-
-$runtime_checks

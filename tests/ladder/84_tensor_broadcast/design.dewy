@@ -5,8 +5,8 @@
 # signature's shape variables reject a row or column of the wrong length.
 $runtime_checks
 
-make = (rows:int64 cols:int64):>array<int64 length=[rows cols]> => {
-    let cells = zeros<int64>(rows cols)
+make = (rows:int64<(>=? 0)> cols:int64<(>=? 0)>):>array<int length=[rows cols]> => {
+    let cells = zeros<int>(rows cols)
     loop r in [0..rows) {
         loop c in [0..cols) {
             cells[r c] = r*10+c
@@ -16,7 +16,7 @@ make = (rows:int64 cols:int64):>array<int64 length=[rows cols]> => {
 }
 
 # The row runs along each of the m rows, the column down each of the n columns.
-broadcast = (matrix:array<int64 length=[m n]> row:array<int64 length=[n]> column:array<int64 length=[m]>):>array<int64 length=[m n]> => matrix .+ row[new ..] .+ column[.. new]
+broadcast = (matrix:array<int length=[m n]> row:array<int length=[n]> column:array<int length=[m]>):>array<int length=[m n]> => matrix .+ row[new ..] .+ column[.. new]
 
 main = ():>void => {
     let a = make(3 4)

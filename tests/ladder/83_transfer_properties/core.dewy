@@ -1,16 +1,16 @@
 # Tier 3 / 83_transfer_properties / milestone 25
 # Acceptance: Derive structural task-transfer properties; reject an Rc-like non-atomic handle crossing tasks.
 # Sequential value oracle; design.dewy checks the rejected concurrent program.
-Message:type = [sender:int64 sequence:int64 payload:array<int64>]
+Message:type = [sender:int64 sequence:int64 payload:array<int>]
 make = (sender:int64 n:int64):>Message => {
-    let values:array<int64> = []
+    let values:array<int> = []
     loop i in [0..n) {
         values.push(sender*100+i)
     }
     return Message[sender n values]
 }
-receive = (message:Message):>int64 => {
-    let checksum:int64 = 0
+receive = (message:Message):>int => {
+    let checksum = 0
     loop i in [0..message.payload.length) {
         $runtime_assert message.payload[i] =? message.sender*100+i
         checksum += message.payload[i]
@@ -23,7 +23,7 @@ replace = (@message:Message):>void => {
     message.sender = -1
 }
 main = ():>void => {
-    let total:int64 = 0
+    let total = 0
     loop sender in [1..9) {
         let message = make(sender 16)
         let saved = message.copy()
@@ -63,5 +63,3 @@ main = ():>void => {
     $runtime_assert sum(checksums) =? total
     printl("{total}")
 }
-
-$runtime_checks

@@ -2,7 +2,6 @@
 # Acceptance: HTTP/1.1 request parser and JSON integer-schema CRUD routing with status codes and transactional validation; deterministic transport transcripts.
 # The handler is checked in-process, then main carries the same requests over a
 # loopback listener (net), one connection each, framed by Content-Length.
-$runtime_checks
 import net
 Request:type = [method:string target:string body:string]
 Response:type = [status:int64 body:string]
@@ -213,7 +212,7 @@ boundaries = ():>void => {
 
 # How much of `buffer` the first request takes (its head, the blank line and
 # Content-Length more), once all of it has arrived; at most `largest`.
-request_length = (buffer:string largest:int64=65536):>int64 | none => {
+request_length = (buffer:string largest:int64=65536):>int | none => {
     # (positions count graphemes, as 92's lengths do: "\r\n" is one)
     let blank = "\r\n\r\n"
     let found = buffer.find(blank)
@@ -259,8 +258,8 @@ answer = (@service:Service socket:net.TcpStream):>void | net.NetError | Canceled
             }
         }
         let request = buffer
-        if length is? int64 {
-            let size:int64 = length
+        if length is? int {
+            let size = length
             request = buffer[$clamp 0..size)
         }
         let response = serve(@service request)

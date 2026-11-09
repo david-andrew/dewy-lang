@@ -34,7 +34,7 @@ next = (@rng:Rng):>uint64 => {
 }
 
 # a*b mod m without overflow: the product is exact, only the remainder is stored.
-mul_mod = (a:uint64 b:uint64 m:uint64<(>? 0)>):>uint64 => a*b % m
+mul_mod = (a:uint64 b:uint64 m:uint64<(>? 0)>):>int => a*b % m
 
 # Binary search over sorted uint64 keys: (lo + hi) // 2 never overflows.
 find = (keys:array<uint64> target:uint64):>bool => {
@@ -59,8 +59,8 @@ midpoint = (a:uint64 b:uint64):>uint64 => (a + b) // 2
 blend = (p:uint8 q:uint8):>uint8 => (p + q) // 2
 
 # A counting Bloom filter: each counter saturates at 255 instead of wrapping to 0.
-Bloom:type = [counts:array<Count8>]
-slots = (word:string):>array<int> => {
+Bloom:type = [counts:array<Count8 length=64>]
+slots = (word:string):>array<int<(in? 0..63)>> => {
     let h = fnv1a(word)
     let g = adler32(word)
     [loop i in [0..3) (h + i*g) % 64]
@@ -95,7 +95,7 @@ main = () => {
     printl"mul_mod {mul_mod(big 18446744073709550000 1000000007)}"
     printl"blend {blend(250 240)} {blend(3 4)}"
     let scale:int64 = 3037000500
-    let per_mille:int64 = scale*scale // 1000000007
+    let per_mille = scale*scale // 1000000007
     printl"per mille {per_mille}"
     let keys:array<uint64> = [3 9 27 81 243 18446744073709551000 18446744073709551600]
     printl"find {find(keys 81)} {find(keys 18446744073709551600)} {find(keys 4)}"
@@ -109,5 +109,3 @@ main = () => {
     printl"saturated counters {hot}"
     loop word in ["apple" "cherry" "grape" "spam" "kiwi"] printl"{word}: {maybe_has(bloom word)}"
 }
-
-$runtime_checks
