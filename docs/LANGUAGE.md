@@ -914,7 +914,7 @@ immutable scalar parameters. Loading the counter as its own increment still
 needs proof; `$no_assumed_bounds` keeps the atomic overflow obligation.
 It does not cover 32-bit or narrower storage, multiplication, or a wider exact
 increment. `$no_assumed_bounds` disables this axiom and the array-length bound
-(at most 2^56 bytes) in its scope, requiring ordinary proofs or explicitly
+(at most the target's `addr` range: 2^48 native, 2^32 WebAssembly) in its scope, requiring ordinary proofs or explicitly
 allowed runtime checks.
 
 For fixed-width arithmetic that does not yield `int`, an expression whose

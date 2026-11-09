@@ -384,8 +384,9 @@ fact_shrunk_elements = (s: mut FactState, base: int, fresh: int):
 fact_grown_roots: {int: bool} = {}
 fact_name_vals = 0
 
-# The array-length ceiling (2^56 bytes) is an axiom `$no_assumed_bounds` turns
-# off in its scope, decided by where the analyzed code is: a function whose body
+# The array-length ceiling is the target's `addr` range (2^48 native, 2^32
+# WebAssembly: an array's positions are `addr` values), an axiom
+# `$no_assumed_bounds` turns off in its scope, decided by where the analyzed code is: a function whose body
 # is in such a scope or holds one uses only the signed storage limit; every other
 # function keeps the ceiling for its own proofs, whatever its callers or the other
 # modules set. Its summary, asked for by a strict function, is computed and cached
@@ -396,8 +397,9 @@ fact_name_vals = 0
 # nested strict scope.
 fact_length_max = () -> int:
     if dir_assumed_bounds_any and fact_length_strict(): return FACT_MAX
+    # (ref_addr_max: the same range `addr` is declared with)
     if ptr_size == 4: return 4294967295
-    (1 << 56) - 1
+    281474976710655
 
 fact_length_owner = -1
 # (a callee's summary asked for by such a function: computed, and cached apart,

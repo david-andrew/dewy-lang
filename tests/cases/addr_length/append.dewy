@@ -1,0 +1,21 @@
+# An array's length is within `addr`'s range, so an index below the length
+# (the position just appended, or the length itself) is an `addr`.
+append = (@xs:array<int64> value:int64):>addr<(<? xs.length)> => {
+    let i = xs.length
+    xs.push(value)
+    return i
+}
+locate = (xs:array<int64> needle:int64):>addr<(<? xs.length)> | none => {
+    loop i in [0..xs.length) {
+        if xs[i] =? needle return i
+    }
+    return none
+}
+size = (xs:array<int64>):>addr<(<=? xs.length)> => xs.length
+main = ():>void => {
+    let xs:array<int64> = []
+    loop n in [0..5) { let i = append(@xs n*n) printl(xs[i]) }
+    let found = locate(xs 9)
+    if found is? addr { printl(found) }
+    printl(size(xs))
+}

@@ -1,0 +1,6 @@
+# Below the length is not an addr: the index may be negative.
+pick = (xs:array<int64> i:int64):>addr<(<? xs.length)> => {
+    if i <? xs.length return i
+    return 0
+}
+main = ():>void => printl(pick([1 2 3] -1))

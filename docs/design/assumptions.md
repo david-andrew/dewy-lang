@@ -9,7 +9,7 @@ await David, so that configuration is not yet fully enforceable.
 | Assumption (default on) | Where | Opt-out metatag |
 |---|---|---|
 | A 64-bit counter or accumulator growing by a bounded amount per iteration or allocation cannot overflow | facts (fixed-width stores and open ranges; range starts within ±2^56 and constant steps within ±2^16 only, never narrow counters); a `parallel` range of 2^63 or more values runs as 2^63 - 1 (lib/std/thread.jo) | `$no_assumed_bounds` |
-| An array's length fits in 2^56 bytes (the largest address space of any target) | facts (integer counters) | `$no_assumed_bounds` |
+| An array's length fits the target's `addr` range (2^48 native, 2^32 WebAssembly: positions are `addr` values) | facts (integer counters) | `$no_assumed_bounds` |
 | Plain `Instant` and `Duration` arithmetic stays within 128 bits (±5.39×10²¹ years); leaving it is a reported environmental failure, and `checked_add` gives `OutOfRange` | lib/time/core.dewy | `$time.require_range` *pending* |
 | Library-internal `assert`/`unreachable` are trusted invariants, not `panics` | effects (`panics`) | *pending* |
 | Running out of memory (an array shape whose element count passes int64 included) and the runtime core (lib/core/rt.jo) are environmental, not `panics` | effects (`panics`) | *pending* (`$explicit_allocation_failure` covers allocation) |
