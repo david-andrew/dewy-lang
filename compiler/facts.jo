@@ -3903,7 +3903,7 @@ fn_in_lib = (f: int) -> bool:
     pos_in_lib(nodes[int(fns[f].body)].pos)
 
 fact_exact_demand = (n: int) -> bool:
-    (exact_has_store(n) and not exact_decided(n) and (fact_deferred_proving or dir_obligations or dir_policy(nodes[n].pos) == DIR_STATIC)) or (n >= 0 and n < exact_marks.len() and exact_marks[n] & 128 != 0)
+    (exact_has_store(n) and not exact_decided(n) and (fact_deferred_proving or dir_obligations or dir_policy(nodes[n].pos) == DIR_STATIC or exact_shader_owners.has(exact_stores.get(n) ?? 0))) or (n >= 0 and n < exact_marks.len() and exact_marks[n] & 128 != 0)
 
 # (Jo sources, the compiler's own, keep runtime checks: none is demanded)
 fn_dewy = (f: int) -> bool:

@@ -79,6 +79,11 @@ exact_candidate_nodes: int[]
 exact_candidate_next: int[]
 exact_demands: {int: bool} = {}
 exact_proof_demands: {int: bool} = {}
+# The functions GPU programs run, as the checker meets them: compute(f) and a fused GPU array
+# expression's function literal. A shader cannot check a fixed-width store, so their stores
+# and their callees' are proved even where runtime checks are on (exact_shader_demand).
+exact_shader_roots: int[]
+exact_shader_owners: {int: bool} = {}
 exact_rep_demands: bool[]
 exact_rep_owners: bool[]
 exact_effect_owners: bool[]
@@ -474,6 +479,34 @@ exact_type_width = (n: int, constant_only: bool = false) -> int:
     if midpoint.0 != 0: result = 128
     exact_type_widths[n] = result
     result
+
+# Demand proofs of the exact stores in GPU programs' functions and the program's functions they
+# call (exact_shader_roots), before the facts pass chooses its bodies: those it must visit.
+# O(their nodes), once.
+exact_shader_demand = () -> int[]:
+    seen: {int: bool} = {}
+    out: int[]
+    work = exact_shader_roots
+    exact_shader_roots = []
+    loop work.len() > 0:
+        f = work.pop()
+        if f <= 0 or f >= fns.len() or seen.has(f) or fns[f].body == 0 or fn_in_lib(f): continue
+        seen[f] = true
+        exact_shader_owners[f] = true
+        out.push(f)
+        exact_shader_calls(int(fns[f].body), work)
+    out
+exact_shader_calls = (n: int, work: mut int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .call and nodes[n].aux == 0 and nodes[n].sym > 0: work.push(int(nodes[n].sym))
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: exact_shader_calls(int(nodes[n].a), work)
+    if mask & 2 != 0: exact_shader_calls(int(nodes[n].b), work)
+    if mask & 4 != 0: exact_shader_calls(int(nodes[n].c), work)
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): exact_shader_calls(kid(n, i), work)
 
 # A boundary wrapper has the same ABI and type as the value it stores.
 exact_store = (n: int, owner: int):
@@ -2156,6 +2189,8 @@ exact_reset = ():
     exact_lower_sites = []; exact_collect_writes = false
     exact_demands = {}
     exact_proof_demands = {}
+    exact_shader_roots = []
+    exact_shader_owners = {}
     exact_progress_math = {}
     exact_word_reads = {}
     exact_initializers = []

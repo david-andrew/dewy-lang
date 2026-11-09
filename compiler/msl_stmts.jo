@@ -296,6 +296,9 @@ ml_expr = (e: int) -> str:
             if types[from_].kind == .bool_: return "int({a})"
             return gl_narrow(a, t)
         if cv == .float_ or cv == .none_ or cv == .quantity_const: return a
+        if cv == .fixed_store and types[t].kind == .int_:
+            gl_store_check(e, t)
+            return gl_narrow(a, t)
         ml_err(pos, "unsupported conversion in shader")
     if k == .if_:
         b = int(nodes[e].b)

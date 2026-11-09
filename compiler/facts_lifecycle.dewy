@@ -14,7 +14,7 @@ from p"directive_rules.dewy" import (dir_defer)
 from p"directive_ops.dewy" import (directives_after_facts)
 from p"draw_ops.dewy" import (draw_context_finalize draw_context_reset)
 from p"effects.jo" import (effect_panic_nodes effect_panic_pending effect_panic_texts effect_unavailable loan_owners)
-from p"exact.jo" import (exact_decided exact_fact_store exact_finish exact_has_store exact_marks exact_owners exact_proof_demands exact_reset exact_stores)
+from p"exact.jo" import (exact_decided exact_fact_store exact_finish exact_has_store exact_marks exact_owners exact_proof_demands exact_reset exact_shader_demand exact_stores)
 from p"expr.jo" import (CV IN ntype)
 from p"facts.jo" import (FactPlanDependency FACT_LENT FactBinding FactSlice FactState fact_add_fits fact_bound fact_call_field_types fact_capture fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_domain fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_index_put fact_internal_policy fact_key_params fact_new fact_obliged fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_forget fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_root_key fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_slice_prepare fact_slice_push_children fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_type fact_validated fn_dewy fn_in_lib)
 from p"facts_elements.dewy" import (fact_fixed_check fact_fixed_node)
@@ -148,6 +148,7 @@ facts_finalize=():>void=>$unsafe {
             if result_contracts.has(LifeWord(fns.ptr[f].decl)) {demanded[f]=true}
         }
     }
+    loop f in exact_shader_demand() {demanded[f]=true}
     let mandatory=demanded
     loop request in fact_fixed_requests {demanded[request.owner]=true}
     loop request in refine_requests {demanded[request.owner]=true}

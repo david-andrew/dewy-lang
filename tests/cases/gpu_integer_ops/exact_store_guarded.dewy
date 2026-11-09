@@ -1,0 +1,10 @@
+# Plain fixed-width arithmetic in a GPU function: proven to fit, it needs no wrapping type.
+inc=(x:int32):>int32=>{
+    if x <? 1000000 and x >? -1000000 { return x*3+1-(x & 1) }
+    return 0
+}
+main=()=>{
+    let xs:array<int32>=[-999999 -2 -1 0 1 2 999999]
+    printl(cpu(inc.(gpu(xs))).data)
+    printl(inc.(xs))
+}

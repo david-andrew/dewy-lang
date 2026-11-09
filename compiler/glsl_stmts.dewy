@@ -11,7 +11,7 @@ from p"checks_thin_expr.dewy" import (is_gpu_buffer)
 from p"expr.jo" import (CV IN gpu_buffer_elem ntype)
 from p"glsl.jo" import (builtin_map gl_decls gl_done gl_done_fns gl_done_structs gl_float gl_out gl_param_copies gl_stage sl_turns_fns)
 from p"glsl_emit.dewy" import (gl_attrib_comps gl_block gl_float_to_int gl_gbuf_reader gl_narrow gl_param_copy gl_sdiv gl_shift_decls gl_stmt_if gl_struct_fields gl_target gl_type gl_udesc gl_zero sl_abs_body)
-from p"glsl_ops.dewy" import (gl_err gl_first gl_fn_name gl_local gl_unsigned gl_wrap gl_wrapped ind sl_type)
+from p"glsl_ops.dewy" import (gl_err gl_store_check gl_first gl_fn_name gl_local gl_unsigned gl_wrap gl_wrapped ind sl_type)
 from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
 from p"types.jo" import (T_I32 T_MAT4 T_MATH_INT T_VEC4 fields is_float is_vec prune structs tkind tsize types)
 from p"util.jo" import (name_of)
@@ -247,6 +247,10 @@ gl_expr=(e:GlslStmtWord):>string=>$unsafe {
             return gl_narrow(a t)
         }
         if cv =? int32(int64(CV.float_)) or cv =? int32(int64(CV.none_)) or cv =? int32(int64(CV.quantity_const)) {return a}
+        if cv =? int32(int64(CV.fixed_store)) and types.ptr[t].kind =? 'int_' {
+            gl_store_check(e t)
+            return gl_narrow(a t)
+        }
         gl_err(nodes.ptr[e].pos "unsupported conversion in shader")
     }
     if k =? 'if_' {

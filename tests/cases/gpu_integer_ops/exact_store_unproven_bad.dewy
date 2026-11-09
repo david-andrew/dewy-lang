@@ -1,0 +1,4 @@
+# A runtime check cannot run in a shader: an unproven store is a compile error.
+$runtime_checks
+inc=(x:int32):>int32=>x+1
+main=()=>{printl(cpu(inc.(gpu([int32(1) 2]))).data)}

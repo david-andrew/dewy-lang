@@ -1,0 +1,6 @@
+# A division of an unstored product would need a wider word than a shader's.
+step=(x:int32):>int32=>{
+    if x <? 1000 and x >? -1000 { return (x*3-7) // 4 }
+    return 0
+}
+main=()=>{printl(cpu(step.(gpu([int32(1) 2]))).data)}

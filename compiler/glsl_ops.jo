@@ -11,8 +11,29 @@ use 'check.jo'
 use 'checks_assign_hooks.dewy'
 use 'expr.jo'
 use 'checks_thin_expr.dewy'
+use 'exact.jo'
 
 gl_err = (pos: int, msg: str): fatal(pos, "in shader code: {msg}")
+# A fixed-width store of an exact result (`x + 1` into an int32), as shader words compute it:
+# exact when the facts proved the stored value fits and every operation under it is a ring
+# operation (+, -, *, bitwise, <<: exact modulo 2^32) or takes plain values (/, %, >>). False
+# otherwise: a shader cannot check the store. O(nodes under it).
+sl_ring_exact = (e: int) -> bool:
+    k = nodes[e].kind
+    if k == .unary: return sl_ring_exact(int(nodes[e].a))
+    if k != .binary: return true
+    op = nodes[e].op as Tok
+    a = int(nodes[e].a)
+    b = int(nodes[e].b)
+    if op == .plus or op == .minus or op == .star or op == .amp or op == .pipe or op == .caret or op == .kw_xor or op == .shl: return sl_ring_exact(a) and sl_ring_exact(b)
+    if op == .slash or op == .percent or op == .shr: return sl_plain(a) and sl_plain(b)
+    false
+# Reject a store (CV.fixed_store) a shader cannot compute exactly, saying what to write.
+gl_store_check = (e: int, t: int):
+    if not exact_proved(e): gl_err(nodes[e].pos, "a shader cannot check that this integer result fits in {dt(t)}: prove it first (a guard or a refined parameter), or use a wrapping type such as `int32<overflow='wrap'>`")
+    if not sl_ring_exact(int(nodes[e].a)): gl_err(nodes[e].pos, "this integer expression needs intermediates wider than a shader's 32-bit words: store each step that divides or shifts right in its own variable, or use a wrapping type")
+# A value a shader word holds exactly: no arithmetic of its own. O(1).
+sl_plain = (e: int) -> bool: nodes[e].kind != .binary and nodes[e].kind != .unary
 # A type as shaders hold it (GLSL, Metal and SPIR-V alike): a physical quantity's unit is checked
 # at compilation, so on the GPU it is its plain number, in canonical units (an angle in turns).
 sl_type = (t0: int) -> int:

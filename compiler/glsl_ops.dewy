@@ -1,9 +1,12 @@
 $runtime_checks
 from p"ast.jo" import (nodes)
 from p"check.jo" import (fns locals)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"exact.jo" import (exact_proved)
 from p"glsl.jo" import (gl_done gl_param_copies)
 from p"glsl_emit.dewy" import (gl_elem_type gl_name)
 from p"types.jo" import (prune types)
+from p"type_ops.dewy" import (dt)
 from p"util.jo" import (fatal name_of)
 
 GlslWord:type=int64<overflow='wrap'>
@@ -16,6 +19,30 @@ sl_type=(t0:GlslWord):>int64=>$unsafe {
     let t=prune(t0)
     if types.ptr[t].kind =? 'quantity' {return prune(GlslWord(types.ptr[t].elem))}
     t
+}
+# A fixed-width store of an exact result (`x + 1` into an int32), as shader words compute it:
+# exact when the facts proved the stored value fits and every operation under it is a ring
+# operation (+, -, *, bitwise, <<: exact modulo 2^32) or takes plain values (/, %, >>). False
+# otherwise: a shader cannot check the store. O(nodes under it).
+sl_ring_exact=(e:GlslWord):>bool=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k =? 'unary' {return sl_ring_exact(GlslWord(nodes.ptr[e].a))}
+    if k not=? 'binary' {return true}
+    let op=cx_token_values.ptr[GlslWord(nodes.ptr[e].op)]
+    let a=GlslWord(nodes.ptr[e].a)
+    let b=GlslWord(nodes.ptr[e].b)
+    if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'amp' or op =? 'pipe' or op =? 'caret' or op =? 'kw_xor' or op =? 'shl' {return sl_ring_exact(a) and sl_ring_exact(b)}
+    if op =? 'slash' or op =? 'percent' or op =? 'shr' {return sl_plain(a) and sl_plain(b)}
+    false
+}
+# Reject a store (CV.fixed_store) a shader cannot compute exactly, saying what to write.
+gl_store_check=(e:GlslWord t:GlslWord):>void=>$unsafe {
+    if not exact_proved(e) {gl_err(nodes.ptr[e].pos "a shader cannot check that this integer result fits in {dt(t)}: prove it first (a guard or a refined parameter), or use a wrapping type such as `int32<overflow='wrap'>`")}
+    if not sl_ring_exact(GlslWord(nodes.ptr[e].a)) {gl_err(nodes.ptr[e].pos "this integer expression needs intermediates wider than a shader's 32-bit words: store each step that divides or shifts right in its own variable, or use a wrapping type")}
+}
+# A value a shader word holds exactly: no arithmetic of its own. O(1).
+sl_plain=(e:GlslWord):>bool=>$unsafe {
+    nodes.ptr[e].kind not=? 'binary' and nodes.ptr[e].kind not=? 'unary'
 }
 # true the first time a helper is asked for (its declarations are then made by the caller)
 gl_first=(name:string):>bool=>{

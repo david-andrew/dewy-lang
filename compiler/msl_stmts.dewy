@@ -11,7 +11,7 @@ from p"checks_thin_expr.dewy" import (is_gpu_buffer)
 from p"expr.jo" import (CV gpu_buffer_elem ntype)
 from p"glsl.jo" import (sl_turns_fns)
 from p"glsl_emit.dewy" import (gl_narrow gl_struct_fields)
-from p"glsl_ops.dewy" import (gl_unsigned ind sl_type)
+from p"glsl_ops.dewy" import (gl_store_check gl_unsigned ind sl_type)
 from p"glsl_stmts.dewy" import (gl_binop gl_compound_op sl_hypot_body)
 from p"msl.jo" import (MlRef ml_decls ml_dumped ml_float ml_lref ml_math_names ml_out ml_stage ml_temps ml_utype)
 from p"msl_emit.dewy" import (ml_as ml_block ml_compare ml_field_offset ml_fn ml_gbuf_elem ml_gbuf_store ml_int ml_intrinsic ml_mat_from ml_reset ml_sdiv ml_shift_decls ml_target ml_type ml_varyings ml_zero)
@@ -352,6 +352,10 @@ ml_expr=(e:MslStmtWord):>string=>$unsafe {
             return gl_narrow(a t)
         }
         if cv =? int32(int64(CV.float_)) or cv =? int32(int64(CV.none_)) or cv =? int32(int64(CV.quantity_const)) {return a}
+        if cv =? int32(int64(CV.fixed_store)) and types.ptr[t].kind =? 'int_' {
+            gl_store_check(e t)
+            return gl_narrow(a t)
+        }
         ml_err(pos "unsupported conversion in shader")
     }
     if k =? 'if_' {

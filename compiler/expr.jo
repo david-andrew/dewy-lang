@@ -5421,6 +5421,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         nargs_check(n, nargs, 2, 2, "__gpu_kernel")
         if nodes[args[0]].kind != .lambda or nodes[args[1]].kind != .str_lit: fatal(nodes[n].pos, "__gpu_kernel takes a function literal and a string")
         check_expr(args[0], 0)
+        exact_shader_roots.push(int(nodes[args[0]].sym))
         r = T_STR
     else if id == .compute:
         # compute(f): a GPU program run once per element, f(id: int, params: P) (lib/game/gpubuffer.jo),
@@ -5445,6 +5446,7 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         if fns[f].ptypes.len() != 2 or (it0 != T_INT and it0 != T_IVEC2 and it0 != T_IVEC3) or tkind(fns[f].ptypes[1]) != .struct_:
             fatal(nodes[a].pos, "a compute function takes (id: int, params: P), P a struct (or id: ivec2 or ivec3, over a grid)")
         if tkind(int(fns[f].ret)) != .void_: fatal(nodes[a].pos, "a compute function returns nothing: it writes its results into GPU buffers")
+        exact_shader_roots.push(f)
         ref = mk(.fnref, nodes[a].pos)
         nodes[ref].sym = nodes[a].sym
         nodes[ref].type = nodes[a].type

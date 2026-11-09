@@ -170,6 +170,7 @@ facts_finalize = ():
     if result_active:
         loop f in [1..fns.len()):
             if result_contracts.has(int(fns[f].decl)): demanded[f] = true
+    loop f in exact_shader_demand(): demanded[f] = true
     mandatory = demanded
     loop request in fact_fixed_requests: demanded[request.owner] = true
     loop request in refine_requests: demanded[request.owner] = true

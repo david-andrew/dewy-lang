@@ -11,7 +11,7 @@ from tools.cores import on_cores
 from tools.headless import headless
 
 CASES = Path(__file__).parent / 'cases'
-GROUPS = ['gpu_nonempty', 'gpu_float_sum', 'gpu_upload_shape', 'gpu_integer_upload', 'gpu_ieee']
+GROUPS = ['gpu_nonempty', 'gpu_float_sum', 'gpu_upload_shape', 'gpu_integer_upload', 'gpu_ieee', 'gpu_integer_ops']
 
 
 @pytest.mark.parametrize('group', GROUPS)

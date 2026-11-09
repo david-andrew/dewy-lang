@@ -621,6 +621,9 @@ sv_expr = (e: int) -> int:
             if types[from_].kind == .bool_: return sv_val(169, sv_i32(), [v, sv_ci(1), sv_ci(0)])
             return sv_narrow(v, t)
         if cv == .float_ or cv == .none_ or cv == .quantity_const: return v
+        if cv == .fixed_store and types[t].kind == .int_:
+            gl_store_check(e, t)
+            return sv_narrow(v, t)
         sv_err(pos, "unsupported conversion in shader")
     if k == .if_: return sv_if_expr(e)
     if k == .intrinsic: return sv_intrinsic(e)

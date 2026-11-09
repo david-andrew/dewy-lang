@@ -12,7 +12,7 @@ from p"checks_assign_hooks.dewy" import (block_value)
 from p"checks_thin_expr.dewy" import (is_gpu_buffer swizzle_index)
 from p"expr.jo" import (CV gpu_buffer_elem ntype)
 from p"glsl.jo" import (builtin_map sl_turns_fns)
-from p"glsl_ops.dewy" import (sl_type)
+from p"glsl_ops.dewy" import (gl_store_check sl_type)
 from p"spirv.jo" import (SC_FUNCTION SC_INPUT SC_OUTPUT SC_PSB SV_PC_DEPTH SV_PC_FLIP SV_PC_INSTS SV_PC_ISTRIDE SV_PC_PARAMS SV_PC_VERTS SV_PC_VSTRIDE SvRef sv_atomic_ops sv_bound sv_cache sv_caps sv_cf sv_dead sv_dec sv_dumped sv_fns sv_glob sv_group sv_iface sv_label sv_loops sv_lref sv_lvar sv_stage sv_std sv_std_ops sv_translated sv_utype)
 from p"spirv_emit.dewy" import (sv_branch sv_cbool sv_minmax sv_drain sv_field_offset sv_finish_fn sv_fn_id sv_fntype sv_gbuf_elem sv_gbuf_inside sv_gbuf_store sv_global sv_intrinsic sv_invocation sv_logic sv_loop_body sv_loop_start sv_narrow sv_null sv_param_type sv_rawptr sv_rawptr_w sv_rebuild sv_reset sv_start_fn sv_store_sub sv_strw sv_subgroup_builtin sv_subword sv_texture sv_type_key sv_val sv_varyings sv_word sv_word_ptr)
 from p"spirv_ops.dewy" import (sv_addr_at sv_begin sv_bool sv_builtin_var sv_cap sv_ci sv_code sv_cond_branch sv_cu sv_deco sv_err sv_f32 sv_gbuf_len sv_gbuf_ptr sv_gbuf_type sv_i32 sv_image_type sv_ins sv_instance_id sv_is_floaty sv_is_gbuf_op sv_is_vector sv_load sv_mat4 sv_ncomp sv_new sv_pc_get sv_pick sv_ptr sv_splat sv_stmts sv_store sv_store_word sv_u32 sv_unsigned sv_uv2 sv_var sv_vecb sv_vecf sv_veci sv_vertex_id sv_void)
@@ -713,6 +713,10 @@ sv_expr=(e:SpirvStmtWord):>int64=>$unsafe {
             return sv_narrow(v t)
         }
         if cv =? int32(int64(CV.float_)) or cv =? int32(int64(CV.none_)) or cv =? int32(int64(CV.quantity_const)) {return v}
+        if cv =? int32(int64(CV.fixed_store)) and types.ptr[t].kind =? 'int_' {
+            gl_store_check(e t)
+            return sv_narrow(v t)
+        }
         sv_err(pos "unsupported conversion in shader")
     }
     if k =? 'if_' {return sv_if_expr(e)}
