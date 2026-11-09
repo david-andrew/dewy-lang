@@ -894,17 +894,22 @@ append_file = (path: str, contents: str) -> bool:
 # when a file or directory was last changed, in seconds since 1970 (as unix_time()); none if it
 # is not there
 file_time = (path: str) -> f64?:
+    if let ns = __file_time_ns(path): return f64(ns) / 1e9
+    none
+
+# (the same in whole nanoseconds since 1970, for Dewy's Instant: lib/prelude/files.dewy)
+__file_time_ns = (path: str) -> int?:
     when TARGET == "wasm":
         return none
     else when TARGET == "windows":
         info = fill(u8(0), 40)                        # WIN32_FILE_ATTRIBUTE_DATA
         if GetFileAttributesExW(data(__wide(path)), 0, data(info)) == 0: return none
         ft = int(((data(info) + 20) as *u32)[0]) | (int(((data(info) + 24) as *u32)[0]) << 32)
-        return f64(ft) / 10000000.0 - 11644473600.0   # (100 ns steps since 1601)
+        return (ft - 116444736000000000) * 100        # (100 ns steps since 1601)
     else when TARGET == "macos":
         st = fill(0, 18)                              # (struct stat: st_mtimespec at 48)
         if __c_stat(data(__zstr(path)), data(st) as *u8) != 0: return none
-        return f64(st[6]) + f64(st[7]) * 1e-9
+        return st[6] * 1000000000 + st[7]
     else:
         fd = syscall(2, data(__zstr(path)), 0x200000, 0)   # (O_PATH: one that cannot be read too)
         if fd < 0: return none
@@ -912,7 +917,7 @@ file_time = (path: str) -> f64?:
         r = syscall(5, fd, data(st))
         syscall(3, fd)
         if r != 0: return none
-        f64(st[11]) + f64(st[12]) * 1e-9
+        st[11] * 1000000000 + st[12]
 
 # every file under a directory, at any depth, as paths from it ("maps/level1.tmx"), sorted;
 # links to directories are not followed

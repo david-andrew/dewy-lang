@@ -684,12 +684,12 @@ size = (path: Path) -> int | __FileFailure:
         if n < 0: return __fsys_failure(n)
         return n
 
-# p.modified: when the file or directory was last changed
-@warn_if(path is not SafePath, "may escape its base")
-modified = (path: Path) -> Date | __FileFailure:
+# when the file or directory was last changed, in nanoseconds since 1970 (Dewy's `p.modified`,
+# lib/prelude/files.dewy, makes an Instant of it)
+__modified_ns = (path: Path) -> int | __FileFailure:
     if __task_canceled(): return Canceled
     __fsys_begin()
-    if let t = file_time(path.path): return date(t)
+    if let t = __file_time_ns(path.path): return t
     if __fsys_kind(path.path) == 0: return __fsys_failure(-2)
     __file_failure()
 

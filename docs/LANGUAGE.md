@@ -3933,7 +3933,7 @@ outcome as a value:
   `rename(target)` moves a file or directory in one step, `make_dirs` makes the
   directory and any missing ones above it, and `chmod(0o644)` sets permission
   bits, the last three giving `true`;
-- `size` gives the file's byte count, `modified` the `Date` it last changed,
+- `size` gives the file's byte count, `modified` the `Instant` it last changed (provisional: open decision D10),
   `walk` every file under a directory (sorted paths, links to directories not
   followed), and `glob"*.dewy"` the sorted paths under it matching a pattern
   (`*` any part of a name, `?` one character, `**` any number of directories).

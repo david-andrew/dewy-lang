@@ -4322,7 +4322,15 @@ call_style_has_field = (t0: int, name: int) -> bool:
         if int(fields[int(structs[si].fields) + i].name) == name: return true
     false
 
-member_call_without_arguments = (t: int, name: int) -> bool:
+# (the Dewy prelude's module declaring name, as a table of the methods a Dewy module's `x.name`
+# finds beside the receiver's own: `p.modified` of a Path, lib/prelude/files.dewy; -1 for none)
+dewy_prelude_method_module = (name: int) -> int:
+    if not caller_dewy(): return -1
+    m = dewy_prelude_module(name)
+    if m == cur_mod(): return -1
+    m
+
+member_call_without_arguments = (t: int, name: int, prelude_methods: bool = false) -> bool:
     tk = types[t].kind
     ii = intrinsic_of(name)
     if ii >= 0 and intrinsics[ii].arr and (tk == .array or tk == .str_):
@@ -4332,6 +4340,9 @@ member_call_without_arguments = (t: int, name: int) -> bool:
     tables = [modules[cur_mod()].names, prelude]
     loop tm in method_modules(t):
         if tm != cur_mod(): tables.push(modules[tm].names)
+    # (the zero-argument call style check leaves them out: it has never asked of `x.to_int64()`)
+    dm = if prelude_methods: dewy_prelude_method_module(name) else: -1
+    if dm >= 0: tables.push(modules[dm].names)
     loop table in tables:
         if not table.has(name): continue
         s = table[name]
@@ -7163,7 +7174,7 @@ member_missing = (n: int, bt: int, expected: int, bypass: mut bool) -> int:
             if files[pos_file(nodes[n].pos)].is_dewy:
                 # Zero-argument calls may omit their parentheses:
                 # `xs.pop` is `xs.pop()`. A field of that name wins.
-                if member_call_without_arguments(bt, fname):
+                if member_call_without_arguments(bt, fname, true):
                     add_flag(int(nodes[n].a), NF_MUT)
                     method = mk(.field, nodes[n].pos)
                     nodes[method].a = nodes[n].a

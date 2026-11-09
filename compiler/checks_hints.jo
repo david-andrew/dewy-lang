@@ -267,6 +267,8 @@ method_name_for = (recv: int, name: int) -> bool:
     tables = [modules[cur_mod()].names, prelude]
     loop tm in method_modules(rt):
         if tm != cur_mod(): tables.push(modules[tm].names)
+    dm = dewy_prelude_method_module(name)
+    if dm >= 0: tables.push(modules[dm].names)
     loop tbl in tables:
         s = tbl.get(name) ?? 0
         loop s != 0:

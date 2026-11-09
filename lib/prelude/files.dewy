@@ -1,0 +1,12 @@
+# Dewy's prelude: file times. `p.modified` is the `Instant` the file or directory last changed,
+# read from the system as a wall-clock moment like `now.nominal`; show it in a zone with
+# `zoned(t zone=z)`. The file errors are those of the other `Path` methods.
+from p"@lib/time/core.dewy" import (Instant)
+from p"@lib/time/clock.dewy" import (_of_wall)
+
+$warn_if path isnt? SafePath "may escape its base"
+modified=(path:Path):>Instant|__FileFailure=>{
+    let ns=__modified_ns(path)
+    if ns is? __FileFailure {return ns}
+    _of_wall(ns)
+}

@@ -3,7 +3,7 @@ from p"checks_text.dewy" import (byte_find)
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (kid nkids nodes)
 from p"check.jo" import (LF_DECL check_scopes ctxs cur_mod cx demand_name dewy_type_word fns locals method_decl_for method_modules modules prelude syms universe)
-from p"expr.jo" import (dewy_surface_table receiver_fits)
+from p"expr.jo" import (dewy_prelude_method_module dewy_surface_table receiver_fits)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"habits.dewy" import (habit sloppy_shaped)
 from p"lex.jo" import (is_ident_char)
@@ -202,6 +202,8 @@ method_name_for=(recv:HintWord name:HintWord):>bool=>$unsafe {
     loop tm in method_modules(rt) {
         if tm not=? cur_mod() {tables.push(modules[tm].names)}
     }
+    let dm=dewy_prelude_method_module(name)
+    if dm >=? 0 {tables.push(modules[dm].names)}
     loop tbl in tables {
         let s=tbl.get(name) ?? 0
         loop s not=? 0 {

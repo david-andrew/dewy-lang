@@ -16,7 +16,7 @@ main=():>void=>{
     printl(root.glob"*.txt")
     let changed=notes.modified
     if changed is? (error|Canceled) exit(1)
-    printl(changed.year >? 2000)
+    printl(changed >? instant"2000-01-01T00:00:00Z")
     printl(notes.chmod(0o600))
     printl(p"{root}/missing.txt".size)
     printl(p"{root}/missing".walk)
