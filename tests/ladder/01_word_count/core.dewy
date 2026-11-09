@@ -1,7 +1,7 @@
 Counts:type = [lines:int64 words:int64 graphemes:int64]
 count_text = (text:string):>Counts => {
-    let lines = 0
-    let words = 0
+    let lines:int64 = 0
+    let words:int64 = 0
     let inside = false
     loop c in text {
         if c =? "\n" { lines += 1 }
@@ -30,5 +30,3 @@ main = ():>void => {
     $runtime_assert(count_text("no newline").lines =? 1)
     printl(show(result))
 }
-
-$runtime_checks

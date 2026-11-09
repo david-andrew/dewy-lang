@@ -13,7 +13,7 @@ decode = (word:uint64):>Packet => {
 }
 popcount = (word:uint64):>int64 => {
     let x = word
-    let count = 0
+    let count:int64 = 0
     loop x not=? 0 {
         x = x and (x-1)
         count += 1
@@ -29,5 +29,3 @@ main = ():>void => {
     $runtime_assert(popcount(word) =? 4)
     printl("{word} {popcount(word)} {decode(word).length}")
 }
-
-$runtime_checks
