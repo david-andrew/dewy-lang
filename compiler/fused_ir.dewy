@@ -1,13 +1,23 @@
 $runtime_checks
-from p"fused.jo" import (FzRec fz_d0 fz_int_op fz_op_int fz_r0 fz_rd)
+from p"fused.jo" import (FzRec fz_d0 fz_r0 fz_rd)
 from p"fused_ops.dewy" import (fz_get_str fz_map_in fz_map_lf fz_pos fz_put_str)
 from p"ir.jo" import (ir_positions)
-from p"ir_types.dewy" import (Ins IrFn)
+from p"ir_types.dewy" import (Ins IrFn Op)
 from p"lower.jo" import (lfuncs)
 from p"par.jo" import (pr)
 from p"par_ops.dewy" import (pr_ints pw pw_ints)
 
 FusedWord:type=int64<overflow='wrap'>
+# (an instruction's operation travels as its place in members(Op): the same in a worker and here)
+let fz_ops:array<Op>=[]
+let fz_op_codes:dict<Op FusedWord>=[]
+fz_op_code=(op:Op):>FusedWord=>{
+    if fz_op_codes.length =? 0 {
+        let ops:array<Op>=members(Op)
+        loop i in 0.. and m in ops {fz_op_codes[m]=i}
+    }
+    fz_op_codes[op]
+}
 # (IR positions travel as source positions)
 fz_pack_ir=(@out:array<uint8> f:IrFn):>void=>{
     pw(@out f.nparams)
@@ -28,7 +38,7 @@ fz_pack_ir=(@out:array<uint8> f:IrFn):>void=>{
     pw_ints(@out f.kval)
     pw(@out f.code.length)
     loop x in f.code {
-        pw(@out fz_op_int(x.op))
+        pw(@out fz_op_code(x.op))
         pw(@out FusedWord(x.ty))
         pw(@out FusedWord(x.dst))
         pw(@out FusedWord(x.a))
@@ -55,6 +65,7 @@ fz_unpack_ir=(x:FzRec lf:FusedWord):>IrFn=>$unsafe {
     loop _ in [0..pr(@fz_rd[w])) {f.args.push(int32(pr(@fz_rd[w])))}
     f.kval=pr_ints(@fz_rd[w])
     let n=pr(@fz_rd[w])
+    if fz_ops.length =? 0 {fz_ops=members(Op)}
     f.code.reserve(n)
     loop _ in [0..n) {
         let op=pr(@fz_rd[w])
@@ -65,7 +76,7 @@ fz_unpack_ir=(x:FzRec lf:FusedWord):>IrFn=>$unsafe {
         let c=pr(@fz_rd[w])
         let imm=pr(@fz_rd[w])
         let pos=fz_pos(pr(@fz_rd[w]))
-        let ins=Ins(fz_int_op(op) int32(ty) int32(dst) int32(a) int32(b) int32(c) imm int32(pos))
+        let ins=Ins(fz_ops[op] int32(ty) int32(dst) int32(a) int32(b) int32(c) imm int32(pos))
         let o=ins.op
         if o =? 'call' or o =? 'faddr' or o =? 'checked_add' or o =? 'checked_sub' or o =? 'checked_mul' {ins.imm=fz_map_lf(x.w ins.imm)}
         else if o =? 'scanbytes' and ins.imm >=? 4 {
