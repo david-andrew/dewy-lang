@@ -6036,7 +6036,9 @@ rt_dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] 
             rt_dc_comma_mistake(mkpos(dc_parser.file, first.start))
             dc_parser.at += 1
     if not rt_dc_main_params(ps, name): return 0
-    if name == "main" and (ps.len() > 1 or (ps.len() == 1 and has_flag(ps[0], NF_MUT))): return 0
+    if name == "main" and ps.len() == 1 and has_flag(ps[0], NF_MUT):
+        rt_dc_hint(nodes[ps[0]].pos, "`main`'s parameter cannot be mutable: it receives the command-line arguments or the program's task group by value, so drop the `@`")
+        return 0
     if dc_parser.reader.dc_kinds.len() > kinds_at:
         any_kind = false
         loop i in [kinds_at..dc_parser.reader.dc_kinds.len()): any_kind = any_kind or dc_parser.reader.dc_kinds[i] != 0

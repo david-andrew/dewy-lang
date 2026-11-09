@@ -5152,7 +5152,8 @@ rd_dc_function_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> name
     if not rd_dc_main_params(@reader_ctx @reader_nodes ps name) {
         return 0
     }
-    if ((name =? "main") and ((ps.length >? 1) or ((ps.length =? 1) and rd_has_flag(@reader_nodes ps[0] NF_MUT)))) {
+    if ((name =? "main") and (ps.length =? 1) and rd_has_flag(@reader_nodes ps[0] NF_MUT)) {
+        rd_dc_hint(@reader_ctx reader_nodes[ps[0]].pos "`main`'s parameter cannot be mutable: it receives the command-line arguments or the program's task group by value, so drop the `@`");
         return 0
     }
     if (reader_ctx.reader.dc_kinds.length >? kinds_at) {
