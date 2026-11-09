@@ -51,9 +51,9 @@ kernel = (edges:dict<int64 array<int64>>):>int64 => {
 main = (args:array<string>):>void => {
     let count=size_argument(args 200000)
     let edges=generate(count)
-    let started=clock()
+    let started=clock
     let result=kernel(edges)
-    let finished=clock()
+    let finished=clock
     printl"{result} {finished-started}"
 }
 

@@ -59,9 +59,9 @@ kernel = (text:array<uint8>):>int64 => {
 main = (args:array<string>):>void => {
     let count=size_argument(args 1000000)
     let text=generate(count)
-    let started=clock()
+    let started=clock
     let result=kernel(text)
-    let finished=clock()
+    let finished=clock
     printl"{result} {finished-started}"
 }
 

@@ -17,9 +17,9 @@ main=(args:array<string>):>void=>{
         let value:int64=123456789012345+i*23456789
         texts.push("{if i%2=?0 value else -value}")
     }
-    let started=clock()
+    let started=clock
     let result=kernel(texts count)
-    printl"{result} {clock()-started}"
+    printl"{result} {clock-started}"
 }
 
 $runtime_checks

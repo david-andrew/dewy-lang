@@ -36,8 +36,8 @@ main=(args:array<string>):>void=>{
         keys.push(make_key(i*2))
         queries.push(make_key(i*2+i%2))
     }
-    let started=clock()
+    let started=clock
     let result=kernel(keys queries count)
-    let finished=clock()
+    let finished=clock
     printl"{result} {finished-started}"
 }

@@ -31,8 +31,8 @@ main=(args:array<string>):>void=>{
     let m=reshape(values(N*N 1) N N)
     let bias=values(N 2)
     let shift=values(N 3)
-    let start=clock()
+    let start=clock
     let result=kernel(count m bias shift)
-    let stop=clock()
+    let stop=clock
     printl"{result} {stop-start}"
 }

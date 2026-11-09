@@ -37,9 +37,9 @@ kernel = (rounds:int64):>int64 => {
 
 main = (args:array<string>):>void => {
     let rounds=size_argument(args 1000)
-    let started=clock()
+    let started=clock
     let result=kernel(rounds)
-    let finished=clock()
+    let finished=clock
     printl"{result} {finished-started}"
 }
 

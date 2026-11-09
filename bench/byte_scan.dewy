@@ -12,9 +12,9 @@ main=(args:array<string>):>void=>{
     let padding=repeat("a" 4095)
     let text="{padding}\n"
     let result:int64=0
-    let started=clock()
+    let started=clock
     loop i in [0..count) {result+=scan(text if i%2=?0 b'\n' else b'!')}
-    let finished=clock()
+    let finished=clock
     printl"{result} {finished-started}"
 }
 $runtime_checks

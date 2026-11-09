@@ -18,8 +18,8 @@ main=(args:array<string>):>void=>{
     let count=size_argument(args 10000000)
     let rows:array<Row>=[]
     loop i in [0..128) {rows.push(Row[[i i+1 i+2 i+3] i*3])}
-    let start=clock()
+    let start=clock
     let result=kernel(rows count)
-    let stop=clock()
+    let stop=clock
     printl"{result} {stop-start}"
 }

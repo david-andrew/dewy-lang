@@ -21,9 +21,9 @@ kernel=(root:Node? count:int64):>int64=>{
 main=(args:array<string>):>void=>{
     let count=size_argument(args 20000)
     let root=build_list(1023)
-    let started=clock()
+    let started=clock
     let result=kernel(root count)
-    let finished=clock()
+    let finished=clock
     printl"{result} {finished-started}"
 }
 

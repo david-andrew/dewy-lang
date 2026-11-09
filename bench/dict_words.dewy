@@ -32,9 +32,9 @@ main = (args:array<string>):>void => {
     let count=size_argument(args 2000000)
     let words:array<string>=[]
     loop i in [0..VOCAB) {words.push("word-{i}")}
-    let started=clock()
+    let started=clock
     let result=kernel(words count)
-    let finished=clock()
+    let finished=clock
     printl"{result} {finished-started}"
 }
 
