@@ -18,7 +18,7 @@ These folders record, for each design decision, what was considered and why one 
 |---|---|---|
 | [time/](time/) | Time, dates, clocks and calendars | v5 drafted; core accepted 2026-11-06 (decisions.md). v6 applies it. Open: D15c, D15e. |
 | [concurrency/stage4/](concurrency/stage4/) | Queues, `select`, failed sends | `Unsent`, `spsc` and `mpmc` accepted 2026-11-01. `select` and `[concurrent …]` are superseded by `unified/`. |
-| [concurrency/unified/](concurrency/unified/) | One `parallel` surface | Proposals v3–v5, names, and `select` v6 (type-matched arms, `race`, `merged`) with dogfood and three reviews. Open (D4). |
+| [concurrency/unified/](concurrency/unified/) | One `parallel` surface | Proposals v3–v5, names, and `select` v6 (type-matched arms, source-qualified members, `$named`, `race`, `merged`): round 7 and round 11 texts, dogfood, and six reviews. Open (D4). |
 | [concurrency/big-picture/](concurrency/big-picture/) | The 80/20 performance ladder and prior art | Synthesis and reviews. Open (D4). |
 | [packages/](packages/) | Vendoring and package metadata | Synthesis and reviews. Open: D21a–b. |
 | [string-shapes/](string-shapes/) | Compile-time string shapes, action names, stale handles, UI | Round 1. Open (D11). |

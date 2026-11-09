@@ -1,0 +1,99 @@
+- Paper review of the proposal, questions, all 21 programs, and relevant language/reflection/v5 text.
+- Grades were formed before reading review-r9. No dogfood files were read. No programs were compiled.
+- Verdict: the restricted subset is viable. The written rule is not yet sound, complete, or demonstrably linear. Fix its boundaries rather than restoring general provenance flow.
+
+- **Provenance**
+- Keep three identities: receiver binding, prepared operation, and registration slot. A source pattern filters the winning slot by receiver or operation and resolved outcome type.
+- Ordinary type members can supply the type. The enclosing direct match supplies the source filter. Copying the type value elsewhere must yield an ordinary type, with no hidden source transfer.
+- Define immutable named waits. `let` is mutable in LANGUAGE. Reject reassignment, replacement through an ancestor, mutable borrowing, and shared mutation of the named wait throughout its qualified uses. Merely writing `let w = @...` proves none of that.
+- Receiver invalidation must include ancestor stores and overlapping `@` places. Reject `replace(@child)` between preparing `@child.stdout.receive` and matching `child.stdout.string`.
+- Syntactic stores and `@` arguments are insufficient. A closure can capture `@child` before preparation and replace it when called afterward. Reject escaping/shared aliases of qualified receiver routes, or use existing effect information to invalidate them. Do not require new helper summaries.
+- Include loop backedges. Preparing `w` before a loop and replacing its receiver in the loop tail invalidates the next match, even though the replacement occurs textually after the match.
+- Check argument evaluation too. A later argument or enabling condition can mutate a receiver after an earlier wait captured it. The preparation-to-match interval includes the rest of the call's argument evaluation.
+- Define stable paths. `@channels[i].receive` cannot later be identified by a changed `i`. Either restrict qualified routes to stable locals/field chains, or freeze and validate the index. The cheap fallback is a local receiver binding.
+- The inline `if` repair is good. Its condition is re-evaluated for each registration. It is not a permanent property of a saved wait.
+- However, a later argument can clear `local` after the reserve condition tested its length. A permit arm must not then prove `local.pop(0)` safe. Feed the condition into existing obligation checking, with ordinary mutation invalidation; do not blindly inject it at arm entry.
+- Define one immutable `inbox = merged(...)` binding and its original wait table. Reassignment or copying of inbox must not retain inner-source qualification accidentally. Direct `inbox.next` may use that table only under the stated stability checks.
+- Make nested boundaries consistent. `select(@inbox.next)` and `merged(@inbox.next ...)` should expose an opaque outer source. Reject inner-qualified patterns there. Define retirement separately: one inner child's close must not retire an outer source that still has inner payloads.
+- Direct receive/next/reserve can use a one-slot table. Explicitly permit the demonstrated `or_throw<Canceled>` wrapper around a qualifying call. Specify which other wrappers, if any, preserve the direct-match form.
+- Clarify the escape restriction. The sentence limiting `a.<A>` to parameters and selects appears to forbid program 13's direct receive and the offered local `heart.<Tick>` fix. Restrict generic substitution as intended, not every explicit-type escape.
+- Duplicate waits still need the shared commit token and the no-self-rendezvous rule from v5. Reject or diagnose redundant slots. Receiver grouping alone cannot prevent double commitment through aliased handles.
+- Payload Timeout and call Timeout need distinct tags only inside the direct match. Test `Channel<Timeout>` with both `box.Timeout` and a remaining plain Timeout arm. A plain Timeout arm or `or_throw<Timeout>` covers both roles; storing the result intentionally loses source discrimination.
+- Rejecting channel payloads overlapping Closed or Canceled removes those channel ambiguities. Do not silently extend that ban to arbitrary function results. Explain how race/first_ok classify an intrinsic Canceled result and how first_ok treats exception-valued results.
+- The concessions are acceptable for this round. Programs 06, 11, 14b, and 17a show plain helper, field, mapped-wait, and loop-built alternatives. They do not demonstrate dynamic source-sensitive fan-in. Add a source field to ordinary payload records for that case, or match inside the helper.
+- A one-pass checker is plausible with indexed bindings, overlapping-place invalidation, and shared immutable wait tables. Rescanning the preparation-to-match interval for every wait is quadratic. State the indexing and charge nested table expansion explicitly. Reuse existing obligation checking; do not call that work free.
+- Measure the flagship instruction panel before landing. This review establishes neither an implementation bound nor a measured cost.
+
+- **Progress and spin**
+- “A ready source's arm must turn that source off” rejects legitimate consuming receives and repeated ticks in 02, 03, and 10. Limit this rule to permanently ready terminal outcomes or paths that make no progress.
+- Accept consumption, leaving the loop, disabling that same registration, or a proven blocking/progress step. Keep rejecting an unchanged closed wait, an unrelated flag, and a timeout poll that merely restores the unsent value.
+
+- **The named hook**
+- Prefer `named(...)`. It can be ordinary comptime code. `$named[...]` is equally legitimate meta functionality, but should call the same library implementation. It needs no privileged name-generation capability.
+- `T.name` is a new reflection contract. `fields(S).name` names a field, not its field type. Existing field descriptors do not settle the declared name of an arbitrary type value.
+- The resolved generic case and `Closed<Job>.name == "Closed"` are clear. Module qualification should affect type identity, while the documented short name can remain `Job`. Two modules' Job types then intentionally collide by name.
+- Aliases are unresolved. `A:type = [x:int64]` and `B:type = A` denote the same structural type. Which declared name belongs to that resolved value? The same problem affects named union aliases versus their flattened alternatives.
+- Anonymous records, anonymous unions, literal alternatives, and unnamed intersections have no declared name. Reflection currently permits literal union members as singleton values. It does not establish that every item returned by members has a type's `.name`.
+- Define `.name` only where a canonical declared name exists, with explicit behavior for aliases and unnamed types. Give `members` a precise contract for type alternatives versus literal singleton values. Do not manufacture unstable names from incidental alias spellings.
+- Strict duplicate errors are fine for an explicitly requested `named` record. They are not a universal Waitable constraint. `Waitable<left.Job | right.Job>` fails before `w.<left.Job>` can escape. A merged next exposing several `Closed<T>` alternatives has the same naming problem.
+- Keep strict `named` for registries. Let Waitable's ordinary library installer omit unnamed or multiply named alternatives and retain explicit resolved-type selection. Emit a useful diagnostic when someone requests an unavailable shorthand. Reserve/install `types` deliberately too.
+- Ordinary comptime implementation must preserve the known sequence through the named function call. Unrolling a literal at its original call site does not by itself prove that an `array<Each>` parameter retains that knowledge. Specify value specialization and reject runtime sequences.
+- The callback overload's single V does not establish distinct per-field function types. Infer each expanded field from a type-value-aware callback, without first erasing all results to one common callback result type. Show the checked signature.
+- Program 19 is invalid as written. Draw and Save are type values in members(Plugin), not instances accepted by `(k:Draw)` and `(k:Save)`. Bare `handler` also calls a function needing an argument. Use a callback explicitly accepting type values and pass its handle, `@handler`.
+- A safe interim program 19 is an explicit record of Draw and Save callbacks. That is shorter than this broken generator. The corrected generator must earn its use by handling more alternatives correctly.
+
+- **Clashes**
+- Prefer the middle rule. Existing ordinary members keep their reads. A source-pattern collision errors and offers the explicit resolved-type selector. This works on clean builds and does not require dependency history.
+- Cover collisions with `.types`, inherited members, and two generated names. Later-field-wins spreading alone cannot implement the promised warning and pattern error; the protocol checker needs the outcome-name set as well as the final record shape.
+- Warning-only is implementable, but an upgrade can silently turn a source-specific arm into a plain type arm. Coverage need not notice when a later fallback still handles everything. That is a concrete safety cost of that alternative.
+- Test collisions with both a non-type existing field and a type-valued existing field. Also test a payload type named `types`. No supplied program tests any clash.
+
+- **Grades and comparisons**
+- Order: obvious / discoverable / concise / safe by default / complete. Scores cover the supplied examples and explicit defects. F means fixable. I means an inherent learning or policy cost under the accepted design.
+- Compare equivalent draining, ownership recovery, and cancellation/join behavior. These are qualitative paper comparisons, not measured source-length claims.
+- Go's receive cases/ok and Tokio's guarded branches are the strongest compact source-sensitive baseline. Python asyncio needs task association and cleanup. TypeScript needs channel adapters plus abort/join. Swift needs stream association and scoped task cleanup. Bare Promise.race is not cancellation-equivalent.
+- Dewy's drain/race/within helpers compete well with all five. Type-qualified source patterns and named-handle spelling require more discovery than Go/Tokio's branch-associated operations. The other three generally require more adapter code.
+- **01 chat_command: 5/4/5/5/5.** D4: `.open` and final-close delivery need teaching. Better Dewy: document next beside iteration. F; the manual form is useful when close events matter.
+- **02 stdout_stderr: 4/4/4/5/5.** Qualification and two flags are less direct than Go/Tokio branches. Better Dewy: match a local merged inbox.next and let it retire closed sources. F bookkeeping; I source-pattern learning.
+- **03 two_tickers: 4/4/5/5/4.** Distinct-source matching needs discovery; the broad spin text contradicts repeated ticks. Better Dewy: keep these calls and narrow that rule. F specification; I priority-policy learning.
+- **04 selected_send: 4/3/4/4/4.** `.value` recovery is less obvious than retaining Go's unsent local. Better Dewy: hover Unsent.value and align the comment/questions with Unsent.reason. F contract clarity; I explicit failed-payload handling.
+- **05 ctrl_c: 4/4/4/4/4.** Scope borrowing and propagation need explanation. The read is a stub and a press changes which arms run. Better Dewy: retain the scoped listener and add a real interrupted-read fixture. F; I signal-domain knowledge.
+- **06 merge: 4/3/4/5/4.** Fan-in is compact against all five; generic source qualification has extra rules. Better Dewy: retain a.<A>, define the escape boundary, and show empty collect. F documentation/tests; I source-sensitive opt-in.
+- **07 worker_pool: 3/3/4/5/4.** Deadline and priority combinations require careful reading. It demonstrates no worker pool. Better Dewy: split deadline examples from a real worker example. F presentation/completeness; I deadline-policy learning.
+- **08 single_timeout: 5/5/5/5/5.** Comparable to the shortest correct timeout helpers. Repeated polls, an empty source, and close are covered. Keep it.
+- **09 drain_all: 4/4/5/5/4.** `.open` means different endings after idle and exhaustion; iteration forwarding remains a standing specification gap. Better Dewy: document both together. F; no inherent missing drain capability.
+- **10 backpressure: 3/3/3/4/3.** Handle-member punctuation and guard facts are harder to read than Go/Tokio guards. Better Dewy: retain inline conditions, enforce stable waits, and invalidate facts across later arguments. F safety/specification; I handle-spelling learning.
+- **11 library_types: 4/4/4/5/5.** Ordinary channels avoid wrappers. Nested qualified paths and close flags add ceremony. Better Dewy: a local merged inbox with qualified next arms. F bookkeeping; I source-pattern learning. Launch is honestly a fixture.
+- **12 overlap_error: 4/4/4/5/4.** Same friction as 02. The promised unreachable-arm error appears only in a comment. Better Dewy: add a separate negative fixture with broad-before-qualified arms. F; I ordered-pattern learning.
+- **13 union_payload: 4/4/4/5/3.** Union matching is compact. Alarm wraps Timeout and never exercises the actual payload/control collision. Better Dewy: add Channel<Timeout> and clarify events.<Event> on direct receive. F; I control-role learning.
+- **14b mirrors_race: 5/4/5/5/4.** Excellent cleanup-equivalent concision. Partial-map-spread needs discovery; immediate mocks do not exercise a losing receive or cleanup. Better Dewy: add one blocking contender. F demonstration; I expression learning.
+- **15b fetch_or_cache_race: 3/3/4/3/2.** hang does not hang. check_cancel queries and returns; the supposed loser can return page or win the error/closed races. Better Dewy: use actual cancelable blocking work with cleanup. F correctness, not an inherent race limitation.
+- **16b work_timeout_within: 5/4/5/5/4.** As compact as asyncio/Tokio timeout helpers. Better Dewy: replace the instant checkpoint-only mock with a blocked operation and observed cleanup. F demonstration; I cooperative overrun/join latency.
+- **17a first_ok_select: 4/4/3/5/4.** Correctly non-canceling, but fetch pre-fills each channel sequentially. Setup exceeds first-success helpers in all five. Better Dewy: concurrent producers for this drain example, or 17b for cancellation. F fixture; I extra non-canceling ownership work.
+- **17b first_ok_race: 5/4/5/5/4.** Strong concision against all five, including cleanup-equivalent Promise.any. Better Dewy: add delayed success and all-failed cleanup fixtures. F demonstration; I first-success policy learning.
+- **18 command_registry: 4/4/5/5/4.** Names remove repetitive fields, but alias/union naming is unsettled. Better Dewy: define those rules and test a duplicate name. F; I generated-member discovery.
+- **19 plugin_table: 3/3/4/4/1.** Invalid callback argument types and missing @handler. Better Dewy: explicit callbacks now, then a checked type-value callback generator. F correctness and specialization; no inherent capability floor of 1.
+- **20 palette: 5/4/5/5/4.** Useful ordinary record spread. Better Dewy: settle canonical names and demonstrate the documented replacement behavior separately. F completeness; I generated-member discovery.
+- Floor: 1 for fixable program 19. The main provenance examples bottom out at 3 for fixable specification gaps. Inherent discovery costs remain below 5; these examples establish no inherent capability floor of 1.
+
+- **Validity and coverage**
+- The formerly missing Unsent result in 04 is declared. Program 06 now declares the concrete Unsent alternatives. Program 10 now passes @ handles and removes its shared counter. Program 17a no longer matches a Closed iteration item.
+- Current receive/close arms otherwise cover their declared outcomes under the intended source filters. Generic Closed patterns cover parameterized closes. Signature-possible but unexercised arms in mocks are not statically unreachable arms.
+- Plain payload-before-qualified payload is unreachable. Qualified payload-before-plain payload leaves the other sources. A payload-qualified Timeout arm must leave call Timeout uncovered until another arm handles it.
+- Program 19's type-valued registry patterns differ from select qualification. Keep ordinary commands.Quit matching legal outside direct calls; activate source filtering only for an eligible waitable receiver/operation.
+- No foreign formatting syntax or environment-variable access appears. Ordinary interpolation is valid; precision/width formatting must use fmt. Successful-void zero-argument calls keep (); value-producing read_line, receive, next, and now omit it correctly.
+- The generic “select needs a wait” obligation is reasonable. State its runtime checking/error behavior for dynamically empty inputs under existing obligation policy. Empty merged should drain immediately as specified.
+
+- **Previous review's top five, checked afterward**
+- 1, identity transfer: most cases are now deliberately rejected. Good scope reduction. Finish shared-alias, backedge, dynamic-path, inbox, and duplicate-slot rules; do not restore helper/copy propagation.
+- 2, enabling facts/pump: @ handles, the inline condition, and counter removal fix the concrete earlier defects. Later-argument mutation and the meaning of immutable still need explicit checks.
+- 3, control roles: banning overlapping channel Closed/Canceled payloads narrows the problem correctly. The actual Timeout collision still lacks a program. State arbitrary-call cancellation classification separately.
+- 4, clashes: the middle rule remains the strongest compatibility/safety balance. Generated-name collisions and the universal Waitable instantiation failure are additional blockers.
+- 5, cost/readiness: shrinking flow and removing race tie order help. Empty merged is fixed. Indexed stability checks, precise spin progress, nested retirement, and measured cost remain open.
+
+- **Top five fixes**
+- **1. Finish the local provenance contract.** Specify stable receiver/operation/slot identities, whole-use immutability, ancestor/shared-alias invalidation, argument evaluation, and loop backedges. Reject unsupported routes conservatively.
+- **2. Make name generation optional for Waitable.** Define canonical/absent names and literal-member reflection. Omit ambiguous shorthands so explicit resolved-type arms remain usable. Keep strict named for explicit registries.
+- **3. Repair the callback generator and fixtures.** Correct 19's type-value callback and @ handle. Replace 15b's nonblocking hang. Add actual Timeout-payload, clash, and unreachable-arm cases.
+- **4. State registration facts and real progress.** Reuse mutation-aware obligation facts. Distinguish consuming readiness from permanent terminal readiness. Define opaque nested merged retirement and consistent escape eligibility.
+- **5. Close the implementation contract.** Show indexed linear checking instead of repeated interval scans. Keep protocol commit safety and middle-rule ambiguity checks explicit. Supply flagship instruction measurements before landing.

@@ -12,7 +12,7 @@
   - `or_throw` forwards an error to the caller, `??` substitutes a default for any error or `none`, and `??<E>` does so only for error type `E`.
   - `@f` is a handle to function `f`, and `$name` is a metatag.
 - **Revised 2026-11-07:** D4, D10, D11, D28, D29, D31 and D33–D37 were revised together. Independent agents dogfooded them twice, they were made consistent with each other, and every name was read cold. Each item states its floors and whether it is ready.
-- **Revised 2026-11-08:** D4's `select` after your review (v6): arms match by type, `race` cancels, `merged` drains. Seven rounds, three independent regrades, every new name read cold.
+- **Revised 2026-11-09:** D4's `select` (v6): arms match by type, your `<heart.Tick>` members tell sources apart (built by `$named`), `race` cancels, `merged` drains. Eleven rounds, six independent reviews, every new spelling read cold. Q10 (`type of string`, `ticker<T>`) is withdrawn: source-qualified members made it unnecessary.
 - **Closed:** D22 (`$parallel_safe` deleted), D26 and D27. Your answers of 2026-11-07 are in decisions.md, batch 4.
 - **Question kinds:** (a) changes something you decided; (b) new syntax or surface; (c) names only. Question numbers are kept as first asked, so answered ones leave gaps.
 
@@ -20,14 +20,16 @@
 - **(a) Changes something you decided:**
   - D4 Q6: metatags go before the construct they affect, language-wide;
   - D4 Q7: separate entry files when environments need different program settings;
-  - D4 Q8: `select` arms match by type, same-typed waits merged;
+  - D4 Q8: `select` arms match by type; your `<heart.Tick>` tells sources apart;
   - D4 Q9: `priority=` replaces `ties=`, and `Sent` is withdrawn;
+  - D4 Q17: a generated member clashing with an existing one (your warning rule, or the middle rule);
   - D38 Q1: snake_case naming style;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
 - **(b) New syntax or surface:**
-  - D4 Q10–Q13: `type of string`, `ticker<T>`, `send(timeout=)`, `reserve`, `merged`, `race` with many calls, `first_ok`;
+  - D4 Q11–Q13: `send(timeout=)`, `reserve`, `merged`, `race` with many calls, `first_ok`;
+  - D4 Q15: `$named[...]`;
   - D11 Q2: `check=` or `valid_if=`;
   - D11 Q3: `__read__` or `$reader`;
   - D11 Q4: the checked constructor `Roll(count=…)`;
@@ -37,6 +39,7 @@
 - **(c) Names only:**
   - D4 Q4: `catch_ctrl_c` taking a callback;
   - D4 Q14: `Closed<T>`, `Unsent<T>`, `Tick`, `CtrlC` and friends;
+  - D4 Q16: `heart.types`;
   - D10 Q4–Q8;
   - D11 Q5, Q6;
   - D28 Q1–Q4;
@@ -279,19 +282,33 @@ main = (argv:array<string> app:BackgroundTasks):>void => {
   - **Frame code:** use nonwaiting `ch.drain` and background jobs; channel/task/timer waits remain errors in `update`/`draw`. The injected group survives `main` until the window closes.
   - **Entrypoint arguments:** accept at most one `array<string>` and one `BackgroundTasks`, by exact type rather than parameter name; no extra injections into ordinary helpers. Only the selected file's entry `main` runs automatically.
   - **Limits:** settings are in source, caps count cores, and `available_cores` combines hardware/affinity and source limits. No environment-variable cap. Program task admission retains the decided explicit-allocation-failure policy.
-- **`select`, `race` and channel waits (v6, after your review of v5's record labels):**
-  - **The rule:** `select(...)` takes the operations themselves and returns the union of what they produce, plus `Canceled`, plus `Timeout` when `timeout=` is given. Arms match by type, like any other `match`.
-  - **Same-typed waits are one arm, as you asked.** `string | string` is `string`, so `result:string` handles every source. Giving a channel its own type is how you opt in to telling sources apart. A close is `Closed<T>` of that operation's type, so closes of the same type merge too.
-  - **`select` never cancels anything. `race` does.** `race` runs work, returns the first result and cancels and joins the rest. Your mirror fetch is `race(@load.(sources)...)`: by the existing rule, every argument group in an ungrouped `@` chain partially applies, and `.( )` is one, so `@load.(sources)` is an array of ready-to-run calls. `first_ok` is the same but skips failures until one succeeds, returning the first failure only if all fail. `within` stays the deadline on one piece of work. A bound receive is work too: `race(@cache.receive @load(url))`.
-  - **Draining several channels until they all close** is `loop item in merged(@a.receive @b.receive) or_throw { … }`. `merged` stops waiting on a channel once it closes, so it can't spin. `stop_when_idle=30s` ends the loop after 30 s with nothing new and leaves the channels open. A plain `select` in a loop whose close arm neither leaves nor changes the waits is a compile error that points to `merged`.
-  - **Single waits with a deadline:** `replies.receive(timeout=2s)`, `tick.next(timeout=)`. `send(job timeout=50ms)` gives `void | Unsent<Job> | Canceled`; the job comes back in `Unsent`, whose `.reason` is `Timeout` or `Closed`. A pump that should take a job only once there is room uses `@out.reserve` in a `select`, then `permit.send(job)`. Sends inside `select` and the `Sent` type are withdrawn: `reserve` and `send(timeout=)` cover every case written.
+- **`select`, `race` and channel waits (v6, revised 2026-11-09 with your `heart.Tick` idea):**
+  - **The rule:** `select(...)` takes the operations themselves and returns the union of what they produce, plus `Canceled`, plus `Timeout` when `timeout=` is given. Arms match by type, like any other `match`. Same-typed waits merge into one arm (`result:string` takes a string from any source).
+  - **Telling sources apart is your idea:** every operation's receiver offers one member per outcome type, so `<heart.Tick>`, `line:stderr.string` and `<commands.Closed>` match only that source. A plain `<Tick>` still matches every source, so you choose the granularity. Two operations on one receiver are told apart by naming a wait: `let reserve = @out.reserve`, then `<(@reserve).Closed>`; the same form names receiver-less work in `race`: `page:(@web).string`. `heart.<Tick>` selects by resolved type explicitly (for generic code, `a.<A>`, and when a name clashes).
+  - **Where a qualified arm is allowed:** on a `match` written directly on the call that prepared the waits (`select`, `race`, `first_ok`, `inbox.next`, or a direct `receive`/`next`/`reserve`), with each wait written there as `@path.op`, a same-function named wait, or `if … else none` of those. The receiver and named wait stay unchanged from the call to the arm, and a wait prepared on a loop's backedge belongs to that iteration. Anything else (helpers, copied results, waits built in a loop and passed around) matches by plain type, and a qualified arm there is an error with a fix-it. This keeps the check local to one function, linear in waits plus arms.
+  - **The members are not compiler magic:** `Waitable<R>` builds them with `$named[...]`, a metatag backed by an ordinary comptime function any library can use: `[$named[Png Jpeg Gif]...]` gives fields `Png`, `Jpeg`, `Gif` holding those types. A member's name is its type's declared name (`Closed<Job>` → `Closed`; a generic parameter → the instantiated type's name). When two outcomes share a short name (`ui.Job`, `net.Job`), `Waitable` leaves that shorthand out and `w.<ui.Job>` still works; a strict `$named` registry reports the clash as an error. `heart.types` is everything `heart` can produce, so `<heart.types & (Tick | Closed)>` is `<heart.Tick | heart.Closed>`.
+  - **`select` never cancels anything. `race` does.** `race` starts every argument, returns the first result, and cancels and joins the rest; a losing receive takes nothing; ties have no promised order. Your mirror fetch is `race(@load.(sources)...)`: every argument group in an ungrouped `@` chain partially applies, and `.( )` is one, so `@load.(sources)` is an array of ready-to-run calls. `first_ok` returns the first success, and the first failure only if all fail. `within` stays the deadline on one piece of work.
+  - **Draining several channels until they all close** is `loop item in merged(@a.receive @b.receive) or_throw { … }`. `merged` stops waiting on a channel once it closes; `stop_when_idle=30s` ends the loop after 30 s with nothing new and leaves the channels open. Held as `let inbox = merged(…)`, `inbox.next` reports each close once and `inbox.open` says whether any source is left. A loop whose ready source can never be consumed (a closed channel) must drop it or leave; repeatedly ready sources like tickers are fine.
+  - **Single waits:** `replies.receive(timeout=2s)`, `tick.next(timeout=)`. `send(job timeout=50ms)` gives `void | Unsent<Job> | Canceled`; the job comes back in `Unsent`, whose `.reason` is `Timeout` or `Closed`. A pump that should take a job only once there's room selects `@out.reserve`, then `permit.send(job)`. Sends inside `select` and the `Sent` type are withdrawn.
   - **Deadlines keep no state between calls.** A relative `timeout=` restarts each call; `timeout=0s` is a poll where a ready operation wins; an absolute deadline already past wins under `priority='fair'`. `priority='listed'` takes the written waits in order, deadline last.
-  - **What matching by type costs:** you only pay when you need to know the source. Then two same-typed sources need two declared types, and senders wrap: `Stderr:type = type of string`, `err.send(Stderr(text))`. The process library declares `Stdout` and `Stderr` itself, so ordinary users never do. Go, Tokio and Swift need no declaration there, because the case label is the identity. Dewy is shorter when you don't care which source fired (one arm instead of one case per channel).
 
 ```dewy
+watch_which = ():>void | Canceled => {
+    let heart = ticker(1s)
+    let sweep = ticker(2s)
+    defer heart.stop()
+    defer sweep.stop()
+    let swept = false
+    loop not swept {
+        match select(@heart.next @sweep.next) or_throw<Canceled> {
+            <heart.Tick> => printl"beat"
+            <sweep.Tick> => { printl"sweep"; swept = true }
+        }
+    }
+}
+
 FetchError:type = type of exception & [url:string]
 load = (url:string):>string | FetchError => ...
-
 fastest = (sources:array<string>) => {
     match race(@load.(sources)...) or_throw<Canceled> {
         page:string => printl'result is {page}'
@@ -299,29 +316,32 @@ fastest = (sources:array<string>) => {
     }
 }
 
-Command:type = [verb:string]
-relay = (commands:Channel<Command> chat:Channel<string>) => {
-    loop item in merged(@commands.receive @chat.receive stop_when_idle=30s) or_throw {
-        match item {
-            command:Command => printl"command: {command.verb}"
-            message:string => printl"chat: {message}"
+pipes = (stdout:Channel<string> stderr:Channel<string>) => {
+    let inbox = merged(@stdout.receive @stderr.receive)
+    loop inbox.open {
+        match inbox.next or_throw<Canceled> {
+            line:stdout.string => printl"{line}"
+            line:stderr.string => printl"err {line}"
+            <stdout.Closed | stderr.Closed> => {}
         }
     }
 }
 ```
 
-  - **Dogfood:** 17 programs over seven rounds, three independent regrades (`proposals/concurrency/unified/select-v6-review-round3.md`, `-round4.md`, `-round6.md`). Final floor 3, only from the cost above: two same-typed sources told apart (two programs) and three `Closed` spellings in one program (`<Closed<Event>>` arm, `or_throw<Closed<Event>>`, `or_throw<Closed>`). Every fixable sub-5 the reviews found is fixed. Full text: `proposals/concurrency/unified/select-v6.md`; grades: `select-v6-dogfood.md`; programs: `~/dev/tmp/par6/programs-r7/`.
+  - **Dogfood:** 27 programs over eleven rounds, six independent reviews (`proposals/concurrency/unified/select-v6-review-round*.md`), every new spelling read cold by three fresh readers. Floor 3 on two programs, both judged inherent: the deadline policy takes reading (an expired deadline wins under `'fair'`, `'listed'` can starve), and the backpressure pump's `(@reserve)` spelling. Compared with Go and Tokio, the source-qualified arm takes a little more discovery than a branch tied to one operation; Dewy is shorter when you don't care which source fired, and its drain, race and `within` match them on cleanup. Full text: `proposals/concurrency/unified/select-v6-round11.md`; grades: `select-v6-round11-dogfood.md`.
 - **Surface questions for you:**
   - **Q4 (c): keep `catch_ctrl_c`, now taking a callback rather than returning an activating guard?** The callback's extent is the catching extent; its `ctrl_c` parameter receives presses. It unblocks shells and prompt loops without a policy-changing assignment. **Rec:** yes. Reversible library call-shape choice. The spelling was previously cold-read; its new invocation shape has been paper dogfooded, not independently retested. No new tag/member spelling is introduced.
   - **Q6 (a, b): make construct settings prefix their target language-wide?** Tags and labels sit before loops, blocks, and declarations. One contiguous module header may be at file start or after the initial imports, before the first ordinary declaration/statement; imported units are in scope. Later prefixes apply only to their next construct. Program settings may also directly prefix entry `main`, and are fixed at compile time. This replaces both current containing-scope placement and the first-line-inside-parallel exception. It unblocks consistent examples in every design item. **Rec:** yes. Reversible before the surface ships; broader than concurrency, and explicitly changes the prior placement direction.
   - **Q7 (a, b): use separate entry files when environments need different process caps, and ordinary config records when one entrypoint chooses at runtime?** Your second idiom cannot select compiled `$program.*` settings from runtime `argv`; putting them on ordinary functions would give a prefix tag a second, process-changing meaning. A one-file process configuration would need an environment already known when compiling, selected through an agreed target/build-mode/compile-time source value; no such environment selector is invented here. **Rec:** separate entry files for process settings; keep one-file functions for application config under one fixed process cap (complete examples above). This preserves compile-time settings and ordinary function-call semantics. It unblocks environment packaging; reversible source organization. Your proposed second idiom remains an explicit owner choice, not silently implemented as runtime configuration.
-  - **Q8 (a): match `select` arms by type, with same-typed waits merged into one arm, instead of v5's one-field record labels?** `select(@commands.receive @chat.receive)` gives `Command | Closed<Command> | string | Closed<string> | Canceled`; you write one arm per type you care about. Distinguishing two same-typed sources takes a declared type each. **Rec:** yes. Unblocks every channel program; reversible.
-  - **Q9 (a): `priority='fair' | 'listed'` replaces your approved `ties=`, and `Sent` is withdrawn?** Cold read: two of three readers took `ties='first'` as "whichever became ready first in time"; all three read `priority='listed'` as "in the order written". `Sent` existed only for sends inside `select`, which are withdrawn (`reserve` and `send(timeout=)` replace them). **Rec:** yes; reversible.
-  - **Q10 (b): `Stderr:type = type of string`, built with `Stderr(text)`, and `ticker<Heartbeat>(1s)`?** `type of` with a concrete parent is listed as planned in LANGUAGE.md; the existing family rule applies (a `Stderr` passes where a `string` is wanted, not the reverse). A ticker's type parameter names what `.next` gives (default `Tick`), so two tickers can be told apart. Cold read: `type of string` read as usable where a string is wanted (two of three); `ticker<Heartbeat>(1s)` read correctly by all three.. **Rec:** yes; reversible.
-  - **Q11 (b): `out.send(job timeout=50ms)` and `@out.reserve`?** The send gives `void | Unsent<Job> | Canceled`, the job coming back in `Unsent` (hover says so; no reader guessed it). `reserve` waits for room and gives `Reserved<Job>` (then `permit.send(job)` can't fail) or `Closed<Reserved<Job>>`, kept apart from the input's `Closed<Job>` so a pump can drain on one and stop on the other. Cold read: `send(timeout=)`, `reserve` and `Reserved` read correctly by all three; `Closed<Reserved<Job>>` by two of three (the third read it vaguely as "the reserve path closed").. **Rec:** yes; reversible.
-  - **Q12 (b): `loop item in merged(@a.receive @b.receive stop_when_idle=30s) or_throw { … }`?** `merged` (also a held value with `.next` and `.open`) yields values until every source closes; `stop_when_idle=` ends early and leaves channels open. `or_throw` after a loop's iterable is the binding v4 §12 proposed; it isn't in LANGUAGE.md yet. Cold read: `merged` and `stop_when_idle` read correctly by all three (`select_set` and `timeout=` did not). **Rec:** yes; reversible.
-  - **Q13 (b): `race` takes any number of calls or a spread, and `first_ok(…)` returns the first success?** `race` today takes two functions. `first_ok` returns the first failure only when all fail. Cold read: `race` (losers canceled) and `first_ok` read correctly by all three; `first_success` read equally well, if you prefer it. **Rec:** yes, `first_ok`; reversible.
-  - **Q14 (c): `Closed<T>`, `Unsent<T>`, `Tick`, `CtrlC`, `task.CtrlCListener` and `receive(timeout=)`?** All read correctly by three fresh readers. **Rec:** yes.
+  - **Q8 (a): match `select` arms by type, same-typed waits merged, and tell sources apart with your source-qualified members (`<heart.Tick>`, `line:stderr.string`, `<(@reserve).Closed>`, `heart.<Tick>`), allowed on the match written directly on the call?** Replaces v5's one-field record labels. Gives up qualified arms through helpers and copied results (those match by plain type). Cold read: all six spellings read correctly by three readers (`heart.<Tick>` and `events.<Event>` with lower confidence, fitting an escape hatch). **Rec:** yes. Unblocks every channel program; reversible.
+  - **Q9 (a): `priority='fair' | 'listed'` replaces your approved `ties=`, and `Sent` is withdrawn?** Two of three readers took `ties='first'` as "whichever became ready first in time"; all three read `priority='listed'` as "in the order written". `Sent` existed only for sends inside `select`, now withdrawn. **Rec:** yes; reversible.
+  - **Q11 (b): `out.send(job timeout=50ms)` and `@out.reserve`?** The send gives `void | Unsent<Job> | Canceled`, with the job back in `Unsent` (hover must say so: no reader guessed it). `reserve` waits for room and gives a `Reserved<Job>` whose `permit.send(job)` can't fail; a held permit still delivers if the channel closes. Cold read: `send(timeout=)`, `reserve` and `Reserved` passed. **Rec:** yes; reversible.
+  - **Q12 (b): `loop item in merged(@a.receive @b.receive stop_when_idle=30s) or_throw { … }`?** `or_throw` after a loop's iterable is the binding v4 §12 proposed; it isn't in LANGUAGE.md yet. Cold read: `merged` and `stop_when_idle` passed (`select_set` and `timeout=` failed). **Rec:** yes; reversible.
+  - **Q13 (b): `race` takes any number of calls or a spread, and `first_ok(…)` returns the first success?** `race` today takes two functions. Cold read: `race` (losers canceled) and `first_ok` passed; `first_success` read equally well, if you prefer it. **Rec:** `first_ok`; reversible.
+  - **Q14 (c): `Closed<T>`, `Unsent<T>`, `Tick`, `CtrlC`, `task.CtrlCListener` and `receive(timeout=)`?** All read correctly by three readers. `task.CtrlCListener` is borrowed for the scope and has no `Closed` afterwards (replaces v5's line that delivered `Closed` after the callback). **Rec:** yes.
+  - **Q15 (b): `$named[Png Jpeg Gif]`, a metatag backed by an ordinary comptime function, that spreads one member per type?** Your sketch. `Waitable` uses it for `heart.Tick` and friends; registries and plugin tables use it directly (`each=@handler` builds a per-type value). Cold read: `[$named[Png Jpeg Gif]...]` passed with all three; the plain-function form `[named([…])...]` misled one reader (one field called `named`). **Rec:** `$named[...]`; reversible.
+  - **Q16 (c): `heart.types` for everything a source can produce?** Cold read: `types` and `outcomes` tied, all correct; `<heart.types & (Tick | Closed)>` read correctly. **Rec:** `types`; reversible.
+  - **Q17 (a): when a generated member clashes with an existing one, keep the existing member for ordinary reads with a warning, but make an ambiguous source-qualified arm an error offering `heart.<Tick>`?** Your rule was "existing member wins, plus a warning". The reviewers' concern: a library update adds a field `Tick`, and an arm meant only for `heart`'s ticks starts catching `sweep`'s too, while a later wildcard arm keeps coverage from noticing. The middle rule keeps your ordinary-member behavior and warning, and only rejects the ambiguous arm. **Rec:** the middle rule; reversible.
 - **Flagged, not new questions:**
   - `check_cancel()` is an explicit checkpoint, not an ambient opt-in; it has no active lifetime to bracket. It lives inside an ordinary computation function whose result carries `Canceled`.
   - `protect_from_cancel` and `within` are cooperative: nonchecking compute or an uninterruptible foreign call can exceed the requested duration while being joined.
