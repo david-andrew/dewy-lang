@@ -1,0 +1,520 @@
+use 'fused.jo'
+use 'lower_closures.dewy'
+use 'lower_storage.dewy'
+use 'lower_determinism.dewy'
+use 'native_debug.dewy'
+use 'elf_format.dewy'
+use 'x64_emit.dewy'
+use 'driver_pipeline.dewy'
+use 'x64_allocate.dewy'
+use 'ir_types.dewy'
+use 'pcheck.jo'
+use 'main.jo'
+use 'util.jo'
+use 'ir.jo'
+use 'x64.jo'
+use 'check.jo'
+use 'lower.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'ast.jo'
+use 'par.jo'
+use 'par_ops.dewy'
+use 'inline.jo'
+use 'inline_ops.dewy'
+use 'opt.jo'
+use 'lower_functions.dewy'
+use 'lower_primitives.dewy'
+use 'fused_ops.dewy'
+use 'fused_ir.dewy'
+
+fused_start = (pinit_lf: int) -> bool:
+    fz_ready = false
+    fz_layout = false
+    when BOOTSTRAP:
+        return false
+    else when TARGET != "linux" or ARCH != "x86_64":
+        return false
+    else:
+        if target_wasm or target_arm64 or target_windows or target_macos or opt_release or dbg_on or watch_build or repl_image or lower_only or host_ir or ra_stat or len(ra_dump) > 0 or not queue_emit: return false
+        fz_pinit = lfuncs[pinit_lf].inst
+        cands: int[]
+        ws: int[]
+        total = 0
+        loop f in [1..fns.len()):
+            if not fz_cand(f, fz_pinit): continue
+            cands.push(f)
+            w = fz_weight(f)
+            ws.push(w)
+            total += w
+        root = 0
+        loop k in 0.. and f in cands:
+            if not modules[int(fns[f].mod)].is_prelude: root += ws[k]
+        if env("DEWY_PAR_TIME") != none: eprint("fused: weight {total}, root {root}")
+        forced = env("DEWY_EMIT_FORCE") != none
+        # (library-heavy programs, games among them, have many small functions that workers
+        # would each lower to inline: there the code is made as before, emission alone in parallel)
+        fz_layout = forced or root / 20000 >= 2
+        if not fz_layout or (env("DEWY_FUSED") ?? "") == "0": return false
+        n = emit_workers()
+        if pc_active: n = pc_workers
+        else if not forced: n = min(n, root / 20000)
+        if n < 2 or cands.len() < n: return false
+        # (closure layouts are settled by whichever function needs one first: settle them here)
+        loop f in [1..fns.len()):
+            if fns[f].kind == FK_LAMBDA: env_layout(f)
+            else if fns[f].kind == FK_PARTIAL:
+                offsets = partial_layout(int(fns[f].partial))
+                fns[f].env_size = i32(offsets[offsets.len() - 1])
+        cuts = [0]
+        acc = 0
+        loop k in [0..cands.len()):
+            acc += ws[k]
+            if acc * n >= total * cuts.len() and cuts.len() < n and k + 1 < cands.len(): cuts.push(k + 1)
+        cuts.push(cands.len())
+        tm = env("DEWY_PAR_TIME") != none
+        fz_lf0 = lfuncs.len()
+        fz_r0 = rodata.len()
+        fz_d0 = data_size
+        ta = time()
+        pids: int[]
+        fds: int[]
+        if pc_active:
+            if pc_child >= 0:
+                mine: int[]
+                next = 0
+                loop f in cands:
+                    owner = pc_owner.get(f) ?? -1
+                    if owner < 0:
+                        owner = next % pc_workers
+                        next += 1
+                    if owner == pc_child: mine.push(f)
+                if (env("DEWY_FUSED_FAIL_WORKER") ?? "") == "{pc_child}": exit(1)
+                fz_worker(mine, 0, mine.len(), pc_emit)
+            pids = pc_pids
+            fds = pc_fds
+        loop w in [0..if pc_active: 0 else: cuts.len() - 1):
+            pfd = [0]
+            if syscall(293, data(pfd), 0x80000) != 0:
+                pids.push(-1)
+                fds.push(-1)
+                continue
+            rfd = pfd[0] & 0xFFFFFFFF
+            wfd = pfd[0] >> 32
+            pid = syscall(57)
+            if pid == 0:
+                syscall(3, rfd)
+                # (what a worker would say is said here, in order, when its functions are lowered here)
+                if env("DEWY_FUSED_TRACE") == none:
+                    nullfd = syscall(2, data("/dev/null"), 1, 0)
+                    if nullfd >= 0:
+                        syscall(33, nullfd, 1)
+                        syscall(33, nullfd, 2)
+                        syscall(3, nullfd)
+                __olen = 0
+                if (env("DEWY_FUSED_FAIL_WORKER") ?? "") == "{w}": exit(1)
+                fz_worker(cands, cuts[w], cuts[w + 1], wfd)
+            syscall(3, wfd)
+            if pid < 0:
+                syscall(3, rfd)
+                pids.push(-1)
+                fds.push(-1)
+            else:
+                pids.push(pid)
+                fds.push(rfd)
+        tb = time()
+        got = fz_read_all(fds)
+        tc = time()
+        fz_recs = []
+        fz_rd = []
+        fz_mlf = []
+        fz_mro = []
+        fz_mdt = []
+        fz_mrc = []
+        fz_kro = []
+        fz_kdt = []
+        fz_by_inst = {}
+        fz_by_helper = {}
+        fz_qrec = {}
+        lost = false
+        loop w in [0..fds.len()):
+            fz_rd.push(ParIn([]))
+            fz_mlf.push({})
+            fz_mro.push({})
+            fz_mdt.push({})
+            fz_mrc.push({})
+            fz_kro.push([])
+            fz_kdt.push([])
+            if fds[w] < 0:
+                lost = true
+                continue
+            syscall(3, fds[w])
+            st = [0]
+            if pc_active:
+                pc_fds[w] = -1
+                st[0] = pc_reap(w)
+            else:
+                r = -4
+                loop r == -4: r = syscall(61, pids[w], data(st), 0, 0)
+                if r != pids[w]: st[0] = -1
+            if st[0] & 0xFFFF != 0 or got[w].len() < 16:
+                lost = true
+                continue
+            trailer = ParIn(got[w], got[w].len() - 8)
+            if pr(trailer) != 0x46555345:
+                lost = true
+                continue
+            fz_parse(w, got[w])
+        # (a partitioned check's worker that did not finish decided none of
+        # its obligations: the parent decides them, with every body checked)
+        if lost and pc_active and pc_static(): pc_facts_serial()
+        fz_validate()
+        fz_ready = true
+        if env("DEWY_FUSED_WHY") != none:
+            nt = 0
+            nn = 0
+            nc = 0
+            na = 0
+            loop x in fz_recs:
+                if not x.owned: nn += 1
+                else if x.taint: nt += 1
+                else if x.chunk < 0: nc += 1
+                else if not x.valid: na += 1
+            eprint("fused: records {fz_recs.len()}: not owned {nn}, tainted {nt}, no code {nc}, invalid {na}")
+            loop x in fz_recs:
+                if x.owned and x.lkind == LK_INST and x.kind != 0 and not fz_small(x.ka): eprint("  leaf not small: {fns[x.ka].sym} kind {x.kind} kids {nkids(int(fns[x.ka].body))} locals {fns[x.ka].locals.len()} body {nodes[int(fns[x.ka].body)].kind}")
+            loop x in fz_recs:
+                if x.owned and x.taint and x.lkind == LK_INST: eprint("  tainted {fns[x.ka].sym}")
+                if x.owned and not x.taint and x.chunk >= 0 and not x.valid:
+                    bad: int[]
+                    loop f in x.assumed:
+                        o = fz_by_inst.get(f) ?? -1
+                        if o < 0 or fz_recs[o].kind != 0: bad.push(f)
+                    why = ""
+                    loop f in bad:
+                        o = fz_by_inst.get(f) ?? -1
+                        d = int(fns[f].decl)
+                        ext = d != 0 and has_flag(d, NF_EXTERN)
+                        kind = -1
+                        if o >= 0: kind = fz_recs[o].kind
+                        why = why + " {fns[f].sym}(owner {o} kind {kind} ext {ext} cand {fz_cand(f, fz_pinit)})"
+                    eprint("  invalid w{x.w} lf{x.lf} k{x.lkind}:{x.ka}: assumed {x.assumed.len()} uses {x.uses.len()} bad:{why}")
+        if tm:
+            valid = 0
+            loop r in fz_recs:
+                if r.valid: valid += 1
+            eprint("fused: {pids.len()} workers, {cands.len()} functions, fork {(tb - ta) * 1000.0:.1} ms, waiting and reading {(tc - tb) * 1000.0:.1} ms, parsing {(time() - tc) * 1000.0:.1} ms, {fz_recs.len()} records, {valid} valid")
+        true
+# everything the pipes give until each is closed, read as it comes
+fz_read_all = (fds: int[]) -> u8[][]:
+    outs: u8[][]
+    open: bool[]
+    left = 0
+    loop fd in fds:
+        outs.push([])
+        open.push(fd >= 0)
+        if fd >= 0:
+            left += 1
+            fl = syscall(72, fd, 3, 0)
+            syscall(72, fd, 4, fl | 0x800)
+    pfds = fill(0, fds.len())
+    loop left > 0:
+        idx: int[]
+        loop w in [0..fds.len()):
+            if open[w]:
+                # struct pollfd: fd, events POLLIN (1), revents
+                pfds[idx.len()] = (fds[w] & 0xFFFFFFFF) | (1 << 32)
+                idx.push(w)
+        r = syscall(7, data(pfds), idx.len(), -1)
+        if r < 0: continue
+        loop k in [0..idx.len()):
+            if (pfds[k] >> 48) & 0xFFFF == 0: continue
+            w = idx[k]
+            loop true:
+                n = outs[w].len()
+                outs[w].resize(n + 262144)
+                got = syscall(0, fds[w], data(outs[w]) + n, 262144)
+                if got > 0:
+                    outs[w].resize(n + got)
+                    continue
+                outs[w].resize(n)
+                if got == 0 or got != -11:
+                    open[w] = false
+                    left -= 1
+                break
+    outs
+# ---- a worker ----
+fz_worker = (cands: int[], a: int, b: int, fd: int):
+    if env("DEWY_FUSED_FAIL") != none: exit(1)
+    tw0 = time()
+    fz_lf0 = lfuncs.len()
+    fz_r0 = rodata.len()
+    fz_d0 = data_size
+    f0 = fns.len()
+    fzw_f0 = fns.len()
+    fzw_t0 = types.len()
+    fzw_g0 = globals.len()
+    f0 = fzw_f0
+    mine: int[]
+    loop k in [a..b): mine.push(lf_of_inst(cands[k]))
+    fused_on = true
+    loop lf in mine: fzw_lower(lf, true)
+    # helpers they need: made here too (another worker may make the same one)
+    i = fz_lf0
+    loop i < lfuncs.len():
+        if lfuncs[i].kind == LK_HELPER and fzw_have.get(i) == none: fzw_lower(i, true)
+        i += 1
+    recs = fzw_recs
+    have = fzw_have
+    tw1 = time()
+    # small functions they call that others make: lowered here only to be inlined
+    nown = recs.len()
+    k = 0
+    loop k < recs.len():
+        r = recs[k]
+        if k >= nown and r.kind != 2:
+            k += 1
+            continue
+        loop ins in r.ir.code:
+            if ins.op != .call or ins.c != 0: continue
+            g = int(ins.imm)
+            if have.get(g) != none or lfuncs[g].kind != LK_INST or not fz_canon(g): continue
+            fi = lfuncs[g].inst
+            if fz_cand(fi, fz_pinit) and fz_small(fi):
+                fzw_lower(g, false)
+                recs = fzw_recs
+                have = fzw_have
+        k += 1
+    sent_taint = fill(false, recs.len())
+    tw2 = time()
+    out: u8[]
+    pw(out, recs.len())
+    loop r in recs:
+        f = lfuncs[r.lf]
+        pw(out, r.lf)
+        pw(out, f.kind)
+        if f.kind == LK_INST:
+            pw(out, f.inst)
+            pw(out, 0)
+            pw(out, 0)
+        else:
+            pw(out, int(f.hkind))
+            pw(out, f.htype)
+            pw(out, f.inst)
+        pw(out, if r.owned: 1 else: 0)
+        # (a function that inlines one this worker could not map, or that might inline one
+        # this worker does not have: its own record says which)
+        taint = r.taint
+        assumed: int[]
+        uses: int[]
+        loop ins in r.ir.code:
+            if ins.op != .call or ins.c != 0: continue
+            g = int(ins.imm)
+            if let h = have.get(g):
+                if recs[h].taint: taint = true
+                uses.push(g)
+                if recs[h].kind == 2:
+                    loop ins2 in recs[h].ir.code:
+                        if ins2.op != .call or ins2.c != 0: continue
+                        g2 = int(ins2.imm)
+                        if let h2 = have.get(g2):
+                            if recs[h2].taint: taint = true
+                            uses.push(g2)
+                        else if lfuncs[g2].kind == LK_INST and lfuncs[g2].inst < f0 and fz_canon(g2): assumed.push(lfuncs[g2].inst)
+                        else: taint = true
+            else if lfuncs[g].kind == LK_INST and lfuncs[g].inst < f0 and fz_canon(g): assumed.push(lfuncs[g].inst)
+            else: taint = true
+        pw(out, if taint: 1 else: 0)
+        pw(out, r.kind)
+        pw(out, r.j1 - r.j0)
+        k2 = r.j0
+        loop k2 < r.j1:
+            kind = fz_j[k2]
+            loop d in [0..5): pw(out, fz_j[k2 + d])
+            if kind == 2: fz_put_str(out, fz_texts[fz_j[k2 + 2]])
+            else if kind == 5: fz_put_str(out, fz_texts[fz_j[k2 + 3]])
+            else if kind == 6:
+                start = fz_j[k2 + 4]
+                pw(out, fz_j[k2 + 3])
+                loop q in [start..start + fz_j[k2 + 3]): out.push(fz_raws[q])
+            k2 += 5
+        pw_ints(out, assumed)
+        pw_ints(out, uses)
+        if r.owned and r.kind != 0 and not taint:
+            pw(out, 1)
+            fz_pack_ir(out, r.ir)
+        else: pw(out, 0)
+        sent_taint[have[r.lf]] = taint
+    # machine code: the owned functions
+    tw3 = time()
+    q: IrFn[]
+    loop r in recs: q.push(r.ir)
+    fast_inline_prepare(q)
+    loop k3 in 0.. and r in recs:
+        if not r.owned or sent_taint[k3]:
+            pw(out, 0)
+            continue
+        ir = q[k3]
+        c0 = call_fix.len()
+        d0 = data_fix.len()
+        s0 = stub_fix.len()
+        l0 = line_rows.len()
+        cs0 = call_sites.len()
+        e0 = elf_syms.len()
+        ro0 = fz_ro.len()
+        u0 = rsp_rows.len()
+        emit_now(false)
+        start = fn_addr[r.lf]
+        pw(out, 1)
+        pw(out, code.len() - start)
+        out.extend(code[start..code.len()))
+        pw(out, call_fix.len() - c0)
+        loop x in call_fix[c0..call_fix.len()):
+            pw(out, x.0 - start)
+            pw(out, x.1)
+        pw(out, data_fix.len() - d0)
+        loop x in data_fix[d0..data_fix.len()):
+            pw(out, x.0 - start)
+            pw(out, x.1)
+            pw(out, x.2)
+        pw(out, stub_fix.len() - s0)
+        loop x in stub_fix[s0..stub_fix.len()):
+            pw(out, x.0 - start)
+            pw(out, x.1)
+        pw(out, (line_rows.len() - l0) / 2)
+        k4 = l0
+        loop k4 < line_rows.len():
+            pw(out, line_rows[k4] - start)
+            pw(out, ir_positions[line_rows[k4 + 1]])
+            k4 += 2
+        pw(out, (call_sites.len() - cs0) / 2)
+        k4 = cs0
+        loop k4 < call_sites.len():
+            pw(out, call_sites[k4] - start)
+            pw(out, ir_positions[call_sites[k4 + 1]])
+            k4 += 2
+        pw(out, (fz_ro.len() - ro0) / 2)
+        loop x in fz_ro[ro0..fz_ro.len()): pw(out, x)
+        pw(out, (rsp_rows.len() - u0) / 2)
+        k4 = u0
+        loop k4 < rsp_rows.len():
+            pw(out, rsp_rows[k4] - start)
+            pw(out, rsp_rows[k4 + 1])
+            k4 += 2
+        if elf_syms.len() == e0: pw(out, 0)
+        else: pw(out, 1)
+    pw(out, 0x46555345)
+    if env("DEWY_FUSED_TRACE") != none: eprint("  fused worker {a}..{b}: lower {(tw1 - tw0) * 1000.0:.1} ms, others {(tw2 - tw1) * 1000.0:.1} ms ({recs.len() - nown}), pack {(tw3 - tw2) * 1000.0:.1} ms, emit {(time() - tw3) * 1000.0:.1} ms, {out.len()} bytes")
+    __olen = 0
+    __write_fd(fd, data(out), out.len())
+    exit(0)
+# in the lowering loop: lf made by a worker (journal replayed, code to join later)
+fz_replay = (lf: int) -> bool:
+    f = lfuncs[lf]
+    k = -1
+    if not fz_canon(lf): return false
+    if f.kind == LK_INST: k = fz_by_inst.get(f.inst) ?? -1
+    else: k = fz_by_helper.get(fz_hkey(int(f.hkind), f.htype, f.inst)) ?? -1
+    if k < 0 or not fz_recs[k].valid: return false
+    x = fz_recs[k]
+    t = 0
+    rw = 0
+    raw_par: int[]
+    e = 0
+    loop e < x.ents.len():
+        kind = x.ents[e]
+        local = x.ents[e + 1]
+        a = x.ents[e + 2]
+        b = x.ents[e + 3]
+        c = x.ents[e + 4]
+        if kind == 0:
+            got = lf_of_inst(a)
+            fz_mlf[x.w][local] = got
+        else if kind == 1:
+            got = lf_helper(a as HK, b, c)
+            fz_mlf[x.w][local] = got
+        else if kind == 2:
+            got = str_data(x.texts[t])
+            fz_mro[x.w][local] = got
+            t += 1
+        else if kind == 3:
+            got = global_addr_off(a)
+            fz_mdt[x.w][local] = got
+            if mt_active_off < 0:
+                s = prelude.get(intern("__mt_active")) ?? 0
+                if s != 0 and syms[s].kind == .global and int(syms[s].ref) == a: mt_active_off = fz_mdt[x.w][local]
+        else if kind == 4:
+            got = box_dflt_off(a)
+            fz_mro[x.w][local] = got
+        else if kind == 5:
+            warn(a, x.texts[t])
+            t += 1
+        else if kind == 7:
+            det_check(int(nodes[a].sym), kids(a), nodes[a].pos)
+        else if kind == 6:
+            loop rodata.len() % a != 0: rodata.push(0)
+            o = rodata.len()
+            ro_starts.push(o)
+            loop v in x.raws[rw]: rodata.push(v)
+            rw += 1
+            fz_mro[x.w][local] = o
+            raw_par.push(o)
+        e += 5
+    fz_recs[k].raw_par = raw_par
+    ir = IrFn(name = f.name, fn_index = lf)
+    emit_queue.push(ir)
+    emit_queue_rel.push(false)
+    fz_qrec[lf] = k
+    true
+fz_place = (x: FzRec, lf: int):
+    w = x.w
+    fz_rd[w].i = x.chunk
+    loop code.len() % 64 != 0: code.push(0xCC)
+    base = code.len()
+    loop fn_addr.len() <= lf: fn_addr.push(-1)
+    loop fn_len.len() <= lf: fn_len.push(0)
+    nc = pr(fz_rd[w])
+    fn_addr[lf] = base
+    fn_len[lf] = nc
+    when BOOTSTRAP:
+        loop k in [0..nc): code.push(fz_rd[w].b[fz_rd[w].i + k])
+    else: code.extend(fz_rd[w].b[fz_rd[w].i..fz_rd[w].i + nc))
+    fz_rd[w].i += nc
+    calls: (int, int)[]
+    loop _ in [0..pr(fz_rd[w])):
+        p = pr(fz_rd[w])
+        calls.push((base + p, pr(fz_rd[w])))
+    datas: (int, int, int)[]
+    loop _ in [0..pr(fz_rd[w])):
+        p = pr(fz_rd[w])
+        kind = pr(fz_rd[w])
+        datas.push((base + p, kind, pr(fz_rd[w])))
+    loop _ in [0..pr(fz_rd[w])):
+        p = pr(fz_rd[w])
+        stub_fix.push((base + p, pr(fz_rd[w])))
+    loop _ in [0..pr(fz_rd[w])):
+        p = pr(fz_rd[w])
+        line_rows.push(base + p)
+        line_rows.push(fz_pos(pr(fz_rd[w])))
+    loop _ in [0..pr(fz_rd[w])):
+        p = pr(fz_rd[w])
+        call_sites.push(base + p)
+        call_sites.push(fz_pos(pr(fz_rd[w])))
+    loop _ in [0..pr(fz_rd[w])):
+        bits = pr(fz_rd[w])
+        off = pr(fz_rd[w])
+        got = ro_const(bits)
+        fz_mrc[x.w][off] = got
+    loop _ in [0..pr(fz_rd[w])):
+        p = pr(fz_rd[w])
+        rsp_rows.push(base + p)
+        rsp_rows.push(pr(fz_rd[w]))
+    if pr(fz_rd[w]) != 0: elf_syms.push((sym_name(lfuncs[lf].name), base, nc))
+    loop c in calls: call_fix.push((c.0, fz_map_lf(x.w, c.1)))
+    loop d in datas:
+        off = d.2
+        if d.1 == 0:
+            if let v = fz_mrc[x.w].get(off): off = v
+            else: off = fz_map_in(x.w, 0, off, fz_r0)
+        else if d.1 == 1: off = fz_map_in(x.w, 1, off, fz_d0)
+        data_fix.push((d.0, d.1, off))

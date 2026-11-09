@@ -22,7 +22,7 @@ def test_worker_cancel_retires_children(compiler, tmp_path, emitted):
     source = function('compiler/pcheck.jo', 'pc_cancel')
     if 'pc_reap(' in source:
         source += function('compiler/pcheck.jo', 'pc_reap')
-    fused = (ROOT / 'compiler/fused.jo').read_text()
+    fused = (ROOT / 'compiler/fused_drive.jo').read_text()
     start = fused.index('            syscall(3, fds[w])\n')
     end = fused.index('            if st[0] & 0xFFFF', start)
     source += 'reap_emission = (w: int):\n' + textwrap.indent(

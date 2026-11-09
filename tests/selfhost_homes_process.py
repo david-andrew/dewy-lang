@@ -11,6 +11,7 @@ LEAF_HOMES = {
     'proc_sys': 'watch.jo',
     'repl_drive': 'repl.jo',
     'fused_ir': 'fused.jo',
+    'fused_drive': 'fused.jo',
     'par_drive': 'par.jo',
     'driver_cli': 'main.jo',
     'repl_session': 'repl.jo',
