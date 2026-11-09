@@ -651,6 +651,7 @@ sv_expr = (e: int) -> int:
             loop i in [0..nkids(e)): parts.push(sv_expr(kid(e, i)))
         return sv_val(80, ty, parts)
     if k == .array: sv_err(pos, "growable arrays ({tsd("T[]", "array<T>")}) cannot be used in shaders; use a fixed-size array {tsd("T[N]", "array<T length=N>")}")
+    if k == .str_lit: sv_err(pos, "text cannot be used in shaders: a GPU function computes numbers, so print or format its results on the CPU, after `cpu(...)`")
     sv_err(pos, "unsupported expression in shader")
     0
 # if c: a else: b as a value

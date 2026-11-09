@@ -319,6 +319,7 @@ ml_expr = (e: int) -> str:
             loop i in [0..nkids(e)): parts.push(ml_expr(kid(e, i)))
         return "{ml_type(t, pos)}\{{join(parts, ", ")}}"
     if k == .array: ml_err(pos, "growable arrays ({tsd("T[]", "array<T>")}) cannot be used in shaders; use a fixed-size array {tsd("T[N]", "array<T length=N>")}")
+    if k == .str_lit: ml_err(pos, "text cannot be used in shaders: a GPU function computes numbers, so print or format its results on the CPU, after `cpu(...)`")
     ml_err(pos, "unsupported expression in shader")
     ""
 # (operands are already a name, a call or in parentheses: an extra pair around one that looks

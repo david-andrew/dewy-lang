@@ -325,6 +325,7 @@ gl_expr = (e: int) -> str:
             loop i in [0..nkids(e)): parts.push(gl_wrap(gl_expr(kid(e, i)), et, nodes[e].pos))
         return "{gl_type(t, nodes[e].pos)}({join(parts, ", ")})"
     if k == .array: gl_err(nodes[e].pos, "growable arrays ({tsd("T[]", "array<T>")}) cannot be used in shaders; use a fixed-size array {tsd("T[N]", "array<T length=N>")}")
+    if k == .str_lit: gl_err(nodes[e].pos, "text cannot be used in shaders: a GPU function computes numbers, so print or format its results on the CPU, after `cpu(...)`")
     gl_err(nodes[e].pos, "unsupported expression in shader")
     ""
 # x op y for operands of type ta, giving type t: unsigned integers divide, take remainders,
