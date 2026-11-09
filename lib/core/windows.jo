@@ -48,6 +48,8 @@ when TARGET == "windows":
     @lib("kernel32.dll")
     extern ExitProcess = (code: u32)
     @lib("kernel32.dll")
+    extern TerminateProcess = (process: *u8, code: u32) -> i32
+    @lib("kernel32.dll")
     extern IsDebuggerPresent = () -> i32
     @lib("kernel32.dll")
     extern DebugBreak = ()

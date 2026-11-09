@@ -98,17 +98,27 @@ when TARGET == "windows":
     # may handle their exceptions themselves.)
     __crash_reporter = 0
 
+    # (the end of a crash report: TerminateProcess, not ExitProcess, whose DLL detach code would run
+    # on the faulting thread -- a worker's stack is its own, not the one Windows knows, and a
+    # library's stack probe there faults again, ending the process with that fault's code)
+    __w32_crash_exit = ():
+        TerminateProcess((-1) as *u8, u32(101))                            # (the current process)
+
     @cabi
     __w32_crash = (ep: *u8) -> i32:
         rec = (ep as **u8)[0]
         ctx = (ep as **u8)[1]
         code = int((rec as *u32)[0])
+        fatal = code == 0x80000001 or code == 0xC00000FD or code == 0xC0000005 or code == 0xC0000094 or code == 0xC0000095 or code == 0xC000001D or code == 0xC0000096
+        # (a fault while this thread reports, in the program's code or a library's: the report is over)
+        me = __tid() + 1
+        if fatal and __atomic_add(&__crash_reporter, 0) == me: __w32_crash_exit()
         rsp = ((ctx + 0x98) as *int)[0]
         rbp = ((ctx + 0xA0) as *int)[0]
         rip = ((ctx + 0xF8) as *int)[0]
         # (code of the interactive prompt's inputs is the program's too: lib/std/repl.jo)
         if (rip < 0x400000 or rip >= 0x400000 + __w32_image_size()) and (rip < __repl_lo or rip >= __repl_hi): return 0          # EXCEPTION_CONTINUE_SEARCH
-        if code != 0x80000001 and code != 0xC00000FD and code != 0xC0000005 and code != 0xC0000094 and code != 0xC0000095 and code != 0xC000001D and code != 0xC0000096: return 0
+        if not fatal: return 0
         what = "crashed (exception 0x{__hex_text(code)})"
         if code == 0x80000001 or code == 0xC00000FD: what = "stack overflow (a function calls itself without end, or too deeply?)"
         else if code == 0xC0000005:
@@ -118,16 +128,15 @@ when TARGET == "windows":
         else if code == 0xC0000094 or code == 0xC0000095: what = "arithmetic error"
         else if code == 0xC000001D or code == 0xC0000096: what = "illegal instruction"
         # (the first thread to fault reports; threads faulting while it does wait for its exit)
-        me = __tid() + 1
         if __atomic_cas(&__crash_reporter, 0, me) != 0:
-            if __atomic_add(&__crash_reporter, 0) == me: __exit(101)    # (the report itself crashed)
             loop true: Sleep(u32(1000))
         __write_err("panic: {what}\n")
         __backtrace_from(rbp, rip)
         if __repl_crashed(ctx):
             __atomic_cas(&__crash_reporter, me, 0)
             return -1                                                        # EXCEPTION_CONTINUE_EXECUTION
-        __exit(101)
+        __owner_unwind()
+        __w32_crash_exit()
         0
 else when TARGET == "macos":
     __crash_install = () -> bool:
@@ -140,9 +149,14 @@ else when TARGET == "macos":
         h: cfn(i32, *u8, *u8) = __crash
         act = fill(0, 2)
         act[0] = h as int
-        act[1] = (1 | 4 | 0x40) << 32                       # SA_ONSTACK | SA_RESETHAND | SA_SIGINFO
+        act[1] = (1 | 0x40) << 32                           # SA_ONSTACK | SA_SIGINFO
         loop sig in [4, 8, 10, 11]: __c_sigaction(i32(sig), data(act) as *u8, null)
         true
+
+    # (the thread reporting a crash, as on Linux: the first to fault reports, and threads faulting
+    # while it does wait for its exit; the handler stays installed, so a second fault is not the
+    # default action ending the program before the report)
+    __crash_reporter = 0
 
     # (ucontext's uc_mcontext, a pointer, at 48; in it x0-x28 from 16, then fp, lr, sp, pc;
     # siginfo's si_addr at 24)
@@ -152,6 +166,14 @@ else when TARGET == "macos":
         rbp = g[29]
         rsp = g[31]
         rip = g[32]
+        # (a thread is told by the stack it faulted on, a worker's own or else the main thread's:
+        # the handler runs on a signal stack)
+        me = 1
+        if __tstack_base != null and rsp >= (__tstack_base as int) and rsp < (__tstack_base as int) + (__MAX_THREADS << __TSTACK_SHIFT): me = ((rsp - (__tstack_base as int)) >> __TSTACK_SHIFT) + 2
+        if __atomic_cas(&__crash_reporter, 0, me) != 0:
+            if __atomic_add(&__crash_reporter, 0) == me: __exit(101)    # (the report itself crashed)
+            pause = (1, 0)
+            loop true: syscall(35, &pause, 0)              # nanosleep
         what = "crashed (signal {sig})"
         if sig == 11 or sig == 10:
             a = ((info + 24) as *int)[0]

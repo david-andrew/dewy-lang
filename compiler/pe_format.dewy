@@ -9,7 +9,8 @@ from p"elf_format.dewy" import (put16 put32 put64 elf_append_bytes)
 #
 # Sections: .text (code), .rdata (read-only data), .data: an import table for kernel32.dll
 # (pe_imports: what everything else is looked up with at run time, as on Linux, and what that
-# needs: lib/core/windows.jo) followed by the program's globals (zero at start, not in the
+# needs: lib/core/windows.jo, and TerminateProcess, which a crash report on a worker's stack
+# must not look up: lib/std/backtrace.jo) followed by the program's globals (zero at start, not in the
 # file). The import address table ends where the globals begin, so code finds its entries at
 # fixed offsets below them (pe_iat_off). Last, .dewy: the functions' names and the line table,
 # for backtraces (x64.jo, pe_backtrace_info; lib/std/backtrace.jo reads it where it is loaded).
@@ -17,7 +18,7 @@ const PE_BASE=0x400000
 const PE_SECT=0x1000 # section alignment in memory
 const PE_FILE=0x200 # in the file
 const PE_HEADERS=0x400 # DOS header, PE headers and section table, padded
-let pe_imports:array<string>=["ExitProcess"  "LoadLibraryA"  "GetProcAddress"  "VirtualAlloc"  "VirtualFree"]
+let pe_imports:array<string>=["ExitProcess"  "LoadLibraryA"  "GetProcAddress"  "VirtualAlloc"  "VirtualFree"  "TerminateProcess"]
 
 # where import k's address is: from the start of the globals (the table ends with a zero entry)
 pe_iat_off=(k:PEWord):>PEWord=>$unsafe {

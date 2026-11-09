@@ -38,20 +38,10 @@ def run_native(binary, *args):
     return ran.returncode, ran.stdout.replace('\r\n', '\n'), ran.stderr.replace('\r\n', '\n')
 
 
-def assert_reported(status, err, exact_exit=True):
-    """The runtime said so once and the process failed. Exit 101 is the contract; where a worker's
-    handler still ends the process with the fault itself (a signal death on macOS, the NTSTATUS
-    on Windows), that is an expected failure: the message came out, nothing ran on."""
+def assert_reported(status, err):
+    """The runtime said so once and the process exited with the panic status, 101."""
     assert err.count('panic: stack overflow') == 1, err[-2000:]
-    assert status != 0, err[-2000:]
-    if status != EXIT_PANIC and not exact_exit:
-        pytest.xfail(f'a worker stack overflow is reported but the process ends with {status}, not {EXIT_PANIC}, '
-                     f'on {sys.platform} (the worker stack guard of f73f3d95e exits 101 on Linux only)')
     assert status == EXIT_PANIC, (status, err[-2000:])
-
-
-# (the main thread and Linux workers and tasks exit 101 everywhere; macOS and Windows workers do not yet)
-WORKER_EXITS_WITH_FAULT = sys.platform in ('darwin', 'win32')
 
 
 def test_main_thread_stack_overflow_is_reported(compiler, tmp_path):
@@ -64,7 +54,7 @@ def test_worker_stack_overflow_is_reported(compiler, tmp_path):
     binary = build_native(compiler, tmp_path, WORKER_OVERFLOW)
     assert run_native(binary, '1000')[:2] == (0, '16120\n')
     for _ in range(3):
-        assert_reported(*run_native(binary, '1000000')[::2], exact_exit=not WORKER_EXITS_WITH_FAULT)
+        assert_reported(*run_native(binary, '1000000')[::2])
 
 
 @pytest.mark.skipif(sys.platform != 'linux', reason='tasks run on Linux only')

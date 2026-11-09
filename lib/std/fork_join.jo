@@ -70,8 +70,14 @@ else when TARGET == "macos":
         __jump(entry as *u8, top)
         null
 
+    # (with its own signal stack, as the main thread has one (lib/std/backtrace.jo): the crash
+    # handler of an overflow in the worker's guard runs there and reports it)
     @cabi
-    __mac_worker = (): __worker_main(__tid())
+    __mac_worker = ():
+        size = 1 << 16
+        st = (__os_pages(size) as int, size, 0)            # (stack_t, on this stack: it never returns)
+        __c_sigaltstack((&st) as *u8, null)
+        __worker_main(__tid())
 else:
     __futex_wait = (p: *int, v: int): syscall(202, p, 128, v, 0)      # FUTEX_WAIT_PRIVATE
     __futex_wake = (p: *int): syscall(202, p, 129, 0x7FFFFFFF)        # FUTEX_WAKE_PRIVATE (all)
@@ -299,6 +305,8 @@ __fj_start = ():
             start: cfn(*u8) -> *u8 = __mac_thread_start
             th = [0]
             loop i in [0..n):
+                # (the low end of each stack is a guard, as on Linux)
+                if syscall(10, base + (i << __TSTACK_SHIFT), __TSTACK_GUARD, 0) != 0: break     # mprotect
                 if __mac_pthread_create(data(th) as *u8, null, start as *u8, (i + 1) as *u8) != 0: break
                 __fj_workers += 1
         else:
