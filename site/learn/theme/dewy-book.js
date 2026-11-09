@@ -44,6 +44,10 @@
       if (button.id === "dewy-light" || button.id === "dewy-dark") {
         localStorage.setItem("dewy-theme-link", "on");
         localStorage.setItem("dewy-theme", button.id === "dewy-dark" ? "dark" : "light");
+      } else if (button.id === "default_theme") {
+        // mdBook's Auto entry removes mdbook-theme and follows the system.
+        localStorage.setItem("dewy-theme-link", "on");
+        localStorage.setItem("dewy-theme", "auto");
       } else {
         localStorage.setItem("dewy-theme-link", "off");
       }

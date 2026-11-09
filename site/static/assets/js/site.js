@@ -1,41 +1,78 @@
 (() => {
   const THEME_KEY = "dewy-theme";
-  const themeColors = document.documentElement.dataset.site === "udewy"
+  const BOOK_KEY = "mdbook-theme";
+  const LINK_KEY = "dewy-theme-link";
+  const root = document.documentElement;
+  const themeColors = root.dataset.site === "udewy"
     ? { light: "#eef7fa", dark: "#0c1c22" }
     : { light: "#f3faf6", dark: "#0e241b" };
   const themeColor = document.querySelector('meta[name="theme-color"]');
+  const systemDark = matchMedia("(prefers-color-scheme: dark)");
 
-  const currentTheme = () => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  const systemTheme = () => (systemDark.matches ? "dark" : "light");
+  const opposite = (theme) => (theme === "dark" ? "light" : "dark");
+  const storedMode = () => {
+    try {
+      const mode = localStorage.getItem(THEME_KEY);
+      return mode === "light" || mode === "dark" ? mode : "auto";
+    } catch {
+      return "auto";
+    }
+  };
+  let mode = root.dataset.themeMode || storedMode();
 
-  const applyTheme = (theme) => {
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.style.colorScheme = theme;
+  // From auto, the first click always changes the look (to the opposite of the
+  // system); the second pins the system look; the third returns to auto.
+  const nextMode = (current) => {
+    const system = systemTheme();
+    if (current === "auto") return opposite(system);
+    if (current === system) return "auto";
+    return system;
+  };
+  const describe = (value) => (value === "auto"
+    ? `automatic (${systemTheme()}, following the system)`
+    : value);
+
+  const applyMode = (value) => {
+    mode = value;
+    const theme = value === "auto" ? systemTheme() : value;
+    root.dataset.theme = theme;
+    root.dataset.themeMode = value;
+    root.style.colorScheme = theme;
     if (themeColor) themeColor.setAttribute("content", themeColors[theme]);
+    const next = nextMode(value);
+    const label = `Theme: ${describe(value)}. Switch to ${next === "auto" ? "automatic (follow the system)" : `${next} theme`}`;
     document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-      const next = theme === "dark" ? "light" : "dark";
-      const label = `Switch to ${next} theme`;
       button.setAttribute("aria-label", label);
       button.setAttribute("title", label);
     });
   };
 
-  applyTheme(currentTheme());
+  const saveMode = (value) => {
+    try {
+      localStorage.setItem(THEME_KEY, value);
+      if (localStorage.getItem(LINK_KEY) !== "off") {
+        if (value === "auto") localStorage.removeItem(BOOK_KEY);
+        else localStorage.setItem(BOOK_KEY, value === "dark" ? "dewy-dark" : "dewy-light");
+      }
+    } catch {
+      // Storage unavailable: the choice lasts for this page only.
+    }
+  };
+
+  applyMode(mode);
 
   document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
-      const theme = currentTheme() === "dark" ? "light" : "dark";
-      localStorage.setItem(THEME_KEY, theme);
-      if (localStorage.getItem("dewy-theme-link") !== "off") {
-        localStorage.setItem("mdbook-theme", theme === "dark" ? "dewy-dark" : "dewy-light");
-      }
-      applyTheme(theme);
+      const value = nextMode(mode);
+      saveMode(value);
+      applyMode(value);
     });
   });
 
-  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
-    const stored = localStorage.getItem(THEME_KEY);
-    if (stored === "light" || stored === "dark") return;
-    applyTheme(event.matches ? "dark" : "light");
+  systemDark.addEventListener("change", () => applyMode(mode));
+  window.addEventListener("storage", (event) => {
+    if (event.key === THEME_KEY || event.key === null) applyMode(storedMode());
   });
 
   const navToggle = document.querySelector("[data-nav-toggle]");
@@ -96,6 +133,64 @@
     new IntersectionObserver(([entry]) => {
       header.classList.toggle("show-brand", !entry.isIntersecting);
     }, { rootMargin: "-56px 0px 0px 0px" }).observe(heroBrand);
+  }
+
+  const install = document.querySelector("[data-install]");
+  if (install) {
+    const unix = "curl -fsSL https://dewy-lang.org/install.sh | bash";
+    const commands = {
+      linux: { prompt: "$", command: unix, hint: "Linux x86-64 and ARM64" },
+      macos: { prompt: "$", command: unix, hint: "macOS on Apple silicon" },
+      windows: { prompt: "PS>", command: "irm https://dewy-lang.org/install.ps1 | iex", hint: "Windows x64, in PowerShell" },
+    };
+    const osTabs = [...install.querySelectorAll('[role="tab"][data-os]')];
+    const panel = install.querySelector('[role="tabpanel"]');
+    const code = panel.querySelector("code");
+    const copy = panel.querySelector("[data-copy]");
+    const prompt = panel.querySelector("[data-install-prompt]");
+    const hint = install.querySelector("[data-install-hint]");
+
+    const selectOs = (os, focus = false) => {
+      const entry = commands[os];
+      osTabs.forEach((tab) => {
+        const selected = tab.dataset.os === os;
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+        if (selected) {
+          panel.setAttribute("aria-labelledby", tab.id);
+          if (focus) tab.focus();
+        }
+      });
+      // One span per word, so narrow screens wrap between words, never inside a URL.
+      code.replaceChildren(...entry.command.split(" ").flatMap((word, i) => {
+        const span = document.createElement("span");
+        span.textContent = word;
+        return i ? [" ", span] : [span];
+      }));
+      copy.setAttribute("data-copy", entry.command);
+      prompt.textContent = entry.prompt;
+      hint.textContent = entry.hint;
+    };
+
+    const detectOs = () => {
+      const platform = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+      const agent = navigator.userAgent.toLowerCase();
+      if (platform.startsWith("win") || agent.includes("windows")) return "windows";
+      if (platform.startsWith("mac") || /macintosh|mac os x/.test(agent)) return "macos";
+      return "linux";
+    };
+
+    osTabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => selectOs(tab.dataset.os));
+      tab.addEventListener("keydown", (event) => {
+        const moves = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: osTabs.length - 1 };
+        if (!(event.key in moves)) return;
+        event.preventDefault();
+        const target = osTabs[(moves[event.key] + osTabs.length) % osTabs.length];
+        selectOs(target.dataset.os, true);
+      });
+    });
+    selectOs(detectOs());
   }
 
   const tabs = [...document.querySelectorAll("[data-tour-tab]")];

@@ -1,4 +1,8 @@
 (() => {
+  // Theme mode: "auto" (follow the system), "light" or "dark".
+  // dewy-theme holds the site's mode; the docs books mirror it in mdbook-theme
+  // (auto removes the key, so mdBook follows the system too) unless the reader
+  // picked a non-Dewy book theme (dewy-theme-link = "off").
   const siteKey = "dewy-theme";
   const bookKey = "mdbook-theme";
   const linkKey = "dewy-theme-link";
@@ -11,24 +15,34 @@
   };
   const siteToBook = { light: "dewy-light", dark: "dewy-dark" };
 
-  let stored = localStorage.getItem(siteKey);
-  if (stored !== "light" && stored !== "dark" && localStorage.getItem(linkKey) !== "off") {
-    const fromBook = bookToSite[localStorage.getItem(bookKey)];
-    if (fromBook) {
-      stored = fromBook;
-      localStorage.setItem(siteKey, stored);
-      localStorage.setItem(bookKey, siteToBook[stored]);
+  let mode = "auto";
+  try {
+    mode = localStorage.getItem(siteKey);
+    if (mode !== "light" && mode !== "dark" && mode !== "auto") {
+      // No site choice yet: adopt an explicit Dewy book choice, else follow the system.
+      const fromBook = localStorage.getItem(linkKey) !== "off"
+        ? bookToSite[localStorage.getItem(bookKey)]
+        : undefined;
+      mode = fromBook || "auto";
+      if (fromBook) {
+        localStorage.setItem(siteKey, mode);
+        localStorage.setItem(bookKey, siteToBook[mode]);
+      }
     }
+  } catch {
+    mode = "auto";
   }
 
-  const theme = stored === "light" || stored === "dark"
-    ? stored
-    : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-  document.documentElement.dataset.theme = theme;
-  document.documentElement.style.colorScheme = theme;
+  const theme = mode === "auto"
+    ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : mode;
+  const root = document.documentElement;
+  root.dataset.theme = theme;
+  root.dataset.themeMode = mode;
+  root.style.colorScheme = theme;
   const themeColor = document.querySelector('meta[name="theme-color"]');
   if (themeColor) {
-    const udewy = document.documentElement.dataset.site === "udewy";
+    const udewy = root.dataset.site === "udewy";
     const colors = udewy
       ? { light: "#eef7fa", dark: "#0c1c22" }
       : { light: "#f3faf6", dark: "#0e241b" };

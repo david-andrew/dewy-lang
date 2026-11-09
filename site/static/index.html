@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dewy Programming Language</title>
-  <meta name="description" content="Dewy is a programming language for clear, expressive computation—from ordinary programs to engineering, science, and mathematics.">
+  <meta name="description" content="Dewy is a programming language for clear, expressive computation—from ordinary software applications to game development to science and engineering.">
   <meta name="theme-color" content="#f3faf6">
   <meta property="og:title" content="The Dewy Programming Language">
   <meta property="og:description" content="An everyday programming language for clear, expressive computation.">
@@ -24,6 +24,7 @@
   <script src="/assets/js/theme-init.js"></script>
   <link rel="stylesheet" href="/assets/css/site.css">
   <script src="/assets/js/site.js" defer></script>
+  <noscript><style>.os-tabs { display: none; }</style></noscript>
 </head>
 <body class="home-page">
   <a class="skip-link" href="#main">Skip to content</a>
@@ -33,7 +34,7 @@
       <a class="brand" href="/"><img src="/assets/images/dewy-logo-128.png" alt=""><span>Dewy</span></a>
       <div class="nav-end">
         <div class="nav-links" id="site-nav" data-nav><a href="/learn/">Learn</a><a href="/reference/">Reference</a><a href="/examples/">Examples</a><a href="/status/">Status</a><a class="nav-cta" href="/playground/">Try Dewy</a></div>
-        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark theme"></button>
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Change theme"></button>
         <button type="button" class="nav-toggle" data-nav-toggle aria-controls="site-nav" aria-expanded="false">Menu</button>
       </div>
     </nav>
@@ -49,14 +50,22 @@
         <span>Dewy</span>
       </div>
       <h1>An Everyday Language</h1>
-      <p class="lead">Dewy is a language for clear, expressive computation—useful for anything from ordinary programming to complex engineering, science, and mathematics, and everything in between.</p>
+      <p class="lead">Dewy is a language for clear, expressive computation—useful for anything from ordinary software applications to game development to science and engineering, and everything in between.</p>
 
-      <div class="dewline" aria-label="Install command">
-        <span class="prompt" aria-hidden="true">$</span>
-        <code id="install-cmd">curl -fsSL https://dewy-lang.org/install.sh | bash</code>
-        <button type="button" class="copy" data-copy="curl -fsSL https://dewy-lang.org/install.sh | bash">Copy</button>
+      <div class="install-picker" data-install>
+        <div class="os-tabs" role="tablist" aria-label="Your operating system">
+          <button type="button" role="tab" id="os-tab-linux" data-os="linux" aria-controls="install-panel" aria-selected="true">Linux</button>
+          <button type="button" role="tab" id="os-tab-macos" data-os="macos" aria-controls="install-panel" aria-selected="false" tabindex="-1">macOS</button>
+          <button type="button" role="tab" id="os-tab-windows" data-os="windows" aria-controls="install-panel" aria-selected="false" tabindex="-1">Windows</button>
+        </div>
+        <div class="dewline" id="install-panel" role="tabpanel" aria-labelledby="os-tab-linux">
+          <span class="prompt" aria-hidden="true" data-install-prompt>$</span>
+          <code id="install-cmd"><span>curl</span> <span>-fsSL</span> <span>https://dewy-lang.org/install.sh</span> <span>|</span> <span>bash</span></code>
+          <button type="button" class="copy" data-copy="curl -fsSL https://dewy-lang.org/install.sh | bash">Copy</button>
+        </div>
+        <p class="dewline-note"><span data-install-hint>Linux and macOS</span><a href="/install/">Install details</a><a href="/playground/">Try examples in your browser</a></p>
+        <noscript><p class="dewline-note">Windows (PowerShell): <code>irm https://dewy-lang.org/install.ps1 | iex</code></p></noscript>
       </div>
-      <p class="dewline-note">Linux and macOS. Windows: <code>irm https://dewy-lang.org/install.ps1 | iex</code> · <a href="/install/">Install details</a> · <a href="/playground/">Try examples in your browser</a></p>
 
       <div class="hero-code" aria-label="Dewy source example">
         <div class="code-top"><span>example.dewy</span><a class="runs" href="/status/#website-examples">tested ✓</a></div>

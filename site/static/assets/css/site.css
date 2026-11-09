@@ -147,6 +147,7 @@ a:focus-visible, button:focus-visible, .skip-link:focus { outline: 3px solid var
 }
 .nav-links .nav-cta:hover { background: var(--cta-hover); color: var(--on-cta); }
 .theme-toggle {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -162,6 +163,19 @@ a:focus-visible, button:focus-visible, .skip-link:focus { outline: 3px solid var
 }
 .theme-toggle::after { content: "☀"; }
 [data-theme="dark"] .theme-toggle::after { content: "☾"; }
+[data-theme-mode="auto"] .theme-toggle::before {
+  content: "A";
+  position: absolute;
+  right: .02rem;
+  bottom: .2rem;
+  padding: .06rem .12rem;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--green-deep);
+  font: 850 .64rem/1 var(--sans);
+  letter-spacing: 0;
+  text-align: center;
+}
 .theme-toggle:hover { color: var(--green-deep); }
 .nav-toggle {
   display: none;
@@ -218,12 +232,37 @@ a:focus-visible, button:focus-visible, .skip-link:focus { outline: 3px solid var
   line-height: 1.1;
 }
 .lead { max-width: 42rem; margin: 1.5rem auto 0; color: var(--muted); font-size: clamp(1.02rem, 2vw, 1.18rem); }
+.install-picker { max-width: 42rem; margin: 2.4rem auto 0; text-align: center; }
+.os-tabs {
+  display: inline-flex;
+  gap: .2rem;
+  margin: 0 auto .8rem;
+  padding: .22rem;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: var(--aqua-soft);
+}
+.os-tabs [role="tab"] {
+  padding: .38rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: 700 .84rem/1.2 var(--sans);
+  transition: background .15s ease, color .15s ease;
+}
+.os-tabs [role="tab"]:hover { color: var(--ink); }
+.os-tabs [role="tab"][aria-selected="true"] {
+  background: var(--card);
+  color: var(--green-deep);
+  box-shadow: 0 1px 4px var(--shadow);
+}
 .dewline {
   display: flex;
   align-items: center;
   gap: .8rem;
-  max-width: 42rem;
-  margin: 2.4rem auto 0;
+  margin: 0;
   padding: .78rem .8rem .78rem 1.15rem;
   border: 1px solid var(--edge);
   border-radius: 999px;
@@ -269,7 +308,19 @@ a:focus-visible, button:focus-visible, .skip-link:focus { outline: 3px solid var
 .copy:hover, .copy-button:hover, .copy.copied, .copy-button.copied { background: var(--cta-hover); color: var(--on-cta); }
 .copy.copied, .copy-button.copied { transform: scale(1.03); }
 .copy.copy-failed, .copy-button.copy-failed { background: var(--danger); }
-.dewline-note { margin: .9rem auto 0; color: var(--muted); font-size: .87rem; }
+.dewline-note {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .3rem .55rem;
+  margin: .95rem auto 0;
+  color: var(--muted);
+  font-size: .87rem;
+  line-height: 1.5;
+}
+.dewline-note > * + *::before { content: "·"; display: inline-block; margin-right: .55rem; color: var(--muted); }
+.dewline-note code { font-size: .8rem; }
+[data-theme="dark"] .os-tabs [role="tab"][aria-selected="true"] { background: var(--card); color: var(--green); }
 [data-theme="dark"] .dewline { border-color: var(--green); }
 .hero-code {
   max-width: 32rem;
@@ -728,8 +779,20 @@ html[data-site="udewy"][data-theme="dark"] {
   .home-hero, .showcase-intro { width: calc(100% - 1.5rem); }
   .hero-brand { transform: translateX(-.25rem); }
   .drop-b, .drop-c { display: none; }
-  .dewline { flex-wrap: wrap; padding: .9rem 1.05rem; border-radius: 18px; }
-  .dewline code { flex-basis: 100%; order: 3; }
+  .dewline {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: .75rem .6rem;
+    padding: .85rem;
+    border-radius: 18px;
+  }
+  .dewline .prompt { padding-left: .2rem; }
+  .dewline code { white-space: normal; }
+  .dewline code span { white-space: nowrap; }
+  .dewline .copy { grid-column: 1 / -1; padding-block: .6rem; }
+  .os-tabs [role="tab"] { padding-inline: .9rem; }
+  .dewline-note [data-install-hint] { flex-basis: 100%; }
+  .dewline-note a:first-of-type::before { display: none; }
   .prose-pane { padding-inline: 1.25rem; }
   .code-pane pre { padding-inline: .85rem; }
   .pane-top { padding-inline: .85rem; }

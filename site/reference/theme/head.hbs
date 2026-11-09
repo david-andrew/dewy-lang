@@ -1,5 +1,8 @@
 <script>
 (() => {
+  // Mirror the site's theme mode (dewy-theme: auto, light or dark) into mdBook's
+  // key before mdBook paints. Auto removes mdbook-theme so mdBook follows the
+  // system with its default light/dark themes (dewy-light/dewy-dark).
   const linkKey = "dewy-theme-link";
   const siteKey = "dewy-theme";
   const bookKey = "mdbook-theme";
@@ -19,6 +22,10 @@
     const site = localStorage.getItem(siteKey);
     if (site === "light" || site === "dark") {
       localStorage.setItem(bookKey, toBook[site]);
+    } else if (site === "auto") {
+      localStorage.removeItem(bookKey);
+    } else if (book === "dewy-light" || book === "dewy-dark") {
+      localStorage.setItem(siteKey, book === "dewy-dark" ? "dark" : "light");
     }
   } catch {
     // ignore
