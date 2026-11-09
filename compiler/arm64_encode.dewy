@@ -356,8 +356,8 @@ ACtl:type=[
 ]
 let actl:array<ACtl>=[]
 
-# Return before mutation on an out-of-range conditional branch. The host owns
-# the existing fatal diagnostic; unconditional branches retain masked offsets.
+# Return before mutation on an out-of-range conditional branch: the host then emits
+# the function again with a_far. Unconditional branches retain masked offsets.
 a_try_patch=(f:[int64 int64] target:ArmWord):>bool=>$unsafe {
     let d:ArmWord=(target - ArmWord(f[0])) // 4
     let x:ArmWord=rd32(ArmWord(f[0]))
@@ -368,6 +368,50 @@ a_try_patch=(f:[int64 int64] target:ArmWord):>bool=>$unsafe {
     }
     wr32(ArmWord(f[0]) x)
     true
+}
+
+# A function over 1 MB is out of a conditional branch's reach (B.cond, CBZ and CBNZ: ±1 MB): a
+# branch found out of range sets a_far_needed, and the host emits that function again with a_far,
+# each conditional branch to a label then the opposite condition over a B (±128 MB).
+let a_far = false
+let a_far_needed = false
+a_far_begin=(far:bool):>void=>{
+    a_far=far
+    a_far_needed=false
+    a_lits=[]
+}
+a_far_note=():>void=>{a_far_needed=true}
+a_far_missed=():>bool=>a_far_needed
+
+# the opposite of a conditional branch: B.cond's condition, or CBZ for CBNZ and back
+a_cond_invert=(w:ArmWord):>ArmWord=>{
+    if (w & 0xFF000010) =? 0x54000000 {return w xor 1}
+    w xor 0x01000000
+}
+
+# a conditional branch (its offset 0) to a later label: its fixup
+a_cond_branch=(w:ArmWord):>[int64 int64]=>$unsafe {
+    if a_far {
+        w32(a_cond_invert(w) | (2 << 5))
+        let at=a_code[0].length
+        w32(0x14000000)
+        return [at 0]
+    }
+    let at=a_code[0].length
+    w32(w)
+    [at 1]
+}
+
+# a conditional branch (its offset 0) back to an earlier position
+a_cond_back=(w:ArmWord target:ArmWord):>void=>$unsafe {
+    let d:ArmWord=(target - ArmWord(a_code[0].length)) // 4
+    if a_far {
+        w32(a_cond_invert(w) | (2 << 5))
+        w32(0x14000000 | ((d - 1) & 0x3FFFFFF))
+        return
+    }
+    if d <? -0x40000 {a_far_needed=true}
+    w32(w | ((d & 0x7FFFF) << 5))
 }
 
 a_branch=(depth:ArmWord):>void=>$unsafe {
@@ -383,21 +427,17 @@ a_branch=(depth:ArmWord):>void=>$unsafe {
 a_branch_nz=(r:ArmWord depth:ArmWord):>void=>$unsafe {
     let c:ArmWord=ArmWord(actl.length) - 1 - depth
     if actl[c].kind =? 1 {
-        let d:ArmWord=(ArmWord(actl[c].start) - ArmWord(a_code[0].length)) // 4
-        w32(0xB5000000 | ((d & 0x7FFFF) << 5) | r)
+        a_cond_back(0xB5000000 | r  ArmWord(actl[c].start))
     } else {
-        actl[c].fixups.push([a_code[0].length 1])
-        w32(0xB5000000 | r)
+        actl[c].fixups.push(a_cond_branch(0xB5000000 | r))
     }
 }
 
 a_branch_cc=(cc:ArmWord depth:ArmWord):>void=>$unsafe {
     let c:ArmWord=ArmWord(actl.length) - 1 - depth
     if actl[c].kind =? 1 {
-        let d:ArmWord=(ArmWord(actl[c].start) - ArmWord(a_code[0].length)) // 4
-        w32(0x54000000 | ((d & 0x7FFFF) << 5) | cc)
+        a_cond_back(0x54000000 | cc  ArmWord(actl[c].start))
     } else {
-        actl[c].fixups.push([a_code[0].length 1])
-        w32(0x54000000 | cc)
+        actl[c].fixups.push(a_cond_branch(0x54000000 | cc))
     }
 }

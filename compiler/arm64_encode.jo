@@ -269,6 +269,44 @@ a_try_patch = (f: (int, int), target: int) -> bool:
     wr32(f.0, x)
     true
 
+# A function over 1 MB is out of a conditional branch's reach (B.cond, CBZ and CBNZ: ±1 MB): a
+# branch found out of range sets a_far_needed, and the host emits that function again with a_far,
+# each conditional branch to a label then the opposite condition over a B (±128 MB).
+a_far = false
+a_far_needed = false
+a_far_begin = (far: bool):
+    a_far = far
+    a_far_needed = false
+    a_lits = []
+a_far_note = (): a_far_needed = true
+a_far_missed = () -> bool: a_far_needed
+
+# the opposite of a conditional branch: B.cond's condition, or CBZ for CBNZ and back
+a_cond_invert = (w: int) -> int:
+    if (w & 0xFF000010) == 0x54000000: return w xor 1
+    w xor 0x01000000
+
+# a conditional branch (its offset 0) to a later label: its fixup
+a_cond_branch = (w: int) -> (int, int):
+    if a_far:
+        w32(a_cond_invert(w) | (2 << 5))
+        at = a_code[0].len()
+        w32(0x14000000)
+        return (at, 0)
+    at = a_code[0].len()
+    w32(w)
+    (at, 1)
+
+# a conditional branch (its offset 0) back to an earlier position
+a_cond_back = (w: int, target: int):
+    d = (target - a_code[0].len()) / 4
+    if a_far:
+        w32(a_cond_invert(w) | (2 << 5))
+        w32(0x14000000 | ((d - 1) & 0x3FFFFFF))
+        return
+    if d < -0x40000: a_far_needed = true
+    w32(w | ((d & 0x7FFFF) << 5))
+
 # B to the label of the enclosing construct at depth
 a_branch = (depth: int):
     c = actl.len() - 1 - depth
@@ -281,20 +319,12 @@ a_branch = (depth: int):
 # CBNZ r to the label at depth
 a_branch_nz = (r: int, depth: int):
     c = actl.len() - 1 - depth
-    if actl[c].kind == 1:
-        d = (actl[c].start - a_code[0].len()) / 4
-        w32(0xB5000000 | ((d & 0x7FFFF) << 5) | r)
-    else:
-        actl[c].fixups.push((a_code[0].len(), 1))
-        w32(0xB5000000 | r)
+    if actl[c].kind == 1: a_cond_back(0xB5000000 | r, actl[c].start)
+    else: actl[c].fixups.push(a_cond_branch(0xB5000000 | r))
 
 # B.cond to the label at depth
 a_branch_cc = (cc: int, depth: int):
     c = actl.len() - 1 - depth
-    if actl[c].kind == 1:
-        d = (actl[c].start - a_code[0].len()) / 4
-        w32(0x54000000 | ((d & 0x7FFFF) << 5) | cc)
-    else:
-        actl[c].fixups.push((a_code[0].len(), 1))
-        w32(0x54000000 | cc)
+    if actl[c].kind == 1: a_cond_back(0x54000000 | cc, actl[c].start)
+    else: actl[c].fixups.push(a_cond_branch(0x54000000 | cc))
 

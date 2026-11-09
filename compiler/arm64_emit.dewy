@@ -7,7 +7,7 @@ from p"arm64_encode.dewy" import (ArmWord)
 from p"ir_types.dewy" import (Op Ins IrFn)
 from p"backend_analysis.dewy" import (LOC_SPILL LOC_CONST LOC_SLOT LOC_NONE LOC_GLOBAL LOC_FCONST vgkind vgoff vloc vcval vslot vsoff backend_debug_vregs v_live backend_analyze)
 from p"arm64_allocate.dewy" import (a_scratch A_V a_saved a_save_off a_allocate a_layout)
-from p"arm64_encode.dewy" import (a_code A_SP A_ZR A_FP AC_EQ AC_NE AC_HS AC_LO AC_MI AC_HI AC_LS AC_GE AC_LT AC_GT AC_LE w32 rd32 wr32 a_movz a_mov_imm a_mov a_add_imm a_sub_imm a_rrr A_ADD A_SUB A_AND A_ORR A_EOR A_SDIV A_UDIV A_LSLV A_LSRV A_ASRV a_mul a_msub a_cmp a_cmp_imm a_cset a_add_lsl a_ubfm a_sbfm a_bl a_blr a_br a_ret a_svc a_mem a_ldr a_str fty a_fop a_fun AF_ADD AF_SUB AF_MUL AF_DIV AF_SQRT AF_NEG AF_ABS AF_MOV AF_FLOOR AF_CEIL AF_TRUNC a_fcmp a_fcsel a_fmov_from a_fmov_to a_mem_idx a_logimm a_fimm8 a_lits ACtl actl a_try_patch a_branch a_branch_nz a_branch_cc)
+from p"arm64_encode.dewy" import (a_code A_SP A_ZR A_FP AC_EQ AC_NE AC_HS AC_LO AC_MI AC_HI AC_LS AC_GE AC_LT AC_GT AC_LE w32 rd32 wr32 a_movz a_mov_imm a_mov a_add_imm a_sub_imm a_rrr A_ADD A_SUB A_AND A_ORR A_EOR A_SDIV A_UDIV A_LSLV A_LSRV A_ASRV a_mul a_msub a_cmp a_cmp_imm a_cset a_add_lsl a_ubfm a_sbfm a_bl a_blr a_br a_ret a_svc a_mem a_ldr a_str fty a_fop a_fun AF_ADD AF_SUB AF_MUL AF_DIV AF_SQRT AF_NEG AF_ABS AF_MOV AF_FLOOR AF_CEIL AF_TRUNC a_fcmp a_fcsel a_fmov_from a_fmov_to a_mem_idx a_logimm a_fimm8 a_lits ACtl actl a_try_patch a_branch a_branch_nz a_branch_cc a_far_note a_cond_branch)
 const VI = 0
 const VF = 1
 const VS = 2
@@ -355,11 +355,18 @@ a_result=(ins:Ins):>void=>$unsafe {
         a_sts(d  0  a_vtype(d))
     }
 }
+# (a conditional branch out of reach: the host emits the function again, every one far)
 a_patch=(f:[int64 int64] target:ArmWord):>void=>$unsafe {
-    if not a_try_patch(f  target) {
-        a_emit_failed=true
-        a_emit_error = "arm64: a conditional branch is too far (a function over 1 MB)"
-    }
+    if not a_try_patch(f  target) {a_far_note()}
+}
+
+# the fixups this module keeps across functions: their counts before one, to undo its emission
+a_fix_marks=():>array<int64>=>[a_call_fix.length a_stub_fix.length a_faddr_fix.length a_data_fix.length]
+a_fix_rollback=(marks:array<int64>):>void=>$unsafe {
+    a_call_fix.truncate(marks[0]);
+    a_stub_fix.truncate(marks[1]);
+    a_faddr_fix.truncate(marks[2]);
+    a_data_fix.truncate(marks[3]);
 }
 a_patch_here=(f:[int64 int64]):>void=>$unsafe {
     a_patch(f  ArmWord(a_code[0].length))
@@ -750,8 +757,7 @@ arm64_ins=(pos:ArmWord ins:Ins):>void=>$unsafe {
                 let base:ArmWord=if op =? 'checked_add' {0xAB000000} else {0xEB000000}
                 w32(base | (rm << 16) | (rn << 5) | rd)
             }
-            a_int_fail.push(ArmWord(a_code[0].length))
-            w32(0x54000000 | cc)
+            a_int_fail.push(a_cond_branch(0x54000000 | cc)[0])
             a_int_fail_fn = ArmWord(ArmWord(ins.imm))
             a_st(d  rd)
         }
@@ -1182,14 +1188,12 @@ arm64_ins=(pos:ArmWord ins:Ins):>void=>$unsafe {
         <'if_'> => {
             let fx:array<[int64 int64]>=[]
             if a =? a_pend {
-                fx.push([ArmWord(a_code[0].length)  1])
-                w32(0x54000000 | (a_pend_cc xor 1))
+                fx.push(a_cond_branch(0x54000000 | (a_pend_cc xor 1)))
                 a_pend = -1
             }
             else {
                 let r=a_src(a  9)
-                fx.push([ArmWord(a_code[0].length)  1])
-                w32(0xB4000000 | r)
+                fx.push(a_cond_branch(0xB4000000 | r))
             }
             actl.push(ACtl(2  ArmWord(a_code[0].length)  []  fx))
         }
@@ -1377,7 +1381,10 @@ arm64_emit=(input:ptr<IrFn> @layouts:array<int64> @positions:array<int64> fused:
     }
     if a_int_fail.length >? 0 {
         loop fix in a_int_fail {
-            wr32(fix  rd32(fix) | (((ArmWord(a_code[0].length) - fix) // 4) << 5))
+            let d:ArmWord=(ArmWord(a_code[0].length) - fix) // 4
+            if (rd32(fix) & 0xFC000000) =? 0x14000000 {wr32(fix  rd32(fix) | (d & 0x3FFFFFF))}
+            else if d >=? 0x40000 {a_far_note()}
+            else {wr32(fix  rd32(fix) | (d << 5))}
         }
         a_call_fix.push([ArmWord(a_code[0].length)  a_int_fail_fn])
         a_bl()

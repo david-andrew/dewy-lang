@@ -241,8 +241,17 @@ a_result = (ins: Ins):
 
 # ---------------- control flow ----------------
 # The encoder owns control records and bytes; fatal diagnostics stay with the host.
+# (a conditional branch out of reach: the host emits the function again, every one far)
 a_patch = (f: (int, int), target: int):
-    if not a_try_patch(f, target): a_emit_error = "arm64: a conditional branch is too far (a function over 1 MB)"
+    if not a_try_patch(f, target): a_far_note()
+
+# the fixups this module keeps across functions: their counts before one, to undo its emission
+a_fix_marks = () -> int[]: [a_call_fix.len(), a_stub_fix.len(), a_faddr_fix.len(), a_data_fix.len()]
+a_fix_rollback = (marks: int[]):
+    a_call_fix.truncate(marks[0])
+    a_stub_fix.truncate(marks[1])
+    a_faddr_fix.truncate(marks[2])
+    a_data_fix.truncate(marks[3])
 
 a_patch_here = (f: (int, int)): a_patch(f, a_code[0].len())
 
@@ -544,8 +553,7 @@ arm64_ins = (pos: int, ins: Ins):
                 rm = a_src(bb, 10)
                 base = if op == .checked_add: 0xAB000000 else: 0xEB000000
                 w32(base | (rm << 16) | (rn << 5) | rd)
-            a_int_fail.push(a_code[0].len())
-            w32(0x54000000 | cc)
+            a_int_fail.push(a_cond_branch(0x54000000 | cc).0)
             a_int_fail_fn = int(ins.imm)
             a_st(d, rd)
         add, sub:
@@ -799,13 +807,11 @@ arm64_ins = (pos: int, ins: Ins):
         if_:
             fx: (int, int)[]
             if a == a_pend:
-                fx.push((a_code[0].len(), 1))
-                w32(0x54000000 | (a_pend_cc xor 1))                     # b.(not cc) else
+                fx.push(a_cond_branch(0x54000000 | (a_pend_cc xor 1)))  # b.(not cc) else
                 a_pend = -1
             else:
                 r = a_src(a, 9)
-                fx.push((a_code[0].len(), 1))
-                w32(0xB4000000 | r)                                     # cbz r, else
+                fx.push(a_cond_branch(0xB4000000 | r))                  # cbz r, else
             actl.push(ACtl(2, a_code[0].len(), [], fx))
         else_:
             c = actl.len() - 1
@@ -929,7 +935,11 @@ arm64_emit = (input: *IrFn, layouts: mut int[], positions: mut int[], fused: boo
         arm64_ins(pos, ins)
         if a_emit_error != "": return body_start
     if a_int_fail.len() > 0:
-        loop fix in a_int_fail: wr32(fix, rd32(fix) | (((a_code[0].len() - fix) / 4) << 5))
+        loop fix in a_int_fail:
+            d = (a_code[0].len() - fix) / 4
+            if rd32(fix) & 0xFC000000 == 0x14000000: wr32(fix, rd32(fix) | (d & 0x3FFFFFF))
+            else if d >= 0x40000: a_far_note()
+            else: wr32(fix, rd32(fix) | (d << 5))
         a_call_fix.push((a_code[0].len(), a_int_fail_fn))
         a_bl()
         w32(0xD4200000)

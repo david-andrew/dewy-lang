@@ -70,3 +70,30 @@ def test_worker_stack_overflow_is_reported(compiler, tmp_path, target):
         status, out, err = run(target, binary, '1000000')
         assert status == 101, (status, err[-2000:])
         assert err.count('panic: stack overflow') == 1, err[-2000:]
+
+
+def far_branch_program():
+    """One function over 1 MB of arm64 code: an if/else, a loop with `continue` and `break`
+    and an overflow check all branch across more than a conditional branch reaches."""
+    body = lambda line: [line.format(k=k, m=k % 89 + 2) for k in range(16000)]
+    return '\n'.join([
+        '$runtime_checks',
+        'big = (n:int64 mode:int64):>int64 => {',
+        '    let i:int64 = 0', '    let t:int64 = 0', '    let u:int64 = 1',
+        '    loop i <? n {', '        i += 1', '        if i % 3 =? 0 { continue }',
+        '        if mode =? 2 and i =? 2 { break }', '        if i % 2 =? 0 {',
+        *body('            u = (u * {m} + {k}) % 1000003'), '        } else {',
+        *body('            u = (u + {k} * t) % 999983'), '        }',
+        '        t = (t + u) % 1000000007', '    }',
+        '    if mode =? 1 {', '        let top:int64 = int64.max - 10 + t % 2', '        return top + 20', '    }',
+        '    return t + i', '}',
+        'main = (argv:array<string>):>void => {', '    let m = to_int(argv[1]) ?? 0',
+        '    if 0 <=? m and m <=? 5 { printl"{big(7 0)} {big(5 2)} {big(3 m)}" }', '}', ''])
+
+
+@pytest.mark.parametrize('flags', [(), ('--release',)])
+def test_arm64_branches_reach_across_large_functions(compiler, tmp_path, flags):
+    binary = build(compiler, tmp_path, far_branch_program(), 'aarch64-linux', *flags)
+    assert run('aarch64-linux', binary, '0')[:2] == (0, '1886348 3 683785\n')
+    status, out, err = run('aarch64-linux', binary, '1')
+    assert (status, 'integer overflow' in err) == (101, True), (status, out, err)
