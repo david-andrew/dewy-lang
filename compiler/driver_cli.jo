@@ -495,3 +495,14 @@ web_save_name_check = ():
                     if files[int(m.file)].is_dewy: hint = "choose a distinct .dewy source filename before publishing, and keep it the same for native and web builds"
             warn(at, "this web page saves under the name '{program_name}' (its file's): pages on one site, as itch.io's, share their storage, so {hint}")
             return
+
+dump_host_ir = ():
+    print("FN {ir.fn_index} {ir.nparams} {ir.ret} {ir.noinline}")
+    print("NAME {ir.name}")
+    dump_host_values("VT", ir.vtypes)
+    dump_host_values("KV", ir.kval)
+    dump_host_values("SS", ir.slot_size)
+    dump_host_values("SA", ir.slot_align)
+    dump_host_values("ARGS", ir.args)
+    loop x in ir.code: print("I {x.op} {x.ty} {x.dst} {x.a} {x.b} {x.c} {x.imm}")
+    print("END")

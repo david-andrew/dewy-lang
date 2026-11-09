@@ -14,6 +14,7 @@ from p"host_target.dewy" import (host_target_name)
 from p"ide.jo" import (ide_texts)
 from p"ide_decls.dewy" import (read_source)
 from p"json_doc.dewy" import (JsonDoc json_get json_parse json_quote json_str)
+from p"ir.jo" import (ir)
 from p"lower.jo" import (opt_release)
 from p"main.jo" import (build_output compile)
 from p"manifest.dewy" import (pkg_block_at pkg_scan_at)
@@ -498,4 +499,29 @@ web_save_name_check=():>void=>$unsafe {
             return
         }
     }
+}
+# (--host-ir: the function just lowered, for the build tool; arrays as `[a, b]`)
+dump_host_ir=():>void=>{
+    printl("FN {ir.fn_index} {ir.nparams} {ir.ret} {ir.noinline}")
+    printl("NAME {ir.name}")
+    let vt:array<int64>=[]
+    loop v in ir.vtypes {vt.push(int64(v))}
+    host_words("VT" vt)
+    host_words("KV" ir.kval)
+    let ss:array<int64>=[]
+    loop v in ir.slot_size {ss.push(int64(v))}
+    host_words("SS" ss)
+    let sa:array<int64>=[]
+    loop v in ir.slot_align {sa.push(int64(v))}
+    host_words("SA" sa)
+    let args:array<int64>=[]
+    loop v in ir.args {args.push(int64(v))}
+    host_words("ARGS" args)
+    loop x in ir.code {printl("I {x.op} {x.ty} {x.dst} {x.a} {x.b} {x.c} {x.imm}")}
+    printl("END")
+}
+host_words=(name:string values:array<int64>):>void=>{
+    let parts:array<string>=[]
+    loop v in values {parts.push("{v}")}
+    printl("{name} [{join(parts ", ")}]")
 }

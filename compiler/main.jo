@@ -165,16 +165,6 @@ dump_host_values = (name: str, values):
     loop x in values: wide.push(int(x))
     print("{name} {wide}")
 
-dump_host_ir = ():
-    print("FN {ir.fn_index} {ir.nparams} {ir.ret} {ir.noinline}")
-    print("NAME {ir.name}")
-    dump_host_values("VT", ir.vtypes)
-    dump_host_values("KV", ir.kval)
-    dump_host_values("SS", ir.slot_size)
-    dump_host_values("SA", ir.slot_align)
-    dump_host_values("ARGS", ir.args)
-    loop x in ir.code: print("I {x.op} {x.ty} {x.dst} {x.a} {x.b} {x.c} {x.imm}")
-    print("END")
 
 
 compile = (path: str, out0: str) -> str:
