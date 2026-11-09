@@ -3898,7 +3898,9 @@ main = ():>void => {
 The methods follow Python's `pathlib`. The lexical ones read only the text:
 `name`, `stem`, `suffix` (with its dot; `.bashrc` has none), `parent`, `parts` (a
 leading `/` is the root part), `is_absolute`, `with_name(name)`,
-`with_stem(stem)` and `with_suffix(suffix)`. The file-system ones give every
+`with_stem(stem)` and `with_suffix(suffix)`. On Windows `\` separates parts too, and
+a drive's root (`C:\`) or a share's (`\\server\share\`) is the root part; the
+methods write the paths they make with `/`. The file-system ones give every
 outcome as a value:
 
 - `exists`, `is_file` and `is_dir` give a `bool`;

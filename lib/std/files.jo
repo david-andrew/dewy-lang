@@ -20,24 +20,52 @@ __fmt = (buf: mut u8[], path: Path): __buf_append_str(buf, path.path)
 # ---------------- lexical: the text alone ----------------
 
 # The components: a leading / is the root part; empty and `.` components are left out, so
-# "a//b/" and "a/./b" have the parts of "a/b".
+# "a//b/" and "a/./b" have the parts of "a/b". On Windows `\` separates too, and a drive's root
+# (`C:\`) and a share's (`\\server\share\`) are root parts, written with `/`.
 __fsys_parts = (text: str) -> str[]:
     out: str[]
-    if len(text) > 0 and text[0] == '/': out.push("/")
+    n = len(text)
     start = 0
-    loop i in [0..len(text) + 1):
-        if i == len(text) or text[i] == '/':
+    when TARGET == "windows":
+        if n >= 2 and __fsys_sep(text[0]) and __fsys_sep(text[1]):
+            i1 = 2
+            loop i1 < n and not __fsys_sep(text[i1]): i1 += 1
+            i2 = i1 + 1
+            loop i2 < n and not __fsys_sep(text[i2]): i2 += 1
+            if i1 >= n:
+                out.push("//" + text[2..n) + "/")
+                return out
+            out.push("//" + text[2..i1) + "/" + text[i1 + 1..min(i2, n)) + "/")
+            start = i2 + 1
+        else if n >= 3 and text[1] == ':' and __fsys_sep(text[2]):
+            out.push(text[0..2) + "/")
+            start = 3
+        else if n > 0 and __fsys_sep(text[0]): out.push("/")
+    else:
+        if n > 0 and text[0] == '/': out.push("/")
+    loop i in [start..n + 1):
+        if i == n or __fsys_sep(text[i]):
             if i > start:
                 part = text[start..i)
                 if part != ".": out.push(part)
             start = i + 1
     out
 
+# (a separator: `/`, and `\` on Windows)
+__fsys_sep = (c: u8) -> bool:
+    when TARGET == "windows":
+        return c == '/' or int(c) == 92
+    else:
+        return c == '/'
+
+# (a root part: "/", or on Windows a drive's or a share's, all ending in `/`)
+__fsys_root = (part: str) -> bool: len(part) > 0 and part[len(part) - 1] == '/'
+
 # (the text of the first `count` parts: "." for none)
 __fsys_text = (ps: str[], count: int) -> str:
     out = ""
     loop i in [0..count):
-        if i > 0 and ps[i - 1] != "/": out = out + "/"
+        if i > 0 and not __fsys_root(ps[i - 1]): out = out + "/"
         out = out + ps[i]
     if len(out) == 0: return "."
     out
@@ -45,7 +73,7 @@ __fsys_text = (ps: str[], count: int) -> str:
 # (the last part, unless it is the root: "" then)
 __fsys_name = (text: str) -> str:
     ps = __fsys_parts(text)
-    if ps.len() == 0 or ps[ps.len() - 1] == "/": return ""
+    if ps.len() == 0 or __fsys_root(ps[ps.len() - 1]): return ""
     ps[ps.len() - 1]
 
 # (where a name's suffix starts: its last dot, unless that is its first character, as in
@@ -78,19 +106,21 @@ stem = (path: Path) -> str:
 parent = (path: Path) -> Path:
     ps = __fsys_parts(path.path)
     if ps.len() == 0: return Path(path = ".")
-    if ps.len() == 1 and ps[0] == "/": return Path(path = "/")
+    if ps.len() == 1 and __fsys_root(ps[0]): return Path(path = ps[0])
     Path(path = __fsys_text(ps, ps.len() - 1))
 
-is_absolute = (path: Path) -> bool: len(path.path) > 0 and path.path[0] == '/'
+is_absolute = (path: Path) -> bool:
+    ps = __fsys_parts(path.path)
+    ps.len() > 0 and __fsys_root(ps[0])
 
 # The path with its last part replaced (or given one, when it has none).
 with_name = (path: Path, new_name: str) -> Path:
     ps = __fsys_parts(path.path)
     keep = ps.len()
-    if keep > 0 and ps[keep - 1] != "/": keep -= 1
+    if keep > 0 and not __fsys_root(ps[keep - 1]): keep -= 1
     if keep == 0: return Path(path = new_name)
     head = __fsys_text(ps, keep)
-    if head == "/": return Path(path = "/" + new_name)
+    if __fsys_root(head): return Path(path = head + new_name)
     Path(path = head + "/" + new_name)
 
 with_stem = (path: Path, new_stem: str) -> Path: with_name(path, new_stem + suffix(path))
@@ -112,7 +142,7 @@ struct PathEscape:
 
 # (a part that leaves the base it follows: `..`, a root, and on Windows a drive or a `\`)
 __fsys_escaping_part = (part: str) -> bool:
-    if part == ".." or part == "/": return true
+    if part == ".." or __fsys_root(part): return true
     when TARGET == "windows":
         return find_byte(part, ':') >= 0
     else:

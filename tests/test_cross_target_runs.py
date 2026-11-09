@@ -122,3 +122,24 @@ def test_arm64_branches_reach_across_large_functions(compiler, tmp_path, flags):
     assert run('aarch64-linux', binary, '0')[:2] == (0, '1886348 3 683785\n')
     status, out, err = run('aarch64-linux', binary, '1')
     assert (status, 'integer overflow' in err) == (101, True), (status, out, err)
+
+
+# Windows reads `\` as a separator and `C:\` or `\\server\share\` as a root, as pathlib does.
+WINDOWS_PATHS = r"""main = ():>void => {
+    loop text in ["C:\\Users\\ann\\notes.txt" "\\\\srv\\share\\d\\f.txt" "dir\\sub\\x.tar.gz" "C:\\" "a/b\\c"] {
+        let q = p(text)
+        printl"{q.name} {q.parent} {q.parts} {q.is_absolute} {q.with_suffix(".md")}"
+    }
+}
+"""
+
+
+def test_windows_paths_split_at_backslashes(compiler, tmp_path):
+    binary = build(compiler, tmp_path, WINDOWS_PATHS, 'x86_64-windows')
+    status, out, err = run('x86_64-windows', binary)
+    assert (status, out.splitlines()) == (0, [
+        'notes.txt C:/Users/ann ["C:/" "Users" "ann" "notes.txt"] true C:/Users/ann/notes.md',
+        'f.txt //srv/share/d ["//srv/share/" "d" "f.txt"] true //srv/share/d/f.md',
+        'x.tar.gz dir/sub ["dir" "sub" "x.tar.gz"] false dir/sub/x.tar.md',
+        ' C:/ ["C:/"] true C:/.md',
+        'c a/b ["a" "b" "c"] false a/b/c.md']), err
