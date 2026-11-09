@@ -1,0 +1,13 @@
+# Every wrapping integer array uploads, keeping its low 32 bits as the GPU's words.
+main=()=>{
+let a:array<uint32<overflow='wrap'>>=[0 1 4294967295]
+let b:array<int64<overflow='wrap'>>=[-1 4294967298]
+let c:array<uint8<overflow='wrap'>>=[255 7]
+let d:array<int16<overflow='wrap'>>=[-300 300]
+let e:array<uint64<overflow='wrap'>>=[18446744073709551615 2]
+let f:array<int8<overflow='wrap'>>=[-128 127]
+let g:array<uint16<overflow='wrap'>>=[65535 1]
+printl(cpu(gpu(a)).data) printl(cpu(gpu(b)).data) printl(cpu(gpu(c)).data) printl(cpu(gpu(d)).data)
+printl(cpu(gpu(e)).data) printl(cpu(gpu(f)).data) printl(cpu(gpu(g)).data)
+printl(cpu(gpu(reshape(a [3 1]))).length)
+}

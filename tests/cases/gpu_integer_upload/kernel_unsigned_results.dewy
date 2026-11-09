@@ -1,0 +1,17 @@
+# A GPU function on unsigned wrapping words (a PCG hash), and one giving uint8.
+U:type=uint32<overflow='wrap'>
+pcg=(v:U):>U=>{
+    let state=v*747796405+2891336453
+    let word=((state >> ((state >> 28)+4)) xor state)*277803737
+    return (word >> 22) xor word
+}
+level=(x:float32):>uint8=>if 0.0 <=? x and x <=? 1.0 {uint8(x*255.0)} else if x >? 1.0 {255} else {0}
+main=()=>{
+    let xs:array<U>=[loop i in [0..512) U(i*2654435761)]
+    let out=cpu(pcg.(gpu(xs))).data
+    let ref=pcg.(xs)
+    let bad=0
+    loop i in [0..ref.length) { if U(out.get(i) ?? 0) not=? ref[i] { bad += 1 } }
+    printl(bad)
+    printl(cpu(level.(gpu([float32(-1.0) 0.5 2.0]))).data)
+}

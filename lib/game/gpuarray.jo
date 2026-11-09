@@ -1,5 +1,20 @@
 @overflow("wrap")
 type __GpuInt = i32
+# (the other wrapping integers: uploads keep their low 32 bits, as the GPU's words do)
+@overflow("wrap")
+type __GpuWrapI8 = i8
+@overflow("wrap")
+type __GpuWrapI16 = i16
+@overflow("wrap")
+type __GpuWrapI64 = i64
+@overflow("wrap")
+type __GpuWrapU8 = u8
+@overflow("wrap")
+type __GpuWrapU16 = u16
+@overflow("wrap")
+type __GpuWrapU32 = u32
+@overflow("wrap")
+type __GpuWrapU64 = u64
 
 # GPU arrays: numbers kept in GPU memory and computed on by GPU programs.
 #
@@ -124,6 +139,13 @@ gpu = (xs: u16[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: u32[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: u64[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: __dewy_int[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
+gpu = (xs: __GpuWrapI8[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
+gpu = (xs: __GpuWrapI16[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
+gpu = (xs: __GpuWrapI64[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
+gpu = (xs: __GpuWrapU8[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
+gpu = (xs: __GpuWrapU16[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
+gpu = (xs: __GpuWrapU32[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
+gpu = (xs: __GpuWrapU64[]) -> GpuArray[__GpuInt]: gpu(__GpuInt.(xs))
 gpu = (xs: bool[]) -> GpuArray[f32]: gpu(__to_f32.(xs))
 gpu = (m: f32[,]) -> GpuArray[f32]: __gpu_upload_nd(m.data, m.shape)
 gpu = (m: f64[,]) -> GpuArray[f32]: __gpu_upload_nd(f32.(m.data), m.shape)
@@ -137,6 +159,13 @@ gpu = (m: u16[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.sh
 gpu = (m: u32[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 gpu = (m: u64[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 gpu = (m: __dewy_int[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+gpu = (m: __GpuWrapI8[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+gpu = (m: __GpuWrapI16[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+gpu = (m: __GpuWrapI64[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+gpu = (m: __GpuWrapU8[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+gpu = (m: __GpuWrapU16[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+gpu = (m: __GpuWrapU32[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
+gpu = (m: __GpuWrapU64[,]) -> GpuArray[__GpuInt]: __gpu_upload_nd(__GpuInt.(m.data), m.shape)
 
 # (an N-D array's: the caller proves its rank and storage, compiler/nd_contracts.jo)
 __gpu_upload_nd[T] = (xs: T[], shape: int[]) -> GpuArray[T]:
@@ -325,6 +354,19 @@ __gpu_from = (m: bool[,]) -> GpuArray[f32]: gpu(ndarray(__to_f32.(m.data), m.sha
 __gpu_from = (m: __GpuInt[,]) -> GpuArray[__GpuInt]: gpu(m)
 __gpu_from = (m: i32[,]) -> GpuArray[__GpuInt]: gpu(m)
 __gpu_from = (m: int[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: i8[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: i16[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: u8[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: u16[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: u32[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: u64[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: __GpuWrapI8[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: __GpuWrapI16[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: __GpuWrapI64[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: __GpuWrapU8[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: __GpuWrapU16[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: __GpuWrapU32[,]) -> GpuArray[__GpuInt]: gpu(m)
+__gpu_from = (m: __GpuWrapU64[,]) -> GpuArray[__GpuInt]: gpu(m)
 __to_f32 = (x: bool) -> f32:
     if x: return 1.0
     0.0
