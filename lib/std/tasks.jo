@@ -92,6 +92,9 @@ __task_worker = (slot: int) -> void:
     # Linux clears this word at actual thread exit, after the last use of the
     # stack. A completion flag before returning is insufficient for reuse.
     syscall(218, &p.alive)
+    # (its signal stack, between its slot's two guards: the crash handler reports an overflow there)
+    st = ((__task_stacks + (slot << __TASK_SHIFT) + 4096) as int, 0, 65536)
+    syscall(131, &st, 0)                                   # sigaltstack
     __atomic_cas(&p.tid, 0, syscall(186))
     c.scope = p.group
     c.rng = rng(__rng_seed + slot * 1000003)
@@ -132,8 +135,10 @@ __task_launch = (g: TaskGroup, f: () -> void) -> bool:
     c.address = j
     entry: cfn(int) = __task_worker
     top = __task_stacks + ((slot + 1) << __TASK_SHIFT)
-    # The low page is a guard; reserved virtual stacks commit on demand.
-    guarded = syscall(10, top - (1 << __TASK_SHIFT), 4096, 0) == 0
+    # The low page is a guard, then 64 KB of signal stack and another guard; reserved virtual
+    # stacks commit on demand.
+    low = top - (1 << __TASK_SHIFT)
+    guarded = syscall(10, low, 4096, 0) == 0 and syscall(10, low + 4096 + 65536, 4096, 0) == 0
     p.pending += 1
     id = if guarded: __clone_thread(entry as *u8, slot, top) else: -1
     if id < 0:

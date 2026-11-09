@@ -72,6 +72,31 @@ def test_worker_stack_overflow_is_reported(compiler, tmp_path, target):
         assert err.count('panic: stack overflow') == 1, err[-2000:]
 
 
+# A task's stack overflows into its guard: its own signal stack, between two guards, lets the
+# handler report it (tasks run on Linux only).
+TASK_OVERFLOW = """$runtime_checks
+depth = (n:int64):>int64 => if n <=? 0 0 else 1 + depth(n - 1)
+main = (argv:array<string>):>void => {
+    let n = to_int(argv[1]) ?? 0
+    if 0 <=? n and n <=? 100000000 {
+        concurrent {
+            let a = spawn depth(n)
+            let b = spawn depth(n + 1)
+        }
+        printl"{a} {b}"
+    }
+}
+"""
+
+
+@pytest.mark.parametrize('target', ['x86_64-linux', 'aarch64-linux'])
+def test_task_stack_overflow_is_reported(compiler, tmp_path, target):
+    binary = build(compiler, tmp_path, TASK_OVERFLOW, target)
+    assert run(target, binary, '1000')[:2] == (0, '1000 1001\n')
+    status, out, err = run(target, binary, '1000000')
+    assert status == 101 and err.count('panic: stack overflow') == 1, (status, err[-2000:])
+
+
 def far_branch_program():
     """One function over 1 MB of arm64 code: an if/else, a loop with `continue` and `break`
     and an overflow check all branch across more than a conditional branch reaches."""
