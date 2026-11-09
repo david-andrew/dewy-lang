@@ -3151,7 +3151,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             trips = fact_length_max()
             if types[t].kind == .fixed: trips = fixed_len(t)
             else:
-                b = fact_bound(s, fact_project(s, base, -1, false, T_INT))
+                base_length = fact_project(s, base, -1, false, T_INT)
+                b = fact_bound(s, base_length)
                 if not b.wide: trips = max(0, min(trips, b.hi))
             sums = fact_counted_sums(n, s, trips)
         hulls = indexed and fact_push_open(n, s, base)
@@ -3847,7 +3848,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             if fact_words_call(n) and s.projections.len() < FACT_CAP:
                 fact_add_projection(s, FactProjection(result, FACT_ELEMENT_LENGTH, false, fact_new(s, FactBound(1, fact_length_max()))))
             if fact_lines_call(n):
-                source = fact_bound(s, fact_project(s, entry[0], -1, false, T_INT))
+                source_length = fact_project(s, entry[0], -1, false, T_INT)
+                source = fact_bound(s, source_length)
                 length = fact_project(s, result, -1, false, T_INT)
                 bound = fact_bound(s, length)
                 if source.lo > 0: bound.lo = max(1, bound.lo)

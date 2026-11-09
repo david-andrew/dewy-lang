@@ -53,7 +53,11 @@ fact_pool_member=(@s:FactState pool:PoolWord handle:PoolWord):>PoolWord=>{
 # `except`, only those provably another handle than it)
 fact_pool_keep=(@s:FactState source:PoolWord to:PoolWord except:PoolWord=0):>void=>{
     if source =? to or source =? 0 or to =? 0 {return}
-    let gone=if except not=? 0 {fact_bound(s fact_pool_member(@s source except))} else {FactBound(0 0)}
+    let gone=FactBound(0 0)
+    if except not=? 0 {
+        let member=fact_pool_member(@s source except)
+        gone=fact_bound(s member)
+    }
     let kept:array<FactProjection>=[]
     let i=fact_projection_first(s source)
     loop i >=? 0 {
@@ -84,7 +88,8 @@ fact_pool_rank=(s:FactState pool:PoolWord):>PoolWord=>{
 }
 fact_pool_check=(n:PoolWord @s:FactState pool:PoolWord handle:PoolWord):>void=>$unsafe {
     if fact_speculating not=? 0 or not (fact_policy =? 'RequireStatic' or fact_query) {return}
-    let b=fact_bound(s fact_pool_member(@s pool handle))
+    let member=fact_pool_member(@s pool handle)
+    let b=fact_bound(s member)
     let proven=b.lo >=? 1 and not b.wide
     if fact_probe_on {
         fact_probe_record(n proven)

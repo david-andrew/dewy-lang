@@ -616,7 +616,9 @@ fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
         if hull >= 0:
             bound = fact_bound(s, s.projections[hull].value)
             seen = true
-        else if fact_bound(s, fact_project(s, value, -1, false, T_INT)).hi != 0: continue
+        else:
+            length = fact_project(s, value, -1, false, T_INT)
+            if fact_bound(s, length).hi != 0: continue
         sites: int[]
         if fact_mentions(int(nodes[n].a), l) or not fact_push_only(int(nodes[n].b), l, sites) or sites.len() == 0: continue
         # Only empty, one-push-per-iteration row maps can preserve positions.
@@ -655,7 +657,8 @@ fact_push_open = (n: int, s: mut FactState, base: int = 0) -> bool:
 # (an array of tuples, as `[loop i in [0..n) [i i]]`: each integer component a
 # candidate of its own, with its hull and a value it is below)
 fact_push_open_components = (n: int, s: mut FactState, frame: mut FactPushes, l: int, e: int, value: int):
-    empty = fact_bound(s, fact_project(s, value, -1, false, T_INT)).hi == 0
+    length = fact_project(s, value, -1, false, T_INT)
+    empty = fact_bound(s, length).hi == 0
     sites: int[]
     if fact_mentions(int(nodes[n].a), l) or not fact_push_only(int(nodes[n].b), l, sites) or sites.len() == 0: return
     loop c in [0..fact_int_components(e)):
@@ -690,7 +693,9 @@ fact_push_open_rows = (s: mut FactState, frame: mut FactPushes, l: int, value: i
     if hull >= 0:
         bound = fact_bound(s, s.projections[hull].value)
         seen = true
-    else if fact_bound(s, fact_project(s, value, -1, false, T_INT)).hi != 0: return
+    else:
+        length = fact_project(s, value, -1, false, T_INT)
+        if fact_bound(s, length).hi != 0: return
     below = -1
     held = fact_projection_find(s, value, fact_component_selector(FACT_ROW_ELEMENTS, true), false)
     if held >= 0: below = s.projections[held].value

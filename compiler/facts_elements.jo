@@ -464,7 +464,8 @@ fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: 
             continue
         joined = FactBound()
         loop j in [0..parts.len()):
-            b = fact_bound(s, fact_project(s, parts[j], selector, false, ct))
+            part = fact_project(s, parts[j], selector, false, ct)
+            b = fact_bound(s, part)
             joined = if j == 0: b else: fact_hull(joined, b, at)
         # (what the elements share bounds it: where that is too little, nothing
         # establishes more, whatever iterates them)
@@ -477,7 +478,8 @@ fact_inventory_bound = (s: mut FactState, value: int, parts: int[], t: int, at: 
         loop k in [0..joined.lo):
             item = FactBound()
             loop j in [0..parts.len()):
-                b = fact_bound(s, fact_project(s, parts[j], fact_constant(s, k), true, et))
+                part = fact_project(s, parts[j], fact_constant(s, k), true, et)
+                b = fact_bound(s, part)
                 item = if j == 0: b else: fact_hull(item, b, at)
             item.reason = .missing; item.witness = 0
             if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, fact_constant(s, k), true, fact_new(s, item, FactTerm(type = et))))

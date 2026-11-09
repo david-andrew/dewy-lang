@@ -109,7 +109,9 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
                 if x.wide or h.wide or x.lo < h.lo or x.hi > h.hi: continue
         if element and not p.element and p.selector == FACT_ROW_SOURCE:
             row = fact_project(s, base, selector, true, telem(fact_type(t)))
-            if fact_compare(s, .eq, fact_project(s, row, -1, false, T_INT), fact_project(s, value, -1, false, T_INT)) != 1: continue
+            row_length = fact_project(s, row, -1, false, T_INT)
+            value_length = fact_project(s, value, -1, false, T_INT)
+            if fact_compare(s, .eq, row_length, value_length) != 1: continue
         if private and p.element: continue
         if private and p.selector == FACT_POOL_POSITIONS: continue
         if p.selector == FACT_MAP_POSITIONS and not p.element and (element or selector != fact_name_vals): continue

@@ -691,7 +691,8 @@ fact_power_call=(n:NumericWord):>bool=>$unsafe {
 fact_power_check=(n:NumericWord @s:FactState exponent:NumericWord base:NumericWord):>void=>{
     # (a rational base tested nonzero, `if q =? 0 return`, takes any exponent)
     if base not=? 0 and fact_power_rational(n) {
-        let b=fact_bound(s fact_project(@s base intern("numerator") false T_MATH_INT))
+        let numerator=fact_project(@s base intern("numerator") false T_MATH_INT)
+        let b=fact_bound(s numerator)
         if b.nz or b.lo >? 0 or b.hi <? 0 {
             if fact_speculating =? 0 and fact_probe_on {fact_probe_record(n true)}
             return

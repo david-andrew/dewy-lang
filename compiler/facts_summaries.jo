@@ -113,7 +113,8 @@ fact_summary_record = (s: mut FactState, r0: int):
     if payload != 0 and fact_summary_field == 0:
         # (a present return's payload; a known `none` adds nothing)
         if r != 0:
-            tag = fact_bound(s, fact_project(s, r, -3, false, T_INT))
+            present = fact_project(s, r, -3, false, T_INT)
+            tag = fact_bound(s, present)
             if tag.lo == 0 and tag.hi == 0 and not tag.wide: return
             # (this describes a present payload: what holds where the tag is 1,
             # its implications too; the state ends with this return)
@@ -197,7 +198,9 @@ fact_summary_record = (s: mut FactState, r0: int):
                 if b < 0: continue
                 pt = fact_type(int(locals[l].type))
                 field = fact_project(s, s.bindings[b].value, entry.1, false, fact_call_field_type(pt, entry.1))
-                if field == 0 or not fact_entails(s, r, fact_project(s, field, -1, false, T_INT), -1): continue
+                if field == 0: continue
+                field_length = fact_project(s, field, -1, false, T_INT)
+                if not fact_entails(s, r, field_length, -1): continue
                 post = entry.0; post_field = entry.1
                 break
     # Reuse globals already demanded by this scalar summary, never scan
@@ -210,7 +213,9 @@ fact_summary_record = (s: mut FactState, r0: int):
             g = fact_summary_acc.global_post
             if g > 0:
                 b = fact_binding(s, PlaceIdentity(.global, 0, g))
-                if b >= 0 and fact_entails(s, r, fact_project(s, s.bindings[b].value, -1, false, T_INT), -1): global_post = g
+                if b >= 0:
+                    global_length = fact_project(s, s.bindings[b].value, -1, false, T_INT)
+                    if fact_entails(s, r, global_length, -1): global_post = g
         else:
             tried = 0
             bindings = s.bindings
@@ -219,7 +224,8 @@ fact_summary_record = (s: mut FactState, r0: int):
                 if binding.place.root != .global or g <= 0 or tkind(fact_type(int(globals[g].type))) != .array: continue
                 if tried >= 8: break
                 tried += 1
-                if fact_entails(s, r, fact_project(s, binding.value, -1, false, T_INT), -1):
+                binding_length = fact_project(s, binding.value, -1, false, T_INT)
+                if fact_entails(s, r, binding_length, -1):
                     global_post = g
                     break
     if fact_summary_acc.seen:

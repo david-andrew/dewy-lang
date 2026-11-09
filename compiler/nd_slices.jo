@@ -170,9 +170,11 @@ fact_nd_slice = (n: int, s: mut FactState, values: int[], kind: int) -> int:
     text = wit_text(kid(n, 0))
     if text == "": text = "the sliced array"
     shape_text = if bound: text else: "{text}.length"
-    rank = fact_bound(s, fact_project(s, shape, -1, false, T_INT))
+    rank_value = fact_project(s, shape, -1, false, T_INT)
+    rank = fact_bound(s, rank_value)
     spec = values[1]
-    count = fact_bound(s, fact_project(s, spec, -1, false, T_INT))
+    spec_count = fact_project(s, spec, -1, false, T_INT)
+    count = fact_bound(s, spec_count)
     storage = false
     if not bound:
         storage = fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
@@ -246,7 +248,11 @@ fact_nd_slice = (n: int, s: mut FactState, values: int[], kind: int) -> int:
     # (an array whose extents match the selection axis by axis, with its data matching its shape,
     # has the selected count: no symbolic product is needed. O(rank))
     matched = false
-    if kind == 153 and fact_bound(s, fact_nd_valid(s, values[2])).lo == 1:
+    data_valid = false
+    if kind == 153:
+        valid_value = fact_nd_valid(s, values[2])
+        data_valid = fact_bound(s, valid_value).lo == 1
+    if data_valid:
         assigned = fact_nd_shape(s, values[2])
         assigned_count = fact_project(s, assigned, -1, false, T_INT)
         assigned_rank = fact_bound(s, assigned_count)

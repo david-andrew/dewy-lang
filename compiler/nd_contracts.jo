@@ -577,7 +577,8 @@ fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
 # negative peer dimensions: publish storage validity only after proving every
 # dimension nonnegative. O(rank <= 32), only for a demanded count.
 fact_nd_count = (s: mut FactState, shape: int) -> int:
-    rank = fact_bound(s, fact_project(s, shape, -1, false, T_INT))
+    rank_value = fact_project(s, shape, -1, false, T_INT)
+    rank = fact_bound(s, rank_value)
     result = fact_new(s, FactBound(0, FACT_MAX), FactTerm(type = T_INT))
     if rank.wide or rank.lo != rank.hi or rank.lo < 0 or rank.hi > 32: return result
     valid = true
@@ -585,7 +586,8 @@ fact_nd_count = (s: mut FactState, shape: int) -> int:
     zero = false
     count = 1
     loop axis in [0..rank.lo):
-        dim = fact_bound(s, fact_project(s, shape, fact_constant(s, axis), true, T_INT))
+        dim_value = fact_project(s, shape, fact_constant(s, axis), true, T_INT)
+        dim = fact_bound(s, dim_value)
         if dim.wide or dim.lo < 0: valid = false
         if not dim.wide and dim.lo == 0 and dim.hi == 0: zero = true
         if dim.wide or dim.lo != dim.hi or dim.lo < 0 or math_word_overflow(2, count, dim.lo): known = false
@@ -600,7 +602,8 @@ fact_nd_count = (s: mut FactState, shape: int) -> int:
 # an extent of one. Only demanded calls inspect shapes, with indexed element
 # projections and at most 32 operands/rank and 128 total axes. No body scan.
 fact_nd_broadcast = (n: int, s: mut FactState, input: int) -> int:
-    count = fact_bound(s, fact_project(s, input, -1, false, T_INT))
+    count_value = fact_project(s, input, -1, false, T_INT)
+    count = fact_bound(s, count_value)
     if count.wide or count.lo != count.hi or count.lo < 0 or count.hi > 32:
         fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "broadcast operand shapes have compatible trailing dimensions (equal or one)")
         return fact_fresh(s, ntype(n))
@@ -618,7 +621,8 @@ fact_nd_broadcast = (n: int, s: mut FactState, input: int) -> int:
         if fact_probe_on: fact_probe_record(n, true)
         return shapes[0]
     loop shape in shapes:
-        extent = fact_bound(s, fact_project(s, shape, -1, false, T_INT))
+        extent_value = fact_project(s, shape, -1, false, T_INT)
+        extent = fact_bound(s, extent_value)
         if extent.wide or extent.lo != extent.hi or extent.lo < 0 or extent.hi > 32 or axes + extent.lo > 128:
             fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "broadcast operand shapes have compatible trailing dimensions (equal or one)")
             return fact_fresh(s, ntype(n))
@@ -692,7 +696,8 @@ fact_nd_transpose = (n: int, s: mut FactState, input: int) -> int:
         shape = fact_nd_shape(s, result)
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(shape, -1, false, rank))
         if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("data"), false, data))
-    valid = fact_bound(s, fact_nd_valid(s, input))
+    valid_value = fact_nd_valid(s, input)
+    valid = fact_bound(s, valid_value)
     if valid.lo == 1 and valid.hi == 1: fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
     result
 

@@ -430,7 +430,8 @@ fact_ensured_close = (n: int, base: int, back: mut FactState, s: mut FactState):
         bi = fact_binding(back, place)
         if bi < 0 or fact_stable_key(c.1) <= 0: continue
         key = fact_map_key(back, c.1, 0)
-        if fact_truth(back, fact_project(back, back.bindings[bi].value, key, true, T_BOOL)) != 1: continue
+        present = fact_project(back, back.bindings[bi].value, key, true, T_BOOL)
+        if fact_truth(back, present) != 1: continue
         if not fact_keys_monotone(n, s, place): continue
         si = fact_binding(s, place)
         if si < 0 or s.projections.len() + 2 >= FACT_CAP: continue
@@ -449,7 +450,9 @@ fact_keys_monotone = (n: int, s: FactState, place: PlaceIdentity) -> bool:
     fact_assume(probe, fact_project(probe, probe.bindings[i].value, marker, true, T_BOOL), true)
     fact_changes(int(nodes[n].b), probe, n)
     i = fact_binding(probe, place)
-    i >= 0 and fact_truth(probe, fact_project(probe, probe.bindings[i].value, marker, true, T_BOOL)) == 1
+    if i < 0: return false
+    kept = fact_project(probe, probe.bindings[i].value, marker, true, T_BOOL)
+    fact_truth(probe, kept) == 1
 fact_map_snapshot = (n: int, s: mut FactState, map: int) -> int:
     if ownership_decls.len() != 0 and ownership_fact_type(ntype(kid(n, 0))):
         fact_path_call_effects(n, s)

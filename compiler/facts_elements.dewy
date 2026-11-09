@@ -488,7 +488,8 @@ fact_inventory_bound=(@s:FactState value:ElementWord parts:array<int64> t:Elemen
         }
         let joined=FactBound()
         loop j in [0..parts.length) {
-            let b=fact_bound(s fact_project(@s parts[j] selector false ct))
+            let part=fact_project(@s parts[j] selector false ct)
+            let b=fact_bound(s part)
             joined=if j =? 0 {b} else {fact_hull(joined b at)}
         }
         # (what the elements share bounds it: where that is too little, nothing
@@ -503,7 +504,8 @@ fact_inventory_bound=(@s:FactState value:ElementWord parts:array<int64> t:Elemen
         loop k in [0..joined.lo) {
             let item=FactBound()
             loop j in [0..parts.length) {
-                let b=fact_bound(s fact_project(@s parts[j] fact_constant(@s k) true et))
+                let part=fact_project(@s parts[j] fact_constant(@s k) true et)
+                let b=fact_bound(s part)
                 item=if j =? 0 {b} else {fact_hull(item b at)}
             }
             item.reason='missing'

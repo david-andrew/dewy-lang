@@ -617,7 +617,8 @@ fact_power_call = (n: int) -> bool:
 fact_power_check = (n: int, s: mut FactState, exponent: int, base: int):
     # (a rational base tested nonzero, `if q =? 0 return`, takes any exponent)
     if base != 0 and fact_power_rational(n):
-        b = fact_bound(s, fact_project(s, base, intern("numerator"), false, T_MATH_INT))
+        numerator = fact_project(s, base, intern("numerator"), false, T_MATH_INT)
+        b = fact_bound(s, numerator)
         if b.nz or b.lo > 0 or b.hi < 0:
             if fact_speculating == 0 and fact_probe_on: fact_probe_record(n, true)
             return

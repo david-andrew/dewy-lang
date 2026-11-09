@@ -90,7 +90,10 @@ fact_pool_member = (s: mut FactState, pool: int, handle: int) -> int: fact_proje
 # `except`, only those provably another handle than it)
 fact_pool_keep = (s: mut FactState, from: int, to: int, except: int = 0):
     if from == to or from == 0 or to == 0: return
-    gone = if except != 0: fact_bound(s, fact_pool_member(s, from, except)) else: FactBound(0, 0)
+    gone = FactBound(0, 0)
+    if except != 0:
+        member = fact_pool_member(s, from, except)
+        gone = fact_bound(s, member)
     kept: FactProjection[]
     i = fact_projection_first(s, from)
     loop i >= 0:
@@ -116,7 +119,8 @@ fact_pool_rank = (s: FactState, pool: int) -> int:
     top
 fact_pool_check = (n: int, s: mut FactState, pool: int, handle: int):
     if fact_speculating != 0 or not (fact_policy == .RequireStatic or fact_query): return
-    b = fact_bound(s, fact_pool_member(s, pool, handle))
+    member = fact_pool_member(s, pool, handle)
+    b = fact_bound(s, member)
     proven = b.lo >= 1 and not b.wide
     if fact_probe_on:
         fact_probe_record(n, proven)

@@ -77,7 +77,8 @@ fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
     if payload not=? 0 and fact_summary_field =? 0 {
         # (a present return's payload; a known `none` adds nothing)
         if r not=? 0 {
-            let tag=fact_bound(s fact_project(@s r (-3) false T_INT))
+            let present=fact_project(@s r (-3) false T_INT)
+            let tag=fact_bound(s present)
             if tag.lo =? 0 and tag.hi =? 0 and not tag.wide {return}
             # (this describes a present payload: what holds where the tag is 1,
             # its implications too; the state ends with this return)
@@ -181,7 +182,9 @@ fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
                 if b <? 0 {continue}
                 let pt=fact_type(SummaryWord(locals.ptr[l].type))
                 let field=fact_project(@s s.bindings[b].value entry[1] false fact_call_field_type(pt entry[1]))
-                if field =? 0 or not fact_entails(s r fact_project(@s field (-1) false T_INT) (-1)) {continue}
+                if field =? 0 {continue}
+                let field_length=fact_project(@s field (-1) false T_INT)
+                if not fact_entails(s r field_length (-1)) {continue}
                 post=entry[0]
                 post_field=entry[1]
                 break
@@ -198,7 +201,10 @@ fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
             let g=fact_summary_acc.global_post
             if g >? 0 {
                 let b=fact_binding(s PlaceIdentity('global' 0 g))
-                if b >=? 0 and fact_entails(s r fact_project(@s s.bindings[b].value (-1) false T_INT) (-1)) {global_post=g}
+                if b >=? 0 {
+                    let global_length=fact_project(@s s.bindings[b].value (-1) false T_INT)
+                    if fact_entails(s r global_length (-1)) {global_post=g}
+                }
             }
         }
         else {
@@ -209,7 +215,8 @@ fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
                 if binding.place.root not=? 'global' or g <=? 0 or tkind(fact_type(SummaryWord(globals.ptr[g].type))) not=? 'array' {continue}
                 if tried >=? 8 {break}
                 tried += 1
-                if fact_entails(s r fact_project(@s binding.value (-1) false T_INT) (-1)) {
+                let binding_length=fact_project(@s binding.value (-1) false T_INT)
+                if fact_entails(s r binding_length (-1)) {
                     global_post=g
                     break
                 }

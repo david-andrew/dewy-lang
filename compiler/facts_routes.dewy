@@ -60,7 +60,9 @@ fact_replace=(@s:FactState base:RouteWord selector:RouteWord element:bool value:
         }
         if element and not p.element and p.selector =? FACT_ROW_SOURCE {
             let row=fact_project(@s base selector true telem(fact_type(t)))
-            if fact_compare(s 'eq' fact_project(@s row (-1) false T_INT) fact_project(@s value (-1) false T_INT)) not=? 1 {continue}
+            let row_length=fact_project(@s row (-1) false T_INT)
+            let value_length=fact_project(@s value (-1) false T_INT)
+            if fact_compare(s 'eq' row_length value_length) not=? 1 {continue}
         }
         if private and p.element {continue}
         if private and p.selector =? FACT_POOL_POSITIONS {continue}

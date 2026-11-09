@@ -787,7 +787,10 @@ fact_push_open=(n:PushWord @s:FactState base:PushWord=0):>bool=>$unsafe {
             bound=fact_bound(s s.projections[hull].value)
             seen=true
         }
-        else if fact_bound(s fact_project(@s value (-1) false T_INT)).hi not=? 0 {continue}
+        else {
+            let length=fact_project(@s value (-1) false T_INT)
+            if fact_bound(s length).hi not=? 0 {continue}
+        }
         let sites:array<int64>=[]
         if fact_mentions(PushWord(nodes.ptr[n].a) l) or not fact_push_only(PushWord(nodes.ptr[n].b) l @sites) or sites.length =? 0 {continue}
         # Only empty, one-push-per-iteration row maps can preserve positions.
@@ -832,7 +835,8 @@ fact_push_open=(n:PushWord @s:FactState base:PushWord=0):>bool=>$unsafe {
 # (an array of tuples, as `[loop i in [0..n) [i i]]`: each integer component a
 # candidate of its own, with its hull and a value it is below)
 fact_push_open_components=(n:PushWord @s:FactState @frame:FactPushes l:PushWord e:PushWord value:PushWord):>void=>$unsafe {
-    let empty=fact_bound(s fact_project(@s value (-1) false T_INT)).hi =? 0
+    let length=fact_project(@s value (-1) false T_INT)
+    let empty=fact_bound(s length).hi =? 0
     let sites:array<int64>=[]
     if fact_mentions(PushWord(nodes.ptr[n].a) l) or not fact_push_only(PushWord(nodes.ptr[n].b) l @sites) or sites.length =? 0 {return}
     loop c in [0..fact_int_components(e)) {
@@ -871,7 +875,10 @@ fact_push_open_rows=(@s:FactState @frame:FactPushes l:PushWord value:PushWord si
         bound=fact_bound(s s.projections[hull].value)
         seen=true
     }
-    else if fact_bound(s fact_project(@s value (-1) false T_INT)).hi not=? 0 {return}
+    else {
+        let length=fact_project(@s value (-1) false T_INT)
+        if fact_bound(s length).hi not=? 0 {return}
+    }
     let below:PushWord=-1
     let held=fact_projection_find(s value fact_component_selector(FACT_ROW_ELEMENTS true) false)
     if held >=? 0 {below=s.projections[held].value}
