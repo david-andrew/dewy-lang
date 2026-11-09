@@ -11,6 +11,7 @@ CASES = [
     'census_proofs/equality_element_hook',
     'self_length/bound_forms',
     'self_length/build_with_push_loop',
+    'sibling_length/grow_keeps_old_reads',
 ]
 
 

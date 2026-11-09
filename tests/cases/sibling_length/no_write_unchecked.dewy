@@ -1,0 +1,8 @@
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+set = (@g:Graph at:int64 v:int64):>void => {
+    if 0 <=? at <? g.next.length { g.next[at] = v }
+}
+main = ():>void => {
+    let g = Graph[nodes=['a' 'b'] next=[0 1]]
+    set(@g 0 5)
+}

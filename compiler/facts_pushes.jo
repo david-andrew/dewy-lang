@@ -517,7 +517,7 @@ fact_iteration_body = (n: int, header: FactState, range: bool, base: int, lo: in
     fact_growing_lengths(body, pushes)
     if not range:
         fact_loop_index(n, base, body)
-        fact_loop_elements(n, base, body)
+        ref_sib_loop_elements(n, base, body)
     body
 # A range or array loop's header from entry by fact_while's iteration: at most
 # four widening rounds, then one narrowing round. Narrowing is sound because

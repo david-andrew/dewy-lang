@@ -1,0 +1,6 @@
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+take = (@g:Graph h:Graph):>void => { g.next = h.next }
+main = ():>void => {
+    let g = Graph[nodes=['a'] next=[0]]
+    take(@g Graph[nodes=['a' 'b' 'c'] next=[2]])
+}

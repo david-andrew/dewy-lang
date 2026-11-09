@@ -94,7 +94,7 @@ fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value
         p = old[pi]
         pi = fact_projection_next_in(old, links, pi)
         # (it held for the value replaced)
-        if not p.element and p.selector == FACT_SELF_BOUND: continue
+        if not p.element and (p.selector == FACT_SELF_BOUND or p.selector == FACT_SIB_BOUND): continue
         if element and not p.element and (p.selector == FACT_ELEMENT_LENGTH or p.selector == FACT_ELEMENT_VALUE or p.selector == FACT_ELEMENT_COPY or p.selector == FACT_ELEMENT_SOURCE or p.selector == FACT_KEYS_SOURCE or p.selector == FACT_FIELD_KEYS or p.selector == FACT_KEYS_POSITIONS or p.selector == FACT_ELEMENT_SAME_LENGTH or p.selector == FACT_ELEMENT_BELOW or fact_component_fact(p.selector)):
             if p.selector == FACT_ELEMENT_COPY: fact_fill_remainder(s, base, v, selector, p.value)
             # (a row stored back with the one length every row has, as

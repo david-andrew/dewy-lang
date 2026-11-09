@@ -534,6 +534,8 @@ ref_holder_place = (place: int) -> int:
     loop nodes[value].kind == .field or nodes[value].kind == .index:
         if nodes[value].kind == .index and not ref_simple_selector(int(nodes[value].b)): fatal(nodes[value].pos, ref_selector_message)
         value = ref_place_alias(int(nodes[value].a))
+    sibling = ref_sib_holder(place)
+    if sibling != 0: return sibling
     copy_place(place)
 # (no call in it: it cannot change an array. O(selector))
 ref_simple_selector = (n: int) -> bool:

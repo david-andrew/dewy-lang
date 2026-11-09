@@ -1244,6 +1244,8 @@ Reading such an array into a plain binding (`let c = p`) or through a generic fo
 the contract and can't change `p`. Making a value with the contract again needs a proof:
 a slice or a call's result is unproven. A function result has no name to write in the
 contract, so return a record with such a field or fill an `@` parameter.
+A record field's elements can be valid indexes of a sibling array in the same way,
+`next:array<int64<(<? nodes.length)>>`; see the record fields below.
 
 `array<int64 length <? 10>` is a dynamic array with a checked length contract;
 `array<int64 length=10>` remains a fixed-size array. `push`, `pop`, `extend`, `clear`
@@ -2970,6 +2972,19 @@ the last. The later statements' operands may not read the record or call a funct
 A lone change, or a run that leaves the lengths unequal, is an error naming the paired
 operation. Construction and replacing a whole field check the contract, and every
 read knows it, so `loop i in [0..ix.keys.length) printl(ix.values[i])` checks no bounds.
+A field's elements can be indexes of a sibling array, as
+`Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]`. As for a
+self-length array, the elements are `int64` or `addr`, the bound is an upper one (`<?` or
+`<=?`, with an optional constant offset) and also means `>=? 0` unless the refinement states
+its own lower bound. Construction and replacing either field check every element; storing,
+pushing or inserting into `next` checks the value against `nodes.length`; and every read knows
+the bound, so `g.nodes[g.next[i]]` and `loop e in g.next printl(g.nodes[e])` check no bounds.
+Growing `nodes`, permuting either field (`swap`, `reverse`, the `sort` family) and shrinking
+or clearing `next` keep the bound and work in place. Making
+`nodes` shorter (`pop`, `truncate`, `remove`, `clear`, a shorter replacement, also through an
+alias) is a compile error unless the elements are known to fit, as after clearing or emptying
+`next` first; under `$runtime_checks` it checks every element of `next`, O(n), before changing
+the record. A dictionary's values cannot have such a bound yet.
 
 
 ```dewy

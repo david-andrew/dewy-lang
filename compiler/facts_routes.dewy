@@ -7,7 +7,7 @@ from p"checks_thin.dewy" import (readonly_global)
 from p"directive_queries.dewy" import (dir_index)
 from p"expr.jo" import (CV IN ntype rational_constants)
 from p"checks_thin_expr.dewy" import (oversized_literal)
-from p"facts.jo" import (FACT_SELF_BOUND FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_ELEMENT_SOURCE FACT_ELEMENT_VALUE FACT_FIELD_KEYS FACT_KEYS_POSITIONS FACT_KEYS_SOURCE FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_POOL_POSITIONS FACT_ROW_SOURCE FactProjection FactRoute FactState fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_compare fact_constant fact_constant_globals fact_covered fact_domain fact_exposed fact_index_success fact_name_vals fact_new fact_place fact_policy fact_probe_on fact_project fact_projection_first fact_projection_next_in fact_query fact_rebind fact_route_reuse fact_route_selectors fact_scalar fact_set_bound fact_speculating fact_terms fact_type)
+from p"facts.jo" import (FACT_SELF_BOUND FACT_SIB_BOUND FACT_CAP FACT_ELEMENT_BELOW FACT_ELEMENT_COPY FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_ELEMENT_SOURCE FACT_ELEMENT_VALUE FACT_FIELD_KEYS FACT_KEYS_POSITIONS FACT_KEYS_SOURCE FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_POOL_POSITIONS FACT_ROW_SOURCE FactProjection FactRoute FactState fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_compare fact_constant fact_constant_globals fact_covered fact_domain fact_exposed fact_index_success fact_name_vals fact_new fact_place fact_policy fact_probe_on fact_project fact_projection_first fact_projection_next_in fact_query fact_rebind fact_route_reuse fact_route_selectors fact_scalar fact_set_bound fact_speculating fact_terms fact_type)
 from p"facts_arith.dewy" import (fact_fresh)
 from p"facts_forgets.dewy" import (fact_forget)
 from p"facts_plans.dewy" import (fact_component_fact)
@@ -42,7 +42,7 @@ fact_replace=(@s:FactState base:RouteWord selector:RouteWord element:bool value:
         let p=old[pi]
         pi=fact_projection_next_in(old links pi)
         # (it held for the value replaced)
-        if not p.element and p.selector =? FACT_SELF_BOUND {continue}
+        if not p.element and (p.selector =? FACT_SELF_BOUND or p.selector =? FACT_SIB_BOUND) {continue}
         if element and not p.element and (p.selector =? FACT_ELEMENT_LENGTH or p.selector =? FACT_ELEMENT_VALUE or p.selector =? FACT_ELEMENT_COPY or p.selector =? FACT_ELEMENT_SOURCE or p.selector =? FACT_KEYS_SOURCE or p.selector =? FACT_FIELD_KEYS or p.selector =? FACT_KEYS_POSITIONS or p.selector =? FACT_ELEMENT_SAME_LENGTH or p.selector =? FACT_ELEMENT_BELOW or fact_component_fact(p.selector)) {
             if p.selector =? FACT_ELEMENT_COPY {fact_fill_remainder(@s base v selector p.value)}
             # (a row stored back with the one length every row has, as

@@ -11,7 +11,8 @@ from p"facts_arith.dewy" import (fact_fresh)
 from p"facts_plans.dewy" import (fact_component_selector fact_int_component fact_int_components fact_int_rows)
 from p"facts_changes.dewy" import (fact_changes fact_partial_opaque)
 from p"facts_conditions.dewy" import (fact_implication)
-from p"facts_elements.dewy" import (fact_inventory fact_loop_elements fact_loop_index)
+from p"facts_elements.dewy" import (fact_inventory fact_loop_index)
+from p"refine.jo" import (ref_sib_loop_elements)
 from p"facts_joins.dewy" import (fact_hull)
 from p"facts_library.dewy" import (fact_copy_length_call fact_element_hull fact_length_through fact_same_length_call)
 from p"facts_loops.dewy" import (fact_entails fact_loop_body fact_loop_header fact_loop_stable fact_may_return)
@@ -676,7 +677,7 @@ fact_iteration_body=(n:PushWord header:FactState range:bool base:PushWord lo:Pus
     fact_growing_lengths(@body pushes)
     if not range {
         fact_loop_index(n base @body)
-        fact_loop_elements(n base @body)
+        ref_sib_loop_elements(n base @body)
     }
     body
 }

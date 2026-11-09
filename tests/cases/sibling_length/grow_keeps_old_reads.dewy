@@ -1,0 +1,15 @@
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+grow = (@g:Graph):>void => {
+    if g.next.length >? 1 {
+        let i = g.next[1]
+        g.nodes.push('e')
+        printl(g.nodes[i])
+    }
+}
+main = ():>void => {
+    let g = Graph[nodes=['a' 'b' 'c'] next=[1 2 0]]
+    grow(@g)
+    touch(@g)
+    if g.next.length >? 1 { printl(g.nodes[g.next[1]]) }
+}
+touch = (@g:Graph):>void => { g.nodes.push('z') }

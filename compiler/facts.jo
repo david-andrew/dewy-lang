@@ -351,6 +351,9 @@ const FACT_FIELD_KEYS = -30
 # A value holding a self-length contract: every element <= length + this constant
 # (ref_self_assume). A place's new value gets it again from the place's type.
 const FACT_SELF_BOUND = -31
+# A value holding a sibling bound on its elements: every element <= this value, a sibling's
+# length + c read with the record (ref_sib_assume).
+const FACT_SIB_BOUND = -33
 # Injective text identities, materialized only in a demanded narrowing proof.
 const FACT_TEXT_ID = -32
 # Component c (< 8) of every element of this array of tuples, an integer: its
@@ -896,7 +899,9 @@ fact_project = (s: mut FactState, base: int, selector: int, element: bool, t: in
         if parts.len() > 0: fact_inventory_bound(s, v, parts, t, 0)
     if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(base, selector, element, v))
     if refine_active:
-        if element and ref_self_active: ref_self_element_row(s, base, v)
+        if element and ref_self_active:
+            ref_self_element_row(s, base, v)
+            ref_sib_element_row(s, base, v)
         # A field's contract may name its siblings: every stored record was
         # validated whole, so the field's value relates to theirs in base.
         args: int[]
@@ -2833,8 +2838,12 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
     if k == .field and (nodes[n].aux >= 0 and tkind(ntype(int(nodes[n].a))) == .struct_ or nodes[n].aux == -2 and tkind(ntype(int(nodes[n].a))) == .tuple):
         base = fact_capture(int(nodes[n].a), s)
         selector = if nodes[n].aux == -2: int(nodes[n].ival) else: int(nodes[n].name)
-        held = fact_project(s, base, selector, false, refine_storage(n, ntype(n)))
-        if ref_self_active: ref_self_place_read(n, held, s)
+        stored = refine_storage(n, ntype(n))
+        held = fact_project(s, base, selector, false, stored)
+        if ref_self_active:
+            ref_self_place_read(n, held, s)
+            # (a field a call or a sibling's store kept: the record holds its bound again)
+            if not fact_pair_transient and ref_sib_contract(stored): ref_assume(stored, held, fact_field_args(s, base), s)
         return held
     if k == .tuple:
         value = fact_new(s, FactBound(), FactTerm(type = ntype(n)))
@@ -3203,7 +3212,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         fact_growing_lengths(body, growers)
         if indexed:
             fact_loop_index(n, base, body)
-            fact_loop_elements(n, base, body)
+            ref_sib_loop_elements(n, base, body)
         else if mapped: fact_map_loop(n, base, body)
         else: fact_capture(int(nodes[n].a), body)
         edges = fact_loop_body(n, body)

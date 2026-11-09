@@ -1,0 +1,7 @@
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+drop = (@xs:array<string>):>void => { if xs.length >? 0 { xs.pop(); } }
+main = ():>void => {
+    let g = Graph[nodes=['a' 'b'] next=[1 0]]
+    drop(@g.nodes)
+    printl(g.next)
+}

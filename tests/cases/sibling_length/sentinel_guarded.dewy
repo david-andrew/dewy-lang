@@ -1,0 +1,13 @@
+List:type = [items:array<string> next:array<int64<v => -1 <=? v and v <? items.length>>]
+main = ():>void => {
+    let l = List[items=['a' 'b' 'c'] next=[1 2 -1]]
+    let at = 0
+    loop _ in [0..5) {
+        if not (0 <=? at <? l.next.length) return
+        printl(l.items[at])
+        let n = l.next[at]
+        if n <? 0 return
+        printl("-> {l.items[n]}")
+        at = n
+    }
+}

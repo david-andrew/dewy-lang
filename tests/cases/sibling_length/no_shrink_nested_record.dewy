@@ -1,0 +1,7 @@
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+Outer:type = [g:Graph n:int64]
+main = ():>void => {
+    let o = Outer[g=Graph[nodes=['a' 'b'] next=[1 0]] n=0]
+    o.g.nodes.pop();
+    printl(o.g.next)
+}

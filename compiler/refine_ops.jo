@@ -109,7 +109,7 @@ ref_self_lower_bound = (atoms: RefAtom[]) -> bool:
     false
 ref_self_contract = (t0: int) -> bool:
     t = prune(t0)
-    types[t].kind == .refined and ref_atoms_have_kind(ref_predicates[int(types[t].st)], 6) and tkind(representation_type(t)) == .array
+    types[t].kind == .refined and ref_atoms_have_kind(ref_predicates[int(types[t].st)], 6) and tkind(representation_type(t)) == .array and not ref_sib_contract(t)
 # `every element <= length + k`, in one number
 ref_self_k = (atom: RefAtom) -> int:
     if atom.op == .lt: atom.b.offset - 1 else: atom.b.offset

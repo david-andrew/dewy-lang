@@ -15,7 +15,7 @@ from p"lower_group.dewy" import (gen_expr)
 from p"lower_storage.dewy" import (arr_len release)
 from p"math_ops.dewy" import (math_call math_word)
 from p"node_store.dewy" import (Node)
-from p"refine.jo" import (RefArrayCall ref_pair_call_finish is_total_dict mk_refined ref_addr_type ref_assume ref_declaring ref_dependent_ancestor ref_gen_site ref_holder_name ref_intern ref_interval ref_place_alias ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_span_copy ref_spans ref_value refine_bindings refine_coerce refine_owners refine_requests refine_storage representation_type str_set_of str_sets total_literals)
+from p"refine.jo" import (RefArrayCall ref_sib_holder ref_pair_call_finish is_total_dict mk_refined ref_addr_type ref_assume ref_declaring ref_dependent_ancestor ref_gen_site ref_holder_name ref_intern ref_interval ref_place_alias ref_predicates ref_selector_message ref_self_active ref_self_elements ref_self_established ref_span_copy ref_spans ref_value refine_bindings refine_coerce refine_owners refine_requests refine_storage representation_type str_set_of str_sets total_literals)
 from p"refine_ops.dewy" import (call_result_type copy_checked ref_addr_max ref_length_literal ref_own_length ref_path_length ref_self_contract ref_self_k ref_self_lower_bound ref_self_published ref_type_contains str_set_const total_dict_keys)
 from p"refine_predicates.dewy" import (ref_atoms_have_kind)
 from p"refine_resolve.dewy" import (ref_resolve_atoms)
@@ -602,6 +602,8 @@ ref_holder_place=(place:RefineRareWord):>int64=>$unsafe {
         if nodes.ptr[value].kind =? 'index' and not ref_simple_selector(RefineRareWord(nodes.ptr[value].b)) {fatal(nodes.ptr[value].pos ref_selector_message)}
         value=ref_place_alias(RefineRareWord(nodes.ptr[value].a))
     }
+    let sibling=ref_sib_holder(place)
+    if sibling not=? 0 {return sibling}
     copy_place(place)
 }
 # (no call in it: it cannot change an array. O(selector))

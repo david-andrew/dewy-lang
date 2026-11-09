@@ -12,6 +12,8 @@ CASES = [
     'self_length/no_pop_index',
     'dictionary/totaldict_pop',
     'length_in_place/generic_needs_guard',
+    'sibling_length/accepted',
+    'sibling_length/no_alias_shrink',
 ]
 
 

@@ -1,0 +1,13 @@
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+main = ():>void => {
+    let g = Graph[nodes=['a' 'b' 'c'] next=[1 2 0]]
+    loop @x in g.next { x = 0 }
+    if g.next.length >? 0 { g.next[0] = g.nodes.length - 1 }
+    g.next.sort()
+    g.next.reverse()
+    g.next.swap(0 1)
+    g.nodes.swap(0 1)
+    g.nodes.reverse()
+    g = Graph[nodes=['x'] next=[0 0]]
+    printl(g.next)
+}

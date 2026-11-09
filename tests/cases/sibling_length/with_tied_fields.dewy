@@ -1,0 +1,20 @@
+# A record with tied lengths and a sibling bound: runs keep both.
+Index:type = [keys:array<int64> values:array<string length =? keys.length> next:array<int64<(<? keys.length)>>]
+add = (@ix:Index key:int64 value:string):>void => {
+    ix.keys.push(key)
+    ix.values.push(value)
+    ix.next.push(ix.keys.length - 1)
+}
+drop_all = (@ix:Index):>void => {
+    ix.next.clear()
+    ix.keys.clear()
+    ix.values.clear()
+}
+main = ():>void => {
+    let ix = Index[keys=[] values=[] next=[]]
+    add(@ix 7 'seven')
+    add(@ix 8 'eight')
+    loop e in ix.next { printl("{ix.keys[e]} {ix.values[e]}") }
+    drop_all(@ix)
+    printl(ix.keys.length)
+}

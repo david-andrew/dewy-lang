@@ -8,7 +8,7 @@ from p"host_binds.jo" import (ref_intern_host)
 from p"lower.jo" import (Val cur_fn)
 from p"lower_group.dewy" import (gen_expr)
 from p"nd_contracts.jo" import (nd_field_shape)
-from p"refine.jo" import (ref_gen_check ref_holder_elems ref_nd_receivers ref_predicates ref_self_shrinks refine_active refine_ir_entry representation_type str_set_types str_sets)
+from p"refine.jo" import (ref_gen_check ref_sib_contract ref_holder_elems ref_nd_receivers ref_predicates ref_self_shrinks refine_active refine_ir_entry representation_type str_set_types str_sets)
 from p"refine_rare.dewy" import (ref_self_array)
 from p"refine_keys.dewy" import (ref_finite_keys)
 from p"refine_predicates.dewy" import (ref_atoms_have_kind)
@@ -115,7 +115,7 @@ ref_self_lower_bound=(atoms:array<RefAtom>):>bool=>{
 }
 ref_self_contract=(t0:RefineOpWord):>bool=>$unsafe {
     let t=prune(t0)
-    types.ptr[t].kind =? 'refined' and ref_atoms_have_kind(ref_predicates[RefineOpWord(types.ptr[t].st)] 6) and tkind(representation_type(t)) =? 'array'
+    types.ptr[t].kind =? 'refined' and ref_atoms_have_kind(ref_predicates[RefineOpWord(types.ptr[t].st)] 6) and tkind(representation_type(t)) =? 'array' and not ref_sib_contract(t)
 }
 # `every element <= length + k`, in one number
 ref_self_k=(atom:RefAtom):>int64=>{

@@ -3,7 +3,7 @@ contracts, resolved limits, record conversions) agree with frozen Jo: the same m
 from tests.selfhost_build_double import compare_builds
 from tests.support import ROOT, compiler  # noqa: F401
 
-DIRS = ('self_length', 'length_in_place', 'refinements', 'refinement_aggregates', 'record_field_shape')
+DIRS = ('self_length', 'length_in_place', 'refinements', 'refinement_aggregates', 'record_field_shape', 'sibling_length')
 
 
 def test_refine_rare_matches_twin(compiler, tmp_path, monkeypatch):
