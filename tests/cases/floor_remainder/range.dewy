@@ -1,0 +1,20 @@
+# x % m is in [0, m) for a positive m, whatever x is: a product or a sum
+# that overflows its width, an `int`, a uint64 or a negative dividend.
+mul_mod = (a:uint64 b:uint64 m:uint64<(>? 0)>):>uint64 => a*b % m
+sum_mod = (a:uint64 b:uint64 m:uint64<(>? 0)>):>uint64 => (a+b) % m
+int_mod = (n:int i:int m:uint64<(>? 0)>):>uint64 => (n+i) % m
+word_mod = (a:int64 b:int64 m:int64<0 <? m and m <=? 255>):>uint8 => a*b % m
+open_mod = (n:int i:int):>uint8 => (n+i) % 97
+below = (n:int m:int<(>? 0)>):>int => {
+    let r = n % m
+    $assert 0 <=? r and r <? m
+    r
+}
+main = ():>void => {
+    printl(mul_mod(18446744073709550000 1000000007 998244353))
+    printl(sum_mod(18446744073709551615 18446744073709551615 1000))
+    printl(int_mod(-5 -7 18446744073709551615))
+    printl(word_mod(-123456789 987654321 200))
+    printl(open_mod(-1000 3))
+    printl(below(-10 7))
+}

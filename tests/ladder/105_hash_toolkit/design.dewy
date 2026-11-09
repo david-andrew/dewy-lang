@@ -34,7 +34,7 @@ next = (@rng:Rng):>uint64 => {
 }
 
 # a*b mod m without overflow: the product is exact, only the remainder is stored.
-mul_mod = (a:uint64 b:uint64 m:uint64<(>? 0)>):>int => a*b % m
+mul_mod = (a:uint64 b:uint64 m:uint64<(>? 0)>):>uint64 => a*b % m
 
 # Binary search over sorted uint64 keys: (lo + hi) // 2 never overflows.
 find = (keys:array<uint64> target:uint64):>bool => {

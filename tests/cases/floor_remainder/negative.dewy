@@ -1,0 +1,14 @@
+# A negative divisor gives a remainder above it and at most zero, even when
+# the divisor has no lower end.
+at_most_zero = (v:int<(<=? 0)>):>int => v
+above = (n:int m:int<(<? 0)>):>int => {
+    let r = n % m
+    $assert m <? r and r <=? 0
+    at_most_zero(r)
+}
+word = (n:int64 m:int64<(<? 0)>):>int64<(<=? 0)> => n % m
+main = ():>void => {
+    printl(above(10 -3))
+    printl(above(-10 -3))
+    printl(word(7 -4))
+}

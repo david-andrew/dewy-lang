@@ -115,8 +115,18 @@ fact_u64_literal = (v: int) -> int:
     if t.op != .eof or t.a != 0 or t.b != 0 or n <= 0 or nodes[n].kind != .int_lit or not has_flag(n, NF_U64): return 0
     if fact_type(ntype(n)) == T_U64 or nodes[n].ival >= 0: return 0
     nodes[n].ival
+# A term that is a uint64 converted to an `int` (fact_capture_value keeps the
+# conversion as its origin when the interval passes int64's top): at most
+# 2^64-1. O(1).
+fact_u64_valued = (v: int) -> bool:
+    if v <= 0 or v >= fact_terms.len(): return false
+    t = fact_terms[v]
+    n = t.origin
+    if t.op != .eof or t.a != 0 or t.b != 0 or n <= 0 or nodes[n].kind != .conv or nodes[n].aux != i32(int(CV.int_)): return false
+    t.type == T_MATH_INT and fact_type(ntype(int(nodes[n].a))) == T_U64
 # v <= 2^64-1 through a guard row v - c <= d to such a literal c (fact_assume
-# keeps that row: no interval holds it). O(incident rows of v).
+# keeps that row: no interval holds it), or v - u <= 0 to a uint64 value u
+# converted to an `int` (`a % m` is below m). O(incident rows of v).
 fact_u64_capped = (s: FactState, v: int) -> bool:
     ri = fact_difference_head(s, v, 1)
     loop ri >= 0:
@@ -124,6 +134,7 @@ fact_u64_capped = (s: FactState, v: int) -> bool:
         ri = fact_difference_next(s, ri, 1)
         c = fact_u64_literal(row.b)
         if c < 0 and fact_add_fits(c, row.limit) and c + row.limit <= -1: return true
+        if row.limit <= 0 and fact_u64_valued(row.b): return true
     false
 # Publish an arm's scalar result, including its incident difference rows.
 # O(incident rows), indexed and capped by the existing fact-row budget. Only

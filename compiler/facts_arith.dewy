@@ -3,7 +3,7 @@ from p"ast.jo" import (NF_U64 has_flag nodes)
 from p"check.jo" import (LF_ALIAS locals sa_fits)
 from p"checker_tokens.dewy" import (Tok)
 from p"exact.jo" import (exact_has_node exact_marks exact_unsigned_fact)
-from p"expr.jo" import (ntype)
+from p"expr.jo" import (CV ntype)
 from p"facts.jo" import (FactDifference FactState fact_add_fits fact_bound fact_constant fact_difference fact_difference_head fact_difference_next fact_domain fact_incident fact_literal fact_new fact_open_endpoint fact_project fact_set_bound fact_shared_literals fact_shortest fact_slot fact_sum_operand fact_sum_rows fact_terms fact_type fact_unmodeled)
 from p"facts_joins.dewy" import (fact_host_finite)
 from p"facts_loops.dewy" import (fact_entails)
@@ -54,8 +54,19 @@ fact_u64_literal=(v:ArithWord):>ArithWord=>$unsafe {
     if fact_type(ntype(n)) =? T_U64 or nodes.ptr[n].ival >=? 0 {return 0}
     nodes.ptr[n].ival
 }
+# A term that is a uint64 converted to an `int` (fact_capture_value keeps the
+# conversion as its origin when the interval passes int64's top): at most
+# 2^64-1. O(1).
+fact_u64_valued=(v:ArithWord):>bool=>$unsafe {
+    if v <=? 0 or v >=? fact_terms.length {return false}
+    let t=fact_terms[v]
+    let n=t.origin
+    if t.op not=? 'eof' or t.a not=? 0 or t.b not=? 0 or n <=? 0 or nodes.ptr[n].kind not=? 'conv' or nodes.ptr[n].aux not=? int32(int64(CV.int_)) {return false}
+    t.type =? T_MATH_INT and fact_type(ntype(ArithWord(nodes.ptr[n].a))) =? T_U64
+}
 # v <= 2^64-1 through a guard row v - c <= d to such a literal c (fact_assume
-# keeps that row: no interval holds it). O(incident rows of v).
+# keeps that row: no interval holds it), or v - u <= 0 to a uint64 value u
+# converted to an `int` (`a % m` is below m). O(incident rows of v).
 fact_u64_capped=(s:FactState v:ArithWord):>bool=>{
     let ri=fact_difference_head(s v 1)
     loop ri >=? 0 {
@@ -63,6 +74,7 @@ fact_u64_capped=(s:FactState v:ArithWord):>bool=>{
         ri=fact_difference_next(s ri 1)
         let c=fact_u64_literal(row.b)
         if c <? 0 and fact_add_fits(c row.limit) and c + ArithWord(row.limit) <=? -1 {return true}
+        if row.limit <=? 0 and fact_u64_valued(row.b) {return true}
     }
     false
 }

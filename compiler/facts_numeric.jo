@@ -328,9 +328,13 @@ fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) 
         return fact_new(s, FactBound(low, high, low > 0 or high < 0), FactTerm(type = ntype(n)))
     else if kind == 2 and floor and y.hi < 0:
         # Floor remainder has its divisor's sign, including for a wide
-        # dividend: d < x % d <= 0. No negation of MIN is needed. O(1).
-        if not fact_host_endpoint(s, b, false): return fact_unmodeled(s, n, .unsupported)
-        return fact_new(s, FactBound(y.lo + 1, 0), FactTerm(.eof, a, b, n, ntype(n)))
+        # dividend: d < x % d <= 0. No negation of MIN is needed. An open
+        # divisor floor leaves the remainder's floor open. O(1).
+        low = FACT_MIN
+        if fact_host_endpoint(s, b, false): low = y.lo + 1
+        v = fact_new(s, FactBound(low, 0), FactTerm(.eof, a, b, n, ntype(n)))
+        fact_difference(s, b, v, -1, n)
+        return v
     else if y.lo < 1: return fact_unmodeled(s, n, .unsupported)
     # (an open divisor end is infinite, not 2^63-1: a quotient by it tends to 0)
     y_open = y.hi == FACT_MAX and fact_open_endpoint(s, b, true)
@@ -403,14 +407,16 @@ fact_midpoint = (s: mut FactState, n: int, v: int, sum: int):
         fact_difference(s, p, v, up, n)
 # uint64's forms on its order-preserving encoding (value xor MIN, so rows and
 # comparisons between two uint64 values read as unsigned): every result is at
-# most the dividend, `x % n` lies in [0, n) and a mask bounds `x & m`.
+# most the dividend, `x % n` lies in [0, n) and a mask bounds `x & m`. A
+# remainder by a positive divisor needs no bound on its dividend, a wide
+# product `a*b` included.
 fact_floor_unsigned = (s: mut FactState, n: int, kind: int, a: int, b: int) -> int:
     x = fact_bound(s, a); y = fact_bound(s, b)
-    if x.wide or y.wide: return fact_unmodeled(s, n, .unsupported)
+    if y.wide or x.wide and kind != 2: return fact_unmodeled(s, n, .unsupported)
     if (kind == 1 or kind == 2) and y.lo == FACT_MIN: return fact_unmodeled(s, n, .unsupported)
     if kind == 3 and (y.lo < 0 or y.hi > 63): return fact_unmodeled(s, n, .unsupported)
     r = FactBound(FACT_MIN, x.hi)
-    if kind == 2: r.hi = min(x.hi, y.hi - 1)
+    if kind == 2: r.hi = if x.wide: y.hi - 1 else: min(x.hi, y.hi - 1)
     else if kind == 4: r.hi = min(x.hi, y.hi)
     else if kind == 1:
         r.lo = int(u64(x.lo xor FACT_MIN) / u64(y.hi xor FACT_MIN)) xor FACT_MIN
@@ -421,7 +427,7 @@ fact_floor_unsigned = (s: mut FactState, n: int, kind: int, a: int, b: int) -> i
     v = fact_new(s, r, FactTerm(.eof, a, b, n, T_U64))
     if kind == 2: fact_difference(s, v, b, -1, n)
     if kind == 4: fact_difference(s, v, b, 0, n)
-    fact_difference(s, v, a, 0, n)
+    if not x.wide: fact_difference(s, v, a, 0, n)
     v
 # Bit operations on nonnegative operands, one interval step each: a mask
 # bounds `x & m` by m, `|` and `xor` stay below the next power of two of the

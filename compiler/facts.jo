@@ -3343,6 +3343,10 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     r = FactBound(b.lo xor FACT_MIN, b.hi xor FACT_MIN)
                     r.nz = r.lo > 0
                     return fact_new(s, r, FactTerm(type = ntype(n)))
+                # (a uint64 interval reaching past int64's top, as an `int`: its
+                # low end stays, the top is open, and the term remembers its
+                # origin, so fact_u64_capped knows it is at most 2^64-1)
+                if to == T_MATH_INT and not b.wide and b.lo < 0 and b.hi >= 0 and (b.lo xor FACT_MIN) < FACT_MAX: return fact_new(s, FactBound(b.lo xor FACT_MIN, FACT_MAX, (b.lo xor FACT_MIN) > 0), FactTerm(origin = n, type = to))
             return fact_unmodeled(s, n, .unsupported)
         if fact_scalar(ntype(n)) and fact_scalar(ntype(int(nodes[n].a))) and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))):
             fits = sa_fits(b.lo, ntype(n)) and sa_fits(b.hi, ntype(n))
