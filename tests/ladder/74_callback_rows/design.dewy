@@ -1,21 +1,21 @@
 # Tier 3 / 74_callback_rows / milestone 23
 # Acceptance: Forward nonlocal callback rows while remapping explicit place permissions.
-Action:type = <E:Effect>((x:int64:>int64 & E))
-map_one = <E:Effect>(f:Action<E> value:int64):>int64 & E => {
+Action:type = <E:Effect>((x:int16:>int32 & E))
+map_one = <E:Effect>(f:Action<E> value:int16):>int32 & E => {
     return f(value)
 }
 forward = <E:Effect>(f:(@x:int64:>void & mutates<x> & E) @y:int64):>void & mutates<y> & E => {
     f(@y)
 }
-square = (x:int64):>int64 & no_effects => x*x
-negate = (x:int64):>int64 & no_effects => -x
+square = (x:int16):>int32 & no_effects => x*x
+negate = (x:int16):>int32 & no_effects => -x
 set_seven = (@x:int64):>void & mutates<x> => {
     x = 7
 }
-quiet = (x:int64):>int64 & no_effects => {
+quiet = (x:int16):>int64 & no_effects => {
     return map_one(@square x)+map_one(@negate x)
 }
-fold = <E:Effect>(xs:array<int64> f:Action<E>):>int64 & E => {
+fold = <E:Effect>(xs:array<int16> f:Action<E>):>int64 & E => {
     let total:int64 = 0
     loop x in xs {
         total += f(x)
@@ -59,5 +59,3 @@ main = ():>void => {
     $runtime_assert quiet(6) =? 30
     printl("{total} {cell}")
 }
-
-$runtime_checks

@@ -2,7 +2,7 @@
 # Acceptance: 80 integer-step 2D physics frames, spatial hash broad phase cross-checked against all pairs, deterministic axis impulses, walls, conserved kinetic sum and saved world.
 Body:type = [id:int64 x:int64 y:int64 vx:int64 vy:int64 radius:int64]
 World:type = [bodies:array<Body> contacts:int64]
-key = (x:int64 y:int64):>int64 & no_effects => x*1000+y
+key = (x:int64<overflow='wrap'> y:int64<overflow='wrap'>):>int64 & no_effects => x*1000+y
 cell = (position:int64):>int64 & no_effects => position//16
 seed = ():>World => {
     let bodies:array<Body> = []
@@ -27,9 +27,9 @@ near = (a:Body b:Body):>bool & no_effects => {
     let radius = a.radius+b.radius
     return dx*dx+dy*dy <=? radius*radius
 }
-contacts = (bodies:array<Body>):>array<int64> => {
+contacts = (bodies:array<Body>):>array<int> => {
     let grid = build_grid(bodies)
-    let pairs:array<int64> = []
+    let pairs:array<int> = []
     loop i in [0..bodies.length) {
         let body = bodies[i]
         let cx = cell(body.x)
@@ -50,8 +50,8 @@ contacts = (bodies:array<Body>):>array<int64> => {
     pairs.sort()
     return pairs
 }
-brute = (bodies:array<Body>):>array<int64> => {
-    let pairs:array<int64> = []
+brute = (bodies:array<Body>):>array<int> => {
+    let pairs:array<int> = []
     loop i in [0..bodies.length) {
         loop j in [i+1..bodies.length) {
             if near(bodies[i] bodies[j]) {
@@ -62,26 +62,35 @@ brute = (bodies:array<Body>):>array<int64> => {
     return pairs
 }
 integrate = (@body:Body):>void => {
-    body.x += body.vx
-    body.y += body.vy
-    if body.x <? body.radius {
-        body.x = 2*body.radius-body.x
-        body.vx = -body.vx
+    let x = body.x+body.vx
+    let y = body.y+body.vy
+    let vx:int = body.vx
+    let vy:int = body.vy
+    if x <? body.radius {
+        x = 2*body.radius-x
+        vx = -vx
     }
-    if body.x >? 128-body.radius {
-        body.x = 2*(128-body.radius)-body.x
-        body.vx = -body.vx
+    if x >? 128-body.radius {
+        x = 2*(128-body.radius)-x
+        vx = -vx
     }
-    if body.y <? body.radius {
-        body.y = 2*body.radius-body.y
-        body.vy = -body.vy
+    if y <? body.radius {
+        y = 2*body.radius-y
+        vy = -vy
     }
-    if body.y >? 128-body.radius {
-        body.y = 2*(128-body.radius)-body.y
-        body.vy = -body.vy
+    if y >? 128-body.radius {
+        y = 2*(128-body.radius)-y
+        vy = -vy
     }
+    # A body stays in its 128 by 128 world and moves less than a world per step.
+    $runtime_assert 0 <=? x and x <=? 128 and 0 <=? y and y <=? 128
+    $runtime_assert -128 <=? vx and vx <=? 128 and -128 <=? vy and vy <=? 128
+    body.x = x
+    body.y = y
+    body.vx = vx
+    body.vy = vy
 }
-resolve = (@world:World pair:int64):>void => {
+resolve = (@world:World pair:int):>void => {
     let i = pair//1000
     let j = pair%1000
     $runtime_assert 0 <=? i and i <? world.bodies.length and j <? world.bodies.length
@@ -99,15 +108,15 @@ resolve = (@world:World pair:int64):>void => {
     }
     world.contacts += 1
 }
-energy = (world:World):>int64 => {
-    let total:int64 = 0
+energy = (world:World):>int => {
+    let total = 0
     loop body in world.bodies {
         total += body.vx*body.vx+body.vy*body.vy
     }
     return total
 }
-checksum = (world:World):>int64 => {
-    let total:int64 = 0
+checksum = (world:World):>int => {
+    let total = 0
     loop body in world.bodies {
         total += (body.id+1)*(body.x*31+body.y*17+body.vx*7+body.vy)
     }
@@ -208,5 +217,3 @@ main = ():>void => {
     $runtime_assert valid(world)
     printl("{checksum(world)} {world.contacts} {energy(world)}")
 }
-
-$runtime_checks
