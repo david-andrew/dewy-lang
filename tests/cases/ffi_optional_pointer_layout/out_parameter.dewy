@@ -1,8 +1,12 @@
-# modes: native
-# An optional pointer is two words in Dewy's memory, so C cannot fill one
-# through a pointer: it would write the address and leave the presence.
-strtol=(s:string stop_at:ptr<ptr<uint8>?> base:int32):>int64 => $extern
-main=():>void=>{
+# modes: native native-release
+# C fills a `char **` out-parameter: the optional pointer is C's nullable pointer, one word.
+strtol=(s:ptr<uint8> stop_at:ptr<ptr<uint8>?> base:int32):>int64 => $extern
+strlen=(s:ptr<uint8>):>uint64 => $extern
+main=():>void=>$unsafe {
+    let text:array<uint8>=bytes("123abc")
+    text.push(0)
     let slot:array<ptr<uint8>?>=[none]
-    printl($unsafe strtol("12ab" slot.ptr 10))
+    let value=strtol(text.ptr slot.ptr 10)
+    let stop=slot[0]
+    if stop isnt? none {printl(value strlen(stop) stop[0])}
 }

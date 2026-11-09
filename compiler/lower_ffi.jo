@@ -18,11 +18,6 @@ mac_bound_lib = (lib: str) -> str:
     ""
 
 
-c_nullable = (t0: int) -> bool:
-    t = prune(t0)
-    types[t].kind == .opt and tkind(int(types[t].elem)) == .ptr
-
-
 lower_extern_thunk = (lf: int, f: int):
     begin_fn(fns[f].sym, lf)
     lib = fns[f].clib
@@ -32,25 +27,17 @@ lower_extern_thunk = (lf: int, f: int):
     if c_struct(ret) or c_struct_params(f):
         c_struct_thunk(f, lib, nm, ret)
         return
-    # (Dewy's ptr<T>?: an optional held as a value, null to C when it is none)
-    sret = if c_nullable(ret): vreg(VI) else: -1
+    # (a ptr<T>? is C's nullable pointer word as it stands)
     ps: int[]
     loop t in fns[f].ptypes:
-        if vc(t) == VC_AGG and not c_nullable(t): fatal(nodes[int(fns[f].decl)].pos, "C functions can only take scalar or pointer arguments")
+        if vc(t) == VC_AGG: fatal(nodes[int(fns[f].decl)].pos, "C functions can only take scalar or pointer arguments")
         if tkind(t) == .array: fatal(nodes[int(fns[f].decl)].pos, "a C function cannot take an array: declare the parameter as a pointer (*f32) and pass data(xs)")
         ps.push(vreg(vt_of(t)))
     ir.nparams = ir.vtypes.len()
     # (a str goes to C as its bytes, ending in a zero byte: a char *)
     cps: int[]
     loop i in 0.. and t in fns[f].ptypes:
-        if c_nullable(t):
-            p = vreg(VI)
-            e_mov(p, e_iconst(0))
-            iff(opt_has(ps[i], int(types[prune(t)].elem)))
-            e_mov(p, e_load(VI, ps[i], 0, 8))
-            endc()
-            cps.push(p)
-        else if tkind(t) == .str_: cps.push(e_call1(rt("__c_str"), ps[i], VI))
+        if tkind(t) == .str_: cps.push(e_call1(rt("__c_str"), ps[i], VI))
         else if fns[f].cvariadic > 0 and i >= int(fns[f].cvariadic) - 1 and vt_of(t) == VS:
             # C promotes variadic floats to double. Fixed f32 parameters keep
             # their declared type; narrow integers already use extended registers.
@@ -58,19 +45,12 @@ lower_extern_thunk = (lf: int, f: int):
             emit(.f2f, VF, d, ps[i], 0, 0, 0)
             cps.push(d)
         else: cps.push(ps[i])
-    if vc(ret) == VC_AGG and sret < 0: fatal(nodes[int(fns[f].decl)].pos, "C functions can only return scalars or pointers")
+    if vc(ret) == VC_AGG: fatal(nodes[int(fns[f].decl)].pos, "C functions can only return scalars or pointers")
     ir.ret = ret_vt(ret)
     fp = extern_target(f, lib, nm)
-    result_type = if sret >= 0: VI else: ret_vt(ret)
-    r = e_calli(fp, cps, result_type, true)
+    r = e_calli(fp, cps, ret_vt(ret), true)
     # (C's variadic arguments: on Apple's arm64 they go on the stack)
     if fns[f].cvariadic > 0: ir.code[ir.code.len() - 1].imm = int(fns[f].cvariadic)
-    if sret >= 0:
-        e_zero(sret, tsize(ret))
-        e_store(sret, 0, r, 8)
-        e_store(sret, 8, e_bin(.ne, VI, r, e_iconst(0)), 1)
-        e_ret(sret)
-        return
     if vc(ret) == VC_INT: r = norm(r, ret)
     e_ret(r)
 
@@ -109,7 +89,7 @@ extern_target = (f: int, lib: str, nm: str) -> int:
 # ---------- C structs by value (lower_ffi.dewy) ----------
 c_struct = (t0: int) -> bool:
     t = prune(t0)
-    vc(t) == VC_AGG and not c_nullable(t) and types[t].kind == .struct_
+    vc(t) == VC_AGG and types[t].kind == .struct_
 
 
 c_struct_params = (f: int) -> bool:
@@ -251,11 +231,11 @@ c_struct_thunk = (f: int, lib: str, nm: str, ret: int):
     arm = target_arm64 or target_macos
     gmax = if arm: 8 else: 6
     agg_ret = c_struct(ret)
-    sret = if agg_ret or c_nullable(ret): vreg(VI) else: -1
+    sret = if agg_ret: vreg(VI) else: -1
     ps: int[]
     loop t in fns[f].ptypes:
         if tkind(t) == .array: fatal(pos, "a C function cannot take an array: declare the parameter as a pointer (*f32) and pass data(xs)")
-        if vc(t) == VC_AGG and not c_nullable(t) and not c_struct(t): fatal(pos, "C functions can only take scalars, pointers or C structs")
+        if vc(t) == VC_AGG and not c_struct(t): fatal(pos, "C functions can only take scalars, pointers or C structs")
         ps.push(vreg(vt_of(t)))
     ir.nparams = ir.vtypes.len()
     if vc(ret) == VC_AGG and sret < 0: fatal(pos, "C functions can only return scalars, pointers or C structs")
@@ -286,13 +266,6 @@ c_struct_thunk = (f: int, lib: str, nm: str, ret: int):
         else: cs_int(e_slot(rslot), gmax)
     loop i in 0.. and t in fns[f].ptypes:
         if c_struct(t): cs_struct(t, ps[i], arm)
-        else if c_nullable(t):
-            p = vreg(VI)
-            e_mov(p, e_iconst(0))
-            iff(opt_has(ps[i], int(types[prune(t)].elem)))
-            e_mov(p, e_load(VI, ps[i], 0, 8))
-            endc()
-            cs_int(p, gmax)
         else if tkind(t) == .str_: cs_int(e_call1(rt("__c_str"), ps[i], VI), gmax)
         else if vt_of(t) == VI: cs_int(ps[i], gmax)
         else: cs_float(ps[i])
@@ -324,18 +297,11 @@ c_struct_thunk = (f: int, lib: str, nm: str, ret: int):
     if rcode != 0: cps.push(e_slot(rslot))
     fp = extern_target(f, lib, nm)
     result_type = ret_vt(ret)
-    if c_nullable(ret): result_type = VI
     if agg_ret: result_type = -1
     r = e_calli(fp, cps, result_type, true)
     if rcode != 0: ir.code[ir.code.len() - 1].imm = rcode
     if agg_ret:
         e_copy(sret, e_slot(rslot), tsize(ret))
-        e_ret(sret)
-        return
-    if sret >= 0:
-        e_zero(sret, tsize(ret))
-        e_store(sret, 0, r, 8)
-        e_store(sret, 8, e_bin(.ne, VI, r, e_iconst(0)), 1)
         e_ret(sret)
         return
     if vc(ret) == VC_INT: r = norm(r, ret)

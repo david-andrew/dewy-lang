@@ -1,5 +1,5 @@
 $runtime_checks
-from p"type_ops.dewy" import (layout_cache_padded layout_cycle_error layout_endless_error math_optional mk_box)
+from p"type_ops.dewy" import (layout_cache_padded layout_cycle_error layout_endless_error math_optional mk_box ptr_optional)
 from p"checker_types.dewy" import (TypeInfo StructInfo Field Variant)
 from p"check.jo" import (check_struct_fields)
 from p"units.jo" import (quantity_base)
@@ -223,7 +223,7 @@ tl_layout_body=(t:LWord):>void=>$unsafe {
         let e=LWord(tl_inputs[0].types[0].ptr[t].elem)
         tl_layout(e)
         al=tl_align(e)
-        size=if math_optional(t) {8} else {tl_align_up(tl_size(e) + 1  al)}
+        size=if math_optional(t) {8} else if ptr_optional(t) {tl_inputs[0].ptr_size[0]} else {tl_align_up(tl_size(e) + 1  al)}
         m=tl_managed(e)
         boxed=LWord(tl_inputs[0].types[0].ptr[tl_prune(e)].flags) & TF_BOXED not=? 0
     }

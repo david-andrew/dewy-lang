@@ -1,0 +1,80 @@
+# `ptr<T>?` is C's nullable pointer, one word (test_optional_pointer.py: pointers.c is the C side).
+Pair:type = [tag:int32 first:ptr<int32>? second:ptr<int32>?]
+Shape:type = Pair | string | none
+find_value = (want:int32 out:ptr<ptr<int32>?>):>int32 => $extern(lib=LIBRARY)
+fill_slots = (out:ptr<ptr<int32>?> n:int64):>void => $extern(lib=LIBRARY)
+read_or_minus_one = (p:ptr<int32>?):>int32 => $extern(lib=LIBRARY)
+next_value = (p:ptr<int32>?):>ptr<int32>? => $extern(lib=LIBRARY)
+fill_pair = (out:ptr<Pair> tag:int32):>void => $extern(lib=LIBRARY)
+pair_sum = (p:ptr<Pair>):>int32 => $extern(lib=LIBRARY)
+apply = (f:((p:ptr<int32>?):>ptr<int32>?) p:ptr<int32>?):>ptr<int32>? => $extern(lib=LIBRARY)
+
+$export
+second_after = (p:ptr<int32>?):>ptr<int32>? => $unsafe {
+    if p is? none {return none}
+    next_value(p)
+}
+
+show = (label:string p:ptr<int32>?):>void => $unsafe {
+    if p is? none {printl(label "none")} else {printl(label p[0])}
+}
+
+describe = (s:Shape):>string => match s {
+    <Pair> => "pair"
+    <string> => "string"
+    <none> => "none"
+}
+
+main = ():>void => $unsafe {
+    # C fills a T** out-parameter in place
+    let slot:array<ptr<int32>?> = [none]
+    printl(find_value(33 slot.ptr))
+    show("found" slot[0])
+    printl(find_value(99 slot.ptr))
+    show("missing" slot[0])
+    printl(slot[0] is? none)
+
+    # an array of nullable pointers filled by C
+    let slots:array<ptr<int32>?> = [none none none none none]
+    fill_slots(slots.ptr slots.length)
+    loop i in [0..slots.length) { show("slot{i}" slots[i]) }
+    slots[1] = slots[0]
+    slots[0] = none
+    show("moved0" slots[0])
+    show("moved1" slots[1])
+
+    # arguments and results
+    printl(read_or_minus_one(none) read_or_minus_one(slots[2]))
+    let walk:ptr<int32>? = none
+    loop true {
+        walk = next_value(walk)
+        if walk is? none {break}
+        show("walk" walk)
+    }
+    show("second_after" second_after(slots[2]))
+    show("second_after none" second_after(none))
+
+    # records: C fills and reads the fields, Dewy reads and writes them
+    let pairs:array<Pair> = [Pair[0 none none]]
+    fill_pair(pairs.ptr 7)
+    printl(pairs[0].tag pairs[0].first is? none pairs[0].second is? none)
+    show("first" pairs[0].first)
+    printl(pair_sum(pairs.ptr))
+    pairs[0].second = slots[2]
+    printl(pair_sum(pairs.ptr))
+    pairs[0].first = none
+    printl(pair_sum(pairs.ptr))
+    printl(size_of<Pair> align_of<Pair> size_of<ptr<int32>?>)
+
+    # optionals in unions and function results
+    let s:Shape = pairs[0]
+    printl(describe(s) describe("x") describe(none))
+    let maybe:ptr<int32>? | string = slots[2]
+    if maybe is? string {printl("string")} else {printl("pointer")}
+    let none_or:ptr<int32>? | string = none
+    printl(none_or is? none)
+
+    # a callback takes and returns the nullable pointer
+    show("callback" apply(@second_after slots[2]))
+    show("callback none" apply(@second_after none))
+}

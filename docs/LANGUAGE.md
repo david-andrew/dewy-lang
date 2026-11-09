@@ -4133,11 +4133,21 @@ Other types report Dewy's own representation for the target (a `string` field
 is one pointer word).
 
 A record holding a string, an array or another managed value has no C layout,
-and a pointer to one is rejected in an `$extern` signature. So is a pointer to
-`ptr<T>?`, or to a record with such a field: an optional pointer is C's nullable
-pointer only as an argument or a result, and two words in memory. For C's
-`T **` out-parameter, pass `uint64` words and read a nonzero one back through
-`words.ptr as ptr<ptr<T>>`.
+and a pointer to one is rejected in an `$extern` signature. `ptr<T>?` is C's
+nullable pointer, one word wherever it sits (zero is `none`), so C fills a
+`T **` out-parameter, an array of them or a record's field in place:
+
+```dewy
+strtol = (s:ptr<uint8> stop_at:ptr<ptr<uint8>?> base:int32):>int64 => $extern
+main = ():>void => $unsafe {
+    let text:array<uint8> = bytes("12ab")
+    text.push(0)
+    let stop:array<ptr<uint8>?> = [none]
+    printl(strtol(text.ptr stop.ptr 10))   # 12
+    let end = stop[0]
+    if end isnt? none { printl(end[0]) }   # 97
+}
+```
 
 Calling a `$extern` function, or naming it as a value, and reading or writing
 through a `ptr<T>` need an unsafe boundary: `$unsafe` before the expression,
@@ -4172,8 +4182,8 @@ ascending = (a:ptr<int32> b:ptr<int32>):>int32 => $unsafe {
 }
 ```
 
-An exported function takes and returns the same kinds of values, but not yet
-`ptr<T>?`. Native executables do not export symbols yet, so C reaches an
+An exported function takes and returns the same kinds of values, `ptr<T>?`
+included. Native executables do not export symbols yet, so C reaches an
 exported function only through a pointer that Dewy gives it.
 
 A function whose body is `$intrinsic` states one the compiler provides

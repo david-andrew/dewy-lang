@@ -5,7 +5,7 @@ from p"lower.jo" import (VC_AGG VC_INT data_size ffi_keys ffi_offs ffi_slot late
 from p"ir.jo" import (M_FLOAT VF VI VS ir)
 from p"types.jo" import (align_up fields prune structs tkind tsize types)
 from p"type_ops.dewy" import (fixed_len)
-from p"lower_storage.dewy" import (endc iff norm opt_has ret_vt vc vt_of)
+from p"lower_storage.dewy" import (endc iff norm ret_vt vc vt_of)
 from p"util.jo" import (fatal name_of)
 from p"check.jo" import (fns target_arm64 target_macos target_windows)
 from p"ast.jo" import (nodes)
@@ -18,10 +18,6 @@ mac_bound_lib=(lib:string):>string=>$unsafe {
     if lib =? "libc.so.6" or lib =? "libm.so.6" or lib =? "libdl.so.2" or lib =? "libpthread.so.0" {return "/usr/lib/libSystem.B.dylib"}
     return ""
 }
-c_nullable=(t0:LFFWord):>bool=>$unsafe {
-    let t=prune(t0)
-    return types.ptr[t].kind =? 'opt' and tkind(LFFWord(types.ptr[t].elem)) =? 'ptr'
-}
 lower_extern_thunk=(lf:LFFWord f:LFFWord):>void=>$unsafe {
     begin_fn(fns.ptr[f].sym lf);
     let lib=fns.ptr[f].clib
@@ -32,11 +28,10 @@ lower_extern_thunk=(lf:LFFWord f:LFFWord):>void=>$unsafe {
         c_struct_thunk(f lib nm ret);
         return
     }
-    # (Dewy's ptr<T>?: an optional held as a value, null to C when it is none)
-    let sret=if c_nullable(ret) {vreg(VI)} else {-1}
+    # (a ptr<T>? is C's nullable pointer word as it stands)
     let ps:array<int64>=[]
     loop t in fns.ptr[f].ptypes {
-        if vc(t) =? VC_AGG and not c_nullable(t) {fatal(nodes.ptr[LFFWord(fns.ptr[f].decl)].pos "C functions can only take scalar or pointer arguments");}
+        if vc(t) =? VC_AGG {fatal(nodes.ptr[LFFWord(fns.ptr[f].decl)].pos "C functions can only take scalar or pointer arguments");}
         if tkind(t) =? 'array' {fatal(nodes.ptr[LFFWord(fns.ptr[f].decl)].pos "a C function cannot take an array: declare the parameter as a pointer (*f32) and pass data(xs)");}
         ps.push(vreg(vt_of(t)));
     }
@@ -44,15 +39,7 @@ lower_extern_thunk=(lf:LFFWord f:LFFWord):>void=>$unsafe {
     # (a str goes to C as its bytes, ending in a zero byte: a char *)
     let cps:array<int64>=[]
     loop i in [0..fns.ptr[f].ptypes.length) and t in fns.ptr[f].ptypes {
-        if c_nullable(t) {
-            let p=vreg(VI)
-            e_mov(p e_iconst(0));
-            iff(opt_has(ps.ptr[i] LFFWord(types.ptr[prune(t)].elem)));
-            e_mov(p e_load(VI ps.ptr[i] 0 8));
-            endc();
-            cps.push(p);
-        }
-        else if tkind(t) =? 'str_' {cps.push(e_call1(rt("__c_str") ps.ptr[i] VI));}
+        if tkind(t) =? 'str_' {cps.push(e_call1(rt("__c_str") ps.ptr[i] VI));}
         else if fns.ptr[f].cvariadic >? 0 and i >=? LFFWord(fns.ptr[f].cvariadic) - 1 and vt_of(t) =? VS {
             # C promotes variadic floats to double. Fixed f32 parameters keep
             # their declared type; narrow integers already use extended registers.
@@ -62,19 +49,12 @@ lower_extern_thunk=(lf:LFFWord f:LFFWord):>void=>$unsafe {
         }
         else {cps.push(ps.ptr[i]);}
     }
-    if vc(ret) =? VC_AGG and sret <? 0 {fatal(nodes.ptr[LFFWord(fns.ptr[f].decl)].pos "C functions can only return scalars or pointers");}
+    if vc(ret) =? VC_AGG {fatal(nodes.ptr[LFFWord(fns.ptr[f].decl)].pos "C functions can only return scalars or pointers");}
     ir.ret = ret_vt(ret);
     let fp=extern_target(f lib nm)
-    let r=e_calli(fp cps (if sret >=? 0 {VI} else {ret_vt(ret)}) true)
+    let r=e_calli(fp cps ret_vt(ret) true)
     # (C's variadic arguments: on Apple's arm64 they go on the stack)
     if fns.ptr[f].cvariadic >? 0 {ir.code.ptr[ir.code.length - 1].imm = LFFWord(fns.ptr[f].cvariadic);}
-    if sret >=? 0 {
-        e_zero(sret tsize(ret));
-        e_store(sret 0 r 8);
-        e_store(sret 8 e_bin('ne' VI r e_iconst(0)) 1);
-        e_ret(sret);
-        return
-    }
     if vc(ret) =? VC_INT {r=norm(r ret)}
     e_ret(r);
 }
@@ -121,7 +101,7 @@ extern_target=(f:LFFWord lib:string nm:string):>int64=>$unsafe {
 # frame slot the backend fills from the result registers (`callc` imm < 0).
 c_struct=(t0:LFFWord):>bool=>$unsafe {
     let t=prune(t0)
-    vc(t) =? VC_AGG and not c_nullable(t) and types.ptr[t].kind =? 'struct_'
+    vc(t) =? VC_AGG and types.ptr[t].kind =? 'struct_'
 }
 c_struct_params=(f:LFFWord):>bool=>$unsafe {
     loop t in fns.ptr[f].ptypes {
@@ -289,11 +269,11 @@ c_struct_thunk=(f:LFFWord lib:string nm:string ret:LFFWord):>void=>$unsafe {
     let arm=target_arm64 or target_macos
     let gmax:LFFWord=if arm {8} else {6}
     let agg_ret=c_struct(ret)
-    let sret=if agg_ret or c_nullable(ret) {vreg(VI)} else {-1}
+    let sret=if agg_ret {vreg(VI)} else {-1}
     let ps:array<int64>=[]
     loop t in fns.ptr[f].ptypes {
         if tkind(t) =? 'array' {fatal(pos "a C function cannot take an array: declare the parameter as a pointer (*f32) and pass data(xs)");}
-        if vc(t) =? VC_AGG and not c_nullable(t) and not c_struct(t) {fatal(pos "C functions can only take scalars, pointers or C structs");}
+        if vc(t) =? VC_AGG and not c_struct(t) {fatal(pos "C functions can only take scalars, pointers or C structs");}
         ps.push(vreg(vt_of(t)));
     }
     ir.nparams = ir.vtypes.length;
@@ -326,14 +306,6 @@ c_struct_thunk=(f:LFFWord lib:string nm:string ret:LFFWord):>void=>$unsafe {
     }
     loop i in [0..fns.ptr[f].ptypes.length) and t in fns.ptr[f].ptypes {
         if c_struct(t) {cs_struct(t ps.ptr[i] arm);}
-        else if c_nullable(t) {
-            let p=vreg(VI)
-            e_mov(p e_iconst(0));
-            iff(opt_has(ps.ptr[i] LFFWord(types.ptr[prune(t)].elem)));
-            e_mov(p e_load(VI ps.ptr[i] 0 8));
-            endc();
-            cs_int(p gmax);
-        }
         else if tkind(t) =? 'str_' {cs_int(e_call1(rt("__c_str") ps.ptr[i] VI) gmax);}
         else if vt_of(t) =? VI {cs_int(ps.ptr[i] gmax);}
         else {cs_float(ps.ptr[i]);}
@@ -377,17 +349,10 @@ c_struct_thunk=(f:LFFWord lib:string nm:string ret:LFFWord):>void=>$unsafe {
     # (the result slot goes last, for the backend alone: C does not see it)
     if rcode not=? 0 {cps.push(e_slot(rslot));}
     let fp=extern_target(f lib nm)
-    let r=e_calli(fp cps (if agg_ret {-1} else if c_nullable(ret) {VI} else {ret_vt(ret)}) true)
+    let r=e_calli(fp cps (if agg_ret {-1} else {ret_vt(ret)}) true)
     if rcode not=? 0 {ir.code.ptr[ir.code.length - 1].imm = rcode;}
     if agg_ret {
         e_copy(sret e_slot(rslot) tsize(ret));
-        e_ret(sret);
-        return
-    }
-    if sret >=? 0 {
-        e_zero(sret tsize(ret));
-        e_store(sret 0 r 8);
-        e_store(sret 8 e_bin('ne' VI r e_iconst(0)) 1);
         e_ret(sret);
         return
     }

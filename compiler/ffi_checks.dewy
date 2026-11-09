@@ -68,8 +68,7 @@ ffi_check_nested_type=(t0:MoveWord pos:MoveWord extern_:bool param:bool nested:b
     if k =? 'int_' or k =? 'float_' or k =? 'bool_' {return}
     if k =? 'opt' and tkind(MoveWord(types.ptr[t].elem)) =? 'ptr' {
         ffi_check_pointee(MoveWord(types.ptr[prune(MoveWord(types.ptr[t].elem))].elem) pos);
-        if extern_ {return}
-        fatal(pos "`$export` takes and returns `ptr<T>` but not yet `ptr<T>?`: C callers would see an optional's layout");
+        return
     }
     if k =? 'str_' and extern_ and param {return}
     # (a record with C's layout is C's struct by value: compiler/lower_ffi.dewy)
@@ -98,9 +97,8 @@ ffi_c_layout=(t0:MoveWord @seen:dict<int64 bool>):>string=>$unsafe {
     let k=types.ptr[t].kind
     if t =? T_MATH_INT {return "`int` has no fixed size"}
     if k =? 'int_' or k =? 'float_' or k =? 'bool_' or k =? 'ptr' or k =? 'cfn' or k =? 'void_' {return ""}
-    # (an optional pointer is a pointer and its presence in Dewy's memory;
-    # only an argument or a result becomes C's one nullable word)
-    if k =? 'opt' and tkind(MoveWord(types.ptr[t].elem)) =? 'ptr' {return "`{dt(t)}` is two words in Dewy's memory, C's nullable pointer one: hold it as a `uint64`, test that for 0 and read the words as `ptr<{dt(MoveWord(types.ptr[t].elem))}>`"}
+    # (an optional pointer is C's nullable pointer word)
+    if k =? 'opt' and tkind(MoveWord(types.ptr[t].elem)) =? 'ptr' {return ""}
     if k =? 'fixed' {return ffi_c_layout(MoveWord(types.ptr[t].elem) @seen)}
     if k =? 'struct_' {
         let si:MoveWord=MoveWord(types.ptr[t].st)

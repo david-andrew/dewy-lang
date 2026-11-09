@@ -76,7 +76,7 @@ copy_through = (a: int, callee: int) -> bool:
     alias = a
     loop nodes[alias].kind == .ident and nodes[alias].aux == i32(int(SK.local)) and int(locals[int(nodes[alias].sym)].flags) & LF_ALIAS != 0:
         alias = int(locals[int(nodes[alias].sym)].alias)
-    if nodes[alias].kind == .unwrap and math_optional(prune(ntype(int(nodes[alias].a)))): return true
+    if nodes[alias].kind == .unwrap and (math_optional(prune(ntype(int(nodes[alias].a)))) or ptr_optional(prune(ntype(int(nodes[alias].a))))): return true
     r = place_var(a)
     if r == 0 or not pw_heap: return false
     if nodes[r].aux != i32(int(SK.global)):

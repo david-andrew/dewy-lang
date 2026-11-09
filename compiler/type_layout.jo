@@ -184,7 +184,7 @@ tl_layout = (t0: int):
         e = int(tl_inputs[0].types[0][t].elem)
         tl_layout(e)
         al = tl_align(e)
-        size = if math_optional(t): 8 else: tl_align_up(tl_size(e) + 1, al)
+        size = if math_optional(t): 8 else if ptr_optional(t): tl_inputs[0].ptr_size[0] else: tl_align_up(tl_size(e) + 1, al)
         m = tl_managed(e)
         boxed = int(tl_inputs[0].types[0][tl_prune(e)].flags) & TF_BOXED != 0
     else if k == .fixed:

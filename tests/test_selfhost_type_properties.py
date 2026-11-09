@@ -176,6 +176,7 @@ layout_box = (t: int) -> int:
     type_intern(&v, [])
 property_base = (t: int) -> int: int(tp_base(t))
 property_optional = (t: int) -> bool: tp_math_optional(t)
+property_ptr_optional = (t: int) -> bool: tp_ptr_optional(t)
 endless = (si: int, f: int, vi: int): property_events.push("endless:{si}:{f}:{vi}")
 cycle = (si: int): property_events.push("cycle:{si}")
 padded = (t: int) -> bool: false
@@ -212,6 +213,8 @@ main = ():
     assert(property_events.len() == count, "completed roots are memoized")
     math_id = add(TypeInfo(kind=.int_, rep=.tagged_int, size=8, align=8, flags=2))
     opt_math = add(TypeInfo(kind=.opt, elem=i32(math_id)))
+    ptr_type = add(TypeInfo(kind=.ptr, elem=1, size=8, align=8, flags=2))
+    opt_ptr = add(TypeInfo(kind=.opt, elem=i32(ptr_type)))
     arr = add(TypeInfo(kind=.array, elem=1))
     refined_arr = add(TypeInfo(kind=.refined, elem=i32(arr)))
     quantity_arr = add(TypeInfo(kind=.quantity, elem=i32(arr)))
@@ -234,13 +237,14 @@ main = ():
     ns = int(types[nominal_enum].st)
     structs[ns].nfields = 0; structs[ns].nvariants = 2; structs[ns].variants = 0
     assert(tp_is_managed(math_id) and not tp_is_aggregate(opt_math) and tp_math_optional(opt_math))
+    assert(not tp_is_aggregate(opt_ptr) and tp_ptr_optional(opt_ptr) and not tp_math_optional(opt_ptr) and not tp_ptr_optional(opt_math))
     assert(not tp_simple_enum(en) and tp_simple_enum(nominal_enum))
     assert(tp_plain_problem(texture_type) == "Texture" and tp_plain_problem(value) == "")
     loop active in [false, true]:
         refine_active = active
         assert(tp_is_managed(refined_arr) == active and tp_is_aggregate(refined_arr) == false)
         assert(tp_is_managed(quantity_arr) and tp_is_managed(secret_arr))
-        loop t in [1, 2, 3, 10, a, b, d, math_id, opt_math, arr, refined_arr, quantity_arr, secret_arr, fixed, texture_type, value, en, nominal_enum]:
+        loop t in [1, 2, 3, 10, a, b, d, math_id, opt_math, opt_ptr, arr, refined_arr, quantity_arr, secret_arr, fixed, texture_type, value, en, nominal_enum]:
             print("{active}:{t}:{tp_is_managed(t)}:{tp_is_aggregate(t)}:{tp_type_has_fn(t)}:{tp_plain_problem(t)}")
     assert(not old_fields[0].boxed and old_types[a].flags == 0, "layout preserves snapshots")
     print(property_events)
@@ -259,6 +263,7 @@ LAYOUT_JO = {
     'types.jo': {
         'mk_box': 'mk_box = (e: int) -> int: layout_box(e)',
         'math_optional': 'math_optional = (t: int) -> bool: property_optional(t)',
+        'ptr_optional': 'ptr_optional = (t: int) -> bool: property_ptr_optional(t)',
         'layout_endless_error': 'layout_endless_error = (si: int, f: int, vi: int): endless(si, f, vi)',
         'layout_cycle_error': 'layout_cycle_error = (si: int): cycle(si)',
         'layout_cache_padded': 'layout_cache_padded = (t: int) -> bool: padded(t)',

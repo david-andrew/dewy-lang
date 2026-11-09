@@ -10,7 +10,7 @@ from p"type_format.dewy" import (tf_postfix tf_string)
 from p"type_inference.dewy" import (tu_unify tu_zonk)
 from p"type_labels.dewy" import (tn_decl_labels tn_label_names)
 from p"type_layout.dewy" import (tl_box_default tl_decide_boxes tl_layout)
-from p"type_properties.dewy" import (tp_is_aggregate tp_is_managed tp_math_optional tp_plain_problem tp_simple_enum tp_type_has_fn)
+from p"type_properties.dewy" import (tp_is_aggregate tp_is_managed tp_math_optional tp_plain_problem tp_ptr_optional tp_simple_enum tp_type_has_fn)
 from p"type_unions.dewy" import (uu_alias_name uu_alias_note uu_holder uu_index uu_mk_union)
 from p"types.jo" import (T_MATH_INT fields is_int mk_type prune refined_alias_names struct_targ structs targ ts_dewy types variants)
 from p"util.jo" import (fatal files ice intern name_of pos_file)
@@ -133,6 +133,9 @@ type_has_fn=(t:TypeOpWord):>bool=>{
 }
 math_optional=(t:TypeOpWord):>bool=>{
     tp_math_optional(t)
+}
+ptr_optional=(t:TypeOpWord):>bool=>{
+    tp_ptr_optional(t)
 }
 is_aggregate=(t:TypeOpWord):>bool=>{
     tp_is_aggregate(t)

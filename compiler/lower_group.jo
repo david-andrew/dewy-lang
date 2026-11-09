@@ -313,6 +313,13 @@ gen_place = (e: int, write: bool) -> Place:
             e_call_nr1(rt("__panic_unwrap"), e_daddr(loc_data(nodes[e].pos)), -1)
             endc()
             return Place(base.mem, base.v, true)
+        # (an optional pointer is the pointer word: checked, then the same place)
+        if ptr_optional(ot):
+            base = gen_place(a, write)
+            iff(e_bin(.eq, VI, read_place(base, ot), e_iconst(0)))
+            e_call_nr1(rt("__panic_unwrap"), e_daddr(loc_data(nodes[e].pos)), -1)
+            endc()
+            return Place(base.mem, base.v, false)
         view = held_opt_reg(a)
         addr = 0
         has = 0
@@ -2550,6 +2557,8 @@ gen_conv = (e: int) -> Val:
         if math_optional(to):
             value = gen_owned(a)
             return V(e_bin(.xor, VI, value.v, e_iconst(1)), true)
+        # (an optional pointer is the pointer word itself)
+        if ptr_optional(to): return gen_owned(a)
         inner = int(types[to].elem)
         s = new_temp(to)
         d = e_slot(s)
@@ -3347,6 +3356,9 @@ gen_iflet = (e: int, t: int) -> Val:
         if math_optional(ot):
             pa = e_slot(new_temp(ot))
             e_store(pa, 0, ov.v, 8)
+        else if ptr_optional(ot):
+            pa = e_slot(new_temp(ot))
+            e_store(pa, 0, ov.v, tsize(ot))
         e_mov(has, opt_has(pa, inner))
         iff(has)
         write_place(local_place(l, true), inner, opt_value(pa, inner))

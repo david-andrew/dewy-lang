@@ -508,6 +508,8 @@ scope_add_local=(l:LSWord):>void=>$unsafe {
 }
 opt_has=(addr:LSWord inner:LSWord):>int64=>$unsafe {
     if quantity_base(inner) =? T_MATH_INT {return e_bin('ne' VI e_load(VI addr 0 8) e_iconst(0))}
+    # (an optional pointer is the pointer word: present when not zero)
+    if types.ptr[quantity_base(inner)].kind =? 'ptr' {return e_bin('ne' VI e_load(VI addr 0 ptr_size) e_iconst(0))}
     return e_load(VI addr tsize(inner) 1)
 }
 opt_value=(addr:LSWord inner:LSWord):>int64=>$unsafe {
