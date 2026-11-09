@@ -426,7 +426,10 @@ return_error = (s: int, t: int, code: int):
     pos = nodes[s].pos
     if code == 1: fatal(pos, "'return' outside of a function")
     if code == 2: fatal(pos, "a function giving `never` does not return")
-    if code == 3: fatal(pos, "this function does not return a value")
+    if code == 3:
+        # (the return a `??` or a collector writes to pass `Canceled` on)
+        if or_throw_returns.has(pos): fatal(pos, "this `??` or collector passes `Canceled` on to the function around it, but that function's declared return type is void: add it (`:>void | Canceled`), or handle it here with `??<Canceled>` or a `match`")
+        fatal(pos, "this function does not return a value")
     fatal(pos, "missing return value (function returns {dt(t)})")
 body_restore = (f: int):
     if pc_missing.has(f): pc_restore(f)

@@ -6,7 +6,7 @@ from p"refine.jo" import (ref_holder_arm)
 from p"expr.jo" import (CV)
 from p"@lib/core/str.jo" import (starts_with)
 from p"ast.jo" import (NF_INCLUSIVE NF_STEP NF_CHECKED NF_FLOW_RETURNS NF_INBOUNDS NF_MUT NF_STMT add_flag clone dewy_live_sources has_flag kid kids mk nkids nodes set_list)
-from p"check.jo" import (FK_INIT SINK_NONE binding_leaves check_binding_input check_block check_struct_fields collide_local copy_write_warnings ctx_for_inst ctx_in_progress ctxs cx dewy_at dewy_cursor_loop dewy_iterator_loop dewy_nested_loop_bindings dewy_sequence_loop ensure_global expectation_ifs fns has_break local_place_decl locals map_loop_values map_tidy_first modules lib_dir ensure_bundled_import new_local returned_place route_text scope_mark scope_reset shape_checked_value shape_dim_decl sink_body_mode sink_fn sinks soa_loop union_has_void unpack_loop unused_value)
+from p"check.jo" import (FK_INIT SINK_NONE or_throw_returns binding_leaves check_binding_input check_block check_struct_fields collide_local copy_write_warnings ctx_for_inst ctx_in_progress ctxs cx dewy_at dewy_cursor_loop dewy_iterator_loop dewy_nested_loop_bindings dewy_sequence_loop ensure_global expectation_ifs fns has_break local_place_decl locals map_loop_values map_tidy_first modules lib_dir ensure_bundled_import new_local returned_place route_text scope_mark scope_reset shape_checked_value shape_dim_decl sink_body_mode sink_fn sinks soa_loop union_has_void unpack_loop unused_value)
 from p"checks_thin.dewy" import (check_stmt jd library_exit_call mutable_loop_syntax resolve_binding_type)
 from p"checks_assign_hooks.dewy" import (sink_void_error)
 from p"checked_eval.dewy" import (LF_ALIAS)
@@ -503,7 +503,11 @@ return_error=(s:int64 t:int64 code:int64):>void=>$unsafe {
     let pos=nodes.ptr[s].pos
     if code =? 1 {fatal(pos "'return' outside of a function")}
     if code =? 2 {fatal(pos "a function giving `never` does not return")}
-    if code =? 3 {fatal(pos "this function does not return a value")}
+    if code =? 3 {
+        # (the return a `??` or a collector writes to pass `Canceled` on)
+        if or_throw_returns.has(pos) {fatal(pos "this `??` or collector passes `Canceled` on to the function around it, but that function's declared return type is void: add it (`:>void | Canceled`), or handle it here with `??<Canceled>` or a `match`")}
+        fatal(pos "this function does not return a value")
+    }
     fatal(pos "missing return value (function returns {dt(t)})")
 }
 body_restore=(f:int64):>void=>{
