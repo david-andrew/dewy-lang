@@ -1,5 +1,5 @@
 """Integer arithmetic in GPU code without a device: proven fixed-width stores (`x + 1` into an
-int32) in the SPIR-V (checked with spirv-val) and Metal text.
+int32) and Dewy's floor `//` and `%` in the SPIR-V (checked with spirv-val) and Metal text.
 (Results on drivers and the CPU fallback: tests/cases/gpu_integer_ops.)"""
 import os
 import shutil
@@ -12,12 +12,12 @@ from tests.support import compiler  # noqa: F401
 PROGRAM = r'''$runtime_checks
 Shift:type=[src:GpuBuffer<int32> dst:GpuBuffer<int32>]
 back=(id:int64 u:Shift):>void=>{
-    if id >? 0 and id <? 1000000 { u.dst[id]=u.src[id-1] } else { u.dst[id]=u.src[id] }
+    if id >? 0 and id <? 1000000 { u.dst[id]=u.src[id-1] // 4 } else { u.dst[id]=u.src[id] % 3 }
 }
 step=(x:int32):>int32=>{
     if x <? 1000 and x >? -1000 {
         let t:int32=x*3-7
-        return t & 255
+        return t // 4 + x % 5
     }
     return 0
 }
@@ -60,4 +60,6 @@ def test_integer_ops_metal(compiler, tmp_path):
     dump = tmp_path / 'msl'
     dump.mkdir()
     _build(compiler, tmp_path, '--target', 'aarch64-mac', DEWY_MSL_DUMP=str(dump))
-    assert list(dump.glob('*.metal'))
+    text = ''.join(path.read_text() for path in sorted(dump.glob('*.metal')))
+    assert 'int sl_fdiv(int a, int b)' in text and 'int sl_fmod(int a, int b)' in text, text
+    assert text.count('sl_fdiv(') >= 2 and text.count('sl_fmod(') >= 2, text

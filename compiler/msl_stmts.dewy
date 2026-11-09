@@ -14,7 +14,7 @@ from p"glsl_emit.dewy" import (gl_narrow gl_struct_fields)
 from p"glsl_ops.dewy" import (gl_store_check gl_unsigned ind sl_type)
 from p"glsl_stmts.dewy" import (gl_binop gl_compound_op sl_hypot_body)
 from p"msl.jo" import (MlRef ml_decls ml_dumped ml_float ml_lref ml_math_names ml_out ml_stage ml_temps ml_utype)
-from p"msl_emit.dewy" import (ml_as ml_block ml_compare ml_field_offset ml_fn ml_gbuf_elem ml_gbuf_store ml_int ml_intrinsic ml_mat_from ml_reset ml_sdiv ml_shift_decls ml_target ml_type ml_varyings ml_zero)
+from p"msl_emit.dewy" import (ml_as ml_block ml_compare ml_field_offset ml_fn ml_gbuf_elem ml_gbuf_store ml_int ml_intrinsic ml_mat_from ml_floor ml_reset ml_sdiv ml_shift_decls ml_target ml_type ml_varyings ml_zero)
 from p"msl_ops.dewy" import (ml_ctx_args ml_drain ml_err ml_first ml_is_floaty ml_is_gbuf_op ml_is_vector ml_local ml_off ml_source ml_store_decls ml_with_ctx ml_word ml_wref)
 from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout)
 from p"types.jo" import (T_FLOAT T_I32 T_IVEC2 T_IVEC3 T_MAT4 T_MATH_INT T_VEC4 fields is_vec prune structs tkind tsize types)
@@ -319,6 +319,8 @@ ml_expr=(e:MslStmtWord):>string=>$unsafe {
             if op =? 'pipe' {return "bool({x} | {y})"}
             if op =? 'caret' {return "({x} != {y})"}
         }
+        # (Dewy's `//` and `%` of signed integers floor, as on the CPU)
+        if nodes.ptr[e].aux2 =? -1 and (op =? 'slash' or op =? 'percent') and types.ptr[t].kind =? 'int_' and types.ptr[t].sign {return gl_narrow("{ml_floor(op =? 'percent')}(int({x}), int({y}))" t)}
         return ml_arith(op x y ta t tb)
     }
     if k =? 'unary' {

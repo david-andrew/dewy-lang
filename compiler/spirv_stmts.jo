@@ -381,6 +381,16 @@ sv_assign_op = (op: Tok) -> Tok:
         shleq: .shl
         shreq: .shr
         _: .plus
+# Dewy's floor `//` (or `%`) of signed integers: the truncating quotient (sv_arith's) one lower,
+# and the remainder plus the divisor, where the remainder's sign is not the divisor's
+sv_floor = (percent: bool, x: int, y: int, t: int, pos: int) -> int:
+    ty = sv_type(t, pos)
+    q = sv_arith(.slash, t, x, t, y, t, pos)
+    r = sv_val(130, ty, [x, sv_val(132, ty, [q, y])])
+    zero = sv_ci(0)
+    fix = sv_val(167, sv_bool(), [sv_val(171, sv_bool(), [r, zero]), sv_val(177, sv_bool(), [sv_val(198, ty, [r, y]), zero])])
+    if percent: return sv_narrow(sv_val(169, ty, [fix, sv_val(128, ty, [r, y]), r]), t)
+    sv_narrow(sv_val(169, ty, [fix, sv_val(130, ty, [q, sv_ci(1)]), q]), t)
 # a op b for numbers and vectors (rt: the result's type)
 sv_arith = (op: Tok, ta0: int, a0: int, tb0: int, b0: int, rt: int, pos: int) -> int:
     ta = prune(ta0)
@@ -596,6 +606,8 @@ sv_expr = (e: int) -> int:
             if op == .amp: return sv_val(167, sv_bool(), [x, y])
             if op == .pipe: return sv_val(166, sv_bool(), [x, y])
             if op == .caret: return sv_val(165, sv_bool(), [x, y])
+        # (Dewy's `//` and `%` of signed integers floor, as on the CPU)
+        if nodes[e].aux2 == -1 and (op == .slash or op == .percent) and types[t].kind == .int_ and types[t].sign: return sv_floor(op == .percent, x, y, t, pos)
         return sv_arith(op, ta, x, tb, y, t, pos)
     if k == .unary:
         if nodes[e].op == i32(int(Tok.plus)): return sv_expr(int(nodes[e].a))

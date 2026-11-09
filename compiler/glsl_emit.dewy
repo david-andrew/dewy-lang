@@ -8,7 +8,7 @@ from p"glsl.jo" import (gl_decls gl_done_structs gl_float gl_out gl_param_copies
 from p"glsl_stmts.dewy" import (gl_expr gl_read gl_stmt)
 from p"glsl_ops.dewy" import (gl_err gl_first gl_wrap gl_wrapped ind sl_type)
 from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout tsd)
-from p"types.jo" import (T_MAT4 fields is_vec prune structs tsize types)
+from p"types.jo" import (T_I32 T_MAT4 fields is_vec prune structs tsize types)
 from p"util.jo" import (name_of)
 
 
@@ -175,6 +175,17 @@ gl_sdiv=(ta:GlslEmitWord tb:GlslEmitWord):>string=>$unsafe {
         gl_decls.push("ivec{n} {nm}(ivec{n} a, {bty} b) \{\n    return ivec{n}({join(cs ", ")});\n}\n")
     }
     nm
+}
+# the name of a helper for Dewy's floor `//` (or `%`) of signed integers: the truncating quotient
+# (sl_sdiv's) one lower, and the remainder plus the divisor, where the remainder's sign is not the divisor's
+gl_floor=(percent:bool):>string=>{
+    gl_sdiv(T_I32 0);
+    if percent {
+        if gl_first("fmod") {gl_decls.push("int sl_fmod(int a, int b) \{\n    int r = int(uint(a) - uint(sl_sdiv(a, b)) * uint(b));\n    return (r != 0 && (r ^ b) < 0) ? int(uint(r) + uint(b)) : r;\n}\n")}
+        return "sl_fmod"
+    }
+    if gl_first("fdiv") {gl_decls.push("int sl_fdiv(int a, int b) \{\n    int q = sl_sdiv(a, b);\n    int r = int(uint(a) - uint(q) * uint(b));\n    return (r != 0 && (r ^ b) < 0) ? q - 1 : q;\n}\n")}
+    "sl_fdiv"
 }
 # (the body of sl_abs: x below 0 negated through unsigned numbers, which wrap; by component)
 sl_abs_body=(t:GlslEmitWord un:string):>string=>$unsafe {

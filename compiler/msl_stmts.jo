@@ -269,6 +269,8 @@ ml_expr = (e: int) -> str:
             if op == .amp: return "bool({x} & {y})"
             if op == .pipe: return "bool({x} | {y})"
             if op == .caret: return "({x} != {y})"
+        # (Dewy's `//` and `%` of signed integers floor, as on the CPU)
+        if nodes[e].aux2 == -1 and (op == .slash or op == .percent) and types[t].kind == .int_ and types[t].sign: return gl_narrow("{ml_floor(op == .percent)}(int({x}), int({y}))", t)
         return ml_arith(op, x, y, ta, t, tb)
     if k == .unary:
         x = ml_expr(int(nodes[e].a))

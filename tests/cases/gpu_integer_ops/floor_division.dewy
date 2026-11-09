@@ -1,0 +1,24 @@
+# Integer `//` and `%` floor on the GPU as on the CPU: -10 // 4 is -3, -1 % 5 is 4.
+W:type=int32<overflow='wrap'>
+step=(x:int32):>int32=>{
+    if x <? 1000 and x >? -1000 {
+        let t:int32=x*3-7
+        let q:int32=t // 4
+        let r:int32=x % 5
+        return q + r - (-x)
+    }
+    return 0
+}
+wrapped=(x:W):>W=>{
+    let t=x
+    t //= 4
+    return t*100+(x % -3)
+}
+main=()=>{
+    let xs:array<int32>=[-999 -17 -8 -5 -4 -1 0 1 3 4 7 998]
+    printl(cpu(step.(gpu(xs))).data)
+    printl(step.(xs))
+    let ws:array<W>=[-17 -9 -8 -1 0 1 7 9]
+    printl(cpu(wrapped.(gpu(ws))).data)
+    printl(wrapped.(ws))
+}

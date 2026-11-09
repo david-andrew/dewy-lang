@@ -193,6 +193,8 @@ gl_expr = (e: int) -> str:
             x = gl_expr(a)
             y = gl_expr(b)
             return "({x} - {y} * trunc({x} / {y}))"
+        # (Dewy's `//` and `%` of signed integers floor, as on the CPU)
+        if nodes[e].aux2 == -1 and (op == .slash or op == .percent) and types[t].kind == .int_ and types[t].sign: return gl_narrow("{gl_floor(op == .percent)}({gl_expr(a)}, {gl_expr(b)})", t)
         return gl_arith(op, gl_expr(a), gl_expr(b), ntype(a), t, ntype(b))
     if k == .unary:
         if nodes[e].op == i32(int(Tok.plus)): return gl_expr(int(nodes[e].a))

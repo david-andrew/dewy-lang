@@ -11,7 +11,7 @@ from p"msl.jo" import (MlRef ml_bodies ml_decls ml_done ml_done_fns ml_lref ml_o
 from p"msl_stmts.dewy" import (ml_expr ml_stmt ml_vec_ctor ml_write)
 from p"msl_ops.dewy" import (ml_ctx_params ml_err ml_first ml_fn_name ml_gbuf_value ml_is_floaty ml_is_vector ml_local ml_ncomp ml_with_ctx)
 from p"type_ops.dewy" import (dt fixed_len is_lib_texture layout tsd)
-from p"types.jo" import (T_MAT4 T_VEC4 fields is_vec prune structs tkind tsize types)
+from p"types.jo" import (T_I32 T_MAT4 T_VEC4 fields is_vec prune structs tkind tsize types)
 from p"util.jo" import (name_of)
 
 MslEmitWord:type=int64<overflow='wrap'>
@@ -201,6 +201,17 @@ ml_sdiv=(ta:MslEmitWord tb:MslEmitWord):>string=>$unsafe {
         ml_decls.push("int{n} {nm}(int{n} a, {bty} b) \{\n    return int{n}({join(cs ", ")});\n}\n")
     }
     nm
+}
+# the name of a helper for Dewy's floor `//` (or `%`) of signed integers: the truncating quotient
+# (sl_sdiv's) one lower, and the remainder plus the divisor, where the remainder's sign is not the divisor's
+ml_floor=(percent:bool):>string=>{
+    ml_sdiv(T_I32 0);
+    if percent {
+        if ml_first("fmod") {ml_decls.push("int sl_fmod(int a, int b) \{\n    int r = as_type<int>(as_type<uint>(a) - as_type<uint>(sl_sdiv(a, b)) * as_type<uint>(b));\n    return (r != 0 && (r ^ b) < 0) ? as_type<int>(as_type<uint>(r) + as_type<uint>(b)) : r;\n}\n")}
+        return "sl_fmod"
+    }
+    if ml_first("fdiv") {ml_decls.push("int sl_fdiv(int a, int b) \{\n    int q = sl_sdiv(a, b);\n    int r = as_type<int>(as_type<uint>(a) - as_type<uint>(q) * as_type<uint>(b));\n    return (r != 0 && (r ^ b) < 0) ? q - 1 : q;\n}\n")}
+    "sl_fdiv"
 }
 ml_shift_decls=():>void=>{
     if not ml_first("shift") {return}
