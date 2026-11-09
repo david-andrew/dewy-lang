@@ -74,8 +74,22 @@ def version_of(root):
     return 'iana-' + first.split()[-1]
 
 
+# CLDR keeps the tz names it first used; a renamed zone answers to its current name, as a
+# Linux machine set to the same place does (`India Standard Time` is Asia/Kolkata, not Asia/Calcutta).
+CLDR_RENAMED = {
+    'America/Buenos_Aires': 'America/Argentina/Buenos_Aires', 'America/Catamarca': 'America/Argentina/Catamarca',
+    'America/Cordoba': 'America/Argentina/Cordoba', 'America/Jujuy': 'America/Argentina/Jujuy',
+    'America/Mendoza': 'America/Argentina/Mendoza', 'America/Godthab': 'America/Nuuk',
+    'America/Indianapolis': 'America/Indiana/Indianapolis', 'America/Louisville': 'America/Kentucky/Louisville',
+    'Asia/Calcutta': 'Asia/Kolkata', 'Asia/Katmandu': 'Asia/Kathmandu', 'Asia/Rangoon': 'Asia/Yangon',
+    'Asia/Saigon': 'Asia/Ho_Chi_Minh', 'Atlantic/Faeroe': 'Atlantic/Faroe', 'Europe/Kiev': 'Europe/Kyiv',
+    'Pacific/Enderbury': 'Pacific/Kanton', 'Pacific/Ponape': 'Pacific/Pohnpei', 'Pacific/Truk': 'Pacific/Chuuk',
+}
+
+
 def windows_names(path, names):
     pairs = re.findall(r'<mapZone other="([^"]+)" territory="001" type="([^" ]+)', path.read_text())
+    pairs = [(w, CLDR_RENAMED.get(z, z)) for w, z in pairs]
     return sorted(((w.encode(), z) for w, z in pairs if z in names), key=lambda pair: pair[0])
 
 

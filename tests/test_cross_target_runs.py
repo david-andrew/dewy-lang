@@ -124,6 +124,29 @@ def test_arm64_branches_reach_across_large_functions(compiler, tmp_path, flags):
     assert (status, 'integer overflow' in err) == (101, True), (status, out, err)
 
 
+# A machine set to India Standard Time, as Windows names it, is in Asia/Kolkata: CLDR's table
+# says Asia/Calcutta, the name tz keeps only as a link.
+WINDOWS_ZONE = """$time.zone = 'system'
+main = (argv:array<string>):>void => {
+    let text = if argv.length >? 1 argv[1] else "2026-07-01T12:00"
+    printl(zoned(text))
+}
+"""
+
+
+def test_windows_zone_names_are_current(compiler, tmp_path):
+    source = WINDOWS_ZONE.replace("'system'", "'India Standard Time'")
+    binary = build(compiler, tmp_path, source, 'x86_64-linux')
+    assert run('x86_64-linux', binary)[:2] == (0, '2026-07-01T12:00:00+05:30[Asia/Kolkata]\n')
+
+
+def test_windows_machine_zone_reads_as_linux_does(compiler, tmp_path):
+    binary = build(compiler, tmp_path, WINDOWS_ZONE, 'x86_64-windows')
+    status, out, err = run('x86_64-windows', binary,
+                           setup='ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && unset TZ &&')
+    assert (status, out) == (0, '2026-07-01T12:00:00+05:30[Asia/Kolkata]\n'), err
+
+
 # Windows reads `\` as a separator and `C:\` or `\\server\share\` as a root, as pathlib does.
 WINDOWS_PATHS = r"""main = ():>void => {
     loop text in ["C:\\Users\\ann\\notes.txt" "\\\\srv\\share\\d\\f.txt" "dir\\sub\\x.tar.gz" "C:\\" "a/b\\c"] {
