@@ -1,5 +1,6 @@
 """Integer arithmetic in GPU code without a device: proven fixed-width stores (`x + 1` into an
-int32) and Dewy's floor `//` and `%` in the SPIR-V (checked with spirv-val) and Metal text.
+int32), explicit narrowings and Dewy's floor `//` and `%`, in the SPIR-V (checked with
+spirv-val) and Metal text.
 (Results on drivers and the CPU fallback: tests/cases/gpu_integer_ops.)"""
 import os
 import shutil
@@ -17,7 +18,8 @@ back=(id:int64 u:Shift):>void=>{
 step=(x:int32):>int32=>{
     if x <? 1000 and x >? -1000 {
         let t:int32=x*3-7
-        return t // 4 + x % 5
+        let h=int16(t)
+        return h // 4 + x % 5
     }
     return 0
 }

@@ -222,6 +222,8 @@ gl_expr = (e: int) -> str:
             if types[from_].kind == .bool_: return "int({a})"
             return gl_narrow(a, t)
         if cv == .float_ or cv == .none_ or cv == .quantity_const: return a
+        # (into a refined type: proven, as every check in GPU code is, so the value itself)
+        if cv == .refinement: return if types[t].kind == .int_ and types[from_].kind == .int_: gl_narrow(a, t) else: a
         if cv == .fixed_store and types[t].kind == .int_:
             gl_store_check(e, t)
             return gl_narrow(a, t)

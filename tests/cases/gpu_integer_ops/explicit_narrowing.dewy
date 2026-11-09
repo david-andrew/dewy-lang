@@ -1,0 +1,15 @@
+# An explicit narrowing a guard proves (`int32(id)`, `int16(x)`) is a plain value in GPU code.
+$runtime_checks
+P:type=[dst:GpuBuffer<int32> mask:int32]
+pair=(id:int64 u:P):>void=>{
+    if id <? 0 or id >=? 1048576 { return }
+    let i=int32(id)
+    u.dst[i]=i xor u.mask
+}
+half=(x:int32):>int16=>if x >? -30000 and x <? 30000 {int16(x)} else {0}
+main=()=>{
+    let b=gpu_buffer<int32>(6)
+    dispatch(compute(@pair) 6 P(b 5))
+    printl(cpu(b))
+    printl(cpu(half.(gpu([int32(-7) 29999 40000]))).data)
+}

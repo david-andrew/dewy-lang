@@ -249,6 +249,8 @@ gl_expr=(e:GlslStmtWord):>string=>$unsafe {
             return gl_narrow(a t)
         }
         if cv =? int32(int64(CV.float_)) or cv =? int32(int64(CV.none_)) or cv =? int32(int64(CV.quantity_const)) {return a}
+        # (into a refined type: proven, as every check in GPU code is, so the value itself)
+        if cv =? int32(int64(CV.refinement)) {return if types.ptr[t].kind =? 'int_' and types.ptr[from_].kind =? 'int_' {gl_narrow(a t)} else {a}}
         if cv =? int32(int64(CV.fixed_store)) and types.ptr[t].kind =? 'int_' {
             gl_store_check(e t)
             return gl_narrow(a t)
