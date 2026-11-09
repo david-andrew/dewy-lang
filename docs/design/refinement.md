@@ -146,7 +146,7 @@ The binding can be a `let` or `const`, a named record's field or a function's pa
 
 **Provisional: an upper bound on a signed element also means nonnegative.** `int64<(<? parent.length)>` also requires `>=? 0`, unless the contract states its own lower bound. D17 calls these elements valid indexes, and its example only proves `parent[parent[i]]` if they are. A sentinel is still easy to write: `int64<v => -1 <=? v and v <? next.length>` admits `-1`, and such an element needs a guard before it indexes.
 
-**Not supported:** a self-length contract combined with a length contract on the same array (`array<int64<(<? p.length)> length >=? 1>`) is a declaration error. Dependent elements stay limited to the array's own length. There is no general dependent-element system.
+**Not supported:** a self-length contract combined with a length contract on the same array (`array<int64<(<? p.length)> length >=? 1>`) is a declaration error. Dependent elements are limited to the array's own length and, in a record, a sibling array's length bounding a field's array elements or dictionary values (`next:array<int64<(<? nodes.length)>>`, `edges:dict<string int64<(<? terminal.length)>>`). There is no general dependent-element system.
 
 ### Representation
 

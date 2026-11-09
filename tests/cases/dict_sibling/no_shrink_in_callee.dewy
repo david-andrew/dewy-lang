@@ -1,0 +1,7 @@
+Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
+shrink = (@xs:array<bool>):>void => { xs.clear() }
+main = ():>void => {
+    let t:Trie = [terminal=[false false] edges=["a"->1]]
+    shrink(@t.terminal)
+    printl(t.edges)
+}

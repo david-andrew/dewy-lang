@@ -175,6 +175,8 @@ struct RefArrayCall:
     candidate: int
 refine_active = false
 ref_array_call_prepare = (d: int, xs: mut int[], ps: int[], written: int[]) -> RefArrayCall: RefArrayCall(1)
+ref_sib_dict_call = (d: int, xs: mut int[], ps: int[]):
+    pass
 ref_array_call_finish = (n: int, prepared: RefArrayCall) -> int: T_BOOL
 representation_type = (t: int) -> int: t
 ''',

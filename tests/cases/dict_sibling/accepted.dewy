@@ -1,0 +1,21 @@
+# A dictionary field's values index a sibling array: checked on every store, known on every read.
+Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
+add = (@t:Trie key:string):>void => {
+    t.terminal.push(false)
+    t.edges[key] = t.terminal.length - 1
+}
+main = ():>void => {
+    let t:Trie = [terminal=[false false] edges=["a"->1]]
+    add(@t "b")
+    let fresh = t.terminal.length
+    t.terminal.push(true)
+    if t.edges.insert_if_absent("c" fresh) { printl("added") }
+    if "c" in? t.edges { printl(t.terminal[t.edges["c"]]) }
+    let found = t.edges.get("b")
+    if found isnt? none { printl(t.terminal[found]) }
+    if t.edges.remove("a") { printl(t.edges) }
+    if "b" in? t.edges { printl(t.edges.pop("b")) }
+    t.edges.clear()
+    t.terminal.push(false)
+    printl("{t.terminal.length} {t.edges.length}")
+}

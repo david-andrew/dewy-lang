@@ -15,7 +15,7 @@ from p"effects.jo" import (effect_contracts)
 from p"poly_ops.dewy" import (poly_default_type poly_default_variant poly_fnref)
 from p"util.jo" import (pos_file files)
 from p"ide.jo" import (ide_on)
-from p"refine.jo" import (RefArrayCall refine_active ref_array_call_prepare representation_type)
+from p"refine.jo" import (RefArrayCall refine_active ref_array_call_prepare ref_sib_dict_call representation_type)
 from p"refine_rare.dewy" import (ref_array_call_finish)
 from p"dewy_method_ops.dewy" import (dewy_is_method)
 from p"proofs.jo" import (proof_active)
@@ -286,6 +286,7 @@ resolve_fn_call=(n:CRWord name:CRWord decls:array<int64> args:array<int64> expec
     if capture_defaults and cd.sig.mutmask not=? 0 {call_resolve_error(3 n name decl 0 partial)}
     let refined_array=RefArrayCall[]
     if refine_active and not partial and not capture_defaults and cd.sig.mutmask =? 1 and fns.ptr[f].ret =? T_VOID {refined_array=ref_array_call_prepare(decl @cd.args fns.ptr[f].ptypes args)}
+    if refine_active and not partial and not capture_defaults and cd.sig.mutmask =? 1 {ref_sib_dict_call(decl @cd.args fns.ptr[f].ptypes)}
     let captured:array<int64>=[]
     let statements:array<int64>=[]
     if capture_defaults {

@@ -788,6 +788,12 @@ __first_element_above = (xs: int[], bound: int) -> int:
         if xs[i] > bound: return i
     -1
 
+# The same for a dictionary's values, skipping removed entries' positions.
+__first_live_value_above = (vals: int[], gone: bool[], bound: int) -> int:
+    loop i in [0..vals.len()):
+        if vals[i] > bound and (i >= gone.len() or not gone[i]): return i
+    -1
+
 __print_str = (s: str):
     __out(data(s), len(s), false)
     __out(data("\n"), 1, true)

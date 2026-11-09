@@ -228,6 +228,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
     if capture_defaults and cd.sig.mutmask != 0: call_resolve_error(3, n, name, decl, 0, partial)
     refined_array = RefArrayCall()
     if refine_active and not partial and not capture_defaults and cd.sig.mutmask == 1 and fns[f].ret == T_VOID: refined_array = ref_array_call_prepare(decl, cd.args, fns[f].ptypes, args)
+    if refine_active and not partial and not capture_defaults and cd.sig.mutmask == 1: ref_sib_dict_call(decl, cd.args, fns[f].ptypes)
     captured: int[]
     statements: int[]
     if capture_defaults:

@@ -3794,11 +3794,15 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 result = fact_fresh(s, ntype(n))
                 member = fact_map_member(s, n, values[0], values[1])
                 if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -3, false, member))
+                if ref_self_active: ref_sib_map_read(s, values[0], result, n)
                 return result
             if map > 3 or not builtin: fact_path_call_effects(n, s)
             if map == 1: return fact_map_member(s, n, before, values[1])
             # (the entry, of the dictionary's value after the hashing's calls)
-            if map == 2: return fact_map_entry(s, n, (if builtin: before else: fact_map_receiver(s, n, values[0])), values[1])
+            if map == 2:
+                entry = fact_map_entry(s, n, (if builtin: before else: fact_map_receiver(s, n, values[0])), values[1])
+                if ref_self_active: ref_sib_map_read(s, values[0], entry, n)
+                return entry
             # (the entry is there now, in d's value after the change, and so is
             # every key known there before: a store removes none)
             if map == 3 or map == 5:
@@ -3813,7 +3817,9 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     loop key in keys: fact_assume(s, fact_project(s, after, key, true, T_BOOL), true)
                 fact_assume(s, fact_map_member(s, n, after, values[1]), true)
                 if map == 3: return fact_map_position(s, n, after, values[1])
-            return fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
+            other = fact_new(s, fact_domain(ntype(n), .missing, n), FactTerm(type = ntype(n)))
+            if ref_self_active and (map == 4 or map == 6): ref_sib_map_read(s, values[0], other, n)
+            return other
         zero_test = fact_rational_zero_test(n)
         if zero_test >= 0 and values[zero_test] != 0:
             numerator = fact_project(s, values[zero_test], intern("numerator"), false, T_MATH_INT)

@@ -1,0 +1,12 @@
+# exit: 101
+Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
+put = (@t:Trie key:string at:int64):>void => {
+    $runtime_checks
+    t.edges[key] = at
+}
+main = ():>void => {
+    let t:Trie = [terminal=[false false] edges=[]]
+    put(@t "a" 1)
+    printl(t.edges)
+    put(@t "b" 2)
+}

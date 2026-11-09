@@ -2984,7 +2984,14 @@ or clearing `next` keep the bound and work in place. Making
 `nodes` shorter (`pop`, `truncate`, `remove`, `clear`, a shorter replacement, also through an
 alias) is a compile error unless the elements are known to fit, as after clearing or emptying
 `next` first; under `$runtime_checks` it checks every element of `next`, O(n), before changing
-the record. A dictionary's values cannot have such a bound yet.
+the record. A dictionary field's values can have the same bound,
+`Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]`: a literal's
+values are checked when the record is built, a store or `insert_if_absent` checks the value
+against `terminal.length`, and `t.edges[k]` and the value of `t.edges.get(k)` are known to be
+valid indexes of `terminal`. `remove`, `pop`, `clear` and growing `terminal` keep the bound in place.
+An in-place change of a value (`t.edges[k] += 1`) is a compile error: store the new value whole.
+Making `terminal` shorter is a compile error unless the values are known to fit; under
+`$runtime_checks` it checks every value, O(n).
 
 
 ```dewy

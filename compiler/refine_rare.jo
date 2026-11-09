@@ -552,7 +552,7 @@ ref_self_grown = (t0: int, grown: int) -> int:
     atoms: RefAtom[]
     loop atom in ref_predicates[int(types[t].st)]:
         atoms.push(RefAtom(atom.op, RefTerm(0), RefTerm(6, path = [-1], offset = atom.b.offset + grown)))
-    mk_refined(int(types[representation_type(t)].elem), ref_intern(atoms))
+    mk_refined(ref_held_element(t), ref_intern(atoms))
 # A value going into the array: checked against its length, with `grown` more elements.
 ref_self_value = (value: int, t: int, grown: int, place: int):
     stored = ref_self_grown(t, grown)

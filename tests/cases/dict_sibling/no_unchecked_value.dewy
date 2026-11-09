@@ -1,0 +1,8 @@
+Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
+put = (@t:Trie key:string at:int64):>void => {
+    if at >=? 0 { t.edges[key] = at }
+}
+main = ():>void => {
+    let t:Trie = [terminal=[false] edges=[]]
+    put(@t "a" 0)
+}
