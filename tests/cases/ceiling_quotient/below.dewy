@@ -1,0 +1,35 @@
+# A ceiling division by a positive count, `(n + c - 1) // c`, is at most the
+# nonnegative `n`, in each spelling of its dividend, even where the sum is
+# beyond a word.
+plain = (n:int64<(>=? 0)> c:int64<(>=? 1)>):>int64 => {
+    let q = (n+c-1)//c
+    $assert 0 <=? q and q <=? n
+    q
+}
+grouped = (n:int64<(>=? 0)> c:int64<(>? 0)>):>int64 => {
+    let q = (n+(c-1))//c
+    $assert q <=? n
+    q
+}
+front = (n:int64<(>=? 0)> c:int64<(>? 0)>):>int64 => {
+    let q = (c-1+n)//c
+    $assert q <=? n
+    q
+}
+pieces = (xs:array<uint8> c:int64<(>? 0)>):>int64 => {
+    let size = (xs.length+c-1)//c
+    $assert size <=? xs.length
+    size
+}
+positive = (n:int64<(>=? 1)> c:int64<(>=? 1)>):>int64 => {
+    let q = (n+c-1)//c
+    $assert 1 <=? q
+    q
+}
+main = ():>void => {
+    printl(plain(7 2))
+    printl(grouped(0 5))
+    printl(front(9 4))
+    printl(pieces([1 2 3 4 5] 2))
+    printl(positive(1 100))
+}

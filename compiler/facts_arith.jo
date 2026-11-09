@@ -210,6 +210,11 @@ fact_sum_source = (n: int) -> int:
 fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     if fact_type(ntype(n)) == T_U64: return exact_unsigned_fact(s, n, op, a, b)
     x = fact_bound(s, a); y = fact_bound(s, b)
+    # (a ceiling division's dividend `m + c - 1`: the wide sum minus one stays a
+    # term, so fact_ceiling_operand can read it. Only a quotient's own dividend)
+    if x.wide and not y.wide and op == .minus and n == fact_sum_operand and y.lo == 1 and y.hi == 1 and exact_has_node(n) and fact_terms[a].op == .plus:
+        least = if x.lo == FACT_MIN: FACT_MIN else: x.lo - 1
+        return fact_new(s, FactBound(least, FACT_MAX, x.lo > 1, wide = true), FactTerm(op, a, b, n, ntype(n)))
     if x.wide or y.wide: return fact_unmodeled(s, n, .unsupported)
     if op != .star:
         # An interval beyond the host word may still be bounded through rows (a

@@ -271,6 +271,54 @@ fact_sum_quotient=(@s:FactState n:NumericWord a:NumericWord d:NumericWord):>Nume
     if d =? 2 and not subtract {fact_midpoint(@s n v a)}
     v
 }
+# `(m + c - 1) // c`, a ceiling division by a positive c: m + c - 1 < c*(m + 1)
+# for m >= 0, so the quotient is at most m (`(len + count - 1) // count` pieces
+# of a `len`-long array). The dividend is `m + c - 1` or `m + (c - 1)`, read from
+# its two terms; returns m, or 0. O(1).
+fact_ceiling_operand=(s:FactState a:NumericWord b:NumericWord):>NumericWord=>{
+    if a =? 0 or b =? 0 {return 0}
+    let d=fact_terms[a]
+    if d.a =? 0 or d.b =? 0 or fact_type(d.type) =? T_U64 {return 0}
+    if d.op =? 'minus' {
+        if not fact_is_unit(s d.b) {return 0}
+        let sum=fact_terms[d.a]
+        if sum.op not=? 'plus' or sum.a =? 0 or sum.b =? 0 or fact_type(sum.type) =? T_U64 {return 0}
+        if sum.a =? b {return sum.b}
+        if sum.b =? b {return sum.a}
+        return 0
+    }
+    if d.op not=? 'plus' {return 0}
+    loop side in [0..2) {
+        let e=fact_terms[if side =? 0 {d.b} else {d.a}]
+        if e.op =? 'minus' and e.a =? b and e.b not=? 0 and fact_type(e.type) not=? T_U64 and fact_is_unit(s e.b) {return if side =? 0 {d.a} else {d.b}}
+    }
+    0
+}
+fact_is_unit=(s:FactState v:NumericWord):>bool=>{
+    let k=fact_bound(s v)
+    k.lo =? 1 and k.hi =? 1 and not k.wide
+}
+# The ceiling quotient's value: within [0, m], and below m by the retained row.
+# Demanded by a `//` or `/` whose dividend has the ceiling shape. O(1).
+fact_ceiling_quotient=(@s:FactState n:NumericWord a:NumericWord b:NumericWord):>NumericWord=>{
+    let m=fact_ceiling_operand(s a b)
+    if m =? 0 {return 0}
+    let y=fact_bound(s b)
+    if y.wide {return 0}
+    if y.lo <? 1 and y.hi >=? 1 {y.lo=max(y.lo fact_relational(s b false))}
+    if y.lo <? 1 {return 0}
+    let mb=fact_bound(s m)
+    if mb.wide or not fact_host_endpoint(s m true) {return 0}
+    if mb.lo <? 0 {mb.lo=max(mb.lo fact_relational(s m false))}
+    if mb.lo <? 0 {return 0}
+    let least:NumericWord=if mb.lo >=? 1 {1} else {0}
+    let r=FactBound(least mb.hi)
+    r.nz=r.lo >? 0
+    let v=fact_new(@s r FactTerm('eof' a b n ntype(n)))
+    fact_set_bound(@s v r)
+    fact_difference(@s v m 0 n)
+    v
+}
 # Integer `//` and `%` by a nonzero divisor (kind 1, 2), or by a power of two
 # as a shift count or mask (3, 4). Dewy's remainder has the divisor's sign, so
 # `x % n` lies in [0, n) for positive n; the truncating form agrees when the
@@ -279,6 +327,10 @@ fact_sum_quotient=(@s:FactState n:NumericWord a:NumericWord d:NumericWord):>Nume
 fact_floor=(@s:FactState n:NumericWord kind:NumericWord a:NumericWord b:NumericWord floor:bool):>NumericWord=>{
     let x=fact_bound(s a)
     let y=fact_bound(s b)
+    if kind =? 1 {
+        let ceiling=fact_ceiling_quotient(@s n a b)
+        if ceiling not=? 0 {return ceiling}
+    }
     if x.wide and not y.wide and kind =? 1 and floor and y.lo =? y.hi {
         let divided=fact_sum_quotient(@s n a y.lo)
         if divided not=? 0 {return divided}

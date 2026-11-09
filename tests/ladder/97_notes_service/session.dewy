@@ -1,7 +1,6 @@
 # Deterministic drivers: raw HTTP transcripts against a server connection,
 # and a scripted UI session whose calls travel as bytes through the same
 # server. Both run in-process, natively and in the wasm build.
-$runtime_checks
 from p"http.dewy" import Response, HttpError
 from p"router.dewy" import Service
 from p"server.dewy" import Connection, feed, finish
@@ -53,7 +52,7 @@ pieces = (data:array<uint8> count:int64<(>? 0)>):>array<array<uint8>> => {
     let start = 0
     loop start <? data.length {
         let stop = min(start+size data.length)
-        $runtime_assert 0 <=? start and start <=? stop and stop <=? data.length
+        $assert 0 <=? start and start <=? stop and stop <=? data.length
         out.push(data[start..stop))
         start = stop
     }

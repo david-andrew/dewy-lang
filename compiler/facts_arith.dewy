@@ -174,6 +174,12 @@ fact_arithmetic=(@s:FactState n:ArithWord op:Tok a:ArithWord b:ArithWord):>Arith
     if op =? 'minus' and a not=? 0 and a =? b {return fact_constant(@s 0)}
     let x=fact_bound(s a)
     let y=fact_bound(s b)
+    # (a ceiling division's dividend `m + c - 1`: the wide sum minus one stays a
+    # term, so fact_ceiling_operand can read it. Only a quotient's own dividend)
+    if x.wide and not y.wide and op =? 'minus' and n =? fact_sum_operand and y.lo =? 1 and y.hi =? 1 and exact_has_node(n) and fact_terms[a].op =? 'plus' {
+        let least:ArithWord=if x.lo =? FACT_MIN {FACT_MIN} else {x.lo - 1}
+        return fact_new(@s FactBound(least FACT_MAX x.lo >? 1 wide=true) FactTerm(op a b n ntype(n)))
+    }
     if x.wide or y.wide {return fact_unmodeled(@s n 'unsupported')}
     if op not=? 'star' {
         # An interval beyond the host word may still be bounded through rows (a

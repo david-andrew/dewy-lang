@@ -1,0 +1,7 @@
+# The added term must be the divisor itself: (n + d - 1) // c can exceed n.
+ceil_div = (n:int64<(>=? 0)> c:int64<(>=? 1)> d:int64<(>=? 1)>):>int64 => {
+    let q = (n+d-1)//c
+    $assert q <=? n
+    q
+}
+main = ():>void => printl(ceil_div(0 1 5))

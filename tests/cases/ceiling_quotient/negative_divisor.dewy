@@ -1,0 +1,7 @@
+# A negative count is no ceiling: (5 + -2 - 1) // -2 is -1, below zero.
+ceil_div = (n:int64<(>=? 0)> c:int64<(<=? -1)>):>int64 => {
+    let q = (n+c-1)//c
+    $assert 0 <=? q
+    q
+}
+main = ():>void => printl(ceil_div(5 -2))

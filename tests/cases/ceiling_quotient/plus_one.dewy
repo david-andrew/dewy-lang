@@ -1,0 +1,7 @@
+# (n + c + 1) // c can exceed n: (1 + 1 + 1) // 1 is 3.
+ceil_div = (n:int64<(>=? 0)> c:int64<(>=? 1)>):>int64 => {
+    let q = (n+c+1)//c
+    $assert q <=? n
+    q
+}
+main = ():>void => printl(ceil_div(1 1))
