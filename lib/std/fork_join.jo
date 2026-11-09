@@ -76,6 +76,15 @@ else:
     __futex_wait = (p: *int, v: int): syscall(202, p, 128, v, 0)      # FUTEX_WAIT_PRIVATE
     __futex_wake = (p: *int): syscall(202, p, 129, 0x7FFFFFFF)        # FUTEX_WAKE_PRIVATE (all)
 
+    # A worker's own signal stack, as the main thread has one (lib/std/backtrace.jo): the crash
+    # handler of an overflow in the worker's guard runs there and reports it
+    @cabi
+    __linux_worker = (id: int):
+        size = 1 << 16
+        st = (__os_pages(size) as int, 0, size)            # (stack_t, on this stack: it never returns)
+        syscall(131, &st, 0)                                           # sigaltstack
+        __worker_main(id)
+
 # All shared deque accesses use sequentially consistent primitives. In
 # particular bottom's decrement is fenced before top is read, and a thief
 # reads the slot before competing for top. Ring slots themselves are atomic:
@@ -273,8 +282,14 @@ __fj_start = ():
             __tstack_base = base
             start: cfn(int) -> int = __w32_thread_start
             loop i in [0..n):
-                # (a worker's stack is committed whole: no guard pages to grow it)
-                if VirtualAlloc(base + (i << __TSTACK_SHIFT), 1 << __TSTACK_SHIFT, u32(0x1000), 4) == null: break
+                # (a worker's stack is committed whole but for its guard: an overflow faults there
+                # rather than run into the next worker's stack. The guard's top page is a one-shot
+                # PAGE_GUARD and the 256 KB under it committed, room for the crash handler to report
+                # the overflow on this stack; the rest stays reserved.)
+                low = base + (i << __TSTACK_SHIFT)
+                if VirtualAlloc(low + __TSTACK_GUARD, (1 << __TSTACK_SHIFT) - __TSTACK_GUARD, u32(0x1000), 4) == null: break
+                VirtualAlloc(low + __TSTACK_GUARD - (1 << 18), (1 << 18) - 4096, u32(0x1000), 4)
+                VirtualAlloc(low + __TSTACK_GUARD - 4096, 4096, u32(0x1000), 0x104)              # PAGE_READWRITE | PAGE_GUARD
                 if CreateThread(null, 65536, start as *u8, (i + 1) as *u8, 0, null) == null: break
                 __fj_workers += 1
         else when TARGET == "macos":
@@ -290,9 +305,12 @@ __fj_start = ():
             base = syscall(9, 0, size, 3, 0x22 | 0x4000, -1, 0)       # MAP_PRIVATE|ANON|NORESERVE
             if base < 0 and base > -4096: return
             __tstack_base = base as *u8
-            entry: cfn(int) = __worker_main
+            entry: cfn(int) = __linux_worker
             loop i in [0..n):
                 top = __tstack_base + ((i + 1) << __TSTACK_SHIFT)
+                # (the low end of each stack is a guard: an overflow faults there rather than run
+                # into the next worker's stack)
+                if syscall(10, top - (1 << __TSTACK_SHIFT), __TSTACK_GUARD, 0) != 0: break     # mprotect
                 if __clone_thread(entry as *u8, i + 1, top) < 0: break
                 __fj_workers += 1
 

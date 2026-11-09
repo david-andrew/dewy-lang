@@ -96,6 +96,8 @@ when TARGET == "windows":
     # (EXCEPTION_POINTERS: the record (code at 0, address at 32 + 8) and the registers (CONTEXT:
     # rsp at 0x98, rbp at 0xA0, rip at 0xF8). Only faults in the program's own code: libraries
     # may handle their exceptions themselves.)
+    __crash_reporter = 0
+
     @cabi
     __w32_crash = (ep: *u8) -> i32:
         rec = (ep as **u8)[0]
@@ -115,9 +117,16 @@ when TARGET == "windows":
             else: what = "crashed: memory access at 0x{__hex_text(a)} (a bad pointer, in code using raw pointers or C?)"
         else if code == 0xC0000094 or code == 0xC0000095: what = "arithmetic error"
         else if code == 0xC000001D or code == 0xC0000096: what = "illegal instruction"
+        # (the first thread to fault reports; threads faulting while it does wait for its exit)
+        me = __tid() + 1
+        if __atomic_cas(&__crash_reporter, 0, me) != 0:
+            if __atomic_add(&__crash_reporter, 0) == me: __exit(101)    # (the report itself crashed)
+            loop true: Sleep(u32(1000))
         __write_err("panic: {what}\n")
         __backtrace_from(rbp, rip)
-        if __repl_crashed(ctx): return -1                                    # EXCEPTION_CONTINUE_EXECUTION
+        if __repl_crashed(ctx):
+            __atomic_cas(&__crash_reporter, me, 0)
+            return -1                                                        # EXCEPTION_CONTINUE_EXECUTION
         __exit(101)
         0
 else when TARGET == "macos":
@@ -166,13 +175,23 @@ else when TARGET != "wasm":
         h: cfn(i32, *u8, *u8) = __crash
         act = fill(0, 4)
         act[0] = h as int
-        act[1] = 4 | 0x08000000 | 0x04000000 | 0x80000000   # SA_SIGINFO | SA_ONSTACK | SA_RESTORER | SA_RESETHAND
+        act[1] = 4 | 0x08000000 | 0x04000000                # SA_SIGINFO | SA_ONSTACK | SA_RESTORER
         act[2] = h as int                                  # (never returned to)
         loop sig in [4, 7, 8, 11]: syscall(13, sig, data(act), 0, 8)    # rt_sigaction
         true
 
+    # (the thread reporting a crash: the first to fault reports, and threads faulting while it
+    # does wait for its exit; the handler stays installed, so a second fault is not the default
+    # action ending the program before the report)
+    __crash_reporter = 0
+
     @cabi
     __crash = (sig: i32, info: *u8, uc: *u8):
+        me = syscall(186)                                  # gettid
+        if __atomic_cas(&__crash_reporter, 0, me) != 0:
+            if __atomic_add(&__crash_reporter, 0) == me: __exit(101)    # (the report itself crashed)
+            pause = (1, 0)
+            loop true: syscall(35, &pause, 0)              # nanosleep
         # the registers when it happened (x86-64: ucontext_t's uc_mcontext.gregs at 40; arm64:
         # uc_mcontext at 176, its x0-x30 from 184, then sp and pc)
         rbp = 0

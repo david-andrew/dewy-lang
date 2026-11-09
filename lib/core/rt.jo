@@ -76,6 +76,7 @@ __entropy_word = () -> u64:
 # reference counts are updated with atomic instructions.
 const __MAX_THREADS = 64
 const __TSTACK_SHIFT = 23              # 8 MB per worker stack
+const __TSTACK_GUARD = 1 << 20         # the low 1 MB of each is a guard: an overflow faults there
 __tstack_base: *u8 = null
 __mt_active = false                   # a parallel job is running: refcounts are atomic
 
