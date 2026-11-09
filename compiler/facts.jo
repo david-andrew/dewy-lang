@@ -3577,7 +3577,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             fact_add_projection(s, FactProjection(fresh, -1, false, size))
             fact_store_route(s, route, fresh, n)
             return 0
-        if array >= 30:
+        if array == 30 or array == 31:
             # (a slice assignment changes elements, not the length)
             a = kid(n, 0)
             route = fact_receiver_route(n, s)

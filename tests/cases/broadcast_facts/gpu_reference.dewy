@@ -1,0 +1,12 @@
+# A CPU reference beside a GPU upload: the upload's element count survives
+# the reference's dotted expression, so the GPU reductions need no guard.
+saxpy=(a:float32 x:float32 y:float32):>float32=>a*x+y
+main=()=>{
+    let xs:array<float32>=[1.0 2.0 3.0]
+    let ys:array<float32>=[4.0 -5.0 6.0]
+    let gx=gpu(xs) let gy=gpu(ys)
+    let ref=saxpy.(2.0 xs ys)
+    printl(ref)
+    printl(min(gy))
+    printl(max(gx))
+}
