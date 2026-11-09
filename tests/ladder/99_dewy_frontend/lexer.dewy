@@ -29,7 +29,7 @@ text_of = (source:array<uint8> start:int64 stop:int64):>string => {
 
 lex_error = (offset:int64 message:string):>LexError => LexError[offset message]
 
-quote_width = (source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<start <? stop and stop <=? source.length>):>int64 => {
+quote_width = (source:array<uint8> start:int64<0 <=? start and start <=? source.length> stop:int64<start <? stop and stop <=? source.length>):>int64<w => 1 <=? w and w <=? 3> => {
     let q = source[start]
     if start+2 <? stop and source[start+1] =? q and source[start+2] =? q return 3
     return 1

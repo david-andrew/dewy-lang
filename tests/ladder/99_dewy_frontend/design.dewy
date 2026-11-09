@@ -75,7 +75,9 @@ run = (entry:Entry @totals:Totals):>void => {
         report(entry.source "lex" tokens.offset tokens.message)
         return
     }
-    totals.tokens += tokens.length-1
+    # (every token but the end marker)
+    let counted:int64 = tokens.length-1
+    totals.tokens += counted
     printl("  tokens {token_line(entry.source tokens)}")
     let parsed = parse(entry.source tokens)
     if parsed is? ParseError {
@@ -83,7 +85,8 @@ run = (entry:Entry @totals:Totals):>void => {
         report(entry.source "parse" parsed.offset parsed.message)
         return
     }
-    totals.nodes += parsed.nodes.length-1
+    let nodes:int64 = parsed.nodes.length-1
+    totals.nodes += nodes
     loop tree in tree_lines(parsed) printl("  tree {tree}")
 }
 
