@@ -21,11 +21,11 @@ main=()=>{
 '''
 
 
-def outcome(binary, tmp_path, label):
+def outcome(binary, tmp_path, label, paths=CASES):
     out = tmp_path / label
     out.mkdir()
     results = []
-    for i, path in enumerate([*CASES, tmp_path / 'mixed.dewy']):
+    for i, path in enumerate([*paths, tmp_path / 'mixed.dewy']):
         target = out / f'p{i}'
         r = subprocess.run([binary, 'build', path, '-o', target], capture_output=True, text=True, timeout=120,
                            check=False)

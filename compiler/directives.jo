@@ -111,11 +111,6 @@ dir_name_audited = 0
 dir_name_assumed_bounds = 0
 dir_name_cancellation = 0
 
-# The builtin boolean settings. (`$fast_math` permits reassociation and FMA
-# contraction; the backends do neither yet, so it changes no code. `$unsafe` is
-# the unsafe boundary: compiler/ffi.jo.)
-dir_builtin = (name: str) -> bool:
-    name == "runtime_checks" or name == "prototype" or name == "prototype_warnings" or name == "explicit_copies" or name == "fast_math" or name == "no_nan" or name == "no_inf" or name == "unsafe" or name == "assume_local_asserts" or name == "confine_external_paths" or name == "no_deadlocks" or name == "audited_wait" or name == "no_assumed_bounds" or name == "explicit_cancellation"
 
 dir_module_start = (file: int) -> int: file << 40
 
@@ -124,14 +119,6 @@ dir_module_start = (file: int) -> int: file << 40
 # a nested strict scope (`let n = xs.length`) may be used inside it. O(scopes) once.
 dir_bounds_files: {int: bool} = {}
 dir_bounds_gen = -1
-dir_assumed_bounds_file = (file: int) -> bool:
-    if not dir_assumed_bounds_any: return false
-    if dir_bounds_gen != dir_scopes_gen:
-        dir_bounds_gen = dir_scopes_gen
-        dir_bounds_files = {}
-        loop s in dir_scopes:
-            if s.setting == dir_name_assumed_bounds and s.value == 1: dir_bounds_files[s.start >> 40] = true
-    dir_bounds_files.has(file)
 dir_module_end = (file: int) -> int: (file << 40) | 0xFFFFFFFFFF
 
 # (the chain of a setting's scopes in a file, -1 none)
@@ -217,70 +204,8 @@ dir_value = (setting: int, p: int) -> int:
     if i < 0: return -1
     dir_scopes[i].value
 
-# How an unproven obligation at p compiles: the innermost of `$runtime_checks`
-# and `$prototype` decides.
-dir_policy = (p: int) -> int:
-    let p = if dir_entry_positions.len() != 0: dir_entry_positions.get(p) ?? p else: p
-    r = -1
-    q = -1
-    if dir_scopes.len() > 0:
-        r = dir_find(dir_name_runtime, p)
-        q = dir_find(dir_name_prototype, p)
-    rv = if r >= 0: dir_scopes[r].value else: -1
-    qv = if q >= 0: dir_scopes[q].value else: -1
-    if qv == 1 and (rv == -1 or dir_scopes[q].start >= dir_scopes[r].start): return DIR_PROTOTYPE
-    if rv == 1: return DIR_RUNTIME
-    if rv == 0: return DIR_STATIC
-    if qv == 1: return DIR_PROTOTYPE
-    # (the library's own obligations keep their checks unless it says otherwise,
-    # however its function came to be analyzed: not every function is, and a
-    # library function analyzed for one request is no different; so do the
-    # compiler's own Jo sources, which are not Dewy)
-    if pos_in_lib(p) or p > 0 and not files[pos_file(p)].is_dewy: return DIR_IMPLICIT
-    if DIR_DEFAULT == DIR_STATIC: return DIR_STATIC
-    static = if dir_forced: dir_prior_static else: fact_policy == .RequireStatic
-    if static: DIR_STATIC else: DIR_IMPLICIT
 
-# Every analyzed visit of an index must prove it before its check is dropped.
-dir_index = (n: int, proven: bool):
-    if fact_speculating > 0: return
-    if not proven and fact_member_shared: fact_member_failed = true
-    if not proven: dir_proven[n] = false
-    else if not dir_proven.has(n): dir_proven[n] = true
 
-# `$explicit_copies`, written for the module, a function or a block.
-dir_explicit_copies = (p: int) -> bool:
-    if not dir_copies_any: return false
-    dir_value(dir_name_copies, p) == 1
 
-# Only bodies containing a no-traps scope demand the panic graph.
-# O(body nodes), stopping at the first such scope; nested lambdas own their bodies.
-dir_static_body = (n: int) -> bool:
-    if n <= 0: return false
-    if dir_uniform_runtime(nodes[n].pos): return false
-    if nodes[n].pos > 0 and dir_policy(nodes[n].pos) == DIR_STATIC: return true
-    if nodes[n].kind == .lambda: return false
-    mask = isolation_children(nodes[n].kind)
-    if mask < 0: return false
-    if mask & 1 != 0 and dir_static_body(int(nodes[n].a)): return true
-    if mask & 2 != 0 and dir_static_body(int(nodes[n].b)): return true
-    if mask & 4 != 0 and dir_static_body(int(nodes[n].c)): return true
-    if mask & 16 != 0:
-        loop i in [0..nkids(n)):
-            child = kid(n, i)
-            if dir_static_body(child): return true
-    false
 
-# A module with no nested trap-policy override has one policy throughout.
-# Cache on first demand: O(scopes) once per file, O(1) thereafter. Updating
-# a setting invalidates its file, including lazily parsed declarations.
-dir_uniform_runtime = (p: int) -> bool:
-    if p <= 0: return false
-    file = pos_file(p)
-    if dir_mixed_files.has(file): return false
-    if let cached = dir_uniform_files.get(file): return cached
-    policy = dir_policy(p)
-    runtime = policy == DIR_RUNTIME or policy == DIR_IMPLICIT
-    dir_uniform_files[file] = runtime
-    runtime
 

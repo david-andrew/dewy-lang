@@ -1,0 +1,96 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"directives.jo" import (DIR_DEFAULT DIR_IMPLICIT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC dir_assumed_bounds_any dir_bounds_files dir_bounds_gen dir_copies_any dir_entry_positions dir_find dir_forced dir_mixed_files dir_name_assumed_bounds dir_name_copies dir_name_prototype dir_name_runtime dir_prior_static dir_proven dir_scopes dir_scopes_gen dir_uniform_files dir_value)
+from p"facts.jo" import (fact_member_failed fact_member_shared fact_policy fact_speculating)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"util.jo" import (files pos_file pos_in_lib)
+
+DirWord:type=int64<overflow='wrap'>
+# The builtin boolean settings. (`$fast_math` permits reassociation and FMA
+# contraction; the backends do neither yet, so it changes no code. `$unsafe` is
+# the unsafe boundary: compiler/ffi.jo.)
+dir_builtin=(name:string):>bool=>{
+    name =? "runtime_checks" or name =? "prototype" or name =? "prototype_warnings" or name =? "explicit_copies" or name =? "fast_math" or name =? "no_nan" or name =? "no_inf" or name =? "unsafe" or name =? "assume_local_asserts" or name =? "confine_external_paths" or name =? "no_deadlocks" or name =? "audited_wait" or name =? "no_assumed_bounds" or name =? "explicit_cancellation"
+}
+dir_assumed_bounds_file=(file:DirWord):>bool=>{
+    if not dir_assumed_bounds_any {return false}
+    if dir_bounds_gen not=? dir_scopes_gen {
+        dir_bounds_gen=dir_scopes_gen
+        dir_bounds_files=[]
+        loop s in dir_scopes {
+            if s.setting =? dir_name_assumed_bounds and s.value =? 1 {dir_bounds_files[s.start >> 40]=true}
+        }
+    }
+    dir_bounds_files.has(file)
+}
+# How an unproven obligation at p compiles: the innermost of `$runtime_checks`
+# and `$prototype` decides.
+dir_policy=(p:DirWord):>DirWord=>{
+    let at=if dir_entry_positions.length not=? 0 {dir_entry_positions.get(p) ?? p} else {p}
+    let r:DirWord=-1
+    let q:DirWord=-1
+    if dir_scopes.length >? 0 {
+        r=dir_find(dir_name_runtime at)
+        q=dir_find(dir_name_prototype at)
+    }
+    let rv=if r >=? 0 {dir_scopes[r].value} else {-1}
+    let qv=if q >=? 0 {dir_scopes[q].value} else {-1}
+    if qv =? 1 and (rv =? -1 or dir_scopes[q].start >=? dir_scopes[r].start) {return DIR_PROTOTYPE}
+    if rv =? 1 {return DIR_RUNTIME}
+    if rv =? 0 {return DIR_STATIC}
+    if qv =? 1 {return DIR_PROTOTYPE}
+    # (the library's own obligations keep their checks unless it says otherwise,
+    # however its function came to be analyzed: not every function is, and a
+    # library function analyzed for one request is no different; so do the
+    # compiler's own Jo sources, which are not Dewy)
+    if pos_in_lib(at) or (at >? 0 and not files[pos_file(at)].is_dewy) {return DIR_IMPLICIT}
+    if DIR_DEFAULT =? DIR_STATIC {return DIR_STATIC}
+    let static=if dir_forced {dir_prior_static} else {fact_policy =? 'RequireStatic'}
+    if static {DIR_STATIC} else {DIR_IMPLICIT}
+}
+# Every analyzed visit of an index must prove it before its check is dropped.
+dir_index=(n:DirWord proven:bool):>void=>{
+    if fact_speculating >? 0 {return}
+    if not proven and fact_member_shared {fact_member_failed=true}
+    if not proven {dir_proven[n]=false}
+    else if not dir_proven.has(n) {dir_proven[n]=true}
+}
+# `$explicit_copies`, written for the module, a function or a block.
+dir_explicit_copies=(p:DirWord):>bool=>{
+    if not dir_copies_any {return false}
+    dir_value(dir_name_copies p) =? 1
+}
+# Only bodies containing a no-traps scope demand the panic graph.
+# O(body nodes), stopping at the first such scope; nested lambdas own their bodies.
+dir_static_body=(n:DirWord):>bool=>$unsafe {
+    if n <=? 0 {return false}
+    if dir_uniform_runtime(nodes.ptr[n].pos) {return false}
+    if nodes.ptr[n].pos >? 0 and dir_policy(nodes.ptr[n].pos) =? DIR_STATIC {return true}
+    if nodes.ptr[n].kind =? 'lambda' {return false}
+    let mask=isolation_children(nodes.ptr[n].kind)
+    if mask <? 0 {return false}
+    if mask & 1 not=? 0 and dir_static_body(DirWord(nodes.ptr[n].a)) {return true}
+    if mask & 2 not=? 0 and dir_static_body(DirWord(nodes.ptr[n].b)) {return true}
+    if mask & 4 not=? 0 and dir_static_body(DirWord(nodes.ptr[n].c)) {return true}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {
+            let child=kid(n i)
+            if dir_static_body(child) {return true}
+        }
+    }
+    false
+}
+# A module with no nested trap-policy override has one policy throughout.
+# Cache on first demand: O(scopes) once per file, O(1) thereafter. Updating
+# a setting invalidates its file, including lazily parsed declarations.
+dir_uniform_runtime=(p:DirWord):>bool=>{
+    if p <=? 0 {return false}
+    let file=pos_file(p)
+    if dir_mixed_files.has(file) {return false}
+    let cached=dir_uniform_files.get(file)
+    if cached not=? none {return cached}
+    let policy=dir_policy(p)
+    let runtime=policy =? DIR_RUNTIME or policy =? DIR_IMPLICIT
+    dir_uniform_files[file]=runtime
+    runtime
+}
