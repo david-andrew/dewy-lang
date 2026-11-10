@@ -1,0 +1,99 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_EXCL_FIRST NF_INCLUSIVE NF_STEP add_flag has_flag kids mk nodes set_list)
+from p"check.jo" import (ensure_bundled_import)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_call bc_field bc_ident bc_int)
+from p"expr.jo" import (binary_membership bundled_bigint_type dewy_slice_args is_dewy_range_type last_checked)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (T_MATH_INT is_int prune tkind)
+from p"util.jo" import (fatal files pos_file)
+
+RangeWord:type=int64<overflow='wrap'>
+# `[a..b)` of values that are not integers (Instant, rational, text: anything with `<?`): a Range of
+# lib/ranges.dewy rather than the IntRange of `__dewy_range`. -1 for integers, whose range this leaves.
+dewy_range_ordered=(n:RangeWord args:array<int64> expected:RangeWord):>int64=>$unsafe {
+    let a=args[0]
+    if nodes.ptr[a].kind =? 'int_lit' or nodes.ptr[a].kind =? 'namedarg' {return -1}
+    let t=prune(check_expr(a 0))
+    add_flag(a NF_CHECKED)
+    if is_int(t) or t =? T_MATH_INT or bundled_bigint_type(t) or tkind(t) =? 'var' or tkind(t) =? 'param' {return -1}
+    let pos=nodes.ptr[n].pos
+    if nodes.ptr[args[3]].ival not=? 0 {fatal(pos "only a range of integers has a step for now: this is a range of {dt(t)}. Count instead: `loop x <? last \{ ... }`")}
+    ensure_bundled_import("ranges.dewy" "$dewy_ranges" pos)
+    let c=mk('call' pos)
+    nodes.ptr[c].a=int32(bc_field(bc_ident("$dewy_ranges" pos) "_between" pos))
+    set_list(c [a args[2] args[4]])
+    let r=check_expr(c expected)
+    nodes.ptr[n]=nodes.ptr[last_checked]
+    last_checked=n
+    r
+}
+# `(a..b)` of the same: the range with its first end left out. -1 for an integer range.
+dewy_range_tail_ordered=(n:RangeWord args:array<int64> expected:RangeWord):>int64=>$unsafe {
+    let a=args[0]
+    let t=prune(check_expr(a 0))
+    add_flag(a NF_CHECKED)
+    if is_dewy_range_type(t "IntRange") {return -1}
+    let pos=nodes.ptr[n].pos
+    ensure_bundled_import("ranges.dewy" "$dewy_ranges" pos)
+    let c=mk('call' pos)
+    nodes.ptr[c].a=int32(bc_field(bc_ident("$dewy_ranges" pos) "_open_first" pos))
+    set_list(c [a])
+    let r=check_expr(c expected)
+    nodes.ptr[n]=nodes.ptr[last_checked]
+    last_checked=n
+    r
+}
+# `x in? [a..b)` of values that are not integers: through the stored range. -1 for integers, which
+# checker_in_range's comparisons take.
+range_membership_ordered=(n:RangeWord expected:RangeWord):>int64=>$unsafe {
+    if not files[pos_file(nodes.ptr[n].pos)].is_dewy {return -1}
+    let a=RangeWord(nodes.ptr[n].a)
+    if nodes.ptr[a].kind =? 'int_lit' {return -1}
+    let range=RangeWord(nodes.ptr[n].b)
+    if nodes.ptr[range].a =? 0 or nodes.ptr[range].b =? 0 {return -1}
+    let t=prune(check_expr(a 0))
+    add_flag(a NF_CHECKED)
+    if is_int(t) or t =? T_MATH_INT or bundled_bigint_type(t) or tkind(t) =? 'var' or tkind(t) =? 'param' {return -1}
+    # (the ends in the needle's type: `f in? [0.0..1.0)` of a float compares floats)
+    check_expr(RangeWord(nodes.ptr[range].a) t);
+    check_expr(RangeWord(nodes.ptr[range].b) t);
+    add_flag(RangeWord(nodes.ptr[range].a) NF_CHECKED)
+    add_flag(RangeWord(nodes.ptr[range].b) NF_CHECKED)
+    nodes.ptr[n].b=int32(dewy_range_value(range))
+    binary_membership(n expected)
+}
+dewy_range_value=(range:RangeWord):>int64=>$unsafe {
+    let pos=nodes.ptr[range].pos
+    if nodes.ptr[range].a =? 0 or nodes.ptr[range].b =? 0 {fatal(pos "a stored range needs both endpoints; open ranges can be used directly in loops or membership")}
+    let step=has_flag(range NF_STEP)
+    let second=if step {RangeWord(nodes.ptr[range].c)} else {bc_int(0 pos)}
+    let stepped=mk('bool_lit' pos)
+    nodes.ptr[stepped].ival=if step {1} else {0}
+    let inclusive=mk('bool_lit' pos)
+    nodes.ptr[inclusive].ival=if has_flag(range NF_INCLUSIVE) {1} else {0}
+    let result=bc_call("__dewy_range" [RangeWord(nodes.ptr[range].a) second RangeWord(nodes.ptr[range].b) stepped inclusive] pos)
+    if has_flag(range NF_EXCL_FIRST) {result=bc_call("__dewy_range_tail" [result] pos)}
+    result
+}
+# Convert each axis to a small selector. The library binds open endpoints to
+# the captured shape and validates stored ranges without materializing indexes.
+part_spec=(n:RangeWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let ixs=kids(n)
+    if nodes.ptr[n].b not=? 0 {ixs=[RangeWord(nodes.ptr[n].b)]}
+    let elems:array<int64>=[]
+    loop x in ixs {
+        if nodes.ptr[x].kind not=? 'range' {
+            elems.push(bc_call("__nd_axis" [x] pos))
+            continue
+        }
+        let args=dewy_slice_args(x pos)
+        let exclusive=mk('bool_lit' pos)
+        nodes.ptr[exclusive].ival=if has_flag(x NF_EXCL_FIRST) {1} else {0}
+        elems.push(bc_call("__nd_axis_slice" [args... exclusive] pos))
+    }
+    let arr=mk('array' pos)
+    set_list(arr elems)
+    arr
+}

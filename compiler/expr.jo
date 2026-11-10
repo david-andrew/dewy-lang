@@ -157,6 +157,7 @@ use 'narrowing_checks.dewy'
 use 'expr_rare.dewy'
 use 'callable_checks.dewy'
 use 'expr_routes.dewy'
+use 'range_checks.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -7259,73 +7260,6 @@ time_rules_path = (path: str) -> str:
     if len(d!) < 4 or d![..4) != "DZP2": fatal(dir_scopes[scope].at, "`$time.rules`: '{chosen}' is not a rule pack; tools/time/gen_rules.py makes one")
     path_norm(chosen)
 
-# `[a..b)` of values that are not integers (Instant, rational, text: anything with `<?`): a Range of
-# lib/ranges.dewy rather than the IntRange of `__dewy_range`. -1 for integers, whose range this leaves.
-dewy_range_ordered = (n: int, args: int[], expected: int) -> int:
-    a = args[0]
-    if nodes[a].kind == .int_lit or nodes[a].kind == .namedarg: return -1
-    t = prune(check_expr(a, 0))
-    add_flag(a, NF_CHECKED)
-    if is_int(t) or t == T_MATH_INT or bundled_bigint_type(t) or tkind(t) == .var or tkind(t) == .param: return -1
-    pos = nodes[n].pos
-    if nodes[args[3]].ival != 0: fatal(pos, "only a range of integers has a step for now: this is a range of {dt(t)}. Count instead: `loop x <? last \{ ... }`")
-    ensure_bundled_import("ranges.dewy", "$dewy_ranges", pos)
-    c = mk(.call, pos)
-    nodes[c].a = i32(bc_field(bc_ident("$dewy_ranges", pos), "_between", pos))
-    set_list(c, [a, args[2], args[4]])
-    r = check_expr(c, expected)
-    nodes[n] = nodes[last_checked]
-    last_checked = n
-    r
-
-# `(a..b)` of the same: the range with its first end left out. -1 for an integer range.
-dewy_range_tail_ordered = (n: int, args: int[], expected: int) -> int:
-    a = args[0]
-    t = prune(check_expr(a, 0))
-    add_flag(a, NF_CHECKED)
-    if is_dewy_range_type(t, "IntRange"): return -1
-    pos = nodes[n].pos
-    ensure_bundled_import("ranges.dewy", "$dewy_ranges", pos)
-    c = mk(.call, pos)
-    nodes[c].a = i32(bc_field(bc_ident("$dewy_ranges", pos), "_open_first", pos))
-    set_list(c, [a])
-    r = check_expr(c, expected)
-    nodes[n] = nodes[last_checked]
-    last_checked = n
-    r
-
-# `x in? [a..b)` of values that are not integers: through the stored range. -1 for integers, which
-# checker_in_range's comparisons take.
-range_membership_ordered = (n: int, expected: int) -> int:
-    if not files[pos_file(nodes[n].pos)].is_dewy: return -1
-    a = int(nodes[n].a)
-    if nodes[a].kind == .int_lit: return -1
-    range = int(nodes[n].b)
-    if nodes[range].a == 0 or nodes[range].b == 0: return -1
-    t = prune(check_expr(a, 0))
-    add_flag(a, NF_CHECKED)
-    if is_int(t) or t == T_MATH_INT or bundled_bigint_type(t) or tkind(t) == .var or tkind(t) == .param: return -1
-    # (the ends in the needle's type: `f in? [0.0..1.0)` of a float compares floats)
-    check_expr(int(nodes[range].a), t)
-    check_expr(int(nodes[range].b), t)
-    add_flag(int(nodes[range].a), NF_CHECKED)
-    add_flag(int(nodes[range].b), NF_CHECKED)
-    nodes[n].b = i32(dewy_range_value(range))
-    binary_membership(n, expected)
-
-dewy_range_value = (range: int) -> int:
-    pos = nodes[range].pos
-    if nodes[range].a == 0 or nodes[range].b == 0: fatal(pos, "a stored range needs both endpoints; open ranges can be used directly in loops or membership")
-    step = has_flag(range, NF_STEP)
-    second = if step: int(nodes[range].c) else: bc_int(0, pos)
-    stepped = mk(.bool_lit, pos)
-    nodes[stepped].ival = if step: 1 else: 0
-    inclusive = mk(.bool_lit, pos)
-    nodes[inclusive].ival = if has_flag(range, NF_INCLUSIVE): 1 else: 0
-    result = bc_call("__dewy_range", [int(nodes[range].a), second, int(nodes[range].b), stepped, inclusive], pos)
-    if has_flag(range, NF_EXCL_FIRST): result = bc_call("__dewy_range_tail", [result], pos)
-    result
-
 # A matrix part can use literal ranges, stored IntRange values or index arrays.
 is_part_index = (n: int, receiver: int = 0) -> bool:
     ixs = kids(n)
@@ -7338,25 +7272,6 @@ is_part_index = (n: int, receiver: int = 0) -> bool:
             if is_dewy_range_type(t, "IntRange"): return true
             if (tkind(t) == .array or tkind(t) == .fixed) and is_int(telem(t)): return true
     false
-
-# Convert each axis to a small selector. The library binds open endpoints to
-# the captured shape and validates stored ranges without materializing indexes.
-part_spec = (n: int) -> int:
-    pos = nodes[n].pos
-    ixs = kids(n)
-    if nodes[n].b != 0: ixs = [int(nodes[n].b)]
-    elems: int[]
-    loop x in ixs:
-        if nodes[x].kind != .range:
-            elems.push(bc_call("__nd_axis", [x], pos))
-            continue
-        args = dewy_slice_args(x, pos)
-        exclusive = mk(.bool_lit, pos)
-        nodes[exclusive].ival = if has_flag(x, NF_EXCL_FIRST): 1 else: 0
-        elems.push(bc_call("__nd_axis_slice", args + [exclusive], pos))
-    arr = mk(.array, pos)
-    set_list(arr, elems)
-    arr
 
 bc_bin = (op: Tok, a: int, b: int, pos: int) -> int:
     n = mk(.binary, pos)
