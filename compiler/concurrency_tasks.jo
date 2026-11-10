@@ -97,10 +97,16 @@ concurrency_finalize = ():
         if not target_wasm and not target_windows and not target_macos and concurrency_calls_c():
             concurrency_ffi_start = runtime_fn("__ffi_start")
             check_pending_functions(concurrency_ffi_start)
-    if concurrency_tasks.len() > 0 and (target_wasm or target_windows or target_macos):
-        fatal(nodes[concurrency_tasks[0]].pos, "the threads task backend currently requires Linux; parallel computation remains portable")
+    if target_wasm or target_windows or target_macos:
+        # (select runs on the caller's task: it needs no thread)
+        loop n in concurrency_tasks:
+            if not select_call(n): fatal(nodes[n].pos, "the threads task backend currently requires Linux; parallel computation remains portable")
     loop n in concurrency_tasks:
         if in_lib(nodes[n].pos): continue
+        # (select runs its waits here, on the caller's task)
+        if select_call(n):
+            select_check(n)
+            continue
         task_arg = concurrency_protocol_task_arg(n)
         loop i in 0.. and callback in kids(n):
             if tkind(ntype(callback)) != .fn_ or task_arg >= -1 and i != task_arg: continue

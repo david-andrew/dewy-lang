@@ -1,0 +1,6 @@
+# An indexed element is not a stable path for select (decisions.md, batch 7, rule 5): bind it
+# to a local first.
+main = () => {
+    let channels = [channel<int64>(1) channel<int64>(1)]
+    printl"{select(@channels[0].receive)}"
+}

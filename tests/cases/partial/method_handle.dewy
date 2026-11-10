@@ -1,0 +1,19 @@
+# modes: native native-release
+# `@x.method` is the method itself, with x evaluated now (decisions.md, batch 4), as
+# `@x.method(args)` binds arguments too; `x.method` alone calls it. It works for a prelude
+# record's methods, as `@jobs.receive`.
+Counter:type = [
+    start:int64
+    get = ():>int64 => start
+    pick = (other:int64):>int64 => if other >? start other else start
+]
+call = (f:(():>int64)):>int64 => f()
+main = () => {
+    let c = Counter[3]
+    let get = @c.get
+    printl"{get()} {call(@c.get)} {call(@c.pick(4))} {c.get}"
+    let jobs = channel<int64>(2)
+    jobs.send(9) or_throw
+    let take = @jobs.receive
+    printl"{take() or_throw}"
+}

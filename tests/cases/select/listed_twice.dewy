@@ -1,0 +1,6 @@
+# The same prepared wait listed twice in one select is an error (decisions.md, batch 7).
+main = () => {
+    let jobs = channel<int64>(1)
+    jobs.send(1) or_throw
+    printl"{select(@jobs.receive @jobs.receive)}"
+}

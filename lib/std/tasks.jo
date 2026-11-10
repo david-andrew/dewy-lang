@@ -99,6 +99,7 @@ __task_worker = (slot: int) -> void:
     c.scope = p.group
     c.rng = rng(__rng_seed + slot * 1000003)
     __task_states[slot * __TS_WORDS + __TS_FILE_CODE] = 0
+    __task_states[slot * __TS_WORDS + __TS_SELECT] = 0
     p.run()
     # The callback owns the task's captures. Release them on this worker,
     # before publishing completion, so a dropped queue end wakes its peer.
@@ -286,6 +287,235 @@ race[A, B] = (first: () -> A, second: () -> B) -> (A | B | Canceled | OutOfMemor
     if winner.load() == 1: return __task_result(b)
     if __task_scope_canceled(g): return Canceled
     OutOfMemory
+
+
+# `select(@a.receive @heart.next ...)` (D4, decisions.md batch 7): the first of the waits
+# to be ready, as the union of their outcomes (same-typed outcomes are one alternative), or
+# Canceled; with `timeout=`, Timeout when none is ready in time. It tries each wait without
+# blocking, starting from a rotating one ('fair'), and only a ready wait commits: a losing
+# receive takes nothing. A ready wait wins a deadline already past; `timeout=0s` is a poll.
+# Nothing is remembered across calls. (The compiler checks that each argument is a wait
+# written in the call: compiler/concurrency_tasks.jo.)
+__select_turns = 0
+
+__select_first = (n: int) -> int: __atomic_add(&__select_turns, 1) % n
+
+# (between rounds with nothing ready: spin a little, then nap; a channel's own waiters
+# sleep at most 1 ms too)
+__select_nap = (spins: int):
+    if spins >= 16: __task_pause()
+
+select[A] = (a: () -> A) -> (A | Canceled):
+    s = __ts()
+    first = __select_first(1)
+    spins = 0
+    loop:
+        if __task_canceled(): return Canceled
+        loop k in [0..1):
+            i = (first + k) % 1
+            s[__TS_SELECT] = 1
+            if i == 0:
+                ra = a()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return ra
+            s[__TS_SELECT] = 0
+        __select_nap(spins)
+        spins += 1
+
+select[A, D] = (a: () -> A, timeout: D) -> (A | Canceled | Timeout):
+    s = __ts()
+    deadline = __task_deadline(__task_nanoseconds(timeout))
+    first = __select_first(1)
+    spins = 0
+    loop:
+        if __task_canceled(): return Canceled
+        loop k in [0..1):
+            i = (first + k) % 1
+            s[__TS_SELECT] = 1
+            if i == 0:
+                ra = a()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return ra
+            s[__TS_SELECT] = 0
+        if time_ns() >= deadline: return Timeout
+        __select_nap(spins)
+        spins += 1
+
+select[A, B] = (a: () -> A, b: () -> B) -> (A | B | Canceled):
+    s = __ts()
+    first = __select_first(2)
+    spins = 0
+    loop:
+        if __task_canceled(): return Canceled
+        loop k in [0..2):
+            i = (first + k) % 2
+            s[__TS_SELECT] = 1
+            if i == 0:
+                ra = a()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return ra
+            else:
+                rb = b()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rb
+            s[__TS_SELECT] = 0
+        __select_nap(spins)
+        spins += 1
+
+select[A, B, D] = (a: () -> A, b: () -> B, timeout: D) -> (A | B | Canceled | Timeout):
+    s = __ts()
+    deadline = __task_deadline(__task_nanoseconds(timeout))
+    first = __select_first(2)
+    spins = 0
+    loop:
+        if __task_canceled(): return Canceled
+        loop k in [0..2):
+            i = (first + k) % 2
+            s[__TS_SELECT] = 1
+            if i == 0:
+                ra = a()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return ra
+            else:
+                rb = b()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rb
+            s[__TS_SELECT] = 0
+        if time_ns() >= deadline: return Timeout
+        __select_nap(spins)
+        spins += 1
+
+select[A, B, C] = (a: () -> A, b: () -> B, c: () -> C) -> (A | B | C | Canceled):
+    s = __ts()
+    first = __select_first(3)
+    spins = 0
+    loop:
+        if __task_canceled(): return Canceled
+        loop k in [0..3):
+            i = (first + k) % 3
+            s[__TS_SELECT] = 1
+            if i == 0:
+                ra = a()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return ra
+            else if i == 1:
+                rb = b()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rb
+            else:
+                rc = c()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rc
+            s[__TS_SELECT] = 0
+        __select_nap(spins)
+        spins += 1
+
+select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, timeout: D) -> (A | B | C | Canceled | Timeout):
+    s = __ts()
+    deadline = __task_deadline(__task_nanoseconds(timeout))
+    first = __select_first(3)
+    spins = 0
+    loop:
+        if __task_canceled(): return Canceled
+        loop k in [0..3):
+            i = (first + k) % 3
+            s[__TS_SELECT] = 1
+            if i == 0:
+                ra = a()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return ra
+            else if i == 1:
+                rb = b()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rb
+            else:
+                rc = c()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rc
+            s[__TS_SELECT] = 0
+        if time_ns() >= deadline: return Timeout
+        __select_nap(spins)
+        spins += 1
+
+select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D) -> (A | B | C | D | Canceled):
+    s = __ts()
+    first = __select_first(4)
+    spins = 0
+    loop:
+        if __task_canceled(): return Canceled
+        loop k in [0..4):
+            i = (first + k) % 4
+            s[__TS_SELECT] = 1
+            if i == 0:
+                ra = a()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return ra
+            else if i == 1:
+                rb = b()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rb
+            else if i == 2:
+                rc = c()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rc
+            else:
+                rd = d()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rd
+            s[__TS_SELECT] = 0
+        __select_nap(spins)
+        spins += 1
+
+select[A, B, C, D, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, timeout: D) -> (A | B | C | D | Canceled | Timeout):
+    s = __ts()
+    deadline = __task_deadline(__task_nanoseconds(timeout))
+    first = __select_first(4)
+    spins = 0
+    loop:
+        if __task_canceled(): return Canceled
+        loop k in [0..4):
+            i = (first + k) % 4
+            s[__TS_SELECT] = 1
+            if i == 0:
+                ra = a()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return ra
+            else if i == 1:
+                rb = b()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rb
+            else if i == 2:
+                rc = c()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rc
+            else:
+                rd = d()
+                if s[__TS_SELECT] == 1:
+                    s[__TS_SELECT] = 0
+                    return rd
+            s[__TS_SELECT] = 0
+        if time_ns() >= deadline: return Timeout
+        __select_nap(spins)
+        spins += 1
 
 # The signal handler only returns. No allocator, locks or user callbacks run
 # on its signal stack. Repeated acknowledgement closes the check/syscall race.

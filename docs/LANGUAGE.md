@@ -3603,6 +3603,38 @@ main = () => {
 }
 ```
 
+`select(...)` waits for the first of several waits (decisions.md, batch 7). Each argument
+is a wait written in the call, on a local or a field chain: `@lines.receive` or
+`@heart.next` (`@x.method` is the method itself, with `x` evaluated now). It gives the
+union of their outcomes plus `Canceled`, so arms match by type: two `string` channels are
+one `string` arm, and every close is one `<Closed>` arm. `timeout=` adds `Timeout`; a ready
+wait wins a deadline already past, and `timeout=0s` is a poll. A wait that loses takes
+nothing. Starting points rotate, so no wait is always tried first; nothing is remembered
+across calls.
+
+```dewy
+main = () => {
+    let lines = channel<string>(4)
+    let numbers = channel<int64>(4)
+    numbers.send(7) or_throw
+    match select(@lines.receive @numbers.receive timeout=1s) {
+        line:string => printl"line {line}"
+        n:int64 => printl"number {n}"            # number 7
+        <Closed> => printl"a channel closed"
+        <Timeout> => printl"nothing in time"
+        <Canceled> => printl"canceled"
+    }
+}
+```
+
+A wait written twice (`select(@jobs.receive @jobs.receive)`) is an error, and so is a wait
+the call cannot see: a stored handle, a helper's result or an indexed element (bind
+`let ch = channels[i]`, then write `@ch.receive`). *Not yet built:* telling same-typed
+waits apart by source (`<heart.Tick>`, `line:stderr.string`), sends inside `select`
+through `reserve`, waits turned off with `if cond @… else none`, a spread of waits, and the
+progress check for a close arm that loops without turning its wait off. `select` takes up
+to four waits for now.
+
 `c.try_send(value)` and `c.try_receive` never wait and are cancellation points.
 `try_send` fails with `Full` when there is no room; `try_receive` gives `T | Empty |
 Closed | Busy | Canceled`. Both give `Busy` when another task is mid-operation on

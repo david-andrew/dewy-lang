@@ -6902,6 +6902,68 @@ bare_fn_value = (n: int, t: int, text: str, expected: int) -> int:
     if not takes_none: bare_fn_error(n, text, true)
     bare_call(n, expected)
 
+# `select(@lines.receive @heart.next ...)` (decisions.md, batch 7): each wait it is given is a
+# channel's `receive` or a ticker's `next`, written in the call on a local or a field chain;
+# the same operation twice is an error. O(arguments^2), only for select's calls.
+select_call = (n: int) -> bool:
+    f = int(nodes[n].sym)
+    if f <= 0 or nodes[n].aux != 0 or fns[f].decl == 0: return false
+    d = int(fns[f].decl)
+    name_of(int(nodes[d].name)) == "select" and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/tasks.jo"
+
+select_check = (n: int):
+    waits: int[]
+    loop a0 in kids(n):
+        a = a0
+        loop nodes[a].kind == .conv: a = int(nodes[a].a)
+        if tkind(ntype(a)) != .fn_: continue
+        op = 0
+        if nodes[a].kind == .partial and nodes[a].sym > 0 and nkids(a) == 1 and fns[int(nodes[a].sym)].decl != 0:
+            d = int(fns[int(nodes[a].sym)].decl)
+            name = name_of(int(nodes[d].name))
+            if (name == "receive" or name == "next") and files[pos_file(nodes[d].pos)].path == lib_dir + "/prelude/channels.dewy" and select_place(kid(a, 0)): op = int(nodes[d].name)
+        if op == 0: fatal(nodes[a].pos, "select waits on operations written in the call, on a local or a field: `@lines.receive`, `@heart.next`. It cannot follow a function value, a helper's result or an indexed element (bind `let ch = channels[i]`, then `@ch.receive`), and its own `timeout=` is the deadline")
+        loop w in waits:
+            if int(nodes[int(fns[int(nodes[w].sym)].decl)].name) == op and select_same_place(kid(w, 0), kid(a, 0)): fatal(nodes[a].pos, "this operation is listed twice: select takes at most one value from it, so write it once")
+        waits.push(a)
+
+# (a local or a field chain on one)
+select_place = (n0: int) -> bool:
+    n = n0
+    loop nodes[n].kind == .conv or nodes[n].kind == .field: n = int(nodes[n].a)
+    nodes[n].kind == .ident
+
+select_same_place = (x0: int, y0: int) -> bool:
+    x = x0
+    y = y0
+    loop nodes[x].kind == .conv: x = int(nodes[x].a)
+    loop nodes[y].kind == .conv: y = int(nodes[y].a)
+    if nodes[x].kind != nodes[y].kind: return false
+    if nodes[x].kind == .ident: return nodes[x].sym == nodes[y].sym and nodes[x].aux == nodes[y].aux
+    nodes[x].kind == .field and nodes[x].name == nodes[y].name and select_same_place(int(nodes[x].a), int(nodes[y].a))
+
+# `@x.method` (decisions.md, batch 4): the method as a function of its remaining
+# parameters, with x evaluated now, as `@x.method()` gives; a data member stays a place.
+# -1 when n is not such a handle. O(the record's fields), only for `@` on a member.
+dewy_method_handle = (n: int, expected: int) -> int:
+    if not has_flag(n, NF_AT) or nodes[n].b != 0 or nodes[n].aux2 == i32(AUX2_PLACE) or not dewy_at(nodes[n].pos): return -1
+    rt = prune(check_expr(int(nodes[n].a), 0))
+    nodes[n].a = i32(last_checked)
+    add_flag(last_checked, NF_CHECKED)
+    st = if types[rt].kind == .ptr: prune(int(types[rt].elem)) else: rt
+    if types[st].kind != .struct_: return -1
+    si = int(types[st].st)
+    if structs[si].decl == 0 or dewy_type_method(int(structs[si].decl), int(nodes[n].name)) < 0: return -1
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        if fields[int(structs[si].fields) + i].name == nodes[n].name: return -1
+    callee = nodes.len()
+    nodes.push(nodes[n])
+    clear_flag(callee, NF_AT | NF_MUT | NF_CHECKED)
+    nodes[callee].type = 0
+    nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee), aux2 = i32(AUX2_PARTIAL))
+    dewy_partial(n, expected)
+
 # `@f(args)`: the function of f's remaining parameters that calls f with args
 # and them. The arguments are evaluated now. A parameter left to a constant
 # default takes it now; other defaults cannot be left out yet.
@@ -6934,7 +6996,14 @@ dewy_partial = (n: int, expected: int) -> int:
                 # `@text.split(" ")`: the receiver is the first argument, saved with the rest
                 recv = int(nodes[callee].a)
                 fname = dewy_member_name(callee, rt, int(nodes[callee].name), args)
-                s = lookup(fname)
+                s = 0
+                # (a method the record type declares, as the prelude's `@lines.receive()`: its
+                # module's, not a function of that name in scope)
+                if types[st].kind == .struct_ and structs[int(types[st].st)].decl != 0 and dewy_type_method(int(structs[int(types[st].st)].decl), fname) >= 0:
+                    owner = int(nodes[int(structs[int(types[st].st)].decl)].mod)
+                    s = module_lookup(owner, fname)
+                    if s != 0: mod = owner
+                if s == 0: s = lookup(fname)
                 ii = intrinsic_of(fname)
                 if s == 0 or syms[s].kind != .fns or (ii >= 0 and intrinsics[ii].arr): fatal(pos, "partial evaluation of the built-in `.{name_of(int(nodes[callee].name))}` is not supported yet; use a function literal")
                 f = mk(.ident, nodes[callee].pos)

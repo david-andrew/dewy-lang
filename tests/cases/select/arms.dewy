@@ -1,0 +1,69 @@
+# modes: native native-release
+# `select` (decisions.md, batch 7) takes waits written in the call and gives the union of their
+# outcomes, so arms match by type: one `string` arm covers every string wait, and one `<Closed>`
+# arm every close. A wait that loses takes nothing; `timeout=` adds `Timeout`, and a ready wait
+# wins a `0s` poll.
+produce = (out:Channel<int64> n:int64):>void | Unsent<int64> => {
+    loop i in [0..n) { out.send(i) or_throw }
+    out.close()
+}
+main = () => {
+    let lines = channel<string>(4)
+    let numbers = channel<int64>(4)
+    let heart = ticker(1hour)
+    numbers.send(7) or_throw
+    match select(@lines.receive @numbers.receive @heart.next) {
+        line:string => printl"line {line}"
+        n:int64 => printl"number {n}"
+        <Tick> => printl"tick"
+        <Closed> => printl"closed"
+        <Canceled> => printl"canceled"
+    }
+    lines.send("hi") or_throw
+    match select(@lines.receive @numbers.receive timeout=0s) {
+        line:string => printl"line {line}"
+        n:int64 => printl"number {n}"
+        <Closed> => printl"closed"
+        <Timeout> => printl"timeout"
+        <Canceled> => printl"canceled"
+    }
+    printl"poll on nothing: {select(@lines.receive @numbers.receive timeout=0s) is? Timeout}"
+    printl"wait on nothing: {select(@lines.receive @heart.next timeout=2ms) is? Timeout}"
+    # Two channels of one type are one arm: two selects take one value from each.
+    let a = channel<string>(2)
+    let b = channel<string>(2)
+    a.send("from a") or_throw
+    b.send("from b") or_throw
+    let got:array<string> = []
+    loop _ in [0..2) {
+        match select(@a.receive @b.receive) {
+            text:string => got.push(text)
+            <Closed> => break
+            <Canceled> => break
+        }
+    }
+    printl"got {got.sorted}, left: {a.try_receive is? Empty} {b.try_receive is? Empty}"
+    # A producer task feeding a select loop.
+    let feed = channel<int64>(4)
+    let total:int = 0
+    let open = true
+    concurrent {
+        spawn produce(feed 100)
+        loop open {
+            match select(@feed.receive @lines.receive) {
+                n:int64 => {total += n}
+                line:string => printl"line {line}"
+                <Closed> => {open = false}
+                <Canceled> => {open = false}
+            }
+        }
+    }
+    printl"total {total}"
+    # (in a canceled group select gives Canceled)
+    let canceled = false
+    concurrent g {
+        cancel(g)
+        canceled = select(@lines.receive @heart.next) is? Canceled
+    }
+    printl"canceled: {canceled}"
+}

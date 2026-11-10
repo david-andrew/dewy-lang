@@ -3,7 +3,7 @@ from p"check.jo" import (LF_ADDR LF_PARTBORROW fns globals lib_dir locals module
 from p"checks_thin.dewy" import (check_pending_functions)
 from p"ast.jo" import (NF_CHECKED NF_EXTERN NF_STMT add_flag has_flag kid kid2 kids mk nkids nkids2 nodes)
 from p"types.jo" import (T_MATH_INT T_NONE T_VOID tkind)
-from p"expr.jo" import (last_checked ntype type_node_of)
+from p"expr.jo" import (last_checked ntype type_node_of select_call select_check)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt)
 from p"checker_expr.dewy" import (check_expr)
 from p"deadlock.jo" import deadlock_atomics
@@ -102,11 +102,19 @@ concurrency_finalize=():>void=>$unsafe {
             check_pending_functions(concurrency_ffi_start);
         }
     }
-    if concurrency_tasks.length >? 0 and (target_wasm or target_windows or target_macos) {
-        fatal(nodes.ptr[concurrency_tasks.ptr[0]].pos "the threads task backend currently requires Linux; parallel computation remains portable");
+    if target_wasm or target_windows or target_macos {
+        # (select runs on the caller's task: it needs no thread)
+        loop n in concurrency_tasks {
+            if not select_call(n) {fatal(nodes.ptr[n].pos "the threads task backend currently requires Linux; parallel computation remains portable");}
+        }
     }
     loop n in concurrency_tasks {
         if in_lib(nodes.ptr[n].pos) {continue}
+        # (select runs its waits here, on the caller's task)
+        if select_call(n) {
+            select_check(n)
+            continue
+        }
         let task_arg=concurrency_protocol_task_arg(n)
         let callbacks=kids(n)
         loop i in [0..callbacks.length) and callback in callbacks {

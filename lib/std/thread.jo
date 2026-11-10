@@ -361,9 +361,20 @@ __ticker_wait = (t: __Ticker, deadline: int) -> int:
         if now >= due:
             if __atomic_cas(&p[0], due, due + ((now - due) / p[1] + 1) * p[1]) == due: return 0
             continue
+        if __select_missed(): return 2
         if deadline != 0 and now >= deadline: return 3
         wake = if deadline != 0 and deadline < due: deadline else: due
         __sleep_ns(min(wake - now, 1000000))
+
+# `select` (lib/std/tasks.jo) tries each wait it is given without blocking: while this
+# thread's word says so, a wait with nothing ready marks that and gives up (code 2, so its
+# result is a Canceled that select discards). Only a ready wait commits, so a losing
+# receive takes nothing.
+__select_missed = () -> bool:
+    s = __ts()
+    if s[__TS_SELECT] == 0: return false
+    s[__TS_SELECT] = 2
+    true
 
 __chan_put[T] = (c: __Chan[T], v: T) -> void:
     p = c.__p
@@ -388,6 +399,9 @@ __chan_receive_wait_until[T] = (c: __Chan[T], deadline: int) -> int:
         if p.closed != 0:
             __chan_unlock(&p.lock)
             return 1
+        if __select_missed():
+            __chan_unlock(&p.lock)
+            return 2
         if deadline != 0 and time_ns() >= deadline:
             __chan_unlock(&p.lock)
             return 3

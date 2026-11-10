@@ -1,0 +1,7 @@
+# select waits only on operations written in the call (decisions.md, batch 7): a stored handle
+# is not followed.
+main = () => {
+    let jobs = channel<int64>(1)
+    let wait = @jobs.receive
+    printl"{select(@jobs.receive @wait)}"
+}

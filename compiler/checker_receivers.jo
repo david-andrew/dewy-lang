@@ -60,6 +60,10 @@ xs_soa = (t0: int) -> bool:
     xs_types[0][t].kind == .struct_ and xs_structs[0][int(xs_types[0][t].st)].soa_
 xs_field = (n: int, expected: int) -> int:
     if xs_nodes[0][n].aux2 == -11 and grouped_place_call(n): return check_expr(n, expected)
+    # (NF_AT: `@x.method` is the method's handle)
+    if int(xs_nodes[0][n].flags) & 2147483648 != 0:
+        handle = dewy_method_handle(n, expected)
+        if handle >= 0: return handle
     if xs_flag(n, 536870912): field_juxt(n)
     if xs_nodes[0][n].b != 0: field_reflect_name(n)
     if xs_reflecting[0] and reflect_member(n): return int(xs_nodes[0][n].type)
