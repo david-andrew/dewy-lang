@@ -16,8 +16,15 @@ throughput (it may not drop more than --limit percent unless the panel got
 cheaper) and hello-world latency (<= 20 ms; reported until it is under). Each
 compiler is its commit's own fixed point (its sources built by a compiler with
 the same sources) and uses its commit's library, so the counts cover compiler
-and library changes alike. Inputs are this checkout's; a base that cannot
-compile one falls back to its own copy and says so.
+and library changes alike. Inputs are this checkout's. A base that cannot
+compile one of them (it predates a rule the program now relies on) is measured
+on its own, older copy of the program, so that row compares two different
+programs. The gate says so loudly and splits the row: the candidate also
+builds the base's copy (compiler alone), and its two costs, on the old and the
+new source, give the source's own growth. The compiler's share is gated as
+usual; a source that grew more than the limit (or cannot be split) fails unless
+a `speed: accept` line names the program (its directory name, or its number).
+Such rows are left out of the throughput and phase comparisons.
 
 Both compilers build the same compiler source in the self-build row, so a cost
 that the new source adds to its own compile (such as an import cycle that sends
@@ -28,7 +35,9 @@ most changes, so it fails only above SOURCE_LIMIT percent (or --limit if larger)
 
 A line `speed: accept <reason>` in a commit message between the base and HEAD
 waives the base comparison. A --checkpoint comparison is never waived: move the
-checkpoint tag after reviewing accepted costs.
+checkpoint tag after reviewing accepted costs (a program's own growth against
+the checkpoint is the one exception: an accept line that names it, between the
+checkpoint and HEAD, acknowledges it).
 
 Counts come from perf_event_open (count_instructions.c), or from valgrind's
 cachegrind where hardware counters are unavailable (CI's virtual machines).
@@ -69,6 +78,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 from tools.compiler import speed_corpus
@@ -340,7 +350,9 @@ def stage(toolchain: Toolchain) -> Path:
     return active
 
 
-def measure(counter: Counter, toolchain: Toolchain, source: str, flags: list[str], notes: list[str]) -> int:
+def measure_item(counter: Counter, toolchain: Toolchain, source: str, flags: list[str]) -> tuple[int, Path | None]:
+    """The compiler's instructions for one source, and None; or, when a base cannot build this checkout's source,
+    its instructions on its own copy and that copy's path (the count is then of a different program)."""
     output = CACHE / 'panel' / 'program'
     active = stage(toolchain)
     env = clean_env(DEWY_CORE_LIB=str(active / 'lib'))
@@ -354,12 +366,83 @@ def measure(counter: Counter, toolchain: Toolchain, source: str, flags: list[str
 
     path = ROOT / source
     try:
-        return twice(path)
+        return twice(path), None
     except CompileError as error:
         if toolchain.inputs is None or Path(source).is_absolute():
             raise RuntimeError(f'{toolchain.label} cannot build {source}:\n{str(error)[-2000:]}')
-        notes.append(f'{toolchain.label} cannot build this checkout\'s {source}; measured its own copy')
-        return twice(toolchain.inputs / source)
+        own = toolchain.inputs / source
+        return twice(own), own
+
+
+def measure(counter: Counter, toolchain: Toolchain, source: str, flags: list[str], notes: list[str]) -> int:
+    count, own = measure_item(counter, toolchain, source, flags)
+    if own is not None:
+        notes.append(f'FALLBACK: {toolchain.label} cannot build this checkout\'s {source}; measured its own copy')
+    return count
+
+
+@dataclass
+class Fallback:
+    """A panel row whose reference compiler could not build this checkout's source: `old` is the reference on
+    its own copy, `new` the candidate on this source, `same` the candidate on the reference's copy (the compiler
+    alone; None when it cannot build that either)."""
+    role: str
+    name: str
+    revision: str
+    old: int
+    new: int
+    same: int | None
+
+    @property
+    def compiler(self) -> float | None:
+        """Percent the candidate compiler costs over the reference, on the reference's source."""
+        return None if self.same is None else round(delta(self.old, self.same), 2) + 0.0
+
+    @property
+    def growth(self) -> float | None:
+        """Percent the source itself grew, for the candidate compiler."""
+        return None if self.same is None else round(delta(self.same, self.new), 2) + 0.0
+
+    def lines(self) -> list[str]:
+        out = [f'    !! FALLBACK {self.name}: {self.role} {self.revision} cannot build this checkout\'s source, so the row '
+               'above compares two different programs; its cost is not a compiler cost',
+               f'       {self.role} on its old source       {self.old / 1e9:8.4f} G']
+        if self.same is None:
+            out.append('       candidate on the old source: it cannot build that either; no split')
+        else:
+            out.append(f'       candidate on the old source  {self.same / 1e9:8.4f} G  {self.compiler:+6.2f}%  (compiler alone)')
+        out.append(f'       candidate on this source     {self.new / 1e9:8.4f} G  '
+                   + (f'{self.growth:+6.2f}%  (this source\'s own growth)' if self.growth is not None else
+                      f'{round(delta(self.old, self.new), 2):+6.2f}%  (against the old source: not split)'))
+        return out
+
+
+def names_item(reason: str, name: str) -> bool:
+    """Does an accept reason name this panel row? Rows are named by their program (`ladder 84_tensor_broadcast`,
+    `flagship 97_notes_service`: the directory name, or its number as a word) or by a word (`game`, `hello`)."""
+    program = name.split(' ', 1)[1] if name.startswith(('ladder ', 'flagship ')) else name
+    if program in reason:
+        return True
+    number = re.match(r'\d+(?=_)', program)
+    word = number.group() if number else program.split()[0]
+    return re.search(rf'(?<![\w.]){re.escape(word)}(?![\w]|\.\d)', reason, re.IGNORECASE) is not None
+
+
+def fallback_verdict(fallbacks: list[Fallback], limit: float,
+                     reasons: dict[str, list[str]]) -> tuple[list[str], list[str]]:
+    """(failures, accepted) for the source growth of the fallback rows: a source that grew more than `limit`
+    (or cannot be split) fails unless an accept line of its role's commit range names the program."""
+    failures, waived = [], []
+    for fb in fallbacks:
+        if fb.growth is not None and fb.growth <= limit:
+            continue
+        named = [r for r in reasons.get(fb.role, []) if names_item(r, fb.name)]
+        what = (f'{fb.name}: {fb.role} {fb.revision} measured an older copy of the source'
+                + (f'; this source grew {fb.growth:+.2f}% (limit {limit:g}%)' if fb.growth is not None
+                   else '; the candidate cannot build that copy, so the growth is unknown')
+                + f' ({fb.old / 1e9:.4f} G old source -> {fb.new / 1e9:.4f} G this source)')
+        (waived if named else failures).append(f'{what}: accepted: {named[0]}' if named else what)
+    return failures, waived
 
 
 def source_row(counter: Counter, candidate: Toolchain, base: Toolchain, counts: dict[str, int], notes: list[str],
@@ -471,12 +554,17 @@ def phase_totals(toolchain: Toolchain, sources: list[str],
     return totals, nodes, lines
 
 
-def cost_model(candidate: Toolchain, base: Toolchain | None, limit: float) -> list[tuple[str, float]]:
+def cost_model(candidate: Toolchain, base: Toolchain | None, limit: float,
+               skip: set[str] = frozenset()) -> list[tuple[str, float]]:
     """The flagship panel's instructions per processed node by phase, against the budgets; returns the phases
-    that grew more than `limit` percent over the base's."""
-    sources = [source for name, source, _ in panel(False) if name.startswith('flagship ')]
+    that grew more than `limit` percent over the base's. Flagships in `skip` (the base measured an older copy of
+    their source) are left out of the comparison with the base, never compared across different programs."""
+    named = [(name, source) for name, source, _ in panel(False) if name.startswith('flagship ')]
+    sources = [source for _, source in named]
+    common = [source for name, source in named if name not in skip]
     new = phase_totals(candidate, sources)
-    old = phase_totals(base, sources, lines_required=False) if base is not None else None
+    old = phase_totals(base, common, lines_required=False) if base is not None and common else None
+    compared = phase_totals(candidate, common) if old and len(common) < len(sources) else new
     if new is None:
         print('  (no phase split: build --time needs Linux x86-64 hardware counters)')
         return []
@@ -486,6 +574,9 @@ def cost_model(candidate: Toolchain, base: Toolchain | None, limit: float) -> li
     print(f'cost model, flagship panel ({len(sources)} programs, {lines} processed lines, {nodes} processed nodes, '
           f'{nodes / lines:.1f} nodes/line; instructions per processed node, library and instance work included)'
           + ('' if old else ': no base phase split, not gated'))
+    if old and len(common) < len(sources):
+        print(f'  (base columns: {len(common)} of {len(sources)} programs; left out, measured on different sources: '
+              + ', '.join(name for name, source in named if name in skip) + ')')
     print(f'  {"phase":16}{"budget":>8}{"now":>8}{"x budget":>9}{"k/line":>8}' + (f'{"base":>8}{"change":>9}' if old else ''))
     failures = []
     for row, parts, budget in PHASE_BUDGETS:
@@ -494,7 +585,8 @@ def cost_model(candidate: Toolchain, base: Toolchain | None, limit: float) -> li
         line = f'  {row:16}{round(budget / NODES_PER_LINE) if budget else "-":>8}{n / nodes:8.0f}{ratio}{n / lines / 1e3:8.1f}'
         if old:
             b = sum(old[0].get(p, 0) for p in parts)
-            change = round(delta(b, n), 2) + 0.0 if b else 0.0
+            c = sum(compared[0].get(p, 0) for p in parts)
+            change = round(delta(b, c), 2) + 0.0 if b else 0.0
             line += f'{b / old[1]:8.0f}{change:+8.2f}%'
             # (every phase is gated once: facts+effects is its two rows)
             if b and change > limit and row != 'facts+effects':
@@ -595,10 +687,12 @@ def yardstick(toolchain: Toolchain, counts: dict[str, int]) -> list[str]:
 
 
 def throughput_gate(candidate: Toolchain, base: Toolchain | None, counts: dict[str, int],
-                    base_counts: dict[str, int], limit: float, counters: bool = True) -> list[str]:
+                    base_counts: dict[str, int], limit: float, counters: bool = True,
+                    skip: set[str] = frozenset()) -> list[str]:
     """The flagship panel's all-lines throughput against the base's: a drop of more than `limit` percent in
     processed lines per instruction fails unless the panel also got cheaper (a fan-out cut that pays for
-    itself). A base that does not count lines cannot be compared."""
+    itself). A base that does not count lines cannot be compared. Flagships in `skip` (the base measured an older
+    copy of their source) are left out of the comparison: two different programs have no rate to compare."""
     names = [name for name, _, _ in panel(False) if name.startswith('flagship ')]
     sources = {name: source for name, source, _ in panel(False)}
     new_lines = [processed_report(candidate, sources[n]) for n in names]
@@ -610,6 +704,13 @@ def throughput_gate(candidate: Toolchain, base: Toolchain | None, counts: dict[s
         raise RuntimeError('the candidate does not count processed lines: the throughput gate cannot run')
     if base is None:
         return []
+    if skip & set(names):
+        print('throughput gate: left out of the comparison (the base measured an older copy of the source): '
+              + ', '.join(sorted(skip & set(names))))
+        keep = [i for i, n in enumerate(names) if n not in skip]
+        names, new_lines = [names[i] for i in keep], [new_lines[i] for i in keep]
+        if not names:
+            return []
     old_lines = [processed_report(base, sources[n], required=False) for n in names]
     if any(x is None for x in old_lines) or any(n not in base_counts for n in names):
         print('throughput gate: the base does not count processed lines; not gated this time')
@@ -960,31 +1061,55 @@ def main(argv: list[str], current: Path) -> int:
         failures = []
         counts = {}
         base_counts = {}
+        fallbacks: list[Fallback] = []
         for name, source, flags in panel(args.release):
             new = measure(counter, candidate, source, flags, notes)
             counts[name] = new
             line = f'  {name:26}'
+            found = []
             for role, (revision, _, toolchain) in references.items():
-                old = measure(counter, toolchain, source, flags, notes)
+                old, own = measure_item(counter, toolchain, source, flags)
                 if role == 'base':
                     base_counts[name] = old
+                prefix = '' if role == 'base' else f'   {revision}'
+                if own is not None:
+                    # (a different program on the base's side: the percentage would be meaningless, and the
+                    # base's old copy must never stand in for this source unannounced)
+                    try:
+                        same = measure(counter, candidate, str(own), flags, [])
+                    except RuntimeError:
+                        same = None
+                    fb = Fallback(role, name, toolchain.label.split()[-1], old, new, same)
+                    found.append(fb)
+                    if fb.compiler is not None and fb.compiler > args.limit:
+                        failures.append((role, f'{name} (compiler alone, on {role}\'s source)', fb.compiler))
+                    line += f'{prefix} {old / 1e9:8.4f} -> {new / 1e9:8.4f}  {"DIFFERENT SOURCE":>16} <-'
+                    continue
                 change = round(delta(old, new), 2) + 0.0
                 over = change > args.limit
                 if over:
                     failures.append((role, name, change))
-                prefix = '' if role == 'base' else f'   {revision}'
                 line += f'{prefix} {old / 1e9:8.4f} -> {new / 1e9:8.4f}  {change:+6.2f}%' + (' <-' if over else '   ')
             print(line.rstrip(), flush=True)
+            for fb in found:
+                for text in fb.lines():
+                    print(text, flush=True)
+            fallbacks += found
         source_row(counter, candidate, references['base'][2], counts, notes, max(args.limit, SOURCE_LIMIT), failures)
         for note in dict.fromkeys(notes):
             print(f'  ({note})')
         hello_failures = yardstick(candidate, counts)
         base_toolchain = references['base'][2]
+        mixed = {fb.name for fb in fallbacks if fb.role == 'base'}
         throughput_failures = throughput_gate(candidate, base_toolchain, counts, base_counts, args.limit,
-                                             counter.kind == 'perf')
-        for row, change in cost_model(candidate, base_toolchain, args.limit):
+                                             counter.kind == 'perf', skip=mixed)
+        for row, change in cost_model(candidate, base_toolchain, args.limit, skip=mixed):
             failures.append(('base', f'phase {row} (flagships)', change))
         print(f'  ({time.perf_counter() - started:.0f} s)')
+    ranges = {role: accepted(git('log', '--format=%B', f'{commit}..HEAD')) for role, (_, commit, _) in references.items()}
+    growth_failures, growth_accepted = fallback_verdict(fallbacks, args.limit, ranges)
+    for text in growth_accepted:
+        print(f'speed: source growth accepted for {text}')
     base_failures = [f for f in failures if f[0] == 'base']
     other_failures = [f for f in failures if f[0] != 'base']
     if (base_failures or throughput_failures) and reasons:
@@ -995,7 +1120,13 @@ def main(argv: list[str], current: Path) -> int:
         print(f'speed: {name} needs {change:+.2f}% instructions vs {role} (limit {args.limit}%)', file=sys.stderr)
     for message in throughput_failures + hello_failures:
         print(f'speed: {message}', file=sys.stderr)
+    for message in growth_failures:
+        print(f'speed: FALLBACK {message}', file=sys.stderr)
+    if growth_failures:
+        print('speed: the base could not build that source, so its cost never reached a comparison: add a line '
+              '`speed: accept <reason naming the program>` to a commit message since then, or change the source',
+              file=sys.stderr)
     if remaining or throughput_failures:
         print('speed: add a line `speed: accept <reason>` to the commit message when the cost is intended',
               file=sys.stderr)
-    return 1 if remaining or throughput_failures or hello_failures else 0
+    return 1 if remaining or throughput_failures or hello_failures or growth_failures else 0
