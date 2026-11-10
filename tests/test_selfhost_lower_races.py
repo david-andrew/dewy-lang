@@ -1,8 +1,8 @@
 """Parallel callback traversal and race diagnostics match the frozen leaf."""
-import re
 
 import pytest
 
+from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
@@ -41,11 +41,7 @@ def test_lower_races_diagnostics(compiler, tmp_path, monkeypatch, captured):
     source, output = tmp_path / 'input.dewy', tmp_path / 'program'
     source.write_text('main=()=>{}\n')
     modules = modules_for(source, output, 'lower_races')
-    modules['util.jo'], count = re.subn(
-        r'(?m)^fatal = \(p0: int, msg0: str\):\n(?:[ \t].*\n|\n)*',
-        'fatal = (p0: int, msg0: str):\n    print(msg0)\n    exit(41)\n\n',
-        modules['util.jo'], count=1)
-    assert count == 1
+    diagnostic_status(modules, 'fatal')
     setup = ('target = la_local(T_INT, LF_CAPTURE)\n    nodes[target].name = i32(intern("counter"))'
              if captured else 'target = la_global("counter", T_INT)')
     driver = DRIVER + '''main = ():
@@ -112,11 +108,7 @@ def test_lower_races_entry_errors(compiler, tmp_path, monkeypatch, case, expecte
     source, output = tmp_path / 'input.dewy', tmp_path / 'program'
     source.write_text('main=()=>{}\n')
     modules = modules_for(source, output, 'lower_races')
-    modules['util.jo'], count = re.subn(
-        r'(?m)^fatal = \(p0: int, msg0: str\):\n(?:[ \t].*\n|\n)*',
-        'fatal = (p0: int, msg0: str):\n    print(msg0)\n    exit(41)\n\n',
-        modules['util.jo'], count=1)
-    assert count == 1
+    diagnostic_status(modules, 'fatal')
     driver = DRIVER + '''main = ():
     lower_test_cli()
     f = la_fn(la_node(.block)); decl = la_node(.ident)

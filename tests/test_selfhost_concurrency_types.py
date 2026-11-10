@@ -5,6 +5,7 @@ import subprocess
 
 import pytest
 
+from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
@@ -98,11 +99,7 @@ def test_concurrency_types_diagnostics(compiler, tmp_path, monkeypatch, case):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     source = ROOT / 'tests/cases/transfer' / (case + '.dewy')
     modules = modules_for(source, tmp_path / 'program', 'concurrency_types')
-    modules['util.jo'], count = re.subn(
-        r'(?m)^fatal = \(p0: int, msg0: str\):\n(?:[ \t].*\n|\n)*',
-        'fatal = (p0: int, msg0: str):\n    print(msg0)\n    exit(41)\n\n',
-        modules['util.jo'], count=1)
-    assert count == 1
+    diagnostic_status(modules, 'fatal')
     out = compare_leaf(compiler, tmp_path, False,
                        "use 'main.jo'\nmain = ():\n    lower_test_cli()\n",
                        status=41, extra_stems=('concurrency_types',), jo_doubles=modules)

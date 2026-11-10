@@ -3,6 +3,7 @@ import re
 
 import pytest
 
+from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
@@ -121,11 +122,7 @@ def test_lower_analysis_alias_error(compiler, tmp_path, monkeypatch):
     source, output = tmp_path / 'input.dewy', tmp_path / 'program'
     source.write_text('main=()=>{}\n')
     modules = modules_for(source, output, 'lower_analysis')
-    modules['util.jo'], count = re.subn(
-        r'(?m)^fatal = \(p0: int, msg0: str\):\n(?:[ \t].*\n|\n)*',
-        'fatal = (p0: int, msg0: str):\n    print(msg0)\n    exit(41)\n\n',
-        modules['util.jo'], count=1)
-    assert count == 1
+    diagnostic_status(modules, 'fatal')
     driver = DRIVER + r'''main = ():
     lower_test_cli()
     g = la_global("g", mk_array(T_INT))

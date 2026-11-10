@@ -1,6 +1,7 @@
 """Channel identity, capacity and cancellation queries match frozen Jo."""
 import re
 
+from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
@@ -36,7 +37,8 @@ main = ():
         modules = modules_for(source, tmp_path / 'unused', leaf)
         modules.arguments = ('check', str(source))
         modules.runtime_driver = lambda text: text
-        for name, body in [('fatal', 'print(msg); exit(41)'), ('warn', 'print(msg)')]:
+        diagnostic_status(modules)
+        for name, body in [('warn', 'print(msg)')]:
             modules['util.jo'], count = re.subn(
                 rf'(?m)^{name} = \([^\n]*\):\n(?:[ \t].*\n|\n)*',
                 f'{name} = (p: int, msg: str): {body}\n\n',

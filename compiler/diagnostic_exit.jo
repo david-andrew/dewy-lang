@@ -1,0 +1,52 @@
+use 'util.jo'
+use 'source_types.dewy'
+use 'lazy_bodies.jo'
+use 'lazy_force.dewy'
+use 'frontend.jo'
+use 'pcheck.jo'
+use 'watch.jo'
+use 'watch_ops.dewy'
+use 'ide.jo'
+use 'ide_decls.dewy'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'fused.jo'
+use 'fused_ops.dewy'
+use 'line_table.dewy'
+use 'intern.dewy'
+use 'error_display.dewy'
+
+# the end of compiling: the process ends (in the interactive prompt, back to it: repl.jo)
+stop = (code: int):
+    if err_prior.len() > 0 or err_more_note: err_prior_show()
+    status = code
+    if status == 1: status = error_exit
+    when not BOOTSTRAP:
+        if status != 0: watch_save_failed_inputs()
+        __repl_unwind()
+    exit(status)
+fatal = (p0: int, msg0: str):
+    dc_replay()
+    p, msg, notes = err_locate(p0, msg0)
+    if quiet_errors: stop(1)
+    extra = err_notes
+    err_notes = []
+    if ide_on:
+        loop n in notes: msg += " (in {trail_sig(n)}, called at {pos_str(err_trail[n])})"
+        loop e in extra: msg += "; {e.1}"
+        ide_fatal(p, msg)
+    if err_held_on or err_held.len() > 0:
+        # (one with no place shows last)
+        if p >= 0: err_held.push((p, err_block(p, msg, notes, extra)))
+        else: err_held.push((1 << 62, "error: {msg}"))
+        err_flush()
+    if p < 0:
+        err_prior.push((1 << 62, "error: {msg}"))
+        stop(1)
+    block = err_block(p, msg, notes, extra)
+    if more_errors: next_error_run(p, block)
+    err_prior.push((p, block))
+    stop(1)
+ice = (msg: str):
+    eprint("internal compiler error: {msg}")
+    stop(2)

@@ -4,7 +4,8 @@ from p"deadlock_channels.dewy" import (dc_capacity dc_mult dc_may_fail dc_cancel
 from p"deadlock_channel_walk.dewy" import dc_collect
 from p"deadlock_locations.dewy" import (dl_key dl_name dl_line dl_must dl_path)
 from p"deadlock_waits.dewy" import dl_undecided
-from p"util.jo" import (fatal err_notes)
+from p"util.jo" import (err_notes)
+from p"diagnostic_exit.dewy" import (fatal)
 
 ChannelGraphWord:type=int64<overflow='wrap'>
 dc_send_waits=(a:ChannelGraphWord ch:string upto:ChannelGraphWord through:bool):>int64=>$unsafe {

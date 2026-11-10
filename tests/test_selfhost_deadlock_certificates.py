@@ -1,6 +1,6 @@
 """Recursive wait certificates, protocols and foreign boundaries match frozen Jo."""
-import re
 
+from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
@@ -44,11 +44,7 @@ main = ():
         modules = modules_for(source, tmp_path / 'unused', 'deadlock_certificates')
         modules.arguments = ('check', str(source))
         modules.runtime_driver = lambda text: text
-        modules['util.jo'], count = re.subn(
-            r'(?m)^fatal = \([^\n]*\):\n(?:[ \t].*\n|\n)*',
-            'fatal = (p: int, msg: str): print(msg); exit(41)\n\n',
-            modules['util.jo'], count=1)
-        assert count == 1
+        diagnostic_status(modules, 'fatal')
         result = compare_leaf(compiler, tmp_path, False, driver, status=status,
                               extra_stems=('deadlock_certificates',), jo_doubles=modules)
         assert expected in result, (source, result)

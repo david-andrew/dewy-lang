@@ -1,7 +1,7 @@
 """Demanded lock walks, task joins and callback substitution match frozen Jo."""
-import re
 import subprocess
 
+from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
@@ -33,11 +33,7 @@ main = ():
             output = tmp_path / 'program'
             modules = modules_for(source, output, 'deadlock_walk',
                                   flags=('--release',) if release else ())
-            modules['util.jo'], count = re.subn(
-                r'(?m)^fatal = \(p0: int, msg0: str\):\n(?:[ \t].*\n|\n)*',
-                'fatal = (p0: int, msg0: str):\n    print(msg0)\n    exit(41)\n\n',
-                modules['util.jo'], count=1)
-            assert count == 1
+            diagnostic_status(modules, 'fatal')
             result = compare_leaf(compiler, tmp_path, False, driver,
                                   status=41 if message else 0,
                                   extra_stems=('deadlock_walk',), jo_doubles=modules)

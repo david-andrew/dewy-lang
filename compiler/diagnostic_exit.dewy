@@ -1,0 +1,50 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (eprint exit)
+from p"error_display.dewy" import (err_block err_flush err_locate err_prior_show)
+from p"ide.jo" import (ide_on next_error_run)
+from p"ide_decls.dewy" import (trail_sig)
+from p"ide_index.dewy" import (ide_fatal)
+from p"lazy_force.dewy" import (dc_replay)
+from p"util.jo" import (err_held err_held_on err_more_note err_notes err_prior err_trail error_exit more_errors pos_str quiet_errors)
+from p"watch_ops.dewy" import (watch_save_failed_inputs)
+
+ExitWord:type=int64<overflow='wrap'>
+# the end of compiling: the process ends (in the interactive prompt, back to it: repl.jo)
+stop=(code:int64):>never=>$unsafe {
+    if err_prior.length >? 0 or err_more_note {err_prior_show()}
+    let status=code
+    if status =? 1 {status=error_exit}
+    # Bootstrap generations select the Jo twin; this leaf is the normal path.
+    if status not=? 0 {watch_save_failed_inputs()}
+    __repl_unwind()
+    exit(status)
+}
+fatal=(p0:int64 msg0:string):>never=>{
+    dc_replay()
+    let [p msg notes]=err_locate(p0 msg0)
+    if quiet_errors {stop(1)}
+    let extra=err_notes
+    err_notes=[]
+    if ide_on {
+        loop n in notes {msg="{msg} (in {trail_sig(n)}, called at {pos_str(err_trail[n])})"}
+        loop e in extra {msg="{msg}; {e[1]}"}
+        ide_fatal(p msg)
+    }
+    if err_held_on or err_held.length >? 0 {
+        # (one with no place shows last)
+        if p >=? 0 {err_held.push([p err_block(p msg notes extra)])} else {err_held.push([1 << 62 "error: {msg}"])}
+        err_flush()
+    }
+    if p <? 0 {
+        err_prior.push([1 << 62 "error: {msg}"])
+        stop(1)
+    }
+    let block=err_block(p msg notes extra)
+    if more_errors {next_error_run(p block)}
+    err_prior.push([p block])
+    stop(1)
+}
+ice=(msg:string):>never=>{
+    eprint("internal compiler error: {msg}")
+    stop(2)
+}

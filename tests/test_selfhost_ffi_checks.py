@@ -1,10 +1,10 @@
 """Foreign boundary checks preserve C layouts and unsafe diagnostics."""
 import json
-import re
 import subprocess
 
 import pytest
 
+from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
@@ -34,11 +34,7 @@ def test_ffi_checks_diagnostics(compiler, tmp_path, monkeypatch, case, expected)
     source, output = tmp_path / 'input.dewy', tmp_path / 'program'
     source.write_text((ROOT / 'tests/cases/ffi' / (case + '.dewy')).read_text())
     modules = modules_for(source, output, 'ffi_checks')
-    modules['util.jo'], count = re.subn(
-        r'(?m)^fatal = \(p0: int, msg0: str\):\n(?:[ \t].*\n|\n)*',
-        'fatal = (p0: int, msg0: str):\n    print(msg0)\n    exit(41)\n\n',
-        modules['util.jo'], count=1)
-    assert count == 1
+    diagnostic_status(modules, 'fatal')
     driver = "use 'main.jo'\nmain = ():\n    lower_test_cli()\n    print(\"unreachable\")\n"
     out = compare_leaf(compiler, tmp_path, False, driver, status=41,
                        extra_stems=('ffi_checks',), jo_doubles=modules)

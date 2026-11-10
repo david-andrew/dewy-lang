@@ -16,6 +16,7 @@ use 'fused_ops.dewy'
 use 'line_table.dewy'
 use 'intern.dewy'
 use 'error_display.dewy'
+use 'diagnostic_exit.dewy'
 
 files: SrcFile[]
 # the interned names (intern.dewy's table, passed to it by place): each name by id, its hash by
@@ -63,18 +64,6 @@ pos_str = (p: int) -> str:
     if f < 0 or f >= files.len(): return "<unknown>"
     l, c = line_col(p)
     "{files[f].path}:{l}:{c}"
-
-
-
-# the end of compiling: the process ends (in the interactive prompt, back to it: repl.jo)
-stop = (code: int):
-    if err_prior.len() > 0 or err_more_note: err_prior_show()
-    status = code
-    if status == 1: status = error_exit
-    when not BOOTSTRAP:
-        if status != 0: watch_save_failed_inputs()
-        __repl_unwind()
-    exit(status)
 
 error_exit = 1              # (the exit status for errors: dewy-core test's is 102, a module that did not build)
 quiet_errors = false        # (an error only stops: dewy fmt in the language server)
@@ -138,39 +127,10 @@ pos_in_lib = (p: int) -> bool:
     f = pos_file(p)
     f < files.len() and starts_with(files[f].path, lib_root)
 
-
-
 # (the facts pass decides each function's obligations on its own: while err_held_on, an
 # unproven one is held, not shown, and the pass shows all it held in source order at its end)
 err_held_on = false
 err_held: (int, str)[]
-
-
-
-
-fatal = (p0: int, msg0: str):
-    dc_replay()
-    p, msg, notes = err_locate(p0, msg0)
-    if quiet_errors: stop(1)
-    extra = err_notes
-    err_notes = []
-    if ide_on:
-        loop n in notes: msg += " (in {trail_sig(n)}, called at {pos_str(err_trail[n])})"
-        loop e in extra: msg += "; {e.1}"
-        ide_fatal(p, msg)
-    if err_held_on or err_held.len() > 0:
-        # (one with no place shows last)
-        if p >= 0: err_held.push((p, err_block(p, msg, notes, extra)))
-        else: err_held.push((1 << 62, "error: {msg}"))
-        err_flush()
-    if p < 0:
-        err_prior.push((1 << 62, "error: {msg}"))
-        stop(1)
-    block = err_block(p, msg, notes, extra)
-    if more_errors: next_error_run(p, block)
-    err_prior.push((p, block))
-    stop(1)
-
 
 # (the same warning at the same place once: a generic function checked for each of its types;
 # the editor's checks start over each time, so not there)
@@ -201,10 +161,6 @@ warn = (p: int, msg: str):
     if errors_only and shown_warnings.contains(wk): return
     shown_warnings.push(wk)
     eprint("{pos_str(p)}: warning: {msg}")
-
-ice = (msg: str):
-    eprint("internal compiler error: {msg}")
-    stop(2)
 
 # append src to out with one copy (compiler code must stay compilable by the C bootstrap,
 # which lacks the `extend` intrinsic)

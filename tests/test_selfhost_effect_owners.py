@@ -5,6 +5,7 @@ import subprocess
 
 import pytest
 
+from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
@@ -90,11 +91,7 @@ def test_effect_owners_programs(compiler, tmp_path, monkeypatch, optimized, case
 def test_effect_owners_diagnostics(compiler, tmp_path, monkeypatch, entry):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     modules = modules_for(tmp_path / 'unused.dewy', tmp_path / 'unused', 'effect_owners')
-    modules['util.jo'], count = re.subn(
-        r'(?m)^fatal = \(p0: int, msg0: str\):\n(?:[ \t].*\n|\n)*',
-        'fatal = (p0: int, msg0: str):\n    print(msg0)\n    exit(41)\n\n',
-        modules['util.jo'], count=1)
-    assert count == 1
+    diagnostic_status(modules, 'fatal')
     driver = "use 'main.jo'\nmain = ():\n    " + entry + '(0, "borrow escaped")\n'
     out = compare_leaf(compiler, tmp_path, False, driver, status=41,
                        extra_stems=('effect_owners',), jo_doubles=modules)

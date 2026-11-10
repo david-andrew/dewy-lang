@@ -1,10 +1,10 @@
 """Generated value/ownership helpers agree with the frozen implementation."""
 import json
-import re
 import subprocess
 
 import pytest
 
+from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
@@ -36,11 +36,7 @@ def test_lower_helpers_invalid_dispatch(compiler, tmp_path, monkeypatch):
     source, output = tmp_path / 'input.dewy', tmp_path / 'program'
     source.write_text('main=()=>{}\n')
     modules = modules_for(source, output, 'lower_helpers')
-    modules['util.jo'], count = re.subn(
-        r'(?m)^ice = \(msg: str\):\n(?:[ \t].*\n|\n)*',
-        'ice = (msg: str):\n    print(msg)\n    exit(41)\n\n',
-        modules['util.jo'], count=1)
-    assert count == 1
+    diagnostic_status(modules, 'ice')
     driver = ("use 'main.jo'\nuse 'lower.jo'\nuse 'types.jo'\n"
               "use 'lower_primitives.dewy'\n"
               'main = ():\n    lower_test_cli()\n'

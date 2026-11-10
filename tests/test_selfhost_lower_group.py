@@ -1,10 +1,10 @@
 """Recursive lowering and its frozen twin emit identical programs and diagnostics."""
 import json
-import re
 import subprocess
 
 import pytest
 
+from tests.selfhost_diagnostic_double import diagnostic_status
 from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
@@ -86,11 +86,7 @@ def test_lower_group_errors(compiler, tmp_path, kind, message):
     modules = modules_for(source, output)
     # A diagnostic service double makes the exact lowerer's message observable
     # without unrelated source-location rendering or process-wide error queues.
-    modules['util.jo'], count = re.subn(
-        r'(?m)^fatal = \(p0: int, msg0: str\):\n(?:[ \t].*\n|\n)*',
-        'fatal = (p0: int, msg0: str):\n    print(msg0)\n    exit(41)\n\n',
-        modules['util.jo'], count=1)
-    assert count == 1
+    diagnostic_status(modules, 'fatal')
     driver = ("use 'main.jo'\nuse 'ast.jo'\nuse 'types.jo'\n"
               'main = ():\n    lower_test_cli()\n'
               f'    bad = mk(.{kind}, 0)\n    nodes[bad].type = i32(T_INT)\n'
