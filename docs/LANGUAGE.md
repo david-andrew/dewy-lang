@@ -2126,6 +2126,13 @@ Generic functions cannot implicitly duplicate a move-only type argument.
 A method marked with the compiler-only `$__consume__` takes its receiver: the
 call moves the owner in (at its proven last use, like any owning argument), and
 the method owns and drops it. Other methods borrow their receiver.
+A union with an owning alternative (`Permit | Stop`, `Reserved<T> | Closed<Reserved<T>>`)
+is an owner: dropping it drops its active alternative, a widening or a return moves
+it, and copying it copies the active alternative (a move-only alternative makes the
+union move-only). A `match` binding, a name narrowed by `match` or `is?`, or the value
+`or_throw` gives takes the owner out at the union's proven last use; on every other path the union keeps it, and
+each owner drops once whichever path ran. A later use of the union, or of the narrowed
+name, prevents the transfer.
 Global owners and foreign entry points with owners remain unsupported.
 Ordinary records and collections keep their existing value and copy-on-write behavior.
 
@@ -3859,6 +3866,25 @@ receivers with the same verbs and outcomes. It is lock-free: a send or receive
 claims a slot and fills or empties it, and a non-waiting attempt that finds another
 task claiming or filling the slot it wants gives `Busy`. Its handle is shared by
 copying, like a channel's, and its waits are checked like a channel's.
+
+`q.reserve` waits for room and takes a slot before the value exists: it gives
+`Reserved<T> | Closed<Reserved<T>> | Canceled`, and `reserve(timeout=)` adds `Timeout`.
+`permit.send(value)` is `void`: it cannot wait or fail, even after a close, and it
+consumes the permit, so a permit sends once. Dropping a permit unsent gives its slot up;
+receives pass over it, and the slot is room again once the values ahead of it are
+received. `Closed<Reserved<T>>` is the queue closing to reservations, distinct from a
+receive's `Closed<T>`. In `select`, `@out.reserve` is "send or stop": a reserve that
+loses claims nothing, and the value stays with the caller until the permit's arm.
+`$no_deadlocks` rejects `reserve`, called or prepared as a wait: a permit may be
+dropped unsent, so no certificate counts it as a send.
+
+```dewy
+match select(@out.reserve @stop.receive) {
+    permit:Reserved<Job> => permit.send(job)
+    _:bool => return
+    <Closed<Reserved<Job>>> => save(job)
+}
+```
 
 ```dewy
 fill = (jobs:Mpmc<int64> n:int64):>void | Unsent<int64> => {

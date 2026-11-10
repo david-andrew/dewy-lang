@@ -1,0 +1,11 @@
+# A permit is one slot: `send` consumes it, so a second send is refused.
+main = () => {
+    let jobs = mpmc<int64>(2)
+    match jobs.reserve {
+        permit:Reserved<int64> => {
+            permit.send(1)
+            permit.send(2)
+        }
+        _ => {}
+    }
+}

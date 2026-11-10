@@ -132,10 +132,19 @@ nd_args = (n: int, held: DlHeld[], pos: int, first: int = 0):
         if nd_param(a) or nd_nonblocking(a): continue
         nd_bad(pos, "gives a function value the compiler cannot follow, so what it waits for is unknown", "give a function literal or a named function, or a callable type whose row says `no blocks`")
 
+# A queue's `reserve`, called or prepared as a wait (`@q.reserve`): its permit may be dropped
+# unsent, so it is a send no certificate can count (decisions.md batch 7, as `select`).
+nd_reserve = (n: int) -> bool:
+    g = int(nodes[n].sym)
+    if g <= 0 or nkids(n) == 0 or fns[g].mod != dc_qmod or fns[g].decl == 0: return false
+    name_of(int(nodes[int(fns[g].decl)].name)) == "reserve"
 nd_walk = (n: int, held: mut DlHeld[]):
     if n == 0: return
     k = nodes[n].kind
     if k == .lambda or k == .fnref: return
+    if k == .partial and nd_reserve(n):
+        nd_bad(nodes[n].pos, "reserves a slot in the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a permit may be dropped unsent, so a reservation has no certificate; send with `send` from tasks that are joined, which is certified")
+        return
     if k == .block:
         mark = held.len()
         loop c in kids(n): nd_walk(c, held)
@@ -218,6 +227,10 @@ nd_call = (n: int, held: mut DlHeld[]):
                         break
         return
     if len(what) > 0: return
+    if nodes[n].aux == 0 and nd_reserve(n):
+        loop i in [1..nkids(n)): nd_walk(kid(n, i), held)
+        nd_bad(pos, "reserves a slot in the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a permit may be dropped unsent, so a reservation has no certificate; send with `send` from tasks that are joined, which is certified")
+        return
     op = dc_chan_call(n)
     if op == 1 or op == 2:
         loop i in [1..nkids(n)): nd_walk(kid(n, i), held)

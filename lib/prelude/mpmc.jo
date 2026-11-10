@@ -77,8 +77,9 @@ __mpmc_try_send[T] = (q: __Mpmc[T], v: T) -> int:
     sq = __mpmc_seq(p, i)
     d = __q_load(sq) - 2 * pos
     if d < 0:
-        # (the slot still holds the value sent a lap ago: full, unless a receive has claimed it)
-        if __q_load(&p.deq) > pos - p.cap: return 4
+        # (the slot still holds the value sent a lap ago: full, unless a receive has claimed it
+        # or it is a given-up reservation at the head, which this send passes over)
+        if __q_load(&p.deq) > pos - p.cap or __mpmc_pass_empty(p): return 4
         return 3
     if d > 0: return 4
     if __q_cas(&p.enq, pos, pos + 1) != pos:
@@ -99,22 +100,28 @@ __mpmc_take_at[T] = (p: *__MpmcState[T], pos: int) -> T:
     v
 
 # The position claimed (>= 0, for __mpmc_take), or -1 closed and drained, -2 canceled,
-# -3 empty, -4 busy. Never waits.
+# -3 empty, -4 busy. Never waits. A slot published empty (a reservation given up) is passed
+# over: claimed, freed for the send a lap later, and the next position tried.
 __mpmc_try_claim[T] = (q: __Mpmc[T]) -> int:
     p = q.__p
-    if __task_canceled(): return -2
-    pos = __q_load(&p.deq)
-    i = pos % p.cap
-    d = __q_load(__mpmc_seq(p, i)) - (2 * pos + 1)
-    if d < 0:
-        # (not written yet: empty, unless a send has claimed it and is still writing)
-        e = __q_load(&p.enq)
-        if e & (__MPMC_CLOSED - 1) != pos: return -4
-        if e & __MPMC_CLOSED != 0: return -1
-        return -3
-    if d > 0: return -4
-    if __q_cas(&p.deq, pos, pos + 1) != pos: return -4
-    pos
+    loop:
+        if __task_canceled(): return -2
+        pos = __q_load(&p.deq)
+        i = pos % p.cap
+        d = __q_load(__mpmc_seq(p, i)) - (2 * pos + 1)
+        if d < 0:
+            # (not written yet: empty, unless a send has claimed it and is still writing, or
+            # holds it reserved)
+            e = __q_load(&p.enq)
+            if e & (__MPMC_CLOSED - 1) != pos: return -4
+            if e & __MPMC_CLOSED != 0: return -1
+            return -3
+        if d > 0: return -4
+        if __q_cas(&p.deq, pos, pos + 1) != pos: return -4
+        if p.slots[i] != none: return pos
+        __q_add(__mpmc_seq(p, i), 2 * p.cap - 1)
+        __q_changed(&p.seq, &p.waiting)
+    -4
 
 __mpmc_take[T] = (q: __Mpmc[T], pos: int) -> T: __mpmc_take_at(q.__p, pos)
 
@@ -153,6 +160,74 @@ __mpmc_receive_wait_until[T] = (q: __Mpmc[T], deadline: int) -> int:
         if pos == -3: __q_park(&p.seq, s, &p.waiting, spins)
         else if spins > 64: __task_pause()
         spins += 1
+
+# `reserve` (D4, decisions.md batch 7): a send's slot claimed before its value. The position
+# (>= 0) is the permit's until __mpmc_fill writes it or __mpmc_unreserve publishes it empty;
+# a close after the claim does not take it back. -1 closed, -2 canceled, -3 full, -4 busy.
+# Never waits.
+__mpmc_try_reserve[T] = (q: __Mpmc[T]) -> int:
+    p = q.__p
+    if __task_canceled(): return -2
+    pos = __q_load(&p.enq)
+    if pos & __MPMC_CLOSED != 0: return -1
+    i = pos % p.cap
+    d = __q_load(__mpmc_seq(p, i)) - 2 * pos
+    if d < 0:
+        if __q_load(&p.deq) > pos - p.cap or __mpmc_pass_empty(p): return -4
+        return -3
+    if d > 0: return -4
+    if __q_cas(&p.enq, pos, pos + 1) != pos:
+        if __q_load(&p.enq) & __MPMC_CLOSED != 0: return -1
+        return -4
+    pos
+
+# The same, waiting while the queue is full or busy, with -5: the deadline (time_ns; 0 for
+# none) passed first. Inside select a full queue is a miss (-2), so a losing reserve claims
+# nothing.
+__mpmc_reserve_wait_until[T] = (q: __Mpmc[T], deadline: int) -> int:
+    p = q.__p
+    spins = 0
+    loop:
+        s = __q_load(&p.seq)
+        pos = __mpmc_try_reserve(q)
+        if pos > -3: return pos
+        if __select_missed(): return -2
+        if deadline != 0 and time_ns() >= deadline: return -5
+        if pos == -3: __q_park(&p.seq, s, &p.waiting, spins)
+        else if spins > 64: __task_pause()
+        spins += 1
+
+__mpmc_reserve_wait[T] = (q: __Mpmc[T]) -> int: __mpmc_reserve_wait_until(q, 0)
+
+# A reserved position's value written and published. Never waits, never fails.
+__mpmc_fill[T] = (q: __Mpmc[T], pos: int, v: T):
+    p = q.__p
+    i = pos % p.cap
+    p.slots[i] = v
+    __q_add(__mpmc_seq(p, i), 1)
+    __q_changed(&p.seq, &p.waiting)
+
+# A reserved position given up: published empty, so receives pass over it. Only the holder
+# moves a slot from 2*pos (claimed) on, so finding it moved on means it was filled.
+__mpmc_unreserve[T] = (q: __Mpmc[T], pos: int):
+    p = q.__p
+    sq = __mpmc_seq(p, pos % p.cap)
+    if __q_load(sq) != 2 * pos: return
+    __q_add(sq, 1)
+    __q_changed(&p.seq, &p.waiting)
+    __mpmc_pass_empty(p)
+
+# A given-up reservation at the head claimed and freed, so its slot is room again without
+# waiting for a receive: whether one was.
+__mpmc_pass_empty[T] = (p: *__MpmcState[T]) -> bool:
+    pos = __q_load(&p.deq)
+    i = pos % p.cap
+    sq = __mpmc_seq(p, i)
+    if __q_load(sq) != 2 * pos + 1 or p.slots[i] != none: return false
+    if __q_cas(&p.deq, pos, pos + 1) != pos: return false
+    __q_add(sq, 2 * p.cap - 1)
+    __q_changed(&p.seq, &p.waiting)
+    true
 
 __mpmc_close[T] = (q: __Mpmc[T]) -> void:
     p = q.__p

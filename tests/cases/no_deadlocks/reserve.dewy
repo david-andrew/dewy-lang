@@ -1,0 +1,11 @@
+# modes: native
+# `$no_deadlocks`: a reservation has no certificate (decisions.md batch 7): its permit may be dropped
+# unsent, so it is not a send a certificate can count.
+$no_deadlocks
+main = () => {
+    let a = mpmc<int64>(1)
+    match a.reserve {
+        p:Reserved<int64> => p.send(1)
+        _ => {}
+    }
+}

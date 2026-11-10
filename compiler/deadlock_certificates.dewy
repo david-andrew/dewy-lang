@@ -143,10 +143,21 @@ nd_args=(n:CertificateWord held:array<DlHeld> pos:CertificateWord first:Certific
         nd_bad(pos "gives a function value the compiler cannot follow, so what it waits for is unknown" "give a function literal or a named function, or a callable type whose row says `no blocks`")
     }
 }
+# A queue's `reserve`, called or prepared as a wait (`@q.reserve`): its permit may be dropped
+# unsent, so it is a send no certificate can count (decisions.md batch 7, as `select`).
+nd_reserve=(n:CertificateWord):>bool=>$unsafe {
+    let g=CertificateWord(nodes.ptr[n].sym)
+    if g <=? 0 or nkids(n) =? 0 or fns.ptr[g].mod not=? dc_qmod or fns.ptr[g].decl =? 0 {return false}
+    name_of(CertificateWord(nodes.ptr[CertificateWord(fns.ptr[g].decl)].name)) =? "reserve"
+}
 nd_walk=(n:CertificateWord @held:array<DlHeld>):>void=>$unsafe {
     if n =? 0 {return}
     let k=nodes.ptr[n].kind
     if k =? 'lambda' or k =? 'fnref' {return}
+    if k =? 'partial' and nd_reserve(n) {
+        nd_bad(nodes.ptr[n].pos "reserves a slot in the channel {dl_name(dl_resolve(kid(n 0) nd_fn()))}" "a permit may be dropped unsent, so a reservation has no certificate; send with `send` from tasks that are joined, which is certified")
+        return
+    }
     if k =? 'block' {
         let mark=held.length
         loop c in kids(n) {nd_walk(c @held)}
@@ -244,6 +255,11 @@ nd_call=(n:CertificateWord @held:array<DlHeld>):>void=>$unsafe {
         return
     }
     if what.length >? 0 {return}
+    if nodes.ptr[n].aux =? 0 and nd_reserve(n) {
+        loop i in [1..nkids(n)) {nd_walk(kid(n i) @held)}
+        nd_bad(pos "reserves a slot in the channel {dl_name(dl_resolve(kid(n 0) nd_fn()))}" "a permit may be dropped unsent, so a reservation has no certificate; send with `send` from tasks that are joined, which is certified")
+        return
+    }
     let op=dc_chan_call(n)
     if op =? 1 or op =? 2 {
         loop i in [1..nkids(n)) {nd_walk(kid(n i) @held)}

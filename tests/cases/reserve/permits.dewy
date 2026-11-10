@@ -1,0 +1,35 @@
+# modes: native native-release
+# reserve takes a slot before the value exists; permit.send cannot wait; a dropped permit
+# gives its slot up, and receives pass over it.
+main = () => {
+    let jobs = mpmc<int64>(2)
+    match jobs.reserve {
+        permit:Reserved<int64> => permit.send(7)
+        _ => printl"no"
+    }
+    {let held = jobs.reserve}
+    match jobs.reserve(timeout=0s) {
+        _:Timeout => printl"full: 7 is queued ahead of the given-up slot"
+        _ => printl"room"
+    }
+    printl"{jobs.receive or_throw}"
+    match jobs.reserve(timeout=0s) {
+        permit:Reserved<int64> => permit.send(8)
+        _ => printl"no"
+    }
+    let late = jobs.reserve
+    jobs.close
+    match late {
+        permit:Reserved<int64> => permit.send(9)
+        _ => printl"no"
+    }
+    match jobs.reserve {
+        _:Closed<Reserved<int64>> => printl"closed"
+        _ => printl"open"
+    }
+    printl"{jobs.receive or_throw} {jobs.receive or_throw}"
+    match jobs.receive {
+        _:Closed<int64> => printl"drained"
+        _ => printl"more"
+    }
+}

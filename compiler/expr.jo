@@ -7459,7 +7459,7 @@ wait_partial = (a0: int) -> int:
         d = int(fns[int(nodes[a].sym)].decl)
         name = name_of(int(nodes[d].name))
         path = files[pos_file(nodes[d].pos)].path
-        if (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy" or path == lib_dir + "/prelude/mpmc.dewy"):
+        if (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy" or path == lib_dir + "/prelude/mpmc.dewy") or name == "reserve" and path == lib_dir + "/prelude/mpmc.dewy":
             if not select_place(kid(a, 0)): fatal(nodes[a].pos, "a wait's receiver is a local or a field chain: an index is not stable. Bind `let ch = channels[i]` and prepare `@ch.receive`")
             return a
     0
@@ -7735,7 +7735,7 @@ source_match = (m: int, expected: int) -> int:
     # (rule 7: a direct receive or next has one slot, its receiver)
     head = sc
     if nodes[head].kind == .call: head = int(nodes[head].a)
-    if nodes[head].kind == .field and (name_of(int(nodes[head].name)) == "receive" or name_of(int(nodes[head].name)) == "next") and select_place(int(nodes[head].a)):
+    if nodes[head].kind == .field and (name_of(int(nodes[head].name)) == "receive" or name_of(int(nodes[head].name)) == "next" or name_of(int(nodes[head].name)) == "reserve") and select_place(int(nodes[head].a)):
         receiver = source_receiver(int(nodes[head].a))
         inner = inbox_sources(int(nodes[head].a), name_of(int(nodes[head].name)))
         if inner.len() > 0: return inbox_source_match(m, sc, inner, expected)
@@ -8171,15 +8171,18 @@ dewy_partial = (n: int, expected: int) -> int:
                 recv = int(nodes[callee].a)
                 fname = dewy_member_name(callee, rt, int(nodes[callee].name), args)
                 s = 0
+                declared = false
                 # (a method the record type declares, as the prelude's `@lines.receive()`: its
-                # module's, not a function of that name in scope)
+                # module's, not a function of that name in scope, nor an array built-in's)
                 if types[st].kind == .struct_ and structs[int(types[st].st)].decl != 0 and dewy_type_method(int(structs[int(types[st].st)].decl), fname) >= 0:
                     owner = int(nodes[int(structs[int(types[st].st)].decl)].mod)
                     s = module_lookup(owner, fname)
-                    if s != 0: mod = owner
+                    if s != 0:
+                        mod = owner
+                        declared = true
                 if s == 0: s = lookup(fname)
                 ii = intrinsic_of(fname)
-                if s == 0 or syms[s].kind != .fns or (ii >= 0 and intrinsics[ii].arr): fatal(pos, "partial evaluation of the built-in `.{name_of(int(nodes[callee].name))}` is not supported yet; use a function literal")
+                if s == 0 or syms[s].kind != .fns or (ii >= 0 and intrinsics[ii].arr and not declared): fatal(pos, "partial evaluation of the built-in `.{name_of(int(nodes[callee].name))}` is not supported yet; use a function literal")
                 f = mk(.ident, nodes[callee].pos)
                 nodes[f].name = i32(fname)
                 callee = f

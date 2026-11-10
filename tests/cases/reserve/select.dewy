@@ -1,0 +1,35 @@
+# modes: native native-release
+# select(@out.reserve @stop.receive): send or stop. The job stays with the caller until the
+# permit's arm; a losing reserve claims nothing.
+main = () => {
+    let out = mpmc<int64>(1)
+    let stop = mpmc<bool>(1)
+    let local = [10 20 30]
+    let sent = 0
+    loop sent <? 3 {
+        match select(@out.reserve @stop.receive) {
+            permit:Reserved<int64> => {
+                permit.send(local[sent])
+                sent += 1
+                printl"got {out.receive(timeout=5s) or_throw}"
+            }
+            _:bool => printl"stop"
+            _ => printl"other"
+        }
+    }
+    match select(@out.reserve @stop.receive timeout=0s) {
+        permit:Reserved<int64> => {
+            permit.send(40)
+            printl"room first"
+        }
+        _ => printl"other"
+    }
+    # (out is full now: only the stop is ready)
+    stop.send(true) or_throw
+    match select(@out.reserve @stop.receive) {
+        _:Reserved<int64> => printl"no room"
+        b:bool => printl"stop {b}"
+        _ => printl"other"
+    }
+    printl"left {out.receive(timeout=5s) or_throw}"
+}

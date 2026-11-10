@@ -41,7 +41,7 @@ dc_called = () -> bool:
     loop f in [1..fns.len()):
         if not dc_is(int(fns[f].mod)) or fns[f].state != 2 or fns[f].decl == 0: continue
         nm = name_of(int(nodes[int(fns[f].decl)].name))
-        if nm == "send" or nm == "receive" or nm == "close" or nm == "try_send" or nm == "try_receive": return true
+        if nm == "send" or nm == "receive" or nm == "close" or nm == "try_send" or nm == "try_receive" or nm == "reserve": return true
     false
 
 dc_chan_call = (n: int) -> int:
@@ -54,6 +54,10 @@ dc_chan_call = (n: int) -> int:
     # (a wait with a timeout ends, like a non-waiting attempt)
     if nm == "send":
         if nkids(n) > 2: return 6
+        return 1
+    # (a reserve waits for room as a send does; its permit's send cannot wait)
+    if nm == "reserve":
+        if nkids(n) > 1: return 6
         return 1
     if nm == "receive":
         if nkids(n) > 1: return 7

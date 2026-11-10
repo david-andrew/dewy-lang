@@ -1,0 +1,25 @@
+# modes: native native-release
+# `or_throw` on a reserve forwards the close or the cancellation and gives the permit, which
+# moves out of the outcome at its last use. A permit given up unsent frees its slot.
+put = (q:Mpmc<int64> v:int64):>void | Closed<Reserved<int64>> | Canceled => {
+    let permit = q.reserve or_throw
+    permit.send(v)
+}
+hold = (q:Mpmc<int64> keep:bool):>bool | Closed<Reserved<int64>> | Canceled => {
+    let permit = q.reserve or_throw
+    if keep {
+        permit.send(1)
+        return true
+    }
+    false
+}
+main = () => {
+    let jobs = mpmc<int64>(1)
+    put(jobs 6) or_throw
+    printl"{jobs.receive(timeout=1s) or_throw}"
+    printl"given up: {hold(jobs false) or_throw}"
+    printl"kept: {hold(jobs true) or_throw}"
+    printl"{jobs.receive(timeout=1s) or_throw}"
+    jobs.close
+    printl"after close: {put(jobs 7) is? Closed<Reserved<int64>>}"
+}
