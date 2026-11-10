@@ -57,25 +57,35 @@ __spsc_take[T] = (q: __Spsc[T]) -> T:
     v
 
 # 0: sent; 1 closed; 2 canceled. Waits while the ring is full.
-__spsc_send_wait[T] = (q: __Spsc[T], v: T) -> int:
+__spsc_send_wait[T] = (q: __Spsc[T], v: T) -> int: __spsc_send_wait_until(q, v, 0)
+
+# The same, with 5: the deadline (time_ns; 0 for none) passed first. A deadline already past
+# still sends where there is room now: a `0s` timeout is a poll.
+__spsc_send_wait_until[T] = (q: __Spsc[T], v: T, deadline: int) -> int:
     p = q.__p
     spins = 0
     loop:
         s = __q_load(&p.seq)
         code = __spsc_try_send(q, v)
         if code != 3: return code
+        if deadline != 0 and time_ns() >= deadline: return 5
         __q_park(&p.seq, s, &p.waiting, spins)
         spins += 1
 
 # 0: a value at the head (for __spsc_take); 1 closed and drained; 2 canceled. Waits while
 # the ring is empty.
-__spsc_receive_wait[T] = (q: __Spsc[T]) -> int:
+__spsc_receive_wait[T] = (q: __Spsc[T]) -> int: __spsc_receive_wait_until(q, 0)
+
+# The same, with 5: the deadline (time_ns; 0 for none) passed first. A buffered value wins a
+# deadline already past.
+__spsc_receive_wait_until[T] = (q: __Spsc[T], deadline: int) -> int:
     p = q.__p
     spins = 0
     loop:
         s = __q_load(&p.seq)
         code = __spsc_try_receive(q)
         if code != 3: return code
+        if deadline != 0 and time_ns() >= deadline: return 5
         __q_park(&p.seq, s, &p.waiting, spins)
         spins += 1
 

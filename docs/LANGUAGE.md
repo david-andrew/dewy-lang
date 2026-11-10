@@ -3656,7 +3656,8 @@ timeout=50ms)` gives `void | Unsent<T> | Canceled`: the job comes back as the `U
 `.value`, with the reason `Timeout` or `Closed`, and `Canceled` is the call's own result.
 A relative timeout starts when the call does, and `timeout=0s` is a poll: a buffered value,
 or room, wins it. A wait with a timeout always ends, so the deadlock checks count it as a
-non-waiting attempt.
+non-waiting attempt. `mpmc` queues and `spsc` ends take `send(value timeout=)` and
+`receive(timeout=)` the same way.
 
 `ticker(period)` makes a `Ticker` that ticks every period from when it is made.
 `tick.next` waits for the next tick and gives `Tick | Canceled`; `tick.next(timeout=d)`

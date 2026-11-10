@@ -1,0 +1,53 @@
+# modes: native native-release
+# Timed waits on `mpmc` and `spsc` queues match a channel's (decisions.md, batch 7):
+# `receive(timeout=)` gives `Timeout`, `send(value timeout=)` gives the value back as `Unsent`
+# with the reason `Timeout` or `Closed`, its `Canceled` the call's own result. A `0s` timeout
+# is a poll: a buffered value, or room, wins it.
+Job:type = [id:int64]
+main = () => {
+    let q = mpmc<int64>(1)
+    printl"mpmc empty poll: {q.receive(timeout=0s) is? Timeout}"
+    printl"mpmc empty wait: {q.receive(timeout=5ms) is? Timeout}"
+    printl"mpmc room wins a poll: {q.send(4 timeout=0s) is? void}"
+    match q.send(6 timeout=2ms) {
+        u:Unsent<int64> => printl"mpmc full: gave back {u.value}, timed out {u.reason is? Timeout}"
+        _ => printl"sent"
+    }
+    printl"mpmc buffered wins a poll: {q.receive(timeout=0s)}"
+    let jobs = mpmc<Job>(1)
+    jobs.close()
+    printl"mpmc closed: {jobs.receive(timeout=1s) is? Closed}"
+    match jobs.send(Job[7] timeout=1s) {
+        u:Unsent<Job> => printl"mpmc closed send: job {u.value.id}, closed {u.reason is? Closed}"
+        _ => printl"sent"
+    }
+
+    let [tx rx] = spsc<int64 1>.split
+    printl"spsc empty poll: {rx.receive(timeout=0s) is? Timeout}"
+    printl"spsc empty wait: {rx.receive(timeout=5ms) is? Timeout}"
+    printl"spsc room wins a poll: {tx.send(4 timeout=0s) is? void}"
+    match tx.send(6 timeout=2ms) {
+        u:Unsent<int64> => printl"spsc full: gave back {u.value}, timed out {u.reason is? Timeout}"
+        _ => printl"sent"
+    }
+    printl"spsc buffered wins a poll: {rx.receive(timeout=0s)}"
+    tx.close()
+    printl"spsc closed: {rx.receive(timeout=1s) is? Closed}"
+    match tx.send(9 timeout=1s) {
+        u:Unsent<int64> => printl"spsc closed send: gave back {u.value}, closed {u.reason is? Closed}"
+        _ => printl"sent"
+    }
+
+    # (in a canceled group a wait gives Canceled, the send's as the call's own result)
+    let late = mpmc<int64>(1)
+    let [ltx lrx] = spsc<int64 1>.split
+    let results:array<bool> = []
+    concurrent g {
+        cancel(g)
+        results.push(late.receive(timeout=1s) is? Canceled)
+        results.push(late.send(1 timeout=1s) is? Canceled)
+        results.push(lrx.receive(timeout=1s) is? Canceled)
+        results.push(ltx.send(1 timeout=1s) is? Canceled)
+    }
+    printl"canceled: {results}"
+}

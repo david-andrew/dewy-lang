@@ -119,20 +119,29 @@ __mpmc_try_claim[T] = (q: __Mpmc[T]) -> int:
 __mpmc_take[T] = (q: __Mpmc[T], pos: int) -> T: __mpmc_take_at(q.__p, pos)
 
 # 0: sent; 1 closed; 2 canceled. Waits while the queue is full or busy.
-__mpmc_send_wait[T] = (q: __Mpmc[T], v: T) -> int:
+__mpmc_send_wait[T] = (q: __Mpmc[T], v: T) -> int: __mpmc_send_wait_until(q, v, 0)
+
+# The same, with 5: the deadline (time_ns; 0 for none) passed first. A deadline already past
+# still sends where there is room now: a `0s` timeout is a poll.
+__mpmc_send_wait_until[T] = (q: __Mpmc[T], v: T, deadline: int) -> int:
     p = q.__p
     spins = 0
     loop:
         s = __q_load(&p.seq)
         code = __mpmc_try_send(q, v)
         if code < 3: return code
+        if deadline != 0 and time_ns() >= deadline: return 5
         if code == 3: __q_park(&p.seq, s, &p.waiting, spins)
         else if spins > 64: __task_pause()
         spins += 1
 
 # The position claimed, or -1 closed and drained, -2 canceled. Waits while the queue is
 # empty or busy.
-__mpmc_receive_wait[T] = (q: __Mpmc[T]) -> int:
+__mpmc_receive_wait[T] = (q: __Mpmc[T]) -> int: __mpmc_receive_wait_until(q, 0)
+
+# The same, with -5: the deadline (time_ns; 0 for none) passed first. A value claimed now wins
+# a deadline already past.
+__mpmc_receive_wait_until[T] = (q: __Mpmc[T], deadline: int) -> int:
     p = q.__p
     spins = 0
     loop:
@@ -140,6 +149,7 @@ __mpmc_receive_wait[T] = (q: __Mpmc[T]) -> int:
         pos = __mpmc_try_claim(q)
         if pos > -3: return pos
         if __select_missed(): return -2
+        if deadline != 0 and time_ns() >= deadline: return -5
         if pos == -3: __q_park(&p.seq, s, &p.waiting, spins)
         else if spins > 64: __task_pause()
         spins += 1

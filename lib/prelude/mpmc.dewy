@@ -25,6 +25,13 @@ Mpmc:type = <T>[
         let code = __mpmc_send_wait(__h value)
         if code not=? 0 return __unsent<T>(value code)
     }
+    # (Unsent with the reason Timeout or Closed, and Canceled as the call's own result; `0s` is
+    # a poll)
+    send = <D>(value:T ... timeout:D):>void | Unsent<T> | Canceled => {
+        let code = __mpmc_send_wait_until(__h value __chan_deadline(__task_nanoseconds(timeout)))
+        if code =? 2 return Canceled
+        if code not=? 0 return __unsent<T>(value code)
+    }
     try_receive = ():>T | Empty | Closed<T> | Busy | Canceled => {
         let pos = __mpmc_try_claim(__h)
         if pos =? -1 return Closed<T>[]
@@ -37,6 +44,14 @@ Mpmc:type = <T>[
         let pos = __mpmc_receive_wait(__h)
         if pos =? -1 return Closed<T>[]
         if pos =? -2 return Canceled
+        __mpmc_take(__h pos)
+    }
+    # (Timeout when nothing came before the time passed; a buffered value wins a `0s` poll)
+    receive = <D>(... timeout:D):>T | Closed<T> | Canceled | Timeout => {
+        let pos = __mpmc_receive_wait_until(__h __chan_deadline(__task_nanoseconds(timeout)))
+        if pos =? -1 return Closed<T>[]
+        if pos =? -2 return Canceled
+        if pos =? -5 return Timeout
         __mpmc_take(__h pos)
     }
     close = ():>void => __mpmc_close(__h)
