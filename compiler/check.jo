@@ -153,6 +153,7 @@ use 'comptime_ops.dewy'
 use 'checks_place_updates.dewy'
 use 'check_cold_queries.dewy'
 use 'check_metadata.dewy'
+use 'checker_tree_queries.dewy'
 
 struct Module:
     name: i32
@@ -375,13 +376,6 @@ name_bind = (m: int, name: int, s: int):
     name_sym.push(s)
     name_next.push(name_first[name])
     name_first[name] = name_mod.len()
-name_unbind = (m: int, name: int):
-    modules[m].names.remove(name)
-    if name < name_first.len():
-        e = name_first[name]
-        loop e != 0:
-            if name_mod[e - 1] == m: name_sym[e - 1] = 0
-            e = name_next[e - 1]
 home_add = (m: int, name: int):
     if home_first.len() <= name: home_first.resize(name * 2 + 64)
     h = home_first[name]
@@ -2764,20 +2758,6 @@ check_pushers_first = ():
                 f = get_fn_inst(d, [], nodes[d].pos)
                 # (before the top level's code, too, which may read it)
                 if fns[f].state == 0: check_fn_body(f)
-
-pushes_into = (n: int, names: {int: bool}) -> bool:
-    if n == 0: return false
-    k = nodes[n].kind
-    if k == .call and nkids(n) == 1:
-        f = int(nodes[n].a)
-        if f != 0 and nodes[f].kind == .field and name_of(int(nodes[f].name)) == "push":
-            r = int(nodes[f].a)
-            if r != 0 and nodes[r].kind == .ident and names.has(int(nodes[r].name)): return true
-    if pushes_into(int(nodes[n].a), names) or pushes_into(int(nodes[n].b), names): return true
-    if k != .for_ and pushes_into(int(nodes[n].c), names): return true
-    loop i in [0..nkids(n)):
-        if pushes_into(kid(n, i), names): return true
-    false
 
 # the open globals' types, now that every function is checked: each is settled, or an error;
 # what was checked before it was settled sees its type now

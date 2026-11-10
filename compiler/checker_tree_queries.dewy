@@ -1,0 +1,33 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (modules name_first name_mod name_next name_sym)
+from p"util.jo" import (name_of)
+
+TreeQueryWord:type=int64<overflow='wrap'>
+name_unbind=(m:TreeQueryWord name:TreeQueryWord):>void=>{
+    modules[m].names.remove(name);
+    if name <? name_first.length {
+        let e=name_first[name]
+        loop e not=? 0 {
+            if name_mod[e - 1] =? m {name_sym[e - 1]=0}
+            e=name_next[e - 1]
+        }
+    }
+}
+pushes_into=(n:TreeQueryWord names:dict<int64 bool>):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'call' and nkids(n) =? 1 {
+        let f=TreeQueryWord(nodes.ptr[n].a)
+        if f not=? 0 and nodes.ptr[f].kind =? 'field' and name_of(TreeQueryWord(nodes.ptr[f].name)) =? "push" {
+            let r=TreeQueryWord(nodes.ptr[f].a)
+            if r not=? 0 and nodes.ptr[r].kind =? 'ident' and names.has(TreeQueryWord(nodes.ptr[r].name)) {return true}
+        }
+    }
+    if pushes_into(TreeQueryWord(nodes.ptr[n].a) names) or pushes_into(TreeQueryWord(nodes.ptr[n].b) names) {return true}
+    if k not=? 'for_' and pushes_into(TreeQueryWord(nodes.ptr[n].c) names) {return true}
+    loop i in [0..nkids(n)) {
+        if pushes_into(kid(n i) names) {return true}
+    }
+    false
+}
