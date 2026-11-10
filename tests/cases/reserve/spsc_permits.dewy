@@ -1,0 +1,44 @@
+# modes: native native-release
+# An spsc sender's reserve: the permit holds room, may be sent from another task, and a
+# dropped permit gives the room back; values arrive in the order they are sent.
+main = () => {
+    let [tx rx] = spsc<int64 2>().split
+    match tx.reserve {
+        permit:Reserved<int64> => {
+            tx.send(1) or_throw
+            match tx.try_send(2) {
+                u:Unsent<int64> => printl"full while held: {u.reason is? Full}"
+                _ => printl"sent"
+            }
+            permit.send(2)
+        }
+        _ => printl"no"
+    }
+    printl"{rx.receive or_throw} {rx.receive or_throw}"
+    {let held = tx.reserve}
+    match tx.reserve(timeout=0s) {
+        permit:Reserved<int64> => {
+            concurrent {
+                spawn { permit.send(3) }
+            }
+        }
+        _ => printl"no room"
+    }
+    tx.send(4) or_throw
+    match tx.reserve(timeout=0s) {
+        _:Timeout => printl"full"
+        _ => printl"room"
+    }
+    printl"{rx.receive or_throw} {rx.receive or_throw}"
+    let late = tx.reserve
+    tx.close
+    match late {
+        permit:Reserved<int64> => permit.send(5)
+        _ => printl"no"
+    }
+    printl"{rx.receive or_throw}"
+    match rx.receive {
+        _:Closed<int64> => printl"drained"
+        _ => printl"more"
+    }
+}

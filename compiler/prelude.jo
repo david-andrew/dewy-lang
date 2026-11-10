@@ -297,6 +297,11 @@ dp_by_name: int[]
 dp_load = (f: int) -> int:
     m = dp_mods[f]
     if m < 0:
+        # (`Reserved<T>`, a queue's permit, holds each kind's handle: the queue runtimes first,
+        # when a program first reaches it)
+        if ends_with(dp_paths[f], "/prelude/reserved.dewy"):
+            loop g in [0..dp_paths.len()):
+                if ends_with(dp_paths[g], "/prelude/mpmc.jo") or ends_with(dp_paths[g], "/prelude/spsc.jo"): dp_load(g)
         first_module = modules.len()
         first_import = from_imports.len()
         active = refine_active

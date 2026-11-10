@@ -64,6 +64,23 @@ Channel:type = <T>[
         if code =? 4 return Busy
         __chan_take(__h)
     }
+    # (a slot held before the value exists, lib/prelude/reserved.dewy: `permit.send` cannot
+    # wait or fail; Closed<Reserved<T>> is this channel's close, distinct from a receive's.
+    # Gives Reserved<T> | Closed<Reserved<T>> | Canceled, plus Timeout with timeout=; written
+    # unannotated so a program that never reserves never loads the permit type)
+    reserve = () => {
+        let code = __chan_reserve_wait(__h)
+        if code =? 1 return Closed<Reserved<T>>[]
+        if code =? 2 return Canceled
+        Reserved<T>[__h __mpmc_none<T>() __spsc_none<T>() -1 false]
+    }
+    reserve = <D>(... timeout:D) => {
+        let code = __chan_reserve_wait_until(__h __chan_deadline(__task_nanoseconds(timeout)))
+        if code =? 1 return Closed<Reserved<T>>[]
+        if code =? 2 return Canceled
+        if code =? 3 return Timeout
+        Reserved<T>[__h __mpmc_none<T>() __spsc_none<T>() -1 false]
+    }
     close = ():>void => __chan_close(__h)
     # (a value still buffered, without waiting or a cancellation point: Closed when none is)
     __drain = ():>T | Closed<T> => {

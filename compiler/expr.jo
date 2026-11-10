@@ -7465,7 +7465,7 @@ wait_partial = (a0: int) -> int:
         d = int(fns[int(nodes[a].sym)].decl)
         name = name_of(int(nodes[d].name))
         path = files[pos_file(nodes[d].pos)].path
-        if (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy" or path == lib_dir + "/prelude/mpmc.dewy") or name == "reserve" and path == lib_dir + "/prelude/mpmc.dewy":
+        if (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy" or path == lib_dir + "/prelude/mpmc.dewy") or name == "reserve" and (path == lib_dir + "/prelude/mpmc.dewy" or path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/spsc.dewy"):
             if not select_place(kid(a, 0)): fatal(nodes[a].pos, "a wait's receiver is a local or a field chain: an index is not stable. Bind `let ch = channels[i]` and prepare `@ch.receive`")
             return a
     0

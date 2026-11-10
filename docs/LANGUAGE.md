@@ -3869,14 +3869,20 @@ claims a slot and fills or empties it, and a non-waiting attempt that finds anot
 task claiming or filling the slot it wants gives `Busy`. Its handle is shared by
 copying, like a channel's, and its waits are checked like a channel's.
 
-`q.reserve` waits for room and takes a slot before the value exists: it gives
+`q.reserve` waits for room and takes a slot before the value exists, on a channel, an
+mpmc queue or an spsc sender alike: it gives
 `Reserved<T> | Closed<Reserved<T>> | Canceled`, and `reserve(timeout=)` adds `Timeout`.
 `permit.send(value)` is `void`: it cannot wait or fail, even after a close, and it
-consumes the permit, so a permit sends once. Dropping a permit unsent gives its slot up;
-receives pass over it, and the slot is room again once the values ahead of it are
-received. `Closed<Reserved<T>>` is the queue closing to reservations, distinct from a
+consumes the permit, so a permit sends once; it may be sent from another task. Dropping
+a permit unsent gives its slot up. In an mpmc queue the slot is a position: receives pass
+over it, and it is room again once the values ahead of it are received. In a channel or an
+spsc queue it is room: the value queues behind those sent before the permit's `send`, a
+dropped permit's room is free at once, and a receive on a closed queue waits for held
+permits before it gives `Closed<T>` (`try_receive` gives `Busy` meanwhile).
+`Closed<Reserved<T>>` is the queue closing to reservations, distinct from a
 receive's `Closed<T>`. In `select`, `@out.reserve` is "send or stop": a reserve that
-loses claims nothing, and the value stays with the caller until the permit's arm.
+loses claims nothing, and the value stays with the caller until the permit's arm; an
+spsc sender's waits cannot be prepared for `select` yet.
 `$no_deadlocks` rejects `reserve`, called or prepared as a wait: a permit may be
 dropped unsent, so no certificate counts it as a send.
 

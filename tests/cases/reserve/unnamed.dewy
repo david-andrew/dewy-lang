@@ -1,0 +1,9 @@
+# modes: native native-release
+# A channel's reserve whose program never names Reserved: the permit type loads when reached,
+# and a program that never reserves does not load it.
+main = () => {
+    let c = channel<int64>(2)
+    {let p = c.reserve(timeout=0s)}
+    c.send(4) or_throw
+    printl"{c.receive or_throw}"
+}

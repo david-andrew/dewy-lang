@@ -4,6 +4,9 @@
 # sender's and `head` (the next to read) the receiver's; each reads the other's with an
 # atomic load and publishes its own with an atomic add after the slot is written or
 # emptied. Both only grow.
+# A `reserve` permit (lib/prelude/reserved.dewy) holds room in `reserved` and may write the
+# tail from another task: while one is outstanding, writers take `wlock`. Only the sender
+# reserves, so with `reserved` 0 it is the one writer and needs no lock.
 struct __SpscState[T]:
     head: int
     tail: int
@@ -12,6 +15,8 @@ struct __SpscState[T]:
     waiting: int
     cap: int
     slots: T?[]
+    reserved: int
+    wlock: int
 
 struct __Spsc[T]:
     __cell: __SpscState[T][]
@@ -20,21 +25,78 @@ struct __Spsc[T]:
 __spsc_new[T] = (capacity: int) -> __Spsc[T]:
     # Vacant slots contain none, never a fabricated zero-valued payload.
     slots: T?[] = fill(none, max(capacity, 1))
-    cell: __SpscState[T][] = [__SpscState[T](0, 0, 0, 0, 0, max(capacity, 1), slots)]
+    cell: __SpscState[T][] = [__SpscState[T](0, 0, 0, 0, 0, max(capacity, 1), slots, 0, 0)]
     p = __task_data(cell)
     __Spsc[T](cell, p)
+
+# (no queue: the handle a `Reserved` permit of another kind of queue leaves unused)
+__spsc_none[T] = () -> __Spsc[T]:
+    cell: __SpscState[T][] = []
+    __Spsc[T](cell, null)
 
 # 0: sent; 1 closed; 2 canceled; 3 full. Never waits.
 __spsc_try_send[T] = (q: __Spsc[T], v: T) -> int:
     p = q.__p
     if __task_canceled(): return 2
     if __q_load(&p.closed) != 0: return 1
-    t = p.tail
-    if t - __q_load(&p.head) >= p.cap: return 3
+    if __q_load(&p.reserved) == 0: return __spsc_put(p, v)
+    __chan_lock(&p.wlock)
+    code = __spsc_put(p, v)
+    __chan_unlock(&p.wlock)
+    code
+
+# The value written at the tail when there is room beside the held slots: 0, else 3 full.
+__spsc_put[T] = (p: *__SpscState[T], v: T) -> int:
+    t = __q_load(&p.tail)
+    if t - __q_load(&p.head) + __q_load(&p.reserved) >= p.cap: return 3
     p.slots[t % p.cap] = v
     __q_add(&p.tail, 1)
     __q_changed(&p.seq, &p.waiting)
     0
+
+# `reserve` (D4, decisions.md batch 7), by the sender: room held for a permit. 0 held;
+# 1 closed; 2 canceled; 3 full. Never waits.
+__spsc_try_reserve[T] = (q: __Spsc[T]) -> int:
+    p = q.__p
+    if __task_canceled(): return 2
+    if __q_load(&p.closed) != 0: return 1
+    if __q_load(&p.tail) - __q_load(&p.head) + __q_load(&p.reserved) >= p.cap: return 3
+    __q_add(&p.reserved, 1)
+    0
+
+# The same, waiting while the ring is full, with 5: the deadline (time_ns; 0 for none) passed
+# first. Inside select a full ring is a miss (2), so a losing reserve holds nothing.
+__spsc_reserve_wait_until[T] = (q: __Spsc[T], deadline: int) -> int:
+    p = q.__p
+    spins = 0
+    loop:
+        s = __q_load(&p.seq)
+        code = __spsc_try_reserve(q)
+        if code != 3: return code
+        if __select_missed(): return 2
+        if deadline != 0 and time_ns() >= deadline: return 5
+        __q_park(&p.seq, s, &p.waiting, spins)
+        spins += 1
+
+__spsc_reserve_wait[T] = (q: __Spsc[T]) -> int: __spsc_reserve_wait_until(q, 0)
+
+# A held slot's value written, even after a close, by whichever task holds the permit: under
+# the writers' lock, the room handed back only once the tail has moved. Never fails.
+__spsc_fill[T] = (q: __Spsc[T], v: T) -> void:
+    p = q.__p
+    __chan_lock(&p.wlock)
+    t = __q_load(&p.tail)
+    p.slots[t % p.cap] = v
+    __q_add(&p.tail, 1)
+    __q_add(&p.reserved, -1)
+    __q_changed(&p.seq, &p.waiting)
+    __chan_unlock(&p.wlock)
+
+# A held slot given up: room again, and a receive waiting on a closed ring for it ends.
+__spsc_unreserve[T] = (q: __Spsc[T]) -> void:
+    p = q.__p
+    __q_add(&p.reserved, -1)
+    __q_changed(&p.seq, &p.waiting)
 
 # 0: a value at the head (for __spsc_take); 1 closed and drained; 2 canceled; 3 empty.
 __spsc_try_receive[T] = (q: __Spsc[T]) -> int:
@@ -42,9 +104,12 @@ __spsc_try_receive[T] = (q: __Spsc[T]) -> int:
     if __task_canceled(): return 2
     h = p.head
     if __q_load(&p.tail) != h: return 0
-    # (closed, then the tail read again: a value sent before the close is still taken)
+    # (closed, then the tail read again: a value sent before the close is still taken; the
+    # held slots read before it, as a permit moves the tail before giving its room back)
     if __q_load(&p.closed) == 0: return 3
+    held = __q_load(&p.reserved)
     if __q_load(&p.tail) != h: return 0
+    if held != 0: return 3
     1
 
 __spsc_take[T] = (q: __Spsc[T]) -> T:

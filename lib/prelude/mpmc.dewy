@@ -60,29 +60,16 @@ Mpmc:type = <T>[
         let pos = __mpmc_reserve_wait(__h)
         if pos =? -1 return Closed<Reserved<T>>[]
         if pos =? -2 return Canceled
-        Reserved<T>[__h pos]
+        Reserved<T>[__chan_none<T>() __h __spsc_none<T>() pos false]
     }
     reserve = <D>(... timeout:D):>Reserved<T> | Closed<Reserved<T>> | Canceled | Timeout => {
         let pos = __mpmc_reserve_wait_until(__h __chan_deadline(__task_nanoseconds(timeout)))
         if pos =? -1 return Closed<Reserved<T>>[]
         if pos =? -2 return Canceled
         if pos =? -5 return Timeout
-        Reserved<T>[__h pos]
+        Reserved<T>[__chan_none<T>() __h __spsc_none<T>() pos false]
     }
     close = ():>void => __mpmc_close(__h)
-]
-
-# A held slot of an mpmc queue (`reserve`): `send` writes the value into it and cannot wait or
-# fail, even after a close; dropping the permit unsent gives the slot up. One owner: the permit
-# cannot be copied, and `send` consumes it.
-$unsafe
-Reserved:type = <T>[
-    __h:__Mpmc<T>
-    __pos:int64
-    $__drop__
-    __release = ():>void => __mpmc_unreserve(__h __pos)
-    $__consume__
-    send = (value:T):>void => __mpmc_fill(__h __pos value)
 ]
 
 mpmc = <T>(capacity:int64<(>? 0)>):>Mpmc<T> => Mpmc<T>[__mpmc_new<T>(capacity)]

@@ -65,6 +65,11 @@ __mpmc_new[T] = (capacity: int) -> __Mpmc[T]:
     p = __task_data(cell)
     __Mpmc[T](cell, p)
 
+# (no queue: the handle a `Reserved` permit of another kind of queue leaves unused)
+__mpmc_none[T] = () -> __Mpmc[T]:
+    cell: __MpmcState[T][] = []
+    __Mpmc[T](cell, null)
+
 __mpmc_seq[T] = (p: *__MpmcState[T], i: int) -> *int: ((data(p.seqs) as int) + i * 8) as *int
 
 # 0: sent; 1 closed; 2 canceled; 3 full; 4 busy. Never waits.

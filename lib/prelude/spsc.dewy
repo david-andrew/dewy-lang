@@ -40,6 +40,22 @@ SpscSender:type = <T>[
         if code =? 2 return Canceled
         if code not=? 0 return __unsent<T>(value code)
     }
+    # (a slot held before the value exists, lib/prelude/reserved.dewy: the permit may go to
+    # another task, and its `send` cannot wait or fail. Gives Reserved<T> | Closed<Reserved<T>>
+    # | Canceled, plus Timeout with timeout=; unannotated, as a channel's)
+    reserve = () => {
+        let code = __spsc_reserve_wait(__h)
+        if code =? 1 return Closed<Reserved<T>>[]
+        if code =? 2 return Canceled
+        Reserved<T>[__chan_none<T>() __mpmc_none<T>() __h -2 false]
+    }
+    reserve = <D>(... timeout:D) => {
+        let code = __spsc_reserve_wait_until(__h __chan_deadline(__task_nanoseconds(timeout)))
+        if code =? 1 return Closed<Reserved<T>>[]
+        if code =? 2 return Canceled
+        if code =? 5 return Timeout
+        Reserved<T>[__chan_none<T>() __mpmc_none<T>() __h -2 false]
+    }
     close = ():>void => __spsc_close(__h)
 ]
 

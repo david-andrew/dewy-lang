@@ -1,0 +1,45 @@
+# modes: native native-release
+# A channel's reserve holds room before the value exists: permit.send cannot wait, a dropped
+# permit gives the room back, and a permit held across a close still delivers.
+main = () => {
+    let jobs = channel<int64>(2)
+    match jobs.reserve {
+        permit:Reserved<int64> => permit.send(7)
+        _ => printl"no"
+    }
+    {let held = jobs.reserve}
+    match jobs.reserve(timeout=0s) {
+        permit:Reserved<int64> => {
+            match jobs.try_send(1) {
+                u:Unsent<int64> => printl"full while held: {u.reason is? Full}"
+                _ => printl"sent"
+            }
+            permit.send(8)
+        }
+        _ => printl"no room"
+    }
+    match jobs.reserve(timeout=0s) {
+        _:Timeout => printl"full"
+        _ => printl"room"
+    }
+    printl"{jobs.receive or_throw} {jobs.receive or_throw}"
+    let late = jobs.reserve
+    jobs.close
+    match jobs.reserve {
+        _:Closed<Reserved<int64>> => printl"closed"
+        _ => printl"open"
+    }
+    match jobs.try_receive {
+        _:Busy => printl"busy: a permit is still to send"
+        _ => printl"other"
+    }
+    match late {
+        permit:Reserved<int64> => permit.send(9)
+        _ => printl"no"
+    }
+    printl"{jobs.receive or_throw}"
+    match jobs.receive {
+        _:Closed<int64> => printl"drained"
+        _ => printl"more"
+    }
+}

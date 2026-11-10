@@ -1,0 +1,31 @@
+# Dewy's prelude: `Reserved<T>`, a send's slot held before its value exists (D4, decisions.md
+# batch 7). `reserve` on a channel, an mpmc queue or an spsc sender waits for room and gives
+# one; `permit.send(value)` then cannot wait or fail, even after a close, and dropping the
+# permit unsent gives the slot back:
+#
+#     match out.reserve {
+#         permit:Reserved<Job> => permit.send(next_job())   # the job made once room is held
+#         _:Closed<Reserved<Job>> => {}
+#         _:Canceled => {}
+#     }
+#
+# One owner: a permit cannot be copied, and `send` consumes it. It holds the queue it came
+# from (the other two handles unused): __pos is the mpmc position, -1 for a channel, -2 for
+# an spsc ring. (The runtimes are lib/std/thread.jo, lib/prelude/mpmc.jo and spsc.jo.)
+$unsafe
+Reserved:type = <T>[
+    __c:__Chan<T>
+    __q:__Mpmc<T>
+    __s:__Spsc<T>
+    __pos:int64
+    __sent:bool
+    $__drop__
+    __release = ():>void => if not __sent {
+        if __pos >=? 0 __mpmc_unreserve(__q __pos) else if __pos =? -1 __chan_unreserve(__c) else __spsc_unreserve(__s)
+    }
+    $__consume__
+    send = (value:T):>void => {
+        __sent = true
+        if __pos >=? 0 __mpmc_fill(__q __pos value) else if __pos =? -1 __chan_fill(__c value) else __spsc_fill(__s value)
+    }
+]

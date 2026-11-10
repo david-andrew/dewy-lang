@@ -1,0 +1,43 @@
+# modes: native native-release
+# select(@out.reserve @q.reserve @stop.receive) with a channel: send or stop. A losing reserve
+# holds nothing, and `out.<Reserved<int64>>` names the source a permit came from.
+main = () => {
+    let out = channel<int64>(1)
+    let q = mpmc<int64>(1)
+    let stop = channel<bool>(1)
+    q.send(0) or_throw
+    loop i in [1..2] {
+        # (q full: only the channel has room)
+        match select(@out.reserve @q.reserve @stop.receive) {
+            permit:out.<Reserved<int64>> => {
+                permit.send(i)
+                printl"channel {out.receive(timeout=5s) or_throw}"
+            }
+            _:q.<Reserved<int64>> => printl"mpmc"
+            _ => printl"other"
+        }
+    }
+    out.send(0) or_throw
+    printl"taken {q.receive(timeout=5s) or_throw}"
+    match select(@out.reserve @q.reserve @stop.receive) {
+        _:out.<Reserved<int64>> => printl"channel"
+        permit:q.<Reserved<int64>> => {
+            permit.send(3)
+            printl"mpmc"
+        }
+        _ => printl"other"
+    }
+    # (out and q full now: only the stop is ready, and neither reserve keeps room)
+    stop.send(true) or_throw
+    match select(@out.reserve @q.reserve @stop.receive) {
+        _:Reserved<int64> => printl"no room"
+        b:bool => printl"stop {b}"
+        _ => printl"other"
+    }
+    printl"left {out.receive(timeout=5s) or_throw} {q.receive(timeout=5s) or_throw}"
+    match select(@out.reserve timeout=0s) {
+        permit:Reserved<int64> => permit.send(5)
+        _ => printl"other"
+    }
+    printl"then {out.receive(timeout=5s) or_throw}"
+}

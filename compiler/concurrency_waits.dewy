@@ -44,9 +44,9 @@ concurrency_blocks=(f:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bo
         # Runtime internals are trusted nonblocking unless classified here;
         # raw syscalls/foreign code in user modules remain conservative.
         # (a channel's waits are the waiting lane's: a parallel body must not wait on a sibling)
-        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/thread.jo" {return name in? ["__chan_send_wait" "__chan_receive_wait" "__chan_send_wait_until" "__chan_receive_wait_until" "__ticker_wait"]}
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/thread.jo" {return name in? ["__chan_send_wait" "__chan_receive_wait" "__chan_send_wait_until" "__chan_receive_wait_until" "__chan_reserve_wait" "__chan_reserve_wait_until" "__ticker_wait"]}
         if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/prelude/mpmc.jo" {return name in? ["__mpmc_send_wait" "__mpmc_receive_wait" "__mpmc_send_wait_until" "__mpmc_receive_wait_until" "__mpmc_reserve_wait" "__mpmc_reserve_wait_until"]}
-        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/prelude/spsc.jo" {return name in? ["__spsc_send_wait" "__spsc_receive_wait" "__spsc_send_wait_until" "__spsc_receive_wait_until"]}
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/prelude/spsc.jo" {return name in? ["__spsc_send_wait" "__spsc_receive_wait" "__spsc_send_wait_until" "__spsc_receive_wait_until" "__spsc_reserve_wait" "__spsc_reserve_wait_until"]}
         # (the running task's state; its input operations wait)
         if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/task_core.jo" and name in? ["__task_slot" "__task_context" "__task_scope_canceled" "__task_canceled" "__task_shield_enter" "__task_shield_leave" "__task_file_code" "__task_file_begin" "__task_lock" "__task_unlock"] {return false}
         if name.startswith("__fj_") {return false}
