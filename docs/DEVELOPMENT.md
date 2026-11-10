@@ -208,11 +208,25 @@ hardware counters are unavailable, as on CI. Every item runs twice and must
 agree within 0.01%. A cached run takes about 30 s with counters, about 6
 minutes under valgrind.
 
-When a cost is intended, add a line `speed: accept <reason>` to the commit
-message; any such line between the base and HEAD waives the base comparison.
+When a compiler cost is intended, add a line `speed: accept <reason>` to the
+commit message; any such line between the base and HEAD waives the base
+comparison. A program's own source growth is never waived that way, because
+both compilers compile the same source and the row cannot show it. Two cases
+fail unless an accept line names the program (its directory name, or its
+number):
+
+- **Fallback:** a base too old to build a program's new source is measured on
+  its own copy. The row prints `FALLBACK`, splits compiler from source growth
+  and is left out of the throughput and phase gates.
+- **Source drift:** for a program whose files changed since the base (only
+  those cost an extra measurement), the candidate also compiles the base's
+  copy; the report splits compiler alone from source alone. Source growth over
+  `--limit` fails.
+
 `--checkpoint TAG` also compares with a fixed revision so that sub-limit losses
-cannot compound silently; accept lines never waive it. The coordinator moves
-the tag after reviewing accepted costs:
+cannot compound silently; accept lines never waive it, except a line naming a
+program's own growth. The coordinator moves the tag after reviewing accepted
+costs:
 `git tag -f speed-checkpoint <commit> && git push -f origin speed-checkpoint`.
 CI runs the gate (default panel) on every push against the previous pushed
 commit.
