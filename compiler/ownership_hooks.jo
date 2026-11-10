@@ -69,6 +69,8 @@ ownership_finalize_hook = (f: int):
     else if role == 2: ownership_copies[t] = f
     else: ownership_moves[t] = f
     types[t].flags |= i32(TF_MANAGED)
+    # (a settled no about any type holding t is stale now)
+    ownership_contained.clear()
 
 ownership_finalize = ():
     if ownership_decls.len() == 0: return

@@ -5,7 +5,7 @@ from p"arena_ops.dewy" import (arena_handle)
 from p"ast.jo" import (NF_GENERIC has_flag kid nkids nodes)
 from p"check.jo" import (FK_NORMAL LF_ADDR LF_ASSIGNED LF_CAPTURED LF_EXPOSED LF_PARAM LF_READ fns globals locals place_root)
 from p"checks_thin.dewy" import (readonly_global)
-from p"copies.jo" import (copies_on copy_bindings copy_blocked copy_borrowed copy_capture_nodes copy_costs copy_explicit copy_fields copy_inputs copy_loop_after copy_loop_back copy_moves copy_noenv copy_proof_budget)
+from p"copies.jo" import (copies_on copy_bindings copy_blocked copy_borrowed copy_capture_nodes copy_costs copy_explicit copy_fields copy_inputs copy_loop_after copy_loop_back copy_moves copy_noenv copy_hidden copy_owner_hidden copy_part_roots copy_parts copy_proof_budget)
 from p"directives.jo" import (dir_copies_any)
 from p"directive_queries.dewy" import (dir_explicit_copies)
 from p"expr.jo" import (CV IN mk_ident_local ntype)
@@ -315,6 +315,13 @@ copy_live=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
     if k =? 'ident' and nodes.ptr[n].aux =? int32(1) {
         let l=CopyWord(nodes.ptr[n].sym)
         let skip=LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
+        # (a narrowed name reads the local it narrows: its last use may move that part out)
+        if copy_parts and copy_part_roots.has(l) {
+            let r=copy_part_roots.get(l) ?? 0
+            if not copy_local_live(r live) and not copy_blocked.has(r) and CopyWord(locals.ptr[r].flags) & skip =? 0 {copy_moves[n]=true}
+            live[r]=true
+            return
+        }
         if copy_inputs.has(l) {skip &= ~LF_PARAM}
         if spawn_owned_capture(CopyWord(locals.ptr[l].owner) l) {skip &= ~LF_CAPTURE}
         if ownership_type(CopyWord(locals.ptr[l].type)) and not is_shared(l) and CopyWord(locals.ptr[l].flags) & LF_ADDR =? 0 {skip &= ~LF_CAPTURED}
@@ -346,6 +353,7 @@ copy_live=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
         copy_mentions(n @live)
         let inner=live
         copy_loop_locals(n @inner)
+        if copy_hidden {loop h in copy_owner_hidden {copy_kill_local(h @inner)}}
         copy_loop_back.push(inner)
         let cs=copy_children(n)
         let i=cs.length - 1
@@ -414,13 +422,31 @@ copies_prepare=(f:CopyWord):>void=>$unsafe {
     copy_noenv.clear()
     copy_loop_after=[]
     copy_loop_back=[]
-    copy_proof_budget=if ownership_functions.has(f) {4096} else {-1}
+    if copy_parts {copy_part_roots.clear()}
+    copy_parts=false
+    if copy_hidden {copy_owner_hidden=[]}
+    copy_hidden=false
+    let owners=ownership_functions.has(f)
+    copy_proof_budget=if owners {4096} else {-1}
     if not copies_on {return}
     let body=CopyWord(fns.ptr[f].body)
-    if body =? 0 or (not copy_strict(body) and not ownership_functions.has(f)) {return}
+    if body =? 0 or (not copy_strict(body) and not owners) {return}
     loop l in fns.ptr[f].locals {
+        # (a match's own variable is declared by the match, fresh each iteration too)
+        if owners and locals.ptr[l].name =? 0 and CopyWord(locals.ptr[l].flags) & LF_ADDR not=? 0 and ownership_type(CopyWord(locals.ptr[l].type)) {
+            copy_owner_hidden.push(l)
+            copy_hidden=true
+        }
         if CopyWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 {
-            copy_mentions(CopyWord(locals.ptr[l].alias) @copy_blocked)
+            let al=CopyWord(locals.ptr[l].alias)
+            let root:CopyWord=0
+            # (narrowed to one alternative, or to several, as a catch-all's name)
+            if owners {root=copy_part_root(al)}
+            if root >? 0 {
+                copy_part_roots[l]=root
+                copy_parts=true
+            }
+            else {copy_mentions(CopyWord(locals.ptr[l].alias) @copy_blocked)}
         }
     }
     copy_deferred(body)
@@ -489,6 +515,34 @@ copy_forget=(e:CopyWord t:CopyWord):>void=>$unsafe {
         owner_forget_field(CopyWord(locals.ptr[p[0]].offset) p[1])
     }
 }
+# The owning local whose active alternative this narrowing reads (`narrow` of a union,
+# `unwrap` of an optional, written on the local itself), or 0.
+copy_part_root=(e:CopyWord):>CopyWord=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k not=? 'narrow' and k not=? 'unwrap' and (k not=? 'conv' or nodes.ptr[e].aux not=? int32(int64(CV.union_))) {return 0}
+    let a=CopyWord(nodes.ptr[e].a)
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32(1) or not ownership_type(ntype(a)) {return 0}
+    # (a name narrowed from a narrowed name: the local underneath both)
+    let r=copy_part_roots.get(CopyWord(nodes.ptr[a].sym)) ?? CopyWord(nodes.ptr[a].sym)
+    if CopyWord(locals.ptr[r].flags) & LF_ALIAS not=? 0 {return 0}
+    r
+}
+# Move a union's or optional's owning alternative out of its dead local: the local's
+# cleanup record is unlinked on this path, so it no longer drops that alternative.
+copy_take_part=(value:Val t:CopyWord root:CopyWord):>Val=>$unsafe {
+    if spawn_owned_capture(cur_fn root) {e_store(env_v CopyWord(locals.ptr[root].env_off) - 8 e_iconst(0) 8);}
+    else {owner_forget_slot(CopyWord(locals.ptr[root].offset))}
+    if vc(t) =? VC_AGG {
+        let s=new_temp(t)
+        let a=e_slot(s)
+        e_call(lf_helper(HK.move t 0) [a value.v] (-1));
+        owner_register(s t)
+        return Val(a true s)
+    }
+    let v=vreg(vt_of(t))
+    e_mov(v value.v);
+    owner_value(V(v true) t)
+}
 copy_movable=(e:CopyWord):>bool=>$unsafe {
     if nodes.ptr[e].kind =? 'field' and copy_moves.has(e) {return true}
     let n=e
@@ -522,7 +576,16 @@ copy_later_use=(n:CopyWord l:CopyWord after:CopyWord):>CopyWord=>$unsafe {
 copy_own=(e:CopyWord value:Val t:CopyWord):>Val=>$unsafe {
     if ownership_type(t) {
         if value.owned {return value}
-        if (nodes.ptr[e].kind =? 'ident' or (nodes.ptr[e].kind =? 'field' and copy_moves.has(e))) and copy_movable(e) {return copy_take(e value t)}
+        if copy_parts and nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) and copy_part_roots.has(CopyWord(nodes.ptr[e].sym)) {
+            let root=copy_part_roots.get(CopyWord(nodes.ptr[e].sym)) ?? 0
+            if copy_moves.has(e) {return copy_take_part(value t root)}
+        }
+        else if (nodes.ptr[e].kind =? 'ident' or (nodes.ptr[e].kind =? 'field' and copy_moves.has(e))) and copy_movable(e) {return copy_take(e value t)}
+        let ek=nodes.ptr[e].kind
+        if ek =? 'narrow' or ek =? 'unwrap' or ek =? 'conv' {
+            let part=copy_part_root(e)
+            if part >? 0 and copy_moves.has(CopyWord(nodes.ptr[e].a)) and not copy_blocked.has(part) {return copy_take_part(value t part)}
+        }
         if owner_adoptions.has(e) {fatal(nodes.ptr[e].pos "a hook result requires fresh construction or a proven last-use local")}
         if ownership_copyable(t) {return own(value t)}
         if copy_proof_budget =? 0 {fatal(nodes.ptr[e].pos "move proof budget exhausted; cannot copy a move-only owner")}
@@ -597,6 +660,7 @@ copy_shared_global=(s:CopyWord g:CopyWord):>bool=>$unsafe {
 # Locals freshly constructed within a loop do not cross its backedge.
 copy_loop_locals=(n:CopyWord @live:dict<int64 bool>):>void=>$unsafe {
     if n =? 0 {return}
+    # (a match's own variable is declared by the match, fresh each iteration too)
     if nodes.ptr[n].kind =? 'vardecl' {copy_kill_local(CopyWord(nodes.ptr[n].sym) @live)}
     loop c in copy_children(n) {copy_loop_locals(c @live)}
 }

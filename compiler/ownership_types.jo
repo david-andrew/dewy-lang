@@ -68,6 +68,15 @@ ow_field_types = (t: int) -> int[]:
         if ow_fields[0][f].boxed: out.push(tb_mk_box(int(ow_fields[0][f].type)))
         else: out.push(int(ow_fields[0][f].type))
     out
+# The payload types of every alternative of a tagged union (enum), after layout.
+ow_variant_types = (t: int) -> int[]:
+    out: int[]
+    tl_layout(t)
+    si = ow_st(ow_prune(t))
+    loop i in [0..int(ow_structs[0][si].nvariants)):
+        v = int(ow_structs[0][si].variants) + i
+        loop j in [0..int(ow_variants[0][v].nfields)): out.push(int(ow_fields[0][int(ow_variants[0][v].fields) + j].type))
+    out
 ow_scalar = (t0: int) -> bool:
     t = ow_representation(t0)
     ow_types[0][t].kind == .bool_ or ow_types[0][t].kind == .int_ and t != ow_math_int[0]
@@ -86,15 +95,27 @@ ownership_type = (t0: int) -> bool:
     t = ow_prune(t0)
     if ownership_callable_cap(t) != 0: return true
     k = ow_types[0][t].kind
-    (k == .struct_ or k == .tuple or k == .fixed or k == .array or k == .opt or k == .box) and ownership_contains(t)
+    (k == .struct_ or k == .tuple or k == .fixed or k == .array or k == .opt or k == .box or k == .enum_) and ownership_contains(t)
+# The contained cache's keys: t, the settled answer, whether t holds an owner; -1 - t,
+# present while t is being visited (the recursion guard); OW_UNSETTLED, present while some
+# answer below the current visit leaned on a guard or an unbound type variable.
+const OW_UNSETTLED = -4611686018427387904
 ownership_contains = (t0: int) -> bool:
     t = ow_prune(t0)
     if ownership_callable_cap(t) != 0: return true
     if ownership_nominal(t): return true
-    if let found = ow_contained[0].get(t): return found
-    ow_contained[0][t] = false
-    found = false
+    if let cached = ow_contained[0].get(t): return cached
+    if ow_contained[0].has(-1 - t):
+        ow_contained[0][OW_UNSETTLED] = true
+        return false
     k = ow_kind(t)
+    if k == .var or k == .param:
+        ow_contained[0][OW_UNSETTLED] = true
+        return false
+    outer = ow_contained[0].has(OW_UNSETTLED)
+    if outer: ow_contained[0].remove(OW_UNSETTLED)
+    ow_contained[0][-1 - t] = true
+    found = false
     if k == .array or k == .fixed or k == .opt or k == .box: found = ownership_contains(ow_elem(t))
     else if k == .tuple:
         loop i in [0..int(ow_types[0][t].nargs)):
@@ -110,8 +131,12 @@ ownership_contains = (t0: int) -> bool:
                 v = int(ow_structs[0][si].variants) + i
                 loop j in [0..int(ow_variants[0][v].nfields)):
                     if ownership_contains(int(ow_fields[0][int(ow_variants[0][v].fields) + j].type)): found = true
+    ow_contained[0].remove(-1 - t)
+    # A no reached through a guard is not settled: another path through the component may
+    # discover a resource after this visit. Without one it is, until the hooks change.
     if found: ow_contained[0][t] = true
-    else: ow_contained[0].remove(t)
+    else if not ow_contained[0].has(OW_UNSETTLED): ow_contained[0][t] = false
+    if outer: ow_contained[0][OW_UNSETTLED] = true
     found
 ownership_copyable = (t0: int, seen: int[] = []) -> bool:
     t = ow_prune(t0)
@@ -123,6 +148,11 @@ ownership_copyable = (t0: int, seen: int[] = []) -> bool:
     k = ow_kind(t)
     if k == .fixed or k == .array or k == .opt or k == .box: return ownership_copyable(ow_elem(t), visited)
     if not ownership_type(t): return true
+    # (a union holding an owner copies its active alternative)
+    if k == .enum_:
+        loop ft in ow_variant_types(t):
+            if ownership_type(ft) and not ownership_copyable(ft, visited): return false
+        return true
     first = 0
     if k != .tuple:
         if let hook = ow_copies[0].get(t):
@@ -160,8 +190,11 @@ ownership_fact_type = (t0: int, depth: int = 0) -> bool:
     if depth > 32: return true
     k = ow_kind(t)
     if k == .fixed or k == .array or k == .opt or k == .box: return ownership_fact_type(ow_elem(t), depth + 1)
-    if k == .tuple:
-        loop ft in ow_field_types(t):
+    if k == .tuple or k == .enum_:
+        parts: int[]
+        if k == .tuple: parts = ow_field_types(t)
+        else: parts = ow_variant_types(t)
+        loop ft in parts:
             if ownership_fact_type(ft, depth + 1): return true
         return false
     if k != .struct_: return false
@@ -194,15 +227,10 @@ ownership_layout = (t0: int, depth: int = 0, seen: int[] = []) -> bool:
     scalar = ow_kind(ow_representation(t))
     if k == .str_ or scalar == .int_ or scalar == .bool_ or k == .float_ or k == .ptr: return true
     if k == .enum_:
-        # Active-variant managed cleanup exists; owner-bearing enums do not.
-        if ownership_contains(t): return false
-        tl_layout(t)
-        si = ow_st(t)
-        loop i in [0..int(ow_structs[0][si].nvariants)):
-            v = int(ow_structs[0][si].variants) + i
-            loop j in [0..int(ow_variants[0][v].nfields)):
-                ft = int(ow_fields[0][int(ow_variants[0][v].fields) + j].type)
-                if not ownership_layout(ft, depth + 1, visited): return false
+        # Tagged payloads use the active-variant retain/drop path; an owning
+        # alternative is dropped, moved or copied there by its own helpers.
+        loop ft in ow_variant_types(t):
+            if not ownership_layout(ft, depth + 1, visited): return false
         return true
     if k != .struct_ and k != .tuple: return false
     loop ft in ow_field_types(t):
@@ -217,8 +245,11 @@ ownership_decl_copyable = (t0: int, seen: int[] = []) -> bool:
     visited.push(t)
     k = ow_kind(t)
     if k == .array or k == .fixed or k == .box or k == .opt: return ownership_decl_copyable(ow_elem(t), visited)
-    if k == .tuple:
-        loop ft in ow_field_types(t):
+    if k == .tuple or k == .enum_:
+        parts: int[]
+        if k == .tuple: parts = ow_field_types(t)
+        else: parts = ow_variant_types(t)
+        loop ft in parts:
             if not ownership_decl_copyable(ft, visited): return false
         return true
     if k != .struct_: return true

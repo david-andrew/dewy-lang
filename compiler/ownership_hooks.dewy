@@ -58,6 +58,8 @@ ownership_finalize_hook=(f:HookWord):>void=>$unsafe {
     else if role =? 2 {ownership_copies[t]=f;}
     else {ownership_moves[t]=f;}
     types[t].flags=types.ptr[t].flags | int32(TF_MANAGED)
+    # (a settled no about any type holding t is stale now)
+    ownership_contained.clear()
 }
 ownership_finalize=():>void=>$unsafe {
     if ownership_decls.length =? 0 {return}

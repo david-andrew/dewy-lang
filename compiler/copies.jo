@@ -43,5 +43,11 @@ copy_proof_budget = -1
 copy_fields: (int, str)[] # local and field path; negative liveness keys
 copy_capture_nodes: {int: int[]} # only the function currently being lowered
 copy_noenv: {int: bool}
+# a name narrowed from a union or optional owner -> the local it narrows (its part is moved out of it)
+copy_part_roots: {int: int}
+copy_parts = false # (copy_part_roots is not empty: the hot ident walk reads only this)
+# owning variables a match or `if let` declares for itself: fresh each loop iteration
+copy_owner_hidden: int[]
+copy_hidden = false # (copy_owner_hidden is not empty)
 copy_borrowed: {int: bool} # analyzed parameter local whose snapshot binding stays borrowed
 

@@ -114,8 +114,9 @@ ownership_defer_conflict = (f: int) -> bool:
 ownership_validate_node = (n: int, f: int):
     if n == 0: return
     t = oc_ntype(n)
-    if t > 0 and ownership_contains(t) and not ownership_type(t): oc_fail(n, "resource containers require aggregate ownership support")
-    if ownership_type(t) and not ownership_layout(t): oc_fail(n, "unsupported resource field layout; elements with lifecycle hooks in arrays must be inline")
+    owned = t > 0 and ownership_contains(t)
+    if owned and not ownership_type(t): oc_fail(n, "resource containers require aggregate ownership support")
+    if owned and ownership_type(t) and not ownership_layout(t): oc_fail(n, "unsupported resource field layout; elements with lifecycle hooks in arrays must be inline")
     k = oc_nodes[0][n].kind
     if k == .partial:
         a = int(oc_nodes[0][n].a)

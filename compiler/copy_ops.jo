@@ -261,6 +261,12 @@ copy_live = (n: int, live: mut {int: bool}):
     if k == .ident and nodes[n].aux == i32(int(SK.local)):
         l = int(nodes[n].sym)
         skip = LF_PARAM | LF_MUTPARAM | LF_ALIAS | LF_BYREF | LF_CAPTURE | LF_CAPTURED | LF_EXPOSED
+        # (a narrowed name reads the local it narrows: its last use may move that part out)
+        if copy_parts and copy_part_roots.has(l):
+            r = copy_part_roots[l]
+            if not copy_local_live(r, live) and not copy_blocked.has(r) and int(locals[r].flags) & skip == 0: copy_moves[n] = true
+            live[r] = true
+            return
         if copy_inputs.has(l): skip &= ~LF_PARAM
         if spawn_owned_capture(int(locals[l].owner), l): skip &= ~LF_CAPTURE
         if ownership_type(int(locals[l].type)) and not is_shared(l) and int(locals[l].flags) & LF_ADDR == 0: skip &= ~LF_CAPTURED
@@ -287,6 +293,8 @@ copy_live = (n: int, live: mut {int: bool}):
         copy_mentions(n, live)
         inner = live
         copy_loop_locals(n, inner)
+        if copy_hidden:
+            loop h in copy_owner_hidden: copy_kill_local(h, inner)
         copy_loop_back.push(inner)
         cs = copy_children(n)
         i = cs.len() - 1
@@ -344,13 +352,29 @@ copies_prepare = (f: int):
     copy_noenv.clear()
     copy_loop_after = []
     copy_loop_back = []
-    copy_proof_budget = if ownership_functions.has(f): 4096 else: -1
+    if copy_parts: copy_part_roots.clear()
+    copy_parts = false
+    if copy_hidden: copy_owner_hidden = []
+    copy_hidden = false
+    owners = ownership_functions.has(f)
+    copy_proof_budget = if owners: 4096 else: -1
     if not copies_on: return
     body = int(fns[f].body)
-    if body == 0 or (not copy_strict(body) and not ownership_functions.has(f)): return
+    if body == 0 or (not copy_strict(body) and not owners): return
     loop l in fns[f].locals:
+        # (a match's own variable is declared by the match, fresh each iteration too)
+        if owners and locals[l].name == 0 and int(locals[l].flags) & LF_ADDR != 0 and ownership_type(int(locals[l].type)):
+            copy_owner_hidden.push(l)
+            copy_hidden = true
         if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0:
-            copy_mentions(int(locals[l].alias), copy_blocked)
+            al = int(locals[l].alias)
+            root = 0
+            # (narrowed to one alternative, or to several, as a catch-all's name)
+            if owners: root = copy_part_root(al)
+            if root > 0:
+                copy_part_roots[l] = root
+                copy_parts = true
+            else: copy_mentions(int(locals[l].alias), copy_blocked)
     copy_deferred(body)
     live: {int: bool}
     copy_live(body, live)
@@ -404,6 +428,31 @@ copy_forget = (e: int, t: int):
         if key >= 0: ice("missing owner field path")
         p = copy_fields[-1 - key]
         owner_forget_field(int(locals[p.0].offset), p.1)
+# The owning local whose active alternative this narrowing reads (`narrow` of a union,
+# `unwrap` of an optional, written on the local itself), or 0.
+copy_part_root = (e: int) -> int:
+    k = nodes[e].kind
+    if k != .narrow and k != .unwrap and (k != .conv or nodes[e].aux != i32(int(CV.union_))): return 0
+    a = int(nodes[e].a)
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) or not ownership_type(ntype(a)): return 0
+    # (a name narrowed from a narrowed name: the local underneath both)
+    r = copy_part_roots.get(int(nodes[a].sym)) ?? int(nodes[a].sym)
+    if int(locals[r].flags) & LF_ALIAS != 0: return 0
+    r
+# Move a union's or optional's owning alternative out of its dead local: the local's
+# cleanup record is unlinked on this path, so it no longer drops that alternative.
+copy_take_part = (value: Val, t: int, root: int) -> Val:
+    if spawn_owned_capture(cur_fn, root): e_store(env_v, int(locals[root].env_off) - 8, e_iconst(0), 8)
+    else: owner_forget_slot(int(locals[root].offset))
+    if vc(t) == VC_AGG:
+        s = new_temp(t)
+        a = e_slot(s)
+        e_call(lf_helper(.move, t, 0), [a, value.v], -1)
+        owner_register(s, t)
+        return Val(a, true, s)
+    v = vreg(vt_of(t))
+    e_mov(v, value.v)
+    owner_value(V(v, true), t)
 copy_movable = (e: int) -> bool:
     if nodes[e].kind == .field and copy_moves.has(e): return true
     n = e
@@ -431,7 +480,12 @@ copy_later_use = (n: int, l: int, after: int) -> int:
 copy_own = (e: int, value: Val, t: int) -> Val:
     if ownership_type(t):
         if value.owned: return value
-        if (nodes[e].kind == .ident or (nodes[e].kind == .field and copy_moves.has(e))) and copy_movable(e): return copy_take(e, value, t)
+        if copy_parts and nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)) and copy_part_roots.has(int(nodes[e].sym)):
+            if copy_moves.has(e): return copy_take_part(value, t, copy_part_roots[int(nodes[e].sym)])
+        else if (nodes[e].kind == .ident or (nodes[e].kind == .field and copy_moves.has(e))) and copy_movable(e): return copy_take(e, value, t)
+        if nodes[e].kind == .narrow or nodes[e].kind == .unwrap or nodes[e].kind == .conv:
+            part = copy_part_root(e)
+            if part > 0 and copy_moves.has(int(nodes[e].a)) and not copy_blocked.has(part): return copy_take_part(value, t, part)
         if owner_adoptions.has(e): fatal(nodes[e].pos, "a hook result requires fresh construction or a proven last-use local")
         if ownership_copyable(t): return own(value, t)
         if copy_proof_budget == 0: fatal(nodes[e].pos, "move proof budget exhausted; cannot copy a move-only owner")

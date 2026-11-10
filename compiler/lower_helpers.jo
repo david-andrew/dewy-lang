@@ -101,6 +101,7 @@ helper_drop = (t: int, copy: bool):
                 f = int(variants[vi].fields) + i
                 ft = field_store_type(f)
                 if copy: copy_at(e_addi(a, int(fields[f].offset)), ft)
+                else if ownership_type(ft): drop_embedded(e_addi(a, int(fields[f].offset)), ft)
                 else: drop_at(e_addi(a, int(fields[f].offset)), ft)
             endc()
     else if k == .fixed:
@@ -789,6 +790,21 @@ helper_move = (t: int):
         e_call2(lf_helper(.move, inner, 0), dest, source, -1)
         e_store(dest, tsize(inner), e_iconst(1), 1)
         endc()
+    else if tkind(t) == .enum_:
+        # (the tag and plain payloads move as bytes; an owning alternative by its own move)
+        e_copy(dest, source, tsize(t))
+        si = int(types[t].st)
+        layout(t)
+        tag = e_load(VI, source, 0, 4)
+        loop v in [0..int(structs[si].nvariants)):
+            vi = int(structs[si].variants) + v
+            loop i in [0..int(variants[vi].nfields)):
+                f = int(variants[vi].fields) + i
+                ft = field_store_type(f)
+                if ownership_type(ft):
+                    iff(e_bin(.eq, VI, tag, e_iconst(v)))
+                    e_call2(lf_helper(.move, ft, 0), e_addi(dest, int(fields[f].offset)), e_addi(source, int(fields[f].offset)), -1)
+                    endc()
     else if tkind(t) == .fixed:
         et = telem(t)
         i = fixed_loop_begin(t)

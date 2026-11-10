@@ -1,0 +1,22 @@
+# A panic unwinds a union holding an owner: its active alternative drops, once.
+# exit: 101
+$runtime_checks
+Owner:type = [value:int64
+    $__drop__
+    release = ():>void => {
+        if value =? 1 printl"drop one"
+        else printl"drop two"
+    }
+]
+Stop:type = [why:int64]
+get = (n:int64):>Owner | Stop => {
+    if n >? 0 return Owner[n]
+    Stop[0]
+}
+fail = ():>int64 => {panic("union panic")}
+main = () => {
+    let first = get(1)
+    let none_held = get(0)
+    let second:Owner | Stop = Owner[2]
+    let third = get(fail())
+}

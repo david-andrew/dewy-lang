@@ -117,6 +117,7 @@ helper_drop=(t:LHWord copy:bool):>void=>$unsafe {
                 let f:LHWord=LHWord(variants.ptr[vi].fields) + i
                 let ft=field_store_type(f)
                 if copy {copy_at(e_addi(a LHWord(fields.ptr[f].offset)) ft);}
+                else if ownership_type(ft) {drop_embedded(e_addi(a LHWord(fields.ptr[f].offset)) ft);}
                 else {drop_at(e_addi(a LHWord(fields.ptr[f].offset)) ft);}
             }
             endc();
@@ -1027,6 +1028,25 @@ helper_move=(t:LHWord):>void=>$unsafe {
         e_call2(lf_helper(HK.move inner 0) dest source -1);
         e_store(dest tsize(inner) e_iconst(1) 1);
         endc();
+    }
+    else if tkind(t) =? 'enum_' {
+        # (the tag and plain payloads move as bytes; an owning alternative by its own move)
+        e_copy(dest source tsize(t));
+        let si:LHWord=LHWord(types.ptr[t].st)
+        layout(t);
+        let tag=e_load(VI source 0 4)
+        loop v in [0..LHWord(structs.ptr[si].nvariants)) {
+            let vi:LHWord=LHWord(structs.ptr[si].variants) + v
+            loop i in [0..LHWord(variants.ptr[vi].nfields)) {
+                let f:LHWord=LHWord(variants.ptr[vi].fields) + i
+                let ft=field_store_type(f)
+                if ownership_type(ft) {
+                    iff(e_bin('eq' VI tag e_iconst(v)));
+                    e_call2(lf_helper(HK.move ft 0) e_addi(dest LHWord(fields.ptr[f].offset)) e_addi(source LHWord(fields.ptr[f].offset)) -1);
+                    endc();
+                }
+            }
+        }
     }
     else if tkind(t) =? 'fixed' {
         let et=telem(t)

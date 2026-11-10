@@ -2789,7 +2789,13 @@ gen_conv=(e:LGWord):>Val=>$unsafe {
         let s=new_temp(to)
         let d=e_slot(s)
         e_zero(d tsize(to));
-        let src=gen_owned(a).v
+        # (an owning local is read in place: the result is a view of it, which a transfer at
+        # the local's last use takes from (copy_ops' parts); a temporary is relocated, and the
+        # wider union is then its one cleanup authority)
+        let view=ownership_type(source_type) and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1)
+        let source=if view {gen_borrowed(a)} else {gen_owned(a)}
+        let src=source.v
+        if ownership_type(source_type) and not view {owner_forget_slot(source.slot);}
         let tag=e_load(VI src 0 4)
         let fsi:LGWord=LGWord(types.ptr[source_type].st)
         let tsi:LGWord=LGWord(types.ptr[to].st)
@@ -2807,6 +2813,7 @@ gen_conv=(e:LGWord):>Val=>$unsafe {
             }
             endc();
         }
+        if view {return Val[d false (-1)]}
         return Val[d true s]
     }
     if cv =? CV.arr2fixed {
@@ -3136,6 +3143,8 @@ gen_value_call=(e:LGWord):>Val=>$unsafe {
             let f:LGWord=LGWord(variants.ptr[vi].fields) + i
             let val=gen_owned(kid(e i))
             store_field(f d val.v);
+            # (an owning alternative's cleanup passes to the union holding it)
+            if ownership_type(ntype(kid(e i))) {owner_forget_slot(val.slot);}
         }
         if tracked {building.pop();}
         return Val[e_slot(s) true s]

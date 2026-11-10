@@ -1,0 +1,32 @@
+# Copying a union that holds a move-only owner is refused: `b = a` and the match both take it.
+let drops:int64 = 0
+let sent:int64 = 0
+Permit:type = [
+    id:int64
+    $__drop__
+    release = ():>void => {drops += 1}
+    $__consume__
+    use = ():>int64 => {sent += 1 return id}
+]
+Stop:type = [why:int64]
+Other:type = [x:int64]
+get = (n:int64):>Permit | Stop => {
+    if n >? 0 return Permit[n]
+    Stop[0]
+}
+widen = (n:int64):>Permit | Stop | Other => get(n)
+take = (u:Permit | Stop):>int64 => {
+    match u {
+        p:Permit => p.use
+        _:Stop => 0
+    }
+}
+main = () => {
+    let a = get(1)
+    let b = a
+    match a {
+        p:Permit => printl"{p.use}"
+        _:Stop => {}
+    }
+    take(b);
+}

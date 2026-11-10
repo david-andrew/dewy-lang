@@ -2487,7 +2487,13 @@ gen_conv = (e: int) -> Val:
         s = new_temp(to)
         d = e_slot(s)
         e_zero(d, tsize(to))
-        src = gen_owned(a).v
+        # (an owning local is read in place: the result is a view of it, which a transfer at
+        # the local's last use takes from (copy_ops' parts); a temporary is relocated, and the
+        # wider union is then its one cleanup authority)
+        view = ownership_type(from) and nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local))
+        source = if view: gen_borrowed(a) else: gen_owned(a)
+        src = source.v
+        if ownership_type(from) and not view: owner_forget_slot(source.slot)
         tag = e_load(VI, src, 0, 4)
         fsi = int(types[from].st)
         tsi = int(types[to].st)
@@ -2503,6 +2509,7 @@ gen_conv = (e: int) -> Val:
                 if not type_eq(tm, m): e_store(d, to_off, set_word_moved(e_load(VI, src, fo, tsize(m)), m, tm, nodes[e].pos), tsize(tm))
                 else if tsize(m) > 0: e_copy(e_addi(d, to_off), e_addi(src, fo), tsize(m))
             endc()
+        if view: return Val(d, false, -1)
         return Val(d, true, s)
     if cv == .arr2fixed:
         push = fact_fixed_comprehension(a, to)
@@ -2798,6 +2805,8 @@ gen_value_call = (e: int) -> Val:
             f = int(variants[vi].fields) + i
             val = gen_owned(kid(e, i))
             store_field(f, d, val.v)
+            # (an owning alternative's cleanup passes to the union holding it)
+            if ownership_type(ntype(kid(e, i))): owner_forget_slot(val.slot)
         if tracked: building.pop()
         return Val(e_slot(s), true, s)
     fatal(nodes[e].pos, "invalid call")
