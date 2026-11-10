@@ -748,13 +748,21 @@ fact_nd_valid = (s: mut FactState, value: int) -> int:
     rank_value = fact_project(s, shape, -1, false, T_INT)
     rank = fact_bound(s, rank_value)
     if rank.lo != rank.hi or rank.lo < 0 or rank.hi > 32: return valid
+    # (constant extents multiply; one symbolic extent among ones, as a `new`
+    # axis makes, must equal the length itself. O(rank <= 32) when demanded)
     product = 1
+    free = 0
     loop axis in [0..rank.lo):
         extent_value = fact_project(s, shape, fact_constant(s, axis), true, T_INT)
         extent = fact_bound(s, extent_value)
-        if extent.lo != extent.hi or extent.lo < 0 or math_word_overflow(2, product, extent.lo): return valid
-        product *= extent.lo
-    expected = fact_constant(s, product)
+        if extent.lo != extent.hi:
+            if free != 0: return valid
+            free = extent_value
+        else:
+            if extent.lo < 0 or math_word_overflow(2, product, extent.lo): return valid
+            product *= extent.lo
+    if free != 0 and product != 1: return valid
+    expected = if free != 0: free else: fact_constant(s, product)
     if fact_compare(s, .eq, length, expected) == 1: fact_set_bound(s, valid, FactBound(1, 1, true))
     valid
 
