@@ -1,0 +1,20 @@
+# An annotation that matches the place's type leaves `@` a place: writes show on the source.
+Point:type = [x:int64 y:int64]
+main = () => {
+    let xs:array<int64> = [1 2 3]
+    let all:array<int64> = @xs
+    all[0] = 99
+    all.push(4)
+    let cursor:int64 = @xs[1]
+    cursor += 10
+    let n:int64 = 5
+    let m:int64 = @n
+    m += 1
+    let p = Point[1 2]
+    let px:int64 = @p.x
+    px = 7
+    let table:dict<string int64> = ["a" -> 1]
+    let entry:int64 = @table["a"]
+    entry += 10
+    printl"{xs} {n} {p} {table}"
+}

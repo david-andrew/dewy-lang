@@ -2697,15 +2697,31 @@ check_binding_input = (s: int) -> int:
 # a local name for the element, entry, field or variable itself, its key or
 # index evaluated once.
 local_place_count = 0
+
+# `let v:T = @xs`: the written type must be the place's own; a place has the type of what it
+# names, so another type is an error, not a copy made quietly.
+written_place_type = (s: int) -> int:
+    if nodes[s].a == 0: return 0
+    resolve_binding_type(int(nodes[s].a))
+
+local_place_annotation = (s: int, place_type: int):
+    if nodes[s].a == 0: return
+    written = written_place_type(s)
+    if prune(written) != prune(place_type) and not type_eq(written, place_type):
+        fatal(nodes[s].pos, "`@` makes a place, which has the type of what it names ({dt(place_type)}), so it cannot be written as {dt(written)}: drop the annotation, or take a copy without `@`")
+    nodes[s].a = 0
+
 local_place_decl = (s: int) -> bool:
     init = int(nodes[s].b)
-    if init == 0 or nodes[s].a != 0 or nodes[s].nlist > 0 or has_flag(s, NF_GLOBAL) or has_flag(s, NF_RDONLY): return false
+    if init == 0 or nodes[s].nlist > 0 or has_flag(s, NF_GLOBAL) or has_flag(s, NF_RDONLY): return false
     if not has_flag(init, NF_MUT) or not files[pos_file(nodes[s].pos)].is_dewy: return false
     k = nodes[init].kind
     if k == .ident:
         # (`let p = @xs`: a name for the variable itself; `@f` of a function is its handle)
         probe = clone(init)
-        if is_fn_type(check_expr(probe, 0)) or nodes[probe].kind != .ident or nodes[probe].aux != i32(int(SK.local)) and nodes[probe].aux != i32(int(SK.global)): return false
+        probe_type = check_expr(probe, written_place_type(s))
+        if is_fn_type(probe_type) or nodes[probe].kind != .ident or nodes[probe].aux != i32(int(SK.local)) and nodes[probe].aux != i32(int(SK.global)): return false
+        local_place_annotation(s, probe_type)
         clear_flag(init, NF_MUT)
         add_flag(s, NF_ALIASDECL)
         check_vardecl(s)
@@ -2716,7 +2732,9 @@ local_place_decl = (s: int) -> bool:
         fatal(nodes[init].pos, "a local place names an element, entry or field of a variable (`let cursor = @xs[i]`, `let f = @r.a`); pass deeper routes to an `@` parameter instead")
     # (`@r.f` of a function is its handle: a value, as `let g = @f`)
     probe = clone(init)
-    if is_fn_type(check_expr(probe, 0)): return false
+    probe_type = check_expr(probe, written_place_type(s))
+    if is_fn_type(probe_type): return false
+    local_place_annotation(s, probe_type)
     temp = 0
     if k == .index:
         key = int(nodes[init].b)
