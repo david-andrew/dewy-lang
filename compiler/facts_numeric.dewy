@@ -530,6 +530,13 @@ fact_bitwise=(@s:FactState n:NumericWord op:Tok a:NumericWord b:NumericWord):>Nu
             return fact_new(@s FactBound(0 hi) FactTerm('eof' a b n ntype(n)))
         }
     }
+    # The same for a uint64 result, in its order-preserving coordinates: the
+    # mask `(h << 8) and 0xffffffff` is [0, 0xffffffff] however far h << 8
+    # went. O(1).
+    if op =? 'amp' and (x.wide or y.wide) and fact_type(ntype(n)) =? T_U64 {
+        let hi=min(fact_mask_end(x ntype(NumericWord(nodes.ptr[n].a))) fact_mask_end(y ntype(NumericWord(nodes.ptr[n].b))))
+        if hi not=? FACT_MAX {return fact_new(@s FactBound(FACT_MIN hi) FactTerm('eof' a b n T_U64))}
+    }
     if x.wide or y.wide {return fact_unmodeled(@s n 'unsupported')}
     let r=FactBound()
     if fact_type(ntype(n)) =? T_U64 {
@@ -612,6 +619,14 @@ fact_bitwise=(@s:FactState n:NumericWord op:Tok a:NumericWord b:NumericWord):>Nu
     if op =? 'amp' and y.lo >=? 0 and y.lo not=? y.hi {fact_difference(@s v b 0 n)}
     if op =? 'amp' and x.lo >=? 0 and x.lo not=? x.hi and (y.lo <? 0 or y.lo not=? y.hi) {fact_difference(@s v a 0 n)}
     v
+}
+# The largest value a finite nonnegative mask operand of type t admits, in
+# uint64 coordinates (value xor MIN), or MAX when it bounds nothing.
+fact_mask_end=(b:FactBound t:NumericWord):>NumericWord=>{
+    if b.wide {return FACT_MAX}
+    if fact_type(t) =? T_U64 {return b.hi}
+    if b.lo >=? 0 {return b.hi xor FACT_MIN}
+    FACT_MAX
 }
 # The prelude's integer `mod(a b kind)` with the floor kind (the default, or
 # written `'floor'`), `a % b` by another spelling (the function is `let r=a % b`

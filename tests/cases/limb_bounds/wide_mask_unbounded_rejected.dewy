@@ -1,0 +1,8 @@
+# A mask that is itself unbounded bounds nothing.
+pack = (h:uint64 m:uint64 p:uint64<(<=? 0xffffffff)>):>uint64 => {
+    let w = (h << 8) and m
+    return w+p+1
+}
+main = () => {
+    printl(pack(0x0123456789abcdef 0xffffffff 7))
+}

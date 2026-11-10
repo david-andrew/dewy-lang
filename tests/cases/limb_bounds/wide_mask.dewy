@@ -1,0 +1,8 @@
+# A constant mask bounds a uint64 shifted past its word.
+pack = (h:uint64 p:uint64<(<=? 0xffffffff)>):>uint64 => {
+    let w = (h << 8) and 0xffffffff
+    return w+p+1
+}
+main = () => {
+    printl(pack(0x0123456789abcdef 7))
+}
