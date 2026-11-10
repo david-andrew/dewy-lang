@@ -205,8 +205,11 @@ fact_nd_slice=(n:SliceWord @s:FactState values:array<int64> kind:SliceWord):>Sli
             let [entries complete_picks]=fact_selector_entries(s part.picks size)
             if not complete_picks {
                 fact_nd_need(n @s 'eq' fact_fresh(@s T_INT) fact_constant(@s 1) "slice axis {axis} index array contains only positions in {shape_text}[{axis}]");
-                complete=false
-                continue
+                # (a read checked at run time still selects one position per index on its normal edge)
+                if kind not=? 150 {
+                    complete=false
+                    continue
+                }
             }
             loop entry in entries {
                 fact_nd_need(n @s 'le' zero entry "slice axis {axis} index is nonnegative");
