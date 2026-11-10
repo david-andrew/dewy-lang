@@ -1,0 +1,11 @@
+# Writing the whole record global may replace the array it holds.
+Box=type of [items:array<int64> count:int64]
+let box:Box=Box[[1 2 3] 0]
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        box=Box[[] 1]
+        return xs[i]
+    }
+    0
+}
+main=()=>{printl(pick(@box.items 1))}

@@ -1,0 +1,13 @@
+# A union global whose alternative is the parameter's type.
+let slot:array<int64> | string=[1 2 3]
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        slot="gone"
+        return xs[i]
+    }
+    0
+}
+main=()=>{
+    let local:array<int64>=[4 5 6]
+    printl(pick(@local 1))
+}

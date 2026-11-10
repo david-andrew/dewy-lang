@@ -1,0 +1,13 @@
+# An optional global holding the parameter's type.
+let maybe:array<int64>?=[1 2 3]
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        maybe=none
+        return xs[i]
+    }
+    0
+}
+main=()=>{
+    let local:array<int64>=[4 5 6]
+    printl(pick(@local 1))
+}

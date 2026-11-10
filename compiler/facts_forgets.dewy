@@ -13,7 +13,7 @@ from p"effects.jo" import (effect_summaries)
 from p"expr.jo" import (is_nd ntype)
 from p"checks_thin_expr.dewy" import (is_map_type nd_elem)
 from p"checks_shaped.dewy" import (shape_field_type)
-from p"facts.jo" import (FACT_CAP FactBinding FactCallWrites FactProjection FactState FactSummary fact_add_projection fact_binding fact_bound fact_call_field_types fact_difference fact_drop_sites fact_drop_types fact_domain fact_exposed fact_forget_mutable_maps fact_index_get fact_index_put fact_new fact_owner fact_probe_on fact_project fact_projection_find fact_projection_first fact_projection_next_in fact_rebind fact_set_bound fact_shape_summaries fact_summary_assumed fact_summary_owner fact_summary_used fact_terms fact_text_sinks fact_type)
+from p"facts.jo" import (FACT_CAP FactBinding FactCallWrites FactProjection FactState FactSummary fact_add_projection fact_binding fact_bound fact_call_field_types fact_difference fact_drop_sites fact_drop_types fact_domain fact_exposed fact_forget_mutable_maps fact_index_get fact_index_put fact_new fact_owner fact_probe_on fact_project fact_projection_find fact_projection_first fact_projection_next_in fact_reach_cache fact_rebind fact_set_bound fact_shape_summaries fact_summary_assumed fact_summary_owner fact_summary_used fact_terms fact_text_sinks fact_type)
 from p"facts_changes.dewy" import (fact_change_route)
 from p"facts_joins.dewy" import (fact_field_node fact_payload_node)
 from p"facts_pools.dewy" import (fact_pool_type)
@@ -102,6 +102,29 @@ fact_disjoint=(p:PlaceIdentity q:PlaceIdentity):>bool=>$unsafe {
     let f=ForgetWord(locals.ptr[a].owner)
     f >? 0 and f <? fns.length and fns.ptr[f].decl not=? 0 and files[pos_file(nodes.ptr[ForgetWord(fns.ptr[f].decl)].pos)].is_dewy
 }
+# Whether two places' types keep their storage apart: no write to one changes
+# the other. Storage overlaps only when one lies inside the other, and a
+# global lies inside nothing but itself, so a written global threatens a
+# place whose type it can contain (an `@` parameter bound to it or a part of
+# it), and a written local one whose type contains it or lies in it. Raw
+# addresses (a place reached by `ptr`, `data`) can be viewed as any type, and
+# pointers, callables and unresolved generics reach anything: all stay
+# conservative. O(1) cached; once per type pair O(component types).
+fact_type_disjoint=(w:PlaceIdentity q:PlaceIdentity):>bool=>$unsafe {
+    if w.declaration <=? 0 or q.declaration <=? 0 or w.root =? q.root and w.declaration =? q.declaration {return false}
+    if fact_place_raw(w) or fact_place_raw(q) {return false}
+    let wt=if w.root =? 'local' {ForgetWord(locals.ptr[w.declaration].type)} else {ForgetWord(globals.ptr[w.declaration].type)}
+    let qt=if q.root =? 'local' {ForgetWord(locals.ptr[q.declaration].type)} else {ForgetWord(globals.ptr[q.declaration].type)}
+    if w.root =? 'global' {return not fact_type_reaches(wt qt)}
+    if q.root =? 'global' {return not fact_type_reaches(qt wt)}
+    not fact_type_reaches(wt qt) and not fact_type_reaches(qt wt)
+}
+# A place whose address was taken as a raw pointer (a global's escape, a
+# local's `.ptr`): a view of it may have any type.
+fact_place_raw=(p:PlaceIdentity):>bool=>$unsafe {
+    if p.root =? 'global' {return globals.ptr[p.declaration].exposed}
+    p.root not=? 'local' or ForgetWord(locals.ptr[p.declaration].flags) & LF_EXPOSED not=? 0
+}
 fact_exposed_bound=(s:FactState):>bool=>$unsafe {
     loop i in [0..s.bindings.length) {
         if fact_exposed(s.bindings.ptr[i].place) {return true}
@@ -121,7 +144,7 @@ fact_forget=(@s:FactState at:ForgetWord reason:FactReason all:bool=false written
             if d not=? 0 and dewy_at(nodes.ptr[d].pos) and not pos_in_lib(nodes.ptr[d].pos) {continue}
         }
         if text_sink and p.root =? 'local' and fact_sink_disjoint_param(p.declaration) {continue}
-        if not all and (fact_disjoint(written p) or keep_written and p =? written) {continue}
+        if not all and (fact_disjoint(written p) or keep_written and p =? written or fact_type_disjoint(written p)) {continue}
         let t=if p.root =? 'local' {ForgetWord(locals.ptr[p.declaration].type)} else {ForgetWord(globals.ptr[p.declaration].type)}
         let v=fact_new(@s fact_domain(t reason at) FactTerm(type=t))
         fact_holds_contract(@s t v)
@@ -695,7 +718,7 @@ fact_drop_forget=(@s:FactState at:ForgetWord fp:array<int64>):>void=>$unsafe {
         let hit=false
         loop j in [1..fp.length) {
             if p.root =? 'global' {hit=hit or p.declaration =? fp[j]}
-            else {hit=hit or fact_drop_reaches(ForgetWord(globals.ptr[fp[j]].type) ow_representation(t) 0)}
+            else {hit=hit or fact_type_reaches(ForgetWord(globals.ptr[fp[j]].type) t)}
         }
         if not hit {continue}
         let v=fact_new(@s fact_domain(t 'call' at) FactTerm(type=t))
@@ -703,11 +726,39 @@ fact_drop_forget=(@s:FactState at:ForgetWord fp:array<int64>):>void=>$unsafe {
         s.bindings.ptr[i]=FactBinding(p v at s.bindings.ptr[i].value)
     }
 }
-# Whether storage of type lt can lie inside a global of type gt0. O(gt0's
-# component types), depth 8.
+# Whether storage of type lt can lie inside storage of type gt (or be it).
+# Cached per pair; O(gt's component types) once, depth 8.
+fact_type_reaches=(gt:ForgetWord lt:ForgetWord):>bool=>{
+    let key=gt * 4294967296 + lt
+    let known=fact_reach_cache.get(key)
+    if known not=? none {return known}
+    let reaches=fact_type_opaque(ow_representation(lt)) or fact_drop_reaches(gt ow_representation(lt) 0)
+    fact_reach_cache[key]=reaches
+    reaches
+}
+fact_type_opaque=(t:ForgetWord):>bool=>$unsafe {
+    let k=tkind(t)
+    k =? 'ptr' or k =? 'var' or k =? 'param' or k =? 'callable' or k =? 'fn_' or k =? 'cfn'
+}
+# Whether two types may name the same storage: one type, or one kind of
+# scalar (`int32` and `int64<overflow='wrap'>` are not told apart) or of
+# container over such storage. O(nesting).
+fact_type_same=(a:ForgetWord b:ForgetWord):>bool=>$unsafe {
+    if a =? b {return true}
+    let k=tkind(a)
+    if k not=? tkind(b) {return false}
+    if fact_type_leaf(a) {return true}
+    if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'box' {return fact_type_same(ow_representation(telem(a)) ow_representation(telem(b)))}
+    false
+}
+# A type without component storage or addresses.
+fact_type_leaf=(t:ForgetWord):>bool=>$unsafe {
+    let k=tkind(t)
+    k =? 'int_' or k =? 'float_' or k =? 'bool_' or k =? 'str_' or k =? 'void_' or k =? 'null_' or k =? 'none_lit' or k =? 'range' or k =? 'vec' or k =? 'quantity' or k =? 'dimension'
+}
 fact_drop_reaches=(gt0:ForgetWord lt:ForgetWord depth:ForgetWord):>bool=>$unsafe {
     let gt=ow_representation(gt0)
-    if gt =? lt or depth >? 8 {return true}
+    if depth >? 8 or fact_type_same(gt lt) {return true}
     let k=tkind(gt)
     if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'box' {return fact_drop_reaches(telem(gt) lt depth + 1)}
     if k =? 'tuple' or k =? 'struct_' or k =? 'enum_' {
@@ -717,5 +768,5 @@ fact_drop_reaches=(gt0:ForgetWord lt:ForgetWord depth:ForgetWord):>bool=>$unsafe
         }
         return false
     }
-    k =? 'ptr' or k =? 'var' or k =? 'param' or k =? 'callable' or k =? 'fn_' or k =? 'cfn'
+    not fact_type_leaf(gt)
 }

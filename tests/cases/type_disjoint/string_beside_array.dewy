@@ -1,0 +1,14 @@
+# A string global next to an array parameter: writing it keeps the length.
+let name:string="a"
+total=(@xs:array<int64>):>int=>{
+    let sum:int=0
+    loop i in [0..xs.length) {
+        name=name
+        sum+=xs[i]
+    }
+    sum
+}
+main=()=>{
+    let data:array<int64>=[1 2 3]
+    printl(total(@data))
+}

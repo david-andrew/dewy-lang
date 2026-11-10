@@ -1,0 +1,11 @@
+# A callee that writes an array global may empty the array the parameter is.
+let data:array<int64>=[1 2 3]
+clear=():>void=>{data=[]}
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        clear()
+        return xs[i]
+    }
+    0
+}
+main=()=>{printl(pick(@data 1))}

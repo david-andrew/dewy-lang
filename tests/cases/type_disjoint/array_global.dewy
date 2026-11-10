@@ -1,0 +1,10 @@
+# The parameter may be this very global: its write can empty it.
+let data:array<int64>=[1 2 3]
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        data=[]
+        return xs[i]
+    }
+    0
+}
+main=()=>{printl(pick(@data 1))}

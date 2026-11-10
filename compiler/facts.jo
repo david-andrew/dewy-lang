@@ -1215,6 +1215,8 @@ fact_text_sinks: {int: bool} = {}
 # node * 4 + site (0 statement, 1 block end, 2 loop region, 3 function exit).
 fact_drop_types: {int: int[]} = {}
 fact_drop_sites: {int: int[]} = {}
+# Whether storage of one type can lie in another's (facts_forgets.dewy), per type pair.
+fact_reach_cache: {int: bool} = {}
 
 struct FactCallWrites:
     place: PlaceIdentity

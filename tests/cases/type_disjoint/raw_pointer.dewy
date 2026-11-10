@@ -1,0 +1,13 @@
+# A write through a raw pointer to the global's elements stays conservative.
+let data:array<int64>=[1 2 3]
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        $unsafe {
+            let raw=data.ptr
+            raw[0]=7
+        }
+        return xs[i]
+    }
+    0
+}
+main=()=>{printl(pick(@data 1))}

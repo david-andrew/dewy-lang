@@ -1,0 +1,15 @@
+# A callee that writes only a counter global keeps the lent array's length.
+let counter:int64=0
+tick=():>void=>{counter+=1}
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        tick()
+        return xs[i]
+    }
+    0
+}
+main=()=>{
+    let data:array<int64>=[1 2 3]
+    printl(pick(@data 2))
+    printl(counter)
+}

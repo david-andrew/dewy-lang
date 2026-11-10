@@ -1,0 +1,11 @@
+# A record global holds an array field the parameter may be.
+Box=type of [items:array<int64> count:int64]
+let box:Box=Box[[1 2 3] 0]
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        box.items=[]
+        return xs[i]
+    }
+    0
+}
+main=()=>{printl(pick(@box.items 1))}

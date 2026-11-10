@@ -1,0 +1,11 @@
+# A raw pointer global writes storage of any type.
+let data:array<int64>=[1 2 3]
+let raw:ptr<int64>=$unsafe data.ptr
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        $unsafe {raw[0]=7}
+        return xs[i]
+    }
+    0
+}
+main=()=>{printl(pick(@data 1))}

@@ -1,0 +1,12 @@
+# An element of the global array is an int64 place: the parameter may be it,
+# so the write can change the value the guard bounded.
+let data:array<int64>=[1 2 3]
+pick=(@n:int64):>int64=>{
+    let table:array<int64>=[10 20 30]
+    if 0 <=? n and n <? 3 {
+        data=[9 9 9]
+        return table[n]
+    }
+    0
+}
+main=()=>{printl(pick(@data[1]))}

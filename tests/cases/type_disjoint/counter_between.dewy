@@ -1,0 +1,17 @@
+# A counter global of another type cannot be the array a parameter lends, so
+# the guard on `@xs.length` still proves the index after the increment.
+let counter:int64=0
+let label:string="x"
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        counter+=1
+        label="y"
+        return xs[i]
+    }
+    0
+}
+main=()=>{
+    let data:array<int64>=[1 2 3]
+    printl(pick(@data 1))
+    printl(counter)
+}

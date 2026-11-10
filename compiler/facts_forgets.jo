@@ -141,6 +141,27 @@ fact_disjoint = (p: PlaceIdentity, q: PlaceIdentity) -> bool:
     if locals[a].owner != locals[b].owner or int(locals[a].flags) & LF_MUTPARAM == 0 or int(locals[b].flags) & LF_MUTPARAM == 0: return false
     f = int(locals[a].owner)
     f > 0 and f < fns.len() and fns[f].decl != 0 and files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy
+# Whether two places' types keep their storage apart: no write to one changes
+# the other. Storage overlaps only when one lies inside the other, and a
+# global lies inside nothing but itself, so a written global threatens a
+# place whose type it can contain (an `@` parameter bound to it or a part of
+# it), and a written local one whose type contains it or lies in it. Raw
+# addresses (a place reached by `ptr`, `data`) can be viewed as any type, and
+# pointers, callables and unresolved generics reach anything: all stay
+# conservative. O(1) cached; once per type pair O(component types).
+fact_type_disjoint = (w: PlaceIdentity, q: PlaceIdentity) -> bool:
+    if w.declaration <= 0 or q.declaration <= 0 or w.root == q.root and w.declaration == q.declaration: return false
+    if fact_place_raw(w) or fact_place_raw(q): return false
+    wt = if w.root == .local: int(locals[w.declaration].type) else: int(globals[w.declaration].type)
+    qt = if q.root == .local: int(locals[q.declaration].type) else: int(globals[q.declaration].type)
+    if w.root == .global: return not fact_type_reaches(wt, qt)
+    if q.root == .global: return not fact_type_reaches(qt, wt)
+    not fact_type_reaches(wt, qt) and not fact_type_reaches(qt, wt)
+# A place whose address was taken as a raw pointer (a global's escape, a
+# local's `.ptr`): a view of it may have any type.
+fact_place_raw = (p: PlaceIdentity) -> bool:
+    if p.root == .global: return globals[p.declaration].exposed
+    p.root != .local or int(locals[p.declaration].flags) & LF_EXPOSED != 0
 fact_exposed_bound = (s: FactState) -> bool:
     loop binding in s.bindings:
         if fact_exposed(binding.place): return true
@@ -157,7 +178,7 @@ fact_forget = (s: mut FactState, at: int, reason: FactReason, all: bool = false,
             d = int(globals[p.declaration].decl)
             if d != 0 and dewy_at(nodes[d].pos) and not pos_in_lib(nodes[d].pos): continue
         if text_sink and p.root == .local and fact_sink_disjoint_param(p.declaration): continue
-        if not all and (fact_disjoint(written, p) or keep_written and p == written): continue
+        if not all and (fact_disjoint(written, p) or keep_written and p == written or fact_type_disjoint(written, p)): continue
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         v = fact_new(s, fact_domain(t, reason, at), FactTerm(type = t))
         fact_holds_contract(s, t, v)
@@ -595,14 +616,39 @@ fact_drop_forget = (s: mut FactState, at: int, fp: int[]):
         hit = false
         loop j in [1..fp.len()):
             if p.root == .global: hit = hit or p.declaration == fp[j]
-            else: hit = hit or fact_drop_reaches(int(globals[fp[j]].type), ow_representation(t), 0)
+            else: hit = hit or fact_type_reaches(int(globals[fp[j]].type), t)
         if not hit: continue
         v = fact_new(s, fact_domain(t, .call, at), FactTerm(type = t))
         fact_holds_contract(s, t, v)
         s.bindings[i] = FactBinding(p, v, at, s.bindings[i].value)
+# Whether storage of type lt can lie inside storage of type gt (or be it).
+# Cached per pair; O(gt's component types) once, depth 8.
+fact_type_reaches = (gt: int, lt: int) -> bool:
+    key = gt * 4294967296 + lt
+    if let known = fact_reach_cache.get(key): return known
+    reaches = fact_type_opaque(ow_representation(lt)) or fact_drop_reaches(gt, ow_representation(lt), 0)
+    fact_reach_cache[key] = reaches
+    reaches
+fact_type_opaque = (t: int) -> bool:
+    k = tkind(t)
+    k == .ptr or k == .var or k == .param or k == .callable or k == .fn_ or k == .cfn
+# Whether two types may name the same storage: one type, or one kind of
+# scalar (`int32` and `int64<overflow='wrap'>` are not told apart) or of
+# container over such storage. O(nesting).
+fact_type_same = (a: int, b: int) -> bool:
+    if a == b: return true
+    k = tkind(a)
+    if k != tkind(b): return false
+    if fact_type_leaf(a): return true
+    if k == .array or k == .fixed or k == .opt or k == .box: return fact_type_same(ow_representation(telem(a)), ow_representation(telem(b)))
+    false
+# A type without component storage or addresses.
+fact_type_leaf = (t: int) -> bool:
+    k = tkind(t)
+    k == .int_ or k == .float_ or k == .bool_ or k == .str_ or k == .void_ or k == .null_ or k == .none_lit or k == .range or k == .vec or k == .quantity or k == .dimension
 fact_drop_reaches = (gt0: int, lt: int, depth: int) -> bool:
     gt = ow_representation(gt0)
-    if gt == lt or depth > 8: return true
+    if depth > 8 or fact_type_same(gt, lt): return true
     k = tkind(gt)
     if k == .array or k == .fixed or k == .opt or k == .box: return fact_drop_reaches(telem(gt), lt, depth + 1)
     if k == .tuple or k == .struct_ or k == .enum_:
@@ -613,4 +659,4 @@ fact_drop_reaches = (gt0: int, lt: int, depth: int) -> bool:
             loop ft in ow_field_types(gt):
                 if fact_drop_reaches(ft, lt, depth + 1): return true
         return false
-    k == .ptr or k == .var or k == .param or k == .callable or k == .fn_ or k == .cfn
+    not fact_type_leaf(gt)
