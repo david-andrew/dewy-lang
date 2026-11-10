@@ -1,6 +1,6 @@
 $runtime_checks
 from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
-from p"effects.jo" import (EffectEdge effect_contracts effect_counters effect_exact_rep effect_footprints_only effect_for_marks effect_limit effect_policy effect_seen effect_summaries effects_active)
+from p"effects.jo" import (EffectEdge effect_contracts effect_counters effect_exact_rep effect_footprints_only effect_for_marks effect_limit effect_moved_out effect_policy effect_seen effect_summaries effects_active)
 from p"effect_costs.dewy" import (effect_bounds effect_cleanup effect_failure effect_intrinsic_cost effect_plan_cost)
 from p"dewy_reader_types.dewy" import (EffectKind)
 from p"expr.jo" import (IN ntype)
@@ -19,7 +19,7 @@ from p"copies.jo" import (copies_on copy_bindings)
 from p"copy_ops.dewy" import (copy_strict)
 from p"ir.jo" import (dbg_on)
 from p"effect_graph.dewy" import (effect_add effect_opaque)
-from p"effect_values.dewy" import (effect_count_literal effect_float effect_float_op effect_plain effect_scalar effect_share effect_simple_enum effect_value effect_word_op)
+from p"effect_values.dewy" import (effect_count_literal effect_float effect_float_op effect_owner_record effect_plain effect_scalar effect_share effect_simple_enum effect_value effect_word_op)
 from p"effect_lattice.dewy" import (effect_intern place_base)
 from p"effect_control.dewy" import (effect_name)
 from p"effect_sites.dewy" import (effect_scalar_sites effect_use_sites)
@@ -430,6 +430,14 @@ effect_oom_frame=(n:EffectScanWord):>bool=>$unsafe {
     let name=effect_name(g)
     return name in? ["__oom_frame" "__oom_caught" "__oom_release" "__oom_unsupported"]
 }
+# An owner record built or returned as the function's result moves to the caller,
+# which drops it: effect_moved_out. O(1).
+effect_moves_out=(n:EffectScanWord):>void=>$unsafe {
+    if (nodes.ptr[n].kind =? 'call' and (nodes.ptr[n].aux =? 2 or nodes.ptr[n].aux =? 0)) and effect_owner_record(ntype(n)) {effect_moved_out[n]=true}
+}
+effect_body_moves_out=(body:EffectScanWord):>void=>$unsafe {
+    if body not=? 0 and nodes.ptr[body].kind =? 'block' and nodes.ptr[body].aux not=? 0 and nkids(body) >? 0 {effect_moves_out(EffectScanWord(nodes.ptr[kid(body nkids(body) - 1)].a))}
+}
 effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     if n =? 0 or effect_footprints_only and effect_summaries.ptr[f].footprint_opaque {return}
     if effect_seen.ptr[n] =? f {return}
@@ -496,8 +504,13 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     if k =? 'conv' and (nodes.ptr[n].aux =? int32<overflow='wrap'>(10) or nodes.ptr[n].aux =? int32<overflow='wrap'>(8) or nodes.ptr[n].aux =? int32<overflow='wrap'>(13) and not effect_plain(ntype(n)) and not ownership_scalar(ntype(n))) {
         effect_plan_cost(f n 1 << 2);
     }
-    if k =? 'call' and nodes.ptr[n].aux =? 2 {
+    if k =? 'return_' and nodes.ptr[n].a not=? 0 {effect_moves_out(EffectScanWord(nodes.ptr[n].a))}
+    # (a call's owner record result is dropped here, as a temporary or a binding, unless it moves on)
+    if k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 and effect_owner_record(ntype(n)) and not effect_moved_out.has(n) {
         effect_cleanup(f ntype(n) n PlaceIdentity['local' f n]);
+    }
+    if k =? 'call' and nodes.ptr[n].aux =? 2 {
+        if not effect_moved_out.has(n) {effect_cleanup(f ntype(n) n PlaceIdentity['local' f n]);}
         let t=representation_type(ntype(n))
         layout(t);
         if EffectScanWord(types.ptr[t].flags) & TF_BOXED not=? 0 {effect_plan_cost(f n 1 << 2);}
@@ -574,7 +587,9 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
             }
         }
         effect_summaries.ptr[f].edges.push(EffectEdge[g n routes]);
-        if not effect_value(EffectScanWord(fns.ptr[g].ret)) and EffectScanWord(fns.ptr[g].ret) not=? T_VOID {effect_opaque(f n);}
+        # (a returned owner record is dropped where its caller's binding or temporary ends: that
+        # drop's hook edge is the caller's own, and the callee's construction carries it too)
+        if not effect_value(EffectScanWord(fns.ptr[g].ret)) and EffectScanWord(fns.ptr[g].ret) not=? T_VOID and not effect_owner_record(EffectScanWord(fns.ptr[g].ret)) {effect_opaque(f n);}
         # (a string index or slice: in bounds by the caller's facts, or a possible failure)
         if fact_string_call(n) >=? 2 {effect_failure(f n);}
         return
@@ -664,7 +679,8 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     let supported=false
     if exact_rep and (k =? 'binary' or k =? 'unary' or k =? 'conv') and prune(ntype(n)) =? T_MATH_INT and exact_raw_value(n) {supported=true}
     else if k =? 'intrinsic' {supported=effect_intrinsic_cost(nodes.ptr[n].aux as IN) >=? 0}
-    else if k =? 'call' and nodes.ptr[n].aux =? 2 {supported=effect_share(ntype(n))}
+    # (an owner record of values is built in place; its drop's hook edge is pushed above)
+    else if k =? 'call' and nodes.ptr[n].aux =? 2 {supported=effect_share(ntype(n)) or effect_owner_record(ntype(n))}
     # (a member into a union of shares: `return Oops` from `:>(int64|Oops)`)
     else if k =? 'call' and nodes.ptr[n].aux =? 3 {supported=effect_share(ntype(n))}
     # (a literal is static data; an interpolation's allocation is counted above)

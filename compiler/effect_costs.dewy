@@ -11,13 +11,14 @@ from p"types.jo" import (T_MATH_INT T_STR T_VOID fields prune struct_targ struct
 from p"type_ops.dewy" import (fixed_len layout)
 from p"effect_graph.dewy" import (effect_add effect_declared_row effect_opaque)
 from p"effect_classifiers.dewy" import (effect_library_class)
-from p"effect_values.dewy" import (effect_scalar effect_signature_value effect_value)
+from p"effect_values.dewy" import (effect_owner_record effect_scalar effect_signature_value effect_value)
 from p"facts.jo" import (fn_in_lib)
 from p"facts_ranges.dewy" import (fact_range_assumed)
 from p"facts_changes.dewy" import (fact_pure_intrinsic)
 from p"facts_text.dewy" import (fact_string_call)
 from p"util.jo" import (fatal files name_of pos_file)
-from p"ownership.jo" import (ownership_decls)
+from p"dewy_method_ops.dewy" import (dewy_is_method)
+from p"ownership.jo" import (ownership_consumers ownership_decls)
 from p"ownership_types.dewy" import (ownership_type)
 from p"panic_inventory.dewy" import (panic_format_literal panic_format_spec)
 from p"refine.jo" import (representation_type)
@@ -225,11 +226,24 @@ effect_signature_opaque_by_type=(f:EffectCostsWord):>bool=>$unsafe {
     # formatting and text trees)
     # (a program's own function with text in its signature, a method returning
     # `void | Error[message=...]`, is visited: its summary is the program's)
+    # (a hooked record a method borrows, or one a call returns: effect_owner_record)
     let own=not fn_in_lib(f) or effect_array_reader(f)
-    if not effect_signature_value(EffectCostsWord(fns.ptr[f].ret)) and EffectCostsWord(fns.ptr[f].ret) not=? T_VOID and not (own and effect_value(EffectCostsWord(fns.ptr[f].ret))) {return true}
-    loop l in fns.ptr[f].params {
+    let ret:EffectCostsWord=EffectCostsWord(fns.ptr[f].ret)
+    if not effect_signature_value(ret) and ret not=? T_VOID and not (own and (effect_value(ret) or effect_owner_record(ret))) {return true}
+    loop i in [0..fns.ptr[f].params.length) {
+        let l=fns.ptr[f].params.ptr[i]
         let t=representation_type(EffectCostsWord(locals.ptr[l].type))
-        if EffectCostsWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 and not effect_signature_value(t) and not is_fn_type(t) and not (own and effect_value(t)) {return true}
+        if EffectCostsWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 and not effect_signature_value(t) and not is_fn_type(t) and not (own and (effect_value(t) or i =? 0 and effect_borrowed_receiver(f t))) {return true}
     }
     return false
+}
+# A method's receiver of a hooked record (effect_owner_record): borrowed.
+effect_borrowed_receiver=(f:EffectCostsWord t:EffectCostsWord):>bool=>$unsafe {
+    effect_owner_record(t) and effect_method_borrows(f)
+}
+# A method borrows its receiver, unless it is a `$__consume__` one, which owns
+# and drops it. O(1) but a name's first characters.
+effect_method_borrows=(f:EffectCostsWord):>bool=>$unsafe {
+    let d:EffectCostsWord=EffectCostsWord(fns.ptr[f].decl)
+    return d not=? 0 and dewy_is_method(d) and not ownership_consumers.has(d)
 }

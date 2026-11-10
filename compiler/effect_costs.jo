@@ -22,6 +22,7 @@ use 'ownership_types.dewy'
 use 'panic_inventory.dewy'
 use 'refine.jo'
 use 'effect_scan.dewy'
+use 'dewy_method_ops.dewy'
 
 # A reviewed library operation's class (effect_library.jo) as its summary: its
 # residual costs, and a write of each mutable parameter.
@@ -194,10 +195,22 @@ effect_signature_opaque_by_type = (f: int) -> bool:
     # formatting and text trees)
     # (a program's own function with text in its signature, a method returning
     # `void | Error[message=...]`, is visited: its summary is the program's)
+    # (a hooked record a method borrows, or one a call returns: effect_owner_record)
     own = not fn_in_lib(f) or effect_array_reader(f)
-    if not effect_signature_value(int(fns[f].ret)) and int(fns[f].ret) != T_VOID and not (own and effect_value(int(fns[f].ret))): return true
-    loop l in fns[f].params:
+    ret = int(fns[f].ret)
+    if not effect_signature_value(ret) and ret != T_VOID and not (own and (effect_value(ret) or effect_owner_record(ret))): return true
+    loop i in [0..fns[f].params.len()):
+        l = fns[f].params[i]
         t = representation_type(int(locals[l].type))
-        if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_signature_value(t) and not is_fn_type(t) and not (own and effect_value(t)): return true
+        if int(locals[l].flags) & LF_MUTPARAM == 0 and not effect_signature_value(t) and not is_fn_type(t) and not (own and (effect_value(t) or i == 0 and effect_borrowed_receiver(f, t))): return true
     false
+
+# A method's receiver of a hooked record (effect_owner_record): borrowed.
+effect_borrowed_receiver = (f: int, t: int) -> bool: effect_owner_record(t) and effect_method_borrows(f)
+
+# A method borrows its receiver, unless it is a `$__consume__` one, which owns
+# and drops it. O(1) but a name's first characters.
+effect_method_borrows = (f: int) -> bool:
+    d = int(fns[f].decl)
+    d != 0 and dewy_is_method(d) and not ownership_consumers.has(d)
 

@@ -419,6 +419,14 @@ effect_oom_frame = (n: int) -> bool:
     name in ["__oom_frame", "__oom_caught", "__oom_release", "__oom_unsupported"]
 
 
+# An owner record built or returned as the function's result moves to the caller,
+# which drops it: effect_moved_out. O(1).
+effect_moves_out = (n: int):
+    if nodes[n].kind == .call and (nodes[n].aux == 2 or nodes[n].aux == 0) and effect_owner_record(ntype(n)): effect_moved_out[n] = true
+
+effect_body_moves_out = (body: int):
+    if body != 0 and nodes[body].kind == .block and nodes[body].aux != 0 and nkids(body) > 0: effect_moves_out(int(nodes[kid(body, nkids(body) - 1)].a))
+
 effect_scan_node = (f: int, n: int):
     if n == 0 or effect_footprints_only and effect_summaries[f].footprint_opaque: return
     if effect_seen[n] == f: return
@@ -474,8 +482,12 @@ effect_scan_node = (f: int, n: int):
     if k == .partial: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
     if k == .conv and (nodes[n].aux == i32(int(CV.fixed2arr)) or nodes[n].aux == i32(int(CV.fn2clos)) or nodes[n].aux == i32(int(CV.explicit_copy)) and not effect_plain(ntype(n)) and not ownership_scalar(ntype(n))):
         effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
-    if k == .call and nodes[n].aux == 2:
+    if k == .return_ and nodes[n].a != 0: effect_moves_out(int(nodes[n].a))
+    # (a call's owner record result is dropped here, as a temporary or a binding, unless it moves on)
+    if k == .call and nodes[n].aux == 0 and nodes[n].sym > 0 and effect_owner_record(ntype(n)) and not effect_moved_out.has(n):
         effect_cleanup(f, ntype(n), n, PlaceIdentity(.local, f, n))
+    if k == .call and nodes[n].aux == 2:
+        if not effect_moved_out.has(n): effect_cleanup(f, ntype(n), n, PlaceIdentity(.local, f, n))
         t = representation_type(ntype(n))
         layout(t)
         if int(types[t].flags) & TF_BOXED != 0: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
@@ -540,7 +552,9 @@ effect_scan_node = (f: int, n: int):
                 effect_scan_node(f, a)
                 if ownership_decls.len() != 0: effect_owner_init(f, a, n)
         effect_summaries[f].edges.push(EffectEdge(g, n, routes))
-        if not effect_value(int(fns[g].ret)) and int(fns[g].ret) != T_VOID: effect_opaque(f, n)
+        # (a returned owner record is dropped where its caller's binding or temporary ends: that
+        # drop's hook edge is the caller's own, and the callee's construction carries it too)
+        if not effect_value(int(fns[g].ret)) and int(fns[g].ret) != T_VOID and not effect_owner_record(int(fns[g].ret)): effect_opaque(f, n)
         # (a string index or slice: in bounds by the caller's facts, or a possible failure)
         if fact_string_call(n) >= 2: effect_failure(f, n)
         return
@@ -614,7 +628,8 @@ effect_scan_node = (f: int, n: int):
     supported = false
     if exact_rep and (k == .binary or k == .unary or k == .conv) and prune(ntype(n)) == T_MATH_INT and exact_raw_value(n): supported = true
     else if k == .intrinsic: supported = effect_intrinsic_cost(nodes[n].aux as IN) >= 0
-    else if k == .call and nodes[n].aux == 2: supported = effect_share(ntype(n))
+    # (an owner record of values is built in place; its drop's hook edge is pushed above)
+    else if k == .call and nodes[n].aux == 2: supported = effect_share(ntype(n)) or effect_owner_record(ntype(n))
     # (a member into a union of shares: `return Oops` from `:>(int64|Oops)`)
     else if k == .call and nodes[n].aux == 3: supported = effect_share(ntype(n))
     # (a literal is static data; an interpolation's allocation is counted above)

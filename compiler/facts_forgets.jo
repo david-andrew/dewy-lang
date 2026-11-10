@@ -569,12 +569,16 @@ fact_drop_scan = (n: int, parent: int, out: mut int[], deep: bool) -> bool:
     if mask & 16 != 0:
         loop i in [0..nkids(n)): settled = fact_drop_scan(kid(n, i), n, out, deep) and settled
     settled
+# A method call's receiver (its first argument) is borrowed, not moved: its
+# owner drops it later, so passing it runs no hook. O(1).
+fact_borrowed_receiver = (call: int) -> bool: nodes[call].aux == 0 and nodes[call].sym > 0 and effect_method_borrows(int(nodes[call].sym))
 fact_drop_counted = (n: int, parent: int) -> bool:
     k = nodes[n].kind
     if k == .vardecl or k == .assign or k == .addr or not ownership_fact_type(ntype(n)): return false
     if parent == 0: return true
     pk = nodes[parent].kind
     if k == .ident or k == .field or k == .index or k == .narrow:
+        if pk == .call and nkids(parent) > 0 and kid(parent, 0) == n and fact_borrowed_receiver(parent): return false
         if pk == .call or pk == .partial or pk == .intrinsic or pk == .array or pk == .tuple or pk == .map_lit or pk == .pair: return true
         return k == .index and (pk == .vardecl or pk == .assign or pk == .return_)
     if k == .call and (pk == .vardecl or pk == .assign or pk == .return_ or pk == .call and nodes[parent].aux == 2): return false

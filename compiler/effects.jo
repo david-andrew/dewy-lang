@@ -178,6 +178,10 @@ effect_counters: {int: int} = {}
 
 effect_exact_rep = false
 
+# Owner records a function's result moves to its caller, by node: a `return`'s operand or a
+# body's value. Their drops are the caller's (its binding's or temporary's), not the callee's.
+effect_moved_out: {int: bool} = {}
+
 # ---------------- panics ----------------
 # `panics` (docs/design/decisions.md, 2026-10-23): a function may fail a runtime
 # check or otherwise panic. Its sources: an obligation its scope deferred to a

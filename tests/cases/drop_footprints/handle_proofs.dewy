@@ -1,10 +1,12 @@
 # Handle-like owners beside array proofs. A handle's drop hook closes it by
 # updating global counters only, so facts about the arrays a function
 # borrows survive every close: at inner block ends, statement ends,
-# replacements, loop iterations and match arms.
+# replacements, loop iterations and match arms. Asking a handle `ready`
+# borrows it, and opening one moves it out of `open_handle`: neither closes
+# anything, so guards made before them still prove the index after them.
 let closed:int64=0
 let last_fd:int64=-1
-Handle=type of [fd:int64 pending:int64
+Handle=type of [fd:int64 path:string
     $__drop__
     close=():>void=>{
         closed+=1
@@ -12,6 +14,7 @@ Handle=type of [fd:int64 pending:int64
     }
     ready=():>bool=>fd >=? 0
 ]
+open_handle=(fd:int64):>Handle=>Handle[fd "data.bin"]
 # Binary search over the sorted keys a caller lends, closing a probe handle
 # each step.
 search=(@keys:array<int64> target:int64):>int64=>{
@@ -19,7 +22,7 @@ search=(@keys:array<int64> target:int64):>int64=>{
     let hi=keys.length
     loop lo <? hi {
         let mid=lo+(hi-lo)//2
-        {let _probe=Handle[mid 0]}
+        {let _probe=open_handle(mid)}
         if keys[mid] <? target {lo=mid+1} else {hi=mid}
     }
     lo
@@ -27,23 +30,24 @@ search=(@keys:array<int64> target:int64):>int64=>{
 # Copy a window of rows into a buffer through a replaced handle.
 window=(@rows:array<int64> @out:array<int64> start:int64):>int64=>{
     if start <? 0 or start >=? rows.length or out.length =? 0 {return 0}
-    let h=Handle[start 0]
-    let copied=0
-    let i=start
-    loop i <? rows.length and copied <? out.length {
+    let h=open_handle(start)
+    if not h.ready {return 0}
+    out[0]=rows[start]
+    let copied=1
+    let i=start+1
+    loop i <? rows.length and copied <? out.length and h.ready {
         out[copied]=rows[i]
-        h=Handle[i 1]
+        h=open_handle(i)
         copied+=1
         i+=1
     }
-    if h.fd <? 0 {return 0}
     copied
 }
 # A handle per lookup, its readiness tested inline, then an index.
 lookup=(@table:array<int64> slots:array<int64>):>int64=>{
     let hits=0
     loop slot in slots {
-        if 0 <=? slot and slot <? table.length and Handle[slot 0].ready {
+        if 0 <=? slot and slot <? table.length and open_handle(slot).ready {
             if table[slot] >? 0 {hits+=1}
         }
     }
@@ -51,10 +55,10 @@ lookup=(@table:array<int64> slots:array<int64>):>int64=>{
 }
 # An optional handle taken by a match arm, then a guarded read.
 first_ready=(@table:array<int64> fd:int64):>int64=>{
-    let maybe:Handle?=if fd >=? 0 {Handle[fd 0]} else {none}
+    let maybe:Handle?=if fd >=? 0 {open_handle(fd)} else {none}
     if table.length =? 0 {return 0}
     match maybe {
-        h:Handle => {if h.fd >=? 0 {printl"handle {h.fd} ready"}}
+        h:Handle => {if h.ready {printl"handle {h.fd} ready"}}
         _ => {printl"no handle"}
     }
     table[0]

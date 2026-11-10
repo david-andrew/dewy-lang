@@ -14,12 +14,12 @@ from p"exact.jo" import (exact_effect_owners)
 from p"checks_thin_expr.dewy" import (is_fn_type)
 from p"place_routes.dewy" import (place_append)
 from p"refine.jo" import (representation_type)
-from p"effect_values.dewy" import (effect_value)
+from p"effect_values.dewy" import (effect_owner_record effect_value)
 from p"effect_contracts.dewy" import (effect_subst)
 from p"effect_control.dewy" import (effect_prepare)
 from p"facts_forgets.dewy" import (fact_text_sink)
-from p"effect_costs.dewy" import (effect_caller_obligation effect_library_summary effect_map_write effect_signature_opaque)
-from p"effect_scan.dewy" import (effect_isolation_block effect_scan_node)
+from p"effect_costs.dewy" import (effect_borrowed_receiver effect_caller_obligation effect_library_summary effect_map_write effect_signature_opaque)
+from p"effect_scan.dewy" import (effect_body_moves_out effect_isolation_block effect_scan_node)
 from p"concurrency_waits.dewy" import (concurrency_fn_blocks)
 # Demanded effect graph execution; shared state has one owner in effects.jo.
 GraphWord:type=int64<overflow='wrap'>
@@ -346,14 +346,15 @@ effect_visit=(f:GraphWord):>void=>$unsafe {
                 effect_isolation_block(f IsolationReason.capture GraphWord(fns.ptr[f].body));
             }
             if fns.ptr[f].cabi {effect_opaque(f d);}
-            if not effect_value(GraphWord(fns.ptr[f].ret)) and GraphWord(fns.ptr[f].ret) not=? T_VOID {effect_opaque(f d);}
+            if not effect_value(GraphWord(fns.ptr[f].ret)) and GraphWord(fns.ptr[f].ret) not=? T_VOID and not effect_owner_record(GraphWord(fns.ptr[f].ret)) {effect_opaque(f d);}
             loop i in [0..fns.ptr[f].params.length) {
                 let l=fns.ptr[f].params.ptr[i]
                 let t=representation_type(GraphWord(locals.ptr[l].type))
-                if GraphWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 and not effect_value(t) and not is_fn_type(t) {effect_opaque(f d);}
+                if GraphWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 and not effect_value(t) and not is_fn_type(t) and not (i =? 0 and effect_borrowed_receiver(f t)) {effect_opaque(f d);}
             }
             let previous_exact=effect_exact_rep
             effect_exact_rep=f <? exact_effect_owners.length and exact_effect_owners.ptr[f]
+            effect_body_moves_out(GraphWord(fns.ptr[f].body));
             effect_scan_node(f GraphWord(fns.ptr[f].body));
             effect_exact_rep=previous_exact
         }

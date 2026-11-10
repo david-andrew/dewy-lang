@@ -6,7 +6,7 @@ from p"check.jo" import (FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURE
 from p"checks_thin.dewy" import (library_exit_call)
 from p"effect_classifiers.dewy" import (effect_library_class)
 from p"effect_control.dewy" import (effects_demand)
-from p"effect_costs.dewy" import (effect_signature_opaque)
+from p"effect_costs.dewy" import (effect_method_borrows effect_signature_opaque)
 from p"effect_lattice.dewy" import (place_base)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"effects.jo" import (effect_summaries)
@@ -654,6 +654,11 @@ fact_drop_scan=(n:ForgetWord parent:ForgetWord @out:array<int64> deep:bool):>boo
     }
     settled
 }
+# A method call's receiver (its first argument) is borrowed, not moved: its
+# owner drops it later, so passing it runs no hook. O(1).
+fact_borrowed_receiver=(call:ForgetWord):>bool=>$unsafe {
+    nodes.ptr[call].aux =? 0 and nodes.ptr[call].sym >? 0 and effect_method_borrows(ForgetWord(nodes.ptr[call].sym))
+}
 # An owner-typed node at an owning boundary of its statement: a temporary
 # the statement drops, an owner passed by value (the callee may drop it), a
 # copy. A place read borrows (a transfer by declaration, assignment or
@@ -665,6 +670,7 @@ fact_drop_counted=(n:ForgetWord parent:ForgetWord):>bool=>$unsafe {
     if parent =? 0 {return true}
     let pk=nodes.ptr[parent].kind
     if k =? 'ident' or k =? 'field' or k =? 'index' or k =? 'narrow' {
+        if pk =? 'call' and nkids(parent) >? 0 and kid(parent 0) =? n and fact_borrowed_receiver(parent) {return false}
         if pk =? 'call' or pk =? 'partial' or pk =? 'intrinsic' or pk =? 'array' or pk =? 'tuple' or pk =? 'map_lit' or pk =? 'pair' {return true}
         return k =? 'index' and (pk =? 'vardecl' or pk =? 'assign' or pk =? 'return_')
     }

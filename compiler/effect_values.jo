@@ -9,6 +9,7 @@ use 'effects.jo'
 use 'expr.jo'
 use 'checks_thin_expr.dewy'
 use 'ownership_types.dewy'
+use 'ownership.jo'
 use 'refine.jo'
 
 # Residual implementation inventory used by check and both code generators.
@@ -180,6 +181,23 @@ effect_value_record = (t: int, depth: int) -> bool:
             if fields[fi].boxed or not effect_value(int(fields[fi].type), depth + 1): answer = false
     effect_value_cache[t] = answer
     answer
+
+
+# A record with a drop hook, no copy or move hook, and fields that are values
+# (`[fd:int64 path:string]` closed by its hook). A method borrows it: reading
+# it reads values, and the method never drops it. Returned, it moves to the
+# caller, whose drop point forgets the hook's footprint; the callee's
+# construction already carries the hook's edge (effect_cleanup).
+effect_owner_record = (t0: int) -> bool:
+    t = representation_type(t0)
+    if tkind(t) != .struct_ or ownership_copies.has(t) or ownership_moves.has(t): return false
+    layout(t)
+    si = int(types[t].st)
+    if structs[si].drop_fn == 0: return false
+    loop i in [0..int(structs[si].nfields)):
+        fi = int(structs[si].fields) + i
+        if fields[fi].boxed or not effect_value(int(fields[fi].type)): return false
+    true
 
 
 effect_signature_value = (t0: int, depth: int = 0) -> bool:

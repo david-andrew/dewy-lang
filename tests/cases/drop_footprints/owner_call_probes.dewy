@@ -1,0 +1,53 @@
+# Calls on and from hooked owners forget what they may change. A borrowing
+# method that writes the guarded global, a returned owner dropped in a block
+# or as a temporary, a callee that drops another owner, and a `$__consume__`
+# method that drops its receiver all run code that writes `cursor`.
+let cursor:int64=0
+File=type of [fd:int64 path:string
+    $__drop__
+    close=():>void=>{cursor+=1}
+    ready=():>bool=>fd >=? 0
+    advance=():>bool=>{
+        cursor+=1
+        fd >=? 0
+    }
+    $__consume__
+    finish=():>int64=>fd
+]
+open_file=(fd:int64):>File=>File[fd "a.txt"]
+reopen=(fd:int64):>File=>open_file(fd)
+churn=(fd:int64):>File=>{
+    let spare=File[0 "spare"]
+    File[fd "b.txt"]
+}
+method_writes=(table:array<int64>):>int64=>{
+    if cursor <? 0 or cursor >=? table.length {return 0}
+    let h=File[1 "x"]
+    let ok=h.advance
+    table[cursor]
+}
+returned_block=(table:array<int64>):>int64=>{
+    if cursor <? 0 or cursor >=? table.length {return 0}
+    {let h=reopen(1)}
+    table[cursor]
+}
+returned_temporary=(table:array<int64>):>int64=>{
+    if cursor <? 0 or cursor >=? table.length {return 0}
+    let fd=open_file(1).fd
+    table[cursor]
+}
+inner_drop=(table:array<int64>):>int64=>{
+    if cursor <? 0 or cursor >=? table.length {return 0}
+    let h=churn(1)
+    table[cursor]
+}
+consumed=(table:array<int64>):>int64=>{
+    if cursor <? 0 or cursor >=? table.length {return 0}
+    let h=File[1 "x"]
+    let fd=h.finish
+    table[cursor]
+}
+main=()=>{
+    let table:array<int64>=[0 4 0 9]
+    printl(method_writes(table) + returned_block(table) + returned_temporary(table) + inner_drop(table) + consumed(table))
+}
