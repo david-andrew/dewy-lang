@@ -1,8 +1,8 @@
 # modes: native native-release
 # A pipeline whose results may be none or Closed. They come back as results,
 # never taken for the channel closing.
-half = (n:int64):>int64 | none | Closed => if n =? 0 Closed else if n % 2 =? 1 none else n // 2
-none_back = (_:int64 | none | Closed):>array<int64> => []
+half = (n:int64):>int64 | none | Closed<int64> => if n =? 0 Closed<int64>[] else if n % 2 =? 1 none else n // 2
+none_back = (_:int64 | none | Closed<int64>):>array<int64> => []
 main = ():>void | Canceled => {
     let seeds:array<int64> = [4 3 0 8]
     let out = pipeline(2 seeds @half @none_back) or_throw

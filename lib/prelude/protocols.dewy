@@ -7,10 +7,10 @@ __Request:type = <Q R>[value:Q reply:Channel<R>]
 
 Service:type = <Q R>[
     __requests:Channel<__Request<Q R>>
-    request = (value:Q):>R | Closed | Canceled => {
+    request = (value:Q):>R | Closed<R> | Canceled => {
         let reply = channel<R>(1)
         match __requests.send(__Request<Q R>[value reply]) {
-            u:Unsent<__Request<Q R>> => return (if u.reason is? Canceled Canceled else Closed)
+            u:Unsent<__Request<Q R>> => return (if u.reason is? Canceled Canceled else Closed<R>[])
             _ => {}
         }
         reply.receive

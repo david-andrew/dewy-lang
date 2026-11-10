@@ -1,0 +1,30 @@
+# modes: native native-release
+# A bare generic name where a value is tested is every instance (decisions.md, batch 7):
+# `<Closed>`, `c:Closed`, `is? Closed` and `or_throw<Closed>` take any `Closed<T>`, and
+# `<Closed<string>>` takes that one.
+first = (c:Channel<int64>):>int | Canceled | Closed<int64> => {
+    let n = c.receive or_throw<Closed | Canceled>
+    int(n) * 10
+}
+main = () => {
+    let words = channel<string>(2)
+    let numbers = channel<int64>(2)
+    words.close()
+    let r = words.receive
+    printl"{r is? Closed} {r is? Closed<string>} {r is? string}"
+    match select(@words.receive @numbers.receive) {
+        <Closed<string>> => printl"words closed"
+        <Closed> => printl"numbers closed"
+        _ => printl"other"
+    }
+    numbers.close()
+    match numbers.receive {
+        c:Closed => printl"numbers closed {c is? Closed<int64>}"
+        _ => printl"value"
+    }
+    printl"{first(numbers) is? Closed}"
+    let full = channel<int64>(1)
+    full.send(1) or_throw
+    let u = full.send(2 timeout=0s)
+    printl"{u is? Unsent} {u is? Unsent<int64>}"
+}

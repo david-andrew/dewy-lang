@@ -3,7 +3,7 @@ from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"type_inference.dewy" import (tu_prune tu_equal)
 from p"type_unions.dewy" import uu_index
-from p"checker_resolve.dewy" import ct_resolve_type
+from p"checker_resolve.dewy" import (ct_resolve_type ct_resolve_family)
 # `x is? T` owns its test selection: family, optional-union, union-subset, string-set,
 # member-value and refinement rewrites (built by the host), then the direct tests.
 # Work is O(inference links + union members) plus the demanded rewrite and check.
@@ -76,7 +76,7 @@ xi_check=(n:XIWord):>XIWord=>$unsafe {
     xi_nodes[0][n].a=int32<overflow='wrap'>(xi_last[0])
     xi_host[0].finalize(XIWord(xi_nodes[0].ptr[n].a));
     let at=tu_prune(XIWord(xi_nodes[0].ptr[XIWord(xi_nodes[0].ptr[n].a)].type))
-    let tt=ct_resolve_type(XIWord(xi_nodes[0].ptr[n].b))
+    let tt=ct_resolve_family(XIWord(xi_nodes[0].ptr[n].b))
     # Family annotations (unions or optionals only) select the tested value's members.
     let tk=xi_kind(tt)
     if xi_nodes[0].ptr[XIWord(xi_nodes[0].ptr[n].b)].aux not=? -7 and (xi_union(tt) or tk =? 'opt') and xi_host[0].family(tt) {

@@ -5,7 +5,7 @@ from p"source_types.dewy" import SrcFile
 from p"checker_state.dewy" import (Local CheckerScope)
 from p"type_inference.dewy" import (tu_prune tu_equal)
 from p"type_unions.dewy" import uu_index
-from p"checker_resolve.dewy" import ct_resolve_type
+from p"checker_resolve.dewy" import ct_resolve_family
 from p"intervals.dewy" import (interval_missing interval_meet_all interval_text)
 # `match` owns its arms: pattern reading (type, literal, variant, range and wildcard
 # patterns, with their bindings), unreachable arms, per-arm narrowing of the subject,
@@ -214,7 +214,7 @@ xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hid
         }
     }
     if pk =? 'ptype' {
-        let pt=tu_prune(ct_resolve_type(XHWord(xh_nodes[0].ptr[p].a)))
+        let pt=tu_prune(ct_resolve_family(XHWord(xh_nodes[0].ptr[p].a)))
         # `e:error`: the error kinds the value may hold.
         if dewy and (xh_union(pt) or xh_types[0].ptr[pt].kind =? 'opt') and not tu_equal(pt st) {
             let whole=if xh_types[0].ptr[st].kind =? 'opt' {tu_prune(xh_elem(st))} else {st}

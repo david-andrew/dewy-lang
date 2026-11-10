@@ -283,6 +283,7 @@ RESOLVE_JO = {
         'word_rational_type': 'word_rational_type = (pos: int) -> int: word_rational(pos)',
         'dewy_record_schema': 'dewy_record_schema = (n: int, args: int[]) -> int: record(n, args)',
         'type_meet': 'type_meet = (ms: int[], pos: int) -> int: ms[0]',
+        'bare_generic_set': 'bare_generic_set = (on: bool) -> bool: false',
     },
 }
 

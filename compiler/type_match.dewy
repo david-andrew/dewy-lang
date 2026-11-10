@@ -143,21 +143,38 @@ tm_param_in_union=(t0:MWord id:MWord):>bool=>$unsafe {
     }
     false
 }
+# (two instances of one generic record)
+tm_same_decl=(p0:MWord a0:MWord):>bool=>$unsafe {
+    let p=tu_prune(p0)
+    let a=tu_prune(a0)
+    tm_types[0].ptr[p].kind =? 'struct_' and tm_types[0].ptr[a].kind =? 'struct_' and tm_structs[0].ptr[MWord(tm_types[0].ptr[p].st)].decl =? tm_structs[0].ptr[MWord(tm_types[0].ptr[a].st)].decl
+}
 tm_union=(pat:MWord a:MWord @binds:array<int64> depth:MWord):>MWord=>$unsafe {
     let pms=tu_union_members(pat)
     let ams:array<int64>=[a]
     if tu_is_union(a) {ams=tu_union_members(a)}
     let rest:array<int64>=[]
+    let generic=false
+    loop pm in pms {
+        if tu_has_var(pm) and tm_types[0].ptr[tu_prune(pm)].kind =? 'struct_' {generic=true}
+    }
     loop m in ams {
         let named=false
         loop pm in pms {
             if not tu_has_var(pm) and tu_equal(pm  m) {named=true}
         }
+        # (`T | Closed<T>` against `int64 | Closed<int64>`: a generic member binds from the
+        # member of its declaration, batch 7)
+        if not named and generic {
+            loop pm in pms {
+                if not named and tm_same_decl(pm m) and tu_has_var(pm) and tm_match(pm  m  @binds  depth + 1) >=? 0 {named=true}
+            }
+        }
         if not named {rest.push(m)}
     }
     let params:array<int64>=[]
     loop pm in pms {
-        if tu_has_var(pm) {params.push(pm)}
+        if tu_has_var(pm) and tm_types[0].ptr[tu_prune(pm)].kind =? 'param' {params.push(pm)}
     }
     if params.length not=? 1 or tm_types[0].ptr[tu_prune(params[0])].kind not=? 'param' {return - 1}
     let widen:MWord=0

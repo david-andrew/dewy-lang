@@ -16,7 +16,7 @@ from p"refine_ops.dewy" import (ref_field_shape total_dict_type)
 from p"unit_ops.dewy" import (resolve_quantity_type)
 from p"effect_contracts.dewy" import effect_argument
 from p"error_ops.dewy" import (nominal_family)
-from p"expr.jo" import (decimal_type word_rational_type dewy_record_schema type_meet)
+from p"expr.jo" import (decimal_type word_rational_type dewy_record_schema type_meet bare_generic_set)
 # Demand-only type syntax recursion. No arena elements survive semantic calls.
 # Work follows visited syntax and requested semantic services; record binder sorting
 # retains O(F²), with O(F) field/name storage. Scope state is restored individually.
@@ -218,6 +218,13 @@ ct_resolve_type=(tn:CTWord):>CTWord=>$unsafe {
     }
     resolve_type_error(1   tn   0)
     0
+}
+# A tested type (`is?`, a pattern, `or_throw<...>`): a bare generic name is every instance.
+ct_resolve_family=(tn:CTWord):>CTWord=>$unsafe {
+    let was=bare_generic_set(true)
+    let t=ct_resolve_type(tn)
+    bare_generic_set(was);
+    t
 }
 ct_resolve_binding=(tn:CTWord):>CTWord=>$unsafe {
     ct_input[0].values[0] = true

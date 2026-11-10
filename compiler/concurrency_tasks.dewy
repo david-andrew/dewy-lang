@@ -3,7 +3,7 @@ from p"check.jo" import (LF_ADDR LF_PARTBORROW fns globals lib_dir locals module
 from p"checks_thin.dewy" import (check_pending_functions)
 from p"ast.jo" import (NF_CHECKED NF_EXTERN NF_STMT add_flag has_flag kid kid2 kids mk nkids nkids2 nodes)
 from p"types.jo" import (T_MATH_INT T_NONE T_VOID tkind)
-from p"expr.jo" import (last_checked ntype type_node_of select_call select_check queue_payload_clash)
+from p"expr.jo" import (last_checked ntype type_node_of select_call select_check queue_payload_clash task_failure_calls)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt)
 from p"checker_expr.dewy" import (check_expr)
 from p"deadlock.jo" import deadlock_atomics
@@ -180,18 +180,17 @@ concurrency_report=(n:TaskWord args:array<int64>):>int64=>$unsafe {
     let members=value_members(t)
     loop member in members {
         if not exception_member(member) {continue}
-        let actual=if member =? T_NONE {mk('none_lit' pos)} else {bc_ident(vn pos)}
-        # (the family holds no generic instance: `Unsent<T>` reports its reason, errors.jo)
-        if member not=? T_NONE and nominal_generic_instance(member) {actual=bc_field(actual "reason" pos)}
-        let call=bc_stmt(bc_call("__task_fail" [bc_ident(gn pos) actual] pos) pos)
-        if members.length =? 1 {statements.push(call);}
+        # (the family holds no generic instance: `Closed<T>` reports its erased instance,
+        # `Unsent<T>` its reason, errors.jo)
+        let calls=task_failure_calls(gn vn member pos)
+        if members.length =? 1 {loop c in calls {statements.push(c);}}
         else {
             let condition=mk('istype' pos)
             nodes.ptr[condition].a = int32(bc_ident(vn pos));
             nodes.ptr[condition].b = int32(type_node_of(member pos));
             let branch=mk('if_' pos)
             nodes.ptr[branch].a = int32(condition);
-            nodes.ptr[branch].b = int32(bc_block([call] pos));
+            nodes.ptr[branch].b = int32(bc_block(calls pos));
             add_flag(branch NF_STMT);
             statements.push(branch);
         }

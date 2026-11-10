@@ -2741,6 +2741,93 @@ record_has_field = (t0: int, name: int) -> bool:
         if fields[int(structs[si].fields) + i].name == i32(name): return true
     false
 
+# A generic type's name written bare where values are tested (decisions.md, batch 7): `<Closed>`,
+# `is? Closed`, `or_throw<Closed>` take every `Closed<T>`. While a test's type is resolved
+# (ct_resolve_family) a bare generic name is the union of that type's instances, a family the
+# test narrows to the tested value's members; elsewhere it still needs its arguments.
+bare_generic_ok = false
+bare_generic_set = (on: bool) -> bool:
+    was = bare_generic_ok
+    bare_generic_ok = on
+    was
+
+# A field-less generic exception's erased instance (`Closed<void>`, errors.jo): the member of
+# `exception` every instance is reported as, since that family lists no generic instance.
+nominal_erased = (d: int) -> int: get_struct_inst(d, fill(T_VOID, nkids2(d)))
+
+# The statements reporting a task's failure `vn` (a name), known to hold member, to the group
+# named gn: the value itself; a field-less generic exception's erased instance; `Unsent<T>`'s
+# reason, each of its members reported the same way.
+task_failure_calls = (gn: str, vn: str, member: int, pos: int) -> int[]:
+    if member == T_NONE: return [bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), mk(.none_lit, pos)], pos), pos)]
+    if not nominal_generic_instance(member): return [bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), bc_ident(vn, pos)], pos), pos)]
+    si = int(types[prune(member)].st)
+    check_struct_fields(si)
+    if structs[si].nfields == 0:
+        erased = nominal_erased(int(structs[si].decl))
+        value = mk(.call, pos)
+        struct_ctor(value, erased, int(structs[int(types[erased].st)].decl), [], 0)
+        add_flag(value, NF_CHECKED)
+        return [bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), value], pos), pos)]
+    reason = 0
+    loop i in [0..int(structs[si].nfields)):
+        if name_of(int(fields[int(structs[si].fields) + i].name)) == "reason": reason = int(fields[int(structs[si].fields) + i].type)
+    if reason == 0: fatal(pos, "a task's failure {dt(member)} cannot be reported: a generic exception reports its `reason`")
+    rn = "{vn}_reason"
+    out = [bc_let(rn, bc_field(bc_ident(vn, pos), "reason", pos), pos)]
+    held = value_members(reason)
+    loop m in held:
+        if not exception_member(m): continue
+        calls = task_failure_calls(gn, rn, m, pos)
+        if held.len() == 1:
+            out += calls
+            continue
+        condition = mk(.istype, pos)
+        nodes[condition].a = i32(bc_ident(rn, pos))
+        nodes[condition].b = i32(type_node_of(m, pos))
+        branch = mk(.if_, pos)
+        nodes[branch].a = i32(condition)
+        nodes[branch].b = i32(bc_block(calls, pos))
+        add_flag(branch, NF_STMT)
+        out.push(branch)
+    out
+
+# (does t name a type parameter or an unsolved variable: a generic signature's instance)
+type_mentions_param = (t0: int, depth: int) -> bool:
+    t = prune(t0)
+    k = tkind(t)
+    if k == .param or k == .var or has_var(t): return true
+    if depth > 4: return false
+    if (k == .struct_ or k == .enum_) and types[t].st >= 0:
+        si = int(types[t].st)
+        loop j in [0..int(structs[si].ntargs)):
+            if type_mentions_param(struct_targ(si, j), depth + 1): return true
+    if k == .array or k == .opt or k == .ptr: return type_mentions_param(telem(t), depth + 1)
+    false
+
+# The instances of generic declaration d made so far, as one type: a family when there are
+# several (nominal_families, under d's own negative key), 0 when there is none. O(structs).
+generic_family_cache: {int: (int, int)} = {}
+generic_family_type = (d: int) -> int:
+    # (unchanged while no record instance is added)
+    if let known = generic_family_cache.get(d):
+        if known.0 == structs.len(): return known.1
+    family = generic_family_scan(d)
+    generic_family_cache[d] = (structs.len(), family)
+    family
+generic_family_scan = (d: int) -> int:
+    out: int[]
+    loop si in [0..structs.len()):
+        if int(structs[si].decl) != d or structs[si].type == 0: continue
+        t = prune(int(structs[si].type))
+        if type_mentions_param(t, 0) or out.contains(t): continue
+        out.push(t)
+    if out.len() == 0: return 0
+    if out.len() == 1: return out[0]
+    family = mk_union(out)
+    nominal_families[-1 - d] = family
+    family
+
 # The type a record type's member `name` holds, 0 when it has no such type member.
 record_type_member = (t0: int, name: int) -> int:
     t = prune(t0)
@@ -7272,7 +7359,7 @@ select_progress = (m: int):
         if closes and not select_moves(int(nodes[arm].b)): fatal(nodes[arm].pos, "this close arm spins: a closed channel stays ready, so the next turn of the loop takes the close again; leave the loop (`break`), change what the loop tests, or drain the channels with `merged(...)`, which retires each one as it closes")
 
 select_pattern_closes = (p: int) -> bool:
-    if nodes[p].kind == .pvariant: return name_of(int(nodes[p].name)) == "Closed"
+    if nodes[p].kind == .pvariant: return name_of(int(nodes[p].name)) == "Closed" or starts_with(name_of(int(nodes[p].name)), "Closed<") or starts_with(name_of(int(nodes[p].name)), "Closed[")
     if nodes[p].kind != .ptype or nodes[p].type == 0: return false
     t = prune(int(nodes[p].type))
     members = if is_union(t): union_members(t) else: [t]

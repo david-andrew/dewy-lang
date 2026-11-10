@@ -176,6 +176,12 @@ ct_resolve_type = (tn: int) -> int:
     resolve_type_error(1, tn, 0)
     0
 
+# A tested type (`is?`, a pattern, `or_throw<...>`): a bare generic name is every instance.
+ct_resolve_family = (tn: int) -> int:
+    was = bare_generic_set(true)
+    t = ct_resolve_type(tn)
+    bare_generic_set(was)
+    t
 ct_resolve_binding = (tn: int) -> int:
     ct_input[0].values[0] = true
     t = ct_resolve_type(tn)

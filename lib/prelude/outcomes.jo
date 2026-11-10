@@ -9,7 +9,7 @@ struct Full:
 struct Empty:
     pass
 @nominal(exception)
-struct Closed:
+struct Closed[T]:
     pass
 @nominal(error)
 struct Busy:
@@ -25,15 +25,15 @@ struct CtrlC:
 @nominal(exception)
 struct Unsent[T]:
     value: T
-    reason: Full | Closed | Busy | Canceled | Timeout
+    reason: Full | Closed[T] | Busy | Canceled | Timeout
 
 # Why a send gave its value back, by code: 1 closed, 2 canceled, 3 full, 4 busy, 5 timed out.
-__send_failure = (code: int) -> Full | Closed | Busy | Canceled | Timeout:
-    if code == 1: return Closed()
+__send_failure[T] = (code: int) -> Full | Closed[T] | Busy | Canceled | Timeout:
+    if code == 1: return Closed[T]()
     if code == 2: return Canceled
     if code == 3: return Full()
     if code == 5: return Timeout
     Busy()
 
 # A send's value given back, with why (by code)
-__unsent[T] = (value: T, code: int) -> Unsent[T]: Unsent[T](value, __send_failure(code))
+__unsent[T] = (value: T, code: int) -> Unsent[T]: Unsent[T](value, __send_failure[T](code))

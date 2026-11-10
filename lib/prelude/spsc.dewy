@@ -41,16 +41,16 @@ SpscReceiver:type = <T>[
     __h:__Spsc<T>
     $__drop__
     __release = ():>void => __spsc_close(__h)
-    try_receive = ():>T | Empty | Closed | Canceled => {
+    try_receive = ():>T | Empty | Closed<T> | Canceled => {
         let code = __spsc_try_receive(__h)
-        if code =? 1 return Closed
+        if code =? 1 return Closed<T>[]
         if code =? 2 return Canceled
         if code =? 3 return Empty
         __spsc_take(__h)
     }
-    receive = ():>T | Closed | Canceled => {
+    receive = ():>T | Closed<T> | Canceled => {
         let code = __spsc_receive_wait(__h)
-        if code =? 1 return Closed
+        if code =? 1 return Closed<T>[]
         if code =? 2 return Canceled
         __spsc_take(__h)
     }

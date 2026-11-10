@@ -25,17 +25,17 @@ Mpmc:type = <T>[
         let code = __mpmc_send_wait(__h value)
         if code not=? 0 return __unsent<T>(value code)
     }
-    try_receive = ():>T | Empty | Closed | Busy | Canceled => {
+    try_receive = ():>T | Empty | Closed<T> | Busy | Canceled => {
         let pos = __mpmc_try_claim(__h)
-        if pos =? -1 return Closed
+        if pos =? -1 return Closed<T>[]
         if pos =? -2 return Canceled
         if pos =? -3 return Empty
         if pos =? -4 return Busy
         __mpmc_take(__h pos)
     }
-    receive = ():>T | Closed | Canceled => {
+    receive = ():>T | Closed<T> | Canceled => {
         let pos = __mpmc_receive_wait(__h)
-        if pos =? -1 return Closed
+        if pos =? -1 return Closed<T>[]
         if pos =? -2 return Canceled
         __mpmc_take(__h pos)
     }

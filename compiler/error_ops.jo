@@ -11,6 +11,7 @@ use 'type_ops.dewy'
 use 'util.jo'
 use 'check.jo'
 use 'checks_thin.dewy'
+use 'checker_resolve.dewy'
 use 'expr.jo'
 use 'ownership.jo'
 use 'oom.jo'
@@ -50,6 +51,9 @@ nominal_family = (t: int) -> int:
     members: int[]
     loop child in nominal_types:
         if nominal_descends(child, t): members.push(child)
+    # (a field-less generic exception, `Closed<T>`: its erased instance stands for every one)
+    loop d, parent in nominal_generic:
+        if nkids(d) == 0 and nominal_descends(parent, t): members.push(nominal_erased(d))
     if t == exception_type: members.push(T_NONE)
     result = mk_union(members)
     nominal_families[t] = result
@@ -219,7 +223,7 @@ check_propagate = (n: int, expected: int) -> int:
     at = prune(check_expr(int(nodes[n].a), 0))
     a = last_checked
     add_flag(a, NF_CHECKED)
-    selected = prune(resolve_type(int(nodes[n].b)))
+    selected = prune(ct_resolve_family(int(nodes[n].b)))
     wanted = value_members(selected)
     loop t in wanted:
         if not exception_member(t): fatal(nodes[n].pos, "`or_throw<...>` names the failures to forward: {dt(t)} is not an exception or none")

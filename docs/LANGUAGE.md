@@ -1228,7 +1228,7 @@ program may call too: a call given a literal array of types is specialized on th
 A record loop over a literal array of types binds each as a type.
 
 A wait handle has its outcomes as type members: `heart.types` is everything the handle's
-wait gives (a channel's `T | Closed | Canceled`, a ticker's `Tick | Canceled`), and an
+wait gives (a channel's `T | Closed<T> | Canceled`, a ticker's `Tick | Canceled`), and an
 outcome whose short name only one alternative has is a member (`lines.string`,
 `lines.Closed`, `heart.Tick`) unless the handle's type has a member of that name. They match
 by type: `<heart.Tick>` is `<Tick>`, and `x:heart.types & (Tick | Closed)` is
@@ -3611,7 +3611,7 @@ main = () => {
 }
 ```
 
-`c.send(value)` waits while the channel is full; `c.receive` gives `T | Closed |
+`c.send(value)` waits while the channel is full; `c.receive` gives `T | Closed<T> |
 Canceled` and waits while it is empty. So that these outcomes are never mistaken for a
 value, a payload that is or may be `Closed`, `Canceled` or any exception is an error;
 carry such a value in a record (decisions.md, batch 7). Both are blocking operations (`blocks`, so a
@@ -3620,6 +3620,14 @@ in a canceled scope, they fail with `Canceled`. `c.close` closes the channel; cl
 again does nothing. After a close, a send fails with `Closed` (never a trap) and a
 receive takes what is still buffered, then gives `Closed`; tasks waiting on the
 channel wake.
+
+`Closed<T>` is generic (decisions.md, batch 7): a `Channel<Job>`'s close is `Closed<Job>`,
+so two channels' closes are different types. A bare generic name where a value is tested
+means every instance: `<Closed>` and `c:Closed` as patterns, `is? Closed` and
+`or_throw<Closed>` take any `Closed<T>` the value may hold (`is? Unsent` any `Unsent<T>`),
+while `<Closed<Job>>` takes that one. Elsewhere, as in an annotation, write the argument:
+`:>int64 | Closed<int64> | Canceled`. A task that fails with a `Closed<T>` fails its group
+with `Closed`, which an `exception` holds for every instance.
 
 A send that fails gives its value back: it returns `void | Unsent<T>`, where `.value`
 is the exact payload offered and `.reason` is `Full`, `Closed`, `Busy` or `Canceled`.
@@ -3639,7 +3647,7 @@ main = () => {
 ```
 
 A wait can be given a deadline (decisions.md, batch 7). `c.receive(timeout=50ms)` gives
-`T | Closed | Canceled | Timeout`: `Timeout` when nothing arrived in time. `c.send(job
+`T | Closed<T> | Canceled | Timeout`: `Timeout` when nothing arrived in time. `c.send(job
 timeout=50ms)` gives `void | Unsent<T> | Canceled`: the job comes back as the `Unsent`'s
 `.value`, with the reason `Timeout` or `Closed`, and `Canceled` is the call's own result.
 A relative timeout starts when the call does, and `timeout=0s` is a poll: a buffered value,
@@ -3729,7 +3737,7 @@ main = () => {
 
 `c.try_send(value)` and `c.try_receive` never wait and are cancellation points.
 `try_send` fails with `Full` when there is no room; `try_receive` gives `T | Empty |
-Closed | Busy | Canceled`. Both give `Busy` when another task is mid-operation on
+Closed<T> | Busy | Canceled`. Both give `Busy` when another task is mid-operation on
 the channel, rather than a misleading `Full` or `Empty`. `Unsent`, `Full`, `Empty`
 and `Closed` are `exception`s, like `Canceled`; `Busy` is an `error`.
 
@@ -3852,8 +3860,8 @@ library check proves them: write them in a scope without it, or one that says
 
 ```dewy
 square = (n:int):>int => n * n
-main = ():>void | Closed | Canceled => {
-    let total = serve(@square (s:Service<int int>):>int | Closed | Canceled => {
+main = ():>void | Closed<int> | Canceled => {
+    let total = serve(@square (s:Service<int int>):>int | Closed<int> | Canceled => {
         (s.request(3) or_throw) + (s.request(4) or_throw)     # 25
     }) or_throw
     let seeds:array<int> = [6]

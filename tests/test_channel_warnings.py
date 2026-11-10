@@ -13,7 +13,7 @@ def diagnostics(compiler, tmp_path, program):  # noqa: F811
     return [line for line in checked.stderr.splitlines() if 'warning:' in line]
 
 
-PING = '''ping = (out:Channel<int64> back:Channel<int64> n:int64):>void | Unsent<int64> | Closed | Canceled => {
+PING = '''ping = (out:Channel<int64> back:Channel<int64> n:int64):>void | Unsent<int64> | Closed<int64> | Canceled => {
     loop i in [0..n) { out.send(i) or_throw }
     loop i in [0..n) { back.receive or_throw; }
 }
@@ -27,11 +27,11 @@ main = () => {
 }
 '''
 
-PIPELINE = '''produce = (out:Channel<int64> n:int64):>void | Unsent<int64> | Closed | Canceled => {
+PIPELINE = '''produce = (out:Channel<int64> n:int64):>void | Unsent<int64> | Closed<int64> | Canceled => {
     loop i in [0..n) { out.send(i) or_throw }
     out.close()
 }
-square = (input:Channel<int64> out:Channel<int64>):>void | Unsent<int64> | Closed | Canceled => {
+square = (input:Channel<int64> out:Channel<int64>):>void | Unsent<int64> | Closed<int64> | Canceled => {
     loop true {
         let n = input.receive or_throw
         out.send(n * n) or_throw
@@ -55,7 +55,7 @@ main = () => {
 }
 '''
 
-WORKERS = '''work = (jobs:Channel<int64> results:Channel<int64>):>void | Unsent<int64> | Closed | Canceled => {
+WORKERS = '''work = (jobs:Channel<int64> results:Channel<int64>):>void | Unsent<int64> | Closed<int64> | Canceled => {
     loop true {
         let j = jobs.receive or_throw
         results.send(j * 2) or_throw
@@ -73,7 +73,7 @@ main = () => {
 }
 '''
 
-REQUEST_REPLY = '''serve = (requests:Channel<int64> replies:Channel<int64>):>void | Unsent<int64> | Closed | Canceled => {
+REQUEST_REPLY = '''serve = (requests:Channel<int64> replies:Channel<int64>):>void | Unsent<int64> | Closed<int64> | Canceled => {
     loop true {
         let r = requests.receive or_throw
         replies.send(r + 1) or_throw

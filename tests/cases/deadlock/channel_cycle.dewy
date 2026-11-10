@@ -1,7 +1,7 @@
 # modes: native
 # Bounded-channel cycles. Each task sends ten values into a channel that holds four before it
 # receives from the other's, so each waits for room the other never makes.
-ping = (out:Channel<int64> back:Channel<int64>):>void | Unsent<int64> | Closed | Canceled => {
+ping = (out:Channel<int64> back:Channel<int64>):>void | Unsent<int64> | Closed<int64> | Canceled => {
     loop i in [0..10) { out.send(i) or_throw }
     loop i in [0..10) { back.receive or_throw; }
 }

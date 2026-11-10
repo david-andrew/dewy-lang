@@ -1,7 +1,7 @@
 # modes: native
 # mpmc waits are channel waits to the deadlock analysis: each task sends ten values into a
 # queue that holds four before it receives from the other's.
-ping = (out:Mpmc<int64> back:Mpmc<int64>):>void | Unsent<int64> | Closed | Canceled => {
+ping = (out:Mpmc<int64> back:Mpmc<int64>):>void | Unsent<int64> | Closed<int64> | Canceled => {
     loop i in [0..10) { out.send(i) or_throw }
     loop i in [0..10) { back.receive or_throw; }
 }

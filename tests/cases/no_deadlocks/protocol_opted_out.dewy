@@ -5,9 +5,9 @@ $no_deadlocks
 square = (n:int64):>int64 => n * n
 step = (n:int64):>int64 => if n % 2 =? 0 n // 2 else 3 * n + 1
 again = (n:int64):>array<int64> => if n =? 1 [] else [n]
-main = ():>void | Closed | Canceled => {
+main = ():>void | Closed<int64> | Canceled => {
     $no_deadlocks = false
-    let total = serve(@square (s:Service<int64 int64>):>int64 | Closed | Canceled => s.request(3) or_throw) or_throw
+    let total = serve(@square (s:Service<int64 int64>):>int64 | Closed<int64> | Canceled => s.request(3) or_throw) or_throw
     let seeds:array<int64> = [6]
     let path = pipeline(2 seeds @step @again) or_throw
     printl"{total} {path}"

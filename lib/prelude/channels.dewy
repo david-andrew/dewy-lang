@@ -42,23 +42,23 @@ Channel:type = <T>[
         if code not=? 0 return __unsent<T>(value code)
         __chan_put(__h value)
     }
-    receive = ():>T | Closed | Canceled => {
+    receive = ():>T | Closed<T> | Canceled => {
         let code = __chan_receive_wait(__h)
-        if code =? 1 return Closed
+        if code =? 1 return Closed<T>[]
         if code =? 2 return Canceled
         __chan_take(__h)
     }
     # (Timeout when nothing came before the time passed; a buffered value wins a `0s` poll)
-    receive = <D>(... timeout:D):>T | Closed | Canceled | Timeout => {
+    receive = <D>(... timeout:D):>T | Closed<T> | Canceled | Timeout => {
         let code = __chan_receive_wait_until(__h __chan_deadline(__task_nanoseconds(timeout)))
-        if code =? 1 return Closed
+        if code =? 1 return Closed<T>[]
         if code =? 2 return Canceled
         if code =? 3 return Timeout
         __chan_take(__h)
     }
-    try_receive = ():>T | Empty | Closed | Busy | Canceled => {
+    try_receive = ():>T | Empty | Closed<T> | Busy | Canceled => {
         let code = __chan_try_receive(__h)
-        if code =? 1 return Closed
+        if code =? 1 return Closed<T>[]
         if code =? 2 return Canceled
         if code =? 3 return Empty
         if code =? 4 return Busy
@@ -66,8 +66,8 @@ Channel:type = <T>[
     }
     close = ():>void => __chan_close(__h)
     # (a value still buffered, without waiting or a cancellation point: Closed when none is)
-    __drain = ():>T | Closed => {
-        if __chan_drain_wait(__h) =? 1 return Closed
+    __drain = ():>T | Closed<T> => {
+        if __chan_drain_wait(__h) =? 1 return Closed<T>[]
         __chan_take(__h)
     }
 ]

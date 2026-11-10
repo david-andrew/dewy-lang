@@ -879,6 +879,10 @@ resolve_type_name = (tn: int) -> CheckerTypeName:
     if sk == .struct_ or sk == .enum_:
         d = int(syms[s].ref)
         if nkids2(d) == 0 and nkids(tn) == 0: return CheckerTypeName(0, nominal_family(get_struct_inst(d, [])))
+        # (`<Closed>`, `is? Closed`: every instance, while a test's type is resolved)
+        if bare_generic_ok and nkids(tn) == 0 and nkids2(d) > 0 and nodes[kid2(d, 0)].b == 0:
+            family = generic_family_type(d)
+            if family != 0: return CheckerTypeName(0, family)
         return CheckerTypeName(2, d)
     h = habit_name(name_of(nm))
     if len(h) > 0: fatal(nodes[tn].pos, "'{name_of(nm)}' is not a type (use {h})")

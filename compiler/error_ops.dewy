@@ -8,8 +8,9 @@ from p"checks_stmt_hooks.dewy" import (stmt_terminates)
 from p"checker_expr.dewy" import (check_expr)
 from p"checker_propagate.dewy" import (xq_check)
 from p"checker_state.dewy" import (FnCtx)
+from p"checker_resolve.dewy" import (ct_resolve_family)
 from p"errors.jo" import (error_type exception_type infer_returns infer_throws nominal_families nominal_generic nominal_parent nominal_ready nominal_resolving nominal_types out_of_memory_type)
-from p"expr.jo" import (can_coerce coerce cur_assign last_checked ntype type_node_of union_field_sources unnamed)
+from p"expr.jo" import (nominal_erased can_coerce coerce cur_assign last_checked ntype type_node_of union_field_sources unnamed)
 from p"checks_builders.dewy" import (bc_block bc_method bc_field bc_ident bc_let bc_stmt)
 from p"oom.jo" import (oom_files)
 from p"ownership.jo" import (ownership_nominals)
@@ -61,6 +62,10 @@ nominal_family=(t:ErrWord):>ErrWord=>{
     let members:array<int64>=[]
     loop child in nominal_types {
         if nominal_descends(child t) {members.push(child)}
+    }
+    # (a field-less generic exception, `Closed<T>`: its erased instance stands for every one)
+    loop [d parent] in nominal_generic {
+        if nkids(d) =? 0 and nominal_descends(parent t) {members.push(nominal_erased(d))}
     }
     if t =? exception_type {members.push(T_NONE)}
     let result=mk_union(members)
@@ -268,7 +273,7 @@ check_propagate=(n:ErrWord expected:ErrWord):>ErrWord=>$unsafe {
     let at=prune(check_expr(ErrWord(nodes.ptr[n].a) 0))
     let a=last_checked
     add_flag(a NF_CHECKED)
-    let selected=prune(resolve_type(ErrWord(nodes.ptr[n].b)))
+    let selected=prune(ct_resolve_family(ErrWord(nodes.ptr[n].b)))
     let wanted=value_members(selected)
     loop t in wanted {
         if not exception_member(t) {fatal(nodes.ptr[n].pos "`or_throw<...>` names the failures to forward: {dt(t)} is not an exception or none")}

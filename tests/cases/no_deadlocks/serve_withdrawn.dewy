@@ -3,8 +3,8 @@
 # protocols/request_reply, which runs the protocol with no tag.
 $no_deadlocks
 square = (n:int64):>int64 => n * n
-main = ():>void | Closed | Canceled => {
-    let total = serve(@square (s:Service<int64 int64>):>int64 | Closed | Canceled => s.request(3) or_throw) or_throw
+main = ():>void | Closed<int64> | Canceled => {
+    let total = serve(@square (s:Service<int64 int64>):>int64 | Closed<int64> | Canceled => s.request(3) or_throw) or_throw
     printl"{total}"
 }
 

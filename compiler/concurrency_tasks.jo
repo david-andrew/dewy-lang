@@ -169,18 +169,17 @@ concurrency_report = (n: int, args: int[]) -> int:
     members = value_members(t)
     loop member in members:
         if not exception_member(member): continue
-        actual = if member == T_NONE: mk(.none_lit, pos) else: bc_ident(vn, pos)
-        # (the family holds no generic instance: `Unsent<T>` reports its reason, errors.jo)
-        if member != T_NONE and nominal_generic_instance(member): actual = bc_field(actual, "reason", pos)
-        call = bc_stmt(bc_call("__task_fail", [bc_ident(gn, pos), actual], pos), pos)
-        if members.len() == 1: statements.push(call)
+        # (the family holds no generic instance: `Closed<T>` reports its erased instance,
+        # `Unsent<T>` its reason, errors.jo)
+        calls = task_failure_calls(gn, vn, member, pos)
+        if members.len() == 1: statements += calls
         else:
             condition = mk(.istype, pos)
             nodes[condition].a = i32(bc_ident(vn, pos))
             nodes[condition].b = i32(type_node_of(member, pos))
             branch = mk(.if_, pos)
             nodes[branch].a = i32(condition)
-            nodes[branch].b = i32(bc_block([call], pos))
+            nodes[branch].b = i32(bc_block(calls, pos))
             add_flag(branch, NF_STMT)
             statements.push(branch)
     statements.push(bc_stmt(bc_block([], pos), pos))

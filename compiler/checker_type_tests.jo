@@ -62,7 +62,7 @@ xi_check = (n: int) -> int:
     xi_nodes[0][n].a = i32(xi_last[0])
     xi_host[0].finalize(int(xi_nodes[0][n].a))
     at = int(tu_prune(int(xi_nodes[0][int(xi_nodes[0][n].a)].type)))
-    tt = int(ct_resolve_type(int(xi_nodes[0][n].b)))
+    tt = int(ct_resolve_family(int(xi_nodes[0][n].b)))
     tk = xi_kind(tt)
     if xi_nodes[0][int(xi_nodes[0][n].b)].aux != -7 and (xi_union(tt) or tk == .opt) and xi_host[0].family(tt):
         return xi_host[0].family_test(n, orig, at, tt)
