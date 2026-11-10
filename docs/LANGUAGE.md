@@ -3591,7 +3591,10 @@ any number of calls giving one type, written or spread (`race(lookups...)`), tak
 its rest form, and so does `first_ok`. `first_ok(@load(a)
 @load(b))` (decisions.md, batch 7) returns the first result that is not an exception (a
 `Canceled` a call returns is a failure too) and cancels and joins the rest; when every call
-fails, it returns the failure that came first. A tie has no promised order. None of these
+fails, it returns the failure that came first. A tie has no promised order. Both need a
+call to run, as `select` needs a wait: `race()` is an error, and when every argument is a
+spread, the arrays must be proven not all empty (an error otherwise, a runtime check under
+`$runtime_checks`), as by `if lookups.length >? 0` or a fixed array. None of these
 helpers leaves a task detached.
 Backend state, cancellation, and deadlines travel implicitly through calls.
 CPU work cooperates with cancellation by checking a blocking operation such as

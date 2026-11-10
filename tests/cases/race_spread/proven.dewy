@@ -1,0 +1,19 @@
+# modes: native native-release
+# A spread proven nonempty runs: by its length tested, by pushes, or by a fixed array.
+work = (n:int64):>int64 => n
+fastest = (calls:array<():>int64>):>int64 | Canceled | OutOfMemory => {
+    if calls.length =? 0 return 0
+    race(calls...)
+}
+main = () => {
+    let calls:array<():>int64> = []
+    calls.push(@work(2))
+    let r = race(calls...)
+    printl"race {r is? int64}"
+    let fixed = [@work(7)]
+    match first_ok(fixed...) {
+        n:int64 => printl"first_ok {n}"
+        _ => printl"other"
+    }
+    printl"tested {fastest([]) is? int64} {fastest([@work(3)]) is? int64}"
+}

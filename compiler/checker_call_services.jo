@@ -125,7 +125,8 @@ call_ident_special = (n: int, expected: int) -> int:
     if nkids(n) > 0 and nodes[kid(n, 0)].kind == .array: return type_sequence_call(n, expected)
     # (`select(if open @a.receive else none ...)`: a wait turned off, decisions.md batch 7)
     if nkids(n) > 0 and int(nodes[callee].name) == select_id(): return select_conditions(n, expected)
-    -1
+    # (`race(xs...)`: the spread must not be empty, as select needs a wait)
+    return race_spread(n, expected)
 
 call_dotname = (n: int, expected: int) -> int:
     callee = int(nodes[n].a)

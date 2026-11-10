@@ -7672,6 +7672,96 @@ select_conditions = (n: int, expected: int) -> int:
     set_list(n, [statement, bc_stmt(call, pos)])
     check_expr(n, expected)
 
+# `race(xs...)` and `first_ok(xs...)` (decisions.md batch 7, select-v6.md): a spread may be
+# empty, and the call needs a call to run, as select needs a wait. When every positional argument
+# is a spread, each is bound once and the obligation "needs a call" is that one is not empty:
+# proven from facts, else an error (a runtime check where the scope allows one). No positional
+# argument at all is an error. -1 for any other call; O(arguments), for these calls only.
+race_name_ids: int[] = []
+race_needs_id = 0
+race_spread = (n: int, expected: int) -> int:
+    if race_name_ids.len() == 0:
+        race_name_ids = [intern("race"), intern("first_ok")]
+        race_needs_id = intern("$race_needs")
+    callee = int(nodes[n].a)
+    name = int(nodes[callee].name)
+    if name == race_needs_id: return race_needs(n)
+    if not race_name_ids.contains(name): return -1
+    ds: int[]
+    call_collect_named(name, -1, ds)
+    if concurrency_first_ok_module < 0 or not dewy_at(nodes[n].pos): return -1
+    if ds.len() == 0: return -1
+    loop d in ds:
+        if int(nodes[d].mod) != concurrency_first_ok_module: return -1
+    args = kids(n)
+    spreads: int[]
+    loop i in [0..args.len()):
+        a = args[i]
+        if nodes[a].kind == .namedarg: continue
+        if not has_flag(a, NF_SPREAD): return -1
+        # (already bound: this is the call the rewrite below made)
+        if nodes[a].kind == .ident and starts_with(name_of(int(nodes[a].name)), "$race_spread"): return -1
+        spreads.push(i)
+    pos = nodes[n].pos
+    word = name_of(name)
+    if spreads.len() == 0: fatal(pos, "{word} needs a call to run: give it calls, or spread an array of them")
+    stmts: int[]
+    held: int[]
+    loop i in spreads:
+        e = args[i]
+        held_name = "$race_spread{bc_count}"
+        bc_count += 1
+        clear_flag(e, NF_SPREAD)
+        stmts.push(bc_let(held_name, e, nodes[e].pos))
+        spread = bc_ident(held_name, nodes[e].pos)
+        add_flag(spread, NF_SPREAD)
+        args[i] = spread
+        held.push(bc_ident(held_name, nodes[e].pos))
+    needs = bc_call("$race_needs", held, pos)
+    nodes[needs].ival = name
+    call = clone(n)
+    set_list(call, args)
+    stmts.push(bc_stmt(needs, pos))
+    stmts.push(bc_stmt(call, pos))
+    nodes[n] = Node(kind = .block, pos = pos, aux = 1)
+    set_list(n, stmts)
+    check_expr(n, expected)
+
+# (the obligation itself: the spread arrays' lengths add up to at least one)
+race_needs = (n: int) -> int:
+    pos = nodes[n].pos
+    total = 0
+    loop a in kids(n):
+        check_expr(a, 0)
+        held = last_checked
+        length = mk(.call, pos)
+        check_intrinsic(length, int(IN.len), [held], 0)
+        add_flag(length, NF_CHECKED)
+        if total == 0: total = length
+        else:
+            sum = mk(.binary, pos)
+            nodes[sum].op = i32(int(Tok.plus))
+            nodes[sum].a = i32(total)
+            nodes[sum].b = i32(length)
+            check_expr(sum, T_INT)
+            total = last_checked
+    one = mk(.int_lit, pos)
+    nodes[one].ival = 1
+    cmp = mk(.binary, pos)
+    nodes[cmp].op = i32(int(Tok.ge))
+    nodes[cmp].a = i32(total)
+    nodes[cmp].b = i32(one)
+    check_expr(cmp, T_BOOL)
+    cmp = last_checked
+    word = name_of(int(nodes[n].ival))
+    check_expr(bc_str("{word} needs a call to run: the spread array may be empty", pos), T_STR)
+    message = last_checked
+    check_intrinsic(n, int(IN.assert), [cmp, message], 0)
+    nodes[n].aux2 = i32(UNPACK_OBLIGATION)
+    fact_requests.push(FactRequest(n, if cx >= 0: int(ctxs[cx].inst) else: 0))
+    last_checked = n
+    T_VOID
+
 # (a condition the obligation can read again: names, fields, literals, `not`, `and`, `or` and
 # comparisons of them)
 select_plain_condition = (c: int) -> bool:

@@ -1,0 +1,6 @@
+# modes: native
+# race over a spread needs a call to run: an array not proven nonempty is an error.
+fastest = (calls:array<():>int64>):>int64 | Canceled | OutOfMemory => race(calls...)
+main = () => {
+    printl"{fastest([])}"
+}

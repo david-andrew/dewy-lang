@@ -1,0 +1,7 @@
+# modes: native
+# first_ok over a known-empty spread: needs a call to run.
+work = (n:int64):>int64 => n
+main = () => {
+    let calls:array<():>int64> = []
+    printl"{first_ok(calls...)}"
+}

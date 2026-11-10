@@ -64,6 +64,7 @@ relocate_name = 0
 struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> int: 0
 surface_hidden: int[]
 select_conditions = (n: int, expected: int) -> int: -1
+race_spread = (n: int, expected: int) -> int: -1
 select_id = () -> int: 0
 synthetic_copy = (t: int, name: int, pos: int) -> bool: false
 take_call = (n: int, args: int[]) -> int: 0
