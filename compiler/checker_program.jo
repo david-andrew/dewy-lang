@@ -119,7 +119,7 @@ check_program = (main_path: str):
     # `DuplicateLock`, `Busy`, `Closed`, `Unsent`..., so each loads before they close when a Dewy
     # program names it: a probe per name, all asked before any loads, nothing otherwise)
     locks = ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "DuplicateLock"])
-    channels = ts_dewy and prelude_named(["channel", "Channel", "ticker", "Ticker"])
+    channels = ts_dewy and prelude_named(["channel", "Channel", "ticker", "Ticker", "merged", "Merged"])
     queue = ts_dewy and prelude_named(["mpmc", "Mpmc"])
     ring = ts_dewy and prelude_named(["spsc", "Spsc", "SpscSender", "SpscReceiver"])
     protocols = ts_dewy and prelude_named(["serve", "Service", "pipeline", "first_ok"], true)

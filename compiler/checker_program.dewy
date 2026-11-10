@@ -98,7 +98,7 @@ check_program=(main_path:string):>void=>$unsafe {
     if dewy_methods.length >? 0 {dc_force_all()}
     dewy_infer_methods()
     let locks=ts_dewy and prelude_named(["mutex" "Mutex" "lock_all" "DuplicateLock"])
-    let channels=ts_dewy and prelude_named(["channel" "Channel" "ticker" "Ticker"])
+    let channels=ts_dewy and prelude_named(["channel" "Channel" "ticker" "Ticker" "merged" "Merged"])
     let queue=ts_dewy and prelude_named(["mpmc" "Mpmc"])
     let ring=ts_dewy and prelude_named(["spsc" "Spsc" "SpscSender" "SpscReceiver"])
     let protocols=ts_dewy and prelude_named(["serve" "Service" "pipeline" "first_ok"] true)

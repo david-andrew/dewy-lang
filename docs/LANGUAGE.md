@@ -3639,6 +3639,29 @@ through `reserve`, waits turned off with `if cond @… else none`, a spread of w
 progress check for a close arm that loops without turning its wait off. `select` takes up
 to four waits for now.
 
+`merged(@a.receive @b.receive)` drains up to four receives of one payload type as one
+inbox (decisions.md, batch 7). `loop item in inbox` takes each value as it comes (an item is
+the payload or `Canceled`; a canceled task gets one `Canceled`, then the loop ends) and ends
+when every source has closed; a close is not an item, it retires its source. Afterwards
+`inbox.open` is false. `merged(... stop_when_idle=30s)` also ends the loop after 30 s with
+nothing new, restarted by each value; `inbox.open` is then still true and the channels stay
+open. Inside `select`, `@inbox.next` is one wait, which gives `none` once the inbox has
+finished.
+
+```dewy
+main = () => {
+    let a = channel<int64>(4)
+    let b = channel<int64>(4)
+    concurrent {
+        spawn { loop i in [0..3) { a.send(i) or_throw }  a.close() }
+        spawn { b.send(10) or_throw  b.close() }
+        let total = 0
+        loop item in merged(@a.receive @b.receive) { total += item or_throw }
+        printl"total {total}"                       # total 13
+    }
+}
+```
+
 `c.try_send(value)` and `c.try_receive` never wait and are cancellation points.
 `try_send` fails with `Full` when there is no room; `try_receive` gives `T | Empty |
 Closed | Busy | Canceled`. Both give `Busy` when another task is mid-operation on

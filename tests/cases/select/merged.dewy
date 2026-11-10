@@ -1,0 +1,38 @@
+# modes: native native-release
+# `merged(@a.receive @b.receive)` drains receives as one inbox (decisions.md, batch 7). A loop
+# over it takes every value and ends when every source has closed, `open` then false; a close
+# is not an item. `stop_when_idle=` ends it after a gap with nothing new, `open` still true.
+# Inside select, `@inbox.next` is one wait: none once the inbox has finished.
+produce = (out:Channel<int64> n:int64):>void | Unsent<int64> => {
+    loop i in [0..n) { out.send(i) or_throw }
+    out.close()
+}
+main = () => {
+    let a = channel<int64>(4)
+    let b = channel<int64>(4)
+    let total:int = 0
+    let count = 0
+    let inbox = merged(@a.receive @b.receive)
+    concurrent {
+        spawn produce(a 50)
+        spawn produce(b 100)
+        loop item in inbox {
+            total += item or_throw
+            count += 1
+        }
+    }
+    printl"{count} values, total {total}, open {inbox.open}"
+    let c = channel<int64>(4)
+    c.send(5) or_throw
+    let idle = merged(@c.receive stop_when_idle=5ms)
+    loop item in idle { printl"got {item or_throw}" }
+    printl"idle stop, open {idle.open}"
+    let d = channel<int64>(4)
+    let heart = ticker(1hour)
+    let one = merged(@d.receive)
+    printl"empty: {select(@one.next @heart.next timeout=2ms) is? Timeout}"
+    d.send(4) or_throw
+    printl"value: {select(@one.next @heart.next timeout=1s)}"
+    d.close()
+    printl"finished: {select(@one.next @heart.next timeout=1s) is? none}, open {one.open}"
+}
