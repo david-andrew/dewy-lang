@@ -1,6 +1,6 @@
 $runtime_checks
 from p"ast.jo" import (nodes)
-from p"facts.jo" import (FACT_CAP FactDifference FactProjection FactState fact_add_fits fact_bound fact_difference_head fact_difference_next fact_loans fact_projection_after fact_projection_first fact_reindex fact_set_bound fact_slot fact_stamp fact_stamp_gen fact_summary_entry fact_summary_fields fact_terms)
+from p"facts.jo" import (FACT_CAP FactDifference FactProjection FactState fact_add_fits fact_bound fact_difference_head fact_difference_next fact_loans fact_pending fact_projection_after fact_projection_first fact_reindex fact_set_bound fact_slot fact_stamp fact_stamp_gen fact_summary_entry fact_summary_fields fact_terms)
 from p"facts_numeric.dewy" import (fact_quotient_divisor)
 from p"facts_ranges.dewy" import (fact_floor_call fact_host_value)
 from p"refine.jo" import (refine_entry)
@@ -25,6 +25,7 @@ fact_compact=(@s:FactState):>void=>{
     }
     loop x in refine_entry {work.push(x)}
     loop loan in fact_loans {work.push(loan.capacity)}
+    loop x in fact_pending {work.push(x)}
     # (the newest values: operands of the expression being evaluated)
     loop j in [max(0 s.ids.length - 32)..s.ids.length) {work.push(s.ids[j])}
     # (terms are followed two levels: an accumulator's chain of sums is not
@@ -105,6 +106,7 @@ fact_collect=(@s:FactState boundary:CollectWord result:CollectWord):>void=>{
     }
     loop x in refine_entry {work.push(x)}
     loop loan in fact_loans {work.push(loan.capacity)}
+    loop x in fact_pending {work.push(x)}
     loop x in fact_summary_entry {work.push(x)}
     loop entry in fact_summary_fields {work.push(entry[2])}
     depth=fill(0 work.length)

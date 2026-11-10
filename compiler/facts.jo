@@ -230,6 +230,9 @@ fact_plan_forget = (f: int):
     fact_probe_runs.remove(f)
 
 fact_loans: FactLoan[]
+# The arguments a call has evaluated while its later ones run (a record
+# literal's earlier fields): compaction keeps them. O(1) per argument.
+fact_pending: int[]
 
 fact_returns_cache: {int: bool} = {}
 fact_return_escapes_cache: {int: bool} = {}

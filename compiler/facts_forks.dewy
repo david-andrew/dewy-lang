@@ -4,7 +4,7 @@ from p"check.jo" import (FK_LAMBDA LF_ADDR LF_ASSIGNED LF_EXPOSED LF_PARTBORROW 
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"expr.jo" import (CV is_dewy_set_type ntype)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"facts.jo" import (FACT_CAP fact_reflexive_key FACT_CONTRACT FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_KEYS_SOURCE FACT_KEY_SOURCE FactDifference FactForkEntry FactKeyParam FactProjection FactState fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_covered fact_difference fact_domain fact_fork_entries fact_key_names fact_key_params fact_name_parallel_arrays fact_new fact_owner fact_parallel_bounds fact_policy fact_probe_on fact_project fact_projection_find fact_query fact_scalar fact_shortest fact_slice_flags fact_speculating fact_summary_owner fact_type)
+from p"facts.jo" import (FACT_CAP fact_reflexive_key FACT_CONTRACT FACT_ELEMENT_BELOW FACT_ELEMENT_VALUE FACT_KEYS_SOURCE FACT_KEY_SOURCE FactDifference FactForkEntry FactKeyParam FactProjection FactState fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_covered fact_pending fact_difference fact_domain fact_fork_entries fact_key_names fact_key_params fact_name_parallel_arrays fact_new fact_owner fact_parallel_bounds fact_policy fact_probe_on fact_project fact_projection_find fact_query fact_scalar fact_shortest fact_slice_flags fact_speculating fact_summary_owner fact_type)
 from p"facts_lifecycle.dewy" import (fact_owner_value)
 from p"facts_forgets.dewy" import (fact_ends_path fact_path_call_effects)
 from p"facts_ranges.dewy" import (fact_refinement_covers)
@@ -212,6 +212,7 @@ fact_fork_seed=(f:ForkWord @s:FactState):>void=>$unsafe {
 # effects, in the same source evaluation order and with the same entry.
 fact_call_arguments=(n:ForkWord @s:FactState):>array<int64>=>$unsafe {
     let values:array<int64>=fill(0 nkids(n))
+    let pending=fact_pending.length
     loop i in call_eval_order(n) {
         let arg=kid(n i)
         if nodes.ptr[arg].kind =? 'conv' and nodes.ptr[arg].aux =? int32(int64(CV.refinement)) {
@@ -229,6 +230,7 @@ fact_call_arguments=(n:ForkWord @s:FactState):>array<int64>=>$unsafe {
         }
         else {values[i]=fact_capture(arg @s)}
         if ownership_decls.length not=? 0 {values[i]=fact_owner_value(arg values[i] @s)}
+        fact_pending.push(values[i])
     }
     nd_call_entry(n @s @values)
     loop i in [0..nkids(n)) {
@@ -240,6 +242,7 @@ fact_call_arguments=(n:ForkWord @s:FactState):>array<int64>=>$unsafe {
         else {ref_check(arg values[i] values @s)}
     }
     nd_mutable_check(n @s values)
+    fact_pending.truncate(pending)
     values
 }
 # Undemanded values still execute their effectful descendants. Ordinary calls

@@ -99,6 +99,7 @@ fact_compact = (s: mut FactState):
         work += c.values
     work += refine_entry
     loop loan in fact_loans: work.push(loan.capacity)
+    work += fact_pending
     # (the newest values: operands of the expression being evaluated)
     loop j in [max(0, s.ids.len() - 32)..s.ids.len()): work.push(s.ids[j])
     # (terms are followed two levels: an accumulator's chain of sums is not
@@ -164,6 +165,7 @@ fact_collect = (s: mut FactState, boundary: int, result: int):
         work += c.values
     work += refine_entry
     loop loan in fact_loans: work.push(loan.capacity)
+    work += fact_pending
     work += fact_summary_entry
     loop entry in fact_summary_fields: work.push(entry.2)
     depth = fill(0, work.len())
