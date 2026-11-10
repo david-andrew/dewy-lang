@@ -163,6 +163,7 @@ use 'slice_checks.dewy'
 use 'gpu_type_checks.dewy'
 use 'numeric_constants.dewy'
 use 'expr_cold_queries.dewy'
+use 'expr_source_hints.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -3492,51 +3493,6 @@ coerce_hint = ""     # (said after a type mismatch, by what asked for the type)
 # looks through the nodes for an `as`, or a comparison, `and` or `or`, written around the node at
 # fault so that the other grouping would have held it, and says what to parenthesize.
 
-regroup_op_name = (p: int) -> str:
-    k = nodes[p].kind
-    if k == .and_: return "and"
-    if k == .or_: return "or"
-    if k == .not_: return "not"
-    op_text(nodes[p].op as Tok, nodes[p].pos)
-
-# the source between two places of one file, on one line, without the blanks around it ("" if not)
-regroup_source = (f: int, from0: int, to0: int) -> str:
-    src = files[f].src
-    from = from0
-    to = to0
-    loop from < to and (src[from] == ' ' or src[from] == '\t'): from += 1
-    loop to > from and (src[to - 1] == ' ' or src[to - 1] == '\t'): to -= 1
-    if from >= to or to > len(src) or to - from > 80: return ""
-    loop i in [from..to):
-        if src[i] == '\n': return ""
-    src[from..to)
-
-# whether text closes no bracket it did not open (else its operand was written inside parentheses)
-regroup_balanced = (text: str) -> bool:
-    depth = 0
-    loop c in text:
-        if c == '(' or c == '[': depth += 1
-        else if c == ')' or c == ']': depth -= 1
-        if depth < 0: return false
-    true
-
-# the text of the type a cast names: a name, with its type arguments
-regroup_type_text = (c: int) -> str:
-    t = int(nodes[c].b)
-    f = pos_file(nodes[t].pos)
-    src = files[f].src
-    from = pos_off(nodes[t].pos)
-    to = from
-    depth = 0
-    loop to < len(src):
-        ch = src[to]
-        if ch == '<': depth += 1
-        else if ch == '>': depth -= 1
-        else if depth == 0 and not is_ident_char(ch) and ch != '.': break
-        to += 1
-    if depth != 0: return ""
-    src[from..to)
-
 fn_used: {int: bool}            # the program's functions called or used as a value (by decl)
 drew_in: {int: bool}            # (functions, by instance, that have drawn something so far)
 draw_to_at: {int: int}          # (draw's first draw_to, by instance)
@@ -6646,28 +6602,6 @@ mk_ident_local = (l: int, pos: int) -> int:
     add_flag(n, NF_CHECKED)
     n
 
-# An interpolation as written in a string, after its `{` (not `printl(x)`'s
-# own): the source before its expression is a brace. O(spaces).
-written_interpolation = (e: int) -> bool:
-    f = pos_file(nodes[e].pos)
-    if f < 0 or f >= files.len(): return false
-    src = files[f].src
-    o = pos_off(nodes[e].pos) - 1
-    loop o >= 0 and (src[o] == ' ' or src[o] == '\t' or src[o] == '\n'): o -= 1
-    o >= 0 and src[o] == '{{'
-
-# Node n is e or inside it. Error paths only; O(nodes of e), depth 64.
-node_within = (e: int, n: int, depth: int = 0) -> bool:
-    if e <= 0 or depth > 64: return false
-    if e == n: return true
-    mask = isolation_children(nodes[e].kind)
-    if mask < 0: return false
-    if mask & 1 != 0 and node_within(int(nodes[e].a), n, depth + 1) or mask & 2 != 0 and node_within(int(nodes[e].b), n, depth + 1) or mask & 4 != 0 and node_within(int(nodes[e].c), n, depth + 1): return true
-    if mask & 16 != 0:
-        loop i in [0..nkids(e)):
-            if node_within(kid(e, i), n, depth + 1): return true
-    false
-
 # The interpolation checked last, for an unknown name inside one: ident_unknown.
 interpolation_last = 0
 
@@ -7387,24 +7321,6 @@ narrow_local = (l: int, ms: int[], pos: int):
         al = int(locals[l].alias)
         if nodes[al].kind == .conv and nodes[al].aux == i32(int(CV.union_)): root = copy_path(int(nodes[al].a))
     narrow_expr(root, ms, pos, int(locals[l].name))
-
-# Why a Dewy optional does not fit a plain type. A value optional twice
-# (`xs.get(i)` of optional elements) needs a check per level, and a name
-# narrowed once from one still holds an optional.
-optional_hint = (n: int, from: int) -> str:
-    inner = telem(prune(from))
-    if tkind(inner) == .opt: return " (this value is optional twice, {dt(prune(from))}: none for a missing value, or a present value that is none itself; check it with `is? none` once for each)"
-    e = n
-    loop nodes[e].kind == .conv: e = int(nodes[e].a)
-    root = 0
-    if nodes[e].kind == .unwrap: root = int(nodes[e].a)
-    else if nodes[e].kind == .ident and nodes[e].aux == i32(int(SK.local)):
-        l = int(nodes[e].sym)
-        if int(locals[l].flags) & LF_ALIAS != 0 and locals[l].alias != 0 and nodes[int(locals[l].alias)].kind == .unwrap: root = int(nodes[int(locals[l].alias)].a)
-    if root != 0 and tkind(prune(ntype(root))) == .opt and tkind(telem(prune(ntype(root)))) == .opt:
-        name = if nodes[root].kind == .ident: "`{name_of(int(nodes[root].name))}`" else: "it"
-        return " ({name} was optional twice, {dt(prune(ntype(root)))}, and `is? none` ruled out only the outer none: the value present may be none itself; check it again with `is? none`)"
-    " (this value may be none; check it with `is?none` before using its value)"
 
 # the name `name` stands for root (a variable or field path) narrowed to members ms of its union
 narrow_expr = (root: int, ms: int[], pos: int, name: int):

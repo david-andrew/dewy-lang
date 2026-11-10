@@ -1,0 +1,106 @@
+$runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (locals op_text)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"expr.jo" import (ntype)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"lex.jo" import (is_ident_char)
+from p"ownership_checks.dewy" import (LF_ALIAS)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (prune telem tkind)
+from p"util.jo" import (files name_of pos_file pos_off)
+
+SourceHintWord:type=int64<overflow='wrap'>
+regroup_op_name=(p:SourceHintWord):>string=>$unsafe {
+    let k=nodes.ptr[p].kind
+    if k =? 'and_' {return "and"}
+    if k =? 'or_' {return "or"}
+    if k =? 'not_' {return "not"}
+    op_text(cx_token_values.ptr[SourceHintWord(nodes.ptr[p].op)] nodes.ptr[p].pos)
+}
+# the source between two places of one file, on one line, without the blanks around it ("" if not)
+regroup_source=(f:SourceHintWord from0:SourceHintWord to0:SourceHintWord):>string=>{
+    let src=files[f].src
+    let bytes=src as array<uint8>
+    let from_=from0
+    let to=to0
+    loop from_ <? to and (bytes[from_] =? b' ' or bytes[from_] =? b'\t') {from_ += 1}
+    loop to >? from_ and (bytes[to - 1] =? b' ' or bytes[to - 1] =? b'\t') {to -= 1}
+    if from_ >=? to or to >? (src as array<uint8>).length or to - from_ >? 80 {return ""}
+    loop i in [from_..to) {
+        if bytes[i] =? b'\n' {return ""}
+    }
+    __str_slice(src from_ to)
+}
+# whether text closes no bracket it did not open (else its operand was written inside parentheses)
+regroup_balanced=(text:string):>bool=>{
+    let depth:SourceHintWord=0
+    loop c in (text as array<uint8>) {
+        if c =? b'(' or c =? b'[' {depth += 1} else if c =? b')' or c =? b']' {depth -= 1}
+        if depth <? 0 {return false}
+    }
+    true
+}
+# the text of the type a cast names: a name, with its type arguments
+regroup_type_text=(c:SourceHintWord):>string=>$unsafe {
+    let t=SourceHintWord(nodes.ptr[c].b)
+    let f=pos_file(nodes.ptr[t].pos)
+    let src=files[f].src
+    let bytes=src as array<uint8>
+    let from_=pos_off(nodes.ptr[t].pos)
+    let to=from_
+    let depth:SourceHintWord=0
+    loop to <? (src as array<uint8>).length {
+        let ch=bytes[to]
+        if ch =? b'<' {depth += 1} else if ch =? b'>' {depth -= 1}
+        else if depth =? 0 and not is_ident_char(ch) and ch not=? b'.' {break}
+        to += 1
+    }
+    if depth not=? 0 {return ""}
+    __str_slice(src from_ to)
+}
+# An interpolation as written in a string, after its `{` (not `printl(x)`'s
+# own): the source before its expression is a brace. O(spaces).
+written_interpolation=(e:SourceHintWord):>bool=>$unsafe {
+    let f=pos_file(nodes.ptr[e].pos)
+    if f <? 0 or f >=? files.length {return false}
+    let src=files[f].src
+    let bytes=src as array<uint8>
+    let o=pos_off(nodes.ptr[e].pos) - 1
+    loop o >=? 0 and (bytes[o] =? b' ' or bytes[o] =? b'\t' or bytes[o] =? b'\n') {o -= 1}
+    o >=? 0 and bytes[o] =? 123
+}
+# Node n is e or inside it. Error paths only; O(nodes of e), depth 64.
+node_within=(e:SourceHintWord n:SourceHintWord depth:SourceHintWord=0):>bool=>$unsafe {
+    if e <=? 0 or depth >? 64 {return false}
+    if e =? n {return true}
+    let mask=isolation_children(nodes.ptr[e].kind)
+    if mask <? 0 {return false}
+    if mask & 1 not=? 0 and node_within(SourceHintWord(nodes.ptr[e].a) n depth + 1) or mask & 2 not=? 0 and node_within(SourceHintWord(nodes.ptr[e].b) n depth + 1) or mask & 4 not=? 0 and node_within(SourceHintWord(nodes.ptr[e].c) n depth + 1) {return true}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(e)) {
+            if node_within(kid(e i) n depth + 1) {return true}
+        }
+    }
+    false
+}
+# Why a Dewy optional does not fit a plain type. A value optional twice
+# (`xs.get(i)` of optional elements) needs a check per level, and a name
+# narrowed once from one still holds an optional.
+optional_hint=(n:SourceHintWord from_:SourceHintWord):>string=>$unsafe {
+    let inner=telem(prune(from_))
+    if tkind(inner) =? 'opt' {return " (this value is optional twice, {dt(prune(from_))}: none for a missing value, or a present value that is none itself; check it with `is? none` once for each)"}
+    let e=n
+    loop nodes.ptr[e].kind =? 'conv' {e=SourceHintWord(nodes.ptr[e].a)}
+    let root:SourceHintWord=0
+    if nodes.ptr[e].kind =? 'unwrap' {root=SourceHintWord(nodes.ptr[e].a)} else if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].aux =? int32(1) {
+        let l=SourceHintWord(nodes.ptr[e].sym)
+        if SourceHintWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and locals.ptr[l].alias not=? 0 and nodes.ptr[SourceHintWord(locals.ptr[l].alias)].kind =? 'unwrap' {root=SourceHintWord(nodes.ptr[SourceHintWord(locals.ptr[l].alias)].a)}
+    }
+    if root not=? 0 and tkind(prune(ntype(root))) =? 'opt' and tkind(telem(prune(ntype(root)))) =? 'opt' {
+        let name=if nodes.ptr[root].kind =? 'ident' {"`{name_of(SourceHintWord(nodes.ptr[root].name))}`"} else {"it"}
+        return " ({name} was optional twice, {dt(prune(ntype(root)))}, and `is? none` ruled out only the outer none: the value present may be none itself; check it again with `is? none`)"
+    }
+    " (this value may be none; check it with `is?none` before using its value)"
+}
