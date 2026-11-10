@@ -151,6 +151,7 @@ use 'checks_thin_expr.dewy'
 use 'select_checks.dewy'
 use 'type_member_checks.dewy'
 use 'dotted_checks.dewy'
+use 'expr_hints.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -625,24 +626,6 @@ elem_subsumes = (f0: int, t0: int) -> bool:
     tknown, tlow, thigh = int_intervals_wide(t)
     fknown and tknown and interval_missing(flow, tlow).len() == 0 and interval_missing(fhigh, thigh).len() == 0
 
-# Why an array of refined integers does not fit an array of other refined integers of its
-# shape: the element values it may hold that the wanted elements do not admit; "" otherwise.
-array_elems_gap_text = (from0: int, to0: int) -> str:
-    from = prune(from0)
-    to = prune(to0)
-    fk = types[from].kind
-    if fk != types[to].kind or fk != .array and fk != .fixed: return ""
-    if fk == .fixed and types[from].bits != types[to].bits: return ""
-    f = prune(int(types[from].elem))
-    t = prune(int(types[to].elem))
-    if types[t].kind != .refined or representation_type(f) != representation_type(t): return ""
-    fknown, flow, fhigh = int_intervals_wide(f)
-    tknown, tlow, thigh = int_intervals_wide(t)
-    if not fknown or not tknown or fhigh.len() > 0 or thigh.len() > 0: return ""
-    missing = interval_missing(flow, tlow)
-    if missing.len() == 0: return ""
-    " (its elements may hold {interval_text(missing)}, which the wanted elements do not admit)"
-
 # n coerced to `to` where a string set is on either side: true when done (a
 # string or set into a set; a set into a string), and a set going where only
 # its text fits (an optional string, a union with a string) is made text first
@@ -794,21 +777,6 @@ coerce_int_literal = (n: int, to: int) -> int:
     nodes[n].type = i32(to)
     clear_flag(n, NF_LITERAL)
     n
-
-# coerce node n to `target` (rewrites n in place); returns n
-# (`let d:Duration = q` or a result `:>Duration | ParseError`, q a time known at run time
-# or a float: only a constant is known to fit) "" for anything else. O(union members)
-duration_hint = (n: int, from: int, to: int) -> str:
-    if tkind(from) != .quantity or quantity_dimension(from) != base_dimension(0): return ""
-    member = false
-    if is_union(to):
-        loop m in union_members(to):
-            if time_core_type(m, "Duration"): member = true
-    if not member and not time_core_type(to, "Duration"): return ""
-    shown = if nodes[n].kind == .ident: name_of(int(nodes[n].name)) else: "x"
-    if is_float(quantity_base(from)): return " (a float time enters through `quantize({shown} rounding='nearest_even')`, which says what is lost)"
-    if member: return " (a time known only at run time may not fit: `convert<Duration>({shown})` gives the `Duration` or the failure, `OffGrid | OutOfRange`; take it with `?? fallback` or `or_throw`)"
-    " (a time known only at run time may not fit: `convert<Duration>({shown})` gives the `Duration` or the failure)"
 
 # A cast node takes its coerced operand's node (xc_take): the operand's pending
 # fixed-size boundary, registered just before by coerce, now lives at `to`.
@@ -1292,59 +1260,6 @@ fn_without_defaults = (t: int) -> int:
 
 # ---------------- places ----------------
 cp_inner = 0           # > 0 while checking the base of an element or field being written
-
-# (a private name of a module this one uses: say so)
-private_hint = (name: int) -> str:
-    m = cur_mod()
-    if m < 0 or not is_private(name) or modules[m].is_prelude: return ""
-    loop u in modules[m].uses:
-        if not modules[u].is_prelude and modules[u].names.get(name) != none:
-            f = files[int(modules[u].file)].path
-            s = rfind(f, "/")
-            if s >= 0: f = f[s + 1..]
-            return " (it is private to {f}: `use` leaves out names starting with _; `from '{f}' import {name_of(name)}` brings it in)"
-    ""
-
-# (helper() whose file the program has, but not `use`d by this one: `use` brings in the names of
-# the file it names only, not those of the files that one uses)
-# the constants the bundled `units` module declares (read only for an unknown name's hint)
-unit_library_names = () -> str[]:
-    out: str[]
-    if len(lib_root) == 0: return out
-    text = read_file("{lib_root}/units.dewy") ?? ""
-    loop line in split(text, "\n"):
-        if not starts_with(line, "const "): continue
-        rest = line[6..]
-        stop = 0
-        loop stop < len(rest) and rest[stop] != ' ' and rest[stop] != ':' and rest[stop] != '=': stop += 1
-        if stop > 0: out.push(rest[..stop))
-    out
-
-unused_file_hint = (name: int) -> str:
-    m = cur_mod()
-    if m < 0 or modules[m].is_prelude or is_private(name): return ""
-    # (the file that declares it, ahead of those that import it)
-    home = -1
-    loop o in [0..modules.len()):
-        if o == m or modules[o].is_prelude or modules[o].names.get(name) == none or modules[o].decls.len() == 0: continue
-        gf = int(modules[o].file)
-        if gf < 0 or int(modules[m].file) < 0 or pos_in_lib(nodes[modules[o].decls[0]].pos): continue
-        d = int(syms[modules[o].names[name]].decl)
-        if home < 0 or (d > 0 and pos_file(nodes[d].pos) == gf):
-            home = o
-            if d > 0 and pos_file(nodes[d].pos) == gf: break
-    if home >= 0:
-        o = home
-        gf = int(modules[o].file)
-        lf = int(modules[m].file)
-        # (a module this file imports: its names are written after its name)
-        loop k, sy in modules[m].names:
-            if syms[sy].kind == .module and int(syms[sy].ref) == o: return " (it is {name_of(k)}'s: `{name_of(k)}.{name_of(name)}`)"
-        shown = files[gf].path
-        if starts_with(shown, files[lf].dir + "/"): shown = shown[len(files[lf].dir) + 1..]
-        if files[lf].is_dewy: return " (it is in {shown}, which this file does not import: `from p\"{shown}\" import {name_of(name)}` at its top)"
-        return " (it is in {shown}, which this file does not use: `use '{shown}'` at its top)"
-    ""
 
 # m[k] for a map m (a call of its `[]`)
 is_map_get = (n: int) -> bool:
@@ -1872,16 +1787,6 @@ rest_inst_binds = (decl: int, args: int[], params: int[], binds: int[]) -> int[]
         return binds + [mk_fixed(telem(t), k)]
     binds
 
-# why function d's parameters do not take args (map_args's message, built when it is reported)
-map_args_text = (d: int, args: int[]) -> str:
-    pnames: int[]
-    hasdef: bool[]
-    loop i in [0..nkids(d)):
-        pnames.push(int(nodes[kid(d, i)].name))
-        hasdef.push(nodes[kid(d, i)].b != 0)
-    unused: int[]
-    map_args(pnames, hasdef, args, unused, dewy_param_kinds.get(d) ?? [], true, d)
-
 # Keep parameter slots canonical for types/ABI, but evaluate explicitly supplied
 # Dewy arguments in source order, then omitted defaults in parameter order.
 # c holds a list of integer-literal slot numbers only when reordering is needed.
@@ -2228,26 +2133,6 @@ finish_partial = (n: int, ptypes: int[], mutmask: int, ret: int) -> int:
 call_targs: int[]              # type arguments written at the call being resolved (f[T](...))
 cur_assign = 0                 # the assignment whose target is being checked (`x = ...`, `x += ...`)
 early_set: {int: bool} = {}    # globals top-level code assigns above their own line
-
-# What a literal argument breaks when its refined parameter's atoms compare the
-# value with literals: the first it fails, as the contract reads; "" otherwise.
-refuted_literal_contract = (a: int, t0: int, name: str) -> str:
-    t = prune(t0)
-    # (a contract its type's name already spells, `1 | 2 | 3`, says it there)
-    if not refine_active or types[t].kind != .refined or types[t].bits == -1 or not contains(dt(t), "<refinement>"): return ""
-    v = 0
-    if nodes[a].kind == .int_lit and not has_flag(a, NF_U64): v = nodes[a].ival
-    else if nodes[a].kind == .unary and nodes[a].op == i32(int(Tok.minus)) and nodes[int(nodes[a].a)].kind == .int_lit: v = -nodes[int(nodes[a].a)].ival
-    else: return ""
-    loop atom in ref_predicates[int(types[t].st)]:
-        if atom.a.unsigned or atom.b.unsigned: return ""
-        if atom.a.kind == 0 and atom.b.kind == 1 and atom.a.path.len() == 0:
-            if not ref_literal_holds(atom.op, v, atom.b.value + atom.b.offset): return "argument '{name}' is {v}, which breaks its contract `{name} {wit_op(atom.op)} {atom.b.value + atom.b.offset}`"
-        else if atom.a.kind == 1 and atom.b.kind == 0 and atom.b.path.len() == 0:
-            if not ref_literal_holds(atom.op, atom.a.value, v + atom.b.offset):
-                flipped = if atom.op == .lt: Tok.gt else if atom.op == .le: Tok.ge else: atom.op
-                return "argument '{name}' is {v}, which breaks its contract `{name} {wit_op(flipped)} {atom.a.value}`"
-    ""
 
 # (a local a comprehension made, unannotated: `let sizes = [loop ... w.length]`)
 comprehension_binding = (a: int) -> bool:
@@ -3373,20 +3258,6 @@ dewy_surface = (name: int, decl: int) -> int:
     if t != 0 and nodes[t].kind == .tname and name_of(int(nodes[t].name)) == "str": return 2
     0
 
-# Suggested names as the source at pos spells them: Dewy's own words for the
-# implementation's builtin types and sequence length.
-surface_names = (names: int[], pos: int) -> int[]:
-    if not dewy_at(pos): return names
-    out: int[]
-    loop nm in names:
-        w = name_of(nm)
-        d = if w == "len": "length" else if w == "str": "string" else if w == "f64": "float64" else if w == "f32": "float32" else: ""
-        if d == "" and len(w) >= 2 and len(w) <= 3 and (w[0] == 'i' or w[0] == 'u') and is_digit(w[1]):
-            if w == "i8" or w == "i16" or w == "i32" or w == "i64": d = "int" + w[1..]
-            if w == "u8" or w == "u16" or w == "u32" or w == "u64": d = "uint" + w[1..]
-        out.push(if d != "": intern(d) else: nm)
-    out
-
 # (is the code being checked Dewy's? the library's own code is Sloppy)
 caller_dewy = () -> bool:
     m = cur_mod()
@@ -3896,21 +3767,6 @@ coerce_hint = ""     # (said after a type mismatch, by what asked for the type)
 # looks through the nodes for an `as`, or a comparison, `and` or `or`, written around the node at
 # fault so that the other grouping would have held it, and says what to parenthesize.
 
-# the operator inside the operand of the `as` at c that its right edge ends in, and that right operand
-regroup_edge = (c: int) -> (int, int):
-    r = int(nodes[c].a)
-    op = 0
-    loop true:
-        k = nodes[r].kind
-        if k == .and_ or k == .or_ or k == .binary:
-            op = r
-            r = int(nodes[r].b)
-        else if k == .not_ or k == .unary:
-            op = r
-            r = int(nodes[r].a)
-        else: break
-    (op, r)
-
 regroup_op_name = (p: int) -> str:
     k = nodes[p].kind
     if k == .and_: return "and"
@@ -3955,53 +3811,6 @@ regroup_type_text = (c: int) -> str:
         to += 1
     if depth != 0: return ""
     src[from..to)
-
-# the help for a type error at node n if `as` at cast c would have held it under the other grouping
-regroup_as_note = (c: int, n: int) -> bool:
-    p = nodes[n].pos
-    op, r = regroup_edge(c)
-    if op == 0 or nodes[r].pos != p: return false
-    f = pos_file(p)
-    name = regroup_op_name(op)
-    ty = regroup_type_text(c)
-    src = files[f].src
-    as_at = pos_off(nodes[int(nodes[c].b)].pos)
-    loop as_at > 0 and (src[as_at - 1] == ' ' or src[as_at - 1] == '\t'): as_at -= 1
-    if as_at < 2 or src[as_at - 2..as_at) != "as" or ty == "": return false
-    operand = regroup_source(f, pos_off(p), as_at - 2)
-    if operand == "" or not regroup_balanced(operand): return false
-    err_notes.push((-1, "help: `as` binds looser than `{name}`, so it converts everything before it, not just `{operand}`: parenthesize what you mean to convert, as in `{name} ({operand} as {ty} ...)`"))
-    true
-
-# the same, if the `??` on the left of operator par has the node at fault as its fallback
-regroup_coalesce_note = (par: int, n: int) -> bool:
-    p = nodes[n].pos
-    co = int(nodes[par].a)
-    if nodes[co].kind != .coalesce or nodes[int(nodes[co].b)].pos != p or nodes[par].kind == .not_: return false
-    name = regroup_op_name(par)
-    f = pos_file(p)
-    right = int(nodes[par].b)
-    if right == 0 or pos_file(nodes[right].pos) != f: return false
-    fallback = regroup_source(f, pos_off(p), pos_off(nodes[right].pos))
-    if len(fallback) > len(name) and fallback[len(fallback) - len(name)..len(fallback)) == name:
-        fallback = fallback[0..len(fallback) - len(name))
-    loop len(fallback) > 0 and fallback[len(fallback) - 1] == ' ': fallback = fallback[0..len(fallback) - 1)
-    if fallback == "" or not regroup_balanced(fallback): return false
-    err_notes.push((-1, "help: `??` binds tighter than `{name}`, so its fallback is just `{fallback}` and `{name}` compares the result: parenthesize what you mean as the fallback, as in `?? ({fallback} {name} ...)`"))
-    true
-
-# the help for a type error at node n, if the other grouping of an `as` or `??` around it would hold it
-# (a search of the nodes: it runs only for an error, and only in Dewy source)
-regroup_note = (n: int):
-    if not dewy_at(nodes[n].pos): return
-    i = 1
-    loop i < len(nodes):
-        k = nodes[i].kind
-        if k == .cast:
-            if nodes[i].aux2 != 1 and regroup_as_note(i, n): return
-        else if k == .and_ or k == .or_ or (k == .binary and nodes[i].op >= 69 and nodes[i].op <= 74):
-            if regroup_coalesce_note(i, n): return
-        i += 1
 
 fn_used: {int: bool}            # the program's functions called or used as a value (by decl)
 drew_in: {int: bool}            # (functions, by instance, that have drawn something so far)
@@ -4445,17 +4254,6 @@ cancel_reject = (n: int, coalesce: bool, what0: str):
     else if what == "this collector" and cancel_parallel_at(cancel_first_pos(n, pos_file(nodes[n].pos), 0)):
         fatal(at, "this `parallel` loop's elements may be `Canceled`, which it would pass on unwritten under `$explicit_cancellation`, and a `parallel` body cannot forward it with `or_throw<Canceled>` yet: default it in the body with `??<Canceled>`, or opt this scope out with `$explicit_cancellation=false`")
     fatal(at, "{shown} may be `Canceled`, which {what} would pass on unwritten under `$explicit_cancellation`: write {fix} to forward it{other}")
-
-# Only naming Canceled selects it: a broad exception family does not opt in.
-# Resolve aliases as types; inspect union syntax before families can absorb members.
-coalesce_names_canceled = (tn: int, canceled: int) -> bool:
-    if nodes[tn].kind == .tunion:
-        loop c in kids(tn):
-            if coalesce_names_canceled(c, canceled): return true
-        return false
-    t = prune(resolve_type(tn))
-    if family_annotation(t): return false
-    value_members(t).contains(canceled)
 
 # Generated collector arguments retain their original syntax for contextual
 # overload selection. The expression flag demands one indexed callback only.

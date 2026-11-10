@@ -1,0 +1,252 @@
+$runtime_checks
+from p"checks_text.dewy" import (byte_rfind)
+from p"@lib/core/os.jo" import (read_file)
+from p"@lib/core/rt.jo" import (__str_slice)
+from p"@lib/core/str.jo" import (is_digit split starts_with)
+from p"ast.jo" import (NF_U64 dewy_param_kinds has_flag kid kids nkids nodes)
+from p"check.jo" import (cur_mod dewy_at modules syms)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_thin.dewy" import (is_private resolve_type)
+from p"checks_thin_expr.dewy" import (int_intervals_wide ref_literal_holds)
+from p"error_ops.dewy" import (family_annotation value_members)
+from p"expr.jo" import (map_args regroup_balanced regroup_op_name regroup_source regroup_type_text)
+from p"intervals.dewy" import (interval_missing interval_text)
+from p"refine.jo" import (ref_predicates refine_active representation_type)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (is_float is_union prune tkind types union_members)
+from p"unit_ops.dewy" import (base_dimension quantity_dimension)
+from p"unit_rare.dewy" import (time_core_type)
+from p"units.jo" import (quantity_base)
+from p"util.jo" import (err_notes files intern lib_root name_of pos_file pos_in_lib pos_off)
+from p"witness_ops.dewy" import (wit_op)
+
+ExprHintWord:type=int64<overflow='wrap'>
+# Why an array of refined integers does not fit an array of other refined integers of its
+# shape: the element values it may hold that the wanted elements do not admit; "" otherwise.
+array_elems_gap_text=(from0:ExprHintWord to0:ExprHintWord):>string=>$unsafe {
+    let from_=prune(from0)
+    let to=prune(to0)
+    let fk=types.ptr[from_].kind
+    if fk not=? types.ptr[to].kind or fk not=? 'array' and fk not=? 'fixed' {return ""}
+    if fk =? 'fixed' and types.ptr[from_].bits not=? types.ptr[to].bits {return ""}
+    let f=prune(ExprHintWord(types.ptr[from_].elem))
+    let t=prune(ExprHintWord(types.ptr[to].elem))
+    if types.ptr[t].kind not=? 'refined' or representation_type(f) not=? representation_type(t) {return ""}
+    let [fknown flow fhigh]=int_intervals_wide(f)
+    let [tknown tlow thigh]=int_intervals_wide(t)
+    if not fknown or not tknown or fhigh.length >? 0 or thigh.length >? 0 {return ""}
+    let missing=interval_missing(flow tlow)
+    if missing.length =? 0 {return ""}
+    " (its elements may hold {interval_text(missing)}, which the wanted elements do not admit)"
+}
+# coerce node n to `target` (rewrites n in place); returns n
+# (`let d:Duration = q` or a result `:>Duration | ParseError`, q a time known at run time
+# or a float: only a constant is known to fit) "" for anything else. O(union members)
+duration_hint=(n:ExprHintWord from_:ExprHintWord to:ExprHintWord):>string=>$unsafe {
+    if tkind(from_) not=? 'quantity' or quantity_dimension(from_) not=? base_dimension(0) {return ""}
+    let member=false
+    if is_union(to) {
+        loop m in union_members(to) {
+            if time_core_type(m "Duration") {member=true}
+        }
+    }
+    if not member and not time_core_type(to "Duration") {return ""}
+    let shown=if nodes.ptr[n].kind =? 'ident' {name_of(ExprHintWord(nodes.ptr[n].name))} else {"x"}
+    if is_float(quantity_base(from_)) {return " (a float time enters through `quantize({shown} rounding='nearest_even')`, which says what is lost)"}
+    if member {return " (a time known only at run time may not fit: `convert<Duration>({shown})` gives the `Duration` or the failure, `OffGrid | OutOfRange`; take it with `?? fallback` or `or_throw`)"}
+    " (a time known only at run time may not fit: `convert<Duration>({shown})` gives the `Duration` or the failure)"
+}
+# (a private name of a module this one uses: say so)
+private_hint=(name:ExprHintWord):>string=>{
+    let m=cur_mod()
+    if m <? 0 or not is_private(name) or modules[m].is_prelude {return ""}
+    loop u in modules[m].uses {
+        if not modules[u].is_prelude and modules[u].names.get(name) not=? none {
+            let f=files[ExprHintWord(modules[u].file)].path
+            let s=byte_rfind(f "/")
+            if s >=? 0 {f=__str_slice(f s + 1 (f as array<uint8>).length)}
+            return " (it is private to {f}: `use` leaves out names starting with _; `from '{f}' import {name_of(name)}` brings it in)"
+        }
+    }
+    ""
+}
+# (helper() whose file the program has, but not `use`d by this one: `use` brings in the names of
+# the file it names only, not those of the files that one uses)
+# the constants the bundled `units` module declares (read only for an unknown name's hint)
+unit_library_names=():>array<string>=>{
+    let out:array<string>=[]
+    if (lib_root as array<uint8>).length =? 0 {return out}
+    let text=read_file("{lib_root}/units.dewy") ?? ""
+    loop line in split(text "\n") {
+        if not starts_with(line "const ") {continue}
+        let rest=__str_slice(line 6 (line as array<uint8>).length)
+        let bytes=rest as array<uint8>
+        let stop:ExprHintWord=0
+        loop stop <? bytes.length and bytes[stop] not=? b' ' and bytes[stop] not=? b':' and bytes[stop] not=? b'=' {stop += 1}
+        if stop >? 0 {out.push(__str_slice(rest 0 stop))}
+    }
+    out
+}
+unused_file_hint=(name:ExprHintWord):>string=>$unsafe {
+    let m=cur_mod()
+    if m <? 0 or modules[m].is_prelude or is_private(name) {return ""}
+    # (the file that declares it, ahead of those that import it)
+    let home:ExprHintWord=-1
+    loop o in [0..modules.length) {
+        if o =? m or modules[o].is_prelude or modules[o].names.get(name) =? none or modules[o].decls.length =? 0 {continue}
+        let gf=ExprHintWord(modules[o].file)
+        if gf <? 0 or ExprHintWord(modules[m].file) <? 0 or pos_in_lib(nodes.ptr[modules[o].decls[0]].pos) {continue}
+        let d=ExprHintWord(syms.ptr[modules[o].names[name]].decl)
+        if home <? 0 or (d >? 0 and pos_file(nodes.ptr[d].pos) =? gf) {
+            home=o
+            if d >? 0 and pos_file(nodes.ptr[d].pos) =? gf {break}
+        }
+    }
+    if home >=? 0 {
+        let o=home
+        let gf=ExprHintWord(modules[o].file)
+        let lf=ExprHintWord(modules[m].file)
+        # (a module this file imports: its names are written after its name)
+        loop [k sy] in modules[m].names {
+            if syms.ptr[sy].kind =? 'module' and ExprHintWord(syms.ptr[sy].ref) =? o {return " (it is {name_of(k)}'s: `{name_of(k)}.{name_of(name)}`)"}
+        }
+        let shown=files[gf].path
+        if starts_with(shown "{files[lf].dir}/") {shown=__str_slice(shown (files[lf].dir as array<uint8>).length + 1 (shown as array<uint8>).length)}
+        if files[lf].is_dewy {return " (it is in {shown}, which this file does not import: `from p\"{shown}\" import {name_of(name)}` at its top)"}
+        return " (it is in {shown}, which this file does not use: `use '{shown}'` at its top)"
+    }
+    ""
+}
+# why function d's parameters do not take args (map_args's message, built when it is reported)
+map_args_text=(d:ExprHintWord args:array<int64>):>string=>$unsafe {
+    let pnames:array<int64>=[]
+    let hasdef:array<bool>=[]
+    loop i in [0..nkids(d)) {
+        pnames.push(ExprHintWord(nodes.ptr[kid(d i)].name))
+        hasdef.push(nodes.ptr[kid(d i)].b not=? 0)
+    }
+    let unused:array<int64>=[]
+    map_args(pnames hasdef args @unused dewy_param_kinds.get(d) ?? [] true d)
+}
+# What a literal argument breaks when its refined parameter's atoms compare the
+# value with literals: the first it fails, as the contract reads; "" otherwise.
+refuted_literal_contract=(a:ExprHintWord t0:ExprHintWord name:string):>string=>$unsafe {
+    let t=prune(t0)
+    # (a contract its type's name already spells, `1 | 2 | 3`, says it there)
+    if not refine_active or types.ptr[t].kind not=? 'refined' or types.ptr[t].bits =? -1 or not contains(dt(t) "<refinement>") {return ""}
+    let v:ExprHintWord=0
+    if nodes.ptr[a].kind =? 'int_lit' and not has_flag(a NF_U64) {v=nodes.ptr[a].ival} else if nodes.ptr[a].kind =? 'unary' and nodes.ptr[a].op =? int32(59) and nodes.ptr[ExprHintWord(nodes.ptr[a].a)].kind =? 'int_lit' {v=-nodes.ptr[ExprHintWord(nodes.ptr[a].a)].ival}
+    else {return ""}
+    loop atom in ref_predicates[ExprHintWord(types.ptr[t].st)] {
+        if atom.a.unsigned or atom.b.unsigned {return ""}
+        if atom.a.kind =? 0 and atom.b.kind =? 1 and atom.a.path.length =? 0 {
+            if not ref_literal_holds(atom.op v atom.b.value + atom.b.offset) {return "argument '{name}' is {v}, which breaks its contract `{name} {wit_op(atom.op)} {atom.b.value + atom.b.offset}`"}
+        }
+        else if atom.a.kind =? 1 and atom.b.kind =? 0 and atom.b.path.length =? 0 {
+            if not ref_literal_holds(atom.op atom.a.value v + atom.b.offset) {
+                let flipped=if atom.op =? 'lt' {Tok.gt} else if atom.op =? 'le' {Tok.ge} else {atom.op}
+                return "argument '{name}' is {v}, which breaks its contract `{name} {wit_op(flipped)} {atom.a.value}`"
+            }
+        }
+    }
+    ""
+}
+# Suggested names as the source at pos spells them: Dewy's own words for the
+# implementation's builtin types and sequence length.
+surface_names=(names:array<int64> pos:ExprHintWord):>array<int64>=>{
+    if not dewy_at(pos) {return names}
+    let out:array<int64>=[]
+    loop nm in names {
+        let w=name_of(nm)
+        let d=if w =? "len" {"length"} else if w =? "str" {"string"} else if w =? "f64" {"float64"} else if w =? "f32" {"float32"} else {""}
+        if d =? "" and (w as array<uint8>).length >=? 2 and (w as array<uint8>).length <=? 3 and ((w as array<uint8>)[0] =? b'i' or (w as array<uint8>)[0] =? b'u') and is_digit((w as array<uint8>)[1]) {
+            if w =? "i8" or w =? "i16" or w =? "i32" or w =? "i64" {d="int{__str_slice(w 1 (w as array<uint8>).length)}"}
+            if w =? "u8" or w =? "u16" or w =? "u32" or w =? "u64" {d="uint{__str_slice(w 1 (w as array<uint8>).length)}"}
+        }
+        out.push(if d not=? "" {intern(d)} else {nm})
+    }
+    out
+}
+# the operator inside the operand of the `as` at c that its right edge ends in, and that right operand
+regroup_edge=(c:ExprHintWord):>[int64 int64]=>$unsafe {
+    let r=ExprHintWord(nodes.ptr[c].a)
+    let op:ExprHintWord=0
+    loop true {
+        let k=nodes.ptr[r].kind
+        if k =? 'and_' or k =? 'or_' or k =? 'binary' {
+            op=r
+            r=ExprHintWord(nodes.ptr[r].b)
+        }
+        else if k =? 'not_' or k =? 'unary' {
+            op=r
+            r=ExprHintWord(nodes.ptr[r].a)
+        }
+        else {break}
+    }
+    [op r]
+}
+# the help for a type error at node n if `as` at cast c would have held it under the other grouping
+regroup_as_note=(c:ExprHintWord n:ExprHintWord):>bool=>$unsafe {
+    let p=nodes.ptr[n].pos
+    let [op r]=regroup_edge(c)
+    if op =? 0 or nodes.ptr[r].pos not=? p {return false}
+    let f=pos_file(p)
+    let name=regroup_op_name(op)
+    let ty=regroup_type_text(c)
+    let src=files[f].src
+    let sb=src as array<uint8>
+    let as_at=pos_off(nodes.ptr[ExprHintWord(nodes.ptr[c].b)].pos)
+    loop as_at >? 0 and (sb[as_at - 1] =? b' ' or sb[as_at - 1] =? b'\t') {as_at -= 1}
+    if as_at <? 2 or __str_slice(src as_at - 2 as_at) not=? "as" or ty =? "" {return false}
+    let operand=regroup_source(f pos_off(p) as_at - 2)
+    if operand =? "" or not regroup_balanced(operand) {return false}
+    err_notes.push([(-1) "help: `as` binds looser than `{name}`, so it converts everything before it, not just `{operand}`: parenthesize what you mean to convert, as in `{name} ({operand} as {ty} ...)`"])
+    true
+}
+# the same, if the `??` on the left of operator par has the node at fault as its fallback
+regroup_coalesce_note=(par:ExprHintWord n:ExprHintWord):>bool=>$unsafe {
+    let p=nodes.ptr[n].pos
+    let co=ExprHintWord(nodes.ptr[par].a)
+    if nodes.ptr[co].kind not=? 'coalesce' or nodes.ptr[ExprHintWord(nodes.ptr[co].b)].pos not=? p or nodes.ptr[par].kind =? 'not_' {return false}
+    let name=regroup_op_name(par)
+    let f=pos_file(p)
+    let right=ExprHintWord(nodes.ptr[par].b)
+    if right =? 0 or pos_file(nodes.ptr[right].pos) not=? f {return false}
+    let fallback=regroup_source(f pos_off(p) pos_off(nodes.ptr[right].pos))
+    if (fallback as array<uint8>).length >? (name as array<uint8>).length and __str_slice(fallback (fallback as array<uint8>).length - (name as array<uint8>).length (fallback as array<uint8>).length) =? name {
+        fallback=__str_slice(fallback 0 (fallback as array<uint8>).length - (name as array<uint8>).length)
+    }
+    loop (fallback as array<uint8>).length >? 0 and (fallback as array<uint8>)[(fallback as array<uint8>).length - 1] =? b' ' {fallback=__str_slice(fallback 0 (fallback as array<uint8>).length - 1)}
+    if fallback =? "" or not regroup_balanced(fallback) {return false}
+    err_notes.push([(-1) "help: `??` binds tighter than `{name}`, so its fallback is just `{fallback}` and `{name}` compares the result: parenthesize what you mean as the fallback, as in `?? ({fallback} {name} ...)`"])
+    true
+}
+# the help for a type error at node n, if the other grouping of an `as` or `??` around it would hold it
+# (a search of the nodes: it runs only for an error, and only in Dewy source)
+regroup_note=(n:ExprHintWord):>void=>$unsafe {
+    if not dewy_at(nodes.ptr[n].pos) {return}
+    let i:ExprHintWord=1
+    loop i <? nodes.length {
+        let k=nodes.ptr[i].kind
+        if k =? 'cast' {
+            if nodes.ptr[i].aux2 not=? 1 and regroup_as_note(i n) {return}
+        }
+        else if k =? 'and_' or k =? 'or_' or (k =? 'binary' and nodes.ptr[i].op >=? 69 and nodes.ptr[i].op <=? 74) {
+            if regroup_coalesce_note(i n) {return}
+        }
+        i += 1
+    }
+}
+# Only naming Canceled selects it: a broad exception family does not opt in.
+# Resolve aliases as types; inspect union syntax before families can absorb members.
+coalesce_names_canceled=(tn:ExprHintWord canceled:ExprHintWord):>bool=>$unsafe {
+    if nodes.ptr[tn].kind =? 'tunion' {
+        loop c in kids(tn) {
+            if coalesce_names_canceled(c canceled) {return true}
+        }
+        return false
+    }
+    let t=prune(resolve_type(tn))
+    if family_annotation(t) {return false}
+    value_members(t).contains(canceled)
+}
