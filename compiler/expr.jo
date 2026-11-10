@@ -161,6 +161,7 @@ use 'range_checks.dewy'
 use 'collection_checks.dewy'
 use 'slice_checks.dewy'
 use 'gpu_type_checks.dewy'
+use 'numeric_constants.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -307,19 +308,6 @@ rational_divisor = (n: int):
     # (a quantity divides as its number: the same obligation, said as one)
     t = quantity_base(prune(ntype(e)))
     if is_int(t) or t == T_MATH_INT or rational_constants.has(e) or bundled_rational_type(t): fact_divisors[n] = 1
-
-# (node n, replaced by the bundled rational module's fname applied to its old content)
-rational_wrap = (n: int, fname: str, to: int) -> int:
-    source = nodes.len()
-    nodes.push(nodes[n])
-    move_divisor(n, source)
-    add_flag(source, NF_CHECKED)
-    pos = nodes[n].pos
-    ensure_bundled_import("rational.dewy", "$dewy_rational", pos)
-    nodes[n] = Node(kind = .call, pos = pos, a = i32(bc_field(bc_ident("$dewy_rational", pos), fname, pos)))
-    set_list(n, [source])
-    check_expr(n, to)
-    n
 
 decimal_part = (digits: str, pos: int) -> int:
     ensure_bundled_import("bigint.dewy", "$dewy_decimal_bigint", pos)
@@ -6742,17 +6730,6 @@ member_call = (n: int, data: bool, expected: int) -> int:
     else: nodes[method].name = i32(intern("len"))
     nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(method))
     check_expr(n, expected)
-
-# `float64.max` and the rest; `min` is the most negative finite value, as `int64.min` is
-float_constant = (name: str, wide: bool) -> f64:
-    if name == "max": return if wide: 1.7976931348623157e308 else: 3.4028234663852886e38
-    if name == "min": return if wide: -1.7976931348623157e308 else: -3.4028234663852886e38
-    if name == "min_positive": return if wide: 2.2250738585072014e-308 else: 1.1754943508222875e-38
-    if name == "min_subnormal": return if wide: 5e-324 else: 1.401298464324817e-45
-    if name == "epsilon": return if wide: 2.220446049250313e-16 else: 1.1920928955078125e-07
-    if name == "max_exact_int": return if wide: 9007199254740992.0 else: 16777216.0
-    if name == "inf": return __INF
-    __NAN
 
 member_missing = (n: int, bt: int, expected: int, bypass: mut bool) -> int:
     fname = int(nodes[n].name)

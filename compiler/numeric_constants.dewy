@@ -1,0 +1,33 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED add_flag nodes set_list)
+from p"check.jo" import (ensure_bundled_import)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_field bc_ident)
+from p"expr.jo" import (move_divisor)
+from p"node_store.dewy" import (Node)
+
+NumericConstantWord:type=int64<overflow='wrap'>
+# (node n, replaced by the bundled rational module's fname applied to its old content)
+rational_wrap=(n:NumericConstantWord fname:string to:NumericConstantWord):>int64=>$unsafe {
+    let source=nodes.length
+    nodes.push(nodes.ptr[n])
+    move_divisor(n source)
+    add_flag(source NF_CHECKED)
+    let pos=nodes.ptr[n].pos
+    ensure_bundled_import("rational.dewy" "$dewy_rational" pos)
+    nodes.ptr[n]=Node(kind='call' pos=pos a=int32(bc_field(bc_ident("$dewy_rational" pos) fname pos)))
+    set_list(n [source])
+    check_expr(n to);
+    n
+}
+# `float64.max` and the rest; `min` is the most negative finite value, as `int64.min` is
+float_constant=(name:string wide:bool):>float64=>{
+    if name =? "max" {return if wide {1.7976931348623157e308} else {3.4028234663852886e38}}
+    if name =? "min" {return if wide {-1.7976931348623157e308} else {-3.4028234663852886e38}}
+    if name =? "min_positive" {return if wide {2.2250738585072014e-308} else {1.1754943508222875e-38}}
+    if name =? "min_subnormal" {return if wide {5e-324} else {1.401298464324817e-45}}
+    if name =? "epsilon" {return if wide {2.220446049250313e-16} else {1.1920928955078125e-07}}
+    if name =? "max_exact_int" {return if wide {9007199254740992.0} else {16777216.0}}
+    if name =? "inf" {return __INF}
+    __NAN
+}
