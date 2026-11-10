@@ -1477,7 +1477,7 @@ check_place = (n: int, for_mut: bool):
             if rf & (LF_CAPTURE | LF_VALUECAP) == LF_CAPTURE | LF_VALUECAP and implicit_capture(r): implicit_capture_write(r, if place_write_pos != 0: place_write_pos else: nodes[n].pos)
             ag = alias_global(r)
             if ag >= 0 and readonly_global(ag): place_fatal(nodes[n].pos, "cannot modify const '{nm}'")
-            if rf & LF_PARAM != 0 and rf & LF_MUTPARAM == 0: place_fatal(nodes[n].pos, "cannot modify parameter '{nm}' (parameters are read-only; {jd(nodes[n].pos, "mark it `mut`", "take it by place, `@{nm}`,")} or copy it with `let {nm} = {nm}`)")
+            if rf & LF_PARAM != 0 and rf & LF_MUTPARAM == 0 and not consumed_receiver(r): place_fatal(nodes[n].pos, "cannot modify parameter '{nm}' (parameters are read-only; {jd(nodes[n].pos, "mark it `mut`", "take it by place, `@{nm}`,")} or copy it with `let {nm} = {nm}`)")
             if rf & LF_BYREF != 0 and via_closure: fatal(nodes[n].pos, "cannot modify loop variable '{nm}', a copy of an element, and the function changing it runs later: change the element by its position, `loop i in 0.. and {nm} in xs:` and then `(): xs[i]...` in the function")
             if rf & LF_BYREF != 0: place_fatal(nodes[n].pos, "cannot modify loop variable '{nm}' (use `{mutable_loop_syntax(nodes[n].pos)}` to modify elements)")
             nf = f | LF_ASSIGNED
@@ -7410,6 +7410,12 @@ bare_fn_value = (n: int, t: int, text: str, expected: int) -> int:
     if expected != 0 and is_fn_type(ex) and not (takes_none and is_fn_type(int(types[ft].elem))): bare_fn_error(n, text, false)
     if not takes_none: bare_fn_error(n, text, true)
     bare_call(n, expected)
+
+# (the object of the `$__consume__` method being checked: its own, moved in, so it may write it)
+consumed_receiver = (l: int) -> bool:
+    if ownership_consumers.len() == 0 or cx < 0: return false
+    f = int(ctxs[cx].inst)
+    f > 0 and fns[f].decl != 0 and ownership_consumers.has(int(fns[f].decl)) and fns[f].params.len() > 0 and fns[f].params[0] == l
 
 # `select(@lines.receive @heart.next ...)` (decisions.md, batch 7): each wait it is given is a
 # channel's `receive` or a ticker's `next`, written in the call on a local or a field chain;

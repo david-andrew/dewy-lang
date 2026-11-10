@@ -21,7 +21,7 @@ from p"ir.jo" import (VI dbg_on ir ir_pos)
 from p"copies.jo" import (copies_on copy_inputs)
 from p"copy_ops.dewy" import (copies_prepare)
 from p"exact_guards.jo" import (eg_demanded)
-from p"lower_storage.dewy" import (endc iff new_temp norm ret_vt scope_add_local scope_push store_type store_val vc vt_of)
+from p"lower_storage.dewy" import (endc iff load_val new_temp norm ret_vt scope_add_local scope_push store_type store_val vc vt_of)
 from p"exact_loop.jo" import (exact_loop_guard exact_loop_plan)
 from p"exact.jo" import (exact_nodes exact_owners)
 from p"exact_reset_loop.jo" import (exr_plan)
@@ -215,8 +215,13 @@ lower_inst=(lf:LFnWord f:LFnWord):>void=>$unsafe {
         if fl & LF_PARAM not=? 0 {
             if copy_inputs.has(l) and (not files.ptr[pos_file(nodes.ptr[LFnWord(fns.ptr[f].decl)].pos)].is_dewy or ownership_consumers.length not=? 0 and ownership_consumers.has(LFnWord(fns.ptr[f].decl))) {
                 let s=new_temp(t)
-                store_val(t e_slot(s) 0 LFnWord(locals.ptr[l].vreg));
+                # (a place parameter's vreg is the caller's address: the value copied from there)
+                let v=LFnWord(locals.ptr[l].vreg)
+                if fl & LF_MUTPARAM not=? 0 and vc(t) not=? VC_AGG {v = load_val(t v 0);}
+                store_val(t e_slot(s) 0 v);
                 locals.ptr[l].offset = int32<overflow='wrap'>(s);
+                # (the body reads and writes the owned copy, which its drop then sees)
+                if fl & LF_MUTPARAM not=? 0 or vc(t) =? VC_AGG {e_mov(LFnWord(locals.ptr[l].vreg) e_slot(s));}
                 continue
             }
             if fl & LF_ADDR not=? 0 and fl & LF_MUTPARAM =? 0 and vc(t) not=? VC_AGG {

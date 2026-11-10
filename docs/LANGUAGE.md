@@ -2125,7 +2125,9 @@ each concrete type; structural generic records compose their fields' hooks.
 Generic functions cannot implicitly duplicate a move-only type argument.
 A method marked with the compiler-only `$__consume__` takes its receiver: the
 call moves the owner in (at its proven last use, like any owning argument), and
-the method owns and drops it. Other methods borrow their receiver.
+the method owns and drops it. It may write the fields of that object, its own, and its
+drop hook sees what it wrote; that changes no caller's place, so the call also works on a
+temporary or on a value a `spawn` captured. Other methods borrow their receiver.
 A union with an owning alternative (`Permit | Stop`, `Reserved<T> | Closed<Reserved<T>>`)
 is an owner: dropping it drops its active alternative, a widening or a return moves
 it, and copying it copies the active alternative (a move-only alternative makes the

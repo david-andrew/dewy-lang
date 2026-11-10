@@ -9,7 +9,7 @@ from p"dewy_context.jo" import (dc_parser)
 from p"dewy_methods.jo" import (DewyMethod dewy_allowed_members dewy_decl_members dewy_decl_methods dewy_deferred dewy_deferred_callees dewy_deferred_files dewy_deferred_names dewy_deferred_order dewy_methods dewy_methods_inferred dewy_module_of_file dewy_reachable dewy_receivers dewy_seen_new dewy_type_members)
 from p"error_ops.dewy" import (mint_of_any)
 from p"expr.jo" import (AUX2_PARTIAL IN intrinsics)
-from p"ownership.jo" import (ownership_hooks)
+from p"ownership.jo" import (ownership_consumers ownership_hooks)
 from p"prelude.jo" import (demand_prelude_name prelude_new_decls)
 from p"types.jo" import (T_VOID prune structs types)
 from p"util.jo" import (fatal intern name_of pos_file)
@@ -155,7 +155,8 @@ dewy_infer_methods=():>void=>$unsafe {
             loop param in kids(decl) {
                 if dewy_changes(MethodWord(nodes.ptr[param].b) receiver i false) {changes=true}
             }
-            if changes {
+            # (a `$__consume__` method owns its object: writing it changes no caller's place)
+            if changes and not ownership_consumers.has(decl) {
                 dewy_methods[i].state=3
                 progress=true
             }

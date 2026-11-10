@@ -129,7 +129,8 @@ dewy_infer_methods = ():
             changes = dewy_changes(int(nodes[decl].b), receiver, i, false)
             loop param in kids(decl):
                 if dewy_changes(int(nodes[param].b), receiver, i, false): changes = true
-            if changes:
+            # (a `$__consume__` method owns its object: writing it changes no caller's place)
+            if changes and not ownership_consumers.has(decl):
                 dewy_methods[i].state = 3
                 progress = true
         if not progress: break

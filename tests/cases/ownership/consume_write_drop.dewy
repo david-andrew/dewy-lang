@@ -1,0 +1,48 @@
+# modes: native native-release
+# A `$__consume__` method owns its receiver: a field it writes is the value its drop hook
+# then reads, for a one-field record, a wider one and a generic one. Writing its own object
+# changes no caller's place, so it runs on a temporary or a value a spawn captured.
+Flag:type = [
+    sent:bool
+    $__drop__
+    release = ():>void => if sent printl"flag: sent" else printl"flag: given up"
+    $__consume__
+    send = ():>void => { sent = true }
+]
+Permit:type = [
+    id:int64
+    sent:bool
+    $__drop__
+    release = ():>void => if sent printl"permit: sent" else printl"permit: given up"
+    $__consume__
+    send = (value:int64):>void => {
+        sent = true
+        printl"send {value} on {id}"
+    }
+]
+Held:type = <T>[
+    value:T
+    count:int64
+    $__drop__
+    release = ():>void => if count =? 2 printl"held: counted twice" else printl"held: not counted"
+    $__consume__
+    finish = ():>void => {
+        count += 1
+        count += 1
+    }
+]
+main = () => {
+    let f = Flag[false]
+    f.send()
+    let _ = Flag[false]
+    let p = Permit[1 false]
+    p.send(7)
+    let _ = Permit[2 false]
+    let h = Held<int64>[5 0]
+    h.finish()
+    Flag[false].send()
+    let c = Permit[3 false]
+    concurrent {
+        spawn { c.send(9) }
+    }
+}

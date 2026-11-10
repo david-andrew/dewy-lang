@@ -194,8 +194,13 @@ lower_inst = (lf: int, f: int):
         if fl & LF_PARAM != 0:
             if copy_inputs.has(l) and (not files[pos_file(nodes[int(fns[f].decl)].pos)].is_dewy or ownership_consumers.len() != 0 and ownership_consumers.has(int(fns[f].decl))):
                 s = new_temp(t)
-                store_val(t, e_slot(s), 0, int(locals[l].vreg))
+                # (a place parameter's vreg is the caller's address: the value copied from there)
+                v = int(locals[l].vreg)
+                if fl & LF_MUTPARAM != 0 and vc(t) != VC_AGG: v = load_val(t, v, 0)
+                store_val(t, e_slot(s), 0, v)
                 locals[l].offset = i32(s)
+                # (the body reads and writes the owned copy, which its drop then sees)
+                if fl & LF_MUTPARAM != 0 or vc(t) == VC_AGG: e_mov(int(locals[l].vreg), e_slot(s))
                 continue
             if fl & LF_ADDR != 0 and fl & LF_MUTPARAM == 0 and vc(t) != VC_AGG:
                 # address-taken scalar parameter: move to memory
