@@ -1,6 +1,6 @@
 $runtime_checks
 from p"checks_thin.dewy" import (jd)
-from p"expr.jo" import (time_policy_why time_zone_failure)
+from p"expr_error_context.dewy" import (time_policy_why time_zone_failure)
 from p"unit_rare.dewy" import (time_core_type)
 from p"checked_eval.dewy" import (cx_token_values)
 from p"@lib/core/str.jo" import (is_digit lower starts_with upper)
@@ -94,7 +94,7 @@ union_operand_why=(n:CompareWord u:CompareWord):>string=>$unsafe {
     let others:CompareWord=0
     loop m in value_members(prune(u)) {
         if exception_member(m) {
-            if time_core_type(m "Gap") or time_zone_failure(m) {return time_policy_why()}
+            if time_core_type(m "Gap") or time_zone_failure(m) {return time_policy_why}
             continue
         }
         if member =? 0 and is_numeric(m) {member=m} else {others += 1}

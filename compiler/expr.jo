@@ -168,6 +168,7 @@ use 'expr_cold_queries.dewy'
 use 'expr_source_hints.dewy'
 use 'concat_hints.dewy'
 use 'cancel_hints.dewy'
+use 'expr_error_context.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -654,19 +655,6 @@ str_set_coerced = (n: int, to: int) -> bool:
             if ms != 0 and str_set_within(fs, ms): fits = true
         if not fits: str_set_text_of(n)
     false
-
-# `a <? b`, `max(a b)`, `xs.sorted()`... on a string-literal union, in Dewy code (or in the
-# library's generic code a Dewy call made): its members are unordered, so there is no order to use
-str_set_unordered = (pos: int, ta: int, tb: int):
-    t = ta
-    if str_set_of(t) == 0: t = tb
-    set = str_sets[str_set_of(t)]
-    rank = ""
-    loop i in 0.. and value in set:
-        if i > 0 and i < 3: rank += " "
-        if i < 3: rank += "'{value}' -> {i}"
-    if set.len() > 3: rank += " ..."
-    fatal(pos, "{dt(t)} has no order: the members of a union of string literals are unordered, so `<?`, `>?`, `min`, `max` and sorting don't apply; order by a key you choose (`const RANK:totaldict<{dt(t)} int64> = [{rank}]`, then `xs.sorted(key=(p:{dt(t)}) => RANK[p])`) or by the text (`\"\{p}\"`)")
 
 # ordering at pos is the program's Dewy code's: Dewy source, or the library's code inside an
 # instance the innermost program call that made it is Dewy's
@@ -1328,12 +1316,6 @@ is_map_entries_type = (t: int) -> bool:
 
 # The method whose object is being checked as a place, for its diagnostics.
 place_method = 0
-
-implicit_capture_write = (l: int, pos: int):
-    nm = name_of(int(locals[l].name))
-    err_notes.push((int(nodes[int(fns[int(locals[l].owner)].decl)].pos), "note: the closure is here"))
-    err_notes.push((-1, "help: `($capture {nm}) => ...` gives the closure its own copy, kept between calls; `($capture @{nm}) => ...` changes the enclosing '{nm}'"))
-    fatal(pos, "this closure changes '{nm}', which it captures implicitly: capture it explicitly")
 
 place_write_pos = 0 # the written name, when a narrowed alias is resolved to its variable
 
@@ -3710,17 +3692,6 @@ KEY_NAMES = ["esc", "escape", "return", "enter", "spacebar", "space", "del", "de
     "kp_enter", "enter", "numpad_enter", "enter", "kp_add", "kp_plus", "kp_subtract", "kp_minus", "kp_multiply", "kp_star", "kp_divide", "kp_slash",
     "kp_decimal", "kp_period", "kp_dot", "kp_period"]
 
-# a == b, a < b with types that do not compare
-# An arithmetic or comparison operand that is a union: the member to narrow to, as it
-# is spelled, and when the other members are all failures (`to_int(s)`), the fallback.
-# (`z + 1day` of a zoned time known at run time: a gap or repeated hour is the program's to answer)
-time_zone_failure = (m: int) -> bool:
-    if tkind(m) != .struct_: return false
-    nm = structs[int(types[prune(m)].st)].name
-    d = int(structs[int(types[prune(m)].st)].decl)
-    (nm == "Gap" or nm == "Ambiguous") and d != 0 and pos_in_lib(nodes[d].pos)
-
-time_policy_why = () -> str: " (a zoned time's date can land in a clock change's gap or repeated hour: say what that means with `z.add(1day fold='later' gap='next')`, or `$time.fold` and `$time.gap` for the scope; a `const` zoned time is checked while compiling)"
 # (the prelude's Console, the type of `console`; 0 before the library is loaded)
 console_type_id = -1
 console_type = () -> int:

@@ -1,0 +1,43 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (fns locals)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"refine.jo" import (str_set_of str_sets)
+from p"type_ops.dewy" import (dt)
+from p"types.jo" import (prune structs tkind types)
+from p"util.jo" import (err_notes name_of pos_in_lib)
+
+ErrorContextWord:type=int64<overflow='wrap'>
+# `a <? b`, `max(a b)`, `xs.sorted()`... on a string-literal union, in Dewy code (or in the
+# library's generic code a Dewy call made): its members are unordered, so there is no order to use
+str_set_unordered=(pos:ErrorContextWord ta:ErrorContextWord tb:ErrorContextWord):>never=>{
+    let t=ta
+    if str_set_of(t) =? 0 {t=tb}
+    let set=str_sets[str_set_of(t)]
+    let rank=""
+    loop i in 0.. and value in set {
+        if i >? 0 and i <? 3 {rank="{rank} "}
+        if i <? 3 {rank="{rank}'{value}' -> {i}"}
+    }
+    if set.length >? 3 {rank="{rank} ..."}
+    fatal(pos "{dt(t)} has no order: the members of a union of string literals are unordered, so `<?`, `>?`, `min`, `max` and sorting don't apply; order by a key you choose (`const RANK:totaldict<{dt(t)} int64> = [{rank}]`, then `xs.sorted(key=(p:{dt(t)}) => RANK[p])`) or by the text (`\"\{p}\"`)");
+}
+implicit_capture_write=(l:ErrorContextWord pos:ErrorContextWord):>never=>$unsafe {
+    let nm=name_of(ErrorContextWord(locals.ptr[l].name))
+    err_notes.push([ErrorContextWord(nodes.ptr[ErrorContextWord(fns.ptr[ErrorContextWord(locals.ptr[l].owner)].decl)].pos) "note: the closure is here"])
+    err_notes.push([(-1) "help: `($capture {nm}) => ...` gives the closure its own copy, kept between calls; `($capture @{nm}) => ...` changes the enclosing '{nm}'"])
+    fatal(pos "this closure changes '{nm}', which it captures implicitly: capture it explicitly");
+}
+# a == b, a < b with types that do not compare
+# An arithmetic or comparison operand that is a union: the member to narrow to, as it
+# is spelled, and when the other members are all failures (`to_int(s)`), the fallback.
+# (`z + 1day` of a zoned time known at run time: a gap or repeated hour is the program's to answer)
+time_zone_failure=(m:ErrorContextWord):>bool=>$unsafe {
+    if tkind(m) not=? 'struct_' {return false}
+    let nm=structs.ptr[ErrorContextWord(types.ptr[prune(m)].st)].name
+    let d=ErrorContextWord(structs.ptr[ErrorContextWord(types.ptr[prune(m)].st)].decl)
+    (nm =? "Gap" or nm =? "Ambiguous") and d not=? 0 and pos_in_lib(nodes.ptr[d].pos)
+}
+time_policy_why=():>string=>{
+    " (a zoned time's date can land in a clock change's gap or repeated hour: say what that means with `z.add(1day fold='later' gap='next')`, or `$time.fold` and `$time.gap` for the scope; a `const` zoned time is checked while compiling)"
+}

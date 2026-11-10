@@ -8,7 +8,8 @@ from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_if bc
 from p"checks_call_hints.dewy" import (a_type)
 from p"checks_thin.dewy" import (check_stmt check_vardecl jd pool_library_fn resolve_binding_type resolve_type)
 from p"checks_thin_expr.dewy" import (array_has_spread is_fn_type)
-from p"expr.jo" import (bc_assign bc_bin coerce dewy_position_known last_checked ntype resolve_by_types time_policy_why time_zone_failure type_node_of)
+from p"expr.jo" import (bc_assign bc_bin coerce dewy_position_known last_checked ntype resolve_by_types type_node_of)
+from p"expr_error_context.dewy" import (time_policy_why time_zone_failure)
 from p"slice_checks.dewy" import (dewy_slice_args)
 from p"range_checks.dewy" import (part_spec)
 from p"juxtapose.dewy" import (juxt_space_hint)
@@ -326,7 +327,7 @@ var_type_error=(lhs:PlaceUpdateWord lt:PlaceUpdateWord rt:PlaceUpdateWord at:Pla
     # (m = m + 1day, a zoned time: the sum may be a gap or repeated hour)
     if is_union(rt) {
         loop member in union_members(prune(rt)) {
-            if time_zone_failure(member) {how="the result may land in a clock change{time_policy_why()}"}
+            if time_zone_failure(member) {how="the result may land in a clock change{time_policy_why}"}
         }
     }
     fatal(at "'{nm}' has type {dt(lt)}{made} and cannot hold this {dt(rt)}: {how}")
