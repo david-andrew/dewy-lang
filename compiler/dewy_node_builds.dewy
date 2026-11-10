@@ -1,7 +1,7 @@
 $runtime_checks
 from p"ast.jo" import NF_LOOPCOUNT
 from p"@lib/core/str.jo" import (join)
-from p"ast.jo" import (NF_GENERIC NF_INCLUSIVE NF_LANG_BODY NF_STMT add_flag has_flag kids kids2 mk nkids nodes set_list set_list2)
+from p"ast.jo" import (NF_GENERIC NF_INCLUSIVE NF_LANG_BODY NF_STMT add_flag dewy_param_kinds has_flag kids kids2 mk nkids nodes set_list set_list2)
 from p"check.jo" import (expectation_ifs statement_watch target_arm64 target_macos target_wasm target_windows)
 from p"checks_builders.dewy" import (bc_block bc_call bc_ident bc_if bc_int bc_let bc_stmt)
 from p"dewy_grammar.dewy" import (dw_designed_directive)
@@ -22,6 +22,9 @@ dw_add_receiver=(fn_:NodeBuildWord receiver:NodeBuildWord receiver_type:NodeBuil
     nodes.ptr[param].name=int32(receiver)
     nodes.ptr[param].a=int32(receiver_type)
     set_list(fn_ [param kids(fn_)...])
+    # (the parameters' kinds, `...` and `<v:T>`, count from the receiver now)
+    let kinds=dewy_param_kinds.get(fn_)
+    if kinds not=? none {dewy_param_kinds[fn_]=[0 kinds...]}
 }
 # `$target`: the full name of the target being compiled for (docs/LANGUAGE.md,
 # "Targets"). A name has only the fields it needs: the processor (or `c`, `wasm32`),

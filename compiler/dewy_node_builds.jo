@@ -48,6 +48,8 @@ dw_add_receiver = (fn_: int, receiver: int, receiver_type: int):
     nodes[param].name = i32(receiver)
     nodes[param].a = i32(receiver_type)
     set_list(fn_, [param] + kids(fn_))
+    # (the parameters' kinds, `...` and `<v:T>`, count from the receiver now)
+    if let kinds = dewy_param_kinds.get(fn_): dewy_param_kinds[fn_] = [0] + kinds
 # `$target`: the full name of the target being compiled for (docs/LANGUAGE.md,
 # "Targets"). A name has only the fields it needs: the processor (or `c`, `wasm32`),
 # then the system. A processor alone asks for the current machine, so `$target` is

@@ -30,7 +30,7 @@ Channel:type = <T>[
     }
     # (Unsent with the reason Timeout or Closed, and Canceled as the call's own result; `0s` is
     # a poll)
-    send = <D>(value:T timeout:D):>void | Unsent<T> | Canceled => {
+    send = <D>(value:T ... timeout:D):>void | Unsent<T> | Canceled => {
         let code = __chan_send_wait_until(__h __chan_deadline(__task_nanoseconds(timeout)))
         if code =? 2 return Canceled
         if code =? 3 return __unsent<T>(value 5)
@@ -49,7 +49,7 @@ Channel:type = <T>[
         __chan_take(__h)
     }
     # (Timeout when nothing came before the time passed; a buffered value wins a `0s` poll)
-    receive = <D>(timeout:D):>T | Closed | Canceled | Timeout => {
+    receive = <D>(... timeout:D):>T | Closed | Canceled | Timeout => {
         let code = __chan_receive_wait_until(__h __chan_deadline(__task_nanoseconds(timeout)))
         if code =? 1 return Closed
         if code =? 2 return Canceled

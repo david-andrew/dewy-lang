@@ -12,7 +12,7 @@ Ticker:type = [
         if __ticker_wait(__t 0) =? 2 return Canceled
         Tick()
     }
-    next = <D>(timeout:D):>Tick | Canceled | Timeout => {
+    next = <D>(... timeout:D):>Tick | Canceled | Timeout => {
         let code = __ticker_wait(__t __chan_deadline(__task_nanoseconds(timeout)))
         if code =? 2 return Canceled
         if code =? 3 return Timeout
@@ -80,10 +80,10 @@ Merged:type = <T>[
 ]
 
 merged = <T>(a:(():>T | Closed | Canceled)):>Merged<T> => Merged<T>[[a] __merge_new(1 0)]
-merged = <T D>(a:(():>T | Closed | Canceled) stop_when_idle:D):>Merged<T> => Merged<T>[[a] __merge_new(1 __task_nanoseconds(stop_when_idle))]
+merged = <T D>(a:(():>T | Closed | Canceled) ... stop_when_idle:D):>Merged<T> => Merged<T>[[a] __merge_new(1 __task_nanoseconds(stop_when_idle))]
 merged = <T>(a:(():>T | Closed | Canceled) b:(():>T | Closed | Canceled)):>Merged<T> => Merged<T>[[a b] __merge_new(2 0)]
-merged = <T D>(a:(():>T | Closed | Canceled) b:(():>T | Closed | Canceled) stop_when_idle:D):>Merged<T> => Merged<T>[[a b] __merge_new(2 __task_nanoseconds(stop_when_idle))]
+merged = <T D>(a:(():>T | Closed | Canceled) b:(():>T | Closed | Canceled) ... stop_when_idle:D):>Merged<T> => Merged<T>[[a b] __merge_new(2 __task_nanoseconds(stop_when_idle))]
 merged = <T>(a:(():>T | Closed | Canceled) b:(():>T | Closed | Canceled) c:(():>T | Closed | Canceled)):>Merged<T> => Merged<T>[[a b c] __merge_new(3 0)]
-merged = <T D>(a:(():>T | Closed | Canceled) b:(():>T | Closed | Canceled) c:(():>T | Closed | Canceled) stop_when_idle:D):>Merged<T> => Merged<T>[[a b c] __merge_new(3 __task_nanoseconds(stop_when_idle))]
+merged = <T D>(a:(():>T | Closed | Canceled) b:(():>T | Closed | Canceled) c:(():>T | Closed | Canceled) ... stop_when_idle:D):>Merged<T> => Merged<T>[[a b c] __merge_new(3 __task_nanoseconds(stop_when_idle))]
 merged = <T>(a:(():>T | Closed | Canceled) b:(():>T | Closed | Canceled) c:(():>T | Closed | Canceled) d:(():>T | Closed | Canceled)):>Merged<T> => Merged<T>[[a b c d] __merge_new(4 0)]
-merged = <T D>(a:(():>T | Closed | Canceled) b:(():>T | Closed | Canceled) c:(():>T | Closed | Canceled) d:(():>T | Closed | Canceled) stop_when_idle:D):>Merged<T> => Merged<T>[[a b c d] __merge_new(4 __task_nanoseconds(stop_when_idle))]
+merged = <T D>(a:(():>T | Closed | Canceled) b:(():>T | Closed | Canceled) c:(():>T | Closed | Canceled) d:(():>T | Closed | Canceled) ... stop_when_idle:D):>Merged<T> => Merged<T>[[a b c d] __merge_new(4 __task_nanoseconds(stop_when_idle))]

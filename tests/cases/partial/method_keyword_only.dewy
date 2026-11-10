@@ -1,0 +1,11 @@
+# modes: native native-release
+# A method's `...` makes the parameters after it keyword-only, counted from the method's own
+# parameters, not its hidden receiver (as `receive(timeout=)` is).
+Meter:type = [
+    base:int64
+    read = (... offset:int64):>int64 => if offset >? base offset else base
+]
+main = () => {
+    let m = Meter[4]
+    printl"{m.read(offset=3)} {m.read(offset=9)}"
+}
