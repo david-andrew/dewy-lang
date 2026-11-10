@@ -8333,14 +8333,9 @@ bc_flat_new_axis = (n: int) -> int:
     name = "$flat_axis{bc_count}"
     bc_count += 1
     length = bc_field(bc_ident(name, pos), "length", pos)
+    # (`new` inserts an extent-1 axis: an empty column is [0 1], as documented)
     rows = if row: bc_int(1, pos) else: length
     cols = if row: length else: bc_int(1, pos)
-    if column:
-        # Flattening an empty collection of rows has shape [0, 0].
-        cols = mk(.if_, pos)
-        nodes[cols].a = i32(bc_bin(.eq, clone(length), bc_int(0, pos), pos))
-        nodes[cols].b = i32(bc_block([bc_stmt(bc_int(0, pos), pos)], pos))
-        nodes[cols].c = i32(bc_block([bc_stmt(bc_int(1, pos), pos)], pos))
     bc_block([bc_let(name, receiver, pos), bc_stmt(bc_call("__array2", [bc_ident(name, pos), rows, cols], pos), pos)], pos)
 
 check_dotted = (n: int, expected: int) -> int:

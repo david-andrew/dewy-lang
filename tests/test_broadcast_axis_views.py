@@ -18,7 +18,7 @@ main=()=>{
   let col:NDArray<int64>=make(@calls xs)[.. new] .+ 0
   $runtime_assert(calls =? 2)
   $runtime_assert(row.shape =? [1 n])
-  $runtime_assert(col.shape =? [n (if n =? 0 0 else 1)])
+  $runtime_assert(col.shape =? [n 1])
   $runtime_assert(row.data =? xs and col.data =? xs)
   if n >? 0 {
    xs[0]=99
