@@ -292,7 +292,7 @@ nd_call=(n:CertificateWord @held:array<DlHeld>):>void=>$unsafe {
         nd_held_across(held pos "joins its tasks")
         return
     }
-    if (gname =? "within" or gname =? "race") and CertificateWord(fns.ptr[g].mod) =? concurrency_task_module {
+    if gname =? "within" and CertificateWord(fns.ptr[g].mod) =? concurrency_task_module {
         nd_wait(pos "waits for the task of `{gname}`")
         nd_held_across(held pos "waits for the task of `{gname}`")
         let none_held:array<DlHeld>=[]

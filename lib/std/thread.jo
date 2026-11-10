@@ -408,6 +408,8 @@ __merge_new = (n: int, idle: int) -> __Merge:
     p[2] = max(idle, 0)
     p[3] = time_ns()
     loop i in [0..n): p[5 + i] = 1
+    # (no source, as a spread of an empty array: finished at once, `open` false)
+    if n == 0: p[1] = 1
     __Merge(cell, p)
 
 __merge_live = (m: __Merge, i: int) -> bool: m.__p[5 + i] != 0

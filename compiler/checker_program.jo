@@ -118,7 +118,7 @@ check_program = (main_path: str):
     # (the locks prelude and the outcomes of locks, channels and queues declare nominal errors,
     # `DuplicateLock`, `Busy`, `Closed`, `Unsent`..., so each loads before they close when a Dewy
     # program names it: a probe per name, all asked before any loads, nothing otherwise)
-    locks = ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "DuplicateLock"])
+    locks = ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "DuplicateLock", "first_ok", "race"])
     channels = ts_dewy and prelude_named(["channel", "Channel"])
     queue = ts_dewy and prelude_named(["mpmc", "Mpmc"])
     ring = ts_dewy and prelude_named(["spsc", "Spsc", "SpscSender", "SpscReceiver"])
@@ -136,7 +136,7 @@ check_program = (main_path: str):
     # (the certified protocols are built on channels: theirs load first)
     if channels or protocols: dewy_prelude_module(intern("channel"))
     if protocols: concurrency_protocol_module = dewy_prelude_module(intern("serve"))
-    if ts_dewy and prelude_named(["first_ok"]): concurrency_first_ok_module = dewy_prelude_module(intern("first_ok"))
+    if ts_dewy and prelude_named(["first_ok", "race"]): concurrency_first_ok_module = dewy_prelude_module(intern("first_ok"))
     # (the time prelude declares `strict_today`'s error types, so it loads before they close)
     if ts_dewy and prelude_named(["strict_today", "AmbiguousToday", "UnknownToday"]): dewy_prelude_module(intern("strict_today"))
     prepare_nominals()
@@ -208,7 +208,7 @@ check_program = (main_path: str):
     loop m in modules:
         if m.is_prelude and int(m.file) != ide_force: continue
         loop d in m.decls:
-            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic: get_fn_inst(d, [], nodes[d].pos)
+            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic and not decl_has_rest(d): get_fn_inst(d, [], nodes[d].pos)
     loop nm in runtime_names: runtime_fn(nm)
     runtime_memeq = runtime_fn("__mem_eq")
     runtime_streq = runtime_fn("__str_eq")

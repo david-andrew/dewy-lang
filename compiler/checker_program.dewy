@@ -9,7 +9,7 @@ from p"checks_main.dewy" import (dewy_main_result names_known prelude_named)
 from p"checks_imports.dewy" import (bind_from_imports)
 from p"icount.jo" import (IC_CHECK IC_EFFECTS IC_FACTS IC_LIB IC_LOAD IC_OWNERSHIP IC_ROOT IC_SHARED)
 from p"icount_ops.dewy" import (ic_mod ic_restore ic_switch)
-from p"ast.jo" import (NF_EXTERN has_flag mk nkids nkids2 nodes set_list)
+from p"ast.jo" import (NF_EXTERN decl_has_rest has_flag mk nkids nkids2 nodes set_list)
 from p"types.jo" import (T_FLOAT T_NEVER T_VOID is_int prune ts_dewy)
 from p"type_ops.dewy" import (get_struct_inst layout)
 from p"arena.jo" import (runtime_switches)
@@ -97,7 +97,7 @@ check_program=(main_path:string):>void=>$unsafe {
     dewy_resolve_inherited()
     if dewy_methods.length >? 0 {dc_force_all()}
     dewy_infer_methods()
-    let locks=ts_dewy and prelude_named(["mutex" "Mutex" "lock_all" "DuplicateLock"])
+    let locks=ts_dewy and prelude_named(["mutex" "Mutex" "lock_all" "DuplicateLock" "first_ok" "race"])
     let channels=ts_dewy and prelude_named(["channel" "Channel"])
     let queue=ts_dewy and prelude_named(["mpmc" "Mpmc"])
     let ring=ts_dewy and prelude_named(["spsc" "Spsc" "SpscSender" "SpscReceiver"])
@@ -112,7 +112,7 @@ check_program=(main_path:string):>void=>$unsafe {
     }
     if channels or protocols {dewy_prelude_module(intern("channel"));}
     if protocols {concurrency_protocol_module=dewy_prelude_module(intern("serve"))}
-    if ts_dewy and prelude_named(["first_ok"]) {concurrency_first_ok_module=dewy_prelude_module(intern("first_ok"))}
+    if ts_dewy and prelude_named(["first_ok" "race"]) {concurrency_first_ok_module=dewy_prelude_module(intern("first_ok"))}
     # (the time prelude declares `strict_today`'s error types, so it loads before they close)
     if ts_dewy and prelude_named(["strict_today" "AmbiguousToday" "UnknownToday"]) {dewy_prelude_module(intern("strict_today"));}
     prepare_nominals()
@@ -196,7 +196,7 @@ check_program=(main_path:string):>void=>$unsafe {
     loop m in modules {
         if m.is_prelude and PGWord(m.file) not=? ide_force {continue}
         loop d in m.decls {
-            if nodes.ptr[d].kind =? 'fn_' and not has_flag(d NF_EXTERN) and not fn_sig(d).generic {get_fn_inst(d [] nodes.ptr[d].pos);}
+            if nodes.ptr[d].kind =? 'fn_' and not has_flag(d NF_EXTERN) and not fn_sig(d).generic and not decl_has_rest(d) {get_fn_inst(d [] nodes.ptr[d].pos);}
         }
     }
     loop nm in runtime_names {runtime_fn(nm);}

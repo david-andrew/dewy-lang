@@ -1,0 +1,10 @@
+# A spread's waits are not written in the call, so a pattern cannot name them.
+main = () => {
+    let a = channel<string>(1)
+    let b = channel<string>(1)
+    let waits = [@a.receive @b.receive]
+    match race(waits...) {
+        s:a.string => printl"a {s}"
+        _ => printl"other"
+    }
+}

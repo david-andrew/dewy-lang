@@ -259,7 +259,7 @@ nd_call = (n: int, held: mut DlHeld[]):
         nd_wait(pos, "joins its tasks")
         nd_held_across(held, pos, "joins its tasks")
         return
-    if (gname == "within" or gname == "race") and int(fns[g].mod) == concurrency_task_module:
+    if gname == "within" and int(fns[g].mod) == concurrency_task_module:
         nd_wait(pos, "waits for the task of `{gname}`")
         nd_held_across(held, pos, "waits for the task of `{gname}`")
         none_held: DlHeld[]

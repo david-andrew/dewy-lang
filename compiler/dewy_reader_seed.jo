@@ -560,7 +560,11 @@ rt_dc_atom = () -> int:
     # `@x` selects a place; `@f(a)` partially evaluates f
     if op == .at:
         operand = dc_parser.at
+        # (`f(@g.(xs)...)`: where a spread may follow, it may follow the operand)
+        saved_spread = dc_parser.reader.dc_spread_depth
+        if dc_parser.reader.dc_spread_depth == dc_parser.depth: dc_parser.reader.dc_spread_depth = dc_parser.depth + 1
         e = rt_dc_expr(160)
+        dc_parser.reader.dc_spread_depth = saved_spread
         if e == 0: return 0
         # (`@(m.lock())`: the operand is one group, whose call takes the place it returns)
         if nodes[e].kind == .call and dc_parser.tokens[operand].symbol == .lparen and rt_dc_closing(operand) == dc_parser.at - 1: nodes[e].aux2 = i32(AUX2_PLACE)
@@ -5982,6 +5986,9 @@ rt_dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] 
     # (`... by:int64`: a bare `...` ends the positional run; the parameters after it are named
     # only, dewy_param_kinds)
     keyword_only = false
+    # (`...rest:T`: a rest parameter, kind 3, collects the remaining positional arguments into an
+    # array<T>; the parameters after it are keyword-only)
+    rest_seen = false
     kinds_at = dc_parser.reader.dc_kinds.len()
     # (`(a:int64, b:int64)`: once a comma follows an annotation, one ends each, dc_comma_mistake below)
     commas = false
@@ -5990,14 +5997,21 @@ rt_dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] 
             if ps.len() > 0: break
         else if rt_dn_accept(.rparen): break
         first = dc_parser.tokens[dc_parser.at]
-        if first.symbol == .ellipsis and not bare and not keyword_only and dc_parser.tokens[dc_parser.at - 1].symbol == .lparen:
+        rest = false
+        if first.symbol == .ellipsis and not bare:
             after = dc_parser.tokens[dc_parser.at + 1]
-            if after.kind != .identifier or after.symbol != .none or not after.space or dc_parser.tokens[dc_parser.at + 2].symbol != .colon:
-                if not rt_dc_rest_parameter(): return 0
+            if not after.space and after.kind == .identifier and after.symbol == .none:
+                rt_dc_rest_parameter(rest_seen, keyword_only, lambda)
+                rest = true
+                rest_seen = true
+                dc_parser.at += 1
+                first = after
+            else:
+                if keyword_only or dc_parser.tokens[dc_parser.at - 1].symbol != .lparen: return 0
+                if after.kind != .identifier or after.symbol != .none or not after.space or dc_parser.tokens[dc_parser.at + 2].symbol != .colon: return 0
+                keyword_only = true
+                dc_parser.at += 1
                 continue
-            keyword_only = true
-            dc_parser.at += 1
-            continue
         if first.kind == .metatag and not bare:
             # (dw_function's mistakes: another modifier, `$capture` on a module function, before no
             # name, or before something else)
@@ -6060,6 +6074,7 @@ rt_dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] 
             break
         kind = 0
         if keyword_only: kind = 1
+        if rest: kind = 3
         if angled:
             kind = 2
             if rt_dn_peek() != .colon: return 0
@@ -6084,14 +6099,17 @@ rt_dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] 
             if angled: dc_parser.reader.dc_type_args -= 1
             dc_parser.reader.dc_parameter_type = false
             if annotation == 0: return 0
+            if rest:
+                # (`...rest:T` is an array<T>)
+                listed = mk(.tarray, nodes[annotation].pos)
+                nodes[listed].a = i32(annotation)
+                annotation = listed
             nodes[p].a = i32(annotation)
             # (`value:int64 ...`: the positional run ends after this parameter; `...rest` attached
-            # is a rest parameter, which dw_function reports)
+            # is a rest parameter, read next)
             if rt_dn_peek() == .ellipsis and not bare and not angled:
                 after = dc_parser.tokens[dc_parser.at + 1]
-                if not after.space and after.kind == .identifier and not keyword_only:
-                    if not rt_dc_rest_parameter(): return 0
-                else:
+                if after.space or after.kind != .identifier or after.symbol != .none:
                     if keyword_only or after.symbol == .assign or not after.space and after.kind == .identifier: return 0
                     dc_parser.at += 1
                     keyword_only = true
@@ -6103,7 +6121,9 @@ rt_dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] 
         if rt_dn_accept(.assign):
             initial = rt_dc_expr(11)
             if initial == 0: return 0
+            if rest: rt_dc_report(nodes[initial].pos, "a rest parameter takes no default: with no arguments left for it, it is empty")
             nodes[p].b = i32(initial)
+        if rest: keyword_only = true
         if pattern:
             loop leaf in binding_leaves(kids(p)):
                 if not rt_dc_bind_once(bound, int(nodes[leaf].name)): return rt_dc_duplicate_parameter(leaf, lambda)
@@ -6243,15 +6263,15 @@ rt_dc_row_grouping = (result: int) -> bool:
     rt_dc_report(nodes[kid(result, nkids(result) - 1)].pos, "effects describe the whole result: parenthesize the alternatives before them, `:>(A | B) & no_effects`")
     true
 
-# `...rest` at the `...` among parameters (dw_function's mistake, noted; read as a parameter).
-
-rt_dc_rest_parameter = () -> bool:
-    name = dc_parser.tokens[dc_parser.at + 1]
-    if not dc_parser.flags.report_now or name.space or name.kind != .identifier or name.symbol != .none: return false
-    word = rt_dn_payload(name)
-    rt_dc_report(mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at].start), "rest parameters (`...{word}`) are not implemented yet; a bare `...` ends the positional run, so write `... {word}` for a keyword-only parameter")
-    dc_parser.at += 1
-    true
+# `...rest` at the `...` among parameters: its mistakes, noted (a second one, one after the
+# keyword-only parameters, one on a lambda); read as a parameter either way.
+rt_dc_rest_parameter = (seen: bool, keyword_only: bool, lambda: bool):
+    if not dc_parser.flags.report_now: return
+    word = rt_dn_payload(dc_parser.tokens[dc_parser.at + 1])
+    pos = mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at].start)
+    if seen: rt_dc_report(pos, "a function takes one rest parameter: `...{word}` follows another")
+    else if keyword_only: rt_dc_report(pos, "a rest parameter collects positional arguments, so it comes before the keyword-only parameters: move `...{word}` before the `...`")
+    else if lambda: rt_dc_report(pos, "rest parameters (`...{word}`) are supported on declared functions for now, not on a lambda")
 
 rt_dc_mutable_pattern = (first: DewyLexeme) -> bool:
     rt_dc_unsupported(mkpos(dc_parser.file, first.start), "unpacking a mutable parameter; use a named @ parameter")

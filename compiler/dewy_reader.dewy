@@ -897,7 +897,13 @@ rd_dc_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe
     # `@x` selects a place; `@f(a)` partially evaluates f
     if (op =? 'at') {
         let operand:int64=reader_ctx.at
+        # (`f(@g.(xs)...)`: where a spread may follow, it may follow the operand)
+        let saved_spread:int64=reader_ctx.reader.dc_spread_depth
+        if (reader_ctx.reader.dc_spread_depth =? reader_ctx.depth) {
+            reader_ctx.reader.dc_spread_depth = (int64<overflow='wrap'>(reader_ctx.depth) + 1)
+        }
         let e:int64=rd_dc_expr(@reader_ctx @reader_nodes 160)
+        reader_ctx.reader.dc_spread_depth = saved_spread
         if (e =? 0) {
             return 0
         }
@@ -4947,6 +4953,9 @@ rd_dc_function_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> name
     # (`... by:int64`: a bare `...` ends the positional run; the parameters after it are named
     # only, dewy_param_kinds)
     let keyword_only:bool=false
+    # (`...rest:T`: a rest parameter, kind 3, collects the remaining positional arguments into an
+    # array<T>; the parameters after it are keyword-only)
+    let rest_seen:bool=false
     let kinds_at:int64=reader_ctx.reader.dc_kinds.length
     # (`(a:int64, b:int64)`: once a comma follows an annotation, one ends each, dc_comma_mistake below)
     let commas:bool=false
@@ -4960,17 +4969,27 @@ rd_dc_function_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> name
             break
         }
         let first:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
-        if ((((first.symbol =? 'ellipsis') and (not bare)) and (not keyword_only)) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)].symbol =? 'lparen')) {
+        let rest:bool=false
+        if ((first.symbol =? 'ellipsis') and (not bare)) {
             let after:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)]
-            if ((((after.kind not=? 'identifier') or (after.symbol not=? 'none')) or (not after.space)) or (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol not=? 'colon')) {
-                if (not rd_dc_rest_parameter(@reader_ctx)) {
+            if (((not after.space) and (after.kind =? 'identifier')) and (after.symbol =? 'none')) {
+                rd_dc_rest_parameter(@reader_ctx rest_seen keyword_only lambda);
+                rest = true
+                rest_seen = true
+                reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+                first = after
+            }
+            else {
+                if (keyword_only or (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) - 1)].symbol not=? 'lparen')) {
                     return 0
                 }
+                if ((((after.kind not=? 'identifier') or (after.symbol not=? 'none')) or (not after.space)) or (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol not=? 'colon')) {
+                    return 0
+                }
+                keyword_only = true
+                reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
                 continue
             }
-            keyword_only = true
-            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-            continue
         }
         if ((first.kind =? 'metatag') and (not bare)) {
             # (dw_function's mistakes: another modifier, `$capture` on a module function, before no
@@ -5074,6 +5093,9 @@ rd_dc_function_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> name
         if keyword_only {
             kind = 1
         }
+        if rest {
+            kind = 3
+        }
         if angled {
             kind = 2
             if (rd_dn_peek(@reader_ctx) not=? 'colon') {
@@ -5110,17 +5132,18 @@ rd_dc_function_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> name
             if (annotation =? 0) {
                 return 0
             }
+            if rest {
+                # (`...rest:T` is an array<T>)
+                let listed:int64=node_mk(@reader_nodes 'tarray' reader_nodes[annotation].pos)
+                reader_nodes[listed].a = int32<overflow='wrap'>(annotation)
+                annotation = listed
+            }
             reader_nodes[p].a = int32<overflow='wrap'>(annotation)
             # (`value:int64 ...`: the positional run ends after this parameter; `...rest` attached
-            # is a rest parameter, which dw_function reports)
+            # is a rest parameter, read next)
             if (((rd_dn_peek(@reader_ctx) =? 'ellipsis') and (not bare)) and (not angled)) {
                 let after:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)]
-                if (((not after.space) and (after.kind =? 'identifier')) and (not keyword_only)) {
-                    if (not rd_dc_rest_parameter(@reader_ctx)) {
-                        return 0
-                    }
-                }
-                else {
+                if ((after.space or (after.kind not=? 'identifier')) or (after.symbol not=? 'none')) {
                     if ((keyword_only or (after.symbol =? 'assign')) or ((not after.space) and (after.kind =? 'identifier'))) {
                         return 0
                     }
@@ -5145,7 +5168,13 @@ rd_dc_function_literal=(@reader_ctx:ParserContext @reader_nodes:array<Node> name
             if (initial =? 0) {
                 return 0
             }
+            if rest {
+                rd_dc_report(@reader_ctx reader_nodes[initial].pos "a rest parameter takes no default: with no arguments left for it, it is empty");
+            }
             reader_nodes[p].b = int32<overflow='wrap'>(initial)
+        }
+        if rest {
+            keyword_only = true
         }
         if pattern {
             loop leaf in reader_ctx.stores.host[0].binding_leaves(node_kids(@reader_nodes @reader_ctx.stores.lists[0] p)) {
@@ -9061,16 +9090,23 @@ rd_dc_reserved_target=(@reader_ctx:ParserContext @reader_nodes:array<Node> left:
     }
 }
 
-# `...rest` at the `...` among parameters (dw_function's mistake, noted; read as a parameter).
-rd_dc_rest_parameter=(@reader_ctx:ParserContext):>bool=>$unsafe {
-    let name:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)]
-    if ((((not reader_ctx.flags.report_now) or name.space) or (name.kind not=? 'identifier')) or (name.symbol not=? 'none')) {
-        return false
+# `...rest` at the `...` among parameters: its mistakes, noted (a second one, one after the
+# keyword-only parameters, one on a lambda); read as a parameter either way.
+rd_dc_rest_parameter=(@reader_ctx:ParserContext seen:bool keyword_only:bool lambda:bool):>void=>$unsafe {
+    if (not reader_ctx.flags.report_now) {
+        return
     }
-    let word:string=rd_dn_payload(@reader_ctx name)
-    rd_dc_report(@reader_ctx rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at].start) "rest parameters (`...{word}`) are not implemented yet; a bare `...` ends the positional run, so write `... {word}` for a keyword-only parameter");
-    reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-    true
+    let word:string=rd_dn_payload(@reader_ctx reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)])
+    let pos:int64=rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at].start)
+    if seen {
+        rd_dc_report(@reader_ctx pos "a function takes one rest parameter: `...{word}` follows another");
+    }
+    else if keyword_only {
+        rd_dc_report(@reader_ctx pos "a rest parameter collects positional arguments, so it comes before the keyword-only parameters: move `...{word}` before the `...`");
+    }
+    else if lambda {
+        rd_dc_report(@reader_ctx pos "rest parameters (`...{word}`) are supported on declared functions for now, not on a lambda");
+    }
 }
 
 rd_dc_route_text=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64):>string=>$unsafe {

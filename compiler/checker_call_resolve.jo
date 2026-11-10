@@ -118,7 +118,12 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             if best < 0 or cd.cost < cands[best].cost: best = ci
             else if cd.cost == cands[best].cost:
                 bc = cands[best]
+                # (after a function that is not generic, one written for the count beats one with a
+                # rest parameter)
+                rest_b = rest_bundles.len() > 0 and decl_has_rest(bc.decl)
                 if bc.sig.generic and not cd.sig.generic: best = ci
+                else if bc.sig.generic == cd.sig.generic and rest_bundles.len() > 0 and rest_b != decl_has_rest(cd.decl):
+                    if rest_b: best = ci
                 else if bc.sig.generic == cd.sig.generic and decl_in_prelude(bc.decl) and not decl_in_prelude(cd.decl): best = ci
                 else if bc.sig.generic == cd.sig.generic and decl_in_prelude(bc.decl) and decl_in_prelude(cd.decl) and exact_args(cd) > exact_args(bc): best = ci
     if nfit > 1 and not decl_in_prelude(cands[best].decl): call_tie_error(n, name, args, cands, best)
@@ -218,7 +223,7 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
                 if arg != 0: supplied.push(arg)
             cd.args = supplied
             np = supplied.len()
-    f = get_fn_inst(decl, cd.binds, nodes[n].pos)
+    f = get_fn_inst(decl, rest_inst_binds(decl, cd.args, cd.sig.params, cd.binds), nodes[n].pos)
     if ide_on: call_ide_ref(n, name, args, decl, f)
     capture_defaults = false
     dewy_call = files[pos_file(nodes[n].pos)].is_dewy

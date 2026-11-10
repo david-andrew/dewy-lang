@@ -82,11 +82,7 @@ Merged:type = <T>[
     }
 ]
 
-merged = <T>(a:(():>T | Closed<T> | Canceled)):>Merged<T> => Merged<T>[[a] __merge_new(1 0)]
-merged = <T D>(a:(():>T | Closed<T> | Canceled) ... stop_when_idle:D):>Merged<T> => Merged<T>[[a] __merge_new(1 __task_nanoseconds(stop_when_idle))]
-merged = <T>(a:(():>T | Closed<T> | Canceled) b:(():>T | Closed<T> | Canceled)):>Merged<T> => Merged<T>[[a b] __merge_new(2 0)]
-merged = <T D>(a:(():>T | Closed<T> | Canceled) b:(():>T | Closed<T> | Canceled) ... stop_when_idle:D):>Merged<T> => Merged<T>[[a b] __merge_new(2 __task_nanoseconds(stop_when_idle))]
-merged = <T>(a:(():>T | Closed<T> | Canceled) b:(():>T | Closed<T> | Canceled) c:(():>T | Closed<T> | Canceled)):>Merged<T> => Merged<T>[[a b c] __merge_new(3 0)]
-merged = <T D>(a:(():>T | Closed<T> | Canceled) b:(():>T | Closed<T> | Canceled) c:(():>T | Closed<T> | Canceled) ... stop_when_idle:D):>Merged<T> => Merged<T>[[a b c] __merge_new(3 __task_nanoseconds(stop_when_idle))]
-merged = <T>(a:(():>T | Closed<T> | Canceled) b:(():>T | Closed<T> | Canceled) c:(():>T | Closed<T> | Canceled) d:(():>T | Closed<T> | Canceled)):>Merged<T> => Merged<T>[[a b c d] __merge_new(4 0)]
-merged = <T D>(a:(():>T | Closed<T> | Canceled) b:(():>T | Closed<T> | Canceled) c:(():>T | Closed<T> | Canceled) d:(():>T | Closed<T> | Canceled) ... stop_when_idle:D):>Merged<T> => Merged<T>[[a b c d] __merge_new(4 __task_nanoseconds(stop_when_idle))]
+# (any number of waits, written or spread from an array: `merged(@a.receive @b.receive)`,
+# `merged(waits...)`; the sources are copied into the inbox's own array)
+merged = <T>(...sources:(():>T | Closed<T> | Canceled)):>Merged<T> => Merged<T>[[sources...] __merge_new(sources.length 0)]
+merged = <T D>(...sources:(():>T | Closed<T> | Canceled) stop_when_idle:D):>Merged<T> => Merged<T>[[sources...] __merge_new(sources.length __task_nanoseconds(stop_when_idle))]

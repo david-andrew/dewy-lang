@@ -137,7 +137,7 @@ dc_call = (n: int):
     # from; a select that runs once takes one value)
     waits = dc_wait_set(n)
     if waits == 2 or waits == 1 and dc_loops.len() > 0:
-        loop c in kids(n):
+        loop c in written_args(n):
             source = dc_wait_source(c)
             if source == 0: continue
             loc = dc_loc(source)

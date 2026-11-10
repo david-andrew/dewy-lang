@@ -6,7 +6,7 @@ from p"type_ops.dewy" import (fixed_len is_values mk_values)
 from p"check.jo" import (ValuesItem check_struct_fields cur_mod method_modules node_mark node_marked sink_pack_hit sink_pack_site spread_calls subst syms values_collect_fns values_collect_module values_hint_first values_hint_mark values_hint_pos values_hits)
 from p"checks_thin.dewy" import (values_count_label values_expand_error0 values_expand_error1 values_expand_error2 values_expand_error3 values_expand_error4 values_group_error0)
 from p"checks_assign_hooks.dewy" import (values_call_labels values_dynamic values_internal_callee values_length_check values_shift_warning)
-from p"expr.jo" import (args_fit call_collect_named capture_value coerce decl_in_prelude dewy_member_name finalize_literal last_checked map_args match_type mk_ident_local ntype program_fn_named receiver_literal_hint takes_seq type_receiver_at unnamed)
+from p"expr.jo" import (values_rest_call args_fit call_collect_named capture_value coerce decl_in_prelude dewy_member_name finalize_literal last_checked map_args match_type mk_ident_local ntype program_fn_named receiver_literal_hint takes_seq type_receiver_at unnamed)
 from p"checks_thin_expr.dewy" import (is_map_type)
 from p"checks_builders.dewy" import (bc_block bc_stmt)
 from p"checker_expr.dewy" import (check_expr lookup)
@@ -53,7 +53,15 @@ values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>
             }
             else if types.ptr[t].kind =? 'fixed' {k=fixed_len(t)}
             else if types.ptr[t].kind =? 'tuple' {k=VCWord(types.ptr[t].nargs)}
-            else if types.ptr[t].kind =? 'array' {k=-1}
+            else if types.ptr[t].kind =? 'array' {
+                k=-1
+                if values_rest_call(call) {
+                    # (a rest parameter takes it whole: map_args)
+                    add_flag(items.ptr[i] NF_SPREAD)
+                    info.ptr[i].spread = false
+                    k=1
+                }
+            }
             else if types.ptr[t].kind =? 'struct_' and not is_map_type(t) {values_expand_error0(c)}
             else {values_expand_error1(c t)}
             info.ptr[i].count = k
@@ -119,7 +127,7 @@ values_expand=(items0:array<int64> @pre:array<int64> call:int64):>array<int64>=>
             continue
         }
         if info.ptr[i].count =? 1 and not info.ptr[i].spread {
-            if i <? last and not values_simple(c) {
+            if i <? last and not values_simple(c) and not has_flag(c NF_SPREAD) {
                 if not has_flag(c NF_CHECKED) {
                     check_expr(c 0);
                     c=last_checked

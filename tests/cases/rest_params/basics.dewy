@@ -1,0 +1,26 @@
+# `...xs:T` collects the positional arguments left into an array; written arguments give a
+# fixed array, so indexing is proven; a spread passes an array; later parameters are named.
+total = (...xs:int):>int => {
+    let t:int = 0
+    loop x in xs { t += x }
+    t
+}
+first = <T>(...xs:T):>T => xs[0]
+second = (...xs:int64):>int64 => xs[1]
+label = (name:string ...parts:string sep:string=", "):>string => "{name}: {parts.join(sep)}"
+count = (x:int ...rest):>int => x + rest.length
+main = () => {
+    let ys = [4 5]
+    printl(total(1 2 3))
+    printl(total())
+    printl(total(ys...))
+    printl(total(1 ys... 3))
+    printl(total([7 8]...))
+    printl(first(9 8))
+    printl(first("a"))
+    printl(second(10 20 30))
+    printl(label("x" "a" "b"))
+    printl(label("y" "a" "b" sep="-"))
+    printl(label("z"))
+    printl(count(1 "a" "b"))
+}

@@ -1,0 +1,15 @@
+# modes: native native-release
+# `race` and `first_ok` take any number of calls of one type, written or spread.
+Missing:type = type of exception
+load = (n:int64 wait:Duration):>int64 | Missing => {
+    sleep(wait);
+    if n <? 0 return Missing
+    n
+}
+main = () => {
+    printl"race: {race(@load(1 2s) @load(2 2s) @load(3 1ms) @load(4 2s) @load(5 2s))}"
+    let calls = [@load(8 2s) @load(9 1ms)]
+    printl"race spread: {race(calls...)}"
+    printl"first ok: {first_ok(@load(-1 1ms) @load(2 50ms) @load(3 2s) @load(4 2s) @load(5 2s))}"
+    printl"all failed: {first_ok(@load(-1 1ms) @load(-2 5ms) @load(-3 10ms) @load(-4 20ms) @load(-5 30ms)) is? Missing}"
+}

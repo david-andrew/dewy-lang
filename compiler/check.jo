@@ -3226,7 +3226,7 @@ check_pushers_first = ():
     loop m in modules:
         if m.is_prelude: continue
         loop d in m.decls:
-            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and nodes[d].b != 0 and pushes_into(int(nodes[d].b), names) and not fn_sig(d).generic:
+            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and nodes[d].b != 0 and pushes_into(int(nodes[d].b), names) and not fn_sig(d).generic and not decl_has_rest(d):
                 f = get_fn_inst(d, [], nodes[d].pos)
                 # (before the top level's code, too, which may read it)
                 if fns[f].state == 0: check_fn_body(f)

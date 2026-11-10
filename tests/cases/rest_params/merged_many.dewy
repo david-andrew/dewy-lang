@@ -1,0 +1,34 @@
+# modes: native native-release
+# `merged` takes any number of receives, written or spread from an array.
+main = () => {
+    let a = channel<int64>(8)
+    let b = channel<int64>(8)
+    let c = channel<int64>(8)
+    let d = channel<int64>(8)
+    let e = channel<int64>(8)
+    concurrent {
+        spawn { a.send(1) or_throw  a.close() }
+        spawn { b.send(2) or_throw  b.close() }
+        spawn { c.send(3) or_throw  c.close() }
+        spawn { d.send(4) or_throw  d.close() }
+        spawn { e.send(5) or_throw  e.close() }
+        let total = 0
+        loop item in merged(@a.receive @b.receive @c.receive @d.receive @e.receive) or_throw { total += item }
+        printl"five {total}"
+    }
+    let x = channel<int64>(4)
+    let y = channel<int64>(4)
+    x.send(10) or_throw
+    y.send(20) or_throw
+    x.close()
+    y.close()
+    let waits = [@x.receive @y.receive]
+    let sum = 0
+    let inbox = merged(waits... stop_when_idle=1s)
+    loop item in inbox or_throw { sum += item }
+    printl"spread {sum}, open {inbox.open}"
+    let none_yet:array<(():>int64 | Closed<int64> | Canceled)> = []
+    let empty = merged(none_yet...)
+    loop item in empty or_throw { printl(item) }
+    printl"empty, open {empty.open}"
+}

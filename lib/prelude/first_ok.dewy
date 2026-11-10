@@ -1,4 +1,4 @@
-# Dewy's prelude: `first_ok`, loaded when named.
+# Dewy's prelude: `first_ok` and `race`, loaded when named.
 
 # (a result in flight, boxed so a failure does not fail the group)
 __OkFlight:type = <V>[value:V]
@@ -67,4 +67,123 @@ first_ok = <A B C D>(a:(():>A) b:(():>B) c:(():>C) d:(():>D)):>A | B | C | D | C
     if pick =? 3 { if rd is? __OkFlight<D> return rd.value }
     __select_took(-1)
     Canceled
+}
+
+# (any number of calls of one result type, written or spread: `first_ok(@load.(sources)...)`;
+# each runner adds its result under a lock as it finishes, before it can cancel the others)
+__OkSlot:type = <V>[index:int64 flight:__OkFlight<V>]
+
+__ok_slot_put = <R>(out:Mutex<array<__OkSlot<R>>> i:int64 flight:__OkFlight<R>):>void => {
+    let held = @(out.lock())
+    held.push(__OkSlot<R>[i flight])
+}
+
+__ok_slot_take = <R>(out:Mutex<array<__OkSlot<R>>> pick:int64):>R | Canceled => {
+    let held = @(out.lock())
+    __select_took(pick)
+    loop slot in held {
+        if slot.index =? pick return slot.flight.value
+    }
+    __select_took(-1)
+    Canceled
+}
+
+__first_ok_slot = <R>(f:(():>R) i:int64 winner:Atomic<int64> failure:Atomic<int64> g:TaskGroup out:Mutex<array<__OkSlot<R>>>):>void => {
+    let flight = __OkFlight<R>[f()]
+    __ok_slot_put<R>(out i flight)
+    if flight.value is? exception {
+        failure.compare_swap(-1 i);
+    } else if winner.compare_swap(-1 i) {
+        cancel(g)
+    }
+}
+
+first_ok = <R>(...calls:(():>R)):>R | Canceled => {
+    let winner = atomic(-1)
+    let failure = atomic(-1)
+    let empty:array<__OkSlot<R>> = []
+    let out = mutex(empty)
+    concurrent g {
+        loop i in [0..calls.length) { spawn __first_ok_slot<R>(calls[i] i winner failure g out) }
+    }
+    __ok_slot_take<R>(out if winner.load >=? 0 winner.load else failure.load)
+}
+
+# `race(@f(x) @g(y) ...)` (decisions.md batch 7): runs each call as a task and gives the first
+# completed result, including a Canceled the winner returned as a value, then cancels and joins
+# the rest. Its own cancellation is the call's Canceled; OutOfMemory when no task could start.
+# Two to four calls may give different types; any number of one type takes the rest form.
+__race_run = <R>(f:(():>R) i:int64 winner:Atomic<int64> g:TaskGroup):>__OkFlight<R> => {
+    let flight = __OkFlight<R>[f()]
+    if winner.compare_swap(-1 i) cancel(g)
+    flight
+}
+
+__race_lost = ():>Canceled | OutOfMemory => if __task_canceled() Canceled else OutOfMemory
+
+race = <A B>(a:(():>A) b:(():>B)):>A | B | Canceled | OutOfMemory => {
+    let winner = atomic(-1)
+    concurrent g {
+        let ra = spawn __race_run<A>(a 0 winner g)
+        let rb = spawn __race_run<B>(b 1 winner g)
+    }
+    let pick = winner.load
+    __select_took(pick)
+    if pick =? 0 { if ra is? __OkFlight<A> return ra.value }
+    if pick =? 1 { if rb is? __OkFlight<B> return rb.value }
+    __select_took(-1)
+    __race_lost()
+}
+
+race = <A B C>(a:(():>A) b:(():>B) c:(():>C)):>A | B | C | Canceled | OutOfMemory => {
+    let winner = atomic(-1)
+    concurrent g {
+        let ra = spawn __race_run<A>(a 0 winner g)
+        let rb = spawn __race_run<B>(b 1 winner g)
+        let rc = spawn __race_run<C>(c 2 winner g)
+    }
+    let pick = winner.load
+    __select_took(pick)
+    if pick =? 0 { if ra is? __OkFlight<A> return ra.value }
+    if pick =? 1 { if rb is? __OkFlight<B> return rb.value }
+    if pick =? 2 { if rc is? __OkFlight<C> return rc.value }
+    __select_took(-1)
+    __race_lost()
+}
+
+race = <A B C D>(a:(():>A) b:(():>B) c:(():>C) d:(():>D)):>A | B | C | D | Canceled | OutOfMemory => {
+    let winner = atomic(-1)
+    concurrent g {
+        let ra = spawn __race_run<A>(a 0 winner g)
+        let rb = spawn __race_run<B>(b 1 winner g)
+        let rc = spawn __race_run<C>(c 2 winner g)
+        let rd = spawn __race_run<D>(d 3 winner g)
+    }
+    let pick = winner.load
+    __select_took(pick)
+    if pick =? 0 { if ra is? __OkFlight<A> return ra.value }
+    if pick =? 1 { if rb is? __OkFlight<B> return rb.value }
+    if pick =? 2 { if rc is? __OkFlight<C> return rc.value }
+    if pick =? 3 { if rd is? __OkFlight<D> return rd.value }
+    __select_took(-1)
+    __race_lost()
+}
+
+__race_slot = <R>(f:(():>R) i:int64 winner:Atomic<int64> g:TaskGroup out:Mutex<array<__OkSlot<R>>>):>void => {
+    __ok_slot_put<R>(out i __OkFlight<R>[f()])
+    if winner.compare_swap(-1 i) cancel(g)
+}
+
+race = <R>(...calls:(():>R)):>R | Canceled | OutOfMemory => {
+    let winner = atomic(-1)
+    let empty:array<__OkSlot<R>> = []
+    let out = mutex(empty)
+    concurrent g {
+        loop i in [0..calls.length) { spawn __race_slot<R>(calls[i] i winner g out) }
+    }
+    if winner.load <? 0 {
+        __select_took(-1)
+        return __race_lost()
+    }
+    __ok_slot_take<R>(out winner.load)
 }

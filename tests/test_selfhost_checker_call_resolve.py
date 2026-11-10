@@ -20,6 +20,8 @@ kid = (d: int, i: int) -> int: (decl_children.get(d) ?? [])[i]
 has_flag = (n: int, f: int) -> bool: int(nodes[n].flags) & f != 0
 add_flag = (n: int, f: int): nodes[n].flags |= i32(f)
 set_list = (n: int, xs: int[]): events.push("list:{n}:{xs}")
+decl_has_rest = (d: int) -> bool: (dewy_param_kinds.get(d) ?? []).contains(3)
+rest_bundles: {int: int} = {}
 ''',
     'types.jo': r'''use 'driver.jo'
 use 'checker_types.dewy'
@@ -106,6 +108,7 @@ call_no_candidate = (n: int, name: int, ds: int[], xs: int[], expected: int, ufc
     0
 call_decl_checks = (n: int, name: int, d: int, xs: int[], cd: Cand, np: int, ufcs: bool): events.push("picked:{d}")
 expected_binds = (cd: mut Cand, expected: int, given: int[]): events.push("expected:{expected}:{given}")
+rest_inst_binds = (d: int, xs: int[], ps: int[], bs: int[]) -> int[]: bs
 lit_default = (a: int) -> int: T_INT
 match_type = (p: int, a: int, bs: mut int[], depth: int) -> int:
     if tkind(p) == .param:

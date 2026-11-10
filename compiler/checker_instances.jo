@@ -62,14 +62,21 @@ ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     if ci_input[0].context[0] >= 0 and int(ci_input[0].contexts[0][ci_input[0].context[0]].inst) > 0 and ci_input[0].functions[0][int(ci_input[0].contexts[0][ci_input[0].context[0]].inst)].targs.len() > 0:
         ci_input[0].functions[0][f].gdepth = ci_input[0].functions[0][int(ci_input[0].contexts[0][ci_input[0].context[0]].inst)].gdepth + 1
         if ci_input[0].functions[0][f].gdepth > 500: instance_depth_error(decl, use_pos)
-    loop i in [0..int(ci_input[0].nodes[0][decl].nlist)): ci_input[0].functions[0][f].ptypes.push(ts_subst(sig.params[i], zt))
-    instance_load(decl, f, sig.generic)
+    # (a rest parameter, NF_SPREAD: the extra type argument is its type, expr.jo's rest_inst_binds)
+    rest_type = 0
+    if zt.len() > int(sig.ntp): rest_type = zt[int(sig.ntp)]
+    loop i in [0..int(ci_input[0].nodes[0][decl].nlist)):
+        pt = ts_subst(sig.params[i], zt)
+        param = kid(decl, i)
+        if rest_type != 0 and int(ci_input[0].nodes[0][param].flags) & 1024 != 0: pt = rest_type
+        ci_input[0].functions[0][f].ptypes.push(pt)
+    instance_load(decl, f, sig.generic or rest_type != 0)
     if sig.ret != 0: ci_input[0].functions[0][f].ret = i32(ts_subst(int(sig.ret), zt))
     pack_written(f, int(ci_input[0].nodes[0][decl].a))
     if sig.ret != 0: pass
     else if ci_input[0].nodes[0][decl].b != 0 and cr_syntactic_void(int(ci_input[0].nodes[0][decl].b)) and not (dewy_at(ci_input[0].nodes[0][decl].pos) and (cr_may_express(int(ci_input[0].nodes[0][decl].b)) or cr_has_propagate(int(ci_input[0].nodes[0][decl].b)))): ci_input[0].functions[0][f].ret = i32(ci_input[0].void_type[0])
     instance_validate(f, sig, use_pos)
-    if sig.generic: ci_input[0].functions[0][f].body = i32(clone(int(ci_input[0].nodes[0][decl].b)))
+    if sig.generic or rest_type != 0: ci_input[0].functions[0][f].body = i32(clone(int(ci_input[0].nodes[0][decl].b)))
     else: ci_input[0].functions[0][f].body = ci_input[0].nodes[0][decl].b
     if int(ci_input[0].nodes[0][decl].flags) & 4 != 0 and ci_input[0].functions[0][f].ret == 0: ci_input[0].functions[0][f].ret = i32(ci_input[0].void_type[0])
     instance_attributes(decl, f, zt, use_pos)

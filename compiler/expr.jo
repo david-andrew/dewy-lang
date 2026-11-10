@@ -1761,13 +1761,19 @@ literal_typed_call = (e: int) -> bool:
     false
 
 # map call args to parameter slots; returns error message ("" on success)
-# kinds: per parameter, 1 keyword-only (after `...`), 2 position-only (`<v:T>`)
+# kinds: per parameter, 1 keyword-only (after `...`), 2 position-only (`<v:T>`), 3 rest
+# (`...rest:T`: the positional arguments left, and spreads, gathered into an array literal made
+# here, rest_bundle)
 # explain: false gives "?" for any error, its message left unbuilt (overload resolution tries
 # many and reports few: map_args_text builds the one reported)
-map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[], kinds: int[] = [], explain: bool = true) -> str:
+map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[], kinds: int[] = [], explain: bool = true, decl: int = 0) -> str:
     np = pnames.len()
     out.clear()
     out.resize(np)
+    rest = -1
+    loop i in [0..kinds.len()):
+        if kinds[i] == 3 and i < np: rest = i
+    gathered: int[]
     pos = 0
     loop a in args:
         if nodes[a].kind == .namedarg:
@@ -1777,6 +1783,9 @@ map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[], kin
             if k >= 0 and k < kinds.len() and kinds[k] == 2:
                 if not explain: return "?"
                 return "parameter '{name_of(pnames[k])}' is position-only: pass it without its name"
+            if k >= 0 and k == rest:
+                if not explain: return "?"
+                return "parameter '{name_of(pnames[k])}' collects the positional arguments left: pass them without its name, or spread an array into it (`xs...`)"
             if k < 0:
                 if not explain: return "?"
                 an = name_of(int(nodes[a].name))
@@ -1788,19 +1797,76 @@ map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[], kin
             out[k] = int(nodes[a].a)
         else:
             loop pos < np and out[pos] != 0: pos += 1
+            if rest >= 0 and pos >= rest:
+                gathered.push(a)
+                continue
             if pos < np and pos < kinds.len() and kinds[pos] == 1:
                 if not explain: return "?"
                 return "too many positional arguments: '{name_of(pnames[pos])}' takes its name (`{name_of(pnames[pos])}=...`)"
             if pos >= np:
                 if not explain: return "?"
                 return "too many arguments (expected {np})"
+            if has_flag(a, NF_SPREAD):
+                if not explain: return "?"
+                return "an array of unknown length spreads only into a rest parameter"
             out[pos] = a
             pos += 1
+    if rest >= 0: out[rest] = rest_bundle(gathered, decl, rest)
     loop i in [0..np):
         if out[i] == 0 and not has_default[i]:
             if not explain: return "?"
             return "missing argument '{name_of(pnames[i])}'"
     ""
+
+# A rest parameter's argument: the positional arguments it gathers, as the array literal
+# `[a b xs...]` (a spread stays a spread). Its length is known when none is spread, and the
+# instance takes a fixed array of that length (rest_instance_type).
+rest_bundle = (gathered: int[], decl: int, rest: int) -> int:
+    at = if gathered.len() > 0: nodes[gathered[0]].pos else: 0
+    if at == 0 and decl != 0: at = nodes[kid(decl, rest)].pos
+    b = mk(.array, at)
+    set_list(b, gathered)
+    count = gathered.len()
+    loop a in gathered:
+        if has_flag(a, NF_SPREAD): count = -1
+    rest_bundles[b] = count
+    b
+
+# Does call c's callee, by name, take a rest parameter? (values_expand then keeps a spread of an
+# array of unknown length whole, for the rest parameter to take)
+values_rest_call = (c: int) -> bool:
+    if c == 0: return false
+    callee = int(nodes[c].a)
+    if nodes[callee].kind == .typeapply: callee = int(nodes[callee].a)
+    if nodes[callee].kind != .ident: return false
+    s = lookup(int(nodes[callee].name))
+    if s == 0 or syms[s].kind != .fns: return false
+    ds: int[]
+    call_collect_named(int(nodes[callee].name), -1, ds)
+    loop d in ds:
+        if decl_has_rest(d): return true
+    false
+
+# The type arguments of a call's instance: a function with a rest parameter adds the type its
+# rest argument has (rest_bundle), a fixed array when its length is written (no spread). Each
+# count then has its own instance, whose indexing that length proves, and the arguments are
+# passed in place, off the heap. The rest parameter is marked NF_SPREAD for the instance
+# (checker_instances: its parameter type is this extra argument).
+rest_inst_binds = (decl: int, args: int[], params: int[], binds: int[]) -> int[]:
+    if rest_bundles.len() == 0: return binds
+    kinds = dewy_param_kinds.get(decl) ?? []
+    if kinds.len() == 0: return binds
+    loop i in [0..kinds.len()):
+        if kinds[i] != 3 or i >= args.len() or i >= params.len(): continue
+        b = args[i]
+        if b == 0 or not rest_bundles.has(b): return binds
+        add_flag(kid(decl, i), NF_SPREAD)
+        t = prune(subst(params[i], binds))
+        if tkind(t) != .array: return binds
+        k = rest_bundles[b]
+        if k <= 0: return binds + [t]
+        return binds + [mk_fixed(telem(t), k)]
+    binds
 
 # why function d's parameters do not take args (map_args's message, built when it is reported)
 map_args_text = (d: int, args: int[]) -> str:
@@ -1810,7 +1876,7 @@ map_args_text = (d: int, args: int[]) -> str:
         pnames.push(int(nodes[kid(d, i)].name))
         hasdef.push(nodes[kid(d, i)].b != 0)
     unused: int[]
-    map_args(pnames, hasdef, args, unused, dewy_param_kinds.get(d) ?? [])
+    map_args(pnames, hasdef, args, unused, dewy_param_kinds.get(d) ?? [], true, d)
 
 # Keep parameter slots canonical for types/ABI, but evaluate explicitly supplied
 # Dewy arguments in source order, then omitted defaults in parameter order.
@@ -2231,7 +2297,7 @@ struct CallFailure:
 
 call_tie_error = (n: int, name: int, args: int[], cands: Cand[], best: int):
     loop ci in 0.. and cd in cands:
-        if ci != best and cd.cost == cands[best].cost and cd.sig.generic == cands[best].sig.generic and decl_in_prelude(cd.decl) == decl_in_prelude(cands[best].decl):
+        if ci != best and cd.cost == cands[best].cost and cd.sig.generic == cands[best].sig.generic and decl_in_prelude(cd.decl) == decl_in_prelude(cands[best].decl) and (rest_bundles.len() == 0 or decl_has_rest(cd.decl) == decl_has_rest(cands[best].decl)):
             ats = ""
             loop ai in 0.. and a0 in args:
                 if ai > 0: ats += ", "
@@ -2288,7 +2354,7 @@ call_map_candidate = (d: int, args: int[], cd: mut Cand, kinds: int[], ufcs: boo
     loop i in [0..np):
         pnames.push(int(nodes[kid(d, i)].name))
         hasdef.push(nodes[kid(d, i)].b != 0)
-    if len(map_args(pnames, hasdef, args, cd.args, kinds, false)) > 0:
+    if len(map_args(pnames, hasdef, args, cd.args, kinds, false, d)) > 0:
         if failure.last_err_arg == 0:
             failure.last_err = ""
             failure.last_err_map = d
@@ -7363,7 +7429,8 @@ source_call = (n: int) -> bool:
     d = int(fns[f].decl)
     name = name_of(int(nodes[d].name))
     path = files[pos_file(nodes[d].pos)].path
-    name == "race" and path == lib_dir + "/std/tasks.jo" or name == "first_ok" and path == lib_dir + "/prelude/first_ok.dewy"
+    if name != "race" and name != "first_ok": return false
+    path == lib_dir + "/prelude/first_ok.dewy"
 
 select_check = (n: int):
     waits: int[]
@@ -7695,7 +7762,8 @@ source_match = (m: int, expected: int) -> int:
     named: int[]
     outcomes: int[][]
     taken: int[]
-    loop a0 in kids(call):
+    if spreads_rest(call): fatal(nodes[first].pos, "a pattern that names its source needs the waits written in the call; a spread array's are not: match the plain type")
+    loop a0 in written_args(call):
         a = select_wait_arg(a0)
         if tkind(ntype(a)) != .fn_: continue
         w = wait_partial(a)
@@ -7830,7 +7898,8 @@ inbox_sources = (x0: int, op: str) -> int[]:
     if nodes[init].kind != .call or nodes[init].sym <= 0 or nodes[init].aux != 0 or fns[int(nodes[init].sym)].decl == 0: return out
     d = int(fns[int(nodes[init].sym)].decl)
     if name_of(int(nodes[d].name)) != "merged" or files[pos_file(nodes[d].pos)].path != lib_dir + "/prelude/inbox.dewy": return out
-    loop a0 in kids(init):
+    if spreads_rest(init): return out
+    loop a0 in written_args(init):
         a = select_wait_arg(a0)
         if tkind(ntype(a)) != .fn_: continue
         w = wait_partial(a)
@@ -8154,6 +8223,7 @@ dewy_partial = (n: int, expected: int) -> int:
                 if open_wanted < 0 or open < open_wanted: open_wanted = open
         loop c in decls:
             if own and decl_in_prelude(c): continue
+            if decls.len() == 1 and decl_has_rest(c): fatal(pos, "partial evaluation of '{name_of(int(nodes[callee].name))}', which has a rest parameter, is not supported yet; use a function literal")
             names: int[]
             loop i in [0..nkids(c)): names.push(int(nodes[kid(c, i)].name))
             fit: int[]

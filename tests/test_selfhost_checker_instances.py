@@ -118,6 +118,7 @@ INSTANCE_JO = {
     },
     'ast.jo': {
         'clone': 'clone = (n: int) -> int: instance_clone(n)',
+        'kid': 'kid = (n: int, i: int) -> int: int(lists[int(nodes[n].list) + i])',
     },
 }
 JO_DOUBLES = jo_doubles(INSTANCE_JO, SIGNATURE_JO)

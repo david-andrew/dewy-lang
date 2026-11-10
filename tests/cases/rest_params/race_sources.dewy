@@ -1,0 +1,16 @@
+# modes: native native-release
+# A match on `race(...)` with more than four written waits names their sources, as on four.
+main = () => {
+    let a = channel<string>(1)
+    let b = channel<string>(1)
+    let c = channel<string>(1)
+    let d = channel<string>(1)
+    let e = channel<string>(1)
+    e.send("from e") or_throw
+    match race(@a.receive @b.receive @c.receive @d.receive @e.receive) {
+        s:a.string => printl"a {s}"
+        s:e.string => printl"e {s}"
+        <Closed> => printl"closed"
+        _ => printl"other"
+    }
+}

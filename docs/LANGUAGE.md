@@ -296,7 +296,8 @@ them apart (`(a b) = p`). A place for one value given several is an error naming
 the count, never the last value: `p + 1` and `p[0]` (write `[p][0]`) are errors.
 `xs...` spreads a container into a call's positional parameters,
 `add([20 22]...)`: a fixed array's length is known, and an array's must be
-exactly what the parameters left take, proven or checked like an index. A call
+exactly what the parameters left take, proven or checked like an index, unless
+a rest parameter takes it whole. A call
 takes several values only when its function's count is static, written or
 inferred from a body that expresses each value once in its own block (a call
 through a function value has its type's count); overloads
@@ -350,10 +351,41 @@ its captured value, so `combine(next())` calls `next()` once.
 `...` after a parameter ends the positional run: in
 `offset = (value:int ... amount:int) => value+amount`, `amount` must be named,
 `offset(40 amount=2)`; a leading bare `...`, as in `(... width:int64)`, makes
-every parameter keyword-only. An attached `...rest` is a rest parameter, which
-is not implemented yet and reports so. A parameter wrapped in `<>` is position-only: it keeps its
+every parameter keyword-only. A parameter wrapped in `<>` is position-only: it keeps its
 local name, but `increment = (<value:int>) => value+1` rejects `increment(value=41)`.
 These kinds apply to direct calls of declared functions.
+
+An attached `...rest:T` is a rest parameter: it collects the positional arguments
+the parameters before it leave into an array of `T`, and the parameters after it
+are keyword-only. A function has at most one, with no default; with no
+arguments left it is empty.
+
+```dewy
+total = (...xs:int):>int => {
+    let t:int = 0
+    loop x in xs { t += x }
+    t
+}
+label = (name:string ...parts:string sep:string=", ") => "{name}: {parts.join(sep)}"
+first = <T>(...xs:T):>T => xs[0]       # proven: each call writes its arguments
+main = () => {
+    let ys = [4 5]
+    printl(total(1 2 3))                # 6
+    printl(total(1 ys... 3))            # 13: a spread array joins them
+    printl(label("x" "a" "b" sep="-"))  # x: a-b
+    printl(first(9 8))                  # 9
+}
+```
+
+Written arguments give the rest parameter a fixed array of that length,
+`array<T length=n>`, so indexing within it is proven, and the arguments are
+passed in place, with no allocation. A spread of an array whose length is not
+known (`total(ys...)`) gives an `array<T>`, which an index must prove as usual.
+A rest parameter is not named in a call (`total(xs=[1])` is an error; spread the
+array instead). Its arguments share one type, as an array literal's elements do: a
+generic `T` given `1` and `"a"` is an error. When an overload written for the
+count also fits, it is chosen over one with a rest parameter. Rest parameters are
+supported on declared functions for now, not on a lambda.
 
 Named arguments also work through function values, returned callbacks, record
 fields and array elements. An inferred function value retains its declared
@@ -3545,7 +3577,9 @@ their child; cancellation of `child.wait` leaves that child owned by its caller.
 `within(2s @get(url))` establishes a deadline scope and returns `Timeout` when
 its own deadline expires; parent cancellation remains `Canceled`.
 `race(@first_lookup(key) @second_lookup(key))` returns the first completed result
-and cancels and joins the other task; it takes two to four calls. `first_ok(@load(a)
+and cancels and joins the other task. Two to four calls may give different types;
+any number of calls giving one type, written or spread (`race(lookups...)`), take
+its rest form, and so does `first_ok`. `first_ok(@load(a)
 @load(b))` (decisions.md, batch 7) returns the first result that is not an exception (a
 `Canceled` a call returns is a failure too) and cancels and joins the rest; when every call
 fails, it returns the failure that came first. A tie has no promised order. None of these
@@ -3724,6 +3758,7 @@ wait among their arguments (`s:a.string` in `match race(@a.receive @b.receive)`)
 `inbox.next`, for an `inbox = merged(@a.receive @b.receive)` declared in the same function,
 names the merged waits: `v:a.int64` takes only a's values. Assigning the inbox another value
 anywhere after its declaration is then an error, since the new one has other waits.
+The waits must be written in the call: with an array spread into it, match the plain type.
 
 ```dewy
 main = () => {
@@ -3781,8 +3816,8 @@ retires each channel as it closes. Under a `timeout=0s` poll a `<Timeout>` arm t
 nothing is the same error. *Not yet built:* sends inside `select` through `reserve`, and a
 spread of waits. `select` takes up to four waits for now.
 
-`merged(@a.receive @b.receive)` drains up to four receives of one payload type as one
-inbox (decisions.md, batch 7). `loop item in inbox` takes each value as it comes (an item is
+`merged(@a.receive @b.receive)` drains any number of receives of one payload type as one
+inbox (decisions.md, batch 7); `merged(waits...)` spreads an array of them. `loop item in inbox` takes each value as it comes (an item is
 the payload or `Canceled`; a canceled task gets one `Canceled`, then the loop ends) and ends
 when every source has closed; a close is not an item, it retires its source. Afterwards
 `inbox.open` is false. `merged(... stop_when_idle=30s)` also ends the loop after 30 s with

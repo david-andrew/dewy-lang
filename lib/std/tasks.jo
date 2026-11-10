@@ -267,31 +267,6 @@ within[D, T] = (duration: D, f: () -> T) -> (T | Timeout | Canceled | OutOfMemor
     if g.__state.len() != 0 and __atomic_add(&g.__p.canceled, 0) == 2: return Timeout
     __task_result(task)
 
-# `race(@f(x) @g(y) ...)`, two to four calls: the first completed result, the rest canceled
-# and joined.
-race[A, B] = (first: () -> A, second: () -> B) -> (A | B | Canceled | OutOfMemory):
-    g = __task_new_group()
-    previous = __task_enter(g)
-    winner = atomic(-1)
-    a = __task_spawn(g, ():
-        value: (A | Canceled) = first()
-        if winner.compare_swap(-1, 0): cancel(g)
-        value
-    )
-    b = __task_spawn(g, ():
-        value: (B | Canceled) = second()
-        if winner.compare_swap(-1, 1): cancel(g)
-        value
-    )
-    __task_join(g)
-    __task_restore(previous)
-    __select_took(winner.load())
-    if winner.load() == 0: return __task_result(a)
-    if winner.load() == 1: return __task_result(b)
-    if __task_scope_canceled(g): return Canceled
-    OutOfMemory
-
-
 # `select(@a.receive @heart.next ...)` (D4, decisions.md batch 7): the first of up to four waits
 # to be ready, as the union of their outcomes, or Canceled; with `timeout=`, Timeout when none is
 # ready in time. Each round tries every wait without blocking, from a start the clock picks; only a
@@ -468,68 +443,6 @@ select[A, B, C, D, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, timeout
         if time_ns() >= deadline: return Timeout
         __select_nap(spins)
     Canceled
-
-race[A, B, C] = (a: () -> A, b: () -> B, c: () -> C) -> (A | B | C | Canceled | OutOfMemory):
-    g = __task_new_group()
-    previous = __task_enter(g)
-    winner = atomic(-1)
-    ta = __task_spawn(g, ():
-        value: (A | Canceled) = a()
-        if winner.compare_swap(-1, 0): cancel(g)
-        value
-    )
-    tb = __task_spawn(g, ():
-        value: (B | Canceled) = b()
-        if winner.compare_swap(-1, 1): cancel(g)
-        value
-    )
-    tc = __task_spawn(g, ():
-        value: (C | Canceled) = c()
-        if winner.compare_swap(-1, 2): cancel(g)
-        value
-    )
-    __task_join(g)
-    __task_restore(previous)
-    __select_took(winner.load())
-    if winner.load() == 0: return __task_result(ta)
-    if winner.load() == 1: return __task_result(tb)
-    if winner.load() == 2: return __task_result(tc)
-    if __task_scope_canceled(g): return Canceled
-    OutOfMemory
-
-race[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D) -> (A | B | C | D | Canceled | OutOfMemory):
-    g = __task_new_group()
-    previous = __task_enter(g)
-    winner = atomic(-1)
-    ta = __task_spawn(g, ():
-        value: (A | Canceled) = a()
-        if winner.compare_swap(-1, 0): cancel(g)
-        value
-    )
-    tb = __task_spawn(g, ():
-        value: (B | Canceled) = b()
-        if winner.compare_swap(-1, 1): cancel(g)
-        value
-    )
-    tc = __task_spawn(g, ():
-        value: (C | Canceled) = c()
-        if winner.compare_swap(-1, 2): cancel(g)
-        value
-    )
-    td = __task_spawn(g, ():
-        value: (D | Canceled) = d()
-        if winner.compare_swap(-1, 3): cancel(g)
-        value
-    )
-    __task_join(g)
-    __task_restore(previous)
-    __select_took(winner.load())
-    if winner.load() == 0: return __task_result(ta)
-    if winner.load() == 1: return __task_result(tb)
-    if winner.load() == 2: return __task_result(tc)
-    if winner.load() == 3: return __task_result(td)
-    if __task_scope_canceled(g): return Canceled
-    OutOfMemory
 
 # The signal handler only returns. No allocator, locks or user callbacks run
 # on its signal stack. Repeated acknowledgement closes the check/syscall race.

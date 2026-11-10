@@ -10,7 +10,7 @@ from p"poly_ops.dewy" import (poly_inst)
 from p"check.jo" import (dewy_at)
 from p"checks_thin.dewy" import (ensure_ret)
 from p"checks_type_hooks.dewy" import (instance_preflight instance_create instance_bad_arg instance_depth_error instance_load instance_validate instance_attributes)
-from p"ast.jo" import clone
+from p"ast.jo" import (clone kid)
 # Demand-only instance resolution. Concrete lookup is indexed; unresolved lookup
 # scans this declaration's instances and type arguments. Substitution and body
 # walks retain their existing costs. Hosts may reenter and grow every arena.
@@ -75,11 +75,15 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
             if ci_input[0].functions[0].ptr[f].gdepth >? 500 {instance_depth_error(decl use_pos)}
         }
     }
+    # (a rest parameter, NF_SPREAD: the extra type argument is its type, expr.jo's rest_inst_binds)
+    let rest_type:CIWord=if zt.length >? CIWord(sig.ntp) zt[CIWord(sig.ntp)] else 0
     loop i in [0..CIWord(ci_input[0].nodes[0].ptr[decl].nlist)) {
         let pt=ts_subst(sig.params[i] zt)
+        let param:CIWord=kid(decl i)
+        if rest_type not=? 0 and (CIWord(ci_input[0].nodes[0].ptr[param].flags) & 1024) not=? 0 {pt=rest_type}
         ci_input[0].functions[0][f].ptypes.push(pt)
     }
-    instance_load(decl f sig.generic)
+    instance_load(decl f sig.generic or rest_type not=? 0)
     if sig.ret not=? 0 {
         let ret=ts_subst(CIWord(sig.ret) zt)
         ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ret)
@@ -89,7 +93,7 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
         ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ci_input[0].void_type[0])
     }
     instance_validate(f sig use_pos)
-    if sig.generic {
+    if sig.generic or rest_type not=? 0 {
         let body=clone(CIWord(ci_input[0].nodes[0].ptr[decl].b))
         ci_input[0].functions[0][f].body=int32<overflow='wrap'>(body)
     } else {ci_input[0].functions[0][f].body=ci_input[0].nodes[0].ptr[decl].b}
