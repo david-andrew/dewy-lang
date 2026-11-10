@@ -6,6 +6,7 @@ from tests.selfhost_homes_checks import _doubled
 LEAF_HOMES = {
     'facts_arith': 'facts.jo',
     'facts_collect': 'facts.jo',
+    'nd_contract_ops': 'nd_contracts.jo',
 }
 
 

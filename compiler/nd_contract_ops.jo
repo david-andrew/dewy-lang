@@ -1,0 +1,633 @@
+use 'nd_contracts.jo'
+use 'lower_storage.dewy'
+use 'host_binds.jo'
+use 'checker_expr.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'refine_resolve.dewy'
+use 'refine_predicates.dewy'
+use 'ast.jo'
+use 'check.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'expr.jo'
+use 'checks_thin_expr.dewy'
+use 'checks_builders.dewy'
+use 'lex.jo'
+use 'util.jo'
+use 'lower.jo'
+use 'ir.jo'
+use 'directives.jo'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'facts.jo'
+use 'facts_arith.dewy'
+use 'facts_forgets.dewy'
+use 'facts_routes.dewy'
+use 'facts_changes.dewy'
+use 'facts_library.dewy'
+use 'facts_probes.dewy'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'effects.jo'
+use 'ownership.jo'
+use 'nd_slices.dewy'
+use 'sequence_selectors.dewy'
+use 'ownership_types.dewy'
+use 'lower_primitives.dewy'
+use 'ir_builders.dewy'
+use 'effect_values.dewy'
+
+# Keep shape detection available to the implementation-language bootstrap.
+nd_has_shape = (t: int) -> bool:
+    t != 0 and nodes[t].kind == .tarray and nodes[t].ival == 1
+nd_shape_term = (n: int, bound: {int: RefTerm}) -> RefTerm:
+    if nodes[n].kind == .ident:
+        if let term = bound.get(int(nodes[n].name)): return term
+    if nodes[n].kind == .binary and (nodes[n].op == i32(int(Tok.plus)) or nodes[n].op == i32(int(Tok.minus))):
+        a = nd_shape_term(int(nodes[n].a), bound)
+        b = nd_shape_term(int(nodes[n].b), bound)
+        if b.kind == 1:
+            if b.value < -4294967296 or b.value > 4294967296: fatal(nodes[n].pos, "unsupported shape dimension offset")
+            offset = if nodes[n].op == i32(int(Tok.minus)): -b.value else: b.value
+            if not fact_add_fits(a.offset, offset): fatal(nodes[n].pos, "shape dimension offset is too large")
+            a.offset += offset
+            if a.offset < -4294967296 or a.offset > 4294967296: fatal(nodes[n].pos, "unsupported shape dimension offset")
+            if a.kind == 1:
+                if not fact_add_fits(a.value, a.offset): fatal(nodes[n].pos, "shape dimension is too large")
+                a.value += a.offset; a.offset = 0
+            return a
+    ref_resolve_term(nodes, types, names, refine_bindings, ref_resolve_host, n, 0)
+nd_span = (predicate: int, pos: int):
+    if nd_span_shared.has(predicate): return
+    if let at = ref_spans.get(predicate):
+        if at == pos: return
+        ref_spans.remove(predicate)
+        nd_span_shared[predicate] = true
+        return
+    ref_spans[predicate] = pos
+nd_signature = (decl: int, params: mut int[], result: int = 0) -> int:
+    refine_bindings.formals = []
+    loop p in kids(decl): refine_bindings.formals.push(int(nodes[p].name))
+    bound: {int: RefTerm} = {}
+    borrowed = fill(0, params.len())
+    has_borrowed = false
+    loop i in [0..nkids(decl)):
+        p = kid(decl, i)
+        tn = int(nodes[p].a)
+        if not nd_has_shape(tn): continue
+        atoms: RefAtom[]
+        nd = is_nd(representation_type(params[i]))
+        if nd:
+            ref_add(.eq, RefTerm(path = [-2]), RefTerm(1, nkids(tn)), atoms)
+            ref_add(.eq, RefTerm(path = [ND_STORAGE_VALID]), RefTerm(1, 1), atoms)
+        loop axis in [0..nkids(tn)):
+            dim = kid(tn, axis)
+            path = if nd: [-3 - axis] else: [-1]
+            term = RefTerm()
+            if nodes[dim].kind == .ident:
+                name = int(nodes[dim].name)
+                if bound.has(name): term = bound[name]
+                else:
+                    ordinal = refine_bindings.formals.index_of(name)
+                    if ordinal >= 0: term = RefTerm(2, ordinal)
+                    else if lookup(name) != 0 and (syms[lookup(name)].kind == .local or syms[lookup(name)].kind == .global or syms[lookup(name)].kind == .const_): term = ref_resolve_value(dim)
+                    else:
+                        bound[name] = RefTerm(2, i, path = path)
+                        continue
+            else: term = nd_shape_term(dim, bound)
+            if term.kind == 2 and term.value == i: term.kind = 0; term.value = 0
+            ref_add(.eq, RefTerm(path = path), term, atoms)
+        if atoms.len() > 0:
+            predicate = ref_intern(atoms)
+            nd_span(predicate, nodes[p].pos)
+            if nd: runtime_fn("__nd_storage_valid")
+            refined = mk_refined(params[i], predicate)
+            nd_shape_predicates[int(types[refined].st)] = true
+            if has_flag(p, NF_MUT):
+                borrowed[i] = refined
+                has_borrowed = true
+            else: params[i] = refined
+    if has_borrowed:
+        nd_mutable_signatures[decl] = borrowed
+        checked = params
+        loop i in [0..borrowed.len()):
+            if borrowed[i] != 0: checked[i] = borrowed[i]
+        ref_validate_signature(checked, 0, ref_decl_mask(decl), nodes[decl].pos)
+    tn = int(nodes[decl].a)
+    if result == 0 or not nd_has_shape(tn): return result
+    atoms: RefAtom[]
+    nd = is_nd(representation_type(result))
+    if nd:
+        ref_add(.eq, RefTerm(path = [-2]), RefTerm(1, nkids(tn)), atoms)
+        ref_add(.eq, RefTerm(path = [ND_STORAGE_VALID]), RefTerm(1, 1), atoms)
+    loop axis in [0..nkids(tn)):
+        term = nd_shape_term(kid(tn, axis), bound)
+        # Shape binders snapshot entry values. A mutable formal's current
+        # projection is not that snapshot; retain the original return check
+        # without publishing a postcondition referring to its later value.
+        if term.kind == 2 and has_flag(kid(decl, term.value), NF_MUT): return result
+        ref_add(.eq, RefTerm(path = (if nd: [-3 - axis] else: [-1])), term, atoms)
+    predicate = ref_intern(atoms)
+    nd_span(predicate, nodes[tn].pos)
+    if nd: runtime_fn("__nd_storage_valid")
+    refined = mk_refined(result, predicate)
+    nd_shape_predicates[int(types[refined].st)] = true
+    refined
+# A record field's shape, `a:array<T length=[h w]>`: the same contract as a shaped parameter's,
+# whose dimensions name sibling fields or constants, held where the value enters and where it
+# is read; a word that names neither holds nothing of its axis. O(dimensions), once per record type.
+nd_field_shape = (tn: int, t: int, siblings: int[]) -> int:
+    atoms: RefAtom[]
+    nd = is_nd(representation_type(t))
+    if nd:
+        ref_add(.eq, RefTerm(path = [-2]), RefTerm(1, nkids(tn)), atoms)
+        ref_add(.eq, RefTerm(path = [ND_STORAGE_VALID]), RefTerm(1, 1), atoms)
+    bound: {int: RefTerm} = {}
+    loop i in [0..siblings.len()): bound[siblings[i]] = RefTerm(5, i)
+    loop axis in [0..nkids(tn)):
+        dim = kid(tn, axis)
+        term = RefTerm()
+        if nodes[dim].kind == .ident:
+            name = int(nodes[dim].name)
+            if bound.has(name): term = bound[name]
+            else if lookup(name) != 0 and (syms[lookup(name)].kind == .global or syms[lookup(name)].kind == .const_): term = ref_resolve_value(dim)
+            # (another word stands for an extent the record does not store: only the rank is held)
+            else: continue
+        else: term = nd_shape_term(dim, bound)
+        ref_add(.eq, RefTerm(path = (if nd: [-3 - axis] else: [-1])), term, atoms)
+    predicate = ref_intern(atoms)
+    nd_span(predicate, nodes[tn].pos)
+    if nd: runtime_fn("__nd_storage_valid")
+    refined = mk_refined(t, predicate)
+    nd_shape_predicates[int(types[refined].st)] = true
+    refined
+# Runtime projection is total even before the separate rank obligation has
+# been checked (predicate interning may reorder atoms). Missing axes are -1;
+# a legitimate array never has a negative extent.
+nd_ir_projection = (value: int, t: int, selector: int) -> int:
+    si = int(types[representation_type(t)].st)
+    field = int(structs[si].fields) + 1
+    shape = load_val(int(fields[field].type), field_val_addr(field, value), 0)
+    if selector == ND_STORAGE_VALID:
+        data_field = int(structs[si].fields)
+        data = load_val(int(fields[data_field].type), field_val_addr(data_field, value), 0)
+        return e_call(rt("__nd_storage_valid"), [shape, arr_len(data)], VI)
+    if selector == -2: return arr_len(shape)
+    axis = -3 - selector
+    result = vreg(VI)
+    e_mov(result, e_iconst(-1))
+    iff(e_bin(.lts, VI, e_iconst(axis), arr_len(shape)))
+    e_mov(result, e_load(VI, shape, 24 + axis * 8, 8))
+    endc()
+    result
+fact_nd_shape = (s: mut FactState, value: int) -> int:
+    fact_project(s, value, intern("shape"), false, mk_array(T_INT))
+fact_nd_projection = (s: mut FactState, value: int, selector: int) -> int:
+    if selector == ND_STORAGE_VALID: return fact_nd_valid(s, value)
+    shape = fact_nd_shape(s, value)
+    if selector == -2: return fact_project(s, shape, -1, false, T_INT)
+    fact_nd_dim(s, value, fact_terms[value].type, fact_constant(s, -3 - selector))
+fact_nd_rank = (s: mut FactState, value: int, t: int) -> int:
+    if is_nd(representation_type(t)): return fact_nd_projection(s, value, -2)
+    fact_constant(s, 1)
+fact_nd_dim = (s: mut FactState, value: int, t: int, axis: int) -> int:
+    if is_nd(representation_type(t)):
+        shape = fact_nd_shape(s, value)
+        extent = fact_project(s, shape, axis, true, T_INT)
+        valid = fact_nd_valid(s, value)
+        if fact_bound(s, valid).lo == 1 and fact_bound(s, valid).hi == 1:
+            b = fact_bound(s, extent)
+            fact_set_bound(s, extent, FactBound(max(0, b.lo), b.hi, b.nz, b.reason, b.witness))
+        return extent
+    fact_project(s, value, -1, false, T_INT)
+fact_nd_need = (n: int, s: mut FactState, op: Tok, a: int, b: int, relation: str) -> bool:
+    truth = fact_compare(s, op, a, b)
+    if fact_speculating != 0: return truth == 1
+    if fact_probe_on: fact_probe_record(n, truth == 1)
+    else if truth != 1 and (fact_policy == .RequireStatic or fact_query): wit_unknown(n, fact_bound(s, a), "array shape/index contract `{relation}`", 0, relation)
+    truth == 1
+fact_nd_check = (n: int, s: mut FactState, values: int[], kind: int):
+    if kind == 115: return
+    if kind >= 160: fact_sequence_select(n, s, values, kind); return
+    if kind == 155:
+        fact_nd_integer_picks(n, s, values[0])
+        return
+    if kind >= 150 and kind <= 154:
+        fact_nd_slice(n, s, values, kind)
+        return
+    if kind == 140:
+        fact_nd_broadcast(n, s, values[0])
+        return
+    t = ntype(kid(n, 0))
+    if kind == 141:
+        text = wit_text(kid(n, 0))
+        relation = if text != "": "{text}.data.length matches its nonnegative shape" else: "the broadcast operand's data length matches its nonnegative shape"
+        fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), relation)
+        return
+    rank = fact_nd_rank(s, values[0], t)
+    text = wit_text(kid(n, 0))
+    if text == "": text = "the array"
+    if kind == 130 or kind == 131:
+        fact_nd_need(n, s, .eq, rank, fact_constant(s, 2), "{text}.length.length =? 2")
+        fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
+        left = fact_nd_dim(s, values[0], t, fact_constant(s, 1))
+        other = wit_text(kid(n, 1))
+        if other == "": other = "the right array"
+        right = fact_project(s, values[1], -1, false, T_INT)
+        relation = "{text}.length[1] =? {other}.length"
+        if kind == 130:
+            fact_nd_need(n, s, .eq, fact_nd_rank(s, values[1], ntype(kid(n, 1))), fact_constant(s, 2), "{other}.length.length =? 2")
+            fact_nd_need(n, s, .eq, fact_nd_valid(s, values[1]), fact_constant(s, 1), "{other}.data.length matches its shape")
+            right = fact_nd_dim(s, values[1], ntype(kid(n, 1)), fact_constant(s, 0))
+            relation += "[0]"
+        fact_nd_need(n, s, .eq, left, right, relation)
+    else if kind >= 120:
+        # Numeric linear algebra touches only a square matrix's own storage.
+        # These are the actual boundary obligations; singularity is a result.
+        fact_nd_need(n, s, .eq, rank, fact_constant(s, 2), "{text}.length.length =? 2")
+        fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
+        rows = fact_nd_dim(s, values[0], t, fact_constant(s, 0))
+        cols = fact_nd_dim(s, values[0], t, fact_constant(s, 1))
+        fact_nd_need(n, s, .eq, rows, cols, "{text}.length[0] =? {text}.length[1]")
+        if kind == 121:
+            length = fact_project(s, values[1], -1, false, T_INT)
+            rhs = wit_text(kid(n, 1))
+            if rhs == "": rhs = "the right-hand side"
+            fact_nd_need(n, s, .eq, length, rows, "{rhs}.length =? {text}.length[0]")
+    else if kind == 100 or kind == 101 or kind == 105 or kind == 110 or kind == 111:
+        count = if kind == 105: 1 else if kind < 110: 2 else: nkids(n) - (if kind == 110: 1 else: 2)
+        fact_nd_need(n, s, .eq, rank, fact_constant(s, count), "{text}.length.length =? {count}")
+        if kind < 110: return
+        fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
+        loop i in [1..count + 1):
+            extent = fact_nd_dim(s, values[0], t, fact_constant(s, i - 1))
+            ix = wit_text(kid(n, i))
+            fact_nd_need(n, s, .le, fact_constant(s, 0), values[i], "0 <=? {ix}")
+            fact_nd_need(n, s, .lt, values[i], extent, "{ix} <? {text}.length[{i - 1}]")
+    else if kind == 112 or kind == 113:
+        # (a matrix's row or column i: 0 <=? i <? that axis's extent)
+        fact_nd_need(n, s, .eq, rank, fact_constant(s, 2), "{text}.length.length =? 2")
+        fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
+        axis = kind - 112
+        extent = fact_nd_dim(s, values[0], t, fact_constant(s, axis))
+        ix = wit_text(kid(n, 1))
+        fact_nd_need(n, s, .le, fact_constant(s, 0), values[1], "0 <=? {ix}")
+        fact_nd_need(n, s, .lt, values[1], extent, "{ix} <? {text}.length[{axis}]")
+    else if kind == 109:
+        other = wit_text(kid(n, 1))
+        if other == "": other = "the right array"
+        fact_nd_need(n, s, .eq, fact_project(s, values[0], -1, false, T_INT), fact_project(s, values[1], -1, false, T_INT), "{text}.length =? {other}.length")
+    else if kind == 108:
+        if is_nd(representation_type(t)):
+            fact_nd_need(n, s, .le, rank, fact_constant(s, 4), "{text}.length.length <=? 4")
+            fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
+    else if kind == 102:
+        if is_nd(representation_type(t)): fact_nd_need(n, s, .eq, fact_nd_valid(s, values[0]), fact_constant(s, 1), "{text}.data.length matches its shape")
+        fact_nd_need(n, s, .eq, rank, values[1], "{text}.length.length =? {wit_text(kid(n, 1))}")
+    else if kind == 107:
+        if is_nd(representation_type(t)):
+            fact_nd_need(n, s, .le, fact_constant(s, 0), values[1], "0 <=? shape axis")
+            fact_nd_need(n, s, .lt, values[1], rank, "shape axis is below the rank")
+    else if kind == 103:
+        if is_nd(representation_type(t)):
+            fact_nd_need(n, s, .le, fact_constant(s, 0), values[1], "0 <=? shape axis")
+            fact_nd_need(n, s, .lt, values[1], rank, "shape axis is below the rank")
+        extent = fact_nd_dim(s, values[0], t, values[1])
+        fact_nd_need(n, s, .eq, extent, values[2], "{text}.length[{wit_text(kid(n, 1))}] =? {wit_text(kid(n, 2))}")
+    else if kind == 104:
+        length = fact_project(s, values[1], -1, false, T_INT)
+        fact_nd_need(n, s, .eq, rank, length, "{text}.length has the declared rank")
+        b = fact_bound(s, length)
+        if b.lo != b.hi or b.hi > 32:
+            fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "{text}.length matches its declared shape")
+            return
+        loop axis in [0..b.lo):
+            index = fact_constant(s, axis)
+            expected = fact_project(s, values[1], index, true, T_INT)
+            extent = fact_nd_dim(s, values[0], t, index)
+            fact_nd_need(n, s, .eq, extent, expected, "{text}.length[{axis}] matches its declared extent")
+fact_nd_make = (n: int, s: mut FactState, dims: int[], data: int = 0, result_type: int = 0) -> int:
+    shape = fact_new(s, FactBound(), FactTerm(type = mk_array(T_INT)))
+    fact_add_projection(s, FactProjection(shape, -1, false, fact_constant(s, dims.len())))
+    loop i in [0..dims.len()): fact_add_projection(s, FactProjection(shape, fact_constant(s, i), true, dims[i]))
+    result = fact_new(s, FactBound(), FactTerm(type = (if result_type != 0: result_type else: ntype(n))))
+    fact_add_projection(s, FactProjection(result, intern("shape"), false, shape))
+    # A literal helper receives its flat storage; unlike allocating
+    # constructors it does not check that storage against its dimensions.
+    if data != 0:
+        fact_add_projection(s, FactProjection(result, intern("data"), false, data))
+        fact_nd_valid(s, result)
+        return result
+    # Concrete constructor shapes also establish the flat count used by
+    # reshape. A zero dimension makes the count zero even with huge peers.
+    # One symbolic extent among ones, as a slice to one axis or a product
+    # with a single row makes, is the count itself. O(rank) here.
+    count = 1
+    known = true
+    zero = false
+    free = 0
+    frees = 0
+    loop dim in dims:
+        b = fact_bound(s, dim)
+        if b.lo == 0 and b.hi == 0: zero = true
+        if b.lo != b.hi:
+            free = dim
+            frees += 1
+        if b.lo != b.hi or b.lo < 0 or math_word_overflow(2, count, b.lo): known = false
+        else if known: count *= b.lo
+    if known or zero:
+        length = fact_nd_data_length(s, result)
+        extent = if zero: 0 else: count
+        fact_set_bound(s, length, FactBound(extent, extent))
+    else if frees == 1 and count == 1 and s.projections.len() < FACT_CAP:
+        storage = fact_project(s, result, intern("data"), false, mk_array(nd_elem(representation_type(fact_terms[result].type))))
+        if fact_projection_find(s, storage, -1, false) < 0: fact_add_projection(s, FactProjection(storage, -1, false, free))
+    fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
+    result
+fact_nd_capture = (n: int, s: mut FactState, values: int[], kind: int) -> int:
+    if kind == 155:
+        fact_nd_integer_picks(n, s, values[0])
+        return fact_nd_remember(n, s, values, ntype(n))
+    if kind >= 160: return fact_sequence_select(n, s, values, kind)
+    if kind != 111 and not (kind >= 151 and kind <= 153) and not fact_nd_reads_only(n): fact_path_call_effects(n, s)
+    if kind == 115: return values[0]
+    if kind >= 150 and kind <= 154: return fact_nd_slice(n, s, values, kind)
+    if kind == 114: return fact_nd_download(n, s, values[0])
+    if kind >= 11 and kind <= 14: return fact_nd_remember(n, s, values, ntype(n))
+    if kind == 140: return fact_nd_broadcast(n, s, values[0])
+    if kind == 10: return fact_nd_count(s, values[0])
+    if kind == 106:
+        data = values[0]
+        if is_nd(representation_type(ntype(kid(n, 0)))): data = fact_project(s, data, intern("data"), false, mk_array(nd_elem(representation_type(ntype(kid(n, 0))))))
+        dims = values[1..]
+        if nkids(n) == 2 and tkind(representation_type(ntype(kid(n, 1)))) == .array:
+            count_value = fact_project(s, values[1], -1, false, T_INT)
+            count = fact_bound(s, count_value)
+            if count.lo != count.hi or count.hi > 32:
+                fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "reshape's shape is nonnegative and its product matches the data")
+                return fact_fresh(s, ntype(n))
+            dims = []
+            loop i in [0..count.lo): dims.push(fact_project(s, values[1], fact_constant(s, i), true, T_INT))
+        length = fact_project(s, data, -1, false, T_INT)
+        zero = false
+        loop dim in dims:
+            b = fact_bound(s, dim)
+            if b.lo == 0 and b.hi == 0: zero = true
+        product = fact_constant(s, (if zero: 0 else: 1))
+        loop dim in dims:
+            fact_nd_need(n, s, .le, fact_constant(s, 0), dim, "reshape's dimensions are nonnegative")
+            if zero: continue
+            origin = kid(n, nkids(n) - 1)
+            if not is_int(representation_type(ntype(origin))):
+                origin = bc_int(0, nodes[n].pos)
+                nodes[origin].type = i32(T_INT)
+            product = fact_arithmetic(s, origin, .star, product, dim)
+        fact_nd_need(n, s, .eq, product, length, "reshape's dimensions multiply to its element count")
+        result = fact_nd_make(n, s, dims, data)
+        fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
+        return result
+    if kind >= 100 or kind == 6: fact_nd_check(n, s, values, (if kind == 6: 107 else: kind))
+    if kind == 108: return fact_nd_upload(n, s, values[0])
+    if kind == 9: return fact_nd_transpose(n, s, values[0])
+    if kind == 130 or kind == 131:
+        rows = fact_nd_dim(s, values[0], ntype(kid(n, 0)), fact_constant(s, 0))
+        if kind == 130:
+            cols = fact_nd_dim(s, values[1], ntype(kid(n, 1)), fact_constant(s, 1))
+            return fact_nd_make(n, s, [rows, cols])
+        result = fact_fresh(s, ntype(n))
+        length = fact_clamped(s, rows, n)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -1, false, length))
+        return result
+    if kind == 120 or kind == 121:
+        result = fact_fresh(s, ntype(n))
+        loop t in union_members(fact_type(ntype(n))):
+            if kind == 120 and is_nd(t):
+                extent = fact_nd_dim(s, values[0], ntype(kid(n, 0)), fact_constant(s, 0))
+                value = fact_nd_make(n, s, [extent, extent], 0, t)
+                if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -4, false, value))
+                break
+            if kind == 121 and tkind(t) == .array:
+                value = fact_fresh(s, t)
+                length = fact_project(s, values[1], -1, false, T_INT)
+                # Returning solve checked that this immutable RHS count is
+                # its row count. Retain bounds known from either identity.
+                rows = fact_nd_dim(s, values[0], ntype(kid(n, 0)), fact_constant(s, 0))
+                b = fact_bound(s, length); r = fact_bound(s, rows)
+                b.lo = max(b.lo, r.lo); b.hi = min(b.hi, r.hi); b.nz = b.nz or r.nz
+                fact_set_bound(s, length, b)
+                if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, length))
+                if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -4, false, value))
+                break
+        return result
+    if kind == 1: return fact_nd_make(n, s, values)
+    if kind == 2: return fact_nd_make(n, s, [values[0], values[0]])
+    if kind == 3: return fact_nd_make(n, s, values[1..], values[0])
+    if kind == 4: return fact_nd_shape(s, values[0])
+    if kind == 5: return fact_nd_projection(s, values[0], -2)
+    if kind == 6: return fact_nd_dim(s, values[0], ntype(kid(n, 0)), values[1])
+    if kind == 7 or kind == 8 or kind == 105 or kind == 141:
+        data = fact_project(s, values[0], intern("data"), false, mk_array(nd_elem(representation_type(ntype(kid(n, 0))))))
+        return if kind == 7: fact_project(s, data, -1, false, T_INT) else: data
+    if kind == 100 or kind == 101: return fact_nd_projection(s, values[0], -3 - (kind - 100))
+    if kind == 104: return values[0]
+    if kind == 111:
+        if fact_nd_plain_store(n): fact_nd_store(n, s, n, .write)
+        else: fact_path_call_effects(n, s)
+    fact_fresh(s, ntype(n))
+# __nd_count returns the exact product on its normal edge (a product beyond
+# int64 exits as allocation exhaustion). Its zero shortcut does not validate
+# negative peer dimensions: publish storage validity only after proving every
+# dimension nonnegative. O(rank <= 32), only for a demanded count.
+fact_nd_count = (s: mut FactState, shape: int) -> int:
+    rank_value = fact_project(s, shape, -1, false, T_INT)
+    rank = fact_bound(s, rank_value)
+    result = fact_new(s, FactBound(0, FACT_MAX), FactTerm(type = T_INT))
+    if rank.wide or rank.lo != rank.hi or rank.lo < 0 or rank.hi > 32: return result
+    valid = true
+    known = true
+    zero = false
+    count = 1
+    loop axis in [0..rank.lo):
+        dim_value = fact_project(s, shape, fact_constant(s, axis), true, T_INT)
+        dim = fact_bound(s, dim_value)
+        if dim.wide or dim.lo < 0: valid = false
+        if not dim.wide and dim.lo == 0 and dim.hi == 0: zero = true
+        if dim.wide or dim.lo != dim.hi or dim.lo < 0 or math_word_overflow(2, count, dim.lo): known = false
+        else if known: count *= dim.lo
+    if known or zero: fact_set_bound(s, result, FactBound((if zero: 0 else: count), (if zero: 0 else: count)), true)
+    if valid:
+        shapes = fact_project(s, result, ND_STORAGE_SHAPES, false, T_INT)
+        fact_set_bound(s, fact_project(s, shapes, shape, true, T_INT), FactBound(1, 1, true))
+    result
+# Dotted N-D operations align trailing axes; each pair must agree or have
+# an extent of one. Only demanded calls inspect shapes, with indexed element
+# projections and at most 32 operands/rank and 128 total axes. No body scan.
+fact_nd_broadcast = (n: int, s: mut FactState, input: int) -> int:
+    count_value = fact_project(s, input, -1, false, T_INT)
+    count = fact_bound(s, count_value)
+    if count.wide or count.lo != count.hi or count.lo < 0 or count.hi > 32:
+        fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "broadcast operand shapes have compatible trailing dimensions (equal or one)")
+        return fact_fresh(s, ntype(n))
+    shapes: int[]
+    ranks: int[]
+    rank = 0
+    axes = 0
+    same = true
+    loop i in [0..count.lo):
+        shape = fact_project(s, input, fact_constant(s, i), true, mk_array(T_INT))
+        if shapes.len() > 0 and shape != shapes[0]: same = false
+        shapes.push(shape)
+    # One operand (or repeated immutable shapes) needs no rank enumeration.
+    if shapes.len() > 0 and same:
+        if fact_probe_on: fact_probe_record(n, true)
+        return shapes[0]
+    loop shape in shapes:
+        extent_value = fact_project(s, shape, -1, false, T_INT)
+        extent = fact_bound(s, extent_value)
+        if extent.wide or extent.lo != extent.hi or extent.lo < 0 or extent.hi > 32 or axes + extent.lo > 128:
+            fact_nd_need(n, s, .eq, fact_fresh(s, T_INT), fact_constant(s, 1), "broadcast operand shapes have compatible trailing dimensions (equal or one)")
+            return fact_fresh(s, ntype(n))
+        ranks.push(extent.lo)
+        rank = max(rank, extent.lo)
+        axes += extent.lo
+    one = fact_constant(s, 1)
+    dims = fill(one, rank)
+    loop i in [0..shapes.len()):
+        loop axis in [0..ranks[i]):
+            at = rank - ranks[i] + axis
+            dim = fact_project(s, shapes[i], fact_constant(s, axis), true, T_INT)
+            prior = dims[at]
+            if fact_compare(s, .eq, prior, one) == 1: dims[at] = dim
+            else if fact_compare(s, .eq, dim, one) != 1:
+                if not fact_nd_need(n, s, .eq, dim, prior, "broadcast operand {i + 1} axis {axis} is compatible with the aligned extent (equal or either is one)"):
+                    # A deferred check can also succeed because the old
+                    # extent was one. Its result then takes the new extent.
+                    dims[at] = fact_fresh(s, T_INT)
+    if fact_probe_on: fact_probe_record(n, true)
+    result = fact_fresh(s, ntype(n))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, -1, false, fact_constant(s, rank)))
+    loop axis in [0..rank):
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, fact_constant(s, axis), true, dims[axis]))
+    result
+# `cpu(g)` downloads a GPU array: lib/game/gpuarray.jo builds every GpuArray
+# with as many values as its shape counts (an upload proves its input's
+# storage, a GPU program or its CPU fallback makes its result's), and the
+# download pairs those values with that shape, so it has the storage marker.
+# An N-D upload keeps its input's shape as the GPU array's own `shape` field,
+# which the download gives back. O(1) each.
+fact_nd_download = (n: int, s: mut FactState, input: int) -> int:
+    result = fact_fresh(s, ntype(n))
+    shape = if input != 0: fact_projection_find(s, input, intern("shape"), false) else: -1
+    if shape >= 0 and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("shape"), false, s.projections[shape].value))
+    # Downloaded storage and reductions refer to the same immutable count.
+    length = fact_project(s, input, intern("n"), false, T_INT)
+    data = fact_project(s, result, intern("data"), false, mk_array(nd_elem(representation_type(ntype(n)))))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(data, -1, false, length))
+    fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
+    result
+fact_nd_upload = (n: int, s: mut FactState, input: int) -> int:
+    t = representation_type(ntype(kid(n, 0)))
+    nd = is_nd(t)
+    length = if nd: fact_nd_data_length(s, input) else if tkind(t) == .fixed: fact_constant(s, fixed_len(t)) else: fact_project(s, input, -1, false, T_INT)
+    # Upload owns a shape snapshot and retains the exact flat element count.
+    result = if nd: fact_fresh(s, ntype(n)) else: fact_nd_make(n, s, [length])
+    if nd and s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("shape"), false, fact_nd_shape(s, input)))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("n"), false, length))
+    result
+# A transpose reverses axes and copies exactly the input storage count.
+# Transfer only a demanded result, O(rank <= 32); unknown/larger ranks retain
+# only rank and storage count. This is a result fact, not a no-failure promise.
+# The validity marker transfers only when the input's own invariant is known.
+fact_nd_transpose = (n: int, s: mut FactState, input: int) -> int:
+    rank = fact_nd_rank(s, input, ntype(kid(n, 0)))
+    count = fact_bound(s, rank)
+    length = fact_nd_data_length(s, input)
+    data = fact_fresh(s, mk_array(nd_elem(representation_type(ntype(n)))))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(data, -1, false, length))
+    result = 0
+    if not count.wide and count.lo == count.hi and count.lo >= 0 and count.hi <= 32:
+        dims: int[]
+        loop axis in [0..count.lo): dims.push(fact_nd_dim(s, input, ntype(kid(n, 0)), fact_constant(s, count.lo - 1 - axis)))
+        result = fact_nd_make(n, s, dims, data)
+    else:
+        result = fact_fresh(s, ntype(n))
+        shape = fact_nd_shape(s, result)
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(shape, -1, false, rank))
+        if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(result, intern("data"), false, data))
+    valid_value = fact_nd_valid(s, input)
+    valid = fact_bound(s, valid_value)
+    if valid.lo == 1 and valid.hi == 1: fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
+    result
+fact_nd_store = (n: int, s: mut FactState, at: int, reason: FactReason):
+    route = fact_receiver_route(n, s)
+    held = fact_route_values(s, route)
+    if held.len() == 0: fact_path_call_effects(n, s); return
+    old = held[held.len() - 1]
+    shape = fact_nd_shape(s, old)
+    length = fact_nd_data_length(s, old)
+    target = kid(n, 0)
+    loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
+    fact_change_route(s, target, true, at, reason)
+    fresh = fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0))))
+    fact_add_projection(s, FactProjection(fresh, intern("shape"), false, shape))
+    data = fact_project(s, fresh, intern("data"), false, mk_array(nd_elem(representation_type(ntype(kid(n, 0))))))
+    fact_add_projection(s, FactProjection(data, -1, false, length))
+    fact_store_route(s, route, fresh, at)
+# The invariant belongs to the pair (immutable data length, immutable shape),
+# never to a mutable binding. A field replacement loses it automatically;
+# element writes preserving both identities retain it. Sparse, indexed state.
+fact_nd_data_length = (s: mut FactState, value: int) -> int:
+    t = representation_type(fact_terms[value].type)
+    data = fact_project(s, value, intern("data"), false, mk_array(nd_elem(t)))
+    fact_project(s, data, -1, false, T_INT)
+fact_nd_valid = (s: mut FactState, value: int) -> int:
+    if value == 0: return 0
+    shape = fact_nd_shape(s, value)
+    length = fact_nd_data_length(s, value)
+    known = fact_project(s, length, ND_STORAGE_SHAPES, false, T_INT)
+    valid = fact_project(s, known, shape, true, T_INT)
+    if fact_bound(s, valid).lo == 1: return valid
+    # (a loop header's value carries the marker its edges agreed on)
+    marker = fact_projection_find(s, value, ND_STORAGE_VALID, false)
+    if marker >= 0 and fact_bound(s, s.projections[marker].value).lo == 1:
+        fact_set_bound(s, valid, FactBound(1, 1, true))
+        return valid
+    rank_value = fact_project(s, shape, -1, false, T_INT)
+    rank = fact_bound(s, rank_value)
+    if rank.lo != rank.hi or rank.lo < 0 or rank.hi > 32: return valid
+    # (constant extents multiply; one symbolic extent among ones, as a `new`
+    # axis makes, must equal the length itself. O(rank <= 32) when demanded)
+    product = 1
+    free = 0
+    loop axis in [0..rank.lo):
+        extent_value = fact_project(s, shape, fact_constant(s, axis), true, T_INT)
+        extent = fact_bound(s, extent_value)
+        if extent.lo != extent.hi:
+            if free != 0: return valid
+            free = extent_value
+        else:
+            if extent.lo < 0 or math_word_overflow(2, product, extent.lo): return valid
+            product *= extent.lo
+    if free != 0 and product != 1: return valid
+    expected = if free != 0: free else: fact_constant(s, product)
+    if fact_compare(s, .eq, length, expected) == 1: fact_set_bound(s, valid, FactBound(1, 1, true))
+    valid
+# Whether a state already knows value's data matches its shape, without
+# materializing anything: the header marker or the (length, shape) pair. O(1)
+# indexed lookups.
+fact_nd_valid_held = (s: FactState, value: int) -> bool:
+    if not s.live or value == 0: return false
+    i = fact_projection_find(s, value, ND_STORAGE_VALID, false)
+    if i >= 0: return fact_bound(s, s.projections[i].value).lo == 1
+    i = fact_projection_find(s, value, intern("shape"), false)
+    j = fact_projection_find(s, value, intern("data"), false)
+    if i < 0 or j < 0: return false
+    j = fact_projection_find(s, s.projections[j].value, -1, false)
+    if j < 0: return false
+    j = fact_projection_find(s, s.projections[j].value, ND_STORAGE_SHAPES, false)
+    if j < 0: return false
+    j = fact_projection_find(s, s.projections[j].value, s.projections[i].value, true)
+    j >= 0 and fact_bound(s, s.projections[j].value).lo == 1
