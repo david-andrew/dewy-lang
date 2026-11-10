@@ -10,6 +10,7 @@ CHECKS_HOMES = {path.stem: match[1] for path in (Path(__file__).resolve().parent
 # (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
+    'soa_helpers': 'expr.jo',
     'checker_tree_queries': 'check.jo',
     'expr_error_context': 'expr.jo',
     'byte_append': 'util.jo',

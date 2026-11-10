@@ -1,0 +1,194 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED add_flag clone mk nodes set_list)
+from p"check.jo" import (scope_mark scope_reset)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_method bc_stmt)
+from p"checks_thin.dewy" import (check_stmt)
+from p"checks_thin_expr.dewy" import (soa_again)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (bc_count last_checked ntype)
+from p"type_ops.dewy" import (dt soa_elem)
+from p"types.jo" import (fields prune structs types)
+from p"util.jo" import (intern name_of)
+
+SoaWord:type=int64<overflow='wrap'>
+# the struct value P(f0, f1, ...) from checked field values (in field order)
+soa_struct=(st:SoaWord vals:array<int64> pos:SoaWord):>int64=>$unsafe {
+    let c=mk('call' pos)
+    set_list(c vals)
+    nodes.ptr[c].aux=2
+    nodes.ptr[c].type=int32(st)
+    add_flag(c NF_CHECKED)
+    c
+}
+soa_field_names=(t:SoaWord):>array<int64>=>$unsafe {
+    let si=SoaWord(types.ptr[prune(t)].st)
+    let out:array<int64>=[]
+    loop i in [0..SoaWord(structs.ptr[si].nfields)) {out.push(SoaWord(fields.ptr[SoaWord(structs.ptr[si].fields) + i].name))}
+    out
+}
+# ps[i]: P(ps.x[i], ps.y[i], ...)
+check_soa_index=(n:SoaWord expected:SoaWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let base=SoaWord(nodes.ptr[n].a)
+    let st=prune(ntype(base))
+    let pt=soa_elem(st)
+    let stmts:array<int64>=[]
+    let iname="__si{bc_count}"
+    bc_count += 1
+    stmts.push(bc_let(iname SoaWord(nodes.ptr[n].b) pos))
+    let vals:array<int64>=[]
+    loop i in 0.. and fname in soa_field_names(st) {
+        let f=mk('field' pos)
+        nodes.ptr[f].a=int32(soa_again(base))
+        nodes.ptr[f].name=int32(fname)
+        let ix=mk('index' pos)
+        nodes.ptr[ix].a=int32(f)
+        nodes.ptr[ix].b=int32(bc_ident(iname pos))
+        vals.push(ix)
+    }
+    let blk=bc_block(stmts pos)
+    let mark=scope_mark()
+    check_stmt(stmts[0])
+    add_flag(stmts[0] NF_CHECKED)
+    loop i in [0..vals.length) {
+        check_expr(vals[i] 0);
+        vals[i]=last_checked
+    }
+    scope_reset(mark)
+    # (ps[mask], ps[idxs]: each field's elements picked, a soa array again)
+    let it=prune(ntype(SoaWord(nodes.ptr[stmts[0]].b)))
+    if types.ptr[it].kind =? 'array' {stmts.push(bc_stmt(soa_struct(st vals pos) pos))} else {stmts.push(bc_stmt(soa_struct(pt vals pos) pos))}
+    set_list(blk stmts)
+    nodes.ptr[n]=nodes.ptr[blk]
+    check_expr(n expected)
+}
+# ps[i] = p: each field
+soa_assign=(s:SoaWord):>int64=>$unsafe {
+    let pos=nodes.ptr[s].pos
+    let lhs=SoaWord(nodes.ptr[s].a)
+    let base=SoaWord(nodes.ptr[lhs].a)
+    let st=prune(ntype(base))
+    if nodes.ptr[s].op not=? int32(47) {fatal(pos "only `=` assigns a whole element of a soa array");}
+    let tn="__st{bc_count}"
+    let iname="__si{bc_count}"
+    bc_count += 1
+    let stmts=[bc_let(iname SoaWord(nodes.ptr[lhs].b) pos)]
+    let vd=bc_let(tn SoaWord(nodes.ptr[s].b) pos)
+    let ty=mk('tname' pos)
+    nodes.ptr[ty].aux=-7
+    nodes.ptr[ty].ival=soa_elem(st)
+    nodes.ptr[vd].a=int32(ty)
+    stmts.push(vd)
+    loop fname in soa_field_names(st) {
+        let f=mk('field' pos)
+        nodes.ptr[f].a=int32(soa_again(base))
+        nodes.ptr[f].name=int32(fname)
+        let ix=mk('index' pos)
+        nodes.ptr[ix].a=int32(f)
+        nodes.ptr[ix].b=int32(bc_ident(iname pos))
+        let a=mk('assign' pos)
+        nodes.ptr[a].op=int32(47)
+        nodes.ptr[a].a=int32(ix)
+        nodes.ptr[a].b=int32(bc_field(bc_ident(tn pos) name_of(fname) pos))
+        stmts.push(a)
+    }
+    let es=bc_stmt(bc_block(stmts pos) pos)
+    check_stmt(es)
+    es
+}
+check_soa_method=(n:SoaWord recv:SoaWord fname:SoaWord args:array<int64> expected:SoaWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let st=prune(ntype(recv))
+    let pt=soa_elem(st)
+    let fnms=soa_field_names(st)
+    let m=name_of(fname)
+    if fnms.length =? 0 {fatal(pos "{dt(st)}: the struct has no fields");}
+    let fld=(i:int64):>int64=>$unsafe {
+        let f=mk('field' pos)
+        nodes.ptr[f].a=int32(soa_again(recv))
+        nodes.ptr[f].name=int32(fnms[i])
+        f
+    }
+    let stmts:array<int64>=[]
+    if m =? "len" {
+        let replacement=bc_call("len" [fld(0)] pos)
+        nodes.ptr[n]=nodes.ptr[replacement]
+        return check_expr(n expected)
+    }
+    if m =? "push" {
+        if args.length not=? 1 {fatal(pos "push takes one element");}
+        let tn="__st{bc_count}"
+        bc_count += 1
+        let vd=bc_let(tn args[0] pos)
+        let ty=mk('tname' pos)
+        nodes.ptr[ty].aux=-7
+        nodes.ptr[ty].ival=pt
+        nodes.ptr[vd].a=int32(ty)
+        stmts.push(vd)
+        loop i in 0.. and nm in fnms {stmts.push(bc_stmt(bc_method(fld(i) "push" [bc_field(bc_ident(tn pos) name_of(nm) pos)] pos) pos))}
+    }
+    else if m =? "clear" or m =? "reserve" or m =? "truncate" {
+        loop i in [0..fnms.length) {
+            let cl:array<int64>=[]
+            loop a in args {cl.push(clone(a))}
+            stmts.push(bc_stmt(bc_method(fld(i) m cl pos) pos))
+        }
+    }
+    else if m =? "pop" or m =? "remove" {
+        if m =? "remove" and args.length not=? 1 {fatal(pos "remove takes an index");}
+        let vals:array<int64>=[]
+        if m =? "remove" {
+            let iname="__si{bc_count}"
+            bc_count += 1
+            stmts.push(bc_let(iname args[0] pos))
+            loop i in [0..fnms.length) {vals.push(bc_method(fld(i) "remove" [bc_ident(iname pos)] pos))}
+        }
+        else {
+            loop i in [0..fnms.length) {vals.push(bc_method(fld(i) "pop" [] pos))}
+        }
+        let blk=bc_block(stmts pos)
+        let mark=scope_mark()
+        loop x in stmts {
+            check_stmt(x)
+            add_flag(x NF_CHECKED)
+        }
+        loop i in [0..vals.length) {
+            check_expr(vals[i] 0);
+            vals[i]=last_checked
+        }
+        scope_reset(mark)
+        stmts.push(bc_stmt(soa_struct(pt vals pos) pos))
+        set_list(blk stmts)
+        nodes.ptr[n]=nodes.ptr[blk]
+        return check_expr(n expected)
+    }
+    else {fatal(pos "a soa array has len, push, pop, remove, clear, reserve and truncate (and its field arrays: xs.{name_of(fnms[0])})");}
+    let replacement=bc_block(stmts pos)
+    nodes.ptr[n]=nodes.ptr[replacement]
+    check_expr(n expected)
+}
+# P[] -> soa P[]: n becomes a loop pushing each element
+soa_from_array=(n:SoaWord to:SoaWord):>void=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let inner=nodes.length
+    nodes.push(nodes.ptr[n])
+    let cn="__sc{bc_count}"
+    let on="__so{bc_count}"
+    let pn="__sp{bc_count}"
+    bc_count += 1
+    let od=mk('vardecl' pos)
+    nodes.ptr[od].name=int32(intern(on))
+    let ty=mk('tname' pos)
+    nodes.ptr[ty].aux=-7
+    nodes.ptr[ty].ival=to
+    nodes.ptr[od].a=int32(ty)
+    let lp=mk('for_' pos)
+    set_list(lp [bc_ident(pn pos)])
+    nodes.ptr[lp].a=int32(bc_ident(cn pos))
+    nodes.ptr[lp].b=int32(bc_block([bc_stmt(bc_method(bc_ident(on pos) "push" [bc_ident(pn pos)] pos) pos)] pos))
+    let stmts=[bc_let(cn inner pos) od bc_stmt(bc_method(bc_ident(on pos) "reserve" [bc_call("len" [bc_ident(cn pos)] pos)] pos) pos) lp bc_stmt(bc_ident(on pos) pos)]
+    let replacement=bc_block(stmts pos)
+    nodes.ptr[n]=nodes.ptr[replacement]
+    check_expr(n to);
+}
