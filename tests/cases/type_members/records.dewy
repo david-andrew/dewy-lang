@@ -1,0 +1,26 @@
+# quick
+# A record field whose value is a type (decisions.md, batch 7) is an ordinary member: `img.Png`
+# is that type wherever a type goes (annotations, patterns, `is?`, unions, type arguments), a
+# spread carries it, and it has no storage.
+Png:type = [w:int64]
+Jpeg:type = [q:int64]
+Gif:type = [frames:int64]
+img = [Png = Png Jpeg = Jpeg]
+more = [img... Gif = Gif types = Png | Jpeg | Gif]
+size = (x:img.Png | img.Jpeg):>int64 => {
+    match x {
+        <img.Png> => 1
+        j:img.Jpeg => j.q
+    }
+}
+main = () => {
+    let local = [Png = Png n = 2]
+    let v:Png | Jpeg = Png[7]
+    if v is? local.Png printl'png'
+    if v is? img.Jpeg printl'jpeg'
+    printl(size(Jpeg[9]))
+    let xs:array<more.Gif> = [Gif[1] Gif[2]]
+    let p:more.Png = more.Png[4]
+    let any:more.types = Gif[3]
+    printl"{xs.length} {p.w} {local.n} {any is? Gif}"
+}

@@ -16,7 +16,7 @@ from p"refine_ops.dewy" import (ref_field_shape total_dict_type)
 from p"unit_ops.dewy" import (resolve_quantity_type)
 from p"effect_contracts.dewy" import effect_argument
 from p"error_ops.dewy" import (nominal_family)
-from p"expr.jo" import (decimal_type word_rational_type dewy_record_schema)
+from p"expr.jo" import (decimal_type word_rational_type dewy_record_schema type_meet)
 # Demand-only type syntax recursion. No arena elements survive semantic calls.
 # Work follows visited syntax and requested semantic services; record binder sorting
 # retains O(F²), with O(F) field/name storage. Scope state is restored individually.
@@ -178,6 +178,8 @@ ct_resolve_type=(tn:CTWord):>CTWord=>$unsafe {
     if k =? 'tunion' {
         let ms:array<int64>=[]
         loop i in [0..ct_nkids(tn)) {ms.push(ct_resolve_type(ct_kid(tn   i)))}
+        # (`A & B`: the types in both, decisions.md batch 7)
+        if ct_input[0].nodes[0].ptr[tn].aux =? 11 {return type_meet(ms   ct_input[0].nodes[0].ptr[tn].pos)}
         return uu_mk_union(ms)
     }
     if k =? 'tptr' {return tb_mk_ptr(ct_resolve_type(CTWord(ct_input[0].nodes[0].ptr[tn].a)))}

@@ -1212,6 +1212,41 @@ describe = <T>(_x:T):>string => T.name
 main = () => printl"{kind(Jpeg[2])} {describe(Png[1])} {describe("text")}"   # Jpeg Png string
 ```
 
+A record field whose value is a type is an ordinary member (decisions.md, batch 7):
+`img = [Png = Png Jpeg = Jpeg]` makes `img.Png` that type wherever a type goes, in
+annotations, patterns (`<img.Png>`, `p:img.Png`), `is?`, unions and type arguments, and
+`[img... Gif = Gif]` spreads it. A type member exists only at compile time: it has no
+storage, and using it as a run-time value is an error. `&` of types is what is both: of
+unions, the alternatives they share (`All & (Png | Gif)`), binding tighter than `|`; with
+nothing in common it is an error. `types = Png | Jpeg` in a record holds the union.
+
+`$named[Png Jpeg]` is the record `[Png = Png Jpeg = Jpeg]`, one member per type named by
+its `T.name`; spread it with `...`. A type with no name, or a name listed twice, is an
+error (`field Png is listed twice`). It calls the prelude's ordinary function
+`named = <Each>(types:array<Each>) => [loop t in types $field(t.name) = t]`, which a
+program may call too: a call given a literal array of types is specialized on those types.
+A record loop over a literal array of types binds each as a type.
+
+A wait handle has its outcomes as type members: `heart.types` is everything the handle's
+wait gives (a channel's `T | Closed | Canceled`, a ticker's `Tick | Canceled`), and an
+outcome whose short name only one alternative has is a member (`lines.string`,
+`lines.Closed`, `heart.Tick`) unless the handle's type has a member of that name. They match
+by type: `<heart.Tick>` is `<Tick>`, and `x:heart.types & (Tick | Closed)` is
+`Tick | Closed`.
+
+```dewy
+Png:type = [w:int64]
+Jpeg:type = [q:int64]
+img = [$named[Png Jpeg]... count = 2]
+size = (x:img.Png | img.Jpeg):>int64 => {
+    match x {
+        <img.Png> => 1
+        j:img.Jpeg => j.q
+    }
+}
+main = () => printl"{size(Jpeg[9])} {img.count}"   # 9 2
+```
+
 In a union with text, as `'auto' | string<length >? 0>`, a literal the set lists
 is that member and any other text goes to the text member, so `'x'` is accepted.
 Without a text member, a literal the set does not list is an error.

@@ -6,7 +6,7 @@ from p"checks_thin.dewy" import (resolve_type)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checker_state.dewy" import (Global)
 from p"comptime.jo" import (ct_values)
-from p"expr.jo" import (bc_bin coerce expr_as_type finalize_literal last_checked ntype small_span type_alternatives)
+from p"expr.jo" import (bc_bin coerce expr_as_type finalize_literal last_checked ntype small_span type_alternatives type_sequence_scopes)
 from p"checks_thin_expr.dewy" import (int_intervals is_map_type)
 from p"checks_builders.dewy" import (bc_block bc_ident bc_if bc_int bc_str)
 from p"member_admit.dewy" import (member_prepare)
@@ -210,6 +210,9 @@ reflect_sequence=(e0:ReflectWord binder:ReflectWord):>array<int64>=>$unsafe {
         }
     }
     else {
+        # (`[Png Jpeg]`, or a parameter given one: each type, bound as a type)
+        let typed=type_sequence_scopes(e binder)
+        if typed.length >? 0 {return typed}
         let t=prune(check_expr(e 0))
         let checked=last_checked
         if tkind(t) not=? 'array' and tkind(t) not=? 'fixed' {fatal(nodes.ptr[e].pos "a record loop needs fields(T) or a compile-time array")}

@@ -1,0 +1,8 @@
+# Dewy's prelude: `named`, loaded when called (`$named[...]` calls it).
+
+# `$named[Png Jpeg Gif]` (decisions.md, batch 7) is the record `[Png = Png Jpeg = Jpeg Gif = Gif]`:
+# one member per type, named by the type's short name and holding the type. An ordinary
+# compile-time function: a call is specialized on the sequence of types it is given, and a
+# sequence known only at run time is rejected.
+named = <Each>(types:array<Each>) =>
+    [loop t in types $field(t.name) = t]

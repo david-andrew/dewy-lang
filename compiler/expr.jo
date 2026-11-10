@@ -1092,6 +1092,10 @@ coerce = (n: int, target: int) -> int:
     if fk == .ptr and tk == .ptr and (to == T_RAWPTR or from == T_RAWPTR):
         wrap_conv(n, .ptr, to)
         return n
+    # (a type member's value, `[Png = Png]`, where that member's type is expected)
+    if fk == .typeval and tk == .typeval and type_eq(prune(telem(from)), prune(telem(to))):
+        nodes[n].type = i32(to)
+        return n
     if fk == .typeval: fatal(nodes[n].pos, "expected a value of type {dt(to)}, found a type name")
     why = variant_hint(n, to)
     # (`let d:Duration = q`, q a time known at run time or a float: only a constant is known to fit)
@@ -2534,7 +2538,7 @@ dewy_record_spread_entries = (n: int, expected: int, stmts: mut int[], capture: 
         else:
             if nodes[entry].kind != .namedarg: fatal(pos, "a record literal needs named fields or record spreads")
             field = entry
-            if capture:
+            if capture and not type_value_expr(int(nodes[entry].a)):
                 name = "$record_field{bc_count}"
                 bc_count += 1
                 decl = bc_let(name, int(nodes[entry].a), pos)
@@ -2572,11 +2576,255 @@ dewy_record_type = (n: int) -> int:
         value = int(nodes[field].a)
         check_expr(value, 0)
         t = finalize_literal(value)
-        if has_var(t) or tkind(t) == .void_ or tkind(t) == .typeval:
+        # (`[Png = Png]`: a field whose value is a type, comptime only, decisions.md batch 7)
+        if tkind(t) == .typeval and not has_var(telem(t)): t = type_member_type(telem(t))
+        else if has_var(t) or tkind(t) == .void_ or tkind(t) == .typeval:
             fatal(nodes[value].pos, "cannot infer record field '{name_of(name)}'; give the record a type annotation")
         add_flag(value, NF_CHECKED)
         nodes[field].type = i32(t)
     dewy_record_schema(n, args)
+
+# A record field whose value is a type (decisions.md, batch 7): one interned typeval per type, so
+# records with the same type members share one shape instance. It has no runtime storage.
+type_member_types: {int: int} = {}
+type_member_type = (t0: int) -> int:
+    t = prune(t0)
+    if let tv = type_member_types.get(t): return tv
+    tv = mk_typeval(t)
+    type_member_types[t] = tv
+    tv
+
+# Is e written as a type (a type's name, or `r.Png` naming a type member)? Such a record
+# field's value is not captured: it has no storage.
+type_value_expr = (e: int) -> bool:
+    k = nodes[e].kind
+    if k == .ident:
+        s = lookup(int(nodes[e].name))
+        if s == 0: return false
+        sk = syms[s].kind
+        return sk == .type_ or sk == .struct_ or sk == .enum_ or sk == .alias_
+    if k == .binary and (nodes[e].op as Tok == .pipe or nodes[e].op as Tok == .amp): return type_value_expr(int(nodes[e].a)) and type_value_expr(int(nodes[e].b))
+    if k == .field and nodes[e].b == 0 and nodes[int(nodes[e].a)].kind == .ident:
+        s = lookup(int(nodes[int(nodes[e].a)].name))
+        return s != 0 and syms[s].kind != .module and value_type_member(s, int(nodes[e].name), nodes[e].pos) != 0
+    false
+
+# `A & B` of types (decisions.md, batch 7): what is both. Of unions, the alternatives of the left
+# that are also the right's (`heart.types & (Tick | Closed)` is `Tick | Closed` when heart gives
+# both); of a type and itself, that type. Nothing in common is an error.
+type_meet = (ms: int[], pos: int) -> int:
+    left = prune(ms[0])
+    right = prune(ms[1])
+    if type_eq(left, right): return left
+    rights: int[]
+    if is_union(right): rights = union_members(right)
+    else: rights.push(right)
+    lefts: int[]
+    if is_union(left): lefts = union_members(left)
+    else: lefts.push(left)
+    out: int[]
+    loop l in lefts:
+        loop r in rights:
+            if type_eq(prune(l), prune(r)):
+                out.push(prune(l))
+                break
+    if out.len() == 0: fatal(pos, "no type is both {dt(left)} and {dt(right)}")
+    if out.len() == 1: return out[0]
+    mk_union(out)
+
+# A compile-time sequence of types (decisions.md, batch 7): an array literal of types, `[Png
+# Jpeg]`, or a name bound to one (a parameter of a call specialized on it, type_sequence_call).
+# Its types, [] when e is no such sequence.
+type_sequence = (e: int) -> int[]:
+    out: int[]
+    k = nodes[e].kind
+    if k == .ident:
+        s = lookup(int(nodes[e].name))
+        if s != 0 and syms[s].kind == .const_ and type_sequences.has(int(syms[s].ref)): return type_sequences[int(syms[s].ref)]
+        return out
+    if k != .array or nkids(e) == 0: return out
+    loop i in [0..nkids(e)):
+        if not type_value_expr(kid(e, i)): return []
+    loop i in [0..nkids(e)):
+        t = prune(check_expr(kid(e, i), 0))
+        if tkind(t) != .typeval: fatal(nodes[kid(e, i)].pos, "expected a type")
+        out.push(prune(telem(t)))
+    out
+
+# `f([Png Jpeg] ...)`, `$named[Png Jpeg]` (decisions.md, batch 7): a call of a Dewy function given
+# a sequence of types is specialized on that sequence. Its body is checked in place, the first
+# parameter standing for the types and the other arguments bound by name, as a block giving
+# its value. -1 when n is no such call. Checked once per call; O(1) for any other call.
+type_sequence_call = (n: int, expected: int) -> int:
+    if nkids(n) == 0: return -1
+    first = kid(n, 0)
+    if nodes[first].kind != .array or nkids(first) == 0 or not dewy_at(nodes[n].pos) or not type_value_expr(kid(first, 0)): return -1
+    callee = int(nodes[n].a)
+    fname = int(nodes[callee].name)
+    s = lookup(fname)
+    # (the prelude's `named`, loaded when first called)
+    if s == 0: s = dewy_prelude_lookup(fname)
+    if s == 0 or syms[s].kind != .fns: return -1
+    pos = nodes[n].pos
+    named_args: int[]
+    loop i in [1..nkids(n)):
+        a = kid(n, i)
+        if nodes[a].kind != .namedarg: fatal(nodes[a].pos, "after its types, a call specialized on them takes named arguments")
+        named_args.push(a)
+    # (the overload whose parameters are the sequence and those names)
+    d = 0
+    candidates: int[]
+    loop s != 0:
+        if syms[s].name == i32(fname) and syms[s].kind == .fns and syms[s].decl != 0: candidates.push(int(syms[s].decl))
+        s = int(syms[s].next)
+    loop c in candidates:
+        if nodes[c].kind != .fn_ or nkids(c) != named_args.len() + 1: continue
+        fits = true
+        loop a in named_args:
+            found = false
+            loop j in [1..nkids(c)):
+                if nodes[kid(c, j)].name == nodes[a].name: found = true
+            if not found: fits = false
+        if fits:
+            d = c
+            break
+    if d == 0: fatal(pos, "no {name_of(int(nodes[callee].name))} takes a sequence of types with these arguments")
+    seq = type_sequence(first)
+    # (`$named`'s strict rule, the registry's: every type has a name, and no name twice)
+    if pos_in_lib(nodes[d].pos) and name_of(fname) == "named":
+        seen: {str: bool} = {}
+        loop i in 0.. and t in seq:
+            text = type_short_name(t)
+            at = nodes[kid(first, i)].pos
+            if len(text) == 0: fatal(at, "{dt(t)} has no name of its own, so `$named` cannot name its member (give it one, `Name:type = ...`)")
+            if seen.has(text): fatal(at, "field {text} is listed twice")
+            seen[text] = true
+    mark = scope_mark()
+    g = globals.len()
+    pname = int(nodes[kid(d, 0)].name)
+    globals.push(Global(name = i32(pname), type = i32(T_VOID), mod = i32(cur_mod()), is_const = true, state = 2))
+    type_sequences[g] = seq
+    push_scope_sym(pname, new_sym(pname, .const_, g, 0))
+    statements: int[]
+    loop a in named_args: statements.push(bc_let(name_of(int(nodes[a].name)), int(nodes[a].a), nodes[a].pos))
+    loop st in kids(int(nodes[d].b)):
+        # (the parameters' own bindings: given above)
+        if nodes[st].kind == .vardecl and nodes[st].aux2 == 1: continue
+        statements.push(clone(st))
+    nodes[n] = Node(kind = .block, pos = pos, aux = 1)
+    set_list(n, statements)
+    t = check_expr(n, expected)
+    scope_reset(mark)
+    t
+
+# (a global that stands for a sequence of types: its types)
+type_sequences: {int: int[]} = {}
+
+# A record loop's scopes over a sequence of types, each binding the loop's name as that type.
+type_sequence_scopes = (e: int, binder: int) -> int[]:
+    out: int[]
+    loop t in type_sequence(e):
+        scope = mk(.reflect_scope, nodes[e].pos)
+        nodes[scope].name = i32(binder)
+        nodes[scope].ival = t
+        nodes[scope].aux = 2
+        out.push(scope)
+    out
+
+# (does the record type t have a field `name`, of any type?)
+record_has_field = (t0: int, name: int) -> bool:
+    t = prune(t0)
+    if tkind(t) != .struct_: return false
+    si = int(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        if fields[int(structs[si].fields) + i].name == i32(name): return true
+    false
+
+# The type a record type's member `name` holds, 0 when it has no such type member.
+record_type_member = (t0: int, name: int) -> int:
+    t = prune(t0)
+    if tkind(t) != .struct_: return 0
+    si = int(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        fi = int(structs[si].fields) + i
+        if fields[fi].name == i32(name):
+            ft = prune(int(fields[fi].type))
+            if tkind(ft) == .typeval: return prune(telem(ft))
+            return 0
+    0
+
+# A wait handle's outcomes (decisions.md, batch 7, `heart.types`: everything the source can
+# produce): the result of its type's own zero-argument `receive`, or else `next` (a channel's
+# `T | Closed | Canceled`, a ticker's `Tick | Canceled`); 0 when it has neither. Once per type.
+handle_outcomes_cache: {int: int} = {}
+handle_outcomes = (t0: int) -> int:
+    t = prune(t0)
+    if tkind(t) != .struct_: return 0
+    if let known = handle_outcomes_cache.get(t): return known
+    handle_outcomes_cache[t] = 0
+    si = int(types[t].st)
+    decl = int(structs[si].decl)
+    if decl == 0 or nodes[decl].name == 0 or not files[pos_file(nodes[decl].pos)].is_dewy: return 0
+    m = int(nodes[decl].mod)
+    found = 0
+    loop op in ["receive", "next"]:
+        if found != 0: break
+        id = intern(op)
+        loop d in modules[m].decls:
+            if nodes[d].kind != .fn_ or int(nodes[d].name) != id or nkids(d) != 1 or nodes[d].a == 0 or not dewy_is_method(d): continue
+            rt = int(nodes[kid(d, 0)].a)
+            if rt == 0 or nodes[rt].kind != .tname or nodes[rt].name != nodes[decl].name: continue
+            found = d
+            break
+    if found == 0: return 0
+    saved = cx
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, m, "outcomes")), -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(check_scopes.names.len())))
+    cx = ctxs.len() - 1
+    mark = scope_mark()
+    loop j in [0..min(nkids2(found), int(structs[si].ntargs))):
+        nm = int(nodes[kid2(found, j)].name)
+        push_scope_sym(nm, new_sym(nm, .type_, struct_targ(si, j), 0))
+    out = resolve_type(int(nodes[found].a))
+    scope_reset(mark)
+    ctxs.pop()
+    cx = saved
+    handle_outcomes_cache[t] = out
+    out
+
+# A wait handle's member that is a type (decisions.md, batch 7): `types`, its outcomes, and the
+# outcome whose short name is `name` when exactly one has it (`heart.Tick`, a channel's
+# `.Closed`); 0 for any other name. A member the record has wins (record_type_member).
+handle_type_member = (t: int, name: int) -> int:
+    outcomes = handle_outcomes(t)
+    if outcomes == 0: return 0
+    text = name_of(name)
+    if text == "types": return outcomes
+    found = 0
+    alternatives: int[]
+    if is_union(outcomes): alternatives = union_members(outcomes)
+    else: alternatives.push(outcomes)
+    loop a in alternatives:
+        if type_short_name(a) == text:
+            if found != 0: return 0
+            found = prune(a)
+    found
+
+# `r.Png` written as a type, r a local or global: the type its member holds, 0 when r is no such
+# value or that member is no type.
+value_type_member = (s: int, name: int, pos: int) -> int:
+    k = syms[s].kind
+    t = 0
+    if k == .local: t = int(locals[int(syms[s].ref)].type)
+    else if k == .global:
+        ensure_global(int(syms[s].ref), pos)
+        t = int(globals[int(syms[s].ref)].type)
+    if t == 0: return 0
+    member = record_type_member(t, name)
+    if member == 0 and not record_has_field(t, name): member = handle_type_member(t, name)
+    if member != 0 and k == .local: locals[int(syms[s].ref)].flags |= i32(LF_READ)
+    member
 
 # Type annotations and inferred literals share the same structural identity.
 # Each member carries its resolved type; source values remain separate.
@@ -2808,6 +3056,10 @@ struct_ctor = (n: int, st_type: int, decl: int, args: int[], expected: int) -> i
                 fin.push(d)
             continue
         if nodes[a].kind == .hole: fatal(nodes[a].pos, "partial application of constructors is not supported")
+        # (a type member has no storage: nothing is evaluated or stored for it)
+        if tkind(int(fields[fi].type)) == .typeval:
+            fin.push(0)
+            continue
         finish_arg(a, int(fields[fi].type), false)
         fin.push(a)
     nodes[n].kind = .call
@@ -6215,6 +6467,10 @@ binary_rest = (n: int, expected: int, a0: int, b0: int, ta0: int, tb0: int, hint
         else: warn(nodes[n].pos, "this adds the character code of {ch} to a number, not text to text (s[i] is a character's code): `chr(s[i]) + \"{ch}\"` joins text")
     if a_char and is_int(tb) and not is_lit(b) and is_int(ta) and not has_flag(a, NF_SQUOTE):
         warn(nodes[n].pos, "this adds a character code and a number: for text, ... + chr(x)")
+    # (`types = Png | Jpeg`, `r.types & (Tick | Closed)`: a type made of types, decisions.md batch 7)
+    if (op == .pipe or op == .amp) and types[ta].kind == .typeval and types[tb].kind == .typeval and dewy_at(nodes[n].pos):
+        if op == .pipe: return type_member_type(mk_union([telem(ta), telem(tb)]))
+        return type_member_type(type_meet([telem(ta), telem(tb)], nodes[n].pos))
     if types[ta].kind == .typeval or types[tb].kind == .typeval: fatal(nodes[n].pos, "a type name cannot be used as a value here")
     # vectors
     if is_cmp and (op == .eq or op == .ne):

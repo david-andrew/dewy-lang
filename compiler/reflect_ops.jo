@@ -177,6 +177,9 @@ reflect_sequence = (e: int, binder: int) -> int[]:
             nodes[scope].aux = 1
             out.push(scope)
     else:
+        # (`[Png Jpeg]`, or a parameter given one: each type, bound as a type)
+        typed = type_sequence_scopes(e, binder)
+        if typed.len() > 0: return typed
         t = prune(check_expr(e, 0))
         checked = last_checked
         if tkind(t) != .array and tkind(t) != .fixed: fatal(nodes[e].pos, "a record loop needs fields(T) or a compile-time array")

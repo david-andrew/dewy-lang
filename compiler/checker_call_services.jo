@@ -121,6 +121,8 @@ call_ident_special = (n: int, expected: int) -> int:
         set_kid(n, 0, a0)
         if lookup(id_len) == 0 or syms[lookup(id_len)].kind == .builtin or decl_in_prelude(int(syms[lookup(id_len)].decl)): dewy_len_check(callee, false, at, a0)
         if is_soa(at): return check_soa_method(n, a0, int(nodes[callee].name), [], expected)
+    # (`named([Png Jpeg])`: a call specialized on a sequence of types, decisions.md batch 7)
+    if nkids(n) > 0 and nodes[kid(n, 0)].kind == .array: return type_sequence_call(n, expected)
     -1
 
 call_dotname = (n: int, expected: int) -> int:

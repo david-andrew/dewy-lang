@@ -67,6 +67,7 @@ synthetic_copy = (t: int, name: int, pos: int) -> bool: false
 take_call = (n: int, args: int[]) -> int: 0
 take_name = 0
 takes_seq = (d: int) -> bool: false
+type_sequence_call = (n: int, expected: int) -> int: -1
 to_int_word_limit = (a0: int) -> bool: false
 value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int: 0
 variant_ctor = (n: int, et: int, vi: int, args: int[]) -> int: 0

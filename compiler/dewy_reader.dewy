@@ -210,6 +210,12 @@ rd_dc_annotation=(@reader_ctx:ParserContext @reader_nodes:array<Node> boundary:i
                 return 0
             }
         }
+        if (rd_dn_peek(@reader_ctx) =? 'amp') {
+            n = rd_dc_type_meet(@reader_ctx @reader_nodes n boundary pos)
+            if (n =? 0) {
+                return 0
+            }
+        }
         loop (rd_dn_peek(@reader_ctx) =? 'pipe') and (dn_power('pipe') >? boundary) {
             if (rd_dc_quoted_next(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) + 1)) or (rd_dc_int_leaf(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) + 1)) >? 0)) {
                 literal = true
@@ -226,6 +232,12 @@ rd_dc_annotation=(@reader_ctx:ParserContext @reader_nodes:array<Node> boundary:i
                 reader_ctx.at = (int64<overflow='wrap'>(union_at) - 1)
                 literal = true
                 break
+            }
+            if (rd_dn_peek(@reader_ctx) =? 'amp') {
+                right = rd_dc_type_meet(@reader_ctx @reader_nodes right boundary pos)
+                if (right =? 0) {
+                    return 0
+                }
             }
             let union:int64=node_mk(@reader_nodes 'tunion' pos)
             node_set_list(@reader_nodes @reader_ctx.stores.lists[0] union [n right]);
@@ -254,6 +266,24 @@ rd_dc_annotation=(@reader_ctx:ParserContext @reader_nodes:array<Node> boundary:i
         return 0
     }
     reader_ctx.depth = (int64<overflow='wrap'>(reader_ctx.depth) - 1)
+    n
+}
+
+# `heart.types & (Tick | Closed)`: the types in both (decisions.md, batch 7), tighter than `|`; a
+# union node marked aux 11. Not `T & ~value`, a refinement, nor an effect row's `&`.
+rd_dc_type_meet=(@reader_ctx:ParserContext @reader_nodes:array<Node> first:int64 boundary:int64 pos:int64):>int64=>$unsafe {
+    let n:int64=first
+    loop ((((rd_dn_peek(@reader_ctx) =? 'amp') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol not=? 'tilde')) and (dn_power('amp') >? boundary)) and (not reader_ctx.reader.dc_effects_follow)) {
+        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+        let right:int64=rd_dc_type_term(@reader_ctx @reader_nodes)
+        if (right =? 0) {
+            return 0
+        }
+        let meet:int64=node_mk(@reader_nodes 'tunion' pos)
+        node_set_list(@reader_nodes @reader_ctx.stores.lists[0] meet [n right]);
+        reader_nodes[meet].aux = 11
+        n = meet
+    }
     n
 }
 
@@ -6244,6 +6274,10 @@ rd_dc_intersection_next=(@reader_ctx:ParserContext):>bool=>$unsafe {
             break
         }
         let symbol:DewyToken=t.symbol
+        # (`All & (Png | Gif)`: an intersection of unions, an alias)
+        if ((depth =? 0) and ((symbol =? 'lparen') or (symbol =? 'pipe'))) {
+            return false
+        }
         if ((((symbol =? 'lparen') or (symbol =? 'lbrack')) or (symbol =? 'lbrace')) or (symbol =? 'langle')) {
             depth = (int64<overflow='wrap'>(depth) + 1)
         }
@@ -7004,6 +7038,31 @@ rd_dc_metatag_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:De
     }
     if ((width =? 10) and (rd_dn_payload(@reader_ctx token) =? "allocator")) {
         return rd_dc_allocator(@reader_ctx @reader_nodes token)
+    }
+    # (`$named[Png Jpeg each=@draw]`: the call `named([Png Jpeg] each=@draw)`, decisions.md batch 7)
+    if (((width =? 6) and (rd_dn_payload(@reader_ctx token) =? "named")) and (reader_ctx.tokens[reader_ctx.at].symbol =? 'lbrack')) and (not reader_ctx.tokens[reader_ctx.at].space) {
+        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+        let call:int64=node_mk(@reader_nodes 'call' pos)
+        if (not rd_dc_arguments(@reader_ctx @reader_nodes call 'rbrack')) {
+            return 0
+        }
+        let listed:int64=node_mk(@reader_nodes 'array' pos)
+        let items:array<int64>=[]
+        let args:array<int64>=[listed]
+        loop arg in rd_kids(@reader_ctx @reader_nodes call) {
+            if (reader_nodes[arg].kind =? 'namedarg') {
+                args.push(arg);
+            }
+            else {
+                items.push(arg);
+            }
+        }
+        node_set_list(@reader_nodes @reader_ctx.stores.lists[0] listed items);
+        let callee:int64=node_mk(@reader_nodes 'ident' pos)
+        reader_nodes[callee].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("named"))
+        reader_nodes[call].a = int32<overflow='wrap'>(callee)
+        node_set_list(@reader_nodes @reader_ctx.stores.lists[0] call args);
+        return call
     }
     if ((width =? 5) and (rd_dn_payload(@reader_ctx token) =? "lend")) {
         return rd_dc_lend(@reader_ctx @reader_nodes token)

@@ -140,6 +140,8 @@ ct_resolve_type = (tn: int) -> int:
     if k == .tunion:
         ms: int[]
         loop i in [0..ct_nkids(tn)): ms.push(ct_resolve_type(ct_kid(tn, i)))
+        # (`A & B`: the types in both, decisions.md batch 7)
+        if ct_input[0].nodes[0][tn].aux == 11: return type_meet(ms, ct_input[0].nodes[0][tn].pos)
         return uu_mk_union(ms)
     if k == .tptr: return tb_mk_ptr(ct_resolve_type(int(ct_input[0].nodes[0][tn].a)))
     if k == .tfn:

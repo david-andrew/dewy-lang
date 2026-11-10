@@ -1,0 +1,23 @@
+# modes: native native-release
+# A wait handle's `types` is everything it gives, and an outcome whose short name only one of
+# them has is a member (decisions.md, batch 7): a channel's `.string` and `.Closed`, a ticker's
+# `.Tick`.
+main = () => {
+    let lines = channel<string>(4)
+    let heart = ticker(1hour)
+    lines.send("hi") or_throw
+    match select(@lines.receive @heart.next) {
+        line:lines.string => printl"line {line}"
+        <heart.Tick> => printl"tick"
+        <lines.Closed> => printl"closed"
+        <Canceled> => printl"canceled"
+    }
+    lines.send("two") or_throw
+    match lines.receive {
+        s:lines.types & string => printl"s {s}"
+        _ => printl"other"
+    }
+    lines.send("again") or_throw
+    let w:heart.types | lines.types = lines.receive
+    if w is? lines.string printl"again"
+}

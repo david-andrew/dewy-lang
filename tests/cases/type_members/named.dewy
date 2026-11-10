@@ -1,0 +1,15 @@
+# `$named[Png Jpeg]` (decisions.md, batch 7) is the record `[Png = Png Jpeg = Jpeg]`, made by the
+# prelude's ordinary function `named`, which a program can call itself; a record loop over a
+# literal array of types binds each as a type.
+Png:type = [w:int64]
+Jpeg:type = [q:int64]
+Gif:type = [frames:int64]
+img = [$named[Png Jpeg]... n = 1]
+r = named([Png Gif])
+looped = [loop t in [Png Jpeg Gif] $field(t.name) = t]
+main = () => {
+    let x:r.Gif = Gif[2]
+    let y:img.Jpeg = Jpeg[3]
+    let z:looped.Png = Png[4]
+    printl"{x.frames} {y.q} {img.n} {z.w}"
+}

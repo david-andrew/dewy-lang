@@ -137,6 +137,10 @@ small_span = (a: int, b: int, cap: int) -> bool: b - a < cap
 type_alternatives = (u: int) -> int[]:
     out: int[]
     out
+# (no array of types in the stubs)
+type_sequence_scopes = (e: int, binder: int) -> int[]:
+    out: int[]
+    out
 member_prepare = (scopes: int[], body: int):
     print("member_prepare {scopes.len()} {body != 0}")
 member_scopes: {int: int} = {}

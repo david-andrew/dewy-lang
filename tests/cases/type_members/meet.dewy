@@ -1,0 +1,22 @@
+# `&` of types is what is both (decisions.md, batch 7): of unions, the alternatives they share,
+# and it binds tighter than `|`.
+Png:type = [w:int64]
+Jpeg:type = [q:int64]
+Gif:type = [frames:int64]
+All:type = Png | Jpeg | Gif
+Some:type = All & (Png | Gif)
+r = [types = Png | Jpeg]
+f = (x:Some):>int64 => {
+    match x {
+        p:Png => p.w
+        g:Gif => g.frames
+    }
+}
+g = (x:r.types & (Jpeg | Gif)):>int64 => x.q
+h = (x:r.types & Png | Gif):>int64 => {
+    match x {
+        p:Png => p.w
+        g:Gif => g.frames
+    }
+}
+main = () => printl"{f(Gif[3])} {g(Jpeg[4])} {h(Png[5])}"
