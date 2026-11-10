@@ -1,7 +1,7 @@
 $runtime_checks
 from p"facts_summaries.dewy" import fact_record_arrays
 from p"effect_library.jo" import EffectClass
-from p"ast.jo" import (kid nkids nodes)
+from p"ast.jo" import (NF_ALIASDECL NF_GLOBAL has_flag kid nkids nodes)
 from p"check.jo" import (FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM dewy_at fns globals lib_dir locals modules runtime_insts)
 from p"checks_thin.dewy" import (library_exit_call)
 from p"effect_classifiers.dewy" import (effect_library_class)
@@ -13,7 +13,7 @@ from p"effects.jo" import (effect_summaries)
 from p"expr.jo" import (is_nd ntype)
 from p"checks_thin_expr.dewy" import (is_map_type nd_elem)
 from p"checks_shaped.dewy" import (shape_field_type)
-from p"facts.jo" import (FACT_CAP FactBinding FactCallWrites FactProjection FactState FactSummary fact_add_projection fact_binding fact_bound fact_call_field_types fact_difference fact_domain fact_exposed fact_forget_mutable_maps fact_index_get fact_index_put fact_new fact_owner fact_probe_on fact_project fact_projection_find fact_projection_first fact_projection_next_in fact_rebind fact_set_bound fact_shape_summaries fact_summary_assumed fact_summary_owner fact_summary_used fact_terms fact_text_sinks fact_type)
+from p"facts.jo" import (FACT_CAP FactBinding FactCallWrites FactProjection FactState FactSummary fact_add_projection fact_binding fact_bound fact_call_field_types fact_difference fact_drop_sites fact_drop_types fact_domain fact_exposed fact_forget_mutable_maps fact_index_get fact_index_put fact_new fact_owner fact_probe_on fact_project fact_projection_find fact_projection_first fact_projection_next_in fact_rebind fact_set_bound fact_shape_summaries fact_summary_assumed fact_summary_owner fact_summary_used fact_terms fact_text_sinks fact_type)
 from p"facts_changes.dewy" import (fact_change_route)
 from p"facts_joins.dewy" import (fact_field_node fact_payload_node)
 from p"facts_pools.dewy" import (fact_pool_type)
@@ -25,7 +25,10 @@ from p"place_routes.dewy" import (place_path place_route)
 from p"places.jo" import (place_locked)
 from p"refine.jo" import (ref_assume refine_active representation_type)
 from p"refinement_types.dewy" import (FactBound FactReason FactTerm)
-from p"types.jo" import (fields structs types T_INT T_NEVER T_STR tkind)
+from p"types.jo" import (fields structs telem types T_INT T_NEVER T_STR tkind)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"ownership.jo" import (owner_map_copies ownership_copies ownership_fact_cleanup ownership_moves)
+from p"ownership_types.dewy" import (ow_field_types ow_parents ow_representation ow_variant_types ownership_callable_cap ownership_fact_type)
 from p"type_ops.dewy" import (mk_array)
 from p"util.jo" import (files intern name_of pos_file pos_in_lib)
 
@@ -460,4 +463,253 @@ fact_call_write=(@s:FactState old:ForgetWord t:ForgetWord paths:array<array<int6
         if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(fresh p.selector false value))}
     }
     fresh
+}
+# Lifecycle footprints. A drop, copy or move hook runs only at an owning
+# boundary: a statement's end for the temporaries it drops and the places it
+# replaces, a block's end for its owners, a match's or binding's end for the
+# owner it took, a function's exits for its owners and owned parameters.
+# There facts forget only what the hooks that can run there may change, from
+# their settled effect rows: [flags globals...], flag 1 any exposed place (an
+# opaque, escaping or unsettled hook, a callable's captures), 2 I/O. A
+# hook's own receiver is the value leaving its place: its writes change no
+# place another statement reads. Demanded at those sites only, in programs
+# declaring a hook; cached per type and per site: O(component types + hook
+# events) and O(site nodes), once each.
+fact_drop_footprint=(t0:ForgetWord):>array<int64>=>$unsafe {
+    let t=ow_representation(t0)
+    let known=fact_drop_types.get(t)
+    if known not=? none {return known}
+    let out:array<int64>=[0]
+    let seen:array<int64>=[]
+    if fact_drop_type(t @out @seen 0) {fact_drop_types[t]=out}
+    out
+}
+# (false when a hook's row was not settled for a return summary's run: the
+# answer is then the unknown footprint, not cached)
+fact_drop_type=(t:ForgetWord @out:array<int64> @seen:array<int64> depth:ForgetWord):>bool=>$unsafe {
+    if out[0] & 1 not=? 0 or seen.contains(t) {return true}
+    if depth >? 32 or ownership_callable_cap(t) not=? 0 {
+        out[0]=out[0] | 1
+        return true
+    }
+    seen.push(t)
+    let k=tkind(t)
+    if k =? 'fixed' or k =? 'array' or k =? 'opt' or k =? 'box' {return fact_drop_type(ow_representation(telem(t)) @out @seen depth + 1)}
+    if k not=? 'tuple' and k not=? 'enum_' and k not=? 'struct_' {return true}
+    let settled=true
+    if k =? 'struct_' {
+        let si=ForgetWord(types.ptr[t].st)
+        settled=fact_drop_hook(ForgetWord(structs.ptr[si].drop_fn) true @out)
+        settled=fact_drop_hook(ownership_copies.get(t) ?? 0 false @out) and settled
+        settled=fact_drop_hook(ownership_moves.get(t) ?? 0 true @out) and settled
+        settled=fact_drop_hook(owner_map_copies.get(t) ?? 0 false @out) and settled
+        let parent=ow_parents[0].get(t) ?? 0
+        if parent not=? 0 {settled=fact_drop_type(ow_representation(parent) @out @seen depth + 1) and settled}
+    }
+    let parts=if k =? 'enum_' {ow_variant_types(t)} else {ow_field_types(t)}
+    loop ft in parts {
+        if ownership_fact_type(ft) {settled=fact_drop_type(ow_representation(ft) @out @seen depth + 1) and settled}
+    }
+    settled
+}
+fact_drop_hook=(g:ForgetWord receiver:bool @out:array<int64>):>bool=>$unsafe {
+    if g <=? 0 or out[0] & 1 not=? 0 {return true}
+    if g >=? fns.length or fns.ptr[g].body =? 0 or fns.ptr[g].state not=? 2 {
+        out[0]=out[0] | 1
+        return true
+    }
+    # (a return summary's run does not settle callee rows: fact_call_effects)
+    if fact_summary_owner not=? 0 and (g >=? effect_summaries.length or not effect_summaries.ptr[g].done) {
+        out[0]=out[0] | 1
+        return false
+    }
+    if not effects_demand(g true) {
+        out[0]=out[0] | 1
+        return true
+    }
+    let events=effect_summaries.ptr[g].events
+    loop e in [0..events.length) {
+        let kind=events.ptr[e].atom.kind
+        if kind =? 'opaque' or kind =? 'escape' {
+            out[0]=out[0] | 1
+            return true
+        }
+        if kind =? 'io' {out[0]=out[0] | 2}
+        if kind not=? 'write' {continue}
+        let p=place_base(events.ptr[e].atom.place)
+        if p.root =? 'global' and p.declaration >? 0 {fact_drop_global(@out p.declaration)}
+        else if not (receiver and p.root =? 'formal' and p.declaration =? 1) {
+            out[0]=out[0] | 1
+            return true
+        }
+    }
+    true
+}
+fact_drop_global=(@out:array<int64> g:ForgetWord):>void=>{
+    loop i in [1..out.length) {
+        if out[i] =? g {return}
+    }
+    out.push(g)
+}
+fact_drop_union=(@out:array<int64> fp:array<int64>):>void=>{
+    out[0]=out[0] | fp[0]
+    loop i in [1..fp.length) {fact_drop_global(@out fp[i])}
+}
+fact_drop_add=(@out:array<int64> t:ForgetWord):>bool=>{
+    fact_drop_union(@out fact_drop_footprint(t))
+    fact_drop_types.has(ow_representation(t))
+}
+# Whether a footprint can change anything this function's facts describe.
+fact_drop_any=(fp:array<int64>):>bool=>{
+    fp.length >? 1 or fp[0] & 1 not=? 0 or fp[0] & 2 not=? 0 and fact_owner_in_lib()
+}
+# What a statement's own boundaries may run: the hooks of the temporaries it
+# drops, of the places it replaces, of the owners it passes by value. A
+# nested block's statements and end, and a closure's body, are sites of
+# their own. O(the statement's nodes outside nested blocks), once.
+fact_drop_statement=(c:ForgetWord):>array<int64>=>$unsafe {
+    let key=c * 4
+    let known=fact_drop_sites.get(key)
+    if known not=? none {return known}
+    let out:array<int64>=[0]
+    if fact_drop_scan(c 0 @out false) {fact_drop_sites[key]=out}
+    out
+}
+# A block's end drops the owners its declarations made, after its defers.
+fact_drop_block=(n:ForgetWord):>array<int64>=>$unsafe {
+    let key=n * 4 + 1
+    let known=fact_drop_sites.get(key)
+    if known not=? none {return known}
+    let out:array<int64>=[0]
+    let settled=true
+    loop j in [0..nkids(n)) {
+        let c=kid(n j)
+        let k=nodes.ptr[c].kind
+        if k =? 'vardecl' and nodes.ptr[c].sym >? 0 and not has_flag(c NF_GLOBAL) and not has_flag(c NF_ALIASDECL) {
+            let t=ForgetWord(locals.ptr[ForgetWord(nodes.ptr[c].sym)].type)
+            if ownership_fact_type(t) {settled=fact_drop_add(@out t) and settled}
+        }
+        else if k =? 'defer_' {settled=fact_drop_scan(ForgetWord(nodes.ptr[c].a) 0 @out false) and settled}
+    }
+    if settled {fact_drop_sites[key]=out}
+    out
+}
+# Everything a function's exits may drop: every owner its body declares,
+# takes, copies or replaces, and its owned parameters. O(body nodes), once.
+fact_drop_exit=(f:ForgetWord):>array<int64>=>$unsafe {
+    let body=ForgetWord(fns.ptr[f].body)
+    let key=body * 4 + 3
+    let known=fact_drop_sites.get(key)
+    if known not=? none {return known}
+    let out:array<int64>=[0]
+    let settled=fact_drop_scan(body 0 @out true)
+    loop l in fns.ptr[f].params {
+        let t=ForgetWord(locals.ptr[l].type)
+        if ForgetWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 and ownership_fact_type(t) {settled=fact_drop_add(@out t) and settled}
+    }
+    if settled {fact_drop_sites[key]=out}
+    out
+}
+# Everything a loop's or region's trips may drop: every owner it declares,
+# takes, copies or replaces, nested blocks included. O(region nodes), once.
+fact_drop_region=(n:ForgetWord):>array<int64>=>$unsafe {
+    let key=n * 4 + 2
+    let known=fact_drop_sites.get(key)
+    if known not=? none {return known}
+    let out:array<int64>=[0]
+    if fact_drop_scan(n 0 @out true) {fact_drop_sites[key]=out}
+    out
+}
+# Whether cleanup at f's exits may change what its return summary records.
+fact_drop_pending=(f:ForgetWord):>bool=>$unsafe {
+    if not ownership_fact_cleanup or f <=? 0 or f >=? fns.length or fns.ptr[f].body =? 0 {return ownership_fact_cleanup}
+    fact_drop_any(fact_drop_exit(f))
+}
+# A deep scan also enters nested blocks, with the owners their ends drop
+# (declarations) and those a match or binding drops at its end.
+fact_drop_scan=(n:ForgetWord parent:ForgetWord @out:array<int64> deep:bool):>bool=>$unsafe {
+    if n <=? 0 or out[0] & 1 not=? 0 {return true}
+    let k=nodes.ptr[n].kind
+    # (a pattern evaluates no owner: its bindings drop at its match's end)
+    if k =? 'lambda' or k =? 'ptype' or k =? 'pshape' or k =? 'pseq' or k =? 'block' and not deep and parent not=? 0 {return true}
+    let settled=true
+    if fact_drop_counted(n parent) {settled=fact_drop_add(@out ntype(n))}
+    # (an assignment drops the place's old owner)
+    if k =? 'assign' and ownership_fact_type(ntype(ForgetWord(nodes.ptr[n].a))) {settled=fact_drop_add(@out ntype(ForgetWord(nodes.ptr[n].a))) and settled}
+    if deep and k =? 'vardecl' and nodes.ptr[n].sym >? 0 and not has_flag(n NF_GLOBAL) and not has_flag(n NF_ALIASDECL) {
+        let t=ForgetWord(locals.ptr[ForgetWord(nodes.ptr[n].sym)].type)
+        if ownership_fact_type(t) {settled=fact_drop_add(@out t) and settled}
+    }
+    if deep and (k =? 'match_' or k =? 'iflet') and ownership_fact_type(ntype(ForgetWord(nodes.ptr[n].a))) {settled=fact_drop_add(@out ntype(ForgetWord(nodes.ptr[n].a))) and settled}
+    let mask=isolation_children(k)
+    if mask <? 0 {
+        out[0]=out[0] | 1
+        return true
+    }
+    if mask & 1 not=? 0 {settled=fact_drop_scan(ForgetWord(nodes.ptr[n].a) n @out deep) and settled}
+    if mask & 2 not=? 0 {settled=fact_drop_scan(ForgetWord(nodes.ptr[n].b) n @out deep) and settled}
+    if mask & 4 not=? 0 {settled=fact_drop_scan(ForgetWord(nodes.ptr[n].c) n @out deep) and settled}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {settled=fact_drop_scan(kid(n i) n @out deep) and settled}
+    }
+    settled
+}
+# An owner-typed node at an owning boundary of its statement: a temporary
+# the statement drops, an owner passed by value (the callee may drop it), a
+# copy. A place read borrows (a transfer by declaration, assignment or
+# return is fact_owner_value's), and a fresh result a declaration,
+# assignment, return or record field takes is adopted, running no hook.
+fact_drop_counted=(n:ForgetWord parent:ForgetWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'vardecl' or k =? 'assign' or k =? 'addr' or not ownership_fact_type(ntype(n)) {return false}
+    if parent =? 0 {return true}
+    let pk=nodes.ptr[parent].kind
+    if k =? 'ident' or k =? 'field' or k =? 'index' or k =? 'narrow' {
+        if pk =? 'call' or pk =? 'partial' or pk =? 'intrinsic' or pk =? 'array' or pk =? 'tuple' or pk =? 'map_lit' or pk =? 'pair' {return true}
+        return k =? 'index' and (pk =? 'vardecl' or pk =? 'assign' or pk =? 'return_')
+    }
+    if k =? 'call' and (pk =? 'vardecl' or pk =? 'assign' or pk =? 'return_' or pk =? 'call' and nodes.ptr[parent].aux =? 2) {return false}
+    true
+}
+# Forget what a footprint may change: any exposed place for an unknown hook
+# (and, as for calls, for I/O in a library body); otherwise each written
+# global and every exposed place whose storage can lie inside one (an `@`
+# parameter or alias bound to it or a part of it). O(bindings × written
+# globals × their component types).
+fact_drop_forget=(@s:FactState at:ForgetWord fp:array<int64>):>void=>$unsafe {
+    if not fact_drop_any(fp) {return}
+    if fp[0] & 1 not=? 0 or fp[0] & 2 not=? 0 and fact_owner_in_lib() {
+        fact_forget(@s at 'call')
+        return
+    }
+    loop i in [0..s.bindings.length) {
+        let p=s.bindings.ptr[i].place
+        if not fact_exposed(p) {continue}
+        let t=if p.root =? 'local' {ForgetWord(locals.ptr[p.declaration].type)} else {ForgetWord(globals.ptr[p.declaration].type)}
+        let hit=false
+        loop j in [1..fp.length) {
+            if p.root =? 'global' {hit=hit or p.declaration =? fp[j]}
+            else {hit=hit or fact_drop_reaches(ForgetWord(globals.ptr[fp[j]].type) ow_representation(t) 0)}
+        }
+        if not hit {continue}
+        let v=fact_new(@s fact_domain(t 'call' at) FactTerm(type=t))
+        fact_holds_contract(@s t v)
+        s.bindings.ptr[i]=FactBinding(p v at s.bindings.ptr[i].value)
+    }
+}
+# Whether storage of type lt can lie inside a global of type gt0. O(gt0's
+# component types), depth 8.
+fact_drop_reaches=(gt0:ForgetWord lt:ForgetWord depth:ForgetWord):>bool=>$unsafe {
+    let gt=ow_representation(gt0)
+    if gt =? lt or depth >? 8 {return true}
+    let k=tkind(gt)
+    if k =? 'array' or k =? 'fixed' or k =? 'opt' or k =? 'box' {return fact_drop_reaches(telem(gt) lt depth + 1)}
+    if k =? 'tuple' or k =? 'struct_' or k =? 'enum_' {
+        let parts=if k =? 'enum_' {ow_variant_types(gt)} else {ow_field_types(gt)}
+        loop ft in parts {
+            if fact_drop_reaches(ft lt depth + 1) {return true}
+        }
+        return false
+    }
+    k =? 'ptr' or k =? 'var' or k =? 'param' or k =? 'callable' or k =? 'fn_' or k =? 'cfn'
 }

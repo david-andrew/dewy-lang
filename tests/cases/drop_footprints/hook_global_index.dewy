@@ -1,0 +1,14 @@
+# A drop hook that empties a global array the index proof depends on.
+let data:array<int64>=[1 2 3]
+Shrink=type of [id:int64
+    $__drop__
+    release=():>void=>{data=[]}
+]
+pick=(i:int64):>int64=>{
+    if 0 <=? i and i <? data.length {
+        {let _s=Shrink[1]}
+        return data[i]
+    }
+    0
+}
+main=()=>{printl(pick(1))}

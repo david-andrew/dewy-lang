@@ -1,0 +1,68 @@
+# A hook that writes only a global counter cannot change an array: guards
+# made before every kind of drop still prove the index after it.
+let data:array<int64>=[1 2 3]
+let drops:int64=0
+Counted=type of [id:int64
+    $__drop__
+    release=():>void=>{drops+=1}
+    ok=():>bool=>id >? 0
+]
+inner_block=(i:int64):>int64=>{
+    if 0 <=? i and i <? data.length {
+        {let _c=Counted[1]}
+        return data[i]
+    }
+    0
+}
+lent=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        {let _c=Counted[1]}
+        return xs[i]
+    }
+    0
+}
+leaf=(i:int64):>int64=>{
+    if 0 <=? i and i <? data.length and Counted[1].ok {return data[i]}
+    0
+}
+temporary=(i:int64):>int64=>{
+    if 0 <=? i and i <? data.length {
+        let _fine=Counted[1].ok
+        return data[i]
+    }
+    0
+}
+replaced=(i:int64):>int64=>{
+    let c=Counted[1]
+    if 0 <=? i and i <? data.length {
+        c=Counted[2]
+        return data[i]
+    }
+    c.id
+}
+binding=(i:int64):>int64=>{
+    let o:Counted?=if i >? 0 {Counted[i]} else {none}
+    if 0 <=? i and i <? data.length {
+        match o {
+            c:Counted => {drops+=c.id-c.id}
+            _ => {}
+        }
+        return data[i]
+    }
+    0
+}
+ranged=(n:int64):>int64=>{
+    let last:int64=0
+    if 0 <=? n and n <=? data.length {
+        loop i in [0..n) {
+            last=data[i]
+            {let _c=Counted[i]}
+        }
+    }
+    last
+}
+main=()=>{
+    let local:array<int64>=[5 6 7]
+    printl"{inner_block(1)} {lent(@local 2)} {leaf(0)} {temporary(2)} {replaced(1)} {binding(1)} {ranged(3)}"
+    printl(drops)
+}

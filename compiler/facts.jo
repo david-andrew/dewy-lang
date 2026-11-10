@@ -1211,6 +1211,10 @@ fact_forget_mutable_maps = (n: int, s: mut FactState, lent: bool = false, at0: i
 # Exact bundled declarations, cached once per instantiated sink. No user
 # spelling match or callback exemption; O(1) at each demanded call.
 fact_text_sinks: {int: bool} = {}
+# Lifecycle hook footprints (facts_forgets.dewy): per concrete type, and per
+# node * 4 + site (0 statement, 1 block end, 2 loop region, 3 function exit).
+fact_drop_types: {int: int[]} = {}
+fact_drop_sites: {int: int[]} = {}
 
 struct FactCallWrites:
     place: PlaceIdentity
@@ -3101,21 +3105,24 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 fact_pair_transient = held
             else:
                 r = fact_capture(c, s)
-                # A statement can finish a temporary or lexical owner whose
-                # hook writes exposed storage. Until lifecycle edges carry
-                # precise footprints, never export those facts across cleanup.
-                if ownership_fact_cleanup: fact_forget(s, c, .call)
+                # A statement's end drops its temporaries and replaced
+                # owners: forget what their hooks may write (facts_forgets).
+                if ownership_fact_cleanup and s.live: fact_drop_forget(s, c, fact_drop_statement(c))
                 if long_block and s.live and s.ids.len() >= collect_at:
                     fact_collect(s, boundary, r)
                     collect_at = s.ids.len() + max(32, s.ids.len())
         loop i in [0..defers.len()): fact_capture(defers[defers.len() - 1 - i], s)
         fact_pending_defers = pending
+        # (then the block's own owners drop)
+        if ownership_fact_cleanup and s.live: fact_drop_forget(s, n, fact_drop_block(n))
         if s.live and s.bindings.len() > first: fact_scope_exit(s, n, first)
         if s.live and s.ids.len() > 64: fact_collect(s, boundary, r)
         return r
     if k == .return_:
         r = fact_capture(int(nodes[n].a), s)
         if ownership_decls.len() != 0: r = fact_owner_value(int(nodes[n].a), r, s)
+        # (the exit drops every owner still live, before the caller reads)
+        if ownership_fact_cleanup and s.live: fact_drop_forget(s, n, fact_drop_exit(fact_owner))
         if proof_active and proof_decls.has(int(fns[fact_owner].decl)): proof_exit(fact_owner, n, s)
         if result_active: result_exit(fact_owner, r, n, s)
         if fact_summary_owner != 0 and fact_summary_owner == fact_owner: fact_summary_record(s, r)
@@ -3123,6 +3130,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         return r
     if k == .break_ or k == .continue_:
         if fact_pending_defers > 0: fact_forget(s, n, .write, true)
+        # (the jump drops the crossed scopes' owners: at most the function's)
+        if ownership_fact_cleanup and s.live: fact_drop_forget(s, n, fact_drop_exit(fact_owner))
         level = fact_loops.len() - 1 - int(nodes[n].ival)
         if level >= 0:
             if k == .break_: fact_loops[level].exits = fact_join(fact_loops[level].exits, s, n)
@@ -3249,6 +3258,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         take = k == .and_
         fact_assume(rhs, a, take)
         fact_assume(s, a, not take)
+        # (each operand is its own statement: its temporaries drop before the next)
+        if ownership_fact_cleanup:
+            drops = fact_drop_statement(int(nodes[n].a))
+            fact_drop_forget(rhs, n, drops)
+            fact_drop_forget(s, n, drops)
         b = fact_capture(int(nodes[n].b), rhs)
         fact_shared_literals.truncate(shared)
         result = fact_domain(T_BOOL)
@@ -4123,7 +4137,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         no = s
         s = fact_join(yes, no, n)
         # (an owned binding ends here; its hook may write exposed storage)
-        if k == .iflet and ownership_fact_cleanup: fact_forget(s, n, .call)
+        if k == .iflet and ownership_fact_cleanup and s.live and ownership_fact_type(ntype(int(nodes[n].a))): fact_drop_forget(s, n, fact_drop_footprint(ntype(int(nodes[n].a))))
         joined = fact_new(s, result, FactTerm(type = hull))
         if mark & FACT_VALUE != 0: fact_join_length(s, joined, yes, y, no, z, n)
         return joined
@@ -4181,7 +4195,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         valued = not has_flag(n, NF_STMT) and vc(ntype(n)) != VC_VOID and ntype(n) != T_NEVER
         if not valued: exits = fact_join(exits, s, n)
         s = exits
-        if ownership_fact_cleanup: fact_forget(s, n, .call)
+        # (an arm's owned binding, or the subject the match owns, ends here)
+        if ownership_fact_cleanup and s.live and ownership_fact_type(ntype(subject)): fact_drop_forget(s, n, fact_drop_footprint(ntype(subject)))
         return fact_new(s, if first: fact_domain(ntype(n)) else: result)
     # (a partial application's hole is a parameter of the function it makes)
     if k == .hole: return 0

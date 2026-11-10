@@ -1,0 +1,14 @@
+# The array is lent: the hook empties the global it may be.
+let data:array<int64>=[1 2 3]
+Shrink=type of [id:int64
+    $__drop__
+    release=():>void=>{data=[]}
+]
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        {let _s=Shrink[1]}
+        return xs[i]
+    }
+    0
+}
+main=()=>{printl(pick(@data 1))}

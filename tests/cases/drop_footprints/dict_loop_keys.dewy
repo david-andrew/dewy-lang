@@ -1,0 +1,18 @@
+# A dictionary loop borrows its values: no hook runs during it, so the keys a
+# global gave keep their facts although the values' drop hook writes it.
+COLUMNS = ["todo" "doing" "done"]
+Task:type = type of [
+    id:int64
+    column:int64
+    $__drop__
+    release = ():>void => { COLUMNS = [] }
+]
+main = () => {
+    let tasks:dict<int64 Task> = []
+    tasks[1] = Task[1 0]
+    tasks[2] = Task[2 2]
+    let per:dict<string int64> = []
+    loop c in COLUMNS per[c] = 0
+    loop [id t] in tasks per["todo"] = id
+    loop c in COLUMNS printl("{c}={per[c]}")
+}

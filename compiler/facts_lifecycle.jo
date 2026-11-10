@@ -232,6 +232,8 @@ facts_finalize = ():
         if fact_fork_entries.len() > 0 or fact_parallel_bounds.len() > 0: fact_fork_seed(f, state)
         fact_slice_prepare(f)
         result = fact_capture(int(fns[f].body), state)
+        # (falling off the end drops the owned parameters too)
+        if ownership_fact_cleanup and state.live: fact_drop_forget(state, int(fns[f].body), fact_drop_exit(f))
         if result_active: result_exit(f, result, int(fns[f].body), state)
         if proof_active and proof_decls.has(int(fns[f].decl)): proof_exit(f, int(fns[f].body), state)
         fact_policy = previous_policy
@@ -359,9 +361,13 @@ fact_owner_value = (n: int, value: int, s: mut FactState) -> int:
 # the transferred value's own root does not. O(bindings).
 fact_forget_hooked = (s: mut FactState, n: int):
     moved = fact_written_root(n)
+    fp = fact_drop_footprint(ntype(n))
+    known = fp[0] & 1 == 0
+    if known: fact_drop_forget(s, n, fp)
     loop i in [0..s.bindings.len()):
         p = s.bindings[i].place
-        if p.root == .local and p.declaration > 0 and int(locals[p.declaration].flags) & FACT_LENT == 0 and not (moved.root == .local and moved.declaration == p.declaration): continue
+        mine = moved.root == .local and moved.declaration == p.declaration
+        if known and not mine or p.root == .local and p.declaration > 0 and int(locals[p.declaration].flags) & FACT_LENT == 0 and not mine: continue
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         v = fact_new(s, fact_domain(t, .call, n), FactTerm(type = t))
         fact_holds_contract(s, t, v)

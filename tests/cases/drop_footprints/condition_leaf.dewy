@@ -1,0 +1,12 @@
+# A condition leaf's temporary drops before the branch it guards.
+let data:array<int64>=[1 2 3]
+Shrink=type of [id:int64
+    $__drop__
+    release=():>void=>{data=[]}
+    ok=():>bool=>id >? 0
+]
+pick=(i:int64):>int64=>{
+    if 0 <=? i and i <? data.length and Shrink[1].ok {return data[i]}
+    0
+}
+main=()=>{printl(pick(1))}

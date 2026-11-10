@@ -1,0 +1,15 @@
+# A drop hook that calls a foreign function: unknown effects.
+let data:array<int64>=[1 2 3]
+getpid=():>int32 => $extern
+Handle=type of [id:int64
+    $__drop__
+    release=():>void=>{$unsafe getpid();}
+]
+pick=(@xs:array<int64> i:int64):>int64=>{
+    if 0 <=? i and i <? xs.length {
+        {let _h=Handle[1]}
+        return xs[i]
+    }
+    0
+}
+main=()=>{printl(pick(@data 1))}

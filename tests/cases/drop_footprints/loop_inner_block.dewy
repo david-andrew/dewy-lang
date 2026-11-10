@@ -1,0 +1,21 @@
+# A drop at an inner block's end inside the loop body: the next trip cannot trust the guard.
+let data:array<int64>=[1 2 3]
+let copies:int64=0
+Token=type of [id:int64
+    $__copy__
+    dup=():>Token=>{copies+=1 return Token[id]}
+    $__drop__
+    release=():>void=>{data=[]}
+]
+total=(i:int64):>int64=>{
+    let tokens=[Token[1] Token[2]]
+    let sum:int64=0
+    if 0 <=? i and i <? data.length {
+        loop t in tokens {
+            sum=data[i]
+            {let _x=Token[5]}
+        }
+    }
+    sum
+}
+main=()=>{printl(total(1)) printl(copies)}

@@ -1,0 +1,75 @@
+# Handle-like owners beside array proofs. A handle's drop hook closes it by
+# updating global counters only, so facts about the arrays a function
+# borrows survive every close: at inner block ends, statement ends,
+# replacements, loop iterations and match arms.
+let closed:int64=0
+let last_fd:int64=-1
+Handle=type of [fd:int64 pending:int64
+    $__drop__
+    close=():>void=>{
+        closed+=1
+        last_fd=fd
+    }
+    ready=():>bool=>fd >=? 0
+]
+# Binary search over the sorted keys a caller lends, closing a probe handle
+# each step.
+search=(@keys:array<int64> target:int64):>int64=>{
+    let lo=0
+    let hi=keys.length
+    loop lo <? hi {
+        let mid=lo+(hi-lo)//2
+        {let _probe=Handle[mid 0]}
+        if keys[mid] <? target {lo=mid+1} else {hi=mid}
+    }
+    lo
+}
+# Copy a window of rows into a buffer through a replaced handle.
+window=(@rows:array<int64> @out:array<int64> start:int64):>int64=>{
+    if start <? 0 or start >=? rows.length or out.length =? 0 {return 0}
+    let h=Handle[start 0]
+    let copied=0
+    let i=start
+    loop i <? rows.length and copied <? out.length {
+        out[copied]=rows[i]
+        h=Handle[i 1]
+        copied+=1
+        i+=1
+    }
+    if h.fd <? 0 {return 0}
+    copied
+}
+# A handle per lookup, its readiness tested inline, then an index.
+lookup=(@table:array<int64> slots:array<int64>):>int64=>{
+    let hits=0
+    loop slot in slots {
+        if 0 <=? slot and slot <? table.length and Handle[slot 0].ready {
+            if table[slot] >? 0 {hits+=1}
+        }
+    }
+    hits
+}
+# An optional handle taken by a match arm, then a guarded read.
+first_ready=(@table:array<int64> fd:int64):>int64=>{
+    let maybe:Handle?=if fd >=? 0 {Handle[fd 0]} else {none}
+    if table.length =? 0 {return 0}
+    match maybe {
+        h:Handle => {if h.fd >=? 0 {printl"handle {h.fd} ready"}}
+        _ => {printl"no handle"}
+    }
+    table[0]
+}
+main=()=>{
+    let keys:array<int64>=[2 3 5 7 11 13 17 19]
+    printl(search(@keys 11))
+    printl(search(@keys 4))
+    let rows:array<int64>=[10 20 30 40 50]
+    let out:array<int64>=[0 0 0]
+    printl(window(@rows @out 1))
+    printl(out)
+    let table:array<int64>=[0 4 0 9]
+    printl(lookup(@table [1 3 7 (-1) 2]))
+    printl(first_ready(@table 3))
+    printl(first_ready(@table (-1)))
+    printl"closed {closed}, last {last_fd}"
+}

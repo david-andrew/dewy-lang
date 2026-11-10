@@ -440,3 +440,173 @@ fact_tracked_record_lengths = (n: int, i: int, pt: int, s: mut FactState, out: m
         if p < 0: continue
         q = fact_projection_find(s, s.projections[p].value, -1, false)
         if q >= 0: out.push((i, name, s.projections[q].value))
+# Lifecycle footprints: the twin of facts_forgets.dewy's (see there).
+fact_drop_footprint = (t0: int) -> int[]:
+    t = ow_representation(t0)
+    if let known = fact_drop_types.get(t): return known
+    out = [0]
+    seen: int[]
+    if fact_drop_type(t, out, seen, 0): fact_drop_types[t] = out
+    out
+fact_drop_type = (t: int, out: mut int[], seen: mut int[], depth: int) -> bool:
+    if out[0] & 1 != 0 or seen.contains(t): return true
+    if depth > 32 or ownership_callable_cap(t) != 0:
+        out[0] = out[0] | 1
+        return true
+    seen.push(t)
+    k = tkind(t)
+    if k == .fixed or k == .array or k == .opt or k == .box: return fact_drop_type(ow_representation(telem(t)), out, seen, depth + 1)
+    if k != .tuple and k != .enum_ and k != .struct_: return true
+    settled = true
+    if k == .struct_:
+        si = int(types[t].st)
+        settled = fact_drop_hook(int(structs[si].drop_fn), true, out)
+        settled = fact_drop_hook(ownership_copies.get(t) ?? 0, false, out) and settled
+        settled = fact_drop_hook(ownership_moves.get(t) ?? 0, true, out) and settled
+        settled = fact_drop_hook(owner_map_copies.get(t) ?? 0, false, out) and settled
+        parent = ow_parents[0].get(t) ?? 0
+        if parent != 0: settled = fact_drop_type(ow_representation(parent), out, seen, depth + 1) and settled
+    if k == .enum_:
+        loop ft in ow_variant_types(t):
+            if ownership_fact_type(ft): settled = fact_drop_type(ow_representation(ft), out, seen, depth + 1) and settled
+    else:
+        loop ft in ow_field_types(t):
+            if ownership_fact_type(ft): settled = fact_drop_type(ow_representation(ft), out, seen, depth + 1) and settled
+    settled
+fact_drop_hook = (g: int, receiver: bool, out: mut int[]) -> bool:
+    if g <= 0 or out[0] & 1 != 0: return true
+    if g >= fns.len() or fns[g].body == 0 or fns[g].state != 2:
+        out[0] = out[0] | 1
+        return true
+    if fact_summary_owner != 0 and (g >= effect_summaries.len() or not effect_summaries[g].done):
+        out[0] = out[0] | 1
+        return false
+    if not effects_demand(g, true):
+        out[0] = out[0] | 1
+        return true
+    loop event in effect_summaries[g].events:
+        kind = event.atom.kind
+        if kind == .opaque or kind == .escape:
+            out[0] = out[0] | 1
+            return true
+        if kind == .io: out[0] = out[0] | 2
+        if kind != .write: continue
+        p = place_base(event.atom.place)
+        if p.root == .global and p.declaration > 0: fact_drop_global(out, p.declaration)
+        else if not (receiver and p.root == .formal and p.declaration == 1):
+            out[0] = out[0] | 1
+            return true
+    true
+fact_drop_global = (out: mut int[], g: int):
+    loop i in [1..out.len()):
+        if out[i] == g: return
+    out.push(g)
+fact_drop_union = (out: mut int[], fp: int[]):
+    out[0] = out[0] | fp[0]
+    loop i in [1..fp.len()): fact_drop_global(out, fp[i])
+fact_drop_add = (out: mut int[], t: int) -> bool:
+    fact_drop_union(out, fact_drop_footprint(t))
+    fact_drop_types.has(ow_representation(t))
+fact_drop_any = (fp: int[]) -> bool: fp.len() > 1 or fp[0] & 1 != 0 or fp[0] & 2 != 0 and fact_owner_in_lib()
+fact_drop_statement = (c: int) -> int[]:
+    key = c * 4
+    if let known = fact_drop_sites.get(key): return known
+    out = [0]
+    if fact_drop_scan(c, 0, out, false): fact_drop_sites[key] = out
+    out
+fact_drop_block = (n: int) -> int[]:
+    key = n * 4 + 1
+    if let known = fact_drop_sites.get(key): return known
+    out = [0]
+    settled = true
+    loop j in [0..nkids(n)):
+        c = kid(n, j)
+        k = nodes[c].kind
+        if k == .vardecl and nodes[c].sym > 0 and not has_flag(c, NF_GLOBAL) and not has_flag(c, NF_ALIASDECL):
+            t = int(locals[int(nodes[c].sym)].type)
+            if ownership_fact_type(t): settled = fact_drop_add(out, t) and settled
+        else if k == .defer_: settled = fact_drop_scan(int(nodes[c].a), 0, out, false) and settled
+    if settled: fact_drop_sites[key] = out
+    out
+fact_drop_exit = (f: int) -> int[]:
+    body = int(fns[f].body)
+    key = body * 4 + 3
+    if let known = fact_drop_sites.get(key): return known
+    out = [0]
+    settled = fact_drop_scan(body, 0, out, true)
+    loop l in fns[f].params:
+        t = int(locals[l].type)
+        if int(locals[l].flags) & LF_MUTPARAM == 0 and ownership_fact_type(t): settled = fact_drop_add(out, t) and settled
+    if settled: fact_drop_sites[key] = out
+    out
+fact_drop_region = (n: int) -> int[]:
+    key = n * 4 + 2
+    if let known = fact_drop_sites.get(key): return known
+    out = [0]
+    if fact_drop_scan(n, 0, out, true): fact_drop_sites[key] = out
+    out
+fact_drop_pending = (f: int) -> bool:
+    if not ownership_fact_cleanup or f <= 0 or f >= fns.len() or fns[f].body == 0: return ownership_fact_cleanup
+    fact_drop_any(fact_drop_exit(f))
+fact_drop_scan = (n: int, parent: int, out: mut int[], deep: bool) -> bool:
+    if n <= 0 or out[0] & 1 != 0: return true
+    k = nodes[n].kind
+    if k == .lambda or k == .ptype or k == .pshape or k == .pseq or k == .block and not deep and parent != 0: return true
+    settled = true
+    if fact_drop_counted(n, parent): settled = fact_drop_add(out, ntype(n))
+    if k == .assign and ownership_fact_type(ntype(int(nodes[n].a))): settled = fact_drop_add(out, ntype(int(nodes[n].a))) and settled
+    if deep and k == .vardecl and nodes[n].sym > 0 and not has_flag(n, NF_GLOBAL) and not has_flag(n, NF_ALIASDECL):
+        t = int(locals[int(nodes[n].sym)].type)
+        if ownership_fact_type(t): settled = fact_drop_add(out, t) and settled
+    if deep and (k == .match_ or k == .iflet) and ownership_fact_type(ntype(int(nodes[n].a))): settled = fact_drop_add(out, ntype(int(nodes[n].a))) and settled
+    mask = isolation_children(k)
+    if mask < 0:
+        out[0] = out[0] | 1
+        return true
+    if mask & 1 != 0: settled = fact_drop_scan(int(nodes[n].a), n, out, deep) and settled
+    if mask & 2 != 0: settled = fact_drop_scan(int(nodes[n].b), n, out, deep) and settled
+    if mask & 4 != 0: settled = fact_drop_scan(int(nodes[n].c), n, out, deep) and settled
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): settled = fact_drop_scan(kid(n, i), n, out, deep) and settled
+    settled
+fact_drop_counted = (n: int, parent: int) -> bool:
+    k = nodes[n].kind
+    if k == .vardecl or k == .assign or k == .addr or not ownership_fact_type(ntype(n)): return false
+    if parent == 0: return true
+    pk = nodes[parent].kind
+    if k == .ident or k == .field or k == .index or k == .narrow:
+        if pk == .call or pk == .partial or pk == .intrinsic or pk == .array or pk == .tuple or pk == .map_lit or pk == .pair: return true
+        return k == .index and (pk == .vardecl or pk == .assign or pk == .return_)
+    if k == .call and (pk == .vardecl or pk == .assign or pk == .return_ or pk == .call and nodes[parent].aux == 2): return false
+    true
+fact_drop_forget = (s: mut FactState, at: int, fp: int[]):
+    if not fact_drop_any(fp): return
+    if fp[0] & 1 != 0 or fp[0] & 2 != 0 and fact_owner_in_lib():
+        fact_forget(s, at, .call)
+        return
+    loop i in [0..s.bindings.len()):
+        p = s.bindings[i].place
+        if not fact_exposed(p): continue
+        t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
+        hit = false
+        loop j in [1..fp.len()):
+            if p.root == .global: hit = hit or p.declaration == fp[j]
+            else: hit = hit or fact_drop_reaches(int(globals[fp[j]].type), ow_representation(t), 0)
+        if not hit: continue
+        v = fact_new(s, fact_domain(t, .call, at), FactTerm(type = t))
+        fact_holds_contract(s, t, v)
+        s.bindings[i] = FactBinding(p, v, at, s.bindings[i].value)
+fact_drop_reaches = (gt0: int, lt: int, depth: int) -> bool:
+    gt = ow_representation(gt0)
+    if gt == lt or depth > 8: return true
+    k = tkind(gt)
+    if k == .array or k == .fixed or k == .opt or k == .box: return fact_drop_reaches(telem(gt), lt, depth + 1)
+    if k == .tuple or k == .struct_ or k == .enum_:
+        if k == .enum_:
+            loop ft in ow_variant_types(gt):
+                if fact_drop_reaches(ft, lt, depth + 1): return true
+        else:
+            loop ft in ow_field_types(gt):
+                if fact_drop_reaches(ft, lt, depth + 1): return true
+        return false
+    k == .ptr or k == .var or k == .param or k == .callable or k == .fn_ or k == .cfn

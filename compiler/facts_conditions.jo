@@ -36,6 +36,7 @@ use 'places.jo'
 use 'effects.jo'
 use 'effect_library.jo'
 use 'ownership.jo'
+use 'facts_forgets.dewy'
 use 'witness.jo'
 use 'directives.jo'
 use 'warn_if.jo'
@@ -107,6 +108,11 @@ fact_condition = (n: int, entry: FactState) -> FactPaths:
     entry_state = if fact_query: yes else: FactState(live = false)
     fact_assume(yes, v, true)
     fact_assume(no, v, false)
+    # (a leaf is its own statement: its temporaries drop before branching)
+    if ownership_fact_cleanup:
+        drops = fact_drop_statement(n)
+        fact_drop_forget(yes, n, drops)
+        fact_drop_forget(no, n, drops)
     if yes.conditional.len() > 0:
         result_activate(yes, v)
         result_activate(no, v)

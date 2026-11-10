@@ -1,0 +1,20 @@
+# A move hook that empties a global runs at the transfer.
+let data:array<int64>=[1 2 3]
+Mover=type of [id:int64
+    $__move__
+    shift=():>Mover=>{
+        data=[]
+        return Mover[id]
+    }
+]
+pick=(i:int64):>int64=>{
+    let a=Mover[1]
+    if 0 <=? i and i <? data.length {
+        let b=a
+        let v=data[i]
+        printl(b.id)
+        return v
+    }
+    0
+}
+main=()=>{printl(pick(1))}

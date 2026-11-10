@@ -1,0 +1,17 @@
+# A loop condition's temporary drops before each iteration's body.
+let data:array<int64>=[1 2 3]
+Shrink=type of [id:int64
+    $__drop__
+    release=():>void=>{data=[]}
+    ok=():>bool=>id >? 0
+]
+total=():>int64=>{
+    let sum=0
+    let i=0
+    loop i <? data.length and Shrink[1].ok {
+        sum+=data[i]
+        i+=1
+    }
+    sum
+}
+main=()=>{printl(total())}

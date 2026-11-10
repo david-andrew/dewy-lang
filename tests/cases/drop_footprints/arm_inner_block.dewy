@@ -1,0 +1,19 @@
+# A drop at an inner block's end inside a match arm, between guard and index.
+let data:array<int64>=[1 2 3]
+Shrink=type of [id:int64
+    $__drop__
+    release=():>void=>{data=[]}
+]
+pick=(o:int64? i:int64):>int64=>{
+    match o {
+        v:int64 => {
+            if 0 <=? i and i <? data.length {
+                {let _s=Shrink[v]}
+                return data[i]
+            }
+            return 0
+        }
+        _ => {return 0}
+    }
+}
+main=()=>{printl(pick(1 1))}

@@ -318,6 +318,9 @@ fact_return_escapes = (n: int, depth: int = 0) -> bool:
 # transfer (including their own obligations), but cannot affect later trips.
 # This is also used for iterators whose backedge transfer is not modeled.
 fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
+    if ownership_fact_cleanup: fact_drop_forget(s, at, fact_drop_region(n))
+    fact_changes_walk(n, s, at, reason)
+fact_changes_walk = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     if n == 0: return
     if fact_slice_flags(n) & (FACT_MEMBER | FACT_ACTIVE) == FACT_MEMBER: return
     k = nodes[n].kind
@@ -348,11 +351,11 @@ fact_changes = (n: int, s: mut FactState, at: int, reason: FactReason = .loop_):
     else if k == .intrinsic or k == .lambda and ownership_decls.len() != 0 or k == .partial and fact_partial_opaque(n) or k == .fnref and fact_handle_opaque(n): fact_forget(s, at, reason)
     mask = fact_change_children(n)
     if mask < 0: fact_forget(s, at, reason, true); return
-    if mask & 1 != 0: fact_changes(int(nodes[n].a), s, at, reason)
-    if mask & 2 != 0: fact_changes(int(nodes[n].b), s, at, reason)
-    if mask & 4 != 0: fact_changes(int(nodes[n].c), s, at, reason)
+    if mask & 1 != 0: fact_changes_walk(int(nodes[n].a), s, at, reason)
+    if mask & 2 != 0: fact_changes_walk(int(nodes[n].b), s, at, reason)
+    if mask & 4 != 0: fact_changes_walk(int(nodes[n].c), s, at, reason)
     if mask & 16 != 0:
-        loop i in [0..nkids(n)): fact_changes(kid(n, i), s, at, reason)
+        loop i in [0..nkids(n)): fact_changes_walk(kid(n, i), s, at, reason)
 # Runtime children for loop havoc. A match arm's type pattern binds a fresh
 # arm-local and evaluates only its type (a refinement is pure); shape and
 # sequence patterns are their field and element patterns. O(1).
@@ -400,4 +403,4 @@ fact_balanced_changes = (n: int, s: mut FactState, at: int, reason: FactReason):
             fact_difference(s, s.projections[held].value, length, 0, n)
             fact_difference(s, length, s.projections[held].value, 0, n)
         else if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(s.bindings[i].value, -1, false, length))
-    if nkids(n) == 3: fact_changes(kid(n, 2), s, at, reason)
+    if nkids(n) == 3: fact_changes_walk(kid(n, 2), s, at, reason)

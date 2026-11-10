@@ -4,6 +4,8 @@ from p"ast.jo" import (NF_GLOBAL has_flag kid nkids nodes)
 from p"checker_tokens.dewy" import (Tok)
 from p"facts.jo" import (FACT_CAP FactImplication FactPaths FactState fact_assume fact_binding fact_bound fact_capture fact_owner fact_compare fact_comparison fact_constant fact_domain fact_either_wanted fact_implications fact_inverse fact_new fact_project fact_projection_origin fact_query fact_slot fact_speculating fact_string_set fact_terms fact_type)
 from p"facts_lifecycle.dewy" import (fact_scope_exit)
+from p"facts_forgets.dewy" import (fact_drop_forget fact_drop_statement)
+from p"ownership.jo" import (ownership_fact_cleanup)
 from p"facts_joins.dewy" import (fact_join fact_projection_value)
 from p"facts_summaries.dewy" import (fact_summary_payload)
 from p"proofs.jo" import (ResultEvidence)
@@ -56,6 +58,12 @@ fact_condition=(n:ConditionWord entry:FactState):>FactPaths=>$unsafe {
     let entry_state=if fact_query {yes} else {FactState(live=false)}
     fact_assume(@yes v true)
     fact_assume(@no v false)
+    # (a leaf is its own statement: its temporaries drop before branching)
+    if ownership_fact_cleanup {
+        let drops=fact_drop_statement(n)
+        fact_drop_forget(@yes n drops)
+        fact_drop_forget(@no n drops)
+    }
     if yes.conditional.length >? 0 {
         result_activate(@yes v)
         result_activate(@no v)

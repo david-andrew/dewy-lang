@@ -178,7 +178,7 @@ fact_summary_record = (s: mut FactState, r0: int):
     # Pending return cleanup has not run: publish no place relation then.
     # One bounded query per mutable array parameter on demanded scalar
     # summaries only; existing body/state budgets apply. Every return agrees.
-    if r != 0 and fact_scalar(t) and is_int(t) and t != T_U64 and fact_pending_defers == 0 and not ownership_fact_cleanup:
+    if r != 0 and fact_scalar(t) and is_int(t) and t != T_U64 and fact_pending_defers == 0 and not fact_drop_pending(fact_summary_owner):
         loop i in [0..fact_summary_entry.len()):
             l = fns[fact_summary_owner].params[i]
             if fact_summary_entry[i] == 0 or int(locals[l].flags) & LF_MUTPARAM == 0: continue
@@ -209,7 +209,7 @@ fact_summary_record = (s: mut FactState, r0: int):
     # on its first return; later returns check the same indexed binding.
     # Cleanup may still replace/shrink a global after evaluating the result.
     global_post = 0
-    if r != 0 and payload == 0 and fact_summary_field == 0 and fact_scalar(t) and is_int(t) and t != T_U64 and upper < 0 and post < 0 and fact_pending_defers == 0 and not ownership_fact_cleanup:
+    if r != 0 and payload == 0 and fact_summary_field == 0 and fact_scalar(t) and is_int(t) and t != T_U64 and upper < 0 and post < 0 and fact_pending_defers == 0 and not fact_drop_pending(fact_summary_owner):
         if fact_summary_acc.seen:
             g = fact_summary_acc.global_post
             if g > 0:
@@ -239,7 +239,7 @@ fact_summary_record = (s: mut FactState, r0: int):
         mode = 0
         l = fns[fact_summary_owner].params[i]
         prior = if not fact_summary_acc.seen: 1 else if i < fact_summary_acc.lengths.len(): fact_summary_acc.lengths[i] else: 0
-        if prior != 0 and fact_summary_entry[i] != 0 and int(locals[l].flags) & LF_MUTPARAM != 0 and fact_pending_defers == 0 and not ownership_fact_cleanup:
+        if prior != 0 and fact_summary_entry[i] != 0 and int(locals[l].flags) & LF_MUTPARAM != 0 and fact_pending_defers == 0 and not fact_drop_pending(fact_summary_owner):
             b = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
             if b >= 0:
                 current = fact_project(s, s.bindings[b].value, -1, false, T_INT)
@@ -263,7 +263,7 @@ fact_summary_record_shapes = (s: mut FactState):
     loop entry in fact_summary_shapes:
         i = entry.0
         keeps = false
-        if entry.1 != 0 and (not fact_summary_acc.seen or fact_summary_shape_mask & (1 << i) != 0) and fact_pending_defers == 0 and not ownership_fact_cleanup:
+        if entry.1 != 0 and (not fact_summary_acc.seen or fact_summary_shape_mask & (1 << i) != 0) and fact_pending_defers == 0 and not fact_drop_pending(fact_summary_owner):
             l = fns[fact_summary_owner].params[i]
             b = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
             if b >= 0:

@@ -1,0 +1,18 @@
+# An owned match binding drops at its arm's end, before the code after the match.
+let data:array<int64>=[1 2 3]
+Shrink=type of [id:int64
+    $__drop__
+    release=():>void=>{data=[]}
+]
+pick=(i:int64):>int64=>{
+    let o:Shrink?=if i >? 0 {Shrink[i]} else {none}
+    if 0 <=? i and i <? data.length {
+        match o {
+            s:Shrink => {printl(s.id)}
+            _ => {}
+        }
+        return data[i]
+    }
+    0
+}
+main=()=>{printl(pick(1))}

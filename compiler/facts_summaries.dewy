@@ -8,7 +8,7 @@ from p"checks_thin_expr.dewy" import (is_map_type)
 from p"checks_shaped.dewy" import (shape_field_type)
 from p"facts.jo" import (FACT_CAP fact_length_forced fact_length_strict FACT_STEPS FactPaths FactProjection FactState FactSummary fact_add_fits fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_types fact_difference fact_distance fact_domain fact_hull_owner fact_length_max fact_loop_exhausted fact_loop_steps fact_loops fact_new fact_owner fact_pair_key fact_pending_defers fact_place fact_probe_on fact_project fact_projection_find fact_push_frames fact_query fact_record_array_types fact_scalar fact_set_bound fact_shape_summaries fact_slice fact_slice_prepare fact_slice_push_children fact_speculating fact_step_limit fact_summaries fact_summary_acc fact_summary_assumed fact_summary_entry fact_summary_field fact_summary_fields fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_type)
 from p"directives.jo" import (dir_assumed_bounds_any)
-from p"facts_forgets.dewy" import (fact_kept_field fact_call_field_type)
+from p"facts_forgets.dewy" import (fact_call_field_type fact_drop_pending fact_kept_field)
 from p"facts_routes.dewy" import (fact_read fact_route fact_route_values)
 from p"facts_conditions.dewy" import (fact_tag)
 from p"facts_joins.dewy" import (fact_host_finite fact_hull fact_hull_type fact_join)
@@ -16,7 +16,7 @@ from p"facts_library.dewy" import (fact_clamped)
 from p"facts_loops.dewy" import (fact_entails)
 from p"facts_pools.dewy" import (fact_pool_type)
 from p"nd_contract_ops.dewy" import (fact_nd_data_length fact_nd_shape)
-from p"ownership.jo" import (ownership_decls ownership_fact_cleanup)
+from p"ownership.jo" import (ownership_decls)
 from p"ownership_types.dewy" import (ownership_fact_type)
 from p"place_routes.dewy" import (place_route)
 from p"proofs.jo" import (ResultEvidence proof_active result_active)
@@ -160,7 +160,7 @@ fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
     # Pending return cleanup has not run: publish no place relation then.
     # One bounded query per mutable array parameter on demanded scalar
     # summaries only; existing body/state budgets apply. Every return agrees.
-    if r not=? 0 and fact_scalar(t) and is_int(t) and t not=? T_U64 and fact_pending_defers =? 0 and not ownership_fact_cleanup {
+    if r not=? 0 and fact_scalar(t) and is_int(t) and t not=? T_U64 and fact_pending_defers =? 0 and not fact_drop_pending(fact_summary_owner) {
         loop i in [0..fact_summary_entry.length) {
             let l=fns.ptr[fact_summary_owner].params[i]
             if fact_summary_entry[i] =? 0 or SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {continue}
@@ -196,7 +196,7 @@ fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
     # on its first return; later returns check the same indexed binding.
     # Cleanup may still replace/shrink a global after evaluating the result.
     let global_post:SummaryWord=0
-    if r not=? 0 and payload =? 0 and fact_summary_field =? 0 and fact_scalar(t) and is_int(t) and t not=? T_U64 and upper <? 0 and post <? 0 and fact_pending_defers =? 0 and not ownership_fact_cleanup {
+    if r not=? 0 and payload =? 0 and fact_summary_field =? 0 and fact_scalar(t) and is_int(t) and t not=? T_U64 and upper <? 0 and post <? 0 and fact_pending_defers =? 0 and not fact_drop_pending(fact_summary_owner) {
         if fact_summary_acc.seen {
             let g=fact_summary_acc.global_post
             if g >? 0 {
@@ -234,7 +234,7 @@ fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
         let mode:SummaryWord=0
         let l=fns.ptr[fact_summary_owner].params[i]
         let prior=if not fact_summary_acc.seen {1} else if i <? fact_summary_acc.lengths.length {fact_summary_acc.lengths[i]} else {0}
-        if prior not=? 0 and fact_summary_entry[i] not=? 0 and SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 and fact_pending_defers =? 0 and not ownership_fact_cleanup {
+        if prior not=? 0 and fact_summary_entry[i] not=? 0 and SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM not=? 0 and fact_pending_defers =? 0 and not fact_drop_pending(fact_summary_owner) {
             let b=fact_binding(s PlaceIdentity('local' SummaryWord(locals.ptr[l].owner) l))
             if b >=? 0 {
                 let current=fact_project(@s s.bindings[b].value (-1) false T_INT)
@@ -249,7 +249,7 @@ fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
     if not useful {lengths=[]}
     # (a mutable record parameter's array field keeps its length on every return)
     let kept_fields:array<int64>=[]
-    if fact_pending_defers =? 0 and not ownership_fact_cleanup {
+    if fact_pending_defers =? 0 and not fact_drop_pending(fact_summary_owner) {
         loop entry in fact_summary_fields {
             let l=fns.ptr[fact_summary_owner].params[entry[0]]
             if SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {continue}
@@ -283,7 +283,7 @@ fact_summary_record_shapes=(@s:FactState):>void=>$unsafe {
     loop entry in fact_summary_shapes {
         let i=entry[0]
         let keeps=false
-        if entry[1] not=? 0 and (not fact_summary_acc.seen or fact_summary_shape_mask & (SummaryWord(1) << (SummaryWord(i) & 63)) not=? 0) and fact_pending_defers =? 0 and not ownership_fact_cleanup {
+        if entry[1] not=? 0 and (not fact_summary_acc.seen or fact_summary_shape_mask & (SummaryWord(1) << (SummaryWord(i) & 63)) not=? 0) and fact_pending_defers =? 0 and not fact_drop_pending(fact_summary_owner) {
             let l=fns.ptr[fact_summary_owner].params[i]
             let b=fact_binding(s PlaceIdentity('local' SummaryWord(locals.ptr[l].owner) l))
             if b >=? 0 {

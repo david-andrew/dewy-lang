@@ -18,7 +18,7 @@ from p"exact.jo" import (exact_decided exact_fact_store exact_finish exact_has_s
 from p"expr.jo" import (CV IN ntype)
 from p"facts.jo" import (FactPlanDependency FACT_LENT FactBinding FactSlice FactState fact_add_fits fact_bound fact_call_field_types fact_capture fact_carried_cache fact_comprehension_sources fact_comprehensions fact_constant_globals fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_calls fact_constructor_types fact_dead_refinements fact_decided fact_deferred fact_deferred_checks fact_deferred_proving fact_divisors fact_domain fact_fixed_requests fact_fork_entries fact_fork_nodes fact_grown_roots fact_has_deferred fact_index_put fact_internal_policy fact_key_params fact_new fact_obliged fact_owner fact_panic_collect fact_panic_pending fact_panic_sites fact_parallel_bounds fact_plan_dependencies fact_plan_forget fact_plan_serial fact_policy fact_policy_default fact_probe_on fact_probe_runs fact_pushed_rows_cache fact_query fact_regex_counts fact_requests fact_retry_owner fact_return_escapes_cache fact_returns_cache fact_root_key fact_saving fact_search_predicate fact_selector_sources fact_shape_summaries fact_shared_literals fact_slice fact_slice_cache fact_slice_prepare fact_slice_push_children fact_speculating fact_sum_operand fact_summaries fact_summary_assumed fact_summary_field fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_text_sinks fact_type fact_validated fn_dewy fn_in_lib)
 from p"facts_elements.dewy" import (fact_fixed_check fact_fixed_node)
-from p"facts_forgets.dewy" import (fact_holds_contract fact_written_root)
+from p"facts_forgets.dewy" import (fact_drop_exit fact_drop_footprint fact_drop_forget fact_holds_contract fact_written_root)
 from p"facts_forks.dewy" import (fact_fork_seed)
 from p"facts_library.dewy" import (fact_library_call)
 from p"facts_members.dewy" import (fact_member_candidate fact_member_decide)
@@ -28,7 +28,7 @@ from p"icount.jo" import (IC_FACTS)
 from p"icount_ops.dewy" import (ic_fn ic_restore)
 from p"ide.jo" import (ide_on)
 from p"isolation.jo" import (isolation_limit)
-from p"ownership.jo" import (ownership_decls)
+from p"ownership.jo" import (ownership_decls ownership_fact_cleanup)
 from p"ownership_types.dewy" import (ownership_fact_type)
 from p"predicate_facts.jo" import (FactPredicate fact_predicate_nodes fact_predicates)
 from p"proofs.jo" import (proof_active proof_calls proof_decls result_active result_contracts)
@@ -220,6 +220,8 @@ facts_finalize=():>void=>$unsafe {
         if fact_fork_entries.length >? 0 or fact_parallel_bounds.length >? 0 {fact_fork_seed(f @state)}
         fact_slice_prepare(f)
         let result=fact_capture(LifeWord(fns.ptr[f].body) @state)
+        # (falling off the end drops the owned parameters too)
+        if ownership_fact_cleanup and state.live {fact_drop_forget(@state LifeWord(fns.ptr[f].body) fact_drop_exit(f))}
         if result_active {result_exit(f result LifeWord(fns.ptr[f].body) @state)}
         if proof_active and proof_decls.has(LifeWord(fns.ptr[f].decl)) {proof_exit(f LifeWord(fns.ptr[f].body) @state)}
         fact_policy=previous_policy
@@ -355,12 +357,18 @@ fact_owner_value=(n:LifeWord value:LifeWord @s:FactState):>LifeWord=>$unsafe {
 }
 # A hook reaches its own value and what other code can reach: globals and
 # locals exposed, lent, captured or aliased. Every other local keeps its facts;
-# the transferred value's own root does not. O(bindings).
+# the transferred value's own root does not. With a known footprint, only
+# what the type's hooks write (facts_forgets: fact_drop_forget).
+# O(bindings).
 fact_forget_hooked=(@s:FactState n:LifeWord):>void=>$unsafe {
     let moved=fact_written_root(n)
+    let fp=fact_drop_footprint(ntype(n))
+    let known=fp[0] & 1 =? 0
+    if known {fact_drop_forget(@s n fp)}
     loop i in [0..s.bindings.length) {
         let p=s.bindings[i].place
-        if p.root =? 'local' and p.declaration >? 0 and LifeWord(locals.ptr[p.declaration].flags) & FACT_LENT =? 0 and not (moved.root =? 'local' and moved.declaration =? p.declaration) {continue}
+        let mine=moved.root =? 'local' and moved.declaration =? p.declaration
+        if known and not mine or p.root =? 'local' and p.declaration >? 0 and LifeWord(locals.ptr[p.declaration].flags) & FACT_LENT =? 0 and not mine {continue}
         let t=if p.root =? 'local' {LifeWord(locals.ptr[p.declaration].type)} else {LifeWord(globals.ptr[p.declaration].type)}
         let v=fact_new(@s fact_domain(t 'call' n) FactTerm(type=t))
         fact_holds_contract(@s t v)

@@ -6,7 +6,7 @@ from p"effect_values.dewy" import (effect_value)
 from p"expr.jo" import (CV IN ntype)
 from p"checks_thin_expr.dewy" import (is_map_type oversized_literal)
 from p"facts.jo" import (FACT_ACTIVE FACT_CAP FACT_ELEMENT_LENGTH FACT_ELEMENT_SAME_LENGTH FACT_MAP_DENSE FACT_MAP_POSITIONS FACT_MEMBER FACT_POOL_POSITIONS FACT_ROW_SOURCE FactProjection FactState fact_add_projection fact_bind fact_binding fact_bound fact_difference fact_domain fact_exposed fact_name_vals fact_new fact_owner fact_place fact_project fact_projection_after fact_projection_find fact_projection_first fact_return_escapes_cache fact_set_bound fact_slice_children fact_slice_flags fact_truth fact_type fact_incident)
-from p"facts_forgets.dewy" import (fact_call_effects fact_call_write fact_forget fact_forget_call fact_holds_contract fact_path_call_effects)
+from p"facts_forgets.dewy" import (fact_drop_forget fact_drop_region fact_call_effects fact_call_write fact_forget fact_forget_call fact_holds_contract fact_path_call_effects)
 from p"facts_ranges.dewy" import (fact_floor_call)
 from p"facts_arrays.dewy" import (fact_array_call)
 from p"facts_joins.dewy" import (fact_field_node fact_hull fact_payload_node)
@@ -18,7 +18,7 @@ from p"isolation_ops.dewy" import (isolation_children)
 from p"lower_helpers.dewy" import (helper_value_members)
 from p"nd_contracts.jo" import (ND_STORAGE_VALID fact_nd_plain_store fact_nd_reads_only nd_mutable_call)
 from p"nd_contract_ops.dewy" import (fact_nd_store)
-from p"ownership.jo" import (ownership_decls)
+from p"ownership.jo" import (ownership_decls ownership_fact_cleanup)
 from p"ownership_types.dewy" import (ownership_fact_type)
 from p"places.jo" import (place_locked)
 from p"refine.jo" import (refine_storage representation_type)
@@ -334,7 +334,13 @@ fact_return_escapes=(n:ChangeWord depth:ChangeWord=0):>bool=>$unsafe {
 # that can reach a loop edge. Returning expressions still run in the ordinary
 # transfer (including their own obligations), but cannot affect later trips.
 # This is also used for iterators whose backedge transfer is not modeled.
-fact_changes=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_'):>void=>$unsafe {
+# A lifecycle hook that can run anywhere in the region changes its
+# footprint too (facts_forgets: fact_drop_region).
+fact_changes=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_'):>void=>{
+    if ownership_fact_cleanup {fact_drop_forget(@s at fact_drop_region(n))}
+    fact_changes_walk(n @s at reason)
+}
+fact_changes_walk=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_'):>void=>$unsafe {
     if n =? 0 {return}
     if fact_slice_flags(n) & (FACT_MEMBER | FACT_ACTIVE) =? FACT_MEMBER {return}
     let k=nodes.ptr[n].kind
@@ -370,11 +376,11 @@ fact_changes=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason='loop_')
     else if k =? 'intrinsic' or k =? 'lambda' and ownership_decls.length not=? 0 or k =? 'partial' and fact_partial_opaque(n) or k =? 'fnref' and fact_handle_opaque(n) {fact_forget(@s at reason)}
     let mask=fact_change_children(n)
     if mask <? 0 {fact_forget(@s at reason true); return}
-    if mask & 1 not=? 0 {fact_changes(ChangeWord(nodes.ptr[n].a) @s at reason)}
-    if mask & 2 not=? 0 {fact_changes(ChangeWord(nodes.ptr[n].b) @s at reason)}
-    if mask & 4 not=? 0 {fact_changes(ChangeWord(nodes.ptr[n].c) @s at reason)}
+    if mask & 1 not=? 0 {fact_changes_walk(ChangeWord(nodes.ptr[n].a) @s at reason)}
+    if mask & 2 not=? 0 {fact_changes_walk(ChangeWord(nodes.ptr[n].b) @s at reason)}
+    if mask & 4 not=? 0 {fact_changes_walk(ChangeWord(nodes.ptr[n].c) @s at reason)}
     if mask & 16 not=? 0 {
-        loop i in [0..nkids(n)) {fact_changes(kid(n i) @s at reason)}
+        loop i in [0..nkids(n)) {fact_changes_walk(kid(n i) @s at reason)}
     }
 }
 # A loop's havoc of a push or extend: the length it leaves is at least the one it found, so a
@@ -473,5 +479,5 @@ fact_balanced_changes=(n:ChangeWord @s:FactState at:ChangeWord reason:FactReason
         }
         else if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(s.bindings[i].value (-1) false length))}
     }
-    if nkids(n) =? 3 {fact_changes(kid(n 2) @s at reason)}
+    if nkids(n) =? 3 {fact_changes_walk(kid(n 2) @s at reason)}
 }

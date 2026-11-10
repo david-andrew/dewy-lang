@@ -1,0 +1,16 @@
+# Replacing an owner drops the old one.
+let data:array<int64>=[1 2 3]
+Shrink=type of [id:int64
+    $__drop__
+    release=():>void=>{data=[]}
+]
+pick=(i:int64):>int64=>{
+    let s=Shrink[1]
+    if 0 <=? i and i <? data.length {
+        s=Shrink[2]
+        return data[i]
+    }
+    printl(s.id)
+    0
+}
+main=()=>{printl(pick(1))}
