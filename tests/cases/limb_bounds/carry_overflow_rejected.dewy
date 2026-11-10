@@ -1,0 +1,10 @@
+# An unsigned carry the loop doubles each pass leaves its word.
+main = () => {
+    let c:uint64 = 1
+    let total:uint64 = 0
+    loop i in [0..80) {
+        c = (c and 0xffffffff)*2+1
+        total = c*c
+    }
+    printl(total)
+}

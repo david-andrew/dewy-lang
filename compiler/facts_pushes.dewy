@@ -637,12 +637,12 @@ fact_carried_assigns=(n:PushWord):>array<int64>=>$unsafe {
     out
 }
 # A carried local a loop's havoc leaves without a useful bound: a mathematical
-# int (unbounded), or a fixed-width signed one where the function has exact
-# results to decide (its domain's far endpoint). O(1).
+# int (unbounded), or a fixed-width one where the function has exact results
+# to decide (its domain's far endpoint; for a uint64 limb, its top). O(1).
 fact_carried_type=(t0:PushWord f:PushWord):>bool=>$unsafe {
     let t=fact_type(t0)
     # (an N-D array a counted loop replaces, `m = m * p`: its shape settles as a while loop's does)
-    t =? T_MATH_INT or is_nd(t) or exact_demands.has(f) and fact_scalar(t) and is_int(t) and types.ptr[t].sign
+    t =? T_MATH_INT or is_nd(t) or exact_demands.has(f) and fact_scalar(t) and is_int(t)
 }
 # Whether a range or array loop needs its header iterated: an active carried
 # assignment that no counted sum already bounds.
@@ -652,11 +652,25 @@ fact_iterates=(n:PushWord sums:array<[int64 FactBound]>):>bool=>$unsafe {
         if fact_slice_flags(e) & (FACT_MEMBER | FACT_ACTIVE) =? FACT_MEMBER {continue}
         let l=PushWord(nodes.ptr[PushWord(nodes.ptr[e].a)].sym)
         if not fact_carried_type(PushWord(locals.ptr[l].type) fact_owner) {continue}
+        if not fact_carried_demanded(n l) {continue}
         let counted=false
         loop sum in sums {
             if sum[0] =? l {counted=true}
         }
         if not counted {return true}
+    }
+    false
+}
+# Whether an unsigned carried local l is worth iterating loop n's header for:
+# an exact-fit obligation inside or after the loop names it (`h0*r0` of a
+# limb h0). Signed and mathematical ints, whose havoc keeps no useful far end,
+# always are. O(the slice's exact demands x their syntax), only for a loop
+# carrying an unsigned local.
+fact_carried_demanded=(n:PushWord l:PushWord):>bool=>$unsafe {
+    let t=fact_type(PushWord(locals.ptr[l].type))
+    if t =? T_MATH_INT or not is_int(t) or types.ptr[t].sign {return true}
+    loop m in fact_slice.exact_demands {
+        if nodes.ptr[m].pos >=? nodes.ptr[n].pos and fact_mentions(m l) {return true}
     }
     false
 }

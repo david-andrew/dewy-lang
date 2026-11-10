@@ -1,0 +1,14 @@
+# An unsigned limb an array loop carries keeps the bound its body re-establishes.
+const LIMB:uint64 = 0x3ffffff
+absorb = (h:uint64<(<=? 0x7ffffff)> r:uint64<(<=? 0x3ffffff)> data:array<uint8>):>uint64 => {
+    let h0 = h
+    loop b in data {
+        h0 += (b as uint64) and LIMB
+        let d0:uint64 = h0*r
+        h0 = (d0 and LIMB) + (d0 >> 52)
+    }
+    return h0
+}
+main = () => {
+    printl(absorb(1 3 [loop i in [0..40) ((i*7) and 255) as uint8]))
+}
