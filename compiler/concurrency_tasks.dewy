@@ -150,6 +150,8 @@ concurrency_protocol_task_arg=(n:TaskWord):>int64=>$unsafe {
     let name=name_of(TaskWord(nodes.ptr[d].name))
     if name =? "serve" {return 0}
     if name =? "pipeline" {return 2}
+    # (first_ok runs every call it is given on a task of its own)
+    if name =? "first_ok" {return -2}
     return -1
 }
 concurrency_atomic_validate=(n:TaskWord):>void=>$unsafe {

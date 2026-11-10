@@ -3478,7 +3478,11 @@ their child; cancellation of `child.wait` leaves that child owned by its caller.
 `within(2s @get(url))` establishes a deadline scope and returns `Timeout` when
 its own deadline expires; parent cancellation remains `Canceled`.
 `race(@first_lookup(key) @second_lookup(key))` returns the first completed result
-and cancels and joins the other task. Neither helper leaves a task detached.
+and cancels and joins the other task; it takes two to four calls. `first_ok(@load(a)
+@load(b))` (decisions.md, batch 7) returns the first result that is not an exception (a
+`Canceled` a call returns is a failure too) and cancels and joins the rest; when every call
+fails, it returns the failure that came first. A tie has no promised order. None of these
+helpers leaves a task detached.
 Backend state, cancellation, and deadlines travel implicitly through calls.
 CPU work cooperates with cancellation by checking a blocking operation such as
 `sleep(0ns)`; an arbitrary computation is not forcibly terminated. Cleanup

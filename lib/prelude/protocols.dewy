@@ -100,3 +100,63 @@ pipeline = <T R>(window:int64<(>? 0)> seeds:array<T> work:<(item:T):>R> feedback
     if canceled return Canceled
     results
 }
+
+# `first_ok(@load(a) @load(b) ...)` (D4, decisions.md batch 7): runs each call as a task and
+# gives the first result that is not an exception (a Canceled returned as a value is one), then
+# cancels and joins the rest. When every call fails, it gives the failure that came first; tie
+# order is not promised. Its own cancellation is the call's Canceled. (Results travel boxed, so
+# a failure does not fail the group.)
+__first_ok_run = <R>(f:(():>R) i:int64 winner:Atomic<int64> failure:Atomic<int64> g:TaskGroup):>__Flight<R> => {
+    let r = f()
+    if r is? exception {
+        failure.compare_swap(-1 i);
+    } else if winner.compare_swap(-1 i) {
+        cancel(g)
+    }
+    __Flight<R>[r]
+}
+
+first_ok = <A B>(a:(():>A) b:(():>B)):>A | B | Canceled => {
+    let winner = atomic(-1)
+    let failure = atomic(-1)
+    concurrent g {
+        let ra = spawn __first_ok_run<A>(a 0 winner failure g)
+        let rb = spawn __first_ok_run<B>(b 1 winner failure g)
+    }
+    let pick = if winner.load >=? 0 winner.load else failure.load
+    if pick =? 0 { if ra is? __Flight<A> return ra.value }
+    if pick =? 1 { if rb is? __Flight<B> return rb.value }
+    Canceled
+}
+
+first_ok = <A B C>(a:(():>A) b:(():>B) c:(():>C)):>A | B | C | Canceled => {
+    let winner = atomic(-1)
+    let failure = atomic(-1)
+    concurrent g {
+        let ra = spawn __first_ok_run<A>(a 0 winner failure g)
+        let rb = spawn __first_ok_run<B>(b 1 winner failure g)
+        let rc = spawn __first_ok_run<C>(c 2 winner failure g)
+    }
+    let pick = if winner.load >=? 0 winner.load else failure.load
+    if pick =? 0 { if ra is? __Flight<A> return ra.value }
+    if pick =? 1 { if rb is? __Flight<B> return rb.value }
+    if pick =? 2 { if rc is? __Flight<C> return rc.value }
+    Canceled
+}
+
+first_ok = <A B C D>(a:(():>A) b:(():>B) c:(():>C) d:(():>D)):>A | B | C | D | Canceled => {
+    let winner = atomic(-1)
+    let failure = atomic(-1)
+    concurrent g {
+        let ra = spawn __first_ok_run<A>(a 0 winner failure g)
+        let rb = spawn __first_ok_run<B>(b 1 winner failure g)
+        let rc = spawn __first_ok_run<C>(c 2 winner failure g)
+        let rd = spawn __first_ok_run<D>(d 3 winner failure g)
+    }
+    let pick = if winner.load >=? 0 winner.load else failure.load
+    if pick =? 0 { if ra is? __Flight<A> return ra.value }
+    if pick =? 1 { if rb is? __Flight<B> return rb.value }
+    if pick =? 2 { if rc is? __Flight<C> return rc.value }
+    if pick =? 3 { if rd is? __Flight<D> return rd.value }
+    Canceled
+}

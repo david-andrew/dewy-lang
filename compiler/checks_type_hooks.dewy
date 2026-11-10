@@ -250,7 +250,7 @@ instance_create=(decl:int64 use_pos:int64):>int64=>$unsafe {
     let f=new_inst(FK_NORMAL TypeHookWord(nodes.ptr[decl].mod) sanitize(name_of(TypeHookWord(nodes.ptr[decl].name))))
     fns.ptr[f].decl=int32(decl)
     fns.ptr[f].atomic_api=TypeHookWord(nodes.ptr[decl].mod) =? concurrency_thread_module
-    fns.ptr[f].task_api=TypeHookWord(nodes.ptr[decl].mod) =? concurrency_task_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["__task_spawn" "within" "race" "select"] or TypeHookWord(nodes.ptr[decl].mod) =? concurrency_protocol_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["serve" "pipeline"]
+    fns.ptr[f].task_api=TypeHookWord(nodes.ptr[decl].mod) =? concurrency_task_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["__task_spawn" "within" "race" "select"] or TypeHookWord(nodes.ptr[decl].mod) =? concurrency_protocol_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["serve" "pipeline" "first_ok"]
     fns.ptr[f].use_pos=use_pos
     if cx >=? 0 {fns.ptr[f].made_in=ctxs[cx].inst}
     f

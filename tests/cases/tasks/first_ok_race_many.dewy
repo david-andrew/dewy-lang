@@ -1,0 +1,21 @@
+# modes: native native-release
+# `race` takes any number of calls and gives the first result; `first_ok` gives the first
+# success, or, when every call fails, the failure that came first (decisions.md, batch 7).
+# Each cancels and joins the rest.
+Failed:type = type of error
+fail = (_n:int64):>int64 | Failed => Failed
+slow = (n:int64):>int64 | Failed | Canceled => {
+    sleep(20ms) or_throw
+    n
+}
+hang = (n:int64):>int64 | Canceled => {
+    sleep(1hour) or_throw
+    n
+}
+main = () => {
+    printl"first ok: {first_ok(@fail(1) @slow(21))}"
+    printl"of three: {first_ok(@fail(1) @fail(2) @slow(4))}"
+    printl"all failed: {first_ok(@fail(1) @fail(2)) is? Failed}"
+    printl"race of three: {race(@hang(1) @slow(2) @hang(3))}"
+    printl"race of four: {race(@hang(1) @hang(2) @hang(3) @slow(4))}"
+}
