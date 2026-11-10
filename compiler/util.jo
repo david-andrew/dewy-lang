@@ -17,6 +17,7 @@ use 'line_table.dewy'
 use 'intern.dewy'
 use 'error_display.dewy'
 use 'diagnostic_exit.dewy'
+use 'byte_append.dewy'
 
 files: SrcFile[]
 # the interned names (intern.dewy's table, passed to it by place): each name by id, its hash by
@@ -161,11 +162,3 @@ warn = (p: int, msg: str):
     if errors_only and shown_warnings.contains(wk): return
     shown_warnings.push(wk)
     eprint("{pos_str(p)}: warning: {msg}")
-
-# append src to out with one copy (compiler code must stay compilable by the C bootstrap,
-# which lacks the `extend` intrinsic)
-append_bytes = (out: mut u8[], src: u8[]):
-    n = out.len()
-    if src.len() == 0: return
-    out.resize(n + src.len())
-    mem_copy(data(out) + n, data(src), src.len())

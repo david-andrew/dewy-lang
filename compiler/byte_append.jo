@@ -1,0 +1,26 @@
+use 'util.jo'
+use 'source_types.dewy'
+use 'lazy_bodies.jo'
+use 'lazy_force.dewy'
+use 'frontend.jo'
+use 'pcheck.jo'
+use 'watch.jo'
+use 'watch_ops.dewy'
+use 'ide.jo'
+use 'ide_decls.dewy'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'fused.jo'
+use 'fused_ops.dewy'
+use 'line_table.dewy'
+use 'intern.dewy'
+use 'error_display.dewy'
+use 'diagnostic_exit.dewy'
+
+# append src to out with one copy (compiler code must stay compilable by the C bootstrap,
+# which lacks the `extend` intrinsic)
+append_bytes = (out: mut u8[], src: u8[]):
+    n = out.len()
+    if src.len() == 0: return
+    out.resize(n + src.len())
+    mem_copy(data(out) + n, data(src), src.len())

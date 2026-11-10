@@ -1,0 +1,8 @@
+$runtime_checks
+# Append with one copy; keep the source alive if it shares the destination.
+append_bytes=(@out:array<uint8> src:array<uint8>):>void=>$unsafe {
+    let n=out.length
+    if src.length =? 0 {return}
+    out.resize(n + src.length)
+    mem_copy(out.ptr + n src.ptr src.length);
+}
