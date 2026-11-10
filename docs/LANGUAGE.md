@@ -3011,7 +3011,8 @@ A field's elements can be indexes of a sibling array, as
 self-length array, the elements are `int64` or `addr`, the bound is an upper one (`<?` or
 `<=?`, with an optional constant offset) and also means `>=? 0` unless the refinement states
 its own lower bound. Construction and replacing either field check every element; storing,
-pushing or inserting into `next` checks the value against `nodes.length`; and every read knows
+pushing or inserting into `next` checks the value against `nodes.length`, and `next.extend(xs)`
+checks every element of `xs` once; and every read knows
 the bound, so `g.nodes[g.next[i]]` and `loop e in g.next printl(g.nodes[e])` check no bounds.
 Growing `nodes`, permuting either field (`swap`, `reverse`, the `sort` family) and shrinking
 or clearing `next` keep the bound and work in place. Making

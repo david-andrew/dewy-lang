@@ -1,0 +1,7 @@
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+main = ():>void => {
+    let g = Graph[nodes=['a' 'b'] next=[]]
+    let h = Graph[nodes=['a' 'b' 'c'] next=[2]]
+    g.next.extend(h.next)
+    printl(g.next)
+}

@@ -1,0 +1,6 @@
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+add = (@g:Graph at:int64<(>=? 0)>):>void => { g.next.extend([0 at]) }
+main = ():>void => {
+    let g = Graph[nodes=['a' 'b'] next=[]]
+    add(@g 1)
+}

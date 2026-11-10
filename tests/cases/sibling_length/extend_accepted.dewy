@@ -1,0 +1,15 @@
+# Extending a bounded field: every added element is known to be below the sibling's length.
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+main = ():>void => {
+    let g = Graph[nodes=['a' 'b' 'c'] next=[1]]
+    g.next.extend([0 1 2])
+    g.next.extend([loop i in [0..g.nodes.length) i])
+    g.next.extend(g.next)
+    let copy = g.next
+    g.next.extend(copy)
+    g.next.extend([])
+    g.nodes.push('d')
+    g.next.extend([g.nodes.length - 1])
+    printl(g.next.length)
+    printl(g.nodes[g.next[g.next.length - 1]])
+}

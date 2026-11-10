@@ -1,0 +1,13 @@
+# exit: 101
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+extend = (@g:Graph more:array<int64<(>=? 0)>>):>void => {
+    $runtime_checks
+    g.next.extend(more)
+}
+main = ():>void => {
+    let g = Graph[nodes=['a' 'b'] next=[]]
+    extend(@g [0 1])
+    printl("fits")
+    extend(@g [0 2])
+    printl("not reached")
+}

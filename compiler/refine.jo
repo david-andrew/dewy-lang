@@ -313,7 +313,7 @@ ref_assume = (t0: int, self: int, args: int[], s: mut FactState):
     base = int(types[t].elem)
     loop atom in ref_predicates[int(types[t].st)]:
         if atom.a.kind == 6:
-            if atom.b.kind == 5: ref_sib_assume(s, self, atom, args)
+            if atom.b.kind == 5 or atom.b.kind == 6: ref_sib_assume(s, self, atom, args)
             else: ref_self_assume(s, self, atom)
             continue
         # (a store's element type says nothing without the array it is stored in)
@@ -362,7 +362,7 @@ ref_check_held = (n: int, self: int, args: int[], s: mut FactState):
     base = int(types[t].elem)
     proven = true
     loop atom in ref_predicates[int(types[t].st)]:
-        if atom.a.kind == 6 and atom.b.kind == 5:
+        if atom.a.kind == 6 and (atom.b.kind == 5 or atom.b.kind == 6):
             truth = ref_sib_truth(s, self, atom, args)
             if truth < 0 and is_map_type(representation_type(t)): truth = ref_sib_literal_truth(s, n, atom, args)
             if truth == 0: ref_sib_fail(n, t, atom, true)
@@ -454,7 +454,7 @@ ref_gen_check = (n: int, self: int, args: int[], arg_types: int[]):
     ref_gen_site = n
     if ref_self_active and nodes[n].b != 0: wit_holder_text = wit_text(int(nodes[n].b))
     loop atom in ref_predicates[int(types[t].st)]:
-        if atom.a.kind == 6 and atom.b.kind == 5:
+        if atom.a.kind == 6 and (atom.b.kind == 5 or atom.b.kind == 6):
             ref_sib_gen(n, t, atom, self, args, arg_types)
             continue
         if atom.a.kind == 6:
@@ -1427,11 +1427,13 @@ ref_sib_bound = (element: int, name: int, pos: int, contracted: bool) -> (int, i
 # One value per length and c, so reading the bound again adds no rows to the length, whose
 # rows a tied field's relation needs (fact_difference keeps a few per term).
 ref_sib_limit = (atom: RefAtom, args: int[], s: mut FactState, extra: int = 0) -> int:
-    if atom.b.value >= args.len() or args[atom.b.value] == 0: return 0
+    # (the sibling of the array a value is added to, as `extend` into it: the holder, kind 6)
+    kind = atom.b.kind
+    if kind == 5 and (atom.b.value >= args.len() or args[atom.b.value] == 0) or kind == 6 and ref_fact_holder == 0: return 0
     k = atom.b.offset + extra
     if atom.op == .lt: k -= 1
-    length = ref_value(RefTerm(5, atom.b.value, path = [-1]), 0, args, T_INT, s)
-    if length == 0 or k == 0 or k < -64 or k > 64: return ref_value(RefTerm(5, atom.b.value, path = [-1], offset = k), 0, args, T_INT, s)
+    length = ref_value(RefTerm(kind, atom.b.value, path = [-1]), 0, args, T_INT, s)
+    if length == 0 or k == 0 or k < -64 or k > 64: return ref_value(RefTerm(kind, atom.b.value, path = [-1], offset = k), 0, args, T_INT, s)
     # (reused only where this state's rows say it is exactly length + k: values are numbered again
     # for each function)
     key = length * 256 + k + 128
@@ -1439,7 +1441,7 @@ ref_sib_limit = (atom: RefAtom, args: int[], s: mut FactState, extra: int = 0) -
         up = fact_row_find(s, sum, length)
         down = fact_row_find(s, length, sum)
         if up >= 0 and down >= 0 and s.differences[up].limit == k and s.differences[down].limit == -k: return sum
-    sum = ref_value(RefTerm(5, atom.b.value, path = [-1], offset = k), 0, args, T_INT, s)
+    sum = ref_value(RefTerm(kind, atom.b.value, path = [-1], offset = k), 0, args, T_INT, s)
     ref_sib_sums[key] = sum
     sum
 
@@ -1558,6 +1560,7 @@ ref_sib_fail = (n: int, t: int, atom: RefAtom, refuted: bool):
 
 # The sibling's name for a diagnostic, from the record the checked value is a field of.
 ref_sib_name = (atom: RefAtom, n: int) -> str:
+    if atom.b.kind == 6: return "`{wit_holder_text}`"
     v = int(nodes[n].a)
     if nodes[v].kind == .field:
         t = representation_type(ntype(int(nodes[v].a)))
@@ -1568,7 +1571,7 @@ ref_sib_name = (atom: RefAtom, n: int) -> str:
 
 # Every element of a whole array value against the sibling: a loop, only under `$runtime_checks`.
 ref_sib_gen = (n: int, t: int, atom: RefAtom, self: int, args: int[], arg_types: int[]):
-    length = ref_ir_term(RefTerm(5, atom.b.value, path = [-1]), self, args, T_INT, arg_types)
+    length = if atom.b.kind == 6: ref_ir_holder_length() else: ref_ir_term(RefTerm(5, atom.b.value, path = [-1]), self, args, T_INT, arg_types)
     k = atom.b.offset
     if atom.op == .lt: k -= 1
     bound = e_bin(.add, VI, length, e_iconst(k))
@@ -1649,9 +1652,26 @@ ref_sib_in_place = (n: int, id: IN, place0: int, t: int) -> bool:
         if (id == .push or id == .insert) and nkids(n) >= 2:
             ref_self_value(kid(n, 1), t, 0, place0)
             return true
+        # (every extended element owes the sibling's length, checked once before it grows)
+        if id == .extend and nkids(n) == 2:
+            value = kid(n, 1)
+            refine_coerce(value, ref_sib_extension(t))
+            nodes[value].b = i32(ref_holder_place(place0))
+            return true
         return false
     if types[prune(t)].kind == .refined or not ref_sib_only_bounds(record, at): return false
     id == .push or id == .insert or id == .extend
+
+# The type of an array added to a field bounded by a sibling: every element below the sibling's
+# length (term kind 6, the array the value goes into), the field's own element bounds as well.
+ref_sib_extension = (t0: int) -> int:
+    t = prune(t0)
+    atoms: RefAtom[]
+    loop atom in ref_predicates[int(types[t].st)]:
+        atoms.push(RefAtom(atom.op, RefTerm(6), RefTerm(6, path = [-1], offset = atom.b.offset)))
+    predicate = ref_intern(atoms)
+    ref_span_copy(int(types[t].st), predicate)
+    mk_refined(int(types[t].elem), predicate)
 
 # The record type whose field place is, when no contract above that record holds it; else 0.
 ref_sib_record = (place0: int) -> int:
