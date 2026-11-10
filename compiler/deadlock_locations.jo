@@ -28,10 +28,22 @@ dl_lib = () -> str: lib_dir + "/prelude/locks.dewy"
 
 dl_key = (l: DlLoc) -> str: "{l.root}:{l.id}:{l.k}{l.route}"
 
+# A declaration's name; a destructured pair (`let [tx rx] = spsc().split`) has none, and is
+# one channel, named by its ends.
+dl_decl_name = (d: int) -> str:
+    base = name_of(int(nodes[d].name))
+    if len(base) > 0: return base
+    ends: str[]
+    loop i in [0..nkids(d)):
+        c = kid(d, i)
+        if nodes[c].kind == .hole or nodes[c].sym <= 0: continue
+        ends.push(name_of(int(locals[int(nodes[c].sym)].name)))
+    join(ends, "/")
+
 dl_name = (l: DlLoc) -> str:
     base = "a lock"
     if l.root == 1: base = name_of(int(globals[l.id].name))
-    else if l.root == 2: base = name_of(int(nodes[l.id].name))
+    else if l.root == 2: base = dl_decl_name(l.id)
     else if l.root == 4: base = name_of(int(locals[l.id].name))
     else if l.root == 3:
         d = int(fns[l.id].decl)
