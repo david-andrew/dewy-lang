@@ -12,6 +12,7 @@
   - `or_throw` forwards an error to the caller, `??` substitutes a default for any error or `none`, and `??<E>` does so only for error type `E`.
   - `@f` is a handle to function `f`, and `$name` is a metatag.
 - **Revised 2026-11-07:** D4, D10, D11, D28, D29, D31 and D33–D37 were revised together. Independent agents dogfooded them twice, they were made consistent with each other, and every name was read cold. Each item states its floors and whether it is ready.
+- **Revised 2026-11-10:** D4 Q7 is back, redesigned after your answer: settings chosen at run time, six rounds, dogfooded and reviewed.
 - **Revised 2026-11-09:** D4's `select` (v6): arms match by type, your `<heart.Tick>` members tell sources apart (built by `$named`), `race` cancels, `merged` drains. Eleven rounds, six independent reviews, every new spelling read cold. Q10 (`type of string`, `ticker<T>`) is withdrawn: source-qualified members made it unnecessary.
 - **Closed:** D22 (`$parallel_safe` deleted), D26 and D27. Your answers of 2026-11-07 are in decisions.md, batch 4; of 2026-11-09 (D4 Q8, Q11–Q17), batch 7.
 - **Question kinds:** (a) changes something you decided; (b) new syntax or surface; (c) names only. Question numbers are kept as first asked, so answered ones leave gaps.
@@ -19,12 +20,14 @@
 **Questions at a glance**
 - **(a) Changes something you decided:**
   - D4 Q6: metatags go before the construct they affect, language-wide;
+  - D4 Q7: settings chosen by a run-time value; your one-file idiom works (changes the entry-point rule);
   - D4 Q9: `priority=` replaces `ties=` (`'listed'` or your `'index'`), and `Sent` is withdrawn;
   - D38 Q1: snake_case naming style;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
 - **(b) New syntax or surface:**
+  - D4 Q18 (optional): `memory_left`;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D11 Q2: `check=` or `valid_if=`;
   - D11 Q3: `__read__` or `$reader`;
@@ -44,7 +47,7 @@
   - D37 Q2;
   - D38 Q2: prefer familiar words;
   - D39 Q2: `stack` and `Ragged`.
-- **Being redesigned after your answers:** D4 Q4 (Ctrl-C and the other scopes as blocks) and D4 Q7 (settings chosen by a run-time value).
+- **Being redesigned after your answers:** D4 Q4 (Ctrl-C and the other scopes as blocks).
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -230,31 +233,21 @@ main = (argv:array<string> app:BackgroundTasks) => {
 }
 ```
 
-- **Source-defined environments:**
-  - Separate entry files import units/shared code first, then set a contiguous module header before declarations or prefix their entry `main`. Caps are fixed when compiling, with no environment-variable override.
-  - One entry file may dispatch ordinary functions with ordinary application config values. Choosing different process settings from run-time arguments in one file (your second idiom) is being redesigned (Q7). These are the separate-entry and single-file application-config forms as they stand.
-
-```dewy
-# entry-small.dewy
-from units import MiB
-import p"09_environment_program.dewy" as program
-
-$program.max_cores = 2
-$program.max_memory = 512MiB
-main = (argv:array<string> app:BackgroundTasks) => program.run(argv app)
-```
+- **Source-defined environments (Q7):** your one-file idiom works, with no new syntax. Separate entry files still work too, and are the only way to build a different target or build mode.
 
 ```dewy
 from units import MiB
 
-Config:type = [workers:int]
-run = (config:Config):>void => printl"{config.workers} requested workers; {available_cores} cores allowed"
-laptop = ():>void => run(Config[2])
-server = ():>void => run(Config[8])
-
-$program.max_cores = 8
+$program.max_cores = 2              # the entry file's default
 $program.max_memory = 512MiB
-main = (argv:array<string> app:BackgroundTasks):>void => {
+
+run = () => printl"{available_cores} cores allowed"
+laptop = () => run()                # runs at 2
+server = () => {
+    $program.max_cores = 8          # a function in the entry file may replace the default
+    run()                           # runs at 8, and so do the tasks it starts
+}
+main = (argv:array<string>) => {
     let environment = argv.get(0) ?? "laptop"
     if environment =? "laptop" laptop()
     else if environment =? "server" server()
@@ -281,7 +274,15 @@ main = (argv:array<string> app:BackgroundTasks):>void => {
 - **Surface questions for you:**
   - **Q4: being redesigned.** Your answer: Ctrl-C (and likewise task groups and protection) should read like a block, so `return`, `break` and `or_throw` act on the enclosing function as usual instead of on a callback. A design round is under way and comes back here with the new form.
   - **Q6 (a, b): make construct settings prefix their target language-wide?** Tags and labels sit before loops, blocks, and declarations. One contiguous module header may be at file start or after the initial imports, before the first ordinary declaration/statement; imported units are in scope. Later prefixes apply only to their next construct. Program settings may also directly prefix entry `main`, and are fixed at compile time. This replaces both current containing-scope placement and the first-line-inside-parallel exception. It unblocks consistent examples in every design item. **Rec:** yes. Reversible before the surface ships; broader than concurrency, and explicitly changes the prior placement direction.
-  - **Q7: being redesigned.** Your answer: make one entry file with a function per environment work, choosing settings by a run-time value, even if the compiler works harder, with a warning where it costs performance. A design round is under way.
+  - **Q7 (a): settings chosen by a run-time value, as above?** What it does:
+    - A cap, schedule or policy (`$program.max_cores`, `$program.max_memory`, `$parallel.*`, `$time.zone`, …) written in a function or block starts at its line and covers the rest of that scope, what it calls, and the tasks it starts, even after the call returns. `{ $program.max_cores = cores; run() }` limits one call; `cores` may be a value read from a config file. Code settings (`$runtime_checks`, `$fast_math`) still cover their whole scope.
+    - The entry file's header is the default; a function in the entry file may replace it. Otherwise the tightest cap in force wins, and a looser line warns ("this asks for 16 cores; `server` allows 8; the call runs at 8"). A library can only narrow what the program chose, never raise it.
+    - `$runtime_checks` can't be chosen from a value: with checks off, an unproved index is a compile error, so a flag could never skip a proof. `$fast_math = flag` can: both bodies are compiled and the call picks one, with a warning. It doesn't recompile another module's concrete functions (their numerics may rely on IEEE); a library generic follows the caller unless it pins `$fast_math = false`, with a warning.
+    - `$program.max_memory` counts the caller's heap blocks while it is in force; using it anywhere warns once per build that allocations under it pay for the accounting. Past the cap the program ends, unless the module uses `$explicit_allocation_failure`.
+    - A function value keeps the zone of the place its `@` was written, so a library that sets UTC doesn't change what your callback's `today` means; caps follow whoever runs it.
+    - **Changes from your decisions:** settings may be set in any function or block, not only the entry header or `main` (batch 4); calling another file's `main` with different caps runs under the tighter one instead of being a compile error (still an error for `$target` and `$build.mode`); a cap written inside a body starts at its line rather than covering the whole scope. Your sketch put the setting on the line above the function; that form needs Q6, so without Q6 it goes inside the function.
+    - **Dogfooded:** 17 programs over six rounds, with independent regrades and a correctness review. Floor 4: `run()` doesn't show the cap it runs under, `today` doesn't show the zone, a handler table doesn't show which function runs, and a looser library cap still reads 16 while running at 8 (so a library can't raise the program). Full rules: `proposals/runtime-settings/summary.md`. **Rec:** yes; reversible.
+  - **Q18 (b), optional: `memory_left`, the bytes a call can still allocate under the tightest memory cap in force?** It lets a game skip loading an asset that won't fit instead of ending at the cap. Cold read: `memory_left` read correctly by all three readers (5/5/3); `available_memory` failed (one reader took it for the machine's free RAM); `memory_budget` read as the cap itself. **Rec:** add it; reversible.
   - **Q9 (a): `priority='fair' | 'listed'` (or `'index'`) replaces your approved `ties=`, and `Sent` is withdrawn?** You asked about `'index'`. Cold read: all three readers read both correctly as "the earliest argument wins a tie"; confidence `'listed'` 4/4/3, `'index'` 4/4/2 (`'written'` 4/4/3, `'position'` 4/4/2, `'order'` 3/3/3). Two of three had taken your earlier `ties='first'` as "whichever became ready first in time". `Sent` existed only for sends inside `select`, now withdrawn. **Rec:** `'listed'`, by a little: it reads as the plain adjective "in the listed order", next to `'fair'`; `'index'` names the mechanism. Either is fine; reversible.
 - **Flagged, not new questions:**
   - `check_cancel()` is an explicit checkpoint, not an ambient opt-in; it has no active lifetime to bracket. It lives inside an ordinary computation function whose result carries `Canceled`.
@@ -289,7 +290,7 @@ main = (argv:array<string> app:BackgroundTasks):>void => {
   - A foreground-task restriction keeps two unrelated background tasks from racing to own process signal policy; nested catchers restore the prior owner.
   - The standard console failure sets gain `Interrupted` uniformly. No metatag changes their type.
   - `$parallel.*` settings that govern nothing are errors. Declaration settings retain target checks.
-- **Floors:** block-local bindings escaping braces remain unusual; choosing process settings at run time is being redesigned (Q7); full HTTP and real shell job control are library work. Several discoverability scores remain 4. There are no claims of compiler validation or fresh-reader scores.
+- **Floors:** block-local bindings escaping braces remain unusual; a cap chosen at run time is not written at its use (Q7); full HTTP and real shell job control are library work. Several discoverability scores remain 4. There are no claims of compiler validation or fresh-reader scores.
 - **Ready:** design review and syntax/name answers; not implementation landing. Approved Q1, Q3 and approved names are omitted from the questions.
 
 ---
