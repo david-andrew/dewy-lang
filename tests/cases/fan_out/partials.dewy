@@ -1,0 +1,27 @@
+# modes: native native-release
+# `@load.(sources)`: an argument group of an ungrouped `@` chain, so an array of partials, one
+# per element, with scalar arguments repeated; nothing is called until a partial is. Without
+# `@`, `load.(sources)` calls elementwise. race and first_ok take the array spread.
+load = (src:string):>string => "from {src}"
+fetch = (src:string tries:int64):>string => "{src} x{tries}"
+fastest = (sources:array<string>):>string | Canceled | OutOfMemory => {
+    if sources.length =? 0 return "none"
+    race(@load.(sources)...)
+}
+main = () => {
+    let sources = ["a" "b" "c"]
+    let ps = @load.(sources)
+    printl"{ps.length} partials"
+    loop p in ps { printl(p()) }
+    let twice = @fetch.(sources 2)
+    printl(twice[1]())
+    let open = @fetch.(sources)
+    printl(open[2](5))
+    printl"{load.(sources)}"
+    printl"race {race(@load.(sources)...) is? string}"
+    printl"fastest {fastest(sources) is? string} {fastest([])}"
+    match first_ok(@load.(sources)...) {
+        s:string => printl"first_ok {s.length}"
+        _ => printl"other"
+    }
+}

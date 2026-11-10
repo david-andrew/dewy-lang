@@ -421,7 +421,10 @@ main = () => {
 `@f(args)` partially evaluates `f`: the arguments are evaluated now, and the
 result is a function of the remaining parameters. Every argument group in an
 ungrouped `@` chain partially evaluates (`@sum(1)(2)`); parentheses end the
-chain, after which an argument group calls (`(@sum(1))(2)`). A parameter left to
+chain, after which an argument group calls (`(@sum(1))(2)`). An elementwise group
+is one too: `@load.(sources)` is an array of partials, one per element, with scalar
+arguments repeated (`@fetch.(urls 3)`), and nothing is called; `race(@load.(sources)...)`
+spreads it. A parameter left to
 its default must have a literal default for now. An overloaded or generic
 function partially evaluates too: the arguments choose the version, as in a
 call, and an annotation such as `let f:(b:int64:>int64) = @max(x)` chooses

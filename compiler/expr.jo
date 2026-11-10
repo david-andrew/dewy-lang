@@ -9457,6 +9457,9 @@ dot_template = (n: int, leaves: mut int[], tag: str) -> int:
     if k == .call and has_flag(n, NF_BROADCAST):
         c = mk(.call, pos)
         nodes[c].a = nodes[n].a
+        # (`@load.(sources)`: each element a partial, `@load(source)`, an argument group of an
+        # ungrouped `@` chain; nothing is called. decisions.md batch 7, select-v6.md)
+        if nodes[n].aux2 == i32(AUX2_PARTIAL): nodes[c].aux2 = nodes[n].aux2
         args: int[]
         loop x in kids(n): args.push(dot_template(x, leaves, tag))
         set_list(c, args)
