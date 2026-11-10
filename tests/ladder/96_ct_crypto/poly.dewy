@@ -4,13 +4,15 @@
 # a 64-bit word with room for the carries. Every block runs the same arithmetic;
 # the final reduction modulo 2^130-5 picks between h and h-p with a mask, never
 # with a branch, so the tag's timing does not depend on the key or the message.
-$runtime_checks
 
 $explicit_copies
 
-from p"ct.dewy" import load32, store32, mask64
+from p"ct.dewy" import load32, mask64
 
-Limbs:type = array<uint64 length=5>
+# r is clamped to 26-bit limbs. h leaves each block with its limbs below 2^27:
+# the final carry out of h0 lands on h1 after h1 was masked.
+Limbs:type = array<uint64<(<=? 0x3ffffff)> length=5>
+Accumulator:type = array<uint64<(<=? 0x7ffffff)> length=5>
 OneTimeKey:type = array<uint8 length=32>
 Tag:type = array<uint8 length=16>
 
@@ -19,15 +21,14 @@ const BLOCK:int64 = 16
 
 Poly1305:type = [
     r:Limbs=[]
-    h:Limbs=[]
+    h:Accumulator=[]
     pad:array<uint32 length=4>=[]
     pending:array<uint8>=[]
 
     # Absorb the whole 16-byte blocks from `at` on. `final_bit` is 1 << 24 for a
     # full block (the 2^128 marker), 0 for the padded last block, which carries
     # its marker byte in the data.
-    absorb = (data:array<uint8> at:int64<0 <=? at and at <=? data.length> final_bit:uint64):>void => {
-        $runtime_checks
+    absorb = (data:array<uint8> at:int64<0 <=? at and at <=? data.length> final_bit:uint64<(<=? 0x1000000)>):>void => {
         let [r0 r1 r2 r3 r4] = r
         let s1 = r1*5
         let s2 = r2*5
@@ -151,15 +152,15 @@ Poly1305:type = [
         let w1 = ((h1 >> 6) or (h2 << 20)) and 0xffffffff
         let w2 = ((h2 >> 12) or (h3 << 14)) and 0xffffffff
         let w3 = ((h3 >> 18) or (h4 << 8)) and 0xffffffff
-        let f = w0+(pad[0] as uint64)
-        let out:array<uint8> = []
-        store32(@out (f and 0xffffffff) as uint32)
-        f = w1+(pad[1] as uint64)+(f >> 32)
-        store32(@out (f and 0xffffffff) as uint32)
-        f = w2+(pad[2] as uint64)+(f >> 32)
-        store32(@out (f and 0xffffffff) as uint32)
-        f = w3+(pad[3] as uint64)+(f >> 32)
-        store32(@out (f and 0xffffffff) as uint32)
+        let words = [w0 w1 w2 w3]
+        let out:Tag = []
+        let f:uint64 = 0
+        loop k in [0..4) {
+            f = words[k]+(pad[k] as uint64)+(f >> 32)
+            loop j in [0..4) {
+                out[4*k+j] = ((f >> (8*j)) and 255) as uint8
+            }
+        }
         return out
     }
 ]
