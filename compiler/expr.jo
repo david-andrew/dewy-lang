@@ -160,6 +160,7 @@ use 'expr_routes.dewy'
 use 'range_checks.dewy'
 use 'collection_checks.dewy'
 use 'slice_checks.dewy'
+use 'gpu_type_checks.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -7280,49 +7281,6 @@ bc_assign = (target: int, v: int, pos: int) -> int:
 # value, so the element's contract and defaults are not consulted. The store lets go of what
 # the element held. The declaration's own body serves earlier compilers.
 release_name = intern("__release_at")
-
-# What a GPU function reads and writes in GPU memory -- its parameters' struct and the elements of
-# the buffers in it -- shaders hold in 32-bit words: a 64-bit integer there would lose its high
-# word (5000000000 reads as 705032704), so it is an error naming the 32-bit type to use. `what`
-# names the place. O(fields).
-gpu_word_memory = (t0: int, what: str, pos: int, depth: int):
-    t = representation_type(prune(t0))
-    if depth > 8: return
-    k = types[t].kind
-    if k == .int_ and int(types[t].bits) > 32:
-        want = if types[t].sign: "int32" else: "uint32"
-        fatal(pos, "`{what}` is {dt(t)} in GPU memory, which shaders read and write as 32-bit words: declare it `{want}`, a width a shader holds whole")
-    if k == .fixed: gpu_word_memory(int(types[t].elem), "{what}[i]", pos, depth + 1)
-    if k != .struct_: return
-    si = int(types[t].st)
-    if is_lib_texture(si): return
-    if is_gpu_buffer(t):
-        gpu_word_memory(gpu_buffer_elem(t), "{what}[i]", pos, depth + 1)
-        return
-    check_struct_fields(si)
-    loop i in [0..int(structs[si].nfields)):
-        f = int(structs[si].fields) + i
-        gpu_word_memory(int(fields[f].type), "{what}.{name_of(int(fields[f].name))}", pos, depth + 1)
-
-gpu_buffer_elem = (t0: int) -> int:
-    si = int(types[prune(t0)].st)
-    check_struct_fields(si)
-    loop i in [0..int(structs[si].nfields)):
-        f = int(structs[si].fields) + i
-        if name_of(int(fields[f].name)) == "host": return int(types[prune(int(fields[f].type))].elem)
-    0
-
-# an array literal of type T[] (also when it is empty)
-typed_array = (elems: int[], t: int, pos: int) -> int:
-    a = mk(.array, pos)
-    set_list(a, elems)
-    tn = mk(.tname, pos)
-    nodes[tn].aux = -7
-    nodes[tn].ival = mk_array(t)
-    c = mk(.cast, pos)
-    nodes[c].a = i32(a)
-    nodes[c].b = i32(tn)
-    c
 
 callable_fits = (from0: int, to0: int) -> bool:
     if ownership_callable_cap(from0) > ownership_callable_cap(to0): return false

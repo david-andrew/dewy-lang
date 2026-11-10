@@ -1,0 +1,201 @@
+use 'expr.jo'
+use 'data_access.dewy'
+use 'program_settings.dewy'
+use 'call_style.dewy'
+use 'secret_checks.dewy'
+use 'checks_read_code.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'unit_rare.dewy'
+use 'unit_ops.dewy'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'check.jo'
+use 'checks_place_updates.dewy'
+use 'checks_thin.dewy'
+use 'checks_const_views.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'settings.jo'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'refine_ops.dewy'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'prelude_ops.dewy'
+use 'ide.jo'
+use 'ide_text.dewy'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+use 'checks_shaped.dewy'
+use 'checks_thin_expr.dewy'
+use 'select_checks.dewy'
+use 'type_member_checks.dewy'
+use 'dotted_checks.dewy'
+use 'expr_hints.dewy'
+use 'partial_checks.dewy'
+use 'narrowing_checks.dewy'
+use 'expr_rare.dewy'
+use 'callable_checks.dewy'
+use 'expr_routes.dewy'
+use 'range_checks.dewy'
+use 'collection_checks.dewy'
+use 'slice_checks.dewy'
+
+# What a GPU function reads and writes in GPU memory -- its parameters' struct and the elements of
+# the buffers in it -- shaders hold in 32-bit words: a 64-bit integer there would lose its high
+# word (5000000000 reads as 705032704), so it is an error naming the 32-bit type to use. `what`
+# names the place. O(fields).
+gpu_word_memory = (t0: int, what: str, pos: int, depth: int):
+    t = representation_type(prune(t0))
+    if depth > 8: return
+    k = types[t].kind
+    if k == .int_ and int(types[t].bits) > 32:
+        want = if types[t].sign: "int32" else: "uint32"
+        fatal(pos, "`{what}` is {dt(t)} in GPU memory, which shaders read and write as 32-bit words: declare it `{want}`, a width a shader holds whole")
+    if k == .fixed: gpu_word_memory(int(types[t].elem), "{what}[i]", pos, depth + 1)
+    if k != .struct_: return
+    si = int(types[t].st)
+    if is_lib_texture(si): return
+    if is_gpu_buffer(t):
+        gpu_word_memory(gpu_buffer_elem(t), "{what}[i]", pos, depth + 1)
+        return
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        gpu_word_memory(int(fields[f].type), "{what}.{name_of(int(fields[f].name))}", pos, depth + 1)
+gpu_buffer_elem = (t0: int) -> int:
+    si = int(types[prune(t0)].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        if name_of(int(fields[f].name)) == "host": return int(types[prune(int(fields[f].type))].elem)
+    0
+# an array literal of type T[] (also when it is empty)
+typed_array = (elems: int[], t: int, pos: int) -> int:
+    a = mk(.array, pos)
+    set_list(a, elems)
+    tn = mk(.tname, pos)
+    nodes[tn].aux = -7
+    nodes[tn].ival = mk_array(t)
+    c = mk(.cast, pos)
+    nodes[c].a = i32(a)
+    nodes[c].b = i32(tn)
+    c

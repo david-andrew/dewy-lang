@@ -1,0 +1,57 @@
+$runtime_checks
+from p"ast.jo" import (mk nodes set_list)
+from p"check.jo" import (check_struct_fields)
+from p"checks_thin_expr.dewy" import (is_gpu_buffer)
+from p"refine.jo" import (representation_type)
+from p"type_ops.dewy" import (dt is_lib_texture mk_array)
+from p"types.jo" import (fields prune structs types)
+from p"util.jo" import (fatal name_of)
+
+GpuTypeWord:type=int64<overflow='wrap'>
+# What a GPU function reads and writes in GPU memory -- its parameters' struct and the elements of
+# the buffers in it -- shaders hold in 32-bit words: a 64-bit integer there would lose its high
+# word (5000000000 reads as 705032704), so it is an error naming the 32-bit type to use. `what`
+# names the place. O(fields).
+gpu_word_memory=(t0:GpuTypeWord what:string pos:GpuTypeWord depth:GpuTypeWord):>void=>$unsafe {
+    let t=representation_type(prune(t0))
+    if depth >? 8 {return}
+    let k=types.ptr[t].kind
+    if k =? 'int_' and GpuTypeWord(types.ptr[t].bits) >? 32 {
+        let want=if types.ptr[t].sign {"int32"} else {"uint32"}
+        fatal(pos "`{what}` is {dt(t)} in GPU memory, which shaders read and write as 32-bit words: declare it `{want}`, a width a shader holds whole")
+    }
+    if k =? 'fixed' {gpu_word_memory(GpuTypeWord(types.ptr[t].elem) "{what}[i]" pos depth + 1)}
+    if k not=? 'struct_' {return}
+    let si=GpuTypeWord(types.ptr[t].st)
+    if is_lib_texture(si) {return}
+    if is_gpu_buffer(t) {
+        gpu_word_memory(gpu_buffer_elem(t) "{what}[i]" pos depth + 1)
+        return
+    }
+    check_struct_fields(si)
+    loop i in [0..GpuTypeWord(structs.ptr[si].nfields)) {
+        let f=GpuTypeWord(structs.ptr[si].fields) + i
+        gpu_word_memory(GpuTypeWord(fields.ptr[f].type) "{what}.{name_of(GpuTypeWord(fields.ptr[f].name))}" pos depth + 1)
+    }
+}
+gpu_buffer_elem=(t0:GpuTypeWord):>int64=>$unsafe {
+    let si=GpuTypeWord(types.ptr[prune(t0)].st)
+    check_struct_fields(si)
+    loop i in [0..GpuTypeWord(structs.ptr[si].nfields)) {
+        let f=GpuTypeWord(structs.ptr[si].fields) + i
+        if name_of(GpuTypeWord(fields.ptr[f].name)) =? "host" {return GpuTypeWord(types.ptr[prune(GpuTypeWord(fields.ptr[f].type))].elem)}
+    }
+    0
+}
+# an array literal of type T[] (also when it is empty)
+typed_array=(elems:array<int64> t:GpuTypeWord pos:GpuTypeWord):>int64=>$unsafe {
+    let a=mk('array' pos)
+    set_list(a elems)
+    let tn=mk('tname' pos)
+    nodes.ptr[tn].aux=-7
+    nodes.ptr[tn].ival=mk_array(t)
+    let c=mk('cast' pos)
+    nodes.ptr[c].a=int32(a)
+    nodes.ptr[c].b=int32(tn)
+    c
+}
