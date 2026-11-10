@@ -1,0 +1,6 @@
+# `let w = ...` names a wait only when it is one, written there.
+main = () => {
+    let a = channel<string>(1)
+    let w = if true @a.receive else @a.receive
+    printl"{select(@w)}"
+}

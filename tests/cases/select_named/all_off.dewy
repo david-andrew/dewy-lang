@@ -1,0 +1,7 @@
+# When every wait can be off, one must be proven on: a select with no wait never ends
+# (decisions.md, batch 7, "select needs a wait").
+pick = (on:bool) => {
+    let a = channel<string>(1)
+    printl"{select(if on @a.receive else none)}"
+}
+main = () => pick(true)

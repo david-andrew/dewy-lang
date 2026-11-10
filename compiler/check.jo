@@ -831,6 +831,9 @@ resolve_type_name = (tn: int) -> CheckerTypeName:
     nm = int(nodes[tn].name)
     s = 0
     if nodes[tn].sval != 0:
+        # (`(@w).Closed`: a type a named wait gives, decisions.md batch 7)
+        wait_member = named_wait_type(tn)
+        if wait_member != 0: return CheckerTypeName(0, wait_member)
         ms = lookup(int(nodes[tn].sval))
         if ms != 0 and syms[ms].kind == .reflected and name_of(nm) == "type": return CheckerTypeName(0, int(fields[int(syms[ms].ref)].type))
         # (`heart.<Tick>`: the type itself, selected on a wait, decisions.md batch 7)

@@ -1,0 +1,48 @@
+# modes: native native-release
+# A named wait (decisions.md, batch 7): `let w = @a.receive` in this function, then `select(@w)`.
+# `(@w).string` and `<(@w).Closed>` name it as a source; so does its receiver, `<a.Closed>`.
+main = () => {
+    let a = channel<string>(4)
+    let b = channel<string>(4)
+    let wa = @a.receive
+    let wb = @b.receive
+    a.send("one") or_throw
+    match select(@wa @wb) {
+        s:(@wa).string => printl"wa {s}"
+        s:(@wb).<string> => printl"wb {s}"
+        <Closed> => printl"closed"
+        <Canceled> => printl"canceled"
+    }
+    b.send("two") or_throw
+    match select(@wa @wb) {
+        s:a.string => printl"a {s}"
+        s:(@wb).types & string => printl"wb {s}"
+        <Closed> => printl"closed"
+        <Canceled> => printl"canceled"
+    }
+    b.close()
+    # (prepared once, before the loop: the loop back keeps a and wa unchanged)
+    let n = 0
+    loop n <? 3 {
+        match select(@wa @wb timeout=10ms) {
+            s:string => printl"got {s}"
+            <(@wb).Closed> => break
+            <a.Closed> => break
+            <Timeout> => {n += 1}
+            <Canceled> => break
+        }
+    }
+    # (prepared in the loop: each turn gets its own wait, so the tail may replace a)
+    let turns = 0
+    loop turns <? 2 {
+        let w = @a.receive
+        a.send("turn {turns}") or_throw
+        match select(@w) {
+            s:(@w).string => printl"{s}"
+            <Closed> => break
+            <Canceled> => break
+        }
+        a = channel<string>(4)
+        turns += 1
+    }
+}

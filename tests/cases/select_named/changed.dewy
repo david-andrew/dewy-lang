@@ -1,0 +1,15 @@
+# A named wait prepared before a loop: replacing its receiver in the loop changes what the next
+# turn's match names (decisions.md, batch 7, provenance rules 3 and 4).
+main = () => {
+    let a = channel<string>(4)
+    let w = @a.receive
+    loop i in [0..2) {
+        match select(@w timeout=0s) {
+            s:string => printl"{s}"
+            <Closed> => break
+            <Timeout> => break
+            <Canceled> => break
+        }
+        a = channel<string>(4)
+    }
+}

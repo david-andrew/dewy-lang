@@ -641,6 +641,8 @@ wit_assertion = (cond: int, message: int, paths: FactPaths, entry: FactState):
     # checks keeps as one)
     if wit_obligation != 0 and message != 0:
         what = "the length ({name_of(int(nodes[message].sval))})"
+        # (select's obligation that a wait is on is no length)
+        if starts_with(name_of(int(nodes[message].sval)), "select"): what = "that a wait is on ({name_of(int(nodes[message].sval))})"
         # (the length of an element or a temporary has no spelling: say how a
         # fixed shape states it, as a tuple type does)
         if relation == "" and starts_with(name_of(int(nodes[message].sval)), "unpacking"):

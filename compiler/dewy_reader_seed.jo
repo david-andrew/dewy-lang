@@ -2804,6 +2804,7 @@ rt_dc_type_primary = () -> int:
     n = 0
     if token.kind == .identifier and rt_dc_effect_atom_at(dc_parser.at): return rt_dc_effect_type(token)
     if token.kind == .identifier: n = rt_dc_type_named()
+    else if token.symbol == .lparen and rt_dc_wait_qualified(): n = rt_dc_wait_type(token)
     else if token.symbol == .lparen and dc_parser.reader.dc_type_args > 0 and dc_parser.tokens[rt_dc_closing(dc_parser.at) + 1].symbol == .returns:
         # `array<():>int64>`: a type argument may be a function type without its own angle brackets
         n = rt_dc_function_type(false)
@@ -3042,6 +3043,26 @@ rt_dc_type_named = () -> int:
         return n
     if rt_dc_double_angle(): return rt_dc_type_arguments(n, word, true)
     n
+
+# `(@w).Closed`, `(@w).<string>`: a type a named wait gives, as a source pattern names it
+# (decisions.md, batch 7); its qualifier is `@w`.
+
+rt_dc_wait_qualified = () -> bool:
+    at = dc_parser.at
+    dc_parser.tokens[at + 1].symbol == .at and dc_parser.tokens[at + 2].kind == .identifier and dc_parser.tokens[at + 2].symbol == .none and dc_parser.tokens[at + 3].symbol == .rparen and dc_parser.tokens[at + 4].symbol == .dot and not dc_parser.tokens[at + 4].space and not dc_parser.tokens[at + 5].space and (dc_parser.tokens[at + 5].symbol == .langle or dc_parser.tokens[at + 5].kind == .identifier and dc_parser.tokens[at + 5].symbol == .none)
+
+rt_dc_wait_type = (token: DewyLexeme) -> int:
+    name = dc_parser.tokens[dc_parser.at + 2]
+    member = dc_parser.tokens[dc_parser.at + 5]
+    n = mk(.tname, mkpos(dc_parser.file, token.start))
+    nodes[n].sval = i32(intern("@" + rt_dn_payload(name)))
+    if member.symbol == .langle:
+        nodes[n].name = i32(intern("<>"))
+        dc_parser.at += 5
+        return rt_dc_type_arguments(n, 0)
+    nodes[n].name = i32(intern(rt_dn_payload(member)))
+    dc_parser.at += 6
+    rt_dc_type_arguments(n, 0)
 
 # `net.NetError` at the module's name: a module's type (dw_type's `.`).
 

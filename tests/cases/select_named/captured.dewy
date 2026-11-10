@@ -1,0 +1,10 @@
+# A closure that captures a named wait's receiver to change it could make the match name
+# another channel than the one the wait takes from.
+main = () => {
+    let a = channel<string>(1)
+    let w = @a.receive
+    let swap = ($capture @a) => { a = channel<string>(1) }
+    a.send("x") or_throw
+    printl"{select(@w)}"
+    swap()
+}

@@ -1,0 +1,6 @@
+# An index is not a stable receiver for a named wait (decisions.md, batch 7, rule 5).
+main = () => {
+    let channels = [channel<int64>(1) channel<int64>(1)]
+    let w = @channels[0].receive
+    printl"{select(@w)}"
+}

@@ -123,6 +123,8 @@ call_ident_special = (n: int, expected: int) -> int:
         if is_soa(at): return check_soa_method(n, a0, int(nodes[callee].name), [], expected)
     # (`named([Png Jpeg])`: a call specialized on a sequence of types, decisions.md batch 7)
     if nkids(n) > 0 and nodes[kid(n, 0)].kind == .array: return type_sequence_call(n, expected)
+    # (`select(if open @a.receive else none ...)`: a wait turned off, decisions.md batch 7)
+    if nkids(n) > 0 and int(nodes[callee].name) == select_id(): return select_conditions(n, expected)
     -1
 
 call_dotname = (n: int, expected: int) -> int:

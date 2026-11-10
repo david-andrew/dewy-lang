@@ -1,1 +1,1 @@
-select waits on operations written in the call, on a local or a field: `@lines.receive`, `@heart.next`. It cannot follow a function value, a helper's result or an indexed element (bind `let ch = channels[i]`, then `@ch.receive`), and its own `timeout=` is the deadline
+a wait's receiver is a local or a field chain: an index is not stable. Bind `let ch = channels[i]` and prepare `@ch.receive`

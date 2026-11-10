@@ -310,6 +310,14 @@ __select_winner = () -> int:
     k = s[__TS_SELECT_WON] - 1
     s[__TS_SELECT_WON] = 0
     k
+# `if cond @w else none` in select: the wait, or with cond false one that is never ready (it
+# marks itself missed, so select discards the Canceled it gives). compiler/expr.jo's
+# select_conditions writes the call.
+__select_when[A] = (on: bool, w: () -> A) -> (() -> A):
+    if on: return w
+    ():
+        __select_missed()
+        Canceled
 __select_nap = (spins: int):
     if spins >= 16: __task_pause()
 

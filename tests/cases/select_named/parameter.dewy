@@ -1,0 +1,8 @@
+# A named wait is declared in this function: a parameter holding a function is not one.
+take = (w:<():>string | Closed<string> | Canceled>) => {
+    printl"{select(@w)}"
+}
+main = () => {
+    let a = channel<string>(1)
+    take(@a.receive)
+}

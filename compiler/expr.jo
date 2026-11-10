@@ -2880,6 +2880,36 @@ handle_outcomes = (t0: int) -> int:
     handle_outcomes_cache[t] = out
     out
 
+# (the local a named wait qualifier `@w` names, 0 when q is no such qualifier)
+named_wait_qualifier = (q: int) -> int:
+    text = name_of(q)
+    if len(text) < 2 or not starts_with(text, "@"): return 0
+    s = lookup(intern(text[1..]))
+    if s == 0 or syms[s].kind != .local: return 0
+    s
+
+# `(@w).Closed`, `(@w).<string>`, `(@w).types` (decisions.md, batch 7): the type the named wait w
+# gives with that name, as a wait handle's member names its outcome; 0 when tn names no `@w`.
+named_wait_type = (tn: int) -> int:
+    s = named_wait_qualifier(int(nodes[tn].sval))
+    if s == 0: return 0
+    t = prune(int(locals[int(syms[s].ref)].type))
+    q = "(" + name_of(int(nodes[tn].sval)) + ")"
+    if tkind(t) != .fn_: fatal(nodes[tn].pos, "`{q}` names a named wait, `let w = @lines.receive`; {dt(t)} is not one")
+    outcomes = prune(telem(t))
+    nm = int(nodes[tn].name)
+    if name_of(nm) == "<>":
+        if nkids(tn) != 1: fatal(nodes[tn].pos, "`{q}.<T>` selects one type")
+        return resolve_type(kid(tn, 0))
+    if name_of(nm) == "types": return outcomes
+    found: int[]
+    loop a in value_members(outcomes):
+        if type_short_name(a) == name_of(nm): found.push(prune(a))
+    if found.len() == 1: return found[0]
+    if found.len() > 1: fatal(nodes[tn].pos, "{q} gives more than one type named {name_of(nm)}: write the one meant, `{q}.<{dt(found[0])}>`")
+    fatal(nodes[tn].pos, "{q} gives {dt(outcomes)}, none of them named {name_of(nm)}")
+    0
+
 # A wait handle's member that is a type (decisions.md, batch 7): `types`, its outcomes, and the
 # outcome whose short name is `name` when exactly one has it (`heart.Tick`, a channel's
 # `.Closed`); 0 for any other name. A member the record has wins (record_type_member).
@@ -7299,19 +7329,258 @@ select_call = (n: int) -> bool:
 select_check = (n: int):
     waits: int[]
     loop a0 in kids(n):
-        a = a0
-        loop nodes[a].kind == .conv: a = int(nodes[a].a)
+        a = select_wait_arg(a0)
         if tkind(ntype(a)) != .fn_: continue
-        op = 0
-        if nodes[a].kind == .partial and nodes[a].sym > 0 and nkids(a) == 1 and fns[int(nodes[a].sym)].decl != 0:
-            d = int(fns[int(nodes[a].sym)].decl)
-            name = name_of(int(nodes[d].name))
-            path = files[pos_file(nodes[d].pos)].path
-            if (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy" or path == lib_dir + "/prelude/mpmc.dewy") and select_place(kid(a, 0)): op = int(nodes[d].name)
-        if op == 0: fatal(nodes[a].pos, "select waits on operations written in the call, on a local or a field: `@lines.receive`, `@heart.next`. It cannot follow a function value, a helper's result or an indexed element (bind `let ch = channels[i]`, then `@ch.receive`), and its own `timeout=` is the deadline")
-        loop w in waits:
-            if int(nodes[int(fns[int(nodes[w].sym)].decl)].name) == op and select_same_place(kid(w, 0), kid(a, 0)): fatal(nodes[a].pos, "this operation is listed twice: select takes at most one value from it, so write it once")
-        waits.push(a)
+        w = wait_partial(a)
+        l = named_wait_local(a)
+        if w == 0 and l != 0:
+            w = named_wait(n, a, l)
+            if w < 0: return
+        if w == 0: fatal(nodes[a].pos, "select waits on operations written in the call, on a local or a field: `@lines.receive`, `@heart.next`, or `@w` for a `let w = @lines.receive` in this function. It cannot follow a function value, a helper's result or an indexed element (bind `let ch = channels[i]`, then `@ch.receive`), and its own `timeout=` is the deadline")
+        op = int(nodes[int(fns[int(nodes[w].sym)].decl)].name)
+        loop v in waits:
+            if int(nodes[int(fns[int(nodes[v].sym)].decl)].name) == op and select_same_place(kid(v, 0), kid(w, 0)): fatal(nodes[a].pos, "this operation is listed twice: select takes at most one value from it, so write it once")
+        waits.push(w)
+
+# Named waits (decisions.md, batch 7, provenance rules 3-5): `let w = @c.receive` declared in
+# this function, then `select(@w)`. A wait given as an argument a (conversions stripped): the
+# prepared operation, `@c.receive` as written in the call or in w's declaration; 0 when a is no
+# such wait. A local that is not a wait prepared in this function is an error with its fix-it.
+wait_partial = (a0: int) -> int:
+    a = a0
+    loop nodes[a].kind == .conv: a = int(nodes[a].a)
+    if nodes[a].kind == .partial and nodes[a].sym > 0 and nkids(a) == 1 and fns[int(nodes[a].sym)].decl != 0:
+        d = int(fns[int(nodes[a].sym)].decl)
+        name = name_of(int(nodes[d].name))
+        path = files[pos_file(nodes[d].pos)].path
+        if (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy" or path == lib_dir + "/prelude/mpmc.dewy"):
+            if not select_place(kid(a, 0)): fatal(nodes[a].pos, "a wait's receiver is a local or a field chain: an index is not stable. Bind `let ch = channels[i]` and prepare `@ch.receive`")
+            return a
+    0
+
+# (a select argument with conversions and `if cond ... else none`'s `__select_when` taken off)
+select_wait_arg = (a0: int) -> int:
+    a = a0
+    loop nodes[a].kind == .conv: a = int(nodes[a].a)
+    if nodes[a].kind == .call and nkids(a) == 2 and nodes[a].sym > 0 and nodes[a].aux == 0 and fns[int(nodes[a].sym)].decl != 0 and name_of(int(nodes[int(fns[int(nodes[a].sym)].decl)].name)) == "__select_when":
+        a = kid(a, 1)
+        loop nodes[a].kind == .conv: a = int(nodes[a].a)
+    a
+
+# (the local a named wait argument names, 0 for another form)
+named_wait_local = (a0: int) -> int:
+    a = a0
+    loop nodes[a].kind == .conv: a = int(nodes[a].a)
+    if nodes[a].kind != .ident or has_flag(a, NF_GLOBAL) or nodes[a].sym <= 0: return 0
+    int(nodes[a].sym)
+
+# The walk of one function body for a named wait (rules 3 and 4). In source order it finds w's
+# declaration and the call, and every assignment and `$capture @x` closure on w or a place its
+# receiver path overlaps. From the declaration through the call, and around any loop the call is
+# in that the declaration is not (the loop back to the next match), none may change them.
+# O(the body), once per named wait.
+nw_local = 0
+nw_name = 0
+nw_call = 0
+nw_decl = 0
+nw_receiver = 0
+nw_at = 0
+nw_decl_at = -1
+nw_call_at = -1
+nw_call_end = -1
+nw_loops: int[]
+nw_decl_loops: int[]
+nw_call_loops: int[]
+nw_loop_start: {int: int} = {}
+nw_loop_end: {int: int} = {}
+nw_writes: int[]
+nw_write_at: int[]
+
+nw_walk = (n: int):
+    if n <= 0: return
+    at = nw_at
+    nw_at += 1
+    k = nodes[n].kind
+    if k == .vardecl and nodes[n].sym == i32(nw_local) and not has_flag(n, NF_GLOBAL) and nw_decl == 0:
+        nw_decl = n
+        nw_decl_at = at
+        nw_decl_loops = nw_loops
+    if n == nw_call:
+        nw_call_at = at
+        nw_call_loops = nw_loops
+    if k == .assign:
+        nw_writes.push(n)
+        nw_write_at.push(at)
+    if k == .lambda:
+        loop cap in lambda_captures(n):
+            if has_flag(cap, NF_MUT):
+                nw_writes.push(cap)
+                nw_write_at.push(at)
+        return
+    loop_node = k == .while_ or k == .for_
+    if loop_node:
+        nw_loops.push(n)
+        nw_loop_start[n] = at
+    mask = isolation_children(k)
+    if mask < 0: mask = 0
+    if mask & 1 != 0: nw_walk(int(nodes[n].a))
+    if mask & 2 != 0: nw_walk(int(nodes[n].b))
+    if mask & 4 != 0: nw_walk(int(nodes[n].c))
+    if mask & 16 != 0:
+        loop child in kids(n): nw_walk(child)
+    if loop_node:
+        nw_loops.pop()
+        nw_loop_end[n] = nw_at - 1
+    if n == nw_call: nw_call_end = nw_at - 1
+
+# (the names along a place: its root local's id, negated, then each field's name)
+nw_path = (n0: int) -> int[]:
+    out: int[]
+    n = n0
+    loop nodes[n].kind == .conv or nodes[n].kind == .field or nodes[n].kind == .index:
+        if nodes[n].kind == .field: out.push(int(nodes[n].name))
+        if nodes[n].kind == .index: out.clear()
+        n = int(nodes[n].a)
+    if nodes[n].kind != .ident or has_flag(n, NF_GLOBAL): return []
+    out.push(-int(nodes[n].sym))
+    out.reverse()
+    out
+
+# (does a write to the place target replace w, or the receiver path or an ancestor of it?)
+nw_overlaps = (target: int, receiver: int[]) -> bool:
+    path = nw_path(target)
+    if path.len() == 0: return false
+    if path[0] == -nw_local: return true
+    if path[0] != receiver[0]: return false
+    loop i in [0..min(path.len(), receiver.len())):
+        if path[i] != receiver[i]: return false
+    true
+
+# The wait w names in the call n, checked against rules 3-5 (its declaration in this function,
+# a stable receiver, nothing changing them while it is pending).
+named_wait = (n: int, a: int, l: int) -> int:
+    nw_local = l
+    nw_name = int(locals[l].name)
+    nw_call = n
+    nw_decl = 0
+    nw_at = 0
+    nw_decl_at = -1
+    nw_call_at = -1
+    nw_call_end = -1
+    nw_loops.clear()
+    nw_loop_start.clear()
+    nw_loop_end.clear()
+    nw_writes.clear()
+    nw_write_at.clear()
+    owner = int(locals[l].owner)
+    nw_walk(int(fns[owner].body))
+    # (a checked copy of the call, as a match on it makes, is not in the body: the call itself is)
+    if nw_call_at < 0: return -1
+    w = name_of(nw_name)
+    if nw_decl == 0 or nw_decl_at > nw_call_at or int(locals[l].flags) & LF_PARAM != 0: fatal(nodes[a].pos, "select waits on `@{w}` only when {w} is a wait prepared in this function, `let {w} = @lines.receive`; a parameter, a captured value or a stored result is not one: write the wait in the call")
+    init = int(nodes[nw_decl].b)
+    prepared = wait_partial(init)
+    if prepared == 0: fatal(nodes[a].pos, "{w} is not a prepared wait: a named wait is declared as one, `let {w} = @lines.receive` or `@heart.next`; a helper's result, a stored handle or `if cond @x.receive else none` is not (write the wait, or the condition, in the call)")
+    receiver = nw_path(kid(prepared, 0))
+    if receiver.len() == 0: fatal(nodes[prepared].pos, "a named wait's receiver is a local or a field chain on one: bind `let ch = ...` and prepare `@ch.receive`")
+    root = name_of(int(locals[-receiver[0]].name))
+    loop i in [0..nw_writes.len()):
+        x = nw_writes[i]
+        if nodes[x].kind != .assign:
+            # (a closure that captured the place to change it: whenever it runs)
+            if int(nodes[x].name) == nw_name or name_of(int(nodes[x].name)) == root: fatal(nodes[x].pos, "this closure captures the place of the wait `{w}` to change it, so select could take from another place than its pattern names: capture a copy, or match the plain type")
+            continue
+        at = nw_write_at[i]
+        live = at > nw_decl_at and at <= nw_call_end
+        loop lp in nw_call_loops:
+            if not nw_decl_loops.contains(lp) and at >= nw_loop_start[lp] and at <= nw_loop_end[lp]: live = true
+        if live and nw_overlaps(int(nodes[x].a), receiver): fatal(nodes[x].pos, "this changes the place the wait `{w}` was prepared on while select can still take from it: from `let {w} = ...` through the match, and around the loop back to it, the receiver and {w} stay as they are. Bind a fresh local for the new value, or match the plain type")
+    prepared
+
+# `if cond @w else none` as a select argument (decisions.md, batch 7): w, or a wait turned off,
+# written `__select_when(cond, @w)`. When every wait may be off, the select needs one on: the
+# obligation "select needs a wait", proven from facts, else an error (a runtime check where the
+# scope allows one). -1 when n has no such argument; O(arguments) for select's calls only.
+select_name_id = 0
+select_id = () -> int:
+    if select_name_id == 0: select_name_id = intern("select")
+    select_name_id
+
+select_turned_off = (a0: int) -> int:
+    a = a0
+    loop nodes[a].kind == .block and nkids(a) == 1 and nodes[kid(a, 0)].kind == .exprstmt: a = int(nodes[kid(a, 0)].a)
+    if nodes[a].kind != .if_ or nodes[a].c == 0: return 0
+    off = int(nodes[a].c)
+    loop nodes[off].kind == .block and nkids(off) == 1 and nodes[kid(off, 0)].kind == .exprstmt: off = int(nodes[kid(off, 0)].a)
+    if nodes[off].kind != .none_lit: return 0
+    a
+
+select_conditions = (n: int, expected: int) -> int:
+    if not dewy_at(nodes[n].pos): return -1
+    conditions: int[]
+    waits = 0
+    args = kids(n)
+    loop i in [0..args.len()):
+        if nodes[args[i]].kind == .namedarg: continue
+        waits += 1
+        c = select_turned_off(args[i])
+        if c == 0: continue
+        conditions.push(int(nodes[c].a))
+        on = int(nodes[c].b)
+        loop nodes[on].kind == .block and nkids(on) == 1 and nodes[kid(on, 0)].kind == .exprstmt: on = int(nodes[kid(on, 0)].a)
+        args[i] = bc_call("__select_when", [int(nodes[c].a), on], nodes[args[i]].pos)
+    if conditions.len() == 0: return -1
+    pos = nodes[n].pos
+    if conditions.len() < waits:
+        set_list(n, args)
+        return -1
+    call = clone(n)
+    set_list(call, args)
+    # (every wait may be off: one condition must hold, proven where the select is reached)
+    either = 0
+    loop c in conditions:
+        if not select_plain_condition(c): fatal(nodes[c].pos, "every wait of this select can be turned off, so one condition must be proven true before it waits; that needs plain conditions (flags, fields, comparisons): bind this one to a local first")
+        if either == 0: either = clone(c)
+        else:
+            joined = mk(.or_, pos)
+            nodes[joined].a = i32(either)
+            nodes[joined].b = i32(clone(c))
+            either = joined
+    check_expr(either, T_BOOL)
+    held = last_checked
+    check_expr(bc_str("select needs a wait: every wait here can be turned off", pos), T_STR)
+    guard = mk(.call, pos)
+    nodes[guard].aux2 = i32(UNPACK_OBLIGATION)
+    check_intrinsic(guard, int(IN.assert), [held, last_checked], 0)
+    fact_requests.push(FactRequest(guard, if cx >= 0: int(ctxs[cx].inst) else: 0))
+    statement = mk(.exprstmt, pos)
+    nodes[statement].a = i32(guard)
+    add_flag(statement, NF_CHECKED)
+    nodes[n] = Node(kind = .block, pos = pos, aux = 1)
+    set_list(n, [statement, bc_stmt(call, pos)])
+    check_expr(n, expected)
+
+# (a condition the obligation can read again: names, fields, literals, `not`, `and`, `or` and
+# comparisons of them)
+select_plain_condition = (c: int) -> bool:
+    k = nodes[c].kind
+    if k == .ident or k == .bool_lit or k == .int_lit: return true
+    if k == .field or k == .not_: return select_plain_condition(int(nodes[c].a))
+    if k == .and_ or k == .or_ or k == .binary: return select_plain_condition(int(nodes[c].a)) and select_plain_condition(int(nodes[c].b))
+    false
+
+# (the wait a named wait l was declared with while its function is being checked, 0 if none)
+named_wait_declared = (l: int) -> int:
+    nw_local = l
+    nw_call = 0
+    nw_decl = 0
+    nw_at = 0
+    nw_loops.clear()
+    nw_writes.clear()
+    nw_write_at.clear()
+    nw_walk(int(fns[int(locals[l].owner)].body))
+    if nw_decl == 0: return 0
+    wait_partial(int(nodes[nw_decl].b))
 
 # Source patterns (decisions.md, batch 7): `<heart.Tick>`, `line:lines.string`,
 # `x:heart.types & (Tick | Closed)` name the wait that gave the outcome as well as its type. The
@@ -7324,6 +7593,7 @@ source_qualifier = (p: int) -> int:
     if nodes[tn].kind != .tname or nodes[tn].sval == 0: return 0
     selector = name_of(int(nodes[tn].name)) == "<>"
     if nkids(tn) != 0 and not selector: return 0
+    if named_wait_qualifier(int(nodes[tn].sval)) != 0: return int(nodes[tn].sval)
     s = lookup(int(nodes[tn].sval))
     if s == 0 or (syms[s].kind != .local and syms[s].kind != .global): return 0
     t = 0
@@ -7373,17 +7643,26 @@ source_match = (m: int, expected: int) -> int:
     probe = last_checked
     call = probe
     loop nodes[call].kind == .conv: call = int(nodes[call].a)
+    # (all waits conditional: `{obligation; select(...)}`)
+    if nodes[call].kind == .block and nkids(call) > 0 and nodes[kid(call, nkids(call) - 1)].kind == .exprstmt: call = int(nodes[kid(call, nkids(call) - 1)].a)
+    loop nodes[call].kind == .conv: call = int(nodes[call].a)
     if nodes[call].kind != .call or not select_call(call): fatal(nodes[first].pos, "a pattern that names its source needs the match written on `select(...)` itself")
     whole = prune(ntype(probe))
     # (each wait: its receiver's name and what it gives)
     receivers: int[]
+    named: int[]
     outcomes: int[][]
     taken: int[]
     loop a0 in kids(call):
-        a = a0
-        loop nodes[a].kind == .conv: a = int(nodes[a].a)
+        a = select_wait_arg(a0)
         if tkind(ntype(a)) != .fn_: continue
-        receivers.push(if nodes[a].kind == .partial and nkids(a) == 1: source_receiver(kid(a, 0)) else: 0)
+        w = wait_partial(a)
+        l = named_wait_local(a)
+        named.push(0)
+        if w == 0 and l != 0:
+            w = named_wait_declared(l)
+            named[named.len() - 1] = intern("@" + name_of(int(locals[l].name)))
+        receivers.push(if w != 0: source_receiver(kid(w, 0)) else: 0)
         gives = value_members(prune(telem(ntype(a))))
         outcomes.push(gives)
         loop g in gives: taken.push(prune(g))
@@ -7395,7 +7674,7 @@ source_match = (m: int, expected: int) -> int:
     loop arm in kids(m):
         loop p in kids(arm):
             q = source_qualifier(p)
-            if q != 0 and not receivers.contains(q): fatal(nodes[p].pos, "{name_of(q)} is not waited on in this select: a pattern names one of the call's waits (`@{name_of(q)}.receive` written in it)")
+            if q != 0 and not receivers.contains(q) and not named.contains(q): fatal(nodes[p].pos, "{name_of(q)} is not waited on in this select: a pattern names one of the call's waits (`@{name_of(q)}.receive` written in it, or `@w` for a named wait)")
     statement = has_flag(m, NF_STMT)
     sel = "$select{m}"
     won = "$select_won{m}"
@@ -7404,12 +7683,15 @@ source_match = (m: int, expected: int) -> int:
         gives = if k < outcomes.len(): outcomes[k] else: own
         if gives.len() == 0: continue
         source = if k < outcomes.len(): receivers[k] else: -1
+        alias = if k < outcomes.len(): named[k] else: -1
         arms: int[]
+        # (what this wait's unguarded source arms take: a plain arm after them takes the rest)
+        covered: int[]
         loop arm in kids(m):
             kept: int[]
             loop p in kids(arm):
                 q = source_qualifier(p)
-                if q != 0 and q != source: continue
+                if q != 0 and q != source and q != alias: continue
                 if nodes[p].kind == .ptype and nodes[p].a != 0:
                     was = bare_generic_set(true)
                     tt = prune(resolve_type(int(nodes[p].a)))
@@ -7419,6 +7701,13 @@ source_match = (m: int, expected: int) -> int:
                         if gives.contains(prune(g)) or family_holds_generic(tt, prune(g)): held.push(prune(g))
                     loop g in gives:
                         if not held.contains(prune(g)) and type_eq(prune(g), tt): held.push(prune(g))
+                    if q == 0:
+                        rest: int[]
+                        loop g in held:
+                            if not covered.contains(g): rest.push(g)
+                        held = rest
+                    else if nodes[arm].a == 0 and nodes[arm].c == 0:
+                        loop g in held: covered.push(g)
                     if held.len() == 0: continue
                     np = clone(p)
                     tn = mk(.tname, nodes[p].pos)
@@ -7446,6 +7735,7 @@ source_match = (m: int, expected: int) -> int:
         if statement: add_flag(branch, NF_STMT)
         set_list(branch, arms)
         select_source_matches[branch] = true
+        select_source_calls[branch] = sc
         branches.push(branch)
         branches.push(if k < outcomes.len(): k else: -1)
     # (the last branch is the else of the others)
@@ -7557,11 +7847,38 @@ select_progress = (m: int):
     sc = int(nodes[m].a)
     loop nodes[sc].kind == .conv: sc = int(nodes[sc].a)
     if not select_source_matches.has(m) and (nodes[sc].kind != .call or not select_call(sc)): return
+    # (`timeout=0s`, a poll: a Timeout stays ready as a close does)
+    poll = select_poll(select_source_calls.get(m) ?? sc)
     loop arm in kids(m):
         closes = false
+        idles = false
         loop p in kids(arm):
             if select_pattern_closes(p): closes = true
-        if closes and not select_moves(int(nodes[arm].b)): fatal(nodes[arm].pos, "this close arm spins: a closed channel stays ready, so the next turn of the loop takes the close again; leave the loop (`break`), change what the loop tests, or drain the channels with `merged(...)`, which retires each one as it closes")
+            if poll and select_pattern_named(p, "Timeout"): idles = true
+        if closes and not select_moves(int(nodes[arm].b)): fatal(nodes[arm].pos, "this close arm spins: a closed channel stays ready, so the next turn of the loop takes the close again; leave the loop (`break`), turn the wait off (`if open @c.receive else none`, then `open = false` here), change what the loop tests, or drain the channels with `merged(...)`, which retires each one as it closes")
+        if idles and not select_moves(int(nodes[arm].b)): fatal(nodes[arm].pos, "this Timeout arm spins: a `timeout=0s` poll that finds nothing gives Timeout again on the next turn of the loop; leave the loop (`break`), wait with a real timeout, or do the work that makes a wait ready here")
+
+# (the select call a match on select reads: the call itself, or the one a per-wait match was
+# made from; is it a poll, its timeout a literal zero?)
+select_source_calls: {int: int} = {}
+select_poll = (c0: int) -> bool:
+    c = c0
+    loop nodes[c].kind == .conv: c = int(nodes[c].a)
+    if nodes[c].kind == .block and nkids(c) > 0 and nodes[kid(c, nkids(c) - 1)].kind == .exprstmt: c = int(nodes[kid(c, nkids(c) - 1)].a)
+    loop nodes[c].kind == .conv: c = int(nodes[c].a)
+    if nodes[c].kind != .call or not select_call(c) or nkids(c) == 0: return false
+    last = kid(c, nkids(c) - 1)
+    if tkind(ntype(last)) == .fn_: return false
+    loop nodes[last].kind == .conv: last = int(nodes[last].a)
+    nodes[last].kind == .int_lit and nodes[last].ival == 0 or nodes[last].kind == .float_lit and nodes[last].fval == 0.0
+
+# (does pattern p take the type named name, `<Timeout>`?)
+select_pattern_named = (p: int, name: str) -> bool:
+    if nodes[p].kind == .pvariant: return name_of(int(nodes[p].name)) == name
+    if nodes[p].kind != .ptype or nodes[p].type == 0: return false
+    loop member in value_members(prune(int(nodes[p].type))):
+        if type_short_name(member) == name: return true
+    false
 
 select_pattern_closes = (p: int) -> bool:
     if nodes[p].kind == .pvariant: return name_of(int(nodes[p].name)) == "Closed" or starts_with(name_of(int(nodes[p].name)), "Closed<") or starts_with(name_of(int(nodes[p].name)), "Closed[")

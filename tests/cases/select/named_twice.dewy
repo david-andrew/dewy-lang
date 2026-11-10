@@ -1,0 +1,6 @@
+# A named wait and the same operation written in the call are one operation listed twice.
+main = () => {
+    let jobs = channel<int64>(1)
+    let wait = @jobs.receive
+    printl"{select(@jobs.receive @wait)}"
+}

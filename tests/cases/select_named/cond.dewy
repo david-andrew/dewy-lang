@@ -1,0 +1,30 @@
+# modes: native native-release
+# `if cond @a.receive else none` turns a wait off (decisions.md, batch 7): select skips it. A close
+# arm that turns its own wait off makes progress.
+main = () => {
+    let a = channel<string>(4)
+    let b = channel<string>(4)
+    let stop = channel<string>(1)
+    a.send("one") or_throw
+    a.close()
+    b.send("two") or_throw
+    let a_open = true
+    let b_open = false
+    let got:array<string> = []
+    loop got.length <? 2 or a_open {
+        match select(if a_open @a.receive else none  if b_open @b.receive else none  @stop.receive) {
+            s:string => {
+                got.push(s)
+                b_open = true
+            }
+            <a.Closed> => {a_open = false}
+            <Closed> => break
+            <Canceled> => break
+        }
+    }
+    printl"{got} {a_open}"
+    # (every wait off but one proven on)
+    let on = true
+    b.send("three") or_throw
+    printl"{select(if on @b.receive else none  if not on @a.receive else none)}"
+}

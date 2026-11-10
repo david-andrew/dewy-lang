@@ -3733,14 +3733,44 @@ main = () => {
 
 A wait written twice (`select(@jobs.receive @jobs.receive)`) is an error, and so is a wait
 the call cannot see: a stored handle, a helper's result or an indexed element (bind
-`let ch = channels[i]`, then write `@ch.receive`). In a loop, an arm that takes a close
-and changes nothing (no assignment, no `break`, `return` or `or_throw`, no call but
-printing) is an error: the closed channel is ready again on the next turn, so the loop
-would spin. Leave the loop, or drain with `merged`, which retires each channel as it
-closes. *Not yet built:* telling same-typed waits apart by source (`<heart.Tick>`,
-`line:stderr.string`), sends inside `select` through `reserve`, waits turned off with
-`if cond @… else none`, a spread of waits, and the same check for a `Timeout` arm under a
-`0s` poll. `select` takes up to four waits for now.
+`let ch = channels[i]`, then write `@ch.receive`).
+
+A wait can be prepared first and named: `let w = @lines.receive` in this function, then
+`select(@w ...)`. Its arms name it `s:(@w).string`, `<(@w).Closed>` or `(@w).<string>`, or by its
+receiver as before (`<lines.Closed>`). From the `let` through the match, and around a loop back to
+it when the `let` is outside the loop, neither `w` nor the place it was prepared on may change:
+an assignment there, or a closure that captures it with `$capture @`, is an error (bind a fresh
+local instead). A `let` inside the loop prepares a fresh wait each turn, so the loop's tail may
+replace the channel. A parameter, a stored result or a helper's wait is not a named wait.
+
+`if cond @a.receive else none` turns a wait off: while `cond` is false select skips it. When
+every wait of a select can be off, one must be proven on, the obligation "select needs a wait":
+an error unless the facts prove one of the conditions (a runtime check under
+`$runtime_checks`).
+
+```dewy
+main = () => {
+    let a = channel<string>(4)
+    let stop = channel<string>(1)
+    a.send("one") or_throw
+    a.close()
+    let a_open = true
+    loop a_open {
+        match select(if a_open @a.receive else none  @stop.receive) {
+            s:a.string => printl"a {s}"            # a one
+            <a.Closed> => {a_open = false}         # turns a's wait off
+            _ => break
+        }
+    }
+}
+```
+
+In a loop, an arm that takes a close and changes nothing (no assignment, no `break`, `return`
+or `or_throw`, no call but printing) is an error: the closed channel is ready again on the next
+turn, so the loop would spin. Leave the loop, turn the wait off, or drain with `merged`, which
+retires each channel as it closes. Under a `timeout=0s` poll a `<Timeout>` arm that changes
+nothing is the same error. *Not yet built:* sends inside `select` through `reserve`, and a
+spread of waits. `select` takes up to four waits for now.
 
 `merged(@a.receive @b.receive)` drains up to four receives of one payload type as one
 inbox (decisions.md, batch 7). `loop item in inbox` takes each value as it comes (an item is

@@ -7196,6 +7196,28 @@ rd_dc_module_block_next=(@reader_ctx:ParserContext):>bool=>$unsafe {
 }
 
 # `net.NetError` at the module's name: a module's type (dw_type's `.`).
+# `(@w).Closed`, `(@w).<string>`: a type a named wait gives, as a source pattern names it
+# (decisions.md, batch 7); its qualifier is `@w`.
+rd_dc_wait_qualified=(@reader_ctx:ParserContext):>bool=>$unsafe {
+    let at:int64=int64<overflow='wrap'>(reader_ctx.at)
+    (reader_ctx.tokens[at + 1].symbol =? 'at') and (reader_ctx.tokens[at + 2].kind =? 'identifier') and (reader_ctx.tokens[at + 2].symbol =? 'none') and (reader_ctx.tokens[at + 3].symbol =? 'rparen') and (reader_ctx.tokens[at + 4].symbol =? 'dot') and (not reader_ctx.tokens[at + 4].space) and (not reader_ctx.tokens[at + 5].space) and ((reader_ctx.tokens[at + 5].symbol =? 'langle') or (reader_ctx.tokens[at + 5].kind =? 'identifier') and (reader_ctx.tokens[at + 5].symbol =? 'none'))
+}
+
+rd_dc_wait_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexeme):>int64=>$unsafe {
+    let name:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)]
+    let member:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 5)]
+    let n:int64=node_mk(@reader_nodes 'tname' rd_mkpos(reader_ctx.file token.start))
+    reader_nodes[n].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("@{rd_dn_payload(@reader_ctx name)}"))
+    if member.symbol =? 'langle' {
+        reader_nodes[n].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("<>"))
+        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 5)
+        return rd_dc_type_arguments(@reader_ctx @reader_nodes n 0)
+    }
+    reader_nodes[n].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(rd_dn_payload(@reader_ctx member)))
+    reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 6)
+    rd_dc_type_arguments(@reader_ctx @reader_nodes n 0)
+}
+
 rd_dc_module_type=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexeme):>int64=>$unsafe {
     let member:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)]
     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 3)
@@ -10781,6 +10803,9 @@ rd_dc_type_primary=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=
     }
     if (token.kind =? 'identifier') {
         n = rd_dc_type_named(@reader_ctx @reader_nodes)
+    }
+    else if (token.symbol =? 'lparen') and rd_dc_wait_qualified(@reader_ctx) {
+        n = rd_dc_wait_type(@reader_ctx @reader_nodes token)
     }
     else if (((token.symbol =? 'lparen') and (reader_ctx.reader.dc_type_args >? 0)) and (reader_ctx.tokens[(int64<overflow='wrap'>(rd_dc_closing(@reader_ctx reader_ctx.at)) + 1)].symbol =? 'returns')) {
         # `array<():>int64>`: a type argument may be a function type without its own angle brackets

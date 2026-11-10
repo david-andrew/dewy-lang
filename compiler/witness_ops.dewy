@@ -772,6 +772,8 @@ wit_assertion=(cond:WitWord message:WitWord paths:FactPaths entry:FactState):>vo
     # checks keeps as one)
     if wit_obligation not=? 0 and message not=? 0 {
         let what="the length ({name_of(WitWord(nodes.ptr[message].sval))})"
+        # (select's obligation that a wait is on is no length)
+        if starts_with(name_of(WitWord(nodes.ptr[message].sval)) "select") {what="that a wait is on ({name_of(WitWord(nodes.ptr[message].sval))})"}
         # (the length of an element or a temporary has no spelling: say how a
         # fixed shape states it, as a tuple type does)
         if relation =? "" and starts_with(name_of(WitWord(nodes.ptr[message].sval)) "unpacking") {
