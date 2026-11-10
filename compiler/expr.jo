@@ -148,6 +148,7 @@ use 'concurrency_tasks.dewy'
 use 'checks_shaped.dewy'
 use 'checks_thin_expr.dewy'
 use 'select_checks.dewy'
+use 'type_member_checks.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -2656,12 +2657,6 @@ dewy_record_type = (n: int) -> int:
 # A record field whose value is a type (decisions.md, batch 7): one interned typeval per type, so
 # records with the same type members share one shape instance. It has no runtime storage.
 type_member_types: {int: int} = {}
-type_member_type = (t0: int) -> int:
-    t = prune(t0)
-    if let tv = type_member_types.get(t): return tv
-    tv = mk_typeval(t)
-    type_member_types[t] = tv
-    tv
 
 # Is e written as a type (a type's name, or `r.Png` naming a type member)? Such a record
 # field's value is not captured: it has no storage.
@@ -2677,29 +2672,6 @@ type_value_expr = (e: int) -> bool:
         s = lookup(int(nodes[int(nodes[e].a)].name))
         return s != 0 and syms[s].kind != .module and value_type_member(s, int(nodes[e].name), nodes[e].pos) != 0
     false
-
-# `A & B` of types (decisions.md, batch 7): what is both. Of unions, the alternatives of the left
-# that are also the right's (`heart.types & (Tick | Closed)` is `Tick | Closed` when heart gives
-# both); of a type and itself, that type. Nothing in common is an error.
-type_meet = (ms: int[], pos: int) -> int:
-    left = prune(ms[0])
-    right = prune(ms[1])
-    if type_eq(left, right): return left
-    rights: int[]
-    if is_union(right): rights = union_members(right)
-    else: rights.push(right)
-    lefts: int[]
-    if is_union(left): lefts = union_members(left)
-    else: lefts.push(left)
-    out: int[]
-    loop l in lefts:
-        loop r in rights:
-            if type_eq(prune(l), prune(r)):
-                out.push(prune(l))
-                break
-    if out.len() == 0: fatal(pos, "no type is both {dt(left)} and {dt(right)}")
-    if out.len() == 1: return out[0]
-    mk_union(out)
 
 # A compile-time sequence of types (decisions.md, batch 7): an array literal of types, `[Png
 # Jpeg]`, or a name bound to one (a parameter of a call specialized on it, type_sequence_call).
@@ -2828,16 +2800,6 @@ type_sequence_scopes = (e: int, binder: int) -> int[]:
         out.push(scope)
     out
 
-# (does the record type t have a field `name`, of any type?)
-record_has_field = (t0: int, name: int) -> bool:
-    t = prune(t0)
-    if tkind(t) != .struct_: return false
-    si = int(types[t].st)
-    check_struct_fields(si)
-    loop i in [0..int(structs[si].nfields)):
-        if fields[int(structs[si].fields) + i].name == i32(name): return true
-    false
-
 # A generic type's name written bare where values are tested (decisions.md, batch 7): `<Closed>`,
 # `is? Closed`, `or_throw<Closed>` take every `Closed<T>`. While a test's type is resolved
 # (ct_resolve_family) a bare generic name is the union of that type's instances, a family the
@@ -2889,111 +2851,14 @@ task_failure_calls = (gn: str, vn: str, member: int, pos: int) -> int[]:
         out.push(branch)
     out
 
-# (does t name a type parameter or an unsolved variable: a generic signature's instance)
-type_mentions_param = (t0: int, depth: int) -> bool:
-    t = prune(t0)
-    k = tkind(t)
-    if k == .param or k == .var or has_var(t): return true
-    if depth > 4: return false
-    if (k == .struct_ or k == .enum_) and types[t].st >= 0:
-        si = int(types[t].st)
-        loop j in [0..int(structs[si].ntargs)):
-            if type_mentions_param(struct_targ(si, j), depth + 1): return true
-    if k == .array or k == .opt or k == .ptr: return type_mentions_param(telem(t), depth + 1)
-    false
-
 # The instances of generic declaration d made so far, as one type: a family when there are
 # several (nominal_families, under d's own negative key), 0 when there is none. O(structs).
 generic_family_cache: {int: (int, int)} = {}
-generic_family_type = (d: int) -> int:
-    # (unchanged while no record instance is added)
-    if let known = generic_family_cache.get(d):
-        if known.0 == structs.len(): return known.1
-    family = generic_family_scan(d)
-    generic_family_cache[d] = (structs.len(), family)
-    family
-generic_family_scan = (d: int) -> int:
-    out: int[]
-    loop si in [0..structs.len()):
-        if int(structs[si].decl) != d or structs[si].type == 0: continue
-        t = prune(int(structs[si].type))
-        if type_mentions_param(t, 0) or out.contains(t): continue
-        out.push(t)
-    if out.len() == 0: return 0
-    if out.len() == 1: return out[0]
-    family = mk_union(out)
-    nominal_families[-1 - d] = family
-    family
-
-# The type a record type's member `name` holds, 0 when it has no such type member.
-record_type_member = (t0: int, name: int) -> int:
-    t = prune(t0)
-    if tkind(t) != .struct_: return 0
-    si = int(types[t].st)
-    check_struct_fields(si)
-    loop i in [0..int(structs[si].nfields)):
-        fi = int(structs[si].fields) + i
-        if fields[fi].name == i32(name):
-            ft = prune(int(fields[fi].type))
-            if tkind(ft) == .typeval: return prune(telem(ft))
-            return 0
-    0
 
 # A wait handle's outcomes (decisions.md, batch 7, `heart.types`: everything the source can
 # produce): the result of its type's own zero-argument `receive`, or else `next` (a channel's
 # `T | Closed | Canceled`, a ticker's `Tick | Canceled`); 0 when it has neither. Once per type.
 handle_outcomes_cache: {int: int} = {}
-handle_outcomes = (t0: int) -> int:
-    t = prune(t0)
-    if tkind(t) != .struct_: return 0
-    if let known = handle_outcomes_cache.get(t): return known
-    handle_outcomes_cache[t] = 0
-    si = int(types[t].st)
-    decl = int(structs[si].decl)
-    if decl == 0 or nodes[decl].name == 0 or not files[pos_file(nodes[decl].pos)].is_dewy: return 0
-    m = int(nodes[decl].mod)
-    found = 0
-    loop op in ["receive", "next"]:
-        if found != 0: break
-        id = intern(op)
-        loop d in modules[m].decls:
-            if nodes[d].kind != .fn_ or int(nodes[d].name) != id or nkids(d) != 1 or nodes[d].a == 0 or not dewy_is_method(d): continue
-            rt = int(nodes[kid(d, 0)].a)
-            if rt == 0 or nodes[rt].kind != .tname or nodes[rt].name != nodes[decl].name: continue
-            found = d
-            break
-    if found == 0: return 0
-    saved = cx
-    ctxs.push(FnCtx(i32(new_inst(FK_INIT, m, "outcomes")), -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(check_scopes.names.len())))
-    cx = ctxs.len() - 1
-    mark = scope_mark()
-    loop j in [0..min(nkids2(found), int(structs[si].ntargs))):
-        nm = int(nodes[kid2(found, j)].name)
-        push_scope_sym(nm, new_sym(nm, .type_, struct_targ(si, j), 0))
-    out = resolve_type(int(nodes[found].a))
-    scope_reset(mark)
-    ctxs.pop()
-    cx = saved
-    handle_outcomes_cache[t] = out
-    out
-
-# A wait handle's member that is a type (decisions.md, batch 7): `types`, its outcomes, and the
-# outcome whose short name is `name` when exactly one has it (`heart.Tick`, a channel's
-# `.Closed`); 0 for any other name. A member the record has wins (record_type_member).
-handle_type_member = (t: int, name: int) -> int:
-    outcomes = handle_outcomes(t)
-    if outcomes == 0: return 0
-    text = name_of(name)
-    if text == "types": return outcomes
-    found = 0
-    alternatives: int[]
-    if is_union(outcomes): alternatives = union_members(outcomes)
-    else: alternatives.push(outcomes)
-    loop a in alternatives:
-        if type_short_name(a) == text:
-            if found != 0: return 0
-            found = prune(a)
-    found
 
 # `r.Png` written as a type, r a local or global: the type its member holds, 0 when r is no such
 # value or that member is no type.
@@ -3011,39 +2876,9 @@ value_type_member = (s: int, name: int, pos: int) -> int:
     if handle_outcomes(t) != 0: handle_clash_warning(t, pos)
     member
 
-# (does the record type t have a field or method `name`?)
-record_has_member = (t0: int, name: int) -> bool:
-    t = prune(t0)
-    if record_has_field(t, name): return true
-    tkind(t) == .struct_ and structs[int(types[t].st)].decl != 0 and dewy_type_method(int(structs[int(types[t].st)].decl), name) >= 0
-
 # The clash rule (decisions.md, batch 7): an outcome whose short name the handle's type already
 # has as a member gets no shorthand; the member wins, with this warning, once per type.
 handle_clash_warned: {int: bool} = {}
-handle_clash_warning = (t0: int, pos: int):
-    t = prune(t0)
-    if handle_clash_warned.has(t): return
-    handle_clash_warned[t] = true
-    loop a in value_members(handle_outcomes(t)):
-        text = type_short_name(a)
-        if len(text) == 0 or text == "types": continue
-        if record_has_member(t, intern(text)): warn(pos, "{dt(t)} has a member `{text}` of its own, so its outcome {dt(a)} gets no `.{text}` shorthand: write `x.<{dt(a)}>` for the outcome")
-
-# Why `q.name` names no type on a wait handle t (the error that says which arm to write), or ""
-# when t is no handle.
-handle_member_error = (q: str, t: int, name: int) -> str:
-    outcomes = handle_outcomes(t)
-    if outcomes == 0: return ""
-    text = name_of(name)
-    named: int[]
-    loop a in value_members(outcomes):
-        if type_short_name(a) == text: named.push(prune(a))
-    if named.len() > 0 and record_has_member(t, name): return "`{q}.{text}` is a member of {dt(t)} itself, not its outcome {dt(named[0])}: write `{q}.<{dt(named[0])}>`"
-    if named.len() > 1:
-        shown: str[]
-        loop a in named: shown.push(dt(a))
-        return "{q} gives more than one type named {text} ({join(shown, ", ")}): write the one meant, `{q}.<{shown[0]}>`"
-    "{q} gives {dt(outcomes)}, none of them named {text}"
 
 # Type annotations and inferred literals share the same structural identity.
 # Each member carries its resolved type; source values remain separate.

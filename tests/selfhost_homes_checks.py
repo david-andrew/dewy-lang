@@ -28,6 +28,7 @@ LEAF_HOMES = {
     'safe_path_walk': 'safe_paths.jo',
     'comptime_ops': 'comptime.jo',
     'select_checks': 'expr.jo',
+    'type_member_checks': 'expr.jo',
 }
 
 

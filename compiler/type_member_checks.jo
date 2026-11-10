@@ -1,0 +1,308 @@
+use 'expr.jo'
+use 'data_access.dewy'
+use 'program_settings.dewy'
+use 'call_style.dewy'
+use 'secret_checks.dewy'
+use 'checks_read_code.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'unit_rare.dewy'
+use 'unit_ops.dewy'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_const_views.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'settings.jo'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'refine_ops.dewy'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'prelude_ops.dewy'
+use 'ide.jo'
+use 'ide_text.dewy'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+use 'checks_shaped.dewy'
+use 'checks_thin_expr.dewy'
+use 'select_checks.dewy'
+
+type_member_type = (t0: int) -> int:
+    t = prune(t0)
+    if let tv = type_member_types.get(t): return tv
+    tv = mk_typeval(t)
+    type_member_types[t] = tv
+    tv
+# `A & B` of types (decisions.md, batch 7): what is both. Of unions, the alternatives of the left
+# that are also the right's (`heart.types & (Tick | Closed)` is `Tick | Closed` when heart gives
+# both); of a type and itself, that type. Nothing in common is an error.
+type_meet = (ms: int[], pos: int) -> int:
+    left = prune(ms[0])
+    right = prune(ms[1])
+    if type_eq(left, right): return left
+    rights: int[]
+    if is_union(right): rights = union_members(right)
+    else: rights.push(right)
+    lefts: int[]
+    if is_union(left): lefts = union_members(left)
+    else: lefts.push(left)
+    out: int[]
+    loop l in lefts:
+        loop r in rights:
+            if type_eq(prune(l), prune(r)):
+                out.push(prune(l))
+                break
+    if out.len() == 0: fatal(pos, "no type is both {dt(left)} and {dt(right)}")
+    if out.len() == 1: return out[0]
+    mk_union(out)
+# (does the record type t have a field `name`, of any type?)
+record_has_field = (t0: int, name: int) -> bool:
+    t = prune(t0)
+    if tkind(t) != .struct_: return false
+    si = int(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        if fields[int(structs[si].fields) + i].name == i32(name): return true
+    false
+# (does t name a type parameter or an unsolved variable: a generic signature's instance)
+type_mentions_param = (t0: int, depth: int) -> bool:
+    t = prune(t0)
+    k = tkind(t)
+    if k == .param or k == .var or has_var(t): return true
+    if depth > 4: return false
+    if (k == .struct_ or k == .enum_) and types[t].st >= 0:
+        si = int(types[t].st)
+        loop j in [0..int(structs[si].ntargs)):
+            if type_mentions_param(struct_targ(si, j), depth + 1): return true
+    if k == .array or k == .opt or k == .ptr: return type_mentions_param(telem(t), depth + 1)
+    false
+generic_family_type = (d: int) -> int:
+    # (unchanged while no record instance is added)
+    if let known = generic_family_cache.get(d):
+        if known.0 == structs.len(): return known.1
+    family = generic_family_scan(d)
+    generic_family_cache[d] = (structs.len(), family)
+    family
+generic_family_scan = (d: int) -> int:
+    out: int[]
+    loop si in [0..structs.len()):
+        if int(structs[si].decl) != d or structs[si].type == 0: continue
+        t = prune(int(structs[si].type))
+        if type_mentions_param(t, 0) or out.contains(t): continue
+        out.push(t)
+    if out.len() == 0: return 0
+    if out.len() == 1: return out[0]
+    family = mk_union(out)
+    nominal_families[-1 - d] = family
+    family
+# The type a record type's member `name` holds, 0 when it has no such type member.
+record_type_member = (t0: int, name: int) -> int:
+    t = prune(t0)
+    if tkind(t) != .struct_: return 0
+    si = int(types[t].st)
+    check_struct_fields(si)
+    loop i in [0..int(structs[si].nfields)):
+        fi = int(structs[si].fields) + i
+        if fields[fi].name == i32(name):
+            ft = prune(int(fields[fi].type))
+            if tkind(ft) == .typeval: return prune(telem(ft))
+            return 0
+    0
+handle_outcomes = (t0: int) -> int:
+    t = prune(t0)
+    if tkind(t) != .struct_: return 0
+    if let known = handle_outcomes_cache.get(t): return known
+    handle_outcomes_cache[t] = 0
+    si = int(types[t].st)
+    decl = int(structs[si].decl)
+    if decl == 0 or nodes[decl].name == 0 or not files[pos_file(nodes[decl].pos)].is_dewy: return 0
+    m = int(nodes[decl].mod)
+    found = 0
+    loop op in ["receive", "next"]:
+        if found != 0: break
+        id = intern(op)
+        loop d in modules[m].decls:
+            if nodes[d].kind != .fn_ or int(nodes[d].name) != id or nkids(d) != 1 or nodes[d].a == 0 or not dewy_is_method(d): continue
+            rt = int(nodes[kid(d, 0)].a)
+            if rt == 0 or nodes[rt].kind != .tname or nodes[rt].name != nodes[decl].name: continue
+            found = d
+            break
+    if found == 0: return 0
+    saved = cx
+    ctxs.push(FnCtx(i32(new_inst(FK_INIT, m, "outcomes")), -1, i32(T_VOID), false, 0, nodes[decl].mod, i32(check_scopes.names.len())))
+    cx = ctxs.len() - 1
+    mark = scope_mark()
+    loop j in [0..min(nkids2(found), int(structs[si].ntargs))):
+        nm = int(nodes[kid2(found, j)].name)
+        push_scope_sym(nm, new_sym(nm, .type_, struct_targ(si, j), 0))
+    out = resolve_type(int(nodes[found].a))
+    scope_reset(mark)
+    ctxs.pop()
+    cx = saved
+    handle_outcomes_cache[t] = out
+    out
+# A wait handle's member that is a type (decisions.md, batch 7): `types`, its outcomes, and the
+# outcome whose short name is `name` when exactly one has it (`heart.Tick`, a channel's
+# `.Closed`); 0 for any other name. A member the record has wins (record_type_member).
+handle_type_member = (t: int, name: int) -> int:
+    outcomes = handle_outcomes(t)
+    if outcomes == 0: return 0
+    text = name_of(name)
+    if text == "types": return outcomes
+    found = 0
+    alternatives: int[]
+    if is_union(outcomes): alternatives = union_members(outcomes)
+    else: alternatives.push(outcomes)
+    loop a in alternatives:
+        if type_short_name(a) == text:
+            if found != 0: return 0
+            found = prune(a)
+    found
+# (does the record type t have a field or method `name`?)
+record_has_member = (t0: int, name: int) -> bool:
+    t = prune(t0)
+    if record_has_field(t, name): return true
+    tkind(t) == .struct_ and structs[int(types[t].st)].decl != 0 and dewy_type_method(int(structs[int(types[t].st)].decl), name) >= 0
+handle_clash_warning = (t0: int, pos: int):
+    t = prune(t0)
+    if handle_clash_warned.has(t): return
+    handle_clash_warned[t] = true
+    loop a in value_members(handle_outcomes(t)):
+        text = type_short_name(a)
+        if len(text) == 0 or text == "types": continue
+        if record_has_member(t, intern(text)): warn(pos, "{dt(t)} has a member `{text}` of its own, so its outcome {dt(a)} gets no `.{text}` shorthand: write `x.<{dt(a)}>` for the outcome")
+# Why `q.name` names no type on a wait handle t (the error that says which arm to write), or ""
+# when t is no handle.
+handle_member_error = (q: str, t: int, name: int) -> str:
+    outcomes = handle_outcomes(t)
+    if outcomes == 0: return ""
+    text = name_of(name)
+    named: int[]
+    loop a in value_members(outcomes):
+        if type_short_name(a) == text: named.push(prune(a))
+    if named.len() > 0 and record_has_member(t, name): return "`{q}.{text}` is a member of {dt(t)} itself, not its outcome {dt(named[0])}: write `{q}.<{dt(named[0])}>`"
+    if named.len() > 1:
+        shown: str[]
+        loop a in named: shown.push(dt(a))
+        return "{q} gives more than one type named {text} ({join(shown, ", ")}): write the one meant, `{q}.<{shown[0]}>`"
+    "{q} gives {dt(outcomes)}, none of them named {text}"

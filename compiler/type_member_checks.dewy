@@ -1,0 +1,204 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (join)
+from p"ast.jo" import (kid kid2 nkids nkids2 nodes)
+from p"check.jo" import (FK_INIT check_scopes check_struct_fields ctxs cx modules new_sym push_scope_sym scope_mark scope_reset)
+from p"checker_state.dewy" import (FnCtx)
+from p"checks_thin.dewy" import (new_inst resolve_type)
+from p"dewy_method_ops.dewy" import (dewy_is_method dewy_type_method)
+from p"error_ops.dewy" import (value_members)
+from p"errors.jo" import (nominal_families)
+from p"expr.jo" import (generic_family_cache handle_clash_warned handle_outcomes_cache type_member_types type_short_name)
+from p"type_ops.dewy" import (dt mk_typeval mk_union)
+from p"types.jo" import (T_VOID fields has_var is_union prune struct_targ structs telem tkind type_eq types union_members)
+from p"util.jo" import (fatal files intern name_of pos_file warn)
+
+TypeMemberWord:type=int64<overflow='wrap'>
+type_member_type=(t0:TypeMemberWord):>int64=>{
+    let t=prune(t0)
+    let cached=type_member_types.get(t)
+    if cached not=? none {return cached}
+    let tv=mk_typeval(t)
+    type_member_types[t]=tv
+    tv
+}
+# `A & B` of types (decisions.md, batch 7): what is both. Of unions, the alternatives of the left
+# that are also the right's (`heart.types & (Tick | Closed)` is `Tick | Closed` when heart gives
+# both); of a type and itself, that type. Nothing in common is an error.
+type_meet=(ms:array<int64> pos:TypeMemberWord):>int64=>{
+    let left=prune(ms[0])
+    let right=prune(ms[1])
+    if type_eq(left right) {return left}
+    let rights:array<int64>=[]
+    if is_union(right) {rights=union_members(right)} else {rights.push(right)}
+    let lefts:array<int64>=[]
+    if is_union(left) {lefts=union_members(left)} else {lefts.push(left)}
+    let out:array<int64>=[]
+    loop l in lefts {
+        loop r in rights {
+            if type_eq(prune(l) prune(r)) {
+                out.push(prune(l))
+                break
+            }
+        }
+    }
+    if out.length =? 0 {fatal(pos "no type is both {dt(left)} and {dt(right)}")}
+    if out.length =? 1 {return out[0]}
+    mk_union(out)
+}
+# (does the record type t have a field `name`, of any type?)
+record_has_field=(t0:TypeMemberWord name:TypeMemberWord):>bool=>$unsafe {
+    let t=prune(t0)
+    if tkind(t) not=? 'struct_' {return false}
+    let si=TypeMemberWord(types.ptr[t].st)
+    check_struct_fields(si)
+    loop i in [0..TypeMemberWord(structs.ptr[si].nfields)) {
+        if fields.ptr[TypeMemberWord(structs.ptr[si].fields) + i].name =? int32(name) {return true}
+    }
+    false
+}
+# (does t name a type parameter or an unsolved variable: a generic signature's instance)
+type_mentions_param=(t0:TypeMemberWord depth:TypeMemberWord):>bool=>$unsafe {
+    let t=prune(t0)
+    let k=tkind(t)
+    if k =? 'param' or k =? 'var' or has_var(t) {return true}
+    if depth >? 4 {return false}
+    if (k =? 'struct_' or k =? 'enum_') and types.ptr[t].st >=? 0 {
+        let si=TypeMemberWord(types.ptr[t].st)
+        loop j in [0..TypeMemberWord(structs.ptr[si].ntargs)) {
+            if type_mentions_param(struct_targ(si j) depth + 1) {return true}
+        }
+    }
+    if k =? 'array' or k =? 'opt' or k =? 'ptr' {return type_mentions_param(telem(t) depth + 1)}
+    false
+}
+generic_family_type=(d:TypeMemberWord):>int64=>{
+    # (unchanged while no record instance is added)
+    let known=generic_family_cache.get(d)
+    if known not=? none {
+        if known[0] =? structs.length {return known[1]}
+    }
+    let family=generic_family_scan(d)
+    generic_family_cache[d]=[structs.length family]
+    family
+}
+generic_family_scan=(d:TypeMemberWord):>int64=>$unsafe {
+    let out:array<int64>=[]
+    loop si in [0..structs.length) {
+        if TypeMemberWord(structs.ptr[si].decl) not=? d or structs.ptr[si].type =? 0 {continue}
+        let t=prune(TypeMemberWord(structs.ptr[si].type))
+        if type_mentions_param(t 0) or out.contains(t) {continue}
+        out.push(t)
+    }
+    if out.length =? 0 {return 0}
+    if out.length =? 1 {return out[0]}
+    let family=mk_union(out)
+    nominal_families[-1 - d]=family
+    family
+}
+# The type a record type's member `name` holds, 0 when it has no such type member.
+record_type_member=(t0:TypeMemberWord name:TypeMemberWord):>int64=>$unsafe {
+    let t=prune(t0)
+    if tkind(t) not=? 'struct_' {return 0}
+    let si=TypeMemberWord(types.ptr[t].st)
+    check_struct_fields(si)
+    loop i in [0..TypeMemberWord(structs.ptr[si].nfields)) {
+        let fi=TypeMemberWord(structs.ptr[si].fields) + i
+        if fields.ptr[fi].name =? int32(name) {
+            let ft=prune(TypeMemberWord(fields.ptr[fi].type))
+            if tkind(ft) =? 'typeval' {return prune(telem(ft))}
+            return 0
+        }
+    }
+    0
+}
+handle_outcomes=(t0:TypeMemberWord):>int64=>$unsafe {
+    let t=prune(t0)
+    if tkind(t) not=? 'struct_' {return 0}
+    let known=handle_outcomes_cache.get(t)
+    if known not=? none {return known}
+    handle_outcomes_cache[t]=0
+    let si=TypeMemberWord(types.ptr[t].st)
+    let decl=TypeMemberWord(structs.ptr[si].decl)
+    if decl =? 0 or nodes.ptr[decl].name =? 0 or not files[pos_file(nodes.ptr[decl].pos)].is_dewy {return 0}
+    let m=TypeMemberWord(nodes.ptr[decl].mod)
+    let found:TypeMemberWord=0
+    loop op in ["receive" "next"] {
+        if found not=? 0 {break}
+        let id=intern(op)
+        loop d in modules[m].decls {
+            if nodes.ptr[d].kind not=? 'fn_' or TypeMemberWord(nodes.ptr[d].name) not=? id or nkids(d) not=? 1 or nodes.ptr[d].a =? 0 or not dewy_is_method(d) {continue}
+            let rt=TypeMemberWord(nodes.ptr[kid(d 0)].a)
+            if rt =? 0 or nodes.ptr[rt].kind not=? 'tname' or nodes.ptr[rt].name not=? nodes.ptr[decl].name {continue}
+            found=d
+            break
+        }
+    }
+    if found =? 0 {return 0}
+    let saved=cx
+    ctxs.push(FnCtx(int32(new_inst(FK_INIT m "outcomes")) (-1) int32(T_VOID) false 0 nodes.ptr[decl].mod int32(check_scopes.names.length)))
+    cx=ctxs.length - 1
+    let mark=scope_mark()
+    loop j in [0..min(nkids2(found) TypeMemberWord(structs.ptr[si].ntargs))) {
+        let nm=TypeMemberWord(nodes.ptr[kid2(found j)].name)
+        push_scope_sym(nm new_sym(nm 'type_' struct_targ(si j) 0))
+    }
+    let out=resolve_type(TypeMemberWord(nodes.ptr[found].a))
+    scope_reset(mark)
+    ctxs.pop();
+    cx=saved
+    handle_outcomes_cache[t]=out
+    out
+}
+# A wait handle's member that is a type (decisions.md, batch 7): `types`, its outcomes, and the
+# outcome whose short name is `name` when exactly one has it (`heart.Tick`, a channel's
+# `.Closed`); 0 for any other name. A member the record has wins (record_type_member).
+handle_type_member=(t:TypeMemberWord name:TypeMemberWord):>int64=>{
+    let outcomes=handle_outcomes(t)
+    if outcomes =? 0 {return 0}
+    let text=name_of(name)
+    if text =? "types" {return outcomes}
+    let found:TypeMemberWord=0
+    let alternatives:array<int64>=[]
+    if is_union(outcomes) {alternatives=union_members(outcomes)} else {alternatives.push(outcomes)}
+    loop a in alternatives {
+        if type_short_name(a) =? text {
+            if found not=? 0 {return 0}
+            found=prune(a)
+        }
+    }
+    found
+}
+# (does the record type t have a field or method `name`?)
+record_has_member=(t0:TypeMemberWord name:TypeMemberWord):>bool=>$unsafe {
+    let t=prune(t0)
+    if record_has_field(t name) {return true}
+    tkind(t) =? 'struct_' and structs.ptr[TypeMemberWord(types.ptr[t].st)].decl not=? 0 and dewy_type_method(TypeMemberWord(structs.ptr[TypeMemberWord(types.ptr[t].st)].decl) name) >=? 0
+}
+handle_clash_warning=(t0:TypeMemberWord pos:TypeMemberWord):>void=>{
+    let t=prune(t0)
+    if handle_clash_warned.has(t) {return}
+    handle_clash_warned[t]=true
+    loop a in value_members(handle_outcomes(t)) {
+        let text=type_short_name(a)
+        if (text as array<uint8>).length =? 0 or text =? "types" {continue}
+        if record_has_member(t intern(text)) {warn(pos "{dt(t)} has a member `{text}` of its own, so its outcome {dt(a)} gets no `.{text}` shorthand: write `x.<{dt(a)}>` for the outcome")}
+    }
+}
+# Why `q.name` names no type on a wait handle t (the error that says which arm to write), or ""
+# when t is no handle.
+handle_member_error=(q:string t:TypeMemberWord name:TypeMemberWord):>string=>{
+    let outcomes=handle_outcomes(t)
+    if outcomes =? 0 {return ""}
+    let text=name_of(name)
+    let named:array<int64>=[]
+    loop a in value_members(outcomes) {
+        if type_short_name(a) =? text {named.push(prune(a))}
+    }
+    if named.length >? 0 and record_has_member(t name) {return "`{q}.{text}` is a member of {dt(t)} itself, not its outcome {dt(named[0])}: write `{q}.<{dt(named[0])}>`"}
+    if named.length >? 1 {
+        let shown:array<string>=[]
+        loop a in named {shown.push(dt(a))}
+        return "{q} gives more than one type named {text} ({join(shown ", ")}): write the one meant, `{q}.<{shown[0]}>`"
+    }
+    "{q} gives {dt(outcomes)}, none of them named {text}"
+}
