@@ -152,6 +152,7 @@ use 'checks_thin.dewy'
 use 'comptime_ops.dewy'
 use 'checks_place_updates.dewy'
 use 'check_cold_queries.dewy'
+use 'check_metadata.dewy'
 
 struct Module:
     name: i32
@@ -492,15 +493,6 @@ module_lookup_now = (m: int, name: int) -> int:
 # from m import a, b as c: each name bound in the importing module (functions join any of its
 # own with that name, as overloads)
 from_imports: int[]
-
-# Dewy's name for a builtin type Sloppy spells w ("" when w is not one).
-dewy_type_word = (w: str) -> str:
-    if w == "str": return "string"
-    if w == "byte": return "uint8"
-    if w == "f64" or w == "f32": return "float" + w[1..]
-    if w == "i8" or w == "i16" or w == "i32" or w == "i64": return "int" + w[1..]
-    if w == "u8" or w == "u16" or w == "u32" or w == "u64": return "uint" + w[1..]
-    ""
 
 # Dewy source names the builtin types one way: a Sloppy spelling written there (and
 # resolved to the builtin, not a binding of the program's) is rejected. Only
@@ -922,15 +914,6 @@ binding_const_init = (kind: SK, ref: int, pos: int) -> int:
         if int(locals[ref].flags) & LF_CONST != 0: return int(locals[ref].const_init)
     0
 
-# T[N] written as a type name with one argument (the parser cannot tell `int[N]` from a generic
-# type's argument): the argument is a constant's name
-fixed_size_arg = (tn: int) -> bool:
-    if nkids(tn) != 1: return false
-    a = kid(tn, 0)
-    if nodes[a].kind != .tname or nodes[a].nlist > 0 or nodes[a].sval != 0: return false
-    s = lookup(int(nodes[a].name))
-    s != 0 and binding_const_init(syms[s].kind, int(syms[s].ref), nodes[tn].pos) != 0
-
 # the size of a fixed-size array type: a number or a compile-time constant
 fixed_size = (n: int) -> int:
     v = 0
@@ -1029,14 +1012,6 @@ sanitize = (s: str) -> str:
 # (@no_web("why"): a function that does nothing in a browser, said where a web build's program
 # calls it)
 no_web_warned: {int: bool}
-no_web_check = (decl: int, use_pos: int):
-    if use_pos <= 0 or pos_in_lib(use_pos) or no_web_warned.has(use_pos): return
-    ab = int(nodes[decl].c)
-    loop i in [0..nkids(ab)):
-        at = kid(ab, i)
-        if name_of(int(nodes[at].name)) != "no_web" or nodes[at].a == 0 or nodes[int(nodes[at].a)].kind != .str_lit: continue
-        no_web_warned[use_pos] = true
-        warn(use_pos, "{name_of(int(nodes[decl].name))} {name_of(int(nodes[int(nodes[at].a)].sval))}")
 
 # (a lazy body's lexing and parsing is frontend work, whoever asks for it first)
 load_body = (decl: int, f: int):
@@ -1796,18 +1771,6 @@ map_loop_values: {int: bool} = {}
 dewy_at = (pos: int) -> bool:
     f = pos_file(pos)
     pos > 0 and f < files.len() and files[f].is_dewy
-
-# an operator as the source at pos spells it (Dewy's comparisons end in `?`)
-op_text = (op: Tok, pos: int) -> str:
-    if not dewy_at(pos): return tok_text(op)
-    match op:
-        lt: "<?"
-        le: "<=?"
-        gt: ">?"
-        ge: ">=?"
-        eq: "=?"
-        ne: "not=?"
-        _: tok_text(op)
 
 # Arrays a Dewy loop iterates by value (`loop x in xs`), while their bodies are
 # checked: the loop sees the value at entry, so changing the array's length in

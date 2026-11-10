@@ -1,0 +1,49 @@
+$runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (binding_const_init dewy_at no_web_warned syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checker_tokens.dewy" import (Tok)
+from p"lex.jo" import (tok_text)
+from p"util.jo" import (name_of pos_in_lib warn)
+
+MetadataWord:type=int64<overflow='wrap'>
+# Dewy's name for a builtin type Sloppy spells w ("" when w is not one).
+dewy_type_word=(w:string):>string=>{
+    if w =? "str" {return "string"}
+    if w =? "byte" {return "uint8"}
+    if w =? "f64" or w =? "f32" {return "float{__str_slice(w 1 (w as array<uint8>).length)}"}
+    if w =? "i8" or w =? "i16" or w =? "i32" or w =? "i64" {return "int{__str_slice(w 1 (w as array<uint8>).length)}"}
+    if w =? "u8" or w =? "u16" or w =? "u32" or w =? "u64" {return "uint{__str_slice(w 1 (w as array<uint8>).length)}"}
+    ""
+}
+# T[N] written as a type name with one argument (the parser cannot tell `int[N]` from a generic
+# type's argument): the argument is a constant's name
+fixed_size_arg=(tn:MetadataWord):>bool=>$unsafe {
+    if nkids(tn) not=? 1 {return false}
+    let a=kid(tn 0)
+    if nodes.ptr[a].kind not=? 'tname' or nodes.ptr[a].nlist >? 0 or nodes.ptr[a].sval not=? 0 {return false}
+    let s=lookup(MetadataWord(nodes.ptr[a].name))
+    s not=? 0 and binding_const_init(syms.ptr[s].kind MetadataWord(syms.ptr[s].ref) nodes.ptr[tn].pos) not=? 0
+}
+no_web_check=(decl:MetadataWord use_pos:MetadataWord):>void=>$unsafe {
+    if use_pos <=? 0 or pos_in_lib(use_pos) or no_web_warned.has(use_pos) {return}
+    let ab=MetadataWord(nodes.ptr[decl].c)
+    loop i in [0..nkids(ab)) {
+        let at=kid(ab i)
+        if name_of(MetadataWord(nodes.ptr[at].name)) not=? "no_web" or nodes.ptr[at].a =? 0 or nodes.ptr[MetadataWord(nodes.ptr[at].a)].kind not=? 'str_lit' {continue}
+        no_web_warned[use_pos]=true
+        warn(use_pos "{name_of(MetadataWord(nodes.ptr[decl].name))} {name_of(MetadataWord(nodes.ptr[MetadataWord(nodes.ptr[at].a)].sval))}");
+    }
+}
+# an operator as the source at pos spells it (Dewy's comparisons end in `?`)
+op_text=(op:Tok pos:MetadataWord):>string=>{
+    if not dewy_at(pos) {return tok_text(op)}
+    if op =? 'lt' {return "<?"}
+    if op =? 'le' {return "<=?"}
+    if op =? 'gt' {return ">?"}
+    if op =? 'ge' {return ">=?"}
+    if op =? 'eq' {return "=?"}
+    if op =? 'ne' {return "not=?"}
+    tok_text(op)
+}
