@@ -1,0 +1,256 @@
+use 'expr.jo'
+use 'data_access.dewy'
+use 'program_settings.dewy'
+use 'call_style.dewy'
+use 'secret_checks.dewy'
+use 'checks_read_code.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'unit_rare.dewy'
+use 'unit_ops.dewy'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'check.jo'
+use 'checks_place_updates.dewy'
+use 'checks_thin.dewy'
+use 'checks_const_views.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'settings.jo'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'refine_ops.dewy'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'prelude_ops.dewy'
+use 'ide.jo'
+use 'ide_text.dewy'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+use 'checks_shaped.dewy'
+use 'checks_thin_expr.dewy'
+use 'select_checks.dewy'
+use 'type_member_checks.dewy'
+use 'dotted_checks.dewy'
+use 'expr_hints.dewy'
+use 'partial_checks.dewy'
+
+# A successful literal-subset test keeps its exact set, with its own ordinal
+# representation, rather than only the containing union's string-set member.
+narrow_string_set = (c: int):
+    source = string_set_tests[c].0
+    if str_set_of(ntype(source)) == 0: return
+    if str_set_within(str_set_of(ntype(source)), string_set_tests[c].1): return
+    key = path_key(source)
+    if len(key) == 0: return
+    target = str_set_type(str_sets[string_set_tests[c].1])
+    value = copy_path(source)
+    wrap_conv(value, CV.union_, target)
+    name = if nodes[source].kind == .ident and nodes[source].aux == i32(int(SK.local)): int(nodes[source].name) else: path_name(key)
+    nl = new_local(name, target, nodes[c].pos)
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(value)
+    if nodes[source].kind != .ident or nodes[source].aux == i32(int(SK.global)): path_narrows += 1
+    narrow_store_register(nl)
+# match x over an (A | B | C)?: the `_` arm after `c:C` (and `<none>`) knows x is an (A | B)? (an
+# A | B). O(members).
+opt_wild_narrow = (l0: int, st: int, matched: int[], none_matched: bool, pos: int):
+    keep: int[]
+    loop m in union_members(prune(telem(st))):
+        if not matched.contains(m): keep.push(m)
+    if keep.len() == 0: return
+    l = l0
+    loop int(locals[l].flags) & LF_ALIAS != 0 and opt_rest_aliases.has(int(locals[l].alias)): l = narrowed_var(l)
+    if not type_eq(prune(int(locals[l].type)), st): return
+    inner = keep[0]
+    if keep.len() > 1: inner = mk_union(keep)
+    rest = opt_rest_expr(l, keep, pos)
+    t = mk_opt(inner)
+    if none_matched:
+        # (present too: the kept members themselves)
+        e = mk(.unwrap, pos)
+        nodes[e].a = i32(rest)
+        nodes[e].type = i32(inner)
+        add_flag(e, NF_CHECKED)
+        rest = e
+        t = inner
+    nl = new_local(int(locals[l].name), t, pos)
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(rest)
+    narrow_store_register(nl)
+# match x.f over an (A | B | C)?: the `_` arm after `c:C` (and `<none>`), as opt_wild_narrow for
+# a variable. The path is read again (and its tag checked) where the narrowed name is used, as
+# any narrowed path is. O(members).
+opt_wild_narrow_path = (sc: int, key: str, st: int, matched: int[], none_matched: bool, pos: int):
+    keep: int[]
+    loop m in union_members(prune(telem(st))):
+        if not matched.contains(m): keep.push(m)
+    if keep.len() == 0: return
+    inner = keep[0]
+    if keep.len() > 1: inner = mk_union(keep)
+    rest = opt_rest_of(copy_path(sc), keep, pos)
+    t = mk_opt(inner)
+    if none_matched:
+        e = mk(.unwrap, pos)
+        nodes[e].a = i32(rest)
+        nodes[e].type = i32(inner)
+        add_flag(e, NF_CHECKED)
+        rest = e
+        t = inner
+    path_narrows += 1
+    nl = new_local(path_name(key), t, pos)
+    locals[nl].flags = i32(LF_ALIAS)
+    locals[nl].alias = i32(rest)
+# `if x != none: some(payload as the kept members) else none`, x a checked variable or field
+# path (read where the result is used)
+opt_rest_of = (root: int, keep: int[], pos: int) -> int:
+    u = prune(int(types[prune(ntype(root))].elem))
+    inner = keep[0]
+    if keep.len() > 1: inner = mk_union(keep)
+    t = mk_opt(inner)
+    payload = mk(.unwrap, pos)
+    nodes[payload].a = i32(copy_path(root))
+    nodes[payload].type = i32(u)
+    add_flag(payload, NF_CHECKED)
+    kept = 0
+    if keep.len() == 1:
+        kept = mk(.narrow, pos)
+        nodes[kept].aux = i32(union_index(u, keep[0]))
+    else:
+        kept = mk(.conv, pos)
+        nodes[kept].aux = i32(int(CV.union_))
+    nodes[kept].a = i32(payload)
+    nodes[kept].type = i32(inner)
+    add_flag(kept, NF_CHECKED)
+    wrap_conv(kept, .opt, t)
+    absent = mk(.none_lit, pos)
+    e = bc_if(bc_bin(.ne, root, mk(.none_lit, pos), pos), [bc_stmt(kept, pos)], [bc_stmt(absent, pos)], pos)
+    nodes[e].flags = i32(int(nodes[e].flags) & ~NF_STMT)
+    mark = scope_mark()
+    check_expr(e, t)
+    scope_reset(mark)
+    e
+# a closure's or a frozen copy of an optional-union alias, over local l instead
+opt_rest_rebase = (al: int, l: int, pos: int) -> int:
+    t = prune(ntype(al))
+    elem = prune(int(types[t].elem))
+    keep = [elem]
+    if is_union(elem): keep = union_members(elem)
+    opt_rest_expr(l, keep, pos)

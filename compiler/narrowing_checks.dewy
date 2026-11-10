@@ -1,0 +1,128 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_STMT add_flag mk nodes)
+from p"check.jo" import (locals narrow_store_register narrowed_var new_local scope_mark scope_reset)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_builders.dewy" import (bc_if bc_stmt)
+from p"checks_thin_expr.dewy" import (opt_rest_expr str_set_within)
+from p"expr.jo" import (CV bc_bin copy_path ntype opt_rest_aliases path_key path_name path_narrows wrap_conv)
+from p"ownership_checks.dewy" import (LF_ALIAS)
+from p"refine.jo" import (str_set_of str_sets)
+from p"refine_ops.dewy" import (str_set_type)
+from p"string_domains.jo" import (string_set_tests)
+from p"type_ops.dewy" import (mk_opt mk_union union_index)
+from p"types.jo" import (is_union prune telem type_eq types union_members)
+
+NarrowWord:type=int64<overflow='wrap'>
+# A successful literal-subset test keeps its exact set, with its own ordinal
+# representation, rather than only the containing union's string-set member.
+narrow_string_set=(c:NarrowWord):>void=>$unsafe {
+    let source=string_set_tests[c][0]
+    if str_set_of(ntype(source)) =? 0 {return}
+    if str_set_within(str_set_of(ntype(source)) string_set_tests[c][1]) {return}
+    let key=path_key(source)
+    if (key as array<uint8>).length =? 0 {return}
+    let target=str_set_type(str_sets[string_set_tests[c][1]])
+    let value=copy_path(source)
+    wrap_conv(value CV.union_ target)
+    let name=if nodes.ptr[source].kind =? 'ident' and nodes.ptr[source].aux =? int32(1) {NarrowWord(nodes.ptr[source].name)} else {path_name(key)}
+    let nl=new_local(name target nodes.ptr[c].pos)
+    locals.ptr[nl].flags=int32(LF_ALIAS)
+    locals.ptr[nl].alias=int32(value)
+    if nodes.ptr[source].kind not=? 'ident' or nodes.ptr[source].aux =? int32(2) {path_narrows += 1}
+    narrow_store_register(nl)
+}
+# match x over an (A | B | C)?: the `_` arm after `c:C` (and `<none>`) knows x is an (A | B)? (an
+# A | B). O(members).
+opt_wild_narrow=(l0:NarrowWord st:NarrowWord matched:array<int64> none_matched:bool pos:NarrowWord):>void=>$unsafe {
+    let keep:array<int64>=[]
+    loop m in union_members(prune(telem(st))) {
+        if not matched.contains(m) {keep.push(m)}
+    }
+    if keep.length =? 0 {return}
+    let l=l0
+    loop NarrowWord(locals.ptr[l].flags) & LF_ALIAS not=? 0 and opt_rest_aliases.has(NarrowWord(locals.ptr[l].alias)) {l=narrowed_var(l)}
+    if not type_eq(prune(NarrowWord(locals.ptr[l].type)) st) {return}
+    let inner=keep[0]
+    if keep.length >? 1 {inner=mk_union(keep)}
+    let rest=opt_rest_expr(l keep pos)
+    let t=mk_opt(inner)
+    if none_matched {
+        # (present too: the kept members themselves)
+        let e=mk('unwrap' pos)
+        nodes.ptr[e].a=int32(rest)
+        nodes.ptr[e].type=int32(inner)
+        add_flag(e NF_CHECKED)
+        rest=e
+        t=inner
+    }
+    let nl=new_local(NarrowWord(locals.ptr[l].name) t pos)
+    locals.ptr[nl].flags=int32(LF_ALIAS)
+    locals.ptr[nl].alias=int32(rest)
+    narrow_store_register(nl)
+}
+# match x.f over an (A | B | C)?: the `_` arm after `c:C` (and `<none>`), as opt_wild_narrow for
+# a variable. The path is read again (and its tag checked) where the narrowed name is used, as
+# any narrowed path is. O(members).
+opt_wild_narrow_path=(sc:NarrowWord key:string st:NarrowWord matched:array<int64> none_matched:bool pos:NarrowWord):>void=>$unsafe {
+    let keep:array<int64>=[]
+    loop m in union_members(prune(telem(st))) {
+        if not matched.contains(m) {keep.push(m)}
+    }
+    if keep.length =? 0 {return}
+    let inner=keep[0]
+    if keep.length >? 1 {inner=mk_union(keep)}
+    let rest=opt_rest_of(copy_path(sc) keep pos)
+    let t=mk_opt(inner)
+    if none_matched {
+        let e=mk('unwrap' pos)
+        nodes.ptr[e].a=int32(rest)
+        nodes.ptr[e].type=int32(inner)
+        add_flag(e NF_CHECKED)
+        rest=e
+        t=inner
+    }
+    path_narrows += 1
+    let nl=new_local(path_name(key) t pos)
+    locals.ptr[nl].flags=int32(LF_ALIAS)
+    locals.ptr[nl].alias=int32(rest)
+}
+# `if x != none: some(payload as the kept members) else none`, x a checked variable or field
+# path (read where the result is used)
+opt_rest_of=(root:NarrowWord keep:array<int64> pos:NarrowWord):>int64=>$unsafe {
+    let u=prune(NarrowWord(types.ptr[prune(ntype(root))].elem))
+    let inner=keep[0]
+    if keep.length >? 1 {inner=mk_union(keep)}
+    let t=mk_opt(inner)
+    let payload=mk('unwrap' pos)
+    nodes.ptr[payload].a=int32(copy_path(root))
+    nodes.ptr[payload].type=int32(u)
+    add_flag(payload NF_CHECKED)
+    let kept:NarrowWord=0
+    if keep.length =? 1 {
+        kept=mk('narrow' pos)
+        nodes.ptr[kept].aux=int32(union_index(u keep[0]))
+    }
+    else {
+        kept=mk('conv' pos)
+        nodes.ptr[kept].aux=int32(int64(CV.union_))
+    }
+    nodes.ptr[kept].a=int32(payload)
+    nodes.ptr[kept].type=int32(inner)
+    add_flag(kept NF_CHECKED)
+    wrap_conv(kept CV.opt t)
+    let absent=mk('none_lit' pos)
+    let e=bc_if(bc_bin('ne' root mk('none_lit' pos) pos) [bc_stmt(kept pos)] [bc_stmt(absent pos)] pos)
+    nodes.ptr[e].flags=int32(NarrowWord(nodes.ptr[e].flags) & ~NF_STMT)
+    let mark=scope_mark()
+    check_expr(e t);
+    scope_reset(mark)
+    e
+}
+# a closure's or a frozen copy of an optional-union alias, over local l instead
+opt_rest_rebase=(al:NarrowWord l:NarrowWord pos:NarrowWord):>int64=>$unsafe {
+    let t=prune(ntype(al))
+    let elem=prune(NarrowWord(types.ptr[t].elem))
+    let keep=[elem]
+    if is_union(elem) {keep=union_members(elem)}
+    opt_rest_expr(l keep pos)
+}

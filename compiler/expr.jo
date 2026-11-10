@@ -153,6 +153,7 @@ use 'type_member_checks.dewy'
 use 'dotted_checks.dewy'
 use 'expr_hints.dewy'
 use 'partial_checks.dewy'
+use 'narrowing_checks.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -8121,24 +8122,6 @@ narrow_by = (c: int, holds: bool):
     else if k == .and_ and not holds: narrow_opt_rest_by(c)
     else if k == .binary: position_guard_note(c, holds)
 
-# A successful literal-subset test keeps its exact set, with its own ordinal
-# representation, rather than only the containing union's string-set member.
-narrow_string_set = (c: int):
-    source = string_set_tests[c].0
-    if str_set_of(ntype(source)) == 0: return
-    if str_set_within(str_set_of(ntype(source)), string_set_tests[c].1): return
-    key = path_key(source)
-    if len(key) == 0: return
-    target = str_set_type(str_sets[string_set_tests[c].1])
-    value = copy_path(source)
-    wrap_conv(value, CV.union_, target)
-    name = if nodes[source].kind == .ident and nodes[source].aux == i32(int(SK.local)): int(nodes[source].name) else: path_name(key)
-    nl = new_local(name, target, nodes[c].pos)
-    locals[nl].flags = i32(LF_ALIAS)
-    locals[nl].alias = i32(value)
-    if nodes[source].kind != .ident or nodes[source].aux == i32(int(SK.global)): path_narrows += 1
-    narrow_store_register(nl)
-
 # `x is? C` on x: (A | B | C)? is `x != none and x is? C` (check_istype); when it fails,
 # x is none or one of the other members: an (A | B)?. x a field path or a global: as the `_`
 # arm of a match on it (opt_wild_narrow_path). O(members).
@@ -8190,98 +8173,9 @@ narrow_opt_rest_by = (c: int):
     locals[nl].alias = i32(opt_rest_expr(l, keep, pos))
     narrow_store_register(nl)
 
-# match x over an (A | B | C)?: the `_` arm after `c:C` (and `<none>`) knows x is an (A | B)? (an
-# A | B). O(members).
-opt_wild_narrow = (l0: int, st: int, matched: int[], none_matched: bool, pos: int):
-    keep: int[]
-    loop m in union_members(prune(telem(st))):
-        if not matched.contains(m): keep.push(m)
-    if keep.len() == 0: return
-    l = l0
-    loop int(locals[l].flags) & LF_ALIAS != 0 and opt_rest_aliases.has(int(locals[l].alias)): l = narrowed_var(l)
-    if not type_eq(prune(int(locals[l].type)), st): return
-    inner = keep[0]
-    if keep.len() > 1: inner = mk_union(keep)
-    rest = opt_rest_expr(l, keep, pos)
-    t = mk_opt(inner)
-    if none_matched:
-        # (present too: the kept members themselves)
-        e = mk(.unwrap, pos)
-        nodes[e].a = i32(rest)
-        nodes[e].type = i32(inner)
-        add_flag(e, NF_CHECKED)
-        rest = e
-        t = inner
-    nl = new_local(int(locals[l].name), t, pos)
-    locals[nl].flags = i32(LF_ALIAS)
-    locals[nl].alias = i32(rest)
-    narrow_store_register(nl)
-
 # Optional-union narrowing aliases: `if x != none: some(payload as the kept members) else none`,
 # an expression of x (narrowed_var finds x in its condition)
 opt_rest_aliases: {int: bool} = {}
-
-# match x.f over an (A | B | C)?: the `_` arm after `c:C` (and `<none>`), as opt_wild_narrow for
-# a variable. The path is read again (and its tag checked) where the narrowed name is used, as
-# any narrowed path is. O(members).
-opt_wild_narrow_path = (sc: int, key: str, st: int, matched: int[], none_matched: bool, pos: int):
-    keep: int[]
-    loop m in union_members(prune(telem(st))):
-        if not matched.contains(m): keep.push(m)
-    if keep.len() == 0: return
-    inner = keep[0]
-    if keep.len() > 1: inner = mk_union(keep)
-    rest = opt_rest_of(copy_path(sc), keep, pos)
-    t = mk_opt(inner)
-    if none_matched:
-        e = mk(.unwrap, pos)
-        nodes[e].a = i32(rest)
-        nodes[e].type = i32(inner)
-        add_flag(e, NF_CHECKED)
-        rest = e
-        t = inner
-    path_narrows += 1
-    nl = new_local(path_name(key), t, pos)
-    locals[nl].flags = i32(LF_ALIAS)
-    locals[nl].alias = i32(rest)
-
-# `if x != none: some(payload as the kept members) else none`, x a checked variable or field
-# path (read where the result is used)
-opt_rest_of = (root: int, keep: int[], pos: int) -> int:
-    u = prune(int(types[prune(ntype(root))].elem))
-    inner = keep[0]
-    if keep.len() > 1: inner = mk_union(keep)
-    t = mk_opt(inner)
-    payload = mk(.unwrap, pos)
-    nodes[payload].a = i32(copy_path(root))
-    nodes[payload].type = i32(u)
-    add_flag(payload, NF_CHECKED)
-    kept = 0
-    if keep.len() == 1:
-        kept = mk(.narrow, pos)
-        nodes[kept].aux = i32(union_index(u, keep[0]))
-    else:
-        kept = mk(.conv, pos)
-        nodes[kept].aux = i32(int(CV.union_))
-    nodes[kept].a = i32(payload)
-    nodes[kept].type = i32(inner)
-    add_flag(kept, NF_CHECKED)
-    wrap_conv(kept, .opt, t)
-    absent = mk(.none_lit, pos)
-    e = bc_if(bc_bin(.ne, root, mk(.none_lit, pos), pos), [bc_stmt(kept, pos)], [bc_stmt(absent, pos)], pos)
-    nodes[e].flags = i32(int(nodes[e].flags) & ~NF_STMT)
-    mark = scope_mark()
-    check_expr(e, t)
-    scope_reset(mark)
-    e
-
-# a closure's or a frozen copy of an optional-union alias, over local l instead
-opt_rest_rebase = (al: int, l: int, pos: int) -> int:
-    t = prune(ntype(al))
-    elem = prune(int(types[t].elem))
-    keep = [elem]
-    if is_union(elem): keep = union_members(elem)
-    opt_rest_expr(l, keep, pos)
 
 narrow_var = (isn: int, holds: bool):
     a = int(nodes[isn].a)
