@@ -29,6 +29,7 @@ LEAF_HOMES = {
     'comptime_ops': 'comptime.jo',
     'select_checks': 'expr.jo',
     'type_member_checks': 'expr.jo',
+    'dotted_checks': 'expr.jo',
 }
 
 

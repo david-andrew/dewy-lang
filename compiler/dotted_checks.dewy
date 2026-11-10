@@ -1,0 +1,627 @@
+$runtime_checks
+from p"ast.jo" import NF_SQUOTE
+from p"checked_eval.dewy" import (cx_token_values)
+from p"ast.jo" import (NF_BROADCAST NF_CHECKED NF_COMPREHENSION NF_INBOUNDS NF_MUT NF_PRIVATE_SETLEN add_flag clone has_flag kid kid_c kid_d kids mk nkids nodes set_list)
+from p"check.jo" import (ctxs cx dewy_at index_update_sources)
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_if bc_int bc_let bc_method bc_stmt)
+from p"checks_thin_expr.dewy" import (bc_bcast_index bc_step d0_leaf dewy_axis_end_name dewy_axis_full dewy_axis_new dewy_index_end is_gpu_array nd_elem)
+from p"dewy_reader.dewy" import (AUX2_PARTIAL)
+from p"exact.jo" import (exact_full_owners exact_owners exact_representation)
+from p"expr.jo" import (bc_bin bc_count coerce dewy_end_arithmetic finalize_literal is_nd last_checked ntype type_node_of typed_array)
+from p"refine.jo" import (representation_type)
+from p"type_ops.dewy" import (dt mk_array policy_int)
+from p"types.jo" import (T_F32 T_I32 T_MATH_INT is_float is_int is_numeric prune struct_targ telem tkind types)
+from p"unit_ops.dewy" import (quantity_literal_syntax)
+from p"util.jo" import (fatal intern name_of)
+
+DottedWord:type=int64<overflow='wrap'>
+# (`m[0 [..]] =? [1 2]`: a 1-D selection against a literal of its elements; `m * [1.0 0.0]`:
+# a matrix times a column vector written out, in the matrix's elements)
+binary_nd_hint=(n:DottedWord ta:DottedWord h:DottedWord):>int64=>$unsafe {
+    let op=cx_token_values.ptr[DottedWord(nodes.ptr[n].op)]
+    let bk=nodes.ptr[DottedWord(nodes.ptr[n].b)].kind
+    if (op =? 'eq' or op =? 'ne') and is_nd(ta) and bk =? 'array' {return mk_array(nd_elem(ta))}
+    if op =? 'star' and is_nd(ta) and bk =? 'array' and dewy_at(nodes.ptr[n].pos) and is_numeric(nd_elem(ta)) {return mk_array(nd_elem(ta))}
+    h
+}
+# `xs[new ..]`, `xs[.. new]`: NumPy's newaxis on nested arrays. Each `new`
+# wraps the selection so far in a one-element array; `..` maps over an axis,
+# an index selects into it and a range slices it, all from the outside in.
+# Axes after the last entry are untouched. `end` is the last index of the
+# array at its own depth. Entries are evaluated once, in order, unless they
+# are plain arithmetic, which may repeat for every element.
+dewy_new_axis=(n:DottedWord expected:DottedWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let entries=kids(n)
+    let base=if nodes.ptr[n].sval not=? 0 {name_of(DottedWord(nodes.ptr[n].sval))} else {""}
+    let receiver=DottedWord(nodes.ptr[n].a)
+    let t=prune(check_expr(clone(receiver) 0))
+    if is_nd(t) {
+        # (an n-dimensional array: a singleton axis at each `new`, `..` keeping an axis)
+        let at:array<int64>=[]
+        let axis:DottedWord=0
+        loop e in entries {
+            if dewy_axis_new(e) {at.push(bc_int(axis pos))} else if not dewy_axis_full(e) {fatal(nodes.ptr[e].pos "next to `new`, an n-dimensional array takes `..` for each axis it keeps; select first, then add the axis")}
+            axis += 1
+        }
+        let positions=mk('array' pos)
+        set_list(positions at)
+        let made=bc_call("__nd_new_axes" [receiver positions] pos)
+        nodes.ptr[n]=nodes.ptr[made]
+        return check_expr(n expected)
+    }
+    let depth=dewy_axis_depth(t)
+    if depth =? 0 {fatal(pos "`new` inserts an axis into an array or a string, not {dt(t)}")}
+    let axes:DottedWord=0
+    loop e in entries {
+        if not dewy_axis_new(e) {axes += 1}
+    }
+    if axes >? depth {fatal(pos "{axes} axes selected next to `new`, but {dt(t)} has {depth}")}
+    let source="$new_source{bc_count}"
+    bc_count += 1
+    let stmts=[bc_let(source receiver pos)]
+    let pinned:array<int64>=[]
+    loop i in 0.. and e in entries {
+        if dewy_axis_new(e) or dewy_axis_full(e) {pinned.push(e)} else {pinned.push(dewy_axis_pin(e dewy_axis_end_name(base i) @stmts pos))}
+    }
+    stmts.push(bc_stmt(dewy_axis_build(pinned 0 source base pos) pos))
+    let made=bc_block(stmts pos)
+    nodes.ptr[n]=nodes.ptr[made]
+    check_expr(n expected)
+}
+# axes reachable by indexing: a string's graphemes are strings again
+dewy_axis_depth=(t0:DottedWord):>int64=>$unsafe {
+    let t=prune(t0)
+    let k=types.ptr[t].kind
+    if k =? 'str_' {return 1000000}
+    if k =? 'array' or k =? 'fixed' {return 1 + dewy_axis_depth(DottedWord(types.ptr[t].elem))}
+    0
+}
+dewy_axis_mentions=(e:DottedWord name:DottedWord):>bool=>$unsafe {
+    if e =? 0 or name =? 0 {return false}
+    if nodes.ptr[e].kind =? 'ident' and nodes.ptr[e].name =? int32(name) {return true}
+    loop c in [DottedWord(nodes.ptr[e].a) DottedWord(nodes.ptr[e].b) kid_c(e) kid_d(e)] {
+        if dewy_axis_mentions(c name) {return true}
+    }
+    loop c in kids(e) {
+        if dewy_axis_mentions(c name) {return true}
+    }
+    false
+}
+dewy_axis_pin=(e:DottedWord end_name:string @stmts:array<int64> pos:DottedWord):>int64=>$unsafe {
+    if e =? 0 {return 0}
+    let name=if end_name =? "" {0} else {intern(end_name)}
+    if dewy_end_arithmetic(e name) {return e}
+    if nodes.ptr[e].kind =? 'range' {
+        nodes.ptr[e].a=int32(dewy_axis_pin(DottedWord(nodes.ptr[e].a) end_name @stmts pos))
+        nodes.ptr[e].b=int32(dewy_axis_pin(DottedWord(nodes.ptr[e].b) end_name @stmts pos))
+        nodes.ptr[e].c=int32(dewy_axis_pin(DottedWord(nodes.ptr[e].c) end_name @stmts pos))
+        return e
+    }
+    if dewy_axis_mentions(e name) {fatal(nodes.ptr[e].pos "next to `new`, an index using `end` may only combine it with literals and local values")}
+    let value="$new_index{bc_count}"
+    bc_count += 1
+    stmts.push(bc_let(value e pos))
+    bc_ident(value pos)
+}
+dewy_axis_build=(entries:array<int64> i:DottedWord source:string base:string pos:DottedWord):>int64=>$unsafe {
+    if i =? entries.length {return bc_ident(source pos)}
+    let e=entries[i]
+    if dewy_axis_new(e) {
+        let wrap=mk('array' pos)
+        set_list(wrap [dewy_axis_build(entries i + 1 source base pos)])
+        return wrap
+    }
+    if dewy_axis_full(e) {return dewy_axis_collect(entries i + 1 source base pos)}
+    let stmts:array<int64>=[]
+    let end_name=dewy_axis_end_name(base i)
+    if end_name not=? "" and dewy_axis_mentions(e intern(end_name)) {
+        stmts.push(bc_let(end_name dewy_index_end(bc_ident(source pos) pos) pos))
+    }
+    let selected=mk('index' pos)
+    nodes.ptr[selected].a=int32(bc_ident(source pos))
+    nodes.ptr[selected].b=int32(e)
+    set_list(selected [e])
+    let result=selected
+    if nodes.ptr[e].kind =? 'range' or i + 1 <? entries.length {
+        let part="$new_part{bc_count}"
+        bc_count += 1
+        stmts.push(bc_let(part selected pos))
+        result=if nodes.ptr[e].kind =? 'range' {dewy_axis_collect(entries i + 1 part base pos)} else {dewy_axis_build(entries i + 1 part base pos)}
+    }
+    if stmts.length =? 0 {return result}
+    stmts.push(bc_stmt(result pos))
+    bc_block(stmts pos)
+}
+# [loop item in source <the rest of the entries applied to item>]
+dewy_axis_collect=(entries:array<int64> i:DottedWord source:string base:string pos:DottedWord):>int64=>$unsafe {
+    let collection="$dewy_collection_{nodes.length}"
+    let item="$new_item{bc_count}"
+    bc_count += 1
+    let each=mk('for_' pos)
+    set_list(each [bc_ident(item pos)])
+    nodes.ptr[each].a=int32(bc_call("__dewy_iter" [bc_ident(source pos)] pos))
+    let receiver=bc_ident(collection pos)
+    add_flag(receiver NF_MUT)
+    let push=bc_method(receiver "push" [dewy_axis_build(entries i item base pos)] pos)
+    nodes.ptr[each].b=int32(bc_block([bc_stmt(push pos)] pos))
+    let block=bc_block([bc_let(collection mk('array' pos) pos) each bc_stmt(bc_ident(collection pos) pos)] pos)
+    add_flag(block NF_COMPREHENSION)
+    block
+}
+# name: t (its zero value)
+bc_decl=(name:string t:DottedWord pos:DottedWord):>int64=>$unsafe {
+    let d=mk('vardecl' pos)
+    nodes.ptr[d].name=int32(intern(name))
+    let ty=mk('tname' pos)
+    nodes.ptr[ty].aux=-7
+    nodes.ptr[ty].ival=t
+    nodes.ptr[d].a=int32(ty)
+    d
+}
+# loop name in [0..n): body
+bc_loop=(name:string n:DottedWord body:array<int64> pos:DottedWord):>int64=>$unsafe {
+    let f=mk('for_' pos)
+    set_list(f [bc_ident(name pos)])
+    let r=mk('range' pos)
+    nodes.ptr[r].a=int32(bc_int(0 pos))
+    nodes.ptr[r].b=int32(n)
+    nodes.ptr[f].a=int32(r)
+    nodes.ptr[f].b=int32(bc_block(body pos))
+    f
+}
+# the operator a dotted operator applies to each element (.+ is +, .<= is <=, ...)
+dot_base_op=(n:DottedWord):>Tok=>$unsafe {
+    let c=DottedWord(nodes.ptr[n].aux)
+    let three=nodes.ptr[n].aux2 =? 1
+    if c =? b'+' {return 'plus'}
+    if c =? b'-' {return 'minus'}
+    if c =? b'*' {return 'star'}
+    if c =? b'/' {return 'slash'}
+    if c =? b'%' {return 'percent'}
+    if c =? b'<' {
+        if three {return 'le'}
+        return 'lt'
+    }
+    if c =? b'>' {
+        if three {return 'ge'}
+        return 'gt'
+    }
+    if c =? b'=' {return 'eq'}
+    if c =? b'!' {return 'ne'}
+    'caret'
+}
+# the per-element expression of dotted expression n; its operands go to `leaves` (replaced by
+# __b<tag>e<k>, the current element of operand k); literals stay in place (and keep adapting)
+dot_template=(n:DottedWord @leaves:array<int64> tag:string):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let k=nodes.ptr[n].kind
+    if k =? 'unary' and has_flag(n NF_BROADCAST) {
+        let a=dot_template(DottedWord(nodes.ptr[n].a) @leaves tag)
+        let result=mk('unary' pos)
+        nodes.ptr[result].op=nodes.ptr[n].op
+        nodes.ptr[result].a=int32(a)
+        return result
+    }
+    if k =? 'binary' and nodes.ptr[n].op =? int32(85) {
+        let a=dot_template(DottedWord(nodes.ptr[n].a) @leaves tag)
+        let b=dot_template(DottedWord(nodes.ptr[n].b) @leaves tag)
+        let op=dot_base_op(n)
+        if op =? 'caret' {return bc_call("pow" [a b] pos)}
+        let result=bc_bin(op a b pos)
+        add_flag(result NF_BROADCAST)
+        # Dewy's .not<? negates the comparison, including unordered floats.
+        if nodes.ptr[n].ival not=? 0 {
+            let negated=mk('not_' pos)
+            nodes.ptr[negated].a=int32(result)
+            return negated
+        }
+        return result
+    }
+    if k =? 'call' and has_flag(n NF_BROADCAST) {
+        let c=mk('call' pos)
+        nodes.ptr[c].a=nodes.ptr[n].a
+        # (`@load.(sources)`: each element a partial, `@load(source)`, an argument group of an
+        # ungrouped `@` chain; nothing is called. decisions.md batch 7, select-v6.md)
+        if nodes.ptr[n].aux2 =? int32(AUX2_PARTIAL) {nodes.ptr[c].aux2=nodes.ptr[n].aux2}
+        let args:array<int64>=[]
+        loop x in kids(n) {args.push(dot_template(x @leaves tag))}
+        set_list(c args)
+        return c
+    }
+    if (k =? 'int_lit' or k =? 'float_lit' or k =? 'bool_lit') and not has_flag(n NF_CHECKED) {return n}
+    # (and a temperature literal: next to a point it is a difference, ts .+ 5°C)
+    if k =? 'binary' and quantity_literal_syntax(n) {return n}
+    leaves.push(n)
+    bc_ident("__b{tag}e{leaves.length - 1}" pos)
+}
+# (bc_loop_nd's names: one of its temporaries, and operand k's shape)
+dotted_id=(pre:string nm:string pos:DottedWord):>int64=>bc_ident("{pre}{nm}" pos)
+dotted_shape=(kinds:array<int64> arrs:array<string> k:DottedWord pos:DottedWord):>int64=>$unsafe {
+    if kinds[k] =? 2 {return bc_field(bc_ident(arrs[k] pos) "shape" pos)}
+    let a=mk('array' pos)
+    set_list(a [bc_call("len" [bc_ident(arrs[k] pos)] pos)])
+    a
+}
+# the loops computing a dotted expression over n-dimensional arrays: kinds[k] is 1 for a 1-D
+# array, 2 for an n-dimensional one, 0 for a number; arrs[k] names the array. When no operand is
+# stretched (the usual case) one flat loop runs over every element, as for 1-D arrays; otherwise
+# the result's last dimension is the inner loop and the outer loop finds where each operand's row
+# starts. The library checks each operand's data against its shape once, so the element reads
+# need no checks of their own.
+bc_loop_nd=(tmpl:DottedWord arrs:array<string> kinds:array<int64> pre:string epre:string pos:DottedWord storage:DottedWord=0):>array<int64>=>$unsafe {
+    let stmts:array<int64>=[]
+    let rowpre:array<int64>=[]
+    let body:array<int64>=[]
+    let out="{pre}o"
+    let shs:array<int64>=[]
+    loop k in [0..kinds.length) {
+        if kinds[k] >? 0 {shs.push(dotted_shape(kinds arrs k pos))}
+    }
+    let sa=mk('array' pos)
+    set_list(sa shs)
+    stmts.push(bc_let("{pre}shs" sa pos))
+    stmts.push(bc_let("{pre}shp" bc_call("__bcast_shape" [dotted_id(pre "shs" pos)] pos) pos))
+    # (the operands' dimensions are nonnegative, and so is each of the result's)
+    stmts.push(bc_let("{pre}n" bc_call("__nd_count" [dotted_id(pre "shp" pos)] pos) pos))
+    # (each operand's own element count: nothing here writes the caller's places)
+    let counts:array<int64>=[]
+    loop k in [0..kinds.length) {
+        if kinds[k] >? 0 {counts.push(bc_call("__nd_count" [dotted_shape(kinds arrs k pos)] pos))}
+    }
+    let ca=mk('array' pos)
+    set_list(ca counts)
+    stmts.push(bc_let("{pre}cs" ca pos))
+    stmts.push(bc_let("{pre}in" bc_call("__bcast_inner" [dotted_id(pre "cs" pos) dotted_id(pre "n" pos) dotted_id(pre "shp" pos)] pos) pos))
+    stmts.push(bc_let("{pre}on" bc_call("__bcast_rows" [dotted_id(pre "n" pos) dotted_id(pre "in" pos)] pos) pos))
+    let flat:array<string>=[]
+    let advance:array<int64>=[]
+    loop k in [0..kinds.length) {
+        if kinds[k] =? 0 {
+            flat.push("")
+            continue
+        }
+        let src=bc_ident(arrs[k] pos)
+        if kinds[k] =? 2 {src=bc_call("__bcast_data" [bc_ident(arrs[k] pos)] pos)}
+        stmts.push(bc_let("{pre}x{k}" src pos))
+        flat.push("{pre}x{k}")
+        stmts.push(bc_let("{pre}st{k}" bc_call("__bcast_strides" [dotted_shape(kinds arrs k pos) dotted_id(pre "shp" pos)] pos) pos))
+        stmts.push(bc_let("{pre}ls{k}" bc_call("__bcast_last" [dotted_id(pre "st{k}" pos) bc_call("len" [dotted_id(pre "x{k}" pos)] pos) dotted_id(pre "n" pos)] pos) pos))
+        # (q{k} walks operand k's row: by its last stride, 0 where it stretches)
+        rowpre.push(bc_let("{pre}q{k}" bc_call("__bcast_offset" [dotted_id(pre "r" pos) dotted_id(pre "shp" pos) dotted_id(pre "st{k}" pos)] pos) pos))
+        let ix=mk('index' pos)
+        nodes.ptr[ix].a=int32(dotted_id(pre "x{k}" pos))
+        nodes.ptr[ix].b=int32(dotted_id(pre "q{k}" pos))
+        # (the shapes broadcast and each operand's data matches its shape: in bounds)
+        add_flag(ix NF_INBOUNDS)
+        body.push(bc_let("{epre}e{k}" ix pos))
+        let step=mk('assign' pos)
+        nodes.ptr[step].a=int32(dotted_id(pre "q{k}" pos))
+        nodes.ptr[step].b=int32(bc_bcast_index([bc_int(1 pos) dotted_id(pre "q{k}" pos) dotted_id(pre "ls{k}" pos)] pos))
+        nodes.ptr[step].op=int32(47)
+        advance.push(step)
+    }
+    # (room for every element, written in place: element i in step i)
+    let output=bc_let(out mk('array' pos) pos)
+    # Private zeroed output, filled exactly once by these generated loops.
+    add_flag(DottedWord(nodes.ptr[output].b) NF_BROADCAST)
+    if storage not=? 0 {nodes.ptr[output].a=int32(type_node_of(storage pos))}
+    stmts.push(output)
+    stmts.push(bc_stmt(bc_method(bc_ident(out pos) "reserve" [dotted_id(pre "n" pos)] pos) pos))
+    let setlen=bc_call("__set_len" [bc_ident(out pos) dotted_id(pre "n" pos)] pos)
+    add_flag(setlen NF_PRIVATE_SETLEN)
+    stmts.push(bc_stmt(setlen pos))
+    # (every operand has the result's size: element i of each is at i, one flat loop)
+    let fast=[bc_loop("{pre}i" dotted_id(pre "n" pos) bc_body1(clone(tmpl) flat pre epre out false pos) pos)]
+    # These are private coordinates of the checked broadcast, as the
+    # NF_INBOUNDS reads above are. Keep their arithmetic in the library's
+    # word domain; the user's element expression still has exact arithmetic.
+    rowpre.push(bc_let("{pre}ob" bc_bcast_index([dotted_id(pre "r" pos) dotted_id(pre "in" pos) bc_int(0 pos)] pos) pos))
+    let ixo=mk('index' pos)
+    nodes.ptr[ixo].a=int32(bc_ident(out pos))
+    nodes.ptr[ixo].b=int32(bc_bcast_index([bc_int(1 pos) dotted_id(pre "ob" pos) dotted_id(pre "j" pos)] pos))
+    add_flag(ixo NF_INBOUNDS)
+    let store=mk('assign' pos)
+    nodes.ptr[store].a=int32(ixo)
+    nodes.ptr[store].b=int32(tmpl)
+    nodes.ptr[store].op=int32(47)
+    body.push(store)
+    loop step in advance {body.push(step)}
+    rowpre.push(bc_loop("{pre}j" dotted_id(pre "in" pos) body pos))
+    let slow=[bc_loop("{pre}r" dotted_id(pre "on" pos) rowpre pos)]
+    stmts.push(bc_if(bc_bin('eq' dotted_id(pre "in" pos) dotted_id(pre "n" pos) pos) fast slow pos))
+    stmts.push(bc_stmt(bc_call("NDArray" [bc_ident(out pos) dotted_id(pre "shp" pos)] pos) pos))
+    stmts
+}
+# the loop computing a dotted expression over 1-D arrays: arrs[k] names operand k's array ("" for
+# a number, whose element variable already exists); `pre` names the loop's variables, `epre` the
+# element variables the template uses. The last statement is the result.
+bc_loop1=(tmpl:DottedWord arrs:array<string> pre:string epre:string pos:DottedWord storage:DottedWord=0):>array<int64>=>$unsafe {
+    let stmts:array<int64>=[]
+    let out="{pre}o"
+    let lens:array<int64>=[]
+    loop a in arrs {
+        if (a as array<uint8>).length >? 0 {lens.push(bc_call("len" [bc_ident(a pos)] pos))}
+    }
+    let larr=mk('array' pos)
+    set_list(larr lens)
+    stmts.push(bc_let("{pre}n" bc_call("__bcast" [larr] pos) pos))
+    loop k in 0.. and a in arrs {
+        if (a as array<uint8>).length =? 0 {continue}
+        stmts.push(bc_let("{pre}s{k}" bc_step(bc_call("len" [bc_ident(a pos)] pos) pos) pos))
+    }
+    let output=bc_let(out mk('array' pos) pos)
+    # Private zeroed output, filled exactly once by these generated loops.
+    add_flag(DottedWord(nodes.ptr[output].b) NF_BROADCAST)
+    if storage not=? 0 {nodes.ptr[output].a=int32(type_node_of(storage pos))}
+    stmts.push(output)
+    stmts.push(bc_stmt(bc_method(bc_ident(out pos) "reserve" [bc_ident("{pre}n" pos)] pos) pos))
+    # (room for every element is reserved, in an array of the loop's own: it has all its
+    # elements from the start, zeros until written, and element i is written in step i)
+    let setlen=bc_call("__set_len" [bc_ident(out pos) bc_ident("{pre}n" pos)] pos)
+    add_flag(setlen NF_PRIVATE_SETLEN)
+    stmts.push(bc_stmt(setlen pos))
+    # with every operand as long as the result (the usual case) element i of each is at i: a
+    # loop the compiler can run several elements at a time; else operands are stretched
+    let all_one:DottedWord=0
+    loop k in 0.. and a in arrs {
+        if (a as array<uint8>).length =? 0 {continue}
+        let c=bc_bin('eq' bc_ident("{pre}s{k}" pos) bc_int(1 pos) pos)
+        if all_one =? 0 {all_one=c} else {
+            let x=mk('and_' pos)
+            nodes.ptr[x].a=int32(all_one)
+            nodes.ptr[x].b=int32(c)
+            all_one=x
+        }
+    }
+    let fast=bc_loop("{pre}i" bc_ident("{pre}n" pos) bc_body1(clone(tmpl) arrs pre epre out false pos) pos)
+    if all_one =? 0 {
+        stmts.push(fast)
+    }
+    else {
+        let slow=bc_loop("{pre}i" bc_ident("{pre}n" pos) bc_body1(tmpl arrs pre epre out true pos) pos)
+        let ifn=mk('if_' pos)
+        nodes.ptr[ifn].a=int32(all_one)
+        nodes.ptr[ifn].b=int32(bc_block([fast] pos))
+        nodes.ptr[ifn].c=int32(bc_block([slow] pos))
+        stmts.push(ifn)
+    }
+    stmts.push(bc_stmt(bc_ident(out pos) pos))
+    stmts
+}
+# the body of the loop over 1-D operands: their elements (at i, or at i * step when stretched),
+# then the result's element i
+bc_body1=(tmpl:DottedWord arrs:array<string> pre:string epre:string out:string stretched:bool pos:DottedWord):>array<int64>=>$unsafe {
+    let body:array<int64>=[]
+    loop k in 0.. and a in arrs {
+        if (a as array<uint8>).length =? 0 {continue}
+        let ix=mk('index' pos)
+        nodes.ptr[ix].a=int32(bc_ident(a pos))
+        if stretched {
+            # Step is exactly zero or one by construction. Selecting the
+            # index states that proof directly, without an overflow obligation
+            # on an otherwise unbounded generated signed multiplication.
+            let choice=mk('if_' pos)
+            nodes.ptr[choice].a=int32(bc_bin('eq' bc_ident("{pre}s{k}" pos) bc_int(1 pos) pos))
+            nodes.ptr[choice].b=int32(bc_block([bc_stmt(bc_ident("{pre}i" pos) pos)] pos))
+            nodes.ptr[choice].c=int32(bc_block([bc_stmt(bc_int(0 pos) pos)] pos))
+            nodes.ptr[ix].b=int32(choice)
+        }
+        else {nodes.ptr[ix].b=int32(bc_ident("{pre}i" pos))}
+        # (i < n, and an operand's step is 1 only when its length is n: in bounds)
+        add_flag(ix NF_INBOUNDS)
+        body.push(bc_let("{epre}e{k}" ix pos))
+    }
+    let ixo=mk('index' pos)
+    nodes.ptr[ixo].a=int32(bc_ident(out pos))
+    nodes.ptr[ixo].b=int32(bc_ident("{pre}i" pos))
+    add_flag(ixo NF_INBOUNDS)
+    let asg=mk('assign' pos)
+    nodes.ptr[asg].a=int32(ixo)
+    nodes.ptr[asg].b=int32(tmpl)
+    nodes.ptr[asg].op=int32(47)
+    body.push(asg)
+    body
+}
+# Broadcasting immediately flattens numeric rows. A singleton new axis can
+# use the original flat value with a shape, avoiding nested row construction
+# and flattening. The ordinary value copy preserves snapshot semantics.
+bc_flat_new_axis=(n:DottedWord):>int64=>$unsafe {
+    if nodes.ptr[n].kind not=? 'new_axis' or nkids(n) not=? 2 {return n}
+    let first=kid(n 0)
+    let second=kid(n 1)
+    let row=dewy_axis_new(first) and dewy_axis_full(second)
+    let column=dewy_axis_full(first) and dewy_axis_new(second)
+    if not row and not column {return n}
+    let receiver=DottedWord(nodes.ptr[n].a)
+    let t=prune(check_expr(clone(receiver) 0))
+    if types.ptr[t].kind not=? 'array' or not is_numeric(DottedWord(types.ptr[t].elem)) {return n}
+    let pos=nodes.ptr[n].pos
+    let name="$flat_axis{bc_count}"
+    bc_count += 1
+    let length=bc_field(bc_ident(name pos) "length" pos)
+    # (`new` inserts an extent-1 axis: an empty column is [0 1], as documented)
+    let rows=if row {bc_int(1 pos)} else {length}
+    let cols=if row {length} else {bc_int(1 pos)}
+    bc_block([bc_let(name receiver pos) bc_stmt(bc_call("__array2" [bc_ident(name pos) rows cols] pos) pos)] pos)
+}
+check_dotted=(n:int64 expected:int64):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    bc_count += 1
+    let tag="{bc_count}"
+    let leaves:array<int64>=[]
+    let tmpl=dot_template(n @leaves tag)
+    let pre="__b{tag}"
+    let stmts:array<int64>=[]
+    let ranks:array<int64>=[]
+    let rank:DottedWord=0
+    let gpu=false
+    loop k in [0..leaves.length) {
+        let lf=bc_flat_new_axis(leaves[k])
+        check_expr(lf 0);
+        lf=last_checked
+        finalize_literal(lf);
+        let t=prune(ntype(lf))
+        if types.ptr[t].kind =? 'fixed' {
+            t=mk_array(DottedWord(types.ptr[t].elem))
+            lf=coerce(lf t)
+        }
+        # (nested rows of numbers, `xs[new ..]` or `[[1 2] [3 4]]`, are a 2-D operand)
+        if types.ptr[t].kind =? 'array' and tkind(DottedWord(types.ptr[t].elem)) =? 'array' and (is_numeric(DottedWord(types.ptr[prune(DottedWord(types.ptr[t].elem))].elem)) or tkind(DottedWord(types.ptr[prune(DottedWord(types.ptr[t].elem))].elem)) =? 'bool_') {
+            lf=bc_call("__array2_rows" [lf] pos)
+            t=prune(check_expr(lf 0))
+            lf=last_checked
+        }
+        let r:DottedWord=0
+        if types.ptr[t].kind =? 'array' {r=1} else if is_nd(t) {r=2}
+        else if is_gpu_array(t) {
+            r=3
+            gpu=true
+        }
+        ranks.push(r)
+        if r >? rank and r <? 3 {rank=r}
+        # Contract diagnostics refer to the captured source, not __b temporaries.
+        index_update_sources[intern("{pre}d{k}")]=lf
+        stmts.push(bc_let("{pre}d{k}" lf pos))
+    }
+    # scalars: the same value for every element
+    loop k in [0..leaves.length) {
+        if ranks[k] =? 0 {stmts.push(bc_let("{pre}e{k}" bc_ident("{pre}d{k}" pos) pos))}
+    }
+    if rank =? 0 and not gpu {
+        stmts.push(bc_stmt(tmpl pos))
+        let made=bc_block(stmts pos)
+        nodes.ptr[n]=nodes.ptr[made]
+        return check_expr(n expected)
+    }
+    # The destination supplies the output element storage, just as for an
+    # array comprehension. Arithmetic stays exact until each element write.
+    let storage:DottedWord=0
+    if expected not=? 0 {
+        let target=representation_type(prune(expected))
+        if tkind(target) =? 'array' {storage=target} else if is_nd(target) {storage=mk_array(nd_elem(target))}
+        if storage not=? 0 and not is_int(exact_representation(telem(storage))) {storage=0}
+    }
+    let result:DottedWord=0
+    if gpu {
+        # GPU arrays: one fragment program, or the same loop on the CPU where there is no GPU
+        # (each operand is an f32 or i32 in the GPU program: arrays by their element type, numbers
+        # by whether they are integers)
+        let desc=""
+        let params:array<int64>=[]
+        let gins:array<int64>=[]
+        let fscal:array<int64>=[]
+        let iscal:array<int64>=[]
+        let harrs:array<string>=[]
+        let hstmts:array<int64>=[]
+        loop k in [0..leaves.length) {
+            let pm=mk('param' pos)
+            nodes.ptr[pm].name=int32(intern("{pre}e{k}"))
+            let ty=mk('tname' pos)
+            nodes.ptr[ty].aux=-7
+            let et=T_F32
+            harrs.push("")
+            if ranks[k] =? 3 {
+                let gt=prune(ntype(d0_leaf(stmts k)))
+                if is_int(struct_targ(DottedWord(types.ptr[gt].st) 0)) {
+                    et=policy_int(T_I32 1 pos)
+                    desc="{desc}i"
+                }
+                else {desc="{desc}t"}
+                gins.push(bc_call("__gpu_in" [bc_ident("{pre}d{k}" pos)] pos))
+                harrs[k]="{pre}h{k}"
+                hstmts.push(bc_let(harrs[k] bc_call("cpu" [bc_ident("{pre}d{k}" pos)] pos) pos))
+            }
+            else if ranks[k] =? 0 {
+                let lt=prune(ntype(d0_leaf(stmts k)))
+                if is_int(lt) {
+                    et=policy_int(T_I32 1 pos)
+                    desc="{desc}n"
+                    iscal.push(bc_call("i32" [bc_ident("{pre}d{k}" pos)] pos))
+                }
+                else {
+                    desc="{desc}s"
+                    fscal.push(bc_call("f32" [bc_ident("{pre}d{k}" pos)] pos))
+                }
+            }
+            else {fatal(nodes.ptr[leaves[k]].pos "this array is in CPU memory: upload it with gpu(xs) to use it with GPU arrays")}
+            nodes.ptr[ty].ival=et
+            nodes.ptr[pm].a=int32(ty)
+            params.push(pm)
+        }
+        let lam=mk('lambda' pos)
+        set_list(lam params)
+        nodes.ptr[lam].b=int32(bc_block([bc_stmt(clone(tmpl) pos)] pos))
+        # (the expression's type decides the result's: integers stay integers)
+        let lt=prune(check_expr(lam 0))
+        lam=last_checked
+        let rt=prune(DottedWord(types.ptr[lt].elem))
+        if not is_int(rt) and not is_float(rt) and types.ptr[rt].kind not=? 'bool_' {
+            fatal(pos "GPU array expressions must return a fixed-width integer, float or bool, found {dt(rt)}; use CPU arrays for exact rationals and managed values")
+        }
+        let runf="__gpu_run_f"
+        if is_int(rt) {runf="__gpu_run_i"}
+        let ds=mk('str_lit' pos)
+        nodes.ptr[ds].sval=int32(intern(desc))
+        let ga=mk('array' pos)
+        set_list(ga gins)
+        # (the operands' broadcast, an obligation as a CPU array's is)
+        let gs=mk('array' pos)
+        let gshapes:array<int64>=[]
+        loop k in [0..leaves.length) {
+            if ranks[k] =? 3 {gshapes.push(bc_field(bc_ident("{pre}d{k}" pos) "shape" pos))}
+        }
+        set_list(gs gshapes)
+        stmts.push(bc_let("{pre}gsh" bc_call("__bcast_shape" [gs] pos) pos))
+        let run=bc_call(runf [bc_call("__gpu_kernel" [lam ds] pos) ga typed_array(fscal T_F32 pos) typed_array(iscal T_I32 pos) bc_ident("{pre}gsh" pos)] pos)
+        let hkinds:array<int64>=[]
+        loop k in [0..leaves.length) {
+            if ranks[k] =? 3 {hkinds.push(2)} else {hkinds.push(0)}
+        }
+        loop x in bc_loop_nd(tmpl harrs hkinds "{pre}c" pre pos) {hstmts.push(x)}
+        let hb=bc_block(hstmts pos)
+        let cpu=bc_call("__gpu_from" [hb] pos)
+        let iff=mk('if_' pos)
+        nodes.ptr[iff].a=int32(bc_call("gpu_available" [] pos))
+        nodes.ptr[iff].b=int32(bc_block([bc_stmt(run pos)] pos))
+        nodes.ptr[iff].c=int32(bc_block([bc_stmt(cpu pos)] pos))
+        result=iff
+    }
+    else if rank =? 1 {
+        let arrs:array<string>=[]
+        loop k in [0..leaves.length) {
+            if ranks[k] =? 1 {arrs.push("{pre}d{k}")} else {arrs.push("")}
+        }
+        let ls=bc_loop1(tmpl arrs pre pre pos storage)
+        loop i in [0..ls.length - 1) {stmts.push(ls[i])}
+        result=DottedWord(nodes.ptr[ls[ls.length - 1]].a)
+    }
+    else {
+        # n-dimensional: shapes broadcast like numpy (a 1-D array is a row)
+        let arrs:array<string>=[]
+        loop k in [0..leaves.length) {
+            if ranks[k] =? 1 or ranks[k] =? 2 {arrs.push("{pre}d{k}")} else {arrs.push("")}
+        }
+        let ls=bc_loop_nd(tmpl arrs ranks pre pre pos storage)
+        loop i in [0..ls.length - 1) {stmts.push(ls[i])}
+        result=DottedWord(nodes.ptr[ls[ls.length - 1]].a)
+    }
+    stmts.push(bc_stmt(result pos))
+    let made=bc_block(stmts pos)
+    nodes.ptr[n]=nodes.ptr[made]
+    let result_type=check_expr(n expected)
+    if cx >=? 0 and not gpu {
+        let t=prune(result_type)
+        let elem=if tkind(t) =? 'array' {telem(t)} else if is_nd(t) {nd_elem(t)} else {0}
+        if elem =? T_MATH_INT {
+            let owner=DottedWord(ctxs[cx].inst)
+            if owner >? 0 {
+                exact_owners[owner]=true
+                exact_full_owners[owner]=true
+            }
+        }
+    }
+    result_type
+}
