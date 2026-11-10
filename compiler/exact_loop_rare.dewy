@@ -1,0 +1,421 @@
+$runtime_checks
+from p"checked_eval.dewy" import (cx_token_values)
+from p"ast.jo" import (NF_BROADCAST has_flag kid kids nkids nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED fns lib_dir locals)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"exact.jo" import (exact_has_store exact_initializers exact_proved exact_representation exact_type_width)
+from p"exact_loop.jo" import (exact_map_stores exl_aliases exl_array_upper exl_arrays exl_bad exl_mask exl_target exl_upper exm_arrays exm_broadcast exm_censuses exm_elements exm_indices exm_obligation exm_produced_flags exm_produced_widths exm_scalars exm_steps)
+from p"exact_loop_ops.dewy" import (exl_strip exm_element exm_magnitude exm_tagged_source)
+from p"expr.jo" import (CV is_nd ntype)
+from p"facts.jo" import (stable_loop_index)
+from p"facts_library.dewy" import (fact_library_call)
+from p"facts_pushes.dewy" import (fact_mentions)
+from p"ir.jo" import (VI)
+from p"ir_builders.dewy" import (e_addi e_bin e_iconst e_load e_mov e_un emit vreg)
+from p"ir_types.dewy" import (Ins)
+from p"lower.jo" import (LF_HELDVIEW ctl cur_fn lower_entry)
+from p"lower_group.dewy" import (gen_expr gen_for gen_place gen_stmt)
+from p"lower_scalars.dewy" import (int_op)
+from p"lower_storage.dewy" import (blk br_to brif_to els endc iff lop read_place write_place)
+from p"math_lower.jo" import (math_word_regs)
+from p"math_ops.dewy" import (math_proven_word math_word_expr math_word_range)
+from p"refine.jo" import (representation_type)
+from p"types.jo" import (T_INT T_MATH_INT prune structs telem tkind types)
+from p"util.jo" import (files pos_file)
+
+ExactLoopWord:type=int64<overflow='wrap'>
+exl_key=(n:ExactLoopWord):>int64=>$unsafe {
+    (ExactLoopWord(nodes.ptr[n].aux) << 32) | ExactLoopWord(nodes.ptr[n].sym)
+}
+exl_array=(n:ExactLoopWord):>bool=>$unsafe {
+    if nodes.ptr[n].kind not=? 'ident' {return false}
+    let t=exact_representation(ntype(n))
+    if types.ptr[t].kind not=? 'array' or exact_representation(telem(t)) not=? T_INT {return false}
+    if nodes.ptr[n].aux =? int32(1) {
+        let l=ExactLoopWord(nodes.ptr[n].sym)
+        if ExactLoopWord(locals.ptr[l].flags) & LF_PARAM =? 0 or ExactLoopWord(locals.ptr[l].flags) & (LF_MUTPARAM | LF_ADDR | LF_ALIAS | LF_CAPTURED | LF_SHARED) not=? 0 {return false}
+    }
+    else if nodes.ptr[n].aux not=? int32(2) {return false}
+    exl_arrays[exl_key(n)]=n
+    exl_arrays.length <=? 8
+}
+# The increment may not depend on a snapshot of an earlier accumulator value,
+# nor may a loop's trip count depend on it. Such recurrences need a different
+# bound, not multiplication by the number of iterations.
+exl_independent=(n:ExactLoopWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'vardecl' {return not fact_mentions(ExactLoopWord(nodes.ptr[n].b) exl_target)}
+    if k =? 'for_' {
+        return nodes.ptr[n].sym not=? int32(exl_target) and not fact_mentions(ExactLoopWord(nodes.ptr[n].a) exl_target) and exl_independent(ExactLoopWord(nodes.ptr[n].b))
+    }
+    if k =? 'block' {
+        loop c in kids(n) {
+            if not exl_independent(c) {return false}
+        }
+    }
+    if k =? 'exprstmt' {return exl_independent(ExactLoopWord(nodes.ptr[n].a))}
+    true
+}
+exl_reject=(condition:ExactLoopWord):>void=>{
+    e_mov(exl_bad e_bin('or_' VI exl_bad condition));
+}
+exl_add=(a:ExactLoopWord b:ExactLoopWord):>int64=>{
+    let value=e_bin('add' VI a b)
+    exl_reject(e_bin('ltu' VI value a));
+    exl_reject(e_bin('lts' VI value e_iconst(0)));
+    value
+}
+exl_mul=(a:ExactLoopWord b:ExactLoopWord):>int64=>{
+    let value=e_bin('mul' VI a b)
+    let high=e_bin('mulhu' VI a b)
+    exl_reject(e_bin('ne' VI high e_iconst(0)));
+    exl_reject(e_bin('lts' VI value e_iconst(0)));
+    value
+}
+exl_bound=(n0:ExactLoopWord):>int64=>$unsafe {
+    let n=exl_strip(n0)
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return e_iconst(nodes.ptr[n].ival)}
+    if k =? 'ident' {
+        let l=ExactLoopWord(nodes.ptr[n].sym)
+        let cached=exl_upper.get(l)
+        if cached not=? none {return cached}
+        let alias=exl_aliases.get(l)
+        if alias not=? none {return exl_bound(alias)}
+        let value=read_place(gen_place(n false) ntype(n))
+        exl_reject(e_bin('lts' VI value e_iconst(0)));
+        exl_upper[l]=value
+        return value
+    }
+    if k =? 'index' {
+        exl_bound(ExactLoopWord(nodes.ptr[n].b));
+        return exl_array_upper[exl_key(ExactLoopWord(nodes.ptr[n].a))]
+    }
+    let a=exl_bound(ExactLoopWord(nodes.ptr[n].a))
+    let b=exl_bound(ExactLoopWord(nodes.ptr[n].b))
+    let op=cx_token_values.ptr[ExactLoopWord(nodes.ptr[n].op)]
+    if op =? 'plus' {return exl_add(a b)}
+    if op =? 'star' {return exl_mul(a b)}
+    if op =? 'percent' {return e_addi(b (-1))}
+    if op =? 'amp' {
+        let out=vreg(VI)
+        e_mov(out a);
+        iff(e_bin('ltu' VI b a));
+        e_mov(out b);
+        endc();
+        return out
+    }
+    exl_mask(e_bin('or_' VI a b))
+}
+exl_bounds=(n:ExactLoopWord repeats:ExactLoopWord):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'block' {
+        loop c in kids(n) {exl_bounds(c repeats)}
+    }
+    else if k =? 'exprstmt' {exl_bounds(ExactLoopWord(nodes.ptr[n].a) repeats)} else if k =? 'vardecl' {
+        if tkind(ntype(ExactLoopWord(nodes.ptr[n].b))) not=? 'array' {exl_upper[ExactLoopWord(nodes.ptr[n].sym)]=exl_bound(ExactLoopWord(nodes.ptr[n].b))}
+    }
+    else if k =? 'return_' {exl_bound(ExactLoopWord(nodes.ptr[n].a));} else if k =? 'for_' {
+        let end_=exl_bound(ExactLoopWord(nodes.ptr[ExactLoopWord(nodes.ptr[n].a)].b))
+        exl_upper[ExactLoopWord(nodes.ptr[n].sym)]=end_
+        exl_bounds(ExactLoopWord(nodes.ptr[n].b) exl_mul(repeats end_))
+    }
+    else if k =? 'assign' {
+        let l=ExactLoopWord(nodes.ptr[ExactLoopWord(nodes.ptr[n].a)].sym)
+        let value=exl_strip(ExactLoopWord(nodes.ptr[n].b))
+        let delta=exl_bound(ExactLoopWord(nodes.ptr[value].b))
+        exl_upper[l]=exl_add(exl_upper[l] exl_mul(repeats delta))
+    }
+}
+exact_loop_guard=(body:ExactLoopWord):>int64=>{
+    exl_upper=dict<int64 int64>()
+    exl_array_upper=dict<int64 int64>()
+    exl_bad=vreg(VI)
+    e_mov(exl_bad e_iconst(0));
+    loop [key node] in exl_arrays {
+        let pointer=read_place(gen_place(node false) ntype(node))
+        let maximum=vreg(VI)
+        e_mov(maximum e_iconst(0));
+        iff(e_bin('ne' VI pointer e_iconst(0)));
+        let length=e_load(VI pointer 8 8)
+        let index=vreg(VI)
+        e_mov(index e_iconst(0));
+        blk()
+        lop()
+        brif_to(e_bin('geu' VI index length) ctl - 1);
+        let address=e_bin('add' VI pointer e_bin('shl' VI index e_iconst(3)))
+        let value=e_load(VI address 24 8)
+        exl_reject(e_bin('lts' VI value e_iconst(0)));
+        iff(e_bin('gtu' VI value maximum));
+        e_mov(maximum value);
+        endc();
+        e_mov(index e_addi(index 1));
+        br_to(ctl);
+        endc();
+        endc();
+        endc();
+        exl_array_upper[key]=maximum
+    }
+    exl_bounds(body e_iconst(1))
+    e_bin('eq' VI exl_bad e_iconst(0))
+}
+exm_producer=(node:ExactLoopWord bits:ExactLoopWord):>int64=>$unsafe {
+    let n=node
+    loop depth in [0..32) {
+        if nodes.ptr[n].kind =? 'block' and nodes.ptr[n].aux not=? 0 {
+            n=block_value(n)
+            continue
+        }
+        if nodes.ptr[n].kind =? 'call' and (fact_library_call(n "__array2") or fact_library_call(n "__bcast_data") or fact_library_call(n "__nd_new_axes") or fact_library_call(n "__shape_value")) {
+            n=kid(n 0)
+            continue
+        }
+        if nodes.ptr[n].kind =? 'call' and nodes.ptr[n].aux =? 2 and is_nd(ntype(n)) and nkids(n) =? 2 {
+            let d=ExactLoopWord(structs.ptr[ExactLoopWord(types.ptr[representation_type(ntype(n))].st)].decl)
+            if d =? 0 or files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/std/nd.jo" {return -1}
+            n=kid(n 0)
+            continue
+        }
+        if nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? int32(1) {return -1}
+        let l=ExactLoopWord(nodes.ptr[n].sym)
+        let width=exm_produced_widths.get(l)
+        if width not=? none {
+            if width <=? bits {return exm_produced_flags.get(l) ?? -1}
+            return -1
+        }
+        let flags=ExactLoopWord(locals.ptr[l].flags)
+        if flags & LF_HELDVIEW not=? 0 {flags &= ~LF_BYREF}
+        if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_SHARED | LF_EXPOSED | LF_ALIAS) not=? 0 {return -1}
+        if l >=? exact_initializers.length or exact_initializers[l] =? 0 {return -1}
+        n=exact_initializers[l]
+    }
+    -1
+}
+exm_parameter=(node:ExactLoopWord):>int64=>$unsafe {
+    let n=node
+    loop depth in [0..32) {
+        if nodes.ptr[n].kind =? 'block' and nodes.ptr[n].aux not=? 0 {
+            n=block_value(n)
+            continue
+        }
+        if nodes.ptr[n].kind =? 'call' and (fact_library_call(n "__array2") or fact_library_call(n "__bcast_data") or fact_library_call(n "__nd_new_axes") or fact_library_call(n "__shape_value")) {
+            n=kid(n 0)
+            continue
+        }
+        if nodes.ptr[n].kind not=? 'ident' or nodes.ptr[n].aux not=? int32(1) {return 0}
+        let l=ExactLoopWord(nodes.ptr[n].sym)
+        let flags=ExactLoopWord(locals.ptr[l].flags)
+        if flags & LF_HELDVIEW not=? 0 {flags &= ~LF_BYREF}
+        if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_SHARED | LF_EXPOSED | LF_ALIAS) not=? 0 {return 0}
+        if fns.ptr[cur_fn].params.contains(l) {return l}
+        if l >=? exact_initializers.length or exact_initializers[l] =? 0 {return 0}
+        n=exact_initializers[l]
+    }
+    0
+}
+exm_census=(l:ExactLoopWord node:ExactLoopWord bits:ExactLoopWord):>int64=>{
+    let key=(l << 6) | bits
+    let seen:ExactLoopWord=0
+    let combined:ExactLoopWord=0
+    let cached=exm_censuses.get(key)
+    if cached not=? none {
+        seen=cached[0]
+        combined=cached[1]
+    }
+    else {
+        seen=vreg(VI)
+        combined=vreg(VI)
+        lower_entry.push(Ins(op='mov' ty=VI dst=int32(seen) a=int32(e_iconst(0))))
+        lower_entry.push(Ins(op='mov' ty=VI dst=int32(combined) a=int32(e_iconst(0))))
+        exm_censuses[key]=[seen combined]
+    }
+    iff(e_bin('eq' VI seen e_iconst(0)));
+    e_mov(combined e_iconst(0));
+    let pointer=read_place(gen_place(node false) ntype(node))
+    iff(e_bin('ne' VI pointer e_iconst(0)));
+    let length=e_load(VI pointer 8 8)
+    let index=vreg(VI)
+    e_mov(index e_iconst(0));
+    blk()
+    brif_to(e_bin('geu' VI index length) ctl);
+    lop()
+    let address=e_bin('add' VI pointer e_bin('shl' VI index e_iconst(3)))
+    let value=e_load(VI address 24 8)
+    let magnitude=exm_magnitude(value node e_iconst(ExactLoopWord(1) << (bits - 1)) bits)
+    e_mov(combined e_bin('or_' VI combined magnitude));
+    e_mov(index e_addi(index 1));
+    brif_to(e_bin('ltu' VI index length) ctl);
+    endc();
+    endc();
+    endc();
+    e_mov(seen e_iconst(1));
+    endc();
+    combined
+}
+exm_width=(n0:ExactLoopWord bits:ExactLoopWord):>int64=>$unsafe {
+    if exact_has_store(n0) and not exact_proved(n0) {exm_obligation=true; exact_map_stores[n0]=true}
+    if nodes.ptr[n0].kind =? 'conv' and nodes.ptr[n0].aux =? int32(int64(CV.int_)) and exact_representation(ntype(n0)) =? T_INT and exact_representation(ntype(ExactLoopWord(nodes.ptr[n0].a))) =? T_MATH_INT {
+        exm_obligation=true
+        exact_map_stores[n0]=true
+    }
+    let n=exl_strip(n0)
+    if exact_representation(ntype(n)) not=? T_INT and exact_representation(ntype(n)) not=? T_MATH_INT {return 10000}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return exact_type_width(n) // 2}
+    if k =? 'ident' {
+        if nodes.ptr[n].aux not=? int32(1) {return 10000}
+        let l=ExactLoopWord(nodes.ptr[n].sym)
+        if exm_elements.contains(l) {return bits}
+        if exact_representation(ntype(n)) not=? T_INT and not math_proven_word(n) {return 10000}
+        if ExactLoopWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_ADDR | LF_BYREF | LF_MUTPARAM) not=? 0 {return 10000}
+        if not exm_scalars.contains(n) {exm_scalars.push(n)}
+        if exm_scalars.length >? 8 {return 10000}
+        return bits
+    }
+    if k =? 'call' and nkids(n) =? 2 and (fact_library_call(n "min") or fact_library_call(n "max")) {return max(exm_width(kid(n 0) bits) exm_width(kid(n 1) bits))}
+    if k =? 'unary' and nodes.ptr[n].op =? int32(59) {return exm_width(ExactLoopWord(nodes.ptr[n].a) bits) + 1}
+    if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return 10000}
+    if has_flag(n NF_BROADCAST) {exm_broadcast=true}
+    let a=exm_width(ExactLoopWord(nodes.ptr[n].a) bits)
+    let b=exm_width(ExactLoopWord(nodes.ptr[n].b) bits)
+    let op=cx_token_values.ptr[ExactLoopWord(nodes.ptr[n].op)]
+    if op =? 'plus' or op =? 'minus' {return max(a b) + 1}
+    if op =? 'star' {return a + b}
+    if op =? 'amp' or op =? 'pipe' or op =? 'caret' {return max(a b)}
+    10000
+}
+# The census proves this entire expression, including min/max call arguments.
+# Consume its internal words directly; the fallback keeps the tagged ABI.
+exm_word=(n0:ExactLoopWord):>int64=>$unsafe {
+    let n=exl_strip(n0)
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return e_iconst(nodes.ptr[n].ival)}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) {
+        let l=ExactLoopWord(nodes.ptr[n].sym)
+        loop j in [0..exm_elements.length) {
+            if exm_elements[j] =? l {return exm_element(ExactLoopWord(locals.ptr[l].vreg) exm_arrays[j])}
+        }
+        return math_word_expr(n)
+    }
+    if k =? 'binary' {
+        let a=exm_word(ExactLoopWord(nodes.ptr[n].a))
+        let b=exm_word(ExactLoopWord(nodes.ptr[n].b))
+        return e_bin(int_op(cx_token_values.ptr[ExactLoopWord(nodes.ptr[n].op)] true) VI a b)
+    }
+    if k =? 'unary' {return e_un('neg' VI exm_word(ExactLoopWord(nodes.ptr[n].a)))}
+    if k =? 'call' {
+        let a=exm_word(kid(n 0))
+        let b=exm_word(kid(n 1))
+        let maximum=fact_library_call(n "max")
+        let result=vreg(VI)
+        emit('select' VI result e_bin('gts' VI a b) (if maximum {a} else {b}) (if maximum {b} else {a}) 0);
+        return result
+    }
+    gen_expr(n).v
+}
+exm_tagged_word=(n0:ExactLoopWord):>int64=>$unsafe {
+    let n=exl_strip(n0)
+    if not exm_tagged_source(n) {return e_bin('shl' VI exm_word(n) e_iconst(1))}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {return ExactLoopWord(locals.ptr[ExactLoopWord(nodes.ptr[n].sym)].vreg)}
+    if k =? 'unary' {return e_un('neg' VI exm_tagged_word(ExactLoopWord(nodes.ptr[n].a)))}
+    if k =? 'binary' {
+        let op=cx_token_values.ptr[ExactLoopWord(nodes.ptr[n].op)]
+        let a=ExactLoopWord(nodes.ptr[n].a)
+        let b=ExactLoopWord(nodes.ptr[n].b)
+        if op =? 'star' {
+            if exm_tagged_source(a) {return e_bin('mul' VI exm_tagged_word(a) exm_word(b))}
+            return e_bin('mul' VI exm_word(a) exm_tagged_word(b))
+        }
+        return e_bin(int_op(op true) VI exm_tagged_word(a) exm_tagged_word(b))
+    }
+    e_bin('shl' VI exm_word(n) e_iconst(1))
+}
+# The range census already proved the arithmetic of this generated map. Make
+# at most four stride versions (all unit, or one splat among up to three inputs),
+# not a Cartesian product. Other shapes keep the original guarded scalar loop.
+# The loads are in bounds by broadcast shape validation. Splat loads stay behind
+# the nonempty test; each version has private element and induction registers.
+exm_stride_loop=(s:ExactLoopWord assignment:ExactLoopWord count:ExactLoopWord splat:ExactLoopWord):>void=>$unsafe {
+    let induction=ExactLoopWord(nodes.ptr[s].sym)
+    let old_ctr=locals.ptr[induction].vreg
+    let ctr=vreg(VI)
+    locals.ptr[induction].vreg=int32(ctr)
+    let old_elements:array<int64>=[]
+    loop l in exm_elements {
+        old_elements.push(ExactLoopWord(locals.ptr[l].vreg))
+        locals.ptr[l].vreg=int32(vreg(VI))
+    }
+    e_mov(ctr e_iconst(0));
+    blk()
+    brif_to(e_bin('ges' VI ctr count) ctl);
+    let bases:array<int64>=[]
+    let starts:array<int64>=[]
+    loop j in [0..exm_arrays.length) {
+        let pointer=read_place(gen_place(exm_arrays[j] false) ntype(exm_arrays[j]))
+        let start=if exm_indices[j] =? 0 {e_iconst(0)} else {read_place(gen_place(exm_indices[j] false) T_INT)}
+        starts.push(start)
+        let base=e_bin('add' VI pointer e_bin('shl' VI start e_iconst(3)))
+        bases.push(base)
+        if j =? splat {e_mov(ExactLoopWord(locals.ptr[exm_elements[j]].vreg) e_load(VI base 24 8));}
+    }
+    lop()
+    loop j in [0..exm_arrays.length) {
+        if j =? splat {continue}
+        let address=e_bin('add' VI bases[j] e_bin('shl' VI ctr e_iconst(3)))
+        e_mov(ExactLoopWord(locals.ptr[exm_elements[j]].vreg) e_load(VI address 24 8));
+    }
+    let mathematical=prune(ExactLoopWord(locals.ptr[induction].type)) =? T_MATH_INT
+    if mathematical {math_word_regs[induction]=ctr}
+    gen_stmt(assignment)
+    if mathematical {math_word_regs.remove(induction);}
+    e_mov(ctr e_addi(ctr 1));
+    brif_to(e_bin('lts' VI ctr count) ctl);
+    endc();
+    # Preserve the observable cursor state, including a full vector plus tail.
+    loop j in [0..exm_indices.length) {
+        if exm_indices[j] not=? 0 and j not=? splat {
+            write_place(gen_place(exm_indices[j] true) T_INT e_bin('add' VI starts[j] count))
+        }
+    }
+    endc();
+    locals.ptr[induction].vreg=old_ctr
+    loop j in [0..exm_elements.length) {locals.ptr[exm_elements[j]].vreg=int32(old_elements[j])}
+}
+exm_stride_versions=(s:ExactLoopWord assignment:ExactLoopWord count:ExactLoopWord):>bool=>$unsafe {
+    let induction=ExactLoopWord(nodes.ptr[s].sym)
+    if exm_arrays.length >? 3 or not math_word_range(s) or not stable_loop_index(induction) {return false}
+    loop l in exm_elements {
+        if locals.ptr[l].offset >=? 0 and exact_representation(ExactLoopWord(locals.ptr[l].type)) not=? T_MATH_INT {return false}
+    }
+    loop j in [0..exm_indices.length) {
+        if exm_indices[j] =? 0 {continue}
+        loop k in [0..j) {
+            if exm_indices[k] not=? 0 and nodes.ptr[exm_indices[k]].sym =? nodes.ptr[exm_indices[j]].sym {return false}
+        }
+    }
+    let strided=false
+    loop step in exm_steps {
+        if step not=? 0 {strided=true}
+    }
+    if not strided {return false}
+    let steps:array<int64>=[]
+    loop step in exm_steps {steps.push(if step =? 0 {e_iconst(1)} else {read_place(gen_place(step false) T_INT)})}
+    let worthwhile=e_bin('ges' VI count e_iconst(8))
+    let versions:ExactLoopWord=0
+    loop splat in [-1..exm_arrays.length) {
+        if splat >=? 0 and exm_steps[splat] =? 0 {continue}
+        let valid=worthwhile
+        loop j in [0..steps.length) {
+            valid=e_bin('and_' VI valid e_bin('eq' VI steps[j] e_iconst(if j =? splat {0} else {1})))
+        }
+        iff(valid);
+        exm_stride_loop(s assignment count splat);
+        els();
+        versions += 1
+    }
+    gen_for(s)
+    loop _ in [0..versions) {endc();}
+    true
+}

@@ -1,0 +1,341 @@
+use 'exact_loop.jo'
+use 'lower_scalars.dewy'
+use 'lower_storage.dewy'
+use 'lower_group.dewy'
+use 'checker_state.dewy'
+use 'ir_types.dewy'
+use 'checker_tokens.dewy'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'expr.jo'
+use 'check.jo'
+use 'checks_assign_hooks.dewy'
+use 'ir.jo'
+use 'facts.jo'
+use 'facts_library.dewy'
+use 'facts_pushes.dewy'
+use 'facts_progress.dewy'
+use 'refine.jo'
+use 'util.jo'
+use 'main.jo'
+use 'ownership.jo'
+use 'lex.jo'
+use 'exact.jo'
+use 'math_lower.jo'
+use 'lower.jo'
+use 'ownership_types.dewy'
+use 'ir_builders.dewy'
+use 'math_ops.dewy'
+use 'exact_loop_ops.dewy'
+
+exl_key = (n: int) -> int: (int(nodes[n].aux) << 32) | int(nodes[n].sym)
+exl_array = (n: int) -> bool:
+    if nodes[n].kind != .ident: return false
+    t = exact_representation(ntype(n))
+    if types[t].kind != .array or exact_representation(telem(t)) != T_INT: return false
+    if nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        if int(locals[l].flags) & LF_PARAM == 0 or int(locals[l].flags) & (LF_MUTPARAM | LF_ADDR | LF_ALIAS | LF_CAPTURED | LF_SHARED) != 0: return false
+    else if nodes[n].aux != i32(int(SK.global)): return false
+    exl_arrays[exl_key(n)] = n
+    exl_arrays.len() <= 8
+# The increment may not depend on a snapshot of an earlier accumulator value,
+# nor may a loop's trip count depend on it. Such recurrences need a different
+# bound, not multiplication by the number of iterations.
+exl_independent = (n: int) -> bool:
+    k = nodes[n].kind
+    if k == .vardecl: return not fact_mentions(int(nodes[n].b), exl_target)
+    if k == .for_:
+        return nodes[n].sym != i32(exl_target) and not fact_mentions(int(nodes[n].a), exl_target) and exl_independent(int(nodes[n].b))
+    if k == .block:
+        loop c in kids(n):
+            if not exl_independent(c): return false
+    if k == .exprstmt: return exl_independent(int(nodes[n].a))
+    true
+exl_reject = (condition: int): e_mov(exl_bad, e_bin(.or_, VI, exl_bad, condition))
+exl_add = (a: int, b: int) -> int:
+    value = e_bin(.add, VI, a, b)
+    exl_reject(e_bin(.ltu, VI, value, a))
+    exl_reject(e_bin(.lts, VI, value, e_iconst(0)))
+    value
+exl_mul = (a: int, b: int) -> int:
+    value = e_bin(.mul, VI, a, b)
+    high = e_bin(.mulhu, VI, a, b)
+    exl_reject(e_bin(.ne, VI, high, e_iconst(0)))
+    exl_reject(e_bin(.lts, VI, value, e_iconst(0)))
+    value
+exl_bound = (n0: int) -> int:
+    n = exl_strip(n0)
+    k = nodes[n].kind
+    if k == .int_lit: return e_iconst(nodes[n].ival)
+    if k == .ident:
+        l = int(nodes[n].sym)
+        if let value = exl_upper.get(l): return value
+        if let alias = exl_aliases.get(l): return exl_bound(alias)
+        value = read_place(gen_place(n, false), ntype(n))
+        exl_reject(e_bin(.lts, VI, value, e_iconst(0)))
+        exl_upper[l] = value
+        return value
+    if k == .index:
+        exl_bound(int(nodes[n].b))
+        return exl_array_upper[exl_key(int(nodes[n].a))]
+    a = exl_bound(int(nodes[n].a)); b = exl_bound(int(nodes[n].b))
+    op = nodes[n].op as Tok
+    if op == .plus: return exl_add(a, b)
+    if op == .star: return exl_mul(a, b)
+    if op == .percent: return e_addi(b, -1)
+    if op == .amp:
+        out = vreg(VI); e_mov(out, a)
+        iff(e_bin(.ltu, VI, b, a)); e_mov(out, b); endc()
+        return out
+    exl_mask(e_bin(.or_, VI, a, b))
+exl_bounds = (n: int, repeats: int):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .block:
+        loop c in kids(n): exl_bounds(c, repeats)
+    else if k == .exprstmt: exl_bounds(int(nodes[n].a), repeats)
+    else if k == .vardecl:
+        if tkind(ntype(int(nodes[n].b))) != .array: exl_upper[int(nodes[n].sym)] = exl_bound(int(nodes[n].b))
+    else if k == .return_: exl_bound(int(nodes[n].a))
+    else if k == .for_:
+        end = exl_bound(int(nodes[int(nodes[n].a)].b))
+        exl_upper[int(nodes[n].sym)] = end
+        exl_bounds(int(nodes[n].b), exl_mul(repeats, end))
+    else if k == .assign:
+        l = int(nodes[int(nodes[n].a)].sym)
+        value = exl_strip(int(nodes[n].b))
+        delta = exl_bound(int(nodes[value].b))
+        exl_upper[l] = exl_add(exl_upper[l], exl_mul(repeats, delta))
+exact_loop_guard = (body: int) -> int:
+    exl_upper = {}; exl_array_upper = {}
+    exl_bad = vreg(VI); e_mov(exl_bad, e_iconst(0))
+    loop key, node in exl_arrays:
+        pointer = read_place(gen_place(node, false), ntype(node))
+        maximum = vreg(VI); e_mov(maximum, e_iconst(0))
+        iff(e_bin(.ne, VI, pointer, e_iconst(0)))
+        length = e_load(VI, pointer, 8, 8)
+        index = vreg(VI); e_mov(index, e_iconst(0))
+        blk(); lop()
+        brif_to(e_bin(.geu, VI, index, length), ctl - 1)
+        address = e_bin(.add, VI, pointer, e_bin(.shl, VI, index, e_iconst(3)))
+        value = e_load(VI, address, 24, 8)
+        exl_reject(e_bin(.lts, VI, value, e_iconst(0)))
+        iff(e_bin(.gtu, VI, value, maximum)); e_mov(maximum, value); endc()
+        e_mov(index, e_addi(index, 1))
+        br_to(ctl); endc(); endc(); endc()
+        exl_array_upper[key] = maximum
+    exl_bounds(body, e_iconst(1))
+    e_bin(.eq, VI, exl_bad, e_iconst(0))
+exm_producer = (node: int, bits: int) -> int:
+    n = node
+    loop depth in [0..32):
+        if nodes[n].kind == .block and nodes[n].aux != 0:
+            n = block_value(n)
+            continue
+        if nodes[n].kind == .call and (fact_library_call(n, "__array2") or fact_library_call(n, "__bcast_data") or fact_library_call(n, "__nd_new_axes") or fact_library_call(n, "__shape_value")):
+            n = kid(n, 0)
+            continue
+        if nodes[n].kind == .call and nodes[n].aux == 2 and is_nd(ntype(n)) and nkids(n) == 2:
+            d = int(structs[int(types[representation_type(ntype(n))].st)].decl)
+            if d == 0 or files[pos_file(nodes[d].pos)].path != lib_dir + "/std/nd.jo": return -1
+            n = kid(n, 0)
+            continue
+        if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return -1
+        l = int(nodes[n].sym)
+        if let width = exm_produced_widths.get(l):
+            if width <= bits: return exm_produced_flags.get(l) ?? -1
+            return -1
+        flags = int(locals[l].flags)
+        if flags & LF_HELDVIEW != 0: flags &= ~LF_BYREF
+        if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_SHARED | LF_EXPOSED | LF_ALIAS) != 0: return -1
+        if l >= exact_initializers.len() or exact_initializers[l] == 0: return -1
+        n = exact_initializers[l]
+    -1
+exm_parameter = (node: int) -> int:
+    n = node
+    loop depth in [0..32):
+        if nodes[n].kind == .block and nodes[n].aux != 0:
+            n = block_value(n)
+            continue
+        if nodes[n].kind == .call and (fact_library_call(n, "__array2") or fact_library_call(n, "__bcast_data") or fact_library_call(n, "__nd_new_axes") or fact_library_call(n, "__shape_value")):
+            n = kid(n, 0)
+            continue
+        if nodes[n].kind != .ident or nodes[n].aux != i32(int(SK.local)): return 0
+        l = int(nodes[n].sym)
+        flags = int(locals[l].flags)
+        if flags & LF_HELDVIEW != 0: flags &= ~LF_BYREF
+        if flags & (LF_ASSIGNED | LF_MUTPARAM | LF_ADDR | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_SHARED | LF_EXPOSED | LF_ALIAS) != 0: return 0
+        if fns[cur_fn].params.contains(l): return l
+        if l >= exact_initializers.len() or exact_initializers[l] == 0: return 0
+        n = exact_initializers[l]
+    0
+exm_census = (l: int, node: int, bits: int) -> int:
+    key = (l << 6) | bits
+    seen = 0
+    combined = 0
+    if let cached = exm_censuses.get(key):
+        seen = cached.0
+        combined = cached.1
+    else:
+        seen = vreg(VI)
+        combined = vreg(VI)
+        lower_entry.push(Ins(op = .mov, ty = VI, dst = i32(seen), a = i32(e_iconst(0))))
+        lower_entry.push(Ins(op = .mov, ty = VI, dst = i32(combined), a = i32(e_iconst(0))))
+        exm_censuses[key] = (seen, combined)
+    iff(e_bin(.eq, VI, seen, e_iconst(0)))
+    e_mov(combined, e_iconst(0))
+    pointer = read_place(gen_place(node, false), ntype(node))
+    iff(e_bin(.ne, VI, pointer, e_iconst(0)))
+    length = e_load(VI, pointer, 8, 8)
+    index = vreg(VI); e_mov(index, e_iconst(0))
+    blk()
+    brif_to(e_bin(.geu, VI, index, length), ctl)
+    lop()
+    address = e_bin(.add, VI, pointer, e_bin(.shl, VI, index, e_iconst(3)))
+    value = e_load(VI, address, 24, 8)
+    magnitude = exm_magnitude(value, node, e_iconst(1 << (bits - 1)), bits)
+    e_mov(combined, e_bin(.or_, VI, combined, magnitude))
+    e_mov(index, e_addi(index, 1))
+    brif_to(e_bin(.ltu, VI, index, length), ctl); endc(); endc(); endc()
+    e_mov(seen, e_iconst(1))
+    endc()
+    combined
+exm_width = (n0: int, bits: int) -> int:
+    if exact_has_store(n0) and not exact_proved(n0): exm_obligation = true; exact_map_stores[n0] = true
+    if nodes[n0].kind == .conv and nodes[n0].aux == i32(int(CV.int_)) and exact_representation(ntype(n0)) == T_INT and exact_representation(ntype(int(nodes[n0].a))) == T_MATH_INT:
+        exm_obligation = true; exact_map_stores[n0] = true
+    n = exl_strip(n0)
+    if exact_representation(ntype(n)) != T_INT and exact_representation(ntype(n)) != T_MATH_INT: return 10000
+    k = nodes[n].kind
+    if k == .int_lit: return exact_type_width(n) / 2
+    if k == .ident:
+        if nodes[n].aux != i32(int(SK.local)): return 10000
+        l = int(nodes[n].sym)
+        if exm_elements.contains(l): return bits
+        if exact_representation(ntype(n)) != T_INT and not math_proven_word(n): return 10000
+        if int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_ADDR | LF_BYREF | LF_MUTPARAM) != 0: return 10000
+        if not exm_scalars.contains(n): exm_scalars.push(n)
+        if exm_scalars.len() > 8: return 10000
+        return bits
+    if k == .call and nkids(n) == 2 and (fact_library_call(n, "min") or fact_library_call(n, "max")): return max(exm_width(kid(n, 0), bits), exm_width(kid(n, 1), bits))
+    if k == .unary and nodes[n].op == i32(int(Tok.minus)): return exm_width(int(nodes[n].a), bits) + 1
+    if k != .binary or nodes[n].aux != 0: return 10000
+    if has_flag(n, NF_BROADCAST): exm_broadcast = true
+    a = exm_width(int(nodes[n].a), bits); b = exm_width(int(nodes[n].b), bits)
+    op = nodes[n].op as Tok
+    if op == .plus or op == .minus: return max(a, b) + 1
+    if op == .star: return a + b
+    if op == .amp or op == .pipe or op == .caret: return max(a, b)
+    10000
+# The census proves this entire expression, including min/max call arguments.
+# Consume its internal words directly; the fallback keeps the tagged ABI.
+exm_word = (n0: int) -> int:
+    n = exl_strip(n0)
+    k = nodes[n].kind
+    if k == .int_lit: return e_iconst(nodes[n].ival)
+    if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        l = int(nodes[n].sym)
+        loop j in [0..exm_elements.len()):
+            if exm_elements[j] == l: return exm_element(int(locals[l].vreg), exm_arrays[j])
+        return math_word_expr(n)
+    if k == .binary:
+        a = exm_word(int(nodes[n].a)); b = exm_word(int(nodes[n].b))
+        return e_bin(int_op(nodes[n].op as Tok, true), VI, a, b)
+    if k == .unary: return e_un(.neg, VI, exm_word(int(nodes[n].a)))
+    if k == .call:
+        a = exm_word(kid(n, 0)); b = exm_word(kid(n, 1))
+        maximum = fact_library_call(n, "max")
+        result = vreg(VI)
+        emit(.select, VI, result, e_bin(.gts, VI, a, b), (if maximum: a else: b), (if maximum: b else: a), 0)
+        return result
+    gen_expr(n).v
+exm_tagged_word = (n0: int) -> int:
+    n = exl_strip(n0)
+    if not exm_tagged_source(n): return e_bin(.shl, VI, exm_word(n), e_iconst(1))
+    k = nodes[n].kind
+    if k == .ident: return int(locals[int(nodes[n].sym)].vreg)
+    if k == .unary: return e_un(.neg, VI, exm_tagged_word(int(nodes[n].a)))
+    if k == .binary:
+        op = nodes[n].op as Tok
+        a = int(nodes[n].a); b = int(nodes[n].b)
+        if op == .star:
+            if exm_tagged_source(a): return e_bin(.mul, VI, exm_tagged_word(a), exm_word(b))
+            return e_bin(.mul, VI, exm_word(a), exm_tagged_word(b))
+        return e_bin(int_op(op, true), VI, exm_tagged_word(a), exm_tagged_word(b))
+    e_bin(.shl, VI, exm_word(n), e_iconst(1))
+# The range census already proved the arithmetic of this generated map. Make
+# at most four stride versions (all unit, or one splat among up to three inputs),
+# not a Cartesian product. Other shapes keep the original guarded scalar loop.
+# The loads are in bounds by broadcast shape validation. Splat loads stay behind
+# the nonempty test; each version has private element and induction registers.
+exm_stride_loop = (s: int, assignment: int, count: int, splat: int):
+    induction = int(nodes[s].sym)
+    old_ctr = locals[induction].vreg
+    ctr = vreg(VI)
+    locals[induction].vreg = i32(ctr)
+    old_elements: int[]
+    loop l in exm_elements:
+        old_elements.push(int(locals[l].vreg))
+        locals[l].vreg = i32(vreg(VI))
+    e_mov(ctr, e_iconst(0))
+    blk()
+    brif_to(e_bin(.ges, VI, ctr, count), ctl)
+    bases: int[]
+    starts: int[]
+    loop j in [0..exm_arrays.len()):
+        pointer = read_place(gen_place(exm_arrays[j], false), ntype(exm_arrays[j]))
+        start = if exm_indices[j] == 0: e_iconst(0) else: read_place(gen_place(exm_indices[j], false), T_INT)
+        starts.push(start)
+        base = e_bin(.add, VI, pointer, e_bin(.shl, VI, start, e_iconst(3)))
+        bases.push(base)
+        if j == splat: e_mov(int(locals[exm_elements[j]].vreg), e_load(VI, base, 24, 8))
+    lop()
+    loop j in [0..exm_arrays.len()):
+        if j == splat: continue
+        address = e_bin(.add, VI, bases[j], e_bin(.shl, VI, ctr, e_iconst(3)))
+        e_mov(int(locals[exm_elements[j]].vreg), e_load(VI, address, 24, 8))
+    mathematical = prune(int(locals[induction].type)) == T_MATH_INT
+    if mathematical: math_word_regs[induction] = ctr
+    gen_stmt(assignment)
+    if mathematical: math_word_regs.remove(induction)
+    e_mov(ctr, e_addi(ctr, 1))
+    brif_to(e_bin(.lts, VI, ctr, count), ctl)
+    endc()
+    # Preserve the observable cursor state, including a full vector plus tail.
+    loop j in [0..exm_indices.len()):
+        if exm_indices[j] != 0 and j != splat:
+            write_place(gen_place(exm_indices[j], true), T_INT, e_bin(.add, VI, starts[j], count))
+    endc()
+    locals[induction].vreg = old_ctr
+    loop j in [0..exm_elements.len()): locals[exm_elements[j]].vreg = i32(old_elements[j])
+exm_stride_versions = (s: int, assignment: int, count: int) -> bool:
+    induction = int(nodes[s].sym)
+    if exm_arrays.len() > 3 or not math_word_range(s) or not stable_loop_index(induction): return false
+    loop l in exm_elements:
+        if locals[l].offset >= 0 and exact_representation(int(locals[l].type)) != T_MATH_INT: return false
+    loop j in [0..exm_indices.len()):
+        if exm_indices[j] == 0: continue
+        loop k in [0..j):
+            if exm_indices[k] != 0 and nodes[exm_indices[k]].sym == nodes[exm_indices[j]].sym: return false
+    strided = false
+    loop step in exm_steps:
+        if step != 0: strided = true
+    if not strided: return false
+    steps: int[]
+    loop step in exm_steps: steps.push(if step == 0: e_iconst(1) else: read_place(gen_place(step, false), T_INT))
+    worthwhile = e_bin(.ges, VI, count, e_iconst(8))
+    versions = 0
+    loop splat in [-1..exm_arrays.len()):
+        if splat >= 0 and exm_steps[splat] == 0: continue
+        valid = worthwhile
+        loop j in [0..steps.len()):
+            valid = e_bin(.and_, VI, valid, e_bin(.eq, VI, steps[j], e_iconst(if j == splat: 0 else: 1)))
+        iff(valid)
+        exm_stride_loop(s, assignment, count, splat)
+        els()
+        versions += 1
+    gen_for(s)
+    loop _ in [0..versions): endc()
+    true
