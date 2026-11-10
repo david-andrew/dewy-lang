@@ -53,6 +53,8 @@ xc_coerce_host = (n: int, t: int) -> int:
 xc_type_text_host = (n: int, t: int) -> int:
     events.push("type-text:{n}:{t}")
     T_STR
+xc_fixed_moved_host = (from: int, to: int):
+    xc_seen = xc_seen
 xc_set_coerce_host = (n: int, t: int):
     events.push("set:{n}:{t}")
     nodes[n].type = i32(t)
@@ -199,6 +201,7 @@ CAST_JO = {
         'cast_refine': 'cast_refine = (n: int, t: int): xc_refine_host(n, t)',
         'can_coerce': 'can_coerce = (n: int, from0: int, to0: int) -> bool: xc_can_coerce_host(n, from0, to0)',
         'coerce': 'coerce = (n: int, target: int) -> int: xc_coerce_host(n, target)',
+        'fact_fixed_moved': 'fact_fixed_moved = (from: int, to: int): xc_fixed_moved_host(from, to)',
         'cast_type_text': 'cast_type_text = (n: int, ft: int) -> int: xc_type_text_host(n, ft)',
         'cast_set_coerce': 'cast_set_coerce = (n: int, t: int): xc_set_coerce_host(n, t)',
         'cast_bundled': 'cast_bundled = (t: int, bigint: bool) -> bool: xc_bundled_host(t, bigint)',

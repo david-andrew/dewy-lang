@@ -806,6 +806,12 @@ duration_hint = (n: int, from: int, to: int) -> str:
     if member: return " (a time known only at run time may not fit: `convert<Duration>({shown})` gives the `Duration` or the failure, `OffGrid | OutOfRange`; take it with `?? fallback` or `or_throw`)"
     " (a time known only at run time may not fit: `convert<Duration>({shown})` gives the `Duration` or the failure)"
 
+# A cast node takes its coerced operand's node (xc_take): the operand's pending
+# fixed-size boundary, registered just before by coerce, now lives at `to`.
+fact_fixed_moved = (from: int, to: int):
+    last = fact_fixed_requests.len() - 1
+    if last >= 0 and fact_fixed_requests[last].node == from: fact_fixed_requests[last].node = to
+
 coerce = (n: int, target: int) -> int:
     if target == 0: return n
     # (a settled value already of the type: none of the cases below applies but to literals,

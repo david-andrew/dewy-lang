@@ -1,0 +1,12 @@
+# `as` a fixed-size array under a length guard proves the same way the annotated let does.
+show = (a:array<int64 length=3>) => printl(a)
+main = (args:array<string>) => {
+    let dyn:array<int64> = [1 2 3]
+    if args.length >? 5 { dyn.push(1) }
+    if dyn.length =? 3 {
+        let y = dyn as array<int64 length=3>
+        let z:array<int64 length=3> = dyn
+        show(dyn as array<int64 length=3>)
+        printl"{y} {z}"
+    }
+}

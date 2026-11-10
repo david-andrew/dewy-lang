@@ -59,6 +59,7 @@ xc_union = (t0: int) -> bool:
 xc_bundled = (t: int, bigint: bool) -> bool: xc_kind(t) == .struct_ and cast_bundled(t, bigint)
 xc_take = (n: int, a: int):
     xc_nodes[0][n] = xc_nodes[0][a]
+    fact_fixed_moved(a, n)
     xc_last[0] = n
 xc_mark = (a: int): xc_nodes[0][a].flags = i32(int(xc_nodes[0][a].flags) | 128)
 struct CheckerCastResult:

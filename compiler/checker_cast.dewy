@@ -6,7 +6,7 @@ from p"type_inference.dewy" import (tu_prune tu_equal tu_unify)
 from p"type_constructors.dewy" import tb_mk_array
 from p"checker_resolve.dewy" import ct_resolve_type
 from p"checker_expr.dewy" import check_expr
-from p"expr.jo" import (finalize_literal can_coerce coerce)
+from p"expr.jo" import (finalize_literal can_coerce coerce fact_fixed_moved)
 from p"checks_cast_hooks.dewy" import (cast_unit cast_size cast_refine cast_type_text cast_set_coerce cast_bundled cast_conversion cast_helper cast_record cast_text cast_storage cast_error)
 from p"unit_ops.dewy" import (quantity_transmute)
 from p"secret_checks.dewy" import secret_cast
@@ -74,6 +74,7 @@ xc_bundled=(t:XCWord big:bool):>bool=>$unsafe {
 # The cast node takes its operand's node, published as checked.
 xc_take=(n:XCWord a:XCWord):>void=>$unsafe {
     xc_nodes[0][n]=xc_nodes[0].ptr[a]
+    fact_fixed_moved(a n)
     xc_last[0]=n
 }
 xc_mark=(a:XCWord):>void=>$unsafe {xc_nodes[0][a].flags=xc_nodes[0].ptr[a].flags | 128}

@@ -1,0 +1,7 @@
+# Near miss: with no guard the conversion is still unproven.
+main = (args:array<string>) => {
+    let dyn:array<int64> = [1 2 3]
+    if args.length >? 5 { dyn.push(1) }
+    let y = dyn as array<int64 length=3>
+    printl(y)
+}
