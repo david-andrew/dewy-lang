@@ -2217,6 +2217,8 @@ finish_partial = (n: int, ptypes: int[], mutmask: int, ret: int) -> int:
     t = mk_fn(hp, ret, mm)
     nodes[n].type = i32(t)
     nodes[n].d = i32(th)
+    # (checked: a comprehension's push takes it as it is, `[loop s in xs @load(s)]`)
+    add_flag(n, NF_CHECKED)
     t
 
 call_targs: int[]              # type arguments written at the call being resolved (f[T](...))

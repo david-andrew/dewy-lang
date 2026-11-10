@@ -424,7 +424,8 @@ ungrouped `@` chain partially evaluates (`@sum(1)(2)`); parentheses end the
 chain, after which an argument group calls (`(@sum(1))(2)`). An elementwise group
 is one too: `@load.(sources)` is an array of partials, one per element, with scalar
 arguments repeated (`@fetch.(urls 3)`), and nothing is called; `race(@load.(sources)...)`
-spreads it. A parameter left to
+spreads it. A partial is a value like any other, so a comprehension collects partials too:
+`[loop s in sources @load(s)]`. A parameter left to
 its default must have a literal default for now. An overloaded or generic
 function partially evaluates too: the arguments choose the version, as in a
 call, and an annotation such as `let f:(b:int64:>int64) = @max(x)` chooses

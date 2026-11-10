@@ -1,0 +1,14 @@
+# modes: native native-release
+# A partial is a value a comprehension collects, grouped or not: `[loop s in xs @load(s)]` is
+# the array `@load.(xs)` makes, and race takes it spread.
+load = (src:string):>string => "from {src}"
+fetch = (src:string tries:int64):>string => "{src} x{tries}"
+main = () => {
+    let xs = ["a" "b"]
+    let ps = [loop s in xs @load(s)]
+    let grouped = [loop s in xs (@load(s))]
+    let blocks = [loop s in xs { @fetch(s 2) }]
+    let open = [loop s in xs @fetch(s)]
+    printl"{ps.length} {ps[0]()} {grouped[1]()} {blocks[1]()} {open[0](4)}"
+    printl"race {race([loop s in xs @load(s)]...) is? string}"
+}
