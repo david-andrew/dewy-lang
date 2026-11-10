@@ -12,7 +12,7 @@
   - `or_throw` forwards an error to the caller, `??` substitutes a default for any error or `none`, and `??<E>` does so only for error type `E`.
   - `@f` is a handle to function `f`, and `$name` is a metatag.
 - **Revised 2026-11-07:** D4, D10, D11, D28, D29, D31 and D33–D37 were revised together. Independent agents dogfooded them twice, they were made consistent with each other, and every name was read cold. Each item states its floors and whether it is ready.
-- **Revised 2026-11-10:** D4 Q7 is back, redesigned after your answer: settings chosen at run time, six rounds, dogfooded and reviewed.
+- **Revised 2026-11-10:** D4 Q4 and Q7 are back, redesigned after your answers: Ctrl-C and the other scopes as `inline` blocks (four rounds), and settings chosen at run time (six rounds), each dogfooded, regraded and reviewed independently.
 - **Revised 2026-11-09:** D4's `select` (v6): arms match by type, your `<heart.Tick>` members tell sources apart (built by `$named`), `race` cancels, `merged` drains. Eleven rounds, six independent reviews, every new spelling read cold. Q10 (`type of string`, `ticker<T>`) is withdrawn: source-qualified members made it unnecessary.
 - **Closed:** D22 (`$parallel_safe` deleted), D26 and D27. Your answers of 2026-11-07 are in decisions.md, batch 4; of 2026-11-09 (D4 Q8, Q11–Q17), batch 7.
 - **Question kinds:** (a) changes something you decided; (b) new syntax or surface; (c) names only. Question numbers are kept as first asked, so answered ones leave gaps.
@@ -27,6 +27,7 @@
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
 - **(b) New syntax or surface:**
+  - D4 Q4: Ctrl-C, task groups and protection as `inline` blocks that are the caller's code;
   - D4 Q18 (optional): `memory_left`;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D11 Q2: `check=` or `valid_if=`;
@@ -47,7 +48,6 @@
   - D37 Q2;
   - D38 Q2: prefer familiar words;
   - D39 Q2: `stack` and `Ragged`.
-- **Being redesigned after your answers:** D4 Q4 (Ctrl-C and the other scopes as blocks).
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -56,7 +56,7 @@
 
 ### D4. One unified `parallel` surface: v5
 
-- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` waits on channel operations and its arms match the outcomes by type; `race` is the word that cancels the losers. Ctrl-C catching and cleanup protection are visible scopes (their form is being redesigned, Q4); compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
+- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` waits on channel operations and its arms match the outcomes by type; `race` is the word that cancels the losers. Ctrl-C catching, task groups and cleanup protection are `inline` blocks that are the caller's own code (Q4); compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
 - **Status:** first-pass paper dogfood covered fourteen scenarios; independent dogfood in `proposals/concurrency/unified/v5-dogfood.md` found must-fix issues, now corrected in this text. Your approved names, `$explicit_cancellation` and `main`'s `BackgroundTasks` parameter stay. The remaining surface questions are below; no repeated Q1 or Q3. Full design and complete sources: `~/dev/tmp/par5/parallel-v5.md`, `~/dev/tmp/par5/programs/`.
 
 ```dewy
@@ -117,13 +117,13 @@ main = () => {
         }
         relay(commands chat) or_throw
     }
-    task.tasks((group:Tasks) => {
+    task.tasks inline with group {
         let saver = group.spawn(@autosave)
         let tick = ticker(500ms)
         defer tick.stop()
         loop i in [0..4) tick.next or_throw;
         saver.stop()
-    }) or_throw
+    } or_throw
     printl"{map} {sounds} {ages} {total}"
 }
 ```
@@ -132,14 +132,14 @@ main = () => {
   - Write steps in order in `parallel { ... }`; independent steps can run together. Ordinary successful values match source order given the same handle results.
   - `[parallel x in xs f(x)]` maps; `?? void` filters ordinary failures, and `.partition_failures` retains successes and failures.
   - `merged(@commands.receive @chat.receive)` yields each value until both channels close; `match` tells a `Command` from a `string` by type. A one-shot `select(...)` gives the union of its waits' outcomes plus `Canceled` (and `Timeout` with `timeout=`); `or_throw<Canceled>` forwards only the cancellation. See the `select` section below.
-  - `task.tasks` is a function imported from the standard task module, not a language keyword or hidden local. It passes a fresh `Tasks` group to the callback, joins, then returns the callback's value. Void callbacks stay void; a useful group result needs a binding or `;`.
+  - `task.tasks` is a function imported from the standard task module, not a language keyword or hidden local. It hands a fresh `Tasks` group to its `inline with group { … }` block, joins, then gives the block's value. Void blocks stay void; a useful group result needs a binding or `;`.
 - **How to adjust:**
   - Link a step to an earlier result, group ordered statements in `{ ... }`, or put work after the parallel block to order it.
   - Prefix a loop/comprehension with `$parallel.max_concurrent=4` to cap work in flight. A collector spells the prefix inside its `[...]`, before `parallel`.
   - Prefix a block/function with `$parallel.off` for source-priority cooperative replay. One core is a separate resource policy.
   - Put `check_cancel() or_throw` at a safe point in compute. The function's result includes `Canceled`; no guard variable activates anything.
-  - `task.protect_from_cancel(5s () => save(value))` lets a save run despite the parent's pending cancel. Its own deadline is cooperative, and the result still reports save errors or `Timeout`.
-  - Put a prompt loop inside `task.catch_ctrl_c((ctrl_c) => { ... })` to take Ctrl-C as an event or `Interrupted` input result. The scope ends with the call, regardless of aliases to its listener.
+  - `task.protect_from_cancel(5s) inline { save(value) }` lets a save run despite the parent's pending cancel. Its own deadline is cooperative, and the result still reports save errors or `Timeout`.
+  - Put a prompt loop inside `task.catch_ctrl_c inline { ... }` (or `inline with ctrl_c { ... }` for the listener) to take Ctrl-C as an event or `Interrupted` input result. The scope ends with the brace; the listener can't outlive it.
 
 - **A prompt with its own Ctrl-C behavior:** all application names below are declared; `input`, `Interrupted`, and the clock/printing types are standard-library/prelude names.
 
@@ -147,16 +147,16 @@ main = () => {
 # Ctrl-C during input clears the line; EOF/quit leaves the visible scope.
 import p"@lib/std/tasks.dewy" as task
 
-repl = () => task.catch_ctrl_c((ctrl_c) => {
+repl = () => task.catch_ctrl_c inline {
     loop true {
         let line = input("> ") ??<Interrupted> { printl(""); continue } ?? break
         if line =? "quit" break
         printl"you said {line}"
     }
-})
+}
 main = () => {
     repl() or_throw
-    # The catcher has ended even though ctrl_c was never dropped explicitly.
+    # The catcher ended with the brace.
     printl"normal Ctrl-C behavior restored"
     sleep(100ms) or_throw
 }
@@ -174,13 +174,17 @@ search = (@best:int):>void | Canceled => {
         if n % 7919 =? 0 best = n
     }
 }
-save = (best:int) => p"best.txt".write_text("{best}\n")
+save = (best:int) => {
+    p"best.txt".write_text("{best}\n") or_throw;
+    p"best.txt"
+}
 main = () => {
     let best:int = 0
     search(@best) ??<Canceled> {
-        match task.protect_from_cancel(5s () => save(best)) or_throw<Canceled> {
+        match task.protect_from_cancel(5s) inline { save(best) } {
             saved:Path => printl"saved to {saved}"
             <Timeout> => printl("save deadline expired" file=stderr)
+            <Canceled> => Canceled or_throw
             problem:error => printl("save failed: {problem}" file=stderr)
         }
         return Canceled
@@ -260,19 +264,52 @@ main = (argv:array<string>) => {
   - **Writes:** block items may write outer variables under the dependency graph; loop items may write only their own partition; spawned tasks cannot write outer variables. Helpers preserve these rules.
   - **Scope results:** block items' values remain source-ordered; top-level block `let`s remain visible after the block; `( ... )` is one ordered item. The unusual binding scope stays flagged.
   - **Select diagnostics:** a plain `select` in a loop whose `Closed` arm neither leaves nor changes the waits is an error pointing to `merged`; hover lists the outcome types, including each `Closed<T>` and `Timeout` where applicable. A misplaced comprehension tag above `let` says “move this inside the brackets, before `parallel`”.
-  - **Group-body result:** `task.tasks(body)` preserves the body's value after joining, just like the other callback scopes; early `return` is local to the callback. Child failure/parent cancellation joins before returning a failure instead. No contextual-void suppression of useful group values.
+  - **Group-body result:** `task.tasks inline with group { … }` gives the block's value after joining, like the other scopes; `return` in the block leaves the enclosing function (Q4). Child failure/parent cancellation joins before returning a failure instead. No contextual-void suppression of useful group values.
   - **Select protocol:** the arguments are operations (or `none`, skipped, or a spread of one type); the result is the union of their outcomes with duplicates merged, plus top-level `Canceled` and `Timeout` when a timeout is given. Exactly one operation commits; a losing receive takes nothing. `select` never cancels work; `race`, `first_ok` and `within` do, and join before returning.
   - **Cancellation is result-typed:** `Canceled` remains visible in results and ordinary error handling. No second, hidden exception mechanism or cancellation row is needed for these programs. A result excluding `Canceled` forbids an unhandled cancel, without claiming the function never checks it locally.
   - **Explicit cancellation:** `$explicit_cancellation` is approved and included in `$bulletproof`. It rejects implicit forwarding through `??` and collectors. `or_throw<Canceled>` writes the forwarding; `or_throw<E>` with some other E leaves cancellation in the value.
-  - **Ctrl-C scopes:** default Ctrl-C requests root cancellation; an unhandled Ctrl-C-derived cancel exits 130. Catching redirects presses only for the callback's lifetime, without masking other stop sources. Console signatures always include `Interrupted`; scope context does not rewrite their types. Three rapid presses force exit even while caught. Child-process signal/job-control behavior is unchanged.
-  - **Protection:** run the body in a new scope despite a pending parent cancel, apply its own cooperative deadline, then restore the parent without clearing its request. A callback's intrinsic errors remain. Save failures must be reported; protection is not guaranteed persistence.
+  - **Ctrl-C scopes:** default Ctrl-C requests root cancellation; an unhandled Ctrl-C-derived cancel exits 130. Catching redirects presses only for the brace, without masking other stop sources. Console signatures always include `Interrupted`; scope context does not rewrite their types. Three rapid presses force exit even while caught. Child-process signal/job-control behavior is unchanged.
+  - **Protection:** run the body in a new scope despite a pending parent cancel, apply its own cooperative deadline, then restore the parent without clearing its request. The block's own errors remain. Save failures must be reported; protection is not guaranteed persistence.
   - **Task policies:** a scoped group fails fast; `BackgroundTasks` reports a child error without ending the program. An owner/self/group stop is normal group shutdown: a canceled child does not fail the group or print a task error. `Task<E>.wait()` still gives `void|E|Canceled`; `.error` retains `E|none` for ordinary errors. Consume an expected child cancellation explicitly while still checking the caller for a concurrent stop. Event sources use `.next`.
   - **Frame code:** use nonwaiting `ch.drain` and background jobs; channel/task/timer waits remain errors in `update`/`draw`. The injected group survives `main` until the window closes.
   - **Entrypoint arguments:** accept at most one `array<string>` and one `BackgroundTasks`, by exact type rather than parameter name; no extra injections into ordinary helpers. Only the selected file's entry `main` runs automatically.
   - **Limits:** settings are in source, caps count cores, and `available_cores` combines hardware/affinity and source limits. No environment-variable cap. Program task admission retains the decided explicit-allocation-failure policy.
 - **`select`, `race` and channel waits:** decided 2026-11-09 (decisions.md, batch 7), except Q9 below. Full text: `proposals/concurrency/unified/select-v6-round11.md`.
 - **Surface questions for you:**
-  - **Q4: being redesigned.** Your answer: Ctrl-C (and likewise task groups and protection) should read like a block, so `return`, `break` and `or_throw` act on the enclosing function as usual instead of on a callback. A design round is under way and comes back here with the new form.
+  - **Q4 (b): Ctrl-C, task groups and protection as blocks: a call marked `inline` takes a brace that is the caller's own code?** What it does:
+
+```dewy
+repl = () => {
+    task.catch_ctrl_c inline {               # Ctrl-C clears the line instead of quitting
+        loop true {
+            let line = input("> ") ??<Interrupted> { printl(""); continue } ?? break
+            if line =? "quit" return         # leaves repl, not a callback
+            printl"you said {line}"
+        }
+    }
+    printl"end of input"
+}
+
+serve = (port:int) => task.tasks inline with group {   # group is created by the call
+    group.spawn(@accept_loop(port));
+    let command = read_command or_throw      # forwards from serve; children stop, then join
+    if command =? "quit" return              # stops the children, joins, leaves serve
+}
+
+match task.protect_from_cancel(5s) inline { save(best) } {
+    saved:Path => printl"saved to {saved}"
+    <Timeout> => printl("save deadline expired" file=stderr)
+    problem:error => printl("save failed: {problem}" file=stderr)
+}
+```
+
+    - `inline { … }` binds nothing; `inline with name { … }` binds what the call hands in. A brace without `inline` stays a separate block, as today, so the parser never needs to know the callee.
+    - In the brace, `return`, `break`, `continue` and `or_throw` act on the function that wrote it, exactly as in a plain block; an assignment doesn't catch them (your notes at `discussion_points.md:465` and `:502`; line 455 is about generator literals). The callee's `defer`s run on the way out.
+    - `catch_ctrl_c`, `tasks` and `protect_from_cancel` are ordinary library functions with a `scope(…:>R)` parameter, checked once; any library can write its own (`bracket(open close) inline with log { … }` releases on every exit). The block runs at most once, on the caller's task; a block that runs several times would be a later, separate marker (your `#insert body(break=…)` note).
+    - Leaving a task group early (`return`, `break`, `or_throw`, a failure value) stops its children, then joins, as `concurrent` already does. A group's error type is part of its type, `Tasks<E>`. A shield's own deadline is `Timeout` even after Ctrl-C has canceled the parent; operations inside it still report `Canceled`.
+    - **Trades you should know:** if a cleanup step fails while the block is returning normally, the `return` doesn't happen: the failure becomes the call's result and the line after the call runs (with a warning if that failure is defaulted or discarded). If the block is already returning a failure, the cleanup's failure is dropped (an error with a cause belongs to the cleanup design). `or_throw` in the brace is not seen by a `??` on the call.
+    - **Cold read:** three of six readers took `do { … }` for a callback; `inline { … }` and `inline with group { … }` were read as the caller's code by all three, and `group` as created by the call. `within` also read well but is the deadline function. The `scope(…)` parameter type read weakly; its diagnostic ("this block is part of the caller, so `return` leaves this function") carries it.
+    - **Dogfooded:** 17 programs over four rounds, three independent regrades and three correctness reviews. Floor 3 from the independent regrader on three programs, all from the trades above: a save that needs four match arms (`Timeout` beside `Canceled`), a `Canceled` arm whose error was rewritten out of sight, and a `return 0` that becomes `-1` when a child had failed. The rest are 4, from those trades or decided v6 surface. No open must-fix. Full rules: `proposals/scope-blocks/summary.md`. Cleanup (`defer` alternatives) is still a later round; this form is what a region-shaped answer would use. **Rec:** yes; reversible.
   - **Q6 (a, b): make construct settings prefix their target language-wide?** Tags and labels sit before loops, blocks, and declarations. One contiguous module header may be at file start or after the initial imports, before the first ordinary declaration/statement; imported units are in scope. Later prefixes apply only to their next construct. Program settings may also directly prefix entry `main`, and are fixed at compile time. This replaces both current containing-scope placement and the first-line-inside-parallel exception. It unblocks consistent examples in every design item. **Rec:** yes. Reversible before the surface ships; broader than concurrency, and explicitly changes the prior placement direction.
   - **Q7 (a): settings chosen by a run-time value, as above?** What it does:
     - A cap, schedule or policy (`$program.max_cores`, `$program.max_memory`, `$parallel.*`, `$time.zone`, …) written in a function or block starts at its line and covers the rest of that scope, what it calls, and the tasks it starts, even after the call returns. `{ $program.max_cores = cores; run() }` limits one call; `cores` may be a value read from a config file. Code settings (`$runtime_checks`, `$fast_math`) still cover their whole scope.
