@@ -1,0 +1,22 @@
+# modes: native
+# quick
+# An error in one function does not unprove the index proofs of another: the run
+# that looks for the errors after the first decides proofs with the same plans.
+Matrix:type = [rows:int64 cols:int64 cells:array<int>]
+broadcast = (matrix:Matrix row:array<int64>):>Matrix => {
+    $runtime_assert row.length =? matrix.cols
+    $runtime_assert matrix.cells.length =? matrix.rows*matrix.cols
+    loop r in [0..matrix.rows) {
+        loop c in [0..matrix.cols) {
+            matrix.cells[r*matrix.cols+c] += row[c]
+        }
+    }
+    return matrix
+}
+main = () => {
+    let m = broadcast(Matrix[1 2 [1 2]] [3 4])
+    printl(m.cells.length)
+}
+later = () => {
+    let w:int64 = "text"
+}

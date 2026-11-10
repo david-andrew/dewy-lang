@@ -232,7 +232,7 @@ def test_surface_member_calls(compiler, tmp_path):
 
 MEMBER_CALL_ERRORS = {
     'builtin-needs-arguments': ('main = () => { let xs = [1]\nxs.push }', "'push' needs arguments: `xs.push(...)`"),
-    'function-needs-arguments': ('Shape:type = [w:int64]\ngrow = (s:Shape by:int64):>int64 => s.w + by\n'
+    'function-needs-arguments': ('Shape:type = [w:int64]\ngrow = (s:Shape by:int64):>int => s.w + by\n'
                                  'main = () => { let s = Shape[1]\nprintl"{s.grow}" }', "'grow' needs arguments: `s.grow(...)`"),
     'const-receiver': ('main = () => { const xs = [1 2]\nlet x = xs.pop }', "cannot modify const 'xs'"),
 }

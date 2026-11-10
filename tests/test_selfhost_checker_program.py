@@ -257,10 +257,11 @@ MAIN = r'''main = ():
     assert(export_fns.len() == 1 and not pg_ffi)
     assert(events.contains("exact_prepare") and events.contains("ownership_finalize") and events.contains("effects_finalize"))
     print(events)
-    # Errors-only checking still finishes domains and initializers, but no analyses.
+    # Errors-only checking still finishes domains, initializers and the exact plans its
+    # proofs need, but no other analyses.
     pg_prepare(); errors_only = true; test_mode = true; target_macos = true
     check_program("tests.dewy")
-    assert(not events.contains("exact_prepare") and not events.contains("effects_finalize"))
+    assert(events.contains("exact_prepare") and not events.contains("effects_finalize"))
     assert(events.contains("runtime:__test_run_begin") and events.contains("demand:__mac_syscall"))
     assert(init_fns.len() == 4 and events.contains("string_domains_materialize"))
     print(events)

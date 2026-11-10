@@ -306,9 +306,10 @@ check_program = (main_path: str):
     string_domains_materialize()
     int_domains_finish()
     data_access_finalize()
+    # (a run for the errors after the first decides proofs too: they need the exact plans)
+    icb = ic_switch(IC_FACTS, IC_SHARED)
+    exact_prepare()
     if not errors_only:
-        icb = ic_switch(IC_FACTS, IC_SHARED)
-        exact_prepare()
         ic_switch(IC_OWNERSHIP, IC_SHARED)
         ownership_finalize()
         ic_switch(IC_EFFECTS, IC_SHARED)
@@ -316,4 +317,4 @@ check_program = (main_path: str):
         concurrency_claims_finalize()
         deadlock_finalize()
         effects_finalize()
-        ic_restore(icb)
+    ic_restore(icb)
