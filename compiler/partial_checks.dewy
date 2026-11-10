@@ -1,0 +1,307 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_MUT NF_SPREAD add_flag decl_has_rest has_flag kid kids mk nkids nodes rest_bundles set_list)
+from p"check.jo" import (FK_PARTIAL check_struct_fields cur_mod fns lib_dir module_lookup syms)
+from p"checker_call_cost.dewy" import (arg_cost)
+from p"checker_call_queries.dewy" import (ctx_dependent intrinsic_of)
+from p"checker_call_resolve.dewy" import (resolve_fn_call)
+from p"checker_expr.dewy" import (check_args_untyped check_call check_expr lookup)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_thin.dewy" import (new_inst)
+from p"checks_thin_expr.dewy" import (constant_default)
+from p"dewy_method_ops.dewy" import (dewy_type_method)
+from p"expr.jo" import (AUX2_PARTIAL call_collect_fns call_collect_module call_collect_named callee_at decl_in_prelude dewy_member_name intrinsics last_checked map_args match_type)
+from p"refine.jo" import (ref_has_formals refine_active)
+from p"select_checks.dewy" import (select_place)
+from p"type_ops.dewy" import (dt mk_fn)
+from p"types.jo" import (fields prune structs targ tkind types)
+from p"util.jo" import (fatal files name_of pos_file)
+
+PartialWord:type=int64<overflow='wrap'>
+# A rest parameter's argument: the positional arguments it gathers, as the array literal
+# `[a b xs...]` (a spread stays a spread). Its length is known when none is spread, and the
+# instance takes a fixed array of that length (rest_instance_type).
+rest_bundle=(gathered:array<int64> decl:PartialWord rest:PartialWord):>int64=>$unsafe {
+    let at=if gathered.length >? 0 {nodes.ptr[gathered[0]].pos} else {0}
+    if at =? 0 and decl not=? 0 {at=nodes.ptr[kid(decl rest)].pos}
+    let b=mk('array' at)
+    set_list(b gathered)
+    let count=gathered.length
+    loop a in gathered {
+        if has_flag(a NF_SPREAD) {count=-1}
+    }
+    rest_bundles[b]=count
+    b
+}
+# Does call c's callee, by name, take a rest parameter? (values_expand then keeps a spread of an
+# array of unknown length whole, for the rest parameter to take)
+values_rest_call=(c:PartialWord):>bool=>$unsafe {
+    if c =? 0 {return false}
+    let callee=PartialWord(nodes.ptr[c].a)
+    if nodes.ptr[callee].kind =? 'typeapply' {callee=PartialWord(nodes.ptr[callee].a)}
+    if nodes.ptr[callee].kind not=? 'ident' {return false}
+    let s=lookup(PartialWord(nodes.ptr[callee].name))
+    if s =? 0 or syms.ptr[s].kind not=? 'fns' {return false}
+    let ds:array<int64>=[]
+    call_collect_named(PartialWord(nodes.ptr[callee].name) (-1) @ds)
+    loop d in ds {
+        if decl_has_rest(d) {return true}
+    }
+    false
+}
+finish_partial=(n:PartialWord ptypes:array<int64> mutmask:PartialWord ret:PartialWord):>int64=>$unsafe {
+    if refine_active {
+        loop t in [ptypes... ret] {
+            if ref_has_formals(t) {fatal(nodes.ptr[n].pos "dependent refinement partial application is not yet supported")}
+        }
+    }
+    let hp:array<int64>=[]
+    let mm:PartialWord=0
+    loop i in [0..nkids(n)) {
+        let a=kid(n i)
+        if nodes.ptr[a].kind =? 'hole' {
+            if mutmask & (1 << i) not=? 0 {mm |= 1 << hp.length}
+            hp.push(ptypes[i])
+        }
+    }
+    nodes.ptr[n].kind='partial'
+    let th=new_inst(FK_PARTIAL cur_mod() "partial")
+    fns.ptr[th].ptypes=hp
+    fns.ptr[th].ret=int32(ret)
+    fns.ptr[th].has_env=true
+    fns.ptr[th].partial=int32(n)
+    fns.ptr[th].state=2
+    let t=mk_fn(hp ret mm)
+    nodes.ptr[n].type=int32(t)
+    nodes.ptr[n].d=int32(th)
+    # (checked: a comprehension's push takes it as it is, `[loop s in xs @load(s)]`)
+    add_flag(n NF_CHECKED)
+    t
+}
+# Named waits (decisions.md, batch 7, provenance rules 3-5): `let w = @c.receive` declared in
+# this function, then `select(@w)`. A wait given as an argument a (conversions stripped): the
+# prepared operation, `@c.receive` as written in the call or in w's declaration; 0 when a is no
+# such wait. A local that is not a wait prepared in this function is an error with its fix-it.
+wait_partial=(a0:PartialWord):>int64=>$unsafe {
+    let a=a0
+    loop nodes.ptr[a].kind =? 'conv' {a=PartialWord(nodes.ptr[a].a)}
+    if nodes.ptr[a].kind =? 'partial' and nodes.ptr[a].sym >? 0 and nkids(a) =? 1 and fns.ptr[PartialWord(nodes.ptr[a].sym)].decl not=? 0 {
+        let d=PartialWord(fns.ptr[PartialWord(nodes.ptr[a].sym)].decl)
+        let name=name_of(PartialWord(nodes.ptr[d].name))
+        let path=files[pos_file(nodes.ptr[d].pos)].path
+        if (name =? "receive" or name =? "next") and (path =? "{lib_dir}/prelude/channels.dewy" or path =? "{lib_dir}/prelude/inbox.dewy" or path =? "{lib_dir}/prelude/mpmc.dewy") or name =? "reserve" and (path =? "{lib_dir}/prelude/mpmc.dewy" or path =? "{lib_dir}/prelude/channels.dewy" or path =? "{lib_dir}/prelude/spsc.dewy") {
+            if not select_place(kid(a 0)) {fatal(nodes.ptr[a].pos "a wait's receiver is a local or a field chain: an index is not stable. Bind `let ch = channels[i]` and prepare `@ch.receive`")}
+            return a
+        }
+    }
+    0
+}
+# `@f(args)`: the function of f's remaining parameters that calls f with args
+# and them. The arguments are evaluated now. A parameter left to a constant
+# default takes it now; other defaults cannot be left out yet.
+dewy_partial=(n:PartialWord expected:PartialWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let callee=PartialWord(nodes.ptr[n].a)
+    let args=kids(n)
+    # @sum(1)(2): each argument group in the chain is a partial evaluation.
+    if nodes.ptr[callee].kind =? 'call' and not has_flag(callee NF_CHECKED) {nodes.ptr[callee].aux2=int32(AUX2_PARTIAL)}
+    let mod:PartialWord=-1
+    let s:PartialWord=0
+    let receiver=false
+    if nodes.ptr[callee].kind =? 'ident' {s=lookup(PartialWord(nodes.ptr[callee].name))} else if nodes.ptr[callee].kind =? 'field' {
+        let rt=prune(check_expr(PartialWord(nodes.ptr[callee].a) 0))
+        nodes.ptr[callee].a=int32(last_checked)
+        add_flag(last_checked NF_CHECKED)
+        if types.ptr[rt].kind =? 'module' {
+            mod=PartialWord(types.ptr[rt].mod)
+            s=module_lookup(mod PartialWord(nodes.ptr[callee].name))
+        }
+        else {
+            let st=if types.ptr[rt].kind =? 'ptr' {prune(PartialWord(types.ptr[rt].elem))} else {rt}
+            let is_field=false
+            if types.ptr[st].kind =? 'struct_' {
+                let si=PartialWord(types.ptr[st].st)
+                check_struct_fields(si)
+                loop i in [0..PartialWord(structs.ptr[si].nfields)) {
+                    if fields.ptr[PartialWord(structs.ptr[si].fields) + i].name =? nodes.ptr[callee].name {is_field=true}
+                }
+            }
+            if not is_field {
+                # `@text.split(" ")`: the receiver is the first argument, saved with the rest
+                let recv=PartialWord(nodes.ptr[callee].a)
+                let fname=dewy_member_name(callee rt PartialWord(nodes.ptr[callee].name) args)
+                s=0
+                let declared=false
+                # (a method the record type declares, as the prelude's `@lines.receive()`: its
+                # module's, not a function of that name in scope, nor an array built-in's)
+                if types.ptr[st].kind =? 'struct_' and structs.ptr[PartialWord(types.ptr[st].st)].decl not=? 0 and dewy_type_method(PartialWord(structs.ptr[PartialWord(types.ptr[st].st)].decl) fname) >=? 0 {
+                    let owner=PartialWord(nodes.ptr[PartialWord(structs.ptr[PartialWord(types.ptr[st].st)].decl)].mod)
+                    s=module_lookup(owner fname)
+                    if s not=? 0 {
+                        mod=owner
+                        declared=true
+                    }
+                }
+                if s =? 0 {s=lookup(fname)}
+                let ii=intrinsic_of(fname)
+                if s =? 0 or syms.ptr[s].kind not=? 'fns' or (ii >=? 0 and intrinsics[ii].arr and not declared) {fatal(pos "partial evaluation of the built-in `.{name_of(PartialWord(nodes.ptr[callee].name))}` is not supported yet; use a function literal")}
+                let f=mk('ident' nodes.ptr[callee].pos)
+                nodes.ptr[f].name=int32(fname)
+                callee=f
+                nodes.ptr[n].a=int32(f)
+                args=[recv args...]
+                receiver=true
+            }
+        }
+    }
+    let holes:array<int64>=[]
+    let fitting:array<int64>=[]
+    if s not=? 0 and syms.ptr[s].kind =? 'fns' {
+        let decls:array<int64>=[]
+        if receiver {
+            if mod >=? 0 {call_collect_module(mod PartialWord(nodes.ptr[callee].name) @decls)} else {call_collect_fns(PartialWord(nodes.ptr[callee].name) @decls)}
+        }
+        else {call_collect_named(PartialWord(nodes.ptr[callee].name) mod @decls)}
+        # The one ordinary function of that name these arguments fit; the
+        # program's own come before the prelude's.
+        let d:PartialWord=0
+        let err=""
+        let pnames:array<int64>=[]
+        let slots:array<int64>=[]
+        let own=false
+        loop c in decls {
+            if not decl_in_prelude(c) {own=true}
+        }
+        # The versions of that name these arguments fit (the program's own before the
+        # prelude's); the call with holes then picks one by the arguments' types, as a call does.
+        # An expected function type says how many parameters stay open.
+        if decls.length >? 1 {check_args_untyped(args)}
+        let open_wanted=if expected not=? 0 and tkind(expected) =? 'fn_' {PartialWord(types.ptr[prune(expected)].nargs)} else {-1}
+        # (else the versions leaving the fewest parameters open: those an ordinary call with these
+        # arguments is nearest to)
+        if open_wanted <? 0 and decls.length >? 1 {
+            loop c in decls {
+                if own and decl_in_prelude(c) {continue}
+                let names:array<int64>=[]
+                loop i in [0..nkids(c)) {names.push(PartialWord(nodes.ptr[kid(c i)].name))}
+                let fit:array<int64>=[]
+                if (map_args(names fill(true names.length) args @fit [] false) as array<uint8>).length >? 0 or not partial_args_fit(c fit) {continue}
+                let open:PartialWord=0
+                loop i in [0..names.length) {
+                    if fit[i] =? 0 and nodes.ptr[kid(c i)].b =? 0 {open += 1}
+                }
+                if open_wanted <? 0 or open <? open_wanted {open_wanted=open}
+            }
+        }
+        loop c in decls {
+            if own and decl_in_prelude(c) {continue}
+            if decls.length =? 1 and decl_has_rest(c) {fatal(pos "partial evaluation of '{name_of(PartialWord(nodes.ptr[callee].name))}', which has a rest parameter, is not supported yet; use a function literal")}
+            let names:array<int64>=[]
+            loop i in [0..nkids(c)) {names.push(PartialWord(nodes.ptr[kid(c i)].name))}
+            let fit:array<int64>=[]
+            let e=map_args(names fill(true names.length) args @fit)
+            if (e as array<uint8>).length >? 0 {
+                err=e
+                continue
+            }
+            if decls.length >? 1 and not partial_args_fit(c fit) {continue}
+            if decls.length >? 1 and open_wanted >=? 0 {
+                let open:PartialWord=0
+                loop i in [0..names.length) {
+                    if fit[i] =? 0 and nodes.ptr[kid(c i)].b =? 0 {open += 1}
+                }
+                if open not=? open_wanted {continue}
+                if expected not=? 0 and tkind(expected) =? 'fn_' and not partial_open_fit(c fit prune(expected)) {continue}
+            }
+            if d not=? 0 and not same_partial_shape(d pnames slots c names fit) {
+                fatal(pos "partial evaluation of '{name_of(PartialWord(nodes.ptr[callee].name))}' is ambiguous: the versions these arguments fit leave different parameters open (give the result a function type, or use a function literal)")
+            }
+            if receiver and nkids(c) >? 0 and has_flag(kid(c 0) NF_MUT) {fatal(pos "partial evaluation of `.{name_of(PartialWord(nodes.ptr[callee].name))}`, which changes its receiver, is not supported; use a function literal")}
+            fitting.push(c)
+            if d =? 0 {
+                d=c
+                pnames=names
+                slots=fit
+            }
+        }
+        if d =? 0 {
+            if (err as array<uint8>).length >? 0 and not receiver {fatal(pos err)}
+            let which=""
+            if receiver {which=" and this receiver"}
+            fatal(pos "no version of '{name_of(PartialWord(nodes.ptr[callee].name))}' takes these arguments{which}")
+        }
+        let named=false
+        let skipped=false
+        loop i in [0..pnames.length) {
+            if slots[i] not=? 0 {continue}
+            let dv=PartialWord(nodes.ptr[kid(d i)].b)
+            if dv =? 0 {
+                if skipped {named=true}
+                holes.push(i)
+            }
+            else if constant_default(dv) {skipped=true} else {fatal(pos "partial evaluation that leaves '{name_of(pnames[i])}' to its default is not supported yet: pass it explicitly")}
+        }
+        let unbound=holes
+        holes=[]
+        loop h in unbound {
+            let hole=mk('hole' pos)
+            if named {
+                let arg=mk('namedarg' pos)
+                nodes.ptr[arg].name=int32(pnames[h])
+                nodes.ptr[arg].a=int32(hole)
+                hole=arg
+            }
+            holes.push(hole)
+        }
+    }
+    else {
+        if s not=? 0 and syms.ptr[s].kind not=? 'local' and syms.ptr[s].kind not=? 'global' {fatal(pos "'{name_of(PartialWord(nodes.ptr[callee].name))}' is not a function")}
+        callee_at=callee
+        let ft=prune(check_expr(callee 0))
+        callee=last_checked
+        nodes.ptr[n].a=int32(callee)
+        add_flag(callee NF_CHECKED)
+        if types.ptr[ft].kind not=? 'fn_' {fatal(pos "partial evaluation needs a function, found {dt(ft)}")}
+        loop i in [args.length..PartialWord(types.ptr[ft].nargs)) {holes.push(mk('hole' pos))}
+    }
+    set_list(n [args... holes...])
+    nodes.ptr[n].aux2=int32(AUX2_PARTIAL)
+    let t:PartialWord=0
+    if s not=? 0 and syms.ptr[s].kind =? 'fns' and nodes.ptr[callee].kind =? 'ident' {
+        # (among the versions that fit, as a call would choose)
+        t=resolve_fn_call(n PartialWord(nodes.ptr[callee].name) fitting kids(n) expected)
+    }
+    else {t=check_call(n expected)}
+    last_checked=n
+    t
+}
+# (could the arguments given in slots go to version d's parameters, by their types?)
+partial_args_fit=(d:PartialWord slots:array<int64>):>bool=>$unsafe {
+    let sig=fn_sig(d)
+    let binds:array<int64>=fill(0 int64(sig.ntp))
+    loop i in 0.. and a in slots {
+        if a =? 0 or i >=? sig.params.length or ctx_dependent(a) or nodes.ptr[a].type =? 0 {continue}
+        if arg_cost(a sig.params[i] @binds) <? 0 {return false}
+    }
+    true
+}
+# (do version d's open parameters take the expected function type's, in order?)
+partial_open_fit=(d:PartialWord slots:array<int64> ft:PartialWord):>bool=>$unsafe {
+    let sig=fn_sig(d)
+    let binds:array<int64>=fill(0 int64(sig.ntp))
+    let j:PartialWord=0
+    loop i in 0.. and a in slots {
+        if a not=? 0 or nodes.ptr[kid(d i)].b not=? 0 {continue}
+        if j >=? PartialWord(types.ptr[ft].nargs) or match_type(sig.params[i] targ(ft j) @binds 0) <? 0 {return false}
+        j += 1
+    }
+    true
+}
+# (do two versions leave the same parameters open, by position and name, with the same defaults?)
+same_partial_shape=(d:PartialWord names:array<int64> slots:array<int64> c:PartialWord cnames:array<int64> cslots:array<int64>):>bool=>$unsafe {
+    if names.length not=? cnames.length {return false}
+    loop i in [0..names.length) {
+        if (slots[i] =? 0) not=? (cslots[i] =? 0) {return false}
+        if slots[i] =? 0 and (names[i] not=? cnames[i] or (nodes.ptr[kid(d i)].b =? 0) not=? (nodes.ptr[kid(c i)].b =? 0)) {return false}
+    }
+    true
+}

@@ -152,6 +152,7 @@ use 'select_checks.dewy'
 use 'type_member_checks.dewy'
 use 'dotted_checks.dewy'
 use 'expr_hints.dewy'
+use 'partial_checks.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -1737,35 +1738,6 @@ map_args = (pnames: int[], has_default: bool[], args: int[], out: mut int[], kin
             return "missing argument '{name_of(pnames[i])}'"
     ""
 
-# A rest parameter's argument: the positional arguments it gathers, as the array literal
-# `[a b xs...]` (a spread stays a spread). Its length is known when none is spread, and the
-# instance takes a fixed array of that length (rest_instance_type).
-rest_bundle = (gathered: int[], decl: int, rest: int) -> int:
-    at = if gathered.len() > 0: nodes[gathered[0]].pos else: 0
-    if at == 0 and decl != 0: at = nodes[kid(decl, rest)].pos
-    b = mk(.array, at)
-    set_list(b, gathered)
-    count = gathered.len()
-    loop a in gathered:
-        if has_flag(a, NF_SPREAD): count = -1
-    rest_bundles[b] = count
-    b
-
-# Does call c's callee, by name, take a rest parameter? (values_expand then keeps a spread of an
-# array of unknown length whole, for the rest parameter to take)
-values_rest_call = (c: int) -> bool:
-    if c == 0: return false
-    callee = int(nodes[c].a)
-    if nodes[callee].kind == .typeapply: callee = int(nodes[callee].a)
-    if nodes[callee].kind != .ident: return false
-    s = lookup(int(nodes[callee].name))
-    if s == 0 or syms[s].kind != .fns: return false
-    ds: int[]
-    call_collect_named(int(nodes[callee].name), -1, ds)
-    loop d in ds:
-        if decl_has_rest(d): return true
-    false
-
 # The type arguments of a call's instance: a function with a rest parameter adds the type its
 # rest argument has (rest_bundle), a fixed array when its length is written (no spread). Each
 # count then has its own instance, whose indexing that length proves, and the arguments are
@@ -2104,31 +2076,6 @@ simple_arg = (v: int) -> bool:
     if k == .conv or k == .unary: return simple_arg(int(nodes[v].a))
     if k == .field: return simple_arg(int(nodes[v].a))
     false
-
-finish_partial = (n: int, ptypes: int[], mutmask: int, ret: int) -> int:
-    if refine_active:
-        loop t in ptypes + [ret]:
-            if ref_has_formals(t): fatal(nodes[n].pos, "dependent refinement partial application is not yet supported")
-    hp: int[]
-    mm = 0
-    loop i in [0..nkids(n)):
-        a = kid(n, i)
-        if nodes[a].kind == .hole:
-            if mutmask & (1 << i) != 0: mm |= 1 << hp.len()
-            hp.push(ptypes[i])
-    nodes[n].kind = .partial
-    th = new_inst(FK_PARTIAL, cur_mod(), "partial")
-    fns[th].ptypes = hp
-    fns[th].ret = i32(ret)
-    fns[th].has_env = true
-    fns[th].partial = i32(n)
-    fns[th].state = 2
-    t = mk_fn(hp, ret, mm)
-    nodes[n].type = i32(t)
-    nodes[n].d = i32(th)
-    # (checked: a comprehension's push takes it as it is, `[loop s in xs @load(s)]`)
-    add_flag(n, NF_CHECKED)
-    t
 
 call_targs: int[]              # type arguments written at the call being resolved (f[T](...))
 cur_assign = 0                 # the assignment whose target is being checked (`x = ...`, `x += ...`)
@@ -7011,22 +6958,6 @@ bare_fn_value = (n: int, t: int, text: str, expected: int) -> int:
     if not takes_none: bare_fn_error(n, text, true)
     bare_call(n, expected)
 
-# Named waits (decisions.md, batch 7, provenance rules 3-5): `let w = @c.receive` declared in
-# this function, then `select(@w)`. A wait given as an argument a (conversions stripped): the
-# prepared operation, `@c.receive` as written in the call or in w's declaration; 0 when a is no
-# such wait. A local that is not a wait prepared in this function is an error with its fix-it.
-wait_partial = (a0: int) -> int:
-    a = a0
-    loop nodes[a].kind == .conv: a = int(nodes[a].a)
-    if nodes[a].kind == .partial and nodes[a].sym > 0 and nkids(a) == 1 and fns[int(nodes[a].sym)].decl != 0:
-        d = int(fns[int(nodes[a].sym)].decl)
-        name = name_of(int(nodes[d].name))
-        path = files[pos_file(nodes[d].pos)].path
-        if (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy" or path == lib_dir + "/prelude/mpmc.dewy") or name == "reserve" and (path == lib_dir + "/prelude/mpmc.dewy" or path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/spsc.dewy"):
-            if not select_place(kid(a, 0)): fatal(nodes[a].pos, "a wait's receiver is a local or a field chain: an index is not stable. Bind `let ch = channels[i]` and prepare `@ch.receive`")
-            return a
-    0
-
 # The walk of one function body for a named wait (rules 3 and 4). In source order it finds w's
 # declaration and the call, and every assignment and `$capture @x` closure on w or a place its
 # receiver path overlaps. From the declaration through the call, and around any loop the call is
@@ -7193,161 +7124,6 @@ dewy_method_handle = (n: int, expected: int) -> int:
     nodes[n] = Node(kind = .call, pos = nodes[n].pos, a = i32(callee), aux2 = i32(AUX2_PARTIAL))
     dewy_partial(n, expected)
 
-# `@f(args)`: the function of f's remaining parameters that calls f with args
-# and them. The arguments are evaluated now. A parameter left to a constant
-# default takes it now; other defaults cannot be left out yet.
-dewy_partial = (n: int, expected: int) -> int:
-    pos = nodes[n].pos
-    callee = int(nodes[n].a)
-    args = kids(n)
-    # @sum(1)(2): each argument group in the chain is a partial evaluation.
-    if nodes[callee].kind == .call and not has_flag(callee, NF_CHECKED): nodes[callee].aux2 = i32(AUX2_PARTIAL)
-    mod = -1
-    s = 0
-    receiver = false
-    if nodes[callee].kind == .ident: s = lookup(int(nodes[callee].name))
-    else if nodes[callee].kind == .field:
-        rt = prune(check_expr(int(nodes[callee].a), 0))
-        nodes[callee].a = i32(last_checked)
-        add_flag(last_checked, NF_CHECKED)
-        if types[rt].kind == .module:
-            mod = int(types[rt].mod)
-            s = module_lookup(mod, int(nodes[callee].name))
-        else:
-            st = if types[rt].kind == .ptr: prune(int(types[rt].elem)) else: rt
-            is_field = false
-            if types[st].kind == .struct_:
-                si = int(types[st].st)
-                check_struct_fields(si)
-                loop i in [0..int(structs[si].nfields)):
-                    if fields[int(structs[si].fields) + i].name == nodes[callee].name: is_field = true
-            if not is_field:
-                # `@text.split(" ")`: the receiver is the first argument, saved with the rest
-                recv = int(nodes[callee].a)
-                fname = dewy_member_name(callee, rt, int(nodes[callee].name), args)
-                s = 0
-                declared = false
-                # (a method the record type declares, as the prelude's `@lines.receive()`: its
-                # module's, not a function of that name in scope, nor an array built-in's)
-                if types[st].kind == .struct_ and structs[int(types[st].st)].decl != 0 and dewy_type_method(int(structs[int(types[st].st)].decl), fname) >= 0:
-                    owner = int(nodes[int(structs[int(types[st].st)].decl)].mod)
-                    s = module_lookup(owner, fname)
-                    if s != 0:
-                        mod = owner
-                        declared = true
-                if s == 0: s = lookup(fname)
-                ii = intrinsic_of(fname)
-                if s == 0 or syms[s].kind != .fns or (ii >= 0 and intrinsics[ii].arr and not declared): fatal(pos, "partial evaluation of the built-in `.{name_of(int(nodes[callee].name))}` is not supported yet; use a function literal")
-                f = mk(.ident, nodes[callee].pos)
-                nodes[f].name = i32(fname)
-                callee = f
-                nodes[n].a = i32(f)
-                args = [recv] + args
-                receiver = true
-    holes: int[]
-    fitting: int[]
-    if s != 0 and syms[s].kind == .fns:
-        decls: int[]
-        if receiver:
-            if mod >= 0: collect_module(mod, int(nodes[callee].name), &decls)
-            else: collect_fns(int(nodes[callee].name), &decls)
-        else: collect_named(int(nodes[callee].name), mod, &decls)
-        # The one ordinary function of that name these arguments fit; the
-        # program's own come before the prelude's.
-        d = 0
-        err = ""
-        pnames: int[]
-        slots: int[]
-        own = false
-        loop c in decls:
-            if not decl_in_prelude(c): own = true
-        # The versions of that name these arguments fit (the program's own before the
-        # prelude's); the call with holes then picks one by the arguments' types, as a call does.
-        # An expected function type says how many parameters stay open.
-        if decls.len() > 1: check_args_untyped(args)
-        open_wanted = if expected != 0 and tkind(expected) == .fn_: int(types[prune(expected)].nargs) else: -1
-        # (else the versions leaving the fewest parameters open: those an ordinary call with these
-        # arguments is nearest to)
-        if open_wanted < 0 and decls.len() > 1:
-            loop c in decls:
-                if own and decl_in_prelude(c): continue
-                names: int[]
-                loop i in [0..nkids(c)): names.push(int(nodes[kid(c, i)].name))
-                fit: int[]
-                if len(map_args(names, fill(true, names.len()), args, fit, [], false)) > 0 or not partial_args_fit(c, fit): continue
-                open = 0
-                loop i in [0..names.len()):
-                    if fit[i] == 0 and nodes[kid(c, i)].b == 0: open += 1
-                if open_wanted < 0 or open < open_wanted: open_wanted = open
-        loop c in decls:
-            if own and decl_in_prelude(c): continue
-            if decls.len() == 1 and decl_has_rest(c): fatal(pos, "partial evaluation of '{name_of(int(nodes[callee].name))}', which has a rest parameter, is not supported yet; use a function literal")
-            names: int[]
-            loop i in [0..nkids(c)): names.push(int(nodes[kid(c, i)].name))
-            fit: int[]
-            e = map_args(names, fill(true, names.len()), args, fit)
-            if len(e) > 0:
-                err = e
-                continue
-            if decls.len() > 1 and not partial_args_fit(c, fit): continue
-            if decls.len() > 1 and open_wanted >= 0:
-                open = 0
-                loop i in [0..names.len()):
-                    if fit[i] == 0 and nodes[kid(c, i)].b == 0: open += 1
-                if open != open_wanted: continue
-                if expected != 0 and tkind(expected) == .fn_ and not partial_open_fit(c, fit, prune(expected)): continue
-            if d != 0 and not same_partial_shape(d, pnames, slots, c, names, fit):
-                fatal(pos, "partial evaluation of '{name_of(int(nodes[callee].name))}' is ambiguous: the versions these arguments fit leave different parameters open (give the result a function type, or use a function literal)")
-            if receiver and nkids(c) > 0 and has_flag(kid(c, 0), NF_MUT): fatal(pos, "partial evaluation of `.{name_of(int(nodes[callee].name))}`, which changes its receiver, is not supported; use a function literal")
-            fitting.push(c)
-            if d == 0:
-                d = c
-                pnames = names
-                slots = fit
-        if d == 0:
-            if len(err) > 0 and not receiver: fatal(pos, err)
-            which = ""
-            if receiver: which = " and this receiver"
-            fatal(pos, "no version of '{name_of(int(nodes[callee].name))}' takes these arguments{which}")
-        named = false
-        skipped = false
-        loop i in [0..pnames.len()):
-            if slots[i] != 0: continue
-            dv = int(nodes[kid(d, i)].b)
-            if dv == 0:
-                if skipped: named = true
-                holes.push(i)
-            else if constant_default(dv): skipped = true
-            else: fatal(pos, "partial evaluation that leaves '{name_of(pnames[i])}' to its default is not supported yet: pass it explicitly")
-        unbound = holes
-        holes = []
-        loop h in unbound:
-            hole = mk(.hole, pos)
-            if named:
-                arg = mk(.namedarg, pos)
-                nodes[arg].name = i32(pnames[h])
-                nodes[arg].a = i32(hole)
-                hole = arg
-            holes.push(hole)
-    else:
-        if s != 0 and syms[s].kind != .local and syms[s].kind != .global: fatal(pos, "'{name_of(int(nodes[callee].name))}' is not a function")
-        callee_at = callee
-        ft = prune(check_expr(callee, 0))
-        callee = last_checked
-        nodes[n].a = i32(callee)
-        add_flag(callee, NF_CHECKED)
-        if types[ft].kind != .fn_: fatal(pos, "partial evaluation needs a function, found {dt(ft)}")
-        loop i in [args.len()..int(types[ft].nargs)): holes.push(mk(.hole, pos))
-    set_list(n, args + holes)
-    nodes[n].aux2 = i32(AUX2_PARTIAL)
-    t = 0
-    if s != 0 and syms[s].kind == .fns and nodes[callee].kind == .ident:
-        # (among the versions that fit, as a call would choose)
-        t = resolve_fn_call(n, int(nodes[callee].name), fitting, kids(n), expected)
-    else: t = check_call(n, expected)
-    last_checked = n
-    t
-
 # Sloppy: `S(cell, data(cell))` gives the array cell to the record, then data(cell) reads cell
 # after that move: it unshares the variable's own copy from the one given, so the pointer points
 # into storage the record does not hold (and that goes with the variable). The arguments in
@@ -7389,34 +7165,6 @@ dewy_data_of_given = (e: int, given: int[], call: int):
     if mask & 4 != 0: dewy_data_of_given(int(nodes[e].c), given, call)
     if mask & 16 != 0:
         loop c in kids(e): dewy_data_of_given(c, given, call)
-
-# (could the arguments given in slots go to version d's parameters, by their types?)
-partial_args_fit = (d: int, slots: int[]) -> bool:
-    sig = fn_sig(d)
-    binds = fill(0, int(sig.ntp))
-    loop i in 0.. and a in slots:
-        if a == 0 or i >= sig.params.len() or ctx_dependent(a) or nodes[a].type == 0: continue
-        if arg_cost(a, sig.params[i], binds) < 0: return false
-    true
-
-# (do version d's open parameters take the expected function type's, in order?)
-partial_open_fit = (d: int, slots: int[], ft: int) -> bool:
-    sig = fn_sig(d)
-    binds = fill(0, int(sig.ntp))
-    j = 0
-    loop i in 0.. and a in slots:
-        if a != 0 or nodes[kid(d, i)].b != 0: continue
-        if j >= int(types[ft].nargs) or match_type(sig.params[i], targ(ft, j), binds, 0) < 0: return false
-        j += 1
-    true
-
-# (do two versions leave the same parameters open, by position and name, with the same defaults?)
-same_partial_shape = (d: int, names: int[], slots: int[], c: int, cnames: int[], cslots: int[]) -> bool:
-    if names.len() != cnames.len(): return false
-    loop i in [0..names.len()):
-        if (slots[i] == 0) != (cslots[i] == 0): return false
-        if slots[i] == 0 and (names[i] != cnames[i] or (nodes[kid(d, i)].b == 0) != (nodes[kid(c, i)].b == 0)): return false
-    true
 
 mk_ident_local = (l: int, pos: int) -> int:
     n = mk(.ident, pos)
