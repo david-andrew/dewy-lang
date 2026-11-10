@@ -313,6 +313,8 @@ fact_range = (n: int, s: mut FactState):
                 if fact_known_none(s, e): found.push(l)
                 continue
             kept.push((l, fact_bound(s, e), fact_entails(s, e, hi, -1), fact_entails(s, e, lo, 0)))
+    # (positions the body keeps below a length, held at entry: fact_loop_bounds)
+    demands = fact_loop_bound_entry(fact_loop_bound_demands(n), s)
     pre = s
     hulls = fact_push_open(n, s)
     iterated = fact_iterate(n, s, true, 0, lo, hi, pushes + growers, sums)
@@ -333,6 +335,7 @@ fact_range = (n: int, s: mut FactState):
         if entry.2: fact_difference(s, v, hi, -1, n)
     loop l in found: fact_found_payload(s, l, lo, hi)
     if s.live and int(nodes[n].sym) != 0: fact_range_invariants(n, pre, s, lo, hi)
+    bounded = demands.len() > 0 and fact_loop_bounds(n, s, demands, FACT_PREP_RANGE, 0, lo, hi, pushes + growers)
     after = s
     body = fact_range_body(n, s, lo, hi)
     fact_growing_lengths(body, pushes)
@@ -346,7 +349,7 @@ fact_range = (n: int, s: mut FactState):
         if i >= 0: fact_difference(body, body.bindings[i].value, hi, -1, n)
     edges = fact_loop_body(n, body)
     fact_range_exhaustion(n, pre, lo, 0, edges)
-    s = if iterated: fact_join(after, edges.exits, n) else: after
+    s = if iterated or bounded: fact_join(after, edges.exits, n) else: after
     if iterated and fact_speculating == 0 and after.live and edges.exits.live:
         loop entry in kept: fact_carried_exit(s, entry.0, after, edges.exits)
     if hulls: fact_push_close(n, s)

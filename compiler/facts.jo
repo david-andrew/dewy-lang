@@ -185,6 +185,8 @@ struct FactSlice:
     versions: int[]
     exact_demands: int[]
     index_demands: int[]
+    # (index obligations `a[x]` of a local x and a field path a: fact_loop_bounds)
+    loop_indexes: int[]
     float_context: bool = false
 
 fact_slice_flags = (n: int) -> int:
@@ -2277,6 +2279,12 @@ fact_slice_prepare = (f: int, summary: bool = false):
     versions: int[]
     exact_demands: int[]
     index_demands: int[]
+    loop_indexes: int[]
+    # (locals assigned other than by a step of their own value or a record's
+    # unrefined integer field, and those so assigned: loop_indexes keeps
+    # positions of the first kind only)
+    plain_writes: {int: bool} = {}
+    stepped_writes: {int: bool} = {}
     carried = false
     rows = false
     probe_only = false
@@ -2328,6 +2336,9 @@ fact_slice_prepare = (f: int, summary: bool = false):
         if k == .assign:
             target = int(nodes[n].a)
             if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)) and fact_carried_type(int(locals[int(nodes[target].sym)].type), f): carried = true
+            if nodes[target].kind == .ident and nodes[target].aux == i32(int(SK.local)):
+                if fact_loop_step(int(nodes[n].b), int(nodes[target].sym)) or fact_loop_unbounded_field(int(nodes[n].b)): stepped_writes[int(nodes[target].sym)] = true
+                else: plain_writes[int(nodes[target].sym)] = true
             fact_slice_target(writers, target, n)
             if not summary and (fact_probe_on or fact_policy == .RequireStatic) and fact_shift_obliged(n): values.push(n)
             root = target
@@ -2453,6 +2464,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
         else if k == .index:
             if not summary and (fact_probe_on or fact_policy == .RequireStatic) and not has_flag(n, NF_INBOUNDS) and fact_bounded_index(n):
                 if share: index_demands.push(n)
+                if fact_loop_index_local(n) > 0: loop_indexes.push(n)
                 active.push(n)
                 values.push(int(nodes[n].b))
                 if types[fact_type(ntype(int(nodes[n].a)))].kind != .fixed: values.push(int(nodes[n].a))
@@ -2618,6 +2630,9 @@ fact_slice_prepare = (f: int, summary: bool = false):
     fact_slice.versions = versions
     fact_slice.exact_demands = exact_demands
     fact_slice.index_demands = index_demands
+    loop m in loop_indexes:
+        x = fact_loop_index_local(m)
+        if plain_writes.has(x) and not stepped_writes.has(x): fact_slice.loop_indexes.push(m)
     if share: fact_slice.float_context = dir_floats_any or ff_conversions.has(fact_owner)
     # (a plan that walks only member templates serves only the shared decide run)
     if not members or fact_member_admitted.len() == 0: fact_slice_cache[key] = fact_slice
@@ -3213,6 +3228,8 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                 b = fact_bound(s, base_length)
                 if not b.wide: trips = max(0, min(trips, b.hi))
             sums = fact_counted_sums(n, s, trips)
+        # (positions the body keeps below a length: fact_loop_bounds)
+        demands = fact_loop_bound_entry(fact_loop_bound_demands(n), s)
         hulls = indexed and fact_push_open(n, s, base)
         iterated = indexed and fact_iterate(n, s, false, base, 0, 0, pushes + growers, sums)
         if not iterated:
@@ -3220,18 +3237,15 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             loop sum in sums:
                 i = fact_binding(s, PlaceIdentity(.local, int(locals[sum.0].owner), sum.0))
                 if i >= 0: fact_set_bound(s, s.bindings[i].value, sum.1)
+        prep = if indexed: FACT_PREP_INDEXED else if mapped: FACT_PREP_MAPPED else: FACT_PREP_CAPTURE
+        bounded = demands.len() > 0 and fact_loop_bounds(n, s, demands, prep, base, 0, 0, pushes + growers)
         after = s
         body = s
-        fact_growing_lengths(body, pushes)
-        fact_growing_lengths(body, growers)
-        if indexed:
-            fact_loop_index(n, base, body)
-            ref_sib_loop_elements(n, base, body)
-        else if mapped: fact_map_loop(n, base, body)
-        else: fact_capture(int(nodes[n].a), body)
+        fact_loop_prepare(n, body, prep, base, pushes + growers)
         edges = fact_loop_body(n, body)
-        # (an iterated header holds at every head, not inside the body: a break joins it)
-        s = if iterated: fact_join(after, edges.exits, n) else: after
+        # (an iterated or bounded header holds at every head, not inside the
+        # body: a break joins it)
+        s = if iterated or bounded: fact_join(after, edges.exits, n) else: after
         if indexed and nodes[n].aux == 1 and base != 0 and edges.back.live and not edges.exits.live: fact_ensured_close(n, base, edges.back, s)
         if hulls: fact_push_close(n, s)
         fact_growing_lengths(s, growers)
@@ -4660,3 +4674,162 @@ range_facts_end = (facts: (int, int, bool)):
         nonneg_locals.pop()
         nonneg_limits.pop()
 
+
+# How a loop's body state is made from its head (fact_loop_bounds): a while
+# loop's condition holds, a range loop binds its value, an indexed array loop
+# its position below the source's length, an entry loop its key and value;
+# any other loop evaluates its source again.
+const FACT_PREP_CONDITION = 0
+const FACT_PREP_RANGE = 1
+const FACT_PREP_INDEXED = 2
+const FACT_PREP_MAPPED = 3
+const FACT_PREP_CAPTURE = 4
+# The state an array, string or entry loop's body starts from (an indexed or
+# entry loop's source evaluated once as base), as fact_capture's loop transfer.
+fact_loop_prepare = (n: int, body: mut FactState, prep: int, base: int, pushes: (int, int)[]):
+    fact_growing_lengths(body, pushes)
+    if prep == FACT_PREP_INDEXED:
+        fact_loop_index(n, base, body)
+        ref_sib_loop_elements(n, base, body)
+    else if prep == FACT_PREP_MAPPED: fact_map_loop(n, base, body)
+    else: fact_capture(int(nodes[n].a), body)
+
+# The local x of an index obligation `a[x]` on a path a (a local or an `@`
+# parameter, or a field of one) into a resizable array, or 0. O(path depth).
+fact_loop_index_local = (m: int) -> int:
+    if tkind(fact_type(ntype(int(nodes[m].a)))) != .array: return 0
+    a = int(nodes[m].a)
+    loop fact_field_node(a): a = int(nodes[a].a)
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return 0
+    x = int(nodes[m].b)
+    loop nodes[x].kind == .conv: x = int(nodes[x].a)
+    if nodes[x].kind != .ident or nodes[x].aux != i32(int(SK.local)): return 0
+    int(nodes[x].sym)
+
+# The demand for fact_loop_bounds: index obligations inside or after loop n
+# whose position is a local declared before it that the body assigns (an
+# active carried assignment). The slice keeps only positions the function
+# never steps from their own value (`i += 1`, a scanner's, which no step
+# re-establishes unguarded: the header's guards keep those) nor sets to an
+# unrefined record field. O(the slice's such obligations), then one memoized
+# body walk; at most 4 kept.
+fact_loop_bound_demands = (n: int) -> int[]:
+    out: int[]
+    if fact_slice.loop_indexes.len() == 0: return out
+    carried: int[]
+    walked = false
+    loop m in fact_slice.loop_indexes:
+        if nodes[m].pos < nodes[n].pos: continue
+        x = fact_loop_index_local(m)
+        if locals[x].pos >= nodes[n].pos: continue
+        if not walked:
+            carried = fact_carried_assigns(n)
+            walked = true
+        loop e in carried:
+            if int(nodes[int(nodes[e].a)].sym) == x and fact_slice_flags(e) & (FACT_MEMBER | FACT_ACTIVE) != FACT_MEMBER:
+                out.push(m)
+                break
+        if out.len() >= 4: break
+    out
+
+# Whether e reads a record's integer field with no contract (`leaf =
+# node.next`, a link that may be a sentinel): it bounds nothing. O(1).
+fact_loop_unbounded_field = (e0: int) -> bool:
+    e = e0
+    loop e != 0 and nodes[e].kind == .conv: e = int(nodes[e].a)
+    e != 0 and fact_field_node(e) and is_int(ntype(e)) and refine_storage(e, ntype(e)) == ntype(e)
+
+# Whether e is x plus or minus something (an assignment stepping x). O(1).
+fact_loop_step = (e0: int, x: int) -> bool:
+    e = e0
+    loop e != 0 and nodes[e].kind == .conv: e = int(nodes[e].a)
+    if e == 0 or nodes[e].kind != .binary or nodes[e].op != i32(int(Tok.plus)) and nodes[e].op != i32(int(Tok.minus)): return false
+    loop side in [int(nodes[e].a), int(nodes[e].b)]:
+        v = side
+        loop v != 0 and nodes[v].kind == .conv: v = int(nodes[v].a)
+        if v != 0 and nodes[v].kind == .ident and nodes[v].aux == i32(int(SK.local)) and int(nodes[v].sym) == x: return true
+    false
+
+# Obligation m's position x and its array's length in s: the path's route
+# only projects evaluated identities, never evaluating syntax. O(path depth).
+fact_loop_bound_terms = (s: mut FactState, m: int) -> (int, int):
+    l = fact_loop_index_local(m)
+    i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
+    if i < 0: return (0, 0)
+    held = fact_route_values(s, fact_route(int(nodes[m].a), s))
+    if held.len() == 0: return (0, 0)
+    (s.bindings[i].value, fact_project(s, held[held.len() - 1], -1, false, T_INT))
+
+# The demanded obligations whose relation entry s holds: reading their paths
+# there, as fact_loop_roots seeds a while loop's, keeps those evaluations'
+# identities at every head the body leaves them. O(demands x path depth).
+fact_loop_bound_entry = (demands: int[], s: mut FactState) -> int[]:
+    kept: int[]
+    if demands.len() == 0 or not s.live: return kept
+    loop m in demands:
+        if fact_loop_bound_holds(s, m): kept.push(m)
+    kept
+
+# Whether s holds 0 <= x < a.length: one bounded relaxation.
+fact_loop_bound_holds = (s: mut FactState, m: int) -> bool:
+    if not s.live: return true
+    terms = fact_loop_bound_terms(s, m)
+    if terms.0 == 0: return false
+    zero = fact_constant(s, 0)
+    fact_compare(s, .le, zero, terms.0) == 1 and fact_compare(s, .lt, terms.0, terms.1) == 1
+
+fact_loop_bound_assume = (s: mut FactState, m: int, at: int):
+    terms = fact_loop_bound_terms(s, m)
+    if terms.0 == 0: return
+    fact_difference(s, terms.0, terms.1, -1, at)
+    b = fact_bound(s, terms.0)
+    h = fact_bound(s, terms.1).hi
+    b.lo = max(b.lo, 0)
+    if h > 0 and h != FACT_MAX: b.hi = min(b.hi, h - 1)
+    fact_set_bound(s, terms.0, b)
+
+# A position a loop's body assigns stays an index of an array the body only
+# grows: `0 <=? x <? a.length` is an invariant of loop n when entry holds it
+# (held_at_entry, fact_loop_bound_entry) and, assumed at head s (settled or
+# havocked), the body's backedge holds it again, however the body changed x and a. Each assignment of x must
+# establish it; a pop, truncation, replacement or aliased shrink of a, or a
+# call that may write it, fails the backedge. Candidates are the demanded
+# obligations (fact_loop_bound_demands); one that fails is dropped and the
+# rest are checked again from a head without it, so each kept relation is
+# inductive. The body walk starts as the loop's own does (prep).
+# O(rounds x body): at most 5 speculative body walks, in the nest's shared
+# step budget; an exhausted or skipped walk keeps nothing.
+fact_loop_bounds = (n: int, s: mut FactState, held_at_entry: int[], prep: int, base: int, lo: int, hi: int, pushes: (int, int)[]) -> bool:
+    if fact_loop_exhausted or not s.live: return false
+    if fact_summary_owner != 0 and not fact_may_return(int(nodes[n].b)): return false
+    kept = held_at_entry
+    outer = fact_speculating
+    steps = fact_loop_steps
+    verified = false
+    loop attempt in [0..5):
+        if kept.len() == 0 or fact_loop_exhausted: break
+        head = s
+        loop m in kept: fact_loop_bound_assume(head, m, n)
+        fact_speculating += 1
+        body = head
+        if prep == FACT_PREP_CONDITION: body = fact_condition(int(nodes[n].a), head).yes
+        else if prep == FACT_PREP_RANGE: body = fact_iteration_body(n, head, true, 0, lo, hi, pushes)
+        else: fact_loop_prepare(n, body, prep, base, pushes)
+        edges = fact_loop_body(n, body)
+        fact_speculating = outer
+        if fact_loop_exhausted: break
+        held: int[]
+        loop m in kept:
+            if fact_loop_bound_holds(edges.back, m): held.push(m)
+        if held.len() == kept.len():
+            verified = true
+            break
+        kept = held
+    # (outside any speculation these walks are this rule's own: the real
+    # walk and its inner loops keep the budget they had)
+    if outer == 0:
+        fact_loop_steps = steps
+        fact_loop_exhausted = false
+    if not verified: return false
+    loop m in kept: fact_loop_bound_assume(s, m, n)
+    true

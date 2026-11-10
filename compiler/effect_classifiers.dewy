@@ -104,6 +104,10 @@ effect_library_classify=(g:ClassWord):>EffectClass=>$unsafe {
     }
     if file =? "/std/graphemes.jo" {
         if name =? "__dewy_string_length" {return EffectClass.reads}
+        # (a string loop's cursor: it reads the text snapshot and moves only its own `@` cursor, so a
+        # loop over text keeps its function's `@` parameters; valid text never fails the cursor's step)
+        if name =? "__dewy_grapheme_done" {return EffectClass.reads}
+        if name =? "__dewy_grapheme_iter" or name =? "__dewy_grapheme_value" {return EffectClass.allocates}
         # (a search from a grapheme position fails for a negative one)
         if name =? "__dewy_find" or name =? "__dewy_rfind" {return if fns.ptr[g].params.length =? 2 {EffectClass.allocates} else {EffectClass.allocates_panics}}
         if name =? "__dewy_string_index" or name =? "__dewy_string_slice" {return EffectClass.allocates_panics}

@@ -5,7 +5,7 @@ from p"checked_eval.dewy" import (cx_token_values)
 from p"effect_types.dewy" import (PlaceIdentity)
 from p"expr.jo" import (IN is_nd ntype)
 from p"checks_thin_expr.dewy" import (is_map_type)
-from p"facts.jo" import (FACT_CAP FACT_PROJECTION_SCAN FactDifference FactLoop FactPaths FactProjection FactState fact_add_fits fact_add_projection fact_add_value fact_bind fact_binding fact_bound fact_capture fact_comparison fact_difference fact_difference_head fact_difference_next fact_distance fact_domain fact_grown_roots fact_incident fact_index_get fact_index_put fact_length_max fact_loop_exhausted fact_loops fact_new fact_place fact_projection_after fact_projection_find fact_projection_first fact_projection_origin fact_rebind fact_returns_cache fact_row_find fact_scalar fact_set_bound fact_shortest fact_slice_children fact_slot fact_speculating fact_summary_owner fact_terms fact_type)
+from p"facts.jo" import (FACT_CAP FACT_PROJECTION_SCAN FactDifference FactLoop FactPaths FactProjection FactState fact_add_fits fact_add_projection fact_add_value fact_bind fact_binding fact_bound fact_capture fact_comparison fact_difference fact_difference_head fact_difference_next fact_distance fact_domain fact_grown_roots fact_incident fact_index_get fact_index_put fact_length_max FACT_PREP_CONDITION fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_loop_exhausted fact_loops fact_new fact_place fact_projection_after fact_projection_find fact_projection_first fact_projection_origin fact_rebind fact_returns_cache fact_row_find fact_scalar fact_set_bound fact_shortest fact_slice_children fact_slot fact_speculating fact_summary_owner fact_terms fact_type)
 from p"facts_arith.dewy" import (fact_preread_local)
 from p"facts_routes.dewy" import (fact_read)
 from p"facts_changes.dewy" import (fact_changes)
@@ -741,6 +741,9 @@ fact_while=(n:LoopWord @s:FactState):>void=>$unsafe {
         header=entry
         fact_changes(n @header n 'budget')
     }
+    # (positions the body keeps below a length: fact_loop_bounds)
+    let demands=fact_loop_bound_entry(fact_loop_bound_demands(n) @entry)
+    if demands.length >? 0 {fact_loop_bounds(n @header demands FACT_PREP_CONDITION 0 0 0 []);}
     paths=fact_condition(LoopWord(nodes.ptr[n].a) header)
     edges=fact_loop_body(n @paths.yes)
     s=fact_join(paths.no edges.exits n)

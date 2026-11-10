@@ -1,0 +1,11 @@
+main = () => {
+    let xs:array<int64> = [1 2 3]
+    let shrink = ($capture @xs):>void => { xs.clear() }
+    let at = 0
+    loop k in [0..3) {
+        xs.push(k)
+        at = xs.length - 1
+        if k =? 1 { shrink() }
+    }
+    printl(xs[at])
+}

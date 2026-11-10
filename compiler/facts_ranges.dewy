@@ -9,7 +9,7 @@ from p"effect_types.dewy" import (PlaceIdentity)
 from p"exact.jo" import (exact_progress_math exact_word_reads)
 from p"expr.jo" import (CV IN ntype)
 from p"checks_thin_expr.dewy" import (int_intervals)
-from p"facts.jo" import (FACT_CAP FactLoop FactState fact_add_fits fact_binding fact_bound fact_capture fact_compare fact_constant fact_covered fact_difference fact_difference_head fact_difference_next fact_distance fact_domain fact_incident fact_loop_exhausted fact_projection_find fact_shortest fact_name_axis_slice fact_name_open_range fact_name_range fact_name_slice_range fact_new fact_owner fact_policy fact_project fact_probe_on fact_query fact_scalar fact_set_bound fact_speculating fact_summary_owner fact_terms fact_type fact_validated stable_loop_index)
+from p"facts.jo" import (FACT_CAP FactLoop FactState fact_add_fits fact_binding fact_bound fact_capture fact_compare fact_constant fact_covered fact_difference fact_difference_head FACT_PREP_RANGE fact_loop_bound_demands fact_loop_bound_entry fact_loop_bounds fact_difference_next fact_distance fact_domain fact_incident fact_loop_exhausted fact_projection_find fact_shortest fact_name_axis_slice fact_name_open_range fact_name_range fact_name_slice_range fact_new fact_owner fact_policy fact_project fact_probe_on fact_query fact_scalar fact_set_bound fact_speculating fact_summary_owner fact_terms fact_type fact_validated stable_loop_index)
 from p"facts_arith.dewy" import (fact_u64_capped)
 from p"facts_changes.dewy" import (fact_changes)
 from p"facts_elements.dewy" import (fact_found_payload fact_index_carried)
@@ -475,6 +475,8 @@ fact_range=(n:RangeWord @s:FactState):>void=>$unsafe {
             kept.push([l fact_bound(s e) fact_entails(s e hi (-1)) fact_entails(s e lo 0)])
         }
     }
+    # (positions the body keeps below a length, held at entry: fact_loop_bounds)
+    let demands=fact_loop_bound_entry(fact_loop_bound_demands(n) @s)
     let pre=s
     let hulls=fact_push_open(n @s)
     let iterated=fact_iterate(n @s true 0 lo hi [pushes... growers...] sums)
@@ -500,6 +502,7 @@ fact_range=(n:RangeWord @s:FactState):>void=>$unsafe {
     loop l in found {fact_found_payload(@s l lo hi)}
     if s.live and RangeWord(nodes.ptr[n].sym) not=? 0 {fact_range_invariants(n pre @s lo hi)}
     if s.live and RangeWord(nodes.ptr[n].sym) not=? 0 {fact_range_length_rows(n pre @s lo hi)}
+    let bounded=demands.length >? 0 and fact_loop_bounds(n @s demands FACT_PREP_RANGE 0 lo hi [pushes... growers...])
     let after=s
     let body=fact_range_body(n s lo hi)
     fact_growing_lengths(@body pushes)
@@ -515,7 +518,7 @@ fact_range=(n:RangeWord @s:FactState):>void=>$unsafe {
     }
     let edges=fact_loop_body(n @body)
     fact_range_exhaustion(n pre lo 0 edges)
-    s=if iterated {fact_join(after edges.exits n)} else {after}
+    s=if iterated or bounded {fact_join(after edges.exits n)} else {after}
     if iterated and fact_speculating =? 0 and after.live and edges.exits.live {
         loop entry in kept {fact_carried_exit(@s entry[0] after @edges.exits)}
     }

@@ -1,0 +1,36 @@
+# Plain arrays: links bounded by a sibling node table that the walk grows.
+Graph:type = [nodes:array<int64 length >? 0> next:array<int64<(<? nodes.length)>>]
+grow = (@g:Graph steps:array<int64>):>int64 => {
+    let at = 0
+    loop step in steps {
+        if step >? 0 and g.next.length >? 0 {
+            at = g.next[g.next.length - 1]
+        } else {
+            g.nodes.push(step)
+            at = g.nodes.length - 1
+            g.next.push(at)
+        }
+    }
+    g.nodes[at]
+}
+walk = (g:Graph hops:int64):>int64 => {
+    let at = 0
+    loop k in [0..hops) {
+        if g.next.length >? 0 { at = g.next[k % g.next.length] }
+    }
+    g.nodes[at]
+}
+count_down = (g:Graph start:int64):>int64 => {
+    let at = 0
+    let left = start
+    loop left >? 0 {
+        if g.next.length >? 0 { at = g.next[0] }
+        left -= 1
+    }
+    g.nodes[at]
+}
+main = ():>void => {
+    let g:Graph = [nodes=[7] next=[]]
+    printl(grow(@g [0 -3 1 0]))
+    printl("{walk(g 5)} {count_down(g 2)} {g.nodes.length}")
+}

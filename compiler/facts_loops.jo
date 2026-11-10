@@ -684,6 +684,9 @@ fact_while = (n: int, s: mut FactState):
         # normally. Speculative obligation answers are never published.
         header = entry
         fact_changes(n, header, n, .budget)
+    # (positions the body keeps below a length: fact_loop_bounds)
+    demands = fact_loop_bound_entry(fact_loop_bound_demands(n), entry)
+    if demands.len() > 0: fact_loop_bounds(n, header, demands, FACT_PREP_CONDITION, 0, 0, 0, [])
     paths = fact_condition(int(nodes[n].a), header)
     edges = fact_loop_body(n, paths.yes)
     s = fact_join(paths.no, edges.exits, n)

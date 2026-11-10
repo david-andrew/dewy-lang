@@ -1,0 +1,12 @@
+f = (@xs:array<int64> steps:array<int64>):>int64 => {
+    let at = 0
+    loop step in steps {
+        xs.push(step)
+        at = xs.length - 1
+    }
+    xs[at]
+}
+main = () => {
+    let a:array<int64> = []
+    printl(f(@a []))
+}

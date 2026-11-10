@@ -247,7 +247,8 @@ fact_map_store = (n: int, s: mut FactState, values: int[], before: int) -> int:
     if route.root == 0: return 0
     written = fact_place(route.root)
     if written.declaration == 0: return 0
-    if fact_exposed(written): fact_forget(s, n, .call, false, written)
+    # (the store rebuilds the written root from its route: its other fields keep their facts)
+    if fact_exposed(written): fact_forget(s, n, .call, false, written, true)
     after = fact_new(s, FactBound(), FactTerm(type = ntype(target)))
     fact_store_route(s, route, after, n)
     fact_map_grew(s, before, after)

@@ -1,0 +1,32 @@
+# quick
+# A position each iteration either reads (bounded by the node table) or makes
+# with a push stays an index of the table, which the loop only grows.
+Trie:type = [terminal:array<bool length >? 0> edges:dict<string int64<(<? terminal.length)>>]
+insert = (@trie:Trie word:string):>void => {
+    let node = 0
+    loop letter in word {
+        let key = "{node}:{letter}"
+        let next = trie.edges.get(key)
+        if next is? none {
+            trie.terminal.push(false)
+            let fresh = trie.terminal.length - 1
+            trie.edges[key] = fresh
+            node = fresh
+        } else { node = next }
+    }
+    trie.terminal[node] = true
+}
+contains_word = (trie:Trie word:string):>bool => {
+    let node = 0
+    loop letter in word {
+        let next = trie.edges.get("{node}:{letter}")
+        if next is? none { return false }
+        node = next
+    }
+    trie.terminal[node]
+}
+main = ():>void => {
+    let t:Trie = [terminal=[false] edges=[]]
+    loop word in ["to" "tea" "ten"] { insert(@t word) }
+    printl("{t.terminal.length} {contains_word(t "tea")} {contains_word(t "te")}")
+}

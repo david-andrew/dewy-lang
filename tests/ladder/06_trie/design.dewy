@@ -1,4 +1,4 @@
-Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
+Trie:type = [terminal:array<bool length >? 0> edges:dict<string int64<(<? terminal.length)>>]
 insert = (@trie:Trie word:string):>void => {
     let node = 0
     loop letter in word {
@@ -11,8 +11,6 @@ insert = (@trie:Trie word:string):>void => {
             node = fresh
         } else { node = next }
     }
-    # (the root, node 0, is there from the start)
-    $runtime_checks
     trie.terminal[node] = true
 }
 contains_word = (trie:Trie word:string):>bool => {
@@ -22,7 +20,6 @@ contains_word = (trie:Trie word:string):>bool => {
         if next is? none { return false }
         node = next
     }
-    $runtime_checks
     return trie.terminal[node]
 }
 main = ():>void => {

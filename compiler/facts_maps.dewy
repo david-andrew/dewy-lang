@@ -233,7 +233,8 @@ fact_map_store=(n:MapWord @s:FactState values:array<int64> before:MapWord):>MapW
     if route.root =? 0 {return 0}
     let written=fact_place(route.root)
     if written.declaration =? 0 {return 0}
-    if fact_exposed(written) {fact_forget(@s n 'call' false written)}
+    # (the store rebuilds the written root from its route: its other fields keep their facts)
+    if fact_exposed(written) {fact_forget(@s n 'call' false written true)}
     let after=fact_new(@s FactBound() FactTerm(type=ntype(target)))
     fact_store_route(@s route after n)
     fact_map_grew(@s before after)
