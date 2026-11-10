@@ -3014,7 +3014,7 @@ its own lower bound. Construction and replacing either field check every element
 pushing or inserting into `next` checks the value against `nodes.length`, and `next.extend(xs)`
 checks every element of `xs` once; and every read knows
 the bound, so `g.nodes[g.next[i]]` and `loop e in g.next printl(g.nodes[e])` check no bounds.
-Growing `nodes`, permuting either field (`swap`, `reverse`, the `sort` family) and shrinking
+Growing `nodes` (an element read before or after a call that rewrote `next` stays a valid index), permuting either field (`swap`, `reverse`, the `sort` family) and shrinking
 or clearing `next` keep the bound and work in place. Making
 `nodes` shorter (`pop`, `truncate`, `remove`, `clear`, a shorter replacement, also through an
 alias) is a compile error unless the elements are known to fit, as after clearing or emptying

@@ -1,0 +1,11 @@
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+turn = (@g:Graph):>void => { g.next.reverse() }
+use = (@g:Graph at:int64<(>=? 0)>):>void => {
+    turn(@g)
+    g.nodes.push('d')
+    printl(g.nodes[at])
+}
+main = ():>void => {
+    let g = Graph[nodes=['a' 'b' 'c'] next=[1 2 0]]
+    use(@g 1)
+}

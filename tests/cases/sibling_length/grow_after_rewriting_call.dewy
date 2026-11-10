@@ -1,0 +1,20 @@
+# An element read after a call that rewrote `next` stays a valid index when `nodes` only grows.
+Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+turn = (@g:Graph):>void => { g.next.reverse() }
+refill = (@g:Graph):>void => { g.next = [loop i in [0..g.nodes.length) i] }
+main = ():>void => {
+    let g = Graph[nodes=['a' 'b' 'c'] next=[1 2 0]]
+    turn(@g)
+    let first = g.next[0]
+    g.nodes.push('d')
+    printl(g.nodes[first])
+    refill(@g)
+    if g.next.length >? 2 {
+        let second = g.next[1]
+        g.nodes.push('e')
+        g.nodes.push('f')
+        printl(g.nodes[second])
+        printl(g.nodes[g.next[2]])
+        printl(g.nodes[first])
+    }
+}
