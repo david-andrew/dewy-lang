@@ -11,11 +11,11 @@ from p"facts_plans.dewy" import (fact_component_bounds fact_component_selector f
 from p"facts_ranges.dewy" import (fact_host_endpoint fact_range_exhaustion fact_step_check)
 from p"facts_changes.dewy" import (fact_changes fact_partial_opaque)
 from p"facts_conditions.dewy" import (fact_implication)
-from p"facts_joins.dewy" import (fact_hull fact_known_none)
+from p"facts_joins.dewy" import (fact_hull fact_join fact_known_none)
 from p"facts_loops.dewy" import (fact_loop_body)
 from p"facts_maps.dewy" import (fact_keys_element)
 from p"facts_probes.dewy" import (fact_probe_record)
-from p"facts_pushes.dewy" import (fact_mentions)
+from p"facts_pushes.dewy" import (fact_iterate fact_mentions)
 from p"facts_summaries.dewy" import (fact_summary_payload)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"lower_views.dewy" import (comprehension_value)
@@ -200,6 +200,9 @@ fact_index_carried=(body:ElementWord l:ElementWord):>array<int64>=>$unsafe {
 }
 # A stepped range `[first,second..end)`: the step's sign, when known, bounds
 # each value between first and end (the lowering stops before passing end).
+# A body assigning a carried local iterates its header as a range loop does
+# (fact_iterate, demanded by fact_iterates); otherwise the body's changes are
+# havocked.
 fact_stepped=(n:ElementWord @s:FactState):>void=>$unsafe {
     let iterator=ElementWord(nodes.ptr[n].a)
     let first=fact_capture(ElementWord(nodes.ptr[iterator].a) @s)
@@ -209,9 +212,22 @@ fact_stepped=(n:ElementWord @s:FactState):>void=>$unsafe {
     let down=fact_compare(s 'lt' second first) =? 1
     if not up and not down or fact_probe_on {fact_step_check(n @s first second ElementWord(nodes.ptr[iterator].a) ElementWord(nodes.ptr[iterator].c))}
     let entry=s
-    fact_changes(n @s n)
+    let iterated=fact_iterate(n @s true second first end_ [] [])
+    if not iterated {fact_changes(n @s n)}
     let after=s
+    let body=fact_stepped_body(n s first second end_)
+    let edges=fact_loop_body(n @body)
+    fact_range_exhaustion(n entry first second edges)
+    # (an iterated header holds at every head, not inside the body: a break joins it)
+    s=if iterated {fact_join(after edges.exits n)} else {after}
+}
+# A stepped range loop's body with its loop value bound and, when the step's
+# sign is known, between first and end.
+fact_stepped_body=(n:ElementWord s:FactState first:ElementWord second:ElementWord end_:ElementWord):>FactState=>$unsafe {
+    let iterator=ElementWord(nodes.ptr[n].a)
     let body=s
+    let up=fact_compare(body 'lt' first second) =? 1
+    let down=fact_compare(body 'lt' second first) =? 1
     let l=ElementWord(nodes.ptr[n].sym)
     let v=fact_fresh(@body ElementWord(locals.ptr[l].type))
     fact_bind(@body PlaceIdentity('local' ElementWord(locals.ptr[l].owner) l) v)
@@ -224,9 +240,7 @@ fact_stepped=(n:ElementWord @s:FactState):>void=>$unsafe {
             fact_assume(@body fact_new(@body fact_domain(T_BOOL) far) true)
         }
     }
-    let edges=fact_loop_body(n @body)
-    fact_range_exhaustion(n entry first second edges)
-    s=after
+    body
 }
 # Each iteration's hidden index lies in [0, length) of the source's entry
 # value; the source is a snapshot, so a body that resizes the original

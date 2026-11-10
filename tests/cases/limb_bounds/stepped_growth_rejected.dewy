@@ -1,0 +1,14 @@
+# A limb the stepped loop only adds to has no bound at the head: its product
+# may exceed a word.
+absorb = (h:uint64<(<=? 0x7ffffff)> data:array<uint8>):>uint64 => {
+    let h0 = h
+    loop at in [0, 16..data.length-1] {
+        h0 += (data[at] as uint64) and 0x3ffffff
+        let d0 = h0*h0
+        h0 = d0 >> 1
+    }
+    return h0
+}
+main = () => {
+    printl(absorb(3 [1 2 3]))
+}

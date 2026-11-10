@@ -216,6 +216,9 @@ fact_index_carried = (body: int, l: int) -> int[]:
     out
 # A stepped range `[first,second..end)`: the step's sign, when known, bounds
 # each value between first and end (the lowering stops before passing end).
+# A body assigning a carried local iterates its header as a range loop does
+# (fact_iterate, demanded by fact_iterates); otherwise the body's changes are
+# havocked.
 fact_stepped = (n: int, s: mut FactState):
     iterator = int(nodes[n].a)
     first = fact_capture(int(nodes[iterator].a), s)
@@ -225,9 +228,23 @@ fact_stepped = (n: int, s: mut FactState):
     down = fact_compare(s, .lt, second, first) == 1
     if not up and not down or fact_probe_on: fact_step_check(n, s, first, second, int(nodes[iterator].a), int(nodes[iterator].c))
     entry = s
-    fact_changes(n, s, n)
+    pushes: (int, int)[]
+    sums: (int, FactBound)[]
+    iterated = fact_iterate(n, s, true, second, first, end, pushes, sums)
+    if not iterated: fact_changes(n, s, n)
     after = s
+    body = fact_stepped_body(n, s, first, second, end)
+    edges = fact_loop_body(n, body)
+    fact_range_exhaustion(n, entry, first, second, edges)
+    # (an iterated header holds at every head, not inside the body: a break joins it)
+    s = if iterated: fact_join(after, edges.exits, n) else: after
+# A stepped range loop's body with its loop value bound and, when the step's
+# sign is known, between first and end.
+fact_stepped_body = (n: int, s: FactState, first: int, second: int, end: int) -> FactState:
+    iterator = int(nodes[n].a)
     body = s
+    up = fact_compare(body, .lt, first, second) == 1
+    down = fact_compare(body, .lt, second, first) == 1
     l = int(nodes[n].sym)
     v = fact_fresh(body, int(locals[l].type))
     fact_bind(body, PlaceIdentity(.local, int(locals[l].owner), l), v)
@@ -238,9 +255,7 @@ fact_stepped = (n: int, s: mut FactState):
         if end != 0:
             far = if up: FactTerm((if inclusive: Tok.le else: Tok.lt), v, end) else: FactTerm((if inclusive: Tok.ge else: Tok.gt), v, end)
             fact_assume(body, fact_new(body, fact_domain(T_BOOL), far), true)
-    edges = fact_loop_body(n, body)
-    fact_range_exhaustion(n, entry, first, second, edges)
-    s = after
+    body
 # Each iteration's hidden index lies in [0, length) of the source's entry
 # value; the source is a snapshot, so a body that resizes the original
 # rebinds that place and the length stays the snapshot's.

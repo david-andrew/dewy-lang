@@ -523,9 +523,10 @@ fact_counted_bounds = (s: mut FactState, sums: (int, FactBound)[]):
         b = fact_bound(s, s.bindings[i].value)
         b.lo = max(b.lo, sum.1.lo); b.hi = min(b.hi, sum.1.hi)
         fact_set_bound(s, s.bindings[i].value, b)
-# One speculative body state of a range (range) or array (base) loop.
+# One speculative body state of a range (range) or array (base) loop; a
+# stepped range passes its second value as base.
 fact_iteration_body = (n: int, header: FactState, range: bool, base: int, lo: int, hi: int, pushes: (int, int)[]) -> FactState:
-    body = if range: fact_range_body(n, header, lo, hi) else: header
+    body = if range and has_flag(int(nodes[n].a), NF_STEP): fact_stepped_body(n, header, lo, base, hi) else if range: fact_range_body(n, header, lo, hi) else: header
     fact_growing_lengths(body, pushes)
     if not range:
         fact_loop_index(n, base, body)
