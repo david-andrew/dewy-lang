@@ -162,6 +162,7 @@ use 'collection_checks.dewy'
 use 'slice_checks.dewy'
 use 'gpu_type_checks.dewy'
 use 'numeric_constants.dewy'
+use 'expr_cold_queries.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -687,13 +688,6 @@ record_int_conversion = (from: int, to: int) -> bool:
         if types[a].kind != .int_ or types[b].kind != .int_: return false
         if a != T_MATH_INT and b != T_MATH_INT and not int_widens(a, b): return false
     true
-
-# is record `to` an operand of intersection `from` (or of one of its operands)?
-intersection_within = (from: int, to: int) -> bool:
-    if not structs[int(types[from].st)].resolved: check_struct_fields(int(types[from].st))
-    loop part in intersection_parts.get(from) ?? []:
-        if part == to or intersection_within(part, to): return true
-    false
 
 # a function of the program's own (not the prelude's) by this name
 program_fn_named = (name: int) -> bool:
@@ -1329,14 +1323,6 @@ is_map_entries_type = (t: int) -> bool:
 
 # The method whose object is being checked as a place, for its diagnostics.
 place_method = 0
-
-# A Dewy closure's capture of a name its `$capture` list does not mention.
-implicit_capture = (l: int) -> bool:
-    d = int(fns[int(locals[l].owner)].decl)
-    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy or has_flag(d, NF_LANG_BODY): return false
-    loop cap in lambda_captures(d):
-        if nodes[cap].name == locals[l].name: return false
-    true
 
 implicit_capture_write = (l: int, pos: int):
     nm = name_of(int(locals[l].name))
@@ -5503,13 +5489,6 @@ written_int = (a: int) -> int:
     if nodes[a].kind == .int_lit: return nodes[a].ival
     int(nodes[a].fval)
 
-src_char = (p: int) -> u8:
-    f = pos_file(p)
-    if p <= 0 or f < 0 or f >= files.len(): return 0
-    o = pos_off(p)
-    if o >= len(files[f].src): return 0
-    files[f].src[o]
-
 charlike = (n: int) -> bool: nodes[n].kind == .str_lit and has_flag(n, NF_CHARLIKE)
 
 charlike_to_int = (n: int):
@@ -6560,28 +6539,6 @@ race_spread = (n: int, expected: int) -> int:
 
 # (the per-wait matches source_match made: select_progress checks them as on select)
 select_source_matches: {int: bool} = {}
-
-# `T.name` (decisions.md, batch 7): a type's canonical short name, "" when it has none. A
-# declared record or a generic one's instance is its declaration's name (`Closed<Job>` is
-# `Closed`; the module is not part of it); an alias of a named type is that type's; a builtin is
-# its spelling; a text literal is its text when that is a name. Anonymous records and unions
-# have none.
-type_short_name = (t0: int) -> str:
-    t = prune(t0)
-    if is_union(t): return ""
-    text = ""
-    if tkind(t) == .struct_ or tkind(t) == .enum_:
-        d = int(structs[int(types[t].st)].decl)
-        if d != 0 and nodes[d].name != 0: text = name_of(int(nodes[d].name))
-    else:
-        set = str_set_of(t)
-        if set != 0:
-            if str_sets[set].len() == 1: text = str_sets[set].sorted()[0]
-        else: text = dt(t)
-    if len(text) == 0 or not is_alpha(text[0]): return ""
-    loop i in [0..len(text)):
-        if not is_alpha(text[i]) and not is_digit(text[i]): return ""
-    text
 
 type_name_id = 0
 
