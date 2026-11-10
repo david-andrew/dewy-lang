@@ -1,0 +1,15 @@
+# In a loop, a select arm that takes a close and changes nothing spins: the closed channel is
+# ready again on the next turn (decisions.md, batch 7, the progress rule).
+main = () => {
+    let a = channel<int64>(2)
+    let b = channel<int64>(2)
+    a.close()
+    let n = 0
+    loop n <? 3 {
+        match select(@a.receive @b.receive) {
+            v:int64 => {n += 1}
+            <Closed> => printl"closed"
+            <Canceled> => break
+        }
+    }
+}

@@ -1,0 +1,14 @@
+# modes: native native-release
+# A close arm that leaves the loop makes progress (decisions.md, batch 7).
+main = () => {
+    let a = channel<int64>(2)
+    let b = channel<int64>(2)
+    a.close()
+    loop true {
+        match select(@a.receive @b.receive) {
+            v:int64 => printl"{v}"
+            <Closed | Canceled> => break
+        }
+    }
+    printl"left"
+}

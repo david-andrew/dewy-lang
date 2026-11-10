@@ -6927,6 +6927,53 @@ select_check = (n: int):
             if int(nodes[int(fns[int(nodes[w].sym)].decl)].name) == op and select_same_place(kid(w, 0), kid(a, 0)): fatal(nodes[a].pos, "this operation is listed twice: select takes at most one value from it, so write it once")
         waits.push(a)
 
+# The progress rule, for its common case (decisions.md, batch 7): in a loop, an arm of a match
+# on select that takes a close and changes nothing (no assignment, no break, return or
+# or_throw, no call but printing) reaches the next turn, where the closed channel is ready
+# again: it spins. O(the arms' bodies), only for a match on select inside a loop.
+select_progress = (m: int):
+    if cx < 0 or ctxs[cx].loop_depth == 0: return
+    sc = int(nodes[m].a)
+    loop nodes[sc].kind == .conv: sc = int(nodes[sc].a)
+    if nodes[sc].kind != .call or not select_call(sc): return
+    loop arm in kids(m):
+        closes = false
+        loop p in kids(arm):
+            if select_pattern_closes(p): closes = true
+        if closes and not select_moves(int(nodes[arm].b)): fatal(nodes[arm].pos, "this close arm spins: a closed channel stays ready, so the next turn of the loop takes the close again; leave the loop (`break`), change what the loop tests, or drain the channels with `merged(...)`, which retires each one as it closes")
+
+select_pattern_closes = (p: int) -> bool:
+    if nodes[p].kind == .pvariant: return name_of(int(nodes[p].name)) == "Closed"
+    if nodes[p].kind != .ptype or nodes[p].type == 0: return false
+    t = prune(int(nodes[p].type))
+    members = if is_union(t): union_members(t) else: [t]
+    loop member in members:
+        mt = prune(member)
+        if tkind(mt) == .struct_ and structs[int(types[mt].st)].decl != 0 and name_of(int(nodes[int(structs[int(types[mt].st)].decl)].name)) == "Closed": return true
+    false
+
+# (could n change what the loop does next: an assignment, a jump out, a failure forwarded, or a
+# call other than printing)
+select_moves = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .lambda: return false
+    if k == .assign or k == .break_ or k == .return_ or k == .propagate: return true
+    if k == .call:
+        f = int(nodes[n].sym)
+        if nodes[n].aux != 0 or f <= 0 or fns[f].decl == 0: return true
+        name = name_of(int(nodes[int(fns[f].decl)].name))
+        if name != "printl" and name != "print" and name != "__print_str": return true
+    mask = isolation_children(k)
+    if mask < 0: return true
+    if mask & 1 != 0 and select_moves(int(nodes[n].a)): return true
+    if mask & 2 != 0 and select_moves(int(nodes[n].b)): return true
+    if mask & 4 != 0 and select_moves(int(nodes[n].c)): return true
+    if mask & 16 != 0:
+        loop child in kids(n):
+            if select_moves(child): return true
+    false
+
 # (a local or a field chain on one)
 select_place = (n0: int) -> bool:
     n = n0

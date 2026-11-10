@@ -3633,11 +3633,14 @@ main = () => {
 
 A wait written twice (`select(@jobs.receive @jobs.receive)`) is an error, and so is a wait
 the call cannot see: a stored handle, a helper's result or an indexed element (bind
-`let ch = channels[i]`, then write `@ch.receive`). *Not yet built:* telling same-typed
-waits apart by source (`<heart.Tick>`, `line:stderr.string`), sends inside `select`
-through `reserve`, waits turned off with `if cond @… else none`, a spread of waits, and the
-progress check for a close arm that loops without turning its wait off. `select` takes up
-to four waits for now.
+`let ch = channels[i]`, then write `@ch.receive`). In a loop, an arm that takes a close
+and changes nothing (no assignment, no `break`, `return` or `or_throw`, no call but
+printing) is an error: the closed channel is ready again on the next turn, so the loop
+would spin. Leave the loop, or drain with `merged`, which retires each channel as it
+closes. *Not yet built:* telling same-typed waits apart by source (`<heart.Tick>`,
+`line:stderr.string`), sends inside `select` through `reserve`, waits turned off with
+`if cond @… else none`, a spread of waits, and the same check for a `Timeout` arm under a
+`0s` poll. `select` takes up to four waits for now.
 
 `merged(@a.receive @b.receive)` drains up to four receives of one payload type as one
 inbox (decisions.md, batch 7). `loop item in inbox` takes each value as it comes (an item is

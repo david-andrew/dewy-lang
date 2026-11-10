@@ -166,7 +166,9 @@ check_match = (m: int, expected: int) -> int:
     place_grouped_call(int(nodes[m].a))
     if nodes[int(nodes[m].a)].kind == .call and nodes[int(nodes[m].a)].aux2 == i32(AUX2_PLACE): return place_match(m, expected)
     if files[pos_file(nodes[m].pos)].is_dewy and shape_match_wanted(m): return check_shaped_match(m, expected)
-    xh_match(m, expected)
+    t = xh_match(m, expected)
+    select_progress(m)
+    t
 # `match` runs in checker_match.dewy; these are its services.
 match_intervals = (t: int, domain: mut int[], high: mut int[]) -> bool:
     known, d, h = int_intervals_wide(t)
