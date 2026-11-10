@@ -1,0 +1,472 @@
+$runtime_checks
+from p"checked_eval.dewy" import (cx_token)
+from p"ast.jo" import (NF_ALIASDECL NF_BROADCAST NF_CHECKED NF_GLOBAL NF_LOOPCOUNT NF_MUT NF_RDONLY add_flag clear_flag clone has_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (compound_op ctxs cx discarding elem_tmp_n fns globals index_update_path index_update_sources local_place_count locals pool_update_read position_guards syms)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checker_tokens.dewy" import (Tok)
+from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_if bc_int bc_let bc_stmt)
+from p"checks_call_hints.dewy" import (a_type)
+from p"checks_thin.dewy" import (check_stmt check_vardecl jd pool_library_fn resolve_binding_type resolve_type)
+from p"checks_thin_expr.dewy" import (array_has_spread is_fn_type)
+from p"expr.jo" import (bc_assign bc_bin coerce dewy_position_known dewy_slice_args last_checked ntype part_spec resolve_by_types time_policy_why time_zone_failure type_node_of)
+from p"juxtapose.dewy" import (juxt_space_hint)
+from p"lex.jo" import (tok_text)
+from p"node_store.dewy" import (Node)
+from p"parse.jo" import (comp_ident)
+from p"refine.jo" import (ref_nd_receivers refine_active refine_storage)
+from p"refine_ops.dewy" import (total_dict_keys)
+from p"type_ops.dewy" import (dt mk_fixed)
+from p"types.jo" import (T_INT T_MATH_INT T_NEVER is_float is_int is_numeric is_union prune structs targ tkind ts_dewy type_eq types union_members)
+from p"unit_ops.dewy" import (quantity_int_promotes)
+from p"unit_rare.dewy" import (time_core_type)
+from p"units.jo" import (bundled_rational_type is_quantity)
+from p"util.jo" import (err_notes fatal files intern line_col name_of pos_file pos_in_lib warn)
+
+PlaceUpdateWord:type=int64<overflow='wrap'>
+unused_value=(raw:Node t:PlaceUpdateWord):>void=>$unsafe {
+    if discarding {return}
+    if pos_in_lib(raw.pos) or files[pos_file(raw.pos)].path =? "<input>" {return}
+    if tkind(prune(t)) =? 'void_' or t =? T_NEVER {return}
+    let k=raw.kind
+    let name=""
+    if (k =? 'binary' or k =? 'and_' or k =? 'or_') and nodes.ptr[int64(raw.a)].kind =? 'ident' {name=name_of(PlaceUpdateWord(nodes.ptr[int64(raw.a)].name))}
+    if k =? 'binary' {
+        let op=cx_token(PlaceUpdateWord(raw.op))
+        if op =? 'eq' {
+            let eq=jd(raw.pos "`==`" "`=?`")
+            if (name as array<uint8>).length >? 0 {warn(raw.pos "{eq} compares, and the answer is not used: to change '{name}', write `{name} = ...`")} else {warn(raw.pos "{eq} compares, and the answer is not used (`=` changes a value)")}
+            return
+        }
+        if op =? 'ne' or op =? 'lt' or op =? 'gt' or op =? 'le' or op =? 'ge' {
+            warn(raw.pos "this comparison's answer is not used ({jd(raw.pos "`if ...:`" "`if ... \{ }`")} acts on it)")
+            return
+        }
+        if op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'slash' or op =? 'percent' {
+            if (name as array<uint8>).length >? 0 {warn(raw.pos "this value is not used: to change '{name}', write `{name} = ...` (or `{name} {tok_text(op)}= ...`)")} else {warn(raw.pos "this value is not used: it changes nothing")}
+            return
+        }
+        return
+    }
+    if k =? 'and_' or k =? 'or_' or k =? 'not_' {
+        warn(raw.pos "this condition's answer is not used ({jd(raw.pos "`if ...:`" "`if ... \{ }`")} acts on it)")
+        return
+    }
+    if k =? 'bool_lit' or k =? 'int_lit' or k =? 'float_lit' or k =? 'ident' or k =? 'none_lit' {
+        let spaced=if k =? 'int_lit' or k =? 'float_lit' or k =? 'ident' {juxt_space_hint(raw.pos)} else {""}
+        if (spaced as array<uint8>).length >? 0 {warn(raw.pos "this value is not used{spaced}")} else if tkind(prune(PlaceUpdateWord(ctxs[cx].ret))) not=? 'void_' {
+            warn(raw.pos "this value is not used: `return` gives it back from the function")
+        }
+        else {
+            warn(raw.pos "this value is not used: it changes nothing")
+        }
+    }
+}
+index_update_capture=(ix:PlaceUpdateWord @stmts:array<int64>):>int64=>$unsafe {
+    let pos=nodes.ptr[ix].pos
+    elem_tmp_n += 1
+    let name=intern("__index{elem_tmp_n}")
+    let d=mk('vardecl' pos)
+    nodes.ptr[d].name=int32(name)
+    nodes.ptr[d].b=nodes.ptr[ix].b
+    index_update_sources[name]=PlaceUpdateWord(nodes.ptr[ix].b)
+    stmts.push(d)
+    nodes.ptr[ix].b=int32(comp_ident(name pos))
+    name
+}
+pool_direct_update=(s:PlaceUpdateWord ix:PlaceUpdateWord bt:PlaceUpdateWord):>bool=>$unsafe {
+    if types.ptr[bt].kind not=? 'struct_' or structs.ptr[PlaceUpdateWord(types.ptr[bt].st)].name not=? "Pool" {return false}
+    # Do not bypass a user getter or setter, even for the bundled Pool type.
+    let get=clone(ix)
+    check_expr(get 0);
+    get=last_checked
+    if nodes.ptr[get].kind not=? 'call' or nodes.ptr[get].aux not=? 0 or nkids(get) not=? 2 or not pool_library_fn(PlaceUpdateWord(nodes.ptr[get].sym)) {return false}
+    let ht=ntype(kid(get 1))
+    let vt=ntype(get)
+    if resolve_by_types(intern("__setindex__") [bt ht vt] nodes.ptr[s].pos false) not=? 0 {return false}
+    if not pool_library_fn(resolve_by_types(intern("[]=") [bt ht vt] nodes.ptr[s].pos false)) {return false}
+    # The old read/edit/writeback remains necessary when evaluation can change
+    # the pool or invoke a custom arithmetic operator. Start with scalar writes
+    # whose operands are scalar expressions over ordinary reads.
+    let lt=check_expr(clone(PlaceUpdateWord(nodes.ptr[s].a)) 0)
+    if not is_numeric(prune(lt)) and tkind(lt) not=? 'bool_' {return false}
+    check_expr(clone(PlaceUpdateWord(nodes.ptr[s].b)) 0);
+    if not pool_update_read(last_checked) {return false}
+    loop part in index_update_path(PlaceUpdateWord(nodes.ptr[s].a)) {
+        if nodes.ptr[part].kind not=? 'index' {continue}
+        if nodes.ptr[part].b =? 0 {return false}
+        check_expr(clone(PlaceUpdateWord(nodes.ptr[part].b)) 0);
+        if not pool_update_read(last_checked) {return false}
+        if part not=? ix {
+            let pt=tkind(check_expr(clone(PlaceUpdateWord(nodes.ptr[part].a)) 0))
+            if pt not=? 'array' and pt not=? 'fixed' {return false}
+        }
+    }
+    true
+}
+# A checked receiver path that can be aliased without running a getter again.
+dewy_end_place=(n:PlaceUpdateWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {return true}
+    if k =? 'field' or k =? 'index' {return dewy_end_place(PlaceUpdateWord(nodes.ptr[n].a))}
+    false
+}
+# A dotted selection update reads the original source, captures its selector,
+# computes the result, then reacquires the destination for writeback. An open
+# slice becomes a small stored range before the RHS can resize the destination.
+dewy_selection_update=(s:PlaceUpdateWord matrix:bool=false):>int64=>$unsafe {
+    let lhs=PlaceUpdateWord(nodes.ptr[s].a)
+    let pos=nodes.ptr[s].pos
+    let stmts:array<int64>=[]
+    let path=index_update_path(PlaceUpdateWord(nodes.ptr[lhs].a))
+    let j=path.length - 1
+    loop j >=? 0 {
+        let part=path[j]
+        j -= 1
+        if nodes.ptr[part].kind =? 'index' and nodes.ptr[part].b not=? 0 {index_update_capture(part @stmts);}
+    }
+    elem_tmp_n += 1
+    let source="$selection_source{elem_tmp_n}"
+    let selector="$selection_index{elem_tmp_n}"
+    let value="$selection_value{elem_tmp_n}"
+    let captured="$selection{elem_tmp_n}"
+    index_update_sources[intern(source)]=PlaceUpdateWord(nodes.ptr[lhs].a)
+    let reads=[bc_let(source clone(PlaceUpdateWord(nodes.ptr[lhs].a)) pos)]
+    let spec=PlaceUpdateWord(nodes.ptr[lhs].b)
+    if matrix {
+        let shape=bc_field(bc_ident(source pos) "shape" pos)
+        spec=bc_call("__nd_bound_part" [shape part_spec(lhs)] pos)
+    }
+    else if nodes.ptr[spec].kind =? 'range' {
+        let size=bc_field(bc_ident(source pos) "length" pos)
+        spec=bc_call("__dewy_slice_range" [size dewy_slice_args(spec pos)...] pos)
+    }
+    reads.push(bc_let(selector spec pos))
+    let picked=mk('index' pos)
+    nodes.ptr[picked].a=int32(bc_ident(source pos))
+    nodes.ptr[picked].b=int32(bc_ident(selector pos))
+    if matrix {picked=bc_call("__nd_slice" [bc_ident(source pos) bc_ident(selector pos)] pos)}
+    let pair=mk('tuple' pos)
+    set_list(pair [bc_ident(selector pos) picked])
+    reads.push(bc_stmt(pair pos))
+    # Release the whole-source snapshot after selecting the old values. Keeping
+    # it through writeback would force a full-array COW copy for a tiny update.
+    stmts.push(bc_let(captured bc_block(reads pos) pos))
+    loop i in [0..2) {
+        let field=mk('field' pos)
+        nodes.ptr[field].a=int32(bc_ident(captured pos))
+        nodes.ptr[field].aux=-2
+        nodes.ptr[field].ival=i
+        let name=if i =? 0 {selector} else {value}
+        stmts.push(bc_let(name field pos))
+    }
+    let update=nodes.length
+    nodes.push(nodes.ptr[s])
+    nodes.ptr[update].a=int32(bc_ident(value pos))
+    stmts.push(update)
+    # Capturing receiver indices changed checked paths; resolve those paths
+    # again with the new index bindings before generating the write.
+    if matrix {
+        let receiver=clone(PlaceUpdateWord(nodes.ptr[lhs].a))
+        add_flag(receiver NF_MUT)
+        ref_nd_receivers[receiver]=true
+        stmts.push(bc_stmt(bc_call("__nd_slice_set" [receiver bc_ident(selector pos) bc_ident(value pos)] pos) pos))
+    }
+    else {
+        nodes.ptr[lhs].b=int32(bc_ident(selector pos))
+        stmts.push(bc_assign(clone(lhs) bc_ident(value pos) pos))
+    }
+    let block=bc_block(stmts pos)
+    check_stmt(block)
+    block
+}
+# The position a dominating guard holds a runtime index to, or -1. A guard only names the position
+# to write: the store's bound is still proven there, so a guard no longer true is a rejected store.
+tuple_guarded=(b:PlaceUpdateWord count:PlaceUpdateWord):>int64=>$unsafe {
+    if position_guards.length =? 0 {return -1}
+    check_expr(clone(b) 0);
+    let c=last_checked
+    if nodes.ptr[c].kind not=? 'ident' or nodes.ptr[c].aux not=? int32(1) {return -1}
+    let i=position_guards.length - 1
+    loop i >=? 0 {
+        let g=position_guards[i]
+        if g.local =? nodes.ptr[c].sym {return if int64(g.value) >=? 0 and int64(g.value) <? count {int64(g.value)} else {-1}}
+        i -= 1
+    }
+    -1
+}
+# The positions a runtime index can reach: its refined value set's, when it has one, else all.
+tuple_reachable=(b:PlaceUpdateWord count:PlaceUpdateWord):>array<int64>=>{
+    let out:array<int64>=[]
+    check_expr(clone(b) 0);
+    let c=last_checked
+    if refine_active {
+        let [ok keys]=total_dict_keys(refine_storage(c ntype(c)))
+        if ok {
+            loop at in [0..count) {
+                if keys.contains("{at}") {out.push(at)}
+            }
+            if out.length >? 0 {return out}
+        }
+    }
+    loop at in [0..count) {out.push(at)}
+    out
+}
+# (the place of a position)
+tuple_slot=(place:PlaceUpdateWord at:PlaceUpdateWord pos:PlaceUpdateWord):>int64=>$unsafe {
+    let slot=mk('field' pos)
+    nodes.ptr[slot].a=int32(clone(place))
+    nodes.ptr[slot].aux=-2
+    nodes.ptr[slot].ival=at
+    slot
+}
+# The write of statement s at one position. An update of a union position is made for the
+# member it holds, so it needs to be valid for each of them.
+tuple_slot_stmt=(s:PlaceUpdateWord place:PlaceUpdateWord at:PlaceUpdateWord bt:PlaceUpdateWord pos:PlaceUpdateWord):>int64=>$unsafe {
+    let member_types=if is_union(targ(bt at)) and PlaceUpdateWord(nodes.ptr[s].op) not=? 47 and not has_flag(s NF_BROADCAST) {union_members(targ(bt at))} else {[]}
+    if member_types.length =? 0 {
+        let w=clone(s)
+        nodes.ptr[w].a=int32(tuple_slot(place at pos))
+        return w
+    }
+    let name="$slot_value{s}_{at}"
+    let stmts=[bc_let(name tuple_slot(place at pos) pos)]
+    loop member in member_types {
+        let w=clone(s)
+        nodes.ptr[w].a=int32(tuple_slot(place at pos))
+        nodes.ptr[w].op=int32(47)
+        nodes.ptr[w].b=int32(bc_bin(cx_token(compound_op(PlaceUpdateWord(nodes.ptr[s].op))) bc_ident(name pos) clone(PlaceUpdateWord(nodes.ptr[s].b)) pos))
+        let condition=mk('istype' pos)
+        nodes.ptr[condition].a=int32(bc_ident(name pos))
+        nodes.ptr[condition].b=int32(type_node_of(member pos))
+        stmts.push(bc_if(condition [w] [] pos))
+    }
+    bc_block(stmts pos)
+}
+# `t[i] = v`, `t[i] += v` for a `[A B]` and a runtime index: the write, valid at every position
+# the index can reach, made there, from a chain testing i once each; the index's bounds proven
+# as an array's are. O(positions * size of v). 0 for what is not such a write.
+tuple_slot_write=(s:PlaceUpdateWord bt:PlaceUpdateWord):>int64=>$unsafe {
+    let lhs=PlaceUpdateWord(nodes.ptr[s].a)
+    let b=PlaceUpdateWord(nodes.ptr[lhs].b)
+    let pos=nodes.ptr[lhs].pos
+    let count=PlaceUpdateWord(types.ptr[bt].nargs)
+    if b =? 0 or nkids(lhs) not=? 1 or nodes.ptr[b].kind =? 'range' or nodes.ptr[b].kind =? 'namedarg' {return 0}
+    let [known _]=dewy_position_known(b pos)
+    if known {return 0}
+    let guarded=tuple_guarded(b count)
+    let positions=if guarded >=? 0 {[guarded]} else {tuple_reachable(b count)}
+    let place=PlaceUpdateWord(nodes.ptr[lhs].a)
+    loop at in positions {
+        let before=err_notes.length
+        err_notes.push([nodes.ptr[s].pos "note: this writes position {at} of this {dt(bt)}, which holds {a_type(targ(bt at))}"])
+        check_stmt(tuple_slot_stmt(s place at bt pos))
+        loop err_notes.length >? before {err_notes.pop();}
+    }
+    let name="$slot{s}"
+    let table="$position_values{s}"
+    # (under a guard, a table of one, and the index must be proven to be that position)
+    let reach=if guarded >=? 0 {1} else {count}
+    let zeros:array<int64>=[]
+    loop at in [0..reach) {zeros.push(bc_int(0 pos))}
+    let values=mk('array' pos)
+    set_list(values zeros)
+    let shape=mk('tname' pos)
+    nodes.ptr[shape].aux=-7
+    nodes.ptr[shape].ival=mk_fixed(T_INT reach)
+    let bound_values=bc_let(table values pos)
+    nodes.ptr[bound_values].a=int32(shape)
+    let bound=mk('index' pos)
+    nodes.ptr[bound].a=int32(bc_ident(table pos))
+    nodes.ptr[bound].b=int32(if guarded >? 0 {bc_bin('minus' bc_ident(name pos) bc_int(guarded pos) pos)} else {bc_ident(name pos)})
+    set_list(bound [PlaceUpdateWord(nodes.ptr[bound].b)])
+    let chain=tuple_slot_stmt(s place positions[positions.length - 1] bt pos)
+    let i=positions.length - 2
+    loop i >=? 0 {
+        chain=bc_if(bc_bin('eq' bc_ident(name pos) bc_int(positions[i] pos) pos) [tuple_slot_stmt(s place positions[i] bt pos)] [chain] pos)
+        i -= 1
+    }
+    let block=bc_block([bc_let(name b pos) bound_values bc_let("{name}_bound" bound pos) chain] pos)
+    check_stmt(block)
+    block
+}
+# x = value where x is a variable of another type: where x was made, and the ways out
+var_type_error=(lhs:PlaceUpdateWord lt:PlaceUpdateWord rt:PlaceUpdateWord at:PlaceUpdateWord):>void=>$unsafe {
+    let nm=name_of(PlaceUpdateWord(nodes.ptr[lhs].name))
+    let made=""
+    let p:PlaceUpdateWord=0
+    if nodes.ptr[lhs].aux =? int32(1) and nodes.ptr[lhs].sym >? 0 {p=locals.ptr[PlaceUpdateWord(nodes.ptr[lhs].sym)].pos} else if nodes.ptr[lhs].sym >? 0 and globals.ptr[PlaceUpdateWord(nodes.ptr[lhs].sym)].decl >? 0 {p=nodes.ptr[PlaceUpdateWord(globals.ptr[PlaceUpdateWord(nodes.ptr[lhs].sym)].decl)].pos}
+    if p >? 0 and pos_file(p) =? pos_file(at) {
+        let [ln c]=line_col(p)
+        made=" (made on line {ln})"
+    }
+    let how="`let {nm} = ...` makes a new variable"
+    if is_int(lt) and (is_float(rt) or bundled_rational_type(rt)) {
+        # (time_left = 30, then time_left -= dt: 30.0 holds fractions)
+        let start="0.0"
+        if nodes.ptr[lhs].aux not=? int32(1) and nodes.ptr[lhs].sym >? 0 and globals.ptr[PlaceUpdateWord(nodes.ptr[lhs].sym)].decl >? 0 {
+            let gd=PlaceUpdateWord(globals.ptr[PlaceUpdateWord(nodes.ptr[lhs].sym)].decl)
+            if nodes.ptr[gd].b not=? 0 and nodes.ptr[PlaceUpdateWord(nodes.ptr[gd].b)].kind =? 'int_lit' {start="{nodes.ptr[PlaceUpdateWord(nodes.ptr[gd].b)].ival}.0"}
+        }
+        how="write its first value with a decimal point (`{nm} = {start}`), so it holds fractions too, or make this a whole number with int(...)"
+        # (`let total:int64 = 0`: the written type made it whole, not its first value)
+        if ts_dewy and prune(lt) not=? T_MATH_INT {how="declare it a float where it is made (`{nm}:float64`), or make this a whole number with `{dt(lt)}(...)`"}
+        fatal(at "'{nm}' holds whole numbers{made}, and this is a number with a fraction: {how}")
+    }
+    # (total = 0m, then total += 1.5m: 0.0m holds fractions)
+    if quantity_int_promotes(lt rt) {fatal(at "'{nm}' holds whole numbers ({dt(lt)}{made}), and this is a {dt(rt)}: write its first value with a decimal point before its unit, so it holds fractions too")}
+    # (score = "0", then score += 1: a number in quotes is text)
+    if tkind(lt) =? 'str_' and is_numeric(rt) {
+        fatal(at "'{nm}' holds text{made} (a value in quotes, \"0\", is text, even with digits): for a number, give it one without quotes (`{nm} = 0`)")
+    }
+    # (gap = 0s, then gap = t2 - t1: a time written with a unit is a quantity, and the subtraction a Duration)
+    if is_quantity(lt) and time_core_type(rt "Duration") {how="give it the type where it is made, `let {nm}:Duration = ...`"}
+    # (m = m + 1day, a zoned time: the sum may be a gap or repeated hour)
+    if is_union(rt) {
+        loop member in union_members(prune(rt)) {
+            if time_zone_failure(member) {how="the result may land in a clock change{time_policy_why()}"}
+        }
+    }
+    fatal(at "'{nm}' has type {dt(lt)}{made} and cannot hold this {dt(rt)}: {how}")
+}
+# `let v:T = @xs`: the written type must be the place's own; a place has the type of what it
+# names, so another type is an error, not a copy made quietly.
+written_place_type=(s:PlaceUpdateWord):>int64=>$unsafe {
+    if nodes.ptr[s].a =? 0 {return 0}
+    resolve_binding_type(PlaceUpdateWord(nodes.ptr[s].a))
+}
+local_place_annotation=(s:PlaceUpdateWord place_type:PlaceUpdateWord):>void=>$unsafe {
+    if nodes.ptr[s].a =? 0 {return}
+    let written=written_place_type(s)
+    if prune(written) not=? prune(place_type) and not type_eq(written place_type) {
+        fatal(nodes.ptr[s].pos "`@` makes a place, which has the type of what it names ({dt(place_type)}), so it cannot be written as {dt(written)}: drop the annotation, or take a copy without `@`")
+    }
+    nodes.ptr[s].a=0
+}
+local_place_decl=(s:PlaceUpdateWord):>bool=>$unsafe {
+    let init=PlaceUpdateWord(nodes.ptr[s].b)
+    if init =? 0 or nodes.ptr[s].nlist >? 0 or has_flag(s NF_GLOBAL) or has_flag(s NF_RDONLY) {return false}
+    if not has_flag(init NF_MUT) or not files[pos_file(nodes.ptr[s].pos)].is_dewy {return false}
+    let k=nodes.ptr[init].kind
+    if k =? 'ident' {
+        # (`let p = @xs`: a name for the variable itself; `@f` of a function is its handle)
+        let probe=clone(init)
+        let probe_type=check_expr(probe written_place_type(s))
+        if is_fn_type(probe_type) or nodes.ptr[probe].kind not=? 'ident' or nodes.ptr[probe].aux not=? int32(1) and nodes.ptr[probe].aux not=? int32(2) {return false}
+        local_place_annotation(s probe_type)
+        clear_flag(init NF_MUT)
+        add_flag(s NF_ALIASDECL)
+        check_vardecl(s)
+        return true
+    }
+    if k not=? 'index' and k not=? 'field' {return false}
+    let base=PlaceUpdateWord(nodes.ptr[init].a)
+    if nodes.ptr[base].kind not=? 'ident' or k =? 'index' and (nodes.ptr[init].b =? 0 or nkids(init) not=? 1) {
+        fatal(nodes.ptr[init].pos "a local place names an element, entry or field of a variable (`let cursor = @xs[i]`, `let f = @r.a`); pass deeper routes to an `@` parameter instead")
+    }
+    # (`@r.f` of a function is its handle: a value, as `let g = @f`)
+    let probe=clone(init)
+    let probe_type=check_expr(probe written_place_type(s))
+    if is_fn_type(probe_type) {return false}
+    local_place_annotation(s probe_type)
+    let temp:PlaceUpdateWord=0
+    if k =? 'index' {
+        let key=PlaceUpdateWord(nodes.ptr[init].b)
+        let kk=nodes.ptr[key].kind
+        if kk not=? 'int_lit' and kk not=? 'str_lit' {
+            local_place_count += 1
+            temp=bc_let("$place{local_place_count}" key nodes.ptr[key].pos)
+            add_flag(temp NF_LOOPCOUNT)
+            check_vardecl(temp)
+            key=bc_ident("$place{local_place_count}" nodes.ptr[key].pos)
+            nodes.ptr[init].b=int32(key)
+            set_list(init [key])
+        }
+    }
+    clear_flag(init NF_MUT)
+    add_flag(s NF_ALIASDECL)
+    check_vardecl(s)
+    # (the captured key is declared where the place is, in the same scope)
+    if temp not=? 0 {nodes.ptr[s]=nodes.ptr[temp]}
+    true
+}
+shape_dim_decl=(s:PlaceUpdateWord):>void=>$unsafe {
+    nodes.ptr[s].aux2=0
+    let sym=lookup(PlaceUpdateWord(nodes.ptr[s].name))
+    if sym =? 0 {return}
+    let sk=syms.ptr[sym].kind
+    if sk not=? 'local' and sk not=? 'global' and sk not=? 'const_' {return}
+    let dim=PlaceUpdateWord(nodes.ptr[s].b)
+    let known=mk('ident' nodes.ptr[s].pos)
+    nodes.ptr[known].name=nodes.ptr[s].name
+    let check=bc_call("__shape_check" [kid(dim 0) kid(dim 1) known] nodes.ptr[s].pos)
+    nodes.ptr[s]=Node(kind='exprstmt' pos=nodes.ptr[s].pos a=int32(check))
+}
+# `let m:array<T length=[2 3]>=value`: the value's rank and dimensions are
+# checked against the type's as it is bound (the dimensions are known values).
+shape_checked_value=(s:PlaceUpdateWord):>void=>$unsafe {
+    let tn=PlaceUpdateWord(nodes.ptr[s].a)
+    let value=PlaceUpdateWord(nodes.ptr[s].b)
+    if tn =? 0 or value =? 0 or nodes.ptr[tn].kind not=? 'tarray' or nodes.ptr[tn].ival not=? 1 {return}
+    if nodes.ptr[value].kind =? 'call' and nodes.ptr[PlaceUpdateWord(nodes.ptr[value].a)].kind =? 'ident' and name_of(PlaceUpdateWord(nodes.ptr[PlaceUpdateWord(nodes.ptr[value].a)].name)) =? "__shape_value" {return}
+    let pos=nodes.ptr[value].pos
+    # (a literal's shape is known now: a mismatch is a compile-time error)
+    let known:array<int64>=[]
+    if nodes.ptr[value].kind =? 'matrix' and nodes.ptr[value].ival >? 0 {known=[nkids(value) // PlaceUpdateWord(nodes.ptr[value].ival) PlaceUpdateWord(nodes.ptr[value].ival)]} else if nodes.ptr[value].kind =? 'array' and not array_has_spread(value) {known=[nkids(value)]}
+    let proven=false
+    if known.length >? 0 {
+        let written:array<int64>=[]
+        loop dim in kids(tn) {
+            if nodes.ptr[dim].kind =? 'int_lit' {written.push(PlaceUpdateWord(nodes.ptr[dim].ival))} else {written.push(-1)}
+        }
+        let same=written.length =? known.length
+        if same {
+            loop i in 0.. and d in written {
+                if d >=? 0 and d not=? known[i] {same=false}
+            }
+        }
+        if not same {
+            fatal(pos "this literal has shape {place_shape_text(known)}, but its type says {place_shape_text(written)}")
+        }
+        # (every dimension written as a literal and matched: nothing is left to check)
+        proven=not written.contains(-1)
+    }
+    # (the value takes the declared type first: a literal's elements adapt to it)
+    let t=resolve_type(tn)
+    check_expr(value t);
+    let typed=coerce(last_checked t)
+    add_flag(typed NF_CHECKED)
+    if proven {
+        nodes.ptr[s].b=int32(typed)
+        return
+    }
+    let dims:array<int64>=[]
+    loop dim in kids(tn) {dims.push(clone(dim))}
+    let sizes=mk('array' pos)
+    set_list(sizes dims)
+    nodes.ptr[s].b=int32(bc_call("__shape_value" [typed sizes] pos))
+}
+place_shape_text=(ds:array<int64>):>string=>{
+    let out=""
+    loop i in 0.. and d in ds {
+        let sep=if i >? 0 {" "} else {""}
+        let part=if d <? 0 {"_"} else {"{d}"}
+        out="{out}{sep}{part}"
+    }
+    "[{out}]"
+}
+# A value a function with a shaped result type (`:>array<T length=[m p]>`)
+# gives back, checked against that shape as it leaves.
+shape_returned=(value:PlaceUpdateWord rt:PlaceUpdateWord):>int64=>$unsafe {
+    let d=PlaceUpdateWord(fns.ptr[PlaceUpdateWord(ctxs[cx].inst)].decl)
+    if d =? 0 or nodes.ptr[d].kind not=? 'fn_' or nodes.ptr[d].a =? 0 {return value}
+    let tn=PlaceUpdateWord(nodes.ptr[d].a)
+    if nodes.ptr[tn].kind not=? 'tarray' or nodes.ptr[tn].ival not=? 1 {return value}
+    let pos=nodes.ptr[value].pos
+    add_flag(value NF_CHECKED)
+    let dims:array<int64>=[]
+    loop dim in kids(tn) {dims.push(clone(dim))}
+    let sizes=mk('array' pos)
+    set_list(sizes dims)
+    check_expr(bc_call("__shape_value" [value sizes] pos) rt);
+    last_checked
+}

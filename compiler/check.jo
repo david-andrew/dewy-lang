@@ -147,6 +147,7 @@ use 'concurrency_tasks.dewy'
 use 'checks_const_views.dewy'
 use 'checks_thin.dewy'
 use 'comptime_ops.dewy'
+use 'checks_place_updates.dewy'
 
 struct Module:
     name: i32
@@ -1384,39 +1385,6 @@ unused_result = (x: int, pos: int):
 # (written for `=`, `+=` or `return true`)
 discarding = false        # (checking `_ = value`: dropped on purpose, no warning)
 
-unused_value = (raw: Node, t: int):
-    if discarding: return
-    if pos_in_lib(raw.pos) or files[pos_file(raw.pos)].path == "<input>": return
-    if tkind(prune(t)) == .void_ or t == T_NEVER: return
-    k = raw.kind
-    name = ""
-    if (k == .binary or k == .and_ or k == .or_) and nodes[int(raw.a)].kind == .ident: name = name_of(int(nodes[int(raw.a)].name))
-    if k == .binary:
-        op = raw.op as Tok
-        if op == .eq:
-            eq = jd(raw.pos, "`==`", "`=?`")
-            if len(name) > 0: warn(raw.pos, "{eq} compares, and the answer is not used: to change '{name}', write `{name} = ...`")
-            else: warn(raw.pos, "{eq} compares, and the answer is not used (`=` changes a value)")
-            return
-        if op == .ne or op == .lt or op == .gt or op == .le or op == .ge:
-            warn(raw.pos, "this comparison's answer is not used ({jd(raw.pos, "`if ...:`", "`if ... \{ }`")} acts on it)")
-            return
-        if op == .plus or op == .minus or op == .star or op == .slash or op == .percent:
-            if len(name) > 0: warn(raw.pos, "this value is not used: to change '{name}', write `{name} = ...` (or `{name} {tok_text(op)}= ...`)")
-            else: warn(raw.pos, "this value is not used: it changes nothing")
-            return
-        return
-    if k == .and_ or k == .or_ or k == .not_:
-        warn(raw.pos, "this condition's answer is not used ({jd(raw.pos, "`if ...:`", "`if ... \{ }`")} acts on it)")
-        return
-    if k == .bool_lit or k == .int_lit or k == .float_lit or k == .ident or k == .none_lit:
-        spaced = if k == .int_lit or k == .float_lit or k == .ident: juxt_space_hint(raw.pos) else: ""
-        if len(spaced) > 0: warn(raw.pos, "this value is not used{spaced}")
-        else if tkind(prune(int(ctxs[cx].ret))) != .void_:
-            warn(raw.pos, "this value is not used: `return` gives it back from the function")
-        else:
-            warn(raw.pos, "this value is not used: it changes nothing")
-
 has_break = (n: int, depth: int = 0) -> bool:
     if n == 0: return false
     k = nodes[n].kind
@@ -2114,17 +2082,6 @@ index_update_path = (n: int) -> int[]:
 # change that variable before the selected value is written back.
 index_update_sources: {int: int} = {}   # a captured index's name -> the expression it holds (for messages)
 index_update_arrays: {int: bool} = {}   # captured names used only to index arrays (facts.jo)
-index_update_capture = (ix: int, stmts: mut int[]) -> int:
-    pos = nodes[ix].pos
-    elem_tmp_n += 1
-    name = intern("__index{elem_tmp_n}")
-    d = mk(.vardecl, pos)
-    nodes[d].name = i32(name)
-    nodes[d].b = nodes[ix].b
-    index_update_sources[name] = int(nodes[ix].b)
-    stmts.push(d)
-    nodes[ix].b = i32(comp_ident(name, pos))
-    name
 
 pool_update_read = (n: int) -> bool:
     k = nodes[n].kind
@@ -2152,34 +2109,6 @@ void_arm_end = (body: int, r: int) -> bool:
     items = kids(body)
     items.push(ret)
     set_list(body, items)
-    true
-
-pool_direct_update = (s: int, ix: int, bt: int) -> bool:
-    if types[bt].kind != .struct_ or structs[int(types[bt].st)].name != "Pool": return false
-    # Do not bypass a user getter or setter, even for the bundled Pool type.
-    get = clone(ix)
-    check_expr(get, 0)
-    get = last_checked
-    if nodes[get].kind != .call or nodes[get].aux != 0 or nkids(get) != 2 or not pool_library_fn(int(nodes[get].sym)): return false
-    ht = ntype(kid(get, 1))
-    vt = ntype(get)
-    if resolve_by_types(intern("__setindex__"), [bt, ht, vt], nodes[s].pos, false) != 0: return false
-    if not pool_library_fn(resolve_by_types(intern("[]="), [bt, ht, vt], nodes[s].pos, false)): return false
-    # The old read/edit/writeback remains necessary when evaluation can change
-    # the pool or invoke a custom arithmetic operator. Start with scalar writes
-    # whose operands are scalar expressions over ordinary reads.
-    lt = check_expr(clone(int(nodes[s].a)), 0)
-    if not is_numeric(prune(lt)) and tkind(lt) != .bool_: return false
-    check_expr(clone(int(nodes[s].b)), 0)
-    if not pool_update_read(last_checked): return false
-    loop part in index_update_path(int(nodes[s].a)):
-        if nodes[part].kind != .index: continue
-        if nodes[part].b == 0: return false
-        check_expr(clone(int(nodes[part].b)), 0)
-        if not pool_update_read(last_checked): return false
-        if part != ix:
-            pt = tkind(check_expr(clone(int(nodes[part].a)), 0))
-            if pt != .array and pt != .fixed: return false
     true
 
 # A selector that may run code or have effects (a block, a call, an operator
@@ -2382,13 +2311,6 @@ interp_append_assign = (s: int):
     nodes[s].op = i32(int(Tok.pluseq))
     interp_appends[s] = true
 
-# A checked receiver path that can be aliased without running a getter again.
-dewy_end_place = (n: int) -> bool:
-    k = nodes[n].kind
-    if k == .ident: return true
-    if k == .field or k == .index: return dewy_end_place(int(nodes[n].a))
-    false
-
 dewy_end_assign = (s: int) -> int:
     ix = 0
     part = int(nodes[s].a)
@@ -2423,69 +2345,6 @@ dewy_end_assign = (s: int) -> int:
     blk = bc_block(stmts, pos)
     check_stmt(blk)
     blk
-
-# A dotted selection update reads the original source, captures its selector,
-# computes the result, then reacquires the destination for writeback. An open
-# slice becomes a small stored range before the RHS can resize the destination.
-dewy_selection_update = (s: int, matrix: bool = false) -> int:
-    lhs = int(nodes[s].a)
-    pos = nodes[s].pos
-    stmts: int[]
-    path = index_update_path(int(nodes[lhs].a))
-    j = path.len() - 1
-    loop j >= 0:
-        part = path[j]
-        j -= 1
-        if nodes[part].kind == .index and nodes[part].b != 0: index_update_capture(part, stmts)
-    elem_tmp_n += 1
-    source = "$selection_source{elem_tmp_n}"
-    selector = "$selection_index{elem_tmp_n}"
-    value = "$selection_value{elem_tmp_n}"
-    captured = "$selection{elem_tmp_n}"
-    index_update_sources[intern(source)] = int(nodes[lhs].a)
-    reads = [bc_let(source, clone(int(nodes[lhs].a)), pos)]
-    spec = int(nodes[lhs].b)
-    if matrix:
-        shape = bc_field(bc_ident(source, pos), "shape", pos)
-        spec = bc_call("__nd_bound_part", [shape, part_spec(lhs)], pos)
-    else if nodes[spec].kind == .range:
-        size = bc_field(bc_ident(source, pos), "length", pos)
-        spec = bc_call("__dewy_slice_range", [size] + dewy_slice_args(spec, pos), pos)
-    reads.push(bc_let(selector, spec, pos))
-    picked = mk(.index, pos)
-    nodes[picked].a = i32(bc_ident(source, pos))
-    nodes[picked].b = i32(bc_ident(selector, pos))
-    if matrix: picked = bc_call("__nd_slice", [bc_ident(source, pos), bc_ident(selector, pos)], pos)
-    pair = mk(.tuple, pos)
-    set_list(pair, [bc_ident(selector, pos), picked])
-    reads.push(bc_stmt(pair, pos))
-    # Release the whole-source snapshot after selecting the old values. Keeping
-    # it through writeback would force a full-array COW copy for a tiny update.
-    stmts.push(bc_let(captured, bc_block(reads, pos), pos))
-    loop i in [0..2):
-        field = mk(.field, pos)
-        nodes[field].a = i32(bc_ident(captured, pos))
-        nodes[field].aux = -2
-        nodes[field].ival = i
-        name = if i == 0: selector else: value
-        stmts.push(bc_let(name, field, pos))
-    update = nodes.len()
-    nodes.push(nodes[s])
-    nodes[update].a = i32(bc_ident(value, pos))
-    stmts.push(update)
-    # Capturing receiver indices changed checked paths; resolve those paths
-    # again with the new index bindings before generating the write.
-    if matrix:
-        receiver = clone(int(nodes[lhs].a))
-        add_flag(receiver, NF_MUT)
-        ref_nd_receivers[receiver] = true
-        stmts.push(bc_stmt(bc_call("__nd_slice_set", [receiver, bc_ident(selector, pos), bc_ident(value, pos)], pos), pos))
-    else:
-        nodes[lhs].b = i32(bc_ident(selector, pos))
-        stmts.push(bc_assign(clone(lhs), bc_ident(value, pos), pos))
-    block = bc_block(stmts, pos)
-    check_stmt(block)
-    block
 
 # Only dictionary update paths need this work. O(path^2 + RHS): capture keys
 # and ordinary indices before the old-value read/RHS, never entry positions.
@@ -2557,108 +2416,6 @@ position_guard_note = (c: int, holds: bool):
     position_guards.push(PositionGuard(local = nodes[a].sym, value = i32(nodes[b].ival), mark = i32(scope_mark())))
     push_scope_sym(intern("$position_guard"), 0)
 
-# The position a dominating guard holds a runtime index to, or -1. A guard only names the position
-# to write: the store's bound is still proven there, so a guard no longer true is a rejected store.
-tuple_guarded = (b: int, count: int) -> int:
-    if position_guards.len() == 0: return -1
-    check_expr(clone(b), 0)
-    c = last_checked
-    if nodes[c].kind != .ident or nodes[c].aux != i32(int(SK.local)): return -1
-    i = position_guards.len() - 1
-    loop i >= 0:
-        g = position_guards[i]
-        if g.local == nodes[c].sym: return if int(g.value) >= 0 and int(g.value) < count: int(g.value) else: -1
-        i -= 1
-    -1
-
-# The positions a runtime index can reach: its refined value set's, when it has one, else all.
-tuple_reachable = (b: int, count: int) -> int[]:
-    out: int[]
-    check_expr(clone(b), 0)
-    c = last_checked
-    if refine_active:
-        ok, keys = total_dict_keys(refine_storage(c, ntype(c)))
-        if ok:
-            loop at in [0..count):
-                if keys.contains("{at}"): out.push(at)
-            if out.len() > 0: return out
-    loop at in [0..count): out.push(at)
-    out
-
-# (the place of a position)
-tuple_slot = (place: int, at: int, pos: int) -> int:
-    slot = mk(.field, pos)
-    nodes[slot].a = i32(clone(place))
-    nodes[slot].aux = -2
-    nodes[slot].ival = at
-    slot
-
-# The write of statement s at one position. An update of a union position is made for the
-# member it holds, so it needs to be valid for each of them.
-tuple_slot_stmt = (s: int, place: int, at: int, bt: int, pos: int) -> int:
-    member_types = if is_union(targ(bt, at)) and int(nodes[s].op) != int(Tok.assign) and not has_flag(s, NF_BROADCAST): union_members(targ(bt, at)) else: []
-    if member_types.len() == 0:
-        w = clone(s)
-        nodes[w].a = i32(tuple_slot(place, at, pos))
-        return w
-    name = "$slot_value{s}_{at}"
-    stmts = [bc_let(name, tuple_slot(place, at, pos), pos)]
-    loop member in member_types:
-        w = clone(s)
-        nodes[w].a = i32(tuple_slot(place, at, pos))
-        nodes[w].op = i32(int(Tok.assign))
-        nodes[w].b = i32(bc_bin(compound_op(int(nodes[s].op)) as Tok, bc_ident(name, pos), clone(int(nodes[s].b)), pos))
-        condition = mk(.istype, pos)
-        nodes[condition].a = i32(bc_ident(name, pos))
-        nodes[condition].b = i32(type_node_of(member, pos))
-        stmts.push(bc_if(condition, [w], [], pos))
-    bc_block(stmts, pos)
-
-# `t[i] = v`, `t[i] += v` for a `[A B]` and a runtime index: the write, valid at every position
-# the index can reach, made there, from a chain testing i once each; the index's bounds proven
-# as an array's are. O(positions * size of v). 0 for what is not such a write.
-tuple_slot_write = (s: int, bt: int) -> int:
-    lhs = int(nodes[s].a)
-    b = int(nodes[lhs].b)
-    pos = nodes[lhs].pos
-    count = int(types[bt].nargs)
-    if b == 0 or nkids(lhs) != 1 or nodes[b].kind == .range or nodes[b].kind == .namedarg: return 0
-    known, _ = dewy_position_known(b, pos)
-    if known: return 0
-    guarded = tuple_guarded(b, count)
-    positions = if guarded >= 0: [guarded] else: tuple_reachable(b, count)
-    place = int(nodes[lhs].a)
-    loop at in positions:
-        before = err_notes.len()
-        err_notes.push((nodes[s].pos, "note: this writes position {at} of this {dt(bt)}, which holds {a_type(targ(bt, at))}"))
-        check_stmt(tuple_slot_stmt(s, place, at, bt, pos))
-        loop err_notes.len() > before: err_notes.pop()
-    name = "$slot{s}"
-    table = "$position_values{s}"
-    # (under a guard, a table of one, and the index must be proven to be that position)
-    reach = if guarded >= 0: 1 else: count
-    zeros: int[]
-    loop at in [0..reach): zeros.push(bc_int(0, pos))
-    values = mk(.array, pos)
-    set_list(values, zeros)
-    shape = mk(.tname, pos)
-    nodes[shape].aux = -7
-    nodes[shape].ival = mk_fixed(T_INT, reach)
-    bound_values = bc_let(table, values, pos)
-    nodes[bound_values].a = i32(shape)
-    bound = mk(.index, pos)
-    nodes[bound].a = i32(bc_ident(table, pos))
-    nodes[bound].b = i32(if guarded > 0: bc_bin(.minus, bc_ident(name, pos), bc_int(guarded, pos), pos) else: bc_ident(name, pos))
-    set_list(bound, [int(nodes[bound].b)])
-    chain = tuple_slot_stmt(s, place, positions[positions.len() - 1], bt, pos)
-    i = positions.len() - 2
-    loop i >= 0:
-        chain = bc_if(bc_bin(.eq, bc_ident(name, pos), bc_int(positions[i], pos), pos), [tuple_slot_stmt(s, place, positions[i], bt, pos)], [chain], pos)
-        i -= 1
-    block = bc_block([bc_let(name, b, pos), bound_values, bc_let("{name}_bound", bound, pos), chain], pos)
-    check_stmt(block)
-    block
-
 assign_place = (lhs: int):
     check_place(lhs, false)
     return
@@ -2684,40 +2441,6 @@ assign_value = (s: int, lt: int, settle: int) -> int:
     if nodes[v].kind != .intrinsic or nodes[v].aux != i32(int(IN.zeroed)): nodes[s].b = i32(coerce(v, lt))
     rt
 
-# x = value where x is a variable of another type: where x was made, and the ways out
-var_type_error = (lhs: int, lt: int, rt: int, at: int):
-    nm = name_of(int(nodes[lhs].name))
-    made = ""
-    p = 0
-    if nodes[lhs].aux == i32(int(SK.local)) and nodes[lhs].sym > 0: p = locals[int(nodes[lhs].sym)].pos
-    else if nodes[lhs].sym > 0 and globals[int(nodes[lhs].sym)].decl > 0: p = nodes[int(globals[int(nodes[lhs].sym)].decl)].pos
-    if p > 0 and pos_file(p) == pos_file(at):
-        ln, c = line_col(p)
-        made = " (made on line {ln})"
-    how = "`let {nm} = ...` makes a new variable"
-    if is_int(lt) and (is_float(rt) or bundled_rational_type(rt)):
-        # (time_left = 30, then time_left -= dt: 30.0 holds fractions)
-        start = "0.0"
-        if nodes[lhs].aux != i32(int(SK.local)) and nodes[lhs].sym > 0 and globals[int(nodes[lhs].sym)].decl > 0:
-            gd = int(globals[int(nodes[lhs].sym)].decl)
-            if nodes[gd].b != 0 and nodes[int(nodes[gd].b)].kind == .int_lit: start = "{nodes[int(nodes[gd].b)].ival}.0"
-        how = "write its first value with a decimal point (`{nm} = {start}`), so it holds fractions too, or make this a whole number with int(...)"
-        # (`let total:int64 = 0`: the written type made it whole, not its first value)
-        if ts_dewy and prune(lt) != T_MATH_INT: how = "declare it a float where it is made (`{nm}:float64`), or make this a whole number with `{dt(lt)}(...)`"
-        fatal(at, "'{nm}' holds whole numbers{made}, and this is a number with a fraction: {how}")
-    # (total = 0m, then total += 1.5m: 0.0m holds fractions)
-    if quantity_int_promotes(lt, rt): fatal(at, "'{nm}' holds whole numbers ({dt(lt)}{made}), and this is a {dt(rt)}: write its first value with a decimal point before its unit, so it holds fractions too")
-    # (score = "0", then score += 1: a number in quotes is text)
-    if tkind(lt) == .str_ and is_numeric(rt):
-        fatal(at, "'{nm}' holds text{made} (a value in quotes, \"0\", is text, even with digits): for a number, give it one without quotes (`{nm} = 0`)")
-    # (gap = 0s, then gap = t2 - t1: a time written with a unit is a quantity, and the subtraction a Duration)
-    if is_quantity(lt) and time_core_type(rt, "Duration"): how = "give it the type where it is made, `let {nm}:Duration = ...`"
-    # (m = m + 1day, a zoned time: the sum may be a gap or repeated hour)
-    if is_union(rt):
-        loop member in union_members(prune(rt)):
-            if time_zone_failure(member): how = "the result may land in a clock change{time_policy_why()}"
-    fatal(at, "'{nm}' has type {dt(lt)}{made} and cannot hold this {dt(rt)}: {how}")
-
 # A type on the whole pattern supplies context before extracting its leaves.
 check_binding_input = (s: int) -> int:
     expected = 0
@@ -2733,62 +2456,6 @@ check_binding_input = (s: int) -> int:
 # a local name for the element, entry, field or variable itself, its key or
 # index evaluated once.
 local_place_count = 0
-
-# `let v:T = @xs`: the written type must be the place's own; a place has the type of what it
-# names, so another type is an error, not a copy made quietly.
-written_place_type = (s: int) -> int:
-    if nodes[s].a == 0: return 0
-    resolve_binding_type(int(nodes[s].a))
-
-local_place_annotation = (s: int, place_type: int):
-    if nodes[s].a == 0: return
-    written = written_place_type(s)
-    if prune(written) != prune(place_type) and not type_eq(written, place_type):
-        fatal(nodes[s].pos, "`@` makes a place, which has the type of what it names ({dt(place_type)}), so it cannot be written as {dt(written)}: drop the annotation, or take a copy without `@`")
-    nodes[s].a = 0
-
-local_place_decl = (s: int) -> bool:
-    init = int(nodes[s].b)
-    if init == 0 or nodes[s].nlist > 0 or has_flag(s, NF_GLOBAL) or has_flag(s, NF_RDONLY): return false
-    if not has_flag(init, NF_MUT) or not files[pos_file(nodes[s].pos)].is_dewy: return false
-    k = nodes[init].kind
-    if k == .ident:
-        # (`let p = @xs`: a name for the variable itself; `@f` of a function is its handle)
-        probe = clone(init)
-        probe_type = check_expr(probe, written_place_type(s))
-        if is_fn_type(probe_type) or nodes[probe].kind != .ident or nodes[probe].aux != i32(int(SK.local)) and nodes[probe].aux != i32(int(SK.global)): return false
-        local_place_annotation(s, probe_type)
-        clear_flag(init, NF_MUT)
-        add_flag(s, NF_ALIASDECL)
-        check_vardecl(s)
-        return true
-    if k != .index and k != .field: return false
-    base = int(nodes[init].a)
-    if nodes[base].kind != .ident or k == .index and (nodes[init].b == 0 or nkids(init) != 1):
-        fatal(nodes[init].pos, "a local place names an element, entry or field of a variable (`let cursor = @xs[i]`, `let f = @r.a`); pass deeper routes to an `@` parameter instead")
-    # (`@r.f` of a function is its handle: a value, as `let g = @f`)
-    probe = clone(init)
-    probe_type = check_expr(probe, written_place_type(s))
-    if is_fn_type(probe_type): return false
-    local_place_annotation(s, probe_type)
-    temp = 0
-    if k == .index:
-        key = int(nodes[init].b)
-        kk = nodes[key].kind
-        if kk != .int_lit and kk != .str_lit:
-            local_place_count += 1
-            temp = bc_let("$place{local_place_count}", key, nodes[key].pos)
-            add_flag(temp, NF_LOOPCOUNT)
-            check_vardecl(temp)
-            key = bc_ident("$place{local_place_count}", nodes[key].pos)
-            nodes[init].b = i32(key)
-            set_list(init, [key])
-    clear_flag(init, NF_MUT)
-    add_flag(s, NF_ALIASDECL)
-    check_vardecl(s)
-    # (the captured key is declared where the place is, in the same scope)
-    if temp != 0: nodes[s] = nodes[temp]
-    true
 
 # `let p = @q[0]` at the top level: p would be a global, and a global holds a value, not a
 # place (it would silently be a copy). Function handles (`@f`, `@r.f`) stay values.
@@ -2822,79 +2489,6 @@ returned_place = (v: int):
 # A shaped parameter's dimension (dw_shape_prologue): a name already bound to a
 # value is checked against the argument's dimension; otherwise the name binds it.
 const SHAPE_DIM = 1789
-shape_dim_decl = (s: int):
-    nodes[s].aux2 = 0
-    sym = lookup(int(nodes[s].name))
-    if sym == 0: return
-    sk = syms[sym].kind
-    if sk != .local and sk != .global and sk != .const_: return
-    dim = int(nodes[s].b)
-    known = mk(.ident, nodes[s].pos)
-    nodes[known].name = nodes[s].name
-    check = bc_call("__shape_check", [kid(dim, 0), kid(dim, 1), known], nodes[s].pos)
-    nodes[s] = Node(kind = .exprstmt, pos = nodes[s].pos, a = i32(check))
-
-# `let m:array<T length=[2 3]>=value`: the value's rank and dimensions are
-# checked against the type's as it is bound (the dimensions are known values).
-shape_checked_value = (s: int):
-    tn = int(nodes[s].a)
-    value = int(nodes[s].b)
-    if tn == 0 or value == 0 or nodes[tn].kind != .tarray or nodes[tn].ival != 1: return
-    if nodes[value].kind == .call and nodes[int(nodes[value].a)].kind == .ident and name_of(int(nodes[int(nodes[value].a)].name)) == "__shape_value": return
-    pos = nodes[value].pos
-    # (a literal's shape is known now: a mismatch is a compile-time error)
-    known: int[]
-    if nodes[value].kind == .matrix and nodes[value].ival > 0: known = [nkids(value) / int(nodes[value].ival), int(nodes[value].ival)]
-    else if nodes[value].kind == .array and not array_has_spread(value): known = [nkids(value)]
-    proven = false
-    if known.len() > 0:
-        written: int[]
-        loop dim in kids(tn):
-            if nodes[dim].kind == .int_lit: written.push(int(nodes[dim].ival))
-            else: written.push(-1)
-        same = written.len() == known.len()
-        if same:
-            loop i in 0.. and d in written:
-                if d >= 0 and d != known[i]: same = false
-        if not same:
-            shape = (ds: int[]) -> str:
-                out = ""
-                loop i in 0.. and d in ds:
-                    if i > 0: out += " "
-                    out += if d < 0: "_" else: "{d}"
-                "[{out}]"
-            fatal(pos, "this literal has shape {shape(known)}, but its type says {shape(written)}")
-        # (every dimension written as a literal and matched: nothing is left to check)
-        proven = not written.contains(-1)
-    # (the value takes the declared type first: a literal's elements adapt to it)
-    t = resolve_type(tn)
-    check_expr(value, t)
-    typed = coerce(last_checked, t)
-    add_flag(typed, NF_CHECKED)
-    if proven:
-        nodes[s].b = i32(typed)
-        return
-    dims: int[]
-    loop dim in kids(tn): dims.push(clone(dim))
-    sizes = mk(.array, pos)
-    set_list(sizes, dims)
-    nodes[s].b = i32(bc_call("__shape_value", [typed, sizes], pos))
-
-# A value a function with a shaped result type (`:>array<T length=[m p]>`)
-# gives back, checked against that shape as it leaves.
-shape_returned = (value: int, rt: int) -> int:
-    d = int(fns[int(ctxs[cx].inst)].decl)
-    if d == 0 or nodes[d].kind != .fn_ or nodes[d].a == 0: return value
-    tn = int(nodes[d].a)
-    if nodes[tn].kind != .tarray or nodes[tn].ival != 1: return value
-    pos = nodes[value].pos
-    add_flag(value, NF_CHECKED)
-    dims: int[]
-    loop dim in kids(tn): dims.push(clone(dim))
-    sizes = mk(.array, pos)
-    set_list(sizes, dims)
-    check_expr(bc_call("__shape_value", [value, sizes], pos), rt)
-    last_checked
 
 # `x = value` (or `a, b = value`) that declares x, made a declaration; otherwise a spawn's
 # handle and a global declared below are looked at
