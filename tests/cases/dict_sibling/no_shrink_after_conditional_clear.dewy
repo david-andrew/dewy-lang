@@ -1,0 +1,10 @@
+Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
+cut = (@t:Trie full:bool):>void => {
+    if full { t.edges.clear() }
+    if t.terminal.length >? 0 { t.terminal.pop(); }
+}
+main = ():>void => {
+    let t:Trie = [terminal=[false true true] edges=["a"->2]]
+    cut(@t true)
+    printl(t.terminal.length)
+}

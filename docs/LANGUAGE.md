@@ -3025,7 +3025,8 @@ values are checked when the record is built, a store or `insert_if_absent` check
 against `terminal.length`, and `t.edges[k]` and the value of `t.edges.get(k)` are known to be
 valid indexes of `terminal`. `remove`, `pop`, `clear` and growing `terminal` keep the bound in place.
 An in-place change of a value (`t.edges[k] += 1`) is a compile error: store the new value whole.
-Making `terminal` shorter is a compile error unless the values are known to fit; under
+Making `terminal` shorter is a compile error unless the values are known to fit, as after
+`t.edges.clear()` or `t.edges = []`; under
 `$runtime_checks` it checks every value, O(n).
 
 

@@ -1,0 +1,18 @@
+# Nothing records a dictionary's values once it is emptied: its sibling may then shrink.
+Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
+main = ():>void => {
+    let t:Trie = [terminal=[false true true] edges=["a"->2 "b"->1]]
+    t.edges.clear()
+    t.terminal.pop();
+    printl("{t.terminal.length} {t.edges.length}")
+    t.edges["c"] = 1
+    t.edges = []
+    t.terminal.truncate(0)
+    t.terminal.push(true)
+    t.terminal.push(false)
+    t.edges["d"] = 1
+    printl("{t.terminal.length} {t.edges}")
+    t.edges.clear()
+    t.terminal.clear()
+    printl("{t.terminal.length} {t.edges.length}")
+}
