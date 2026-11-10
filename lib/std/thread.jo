@@ -311,7 +311,11 @@ __chan_park = (seq: *int, s: int, lock: *int, waiting: *int, spins: int):
         __task_pause()
 
 # 0: room for one more (the lock held, for __chan_put); 1: closed; 2: canceled.
-__chan_send_wait[T] = (c: __Chan[T]) -> int:
+__chan_send_wait[T] = (c: __Chan[T]) -> int: __chan_send_wait_until(c, 0)
+
+# The same, with 3: the deadline (time_ns; 0 for none) passed first. A deadline already past
+# still takes room that is free now: a `0s` timeout is a poll.
+__chan_send_wait_until[T] = (c: __Chan[T], deadline: int) -> int:
     p = c.__p
     spins = 0
     loop:
@@ -321,8 +325,45 @@ __chan_send_wait[T] = (c: __Chan[T]) -> int:
             __chan_unlock(&p.lock)
             return 1
         if p.count < p.cap: return 0
+        if deadline != 0 and time_ns() >= deadline:
+            __chan_unlock(&p.lock)
+            return 3
         __chan_park(&p.seq, p.seq, &p.lock, &p.waiting, spins)
         spins += 1
+
+# A wait's deadline, ns from now (0 or less: now, a poll), never 0, which means none.
+__chan_deadline = (ns: int) -> int:
+    now = time_ns()
+    if ns <= 0: return max(now, 1)
+    if ns > 0x7FFFFFFFFFFFFFFF - now: return 0x7FFFFFFFFFFFFFFF
+    max(now + ns, 1)
+
+# A ticker's schedule (`ticker`, lib/prelude/channels.dewy): when the next tick is due, in
+# time_ns, and the period. Copies share it.
+struct __Ticker:
+    __cell: int[]
+    __p: *int
+
+__ticker_new = (period: int) -> __Ticker:
+    step = max(period, 1)
+    cell: int[] = [time_ns() + step, step]
+    __Ticker(cell, __task_data(cell))
+
+# 0: a tick, the due one taken (ticks missed while no one waited are dropped, not queued);
+# 2: canceled; 3: the deadline (time_ns; 0 for none) passed first. A tick due wins a deadline
+# already past.
+__ticker_wait = (t: __Ticker, deadline: int) -> int:
+    p = t.__p
+    loop:
+        if __task_canceled(): return 2
+        now = time_ns()
+        due = __atomic_add(&p[0], 0)
+        if now >= due:
+            if __atomic_cas(&p[0], due, due + ((now - due) / p[1] + 1) * p[1]) == due: return 0
+            continue
+        if deadline != 0 and now >= deadline: return 3
+        wake = if deadline != 0 and deadline < due: deadline else: due
+        __sleep_ns(min(wake - now, 1000000))
 
 __chan_put[T] = (c: __Chan[T], v: T) -> void:
     p = c.__p
@@ -333,7 +374,11 @@ __chan_put[T] = (c: __Chan[T], v: T) -> void:
     __chan_changed(&p.seq, &p.lock, &p.waiting)
 
 # 0: a value to take (the lock held, for __chan_take); 1: closed and drained; 2: canceled.
-__chan_receive_wait[T] = (c: __Chan[T]) -> int:
+__chan_receive_wait[T] = (c: __Chan[T]) -> int: __chan_receive_wait_until(c, 0)
+
+# The same, with 3: the deadline (time_ns; 0 for none) passed first. A buffered value wins over
+# a deadline already past.
+__chan_receive_wait_until[T] = (c: __Chan[T], deadline: int) -> int:
     p = c.__p
     spins = 0
     loop:
@@ -343,6 +388,9 @@ __chan_receive_wait[T] = (c: __Chan[T]) -> int:
         if p.closed != 0:
             __chan_unlock(&p.lock)
             return 1
+        if deadline != 0 and time_ns() >= deadline:
+            __chan_unlock(&p.lock)
+            return 3
         __chan_park(&p.seq, p.seq, &p.lock, &p.waiting, spins)
         spins += 1
 

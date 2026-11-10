@@ -1,0 +1,33 @@
+# modes: native native-release
+# Waits with a timeout (decisions.md, batch 7): `receive(timeout=)` gives `Timeout` when
+# nothing comes in time, and `send(value timeout=)` gives the value back as `Unsent` with the
+# reason `Timeout` or `Closed`, its `Canceled` the call's own result. A `0s` timeout is a poll:
+# a buffered value, or room, wins it.
+Job:type = [id:int64]
+main = () => {
+    let c = channel<int64>(1)
+    printl"empty poll: {c.receive(timeout=0s) is? Timeout}"
+    printl"empty wait: {c.receive(timeout=5ms) is? Timeout}"
+    printl"room wins a poll: {c.send(4 timeout=0s) is? void}"
+    match c.send(6 timeout=2ms) {
+        u:Unsent<int64> => printl"full: gave back {u.value}, timed out {u.reason is? Timeout}"
+        _ => printl"sent"
+    }
+    printl"buffered wins a poll: {c.receive(timeout=0s)}"
+    let jobs = channel<Job>(1)
+    jobs.close()
+    printl"closed: {jobs.receive(timeout=1s) is? Closed}"
+    match jobs.send(Job[7] timeout=1s) {
+        u:Unsent<Job> => printl"closed send: job {u.value.id}, closed {u.reason is? Closed}"
+        _ => printl"sent"
+    }
+    # (in a canceled group a wait gives Canceled, the send's as the call's own result)
+    let late = channel<int64>(1)
+    let results:array<bool> = []
+    concurrent g {
+        cancel(g)
+        results.push(late.receive(timeout=1s) is? Canceled)
+        results.push(late.send(1 timeout=1s) is? Canceled)
+    }
+    printl"canceled: {results}"
+}

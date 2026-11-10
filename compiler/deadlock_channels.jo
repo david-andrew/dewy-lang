@@ -50,8 +50,13 @@ dc_chan_call = (n: int) -> int:
     d = int(fns[g].decl)
     if d == 0: return 0
     nm = name_of(int(nodes[d].name))
-    if nm == "send": return 1
-    if nm == "receive": return 2
+    # (a wait with a timeout ends, like a non-waiting attempt)
+    if nm == "send":
+        if nkids(n) > 2: return 6
+        return 1
+    if nm == "receive":
+        if nkids(n) > 1: return 7
+        return 2
     if nm == "close": return 3
     if nm == "try_send": return 6
     if nm == "try_receive": return 7

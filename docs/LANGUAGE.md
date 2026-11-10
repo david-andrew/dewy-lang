@@ -3573,6 +3573,36 @@ main = () => {
 }
 ```
 
+A wait can be given a deadline (decisions.md, batch 7). `c.receive(timeout=50ms)` gives
+`T | Closed | Canceled | Timeout`: `Timeout` when nothing arrived in time. `c.send(job
+timeout=50ms)` gives `void | Unsent<T> | Canceled`: the job comes back as the `Unsent`'s
+`.value`, with the reason `Timeout` or `Closed`, and `Canceled` is the call's own result.
+A relative timeout starts when the call does, and `timeout=0s` is a poll: a buffered value,
+or room, wins it. A wait with a timeout always ends, so the deadlock checks count it as a
+non-waiting attempt.
+
+`ticker(period)` makes a `Ticker` that ticks every period from when it is made.
+`tick.next` waits for the next tick and gives `Tick | Canceled`; `tick.next(timeout=d)`
+adds `Timeout`. A tick that came while nothing waited is dropped, not queued, so a slow
+loop sees one tick, not a backlog.
+
+```dewy
+main = () => {
+    let heart = ticker(1s)
+    let jobs = channel<string>(8)
+    jobs.send("resize") or_throw
+    jobs.close()
+    loop true {
+        match jobs.receive(timeout=250ms) {
+            <Timeout> => if heart.next(timeout=0s) is? Tick printl"still alive"
+            <Closed> => break
+            <Canceled> => break
+            job:string => printl"job {job}"
+        }
+    }
+}
+```
+
 `c.try_send(value)` and `c.try_receive` never wait and are cancellation points.
 `try_send` fails with `Full` when there is no room; `try_receive` gives `T | Empty |
 Closed | Busy | Canceled`. Both give `Busy` when another task is mid-operation on

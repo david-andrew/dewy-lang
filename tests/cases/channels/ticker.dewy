@@ -1,0 +1,18 @@
+# modes: native native-release
+# `ticker(period)` (decisions.md, batches 5 and 7): `tick.next` waits for the next tick and
+# gives `Tick`; with `timeout=` it gives `Timeout` when no tick comes in time.
+main = () => {
+    let heart = ticker(1ms)
+    let beats = 0
+    loop beats <? 3 {
+        match heart.next {
+            <Tick> => {beats += 1}
+            <Canceled> => break
+        }
+    }
+    printl"beats: {beats}"
+    printl"a tick in time: {heart.next(timeout=10s) is? Tick}"
+    let slow = ticker(1hour)
+    printl"none yet: {slow.next(timeout=0s) is? Timeout}"
+    printl"none in time: {slow.next(timeout=2ms) is? Timeout}"
+}

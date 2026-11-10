@@ -15,17 +15,24 @@ struct Closed:
 struct Busy:
     pass
 
+# A ticker's tick (`tick.next`), and a Ctrl-C press, as values a wait gives.
+struct Tick:
+    pass
+struct CtrlC:
+    pass
+
 # A send that failed: the exact value offered, and why.
 @nominal(exception)
 struct Unsent[T]:
     value: T
-    reason: Full | Closed | Busy | Canceled
+    reason: Full | Closed | Busy | Canceled | Timeout
 
-# Why a send gave its value back, by code: 1 closed, 2 canceled, 3 full, 4 busy.
-__send_failure = (code: int) -> Full | Closed | Busy | Canceled:
+# Why a send gave its value back, by code: 1 closed, 2 canceled, 3 full, 4 busy, 5 timed out.
+__send_failure = (code: int) -> Full | Closed | Busy | Canceled | Timeout:
     if code == 1: return Closed()
     if code == 2: return Canceled
     if code == 3: return Full()
+    if code == 5: return Timeout
     Busy()
 
 # A send's value given back, with why (by code)

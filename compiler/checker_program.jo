@@ -119,13 +119,13 @@ check_program = (main_path: str):
     # `DuplicateLock`, `Busy`, `Closed`, `Unsent`..., so each loads before they close when a Dewy
     # program names it: a probe per name, all asked before any loads, nothing otherwise)
     locks = ts_dewy and prelude_named(["mutex", "Mutex", "lock_all", "DuplicateLock"])
-    channels = ts_dewy and prelude_named(["channel", "Channel"])
+    channels = ts_dewy and prelude_named(["channel", "Channel", "ticker", "Ticker"])
     queue = ts_dewy and prelude_named(["mpmc", "Mpmc"])
     ring = ts_dewy and prelude_named(["spsc", "Spsc", "SpscSender", "SpscReceiver"])
     protocols = ts_dewy and prelude_named(["serve", "Service", "pipeline"], true)
     # (the outcomes also load for any source naming one, its own type of that name included: a
     # module that does not declare it may still reach the prelude's)
-    if locks or channels or queue or ring or protocols or ts_dewy and names_known(["Unsent", "Full", "Empty", "Closed", "Busy"]): dewy_prelude_module(intern("Unsent"))
+    if locks or channels or queue or ring or protocols or ts_dewy and names_known(["Unsent", "Full", "Empty", "Closed", "Busy", "Tick", "CtrlC"]): dewy_prelude_module(intern("Unsent"))
     if locks: dewy_prelude_module(intern("mutex"))
     if queue or ring: dewy_prelude_file("mpmc.jo")
     if queue: dewy_prelude_module(intern("mpmc"))

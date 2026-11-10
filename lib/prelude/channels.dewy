@@ -28,6 +28,15 @@ Channel:type = <T>[
         if code not=? 0 return __unsent<T>(value code)
         __chan_put(__h value)
     }
+    # (Unsent with the reason Timeout or Closed, and Canceled as the call's own result; `0s` is
+    # a poll)
+    send = <D>(value:T timeout:D):>void | Unsent<T> | Canceled => {
+        let code = __chan_send_wait_until(__h __chan_deadline(__task_nanoseconds(timeout)))
+        if code =? 2 return Canceled
+        if code =? 3 return __unsent<T>(value 5)
+        if code not=? 0 return __unsent<T>(value code)
+        __chan_put(__h value)
+    }
     try_send = (value:T):>void | Unsent<T> => {
         let code = __chan_try_send(__h)
         if code not=? 0 return __unsent<T>(value code)
@@ -37,6 +46,14 @@ Channel:type = <T>[
         let code = __chan_receive_wait(__h)
         if code =? 1 return Closed
         if code =? 2 return Canceled
+        __chan_take(__h)
+    }
+    # (Timeout when nothing came before the time passed; a buffered value wins a `0s` poll)
+    receive = <D>(timeout:D):>T | Closed | Canceled | Timeout => {
+        let code = __chan_receive_wait_until(__h __chan_deadline(__task_nanoseconds(timeout)))
+        if code =? 1 return Closed
+        if code =? 2 return Canceled
+        if code =? 3 return Timeout
         __chan_take(__h)
     }
     try_receive = ():>T | Empty | Closed | Busy | Canceled => {
@@ -56,3 +73,23 @@ Channel:type = <T>[
 ]
 
 channel = <T>(capacity:int64<(>? 0)>):>Channel<T> => Channel<T>[__chan_new<T>(capacity)]
+
+# `ticker(period)` ticks every period from when it is made: `tick.next` waits for the next tick
+# and gives `Tick`, or `Canceled`; `tick.next(timeout=d)` gives `Timeout` when none comes in
+# time. A tick missed while nothing waited is dropped, not queued.
+$unsafe
+Ticker:type = [
+    __t:__Ticker
+    next = ():>Tick | Canceled => {
+        if __ticker_wait(__t 0) =? 2 return Canceled
+        Tick()
+    }
+    next = <D>(timeout:D):>Tick | Canceled | Timeout => {
+        let code = __ticker_wait(__t __chan_deadline(__task_nanoseconds(timeout)))
+        if code =? 2 return Canceled
+        if code =? 3 return Timeout
+        Tick()
+    }
+]
+
+ticker = <D>(period:D):>Ticker => Ticker[__ticker_new(__task_nanoseconds(period))]
