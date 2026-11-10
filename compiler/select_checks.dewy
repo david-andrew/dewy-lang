@@ -1,0 +1,758 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (starts_with)
+from p"ast.jo" import (NF_CHECKED NF_MUT NF_STMT UNPACK_OBLIGATION add_flag clone has_flag kid kids lambda_captures mk nkids nodes set_list spreads_rest written_args)
+from p"check.jo" import (LF_PARAM ctxs cx dewy_at ensure_global fns globals lib_dir locals syms)
+from p"checker_expr.dewy" import (check_expr check_intrinsic lookup)
+from p"checks_builders.dewy" import (bc_block bc_call bc_ident bc_int bc_let bc_stmt bc_str)
+from p"checks_thin.dewy" import (resolve_type)
+from p"error_ops.dewy" import (family_holds_generic value_members)
+from p"expr.jo" import (IN bare_generic_set bc_bin handle_outcomes last_checked ntype nw_at nw_call nw_call_at nw_call_end nw_call_loops nw_decl nw_decl_at nw_decl_loops nw_local nw_loop_end nw_loop_start nw_loops nw_name nw_write_at nw_writes record_type_member select_source_calls select_source_matches type_short_name wait_partial)
+from p"facts.jo" import (fact_requests)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"node_store.dewy" import (Node)
+from p"ownership.jo" import (ownership_consumers)
+from p"ownership_checks.dewy" import (NF_GLOBAL)
+from p"refine.jo" import (str_set_of)
+from p"refinement_types.dewy" import (FactRequest)
+from p"type_ops.dewy" import (dt mk_union)
+from p"types.jo" import (T_BOOL T_INT T_STR T_VOID is_union prune structs telem tkind type_eq types union_members)
+from p"util.jo" import (fatal files intern name_of pos_file)
+
+SelectWord:type=int64<overflow='wrap'>
+# (the local a named wait qualifier `@w` names, 0 when q is no such qualifier)
+named_wait_qualifier=(q:SelectWord):>int64=>$unsafe {
+    let text=name_of(q)
+    if (text as array<uint8>).length <? 2 or not starts_with(text "@") {return 0}
+    let s=lookup(intern(text.byte_slice(1 (text as array<uint8>).length)))
+    if s =? 0 or syms.ptr[s].kind not=? 'local' {return 0}
+    s
+}
+# `(@w).Closed`, `(@w).<string>`, `(@w).types` (decisions.md, batch 7): the type the named wait w
+# gives with that name, as a wait handle's member names its outcome; 0 when tn names no `@w`.
+named_wait_type=(tn:SelectWord):>int64=>$unsafe {
+    let s=named_wait_qualifier(SelectWord(nodes.ptr[tn].sval))
+    if s =? 0 {return 0}
+    let t=prune(SelectWord(locals.ptr[SelectWord(syms.ptr[s].ref)].type))
+    let q="({name_of(SelectWord(nodes.ptr[tn].sval))})"
+    if tkind(t) not=? 'fn_' {fatal(nodes.ptr[tn].pos "`{q}` names a named wait, `let w = @lines.receive`; {dt(t)} is not one")}
+    let outcomes=prune(telem(t))
+    let nm=SelectWord(nodes.ptr[tn].name)
+    if name_of(nm) =? "<>" {
+        if nkids(tn) not=? 1 {fatal(nodes.ptr[tn].pos "`{q}.<T>` selects one type")}
+        return resolve_type(kid(tn 0))
+    }
+    if name_of(nm) =? "types" {return outcomes}
+    let found:array<int64>=[]
+    loop a in value_members(outcomes) {
+        if type_short_name(a) =? name_of(nm) {found.push(prune(a))}
+    }
+    if found.length =? 1 {return found[0]}
+    if found.length >? 1 {fatal(nodes.ptr[tn].pos "{q} gives more than one type named {name_of(nm)}: write the one meant, `{q}.<{dt(found[0])}>`")}
+    fatal(nodes.ptr[tn].pos "{q} gives {dt(outcomes)}, none of them named {name_of(nm)}")
+    0
+}
+# (the object of the `$__consume__` method being checked: its own, moved in, so it may write it)
+consumed_receiver=(l:SelectWord):>bool=>$unsafe {
+    if ownership_consumers.length =? 0 or cx <? 0 {return false}
+    let f=SelectWord(ctxs[cx].inst)
+    f >? 0 and fns.ptr[f].decl not=? 0 and ownership_consumers.has(SelectWord(fns.ptr[f].decl)) and fns.ptr[f].params.length >? 0 and fns.ptr[f].params[0] =? l
+}
+# `select(@lines.receive @heart.next ...)` (decisions.md, batch 7): each wait it is given is a
+# channel's `receive` or a ticker's `next`, written in the call on a local or a field chain;
+# the same operation twice is an error. O(arguments^2), only for select's calls.
+select_call=(n:SelectWord):>bool=>$unsafe {
+    let f=SelectWord(nodes.ptr[n].sym)
+    if f <=? 0 or nodes.ptr[n].aux not=? 0 or fns.ptr[f].decl =? 0 {return false}
+    let d=SelectWord(fns.ptr[f].decl)
+    name_of(SelectWord(nodes.ptr[d].name)) =? "select" and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/tasks.jo"
+}
+# (a call whose result a match can tell apart by source: select, race or first_ok, which record
+# the argument that gave it)
+source_call=(n:SelectWord):>bool=>$unsafe {
+    if select_call(n) {return true}
+    let f=SelectWord(nodes.ptr[n].sym)
+    if f <=? 0 or nodes.ptr[n].aux not=? 0 or fns.ptr[f].decl =? 0 {return false}
+    let d=SelectWord(fns.ptr[f].decl)
+    let name=name_of(SelectWord(nodes.ptr[d].name))
+    let path=files[pos_file(nodes.ptr[d].pos)].path
+    if name not=? "race" and name not=? "first_ok" {return false}
+    path =? "{lib_dir}/prelude/first_ok.dewy"
+}
+select_check=(n:SelectWord):>void=>$unsafe {
+    let waits:array<int64>=[]
+    loop a0 in kids(n) {
+        let a=select_wait_arg(a0)
+        if tkind(ntype(a)) not=? 'fn_' {continue}
+        let w=wait_partial(a)
+        let l=named_wait_local(a)
+        if w =? 0 and l not=? 0 {
+            w=named_wait(n a l)
+            if w <? 0 {return}
+        }
+        if w =? 0 {fatal(nodes.ptr[a].pos "select waits on operations written in the call, on a local or a field: `@lines.receive`, `@heart.next`, or `@w` for a `let w = @lines.receive` in this function. It cannot follow a function value, a helper's result or an indexed element (bind `let ch = channels[i]`, then `@ch.receive`), and its own `timeout=` is the deadline")}
+        let op=SelectWord(nodes.ptr[SelectWord(fns.ptr[SelectWord(nodes.ptr[w].sym)].decl)].name)
+        loop v in waits {
+            if SelectWord(nodes.ptr[SelectWord(fns.ptr[SelectWord(nodes.ptr[v].sym)].decl)].name) =? op and select_same_place(kid(v 0) kid(w 0)) {fatal(nodes.ptr[a].pos "this operation is listed twice: select takes at most one value from it, so write it once")}
+        }
+        waits.push(w)
+    }
+}
+# (a select argument with conversions and `if cond ... else none`'s `__select_when` taken off)
+select_wait_arg=(a0:SelectWord):>int64=>$unsafe {
+    let a=a0
+    loop nodes.ptr[a].kind =? 'conv' {a=SelectWord(nodes.ptr[a].a)}
+    if nodes.ptr[a].kind =? 'call' and nkids(a) =? 2 and nodes.ptr[a].sym >? 0 and nodes.ptr[a].aux =? 0 and fns.ptr[SelectWord(nodes.ptr[a].sym)].decl not=? 0 and name_of(SelectWord(nodes.ptr[SelectWord(fns.ptr[SelectWord(nodes.ptr[a].sym)].decl)].name)) =? "__select_when" {
+        a=kid(a 1)
+        loop nodes.ptr[a].kind =? 'conv' {a=SelectWord(nodes.ptr[a].a)}
+    }
+    a
+}
+# (the local a named wait argument names, 0 for another form)
+named_wait_local=(a0:SelectWord):>int64=>$unsafe {
+    let a=a0
+    loop nodes.ptr[a].kind =? 'conv' {a=SelectWord(nodes.ptr[a].a)}
+    if nodes.ptr[a].kind not=? 'ident' or has_flag(a NF_GLOBAL) or nodes.ptr[a].sym <=? 0 {return 0}
+    SelectWord(nodes.ptr[a].sym)
+}
+nw_walk=(n:SelectWord):>void=>$unsafe {
+    if n <=? 0 {return}
+    let at=nw_at
+    nw_at += 1
+    let k=nodes.ptr[n].kind
+    if k =? 'vardecl' and nodes.ptr[n].sym =? int32(nw_local) and not has_flag(n NF_GLOBAL) and nw_decl =? 0 {
+        nw_decl=n
+        nw_decl_at=at
+        nw_decl_loops=nw_loops
+    }
+    if n =? nw_call {
+        nw_call_at=at
+        nw_call_loops=nw_loops
+    }
+    if k =? 'assign' {
+        nw_writes.push(n)
+        nw_write_at.push(at)
+    }
+    if k =? 'lambda' {
+        loop cap in lambda_captures(n) {
+            if has_flag(cap NF_MUT) {
+                nw_writes.push(cap)
+                nw_write_at.push(at)
+            }
+        }
+        return
+    }
+    let loop_node=k =? 'while_' or k =? 'for_'
+    if loop_node {
+        nw_loops.push(n)
+        nw_loop_start[n]=at
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {mask=0}
+    if mask & 1 not=? 0 {nw_walk(SelectWord(nodes.ptr[n].a))}
+    if mask & 2 not=? 0 {nw_walk(SelectWord(nodes.ptr[n].b))}
+    if mask & 4 not=? 0 {nw_walk(SelectWord(nodes.ptr[n].c))}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {nw_walk(child)}
+    }
+    if loop_node {
+        nw_loops.pop();
+        nw_loop_end[n]=nw_at - 1
+    }
+    if n =? nw_call {nw_call_end=nw_at - 1}
+}
+# (the names along a place: its root local's id, negated, then each field's name)
+nw_path=(n0:SelectWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' or nodes.ptr[n].kind =? 'field' or nodes.ptr[n].kind =? 'index' {
+        if nodes.ptr[n].kind =? 'field' {out.push(SelectWord(nodes.ptr[n].name))}
+        if nodes.ptr[n].kind =? 'index' {out.clear()}
+        n=SelectWord(nodes.ptr[n].a)
+    }
+    if nodes.ptr[n].kind not=? 'ident' or has_flag(n NF_GLOBAL) {return []}
+    out.push(-SelectWord(nodes.ptr[n].sym))
+    out.reverse()
+    out
+}
+# (does a write to the place target replace w, or the receiver path or an ancestor of it?)
+nw_overlaps=(target:SelectWord receiver:array<int64>):>bool=>{
+    let path=nw_path(target)
+    if path.length =? 0 {return false}
+    if path[0] =? -nw_local {return true}
+    if path[0] not=? receiver[0] {return false}
+    loop i in [0..min(path.length receiver.length)) {
+        if path[i] not=? receiver[i] {return false}
+    }
+    true
+}
+# The wait w names in the call n, checked against rules 3-5 (its declaration in this function,
+# a stable receiver, nothing changing them while it is pending).
+named_wait=(n:SelectWord a:SelectWord l:SelectWord):>int64=>$unsafe {
+    nw_local=l
+    nw_name=SelectWord(locals.ptr[l].name)
+    nw_call=n
+    nw_decl=0
+    nw_at=0
+    nw_decl_at=-1
+    nw_call_at=-1
+    nw_call_end=-1
+    nw_loops.clear()
+    nw_loop_start.clear()
+    nw_loop_end.clear()
+    nw_writes.clear()
+    nw_write_at.clear()
+    let owner=SelectWord(locals.ptr[l].owner)
+    nw_walk(SelectWord(fns.ptr[owner].body))
+    # (a checked copy of the call, as a match on it makes, is not in the body: the call itself is)
+    if nw_call_at <? 0 {return -1}
+    let w=name_of(nw_name)
+    if nw_decl =? 0 or nw_decl_at >? nw_call_at or SelectWord(locals.ptr[l].flags) & LF_PARAM not=? 0 {fatal(nodes.ptr[a].pos "select waits on `@{w}` only when {w} is a wait prepared in this function, `let {w} = @lines.receive`; a parameter, a captured value or a stored result is not one: write the wait in the call")}
+    let init=SelectWord(nodes.ptr[nw_decl].b)
+    let prepared=wait_partial(init)
+    if prepared =? 0 {fatal(nodes.ptr[a].pos "{w} is not a prepared wait: a named wait is declared as one, `let {w} = @lines.receive` or `@heart.next`; a helper's result, a stored handle or `if cond @x.receive else none` is not (write the wait, or the condition, in the call)")}
+    let receiver=nw_path(kid(prepared 0))
+    if receiver.length =? 0 {fatal(nodes.ptr[prepared].pos "a named wait's receiver is a local or a field chain on one: bind `let ch = ...` and prepare `@ch.receive`")}
+    let root=name_of(SelectWord(locals.ptr[-receiver[0]].name))
+    loop i in [0..nw_writes.length) {
+        let x=nw_writes[i]
+        if nodes.ptr[x].kind not=? 'assign' {
+            # (a closure that captured the place to change it: whenever it runs)
+            if SelectWord(nodes.ptr[x].name) =? nw_name or name_of(SelectWord(nodes.ptr[x].name)) =? root {fatal(nodes.ptr[x].pos "this closure captures the place of the wait `{w}` to change it, so select could take from another place than its pattern names: capture a copy, or match the plain type")}
+            continue
+        }
+        let at=nw_write_at[i]
+        let live=at >? nw_decl_at and at <=? nw_call_end
+        loop lp in nw_call_loops {
+            if not nw_decl_loops.contains(lp) and at >=? nw_loop_start[lp] and at <=? nw_loop_end[lp] {live=true}
+        }
+        if live and nw_overlaps(SelectWord(nodes.ptr[x].a) receiver) {fatal(nodes.ptr[x].pos "this changes the place the wait `{w}` was prepared on while select can still take from it: from `let {w} = ...` through the match, and around the loop back to it, the receiver and {w} stay as they are. Bind a fresh local for the new value, or match the plain type")}
+    }
+    prepared
+}
+select_turned_off=(a0:SelectWord):>int64=>$unsafe {
+    let a=a0
+    loop nodes.ptr[a].kind =? 'block' and nkids(a) =? 1 and nodes.ptr[kid(a 0)].kind =? 'exprstmt' {a=SelectWord(nodes.ptr[kid(a 0)].a)}
+    if nodes.ptr[a].kind not=? 'if_' or nodes.ptr[a].c =? 0 {return 0}
+    let off=SelectWord(nodes.ptr[a].c)
+    loop nodes.ptr[off].kind =? 'block' and nkids(off) =? 1 and nodes.ptr[kid(off 0)].kind =? 'exprstmt' {off=SelectWord(nodes.ptr[kid(off 0)].a)}
+    if nodes.ptr[off].kind not=? 'none_lit' {return 0}
+    a
+}
+select_conditions=(n:SelectWord expected:SelectWord):>int64=>$unsafe {
+    if not dewy_at(nodes.ptr[n].pos) {return -1}
+    let conditions:array<int64>=[]
+    let waits:SelectWord=0
+    let args=kids(n)
+    loop i in [0..args.length) {
+        if nodes.ptr[args[i]].kind =? 'namedarg' {continue}
+        waits += 1
+        let c=select_turned_off(args[i])
+        if c =? 0 {continue}
+        conditions.push(SelectWord(nodes.ptr[c].a))
+        let on=SelectWord(nodes.ptr[c].b)
+        loop nodes.ptr[on].kind =? 'block' and nkids(on) =? 1 and nodes.ptr[kid(on 0)].kind =? 'exprstmt' {on=SelectWord(nodes.ptr[kid(on 0)].a)}
+        args[i]=bc_call("__select_when" [SelectWord(nodes.ptr[c].a) on] nodes.ptr[args[i]].pos)
+    }
+    if conditions.length =? 0 {return -1}
+    let pos=nodes.ptr[n].pos
+    if conditions.length <? waits {
+        set_list(n args)
+        return -1
+    }
+    let call=clone(n)
+    set_list(call args)
+    # (every wait may be off: one condition must hold, proven where the select is reached)
+    let either:SelectWord=0
+    loop c in conditions {
+        if not select_plain_condition(c) {fatal(nodes.ptr[c].pos "every wait of this select can be turned off, so one condition must be proven true before it waits; that needs plain conditions (flags, fields, comparisons): bind this one to a local first")}
+        if either =? 0 {either=clone(c)} else {
+            let joined=mk('or_' pos)
+            nodes.ptr[joined].a=int32(either)
+            nodes.ptr[joined].b=int32(clone(c))
+            either=joined
+        }
+    }
+    check_expr(either T_BOOL);
+    let held=last_checked
+    check_expr(bc_str("select needs a wait: every wait here can be turned off" pos) T_STR);
+    let guard=mk('call' pos)
+    nodes.ptr[guard].aux2=int32(UNPACK_OBLIGATION)
+    check_intrinsic(guard int64(IN.assert) [held last_checked] 0);
+    fact_requests.push(FactRequest(guard if cx >=? 0 {SelectWord(ctxs[cx].inst)} else {0}))
+    let statement=mk('exprstmt' pos)
+    nodes.ptr[statement].a=int32(guard)
+    add_flag(statement NF_CHECKED)
+    nodes.ptr[n]=Node(kind='block' pos=pos aux=1)
+    set_list(n [statement bc_stmt(call pos)])
+    check_expr(n expected)
+}
+# (the obligation itself: the spread arrays' lengths add up to at least one)
+race_needs=(n:SelectWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let total:SelectWord=0
+    loop a in kids(n) {
+        check_expr(a 0);
+        let held=last_checked
+        let length=mk('call' pos)
+        check_intrinsic(length int64(IN.len) [held] 0);
+        add_flag(length NF_CHECKED)
+        if total =? 0 {total=length} else {
+            let sum=mk('binary' pos)
+            nodes.ptr[sum].op=int32(58)
+            nodes.ptr[sum].a=int32(total)
+            nodes.ptr[sum].b=int32(length)
+            check_expr(sum T_INT);
+            total=last_checked
+        }
+    }
+    let one=mk('int_lit' pos)
+    nodes.ptr[one].ival=1
+    let cmp=mk('binary' pos)
+    nodes.ptr[cmp].op=int32(74)
+    nodes.ptr[cmp].a=int32(total)
+    nodes.ptr[cmp].b=int32(one)
+    check_expr(cmp T_BOOL);
+    cmp=last_checked
+    let word=name_of(SelectWord(nodes.ptr[n].ival))
+    check_expr(bc_str("{word} needs a call to run: the spread array may be empty" pos) T_STR);
+    let message=last_checked
+    check_intrinsic(n int64(IN.assert) [cmp message] 0);
+    nodes.ptr[n].aux2=int32(UNPACK_OBLIGATION)
+    fact_requests.push(FactRequest(n if cx >=? 0 {SelectWord(ctxs[cx].inst)} else {0}))
+    last_checked=n
+    T_VOID
+}
+# (a condition the obligation can read again: names, fields, literals, `not`, `and`, `or` and
+# comparisons of them)
+select_plain_condition=(c:SelectWord):>bool=>$unsafe {
+    let k=nodes.ptr[c].kind
+    if k =? 'ident' or k =? 'bool_lit' or k =? 'int_lit' {return true}
+    if k =? 'field' or k =? 'not_' {return select_plain_condition(SelectWord(nodes.ptr[c].a))}
+    if k =? 'and_' or k =? 'or_' or k =? 'binary' {return select_plain_condition(SelectWord(nodes.ptr[c].a)) and select_plain_condition(SelectWord(nodes.ptr[c].b))}
+    false
+}
+# (the wait a named wait l was declared with while its function is being checked, 0 if none)
+named_wait_declared=(l:SelectWord):>int64=>$unsafe {
+    nw_local=l
+    nw_call=0
+    nw_decl=0
+    nw_decl_at=-1
+    nw_at=0
+    nw_loops.clear()
+    nw_writes.clear()
+    nw_write_at.clear()
+    nw_walk(SelectWord(fns.ptr[SelectWord(locals.ptr[l].owner)].body))
+    if nw_decl =? 0 {return 0}
+    wait_partial(SelectWord(nodes.ptr[nw_decl].b))
+}
+# Source patterns (decisions.md, batch 7): `<heart.Tick>`, `line:lines.string`,
+# `x:heart.types & (Tick | Closed)` name the wait that gave the outcome as well as its type. The
+# qualifier of p's type when it is such a pattern (a local or global wait handle and a member it
+# has as an outcome, not a record's own type member), 0 otherwise.
+source_qualifier=(p:SelectWord):>int64=>$unsafe {
+    if nodes.ptr[p].kind not=? 'ptype' or nodes.ptr[p].a =? 0 {return 0}
+    let tn=SelectWord(nodes.ptr[p].a)
+    if nodes.ptr[tn].kind =? 'tunion' and nodes.ptr[tn].aux =? 11 {tn=kid(tn 0)}
+    if nodes.ptr[tn].kind not=? 'tname' or nodes.ptr[tn].sval =? 0 {return 0}
+    let selector=name_of(SelectWord(nodes.ptr[tn].name)) =? "<>"
+    if nkids(tn) not=? 0 and not selector {return 0}
+    if named_wait_qualifier(SelectWord(nodes.ptr[tn].sval)) not=? 0 {return SelectWord(nodes.ptr[tn].sval)}
+    let s=lookup(SelectWord(nodes.ptr[tn].sval))
+    if s =? 0 or (syms.ptr[s].kind not=? 'local' and syms.ptr[s].kind not=? 'global') {return 0}
+    let t:SelectWord=0
+    if syms.ptr[s].kind =? 'local' {t=SelectWord(locals.ptr[SelectWord(syms.ptr[s].ref)].type)} else {
+        ensure_global(SelectWord(syms.ptr[s].ref) nodes.ptr[tn].pos)
+        t=SelectWord(globals.ptr[SelectWord(syms.ptr[s].ref)].type)
+    }
+    if t =? 0 or handle_outcomes(t) =? 0 or not selector and record_type_member(t SelectWord(nodes.ptr[tn].name)) not=? 0 {return 0}
+    SelectWord(nodes.ptr[tn].sval)
+}
+# (the variable a wait's receiver path starts from, its name; 0 for another form)
+source_receiver=(n0:SelectWord):>int64=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' {n=SelectWord(nodes.ptr[n].a)}
+    if nodes.ptr[n].kind not=? 'ident' {return 0}
+    SelectWord(nodes.ptr[n].name)
+}
+# A match with source patterns (decisions.md, batch 7, provenance rules 1, 2, 7 and 8). Eligible
+# only on the call that prepared the waits: `match select(...)`, whose waits are written in
+# it, or a direct `x.receive` / `x.next`. On a select the match becomes one match per wait the
+# select can take, chosen by the winner the call records (`__select_winner`), each on the
+# outcomes of that wait: a source pattern stays in its wait's match as its plain type, a plain
+# one in every match whose outcomes it meets. -1 when m has no source pattern (O(patterns)).
+source_match=(m:SelectWord expected:SelectWord):>int64=>$unsafe {
+    let first:SelectWord=0
+    loop arm in kids(m) {
+        loop p in kids(arm) {
+            if first =? 0 and source_qualifier(p) not=? 0 {first=p}
+        }
+    }
+    if first =? 0 {return -1}
+    let sc=SelectWord(nodes.ptr[m].a)
+    let pos=nodes.ptr[m].pos
+    # (rule 7: a direct receive or next has one slot, its receiver)
+    let head=sc
+    if nodes.ptr[head].kind =? 'call' {head=SelectWord(nodes.ptr[head].a)}
+    if nodes.ptr[head].kind =? 'field' and (name_of(SelectWord(nodes.ptr[head].name)) =? "receive" or name_of(SelectWord(nodes.ptr[head].name)) =? "next" or name_of(SelectWord(nodes.ptr[head].name)) =? "reserve") and select_place(SelectWord(nodes.ptr[head].a)) {
+        let receiver=source_receiver(SelectWord(nodes.ptr[head].a))
+        let inner=inbox_sources(SelectWord(nodes.ptr[head].a) name_of(SelectWord(nodes.ptr[head].name)))
+        if inner.length >? 0 {return inbox_source_match(m sc inner expected)}
+        loop arm in kids(m) {
+            loop p in kids(arm) {
+                let q=source_qualifier(p)
+                if q not=? 0 and q not=? receiver {fatal(nodes.ptr[p].pos "this pattern names {name_of(q)}, but the match is on another wait: only what that wait gives can match here (write the plain type, or match on {name_of(q)}'s own wait)")}
+            }
+        }
+        return -1
+    }
+    let callee=if nodes.ptr[sc].kind =? 'call' {SelectWord(nodes.ptr[sc].a)} else {0}
+    if callee =? 0 or nodes.ptr[callee].kind not=? 'ident' or not (name_of(SelectWord(nodes.ptr[callee].name)) in? ["select" "race" "first_ok"]) {
+        fatal(nodes.ptr[first].pos "a pattern that names its source (`<heart.Tick>`) needs the match written on the call that prepared the waits, `match select(...)`, or on a direct `receive` or `next`; a stored result, a helper's or another call's has no source: match the plain type")
+    }
+    # (the waits' outcomes, from a checked copy: the call itself is checked where it is bound)
+    check_expr(clone(sc) 0);
+    let probe=last_checked
+    let call=probe
+    loop nodes.ptr[call].kind =? 'conv' {call=SelectWord(nodes.ptr[call].a)}
+    # (all waits conditional: `{obligation; select(...)}`)
+    if nodes.ptr[call].kind =? 'block' and nkids(call) >? 0 and nodes.ptr[kid(call nkids(call) - 1)].kind =? 'exprstmt' {call=SelectWord(nodes.ptr[kid(call nkids(call) - 1)].a)}
+    loop nodes.ptr[call].kind =? 'conv' {call=SelectWord(nodes.ptr[call].a)}
+    if nodes.ptr[call].kind not=? 'call' or not source_call(call) {fatal(nodes.ptr[first].pos "a pattern that names its source needs the match written on `select(...)`, `race(...)` or `first_ok(...)` itself")}
+    let whole=prune(ntype(probe))
+    # (each wait: its receiver's name and what it gives)
+    let receivers:array<int64>=[]
+    let named:array<int64>=[]
+    let outcomes:array<array<int64>>=[]
+    let taken:array<int64>=[]
+    if spreads_rest(call) {fatal(nodes.ptr[first].pos "a pattern that names its source needs the waits written in the call; a spread array's are not: match the plain type")}
+    loop a0 in written_args(call) {
+        let a=select_wait_arg(a0)
+        if tkind(ntype(a)) not=? 'fn_' {continue}
+        let w=wait_partial(a)
+        let l=named_wait_local(a)
+        named.push(0)
+        if w =? 0 and l not=? 0 {
+            w=named_wait_declared(l)
+            named[named.length - 1]=intern("@{name_of(SelectWord(locals.ptr[l].name))}")
+        }
+        receivers.push(if w not=? 0 {source_receiver(kid(w 0))} else {0})
+        let gives=value_members(prune(telem(ntype(a))))
+        outcomes.push(gives)
+        loop g in gives {taken.push(prune(g))}
+    }
+    # (the select's own outcomes: Canceled, and Timeout with timeout=)
+    let own:array<int64>=[]
+    loop w0 in value_members(whole) {
+        let w=prune(w0)
+        if not taken.contains(w) or type_short_name(w) =? "Canceled" or type_short_name(w) =? "Timeout" {own.push(w)}
+    }
+    loop arm in kids(m) {
+        loop p in kids(arm) {
+            let q=source_qualifier(p)
+            if q not=? 0 and not receivers.contains(q) and not named.contains(q) {fatal(nodes.ptr[p].pos "{name_of(q)} is not waited on in this select: a pattern names one of the call's waits (`@{name_of(q)}.receive` written in it, or `@w` for a named wait)")}
+        }
+    }
+    source_dispatch(m sc receivers named outcomes own whole select_call(call) expected)
+}
+# (source_match's rewrite: one match per wait, chosen by the recorded winner)
+source_dispatch=(m:SelectWord sc:SelectWord receivers:array<int64> named:array<int64> outcomes:array<array<int64>> own:array<int64> whole:SelectWord on_select:bool expected:SelectWord):>int64=>$unsafe {
+    let pos=nodes.ptr[m].pos
+    let statement=has_flag(m NF_STMT)
+    let sel="$select{m}"
+    let won="$select_won{m}"
+    let branches:array<int64>=[]
+    loop k in [0..outcomes.length + 1) {
+        let gives=if k <? outcomes.length {outcomes[k]} else {own}
+        if gives.length =? 0 {continue}
+        let source=if k <? outcomes.length {receivers[k]} else {-1}
+        let alias=if k <? outcomes.length {named[k]} else {-1}
+        let arms:array<int64>=[]
+        # (what this wait's unguarded source arms take: a plain arm after them takes the rest)
+        let covered:array<int64>=[]
+        loop arm in kids(m) {
+            let kept:array<int64>=[]
+            loop p in kids(arm) {
+                let q=source_qualifier(p)
+                if q not=? 0 and q not=? source and q not=? alias {continue}
+                if nodes.ptr[p].kind =? 'ptype' and nodes.ptr[p].a not=? 0 {
+                    let was=bare_generic_set(true)
+                    let tt=prune(resolve_type(SelectWord(nodes.ptr[p].a)))
+                    bare_generic_set(was);
+                    let held:array<int64>=[]
+                    loop g in value_members(tt) {
+                        if gives.contains(prune(g)) or family_holds_generic(tt prune(g)) {held.push(prune(g))}
+                    }
+                    loop g in gives {
+                        if not held.contains(prune(g)) and type_eq(prune(g) tt) {held.push(prune(g))}
+                    }
+                    if q =? 0 {
+                        let rest:array<int64>=[]
+                        loop g in held {
+                            if not covered.contains(g) {rest.push(g)}
+                        }
+                        held=rest
+                    }
+                    else if nodes.ptr[arm].a =? 0 and nodes.ptr[arm].c =? 0 {
+                        loop g in held {covered.push(g)}
+                    }
+                    if held.length =? 0 {continue}
+                    let np=clone(p)
+                    let tn=mk('tname' nodes.ptr[p].pos)
+                    nodes.ptr[tn].aux=-7
+                    nodes.ptr[tn].ival=if held.length =? 1 {held[0]} else {mk_union(held)}
+                    nodes.ptr[np].a=int32(tn)
+                    kept.push(np)
+                }
+                else {kept.push(clone(p))}
+            }
+            if kept.length =? 0 {continue}
+            let na=clone(arm)
+            set_list(na kept)
+            arms.push(na)
+        }
+        # (the other waits' outcomes never reach this match: an arm that says so covers them)
+        let catch_all=false
+        loop na in arms {
+            loop p in kids(na) {
+                if nodes.ptr[p].kind =? 'pwild' {catch_all=true}
+            }
+        }
+        if gives.length <? value_members(whole).length and not catch_all {
+            let rest=mk('arm' pos)
+            set_list(rest [mk('pwild' pos)])
+            nodes.ptr[rest].b=int32(bc_block([bc_stmt(bc_call("panic" [bc_str("select gave the outcome of another wait" pos)] pos) pos)] pos))
+            arms.push(rest)
+        }
+        let branch=mk('match_' pos)
+        nodes.ptr[branch].a=int32(bc_ident(sel pos))
+        if statement {add_flag(branch NF_STMT)}
+        set_list(branch arms)
+        if on_select {select_source_matches[branch]=true}
+        select_source_calls[branch]=sc
+        branches.push(branch)
+        branches.push(if k <? outcomes.length {k} else {-1})
+    }
+    # (the last branch is the else of the others)
+    let chain=branches[branches.length - 2]
+    let i=branches.length - 4
+    loop i >=? 0 {
+        let winner=bc_bin('eq' bc_ident(won pos) bc_int(branches[i + 1] pos) pos)
+        let node=mk('if_' pos)
+        nodes.ptr[node].a=int32(winner)
+        let then=bc_block([bc_stmt(branches[i] pos)] pos)
+        nodes.ptr[then].aux=1
+        let otherwise=bc_block([bc_stmt(chain pos)] pos)
+        nodes.ptr[otherwise].aux=1
+        nodes.ptr[node].b=int32(then)
+        nodes.ptr[node].c=int32(otherwise)
+        if statement {
+            nodes.ptr[node].b=int32(bc_block([bc_stmt(branches[i] pos)] pos))
+            nodes.ptr[node].c=int32(bc_block([if nodes.ptr[chain].kind =? 'if_' {chain} else {bc_stmt(chain pos)}] pos))
+            add_flag(node NF_STMT)
+        }
+        chain=node
+        i -= 2
+    }
+    let last=if statement and nodes.ptr[chain].kind =? 'if_' {chain} else {bc_stmt(chain pos)}
+    let statements=[bc_let(sel sc pos) bc_let(won bc_call("__select_winner" [] pos) pos) last]
+    nodes.ptr[m]=Node(kind='block' pos=pos aux=if statement {0} else {1})
+    set_list(m statements)
+    check_expr(m expected)
+}
+# Rule 6 (decisions.md, batch 7): `match inbox.next` for an `inbox = merged(@a.receive ...)`
+# declared in this function names the inner waits, `v:a.int64`; the inbox records which one gave
+# the value. The waits of inbox's declaration, [] when x is no such inbox (or the pattern names
+# only the inbox itself). A later assignment to the inbox does not carry its table: an error.
+inbox_sources=(x0:SelectWord op:string):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    let x=x0
+    loop nodes.ptr[x].kind =? 'conv' {x=SelectWord(nodes.ptr[x].a)}
+    if op not=? "next" or nodes.ptr[x].kind not=? 'ident' {return out}
+    let s=lookup(SelectWord(nodes.ptr[x].name))
+    if s =? 0 or syms.ptr[s].kind not=? 'local' {return out}
+    let l=SelectWord(syms.ptr[s].ref)
+    named_wait_declared(l);
+    if nw_decl =? 0 {return out}
+    let init=SelectWord(nodes.ptr[nw_decl].b)
+    loop nodes.ptr[init].kind =? 'conv' {init=SelectWord(nodes.ptr[init].a)}
+    if nodes.ptr[init].kind not=? 'call' or nodes.ptr[init].sym <=? 0 or nodes.ptr[init].aux not=? 0 or fns.ptr[SelectWord(nodes.ptr[init].sym)].decl =? 0 {return out}
+    let d=SelectWord(fns.ptr[SelectWord(nodes.ptr[init].sym)].decl)
+    if name_of(SelectWord(nodes.ptr[d].name)) not=? "merged" or files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/prelude/inbox.dewy" {return out}
+    if spreads_rest(init) {return out}
+    loop a0 in written_args(init) {
+        let a=select_wait_arg(a0)
+        if tkind(ntype(a)) not=? 'fn_' {continue}
+        let w=wait_partial(a)
+        if w =? 0 and named_wait_local(a) not=? 0 {w=named_wait_declared(named_wait_local(a))}
+        out.push(w)
+    }
+    out
+}
+inbox_source_match=(m:SelectWord sc:SelectWord inner:array<int64> expected:SelectWord):>int64=>$unsafe {
+    let field=sc
+    if nodes.ptr[field].kind =? 'call' {field=SelectWord(nodes.ptr[field].a)}
+    let target=SelectWord(nodes.ptr[field].a)
+    loop nodes.ptr[target].kind =? 'conv' {target=SelectWord(nodes.ptr[target].a)}
+    let inbox=SelectWord(nodes.ptr[target].name)
+    # (rule 6: the inbox stays the binding its table was made for)
+    named_wait_declared(SelectWord(syms.ptr[lookup(inbox)].ref));
+    nw_walk_assigned(inbox m)
+    check_expr(clone(sc) 0);
+    let whole=prune(ntype(last_checked))
+    let receivers:array<int64>=[]
+    let named:array<int64>=[]
+    let outcomes:array<array<int64>>=[]
+    let taken:array<int64>=[]
+    loop w in inner {
+        receivers.push(if w not=? 0 {source_receiver(kid(w 0))} else {0})
+        named.push(0)
+        let gives:array<int64>=[]
+        if w not=? 0 {
+            loop g in value_members(prune(telem(ntype(w)))) {
+                if type_short_name(g) not=? "Closed" and type_short_name(g) not=? "Canceled" {gives.push(prune(g))}
+            }
+        }
+        outcomes.push(gives)
+        loop g in gives {taken.push(g)}
+    }
+    let own:array<int64>=[]
+    loop g0 in value_members(whole) {
+        let g=prune(g0)
+        if not taken.contains(g) {own.push(g)}
+    }
+    loop arm in kids(m) {
+        loop p in kids(arm) {
+            let q=source_qualifier(p)
+            if q not=? 0 and q not=? inbox and not receivers.contains(q) {fatal(nodes.ptr[p].pos "{name_of(q)} is not one of this inbox's waits: a pattern on `inbox.next` names a wait of its `merged(...)`")}
+            if q =? inbox {fatal(nodes.ptr[p].pos "a pattern on `{name_of(inbox)}.next` names one of its merged waits (`v:a.string`); the inbox itself is one source only inside `select`")}
+        }
+    }
+    source_dispatch(m sc receivers named outcomes own whole false expected)
+}
+# (an assignment to the local named name anywhere in m's function after its declaration: by name,
+# as the rest of the body is not checked yet)
+nw_walk_assigned=(name:SelectWord m:SelectWord):>void=>$unsafe {
+    loop i in [0..nw_writes.length) {
+        let x=nw_writes[i]
+        if nodes.ptr[x].kind not=? 'assign' or nw_write_at[i] <=? nw_decl_at {continue}
+        let t=SelectWord(nodes.ptr[x].a)
+        loop nodes.ptr[t].kind =? 'conv' or nodes.ptr[t].kind =? 'field' {t=SelectWord(nodes.ptr[t].a)}
+        if nodes.ptr[t].kind =? 'ident' and nodes.ptr[t].name =? int32(name) {fatal(nodes.ptr[x].pos "a match on `{name_of(name)}.next` names the waits of its `merged(...)`, but this assigns {name_of(name)} another value, which does not carry them: bind a new local, or match the plain type")}
+    }
+}
+# `members(U)` of a union of types (decisions.md, batch 7): its alternatives, each a type a
+# `loop t in members(U)` binds; [] for a union of literals, which yields its values.
+type_alternatives=(u0:SelectWord):>array<int64>=>$unsafe {
+    let u=prune(u0)
+    let out:array<int64>=[]
+    if not is_union(u) {return out}
+    loop m0 in union_members(u) {
+        let m=prune(m0)
+        if str_set_of(m) not=? 0 or types.ptr[m].kind =? 'refined' {return []}
+        out.push(m)
+    }
+    out
+}
+# A queue's payload that is, or may be, an outcome its own waits give (decisions.md, batch 7),
+# `Closed`, `Canceled` or every exception: the error that says so, "" when none is. A select's arms
+# match by type, so such a payload would be taken for the queue's own close or cancellation.
+queue_payload_clash=(payload:SelectWord name:string):>string=>{
+    loop m0 in value_members(payload) {
+        let text=dt(prune(m0))
+        if text =? "Closed" or text =? "Canceled" or text =? "exception" {return "a {name}'s payload cannot be {text}: its receive gives {text} as its own outcome, so the two could not be told apart; carry it in a record, `[value:{dt(payload)}]`"}
+    }
+    ""
+}
+# The progress rule, for its common case (decisions.md, batch 7): in a loop, an arm of a match
+# on select that takes a close and changes nothing (no assignment, no break, return or
+# or_throw, no call but printing) reaches the next turn, where the closed channel is ready
+# again: it spins. O(the arms' bodies), only for a match on select inside a loop.
+select_progress=(m:SelectWord):>void=>$unsafe {
+    if cx <? 0 or ctxs[cx].loop_depth =? 0 {return}
+    let sc=SelectWord(nodes.ptr[m].a)
+    loop nodes.ptr[sc].kind =? 'conv' {sc=SelectWord(nodes.ptr[sc].a)}
+    if not select_source_matches.has(m) and (nodes.ptr[sc].kind not=? 'call' or not select_call(sc)) {return}
+    # (`timeout=0s`, a poll: a Timeout stays ready as a close does)
+    let poll=select_poll(select_source_calls.get(m) ?? sc)
+    loop arm in kids(m) {
+        let closes=false
+        let idles=false
+        loop p in kids(arm) {
+            if select_pattern_closes(p) {closes=true}
+            if poll and select_pattern_named(p "Timeout") {idles=true}
+        }
+        if closes and not select_moves(SelectWord(nodes.ptr[arm].b)) {fatal(nodes.ptr[arm].pos "this close arm spins: a closed channel stays ready, so the next turn of the loop takes the close again; leave the loop (`break`), turn the wait off (`if open @c.receive else none`, then `open = false` here), change what the loop tests, or drain the channels with `merged(...)`, which retires each one as it closes")}
+        if idles and not select_moves(SelectWord(nodes.ptr[arm].b)) {fatal(nodes.ptr[arm].pos "this Timeout arm spins: a `timeout=0s` poll that finds nothing gives Timeout again on the next turn of the loop; leave the loop (`break`), wait with a real timeout, or do the work that makes a wait ready here")}
+    }
+}
+select_poll=(c0:SelectWord):>bool=>$unsafe {
+    let c=c0
+    loop nodes.ptr[c].kind =? 'conv' {c=SelectWord(nodes.ptr[c].a)}
+    if nodes.ptr[c].kind =? 'block' and nkids(c) >? 0 and nodes.ptr[kid(c nkids(c) - 1)].kind =? 'exprstmt' {c=SelectWord(nodes.ptr[kid(c nkids(c) - 1)].a)}
+    loop nodes.ptr[c].kind =? 'conv' {c=SelectWord(nodes.ptr[c].a)}
+    if nodes.ptr[c].kind not=? 'call' or not select_call(c) or nkids(c) =? 0 {return false}
+    let last=kid(c nkids(c) - 1)
+    if tkind(ntype(last)) =? 'fn_' {return false}
+    loop nodes.ptr[last].kind =? 'conv' {last=SelectWord(nodes.ptr[last].a)}
+    nodes.ptr[last].kind =? 'int_lit' and nodes.ptr[last].ival =? 0 or nodes.ptr[last].kind =? 'float_lit' and nodes.ptr[last].fval =? 0.0
+}
+# (does pattern p take the type named name, `<Timeout>`?)
+select_pattern_named=(p:SelectWord name:string):>bool=>$unsafe {
+    if nodes.ptr[p].kind =? 'pvariant' {return name_of(SelectWord(nodes.ptr[p].name)) =? name}
+    if nodes.ptr[p].kind not=? 'ptype' or nodes.ptr[p].type =? 0 {return false}
+    loop member in value_members(prune(SelectWord(nodes.ptr[p].type))) {
+        if type_short_name(member) =? name {return true}
+    }
+    false
+}
+select_pattern_closes=(p:SelectWord):>bool=>$unsafe {
+    if nodes.ptr[p].kind =? 'pvariant' {return name_of(SelectWord(nodes.ptr[p].name)) =? "Closed" or starts_with(name_of(SelectWord(nodes.ptr[p].name)) "Closed<") or starts_with(name_of(SelectWord(nodes.ptr[p].name)) "Closed[")}
+    if nodes.ptr[p].kind not=? 'ptype' or nodes.ptr[p].type =? 0 {return false}
+    let t=prune(SelectWord(nodes.ptr[p].type))
+    let members=if is_union(t) {union_members(t)} else {[t]}
+    loop member in members {
+        let mt=prune(member)
+        if tkind(mt) =? 'struct_' and structs.ptr[SelectWord(types.ptr[mt].st)].decl not=? 0 and name_of(SelectWord(nodes.ptr[SelectWord(structs.ptr[SelectWord(types.ptr[mt].st)].decl)].name)) =? "Closed" {return true}
+    }
+    false
+}
+# (could n change what the loop does next: an assignment, a jump out, a failure forwarded, or a
+# call other than printing)
+select_moves=(n:SelectWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' {return false}
+    if k =? 'assign' or k =? 'break_' or k =? 'return_' or k =? 'propagate' {return true}
+    if k =? 'call' {
+        let f=SelectWord(nodes.ptr[n].sym)
+        if nodes.ptr[n].aux not=? 0 or f <=? 0 or fns.ptr[f].decl =? 0 {return true}
+        let name=name_of(SelectWord(nodes.ptr[SelectWord(fns.ptr[f].decl)].name))
+        if name not=? "printl" and name not=? "print" and name not=? "__print_str" {return true}
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return true}
+    if mask & 1 not=? 0 and select_moves(SelectWord(nodes.ptr[n].a)) {return true}
+    if mask & 2 not=? 0 and select_moves(SelectWord(nodes.ptr[n].b)) {return true}
+    if mask & 4 not=? 0 and select_moves(SelectWord(nodes.ptr[n].c)) {return true}
+    if mask & 16 not=? 0 {
+        loop child in kids(n) {
+            if select_moves(child) {return true}
+        }
+    }
+    false
+}
+# (a local or a field chain on one)
+select_place=(n0:SelectWord):>bool=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' or nodes.ptr[n].kind =? 'field' {n=SelectWord(nodes.ptr[n].a)}
+    nodes.ptr[n].kind =? 'ident'
+}
+select_same_place=(x0:SelectWord y0:SelectWord):>bool=>$unsafe {
+    let x=x0
+    let y=y0
+    loop nodes.ptr[x].kind =? 'conv' {x=SelectWord(nodes.ptr[x].a)}
+    loop nodes.ptr[y].kind =? 'conv' {y=SelectWord(nodes.ptr[y].a)}
+    if nodes.ptr[x].kind not=? nodes.ptr[y].kind {return false}
+    if nodes.ptr[x].kind =? 'ident' {return nodes.ptr[x].sym =? nodes.ptr[y].sym and nodes.ptr[x].aux =? nodes.ptr[y].aux}
+    nodes.ptr[x].kind =? 'field' and nodes.ptr[x].name =? nodes.ptr[y].name and select_same_place(SelectWord(nodes.ptr[x].a) SelectWord(nodes.ptr[y].a))
+}

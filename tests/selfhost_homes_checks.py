@@ -27,6 +27,7 @@ LEAF_HOMES = {
     'unit_rare': 'units.jo',
     'safe_path_walk': 'safe_paths.jo',
     'comptime_ops': 'comptime.jo',
+    'select_checks': 'expr.jo',
 }
 
 
