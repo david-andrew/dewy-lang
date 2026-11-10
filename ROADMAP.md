@@ -12,7 +12,7 @@ day; keep it under 150 lines. Accepted designs live in [docs/design](docs/design
 | Acceptance ladder, design surface | 132/132 | all |
 | Tier-4 flagship programs (1–5k lines each) | 7/7 pass | all pass |
 | No traps by default | census 2,557 sites in 1,032 of 2,252 programs, down from 3,600 on 10-26 | ordinary code proves without opt-ins |
-| Compile throughput, single thread, default build, every processed line | flagships 164k lines/s (min 100_rtos_kernel 130.9k, 99_dewy_frontend 137.1k; self-build 75.4k) | 200–250k on every flagship |
+| Compile throughput, single thread, default build, every processed line | flagships 141.0k lines/s (11-10; was 161.5k before the flagships dropped their runtime-check opt-ins and now prove statically, +14% source cost, compiler flat) | 200–250k on every flagship |
 | Hello-world compile | 7.5 ms (instruction-derived) | ≤20 ms |
 | Kernels vs C -O2 (time, default, `bench` on redfox) | 18 of 28 at ≤1.2×; worst byte_find 2.85×, callbacks_literal 2.34× (fair C about 1.47×), name_table 1.67×, graph 1.54×, dict_words 1.51×, arena 1.43× | ≤1.2× |
 | Quick / full suite | about 25 s / about 9.5 min at 4 workers | ≤30 s / ≤5 min |
