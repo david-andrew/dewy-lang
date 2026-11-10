@@ -1,0 +1,94 @@
+$runtime_checks
+from p"ast.jo" import (NF_COMPREHENSION has_flag kids nkids nodes)
+from p"check.jo" import (LF_DECL LF_PARAM LF_UNNARROWED LF_VALUEPARAM fns locals module_of_type narrowed_var syms)
+from p"checker_expr.dewy" import (lookup)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_compare_hints.dewy" import (local_decl_in)
+from p"error_ops.dewy" import (nominal_family)
+from p"errors.jo" import (nominal_parent)
+from p"expr.jo" import (call_collect_fns call_collect_module match_type path_alias)
+from p"isolation_ops.dewy" import (isolation_children)
+from p"ownership_checks.dewy" import (LF_ALIAS LF_MUTPARAM)
+from p"types.jo" import (prune type_eq)
+from p"util.jo" import (intern name_of)
+
+CollectionWord:type=int64<overflow='wrap'>
+# Whether a subtree has no value that takes its type from where it goes.
+comprehension_self_typed=(n:CollectionWord):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'none_lit' or k =? 'dotname' or k =? 'record_lit' or k =? 'hole' or k =? 'map_lit' or k =? 'fnref' {return false}
+    if k =? 'array' and nkids(n) =? 0 {return false}
+    if k =? 'call' and nodes.ptr[CollectionWord(nodes.ptr[n].a)].kind =? 'dotname' {return false}
+    let mask=isolation_children(k)
+    if mask <? 0 {return false}
+    if mask & 1 not=? 0 and not comprehension_self_typed(CollectionWord(nodes.ptr[n].a)) {return false}
+    if mask & 2 not=? 0 and not comprehension_self_typed(CollectionWord(nodes.ptr[n].b)) {return false}
+    if mask & 4 not=? 0 and not comprehension_self_typed(CollectionWord(nodes.ptr[n].c)) {return false}
+    if mask & 16 not=? 0 {
+        loop c in kids(n) {
+            if not comprehension_self_typed(c) {return false}
+        }
+    }
+    true
+}
+# (a local a comprehension made, unannotated: `let sizes = [loop ... w.length]`)
+comprehension_binding=(a:CollectionWord):>bool=>$unsafe {
+    if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32(1) or nodes.ptr[a].sym <=? 0 {return false}
+    let l=CollectionWord(nodes.ptr[a].sym)
+    if CollectionWord(locals.ptr[l].flags) & (LF_PARAM | LF_VALUEPARAM | LF_MUTPARAM) not=? 0 or CollectionWord(locals.ptr[l].flags) & LF_DECL =? 0 {return false}
+    let d=local_decl_in(CollectionWord(fns.ptr[CollectionWord(locals.ptr[l].owner)].body) l)
+    if d =? 0 or nodes.ptr[d].kind not=? 'vardecl' or nodes.ptr[d].a not=? 0 or nodes.ptr[d].b =? 0 {return false}
+    let v=CollectionWord(nodes.ptr[d].b)
+    loop v not=? 0 and nodes.ptr[v].kind =? 'conv' {v=CollectionWord(nodes.ptr[v].a)}
+    v not=? 0 and nodes.ptr[v].kind =? 'block' and has_flag(v NF_COMPREHENSION)
+}
+# A comprehension written as the whole delimited argument, `mean[loop t in ts t*°C]`:
+# the collection it builds is the argument (dw_comprehension's shapes).
+dewy_whole_collection=(x:CollectionWord):>bool=>$unsafe {
+    let k=nodes.ptr[x].kind
+    if k =? 'block' {return has_flag(x NF_COMPREHENSION)}
+    if k =? 'parallel_region' {return true}
+    k =? 'call' and nkids(x) =? 1 and nodes.ptr[CollectionWord(nodes.ptr[x].a)].kind =? 'ident' and name_of(CollectionWord(nodes.ptr[CollectionWord(nodes.ptr[x].a)].name)) =? "__map_of"
+}
+# The `__as__` conversion from a record type ft to tt (its declared result), or 0.
+as_conversion=(ft:CollectionWord tt:CollectionWord):>int64=>{
+    let name=intern("__as__")
+    let decls:array<int64>=[]
+    call_collect_fns(name @decls)
+    let tm=module_of_type(ft)
+    if tm >=? 0 {call_collect_module(tm name @decls)}
+    # (the type's own conversion; then, for a minted child, its nearest
+    # ancestor's, whose methods take the family they are written for)
+    let owner=prune(ft)
+    loop owner not=? 0 {
+        let family=if nominal_parent.has(owner) {nominal_family(owner)} else {0}
+        loop d in decls {
+            if nkids(d) not=? 1 {continue}
+            let sig=fn_sig(d)
+            if sig.ret =? 0 or not type_eq(prune(int64(sig.ret)) tt) {continue}
+            let p=prune(sig.params[0])
+            if owner =? prune(ft) {
+                let binds:array<int64>=fill(0 int64(sig.ntp))
+                if match_type(p ft @binds 0) =? 0 {return d}
+            }
+            if sig.generic {continue}
+            if type_eq(p owner) or family not=? 0 and type_eq(p prune(family)) {return d}
+        }
+        owner=nominal_parent.get(owner 0)
+    }
+    0
+}
+# where its name is looked up now, optional v holds a value by a narrowing still in force
+opt_filled=(sub:CollectionWord):>bool=>$unsafe {
+    if nodes.ptr[sub].kind not=? 'ident' or nodes.ptr[sub].aux not=? int32(1) {
+        let al=path_alias(sub)
+        return al >=? 0 and nodes.ptr[CollectionWord(locals.ptr[al].alias)].kind =? 'unwrap'
+    }
+    let l=CollectionWord(nodes.ptr[sub].sym)
+    let sy=lookup(CollectionWord(locals.ptr[l].name))
+    if sy =? 0 or syms.ptr[sy].kind not=? 'local' {return false}
+    let nl=CollectionWord(syms.ptr[sy].ref)
+    if CollectionWord(locals.ptr[nl].flags) & (LF_ALIAS | LF_UNNARROWED) not=? LF_ALIAS {return false}
+    nodes.ptr[CollectionWord(locals.ptr[nl].alias)].kind =? 'unwrap' and narrowed_var(nl) =? l
+}

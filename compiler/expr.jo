@@ -158,6 +158,7 @@ use 'expr_rare.dewy'
 use 'callable_checks.dewy'
 use 'expr_routes.dewy'
 use 'range_checks.dewy'
+use 'collection_checks.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -1875,23 +1876,6 @@ comprehension_settle = (args: int[]) -> bool:
         settled = true
     settled
 
-# Whether a subtree has no value that takes its type from where it goes.
-comprehension_self_typed = (n: int) -> bool:
-    if n == 0: return true
-    k = nodes[n].kind
-    if k == .lambda or k == .none_lit or k == .dotname or k == .record_lit or k == .hole or k == .map_lit or k == .fnref: return false
-    if k == .array and nkids(n) == 0: return false
-    if k == .call and nodes[int(nodes[n].a)].kind == .dotname: return false
-    mask = isolation_children(k)
-    if mask < 0: return false
-    if mask & 1 != 0 and not comprehension_self_typed(int(nodes[n].a)): return false
-    if mask & 2 != 0 and not comprehension_self_typed(int(nodes[n].b)): return false
-    if mask & 4 != 0 and not comprehension_self_typed(int(nodes[n].c)): return false
-    if mask & 16 != 0:
-        loop c in kids(n):
-            if not comprehension_self_typed(c): return false
-    true
-
 # check_args_untyped (each argument's literal shape and function-value marks before an
 # overload is picked) is checker_expr.dewy's; members(U) and spread records are host services.
 
@@ -2072,16 +2056,6 @@ call_targs: int[]              # type arguments written at the call being resolv
 cur_assign = 0                 # the assignment whose target is being checked (`x = ...`, `x += ...`)
 early_set: {int: bool} = {}    # globals top-level code assigns above their own line
 
-# (a local a comprehension made, unannotated: `let sizes = [loop ... w.length]`)
-comprehension_binding = (a: int) -> bool:
-    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) or nodes[a].sym <= 0: return false
-    l = int(nodes[a].sym)
-    if int(locals[l].flags) & (LF_PARAM | LF_VALUEPARAM | LF_MUTPARAM) != 0 or int(locals[l].flags) & LF_DECL == 0: return false
-    d = local_decl_in(int(fns[int(locals[l].owner)].body), l)
-    if d == 0 or nodes[d].kind != .vardecl or nodes[d].a != 0 or nodes[d].b == 0: return false
-    v = int(nodes[d].b)
-    loop v != 0 and nodes[v].kind == .conv: v = int(nodes[v].a)
-    v != 0 and nodes[v].kind == .block and has_flag(v, NF_COMPREHENSION)
 # Whether parameter i of declaration d is written as a builtin integer type (refined or not),
 # read from its annotation alone
 written_int_param = (d: int, i: int) -> bool:
@@ -6891,44 +6865,11 @@ dewy_bracket_call = (n: int) -> bool:
     set_list(n, [items])
     true
 
-# A comprehension written as the whole delimited argument, `mean[loop t in ts t*°C]`:
-# the collection it builds is the argument (dw_comprehension's shapes).
-dewy_whole_collection = (x: int) -> bool:
-    k = nodes[x].kind
-    if k == .block: return has_flag(x, NF_COMPREHENSION)
-    if k == .parallel_region: return true
-    k == .call and nkids(x) == 1 and nodes[int(nodes[x].a)].kind == .ident and name_of(int(nodes[int(nodes[x].a)].name)) == "__map_of"
-
 index_deref = (pos: int, bt: int):
     ffi_deref(pos, bt)
     return
 
 expr_module = (m: int, name: int) -> int: module_lookup(m, name)
-
-# The `__as__` conversion from a record type ft to tt (its declared result), or 0.
-as_conversion = (ft: int, tt: int) -> int:
-    name = intern("__as__")
-    decls: int[]
-    collect_fns(name, &decls)
-    tm = module_of_type(ft)
-    if tm >= 0: collect_module(tm, name, &decls)
-    # (the type's own conversion; then, for a minted child, its nearest
-    # ancestor's, whose methods take the family they are written for)
-    owner = prune(ft)
-    loop owner != 0:
-        family = if nominal_parent.has(owner): nominal_family(owner) else: 0
-        loop d in decls:
-            if nkids(d) != 1: continue
-            sig = fn_sig(d)
-            if sig.ret == 0 or not type_eq(prune(int(sig.ret)), tt): continue
-            p = prune(sig.params[0])
-            if owner == prune(ft):
-                binds = fill(0, int(sig.ntp))
-                if match_type(p, ft, binds, 0) == 0: return d
-            if sig.generic: continue
-            if type_eq(p, owner) or family != 0 and type_eq(p, prune(family)): return d
-        owner = nominal_parent.get(owner, 0)
-    0
 
 # a swizzle whose components follow each other in memory (.x, .xy, .yzw): a place of its own
 swizzle_run = (n: int) -> bool:
@@ -7008,18 +6949,6 @@ opt_fill = (j: int, lhs: int, pos: int):
         al = path_alias(lhs)
         if al < 0 or nodes[int(locals[al].alias)].kind != .unwrap: al = 0
     opt_fill_watch[j].alias = i32(al)
-
-# where its name is looked up now, optional v holds a value by a narrowing still in force
-opt_filled = (sub: int) -> bool:
-    if nodes[sub].kind != .ident or nodes[sub].aux != i32(int(SK.local)):
-        al = path_alias(sub)
-        return al >= 0 and nodes[int(locals[al].alias)].kind == .unwrap
-    l = int(nodes[sub].sym)
-    sy = lookup(int(locals[l].name))
-    if sy == 0 or syms[sy].kind != .local: return false
-    nl = int(syms[sy].ref)
-    if int(locals[nl].flags) & (LF_ALIAS | LF_UNNARROWED) != LF_ALIAS: return false
-    nodes[int(locals[nl].alias)].kind == .unwrap and narrowed_var(nl) == l
 
 # from here on, optional variable l's name stands for its value
 opt_unwrap_alias = (l: int, pos: int) -> int:

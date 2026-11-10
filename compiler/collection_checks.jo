@@ -1,0 +1,227 @@
+use 'expr.jo'
+use 'data_access.dewy'
+use 'program_settings.dewy'
+use 'call_style.dewy'
+use 'secret_checks.dewy'
+use 'checks_read_code.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'unit_rare.dewy'
+use 'unit_ops.dewy'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'check.jo'
+use 'checks_place_updates.dewy'
+use 'checks_thin.dewy'
+use 'checks_const_views.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'settings.jo'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'refine_ops.dewy'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'prelude_ops.dewy'
+use 'ide.jo'
+use 'ide_text.dewy'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+use 'checks_shaped.dewy'
+use 'checks_thin_expr.dewy'
+use 'select_checks.dewy'
+use 'type_member_checks.dewy'
+use 'dotted_checks.dewy'
+use 'expr_hints.dewy'
+use 'partial_checks.dewy'
+use 'narrowing_checks.dewy'
+use 'expr_rare.dewy'
+use 'callable_checks.dewy'
+use 'expr_routes.dewy'
+use 'range_checks.dewy'
+
+# Whether a subtree has no value that takes its type from where it goes.
+comprehension_self_typed = (n: int) -> bool:
+    if n == 0: return true
+    k = nodes[n].kind
+    if k == .lambda or k == .none_lit or k == .dotname or k == .record_lit or k == .hole or k == .map_lit or k == .fnref: return false
+    if k == .array and nkids(n) == 0: return false
+    if k == .call and nodes[int(nodes[n].a)].kind == .dotname: return false
+    mask = isolation_children(k)
+    if mask < 0: return false
+    if mask & 1 != 0 and not comprehension_self_typed(int(nodes[n].a)): return false
+    if mask & 2 != 0 and not comprehension_self_typed(int(nodes[n].b)): return false
+    if mask & 4 != 0 and not comprehension_self_typed(int(nodes[n].c)): return false
+    if mask & 16 != 0:
+        loop c in kids(n):
+            if not comprehension_self_typed(c): return false
+    true
+# (a local a comprehension made, unannotated: `let sizes = [loop ... w.length]`)
+comprehension_binding = (a: int) -> bool:
+    if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)) or nodes[a].sym <= 0: return false
+    l = int(nodes[a].sym)
+    if int(locals[l].flags) & (LF_PARAM | LF_VALUEPARAM | LF_MUTPARAM) != 0 or int(locals[l].flags) & LF_DECL == 0: return false
+    d = local_decl_in(int(fns[int(locals[l].owner)].body), l)
+    if d == 0 or nodes[d].kind != .vardecl or nodes[d].a != 0 or nodes[d].b == 0: return false
+    v = int(nodes[d].b)
+    loop v != 0 and nodes[v].kind == .conv: v = int(nodes[v].a)
+    v != 0 and nodes[v].kind == .block and has_flag(v, NF_COMPREHENSION)
+# A comprehension written as the whole delimited argument, `mean[loop t in ts t*°C]`:
+# the collection it builds is the argument (dw_comprehension's shapes).
+dewy_whole_collection = (x: int) -> bool:
+    k = nodes[x].kind
+    if k == .block: return has_flag(x, NF_COMPREHENSION)
+    if k == .parallel_region: return true
+    k == .call and nkids(x) == 1 and nodes[int(nodes[x].a)].kind == .ident and name_of(int(nodes[int(nodes[x].a)].name)) == "__map_of"
+# The `__as__` conversion from a record type ft to tt (its declared result), or 0.
+as_conversion = (ft: int, tt: int) -> int:
+    name = intern("__as__")
+    decls: int[]
+    collect_fns(name, &decls)
+    tm = module_of_type(ft)
+    if tm >= 0: collect_module(tm, name, &decls)
+    # (the type's own conversion; then, for a minted child, its nearest
+    # ancestor's, whose methods take the family they are written for)
+    owner = prune(ft)
+    loop owner != 0:
+        family = if nominal_parent.has(owner): nominal_family(owner) else: 0
+        loop d in decls:
+            if nkids(d) != 1: continue
+            sig = fn_sig(d)
+            if sig.ret == 0 or not type_eq(prune(int(sig.ret)), tt): continue
+            p = prune(sig.params[0])
+            if owner == prune(ft):
+                binds = fill(0, int(sig.ntp))
+                if match_type(p, ft, binds, 0) == 0: return d
+            if sig.generic: continue
+            if type_eq(p, owner) or family != 0 and type_eq(p, prune(family)): return d
+        owner = nominal_parent.get(owner, 0)
+    0
+# where its name is looked up now, optional v holds a value by a narrowing still in force
+opt_filled = (sub: int) -> bool:
+    if nodes[sub].kind != .ident or nodes[sub].aux != i32(int(SK.local)):
+        al = path_alias(sub)
+        return al >= 0 and nodes[int(locals[al].alias)].kind == .unwrap
+    l = int(nodes[sub].sym)
+    sy = lookup(int(locals[l].name))
+    if sy == 0 or syms[sy].kind != .local: return false
+    nl = int(syms[sy].ref)
+    if int(locals[nl].flags) & (LF_ALIAS | LF_UNNARROWED) != LF_ALIAS: return false
+    nodes[int(locals[nl].alias)].kind == .unwrap and narrowed_var(nl) == l
