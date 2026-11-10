@@ -1,0 +1,9 @@
+# modes: native
+# `$no_deadlocks`: a timeout is recovery, not a certificate, so a select with one is rejected.
+$no_deadlocks
+main = () => {
+    let a = mpmc<int64>(1)
+    match select(@a.receive timeout=1s) {
+        _ => printl"x"
+    }
+}

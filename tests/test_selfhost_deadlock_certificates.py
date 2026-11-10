@@ -29,7 +29,9 @@ main = ():
                  'no_deadlocks/serve_withdrawn', 'no_deadlocks/join_held',
                  'no_deadlocks/poll', 'no_deadlocks/raw_channel',
                  'no_deadlocks/request_withdrawn', 'no_deadlocks/uncertified_callee',
-                 'no_deadlocks/pipeline_withdrawn', 'deadlock/recursive_service_held'):
+                 'no_deadlocks/pipeline_withdrawn', 'deadlock/recursive_service_held',
+                 'no_deadlocks/select', 'no_deadlocks/race_spread', 'no_deadlocks/first_ok',
+                 'no_deadlocks/merged_inbox', 'no_deadlocks/within'):
         source = ROOT / 'tests/cases' / (case + '.dewy')
         cases.append((source, 41, source.with_suffix('.err').read_bytes().splitlines()[0]))
     for case in ('no_deadlocks/audited_adapter', 'no_deadlocks/certified_locks',

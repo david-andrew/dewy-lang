@@ -1,0 +1,29 @@
+# modes: native
+# The same constructs `$no_deadlocks` rejects (select, race, first_ok, merged, within) compile and
+# run in a program without the tag.
+one = ():>int64 => 1
+two = ():>int64 => 2
+main = () => {
+    let a = mpmc<int64>(2)
+    let b = mpmc<int64>(2)
+    a.send(10) or_throw
+    match select(@a.receive @b.receive) {
+        v:int64 => printl"select {v}"
+        _ => printl"select other"
+    }
+    a.send(11) or_throw
+    let w = @a.receive
+    let on = true
+    match select(if on @w else none  @b.receive timeout=0s) {
+        v:int64 => printl"select named {v}"
+        _ => printl"select other"
+    }
+    let calls = [@one() @one()]
+    printl"race {race(calls...)} {race(@one() @one())}"
+    printl"first_ok {first_ok(@two() @two())}"
+    let c = mpmc<int64>(2)
+    c.send(5) or_throw
+    c.close()
+    loop item in merged(@c.receive) or_throw { printl"merged {item}" }
+    printl"within {within(10s @two())}"
+}

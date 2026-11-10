@@ -1,0 +1,14 @@
+# modes: native
+# `$no_deadlocks`: a function in an opted-out scope may use select, but certified code cannot call it.
+$no_deadlocks
+pick = (a:Mpmc<int64> b:Mpmc<int64>):>int64 => {
+    $no_deadlocks = false
+    match select(@a.receive @b.receive) {
+        _ => 0
+    }
+}
+main = () => {
+    let a = mpmc<int64>(1)
+    let b = mpmc<int64>(1)
+    printl"{pick(a b)}"
+}

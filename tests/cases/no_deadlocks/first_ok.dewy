@@ -1,0 +1,8 @@
+# modes: native
+# `$no_deadlocks`: `first_ok` waits on a choice among alternatives like `race`.
+$no_deadlocks
+one = ():>int64 => 1
+two = ():>int64 => 2
+main = () => {
+    printl"{first_ok(@one() @two())}"
+}

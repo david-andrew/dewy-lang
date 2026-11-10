@@ -3976,19 +3976,24 @@ certificate is one of:
   another must be named by a local or a parameter holding a handle `mutex(...)`
   made; take others together with `lock_all`. What the checks above only warn
   about is an error here, and so is a lock-order cycle in a program without tasks.
-- a structured join: the end of `concurrent`, `within` and `race`, whose tasks'
-  waits are certified, with no lock held across it.
+- a structured join: the end of `concurrent`, whose tasks' waits are certified, with
+  no lock held across it.
 - an audited adapter, for a foreign function that may block: a function whose
   body says `$audited_wait` (provisional spelling), where a person has checked
   that the call waits only on the outside world. A foreign function declared with
   a row excluding `blocks` (`& no_effects`) is trusted not to wait.
 
+`select`, `race`, `first_ok`, `merged` (and a loop or `next` over its inbox) and `within` wait on
+a choice among alternatives, which no certificate counts yet, so each is an error in every form (written
+or named waits, spread arrays, conditional waits, prepared with `@`); spawn the work as tasks and join
+them, with sends and receives between them, which is certified. `$bulletproof` includes `$no_deadlocks`,
+so it rejects them too.
 A raw channel's, `mpmc`'s or `spsc`'s `send` and `receive`, a loop polling an atomic another task sets,
 a call of a function value the compiler cannot follow, and a wait in a lifecycle
 hook have no certificate. A lock is held only across other locks: holding one
 across a join or a call that waits is an error. A call into code outside
 the scope needs that code's waits certified too. A timeout is recovery, not a
-certificate: a wait inside `within` needs one like any other.
+certificate.
 
 The library's protocols (provisional spellings) are request/reply and a pipeline
 with feedback. They have no proof yet, so `$no_deadlocks` rejects them until a

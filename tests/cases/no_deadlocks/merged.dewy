@@ -1,0 +1,10 @@
+# modes: native
+# `$no_deadlocks`: `merged` drains several waits as one inbox, a choice no certificate counts.
+$no_deadlocks
+main = () => {
+    let a = mpmc<int64>(1)
+    let b = mpmc<int64>(1)
+    a.close()
+    b.close()
+    loop item in merged(@a.receive @b.receive) or_throw { printl(item) }
+}

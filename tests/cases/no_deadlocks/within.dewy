@@ -1,0 +1,7 @@
+# modes: native
+# `$no_deadlocks`: `within` races its task against a deadline, a choice no certificate counts.
+$no_deadlocks
+work = ():>int64 => 7
+main = () => {
+    printl"{within(10s @work())}"
+}

@@ -1,0 +1,10 @@
+# modes: native
+# `$no_deadlocks`: `inbox.next` of an inbox made elsewhere is a wait on a choice among alternatives.
+make = ():>Merged<int64> => {
+    $no_deadlocks = false
+    let a = mpmc<int64>(1)
+    merged(@a.receive)
+}
+$no_deadlocks
+take = (inbox:Merged<int64>):>int64 | Canceled | none => inbox.next
+main = () => {}

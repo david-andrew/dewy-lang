@@ -1,0 +1,11 @@
+# modes: native
+# `$no_deadlocks`: `merged` over a spread array of waits is uncertified too.
+$no_deadlocks
+main = () => {
+    let a = mpmc<int64>(1)
+    let b = mpmc<int64>(1)
+    a.close()
+    b.close()
+    let waits = [@a.receive @b.receive]
+    loop item in merged(waits...) or_throw { printl(item) }
+}

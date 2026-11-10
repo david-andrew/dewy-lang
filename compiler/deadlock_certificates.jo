@@ -20,6 +20,7 @@ use 'deadlock_locations.dewy'
 use 'deadlock_summaries.dewy'
 use 'deadlock_walk.dewy'
 use 'deadlock_waits.dewy'
+use 'type_ops.dewy'
 
 nd_empty = () -> NdSum: NdSum(0, "", 0, "", 0, 0)
 
@@ -138,6 +139,28 @@ nd_reserve = (n: int) -> bool:
     g = int(nodes[n].sym)
     if g <= 0 or nkids(n) == 0 or fns[g].mod != dc_qmod or fns[g].decl == 0: return false
     name_of(int(nodes[int(fns[g].decl)].name)) == "reserve"
+# `select`, `race`, `first_ok`, `merged` (with the `next` of its inbox, which `loop` calls) and `within`
+# wait on a choice among alternatives (select-v6.md): no certificate counts that yet, so each is
+# a wait nothing covers. The name of the construct a library call or prepared wait `n` is, else "".
+nd_alternative = (n: int) -> str:
+    g = int(nodes[n].sym)
+    if g <= 0 or fns[g].decl == 0: return ""
+    d = int(fns[g].decl)
+    if not pos_in_lib(nodes[d].pos): return ""
+    nm = name_of(int(nodes[d].name))
+    m = int(fns[g].mod)
+    if (nm == "select" or nm == "within") and m == concurrency_task_module: return "`{nm}`"
+    if (nm == "race" or nm == "first_ok") and m == concurrency_first_ok_module: return "`{nm}`"
+    if (nm != "merged" and nm != "next") or not ends_with(files[pos_file(nodes[d].pos)].path, "/prelude/inbox.dewy"): return ""
+    if nm == "merged": return "`{nm}`"
+    # (a ticker's `next` waits on the clock, not on alternatives)
+    if nkids(n) > 0 and starts_with(type_str(ntype(kid(n, 0))), "Merged"): return "a merged inbox's `next`"
+    ""
+nd_alternative_bad = (n: int, what: str):
+    text = "waits on a choice among alternatives with {what}"
+    fix = "a certificate counts each wait on its own, not a choice between them; send and receive between tasks that are joined, which is certified"
+    nd_wait(nodes[n].pos, text)
+    nd_bad(nodes[n].pos, text, fix)
 nd_walk = (n: int, held: mut DlHeld[]):
     if n == 0: return
     k = nodes[n].kind
@@ -145,6 +168,11 @@ nd_walk = (n: int, held: mut DlHeld[]):
     if k == .partial and nd_reserve(n):
         nd_bad(nodes[n].pos, "reserves a slot in the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a permit may be dropped unsent, so a reservation has no certificate; send with `send` from tasks that are joined, which is certified")
         return
+    if k == .partial:
+        alt = nd_alternative(n)
+        if alt.len() > 0:
+            nd_alternative_bad(n, alt)
+            return
     if k == .block:
         mark = held.len()
         loop c in kids(n): nd_walk(c, held)
@@ -272,11 +300,10 @@ nd_call = (n: int, held: mut DlHeld[]):
         nd_wait(pos, "joins its tasks")
         nd_held_across(held, pos, "joins its tasks")
         return
-    if gname == "within" and int(fns[g].mod) == concurrency_task_module:
-        nd_wait(pos, "waits for the task of `{gname}`")
-        nd_held_across(held, pos, "waits for the task of `{gname}`")
-        none_held: DlHeld[]
-        nd_args(n, none_held, pos)
+    alt = nd_alternative(n)
+    if alt.len() > 0:
+        nd_alternative_bad(n, alt)
+        loop c in kids(n): nd_walk(c, held)
         return
     nd_args(n, held, pos)
 
