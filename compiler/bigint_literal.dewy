@@ -1,0 +1,33 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_U64 add_flag has_flag mk nodes set_list)
+from p"node_store.dewy" import (Node)
+from p"type_ops.dewy" import (layout mk_array)
+from p"types.jo" import (T_INT T_U64)
+
+BigLiteralWord:type=int64<overflow='wrap'>
+dewy_coerce_bigint_literal=(n:BigLiteralWord t:BigLiteralWord):>void=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let negative=nodes.ptr[n].ival <? 0 and not has_flag(n NF_U64)
+    let magnitude=uint64<overflow='wrap'>(nodes.ptr[n].ival)
+    if negative {magnitude=0 - magnitude}
+    let sign=mk('int_lit' pos)
+    nodes.ptr[sign].type=int32(T_INT)
+    nodes.ptr[sign].ival=if magnitude =? 0 {0} else if negative {-1} else {1}
+    add_flag(sign NF_CHECKED)
+    let items:array<int64>=[]
+    loop magnitude not=? 0 {
+        let item=mk('int_lit' pos)
+        nodes.ptr[item].type=int32(T_U64)
+        nodes.ptr[item].ival=BigLiteralWord(magnitude & 0xFFFFFFFF)
+        add_flag(item NF_CHECKED)
+        items.push(item)
+        magnitude=magnitude >> 32
+    }
+    let limbs=mk('array' pos)
+    nodes.ptr[limbs].type=int32(mk_array(T_U64))
+    add_flag(limbs NF_CHECKED)
+    set_list(limbs items)
+    layout(t)
+    nodes.ptr[n]=Node(kind='call' pos=pos aux=2 type=int32(t) flags=int32(NF_CHECKED))
+    set_list(n [sign limbs])
+}

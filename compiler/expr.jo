@@ -170,6 +170,7 @@ use 'concat_hints.dewy'
 use 'cancel_hints.dewy'
 use 'expr_error_context.dewy'
 use 'soa_helpers.dewy'
+use 'bigint_literal.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -502,31 +503,6 @@ math_rep_type = (t0: int) -> bool:
     if types[t].kind != .struct_: return false
     decl = int(structs[int(types[t].st)].decl)
     name_of(int(nodes[decl].name)) == "__CTMathRep" and files[pos_file(nodes[decl].pos)].path == "{lib_dir}/math_eval.jo"
-
-dewy_coerce_bigint_literal = (n: int, t: int):
-    pos = nodes[n].pos
-    negative = nodes[n].ival < 0 and not has_flag(n, NF_U64)
-    magnitude = u64(nodes[n].ival)
-    if negative: magnitude = 0 - magnitude
-    sign = mk(.int_lit, pos)
-    nodes[sign].type = i32(T_INT)
-    nodes[sign].ival = if magnitude == 0: 0 else if negative: -1 else: 1
-    add_flag(sign, NF_CHECKED)
-    items: int[]
-    loop magnitude != 0:
-        item = mk(.int_lit, pos)
-        nodes[item].type = i32(T_U64)
-        nodes[item].ival = int(magnitude & 0xFFFFFFFF)
-        add_flag(item, NF_CHECKED)
-        items.push(item)
-        magnitude = magnitude >> 32
-    limbs = mk(.array, pos)
-    nodes[limbs].type = i32(mk_array(T_U64))
-    add_flag(limbs, NF_CHECKED)
-    set_list(limbs, items)
-    layout(t)
-    nodes[n] = Node(kind = .call, pos = pos, aux = 2, type = i32(t), flags = i32(NF_CHECKED))
-    set_list(n, [sign, limbs])
 
 can_coerce = (n: int, from0: int, to0: int) -> bool:
     from = prune(from0)
