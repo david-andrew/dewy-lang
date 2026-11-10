@@ -1,6 +1,5 @@
 # Library-level matrix operations, with row/column broadcasting and alias tests.
-$runtime_checks
-center = (matrix:NDArray<float64>):>NDArray<float64> => {
+center = (matrix:array<float64 length=[2 3]>):>array<float64 length=[2 3]> => {
     let means:array<float64> = [0.0 0.0 0.0]
     loop j in [0..3) {
         loop i in [0..2) {
@@ -9,7 +8,7 @@ center = (matrix:NDArray<float64>):>NDArray<float64> => {
     }
     return matrix .- means
 }
-gram = (matrix:NDArray<float64>):>NDArray<float64> => transpose(matrix)*matrix
+gram = (matrix:array<float64 length=[m n]>):>array<float64 length=[n n]> => transpose(matrix)*matrix
 close = (a:float64 b:float64):>bool => abs(a-b) <? 1e-8
 main = ():>void | Singular => {
     let a = reshape<float64>([1.0 2.0 3.0 4.0 5.0 6.0] 2 3)
