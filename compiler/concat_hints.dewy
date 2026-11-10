@@ -1,0 +1,58 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"check.jo" import (fns)
+from p"checks_text.dewy" import (byte_find)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"expr.jo" import (ntype shown_fn_name)
+from p"facts_text.dewy" import (fact_string_call)
+from p"types.jo" import (tkind)
+from p"util.jo" import (name_of)
+from p"witness.jo" import (wit_text)
+
+
+ConcatWord:type=int64<overflow='wrap'>
+# Dewy's `+` never joins text or containers: interpolation or `join` for text, a spread literal
+# for containers (`+` on arrays is reserved for elementwise math)
+concat_piece=(n:ConcatWord text:bool second:bool=false):>string=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if text and k =? 'str_lit' and nodes.ptr[n].aux =? 0 and nkids(n) =? 0 {
+        let s=name_of(ConcatWord(nodes.ptr[n].sval))
+        if byte_find(s "\"") <? 0 and byte_find(s "\\") <? 0 and byte_find(s "\{") <? 0 and byte_find(s "}") <? 0 and byte_find(s "\n") <? 0 {return s}
+    }
+    let nm=""
+    if k =? 'ident' {nm=name_of(ConcatWord(nodes.ptr[n].name))} else if k =? 'field' and nodes.ptr[n].aux =? -2 and nodes.ptr[ConcatWord(nodes.ptr[n].a)].kind =? 'ident' {nm="{name_of(ConcatWord(nodes.ptr[ConcatWord(nodes.ptr[n].a)].name))}[{nodes.ptr[n].ival}]"}
+    else if k =? 'field' and nodes.ptr[ConcatWord(nodes.ptr[n].a)].kind =? 'ident' {nm="{name_of(ConcatWord(nodes.ptr[ConcatWord(nodes.ptr[n].a)].name))}.{name_of(ConcatWord(nodes.ptr[n].name))}"} else if k =? 'int_lit' {nm="{nodes.ptr[n].ival}"}
+    else if k =? 'call' and nkids(n) <=? 1 {
+        # (d.keys, as written, or as its library function: __dewy_keys(d))
+        let c=ConcatWord(nodes.ptr[n].a)
+        if nkids(n) =? 0 and nodes.ptr[c].kind =? 'field' and nodes.ptr[ConcatWord(nodes.ptr[c].a)].kind =? 'ident' {nm="{name_of(ConcatWord(nodes.ptr[ConcatWord(nodes.ptr[c].a)].name))}.{name_of(ConcatWord(nodes.ptr[c].name))}"} else if nkids(n) =? 1 and nodes.ptr[c].kind =? 'ident' and nodes.ptr[kid(n 0)].kind =? 'ident' {nm="{name_of(ConcatWord(nodes.ptr[kid(n 0)].name))}.{shown_fn_name(name_of(ConcatWord(nodes.ptr[c].name)))}"}
+        else if nkids(n) =? 1 and c =? 0 and nodes.ptr[n].sym >? 0 and ConcatWord(nodes.ptr[n].sym) <? fns.length and fns.ptr[ConcatWord(nodes.ptr[n].sym)].decl not=? 0 and nodes.ptr[kid(n 0)].kind =? 'ident' {nm="{name_of(ConcatWord(nodes.ptr[kid(n 0)].name))}.{shown_fn_name(name_of(ConcatWord(nodes.ptr[ConcatWord(fns.ptr[ConcatWord(nodes.ptr[n].sym)].decl)].name)))}"}
+    }
+    # (any other operand as written, `wrap(x "b")` or `line[2..]`, when it prints)
+    if (nm as array<uint8>).length =? 0 and text {nm=wit_text(n)}
+    if (nm as array<uint8>).length =? 0 and text and fact_string_call(n) =? 3 {nm=concat_slice_text(n)}
+    if (nm as array<uint8>).length =? 0 or (nm as array<uint8>)[0] =? b'$' or (nm as array<uint8>)[0] =? b'_' {nm=if text and second {"y"} else if text {"x"} else if second {"ys"} else {"xs"}}
+    if text {"\{{nm}}"} else {nm}
+}
+# A text slice as written, `line[2..]`, `s[a..b)`; "" when a part does not print.
+concat_slice_text=(n:ConcatWord):>string=>$unsafe {
+    let base=wit_text(kid(n 0))
+    let start=wit_text(kid(n 1))
+    let inclusive=nodes.ptr[kid(n 3)].kind =? 'bool_lit' and nodes.ptr[kid(n 3)].ival not=? 0
+    let stop=nodes.ptr[kid(n 4)].kind not=? 'bool_lit' or nodes.ptr[kid(n 4)].ival not=? 0
+    let end_=if stop {wit_text(kid(n 2))} else {""}
+    if base =? "" or start =? "" or stop and end_ =? "" {return ""}
+    if not stop {return "{base}[{start}..]"}
+    if inclusive {"{base}[{start}..{end_}]"} else {"{base}[{start}..{end_})"}
+}
+no_concat_error=(n:ConcatWord a:ConcatWord b:ConcatWord text:bool):>never=>$unsafe {
+    if text {
+        fatal(nodes.ptr[n].pos "`+` does not join text: interpolate, `\"{concat_piece(a true)}{concat_piece(b true true)}\"`, or join many pieces, `pieces.join`");
+    }
+    let ka=tkind(ntype(a))
+    let kb=tkind(ntype(b))
+    if not ((ka =? 'array' or ka =? 'fixed') and (kb =? 'array' or kb =? 'fixed')) {
+        fatal(nodes.ptr[n].pos "`+` is reserved for elementwise math on arrays, not yet defined: `.+` adds element by element (`xs .+ 1`), and a spread literal joins arrays, `[xs... ys...]`");
+    }
+    fatal(nodes.ptr[n].pos "`+` does not join arrays (on arrays it is reserved for elementwise math): spread them into one, `[{concat_piece(a false)}... {concat_piece(b false true)}...]`; `.+` adds element by element");
+}

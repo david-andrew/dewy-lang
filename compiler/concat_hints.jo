@@ -1,0 +1,207 @@
+use 'expr.jo'
+use 'data_access.dewy'
+use 'program_settings.dewy'
+use 'call_style.dewy'
+use 'secret_checks.dewy'
+use 'checks_read_code.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'unit_rare.dewy'
+use 'unit_ops.dewy'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'check.jo'
+use 'checks_place_updates.dewy'
+use 'checks_thin.dewy'
+use 'checks_const_views.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'settings.jo'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'refine_ops.dewy'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'prelude_ops.dewy'
+use 'ide.jo'
+use 'ide_text.dewy'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+use 'checks_shaped.dewy'
+use 'checks_thin_expr.dewy'
+use 'select_checks.dewy'
+use 'type_member_checks.dewy'
+use 'dotted_checks.dewy'
+use 'expr_hints.dewy'
+use 'partial_checks.dewy'
+use 'narrowing_checks.dewy'
+use 'expr_rare.dewy'
+use 'callable_checks.dewy'
+use 'expr_routes.dewy'
+use 'range_checks.dewy'
+use 'collection_checks.dewy'
+use 'slice_checks.dewy'
+use 'gpu_type_checks.dewy'
+use 'numeric_constants.dewy'
+use 'expr_cold_queries.dewy'
+use 'expr_source_hints.dewy'
+
+# Dewy's `+` never joins text or containers: interpolation or `join` for text, a spread literal
+# for containers (`+` on arrays is reserved for elementwise math)
+concat_piece = (n: int, text: bool, second: bool = false) -> str:
+    k = nodes[n].kind
+    if text and k == .str_lit and nodes[n].aux == 0 and nkids(n) == 0:
+        s = name_of(int(nodes[n].sval))
+        if find(s, "\"") < 0 and find(s, "\\") < 0 and find(s, "\{") < 0 and find(s, "}") < 0 and find(s, "\n") < 0: return s
+    nm = ""
+    if k == .ident: nm = name_of(int(nodes[n].name))
+    else if k == .field and nodes[n].aux == -2 and nodes[int(nodes[n].a)].kind == .ident: nm = "{name_of(int(nodes[int(nodes[n].a)].name))}[{nodes[n].ival}]"
+    else if k == .field and nodes[int(nodes[n].a)].kind == .ident: nm = name_of(int(nodes[int(nodes[n].a)].name)) + "." + name_of(int(nodes[n].name))
+    else if k == .int_lit: nm = "{nodes[n].ival}"
+    else if k == .call and nkids(n) <= 1:
+        # (d.keys, as written, or as its library function: __dewy_keys(d))
+        c = int(nodes[n].a)
+        if nkids(n) == 0 and nodes[c].kind == .field and nodes[int(nodes[c].a)].kind == .ident: nm = name_of(int(nodes[int(nodes[c].a)].name)) + "." + name_of(int(nodes[c].name))
+        else if nkids(n) == 1 and nodes[c].kind == .ident and nodes[kid(n, 0)].kind == .ident: nm = name_of(int(nodes[kid(n, 0)].name)) + "." + shown_fn_name(name_of(int(nodes[c].name)))
+        else if nkids(n) == 1 and c == 0 and nodes[n].sym > 0 and int(nodes[n].sym) < fns.len() and fns[int(nodes[n].sym)].decl != 0 and nodes[kid(n, 0)].kind == .ident: nm = name_of(int(nodes[kid(n, 0)].name)) + "." + shown_fn_name(name_of(int(nodes[int(fns[int(nodes[n].sym)].decl)].name)))
+    # (any other operand as written, `wrap(x "b")` or `line[2..]`, when it prints)
+    if len(nm) == 0 and text: nm = wit_text(n)
+    if len(nm) == 0 and text and fact_string_call(n) == 3: nm = concat_slice_text(n)
+    if len(nm) == 0 or nm[0] == '$' or nm[0] == '_': nm = if text and second: "y" else if text: "x" else if second: "ys" else: "xs"
+    if text: "\{{nm}}" else: nm
+# A text slice as written, `line[2..]`, `s[a..b)`; "" when a part does not print.
+concat_slice_text = (n: int) -> str:
+    base = wit_text(kid(n, 0))
+    start = wit_text(kid(n, 1))
+    inclusive = nodes[kid(n, 3)].kind == .bool_lit and nodes[kid(n, 3)].ival != 0
+    stop = nodes[kid(n, 4)].kind != .bool_lit or nodes[kid(n, 4)].ival != 0
+    end = if stop: wit_text(kid(n, 2)) else: ""
+    if base == "" or start == "" or stop and end == "": return ""
+    if not stop: return "{base}[{start}..]"
+    if inclusive: "{base}[{start}..{end}]" else: "{base}[{start}..{end})"
+no_concat_error = (n: int, a: int, b: int, text: bool):
+    if text:
+        fatal(nodes[n].pos, "`+` does not join text: interpolate, `\"{concat_piece(a, true)}{concat_piece(b, true, true)}\"`, or join many pieces, `pieces.join`")
+    ka = tkind(ntype(a))
+    kb = tkind(ntype(b))
+    if not ((ka == .array or ka == .fixed) and (kb == .array or kb == .fixed)):
+        fatal(nodes[n].pos, "`+` is reserved for elementwise math on arrays, not yet defined: `.+` adds element by element (`xs .+ 1`), and a spread literal joins arrays, `[xs... ys...]`")
+    fatal(nodes[n].pos, "`+` does not join arrays (on arrays it is reserved for elementwise math): spread them into one, `[{concat_piece(a, false)}... {concat_piece(b, false, true)}...]`; `.+` adds element by element")
