@@ -1,0 +1,8 @@
+# Widening keeps the length: a fixed array of three is not one of four.
+Small:type = int64<i => i >=? 0 and i <? 10>
+Big:type = int64<i => i >=? -5 and i <? 20>
+first = (a:array<Big length=4>):>int64 => a[0]
+main = () => {
+    let small:array<Small length=3> = [1 2 3]
+    printl(first(small))
+}

@@ -151,7 +151,9 @@ xc_check=(n:XCWord expected:XCWord):>CheckerCastResult=>$unsafe {
         xc_take(n a)
         return [type=XCWord(xc_nodes[0].ptr[n].type) bypass=true]
     }
-    if ((fk =? 'array' and tk =? 'fixed') or (fk =? 'fixed' and tk =? 'array')) and can_coerce(a ft tt) {
+    # (a fixed array to a growable one and back, or an array of tighter refined elements read
+    # as one of looser ones: the conversions a typed store makes)
+    if ((fk =? 'array' and tk =? 'fixed') or (fk =? 'fixed' and tk =? 'array') or (fk =? tk and (fk =? 'array' or fk =? 'fixed'))) and can_coerce(a ft tt) {
         coerce(a tt);
         xc_take(n a)
         return [type=tt bypass=true]

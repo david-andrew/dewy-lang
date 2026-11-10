@@ -1,0 +1,9 @@
+# Elements that may hold values the wanted elements do not admit are rejected,
+# naming the values in between.
+Small:type = int64<i => i >=? 0 and i <? 10>
+Big:type = int64<i => i >=? -5 and i <? 20>
+first = (a:array<Small length=3>):>int64 => a[0]
+main = () => {
+    let big:array<Big length=3> = [1 2 3]
+    printl(first(big))
+}

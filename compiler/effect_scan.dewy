@@ -265,10 +265,12 @@ effect_big_range_loop=(n:EffectScanWord):>bool=>$unsafe {
     }
     return true
 }
-# A fixed array literal is built in place: its elements, or zeros.
+# A fixed array literal is built in place: its elements, zeros, or one element
+# repeated (`[]` of refined elements fills with their default).
 effect_fixed_literal=(n:EffectScanWord):>bool=>$unsafe {
     let t=representation_type(ntype(n))
-    if nodes.ptr[n].kind not=? 'array' or nodes.ptr[n].b not=? 0 or tkind(t) not=? 'fixed' or not effect_plain(t) {return false}
+    let b=EffectScanWord(nodes.ptr[n].b)
+    if nodes.ptr[n].kind not=? 'array' or b not=? 0 and nodes.ptr[b].kind not=? 'int_lit' or tkind(t) not=? 'fixed' or not effect_plain(t) {return false}
     loop i in [0..nkids(n)) {
         let c=kid(n i)
         if has_flag(c NF_SPREAD) {return false}

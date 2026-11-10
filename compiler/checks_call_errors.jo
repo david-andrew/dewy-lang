@@ -138,7 +138,7 @@ rfc_arg_message = (d: int, fi: int, a: int, ptx: int, cd: Cand) -> str:
     refuted = refuted_literal_contract(a, ptx, name_of(int(nodes[kid(d, fi)].name)))
     if refuted != "": last_err = refuted
     else if nodes[a].type != 0:
-        last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}"
+        last_err = "argument '{name_of(int(nodes[kid(d, fi)].name))}' expects {sig_dt(d, ptx)}, found {dt(ntype(a))}{variant_hint(a, ptx)}{array_elems_gap_text(ntype(a), ptx)}"
         # (`sum_all(sizes)`, sizes an `array<int64>` where an `array<int>` is wanted)
         # (`counts[d]`-style calls with d from `t.in_zone(z).date`: the failure it may hold, for the program to answer)
         if dewy_at(nodes[a].pos) and is_union(ntype(a)) and not is_union(ptx) and tkind(ptx) != .opt:
@@ -193,13 +193,20 @@ self_call_error = (n: int, name: int, ufcs: bool, args: int[]):
     if ufcs and args.len() > 0 and nodes[unnamed(args[0])].kind == .ident:
         hint = ": `{name_of(int(nodes[unnamed(args[0])].name))}.{nm}` names this function, which hides any method `{nm}` it was meant to reach; rename the function"
     fatal(nodes[n].pos, "'{nm}' calls itself as its whole body, so it repeats without end{hint}")
+# (`@` on an array whose elements are tighter than the parameter's: it could store a
+# value its own type allows and the array's does not)
+mutable_widening_hint = (a0: int, ptx: int) -> str:
+    if a0 == 0: return ""
+    a = unnamed(a0)
+    if nodes[a].type == 0 or not array_elems_subsume(ntype(a), ptx): return ""
+    ": the function could store an element its parameter allows and this array's elements do not; take the parameter by value if the function only reads it, or pass a copy made with the looser type and keep what it writes there"
 call_rejection_text = (failure: mut CallFailure):
     texts: str[]
     loop r in failure.rejected:
         if r.d < 0:
             mutable = "mut parameters"
             if caller_dewy(): mutable = "`@` parameters"
-            texts.push("argument {r.fi + 1} must have type {sig_dt(-r.d, r.ptx)} ({mutable} need an exact match)")
+            texts.push("argument {r.fi + 1} must have type {sig_dt(-r.d, r.ptx)} ({mutable} need an exact match){mutable_widening_hint(r.cd.args[r.fi], r.ptx)}")
         else: texts.push(rfc_arg_message(r.d, r.fi, r.a, r.ptx, r.cd))
         if texts.len() > 1 and texts[texts.len() - 1] != texts[texts.len() - 2]: failure.last_err_tie = true
     failure.last_err = texts[texts.len() - 1]

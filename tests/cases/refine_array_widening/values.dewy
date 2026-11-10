@@ -1,0 +1,34 @@
+# An array of tighter refined elements passes, binds and returns where looser
+# ones are wanted, by value: through parameters, lets, returns, record fields,
+# nested arrays, fixed and growable arrays, and `as`.
+Small:type = int64<i => i >=? 0 and i <? 10>
+Big:type = int64<i => i >=? -5 and i <? 20>
+Rec:type = [a:array<Small length=2>]
+
+total = (a:array<Big length=3>):>int64 => a[0]+a[1]+a[2]
+count = (a:array<Big>):>int64 => a.length
+corner = (m:array<array<Big length=2> length=2>):>int64 => m[0][0]+m[1][1]
+first = (b:array<uint8<(<=? 200)> length=2>):>uint8 => b[0]
+plain = (a:array<int64 length=3>):>int64 => a[2]
+pair = (a:array<Big length=2>):>int64 => a[0]*a[1]
+
+main = () => {
+    let small:array<Small length=3> = [1 2 3]
+    printl(total(small))
+    printl(plain(small))
+    let wide:array<Big length=3> = small
+    printl(total(wide))
+    let back = ():>array<Big length=3> => small
+    printl(total(back()))
+    let grown:array<Small> = [4 5 6 7]
+    printl(count(grown))
+    let r = Rec[a=[3 4]]
+    printl(pair(r.a))
+    let m:array<array<Small length=2> length=2> = [[1 2] [3 4]]
+    printl(corner(m))
+    let bytes:array<uint8<(<=? 100)> length=2> = [7 8]
+    printl(first(bytes))
+    printl(total(small as array<Big length=3>))
+    let loose = small as array<Big>
+    printl(loose.length)
+}

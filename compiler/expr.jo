@@ -546,6 +546,7 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
         if ts != 0 and (fk == .str_ and n != 0 or fs != 0 and (str_set_within(fs, ts) or n != 0 and dewy_at(nodes[n].pos))): return true
         if fs != 0 and tk == .str_ and n != 0: return true
     if fk == .refined or tk == .refined: return can_coerce(n, representation_type(from), representation_type(to))
+    if (fk == .array or fk == .fixed) and fk == tk and array_elems_subsume(from, to): return true
     if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return true
     if fk == .struct_ and tk == .struct_ and record_int_conversion(from, to): return true
     if fk == .struct_ and tk == .struct_ and intersection_parts.len() > 0 and intersection_within(from, to): return true
@@ -576,13 +577,13 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if tk == .enum_ and not is_union(from) and is_union(to): return union_target(n, from, to) >= 0
     if is_union(from) and is_union(to): return union_within(from, to)
     if fk == .array and is_soa(to): return can_coerce(0, int(types[from].elem), soa_elem(to))
-    if fk == .fixed and tk == .array: return type_eq(int(types[from].elem), int(types[to].elem))
+    if fk == .fixed and tk == .array: return elem_subsumes(int(types[from].elem), int(types[to].elem))
     if tk == .array and is_nd(from): return type_eq(nd_elem(from), int(types[to].elem))
     if (fk == .callable or tk == .callable) and callable_fits(from, to): return true
     if fk == .fn_ and tk == .fn_ and (callable_fits(from, to) or n != 0 and fn_value_adapts(n, from, to)): return true
     if fk == .array and tk == .fixed:
         if n != 0 and fixed_literal_ok(n, to): return true
-        return n != 0 and nodes[n].kind != .array and type_eq(int(types[from].elem), int(types[to].elem))
+        return n != 0 and nodes[n].kind != .array and elem_subsumes(int(types[from].elem), int(types[to].elem))
     if tk == .opt:
         if fk == .none_lit: return true
         if type_eq(from, int(types[to].elem)): return true
@@ -591,6 +592,52 @@ can_coerce = (n: int, from0: int, to0: int) -> bool:
     if fk == .null_ and (tk == .ptr or tk == .cfn): return true
     if fk == .ptr and tk == .ptr and (to == T_RAWPTR or from == T_RAWPTR): return true
     false
+
+# An array whose elements carry a tighter refinement, read where a looser one is
+# wanted: every value its element type admits, the wanted element type admits
+# (constant bounds), with the same representation and length; arrays nested inside
+# follow the same rule. The value is an immutable share, so no write through the
+# looser type can reach the tighter array; `@` places stay invariant (refine.jo).
+# O(intervals) per level.
+array_elems_subsume = (from0: int, to0: int) -> bool:
+    from = prune(from0)
+    to = prune(to0)
+    fk = types[from].kind
+    if fk != types[to].kind or fk != .array and fk != .fixed: return false
+    if fk == .fixed and types[from].bits != types[to].bits: return false
+    elem_subsumes(int(types[from].elem), int(types[to].elem))
+
+elem_subsumes = (f0: int, t0: int) -> bool:
+    f = prune(f0)
+    t = prune(t0)
+    if f == t or type_eq(f, t): return true
+    fk = types[f].kind
+    tk = types[t].kind
+    if fk != .refined and tk != .refined: return array_elems_subsume(f, t)
+    if fk == .refined and types[f].bits == -1 or tk == .refined and types[t].bits == -1: return false
+    base = representation_type(f)
+    if base != representation_type(t) or types[base].kind != .int_ or base == T_MATH_INT: return false
+    fknown, flow, fhigh = int_intervals_wide(f)
+    tknown, tlow, thigh = int_intervals_wide(t)
+    fknown and tknown and interval_missing(flow, tlow).len() == 0 and interval_missing(fhigh, thigh).len() == 0
+
+# Why an array of refined integers does not fit an array of other refined integers of its
+# shape: the element values it may hold that the wanted elements do not admit; "" otherwise.
+array_elems_gap_text = (from0: int, to0: int) -> str:
+    from = prune(from0)
+    to = prune(to0)
+    fk = types[from].kind
+    if fk != types[to].kind or fk != .array and fk != .fixed: return ""
+    if fk == .fixed and types[from].bits != types[to].bits: return ""
+    f = prune(int(types[from].elem))
+    t = prune(int(types[to].elem))
+    if types[t].kind != .refined or representation_type(f) != representation_type(t): return ""
+    fknown, flow, fhigh = int_intervals_wide(f)
+    tknown, tlow, thigh = int_intervals_wide(t)
+    if not fknown or not tknown or fhigh.len() > 0 or thigh.len() > 0: return ""
+    missing = interval_missing(flow, tlow)
+    if missing.len() == 0: return ""
+    " (its elements may hold {interval_text(missing)}, which the wanted elements do not admit)"
 
 # n coerced to `to` where a string set is on either side: true when done (a
 # string or set into a set; a set into a string), and a set going where only
@@ -918,6 +965,11 @@ coerce = (n: int, target: int) -> int:
         clear_flag(n, NF_LITERAL)
         return n
     fk = types[from].kind
+    # (the same storage read at the looser type: no conversion node, so copies, moves and
+    # facts see the value itself)
+    if (fk == .array or fk == .fixed) and fk == tk and array_elems_subsume(from, to):
+        nodes[n].type = i32(to)
+        return n
     if refine_active and fk == .struct_ and tk == .struct_ and ref_record_conversion(from, to): return ref_convert_record(n, to)
     if fk == .struct_ and tk == .struct_ and record_int_conversion(from, to): return ref_convert_record(n, to)
     # (an intersection's value where one of its operand records is wanted: those fields)
@@ -925,7 +977,7 @@ coerce = (n: int, target: int) -> int:
     if fk == .array and is_soa(to) and can_coerce(0, int(types[from].elem), soa_elem(to)):
         soa_from_array(n, to)
         return n
-    if fk == .fixed and tk == .array and type_eq(int(types[from].elem), int(types[to].elem)):
+    if fk == .fixed and tk == .array and elem_subsumes(int(types[from].elem), int(types[to].elem)):
         wrap_conv(n, .fixed2arr, to)
         return n
     if fk == .callable or tk == .callable:
@@ -947,7 +999,7 @@ coerce = (n: int, target: int) -> int:
         check_expr(n, to)
         return n
     if fk == .array and tk == .fixed:
-        if nodes[n].kind != .array and type_eq(int(types[from].elem), int(types[to].elem)):
+        if nodes[n].kind != .array and elem_subsumes(int(types[from].elem), int(types[to].elem)):
             wrap_conv(n, .arr2fixed, to)
             # Register the boundary, including deferred/opaque control paths.
             # Its operand's evaluated length is proved only by the facts pass.
@@ -1067,6 +1119,8 @@ coerce = (n: int, target: int) -> int:
             if exception_member(prune(m)): failures.push(dt(m))
             else if can_coerce(0, m, to): rest += 1
         if failures.len() > 0 and rest > 0: why = " (it may be {join(failures, " | ")}, carried along from where the value was made: handle that there, with `if x is? exception ...`, `or_throw` or `?? fallback`)"
+    # (an array of looser refined elements where tighter ones are wanted: the values in between)
+    if dewy and len(why) == 0: why = array_elems_gap_text(from, to)
     # (`out.push(ready)`, ready an `array<int64>` comprehension where an
     # `array<int>` is wanted: arrays never convert element by element)
     if dewy and len(why) == 0 and fk == .array and tk == .array:

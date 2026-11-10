@@ -1,0 +1,10 @@
+# `@` stays invariant: the callee could store an element the parameter's type
+# allows and the array's does not.
+Small:type = int64<i => i >=? 0 and i <? 10>
+Big:type = int64<i => i >=? -5 and i <? 20>
+widen = (@a:array<Big length=3>):>void => {a[0] = 15}
+main = () => {
+    let small:array<Small length=3> = [1 2 3]
+    widen(@small)
+    printl(small[0])
+}

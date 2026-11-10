@@ -1214,6 +1214,18 @@ whose fit is not proven by facts or the enabled 64-bit counter-progress
 assumption are unproven like any other obligation. `xs.swap(i j)` keeps an
 element refinement without a proof per element.
 
+An array whose elements carry a tighter refinement is accepted where looser ones
+are expected, by value (provisional): an `array<int64<(<? 10)> length=3>` is an
+`array<int64<(<? 20)> length=3>` argument, `let` value, result, record field or
+`as` conversion when every value its element type admits, the wanted element type
+admits too (constant bounds, decided from the two types; arrays nested inside
+follow the same rule, and the length must match). The value is an immutable share,
+so no write through the looser type reaches the tighter array. An `@` parameter or
+place stays invariant: the callee could store an element its type allows and the
+array's does not, so take the parameter by value, or pass a copy made with the
+looser type. Elements that may hold values the wanted ones do not admit are an
+error naming those values.
+
 An array can require that its elements are valid indexes of itself, by naming its
 own length in its direct element's refinement:
 

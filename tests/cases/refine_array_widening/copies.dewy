@@ -1,0 +1,27 @@
+# A widened array is an immutable share: writing either side afterwards
+# never reaches the other, so the tighter array keeps its contract.
+Small:type = int64<i => i >=? 0 and i <? 10>
+Big:type = int64<i => i >=? -5 and i <? 20>
+Holder:type = [a:array<Big>]
+
+keep = (a:array<Big>):>Holder => Holder[a=a]
+poke = (a:array<Big length=3>):>int64 => {
+    let b = a
+    b[0] = 15
+    b[0]
+}
+
+main = () => {
+    let small:array<Small> = [1 2 3]
+    let h = keep(small)
+    small[0] = 9
+    if h.a.length >? 0 {printl(h.a[0])}
+    let wide:array<Big> = small
+    wide.push(15)
+    wide[0] = -4
+    printl(small.length)
+    printl(small[0])
+    let fixed:array<Small length=3> = [1 2 3]
+    printl(poke(fixed))
+    printl(fixed[0])
+}

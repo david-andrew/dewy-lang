@@ -186,6 +186,7 @@ cast_error = (n: int, a: int, ft: int, tt: int, code: int):
         inner = int(types[fo].elem)
         if type_eq(inner, tt) or (is_union(inner) and union_index(inner, tt) >= 0):
             why = " (an optional is not cast: inside `if x is? {dt(tt)} \{ }` (or after `x is? {dt(tt)} and`), x is one; `match x` takes each member, `x ?? fallback` gives a default)"
+    if why == "": why = array_elems_gap_text(ft, tt)
     fatal(pos, "cannot cast {dt(ft)} to {dt(tt)}{why}")
 collection_float_key = (t: int) -> bool: key_holds_float(t)
 collection_float_obligation = (key: int) -> void: float_key_obligation(key)

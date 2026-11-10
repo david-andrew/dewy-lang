@@ -265,10 +265,12 @@ effect_big_range_loop = (n: int) -> bool:
     true
 
 
-# A fixed array literal is built in place: its elements, or zeros.
+# A fixed array literal is built in place: its elements, zeros, or one element
+# repeated (`[]` of refined elements fills with their default).
 effect_fixed_literal = (n: int) -> bool:
     t = representation_type(ntype(n))
-    if nodes[n].kind != .array or nodes[n].b != 0 or tkind(t) != .fixed or not effect_plain(t): return false
+    b = int(nodes[n].b)
+    if nodes[n].kind != .array or b != 0 and nodes[b].kind != .int_lit or tkind(t) != .fixed or not effect_plain(t): return false
     loop i in [0..nkids(n)):
         c = kid(n, i)
         if has_flag(c, NF_SPREAD): return false

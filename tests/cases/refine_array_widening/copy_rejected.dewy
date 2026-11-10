@@ -1,0 +1,11 @@
+# Under explicit copies, widening a growable array into a binding the program
+# then writes is the same costly copy as without refinements.
+$explicit_copies
+Small:type = int64<i => i >=? 0 and i <? 10>
+Big:type = int64<i => i >=? -5 and i <? 20>
+main = () => {
+    let small:array<Small> = [1 2 3]
+    let wide:array<Big> = small
+    wide.push(15)
+    printl(small.length)
+}
