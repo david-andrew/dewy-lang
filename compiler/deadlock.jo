@@ -146,7 +146,7 @@ dl_givens: {int: int[]}          # function -> the function values its calls are
 # O(V(V + E)).
 
 struct DcEvent:
-    kind: int        # 1 send, 2 receive, 3 close, 4 lock wait, 5 join, 6 try_send, 7 try_receive
+    kind: int        # 1 send, 2 receive, 3 close, 4 lock wait, 5 join, 6 try_send, 7 try_receive, 8 a select or merged receive
     loc: DlLoc       # the channel, lock or task group
     loops: int[]     # the loops around it, outermost first (indexes into dc_trips)
     branch: bool     # under a condition

@@ -38,6 +38,7 @@ dl_scan_calls = (f: int, n: int):
             if nodes[c].kind != .hole and nodes[c].sym > 0: dl_inits[int(nodes[c].sym)] = n
     # (the certified protocols' own channel waits are the library's, not the program's)
     if dc_on() and k == .call and nodes[n].aux == 0 and nodes[n].sym > 0 and not dc_is(int(fns[f].mod)) and int(fns[f].mod) != dc_protocols() and dc_chan_call(n) > 0: dc_fns[f] = true
+    if dc_on() and k == .call and not dc_is(int(fns[f].mod)) and int(fns[f].mod) != dc_protocols() and dc_wait_set(n) > 0: dc_fns[f] = true
     # Spawning a failing sibling or canceling a group can end a queue wait,
     # including through a helper that performs no queue operation itself.
     if dc_on() and k == .call and nodes[n].aux == 0 and nodes[n].sym > 0:

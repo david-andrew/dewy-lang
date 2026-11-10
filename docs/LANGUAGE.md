@@ -3857,6 +3857,11 @@ passed through calls or captured by tasks. Non-waiting attempts affect the
 occupancy used to check later waits; they never count as waits themselves. An
 attempt that may fail is not evidence that another task can proceed. Where its
 outcome prevents a proof, the compiler reports the queue wait as unresolved.
+A `select` in a loop, and the sources of a `merged` inbox, count as receivers of each channel
+they list, so a producer feeding such a loop is not warned about, and a channel no receive,
+`select` or `merged` names still is. A `select` that runs once takes one value and counts for
+nothing; a loop that stops taking early, leaving a sender waiting, is not found (a plain
+`receive` loop has the same gap).
 
 ### Deadlock certificates
 

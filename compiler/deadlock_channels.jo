@@ -9,6 +9,7 @@ use 'types.jo'
 use 'errors.jo'
 use 'error_ops.dewy'
 use 'deadlock_locations.dewy'
+use 'concurrency.jo'
 
 dc_module = (path: str = "/prelude/channels.dewy") -> int:
     loop i in [0..dp_paths.len()):
@@ -61,6 +62,29 @@ dc_chan_call = (n: int) -> int:
     if nm == "try_send": return 6
     if nm == "try_receive": return 7
     0
+
+# `select(@a.receive ...)` is 1 and `merged(@a.receive ...)` 2: calls whose receives consume
+# from every channel they list, in a loop for as long as it runs. 0 for any other call.
+dc_wait_set = (n: int) -> int:
+    if not dc_on() or nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
+    g = int(nodes[n].sym)
+    d = int(fns[g].decl)
+    if d == 0: return 0
+    nm = name_of(int(nodes[d].name))
+    if nm == "select" and fns[g].mod == concurrency_task_module: return 1
+    if nm == "merged" and ends_with(files[pos_file(nodes[d].pos)].path, "/prelude/inbox.dewy"): return 2
+    0
+
+# The channel of a `@x.receive` argument of such a call (the receiver `x`), else 0: a ticker's
+# `next`, an inbox's, a timeout and every other argument are not consumers.
+dc_wait_source = (a0: int) -> int:
+    a = a0
+    loop nodes[a].kind == .conv: a = int(nodes[a].a)
+    if nodes[a].kind != .partial or nodes[a].sym <= 0 or nkids(a) != 1: return 0
+    g = int(nodes[a].sym)
+    if not dc_is(int(fns[g].mod)) or fns[g].decl == 0: return 0
+    if name_of(int(nodes[int(fns[g].decl)].name)) != "receive": return 0
+    kid(a, 0)
 
 dc_loc = (e: int) -> DlLoc:
     l = dc_concrete(dl_resolve(e, dc_ffns[dc_ffns.len() - 1]), dc_ffns.len() - 1)

@@ -17,12 +17,12 @@ dc_send_waits=(a:ChannelGraphWord ch:string upto:ChannelGraphWord through:bool):
     let cap:ChannelGraphWord=-1
     loop j in [0..last) {
         let e=evs.ptr[j]
-        if dl_key(e.loc) not=? ch or e.kind not=? 1 and e.kind not=? 2 and e.kind not=? 6 and e.kind not=? 7 {continue}
+        if dl_key(e.loc) not=? ch or e.kind not=? 1 and e.kind not=? 2 and e.kind not=? 6 and e.kind not=? 7 and e.kind not=? 8 {continue}
         cap=dc_capacity(e.loc)
         let m=ChannelGraphWord(dc_mult(e.loops at))
         if m <? 0 {
             unknown=true
-            if e.kind =? 2 or e.kind =? 7 {sure=0}
+            if e.kind =? 2 or e.kind =? 7 or e.kind =? 8 {sure=0}
         } else if e.kind =? 1 or e.kind =? 6 {
             any+=m
             if not e.branch {
@@ -102,7 +102,7 @@ dc_edges_build=():>void=>$unsafe {
         loop e in dc_actors.ptr[a].events {
             if e.kind =? 4 or e.kind =? 5 or e.loc.root =? 0 {continue}
             let key=dl_key(e.loc)
-            if e.kind =? 2 or e.kind =? 3 or e.kind =? 7 {
+            if e.kind =? 2 or e.kind =? 3 or e.kind =? 7 or e.kind =? 8 {
                 let list=drainers.get(key) ?? []
                 if a not in? list {list.push(a)}
                 drainers[key]=list
@@ -119,7 +119,7 @@ dc_edges_build=():>void=>$unsafe {
         if writers.length =? 1 and readers.length =? 1 and not dc_actors.ptr[writers.ptr[0]].multi and not dc_actors.ptr[readers.ptr[0]].multi {dc_exclusive[key]=true}
     }
     loop actor in dc_actors {
-        loop e in actor.events {if e.kind =? 3 or e.kind =? 7 {dc_exclusive.remove(dl_key(e.loc));}}
+        loop e in actor.events {if e.kind =? 3 or e.kind =? 7 or e.kind =? 8 {dc_exclusive.remove(dl_key(e.loc));}}
     }
     loop a in [0..dc_actors.length) {
         let evs=dc_actors.ptr[a].events
@@ -128,15 +128,15 @@ dc_edges_build=():>void=>$unsafe {
         let tried_drain:dict<string bool>=[]
         loop i in [0..evs.length) {
             let e=evs.ptr[i]
-            if (e.kind <=? 3 or e.kind =? 6 or e.kind =? 7) and e.loc.root not=? 0 {
+            if (e.kind <=? 3 or e.kind =? 6 or e.kind =? 7 or e.kind =? 8) and e.loc.root not=? 0 {
                 let key=dl_key(e.loc)
-                if (e.kind =? 2 or e.kind =? 3 or e.kind =? 7) and not seen_drain.has(key) {
-                    if e.kind not=? 7 {seen_drain[key]=true}
+                if (e.kind =? 2 or e.kind =? 3 or e.kind =? 7 or e.kind =? 8) and not seen_drain.has(key) {
+                    if e.kind not=? 7 and e.kind not=? 8 {seen_drain[key]=true}
                     if (drainers.get(key) ?? []).length =? 1 {
-                        let verb=if e.kind =? 2 or e.kind =? 7 {"receives from"} else {"closes"}
+                        let verb=if e.kind =? 2 or e.kind =? 7 or e.kind =? 8 {"receives from"} else {"closes"}
                         dc_hold(a "S{key}" i false " before it {verb} {dl_name(e.loc)} ({dl_line(e.site)})" tried_drain.has(key))
                     }
-                    if e.kind =? 7 {tried_drain[key]=true}
+                    if e.kind =? 7 or e.kind =? 8 {tried_drain[key]=true}
                 }
                 if (e.kind =? 1 or e.kind =? 3 or e.kind =? 6) and not seen_fill.has(key) {
                     if e.kind not=? 6 {seen_fill[key]=true}

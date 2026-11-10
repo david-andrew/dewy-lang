@@ -133,6 +133,16 @@ dc_call = (n: int):
             if loc.root != 1 and loc.root != 2 or not loc.exact or len(loc.route) > 0: dc_unknown_attempt = true
         dc_event(op, loc, pos)
         return
+    # (a select in a loop, or a merged inbox, lists receives: a consumer of each channel, whichever it takes
+    # from; a select that runs once takes one value)
+    waits = dc_wait_set(n)
+    if waits == 2 or waits == 1 and dc_loops.len() > 0:
+        loop c in kids(n):
+            source = dc_wait_source(c)
+            if source == 0: continue
+            loc = dc_loc(source)
+            if loc.root == 0 or not loc.exact or len(loc.route) > 0 or loc.root != 2 and loc.root != 1: dc_precise = false
+            dc_event(8, loc, pos)
     loop c in kids(n): dc_walk(c)
     if nodes[n].aux == 1 or nodes[n].aux == 4:
         # (a function value: what it waits for is not in view)

@@ -15,12 +15,12 @@ dc_send_waits = (a: int, ch: str, upto: int, through: bool) -> int:
     cap = -1
     loop j in [0..last):
         e = evs[j]
-        if dl_key(e.loc) != ch or e.kind != 1 and e.kind != 2 and e.kind != 6 and e.kind != 7: continue
+        if dl_key(e.loc) != ch or e.kind != 1 and e.kind != 2 and e.kind != 6 and e.kind != 7 and e.kind != 8: continue
         cap = dc_capacity(e.loc)
         m = dc_mult(e.loops, at)
         if m < 0:
             unknown = true
-            if e.kind == 2 or e.kind == 7: sure = 0
+            if e.kind == 2 or e.kind == 7 or e.kind == 8: sure = 0
         else if e.kind == 1 or e.kind == 6:
             any += m
             if not e.branch:
@@ -92,7 +92,7 @@ dc_edges_build = ():
         loop e in dc_actors[a].events:
             if e.kind == 4 or e.kind == 5 or e.loc.root == 0: continue
             key = dl_key(e.loc)
-            if e.kind == 2 or e.kind == 3 or e.kind == 7:
+            if e.kind == 2 or e.kind == 3 or e.kind == 7 or e.kind == 8:
                 list = drainers.get(key) ?? []
                 if not list.contains(a): list.push(a)
                 drainers[key] = list
@@ -105,7 +105,7 @@ dc_edges_build = ():
         if writers.len() == 1 and readers.len() == 1 and not dc_actors[writers[0]].multi and not dc_actors[readers[0]].multi: dc_exclusive[key] = true
     loop actor in dc_actors:
         loop e in actor.events:
-            if e.kind == 3 or e.kind == 7: dc_exclusive.remove(dl_key(e.loc))
+            if e.kind == 3 or e.kind == 7 or e.kind == 8: dc_exclusive.remove(dl_key(e.loc))
     loop a in [0..dc_actors.len()):
         evs = dc_actors[a].events
         seen_drain: {str: bool} = {}
@@ -113,15 +113,15 @@ dc_edges_build = ():
         tried_drain: {str: bool} = {}
         loop i in [0..evs.len()):
             e = evs[i]
-            if (e.kind <= 3 or e.kind == 6 or e.kind == 7) and e.loc.root != 0:
+            if (e.kind <= 3 or e.kind == 6 or e.kind == 7 or e.kind == 8) and e.loc.root != 0:
                 key = dl_key(e.loc)
                 # (the only drainer keeps the channel full until its first receive or close)
-                if (e.kind == 2 or e.kind == 3 or e.kind == 7) and not seen_drain.has(key):
-                    if e.kind != 7: seen_drain[key] = true
+                if (e.kind == 2 or e.kind == 3 or e.kind == 7 or e.kind == 8) and not seen_drain.has(key):
+                    if e.kind != 7 and e.kind != 8: seen_drain[key] = true
                     if (drainers.get(key) ?? []).len() == 1:
-                        verb = if e.kind == 2 or e.kind == 7: "receives from" else: "closes"
+                        verb = if e.kind == 2 or e.kind == 7 or e.kind == 8: "receives from" else: "closes"
                         dc_hold(a, "S" + key, i, false, " before it {verb} {dl_name(e.loc)} ({dl_line(e.site)})", tried_drain.has(key))
-                    if e.kind == 7: tried_drain[key] = true
+                    if e.kind == 7 or e.kind == 8: tried_drain[key] = true
                 # (the only filler keeps it empty until its first send or close)
                 if (e.kind == 1 or e.kind == 3 or e.kind == 6) and not seen_fill.has(key):
                     if e.kind != 6: seen_fill[key] = true
