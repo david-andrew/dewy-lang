@@ -144,11 +144,13 @@ nd_args=(n:CertificateWord held:array<DlHeld> pos:CertificateWord first:Certific
         nd_bad(pos "gives a function value the compiler cannot follow, so what it waits for is unknown" "give a function literal or a named function, or a callable type whose row says `no blocks`")
     }
 }
-# A queue's `reserve`, called or prepared as a wait (`@q.reserve`): its permit may be dropped
-# unsent, so it is a send no certificate can count (decisions.md batch 7, as `select`).
+# A channel's, mpmc queue's or spsc end's `reserve`, called or prepared as a wait (`@q.reserve`): its
+# permit may be dropped unsent, so it is a send no certificate can count (decisions.md batch 7, as `select`).
 nd_reserve=(n:CertificateWord):>bool=>$unsafe {
     let g=CertificateWord(nodes.ptr[n].sym)
-    if g <=? 0 or nkids(n) =? 0 or fns.ptr[g].mod not=? dc_qmod or fns.ptr[g].decl =? 0 {return false}
+    if g <=? 0 or nkids(n) =? 0 or fns.ptr[g].decl =? 0 {return false}
+    let m=CertificateWord(fns.ptr[g].mod)
+    if m <? 0 or m not=? dc_mod and m not=? dc_qmod and m not=? dc_smod {return false}
     name_of(CertificateWord(nodes.ptr[CertificateWord(fns.ptr[g].decl)].name)) =? "reserve"
 }
 # `select`, `race`, `first_ok`, `merged` (with the `next` of its inbox, which `loop` calls) and `within`

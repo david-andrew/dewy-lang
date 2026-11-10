@@ -133,11 +133,13 @@ nd_args = (n: int, held: DlHeld[], pos: int, first: int = 0):
         if nd_param(a) or nd_nonblocking(a): continue
         nd_bad(pos, "gives a function value the compiler cannot follow, so what it waits for is unknown", "give a function literal or a named function, or a callable type whose row says `no blocks`")
 
-# A queue's `reserve`, called or prepared as a wait (`@q.reserve`): its permit may be dropped
-# unsent, so it is a send no certificate can count (decisions.md batch 7, as `select`).
+# A channel's, mpmc queue's or spsc end's `reserve`, called or prepared as a wait (`@q.reserve`): its
+# permit may be dropped unsent, so it is a send no certificate can count (decisions.md batch 7, as `select`).
 nd_reserve = (n: int) -> bool:
     g = int(nodes[n].sym)
-    if g <= 0 or nkids(n) == 0 or fns[g].mod != dc_qmod or fns[g].decl == 0: return false
+    if g <= 0 or nkids(n) == 0 or fns[g].decl == 0: return false
+    m = int(fns[g].mod)
+    if m < 0 or m != dc_mod and m != dc_qmod and m != dc_smod: return false
     name_of(int(nodes[int(fns[g].decl)].name)) == "reserve"
 # `select`, `race`, `first_ok`, `merged` (with the `next` of its inbox, which `loop` calls) and `within`
 # wait on a choice among alternatives (select-v6.md): no certificate counts that yet, so each is

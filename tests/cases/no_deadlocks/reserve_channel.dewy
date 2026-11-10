@@ -1,0 +1,10 @@
+# modes: native
+# `$no_deadlocks`: a raw channel's reserve gets the reservation message, not the send wait's.
+$no_deadlocks
+main = () => {
+    let a = channel<int64>(1)
+    match a.reserve {
+        p:Reserved<int64> => p.send(1)
+        _ => {}
+    }
+}
