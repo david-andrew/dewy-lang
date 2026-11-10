@@ -20,6 +20,7 @@ LEAF_HOMES = {
     'exact_loop_ops': 'exact_loop.jo',
     'error_display': 'util.jo',
     'refine_rare': 'refine.jo',
+    'refine_siblings': 'refine.jo',
     'directive_rules': 'directives.jo',
     'directive_queries': 'directives.jo',
     'constant_fold_ops': 'constant_folds.jo',

@@ -1,0 +1,685 @@
+use 'refine.jo'
+use 'checks_assign_hooks.dewy'
+use 'lower_storage.dewy'
+use 'lower_group.dewy'
+use 'host_binds.jo'
+use 'checker_expr.dewy'
+use 'type_refinement.dewy'
+use 'type_substitute.dewy'
+use 'ir_types.dewy'
+use 'refine_resolve.dewy'
+use 'refine_resolve_host.dewy'
+use 'checker_state.dewy'
+use 'refine_projection.dewy'
+use 'refine_storage.dewy'
+use 'checker_services.dewy'
+use 'refine_strings.dewy'
+use 'refine_keys.dewy'
+use 'refine_queries.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'ast.jo'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'lex.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'expr.jo'
+use 'checks_thin_expr.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_builders.dewy'
+use 'facts.jo'
+use 'facts_elements.dewy'
+use 'facts_library.dewy'
+use 'effect_types.dewy'
+use 'directives.jo'
+use 'directive_rules.dewy'
+use 'facts_routes.dewy'
+use 'nd_contracts.jo'
+use 'lower.jo'
+use 'ir.jo'
+use 'util.jo'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'secrets.jo'
+use 'node_store.dewy'
+use 'math_lower.jo'
+use 'lower_primitives.dewy'
+use 'ir_builders.dewy'
+use 'math_ops.dewy'
+use 'refine_ops.dewy'
+use 'refine_rare.dewy'
+use 'sibling_types.jo'
+
+ref_pair_op = (name: str) -> bool:
+    name == "push" or name == "pop" or name == "insert" or name == "remove" or name == "clear" or name == "extend" or name == "truncate"
+# The array fields of record t whose lengths a contract ties to array field at's, in either
+# direction (`values:array<V length =? keys.length>`). O(fields x atoms).
+ref_pair_tied = (t: int, at: int) -> int[]:
+    tied: int[]
+    si = int(types[t].st)
+    if at < 0 or at >= int(structs[si].nfields): return tied
+    own = prune(int(fields[int(structs[si].fields) + at].type))
+    if tkind(representation_type(own)) != .array: return tied
+    loop i in [0..int(structs[si].nfields)):
+        if i == at: continue
+        ft = prune(int(fields[int(structs[si].fields) + i].type))
+        if tkind(representation_type(ft)) != .array: continue
+        named = false
+        if types[ft].kind == .refined:
+            loop atom in ref_predicates[int(types[ft].st)]:
+                # (a bound on elements leaves the lengths free: ref_sib_in_place)
+                if ref_sib_atom(atom): continue
+                loop term in [atom.a, atom.b]:
+                    if term.kind == 5 and term.value == at and term.path.len() == 1 and term.path[0] == -1: named = true
+        if types[own].kind == .refined:
+            loop atom in ref_predicates[int(types[own].st)]:
+                if ref_sib_atom(atom): continue
+                loop term in [atom.a, atom.b]:
+                    if term.kind == 5 and term.value == i and term.path.len() == 1 and term.path[0] == -1: named = true
+        if named: tied.push(i)
+    tied
+# The field of record t named name, or -1. O(fields).
+ref_pair_field = (t: int, name: int) -> int:
+    si = int(types[t].st)
+    loop i in [0..int(structs[si].nfields)):
+        if int(fields[int(structs[si].fields) + i].name) == name: return i
+    -1
+# The record whose tied field place is, when place can join a run: an array field whose length
+# a contract ties to a sibling's, of a record no contract above holds, reached through names and
+# literals. O(route + fields x atoms).
+ref_pair_record = (place: int) -> int:
+    if nodes[place].kind != .field or nodes[place].aux < 0: return 0
+    r = int(nodes[place].a)
+    t = representation_type(ntype(r))
+    if not ref_dependent_record(t) or ref_dependent_ancestor(r) or ref_pair_tied(t, int(nodes[place].aux)).len() == 0: return 0
+    route = r
+    loop nodes[route].kind == .field or nodes[route].kind == .index:
+        if nodes[route].kind == .index:
+            selector = int(nodes[route].b)
+            if nodes[route].aux != 0 or selector == 0: return 0
+            if nodes[selector].kind != .int_lit and not (nodes[selector].kind == .ident and nodes[selector].aux == i32(int(SK.local))): return 0
+        route = int(nodes[route].a)
+    if nodes[route].kind != .ident or nodes[route].aux != i32(int(SK.local)): return 0
+    r
+# Do two routes name the same place: the same names, fields and selectors? Works on checked
+# and unchecked nodes alike. O(route).
+ref_pair_same = (a0: int, b0: int) -> bool:
+    a = a0; b = b0
+    loop depth in [0..32):
+        ka = nodes[a].kind
+        kb = nodes[b].kind
+        if ka != kb: return false
+        if ka == .ident: return nodes[a].name == nodes[b].name
+        if ka == .field:
+            if nodes[a].name != nodes[b].name: return false
+        else if ka == .index:
+            x = int(nodes[a].b); y = int(nodes[b].b)
+            if x == 0 or y == 0 or nodes[x].kind != nodes[y].kind: return false
+            if nodes[x].kind == .int_lit and nodes[x].ival != nodes[y].ival: return false
+            if nodes[x].kind == .ident and nodes[x].name != nodes[y].name: return false
+            if nodes[x].kind != .int_lit and nodes[x].kind != .ident: return false
+        else: return false
+        a = int(nodes[a].a); b = int(nodes[b].a)
+    false
+# Does an unchecked operand read the name root, call anything or leave? O(operand size).
+ref_pair_touches = (n: int, root: int, depth: int) -> bool:
+    if n == 0: return false
+    if depth > 32: return true
+    k = nodes[n].kind
+    if k == .ident:
+        if nodes[n].name == root: return true
+        # (a function's name alone calls it when it takes nothing)
+        sym = lookup(int(nodes[n].name))
+        return sym != 0 and (syms[sym].kind == .fns or syms[sym].kind == .builtin or syms[sym].kind == .alias_ or syms[sym].kind == .module or syms[sym].kind == .reflected)
+    # (values and operators only: no call, block, `or_throw`, `?? return` or other exit, which
+    # could see the record or leave it before the run ends)
+    plain = k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .none_lit or k == .null_lit or k == .field or k == .dotname or k == .index or k == .unary or k == .binary or k == .and_ or k == .or_ or k == .not_ or k == .coalesce or k == .array or k == .tuple or k == .cast or k == .range or k == .namedarg or k == .pair or k == .hole
+    if not plain: return true
+    if nodes[n].a != 0 and ref_pair_touches(int(nodes[n].a), root, depth + 1): return true
+    if nodes[n].b != 0 and ref_pair_touches(int(nodes[n].b), root, depth + 1): return true
+    loop c in kids(n):
+        if ref_pair_touches(c, root, depth + 1): return true
+    false
+# The root name of a route. O(route).
+ref_pair_root = (r: int) -> int:
+    route = r
+    loop nodes[route].kind == .field or nodes[route].kind == .index: route = int(nodes[route].a)
+    int(nodes[route].name)
+# The statement of block b at i, through an attached `;`.
+ref_pair_unwrap = (s0: int) -> int:
+    s = s0
+    if nodes[s].kind == .block and nkids(s) == 1: s = kid(s, 0)
+    s
+ref_pair_discard = (b: int):
+    ref_pair_outer = b
+    ref_pair_outer_block = sibling_block
+    ref_pair_outer_index = sibling_index
+# The block and statement being checked, seen through a discarding block.
+ref_pair_through = () -> bool:
+    ref_pair_outer != 0 and sibling_block == ref_pair_outer
+ref_pair_here_block = () -> int:
+    if ref_pair_through(): return ref_pair_outer_block
+    sibling_block
+ref_pair_here_index = () -> int:
+    if ref_pair_through(): return ref_pair_outer_index
+    sibling_index
+# Does the statement after the current one change the length of another tied field of r in
+# place, with operands that cannot see r? O(statement).
+ref_pair_follows = (r: int) -> bool:
+    b = ref_pair_here_block()
+    i = ref_pair_here_index()
+    if b == 0 or i < 0 or i + 1 >= nkids(b): return false
+    s = ref_pair_unwrap(kid(b, i + 1))
+    e = 0
+    if nodes[s].kind == .exprstmt: e = int(nodes[s].a)
+    # (`p.values.pop(at);` drops its value: `_ = p.values.pop(at)` until it is checked)
+    if nodes[s].kind == .assign and nodes[s].op == i32(int(Tok.assign)) and nodes[int(nodes[s].a)].kind == .hole: e = int(nodes[s].b)
+    if e == 0: return false
+    if nodes[e].kind != .call: return false
+    callee = int(nodes[e].a)
+    if nodes[callee].kind != .field or not ref_pair_op(name_of(int(nodes[callee].name))): return false
+    receiver = int(nodes[callee].a)
+    if nodes[receiver].kind != .field or not ref_pair_same(int(nodes[receiver].a), r): return false
+    # (an untied field's change checks nothing: it cannot close the run)
+    if ref_pair_tied(representation_type(ntype(r)), ref_pair_field(representation_type(ntype(r)), int(nodes[receiver].name))).len() == 0: return false
+    root = ref_pair_root(r)
+    loop c in kids(e):
+        if ref_pair_touches(c, root, 0): return false
+    true
+# The role of the length operation n on place in a run: 0 none, else 1 when it opens the
+# run, plus 2 when it closes it. Only the whole expression of the statement being checked.
+ref_pair_role = (n: int, place: int) -> int:
+    b = ref_pair_here_block()
+    i = ref_pair_here_index()
+    if b == 0 or i < 0 or i >= nkids(b): return 0
+    s = ref_pair_unwrap(kid(b, i))
+    if nodes[s].kind != .exprstmt: return 0
+    if n != 0 and int(nodes[s].a) != n: return 0
+    # (a library operation, `p.keys.insert(k at)`: its receiver is the statement's)
+    if n == 0:
+        e = int(nodes[s].a)
+        if nodes[e].kind != .call or nodes[int(nodes[e].a)].kind != .field: return 0
+        if not ref_pair_same(int(nodes[int(nodes[e].a)].a), place): return 0
+    r = ref_pair_record(place)
+    if r == 0: return 0
+    continuing = ref_pair_open != 0 and ref_pair_block == b and ref_pair_index + 1 == i and ref_pair_same(ref_pair_open, r)
+    if ref_pair_open != 0 and ref_pair_block == b and ref_pair_index + 1 == i and not continuing: fatal(nodes[place].pos, "this statement was taken to continue the changes to {wit_text(ref_pair_open)}'s tied fields before it, but changes another record: name the record the same way in both")
+    more = ref_pair_follows(r)
+    ref_pair_open = if more: r else: 0
+    ref_pair_block = b
+    ref_pair_index = i
+    if not continuing and not more: return 0
+    role = 4
+    if not continuing: role |= 1
+    if not more: role |= 2
+    role
+ref_pair_reads = (r: int, before: mut int[], pos: int):
+    held = refine_requests.len()
+    before.push(ref_pair_validation(r, pos, false))
+    loop k in [held..refine_requests.len()): ref_pair_held[refine_requests[k].node] = true
+# The whole record r checked as it now is: every field's contract against its siblings, as a
+# constructor checks it. The record is not rebuilt. O(fields).
+ref_pair_validation = (r: int, pos: int, transient: bool = true) -> int:
+    t = representation_type(ntype(r))
+    si = int(types[t].st)
+    held = refine_requests.len()
+    args: int[]
+    loop i in [0..int(structs[si].nfields)):
+        f = int(structs[si].fields) + i
+        field = bc_field(copy_place(r), name_of(int(fields[f].name)), pos)
+        check_expr(field, 0)
+        field = copy_checked(last_checked)
+        coerce(field, int(fields[f].type))
+        args.push(field)
+    ctor = mk(.call, pos)
+    nodes[ctor] = Node(kind = .call, pos = pos, aux = 2, type = i32(t), flags = i32(NF_CHECKED))
+    set_list(ctor, args)
+    s = bc_stmt(ctor, pos)
+    ref_pair_checks[s] = true
+    if transient:
+        ref_pair_stmts[s] = true
+        hint = "help: the statements ending here change {wit_text(r)}'s tied fields together: they must leave every field's contract holding, so change each tied length by the same amount"
+        loop k in [held..refine_requests.len()): ref_pair_hints[refine_requests[k].node] = hint
+    s
+# n, a member of a run, in place: the reads opening it, the operation, and the check closing it.
+ref_pair_rewrite = (n: int, r: int, role: int, place: int, result_type: int) -> int:
+    pos = nodes[n].pos
+    before: int[]
+    if role & 1 != 0: ref_pair_reads(int(nodes[place].a), before, pos)
+    operation = copy_checked(n)
+    add_flag(operation, NF_CHECKED)
+    result = 0
+    if result_type != T_VOID: result = capture_value(operation, result_type, before)
+    else: before.push(bc_stmt(operation, pos))
+    ref_pair_stmts[before[before.len() - 1]] = true
+    if role & 2 != 0: before.push(ref_pair_validation(int(nodes[place].a), pos))
+    if result != 0: before.push(bc_stmt(result, pos))
+    nodes[n] = nodes[bc_block(before, pos)]
+    nodes[n].type = i32(result_type)
+    nodes[n].aux = 1
+    add_flag(n, NF_CHECKED)
+    result_type
+# A library operation in a run (`insert`): the call runs on the field itself.
+ref_pair_call_finish = (n: int, prepared: RefArrayCall) -> int:
+    before = prepared.before
+    pos = nodes[n].pos
+    before.push(bc_stmt(copy_checked(n), pos))
+    ref_pair_stmts[before[before.len() - 1]] = true
+    if let check = ref_pair_after.get(prepared.place): before.push(check)
+    nodes[n] = nodes[bc_block(before, pos)]
+    nodes[n].type = i32(T_VOID)
+    add_flag(n, NF_CHECKED)
+    T_VOID
+# What a lone operation on a tied field is told: the fields its contract ties it to, and
+# the paired operation. O(fields x atoms).
+ref_pair_hint = (place: int, op: str) -> str:
+    t = representation_type(ntype(int(nodes[place].a)))
+    at = int(nodes[place].aux)
+    si = int(types[t].st)
+    tied: str[]
+    loop i in ref_pair_tied(t, at): tied.push(name_of(int(fields[int(structs[si].fields) + i].name)))
+    if tied.len() == 0: return ""
+    record = wit_text(int(nodes[place].a))
+    field = name_of(int(fields[int(structs[si].fields) + at].name))
+    others = ""
+    loop j in [0..tied.len()):
+        if j > 0: others += if j == tied.len() - 1: " and " else: ", "
+        others += "`{record}.{tied[j]}`"
+    them = "it"
+    if tied.len() > 1: them = "them"
+    first = tied[0]
+    root = name_of(ref_pair_root(int(nodes[place].a)))
+    "help: `{op}` changes {record}.{field}.length, and the record's contract ties it to {others}: change {them} too, in the statements right after this one (`{record}.{first}.{op}(...)`), with nothing between them and with operands that neither read `{root}`, call a function nor leave early"
+ref_pair_op_name = (id: IN) -> str:
+    if id == .push: return "push"
+    if id == .pop: return "pop"
+    if id == .insert: return "insert"
+    if id == .remove: return "remove"
+    if id == .clear: return "clear"
+    if id == .extend: return "extend"
+    "truncate"
+# ---------------- sibling-length elements (docs/LANGUAGE.md, records) ----------------
+# `next:array<int64<(<? nodes.length)>>`: every element of a field is a valid index of a sibling
+# array. The bound moves onto the field as one atom, every element (term kind 6) op the
+# sibling's length (term kind 5), so it is a dependent field: construction, replacing either
+# field and a sibling change made on a candidate check the record whole. A read of the field
+# projects the bound as a value (FACT_SIB_BOUND), so an element read relates to the sibling's
+# length. Stores and pushes into the field check the value against the sibling, in place;
+# growing the sibling keeps the bound, in place. O(fields x atoms) once per record type.
+ref_sib_atom = (atom: RefAtom) -> bool: atom.a.kind == 6 and atom.b.kind == 5
+# The element a value with a sibling or self-length bound holds: an array's element, or a
+# dictionary's value.
+ref_held_element = (t: int) -> int:
+    r = representation_type(t)
+    if is_map_type(r): return struct_targ(int(types[r].st), 1)
+    int(types[r].elem)
+ref_sib_contract = (t0: int) -> bool:
+    t = prune(t0)
+    if types[t].kind != .refined: return false
+    loop atom in ref_predicates[int(types[t].st)]:
+        if ref_sib_atom(atom): return true
+    false
+# A field's type with its elements bounded by a sibling's length, as its contract; else 0.
+ref_sib_field = (ft0: int, name: int, pos: int) -> int:
+    ft = prune(ft0)
+    holder = ft
+    if types[ft].kind == .refined: holder = prune(int(types[ft].elem))
+    if types[holder].kind != .array: return 0
+    element = prune(int(types[holder].elem))
+    if types[element].kind != .refined: return 0
+    made = ref_sib_bound(element, name, pos, holder != ft)
+    if made.0 == 0: return 0
+    out = mk_refined(mk_array(made.0), made.1)
+    ref_self_elements[prune(out)] = made.2
+    out
+# `edges:dict<string int64<(<? terminal.length)>>`: the values of a dictionary field bounded by a
+# sibling's length, as the field's contract over its values, as for an array's elements; else 0.
+ref_sib_dict_field = (ft0: int, name: int, pos: int, total: bool) -> int:
+    ft = prune(ft0)
+    holder = ft
+    if types[ft].kind == .refined: holder = prune(int(types[ft].elem))
+    if not is_map_type(holder): return 0
+    si = int(types[holder].st)
+    element = prune(struct_targ(si, 1))
+    if types[element].kind != .refined: return 0
+    made = ref_sib_bound(element, name, pos, false)
+    if made.0 == 0: return 0
+    if total or holder != ft: fatal(pos, "field '{name_of(name)}': a dictionary whose values a sibling's length bounds cannot be a totaldict or have a contract of its own as well")
+    runtime_fn("__first_live_value_above")
+    # (made directly: a dictionary takes no refinement but this one, as a totaldict's)
+    out = mk_type(TypeInfo(kind = .refined, elem = i32(get_struct_inst(int(structs[si].decl), [struct_targ(si, 0), made.0])), st = i32(made.1)), [])
+    ref_self_elements[prune(out)] = made.2
+    out
+# A written element refinement naming a sibling's length: the plain element type, the predicate
+# every element meets and the stored element's type; (0, 0, 0) when it names no sibling.
+ref_sib_bound = (element: int, name: int, pos: int, contracted: bool) -> (int, int, int):
+    written = ref_predicates[int(types[element].st)]
+    named = false
+    loop atom in written:
+        if atom.b.kind == 5 and ref_path_length(atom.b.path) or atom.a.kind == 5 and ref_path_length(atom.a.path): named = true
+    if not named: return (0, 0, 0)
+    field = name_of(name)
+    if contracted: fatal(pos, "field '{field}': an array whose elements a sibling's length bounds cannot have a length contract as well")
+    base = int(types[element].elem)
+    if has_var(base) or not type_eq(representation_type(base), T_INT): fatal(pos, "field '{field}': elements bounded by a sibling's length are int64 or addr, found {dt(base)}")
+    rest: RefAtom[]
+    whole: RefAtom[]
+    stored: RefAtom[]
+    loop atom in written:
+        if atom.a.kind == 5 or atom.b.kind == 5:
+            upper = atom.a.kind == 0 and atom.a.path.len() == 0 and atom.b.kind == 5 and ref_path_length(atom.b.path) and (atom.op == .lt or atom.op == .le)
+            if not upper: fatal(pos, "field '{field}': a sibling's length bounds its elements only from above, `<? name.length` or `<=? name.length`, so that growing the sibling keeps it")
+            whole.push(RefAtom(atom.op, RefTerm(6), RefTerm(5, atom.b.value, path = [-1], offset = atom.b.offset)))
+            stored.push(RefAtom(atom.op, RefTerm(0), RefTerm(6, path = [-1], offset = atom.b.offset)))
+        else: rest.push(atom)
+    # (an upper bound on a signed index means a valid index, unless a lower bound is written)
+    if not ref_self_lower_bound(rest): rest.push(RefAtom(.le, RefTerm(1, 0), RefTerm(0)))
+    plain = mk_refined(base, ref_intern(rest))
+    predicate = ref_intern(whole)
+    span = ref_spans.get(int(types[element].st)) ?? pos
+    if not ref_spans.has(predicate): ref_spans[predicate] = span
+    ref_self_active = true
+    runtime_fn("__first_element_above")
+    (plain, predicate, mk_refined(plain, ref_intern(stored)))
+# The bound every element of a value with the contract is at most: sibling length + c, as a value.
+# One value per length and c, so reading the bound again adds no rows to the length, whose
+# rows a tied field's relation needs (fact_difference keeps a few per term).
+ref_sib_limit = (atom: RefAtom, args: int[], s: mut FactState, extra: int = 0) -> int:
+    # (the sibling of the array a value is added to, as `extend` into it: the holder, kind 6)
+    kind = atom.b.kind
+    if kind == 5 and (atom.b.value >= args.len() or args[atom.b.value] == 0) or kind == 6 and ref_fact_holder == 0: return 0
+    k = atom.b.offset + extra
+    if atom.op == .lt: k -= 1
+    length = ref_value(RefTerm(kind, atom.b.value, path = [-1]), 0, args, T_INT, s)
+    if length == 0 or k == 0 or k < -64 or k > 64: return ref_value(RefTerm(kind, atom.b.value, path = [-1], offset = k), 0, args, T_INT, s)
+    # (reused only where this state's rows say it is exactly length + k: values are numbered again
+    # for each function)
+    key = length * 256 + k + 128
+    if let sum = ref_sib_sums.get(key):
+        up = fact_row_find(s, sum, length)
+        down = fact_row_find(s, length, sum)
+        if up >= 0 and down >= 0 and s.differences[up].limit == k and s.differences[down].limit == -k: return sum
+    sum = ref_value(RefTerm(kind, atom.b.value, path = [-1], offset = k), 0, args, T_INT, s)
+    ref_sib_sums[key] = sum
+    sum
+# (a value read again with another record, as after a call changed the sibling, holds each bound:
+# up to four, each a projection of its own, so a read relates to every one directly)
+ref_sib_assume = (s: mut FactState, self: int, atom: RefAtom, args: int[]):
+    if self == 0: return
+    limit = ref_sib_limit(atom, args, s)
+    if limit == 0: return
+    count = 0
+    j = fact_projection_first(s, self)
+    loop j >= 0:
+        p = s.projections[j]
+        j = fact_projection_after(s, j)
+        if p.element or p.selector != FACT_SIB_BOUND: continue
+        if p.value == limit or fact_compare(s, .le, p.value, limit) == 1: return
+        count += 1
+    if count >= 4 or s.projections.len() >= FACT_CAP: return
+    fact_add_projection(s, FactProjection(self, FACT_SIB_BOUND, false, limit))
+    # (elements read before, as a call's summary keeps them: each is below the bound too)
+    j = fact_projection_first(s, self)
+    loop j >= 0:
+        p = s.projections[j]
+        j = fact_projection_after(s, j)
+        if p.element: fact_difference(s, p.value, limit, 0, 0, 16)
+# An element read from a value known to hold sibling bounds: O(bounds).
+ref_sib_element_row = (s: mut FactState, base: int, v: int):
+    j = fact_projection_first(s, base)
+    loop j >= 0:
+        p = s.projections[j]
+        j = fact_projection_after(s, j)
+        if not p.element and p.selector == FACT_SIB_BOUND: fact_difference(s, v, p.value, 0, 0, 16)
+# A value read from a dictionary known to hold sibling bounds (`d[k]`, `d.pop(k)`, or the payload
+# of `d.get(k)`): below each. O(bounds), nothing for any other dictionary.
+ref_sib_map_read = (s: mut FactState, map: int, result: int, n: int):
+    if map == 0 or result == 0 or fact_projection_find(s, map, FACT_SIB_BOUND, false) < 0: return
+    v = result
+    if tkind(ntype(n)) == .opt: v = fact_project(s, result, -4, false, telem(ntype(n)))
+    if is_int(fact_type(ntype(n))) or tkind(ntype(n)) == .opt: ref_sib_element_row(s, map, v)
+# A value from `d.pop(k default=x)` or `d.get(k x)` on such a dictionary: an entry's value, or x.
+# Below each bound x is below (`none` has no value). O(bounds).
+ref_sib_default_read = (s: mut FactState, map: int, result: int, dflt: int, given: int, n: int):
+    if map == 0 or result == 0 or dflt == 0 or fact_projection_find(s, map, FACT_SIB_BOUND, false) < 0: return
+    v = result
+    if tkind(ntype(n)) == .opt: v = fact_project(s, result, -4, false, telem(ntype(n)))
+    if not is_int(fact_type(ntype(n))) and tkind(ntype(n)) != .opt: return
+    x = dflt
+    literal = given
+    loop nodes[literal].kind == .conv: literal = int(nodes[literal].a)
+    absent = nodes[literal].kind == .none_lit
+    if tkind(ntype(given)) == .opt and not absent: x = fact_project(s, dflt, -4, false, telem(ntype(given)))
+    if not absent and x == 0: return
+    j = fact_projection_first(s, map)
+    loop j >= 0:
+        p = s.projections[j]
+        j = fact_projection_after(s, j)
+        if p.element or p.selector != FACT_SIB_BOUND: continue
+        if absent or fact_compare(s, .le, x, p.value) == 1: fact_difference(s, v, p.value, 0, 0, 16)
+# Does every element of the value stay within the sibling bound? 1, 0 refuted, -1 unknown.
+# O(inventory).
+ref_sib_truth = (s: mut FactState, value: int, atom: RefAtom, args: int[]) -> int:
+    if value == 0: return -1
+    limit = ref_sib_limit(atom, args, s)
+    if limit == 0: return -1
+    j = fact_projection_first(s, value)
+    loop j >= 0:
+        p = s.projections[j]
+        j = fact_projection_after(s, j)
+        if not p.element and p.selector == FACT_SIB_BOUND and fact_compare(s, .le, p.value, limit) == 1: return 1
+    length = fact_project(s, value, -1, false, T_INT)
+    if length != 0 and fact_bound(s, length).hi == 0: return 1
+    parts = fact_inventory(s, value)
+    if parts.len() > 0:
+        truth = 1
+        loop part in parts:
+            one = fact_compare(s, .le, part, limit)
+            if one == 0: return 0
+            if one < 0: truth = -1
+        return truth
+    copy = fact_projection_find(s, value, FACT_ELEMENT_COPY, false)
+    if copy >= 0 and fact_compare(s, .le, s.projections[copy].value, limit) == 1: return 1
+    hull = fact_projection_find(s, value, FACT_ELEMENT_VALUE, false)
+    if hull >= 0:
+        hi = fact_bound(s, s.projections[hull].value).hi
+        if hi < FACT_MAX and fact_compare(s, .le, fact_constant(s, hi), limit) == 1: return 1
+    below = fact_projection_find(s, value, FACT_ELEMENT_BELOW, false)
+    if below >= 0 and fact_compare(s, .le, s.projections[below].value, ref_sib_limit(atom, args, s, 1)) == 1: return 1
+    -1
+# A dictionary literal's values against the bound: each an integer literal; else -1. O(entries).
+ref_sib_literal_truth = (s: mut FactState, n: int, atom: RefAtom, args: int[]) -> int:
+    v = int(nodes[n].a)
+    loop v != 0 and nodes[v].kind == .conv: v = int(nodes[v].a)
+    if v == 0 or nodes[v].kind != .map_lit: return -1
+    if nkids(v) == 0: return 1
+    # (the constants first: a comparison sees the terms its state held before the bound)
+    values: int[]
+    loop pair in kids(v):
+        x = int(nodes[pair].b)
+        loop x != 0 and nodes[x].kind == .conv: x = int(nodes[x].a)
+        if x == 0 or nodes[x].kind != .int_lit: return -1
+        values.push(fact_constant(s, int(nodes[x].ival)))
+    limit = ref_sib_limit(atom, args, s)
+    if limit == 0: return -1
+    truth = 1
+    loop value in values:
+        one = fact_compare(s, .le, value, limit)
+        if one == 0: return 0
+        if one < 0: truth = -1
+    truth
+ref_sib_fail = (n: int, t: int, atom: RefAtom, refuted: bool):
+    contract = ref_spans.get(int(types[t].st)) ?? 0
+    shown = wit_text(int(nodes[n].a))
+    dict = is_map_type(representation_type(t))
+    if shown == "": shown = if dict: "this dictionary" else: "this array"
+    sibling = ref_sib_name(atom, n)
+    item = "element"
+    one = "an element"
+    if dict:
+        item = "value"
+        one = "a value"
+    what = "cannot prove every {item} of {shown} is a valid index of {sibling}"
+    if refuted: what = "refinement refuted: {one} of {shown} is not a valid index of {sibling}"
+    help = "help: every element must be below the length of {sibling}: a literal, `fill` or elements known to be below it prove it; to make {sibling} shorter, first clear or shorten the array it bounds, or put `$runtime_checks` on this statement to check every element when it runs"
+    if dict: help = "help: every value must be below the length of {sibling}: a literal or values known to be below it prove it; to make {sibling} shorter, put `$runtime_checks` on this statement to check every value when it runs"
+    if ref_pair_hints.len() > 0 and ref_pair_hints.has(n): err_notes.push((-1, ref_pair_hints[n]))
+    if not refuted and dir_defer(n, what, true): return
+    err_notes.push((-1, help))
+    wit_context(contract)
+    wit_fail(nodes[n].pos, what)
+# The sibling's name for a diagnostic, from the record the checked value is a field of.
+ref_sib_name = (atom: RefAtom, n: int) -> str:
+    if atom.b.kind == 6: return "`{wit_holder_text}`"
+    v = int(nodes[n].a)
+    if nodes[v].kind == .field:
+        t = representation_type(ntype(int(nodes[v].a)))
+        if tkind(t) == .struct_:
+            si = int(types[t].st)
+            if atom.b.value < int(structs[si].nfields): return "`{name_of(int(fields[int(structs[si].fields) + atom.b.value].name))}`"
+    "its sibling"
+# Every element of a whole array value against the sibling: a loop, only under `$runtime_checks`.
+ref_sib_gen = (n: int, t: int, atom: RefAtom, self: int, args: int[], arg_types: int[]):
+    length = if atom.b.kind == 6: ref_ir_holder_length() else: ref_ir_term(RefTerm(5, atom.b.value, path = [-1]), self, args, T_INT, arg_types)
+    k = atom.b.offset
+    if atom.op == .lt: k -= 1
+    bound = e_bin(.add, VI, length, e_iconst(k))
+    map = representation_type(t)
+    at = 0
+    if is_map_type(map):
+        # (a dictionary's values, but for removed entries': their positions are left zero)
+        si = int(types[map].st)
+        vals = 0
+        gone = 0
+        loop i in [0..int(structs[si].nfields)):
+            f = int(structs[si].fields) + i
+            if name_of(int(fields[f].name)) == "vals": vals = load_val(int(fields[f].type), field_val_addr(f, self), 0)
+            if name_of(int(fields[f].name)) == "gone": gone = load_val(int(fields[f].type), field_val_addr(f, self), 0)
+        at = e_call(rt("__first_live_value_above"), [vals, gone, bound], VI)
+    else: at = e_call(rt("__first_element_above"), [self, bound], VI)
+    iff(e_bin(.les, VI, e_iconst(0), at))
+    message = "refinement failed: an element is not a valid index of its sibling array"
+    if is_map_type(map): message = "refinement failed: a value is not a valid index of its sibling array"
+    e_call_nr(rt("__requirement_fail"), [e_daddr(str_data(message)), e_daddr(loc_data(nodes[n].pos)), e_daddr(str_data("the position of the element")), at, e_daddr(str_data("the bound")), bound], -1)
+    endc()
+# The sibling an element of field place is checked against, read again by the check; else 0.
+ref_sib_holder = (place0: int) -> int:
+    place = ref_place_alias(place0)
+    t = prune(refine_storage(place, ntype(place)))
+    if not ref_sib_contract(t) or nodes[place].kind != .field or nodes[place].aux < 0: return 0
+    parent = int(nodes[place].a)
+    rt0 = representation_type(ntype(parent))
+    if tkind(rt0) != .struct_: return 0
+    si = int(types[rt0].st)
+    j = -1
+    loop atom in ref_predicates[int(types[t].st)]:
+        if ref_sib_atom(atom): j = atom.b.value
+    if j < 0 or j >= int(structs[si].nfields): return 0
+    field = bc_field(copy_place(parent), name_of(int(fields[int(structs[si].fields) + j].name)), nodes[place].pos)
+    check_expr(field, 0)
+    copy_checked(last_checked)
+# Is field `at` of record t named by no contract but its own? O(fields x atoms).
+ref_sib_unnamed = (t: int, at: int) -> bool:
+    si = int(types[t].st)
+    loop i in [0..int(structs[si].nfields)):
+        if i == at: continue
+        ft = prune(int(fields[int(structs[si].fields) + i].type))
+        if types[ft].kind != .refined: continue
+        loop atom in ref_predicates[int(types[ft].st)]:
+            loop term in [atom.a, atom.b]:
+                if term.kind == 5 and term.value == at: return false
+    true
+# Is field `at` of record t named only by sibling bounds on elements? O(fields x atoms).
+ref_sib_only_bounds = (t: int, at: int) -> bool:
+    si = int(types[t].st)
+    seen = false
+    loop i in [0..int(structs[si].nfields)):
+        if i == at: continue
+        ft = prune(int(fields[int(structs[si].fields) + i].type))
+        if types[ft].kind != .refined: continue
+        loop atom in ref_predicates[int(types[ft].st)]:
+            loop term in [atom.a, atom.b]:
+                if term.kind != 5 or term.value != at: continue
+                if not ref_sib_atom(atom): return false
+                seen = true
+    seen
+# A length change in place on a record's field, when what it changes keeps the record's contract:
+# a push or insert into a field bounded by a sibling (its value checked against the sibling), any
+# shrink of such a field, or growing a sibling only such bounds name. Else false, for the
+# candidate route. O(fields x atoms).
+ref_sib_in_place = (n: int, id: IN, place0: int, t: int) -> bool:
+    record = ref_sib_record(place0)
+    if record == 0: return false
+    at = int(nodes[ref_place_alias(place0)].aux)
+    if ref_sib_contract(t):
+        if not ref_sib_free(place0, t): return false
+        if id == .pop or id == .truncate or id == .remove or id == .clear: return true
+        if (id == .push or id == .insert) and nkids(n) >= 2:
+            ref_self_value(kid(n, 1), t, 0, place0)
+            return true
+        # (every extended element owes the sibling's length, checked once before it grows)
+        if id == .extend and nkids(n) == 2:
+            value = kid(n, 1)
+            refine_coerce(value, ref_sib_extension(t))
+            nodes[value].b = i32(ref_holder_place(place0))
+            return true
+        return false
+    if types[prune(t)].kind == .refined or not ref_sib_only_bounds(record, at): return false
+    id == .push or id == .insert or id == .extend
+# The type of an array added to a field bounded by a sibling: every element below the sibling's
+# length (term kind 6, the array the value goes into), the field's own element bounds as well.
+ref_sib_extension = (t0: int) -> int:
+    t = prune(t0)
+    atoms: RefAtom[]
+    loop atom in ref_predicates[int(types[t].st)]:
+        atoms.push(RefAtom(atom.op, RefTerm(6), RefTerm(6, path = [-1], offset = atom.b.offset)))
+    predicate = ref_intern(atoms)
+    ref_span_copy(int(types[t].st), predicate)
+    mk_refined(int(types[t].elem), predicate)
+# The record type whose field place is, when no contract above that record holds it; else 0.
+ref_sib_record = (place0: int) -> int:
+    place = ref_place_alias(place0)
+    if nodes[place].kind != .field or nodes[place].aux < 0: return 0
+    parent = int(nodes[place].a)
+    record = representation_type(ntype(parent))
+    if tkind(record) != .struct_ or not ref_dependent_record(record) or ref_dependent_ancestor(parent): return 0
+    record
+# Is place a field whose only contract is a sibling bound on its elements, which no other
+# contract names? Then its changes keep the record's contract when its new elements are checked.
+ref_sib_free = (place0: int, t: int) -> bool:
+    record = ref_sib_record(place0)
+    if record == 0 or not ref_sib_contract(t): return false
+    loop atom in ref_predicates[int(types[prune(t)].st)]:
+        if not ref_sib_atom(atom): return false
+    ref_sib_unnamed(record, int(nodes[ref_place_alias(place0)].aux))
+# A loop's element of an array with a sibling bound is below it too. O(1) past the loop's own.
+ref_sib_loop_elements = (n: int, base: int, s: mut FactState):
+    if not ref_self_active or base == 0 or nodes[n].aux != 1 or int(nodes[n].sym) <= 0:
+        fact_loop_elements(n, base, s)
+        return
+    l = int(nodes[n].sym)
+    place = PlaceIdentity(.local, int(locals[l].owner), l)
+    i = fact_binding(s, place)
+    before = if i >= 0: s.bindings[i].value else: 0
+    fact_loop_elements(n, base, s)
+    if fact_projection_find(s, base, FACT_SIB_BOUND, false) < 0 or not is_int(fact_type(int(locals[l].type))): return
+    i = fact_binding(s, place)
+    value = if i >= 0: s.bindings[i].value else: 0
+    if value == 0 or value == before:
+        # (the element type's own bounds: `>=? 0` unless it states another)
+        bound = fact_domain(int(locals[l].type))
+        iterated = prune(refine_storage(int(nodes[n].a), ntype(int(nodes[n].a))))
+        if ref_sib_contract(iterated): bound = ref_interval(int(types[representation_type(iterated)].elem), bound)
+        value = fact_new(s, bound, FactTerm(type = int(locals[l].type)))
+        fact_bind(s, place, value)
+    ref_sib_element_row(s, base, value)
+ref_sib_permutable = (place: int, t: int) -> bool:
+    record = ref_sib_record(place)
+    if record == 0: return false
+    if ref_sib_contract(t): return ref_sib_free(place, t)
+    types[prune(t)].kind != .refined and ref_sib_only_bounds(record, int(nodes[ref_place_alias(place)].aux))
