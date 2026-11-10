@@ -69,6 +69,8 @@ concurrency_queue_instance = (decl: int, payload: int, pos: int):
     if files[pos_file(nodes[decl].pos)].path != lib_dir + "/prelude/" + file + ".dewy": return
     seen: {int: bool}
     if not concurrency_transfer(payload, seen): fatal(pos, "{name} payload must satisfy Send{concurrency_why()}; use a payload whose fields can cross tasks")
+    clash = queue_payload_clash(payload, name)
+    if len(clash) > 0: fatal(pos, clash)
 
 
 concurrency_atomic_call = (n: int):

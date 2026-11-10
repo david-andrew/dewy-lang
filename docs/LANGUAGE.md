@@ -3553,7 +3553,9 @@ main = () => {
 ```
 
 `c.send(value)` waits while the channel is full; `c.receive` gives `T | Closed |
-Canceled` and waits while it is empty. Both are blocking operations (`blocks`, so a
+Canceled` and waits while it is empty. So that these outcomes are never mistaken for a
+value, a payload that is or may be `Closed`, `Canceled` or any exception is an error;
+carry such a value in a record (decisions.md, batch 7). Both are blocking operations (`blocks`, so a
 `parallel` body cannot use them) and cancellation points: canceled while waiting, or
 in a canceled scope, they fail with `Canceled`. `c.close` closes the channel; closing
 again does nothing. After a close, a send fails with `Closed` (never a trap) and a

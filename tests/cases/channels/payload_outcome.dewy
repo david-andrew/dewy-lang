@@ -1,0 +1,6 @@
+# A channel's payload cannot overlap Closed or Canceled, the outcomes its own receive gives
+# (decisions.md, batch 7): a select's arms match by type, so the two could not be told apart.
+main = () => {
+    let c = channel<int64 | Canceled>(1)
+    printl"{c.try_receive() is? Empty}"
+}

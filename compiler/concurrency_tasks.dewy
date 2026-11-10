@@ -3,7 +3,7 @@ from p"check.jo" import (LF_ADDR LF_PARTBORROW fns globals lib_dir locals module
 from p"checks_thin.dewy" import (check_pending_functions)
 from p"ast.jo" import (NF_CHECKED NF_EXTERN NF_STMT add_flag has_flag kid kid2 kids mk nkids nkids2 nodes)
 from p"types.jo" import (T_MATH_INT T_NONE T_VOID tkind)
-from p"expr.jo" import (last_checked ntype type_node_of select_call select_check)
+from p"expr.jo" import (last_checked ntype type_node_of select_call select_check queue_payload_clash)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt)
 from p"checker_expr.dewy" import (check_expr)
 from p"deadlock.jo" import deadlock_atomics
@@ -73,6 +73,8 @@ concurrency_queue_instance=(decl:TaskWord payload:TaskWord pos:TaskWord):>void=>
     if files.ptr[pos_file(nodes.ptr[decl].pos)].path not=? "{lib_dir}/prelude/{file}.dewy" {return}
     let seen:dict<int64 bool>=dict<int64 bool>()
     if not concurrency_transfer(payload @seen) {fatal(pos "{name} payload must satisfy Send{concurrency_why()}; use a payload whose fields can cross tasks");}
+    let clash=queue_payload_clash(payload name)
+    if clash.length >? 0 {fatal(pos clash);}
 }
 concurrency_atomic_call=(n:TaskWord):>void=>$unsafe {
     if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 {return}
