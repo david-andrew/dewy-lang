@@ -2909,9 +2909,44 @@ value_type_member = (s: int, name: int, pos: int) -> int:
         t = int(globals[int(syms[s].ref)].type)
     if t == 0: return 0
     member = record_type_member(t, name)
-    if member == 0 and not record_has_field(t, name): member = handle_type_member(t, name)
+    if member == 0 and not record_has_member(t, name): member = handle_type_member(t, name)
     if member != 0 and k == .local: locals[int(syms[s].ref)].flags |= i32(LF_READ)
+    if handle_outcomes(t) != 0: handle_clash_warning(t, pos)
     member
+
+# (does the record type t have a field or method `name`?)
+record_has_member = (t0: int, name: int) -> bool:
+    t = prune(t0)
+    if record_has_field(t, name): return true
+    tkind(t) == .struct_ and structs[int(types[t].st)].decl != 0 and dewy_type_method(int(structs[int(types[t].st)].decl), name) >= 0
+
+# The clash rule (decisions.md, batch 7): an outcome whose short name the handle's type already
+# has as a member gets no shorthand; the member wins, with this warning, once per type.
+handle_clash_warned: {int: bool} = {}
+handle_clash_warning = (t0: int, pos: int):
+    t = prune(t0)
+    if handle_clash_warned.has(t): return
+    handle_clash_warned[t] = true
+    loop a in value_members(handle_outcomes(t)):
+        text = type_short_name(a)
+        if len(text) == 0 or text == "types": continue
+        if record_has_member(t, intern(text)): warn(pos, "{dt(t)} has a member `{text}` of its own, so its outcome {dt(a)} gets no `.{text}` shorthand: write `x.<{dt(a)}>` for the outcome")
+
+# Why `q.name` names no type on a wait handle t (the error that says which arm to write), or ""
+# when t is no handle.
+handle_member_error = (q: str, t: int, name: int) -> str:
+    outcomes = handle_outcomes(t)
+    if outcomes == 0: return ""
+    text = name_of(name)
+    named: int[]
+    loop a in value_members(outcomes):
+        if type_short_name(a) == text: named.push(prune(a))
+    if named.len() > 0 and record_has_member(t, name): return "`{q}.{text}` is a member of {dt(t)} itself, not its outcome {dt(named[0])}: write `{q}.<{dt(named[0])}>`"
+    if named.len() > 1:
+        shown: str[]
+        loop a in named: shown.push(dt(a))
+        return "{q} gives more than one type named {text} ({join(shown, ", ")}): write the one meant, `{q}.<{shown[0]}>`"
+    "{q} gives {dt(outcomes)}, none of them named {text}"
 
 # Type annotations and inferred literals share the same structural identity.
 # Each member carries its resolved type; source values remain separate.

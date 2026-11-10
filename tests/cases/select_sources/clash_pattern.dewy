@@ -1,0 +1,12 @@
+Clock:type = [
+    __t:Ticker
+    Tick:int64
+    next = ():>Tick | Canceled => __t.next
+]
+main = () => {
+    let c = Clock[ticker(1hour) 3]
+    match c.next {
+        <c.Tick> => printl"tick"
+        _ => printl"other"
+    }
+}

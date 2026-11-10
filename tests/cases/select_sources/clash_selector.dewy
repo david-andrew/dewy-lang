@@ -1,0 +1,13 @@
+# A member of the handle wins over the outcome of the same name (decisions.md, batch 7): `c.Tick`
+# reads the field, and `c.<Tick>` is the outcome.
+Clock:type = [
+    __t:Ticker
+    Tick:int64
+    next = ():>Tick | Canceled => __t.next
+]
+main = () => {
+    let c = Clock[ticker(1hour) 3]
+    let n:int64 = c.Tick
+    let t:c.<Tick> = Tick[]
+    printl"{n} {t is? Tick}"
+}

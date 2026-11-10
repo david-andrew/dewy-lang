@@ -1230,7 +1230,11 @@ A record loop over a literal array of types binds each as a type.
 A wait handle has its outcomes as type members: `heart.types` is everything the handle's
 wait gives (a channel's `T | Closed<T> | Canceled`, a ticker's `Tick | Canceled`), and an
 outcome whose short name only one alternative has is a member (`lines.string`,
-`lines.Closed`, `heart.Tick`) unless the handle's type has a member of that name. As a type
+`lines.Closed`, `heart.Tick`) unless the handle's type has a member of that name: then that
+member wins for reads, with a warning, and `heart.<Tick>` names the outcome; a pattern
+`<heart.Tick>` that would mean both is an error offering `heart.<Tick>`. An outcome whose short
+name two alternatives share gets no shorthand either, and asking for it says which
+`heart.<T>` to write. As a type
 `heart.Tick` is `Tick` and `heart.types & (Tick | Closed)` is `Tick | Closed`; as a pattern in a
 match on the wait itself it also names the source (see `select`).
 

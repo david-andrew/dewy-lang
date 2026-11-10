@@ -841,7 +841,12 @@ resolve_type_name = (tn: int) -> CheckerTypeName:
         if ms != 0 and syms[ms].kind != .module:
             member = value_type_member(ms, nm, nodes[tn].pos)
             if member != 0: return CheckerTypeName(0, member)
-            if syms[ms].kind == .local or syms[ms].kind == .global: fatal(nodes[tn].pos, "'{name_of(int(nodes[tn].sval))}' has no member '{name_of(nm)}' that is a type")
+            if syms[ms].kind == .local or syms[ms].kind == .global:
+                q = name_of(int(nodes[tn].sval))
+                vt = if syms[ms].kind == .local: int(locals[int(syms[ms].ref)].type) else: int(globals[int(syms[ms].ref)].type)
+                why = handle_member_error(q, vt, nm)
+                if len(why) > 0: fatal(nodes[tn].pos, why)
+                fatal(nodes[tn].pos, "'{q}' has no member '{name_of(nm)}' that is a type")
         if ms == 0 or syms[ms].kind != .module: fatal(nodes[tn].pos, "unknown module '{name_of(int(nodes[tn].sval))}'")
         s = module_lookup(int(syms[ms].ref), nm)
         if name_of(int(nodes[tn].sval))[0] != '$' and files[pos_file(nodes[tn].pos)].is_dewy: rational_one_spelling(int(syms[ms].ref), nm, nodes[tn].pos, "")
