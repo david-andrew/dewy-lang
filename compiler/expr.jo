@@ -6922,7 +6922,7 @@ select_check = (n: int):
             d = int(fns[int(nodes[a].sym)].decl)
             name = name_of(int(nodes[d].name))
             path = files[pos_file(nodes[d].pos)].path
-            if (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy") and select_place(kid(a, 0)): op = int(nodes[d].name)
+            if (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy" or path == lib_dir + "/prelude/mpmc.dewy") and select_place(kid(a, 0)): op = int(nodes[d].name)
         if op == 0: fatal(nodes[a].pos, "select waits on operations written in the call, on a local or a field: `@lines.receive`, `@heart.next`. It cannot follow a function value, a helper's result or an indexed element (bind `let ch = channels[i]`, then `@ch.receive`), and its own `timeout=` is the deadline")
         loop w in waits:
             if int(nodes[int(fns[int(nodes[w].sym)].decl)].name) == op and select_same_place(kid(w, 0), kid(a, 0)): fatal(nodes[a].pos, "this operation is listed twice: select takes at most one value from it, so write it once")

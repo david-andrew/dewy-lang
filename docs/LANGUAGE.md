@@ -3610,8 +3610,9 @@ main = () => {
 ```
 
 `select(...)` waits for the first of several waits (decisions.md, batch 7). Each argument
-is a wait written in the call, on a local or a field chain: `@lines.receive` or
-`@heart.next` (`@x.method` is the method itself, with `x` evaluated now). It gives the
+is a wait written in the call, on a local or a field chain: a channel's or `mpmc` queue's
+`@lines.receive`, or a ticker's `@heart.next` (`@x.method` is the method itself, with `x`
+evaluated now). It gives the
 union of their outcomes plus `Canceled`, so arms match by type: two `string` channels are
 one `string` arm, and every close is one `<Closed>` arm. `timeout=` adds `Timeout`; a ready
 wait wins a deadline already past, and `timeout=0s` is a poll. A wait that loses takes

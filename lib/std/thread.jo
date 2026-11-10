@@ -366,10 +366,10 @@ __ticker_wait = (t: __Ticker, deadline: int) -> int:
         wake = if deadline != 0 and deadline < due: deadline else: due
         __sleep_ns(min(wake - now, 1000000))
 
-# `select` (lib/std/tasks.jo) tries each wait it is given without blocking: while this
-# thread's word says so, a wait with nothing ready marks that and gives up (code 2, so its
-# result is a Canceled that select discards). Only a ready wait commits, so a losing
-# receive takes nothing.
+# `select` (lib/std/tasks.jo) tries each wait it is given without blocking (a channel's or mpmc
+# queue's receive, a ticker's next): while this thread's word says so, a wait with nothing
+# ready marks that and gives up (code 2, so its result is a Canceled that select discards).
+# Only a ready wait commits, so a losing receive takes nothing.
 __select_missed = () -> bool:
     s = __ts()
     if s[__TS_SELECT] == 0: return false

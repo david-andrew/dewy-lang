@@ -1,0 +1,29 @@
+# modes: native native-release
+# select and merged wait on an mpmc queue's receive too (decisions.md, batch 7).
+main = () => {
+    let jobs = mpmc<int64>(4)
+    let lines = channel<string>(4)
+    let heart = ticker(1hour)
+    printl"nothing yet: {select(@jobs.receive @lines.receive timeout=2ms) is? Timeout}"
+    jobs.send(3) or_throw
+    match select(@jobs.receive @lines.receive @heart.next) {
+        n:int64 => printl"job {n}"
+        s:string => printl"line {s}"
+        <Tick> => printl"tick"
+        <Closed> => printl"closed"
+        <Canceled> => printl"canceled"
+    }
+    lines.send("hello") or_throw
+    match select(@jobs.receive @lines.receive) {
+        n:int64 => printl"job {n}"
+        s:string => printl"line {s}"
+        <Closed> => printl"closed"
+        <Canceled> => printl"canceled"
+    }
+    jobs.send(4) or_throw
+    jobs.send(5) or_throw
+    jobs.close()
+    let total = 0
+    loop item in merged(@jobs.receive) { total += item or_throw }
+    printl"total {total}"
+}
