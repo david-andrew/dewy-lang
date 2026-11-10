@@ -26,6 +26,12 @@ usual; a source that grew more than the limit (or cannot be split) fails unless
 a `speed: accept` line names the program (its directory name, or its number).
 Such rows are left out of the throughput and phase comparisons.
 
+A program whose own files changed since the base is measured one more time:
+both compilers run on this source, so the row's change is the compiler alone
+and hides the program's own growth. The candidate also builds the base's copy
+(only for programs that changed), and the two give the source alone. Growth
+over the limit fails unless a `speed: accept` line names the program.
+
 Both compilers build the same compiler source in the self-build row, so a cost
 that the new source adds to its own compile (such as an import cycle that sends
 the compiler down a slow path) is paid on both sides and never shows. The
@@ -428,21 +434,98 @@ def names_item(reason: str, name: str) -> bool:
     return re.search(rf'(?<![\w.]){re.escape(word)}(?![\w]|\.\d)', reason, re.IGNORECASE) is not None
 
 
-def fallback_verdict(fallbacks: list[Fallback], limit: float,
-                     reasons: dict[str, list[str]]) -> tuple[list[str], list[str]]:
-    """(failures, accepted) for the source growth of the fallback rows: a source that grew more than `limit`
-    (or cannot be split) fails unless an accept line of its role's commit range names the program."""
+def growth_verdict(rows: list, limit: float, reasons: dict[str, list[str]], describe) -> tuple[list[str], list[str]]:
+    """(failures, accepted) for source growth: a source that grew more than `limit` (or cannot be split) fails
+    unless an accept line of its role's commit range names the program."""
     failures, waived = [], []
-    for fb in fallbacks:
-        if fb.growth is not None and fb.growth <= limit:
+    for row in rows:
+        if row.growth is not None and row.growth <= limit:
             continue
-        named = [r for r in reasons.get(fb.role, []) if names_item(r, fb.name)]
-        what = (f'{fb.name}: {fb.role} {fb.revision} measured an older copy of the source'
-                + (f'; this source grew {fb.growth:+.2f}% (limit {limit:g}%)' if fb.growth is not None
-                   else '; the candidate cannot build that copy, so the growth is unknown')
-                + f' ({fb.old / 1e9:.4f} G old source -> {fb.new / 1e9:.4f} G this source)')
+        named = [r for r in reasons.get(row.role, []) if names_item(r, row.name)]
+        what = describe(row, limit)
         (waived if named else failures).append(f'{what}: accepted: {named[0]}' if named else what)
     return failures, waived
+
+
+def fallback_verdict(fallbacks: list[Fallback], limit: float,
+                     reasons: dict[str, list[str]]) -> tuple[list[str], list[str]]:
+    """The growth verdict of the fallback rows (the reference measured an older copy of the source)."""
+    return growth_verdict(fallbacks, limit, reasons, lambda fb, limit: (
+        f'{fb.name}: {fb.role} {fb.revision} measured an older copy of the source'
+        + (f'; this source grew {fb.growth:+.2f}% (limit {limit:g}%)' if fb.growth is not None
+           else '; the candidate cannot build that copy, so the growth is unknown')
+        + f' ({fb.old / 1e9:.4f} G old source -> {fb.new / 1e9:.4f} G this source)'))
+
+
+def program_text(root: Path, source: str) -> dict[str, bytes]:
+    """A program's own files under `root`: its entry and every file it imports by relative path."""
+    top = root.resolve()
+    files = {}
+    for path in speed_corpus.root_files(top / source):
+        try:
+            name = str(path.relative_to(top))
+        except ValueError:
+            name = str(path)
+        files[name] = path.read_bytes()
+    return files
+
+
+def source_drifted(inputs: Path | None, source: str) -> bool:
+    """Does the program's source differ between a reference's checkout and this one? Only programs the
+    reference holds (the ladder and the examples) can; the compiler itself has its own self-build row."""
+    if inputs is None or Path(source).is_absolute() or source == 'compiler/main.jo' or not (inputs / source).is_file():
+        return False
+    return program_text(inputs, source) != program_text(ROOT, source)
+
+
+@dataclass
+class Drift:
+    """A panel row whose reference compiler built this checkout's source, but whose source differs from the
+    reference's own copy: `old` is the reference on this source, `new` the candidate on it, `same` the candidate on
+    the reference's copy (None when it cannot build that). Both compilers run on one source in the row, so only
+    this split shows the source's own growth."""
+    role: str
+    name: str
+    revision: str
+    old: int
+    new: int
+    same: int | None
+
+    @property
+    def compiler(self) -> float:
+        """Percent the candidate compiler costs over the reference, on this source (the row's own change)."""
+        return round(delta(self.old, self.new), 2) + 0.0
+
+    @property
+    def growth(self) -> float | None:
+        """Percent the source itself grew, for the candidate compiler."""
+        return None if self.same is None else round(delta(self.same, self.new), 2) + 0.0
+
+    def lines(self) -> list[str]:
+        out = [f'    ~~ SOURCE DRIFT {self.name}: this source differs from {self.role} {self.revision}\'s copy; the row '
+               'above runs both compilers on this source, so it shows the compiler alone']
+        if self.same is None:
+            out.append('       candidate on the old source: it cannot build that; no split')
+        else:
+            out.append(f'       candidate on the old source  {self.same / 1e9:8.4f} G')
+        out.append(f'       candidate on this source     {self.new / 1e9:8.4f} G  '
+                   + (f'{self.growth:+6.2f}%  (source alone)' if self.growth is not None else '(growth unknown)'))
+        out.append(f'       {self.role} on this source          {self.old / 1e9:8.4f} G  {self.compiler:+6.2f}%  '
+                   '(compiler alone, the row above)')
+        return out
+
+
+def drift_verdict(drifts: list[Drift], limit: float, reasons: dict[str, list[str]]) -> tuple[list[str], list[str]]:
+    """The growth verdict of the drifted rows: a program's own source growth over `limit` fails unless an accept
+    line of its role's commit range names the program."""
+    def describe(d: Drift, limit: float) -> str:
+        if d.growth is None:
+            return (f'{d.name}: its source differs from {d.role} {d.revision}\'s copy and the candidate cannot build '
+                    f'that copy, so the growth is unknown ({d.new / 1e9:.4f} G this source)')
+        return (f'{d.name}: its source differs from {d.role} {d.revision}\'s copy and grew {d.growth:+.2f}% '
+                f'(limit {limit:g}%; {d.same / 1e9:.4f} G old source -> {d.new / 1e9:.4f} G this source)')
+
+    return growth_verdict(drifts, limit, reasons, describe)
 
 
 def source_row(counter: Counter, candidate: Toolchain, base: Toolchain, counts: dict[str, int], notes: list[str],
@@ -1062,11 +1145,12 @@ def main(argv: list[str], current: Path) -> int:
         counts = {}
         base_counts = {}
         fallbacks: list[Fallback] = []
+        drifts: list[Drift] = []
         for name, source, flags in panel(args.release):
             new = measure(counter, candidate, source, flags, notes)
             counts[name] = new
             line = f'  {name:26}'
-            found = []
+            found, drifted = [], []
             for role, (revision, _, toolchain) in references.items():
                 old, own = measure_item(counter, toolchain, source, flags)
                 if role == 'base':
@@ -1090,11 +1174,23 @@ def main(argv: list[str], current: Path) -> int:
                 if over:
                     failures.append((role, name, change))
                 line += f'{prefix} {old / 1e9:8.4f} -> {new / 1e9:8.4f}  {change:+6.2f}%' + (' <-' if over else '   ')
+                if source_drifted(toolchain.inputs, source):
+                    # (the same source on both sides hides the program's own growth: measure the candidate on
+                    # the reference's copy too, only for programs whose files changed)
+                    try:
+                        same = measure(counter, candidate, str(toolchain.inputs / source), flags, [])
+                    except RuntimeError:
+                        same = None
+                    drifted.append(Drift(role, name, toolchain.label.split()[-1], old, new, same))
             print(line.rstrip(), flush=True)
             for fb in found:
                 for text in fb.lines():
                     print(text, flush=True)
+            for d in drifted:
+                for text in d.lines():
+                    print(text, flush=True)
             fallbacks += found
+            drifts += drifted
         source_row(counter, candidate, references['base'][2], counts, notes, max(args.limit, SOURCE_LIMIT), failures)
         for note in dict.fromkeys(notes):
             print(f'  ({note})')
@@ -1107,7 +1203,9 @@ def main(argv: list[str], current: Path) -> int:
             failures.append(('base', f'phase {row} (flagships)', change))
         print(f'  ({time.perf_counter() - started:.0f} s)')
     ranges = {role: accepted(git('log', '--format=%B', f'{commit}..HEAD')) for role, (_, commit, _) in references.items()}
-    growth_failures, growth_accepted = fallback_verdict(fallbacks, args.limit, ranges)
+    fallback_failures, growth_accepted = fallback_verdict(fallbacks, args.limit, ranges)
+    drift_failures, drift_accepted = drift_verdict(drifts, args.limit, ranges)
+    growth_accepted += drift_accepted
     for text in growth_accepted:
         print(f'speed: source growth accepted for {text}')
     base_failures = [f for f in failures if f[0] == 'base']
@@ -1120,13 +1218,19 @@ def main(argv: list[str], current: Path) -> int:
         print(f'speed: {name} needs {change:+.2f}% instructions vs {role} (limit {args.limit}%)', file=sys.stderr)
     for message in throughput_failures + hello_failures:
         print(f'speed: {message}', file=sys.stderr)
-    for message in growth_failures:
+    for message in fallback_failures:
         print(f'speed: FALLBACK {message}', file=sys.stderr)
-    if growth_failures:
+    if fallback_failures:
         print('speed: the base could not build that source, so its cost never reached a comparison: add a line '
               '`speed: accept <reason naming the program>` to a commit message since then, or change the source',
+              file=sys.stderr)
+    for message in drift_failures:
+        print(f'speed: SOURCE DRIFT {message}', file=sys.stderr)
+    if drift_failures:
+        print('speed: both compilers ran on this source, so the program\'s own growth is no compiler cost: add a line '
+              '`speed: accept <reason naming the program>` to a commit message since then, or trim the source',
               file=sys.stderr)
     if remaining or throughput_failures:
         print('speed: add a line `speed: accept <reason>` to the commit message when the cost is intended',
               file=sys.stderr)
-    return 1 if remaining or throughput_failures or hello_failures or growth_failures else 0
+    return 1 if remaining or throughput_failures or hello_failures or fallback_failures or drift_failures else 0
