@@ -1,0 +1,304 @@
+$runtime_checks
+from p"ast.jo" import (NF_CHECKED NF_SPREAD add_flag clear_flag clone has_flag kid kids mk nkids nodes set_list)
+from p"check.jo" import (check_struct_fields syms)
+from p"checker_call_queries.dewy" import (save_call_order)
+from p"checker_expr.dewy" import (check_expr finish_arg lookup)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_int bc_let bc_stmt)
+from p"checks_thin_expr.dewy" import (array_has_spread is_map_type ud_path)
+from p"expr.jo" import (bc_count dewy_record_schema dewy_record_target dewy_spread_source_type finalize_literal is_dewy_set_type is_nd last_checked map_args ntype path_key type_node_of type_sequences type_value_expr unnamed)
+from p"refine.jo" import (representation_type)
+from p"type_member_checks.dewy" import (type_member_type)
+from p"type_ops.dewy" import (dt mk_array)
+from p"types.jo" import (fields has_var is_union prune struct_targ structs telem tkind type_eq types union_members variants)
+from p"util.jo" import (fatal files name_of pos_file)
+
+RareExprWord:type=int64<overflow='wrap'>
+dewy_positional_fits=(n:RareExprWord target:RareExprWord):>bool=>$unsafe {
+    if not files[pos_file(nodes.ptr[n].pos)].is_dewy or array_has_spread(n) {return false}
+    let d=RareExprWord(structs.ptr[RareExprWord(types.ptr[target].st)].decl)
+    if d =? 0 or not files[pos_file(nodes.ptr[d].pos)].is_dewy {return false}
+    loop i in [0..nkids(n)) {
+        if nodes.ptr[kid(n i)].kind =? 'namedarg' {return false}
+    }
+    true
+}
+# Expand record fields for overload scoring, or capture operands in source
+# order for construction. Later entries replace earlier fields; even overwritten
+# operands are evaluated. Captured records retain their independent values.
+dewy_record_spread_entries=(n:RareExprWord expected:RareExprWord @stmts:array<int64> capture:bool):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    let positions=dict<int64 int64>()
+    let field_decls=dict<int64 int64>()
+    let target=dewy_record_target(expected)
+    let target_si:RareExprWord=-1
+    if target not=? 0 {
+        target_si=RareExprWord(types.ptr[target].st)
+        check_struct_fields(target_si)
+    }
+    loop entry in kids(n) {
+        let pos=nodes.ptr[entry].pos
+        let members:array<int64>=[]
+        if has_flag(entry NF_SPREAD) {
+            let source=entry
+            let st=dewy_spread_source_type(entry)
+            if types.ptr[st].kind not=? 'struct_' or is_map_type(st) or is_dewy_set_type(st) {fatal(pos "only records can be spread into a record (found {dt(st)})")}
+            let si=RareExprWord(types.ptr[st].st)
+            check_struct_fields(si)
+            if capture {
+                let name="$record_spread{bc_count}"
+                bc_count += 1
+                clear_flag(entry NF_SPREAD)
+                stmts.push(bc_let(name entry pos))
+                source=bc_ident(name pos)
+            }
+            loop i in [0..RareExprWord(structs.ptr[si].nfields)) {
+                let fi=RareExprWord(structs.ptr[si].fields) + i
+                let field=mk('namedarg' pos)
+                nodes.ptr[field].name=fields.ptr[fi].name
+                let value=bc_field(source name_of(RareExprWord(fields.ptr[fi].name)) pos)
+                if not capture {
+                    nodes.ptr[value].type=fields.ptr[fi].type
+                    add_flag(value NF_CHECKED)
+                }
+                nodes.ptr[field].a=int32(value)
+                members.push(field)
+            }
+        }
+        else {
+            if nodes.ptr[entry].kind not=? 'namedarg' {fatal(pos "a record literal needs named fields or record spreads")}
+            let field=entry
+            if capture and not type_value_expr(RareExprWord(nodes.ptr[entry].a)) {
+                let name="$record_field{bc_count}"
+                bc_count += 1
+                let decl=bc_let(name RareExprWord(nodes.ptr[entry].a) pos)
+                stmts.push(decl)
+                field=mk('namedarg' pos)
+                nodes.ptr[field].name=nodes.ptr[entry].name
+                nodes.ptr[field].a=int32(bc_ident(name pos))
+                field_decls[field]=decl
+            }
+            members.push(field)
+        }
+        loop field in members {
+            let name=RareExprWord(nodes.ptr[field].name)
+            let at=positions.get(name)
+            if at not=? none {out[at]=field} else {
+                positions[name]=out.length
+                out.push(field)
+            }
+        }
+    }
+    # Context belongs to the surviving fields. An overwritten value still runs,
+    # but need not have the type of the field that eventually replaces it.
+    if capture and target_si >=? 0 {
+        loop field in out {
+            let decl=field_decls.get(field)
+            if decl not=? none {
+                loop i in [0..RareExprWord(structs.ptr[target_si].nfields)) {
+                    let fi=RareExprWord(structs.ptr[target_si].fields) + i
+                    if fields.ptr[fi].name =? nodes.ptr[field].name {nodes.ptr[decl].a=int32(type_node_of(RareExprWord(fields.ptr[fi].type) nodes.ptr[field].pos)); break}
+                }
+            }
+        }
+    }
+    out
+}
+# Canonical field order gives structurally equal anonymous records one type.
+# Values are still checked/evaluated in source order by the ordinary constructor.
+dewy_record_type=(n:int64):>int64=>$unsafe {
+    let args=kids(n)
+    let names=dict<int64 bool>()
+    loop field in args {
+        let name=RareExprWord(nodes.ptr[field].name)
+        if names.has(name) {fatal(nodes.ptr[field].pos "duplicate record field '{name_of(name)}'")}
+        names[name]=true
+        let value=RareExprWord(nodes.ptr[field].a)
+        check_expr(value 0);
+        let t=finalize_literal(value)
+        # (`[Png = Png]`: a field whose value is a type, comptime only, decisions.md batch 7)
+        if tkind(t) =? 'typeval' and not has_var(telem(t)) {t=type_member_type(telem(t))} else if has_var(t) or tkind(t) =? 'void_' or tkind(t) =? 'typeval' {
+            fatal(nodes.ptr[value].pos "cannot infer record field '{name_of(name)}'; give the record a type annotation")
+        }
+        add_flag(value NF_CHECKED)
+        nodes.ptr[field].type=int32(t)
+    }
+    dewy_record_schema(n args)
+}
+# A compile-time sequence of types (decisions.md, batch 7): an array literal of types, `[Png
+# Jpeg]`, or a name bound to one (a parameter of a call specialized on it, type_sequence_call).
+# Its types, [] when e is no such sequence.
+type_sequence=(e:RareExprWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    let k=nodes.ptr[e].kind
+    if k =? 'ident' {
+        let s=lookup(RareExprWord(nodes.ptr[e].name))
+        if s not=? 0 and syms.ptr[s].kind =? 'const_' and type_sequences.has(RareExprWord(syms.ptr[s].ref)) {return type_sequences[RareExprWord(syms.ptr[s].ref)]}
+        return out
+    }
+    if k not=? 'array' or nkids(e) =? 0 {return out}
+    loop i in [0..nkids(e)) {
+        if not type_value_expr(kid(e i)) {return []}
+    }
+    loop i in [0..nkids(e)) {
+        let t=prune(check_expr(kid(e i) 0))
+        if tkind(t) not=? 'typeval' {fatal(nodes.ptr[kid(e i)].pos "expected a type")}
+        out.push(prune(telem(t)))
+    }
+    out
+}
+# (each ident in n named renames[2i] renamed renames[2i + 1], lambdas' bodies too)
+rename_idents=(n:RareExprWord renames:array<int64>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {
+        loop i in [0..renames.length // 2) {
+            if RareExprWord(nodes.ptr[n].name) =? renames[2 * i] {
+                nodes.ptr[n].name=int32(renames[2 * i + 1])
+                return
+            }
+        }
+        return
+    }
+    rename_idents(RareExprWord(nodes.ptr[n].a) renames)
+    rename_idents(RareExprWord(nodes.ptr[n].b) renames)
+    if k not=? 'for_' {
+        rename_idents(RareExprWord(nodes.ptr[n].c) renames)
+        if k not=? 'partial' {rename_idents(RareExprWord(nodes.ptr[n].d) renames)}
+    }
+    loop i in [0..nkids(n)) {rename_idents(kid(n i) renames)}
+}
+# A record loop's scopes over a sequence of types, each binding the loop's name as that type.
+type_sequence_scopes=(e:RareExprWord binder:RareExprWord):>array<int64>=>$unsafe {
+    let out:array<int64>=[]
+    loop t in type_sequence(e) {
+        let scope=mk('reflect_scope' nodes.ptr[e].pos)
+        nodes.ptr[scope].name=int32(binder)
+        nodes.ptr[scope].ival=t
+        nodes.ptr[scope].aux=2
+        out.push(scope)
+    }
+    out
+}
+variant_ctor=(n:RareExprWord et:RareExprWord vi:RareExprWord args:array<int64>):>int64=>$unsafe {
+    let si=RareExprWord(types.ptr[prune(et)].st)
+    let v=RareExprWord(structs.ptr[si].variants) + vi
+    let nf=RareExprWord(variants.ptr[v].nfields)
+    let pnames:array<int64>=[]
+    let hasdef:array<bool>=[]
+    loop i in [0..nf) {
+        pnames.push(RareExprWord(fields.ptr[RareExprWord(variants.ptr[v].fields) + i].name))
+        hasdef.push(false)
+    }
+    let mapped:array<int64>=[]
+    let err=map_args(pnames hasdef args @mapped)
+    if (err as array<uint8>).length >? 0 {fatal(nodes.ptr[n].pos "in {name_of(RareExprWord(variants.ptr[v].name))}(...): {err}")}
+    loop i in [0..nf) {finish_arg(mapped[i] RareExprWord(fields.ptr[RareExprWord(variants.ptr[v].fields) + i].type) false)}
+    nodes.ptr[n].kind='call'
+    nodes.ptr[n].aux=3
+    nodes.ptr[n].aux2=int32(vi)
+    save_call_order(n args mapped)
+    set_list(n mapped)
+    nodes.ptr[n].type=int32(et)
+    nodes.ptr[n].a=0
+    et
+}
+# a function's name and parameters as written: circle(center: vec2, radius: f64, c: vec4, segments: int = 0)
+# f(..., e, ...) where e is a union (Walker | Flyer) and f has an overload taking each of its
+# members there: `let u = e; if u is Walker: f(..., u, ...) else ...` (the type it gives back), or
+# -1 when there is no such argument
+union_dispatch=(n:RareExprWord name:RareExprWord decls:array<int64> args:array<int64> expected:RareExprWord):>int64=>$unsafe {
+    loop i in 0.. and a0 in args {
+        let a=unnamed(a0)
+        if nodes.ptr[a].type =? 0 {continue}
+        let ut=prune(ntype(a))
+        if not is_union(ut) {continue}
+        let ms=union_members(ut)
+        let every=true
+        loop m in ms {
+            let found=false
+            loop d in decls {
+                let sig=fn_sig(d)
+                if i <? sig.params.length and not has_var(prune(sig.params[i])) and type_eq(sig.params[i] m) {found=true}
+            }
+            if not found {every=false}
+        }
+        if not every {continue}
+        let pos=nodes.ptr[n].pos
+        let un="__ud{bc_count}"
+        bc_count += 1
+        # (a variable or field is tested and passed itself, narrowed: a `mut` parameter changes it)
+        let place=nodes.ptr[a].kind =? 'ident' or (nodes.ptr[a].kind =? 'field' and (path_key(a) as array<uint8>).length >? 0)
+        # (from the last member, which needs no test, back to the first)
+        let chain:RareExprWord=0
+        let j=ms.length - 1
+        loop j >=? 0 {
+            let arm:array<int64>=[]
+            loop k in 0.. and x in args {
+                if k =? i {
+                    let v:RareExprWord=0
+                    if place {v=ud_path(a)} else {v=bc_ident(un pos)}
+                    if nodes.ptr[x].kind =? 'namedarg' {
+                        let na=mk('namedarg' nodes.ptr[x].pos)
+                        nodes.ptr[na].name=nodes.ptr[x].name
+                        nodes.ptr[na].a=int32(v)
+                        arm.push(na)
+                    }
+                    else {arm.push(v)}
+                }
+                else {arm.push(clone(x))}
+            }
+            let body=bc_block([bc_stmt(bc_call(name_of(name) arm pos) pos)] pos)
+            if chain =? 0 {chain=body} else {
+                let it=mk('istype' pos)
+                if place {nodes.ptr[it].a=int32(ud_path(a))} else {nodes.ptr[it].a=int32(bc_ident(un pos))}
+                let ty=mk('tname' pos)
+                nodes.ptr[ty].aux=-7
+                nodes.ptr[ty].ival=ms[j]
+                nodes.ptr[it].b=int32(ty)
+                let f=mk('if_' pos)
+                nodes.ptr[f].a=int32(it)
+                nodes.ptr[f].b=int32(body)
+                if nodes.ptr[chain].kind =? 'block' {nodes.ptr[f].c=int32(chain)} else {nodes.ptr[f].c=int32(bc_block([chain] pos))}
+                chain=f
+            }
+            j -= 1
+        }
+        let blk:RareExprWord=0
+        if place {blk=bc_block([chain] pos)} else {blk=bc_block([bc_let(un a pos) chain] pos)}
+        nodes.ptr[n]=nodes.ptr[blk]
+        return check_expr(n expected)
+    }
+    -1
+}
+# ---------------- 2-D array literals ----------------
+# [1 2; 3 4] is __array2([1, 2, 3, 4], 2, 2); [a; b] with arrays a, b is __array2_rows([a, b])
+check_matrix=(n:RareExprWord expected:RareExprWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let els=kids(n)
+    let ncols=RareExprWord(nodes.ptr[n].ival)
+    let arr=mk('array' pos)
+    let args:array<int64>=[]
+    let fname="__array2"
+    if ncols =? 1 and els.length >? 0 {
+        let t0=prune(check_expr(els[0] 0))
+        els[0]=last_checked
+        if types.ptr[t0].kind =? 'array' {fname="__array2_rows"} else if is_nd(t0) {fname="__array_stack"}
+    }
+    set_list(arr els)
+    args.push(arr)
+    if fname =? "__array2" {
+        # with a known element type, literals take it (m: f32[,] = [1 2; 3 4])
+        let ex=representation_type(expected)
+        if ex not=? 0 and is_nd(ex) {
+            check_expr(arr mk_array(struct_targ(RareExprWord(types.ptr[ex].st) 0)));
+        }
+        let rows:RareExprWord=0
+        if ncols >? 0 {rows=els.length // ncols}
+        args.push(bc_int(rows pos))
+        args.push(bc_int(ncols pos))
+    }
+    let c=bc_call(fname args pos)
+    nodes.ptr[n]=nodes.ptr[c]
+    check_expr(n expected)
+}

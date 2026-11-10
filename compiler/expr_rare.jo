@@ -1,0 +1,403 @@
+use 'expr.jo'
+use 'data_access.dewy'
+use 'program_settings.dewy'
+use 'call_style.dewy'
+use 'secret_checks.dewy'
+use 'checks_read_code.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'unit_rare.dewy'
+use 'unit_ops.dewy'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'check.jo'
+use 'checks_place_updates.dewy'
+use 'checks_thin.dewy'
+use 'checks_const_views.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'settings.jo'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'refine_ops.dewy'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'prelude_ops.dewy'
+use 'ide.jo'
+use 'ide_text.dewy'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+use 'checks_shaped.dewy'
+use 'checks_thin_expr.dewy'
+use 'select_checks.dewy'
+use 'type_member_checks.dewy'
+use 'dotted_checks.dewy'
+use 'expr_hints.dewy'
+use 'partial_checks.dewy'
+use 'narrowing_checks.dewy'
+
+dewy_positional_fits = (n: int, target: int) -> bool:
+    if not files[pos_file(nodes[n].pos)].is_dewy or array_has_spread(n): return false
+    d = int(structs[int(types[target].st)].decl)
+    if d == 0 or not files[pos_file(nodes[d].pos)].is_dewy: return false
+    loop i in [0..nkids(n)):
+        if nodes[kid(n, i)].kind == .namedarg: return false
+    true
+# Expand record fields for overload scoring, or capture operands in source
+# order for construction. Later entries replace earlier fields; even overwritten
+# operands are evaluated. Captured records retain their independent values.
+dewy_record_spread_entries = (n: int, expected: int, stmts: mut int[], capture: bool) -> int[]:
+    out: int[]
+    positions: {int: int} = {}
+    field_decls: {int: int} = {}
+    target = dewy_record_target(expected)
+    target_si = -1
+    if target != 0:
+        target_si = int(types[target].st)
+        check_struct_fields(target_si)
+    loop entry in kids(n):
+        pos = nodes[entry].pos
+        members: int[]
+        if has_flag(entry, NF_SPREAD):
+            source = entry
+            st = dewy_spread_source_type(entry)
+            if types[st].kind != .struct_ or is_map_type(st) or is_dewy_set_type(st): fatal(pos, "only records can be spread into a record (found {dt(st)})")
+            si = int(types[st].st)
+            check_struct_fields(si)
+            if capture:
+                name = "$record_spread{bc_count}"
+                bc_count += 1
+                clear_flag(entry, NF_SPREAD)
+                stmts.push(bc_let(name, entry, pos))
+                source = bc_ident(name, pos)
+            loop i in [0..int(structs[si].nfields)):
+                fi = int(structs[si].fields) + i
+                field = mk(.namedarg, pos)
+                nodes[field].name = fields[fi].name
+                value = bc_field(source, name_of(int(fields[fi].name)), pos)
+                if not capture:
+                    nodes[value].type = fields[fi].type
+                    add_flag(value, NF_CHECKED)
+                nodes[field].a = i32(value)
+                members.push(field)
+        else:
+            if nodes[entry].kind != .namedarg: fatal(pos, "a record literal needs named fields or record spreads")
+            field = entry
+            if capture and not type_value_expr(int(nodes[entry].a)):
+                name = "$record_field{bc_count}"
+                bc_count += 1
+                decl = bc_let(name, int(nodes[entry].a), pos)
+                stmts.push(decl)
+                field = mk(.namedarg, pos)
+                nodes[field].name = nodes[entry].name
+                nodes[field].a = i32(bc_ident(name, pos))
+                field_decls[field] = decl
+            members.push(field)
+        loop field in members:
+            name = int(nodes[field].name)
+            if let at = positions.get(name): out[at] = field
+            else:
+                positions[name] = out.len()
+                out.push(field)
+    # Context belongs to the surviving fields. An overwritten value still runs,
+    # but need not have the type of the field that eventually replaces it.
+    if capture and target_si >= 0:
+        loop field in out:
+            if let decl = field_decls.get(field):
+                loop i in [0..int(structs[target_si].nfields)):
+                    fi = int(structs[target_si].fields) + i
+                    if fields[fi].name == nodes[field].name: nodes[decl].a = i32(type_node_of(int(fields[fi].type), nodes[field].pos)); break
+    out
+# Canonical field order gives structurally equal anonymous records one type.
+# Values are still checked/evaluated in source order by the ordinary constructor.
+dewy_record_type = (n: int) -> int:
+    args = kids(n)
+    names: {int: bool} = {}
+    loop field in args:
+        name = int(nodes[field].name)
+        if names.has(name): fatal(nodes[field].pos, "duplicate record field '{name_of(name)}'")
+        names[name] = true
+        value = int(nodes[field].a)
+        check_expr(value, 0)
+        t = finalize_literal(value)
+        # (`[Png = Png]`: a field whose value is a type, comptime only, decisions.md batch 7)
+        if tkind(t) == .typeval and not has_var(telem(t)): t = type_member_type(telem(t))
+        else if has_var(t) or tkind(t) == .void_ or tkind(t) == .typeval:
+            fatal(nodes[value].pos, "cannot infer record field '{name_of(name)}'; give the record a type annotation")
+        add_flag(value, NF_CHECKED)
+        nodes[field].type = i32(t)
+    dewy_record_schema(n, args)
+# A compile-time sequence of types (decisions.md, batch 7): an array literal of types, `[Png
+# Jpeg]`, or a name bound to one (a parameter of a call specialized on it, type_sequence_call).
+# Its types, [] when e is no such sequence.
+type_sequence = (e: int) -> int[]:
+    out: int[]
+    k = nodes[e].kind
+    if k == .ident:
+        s = lookup(int(nodes[e].name))
+        if s != 0 and syms[s].kind == .const_ and type_sequences.has(int(syms[s].ref)): return type_sequences[int(syms[s].ref)]
+        return out
+    if k != .array or nkids(e) == 0: return out
+    loop i in [0..nkids(e)):
+        if not type_value_expr(kid(e, i)): return []
+    loop i in [0..nkids(e)):
+        t = prune(check_expr(kid(e, i), 0))
+        if tkind(t) != .typeval: fatal(nodes[kid(e, i)].pos, "expected a type")
+        out.push(prune(telem(t)))
+    out
+# (each ident in n named renames[2i] renamed renames[2i + 1], lambdas' bodies too)
+rename_idents = (n: int, renames: int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .ident:
+        loop i in [0..renames.len() / 2):
+            if int(nodes[n].name) == renames[2 * i]:
+                nodes[n].name = i32(renames[2 * i + 1])
+                return
+        return
+    rename_idents(int(nodes[n].a), renames)
+    rename_idents(int(nodes[n].b), renames)
+    if k != .for_:
+        rename_idents(int(nodes[n].c), renames)
+        if k != .partial: rename_idents(int(nodes[n].d), renames)
+    loop i in [0..nkids(n)): rename_idents(kid(n, i), renames)
+# A record loop's scopes over a sequence of types, each binding the loop's name as that type.
+type_sequence_scopes = (e: int, binder: int) -> int[]:
+    out: int[]
+    loop t in type_sequence(e):
+        scope = mk(.reflect_scope, nodes[e].pos)
+        nodes[scope].name = i32(binder)
+        nodes[scope].ival = t
+        nodes[scope].aux = 2
+        out.push(scope)
+    out
+variant_ctor = (n: int, et: int, vi: int, args: int[]) -> int:
+    si = int(types[prune(et)].st)
+    v = int(structs[si].variants) + vi
+    nf = int(variants[v].nfields)
+    pnames: int[]
+    hasdef: bool[]
+    loop i in [0..nf):
+        pnames.push(int(fields[int(variants[v].fields) + i].name))
+        hasdef.push(false)
+    mapped: int[]
+    err = map_args(pnames, hasdef, args, mapped)
+    if len(err) > 0: fatal(nodes[n].pos, "in {name_of(int(variants[v].name))}(...): {err}")
+    loop i in [0..nf): finish_arg(mapped[i], int(fields[int(variants[v].fields) + i].type), false)
+    nodes[n].kind = .call
+    nodes[n].aux = 3
+    nodes[n].aux2 = i32(vi)
+    save_call_order(n, args, mapped)
+    set_list(n, mapped)
+    nodes[n].type = i32(et)
+    nodes[n].a = 0
+    et
+# a function's name and parameters as written: circle(center: vec2, radius: f64, c: vec4, segments: int = 0)
+# f(..., e, ...) where e is a union (Walker | Flyer) and f has an overload taking each of its
+# members there: `let u = e; if u is Walker: f(..., u, ...) else ...` (the type it gives back), or
+# -1 when there is no such argument
+union_dispatch = (n: int, name: int, decls: int[], args: int[], expected: int) -> int:
+    loop i in 0.. and a0 in args:
+        a = unnamed(a0)
+        if nodes[a].type == 0: continue
+        ut = prune(ntype(a))
+        if not is_union(ut): continue
+        ms = union_members(ut)
+        every = true
+        loop m in ms:
+            found = false
+            loop d in decls:
+                sig = fn_sig(d)
+                if i < sig.params.len() and not has_var(prune(sig.params[i])) and type_eq(sig.params[i], m): found = true
+            if not found: every = false
+        if not every: continue
+        pos = nodes[n].pos
+        un = "__ud{bc_count}"
+        bc_count += 1
+        # (a variable or field is tested and passed itself, narrowed: a `mut` parameter changes it)
+        place = nodes[a].kind == .ident or (nodes[a].kind == .field and len(path_key(a)) > 0)
+        # (from the last member, which needs no test, back to the first)
+        chain = 0
+        j = ms.len() - 1
+        loop j >= 0:
+            arm: int[]
+            loop k in 0.. and x in args:
+                if k == i:
+                    v = 0
+                    if place: v = ud_path(a)
+                    else: v = bc_ident(un, pos)
+                    if nodes[x].kind == .namedarg:
+                        na = mk(.namedarg, nodes[x].pos)
+                        nodes[na].name = nodes[x].name
+                        nodes[na].a = i32(v)
+                        arm.push(na)
+                    else: arm.push(v)
+                else: arm.push(clone(x))
+            body = bc_block([bc_stmt(bc_call(name_of(name), arm, pos), pos)], pos)
+            if chain == 0: chain = body
+            else:
+                it = mk(.istype, pos)
+                if place: nodes[it].a = i32(ud_path(a))
+                else: nodes[it].a = i32(bc_ident(un, pos))
+                ty = mk(.tname, pos)
+                nodes[ty].aux = -7
+                nodes[ty].ival = ms[j]
+                nodes[it].b = i32(ty)
+                f = mk(.if_, pos)
+                nodes[f].a = i32(it)
+                nodes[f].b = i32(body)
+                if nodes[chain].kind == .block: nodes[f].c = i32(chain)
+                else: nodes[f].c = i32(bc_block([chain], pos))
+                chain = f
+            j -= 1
+        blk = 0
+        if place: blk = bc_block([chain], pos)
+        else: blk = bc_block([bc_let(un, a, pos), chain], pos)
+        nodes[n] = nodes[blk]
+        return check_expr(n, expected)
+    -1
+# ---------------- 2-D array literals ----------------
+# [1 2; 3 4] is __array2([1, 2, 3, 4], 2, 2); [a; b] with arrays a, b is __array2_rows([a, b])
+check_matrix = (n: int, expected: int) -> int:
+    pos = nodes[n].pos
+    els = kids(n)
+    ncols = int(nodes[n].ival)
+    arr = mk(.array, pos)
+    args: int[]
+    fname = "__array2"
+    if ncols == 1 and els.len() > 0:
+        t0 = prune(check_expr(els[0], 0))
+        els[0] = last_checked
+        if types[t0].kind == .array: fname = "__array2_rows"
+        else if is_nd(t0): fname = "__array_stack"
+    set_list(arr, els)
+    args.push(arr)
+    if fname == "__array2":
+        # with a known element type, literals take it (m: f32[,] = [1 2; 3 4])
+        ex = representation_type(expected)
+        if ex != 0 and is_nd(ex):
+            check_expr(arr, mk_array(struct_targ(int(types[ex].st), 0)))
+        rows = 0
+        if ncols > 0: rows = els.len() / ncols
+        args.push(bc_int(rows, pos))
+        args.push(bc_int(ncols, pos))
+    c = bc_call(fname, args, pos)
+    nodes[n] = nodes[c]
+    check_expr(n, expected)
