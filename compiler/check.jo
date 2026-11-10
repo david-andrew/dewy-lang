@@ -1688,10 +1688,16 @@ dewy_cursor_loop = (s: int) -> bool:
     check_stmt(s)
     true
 
+# An iterator loop's iterable written with `or_throw` after it (`loop x in inbox or_throw {`),
+# by its node: the failures to forward (a type node), or 0 for all of them.
+throwing_iters: {int: int} = {}
+
 dewy_iterator_loop = (s: int, place: int = 0) -> bool:
     it = int(nodes[s].a)
     pos = nodes[s].pos
     if place == 0 and (nodes[it].kind == .range or not dewy_at(pos) or not dewy_iterator_type(prune(ntype(it)))): return false
+    # (`loop x in inbox or_throw {`: each step's failures leave the function, so x is the payload)
+    throwing = place == 0 and throwing_iters.has(it)
     if has_flag(s, NF_MUT): fatal(pos, "an iterator yields values; `loop @item in items` needs stored array elements")
     if nkids(s) != 1: fatal(pos, "an iterator loop binds one value; unpack it in the body")
     step = "__step{bc_count}"
@@ -1717,6 +1723,12 @@ dewy_iterator_loop = (s: int, place: int = 0) -> bool:
         nodes[element].name = nodes[binder].name
         nodes[element].a = nodes[binder].a
     nodes[element].b = i32(bc_ident(step, pos))
+    if throwing:
+        # (after the none test, so only the payload and its failures remain)
+        thrown = mk(.propagate, nodes[binder].pos)
+        nodes[thrown].a = nodes[element].b
+        nodes[thrown].b = i32(throwing_iters[it])
+        nodes[element].b = i32(thrown)
     body = lx_block([taken, lx_if(finished, mk(.break_, pos), pos), element] + kids(int(nodes[s].b)), pos)
     steps = mk(.while_, pos)
     nodes[steps].a = i32(bc_bool(true, pos))

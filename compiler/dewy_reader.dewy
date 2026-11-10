@@ -3813,26 +3813,10 @@ rd_dc_expr=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>
             continue
         }
         if ((op =? 'kw_or_throw') and (minimum <=? 48)) {
-            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-            let n:int64=node_mk(@reader_nodes 'propagate' pos)
-            reader_nodes[n].a = int32<overflow='wrap'>(left)
-            let next:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
-            if not next.space and (next.symbol =? 'langle' or next.symbol =? 'lt') {
-                reader_ctx.tokens[reader_ctx.at].symbol = 'langle'
-                reader_ctx.at = int64<overflow='wrap'>(reader_ctx.at) + 1
-                reader_ctx.reader.dc_type_args = int64<overflow='wrap'>(reader_ctx.reader.dc_type_args) + 1
-                let kinds:int64=rd_dc_annotation(@reader_ctx @reader_nodes)
-                reader_ctx.reader.dc_type_args = int64<overflow='wrap'>(reader_ctx.reader.dc_type_args) - 1
-                if kinds =? 0 {return 0}
-                if not rd_dn_accept(@reader_ctx 'rangle') {
-                    if not (reader_ctx.reader.dn_edits_on and rd_dn_closer_joined(@reader_ctx)) {
-                        return rd_dc_hint(@reader_ctx pos "`or_throw<...>` names the failures to forward as one type: `or_throw<Missing | ParseError>`")
-                    }
-                    rd_dn_split_closer(@reader_ctx);
-                }
-                reader_nodes[n].b = int32<overflow='wrap'>(kinds)
+            left = rd_dc_propagate(@reader_ctx @reader_nodes left pos)
+            if (left =? 0) {
+                return 0
             }
-            left = n
             juxt_head = false
             continue
         }
@@ -6299,6 +6283,31 @@ rd_dc_intrinsic_next=(@reader_ctx:ParserContext):>bool=>$unsafe {
     (rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at]) =? "intrinsic")
 }
 
+# Postfix `or_throw`, with its optional `<failures>`, on `left`; the cursor is at the keyword. The
+# propagate node, or 0 when its `<...>` is unread. Also a loop's iterable (`loop x in inbox or_throw {`).
+rd_dc_propagate=(@reader_ctx:ParserContext @reader_nodes:array<Node> left:int64 pos:int64):>int64=>$unsafe {
+    reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+    let n:int64=node_mk(@reader_nodes 'propagate' pos)
+    reader_nodes[n].a = int32<overflow='wrap'>(left)
+    let next:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
+    if not next.space and (next.symbol =? 'langle' or next.symbol =? 'lt') {
+        reader_ctx.tokens[reader_ctx.at].symbol = 'langle'
+        reader_ctx.at = int64<overflow='wrap'>(reader_ctx.at) + 1
+        reader_ctx.reader.dc_type_args = int64<overflow='wrap'>(reader_ctx.reader.dc_type_args) + 1
+        let kinds:int64=rd_dc_annotation(@reader_ctx @reader_nodes)
+        reader_ctx.reader.dc_type_args = int64<overflow='wrap'>(reader_ctx.reader.dc_type_args) - 1
+        if kinds =? 0 {return 0}
+        if not rd_dn_accept(@reader_ctx 'rangle') {
+            if not (reader_ctx.reader.dn_edits_on and rd_dn_closer_joined(@reader_ctx)) {
+                return rd_dc_hint(@reader_ctx pos "`or_throw<...>` names the failures to forward as one type: `or_throw<Missing | ParseError>`")
+            }
+            rd_dn_split_closer(@reader_ctx);
+        }
+        reader_nodes[n].b = int32<overflow='wrap'>(kinds)
+    }
+    n
+}
+
 # What a loop iterates, after `in` (dw_iterable): a range, bracketed (`[a..b]`, `[a..b)`, `(a..b]`,
 # `(a..b)`) or not (`a..b`, `a..`, inclusive), stepped by a second start (`[a,b..c)`), or a value
 # (its iteration, `__dewy_iter`). A live place (`in @xs`) is left unread (dc_unread).
@@ -6336,6 +6345,13 @@ rd_dc_iterable=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$un
     let first:int64=reader_ctx.reader.dc_range_first
     if (((rd_dn_peek(@reader_ctx) not=? 'lbrace') and (dn_power(rd_dn_peek(@reader_ctx)) >=? 96)) and (not rd_dc_signed_next(@reader_ctx))) {
         return 0
+    }
+    # (`loop x in inbox or_throw {`: the iterable's failures leave the function)
+    if (rd_dn_peek(@reader_ctx) =? 'kw_or_throw') {
+        first = rd_dc_propagate(@reader_ctx @reader_nodes first rd_mkpos(reader_ctx.file reader_ctx.tokens[opening].start))
+        if (first =? 0) {
+            return 0
+        }
     }
     let callee:int64=node_mk(@reader_nodes 'ident' rd_mkpos(reader_ctx.file reader_ctx.tokens[opening].start))
     reader_nodes[callee].name = int32<overflow='wrap'>(rd_dc_builtin(@reader_ctx 4))

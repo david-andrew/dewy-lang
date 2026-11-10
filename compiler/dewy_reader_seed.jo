@@ -1442,22 +1442,8 @@ rt_dc_expr = (minimum: int) -> int:
             juxt_head = false
             continue
         if op == .kw_or_throw and minimum <= 48:
-            dc_parser.at += 1
-            n = mk(.propagate, pos)
-            nodes[n].a = i32(left)
-            next = dc_parser.tokens[dc_parser.at]
-            if not next.space and (next.symbol == .langle or next.symbol == .lt):
-                dc_parser.tokens[dc_parser.at].symbol = .langle
-                dc_parser.at += 1
-                dc_parser.reader.dc_type_args += 1
-                kinds = rt_dc_annotation()
-                dc_parser.reader.dc_type_args -= 1
-                if kinds == 0: return 0
-                if not rt_dn_accept(.rangle):
-                    if not (dc_parser.reader.dn_edits_on and rt_dn_closer_joined()): return rt_dc_hint(pos, "`or_throw<...>` names the failures to forward as one type: `or_throw<Missing | ParseError>`")
-                    rt_dn_split_closer()
-                nodes[n].b = i32(kinds)
-            left = n
+            left = rt_dc_propagate(left, pos)
+            if left == 0: return 0
             juxt_head = false
             continue
         if not token.space and (token.kind == .quoted or token.kind == .rawquoted) and minimum <= 170:
@@ -3935,6 +3921,26 @@ rt_dc_target_dropped_walk = (n: int):
     if mask & 16 != 0:
         loop c in kids(n): rt_dc_target_dropped_walk(c)
 
+# Postfix `or_throw`, with its optional `<failures>`, on `left`; the cursor is at the keyword. The
+# propagate node, or 0 when its `<...>` is unread. Also a loop's iterable (`loop x in inbox or_throw {`).
+rt_dc_propagate = (left: int, pos: int) -> int:
+    dc_parser.at += 1
+    n = mk(.propagate, pos)
+    nodes[n].a = i32(left)
+    next = dc_parser.tokens[dc_parser.at]
+    if not next.space and (next.symbol == .langle or next.symbol == .lt):
+        dc_parser.tokens[dc_parser.at].symbol = .langle
+        dc_parser.at += 1
+        dc_parser.reader.dc_type_args += 1
+        kinds = rt_dc_annotation()
+        dc_parser.reader.dc_type_args -= 1
+        if kinds == 0: return 0
+        if not rt_dn_accept(.rangle):
+            if not (dc_parser.reader.dn_edits_on and rt_dn_closer_joined()): return rt_dc_hint(pos, "`or_throw<...>` names the failures to forward as one type: `or_throw<Missing | ParseError>`")
+            rt_dn_split_closer()
+        nodes[n].b = i32(kinds)
+    n
+
 # What a loop iterates, after `in` (dw_iterable): a range, bracketed (`[a..b]`, `[a..b)`, `(a..b]`,
 # `(a..b)`) or not (`a..b`, `a..`, inclusive), stepped by a second start (`[a,b..c)`), or a value
 # (its iteration, `__dewy_iter`). A live place (`in @xs`) is left unread (dc_unread).
@@ -3963,6 +3969,10 @@ rt_dc_iterable = () -> int:
     dc_parser.at = dc_parser.reader.dc_range_at
     first = dc_parser.reader.dc_range_first
     if rt_dn_peek() != .lbrace and dn_power(rt_dn_peek()) >= 96 and not rt_dc_signed_next(): return 0
+    # (`loop x in inbox or_throw {`: the iterable's failures leave the function)
+    if rt_dn_peek() == .kw_or_throw:
+        first = rt_dc_propagate(first, mkpos(dc_parser.file, dc_parser.tokens[opening].start))
+        if first == 0: return 0
     callee = mk(.ident, mkpos(dc_parser.file, dc_parser.tokens[opening].start))
     nodes[callee].name = i32(rt_dc_builtin(4))
     n = mk(.call, mkpos(dc_parser.file, dc_parser.tokens[opening].start))

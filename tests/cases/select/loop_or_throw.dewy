@@ -1,0 +1,48 @@
+# modes: native native-release
+# `or_throw` after a loop's iterable (decisions.md, batch 7): over a `merged` inbox each step's
+# `Canceled` leaves the function, so the item is the payload; over an ordinary value the
+# iterable's own failures leave it before the loop starts.
+sum_inbox = ():>int64 | Canceled => {
+    let a = channel<int64>(4)
+    let b = channel<int64>(4)
+    let total:int64 = 0
+    concurrent {
+        spawn { loop i in [0..3) { a.send(i) or_throw }  a.close() }
+        spawn { b.send(10) or_throw  b.close() }
+        loop item in merged(@a.receive @b.receive) or_throw { total += item }
+    }
+    total
+}
+drain = (a:Channel<int64>):>int64 | Canceled => {
+    let steps:int64 = 0
+    loop x in merged(@a.receive) or_throw { steps = x }
+    steps
+}
+only_canceled = (a:Channel<int64>):>int64 | Canceled => {
+    let last:int64 = 0
+    loop x in merged(@a.receive) or_throw<Canceled> { last = x }
+    last
+}
+Missing:type = type of error
+numbers = (text:string):>array<int64> | Missing => if text =? "" Missing() else [1 2 3]
+walk = (text:string):>int64 | Missing => {
+    let last:int64 = 0
+    loop x in numbers(text) or_throw { last = x }
+    last
+}
+main = () => {
+    printl"merged: {sum_inbox()}"
+    let idle = channel<int64>(1)
+    let results:array<bool> = []
+    concurrent g {
+        cancel(g)
+        results.push(drain(idle) is? Canceled)
+    }
+    printl"canceled: {results}"
+    let one = channel<int64>(2)
+    one.send(5) or_throw
+    one.close()
+    printl"or_throw<Canceled>: {only_canceled(one)}"
+    printl"values: {walk("a")}"
+    printl"missing: {walk("") is? Missing}"
+}

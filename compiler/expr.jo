@@ -5371,6 +5371,13 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         return check_expr(n, expected)
     else if id == .dewy_iter:
         nargs_check(n, nargs, 1, 1, "__dewy_iter")
+        # (`loop x in inbox or_throw {`: for an iterator the failures are each step's, not the iterator's)
+        if nodes[args[0]].kind == .propagate and dewy_at(nodes[n].pos):
+            inner = int(nodes[args[0]].a)
+            if dewy_iterator_type(prune(check_expr(inner, 0))):
+                add_flag(last_checked, NF_CHECKED)
+                throwing_iters[n] = int(nodes[args[0]].b)
+                args[0] = last_checked
         t = arg_type(args, 0, 0)
         add_flag(args[0], NF_CHECKED)
         if tkind(t) == .str_:
