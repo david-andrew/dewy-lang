@@ -105,6 +105,7 @@ EXTRA = {'check.jo': {'FK_INIT': 'const FK_INIT = 4',
                                                    'events.push("concurrency_claims_finalize"); return',
                     'concurrency_finalize': 'concurrency_finalize = (): events.push("concurrency_finalize"); '
                                             'return',
+                    'concurrency_first_ok_module': 'concurrency_first_ok_module = -1',
                     'concurrency_protocol_module': 'concurrency_protocol_module = -1'},
  'expr.jo': {'console_type_id': 'console_type_id = -1'},
  'lazy_bodies.jo': {'dc_force_all': 'dc_force_all = (): events.push("dc_force_all"); return'},

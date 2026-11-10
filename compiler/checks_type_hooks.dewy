@@ -15,7 +15,7 @@ from p"checker_results.dewy" import (CheckerResultCandidate)
 from p"checker_signature.dewy" import (CheckerSignatureScope)
 from p"checker_state.dewy" import (FnCtx FnSig)
 from p"checks_main.dewy" import (exit_code_field_type)
-from p"concurrency.jo" import (concurrency_protocol_module concurrency_task_module concurrency_thread_module)
+from p"concurrency.jo" import (concurrency_first_ok_module concurrency_protocol_module concurrency_task_module concurrency_thread_module)
 from p"concurrency_tasks.dewy" import (concurrency_queue_instance)
 from p"constant_checks.dewy" import (cc_read_decl)
 from p"effect_contracts.dewy" import (effect_contract effect_decl_contract effect_qualified_type effect_type mk_callable_contract)
@@ -250,7 +250,7 @@ instance_create=(decl:int64 use_pos:int64):>int64=>$unsafe {
     let f=new_inst(FK_NORMAL TypeHookWord(nodes.ptr[decl].mod) sanitize(name_of(TypeHookWord(nodes.ptr[decl].name))))
     fns.ptr[f].decl=int32(decl)
     fns.ptr[f].atomic_api=TypeHookWord(nodes.ptr[decl].mod) =? concurrency_thread_module
-    fns.ptr[f].task_api=TypeHookWord(nodes.ptr[decl].mod) =? concurrency_task_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["__task_spawn" "within" "race" "select"] or TypeHookWord(nodes.ptr[decl].mod) =? concurrency_protocol_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["serve" "pipeline" "first_ok"]
+    fns.ptr[f].task_api=TypeHookWord(nodes.ptr[decl].mod) =? concurrency_task_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["__task_spawn" "within" "race" "select"] or TypeHookWord(nodes.ptr[decl].mod) =? concurrency_protocol_module and name_of(TypeHookWord(nodes.ptr[decl].name)) in? ["serve" "pipeline"] or TypeHookWord(nodes.ptr[decl].mod) =? concurrency_first_ok_module and name_of(TypeHookWord(nodes.ptr[decl].name)) =? "first_ok"
     fns.ptr[f].use_pos=use_pos
     if cx >=? 0 {fns.ptr[f].made_in=ctxs[cx].inst}
     f
