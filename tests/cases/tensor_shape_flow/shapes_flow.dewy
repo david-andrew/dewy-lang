@@ -1,0 +1,17 @@
+# Shapes flow through `new` axes, placement, slices and record fields
+# without runtime checks.
+const H:int64 = 3
+Layer:type = [w:array<float64 length=[2 H]> b:array<float64 length=[H]>]
+
+spread = (matrix:array<float64 length=[m n]> row:array<float64 length=[n]> column:array<float64 length=[m]>):>array<float64 length=[m n]> => matrix .+ row[new ..] .+ column[.. new]
+column_sums = (a:array<float64 length=[n k]>):>array<float64 length=[k]> => (ones(1 n)*a)[0 [..]]
+halved = (l:Layer):>Layer => [w=l.w .* 0.5 b=l.b .* 0.5]
+
+main = ():>void => {
+    let m = spread(zeros(2 3) [1.0 2.0 3.0] [10.0 20.0])
+    printl(m)
+    printl(spread(zeros(0 3) [1.0 2.0 3.0] []).length)
+    printl(column_sums(m.to('best')))
+    let l:Layer = [w=ones(2 H) b=[2.0 4.0 6.0]]
+    printl(halved(l).b)
+}
