@@ -1,0 +1,18 @@
+# modes: native native-release
+# `members` of a union of types yields its alternative types, and `T.name` is a type's short
+# name (decisions.md, batch 7): a declared record's name, a generic parameter's argument's,
+# a builtin's spelling, and an alias's own name when its right side has none.
+Png:type = [w:int64]
+Jpeg:type = [q:int64]
+Img:type = Png | Jpeg
+kind = (x:Img):>string => {
+    loop t in members(Img) { if x is? t return t.name }
+    "none"
+}
+describe = <T>(_x:T):>string => T.name
+main = () => {
+    loop t in members(Img) { printl"{t.name}" }
+    printl"{kind(Jpeg[2])} {kind(Png[1])}"
+    printl"{describe(Png[1])} {describe("text")} {describe(true)}"
+    printl"{Png.name} {Img.name}"
+}

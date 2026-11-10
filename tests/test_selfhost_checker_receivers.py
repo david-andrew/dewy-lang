@@ -189,6 +189,7 @@ RECEIVER_JO = {
     'expr.jo': {
         'grouped_place_call': 'grouped_place_call = (n: int) -> bool: false',
         'dewy_method_handle': 'dewy_method_handle = (n: int, expected: int) -> int: -1',
+        'type_name_member': 'type_name_member = (n: int) -> bool: false',
         'field_juxt': 'field_juxt = (n: int): rv_juxt_host(n)',
         'field_reflect_name': 'field_reflect_name = (n: int): rv_reflect_name_host(n)',
         'field_private': 'field_private = (n: int) -> int: rv_private_host(n)',

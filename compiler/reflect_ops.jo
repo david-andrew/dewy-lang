@@ -146,9 +146,18 @@ reflect_sequence = (e: int, binder: int) -> int[]:
     out: int[]
     if reflect_members(e):
         if nkids(e) != 1: fatal(nodes[e].pos, "members(U) needs one type")
+        u = members_type(kid(e, 0))
+        # (a union of types: each alternative, bound as a type)
+        loop t in type_alternatives(u):
+            scope = mk(.reflect_scope, nodes[e].pos)
+            nodes[scope].name = i32(binder)
+            nodes[scope].ival = t
+            nodes[scope].aux = 2
+            out.push(scope)
+        if out.len() > 0: return out
         values: int[]
         singletons: int[]
-        literal_members(members_type(kid(e, 0)), nodes[e].pos, values, singletons)
+        literal_members(u, nodes[e].pos, values, singletons)
         loop i in 0.. and value in values:
             scope = mk(.reflect_scope, nodes[e].pos)
             nodes[scope].name = i32(binder)
@@ -182,6 +191,7 @@ reflect_bind = (s: int):
     name = int(nodes[s].name)
     if nodes[s].aux == 1:
         push_scope_sym(name, new_sym(name, .reflected, nodes[s].ival, 0))
+    else if nodes[s].aux == 2: push_scope_sym(name, new_sym(name, .type_, nodes[s].ival, 0))
     else:
         initial = int(nodes[s].a)
         g = globals.len()

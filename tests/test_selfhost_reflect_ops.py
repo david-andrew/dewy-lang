@@ -133,6 +133,10 @@ int_intervals = (t: int) -> (bool, int[]):
 is_map_type = (t: int) -> bool: t == T_MAP
 ntype = (n: int) -> int: int(nodes[n].type)
 small_span = (a: int, b: int, cap: int) -> bool: b - a < cap
+# (the stubbed unions hold literals: no alternative types)
+type_alternatives = (u: int) -> int[]:
+    out: int[]
+    out
 member_prepare = (scopes: int[], body: int):
     print("member_prepare {scopes.len()} {body != 0}")
 member_scopes: {int: int} = {}

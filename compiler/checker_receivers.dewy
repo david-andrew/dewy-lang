@@ -1,5 +1,5 @@
 $runtime_checks
-from p"expr.jo" import (grouped_place_call dewy_method_handle)
+from p"expr.jo" import (grouped_place_call dewy_method_handle type_name_member)
 from p"node_store.dewy" import Node
 from p"checker_types.dewy" import (TypeInfo StructInfo TK)
 from p"source_types.dewy" import SrcFile
@@ -82,6 +82,8 @@ xs_field=(n:XSWord expected:XSWord):>XSWord=>$unsafe {
     if xs_flag(n 536870912) {field_juxt(n)}
     if xs_nodes[0].ptr[n].b not=? 0 {field_reflect_name(n)}
     if xs_reflecting[0] and reflect_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
+    # (`T.name`: a type's short name)
+    if type_name_member(n) {return XSWord(xs_nodes[0].ptr[n].type)}
     let a0=XSWord(xs_nodes[0].ptr[n].a)
     let is_callee=n =? xs_callee[0]
     # `c.__peer` in a program: a library's own field, which may change in any version.

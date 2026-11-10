@@ -1191,6 +1191,27 @@ the array of those members in the same order, an `array<U>` unless its context g
 array a type (`let all = members(U)`, `f(members(U))`). Literal unions are
 ordinary type arguments: `Box<'tokens'|'ast'>`, `array<'a'|'b'>`.
 
+`members` of a union of types yields its alternative types (decisions.md, batch 7): in
+`loop t in members(Png | Jpeg)` each `t` is a type, so `x is? t` and `let y:t = ...` work.
+`T.name` is a type's short name, a compile-time `string`: a declared record's or generic
+record's name (`Closed<Job>.name` is `Closed`; the module is not part of it), a type
+parameter's argument's, a builtin's spelling (`string`), and an alias's own name when its
+right side has none (`Img:type = Png | Jpeg` gives `Img`; `AlsoQuit:type = Quit` stays
+`Quit`). An anonymous record or union has none, which is an error. A member the type
+itself names `name` wins over this.
+
+```dewy
+Png:type = [w:int64]
+Jpeg:type = [q:int64]
+Img:type = Png | Jpeg
+kind = (x:Img):>string => {
+    loop t in members(Img) { if x is? t return t.name }
+    "none"
+}
+describe = <T>(_x:T):>string => T.name
+main = () => printl"{kind(Jpeg[2])} {describe(Png[1])} {describe("text")}"   # Jpeg Png string
+```
+
 In a union with text, as `'auto' | string<length >? 0>`, a literal the set lists
 is that member and any other text goes to the text member, so `'x'` is accepted.
 Without a text member, a literal the set does not list is an error.

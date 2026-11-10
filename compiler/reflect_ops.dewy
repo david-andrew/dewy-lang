@@ -6,7 +6,7 @@ from p"checks_thin.dewy" import (resolve_type)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checker_state.dewy" import (Global)
 from p"comptime.jo" import (ct_values)
-from p"expr.jo" import (bc_bin coerce expr_as_type finalize_literal last_checked ntype small_span)
+from p"expr.jo" import (bc_bin coerce expr_as_type finalize_literal last_checked ntype small_span type_alternatives)
 from p"checks_thin_expr.dewy" import (int_intervals is_map_type)
 from p"checks_builders.dewy" import (bc_block bc_ident bc_if bc_int bc_str)
 from p"member_admit.dewy" import (member_prepare)
@@ -174,9 +174,19 @@ reflect_sequence=(e0:ReflectWord binder:ReflectWord):>array<int64>=>$unsafe {
     let out:array<int64>=[]
     if reflect_members(e) {
         if nkids(e) not=? 1 {fatal(nodes.ptr[e].pos "members(U) needs one type")}
+        let u=members_type(kid(e 0))
+        # (a union of types: each alternative, bound as a type)
+        loop t in type_alternatives(u) {
+            let scope=mk('reflect_scope' nodes.ptr[e].pos)
+            nodes.ptr[scope].name=int32(binder)
+            nodes.ptr[scope].ival=t
+            nodes.ptr[scope].aux=2
+            out.push(scope)
+        }
+        if out.length >? 0 {return out}
         let values:array<int64>=[]
         let singletons:array<int64>=[]
-        literal_members(members_type(kid(e 0)) nodes.ptr[e].pos @values @singletons)
+        literal_members(u nodes.ptr[e].pos @values @singletons)
         loop i in 0.. and value in values {
             let scope=mk('reflect_scope' nodes.ptr[e].pos)
             nodes.ptr[scope].name=int32(binder)
@@ -218,6 +228,7 @@ reflect_bind=(s:ReflectWord):>void=>$unsafe {
     if nodes.ptr[s].aux =? 1 {
         push_scope_sym(name new_sym(name 'reflected' nodes.ptr[s].ival 0))
     }
+    else if nodes.ptr[s].aux =? 2 {push_scope_sym(name new_sym(name 'type_' nodes.ptr[s].ival 0))}
     else {
         let initial=ReflectWord(nodes.ptr[s].a)
         let g=globals.length

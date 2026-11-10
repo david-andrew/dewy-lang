@@ -67,6 +67,8 @@ xs_field = (n: int, expected: int) -> int:
     if xs_flag(n, 536870912): field_juxt(n)
     if xs_nodes[0][n].b != 0: field_reflect_name(n)
     if xs_reflecting[0] and reflect_member(n): return int(xs_nodes[0][n].type)
+    # (`T.name`: a type's short name)
+    if type_name_member(n): return int(xs_nodes[0][n].type)
     a0 = int(xs_nodes[0][n].a)
     is_callee = n == xs_callee[0]
     if starts_with(xs_names[0][int(xs_nodes[0][n].name)], "__") and not xs_ide[0] and not xs_flag(n, 33554432): a0 = field_private(n)

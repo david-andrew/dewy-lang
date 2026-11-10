@@ -6928,6 +6928,69 @@ select_check = (n: int):
             if int(nodes[int(fns[int(nodes[w].sym)].decl)].name) == op and select_same_place(kid(w, 0), kid(a, 0)): fatal(nodes[a].pos, "this operation is listed twice: select takes at most one value from it, so write it once")
         waits.push(a)
 
+# `members(U)` of a union of types (decisions.md, batch 7): its alternatives, each a type a
+# `loop t in members(U)` binds; [] for a union of literals, which yields its values.
+type_alternatives = (u0: int) -> int[]:
+    u = prune(u0)
+    out: int[]
+    if not is_union(u): return out
+    loop m0 in union_members(u):
+        m = prune(m0)
+        if str_set_of(m) != 0 or types[m].kind == .refined: return []
+        out.push(m)
+    out
+
+# `T.name` (decisions.md, batch 7): a type's canonical short name, "" when it has none. A
+# declared record or a generic one's instance is its declaration's name (`Closed<Job>` is
+# `Closed`; the module is not part of it); an alias of a named type is that type's; a builtin is
+# its spelling; a text literal is its text when that is a name. Anonymous records and unions
+# have none.
+type_short_name = (t0: int) -> str:
+    t = prune(t0)
+    if is_union(t): return ""
+    text = ""
+    if tkind(t) == .struct_ or tkind(t) == .enum_:
+        d = int(structs[int(types[t].st)].decl)
+        if d != 0 and nodes[d].name != 0: text = name_of(int(nodes[d].name))
+    else:
+        set = str_set_of(t)
+        if set != 0:
+            if str_sets[set].len() == 1: text = str_sets[set].sorted()[0]
+        else: text = dt(t)
+    if len(text) == 0 or not is_alpha(text[0]): return ""
+    loop i in [0..len(text)):
+        if not is_alpha(text[i]) and not is_digit(text[i]): return ""
+    text
+
+type_name_id = 0
+
+# `T.name` on a name that is a type (a type parameter, a `loop t in members(U)` binder, a
+# declared type): its short name, as a checked text literal. A member of that name the type
+# has wins, as an ordinary read. O(1) unless the member is `name`.
+type_name_member = (n: int) -> bool:
+    if type_name_id == 0: type_name_id = intern("name")
+    if nodes[n].name != i32(type_name_id) or nodes[n].b != 0: return false
+    receiver = int(nodes[n].a)
+    if nodes[receiver].kind != .ident or not dewy_at(nodes[n].pos): return false
+    s = lookup(int(nodes[receiver].name))
+    if s == 0: return false
+    k = syms[s].kind
+    if k != .type_ and k != .struct_ and k != .enum_ and k != .alias_: return false
+    t = if k == .type_: int(syms[s].ref) else: prune(expr_as_type(receiver))
+    if tkind(t) == .struct_:
+        si = int(types[t].st)
+        if structs[si].decl != 0 and dewy_type_method(int(structs[si].decl), type_name_id) >= 0: return false
+        check_struct_fields(si)
+        loop i in [0..int(structs[si].nfields)):
+            if fields[int(structs[si].fields) + i].name == i32(type_name_id): return false
+    text = type_short_name(t)
+    # (`Img:type = Png | Jpeg`: an alias whose right side has no name gives its own)
+    if len(text) == 0 and k == .alias_: text = name_of(int(nodes[receiver].name))
+    if len(text) == 0: fatal(nodes[n].pos, "{dt(t)} has no name of its own: an anonymous record, a union or a computed type has none (give it one, `Name:type = ...`)")
+    nodes[n] = Node(kind = .str_lit, pos = nodes[n].pos, sval = i32(intern(text)), type = i32(T_STR), flags = i32(NF_CHECKED))
+    last_checked = n
+    true
+
 # A queue's payload that is, or may be, an outcome its own waits give (decisions.md, batch 7),
 # `Closed`, `Canceled` or every exception: the error that says so, "" when none is. A select's arms
 # match by type, so such a payload would be taken for the queue's own close or cancellation.
