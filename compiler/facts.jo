@@ -2102,6 +2102,40 @@ fact_map_clear_call = (n: int) -> bool:
     if not is_map_type(t) or ownership_decls.len() != 0 and ownership_fact_type(ntype(kid(n, 0))): return false
     kt = representation_type(struct_targ(int(types[t].st), 0))
     fact_scalar(kt) or kt == T_STR
+# `d.pop(k)`, `d.pop(k default=x)` and `d.get(k x)` on a dictionary whose values a sibling's length bounds
+# (1, 2 and 3; else 0): the result is below the bound (when the default is), as `d[k]` is. O(1).
+fact_map_bounded_call = (n: int) -> int:
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0: return 0
+    count = nkids(n)
+    if count != 2 and count != 3: return 0
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or not pos_in_lib(nodes[d].pos): return 0
+    if fact_name_pop == 0: fact_name_pop = intern("pop")
+    if fact_name_get == 0: fact_name_get = intern("get")
+    name = int(nodes[d].name)
+    kind = if name == fact_name_pop: count - 1 else if name == fact_name_get and count == 3: 3 else: 0
+    if kind == 0: return 0
+    t = representation_type(ntype(kid(n, 0)))
+    if not is_map_type(t) or ownership_decls.len() != 0 and ownership_fact_type(ntype(kid(n, 0))): return 0
+    kt = representation_type(struct_targ(int(types[t].st), 0))
+    if fact_scalar(kt) or kt == T_STR: kind else: 0
+fact_map_bounded = (n: int, s: mut FactState, values: int[], kind: int) -> int:
+    # (an entry's value holds the dictionary's value type: `>=? 0` unless it states its own lower bound)
+    domain = fact_domain(ntype(n), .missing, n)
+    held = representation_type(ntype(kid(n, 0)))
+    if is_int(fact_type(ntype(n))): domain = ref_interval(struct_targ(int(types[held].st), 1), domain)
+    result = fact_new(s, domain, FactTerm(type = ntype(n)))
+    if kind == 1 or kind == 2:
+        # (a removal rewrites the dictionary field alone: its siblings keep what is known of them)
+        route = fact_receiver_route(n, s)
+        if route.root == 0: return 0
+        written = fact_place(route.root)
+        if written.declaration == 0: return 0
+        if fact_exposed(written): fact_forget(s, n, .call, false, written, true)
+        fact_store_route(s, route, fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0)))), n)
+    if kind == 1: ref_sib_map_read(s, values[0], result, n)
+    else: ref_sib_default_read(s, values[0], result, values[2], kid(n, 2), n)
+    result
 fact_map_clear = (n: int, s: mut FactState) -> bool:
     target = kid(n, 0)
     loop nodes[target].kind == .addr or nodes[target].kind == .conv: target = int(nodes[target].a)
@@ -2430,7 +2464,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 values.push(n)
                 values.push(kid(n, first))
                 values.push(kid(n, first + 1))
-            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nd_mutable_call(n) or fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_map_insert_call(n) or ref_self_active and fact_map_clear_call(n) or fact_nonempty_call(n) or fact_heap_call(n) != 0 or fact_exact_sum_call(n) or fact_pool_call(n) != 0 or fact_gpu_index_call(n)):
+            else if not summary and (fact_probe_on or fact_policy == .RequireStatic) and (nd_mutable_call(n) or fact_array_call(n) != 0 or fact_map_call(n) != 0 or fact_map_insert_call(n) or ref_self_active and (fact_map_clear_call(n) or fact_map_bounded_call(n) != 0) or fact_nonempty_call(n) or fact_heap_call(n) != 0 or fact_exact_sum_call(n) or fact_pool_call(n) != 0 or fact_gpu_index_call(n)):
                 active.push(n)
                 values.push(n)
                 loop j in [0..nkids(n)): values.push(kid(n, j))
@@ -3836,6 +3870,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         if (fact_policy == .RequireStatic or fact_query or fact_probe_on) and fact_map_insert_call(n):
             stored = fact_map_store(n, s, values, fact_map_receiver(s, n, values[0]))
             if stored != 0: return stored
+        if ref_self_active and (fact_policy == .RequireStatic or fact_query or fact_probe_on) and values.len() >= 2 and values[0] != 0 and fact_projection_find(s, values[0], FACT_SIB_BOUND, false) >= 0:
+            bounded = fact_map_bounded_call(n)
+            if bounded != 0 and (bounded == 1 or values.len() == 3):
+                result = fact_map_bounded(n, s, values, bounded)
+                if result != 0: return result
         if ref_self_active and (fact_policy == .RequireStatic or fact_query or fact_probe_on) and fact_map_clear_call(n) and s.projections.len() < FACT_CAP and fact_map_clear(n, s): return 0
         map = if fact_policy == .RequireStatic or fact_query or fact_probe_on: fact_map_call(n) else: 0
         if map >= 2 and map <= 4: fact_map_check(n, s, values)

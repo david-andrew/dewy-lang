@@ -1,0 +1,9 @@
+Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
+take = (@t:Trie at:int64<(>=? 0)>?):>void => {
+    let x = t.edges.pop("zz" default=at)
+    if x isnt? none { printl(t.terminal[x]) }
+}
+main = ():>void => {
+    let t:Trie = [terminal=[false true] edges=["a"->1]]
+    take(@t 5)
+}

@@ -1484,6 +1484,26 @@ ref_sib_map_read = (s: mut FactState, map: int, result: int, n: int):
     if tkind(ntype(n)) == .opt: v = fact_project(s, result, -4, false, telem(ntype(n)))
     if is_int(fact_type(ntype(n))) or tkind(ntype(n)) == .opt: ref_sib_element_row(s, map, v)
 
+# A value from `d.pop(k default=x)` or `d.get(k x)` on such a dictionary: an entry's value, or x.
+# Below each bound x is below (`none` has no value). O(bounds).
+ref_sib_default_read = (s: mut FactState, map: int, result: int, dflt: int, given: int, n: int):
+    if map == 0 or result == 0 or dflt == 0 or fact_projection_find(s, map, FACT_SIB_BOUND, false) < 0: return
+    v = result
+    if tkind(ntype(n)) == .opt: v = fact_project(s, result, -4, false, telem(ntype(n)))
+    if not is_int(fact_type(ntype(n))) and tkind(ntype(n)) != .opt: return
+    x = dflt
+    literal = given
+    loop nodes[literal].kind == .conv: literal = int(nodes[literal].a)
+    absent = nodes[literal].kind == .none_lit
+    if tkind(ntype(given)) == .opt and not absent: x = fact_project(s, dflt, -4, false, telem(ntype(given)))
+    if not absent and x == 0: return
+    j = fact_projection_first(s, map)
+    loop j >= 0:
+        p = s.projections[j]
+        j = fact_projection_after(s, j)
+        if p.element or p.selector != FACT_SIB_BOUND: continue
+        if absent or fact_compare(s, .le, x, p.value) == 1: fact_difference(s, v, p.value, 0, 0, 16)
+
 # Does every element of the value stay within the sibling bound? 1, 0 refuted, -1 unknown.
 # O(inventory).
 ref_sib_truth = (s: mut FactState, value: int, atom: RefAtom, args: int[]) -> int:

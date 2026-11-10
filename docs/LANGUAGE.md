@@ -3023,7 +3023,8 @@ the record. A dictionary field's values can have the same bound,
 `Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]`: a literal's
 values are checked when the record is built, a store or `insert_if_absent` checks the value
 against `terminal.length`, and `t.edges[k]` and the value of `t.edges.get(k)` are known to be
-valid indexes of `terminal`. `remove`, `pop`, `clear` and growing `terminal` keep the bound in place.
+valid indexes of `terminal`, as are the values of `pop(k)`, and of `pop(k default=d)` and `get(k d)`
+when `d` is one too. `remove`, `pop`, `clear` and growing `terminal` keep the bound in place.
 An in-place change of a value (`t.edges[k] += 1`) is a compile error: store the new value whole.
 Making `terminal` shorter is a compile error unless the values are known to fit, as after
 `t.edges.clear()` or `t.edges = []`; under

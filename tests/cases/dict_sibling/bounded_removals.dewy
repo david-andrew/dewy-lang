@@ -1,0 +1,18 @@
+# A value removed or defaulted from a bounded dictionary is a valid index of the sibling too.
+Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
+main = ():>void => {
+    let t:Trie = [terminal=[false true true] edges=["a"->2 "b"->1 "c"->0]]
+    let a = t.edges.pop("a")
+    printl(t.terminal[a])
+    let b = t.edges.get("b" 0)
+    printl(t.terminal[b])
+    let missing = t.edges.get("zz" t.terminal.length - 1)
+    printl(t.terminal[missing])
+    let c = t.edges.pop("zz" default=1)
+    printl(t.terminal[c])
+    let d = t.edges.pop("c" default=none)
+    if d isnt? none { printl(t.terminal[d]) }
+    let e = t.edges.pop("b" default=2)
+    printl(t.terminal[e])
+    printl(t.edges.length)
+}
