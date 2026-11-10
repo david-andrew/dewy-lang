@@ -146,13 +146,24 @@ dl_givens: {int: int[]}          # function -> the function values its calls are
 # O(V(V + E)).
 
 struct DcEvent:
-    kind: int        # 1 send, 2 receive, 3 close, 4 lock wait, 5 join, 6 try_send, 7 try_receive, 8 a select or merged receive
+    kind: int        # 1 send, 2 receive, 3 close, 4 lock wait, 5 join, 6 try_send, 7 try_receive, 8 a select or merged receive,
+                     # 9 a reservation given back unsent, 10 one that may be (the slot it held is free again)
     loc: DlLoc       # the channel, lock or task group
     loops: int[]     # the loops around it, outermost first (indexes into dc_trips)
     branch: bool     # under a condition
     held: DlLoc[]    # the locks held
     held_sites: int[]
     site: int
+
+struct DcPermit:
+    loc: DlLoc
+    site: int
+    sym: int         # the local holding the permit (a match's hidden local for `match q.reserve`, and one per alias)
+    root: int        # the stack index of the reservation (its own for the first holder)
+    depth: int       # dc_branch and the number of loops at the reserve
+    nloops: int
+    state: int       # 0 neither sent nor given away, 1 sent on every path, 2 sent on some path or given away
+    sure: bool       # the reserve counted as a certain send
 
 struct DcActor:
     events: DcEvent[]
@@ -196,6 +207,7 @@ dc_loops: int[]
 dc_branch = 0
 dc_multi = false
 dc_held: DlHeld[]
+dc_permits: DcPermit[]           # the reservations whose permits are in scope
 dc_pending: DcSpawn[]
 dc_edges: DcEdge[]
 dc_edge_at: {str: int}

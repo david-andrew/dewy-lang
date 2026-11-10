@@ -21,11 +21,11 @@ main = ():
     cases = [(uncertain, 0, b'may wait to send'), (pipeline, 0, b'checked\n')]
     for case in ('deadlock/channel_cycle', 'deadlock/channel_self',
                  'deadlock/channel_join', 'deadlock/channel_unfilled',
-                 'deadlock/channel_lock_held', 'queues/spsc_cycle',
+                 'deadlock/channel_lock_held', 'deadlock/reserve_held', 'queues/spsc_cycle',
                  'queues/spsc_try_cycle', 'queue_cancel_wait/mpmc_no_cancel'):
         source = ROOT / 'tests/cases' / (case + '.dewy')
         cases.append((source, 41, source.with_suffix('.err').read_bytes().splitlines()[0]))
-    for case in ('deadlock/channel_turns', 'channels/close', 'channels/cancel_blocked',
+    for case in ('deadlock/channel_turns', 'deadlock/reserve_dropped', 'channels/close', 'channels/cancel_blocked',
                  'queues/spsc_turns', 'queues/spsc_tasks', 'queues/spawn_forward_end'):
         cases.append((ROOT / 'tests/cases' / (case + '.dewy'), 0, b'checked\n'))
     for case in ('channel_cancel_diag_ok', 'mpmc_failure_diag', 'cancel_helper', 'failure_helper'):

@@ -17,18 +17,23 @@ dc_send_waits=(a:ChannelGraphWord ch:string upto:ChannelGraphWord through:bool):
     let cap:ChannelGraphWord=-1
     loop j in [0..last) {
         let e=evs.ptr[j]
-        if dl_key(e.loc) not=? ch or e.kind not=? 1 and e.kind not=? 2 and e.kind not=? 6 and e.kind not=? 7 and e.kind not=? 8 {continue}
+        if dl_key(e.loc) not=? ch or e.kind not=? 1 and e.kind not=? 2 and e.kind not=? 6 and e.kind not=? 7 and e.kind not=? 8 and e.kind not=? 9 and e.kind not=? 10 {continue}
         cap=dc_capacity(e.loc)
         let m=ChannelGraphWord(dc_mult(e.loops at))
         if m <? 0 {
             unknown=true
-            if e.kind =? 2 or e.kind =? 7 or e.kind =? 8 {sure=0}
+            if e.kind =? 2 or e.kind >=? 7 {sure=0}
         } else if e.kind =? 1 or e.kind =? 6 {
             any+=m
             if not e.branch {
                 if e.kind =? 1 {sure+=m}
                 else if dc_exclusive.get(ch false) and cap >=? 0 {sure=min(cap sure + m)}
             }
+        } else if e.kind >=? 9 {
+            # (a reservation given back: the slot its reserve counted is free; one that may be given back
+            # lowers what is certain only)
+            if not e.branch {sure=max(ChannelGraphWord(0) sure - m)}
+            if e.kind =? 9 {any=max(ChannelGraphWord(0) any - m)}
         } else {
             sure=max(ChannelGraphWord(0) sure - m)
             if e.kind =? 2 and not e.branch {any=max(ChannelGraphWord(0) any - m)}

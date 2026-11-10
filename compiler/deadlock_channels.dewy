@@ -68,6 +68,19 @@ dc_chan_call=(n:ChannelWord):>int64=>$unsafe {
     if nm =? "try_receive" {return 7}
     0
 }
+# The `reserve` call that e is, through conversions, a narrowing and `or_throw`, else 0.
+dc_reserve_call=(e0:ChannelWord):>int64=>$unsafe {
+    let e=dc_strip(e0)
+    if e =? 0 or dc_chan_call(e) =? 0 {return 0}
+    let d=ChannelWord(fns.ptr[ChannelWord(nodes.ptr[e].sym)].decl)
+    if name_of(ChannelWord(nodes.ptr[d].name)) =? "reserve" {return e}
+    0
+}
+dc_strip=(e0:ChannelWord):>int64=>$unsafe {
+    let e=e0
+    loop e not=? 0 and (nodes.ptr[e].kind =? 'conv' or nodes.ptr[e].kind =? 'narrow' or nodes.ptr[e].kind =? 'unwrap' or nodes.ptr[e].kind =? 'propagate') {e=ChannelWord(nodes.ptr[e].a)}
+    e
+}
 # `select(@a.receive ...)` is 1 and `merged(@a.receive ...)` 2: calls whose receives consume
 # from every channel they list, in a loop for as long as it runs. 0 for any other call.
 dc_wait_set=(n:ChannelWord):>int64=>$unsafe {

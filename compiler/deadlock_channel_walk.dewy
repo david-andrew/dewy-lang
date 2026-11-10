@@ -1,16 +1,17 @@
 $runtime_checks
-from p"deadlock.jo" import (DlLoc DlHeld DcEvent DcSpawn DcActor dc_count DC_EVENTS DC_ACTORS DC_DEPTH dc_complete dc_loops dc_held dc_ev dc_branch dc_trips dc_precise dc_closes dc_attempts dc_unknown_attempt dc_smod dc_ends dc_pending dc_ffns dc_fcalls dc_multi dc_cancels dl_relevant dc_actors)
-from p"deadlock_channels.dewy" import (dc_loc dc_chan_call dc_trip_count dc_wait_set dc_wait_source)
+from p"deadlock.jo" import (DlLoc DlHeld DcPermit dc_permits DcEvent DcSpawn DcActor dc_count DC_EVENTS DC_ACTORS DC_DEPTH dc_complete dc_loops dc_held dc_ev dc_branch dc_trips dc_precise dc_closes dc_attempts dc_unknown_attempt dc_smod dc_ends dc_pending dc_ffns dc_fcalls dc_multi dc_cancels dl_relevant dc_actors)
+from p"deadlock_channels.dewy" import (dc_loc dc_chan_call dc_trip_count dc_wait_set dc_wait_source dc_reserve_call dc_strip)
 from p"deadlock_locations.dewy" import (dl_receiver dl_key dl_line)
 from p"deadlock_walk.dewy" import (dl_lock_call dl_fn_arg)
 from p"ast.jo" import (nodes kids kids2 kid nkids written_args)
 from p"check.jo" import (fns init_fns main_fn)
-from p"util.jo" import (name_of pos_in_lib)
+from p"util.jo" import (name_of pos_in_lib files pos_file)
 from p"lower_helpers.dewy" import value_helper_calls
 from p"isolation_ops.dewy" import isolation_children
 
 ChannelWalkWord:type=int64<overflow='wrap'>
-dc_event=(kind:ChannelWalkWord loc:DlLoc site:ChannelWalkWord):>void=>{
+dc_event=(kind:ChannelWalkWord loc:DlLoc site:ChannelWalkWord):>void=>dc_event_at(kind loc site dc_branch >? 0)
+dc_event_at=(kind:ChannelWalkWord loc:DlLoc site:ChannelWalkWord branch:bool):>void=>{
     dc_count=ChannelWalkWord(dc_count) + 1
     if dc_count >? DC_EVENTS {
         dc_complete=false
@@ -24,19 +25,114 @@ dc_event=(kind:ChannelWalkWord loc:DlLoc site:ChannelWalkWord):>void=>{
         locs.push(h.loc)
         sites.push(h.site)
     }
-    dc_ev.push(DcEvent(kind loc loops dc_branch >? 0 locs sites site))
+    dc_ev.push(DcEvent(kind loc loops branch locs sites site))
 }
 dc_drop=(mark:ChannelWalkWord):>void=>{
     loop dc_held.length >? mark {dc_held.pop();}
 }
+# A permit's reservation holds a slot until its permit is sent or dropped. The walk keeps the
+# permits in scope (dc_permits: the local holding one, and an alias per match arm's binding),
+# watches `send` on them and any other use, and gives the slot back where the scope ends
+# (kind 9) unless the permit was sent (nothing) or sent on some path or given away (kind 10:
+# the slot may be free again, which only lowers what is certain).
+dc_permit_find=(sym:ChannelWalkWord):>int64=>$unsafe {
+    if sym <=? 0 {return -1}
+    let i=ChannelWalkWord(dc_permits.length) - 1
+    loop i >=? 0 and dc_permits.ptr[i].sym not=? sym {i-=1}
+    i
+}
+dc_permit_open=(call:ChannelWalkWord sym:ChannelWalkWord):>void=>$unsafe {
+    if sym <=? 0 or call =? 0 {return}
+    let op=dc_chan_call(call)
+    let sure=op =? 1 and dc_branch =? 0
+    dc_permits.push(DcPermit(dc_loc(kid(call 0)) nodes.ptr[call].pos sym dc_permits.length dc_branch dc_loops.length 0 sure))
+}
+dc_permit_alias=(n:ChannelWalkWord):>bool=>$unsafe {
+    let sym=ChannelWalkWord(nodes.ptr[n].sym)
+    let e=dc_strip(ChannelWalkWord(nodes.ptr[n].b))
+    if sym <=? 0 or e =? 0 or nodes.ptr[e].kind not=? 'ident' {return false}
+    let i=dc_permit_find(ChannelWalkWord(nodes.ptr[e].sym))
+    if i <? 0 {return false}
+    let p=dc_permits.ptr[i]
+    dc_permits.push(DcPermit(p.loc p.site sym p.root p.depth p.nloops 0 p.sure))
+    true
+}
+dc_permit_use=(n:ChannelWalkWord):>void=>$unsafe {
+    let i=dc_permit_find(ChannelWalkWord(nodes.ptr[n].sym))
+    if i <? 0 {return}
+    let r=ChannelWalkWord(dc_permits.ptr[i].root)
+    if dc_permits.ptr[r].state =? 0 {dc_permits.ptr[r].state=2}
+}
+# Every use inside a function value: it may run anywhere, so the permit is given away.
+dc_permit_scan=(n:ChannelWalkWord):>void=>$unsafe {
+    if n =? 0 {return}
+    if nodes.ptr[n].kind =? 'ident' {dc_permit_use(n)}
+    dc_permit_scan(ChannelWalkWord(nodes.ptr[n].a))
+    dc_permit_scan(ChannelWalkWord(nodes.ptr[n].b))
+    dc_permit_scan(ChannelWalkWord(nodes.ptr[n].c))
+    loop c in kids(n) {dc_permit_scan(c)}
+}
+# `permit.send(value)` on a permit in scope: sent, on every path or on some.
+dc_permit_send=(n:ChannelWalkWord):>bool=>$unsafe {
+    if nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 2 {return false}
+    let d=ChannelWalkWord(fns.ptr[ChannelWalkWord(nodes.ptr[n].sym)].decl)
+    if d =? 0 or name_of(ChannelWalkWord(nodes.ptr[d].name)) not=? "send" or not files.ptr[pos_file(nodes.ptr[d].pos)].path.endswith("/prelude/reserved.dewy") {return false}
+    let e=dc_strip(kid(n 0))
+    if e =? 0 or nodes.ptr[e].kind not=? 'ident' {return false}
+    let i=dc_permit_find(ChannelWalkWord(nodes.ptr[e].sym))
+    if i <? 0 {return false}
+    let r=ChannelWalkWord(dc_permits.ptr[i].root)
+    if dc_permits.ptr[r].state =? 0 {
+        if dc_branch =? dc_permits.ptr[r].depth and dc_loops.length =? dc_permits.ptr[r].nloops {dc_permits.ptr[r].state=1}
+        else {dc_permits.ptr[r].state=2}
+    }
+    dc_walk(kid(n 1))
+    true
+}
+dc_release=(mark:ChannelWalkWord):>void=>$unsafe {
+    loop dc_permits.length >? mark {
+        let i=ChannelWalkWord(dc_permits.length) - 1
+        let p=dc_permits.ptr[i]
+        if p.root =? i and p.state not=? 1 {
+            let kind:ChannelWalkWord=if p.state =? 0 {9} else {10}
+            dc_event_at(kind p.loc p.site not p.sure)
+        }
+        dc_permits.pop();
+    }
+}
 dc_walk=(n:ChannelWalkWord):>void=>$unsafe {
     if n =? 0 or dc_count >? DC_EVENTS {return}
     let k=nodes.ptr[n].kind
-    if k =? 'lambda' or k =? 'fnref' {return}
+    if k =? 'lambda' or k =? 'fnref' {
+        if dc_permits.length >? 0 {dc_permit_scan(n)}
+        return
+    }
+    if k =? 'ident' and dc_permits.length >? 0 {dc_permit_use(n)}
     if k =? 'block' {
         let mark=dc_held.length
+        let pmark=ChannelWalkWord(dc_permits.length)
         loop c in kids(n) {dc_walk(c)}
-        if nodes.ptr[n].aux not=? 5 {dc_drop(mark)}
+        if nodes.ptr[n].aux not=? 5 {
+            dc_drop(mark)
+            dc_release(pmark)
+        }
+        return
+    }
+    if k =? 'match_' and dc_reserve_call(ChannelWalkWord(nodes.ptr[n].a)) not=? 0 {
+        # (the scrutinee is evaluated on every path; its permit is the match's hidden local, which
+        # each arm's binding aliases)
+        loop g in value_helper_calls(n) {dc_enter(g 0)}
+        let pmark=ChannelWalkWord(dc_permits.length)
+        let hold=dc_held.length
+        dc_walk(ChannelWalkWord(nodes.ptr[n].a))
+        dc_permit_open(dc_reserve_call(ChannelWalkWord(nodes.ptr[n].a)) ChannelWalkWord(nodes.ptr[n].sym))
+        dc_branch=ChannelWalkWord(dc_branch) + 1
+        loop c in kids(n) {
+            dc_walk(c)
+            dc_drop(hold)
+        }
+        dc_branch=ChannelWalkWord(dc_branch) - 1
+        dc_release(pmark)
         return
     }
     if k =? 'vardecl' {
@@ -51,7 +147,9 @@ dc_walk=(n:ChannelWalkWord):>void=>$unsafe {
                 return
             }
         }
+        if dc_permit_alias(n) {return}
         dc_walk(ChannelWalkWord(nodes.ptr[n].b))
+        dc_permit_open(dc_reserve_call(ChannelWalkWord(nodes.ptr[n].b)) ChannelWalkWord(nodes.ptr[n].sym))
         return
     }
     if k =? 'if_' or k =? 'iflet' {
@@ -115,6 +213,7 @@ dc_walk=(n:ChannelWalkWord):>void=>$unsafe {
 }
 dc_call=(n:ChannelWalkWord):>void=>$unsafe {
     let pos=nodes.ptr[n].pos
+    if dc_permits.length >? 0 and dc_permit_send(n) {return}
     let what=dl_lock_call(n)
     if what =? "__lock_all" {
         let words=kid(n 1)
@@ -240,6 +339,7 @@ dc_collect=():>void=>$unsafe {
         dc_fcalls=s.fcalls
         dc_loops=[]
         dc_held=[]
+        dc_permits=[]
         dc_branch=0
         dc_multi=s.multi
         if dl_relevant.has(s.h) {dc_walk(ChannelWalkWord(fns.ptr[s.h].body))}

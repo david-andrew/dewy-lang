@@ -15,12 +15,12 @@ dc_send_waits = (a: int, ch: str, upto: int, through: bool) -> int:
     cap = -1
     loop j in [0..last):
         e = evs[j]
-        if dl_key(e.loc) != ch or e.kind != 1 and e.kind != 2 and e.kind != 6 and e.kind != 7 and e.kind != 8: continue
+        if dl_key(e.loc) != ch or e.kind != 1 and e.kind != 2 and e.kind != 6 and e.kind != 7 and e.kind != 8 and e.kind != 9 and e.kind != 10: continue
         cap = dc_capacity(e.loc)
         m = dc_mult(e.loops, at)
         if m < 0:
             unknown = true
-            if e.kind == 2 or e.kind == 7 or e.kind == 8: sure = 0
+            if e.kind == 2 or e.kind >= 7: sure = 0
         else if e.kind == 1 or e.kind == 6:
             any += m
             if not e.branch:
@@ -28,6 +28,11 @@ dc_send_waits = (a: int, ch: str, upto: int, through: bool) -> int:
                 # With the sole drainer still held up at its first receive, one
                 # producer's attempts fill available slots but cannot overfill.
                 else if dc_exclusive.get(ch, false) and cap >= 0: sure = min(cap, sure + m)
+        else if e.kind >= 9:
+            # (a reservation given back: the slot its reserve counted is free; one that may be given back
+            # lowers what is certain only)
+            if not e.branch: sure = max(0, sure - m)
+            if e.kind == 9: any = max(0, any - m)
         else:
             sure = max(0, sure - m)
             if e.kind == 2 and not e.branch: any = max(0, any - m)

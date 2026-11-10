@@ -9,6 +9,9 @@ use 'deadlock_walk.dewy'
 use 'deadlock_channels.dewy'
 
 dc_event = (kind: int, loc: DlLoc, site: int):
+    dc_event_at(kind, loc, site, dc_branch > 0)
+
+dc_event_at = (kind: int, loc: DlLoc, site: int, branch: bool):
     dc_count += 1
     if dc_count > DC_EVENTS:
         dc_complete = false
@@ -20,19 +23,107 @@ dc_event = (kind: int, loc: DlLoc, site: int):
     loop h in dc_held:
         locs.push(h.loc)
         sites.push(h.site)
-    dc_ev.push(DcEvent(kind, loc, loops, dc_branch > 0, locs, sites, site))
+    dc_ev.push(DcEvent(kind, loc, loops, branch, locs, sites, site))
 
 dc_drop = (mark: int):
     loop dc_held.len() > mark: dc_held.pop()
 
+# A permit's reservation holds a slot until its permit is sent or dropped. The walk keeps the
+# permits in scope (dc_permits: the local holding one, and an alias per match arm's binding),
+# watches `send` on them and any other use, and gives the slot back where the scope ends
+# (kind 9) unless the permit was sent (nothing) or sent on some path or given away (kind 10:
+# the slot may be free again, which only lowers what is certain).
+dc_permit_find = (sym: int) -> int:
+    if sym <= 0: return -1
+    i = dc_permits.len() - 1
+    loop i >= 0 and dc_permits[i].sym != sym: i -= 1
+    i
+
+dc_permit_open = (call: int, sym: int):
+    if sym <= 0 or call == 0: return
+    op = dc_chan_call(call)
+    sure = op == 1 and dc_branch == 0
+    dc_permits.push(DcPermit(dc_loc(kid(call, 0)), nodes[call].pos, sym, dc_permits.len(), dc_branch, dc_loops.len(), 0, sure))
+
+dc_permit_alias = (n: int) -> bool:
+    sym = int(nodes[n].sym)
+    e = dc_strip(int(nodes[n].b))
+    if sym <= 0 or e == 0 or nodes[e].kind != .ident: return false
+    i = dc_permit_find(int(nodes[e].sym))
+    if i < 0: return false
+    p = dc_permits[i]
+    dc_permits.push(DcPermit(p.loc, p.site, sym, p.root, p.depth, p.nloops, 0, p.sure))
+    true
+
+dc_permit_use = (n: int):
+    i = dc_permit_find(int(nodes[n].sym))
+    if i < 0: return
+    r = dc_permits[i].root
+    if dc_permits[r].state == 0: dc_permits[r].state = 2
+
+# Every use inside a function value: it may run anywhere, so the permit is given away.
+dc_permit_scan = (n: int):
+    if n == 0: return
+    if nodes[n].kind == .ident: dc_permit_use(n)
+    dc_permit_scan(int(nodes[n].a))
+    dc_permit_scan(int(nodes[n].b))
+    dc_permit_scan(int(nodes[n].c))
+    loop c in kids(n): dc_permit_scan(c)
+
+# `permit.send(value)` on a permit in scope: sent, on every path or on some.
+dc_permit_send = (n: int) -> bool:
+    if nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if d == 0 or name_of(int(nodes[d].name)) != "send" or not ends_with(files[pos_file(nodes[d].pos)].path, "/prelude/reserved.dewy"): return false
+    e = dc_strip(kid(n, 0))
+    if e == 0 or nodes[e].kind != .ident: return false
+    i = dc_permit_find(int(nodes[e].sym))
+    if i < 0: return false
+    r = dc_permits[i].root
+    if dc_permits[r].state == 0:
+        if dc_branch == dc_permits[r].depth and dc_loops.len() == dc_permits[r].nloops: dc_permits[r].state = 1
+        else: dc_permits[r].state = 2
+    dc_walk(kid(n, 1))
+    true
+
+dc_release = (mark: int):
+    loop dc_permits.len() > mark:
+        i = dc_permits.len() - 1
+        p = dc_permits[i]
+        if p.root == i and p.state != 1:
+            kind = if p.state == 0: 9 else: 10
+            dc_event_at(kind, p.loc, p.site, not p.sure)
+        dc_permits.pop()
+
 dc_walk = (n: int):
     if n == 0 or dc_count > DC_EVENTS: return
     k = nodes[n].kind
-    if k == .lambda or k == .fnref: return
+    if k == .lambda or k == .fnref:
+        if dc_permits.len() > 0: dc_permit_scan(n)
+        return
+    if k == .ident and dc_permits.len() > 0: dc_permit_use(n)
     if k == .block:
         mark = dc_held.len()
+        pmark = dc_permits.len()
         loop c in kids(n): dc_walk(c)
-        if nodes[n].aux != 5: dc_drop(mark)
+        if nodes[n].aux != 5:
+            dc_drop(mark)
+            dc_release(pmark)
+        return
+    if k == .match_ and dc_reserve_call(int(nodes[n].a)) != 0:
+        # (the scrutinee is evaluated on every path; its permit is the match's hidden local, which
+        # each arm's binding aliases)
+        loop g in value_helper_calls(n): dc_enter(g, 0)
+        pmark = dc_permits.len()
+        hold = dc_held.len()
+        dc_walk(int(nodes[n].a))
+        dc_permit_open(dc_reserve_call(int(nodes[n].a)), int(nodes[n].sym))
+        dc_branch += 1
+        loop c in kids(n):
+            dc_walk(c)
+            dc_drop(hold)
+        dc_branch -= 1
+        dc_release(pmark)
         return
     if k == .vardecl:
         init = int(nodes[n].b)
@@ -44,7 +135,9 @@ dc_walk = (n: int):
                 if what == "lock": dc_event(4, loc, nodes[init].pos)
                 dc_held.push(DlHeld(loc, nodes[init].pos, int(nodes[n].sym)))
                 return
+        if dc_permit_alias(n): return
         dc_walk(int(nodes[n].b))
+        dc_permit_open(dc_reserve_call(int(nodes[n].b)), int(nodes[n].sym))
         return
     if k == .if_ or k == .iflet:
         dc_walk(int(nodes[n].a))
@@ -102,6 +195,7 @@ dc_walk = (n: int):
 
 dc_call = (n: int):
     pos = nodes[n].pos
+    if dc_permits.len() > 0 and dc_permit_send(n): return
     what = dl_lock_call(n)
     if what == "__lock_all":
         words = kid(n, 1)
@@ -209,6 +303,7 @@ dc_collect = ():
         dc_fcalls = s.fcalls
         dc_loops = []
         dc_held = []
+        dc_permits = []
         dc_branch = 0
         dc_multi = s.multi
         # Even a task with no waits can cancel its siblings by failing. Keep

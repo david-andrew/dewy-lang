@@ -1,0 +1,8 @@
+# modes: native native-release
+# A permit still held when the channel is sent into past its capacity: the slot is not free.
+main = () => {
+    let q = mpmc<int64>(1)
+    let held = q.reserve
+    q.send(1);
+    printl"{q.receive or_throw}"
+}
