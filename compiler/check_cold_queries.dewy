@@ -1,0 +1,57 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (is_alnum)
+from p"ast.jo" import (nodes)
+from p"check.jo" import (ctxs)
+from p"checker_expr.dewy" import (check_expr)
+from p"checks_text.dewy" import (byte_find)
+from p"comptime.jo" import (ct_values)
+from p"comptime_ops.dewy" import (ct_run)
+from p"evaluator_state.dewy" import (CVal)
+from p"expr.jo" import (finalize_literal last_checked)
+from p"types.jo" import (tkind)
+
+ColdCheckWord:type=int64<overflow='wrap'>
+# the context of function inst anywhere on the stack of bodies being checked, or -1
+ctx_in_progress=(inst:ColdCheckWord):>int64=>{
+    let c=ctxs.length - 1
+    loop c >=? 0 {
+        if ColdCheckWord(ctxs[c].inst) =? inst {return c}
+        c -= 1
+    }
+    -1
+}
+# how many times w appears in src as a whole word
+word_count=(src:string w:string):>int64=>{
+    let n:ColdCheckWord=0
+    let i=byte_find(src w)
+    loop i >=? 0 {
+        let before=i =? 0 or not (is_alnum((src as array<uint8>)[i - 1]) or (src as array<uint8>)[i - 1] =? b'_')
+        let e=i + (w as array<uint8>).length
+        let after=e >=? (src as array<uint8>).length or not (is_alnum((src as array<uint8>)[e]) or (src as array<uint8>)[e] =? b'_')
+        if before and after and not in_comment(src i) {n += 1}
+        i=byte_find(src w i + 1)
+    }
+    n
+}
+# (a `#` before i on its line, outside quotes)
+in_comment=(src:string i:ColdCheckWord):>bool=>{
+    let s=i
+    loop s >? 0 and (src as array<uint8>)[s - 1] not=? b'\n' {s -= 1}
+    let quoted=false
+    loop k in [s..i) {
+        if (src as array<uint8>)[k] =? b'"' {quoted=not quoted} else if (src as array<uint8>)[k] =? b'#' and not quoted {return true}
+    }
+    false
+}
+# ---------------- compile-time evaluation ----------------
+# Coarse evaluator services: checking may re-enter ceval and grow shared arenas.
+constant_checked=(e:int64):>CVal=>$unsafe {
+    let checked=e
+    if nodes.ptr[e].type =? 0 {
+        check_expr(e 0);
+        checked=last_checked
+        finalize_literal(checked);
+    }
+    let value=ct_values[ct_run(checked)]
+    CVal(tkind(value.type) =? 'str_' value.i value.s)
+}

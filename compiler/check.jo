@@ -150,6 +150,7 @@ use 'checks_const_views.dewy'
 use 'checks_thin.dewy'
 use 'comptime_ops.dewy'
 use 'checks_place_updates.dewy'
+use 'check_cold_queries.dewy'
 
 struct Module:
     name: i32
@@ -1089,14 +1090,6 @@ new_local = (name: int, t: int, pos: int) -> int:
     fns[inst].locals.push(l)
     if name != 0 and name_of(name) != "_": push_scope_sym(name, new_sym(name, .local, l, 0))
     l
-
-# the context of function inst anywhere on the stack of bodies being checked, or -1
-ctx_in_progress = (inst: int) -> int:
-    c = ctxs.len() - 1
-    loop c >= 0:
-        if int(ctxs[c].inst) == inst: return c
-        c -= 1
-    -1
 
 ctx_for_inst = (inst: int) -> int:
     c = cx
@@ -2545,28 +2538,6 @@ copy_write_warnings = (f: int):
         if starts_with(nm, "#") or starts_with(nm, "$") or starts_with(nm, "__") or pos_in_lib(locals[l].pos): continue
         warn_unused_copy(copy_writes[l], nm)
 
-# how many times w appears in src as a whole word
-word_count = (src: str, w: str) -> int:
-    n = 0
-    i = find(src, w)
-    loop i >= 0:
-        before = i == 0 or not (is_alnum(src[i - 1]) or src[i - 1] == '_')
-        e = i + len(w)
-        after = e >= len(src) or not (is_alnum(src[e]) or src[e] == '_')
-        if before and after and not in_comment(src, i): n += 1
-        i = find(src, w, i + 1)
-    n
-
-# (a `#` before i on its line, outside quotes)
-in_comment = (src: str, i: int) -> bool:
-    s = i
-    loop s > 0 and src[s - 1] != '\n': s -= 1
-    quoted = false
-    loop k in [s..i):
-        if src[k] == '"': quoted = not quoted
-        else if src[k] == '#' and not quoted: return true
-    false
-
 # Dewy suggestions use names visible here, including explicit import aliases.
 # A similarly named global in an unrelated loaded file is not a useful hint.
 dewy_unused_name_hint = (name: str, module: int) -> str:
@@ -2871,17 +2842,6 @@ settle_open_globals = ():
 # disprove closed-program ownership. Init/lambda bodies remain unsummarized.
 zonk_indexes = 0
 zonk_user_globals = 0
-
-# ---------------- compile-time evaluation ----------------
-# Coarse evaluator services: checking may re-enter ceval and grow shared arenas.
-constant_checked = (e: int) -> CVal:
-    checked = e
-    if nodes[e].type == 0:
-        check_expr(e, 0)
-        checked = last_checked
-        finalize_literal(checked)
-    value = ct_values[ct_run(checked)]
-    CVal(tkind(value.type) == .str_, value.i, value.s)
 
 constant_binding = (e: int) -> int:
     if nodes[e].type != 0 and (nodes[e].aux == i32(int(SK.local)) or nodes[e].aux == i32(int(SK.global))):

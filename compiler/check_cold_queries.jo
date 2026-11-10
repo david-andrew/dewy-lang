@@ -1,0 +1,189 @@
+use 'check.jo'
+use 'secret_checks.dewy'
+use 'checks_assign_hooks.dewy'
+use 'checks_stmt_hooks.dewy'
+use 'checks_type_hooks.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_program.dewy'
+use 'checks_unpack.dewy'
+use 'checks_main.dewy'
+use 'checks_imports.dewy'
+use 'checks_hints.dewy'
+use 'checks_text.dewy'
+use 'isolation_ops.dewy'
+use 'checker_program.dewy'
+use 'checker_hooks.dewy'
+use 'checker_sinks.dewy'
+use 'checker_value_calls.dewy'
+use 'checker_values.dewy'
+use 'host_binds.jo'
+use 'checker_call_queries.dewy'
+use 'checker_expr.dewy'
+use 'effect_lattice.dewy'
+use 'checker_blocks.dewy'
+use 'checker_assigns.dewy'
+use 'checker_vardecls.dewy'
+use 'checker_for_loops.dewy'
+use 'checker_statements.dewy'
+use 'checker_exprstmts.dewy'
+use 'checker_returns.dewy'
+use 'checker_loops.dewy'
+use 'checker_zonk.dewy'
+use 'checker_body_results.dewy'
+use 'checker_bodies.dewy'
+use 'checker_instances.dewy'
+use 'checker_signature.dewy'
+use 'checker_resolve.dewy'
+use 'checker_alias.dewy'
+use 'checker_fields.dewy'
+use 'checker_results.dewy'
+use 'type_substitute.dewy'
+use 'constant_eval.dewy'
+use 'constant_host.dewy'
+use 'source_types.dewy'
+use 'evaluator_state.dewy'
+use 'checker_state.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'partition.jo'
+use 'lazy_bodies.jo'
+use 'lazy_force.dewy'
+use 'frontend.jo'
+use 'pcheck.jo'
+use 'spelling.dewy'
+use 'habits.dewy'
+use 'units.jo'
+use 'unit_rare.dewy'
+use 'unit_ops.dewy'
+use 'definite.jo'
+use 'definite_walk.dewy'
+use 'import_cycles.jo'
+use 'cycle_ops.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'growth.jo'
+use 'safe_paths.jo'
+use 'safe_path_ops.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'constant_checks.dewy'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'deadlock.jo'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'settings.jo'
+use 'host_target.dewy'
+use 'targets.dewy'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'watch.jo'
+use 'watch_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'pkg.jo'
+use 'pkg_ops.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'parse.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'expr.jo'
+use 'slice_checks.dewy'
+use 'narrowing_checks.dewy'
+use 'type_member_checks.dewy'
+use 'select_checks.dewy'
+use 'checks_thin_expr.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_builders.dewy'
+use 'ide.jo'
+use 'ide_decls.dewy'
+use 'ide_text.dewy'
+use 'ide_index.dewy'
+use 'poly_closure.jo'
+use 'prelude.jo'
+use 'prelude_ops.dewy'
+use 'comptime.jo'
+use 'facts.jo'
+use 'facts_ranges.dewy'
+use 'refine.jo'
+use 'refine_siblings.dewy'
+use 'refine_rare.dewy'
+use 'refine_ops.dewy'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'proof_ops.dewy'
+use 'effects.jo'
+use 'arena.jo'
+use 'ownership.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'juxtapose.dewy'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'temperature_kinds.jo'
+use 'temperature_ops.dewy'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'secrets.jo'
+use 'directives.jo'
+use 'directive_ops.dewy'
+use 'ffi.jo'
+use 'floats.jo'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'concurrency_tasks.dewy'
+use 'checks_const_views.dewy'
+use 'checks_thin.dewy'
+use 'comptime_ops.dewy'
+use 'checks_place_updates.dewy'
+
+# the context of function inst anywhere on the stack of bodies being checked, or -1
+ctx_in_progress = (inst: int) -> int:
+    c = ctxs.len() - 1
+    loop c >= 0:
+        if int(ctxs[c].inst) == inst: return c
+        c -= 1
+    -1
+# how many times w appears in src as a whole word
+word_count = (src: str, w: str) -> int:
+    n = 0
+    i = find(src, w)
+    loop i >= 0:
+        before = i == 0 or not (is_alnum(src[i - 1]) or src[i - 1] == '_')
+        e = i + len(w)
+        after = e >= len(src) or not (is_alnum(src[e]) or src[e] == '_')
+        if before and after and not in_comment(src, i): n += 1
+        i = find(src, w, i + 1)
+    n
+# (a `#` before i on its line, outside quotes)
+in_comment = (src: str, i: int) -> bool:
+    s = i
+    loop s > 0 and src[s - 1] != '\n': s -= 1
+    quoted = false
+    loop k in [s..i):
+        if src[k] == '"': quoted = not quoted
+        else if src[k] == '#' and not quoted: return true
+    false
+# ---------------- compile-time evaluation ----------------
+# Coarse evaluator services: checking may re-enter ceval and grow shared arenas.
+constant_checked = (e: int) -> CVal:
+    checked = e
+    if nodes[e].type == 0:
+        check_expr(e, 0)
+        checked = last_checked
+        finalize_literal(checked)
+    value = ct_values[ct_run(checked)]
+    CVal(tkind(value.type) == .str_, value.i, value.s)
