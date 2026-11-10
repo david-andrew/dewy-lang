@@ -592,3 +592,47 @@ section linked. ROADMAP.md lists them in one line each.
     1-D one-per-line lists or need a special case.
   - Open as D39 ([proposals/array-literals/](proposals/array-literals/)): whether
     bracketed nests are arrays of arrays or n-D, and how comprehensions interact.
+- Batch 7 (David, 2026-11-09), from D4 ([proposals/concurrency/unified/](proposals/concurrency/unified/), `select-v6-round11.md`):
+  - **Remove friction, even if the compiler works harder** (standing): "if there's
+    something that seems like it could work, even if the compiler needs to work a bit
+    harder, I think it's usually worth it (and if it also hurts performance, it ought
+    to also come with a warning)." Said of choosing settings by a run-time value (D4 Q7,
+    being redesigned).
+  - **Dewy files are `.dewy`** (standing): design examples import `.dewy` modules
+    (`import p"@lib/std/tasks.dewy" as task`), even while the standard library is
+    written in Jo.
+  - **`select` arms match by type** (D4 Q8): `select(...)` takes the operations and
+    returns the union of their outcomes plus `Canceled` (and `Timeout` with
+    `timeout=`); same-typed waits merge into one arm. Sources are told apart by David's
+    source-qualified members: `<heart.Tick>`, `line:stderr.string`, `<commands.Closed>`,
+    a named wait `<(@reserve).Closed>`, and the explicit selector `heart.<Tick>`. A
+    qualified arm is allowed only on a `match` written directly on the call that
+    prepared the waits; elsewhere arms match by plain type. Replaces v5's one-field
+    record labels. Considered: record labels; marker types per source; a
+    `type of string` wrapper.
+  - **Sends and drains** (Q11, Q12): `out.send(job timeout=50ms)` gives
+    `void | Unsent<Job> | Canceled`; `@out.reserve` gives a `Reserved<Job>` whose
+    `permit.send(job)` can't fail; sends inside `select` are withdrawn.
+    `loop item in merged(@a.receive @b.receive stop_when_idle=30s) or_throw { … }`
+    drains until every channel closes, with `or_throw` after a loop's iterable.
+  - **`race` and `first_ok`** (Q13): `race` takes any number of calls or a spread,
+    returns the first result and cancels and joins the rest (`race(@load.(sources)...)`);
+    `first_ok` returns the first success. Considered: `first_success`.
+  - **Names** (Q14): `Closed<T>`, `Unsent<T>`, `Tick`, `CtrlC`, `receive(timeout=)`.
+    `task.CtrlCListener` is accepted with the caveat that the Ctrl-C scope is being
+    redesigned (below).
+  - **`$named[...]`** (Q15): a metatag backed by an ordinary comptime function that
+    spreads one member per type, `[$named[Png Jpeg Gif]...]`; `Waitable<R>` builds
+    `heart.Tick` and friends with it. Considered: a plain `named([…])` function, which
+    misled a cold reader.
+  - **`heart.types`** (Q16) is everything a source can produce. Considered: `outcomes`.
+  - **Member clashes** (Q17): when a generated member clashes with an existing one, the
+    existing member wins for ordinary reads, with a warning; a source-qualified arm made
+    ambiguous by the clash is an error offering `heart.<Tick>`. Considered: warning only
+    (an added field could silently widen an arm).
+  - **Cleanup** (direction): `defer` stays for now. A later design pass looks for
+    cleanup that doesn't rely on remembering a second step (`defer <expr> {…}`, a value
+    that cleans itself up, a `with`-like scope).
+  - Being redesigned: Ctrl-C, task groups and protection as blocks where `return`,
+    `break` and `or_throw` act on the enclosing function as usual (Q4); settings chosen
+    by a run-time value, so one entry file with a function per environment works (Q7).

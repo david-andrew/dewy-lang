@@ -13,24 +13,19 @@
   - `@f` is a handle to function `f`, and `$name` is a metatag.
 - **Revised 2026-11-07:** D4, D10, D11, D28, D29, D31 and D33–D37 were revised together. Independent agents dogfooded them twice, they were made consistent with each other, and every name was read cold. Each item states its floors and whether it is ready.
 - **Revised 2026-11-09:** D4's `select` (v6): arms match by type, your `<heart.Tick>` members tell sources apart (built by `$named`), `race` cancels, `merged` drains. Eleven rounds, six independent reviews, every new spelling read cold. Q10 (`type of string`, `ticker<T>`) is withdrawn: source-qualified members made it unnecessary.
-- **Closed:** D22 (`$parallel_safe` deleted), D26 and D27. Your answers of 2026-11-07 are in decisions.md, batch 4.
+- **Closed:** D22 (`$parallel_safe` deleted), D26 and D27. Your answers of 2026-11-07 are in decisions.md, batch 4; of 2026-11-09 (D4 Q8, Q11–Q17), batch 7.
 - **Question kinds:** (a) changes something you decided; (b) new syntax or surface; (c) names only. Question numbers are kept as first asked, so answered ones leave gaps.
 
 **Questions at a glance**
 - **(a) Changes something you decided:**
   - D4 Q6: metatags go before the construct they affect, language-wide;
-  - D4 Q7: separate entry files when environments need different program settings;
-  - D4 Q8: `select` arms match by type; your `<heart.Tick>` tells sources apart;
-  - D4 Q9: `priority=` replaces `ties=`, and `Sent` is withdrawn;
-  - D4 Q17: a generated member clashing with an existing one (your warning rule, or the middle rule);
+  - D4 Q9: `priority=` replaces `ties=` (`'listed'` or your `'index'`), and `Sent` is withdrawn;
   - D38 Q1: snake_case naming style;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
 - **(b) New syntax or surface:**
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
-  - D4 Q11–Q13: `send(timeout=)`, `reserve`, `merged`, `race` with many calls, `first_ok`;
-  - D4 Q15: `$named[...]`;
   - D11 Q2: `check=` or `valid_if=`;
   - D11 Q3: `__read__` or `$reader`;
   - D11 Q4: the checked constructor `Roll(count=…)`;
@@ -38,9 +33,6 @@
   - D33 Q1: a self-naming alias;
   - D37 Q1: `iso_basic` and `""`.
 - **(c) Names only:**
-  - D4 Q4: `catch_ctrl_c` taking a callback;
-  - D4 Q14: `Closed<T>`, `Unsent<T>`, `Tick`, `CtrlC` and friends;
-  - D4 Q16: `heart.types`;
   - D10 Q4–Q8;
   - D11 Q5, Q6;
   - D28 Q1–Q4;
@@ -52,6 +44,7 @@
   - D37 Q2;
   - D38 Q2: prefer familiar words;
   - D39 Q2: `stack` and `Ragged`.
+- **Being redesigned after your answers:** D4 Q4 (Ctrl-C and the other scopes as blocks) and D4 Q7 (settings chosen by a run-time value).
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -60,12 +53,12 @@
 
 ### D4. One unified `parallel` surface: v5
 
-- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` waits on channel operations and its arms match the outcomes by type; `race` is the word that cancels the losers. Ctrl-C catching and cleanup protection have visible callback scopes; compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
+- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` waits on channel operations and its arms match the outcomes by type; `race` is the word that cancels the losers. Ctrl-C catching and cleanup protection are visible scopes (their form is being redesigned, Q4); compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
 - **Status:** first-pass paper dogfood covered fourteen scenarios; independent dogfood in `proposals/concurrency/unified/v5-dogfood.md` found must-fix issues, now corrected in this text. Your approved names, `$explicit_cancellation` and `main`'s `BackgroundTasks` parameter stay. The remaining surface questions are below; no repeated Q1 or Q3. Full design and complete sources: `~/dev/tmp/par5/parallel-v5.md`, `~/dev/tmp/par5/programs/`.
 
 ```dewy
 # v5 design program; standard concurrency API is explicit at its use.
-import p"@lib/std/tasks.jo" as task
+import p"@lib/std/tasks.dewy" as task
 
 Config:type = [root:string]
 Invalid:type = type of error
@@ -149,7 +142,7 @@ main = () => {
 
 ```dewy
 # Ctrl-C during input clears the line; EOF/quit leaves the visible scope.
-import p"@lib/std/tasks.jo" as task
+import p"@lib/std/tasks.dewy" as task
 
 repl = () => task.catch_ctrl_c((ctrl_c) => {
     loop true {
@@ -170,7 +163,7 @@ main = () => {
 
 ```dewy
 # Ctrl-C requests ordinary cancellation. Save, then preserve exit status 130.
-import p"@lib/std/tasks.jo" as task
+import p"@lib/std/tasks.dewy" as task
 
 search = (@best:int):>void | Canceled => {
     loop n in [0..1_000_000_000) {
@@ -198,7 +191,7 @@ main = () => {
 ```dewy
 # Example command: dewy 08_cli_arguments_and_tasks.dewy /index.html count=3
 import argparse
-import p"@lib/std/tasks.jo" as task
+import p"@lib/std/tasks.dewy" as task
 import net
 
 fetch = (resource:string output:Path) => {
@@ -239,7 +232,7 @@ main = (argv:array<string> app:BackgroundTasks) => {
 
 - **Source-defined environments:**
   - Separate entry files import units/shared code first, then set a contiguous module header before declarations or prefix their entry `main`. Caps are fixed when compiling, with no environment-variable override.
-  - One entry file may dispatch ordinary functions with ordinary application config values. It cannot choose different compiled process caps from runtime arguments. The first pass's program 10 is withdrawn. Q7 asks how to reconcile your second idiom; these are the corrected separate-entry and single-file application-config forms.
+  - One entry file may dispatch ordinary functions with ordinary application config values. Choosing different process settings from run-time arguments in one file (your second idiom) is being redesigned (Q7). These are the separate-entry and single-file application-config forms as they stand.
 
 ```dewy
 # entry-small.dewy
@@ -284,73 +277,19 @@ main = (argv:array<string> app:BackgroundTasks):>void => {
   - **Frame code:** use nonwaiting `ch.drain` and background jobs; channel/task/timer waits remain errors in `update`/`draw`. The injected group survives `main` until the window closes.
   - **Entrypoint arguments:** accept at most one `array<string>` and one `BackgroundTasks`, by exact type rather than parameter name; no extra injections into ordinary helpers. Only the selected file's entry `main` runs automatically.
   - **Limits:** settings are in source, caps count cores, and `available_cores` combines hardware/affinity and source limits. No environment-variable cap. Program task admission retains the decided explicit-allocation-failure policy.
-- **`select`, `race` and channel waits (v6, revised 2026-11-09 with your `heart.Tick` idea):**
-  - **The rule:** `select(...)` takes the operations themselves and returns the union of what they produce, plus `Canceled`, plus `Timeout` when `timeout=` is given. Arms match by type, like any other `match`. Same-typed waits merge into one arm (`result:string` takes a string from any source).
-  - **Telling sources apart is your idea:** every operation's receiver offers one member per outcome type, so `<heart.Tick>`, `line:stderr.string` and `<commands.Closed>` match only that source. A plain `<Tick>` still matches every source, so you choose the granularity. Two operations on one receiver are told apart by naming a wait: `let reserve = @out.reserve`, then `<(@reserve).Closed>`; the same form names receiver-less work in `race`: `page:(@web).string`. `heart.<Tick>` selects by resolved type explicitly (for generic code, `a.<A>`, and when a name clashes).
-  - **Where a qualified arm is allowed:** on a `match` written directly on the call that prepared the waits (`select`, `race`, `first_ok`, `inbox.next`, or a direct `receive`/`next`/`reserve`), with each wait written there as `@path.op`, a same-function named wait, or `if … else none` of those. The receiver and named wait stay unchanged from the call to the arm, and a wait prepared on a loop's backedge belongs to that iteration. Anything else (helpers, copied results, waits built in a loop and passed around) matches by plain type, and a qualified arm there is an error with a fix-it. This keeps the check local to one function, linear in waits plus arms.
-  - **The members are not compiler magic:** `Waitable<R>` builds them with `$named[...]`, a metatag backed by an ordinary comptime function any library can use: `[$named[Png Jpeg Gif]...]` gives fields `Png`, `Jpeg`, `Gif` holding those types. A member's name is its type's declared name (`Closed<Job>` → `Closed`; a generic parameter → the instantiated type's name). When two outcomes share a short name (`ui.Job`, `net.Job`), `Waitable` leaves that shorthand out and `w.<ui.Job>` still works; a strict `$named` registry reports the clash as an error. `heart.types` is everything `heart` can produce, so `<heart.types & (Tick | Closed)>` is `<heart.Tick | heart.Closed>`.
-  - **`select` never cancels anything. `race` does.** `race` starts every argument, returns the first result, and cancels and joins the rest; a losing receive takes nothing; ties have no promised order. Your mirror fetch is `race(@load.(sources)...)`: every argument group in an ungrouped `@` chain partially applies, and `.( )` is one, so `@load.(sources)` is an array of ready-to-run calls. `first_ok` returns the first success, and the first failure only if all fail. `within` stays the deadline on one piece of work.
-  - **Draining several channels until they all close** is `loop item in merged(@a.receive @b.receive) or_throw { … }`. `merged` stops waiting on a channel once it closes; `stop_when_idle=30s` ends the loop after 30 s with nothing new and leaves the channels open. Held as `let inbox = merged(…)`, `inbox.next` reports each close once and `inbox.open` says whether any source is left. A loop whose ready source can never be consumed (a closed channel) must drop it or leave; repeatedly ready sources like tickers are fine.
-  - **Single waits:** `replies.receive(timeout=2s)`, `tick.next(timeout=)`. `send(job timeout=50ms)` gives `void | Unsent<Job> | Canceled`; the job comes back in `Unsent`, whose `.reason` is `Timeout` or `Closed`. A pump that should take a job only once there's room selects `@out.reserve`, then `permit.send(job)`. Sends inside `select` and the `Sent` type are withdrawn.
-  - **Deadlines keep no state between calls.** A relative `timeout=` restarts each call; `timeout=0s` is a poll where a ready operation wins; an absolute deadline already past wins under `priority='fair'`. `priority='listed'` takes the written waits in order, deadline last.
-
-```dewy
-watch_which = ():>void | Canceled => {
-    let heart = ticker(1s)
-    let sweep = ticker(2s)
-    defer heart.stop()
-    defer sweep.stop()
-    let swept = false
-    loop not swept {
-        match select(@heart.next @sweep.next) or_throw<Canceled> {
-            <heart.Tick> => printl"beat"
-            <sweep.Tick> => { printl"sweep"; swept = true }
-        }
-    }
-}
-
-FetchError:type = type of exception & [url:string]
-load = (url:string):>string | FetchError => ...
-fastest = (sources:array<string>) => {
-    match race(@load.(sources)...) or_throw<Canceled> {
-        page:string => printl'result is {page}'
-        err:FetchError => printl'error: {err}'
-    }
-}
-
-pipes = (stdout:Channel<string> stderr:Channel<string>) => {
-    let inbox = merged(@stdout.receive @stderr.receive)
-    loop inbox.open {
-        match inbox.next or_throw<Canceled> {
-            line:stdout.string => printl"{line}"
-            line:stderr.string => printl"err {line}"
-            <stdout.Closed | stderr.Closed> => {}
-        }
-    }
-}
-```
-
-  - **Dogfood:** 27 programs over eleven rounds, six independent reviews (`proposals/concurrency/unified/select-v6-review-round*.md`), every new spelling read cold by three fresh readers. Floor 3 on two programs, both judged inherent: the deadline policy takes reading (an expired deadline wins under `'fair'`, `'listed'` can starve), and the backpressure pump's `(@reserve)` spelling. Compared with Go and Tokio, the source-qualified arm takes a little more discovery than a branch tied to one operation; Dewy is shorter when you don't care which source fired, and its drain, race and `within` match them on cleanup. Full text: `proposals/concurrency/unified/select-v6-round11.md`; grades: `select-v6-round11-dogfood.md`.
+- **`select`, `race` and channel waits:** decided 2026-11-09 (decisions.md, batch 7), except Q9 below. Full text: `proposals/concurrency/unified/select-v6-round11.md`.
 - **Surface questions for you:**
-  - **Q4 (c): keep `catch_ctrl_c`, now taking a callback rather than returning an activating guard?** The callback's extent is the catching extent; its `ctrl_c` parameter receives presses. It unblocks shells and prompt loops without a policy-changing assignment. **Rec:** yes. Reversible library call-shape choice. The spelling was previously cold-read; its new invocation shape has been paper dogfooded, not independently retested. No new tag/member spelling is introduced.
+  - **Q4: being redesigned.** Your answer: Ctrl-C (and likewise task groups and protection) should read like a block, so `return`, `break` and `or_throw` act on the enclosing function as usual instead of on a callback. A design round is under way and comes back here with the new form.
   - **Q6 (a, b): make construct settings prefix their target language-wide?** Tags and labels sit before loops, blocks, and declarations. One contiguous module header may be at file start or after the initial imports, before the first ordinary declaration/statement; imported units are in scope. Later prefixes apply only to their next construct. Program settings may also directly prefix entry `main`, and are fixed at compile time. This replaces both current containing-scope placement and the first-line-inside-parallel exception. It unblocks consistent examples in every design item. **Rec:** yes. Reversible before the surface ships; broader than concurrency, and explicitly changes the prior placement direction.
-  - **Q7 (a, b): use separate entry files when environments need different process caps, and ordinary config records when one entrypoint chooses at runtime?** Your second idiom cannot select compiled `$program.*` settings from runtime `argv`; putting them on ordinary functions would give a prefix tag a second, process-changing meaning. A one-file process configuration would need an environment already known when compiling, selected through an agreed target/build-mode/compile-time source value; no such environment selector is invented here. **Rec:** separate entry files for process settings; keep one-file functions for application config under one fixed process cap (complete examples above). This preserves compile-time settings and ordinary function-call semantics. It unblocks environment packaging; reversible source organization. Your proposed second idiom remains an explicit owner choice, not silently implemented as runtime configuration.
-  - **Q8 (a): match `select` arms by type, same-typed waits merged, and tell sources apart with your source-qualified members (`<heart.Tick>`, `line:stderr.string`, `<(@reserve).Closed>`, `heart.<Tick>`), allowed on the match written directly on the call?** Replaces v5's one-field record labels. Gives up qualified arms through helpers and copied results (those match by plain type). Cold read: all six spellings read correctly by three readers (`heart.<Tick>` and `events.<Event>` with lower confidence, fitting an escape hatch). **Rec:** yes. Unblocks every channel program; reversible.
-  - **Q9 (a): `priority='fair' | 'listed'` replaces your approved `ties=`, and `Sent` is withdrawn?** Two of three readers took `ties='first'` as "whichever became ready first in time"; all three read `priority='listed'` as "in the order written". `Sent` existed only for sends inside `select`, now withdrawn. **Rec:** yes; reversible.
-  - **Q11 (b): `out.send(job timeout=50ms)` and `@out.reserve`?** The send gives `void | Unsent<Job> | Canceled`, with the job back in `Unsent` (hover must say so: no reader guessed it). `reserve` waits for room and gives a `Reserved<Job>` whose `permit.send(job)` can't fail; a held permit still delivers if the channel closes. Cold read: `send(timeout=)`, `reserve` and `Reserved` passed. **Rec:** yes; reversible.
-  - **Q12 (b): `loop item in merged(@a.receive @b.receive stop_when_idle=30s) or_throw { … }`?** `or_throw` after a loop's iterable is the binding v4 §12 proposed; it isn't in LANGUAGE.md yet. Cold read: `merged` and `stop_when_idle` passed (`select_set` and `timeout=` failed). **Rec:** yes; reversible.
-  - **Q13 (b): `race` takes any number of calls or a spread, and `first_ok(…)` returns the first success?** `race` today takes two functions. Cold read: `race` (losers canceled) and `first_ok` passed; `first_success` read equally well, if you prefer it. **Rec:** `first_ok`; reversible.
-  - **Q14 (c): `Closed<T>`, `Unsent<T>`, `Tick`, `CtrlC`, `task.CtrlCListener` and `receive(timeout=)`?** All read correctly by three readers. `task.CtrlCListener` is borrowed for the scope and has no `Closed` afterwards (replaces v5's line that delivered `Closed` after the callback). **Rec:** yes.
-  - **Q15 (b): `$named[Png Jpeg Gif]`, a metatag backed by an ordinary comptime function, that spreads one member per type?** Your sketch. `Waitable` uses it for `heart.Tick` and friends; registries and plugin tables use it directly (`each=@handler` builds a per-type value). Cold read: `[$named[Png Jpeg Gif]...]` passed with all three; the plain-function form `[named([…])...]` misled one reader (one field called `named`). **Rec:** `$named[...]`; reversible.
-  - **Q16 (c): `heart.types` for everything a source can produce?** Cold read: `types` and `outcomes` tied, all correct; `<heart.types & (Tick | Closed)>` read correctly. **Rec:** `types`; reversible.
-  - **Q17 (a): when a generated member clashes with an existing one, keep the existing member for ordinary reads with a warning, but make an ambiguous source-qualified arm an error offering `heart.<Tick>`?** Your rule was "existing member wins, plus a warning". The reviewers' concern: a library update adds a field `Tick`, and an arm meant only for `heart`'s ticks starts catching `sweep`'s too, while a later wildcard arm keeps coverage from noticing. The middle rule keeps your ordinary-member behavior and warning, and only rejects the ambiguous arm. **Rec:** the middle rule; reversible.
+  - **Q7: being redesigned.** Your answer: make one entry file with a function per environment work, choosing settings by a run-time value, even if the compiler works harder, with a warning where it costs performance. A design round is under way.
+  - **Q9 (a): `priority='fair' | 'listed'` (or `'index'`) replaces your approved `ties=`, and `Sent` is withdrawn?** You asked about `'index'`. Cold read: all three readers read both correctly as "the earliest argument wins a tie"; confidence `'listed'` 4/4/3, `'index'` 4/4/2 (`'written'` 4/4/3, `'position'` 4/4/2, `'order'` 3/3/3). Two of three had taken your earlier `ties='first'` as "whichever became ready first in time". `Sent` existed only for sends inside `select`, now withdrawn. **Rec:** `'listed'`, by a little: it reads as the plain adjective "in the listed order", next to `'fair'`; `'index'` names the mechanism. Either is fine; reversible.
 - **Flagged, not new questions:**
   - `check_cancel()` is an explicit checkpoint, not an ambient opt-in; it has no active lifetime to bracket. It lives inside an ordinary computation function whose result carries `Canceled`.
   - `protect_from_cancel` and `within` are cooperative: nonchecking compute or an uninterruptible foreign call can exceed the requested duration while being joined.
   - A foreground-task restriction keeps two unrelated background tasks from racing to own process signal policy; nested catchers restore the prior owner.
   - The standard console failure sets gain `Interrupted` uniformly. No metatag changes their type.
   - `$parallel.*` settings that govern nothing are errors. Declaration settings retain target checks.
-- **Floors:** block-local bindings escaping braces remain unusual; different compiled process caps need separate entry files (Q7); full HTTP and real shell job control are library work. Several discoverability scores remain 4. There are no claims of compiler validation or fresh-reader scores.
+- **Floors:** block-local bindings escaping braces remain unusual; choosing process settings at run time is being redesigned (Q7); full HTTP and real shell job control are library work. Several discoverability scores remain 4. There are no claims of compiler validation or fresh-reader scores.
 - **Ready:** design review and syntax/name answers; not implementation landing. Approved Q1, Q3 and approved names are omitted from the questions.
 
 ---
