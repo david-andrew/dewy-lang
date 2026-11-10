@@ -1,0 +1,23 @@
+# modes: native native-release
+# A match on `inbox.next`, for an `inbox = merged(...)` declared here, names the merged waits:
+# `v:a.int64` takes only a's values (decisions.md, batch 7, rule 6).
+main = () => {
+    let a = channel<int64>(4)
+    let b = channel<int64>(4)
+    a.send(1) or_throw
+    a.close()
+    b.send(20) or_throw
+    b.close()
+    let inbox = merged(@a.receive @b.receive)
+    let from_a = 0
+    let from_b = 0
+    loop inbox.open {
+        match inbox.next {
+            v:a.int64 => {from_a += v}
+            v:b.int64 => {from_b += v}
+            <Canceled> => break
+            <none> => break
+        }
+    }
+    printl"a {from_a} b {from_b}"
+}

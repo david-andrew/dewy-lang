@@ -1,0 +1,21 @@
+# modes: native native-release
+# `race` and `first_ok` record the call whose result they give, so a match written on them can
+# name a wait's source as on select (decisions.md, batch 7).
+fail = ():>int64 | Canceled | Busy => Busy
+main = () => {
+    let a = channel<string>(1)
+    let b = channel<string>(1)
+    b.send("from b") or_throw
+    match race(@a.receive @b.receive) {
+        s:a.string => printl"a {s}"
+        s:b.string => printl"b {s}"
+        <Closed> => printl"closed"
+        <Canceled> => printl"canceled"
+        <OutOfMemory> => printl"out of memory"
+    }
+    a.send("from a") or_throw
+    match first_ok(@fail @a.receive) {
+        s:a.string => printl"first ok: a {s}"
+        _ => printl"other"
+    }
+}

@@ -7326,6 +7326,17 @@ select_call = (n: int) -> bool:
     d = int(fns[f].decl)
     name_of(int(nodes[d].name)) == "select" and files[pos_file(nodes[d].pos)].path == lib_dir + "/std/tasks.jo"
 
+# (a call whose result a match can tell apart by source: select, race or first_ok, which record
+# the argument that gave it)
+source_call = (n: int) -> bool:
+    if select_call(n): return true
+    f = int(nodes[n].sym)
+    if f <= 0 or nodes[n].aux != 0 or fns[f].decl == 0: return false
+    d = int(fns[f].decl)
+    name = name_of(int(nodes[d].name))
+    path = files[pos_file(nodes[d].pos)].path
+    name == "race" and path == lib_dir + "/std/tasks.jo" or name == "first_ok" and path == lib_dir + "/prelude/first_ok.dewy"
+
 select_check = (n: int):
     waits: int[]
     loop a0 in kids(n):
@@ -7574,6 +7585,7 @@ named_wait_declared = (l: int) -> int:
     nw_local = l
     nw_call = 0
     nw_decl = 0
+    nw_decl_at = -1
     nw_at = 0
     nw_loops.clear()
     nw_writes.clear()
@@ -7630,13 +7642,15 @@ source_match = (m: int, expected: int) -> int:
     if nodes[head].kind == .call: head = int(nodes[head].a)
     if nodes[head].kind == .field and (name_of(int(nodes[head].name)) == "receive" or name_of(int(nodes[head].name)) == "next") and select_place(int(nodes[head].a)):
         receiver = source_receiver(int(nodes[head].a))
+        inner = inbox_sources(int(nodes[head].a), name_of(int(nodes[head].name)))
+        if inner.len() > 0: return inbox_source_match(m, sc, inner, expected)
         loop arm in kids(m):
             loop p in kids(arm):
                 q = source_qualifier(p)
                 if q != 0 and q != receiver: fatal(nodes[p].pos, "this pattern names {name_of(q)}, but the match is on another wait: only what that wait gives can match here (write the plain type, or match on {name_of(q)}'s own wait)")
         return -1
     callee = if nodes[sc].kind == .call: int(nodes[sc].a) else: 0
-    if callee == 0 or nodes[callee].kind != .ident or name_of(int(nodes[callee].name)) != "select":
+    if callee == 0 or nodes[callee].kind != .ident or not (name_of(int(nodes[callee].name)) in ["select", "race", "first_ok"]):
         fatal(nodes[first].pos, "a pattern that names its source (`<heart.Tick>`) needs the match written on the call that prepared the waits, `match select(...)`, or on a direct `receive` or `next`; a stored result, a helper's or another call's has no source: match the plain type")
     # (the waits' outcomes, from a checked copy: the call itself is checked where it is bound)
     check_expr(clone(sc), 0)
@@ -7646,7 +7660,7 @@ source_match = (m: int, expected: int) -> int:
     # (all waits conditional: `{obligation; select(...)}`)
     if nodes[call].kind == .block and nkids(call) > 0 and nodes[kid(call, nkids(call) - 1)].kind == .exprstmt: call = int(nodes[kid(call, nkids(call) - 1)].a)
     loop nodes[call].kind == .conv: call = int(nodes[call].a)
-    if nodes[call].kind != .call or not select_call(call): fatal(nodes[first].pos, "a pattern that names its source needs the match written on `select(...)` itself")
+    if nodes[call].kind != .call or not source_call(call): fatal(nodes[first].pos, "a pattern that names its source needs the match written on `select(...)`, `race(...)` or `first_ok(...)` itself")
     whole = prune(ntype(probe))
     # (each wait: its receiver's name and what it gives)
     receivers: int[]
@@ -7675,6 +7689,11 @@ source_match = (m: int, expected: int) -> int:
         loop p in kids(arm):
             q = source_qualifier(p)
             if q != 0 and not receivers.contains(q) and not named.contains(q): fatal(nodes[p].pos, "{name_of(q)} is not waited on in this select: a pattern names one of the call's waits (`@{name_of(q)}.receive` written in it, or `@w` for a named wait)")
+    source_dispatch(m, sc, receivers, named, outcomes, own, whole, select_call(call), expected)
+
+# (source_match's rewrite: one match per wait, chosen by the recorded winner)
+source_dispatch = (m: int, sc: int, receivers: int[], named: int[], outcomes: int[][], own: int[], whole: int, on_select: bool, expected: int) -> int:
+    pos = nodes[m].pos
     statement = has_flag(m, NF_STMT)
     sel = "$select{m}"
     won = "$select_won{m}"
@@ -7734,7 +7753,7 @@ source_match = (m: int, expected: int) -> int:
         nodes[branch].a = i32(bc_ident(sel, pos))
         if statement: add_flag(branch, NF_STMT)
         set_list(branch, arms)
-        select_source_matches[branch] = true
+        if on_select: select_source_matches[branch] = true
         select_source_calls[branch] = sc
         branches.push(branch)
         branches.push(if k < outcomes.len(): k else: -1)
@@ -7762,6 +7781,79 @@ source_match = (m: int, expected: int) -> int:
     nodes[m] = Node(kind = .block, pos = pos, aux = if statement: 0 else: 1)
     set_list(m, statements)
     check_expr(m, expected)
+
+
+# Rule 6 (decisions.md, batch 7): `match inbox.next` for an `inbox = merged(@a.receive ...)`
+# declared in this function names the inner waits, `v:a.int64`; the inbox records which one gave
+# the value. The waits of inbox's declaration, [] when x is no such inbox (or the pattern names
+# only the inbox itself). A later assignment to the inbox does not carry its table: an error.
+inbox_sources = (x0: int, op: str) -> int[]:
+    out: int[]
+    x = x0
+    loop nodes[x].kind == .conv: x = int(nodes[x].a)
+    if op != "next" or nodes[x].kind != .ident: return out
+    s = lookup(int(nodes[x].name))
+    if s == 0 or syms[s].kind != .local: return out
+    l = int(syms[s].ref)
+    named_wait_declared(l)
+    if nw_decl == 0: return out
+    init = int(nodes[nw_decl].b)
+    loop nodes[init].kind == .conv: init = int(nodes[init].a)
+    if nodes[init].kind != .call or nodes[init].sym <= 0 or nodes[init].aux != 0 or fns[int(nodes[init].sym)].decl == 0: return out
+    d = int(fns[int(nodes[init].sym)].decl)
+    if name_of(int(nodes[d].name)) != "merged" or files[pos_file(nodes[d].pos)].path != lib_dir + "/prelude/inbox.dewy": return out
+    loop a0 in kids(init):
+        a = select_wait_arg(a0)
+        if tkind(ntype(a)) != .fn_: continue
+        w = wait_partial(a)
+        if w == 0 and named_wait_local(a) != 0: w = named_wait_declared(named_wait_local(a))
+        out.push(w)
+    out
+
+inbox_source_match = (m: int, sc: int, inner: int[], expected: int) -> int:
+    field = sc
+    if nodes[field].kind == .call: field = int(nodes[field].a)
+    target = int(nodes[field].a)
+    loop nodes[target].kind == .conv: target = int(nodes[target].a)
+    inbox = int(nodes[target].name)
+    # (rule 6: the inbox stays the binding its table was made for)
+    named_wait_declared(int(syms[lookup(inbox)].ref))
+    nw_walk_assigned(inbox, m)
+    check_expr(clone(sc), 0)
+    whole = prune(ntype(last_checked))
+    receivers: int[]
+    named: int[]
+    outcomes: int[][]
+    taken: int[]
+    loop w in inner:
+        receivers.push(if w != 0: source_receiver(kid(w, 0)) else: 0)
+        named.push(0)
+        gives: int[]
+        if w != 0:
+            loop g in value_members(prune(telem(ntype(w)))):
+                if type_short_name(g) != "Closed" and type_short_name(g) != "Canceled": gives.push(prune(g))
+        outcomes.push(gives)
+        loop g in gives: taken.push(g)
+    own: int[]
+    loop g0 in value_members(whole):
+        g = prune(g0)
+        if not taken.contains(g): own.push(g)
+    loop arm in kids(m):
+        loop p in kids(arm):
+            q = source_qualifier(p)
+            if q != 0 and q != inbox and not receivers.contains(q): fatal(nodes[p].pos, "{name_of(q)} is not one of this inbox's waits: a pattern on `inbox.next` names a wait of its `merged(...)`")
+            if q == inbox: fatal(nodes[p].pos, "a pattern on `{name_of(inbox)}.next` names one of its merged waits (`v:a.string`); the inbox itself is one source only inside `select`")
+    source_dispatch(m, sc, receivers, named, outcomes, own, whole, false, expected)
+
+# (an assignment to the local named name anywhere in m's function after its declaration: by name,
+# as the rest of the body is not checked yet)
+nw_walk_assigned = (name: int, m: int):
+    loop i in [0..nw_writes.len()):
+        x = nw_writes[i]
+        if nodes[x].kind != .assign or nw_write_at[i] <= nw_decl_at: continue
+        t = int(nodes[x].a)
+        loop nodes[t].kind == .conv or nodes[t].kind == .field: t = int(nodes[t].a)
+        if nodes[t].kind == .ident and nodes[t].name == i32(name): fatal(nodes[x].pos, "a match on `{name_of(name)}.next` names the waits of its `merged(...)`, but this assigns {name_of(name)} another value, which does not carry them: bind a new local, or match the plain type")
 
 # (the per-wait matches source_match made: select_progress checks them as on select)
 select_source_matches: {int: bool} = {}

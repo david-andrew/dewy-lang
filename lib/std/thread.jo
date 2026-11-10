@@ -384,6 +384,9 @@ __select_try_won = () -> bool:
     won = s[__TS_SELECT] == 1
     s[__TS_SELECT] = 0
     won
+# (race and first_ok: the call whose result they gave, k, for a match with source arms; -1 for
+# their own outcome)
+__select_took = (k: int) -> void: __ts()[__TS_SELECT_WON] = k + 1
 # (a merged inbox's `next` inside select: whether select is trying it, and what to leave
 # for select to read: 1 a real result, 2 nothing was ready)
 __select_trying = () -> bool: __ts()[__TS_SELECT] == 1

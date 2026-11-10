@@ -36,6 +36,8 @@ Merged:type = <T>[
         if __merge_done(__m) return none
         # (inside select: one pass, and what it found left for select)
         let probing = __select_trying()
+        # (outside select: which source gave the value, for a match naming its waits)
+        if not probing __select_took(-1)
         let n = __sources.length
         let spins:int64 = 0
         loop true {
@@ -59,6 +61,7 @@ Merged:type = <T>[
                         } else {
                             __merge_got(__m)
                             __select_leave(probing true)
+                            if not probing __select_took(i)
                             return r
                         }
                     }

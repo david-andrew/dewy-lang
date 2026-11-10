@@ -1,0 +1,11 @@
+# A later assignment gives the inbox another table: a match naming the first one's waits is wrong.
+main = () => {
+    let a = channel<int64>(4)
+    let b = channel<int64>(4)
+    let inbox = merged(@a.receive @b.receive)
+    match inbox.next {
+        v:a.int64 => printl"a {v}"
+        _ => printl"other"
+    }
+    inbox = merged(@b.receive)
+}

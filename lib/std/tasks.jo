@@ -285,6 +285,7 @@ race[A, B] = (first: () -> A, second: () -> B) -> (A | B | Canceled | OutOfMemor
     )
     __task_join(g)
     __task_restore(previous)
+    __select_took(winner.load())
     if winner.load() == 0: return __task_result(a)
     if winner.load() == 1: return __task_result(b)
     if __task_scope_canceled(g): return Canceled
@@ -489,6 +490,7 @@ race[A, B, C] = (a: () -> A, b: () -> B, c: () -> C) -> (A | B | C | Canceled | 
     )
     __task_join(g)
     __task_restore(previous)
+    __select_took(winner.load())
     if winner.load() == 0: return __task_result(ta)
     if winner.load() == 1: return __task_result(tb)
     if winner.load() == 2: return __task_result(tc)
@@ -521,6 +523,7 @@ race[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D) -> (A | B | 
     )
     __task_join(g)
     __task_restore(previous)
+    __select_took(winner.load())
     if winner.load() == 0: return __task_result(ta)
     if winner.load() == 1: return __task_result(tb)
     if winner.load() == 2: return __task_result(tc)
