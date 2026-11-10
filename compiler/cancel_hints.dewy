@@ -1,0 +1,114 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (ends_with)
+from p"@lib/core/rt.jo" import (__str_slice)
+from p"checks_text.dewy" import (byte_find)
+from p"ast.jo" import (kids nodes)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"lex.jo" import (is_ident_char)
+from p"util.jo" import (files pos_file pos_off)
+
+CancelWord:type=int64<overflow='wrap'>
+# ---------------- `$explicit_cancellation` ----------------
+# Under the tag (D4 Q1) `Canceled` may not leave through a `??` or a collector unwritten.
+# The error shows the expression as written with `or_throw<Canceled>` after it. Only a
+# rejected site pays: O(the expression's nodes and characters).
+cancel_first_pos=(n:CancelWord file:CancelWord best0:CancelWord):>int64=>$unsafe {
+    if n =? 0 {return best0}
+    let best=best0
+    let p=nodes.ptr[n].pos
+    if p >? 0 and pos_file(p) =? file and (best =? 0 or p <? best) {best=p}
+    best=cancel_first_pos(CancelWord(nodes.ptr[n].a) file best)
+    best=cancel_first_pos(CancelWord(nodes.ptr[n].b) file best)
+    best=cancel_first_pos(CancelWord(nodes.ptr[n].c) file best)
+    loop k in kids(n) {best=cancel_first_pos(k file best)}
+    best
+}
+cancel_last_pos=(n:CancelWord file:CancelWord best0:CancelWord):>int64=>$unsafe {
+    if n =? 0 {return best0}
+    let best=best0
+    let p=nodes.ptr[n].pos
+    if p >? 0 and pos_file(p) =? file and p >? best {best=p}
+    best=cancel_last_pos(CancelWord(nodes.ptr[n].a) file best)
+    best=cancel_last_pos(CancelWord(nodes.ptr[n].b) file best)
+    best=cancel_last_pos(CancelWord(nodes.ptr[n].c) file best)
+    loop k in kids(n) {best=cancel_last_pos(k file best)}
+    best
+}
+# The source text of expression n, to where its last token ends; "" when it spans lines
+# or is long.
+cancel_text=(n:CancelWord):>string=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    if pos <=? 0 {return ""}
+    let file=pos_file(pos)
+    let src=files[file].src
+    let bytes=src as array<uint8>
+    let first=cancel_first_pos(n file 0)
+    if first =? 0 {return ""}
+    let start=pos_off(first)
+    # (from the last node's token on: balanced brackets and quotes, up to a space, a `?`
+    # or a closer at depth 0; bytes by code, which the seed compiler reads)
+    let last=pos_off(cancel_last_pos(n file 0))
+    let depth:CancelWord=0
+    let i=start
+    loop i <? bytes.length {
+        let c=bytes[i]
+        if c =? uint8(34) or c =? uint8(39) {
+            let q=c
+            i += 1
+            loop i <? bytes.length and bytes[i] not=? q and bytes[i] not=? uint8(10) {
+                if bytes[i] =? uint8(92) {i += 1}
+                i += 1
+            }
+        }
+        else if c =? uint8(40) or c =? uint8(91) or c =? uint8(123) {depth += 1} else if c =? uint8(41) or c =? uint8(93) or c =? uint8(125) {
+            if depth =? 0 {break}
+            depth -= 1
+        }
+        else if depth =? 0 and i >? last and (c =? uint8(32) or c =? uint8(9) or c =? uint8(10) or c =? uint8(59) or c =? uint8(44) or c =? uint8(63)) {break}
+        i += 1
+    }
+    let stop=i
+    loop stop >? start and (bytes[stop - 1] =? uint8(32) or bytes[stop - 1] =? uint8(9)) {stop -= 1}
+    if stop <=? start or stop - start >? 80 {return ""}
+    let text=__str_slice(src start stop)
+    if byte_find(text "\n") >=? 0 {return ""}
+    text
+}
+# (a `parallel` loop's collected result: the keyword where the expression starts)
+cancel_parallel_at=(p:CancelWord):>bool=>{
+    if p <=? 0 {return false}
+    let src=files[pos_file(p)].src
+    let bytes=src as array<uint8>
+    let off=pos_off(p)
+    off + 9 <=? bytes.length and __str_slice(src off off + 8) =? "parallel" and not is_ident_char(bytes[off + 8])
+}
+cancel_reject=(n:CancelWord coalesce:bool what0:string):>never=>$unsafe {
+    let what=what0
+    let text=cancel_text(n)
+    let at=nodes.ptr[n].pos
+    let shown="this value"
+    let fix="`or_throw<Canceled>` after it"
+    if (text as array<uint8>).length >? 0 {
+        at=cancel_first_pos(n pos_file(at) 0)
+        shown="`{text}`"
+        fix="`{text} or_throw<Canceled>`"
+    }
+    let other=if coalesce {", or `??<Canceled>` to default it"} else {""}
+    # (a `??` with nothing else to default: the rewrite replaces it)
+    if what =? "this `??`" and not coalesce {
+        fix="{fix} in place of the whole `??`"
+        other=" (it has no other failure to default), or `??<Canceled>` to default it"
+    }
+    # (an array a collector takes whole: a spread forwards per element; a `parallel` body
+    # cannot forward yet)
+    if what =? "this collector" and ends_with(text "...") {
+        let source=__str_slice(text 0 (text as array<uint8>).length - 3)
+        shown="`{source}`"
+        fix="`[loop v in {source} v or_throw<Canceled>]...`"
+        what="this spread"
+    }
+    else if what =? "this collector" and cancel_parallel_at(cancel_first_pos(n pos_file(nodes.ptr[n].pos) 0)) {
+        fatal(at "this `parallel` loop's elements may be `Canceled`, which it would pass on unwritten under `$explicit_cancellation`, and a `parallel` body cannot forward it with `or_throw<Canceled>` yet: default it in the body with `??<Canceled>`, or opt this scope out with `$explicit_cancellation=false`");
+    }
+    fatal(at "{shown} may be `Canceled`, which {what} would pass on unwritten under `$explicit_cancellation`: write {fix} to forward it{other}");
+}
