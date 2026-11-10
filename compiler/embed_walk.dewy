@@ -1,0 +1,14 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (is_dir list_dir)
+from p"@lib/core/str.jo" import (starts_with)
+
+# the files under directory dir (paths from it, sorted), sub-directories' too; hidden ones left out
+embed_dir_walk=(dir:string prefix:string @out:array<string>):>void=>{
+    let entries=list_dir(dir)
+    entries.sort()
+    loop e in entries {
+        if starts_with(e ".") {continue}
+        let full="{dir}/{e}"
+        if is_dir(full) {embed_dir_walk(full "{prefix}{e}/" @out)} else {out.push("{prefix}{e}")}
+    }
+}

@@ -172,6 +172,7 @@ use 'expr_error_context.dewy'
 use 'soa_helpers.dewy'
 use 'bigint_literal.dewy'
 use 'expr_node_queries.dewy'
+use 'embed_walk.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -6690,16 +6691,6 @@ bc_bin = (op: Tok, a: int, b: int, pos: int) -> int:
     nodes[n].a = i32(a)
     nodes[n].b = i32(b)
     n
-
-# the files under directory dir (paths from it, sorted), sub-directories' too; hidden ones left out
-embed_dir_walk = (dir: str, prefix: str, out: mut str[]):
-    entries = list_dir(dir)
-    entries.sort()
-    loop e in entries:
-        if starts_with(e, "."): continue
-        full = "{dir}/{e}"
-        if is_dir(full): embed_dir_walk(full, "{prefix}{e}/", out)
-        else: out.push("{prefix}{e}")
 
 # (xs[-1], s[-3..]: counting from the end, as Python and JavaScript do)
 neg_index_check = (b: int):
