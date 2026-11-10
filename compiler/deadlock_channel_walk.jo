@@ -262,7 +262,6 @@ dc_call = (n: int):
             dc_pending.push(DcSpawn(h, ffns, fcalls, dc_multi or dc_loops.len() > 0, dl_key(dc_loc(kid(n, 0))), pos))
         return
     if gname == "cancel" and pos_in_lib(nodes[d].pos): dc_cancels = true
-    if gname == "cancel" and pos_in_lib(nodes[d].pos): dc_cancels = true
     if gname == "__task_join" and nkids(n) == 1:
         dc_event(5, dc_loc(kid(n, 0)), pos)
         return
