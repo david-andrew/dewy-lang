@@ -1,0 +1,9 @@
+main = () => {
+    let a = channel<string>(1)
+    let b = channel<string>(1)
+    a.close()
+    match a.receive {
+        <b.Closed> => printl"closed"
+        _ => printl"other"
+    }
+}

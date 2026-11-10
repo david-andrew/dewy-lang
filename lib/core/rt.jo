@@ -101,13 +101,14 @@ __tid = () -> int:
 # per-thread allocator state: [heap_cur, heap_end, live count, free list heads (64 size classes),
 # large blocks freed for reuse (a list), the bytes in that list, boxes waiting to be dropped (a
 # list, its length and capacity), a box being dropped, the context allocator]
-const __TS_WORDS = 82
+const __TS_WORDS = 83
 const __TS_OWNERS = 76
 const __TS_DROPPING = 77
 const __TS_FILE_CODE = 78     # (while tasks run: this thread's or task's last file error)
 const __TS_ARENA = 79         # (the context allocator: an arena's control words, or 0 for the heap)
 const __TS_OOM = 80           # (`$explicit_allocation_failure`: this thread's failure frames, lib/std/oom.jo)
 const __TS_SELECT = 81        # (`select` trying a wait: 1 trying, 2 nothing was ready; lib/std/thread.jo)
+const __TS_SELECT_WON = 82    # (the wait the last `select` took, from 1; 0 for its own outcome)
 # Task stacks (lib/std/tasks.jo sets them when tasks start): a task's thread state is its slot's
 const __TASK_SLOTS = 16384
 const __TASK_SHIFT = 23

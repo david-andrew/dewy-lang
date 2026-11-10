@@ -10647,6 +10647,14 @@ rd_dc_type_named=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$
         return 0
     }
     let id:int64=int64<overflow='wrap'>(token.name)
+    # (`heart.<Tick>`: the type a wait gave, selected without a member, decisions.md batch 7)
+    if ((reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'dot') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'langle')) and (not reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].space) {
+        let selector:int64=node_mk(@reader_nodes 'tname' rd_mkpos(reader_ctx.file token.start))
+        reader_nodes[selector].sval = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern(rd_dn_payload(@reader_ctx token)))
+        reader_nodes[selector].name = int32<overflow='wrap'>(reader_ctx.stores.host[0].intern("<>"))
+        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
+        return rd_dc_type_arguments(@reader_ctx @reader_nodes selector 0)
+    }
     # `net.NetError`: a module's type (dw_type's `.`)
     if (((reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'dot') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].kind =? 'identifier')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'none')) {
         return rd_dc_module_type(@reader_ctx @reader_nodes token)

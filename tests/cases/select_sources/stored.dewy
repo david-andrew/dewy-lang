@@ -1,0 +1,9 @@
+# A stored result has no source: name the plain type.
+main = () => {
+    let a = channel<string>(1)
+    let r = select(@a.receive timeout=0s)
+    match r {
+        <a.Closed> => printl"closed"
+        _ => printl"other"
+    }
+}

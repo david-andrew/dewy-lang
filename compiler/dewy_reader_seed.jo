@@ -3028,6 +3028,13 @@ rt_dc_type_named = () -> int:
     token = dc_parser.tokens[dc_parser.at]
     if token.kind != .identifier or (token.symbol != .none and token.symbol != .kw_test) or token.name == 0: return 0
     id = int(token.name)
+    # (`heart.<Tick>`: the type a wait gave, selected without a member, decisions.md batch 7)
+    if dc_parser.tokens[dc_parser.at + 1].symbol == .dot and dc_parser.tokens[dc_parser.at + 2].symbol == .langle and not dc_parser.tokens[dc_parser.at + 2].space:
+        selector = mk(.tname, mkpos(dc_parser.file, token.start))
+        nodes[selector].sval = i32(intern(rt_dn_payload(token)))
+        nodes[selector].name = i32(intern("<>"))
+        dc_parser.at += 2
+        return rt_dc_type_arguments(selector, 0)
     # `net.NetError`: a module's type (dw_type's `.`)
     if dc_parser.tokens[dc_parser.at + 1].symbol == .dot and dc_parser.tokens[dc_parser.at + 2].kind == .identifier and dc_parser.tokens[dc_parser.at + 2].symbol == .none: return rt_dc_module_type(token)
     spelled = rt_dc_type_spelled(id)

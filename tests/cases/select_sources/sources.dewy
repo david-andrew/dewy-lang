@@ -1,0 +1,39 @@
+# modes: native native-release
+# A pattern that names its source (decisions.md, batch 7): on a match written on the select
+# call, `line:a.string` takes only a's strings and `<b.Closed>` only b's close; plain arms take
+# the rest by type.
+main = () => {
+    let a = channel<string>(4)
+    let b = channel<string>(4)
+    let heart = ticker(1hour)
+    b.send("one") or_throw
+    b.close()
+    let seen:array<string> = []
+    loop _ in [0..2) {
+        match select(@a.receive @b.receive @heart.next) {
+            line:a.string => {seen.push("a {line}")}
+            line:b.string => {seen.push("b {line}")}
+            <heart.Tick> => {seen.push("tick")}
+            <a.Closed> => break
+            <b.Closed> => {
+                seen.push("b closed")
+                break
+            }
+            <Canceled> => break
+        }
+    }
+    printl(seen)
+    let c = channel<string>(1)
+    a.send("two") or_throw
+    let got = match select(@a.receive @c.receive timeout=0s) {
+        x:a.types & string => "a gave {x}"
+        <c.Closed> => "c closed"
+        _ => "other"
+    }
+    printl(got)
+    a.close()
+    match a.receive {
+        <a.Closed> => printl"a closed"
+        _ => printl"something"
+    }
+}

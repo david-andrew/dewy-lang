@@ -7271,6 +7271,169 @@ select_check = (n: int):
             if int(nodes[int(fns[int(nodes[w].sym)].decl)].name) == op and select_same_place(kid(w, 0), kid(a, 0)): fatal(nodes[a].pos, "this operation is listed twice: select takes at most one value from it, so write it once")
         waits.push(a)
 
+# Source patterns (decisions.md, batch 7): `<heart.Tick>`, `line:lines.string`,
+# `x:heart.types & (Tick | Closed)` name the wait that gave the outcome as well as its type. The
+# qualifier of p's type when it is such a pattern (a local or global wait handle and a member it
+# has as an outcome, not a record's own type member), 0 otherwise.
+source_qualifier = (p: int) -> int:
+    if nodes[p].kind != .ptype or nodes[p].a == 0: return 0
+    tn = int(nodes[p].a)
+    if nodes[tn].kind == .tunion and nodes[tn].aux == 11: tn = kid(tn, 0)
+    if nodes[tn].kind != .tname or nodes[tn].sval == 0: return 0
+    selector = name_of(int(nodes[tn].name)) == "<>"
+    if nkids(tn) != 0 and not selector: return 0
+    s = lookup(int(nodes[tn].sval))
+    if s == 0 or (syms[s].kind != .local and syms[s].kind != .global): return 0
+    t = 0
+    if syms[s].kind == .local: t = int(locals[int(syms[s].ref)].type)
+    else:
+        ensure_global(int(syms[s].ref), nodes[tn].pos)
+        t = int(globals[int(syms[s].ref)].type)
+    if t == 0 or handle_outcomes(t) == 0 or not selector and record_type_member(t, int(nodes[tn].name)) != 0: return 0
+    int(nodes[tn].sval)
+
+# (the variable a wait's receiver path starts from, its name; 0 for another form)
+source_receiver = (n0: int) -> int:
+    n = n0
+    loop nodes[n].kind == .conv: n = int(nodes[n].a)
+    if nodes[n].kind != .ident: return 0
+    int(nodes[n].name)
+
+# A match with source patterns (decisions.md, batch 7, provenance rules 1, 2, 7 and 8). Eligible
+# only on the call that prepared the waits: `match select(...)`, whose waits are written in
+# it, or a direct `x.receive` / `x.next`. On a select the match becomes one match per wait the
+# select can take, chosen by the winner the call records (`__select_winner`), each on the
+# outcomes of that wait: a source pattern stays in its wait's match as its plain type, a plain
+# one in every match whose outcomes it meets. -1 when m has no source pattern (O(patterns)).
+source_match = (m: int, expected: int) -> int:
+    first = 0
+    loop arm in kids(m):
+        loop p in kids(arm):
+            if first == 0 and source_qualifier(p) != 0: first = p
+    if first == 0: return -1
+    sc = int(nodes[m].a)
+    pos = nodes[m].pos
+    # (rule 7: a direct receive or next has one slot, its receiver)
+    head = sc
+    if nodes[head].kind == .call: head = int(nodes[head].a)
+    if nodes[head].kind == .field and (name_of(int(nodes[head].name)) == "receive" or name_of(int(nodes[head].name)) == "next") and select_place(int(nodes[head].a)):
+        receiver = source_receiver(int(nodes[head].a))
+        loop arm in kids(m):
+            loop p in kids(arm):
+                q = source_qualifier(p)
+                if q != 0 and q != receiver: fatal(nodes[p].pos, "this pattern names {name_of(q)}, but the match is on another wait: only what that wait gives can match here (write the plain type, or match on {name_of(q)}'s own wait)")
+        return -1
+    callee = if nodes[sc].kind == .call: int(nodes[sc].a) else: 0
+    if callee == 0 or nodes[callee].kind != .ident or name_of(int(nodes[callee].name)) != "select":
+        fatal(nodes[first].pos, "a pattern that names its source (`<heart.Tick>`) needs the match written on the call that prepared the waits, `match select(...)`, or on a direct `receive` or `next`; a stored result, a helper's or another call's has no source: match the plain type")
+    # (the waits' outcomes, from a checked copy: the call itself is checked where it is bound)
+    check_expr(clone(sc), 0)
+    probe = last_checked
+    call = probe
+    loop nodes[call].kind == .conv: call = int(nodes[call].a)
+    if nodes[call].kind != .call or not select_call(call): fatal(nodes[first].pos, "a pattern that names its source needs the match written on `select(...)` itself")
+    whole = prune(ntype(probe))
+    # (each wait: its receiver's name and what it gives)
+    receivers: int[]
+    outcomes: int[][]
+    taken: int[]
+    loop a0 in kids(call):
+        a = a0
+        loop nodes[a].kind == .conv: a = int(nodes[a].a)
+        if tkind(ntype(a)) != .fn_: continue
+        receivers.push(if nodes[a].kind == .partial and nkids(a) == 1: source_receiver(kid(a, 0)) else: 0)
+        gives = value_members(prune(telem(ntype(a))))
+        outcomes.push(gives)
+        loop g in gives: taken.push(prune(g))
+    # (the select's own outcomes: Canceled, and Timeout with timeout=)
+    own: int[]
+    loop w0 in value_members(whole):
+        w = prune(w0)
+        if not taken.contains(w) or type_short_name(w) == "Canceled" or type_short_name(w) == "Timeout": own.push(w)
+    loop arm in kids(m):
+        loop p in kids(arm):
+            q = source_qualifier(p)
+            if q != 0 and not receivers.contains(q): fatal(nodes[p].pos, "{name_of(q)} is not waited on in this select: a pattern names one of the call's waits (`@{name_of(q)}.receive` written in it)")
+    statement = has_flag(m, NF_STMT)
+    sel = "$select{m}"
+    won = "$select_won{m}"
+    branches: int[]
+    loop k in [0..outcomes.len() + 1):
+        gives = if k < outcomes.len(): outcomes[k] else: own
+        if gives.len() == 0: continue
+        source = if k < outcomes.len(): receivers[k] else: -1
+        arms: int[]
+        loop arm in kids(m):
+            kept: int[]
+            loop p in kids(arm):
+                q = source_qualifier(p)
+                if q != 0 and q != source: continue
+                if nodes[p].kind == .ptype and nodes[p].a != 0:
+                    was = bare_generic_set(true)
+                    tt = prune(resolve_type(int(nodes[p].a)))
+                    bare_generic_set(was)
+                    held: int[]
+                    loop g in value_members(tt):
+                        if gives.contains(prune(g)) or family_holds_generic(tt, prune(g)): held.push(prune(g))
+                    loop g in gives:
+                        if not held.contains(prune(g)) and type_eq(prune(g), tt): held.push(prune(g))
+                    if held.len() == 0: continue
+                    np = clone(p)
+                    tn = mk(.tname, nodes[p].pos)
+                    nodes[tn].aux = -7
+                    nodes[tn].ival = if held.len() == 1: held[0] else: mk_union(held)
+                    nodes[np].a = i32(tn)
+                    kept.push(np)
+                else: kept.push(clone(p))
+            if kept.len() == 0: continue
+            na = clone(arm)
+            set_list(na, kept)
+            arms.push(na)
+        # (the other waits' outcomes never reach this match: an arm that says so covers them)
+        catch_all = false
+        loop na in arms:
+            loop p in kids(na):
+                if nodes[p].kind == .pwild: catch_all = true
+        if gives.len() < value_members(whole).len() and not catch_all:
+            rest = mk(.arm, pos)
+            set_list(rest, [mk(.pwild, pos)])
+            nodes[rest].b = i32(bc_block([bc_stmt(bc_call("panic", [bc_str("select gave the outcome of another wait", pos)], pos), pos)], pos))
+            arms.push(rest)
+        branch = mk(.match_, pos)
+        nodes[branch].a = i32(bc_ident(sel, pos))
+        if statement: add_flag(branch, NF_STMT)
+        set_list(branch, arms)
+        select_source_matches[branch] = true
+        branches.push(branch)
+        branches.push(if k < outcomes.len(): k else: -1)
+    # (the last branch is the else of the others)
+    chain = branches[branches.len() - 2]
+    i = branches.len() - 4
+    loop i >= 0:
+        winner = bc_bin(.eq, bc_ident(won, pos), bc_int(branches[i + 1], pos), pos)
+        node = mk(.if_, pos)
+        nodes[node].a = i32(winner)
+        then = bc_block([bc_stmt(branches[i], pos)], pos)
+        nodes[then].aux = 1
+        otherwise = bc_block([bc_stmt(chain, pos)], pos)
+        nodes[otherwise].aux = 1
+        nodes[node].b = i32(then)
+        nodes[node].c = i32(otherwise)
+        if statement:
+            nodes[node].b = i32(bc_block([bc_stmt(branches[i], pos)], pos))
+            nodes[node].c = i32(bc_block([if nodes[chain].kind == .if_: chain else: bc_stmt(chain, pos)], pos))
+            add_flag(node, NF_STMT)
+        chain = node
+        i -= 2
+    last = if statement and nodes[chain].kind == .if_: chain else: bc_stmt(chain, pos)
+    statements = [bc_let(sel, sc, pos), bc_let(won, bc_call("__select_winner", [], pos), pos), last]
+    nodes[m] = Node(kind = .block, pos = pos, aux = if statement: 0 else: 1)
+    set_list(m, statements)
+    check_expr(m, expected)
+
+# (the per-wait matches source_match made: select_progress checks them as on select)
+select_source_matches: {int: bool} = {}
+
 # `members(U)` of a union of types (decisions.md, batch 7): its alternatives, each a type a
 # `loop t in members(U)` binds; [] for a union of literals, which yields its values.
 type_alternatives = (u0: int) -> int[]:
@@ -7351,7 +7514,7 @@ select_progress = (m: int):
     if cx < 0 or ctxs[cx].loop_depth == 0: return
     sc = int(nodes[m].a)
     loop nodes[sc].kind == .conv: sc = int(nodes[sc].a)
-    if nodes[sc].kind != .call or not select_call(sc): return
+    if not select_source_matches.has(m) and (nodes[sc].kind != .call or not select_call(sc)): return
     loop arm in kids(m):
         closes = false
         loop p in kids(arm):

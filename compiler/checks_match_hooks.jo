@@ -166,6 +166,10 @@ check_match = (m: int, expected: int) -> int:
     place_grouped_call(int(nodes[m].a))
     if nodes[int(nodes[m].a)].kind == .call and nodes[int(nodes[m].a)].aux2 == i32(AUX2_PLACE): return place_match(m, expected)
     if files[pos_file(nodes[m].pos)].is_dewy and shape_match_wanted(m): return check_shaped_match(m, expected)
+    # (`<heart.Tick>`: patterns naming their source, decisions.md batch 7)
+    if files[pos_file(nodes[m].pos)].is_dewy:
+        sourced = source_match(m, expected)
+        if sourced >= 0: return sourced
     t = xh_match(m, expected)
     select_progress(m)
     t

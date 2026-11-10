@@ -1,0 +1,13 @@
+# `b.<string>` selects the type a wait gave without looking up a member (decisions.md, batch 7):
+# the escape for a clash, a missing shorthand or a generic parameter.
+main = () => {
+    let a = channel<string>(4)
+    let b = channel<string>(4)
+    b.send("one") or_throw
+    match select(@a.receive @b.receive timeout=0s) {
+        x:a.<string> => printl"a {x}"
+        x:b.<string> => printl"b {x}"
+        <b.<Closed<string>>> => printl"b closed"
+        _ => printl"other"
+    }
+}

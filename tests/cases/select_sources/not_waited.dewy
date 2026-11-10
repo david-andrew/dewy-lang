@@ -1,0 +1,8 @@
+main = () => {
+    let a = channel<string>(1)
+    let b = channel<string>(1)
+    match select(@a.receive timeout=0s) {
+        <b.Closed> => printl"closed"
+        _ => printl"other"
+    }
+}

@@ -833,6 +833,10 @@ resolve_type_name = (tn: int) -> CheckerTypeName:
     if nodes[tn].sval != 0:
         ms = lookup(int(nodes[tn].sval))
         if ms != 0 and syms[ms].kind == .reflected and name_of(nm) == "type": return CheckerTypeName(0, int(fields[int(syms[ms].ref)].type))
+        # (`heart.<Tick>`: the type itself, selected on a wait, decisions.md batch 7)
+        if ms != 0 and (syms[ms].kind == .local or syms[ms].kind == .global) and name_of(nm) == "<>":
+            if nkids(tn) != 1: fatal(nodes[tn].pos, "`{name_of(int(nodes[tn].sval))}.<T>` selects one type")
+            return CheckerTypeName(0, resolve_type(kid(tn, 0)))
         # (`r.Png`, `heart.Tick`: a value's type member, decisions.md batch 7)
         if ms != 0 and syms[ms].kind != .module:
             member = value_type_member(ms, nm, nodes[tn].pos)

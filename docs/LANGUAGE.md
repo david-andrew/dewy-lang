@@ -1230,9 +1230,9 @@ A record loop over a literal array of types binds each as a type.
 A wait handle has its outcomes as type members: `heart.types` is everything the handle's
 wait gives (a channel's `T | Closed<T> | Canceled`, a ticker's `Tick | Canceled`), and an
 outcome whose short name only one alternative has is a member (`lines.string`,
-`lines.Closed`, `heart.Tick`) unless the handle's type has a member of that name. They match
-by type: `<heart.Tick>` is `<Tick>`, and `x:heart.types & (Tick | Closed)` is
-`Tick | Closed`.
+`lines.Closed`, `heart.Tick`) unless the handle's type has a member of that name. As a type
+`heart.Tick` is `Tick` and `heart.types & (Tick | Closed)` is `Tick | Closed`; as a pattern in a
+match on the wait itself it also names the source (see `select`).
 
 ```dewy
 Png:type = [w:int64]
@@ -3697,6 +3697,31 @@ main = () => {
         <Closed> => printl"a channel closed"
         <Timeout> => printl"nothing in time"
         <Canceled> => printl"canceled"
+    }
+}
+```
+
+An arm can name the wait that gave its value (decisions.md, batch 7): `line:a.string` takes
+only `a`'s strings, `<b.Closed>` only `b`'s close, `<heart.Tick>` the ticker's tick, and
+`x:a.types & string` the strings `a` gives. `a.<string>` selects the type itself, without a
+member: the escape when a member of that name means something else. Arms that name no wait
+match by type as before. Such an arm is allowed only on a match written on the call that
+prepared the waits, `match select(...)` with its waits written in it, or on a direct
+`a.receive` or `heart.next` (where it must name that wait); on a stored result, a helper's
+result or any other value it is an error, and the plain type (`<Closed>`) is what to write.
+A select records which wait it took, so this costs one comparison per match.
+
+```dewy
+main = () => {
+    let a = channel<string>(4)
+    let b = channel<string>(4)
+    b.send("one") or_throw
+    match select(@a.receive @b.receive timeout=0s) {
+        line:a.string => printl"a {line}"
+        line:b.string => printl"b {line}"      # b one
+        <a.Closed> => printl"a closed"
+        <b.Closed> => printl"b closed"
+        _ => printl"nothing ready"
     }
 }
 ```
