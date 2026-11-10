@@ -4423,11 +4423,12 @@ rd_dc_field_entry=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>
     let pos:int64=rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at].start)
     reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
     let computed:int64=rd_dc_expr(@reader_ctx @reader_nodes 0)
-    if ((((computed =? 0) or (not rd_dn_accept(@reader_ctx 'rparen'))) or (not rd_dn_accept(@reader_ctx 'assign'))) or rd_dc_lambda_next(@reader_ctx)) {
+    if (((computed =? 0) or (not rd_dn_accept(@reader_ctx 'rparen'))) or (not rd_dn_accept(@reader_ctx 'assign'))) {
         return 0
     }
+    # (a lambda is a value like any other: `$field(t.name) = (p:t) => each(p)`)
     let value:int64=rd_dc_expr(@reader_ctx @reader_nodes 11)
-    if ((value =? 0) or (reader_nodes[value].kind =? 'lambda')) {
+    if value =? 0 {
         return 0
     }
     let entry:int64=node_mk(@reader_nodes 'namedarg' pos)

@@ -1,0 +1,14 @@
+# modes: native native-release
+# `$named[Draw Erase each=@handle]` (decisions.md, batch 7): each member is the callback
+# specialized for its type, so `plugins.Draw` takes a Draw. A lambda is a field value like any
+# other, also in a record loop's `$field(...) = ...`.
+Draw:type = [x:int64]
+Erase:type = [y:int64]
+handle = <T>(p:T) => printl"handled {p}"
+main = () => {
+    let plugins = $named[Draw Erase each=@handle]
+    plugins.Draw(Draw[1])
+    plugins.Erase(Erase[2])
+    let r = [$field("inc") = (p:int64) => p + 1  twice = (p:int64) => 2 * p]
+    printl"{r.inc(3)} {r.twice(4)}"
+}

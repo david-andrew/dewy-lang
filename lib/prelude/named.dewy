@@ -6,3 +6,8 @@
 # sequence known only at run time is rejected.
 named = <Each>(types:array<Each>) =>
     [loop t in types $field(t.name) = t]
+
+# `$named[Draw Erase each=@handle]`: each member is the callback specialized for its type,
+# `(p:Draw) => handle(p)`. The members' types are those calls' own, not one joined type.
+named = <Each F>(types:array<Each> each:F) =>
+    [loop t in types $field(t.name) = (p:t) => each(p)]

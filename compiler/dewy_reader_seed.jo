@@ -2404,9 +2404,10 @@ rt_dc_field_entry = () -> int:
     pos = mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at].start)
     dc_parser.at += 2
     computed = rt_dc_expr(0)
-    if computed == 0 or not rt_dn_accept(.rparen) or not rt_dn_accept(.assign) or rt_dc_lambda_next(): return 0
+    if computed == 0 or not rt_dn_accept(.rparen) or not rt_dn_accept(.assign): return 0
+    # (a lambda is a value like any other: `$field(t.name) = (p:t) => each(p)`)
     value = rt_dc_expr(11)
-    if value == 0 or nodes[value].kind == .lambda: return 0
+    if value == 0: return 0
     entry = mk(.namedarg, pos)
     nodes[entry].b = i32(computed)
     nodes[entry].a = i32(value)

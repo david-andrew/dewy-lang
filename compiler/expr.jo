@@ -2706,16 +2706,44 @@ type_sequence_call = (n: int, expected: int) -> int:
     type_sequences[g] = seq
     push_scope_sym(pname, new_sym(pname, .const_, g, 0))
     statements: int[]
-    loop a in named_args: statements.push(bc_let(name_of(int(nodes[a].name)), int(nodes[a].a), nodes[a].pos))
+    # (`each=@handle`, a function by name: the specialized body calls it by that name, so a
+    # generic one is specialized per type rather than needing a value's type)
+    renames: int[]
+    loop a in named_args:
+        v = int(nodes[a].a)
+        fs = if nodes[v].kind == .ident: lookup(int(nodes[v].name)) else: 0
+        if fs != 0 and syms[fs].kind == .fns:
+            renames.push(int(nodes[a].name))
+            renames.push(int(nodes[v].name))
+        else: statements.push(bc_let(name_of(int(nodes[a].name)), v, nodes[a].pos))
     loop st in kids(int(nodes[d].b)):
         # (the parameters' own bindings: given above)
         if nodes[st].kind == .vardecl and nodes[st].aux2 == 1: continue
-        statements.push(clone(st))
+        copy = clone(st)
+        if renames.len() > 0: rename_idents(copy, renames)
+        statements.push(copy)
     nodes[n] = Node(kind = .block, pos = pos, aux = 1)
     set_list(n, statements)
     t = check_expr(n, expected)
     scope_reset(mark)
     t
+
+# (each ident in n named renames[2i] renamed renames[2i + 1], lambdas' bodies too)
+rename_idents = (n: int, renames: int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .ident:
+        loop i in [0..renames.len() / 2):
+            if int(nodes[n].name) == renames[2 * i]:
+                nodes[n].name = i32(renames[2 * i + 1])
+                return
+        return
+    rename_idents(int(nodes[n].a), renames)
+    rename_idents(int(nodes[n].b), renames)
+    if k != .for_:
+        rename_idents(int(nodes[n].c), renames)
+        if k != .partial: rename_idents(int(nodes[n].d), renames)
+    loop i in [0..nkids(n)): rename_idents(kid(n, i), renames)
 
 # (a global that stands for a sequence of types: its types)
 type_sequences: {int: int[]} = {}

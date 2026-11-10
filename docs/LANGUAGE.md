@@ -1226,6 +1226,10 @@ error (`field Png is listed twice`). It calls the prelude's ordinary function
 `named = <Each>(types:array<Each>) => [loop t in types $field(t.name) = t]`, which a
 program may call too: a call given a literal array of types is specialized on those types.
 A record loop over a literal array of types binds each as a type.
+`$named[Draw Erase each=@handle]` makes each member the callback specialized for its type,
+`(p:Draw) => handle(p)`, so `handle` may be generic; the members keep their own types. A lambda
+is a record field's value like any other, `[$field("inc") = (p:int64) => p + 1]`. *Not yet
+built:* spreading a record whose members are functions (`[$named[... each=@h]...]`).
 
 A wait handle has its outcomes as type members: `heart.types` is everything the handle's
 wait gives (a channel's `T | Closed<T> | Canceled`, a ticker's `Tick | Canceled`), and an
