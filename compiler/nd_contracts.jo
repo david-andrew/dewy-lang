@@ -467,18 +467,28 @@ fact_nd_make = (n: int, s: mut FactState, dims: int[], data: int = 0, result_typ
         return result
     # Concrete constructor shapes also establish the flat count used by
     # reshape. A zero dimension makes the count zero even with huge peers.
+    # One symbolic extent among ones, as a slice to one axis or a product
+    # with a single row makes, is the count itself. O(rank) here.
     count = 1
     known = true
     zero = false
+    free = 0
+    frees = 0
     loop dim in dims:
         b = fact_bound(s, dim)
         if b.lo == 0 and b.hi == 0: zero = true
+        if b.lo != b.hi:
+            free = dim
+            frees += 1
         if b.lo != b.hi or b.lo < 0 or math_word_overflow(2, count, b.lo): known = false
         else if known: count *= b.lo
     if known or zero:
         length = fact_nd_data_length(s, result)
         extent = if zero: 0 else: count
         fact_set_bound(s, length, FactBound(extent, extent))
+    else if frees == 1 and count == 1 and s.projections.len() < FACT_CAP:
+        storage = fact_project(s, result, intern("data"), false, mk_array(nd_elem(representation_type(fact_terms[result].type))))
+        if fact_projection_find(s, storage, -1, false) < 0: fact_add_projection(s, FactProjection(storage, -1, false, free))
     fact_set_bound(s, fact_nd_valid(s, result), FactBound(1, 1, true))
     result
 
