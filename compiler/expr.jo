@@ -171,6 +171,7 @@ use 'cancel_hints.dewy'
 use 'expr_error_context.dewy'
 use 'soa_helpers.dewy'
 use 'bigint_literal.dewy'
+use 'expr_node_queries.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -234,7 +235,6 @@ intrinsics = [
 last_checked = 0
 setting_site = 0               # the call whose parameter default is being filled in
 const AUX2_PARTIAL = -10       # a call node that `@` makes a partial evaluation
-grouped_place_call = (n: int) -> bool: place_grouped_call(n)
 
 const AUX2_EMPTY_PARENS = -13   # a call written `f()` or `x.f()` with no arguments whose `()` a style hint may ask to drop (call_style.dewy)
 const AUX2_PLACE = -11         # a call `@(m.lock())` taking the place a method returns (place_methods.jo)
@@ -3950,30 +3950,6 @@ receiver_text = (n: int) -> str:
     if nodes[n].kind == .ident: return name_of(int(nodes[n].name))
     "x"
 
-# (does a function of this name take a t first: `.length` of a type that has no len has none;
-# fn_names_for's names are any that might)
-receiver_fits = (name: str, t0: int) -> bool:
-    t = prune(t0)
-    if has_var(t): return true
-    k = tkind(t)
-    loop it in intrinsics:
-        if it.name == name and (not it.arr or k == .array or k == .fixed or k == .str_): return true
-    nm = intern(name)
-    demand_name(nm)
-    tables = [modules[cur_mod()].names, prelude]
-    loop tm in method_modules(t):
-        if tm != cur_mod(): tables.push(modules[tm].names)
-    loop tbl in tables:
-        s = tbl.get(nm) ?? 0
-        loop s != 0:
-            if syms[s].kind == .fns and syms[s].decl != 0 and nkids(int(syms[s].decl)) > 0:
-                sig = fn_sig(int(syms[s].decl))
-                if sig.params.len() > 0:
-                    rb = fill(0, int(sig.ntp))
-                    if match_type(sig.params[0], t, rb, 0) >= 0: return true
-            s = int(syms[s].next)
-    false
-
 # (does a library function `len`, as Heap's and Pool's, take a t first: Dewy's `.length` reads
 # it. A `len` written in Dewy is not the protocol: that is a `length` function)
 library_len_fits = (t0: int) -> bool:
@@ -4001,13 +3977,6 @@ fn_name_for = (t: int, name: int) -> bool:
     if ii < 0: return false
     tk = types[t].kind
     intrinsics[ii].arr == (tk == .array or tk == .str_)
-
-fn_names_for = (t: int) -> int[]:
-    out = method_names(t)
-    tk = types[t].kind
-    loop it in intrinsics:
-        if it.arr == (tk == .array or tk == .str_): out.push(intern(it.name))
-    out
 
 check_expr_in_module = (n: int, m: int, expected: int = 0) -> int:
     saved = cx
@@ -5858,11 +5827,6 @@ binary_rest = (n: int, expected: int, a0: int, b0: int, ta0: int, tb0: int, hint
 quat_nodes: {int: bool} = {}
 quat_locals: {int: bool} = {}
 quat_globals: {int: bool} = {}
-is_quat = (e: int) -> bool:
-    if quat_nodes.has(e): return true
-    if nodes[e].kind != .ident: return false
-    if nodes[e].aux == i32(int(SK.local)): return quat_locals.has(int(nodes[e].sym))
-    nodes[e].aux == i32(int(SK.global)) and quat_globals.has(int(nodes[e].sym))
 
 check_vec_binary = (n: int, op: Tok, ta: int, tb: int) -> int:
     a = int(nodes[n].a)

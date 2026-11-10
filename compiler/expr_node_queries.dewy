@@ -1,0 +1,58 @@
+$runtime_checks
+from p"ast.jo" import (nkids nodes)
+from p"check.jo" import (cur_mod demand_name method_modules modules prelude syms)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_hints.dewy" import (method_names)
+from p"expr.jo" import (intrinsics match_type quat_globals quat_locals quat_nodes)
+from p"place_method_ops.dewy" import (place_grouped_call)
+from p"types.jo" import (has_var prune tkind types)
+from p"util.jo" import (intern)
+
+NodeQueryWord:type=int64<overflow='wrap'>
+grouped_place_call=(n:NodeQueryWord):>bool=>{
+    place_grouped_call(n)
+}
+# (does a function of this name take a t first: `.length` of a type that has no len has none;
+# fn_names_for's names are any that might)
+receiver_fits=(name:string t0:NodeQueryWord):>bool=>$unsafe {
+    let t=prune(t0)
+    if has_var(t) {return true}
+    let k=tkind(t)
+    loop it in intrinsics {
+        if it.name =? name and (not it.arr or k =? 'array' or k =? 'fixed' or k =? 'str_') {return true}
+    }
+    let nm=intern(name)
+    demand_name(nm)
+    let tables=[modules[cur_mod()].names prelude]
+    loop tm in method_modules(t) {
+        if tm not=? cur_mod() {tables.push(modules[tm].names)}
+    }
+    loop tbl in tables {
+        let s=tbl.get(nm) ?? 0
+        loop s not=? 0 {
+            if syms.ptr[s].kind =? 'fns' and syms.ptr[s].decl not=? 0 and nkids(NodeQueryWord(syms.ptr[s].decl)) >? 0 {
+                let sig=fn_sig(NodeQueryWord(syms.ptr[s].decl))
+                if sig.params.length >? 0 {
+                    let rb:array<int64>=fill(0 int64(sig.ntp))
+                    if match_type(sig.params[0] t @rb 0) >=? 0 {return true}
+                }
+            }
+            s=NodeQueryWord(syms.ptr[s].next)
+        }
+    }
+    false
+}
+fn_names_for=(t:NodeQueryWord):>array<int64>=>$unsafe {
+    let out=method_names(t)
+    let tk=types.ptr[t].kind
+    loop it in intrinsics {
+        if it.arr =? (tk =? 'array' or tk =? 'str_') {out.push(intern(it.name))}
+    }
+    out
+}
+is_quat=(e:NodeQueryWord):>bool=>$unsafe {
+    if quat_nodes.has(e) {return true}
+    if nodes.ptr[e].kind not=? 'ident' {return false}
+    if nodes.ptr[e].aux =? int32(1) {return quat_locals.has(NodeQueryWord(nodes.ptr[e].sym))}
+    nodes.ptr[e].aux =? int32(2) and quat_globals.has(NodeQueryWord(nodes.ptr[e].sym))
+}
