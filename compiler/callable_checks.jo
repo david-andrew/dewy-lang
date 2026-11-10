@@ -1,0 +1,246 @@
+use 'expr.jo'
+use 'data_access.dewy'
+use 'program_settings.dewy'
+use 'call_style.dewy'
+use 'secret_checks.dewy'
+use 'checks_read_code.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'unit_rare.dewy'
+use 'unit_ops.dewy'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'check.jo'
+use 'checks_place_updates.dewy'
+use 'checks_thin.dewy'
+use 'checks_const_views.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'settings.jo'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'refine_ops.dewy'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'prelude_ops.dewy'
+use 'ide.jo'
+use 'ide_text.dewy'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+use 'checks_shaped.dewy'
+use 'checks_thin_expr.dewy'
+use 'select_checks.dewy'
+use 'type_member_checks.dewy'
+use 'dotted_checks.dewy'
+use 'expr_hints.dewy'
+use 'partial_checks.dewy'
+use 'narrowing_checks.dewy'
+use 'expr_rare.dewy'
+
+fn_without_defaults = (t: int) -> int:
+    if types[t].kind != .fn_ or types[t].bits == 0: return t
+    ps: int[]
+    loop i in [0..int(types[t].nargs)): ps.push(targ(t, i))
+    mk_fn(ps, int(types[t].elem), int(types[t].mutmask), int(types[t].st), 0, types[t].sign)
+# an argument that can be computed twice: a literal, a variable, a field of one
+simple_arg = (v: int) -> bool:
+    k = nodes[v].kind
+    if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .ident or k == .none_lit: return true
+    if k == .conv or k == .unary: return simple_arg(int(nodes[v].a))
+    if k == .field: return simple_arg(int(nodes[v].a))
+    false
+# Does declaration d accept every parameter of function type et (by value) and
+# give a result et's result accepts?
+fn_adapts = (d: int, et: int) -> bool:
+    sig = fn_sig(d)
+    if sig.generic or int(types[et].nargs) != nkids(d) or int(types[et].mutmask) != 0: return false
+    loop i in [0..nkids(d)):
+        if has_flag(kid(d, i), NF_MUT) or tkind(sig.params[i]) == .refined or not can_coerce(0, targ(et, i), sig.params[i]): return false
+    want = int(types[et].elem)
+    if want != 0 and tkind(want) == .refined: return false
+    want == 0 or tkind(want) == .void_ or sig.ret != 0 and can_coerce(0, int(sig.ret), want)
+# A function value whose parameters accept function type `to`'s and whose
+# result `to`'s result accepts (by value, unrefined, of the program's own code).
+fn_value_adapts = (n: int, from: int, to: int) -> bool:
+    if not dewy_at(nodes[n].pos) or pos_in_lib(nodes[n].pos): return false
+    if types[from].nargs != types[to].nargs or types[from].mutmask != 0 or types[to].mutmask != 0: return false
+    loop i in [0..int(types[to].nargs)):
+        p = targ(from, i); q = targ(to, i)
+        if tkind(p) == .refined or tkind(q) == .refined or is_fn_type(p) or is_fn_type(q) or not can_coerce(0, q, p): return false
+    want = int(types[to].elem)
+    have = int(types[from].elem)
+    want != 0 and have != 0 and tkind(want) != .void_ and tkind(have) != .refined and tkind(want) != .refined and not is_fn_type(want) and can_coerce(0, have, want)
+# `{ let $f = value; (a b) => $f(a b) }`: the value once, called through a wrapper.
+fn_value_adapter = (n: int, to: int) -> int:
+    pos = nodes[n].pos
+    source = nodes.len()
+    nodes.push(nodes[n])
+    bc_count += 1
+    held = "$adapt{bc_count}"
+    params: int[]
+    args: int[]
+    loop i in [0..int(types[to].nargs)):
+        param = mk(.param, pos)
+        nodes[param].name = i32(intern("$arg{i}"))
+        nodes[param].a = i32(type_node_of(targ(to, i), pos))
+        params.push(param)
+        args.push(bc_ident("$arg{i}", pos))
+    call = mk(.call, pos)
+    nodes[call].a = i32(bc_ident(held, pos))
+    set_list(call, args)
+    lam = mk(.lambda, pos)
+    set_list(lam, params)
+    nodes[lam].b = i32(bc_block([bc_stmt(call, pos)], pos))
+    nodes[n] = nodes[bc_block([bc_let(held, source, pos), bc_stmt(lam, pos)], pos)]
+    check_expr(n, to)
+    n
+# `size_of<T>` / `align_of<T>` (docs/design/user_managed_storage.md): T's in-memory
+# layout, read like the integer literal it becomes. Records of C-layout fields
+# match C's sizeof and alignof.
+apply_layout = (n: int, name: int) -> bool:
+    nm = name_of(name)
+    if nm != "size_of" and nm != "align_of": return false
+    if nodes[n].nlist != 1: fatal(nodes[n].pos, "`{nm}<T>` takes one type argument")
+    t = resolve_type(kid(n, 0))
+    layout(t)
+    v = tsize(t)
+    if nm == "align_of": v = talign(t)
+    nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = v, flags = i32(NF_LITERAL))
+    true
+# A bare function-valued local, global or field of type t at n: called when it
+# takes no arguments, otherwise an error naming `@`.
+bare_fn_value = (n: int, t: int, text: str, expected: int) -> int:
+    ft = callable_base(t)
+    ex = prune(expected)
+    takes_none = types[ft].kind != .polyfn and int(types[ft].nargs) == 0
+    if expected != 0 and is_fn_type(ex) and not (takes_none and is_fn_type(int(types[ft].elem))): bare_fn_error(n, text, false)
+    if not takes_none: bare_fn_error(n, text, true)
+    bare_call(n, expected)
+# Renaming a callable's labels, including nested callback labels, needs no
+# adapter. All value types and mutation modes must still have the same shape.
+callable_shape_eq = (a0: int, b0: int) -> bool:
+    if type_eq(a0, b0): return true
+    a = prune(a0)
+    b = prune(b0)
+    if types[a].kind != .fn_ or types[b].kind != .fn_: return false
+    if types[a].nargs != types[b].nargs or types[a].mutmask != types[b].mutmask: return false
+    loop i in [0..int(types[a].nargs)):
+        if not callable_shape_eq(targ(a, i), targ(b, i)): return false
+    callable_shape_eq(int(types[a].elem), int(types[b].elem))

@@ -155,6 +155,7 @@ use 'expr_hints.dewy'
 use 'partial_checks.dewy'
 use 'narrowing_checks.dewy'
 use 'expr_rare.dewy'
+use 'callable_checks.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -1255,12 +1256,6 @@ join_types = (a: int, b: int, pos: int) -> int:
     coerce(b, ta)
     ta
 
-fn_without_defaults = (t: int) -> int:
-    if types[t].kind != .fn_ or types[t].bits == 0: return t
-    ps: int[]
-    loop i in [0..int(types[t].nargs)): ps.push(targ(t, i))
-    mk_fn(ps, int(types[t].elem), int(types[t].mutmask), int(types[t].st), 0, types[t].sign)
-
 # ---------------- places ----------------
 cp_inner = 0           # > 0 while checking the base of an element or field being written
 
@@ -2070,14 +2065,6 @@ capture_value = (a: int, pt: int, statements: mut int[]) -> int:
     add_flag(binding, NF_CHECKED)
     statements.push(binding)
     mk_ident_local(local, nodes[a].pos)
-
-# an argument that can be computed twice: a literal, a variable, a field of one
-simple_arg = (v: int) -> bool:
-    k = nodes[v].kind
-    if k == .int_lit or k == .float_lit or k == .str_lit or k == .bool_lit or k == .ident or k == .none_lit: return true
-    if k == .conv or k == .unary: return simple_arg(int(nodes[v].a))
-    if k == .field: return simple_arg(int(nodes[v].a))
-    false
 
 call_targs: int[]              # type arguments written at the call being resolved (f[T](...))
 cur_assign = 0                 # the assignment whose target is being checked (`x = ...`, `x += ...`)
@@ -6451,54 +6438,6 @@ struct ShapeArm:
     gmember: int   # a guard on one union member (`small:int64<small <? 100>`): that member
     guard: int[]   # and the intervals of its values the guard admits
 
-# Does declaration d accept every parameter of function type et (by value) and
-# give a result et's result accepts?
-fn_adapts = (d: int, et: int) -> bool:
-    sig = fn_sig(d)
-    if sig.generic or int(types[et].nargs) != nkids(d) or int(types[et].mutmask) != 0: return false
-    loop i in [0..nkids(d)):
-        if has_flag(kid(d, i), NF_MUT) or tkind(sig.params[i]) == .refined or not can_coerce(0, targ(et, i), sig.params[i]): return false
-    want = int(types[et].elem)
-    if want != 0 and tkind(want) == .refined: return false
-    want == 0 or tkind(want) == .void_ or sig.ret != 0 and can_coerce(0, int(sig.ret), want)
-
-# A function value whose parameters accept function type `to`'s and whose
-# result `to`'s result accepts (by value, unrefined, of the program's own code).
-fn_value_adapts = (n: int, from: int, to: int) -> bool:
-    if not dewy_at(nodes[n].pos) or pos_in_lib(nodes[n].pos): return false
-    if types[from].nargs != types[to].nargs or types[from].mutmask != 0 or types[to].mutmask != 0: return false
-    loop i in [0..int(types[to].nargs)):
-        p = targ(from, i); q = targ(to, i)
-        if tkind(p) == .refined or tkind(q) == .refined or is_fn_type(p) or is_fn_type(q) or not can_coerce(0, q, p): return false
-    want = int(types[to].elem)
-    have = int(types[from].elem)
-    want != 0 and have != 0 and tkind(want) != .void_ and tkind(have) != .refined and tkind(want) != .refined and not is_fn_type(want) and can_coerce(0, have, want)
-
-# `{ let $f = value; (a b) => $f(a b) }`: the value once, called through a wrapper.
-fn_value_adapter = (n: int, to: int) -> int:
-    pos = nodes[n].pos
-    source = nodes.len()
-    nodes.push(nodes[n])
-    bc_count += 1
-    held = "$adapt{bc_count}"
-    params: int[]
-    args: int[]
-    loop i in [0..int(types[to].nargs)):
-        param = mk(.param, pos)
-        nodes[param].name = i32(intern("$arg{i}"))
-        nodes[param].a = i32(type_node_of(targ(to, i), pos))
-        params.push(param)
-        args.push(bc_ident("$arg{i}", pos))
-    call = mk(.call, pos)
-    nodes[call].a = i32(bc_ident(held, pos))
-    set_list(call, args)
-    lam = mk(.lambda, pos)
-    set_list(lam, params)
-    nodes[lam].b = i32(bc_block([bc_stmt(call, pos)], pos))
-    nodes[n] = nodes[bc_block([bc_let(held, source, pos), bc_stmt(lam, pos)], pos)]
-    check_expr(n, to)
-    n
-
 # `(a b) => f(a b)` in place of `@f`, checked against the expected function type.
 fn_adapter = (n: int, et: int, expected: int) -> int:
     pos = nodes[n].pos
@@ -6696,20 +6635,6 @@ bare_fns_call = (name: int, mod: int) -> int:
             return if sig.ret != 0 and is_fn_type(int(sig.ret)): 2 else: 1
     0
 
-# `size_of<T>` / `align_of<T>` (docs/design/user_managed_storage.md): T's in-memory
-# layout, read like the integer literal it becomes. Records of C-layout fields
-# match C's sizeof and alignof.
-apply_layout = (n: int, name: int) -> bool:
-    nm = name_of(name)
-    if nm != "size_of" and nm != "align_of": return false
-    if nodes[n].nlist != 1: fatal(nodes[n].pos, "`{nm}<T>` takes one type argument")
-    t = resolve_type(kid(n, 0))
-    layout(t)
-    v = tsize(t)
-    if nm == "align_of": v = talign(t)
-    nodes[n] = Node(kind = .int_lit, pos = nodes[n].pos, ival = v, flags = i32(NF_LITERAL))
-    true
-
 # `f` alone: the call f(), checked in place of n.
 bare_call = (n: int, expected: int) -> int:
     callee = nodes.len()
@@ -6721,16 +6646,6 @@ bare_call = (n: int, expected: int) -> int:
     call_style_implicit(n, int(nodes[callee].name) * 8 + 1, t)
     last_checked = n
     t
-
-# A bare function-valued local, global or field of type t at n: called when it
-# takes no arguments, otherwise an error naming `@`.
-bare_fn_value = (n: int, t: int, text: str, expected: int) -> int:
-    ft = callable_base(t)
-    ex = prune(expected)
-    takes_none = types[ft].kind != .polyfn and int(types[ft].nargs) == 0
-    if expected != 0 and is_fn_type(ex) and not (takes_none and is_fn_type(int(types[ft].elem))): bare_fn_error(n, text, false)
-    if not takes_none: bare_fn_error(n, text, true)
-    bare_call(n, expected)
 
 # The walk of one function body for a named wait (rules 3 and 4). In source order it finds w's
 # declaration and the call, and every assignment and `$capture @x` closure on w or a place its
@@ -7769,18 +7684,6 @@ typed_array = (elems: int[], t: int, pos: int) -> int:
     nodes[c].a = i32(a)
     nodes[c].b = i32(tn)
     c
-
-# Renaming a callable's labels, including nested callback labels, needs no
-# adapter. All value types and mutation modes must still have the same shape.
-callable_shape_eq = (a0: int, b0: int) -> bool:
-    if type_eq(a0, b0): return true
-    a = prune(a0)
-    b = prune(b0)
-    if types[a].kind != .fn_ or types[b].kind != .fn_: return false
-    if types[a].nargs != types[b].nargs or types[a].mutmask != types[b].mutmask: return false
-    loop i in [0..int(types[a].nargs)):
-        if not callable_shape_eq(targ(a, i), targ(b, i)): return false
-    callable_shape_eq(int(types[a].elem), int(types[b].elem))
 
 callable_fits = (from0: int, to0: int) -> bool:
     if ownership_callable_cap(from0) > ownership_callable_cap(to0): return false

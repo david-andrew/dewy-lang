@@ -1,0 +1,120 @@
+$runtime_checks
+from p"ast.jo" import (NF_LITERAL NF_MUT has_flag kid mk nkids nodes set_list)
+from p"check.jo" import (dewy_at)
+from p"checker_expr.dewy" import (check_expr)
+from p"checker_signature.dewy" import (fn_sig)
+from p"checks_builders.dewy" import (bc_block bc_ident bc_let bc_stmt)
+from p"checks_thin.dewy" import (resolve_type)
+from p"checks_thin_expr.dewy" import (bare_fn_error is_fn_type)
+from p"effect_contracts.dewy" import (callable_base)
+from p"expr.jo" import (bare_call bc_count can_coerce type_node_of)
+from p"node_store.dewy" import (Node)
+from p"type_ops.dewy" import (layout mk_fn)
+from p"types.jo" import (prune talign targ tkind tsize type_eq types)
+from p"util.jo" import (fatal intern name_of pos_in_lib)
+
+CallableWord:type=int64<overflow='wrap'>
+fn_without_defaults=(t:CallableWord):>int64=>$unsafe {
+    if types.ptr[t].kind not=? 'fn_' or types.ptr[t].bits =? 0 {return t}
+    let ps:array<int64>=[]
+    loop i in [0..CallableWord(types.ptr[t].nargs)) {ps.push(targ(t i))}
+    mk_fn(ps CallableWord(types.ptr[t].elem) CallableWord(types.ptr[t].mutmask) CallableWord(types.ptr[t].st) 0 types.ptr[t].sign)
+}
+# an argument that can be computed twice: a literal, a variable, a field of one
+simple_arg=(v:CallableWord):>bool=>$unsafe {
+    let k=nodes.ptr[v].kind
+    if k =? 'int_lit' or k =? 'float_lit' or k =? 'str_lit' or k =? 'bool_lit' or k =? 'ident' or k =? 'none_lit' {return true}
+    if k =? 'conv' or k =? 'unary' {return simple_arg(CallableWord(nodes.ptr[v].a))}
+    if k =? 'field' {return simple_arg(CallableWord(nodes.ptr[v].a))}
+    false
+}
+# Does declaration d accept every parameter of function type et (by value) and
+# give a result et's result accepts?
+fn_adapts=(d:CallableWord et:CallableWord):>bool=>$unsafe {
+    let sig=fn_sig(d)
+    if sig.generic or CallableWord(types.ptr[et].nargs) not=? nkids(d) or CallableWord(types.ptr[et].mutmask) not=? 0 {return false}
+    loop i in [0..nkids(d)) {
+        if has_flag(kid(d i) NF_MUT) or tkind(sig.params[i]) =? 'refined' or not can_coerce(0 targ(et i) sig.params[i]) {return false}
+    }
+    let want=CallableWord(types.ptr[et].elem)
+    if want not=? 0 and tkind(want) =? 'refined' {return false}
+    want =? 0 or tkind(want) =? 'void_' or sig.ret not=? 0 and can_coerce(0 int64(sig.ret) want)
+}
+# A function value whose parameters accept function type `to`'s and whose
+# result `to`'s result accepts (by value, unrefined, of the program's own code).
+fn_value_adapts=(n:CallableWord from_:CallableWord to:CallableWord):>bool=>$unsafe {
+    if not dewy_at(nodes.ptr[n].pos) or pos_in_lib(nodes.ptr[n].pos) {return false}
+    if types.ptr[from_].nargs not=? types.ptr[to].nargs or types.ptr[from_].mutmask not=? 0 or types.ptr[to].mutmask not=? 0 {return false}
+    loop i in [0..CallableWord(types.ptr[to].nargs)) {
+        let p=targ(from_ i)
+        let q=targ(to i)
+        if tkind(p) =? 'refined' or tkind(q) =? 'refined' or is_fn_type(p) or is_fn_type(q) or not can_coerce(0 q p) {return false}
+    }
+    let want=CallableWord(types.ptr[to].elem)
+    let have=CallableWord(types.ptr[from_].elem)
+    want not=? 0 and have not=? 0 and tkind(want) not=? 'void_' and tkind(have) not=? 'refined' and tkind(want) not=? 'refined' and not is_fn_type(want) and can_coerce(0 have want)
+}
+# `{ let $f = value; (a b) => $f(a b) }`: the value once, called through a wrapper.
+fn_value_adapter=(n:CallableWord to:CallableWord):>int64=>$unsafe {
+    let pos=nodes.ptr[n].pos
+    let source=nodes.length
+    nodes.push(nodes.ptr[n])
+    bc_count += 1
+    let held="$adapt{bc_count}"
+    let params:array<int64>=[]
+    let args:array<int64>=[]
+    loop i in [0..CallableWord(types.ptr[to].nargs)) {
+        let param=mk('param' pos)
+        nodes.ptr[param].name=int32(intern("$arg{i}"))
+        nodes.ptr[param].a=int32(type_node_of(targ(to i) pos))
+        params.push(param)
+        args.push(bc_ident("$arg{i}" pos))
+    }
+    let call=mk('call' pos)
+    nodes.ptr[call].a=int32(bc_ident(held pos))
+    set_list(call args)
+    let lam=mk('lambda' pos)
+    set_list(lam params)
+    nodes.ptr[lam].b=int32(bc_block([bc_stmt(call pos)] pos))
+    let replacement=bc_block([bc_let(held source pos) bc_stmt(lam pos)] pos)
+    nodes.ptr[n]=nodes.ptr[replacement]
+    check_expr(n to);
+    n
+}
+# `size_of<T>` / `align_of<T>` (docs/design/user_managed_storage.md): T's in-memory
+# layout, read like the integer literal it becomes. Records of C-layout fields
+# match C's sizeof and alignof.
+apply_layout=(n:int64 name:int64):>bool=>$unsafe {
+    let nm=name_of(name)
+    if nm not=? "size_of" and nm not=? "align_of" {return false}
+    if nodes.ptr[n].nlist not=? 1 {fatal(nodes.ptr[n].pos "`{nm}<T>` takes one type argument")}
+    let t=resolve_type(kid(n 0))
+    layout(t)
+    let v=tsize(t)
+    if nm =? "align_of" {v=talign(t)}
+    nodes.ptr[n]=Node(kind='int_lit' pos=nodes.ptr[n].pos ival=v flags=int32(NF_LITERAL))
+    true
+}
+# A bare function-valued local, global or field of type t at n: called when it
+# takes no arguments, otherwise an error naming `@`.
+bare_fn_value=(n:CallableWord t:CallableWord text:string expected:CallableWord):>int64=>$unsafe {
+    let ft=callable_base(t)
+    let ex=prune(expected)
+    let takes_none=types.ptr[ft].kind not=? 'polyfn' and CallableWord(types.ptr[ft].nargs) =? 0
+    if expected not=? 0 and is_fn_type(ex) and not (takes_none and is_fn_type(CallableWord(types.ptr[ft].elem))) {bare_fn_error(n text false)}
+    if not takes_none {bare_fn_error(n text true)}
+    bare_call(n expected)
+}
+# Renaming a callable's labels, including nested callback labels, needs no
+# adapter. All value types and mutation modes must still have the same shape.
+callable_shape_eq=(a0:CallableWord b0:CallableWord):>bool=>$unsafe {
+    if type_eq(a0 b0) {return true}
+    let a=prune(a0)
+    let b=prune(b0)
+    if types.ptr[a].kind not=? 'fn_' or types.ptr[b].kind not=? 'fn_' {return false}
+    if types.ptr[a].nargs not=? types.ptr[b].nargs or types.ptr[a].mutmask not=? types.ptr[b].mutmask {return false}
+    loop i in [0..CallableWord(types.ptr[a].nargs)) {
+        if not callable_shape_eq(targ(a i) targ(b i)) {return false}
+    }
+    callable_shape_eq(CallableWord(types.ptr[a].elem) CallableWord(types.ptr[b].elem))
+}
