@@ -33,6 +33,7 @@ LEAF_HOMES = {
     'dotted_checks': 'expr.jo',
     'expr_hints': 'expr.jo',
     'partial_checks': 'expr.jo',
+    'slice_checks': 'expr.jo',
     'collection_checks': 'expr.jo',
     'range_checks': 'expr.jo',
     'expr_routes': 'expr.jo',

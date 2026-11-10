@@ -1,0 +1,79 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (ends_with)
+from p"ast.jo" import (NF_CHECKED NF_INCLUSIVE NF_MUT NF_STEP add_flag clone has_flag mk nkids nodes set_list)
+from p"checks_builders.dewy" import (bc_field bc_ident bc_int bc_let)
+from p"checks_thin_expr.dewy" import (dewy_index_end)
+from p"expr.jo" import (bc_bin is_nd ntype type_node_of)
+from p"refine.jo" import (refine_active refine_storage representation_type)
+from p"types.jo" import (prune types)
+from p"util.jo" import (name_of)
+
+SliceWord:type=int64<overflow='wrap'>
+# Bind end once per axis of an NDArray. Other receivers still compute their
+# length only once, even if several custom index arguments contain end.
+dewy_index_end_bindings=(index:SliceWord source:SliceWord source_type:SliceWord):>array<int64>=>$unsafe {
+    let pos=nodes.ptr[index].pos
+    let base=name_of(SliceWord(nodes.ptr[index].sval))
+    let out:array<int64>=[]
+    loop axis in [0..max(nkids(index) 1)) {
+        let name=if axis =? 0 {base} else {"{base}_{axis}"}
+        let value:SliceWord=0
+        if is_nd(source_type) {
+            let dim=mk('index' pos)
+            nodes.ptr[dim].a=int32(bc_field(clone(source) "shape" pos))
+            nodes.ptr[dim].b=int32(bc_int(axis pos))
+            value=bc_bin('minus' dim bc_int(1 pos) pos)
+        }
+        else if axis =? 0 {value=dewy_index_end(clone(source) pos)} else {value=bc_ident(base pos)}
+        out.push(bc_let(name value pos))
+    }
+    out
+}
+# A stepped slice computes its default endpoint from the captured receiver's
+# size. Calls retain normal left-to-right operand evaluation and value snapshots.
+dewy_slice_args=(r:SliceWord pos:SliceWord):>array<int64>=>$unsafe {
+    let first=SliceWord(nodes.ptr[r].a)
+    let second=SliceWord(nodes.ptr[r].c)
+    if first =? 0 {first=bc_int(0 pos)}
+    if second =? 0 {second=bc_int(0 pos)}
+    let last=SliceWord(nodes.ptr[r].b)
+    let stepped=mk('bool_lit' pos)
+    nodes.ptr[stepped].ival=if has_flag(r NF_STEP) {1} else {0}
+    let inclusive=mk('bool_lit' pos)
+    nodes.ptr[inclusive].ival=if has_flag(r NF_INCLUSIVE) {1} else {0}
+    let bounded=mk('bool_lit' pos)
+    nodes.ptr[bounded].ival=if last not=? 0 {1} else {0}
+    if last =? 0 {last=bc_int(0 pos)}
+    [first second last inclusive bounded stepped]
+}
+dewy_array_slice=(index:SliceWord value:SliceWord=0):>int64=>$unsafe {
+    let pos=nodes.ptr[index].pos
+    let base=SliceWord(nodes.ptr[index].a)
+    add_flag(base NF_CHECKED)
+    if value not=? 0 {add_flag(base NF_MUT)}
+    let args:array<int64>=[int64(base) dewy_slice_args(SliceWord(nodes.ptr[index].b) pos)...]
+    if value not=? 0 {args.push(value)}
+    if value not=? 0 {return dewy_array_selection_call("__dewy_put_slice" args prune(ntype(base)) pos)}
+    dewy_array_selection_call("__dewy_pick_slice" args prune(ntype(base)) pos)
+}
+# Bind both storage and element types. The same library loops select and update
+# growable and inline arrays directly, preserving element context for literals.
+dewy_array_selection_call=(name:string args:array<int64> storage:SliceWord pos:SliceWord):>int64=>$unsafe {
+    let callee=mk('typeapply' pos)
+    nodes.ptr[callee].a=int32(bc_ident(name pos))
+    # A mutable selection's A is the declared place type, including its
+    # outer length contract. Element stores preserve that length, and the
+    # generic helper retains the same authority when forwarding its receiver.
+    let selected_storage=if refine_active and has_flag(args[0] NF_MUT) {refine_storage(args[0] storage)} else {storage}
+    let base=representation_type(selected_storage)
+    let targs=[type_node_of(selected_storage pos) type_node_of(SliceWord(types.ptr[base].elem) pos)]
+    # Index/mask storage can also be inline; do not materialize it just to read it.
+    if ends_with(name "_indices") or ends_with(name "_mask") {
+        targs.push(type_node_of(prune(ntype(args[1])) pos))
+    }
+    set_list(callee targs)
+    let call=mk('call' pos)
+    nodes.ptr[call].a=int32(callee)
+    set_list(call args)
+    call
+}

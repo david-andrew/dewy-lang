@@ -159,6 +159,7 @@ use 'callable_checks.dewy'
 use 'expr_routes.dewy'
 use 'range_checks.dewy'
 use 'collection_checks.dewy'
+use 'slice_checks.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -7246,25 +7247,6 @@ dewy_end_arithmetic = (n: int, name: int) -> bool:
         return dewy_end_arithmetic(int(nodes[n].a), name) and dewy_end_arithmetic(int(nodes[n].b), name) and dewy_end_arithmetic(int(nodes[n].c), name)
     false
 
-# Bind end once per axis of an NDArray. Other receivers still compute their
-# length only once, even if several custom index arguments contain end.
-dewy_index_end_bindings = (index: int, source: int, source_type: int) -> int[]:
-    pos = nodes[index].pos
-    base = name_of(int(nodes[index].sval))
-    out: int[]
-    loop axis in [0..max(nkids(index), 1)):
-        name = if axis == 0: base else: "{base}_{axis}"
-        value = 0
-        if is_nd(source_type):
-            dim = mk(.index, pos)
-            nodes[dim].a = i32(bc_field(clone(source), "shape", pos))
-            nodes[dim].b = i32(bc_int(axis, pos))
-            value = bc_bin(.minus, dim, bc_int(1, pos), pos)
-        else if axis == 0: value = dewy_index_end(clone(source), pos)
-        else: value = bc_ident(base, pos)
-        out.push(bc_let(name, value, pos))
-    out
-
 dewy_end_substitute = (e: int, names: int[], source: int, pos: int):
     if e == 0: return
     if nodes[e].kind == .ident and names.contains(int(nodes[e].name)):
@@ -7273,53 +7255,6 @@ dewy_end_substitute = (e: int, names: int[], source: int, pos: int):
     loop c in [int(nodes[e].a), int(nodes[e].b), kid_c(e), kid_d(e)]: dewy_end_substitute(c, names, source, pos)
     loop c in kids(e):
         if c != int(nodes[e].b): dewy_end_substitute(c, names, source, pos)
-
-# A stepped slice computes its default endpoint from the captured receiver's
-# size. Calls retain normal left-to-right operand evaluation and value snapshots.
-dewy_slice_args = (r: int, pos: int) -> int[]:
-    first = int(nodes[r].a)
-    second = int(nodes[r].c)
-    if first == 0: first = bc_int(0, pos)
-    if second == 0: second = bc_int(0, pos)
-    last = int(nodes[r].b)
-    stepped = mk(.bool_lit, pos)
-    nodes[stepped].ival = if has_flag(r, NF_STEP): 1 else: 0
-    inclusive = mk(.bool_lit, pos)
-    nodes[inclusive].ival = if has_flag(r, NF_INCLUSIVE): 1 else: 0
-    bounded = mk(.bool_lit, pos)
-    nodes[bounded].ival = if last != 0: 1 else: 0
-    if last == 0: last = bc_int(0, pos)
-    [first, second, last, inclusive, bounded, stepped]
-
-dewy_array_slice = (index: int, value: int = 0) -> int:
-    pos = nodes[index].pos
-    base = int(nodes[index].a)
-    add_flag(base, NF_CHECKED)
-    if value != 0: add_flag(base, NF_MUT)
-    args = [base] + dewy_slice_args(int(nodes[index].b), pos)
-    if value != 0: args.push(value)
-    if value != 0: return dewy_array_selection_call("__dewy_put_slice", args, prune(ntype(base)), pos)
-    dewy_array_selection_call("__dewy_pick_slice", args, prune(ntype(base)), pos)
-
-# Bind both storage and element types. The same library loops select and update
-# growable and inline arrays directly, preserving element context for literals.
-dewy_array_selection_call = (name: str, args: int[], storage: int, pos: int) -> int:
-    callee = mk(.typeapply, pos)
-    nodes[callee].a = i32(bc_ident(name, pos))
-    # A mutable selection's A is the declared place type, including its
-    # outer length contract. Element stores preserve that length, and the
-    # generic helper retains the same authority when forwarding its receiver.
-    let storage = if refine_active and has_flag(args[0], NF_MUT): refine_storage(args[0], storage) else: storage
-    base = representation_type(storage)
-    targs = [type_node_of(storage, pos), type_node_of(int(types[base].elem), pos)]
-    # Index/mask storage can also be inline; do not materialize it just to read it.
-    if ends_with(name, "_indices") or ends_with(name, "_mask"):
-        targs.push(type_node_of(prune(ntype(args[1])), pos))
-    set_list(callee, targs)
-    call = mk(.call, pos)
-    nodes[call].a = i32(callee)
-    set_list(call, args)
-    call
 
 # xs[b] with b a bool[] (a mask) or int[] (indexes): the function that picks (or sets) them
 index_array_fn = (b: int, base: str) -> str:

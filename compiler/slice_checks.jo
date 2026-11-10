@@ -1,0 +1,222 @@
+use 'expr.jo'
+use 'data_access.dewy'
+use 'program_settings.dewy'
+use 'call_style.dewy'
+use 'secret_checks.dewy'
+use 'checks_read_code.dewy'
+use 'checks_call_hints.dewy'
+use 'checks_compare_hints.dewy'
+use 'checks_call_errors.dewy'
+use 'checks_istype.dewy'
+use 'checks_builders.dewy'
+use 'checks_value_hooks.dewy'
+use 'checks_cond_hooks.dewy'
+use 'checks_member_hooks.dewy'
+use 'checks_index_hooks.dewy'
+use 'checks_ident_hooks.dewy'
+use 'checks_cast_hooks.dewy'
+use 'checks_match_hooks.dewy'
+use 'checker_call_values.dewy'
+use 'checker_sinks.dewy'
+use 'checker_values.dewy'
+use 'checker_call_services.dewy'
+use 'checker_call_convert.dewy'
+use 'checker_call_resolve.dewy'
+use 'checker_call_cost.dewy'
+use 'host_binds.jo'
+use 'checker_coerce.dewy'
+use 'checker_signature.dewy'
+use 'checker_exact.dewy'
+use 'checker_expr.dewy'
+use 'checker_call_queries.dewy'
+use 'checker_receivers.dewy'
+use 'checker_range_values.dewy'
+use 'checker_numeric.dewy'
+use 'checker_in_range.dewy'
+use 'checker_idents.dewy'
+use 'checker_match.dewy'
+use 'checker_indexes.dewy'
+use 'checker_members.dewy'
+use 'checker_lambdas.dewy'
+use 'checker_aggregates.dewy'
+use 'checker_type_apply.dewy'
+use 'checker_conditionals.dewy'
+use 'checker_type_tests.dewy'
+use 'checker_variants.dewy'
+use 'checker_places.dewy'
+use 'checker_collections.dewy'
+use 'checker_cast.dewy'
+use 'checker_unary.dewy'
+use 'checker_logic.dewy'
+use 'checker_optional.dewy'
+use 'checker_literals.dewy'
+use 'type_match.dewy'
+use 'type_substitute.dewy'
+use 'checker_state.dewy'
+use 'refine_intervals.dewy'
+use 'intervals.dewy'
+use 'refine_predicates.dewy'
+use 'checker_tokens.dewy'
+use 'checker_types.dewy'
+use 'refinement_types.dewy'
+use 'member_replay.jo'
+use 'member_admit.dewy'
+use 'exact.jo'
+use 'concurrency.jo'
+use 'parallel_lower.jo'
+use 'partition.jo'
+use 'partition_ops.dewy'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'string_domains.jo'
+use 'string_domain_ops.dewy'
+use 'temperature_kinds.jo'
+use 'juxtapose.dewy'
+use 'decimals.jo'
+use 'decimal_ops.dewy'
+use 'ownership.jo'
+use 'units.jo'
+use 'unit_rare.dewy'
+use 'unit_ops.dewy'
+use 'errors.jo'
+use 'error_ops.dewy'
+use 'poly_closure.jo'
+use 'poly_ops.dewy'
+use 'util.jo'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'check.jo'
+use 'checks_place_updates.dewy'
+use 'checks_thin.dewy'
+use 'checks_const_views.dewy'
+use 'checks_loop_copies.dewy'
+use 'checks_static.dewy'
+use 'checks_hints.dewy'
+use 'facts.jo'
+use 'facts_plans.dewy'
+use 'facts_numeric.dewy'
+use 'facts_ranges.dewy'
+use 'facts_text.dewy'
+use 'warn_if.jo'
+use 'warn_if_ops.dewy'
+use 'check_constant.jo'
+use 'directives.jo'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'settings.jo'
+use 'refine.jo'
+use 'refine_rare.dewy'
+use 'refine_ops.dewy'
+use 'nd_contracts.jo'
+use 'proofs.jo'
+use 'effects.jo'
+use 'arena.jo'
+use 'reflection.jo'
+use 'reflect_ops.dewy'
+use 'prelude.jo'
+use 'prelude_ops.dewy'
+use 'ide.jo'
+use 'ide_text.dewy'
+use 'ide_index.dewy'
+use 'ide_ops.dewy'
+use 'dewy_methods.jo'
+use 'dewy_method_ops.dewy'
+use 'ffi.jo'
+use 'isolation.jo'
+use 'sibling_types.jo'
+use 'sibling_ops.dewy'
+use 'floats.jo'
+use 'float_ops.dewy'
+use 'secrets.jo'
+use 'place_methods.jo'
+use 'place_method_ops.dewy'
+use 'node_store.dewy'
+use 'ownership_types.dewy'
+use 'ownership_checks.dewy'
+use 'arena_ops.dewy'
+use 'ffi_checks.dewy'
+use 'effect_contracts.dewy'
+use 'effect_sources.dewy'
+use 'isolation_ops.dewy'
+use 'concurrency_types.dewy'
+use 'concurrency_tasks.dewy'
+use 'checks_shaped.dewy'
+use 'checks_thin_expr.dewy'
+use 'select_checks.dewy'
+use 'type_member_checks.dewy'
+use 'dotted_checks.dewy'
+use 'expr_hints.dewy'
+use 'partial_checks.dewy'
+use 'narrowing_checks.dewy'
+use 'expr_rare.dewy'
+use 'callable_checks.dewy'
+use 'expr_routes.dewy'
+use 'range_checks.dewy'
+use 'collection_checks.dewy'
+
+# Bind end once per axis of an NDArray. Other receivers still compute their
+# length only once, even if several custom index arguments contain end.
+dewy_index_end_bindings = (index: int, source: int, source_type: int) -> int[]:
+    pos = nodes[index].pos
+    base = name_of(int(nodes[index].sval))
+    out: int[]
+    loop axis in [0..max(nkids(index), 1)):
+        name = if axis == 0: base else: "{base}_{axis}"
+        value = 0
+        if is_nd(source_type):
+            dim = mk(.index, pos)
+            nodes[dim].a = i32(bc_field(clone(source), "shape", pos))
+            nodes[dim].b = i32(bc_int(axis, pos))
+            value = bc_bin(.minus, dim, bc_int(1, pos), pos)
+        else if axis == 0: value = dewy_index_end(clone(source), pos)
+        else: value = bc_ident(base, pos)
+        out.push(bc_let(name, value, pos))
+    out
+# A stepped slice computes its default endpoint from the captured receiver's
+# size. Calls retain normal left-to-right operand evaluation and value snapshots.
+dewy_slice_args = (r: int, pos: int) -> int[]:
+    first = int(nodes[r].a)
+    second = int(nodes[r].c)
+    if first == 0: first = bc_int(0, pos)
+    if second == 0: second = bc_int(0, pos)
+    last = int(nodes[r].b)
+    stepped = mk(.bool_lit, pos)
+    nodes[stepped].ival = if has_flag(r, NF_STEP): 1 else: 0
+    inclusive = mk(.bool_lit, pos)
+    nodes[inclusive].ival = if has_flag(r, NF_INCLUSIVE): 1 else: 0
+    bounded = mk(.bool_lit, pos)
+    nodes[bounded].ival = if last != 0: 1 else: 0
+    if last == 0: last = bc_int(0, pos)
+    [first, second, last, inclusive, bounded, stepped]
+dewy_array_slice = (index: int, value: int = 0) -> int:
+    pos = nodes[index].pos
+    base = int(nodes[index].a)
+    add_flag(base, NF_CHECKED)
+    if value != 0: add_flag(base, NF_MUT)
+    args = [base] + dewy_slice_args(int(nodes[index].b), pos)
+    if value != 0: args.push(value)
+    if value != 0: return dewy_array_selection_call("__dewy_put_slice", args, prune(ntype(base)), pos)
+    dewy_array_selection_call("__dewy_pick_slice", args, prune(ntype(base)), pos)
+# Bind both storage and element types. The same library loops select and update
+# growable and inline arrays directly, preserving element context for literals.
+dewy_array_selection_call = (name: str, args: int[], storage: int, pos: int) -> int:
+    callee = mk(.typeapply, pos)
+    nodes[callee].a = i32(bc_ident(name, pos))
+    # A mutable selection's A is the declared place type, including its
+    # outer length contract. Element stores preserve that length, and the
+    # generic helper retains the same authority when forwarding its receiver.
+    let storage = if refine_active and has_flag(args[0], NF_MUT): refine_storage(args[0], storage) else: storage
+    base = representation_type(storage)
+    targs = [type_node_of(storage, pos), type_node_of(int(types[base].elem), pos)]
+    # Index/mask storage can also be inline; do not materialize it just to read it.
+    if ends_with(name, "_indices") or ends_with(name, "_mask"):
+        targs.push(type_node_of(prune(ntype(args[1])), pos))
+    set_list(callee, targs)
+    call = mk(.call, pos)
+    nodes[call].a = i32(callee)
+    set_list(call, args)
+    call
