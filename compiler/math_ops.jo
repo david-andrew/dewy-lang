@@ -30,6 +30,9 @@ use 'ir_builders.dewy'
 use 'math_lower.jo'
 use 'isolation_ops.dewy'
 
+# each slow operation's own entry (lib/math_runtime.jo), by math_binary's operation number
+const MATH_SLOW = ["__mi_add", "__mi_sub", "__mi_mul", "__mi_div", "__mi_rem", "__mi_and", "__mi_or", "__mi_xor"]
+
 math_word = (word: int) -> Val:
     if is_kv(word):
         value = kv_of(word)
@@ -168,7 +171,7 @@ math_binary = (op: Tok, a: int, b: int) -> Val:
     # Both source values are still live here, including their original words.
     old = ir_cold
     ir_cold = true
-    e_mov(out, e_call(rt("__mi_slow"), [a, b, e_iconst(operation)], VI))
+    e_mov(out, e_call(rt(MATH_SLOW[operation]), [a, b], VI))
     ir_cold = old
     endc()
     V(out, true)

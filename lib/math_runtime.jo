@@ -45,23 +45,27 @@ __mi_words = (words: *u64, count: int) -> __dewy_int:
         limbs.push(word >> 32)
     __mi_pack(__bi._pack(negative, limbs))
 
-__mi_slow = (a: __dewy_int, b: __dewy_int, operation: int) -> __dewy_int:
+# Each slow operation has its own entry, so a program reaches only the BigInt code its
+# operations need (an addition does not compile division or the bitwise operations).
+__mi_add = (a: __dewy_int, b: __dewy_int) -> __dewy_int: __mi_pack(__bi.__add__(__mi_big(a), __mi_big(b)))
+__mi_sub = (a: __dewy_int, b: __dewy_int) -> __dewy_int: __mi_pack(__bi.__sub__(__mi_big(a), __mi_big(b)))
+__mi_mul = (a: __dewy_int, b: __dewy_int) -> __dewy_int: __mi_pack(__bi.__mul__(__mi_big(a), __mi_big(b)))
+__mi_and = (a: __dewy_int, b: __dewy_int) -> __dewy_int: __mi_pack(__bi.__and__(__mi_big(a), __mi_big(b)))
+__mi_or = (a: __dewy_int, b: __dewy_int) -> __dewy_int: __mi_pack(__bi.__or__(__mi_big(a), __mi_big(b)))
+__mi_xor = (a: __dewy_int, b: __dewy_int) -> __dewy_int: __mi_pack(__bi.__xor__(__mi_big(a), __mi_big(b)))
+
+# Truncating quotient and remainder (bigint's divmod floors).
+__mi_divmod = (a: __dewy_int, b: __dewy_int, quotient: bool) -> __dewy_int:
     x = __mi_big(a)
     y = __mi_big(b)
-    if operation == 0: return __mi_pack(__bi.__add__(x, y))
-    if operation == 1: return __mi_pack(__bi.__sub__(x, y))
-    if operation == 2: return __mi_pack(__bi.__mul__(x, y))
-    if operation == 3 or operation == 4:
-        parts = __bi.divmod(x, y)
-        if x._sign != y._sign and parts.remainder._sign != 0:
-            parts.quotient = __bi.__add__(parts.quotient, __bi._big(1))
-            parts.remainder = __bi.__sub__(parts.remainder, y)
-        return __mi_pack(if operation == 3: parts.quotient else: parts.remainder)
-    if operation == 5: return __mi_pack(__bi.__and__(x, y))
-    if operation == 6: return __mi_pack(__bi.__or__(x, y))
-    if operation == 7: return __mi_pack(__bi.__xor__(x, y))
-    # (an invariant: the operations above are all there are)
-    unreachable()
+    parts = __bi.divmod(x, y)
+    if x._sign != y._sign and parts.remainder._sign != 0:
+        parts.quotient = __bi.__add__(parts.quotient, __bi._big(1))
+        parts.remainder = __bi.__sub__(parts.remainder, y)
+    __mi_pack(if quotient: parts.quotient else: parts.remainder)
+
+__mi_div = (a: __dewy_int, b: __dewy_int) -> __dewy_int: __mi_divmod(a, b, true)
+__mi_rem = (a: __dewy_int, b: __dewy_int) -> __dewy_int: __mi_divmod(a, b, false)
 
 __mi_compare = (a: __dewy_int, b: __dewy_int) -> int:
     if (a as int) & 1 == 0 and (b as int) & 1 == 0:
@@ -275,7 +279,9 @@ __mi_count = (value: __dewy_int) -> int:
     9223372036854775807
 
 __mi_word_float = (a: int, b: int, operation: int) -> f64:
-    __mi_float(__mi_slow(__mi_word(a), __mi_word(b), operation))
+    if operation == 0: return __mi_float(__mi_add(__mi_word(a), __mi_word(b)))
+    if operation == 1: return __mi_float(__mi_sub(__mi_word(a), __mi_word(b)))
+    __mi_float(__mi_mul(__mi_word(a), __mi_word(b)))
 
 # Saturating conversion inspects at most two limbs; it never allocates a bound.
 __mi_clamp_word = (a: __dewy_int, lo: int, hi: int, unsigned: int) -> int:

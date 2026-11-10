@@ -29,6 +29,8 @@ from p"refine.jo" import (representation_type)
 from p"isolation_ops.dewy" import (isolation_children)
 # Direct recursive lowering; shared state has one owner in math_lower.jo.
 MathWord:type=int64<overflow='wrap'>
+# each slow operation's own entry (lib/math_runtime.jo), by math_binary's operation number
+const MATH_SLOW:array<string>=["__mi_add"  "__mi_sub"  "__mi_mul"  "__mi_div"  "__mi_rem"  "__mi_and"  "__mi_or"  "__mi_xor"]
 math_word=(word:MathWord):>Val=>$unsafe {
     if is_kv(word) {
         let value=kv_of(word)
@@ -173,7 +175,7 @@ math_binary=(op:Tok a:MathWord b:MathWord):>Val=>$unsafe {
     # Both source values are still live here, including their original words.
     let old=ir_cold
     ir_cold=true
-    e_mov(out e_call(rt("__mi_slow") [a b e_iconst(operation)] VI));
+    e_mov(out e_call(rt(MATH_SLOW[operation]) [a b] VI));
     ir_cold=old
     endc();
     return V(out true)

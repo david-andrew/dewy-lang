@@ -431,16 +431,23 @@ _mag_divmod_by=(x:array<uint64> p:array<uint64> mu:array<uint64>):>_MagDivMod=>{
 
 _ConvertTree:type=[powers:array<array<uint64>> reciprocals:array<array<uint64>>]
 
-# 10^(9*2^j) for j below k, and the reciprocals of the long ones
-_convert_tree=(k:int64 reciprocals:bool):>_ConvertTree=>{
+# 10^(9*2^j) for j below k
+_convert_powers=(k:int64):>array<array<uint64>>=>{
     let powers:array<array<uint64>>=[[1000000000]]
     loop powers.length <? k {
         let last=powers[powers.length-1]
         powers.push(_mag_mul(last last))
     }
+    return powers
+}
+
+# the powers below k, and the reciprocals of the long ones (printing's: parsing needs only the
+# powers, so it does not reach the division code)
+_convert_tree=(k:int64):>_ConvertTree=>{
+    let powers=_convert_powers(k)
     let mus:array<array<uint64>>=[]
     loop j in [0..k) {
-        if reciprocals and powers[j].length >? _CONVERT_BASE mus.push(_mag_reciprocal(powers[j]))
+        if powers[j].length >? _CONVERT_BASE mus.push(_mag_reciprocal(powers[j]))
         else mus.push([])
     }
     return [powers=powers reciprocals=mus]
@@ -467,7 +474,7 @@ _mag_decimal_chunks=(limbs:array<uint64>):>array<uint64>=>{
     let k:int64=0
     let bits=limbs.length*32
     loop k <? 63 and (1 << k)*29 <? bits k=k+1       # (10^9 > 2^29.89: 2^k chunks hold 29*2^k bits)
-    let tree=_convert_tree(k true)
+    let tree=_convert_tree(k)
     let out:array<uint64>=[]
     _mag_chunks_into(@out limbs k tree)
     loop out.length >? 1 and out[out.length-1] =? 0 out.pop();
@@ -475,7 +482,7 @@ _mag_decimal_chunks=(limbs:array<uint64>):>array<uint64>=>{
 }
 
 # the magnitude of base-10^9 chunks[lo..lo+2^k) (least significant first; past the end: zeros)
-_mag_from_chunks=(chunks:array<uint64> lo:int64 k:int64<0 <=? k and k <? 63> tree:_ConvertTree):>array<uint64>=>{
+_mag_from_chunks=(chunks:array<uint64> lo:int64 k:int64<0 <=? k and k <? 63> powers:array<array<uint64>>):>array<uint64>=>{
     if lo >=? chunks.length return []
     let count:int64=1 << k
     if k <=? 4 {
@@ -495,10 +502,10 @@ _mag_from_chunks=(chunks:array<uint64> lo:int64 k:int64<0 <=? k and k <? 63> tre
         _bigint_trim(@limbs)
         return limbs
     }
-    let low=_mag_from_chunks(chunks lo k-1 tree)
-    let high=_mag_from_chunks(chunks lo+count//2 k-1 tree)
+    let low=_mag_from_chunks(chunks lo k-1 powers)
+    let high=_mag_from_chunks(chunks lo+count//2 k-1 powers)
     if high.length =? 0 return low
-    return _mag_add(_mag_mul(high tree.powers[k-1]) low)
+    return _mag_add(_mag_mul(high powers[k-1]) low)
 }
 
 # decimal digits (values 0 to 9, most significant first) as a magnitude
@@ -515,8 +522,8 @@ _mag_from_digits=(digits:array<uint8>):>array<uint64>=>{
     }
     let k:int64=0
     loop k <? 63 and (1 << k) <? chunks.length k=k+1
-    let tree=_convert_tree(k false)
-    return _mag_from_chunks(chunks 0 k tree)
+    let powers=_convert_powers(k)
+    return _mag_from_chunks(chunks 0 k powers)
 }
 
 # decimal digit values (most significant first) as a BigInt
