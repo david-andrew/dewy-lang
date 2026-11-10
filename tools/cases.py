@@ -450,12 +450,14 @@ def batch_source(cases: list[Case], forms: list[str], select: bool) -> tuple[str
             call = f'{void} return' if void else f'let r_{i}=case_{i}() exit(r_{i})'
             lines.append(f'if selector =? "{i}" {{printl"{MARK}B{i}" {call}}}')
         else:
-            lines.append(f'printl"{MARK}B{i}"')
+            # (buffered text is written out at each marker, so a case's raw writes to standard
+            # output, a `syscall(1 ...)`, land between its own markers, not a neighbour's)
+            lines.append(f'printl"{MARK}B{i}" flush_output()')
             owners[len(lines) + 1] = i
             if void:
-                lines.append(f'{void} printl"{MARK}E{i}:0"')
+                lines.append(f'{void} printl"{MARK}E{i}:0" flush_output()')
             else:
-                lines.append(f'let r_{i}=case_{i}() printl"{MARK}E{i}:{{r_{i}}}"')
+                lines.append(f'let r_{i}=case_{i}() printl"{MARK}E{i}:{{r_{i}}}" flush_output()')
     if select:
         lines.append('panic("invalid case selector")')
     lines.append('}')
