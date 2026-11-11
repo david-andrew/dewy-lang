@@ -1,0 +1,146 @@
+# Tier 5 / 133 / milestone 43
+# Acceptance: Route a bounded work queue to two workers, multiplex their results,
+# then drain telemetry. Fixed round-robin admission allows one job per worker.
+Job:type = [id:int name:string units:int]
+NoRoute:type = type of error
+
+unavailable = (_region:string):>int | NoRoute => NoRoute
+local_rate = (units:int):>int => units * 7
+
+worker = (input:Channel<Job> output:Channel<string> audit:Channel<int> label:string):>void | Canceled | Unsent<string> | Unsent<int> => {
+    let completed = 0
+    loop true {
+        let next = input.receive
+        if next is? Closed break
+        let job = next or_throw
+        let cost = local_rate(job.units)
+        output.send("{job.id} {label} {job.name} units={job.units} cost={cost}") or_throw
+        completed += 1
+    }
+    audit.send(completed) or_throw
+    audit.close()
+    output.close()
+}
+
+# Only the local snapshot is available. The other receives remain cancellable
+# until race joins them; there is no sleep or guessed head start for the winner.
+choose_snapshot = ():>int | Canceled | Closed<int> | Unsent<int> | OutOfMemory => {
+    let cached = channel<int>(1)
+    let primary = channel<int>(1)
+    let replica = channel<int>(1)
+    cached.send(42) or_throw
+    race(@cached.receive @primary.receive @replica.receive) or_throw
+}
+
+feed = (jobs:Channel<Job> batch:array<Job>):>void | Unsent<Job> => {
+    loop job in batch { jobs.send(job) or_throw }
+    jobs.close()
+}
+
+run_router = (batch:array<Job>) => {
+    let jobs = channel<Job>(2)
+
+    let left = channel<Job>(1)
+    let right = channel<Job>(1)
+    let a = channel<string>(1)
+    let b = channel<string>(1)
+    let audit_a = channel<int>(1)
+    let audit_b = channel<int>(1)
+    let heart = ticker(1ms)
+    let b_ready = @b.receive
+    let open = true
+    let a_active = false
+    let b_active = false
+    let next_left = true
+    let finished = false
+    let admitted = 0
+    let received = 0
+    let transcript:array<string> = []
+
+    let result = concurrent {
+        spawn feed(jobs batch)
+        spawn worker(left a audit_a "A")
+        spawn worker(right b audit_b "B")
+        loop not finished {
+            match select(if open and ((next_left and not a_active) or (not next_left and not b_active)) @jobs.receive else none
+                         if a_active @a.receive else none
+                         if b_active @b_ready else none
+                         @heart.next) {
+                job:Job => {
+                    # Reserve before preparing a worker's message: a permit owns
+                    # the bounded queue's room until its single send consumes it.
+                    if next_left {
+                        let permit = left.reserve or_throw
+                        permit.send(job)
+                        a_active = true
+                    } else {
+                        let permit = right.reserve or_throw
+                        permit.send(job)
+                        b_active = true
+                    }
+                    next_left = not next_left
+                    admitted += 1
+                }
+                line:a.string => {
+                    transcript.push(line)
+                    a_active = false
+                    received += 1
+                }
+                line:(@b_ready).string => {
+                    transcript.push(line)
+                    b_active = false
+                    received += 1
+                }
+                <jobs.Closed> => { open = false }
+                <Tick> => {
+                    # Ticks during work have no observable effect. Exactly one
+                    # tick after the final close finishes the router.
+                    if not open and not a_active and not b_active { finished = true }
+                }
+                <Closed> => { return NoRoute }
+                <Canceled> => { return Canceled }
+            }
+        }
+        left.close()
+        right.close()
+    }
+    match result {
+        failed:exception => { printl"worker group failed: {failed}"; exit(1) }
+        _ => {}
+    }
+
+    printl"snapshot {choose_snapshot or_throw}"
+    let rate = first_ok(@unavailable("east") @local_rate(1) @unavailable("west")) or_throw
+    printl"rate {rate} admitted {admitted} received {received}"
+    # Job IDs in this batch have equal width. Sort the collected log by ID;
+    # completion order can vary while admission and printed order stay fixed.
+    loop line in transcript.sorted { printl(line) }
+
+    # Closing sources retire independently; only the commutative total is
+    # printed, so the two workers' completion order cannot leak into output.
+    let inbox = merged(@audit_a.receive @audit_b.receive stop_when_idle=1s)
+    let audited = 0
+    loop count in inbox or_throw { audited += count }
+    printl"audited {audited} drained {not inbox.open}"
+
+    # Optional late telemetry stops after a short idle interval without closing its
+    # sources. This checks the idle path separately from ordinary exhaustion.
+    let late = channel<int>(1)
+    let idle = merged(@late.receive stop_when_idle=1ms)
+    let late_count = 0
+    loop count in idle or_throw { late_count += count }
+    printl"late {late_count} source open {idle.open}"
+    late.close()
+}
+
+main = () => {
+    let batch:array<Job> = [
+        Job[101 "thumbnail" 3]
+        Job[102 "invoice" 8]
+        Job[103 "index" 5]
+        Job[104 "preview" 2]
+        Job[105 "archive" 13]
+        Job[106 "manifest" 1]
+    ]
+    run_router(batch) or_throw
+}
