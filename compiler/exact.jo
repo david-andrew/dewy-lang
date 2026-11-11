@@ -51,6 +51,7 @@ use 'lower_primitives.dewy'
 use 'ir_builders.dewy'
 use 'math_ops.dewy'
 use 'isolation_ops.dewy'
+use 'exact_measure.dewy'
 
 # exact_potential and exact_math_operand run in checker_exact.dewy.
 exact_query_input = CheckerExactInput(&nodes, &lists, &types, &files, &T_INT, &T_U64, &T_MATH_INT)
@@ -2093,7 +2094,6 @@ exact_unsigned_fact = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int
         fact_difference(s, b, v, -int(xl))
     v
 
-
 # A deliberate conversion to mathematical int is an allocation boundary;
 # evaluating the fixed-width source above it never allocated a bigint.
 exact_gen_math = (n: int) -> Val:
@@ -2236,60 +2236,6 @@ exact_reset = ():
     exact_ranges = []
     exact_range_meta = []
     exact_join_blocks = {}
-
-# Optional measurement consumes the same demand/boundary index. It does not
-# force bodies or facts for the rest of the program. Explicit-policy bodies
-# are indexed only when requested; ordinary compilation pays no reporting walk.
-exact_measure_candidate = (n: int) -> bool:
-    k = nodes[n].kind
-    if k == .conv: return is_int(ntype(n)) and ntype(n) != T_MATH_INT
-    if k == .assign: return nodes[n].op != i32(int(Tok.assign))
-    if k != .binary and k != .unary: return false
-    t = exact_representation(ntype(n))
-    if not is_int(t) or t == T_MATH_INT: return false
-    op = nodes[n].op as Tok
-    op == .plus or op == .minus or op == .star or op == .shl or op == .starstar
-
-# Follow erased conversions and value arms to the operation stored at a
-# boundary, including implicit returns. Reporting uses node keys to deduplicate
-# shared expressions and does not alter ordinary demand or fact transfer.
-exact_measure_boundary = (n: int, owner: int):
-    if n <= 0: return
-    k = nodes[n].kind
-    exact_measure_visit(n, owner, true)
-    if k == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_))) or k == .exprstmt:
-        exact_measure_boundary(int(nodes[n].a), owner)
-    else if k == .block and nodes[n].aux != 0: exact_measure_boundary(block_value(n), owner)
-    else if k == .if_ or k == .iflet:
-        exact_measure_boundary(int(nodes[n].b), owner)
-        exact_measure_boundary(int(nodes[n].c), owner)
-    else if k == .match_:
-        loop arm in kids(n): exact_measure_boundary(int(nodes[arm].b), owner)
-
-exact_measure_visit = (n: int, owner: int, store: bool):
-    if not exact_measure_candidate(n): return
-    k = nodes[n].kind
-    t = ntype(n)
-    if k == .assign: t = ntype(int(nodes[n].a))
-    if not is_int(t) or t == T_MATH_INT: return
-    if k == .conv:
-        if nodes[n].aux == i32(int(CV.wrap_int)) or nodes[n].aux == i32(int(CV.saturate_int)):
-            exact_measure_sites[n] = ExactMeasure(owner, t, "explicit")
-    else if (store or k == .assign) and int_policy(t) != 0:
-        exact_measure_sites[n] = ExactMeasure(owner, t, "wrap")
-
-exact_measure_report = ():
-    order: int[]
-    loop n, _ in exact_measure_sites: order.push(n)
-    order.sort()
-    loop n in order:
-        site = exact_measure_sites[n]
-        source = if exact_has_store(n): int(nodes[n].a) else: n
-        op = nodes[source].op as Tok
-        f = site.owner
-        fname = if f > 0 and fns[f].decl != 0: name_of(int(nodes[int(fns[f].decl)].name)) else: "?"
-        status = if site.category == "runtime-check": "FAIL" else: "ok"
-        eprint("NOWRAP\t{pos_str(nodes[n].pos)}\t{status}\t{site.category}\t{op}\t{type_str(site.type, true)}\tstore\t{site.lo}\t{site.hi}\t{fname}")
 
 # Mixed signed/unsigned comparisons must not compare biased and plain bounds.
 # Rebase small unsigned intervals; larger ones exceed this interval engine.

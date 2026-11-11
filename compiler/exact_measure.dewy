@@ -1,0 +1,73 @@
+$runtime_checks
+from p"@lib/core/os.jo" import (eprint)
+from p"ast.jo" import (kids nodes)
+from p"check.jo" import (fns)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"exact.jo" import (ExactMeasure exact_has_store exact_measure_sites exact_representation)
+from p"expr.jo" import (CV ntype)
+from p"type_ops.dewy" import (int_policy type_str)
+from p"types.jo" import (T_MATH_INT is_int)
+from p"util.jo" import (name_of pos_str)
+
+ExactMeasureWord:type=int64<overflow='wrap'>
+# Optional measurement consumes the same demand/boundary index. It does not
+# force bodies or facts for the rest of the program. Explicit-policy bodies
+# are indexed only when requested; ordinary compilation pays no reporting walk.
+exact_measure_candidate=(n:ExactMeasureWord):>bool=>$unsafe {
+    let k=nodes.ptr[n].kind
+    if k =? 'conv' {return is_int(ntype(n)) and ntype(n) not=? T_MATH_INT}
+    if k =? 'assign' {return nodes.ptr[n].op not=? int32(47)}
+    if k not=? 'binary' and k not=? 'unary' {return false}
+    let t=exact_representation(ntype(n))
+    if not is_int(t) or t =? T_MATH_INT {return false}
+    let op=cx_token_values.ptr[ExactMeasureWord(nodes.ptr[n].op)]
+    op =? 'plus' or op =? 'minus' or op =? 'star' or op =? 'shl' or op =? 'starstar'
+}
+# Follow erased conversions and value arms to the operation stored at a
+# boundary, including implicit returns. Reporting uses node keys to deduplicate
+# shared expressions and does not alter ordinary demand or fact transfer.
+exact_measure_boundary=(n:ExactMeasureWord owner:ExactMeasureWord):>void=>$unsafe {
+    if n <=? 0 {return}
+    let k=nodes.ptr[n].kind
+    exact_measure_visit(n owner true)
+    if k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.none_)) or nodes.ptr[n].aux =? int32(int64(CV.int_))) or k =? 'exprstmt' {
+        exact_measure_boundary(ExactMeasureWord(nodes.ptr[n].a) owner)
+    }
+    else if k =? 'block' and nodes.ptr[n].aux not=? 0 {exact_measure_boundary(block_value(n) owner)} else if k =? 'if_' or k =? 'iflet' {
+        exact_measure_boundary(ExactMeasureWord(nodes.ptr[n].b) owner)
+        exact_measure_boundary(ExactMeasureWord(nodes.ptr[n].c) owner)
+    }
+    else if k =? 'match_' {
+        loop arm in kids(n) {exact_measure_boundary(ExactMeasureWord(nodes.ptr[arm].b) owner)}
+    }
+}
+exact_measure_visit=(n:ExactMeasureWord owner:ExactMeasureWord store:bool):>void=>$unsafe {
+    if not exact_measure_candidate(n) {return}
+    let k=nodes.ptr[n].kind
+    let t=ntype(n)
+    if k =? 'assign' {t=ntype(ExactMeasureWord(nodes.ptr[n].a))}
+    if not is_int(t) or t =? T_MATH_INT {return}
+    if k =? 'conv' {
+        if nodes.ptr[n].aux =? int32(int64(CV.wrap_int)) or nodes.ptr[n].aux =? int32(int64(CV.saturate_int)) {
+            exact_measure_sites[n]=ExactMeasure(owner t "explicit")
+        }
+    }
+    else if (store or k =? 'assign') and int_policy(t) not=? 0 {
+        exact_measure_sites[n]=ExactMeasure(owner t "wrap")
+    }
+}
+exact_measure_report=():>void=>$unsafe {
+    let order:array<int64>=[]
+    loop [n _] in exact_measure_sites {order.push(n)}
+    order.sort()
+    loop n in order {
+        let site=exact_measure_sites[n]
+        let source=if exact_has_store(n) {ExactMeasureWord(nodes.ptr[n].a)} else {n}
+        let op=cx_token_values.ptr[ExactMeasureWord(nodes.ptr[source].op)]
+        let f=site.owner
+        let fname=if f >? 0 and fns.ptr[f].decl not=? 0 {name_of(ExactMeasureWord(nodes.ptr[ExactMeasureWord(fns.ptr[f].decl)].name))} else {"?"}
+        let status=if site.category =? "runtime-check" {"FAIL"} else {"ok"}
+        eprint("NOWRAP\t{pos_str(nodes.ptr[n].pos)}\t{status}\t{site.category}\t{op}\t{type_str(site.type true)}\tstore\t{site.lo}\t{site.hi}\t{fname}")
+    }
+}
