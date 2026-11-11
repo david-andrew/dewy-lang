@@ -271,8 +271,22 @@ within[D, T] = (duration: D, f: () -> T) -> (T | Timeout | Canceled | OutOfMemor
 # to be ready, as the union of their outcomes, or Canceled; with `timeout=`, Timeout when none is
 # ready in time. Each round tries every wait without blocking, from a start the clock picks; only a
 # ready wait commits (lib/std/thread.jo), so a losing receive takes nothing. A ready wait wins
-# a deadline already past. compiler/expr.jo's select_check checks the waits.
+# a deadline already past. `priority="index"` tries argument order; the default
+# `"fair"` rotates the starting point. compiler/expr.jo's select_check checks the waits.
 __select_first = (n: int) -> int: (time_ns() >> 6) % n
+# The checker carries a noncanonical written wait order in an internal string.
+# Public priority values remain fair/index; the wrapper allocates nothing.
+__select_priority_order = (priority: str, order: str) -> str:
+    if priority == "index": return order
+    priority
+__select_order = (priority: str) -> int:
+    # Two bits per slot: 228 encodes the canonical [0, 1, 2, 3].
+    if priority == "fair" or priority == "index": return 228
+    order = 0
+    loop i in [0..len(priority)):
+        digit = int(priority[i]) - 48
+        order = order | (digit << (2 * i))
+    order
 __select_won = (s: *int, k: int) -> bool:
     won = s[__TS_SELECT] == 1
     s[__TS_SELECT] = 0
@@ -297,10 +311,11 @@ __select_when[A] = (on: bool, w: () -> A) -> (() -> A):
 __select_nap = (spins: int):
     if spins >= 16: __task_pause()
 
-select[A] = (a: () -> A) -> (A | Canceled):
+select[A] = (a: () -> A, priority: str = "fair") -> (A | Canceled):
     s = __ts()
     s[__TS_SELECT_WON] = 0
-    first = __select_first(1)
+    first = 0
+    if priority == "fair": first = __select_first(1)
     loop spins in 0..:
         if __task_canceled(): return Canceled
         loop k in [0..1):
@@ -309,11 +324,12 @@ select[A] = (a: () -> A) -> (A | Canceled):
             if __select_won(s, 0): return ra
         __select_nap(spins)
     Canceled
-select[A, D] = (a: () -> A, timeout: D) -> (A | Canceled | Timeout):
+select[A, D] = (a: () -> A, timeout: D, priority: str = "fair") -> (A | Canceled | Timeout):
     s = __ts()
     s[__TS_SELECT_WON] = 0
     deadline = __task_deadline(__task_nanoseconds(timeout))
-    first = __select_first(1)
+    first = 0
+    if priority == "fair": first = __select_first(1)
     loop spins in 0..:
         if __task_canceled(): return Canceled
         loop k in [0..1):
@@ -323,15 +339,17 @@ select[A, D] = (a: () -> A, timeout: D) -> (A | Canceled | Timeout):
         if time_ns() >= deadline: return Timeout
         __select_nap(spins)
     Canceled
-select[A, B] = (a: () -> A, b: () -> B) -> (A | B | Canceled):
+select[A, B] = (a: () -> A, b: () -> B, priority: str = "fair") -> (A | B | Canceled):
     s = __ts()
     s[__TS_SELECT_WON] = 0
-    first = __select_first(2)
+    first = 0
+    if priority == "fair": first = __select_first(2)
+    order = __select_order(priority)
     loop spins in 0..:
         if __task_canceled(): return Canceled
         loop k in [0..2):
             s[__TS_SELECT] = 1
-            if (first + k) % 2 == 0:
+            if ((order >> (2 * ((first + k) % 2))) & 3) == 0:
                 ra = a()
                 if __select_won(s, 0): return ra
             else:
@@ -339,16 +357,18 @@ select[A, B] = (a: () -> A, b: () -> B) -> (A | B | Canceled):
                 if __select_won(s, 1): return rb
         __select_nap(spins)
     Canceled
-select[A, B, D] = (a: () -> A, b: () -> B, timeout: D) -> (A | B | Canceled | Timeout):
+select[A, B, D] = (a: () -> A, b: () -> B, timeout: D, priority: str = "fair") -> (A | B | Canceled | Timeout):
     s = __ts()
     s[__TS_SELECT_WON] = 0
     deadline = __task_deadline(__task_nanoseconds(timeout))
-    first = __select_first(2)
+    first = 0
+    if priority == "fair": first = __select_first(2)
+    order = __select_order(priority)
     loop spins in 0..:
         if __task_canceled(): return Canceled
         loop k in [0..2):
             s[__TS_SELECT] = 1
-            if (first + k) % 2 == 0:
+            if ((order >> (2 * ((first + k) % 2))) & 3) == 0:
                 ra = a()
                 if __select_won(s, 0): return ra
             else:
@@ -357,18 +377,20 @@ select[A, B, D] = (a: () -> A, b: () -> B, timeout: D) -> (A | B | Canceled | Ti
         if time_ns() >= deadline: return Timeout
         __select_nap(spins)
     Canceled
-select[A, B, C] = (a: () -> A, b: () -> B, c: () -> C) -> (A | B | C | Canceled):
+select[A, B, C] = (a: () -> A, b: () -> B, c: () -> C, priority: str = "fair") -> (A | B | C | Canceled):
     s = __ts()
     s[__TS_SELECT_WON] = 0
-    first = __select_first(3)
+    first = 0
+    if priority == "fair": first = __select_first(3)
+    order = __select_order(priority)
     loop spins in 0..:
         if __task_canceled(): return Canceled
         loop k in [0..3):
             s[__TS_SELECT] = 1
-            if (first + k) % 3 == 0:
+            if ((order >> (2 * ((first + k) % 3))) & 3) == 0:
                 ra = a()
                 if __select_won(s, 0): return ra
-            else if (first + k) % 3 == 1:
+            else if ((order >> (2 * ((first + k) % 3))) & 3) == 1:
                 rb = b()
                 if __select_won(s, 1): return rb
             else:
@@ -376,19 +398,21 @@ select[A, B, C] = (a: () -> A, b: () -> B, c: () -> C) -> (A | B | C | Canceled)
                 if __select_won(s, 2): return rc
         __select_nap(spins)
     Canceled
-select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, timeout: D) -> (A | B | C | Canceled | Timeout):
+select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, timeout: D, priority: str = "fair") -> (A | B | C | Canceled | Timeout):
     s = __ts()
     s[__TS_SELECT_WON] = 0
     deadline = __task_deadline(__task_nanoseconds(timeout))
-    first = __select_first(3)
+    first = 0
+    if priority == "fair": first = __select_first(3)
+    order = __select_order(priority)
     loop spins in 0..:
         if __task_canceled(): return Canceled
         loop k in [0..3):
             s[__TS_SELECT] = 1
-            if (first + k) % 3 == 0:
+            if ((order >> (2 * ((first + k) % 3))) & 3) == 0:
                 ra = a()
                 if __select_won(s, 0): return ra
-            else if (first + k) % 3 == 1:
+            else if ((order >> (2 * ((first + k) % 3))) & 3) == 1:
                 rb = b()
                 if __select_won(s, 1): return rb
             else:
@@ -397,21 +421,23 @@ select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, timeout: D) -> (A | B 
         if time_ns() >= deadline: return Timeout
         __select_nap(spins)
     Canceled
-select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D) -> (A | B | C | D | Canceled):
+select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, priority: str = "fair") -> (A | B | C | D | Canceled):
     s = __ts()
     s[__TS_SELECT_WON] = 0
-    first = __select_first(4)
+    first = 0
+    if priority == "fair": first = __select_first(4)
+    order = __select_order(priority)
     loop spins in 0..:
         if __task_canceled(): return Canceled
         loop k in [0..4):
             s[__TS_SELECT] = 1
-            if (first + k) % 4 == 0:
+            if ((order >> (2 * ((first + k) % 4))) & 3) == 0:
                 ra = a()
                 if __select_won(s, 0): return ra
-            else if (first + k) % 4 == 1:
+            else if ((order >> (2 * ((first + k) % 4))) & 3) == 1:
                 rb = b()
                 if __select_won(s, 1): return rb
-            else if (first + k) % 4 == 2:
+            else if ((order >> (2 * ((first + k) % 4))) & 3) == 2:
                 rc = c()
                 if __select_won(s, 2): return rc
             else:
@@ -419,22 +445,24 @@ select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D) -> (A | B 
                 if __select_won(s, 3): return rd
         __select_nap(spins)
     Canceled
-select[A, B, C, D, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, timeout: D) -> (A | B | C | D | Canceled | Timeout):
+select[A, B, C, D, E] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, timeout: E, priority: str = "fair") -> (A | B | C | D | Canceled | Timeout):
     s = __ts()
     s[__TS_SELECT_WON] = 0
     deadline = __task_deadline(__task_nanoseconds(timeout))
-    first = __select_first(4)
+    first = 0
+    if priority == "fair": first = __select_first(4)
+    order = __select_order(priority)
     loop spins in 0..:
         if __task_canceled(): return Canceled
         loop k in [0..4):
             s[__TS_SELECT] = 1
-            if (first + k) % 4 == 0:
+            if ((order >> (2 * ((first + k) % 4))) & 3) == 0:
                 ra = a()
                 if __select_won(s, 0): return ra
-            else if (first + k) % 4 == 1:
+            else if ((order >> (2 * ((first + k) % 4))) & 3) == 1:
                 rb = b()
                 if __select_won(s, 1): return rb
-            else if (first + k) % 4 == 2:
+            else if ((order >> (2 * ((first + k) % 4))) & 3) == 2:
                 rc = c()
                 if __select_won(s, 2): return rc
             else:

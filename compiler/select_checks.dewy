@@ -15,7 +15,7 @@ from p"isolation_ops.dewy" import (isolation_children)
 from p"node_store.dewy" import (Node)
 from p"ownership.jo" import (ownership_consumers)
 from p"ownership_checks.dewy" import (NF_GLOBAL)
-from p"refine.jo" import (str_set_of)
+from p"refine.jo" import (str_set_of str_sets)
 from p"refinement_types.dewy" import (FactRequest)
 from p"type_ops.dewy" import (dt mk_union)
 from p"types.jo" import (T_BOOL T_INT T_STR T_VOID is_union prune structs telem tkind type_eq types union_members)
@@ -83,6 +83,48 @@ source_call=(n:SelectWord):>bool=>$unsafe {
     path =? "{lib_dir}/prelude/first_ok.dewy"
 }
 select_check=(n:SelectWord):>void=>$unsafe {
+    let args=kids(n)
+    let priority=select_wait_arg(args[args.length - 1])
+    if nodes.ptr[priority].kind =? 'call' and nodes.ptr[priority].sym >? 0 {
+        let d=SelectWord(fns.ptr[SelectWord(nodes.ptr[priority].sym)].decl)
+        if d >? 0 and SelectWord(nodes.ptr[d].name) =? intern("__select_priority_order") {priority=select_wait_arg(kid(priority 0))}
+    }
+    if nodes.ptr[priority].kind =? 'str_lit' {
+        let word=SelectWord(nodes.ptr[priority].sval)
+        if word not=? intern("fair") and word not=? intern("index") {fatal(nodes.ptr[priority].pos "select priority is 'fair' or 'index'")}
+    } else {
+        let choices=str_set_of(ntype(priority))
+        if choices =? 0 {fatal(nodes.ptr[priority].pos "select priority is 'fair' or 'index'")}
+        loop choice in str_sets[choices] {
+            if choice not=? "fair" and choice not=? "index" {fatal(nodes.ptr[priority].pos "select priority is 'fair' or 'index'")}
+        }
+    }
+    select_check_waits(n)
+}
+select_written_priority=(n:SelectWord):>void=>$unsafe {
+    let args=kids(n)
+    let priority=select_wait_arg(args[args.length - 1])
+    # Argument evaluation metadata already records written parameter slots.
+    # Only select calls with reordered waits need this O(arguments) adapter.
+    let metadata=SelectWord(nodes.ptr[n].c)
+    if metadata =? 0 {return}
+    let text=""
+    let count:SelectWord=0
+    let changed=false
+    loop e in kids(metadata) {
+        let slot=nodes.ptr[e].ival
+        if tkind(ntype(select_wait_arg(args[slot]))) not=? 'fn_' {continue}
+        if slot not=? count {changed=true}
+        text="{text}{slot}"
+        count += 1
+    }
+    if not changed {return}
+    let wrapped=bc_call("__select_priority_order" [priority bc_str(text nodes.ptr[n].pos)] nodes.ptr[n].pos)
+    check_expr(wrapped T_STR);
+    args[args.length - 1]=wrapped
+    set_list(n args)
+}
+select_check_waits=(n:SelectWord):>void=>$unsafe {
     let waits:array<int64>=[]
     loop a0 in kids(n) {
         let a=select_wait_arg(a0)
@@ -695,7 +737,7 @@ select_poll=(c0:SelectWord):>bool=>$unsafe {
     if nodes.ptr[c].kind =? 'block' and nkids(c) >? 0 and nodes.ptr[kid(c nkids(c) - 1)].kind =? 'exprstmt' {c=SelectWord(nodes.ptr[kid(c nkids(c) - 1)].a)}
     loop nodes.ptr[c].kind =? 'conv' {c=SelectWord(nodes.ptr[c].a)}
     if nodes.ptr[c].kind not=? 'call' or not select_call(c) or nkids(c) =? 0 {return false}
-    let last=kid(c nkids(c) - 1)
+    let last=kid(c nkids(c) - 2)
     if tkind(ntype(last)) =? 'fn_' {return false}
     loop nodes.ptr[last].kind =? 'conv' {last=SelectWord(nodes.ptr[last].a)}
     nodes.ptr[last].kind =? 'int_lit' and nodes.ptr[last].ival =? 0 or nodes.ptr[last].kind =? 'float_lit' and nodes.ptr[last].fval =? 0.0

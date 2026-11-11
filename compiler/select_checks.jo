@@ -203,6 +203,40 @@ source_call = (n: int) -> bool:
     if name != "race" and name != "first_ok": return false
     path == lib_dir + "/prelude/first_ok.dewy"
 select_check = (n: int):
+    args = kids(n)
+    priority = select_wait_arg(args[args.len() - 1])
+    if nodes[priority].kind == .call and nodes[priority].sym > 0:
+        d = int(fns[int(nodes[priority].sym)].decl)
+        if d > 0 and int(nodes[d].name) == intern("__select_priority_order"): priority = select_wait_arg(kid(priority, 0))
+    if nodes[priority].kind == .str_lit:
+        word = int(nodes[priority].sval)
+        if word != intern("fair") and word != intern("index"): fatal(nodes[priority].pos, "select priority is 'fair' or 'index'")
+    else:
+        choices = str_set_of(ntype(priority))
+        if choices == 0: fatal(nodes[priority].pos, "select priority is 'fair' or 'index'")
+        loop choice in str_sets[choices]:
+            if choice != "fair" and choice != "index": fatal(nodes[priority].pos, "select priority is 'fair' or 'index'")
+    select_check_waits(n)
+select_written_priority = (n: int):
+    args = kids(n)
+    priority = select_wait_arg(args[args.len() - 1])
+    metadata = int(nodes[n].c)
+    if metadata == 0: return
+    text = ""
+    count = 0
+    changed = false
+    loop e in kids(metadata):
+        slot = nodes[e].ival
+        if tkind(ntype(select_wait_arg(args[slot]))) != .fn_: continue
+        if slot != count: changed = true
+        text = "{text}{slot}"
+        count += 1
+    if not changed: return
+    wrapped = bc_call("__select_priority_order", [priority, bc_str(text, nodes[n].pos)], nodes[n].pos)
+    check_expr(wrapped, T_STR)
+    args[args.len() - 1] = wrapped
+    set_list(n, args)
+select_check_waits = (n: int):
     waits: int[]
     loop a0 in kids(n):
         a = select_wait_arg(a0)
@@ -734,7 +768,7 @@ select_poll = (c0: int) -> bool:
     if nodes[c].kind == .block and nkids(c) > 0 and nodes[kid(c, nkids(c) - 1)].kind == .exprstmt: c = int(nodes[kid(c, nkids(c) - 1)].a)
     loop nodes[c].kind == .conv: c = int(nodes[c].a)
     if nodes[c].kind != .call or not select_call(c) or nkids(c) == 0: return false
-    last = kid(c, nkids(c) - 1)
+    last = kid(c, nkids(c) - 2)
     if tkind(ntype(last)) == .fn_: return false
     loop nodes[last].kind == .conv: last = int(nodes[last].a)
     nodes[last].kind == .int_lit and nodes[last].ival == 0 or nodes[last].kind == .float_lit and nodes[last].fval == 0.0

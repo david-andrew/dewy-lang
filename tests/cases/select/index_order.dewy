@@ -1,0 +1,30 @@
+# modes: native native-release
+# Every ready wait wins in written order, before even an expired deadline.
+main = () => {
+    let a = channel<int64>(4)
+    let b = channel<int64>(4)
+    let c = channel<int64>(4)
+    let d = channel<int64>(4)
+    a.send(1) or_throw
+    b.send(2) or_throw
+    c.send(3) or_throw
+    d.send(4) or_throw
+    loop _ in [0..4) {
+        printl"{select(@a.receive @b.receive @c.receive @d.receive timeout=0s priority='index') or_throw}"
+    }
+    printl"deadline {select(@a.receive @b.receive timeout=0s priority='index') is? Timeout}"
+    a.send(5) or_throw
+    b.send(6) or_throw
+    printl"{select(@b.receive @a.receive priority='index') or_throw}"
+    printl"{select(@a.receive priority='index') or_throw}"
+    c.send(7) or_throw
+    printl"{select(@a.receive @b.receive @c.receive priority='index') or_throw}"
+    d.send(8) or_throw
+    printl"{select(@a.receive @b.receive @c.receive @d.receive priority='index') or_throw}"
+    a.send(9) or_throw
+    printl"{select(@a.receive timeout=0s priority='index') or_throw}"
+    c.send(10) or_throw
+    printl"{select(@a.receive @b.receive @c.receive timeout=0s priority='index') or_throw}"
+    b.send(11) or_throw
+    printl"{select(@a.receive @b.receive priority='fair') or_throw}"
+}

@@ -3749,8 +3749,10 @@ evaluated now). It gives the
 union of their outcomes plus `Canceled`, so arms match by type: two `string` channels are
 one `string` arm, and every close is one `<Closed>` arm. `timeout=` adds `Timeout`; a ready
 wait wins a deadline already past, and `timeout=0s` is a poll. A wait that loses takes
-nothing. Starting points rotate, so no wait is always tried first; nothing is remembered
-across calls.
+nothing. `priority='fair'` is the default: starting points rotate, so no wait is
+always tried first; nothing is remembered across calls. `priority='index'` tries
+the written waits in argument order, with the deadline last. Sends are not waits;
+select `@out.reserve`, then send through the winning permit.
 
 ```dewy
 main = () => {

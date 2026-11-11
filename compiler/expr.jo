@@ -1738,6 +1738,8 @@ call_order_rest = (n: int, given: int[], final: int[]):
     metadata = mk(.array, nodes[n].pos)
     set_list(metadata, entries)
     nodes[n].c = i32(metadata)
+    # Select's index priority follows this written order, after named binding.
+    if select_call(n): select_written_priority(n)
 
 match_type = (pat0: int, a0: int, binds: mut int[], depth: int) -> int: tm_match(pat0, a0, binds, depth)
 
