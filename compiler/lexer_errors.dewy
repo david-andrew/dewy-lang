@@ -1,0 +1,47 @@
+$runtime_checks
+from p"checked_eval.dewy" import (cx_token)
+from p"checker_tokens.dewy" import (Tok)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"lex.jo" import (lx_base lx_file lx_space_indent lx_tab_indent tok_text)
+from p"util.jo" import (mkpos)
+
+LexerErrorWord:type=int64<overflow='wrap'>
+tok_name=(k:Tok):>string=>{
+    match k {
+        <'eof'> => "end of file"
+        <'newline'> => "newline"
+        <'indent'> => "indent"
+        <'dedent'> => "dedent"
+        <'ident'> => "identifier"
+        <'int_lit'> => "integer"
+        <'float_lit'> => "float"
+        <'str_lit'> => "string"
+        <'lparen'> => "'('"
+        <'rparen'> => "')'"
+        <'lbrack'> => "'['"
+        <'rbrack'> => "']'"
+        <'lbrace'> => "'\{'"
+        <'rbrace'> => "'}'"
+        <'comma'> => "','"
+        <'colon'> => "':'"
+        <'semi'> => "';'"
+        <'dot'> => "'.'"
+        <'dotdot'> => "'..'"
+        <'ellipsis'> => "'...'"
+        <'dotop'> => "dotted operator"
+        <'arrow'> => "'->'"
+        <'assign'> => "'='"
+        _ => "'{tok_text(k)}'"
+    }
+}
+tok_text_at=(op:int64):>string=>{
+    tok_text(cx_token(op))
+}
+lx_err=(off:LexerErrorWord msg:string):>never=>{
+    fatal(mkpos(lx_file lx_base + off) msg);
+}
+# (for indentation errors)
+mixed_indent_note=():>string=>{
+    if lx_tab_indent and lx_space_indent {return " (the file indents some lines with tabs and some with spaces, and a tab counts as up to 4 spaces: use one or the other)"}
+    ""
+}

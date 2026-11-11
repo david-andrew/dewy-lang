@@ -1,0 +1,37 @@
+use 'lex.jo'
+use 'checker_tokens.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+
+tok_name = (k: Tok) -> str:
+    match k:
+        eof: "end of file"
+        newline: "newline"
+        indent: "indent"
+        dedent: "dedent"
+        ident: "identifier"
+        int_lit: "integer"
+        float_lit: "float"
+        str_lit: "string"
+        lparen: "'('"
+        rparen: "')'"
+        lbrack: "'['"
+        rbrack: "']'"
+        lbrace: "'\{'"
+        rbrace: "'}'"
+        comma: "','"
+        colon: "':'"
+        semi: "';'"
+        dot: "'.'"
+        dotdot: "'..'"
+        ellipsis: "'...'"
+        dotop: "dotted operator"
+        arrow: "'->'"
+        assign: "'='"
+        _: "'{tok_text(k)}'"
+tok_text_at = (op: int) -> str: tok_text(op as Tok)
+lx_err = (off: int, msg: str): fatal(mkpos(lx_file, lx_base + off), msg)
+# (for indentation errors)
+mixed_indent_note = () -> str:
+    if lx_tab_indent and lx_space_indent: return " (the file indents some lines with tabs and some with spaces, and a tab counts as up to 4 spaces: use one or the other)"
+    ""

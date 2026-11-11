@@ -3,6 +3,7 @@ use 'checker_tokens.dewy'
 
 use 'util.jo'
 use 'diagnostic_exit.dewy'
+use 'lexer_errors.dewy'
 
 const STRF_RAW = 1
 const STRF_TRIPLE = 2
@@ -21,34 +22,6 @@ struct Token:
     ival: int
     fval: f64
 
-tok_name = (k: Tok) -> str:
-    match k:
-        eof: "end of file"
-        newline: "newline"
-        indent: "indent"
-        dedent: "dedent"
-        ident: "identifier"
-        int_lit: "integer"
-        float_lit: "float"
-        str_lit: "string"
-        lparen: "'('"
-        rparen: "')'"
-        lbrack: "'['"
-        rbrack: "']'"
-        lbrace: "'\{'"
-        rbrace: "'}'"
-        comma: "','"
-        colon: "':'"
-        semi: "';'"
-        dot: "'.'"
-        dotdot: "'..'"
-        ellipsis: "'...'"
-        dotop: "dotted operator"
-        arrow: "'->'"
-        assign: "'='"
-        _: "'{tok_text(k)}'"
-
-tok_text_at = (op: int) -> str: tok_text(op as Tok)
 tok_text = (k: Tok) -> str:
     match k:
         kw_struct: "struct"
@@ -155,8 +128,6 @@ lx_decl_lines: Tok[]            # last header at each indentation level (library
 # source offset of the text being lexed (non-zero for expressions inside string literals)
 lx_base = 0
 
-lx_err = (off: int, msg: str): fatal(mkpos(lx_file, lx_base + off), msg)
-
 # Tokens go straight into lx_toks's zeroed slots (lx_cap of them, lx_count used): only the fields
 # that are not zero are written, and the array is cut to lx_count at the end.
 lx_slots: *Token = null
@@ -182,7 +153,6 @@ lx_emit = (kind: Tok, start: int, n: int):
     t[k].pos = (lx_file << 40) | (lx_base + start)
     t[k].start = i32(start)
     t[k].len = i32(n)
-
 
 lx_open_tok: int[]      # token indexes of open brackets (each gets its partner's index)
 
@@ -313,11 +283,6 @@ lx_skip_str = (i0: int, raw: bool) -> int:
                 continue
         i += 1
     -1
-
-# (for indentation errors)
-mixed_indent_note = () -> str:
-    if lx_tab_indent and lx_space_indent: return " (the file indents some lines with tabs and some with spaces, and a tab counts as up to 4 spaces: use one or the other)"
-    ""
 
 # handle the start of a line (indentation)
 lx_line_start = ():
