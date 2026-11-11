@@ -364,4 +364,4 @@ def test_program_reading_map_keys_is_warned(compiler, tmp_path):
     source = 'main=()=>{\n    let m:dict<string int64>=["a"->1]\n    let e=m.__keys\n    printl(e.length)\n}\n'
     result = run(compiler, tmp_path, source, 'check', False)
     output = result.stdout + result.stderr
-    assert "/loops.dewy:3:11: warning: __keys is Map's own, inside the library" in output, output
+    assert "/loops.dewy:5:11: warning: __keys is Map's own, inside the library" in output, output

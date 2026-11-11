@@ -114,7 +114,7 @@ main=():>void=>exit(0)
     failed = lines[0]
     assert failed['stdout'] == 'test continued\n'
     assert failed['output'].splitlines() == [
-        f'{shown(source)}:2:5: expectation failed: nonempty input',
+        f'{shown(source)}:4:5: expectation failed: nonempty input',
         '        $expect xs.length >? 0, "nonempty input"',
         '                ^~~~~~~~~~~~~~',
         'note: xs.length is 0',
