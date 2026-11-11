@@ -190,7 +190,7 @@ effect_signature_opaque_by_type = (f: int) -> bool:
     d = int(fns[f].decl)
     if fns[f].state != 2 or fns[f].body == 0 or fns[f].kind == FK_INIT or (d != 0 and has_flag(d, NF_EXTERN)):
         return not (d != 0 and has_flag(d, NF_EXTERN) and effect_declared_row(f) != 0)
-    if fns[f].caps.len() != 0 or fns[f].kind == FK_PARTIAL or fns[f].cabi: return true
+    if fns[f].caps.len() != 0 and not effect_copy_captures(f) or fns[f].kind == FK_PARTIAL or fns[f].cabi: return true
     # (`int`s and arrays of words or `int`s are shares effect_visit accepts;
     # text and records of them stay opaque rather than walk the library's
     # formatting and text trees)

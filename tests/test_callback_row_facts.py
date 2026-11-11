@@ -47,6 +47,28 @@ f=(@xs:array<int64>)=>{
     if n >? 0 printl(xs[n-1] + r)
 }
 main=()=>{let xs:array<int64>=[3 1 2] f(@xs)}''', '5\n'),
+    # (a callback reading only its own copies of captured values)
+    'copy_capture_key': ('''f=(@xs:array<int64> rank:array<int64>)=>{
+    let n=xs.length
+    if rank.length =? n {
+        let order=[loop i in [0..n) i].sorted(key=(i) => rank[i])
+        if n >? 0 printl(xs[n-1] + order[0])
+    }
+}
+main=()=>{let xs:array<int64>=[3 1 2] f(@xs [5 6 7])}''', '2\n'),
+    'copy_capture_self': ('''f=(@xs:array<int64>)=>{
+    let n=xs.length
+    let order=[loop i in [0..n) i].sorted(key=(i) => xs[i])
+    if n >? 0 printl(xs[n-1] + order[0])
+}
+main=()=>{let xs:array<int64>=[3 1 2] f(@xs)}''', '3\n'),
+    'copy_capture_scalar': ('''f=(@xs:array<int64> ws:array<int64>)=>{
+    let n=xs.length
+    let k:int64=3
+    let zs=ws.map((v:int64)=>v * k)
+    if n >? 0 printl(xs[n-1] + zs.length)
+}
+main=()=>{let xs:array<int64>=[3 1 2] f(@xs [1 2])}''', '4\n'),
 }
 REJECTED = {
     # (the callback writes a global the `@` parameter may be)
@@ -85,6 +107,27 @@ main=()=>f(@G [1 2])''',
     let n=xs.length
     let zs=ws.filter((v:int64 $capture @xs)=>{xs.clear(); v >? 0})
     if n >? 0 printl(xs[n-1])
+}''',
+    # (a copy-capturing callback that writes a global, or changes a capture)
+    'copy_capture_writes_global': '''let G:array<int64>=[3 1 2]
+f=(@xs:array<int64>)=>{
+    let n=xs.length
+    let k:int64=2
+    let order=[loop i in [0..n) i].sorted(key=(i) => {G.clear(); i * k})
+    if n >? 0 printl(xs[n-1])
+}
+main=()=>f(@G)''',
+    'value_capture_changed': '''f=(@xs:array<int64> ws:array<int64>)=>{
+    let n=xs.length
+    let c:int64=0
+    let zs=ws.map((v:int64 $capture c)=>{c += 1; v + c})
+    if n >? 0 printl(xs[n-1])
+}''',
+    'place_capture_counter': '''f=(@xs:array<int64> ws:array<int64>)=>{
+    let n=xs.length
+    let c:int64=0
+    let zs=ws.map((v:int64 $capture @c)=>{c += 1; v})
+    if n >? 0 printl(xs[n-1] + c)
 }''',
     # (a callback passed in, or one calling a function passed in, is unknown)
     'key_parameter': '''f=(@xs:array<int64> k:(v:int64:>int64))=>{

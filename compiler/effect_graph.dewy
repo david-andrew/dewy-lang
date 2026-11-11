@@ -19,7 +19,7 @@ from p"effect_contracts.dewy" import (effect_subst)
 from p"effect_control.dewy" import (effect_prepare)
 from p"facts_forgets.dewy" import (fact_text_sink)
 from p"effect_costs.dewy" import (effect_borrowed_receiver effect_caller_obligation effect_library_summary effect_map_write effect_signature_opaque)
-from p"effect_scan.dewy" import (effect_body_moves_out effect_isolation_block effect_own_callback effect_scan_node)
+from p"effect_scan.dewy" import (effect_body_moves_out effect_copy_captures effect_isolation_block effect_own_callback effect_scan_node)
 from p"concurrency_waits.dewy" import (concurrency_fn_blocks)
 # Demanded effect graph execution; shared state has one owner in effects.jo.
 GraphWord:type=int64<overflow='wrap'>
@@ -404,8 +404,9 @@ effect_visit=(f:GraphWord):>void=>$unsafe {
             effect_isolation_block(f IsolationReason.unavailable d);
         }
         else {
+            # (a closure reading only its own snapshots is its body: effect_copy_captures)
             if fns.ptr[f].caps.length not=? 0 or fns.ptr[f].kind =? FK_PARTIAL {
-                effect_opaque(f GraphWord(fns.ptr[f].body));
+                if fns.ptr[f].kind =? FK_PARTIAL or not effect_copy_captures(f) {effect_opaque(f GraphWord(fns.ptr[f].body));}
                 effect_isolation_block(f IsolationReason.capture GraphWord(fns.ptr[f].body));
             }
             if fns.ptr[f].cabi {effect_opaque(f d);}

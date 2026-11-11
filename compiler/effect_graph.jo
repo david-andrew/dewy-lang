@@ -372,8 +372,9 @@ effect_visit = (f: int):
             if not trusted: effect_opaque(f, d)
             effect_isolation_block(f, .unavailable, d)
         else:
+            # (a closure reading only its own snapshots is its body: effect_copy_captures)
             if fns[f].caps.len() != 0 or fns[f].kind == FK_PARTIAL:
-                effect_opaque(f, int(fns[f].body))
+                if fns[f].kind == FK_PARTIAL or not effect_copy_captures(f): effect_opaque(f, int(fns[f].body))
                 effect_isolation_block(f, .capture, int(fns[f].body))
             if fns[f].cabi: effect_opaque(f, d)
             if not effect_value(int(fns[f].ret)) and int(fns[f].ret) != T_VOID and not effect_owner_record(int(fns[f].ret)): effect_opaque(f, d)

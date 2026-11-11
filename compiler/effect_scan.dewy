@@ -6,7 +6,7 @@ from p"dewy_reader_types.dewy" import (EffectKind)
 from p"expr.jo" import (IN ntype)
 from p"checks_thin_expr.dewy" import (is_fn_type is_map_type)
 from p"isolation.jo" import (IsolationReason)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_PARAM LF_RESIZED LF_SHARED LF_VALUEPARAM compound_op fns globals locals)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_RESIZED LF_SHARED LF_VALUECAP LF_VALUEPARAM compound_op fns globals locals)
 from p"checks_thin.dewy" import (readonly_global)
 from p"ast.jo" import (NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_MUT NF_SPREAD NF_STMT NF_U64 RANGE_EXHAUSTION has_flag kid kid2 nkids nkids2 nodes)
 from p"type_layout.dewy" import (TF_BOXED)
@@ -295,6 +295,22 @@ effect_const_literal=(g:EffectScanWord):>bool=>$unsafe {
     }
     return true
 }
+# A capture of f that owns its snapshot (LF_VALUECAP) and that f never
+# writes, shares or exposes: reading it reads f's own copy, no caller place.
+# O(1).
+effect_copy_capture=(f:EffectScanWord l:EffectScanWord):>bool=>$unsafe {
+    if l <=? 0 or l >=? locals.length or EffectScanWord(locals.ptr[l].owner) not=? f {return false}
+    let fl:EffectScanWord=EffectScanWord(locals.ptr[l].flags)
+    fl & LF_CAPTURE not=? 0 and fl & LF_VALUECAP not=? 0 and fl & (LF_ASSIGNED | LF_RESIZED | LF_ADDR | LF_SHARED | LF_EXPOSED | LF_ALIAS | LF_BYREF | LF_CAPTURED | LF_PARTBORROW | LF_OWNERBORROW) =? 0
+}
+# Every capture of f is such a copy: its closure reads only its own
+# snapshots, so its row is its body's, not opaque. O(captures).
+effect_copy_captures=(f:EffectScanWord):>bool=>$unsafe {
+    loop cap in fns.ptr[f].caps {
+        if not effect_copy_capture(f EffectScanWord(cap.inner)) {return false}
+    }
+    true
+}
 effect_access=(f:EffectScanWord n:EffectScanWord write:bool):>void=>$unsafe {
     if not effect_value(ntype(n)) or not effect_place_inventory(n) {effect_opaque(f n);}
     if write and nodes.ptr[n].kind =? 'field' {
@@ -302,8 +318,11 @@ effect_access=(f:EffectScanWord n:EffectScanWord write:bool):>void=>$unsafe {
         layout(t);
         if EffectScanWord(types.ptr[t].flags) & TF_BOXED not=? 0 {effect_plan_cost(f n 1 << 2);}
     }
-    let p=effect_export(f effect_route(n))
+    let route=effect_route(n)
+    let p=effect_export(f route)
     if p.declaration =? 0 {
+        # (a read of f's own snapshot of a captured value: effect_copy_capture)
+        if not write and effect_copy_capture(f place_base(route).declaration) {return}
         effect_opaque(f n);
         return
     }
@@ -679,6 +698,8 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         # (passing f's own callback on: opaque, standing for that callback,
         # effect_merge_callbacks)
         if is_fn_type(t) and effect_callback(f n effect_own_callback(f n)) {return}
+        # (f's own snapshot of a captured array of words, as a value parameter's: effect_copy_capture)
+        if tkind(t) =? 'array' and effect_scalar(telem(t)) and effect_copy_capture(f l) {return}
         if tkind(t) =? 'array' and effect_scalar(telem(t)) and EffectScanWord(locals.ptr[l].flags) & LF_PARAM not=? 0 {
             if EffectScanWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {return}
             # (a mutable parameter's storage is the caller's: reading it is a read of the formal)

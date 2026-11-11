@@ -294,14 +294,32 @@ effect_const_literal = (g: int) -> bool:
     true
 
 
+# A capture of f that owns its snapshot (LF_VALUECAP) and that f never
+# writes, shares or exposes: reading it reads f's own copy, no caller place.
+# O(1).
+effect_copy_capture = (f: int, l: int) -> bool:
+    if l <= 0 or l >= locals.len() or int(locals[l].owner) != f: return false
+    fl = int(locals[l].flags)
+    fl & LF_CAPTURE != 0 and fl & LF_VALUECAP != 0 and fl & (LF_ASSIGNED | LF_RESIZED | LF_ADDR | LF_SHARED | LF_EXPOSED | LF_ALIAS | LF_BYREF | LF_CAPTURED | LF_PARTBORROW | LF_OWNERBORROW) == 0
+
+# Every capture of f is such a copy: its closure reads only its own
+# snapshots, so its row is its body's, not opaque. O(captures).
+effect_copy_captures = (f: int) -> bool:
+    loop cap in fns[f].caps:
+        if not effect_copy_capture(f, int(cap.inner)): return false
+    true
+
 effect_access = (f: int, n: int, write: bool):
     if not effect_value(ntype(n)) or not effect_place_inventory(n): effect_opaque(f, n)
     if write and nodes[n].kind == .field:
         t = representation_type(ntype(int(nodes[n].a)))
         layout(t)
         if int(types[t].flags) & TF_BOXED != 0: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
-    p = effect_export(f, effect_route(n))
+    route = effect_route(n)
+    p = effect_export(f, route)
     if p.declaration == 0:
+        # (a read of f's own snapshot of a captured value: effect_copy_capture)
+        if not write and effect_copy_capture(f, place_base(route).declaration): return
         effect_opaque(f, n)
         return
     if p.root == .local: return
@@ -634,6 +652,8 @@ effect_scan_node = (f: int, n: int):
         # (passing f's own callback on: opaque, standing for that callback,
         # effect_merge_callbacks)
         if is_fn_type(t) and effect_callback(f, n, effect_own_callback(f, n)): return
+        # (f's own snapshot of a captured array of words, as a value parameter's: effect_copy_capture)
+        if tkind(t) == .array and effect_scalar(telem(t)) and effect_copy_capture(f, l): return
         if tkind(t) == .array and effect_scalar(telem(t)) and int(locals[l].flags) & LF_PARAM != 0:
             if int(locals[l].flags) & LF_MUTPARAM == 0: return
             # (a mutable parameter's storage is the caller's: reading it is a read of the formal)

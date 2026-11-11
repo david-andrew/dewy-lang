@@ -771,6 +771,8 @@ return cleanup still invalidate facts they could falsify. A call that runs a
 callback written in the call or named with `@f` (`map`, `filter`, `sorted(key=...)`,
 or a program's own function taking one) changes only what the callee and that
 callback write, so facts about other `@` places survive a write-free callback.
+A callback that only reads values it captures by copy (`key=(i) => rank[i]`)
+writes nothing; one that changes a capture does not count as write-free.
 Module `const` values,
 including their lengths and guarded elements, retain facts across calls.
 A scalar search result can also retain its strict upper bound against a
