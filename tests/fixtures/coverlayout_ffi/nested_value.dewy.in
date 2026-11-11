@@ -1,0 +1,9 @@
+Small:type=[tag:uint8 value:int32]
+Pair:type=[x:float64 y:float64]
+Nested:type=[small:Small pair:Pair]
+$extern(lib=LIBRARY)
+nested_next=(n:Nested):>Nested
+main=():>void=>$unsafe {
+    let next=nested_next(Nested[Small[2 40] Pair[1.5 2.5]])
+    printl(next.small.tag next.small.value next.pair.x next.pair.y)
+}

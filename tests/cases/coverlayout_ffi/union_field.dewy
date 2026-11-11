@@ -1,0 +1,5 @@
+# modes: native native-release
+Payload:type=[value:int32|float32]
+$extern(name='abs')
+send=(value:Payload):>void
+main=():>void=>$unsafe {send(Payload[1])}

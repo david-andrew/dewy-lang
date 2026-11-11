@@ -1,0 +1,7 @@
+Small:type=[tag:uint8 value:int32]
+$extern(lib=LIBRARY)
+small_next=(x:Small):>Small
+main=():>void=>$unsafe {
+    let next=small_next(Small[3 39])
+    printl(next.tag next.value)
+}

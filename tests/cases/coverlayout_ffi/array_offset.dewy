@@ -1,0 +1,8 @@
+# modes: native native-release
+$extern
+memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8>?
+main=():>void=>$unsafe {
+    let bytes:array<uint8>=[0 0 0 0]
+    memset(bytes.ptr + 1 7 2);
+    printl(bytes)
+}

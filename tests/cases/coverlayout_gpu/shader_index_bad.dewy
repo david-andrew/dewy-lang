@@ -1,0 +1,10 @@
+$runtime_checks
+
+U:type=[dst:GpuBuffer<float32>]
+fill=(id:int64 u:U):>void=>{
+    u.dst[id]=1.0
+}
+main=()=>{
+    let b=gpu_buffer<float32>(2)
+    dispatch(compute(@fill) 2 U(b))
+}

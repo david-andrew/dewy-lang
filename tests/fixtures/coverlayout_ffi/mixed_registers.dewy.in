@@ -1,0 +1,7 @@
+Mixed:type=[id:int32 weight:float64]
+$extern(lib=LIBRARY)
+mixed_next=(x:Mixed):>Mixed
+main=():>void=>$unsafe {
+    let next=mixed_next(Mixed[40 1.5])
+    printl(next.id next.weight)
+}

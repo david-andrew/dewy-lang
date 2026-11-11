@@ -1,0 +1,16 @@
+$runtime_checks
+
+U:type=[dst:GpuBuffer<float32>]
+fill=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.dst.length {return}
+    let sum:float32=0.0
+    loop i in [0..3) {
+        loop j in [0..2) {sum+=float32(i+j)}
+    }
+    u.dst[id]=sum+float32(id)
+}
+main=()=>{
+    let b=gpu_buffer<float32>(2)
+    dispatch(compute(@fill) 2 U(b))
+    printl(cpu(b))
+}

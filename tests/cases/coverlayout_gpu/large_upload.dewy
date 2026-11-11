@@ -1,0 +1,6 @@
+main=()=>{
+    let xs:array<float32>=[]
+    loop i in [0..257) { xs.push(float32(i)) }
+    let back=cpu(gpu(xs))
+    printl(back.data[0] back.data[256] back.data.length)
+}

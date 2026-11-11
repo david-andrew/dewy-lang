@@ -1,0 +1,7 @@
+Triple:type=[x:float32 y:float32 z:float32]
+$extern(lib=LIBRARY)
+triple_next=(x:Triple):>Triple
+main=():>void=>$unsafe {
+    let next=triple_next(Triple[1.0 2.0 3.0])
+    printl(next.x next.y next.z)
+}

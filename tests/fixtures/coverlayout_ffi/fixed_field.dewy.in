@@ -1,0 +1,8 @@
+Pair:type=<T>(array<T length=2>)
+Two:type=[values:Pair<int32>]
+$extern(lib=LIBRARY)
+two_next=(x:Two):>Two
+main=():>void=>$unsafe {
+    let next=two_next(Two[[20 20]])
+    printl(next.values[0] next.values[1])
+}

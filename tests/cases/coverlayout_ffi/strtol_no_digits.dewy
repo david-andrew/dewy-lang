@@ -1,0 +1,11 @@
+# modes: native native-release
+$extern
+strtol=(s:ptr<uint8> stop_at:ptr<ptr<uint8>?> base:int32):>int64
+main=():>void=>$unsafe {
+    let text=bytes("xyz")
+    text.push(0)
+    let stop_at:array<ptr<uint8>?>=[none]
+    let n=strtol(text.ptr stop_at.ptr 10)
+    let p=stop_at[0]
+    if p isnt? none {printl(n p[0])}
+}

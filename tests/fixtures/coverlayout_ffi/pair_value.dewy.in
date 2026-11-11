@@ -1,0 +1,7 @@
+Pair:type=[x:float64 y:float64]
+$extern(lib=LIBRARY)
+pair_scale=(p:Pair factor:float64):>Pair
+main=():>void=>$unsafe {
+    let next=pair_scale(Pair[1.5 3.0] 2.0)
+    printl(next.x next.y)
+}

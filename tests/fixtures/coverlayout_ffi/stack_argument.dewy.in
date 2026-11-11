@@ -1,0 +1,6 @@
+Small:type=[tag:uint8 value:int32]
+$extern(lib=LIBRARY)
+small_after_six=(a:int64 b:int64 c:int64 d:int64 e:int64 f:int64 x:Small):>int64
+main=():>void=>$unsafe {
+    printl(small_after_six(1 2 3 4 5 6 Small[1 21]))
+}

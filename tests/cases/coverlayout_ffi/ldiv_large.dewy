@@ -1,0 +1,8 @@
+# modes: native native-release
+LDivT:type=[quot:int64 rem:int64]
+$extern
+ldiv=(a:int64 b:int64):>LDivT
+main=():>void=>$unsafe {
+    let result=ldiv(922337203685477580 10)
+    printl(result.quot result.rem)
+}

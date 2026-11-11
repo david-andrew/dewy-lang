@@ -1,0 +1,11 @@
+struct Pair:
+    x: int
+    y: int
+struct Item:
+    pair: Pair
+    tag: int
+main = ():
+    items: soa Item[] = [Item(Pair(20, 22), 1)]
+    print(items[0].pair.x + items[0].pair.y)
+    items[0].pair.x = 19
+    print(items[0].pair.x + items[0].pair.y)

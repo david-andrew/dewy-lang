@@ -1,0 +1,13 @@
+# quick
+$runtime_checks
+
+U:type=[dst:GpuBuffer<float32>]
+fill=(id:int64 u:U):>void=>{
+    if id <? 0 or id >=? u.dst.length {return}
+    u.dst[id]=float32(id)+0.5
+}
+main=()=>{
+    let b=gpu_buffer<float32>(3)
+    dispatch(compute(@fill) 3 U(b))
+    printl(cpu(b))
+}

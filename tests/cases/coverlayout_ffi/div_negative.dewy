@@ -1,0 +1,9 @@
+# modes: native native-release
+# quick
+DivT:type=[quot:int32 rem:int32]
+$extern
+div=(a:int32 b:int32):>DivT
+main=():>void=>$unsafe {
+    let result=div(-47 5)
+    printl(result.quot result.rem)
+}

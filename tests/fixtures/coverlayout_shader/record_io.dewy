@@ -1,0 +1,16 @@
+Vertex:type=[pos:vec4 normal:vec3 uv:vec2]
+Uniform:type=[shift:vec2 gain:float32]
+Output:type=[pos:vec4 shade:float32 uv:vec2]
+vertex=(v:Vertex u:Uniform):>Output=>{
+    let shifted=v.uv+u.shift
+    return Output(v.pos v.normal.z*u.gain shifted)
+}
+fragment=(i:Output _u:Uniform):>vec4=>{
+    let shade=i.shade+i.uv.x*0.1
+    return vec4(shade shade shade 1.0)
+}
+main=():>void=>{
+    let source=shader(@vertex @fragment)
+    write_text("record.vert" source.vs);
+    write_text("record.frag" source.fs);
+}

@@ -1,0 +1,7 @@
+Small:type=[tag:uint8 value:int32]
+$extern(lib=LIBRARY)
+small_sum=(xs:ptr<Small> count:int32):>int32
+main=():>void=>$unsafe {
+    let values:array<Small>=[Small[1 10] Small[2 20] Small[3 12]]
+    printl(small_sum(values.ptr 3))
+}

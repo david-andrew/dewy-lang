@@ -1,0 +1,12 @@
+$extern(lib=LIBRARY)
+new_int=(value:int32):>ptr<int32>?
+$extern(lib=LIBRARY)
+delete_int=(p:ptr<int32>):>void
+main=():>void=>$unsafe {
+    let maybe=new_int(42)
+    if maybe isnt? none {
+        let p:ptr<int32>=maybe
+        printl(p[0])
+        delete_int(p)
+    }
+}

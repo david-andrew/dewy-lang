@@ -1,0 +1,8 @@
+Small:type=[tag:uint8 value:int32]
+$extern(lib=LIBRARY)
+small_fill=(out:ptr<Small> tag:uint8 value:int32):>void
+main=():>void=>$unsafe {
+    let values:array<Small>=[Small[0 0]]
+    small_fill(values.ptr 2 40)
+    printl(values[0].tag values[0].value)
+}
