@@ -1,0 +1,41 @@
+# modes: native native-release
+main = () => {
+    let a = channel<string>(2)
+    let b = channel<string>(2)
+    a.send("direct") or_throw
+    match a.receive or_throw<Canceled> {
+        s:a.string => printl(s)
+        <a.Closed> => {}
+    }
+    a.send("selected") or_throw
+    let ready = @a.receive
+    match select(@ready @b.receive timeout=1s) or_throw<Canceled> {
+        s:(@ready).string => printl(s)
+        s:b.string => printl(s)
+        <Closed> => {}
+        <Timeout> => {}
+    }
+    b.send("raced") or_throw
+    match race(@a.receive @b.receive) or_throw<Canceled|OutOfMemory> {
+        s:a.string => printl(s)
+        s:b.string => printl(s)
+        <Closed> => {}
+    }
+    a.send("first ok") or_throw
+    match first_ok(@a.receive @b.receive) or_throw<Canceled> {
+        s:a.string => printl(s)
+        s:b.string => printl(s)
+        <Closed> => {}
+    }
+    b.send("merged") or_throw
+    a.close()
+    b.close()
+    let inbox = merged(@a.receive @b.receive)
+    loop inbox.open {
+        match inbox.next or_throw<Canceled> {
+            s:a.string => printl(s)
+            s:b.string => printl(s)
+            <none> => break
+        }
+    }
+}

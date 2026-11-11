@@ -3787,7 +3787,9 @@ match by type as before. Such an arm is allowed only on a match written on the c
 prepared the waits, `match select(...)` with its waits written in it, or on a direct
 `a.receive` or `heart.next` (where it must name that wait); on a stored result, a helper's
 result or any other value it is an error, and the plain type (`<Closed>`) is what to write.
-A select records which wait it took, so this costs one comparison per match. `race(...)` and
+`or_throw<...>` around the call preserves its source; forwarding a failure does not turn a
+stored result into a source. A select records which wait it took, so this costs one comparison
+per match. `race(...)` and
 `first_ok(...)` record the call they took the same way, so a match written on them can name a
 wait among their arguments (`s:a.string` in `match race(@a.receive @b.receive)`). A match on
 `inbox.next`, for an `inbox = merged(@a.receive @b.receive)` declared in the same function,

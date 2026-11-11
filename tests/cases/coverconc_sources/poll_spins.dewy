@@ -1,0 +1,10 @@
+main = () => {
+    let a = channel<int>(1)
+    loop true {
+        match select(@a.receive timeout=0s) or_throw<Canceled> {
+            n:a.int => printl(n)
+            <Closed> => break
+            <Timeout> => printl"idle"
+        }
+    }
+}

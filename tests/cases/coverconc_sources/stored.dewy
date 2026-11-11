@@ -1,0 +1,8 @@
+main = () => {
+    let a = channel<string>(1)
+    let value = select(@a.receive timeout=0s)
+    match value or_throw<Canceled> {
+        s:a.string => printl(s)
+        _ => {}
+    }
+}

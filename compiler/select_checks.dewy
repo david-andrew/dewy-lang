@@ -428,6 +428,12 @@ source_receiver=(n0:SelectWord):>int64=>$unsafe {
 # outcomes of that wait: a source pattern stays in its wait's match as its plain type, a plain
 # one in every match whose outcomes it meets. -1 when m has no source pattern (O(patterns)).
 source_match=(m:SelectWord expected:SelectWord):>int64=>$unsafe {
+    let original=SelectWord(nodes.ptr[m].a)
+    loop nodes.ptr[original].kind =? 'conv' or nodes.ptr[original].kind =? 'propagate' {original=SelectWord(nodes.ptr[original].a)}
+    if nodes.ptr[original].kind =? 'call' {
+        let callee=SelectWord(nodes.ptr[original].a)
+        if nodes.ptr[callee].kind =? 'ident' and nodes.ptr[callee].name =? int32(intern("select")) {select_source_calls[m]=original}
+    }
     let first:SelectWord=0
     loop arm in kids(m) {
         loop p in kids(arm) {
@@ -438,7 +444,9 @@ source_match=(m:SelectWord expected:SelectWord):>int64=>$unsafe {
     let sc=SelectWord(nodes.ptr[m].a)
     let pos=nodes.ptr[m].pos
     # (rule 7: a direct receive or next has one slot, its receiver)
-    let head=sc
+    let prepared=sc
+    loop nodes.ptr[prepared].kind =? 'conv' or nodes.ptr[prepared].kind =? 'propagate' {prepared=SelectWord(nodes.ptr[prepared].a)}
+    let head=prepared
     if nodes.ptr[head].kind =? 'call' {head=SelectWord(nodes.ptr[head].a)}
     if nodes.ptr[head].kind =? 'field' and (name_of(SelectWord(nodes.ptr[head].name)) =? "receive" or name_of(SelectWord(nodes.ptr[head].name)) =? "next" or name_of(SelectWord(nodes.ptr[head].name)) =? "reserve") and select_place(SelectWord(nodes.ptr[head].a)) {
         let receiver=source_receiver(SelectWord(nodes.ptr[head].a))
@@ -452,18 +460,21 @@ source_match=(m:SelectWord expected:SelectWord):>int64=>$unsafe {
         }
         return -1
     }
-    let callee=if nodes.ptr[sc].kind =? 'call' {SelectWord(nodes.ptr[sc].a)} else {0}
+    let callee=if nodes.ptr[prepared].kind =? 'call' {SelectWord(nodes.ptr[prepared].a)} else {0}
     if callee =? 0 or nodes.ptr[callee].kind not=? 'ident' or not (name_of(SelectWord(nodes.ptr[callee].name)) in? ["select" "race" "first_ok"]) {
         fatal(nodes.ptr[first].pos "a pattern that names its source (`<heart.Tick>`) needs the match written on the call that prepared the waits, `match select(...)`, or on a direct `receive` or `next`; a stored result, a helper's or another call's has no source: match the plain type")
     }
     # (the waits' outcomes, from a checked copy: the call itself is checked where it is bound)
-    check_expr(clone(sc) 0);
+    let checked=clone(sc)
+    let checked_source=checked
+    loop nodes.ptr[checked_source].kind =? 'conv' or nodes.ptr[checked_source].kind =? 'propagate' {checked_source=SelectWord(nodes.ptr[checked_source].a)}
+    check_expr(checked 0);
     let probe=last_checked
-    let call=probe
-    loop nodes.ptr[call].kind =? 'conv' {call=SelectWord(nodes.ptr[call].a)}
+    let call=checked_source
+    loop nodes.ptr[call].kind =? 'conv' or nodes.ptr[call].kind =? 'propagate' {call=SelectWord(nodes.ptr[call].a)}
     # (all waits conditional: `{obligation; select(...)}`)
     if nodes.ptr[call].kind =? 'block' and nkids(call) >? 0 and nodes.ptr[kid(call nkids(call) - 1)].kind =? 'exprstmt' {call=SelectWord(nodes.ptr[kid(call nkids(call) - 1)].a)}
-    loop nodes.ptr[call].kind =? 'conv' {call=SelectWord(nodes.ptr[call].a)}
+    loop nodes.ptr[call].kind =? 'conv' or nodes.ptr[call].kind =? 'propagate' {call=SelectWord(nodes.ptr[call].a)}
     if nodes.ptr[call].kind not=? 'call' or not source_call(call) {fatal(nodes.ptr[first].pos "a pattern that names its source needs the match written on `select(...)`, `race(...)` or `first_ok(...)` itself")}
     let whole=prune(ntype(probe))
     # (each wait: its receiver's name and what it gives)
@@ -564,7 +575,9 @@ source_dispatch=(m:SelectWord sc:SelectWord receivers:array<int64> named:array<i
                 if nodes.ptr[p].kind =? 'pwild' {catch_all=true}
             }
         }
-        if gives.length <? value_members(whole).length and not catch_all {
+        let other=false
+        loop g in value_members(whole) {if not gives.contains(prune(g)) {other=true}}
+        if other and not catch_all {
             let rest=mk('arm' pos)
             set_list(rest [mk('pwild' pos)])
             nodes.ptr[rest].b=int32(bc_block([bc_stmt(bc_call("panic" [bc_str("select gave the outcome of another wait" pos)] pos) pos)] pos))
@@ -575,7 +588,9 @@ source_dispatch=(m:SelectWord sc:SelectWord receivers:array<int64> named:array<i
         if statement {add_flag(branch NF_STMT)}
         set_list(branch arms)
         if on_select {select_source_matches[branch]=true}
-        select_source_calls[branch]=sc
+        let prepared=sc
+        loop nodes.ptr[prepared].kind =? 'conv' or nodes.ptr[prepared].kind =? 'propagate' {prepared=SelectWord(nodes.ptr[prepared].a)}
+        select_source_calls[branch]=prepared
         branches.push(branch)
         branches.push(if k <? outcomes.length {k} else {-1})
     }
@@ -637,6 +652,7 @@ inbox_sources=(x0:SelectWord op:string):>array<int64>=>$unsafe {
 }
 inbox_source_match=(m:SelectWord sc:SelectWord inner:array<int64> expected:SelectWord):>int64=>$unsafe {
     let field=sc
+    loop nodes.ptr[field].kind =? 'conv' or nodes.ptr[field].kind =? 'propagate' {field=SelectWord(nodes.ptr[field].a)}
     if nodes.ptr[field].kind =? 'call' {field=SelectWord(nodes.ptr[field].a)}
     let target=SelectWord(nodes.ptr[field].a)
     loop nodes.ptr[target].kind =? 'conv' {target=SelectWord(nodes.ptr[target].a)}
@@ -716,8 +732,8 @@ queue_payload_clash=(payload:SelectWord name:string):>string=>{
 # again: it spins. O(the arms' bodies), only for a match on select inside a loop.
 select_progress=(m:SelectWord):>void=>$unsafe {
     if cx <? 0 or ctxs[cx].loop_depth =? 0 {return}
-    let sc=SelectWord(nodes.ptr[m].a)
-    loop nodes.ptr[sc].kind =? 'conv' {sc=SelectWord(nodes.ptr[sc].a)}
+    let sc=select_source_calls.get(m) ?? SelectWord(nodes.ptr[m].a)
+    loop nodes.ptr[sc].kind =? 'conv' or nodes.ptr[sc].kind =? 'propagate' {sc=SelectWord(nodes.ptr[sc].a)}
     if not select_source_matches.has(m) and (nodes.ptr[sc].kind not=? 'call' or not select_call(sc)) {return}
     # (`timeout=0s`, a poll: a Timeout stays ready as a close does)
     let poll=select_poll(select_source_calls.get(m) ?? sc)
@@ -734,9 +750,9 @@ select_progress=(m:SelectWord):>void=>$unsafe {
 }
 select_poll=(c0:SelectWord):>bool=>$unsafe {
     let c=c0
-    loop nodes.ptr[c].kind =? 'conv' {c=SelectWord(nodes.ptr[c].a)}
+    loop nodes.ptr[c].kind =? 'conv' or nodes.ptr[c].kind =? 'propagate' {c=SelectWord(nodes.ptr[c].a)}
     if nodes.ptr[c].kind =? 'block' and nkids(c) >? 0 and nodes.ptr[kid(c nkids(c) - 1)].kind =? 'exprstmt' {c=SelectWord(nodes.ptr[kid(c nkids(c) - 1)].a)}
-    loop nodes.ptr[c].kind =? 'conv' {c=SelectWord(nodes.ptr[c].a)}
+    loop nodes.ptr[c].kind =? 'conv' or nodes.ptr[c].kind =? 'propagate' {c=SelectWord(nodes.ptr[c].a)}
     if nodes.ptr[c].kind not=? 'call' or not select_call(c) or nkids(c) =? 0 {return false}
     let last=kid(c nkids(c) - 2)
     if tkind(ntype(last)) =? 'fn_' {return false}

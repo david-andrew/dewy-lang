@@ -503,6 +503,11 @@ source_receiver = (n0: int) -> int:
 # outcomes of that wait: a source pattern stays in its wait's match as its plain type, a plain
 # one in every match whose outcomes it meets. -1 when m has no source pattern (O(patterns)).
 source_match = (m: int, expected: int) -> int:
+    original = int(nodes[m].a)
+    loop nodes[original].kind == .conv or nodes[original].kind == .propagate: original = int(nodes[original].a)
+    if nodes[original].kind == .call:
+        callee = int(nodes[original].a)
+        if nodes[callee].kind == .ident and int(nodes[callee].name) == intern("select"): select_source_calls[m] = original
     first = 0
     loop arm in kids(m):
         loop p in kids(arm):
@@ -511,7 +516,9 @@ source_match = (m: int, expected: int) -> int:
     sc = int(nodes[m].a)
     pos = nodes[m].pos
     # (rule 7: a direct receive or next has one slot, its receiver)
-    head = sc
+    prepared = sc
+    loop nodes[prepared].kind == .conv or nodes[prepared].kind == .propagate: prepared = int(nodes[prepared].a)
+    head = prepared
     if nodes[head].kind == .call: head = int(nodes[head].a)
     if nodes[head].kind == .field and (name_of(int(nodes[head].name)) == "receive" or name_of(int(nodes[head].name)) == "next" or name_of(int(nodes[head].name)) == "reserve") and select_place(int(nodes[head].a)):
         receiver = source_receiver(int(nodes[head].a))
@@ -522,17 +529,20 @@ source_match = (m: int, expected: int) -> int:
                 q = source_qualifier(p)
                 if q != 0 and q != receiver: fatal(nodes[p].pos, "this pattern names {name_of(q)}, but the match is on another wait: only what that wait gives can match here (write the plain type, or match on {name_of(q)}'s own wait)")
         return -1
-    callee = if nodes[sc].kind == .call: int(nodes[sc].a) else: 0
+    callee = if nodes[prepared].kind == .call: int(nodes[prepared].a) else: 0
     if callee == 0 or nodes[callee].kind != .ident or not (name_of(int(nodes[callee].name)) in ["select", "race", "first_ok"]):
         fatal(nodes[first].pos, "a pattern that names its source (`<heart.Tick>`) needs the match written on the call that prepared the waits, `match select(...)`, or on a direct `receive` or `next`; a stored result, a helper's or another call's has no source: match the plain type")
     # (the waits' outcomes, from a checked copy: the call itself is checked where it is bound)
-    check_expr(clone(sc), 0)
+    checked = clone(sc)
+    checked_source = checked
+    loop nodes[checked_source].kind == .conv or nodes[checked_source].kind == .propagate: checked_source = int(nodes[checked_source].a)
+    check_expr(checked, 0)
     probe = last_checked
-    call = probe
-    loop nodes[call].kind == .conv: call = int(nodes[call].a)
+    call = checked_source
+    loop nodes[call].kind == .conv or nodes[call].kind == .propagate: call = int(nodes[call].a)
     # (all waits conditional: `{obligation; select(...)}`)
     if nodes[call].kind == .block and nkids(call) > 0 and nodes[kid(call, nkids(call) - 1)].kind == .exprstmt: call = int(nodes[kid(call, nkids(call) - 1)].a)
-    loop nodes[call].kind == .conv: call = int(nodes[call].a)
+    loop nodes[call].kind == .conv or nodes[call].kind == .propagate: call = int(nodes[call].a)
     if nodes[call].kind != .call or not source_call(call): fatal(nodes[first].pos, "a pattern that names its source needs the match written on `select(...)`, `race(...)` or `first_ok(...)` itself")
     whole = prune(ntype(probe))
     # (each wait: its receiver's name and what it gives)
@@ -617,7 +627,10 @@ source_dispatch = (m: int, sc: int, receivers: int[], named: int[], outcomes: in
         loop na in arms:
             loop p in kids(na):
                 if nodes[p].kind == .pwild: catch_all = true
-        if gives.len() < value_members(whole).len() and not catch_all:
+        other = false
+        loop g in value_members(whole):
+            if prune(g) not in gives: other = true
+        if other and not catch_all:
             rest = mk(.arm, pos)
             set_list(rest, [mk(.pwild, pos)])
             nodes[rest].b = i32(bc_block([bc_stmt(bc_call("panic", [bc_str("select gave the outcome of another wait", pos)], pos), pos)], pos))
@@ -627,7 +640,9 @@ source_dispatch = (m: int, sc: int, receivers: int[], named: int[], outcomes: in
         if statement: add_flag(branch, NF_STMT)
         set_list(branch, arms)
         if on_select: select_source_matches[branch] = true
-        select_source_calls[branch] = sc
+        prepared = sc
+        loop nodes[prepared].kind == .conv or nodes[prepared].kind == .propagate: prepared = int(nodes[prepared].a)
+        select_source_calls[branch] = prepared
         branches.push(branch)
         branches.push(if k < outcomes.len(): k else: -1)
     # (the last branch is the else of the others)
@@ -683,6 +698,7 @@ inbox_sources = (x0: int, op: str) -> int[]:
     out
 inbox_source_match = (m: int, sc: int, inner: int[], expected: int) -> int:
     field = sc
+    loop nodes[field].kind == .conv or nodes[field].kind == .propagate: field = int(nodes[field].a)
     if nodes[field].kind == .call: field = int(nodes[field].a)
     target = int(nodes[field].a)
     loop nodes[target].kind == .conv: target = int(nodes[target].a)
@@ -749,8 +765,8 @@ queue_payload_clash = (payload: int, name: str) -> str:
 # again: it spins. O(the arms' bodies), only for a match on select inside a loop.
 select_progress = (m: int):
     if cx < 0 or ctxs[cx].loop_depth == 0: return
-    sc = int(nodes[m].a)
-    loop nodes[sc].kind == .conv: sc = int(nodes[sc].a)
+    sc = select_source_calls.get(m) ?? int(nodes[m].a)
+    loop nodes[sc].kind == .conv or nodes[sc].kind == .propagate: sc = int(nodes[sc].a)
     if not select_source_matches.has(m) and (nodes[sc].kind != .call or not select_call(sc)): return
     # (`timeout=0s`, a poll: a Timeout stays ready as a close does)
     poll = select_poll(select_source_calls.get(m) ?? sc)
@@ -764,9 +780,9 @@ select_progress = (m: int):
         if idles and not select_moves(int(nodes[arm].b)): fatal(nodes[arm].pos, "this Timeout arm spins: a `timeout=0s` poll that finds nothing gives Timeout again on the next turn of the loop; leave the loop (`break`), wait with a real timeout, or do the work that makes a wait ready here")
 select_poll = (c0: int) -> bool:
     c = c0
-    loop nodes[c].kind == .conv: c = int(nodes[c].a)
+    loop nodes[c].kind == .conv or nodes[c].kind == .propagate: c = int(nodes[c].a)
     if nodes[c].kind == .block and nkids(c) > 0 and nodes[kid(c, nkids(c) - 1)].kind == .exprstmt: c = int(nodes[kid(c, nkids(c) - 1)].a)
-    loop nodes[c].kind == .conv: c = int(nodes[c].a)
+    loop nodes[c].kind == .conv or nodes[c].kind == .propagate: c = int(nodes[c].a)
     if nodes[c].kind != .call or not select_call(c) or nkids(c) == 0: return false
     last = kid(c, nkids(c) - 2)
     if tkind(ntype(last)) == .fn_: return false
