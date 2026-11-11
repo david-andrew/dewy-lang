@@ -173,6 +173,7 @@ use 'soa_helpers.dewy'
 use 'bigint_literal.dewy'
 use 'expr_node_queries.dewy'
 use 'embed_walk.dewy'
+use 'union_fields.dewy'
 
 enum IN:
     none_, len, push, pop, insert, remove, clear, reserve, slice, syscall, memcpy, memset, sizeof,
@@ -3603,55 +3604,6 @@ angle_check = (decl: int, args: int[]):
 # Common-field lowering retains its source route for witnesses and stable keys.
 # Indexed only for these generated blocks; no extra whole-program traversal.
 union_field_sources: {int: (int, int)} = {}
-union_field = (n: int, ut: int, fname: int) -> int:
-    ms = union_members(ut)
-    ft = 0
-    loop m in ms:
-        pm = prune(m)
-        if types[pm].kind != .struct_: return -1
-        si = int(types[pm].st)
-        check_struct_fields(si)
-        found = 0
-        loop i in [0..int(structs[si].nfields)):
-            f = int(structs[si].fields) + i
-            if int(fields[f].name) == fname: found = int(fields[f].type)
-        if found == 0: return -1
-        if ft == 0: ft = found
-        else if not type_eq(ft, found): return -1
-    a = int(nodes[n].a)
-    pos = nodes[n].pos
-    place = nodes[a].kind == .ident or (nodes[a].kind == .field and len(path_key(a)) > 0)
-    un = "__uf{bc_count}"
-    bc_count += 1
-    chain = 0
-    j = ms.len() - 1
-    loop j >= 0:
-        base = 0
-        if place: base = ud_path(a)
-        else: base = bc_ident(un, pos)
-        body = bc_block([bc_stmt(bc_field(base, name_of(fname), pos), pos)], pos)
-        if chain == 0: chain = body
-        else:
-            it = mk(.istype, pos)
-            if place: nodes[it].a = i32(ud_path(a))
-            else: nodes[it].a = i32(bc_ident(un, pos))
-            ty = mk(.tname, pos)
-            nodes[ty].aux = -7
-            nodes[ty].ival = ms[j]
-            nodes[it].b = i32(ty)
-            f = mk(.if_, pos)
-            nodes[f].a = i32(it)
-            nodes[f].b = i32(body)
-            if nodes[chain].kind == .block: nodes[f].c = i32(chain)
-            else: nodes[f].c = i32(bc_block([chain], pos))
-            chain = f
-        j -= 1
-    blk = 0
-    if place: blk = bc_block([chain], pos)
-    else: blk = bc_block([bc_let(un, a, pos), chain], pos)
-    union_field_sources[n] = (a, fname)
-    nodes[n] = nodes[blk]
-    n
 
 # for an enum's missing variant: the one with the name other places use (Key.esc: escape), the
 # nearest spelling, or (keys) how they are named

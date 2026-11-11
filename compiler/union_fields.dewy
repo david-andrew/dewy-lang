@@ -1,0 +1,58 @@
+$runtime_checks
+from p"ast.jo" import (mk nodes)
+from p"check.jo" import (check_struct_fields)
+from p"checks_builders.dewy" import (bc_block bc_field bc_ident bc_let bc_stmt)
+from p"checks_thin_expr.dewy" import (ud_path)
+from p"expr.jo" import (bc_count path_key union_field_sources)
+from p"types.jo" import (fields prune structs type_eq types union_members)
+from p"util.jo" import (name_of)
+
+UnionFieldWord:type=int64<overflow='wrap'>
+union_field=(n:UnionFieldWord ut:UnionFieldWord fname:UnionFieldWord):>int64=>$unsafe {
+    let ms=union_members(ut)
+    let ft:UnionFieldWord=0
+    loop m in ms {
+        let pm=prune(m)
+        if types.ptr[pm].kind not=? 'struct_' {return -1}
+        let si=UnionFieldWord(types.ptr[pm].st)
+        check_struct_fields(si)
+        let found:UnionFieldWord=0
+        loop i in [0..UnionFieldWord(structs.ptr[si].nfields)) {
+            let f=UnionFieldWord(structs.ptr[si].fields) + i
+            if UnionFieldWord(fields.ptr[f].name) =? fname {found=UnionFieldWord(fields.ptr[f].type)}
+        }
+        if found =? 0 {return -1}
+        if ft =? 0 {ft=found} else if not type_eq(ft found) {return -1}
+    }
+    let a=UnionFieldWord(nodes.ptr[n].a)
+    let pos=nodes.ptr[n].pos
+    let place=nodes.ptr[a].kind =? 'ident' or (nodes.ptr[a].kind =? 'field' and (path_key(a) as array<uint8>).length >? 0)
+    let un="__uf{bc_count}"
+    bc_count += 1
+    let chain:UnionFieldWord=0
+    let j=ms.length - 1
+    loop j >=? 0 {
+        let base:UnionFieldWord=0
+        if place {base=ud_path(a)} else {base=bc_ident(un pos)}
+        let body=bc_block([bc_stmt(bc_field(base name_of(fname) pos) pos)] pos)
+        if chain =? 0 {chain=body} else {
+            let it=mk('istype' pos)
+            if place {nodes.ptr[it].a=int32(ud_path(a))} else {nodes.ptr[it].a=int32(bc_ident(un pos))}
+            let ty=mk('tname' pos)
+            nodes.ptr[ty].aux=-7
+            nodes.ptr[ty].ival=ms[j]
+            nodes.ptr[it].b=int32(ty)
+            let f=mk('if_' pos)
+            nodes.ptr[f].a=int32(it)
+            nodes.ptr[f].b=int32(body)
+            if nodes.ptr[chain].kind =? 'block' {nodes.ptr[f].c=int32(chain)} else {nodes.ptr[f].c=int32(bc_block([chain] pos))}
+            chain=f
+        }
+        j -= 1
+    }
+    let blk:UnionFieldWord=0
+    if place {blk=bc_block([chain] pos)} else {blk=bc_block([bc_let(un a pos) chain] pos)}
+    union_field_sources[n]=[a fname]
+    nodes.ptr[n]=nodes.ptr[blk]
+    n
+}
