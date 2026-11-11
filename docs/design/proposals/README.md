@@ -28,6 +28,7 @@ These folders record, for each design decision, what was considered and why one 
 | [integration/](integration/) | Cross-design conventions, dogfood passes, consistency audits, name tests (2026-11-07) | Shared rules for D4, D10, D11, D22, D28, D29, D31, D33–D37 |
 | [naming-style/](naming-style/) | snake_case vs Julia-style joined names | Study, second opinion, guessability tests. Open (D38). |
 | [scope-blocks/](scope-blocks/) | Ctrl-C, task groups and protection as blocks that are the caller's code (`inline`, `inline with`) | Rounds 1–4, dogfood per round, three regrades, three reviews, marker cold reads; summary.md is the final rules. Not taken (batch 8): Ctrl-C is redesigned as an event source handled in parallel. |
+| [signals/](signals/) | Ctrl-C and other signals as event sources handled in parallel with the work | Rounds 1–4, two regrades, a review, a cold read; summary.md is the final rules. Open (D4 Q4). |
 | [runtime-settings/](runtime-settings/) | Settings chosen by a run-time value (one entry file, a function per environment) | Rounds 1–6, dogfood per round, independent regrades and a review; summary.md is the final rules. Open (D4 Q7). |
 | [array-literals/](array-literals/) | `;`, separator levels, nested literals vs n-D arrays | Rounds 1–2 and a review; separators decided (batch 6). Open (D39). |
 

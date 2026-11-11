@@ -12,7 +12,7 @@
   - `or_throw` forwards an error to the caller, `??` substitutes a default for any error or `none`, and `??<E>` does so only for error type `E`.
   - `@f` is a handle to function `f`, and `$name` is a metatag.
 - **Revised 2026-11-07:** D4, D10, D11, D28, D29, D31 and D33–D37 were revised together. Independent agents dogfooded them twice, they were made consistent with each other, and every name was read cold. Each item states its floors and whether it is ready.
-- **Revised 2026-11-11:** your answers to D4 Q6 and Q9 are in decisions.md, batch 8. D4 Q4 is being redesigned again in your direction (Ctrl-C handled in parallel with the work). D4 Q7 is updated for Q6, which adds Q19.
+- **Revised 2026-11-11:** your answers to D4 Q6 and Q9 are in decisions.md, batch 8. D4 Q4 is back in your direction: signals as event sources handled in parallel, your rule (b), no new syntax. D4 Q7 is updated for Q6, which adds Q19.
 - **Revised 2026-11-10:** D4 Q4 and Q7 are back, redesigned after your answers: Ctrl-C and the other scopes as `inline` blocks (four rounds), and settings chosen at run time (six rounds), each dogfooded, regraded and reviewed independently.
 - **Revised 2026-11-09:** D4's `select` (v6): arms match by type, your `<heart.Tick>` members tell sources apart (built by `$named`), `race` cancels, `merged` drains. Eleven rounds, six independent reviews, every new spelling read cold. Q10 (`type of string`, `ticker<T>`) is withdrawn: source-qualified members made it unnecessary.
 - **Closed:** D22 (`$parallel_safe` deleted), D26 and D27. Your answers of 2026-11-07 are in decisions.md, batch 4; of 2026-11-09 (D4 Q8, Q11–Q17), batch 7.
@@ -26,6 +26,7 @@
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
 - **(b) New syntax or surface:**
+  - D4 Q4: signals as event sources handled in parallel (`signals.ctrl_c`, `.observe`), no new syntax;
   - D4 Q19: how a module header is told apart from a setting that prefixes the first declaration;
   - D4 Q18 (optional): `memory_left`;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
@@ -47,7 +48,6 @@
   - D37 Q2;
   - D38 Q2: prefer familiar words;
   - D39 Q2: `stack` and `Ragged`.
-- **Being redesigned after your answers:** D4 Q4 (Ctrl-C and signals as event sources handled in parallel).
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -56,7 +56,7 @@
 
 ### D4. One unified `parallel` surface: v5
 
-- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` waits on channel operations and its arms match the outcomes by type; `race` is the word that cancels the losers. Ctrl-C is being redesigned as an event source handled in parallel with the work (Q4); compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
+- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` waits on channel operations and its arms match the outcomes by type; `race` is the word that cancels the losers. Ctrl-C and other signals are event sources handled in parallel with the work (Q4); compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
 - **Status:** first-pass paper dogfood covered fourteen scenarios; independent dogfood in `proposals/concurrency/unified/v5-dogfood.md` found must-fix issues, now corrected in this text. Your approved names, `$explicit_cancellation` and `main`'s `BackgroundTasks` parameter stay. The remaining surface questions are below; no repeated Q1 or Q3. Full design and complete sources: `~/dev/tmp/par5/parallel-v5.md`, `~/dev/tmp/par5/programs/`.
 
 ```dewy
@@ -82,6 +82,13 @@ score = (n:int):>int => (n * n) % 7
 autosave = () => loop true {
     sleep(30s) or_throw
     printl"saved"
+}
+ticks_with_autosave = (group:Tasks) => {
+    let saver = group.spawn(@autosave)
+    let tick = ticker(500ms)
+    defer tick.stop()
+    loop i in [0..4) tick.next or_throw;
+    saver.stop()
 }
 Command:type = [verb:string]
 relay = (commands:Channel<Command> chat:Channel<string>) => {
@@ -117,13 +124,7 @@ main = () => {
         }
         relay(commands chat) or_throw
     }
-    task.tasks inline with group {          # form being redesigned (Q4)
-        let saver = group.spawn(@autosave)
-        let tick = ticker(500ms)
-        defer tick.stop()
-        loop i in [0..4) tick.next or_throw;
-        saver.stop()
-    } or_throw
+    task.tasks(@ticks_with_autosave) or_throw
     printl"{map} {sounds} {ages} {total}"
 }
 ```
@@ -132,16 +133,16 @@ main = () => {
   - Write steps in order in `parallel { ... }`; independent steps can run together. Ordinary successful values match source order given the same handle results.
   - `[parallel x in xs f(x)]` maps; `?? void` filters ordinary failures, and `.partition_failures` retains successes and failures.
   - `merged(@commands.receive @chat.receive)` yields each value until both channels close; `match` tells a `Command` from a `string` by type. A one-shot `select(...)` gives the union of its waits' outcomes plus `Canceled` (and `Timeout` with `timeout=`); `or_throw<Canceled>` forwards only the cancellation. See the `select` section below.
-  - `task.tasks` is a function imported from the standard task module, not a language keyword or hidden local. It hands a fresh `Tasks` group to its `inline with group { … }` block, joins, then gives the block's value. Void blocks stay void; a useful group result needs a binding or `;`.
+  - `task.tasks` is a function imported from the standard task module, not a language keyword or hidden local. It hands a fresh `Tasks` group to the function it is given (`task.tasks(@body)`), joins, then gives that function's value. Void functions stay void; a useful group result needs a binding or `;`.
 - **How to adjust:**
   - Link a step to an earlier result, group ordered statements in `{ ... }`, or put work after the parallel block to order it.
   - Prefix a loop/comprehension with `$parallel.max_concurrent=4` to cap work in flight. A collector spells the prefix inside its `[...]`, before `parallel`.
   - Prefix a block/function with `$parallel.off` for source-priority cooperative replay. One core is a separate resource policy.
   - Put `check_cancel() or_throw` at a safe point in compute. The function's result includes `Canceled`; no guard variable activates anything.
-  - `task.protect_from_cancel(5s) inline { save(value) }` lets a save run despite the parent's pending cancel. Its own deadline is cooperative, and the result still reports save errors or `Timeout`.
-  - Put a prompt loop inside `task.catch_ctrl_c inline { ... }` (or `inline with ctrl_c { ... }` for the listener) to take Ctrl-C as an event or `Interrupted` input result. The scope ends with the brace; the listener can't outlive it.
+  - `task.protect_from_cancel(5s @save(value))` lets a save run despite the parent's pending cancel. Its own deadline is cooperative, and the result still reports save errors or `Timeout`.
+  - Handle Ctrl-C and other signals as event sources in parallel with the work: `loop _ in signals.ctrl_c { … }` (Q4).
 
-- **Ctrl-C examples:** being redesigned (Q4).
+- **Ctrl-C examples:** see Q4.
 
 - **Arguments and program-lifetime tasks compose:** both parameter types are supplied at entry, in either order; an ordinary explicit call supplies both normally. `argparse` keeps its descriptor design. This complete CLI includes its HTTP helper; it saves full HTTP responses from localhost:8080.
 
@@ -212,7 +213,7 @@ main = (argv:array<string>) => {
   - **Writes:** block items may write outer variables under the dependency graph; loop items may write only their own partition; spawned tasks cannot write outer variables. Helpers preserve these rules.
   - **Scope results:** block items' values remain source-ordered; top-level block `let`s remain visible after the block; `( ... )` is one ordered item. The unusual binding scope stays flagged.
   - **Select diagnostics:** a plain `select` in a loop whose `Closed` arm neither leaves nor changes the waits is an error pointing to `merged`; hover lists the outcome types, including each `Closed<T>` and `Timeout` where applicable. A misplaced comprehension tag above `let` says “move this inside the brackets, before `parallel`”.
-  - **Group-body result:** `task.tasks inline with group { … }` gives the block's value after joining, like the other scopes; `return` in the block leaves the enclosing function (Q4). Child failure/parent cancellation joins before returning a failure instead. No contextual-void suppression of useful group values.
+  - **Group-body result:** `task.tasks(@body)` gives `body`'s value after joining. Child failure/parent cancellation joins before returning a failure instead. No contextual-void suppression of useful group values.
   - **Select protocol:** the arguments are operations (or `none`, skipped, or a spread of one type); the result is the union of their outcomes with duplicates merged, plus top-level `Canceled` and `Timeout` when a timeout is given. Exactly one operation commits; a losing receive takes nothing. `select` never cancels work; `race`, `first_ok` and `within` do, and join before returning.
   - **Cancellation is result-typed:** `Canceled` remains visible in results and ordinary error handling. No second, hidden exception mechanism or cancellation row is needed for these programs. A result excluding `Canceled` forbids an unhandled cancel, without claiming the function never checks it locally.
   - **Explicit cancellation:** `$explicit_cancellation` is approved and included in `$bulletproof`. It rejects implicit forwarding through `??` and collectors. `or_throw<Canceled>` writes the forwarding; `or_throw<E>` with some other E leaves cancellation in the value.
@@ -224,7 +225,43 @@ main = (argv:array<string>) => {
   - **Limits:** settings are in source, caps count cores, and `available_cores` combines hardware/affinity and source limits. No environment-variable cap. Program task admission retains the decided explicit-allocation-failure policy.
 - **`select`, `race` and channel waits:** decided 2026-11-09 and 2026-11-11 (decisions.md, batches 7 and 8). Full text: `proposals/concurrency/unified/select-v6-round11.md`.
 - **Surface questions for you:**
-  - **Q4: being redesigned again, in your direction.** Your answer (decisions.md, batch 8): Ctrl-C is an event source handled in parallel with the regular work, `parallel { work(); loop { signals.ctrl_c.next(); printl"KeyboardInterrupt" } }`, and the same shape handles any external signal. The round starts from existing constructs (`parallel`, event sources like `ticker`, `select`, `race`, types), adds syntax only where it shows they can't express a case, and covers how the handler stops when the work ends, what Ctrl-C does while nobody listens, the REPL, and whether task groups and protection still need any special form. The `inline` scope blocks are withdrawn.
+  - **Q4 (b): signals are event sources you handle in parallel with the work (your direction)?** What it does:
+
+```dewy
+import p"@lib/std/signals.dewy" as signals
+
+main = () => parallel {
+    regular_work() or_throw
+    loop _ in signals.ctrl_c or_throw { printl"Ctrl-C received" }   # ends when regular_work is done
+}
+
+serve = (port:int) => parallel {
+    accept_loop(port) or_throw
+    loop _ in signals.sigterm or_throw { stop_accepting() }        # graceful shutdown
+}
+
+repl:type = [
+    run = () => loop true {
+        match race(@readl(">>> ") @signals.ctrl_c.next) {         # race cancels the loser
+            line:string => printl"you said {line}"
+            <Interrupted | CtrlC> => printl"KeyboardInterrupt"
+            <EndOfInput> => break
+            <Closed> => break
+            <Canceled> => Canceled or_throw
+            problem:error => problem or_throw
+        }
+    }
+]
+main = () => { let r = repl; r.run() or_throw }
+```
+
+    - **No new syntax.** `signals` is a library module of event sources: `ctrl_c`, `sigterm`, `sighup`, `sigwinch`, `sigusr1`, `sigusr2`, and Windows' `ctrl_break` and `console_close`. You use them with what exists: `loop _ in source`, `source.next`, `select`, `race`.
+    - **Listening is what intercepts.** The block's first wait on `signals.ctrl_c` replaces the default (cancel and exit 130) until that `parallel` block ends (or, outside any block, until the task ends). Nothing to acquire or stop, so nothing to forget. Every listening block gets each press. `signals.ctrl_c.observe` watches without replacing the default; libraries should use that. Three rapid presses still force exit.
+    - **Your rule (b), made visible:** once every other item in the block has finished and only signal listeners are left waiting, the block's signal sources close. `loop _ in source` then ends like a loop over a closed channel; a `loop true` that calls `.next` gets `Closed` and must `break` on it. Limit: a handler that also waits on a timer, or two handlers kept busy by a stream of presses, keeps the block alive; a done channel or `race` ends it.
+    - **Your REPL sketch, and what changed:** a press while `readl` is waiting reaches the reader as `Interrupted` (the line is cleared); any other press goes to the listener. Two separate loops can't promise `KeyboardInterrupt` prints before the next prompt, so the REPL races the read against the signal and prints in one place. A Dewy constructor can't start `run` without blocking the sibling that reads `r`, so the REPL is constructed, then run. The `alive` field isn't needed.
+    - **What it replaces:** `catch_ctrl_c` (callback, then `inline` block) and nested catchers. `protect_from_cancel(5s @save(best))` and `task.tasks(@body)` stay ordinary calls with `@` handles; no block form.
+    - **Cold read:** listening loops were read as replacing the default by all three readers; `observe` as keeping it (3/3, lower confidence); `SignalSource`, `SignalUnavailable` read correctly. Readers assumed handling `console_close` stops the window closing: on Windows it only gets bounded best-effort cleanup, so the docs must say so.
+    - **Dogfooded:** 32 programs over four rounds, two independent regrades and a review; no open must-fix. Floor 3: when a listener's block ends is decided by the block, not written at the loop; ordering a separate printing loop against the prompt needs channels; Windows termination, shell job control and terminal size are platform-limited. Full rules: `proposals/signals/summary.md`. **Rec:** yes; reversible.
   - **Q7 (a): settings chosen by a run-time value, as above?** What it does:
     - With Q6, a setting attaches to the construct after it. Above a function it covers that function's calls, what they call, and the tasks they start, even after the call returns: your sketch works as written. Inside a body it covers the next statement or block: `$program.max_cores = cores` then `run()`, or `{ … }` for several statements; `cores` may be a value read from a config file. This replaces the rounds' "starts at its line and covers the rest of the scope", which predated your Q6 answer.
     - The entry file's header is the default; a function in the entry file may replace it. Otherwise the tightest cap in force wins, and a looser line warns ("this asks for 16 cores; `server` allows 8; the call runs at 8"). A library can only narrow what the program chose, never raise it.
