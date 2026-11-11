@@ -1183,6 +1183,14 @@ fact_exposed = (p: PlaceIdentity) -> bool:
     if fact_probe_disjoint != 0 and fact_owner == fact_probe_disjoint and int(locals[p.declaration].owner) == fact_probe_disjoint and tkind(int(locals[p.declaration].type)) == .array and int(locals[p.declaration].flags) & LF_MUTPARAM != 0: return false
     flags & (LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_ADDR | LF_BYREF | LF_EXPOSED) != 0
 
+# A local that is no parameter and is only lent to calls (`@buf`, a Jo
+# `mut` argument) holds its own storage (a copy is copy-on-write): a write to
+# it changes no other place, though calls may still change it. O(1).
+fact_own_local = (p: PlaceIdentity) -> bool:
+    if p.root != .local or p.declaration <= 0: return false
+    flags = int(locals[p.declaration].flags)
+    flags & FACT_LENT == LF_ADDR and flags & LF_PARAM == 0 and tkind(fact_type(int(locals[p.declaration].type))) == .array
+
 # Address-taking flags of a local: only LF_ADDR (passed by `@` to calls) lends
 # it to a call without exposing it beyond the call.
 const FACT_LENT = LF_ADDR | LF_MUTPARAM | LF_SHARED | LF_CAPTURE | LF_CAPTURED | LF_BYREF | LF_EXPOSED | LF_ALIAS | LF_ELEMALIAS | LF_SOAELEM | LF_PARTBORROW | LF_OWNERBORROW
@@ -2419,7 +2427,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 root = int(nodes[root].a)
             p = fact_place(root)
             # (a store through a raw pointer writes what raw access exposed: fact_route_raw)
-            if raw or p.declaration != 0 and fact_exposed(p): exposed_writes.push(n)
+            if raw or p.declaration != 0 and fact_exposed(p) and not fact_own_local(p): exposed_writes.push(n)
             else if p.declaration == 0: opaque_writes.push(n)
         if k == .for_ or k == .iflet or k == .match_:
             l = int(nodes[n].sym)
@@ -2511,7 +2519,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                     if p.declaration == 0: exposed_writes.push(n)
                     else:
                         fact_slice_writer(writers, p, n)
-                        if fact_exposed(p): exposed_writes.push(n)
+                        if fact_exposed(p) and not fact_own_local(p): exposed_writes.push(n)
                 # (an opaque callee writes its place arguments too: fact_call_effects forgets them)
                 if opaque: fact_slice_place_arguments(writers, n)
             else if nodes[n].aux != 2 and nodes[n].aux != 3:
@@ -2525,7 +2533,7 @@ fact_slice_prepare = (f: int, summary: bool = false):
                 # `@` parameter, may change every other exposed root)
                 p = fact_slice_root(kid(n, 0))
                 if p.declaration == 0: opaque_writes.push(n)
-                else if fact_exposed(p): exposed_writes.push(n)
+                else if fact_exposed(p) and not fact_own_local(p): exposed_writes.push(n)
                 # (removing needs an element, truncating a nonnegative count)
                 if not summary and fact_policy == .RequireStatic and (id == .pop or id == .remove or id == .truncate):
                     active.push(n)

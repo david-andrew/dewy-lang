@@ -134,6 +134,8 @@ fact_dewy_local = (l: int) -> bool:
 # Distinct `@` parameters of one Dewy function are disjoint storage: each call
 # passes them places the mutable-argument check proves apart (provisional).
 fact_disjoint = (p: PlaceIdentity, q: PlaceIdentity) -> bool:
+    # (a written local only lent to calls is its own storage: fact_own_local)
+    if fact_own_local(p) and not (q.root == p.root and q.declaration == p.declaration): return true
     # (two globals are two storages: neither is ever a place of the other)
     if p.root == .global and q.root == .global: return p.declaration != q.declaration and p.declaration > 0 and q.declaration > 0
     if p.root != .local or q.root != .local or p.declaration == q.declaration or p.declaration == 0 or q.declaration == 0: return false

@@ -13,7 +13,7 @@ from p"effects.jo" import (effect_summaries)
 from p"expr.jo" import (is_nd ntype)
 from p"checks_thin_expr.dewy" import (is_map_type nd_elem)
 from p"checks_shaped.dewy" import (shape_field_type)
-from p"facts.jo" import (FACT_CAP FactBinding FactCallWrites FactProjection FactState FactSummary fact_add_projection fact_binding fact_bound fact_call_field_types fact_difference fact_drop_sites fact_drop_types fact_domain fact_exposed fact_forget_mutable_maps fact_index_get fact_index_put fact_new fact_owner fact_probe_on fact_project fact_projection_find fact_projection_first fact_projection_next_in fact_reach_cache fact_rebind fact_set_bound fact_shape_summaries fact_summary_assumed fact_summary_owner fact_summary_used fact_terms fact_text_sinks fact_type)
+from p"facts.jo" import (FACT_CAP FactBinding FactCallWrites FactProjection FactState FactSummary fact_add_projection fact_binding fact_bound fact_call_field_types fact_difference fact_drop_sites fact_drop_types fact_domain fact_exposed fact_forget_mutable_maps fact_index_get fact_index_put fact_new fact_own_local fact_owner fact_probe_on fact_project fact_projection_find fact_projection_first fact_projection_next_in fact_reach_cache fact_rebind fact_set_bound fact_shape_summaries fact_summary_assumed fact_summary_owner fact_summary_used fact_terms fact_text_sinks fact_type)
 from p"facts_changes.dewy" import (fact_change_route)
 from p"facts_joins.dewy" import (fact_field_node fact_payload_node)
 from p"facts_pools.dewy" import (fact_pool_type)
@@ -93,6 +93,8 @@ fact_dewy_local=(l:ForgetWord):>bool=>$unsafe {
 # Distinct `@` parameters of one Dewy function are disjoint storage: each call
 # passes them places the mutable-argument check proves apart (provisional).
 fact_disjoint=(p:PlaceIdentity q:PlaceIdentity):>bool=>$unsafe {
+    # (a written local only lent to calls is its own storage: fact_own_local)
+    if fact_own_local(p) and not (q.root =? p.root and q.declaration =? p.declaration) {return true}
     # (two globals are two storages: neither is ever a place of the other)
     if p.root =? 'global' and q.root =? 'global' {return p.declaration not=? q.declaration and p.declaration >? 0 and q.declaration >? 0}
     if p.root not=? 'local' or q.root not=? 'local' or p.declaration =? q.declaration or p.declaration =? 0 or q.declaration =? 0 {return false}
