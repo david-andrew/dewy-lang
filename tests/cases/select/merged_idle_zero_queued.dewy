@@ -1,0 +1,12 @@
+# modes: native native-release
+# Ready values win over a zero idle limit; no concurrent producer or timing race.
+main = () => {
+    let a = channel<int>(3)
+    let b = channel<int>(1)
+    a.send(11) or_throw
+    a.send(22) or_throw
+    a.send(33) or_throw
+    let inbox = merged(@a.receive @b.receive stop_when_idle=0s)
+    loop item in inbox { printl(item or_throw) }
+    printl"done, open {inbox.open}"
+}

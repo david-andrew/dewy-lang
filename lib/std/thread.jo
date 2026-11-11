@@ -445,7 +445,7 @@ __select_leave = (probing: bool, won: bool) -> void:
 
 # A merged inbox's state (`merged`, lib/prelude/channels.dewy), shared by its copies: which
 # sources are still open, how many, whether it has finished (every source closed, idle too
-# long, or canceled), the idle gap in ns (0 for none), when a value last came, and a turn.
+# long, or canceled), the idle gap in ns (-1 for none), when a value last came, and a turn.
 struct __Merge:
     __cell: int[]
     __p: *int
@@ -455,7 +455,7 @@ __merge_new = (n: int, idle: int) -> __Merge:
     cell: int[] = fill(0, 5 + n)
     p = __task_data(cell)
     p[0] = n
-    p[2] = max(idle, 0)
+    p[2] = max(idle, -1)
     p[3] = time_ns()
     loop i in [0..n): p[5 + i] = 1
     # (no source, as a spread of an empty array: finished at once, `open` false)
@@ -482,7 +482,7 @@ __merge_retire = (m: __Merge, i: int) -> bool:
 # (no value for the idle gap: finished, with its sources left open)
 __merge_idle = (m: __Merge) -> bool:
     p = m.__p
-    if p[2] == 0 or time_ns() - p[3] < p[2]: return false
+    if p[2] < 0 or time_ns() - p[3] < p[2]: return false
     p[1] = 1
     true
 __merge_nap = (spins: int):

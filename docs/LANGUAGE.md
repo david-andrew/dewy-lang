@@ -3845,10 +3845,11 @@ the payload or `Canceled`; a canceled task gets one `Canceled`, then the loop en
 when every source has closed; a close is not an item, it retires its source. Afterwards
 `inbox.open` is false. `merged(... stop_when_idle=30s)` also ends the loop after 30 s with
 nothing new, restarted by each value; `inbox.open` is then still true and the channels stay
-open. `loop item in inbox or_throw { … }` leaves the function with the `Canceled` and gives the
-loop the payload alone (`or_throw<Canceled>` names it); after an ordinary iterable, `or_throw`
-forwards that value's own failure before the loop starts. Inside `select`, `@inbox.next` is one wait, which gives `none` once the inbox has
-finished.
+open. An open but empty channel is idle; `stop_when_idle=0s` drains values already ready and
+then stops without waiting. `loop item in inbox or_throw { … }` leaves the function with the
+`Canceled` and gives the loop the payload alone (`or_throw<Canceled>` names it); after an
+ordinary iterable, `or_throw` forwards that value's own failure before the loop starts.
+Inside `select`, `@inbox.next` is one wait, which gives `none` once the inbox has finished.
 
 ```dewy
 main = () => {

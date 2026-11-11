@@ -1,0 +1,12 @@
+# modes: native native-release
+# quick
+# An open but empty channel is idle. Stopping the inbox leaves its source open.
+main = () => {
+    let ch = channel<int>(1)
+    let inbox = merged(@ch.receive stop_when_idle=0s)
+    loop item in inbox { printl(item or_throw) }
+    printl("done")
+    printl"open {inbox.open}, finished {inbox.next is? none}"
+    ch.send(7) or_throw
+    printl"channel {ch.receive or_throw}"
+}

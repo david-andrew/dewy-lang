@@ -1,0 +1,11 @@
+# modes: native native-release
+# Wait for a small positive idle gap without racing any producer or asserting elapsed time.
+main = () => {
+    let ch = channel<int>(1)
+    ch.send(5) or_throw
+    let inbox = merged(@ch.receive stop_when_idle=1ms)
+    loop item in inbox { printl(item or_throw) }
+    printl"done, open {inbox.open}, finished {inbox.next is? none}"
+    ch.send(9) or_throw
+    printl"channel {ch.receive or_throw}"
+}

@@ -84,5 +84,5 @@ Merged:type = <T>[
 
 # (any number of waits, written or spread from an array: `merged(@a.receive @b.receive)`,
 # `merged(waits...)`; the sources are copied into the inbox's own array)
-merged = <T>(...sources:(():>T | Closed<T> | Canceled)):>Merged<T> => Merged<T>[[sources...] __merge_new(sources.length 0)]
+merged = <T>(...sources:(():>T | Closed<T> | Canceled)):>Merged<T> => Merged<T>[[sources...] __merge_new(sources.length -1)]
 merged = <T D>(...sources:(():>T | Closed<T> | Canceled) stop_when_idle:D):>Merged<T> => Merged<T>[[sources...] __merge_new(sources.length __task_nanoseconds(stop_when_idle))]
