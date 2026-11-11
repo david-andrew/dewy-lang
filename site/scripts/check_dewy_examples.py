@@ -130,7 +130,9 @@ def validate(example: Example, compiler: Path, scratch: Path) -> dict:
         padding = '\n' * max(0, example.line - 1 - prefix.count('\n'))
         # (the published examples predate no traps by default: they keep runtime checks)
         text = prefix + padding + example.source + data.get('suffix', '')
-        if not any(tag in text for tag in ('$runtime_checks', '$no_hidden_costs', '$prototype')): text += '\n$runtime_checks\n'
+        if not any(tag in text for tag in ('$runtime_checks', '$no_hidden_costs', '$prototype')):
+            # (a module header opens the file and a blank line ends it; it reuses two padding lines)
+            text = '$runtime_checks\n\n' + (text[2:] if text.startswith('\n\n') else text)
         source.write_text(text)
         def call(args):
             return subprocess.run(args, cwd=work, capture_output=True, timeout=60,
