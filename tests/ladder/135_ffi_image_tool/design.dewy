@@ -1,0 +1,102 @@
+# Tier 6 / 135 / milestone 49
+# Acceptance: Expose a 16-bit image through C structs by value, summarize it in
+# a large returned struct, encode an RGB buffer and use nullable pointer outputs.
+Pixel:type = [r:uint16 g:uint16 b:uint16 alpha:uint16]
+Stats:type = [count:uint64 red:uint64 green:uint64 blue:uint64]
+
+image_tone = (source:Pixel gain:uint16):>Pixel => $extern(lib='image')
+image_scan = (pixels:ptr<Pixel> count:uint64 stride:uint64 alignment:uint64):>Stats => $extern(lib='image')
+image_merge = (a:Stats b:Stats):>Stats => $extern(lib='image')
+image_rgb = (pixels:ptr<Pixel> count:uint64 buffer:ptr<uint8> capacity:uint64):>uint64 => $extern(lib='image')
+image_find = (pixels:ptr<Pixel> count:uint64 alpha:uint16 found:ptr<ptr<Pixel>?>):>int32 => $extern(lib='image')
+image_pointer_layout = (size:uint64 alignment:uint64):>int32 => $extern(lib='image')
+
+# Managed arrays stay on the safe side of the interface. Each foreign call
+# borrows its contiguous storage only for the duration of that call.
+expose = (pixels:array<Pixel> gain:uint16):>array<Pixel> => {
+    let output:array<Pixel> = []
+    loop pixel in pixels { output.push($unsafe image_tone(pixel gain)) }
+    output
+}
+
+scan = (pixels:array<Pixel>):>Stats => {
+    $unsafe image_scan(pixels.ptr uint64(pixels.length) size_of<Pixel> align_of<Pixel>)
+}
+
+show_stats = (label:string stats:Stats):>void => {
+    printl"{label}: pixels={stats.count} red={stats.red} green={stats.green} blue={stats.blue}"
+}
+
+encode = (pixels:array<Pixel>):>array<uint8> => {
+    # Reserve enough bytes for the source layout, including any C padding.
+    # The RGB8 export uses less space than the original RGBA16 pixels.
+    let capacity = pixels.length * size_of<Pixel>
+    let buffer:array<uint8> = [loop _ in [0..capacity) 0]
+    let written = $unsafe image_rgb(pixels.ptr uint64(pixels.length) buffer.ptr uint64(buffer.length))
+    # This is a real result from foreign code, not a proof assumption. Reject
+    # a broken library contract before using its reported extent as an index.
+    if written >? uint64(buffer.length) {
+        printl"image library returned an invalid buffer extent"
+        exit(1)
+    }
+    let result:array<uint8> = []
+    loop i in [0..buffer.length) {
+        if uint64(i) <? written { result.push(buffer[i]) }
+    }
+    printl"buffer: capacity={capacity} written={written} stride={size_of<Pixel>} alignment={align_of<Pixel>}"
+    result
+}
+
+find_alpha = (pixels:array<Pixel>):>void => $unsafe {
+    # Both slots start non-null. C overwrites one with a borrowed pixel and
+    # the adjacent slot with null, checking both pointer stride and nullness.
+    let slots:array<ptr<Pixel>?> = [pixels.ptr pixels.ptr]
+    let hit_status = image_find(pixels.ptr uint64(pixels.length) 32000 slots.ptr)
+    let miss_status = image_find(pixels.ptr uint64(pixels.length) 12345 slots.ptr + 1)
+    let hit = slots[0]
+    let miss = slots[1]
+    if hit isnt? none {
+        let pixel = hit[0]
+        printl"alpha hit: {pixel.r} {pixel.g} {pixel.b} {pixel.alpha}"
+    } else {
+        printl"alpha hit: missing"
+    }
+    printl"lookup: hit={hit_status} miss={miss_status} null={miss is? none}"
+    let layout = image_pointer_layout(size_of<ptr<Pixel>?> align_of<ptr<Pixel>?>)
+    printl"nullable pointer layout: {layout =? 1}"
+}
+
+main = ():>void => {
+    let original:array<Pixel> = [
+        Pixel[1000 2000 3000 0]
+        Pixel[12000 40000 8000 65535]
+        Pixel[65535 1000 2000 32000]
+        Pixel[0 32000 64000 1000]
+        Pixel[40000 50000 60000 64000]
+        Pixel[500 1000 1500 50000]
+    ]
+    let exposed = expose(original 2)
+    let before = scan(original)
+    let after = scan(exposed)
+    show_stats("original" before)
+    show_stats("exposed" after)
+    # Stats is larger than the argument registers: this call passes and
+    # returns whole C structs through the memory part of the native ABI.
+    let combined = $unsafe image_merge(before after)
+    show_stats("combined" combined)
+
+    let rgb = encode(exposed)
+    let checksum:int = 0
+    loop i in [0..rgb.length) { checksum += (i + 1) * int(rgb[i]) }
+    printl"rgb: bytes={rgb.length} weighted checksum={checksum}"
+    let preview:array<string> = []
+    loop value in rgb { preview.push(fmt'02x'(value)) }
+    printl"preview: {preview.join(" ")}"
+    find_alpha(exposed)
+
+    # Passing a struct by value must not mutate its source or an older copy.
+    let saved = original
+    let dim = expose(original 0)
+    printl"source unchanged: {original =? saved}"
+    show_stats("black" scan(dim))
+}

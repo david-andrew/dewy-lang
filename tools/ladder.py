@@ -100,6 +100,26 @@ def evaluate(compiler: Path, directory: Path, version: str, scratch: Path, env: 
         except subprocess.TimeoutExpired:
             return subprocess.CompletedProcess(command, 'timeout', '', f'timed out after {timeout} s')
 
+    # Build each program's tiny foreign fixture in its isolated work directory.
+    # Loader paths travel with the child even when run_dir chooses another cwd.
+    if entry is not None and (library := entry.get('c_library')):
+        filename = (f'{library}.dll' if os.name == 'nt' else
+                    f'lib{library}.dylib' if sys.platform == 'darwin' else f'lib{library}.so')
+        flags = ['-dynamiclib'] if sys.platform == 'darwin' else ['-shared']
+        if os.name != 'nt':
+            flags += ['-fPIC']
+        try:
+            fixture = step(['cc', '-std=c11', '-O2', *flags,
+                            str(directory / f'{library}.c'), '-o', str(work / filename)])
+        except OSError as error:
+            return Result(directory.name, version, False, False, f'C fixture: {error}')
+        if fixture.returncode != 0:
+            return Result(directory.name, version, False, False,
+                          'C fixture: ' + first_error(fixture.stderr + fixture.stdout))
+        env = env.copy()
+        loader = 'PATH' if os.name == 'nt' else ('DYLD_LIBRARY_PATH' if sys.platform == 'darwin' else 'LD_LIBRARY_PATH')
+        env[loader] = str(work) + (os.pathsep + env[loader] if env.get(loader) else '')
+
     checked = step([str(compiler), 'check', str(source)])
     if version == 'design' and entry is not None and rejects(entry):
         return rejection(directory.name, source, checked, entry['expect'])
@@ -227,6 +247,9 @@ def validate(doc: dict) -> list[str]:
             problems.append(f'{name} lacks expected.out')
         if str(entry.get('milestone')) not in doc['milestones']:
             problems.append(f'{name} needs a milestone from 1 to {len(doc["milestones"])}')
+        if library := entry.get('c_library'):
+            if not isinstance(library, str) or not library.isidentifier() or not (LADDER / name / f'{library}.c').is_file():
+                problems.append(f'{name} needs c_library to name a C source beside design.dewy')
         if negative:
             try:
                 re.compile(entry['expect']['diagnostic'])
