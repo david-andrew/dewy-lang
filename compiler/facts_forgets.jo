@@ -386,6 +386,24 @@ fact_call_effects = (n: int, s: mut FactState):
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         value = fact_call_write(s, old, t, group.paths, 0, n)
         fact_rebind(s, p, value, n, old)
+# A callback argument that writes no place outside its own locals: a literal
+# lambda or a named function whose settled effect row holds no write, escape
+# or opaque event. Calling it changes no caller place through any alias.
+# O(row) once the callee's row is settled, on demand; a summary run uses
+# only rows already settled.
+fact_callback_writes_nothing = (e0: int) -> bool:
+    e = e0
+    loop nodes[e].kind == .conv: e = int(nodes[e].a)
+    f = 0
+    if nodes[e].kind == .lambda and not has_flag(e, NF_GENERIC): f = int(nodes[e].sym)
+    else if nodes[e].kind == .fnref and nodes[e].aux != 1 and nodes[e].aux != 2 and nodes[e].sym > 0 and not fns[int(nodes[e].sym)].has_env: f = int(nodes[e].sym)
+    if f <= 0 or f >= fns.len(): return false
+    if fact_summary_owner != 0 and (f >= effect_summaries.len() or not effect_summaries[f].done): return false
+    if not effects_demand(f, true): return false
+    loop event in effect_summaries[f].events:
+        kind = event.atom.kind
+        if kind == .write or kind == .escape or kind == .opaque or kind == .remainder: return false
+    true
 # Scalars can select a program formatter. Only the resolved builtin word
 # leaf or reviewed library formatter has no external writes.
 fact_builtin_formatter = (part: int) -> bool:

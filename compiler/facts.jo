@@ -3854,17 +3854,21 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
             element = fact_type(telem(fact_type(ntype(kid(n, 0)))))
             plain = not callback and (fact_scalar(element) or element == T_STR)
             reverse = name_of(int(nodes[int(fns[int(nodes[n].sym)].decl)].name)) == "reverse"
-            if p.declaration != 0 and (plain or reverse or not fact_exposed(p)):
+            # (an exposed receiver keeps its length too when the callback
+            # writes nothing: only the permutation itself changes it)
+            unexposed = p.declaration != 0 and (not fact_exposed(p) or callback and fact_callback_writes_nothing(kid(n, 1)))
+            if p.declaration != 0 and (plain or reverse or unexposed):
                 held = fact_route_values(s, route)
                 length = fact_project(s, held[held.len() - 1], -1, false, T_INT)
                 fact_path_call_effects(n, s)
                 fresh = fact_new(s, FactBound(), FactTerm(type = ntype(kid(n, 0))))
                 fact_add_projection(s, FactProjection(fresh, -1, false, length))
                 # A callback receives scalar/string values, not their slots.
-                # With an unexposed receiver it cannot change the inventory.
+                # With an unexposed receiver, or one the callback cannot
+                # write (fact_callback_writes_nothing), it cannot change the inventory.
                 # Its ordinary effects above still invalidate other roots; key
                 # provenance names the old dictionary, never its replacement.
-                if plain or reverse or callback and (fact_scalar(element) or element == T_STR) and not fact_exposed(p):
+                if plain or reverse or callback and (fact_scalar(element) or element == T_STR) and unexposed:
                     fact_keys_copy(s, held[held.len() - 1], fresh)
                     fact_permuted_elements(s, held[held.len() - 1], fresh)
                 fact_store_route(s, route, fresh, n)

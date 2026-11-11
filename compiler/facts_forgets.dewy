@@ -1,7 +1,7 @@
 $runtime_checks
 from p"facts_summaries.dewy" import fact_record_arrays
 from p"effect_library.jo" import EffectClass
-from p"ast.jo" import (NF_ALIASDECL NF_GLOBAL has_flag kid nkids nodes)
+from p"ast.jo" import (NF_ALIASDECL NF_GENERIC NF_GLOBAL has_flag kid nkids nodes)
 from p"check.jo" import (FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARTBORROW LF_SHARED LF_SOAELEM dewy_at fns globals lib_dir locals modules runtime_insts)
 from p"checks_thin.dewy" import (library_exit_call)
 from p"effect_classifiers.dewy" import (effect_library_class)
@@ -420,6 +420,26 @@ fact_call_effects=(n:ForgetWord @s:FactState):>void=>$unsafe {
         let value=fact_call_write(@s old t group.paths 0 n)
         fact_rebind(@s p value n old)
     }
+}
+# A callback argument that writes no place outside its own locals: a literal
+# lambda or a named function whose settled effect row holds no write, escape
+# or opaque event. Calling it changes no caller place through any alias.
+# O(row) once the callee's row is settled, on demand; a summary run uses
+# only rows already settled.
+fact_callback_writes_nothing=(e0:ForgetWord):>bool=>$unsafe {
+    let e=e0
+    loop nodes.ptr[e].kind =? 'conv' {e=ForgetWord(nodes.ptr[e].a)}
+    let f:ForgetWord=0
+    if nodes.ptr[e].kind =? 'lambda' and not has_flag(e NF_GENERIC) {f=ForgetWord(nodes.ptr[e].sym)}
+    else if nodes.ptr[e].kind =? 'fnref' and nodes.ptr[e].aux not=? 1 and nodes.ptr[e].aux not=? 2 and nodes.ptr[e].sym >? 0 and not fns.ptr[ForgetWord(nodes.ptr[e].sym)].has_env {f=ForgetWord(nodes.ptr[e].sym)}
+    if f <=? 0 or f >=? fns.length {return false}
+    if fact_summary_owner not=? 0 and (f >=? effect_summaries.length or not effect_summaries.ptr[f].done) {return false}
+    if not effects_demand(f true) {return false}
+    loop event in effect_summaries.ptr[f].events {
+        let kind=event.atom.kind
+        if kind =? 'write' or kind =? 'escape' or kind =? 'opaque' or kind =? 'remainder' {return false}
+    }
+    true
 }
 # Scalars can select a program formatter. Only the resolved builtin word
 # leaf or reviewed library formatter has no external writes.

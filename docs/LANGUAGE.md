@@ -805,7 +805,8 @@ interval, each below `n`). A key callback written in the call
 elements, so `[loop i in [0..n) i].sorted(key=(i) => -rank[i])` needs no guard
 when `rank.length` is `n`; the element `min_by` or `max_by` returns is one of the
 receiver's, so what holds of every element holds of it. Sorting or reversing in place
-retains those bounds for builtin values. Finite element inventories also retain
+retains those bounds for builtin values, and the array's length, an `@` parameter's
+too when the `key=` or comparison function writes nothing. Finite element inventories also retain
 scalar relations established for every entry, such as an index being below
 another array's length. A write to a known position in a short `fill` retains
 facts about its untouched entries. Element writes, unknown mutations and copy
