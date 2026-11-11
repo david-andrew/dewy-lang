@@ -447,6 +447,10 @@ local_place_decl = (s: int) -> bool:
         return true
     if k != .index and k != .field: return false
     base = int(nodes[init].a)
+    # A method prepared on a field chain is a function value, not a deeper local place.
+    if k == .field and nodes[base].kind != .ident:
+        probe = clone(init)
+        if is_fn_type(check_expr(probe, written_place_type(s))): return false
     if nodes[base].kind != .ident or k == .index and (nodes[init].b == 0 or nkids(init) != 1):
         fatal(nodes[init].pos, "a local place names an element, entry or field of a variable (`let cursor = @xs[i]`, `let f = @r.a`); pass deeper routes to an `@` parameter instead")
     # (`@r.f` of a function is its handle: a value, as `let g = @f`)

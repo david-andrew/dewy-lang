@@ -365,6 +365,11 @@ local_place_decl=(s:PlaceUpdateWord):>bool=>$unsafe {
     }
     if k not=? 'index' and k not=? 'field' {return false}
     let base=PlaceUpdateWord(nodes.ptr[init].a)
+    # A method prepared on a field chain is a function value, not a deeper local place.
+    if k =? 'field' and nodes.ptr[base].kind not=? 'ident' {
+        let probe=clone(init)
+        if is_fn_type(check_expr(probe written_place_type(s))) {return false}
+    }
     if nodes.ptr[base].kind not=? 'ident' or k =? 'index' and (nodes.ptr[init].b =? 0 or nkids(init) not=? 1) {
         fatal(nodes.ptr[init].pos "a local place names an element, entry or field of a variable (`let cursor = @xs[i]`, `let f = @r.a`); pass deeper routes to an `@` parameter instead")
     }
