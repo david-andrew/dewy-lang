@@ -2,6 +2,8 @@
 # Producers and a consumer share bounded channels by copying their handles. Three producers
 # fill one small channel, a stage turns numbers into text through a second, and the consumer
 # drains it until it is closed. Sends wait while a channel is full (backpressure).
+$runtime_checks
+
 produce = (out:Channel<int64> first:int64 count:int64):>void | Unsent<int64> => {
     loop i in [first..first + count) { out.send(i) or_throw }
 }
@@ -38,5 +40,3 @@ main = () => {
     }
     printl"received {seen} texts, {chars} characters"
 }
-
-$runtime_checks

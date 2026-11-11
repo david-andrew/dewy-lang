@@ -7,6 +7,7 @@
 # interface and write the same bytes (tests/test_selfhost_icns.py).
 $runtime_checks
 
+
 # (the PNG's width is the first word of its IHDR chunk, at byte 16)
 icns=(png:array<uint8>):>array<uint8>=>{
     let w=(int64(png[16]) << 24) | (int64(png[17]) << 16) | (int64(png[18]) << 8) | int64(png[19])

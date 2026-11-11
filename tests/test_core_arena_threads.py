@@ -36,8 +36,9 @@ check_workers = ():
     loop i in [0..65): assert(out[i] == 333 * (i + 22), "worker arena")
 ''')
     source.write_text('''
-from p"workers.jo" import check_workers
 $runtime_checks
+
+from p"workers.jo" import check_workers
 make=(seed:int64):>array<int64>=>{
     let scratch=Arena[]
     let out:array<int64>=[]

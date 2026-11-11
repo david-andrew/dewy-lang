@@ -1,5 +1,7 @@
 # Arrays grown one element at a time: records, integers and strings pushed
 # onto empty arrays in one loop, then summed.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock, mix
 
 Particle:type = [x:int64 y:int64 dx:int64 dy:int64]
@@ -34,5 +36,3 @@ main = (args:array<string>):>void => {
     let finished=clock
     printl"{result} {finished-started}"
 }
-
-$runtime_checks

@@ -25,7 +25,7 @@ def test_witness_difference_oracle(compiler, tmp_path, extension):
     if extension == 'dewy':
         calls = '\n'.join(f'printl(wit_difference_holds({x} {y} {limit}))'
                           for x, y, limit in cases)
-        source = '$runtime_checks\n' + definition + '\nmain=()=>{\n' + calls + '\n}\n'
+        source = '$runtime_checks\n\n' + definition + '\nmain=()=>{\n' + calls + '\n}\n'
     else:
         calls = '\n'.join(f'    print(wit_difference_holds({x}, {y}, {limit}))'
                           for x, y, limit in cases)

@@ -10,6 +10,7 @@ from tests.support import compiler  # noqa: F401
 def test_callback_inference_preserves_exact_comparison(compiler, tmp_path, flags):
     source = tmp_path / 'callback.dewy'
     source.write_text('''$runtime_checks
+
 less=(a:int64 b:int64):>bool=>a+b <? 0
 apply=(f:((a:int64 b:int64):>bool & allocates) a:int64 b:int64):>bool & allocates=>f(a b)
 main=(args:array<string>)=>{

@@ -19,7 +19,7 @@ def test_batch4_rounding_time_uses_all_modes(compiler, tmp_path):
           [2,-2,2,-3,3,-3,3,-4], [2,-3,2,-3,2,-3,3,-4],
           [3,-2,3,-2,3,-2,4,-3], [2,-2,2,-2,2,-2,3,-3],
           [3,-3,3,-3,3,-3,4,-4]]
-    text='import p"@lib/time/core.dewy" as core\n$runtime_checks\nshow=(q:rational*Time mode:core._Rounding)=>{\nlet [value lost]=quantize(q rounding=mode)\nprintl(core.ns_count(value))\n}\n'
+    text='$runtime_checks\n\nimport p"@lib/time/core.dewy" as core\nshow=(q:rational*Time mode:core._Rounding)=>{\nlet [value lost]=quantize(q rounding=mode)\nprintl(core.ns_count(value))\n}\n'
     for mode in modes:
         for value in values:
             text+=f"show(({value}) '{mode}')\n"

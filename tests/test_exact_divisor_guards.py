@@ -74,7 +74,7 @@ def test_exact_divisor_guards_reject(compiler, tmp_path, name):
 
 def test_unproven_denominator_checks_at_run_time(compiler, tmp_path):
     path = tmp_path / 'checked.dewy'
-    path.write_text('$runtime_checks\nf=(a:int d:int):>rational=>rational(a d)\nmain=()=>printl(f(1 0))\n')
+    path.write_text('$runtime_checks\n\nf=(a:int d:int):>rational=>rational(a d)\nmain=()=>printl(f(1 0))\n')
     out = tmp_path / 'checked'
     built = subprocess.run([compiler, 'build', path, '-o', out], text=True, capture_output=True, timeout=60)
     assert built.returncode == 0, built.stdout + built.stderr

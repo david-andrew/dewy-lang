@@ -2,10 +2,10 @@
 # `$no_deadlocks`: `serve` has no certificate until a library gate proves it. Its control is
 # protocols/request_reply, which runs the protocol with no tag.
 $no_deadlocks
+$runtime_checks
+
 square = (n:int64):>int64 => n * n
 main = ():>void | Closed<int64> | Canceled => {
     let total = serve(@square (s:Service<int64 int64>):>int64 | Closed<int64> | Canceled => s.request(3) or_throw) or_throw
     printl"{total}"
 }
-
-$runtime_checks

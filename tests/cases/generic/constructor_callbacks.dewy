@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 Transform:type=<T U>[value:T step:(x:T:>U)]
 Runner:type=<T>[value:T step:(x:T:>T)]
 Box:type=<T>[value:T]
@@ -11,5 +13,3 @@ let runner=Runner(42 @identity)
 return if transform.step(transform.value)=?42 and format.step(format.value)=?"value=42"
 and function.value(40)=?42 and runner.step(runner.value)=?42 42 else 1}
 main=()=>exit(run())
-
-$runtime_checks

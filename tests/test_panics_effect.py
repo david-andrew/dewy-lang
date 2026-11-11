@@ -13,8 +13,9 @@ REJECTED = {
     # (here not assumed the module's own handling: test_runtime_checks_module_local.py).
     'checked_dependency': ('''$runtime_checks=false
 $assume_local_asserts=false
+
+$runtime_checks
 helper=(xs:array<int64> i:int64):>int64=>{
-    $runtime_checks
     return xs[i]
 }
 main=():>void=>printl(helper([1 2] 1))
@@ -23,6 +24,7 @@ main=():>void=>printl(helper([1 2] 1))
     # handling), and a handle to it may be called.
     'handle': ('''$runtime_checks=false
 $assume_local_asserts=false
+
 check=(x:int64):>int64=>{
     $runtime_assert(x >? 0)
     return x
@@ -32,6 +34,7 @@ main=():>void=>printl(apply(@check 2))
 ''', 'a handle to `check`, which may be called, may panic (check: `$runtime_assert`'),
     # A row excluding panics holds transitively, whatever the scope.
     'row': ('''$runtime_checks
+
 loose=(xs:array<int64> i:int64):>int64=>xs[i]
 strict=(xs:array<int64>):>int64 & no panics=>loose(xs 0)
 main=():>void=>printl(strict([1]))
@@ -41,31 +44,33 @@ main=():>void=>printl(strict([1]))
     # The strict lane excludes panics; the repair names its opt-out.
     'bundle': ('''$no_hidden_costs
 $assume_local_asserts=false
+
+$no_hidden_costs=false
+$runtime_checks
 pick=(x:int64):>int64=>{
-    $no_hidden_costs=false
-    $runtime_checks
     $runtime_assert(x >? 0)
     return x
 }
 twice=(x:int64):>int64 & no panics=>pick(x)*2
+$no_hidden_costs=false
+$runtime_checks
 main=()=>{
-    $no_hidden_costs=false
-    $runtime_checks
     printl(twice(3))
 }
 ''', 'opt this function out of `$no_hidden_costs` with `$no_hidden_costs=false` and add `$runtime_checks`'),
     # Library preconditions are the caller's obligations.
-    'first_unproven': ('$runtime_checks=false\nf=(xs:array<int64>)=>printl(xs.first)\nf([1])\n',
+    'first_unproven': ('$runtime_checks=false\n\nf=(xs:array<int64>)=>printl(xs.first)\nf([1])\n',
                        'cannot prove refinement `xs.length >? 0`'),
-    'swap_unproven': ('$runtime_checks=false\nf=(@xs:array<int64> i:int64)=>xs.swap(0 i)\nlet a:array<int64>=[1 2]\nf(@a 1)\n',
+    'swap_unproven': ('$runtime_checks=false\n\nf=(@xs:array<int64> i:int64)=>xs.swap(0 i)\nlet a:array<int64>=[1 2]\nf(@a 1)\n',
                       'cannot prove index is in bounds'),
-    'insert_unproven': ('$runtime_checks=false\nf=(@xs:array<int64> i:int64)=>xs.insert(5 i)\nlet a:array<int64>=[1]\nf(@a 0)\n',
+    'insert_unproven': ('$runtime_checks=false\n\nf=(@xs:array<int64> i:int64)=>xs.insert(5 i)\nlet a:array<int64>=[1]\nf(@a 0)\n',
                         'cannot prove index is in bounds'),
-    'dictionary': ('$runtime_checks=false\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n',
+    'dictionary': ('$runtime_checks=false\n\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n',
                    'cannot prove the key is in the dictionary'),
 }
 
 PROVED = '''$runtime_checks=false
+
 edit=(@xs:array<int64> i:int64):>void=>{
     if 0 <=? i and i <=? xs.length {xs.insert(5 i)}
     xs.insert(7 0)
@@ -99,30 +104,30 @@ def test_panics_proved(compiler, tmp_path):
 
 
 def test_format_literal_spec(compiler, tmp_path):
-    source = '$runtime_checks=false\nshow=(x:float64 n:int64 s:string):>string=>"{fmt\'.6f\'(x)} {fmt\',\'(n)} {fmt\'#x\'(n)} {fmt\'>8\'(s)} {fmt\'8.2%\'(x)}"\nprintl(show(0.5 1234567 "hi"))\n'
+    source = '$runtime_checks=false\n\nshow=(x:float64 n:int64 s:string):>string=>"{fmt\'.6f\'(x)} {fmt\',\'(n)} {fmt\'#x\'(n)} {fmt\'>8\'(s)} {fmt\'8.2%\'(x)}"\nprintl(show(0.5 1234567 "hi"))\n'
     result = run(compiler, tmp_path, source, 'run')
     assert result.returncode == 0 and result.stdout == '0.500000 1,234,567 0x12d687       hi   50.00%\n', result.stdout + result.stderr
 
 
 def test_panics_opted_in(compiler, tmp_path):
     # The caller's own `$runtime_checks` accepts the call; the check runs.
-    source = '''helper=(xs:array<int64> i:int64):>int64=>{
-    $runtime_checks
+    source = '''$runtime_checks
+helper=(xs:array<int64> i:int64):>int64=>{
     return xs[i]
 }
+$runtime_checks
 main=():>void=>{
-    $runtime_checks
     printl(helper([1 2] 1))
     printl(helper([1 2] 5))
 }
 '''
-    result = run(compiler, tmp_path, '$runtime_checks=false\n' + source, 'run')
+    result = run(compiler, tmp_path, '$runtime_checks=false\n\n' + source, 'run')
     assert result.stdout == '2\n' and result.returncode == 101, result.stdout + result.stderr
 
 
 def test_panics_listing(compiler, tmp_path):
     # `check --obligations` names library calls that may panic where checks are allowed.
-    source = '$runtime_checks\nshow=(s:string):>string=>s.trim()\nprintl(show("x"))\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n'
+    source = '$runtime_checks\n\nshow=(s:string):>string=>s.trim()\nprintl(show("x"))\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n'
     result = run(compiler, tmp_path, source, 'check', '--obligations')
     # (a missing key is the caller's obligation, listed as its own check)
     assert 'program.dewy:4:38: runtime check: the key is in the dictionary ($runtime_checks)' in result.stdout, result.stdout + result.stderr
@@ -130,19 +135,20 @@ def test_panics_listing(compiler, tmp_path):
 
 def test_first_runtime_check(compiler, tmp_path):
     # Where checks are allowed, an empty array fails the precondition at the call.
-    source = '$runtime_checks\nf=(xs:array<int64>)=>printl(xs.first)\nf([])\n'
+    source = '$runtime_checks\n\nf=(xs:array<int64>)=>printl(xs.first)\nf([])\n'
     result = run(compiler, tmp_path, source, 'run')
     assert result.returncode == 101 and 'refinement failed: `xs.length >? 0`' in result.stderr, result.stderr
 
 
 HOVERED = '''$runtime_checks=false
+
+$runtime_checks
 helper=(xs:array<int64> i:int64):>int64=>{
-    $runtime_checks
     return xs[i]
 }
 total=(xs:array<int64>):>int64=>xs.length
+$runtime_checks
 main=():>void=>{
-    $runtime_checks
     printl(helper([1 2] 1) + total([1]))
 }
 '''

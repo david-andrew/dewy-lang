@@ -1,3 +1,5 @@
+$runtime_checks
+
 choose=(x:int64):>int64=>x
 choose=(x:string):>int64=>0
 byte=(x:int8):>int8=>x
@@ -15,5 +17,3 @@ main=()=>{
     printl(choose(match u {n:int64=>n _=>42}))
     printl(choose(if c {let n:int64=42; n} else 42))
 }
-
-$runtime_checks

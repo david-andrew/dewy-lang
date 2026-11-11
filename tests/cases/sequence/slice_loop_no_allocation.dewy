@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{
 let values=[99 20 22 100]
 let before=alloc_count() let sum:int64=0
@@ -8,5 +10,3 @@ sum+=value
 }
 return if alloc_count()=?before sum else 2}
 main=()=>exit(run())
-
-$runtime_checks

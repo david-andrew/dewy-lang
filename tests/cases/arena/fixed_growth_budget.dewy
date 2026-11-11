@@ -2,6 +2,7 @@
 # Four int64 slots plus array/allocation headers fit in exactly 80 bytes.
 # Reserving a growable arena's larger initial capacity here would wrongly refuse.
 $runtime_checks
+
 $explicit_allocation_failure
 fill=(@scratch:Arena):>int64=>{
     $allocator(@scratch) {

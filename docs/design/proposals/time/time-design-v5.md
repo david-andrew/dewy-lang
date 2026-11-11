@@ -977,18 +977,19 @@ Sources: [RFC 5905 §6](https://www.rfc-editor.org/rfc/rfc5905.html#section-6), 
 
 ```dewy
 $time.require_context
+$time.strict
+
 wait_for = (delay:Duration<(>=? 0s)> context) =>
     time.with_context(context @sleep(delay))
 
-$time.strict
+$time.require_loss=false
 report = (reading context) => {
-    $time.require_loss=false
     printl(reading.nominal.display(profile='nominal' context=context).text)
 }
 ```
 
 - **What the refinement proves.** `delay`'s refinement discharges one local obligation. It doesn't prove the clock is available or that wakeups are timely.
-- **What the inner tag accepts.** It accepts display loss only, not clock accuracy or trust.
+- **What the prefixed setting accepts.** It accepts display loss only, not clock accuracy or trust.
 
 ---
 

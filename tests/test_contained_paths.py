@@ -40,7 +40,9 @@ main=():>void | PathEscape | FileError=>{
 '''
 
 # Each traversal, through locals, fields, loops, helpers and lambdas, to a file operation.
-SOURCES = '''let base=p"/srv/data"
+SOURCES = '''$runtime_checks
+
+let base=p"/srv/data"
 Job:type=[name:string id:int64]
 path_for=(name:string):>Path=>p"{base}/{name}"
 main=():>void=>{
@@ -55,7 +57,6 @@ main=():>void=>{
     let paths=argv.map(x => p"{base}/{x}")
     loop q in paths { printl(q.exists) }
 }
-$runtime_checks
 '''
 
 # Nothing here warns: hardcoded paths, a helper given hardcoded text, a number joined to a base,
@@ -88,19 +89,20 @@ main=():>void=>{
 
 # Under `$confine_external_paths`, a path taken whole must be proven inside a base as well.
 STRICT = '''$confine_external_paths
+$runtime_checks
+
 let root=p"/srv/data"
 main=():>void=>{
     let f=p(args()[0])
     printl(f.exists)
     printl(p"/etc/hosts".exists)
     if root.contains(f) { printl(f.exists) }
-    let g={
-        $confine_external_paths=false
+    let g=$confine_external_paths=false
+    {
         f.exists
     }
     printl(g)
 }
-$runtime_checks
 '''
 
 

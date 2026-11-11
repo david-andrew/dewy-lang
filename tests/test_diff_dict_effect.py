@@ -13,6 +13,7 @@ from tests.support import Scripts, compiler, target_name  # noqa: F401
 # Reordering and removal distinguish a fresh lookup from a stale position.
 SOURCE = '''
 $runtime_checks
+
 let d:dict<string int64>=["a"->0]
 replace=():>int64=>{d=["a"->100]; return 0}
 apply=():>int64=>{d["a"]+=replace(); return d["a"]}
@@ -119,7 +120,7 @@ def test_differential_dict_effect(compiler, tmp_path, mode, case, spelling):
     if spelling == 'bare':
         source = source.replace('+=replace()', '+=replace').replace('[pick()][at()]', '[pick][at]')
     if '$runtime_checks' not in source:
-        source = '$runtime_checks\n' + source
+        source = '$runtime_checks\n\n' + source
     path = tmp_path / 'dict.dewy'
     path.write_text(source)
     binary = tmp_path / mode

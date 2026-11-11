@@ -2,6 +2,8 @@
 # Account transfers in both directions at once: lock_all takes both locks in one canonical order,
 # so the tasks cannot wait on each other, and money is neither made nor lost. The same account
 # twice is DuplicateLock, never two places into one balance.
+$runtime_checks
+
 transfer = (src:Mutex<int64> dst:Mutex<int64> amount:int64):>int64 | Canceled | DuplicateLock => {
     let [a b] = @(lock_all(src dst)) or_throw
     a -= amount
@@ -33,5 +35,3 @@ main = () => {
     let [r s t] = @(lock_all(accounts[0] accounts[1] accounts[2])) or_throw
     printl"{r} {s} {t}"
 }
-
-$runtime_checks

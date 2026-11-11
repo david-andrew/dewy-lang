@@ -1,4 +1,5 @@
 $explicit_cancellation
+
 outcome=(kind:int64):>int64|Missing|Canceled=>if kind =? 0 Canceled else 9
 listed=(kind:int64)=>outcome(kind) ??<Missing> 0
 main=()=>{printl(listed(1))}

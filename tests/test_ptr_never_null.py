@@ -14,8 +14,12 @@ PAGE_C = '''const pageC = {imports: (mem) => ({
   strlen: (p) => { const m = new Uint8Array(mem().buffer); let n = Number(p); while (m[n]) n++; return BigInt(n - Number(p)); },
 })};
 '''
-PAGE_PROGRAM = '''page_address=(p:ptr<uint8>):>uint64 => $extern
-strlen=(s:ptr<uint8>):>uint64 => $extern
+PAGE_PROGRAM = '''$runtime_checks
+
+$extern
+page_address=(p:ptr<uint8>):>uint64
+$extern
+strlen=(s:ptr<uint8>):>uint64
 main=():>void=>$unsafe {
     let empty:array<uint8>=[]
     let rows:array<array<uint8>>=[[104 105 0]]
@@ -28,7 +32,6 @@ main=():>void=>$unsafe {
     printl(strlen((unset as array<uint8>).ptr) strlen(rows[0].ptr) strlen((names[0] as array<uint8>).ptr))
     printl(page_address(rows[0].ptr + 1) - page_address(rows[0].ptr) rows[0].ptr[1])
 }
-$runtime_checks
 '''
 
 
@@ -64,7 +67,9 @@ def test_ptr_never_null_arm64(compiler, tmp_path, release):
     qemu = shutil.which('qemu-aarch64') or shutil.which('qemu-aarch64-static')
     if qemu is None:
         pytest.skip('QEMU is needed to run an ARM64 build')
-    source = '''first=(p:ptr<uint8>):>uint8 => $unsafe p[0]
+    source = '''$runtime_checks
+
+first=(p:ptr<uint8>):>uint8 => $unsafe p[0]
 main=():>void=>$unsafe {
     let names:array<string>=["dewy"]
     names.resize(2)
@@ -76,7 +81,6 @@ main=():>void=>$unsafe {
     let p=zeroed.ptr
     printl(zeroed.length first(rows[0].ptr) rows[0].ptr[1] (p + 0) =? p)
 }
-$runtime_checks
 '''
     flags = ['--target', target_name('linux-arm64'), *(['--release'] if release else [])]
     binary = build(compiler, tmp_path, source, flags)

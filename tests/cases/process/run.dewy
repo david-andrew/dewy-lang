@@ -1,6 +1,8 @@
 # modes: native native-release
 # A child's status: its exit code, 128 + n when signal n ended it, and 127 when its program
 # could not be run (there is no PATH search: a program is a path).
+$runtime_checks
+
 main=():>void=>{
     printl(run("/bin/sh" ["-c" "exit 0"]))
     printl(run("/bin/sh" ["-c" "exit 3"]))
@@ -15,5 +17,3 @@ main=():>void=>{
     if status is? (SpawnError|Canceled) exit(1)
     printl(status+1)
 }
-
-$runtime_checks

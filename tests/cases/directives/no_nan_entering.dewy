@@ -3,13 +3,14 @@
 # caller (or checked there), and a field read in the scope is tested first or
 # checked where it is used.
 $runtime_checks
+
 Reading:type=[value:float64]
+$no_nan
 half=(x:float64):>float64=>{
-    $no_nan
     x*0.5
 }
+$no_nan
 scaled=(r:Reading):>float64=>{
-    $no_nan
     let v=r.value
     if v =? v return v*2.0
     0.0

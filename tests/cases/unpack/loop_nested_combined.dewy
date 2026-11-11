@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{let total:int64=0
 let rows:array<array<array<int64 length=2> length=1>>=[[[20 1]] [[2 19]] [[99 99]]]
 loop i in [0..3) and [[x y]] in rows and i <? 2 {
@@ -6,5 +8,3 @@ total+=x+y if i =? 0 continue
 }
 return total}
 main=()=>exit(run())
-
-$runtime_checks

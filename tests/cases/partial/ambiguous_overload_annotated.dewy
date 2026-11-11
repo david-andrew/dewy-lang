@@ -1,4 +1,6 @@
 # The binding's callable type picks the overload a partial application takes.
+$runtime_checks
+
 add=((a:int64 b:int64):>int64=>a+b) & ((a:int64 b:string):>string=>"{a}{b}")
 main=()=>{
     let f:(b:string:>string)=@add(1)
@@ -6,5 +8,3 @@ main=()=>{
     printl(f("x"))
     printl(g(2))
 }
-
-$runtime_checks

@@ -6,7 +6,7 @@ import subprocess
 import pytest
 
 # (programs that keep runtime checks for their unproven obligations)
-RUNTIME_CHECKS = '\n$runtime_checks\n'
+RUNTIME_CHECKS = '$runtime_checks\n\n'
 
 
 @pytest.fixture(scope='module')
@@ -19,6 +19,7 @@ def compiler():
 
 def test_imported_strict_body_is_checked(compiler, tmp_path):
     (tmp_path / 'strict.dewy').write_text('''$explicit_copies
+
 bad=():>int64=>{
     let a:array<int64>=[42]
     let b=a
@@ -46,19 +47,20 @@ def test_module_local_policy_and_owned_call(compiler, tmp_path, strict_caller):
         directive = '$explicit_copies\n'
     else:
         library = '''$explicit_copies
+
 change=(values:array<int64>):>int64=>{values[0]=99 return values[0]}
 '''
         directive = ''
-    (tmp_path / 'library.dewy').write_text(library + RUNTIME_CHECKS)
+    (tmp_path / 'library.dewy').write_text((RUNTIME_CHECKS) + (library))
     source = tmp_path / 'main.dewy'
-    source.write_text((directive + '''import p"library.dewy" as library
+    source.write_text((RUNTIME_CHECKS) + (directive + '''import p"library.dewy" as library
 main=():>void=>exit(entry()) entry=():>int64=>{
     let xs:array<int64>=[42]
     $runtime_assert library.change(xs)=?99
     $runtime_assert xs[0]=?42
     return 0
 }
-''') + RUNTIME_CHECKS)
+'''))
     program = tmp_path / 'program'
     result = subprocess.run([compiler, 'build', source, '-o', program],
                             capture_output=True, text=True, timeout=30)

@@ -1,5 +1,7 @@
 # Tier 5 / 107_static_files / milestone 42
 # Acceptance: A tiny static file server over a request script: request paths joined to the site root are confined (root.confine(p) or_throw) or guarded (root.contains(p)) before any file operation, SafePath parameters take only proven paths, and traversal attempts get 403.
+$runtime_checks
+
 Response:type = [status:int reason:string kind:string body:string]
 
 const root = p"site"
@@ -100,5 +102,3 @@ main = () => {
         }
     }
 }
-
-$runtime_checks

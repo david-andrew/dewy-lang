@@ -1,6 +1,7 @@
 # modes: native
 # `$no_deadlocks`: an spsc end's reserve gets the reservation message too.
 $no_deadlocks
+
 main = () => {
     let [tx rx] = spsc<int64 1>().split
     match tx.reserve {

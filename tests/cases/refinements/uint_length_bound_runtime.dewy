@@ -1,4 +1,6 @@
 # exit: 101
+$runtime_checks
+
 get=(b:array<int64> i:uint64<(<? b.length)>):>int64=>b[i]
 use=(xs:array<int64> k:uint64)=>printl(get(xs k))
 main=()=>{
@@ -6,4 +8,3 @@ main=()=>{
     use(xs 2)
     use(xs 18446744073709551615)
 }
-$runtime_checks

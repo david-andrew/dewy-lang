@@ -33,31 +33,26 @@ def make_pack(tmp_path):
 
 def test_a_program_can_name_its_rules(compiler, tmp_path):
     make_pack(tmp_path)
-    ran = run(compiler, tmp_path, """$time.rules = 'test.bin'
-const m = zoned"2026-07-01T12:00[Test/Zone]"
-printl(m)
-let name = "Test/Link"
-printl(zone(name))
-""")
+    ran = run(compiler, tmp_path, '$time.rules = \'test.bin\'\n\nconst m = zoned"2026-07-01T12:00[Test/Zone]"\nprintl(m)\nlet name = "Test/Link"\nprintl(zone(name))\n')
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout.splitlines() == ['2026-07-01T12:00:00+03:00[Test/Zone]', 'Test/Link']
-    ran = run(compiler, tmp_path, "$time.rules = 'test.bin'\nprintl(zone\"America/New_York\")\n")
+    ran = run(compiler, tmp_path, '$time.rules = \'test.bin\'\n\nprintl(zone"America/New_York")\n')
     assert ran.returncode != 0
     assert 'no time zone is called America/New_York' in ran.stderr
 
 
 def test_the_pack_is_checked(compiler, tmp_path):
     (tmp_path / 'bad.bin').write_text('not a pack')
-    ran = run(compiler, tmp_path, "$time.rules = 'bad.bin'\nprintl(zone\"UTC\")\n")
+    ran = run(compiler, tmp_path, '$time.rules = \'bad.bin\'\n\nprintl(zone"UTC")\n')
     assert ran.returncode != 0
     assert 'is not a rule pack' in ran.stderr
-    ran = run(compiler, tmp_path, "$time.rules = 'missing.bin'\nprintl(zone\"UTC\")\n")
+    ran = run(compiler, tmp_path, '$time.rules = \'missing.bin\'\n\nprintl(zone"UTC")\n')
     assert ran.returncode != 0
     assert 'cannot read' in ran.stderr
 
 
 def test_rules_are_the_main_files_to_say(compiler, tmp_path):
-    (tmp_path / 'other.dewy').write_text("$time.rules = 'x.bin'\nshown = () => 1\n")
+    (tmp_path / 'other.dewy').write_text("$time.rules = 'x.bin'\n\nshown = () => 1\n")
     ran = run(compiler, tmp_path, 'import p"other.dewy" as other\nprintl(other.shown)\n')
     assert ran.returncode != 0
     assert 'top of the entry file' in ran.stderr

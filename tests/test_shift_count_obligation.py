@@ -26,7 +26,7 @@ FORMS = {
 
 @pytest.mark.parametrize('form', sorted(FORMS))
 def test_unguarded_rejected_bulletproof(compiler, tmp_path, form):
-    result = run(compiler, tmp_path, '$bulletproof\n' + MAIN + FORMS[form] + '}\n')
+    result = run(compiler, tmp_path, '$bulletproof\n\n' + MAIN + FORMS[form] + '}\n')
     assert result.returncode != 0 and 'cannot prove the shift count is >= 0' in result.stderr, result.stdout + result.stderr
 
 
@@ -40,7 +40,7 @@ def test_unguarded_panics(compiler, tmp_path, scope, op):
 
 
 def test_negative_count_refuted(compiler, tmp_path):
-    result = run(compiler, tmp_path, '$bulletproof\n' + MAIN + '    if n >=? 0 { printl(x << (n - 10)) }\n}\n')
+    result = run(compiler, tmp_path, '$bulletproof\n\n' + MAIN + '    if n >=? 0 { printl(x << (n - 10)) }\n}\n')
     assert result.returncode != 0 and 'the shift count is negative' in result.stderr, result.stdout + result.stderr
 
 
@@ -51,6 +51,7 @@ def test_closed_row_needs_the_guard(compiler, tmp_path):
 
 
 ACCEPT = '''$bulletproof
+
 g = (x:int n:int):>(int | OutOfMemory) & allocates => if n >=? 0 x << n else 0
 h = (x:int n:uint8):>(int | OutOfMemory) & allocates => x >> n
 ''' + MAIN + '''    let y = x

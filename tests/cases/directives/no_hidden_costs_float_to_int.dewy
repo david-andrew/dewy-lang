@@ -1,7 +1,8 @@
 # A float to an integer fails for NaN, an infinity or a value out of range: an obligation the lane rejects unproven.
 $no_hidden_costs
+
 toint = (a:float64):>int64 => int64(a)
+$no_hidden_costs=false
 main = ():>void & no panics => {
-    $no_hidden_costs=false
     printl"{toint(1.0)}"
 }

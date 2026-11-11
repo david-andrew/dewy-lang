@@ -8,7 +8,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 
 def build(compiler, tmp_path, source, *, strict=False, release=False, runtime=False):
     path = tmp_path / 'aggregate.dewy'
-    path.write_text(source + ('\n$runtime_checks\n' if runtime else ''))
+    path.write_text(('$runtime_checks\n\n' if runtime else '') + (source))
     return subprocess.run([compiler, *(['--internal-fact-policy=require-static'] if strict else []), 'build', path, '-o', tmp_path / 'aggregate',
                            *(['--release'] if release else [])], text=True, capture_output=True)
 

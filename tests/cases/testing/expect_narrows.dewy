@@ -1,4 +1,6 @@
 # The code after an expectation may assume it: `is?` narrows, as after a guard.
+$runtime_checks
+
 twice = (value:int64?):>void => {
     $expect value is? int64
     printl("{value * 2}")
@@ -15,5 +17,3 @@ run = () => {
     return 0
 }
 main=()=>exit(run())
-
-$runtime_checks

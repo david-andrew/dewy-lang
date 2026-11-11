@@ -32,7 +32,7 @@ def test_small_word_progress_has_opt_out(compiler, tmp_path):
     source = 'f=():>void & no panics => {loop i in int64(0).. {let x=i;}}\nmain=()=>f()\n'
     result = check(compiler, tmp_path, source)
     assert result.returncode == 0, result.stdout + result.stderr
-    result = check(compiler, tmp_path, '$no_assumed_bounds\n' + source)
+    result = check(compiler, tmp_path, '$no_assumed_bounds\n\n' + source)
     assert result.returncode != 0, result.stdout + result.stderr
 
 

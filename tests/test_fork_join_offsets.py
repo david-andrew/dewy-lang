@@ -12,6 +12,8 @@ from tools.cores import on_cores
 def test_fork_offsets_and_mutated_index(compiler, tmp_path, release, workers):
     source = tmp_path / 'offsets.dewy'
     source.write_text('''
+$runtime_checks
+
 f=(n:int64):>int64=>{
  if n <? 2 return n
  let r=parallel_range(2 (i:int64)=>f(n-1-i))
@@ -34,7 +36,6 @@ main=()=>{
  $runtime_assert a[1] =? -9223372036854775808
  printl"ok"
 }
-$runtime_checks
 ''')
     binary = tmp_path / 'offsets'
     built = subprocess.run([compiler, 'build', source, '-o', binary] + (['--release'] if release else []),
@@ -51,12 +52,13 @@ $runtime_checks
 def test_fork_offset_overflow(compiler, tmp_path, expression, value):
     source = tmp_path / 'overflow.dewy'
     source.write_text('''
+$runtime_checks
+
 f=(n:int64):>void=>{
  let r=parallel_range(2 (i:int64):>int64=>EXPR)
  printl"{r[0]} {r[1]}"
 }
 main=()=>{f(VALUE)}
-$runtime_checks
 '''.replace('EXPR', expression).replace('VALUE', value))
     binary = tmp_path / 'overflow'
     built = subprocess.run([compiler, 'build', source, '--release', '-o', binary],

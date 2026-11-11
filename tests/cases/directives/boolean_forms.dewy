@@ -1,12 +1,13 @@
 # Boolean settings: `$name` and `$name=true` turn a setting on, `$name=false` off.
 $runtime_checks=true
 $explicit_copies=true
+
+$runtime_checks
 first=(xs:array<int64> i:int64):>int64=>{
-    $runtime_checks
     return xs[i]
 }
+$explicit_copies=false
 second=(xs:array<int64> i:int64):>int64=>{
-    $explicit_copies=false
     let ys=xs
     ys[0]=0
     return xs[i]+ys[i]

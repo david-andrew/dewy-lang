@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{
 let up=(0,3..10] let down=(10,7..0) let singleton=(5..5] let adjacent=(5..6)
 let a=[loop x in up x] let b=[loop x in down x]
@@ -8,5 +10,3 @@ return if a =? [3 6 9] and b =? [7 4 1] and c.length =? 0 and d.length =? 0
 and 0 not in? up and 3 in? up and 10 not in? down and 7 in? down and combined =? 24 42 else 1
 }
 main=()=>exit(run())
-
-$runtime_checks

@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{
     let mode="fast"
     let work=($capture mode)=>{mode="slow" return match mode {<"fast">=>0 <"slow">=>42}}
@@ -6,5 +8,3 @@ run=()=>{
     return match mode {<"fast">=>result}
 }
 main=()=>exit(run())
-
-$runtime_checks

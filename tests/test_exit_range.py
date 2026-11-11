@@ -40,5 +40,5 @@ def test_clamped_or_masked_code_proves_and_runs(compiler, tmp_path, code):
 
 
 def test_runtime_checks_turns_the_obligation_into_a_check(compiler, tmp_path):
-    result = run(compiler, tmp_path, 'main = () => exit(args().length * 300)\n\n$runtime_checks\n')
+    result = run(compiler, tmp_path, '$runtime_checks\n\nmain = () => exit(args().length * 300)\n\n')
     assert result.returncode == 101, result.stderr

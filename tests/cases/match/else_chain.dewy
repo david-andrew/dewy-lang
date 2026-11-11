@@ -1,6 +1,6 @@
 # exit: 42
+$runtime_checks
+
 pick=(v:int64|string flag:bool)=>match v {n:int64=>n} else if flag 2 else 0
 run=()=>pick(40 false)+pick("text" true)+pick("text" false)
 main=()=>exit(run())
-
-$runtime_checks

@@ -1,8 +1,10 @@
 # modes: native native-release
 # Taking a raw pointer or reinterpreting one changes no value: guards on
 # other locals still hold, and C fills only the elements.
-strnlen=(s:ptr<uint8> max:uint32):>uint64 => $extern
-memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8> => $extern
+$extern
+strnlen=(s:ptr<uint8> max:uint32):>uint64
+$extern
+memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8>
 
 main=():>void=>{
     let data:array<uint8>=bytes("hello")

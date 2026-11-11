@@ -1,6 +1,8 @@
 # modes: native native-release
 # A deadline cancels a service mid-conversation: the client's request gives Canceled, the server
 # stops and closes what is left, and nothing stays waiting.
+$runtime_checks
+
 slow = (n:int64):>int64 => {
     let x:int64 = 0
     loop i in [0..2000000) { x += i % 7 }
@@ -21,5 +23,3 @@ main = () => {
     printl"{within(50ms @talk()) is? Timeout}"
     printl"{within(50ms @churn()) is? Timeout}"
 }
-
-$runtime_checks

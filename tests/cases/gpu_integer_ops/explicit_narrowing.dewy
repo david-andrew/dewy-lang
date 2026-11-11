@@ -1,5 +1,6 @@
 # An explicit narrowing a guard proves (`int32(id)`, `int16(x)`) is a plain value in GPU code.
 $runtime_checks
+
 P:type=[dst:GpuBuffer<int32> mask:int32]
 pair=(id:int64 u:P):>void=>{
     if id <? 0 or id >=? 1048576 or id >=? u.dst.length { return }

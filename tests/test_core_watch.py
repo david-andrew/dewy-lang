@@ -113,7 +113,9 @@ def test_core_watch_program(compiler, tmp_path):
 def test_core_watch_tests(compiler, tmp_path, flags):
     source = tmp_path / 'tests.dewy'
     helper = tmp_path / 'helper.dewy'
-    program = '''from p"helper.dewy" import answer
+    program = '''$runtime_checks
+
+from p"helper.dewy" import answer
 let count=0
 main=()=>panic("must not run main")
 update=(dt:float64):>void=>panic("must not update")
@@ -126,7 +128,6 @@ selected_answer = () => {
 }
 $test
 excluded = () => panic("must not run excluded test")
-$runtime_checks
 '''
     save(source, program)
     save(helper, 'answer=()=>42')
@@ -224,7 +225,9 @@ waiting = () => {
         watcher.close()
 
 
-GAME = '''from p"helper.dewy" import label
+GAME = '''$runtime_checks
+
+from p"helper.dewy" import label
 State:type=[count:int64]
 let state=State[0]
 let values:array<int64>=[20 22]
@@ -235,7 +238,6 @@ update=(dt:float64):>void=>{
     sleep(5ms);
 }
 draw=():>void=>clear(BLACK)
-$runtime_checks
 '''
 
 
@@ -277,7 +279,7 @@ def test_core_watch_exact_division(compiler, tmp_path):
     watcher = Watch(compiler, source, game=True)
     try:
         before = int(watcher.expect(r'tick count=(\d+) label=0\.5 value=22').group(1))
-        save(helper, 'label=()=>"{1/2}"\n$runtime_checks')
+        save(helper, '$runtime_checks\n\nlabel=()=>"{1/2}"\n')
         watcher.expect(r'reloaded in \d+ ms:')
         after = int(watcher.expect(r'tick count=(\d+) label=1/2 value=22').group(1))
         assert after > before, watcher.output
@@ -490,7 +492,9 @@ fs=(v:Out u:U):>vec4=>''' + color + '\n'
 
     save(shader, shading('vec4(1 0 0 1)'))
     source = tmp_path / 'game.dewy'
-    save(source, '''from p"shaders.dewy" import V, U, vs, fs
+    save(source, '''$runtime_checks
+
+from p"shaders.dewy" import V, U, vs, fs
 let shading=shader(@vs @fs)
 let program=make_shader(shading)
 let triangle=mesh([V(vec2(-1 -1)) V(vec2(3 -1)) V(vec2(-1 3))])
@@ -505,7 +509,6 @@ let index=(32*64+32)*4
 printl"tick {count} program={program.prog} color={pixels[index]},{pixels[index+1]},{pixels[index+2]}"
 }
 }
-$runtime_checks
 ''')
     watcher = Watch(compiler, source, game=True)
     try:

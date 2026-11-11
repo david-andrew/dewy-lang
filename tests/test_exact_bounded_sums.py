@@ -9,6 +9,7 @@ def test_bounded_scalar_sums(compiler, tmp_path, release):
     source = tmp_path / 'sums.dewy'
     source.write_text('''$runtime_checks=false
 $no_assumed_bounds
+
 sum=(x:int32 n:int64<0 <=? n and n <=? 64>):>int64=>{
     let total:int64=0
     loop i in [0..n) {if i%2 =? 0 total+=x}
@@ -40,6 +41,7 @@ def test_unmodeled_updates_do_not_gain_sum_bounds(compiler, tmp_path, body):
     source = tmp_path / 'unknown.dewy'
     source.write_text('''$runtime_checks=false
 $no_assumed_bounds
+
 sum=(x:int32):>int64=>{let total:int64=0
 ''' + body + '\nreturn total}\nprintl(sum(1))\n')
     result = subprocess.run([compiler, 'build', source, '-o', tmp_path/'unknown'],
@@ -52,6 +54,7 @@ def test_overflowing_trip_total_is_rejected(compiler, tmp_path):
     source = tmp_path / 'overflow.dewy'
     source.write_text('''$runtime_checks=false
 $no_assumed_bounds
+
 sum=(x:int32):>int64=>{
     let total:int64=int64.max-1
     loop i in [0..2) {total+=x}

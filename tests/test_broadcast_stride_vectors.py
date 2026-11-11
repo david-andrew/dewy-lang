@@ -22,6 +22,7 @@ def run(binary, *args, sse=False):
 def test_broadcast_stride_cases_and_exact_fallback(compiler, tmp_path, release):
     source = tmp_path / 'rows.dewy'
     source.write_text('''$runtime_checks
+
 f=(a:NDArray<int64> b:NDArray<int64> c:NDArray<int64>):>array<int64>=>{
     let h:NDArray<int64>=max.(a .+ b .+ c .- 3 0)
     return h.data

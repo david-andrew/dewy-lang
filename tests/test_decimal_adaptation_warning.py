@@ -25,7 +25,9 @@ main=()=>{
 }
 '''
 
-QUIET = '''main=()=>{
+QUIET = '''$runtime_checks
+
+main=()=>{
     let total=0.0
     let stated:float64=0.3
     let exact=0.1
@@ -35,7 +37,6 @@ QUIET = '''main=()=>{
     exact+=0.2
     printl"{total} {stated =? 0.3} {exact =? 0.3}"
 }
-$runtime_checks
 '''
 
 

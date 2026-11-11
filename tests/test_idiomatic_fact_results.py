@@ -213,6 +213,7 @@ def test_idiomatic_result_rejected(compiler, tmp_path, name):
 def test_clamped_byte_slice_keeps_utf8_obligation(compiler, tmp_path):
     source = tmp_path / 'slice.dewy'
     source.write_text('''$runtime_checks
+
 prefix=(s:string):>string=>{
  let n=(s as array<uint8>).length
  s.byte_slice(0 if n <? 12 n else 12)

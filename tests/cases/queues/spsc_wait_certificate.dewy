@@ -1,5 +1,6 @@
 # modes: native
 $no_deadlocks
+
 main = () => {
     let [tx rx] = spsc<int64 1>().split
     tx.send(1) or_throw

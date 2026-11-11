@@ -2,7 +2,8 @@
 # Acceptance: Pass NUL-terminated byte buffers to libc strlen through ptr<uint8>,
 # compare the foreign lengths with Dewy lengths, and classify a realistic batch.
 # The array .ptr spelling is provisional: question 25(c).
-strlen = (s:ptr<uint8>):>uint64 => $extern
+$extern
+strlen = (s:ptr<uint8>):>uint64
 
 CString:type = [storage:array<uint8> length:uint64]
 

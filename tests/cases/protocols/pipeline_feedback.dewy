@@ -1,6 +1,8 @@
 # modes: native native-release
 # A pipeline with feedback. The stage task takes a Collatz step; the feedback
 # here sends each result back until it reaches 1. At most `window` items are in flight.
+$runtime_checks
+
 step = (n:int64):>int64 => if n % 2 =? 0 n // 2 else 3 * n + 1
 again = (n:int64):>array<int64> => if n =? 1 [] else [n]
 main = ():>void | Canceled => {
@@ -8,5 +10,3 @@ main = ():>void | Canceled => {
     let path = pipeline(2 seeds @step @again) or_throw
     printl"{path.length} {path}"
 }
-
-$runtime_checks

@@ -1,8 +1,8 @@
 # exit: 42
+$runtime_checks
+
 let calls:int64=0
 make=():>array<array<int64 length=1> length=2>=>{calls+=1 return [[20] [22]]}
 let [[x] [y]]=make
 run=()=>if calls =? 1 x+y else 1
 main=()=>exit(run())
-
-$runtime_checks

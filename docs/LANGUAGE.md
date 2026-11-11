@@ -1085,6 +1085,7 @@ Guards on locals and constant operands prove most obligations:
 
 ```dewy
 $finite_floats
+
 ratio = (a:float64 b:float64):>float64 => {
     if 1.0 <=? b and float64.min <=? a <=? float64.max return a/b   # proven: no check
     return 0.0
@@ -1650,8 +1651,9 @@ Temperatures in `°C` and `°F` (from `units`, beside `K`) count from an offset
 zero:
 
 ```dewy
-from units import K, °C, °F
 $runtime_checks              # dividing by a unit is checked
+
+from units import K, °C, °F
 let start = 20°C
 let later = start+15°C       # 35°C: a literal added to a point is a difference
 let rise = later-start       # 15°C: point - point is a difference
@@ -1816,7 +1818,7 @@ compiling, so it needs neither.
 
 `$time.zone = 'America/New_York'` pins the program to one zone in every module.
 Like `$time.rules` and `$time.zone_source`, it is program-wide: write it at the top
-of the entry file or as the first lines of any file's `main`. A non-entry file's
+of the entry file or directly before any file's `main` declaration. A non-entry file's
 settings apply only when that file is run as the entry. Other locations are compile
 errors. If the running `main` reaches another `main`, directly or transitively,
 conflicting settings are a compile error naming both files and values. `'system'` reads the
@@ -1910,8 +1912,8 @@ The inherited `big` module is a separate approximate-number library for idle gam
 
 ```dewy
 kelvin = (celsius:rational):>rational => celsius+273.15
+$runtime_checks          # a negative power checks its base is nonzero
 main = ():>void => {
-    $runtime_checks          # a negative power checks its base is nonzero
     let half = 1/2
 
     printl"{half+1/3}"  # 5/6
@@ -2373,10 +2375,11 @@ a method of a type with minted children cannot change its object yet.
 Custom records can define arithmetic and indexing with ordinary functions:
 
 ```dewy
+$runtime_checks   # store[i] checks its index, as an array's
+
 Point:type = [x:int y:int]
 __add__ = (a:Point b:Point):>Point => Point[a.x+b.x a.y+b.y]
 
-$runtime_checks   # store[i] checks its index, as an array's
 Store:type = <T>[values:array<T>]
 __index__ = <T>(store:Store<T> index:int64):>T => store.values[index]
 
@@ -2816,6 +2819,7 @@ Arrays can select elements with a stored `IntRange` or a stepped slice:
 
 ```dewy
 $runtime_checks                  # each selected index is checked
+
 let values = [10 20 30 40 50 60]
 let evens = values[0, 2..]       # [10 30 50]
 let backwards = values[5, 3..0] # [60 40 20]
@@ -2956,6 +2960,7 @@ Sets retain distinct members in insertion order:
 
 ```dewy
 $runtime_checks                  # the unpack checks the set has two elements
+
 let tags = set["visible" "moving" "visible"]
 tags.push("selected")
 if "moving" in? tags { printl"moving entity" }
@@ -3054,8 +3059,8 @@ obligation `>=? 0`, proven where the arguments show it (`zeros(2 3)`), and a
 shape with more elements than an `int64` counts runs out of memory:
 
 ```dewy
+$runtime_checks                  # the linear algebra calls below may panic
 main = () => {
-    $runtime_checks                  # the linear algebra calls below may panic
     let values:array<float64> = [3.0 1.0 1.0 2.0]
     let matrix = reshape(values 2 2)
     let saved = matrix
@@ -3210,6 +3215,7 @@ operations and calls fuse into one traversal without intermediate result arrays:
 
 ```dewy
 $runtime_checks                  # shapes are checked
+
 let xs = [1.0 4.0 9.0]
 let shifted = sqrt.(xs) .* 2.0 .+ 1.0       # [3.0 5.0 7.0]
 let mask = shifted .>=? 5.0                # [false true true]
@@ -3253,6 +3259,7 @@ length. Ordinary and fixed arrays also support dotted selection updates:
 
 ```dewy
 $runtime_checks                  # the range is checked
+
 positions[1..end] .+= 0.5
 positions[[true false true]] .*= 2.0
 ```
@@ -3280,6 +3287,7 @@ Put a range in its own brackets when selecting axes:
 
 ```dewy
 $runtime_checks                  # selections and exact element updates are checked
+
 let matrix = reshape([1 2 3 4 5 6] 2 3)
 let column = matrix[[..] 1]           # shape [2], values [2 5]
 let row = matrix[1 [..]]              # shape [3], values [4 5 6]
@@ -3379,6 +3387,7 @@ of known shapes is proven as a CPU array's is.
 
 ```dewy
 $runtime_checks                  # shapes are checked
+
 let xs = gpu([1.0 2.0 3.0])
 let shifted = xs .* 2.0 .+ 1.0
 $runtime_assert(cpu(shifted).data =? [3.0 5.0 7.0])
@@ -3419,6 +3428,7 @@ collects its results in input order:
 
 ```dewy
 $runtime_checks                  # saved[0] is checked
+
 let squares = [parallel i in [0..1000) i*i]
 let shifted = [parallel x in squares x+1]
 let saved = shifted
@@ -4162,7 +4172,7 @@ callable function.
 
 Program-wide settings (currently `$time.zone`, `$time.rules`,
 `$time.zone_source` and `$program.max_cores`) go at the top of the entry file or as
-the first lines of any file's `main`. A file's `main` settings configure the program
+a prefix directly before any file's `main` declaration. A file's `main` settings configure the program
 only when that file is the entry; a library can carry its own test configuration.
 Elsewhere these settings are a compile error naming the allowed locations. Calling another file's
 `main` directly or transitively requires their explicit program-wide settings to
@@ -4449,7 +4459,7 @@ sockets. The game library's WebSocket messages (`net.listen`, `net.connect`,
 
 ## Foreign functions
 
-A function whose body is the metatag `$extern` is a C function. Its signature is
+A function prefixed with `$extern` is a C function; its declaration has no body or `=>`. Its signature is
 the C one: fixed-width numbers, `bool`, raw pointers `ptr<T>`, C structs (records
 with C's layout, below), and as
 parameters also strings (passed as a zero-terminated `char *`) and function types
@@ -4457,9 +4467,12 @@ parameters also strings (passed as a zero-terminated `char *`) and function type
 keyword arguments give the C name and the library:
 
 ```dewy
-strlen = (s:ptr<uint8>):>uint64 => $extern
-getenv = (name:string):>ptr<uint8>? => $extern
-sleep_ms = (ms:uint32):>void => $extern(name='Sleep' lib='kernel32')
+$extern
+strlen = (s:ptr<uint8>):>uint64
+$extern
+getenv = (name:string):>ptr<uint8>?
+$extern(name='Sleep' lib='kernel32')
+sleep_ms = (ms:uint32):>void
 ```
 
 Without `lib=`, or with `lib='c'`, the function is in the C library
@@ -4480,7 +4493,7 @@ rejected, because it could violate their storage contract.
 the Dewy side. `p[i]` reads and writes the `i`th `T` from `p`, `p + n` is `n`
 elements on, and `p as ptr<U>` reinterprets it. A C function's result is the
 claim of its declaration: one declared `ptr<T>` must not return null, and a
-refined result (`toupper = (c:int32):>int32<b => b >=? 0 and b <=? 255> => $extern`)
+refined result (`$extern` before `toupper = (c:int32):>int32<b => b >=? 0 and b <=? 255>`)
 is trusted to satisfy its refinement, so `uint8($unsafe toupper(c))` needs no
 check. A parameter cannot state a refinement: check the value in Dewy first.
 `xs.ptr` (provisional spelling) is the pointer to an array's elements, for C to
@@ -4493,7 +4506,8 @@ fields in order, each at its natural alignment, so C fills one in place:
 
 ```dewy
 TimeVal:type = [seconds:int64 microseconds:int64]
-gettimeofday = (now:ptr<TimeVal> zone:ptr<uint8>?):>int32 => $extern
+$extern
+gettimeofday = (now:ptr<TimeVal> zone:ptr<uint8>?):>int32
 main = ():>void => $unsafe {
     let now:array<TimeVal> = [TimeVal[0 0]]
     gettimeofday(now.ptr none);
@@ -4508,7 +4522,8 @@ x86-64 Linux, AAPCS64 on arm64), whatever its size:
 
 ```dewy
 DivT:type = [quot:int32 rem:int32]
-div = (numerator:int32 denominator:int32):>DivT => $extern
+$extern
+div = (numerator:int32 denominator:int32):>DivT
 main = ():>void => $unsafe {
     let d = div(47 5)
     printl(d.quot d.rem)   # 9 2
@@ -4532,7 +4547,8 @@ nullable pointer, one word wherever it sits (zero is `none`), so C fills a
 `T **` out-parameter, an array of them or a record's field in place:
 
 ```dewy
-strtol = (s:ptr<uint8> stop_at:ptr<ptr<uint8>?> base:int32):>int64 => $extern
+$extern
+strtol = (s:ptr<uint8> stop_at:ptr<ptr<uint8>?> base:int32):>int64
 main = ():>void => $unsafe {
     let text:array<uint8> = bytes("12ab")
     text.push(0)
@@ -4551,7 +4567,8 @@ compiler cannot check what foreign code does, so the boundary marks where a
 person must. No bundle may hold `$unsafe`. A safe wrapper confines it:
 
 ```dewy
-getpid = ():>int32 => $extern
+$extern
+getpid = ():>int32
 pid = ():>int32 => $unsafe getpid()
 ```
 
@@ -4559,7 +4576,7 @@ A foreign call is opaque to effect rows: a function declared `& no_effects`, or
 any closed row, cannot call one. It may block, so a `parallel` body cannot call
 one either; tasks can. On Linux, a program with tasks that calls C loads C's
 library on its main thread before its first task. A row written on the `$extern` declaration
-itself (`labs = (x:int64):>int64 & no_effects => $extern`) is trusted instead, as
+itself (`$extern` before `labs = (x:int64):>int64 & no_effects`) is trusted instead, as
 part of the unsafe claim.
 
 `$export` before a module function, on its line or the line above, gives it the
@@ -4568,7 +4585,8 @@ names its symbol where the target exports one (WebAssembly builds export it to
 the page). `@f` passes it where a C function type is expected:
 
 ```dewy
-qsort = (base:ptr<int32> count:uint64 size:uint64 compare:((a:ptr<int32> b:ptr<int32>):>int32)):>void => $extern
+$extern
+qsort = (base:ptr<int32> count:uint64 size:uint64 compare:((a:ptr<int32> b:ptr<int32>):>int32)):>void
 
 $export
 ascending = (a:ptr<int32> b:ptr<int32>):>int32 => $unsafe {
@@ -4580,8 +4598,8 @@ An exported function takes and returns the same kinds of values, `ptr<T>?`
 included. Native executables do not export symbols yet, so C reaches an
 exported function only through a pointer that Dewy gives it.
 
-A function whose body is `$intrinsic` states one the compiler provides
-(`sqrt = (x:float64):>float64 => $intrinsic`); any other name is an error.
+A function prefixed with `$intrinsic` declares one the compiler provides
+(`$intrinsic` before `sqrt = (x:float64):>float64`); any other name is an error.
 
 ## Loops, text and optional values
 
@@ -5074,6 +5092,7 @@ over constant ranges); anything else is reported with the reason.
 
 ```dewy
 $no_hidden_costs
+
 count = ():>int64 | OutOfMemory => {
     let a = arena(4096) or_throw
     let n = $allocator(@a) {
@@ -5479,14 +5498,32 @@ none. (Both spellings are provisional.)
 ## Directives
 
 A setting is a metatag on a line of its own: `$name` or `$name = true` turns it
-on and `$name = false` turns it off. It holds throughout the scope it is written
-in, wherever in that scope: the module at file level, a function in its body,
-or any other block. A function's own setting also covers its generated entry
-checks, including parameter unpacking and shape validation. Refined arguments
-remain obligations at their calls. An inner scope may change it again. A scope sets each
-setting at most once, and the value must be a literal `true` or `false`. Settings
-live in the source: the command line cannot set them (it sets only the build
-mode and the target, under "Modules and games").
+on and `$name = false` turns it off. A tag or label goes immediately before the
+construct it applies to: a declaration, statement, loop or block. A declaration's
+setting covers its whole body and generated entry checks, including parameter
+unpacking and shape validation. Refined arguments remain obligations at their
+calls. Prefix a block to cover several statements; a setting inside a block
+covers the following construct. An inner prefix may change it again. Each
+construct sets a setting at most once, with a literal `true` or `false`.
+
+A module header goes at file start or after the initial imports, with a blank
+line after its tag block. With no blank line before a declaration, the tags are
+that declaration's prefixes. This blank-line rule is provisional (D4 Q19).
+
+```dewy
+$runtime_checks
+
+$no_nan
+half = (x:float64):>float64 => x*0.5
+main = () => {
+    $runtime_checks=false
+    { printl(half(2.0)) }
+}
+```
+
+Settings are fixed at compile time and live in source: the command line sets
+only the build mode and target (under "Modules and games"). Whether settings
+may depend on run-time values remains open (D4 Q7).
 
 An obligation is a fact an operation needs: an index or slice in bounds (a
 string's counted in graphemes, as `text.length` counts), a nonzero divisor, a value that fits a narrower integer, an argument meeting a refined
@@ -5521,7 +5558,7 @@ development toolchain does neither.
 A metatag read in a parameter's default is read where the function is called, so
 a library can take the caller's setting: `f = (zone:string|none=$time.zone) => ...`
 gives the program's zone, or `none`. Valued settings hold a name in quotes.
-Lexical ones, such as `$time.gap` and `$time.fold`, hold throughout their scope.
+Lexical ones, such as `$time.gap` and `$time.fold`, cover the construct they prefix.
 
 ### Making code prove
 
@@ -5633,7 +5670,7 @@ $careful = {
 }
 ```
 
-Writing `$careful` holds every setting in the bundle throughout that scope.
+Prefixing a construct with `$careful` holds every setting in the bundle throughout that construct.
 Inside it, a setting that contradicts the bundle is an error; `$careful = false`
 opts a nested scope out of the whole bundle first. `$default_row = <effect row>`
 in a bundle gives each function declared in its scope without an effect row
@@ -5651,7 +5688,7 @@ The library defines `$no_hidden_costs`, the strict lane (lib/directives.dewy):
 (a detach allocates), no implicit costly copy, no runtime check and no call of
 code that may panic (the `panics` effect, "Functions and values"), and it
 cannot use `$runtime_checks` or `$prototype`. A function that needs more opts out with
-`$no_hidden_costs = false` in its body, or declares a row of its own. The effect
+`$no_hidden_costs = false` before its declaration, or declares a row of its own. The effect
 inventory is still partial (see "Functions and values"): an operation it does
 not classify is rejected there. `$realtime` is reserved for a stronger future bundle.
 
@@ -5851,6 +5888,7 @@ A line can omit its x array to use sample indices. For example:
 
 ```dewy
 $runtime_checks          # chart_image panics if the renderer fails
+
 let chart = Chart[title="Measurements" equal_axes=true
 
     legend_at=LegendAt.bottom_left]

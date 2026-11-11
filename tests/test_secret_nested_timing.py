@@ -8,7 +8,9 @@ from tests.support import compiler
 from tests.test_secrets_taken import _counter
 from tools.compiler import speed
 
-SOURCE = r'''
+SOURCE = '''
+$runtime_checks
+
 Login:type=[pass:secret<string>]
 Pair:type=[first:secret<string> last:secret<string>]
 PlainPair:type=[first:string last:string]
@@ -66,7 +68,6 @@ main=(args:array<string>)=>{
     }
     printl(hits)
 }
-$runtime_checks
 '''
 
 
@@ -92,12 +93,13 @@ def test_secret_nested_comparison_instructions(compiler, tmp_path, release):
 
 def test_secret_integer_dictionary_keys_use_full_word_tags(compiler, tmp_path):
     source, binary = tmp_path / 'keys.dewy', tmp_path / 'keys'
-    source.write_text('''main=()=>{
+    source.write_text('''$runtime_checks
+
+main=()=>{
 let keys=dict<secret<int64> int64>()
 keys[secret(1)]=42
 printl(keys[secret(1)])
 }
-$runtime_checks
 ''')
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary],
                            capture_output=True, text=True, timeout=60)
@@ -111,7 +113,9 @@ $runtime_checks
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=10)
     assert (ran.returncode, ran.stdout, ran.stderr) == (0, '42\n', '')
 
-MATH_SOURCE = r'''
+MATH_SOURCE = '''
+$runtime_checks
+
 main=(args:array<string>)=>{
     let a=(to_int(args[3]) ?? 1) << 16384
     let alternatives=[a or 1 a or (1 << 16352)]
@@ -126,7 +130,6 @@ main=(args:array<string>)=>{
     }
     printl(hits)
 }
-$runtime_checks
 '''
 
 

@@ -6,6 +6,7 @@ import subprocess
 from tests.support import compiler  # noqa: F401 (fixture)
 
 SOURCE = '''$bulletproof
+
 Reading:type = int32<r => -100000 <=? r and r <=? 100000>
 refined = (r:Reading):>string & allocates & no panics => "r {r}"
 specified = (i:int64):>string & allocates & no panics => "{fmt'5'(i)}|{fmt'>8'(i)}|{fmt'08'(i)}|{fmt'x'(i)}"

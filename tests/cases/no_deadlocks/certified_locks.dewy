@@ -2,6 +2,8 @@
 # `$no_deadlocks`: lock waits certified by the checked order (lock_all, and one nesting order on
 # every path) and structured joins of tasks whose waits are certified.
 $no_deadlocks
+$runtime_checks
+
 transfer = (src:Mutex<int64> dst:Mutex<int64> amount:int64):>void | DuplicateLock | Canceled => {
     let [a b] = @(lock_all(src dst)) or_throw
     a -= amount
@@ -27,5 +29,3 @@ main = ():>void | DuplicateLock | Canceled | OutOfMemory => {
     let both = (a or_throw) + (b or_throw)
     printl"{both} {audit(x y)}"
 }
-
-$runtime_checks

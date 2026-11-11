@@ -13,6 +13,7 @@ def run(compiler, tmp_path, source):
 
 def test_strict_today_is_a_date_or_says_why(compiler, tmp_path):
     source = """$time.zone = 'UTC'
+
 match strict_today {
     d:Date => printl"date {d =? today or d + 1day =? today}"
     a:AmbiguousToday => printl"ambiguous {a.dates.first <? a.dates.last}"
@@ -32,13 +33,13 @@ def test_strict_today_warns_like_today_without_a_zone(compiler, tmp_path):
     ran = run(compiler, tmp_path, 'printl"{strict_today ?? today}"\n')
     assert ran.returncode == 0, ran.stderr
     assert '`strict_today` has no time zone here' in ran.stderr
-    control = run(compiler, tmp_path, "$time.zone = 'UTC'\nprintl\"{strict_today ?? today}\"\n")
+    control = run(compiler, tmp_path, '$time.zone = \'UTC\'\n\nprintl"{strict_today ?? today}"\n')
     assert control.returncode == 0, control.stderr
     assert 'time zone' not in control.stderr
 
 
 def test_today_stays_a_plain_date(compiler, tmp_path):
-    ran = run(compiler, tmp_path, "$time.zone = 'UTC'\nlet d:Date = today\nprintl\"{d}\"\n")
+    ran = run(compiler, tmp_path, '$time.zone = \'UTC\'\n\nlet d:Date = today\nprintl"{d}"\n')
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout.strip() in {str(dt.datetime.now(dt.timezone.utc).date()),
                                   str(dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=1))}
@@ -46,17 +47,13 @@ def test_today_stays_a_plain_date(compiler, tmp_path):
 
 def test_removed_today_names(compiler, tmp_path):
     for name in ('today_support', 'possible_todays'):
-        ran = run(compiler, tmp_path, f"$time.zone = 'UTC'\nprintl\"{{{name}}}\"\n")
+        ran = run(compiler, tmp_path, f'$time.zone = \'UTC\'\n\nprintl"{{{name}}}"\n')
         assert ran.returncode != 0, name
         assert name in ran.stderr
 
 
 def test_age_counts_to_today_by_default(compiler, tmp_path):
-    source = """$time.zone = 'UTC'
-let born = date"2000-02-29"
-printl"{age(born) =? age(born on=today())}"
-printl(age(born on=date"2027-02-28"))
-"""
+    source = '$time.zone = \'UTC\'\n\nlet born = date"2000-02-29"\nprintl"{age(born) =? age(born on=today())}"\nprintl(age(born on=date"2027-02-28"))\n'
     ran = run(compiler, tmp_path, source)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout.splitlines() == ['true', '26']

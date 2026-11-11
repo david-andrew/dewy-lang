@@ -1,6 +1,8 @@
 # Grid pathfinding: BFS for reachability, A* with terrain costs, path overlay.
 # '#' wall, '.' road (cost 1), '~' swamp (cost 5), 'S' start, 'G' goal.
 
+$runtime_checks
+
 MAP = """
 ##############################
 #S.........#.................#
@@ -141,5 +143,3 @@ main = () => {
     printl"A*: cost {astar.cost}, {astar.path.length - 1} steps, expanded {astar.expanded} cells"
     printl(render(g astar.path))
 }
-
-$runtime_checks

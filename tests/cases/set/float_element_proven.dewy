@@ -1,10 +1,11 @@
 # Literals, records built from them and elements built under `$no_nan` from
 # tested values need no check
 $runtime_checks=false
+
 P:type=[x:float64 y:float64]
 Q:type=[p:P n:int64]
+$no_nan
 add=(xs:array<P>):>set<P>=>{
-    $no_nan
     let s:set<P>=set[]
     loop p in xs {
         let a=p.x

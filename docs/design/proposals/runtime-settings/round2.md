@@ -3,12 +3,12 @@
 A function sets a resource cap or a policy for its own execution, and `main` calls the one it wants. The setting is written in the function, so it covers the whole function. `laptop()` runs at 2 cores, `server()` at 8, and after that call returns the caller's code is back to whatever was around it. Tasks started inside the call, and heap blocks they still hold, keep the budget. No new syntax. The line-above-the-function picture from the brief is not this design: a file-level setting covers the whole file, and open D4 Q6 is what would make a leading tag belong to the next declaration. This round does not take Q6.
 
 ```dewy
+$program.max_cores = 2
 laptop = () => {
-    $program.max_cores = 2
     run()
 }
+$program.max_cores = 8
 server = () => {
-    $program.max_cores = 8
     run()
 }
 main = (argv:array<string>) => {

@@ -22,7 +22,7 @@ def test_refinement_runtime_and_strict(compiler, tmp_path, release, source):
     # (under `$runtime_checks` the contract is checked when the program runs;
     # by default, and under the strict harness, it is a compile error)
     checked = tmp_path / 'checked.dewy'
-    checked.write_text(source + '\n$runtime_checks\n')
+    checked.write_text(('$runtime_checks\n\n') + (source))
     path = tmp_path / 'boundary.dewy'
     path.write_text(source)
     binary = tmp_path / 'boundary'
@@ -54,7 +54,7 @@ def test_refinement_proven_erasure(compiler, tmp_path, release):
 @pytest.mark.parametrize('source,diagnostic', [
     ('main=()=>{let x:int64<i => i >? 0>; printl(x)}', 'is read before it is given a value'),
     ('main=()=>{let x:int64<i => i >? 0>=1; x=0; printl(x)}', 'refinement refuted'),
-    ('f=(x:int64):>int64<i => i =? x>=>{x=0; return x}\nmain=()=>printl(f(3))\n$runtime_checks', None),
+    ('$runtime_checks\n\nf=(x:int64):>int64<i => i =? x>=>{x=0; return x}\nmain=()=>printl(f(3))\n', None),
     ('main=()=>{let limit:int64=5; let x:int64<i => i <? limit>=1; printl(x)}', 'stable binding'),
     ('f=(@x:int64)=>{x=0}\nmain=()=>{let x:int64<i => i >? 0>=1; f(@x)}', 'mutable refinement'),
     ('f=(x:int64<i => i*i >? 0>)=>printl(x)\nmain=()=>f(2)', 'unsupported refinement term'),

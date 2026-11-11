@@ -1,4 +1,6 @@
 # A value-record game tick: update, bounce, and return the next state.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock, mix
 
 Ball:type=[x:float64 velocity:float64 hits:int64=0]
@@ -30,5 +32,3 @@ main=(args:array<string>):>void=>{
     let finished=clock
     printl"{result} {finished-started}"
 }
-
-$runtime_checks

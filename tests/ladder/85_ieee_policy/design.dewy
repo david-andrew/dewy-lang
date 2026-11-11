@@ -6,11 +6,12 @@
 # keeps the value. `$finite_floats` opts a scope into finite-only arithmetic.
 $runtime_checks
 
+
 # A finite-only kernel: an operation that could produce NaN or an infinity is
 # proven not to, or checked where it runs.
+$finite_floats
+$runtime_checks
 mean = (xs:array<float64>):>float64 => {
-    $finite_floats
-    $runtime_checks
     let total = 0.0
     loop x in xs {
         total += x
@@ -19,8 +20,8 @@ mean = (xs:array<float64>):>float64 => {
     return total/float64(xs.length)
 }
 # The scale is proven finite: a bounded factor of a bounded value.
+$finite_floats
 scaled = (x:float64):>float64 => {
-    $finite_floats
     if -1e300 <? x <? 1e300 return x*0.5+1.0
     return 0.0
 }

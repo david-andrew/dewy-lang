@@ -1,5 +1,7 @@
 # Tier 5 / 108_bank_ledger / milestone 43
 # Acceptance: Concurrent bank transfers between Mutex<int> accounts: four teller tasks move money with lock_all (canonical order, DuplicateLock for a self-transfer), a parallel interest pass locks one account per iteration, try_lock reports Busy, and money is conserved.
+$runtime_checks
+
 Transfer:type = [source:int target:int amount:int]
 Overdrawn:type = type of error & [message:string]
 
@@ -116,5 +118,3 @@ main = () => {
     }
     held += 0
 }
-
-$runtime_checks

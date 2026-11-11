@@ -15,11 +15,12 @@ from tests.support import patience
 from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
-RUNTIME_CHECKS = '\n$runtime_checks\n'
+RUNTIME_CHECKS = '$runtime_checks\n\n'
 
 ROOT = Path(__file__).resolve().parents[1]
 TEXT = 'Dewy café🙂\0' + 'x' * 200
 ECHO = '''$runtime_checks
+
 import net
 payload=():>array<uint8>=>{
     let data:array<uint8>=[]

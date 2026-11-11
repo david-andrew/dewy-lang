@@ -1,5 +1,7 @@
 #
 # A binding given sibling literals holds their union; which one it holds follows its writes.
+$runtime_checks
+
 Shape:type=type of any & [name:string='shape']
 Circle:type=type of Shape & [r:int64]
 Square:type=type of Shape & [s:int64]
@@ -30,5 +32,3 @@ main=()=>{
     t = Circle[r=7]
     printl(t.r)
 }
-
-$runtime_checks

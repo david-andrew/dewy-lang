@@ -41,12 +41,14 @@ def _record_keys():
     return [f'{a} {_signed(_old_record_mix(h0, a) ^ (1 << 40))}' for a in range(1, COUNT + 1)]
 
 
-INTS = r'''
+INTS = '''
+$runtime_checks
+
 main=(args:array<string>)=>{
     let text=read_text(args[1]) or_throw
     let d:dict<int64 int64>=[]
     let e:dict<int int64>=[]
-    loop line in text.split("\n") {
+    loop line in text.split("\\n") {
         if line.length >? 0 {
             let k=to_int(line) ?? 0
             d[k as int64]=1
@@ -55,15 +57,16 @@ main=(args:array<string>)=>{
     }
     printl"{d.length} {e.length}"
 }
-$runtime_checks
 '''
 
-RECORDS = r'''
+RECORDS = '''
+$runtime_checks
+
 P:type=[a:int64 b:int64]
 main=(args:array<string>)=>{
     let text=read_text(args[1]) or_throw
     let d:dict<P int64>=[]
-    loop line in text.split("\n") {
+    loop line in text.split("\\n") {
         if line.length >? 0 {
             let parts=line.split(" ")
             d[P[(to_int(parts[0]) ?? 0) as int64 (to_int(parts[1]) ?? 0) as int64]]=1
@@ -71,10 +74,11 @@ main=(args:array<string>)=>{
     }
     printl"{d.length}"
 }
-$runtime_checks
 '''
 
-STABLE = r'''
+STABLE = '''
+$runtime_checks
+
 P:type=[a:int64 b:string]
 main=()=>{
     let d:dict<string int64>=[]
@@ -83,7 +87,6 @@ main=()=>{
     loop k in d.keys() {keys.push(k)}
     printl"{hash(12345)} {hash("abc")} {hash(P[1 "x"])} {keys[0]} {keys[1]} {keys[49]}"
 }
-$runtime_checks
 '''
 
 

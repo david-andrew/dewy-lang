@@ -1,6 +1,8 @@
 # Floor `%` and `//` by positive constants: negative dividends need the fix-up,
 # masked (nonnegative) dividends do not, and a dividend must not lend its range
 # past a join or a loop head.
+$runtime_checks
+
 rem3 = (x:int64):>int64 => x%3
 div3 = (x:int64):>int64 => x//3
 rem7 = (x:int64):>int64 => x%7
@@ -55,4 +57,3 @@ main = ():>void => {
     printl"{negative_mask(-1)} {negative_mask(33)}"
     printl"{rewritten(7 -13)}"
 }
-$runtime_checks

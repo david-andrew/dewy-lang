@@ -227,7 +227,7 @@ dir_set = (name: int, value: int, start: int, end: int, at: int):
         return
     if dir_builtin(text):
         # (an audit covers the adapter it is written in, never a whole module)
-        if text == "audited_wait" and start == dir_module_start(pos_file(start)): fatal(at, "`$audited_wait` marks one audited adapter: write it in the body of the function that wraps the foreign call, not for a whole module")
+        if text == "audited_wait" and start == dir_module_start(pos_file(start)): fatal(at, "`$audited_wait` marks one audited adapter: write it immediately before the function that wraps the foreign call, not for a whole module")
         dir_push(DirScope(start, end, name, value, 0, at))
         return
     b = dir_bundle_index(name)
@@ -357,8 +357,8 @@ dir_panic_fix = (p: int, operation: bool = false) -> str:
     i = dir_find(dir_name_runtime, p)
     if i >= 0 and dir_scopes[i].bundle != 0:
         b = name_of(dir_scopes[i].bundle)
-        return "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt this function out of `${b}` with `${b}=false` and add `$runtime_checks`"
-    "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt in to the check with `$runtime_checks` on a line of its own in this function or block"
+        return "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or prefix this function with `${b}=false` and `$runtime_checks`"
+    "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` immediately before the statement, block or function"
 # A `$runtime_assert` at p is its module's own handling, not `panics` for the
 # module's callers, unless the scope says `$assume_local_asserts=false`
 # (docs/design/assumptions.md).
@@ -394,4 +394,4 @@ dir_row_origin = (d: int) -> str:
     i = dir_row_scopes.get(d) ?? -1
     if i < 0: return ""
     b = name_of(dir_scopes[i].bundle)
-    "; `${b}` gives functions without a row of their own this one (opt a function out with `${b}=false` in its body)"
+    "; `${b}` gives functions without a row of their own this one (opt a function out by prefixing it with `${b}=false`)"

@@ -90,8 +90,8 @@ report.write_text("{lines.join("\n")}\n") or_throw;
 ## 03: fetch URLs (paper)
 
 ```dewy
+$parallel.max_concurrent = 8
 fetch_all = (urls:array<string>) => {
-    $parallel.max_concurrent = 8
     [parallel u in urls { let r = fetch_one(u); match r {...}; r }]
 }
 let results = within(60s @fetch_all(urls)) or_throw

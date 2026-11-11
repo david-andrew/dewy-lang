@@ -16,6 +16,7 @@ def run(compiler, tmp_path, source, command='check', name='main.dewy'):
 # Every index and narrowing proven, functions without a row of their own get
 # `no allocates & no panics`, and main handles OutOfMemory.
 PROVEN = '''$bulletproof
+
 total = (xs:array<int64 length=4>):>int64 => {
     let t:int64 = 0
     loop i in [0..4) {
@@ -48,29 +49,27 @@ MEMBERS = {
     # $no_hidden_costs: functions without a row of their own do not allocate
     'row': ('grow = (n:int64):>int64 => {\n    let xs:array<int64> = []\n    xs.push(n)\n    xs.length\n}\n' + MAIN
             + '    printl(grow(3))\n}\n',
-            "effect contract violation in 'grow': allocation exceeds the contract (its row excludes it); grow; witness at main.dewy:4:5; `$bulletproof` gives functions without a row of their own this one"),
+            "effect contract violation in 'grow': allocation exceeds the contract (its row excludes it); grow; witness at main.dewy:5:5; `$bulletproof` gives functions without a row of their own this one"),
     # $no_hidden_costs: $explicit_copies
     'copy': (MAIN + '    let xs:array<int64> = [1]\n    let ys = xs\n    ys[0] = 2\n    printl(xs.length + ys.length)\n}\n',
-             'main.dewy:4:14: error: implicit costly copy of array<int64>'),
+             'main.dewy:5:14: error: implicit costly copy of array<int64>'),
     # $explicit_allocation_failure: a function that may allocate returns T | OutOfMemory
     'allocation': ('make = (n:int64):>int64 & no panics => {\n    let xs:array<int64> = [n]\n    xs.length\n}\n' + MAIN
                    + '    let k:int64 = make(3)\n    printl(k)\n}\n',
-                   'main.dewy:7:19: error: type mismatch: expected int64, found int64 | OutOfMemory'),
+                   'main.dewy:8:19: error: type mismatch: expected int64, found int64 | OutOfMemory'),
     # $finite_floats: $no_inf
     'infinity': (MAIN + '    let x:float64 = float64(args().length)\n    printl(1.0 / x)\n}\n',
-                 'main.dewy:4:12: error: cannot prove the divisor is nonzero under `$no_inf`'),
+                 'main.dewy:5:12: error: cannot prove the divisor is nonzero under `$no_inf`'),
     # $finite_floats: $no_nan
     'nan': (MAIN + '    let x:float64 = float64(args().length) - 3.0\n    printl(sqrt(x))\n}\n',
-            "main.dewy:4:12: error: cannot prove the square root's operand is not negative under `$no_nan`"),
+            "main.dewy:5:12: error: cannot prove the square root's operand is not negative under `$no_nan`"),
     # $no_deadlocks
     'deadlock': ('work = (n:int64):>int64 => n\nmain = ():>void & no panics => {\n    let m = mutex<int64>(0)\n'
                  '    let held = @(m.lock())\n    concurrent {\n        let a = spawn work(21)\n    }\n    held += 1\n}\n',
-                 "main.dewy:6:5: error: this joins its tasks while holding 'm' (since line 5), and no certificate covers it (`$no_deadlocks`)"),
+                 "main.dewy:7:5: error: this joins its tasks while holding 'm' (since line 6), and no certificate covers it (`$no_deadlocks`)"),
     # $assume_local_asserts=false: a `$runtime_assert` makes its own module's callers `panics`
-    'local_assert': ('checked = (x:int64):>int64 => {\n    $no_hidden_costs=false\n    $runtime_assert x >? 0\n    x\n}\n'
-                     'relay = (x:int64):>(int64 | OutOfMemory) & no blocks => checked(x)\n'
-                     'main = () => {\n    $bulletproof=false\n    printl(relay(3) or_throw)\n}\n',
-                     'main.dewy:7:57: error: calling `checked` may panic (checked -> __eaf_checked: `$runtime_assert` at main.dewy:4:5)'),
+    'local_assert': ('$no_hidden_costs=false\nchecked = (x:int64):>int64 => {\n    $runtime_assert x >? 0\n    x\n}\nrelay = (x:int64):>(int64 | OutOfMemory) & no blocks => checked(x)\n$bulletproof=false\nmain = () => {\n    printl(relay(3) or_throw)\n}\n',
+                     'main.dewy:8:57: error: calling `checked` may panic (checked -> __eaf_checked: `$runtime_assert` at main.dewy:5:5)'),
 }
 
 
@@ -78,48 +77,49 @@ MEMBERS = {
 def test_member_guarantee(compiler, tmp_path, member):
     body, diagnostic = MEMBERS[member]
     if member == 'local_assert': diagnostic = 'may panic'
-    result = run(compiler, tmp_path, '$bulletproof\n' + body)
+    result = run(compiler, tmp_path, '$bulletproof\n\n' + body)
     assert result.returncode != 0 and diagnostic in result.stderr, result.stderr
 
 
 def test_local_asserts_only_under_the_bundle(compiler, tmp_path):
     # The same program under the strict lane alone: the module's own asserts are its handling.
-    source = '$no_hidden_costs\n' + MEMBERS['local_assert'][0].replace('$bulletproof=false', '$no_hidden_costs=false')
+    source = '$no_hidden_costs\n\n' + MEMBERS['local_assert'][0].replace('$bulletproof=false', '$no_hidden_costs=false')
     result = run(compiler, tmp_path, source, 'run')
     assert result.returncode == 0 and result.stdout == '3\n', result.stdout + result.stderr
 
 
 def test_confined_paths(compiler, tmp_path):
-    source = ('$bulletproof\n' + MAIN + '    let a = args()\n    if a.length >? 0 {\n        let f = p(a[0])\n'
+    source = ('$bulletproof\n\n' + MAIN + '    let a = args()\n    if a.length >? 0 {\n        let f = p(a[0])\n'
               '        printl(f.exists)\n    }\n}\n')
     result = run(compiler, tmp_path, source)
     assert result.returncode == 0, result.stderr
-    assert 'main.dewy:6:16: warning: `f` is not proven to stay inside a base, which `$confine_external_paths` asks' in result.stderr
+    assert 'main.dewy:7:16: warning: `f` is not proven to stay inside a base, which `$confine_external_paths` asks' in result.stderr
 
 
 def test_opt_out_and_conflict(compiler, tmp_path):
     source = '''$bulletproof
+
+$bulletproof=false
+$runtime_checks
 pick = (xs:array<int64> i:int64):>int64 => {
-    $bulletproof=false
-    $runtime_checks
     xs[i]
 }
+$bulletproof=false
+$runtime_checks
 main = () => {
-    $bulletproof=false
-    $runtime_checks
     printl(pick([1 2] 1) or_throw)
 }
 '''
     result = run(compiler, tmp_path, source, 'run')
     assert result.returncode == 0 and result.stdout == '2\n', result.stdout + result.stderr
-    conflict = run(compiler, tmp_path, source.replace('    $bulletproof=false\n    $runtime_checks\n', '    $runtime_checks\n'))
-    assert ('main.dewy:3:5: error: `$runtime_checks` is not allowed inside `$bulletproof`, which sets `$runtime_checks=false`'
+    conflict = run(compiler, tmp_path, source.replace('$bulletproof=false\n$runtime_checks\n', '$runtime_checks\n'))
+    assert ('main.dewy:3:1: error: `$runtime_checks` is not allowed inside `$bulletproof`, which sets `$runtime_checks=false`'
             in conflict.stderr), conflict.stderr
 
 
 def test_module_policy_needs_a_module(compiler, tmp_path):
-    result = run(compiler, tmp_path, 'main = () => {\n    $bulletproof\n    printl(1)\n}\n')
-    assert result.returncode != 0 and ('main.dewy:2:5: error: `$bulletproof` includes `$explicit_allocation_failure`, '
+    result = run(compiler, tmp_path, '$bulletproof\nmain = () => {\n    printl(1)\n}\n')
+    assert result.returncode != 0 and ('main.dewy:1:1: error: `$bulletproof` includes `$explicit_allocation_failure`, '
                                        'a module policy: put it at the top of a module') in result.stderr, result.stderr
 
 
@@ -132,8 +132,8 @@ def test_nested_bundles_resolve_in_any_order(compiler, tmp_path):
 $inner = {
     $explicit_copies
 }
+$outer
 pick = (xs:array<int64> i:int64):>int64 => {
-    $outer
     if i >=? 0 and i <? xs.length return xs[i]
     0
 }
@@ -143,7 +143,7 @@ main = () => printl(pick([1 2] 1))
     assert result.returncode == 0 and result.stdout == '2\n', result.stdout + result.stderr
     unproven = run(compiler, tmp_path, source.replace('    if i >=? 0 and i <? xs.length return xs[i]\n    0\n', '    xs[i]\n'))
     assert 'main.dewy:10:5: error: cannot prove index is in bounds' in unproven.stderr, unproven.stderr
-    copied = run(compiler, tmp_path, source.replace('    $outer\n', '    $outer\n    let ys = xs\n    ys.push(0)\n    printl(xs.length + ys.length)\n'))
+    copied = run(compiler, tmp_path, source.replace('    if i >=? 0', '    let ys = xs\n    ys.push(0)\n    printl(xs.length + ys.length)\n    if i >=? 0'))
     assert 'main.dewy:10:14: error: implicit costly copy' in copied.stderr, copied.stderr
 
 

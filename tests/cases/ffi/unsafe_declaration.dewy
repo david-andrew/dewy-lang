@@ -1,6 +1,7 @@
 # modes: native
 # A module-level `$unsafe` covers the next declaration.
-getpid=():>int32 => $extern
+$extern
+getpid=():>int32
 $unsafe
 positive=():>bool => getpid() >? 0
 $unsafe main=():>void=>printl(positive() and getpid() >? 0)

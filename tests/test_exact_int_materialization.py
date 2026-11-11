@@ -10,6 +10,7 @@ from tests.support import compiler  # noqa: F401
 def test_materialize_finite_words(compiler, tmp_path, flags):
     source = tmp_path / 'words.dewy'
     source.write_text('''$runtime_checks
+
 main=(args:array<string>)=>{
  let a=int64(to_int(args[1]) ?? 0)
  let b=int64(to_int(args[2]) ?? 0)

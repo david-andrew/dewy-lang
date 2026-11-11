@@ -1,6 +1,8 @@
 #
 # Eligible heads: a named number, a field route, a parenthesized scalar, a quantity;
 # callable heads stay calls, and a local unit name shadows the unit.
+$runtime_checks
+
 from units import m, kg
 Material:type = [k:float64 rho:int64]
 twice = (v:int64):>int64 => 2*v
@@ -18,5 +20,3 @@ run = () => {
     printl"{2s}"    # a local s hides the second
 }
 main = () => run()
-
-$runtime_checks

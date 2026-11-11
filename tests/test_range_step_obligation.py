@@ -27,7 +27,7 @@ FORMS = {
 
 @pytest.mark.parametrize('form', sorted(FORMS))
 def test_unguarded_rejected_bulletproof(compiler, tmp_path, form):
-    result = run(compiler, tmp_path, '$bulletproof\n' + MAIN + FORMS[form] + '}\n')
+    result = run(compiler, tmp_path, '$bulletproof\n\n' + MAIN + FORMS[form] + '}\n')
     assert result.returncode != 0 and 'cannot prove the range step is nonzero' in result.stderr, result.stdout + result.stderr
 
 
@@ -40,21 +40,21 @@ def test_unguarded_panics(compiler, tmp_path, scope, form):
 
 
 def test_zero_step_refuted(compiler, tmp_path):
-    result = run(compiler, tmp_path, '$bulletproof\n' + MAIN + '    let a = k\n    loop i in [a, a..10] printl(i)\n}\n')
+    result = run(compiler, tmp_path, '$bulletproof\n\n' + MAIN + '    let a = k\n    loop i in [a, a..10] printl(i)\n}\n')
     assert result.returncode != 0 and 'the range step is zero' in result.stderr, result.stdout + result.stderr
 
 
 def test_closed_row_needs_the_guard(compiler, tmp_path):
     body = '{\n    let t:int64 = 0\n    %s\n    t\n}\n'
-    bad = '$runtime_checks\nf = (a:int64):>int64 & no_effects => ' + body % 'loop i in [0, a..10] t += i' + 'main = () => printl(f(2))\n'
+    bad = '$runtime_checks\n\nf = (a:int64):>int64 & no_effects => ' + body % 'loop i in [0, a..10] t += i' + 'main = () => printl(f(2))\n'
     result = run(compiler, tmp_path, bad)
     assert result.returncode != 0 and 'possible failure exceeds' in result.stderr, result.stdout + result.stderr
-    good = '$runtime_checks\nf = (a:int64):>int64 & no_effects => ' + body % 'if a >? 0 { loop i in [0, a..10] t += i }' + 'main = () => printl(f(2))\n'
+    good = '$runtime_checks\n\nf = (a:int64):>int64 & no_effects => ' + body % 'if a >? 0 { loop i in [0, a..10] t += i }' + 'main = () => printl(f(2))\n'
     result = run(compiler, tmp_path, good, 'run')
     assert result.returncode == 0 and result.stdout == '30\n', result.stdout + result.stderr
 
 
-ACCEPT = '$bulletproof\n' + MAIN + '''    let t = 0
+ACCEPT = '$bulletproof\n\n' + MAIN + '''    let t = 0
     loop i in [0, 3..10] t += i
     if k >? 0 { loop i in [0, k..10] t += i }
     let step = k - 3

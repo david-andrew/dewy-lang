@@ -7,7 +7,9 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
-SOURCE = '''menu=():>void=>{
+SOURCE = '''$runtime_checks
+
+menu=():>void=>{
     ui_begin("first" vec2(0 0))
     ui_begin("second" vec2(0 0))
     ui_end()
@@ -19,7 +21,6 @@ main=()=>{
     menu()
     printl("ok")
 }
-$runtime_checks
 '''
 
 WARNING = "warning: the menu 'first' has no `ui_end()` before the next ui_begin; finished it there\n"

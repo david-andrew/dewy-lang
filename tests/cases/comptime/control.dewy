@@ -1,3 +1,5 @@
+$runtime_checks
+
 Bad:type=type of error
 condition=(n:int64):>bool|Bad=> { if n <? 0 { return Bad } return n >? 0 }
 fallible_loop=(n:int64):>int64|Bad=> {
@@ -34,5 +36,3 @@ main=()=> {
     $runtime_assert read(2) =? 1
     printl("control agrees")
 }
-
-$runtime_checks

@@ -1,8 +1,8 @@
 # exit: 42
 # modes: native native-release
+$runtime_checks
+
 Fn:type=(x:int64):>int64
 apply=(f:Fn x:int64):>int64=>f(x)
 run=()=>apply((x:int64)=>x+2 40)
 main=()=>exit(run())
-
-$runtime_checks

@@ -1,4 +1,6 @@
 # Arenas give their chunks back when they are dropped.
+$runtime_checks
+
 main=()=>{
     let before=alloc_count
     loop r in [0..50) {
@@ -12,5 +14,3 @@ main=()=>{
     }
     printl("{alloc_count()-before}")
 }
-
-$runtime_checks

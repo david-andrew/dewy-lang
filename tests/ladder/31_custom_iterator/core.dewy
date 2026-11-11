@@ -1,3 +1,5 @@
+$runtime_checks
+
 Series:type = [first:int64 step:int64 count:int64]
 length = (s:Series):>int64 => s.count
 __index__ = (s:Series index:int64):>int64 => s.first+index*s.step
@@ -28,5 +30,3 @@ main = ():>void => {
     $runtime_assert(doubled =? [2 8 14 20 26])
     printl("{values} {sum_series(original)} {filter_series(original)}")
 }
-
-$runtime_checks

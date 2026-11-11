@@ -13,7 +13,9 @@ from tests.test_core_editor import Client
 MESSAGE = 'this exact value grows each iteration'
 
 # The confirmed case ran 20000 iterations (35 s, a 268k-character fraction); 40 show it.
-GROWING = '''damped=(steps:int64):>void=>{
+GROWING = '''$runtime_checks
+
+damped=(steps:int64):>void=>{
     let position=0.0
     let velocity=1.0
     loop _ in [0..steps) {
@@ -54,10 +56,11 @@ main=():>void=>{
     temporaries()
     squares()
 }
-$runtime_checks
 '''
 
-QUIET = '''main=():>void=>{
+QUIET = '''$runtime_checks
+
+main=():>void=>{
     let total=0.0
     let doubled=1/3
     let flip=2/3
@@ -82,7 +85,6 @@ QUIET = '''main=():>void=>{
     }
     printl"{total} {doubled} {flip} {shifted} {annotated} {floating}"
 }
-$runtime_checks
 '''
 
 

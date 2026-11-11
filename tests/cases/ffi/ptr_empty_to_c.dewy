@@ -1,7 +1,10 @@
 # modes: native native-release
 # `xs.ptr` is a ptr<T>, never null: an empty array's, a zeroed slot's included,
 # reaches C as a real address (memset returns the pointer it was given).
-memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8>? => $extern
+$runtime_checks
+
+$extern
+memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8>?
 
 main=():>void=>$unsafe {
     let empty:array<uint8>=[]
@@ -15,5 +18,3 @@ main=():>void=>$unsafe {
     let p=empty.ptr
     printl(memset(p + empty.length 0 0) is? none)
 }
-
-$runtime_checks

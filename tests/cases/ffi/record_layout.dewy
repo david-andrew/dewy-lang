@@ -1,11 +1,14 @@
 # modes: native native-release
 $runtime_checks
+
 # A record of fixed-width fields has C's layout: C fills one in place through
 # `xs.ptr`, the pointer to an array's elements.
 TimeVal:type=[seconds:int64 microseconds:int64]
 Pair:type=[small:uint8 wide:uint32]
-gettimeofday=(now:ptr<TimeVal> zone:ptr<uint8>?):>int32 => $extern
-memcpy=(destination:ptr<uint8> source:ptr<uint8> count:uint64):>ptr<uint8> => $extern
+$extern
+gettimeofday=(now:ptr<TimeVal> zone:ptr<uint8>?):>int32
+$extern
+memcpy=(destination:ptr<uint8> source:ptr<uint8> count:uint64):>ptr<uint8>
 
 main=():>void=>$unsafe {
     let now:array<TimeVal>=[TimeVal[0 0]]

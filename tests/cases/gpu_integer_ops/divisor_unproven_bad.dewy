@@ -1,6 +1,7 @@
 # A wrapping division needs no overflow proof, but its divisor must be proven nonzero:
 # a shader cannot run the check `$runtime_checks` asks for.
 $runtime_checks
+
 W:type=int32<overflow='wrap'>
 dv=(x:W y:W):>W=>x // y
 main=()=>{printl(cpu(dv.(gpu([W(7) 8]) gpu([W(2) 0]))).data)}

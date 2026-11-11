@@ -9,8 +9,8 @@ from tests.support import compiler
 
 
 PROGRAM = '''
+$runtime_checks
 kernel=(xs:array<int64> ys:array<int64> rounds:int64):>int64=>{
-    $runtime_checks
     let total:int64=0
     loop r in [int64(0)..rounds) {
         loop i in [int64(0)..int64(32)) {total+=(xs[i]+ys[i]) xor r}
@@ -31,7 +31,7 @@ main=(args:array<string>)=>{
 @pytest.mark.parametrize('release', [False, True])
 def test_reduction_guard_and_scalar_fallback(compiler, tmp_path, release):
     source = tmp_path / 'reduce.dewy'
-    source.write_text((PROGRAM) + "\n$runtime_checks\n")
+    source.write_text(('$runtime_checks\n\n') + (PROGRAM))
     binaries = []
     for debug in [False, True]:
         binary = tmp_path / ('scalar' if debug else 'vector')
@@ -56,7 +56,7 @@ def test_reduction_guard_and_scalar_fallback(compiler, tmp_path, release):
 
 def test_accumulator_snapshot_is_not_an_independent_increment(compiler, tmp_path):
     source = tmp_path / 'recurrence.dewy'
-    source.write_text(('''
+    source.write_text(('$runtime_checks\n\n') + ('''
 kernel=(xs:array<int64> count:int64):>int64=>{
     let total:int64=0
     loop i in [int64(0)..count) {
@@ -66,7 +66,7 @@ kernel=(xs:array<int64> count:int64):>int64=>{
     return total
 }
 main=(args:array<string>)=>printl(kernel([1] int64(to_int(args[1]) ?? 0)))
-''') + "\n$runtime_checks\n")
+'''))
     binary = tmp_path / 'recurrence'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True, text=True)
     assert built.returncode == 0, built.stderr

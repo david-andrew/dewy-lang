@@ -1,5 +1,6 @@
 #
 $no_hidden_costs
+
 const LEN:int64=6
 first_negative=(xs:array<int64 length=6> limit:int64):>int64=>{
     let found:int64=-1
@@ -11,8 +12,8 @@ first_negative=(xs:array<int64 length=6> limit:int64):>int64=>{
     }
     return found
 }
+$no_hidden_costs=false
 main=():>void=>{
-    $no_hidden_costs=false
     let xs:array<int64 length=6>=[3 1 4 -1 5 -9]
     printl("{first_negative(xs 6)} {first_negative(xs 3)}")
 }

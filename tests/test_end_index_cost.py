@@ -7,7 +7,7 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 # (programs that keep runtime checks for their unproven obligations)
-RUNTIME_CHECKS = '\n$runtime_checks\n'
+RUNTIME_CHECKS = '$runtime_checks\n\n'
 
 SOURCE = '''
 last = (xs:array<int64>) => xs[{index}]
@@ -27,7 +27,7 @@ def test_end_matches_length_arithmetic(compiler, tmp_path, release):
     bodies = []
     for form in FORMS:
         source = tmp_path / 'end.dewy'
-        source.write_text((SOURCE.format(**form)) + RUNTIME_CHECKS)
+        source.write_text((RUNTIME_CHECKS) + (SOURCE.format(**form)))
         built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'program', '--ir',
                                 *(['--release'] if release else [])],
                                text=True, capture_output=True, timeout=60)

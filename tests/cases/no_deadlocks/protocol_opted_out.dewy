@@ -2,15 +2,15 @@
 # `$no_deadlocks` in the module, and a function that opts out to use the uncertified protocols,
 # as the rejection's message says to (serve_withdrawn, pipeline_withdrawn).
 $no_deadlocks
+$runtime_checks
+
 square = (n:int64):>int64 => n * n
 step = (n:int64):>int64 => if n % 2 =? 0 n // 2 else 3 * n + 1
 again = (n:int64):>array<int64> => if n =? 1 [] else [n]
+$no_deadlocks = false
 main = ():>void | Closed<int64> | Canceled => {
-    $no_deadlocks = false
     let total = serve(@square (s:Service<int64 int64>):>int64 | Closed<int64> | Canceled => s.request(3) or_throw) or_throw
     let seeds:array<int64> = [6]
     let path = pipeline(2 seeds @step @again) or_throw
     printl"{total} {path}"
 }
-
-$runtime_checks

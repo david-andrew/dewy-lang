@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 Series:type=[first:int64 count:int64]
 let made:int64=0 let lengths:int64=0 let reads:int64=0
 make=()=>{made+=1 return Series[13 3]}
@@ -7,5 +9,3 @@ __index__=(s:Series index:int64)=>{reads+=1 return s.first+index}
 run=()=>{let total=0 loop x in make() total+=x
 return if total =? 42 and made =? 1 and lengths =? 1 and reads =? 3 42 else 1}
 main=()=>exit(run())
-
-$runtime_checks

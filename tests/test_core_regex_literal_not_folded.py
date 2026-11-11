@@ -9,6 +9,7 @@ import pytest
 from tests.support import ROOT, compiler
 
 SOURCE = '''$runtime_checks
+
 main=()=>{
     printl("aaab".find(regex(r"(?:a{100}){100}|b")))
 }
@@ -38,7 +39,7 @@ def test_literal_regex_is_not_built_while_compiling(compiler, tmp_path, monkeypa
 def test_literal_regex_error_is_still_a_compile_error(compiler, tmp_path, monkeypatch):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     path = tmp_path / 'bad_regex.dewy'
-    path.write_text('$runtime_checks\nmain=()=>{\n    printl("a".find(regex(r"(a")))\n}\n')
+    path.write_text('$runtime_checks\n\nmain=()=>{\n    printl("a".find(regex(r"(a")))\n}\n')
     built = subprocess.run([compiler, 'build', path, '-o', tmp_path / 'bad_regex'], capture_output=True,
                            text=True, timeout=120, check=False)
     assert built.returncode != 0

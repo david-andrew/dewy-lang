@@ -1,14 +1,16 @@
 # Tier 6 / 116 / milestone 50
 # Acceptance: A controlled finite-float analytics kernel compares precise and
 # fast scopes, rejects unsafe inputs, and summarizes a bounded sensor batch.
+$fast_math
+
 Reading:type = [signal:float64 baseline:float64]
 Score:type = [usable:int64 rejected:int64 positive:int64 total:float64]
 
 new_score = ():>Score => Score[0 0 0 0.0]
 
+$finite_floats
+$no_nan
 safe_ratio = (signal:float64 baseline:float64):>float64 => {
-    $finite_floats
-    $no_nan
     if signal not=? signal return 0.0
     if baseline not=? baseline return 0.0
     if baseline <? 0.1 or baseline >? 100.0 return 0.0
@@ -16,7 +18,6 @@ safe_ratio = (signal:float64 baseline:float64):>float64 => {
     signal / baseline
 }
 
-$fast_math
 fast_transform = (x:float64):>float64 => (x*0.5 + x*0.25) + x*0.125
 
 normal_transform = (x:float64):>float64 => x*0.5 + (x*0.25 + x*0.125)

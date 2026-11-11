@@ -109,6 +109,7 @@ def test_command_lines_round_trip(compiler, tmp_path):
 
 
 ECHO = '''$runtime_checks
+
 main=()=>{
     loop a in args()[1..] printl(a.length)
     loop a in args()[1..] printl(a)
@@ -116,6 +117,7 @@ main=()=>{
 '''
 
 RUNNER = '''$runtime_checks
+
 main=()=>{
     let argv=args()
     let status=run(argv[1] argv[2..])

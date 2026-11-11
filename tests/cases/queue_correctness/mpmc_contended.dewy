@@ -1,4 +1,6 @@
 # modes: native native-release
+$runtime_checks
+
 produce=(q:Mpmc<int> first:int):>void | Unsent<int>=>{
     loop i in [first..first+200) {q.send(i) or_throw}
 }
@@ -29,4 +31,3 @@ check=(capacity:int<(>? 0)>):>void=>{
     printl(values.sorted =? [loop i in [0..600) i])
 }
 main=()=>{check(1) check(2) check(3)}
-$runtime_checks

@@ -105,7 +105,7 @@ def test_isolation_ops_execution(compiler, tmp_path, monkeypatch, optimized):
 def test_isolation_ops_program(compiler, tmp_path, monkeypatch, optimized):
     monkeypatch.setenv('DEWY_CORE_LIB', str(ROOT / 'lib'))
     source = tmp_path / 'hooks.dewy'
-    source.write_text('$runtime_checks\n' +
+    source.write_text('$runtime_checks\n\n' +
                       (ROOT / 'tests/fixtures/isolation/hook_copy.dewy').read_text())
     output = tmp_path / 'program'
     driver = ("use 'main.jo'\nmain = ():\n    lower_test_cli()\n"

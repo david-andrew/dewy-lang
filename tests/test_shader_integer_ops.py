@@ -10,7 +10,8 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
-PROGRAM = r'''$runtime_checks
+PROGRAM = '''$runtime_checks
+
 Shift:type=[src:GpuBuffer<int32> dst:GpuBuffer<int32>]
 back=(id:int64 u:Shift):>void=>{
     if id <? 0 or id >=? u.dst.length or id >=? u.src.length { return }

@@ -1,4 +1,5 @@
 $runtime_checks
+
 from p"ast.jo" import (kid nkids nodes)
 from p"check.jo" import (fns main_fn modules)
 from p"dewy_method_ops.dewy" import (dewy_is_method)
@@ -32,7 +33,7 @@ dir_program_prepare=():>void=>$unsafe {
     loop m in modules {
         loop d in m.decls {
             if nodes.ptr[d].kind not=? 'fn_' or name_of(ProgramWord(nodes.ptr[d].name)) not=? "main" or dewy_is_method(d) or nodes.ptr[d].b =? 0 {continue}
-            mains[nodes.ptr[ProgramWord(nodes.ptr[d].b)].pos]=d
+            mains[nodes.ptr[d].pos]=d
         }
     }
     loop i in [0..dir_scopes.length) {
@@ -43,17 +44,11 @@ dir_program_prepare=():>void=>$unsafe {
         let d=mains.get(s.start) ?? 0
         let placed=entry and header or d >? 0
         if d >? 0 {
-            let body=ProgramWord(nodes.ptr[d].b)
-            loop k in [0..nkids(body)) {
-                let n=kid(body k)
-                # Generated parameter/shape bindings precede the source body.
-                if nodes.ptr[n].pos >? s.start and nodes.ptr[n].pos <? s.at {placed=false; break}
-            }
             let scopes=dir_program_mains.get(d) ?? []
             scopes.push(i)
             dir_program_mains[d]=scopes
         }
-        if not placed {fatal(s.at "`${name_of(s.setting)}` is program-wide: put it at the top of the entry file or as the first lines of any file's main")}
+        if not placed {fatal(s.at "`${name_of(s.setting)}` is program-wide: put it at the top of the entry file or directly before any file's main: `${name_of(s.setting)} = ...` then `main = ...`")}
         if not entry {continue}
         let old=dir_program_values.get(s.setting) ?? -1
         if old >=? 0 and dir_scopes[old].value not=? s.value {dir_program_disagree(s dir_scopes[old])}

@@ -2,6 +2,8 @@
 # Count words in several documents at once: one task per document sends its
 # counts over a channel, and the main task merges them as they arrive.
 
+$runtime_checks
+
 Counts:type = [name:string words:dict<string int64> lines:int64]
 
 count_words = (text:string):>dict<string int64> => {
@@ -52,5 +54,3 @@ main = () => {
     top.sort(key=(e) => e.n reverse=true)
     loop e in top[$clamp 0..5) printl("{fmt'<6'(e.word)} {e.n}")
 }
-
-$runtime_checks

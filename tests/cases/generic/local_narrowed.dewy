@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{let value:(int64|string)=41
 if value is? int64 {
  let f=<T>(x:T)=>value+1
@@ -7,5 +9,3 @@ if value is? int64 {
 }
 return 1}
 main=()=>exit(run())
-
-$runtime_checks

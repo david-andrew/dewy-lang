@@ -11,7 +11,7 @@ from tools.cores import on_cores
 def build(compiler, tmp_path, source, *, release=True):
     path = tmp_path / 'region.dewy'
     # (these programs test run-time behavior: they keep runtime checks)
-    path.write_text(source + '\n$runtime_checks\n')
+    path.write_text(('$runtime_checks\n\n') + (source))
     output = tmp_path / 'region'
     run = subprocess.run([compiler, 'build', path, '-o', output, '--ir',
                           *(['--release'] if release else [])],

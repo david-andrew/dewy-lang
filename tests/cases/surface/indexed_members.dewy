@@ -1,5 +1,7 @@
 # A named probe must retain the complete overload family, defaults, mutation,
 # and field precedence; common union fields need no diagnostic method list.
+$runtime_checks
+
 Left:type = [value:int64]
 Right:type = [value:int64]
 Other:type = [extra:int64]
@@ -15,5 +17,3 @@ main = () => {
     let f = Field(17)
     printl"{x.amount} {y.amount} {x.bump} {x.value} {common(x)} {common(y)} {f.amount}"
 }
-
-$runtime_checks

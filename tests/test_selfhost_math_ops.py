@@ -23,7 +23,7 @@ def test_math_ops_twins(compiler, tmp_path, monkeypatch, optimized):
         imports.append(f'from p"{name}" import (main as sample{index})')
         calls.append(f'sample{index}()')
         expected += (ROOT / 'tests/cases' / (case + '.out')).read_bytes()
-    source.write_text('$runtime_checks\n' + '\n'.join(imports) + '\nmain=()=>{\n' + '\n'.join(calls) + '\n}\n')
+    source.write_text('$runtime_checks\n\n' + '\n'.join(imports) + '\nmain=()=>{\n' + '\n'.join(calls) + '\n}\n')
     driver = ("use 'main.jo'\nmain = ():\n    lower_test_cli()\n"
               f'    print(read_file({json.dumps(str(output))}) ?? "")\n')
     image = compare_leaf(compiler, tmp_path, False, driver,

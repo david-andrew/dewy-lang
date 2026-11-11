@@ -1,6 +1,7 @@
 # A refinement on arbitrary-precision `int` compares the values, small or big,
 # not their machine words: match arms bind them, bindings and arguments check them.
 $runtime_checks
+
 above = (x:int):>string => match x {<-2> => "minus two" g:int<(>? 4611686018427387903)> => "huge {g}" other => "other {other}"}
 below = (x:int):>string => match x {g:int<(<? 3)> => "small {g}" _ => "large"}
 gap = (lo:int hi:int<(>? lo)>):>int => hi - lo

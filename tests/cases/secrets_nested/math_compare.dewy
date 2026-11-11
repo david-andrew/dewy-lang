@@ -1,3 +1,5 @@
+$runtime_checks
+
 BigKey:type=[values:secret<array<int>>]
 main=()=>{
 let xs:array<int>=[0 1 -1 100000000000000000000000000000000000000 -100000000000000000000000000000000000000]
@@ -15,4 +17,3 @@ if secret(a) =? secret(b) panic("array")
 if secret(a) not=? secret(a.copy) panic("equal array")
 printl("ok")
 }
-$runtime_checks

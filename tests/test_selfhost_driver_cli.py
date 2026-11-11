@@ -37,7 +37,8 @@ RAGGED = (b"# \xff\x80 caf\xc3\xa9 $target = 'wasm32'\n$build.mode = 'release'  
 RAGGED_BLOCK = (b'build:\n    name = "Caf\xc3\xa9 \xff"   # \x80 comment\n    opt = release\n\n'
                 b'main = ():\n    print("block")\n')
 
-EXTERN = '''getpid = ():>int32 => $extern(lib='libc.so.6')
+EXTERN = '''$extern(lib='libc.so.6')
+getpid = ():>int32
 main = ():>void => $unsafe printl"{getpid() >? 0}"
 '''
 

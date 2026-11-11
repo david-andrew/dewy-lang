@@ -9,8 +9,9 @@ from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 from tools.cores import on_cores
 
-SOURCE = r'''
+SOURCE = '''
 $runtime_checks
+
 fib=(n:int64):>int64=>{
     if n <? 2 {return n}
     let parts=parallel_range(2 (i:int64)=>fib(n-1-i))

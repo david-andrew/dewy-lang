@@ -8,6 +8,7 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 PROVEN = '''$runtime_checks=false
+
 count=(words:array<string>):>dict<string int64>=>{
     let counts:dict<string int64>=[]
     loop word in words {if word in? counts {counts[word]+=1} else {counts[word]=1}}
@@ -50,10 +51,10 @@ def test_key_presence_proven(compiler, tmp_path):
 
 @pytest.mark.parametrize('name', sorted(REJECTED))
 def test_key_presence_rejected(compiler, tmp_path, name):
-    result = run(compiler, tmp_path, '$runtime_checks=false\n' + REJECTED[name], 'check')
+    result = run(compiler, tmp_path, '$runtime_checks=false\n\n' + REJECTED[name], 'check')
     assert result.returncode != 0 and 'cannot prove the key is in the dictionary' in result.stderr, result.stderr
 
 
 def test_key_presence_runtime_check(compiler, tmp_path):
-    result = run(compiler, tmp_path, '$runtime_checks\n' + REJECTED['missing'], 'run')
+    result = run(compiler, tmp_path, '$runtime_checks\n\n' + REJECTED['missing'], 'run')
     assert result.returncode == 101 and 'no entry for this key' in result.stderr, result.stdout + result.stderr

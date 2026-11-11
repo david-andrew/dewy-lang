@@ -12,6 +12,7 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 PROVED = '''$runtime_checks=false
+
 guarded=(text:string):>string=>{
     if text.length >? 0 return text[0]
     return ""
@@ -59,12 +60,12 @@ def test_string_obligations_proved(compiler, tmp_path):
 @pytest.mark.parametrize('name', sorted(REJECTED))
 def test_string_obligations_rejected(compiler, tmp_path, name):
     source, expected = REJECTED[name]
-    result = run(compiler, tmp_path, '$runtime_checks=false\n' + source, 'check')
+    result = run(compiler, tmp_path, '$runtime_checks=false\n\n' + source, 'check')
     assert result.returncode != 0 and expected in result.stderr, result.stderr
 
 
 def test_string_obligations_runtime_checks(compiler, tmp_path):
-    source = '$runtime_checks\npick=(text:string i:int64):>string=>text[i]\nprintl(pick("abc" 1))\nprintl(pick("abc" 3))\n'
+    source = '$runtime_checks\n\npick=(text:string i:int64):>string=>text[i]\nprintl(pick("abc" 1))\nprintl(pick("abc" 3))\n'
     listed = run(compiler, tmp_path, source, 'check', '--obligations')
     assert 'program.dewy:2:37: runtime check: index is in bounds' in listed.stdout + listed.stderr
     result = run(compiler, tmp_path, source, 'run')
@@ -76,5 +77,5 @@ def test_string_obligations_by_default(compiler, tmp_path):
     source = 'first=(text:string):>string=>text[0]\nprintl(first("a"))\n'
     result = run(compiler, tmp_path, source, 'run')
     assert result.returncode != 0 and 'cannot prove' in result.stderr, result.stderr
-    result = run(compiler, tmp_path, source + '$runtime_checks\n', 'run')
+    result = run(compiler, tmp_path, ('$runtime_checks\n\n') + (source), 'run')
     assert result.returncode == 0 and result.stdout == 'a\n', result.stderr

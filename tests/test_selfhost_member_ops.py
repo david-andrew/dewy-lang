@@ -8,8 +8,9 @@ from tests.support import ROOT, compiler  # noqa: F401
 from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 
-SOURCE = r'''
+SOURCE = '''
 $runtime_checks
+
 make=()=>{
     let table:dict<string string>=[]
     loop s in members('aa'|'bbb'|'é'|'💧') {table[s]=s}

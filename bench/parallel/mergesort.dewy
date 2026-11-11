@@ -1,3 +1,5 @@
+$runtime_checks
+
 from p"../harness.jo" import clock, size_argument
 merge=(@a:array<int64> @tmp:array<int64> mid:int64):>void=>{
     let n=a.length
@@ -40,5 +42,3 @@ main=(args:array<string>):>void=>{
     loop i in [0..a.length) {checksum=(checksum+a[i]*(i%97))%1000000007}
     printl"{checksum} {elapsed}"
 }
-
-$runtime_checks

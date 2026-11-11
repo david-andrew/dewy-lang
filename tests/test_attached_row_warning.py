@@ -12,13 +12,14 @@ from tests.test_core_editor import Client
 
 MESSAGE = 'this `;` is attached to the value before it'
 
-SOURCE = '''f=()=>5
+SOURCE = '''$runtime_checks
+
+f=()=>5
 main=()=>{
     printl([1 2; 3 4])
     printl([f(); 7])
     printl([1 2 ; 3 4])
 }
-$runtime_checks
 '''
 
 

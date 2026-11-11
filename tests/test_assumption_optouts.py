@@ -22,10 +22,10 @@ def check(compiler, tmp_path, source):
      'main=()=>printl(f([1 2 3]))'),
 ])
 def test_no_assumed_bounds_demand_proof_with_repair(compiler, tmp_path, expression, setup):
-    default = check(compiler, tmp_path, '$runtime_checks=false\n' + setup + '\n')
+    default = check(compiler, tmp_path, '$runtime_checks=false\n\n' + setup + '\n')
     assert default.returncode == 0, default.stderr
 
-    strict = check(compiler, tmp_path, '$no_assumed_bounds\n$runtime_checks=false\n' + setup + '\n')
+    strict = check(compiler, tmp_path, '$no_assumed_bounds\n$runtime_checks=false\n\n' + setup + '\n')
     assert strict.returncode != 0, strict.stderr
     assert 'cannot prove exact integer result fits int64' in strict.stderr
     assert f'nothing bounds `{expression}`' in strict.stderr
@@ -36,10 +36,10 @@ def test_no_assumed_bounds_demand_proof_with_repair(compiler, tmp_path, expressi
 def test_local_assert_optout_demand_proof_with_repair(compiler, tmp_path):
     body = ('checked=(x:int64):>int64=>{$runtime_assert x >? 0;x}\n'
             'main=():>void=>printl(checked(3))\n')
-    default = check(compiler, tmp_path, '$runtime_checks=false\n' + body)
+    default = check(compiler, tmp_path, '$runtime_checks=false\n\n' + body)
     assert default.returncode == 0, default.stderr
 
-    strict = check(compiler, tmp_path, '$assume_local_asserts=false\n$runtime_checks=false\n' + body)
+    strict = check(compiler, tmp_path, '$assume_local_asserts=false\n$runtime_checks=false\n\n' + body)
     assert strict.returncode != 0, strict.stderr
     assert 'calling `checked` may panic' in strict.stderr
     assert 'prove what it checks before the call' in strict.stderr
@@ -47,12 +47,12 @@ def test_local_assert_optout_demand_proof_with_repair(compiler, tmp_path):
 
 
 def test_external_paths_optout_current_warning_and_repair(compiler, tmp_path):
-    body = 'main=()=>{let f=p(args()[0]);printl(f.exists)}\n$runtime_checks\n'
+    body = '$runtime_checks\n\nmain=()=>{let f=p(args()[0]);printl(f.exists)}\n'
     default = check(compiler, tmp_path, body)
     assert default.returncode == 0, default.stderr
     assert 'confine_external_paths' not in default.stderr
 
-    strict = check(compiler, tmp_path, '$confine_external_paths\n' + body)
+    strict = check(compiler, tmp_path, '$confine_external_paths\n\n' + body)
     assert strict.returncode == 0, strict.stderr
     assert 'warning: `f` is not proven to stay inside a base' in strict.stderr
     assert 'root.confine(f) or_throw' in strict.stderr

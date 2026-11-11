@@ -1,7 +1,9 @@
 # modes: native
 # `$no_deadlocks`: a foreign call that may block, outside an audited adapter.
 $no_deadlocks
-usleep = (us:uint32):>int32 => $extern
+
+$extern
+usleep = (us:uint32):>int32
 main = () => {
     printl($unsafe usleep(10))
 }

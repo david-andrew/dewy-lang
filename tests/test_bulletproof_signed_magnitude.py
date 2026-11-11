@@ -11,7 +11,7 @@ def test_sensor_signed_magnitude(compiler, tmp_path, release):
     degrees = 'degrees = ' + program.split('degrees = ', 1)[1].split('\nmain = ', 1)[0]
     values = [-2**63, -11, -1, 0, 1, 11, 2**63-1]
     source = tmp_path/'magnitude.dewy'
-    source.write_text('$bulletproof\n' + degrees + '\n' +
+    source.write_text('$bulletproof\n\n' + degrees + '\n' +
                       '\n'.join(f'printl(degrees({v}) ?? "")' for v in values))
     result = subprocess.run([compiler, *(['--release'] if release else []), source],
                             capture_output=True, text=True)

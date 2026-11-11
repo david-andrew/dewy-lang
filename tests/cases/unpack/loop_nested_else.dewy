@@ -1,8 +1,8 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{let total:int64=0
 let entries:dict<string array<int64 length=2>>=[]
 loop [key [x y]] in entries {total+=x+y} else {total=42}
 return total}
 main=()=>exit(run())
-
-$runtime_checks

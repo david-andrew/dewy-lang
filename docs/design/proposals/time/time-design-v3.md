@@ -419,12 +419,13 @@ Proof means a checked software implication under stated premises. Empirical mode
 
 ```dewy
 $time.require_context
+$time.strict
+
 wait_for = (delay:Duration<(>=? 0s)> context) =>
     time.with_context(context () => sleep(delay))
 
-$time.strict
+$time.require_loss=false
 report = (reading context) => {
-    $time.require_loss=false
     printl(reading.display(profile='nominal' context=context) or_throw)
 }
 ```

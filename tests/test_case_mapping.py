@@ -8,13 +8,14 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tools.compiler import unicode_case
 
-PROGRAM = '''main = (argv:array<string>):>void => {
+PROGRAM = '''$runtime_checks
+
+main = (argv:array<string>):>void => {
     match read_text(argv[1]) {
         text:string => print(if argv[2] =? "up" text.upper else text.lower)
         _ => print"unreadable"
     }
 }
-$runtime_checks
 '''
 
 

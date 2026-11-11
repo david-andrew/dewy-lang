@@ -10,8 +10,8 @@ CASES = sorted([*(ROOT / 'tests/cases/directives').glob('*.dewy'), *(ROOT / 'tes
 
 # (a function whose body sets a policy its signature does not: entry bindings take the body's;
 # an `$ide` index of runtime checks)
-MIXED = '''pick=(xs:array<int64> i:int64):>int64=>{
-    $runtime_checks
+MIXED = '''$runtime_checks
+pick=(xs:array<int64> i:int64):>int64=>{
     xs[i]
 }
 main=()=>{

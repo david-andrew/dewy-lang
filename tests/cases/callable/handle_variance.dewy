@@ -1,3 +1,5 @@
+$runtime_checks
+
 TokenError:type = type of error
 TokenProtocol:type = type of any & [eat:(src:string:>uint64? | TokenError)]
 ws = (src:string):>uint64? => if src.startswith(" ") 1 else none
@@ -11,5 +13,3 @@ main = () => {
     let h:(x:int64:>int64) = @wide
     printl(h(21))
 }
-
-$runtime_checks

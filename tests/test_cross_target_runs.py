@@ -52,6 +52,7 @@ def run(target, binary, *args, setup=''):
 # reported (once) and nothing runs into a neighbouring worker's stack.
 WORKER_OVERFLOW = """$program.max_cores = 4
 $runtime_checks
+
 depth = (n:int64):>int64 => if n <=? 0 0 else 1 + depth(n - 1)
 main = (argv:array<string>):>void => {
     let n = to_int(argv[1]) ?? 0
@@ -75,6 +76,7 @@ def test_worker_stack_overflow_is_reported(compiler, tmp_path, target):
 # A task's stack overflows into its guard: its own signal stack, between two guards, lets the
 # handler report it (tasks run on Linux only).
 TASK_OVERFLOW = """$runtime_checks
+
 depth = (n:int64):>int64 => if n <=? 0 0 else 1 + depth(n - 1)
 main = (argv:array<string>):>void => {
     let n = to_int(argv[1]) ?? 0
@@ -127,6 +129,7 @@ def test_arm64_branches_reach_across_large_functions(compiler, tmp_path, flags):
 # A machine set to India Standard Time, as Windows names it, is in Asia/Kolkata: CLDR's table
 # says Asia/Calcutta, the name tz keeps only as a link.
 WINDOWS_ZONE = """$time.zone = 'system'
+
 main = (argv:array<string>):>void => {
     let text = if argv.length >? 1 argv[1] else "2026-07-01T12:00"
     printl(zoned(text))

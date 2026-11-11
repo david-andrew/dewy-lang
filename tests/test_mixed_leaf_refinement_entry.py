@@ -9,6 +9,7 @@ from tests.support import compiler  # noqa: F401
 @pytest.mark.parametrize('release', [False, True])
 def test_mutable_leaf_summary_entry(compiler, tmp_path, release):
     (tmp_path / 'leaf.dewy').write_text('''$runtime_checks
+
 Kind:type='nil' | 'value'
 Node:type=[kind:Kind='nil' child:int32=0]
 clone=(@store:array<Node> n:int64):>int64=>{

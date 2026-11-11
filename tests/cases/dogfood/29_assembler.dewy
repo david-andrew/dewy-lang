@@ -2,6 +2,8 @@
 # validate it (unknown opcodes, bad operands, undefined labels) with line
 # numbers, print a listing, then run it.
 
+$runtime_checks
+
 SOURCE = """
 ; sum of squares 1..n, then a countdown
         push 5
@@ -165,5 +167,3 @@ main = () => {
         errors:array<AsmError> => loop e in errors { printl"line {e.line}: {e.message}" }
     }
 }
-
-$runtime_checks

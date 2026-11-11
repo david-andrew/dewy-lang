@@ -2,6 +2,8 @@
 # Separate arenas nest: the inner value is promoted into the outer arena, the
 # outer value into the heap; both survive both resets. A copy of an arena is
 # another arena: resetting it leaves the original's values alone.
+$runtime_checks
+
 Packet:type=[id:int64 values:array<int64>]
 build=(n:int64):>Packet=>{
     let values:array<int64>=[]
@@ -27,5 +29,3 @@ main=()=>{
     }
     printl("{p.id} {p.values} {r.values}")
 }
-
-$runtime_checks

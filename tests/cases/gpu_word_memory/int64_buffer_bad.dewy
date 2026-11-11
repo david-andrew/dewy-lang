@@ -1,6 +1,7 @@
 # Shaders read and write GPU memory in 32-bit words: an int64 element would lose its high word
 # (5000000000 read back as 705032704), so it is an error that names int32.
 $runtime_checks
+
 P:type=[src:GpuBuffer<int64> dst:GpuBuffer<int64>]
 k=(id:int64 u:P):>void=>{ if id >=? 0 and id <? u.dst.length and id <? u.src.length { u.dst[id]=u.src[id] } }
 main=()=>{

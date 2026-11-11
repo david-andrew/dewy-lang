@@ -1,4 +1,6 @@
 # Dense opcode classification; the key varies on every iteration.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock
 
 classify=(code:int64):>int64=>match code {
@@ -44,5 +46,3 @@ main=(args:array<string>):>void=>{
     let result=kernel(count)
     printl"{result} {clock-started}"
 }
-
-$runtime_checks

@@ -1,3 +1,5 @@
+$runtime_checks
+
 Flight:type = [height:float64 speed:float64 energy:float64]
 simulate = (mass:float64 speed:float64 gravity:float64):>Flight => {
     let time = speed/gravity
@@ -29,5 +31,3 @@ main = ():>void => {
     # Report integral counts like the design's exact rational arithmetic.
     printl("{int64(result.height)} {int64(result.energy)} {int64(duration)}")
 }
-
-$runtime_checks

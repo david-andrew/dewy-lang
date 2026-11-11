@@ -74,13 +74,13 @@ def build_case_batch(compiler, directory, cases, body, release, target, *, argum
         # (batched programs test run-time behavior: they keep runtime checks
         # for their unproven obligations unless they set the policy themselves)
         if '$runtime_checks' not in source and '$prototype' not in source and '$no_hidden_costs' not in source:
-            source += '\n$runtime_checks\n'
+            source = '$runtime_checks\n\n' + source
         (directory / f'{name}.dewy').write_text(source)
         imports.append(f'from p"{name}.dewy" import (main as case_{i})')
     source = directory / 'batch.dewy'
     parameters = 'argv:array<string>' if arguments else ''
     # (the batch's own calls of its cases may fail their checks: it keeps them too)
-    source.write_text('\n'.join(imports) + f'\n$runtime_checks\nmain=({parameters}):>void=>{{\n'
+    source.write_text('\n'.join(imports) + f'\n$runtime_checks\n\n\nmain=({parameters}):>void=>{{\n'
                       + '\n'.join(body) + '\n}\n')
     binary = directory / 'batch'
     flags = ['--release'] if release else []

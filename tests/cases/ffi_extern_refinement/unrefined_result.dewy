@@ -1,5 +1,6 @@
 # modes: native
 # Without a refinement nothing bounds what C returns.
-toupper = (c:int32):>int32 => $extern
+$extern
+toupper = (c:int32):>int32
 upper = (c:int32):>uint8 => uint8($unsafe toupper(c))
 main = ():>void => printl(upper(97))

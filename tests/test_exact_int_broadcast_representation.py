@@ -13,6 +13,7 @@ from tests.support import compiler  # noqa: F401
 def test_tagged_map_words_and_big_fallback(compiler, tmp_path, release):
     source = tmp_path / 'maps.dewy'
     source.write_text('''$runtime_checks
+
 f=(a:array<int> b:array<int>):>array<int>=>a .* b .+ a
 main=(args:array<string>)=>{
  let n=int64(to_int(args[1]) ?? 0)

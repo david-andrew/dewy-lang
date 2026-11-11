@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{
 let values=[10 20 30 40] let sum:int64=0
 loop i in [0,2..values.length) {
@@ -9,5 +11,3 @@ loop i in [0,2..values.length) {i=1 replacement+=values[i]}
 return if sum =? 200 and replacement =? 40 42 else 1
 }
 main=()=>exit(run())
-
-$runtime_checks

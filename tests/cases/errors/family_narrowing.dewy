@@ -1,4 +1,6 @@
 # `is? error` (and an explicit `is? A or is? B` chain) narrows a local to those members.
+$runtime_checks
+
 Oops:type = type of error & [m:string]
 Bad:type = type of error
 describe = (e:error):>string => match e {
@@ -15,5 +17,3 @@ main = () => {
     f(Bad)
     f(41)
 }
-
-$runtime_checks

@@ -27,7 +27,7 @@ FORMS = {
 
 @pytest.mark.parametrize('form', sorted(FORMS))
 def test_unguarded_rejected_bulletproof(compiler, tmp_path, form):
-    result = run(compiler, tmp_path, '$bulletproof\n' + MAIN + FORMS[form] + '}\n')
+    result = run(compiler, tmp_path, '$bulletproof\n\n' + MAIN + FORMS[form] + '}\n')
     assert result.returncode != 0 and 'range for the conversion to ' in result.stderr, result.stdout + result.stderr
     assert 'help: NaN, an infinity or a value out of range fails' in result.stderr, result.stderr
 
@@ -43,10 +43,10 @@ def test_unguarded_panics(compiler, tmp_path, scope, target):
 
 # A closed row that excludes failure: unproven, the conversion may fail.
 def test_closed_row_needs_the_guard(compiler, tmp_path):
-    bad = '$runtime_checks\nf = (x:float64):>int64 & no_effects => int64(x)\nmain = () => printl(f(2.5))\n'
+    bad = '$runtime_checks\n\nf = (x:float64):>int64 & no_effects => int64(x)\nmain = () => printl(f(2.5))\n'
     result = run(compiler, tmp_path, bad)
     assert result.returncode != 0 and 'possible failure exceeds' in result.stderr, result.stdout + result.stderr
-    good = '$runtime_checks\nf = (x:float64):>int64 & no_effects => if -10.0 <=? x and x <? 10.0 int64(x) else 0\nmain = () => printl(f(2.5))\n'
+    good = '$runtime_checks\n\nf = (x:float64):>int64 & no_effects => if -10.0 <=? x and x <? 10.0 int64(x) else 0\nmain = () => printl(f(2.5))\n'
     result = run(compiler, tmp_path, good, 'run')
     assert result.returncode == 0 and result.stdout == '2\n', result.stdout + result.stderr
 
@@ -59,11 +59,12 @@ def test_negated_guard_does_not_exclude_nan(compiler, tmp_path):
     result = run(compiler, tmp_path, source)
     assert result.returncode != 0 and 'cannot prove' in result.stderr, result.stdout + result.stderr
     assert 'within the uint8 range' in result.stderr, result.stderr
-    result = run(compiler, tmp_path, '$no_nan\n' + source)
+    result = run(compiler, tmp_path, '$no_nan\n\n' + source)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 ACCEPT = '''$bulletproof
+
 a = (x:float64):>int64 => if -1000.0 <=? x and x <? 1000.0 int64(x) else -1
 b = (x:float64):>uint8 => {
     if not (0.0 <=? x and x <? 256.0) return 0
@@ -89,6 +90,6 @@ def test_nan_literal_rejected_under_no_nan(compiler, tmp_path):
 
 
 def test_finite_floats_proves_int(compiler, tmp_path):
-    source = '$finite_floats\nf = (x:float64):>int => int(x)\nmain = ():>void & no panics => printl(f(2.5))\n'
+    source = '$finite_floats\n\nf = (x:float64):>int => int(x)\nmain = ():>void & no panics => printl(f(2.5))\n'
     result = run(compiler, tmp_path, source, 'run')
     assert result.returncode == 0 and result.stdout == '2\n', result.stdout + result.stderr

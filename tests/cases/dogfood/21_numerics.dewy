@@ -1,4 +1,6 @@
 # Numerical toolkit: integration (trapezoid, Simpson, adaptive) and root finding.
+$runtime_checks
+
 from units import rad
 Fn:type = (x:float64:>float64)
 
@@ -78,5 +80,3 @@ main = () => {
     show("newton cos(x)=x" newton((x:float64) => cos(x*rad)-x (x:float64) => -sin(x*rad)-1 1.0))
     show("newton x^2+1" newton((x:float64) => x*x+1 (x:float64) => 2x 0.0))
 }
-
-$runtime_checks

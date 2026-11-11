@@ -23,8 +23,8 @@ find_run = (grid:array<int length=[r c]> needed:int):>Seat? => {
     none
 }
 
+$runtime_checks  # writes to a shaped @ parameter currently lose rank facts
 reserve = (@grid:array<int length=[r c]> request:Request):>Booking? => {
-    $runtime_checks  # writes to a shaped @ parameter currently lose rank facts
     let start = find_run(grid request.count)
     if start is? none return none
     let seat = start or_throw
@@ -53,6 +53,7 @@ show = (grid:array<int length=[r c]>):>void => {
     }
 }
 
+$runtime_checks  # repeated mutable 2-D contract calls lose shape evidence
 main = () => {
     let grid = zeros<int>(4 8)
     loop row in [0..grid.length[0]) grid[row 3] = 2
@@ -65,7 +66,6 @@ main = () => {
         Request["Omar" 3]
         Request["Paz" 5]
     ]
-    $runtime_checks  # repeated mutable 2-D contract calls lose shape evidence
     loop request in requests {
         match reserve(@grid request) {
             booking:Booking => printl"{booking.name}: row {booking.row}, seats {booking.first}..{booking.first + booking.count - 1}"

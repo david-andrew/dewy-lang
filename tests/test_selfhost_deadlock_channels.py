@@ -16,9 +16,9 @@ main = ():
     print("checked")
 '''
     uncertain = tmp_path / 'uncertain.dewy'
-    uncertain.write_text(PING + '\n$runtime_checks\n')
+    uncertain.write_text(('$runtime_checks\n\n') + (PING))
     pipeline = tmp_path / 'pipeline.dewy'
-    pipeline.write_text(PIPELINE + '\n$runtime_checks\n')
+    pipeline.write_text(('$runtime_checks\n\n') + (PIPELINE))
     cases = [(uncertain, 0, b'may wait to send'), (pipeline, 0, b'checked\n')]
     for case in ('deadlock/channel_cycle', 'deadlock/channel_self',
                  'deadlock/channel_join', 'deadlock/channel_unfilled',

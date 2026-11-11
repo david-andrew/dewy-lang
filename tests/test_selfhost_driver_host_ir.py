@@ -13,6 +13,7 @@ pytestmark = pytest.mark.skipif(
     reason='--host-ir is a Linux x86-64 build')
 
 PROGRAM = '''$runtime_checks
+
 f=(xs:array<int64> k:int64):>int64=>{
     let total=0
     loop x in xs {total += x * k}

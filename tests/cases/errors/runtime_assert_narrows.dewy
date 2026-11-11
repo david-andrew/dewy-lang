@@ -1,5 +1,7 @@
 # Execution continues past `$runtime_assert` only where its condition held,
 # so a type test narrows the value for the rest of the block, as `if` does.
+$runtime_checks
+
 Oops:type=type of error & [code:int64]
 parse=(x:int64):>int64|Oops=>if x >? 0 x else Oops[x]
 both=():>int64=>{
@@ -16,5 +18,3 @@ member=():>int64=>{
 }
 printl(both())
 printl(member())
-
-$runtime_checks

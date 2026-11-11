@@ -146,7 +146,8 @@ main=()=>f(@G)''',
     if n >? 0 printl(xs[n-1])
 }''',
     # (the callback calls a foreign function)
-    'key_calls_extern': '''getpid=():>int32 => $extern
+    'key_calls_extern': '''$extern
+getpid=():>int32
 f=(@xs:array<int64>)=>{
     let n=xs.length
     let ys=xs.sorted(key=(v:int64)=>{$unsafe v + int64(getpid())})

@@ -9,7 +9,7 @@ import pytest
 from tests.support import compiler  # noqa: F401 (fixture)
 
 # (programs that keep runtime checks for their unproven obligations)
-RUNTIME_CHECKS = '\n$runtime_checks\n'
+RUNTIME_CHECKS = '$runtime_checks\n\n'
 
 PROGRAM = '''main=()=>{
     let dir=args()[1]
@@ -29,7 +29,7 @@ PROGRAM = '''main=()=>{
 @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX links and permission bits')
 def test_atomic_replace(compiler, tmp_path):
     source = tmp_path / 'write.dewy'
-    source.write_text(PROGRAM + RUNTIME_CHECKS)
+    source.write_text((RUNTIME_CHECKS) + (PROGRAM))
     binary = tmp_path / 'write'
     built = subprocess.run([compiler, 'build', source, '-o', binary],
                            capture_output=True, text=True, timeout=60, check=False)

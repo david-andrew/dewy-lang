@@ -1,4 +1,6 @@
 $explicit_copies
+$runtime_checks
+
 Pack:type=[values:array<int64> other:array<string>]
 make=():>Pack=>{
  let values:array<int64>=[2]
@@ -11,5 +13,3 @@ main=():>void=>{
  loop i in [0..2) {let values=owner.values values.push(40) if read(values) not=?42 return}
  exit(42)
 }
-
-$runtime_checks

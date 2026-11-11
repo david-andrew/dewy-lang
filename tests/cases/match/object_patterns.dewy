@@ -1,4 +1,6 @@
 # An object pattern matches the member with those fields and binds them
+$runtime_checks
+
 Num:type = [sign:-1|1 limbs:array<int64>]
 size = (n:Num):>int64 => match n {
     [sign:1 limbs] => limbs.length
@@ -27,5 +29,3 @@ printl(kind(Circle(1)))
 match Circle(5) {
     [radius:5] => printl("five")
 }
-
-$runtime_checks

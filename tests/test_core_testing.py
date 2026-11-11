@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 # (programs that keep runtime checks for their unproven obligations)
-RUNTIME_CHECKS = '\n$runtime_checks\n'
+RUNTIME_CHECKS = '$runtime_checks\n\n'
 
 
 @pytest.fixture(scope='module')
@@ -32,7 +32,7 @@ def shown(path):
 @pytest.mark.parametrize('flags', [[], ['--release']])
 def test_core_native_tests(compiler, tmp_path, flags):
     source = tmp_path / 'tests.dewy'
-    source.write_text((r'''let values = [20 22]
+    source.write_text((RUNTIME_CHECKS) + (r'''let values = [20 22]
 add = (a:int64 b:int64) => a+b
 main = () => panic("test must not run main")
 $test
@@ -46,7 +46,7 @@ $test
 starts_with_fresh_globals = () => $expect values[0] =? 20
 $test(cases=(1 2 -3))
 negates = (x:int64) => $expect 0 - (0 - x) =? x
-''') + RUNTIME_CHECKS)
+'''))
     result = command(compiler, 'test', *flags, source)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == '......\n6 passed\n'
@@ -64,7 +64,9 @@ negates = (x:int64) => $expect 0 - (0 - x) =? x
     ('$runtime_assert args().length =? 99', 101), ('exit(0)', 101), ('exit(7)', 101)])
 def test_core_native_test_failure_isolation(compiler, tmp_path, flags, failure, status):
     source = tmp_path / 'tests.dewy'
-    source.write_text(f'''$test
+    source.write_text(f'''$runtime_checks
+
+$test
 before = () => $expect true
 $test
 fails = () => {{
@@ -73,7 +75,6 @@ fails = () => {{
 }}
 $test
 after = () => $expect true
-$runtime_checks
 ''')
     result = command(compiler, 'test', *flags, source)
     assert result.returncode == status, result.stdout + result.stderr
@@ -84,7 +85,7 @@ $runtime_checks
 def test_core_native_test_expectations(compiler, tmp_path):
     """A failed expectation returns from its function; a helper's failure fails the test that called it."""
     source = tmp_path / 'tests.dewy'
-    source.write_text(('''first = (xs:array<int64>):>void => {
+    source.write_text(('$runtime_checks\n\n') + ('''first = (xs:array<int64>):>void => {
     $expect xs.length >? 0, "nonempty input"
     printl("helper continued")
 }
@@ -104,7 +105,7 @@ narrows = () => {
 $test(cases=[[a=1 b=2] [a=(-3) b=4]])
 pairs = (a:int64 b:int64) => $expect a - b <? 0, "{a} is not below {b}"
 main=():>void=>exit(0)
-''') + "\n$runtime_checks\n")
+'''))
     result = command(compiler, 'test', '--json', source)
     assert result.returncode == 1, result.stdout + result.stderr
     lines = [json.loads(line) for line in result.stdout.splitlines()]
@@ -150,8 +151,8 @@ def test_core_native_test_child_selection(compiler, tmp_path, flags):
     """Exercise the re-execution protocol locally as well as on Windows hosts."""
     source = tmp_path / 'child.dewy'
     helper = tmp_path / 'helper.dewy'
-    helper.write_text(('let original_args=args()\n') + RUNTIME_CHECKS)
-    source.write_text(('''from p"helper.dewy" import original_args
+    helper.write_text((RUNTIME_CHECKS) + ('let original_args=args()\n'))
+    source.write_text((RUNTIME_CHECKS) + ('''from p"helper.dewy" import original_args
 let values=[20 22]
 $test
 first = () => {
@@ -170,7 +171,7 @@ chosen = () => {
 }
 $test
 last = () => panic("child continued after its test")
-''') + RUNTIME_CHECKS)
+'''))
     result = command(compiler, 'test', *flags, source, '--dewy-internal-test', '2',
                      'original program name', 'original filter')
     assert result.returncode == 0, result.stdout + result.stderr
@@ -268,8 +269,10 @@ def test_core_native_tests_help(compiler):
 
 def test_core_native_tests_game(compiler, tmp_path):
     source = tmp_path / 'game.dewy'
-    (tmp_path / 'setup.dewy').write_text('window("imported setup" 320 240)\nready=()=>true\n$runtime_checks\n')
-    source.write_text('''from p"setup.dewy" import ready
+    (tmp_path / 'setup.dewy').write_text('$runtime_checks\n\nwindow("imported setup" 320 240)\nready=()=>true\n')
+    source.write_text('''$runtime_checks
+
+from p"setup.dewy" import ready
 window("headless tests" 320 240)
 update=(dt:float64):>void=>panic("must not update")
 draw=():>void=>panic("must not draw")
@@ -278,7 +281,6 @@ game_logic = () => {
     $expect ready()
     $expect 20+22 =? 42
 }
-$runtime_checks
 ''')
     result = subprocess.run([compiler, 'test', source], capture_output=True,
                             text=True, timeout=30, check=False)

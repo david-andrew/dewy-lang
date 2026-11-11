@@ -7,6 +7,7 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 PROVED = '''$runtime_checks=false
+
 drain=(@xs:array<int64>):>int64=>{
     let t:int64=0
     loop xs.length >? 0 {t+=xs.pop()}
@@ -48,12 +49,12 @@ def test_removal_proved(compiler, tmp_path):
 @pytest.mark.parametrize('name', sorted(REJECTED))
 def test_removal_rejected(compiler, tmp_path, name):
     source, expected = REJECTED[name]
-    result = run(compiler, tmp_path, '$runtime_checks=false\n' + source, 'check')
+    result = run(compiler, tmp_path, '$runtime_checks=false\n\n' + source, 'check')
     assert result.returncode != 0 and expected in result.stderr, result.stderr
 
 
 def test_removal_runtime_checks(compiler, tmp_path):
-    source = '$runtime_checks\ntake=(@xs:array<int64> i:int64):>int64=>xs.pop(i)\nlet a:array<int64>=[1 2]\nprintl(take(@a 1))\nprintl(take(@a 3))\n'
+    source = '$runtime_checks\n\ntake=(@xs:array<int64> i:int64):>int64=>xs.pop(i)\nlet a:array<int64>=[1 2]\nprintl(take(@a 1))\nprintl(take(@a 3))\n'
     listed = run(compiler, tmp_path, source, 'check', '--obligations')
     assert 'program.dewy:2:41: runtime check: index is in bounds' in listed.stdout + listed.stderr, listed.stdout + listed.stderr
     result = run(compiler, tmp_path, source, 'run')

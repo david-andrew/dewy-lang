@@ -10,7 +10,7 @@ from tools.cores import on_cores
 
 def run(compiler, tmp_path, source, *, expected_error=None):
     path = tmp_path / 'tasks.dewy'
-    path.write_text(source + ('\n$runtime_checks\n' if '$runtime_checks' not in source and '$prototype' not in source else ''))
+    path.write_text(('$runtime_checks\n\n' if '$runtime_checks' not in source and '$prototype' not in source else '') + (source))
     binary = tmp_path / 'tasks'
     built = subprocess.run([compiler, 'build', path, '-o', binary], capture_output=True, text=True, timeout=60)
     if expected_error:
@@ -171,7 +171,7 @@ def test_deadline_interrupts_stdin(compiler, tmp_path, operation):
 }}''')
     # Use an explicit thunk: stdin stays open without producing input or EOF.
     path.write_text(path.read_text().replace(f'@({{ {operation} }})', f'@wait_input'))
-    path.write_text(f'wait_input=()=>{operation}\n' + path.read_text() + '\n$runtime_checks\n')
+    path.write_text(('$runtime_checks\n\n') + (f'wait_input=()=>{operation}\n' + path.read_text()))
     binary = tmp_path / 'stdin'
     built = subprocess.run([compiler, 'build', path, '-o', binary], capture_output=True, text=True, timeout=60)
     assert built.returncode == 0, built.stderr

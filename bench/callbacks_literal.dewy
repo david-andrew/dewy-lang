@@ -1,4 +1,6 @@
 # Inline capturing callbacks, directly and through an invocation-only layer.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock
 Predicate:type=(x:int64):>bool
 Transform:type=(x:int64):>int64
@@ -26,5 +28,3 @@ main=(args:array<string>):>void=>{
     let stop=clock
     printl"{result} {stop-start}"
 }
-
-$runtime_checks

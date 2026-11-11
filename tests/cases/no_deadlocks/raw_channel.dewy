@@ -1,6 +1,7 @@
 # modes: native
 # `$no_deadlocks`: a raw channel wait has no certificate; the certified protocols do.
 $no_deadlocks
+
 main = ():>void | Closed<int64> | Canceled => {
     let c = channel<int64>(4)
     concurrent {

@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{let values=[uint64.max->[x=20 y=22]]
 let total:int64=0
 loop [key [x y]] in values and marker in [1] {
@@ -6,5 +8,3 @@ if key not=? uint64.max return 1 total+=(x+y)*marker
 }
 return total}
 main=()=>exit(run())
-
-$runtime_checks

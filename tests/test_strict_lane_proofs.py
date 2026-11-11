@@ -19,6 +19,7 @@ MAIN = 'main = ():>(void | OutOfMemory) & no panics => {\n'
 
 # An insertion sort whose inner `loop cond { }` is visible control flow, every index proven.
 SORT = '''$bulletproof
+
 const capacity = 8
 sort_prefix = (@xs:array<int32 length=8> n:int64<c => 0 <=? c and c <=? capacity>):>void & no allocates & no panics => {
     loop i in [1..n) {
@@ -41,6 +42,7 @@ sort_prefix = (@xs:array<int32 length=8> n:int64<c => 0 <=? c and c <=? capacity
 # Tracking a minimum and a maximum keeps `low <=? high`, so the record's sibling contract
 # holds, and `high - low + 1` is a nonzero divisor.
 SPAN = '''$bulletproof
+
 Reading:type = int32<r => -100000 <=? r and r <=? 100000>
 Span:type = [count:int64<(>? 0)> low:Reading high:Reading<(>=? low)>]
 span = (xs:array<Reading length=8> n:int64<c => 1 <=? c and c <=? 8>):>Span => {
@@ -89,7 +91,7 @@ def test_range_loop_drops_broken_relation(compiler, tmp_path, body, expected):
 
 
 def test_unrelated_difference_may_be_zero(compiler, tmp_path):
-    source = '$bulletproof\nwidth = (a:int32 b:int32):>int64 => 100 // (int64(a) - int64(b) + 1)\n' + MAIN + '    printl(width(3 1))\n}\n'
+    source = '$bulletproof\n\nwidth = (a:int32 b:int32):>int64 => 100 // (int64(a) - int64(b) + 1)\n' + MAIN + '    printl(width(3 1))\n}\n'
     result = run(compiler, tmp_path, source, 'check')
     assert result.returncode != 0 and 'cannot prove divisor is nonzero' in result.stderr, result.stdout + result.stderr
 
@@ -97,6 +99,7 @@ def test_unrelated_difference_may_be_zero(compiler, tmp_path):
 # A literal limit of at most 18 digits parses into a word: the same answers, and no big integer
 # conversion that could fail.
 PARSE = '''$bulletproof
+
 parse = (text:string):>int64 & no panics => {
     let n = to_int(text max_digits=3)
     if n is? NotAnInteger return -1
@@ -142,6 +145,7 @@ main = () => {
 @pytest.mark.parametrize('index,ok', [('i', True), ('i + 2', False)])
 def test_closed_row_panics(compiler, tmp_path, index, ok):
     source = f'''$runtime_checks
+
 total = (xs:array<int64 length=4>):>int64 & no_effects => {{
     let t:int64 = 0
     loop i in [0..3) {{

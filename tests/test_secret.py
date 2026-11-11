@@ -58,7 +58,7 @@ def test_secret_code_is_the_plain_code(compiler, tmp_path, flags):  # noqa: F811
     source = tmp_path / 'probe.dewy'
     built = []
     for secret in (False, True):
-        source.write_text((probe(secret)) + "\n$runtime_checks\n")
+        source.write_text(('$runtime_checks\n\n') + (probe(secret)))
         output = tmp_path / ('secret' if secret else 'plain')
         if 'wasm32' in flags:
             output = output.with_suffix('.html')

@@ -11,7 +11,7 @@ from tests.support import compiler
 
 def build(compiler, tmp_path, source, flags=(), name='probe'):
     path = tmp_path / f'{name}.dewy'
-    path.write_text(source + ('\n$runtime_checks\n' if '$runtime_checks' not in source and '$prototype' not in source else ''))
+    path.write_text(('$runtime_checks\n\n' if '$runtime_checks' not in source and '$prototype' not in source else '') + (source))
     binary = tmp_path / name
     result = subprocess.run([compiler, 'build', path, '-o', binary, *flags],
                             capture_output=True, text=True, timeout=120)
@@ -101,12 +101,13 @@ def test_string_beside_a_place_it_cannot_reach_is_not_retained(compiler, tmp_pat
 
 
 RANGES = '''
+$runtime_checks
+
 same=(a:array<uint8> i:int64 b:string n:int64):>bool=>a[i..i + n) =? (b as array<uint8>)[0..n)
 main=():>void=>{
     let a:array<uint8>=[104 101 108 108 111 33]
     printl"{same(a 0 "hello" 5)} {same(a 1 "hello" 5)} {same(a 1 "ello" 4)} {same(a 6 "" 0)}"
 }
-$runtime_checks
 '''
 
 

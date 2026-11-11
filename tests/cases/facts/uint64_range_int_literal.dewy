@@ -1,5 +1,7 @@
 # An `int` literal above int64 (2^64 - 1 keeps all-ones bits) is not -1:
 # `x % 18446744073709551615` must not be refuted as a zero divisor.
+$runtime_checks
+
 main = ():>void => {
     let a:int = 15
     printl(mod(a int((a * 2147483647) % 18446744073709551615) kind='trunc'))
@@ -7,4 +9,3 @@ main = ():>void => {
     printl((-a) % 18446744073709551615)
     printl((-a) // 18446744073709551615)
 }
-$runtime_checks

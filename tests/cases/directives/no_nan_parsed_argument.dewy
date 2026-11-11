@@ -1,8 +1,9 @@
 # A float parsed from text may be NaN: a caller outside `$no_nan` proves it
 # before passing it to a function whose body is in the scope.
 $runtime_checks=false
+
+$no_nan
 half=(x:float64):>float64=>{
-    $no_nan
     x*0.5
 }
 main=()=>{

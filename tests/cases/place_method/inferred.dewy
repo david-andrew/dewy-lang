@@ -1,6 +1,8 @@
 #
 # A method whose body gives `@member` lends that place; what it holds is released after the
 # place's last use.
+$runtime_checks
+
 let held:bool = false
 Guard = type of [id:int64
     $__drop__
@@ -35,5 +37,3 @@ main = () => {
     }
     printl"{acct.balance} {held}"
 }
-
-$runtime_checks

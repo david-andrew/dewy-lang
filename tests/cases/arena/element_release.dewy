@@ -1,6 +1,8 @@
 # Dropping an array of owning elements: each element's last reference frees it,
 # a shared element only loses a reference, and an element from outside the arena
 # survives the arena's reset with its contents.
+$runtime_checks
+
 build = (shared:array<int64>):>int64 => {
     let table:array<array<int64>>=[]
     loop r in [0..50) {
@@ -41,4 +43,3 @@ main = ():>void => {
     printl"{sum} {shared}"
     printl"{heap_rows()}"
 }
-$runtime_checks

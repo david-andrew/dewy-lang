@@ -1,5 +1,7 @@
 # quick
 # from_json fills secret fields; a mistake in one is reported without its text.
+$runtime_checks
+
 Login:type = [user:string pass:secret<string>]
 Vault:type = [name:string keys:array<secret<string>> pin:secret<int64>?=none]
 main = ():>void|TextError => {
@@ -15,4 +17,3 @@ main = ():>void|TextError => {
     let v = from_json<Vault>("\{\"name\":\"v\",\"keys\":[\"a\",\"b\"],\"pin\":1234\}") or_throw
     printl(v v.keys[1].reveal (v.pin ?? secret(0)).reveal)
 }
-$runtime_checks

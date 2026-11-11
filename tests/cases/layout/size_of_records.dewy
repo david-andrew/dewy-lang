@@ -2,6 +2,7 @@
 # `size_of<T>` and `align_of<T>` read a type's in-memory layout as integer
 # literals. A record of fixed-width fields has C's, padding included.
 $runtime_checks
+
 Item:type = [sku:uint32 qty:int16 bin:uint8 price_cents:int64]
 Named:type = [name:string id:int32]
 bytes_for = <T>(count:int64):>int64 => count * size_of<T>

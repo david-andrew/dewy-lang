@@ -11,6 +11,7 @@ from tests.support import compiler  # noqa: F401
 def test_broadcast_producer_lifetimes(compiler, tmp_path, release):
     source = tmp_path / 'lifetimes.dewy'
     source.write_text('''$runtime_checks
+
 const N:int64=17
 plain=(m:array<int64 length=[N N]>):>int=>{
  let h=m .+ 1

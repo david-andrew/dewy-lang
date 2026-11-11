@@ -1,3 +1,5 @@
+$runtime_checks
+
 from p"lower_analysis.dewy" import (raw_view checked_call_mutmask)
 # ---- pointers only read through ----
 # `xs.ptr` (data(xs)) detaches xs's elements from any other value sharing them only when
@@ -9,7 +11,6 @@ from p"lower_analysis.dewy" import (raw_view checked_call_mutmask)
 # The walk also tells which locals are exposed only by such reads, so a Dewy parameter's
 # binding can stay a view of the parameter. O(body) per function, once.
 # (one union-find for all functions: its keys, nodes and locals, are each one function's)
-$runtime_checks
 from p"ast.jo" import (nodes nkids nkids2 kid kid2 has_flag NF_MUT NF_AT NF_GLOBAL NF_EXTERN)
 from p"check.jo" import (locals fns LF_CAPTURED LF_CAPTURE LF_SHARED LF_ADDR LF_BYREF LF_ALIAS LF_MUTPARAM)
 from p"expr.jo" import (ntype IN)

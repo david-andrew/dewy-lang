@@ -1,7 +1,9 @@
 # modes: native
 # A row on a foreign function is trusted; without one it is opaque.
-labs=(x:int64):>int64 & no_effects => $extern
-getpid=():>int32 => $extern
+$extern
+labs=(x:int64):>int64 & no_effects
+$extern
+getpid=():>int32
 quiet=(x:int64):>int64 & no_effects => {
     $unsafe
     labs(x) + 1

@@ -1,5 +1,7 @@
 # Inner loops over a read-only loop's element: the element must stay the same for the
 # whole inner loop, whatever the body does to the outer array or to the element's name.
+$runtime_checks
+
 sum_rows = (t:array<array<int64>>):>int64 => {
     let total:int64=0
     loop row in t {
@@ -83,4 +85,3 @@ main = ():>void => {
     printl"{escapes([[1 2] [3]])}"
     printl"{through_call()}"
 }
-$runtime_checks

@@ -6,6 +6,7 @@ import subprocess
 from tests.support import compiler  # noqa: F401
 
 SOURCE = '''$runtime_checks=false
+
 find=(xs:array<int64> needle:int64):>int64<i => 0 <=? i and i <? xs.length> | none=>{
     loop i in [0..xs.length) {
         if xs[i] =? needle return i
@@ -40,6 +41,7 @@ def test_refined_arm_needs_its_test(compiler, tmp_path):
 
 
 ERRORS = '''$runtime_checks=false
+
 Failure:type=type of error & [offset:int64 message:string]
 next=(source:array<uint8> start:int64<0 <=? start and start <=? source.length>):>int64<r => 0 <=? r and r <=? source.length>|Failure=>{
     if start <? source.length return start+1

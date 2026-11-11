@@ -1,4 +1,6 @@
 # modes: native native-release
+$runtime_checks
+
 f=(a:int64 b:int64=2):>int64=>a+b
 k=(a:int64 b:int64=10 c:int64=a):>int64=>a+b+c
 triple=(x:int64 y:int64=3):>int64=>x*y
@@ -22,5 +24,3 @@ main=()=>{
     let hs=[@f @f]
     printl(hs[0](3))
 }
-
-$runtime_checks

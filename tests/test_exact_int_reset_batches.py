@@ -20,6 +20,7 @@ def test_bounded_record_batch_and_outliers(compiler, tmp_path, release, nested):
         make = 'P[p=V[x y] v=V[dx dy]]'
     source = tmp_path / 'batch.dewy'
     source.write_text(f'''$runtime_checks
+
 {definitions}
 step=(@ps:array<P>):>void=>{{
  loop i in 0.. and i <? ps.length {{

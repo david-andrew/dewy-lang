@@ -1,4 +1,6 @@
 # `...` ends the positional run; `<v:T>` keeps a parameter out of the keyword interface
+$runtime_checks
+
 offset = (value:int64 ... amount:int64):>int64 => value + amount
 printl(offset(40 amount=2))
 printl(offset(amount=1 value=2))
@@ -7,5 +9,3 @@ printl(scale(20))
 printl(scale(20 plus=2))
 increment = (<value:int64>):>int64 => value + 1
 printl(increment(41))
-
-$runtime_checks

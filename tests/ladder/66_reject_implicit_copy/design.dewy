@@ -2,6 +2,8 @@
 # Acceptance: Reject an implicit independent runtime-sized mutable copy.
 # Negative: compilation must reject the marked operation, before execution.
 $explicit_copies
+$runtime_checks
+
 
 checksum = (xs:array<int64>):>int64 => {
     let total:int64 = 0
@@ -59,5 +61,3 @@ main = ():>void => {
     forbidden(make(3));
     $runtime_assert witness >? 0
 }
-
-$runtime_checks

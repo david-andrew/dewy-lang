@@ -10,6 +10,7 @@ from tests.support import compiler  # noqa: F401
 def test_proven_open_loop_keeps_word_counter(compiler, tmp_path, release):
     source = tmp_path / 'open.dewy'
     source.write_text('''$runtime_checks
+
 fill=(@values:array<int64>):>void=>{
  loop i in 0.. and i <? values.length {values[i]=i as int64}
 }
@@ -31,6 +32,7 @@ printl(xs)
 def test_open_loop_rereads_resized_bound(compiler, tmp_path, release):
     source = tmp_path / 'resize.dewy'
     source.write_text('''$runtime_checks
+
 trim=(@values:array<int64>):>void=>{
  loop i in 0.. and i <? values.length {
   values[i]=i as int64
@@ -49,6 +51,7 @@ printl(xs)
 def test_proven_stencil_still_vectorizes(compiler, tmp_path):
     source = tmp_path / 'stencil.dewy'
     source.write_text('''$runtime_checks
+
 step=(center:array<float64>):>array<float64>=>{
  let out=center
  loop j in [1..center.length-1) {out[j]=(center[j-1]+center[j+1])*0.5}

@@ -1,9 +1,10 @@
 # A store into a map's refined value is checked.
 # exit: 101
+$runtime_checks
+
 Nat:type=int64<(>=? 0)>
 main=()=>{
     let n:dict<string Nat>=["a"->1]
     n["a"]-=5
     printl(n)
 }
-$runtime_checks

@@ -10,7 +10,9 @@ from tests.support import compiler
 from tools.compiler import speed
 from tools.filelock import lock_exclusive
 
-PROGRAM = r'''
+PROGRAM = '''
+$runtime_checks
+
 main=(args:array<string>)=>{
     let mode=args[1]
     if mode =? "mul" {
@@ -34,7 +36,6 @@ main=(args:array<string>)=>{
         printl(fmt'x'((one << 4001)+5).length)
     }
 }
-$runtime_checks
 '''
 
 

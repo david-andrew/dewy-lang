@@ -1,4 +1,6 @@
 # A sequence scrutinee is read once per value; a sequence pattern matches element by element
+$runtime_checks
+
 x:int64 = 3
 y = "a"
 sum = match (x y) {
@@ -13,5 +15,3 @@ pair = (xs:array<int64>):>string => match xs {
 printl(pair([1 2]))
 printl(pair([1 7 3]))
 printl(pair([1 2 3]))
-
-$runtime_checks

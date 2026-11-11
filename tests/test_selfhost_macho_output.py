@@ -11,7 +11,7 @@ from tests.support import compiler  # noqa: F401
 DOUBLES = {
     'lower.jo': 'mac_imports: (int, str, str)[]\n',
     'util.jo': 'ice = (msg: str): print("ice: {msg}")\n',
-    'x64_module.dewy': '$runtime_checks\nlet stub_addr:array<int64>=[-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 256 -1]\n',
+    'x64_module.dewy': '$runtime_checks\n\nlet stub_addr:array<int64>=[-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 256 -1]\n',
     'x64_module.jo': 'stub_addr: int[] = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 256, -1]\n',
 }
 

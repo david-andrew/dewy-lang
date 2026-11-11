@@ -10,6 +10,7 @@ from tests.support import compiler  # noqa: F401
 def test_dynamic_shift_representation(compiler, tmp_path, release):
     source = tmp_path / 'shifts.dewy'
     source.write_text('''$runtime_checks
+
 bounded=(k:int64):>int=>{
  if k <? 0 or k >? 62 return 0
  let one:int64=1

@@ -1,4 +1,6 @@
 # Inside a generic function a binding typed by a type parameter stays a value.
+$runtime_checks
+
 keep=<T>(value:T):>T=>value
 double=(x:int64):>int64=>x*2
 main=():>void=>{
@@ -6,5 +8,3 @@ main=():>void=>{
     printl(f(21))
     printl(keep(7))
 }
-
-$runtime_checks

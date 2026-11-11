@@ -1,6 +1,7 @@
 # A C function pointer's parameters stay scalars and pointers.
 Pair:type = [a:int32 b:int32]
-visit = (f:((p:Pair):>int32)):>int32 => $extern(lib='m')
+$extern(lib='m')
+visit = (f:((p:Pair):>int32)):>int32
 main = ():>void => $unsafe {
     let v = @visit
 }

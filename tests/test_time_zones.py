@@ -162,17 +162,18 @@ def test_literal_errors_name_the_policy(compiler, tmp_path):
         ran = run(compiler, tmp_path, f'printl({expression})\n')
         assert ran.returncode != 0, expression
         assert message in ran.stderr, (expression, ran.stderr)
-    ran = run(compiler, tmp_path, "$time.zone = 'system'\nprintl(zoned\"2026-07-01T12:00\")\n")
+    ran = run(compiler, tmp_path, "$time.zone = 'system'\n\nprintl(zoned\"2026-07-01T12:00\")\n")
     assert ran.returncode != 0
     assert 'a literal cannot assume' in ran.stderr
 
 
 def test_scope_settings(compiler, tmp_path):
     source = """$time.zone = 'America/New_York'
+
+$time.gap = 'next'
+$time.fold = 'later'
 f = () => {
     # lexical gap and fold policies
-    $time.gap = 'next'
-    $time.fold = 'later'
     printl(zoned"2026-07-01T12:00")
     printl(zoned"2026-03-08T02:30")
     printl(zoned"2026-11-01T01:30")
@@ -196,7 +197,7 @@ g
         '2026-07-01T12:00:00+09:00[Asia/Tokyo]']
 
 
-PIN = "$time.zone = 'Asia/Tokyo'\n"
+PIN = "$time.zone = 'Asia/Tokyo'\n\n"
 
 
 def test_main_file_zone_reaches_every_module(compiler, tmp_path):
@@ -208,22 +209,22 @@ def test_main_file_zone_reaches_every_module(compiler, tmp_path):
 
 def test_main_file_zone_cannot_be_overridden(compiler, tmp_path):
     # An inner scope that is reached, and one that is not.
-    for body in ("f = () => {\n    $time.zone = 'America/New_York'\n    printl(today)\n}\nf\n",
-                 "f = () => {\n    $time.zone = 'America/New_York'\n    printl(today)\n}\nprintl(1)\n"):
+    for body in ("$time.zone = 'America/New_York'\nf = () => {\n    printl(today)\n}\nf\n",
+                 "$time.zone = 'America/New_York'\nf = () => {\n    printl(today)\n}\nprintl(1)\n"):
         ran = run(compiler, tmp_path, PIN + body)
         assert ran.returncode != 0, body
         assert "`$time.zone` is program-wide" in ran.stderr
         assert 'main.dewy:3' in ran.stderr
-        assert "first lines of any file's main" in ran.stderr
-    (tmp_path / 'other.dewy').write_text("$time.zone = 'system'\nshown = () => 1\n")
+        assert "directly before any file's main" in ran.stderr
+    (tmp_path / 'other.dewy').write_text("$time.zone = 'system'\n\nshown = () => 1\n")
     ran = run(compiler, tmp_path, PIN + 'import p"other.dewy" as other\nprintl(other.shown)\n')
     assert ran.returncode != 0
     assert "`$time.zone` is program-wide" in ran.stderr
 
 
 def test_the_same_zone_elsewhere_is_fine(compiler, tmp_path):
-    (tmp_path / 'other.dewy').write_text("shown = () => 1\nmain=()=>{\n$time.zone = 'Asia/Tokyo'\nprintl(shown)\n}\n")
-    source = PIN + "import p\"other.dewy\" as other\nmain = () => {\n    $time.zone = 'Asia/Tokyo'\n    printl(other.shown)\n}\n"
+    (tmp_path / 'other.dewy').write_text("shown = () => 1\n$time.zone = 'Asia/Tokyo'\nmain=()=>{\nprintl(shown)\n}\n")
+    source = PIN + 'import p"other.dewy" as other\n$time.zone = \'Asia/Tokyo\'\nmain = () => {\n    printl(other.shown)\n}\n'
     ran = run(compiler, tmp_path, source)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == '1\n'

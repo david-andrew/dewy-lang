@@ -5,21 +5,21 @@ from tests.support import compiler  # noqa: F401
 
 
 @pytest.mark.parametrize('body,ok', [
-    ('f=(xs:array<int64> i:int64):>int64=>{$runtime_checks\nreturn xs[i]}\nprintl(f([1] 2))', False),
-    ('f=():>int64=>{$runtime_checks\nlet xs:array<int64>=[1 2]\nreturn xs[1]}\nprintl(f())', True),
-    ('f=(x:int64):>int64=>{$runtime_checks\nreturn 10//x}\nprintl(f(0))', False),
-    ('f=(x:int64):>int8=>{$runtime_checks\nreturn int8(x)}\nprintl(f(1000))', False),
-    ('f=(x:int64):>int64=>{$runtime_checks\nif x <? 0 or x >? 100 return 0; return x+1}\nprintl(f(4))', True),
-    ('f=(x:int64):>int64=>{$runtime_checks\nreturn x+1}\nprintl(f(4))', False),
-    ('f=(x:int64):>int8=>{$runtime_checks\nif x <? 0 or x >? 100 return 0; return int8(x)}\nprintl(f(4))', True),
-    ('f=(x:int64 y:float64):>int64=>{$runtime_checks\nif x <? 0 or x >? 100 return 0; let z:int64=x+1; printl(z); return int64(y)}\nprintl(f(4 1.0))', False),
-    ('f=():>int64=>{$runtime_checks\nlet a:array<int64>=[1]\n$assert a[0]=?1\nreturn a[0]}\nprintl(f())', True),
-    ('$runtime_checks\nf=(xs:array<int64> i:int64):>int64=>{$runtime_checks=false\nreturn xs[i]}\nprintl(f([1] 2))', False),
+    ('$runtime_checks\nf=(xs:array<int64> i:int64):>int64=>{\nreturn xs[i]}\nprintl(f([1] 2))', False),
+    ('$runtime_checks\nf=():>int64=>{\nlet xs:array<int64>=[1 2]\nreturn xs[1]}\nprintl(f())', True),
+    ('$runtime_checks\nf=(x:int64):>int64=>{\nreturn 10//x}\nprintl(f(0))', False),
+    ('$runtime_checks\nf=(x:int64):>int8=>{\nreturn int8(x)}\nprintl(f(1000))', False),
+    ('$runtime_checks\nf=(x:int64):>int64=>{\nif x <? 0 or x >? 100 return 0; return x+1}\nprintl(f(4))', True),
+    ('$runtime_checks\nf=(x:int64):>int64=>{\nreturn x+1}\nprintl(f(4))', False),
+    ('$runtime_checks\nf=(x:int64):>int8=>{\nif x <? 0 or x >? 100 return 0; return int8(x)}\nprintl(f(4))', True),
+    ('$runtime_checks\nf=(x:int64 y:float64):>int64=>{\nif x <? 0 or x >? 100 return 0; let z:int64=x+1; printl(z); return int64(y)}\nprintl(f(4 1.0))', False),
+    ('$runtime_checks\nf=():>int64=>{\nlet a:array<int64>=[1]\n$assert a[0]=?1\nreturn a[0]}\nprintl(f())', True),
+    ('$runtime_checks\n\n$runtime_checks=false\nf=(xs:array<int64> i:int64):>int64=>{\nreturn xs[i]}\nprintl(f([1] 2))', False),
 ])
 def test_deferred_body_demand(compiler, tmp_path, body, ok):
     source = tmp_path / 'demand.dewy'
     # Demand the helper's actual panic boundary even within this module.
-    source.write_text('$assume_local_asserts=false\n' + body + '\n')
+    source.write_text('$assume_local_asserts=false\n\n' + body + '\n')
     run = subprocess.run([compiler, 'check', source], text=True, capture_output=True)
     assert (run.returncode == 0) == ok, run.stderr
     if not ok:
@@ -28,7 +28,7 @@ def test_deferred_body_demand(compiler, tmp_path, body, ok):
 
 def test_deferred_prototype_warning(compiler, tmp_path):
     source = tmp_path / 'prototype.dewy'
-    source.write_text('$prototype\nf=(xs:array<int64> i:int64):>int64=>xs[i]\nprintl(f([1] 0))\n')
+    source.write_text('$prototype\n\nf=(xs:array<int64> i:int64):>int64=>xs[i]\nprintl(f([1] 0))\n')
     run = subprocess.run([compiler, 'check', source], text=True, capture_output=True)
     assert run.returncode == 0, run.stderr
     assert 'prototype: cannot prove index is in bounds' in run.stderr

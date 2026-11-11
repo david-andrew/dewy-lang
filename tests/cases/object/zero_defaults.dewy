@@ -1,5 +1,7 @@
 # exit: 4
 # Defaults that are zero bytes (none, a fixed array's []) are filled in place.
+$runtime_checks
+
 let Node:type = [data:array<int64 length=4> = [] next:Node? = none]
 let main = ():>void => {
     let a = Node[]
@@ -8,5 +10,3 @@ let main = ():>void => {
     if b.next is? Node exit(a.data[0] + b.next.data[3])
     exit(1)
 }
-
-$runtime_checks

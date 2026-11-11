@@ -225,7 +225,7 @@ main=(args:array<string>):>void=>{
 def test_offset_contract_runtime_check(compiler, tmp_path, name):
     source, message = RUNTIME[name]
     path = tmp_path / f'{name}.dewy'
-    path.write_text(source + '\n$runtime_checks\n')
+    path.write_text(('$runtime_checks\n\n') + (source))
     result = subprocess.run([compiler, 'run', path], text=True, capture_output=True, timeout=60, cwd=tmp_path)
     assert result.returncode == 101, result.stdout + result.stderr
     assert result.stdout.splitlines() == ['2' if name == 'upper' else '1'], result.stdout

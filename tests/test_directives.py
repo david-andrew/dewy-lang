@@ -6,21 +6,21 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
-SITES = '''checked=(xs:array<int64> i:int64):>int64=>{
-    $runtime_checks
+SITES = '''$runtime_checks
+checked=(xs:array<int64> i:int64):>int64=>{
     return xs[i]
 }
+$runtime_checks
 guarded=(xs:array<int64> i:int64):>int64=>{
-    $runtime_checks
     if i >=? 0 and i <? xs.length return xs[i]
     return 0
 }
+$prototype
 draft=(xs:array<int64> i:int64):>int64=>{
-    $prototype
     return xs[i]
 }
+$runtime_checks
 main=()=>{
-    $runtime_checks
     let xs:array<int64>=[1 2 3]
     printl(int(checked(xs 0)) + guarded(xs 1) + draft(xs 2))
 }
@@ -53,7 +53,7 @@ def test_obligation_listing(compiler, tmp_path):
 
 
 def test_prototype_warnings_silenced(compiler, tmp_path):
-    source = '$prototype\n$prototype_warnings=false\nat=(xs:array<int64> i:int64):>int64=>xs[i]\nmain=()=>printl(at([4] 0))\n'
+    source = '$prototype\n$prototype_warnings=false\n\nat=(xs:array<int64> i:int64):>int64=>xs[i]\nmain=()=>printl(at([4] 0))\n'
     result = run(compiler, tmp_path, source, 'check')
     assert result.returncode == 0 and 'prototype:' not in result.stderr, result.stderr
     built = run(compiler, tmp_path, source.replace('$prototype_warnings=false\n', ''), 'check')
@@ -75,8 +75,8 @@ def test_user_bundle(compiler, tmp_path):
     $explicit_copies
     $runtime_checks=false
 }
+$careful
 safe=(xs:array<int64> i:int64):>int64=>{
-    $careful
     if i >=? 0 and i <? xs.length return xs[i]
     return 0
 }

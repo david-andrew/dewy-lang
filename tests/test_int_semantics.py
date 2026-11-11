@@ -9,7 +9,9 @@ from tests.test_core import Scripts, compiler
 
 MIN = -(1 << 63)
 MAX = (1 << 63) - 1
-SOURCE = '''const WORD_MAX=uint64.max
+SOURCE = '''$runtime_checks
+
+const WORD_MAX=uint64.max
 big_echo=(n:bigint):>bigint=>n
 kind=(x:int):>string=>"int"
 kind=(x:int64):>string=>"int64"
@@ -70,7 +72,6 @@ main=(argv:array<string>)=>{
     if op=?"index" {let xs=[10 20 30] printl"{xs[x]} {xs.length}" return}
     panic("unknown operation")
 }
-$runtime_checks
 '''
 
 

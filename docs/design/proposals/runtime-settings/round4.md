@@ -5,10 +5,10 @@ Round 2 still holds except where this file replaces it. No new syntax. `availabl
 The plain program is a local, then the setting, then the call. It compiles. The cap starts at the setting.
 
 ```dewy
+$program.max_cores = cores
 main = () => {
     let cores = to_int((p"cores.txt".read_text or_throw).trim) or_throw
     if cores <? 1 { printl("cores must be at least 1" file=stderr); exit(2) }
-    $program.max_cores = cores
     run()
 }
 ```

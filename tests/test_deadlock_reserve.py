@@ -9,7 +9,7 @@ from tests.support import compiler  # noqa: F401
 
 def check(compiler, tmp_path, program):  # noqa: F811
     source = tmp_path / 'main.dewy'
-    source.write_text(program + '\n$runtime_checks\n')
+    source.write_text(('$runtime_checks\n\n') + (program))
     checked = subprocess.run([compiler, 'check', source], capture_output=True, text=True, timeout=60, check=False)
     return checked.returncode, [line for line in checked.stderr.splitlines() if 'wait' in line or 'holds' in line or 'holds' in line]
 

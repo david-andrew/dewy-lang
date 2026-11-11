@@ -11,6 +11,7 @@ def test_large_scope_live_values(compiler, tmp_path, release):
     source = tmp_path / 'scope.dewy'
     padding = '\n'.join(f'let unused{i}:int64={i}\nif unused{i} >? 0 {{let copy=unused{i}+1}}' for i in range(80))
     source.write_text('''$runtime_checks
+
 f=(xs:array<int64>):>int64=>{
  if xs.length =? 0 return 0
  let saved=xs.length

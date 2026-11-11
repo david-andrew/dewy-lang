@@ -1,66 +1,113 @@
 # Dewy records with C layout passed to and returned from C by value
 # (test_c_structs.py: structs.c is the C side).
 S1:type = [a:int32]
-S1_sum = (s:S1):>int64 => $extern(lib=LIBRARY)
-S1_make = (a:int32):>S1 => $extern(lib=LIBRARY)
-S1_twice = (s:S1):>S1 => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+S1_sum = (s:S1):>int64
+$extern(lib=LIBRARY)
+S1_make = (a:int32):>S1
+$extern(lib=LIBRARY)
+S1_twice = (s:S1):>S1
 D1:type = [x:float64]
-D1_sum = (s:D1):>int64 => $extern(lib=LIBRARY)
-D1_make = (x:float64):>D1 => $extern(lib=LIBRARY)
-D1_twice = (s:D1):>D1 => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+D1_sum = (s:D1):>int64
+$extern(lib=LIBRARY)
+D1_make = (x:float64):>D1
+$extern(lib=LIBRARY)
+D1_twice = (s:D1):>D1
 F2:type = [x:float32 y:float32]
-F2_sum = (s:F2):>int64 => $extern(lib=LIBRARY)
-F2_make = (x:float32 y:float32):>F2 => $extern(lib=LIBRARY)
-F2_twice = (s:F2):>F2 => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+F2_sum = (s:F2):>int64
+$extern(lib=LIBRARY)
+F2_make = (x:float32 y:float32):>F2
+$extern(lib=LIBRARY)
+F2_twice = (s:F2):>F2
 Vec2:type = [x:float64 y:float64]
-Vec2_sum = (s:Vec2):>int64 => $extern(lib=LIBRARY)
-Vec2_make = (x:float64 y:float64):>Vec2 => $extern(lib=LIBRARY)
-Vec2_twice = (s:Vec2):>Vec2 => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+Vec2_sum = (s:Vec2):>int64
+$extern(lib=LIBRARY)
+Vec2_make = (x:float64 y:float64):>Vec2
+$extern(lib=LIBRARY)
+Vec2_twice = (s:Vec2):>Vec2
 F3:type = [x:float32 y:float32 z:float32]
-F3_sum = (s:F3):>int64 => $extern(lib=LIBRARY)
-F3_make = (x:float32 y:float32 z:float32):>F3 => $extern(lib=LIBRARY)
-F3_twice = (s:F3):>F3 => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+F3_sum = (s:F3):>int64
+$extern(lib=LIBRARY)
+F3_make = (x:float32 y:float32 z:float32):>F3
+$extern(lib=LIBRARY)
+F3_twice = (s:F3):>F3
 D4:type = [a:float64 b:float64 c:float64 d:float64]
-D4_sum = (s:D4):>int64 => $extern(lib=LIBRARY)
-D4_make = (a:float64 b:float64 c:float64 d:float64):>D4 => $extern(lib=LIBRARY)
-D4_twice = (s:D4):>D4 => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+D4_sum = (s:D4):>int64
+$extern(lib=LIBRARY)
+D4_make = (a:float64 b:float64 c:float64 d:float64):>D4
+$extern(lib=LIBRARY)
+D4_twice = (s:D4):>D4
 IF:type = [i:int32 f:float32]
-IF_sum = (s:IF):>int64 => $extern(lib=LIBRARY)
-IF_make = (i:int32 f:float32):>IF => $extern(lib=LIBRARY)
-IF_twice = (s:IF):>IF => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+IF_sum = (s:IF):>int64
+$extern(lib=LIBRARY)
+IF_make = (i:int32 f:float32):>IF
+$extern(lib=LIBRARY)
+IF_twice = (s:IF):>IF
 DI:type = [d:float64 i:int64]
-DI_sum = (s:DI):>int64 => $extern(lib=LIBRARY)
-DI_make = (d:float64 i:int64):>DI => $extern(lib=LIBRARY)
-DI_twice = (s:DI):>DI => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+DI_sum = (s:DI):>int64
+$extern(lib=LIBRARY)
+DI_make = (d:float64 i:int64):>DI
+$extern(lib=LIBRARY)
+DI_twice = (s:DI):>DI
 ID:type = [i:int64 d:float64]
-ID_sum = (s:ID):>int64 => $extern(lib=LIBRARY)
-ID_make = (i:int64 d:float64):>ID => $extern(lib=LIBRARY)
-ID_twice = (s:ID):>ID => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+ID_sum = (s:ID):>int64
+$extern(lib=LIBRARY)
+ID_make = (i:int64 d:float64):>ID
+$extern(lib=LIBRARY)
+ID_twice = (s:ID):>ID
 B3:type = [a:uint8 b:int16 c:uint8]
-B3_sum = (s:B3):>int64 => $extern(lib=LIBRARY)
-B3_make = (a:uint8 b:int16 c:uint8):>B3 => $extern(lib=LIBRARY)
-B3_twice = (s:B3):>B3 => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+B3_sum = (s:B3):>int64
+$extern(lib=LIBRARY)
+B3_make = (a:uint8 b:int16 c:uint8):>B3
+$extern(lib=LIBRARY)
+B3_twice = (s:B3):>B3
 Big3:type = [a:int64 b:int64 c:int64]
-Big3_sum = (s:Big3):>int64 => $extern(lib=LIBRARY)
-Big3_make = (a:int64 b:int64 c:int64):>Big3 => $extern(lib=LIBRARY)
-Big3_twice = (s:Big3):>Big3 => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+Big3_sum = (s:Big3):>int64
+$extern(lib=LIBRARY)
+Big3_make = (a:int64 b:int64 c:int64):>Big3
+$extern(lib=LIBRARY)
+Big3_twice = (s:Big3):>Big3
 Mix4:type = [a:int32 b:float64 c:int8 d:float32]
-Mix4_sum = (s:Mix4):>int64 => $extern(lib=LIBRARY)
-Mix4_make = (a:int32 b:float64 c:int8 d:float32):>Mix4 => $extern(lib=LIBRARY)
-Mix4_twice = (s:Mix4):>Mix4 => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+Mix4_sum = (s:Mix4):>int64
+$extern(lib=LIBRARY)
+Mix4_make = (a:int32 b:float64 c:int8 d:float32):>Mix4
+$extern(lib=LIBRARY)
+Mix4_twice = (s:Mix4):>Mix4
 FID:type = [a:float32 b:int32 c:float64]
-FID_sum = (s:FID):>int64 => $extern(lib=LIBRARY)
-FID_make = (a:float32 b:int32 c:float64):>FID => $extern(lib=LIBRARY)
-FID_twice = (s:FID):>FID => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+FID_sum = (s:FID):>int64
+$extern(lib=LIBRARY)
+FID_make = (a:float32 b:int32 c:float64):>FID
+$extern(lib=LIBRARY)
+FID_twice = (s:FID):>FID
 U2:type = [a:uint16 b:uint8]
-U2_sum = (s:U2):>int64 => $extern(lib=LIBRARY)
-U2_make = (a:uint16 b:uint8):>U2 => $extern(lib=LIBRARY)
-U2_twice = (s:U2):>U2 => $extern(lib=LIBRARY)
-many_vec = (a:Vec2 b:Vec2 c:Vec2 d:Vec2 e:Vec2 f:float64 g:Vec2):>float64 => $extern(lib=LIBRARY)
-many_ints = (a:int64 b:int64 c:int64 d:int64 e:int64 s:B3 g:int64 t:IF h:int64):>int64 => $extern(lib=LIBRARY)
-big_mixed = (k:int32 a:Big3 scale:float64 m:Mix4 b:Big3 f:F3):>int64 => $extern(lib=LIBRARY)
-d4_add = (a:D4 b:D4 c:D4):>D4 => $extern(lib=LIBRARY)
-big_after = (a:int64 b:int64 c:int64 d:int64 e:int64 f:int64 g:int64 x:Big3):>Big3 => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+U2_sum = (s:U2):>int64
+$extern(lib=LIBRARY)
+U2_make = (a:uint16 b:uint8):>U2
+$extern(lib=LIBRARY)
+U2_twice = (s:U2):>U2
+$extern(lib=LIBRARY)
+many_vec = (a:Vec2 b:Vec2 c:Vec2 d:Vec2 e:Vec2 f:float64 g:Vec2):>float64
+$extern(lib=LIBRARY)
+many_ints = (a:int64 b:int64 c:int64 d:int64 e:int64 s:B3 g:int64 t:IF h:int64):>int64
+$extern(lib=LIBRARY)
+big_mixed = (k:int32 a:Big3 scale:float64 m:Mix4 b:Big3 f:F3):>int64
+$extern(lib=LIBRARY)
+d4_add = (a:D4 b:D4 c:D4):>D4
+$extern(lib=LIBRARY)
+big_after = (a:int64 b:int64 c:int64 d:int64 e:int64 f:int64 g:int64 x:Big3):>Big3
 main = ():>void => $unsafe {
     let s1 = S1_make(7)
     printl"S1 {S1_sum(s1)} {S1_sum(S1_twice(s1))} {s1.a}"

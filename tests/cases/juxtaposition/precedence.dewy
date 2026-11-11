@@ -1,5 +1,7 @@
 #
 # Every row of the precedence table in docs/design/juxtaposition.md.
+$runtime_checks
+
 sin = (v:int64):>int64 => v + 1
 square = (v:int64):>int64 => v*v
 run = () => {
@@ -18,5 +20,3 @@ run = () => {
     printl"{2x} {2x^2} {3(a+x)} {(a+1)(a-1)} {(a+x)(y-x)^2} {a(a+1)//2} {2square(x)^2} {(a(-x)).abs()}"
 }
 main = () => run()
-
-$runtime_checks

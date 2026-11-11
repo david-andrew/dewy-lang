@@ -1,3 +1,5 @@
+$runtime_checks
+
 E:type = type of error
 ws = (src:string):>uint64? => if src.startswith(" ") 1 else none
 apply = (f:(s:string:>uint64? | E) s:string) => printl(f(s))
@@ -17,5 +19,3 @@ main = () => {
     let fs:array<(x:int64:>int64)> = [@wide]
     printl(fs[0](5))
 }
-
-$runtime_checks

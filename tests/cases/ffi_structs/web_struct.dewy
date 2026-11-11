@@ -1,5 +1,6 @@
 # modes: web
 # A web page's imports take numbers, so a struct goes by pointer there.
 Pair:type = [a:int32 b:int32]
-total = (p:Pair):>int32 => $extern
+$extern
+total = (p:Pair):>int32
 main = ():>void => $unsafe printl(total(Pair[1 2]))

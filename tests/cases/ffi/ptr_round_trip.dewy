@@ -1,10 +1,14 @@
 # modes: native native-release
 # Raw pointers from C: write and read through them, offset and reinterpret
 # them, and hand a nullable one back.
-malloc=(size:uint64):>ptr<uint8>? => $extern
-free=(p:ptr<uint8>?):>void => $extern
-memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8> => $extern
-strlen=(s:ptr<uint8>):>uint64 => $extern
+$extern
+malloc=(size:uint64):>ptr<uint8>?
+$extern
+free=(p:ptr<uint8>?):>void
+$extern
+memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8>
+$extern
+strlen=(s:ptr<uint8>):>uint64
 
 main=():>void=>$unsafe {
     let block=malloc(32)

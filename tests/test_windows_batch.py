@@ -15,11 +15,12 @@ BATCH = ['x.bat', 'X.CMD', 'x.bat ', 'x.bat. .', 'C:\\dir\\x.Bat', 'C:x.bat', 'x
          '/a/b.cmd', '.bat']
 NOT_BATCH = ['prog.exe', 'prog', 'dir.bat\\prog.exe', 'a.bat.exe', 'x.cmdx', 'bat', 'C:\\tools\\cmd.exe']
 
-RUNNER = '''main=()=>{
+RUNNER = '''$runtime_checks
+
+main=()=>{
     let status=run(args()[1] ["a&echo injected>marker.txt"])
     if status is? SpawnError { printl"refused" } else { printl"ran" }
 }
-$runtime_checks
 '''
 
 

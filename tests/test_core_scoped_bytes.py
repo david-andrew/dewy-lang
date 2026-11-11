@@ -51,7 +51,9 @@ def test_loan_escape_and_stability(compiler, tmp_path, body):
 
 @pytest.mark.parametrize('release', [False, True])
 def test_writable_snapshot_and_early_exits(compiler, tmp_path, release):
-    source = '''probe=(stop:bool):>int64=>{
+    source = '''$runtime_checks
+
+probe=(stop:bool):>int64=>{
     let bytes:array<uint8>=[1 2]
     let saved=bytes.copy()
     $lend(@bytes reserve=2) {
@@ -67,7 +69,6 @@ def test_writable_snapshot_and_early_exits(compiler, tmp_path, release):
     return (bytes[0] as int64)+(bytes[2] as int64)
 }
 main=()=>{printl("{probe(false)} {probe(true)}")}
-$runtime_checks
 '''
     result = run(compiler, tmp_path, source, 'run', release)
     assert result.returncode == 0, result.stderr
@@ -128,12 +129,13 @@ main=()=>probe(@bytes)
 
 @pytest.mark.parametrize('release', [False, True])
 def test_dynamic_length_checked_in_release(compiler, tmp_path, release):
-    result = run(compiler, tmp_path, '''probe=(n:int64)=>{
+    result = run(compiler, tmp_path, '''$runtime_checks
+
+probe=(n:int64)=>{
     let bytes:array<uint8>=[1 2]
     $lend(@bytes) {bytes.set_length(n)}
 }
 main=()=>probe(3)
-$runtime_checks
 ''', 'run', release)
     assert result.returncode != 0
     assert 'scoped loan length exceeds reservation' in result.stderr, result.stderr

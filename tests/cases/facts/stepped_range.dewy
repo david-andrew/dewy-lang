@@ -1,5 +1,7 @@
 # A stepped range's values lie between its first value and its end, in the
 # direction of the step; reading a mutable parameter's length writes nothing.
+$runtime_checks
+
 bump=(@xs:array<int64>):>void=>{
     loop i in [1,3..xs.length) { xs[i]+=1 }
 }
@@ -18,5 +20,3 @@ main=()=>{
     }
     printl(total)
 }
-
-$runtime_checks

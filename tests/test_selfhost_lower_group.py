@@ -10,7 +10,8 @@ from tests.selfhost_expr_double import compare_leaf
 from tests.selfhost_lower_double import modules_for
 
 
-PROGRAM = r'''$runtime_checks
+PROGRAM = '''$runtime_checks
+
 fib=(n:int64):>int64=>if n <? 2 {n} else {fib(n-1)+fib(n-2)}
 inside=(x:int64):>bool=>x >=? -9223372036854775808 and x <=? 9223372036854775807
 choose=(x:int64):>int64=>match x {

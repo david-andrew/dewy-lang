@@ -1,4 +1,5 @@
 $runtime_checks
+
 from p"@lib/core/os.jo" import (delete_file)
 from p"@lib/core/str.jo" import (chr)
 from p"@lib/core/rt.jo" import (__os_raw_free __os_raw_pages __read_fd __write_fd)
@@ -15,9 +16,12 @@ SessionWord:type=int64<overflow='wrap'>
 
 $unsafe
 if $target.os =? 'windows' {
-    SetConsoleMode=(h:ptr<uint8> mode:uint32):>int32 => $extern(name='SetConsoleMode' lib='kernel32')
-    ReadConsoleW=(h:ptr<uint8> buf:ptr<uint16> n:uint32 got:ptr<uint32> ctl:ptr<uint8>):>int32 => $extern(name='ReadConsoleW' lib='kernel32')
-    SetConsoleCtrlHandler=(f:ptr<uint8> add:int32):>int32 => $extern(name='SetConsoleCtrlHandler' lib='kernel32')
+    $extern(name='SetConsoleMode' lib='kernel32')
+    SetConsoleMode=(h:ptr<uint8> mode:uint32):>int32
+    $extern(name='ReadConsoleW' lib='kernel32')
+    ReadConsoleW=(h:ptr<uint8> buf:ptr<uint16> n:uint32 got:ptr<uint32> ctl:ptr<uint8>):>int32
+    $extern(name='SetConsoleCtrlHandler' lib='kernel32')
+    SetConsoleCtrlHandler=(f:ptr<uint8> add:int32):>int32
 }
 
 # ---- the session ----

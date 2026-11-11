@@ -1,4 +1,6 @@
 # The match the diagnostic suggests forwards the error and keeps the optional.
+$runtime_checks
+
 Oops:type=type of error & [code:int64]
 lookup=(x:int64):>int64?|Oops=>if x <? 0 Oops[x] else if x =? 0 none else x*10
 use=(x:int64):>int64|Oops=>{
@@ -11,5 +13,3 @@ use=(x:int64):>int64|Oops=>{
 printl(use(3))
 printl(use(0))
 printl(use(-1))
-
-$runtime_checks

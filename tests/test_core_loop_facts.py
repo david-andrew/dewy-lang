@@ -83,7 +83,7 @@ PROVED_OUTPUT = '14\n0\n110\n46\n14\n0\n210\n1116\n7\n3\n4\n6\n'
 def run(compiler, tmp_path, source, command, strict):
     path = tmp_path / 'loops.dewy'
     # (ordinary: the program keeps runtime checks for what is unproven)
-    path.write_text(source if strict else source + '\n$runtime_checks\n')
+    path.write_text(source if strict else ('$runtime_checks\n\n') + (source))
     arguments = [compiler, command, path]
     if command == 'build':
         arguments += ['-o', tmp_path / 'loops']

@@ -1,9 +1,12 @@
 # modes: native native-release
 # A raw pointer reaches an array's elements, never its length: after C fills
 # the elements, the length is still known, so indexing needs no guard.
-gettimeofday=(now:ptr<int64> zone:ptr<uint8>?):>int32 => $extern
-memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8> => $extern
-strnlen=(s:ptr<uint8> max:uint64):>uint64 => $extern
+$extern
+gettimeofday=(now:ptr<int64> zone:ptr<uint8>?):>int32
+$extern
+memset=(p:ptr<uint8> value:int32 n:uint64):>ptr<uint8>
+$extern
+strnlen=(s:ptr<uint8> max:uint64):>uint64
 
 main=():>void=>{
     let now:array<int64>=[0 0]

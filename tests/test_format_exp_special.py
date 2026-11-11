@@ -12,9 +12,9 @@ def test_special_values_match_python(compiler, tmp_path):  # noqa: F811
     bits = [struct.unpack('<Q', struct.pack('<d', v))[0] for v in values]
     shown = '|'.join("{fmt'%s'(x)}" % spec for spec in SPECS)
     source = tmp_path / 'special.dewy'
-    source.write_text('main = ():>void => {\n    let bits:array<uint64> = [' + ' '.join(map(str, bits)) + ']\n'
+    source.write_text('$runtime_checks\n\nmain = ():>void => {\n    let bits:array<uint64> = [' + ' '.join(map(str, bits)) + ']\n'
                       '    loop b in bits {\n        let x = b transmute float64\n'
-                      f'        printl"{shown}"\n    }}\n}}\n$runtime_checks\n')
+                      f'        printl"{shown}"\n    }}\n}}\n')
     ran = subprocess.run([compiler, 'run', source], capture_output=True, text=True, timeout=120)
     assert ran.returncode == 0, ran.stderr
     want = ['|'.join(format(v, spec) for spec in SPECS) for v in values]

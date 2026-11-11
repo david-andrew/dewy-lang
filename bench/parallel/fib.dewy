@@ -1,3 +1,5 @@
+$runtime_checks
+
 from p"../harness.jo" import clock, size_argument
 fib=(n:int64):>int64=>{if n <? 2 return n return fib(n-1)+fib(n-2)}
 fork_fib=(n:int64):>int64=>{
@@ -13,5 +15,3 @@ main=(args:array<string>):>void=>{
     let result:int64=if serial fib(n) else fork_fib(n)
     printl"{result} {clock()-start}"
 }
-
-$runtime_checks

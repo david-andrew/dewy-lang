@@ -4,14 +4,15 @@ import subprocess
 
 from tests.support import compiler  # noqa: F401
 
-SOURCE = '''main = () => {
+SOURCE = '''$runtime_checks
+
+main = () => {
     let x = 2.0
     let sin = 0.5
     printl(sin(x)^2)
     let a = 3
     printl(a(x))
 }
-$runtime_checks
 '''
 
 

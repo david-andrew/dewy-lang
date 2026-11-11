@@ -6,7 +6,8 @@ import pytest
 from tests.support import compiler
 
 
-PROGRAM = r'''$runtime_checks
+PROGRAM = '''$runtime_checks
+
 main=(args:array<string>):>void=>exit(entry(args)) entry=(args:array<string>):>int64=>{
 if args[1]=?"stdin" {
     let all=read_stdin()
@@ -37,7 +38,7 @@ loop true {
     let line=f.read_line()
     if line is?none break
     if line is?(Canceled|FileError) return 6
-    write(line) write("\n")
+    write(line) write("\\n")
 }
 let last=f.read_bytes(1)
 if last is?Canceled return 6

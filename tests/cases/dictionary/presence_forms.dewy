@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{
 let values=[1->0 2->42]
 if values.get(1) is? none or values.get(3) isnt? none return 1
@@ -11,5 +13,3 @@ let managed=[1->[20 22]]
 if managed.get(1) is? none or managed.get(2) isnt? none return 6
 return values.get(2)??0}
 main=()=>exit(run())
-
-$runtime_checks

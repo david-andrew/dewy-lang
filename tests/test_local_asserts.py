@@ -33,20 +33,20 @@ def test_same_module_fails_at_run_time(compiler, tmp_path):
 
 def test_other_module(compiler, tmp_path):
     # A caller in another module sees `panics`, through the helper module's own callers too.
-    files = {'helper.dewy': HELPER, 'main.dewy': '$runtime_checks=false\nfrom p"helper.dewy" import twice\nmain=():>void=>printl(twice(3))\n'}
+    files = {'helper.dewy': HELPER, 'main.dewy': '$runtime_checks=false\n\nfrom p"helper.dewy" import twice\nmain=():>void=>printl(twice(3))\n'}
     result = run(compiler, tmp_path, files, 'check')
     assert result.returncode != 0 and 'main.dewy:3:23: error: calling `twice` may panic (twice -> checked: `$runtime_assert` at' in result.stderr, result.stderr
 
 
 def test_other_module_opted_in(compiler, tmp_path):
-    files = {'helper.dewy': HELPER, 'main.dewy': 'from p"helper.dewy" import twice\nmain=():>void=>{\n    $runtime_checks\n    printl(twice(3))\n}\n'}
+    files = {'helper.dewy': HELPER, 'main.dewy': 'from p"helper.dewy" import twice\n$runtime_checks\nmain=():>void=>{\n    printl(twice(3))\n}\n'}
     result = run(compiler, tmp_path, files, 'run')
     assert result.returncode == 0 and result.stdout == '6\n', result.stdout + result.stderr
 
 
 def test_opt_out(compiler, tmp_path):
     # `$assume_local_asserts=false` makes the module's own callers prove it or opt in.
-    result = run(compiler, tmp_path, {'main.dewy': '$runtime_checks=false\n$assume_local_asserts=false\n' + HELPER + 'main=():>void=>printl(twice(3))\n'}, 'check')
+    result = run(compiler, tmp_path, {'main.dewy': '$runtime_checks=false\n$assume_local_asserts=false\n\n' + HELPER + 'main=():>void=>printl(twice(3))\n'}, 'check')
     assert result.returncode != 0 and 'calling `checked` may panic (checked: `$runtime_assert` at' in result.stderr, result.stderr
 
 

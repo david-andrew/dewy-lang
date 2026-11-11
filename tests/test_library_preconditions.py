@@ -38,14 +38,14 @@ def test_key_extrema_missing_contract(compiler, tmp_path, operation):
 @pytest.mark.parametrize('operation', ['min_by', 'max_by'])
 def test_key_extrema_empty_runtime_contract(compiler, tmp_path, operation):
     result = run(compiler, tmp_path,
-                 f'$runtime_checks\npick=(xs:array<int64>)=>xs.{operation}((x:int64)=>x)\nprintl(pick([]))\n', 'run')
+                 f'$runtime_checks\n\npick=(xs:array<int64>)=>xs.{operation}((x:int64)=>x)\nprintl(pick([]))\n', 'run')
     assert result.returncode == 101, result.stderr
     assert 'refinement failed' in result.stderr and 'xs.length >? 0' in result.stderr
 
 
 def test_key_extrema_panicking_callback(compiler, tmp_path):
-    result = run(compiler, tmp_path, '''key=(x:int64):>int64=>{
-    $runtime_checks
+    result = run(compiler, tmp_path, '''$runtime_checks
+key=(x:int64):>int64=>{
     return [1 2][x]
 }
 let values:array<int64>=[1 2]
@@ -74,6 +74,7 @@ def test_rational_denominator_invariant(compiler, tmp_path, type_name, statement
 @pytest.mark.parametrize('value, ok', [('3', True), ('-1', False), ('0', False), ('9223372036854775808', True)])
 def test_constant_refinement_is_checked(compiler, tmp_path, value, ok):
     result = run(compiler, tmp_path, f'''$runtime_checks
+
 Box:type=[value:int<(>? 0)>]
 make=(n:int):>Box=>Box[n]
 const BOX=make({value})
@@ -87,7 +88,8 @@ printl(BOX.value)
 
 
 def test_raw_access_keeps_array_length(compiler, tmp_path):
-    result = run(compiler, tmp_path, '''memset=(p:ptr<uint8> value:int32 count:uint64):>ptr<uint8>=>$extern
+    result = run(compiler, tmp_path, '''$extern
+memset=(p:ptr<uint8> value:int32 count:uint64):>ptr<uint8>
 main=():>void=>$unsafe {
 let bytes:array<uint8 length =? 4>=[1 2 3 4]
 memset(bytes.ptr 0 4);
@@ -132,5 +134,5 @@ printl(VALUE)
 ''', '9\n'),
 ])
 def test_constant_contract_projections(compiler, tmp_path, source, expected):
-    result = run(compiler, tmp_path, '$runtime_checks\n' + source, 'run')
+    result = run(compiler, tmp_path, '$runtime_checks\n\n' + source, 'run')
     assert result.returncode == 0 and result.stdout == expected, result.stdout + result.stderr

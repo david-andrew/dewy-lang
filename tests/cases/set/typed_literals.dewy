@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 sum=(values:set<int8>):>int64=>{
 let result:int64=0 loop value in values {result+=value as int64} return result}
 empty=():>set<uint64>=>set[]
@@ -11,5 +13,3 @@ if empty().length not=? 0 or absent is? none or absent.length not=? 0 return 1
 if high not in? wrap(high) or values.length not=? 2 return 2
 return sum(set[20 22])}
 main=()=>exit(run())
-
-$runtime_checks

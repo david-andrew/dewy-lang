@@ -4,12 +4,18 @@
 Pixel:type = [r:uint16 g:uint16 b:uint16 alpha:uint16]
 Stats:type = [count:uint64 red:uint64 green:uint64 blue:uint64]
 
-image_tone = (source:Pixel gain:uint16):>Pixel => $extern(lib='image')
-image_scan = (pixels:ptr<Pixel> count:uint64 stride:uint64 alignment:uint64):>Stats => $extern(lib='image')
-image_merge = (a:Stats b:Stats):>Stats => $extern(lib='image')
-image_rgb = (pixels:ptr<Pixel> count:uint64 buffer:ptr<uint8> capacity:uint64):>uint64 => $extern(lib='image')
-image_find = (pixels:ptr<Pixel> count:uint64 alpha:uint16 found:ptr<ptr<Pixel>?>):>int32 => $extern(lib='image')
-image_pointer_layout = (size:uint64 alignment:uint64):>int32 => $extern(lib='image')
+$extern(lib='image')
+image_tone = (source:Pixel gain:uint16):>Pixel
+$extern(lib='image')
+image_scan = (pixels:ptr<Pixel> count:uint64 stride:uint64 alignment:uint64):>Stats
+$extern(lib='image')
+image_merge = (a:Stats b:Stats):>Stats
+$extern(lib='image')
+image_rgb = (pixels:ptr<Pixel> count:uint64 buffer:ptr<uint8> capacity:uint64):>uint64
+$extern(lib='image')
+image_find = (pixels:ptr<Pixel> count:uint64 alpha:uint16 found:ptr<ptr<Pixel>?>):>int32
+$extern(lib='image')
+image_pointer_layout = (size:uint64 alignment:uint64):>int32
 
 # Managed arrays stay on the safe side of the interface. Each foreign call
 # borrows its contiguous storage only for the duration of that call.

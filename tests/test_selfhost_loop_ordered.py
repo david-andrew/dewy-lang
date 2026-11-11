@@ -24,6 +24,7 @@ lx_def_at = (code: Ins[], v: int, s: int, e: int) -> int:
     at
 ''',
     'ir_builders.dewy': '''$runtime_checks
+
 from p"ir_types.dewy" import (Ins)
 from p"ir.jo" import (M_INDEX use_of)
 let current:int64=0

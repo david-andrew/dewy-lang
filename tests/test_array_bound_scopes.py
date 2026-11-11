@@ -12,6 +12,7 @@ def test_static_array_ceiling_is_removed(compiler, tmp_path, alias):
     for disabled in [False, True]:
         source = tmp_path / 'bound.dewy'
         source.write_text(f'''$runtime_checks=false
+
 length=(xs:array<int64>):>int64=>xs.length
 f=(xs:array<int64>):>int64=>{{
 {prefix}
@@ -29,7 +30,7 @@ main=()=>printl(f([1 2 3]))
 
 def test_runtime_optout_retains_check_after_length_alias(compiler, tmp_path):
     source = tmp_path / 'alias.dewy'
-    source.write_text(('''f=(xs:array<int64>):>int64=>{
+    source.write_text(('$runtime_checks\n\n') + ('''f=(xs:array<int64>):>int64=>{
 let n=xs.length
 {
 $no_assumed_bounds
@@ -37,7 +38,7 @@ return n*16
 }
 }
 main=()=>printl(f([1 2 3]))
-''') + "\n$runtime_checks\n")
+'''))
     result = subprocess.run([compiler, 'build', source, '--ir', '-o', tmp_path / 'alias'], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     body = next(b for b in re.split(r'^fn ', result.stdout, flags=re.M) if b.startswith('f_f_'))
@@ -50,6 +51,7 @@ def test_real_length_guard_still_proves_the_store(compiler, tmp_path):
     source = tmp_path / 'guard.dewy'
     source.write_text('''$no_assumed_bounds
 $runtime_checks=false
+
 f=(xs:array<int64>):>int64=>{
 let n=xs.length
 if n <? 100 return n*16

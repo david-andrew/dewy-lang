@@ -36,7 +36,7 @@ FORMS = {
 @pytest.mark.parametrize('form', sorted(FORMS))
 def test_unguarded_rejected_bulletproof(compiler, tmp_path, form):
     before, body = FORMS[form]
-    result = run(compiler, tmp_path, '$bulletproof\n' + before + MAIN + body + '}\n')
+    result = run(compiler, tmp_path, '$bulletproof\n\n' + before + MAIN + body + '}\n')
     # (unknown, or refuted: x - 10^13 is always negative)
     message = 'for the conversion to '
     assert result.returncode != 0 and message in result.stderr, result.stdout + result.stderr
@@ -45,18 +45,19 @@ def test_unguarded_rejected_bulletproof(compiler, tmp_path, form):
 @pytest.mark.parametrize('form', ['call', 'binding', 'return', 'int64'])
 def test_unguarded_panics_under_runtime_checks(compiler, tmp_path, form):
     before, body = FORMS[form]
-    result = run(compiler, tmp_path, '$runtime_checks\n' + before + MAIN + body + '}\n')
+    result = run(compiler, tmp_path, '$runtime_checks\n\n' + before + MAIN + body + '}\n')
     assert result.returncode != 0 and 'may panic' in result.stderr, result.stdout + result.stderr
     assert 'for the conversion to ' in result.stderr, result.stderr
 
 
 # A 64-bit target is a narrowing too: a closed row that excludes failure rejects it.
 def test_int64_target_is_a_possible_failure(compiler, tmp_path):
-    result = run(compiler, tmp_path, '$runtime_checks\nf = (n:int):>int64 & allocates => int64(n)\nmain = () => printl(f(3))\n')
+    result = run(compiler, tmp_path, '$runtime_checks\n\nf = (n:int):>int64 & allocates => int64(n)\nmain = () => printl(f(3))\n')
     assert result.returncode != 0 and 'possible failure exceeds' in result.stderr, result.stdout + result.stderr
 
 
 ACCEPT = '''$bulletproof
+
 narrow = (n:int):>int32 => {
     if n <? -1000 or n >? 1000 return 0
     int32(n)

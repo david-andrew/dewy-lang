@@ -175,8 +175,7 @@ def test_scan_loop_dewy_const_table(compiler, tmp_path, flags):
     table = ' '.join(str(int(65 <= c <= 90 or c == 95 or 97 <= c <= 122 or c >= 128) * 34)
                      for c in range(256))
     source = tmp_path / 'class.dewy'
-    source.write_text('''$runtime_checks
-const classes:array<uint8 length=256>=[''' + table + ''']
+    source.write_text('$runtime_checks\n\nconst classes:array<uint8 length=256>=[' + table + ''']
 scan=(p:array<uint8> n:int64):>int64=>$unsafe {
     let i:int64=0
     loop i <? n and classes[p[i]] & 34 not=? 0 {i+=1}
@@ -212,6 +211,7 @@ main = () -> int:
 def test_scan_loop_graphemes_and_overflow_fallback(compiler, tmp_path, flags):
     source = tmp_path / 'semantics.dewy'
     source.write_text('''$runtime_checks
+
 scan_text=(text:string):>int64=>{
     let i:int64=0
     loop i <? text.length and text[i] not=? "x" {i+=1}
@@ -250,8 +250,8 @@ def test_scan_loop_parallel_classes(compiler, tmp_path):
     loop i <? a.length and (a[i] =? {k} or a[i] =? {k + 2}) {{i+=1}}
     i
 }}''')
-    source.write_text('\n'.join(functions) + '\nmain=():>void=>{\nlet a:array<uint8>=[0 2 1]\n' +
-                      '\n'.join(f'printl(scan{k}(a))' for k in range(30)) + '\n}\n$runtime_checks\n')
+    source.write_text('$runtime_checks\n\n' + '\n'.join(functions) + '\nmain=():>void=>{\nlet a:array<uint8>=[0 2 1]\n' +
+                      '\n'.join(f'printl(scan{k}(a))' for k in range(30)) + '\n}\n')
     check(compiler, source, tmp_path, DEWY_EMIT_FORCE='1')
 
 

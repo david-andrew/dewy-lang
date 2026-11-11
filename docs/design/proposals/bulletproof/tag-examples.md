@@ -176,9 +176,10 @@ release = ():>void & no allocates & no panics => __lock_release_word(word)
 - **Example:** forwarding a parsed measurement can admit infinity without performing any arithmetic.
 
 ```dewy
+$no_inf
+
+$no_assumed_finite_inputs
 same = (x:float64):>float64 => {
-    $no_inf
-    $no_assumed_finite_inputs
     x
 }
 main = ():>void => { same(to_float("1.5") ?? 0.0); }
@@ -262,9 +263,10 @@ printl(f.exists)
 
 ```dewy
 $no_deadlocks
-usleep = (us:uint32):>int32 => $extern
+$extern
+usleep = (us:uint32):>int32
+$audited_wait
 nap = ():>int32 => {
-    $audited_wait
     $unsafe usleep(1000)
 }
 ```

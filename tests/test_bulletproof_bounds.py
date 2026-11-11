@@ -14,6 +14,7 @@ def check(compiler, tmp_path, source):
 
 def test_bulletproof_empty_and_proven_counter(compiler, tmp_path):
     result = check(compiler, tmp_path, '''$bulletproof
+
 f=(n:int64):>int64=>{let count:int64=0;loop count <? n {count+=1};return count}
 main=():>void=>{f(10);}
 ''')
@@ -22,6 +23,7 @@ main=():>void=>{f(10);}
 
 def test_bulletproof_rejects_unproven_counter(compiler, tmp_path):
     result = check(compiler, tmp_path, '''$bulletproof
+
 f=(step:int64):>int64=>{let count:int64=0;loop i in [0..10) {count+=step};return count}
 main=():>void=>{f(1);}
 ''')
@@ -30,6 +32,7 @@ main=():>void=>{f(1);}
 
 def test_bulletproof_finite_float_contract(compiler, tmp_path):
     result = check(compiler, tmp_path, '''$bulletproof
+
 f=(x:float64):>float64=>x*x
 main=():>void=>{f(1.0);}
 ''')
@@ -44,8 +47,9 @@ def test_provisional_bounds_tags_are_not_aliases(compiler, tmp_path, old):
 
 def test_bulletproof_disables_local_assert_assumption(compiler, tmp_path):
     result = check(compiler, tmp_path, '''$bulletproof
-main=()=>{
+
 $assume_local_asserts
+main=()=>{
 }
 ''')
     assert result.returncode != 0 and '$assume_local_asserts=false' in result.stderr, result.stderr

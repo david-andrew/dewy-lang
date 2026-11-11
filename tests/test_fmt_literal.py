@@ -15,6 +15,7 @@ def test_fmt_literals_without_formats_module(compiler, tmp_path, release):
     (library / 'prelude/formats.dewy').unlink()
     source = tmp_path / 'main.dewy'
     source.write_text('''$bulletproof
+
 show=(x:int64):>string & allocates & no panics=>fmt'#06x'(x)
 main=():>(void|OutOfMemory) & no panics=>{
 printl(show(42) or_throw)

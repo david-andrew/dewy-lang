@@ -5,13 +5,14 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
-DECLS = '''Counter:type=[value:int64 bump=()=>{value+=1} get=():>int64=>value]
+DECLS = '''$runtime_checks
+
+Counter:type=[value:int64 bump=()=>{value+=1} get=():>int64=>value]
 tick=():>void=>printl"tick"
 five=():>int64=>5
 make=():>(():>int64)=>()=>7
 twice=(x:int64):>int64=>x
 value=(c:Counter):>int64=>7
-$runtime_checks
 '''
 
 

@@ -146,8 +146,8 @@ main = () => {
 ```dewy
 $no_hidden_costs
 grow = (@xs:array<int64>):>void => xs.push(1)   # error: allocation exceeds the contract
+$no_hidden_costs = false
 main = () => {
-    $no_hidden_costs = false
     let v:array<int64> = []
     grow(@v)
     printl(v)
@@ -165,9 +165,11 @@ main = () => {
 
 ```dewy
 $no_assumed_waits
-usleep = (us:uint32):>int32 => $extern
+
+$extern
+usleep = (us:uint32):>int32
+$assume_external_wait               # new error: a person's claim, rejected here; use sleep(1ms)
 nap = ():>int32 => {
-    $assume_external_wait               # new error: a person's claim, rejected here; use sleep(1ms)
     $unsafe usleep(1000)
 }
 main = () => printl(nap)

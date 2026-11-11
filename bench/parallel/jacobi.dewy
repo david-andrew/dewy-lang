@@ -1,3 +1,5 @@
+$runtime_checks
+
 from p"../harness.jo" import clock, size_argument
 step=(a:array<float64> @out:array<float64> first:int64 n:int64 threaded:bool):>void=>{
     $runtime_assert n >=? 1
@@ -44,5 +46,3 @@ main=(args:array<string>):>void=>{
     let result:int64=0 loop v in a {result+=(v*1024.0) as int64}
     printl"{result} {elapsed}"
 }
-
-$runtime_checks

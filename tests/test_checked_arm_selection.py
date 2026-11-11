@@ -12,7 +12,7 @@ def test_checked_arm_selection(compiler, tmp_path, release, reverse):
     expression = 'if choose x//2 else 3*x+1' if reverse else 'if choose 3*x+1 else x//2'
     safe = 'true' if reverse else 'false'
     bad = 'false' if reverse else 'true'
-    prefix = '$runtime_checks\nf=(x:int64 choose:bool):>int64=>{if x >? 0 {return ' + expression + '} else return 0}\n'
+    prefix = '$runtime_checks\n\nf=(x:int64 choose:bool):>int64=>{if x >? 0 {return ' + expression + '} else return 0}\n'
     source = tmp_path / 'select.dewy'
     source.write_text(prefix + 'loop x in [1 7 3074457345618258602 9223372036854775807] printl(f(x ' + safe + '))\n')
     result = subprocess.run([compiler, *(['--release'] if release else []), source], capture_output=True, text=True)

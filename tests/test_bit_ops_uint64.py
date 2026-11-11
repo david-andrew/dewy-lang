@@ -22,15 +22,14 @@ def test_unsigned_64_bit_operations(compiler, tmp_path):  # noqa: F811
     shifts = [rng.randrange(0, 70) for _ in values]
     source = tmp_path / 'bits.dewy'
     source.write_text(
-        'main = ():>void => {\n'
+        '$runtime_checks\n\nmain = ():>void => {\n'
         f'    let xs:array<uint64> = [{" ".join(map(str, values))}]\n'
         f'    let ns:array<int64> = [{" ".join(map(str, shifts))}]\n'
         '    loop i in [0..xs.length) {\n'
         '        let x = xs[i]\n'
         '        let n = ns[i]\n'
         '        printl"{x.popcount} {x.leading_zeros} {x.trailing_zeros} {x.rotate_left(n)} {x.rotate_right(n)} {x.byte_swap}"\n'
-        '    }\n}\n'
-        '$runtime_checks\n')
+        '    }\n}\n')
     ran = subprocess.run([compiler, 'run', source], capture_output=True, text=True, timeout=120)
     assert ran.returncode == 0, ran.stderr
     want = ['{} {} {} {} {} {}'.format(*reference(x, n)) for x, n in zip(values, shifts)]
@@ -59,7 +58,6 @@ def test_signed_operations_use_the_64_bit_pattern(compiler, tmp_path):  # noqa: 
 
 def test_unsigned_values_go_into_byte_buffers(compiler, tmp_path):  # noqa: F811
     source = tmp_path / 'put.dewy'
-    source.write_text('main = ():>void => {\n    let b:array<uint8> = []\n    let w:uint64 = 0xFFFFFFFFFFFFFFF1\n'
-                      '    b.append_le(w 8)\n    b.append_be(w 8)\n    printl(b)\n}\n$runtime_checks\n')
+    source.write_text('$runtime_checks\n\nmain = ():>void => {\n    let b:array<uint8> = []\n    let w:uint64 = 0xFFFFFFFFFFFFFFF1\n    b.append_le(w 8)\n    b.append_be(w 8)\n    printl(b)\n}\n')
     ran = subprocess.run([compiler, 'run', source], capture_output=True, text=True, timeout=120)
     assert ran.returncode == 0 and ran.stdout.strip() == '[241 255 255 255 255 255 255 255 255 255 255 255 255 255 255 241]', ran.stderr

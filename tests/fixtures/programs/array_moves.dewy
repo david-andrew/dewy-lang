@@ -3,6 +3,8 @@
 # into a field, and a local object returned at its last use hands over its
 # arrays the same way; a value used again is copied. Reassigning an owned
 # local releases its old storage first.
+$runtime_checks
+
 let build = (n:int64):>array<int64> => {
     let out:array<int64> = []
     let i:int64 = 0
@@ -41,5 +43,3 @@ let main = ():>void => {
     loop y in b.items { total += y }     # 3 + 4 = 7
     exit(total + twice(1) - 34)         # 66 + 7 + 3 - 34 = 42
 }
-
-$runtime_checks

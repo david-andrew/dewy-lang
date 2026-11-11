@@ -1,8 +1,8 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{let result=0
 let rows:array<array<int64 length=2>>=[[20 22]]
 loop [x:int64 y:float64] in rows {if y is?float64 and x=?20 and y=?22.0 result=42}
 return result}
 main=()=>exit(run())
-
-$runtime_checks

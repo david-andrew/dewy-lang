@@ -2,6 +2,7 @@
 # by number. Words are hashed a word at a time through the text's pointer, found in
 # an open-addressing table and compared as byte ranges of the text in place.
 $runtime_checks
+
 from p"harness.dewy" import size_argument, clock, mix
 
 NameTable:type=[
@@ -47,7 +48,6 @@ hash_bytes = (p:ptr<uint8> n:int64):>int64 => $unsafe {
 
 # the id of text[start..start + n), made if it is new
 intern = (@t:NameTable text:array<uint8> bytes:ptr<uint8> start:int64 n:int64):>int64 => $unsafe {
-    $runtime_checks
     let h=hash_bytes(bytes + start n)
     let mask=t.slots.length-1
     let at=h & mask

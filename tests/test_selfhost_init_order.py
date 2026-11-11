@@ -37,8 +37,8 @@ right=(n:int64):>void=>{left(n)}
     writes = {'direct': 'a.value=42', 'call': 'a.set()',
               'recursive': 'a.left(2)', 'record': 'a.box.value=42',
               'tuple': 'a.set_values()'}
-    (tmp_path / 'a.dewy').write_text('$runtime_checks\n' + a)
-    (tmp_path / 'b.dewy').write_text('$runtime_checks\nimport p"a.dewy" as a\n' + writes[write] + '\n')
+    (tmp_path / 'a.dewy').write_text('$runtime_checks\n\n' + a)
+    (tmp_path / 'b.dewy').write_text('$runtime_checks\n\nimport p"a.dewy" as a\n' + writes[write] + '\n')
     (tmp_path / 'c.dewy').write_text('import p"a.dewy" as a\n')
     main = tmp_path / 'main.dewy'
     value = 'a.box.value' if write == 'record' else 'a.value'
@@ -108,6 +108,7 @@ def test_compiled_compiler_scrambled_imports(compiler, tmp_path, monkeypatch, re
 @pytest.mark.parametrize('order', [('leaf.dewy', 'host.jo'), ('host.jo', 'leaf.dewy')])
 def test_cycle_host_record_binding(compiler, tmp_path, order):
     (tmp_path / 'leaf.dewy').write_text('''$runtime_checks
+
 from p"host.jo" import (Input)
 let input:ptr<Input>=$unsafe (uint64(0) as ptr<Input>)
 bind=(p:ptr<Input>):>int64=>{input=p; 0}
@@ -121,5 +122,5 @@ binding = bind(&state)
 ''')
     main = tmp_path / 'main.dewy'
     main.write_text(''.join(f'import p"{name}" as m{i}\n' for i, name in enumerate(order))
-                    + 'from p"leaf.dewy" import (read)\n$runtime_checks\nmain=():>void=>printl(read())\n')
+                    + '$runtime_checks\n\nfrom p"leaf.dewy" import (read)\nmain=():>void=>printl(read())\n')
     assert build_run(compiler, main, tmp_path / 'program') == '42\n'

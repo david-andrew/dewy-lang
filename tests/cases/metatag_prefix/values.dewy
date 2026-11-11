@@ -1,0 +1,14 @@
+# A prefixed value can finish a function or a comprehension body.
+first=(xs:array<int64> i:int64):>int64=>{
+    $runtime_checks
+    xs[i]
+}
+main=(argv:array<string>)=>{
+    let i=argv.length-1
+    let rows:array<array<int64>>=[[20] [22]]
+    let values=[loop row in rows {
+        $runtime_checks
+        row[i]
+    }]
+    printl(first(values 0)+first(values 1))
+}

@@ -1,5 +1,7 @@
 # Known callbacks: a version with one call site moves into its loop on default builds.
 # Each shape keeps its meaning, wherever the body ends up.
+$runtime_checks
+
 Predicate:type=(x:int64):>bool
 Transform:type=(x:int64):>int64
 visit = (values:array<int64> accept:Predicate transform:Transform):>int64 => {
@@ -60,4 +62,3 @@ main = ():>void => {
         printl"{first(huge (x:int64):>bool=>x>?shift)}"
     }
 }
-$runtime_checks

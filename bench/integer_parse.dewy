@@ -1,4 +1,6 @@
 # Parse ordinary signed decimal input; input construction is outside the timer.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock
 kernel=(texts:array<string> count:int64):>int64=>{
     let checksum:int64=0
@@ -21,5 +23,3 @@ main=(args:array<string>):>void=>{
     let result=kernel(texts count)
     printl"{result} {clock-started}"
 }
-
-$runtime_checks

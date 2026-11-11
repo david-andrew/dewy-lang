@@ -1,6 +1,7 @@
 # modes: native
 # `$no_deadlocks`: a destructured spsc pair is one channel, named by its two ends.
 $no_deadlocks
+
 main = () => {
     let [tx rx] = spsc<int64 1>().split
     tx.send(1) or_throw

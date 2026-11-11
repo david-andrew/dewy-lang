@@ -1,6 +1,7 @@
 # Exact `int` values proven to fit in an int32 (counting loops over literals, constants and what
 # +, - and * make of them) are shader words: no `int32(...)` widths needed.
 $runtime_checks
+
 P:type=[dst:GpuBuffer<float32>]
 k=(id:int64 u:P):>void=>{
     if id <? 0 or id >=? u.dst.length { return }

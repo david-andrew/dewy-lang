@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 let trace:int64=0
 let values:dict<int64 array<int64>>=[1->[42]]
 source=():>dict<int64 array<int64>>=>{trace=trace*10+1 return values}
@@ -11,5 +13,3 @@ values=[1->[42]] trace=0
 if none =? source().get(key()) or trace not=?12 return 3
 return 42}
 main=()=>exit(run())
-
-$runtime_checks

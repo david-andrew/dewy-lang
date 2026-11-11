@@ -1,5 +1,6 @@
 # Near miss of unproven_rejected: the guard proves the size.
 $no_assumed_bounds
+
 big = (lo:int64 hi:int64):>void => {
     if lo <? 0 return
     parallel i in [lo..hi) { $runtime_assert(i <=? hi) }

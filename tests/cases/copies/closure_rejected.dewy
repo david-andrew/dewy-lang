@@ -1,9 +1,9 @@
 $explicit_copies
+$runtime_checks
+
 main=():>void=>{
     let value:int64=0
     let first=($capture value):>int64=>{value+=1 return value}
     let second=@first
     exit(first()+second())
 }
-
-$runtime_checks

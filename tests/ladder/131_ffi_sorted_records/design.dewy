@@ -3,8 +3,10 @@
 # back into exported Dewy comparators, and check the order against Dewy.
 Item:type = [sku:uint32 qty:int16 bin:uint8 price_cents:int64]
 
-qsort = (base:ptr<Item> count:uint64 size:uint64 compare:((a:ptr<Item> b:ptr<Item>):>int32)):>void => $extern
-bsearch = (key:ptr<Item> base:ptr<Item> count:uint64 size:uint64 compare:((a:ptr<Item> b:ptr<Item>):>int32)):>ptr<Item>? => $extern
+$extern
+qsort = (base:ptr<Item> count:uint64 size:uint64 compare:((a:ptr<Item> b:ptr<Item>):>int32)):>void
+$extern
+bsearch = (key:ptr<Item> base:ptr<Item> count:uint64 size:uint64 compare:((a:ptr<Item> b:ptr<Item>):>int32)):>ptr<Item>?
 
 $export
 by_sku = (a:ptr<Item> b:ptr<Item>):>int32 => $unsafe {

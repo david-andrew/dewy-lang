@@ -1,5 +1,7 @@
 # exit: 101
 # Ordinary code keeps the runtime check: without `$assert`, nothing is demanded.
+$runtime_checks
+
 forbidden=(@xs:array<int64>):>int64=>{
     if xs.length =? 0 return 0
     let i:int64=0
@@ -8,4 +10,3 @@ forbidden=(@xs:array<int64>):>int64=>{
     return xs[i]
 }
 main=()=>{ let items:array<int64>=[1]; printl(forbidden(@items)) }
-$runtime_checks

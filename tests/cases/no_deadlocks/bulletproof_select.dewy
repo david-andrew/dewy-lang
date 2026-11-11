@@ -1,6 +1,7 @@
 # modes: native
 # `$bulletproof` includes `$no_deadlocks`, so `select` is rejected there too.
 $bulletproof
+
 main = ():>void | OutOfMemory => {
     let a = mpmc<int64>(1) or_throw
     let b = mpmc<int64>(1) or_throw

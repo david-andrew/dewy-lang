@@ -175,22 +175,38 @@ __failure=(what:string code:int32):>NetError=>NetError["{what}: {__describe(code
 
 $unsafe
 if $target.os =? "windows" {
-    __WSAStartup=(version:uint16 data:ptr<uint8>):>int32 => $extern(name='WSAStartup' lib='ws2_32')
-    __socket=(domain:int32 kind:int32 protocol:int32):>int64 => $extern(name='socket' lib='ws2_32')
-    __closesocket=(s:int64):>int32 => $extern(name='closesocket' lib='ws2_32')
-    __bind=(s:int64 address:ptr<uint8> length:int32):>int32 => $extern(name='bind' lib='ws2_32')
-    __listen=(s:int64 backlog:int32):>int32 => $extern(name='listen' lib='ws2_32')
-    __connect=(s:int64 address:ptr<uint8> length:int32):>int32 => $extern(name='connect' lib='ws2_32')
-    __accept_c=(s:int64 address:ptr<uint8>? length:ptr<int32>?):>int64 => $extern(name='accept' lib='ws2_32')
-    __send_c=(s:int64 data:ptr<uint8> length:int32 flags:int32):>int32 => $extern(name='send' lib='ws2_32')
-    __recv_c=(s:int64 data:ptr<uint8> length:int32 flags:int32):>int32 => $extern(name='recv' lib='ws2_32')
-    __name=(s:int64 address:ptr<uint8> length:ptr<int32>):>int32 => $extern(name='getsockname' lib='ws2_32')
-    __setsockopt=(s:int64 level:int32 name:int32 value:ptr<int32> length:int32):>int32 => $extern(name='setsockopt' lib='ws2_32')
-    __getsockopt=(s:int64 level:int32 name:int32 value:ptr<int32> length:ptr<int32>):>int32 => $extern(name='getsockopt' lib='ws2_32')
-    __ioctlsocket=(s:int64 command:int32 argument:ptr<uint32>):>int32 => $extern(name='ioctlsocket' lib='ws2_32')
-    __WSAPoll=(fds:ptr<__PollFd> count:uint32 timeout:int32):>int32 => $extern(name='WSAPoll' lib='ws2_32')
-    __WSAGetLastError=():>int32 => $extern(name='WSAGetLastError' lib='ws2_32')
-    __inet_pton=(family:int32 text:string out:ptr<uint8>):>int32 => $extern(name='inet_pton' lib='ws2_32')
+    $extern(name='WSAStartup' lib='ws2_32')
+    __WSAStartup=(version:uint16 data:ptr<uint8>):>int32
+    $extern(name='socket' lib='ws2_32')
+    __socket=(domain:int32 kind:int32 protocol:int32):>int64
+    $extern(name='closesocket' lib='ws2_32')
+    __closesocket=(s:int64):>int32
+    $extern(name='bind' lib='ws2_32')
+    __bind=(s:int64 address:ptr<uint8> length:int32):>int32
+    $extern(name='listen' lib='ws2_32')
+    __listen=(s:int64 backlog:int32):>int32
+    $extern(name='connect' lib='ws2_32')
+    __connect=(s:int64 address:ptr<uint8> length:int32):>int32
+    $extern(name='accept' lib='ws2_32')
+    __accept_c=(s:int64 address:ptr<uint8>? length:ptr<int32>?):>int64
+    $extern(name='send' lib='ws2_32')
+    __send_c=(s:int64 data:ptr<uint8> length:int32 flags:int32):>int32
+    $extern(name='recv' lib='ws2_32')
+    __recv_c=(s:int64 data:ptr<uint8> length:int32 flags:int32):>int32
+    $extern(name='getsockname' lib='ws2_32')
+    __name=(s:int64 address:ptr<uint8> length:ptr<int32>):>int32
+    $extern(name='setsockopt' lib='ws2_32')
+    __setsockopt=(s:int64 level:int32 name:int32 value:ptr<int32> length:int32):>int32
+    $extern(name='getsockopt' lib='ws2_32')
+    __getsockopt=(s:int64 level:int32 name:int32 value:ptr<int32> length:ptr<int32>):>int32
+    $extern(name='ioctlsocket' lib='ws2_32')
+    __ioctlsocket=(s:int64 command:int32 argument:ptr<uint32>):>int32
+    $extern(name='WSAPoll' lib='ws2_32')
+    __WSAPoll=(fds:ptr<__PollFd> count:uint32 timeout:int32):>int32
+    $extern(name='WSAGetLastError' lib='ws2_32')
+    __WSAGetLastError=():>int32
+    $extern(name='inet_pton' lib='ws2_32')
+    __inet_pton=(family:int32 text:string out:ptr<uint8>):>int32
 
     __PollFd:type=[fd:int64 events:int16 revents:int16]
     const __AF_INET:int32=2
@@ -250,18 +266,30 @@ if $target.os =? "windows" {
         return "socket error {code}"
     }
 } else {
-    __socket=(domain:int32 kind:int32 protocol:int32):>int32 => $extern(name='socket')
-    __close_c=(fd:int32):>int32 => $extern(name='close')
-    __bind_c=(fd:int32 address:ptr<uint8> length:uint32):>int32 => $extern(name='bind')
-    __listen_c=(fd:int32 backlog:int32):>int32 => $extern(name='listen')
-    __connect_c=(fd:int32 address:ptr<uint8> length:uint32):>int32 => $extern(name='connect')
-    __send_c=(fd:int32 data:ptr<uint8> length:uint64 flags:int32):>int64 => $extern(name='send')
-    __recv_c=(fd:int32 data:ptr<uint8> length:uint64 flags:int32):>int64 => $extern(name='recv')
-    __name_c=(fd:int32 address:ptr<uint8> length:ptr<int32>):>int32 => $extern(name='getsockname')
-    __setsockopt=(fd:int32 level:int32 name:int32 value:ptr<int32> length:uint32):>int32 => $extern(name='setsockopt')
-    __getsockopt=(fd:int32 level:int32 name:int32 value:ptr<int32> length:ptr<uint32>):>int32 => $extern(name='getsockopt')
-    __poll=(fds:ptr<__PollFd> count:uint64 timeout:int32):>int32 => $extern(name='poll')
-    __inet_pton=(family:int32 text:string out:ptr<uint8>):>int32 => $extern(name='inet_pton')
+    $extern(name='socket')
+    __socket=(domain:int32 kind:int32 protocol:int32):>int32
+    $extern(name='close')
+    __close_c=(fd:int32):>int32
+    $extern(name='bind')
+    __bind_c=(fd:int32 address:ptr<uint8> length:uint32):>int32
+    $extern(name='listen')
+    __listen_c=(fd:int32 backlog:int32):>int32
+    $extern(name='connect')
+    __connect_c=(fd:int32 address:ptr<uint8> length:uint32):>int32
+    $extern(name='send')
+    __send_c=(fd:int32 data:ptr<uint8> length:uint64 flags:int32):>int64
+    $extern(name='recv')
+    __recv_c=(fd:int32 data:ptr<uint8> length:uint64 flags:int32):>int64
+    $extern(name='getsockname')
+    __name_c=(fd:int32 address:ptr<uint8> length:ptr<int32>):>int32
+    $extern(name='setsockopt')
+    __setsockopt=(fd:int32 level:int32 name:int32 value:ptr<int32> length:uint32):>int32
+    $extern(name='getsockopt')
+    __getsockopt=(fd:int32 level:int32 name:int32 value:ptr<int32> length:ptr<uint32>):>int32
+    $extern(name='poll')
+    __poll=(fds:ptr<__PollFd> count:uint64 timeout:int32):>int32
+    $extern(name='inet_pton')
+    __inet_pton=(family:int32 text:string out:ptr<uint8>):>int32
 
     __PollFd:type=[fd:int32 events:int16 revents:int16]
     const __AF_INET:int32=2
@@ -295,8 +323,10 @@ if $target.os =? "windows" {
     }
 
     if $target.os =? "mac" {
-        __error_location=():>ptr<int32> => $extern(name='__error')
-        __accept_c=(fd:int32 address:ptr<uint8>? length:ptr<uint32>?):>int32 => $extern(name='accept')
+        $extern(name='__error')
+        __error_location=():>ptr<int32>
+        $extern(name='accept')
+        __accept_c=(fd:int32 address:ptr<uint8>? length:ptr<uint32>?):>int32
         const __AF_INET6:int32=30
         const __SOL_SOCKET:int32=0xffff
         const __SO_REUSEADDR:int32=4
@@ -335,8 +365,10 @@ if $target.os =? "windows" {
             return "socket error {code}"
         }
     } else {
-        __error_location=():>ptr<int32> => $extern(name='__errno_location')
-        __accept4=(fd:int32 address:ptr<uint8>? length:ptr<uint32>? flags:int32):>int32 => $extern(name='accept4')
+        $extern(name='__errno_location')
+        __error_location=():>ptr<int32>
+        $extern(name='accept4')
+        __accept4=(fd:int32 address:ptr<uint8>? length:ptr<uint32>? flags:int32):>int32
         const __AF_INET6:int32=10
         const __SOL_SOCKET:int32=1
         const __SO_REUSEADDR:int32=2

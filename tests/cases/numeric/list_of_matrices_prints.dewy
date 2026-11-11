@@ -1,6 +1,8 @@
 #
 # Matrices inside a list, a dictionary or a record print on one line each, as a
 # matrix inside a structure does, rather than being taken for 1-D arrays.
+$runtime_checks
+
 Holder:type = [cells:array<int64 length=[2 2]> name:string]
 main = () => {
     let a = [1 2 3 4]
@@ -19,5 +21,3 @@ main = () => {
     printl([Holder(reshape(b 2 2) "x")])
     printl([reshape([1 2 3 4 5 6 7 8] 2 2 2)])
 }
-
-$runtime_checks

@@ -111,8 +111,8 @@ main = () => {
     let current = gpu(reshape(pi 1 3))
     let back = cpu(current)
     printl"downloaded {back.length}: first {fmt'.4f'(back[0 0])}"
-    let scaled = {
-        $runtime_checks   # a GPU program's operand shapes are checked when it runs
+    let scaled = $runtime_checks   # a GPU program's operand shapes are checked when it runs
+    {
         cpu(current .* 100.0)
     }
     printl"percent: {[loop x in scaled.data fmt'.1f'(x)].join(" ")}"

@@ -1,4 +1,6 @@
 #
+$runtime_checks
+
 bounded=(seed:int64)=>{
  let word=seed%5003
  let size=word%12+1
@@ -20,4 +22,3 @@ main=()=>{
  let seeds:array<int64>=[0 5002 (-1) int64.min int64.max]
  loop seed in seeds {printl(bounded(seed) descending(seed) growing(seed))}
 }
-$runtime_checks

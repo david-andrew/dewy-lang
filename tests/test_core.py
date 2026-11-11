@@ -26,7 +26,7 @@ from tools.compiler.bench import CHECKSUMS_1000, prepare_source
 from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
-RUNTIME_CHECKS = '\n$runtime_checks\n'
+RUNTIME_CHECKS = '$runtime_checks\n\n'
 
 
 
@@ -438,7 +438,7 @@ def test_core_bundled_module_path(compiler, tmp_path, extension):
     (tmp_path / 'bigint.jo').write_text('_big = (value): 0')
     source = tmp_path / f'main.{extension}'
     if extension == 'dewy':
-        source.write_text('from p"@lib/rational.dewy" import _parse\nmain=():>void=>exit((if (_parse("42") ?? 0) =? 42 42 else 1))\n$runtime_checks')
+        source.write_text('$runtime_checks\n\nfrom p"@lib/rational.dewy" import _parse\nmain=():>void=>exit((if (_parse("42") ?? 0) =? 42 42 else 1))\n')
     else:
         source.write_text('from "@lib/bigint.dewy" import _big\nmain = (): if _big(42).to_int64() == 42: 42 else: 1')
     binary = tmp_path / 'bundled'
@@ -482,7 +482,7 @@ loop line in input.split("\n") {
         body = body.replace('rational(fields[0] fields[1]) ?? 0', 'big(fields[0])/nonzero(fields[1])')
         body = body.replace('rational(fields[2] fields[3]) ?? 1', 'big(fields[2])/nonzero(fields[3])')
         body = 'big=(text:string):>bigint=>to_int(text) ?? 0\nnonzero=(text:string):>bigint & ~0=>{\n    let n=big(text)\n    if n =? 0 return 1\n    return n\n}\n' + body
-    source.write_text(body + RUNTIME_CHECKS)
+    source.write_text((RUNTIME_CHECKS) + (body))
     expected = []
     for left, right in pairs:
         a, b = Fraction(*left), Fraction(*right)
@@ -562,7 +562,7 @@ def test_core_exact_float_conversions(compiler, tmp_path, target, release):
 
     expected = ['|'.join(map(str, bits(Fraction(v.numerator))+bits(v))) for v in values]
     source = tmp_path / 'conversions.dewy'
-    source.write_text(('''from rational import rational
+    source.write_text((RUNTIME_CHECKS) + ('''from rational import rational
 main=():>void=>{
 let input=$include_bytes(p"cases.txt") as string|none
 if input is? none panic("invalid test data")
@@ -573,7 +573,7 @@ loop line in input.split("\n") {
     printl"{f64_bits(numerator.to_float64())}|{f32_bits(numerator.to_float32())}|{f64_bits(value.to_float64())}|{f32_bits(value.to_float32())}"
 }
 }
-''') + RUNTIME_CHECKS)
+'''))
     binary = tmp_path / 'conversions'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -625,7 +625,7 @@ def test_core_magnitude_reference(compiler, tmp_path, target, release):
 
     rows = '\n'.join('[' + ' '.join(str(bits(v)) for v in values) + ']' for values in cases)
     source = tmp_path / 'magnitudes.dewy'
-    source.write_text('let rows:array<array<uint64>>=[\n' + rows + '''\n]
+    source.write_text((RUNTIME_CHECKS) + ('let rows:array<array<uint64>>=[\n' + rows + '''\n]
 main=():>void=>exit(entry()) entry=()=>{
 loop words in rows {
 let values=[loop word in words f64_from_bits(word)]
@@ -634,7 +634,7 @@ printl"{f64_bits(norm(values))}|{f64_bits(pair)}"
 }
 return 0
 }
-''' + RUNTIME_CHECKS)
+'''))
     binary = tmp_path / 'magnitudes'
     flags = (['--release'] if release else []) + (['--target', 'wasm32'] if target == 'wasm' else [])
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
@@ -816,7 +816,7 @@ def test_core_bigint_arithmetic(compiler, tmp_path, target, release):
         pairs.append((a * rng.choice([-1, 1]), b * rng.choice([-1, 1])))
     (tmp_path / 'cases.txt').write_text('\n'.join(f'{a} {b}' for a, b in pairs))
     source = tmp_path / 'bigint.dewy'
-    source.write_text(('''main=():>void=>{
+    source.write_text((RUNTIME_CHECKS) + ('''main=():>void=>{
 let input=$include_bytes(p"cases.txt") as string|none
 if input is? none panic("invalid test data")
 loop line in input.split("\n") {
@@ -828,7 +828,7 @@ loop line in input.split("\n") {
     printl"{a+b}|{a-b}|{a*b}|{parts.quotient}|{parts.remainder}|{a.gcd(b)}|{a <? b}|{a =? b}"
 }
 }
-''') + RUNTIME_CHECKS)
+'''))
     expected = ['|'.join(map(str, [a+b, a-b, a*b, a//b, a%b, math.gcd(a, b)]))
                 + f'|{str(a < b).lower()}|{str(a == b).lower()}' for a, b in pairs]
     binary = tmp_path / 'bigint'
@@ -895,7 +895,7 @@ def test_core_integer_ranges(compiler, tmp_path, target, release, form):
         add('s', start, start + step, start + rng.randrange(-50, 51), rng.choice([False, True]))
     (tmp_path / 'cases.txt').write_text('\n'.join(cases))
     source = tmp_path / 'ranges.dewy'
-    source.write_text(('''emit=<T>(a:T b:T stop:T inclusive:bool):>void=>{
+    source.write_text((RUNTIME_CHECKS) + ('''emit=<T>(a:T b:T stop:T inclusive:bool):>void=>{
 let count:int64=0
 if inclusive {
     loop i in [a,b..stop] {if count >=? 32 panic("loop did not terminate") printl(i) count+=1}
@@ -920,7 +920,7 @@ loop line in input.split("\\n") {
     }
 }
 }
-''') + RUNTIME_CHECKS)
+'''))
     if form.startswith('stored-'):
         source.write_text(source.read_text()
                           .replace('loop i in [a,b..stop] {', 'let r=[a,b..stop] loop i in r {')
@@ -971,7 +971,7 @@ def test_core_bigint_bits(compiler, tmp_path, target, release):
         cases.append((a, b, rng.choice(counts)))
     (tmp_path / 'cases.txt').write_text('\n'.join(f'{a} {b} {count}' for a, b, count in cases))
     source = tmp_path / 'bits.dewy'
-    source.write_text(('''main=():>void=>{
+    source.write_text((RUNTIME_CHECKS) + ('''main=():>void=>{
 let input=$include_bytes(p"cases.txt") as string|none
 if input is? none panic("invalid test data")
 loop line in input.split("\\n") {
@@ -981,7 +981,7 @@ loop line in input.split("\\n") {
     printl"{a and b}|{a or b}|{a xor b}|{not a}|{a << count}|{a >> count}"
 }
 }
-''') + RUNTIME_CHECKS)
+'''))
     expected = ['|'.join(map(str, [a & b, a | b, a ^ b, ~a, a << count, a >> count]))
                 for a, b, count in cases]
     binary = tmp_path / 'bits'
@@ -1013,14 +1013,14 @@ def test_core_word_power_arithmetic(compiler, tmp_path, target, release):
     unsigned = [0, 1, 2, 3, 2**32-1, 2**32, 2**63, 2**64-2, 2**64-1]
     exponents = [0, 1, 2, 3, 7, 16, 31, 32, 63, 64, 127, 255]
     source = tmp_path / 'powers.dewy'
-    source.write_text(f'''main=():>void=>{{
+    source.write_text((RUNTIME_CHECKS) + (f'''main=():>void=>{{
 let signed:array<int64<overflow='wrap'>>=[{' '.join(map(str, signed))}]
 let unsigned:array<uint64<overflow='wrap'>>=[{' '.join(map(str, unsigned))}]
 let exponents:array<int64>=[{' '.join(map(str, exponents))}]
 loop a in signed {{loop n in exponents {{printl"{{a^n}}"}}}}
 loop a in unsigned {{loop n in exponents {{printl"{{a^n}}"}}}}
 }}
-''' + RUNTIME_CHECKS)
+'''))
     expected = []
     for a in signed:
         for n in exponents:
@@ -1056,7 +1056,7 @@ def test_core_set_algebra(compiler, tmp_path, target, release):
     members = [[key for i, key in enumerate(keys) if mask & (1 << i)] for mask in range(16)]
     literals = ' '.join('set['+' '.join(map(str, values))+']' for values in members)
     source = tmp_path / 'sets.dewy'
-    source.write_text(('''digest=(values:set<int64>):>int64=>{
+    source.write_text(('$runtime_checks\n\n') + ('''digest=(values:set<int64>):>int64=>{
 let result:int64=7 loop value in values {result=result*11+value+5} return result}
 main=():>void=>{
 let values:array<set<int64>>=['''+literals+''']
@@ -1064,7 +1064,7 @@ loop a in values {loop b in values {
 printl(digest(a & b)) printl(digest(a | b))
 printl(digest(a-b)) printl(digest(a xor b)) printl(a =? b)
 }}
-}''') + "\n$runtime_checks\n")
+}'''))
     expected = []
     for left in members:
         for right in members:
@@ -1310,7 +1310,7 @@ main = () -> int:
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
 def test_core_recursive_branch_returns(compiler, tmp_path, target, release):
     source = tmp_path / 'returns.dewy'
-    source.write_text(('''let calls:int64=0
+    source.write_text(('$runtime_checks\n\n') + ('''let calls:int64=0
 fib=(n:int64):>int64=>if n<?2 n else fib(n-1)+fib(n-2)
 fib_float=(n:int64):>float64=>if n<?2 (n as float64) else fib_float(n-1)+fib_float(n-2)
 # Returning a narrow value must retain its conversion before leaving the branch.
@@ -1333,7 +1333,7 @@ main=():>void=>exit(entry()) entry=()=>{
     if walk(0) not=?1 or walk(1) not=?1 or walk(2) not=?2 or walk(5) not=?6 return 4
     return 42
 }
-''') + "\n$runtime_checks\n")
+'''))
     binary = tmp_path / 'returns'
     flags = ['--ir', '--target', target_name(target), *(['--release'] if release else [])]
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags],
@@ -1602,14 +1602,14 @@ def test_core_compiler_hosts(compiler, tmp_path, host):
         assert header[:4] == b'\x7fELF' and int.from_bytes(header[18:20], 'little') == 183
         if runner := shutil.which('qemu-aarch64'):
             source = tmp_path / 'values.dewy'
-            source.write_text(('''main=():>void=>exit(entry()) entry=()=>{
+            source.write_text((RUNTIME_CHECKS) + ('''main=():>void=>exit(entry()) entry=()=>{
 let original=[20 21] let changed=original
 loop @item in changed {item+=1}
 $runtime_assert(original =? [20 21] and changed =? [21 22])
 let huge:bigint=18446744073709551616
 printl"{changed[1]} {1/3+1/6} {huge+1}"
 return 0
-}''') + RUNTIME_CHECKS)
+}'''))
             for flags in [[], ['--release']]:
                 program = tmp_path / 'values'
                 built = subprocess.run([runner, binary, 'build', source, '-o', program, *flags],
@@ -1631,7 +1631,7 @@ def test_core_unsigned_floor_arithmetic(compiler, tmp_path, target, release):
     literal_divisors = [*[1 << shift for shift in range(64)], 3, 5, 7, 31, 255, 1000, 1000000007]
     constants = '\n'.join(f'printl"{{a//{b}}} {{a%{b}}}"' for b in literal_divisors)
     source = tmp_path / 'unsigned.dewy'
-    source.write_text((f'''main=():>void=>{{
+    source.write_text((RUNTIME_CHECKS) + (f'''main=():>void=>{{
 let values:array<uint64>=[{' '.join(map(str, numerators))}]
 let divisors:array<uint64>=[{' '.join(map(str, denominators))}]
 loop a in values {{
@@ -1643,7 +1643,7 @@ loop a in values {{
     {constants}
 }}
 }}
-''') + RUNTIME_CHECKS)
+'''))
     expected = [f'{a // b} {a % b}' for a in numerators for b in denominators + literal_divisors]
     binary = tmp_path / 'unsigned'
     flags = ['--release'] if release else []
@@ -1678,7 +1678,7 @@ def test_core_signed_floor_arithmetic(compiler, tmp_path, target, release):
                           -129, 129, -1000000007, 1000000007, minimum, maximum]
     constant_cases = '\n'.join(f'printl"{{a%{b}}} {{a//{b}}}"' for b in constants)
     source = tmp_path / 'floor.dewy'
-    source.write_text((f'''main=():>void=>{{
+    source.write_text((RUNTIME_CHECKS) + (f'''main=():>void=>{{
 let numerators:array<int64<overflow='wrap'>>=[{' '.join(map(str, numerators))}]
 let denominators:array<int64<overflow='wrap'>>=[{' '.join(map(str, denominators))}]
 loop a in numerators {{
@@ -1690,7 +1690,7 @@ loop a in numerators {{
     {constant_cases}
 }}
 }}
-''') + RUNTIME_CHECKS)
+'''))
     expected = [f'{a % b} {minimum if a == minimum and b == -1 else a // b}'
                 for a in numerators for b in denominators + constants]
     binary = tmp_path / 'floor'
@@ -1719,7 +1719,7 @@ loop a in numerators {{
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_scalar_conditional_results(compiler, tmp_path, target, release):
     source = tmp_path / 'conditional.dewy'
-    source.write_text(('''let calls:int64=0
+    source.write_text(('$runtime_checks\n\n') + ('''let calls:int64=0
 pick=(yes:bool x:int8 y:int8):>int8=>if yes {calls+=1 x} else {calls+=10 y}
 floating=(yes:bool x:float32 y:float32):>float32=>if yes x else y
 early=(x:int64):>int64=>if x <? 0 {return -x} else if x =? 0 7 else {let values=[x 2] values[0]+values[1]}
@@ -1738,7 +1738,7 @@ main=():>void=>{
     }
     printl"{total} {calls} {real} {wide} {truth} {jumped} {early(-3)+early(0)+early(30)}"
 }
-''') + "\n$runtime_checks\n")
+'''))
     binary = tmp_path / 'conditional'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -1797,10 +1797,10 @@ def test_core_string_literals(compiler, tmp_path, name, expression, expected, ta
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_imported_generics(compiler, tmp_path, target, release):
-    (tmp_path / 'support.dewy').write_text(('''Box:type=<T>[value:T]
+    (tmp_path / 'support.dewy').write_text((RUNTIME_CHECKS) + ('''Box:type=<T>[value:T]
 wrap=<T>(value:T):>Box<T>=>[value=value]
 identity=<T>(value:T):>T=>value
-''') + RUNTIME_CHECKS)
+'''))
     (tmp_path / 'other.jo').write_text('''struct Box[T]:
     value: T
     extra = 2
@@ -1808,7 +1808,7 @@ type Nested[T] = Box[T[]]
 identity[T] = (value: T) -> T: value
 ''')
     source = tmp_path / 'main.dewy'
-    source.write_text(('''import p"support.dewy" as a
+    source.write_text((RUNTIME_CHECKS) + ('''import p"support.dewy" as a
 import p"other.jo" as b
 from p"support.dewy" import (Box as Package), wrap
 main=():>void=>exit(entry()) entry=()=>{
@@ -1826,7 +1826,7 @@ main=():>void=>exit(entry()) entry=()=>{
         and make_package(42).value =? 42
         and a.identity<array<string>>(words.value)[0] =? "yes" 42 else 1
 }
-''') + RUNTIME_CHECKS)
+'''))
     binary = tmp_path / 'imports'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -1869,7 +1869,7 @@ reset = (): trace = ""
 events = () -> str: trace
 ''')
     source = tmp_path / 'main.dewy'
-    source.write_text(('''from p"store.jo" import Store, at, events, reset
+    source.write_text((RUNTIME_CHECKS) + ('''from p"store.jo" import Store, at, events, reset
 main=():>void=>exit(entry()) entry=()=>{
     let root=[Store<array<int64>>[values=[[1 2]]]]
     let original=root
@@ -1888,7 +1888,7 @@ main=():>void=>exit(entry()) entry=()=>{
     if events() not=? "grs" or scalars.values not=? [42 3] return 4
     return 42
 }
-''') + RUNTIME_CHECKS)
+'''))
     if language == 'jo':
         source = tmp_path / 'main.jo'
         source.write_text(('''from "store.jo" import Store, at, events, reset
@@ -1914,14 +1914,14 @@ main = () -> int:
     42
 '''))
     if provider == 'dewy':
-        (tmp_path / 'store.dewy').write_text(('''Store:type=<T>[values:array<T>]
+        (tmp_path / 'store.dewy').write_text((RUNTIME_CHECKS) + ('''Store:type=<T>[values:array<T>]
 trace=""
 at=(label:string value:int64):>int64=>{trace="{trace}{label}" return value}
 __index__=<T>(s:Store<T> i:int64):>T=>{trace="{trace}g" return s.values[i]}
 __setindex__=<T>(@s:Store<T> i:int64 value:T):>void=>{trace="{trace}s" s.values[i]=value}
 reset=():>void=>{trace=""}
 events=():>string=>trace
-''') + RUNTIME_CHECKS)
+'''))
         source.write_text(source.read_text().replace('store.jo', 'store.dewy'))
     binary = tmp_path / 'order'
     flags = ['--release'] if release else []
@@ -1957,9 +1957,9 @@ events=():>string=>trace
 def test_core_operator_imports(compiler, tmp_path, name, imports, target, release):
     text = exit_main(case_source(name)).replace('main=():>void=>exit(entry())', '').replace('$runtime_checks\n', '')
     at = re.search(r'(?:^|\s)entry\s*=', text, re.M)
-    (tmp_path / 'operators.dewy').write_text((text[:at.start()]) + "\n$runtime_checks\n")
+    (tmp_path / 'operators.dewy').write_text(('$runtime_checks\n\n') + (text[:at.start()]))
     source = tmp_path / 'main.dewy'
-    source.write_text((f'from p"operators.dewy" import {imports}\nmain=():>void=>exit(entry())\n{text[at.start():]}') + "\n$runtime_checks\n")
+    source.write_text(('$runtime_checks\n\n') + (f'from p"operators.dewy" import {imports}\nmain=():>void=>exit(entry())\n{text[at.start():]}'))
     binary = tmp_path / 'operators'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -1991,7 +1991,7 @@ def test_core_ring_example(compiler, tmp_path, case, target, release):
     if case == 'history':
         source.write_text((examples / 'history.dewy').read_text())
     elif case == 'iteration':
-        source.write_text(('''from p"ring.dewy" import new_ring
+        source.write_text((RUNTIME_CHECKS) + ('''from p"ring.dewy" import new_ring
 main=():>void=>exit(entry()) entry=()=>{
 let ring=new_ring<int64>(4) loop i in [0..6) ring.push(i)
 let saved=ring let sum=0 let both=0 let either=0
@@ -2002,9 +2002,9 @@ loop x in ring {sum+=x ring.push(99)}
 return if sum =? 14 and both =? 47 and either =? 56
 and tripled =? [6 9 12 15] and saved[0] =? 2 and ring[0] =? 99 42 else 1
 }
-''') + RUNTIME_CHECKS)
+'''))
     elif case == 'managed-values':
-        source.write_text(('''from p"ring.dewy" import new_ring
+        source.write_text((RUNTIME_CHECKS) + ('''from p"ring.dewy" import new_ring
 main=():>void=>exit(entry()) entry=()=>{
 let ring=new_ring<array<string>>(2)
 loop i in [0..7) {ring.push(["{i}"])}
@@ -2018,13 +2018,13 @@ if empty.length not=? 0 return 3
 empty.push(1) empty.push(42)
 return if empty.length =? 1 and empty[0] =? 42 42 else 4
 }
-''') + RUNTIME_CHECKS)
+'''))
     else:
         # (a constant outside the contract is an error while compiling; data is checked when it runs)
         action = {'capacity': 'new_ring<int64>(0);',
                   'negative-index': 'ring[-1];', 'past-end': 'ring[to_int("1") ?? 0];'}[case]
-        source.write_text((f'from p"ring.dewy" import new_ring\n'
-                          f'main=():>void=>exit(entry()) entry=()=>{{let ring=new_ring<int64>(2) ring.push(42) {action} return 0}}') + RUNTIME_CHECKS)
+        source.write_text((RUNTIME_CHECKS) + (f'from p"ring.dewy" import new_ring\n'
+                          f'main=():>void=>exit(entry()) entry=()=>{{let ring=new_ring<int64>(2) ring.push(42) {action} return 0}}'))
     binary = tmp_path / 'ring'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -2078,7 +2078,7 @@ erase=():>int64=>{pool.remove(h); return 22}
         setup = 'h=pool.add([20])'
         update = 'pool[h][0]+=erase()'
     source = tmp_path / 'invalid.dewy'
-    source.write_text((declarations + f'main=():>void=>exit(entry()) entry=()=>{{{setup} {update} return 0}}') + RUNTIME_CHECKS)
+    source.write_text((RUNTIME_CHECKS) + (declarations + f'main=():>void=>exit(entry()) entry=()=>{{{setup} {update} return 0}}'))
     binary = tmp_path / 'invalid'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -2246,7 +2246,7 @@ $runtime_assert(cpu(saved).data =? [1.0 2.0 3.0 4.0])
 def test_core_metal_magnitude(compiler, tmp_path, release):
     # Source cross-compilation only: execution requires Apple hardware.
     source = tmp_path / 'magnitude.dewy'
-    source.write_text('main=():>void=>{printl(cpu(hypot.(gpu([3.0]) gpu([4.0]))).data)}' + RUNTIME_CHECKS)
+    source.write_text((RUNTIME_CHECKS) + ('main=():>void=>{printl(cpu(hypot.(gpu([3.0]) gpu([4.0]))).data)}'))
     shaders = tmp_path / 'shaders'
     shaders.mkdir()
     env = {key: value for key, value in os.environ.items()
@@ -2268,10 +2268,10 @@ def test_core_metal_magnitude(compiler, tmp_path, release):
 def test_core_metal_unary_plus(compiler, tmp_path, release):
     # Cross-compilation checks generated source; executing Metal needs macOS.
     source = tmp_path / 'plus.dewy'
-    source.write_text('''main=():>void=>{
+    source.write_text((RUNTIME_CHECKS) + ('''main=():>void=>{
 let floats=.+gpu([1.0 2.0]) let ints=.+gpu([1 -2])
 printl(cpu(floats).data) printl(cpu(ints).data)
-}''' + RUNTIME_CHECKS)
+}'''))
     shaders = tmp_path / 'shaders'
     shaders.mkdir()
     env = {key: value for key, value in os.environ.items()
@@ -2349,7 +2349,7 @@ def test_core_numeric_cpu_feature_initializer(compiler, tmp_path, flags):
     if platform.machine().lower() not in ('x86_64', 'amd64'):
         pytest.skip('the vectorizer currently targets native x86-64')
     source = tmp_path / 'matrix.dewy'
-    source.write_text('main=():>void=>{let a=ones(2 2) exit(sum(a*a) as int64)}' + RUNTIME_CHECKS)
+    source.write_text((RUNTIME_CHECKS) + ('main=():>void=>{let a=ones(2 2) exit(sum(a*a) as int64)}'))
     binary = tmp_path / 'matrix'
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary, *flags],
                            capture_output=True, text=True, timeout=30, check=False)
@@ -2366,7 +2366,7 @@ def test_core_numeric_array_vectors(compiler, tmp_path, release):
     if platform.machine().lower() not in ('x86_64', 'amd64'):
         pytest.skip('AVX2/SSE2 code generation targets native x86-64')
     source = tmp_path / 'vectors.dewy'
-    source.write_text(('''looped=<T>(a:array<T> b:array<T>):>array<T>=>[loop i in [0..a.length) a[i]*2.0+b[i]*0.5+1.0]
+    source.write_text((RUNTIME_CHECKS) + ('''looped=<T>(a:array<T> b:array<T>):>array<T>=>[loop i in [0..a.length) a[i]*2.0+b[i]*0.5+1.0]
 valued=<T>(a:array<T> b:array<T>):>array<T>=>[loop i in 0.. and x in a x*2.0+b[i]*0.5+1.0]
 mapped=<T>(a:array<T>):>array<T>=>[loop x in a x*2.5+1.0]
 fused=<T>(a:array<T> b:array<T>):>array<T>=>a .* 2.0 .+ b .* 0.5 .+ 1.0
@@ -2404,7 +2404,7 @@ if argv[1] =? "values" printl(valued(fill(float64(1.0) 20) fill(float64(2.0) 19)
 else printl(looped(fill(float64(1.0) 20) fill(float64(2.0) 19)))
 }
 return 42
-}''') + RUNTIME_CHECKS)
+}'''))
     binary = tmp_path / 'vectors'
     flags = ['--release'] if release else []
     built = subprocess.run([compiler, 'build', source, '--ir', '-o', binary, *flags],
@@ -2464,7 +2464,7 @@ return x.value
 @pytest.mark.parametrize('style', ['selected', 'splat', 'module-alias', 'name-alias'])
 def test_core_imports(compiler, tmp_path, extension, style):
     dependency = tmp_path / f'helper.{extension}'
-    dependency.write_text('twice=(x:int64):>int64=>x*2\n$runtime_checks\n' if extension == 'dewy'
+    dependency.write_text('$runtime_checks\n\ntwice=(x:int64):>int64=>x*2\n' if extension == 'dewy'
                           else 'twice = (x: int) -> int: x * 2')
     source = tmp_path / 'main.dewy'
     forms = {
@@ -2474,7 +2474,7 @@ def test_core_imports(compiler, tmp_path, extension, style):
         'name-alias': (f'from p"helper.{extension}" import twice as double', 'double(21)'),
     }
     declaration, expression = forms[style]
-    source.write_text((f'{declaration}\nmain=():>void=>exit({expression})') + "\n$runtime_checks\n")
+    source.write_text(('$runtime_checks\n\n') + (f'{declaration}\nmain=():>void=>exit({expression})'))
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -2485,13 +2485,13 @@ def test_core_imports(compiler, tmp_path, extension, style):
 @pytest.mark.parametrize('extension', ['dewy', 'jo'])
 def test_core_imported_dependent_default(compiler, tmp_path, extension):
     dependency = tmp_path / f'helper.{extension}'
-    dependency.write_text('let offset:int64=2\ncombine=(a:int64 b:int64=a+offset)=>a+b\n$runtime_checks\n'
+    dependency.write_text('$runtime_checks\n\nlet offset:int64=2\ncombine=(a:int64 b:int64=a+offset)=>a+b\n'
                           if extension == 'dewy' else
                           'offset: int = 2\ncombine = (a: int, b: int = a + offset) -> int: a + b\n')
     source = tmp_path / 'main.dewy'
-    source.write_text((f'''from p"helper.{extension}" import combine
+    source.write_text(('$runtime_checks\n\n') + (f'''from p"helper.{extension}" import combine
 let offset:int64=99
-main=():>void=>exit(entry()) entry=()=>{{let value:int64=20 return combine(value)}}''') + "\n$runtime_checks\n")
+main=():>void=>exit(entry()) entry=()=>{{let value:int64=20 return combine(value)}}'''))
     binary = tmp_path / 'main'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -2501,16 +2501,16 @@ main=():>void=>exit(entry()) entry=()=>{{let value:int64=20 return combine(value
 
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_inline_record_across_modules(compiler, tmp_path, release):
-    (tmp_path / 'helper.dewy').write_text(('''Count:type=int64
+    (tmp_path / 'helper.dewy').write_text(('$runtime_checks\n\n') + ('''Count:type=int64
 make=():>[y:Count x:Count]=>[x=20 y=22]
 sum=(point:[x:Count y:Count])=>point.x+point.y
-''') + "\n$runtime_checks\n")
+'''))
     source = tmp_path / 'main.dewy'
-    source.write_text(('''from p"helper.dewy" import make, sum
+    source.write_text(('$runtime_checks\n\n') + ('''from p"helper.dewy" import make, sum
 Count:type=string
 main=():>void=>exit(entry()) entry=()=>{let point:[x:int64 y:int64]=make()
 return if sum([y=22 x=20]) =? 42 point.x+point.y else 1}
-''') + "\n$runtime_checks\n")
+'''))
     binary = tmp_path / 'main'
     flags = ['--release'] if release else []
     built = subprocess.run([compiler, 'build', source, '-o', binary, *flags], capture_output=True,
@@ -2603,7 +2603,7 @@ def test_core_netplay_tick_warnings(compiler, tmp_path, setup, callback, start, 
     source = tmp_path / 'tick.dewy'
     session = f'let game=netplay.session({start} {callback} players=2 me=0)'
     program = f'{session}\nmain=()=>printl(game.tick+42)' if at_top else f'main=()=>{{{session} printl(game.tick+42)}}'
-    source.write_text((f'import netplay\n{setup}\n{program}') + RUNTIME_CHECKS)
+    source.write_text((RUNTIME_CHECKS) + (f'import netplay\n{setup}\n{program}'))
     flags = ['--release'] if release else []
     built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', tmp_path / 'tick', *flags],
                            capture_output=True, text=True, timeout=30, check=False)
@@ -2762,7 +2762,7 @@ def test_core_reaction_model(compiler, tmp_path, target, release):
     model = Path(__file__).resolve().parents[1] / 'examples/reaction_model.dewy'
     shutil.copy2(model, tmp_path)
     source = tmp_path / 'reaction_test.dewy'
-    source.write_text('''from p"reaction_model.dewy" import fresh, paint, advance
+    source.write_text((RUNTIME_CHECKS) + ('''from p"reaction_model.dewy" import fresh, paint, advance
 simulate=()=>{
 let field=fresh(8 6) let saved=field
 paint(@field 4 3 1)
@@ -2778,7 +2778,7 @@ loop i in [0..20) {let trial=simulate() $runtime_assert(trial.steps =? 8)}
 $runtime_assert(alloc_count() =? before)
 printl(to_json(result))
 return 42
-}''' + RUNTIME_CHECKS)
+}'''))
     binary = tmp_path / 'reaction_test'
     flags = ['--release'] if release else []
     built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary, *flags],
@@ -2822,7 +2822,7 @@ def test_core_forest_model(compiler, tmp_path, target, release):
     model = Path(__file__).resolve().parents[1] / 'examples/forest_model.dewy'
     shutil.copy2(model, tmp_path)
     source = tmp_path / 'forest_test.dewy'
-    source.write_text(('''from p"forest_model.dewy" import fresh_forest, hill, ground_color
+    source.write_text((RUNTIME_CHECKS) + ('''from p"forest_model.dewy" import fresh_forest, hill, ground_color
 main=():>void=>exit(entry()) entry=()=>{
     let forest=fresh_forest()
     if forest.trunks.length not=? 300 or forest.crowns.length not=? 300 return 1
@@ -2843,7 +2843,7 @@ main=():>void=>exit(entry()) entry=()=>{
     if abs(low.x-0.35) >? 0.0001 or abs(high.x-0.75) >? 0.0001 return 7
     return 42
 }
-''') + RUNTIME_CHECKS)
+'''))
     binary = tmp_path / 'forest-model'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -2923,7 +2923,7 @@ def test_core_dunes_model(compiler, tmp_path, target, release):
     model = Path(__file__).resolve().parents[1] / 'examples/dunes_model.dewy'
     shutil.copy2(model, tmp_path / model.name)
     source = tmp_path / 'dunes-model.dewy'
-    source.write_text(("""from p"dunes_model.dewy" import dune_height, robe_vertices, robe_indices, ribbon_vertices, ribbon_indices
+    source.write_text((RUNTIME_CHECKS) + ("""from p"dunes_model.dewy" import dune_height, robe_vertices, robe_indices, ribbon_vertices, ribbon_indices
 main=():>void=>exit(entry()) entry=()=>{
 let cloth=robe_vertices(0.0 0.0) let indices=robe_indices()
 if cloth.length not=? 175 or indices.length not=? 864 return 1
@@ -2941,7 +2941,7 @@ if ribbon_vertices([] 0.2 0.0).length not=? 0 or ribbon_indices(0).length not=? 
 if dune_height(0.0 (-150.0)) <? 60.0 or dune_height(150.0 150.0) >? 60.0 return 9
 return 42
 }
-""") + RUNTIME_CHECKS)
+"""))
     binary = tmp_path / 'dunes-model'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -3830,7 +3830,7 @@ main = ():
 @pytest.mark.parametrize('release', [False, True], ids=['debug', 'release'])
 def test_core_streaming_graphemes(compiler, tmp_path, target, release):
     source = tmp_path / 'stream.dewy'
-    source.write_text(('''let calls:int64=0
+    source.write_text(('$runtime_checks\n\n') + ('''let calls:int64=0
 let shared="abc"
 input=()=>{calls+=1 return shared}
 replace=()=>{shared="changed" return "12"}
@@ -3875,7 +3875,7 @@ main=():>void=>exit(entry()) entry=()=>{
     if alloc_count() not=? before return 13
     return 42
 }
-''') + "\n$runtime_checks\n")
+'''))
     binary = tmp_path / 'stream'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -3910,10 +3910,10 @@ def test_core_embedded_png(compiler, tmp_path, release, target):
                       + chunk(b'IDAT', zlib.compress(bytes([0, 42, 0, 0, 255])))
                       + chunk(b'IEND', b''))
     source = tmp_path / 'image.dewy'
-    source.write_text('''$include_bytes(p"pixel.png") as pixel
+    source.write_text((RUNTIME_CHECKS) + ('''$include_bytes(p"pixel.png") as pixel
 main=():>void=>exit(entry()) entry=()=>{let image=load_image(pixel)
 return if image.width =? 1 and image.height =? 1 and image.pixels.length =? 4 image.pixels[0] as int64 else 1}
-''' + RUNTIME_CHECKS)
+'''))
     binary = tmp_path / 'image'
     flags = ['--release'] if release else []
     node = shutil.which('node')
@@ -3946,7 +3946,7 @@ def test_core_physics_scene(compiler, tmp_path, target, release):
     model = Path(__file__).resolve().parents[1] / 'examples/physics_scene.dewy'
     shutil.copy2(model, tmp_path)
     source = tmp_path / 'physics_test.dewy'
-    source.write_text('''import physics as dynamics
+    source.write_text((RUNTIME_CHECKS) + ('''import physics as dynamics
 from p"physics_scene.dewy" import fresh, advance, add_ball
 
 main=():>void=>exit(entry()) entry=()=>{
@@ -3971,7 +3971,7 @@ main=():>void=>exit(entry()) entry=()=>{
     scene.world.remove(ball)
     if scene.world.bodies().length not=? 57 return 7
     return 42
-}''' + RUNTIME_CHECKS)
+}'''))
     binary = tmp_path / 'physics_test'
     flags = ['--release'] if release else []
     built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary, *flags],
@@ -4055,7 +4055,7 @@ conditional_runtime = () -> int:
     source = tmp_path / 'main.dewy'
     expression = 'conditional_invalid()' if use_invalid else (
         'conditional_pick()+conditional_tail()+conditional_runtime()')
-    source.write_text((f'main=():>void=>exit(entry()) entry=()=>{expression}\n') + "\n$runtime_checks\n")
+    source.write_text(('$runtime_checks\n\n') + (f'main=():>void=>exit(entry()) entry=()=>{expression}\n'))
     binary = tmp_path / 'program'
     flags = ['--release'] if release else []
     env = {**os.environ, 'DEWY_CORE_LIB': str(library)}
@@ -4092,7 +4092,7 @@ def test_core_division_without_exact_libraries(compiler, tmp_path, source_text):
         if item.name not in ('bigint.dewy', 'rational.dewy'):
             (library / item.name).symlink_to(item, target_is_directory=item.is_dir())
     source = tmp_path / 'main.dewy'
-    source.write_text(source_text + RUNTIME_CHECKS)
+    source.write_text((RUNTIME_CHECKS) + (source_text))
     binary = tmp_path / 'program'
     env = {**os.environ, 'DEWY_CORE_LIB': str(library)}
     built = subprocess.run([compiler, 'build', source, '-o', binary, '--release'], env=env,
@@ -4113,14 +4113,14 @@ def test_core_exact_division_module_initialization(compiler, tmp_path, target, r
             (library / item.name).symlink_to(item, target_is_directory=item.is_dir())
     # An observable library initializer checks dependency order when a language
     # operation first discovers a module during function/global checking.
-    (library / 'seed.dewy').write_text(('let seed:int64=39\nprintl"seed"\n') + "\n$runtime_checks\n")
-    (library / 'rational.dewy').write_text(('''from seed import seed
+    (library / 'seed.dewy').write_text(('$runtime_checks\n\n') + ('let seed:int64=39\nprintl"seed"\n'))
+    (library / 'rational.dewy').write_text(('$runtime_checks\n\n') + ('''from seed import seed
 let base=seed+1
 printl"rational"
 _fraction=(a b):>int64=>a+b+base
 Rational:type=[numerator:int=0 denominator:int=1 _shown:int64=0]
-''') + "\n$runtime_checks\n")
-    (tmp_path / 'helper.dewy').write_text(('const offset=1\n') + "\n$runtime_checks\n")
+'''))
+    (tmp_path / 'helper.dewy').write_text(('$runtime_checks\n\n') + ('const offset=1\n'))
     # (a runtime divisor calls the library's `_fraction`; a constant folds to its `Rational`)
     bodies = {
         'body': 'two=():>int64=>2\nmain=():>void=>exit(1/two()-offset)',
@@ -4128,7 +4128,7 @@ Rational:type=[numerator:int=0 denominator:int=1 _shown:int64=0]
         'unused-constant': 'const unused=1/2\nmain=():>void=>exit(42)',
     }
     source = tmp_path / 'main.dewy'
-    source.write_text(('from helper import offset\nprintl"main"\n' + bodies[entry] + '\n') + "\n$runtime_checks\n")
+    source.write_text(('$runtime_checks\n\n') + ('from helper import offset\nprintl"main"\n' + bodies[entry] + '\n'))
     binary = tmp_path / 'program'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -4161,7 +4161,7 @@ Rational:type=[numerator:int=0 denominator:int=1 _shown:int64=0]
 def test_core_tuple_interop(compiler, tmp_path, expression, diagnostic):
     (tmp_path / 'helper.jo').write_text('pair = () -> (int, str): (39, "abc")')
     source = tmp_path / 'tuple.dewy'
-    source.write_text((f'import p"helper.jo" as helper\nmain=():>void=>exit(entry()) entry=()=>{{let pair=helper.pair() let i:int64=0 return {expression}}}') + "\n$runtime_checks\n")
+    source.write_text(('$runtime_checks\n\n') + (f'import p"helper.jo" as helper\nmain=():>void=>exit(entry()) entry=()=>{{let pair=helper.pair() let i:int64=0 return {expression}}}'))
     binary = tmp_path / 'tuple'
     built = subprocess.run([compiler, 'build', source, '-o', binary], capture_output=True,
                            text=True, timeout=30, check=False)
@@ -4201,7 +4201,7 @@ return count+text.length+extra}''' if nested else
             program = ('sum=([[count text] [extra]])=>count+text.length+extra\nmain=():>void=>exit(entry()) entry=()=>sum(helper.nested())' if nested else
                        'sum=([count:float64 text:string])=>if count is?float64 (count as int64)+text.length else 1\nmain=():>void=>exit(entry()) entry=()=>sum(helper.pair())')
     # (a parameter's length, or a Jo helper's inner array, is known only at run time)
-    source.write_text(('import p"helper.jo" as helper\n' + program) + "\n$runtime_checks\n")
+    source.write_text(('$runtime_checks\n\n') + ('import p"helper.jo" as helper\n' + program))
     binary = tmp_path / 'unpack'
     node = shutil.which('node')
     if target == 'wasm' and node is None:
@@ -4780,12 +4780,12 @@ def test_core_lexer_bounded_spans(compiler, tmp_path, release):
 def test_core_parameter_view_frame(compiler, tmp_path, debug, method):
     source = tmp_path / 'parameter-frame.dewy'
     expression = 'row.read_score()' if method else 'row.values[0]+row.bias'
-    source.write_text(('''Row:type=[values:array<int64> bias:int64]
+    source.write_text((RUNTIME_CHECKS) + ('''Row:type=[values:array<int64> bias:int64]
 read_score=(row:Row):>int64=>row.values[0]+row.bias
 parameter_frame_probe=(row:Row):>int64=>EXPRESSION
 let callback=@parameter_frame_probe
 main=():>void=>exit(entry()) entry=()=>callback(Row[[20] 22])
-'''.replace('EXPRESSION', expression)) + RUNTIME_CHECKS)
+'''.replace('EXPRESSION', expression)))
     binary = tmp_path / 'parameter-frame'
     built = subprocess.run([compiler, 'build', source, '--ir', *(['-g'] if debug else []), '-o', binary],
                            capture_output=True, text=True, timeout=30)
@@ -5534,7 +5534,7 @@ def test_core_text_case_bytes(compiler, tmp_path, release, target):
     arrays = [f'[{" ".join("0x\"" + row[k].hex() + "\"" for row in pairs)}]'
               for k in range(3)]
     source = tmp_path / 'case-bytes.dewy'
-    source.write_text(('''main=():>void=>{
+    source.write_text((RUNTIME_CHECKS) + ('''main=():>void=>{
 let inputs:array<array<uint8>>=INPUTS
 let uppers:array<array<uint8>>=UPPERS
 let lowers:array<array<uint8>>=LOWERS
@@ -5549,7 +5549,7 @@ loop i in [0..inputs.length) {
 }
 exit(42)
 }
-'''.replace('INPUTS', arrays[0]).replace('UPPERS', arrays[1]).replace('LOWERS', arrays[2])) + RUNTIME_CHECKS)
+'''.replace('INPUTS', arrays[0]).replace('UPPERS', arrays[1]).replace('LOWERS', arrays[2])))
     binary = tmp_path / 'case-bytes'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -5673,7 +5673,7 @@ def test_core_integer_parse_boundaries(compiler, tmp_path, target, release):
     literals = ' '.join(json.dumps(text, ensure_ascii=False) for text in texts)
     results = ' '.join('none' if value is None else str(value) for value in answers)
     source = tmp_path / 'integers.dewy'
-    source.write_text((f'''main=():>void=>exit(entry()) entry=()=>{{
+    source.write_text(('$runtime_checks\n\n') + (f'''main=():>void=>exit(entry()) entry=()=>{{
 let texts=[{literals}]
 let expected:array<int?>=[{results}]
 loop i in [0..texts.length) {{
@@ -5681,7 +5681,7 @@ loop i in [0..texts.length) {{
 }}
 return 42
 }}
-''') + "\n$runtime_checks\n")
+'''))
     binary = tmp_path / 'integers'
     built = subprocess.run([compiler, 'build', source, '--target', target_name(target), '-o', binary,
                             *(['--release'] if release else [])],
@@ -5908,7 +5908,7 @@ def test_core_grapheme_lookup_borrows_table(compiler, tmp_path):
 @pytest.mark.parametrize('target', ['native', 'wasm'])
 def test_core_fixed_index_unsigned_domain(compiler, tmp_path, release, target):
     source = tmp_path / 'domains.dewy'
-    source.write_text('''read8=(table:array<uint8 length=256> index:uint8)=>(table[index] as int64)
+    source.write_text((RUNTIME_CHECKS) + ('''read8=(table:array<uint8 length=256> index:uint8)=>(table[index] as int64)
 read16=(table:array<uint8 length=65536> index:uint16)=>(table[index] as int64)
 read_widen=(table:array<uint8 length=256> index:uint8)=>(table[(index as int16) as int64] as int64)
 read_wrap=(table:array<uint8 length=256> index:int16)=>(table[uint8<overflow='wrap'>(index)] as int64)
@@ -5923,7 +5923,7 @@ main=():>void=>exit(entry()) entry=()=>{
  if read_wrap(small -1) not=? 255 return 4
  return 42
 }
-''' + RUNTIME_CHECKS)
+'''))
     binary = tmp_path / 'domains'
     flags = ['--release'] if release else []
     if target == 'wasm':
@@ -5954,9 +5954,9 @@ main=():>void=>exit(entry()) entry=()=>{
 ])
 def test_core_fixed_index_domain_keeps_checks(compiler, tmp_path, release, size, ty, index, value):
     source = tmp_path / 'bounds.dewy'
-    source.write_text((f'''read=(table:array<uint8 length={size}> index:{ty})=>(table[{index}] as int64)
+    source.write_text((RUNTIME_CHECKS) + (f'''read=(table:array<uint8 length={size}> index:{ty})=>(table[{index}] as int64)
 main=():>void=>exit(entry()) entry=()=>{{let table:array<uint8 length={size}>=[] return read(table {value})}}
-''') + RUNTIME_CHECKS)
+'''))
     binary = tmp_path / 'bounds'
     built = subprocess.run([compiler, 'build', source, '-o', binary,
                             *(['--release'] if release else [])],
@@ -6086,7 +6086,7 @@ main = () -> int:
 ])
 def test_core_matrix_product_tiles(compiler, tmp_path, target, flags, threads):
     source = tmp_path / 'products.dewy'
-    source.write_text(('''main=():>void=>{
+    source.write_text((RUNTIME_CHECKS) + ('''main=():>void=>{
 loop dims in [[0 3 2] [2 0 3] [3 7 5] [9 65 513] [3 64 512] [2 66 515]] {
     let r=dims[0] let m=dims[1] let p=dims[2]
     let a=reshape([loop i in [0..r*m) ((i%17)-8) as float64] r m)
@@ -6115,7 +6115,7 @@ let finite=reshape([float64(2.0) 3.0 4.0 5.0 6.0] 5 1)
 $runtime_assert((zero*finite)[0 0] =? 0.0)
 exit(42)
 }
-''') + RUNTIME_CHECKS)
+'''))
     binary = tmp_path / 'products'
     built = subprocess.run([compiler, 'build', source, '--target', target_name(target),
                             '-o', binary, *flags],

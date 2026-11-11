@@ -1,5 +1,7 @@
 # A bare zero-argument function name calls before a member call with arguments,
 # as before `.length` and `[i]` (and the compiler's targets.dewy and its users).
+$runtime_checks
+
 names=():>array<string>=>['a' 'b' 'c']
 greeting=():>string=>"hello, world"
 counts=():>dict<string int>=>['a'->1 'b'->2]
@@ -16,5 +18,3 @@ main=():>void=>{
     printl(listed("a"))
     printl(listed("z"))
 }
-
-$runtime_checks

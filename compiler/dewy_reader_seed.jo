@@ -433,6 +433,20 @@ rt_dc_metatag_atom = (token: DewyLexeme, pos: int) -> int:
         if dot.symbol != .dot or dot.space or member.space or member.kind != .identifier or rt_dn_payload(member) != "mode": return 0
         dc_parser.at += 2
         return rt_dc_target_value(3, pos, member.start)
+    # Valued setting reads share the same intrinsic as the complete reader.
+    if width == 5 and (rt_dn_payload(token) == "dewy" or rt_dn_payload(token) == "time") and dc_parser.tokens[dc_parser.at].symbol == .dot:
+        member = dc_parser.tokens[dc_parser.at + 1]
+        if not dc_parser.tokens[dc_parser.at].space and not member.space and member.kind == .identifier:
+            text = rt_dn_payload(token) + "." + rt_dn_payload(member)
+            dc_parser.at += 2
+            literal = mk(.str_lit, pos)
+            nodes[literal].sval = i32(intern(text))
+            callee = mk(.ident, pos)
+            nodes[callee].name = i32(intern("__setting_read"))
+            call = mk(.call, pos)
+            nodes[call].a = i32(callee)
+            set_list(call, [literal])
+            return call
     if width == 10 and rt_dn_payload(token) == "allocator": return rt_dc_allocator(token)
     # (`$named[Png Jpeg each=@draw]`: the call `named([Png Jpeg] each=@draw)`, decisions.md batch 7)
     if width == 6 and rt_dn_payload(token) == "named" and dc_parser.tokens[dc_parser.at].symbol == .lbrack and not dc_parser.tokens[dc_parser.at].space:
@@ -553,6 +567,9 @@ rt_dc_atom = () -> int:
         return rt_dc_flow()
     if op == .kw_loop and dc_parser.flags.report_now: return rt_dc_loop_value(pos)
     # `$unsafe expression`: the boundary holds over the expression (dw_unsafe_scope)
+    if token.kind == .metatag and (rt_dc_valued_place(dc_parser.at - 1) or (dn_directive_form(rt_dn_payload(token)) == 0 and dw_dir_name(rt_dn_payload(token)))):
+        dc_parser.at -= 1
+        return rt_dc_prefixed_body()
     if token.kind == .metatag:
         tagged = rt_dc_metatag_atom(token, pos)
         if tagged >= 0: return tagged
@@ -3637,6 +3654,7 @@ rt_dc_declaration = (constant: bool, bare: bool = false) -> int:
 # head, label, declaration or expression is left unread (dc_unread).
 
 rt_dc_body = () -> int:
+    if dc_parser.tokens[dc_parser.at].kind == .metatag and (rt_dc_valued_place(dc_parser.at) or (dn_directive_form(rt_dn_payload(dc_parser.tokens[dc_parser.at])) == 0 and dw_dir_name(rt_dn_payload(dc_parser.tokens[dc_parser.at])))): return rt_dc_prefixed_body()
     # (`=> $unsafe { ... }`: the boundary covers the block, which stays the body itself, dw_block)
     if dc_parser.tokens[dc_parser.at].kind == .metatag and dc_parser.tokens[dc_parser.at + 1].symbol == .lbrace and rt_dc_unsafe_at(dc_parser.at):
         opening = dc_parser.tokens[dc_parser.at]
@@ -3670,26 +3688,24 @@ rt_dc_body_read = () -> int:
     dc_parser.at += if braced: 1 else: 0
     n = mk(.block, pos)
     statements: int[]
-    last_start = dc_parser.at
-    settings = dc_parser.reader.dc_settings.len()
     loop true:
         if braced and rt_dn_accept(.rbrace): break
         if dc_parser.tokens[dc_parser.at].kind == .eof:
             if braced and dc_parser.flags.report_now: rt_dc_unclosed(pos, "}")
             return 0
         start = dc_parser.at
-        last_start = start
         if braced and dc_parser.flags.unread_here: dc_parser.status.hint_pos = 0
         node_start = nodes.len()
         list_start = lists.len()
         depth = dc_parser.depth
         edits = dc_parser.reader.dn_edit_at.len()
-        # `$runtime_checks`, `$no_nan=false`: a setting holding throughout the block, wherever
-        # written (dw_dir_block); `$outer loop ...`: a loop's label (dw_block)
-        if dc_parser.tokens[dc_parser.at].kind == .metatag and braced:
+        # Settings prefix the following construct; `$outer loop ...`: a loop's label (dw_block)
+        if dc_parser.tokens[dc_parser.at].kind == .metatag and (braced or dc_parser.tokens[dc_parser.at + 1].symbol == .kw_loop):
             tagged = rt_dc_body_metatag(statements)
             if tagged < 0: return 0
-            if tagged > 0: continue
+            if tagged > 0:
+                if not braced: break
+                continue
         # (`$field(name)=value` ending a record comprehension's body: a row, dc_record_loop)
         if dc_parser.reader.dc_map_ok and rt_dc_field_next():
             entry = rt_dc_field_entry()
@@ -3754,18 +3770,6 @@ rt_dc_body_read = () -> int:
                 nodes[statement].a = i32(value)
         statements.push(statement)
         if not braced: break
-    # (a block whose last statement is tagged: dc_collect leaves it unread)
-    if statements.len() > 0 and dc_parser.tokens[last_start].kind == .metatag: dc_parser.collection.tagged_last[n] = true
-    if dc_parser.reader.dc_settings.len() > settings:
-        # (through its closing brace: its last syntax node is the last position inside, dw_dir_last)
-        dc_parser.collection.tagged_last[n] = true
-        end = mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at - 1].start)
-        loop i in [settings..dc_parser.reader.dc_settings.len()):
-            rt_dc_scope_undoable()
-            dw_dir_apply(dc_parser.reader.dc_settings[i], dc_parser.reader.dc_setting_values[i], dc_parser.reader.dc_setting_at[i], pos, end, false)
-        dc_parser.reader.dc_settings.truncate(settings)
-        dc_parser.reader.dc_setting_values.truncate(settings)
-        dc_parser.reader.dc_setting_at.truncate(settings)
     set_list(n, statements)
     if braced: dc_parser.depth -= 1
     n
@@ -3782,12 +3786,13 @@ rt_dc_body_metatag = (statements: mut int[]) -> int:
     name = rt_dn_payload(tag)
     # (`$include_bytes(p"asset") as name`: a statement, dc_include_binding)
     if dn_directive_form(name) != 0 or name == "include_bytes": return 0
-    if dw_dir_name(name):
-        value = rt_dc_block_setting()
-        if value < 0: return -1
-        dc_parser.reader.dc_settings.push(name)
-        dc_parser.reader.dc_setting_values.push(value)
-        dc_parser.reader.dc_setting_at.push(mkpos(dc_parser.file, tag.start))
+    if rt_dc_valued_place(dc_parser.at) or dw_dir_name(name):
+        body = rt_dc_prefixed_body()
+        if body == 0: return -1
+        source = files[dc_parser.file].src
+        if source[pos_off(nodes[body].pos)] == 123: statements.push(bc_stmt(body, nodes[body].pos))
+        else:
+            loop statement in kids(body): statements.push(statement)
         return 1
     # (`$build.mode = ...`: a mistake in a body, dc_statement's dc_body_setting)
     if (name == "target" or name == "build") and dc_parser.tokens[rt_dc_setting_place_end(dc_parser.at)].symbol == .assign: return 0
@@ -3807,6 +3812,7 @@ rt_dc_body_metatag = (statements: mut int[]) -> int:
 # (dw_metatag_fail), a label before no loop (dw_label_fail); -1 a form left unread (dc_unread).
 
 rt_dc_body_tag = (name: str, tag: DewyLexeme) -> int:
+    if name == "extern" or name == "intrinsic": fatal(mkpos(dc_parser.file, tag.start), "`${name}` declares a module-level function: prefix its declaration with `${name}`, then `name = (...):>Result`")
     if (name == "shadowable" or name == "supported_targets") and dc_parser.flags.report_now:
         if name == "shadowable": rt_dc_report(mkpos(dc_parser.file, tag.start), "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file")
         else: rt_dc_report(mkpos(dc_parser.file, tag.start), "`$supported_targets` is a module directive; put it at file scope")
@@ -3821,7 +3827,7 @@ rt_dc_body_tag = (name: str, tag: DewyLexeme) -> int:
     # (a label is a tag alone: one an expression goes on from is no label)
     if not dc_parser.flags.report_now or dn_power(next.symbol) > 0 or not next.space and not next.newline and next.kind != .eof and next.symbol != .rbrace: return -1
     if name == "explicit_allocation_failure": rt_dc_report(mkpos(dc_parser.file, tag.start), "`$explicit_allocation_failure` is a module directive; put it at file scope, at the top")
-    else: rt_dc_report(mkpos(dc_parser.file, tag.start), "a loop label must be followed by a loop (`${name}` is not a directive)")
+    else: rt_dc_report(mkpos(dc_parser.file, tag.start), "a loop label must be followed by a loop: write `${name}` then `loop ...` (`${name}` is not a directive)")
     dc_parser.at += 1
     1
 
@@ -5977,6 +5983,10 @@ rt_dc_granted = (pos: int, word: str) -> bool:
 # parameter name instead of a list (`x => x + 1`, opening that name).
 
 rt_dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] = [], lambda: bool = false, bare: bool = false) -> int:
+    callable_tag = 0
+    if not lambda:
+        callable_tag = dc_parser.reader.dc_callable_tag
+        dc_parser.reader.dc_callable_tag = 0
     name = name_of(int(name_id))
     n = mk(.fn_, mkpos(dc_parser.file, opening.start))
     if lambda: nodes[n].kind = .lambda
@@ -6193,6 +6203,17 @@ rt_dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] 
             if packed == result and nodes[packed].kind == .tarray and nodes[packed].ival < 0 and rt_dn_peek() == .amp: return 0
             nodes[n].a = i32(packed)
         if rt_dn_peek() == .amp and not rt_dc_effect_row(n): return 0
+    if callable_tag > 0:
+        after = dc_parser.at
+        tag = dc_parser.tokens[callable_tag - 1]
+        if intern(rt_dn_payload(tag)) == intern("extern"):
+            dc_parser.at = callable_tag - 1
+            made = rt_dc_extern(n, ps)
+            dc_parser.at = after
+            return made
+        if type_params.len() > 0 or intrinsic_of(intern(name)) < 0: return rt_dc_not_intrinsic(n, name)
+        dc_parser.reader.dc_nothing = true
+        return n
     if not rt_dn_accept(.function): return 0
     dc_parser.depth -= 1
     # (`() => $extern` as a value: dw_extern_finish's mistake)
@@ -6211,16 +6232,9 @@ rt_dc_function_literal = (name_id: i32, opening: DewyLexeme, type_params: int[] 
         if body == 0: return 0
         dc_parser.depth -= 2
         return dw_finish_function(n, ps, body, name)
-    # (`=> $extern(name='c_name')`: a C function, no body)
-    if dc_parser.tokens[dc_parser.at].kind == .metatag and not dc_parser.reader.dc_method_body and rt_dn_payload(dc_parser.tokens[dc_parser.at]) == "extern": return rt_dc_extern(n, ps)
-    # (`=> $intrinsic`: the compiler provides it, the declaration binds nothing: dw_intrinsic_check)
-    if dc_parser.tokens[dc_parser.at].kind == .metatag and not dc_parser.reader.dc_method_body and type_params.len() == 0 and rt_dc_intrinsic_next():
-        next = dc_parser.tokens[dc_parser.at + 1]
-        if name == "" or next.kind != .eof and not (next.newline and dn_power(next.symbol) == 0 and next.symbol != .kw_not): return 0
-        if intrinsic_of(intern(name)) < 0: return rt_dc_not_intrinsic(n, name)
-        dc_parser.at += 1
-        dc_parser.reader.dc_nothing = true
-        return n
+    if dc_parser.tokens[dc_parser.at].kind == .metatag:
+        tag = dc_parser.tokens[dc_parser.at]
+        if intern(rt_dn_payload(tag)) == intern("extern") or intern(rt_dn_payload(tag)) == intern("intrinsic"): fatal(mkpos(dc_parser.file, tag.start), "`${rt_dn_payload(tag)}` prefixes its declaration: write `${rt_dn_payload(tag)}` then `{name} = (...):>Result`, without `=>`")
     concrete = type_params.len() == 0
     loop p in ps:
         if nodes[p].a == 0: concrete = false
@@ -6316,7 +6330,7 @@ rt_dc_extern = (n: int, ps: int[]) -> int:
     # (dw_extern_finish's mistakes, noted: a lambda, no result type)
     if nodes[n].kind == .lambda or not has_flag(n, NF_GENERIC) and nodes[n].a == 0 and not has_flag(n, NF_VOID):
         if not dc_parser.flags.report_now: return 0
-        if nodes[n].kind == .lambda: rt_dc_report(pos, "`$extern` declares a module-level function: `strlen = (s:ptr<uint8>):>uint64 => $extern`")
+        if nodes[n].kind == .lambda: rt_dc_report(pos, "`$extern` declares a module-level function: `$extern` then `strlen = (s:ptr<uint8>):>uint64`")
         else: rt_dc_report(pos, "a `$extern` function states its result type, `:>int32` or `:>void`: there is no body to infer it from")
     if has_flag(n, NF_GENERIC): return rt_dc_extern_mistake(pos, "a `$extern` function cannot be generic: C has one signature per symbol")
     symbol = ""
@@ -6672,9 +6686,7 @@ rt_dc_block_setting = () -> int:
     if dc_parser.tokens[at].symbol == .assign:
         written = dc_parser.tokens[at + 1]
         if written.kind != .boolean:
-            # (`$prototype=1`: dw_dir_boolean's mistake, reported once the statement is read)
-            if not dc_parser.flags.report_now or not rt_dc_lone_value(at + 1): return -1
-            rt_dc_report(mkpos(dc_parser.file, written.start), "`${rt_dn_payload(dc_parser.tokens[dc_parser.at])}` takes a literal true or false")
+            fatal(mkpos(dc_parser.file, written.start), "`${rt_dn_payload(dc_parser.tokens[dc_parser.at])}` takes a literal true or false")
         else if int(written.name) != dc_parser.reader.dn_true_id: value = 0
         at += 2
     next = dc_parser.tokens[at]
@@ -7009,11 +7021,9 @@ rt_dc_setting = (token: DewyLexeme) -> int:
     enabled = 1
     if dc_parser.tokens[at].symbol == .assign:
         value = dc_parser.tokens[at + 1]
-        if value.newline: return 0
+        if value.newline: fatal(mkpos(dc_parser.file, value.start), "`${name}` takes a literal true or false")
         if value.kind != .boolean:
-            # (`$explicit_copies = 1`: dw_dir_boolean's mistake)
-            if rt_dc_lone_value(at + 1) or value.symbol == .lbrace and dir_builtin(name): return rt_dc_fail_now(mkpos(dc_parser.file, value.start), "`${name}` takes a literal true or false")
-            return 0
+            fatal(mkpos(dc_parser.file, value.start), "`${name}` takes a literal true or false")
         if int(value.name) != dc_parser.reader.dn_true_id: enabled = 0
         at += 2
     next = dc_parser.tokens[at]
@@ -7085,6 +7095,33 @@ rt_dn_statement = (top: bool = false) -> int:
     read
 
 rt_dn_statement_read = (top: bool) -> int:
+    if top and dc_parser.tokens[dc_parser.at].kind == .metatag and dc_parser.tokens[dc_parser.at + 1].symbol == .kw_loop:
+        tag = dc_parser.tokens[dc_parser.at]
+        name = rt_dn_payload(tag)
+        if not dw_dir_name(name) and not dw_designed_directive(name):
+            dc_parser.at += 1
+            statement = rt_dc_statement()
+            if statement == 0: return 0
+            nodes[statement].sval = i32(intern(name))
+            return statement
+    if top and dc_parser.tokens[dc_parser.at].kind == .metatag:
+        tag = dc_parser.at
+        id = intern(rt_dn_payload(dc_parser.tokens[tag]))
+        if id == intern("extern") or id == intern("intrinsic"):
+            dc_parser.at += 1
+            if dc_parser.tokens[dc_parser.at].symbol == .lparen:
+                depth = 1
+                dc_parser.at += 1
+                loop depth > 0 and dc_parser.tokens[dc_parser.at].kind != .eof:
+                    if dc_parser.tokens[dc_parser.at].symbol == .lparen: depth += 1
+                    if dc_parser.tokens[dc_parser.at].symbol == .rparen: depth -= 1
+                    dc_parser.at += 1
+            if dc_parser.reader.dc_callable_tag > 0: fatal(mkpos(dc_parser.file, dc_parser.tokens[tag].start), "one `$extern` or `$intrinsic` prefixes a function declaration")
+            dc_parser.reader.dc_callable_tag = tag + 1
+            read = rt_dn_statement_read(true)
+            if read >= 0 and dc_parser.reader.dc_callable_tag > 0: fatal(mkpos(dc_parser.file, dc_parser.tokens[tag].start), "this tag prefixes a module-level function declaration: `$extern` then `name = (...):>Result`")
+            if read == 0: fatal(mkpos(dc_parser.file, dc_parser.tokens[tag].start), "this tag prefixes a module-level function declaration: `$extern` then `name = (...):>Result`")
+            return read
     if top:
         dc_parser.status.hint_pos = 0
     # (`test "adds" { ... }`: dn_stmt's mistake, at once)
@@ -7092,6 +7129,8 @@ rt_dn_statement_read = (top: bool) -> int:
     if top and dc_parser.tokens[dc_parser.at].kind == .metatag:
         built = rt_dc_build_setting()
         if built != 0: return built
+        valued = rt_dc_valued_setting()
+        if valued != 0: return valued
         setting = rt_dc_setting(dc_parser.tokens[dc_parser.at])
         if setting != 0: return setting
         marker = rt_dc_marker(dc_parser.tokens[dc_parser.at])
@@ -7229,7 +7268,7 @@ rt_dc_concurrent = (token: DewyLexeme, transparent: bool) -> int:
     # (its hidden names' number: beyond any syntax index)
     serial = (1 << 32) + nodes.len()
     name = "$group{serial}"
-    if rt_dn_peek() != .lbrace:
+    if rt_dn_peek() != .lbrace and dc_parser.tokens[dc_parser.at].kind != .metatag:
         group = dc_parser.tokens[dc_parser.at]
         if group.kind != .identifier: return rt_dc_concurrent_mistake(group.start, "concurrent needs a group name or a braced body")
         if group.symbol != .none: return 0
@@ -7237,7 +7276,7 @@ rt_dc_concurrent = (token: DewyLexeme, transparent: bool) -> int:
         # (a named group is placed at its name)
         pos = mkpos(dc_parser.file, group.start)
         dc_parser.at += 1
-        if rt_dn_peek() != .lbrace: return rt_dc_concurrent_mistake(dc_parser.tokens[dc_parser.at].start, "concurrent needs a braced body")
+        if rt_dn_peek() != .lbrace and dc_parser.tokens[dc_parser.at].kind != .metatag: return rt_dc_concurrent_mistake(dc_parser.tokens[dc_parser.at].start, "concurrent needs a braced body")
     dw_task_groups.push(name)
     saved_unread = dc_parser.flags.unread_here
     dc_parser.flags.unread_here = false
@@ -7841,3 +7880,90 @@ rt_dn_split_closer = ():
     dc_parser.tokens[dc_parser.at].start += 1
     tail = dc_parser.tokens[dc_parser.at]
     dc_parser.tokens[dc_parser.at].symbol = dn_token_kind(files[dc_parser.file].src[tail.start..tail.stop))
+
+# D4 Q19, provisional; the sole blank-line module-header rule.
+rt_dc_module_header = () -> bool:
+    at = dc_parser.at
+    loop true:
+        if at >= dc_parser.tokens.len(): return false
+        previous = dc_parser.tokens[at - 1]
+        next = dc_parser.tokens[at]
+        blank = false
+        newline = false
+        source = files[dc_parser.file].src
+        loop i in [previous.stop..next.start):
+            b = source[i]
+            if b == 10:
+                if newline: blank = true
+                newline = true
+            else if b != 32 and b != 9 and b != 13: newline = false
+        if blank or next.kind == .eof: return true
+        if next.kind != .metatag: return false
+        name = rt_dn_payload(next)
+        if rt_dc_valued_place(at):
+            at += 5
+            continue
+        if dn_directive_form(name) != 0 or not dw_dir_name(name): return false
+        at += 1
+        if dc_parser.tokens[at].symbol == .assign: at += 2
+    false
+
+rt_dc_prefixed_body = () -> int:
+    tag = dc_parser.tokens[dc_parser.at]
+    name = rt_dn_payload(tag)
+    value = 0
+    if rt_dc_valued_place(dc_parser.at):
+        name = name + "." + rt_dn_payload(dc_parser.tokens[dc_parser.at + 2])
+        value = rt_dc_valued_value(name)
+        dc_parser.at += 5
+    else:
+        if dn_directive_form(name) != 0 or not dw_dir_name(name): return 0
+        value = rt_dc_block_setting()
+        if value < 0: return 0
+    start = dc_parser.tokens[dc_parser.at]
+    if start.symbol == .rbrace or start.symbol == .rparen or start.symbol == .rbrack or start.kind == .eof: fatal(mkpos(dc_parser.file, tag.start), "`${name}` needs a following construct; move it before the construct: `${name}` then `\{ ... }`")
+    depth = dc_parser.depth
+    dc_parser.depth += 1
+    if dc_parser.depth + dc_parser.reader.dn_depth > 256:
+        dc_parser.depth = depth
+        return rt_dc_too_deep()
+    body = rt_dc_body()
+    dc_parser.depth = depth
+    if body == 0: return 0
+    rt_dc_scope_undoable()
+    dw_dir_apply(name, value, mkpos(dc_parser.file, tag.start), nodes[body].pos, mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at - 1].stop - 1), false)
+    body
+
+rt_dc_valued_place = (at: int) -> bool:
+    token = dc_parser.tokens[at]
+    if token.kind != .metatag: return false
+    name = rt_dn_payload(token)
+    if name != "dewy" and name != "time" and name != "program": return false
+    dot = dc_parser.tokens[at + 1]
+    member = dc_parser.tokens[at + 2]
+    if name == "program" and rt_dn_payload(member) != "max_cores": return false
+    dot.symbol == .dot and not dot.space and not member.space and member.kind == .identifier and dc_parser.tokens[at + 3].symbol == .assign
+rt_dc_valued_value = (text: str) -> int:
+    value = dc_parser.tokens[dc_parser.at + 4]
+    if text == "program.max_cores":
+        digits = rt_dn_payload(value)
+        ok = (value.kind == .integer or value.kind == .source_integer) and len(digits) > 0 and len(digits) <= 9 and digits[0] != 48
+        loop i in [0..len(digits)):
+            if digits[i] < 48 or digits[i] > 57: ok = false
+        if not ok: fatal(mkpos(dc_parser.file, value.start), "`$program.max_cores` is a whole number of at least 1, as `$program.max_cores = 2`")
+        return intern(digits) + 2
+    literal = 0
+    if value.kind == .quoted and rt_dc_plain_quote(value) or value.kind == .rawquoted: literal = rt_dn_string(value)
+    if literal == 0 or nodes[literal].kind != .str_lit or nkids(literal) > 0: fatal(mkpos(dc_parser.file, value.start), "`${text}` is set to a name in quotes")
+    int(nodes[literal].sval) + 2
+rt_dc_valued_setting = () -> int:
+    at = dc_parser.at
+    if not rt_dc_valued_place(at): return 0
+    token = dc_parser.tokens[at]
+    member = dc_parser.tokens[at + 2]
+    after = dc_parser.tokens[at + 5]
+    text = rt_dn_payload(token) + "." + rt_dn_payload(member)
+    value = rt_dc_valued_value(text)
+    if after.kind != .eof and not after.newline: fatal(mkpos(dc_parser.file, after.start), "`${text} = ...` goes on a line of its own")
+    dc_parser.at = at + 5
+    rt_module_tag(token, 6, intern(text), value)

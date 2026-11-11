@@ -617,7 +617,7 @@ def test_real_toolchain_over_http(world, real_toolchain):
         install(world, env=env)
         work = world.tmp / 'my project'
         work.mkdir()
-        (work / 'main.dewy').write_text((SAMPLE) + "\n$runtime_checks\n")
+        (work / 'main.dewy').write_text(('$runtime_checks\n\n') + (SAMPLE))
         clean = {k: v for k, v in env.items() if k != 'PATH'} | {'PATH': '/usr/bin:/bin'}
         launch(world.prefix, 'build', 'main.dewy', '-o', 'main', env=clean, cwd=work)
         assert subprocess.run([str(work / 'main')], cwd=work).returncode == 42

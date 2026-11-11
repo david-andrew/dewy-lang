@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{
 let empty:array<int64>=[] let total=0
 loop x in empty or y in empty {total=999} else {total+=40}
@@ -6,5 +8,3 @@ loop x in empty or y in [10 20] {total+=1} else {total=999}
 return total
 }
 main=()=>exit(run())
-
-$runtime_checks

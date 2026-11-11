@@ -90,7 +90,7 @@ def test_the_assumed_zone_is_named(compiler, tmp_path):
     assert "main.dewy:1:9: warning: `today` has no time zone here, so it assumes the zone of the machine" in ran.stderr
     assert "`$time.zone = 'system'`" in ran.stderr
     for setting in ("'system'", "'Asia/Tokyo'"):
-        ran = run(compiler, tmp_path, f'$time.zone = {setting}\nlet d = today\nprintl"{{d =? d}}"\n')
+        ran = run(compiler, tmp_path, f'$time.zone = {setting}\n\nlet d = today\nprintl"{{d =? d}}"\n')
         assert ran.returncode == 0, ran.stderr
         assert 'time zone' not in ran.stderr
     ran = run(compiler, tmp_path, 'printl"{age(date"2000-05-12") >? 20}"\n')
@@ -99,7 +99,7 @@ def test_the_assumed_zone_is_named(compiler, tmp_path):
 
 
 def test_system_zone_reads_its_name_and_pinned_rules(compiler, tmp_path):
-    source = "$time.zone = 'system'\nprintl\"{today}\"\n"
+    source = '$time.zone = \'system\'\n\nprintl"{today}"\n'
     for zone in ('Pacific/Kiritimati', 'Pacific/Pago_Pago'):
         ran = run(compiler, tmp_path, source, TZ=zone)
         assert ran.returncode == 0, ran.stderr
@@ -167,7 +167,7 @@ printl"{g3.years} {g3.months} {g3.days} {g3.total_days} {date"2026-12-25" + g3}"
 
 def test_zone_chosen_at_build(compiler, tmp_path):
     source = tmp_path / 'main.dewy'
-    source.write_text("$time.zone = 'build'\nprintl\"{today}\"\n")
+    source.write_text('$time.zone = \'build\'\n\nprintl"{today}"\n')
     env = dict(os.environ, TZ='Pacific/Kiritimati')
     built = subprocess.run([compiler, 'build', source, '-o', tmp_path / 'main'], capture_output=True, text=True,
                            timeout=300, check=False, cwd=tmp_path, env=env)
@@ -181,7 +181,7 @@ def test_zone_chosen_at_build(compiler, tmp_path):
 
 def test_main_file_pins_the_whole_program(compiler, tmp_path):
     (tmp_path / 'other.dewy').write_text('shown = () => "{today}"\n')
-    source = "$time.zone = 'Pacific/Kiritimati'\nimport p\"other.dewy\" as other\nprintl(other.shown)\n"
+    source = '$time.zone = \'Pacific/Kiritimati\'\n\nimport p"other.dewy" as other\nprintl(other.shown)\n'
     ran = run(compiler, tmp_path, source, TZ='Pacific/Pago_Pago')
     assert ran.returncode == 0, ran.stderr
     assert 'time zone' not in ran.stderr
@@ -190,7 +190,7 @@ def test_main_file_pins_the_whole_program(compiler, tmp_path):
 
 
 def test_a_scope_setting_must_name_a_zone(compiler, tmp_path):
-    ran = run(compiler, tmp_path, "$time.zone = 'Mars/Olympus'\nprintl(today)\n")
+    ran = run(compiler, tmp_path, "$time.zone = 'Mars/Olympus'\n\nprintl(today)\n")
     assert ran.returncode != 0
     assert 'no time zone is called Mars/Olympus' in ran.stderr
 
@@ -225,7 +225,7 @@ def test_a_programs_own_function_keeps_an_old_name(compiler, tmp_path):
 
 
 def test_a_machine_with_no_readable_zone_says_so(compiler, tmp_path):
-    source = "$time.zone = 'system'\nlet a = today\nlet b = today\nprintl(a =? b)\n"
+    source = "$time.zone = 'system'\n\nlet a = today\nlet b = today\nprintl(a =? b)\n"
     ran = run(compiler, tmp_path, source, TZ='Nowhere/Land')
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == 'true\n'
@@ -236,7 +236,7 @@ def test_a_machine_with_no_readable_zone_says_so(compiler, tmp_path):
 
 
 def test_windows_name_for_the_machines_zone(compiler, tmp_path):
-    ran = run(compiler, tmp_path, "$time.zone = 'system'\nprintl(today)\n", TZ='Tokyo Standard Time')
+    ran = run(compiler, tmp_path, "$time.zone = 'system'\n\nprintl(today)\n", TZ='Tokyo Standard Time')
     assert ran.returncode == 0, ran.stderr
     assert 'warning' not in ran.stderr
     from zoneinfo import ZoneInfo

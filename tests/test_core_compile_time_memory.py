@@ -11,6 +11,7 @@ from tests.support import ROOT, compiler
 
 # (a nested repeat written out to 10000 steps, and a pattern 8000 characters long)
 SOURCE = '''$runtime_checks
+
 main=()=>{
     printl("aaab".find(regex(r"(?:a{100}){100}|b")))
     printl("x%s".find(regex(r"%s")))

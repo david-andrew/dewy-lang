@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{
 let a:int8<overflow='wrap'>=-128 let b:uint64<overflow='wrap'>=18446744073709551615 let c:int64<overflow='wrap'>=-9223372036854775808
 let d:int16<overflow='wrap'>=-17 let e:uint8<overflow='wrap'>=3
@@ -7,5 +9,3 @@ return if a =? -128 and b =? 9223372036854775807 and c =? -9223372036854775808
 and d =? 7 and e =? 27 42 else 1
 }
 main=()=>exit(run())
-
-$runtime_checks

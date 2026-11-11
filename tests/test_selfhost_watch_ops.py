@@ -3,7 +3,9 @@ Jo: the same session transcripts, patch sizes, exit codes and files."""
 from tests.selfhost_process_double import compare_watch
 from tests.support import compiler  # noqa: F401
 
-GAME = '''from p"helper.dewy" import label
+GAME = '''$runtime_checks
+
+from p"helper.dewy" import label
 State:type=[count:int64]
 let state=State[0]
 let values:array<int64>=[20 22]
@@ -19,7 +21,6 @@ update=(dt:float64):>void=>{
     sleep(5ms);
 }
 draw=():>void=>clear(BLACK)
-$runtime_checks
 '''
 
 

@@ -11,6 +11,7 @@ from tests.support import compiler  # noqa: F401
 def test_tagged_sum_census_and_exact_fallback(compiler, tmp_path, release):
     source = tmp_path / 'sum.dewy'
     source.write_text('''$runtime_checks
+
 main=(args:array<string>)=>{
  let xs:array<int>=[]
  loop i in [1..args.length) {xs.push(to_int(args[i]) ?? 0)}

@@ -1,4 +1,6 @@
 # Search long text for a delimiter or an absent byte, alternating both paths.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock
 main=(args:array<string>):>void=>{
     let count=size_argument(args 20000)
@@ -10,4 +12,3 @@ main=(args:array<string>):>void=>{
     let finished=clock
     printl"{result} {finished-started}"
 }
-$runtime_checks

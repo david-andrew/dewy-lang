@@ -10,8 +10,8 @@ from tests.test_fixed_exact import build
 @pytest.mark.parametrize('release', [False, True])
 def test_wide_mask_and_floor_power_of_two(compiler, tmp_path, release):
     binary = build(compiler, tmp_path, '''
+$runtime_checks=false
 masked=(a:int64):>int64=>{
-    $runtime_checks=false
     return (a*a+12345)&2147483647
 }
 main=(args:array<string>)=>{

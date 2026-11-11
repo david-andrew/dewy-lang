@@ -1,5 +1,7 @@
 # Generic closures that reach themselves again through a record: a stored closure
 # given its record, and record-literal methods (recursive, mutually recursive, generic).
+$runtime_checks
+
 main = () => {
     let fact = <R>(r:R n:int64):>int64 => if n <=? 1 1 else n * r.f(r n - 1)
     let holder = [f = @fact]
@@ -16,5 +18,3 @@ main = () => {
     m.count_down(4)
     printl"{m.power(4)} {m.is_even(10)} {m.is_odd(7)} {m.repeat("ab" 3)} {m.repeat(1 2)} {m.steps}"
 }
-
-$runtime_checks

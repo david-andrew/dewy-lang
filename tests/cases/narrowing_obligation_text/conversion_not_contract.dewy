@@ -1,7 +1,8 @@
 # modes: native
 # A conversion's own check is named as one, not as a declared contract that
 # shares its predicate (`count`'s parameter here).
-labs=(x:int64):>int64 => $extern
+$extern
+labs=(x:int64):>int64
 count=(n:int64<(>=? 0)>):>int64 => n
 main=():>void=>{
     let bound=uint64($unsafe labs(100))

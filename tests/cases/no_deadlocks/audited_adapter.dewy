@@ -2,10 +2,13 @@
 # `$no_deadlocks`: a foreign call that may block is certified inside an audited adapter; one
 # declared with a closed row is trusted not to wait.
 $no_deadlocks
-usleep = (us:uint32):>int32 => $extern
-labs = (x:int64):>int64 & no_effects => $extern
+
+$extern
+usleep = (us:uint32):>int32
+$extern
+labs = (x:int64):>int64 & no_effects
+$audited_wait
 nap = ():>int32 => {
-    $audited_wait
     $unsafe usleep(1000)
 }
 main = () => {

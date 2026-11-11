@@ -1,3 +1,5 @@
+$runtime_checks
+
 Pair:type=[left:int64 right:int64]
 put=(@x:int64 v:int64):>void & mutates<x>=>{ x=v }
 get=(@x:int64):>int64 & reads<x>=>x
@@ -18,5 +20,3 @@ main=():>void=>{
     swap(@p.right @p.left)
     printl("{p.left} {p.right} {scalar(21)}")
 }
-
-$runtime_checks

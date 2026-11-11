@@ -1,13 +1,20 @@
 # `ptr<T>?` is C's nullable pointer, one word (test_optional_pointer.py: pointers.c is the C side).
 Pair:type = [tag:int32 first:ptr<int32>? second:ptr<int32>?]
 Shape:type = Pair | string | none
-find_value = (want:int32 out:ptr<ptr<int32>?>):>int32 => $extern(lib=LIBRARY)
-fill_slots = (out:ptr<ptr<int32>?> n:int64):>void => $extern(lib=LIBRARY)
-read_or_minus_one = (p:ptr<int32>?):>int32 => $extern(lib=LIBRARY)
-next_value = (p:ptr<int32>?):>ptr<int32>? => $extern(lib=LIBRARY)
-fill_pair = (out:ptr<Pair> tag:int32):>void => $extern(lib=LIBRARY)
-pair_sum = (p:ptr<Pair>):>int32 => $extern(lib=LIBRARY)
-apply = (f:((p:ptr<int32>?):>ptr<int32>?) p:ptr<int32>?):>ptr<int32>? => $extern(lib=LIBRARY)
+$extern(lib=LIBRARY)
+find_value = (want:int32 out:ptr<ptr<int32>?>):>int32
+$extern(lib=LIBRARY)
+fill_slots = (out:ptr<ptr<int32>?> n:int64):>void
+$extern(lib=LIBRARY)
+read_or_minus_one = (p:ptr<int32>?):>int32
+$extern(lib=LIBRARY)
+next_value = (p:ptr<int32>?):>ptr<int32>?
+$extern(lib=LIBRARY)
+fill_pair = (out:ptr<Pair> tag:int32):>void
+$extern(lib=LIBRARY)
+pair_sum = (p:ptr<Pair>):>int32
+$extern(lib=LIBRARY)
+apply = (f:((p:ptr<int32>?):>ptr<int32>?) p:ptr<int32>?):>ptr<int32>?
 
 $export
 second_after = (p:ptr<int32>?):>ptr<int32>? => $unsafe {

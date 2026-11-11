@@ -6,10 +6,12 @@ import subprocess
 from tests.support import compiler  # noqa: F401
 
 HELPER = '''$runtime_checks
+
 twice = (x:int64):>int64 => x * 2
 '''
 
 PROGRAM = '''$runtime_checks
+
 from p"helper.dewy" import twice
 import p"helper.dewy" as h
 let drops:int64 = 0

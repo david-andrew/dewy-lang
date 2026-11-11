@@ -3,10 +3,10 @@ next=(@i:int64):>int64=>{
     i += 1
     return i
 }
+$runtime_checks
 main=()=>{
     let rs:array<R> = [R[[]] R[[]]]
     let i:int64 = -1
-    $runtime_checks
     rs[next(@i)].xs.push(next(@i))
     rs[1].xs.push(6)
     printl"{rs[0].xs} {rs[1].xs} {i}"

@@ -31,12 +31,12 @@ def write_program(tmp_path):
                 functions.append(f'w{k}_{i}=(xs:array<int64>):>int64=>{{\n    loop e in xs {{ e += {i} }}\n    return {i}\n}}')
             else:
                 functions.append(f'f{k}_{i}=(x:int64):>int64=>x+{i}')
-        (tmp_path / f'm{k}.dewy').write_text('\n'.join(functions) + '\n$runtime_checks\n')
+        (tmp_path / f'm{k}.dewy').write_text(('$runtime_checks\n\n') + ('\n'.join(functions)))
         names.append([f'w{k}_{i}' if warns(i) else f'f{k}_{i}' for i in range(PER_MODULE)])
     lines = [f'from p"m{k}.dewy" import ({" ".join(n)})' for k, n in enumerate(names)]
     lines += ['let sum:int64=0', 'let data:array<int64>=[1 2 3]']
     lines += [f'sum+={n}(data)' if n.startswith('w') else f'sum+={n}({i})' for ns in names for i, n in enumerate(ns)]
-    (tmp_path / 'main.dewy').write_text('\n'.join(lines) + '\nprintl"{sum}"\n$runtime_checks\n')
+    (tmp_path / 'main.dewy').write_text('$runtime_checks\n\n' + '\n'.join(lines) + '\nprintl"{sum}"\n')
     return ['main.dewy']
 
 

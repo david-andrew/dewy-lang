@@ -93,6 +93,6 @@ def test_api_misuse_is_still_a_panic(compiler, tmp_path, source, message):
     checked = invoke(compiler, tmp_path, 'check', 'main.dewy')
     # (a panic of the callee's, or its stated contract unproven at the call)
     assert checked.returncode == 1 and ('may panic' in checked.stderr or 'cannot prove' in checked.stderr), checked.stdout + checked.stderr
-    (tmp_path / 'main.dewy').write_text('import p"@lib/physics.jo" as physics\n$runtime_checks\nmain=()=>{' + source + '}\n')
+    (tmp_path / 'main.dewy').write_text('$runtime_checks\n\nimport p"@lib/physics.jo" as physics\nmain=()=>{' + source + '}\n')
     ran = invoke(compiler, tmp_path, 'run', 'main.dewy', DEWY_NO_GPU='1')
     assert ran.returncode == 101 and message in ran.stderr, ran.stdout + ran.stderr

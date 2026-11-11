@@ -10,6 +10,7 @@ from tests.support import compiler  # noqa: F401
 def test_finite_exact_locals_do_not_allocate(compiler, tmp_path, flags):
     source = tmp_path / 'finite.dewy'
     source.write_text('''$runtime_checks
+
 near=(a:int64 b:int64):>bool & no_effects=>{
  let x=a-b let y=a+b
  return x*x <=? y*y
@@ -37,6 +38,7 @@ main=(args:array<string>)=>{
 def test_finite_local_escape_still_reports_allocation(compiler, tmp_path):
     source = tmp_path / 'escape.dewy'
     source.write_text('''$runtime_checks
+
 escape=(a:int64):>int & no_effects=>{let x=a+1 return x}
 main=()=>printl(escape(9223372036854775807))
 ''')
@@ -47,6 +49,7 @@ main=()=>printl(escape(9223372036854775807))
 def test_narrowed_operand_still_reports_allocation(compiler, tmp_path):
     source = tmp_path / 'hidden.dewy'
     source.write_text('''$runtime_checks
+
 hidden=(a:int b:int):>bool & no allocates=>{
  let x=int64(a+b)+1
  return x =? 0

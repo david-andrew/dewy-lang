@@ -1,5 +1,7 @@
 # A refinement bound written with an offset (`i - 1 >=? 0`, `i + 5 >? 10`) admits the values the
 # offset moves it to: arms covering them are exhaustive, and `is?` tests the same values.
+$runtime_checks
+
 pos = int64<i => i - 1 >=? 0>
 above = int64<i => i + 5 >? 10>
 f = (x:pos):>string => match x {
@@ -24,5 +26,3 @@ main = () => {
     let w:int64=0
     printl(w is? int64<i => i - 1 >=? 0>)
 }
-
-$runtime_checks

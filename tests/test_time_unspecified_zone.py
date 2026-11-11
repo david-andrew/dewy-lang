@@ -24,9 +24,9 @@ def test_runtime_text_warns_and_reads_the_machine(compiler, tmp_path):
 
 def test_saying_where_keeps_it_quiet(compiler, tmp_path):
     for source, output in [
-            ("$time.zone = 'system'\nf=(s:string)=>printl(zoned(s))\nf(\"2026-01-01T12:00\")\n",
+            ('$time.zone = \'system\'\n\nf=(s:string)=>printl(zoned(s))\nf("2026-01-01T12:00")\n',
              '2026-01-01T12:00:00+09:00[Asia/Tokyo]\n'),
-            ("$time.zone = 'Europe/Paris'\nf=(s:string)=>printl(zoned(s))\nf(\"2026-01-01T12:00\")\n",
+            ('$time.zone = \'Europe/Paris\'\n\nf=(s:string)=>printl(zoned(s))\nf("2026-01-01T12:00")\n',
              '2026-01-01T12:00:00+01:00[Europe/Paris]\n'),
             ('f=(s:string)=>printl(zoned(s zone=zone"UTC"))\nf("2026-01-01T12:00")\n',
              '2026-01-01T12:00:00+00:00[UTC]\n'),
@@ -47,7 +47,7 @@ def test_text_that_names_its_zone_reads_there_at_run_time(compiler, tmp_path):
 
 def test_a_literal_still_cannot_assume(compiler, tmp_path):
     for source in ('printl(zoned"2026-07-01T12:00")\n', 'printl(zoned("2026-07-01T12:00"))\n',
-                   "$time.zone = 'system'\nprintl(zoned\"2026-07-01T12:00\")\n"):
+                   '$time.zone = \'system\'\n\nprintl(zoned"2026-07-01T12:00")\n'):
         ran = run(compiler, tmp_path, source)
         assert ran.returncode != 0, source
         assert 'a literal cannot assume' in ran.stderr, source

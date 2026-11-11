@@ -1,5 +1,7 @@
 # exit: 42
 # quick
+$runtime_checks
+
 A:type=[value:int64]
 B:type=[value:int64]
 identity=<T>(value:T):>T=>value
@@ -15,5 +17,3 @@ if second<int64 string>(20 "kept") not=?"kept" return 2
 if first<string int64>("kept" 22) not=?"kept" return 3
 return score(identity(a))+score(identity(b))}
 main=()=>exit(run())
-
-$runtime_checks

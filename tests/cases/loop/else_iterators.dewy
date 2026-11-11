@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{
 let total=0 let empty=[3..3) let full=(0,2..4] let missing:array<int64>=[]
 loop value in empty {total=999} else {total+=10}
@@ -9,5 +11,3 @@ loop x in [1] and y in missing {total=999} else {total+=10}
 return total
 }
 main=()=>exit(run())
-
-$runtime_checks

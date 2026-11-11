@@ -10,6 +10,7 @@ import pytest
 from tests.support import compiler  # noqa: F401
 
 PROVEN = '''$runtime_checks=false
+
 Enemy:type=[name:string health:int64=100]
 World:type=[enemies:Pool<Enemy> turn:int64=0]
 total=(enemies:Pool<Enemy> hs:array<Handle>):>int64=>{
@@ -95,7 +96,7 @@ def test_membership_unproven(compiler, tmp_path, name):
 
 
 def test_membership_runtime_check(compiler, tmp_path):
-    source = '$runtime_checks\nf=(p:Pool<int64> h:Handle):>int64=>p[h]\nmain=():>void=>{\n    let p:Pool<int64>=[]\n    let a=p.add(5)\n    printl(f(p a))\n    p.remove(a);\n    printl(f(p a))\n}\n'
+    source = '$runtime_checks\n\nf=(p:Pool<int64> h:Handle):>int64=>p[h]\nmain=():>void=>{\n    let p:Pool<int64>=[]\n    let a=p.add(5)\n    printl(f(p a))\n    p.remove(a);\n    printl(f(p a))\n}\n'
     result = run(compiler, tmp_path, source, 'run')
     assert result.returncode == 101 and result.stdout == '5\n', result.stdout + result.stderr
     assert 'gone from the pool' in result.stderr, result.stderr
@@ -105,6 +106,7 @@ def test_slot_tables_ignore_public_fields(compiler, tmp_path):
     # (`handles` is public: a clear or remove after it changed still gives
     # each slot once, so later handles stay distinct and others stay in)
     source = '''$runtime_checks
+
 main=():>void=>{
     let p:Pool<int64>=[]
     let a=p.add(1)

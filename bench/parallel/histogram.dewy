@@ -1,3 +1,5 @@
+$runtime_checks
+
 from p"../harness.jo" import clock, size_argument
 main=(args:array<string>)=>{
  let n=size_argument(args 1000000)
@@ -11,5 +13,3 @@ main=(args:array<string>)=>{
  loop i in [0..counts.length) {checksum+=counts[i]*(i+1)}
  printl"{checksum} {clock()-start}"
 }
-
-$runtime_checks

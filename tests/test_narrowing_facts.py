@@ -117,7 +117,7 @@ def test_narrowing_still_required(compiler, tmp_path, name):
 
 def test_obligations_demands_exact_store_inputs(compiler, tmp_path):
     path = tmp_path / 'demand.dewy'
-    path.write_text('$runtime_checks\nf=(x:int64):>int64=>{if 0 <=? x <? 100 return x+1 return 0}\nprintl(f(10))\n')
+    path.write_text('$runtime_checks\n\nf=(x:int64):>int64=>{if 0 <=? x <? 100 return x+1 return 0}\nprintl(f(10))\n')
     checked = subprocess.run([compiler, 'check', '--obligations', path], capture_output=True, text=True)
     assert checked.returncode == 0, checked.stderr
     assert 'exact integer result fits' not in checked.stdout, checked.stdout

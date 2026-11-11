@@ -1,5 +1,7 @@
 # Dense dispatch whose arms compute with a changing operand.
 # Unlike match_dispatch, this cannot become a constant-result lookup.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock
 
 dispatch=(code:int64 value:int64):>int64=>match code {
@@ -45,5 +47,3 @@ main=(args:array<string>):>void=>{
     let result=kernel(count)
     printl"{result} {clock-started}"
 }
-
-$runtime_checks

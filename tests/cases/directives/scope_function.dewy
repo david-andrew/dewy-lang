@@ -1,9 +1,10 @@
 #
 $runtime_checks
+
 # A setting in a function body holds for that function only: `guarded` proves
 # its index, `loose` keeps a runtime check outside the strict function.
+$runtime_checks=false
 guarded=(xs:array<int64> i:int64):>int64=>{
-    $runtime_checks=false
     if i >=? 0 and i <? xs.length return xs[i]
     return -1
 }

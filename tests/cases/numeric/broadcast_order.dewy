@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 let trace:int64=0
 values=(tag:int64)=>{trace=trace*10+tag return [1 2 3]}
 scalar=()=>{trace=trace*10+3 return 2}
@@ -11,5 +13,3 @@ let visited=visit.([1 2 3])
 return if visited =? [2 3 4] and seen =? [1 2 3] 42 else 2
 }
 main=()=>exit(run())
-
-$runtime_checks

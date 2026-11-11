@@ -2,6 +2,8 @@
 # Many senders and receivers on one small mpmc queue. Every value arrives exactly once:
 # four producers send 2000 values each through 8 slots, three consumers sum them, and the
 # close after the producers' join lets the consumers drain and stop.
+$runtime_checks
+
 produce = (q:Mpmc<int64> first:int64 count:int64):>void | Unsent<int64> => {
     loop i in [first..first + count) { q.send(i) or_throw }
 }
@@ -34,5 +36,3 @@ main = () => {
     }
     printl"received {seen.load} values, sum {total.load}"
 }
-
-$runtime_checks

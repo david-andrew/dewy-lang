@@ -1,11 +1,12 @@
 $runtime_checks
+$explicit_copies
+
 # ChaCha20 (RFC 8439 section 2.3-2.4).
 #
 # An add-rotate-xor cipher: no table lookups and no data-dependent branches, so
 # key and plaintext never select a code path or an address. Loop bounds depend
 # only on the message length, which is public.
 
-$explicit_copies
 
 from p"ct.dewy" import load32
 

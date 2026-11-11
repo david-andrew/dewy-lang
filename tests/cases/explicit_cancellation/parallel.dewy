@@ -1,5 +1,6 @@
 # modes: native
 $explicit_cancellation
+
 outcome=(n:int64):>int64|Canceled=>if n =? 1 Canceled else n
 collect=()=>[parallel n in [0..3) outcome(n)]
 main=()=>{printl(collect() is? Canceled)}

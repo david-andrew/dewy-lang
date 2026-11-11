@@ -34,6 +34,7 @@ main=()=>{let x:int<(>=? 0)>?=2 if x isnt? none {weaken(@x)} printl(x)}""",
 
 NARROW_VALID = {
     'equivalent_mutable_contract': ('''$runtime_checks
+
 bump=(@x:int<(>=? 0)>)=>{x+=1}
 main=()=>{
  let x:int<(>=? 0)>?=2
@@ -41,6 +42,7 @@ main=()=>{
  printl(x)
 }''', '3\n'),
     'length_and_string_mutation': ('''$runtime_checks
+
 main=()=>{
  let xs:array<int length >? 0>?=[1]
  if xs isnt? none {xs.push(2)}
@@ -50,6 +52,7 @@ main=()=>{
  printl(s)
 }''', '[1 2]\nok\n'),
     'narrowed_optional_mutation': ("""$runtime_checks
+
 T:type=int<(>=? 0)>
 main=()=>{
  let xs:array<T?>=[2 none]
@@ -62,6 +65,7 @@ main=()=>{
  printl(d["x"] ?? 0)
 }""", '5\n5\n'),
     'compound_optional_refmath': ("""$runtime_checks
+
 T:type=int<(>=? -10)>
 R:type=[v:T?]
 main=()=>{
@@ -75,6 +79,7 @@ main=()=>{
  printl(old.v ?? -7)
 }""", '-6\n-6\n-7\n'),
     'compound_optional_refi8': ("""$runtime_checks
+
 T:type=int8<(>=? -128)>
 R:type=[v:T?]
 main=()=>{
@@ -88,6 +93,7 @@ main=()=>{
  printl(old.v ?? -128)
 }""", '-127\n-127\n-128\n'),
     'compound_optional_refu64': ("""$runtime_checks
+
 T:type=uint64<(>=? 0)>
 R:type=[v:T?]
 main=()=>{
@@ -211,11 +217,14 @@ def test_optional_coalesce(compiler, tmp_path, name, mode):
 
 HEAP_VALID = {
     'finding_refined_heap_literal': ("""$runtime_checks
+
 main=()=>{let x:int<(>=? 0)>?=18446744073709551616 printl(x ?? 0)}""", '18446744073709551616\n'),
     'refined_heap_literals': ("""$runtime_checks
+
 main=()=>{ let x:int<(>=? 0)>?=1267650600228229401496703205376 printl(x ?? 0) }""", '1267650600228229401496703205376\n'),
     'control_heap_literal_plain': ("""main=()=>{let x:int?=18446744073709551616 printl(x ?? 0)}""", '18446744073709551616\n'),
     'control_heap_literal_refined': ("""$runtime_checks
+
 main=()=>{let x:int<(>=? 0)>=18446744073709551616 printl(x)}""", '18446744073709551616\n'),
 }
 
@@ -229,7 +238,7 @@ def test_optional_heap_literal(compiler, tmp_path, name, mode):
 @pytest.mark.parametrize('mode', MODES)
 @pytest.mark.parametrize('type_name', ['int8<(>=? 0)>', 'uint64<(>=? 0)>'])
 def test_optional_heap_literal_word_reject(compiler, tmp_path, type_name, mode):
-    source = f'$runtime_checks\nmain=()=>{{let x:{type_name}?=18446744073709551616 printl(x)}}'
+    source = f'$runtime_checks\n\nmain=()=>{{let x:{type_name}?=18446744073709551616 printl(x)}}'
     check_program(compiler, tmp_path, source, None, mode)
 
 

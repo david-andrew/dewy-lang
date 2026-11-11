@@ -1,6 +1,8 @@
 # quick
 # modes: native native-release
 # exit: 42
+$runtime_checks
+
 increment=(@value:int64):>void=>{value+=1}
 add=(value:int64 extra:int64=1):>int64=>value+extra
 length=(values:array<int64>):>int64=>values.length
@@ -9,5 +11,3 @@ main=():>void=>exit(entry()) entry=()=>{
     increment(@value)
     return add(value)
 }
-
-$runtime_checks

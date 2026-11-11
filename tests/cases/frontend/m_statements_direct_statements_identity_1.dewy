@@ -1,5 +1,6 @@
 # modes: native
 $runtime_checks
+
 Busy:type = type of error
 Account:type = [
     balance:int64
@@ -9,7 +10,8 @@ Account:type = [
         return @balance
     }
 ]
-__close_c = (fd:int32):>int32 => $extern(name='close')
+$extern(name='close')
+__close_c = (fd:int32):>int32
 apply = (f:<(x:int64):>int64> v:int64):>int64 => f(v)
 span = ([first ...middle last]:array<int64 length=4>) => last - first
 pair = ([a:int64 b:int64]:array<int64 length=2>) => a * 10 + b

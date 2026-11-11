@@ -1,6 +1,8 @@
 #
 # `:> @T` writes the place result; generic types, receivers in fields and elements, and
 # arguments, including `@` ones.
+$runtime_checks
+
 let holds:int64 = 0
 Guard = type of [id:int64
     $__drop__
@@ -48,5 +50,3 @@ main = () => {
     o.y = 9
     printl"{ms[1].value} {plot.origin.value} {holds}"
 }
-
-$runtime_checks

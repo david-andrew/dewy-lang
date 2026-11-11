@@ -5,7 +5,9 @@ import subprocess
 
 from tests.support import compiler  # noqa: F401
 
-PROGRAM = '''hammer_send = (q:Mpmc<int64> busy:Atomic<int64> first:int64 n:int64):>void => {
+PROGRAM = '''$runtime_checks
+
+hammer_send = (q:Mpmc<int64> busy:Atomic<int64> first:int64 n:int64):>void => {
     let sent:int64 = 0
     loop sent <? n {
         let r = q.try_send(first + sent)
@@ -39,7 +41,6 @@ main = () => {
     printl"{got.load()} {sum.load()} {busy.load()}"
 }
 
-$runtime_checks
 '''
 
 

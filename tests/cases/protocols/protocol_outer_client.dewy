@@ -1,6 +1,8 @@
 # modes: native native-release
 # A client outside serve's scope (spawned into an outer group) keeps asking while a deadline
 # cancels the service: its request gives Closed, and the program ends.
+$runtime_checks
+
 slow = (n:int64):>int64 => {
     let x:int64 = 0
     loop i in [0..200000) { x += i % 7 }
@@ -23,5 +25,3 @@ main = () => {
     }
     printl"{r is? Timeout}"
 }
-
-$runtime_checks

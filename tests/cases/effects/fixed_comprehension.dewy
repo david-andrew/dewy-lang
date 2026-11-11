@@ -2,6 +2,7 @@
 # A comprehension fills a fixed-size array in place: no allocation, and a
 # range from 0 to the length cannot miss or pass it.
 $no_hidden_costs
+
 const N:int64=4
 const W:int64=8
 Cell:type=[v:int64<overflow='wrap'> w:int64<overflow='wrap'>]
@@ -16,8 +17,8 @@ squares=(k:int64<overflow='wrap'>):>int64<overflow='wrap'> & no_effects=>{
     loop i in [0..8) { s+=xs[i] }
     return s
 }
+$no_hidden_costs=false
 main=():>void=>{
-    $no_hidden_costs=false
     let c=cells(3)
     printl("{scaled(2 [1 2 3 4])} {c[3].w} {squares(2)}")
 }

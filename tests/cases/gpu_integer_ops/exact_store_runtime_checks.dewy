@@ -1,6 +1,7 @@
 # Under `$runtime_checks` a GPU function's stores are still proved, from its guards: a
 # shader cannot run the check, so an unproven one is an error (exact_store_unproven_bad).
 $runtime_checks
+
 Shift:type=[src:GpuBuffer<int32> dst:GpuBuffer<int32>]
 back=(id:int64 u:Shift):>void=>{
     if id <? 0 or id >=? u.dst.length or id >=? u.src.length { return }

@@ -17,8 +17,8 @@ main = (argv:array<string>) => {
 `run` sees the cap of whichever function was called. After that call returns, the cap is gone. A task started inside the call keeps the cap it was started with. A setting whose value is not a literal is the same mechanism, written where the value exists:
 
 ```dewy
+$program.max_cores = cores
 play = (cores:int) => {
-    $program.max_cores = cores
     run()
 }
 ```

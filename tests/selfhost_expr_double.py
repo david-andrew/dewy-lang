@@ -6,7 +6,8 @@ differential (test_selfhost_checker_expr.py).
 """
 from tests.test_selfhost_checker_resolve import compare
 
-DEWY = r'''$runtime_checks
+DEWY = '''$runtime_checks
+
 CheckExprDouble:type=[
     check:((node:int64 expected:int64):>int64)
 ]
@@ -78,7 +79,7 @@ def _isolate_services(modules, stem, signatures):
         jo.append(f'{name} = {match[1]}: {service}({args.replace(" ", ", ")})\n')
     if dewy:
         modules['check.jo'] = text
-        modules[stem + '.dewy'] = '$runtime_checks\n' + ''.join(dewy)
+        modules[stem + '.dewy'] = '$runtime_checks\n\n' + ''.join(dewy)
         modules[stem + '.jo'] = ''.join(jo)
 
 

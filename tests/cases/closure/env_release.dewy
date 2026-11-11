@@ -3,6 +3,8 @@
 # One function type holds plain functions (no environment: nothing to release or copy),
 # closures and partial applications (an environment each). Copies, containers, pinned calls
 # and replacements release exactly the environments, and keep each alive while it is held.
+$runtime_checks
+
 Op:type=(value:int64:>int64)
 Holder:type=[op:Op rows:array<Op>]
 double=(value:int64):>int64=>value*2
@@ -44,5 +46,3 @@ let again=@keep
 if keep(1) not=?7 or keep(1) not=?8 or again(1) not=?7 return 3
 return if alloc_count()>?before 42 else 4}
 main=()=>exit(run())
-
-$runtime_checks

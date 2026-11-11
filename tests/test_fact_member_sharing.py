@@ -60,6 +60,7 @@ printl(make())
 ''', False),
     'one_copy_checked': ('''
 $runtime_checks
+
 make=()=>{
     let table:dict<string uint8>=[]
     loop s in members('aa'|'b'|'cc') {

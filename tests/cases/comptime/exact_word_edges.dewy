@@ -1,6 +1,7 @@
 # quick
 # Exact arithmetic at compile time gives what it gives at run time, at the edges of a word.
 $runtime_checks
+
 compute = (a:int b:int):>array<int> => {
     let out:array<int> = [a+b a-b a*b]
     if b not=? 0 { out = [out... a//b a%b] }

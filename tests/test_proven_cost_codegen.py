@@ -10,6 +10,7 @@ from tests.support import compiler  # noqa: F401
 def test_integer_complement_and_float_comparisons(compiler, tmp_path, release):
     source = tmp_path / 'complements.dewy'
     source.write_text('''$runtime_checks
+
 predicate=(x:int64 f:int64):>bool=>(x and f) not=? 0
 less=(x:int64 y:int64):>bool=>not (x <? y)
 ule=(x:uint64 y:uint64):>bool=>not (x <=? y)

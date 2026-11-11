@@ -1,5 +1,7 @@
 # Tier 3 / 77_owner_cleanup / milestone 24
 # Acceptance: Move last-use owners and release actual resources exactly once on return, break and continue; do not assert elidable copy-hook counts.
+$runtime_checks
+
 let released:int64=0
 Ticket=type of [id:int64
     $__drop__
@@ -60,5 +62,3 @@ main=():>void=>{
     $runtime_assert released =? 61
     printl("{total} {released}")
 }
-
-$runtime_checks

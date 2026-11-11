@@ -47,8 +47,9 @@ def test_quantize_matches_exact_fractions(compiler, tmp_path):
         count = rounded(exact / tick, how)
         value = count * tick
         expected.append((value, exact - value))
-    source = """import p"@lib/time/core.dewy" as core
-$runtime_checks
+    source = """$runtime_checks
+
+import p"@lib/time/core.dewy" as core
 show = (q:rational*Time how:core._Rounding tick:rational*Time) => {
     let r = quantize(q rounding=how tick=tick)
     if r isnt? OffGrid {

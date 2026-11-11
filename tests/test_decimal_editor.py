@@ -7,7 +7,9 @@ import pytest
 
 from tests.test_core_editor import Client
 
-PROGRAM = '''let elapsed=0.0
+PROGRAM = '''$runtime_checks
+
+let elapsed=0.0
 tick=(dt:float64):>void=>{elapsed+=dt}
 best_of=(xs:array<float64>)=>{
     let best=0.0
@@ -25,7 +27,6 @@ main=()=>{
     printl(wide)
     printl(exact =? 0.3)
 }
-$runtime_checks
 '''
 
 

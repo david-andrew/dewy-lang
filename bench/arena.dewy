@@ -1,5 +1,7 @@
 # Many short-lived allocations per round, made in an arena and given back at once by
 # its reset: each round builds a table of small rows and keeps one number from it.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock, mix
 
 const ROWS:int64=1000
@@ -42,5 +44,3 @@ main = (args:array<string>):>void => {
     let finished=clock
     printl"{result} {finished-started}"
 }
-
-$runtime_checks

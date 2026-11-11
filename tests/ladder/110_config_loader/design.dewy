@@ -1,5 +1,7 @@
 # Tier 5 / 110_config_loader / milestone 44
 # Acceptance: Load a server config from stdin: `??` defaults any failure, `??<NotAnInteger>` defaults only that kind while TooManyDigits passes through to a match, to_int reports why it failed, and user-supplied patterns go through regex(p), which gives Regex | RegexError.
+$runtime_checks
+
 Config:type = [
     port:int
     workers:int
@@ -104,5 +106,3 @@ main = () => {
     printl"second config: port {broken.port}, workers {broken.workers}"
     loop p in broken.problems printl"problem: {p}"
 }
-
-$runtime_checks

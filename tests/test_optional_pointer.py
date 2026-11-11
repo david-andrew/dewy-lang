@@ -63,8 +63,10 @@ def test_optional_pointer_arm64(compiler, tmp_path):
 SQLITE = ctypes.util.find_library('sqlite3')
 
 SQLITE_PROGRAM = """# sqlite3_open fills a `sqlite3 **` out-parameter: a `ptr<ptr<uint8>?>` slot in an array.
-sqlite3_open = (name:string db:ptr<ptr<uint8>?>):>int32 => $extern(lib='%s')
-sqlite3_close = (db:ptr<uint8>):>int32 => $extern(lib='%s')
+$extern(lib='%s')
+sqlite3_open = (name:string db:ptr<ptr<uint8>?>):>int32
+$extern(lib='%s')
+sqlite3_close = (db:ptr<uint8>):>int32
 main = ():>void => $unsafe {
     let slot:array<ptr<uint8>?> = [none]
     printl(slot[0] is? none)

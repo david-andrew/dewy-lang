@@ -2,6 +2,8 @@
 # `d.get(k)` yields `V|none` for a key that may miss, `in?` tests
 # membership, `.length` counts entries, and iteration follows insertion order
 # even after growth.
+$runtime_checks
+
 let main = ():>void => {
     let counts:dict<string int64> = []
     counts['apple'] = 3
@@ -25,5 +27,3 @@ let main = ():>void => {
     loop [k v] in names { total += v }              # 36 + 1 + 2 = 39
     exit(total + order - 42)                       # 39 + 45 - 42 = 42
 }
-
-$runtime_checks

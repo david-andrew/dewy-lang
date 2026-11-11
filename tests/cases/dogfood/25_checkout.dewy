@@ -1,6 +1,8 @@
 # Supermarket checkout simulation: customers arrive at random, join the
 # shortest lane, and are served in order. Compare 2, 3 and 4 open lanes.
 
+$runtime_checks
+
 Customer:type = [id:int64 arrived:float64 items:int64]
 Lane:type = [queue:array<Customer> busy_until:float64 = 0.0 served:int64 = 0 busy_time:float64 = 0.0]
 
@@ -92,5 +94,3 @@ main = () => {
     printl("3 lanes: median wait {fmt'.2f'(percentile(sorted 0.5))}, p90 {fmt'.2f'(percentile(sorted 0.9))}, p99 {fmt'.2f'(percentile(sorted 0.99))}")
     histogram(three.waits 1.0)
 }
-
-$runtime_checks

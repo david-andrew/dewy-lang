@@ -1,4 +1,6 @@
 # Text scanning and parsing: split generated text into words and numbers.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock, mix
 
 # `count` tokens: words of lowercase letters and decimal numbers, separated
@@ -64,5 +66,3 @@ main = (args:array<string>):>void => {
     let finished=clock
     printl"{result} {finished-started}"
 }
-
-$runtime_checks

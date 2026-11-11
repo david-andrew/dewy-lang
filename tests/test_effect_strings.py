@@ -19,6 +19,7 @@ MAIN = 'main = ():>(void | OutOfMemory) & no panics => {\n'
 # Closed `& allocates` rows over text, and reading text under the strict lane's
 # `no allocates & no panics`, in a `$bulletproof` module.
 ACCEPT = '''$bulletproof
+
 Bad:type = type of error & [message:string]
 parse = (text:string):>(int32 | Bad) & allocates => {
     let n = to_int(text.trim() max_digits=6)
@@ -83,7 +84,7 @@ REJECT = {
 @pytest.mark.parametrize('name', REJECT)
 def test_string_rows_reject(compiler, tmp_path, name):
     body, message = REJECT[name]
-    result = run(compiler, tmp_path, '$runtime_checks\n' + body + 'main = () => printl(1)\n', 'check')
+    result = run(compiler, tmp_path, '$runtime_checks\n\n' + body + 'main = () => printl(1)\n', 'check')
     assert result.returncode != 0 and "effect contract violation in 'f'" in result.stderr, result.stdout + result.stderr
     assert message in result.stderr, result.stderr
 

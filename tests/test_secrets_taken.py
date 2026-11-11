@@ -14,7 +14,9 @@ from tests.support import compiler
 from tools.compiler import speed
 from tools.filelock import lock_exclusive
 
-COMPARE = r'''
+COMPARE = '''
+$runtime_checks
+
 main = (args:array<string>) => {
     let kind = args[1]
     let at = args[2]
@@ -45,7 +47,6 @@ main = (args:array<string>) => {
     }
     printl(hits)
 }
-$runtime_checks
 '''
 
 
@@ -82,7 +83,9 @@ def test_secret_equality_runs_the_same_instructions_wherever_the_bytes_differ(co
     assert secret < 1_000, counts
 
 
-WRITE = r'''
+WRITE = '''
+$runtime_checks
+
 main = (args:array<string>) => {
     let dir = args[1]
     let pass:secret<string> = "hunter2"
@@ -96,7 +99,6 @@ main = (args:array<string>) => {
     printl(p"{dir}/owner.txt".write_text(pass) ?? -1)
     printl(p"{dir}/new.txt".read_text ?? "")
 }
-$runtime_checks
 '''
 
 

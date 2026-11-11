@@ -1,4 +1,6 @@
 # `|>` supplies a value to the callable on its right, `<|` to the one on its left
+$runtime_checks
+
 square = (x:int64):>int64 => x * x
 inc = (x:int64):>int64 => x + 1
 printl(3 |> @square)
@@ -10,5 +12,3 @@ printl(5 |> (x:int64) => x * 10)      # a function literal pipes as written
 f = @inc
 printl(4 |> f)
 printl([1 2 3] |> @sum)
-
-$runtime_checks

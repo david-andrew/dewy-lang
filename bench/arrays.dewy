@@ -1,4 +1,6 @@
 # Flat integer-array loops: fill, prefix sums, a sieve, an in-place reverse.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock, mix
 
 fill = (count:int64):>array<int64> => {
@@ -71,5 +73,3 @@ main = (args:array<string>):>void => {
     let finished=clock
     printl"{result} {finished-started}"
 }
-
-$runtime_checks

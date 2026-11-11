@@ -1,5 +1,7 @@
 # x is? C failing on an optional union (A | B | C)? leaves an (A | B)?: an early exit
 # narrows the rest of the block, through further tests, closures and reassignment
+$runtime_checks
+
 Stop:type = type of error & [why:string]
 Halt:type = type of error & []
 f = (k:int64):>(int64 | none | Stop | Halt) => if k =? 0 none else if k =? 1 Stop["stopped"] else if k =? 2 Halt else k
@@ -23,5 +25,3 @@ main = () => {
         if r is? none printl"none" else printl(r + 1)
     }
 }
-
-$runtime_checks

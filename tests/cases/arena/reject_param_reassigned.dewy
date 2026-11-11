@@ -1,4 +1,6 @@
 # A reassigned parameter no longer holds the function the caller passed in.
+$runtime_checks
+
 other=(x:int64):>int64=>x
 apply=(f:(x:int64:>int64) x:int64):>int64=>{
     f = @other
@@ -12,5 +14,3 @@ main=()=>{
     }
     printl("{n}")
 }
-
-$runtime_checks

@@ -1,4 +1,5 @@
 $runtime_checks
+
 let xs:array<int64>=[1 2]
 f=():>int64=>{loop i in [0..100) {xs.push(i)}; xs[1]=42; return 1}
 main=():>void=>$unsafe {xs.ptr[0]=xs.ptr[f()]; printl(xs[0]); printl(xs[1])}

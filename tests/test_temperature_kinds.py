@@ -9,13 +9,14 @@ import pytest
 from tests.support import compiler  # noqa: F401
 from tests.test_core_editor import Client
 
-SOURCE = '''from units import K, °C, °F
+SOURCE = '''$runtime_checks
+
+from units import K, °C, °F
 reading=(c:int)=>c*°C
 let t=reading(25)
 let rise=20°C
 printl"{t + rise} {rise as °F}"
 printl"{rise <? t}"
-$runtime_checks
 '''
 
 

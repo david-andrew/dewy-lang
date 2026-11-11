@@ -5,13 +5,13 @@ import pytest
 
 from tests.support import compiler
 
-RUNTIME_CHECKS = '\n$runtime_checks\n'
+RUNTIME_CHECKS = '$runtime_checks\n\n'
 
 
 @pytest.mark.parametrize('release', [False, True])
 def test_policy_conversions(compiler, tmp_path, release):
     source = tmp_path / 'policy.dewy'
-    source.write_text('''
+    source.write_text((RUNTIME_CHECKS) + ('''
 W:type=uint8<overflow='wrap'>
 S:type=int8<overflow='saturate'>
 main=(args:array<string>)=>{
@@ -21,7 +21,7 @@ main=(args:array<string>)=>{
     let unsigned:uint64=uint64.max
     printl"{W(word)} {S(word)} {int64<overflow='saturate'>(unsigned)}"
 }
-''' + RUNTIME_CHECKS)
+'''))
     binary = tmp_path / 'policy'
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []), text=True, capture_output=True)
@@ -53,12 +53,12 @@ def test_policy_rejections(compiler, tmp_path, source, diagnostic):
 @pytest.mark.parametrize('release', [False, True])
 def test_mathematical_power_with_word_exponent(compiler, tmp_path, release):
     source = tmp_path / 'power.dewy'
-    source.write_text("""main=(args:array<string>)=>{
+    source.write_text((RUNTIME_CHECKS) + ("""main=(args:array<string>)=>{
     let b:int=to_int(args[1]) ?? 0
     let e:int64=int64(to_int(args[2]) ?? 0)
     printl(b^e)
 }
-""" + RUNTIME_CHECKS)
+"""))
     binary = tmp_path / 'power'
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []), text=True, capture_output=True)
@@ -103,12 +103,12 @@ def test_saturating_arithmetic(compiler, tmp_path, target, release):
     printl"{{a+b}} {{a-b}} {{a*b}} {{-a}} {{sum}} {{difference}} {{product}}"
 }}''')
     source = tmp_path / 'saturate.dewy'
-    source.write_text('\n'.join(functions) + '''
+    source.write_text((RUNTIME_CHECKS) + ('\n'.join(functions) + '''
 main=(args:array<string>)=>{
     let x=to_int(args[1]) ?? 0
     let y=to_int(args[2]) ?? 0
 ''' + '\n'.join(f'{name}_ops(x y)' for name in
-                [f'{prefix}{bits}' for prefix in ('uint', 'int') for bits in (8, 16, 32, 64)]) + '\n}\n' + RUNTIME_CHECKS)
+                [f'{prefix}{bits}' for prefix in ('uint', 'int') for bits in (8, 16, 32, 64)]) + '\n}\n'))
     binary = tmp_path / ('saturate.html' if target == 'wasm' else 'saturate')
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []) +
@@ -144,7 +144,7 @@ main=(args:array<string>)=>{
 @pytest.mark.parametrize('release', [False, True])
 def test_policy_floor_power_abs(compiler, tmp_path, release):
     source = tmp_path / 'operators.dewy'
-    source.write_text("""S:type=int8<overflow='saturate'>
+    source.write_text((RUNTIME_CHECKS) + ("""S:type=int8<overflow='saturate'>
 W:type=uint8<overflow='wrap'>
 L:type=int64<overflow='saturate'>
 main=(args:array<string>)=>{
@@ -155,7 +155,7 @@ main=(args:array<string>)=>{
     let minimum:L=L(int64.min)
     printl"{a//b} {a%b} {a^e} {abs(a)} {x^e} {minimum//L(-1)} {abs(minimum)} {a<<e}"
 }
-""" + RUNTIME_CHECKS)
+"""))
     binary = tmp_path / 'operators'
     built = subprocess.run([compiler, 'build', source, '-o', binary] +
                            (['--release'] if release else []), text=True, capture_output=True)

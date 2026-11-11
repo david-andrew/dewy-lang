@@ -17,7 +17,7 @@ def run(compiler, tmp_path, source, toolchain=None, name='main.dewy'):
 
 
 def test_version_reads_back(compiler, tmp_path):
-    ran = run(compiler, tmp_path, "$dewy.version = '0.1.0'\nprintl($dewy.version)\n")
+    ran = run(compiler, tmp_path, "$dewy.version = '0.1.0'\n\nprintl($dewy.version)\n")
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == '0.1.0\n'
     assert 'warning' not in ran.stderr
@@ -35,26 +35,26 @@ def test_tagged_toolchain_warns_with_the_fix(compiler, tmp_path):
 
 
 def test_tagged_toolchain_refuses_a_newer_version(compiler, tmp_path):
-    ran = run(compiler, tmp_path, "$dewy.version = '0.3.0'\nprintl\"hi\"\n", toolchain='0.2.0')
+    ran = run(compiler, tmp_path, "$dewy.version = '0.3.0'\n\nprintl\"hi\"\n", toolchain='0.2.0')
     assert ran.returncode != 0
     assert "newer than this toolchain (0.2.0)" in ran.stderr
 
 
 def test_tagged_toolchain_takes_its_own_and_older(compiler, tmp_path):
     for version in ('0.2.0', '0.1.9'):
-        ran = run(compiler, tmp_path, f"$dewy.version = '{version}'\nprintl\"hi\"\n", toolchain='0.2.0')
+        ran = run(compiler, tmp_path, f'$dewy.version = \'{version}\'\n\nprintl"hi"\n', toolchain='0.2.0')
         assert ran.returncode == 0 and 'warning' not in ran.stderr, ran.stderr
 
 
 def test_malformed_version(compiler, tmp_path):
     for version in ('0.1', '0.1.x', '1.2.3.4', ''):
-        ran = run(compiler, tmp_path, f"$dewy.version = '{version}'\n")
+        ran = run(compiler, tmp_path, f"$dewy.version = '{version}'\n\n")
         assert ran.returncode != 0
         assert 'three numbers in quotes' in ran.stderr
 
 
 def test_version_is_a_module_setting(compiler, tmp_path):
-    ran = run(compiler, tmp_path, "main = () => {\n    $dewy.version = '0.1.0'\n    printl\"hi\"\n}\n")
+    ran = run(compiler, tmp_path, '$dewy.version = \'0.1.0\'\nmain = () => {\n    printl"hi"\n}\n')
     assert ran.returncode != 0
     assert 'top of the module' in ran.stderr
     ran = run(compiler, tmp_path, "$dewy.version = '0.1.0'\n$dewy.version = '0.1.0'\n")
@@ -70,7 +70,7 @@ def test_edition_is_gone(compiler, tmp_path):
 
 def test_not_inherited_by_modules(compiler, tmp_path):
     (tmp_path / 'other.dewy').write_text('printl"other"\n')
-    ran = run(compiler, tmp_path, "$dewy.version = '0.2.0'\nimport p\"other.dewy\"\n", toolchain='0.2.0')
+    ran = run(compiler, tmp_path, "$dewy.version = '0.2.0'\n\nimport p\"other.dewy\"\n", toolchain='0.2.0')
     assert ran.returncode == 0, ran.stderr
     assert 'other.dewy:1:1: warning' in ran.stderr
     assert 'main.dewy:1:1: warning' not in ran.stderr
@@ -86,7 +86,7 @@ READ = """f = (zone:string|none=$time.zone) => {
 
 
 def test_default_reads_the_callers_setting(compiler, tmp_path):
-    source = READ.replace("$time.zone", "$time.gap") + "g = () => {\n    $time.gap = 'next'\n    f\n}\nf\ng\nf(\"mine\")\n"
+    source = READ.replace("$time.zone", "$time.gap") + '$time.gap = \'next\'\ng = () => {\n    f\n}\nf\ng\nf("mine")\n'
     ran = run(compiler, tmp_path, source)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == 'no zone\nzone next\nzone mine\n'
@@ -94,7 +94,7 @@ def test_default_reads_the_callers_setting(compiler, tmp_path):
 
 def test_module_setting_reaches_a_library_default(compiler, tmp_path):
     (tmp_path / 'lib.dewy').write_text(READ)
-    source = "$time.zone = 'Asia/Tokyo'\nimport p\"lib.dewy\" as lib\nlib.f\n"
+    source = "$time.zone = 'Asia/Tokyo'\n\nimport p\"lib.dewy\" as lib\nlib.f\n"
     ran = run(compiler, tmp_path, source)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == 'zone Asia/Tokyo\n'

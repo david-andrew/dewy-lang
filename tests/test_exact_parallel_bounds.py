@@ -9,6 +9,7 @@ def test_parallel_literal_parameter_bounds(compiler, tmp_path, release):
     source = tmp_path / 'bounds.dewy'
     source.write_text('''$runtime_checks=false
 $no_assumed_bounds
+
 main=()=>{
 printl([parallel i in [0..5) i*i])
 printl([parallel i in [-3..3] i*i])

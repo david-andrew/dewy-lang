@@ -1,9 +1,9 @@
 # Removed entries' positions are skipped by the check.
 Trie:type = [terminal:array<bool> edges:dict<string int64<(<? terminal.length)>>]
+$runtime_checks
 main = ():>void => {
     let t:Trie = [terminal=[false false] edges=["a"->0 "b"->1]]
     t.edges.remove("b");
-    $runtime_checks
     t.terminal.pop();
     printl(t.edges)
 }

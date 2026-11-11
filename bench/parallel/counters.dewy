@@ -1,3 +1,5 @@
+$runtime_checks
+
 from p"../harness.jo" import clock, size_argument
 from p"counters.jo" import __counter_cells
 main=(args:array<string>)=>{
@@ -12,5 +14,3 @@ main=(args:array<string>)=>{
  loop cell in counters {checksum+=cell.load}
  printl"{checksum} {clock()-start}"
 }
-
-$runtime_checks

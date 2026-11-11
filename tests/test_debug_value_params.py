@@ -9,6 +9,7 @@ import pytest
 from tests.support import compiler  # noqa: F401 (the fixture)
 
 SOURCE = '''$runtime_checks
+
 probe=(n:int64 @acc:int64 k:int64):>int64=>{
 k = k + 1
 acc = acc + n

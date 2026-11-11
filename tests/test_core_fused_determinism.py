@@ -85,7 +85,7 @@ main=():>void=>{
 
 def test_fused_callback_versions(compiler, tmp_path):
     source = tmp_path / 'versions.dewy'
-    source.write_text((CALLBACK_VERSIONS) + "\n$runtime_checks\n")
+    source.write_text(('$runtime_checks\n\n') + (CALLBACK_VERSIONS))
     check(compiler, source, tmp_path, DEWY_EMIT_FORCE='1')
     ir = subprocess.run([compiler, 'build', source, '--ir', '-o', tmp_path / 'ir'], capture_output=True, text=True)
     assert '_callback_' in ir.stdout, 'no callback versions: the case does not exercise them'

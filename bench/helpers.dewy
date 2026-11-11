@@ -1,4 +1,6 @@
 # Helper-heavy scalar loops: small functions called from a hot loop.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock, mix
 
 gcd = (a:int64 b:int64):>int64 => {
@@ -41,5 +43,3 @@ main = (args:array<string>):>void => {
     let finished=clock
     printl"{result} {finished-started}"
 }
-
-$runtime_checks

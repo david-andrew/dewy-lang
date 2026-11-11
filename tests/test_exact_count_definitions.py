@@ -8,7 +8,7 @@ from tests.support import compiler
 @pytest.mark.parametrize('release', [False, True])
 def test_masked_and_refined_counts(compiler, tmp_path, release):
     source = tmp_path / 'counts.dewy'
-    source.write_text(('''
+    source.write_text(('$runtime_checks\n\n') + ('''
 masked=(x:int64 by:int64):>int64=>{
     let count:uint64=uint64<overflow='wrap'>(by%32)
     return (x<<count)>>count
@@ -24,7 +24,7 @@ main=(args:array<string>)=>{
     let by=int64(to_int(args[2]) ?? 0)
     printl(masked(x by) refined(x by%63) changed(x))
 }
-''') + "\n$runtime_checks\n")
+'''))
     binary = tmp_path / 'counts'
     built = subprocess.run([compiler, 'build', source, '-o', binary,
                             *(['--release'] if release else [])], capture_output=True, text=True)
@@ -39,6 +39,7 @@ def test_constant_power_survives_unrelated_proof_slice(compiler, tmp_path):
     source = tmp_path / 'power.dewy'
     source.write_text('''$runtime_checks
 $no_assumed_bounds
+
 pick=(value:int64 unused:uint64):>int64=>value
 printl(pick(int64(11)^int64(3) uint64(int64.max)))
 ''')

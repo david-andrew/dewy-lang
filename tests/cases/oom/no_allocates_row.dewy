@@ -1,4 +1,6 @@
 # A row that rules allocation out keeps the function's result: no | OutOfMemory to handle.
+$runtime_checks
+
 $explicit_allocation_failure
 const capacity = 4
 Log:type = [values:array<int32 length=4> count:int64<c => 0 <=? c and c <=? capacity>]
@@ -17,5 +19,3 @@ main = ():>void | OutOfMemory => {
     }
     printl"{log.count}"
 }
-
-$runtime_checks

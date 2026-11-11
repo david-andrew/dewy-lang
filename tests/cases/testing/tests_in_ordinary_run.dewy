@@ -1,5 +1,7 @@
 # `$test` functions are ordinary functions: an ordinary run keeps main and
 # reports nothing about them.
+$runtime_checks
+
 let CASES:array<int64> = [1 2]
 square = (x:int64) => x * x
 $test
@@ -12,5 +14,3 @@ run_case = () => {
     return 0
 }
 main=()=>exit(run_case())
-
-$runtime_checks

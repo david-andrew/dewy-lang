@@ -1,4 +1,5 @@
 $runtime_checks
+
 from p"@lib/core/os.jo" import (env)
 from p"@lib/core/rt.jo" import (__str_slice)
 from p"@lib/core/str.jo" import (find is_digit split starts_with to_int)
@@ -272,7 +273,7 @@ dir_set=(name:DirWord value:DirWord start:DirWord end_:DirWord at:DirWord):>void
     }
     if dir_builtin(text) {
         # (an audit covers the adapter it is written in, never a whole module)
-        if text =? "audited_wait" and start =? dir_module_start(pos_file(start)) {fatal(at "`$audited_wait` marks one audited adapter: write it in the body of the function that wraps the foreign call, not for a whole module")}
+        if text =? "audited_wait" and start =? dir_module_start(pos_file(start)) {fatal(at "`$audited_wait` marks one audited adapter: write it immediately before the function that wraps the foreign call, not for a whole module")}
         dir_push(DirScope(start end_ name value 0 at))
         return
     }
@@ -434,9 +435,9 @@ dir_panic_fix=(p:DirWord operation:bool=false):>string=>{
     let i=dir_find(dir_name_runtime p)
     if i >=? 0 and dir_scopes[i].bundle not=? 0 {
         let b=name_of(dir_scopes[i].bundle)
-        return "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt this function out of `${b}` with `${b}=false` and add `$runtime_checks`"
+        return "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or prefix this function with `${b}=false` and `$runtime_checks`"
     }
-    "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt in to the check with `$runtime_checks` on a line of its own in this function or block"
+    "prove what it checks before the {where} (a guard, a refined parameter, or a form that returns the failure as a value), or opt in by writing `$runtime_checks` immediately before the statement, block or function"
 }
 # A `$runtime_assert` at p is its module's own handling, not `panics` for the
 # module's callers, unless the scope says `$assume_local_asserts=false`
@@ -478,5 +479,5 @@ dir_row_origin=(d:DirWord):>string=>{
     let i=dir_row_scopes.get(d) ?? -1
     if i <? 0 {return ""}
     let b=name_of(dir_scopes[i].bundle)
-    "; `${b}` gives functions without a row of their own this one (opt a function out with `${b}=false` in its body)"
+    "; `${b}` gives functions without a row of their own this one (opt a function out by prefixing it with `${b}=false`)"
 }

@@ -1,4 +1,5 @@
-invoke=(f:(x:int32:>int32) x:int32):>int32=>$extern(lib='archtest')
+$extern(lib='archtest')
+invoke=(f:(x:int32:>int32) x:int32):>int32
 $export
 id=(x:int32):>int32=>x
 main=()=>$unsafe printl(invoke(@id 42))

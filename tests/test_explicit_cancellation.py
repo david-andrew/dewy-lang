@@ -11,6 +11,7 @@ from tests.support import compiler  # noqa: F401
 from tests.test_core_editor import Client
 
 SOURCE = '''$bulletproof
+
 outcome = (kind:int64):>(int64 | Missing | Canceled) & no panics => {
     if kind =? 0 return Canceled
     if kind =? 1 return Missing
@@ -32,7 +33,7 @@ def check(compiler, tmp_path, body):
 def test_bulletproof_holds_it(compiler, tmp_path):
     result = check(compiler, tmp_path, 'outcome(kind) ?? 0')
     assert result.returncode != 0
-    assert ('main.dewy:7:58: error: `outcome(kind)` may be `Canceled`, which this `??` would pass on unwritten '
+    assert ('main.dewy:8:58: error: `outcome(kind)` may be `Canceled`, which this `??` would pass on unwritten '
             'under `$explicit_cancellation`: write `outcome(kind) or_throw<Canceled>` to forward it') in result.stderr, result.stderr
 
 
@@ -52,8 +53,7 @@ def test_quickfix_writes_the_forwarding(tmp_path):
         pytest.skip('set DEWY_CORE_COMPILER for the editor checks')
     source = tmp_path / 'main.dewy'
     source.write_text('main=():>void=>exit(0)')
-    text = ('$explicit_cancellation\noutcome=(k:int64):>int64|Missing|Canceled=>if k =? 0 Canceled else 9\n'
-            'plain=(k:int64)=>outcome(k) ?? 0\nmain=()=>{printl(plain(1))}\n')
+    text = ('$explicit_cancellation\n\noutcome=(k:int64):>int64|Missing|Canceled=>if k =? 0 Canceled else 9\nplain=(k:int64)=>outcome(k) ?? 0\nmain=()=>{printl(plain(1))}\n')
     client = Client(Path(value).resolve(strict=True), tmp_path)
     try:
         diagnostics = client.set_text(source.as_uri(), text, 1)

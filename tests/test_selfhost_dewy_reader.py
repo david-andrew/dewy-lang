@@ -12,10 +12,7 @@ def test_recursive_reader_ships_dewy(compiler, tmp_path):
     assert b'/compiler/dewy_reader.dewy\0' in binary
     assert b'/compiler/dewy_reader_seed.jo\0' not in binary
     source = tmp_path / 'nested.dewy'
-    source.write_text('$runtime_checks\n'
-                      'take=(xs:array<array<int64>>):>int64=>xs[0][0]\n'
-                      'let text="{if true {\"{take([[7]])}\"} else \"bad\"}"\n'
-                      'printl(text)\nprintl(take([[9]]))\n')
+    source.write_text('$runtime_checks\n\ntake=(xs:array<array<int64>>):>int64=>xs[0][0]\nlet text="{if true {"{take([[7]])}"} else "bad"}"\nprintl(text)\nprintl(take([[9]]))\n')
     program = tmp_path / 'nested'
     run = subprocess.run([compiler, 'build', source, '-o', program],
                          capture_output=True, timeout=120)

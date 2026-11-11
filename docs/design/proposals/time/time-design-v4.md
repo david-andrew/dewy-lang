@@ -1149,12 +1149,13 @@ let proper = time.proper_elapsed(mission.rover first_event last_event
 
 ```dewy
 $time.require_context
+$time.strict
+
 wait_for = (delay:Duration<(>=? 0s)> context) =>
     time.with_context(context () => sleep(delay))
 
-$time.strict
+$time.require_loss=false
 report = (reading context) => {
-    $time.require_loss=false
     printl(reading.display(profile='nominal' context=context) or_throw)
 }
 ```

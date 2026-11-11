@@ -1,6 +1,8 @@
 # Current-dialect algorithm projection; does not establish removed design contracts.
 # Tier 3 / 71_checked_proofs / milestone 22
 # Acceptance: Check and erase proof calls; retain transitive result facts at callers.
+$runtime_checks
+
 width = (start:int64 stop:int64):>int64 => {
     $runtime_assert start <=? stop
     $runtime_assert stop >=? 0
@@ -41,5 +43,3 @@ main = ():>void => {
     $runtime_assert chain(25) =? 2
     printl("{total}")
 }
-
-$runtime_checks

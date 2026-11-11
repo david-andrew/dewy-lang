@@ -1,4 +1,6 @@
 # exit: 42
+$runtime_checks
+
 run=()=>{
 let values=set[20 22] let trace:int64=0 let total:int64=0
 loop i in 0.. and value in {trace+=1; values} {
@@ -9,5 +11,3 @@ let zipped=[loop a in set[20 22] and b in [1 2] a+b]
 if zipped not=? [21 24] return 2
 return total}
 main=()=>exit(run())
-
-$runtime_checks

@@ -1,5 +1,7 @@
 # Count repeated generated words and sparse integer IDs, then scan keys/items.
 # Input strings are prepared outside the timed region; dictionary work is timed.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock, mix
 
 const VOCAB:int64=65536
@@ -37,5 +39,3 @@ main = (args:array<string>):>void => {
     let finished=clock
     printl"{result} {finished-started}"
 }
-
-$runtime_checks

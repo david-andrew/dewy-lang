@@ -1,5 +1,6 @@
 #
 $no_hidden_costs
+
 Wide:type=[f0:int64<overflow='wrap'> f1:int64<overflow='wrap'> f2:int64<overflow='wrap'> f3:int64<overflow='wrap'> f4:int64<overflow='wrap'> f5:int64<overflow='wrap'> f6:int64<overflow='wrap'> f7:int64<overflow='wrap'> f8:int64<overflow='wrap'> f9:int64<overflow='wrap'> f10:int64<overflow='wrap'> f11:int64<overflow='wrap'> f12:int64<overflow='wrap'> f13:int64<overflow='wrap'> f14:int64<overflow='wrap'> f15:int64<overflow='wrap'> f16:int64<overflow='wrap'> f17:int64<overflow='wrap'> f18:int64<overflow='wrap'> f19:int64<overflow='wrap'>]
 touch_all=(@w:Wide):>void & no allocates & no blocks=>{
     w.f0+=w.f19
@@ -23,8 +24,8 @@ touch_all=(@w:Wide):>void & no allocates & no blocks=>{
     w.f18+=1
     w.f19+=1
 }
+$no_hidden_costs=false
 main=():>void=>{
-    $no_hidden_costs=false
     let w:Wide=[f0=0 f1=0 f2=0 f3=0 f4=0 f5=0 f6=0 f7=0 f8=0 f9=0 f10=1 f11=1 f12=1 f13=1 f14=1 f15=1 f16=1 f17=1 f18=1 f19=1]
     touch_all(@w)
     printl("{w.f0} {w.f19}")

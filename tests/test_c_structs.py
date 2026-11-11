@@ -62,8 +62,7 @@ def test_c_structs_arm64(compiler, tmp_path):
 
 def test_c_structs_refused_on_windows(compiler, tmp_path):
     source = tmp_path / 'pair.dewy'
-    source.write_text("Pair:type = [a:int32 b:int32]\ntotal = (p:Pair):>int32 => $extern(lib='kernel32')\n"
-                      "main = ():>void => $unsafe printl(total(Pair[1 2]))\n")
+    source.write_text("Pair:type = [a:int32 b:int32]\n$extern(lib='kernel32')\ntotal = (p:Pair):>int32\nmain = ():>void => $unsafe printl(total(Pair[1 2]))\n")
     built = subprocess.run([compiler, 'build', source, '--target', 'x86_64-windows', '-o', tmp_path / 'pair.exe'],
                            capture_output=True, text=True, timeout=60)
     assert built.returncode != 0

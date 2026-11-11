@@ -1,5 +1,7 @@
 # Tier 5 / 104_exact_kitchen / milestone 39
 # Acceptance: Recipe scaling, bill splitting and savings in exact rationals that print the way they were written (fractions, decimals, repeating decimals), with loop-carried products annotated so they draw no growth warning.
+$runtime_checks
+
 from units import kg, g, N
 
 Ingredient:type = [name:string amount:rational unit:string]
@@ -99,5 +101,3 @@ main = () => {
     let portions = sack/(125g)
     printl"  {portions} portions, weighing {sack*gravity/N} N"
 }
-
-$runtime_checks

@@ -1,5 +1,7 @@
 # exit: 42
 # quick
+$runtime_checks
+
 byte=(v:int64):>int64=>match v {<-2>=>255 <0>=>2 <3>=>7 _=>5}
 short=(v:int64):>int64=>match v {<-2>=>65535 <0>=>2 <3>=>7 _=>5}
 word=(v:int64):>int64=>match v {<-2>=>4294967295 <0>=>2 <3>=>7 _=>5}
@@ -20,5 +22,3 @@ run=()=>{
     return 42
 }
 main=()=>exit(run())
-
-$runtime_checks

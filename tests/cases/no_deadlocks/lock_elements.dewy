@@ -1,6 +1,7 @@
 # modes: native
 # `$no_deadlocks`: what stage 1 cannot decide (two elements of one array, nested) is an error.
 $no_deadlocks
+
 touch = (m:Mutex<int64>):>void => {
     let v = @(m.lock())
     v += 1

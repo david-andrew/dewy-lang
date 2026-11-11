@@ -13,6 +13,8 @@ from tools.cores import on_cores
 def test_length_and_ordered_results(compiler, tmp_path, target, count):
     source = tmp_path / 'lengths.dewy'
     source.write_text('''
+$runtime_checks
+
 work=(n:int64):>int64=>{
  if n <? 1 return 1
  let parts=[parallel i in [3..END) work(n-1)+i]
@@ -20,7 +22,6 @@ work=(n:int64):>int64=>{
  return parts[0]-parts[1]+parts[LAST]+parts.length
 }
 main=()=>{printl"{work(5)}"}
-$runtime_checks
 '''.replace('END', str(3+count)).replace('COUNT', str(count)).replace('LAST', str(count-1)))
     binary = tmp_path / 'lengths'
     built = subprocess.run([compiler, 'build', source, '--release', '--target', target_name(target),
@@ -47,12 +48,13 @@ $runtime_checks
 def test_length_assertion_diagnostic(compiler, tmp_path):
     source = tmp_path / 'failure.dewy'
     source.write_text('''
+$runtime_checks
+
 main=()=>{
  let parts=[parallel i in [0..2) i+10]
  $runtime_assert parts.length =? 3
  printl"{parts[0]} {parts[1]}"
 }
-$runtime_checks
 ''')
     binary = tmp_path / 'failure'
     built = subprocess.run([compiler, 'build', source, '--release', '-o', binary],
@@ -68,6 +70,8 @@ $runtime_checks
 def test_length_only_still_evaluates_children(compiler, tmp_path):
     source = tmp_path / 'length_only.dewy'
     source.write_text('''
+$runtime_checks
+
 work=(i:int64):>int64=>{
  if i =? 1 panic("length-only child ran")
  return i
@@ -76,7 +80,6 @@ main=()=>{
  let parts=[parallel i in [0..2) work(i)]
  printl"{parts.length}"
 }
-$runtime_checks
 ''')
     binary = tmp_path / 'length_only'
     built = subprocess.run([compiler, 'build', source, '--release', '-o', binary],

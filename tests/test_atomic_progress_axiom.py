@@ -17,7 +17,7 @@ def test_atomic_literal_progress(compiler, tmp_path, step):
     source = f'let counter=atomic(0)\nprintl(counter.add({step}))'
     result = check(compiler, tmp_path, source)
     assert result.returncode == 0, result.stderr
-    strict = check(compiler, tmp_path, '$no_assumed_bounds\n' + source)
+    strict = check(compiler, tmp_path, '$no_assumed_bounds\n\n' + source)
     assert strict.returncode != 0 and 'add' in strict.stderr and 'may panic' in strict.stderr, strict.stderr
 
 
@@ -25,9 +25,9 @@ def test_atomic_parameter_progress_and_nested_optout(compiler, tmp_path):
     source = 'f=(counter:Atomic<int64> step:int64)=>counter.add(step)\nprintl(f(atomic(0) 3))'
     result = check(compiler, tmp_path, source)
     assert result.returncode == 0, result.stderr
-    strict = check(compiler, tmp_path, '$no_assumed_bounds\n' + source)
+    strict = check(compiler, tmp_path, '$no_assumed_bounds\n\n' + source)
     assert strict.returncode != 0 and 'may panic' in strict.stderr, strict.stderr
-    restored = check(compiler, tmp_path, '$no_assumed_bounds\nf=(counter:Atomic<int64>)=>{\n$no_assumed_bounds=false\ncounter.add(1)\n}\nprintl(f(atomic(0)))')
+    restored = check(compiler, tmp_path, '$no_assumed_bounds\n\n$no_assumed_bounds=false\nf=(counter:Atomic<int64>)=>{\ncounter.add(1)\n}\nprintl(f(atomic(0)))')
     assert restored.returncode == 0, restored.stderr
 
 
@@ -35,7 +35,7 @@ def test_atomic_parameter_progress_and_nested_optout(compiler, tmp_path):
     'let counter=atomic(1)\nprintl(counter.add(counter.load()))',
     'let counter=atomic(1)\nlet step=counter.load()\nprintl(counter.add(step))',
     'let counter=atomic<uint64>(0)\nprintl(counter.add(1))',
-    '$assume_local_asserts=false\nadd=(value:int64)=>{panic("user failure");value}\nprintl(add(1))',
+    '$assume_local_asserts=false\n\nadd=(value:int64)=>{panic("user failure");value}\nprintl(add(1))',
 ])
 def test_atomic_axiom_keeps_other_failures(compiler, tmp_path, source):
     result = check(compiler, tmp_path, source)
@@ -54,11 +54,11 @@ def test_atomic_bounded_progress_in_effect_row(compiler, tmp_path, step):
     source = f'f=(counter:Atomic<int64> step:int64):>int64 & no panics=>counter.add({step})\nprintl(f(atomic(0) 3))'
     result = check(compiler, tmp_path, source)
     assert result.returncode == 0, result.stderr
-    strict = check(compiler, tmp_path, '$no_assumed_bounds\n' + source)
+    strict = check(compiler, tmp_path, '$no_assumed_bounds\n\n' + source)
     assert strict.returncode != 0 and 'panic' in strict.stderr, strict.stderr
 
 
 def test_atomic_literal_does_not_hide_another_panic(compiler, tmp_path):
-    source = '$assume_local_asserts=false\nf=(counter:Atomic<int64>):>int64 & no panics=>{counter.add(1);panic("still fails")}\nprintl(f(atomic(0)))'
+    source = '$assume_local_asserts=false\n\nf=(counter:Atomic<int64>):>int64 & no panics=>{counter.add(1);panic("still fails")}\nprintl(f(atomic(0)))'
     result = check(compiler, tmp_path, source)
     assert result.returncode != 0 and 'panic' in result.stderr, result.stderr

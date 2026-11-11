@@ -6,7 +6,9 @@ from tests.support import ROOT, compiler
 from tests.test_secrets_taken import _counter
 from tools.compiler import speed
 
-LOOP = r'''main=(args:array<string>)=>{
+LOOP = '''$runtime_checks
+
+main=(args:array<string>)=>{
     let n=0
     if args[1] =? "inside" {
         loop i in [0..20000) {
@@ -22,7 +24,6 @@ LOOP = r'''main=(args:array<string>)=>{
     }
     printl(n)
 }
-$runtime_checks
 '''
 
 PARALLEL = r'''hit=(i:int64):>int64=>{

@@ -9,6 +9,7 @@ def test_strict_broadcast_indices_without_assumptions(compiler, tmp_path, releas
     source = tmp_path / 'broadcast.dewy'
     source.write_text('''$runtime_checks=false
 $no_assumed_bounds
+
 main=()=>{
 printl([int(1)] .+ [int(2) int(3)])
 printl([int(2) int(3)] .+ [int(1)])

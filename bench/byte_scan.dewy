@@ -1,4 +1,6 @@
 # An explicit bounded byte loop: the same search as byte_find.
+$runtime_checks
+
 scan=(text:string c:uint8):>int64=>{
     let bytes=text as array<uint8>
     let i:int64=0
@@ -17,4 +19,3 @@ main=(args:array<string>):>void=>{
     let finished=clock
     printl"{result} {finished-started}"
 }
-$runtime_checks

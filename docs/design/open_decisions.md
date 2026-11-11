@@ -698,8 +698,9 @@ Turn this on and:
 - the call that gives its failures as values has one prefix.
 
 ```dewy
-$program.time_zone = 'America/New_York'                    # program settings: top of the entry file, or inside a main
+$program.time_zone = 'America/New_York'                    # program settings: entry header, or before main
 $program.time_zone_rules = 'urgent.bin'                    # a rule pack beside the entry file
+
 Box:type = <T=int64>[v:T]                                  # bare Box means Box<int64>
 let b:Box = Box[1]
 let meet = zoned"2026-10-31T09:00[America/New_York]"
@@ -722,8 +723,8 @@ A library file can carry its own test run, with its own settings:
 ```dewy
 # meetings.dewy: a library; `dewy meetings.dewy` runs this main, and importing the file never does
 next_meeting = (after:Instant):>ZonedDateTime => (after.in_zone(zone"Asia/Tokyo") + 1day).at(time_of_day"09:00")
+$program.time_zone = 'Asia/Tokyo'          # applies only when this file is the entry
 main = () => {
-    $program.time_zone = 'Asia/Tokyo'          # applies only when this file is the entry
     printl(next_meeting(now.nominal))
 }
 ```
@@ -746,7 +747,7 @@ main = () => {
   - An integer times an on-grid tick is on the grid, and a proven-nonzero divisor gives a plain value.
   - Every text reader gives `T | ValidationError`.
   - No tag changes a result type: strict tags point to the prefixed functions (Q6), and `$time.require_*` becomes `$time.no_assumed_*`.
-- **Decided by you (2026-11-07):** one keyword, `rounding=`, replaces `ties=` on `round`, and `round`, `quantize`, time's `round` and `fmt` share it. Your per-type defaults don't change, and `ties=` keeps only `select`'s fairness. Its nine values:
+- **Decided by you (2026-11-07):** one keyword, `rounding=`, replaces `ties=` on `round`, and `round`, `quantize`, time's `round` and `fmt` share it. Your per-type defaults don't change, and `select` uses `priority=` for its fairness (batch 8). Its nine values:
   - `'nearest_away'` and `'nearest_even'` (the defaults);
   - `'nearest_toward_zero'`, `'nearest_up'` and `'nearest_down'`;
   - `'floor'`, `'ceil'`, `'toward_zero'` and `'away_from_zero'`.

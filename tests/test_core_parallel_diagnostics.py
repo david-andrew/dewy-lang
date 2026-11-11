@@ -34,7 +34,7 @@ def test_rollback_warning_order(compiler, tmp_path, automatic, shared):
         text = '\n'.join(lines[:5]) + '\n' + workload + 'second()\nfirst()\n'
     elif automatic:
         text += generate_dewy(600)
-    source.write_text((text) + "\n$runtime_checks\n")
+    source.write_text(('$runtime_checks\n\n') + (text))
     options = {} if automatic else {'DEWY_EMIT_FORCE': '1'}
     check(compiler, source, tmp_path, **options)
     base, err = build(compiler, source, tmp_path / 'serial', 1, **options)

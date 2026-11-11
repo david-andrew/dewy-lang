@@ -1,8 +1,8 @@
 # exit: 101
 Graph:type = [nodes:array<string> next:array<int64<(<? nodes.length)>>]
+$runtime_checks
 main = ():>void => {
     let g = Graph[nodes=['a' 'b' 'c'] next=[2 0]]
-    $runtime_checks
     g.nodes.pop();
     printl("not reached")
 }

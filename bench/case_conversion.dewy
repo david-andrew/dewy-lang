@@ -1,5 +1,7 @@
 # Materialize both cases of mixed ASCII/UTF-8 text. Input construction and the
 # checksum are outside the timed region; output allocation is included.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock
 
 main=(args:array<string>):>void=>{
@@ -14,5 +16,3 @@ main=(args:array<string>):>void=>{
     loop b in bytes(lo) {checksum+=b as int64}
     printl"{checksum} {finished-started}"
 }
-
-$runtime_checks

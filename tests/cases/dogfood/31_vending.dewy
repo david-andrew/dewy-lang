@@ -3,6 +3,8 @@
 # A vending machine as a state machine, driven by commands on standard input:
 #   coin 25 | select B2 | cancel | restock B2 3 | report | quit
 
+$runtime_checks
+
 Product:type = [name:string price:int64 stock:int64]
 
 Idle:type = type of any
@@ -127,5 +129,3 @@ main = () => {
     }
     if credit_of(m) >? 0 cancel(@m)
 }
-
-$runtime_checks

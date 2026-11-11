@@ -1,5 +1,7 @@
 # First pushes in the context arena: element sizes, chunk refills, arrays that
 # leave the arena, and arrays in the heap.
+$runtime_checks
+
 P:type=[x:int64 y:int64 z:int64]
 rows = (n:int64):>int64 => {
     let total:int64=0
@@ -35,4 +37,3 @@ main = ():>void => {
     scratch.reset()
     printl"{held}"
 }
-$runtime_checks

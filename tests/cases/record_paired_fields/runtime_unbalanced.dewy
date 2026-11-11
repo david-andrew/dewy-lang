@@ -1,8 +1,8 @@
 # exit: 101
 # A run whose lengths are not known is checked at run time, and fails when they differ.
 Index:type = [keys:array<int64> values:array<string length =? keys.length>]
+$runtime_checks
 both = (@ix:Index ks:array<int64> vs:array<string>):>void => {
-    $runtime_checks
     ix.keys.extend(ks)
     ix.values.extend(vs)
 }

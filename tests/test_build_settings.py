@@ -80,7 +80,7 @@ def test_conflicting_mode_override_warns(compiler, tmp_path, setting, flag):
 
 def test_conflicting_target_override_warns(compiler, tmp_path):
     native_host()
-    ran = run(compiler, tmp_path, "$target = 'wasm32'\n" + REPORT, '--target', HOST)
+    ran = run(compiler, tmp_path, "$target = 'wasm32'\n\n" + REPORT, '--target', HOST)
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == f'debug\n{HOST}\n'
     assert (f"warning: --target {HOST} overrides `$target = 'wasm32'`: this build is for {HOST}") in ran.stderr
@@ -89,7 +89,7 @@ def test_conflicting_target_override_warns(compiler, tmp_path):
 def test_build_command_overrides_too(compiler, tmp_path):
     native_host()
     source = tmp_path / 'main.dewy'
-    source.write_text("$build.mode = 'debug'\n" + REPORT)
+    source.write_text("$build.mode = 'debug'\n\n" + REPORT)
     built = subprocess.run([compiler, 'build', source, '--release', '-o', tmp_path / 'main'], capture_output=True,
                            text=True, timeout=120, check=False)
     assert built.returncode == 0, built.stderr

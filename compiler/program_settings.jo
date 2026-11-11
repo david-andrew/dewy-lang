@@ -27,7 +27,7 @@ dir_program_prepare = ():
     loop m in modules:
         loop d in m.decls:
             if nodes[d].kind != .fn_ or name_of(int(nodes[d].name)) != "main" or dewy_is_method(d) or nodes[d].b == 0: continue
-            mains[nodes[int(nodes[d].b)].pos] = d
+            mains[nodes[d].pos] = d
     loop i in [0..dir_scopes.len()):
         s = dir_scopes[i]
         if not dir_program_setting(name_of(s.setting)): continue
@@ -36,16 +36,10 @@ dir_program_prepare = ():
         d = mains.get(s.start) ?? 0
         placed = entry and header or d > 0
         if d > 0:
-            body = int(nodes[d].b)
-            loop k in [0..nkids(body)):
-                n = kid(body, k)
-                if nodes[n].pos > s.start and nodes[n].pos < s.at:
-                    placed = false
-                    break
             scopes = dir_program_mains.get(d) ?? []
             scopes.push(i)
             dir_program_mains[d] = scopes
-        if not placed: fatal(s.at, "`${name_of(s.setting)}` is program-wide: put it at the top of the entry file or as the first lines of any file's main")
+        if not placed: fatal(s.at, "`${name_of(s.setting)}` is program-wide: put it at the top of the entry file or directly before any file's main: `${name_of(s.setting)} = ...` then `main = ...`")
         if not entry: continue
         old = dir_program_values.get(s.setting) ?? -1
         if old >= 0 and dir_scopes[old].value != s.value: dir_program_disagree(s, dir_scopes[old])

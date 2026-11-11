@@ -11,6 +11,7 @@ from tools.compiler.member_replay_diff import MODES, compare
 SOURCES = {
     'later_debug_name': '''
 $runtime_checks
+
 U:type='aa'|'bbb'
 make=(text:string):>dict<string U>=>{
     let table:dict<string U>=[]
@@ -25,6 +26,7 @@ printl(make("aa"))
 ''',
     'narrowed_path': '''
 $runtime_checks
+
 Box:type=[value:array<string>|none]
 make=(box:Box)=>{
     let table:dict<string string>=[]
@@ -37,6 +39,7 @@ printl(make(Box[value=["x"]]))
 ''',
     'inferred_text': '''
 $runtime_checks
+
 make=()=>{
     let prefix="aa"
     let table:dict<string 'aa'|'bbb'>=[]
@@ -141,6 +144,7 @@ printl(make(3))
 ''',
     'bounds_later': '''
 $runtime_checks
+
 make=(index:int64)=>{
     let table:dict<string uint8>=[]
     loop s in members('aa'|'b') {
@@ -154,6 +158,7 @@ printl(make(1))
 ''',
     'different_facts': '''
 $runtime_checks
+
 make=()=>{
     let table:dict<string uint8>=[]
     loop s in members('aa'|'b') {
@@ -166,6 +171,7 @@ printl(make())
 ''',
     'cleanup_and_alias': '''
 $runtime_checks
+
 make=(choose:bool)=>{
     let result:array<array<string>>=[]
     let table:dict<uint8 array<string>>=[]
@@ -186,6 +192,7 @@ printl(make(false))
 ''',
     'nested_invocation': '''
 $runtime_checks
+
 make=()=>{
     let all:array<string>=[]
     loop i in [0..3) {

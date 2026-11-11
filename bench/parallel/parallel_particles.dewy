@@ -1,5 +1,7 @@
 # The all-pairs update from examples/parallel_particles.dewy, timed separately
 # from initialization and checksum collection. Each frame reads its predecessor.
+$runtime_checks
+
 from p"../harness.jo" import clock, size_argument
 from p"../../examples/parallel_particles.dewy" import make, advance
 main=(args:array<string>):>void=>{
@@ -18,4 +20,3 @@ main=(args:array<string>):>void=>{
     }
     printl"{checksum} {elapsed}"
 }
-$runtime_checks

@@ -15,7 +15,8 @@ def test_lower_ffi_twins(compiler, tmp_path, monkeypatch, mode):
     source = tmp_path / 'input.dewy'
     output = tmp_path / ('program.exe' if mode == 'x86_64-windows' else 'program')
     if mode == 'x86_64-windows':
-        source.write_text("""ticks=():>uint64=>$extern(name='GetTickCount64' lib='kernel32.dll')
+        source.write_text("""$extern(name='GetTickCount64' lib='kernel32.dll')
+ticks=():>uint64
 main=()=>$unsafe {printl(ticks())}
 """)
     elif mode in ('structs', 'aarch64-linux'):

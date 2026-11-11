@@ -1,4 +1,6 @@
 # Only aggregate comparisons: no direct secret comparison preloads a helper.
+$runtime_checks
+
 Password:type=[value:secret<string>]
 Key:type=[value:secret<array<uint8>>]
 Number:type=[value:secret<int>]
@@ -10,4 +12,3 @@ main=(args:array<string>)=>{
     let n=int(args.length)
     printl(Number[n] =? Number[n+1])
 }
-$runtime_checks

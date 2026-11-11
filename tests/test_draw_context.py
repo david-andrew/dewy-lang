@@ -79,7 +79,7 @@ def test_draw_context_does_not_instantiate_unused_field_defaults(compiler, tmp_p
     imports = [f'from p"{CASES.parent / name}.dewy" import (run as run_{i})'
                for i, name in enumerate(modules)]
     path = tmp_path / 'batch.dewy'
-    path.write_text('$runtime_checks\n' + '\n'.join(imports) + '\nmain=():>void=>{\n'
+    path.write_text('$runtime_checks\n\n' + '\n'.join(imports) + '\nmain=():>void=>{\n'
                     'printl"{run_0()} {run_1()} {run_2()}"\n}\n')
     flags = [] if target == 'native' else ['--target', target]
     checked = invoke(compiler, path, 'check', flags=flags)

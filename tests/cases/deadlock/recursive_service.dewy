@@ -1,5 +1,7 @@
 # A recursive service whose lock's place ends before it serves the sub-request runs; the one
 # keeping it across the recursive call is recursive_service_held.dewy's error.
+$runtime_checks
+
 serve = (m:Mutex<int64> depth:int64):>int64 => {
     let state = @(m.lock())
     state += 1
@@ -12,5 +14,3 @@ main = () => {
     let s = @(m.lock())
     printl"served {s}"
 }
-
-$runtime_checks

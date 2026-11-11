@@ -7,7 +7,7 @@ from tests.support import compiler
 from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
-RUNTIME_CHECKS = '\n$runtime_checks\n'
+RUNTIME_CHECKS = '$runtime_checks\n\n'
 
 
 PROGRAM = '''
@@ -43,7 +43,7 @@ main=():>void=>{
 @pytest.mark.parametrize('release', [False, True])
 def test_borrowed_row_snapshots(compiler, tmp_path, release):
     source = tmp_path / 'rows.dewy'
-    source.write_text(PROGRAM + RUNTIME_CHECKS)
+    source.write_text((RUNTIME_CHECKS) + (PROGRAM))
     output = tmp_path / 'rows'
     build = subprocess.run([compiler, 'build', source, '-o', output,
                             *(['--release'] if release else [])], capture_output=True, text=True)

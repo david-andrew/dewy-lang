@@ -53,6 +53,8 @@ def test_invalid_memory_order(compiler, tmp_path, operation, diagnostic):
 
 def test_atomic_orders_and_structural_payloads(compiler, tmp_path):
     result = check(compiler, tmp_path, '''
+$runtime_checks
+
 main=()=>{
  let a=atomic(0)
  let payload=[value=[1 2 3] count=a]
@@ -65,7 +67,6 @@ main=()=>{
  $runtime_assert(a.load() =? 42)
  $runtime_assert(sums.length =? 128)
 }
-$runtime_checks
 ''', 'build')
     assert result.returncode == 0, result.stderr
     for threads in (1, 2):

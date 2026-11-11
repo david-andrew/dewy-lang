@@ -1,3 +1,5 @@
+$runtime_checks
+
 from p"../harness.jo" import clock, size_argument
 work=():>int64|Canceled=>{sleep(1ms) or_throw return 1}
 fanout=(n:int64):>void=>{concurrent {loop i in [0..n) {spawn work()}}}
@@ -9,5 +11,3 @@ main=(args:array<string>)=>{
  $runtime_assert(result is? Timeout)
  printl"{n} {elapsed} {max(0 elapsed-20000000)}"
 }
-
-$runtime_checks

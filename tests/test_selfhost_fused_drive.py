@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(
 
 def test_fused_drive_matches_twin(compiler, tmp_path, monkeypatch):
     (tmp_path / 'synthetic.dewy').write_text(generate_dewy(600))
-    (tmp_path / 'versions.dewy').write_text(CALLBACK_VERSIONS + '\n$runtime_checks\n')
+    (tmp_path / 'versions.dewy').write_text(('$runtime_checks\n\n') + (CALLBACK_VERSIONS))
     paths = ['synthetic.dewy', 'versions.dewy', 'examples/ring.dewy', 'examples/rollback_model.dewy']
     reports = compare_workers(compiler, tmp_path, monkeypatch, ('fused_drive',), paths)
     assert all('fused: 4 workers' in report for report in reports), reports

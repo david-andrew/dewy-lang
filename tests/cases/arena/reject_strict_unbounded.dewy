@@ -1,6 +1,7 @@
 # Under $no_hidden_costs an arena acquires its capacity explicitly, and allocation
 # inside $allocator is allowed where it is proven to fit that capacity.
 $no_hidden_costs
+
 count=(n0:int64):>int64 | OutOfMemory=>{
     let a=arena(4096) or_throw
     let n=$allocator(@a) {
@@ -14,12 +15,12 @@ count=(n0:int64):>int64 | OutOfMemory=>{
     }
     n
 }
+$no_hidden_costs=false
 show=(n:int64):>void=>{
-    $no_hidden_costs=false
     printl("{n}")
 }
+$no_hidden_costs=false
 main=()=>{
-    $no_hidden_costs=false
     let n=count(10) or_throw
     show(n)
 }

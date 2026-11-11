@@ -1,6 +1,8 @@
 # quick
 # Mutex<T>: `@(m.lock())` lends the payload until the place's last use; `try_lock` gives Busy
 # while another holder has it; copies of the handle share the lock.
+$runtime_checks
+
 main = () => {
     let m = mutex<int64>(10)
     let a = @(m.lock())
@@ -25,5 +27,3 @@ main = () => {
     n.push("b")
     printl"{n}"
 }
-
-$runtime_checks

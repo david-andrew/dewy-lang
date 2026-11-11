@@ -7,7 +7,7 @@ from tests.support import compiler  # noqa: F401 (fixture)
 from tests.test_time_zone_bulk import program, stored
 from tests.test_time_zones import same_rules
 
-HOST = "$time.zone_source = 'host'\n"
+HOST = "$time.zone_source = 'host'\n\n"
 READ = 'f=(s:string)=>printl(zoned(s zone=zone"America/New_York"))\nf("2026-07-01T12:00")\n'
 
 
@@ -82,7 +82,7 @@ def test_where_and_what_it_can_say(compiler, tmp_path):
     ran = run(compiler, tmp_path, "$time.zone_source = 'pack'\n")
     assert ran.returncode != 0
     assert "`$time.zone_source` is 'host'" in ran.stderr
-    ran = run(compiler, tmp_path, "f=()=>{\n$time.zone_source = 'host'\nprintl(1)\n}\nf\n")
+    ran = run(compiler, tmp_path, "$time.zone_source = 'host'\nf=()=>{\nprintl(1)\n}\nf\n")
     assert ran.returncode != 0
     assert 'put it at the top of the entry file' in ran.stderr
 

@@ -8,7 +8,7 @@ from tests.support import compiler  # noqa: F401
 
 def run(compiler, tmp_path, source, *arguments):
     path = tmp_path / 'program.dewy'
-    path.write_text('$runtime_checks=false\n' + source)
+    path.write_text('$runtime_checks=false\n\n' + source)
     return subprocess.run([compiler, *arguments, path.name], text=True, capture_output=True, timeout=60, cwd=tmp_path)
 
 

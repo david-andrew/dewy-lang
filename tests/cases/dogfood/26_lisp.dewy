@@ -1,5 +1,7 @@
 # A tiny Lisp: numbers, symbols, lists, define, lambda, if, let, closures.
 
+$runtime_checks
+
 Token:type = [text:string pos:int64]
 
 LispError:type = type of error & [message:string pos:int64]
@@ -213,5 +215,3 @@ main = () => {
     ]
     loop src in programs { run(src @frames) }
 }
-
-$runtime_checks

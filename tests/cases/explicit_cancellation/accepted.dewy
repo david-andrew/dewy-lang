@@ -1,5 +1,6 @@
 # quick
 $explicit_cancellation
+
 outcome=(kind:int64):>int64|Missing|Canceled=>{
     if kind =? 0 return Canceled
     if kind =? 1 return Missing
@@ -16,8 +17,8 @@ collected=(k:int64)=>[outcome(2) or_throw<Canceled> outcome(k) or_throw<Canceled
 looped=()=>[loop k in [2 2] outcome(k) or_throw<Canceled>]
 inner=(k:int64)=>outcome(k) or_throw<Canceled>
 nested=(k:int64)=>inner(inner(k) or_throw<Canceled> ?? 3) or_throw<Canceled> ?? 4
+$explicit_cancellation=false
 optout=(kind:int64)=>{
-    $explicit_cancellation=false
     outcome(kind) ?? 0
 }
 main=()=>{

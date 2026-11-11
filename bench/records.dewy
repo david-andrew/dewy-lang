@@ -1,4 +1,6 @@
 # Loops over an array of small records: integer particles stepped in a box.
+$runtime_checks
+
 from p"harness.dewy" import size_argument, clock, mix
 
 Particle:type = [x:int64 y:int64 dx:int64 dy:int64]
@@ -57,5 +59,3 @@ main = (args:array<string>):>void => {
     let finished=clock
     printl"{result} {finished-started}"
 }
-
-$runtime_checks

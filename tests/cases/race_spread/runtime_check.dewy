@@ -2,6 +2,7 @@
 # modes: native
 # Under $runtime_checks an unproven spread is checked when the call runs: empty, it stops.
 $runtime_checks
+
 work = (n:int64):>int64 => n
 fastest = (calls:array<():>int64>):>int64 | Canceled | OutOfMemory => race(calls...)
 main = () => {

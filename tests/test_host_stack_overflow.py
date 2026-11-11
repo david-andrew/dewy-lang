@@ -13,6 +13,7 @@ from tests.test_cross_target_runs import TASK_OVERFLOW, WORKER_OVERFLOW
 EXIT_PANIC = 101
 
 MAIN_OVERFLOW = '''$runtime_checks
+
 depth = (n:int64):>int64 => if n <=? 0 0 else 1 + depth(n - 1)
 main = (argv:array<string>):>void => {
     let n = to_int(argv[1]) ?? 0

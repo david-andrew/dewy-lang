@@ -9,7 +9,7 @@ from tests.support import Scripts, target_name
 from tools.cores import on_cores
 
 # (programs that keep runtime checks for their unproven obligations)
-RUNTIME_CHECKS = '\n$runtime_checks\n'
+RUNTIME_CHECKS = '$runtime_checks\n\n'
 
 
 @pytest.fixture(scope='module')
@@ -48,7 +48,7 @@ loop round in [0..20) {$runtime_assert(sum([parallel x in floats x]) =? sum(floa
 @pytest.mark.parametrize('release', [False, True])
 def test_parallel_syntax(compiler, tmp_path, target, release):
     source = tmp_path / 'main.dewy'
-    source.write_text(PROGRAM + RUNTIME_CHECKS)
+    source.write_text((RUNTIME_CHECKS) + (PROGRAM))
     output = tmp_path / 'main'
     env = dict(os.environ, DEWY_EMIT_WORKERS='1')
     built = subprocess.run([compiler, 'build', source, '-o', output, '--target', target_name(target),
@@ -78,7 +78,7 @@ def test_parallel_syntax(compiler, tmp_path, target, release):
 ])
 def test_parallel_obligations(compiler, tmp_path, body, diagnostic):
     source = tmp_path / 'invalid.dewy'
-    source.write_text('main=():>void=>{' + body + '}' + RUNTIME_CHECKS)
+    source.write_text((RUNTIME_CHECKS) + ('main=():>void=>{' + body + '}'))
     result = subprocess.run([compiler, 'check', source], capture_output=True,
                             text=True, timeout=30)
     assert result.returncode != 0

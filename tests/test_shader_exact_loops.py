@@ -9,7 +9,8 @@ import pytest
 
 from tests.support import compiler  # noqa: F401
 
-PROGRAM = r'''$runtime_checks
+PROGRAM = '''$runtime_checks
+
 P:type=[dst:GpuBuffer<float32>]
 k=(id:int64 u:P):>void=>{
     if id <? 0 or id >=? u.dst.length { return }

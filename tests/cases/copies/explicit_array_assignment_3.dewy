@@ -1,5 +1,7 @@
 # exit: 42
 $explicit_copies
+$runtime_checks
+
 make=():>array<int64>=>[20 22]
 main=():>void=>{
     let source=make
@@ -9,5 +11,3 @@ snapshot=snapshot.copy
     source.clear()
     exit((if snapshot.length=?2 snapshot[0]+snapshot[1] else 1))
 }
-
-$runtime_checks

@@ -17,9 +17,10 @@ from tools.cores import on_cores
 
 
 LENGTHS = (*range(18), 31, 32, 33)
-SOURCE = r'''
-from p"bits.jo" import bits, frombits
+SOURCE = '''
 $runtime_checks
+
+from p"bits.jo" import bits, frombits
 values=(n:int64 x:int64):>array<int64>=>[loop i in [0..n) x+i%7]
 row=(a:NDArray<int64> b:NDArray<int64> c:NDArray<int64>):>array<int64>=>{
     let result:NDArray<int64>=max.(a .+ b .+ c .- 3 0)

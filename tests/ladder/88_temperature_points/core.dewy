@@ -1,5 +1,7 @@
 # Core: explicit point/delta wrappers over bounded exact word rationals.
 # Bounded word-rational helper for core projections only; fixtures fit int64.
+$runtime_checks
+
 Rat:type = [n:int64 d:int64]
 gcd = (a:int64 b:int64):>int64 => {
     a = abs(a)
@@ -88,5 +90,3 @@ main = ():>void => {
     $runtime_assert equal(checksum ratio(345443 20))
     printl("{show(delta.kelvin)} {show(checksum)}")
 }
-
-$runtime_checks
