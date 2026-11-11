@@ -7,6 +7,7 @@ from p"checker_expr.dewy" import (check_expr check_intrinsic lookup)
 from p"checks_builders.dewy" import (bc_block bc_call bc_ident bc_int bc_let bc_stmt bc_str)
 from p"checks_thin.dewy" import (resolve_type)
 from p"error_ops.dewy" import (family_holds_generic value_members)
+from p"errors.jo" import nominal_parent
 from p"expr.jo" import (IN bare_generic_set bc_bin last_checked ntype nw_at nw_call nw_call_at nw_call_end nw_call_loops nw_decl nw_decl_at nw_decl_loops nw_local nw_loop_end nw_loop_start nw_loops nw_name nw_write_at nw_writes select_source_calls select_source_matches)
 from p"expr_cold_queries.dewy" import (type_short_name)
 from p"partial_checks.dewy" import (wait_partial)
@@ -719,13 +720,35 @@ type_alternatives=(u0:SelectWord):>array<int64>=>$unsafe {
 # A queue's payload that is, or may be, an outcome its own waits give (decisions.md, batch 7),
 # `Closed`, `Canceled` or every exception: the error that says so, "" when none is. A select's arms
 # match by type, so such a payload would be taken for the queue's own close or cancellation.
+# The standard wait outcome a type belongs to, by declaration and nominal ancestry.
+# A same-named application record is data. O(ancestry depth), only at wait boundaries.
+standard_wait_outcome=(t:SelectWord):>int64=>$unsafe {
+    let current=prune(t)
+    loop current not=? 0 {
+        if tkind(current) =? 'struct_' {
+            let d=SelectWord(structs.ptr[SelectWord(types.ptr[current].st)].decl)
+            if d not=? 0 {
+                let name=SelectWord(nodes.ptr[d].name)
+                if (name =? intern("Canceled") or name =? intern("Timeout")) and nodes.ptr[d].pos =? 0 {return name}
+                if name =? intern("Closed") and nodes.ptr[d].pos >? 0 and files[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/prelude/outcomes.jo" {return name}
+            }
+        }
+        current=nominal_parent.get(current) ?? 0
+    }
+    0
+}
 queue_payload_clash=(payload:SelectWord name:string):>string=>{
     loop m0 in value_members(payload) {
         let text=dt(prune(m0))
-        if text =? "Closed" or text =? "Canceled" or text =? "exception" {return "a {name}'s payload cannot be {text}: its receive gives {text} as its own outcome, so the two could not be told apart; carry it in a record, `[value:{dt(payload)}]`"}
+        let outcome=standard_wait_outcome(prune(m0))
+        if outcome =? intern("Closed") or outcome =? intern("Canceled") or text =? "exception" {
+            let control=if outcome not=? 0 {name_of(outcome)} else {text}
+            return "a {name}'s payload cannot be {text}: its receive gives {control} as its own outcome, so the two could not be told apart; carry it in a record, `[value:{dt(payload)}]`"
+        }
     }
     ""
 }
+
 # The progress rule, for its common case (decisions.md, batch 7): in a loop, an arm of a match
 # on select that takes a close and changes nothing (no assignment, no break, return or
 # or_throw, no call but printing) reaches the next turn, where the closed channel is ready

@@ -754,11 +754,26 @@ type_alternatives = (u0: int) -> int[]:
 # A queue's payload that is, or may be, an outcome its own waits give (decisions.md, batch 7),
 # `Closed`, `Canceled` or every exception: the error that says so, "" when none is. A select's arms
 # match by type, so such a payload would be taken for the queue's own close or cancellation.
+standard_wait_outcome = (t: int) -> int:
+    current = prune(t)
+    loop current != 0:
+        if tkind(current) == .struct_:
+            d = int(structs[int(types[current].st)].decl)
+            if d != 0:
+                name = int(nodes[d].name)
+                if (name == intern("Canceled") or name == intern("Timeout")) and nodes[d].pos == 0: return name
+                if name == intern("Closed") and nodes[d].pos > 0 and files[pos_file(nodes[d].pos)].path == "{lib_dir}/prelude/outcomes.jo": return name
+        current = nominal_parent.get(current) ?? 0
+    0
 queue_payload_clash = (payload: int, name: str) -> str:
     loop m0 in value_members(payload):
         text = dt(prune(m0))
-        if text == "Closed" or text == "Canceled" or text == "exception": return "a {name}'s payload cannot be {text}: its receive gives {text} as its own outcome, so the two could not be told apart; carry it in a record, `[value:{dt(payload)}]`"
+        outcome = standard_wait_outcome(prune(m0))
+        if outcome == intern("Closed") or outcome == intern("Canceled") or text == "exception":
+            control = if outcome != 0: name_of(outcome) else: text
+            return "a {name}'s payload cannot be {text}: its receive gives {control} as its own outcome, so the two could not be told apart; carry it in a record, `[value:{dt(payload)}]`"
     ""
+
 # The progress rule, for its common case (decisions.md, batch 7): in a loop, an arm of a match
 # on select that takes a close and changes nothing (no assignment, no break, return or
 # or_throw, no call but printing) reaches the next turn, where the closed channel is ready

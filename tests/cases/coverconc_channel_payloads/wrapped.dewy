@@ -1,0 +1,9 @@
+# modes: native native-release
+Status:type = [id:int reason:Closed<int>]
+main = () => {
+    let c = channel<Status>(1)
+    c.send(Status[7 Closed<int>[]]) or_throw
+    c.close()
+    let status = c.receive or_throw
+    printl"wrapped {status.id} {status.reason is? Closed} {c.receive is? Closed}"
+}

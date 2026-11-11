@@ -1,0 +1,17 @@
+# modes: native native-release
+import p"../../fixtures/coverconc_payload/status.dewy" as wire
+main = () => {
+    let c = channel<wire.Closed>(1)
+    let d = channel<wire.Canceled>(1)
+    c.send(wire.Closed[7]) or_throw
+    d.send(wire.Canceled[9]) or_throw
+    c.close()
+    d.close()
+    match c.receive {
+        value:c.<wire.Closed> => printl"status {value.code}"
+        _ => printl"missing status"
+    }
+    let data = d.receive
+    if data is? wire.Canceled {printl"data {data.code}"} else {printl"missing data"}
+    printl"drained {c.receive is? Closed} {d.receive is? Closed}"
+}
