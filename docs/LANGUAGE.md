@@ -3691,10 +3691,11 @@ Canceled` and waits while it is empty. So that these outcomes are never mistaken
 value, a payload that is or may be `Closed`, `Canceled` or any exception is an error;
 carry such a value in a record (decisions.md, batch 7). Both are blocking operations (`blocks`, so a
 `parallel` body cannot use them) and cancellation points: canceled while waiting, or
-in a canceled scope, they fail with `Canceled`. `c.close` closes the channel; closing
-again does nothing. After a close, a send fails with `Closed` (never a trap) and a
-receive takes what is still buffered, then gives `Closed`; tasks waiting on the
-channel wake.
+in a canceled scope, a receive gives `Canceled` and an ordinary send gives
+`Unsent<T>` with reason `Canceled`. `c.close` closes the channel; closing again does
+nothing. After a close, a send gives `Unsent<T>` with reason `Closed` (never a trap),
+and a receive takes what is still buffered, then gives `Closed`; tasks waiting on
+the channel wake.
 
 `Closed<T>` is generic (decisions.md, batch 7): a `Channel<Job>`'s close is `Closed<Job>`,
 so two channels' closes are different types. A bare generic name where a value is tested
@@ -4030,8 +4031,9 @@ certificate is one of:
 
 `select`, `race`, `first_ok`, `merged` (and a loop or `next` over its inbox) and `within` wait on
 a choice among alternatives, which no certificate counts yet, so each is an error in every form (written
-or named waits, spread arrays, conditional waits, prepared with `@`); spawn the work as tasks and join
-them, with sends and receives between them, which is certified. `$bulletproof` includes `$no_deadlocks`,
+or named waits, spread arrays, conditional waits, prepared with `@`). A structured join is
+certified only when every child wait already has a certificate; joining tasks does not certify
+their raw channel sends and receives. `$bulletproof` includes `$no_deadlocks`,
 so it rejects them too.
 A raw channel's, `mpmc`'s or `spsc`'s `send` and `receive`, a loop polling an atomic another task sets,
 a call of a function value the compiler cannot follow, and a wait in a lifecycle
@@ -4043,7 +4045,7 @@ certificate.
 The library's protocols (provisional spellings) are request/reply and a pipeline
 with feedback. They have no proof yet, so `$no_deadlocks` rejects them until a
 library check proves them: write them in a scope without it, or one that says
-`$no_deadlocks = false`, or spawn the work as tasks and join them, which is certified.
+`$no_deadlocks = false`. Spawning and joining a protocol does not certify its raw waits.
 
 ```dewy
 square = (n:int):>int => n * n
