@@ -1,0 +1,33 @@
+use 'lex.jo'
+use 'checker_tokens.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'lexer_errors.dewy'
+use 'lexer_units.dewy'
+
+# whether the rest of the line from `from` closes a bracket it did not open, or is another
+# lambda's header (its indented body follows)
+lx_line_closes = (from: int) -> bool:
+    p = lx_p
+    j = from
+    depth = 0
+    last = u8(0)
+    loop j < lx_n and p[j] != '\n':
+        c = p[j]
+        if c == '#': break
+        if c == '"' or c == '\'':
+            raw = j > 0 and p[j - 1] == 'r'
+            j = lx_skip_str(j, raw)
+            if j < 0: return false
+            last = u8('"')
+            continue
+        if c == 40 or c == 91 or c == 123: depth += 1
+        else if c == 41 or c == 93 or c == 125:
+            depth -= 1
+            if depth < 0: return true
+        if c != ' ' and c != '\t' and c != '\r': last = c
+        j += 1
+    # (a lambda's header: `(x):` or `(x) -> T:`, not the rest of `loop k, v in m:`)
+    k = from
+    loop k < lx_n and (p[k] == ' ' or p[k] == '\t'): k += 1
+    depth == 0 and last == ':' and k < lx_n and p[k] == 40
