@@ -19,7 +19,7 @@ helper=(xs:array<int64> i:int64):>int64=>{
     return xs[i]
 }
 main=():>void=>printl(helper([1 2] 1))
-''', '7:23: error: calling `helper` may panic (helper: runtime check: index is in bounds'),
+''', '8:23: error: calling `helper` may panic (helper: runtime check: index is in bounds'),
     # An explicit check is a panic too (here not assumed the module's own
     # handling), and a handle to it may be called.
     'handle': ('''$runtime_checks=false
@@ -57,7 +57,7 @@ $runtime_checks
 main=()=>{
     printl(twice(3))
 }
-''', 'opt this function out of `$no_hidden_costs` with `$no_hidden_costs=false` and add `$runtime_checks`'),
+''', 'prefix this function with `$no_hidden_costs=false` and `$runtime_checks`'),
     # Library preconditions are the caller's obligations.
     'first_unproven': ('$runtime_checks=false\n\nf=(xs:array<int64>)=>printl(xs.first)\nf([1])\n',
                        'cannot prove refinement `xs.length >? 0`'),
@@ -130,7 +130,7 @@ def test_panics_listing(compiler, tmp_path):
     source = '$runtime_checks\n\nshow=(s:string):>string=>s.trim()\nprintl(show("x"))\ncount=(d:dict<string int64>):>int64=>d["a"]\nprintl(count(["a"->1]))\n'
     result = run(compiler, tmp_path, source, 'check', '--obligations')
     # (a missing key is the caller's obligation, listed as its own check)
-    assert 'program.dewy:4:38: runtime check: the key is in the dictionary ($runtime_checks)' in result.stdout, result.stdout + result.stderr
+    assert 'program.dewy:5:38: runtime check: the key is in the dictionary ($runtime_checks)' in result.stdout, result.stdout + result.stderr
 
 
 def test_first_runtime_check(compiler, tmp_path):

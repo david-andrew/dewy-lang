@@ -96,7 +96,7 @@ main = () => {
 
 def test_counts_that_are_not_literal_warn(compiler, tmp_path):  # noqa: F811
     found = diagnostics(compiler, tmp_path, PING)
-    assert len(found) == 1 and ':2:24:' in found[0] and "may wait to send into 'a'" in found[0] and 'cannot tell' in found[0], found
+    assert len(found) == 1 and ':4:24:' in found[0] and "may wait to send into 'a'" in found[0] and 'cannot tell' in found[0], found
 
 
 def test_a_capacity_that_is_not_literal_warns(compiler, tmp_path):  # noqa: F811

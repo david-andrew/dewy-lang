@@ -87,7 +87,7 @@ main=()=>printl(safe([5 6] 1))
     rejected = run(compiler, tmp_path, source.replace('    if i >=? 0 and i <? xs.length return xs[i]\n', '    return xs[i]\n'),
                    'check')
     assert rejected.returncode != 0 and 'cannot prove index is in bounds' in rejected.stderr, rejected.stderr
-    conflict = run(compiler, tmp_path, source.replace('    $careful\n', '    $careful\n    $runtime_checks\n'), 'check')
+    conflict = run(compiler, tmp_path, source.replace('$careful\n', '$careful\n$runtime_checks\n'), 'check')
     assert 'not allowed inside `$careful`, which sets `$runtime_checks=false`' in conflict.stderr, conflict.stderr
 
 
@@ -96,7 +96,7 @@ main=()=>printl(safe([5 6] 1))
     ('$quiet = {\n    $frob\n}\nmain=()=>0\n', 'a bundle lists builtin settings'),
     ('$quiet = {\n    $default_row = 3\n}\nmain=()=>0\n', 'effect'),
     ('$runtime_checks = {\n    $prototype\n}\nmain=()=>0\n', 'takes a literal true or false'),
-    ('$no_hidden_costs = {\n    $prototype\n}\nmain=()=>0\n', 'the bundle `$no_hidden_costs` is already defined'),
+    ('$no_hidden_costs = {\n    $prototype\n}\nmain=()=>0\n', 'sites.dewy:1:20: error: `$no_hidden_costs` takes a literal true or false'),
 ])
 def test_bundle_definition_errors(compiler, tmp_path, source, diagnostic):
     result = run(compiler, tmp_path, source, 'check')

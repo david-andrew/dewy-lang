@@ -52,7 +52,7 @@ def test_unproven_calls_warn(compiler, tmp_path):  # noqa: F811
     checked = subprocess.run([compiler, 'check', source], capture_output=True, text=True,
                              timeout=60, check=False)
     assert checked.returncode == 0, checked.stdout + checked.stderr
-    assert warned(checked.stderr) == [(12, MESSAGES[0]), (16, MESSAGES[1]), (20, MESSAGES[2])], checked.stderr
+    assert warned(checked.stderr) == [(14, MESSAGES[0]), (18, MESSAGES[1]), (22, MESSAGES[2])], checked.stderr
     run = subprocess.run([compiler, 'run', source], capture_output=True, text=True, timeout=60, check=False)
     assert run.returncode == 0 and run.stdout.split() == ['20', '2', '2', '1', '2', '1', '1'], run.stdout + run.stderr
 
@@ -84,11 +84,11 @@ def test_editor_shows_the_warnings(tmp_path):
         # (a type test is decided while checking; the facts' warnings come when the editor
         # lowers the document, after a quiet moment)
         diagnostics = client.set_text(source.as_uri(), ('$runtime_checks\n\n') + (SOURCE), 1)
-        assert (16, MESSAGES[1]) in found(diagnostics), diagnostics
+        assert (18, MESSAGES[1]) in found(diagnostics), diagnostics
         while len(found(diagnostics)) < 3:
             message = client.receive()
             if message.get('method') == 'textDocument/publishDiagnostics':
                 diagnostics = message['params']['diagnostics']
-        assert found(diagnostics) == [(12, MESSAGES[0]), (16, MESSAGES[1]), (20, MESSAGES[2])], diagnostics
+        assert found(diagnostics) == [(14, MESSAGES[0]), (18, MESSAGES[1]), (22, MESSAGES[2])], diagnostics
     finally:
         client.close()

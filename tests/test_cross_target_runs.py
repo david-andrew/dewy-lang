@@ -104,7 +104,7 @@ def far_branch_program():
     and an overflow check all branch across more than a conditional branch reaches."""
     body = lambda line: [line.format(k=k, m=k % 89 + 2) for k in range(16000)]
     return '\n'.join([
-        '$runtime_checks',
+        '$runtime_checks', '',
         'big = (n:int64 mode:int64):>int64 => {',
         '    let i:int64 = 0', '    let t:int64 = 0', '    let u:int64 = 1',
         '    loop i <? n {', '        i += 1', '        if i % 3 =? 0 { continue }',

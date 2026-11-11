@@ -23,4 +23,4 @@ def test_shadowed_function_coefficient_warns(compiler, tmp_path):  # noqa: F811
     assert checked.returncode == 0, checked.stdout + checked.stderr
     warnings = [line for line in checked.stderr.splitlines() if 'warning:' in line]
     assert len(warnings) == 1, checked.stderr
-    assert ':4:12:' in warnings[0] and 'which hides the function `sin`' in warnings[0], warnings
+    assert ':6:12:' in warnings[0] and 'which hides the function `sin`' in warnings[0], warnings

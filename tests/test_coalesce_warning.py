@@ -23,6 +23,6 @@ def test_coalesce_arithmetic_warning(compiler, tmp_path):  # noqa: F811
     assert checked.returncode == 0, checked.stdout + checked.stderr
     warnings = [line for line in checked.stderr.splitlines() if 'warning:' in line]
     assert len(warnings) == 2, checked.stderr
-    assert ':4:' in warnings[0] and 'includes `0 + 1`, not just `0`' in warnings[0]
+    assert ':6:' in warnings[0] and 'includes `0 + 1`, not just `0`' in warnings[0]
     assert '`(value ?? 0) + 1`' in warnings[0] and '`value ?? (0 + 1)`' in warnings[0]
-    assert ':5:' in warnings[1] and '`(x ?? 2) * 3`' in warnings[1]
+    assert ':7:' in warnings[1] and '`(x ?? 2) * 3`' in warnings[1]

@@ -15,5 +15,5 @@ def test_int_main_backtrace_hides_entry_helper(compiler, tmp_path):
     assert built.returncode == 0, built.stderr
     ran = subprocess.run([binary], capture_output=True, text=True, timeout=30)
     assert ran.returncode == 101
-    assert '    in main (bt.dewy:3)' in ran.stderr
+    assert '    in main (bt.dewy:5)' in ran.stderr
     assert 'h_' not in ran.stderr, ran.stderr

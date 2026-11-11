@@ -33,7 +33,7 @@ printl(guarded("abc") count_a("banana") last("xyz") literal() head("abcd") tail(
 
 REJECTED = {
     'unguarded_index': ('first=(text:string):>string=>text[0]\nprintl(first("a"))\n',
-                        '2:30: error: cannot prove index is in bounds: missing upper bound'),
+                        '3:30: error: cannot prove index is in bounds: missing upper bound'),
     'literal_past_end': ('printl("hello"[5])\n', ':8: error: index is not in bounds'),
     'negative_index': ('at=(text:string i:int64):>string=>if i <? text.length text[i] else ""\nprintl(at("a" 0))\n',
                        'cannot prove index is in bounds: missing lower bound'),
@@ -67,7 +67,7 @@ def test_string_obligations_rejected(compiler, tmp_path, name):
 def test_string_obligations_runtime_checks(compiler, tmp_path):
     source = '$runtime_checks\n\npick=(text:string i:int64):>string=>text[i]\nprintl(pick("abc" 1))\nprintl(pick("abc" 3))\n'
     listed = run(compiler, tmp_path, source, 'check', '--obligations')
-    assert 'program.dewy:2:37: runtime check: index is in bounds' in listed.stdout + listed.stderr
+    assert 'program.dewy:3:37: runtime check: index is in bounds' in listed.stdout + listed.stderr
     result = run(compiler, tmp_path, source, 'run')
     assert result.stdout == 'b\n' and result.returncode == 101 and 'string index out of bounds' in result.stderr
 

@@ -185,7 +185,7 @@ DIRECTIVE_ERRORS = {
     'proof': ('$proof\nf = () => 1', '$proof bodies allow only'),
     'realtime-reserved': ('main = () => { $realtime\nreturn 0 }', '`$realtime` is reserved for a future bundle'),
     'unknown-label': ('main = () => { $foo\nreturn 0 }',
-                      'a loop label must be followed by a loop (`$foo` is not a directive)'),
+                      'a loop label must be followed by a loop: write `$foo` then `loop ...` (`$foo` is not a directive)'),
     'unknown-setting': ('$frob = 3', 'unknown directive `$frob`'),
     'capture-outside-parameters': ('main = () => { $capture }', '`$capture` belongs in a parameter list'),
 }

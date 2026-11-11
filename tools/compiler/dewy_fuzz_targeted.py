@@ -133,7 +133,7 @@ class Test:
         return '\n'.join(self.decls + lines + ['}'])
 
     def source(self) -> str:
-        return self.function() + f'\nmain = ():>void => {self.prefix}run()\n$runtime_checks\n'
+        return '$runtime_checks\n\n' + self.function() + f'\nmain = ():>void => {self.prefix}run()\n'
 
 
 def make(family, seed, prefix='t_') -> Test:
@@ -1094,7 +1094,7 @@ class Fuzzer:
         batch = list(batch)
         while batch:
             work = self.runner.directory(mode)
-            lines, owner = [], []
+            lines, owner = ['$runtime_checks', ''], [-1, -1]
             for i, t in enumerate(batch):
                 text = t.function().splitlines()
                 lines += text
@@ -1103,7 +1103,7 @@ class Fuzzer:
             for i, t in enumerate(batch):
                 lines += [f'    printl"{MARK}B{i}"', f'    {t.prefix}run()', f'    printl"{MARK}E{i}"']
             source = work / 'batch.dewy'
-            source.write_text('\n'.join(lines) + '\n}\n$runtime_checks\n')
+            source.write_text('\n'.join(lines) + '\n}\n')
             output = work / 'batch'
             built = self.runner.build(source, output, mode)
             if built.returncode == 0:
@@ -1111,7 +1111,7 @@ class Fuzzer:
             text = built.stdout + built.stderr
             located = re.search(r'batch\.dewy:(\d+):\d+: error', text)
             line = int(located[1]) - 1 if located else -1
-            if not 0 <= line < len(owner):
+            if not 0 <= line < len(owner) or owner[line] < 0:
                 # Unattributable: judge each test alone (which also runs those that build).
                 alone = [(t, self.outcome(t, mode)) for t in batch]
                 failures += [Failure(t, mode, o[0], o[1], o[2]) for t, o in alone if o[0] != 'pass']

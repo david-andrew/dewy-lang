@@ -1070,7 +1070,7 @@ class Program(Node):
         # oracle predicts as exit 101)
         # Deliberate machine-limit overflows exercise ordinary obligations, not
         # the default practical counter/array bounds.
-        parts = ['$runtime_checks', '$no_assumed_bounds', 'Item:type=[id:int64 tags:array<int64> label:string]', 'Bad:type=type of error & [code:int64]']
+        parts = ['$runtime_checks', '$no_assumed_bounds', '', 'Item:type=[id:int64 tags:array<int64> label:string]', 'Bad:type=type of error & [code:int64]']
         parts += [render(f) for f in self.functions]
         parts.append('main=():>void=>{\n' + block(self.body) + '\n}')
         return '\n'.join(parts) + '\n'

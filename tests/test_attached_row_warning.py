@@ -31,7 +31,7 @@ def test_attached_row_discards_and_warns(compiler, tmp_path):  # noqa: F811
     assert run.stdout == '[1 3 4]\n[7]\n[1 2; 3 4]\n', run.stdout
     warnings = [line for line in run.stderr.splitlines() if 'warning:' in line]
     assert len(warnings) == 1, run.stderr
-    assert ':3:15:' in warnings[0] and MESSAGE in warnings[0] and '`[1 2 ; 3 4]`' in warnings[0], warnings
+    assert ':5:15:' in warnings[0] and MESSAGE in warnings[0] and '`[1 2 ; 3 4]`' in warnings[0], warnings
 
 
 def test_attached_row_quickfix(tmp_path):

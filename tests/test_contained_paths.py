@@ -138,13 +138,13 @@ def test_each_source_reaches_its_sink(compiler, tmp_path):  # noqa: F811
     source.write_text(SOURCES)
     found = diagnostics_of(compiler, source, UNTRUSTED)
     origins = {line_of(line): line for line in found}
-    assert sorted(origins) == [6, 8, 10, 12, 14], found
-    assert 'built from unproven text on line 6' in origins[6]
+    assert sorted(origins) == [8, 10, 12, 14, 16], found
     assert 'built from unproven text on line 8' in origins[8]
     assert 'built from unproven text on line 10' in origins[10]
+    assert 'built from unproven text on line 12' in origins[12]
     # (the helper joins its parameter to a base: the call giving it unproven text built it)
-    assert 'built by `path_for` on line 12' in origins[12]
-    assert '`q` may escape its base (built from unproven text on line 13)' in origins[14]
+    assert 'built by `path_for` on line 14' in origins[14]
+    assert '`q` may escape its base (built from unproven text on line 15)' in origins[16]
 
 
 def test_trusted_and_validated_paths_are_quiet(compiler, tmp_path):  # noqa: F811
@@ -157,7 +157,7 @@ def test_confine_external_paths(compiler, tmp_path):  # noqa: F811
     source = tmp_path / 'main.dewy'
     source.write_text(STRICT)
     found = diagnostics_of(compiler, source, 'confine_external_paths')
-    assert lines_of(found) == [5], found
+    assert lines_of(found) == [7], found
     assert '`f` is not proven to stay inside a base' in found[0], found
 
 

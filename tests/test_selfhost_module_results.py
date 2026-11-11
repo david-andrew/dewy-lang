@@ -24,6 +24,7 @@ def test_proof_requires_the_next_module_result(compiler, tmp_path, following, co
 def test_nested_module_groups_keep_declaration_order(compiler, tmp_path):
     source = tmp_path / 'groups.dewy'
     source.write_text('''$runtime_checks
+
 if $target.os =? 'linux' {
     if $build.mode =? 'debug' {const value:int64=41} else {const value:int64=42}
 } else {const value:int64=0}

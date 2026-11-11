@@ -25,7 +25,7 @@ main=():>void=>{
 '''
 
 REJECTED = {
-    'pop_empty': ('let xs:array<int64>=[]\nprintl(xs.pop())\n', '3:8: error: pop() of an empty array'),
+    'pop_empty': ('let xs:array<int64>=[]\nprintl(xs.pop())\n', '4:8: error: pop() of an empty array'),
     'pop_unguarded': ('last=(@xs:array<int64>):>int64=>xs.pop()\nlet a:array<int64>=[1]\nprintl(last(@a))\n',
                       'cannot prove pop() has an element to remove: missing lower bound'),
     'pop_index': ('take=(@xs:array<int64> i:int64):>int64=>xs.pop(i)\nlet a:array<int64>=[1]\nprintl(take(@a 0))\n',
@@ -56,6 +56,6 @@ def test_removal_rejected(compiler, tmp_path, name):
 def test_removal_runtime_checks(compiler, tmp_path):
     source = '$runtime_checks\n\ntake=(@xs:array<int64> i:int64):>int64=>xs.pop(i)\nlet a:array<int64>=[1 2]\nprintl(take(@a 1))\nprintl(take(@a 3))\n'
     listed = run(compiler, tmp_path, source, 'check', '--obligations')
-    assert 'program.dewy:2:41: runtime check: index is in bounds' in listed.stdout + listed.stderr, listed.stdout + listed.stderr
+    assert 'program.dewy:3:41: runtime check: index is in bounds' in listed.stdout + listed.stderr, listed.stdout + listed.stderr
     result = run(compiler, tmp_path, source, 'run')
     assert result.stdout == '2\n' and result.returncode == 101 and 'out of bounds' in result.stderr, result.stderr

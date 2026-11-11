@@ -38,6 +38,7 @@ def test_default_game_inline(compiler, tmp_path, debug):
 def test_record_inline_checks_and_loop_scope(compiler, tmp_path, target):
     source = tmp_path / 'checked.dewy'
     source.write_text((RUNTIME_CHECKS) + ('''$no_assumed_bounds
+
 Box:type=[value:int64]
 read=(box:Box at:int64):>Box=>{
  let table:array<int64 length=2>=[20 22]

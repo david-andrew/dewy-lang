@@ -6,6 +6,8 @@ import subprocess
 
 from tests.support import ROOT, compiler
 
+# Keep a lazy body before the prefix: resolving the tag loads more library source.
+EARLIER = 'identity = x => x\n'
 BODY = 'g = x => {\n    x * 2\n}\n'
 
 
@@ -28,9 +30,9 @@ def run(compiler, tmp_path, library):
 
 
 def test_bundle_metatag(compiler, tmp_path):
-    assert run(compiler, tmp_path, BODY + '$finite_floats\n') == (0, '6\n')
+    assert run(compiler, tmp_path, EARLIER + '$finite_floats\n' + BODY) == (0, '6\n')
 
 
 def test_unknown_metatag(compiler, tmp_path):
-    code, err = run(compiler, tmp_path, BODY + '$bogus\n')
+    code, err = run(compiler, tmp_path, EARLIER + '$bogus\n' + BODY)
     assert code != 0 and 'unknown directive `$bogus`' in err and 'LazyBody' not in err

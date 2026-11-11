@@ -22,7 +22,7 @@ def test_values_followed_by_positional_arguments_warn(compiler, tmp_path):  # no
     assert checked.returncode == 0, checked.stdout + checked.stderr
     warnings = [line for line in checked.stderr.splitlines() if 'warning:' in line]
     assert len(warnings) == 1, checked.stderr
-    assert ':4:17:' in warnings[0] and "'pair()' gives 2 values, filling as many positions" in warnings[0], warnings
+    assert ':6:17:' in warnings[0] and "'pair()' gives 2 values, filling as many positions" in warnings[0], warnings
 
 
 def test_values_inlay_hints_name_the_parameters(tmp_path):

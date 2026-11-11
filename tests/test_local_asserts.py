@@ -35,7 +35,7 @@ def test_other_module(compiler, tmp_path):
     # A caller in another module sees `panics`, through the helper module's own callers too.
     files = {'helper.dewy': HELPER, 'main.dewy': '$runtime_checks=false\n\nfrom p"helper.dewy" import twice\nmain=():>void=>printl(twice(3))\n'}
     result = run(compiler, tmp_path, files, 'check')
-    assert result.returncode != 0 and 'main.dewy:3:23: error: calling `twice` may panic (twice -> checked: `$runtime_assert` at' in result.stderr, result.stderr
+    assert result.returncode != 0 and 'main.dewy:4:23: error: calling `twice` may panic (twice -> checked: `$runtime_assert` at' in result.stderr, result.stderr
 
 
 def test_other_module_opted_in(compiler, tmp_path):

@@ -32,8 +32,8 @@ def test_conflicting_uses_warn_naming_both(compiler, tmp_path):  # noqa: F811
     source.write_text(SOURCE)
     found = warnings_of(compiler, source)
     assert len(found) == 1, found
-    assert ':4:5: warning: `rise` holds only temperature literals' in found[0]
-    assert '`t + rise` (line 5) needs a difference, `rise <? t` (line 6) a point' in found[0]
+    assert ':6:5: warning: `rise` holds only temperature literals' in found[0]
+    assert '`t + rise` (line 7) needs a difference, `rise <? t` (line 8) a point' in found[0]
     assert 'It stays a point' in found[0]
     run = subprocess.run([compiler, 'run', source], capture_output=True, text=True, timeout=60, check=False)
     assert run.stdout.split() == ['45°C', '68°F', 'true'], run.stdout + run.stderr
@@ -58,6 +58,6 @@ def test_editor_shows_the_warning(tmp_path):
         diagnostics = client.set_text(source.as_uri(), SOURCE, 1)
         warnings = [d for d in diagnostics if d['severity'] == 2 and 'holds only temperature literals' in d['message']]
         assert len(warnings) == 1, diagnostics
-        assert warnings[0]['range']['start'] == {'line': 3, 'character': 4}, warnings
+        assert warnings[0]['range']['start'] == {'line': 5, 'character': 4}, warnings
     finally:
         client.close()

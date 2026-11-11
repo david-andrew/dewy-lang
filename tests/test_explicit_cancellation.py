@@ -65,7 +65,7 @@ def test_quickfix_writes_the_forwarding(tmp_path):
         })
         assert len(actions) == 1, actions
         edits = actions[0]['edit']['changes'][source.as_uri()]
-        at = {'line': 2, 'character': 27}
+        at = {'line': 3, 'character': 27}
         assert edits == [{'range': {'start': at, 'end': at}, 'newText': ' or_throw<Canceled>'}], edits
         fixed = text.replace('outcome(k) ??', 'outcome(k) or_throw<Canceled> ??')
         diagnostics = client.set_text(source.as_uri(), fixed, 2)

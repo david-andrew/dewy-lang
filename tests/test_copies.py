@@ -35,7 +35,7 @@ bad=():>int64=>{
             args += ['-o', tmp_path / 'program']
         result = subprocess.run(args, capture_output=True, text=True, timeout=30)
         assert result.returncode != 0
-        assert 'strict.dewy:4:' in result.stderr
+        assert 'strict.dewy:5:' in result.stderr
         assert 'implicit costly copy' in result.stderr
 
 
@@ -44,7 +44,7 @@ def test_module_local_policy_and_owned_call(compiler, tmp_path, strict_caller):
     if strict_caller:
         library = '''change=(values:array<int64>):>int64=>{values[0]=99 return values[0]}
 '''
-        directive = '$explicit_copies\n'
+        directive = '$explicit_copies\n\n'
     else:
         library = '''$explicit_copies
 
