@@ -174,6 +174,7 @@ struct ArmState:
     wild: bool = false
 xh_pattern = (ms: mut MatchState, arm_state: mut ArmState, arm: int, p: int, st: int, hidden: int, dewy: bool, seen_before: bool[], finite_before: int, domain_known: bool, int_dom: bool, str_domain: int):
     pk = xh_nodes[0][p].kind
+    typed_variant = -1
     pos = xh_nodes[0][p].pos
     binding = 0
     value = 0
@@ -196,6 +197,7 @@ xh_pattern = (ms: mut MatchState, arm_state: mut ArmState, arm: int, p: int, st:
             vi = int(uu_index(st, pt))
             si = int(xh_types[0][st].st)
             xh_nodes[0][p].kind = .pvariant
+            typed_variant = vi
             xh_nodes[0][p].name = xh_variants[0][int(xh_structs[0][si].variants) + vi].name
             if binding != 0: value = xh_node(.narrow, value, vi, pt, pos)
         else if xh_union(st) and xh_union(pt) and xh_host[0].within(pt, st):
@@ -282,7 +284,8 @@ xh_pattern = (ms: mut MatchState, arm_state: mut ArmState, arm: int, p: int, st:
         return
     if pk == .pvariant and xh_types[0][st].kind == .enum_:
         si = int(xh_types[0][st].st)
-        vi = xh_find_variant(si, int(xh_nodes[0][p].name))
+        vi = typed_variant
+        if vi < 0: vi = xh_find_variant(si, int(xh_nodes[0][p].name))
         if vi < 0: xh_host[0].error(p, 5, st, 0, "")
         xh_nodes[0][p].aux2 = i32(vi)
         if dewy and xh_structs[0][si].union_ and ms.seen[vi]: xh_host[0].error(p, 6, xh_struct_targ(si, vi), 0, "")

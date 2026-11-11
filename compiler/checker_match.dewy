@@ -200,6 +200,7 @@ ArmState:type=[
 ]
 xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hidden:XHWord dewy:bool seen_before:array<bool> finite_before:XHWord domain_known:bool int_dom:bool str_domain:XHWord):>void=>$unsafe {
     let pk=xh_nodes[0].ptr[p].kind
+    let typed_variant:XHWord=-1
     let pos=xh_nodes[0].ptr[p].pos
     # Dewy bindings are ordinary independent values initialized from the once-evaluated
     # scrutinee. Type patterns reuse union tag dispatch.
@@ -227,6 +228,7 @@ xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hid
             let vi=uu_index(st pt)
             let si=XHWord(xh_types[0].ptr[st].st)
             xh_nodes[0][p].kind='pvariant'
+            typed_variant=vi
             xh_nodes[0][p].name=xh_variants[0][XHWord(xh_structs[0].ptr[si].variants) + vi].name
             if binding not=? 0 {value=xh_node('narrow' value vi pt pos)}
         } else if xh_union(st) and xh_union(pt) and xh_host[0].within(pt st) {
@@ -326,7 +328,8 @@ xh_pattern=(@ms:MatchState @arm_state:ArmState arm:XHWord p:XHWord st:XHWord hid
     }
     if pk =? 'pvariant' and xh_types[0].ptr[st].kind =? 'enum_' {
         let si=XHWord(xh_types[0].ptr[st].st)
-        let vi=xh_find_variant(si XHWord(xh_nodes[0].ptr[p].name))
+        let vi=typed_variant
+        if vi <? 0 {vi=xh_find_variant(si XHWord(xh_nodes[0].ptr[p].name))}
         if vi <? 0 {xh_host[0].error(p 5 st 0 "")}
         xh_nodes[0][p].aux2=int32<overflow='wrap'>(vi)
         if dewy and xh_structs[0].ptr[si].union_ and ms.seen[vi] {xh_host[0].error(p 6 xh_struct_targ(si vi) 0 "")}

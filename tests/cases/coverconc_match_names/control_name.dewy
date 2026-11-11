@@ -1,0 +1,11 @@
+# modes: native native-release
+import p"../../fixtures/coverconc_payload/status.dewy" as wire
+load = (hit:bool):>wire.Canceled | Canceled => if hit wire.Canceled[9] else Canceled
+main = () => {
+    loop hit in [true false] {
+        match load(hit) {
+            value:wire.Canceled => printl"data {value.code}"
+            <Canceled> => printl"control"
+        }
+    }
+}
