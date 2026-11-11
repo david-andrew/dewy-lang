@@ -1,0 +1,45 @@
+# modes: native native-release
+# Two rooms share a relay; source names survive a named wait.
+post = (out:Channel<string> room:string) => {
+    loop n in [1..5) {
+        out.send("{room}/{n}") or_throw
+    }
+    out.close()
+}
+main = () => {
+    let general = channel<string>(1)
+    let support = channel<string>(1)
+    let stop = channel<bool>(1)
+    let support_ready = @support.receive
+    let general_open = true
+    let support_open = true
+    let transcript:array<string> = []
+    let general_count = 0
+    let support_count = 0
+    concurrent {
+        spawn post(general "general")
+        spawn post(support "support")
+        loop general_open or support_open {
+            match select(if general_open @general.receive else none
+                         if support_open @support_ready else none
+                         @stop.receive) {
+                text:general.string => {
+                    general_count += 1
+                    transcript.push(text)
+                }
+                text:(@support_ready).<string> => {
+                    support_count += 1
+                    transcript.push(text)
+                }
+                <general.Closed> => { general_open = false }
+                <(@support_ready).Closed> => { support_open = false }
+                <Canceled> => return Canceled
+                _:bool => break
+                _ => break
+            }
+        }
+    }
+    printl"rooms {general_count} {support_count}"
+    loop text in transcript.sorted { printl(text) }
+    stop.close()
+}

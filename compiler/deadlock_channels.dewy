@@ -1,12 +1,12 @@
 $runtime_checks
 
-from p"deadlock.jo" import (DlLoc dc_mod dc_qmod dc_smod pc_mod dc_ffns dc_fcalls dc_closes dc_trips dc_cancels dc_cancelable_groups dc_actors dc_warned)
+from p"deadlock.jo" import (DlLoc dc_mod dc_qmod dc_smod pc_mod dc_ffns dc_fcalls dc_closes dc_trips dc_cancels dc_cancelable_groups dc_actors dc_warned dl_inits)
 from p"deadlock_locations.dewy" import (dl_resolve dl_unknown dl_makes_handle dl_key dl_line)
 from p"prelude.jo" import (dp_paths dp_mods)
 from p"ast.jo" import (nodes nkids kid has_flag NF_U64 NF_STEP NF_EXCL_FIRST NF_INCLUSIVE)
-from p"check.jo" import (fns globals)
+from p"check.jo" import (fns globals locals LF_CAPTURE)
 from p"expr.jo" import (ntype)
-from p"util.jo" import (name_of files pos_file)
+from p"util.jo" import (name_of files pos_file intern)
 from p"concurrency.jo" import (concurrency_task_module)
 from p"types.jo" import (T_NONE tkind structs types struct_targ)
 from p"error_ops.dewy" import (value_members exception_member)
@@ -94,11 +94,25 @@ dc_wait_set=(n:ChannelWord):>int64=>$unsafe {
     if nm =? "merged" and files.ptr[pos_file(nodes.ptr[d].pos)].path.endswith("/prelude/inbox.dewy") {return 2}
     0
 }
-# The channel of a `@x.receive` argument of such a call (the receiver `x`), else 0: a ticker's
-# `next`, an inbox's, a timeout and every other argument are not consumers.
-dc_wait_source=(a0:ChannelWord):>int64=>$unsafe {
+# The channel of a receive written, conditionally enabled or named in such a call. The
+# declaration index already built for channel identities resolves named waits; no body scan.
+# O(the argument's wrappers + at most eight local aliases).
+dc_wait_source=(a0:ChannelWord depth:ChannelWord=0):>int64=>$unsafe {
     let a=a0
     loop nodes.ptr[a].kind =? 'conv' {a=ChannelWord(nodes.ptr[a].a)}
+    if nodes.ptr[a].kind =? 'call' and nodes.ptr[a].aux =? 0 and nodes.ptr[a].sym >? 0 and nkids(a) =? 2 {
+        let g=ChannelWord(nodes.ptr[a].sym)
+        let d=ChannelWord(fns.ptr[g].decl)
+        if fns.ptr[g].mod =? concurrency_task_module and d not=? 0 and nodes.ptr[d].name =? int32(intern("__select_when")) {
+            return dc_wait_source(kid(a 1) depth)
+        }
+    }
+    if nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) and nodes.ptr[a].sym >? 0 and depth <? 8 {
+        let l=ChannelWord(nodes.ptr[a].sym)
+        if ChannelWord(locals.ptr[l].flags) & LF_CAPTURE not=? 0 and locals.ptr[l].outer >? 0 {l=ChannelWord(locals.ptr[l].outer)}
+        let d=dl_inits.get(l)
+        if d not=? none {return dc_wait_source(ChannelWord(nodes.ptr[d].b) depth + 1)}
+    }
     if nodes.ptr[a].kind not=? 'partial' or nodes.ptr[a].sym <=? 0 or nkids(a) not=? 1 {return 0}
     let g=ChannelWord(nodes.ptr[a].sym)
     if not dc_is(ChannelWord(fns.ptr[g].mod)) or fns.ptr[g].decl =? 0 {return 0}
