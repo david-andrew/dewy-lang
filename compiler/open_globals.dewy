@@ -1,0 +1,36 @@
+$runtime_checks
+from p"ast.jo" import (nodes)
+from p"check.jo" import (fns globals locals open_globals)
+from p"checks_hints.dewy" import (empty_hint)
+from p"checks_thin.dewy" import (zonk_tree)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"type_ops.dewy" import (zonk)
+from p"types.jo" import (has_var)
+from p"util.jo" import (name_of)
+
+OpenGlobalWord:type=int64<overflow='wrap'>
+# the open globals' types, now that every function is checked: each is settled, or an error;
+# what was checked before it was settled sees its type now
+settle_open_globals=():>void=>$unsafe {
+    loop g in open_globals {
+        let t=zonk(OpenGlobalWord(globals.ptr[g].type))
+        if has_var(t) {
+            let nm=name_of(OpenGlobalWord(globals.ptr[g].name))
+            fatal(nodes.ptr[OpenGlobalWord(globals.ptr[g].decl)].pos "cannot infer the type of '{nm}' (nothing is put in it); add a type annotation{empty_hint(nm t)}");
+        }
+        globals.ptr[g].type=int32(t)
+    }
+    loop fi in [1..fns.length) {
+        if fns.ptr[fi].state not=? 2 {continue}
+        zonk_tree(OpenGlobalWord(fns.ptr[fi].body))
+        loop l in fns.ptr[fi].locals {locals.ptr[l].type=int32(zonk(OpenGlobalWord(locals.ptr[l].type)))}
+        loop i in [0..fns.ptr[fi].ptypes.length) {fns.ptr[fi].ptypes[i]=zonk(fns.ptr[fi].ptypes[i])}
+        loop i in [0..fns.ptr[fi].targs.length) {fns.ptr[fi].targs[i]=zonk(fns.ptr[fi].targs[i])}
+        if fns.ptr[fi].ret not=? 0 {fns.ptr[fi].ret=int32(zonk(OpenGlobalWord(fns.ptr[fi].ret)))}
+        if fns.ptr[fi].fntype not=? 0 {fns.ptr[fi].fntype=int32(zonk(OpenGlobalWord(fns.ptr[fi].fntype)))}
+    }
+    loop g in [0..globals.length) {
+        if globals.ptr[g].type not=? 0 {globals.ptr[g].type=int32(zonk(OpenGlobalWord(globals.ptr[g].type)))}
+        if globals.ptr[g].decl not=? 0 {zonk_tree(OpenGlobalWord(globals.ptr[g].decl))}
+    }
+}
