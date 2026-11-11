@@ -636,3 +636,20 @@ section linked. ROADMAP.md lists them in one line each.
   - Being redesigned: Ctrl-C, task groups and protection as blocks where `return`,
     `break` and `or_throw` act on the enclosing function as usual (Q4); settings chosen
     by a run-time value, so one entry file with a function per environment works (Q7).
+- Batch 8 (David, 2026-11-11), from D4:
+  - **Tie order in `select`** (D4 Q9): `priority='fair' | 'index'` replaces `ties=` (batch 5);
+    `'index'` takes the written waits in argument order, deadline last. `Sent` is withdrawn
+    with sends inside `select`. Considered: `'listed'` (cold read 4/4/3 against `'index'`'s
+    4/4/2); David prefers `'index'`.
+  - **Metatags prefix what they attach to** (D4 Q6), as the general rule: a tag or label that
+    applies to a construct is written before it (a loop, a block, a statement, a declaration,
+    entry `main`); a module header sits at file start or after the initial imports. Replaces
+    containing-scope placement and the first-line-inside-`parallel` exception. Whether
+    program settings stay fixed at compile time is D4 Q7.
+  - **Ctrl-C and other signals** (D4 Q4, direction): not new syntax. Catching Ctrl-C should
+    be something done in parallel with the regular work, for example
+    `parallel { work(); loop { signals.ctrl_c.next(); printl"KeyboardInterrupt" } }`, and the
+    same shape should handle any external signal. "Work largely within the existing design,
+    utilize Dewy's strengths and style" rather than inventing syntax. The names
+    (`signals.ctrl_c`, `.next()`) and how the handler stops when the work is done are open.
+    The `inline` scope-block proposal (`proposals/scope-blocks/`) is not taken.

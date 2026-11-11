@@ -12,6 +12,7 @@
   - `or_throw` forwards an error to the caller, `??` substitutes a default for any error or `none`, and `??<E>` does so only for error type `E`.
   - `@f` is a handle to function `f`, and `$name` is a metatag.
 - **Revised 2026-11-07:** D4, D10, D11, D28, D29, D31 and D33–D37 were revised together. Independent agents dogfooded them twice, they were made consistent with each other, and every name was read cold. Each item states its floors and whether it is ready.
+- **Revised 2026-11-11:** your answers to D4 Q6 and Q9 are in decisions.md, batch 8. D4 Q4 is being redesigned again in your direction (Ctrl-C handled in parallel with the work). D4 Q7 is updated for Q6, which adds Q19.
 - **Revised 2026-11-10:** D4 Q4 and Q7 are back, redesigned after your answers: Ctrl-C and the other scopes as `inline` blocks (four rounds), and settings chosen at run time (six rounds), each dogfooded, regraded and reviewed independently.
 - **Revised 2026-11-09:** D4's `select` (v6): arms match by type, your `<heart.Tick>` members tell sources apart (built by `$named`), `race` cancels, `merged` drains. Eleven rounds, six independent reviews, every new spelling read cold. Q10 (`type of string`, `ticker<T>`) is withdrawn: source-qualified members made it unnecessary.
 - **Closed:** D22 (`$parallel_safe` deleted), D26 and D27. Your answers of 2026-11-07 are in decisions.md, batch 4; of 2026-11-09 (D4 Q8, Q11–Q17), batch 7.
@@ -19,15 +20,13 @@
 
 **Questions at a glance**
 - **(a) Changes something you decided:**
-  - D4 Q6: metatags go before the construct they affect, language-wide;
   - D4 Q7: settings chosen by a run-time value; your one-file idiom works (changes the entry-point rule);
-  - D4 Q9: `priority=` replaces `ties=` (`'listed'` or your `'index'`), and `Sent` is withdrawn;
   - D38 Q1: snake_case naming style;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
 - **(b) New syntax or surface:**
-  - D4 Q4: Ctrl-C, task groups and protection as `inline` blocks that are the caller's code;
+  - D4 Q19: how a module header is told apart from a setting that prefixes the first declaration;
   - D4 Q18 (optional): `memory_left`;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D11 Q2: `check=` or `valid_if=`;
@@ -48,6 +47,7 @@
   - D37 Q2;
   - D38 Q2: prefer familiar words;
   - D39 Q2: `stack` and `Ragged`.
+- **Being redesigned after your answers:** D4 Q4 (Ctrl-C and signals as event sources handled in parallel).
 - **Unchanged:** D30 (function types without parentheses), D32 (time zone data license) and D21 (packages).
 
 ---
@@ -56,7 +56,7 @@
 
 ### D4. One unified `parallel` surface: v5
 
-- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` waits on channel operations and its arms match the outcomes by type; `race` is the word that cancels the losers. Ctrl-C catching, task groups and cleanup protection are `inline` blocks that are the caller's own code (Q4); compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
+- **BLUF:** three forms cover data-dependent steps, parallel iteration, and owned background work. `select` waits on channel operations and its arms match the outcomes by type; `race` is the word that cancels the losers. Ctrl-C is being redesigned as an event source handled in parallel with the work (Q4); compute stops only at explicit checkpoints or cancelable operations. Settings go before their target.
 - **Status:** first-pass paper dogfood covered fourteen scenarios; independent dogfood in `proposals/concurrency/unified/v5-dogfood.md` found must-fix issues, now corrected in this text. Your approved names, `$explicit_cancellation` and `main`'s `BackgroundTasks` parameter stay. The remaining surface questions are below; no repeated Q1 or Q3. Full design and complete sources: `~/dev/tmp/par5/parallel-v5.md`, `~/dev/tmp/par5/programs/`.
 
 ```dewy
@@ -117,7 +117,7 @@ main = () => {
         }
         relay(commands chat) or_throw
     }
-    task.tasks inline with group {
+    task.tasks inline with group {          # form being redesigned (Q4)
         let saver = group.spawn(@autosave)
         let tick = ticker(500ms)
         defer tick.stop()
@@ -141,57 +141,7 @@ main = () => {
   - `task.protect_from_cancel(5s) inline { save(value) }` lets a save run despite the parent's pending cancel. Its own deadline is cooperative, and the result still reports save errors or `Timeout`.
   - Put a prompt loop inside `task.catch_ctrl_c inline { ... }` (or `inline with ctrl_c { ... }` for the listener) to take Ctrl-C as an event or `Interrupted` input result. The scope ends with the brace; the listener can't outlive it.
 
-- **A prompt with its own Ctrl-C behavior:** all application names below are declared; `input`, `Interrupted`, and the clock/printing types are standard-library/prelude names.
-
-```dewy
-# Ctrl-C during input clears the line; EOF/quit leaves the visible scope.
-import p"@lib/std/tasks.dewy" as task
-
-repl = () => task.catch_ctrl_c inline {
-    loop true {
-        let line = input("> ") ??<Interrupted> { printl(""); continue } ?? break
-        if line =? "quit" break
-        printl"you said {line}"
-    }
-}
-main = () => {
-    repl() or_throw
-    # The catcher ended with the brace.
-    printl"normal Ctrl-C behavior restored"
-    sleep(100ms) or_throw
-}
-```
-
-- **Save on Ctrl-C:** normal cancellation stops the search; a protected save handles its own errors and then preserves the original `Canceled` (exit 130).
-
-```dewy
-# Ctrl-C requests ordinary cancellation. Save, then preserve exit status 130.
-import p"@lib/std/tasks.dewy" as task
-
-search = (@best:int):>void | Canceled => {
-    loop n in [0..1_000_000_000) {
-        check_cancel() or_throw
-        if n % 7919 =? 0 best = n
-    }
-}
-save = (best:int) => {
-    p"best.txt".write_text("{best}\n") or_throw;
-    p"best.txt"
-}
-main = () => {
-    let best:int = 0
-    search(@best) ??<Canceled> {
-        match task.protect_from_cancel(5s) inline { save(best) } {
-            saved:Path => printl"saved to {saved}"
-            <Timeout> => printl("save deadline expired" file=stderr)
-            <Canceled> => Canceled or_throw
-            problem:error => printl("save failed: {problem}" file=stderr)
-        }
-        return Canceled
-    }
-    save(best) or_throw;
-}
-```
+- **Ctrl-C examples:** being redesigned (Q4).
 
 - **Arguments and program-lifetime tasks compose:** both parameter types are supplied at entry, in either order; an ordinary explicit call supplies both normally. `argparse` keeps its descriptor design. This complete CLI includes its HTTP helper; it saves full HTTP responses from localhost:8080.
 
@@ -247,10 +197,8 @@ $program.max_memory = 512MiB
 
 run = () => printl"{available_cores} cores allowed"
 laptop = () => run()                # runs at 2
-server = () => {
-    $program.max_cores = 8          # a function in the entry file may replace the default
-    run()                           # runs at 8, and so do the tasks it starts
-}
+$program.max_cores = 8              # prefixes server (Q6): replaces the default for its calls
+server = () => run()                # runs at 8, and so do the tasks it starts
 main = (argv:array<string>) => {
     let environment = argv.get(0) ?? "laptop"
     if environment =? "laptop" laptop()
@@ -274,53 +222,19 @@ main = (argv:array<string>) => {
   - **Frame code:** use nonwaiting `ch.drain` and background jobs; channel/task/timer waits remain errors in `update`/`draw`. The injected group survives `main` until the window closes.
   - **Entrypoint arguments:** accept at most one `array<string>` and one `BackgroundTasks`, by exact type rather than parameter name; no extra injections into ordinary helpers. Only the selected file's entry `main` runs automatically.
   - **Limits:** settings are in source, caps count cores, and `available_cores` combines hardware/affinity and source limits. No environment-variable cap. Program task admission retains the decided explicit-allocation-failure policy.
-- **`select`, `race` and channel waits:** decided 2026-11-09 (decisions.md, batch 7), except Q9 below. Full text: `proposals/concurrency/unified/select-v6-round11.md`.
+- **`select`, `race` and channel waits:** decided 2026-11-09 and 2026-11-11 (decisions.md, batches 7 and 8). Full text: `proposals/concurrency/unified/select-v6-round11.md`.
 - **Surface questions for you:**
-  - **Q4 (b): Ctrl-C, task groups and protection as blocks: a call marked `inline` takes a brace that is the caller's own code?** What it does:
-
-```dewy
-repl = () => {
-    task.catch_ctrl_c inline {               # Ctrl-C clears the line instead of quitting
-        loop true {
-            let line = input("> ") ??<Interrupted> { printl(""); continue } ?? break
-            if line =? "quit" return         # leaves repl, not a callback
-            printl"you said {line}"
-        }
-    }
-    printl"end of input"
-}
-
-serve = (port:int) => task.tasks inline with group {   # group is created by the call
-    group.spawn(@accept_loop(port));
-    let command = read_command or_throw      # forwards from serve; children stop, then join
-    if command =? "quit" return              # stops the children, joins, leaves serve
-}
-
-match task.protect_from_cancel(5s) inline { save(best) } {
-    saved:Path => printl"saved to {saved}"
-    <Timeout> => printl("save deadline expired" file=stderr)
-    problem:error => printl("save failed: {problem}" file=stderr)
-}
-```
-
-    - `inline { … }` binds nothing; `inline with name { … }` binds what the call hands in. A brace without `inline` stays a separate block, as today, so the parser never needs to know the callee.
-    - In the brace, `return`, `break`, `continue` and `or_throw` act on the function that wrote it, exactly as in a plain block; an assignment doesn't catch them (your notes at `discussion_points.md:465` and `:502`; line 455 is about generator literals). The callee's `defer`s run on the way out.
-    - `catch_ctrl_c`, `tasks` and `protect_from_cancel` are ordinary library functions with a `scope(…:>R)` parameter, checked once; any library can write its own (`bracket(open close) inline with log { … }` releases on every exit). The block runs at most once, on the caller's task; a block that runs several times would be a later, separate marker (your `#insert body(break=…)` note).
-    - Leaving a task group early (`return`, `break`, `or_throw`, a failure value) stops its children, then joins, as `concurrent` already does. A group's error type is part of its type, `Tasks<E>`. A shield's own deadline is `Timeout` even after Ctrl-C has canceled the parent; operations inside it still report `Canceled`.
-    - **Trades you should know:** if a cleanup step fails while the block is returning normally, the `return` doesn't happen: the failure becomes the call's result and the line after the call runs (with a warning if that failure is defaulted or discarded). If the block is already returning a failure, the cleanup's failure is dropped (an error with a cause belongs to the cleanup design). `or_throw` in the brace is not seen by a `??` on the call.
-    - **Cold read:** three of six readers took `do { … }` for a callback; `inline { … }` and `inline with group { … }` were read as the caller's code by all three, and `group` as created by the call. `within` also read well but is the deadline function. The `scope(…)` parameter type read weakly; its diagnostic ("this block is part of the caller, so `return` leaves this function") carries it.
-    - **Dogfooded:** 17 programs over four rounds, three independent regrades and three correctness reviews. Floor 3 from the independent regrader on three programs, all from the trades above: a save that needs four match arms (`Timeout` beside `Canceled`), a `Canceled` arm whose error was rewritten out of sight, and a `return 0` that becomes `-1` when a child had failed. The rest are 4, from those trades or decided v6 surface. No open must-fix. Full rules: `proposals/scope-blocks/summary.md`. Cleanup (`defer` alternatives) is still a later round; this form is what a region-shaped answer would use. **Rec:** yes; reversible.
-  - **Q6 (a, b): make construct settings prefix their target language-wide?** Tags and labels sit before loops, blocks, and declarations. One contiguous module header may be at file start or after the initial imports, before the first ordinary declaration/statement; imported units are in scope. Later prefixes apply only to their next construct. Program settings may also directly prefix entry `main`, and are fixed at compile time. This replaces both current containing-scope placement and the first-line-inside-parallel exception. It unblocks consistent examples in every design item. **Rec:** yes. Reversible before the surface ships; broader than concurrency, and explicitly changes the prior placement direction.
+  - **Q4: being redesigned again, in your direction.** Your answer (decisions.md, batch 8): Ctrl-C is an event source handled in parallel with the regular work, `parallel { work(); loop { signals.ctrl_c.next(); printl"KeyboardInterrupt" } }`, and the same shape handles any external signal. The round starts from existing constructs (`parallel`, event sources like `ticker`, `select`, `race`, types), adds syntax only where it shows they can't express a case, and covers how the handler stops when the work ends, what Ctrl-C does while nobody listens, the REPL, and whether task groups and protection still need any special form. The `inline` scope blocks are withdrawn.
   - **Q7 (a): settings chosen by a run-time value, as above?** What it does:
-    - A cap, schedule or policy (`$program.max_cores`, `$program.max_memory`, `$parallel.*`, `$time.zone`, …) written in a function or block starts at its line and covers the rest of that scope, what it calls, and the tasks it starts, even after the call returns. `{ $program.max_cores = cores; run() }` limits one call; `cores` may be a value read from a config file. Code settings (`$runtime_checks`, `$fast_math`) still cover their whole scope.
+    - With Q6, a setting attaches to the construct after it. Above a function it covers that function's calls, what they call, and the tasks they start, even after the call returns: your sketch works as written. Inside a body it covers the next statement or block: `$program.max_cores = cores` then `run()`, or `{ … }` for several statements; `cores` may be a value read from a config file. This replaces the rounds' "starts at its line and covers the rest of the scope", which predated your Q6 answer.
     - The entry file's header is the default; a function in the entry file may replace it. Otherwise the tightest cap in force wins, and a looser line warns ("this asks for 16 cores; `server` allows 8; the call runs at 8"). A library can only narrow what the program chose, never raise it.
     - `$runtime_checks` can't be chosen from a value: with checks off, an unproved index is a compile error, so a flag could never skip a proof. `$fast_math = flag` can: both bodies are compiled and the call picks one, with a warning. It doesn't recompile another module's concrete functions (their numerics may rely on IEEE); a library generic follows the caller unless it pins `$fast_math = false`, with a warning.
     - `$program.max_memory` counts the caller's heap blocks while it is in force; using it anywhere warns once per build that allocations under it pay for the accounting. Past the cap the program ends, unless the module uses `$explicit_allocation_failure`.
     - A function value keeps the zone of the place its `@` was written, so a library that sets UTC doesn't change what your callback's `today` means; caps follow whoever runs it.
-    - **Changes from your decisions:** settings may be set in any function or block, not only the entry header or `main` (batch 4); calling another file's `main` with different caps runs under the tighter one instead of being a compile error (still an error for `$target` and `$build.mode`); a cap written inside a body starts at its line rather than covering the whole scope. Your sketch put the setting on the line above the function; that form needs Q6, so without Q6 it goes inside the function.
+    - **Changes from your decisions:** settings may prefix any function, block or statement, not only the entry header or `main` (batch 4); calling another file's `main` with different caps runs under the tighter one instead of being a compile error (still an error for `$target` and `$build.mode`); code settings such as `$runtime_checks` follow Q6 too, prefixing what they apply to.
     - **Dogfooded:** 17 programs over six rounds, with independent regrades and a correctness review. Floor 4: `run()` doesn't show the cap it runs under, `today` doesn't show the zone, a handler table doesn't show which function runs, and a looser library cap still reads 16 while running at 8 (so a library can't raise the program). Full rules: `proposals/runtime-settings/summary.md`. **Rec:** yes; reversible.
+  - **Q19 (b): how is the module header told apart from a setting that prefixes the first declaration?** In the example above, `$program.max_cores = 2` sits at the top of the file, and the next declaration is `run`. Q6 makes a setting directly before a declaration that declaration's prefix, so without a rule the header would quietly become `run`'s prefix. **Rec:** a blank line ends the module header; a setting with no blank line before its declaration prefixes it. Dewy already gives blank lines meaning in array literals (batch 6). Alternatives: the header must come before the imports; or the header is the settings before the first blank line *or* the first declaration, with an error when ambiguous. Reversible.
   - **Q18 (b), optional: `memory_left`, the bytes a call can still allocate under the tightest memory cap in force?** It lets a game skip loading an asset that won't fit instead of ending at the cap. Cold read: `memory_left` read correctly by all three readers (5/5/3); `available_memory` failed (one reader took it for the machine's free RAM); `memory_budget` read as the cap itself. **Rec:** add it; reversible.
-  - **Q9 (a): `priority='fair' | 'listed'` (or `'index'`) replaces your approved `ties=`, and `Sent` is withdrawn?** You asked about `'index'`. Cold read: all three readers read both correctly as "the earliest argument wins a tie"; confidence `'listed'` 4/4/3, `'index'` 4/4/2 (`'written'` 4/4/3, `'position'` 4/4/2, `'order'` 3/3/3). Two of three had taken your earlier `ties='first'` as "whichever became ready first in time". `Sent` existed only for sends inside `select`, now withdrawn. **Rec:** `'listed'`, by a little: it reads as the plain adjective "in the listed order", next to `'fair'`; `'index'` names the mechanism. Either is fine; reversible.
 - **Flagged, not new questions:**
   - `check_cancel()` is an explicit checkpoint, not an ambient opt-in; it has no active lifetime to bracket. It lives inside an ordinary computation function whose result carries `Canceled`.
   - `protect_from_cancel` and `within` are cooperative: nonchecking compute or an uninterruptible foreign call can exceed the requested duration while being joined.
