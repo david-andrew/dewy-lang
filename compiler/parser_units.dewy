@@ -1,0 +1,85 @@
+$runtime_checks
+from p"ast.jo" import (NF_LITERAL add_flag kid mk nkids nodes set_kid)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"lexer_units.dewy" import (unit_scale)
+from p"parse.jo" import (advance cur_pos expect p_toks partner pk ti tok_src)
+
+ParserUnitWord:type=int64<overflow='wrap'>
+# (m/s), (km/h), (m/s^2), (N*m): a parenthesized unit expression right after a number
+is_unit_group=(i:ParserUnitWord):>bool=>$unsafe {
+    let close=partner(i)
+    let j=i + 1
+    if j >=? close {return false}
+    loop j <? close {
+        let k=p_toks[j].kind
+        if k =? 'ident' {
+            if unit_scale(tok_src(j)) =? 0.0 {return false}
+        }
+        else if k not=? 'slash' and k not=? 'star' and k not=? 'caret' and k not=? 'int_lit' {return false}
+        j += 1
+    }
+    true
+}
+# the scale of the unit group at ti, e.g. (km/h); consumes it
+unit_group_scale=():>float64=>$unsafe {
+    let close=partner(ti)
+    advance();
+    let scale=1.0
+    let div=false
+    loop ti <? close {
+        let k=pk()
+        if k =? 'slash' {
+            div=true
+            advance();
+        }
+        else if k =? 'star' {
+            div=false
+            advance();
+        }
+        else if k =? 'ident' {
+            let f=unit_scale(tok_src(advance()))
+            if pk() =? 'caret' {
+                advance();
+                let pw=ParserUnitWord(p_toks[expect('int_lit' "an exponent")].ival)
+                let g=f
+                loop _ in [1..pw) {g=g * f}
+                f=g
+            }
+            if div {scale=scale / f} else {scale=scale * f}
+        }
+        else {fatal(cur_pos() "unexpected token in a unit");}
+    }
+    expect('rparen' "");
+    scale
+}
+scaled_literal=(e:ParserUnitWord scale:float64):>int64=>$unsafe {
+    let k=nodes.ptr[e].kind
+    if k not=? 'int_lit' and k not=? 'float_lit' {
+        # [x 0](m/s): any element times the scale
+        if scale =? 1.0 {return e}
+        let f=mk('float_lit' nodes.ptr[e].pos)
+        nodes.ptr[f].fval=scale
+        add_flag(f NF_LITERAL)
+        let b=mk('binary' nodes.ptr[e].pos)
+        nodes.ptr[b].op=int32(60)
+        nodes.ptr[b].a=int32(e)
+        nodes.ptr[b].b=int32(f)
+        return b
+    }
+    let v=float64(nodes.ptr[e].ival)
+    if k =? 'float_lit' {v=nodes.ptr[e].fval}
+    let n=mk('float_lit' nodes.ptr[e].pos)
+    nodes.ptr[n].fval=v * scale
+    add_flag(n NF_LITERAL)
+    n
+}
+apply_unit=(e:ParserUnitWord):>int64=>$unsafe {
+    let scale=unit_group_scale
+    let k=nodes.ptr[e].kind
+    if k =? 'array' or k =? 'matrix' {
+        # [1.2 0](m/s): each element
+        loop i in [0..nkids(e)) {set_kid(e i scaled_literal(kid(e i) scale))}
+        return e
+    }
+    scaled_literal(e scale)
+}

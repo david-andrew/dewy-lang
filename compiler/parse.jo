@@ -10,6 +10,7 @@ use 'lexer_errors.dewy'
 use 'ast.jo'
 use 'literals.dewy'
 use 'node_store.dewy'
+use 'parser_units.dewy'
 
 toks: Token[]
 # A parse unit owns its EOF-terminated stream. Borrow once on entry; recursive
@@ -1076,76 +1077,6 @@ parse_postfix = (e0: int) -> int:
             e = u
         else: return e
     e
-
-# (m/s), (km/h), (m/s^2), (N*m): a parenthesized unit expression right after a number
-is_unit_group = (i: int) -> bool:
-    close = partner(i)
-    j = i + 1
-    if j >= close: return false
-    loop j < close:
-        k = p_toks[j].kind
-        if k == .ident:
-            if unit_scale(tok_src(j)) == 0.0: return false
-        else if k != .slash and k != .star and k != .caret and k != .int_lit: return false
-        j += 1
-    true
-
-# the scale of the unit group at ti, e.g. (km/h); consumes it
-unit_group_scale = () -> f64:
-    close = partner(ti)
-    advance()
-    scale = 1.0
-    div = false
-    loop ti < close:
-        k = pk()
-        if k == .slash:
-            div = true
-            advance()
-        else if k == .star:
-            div = false
-            advance()
-        else if k == .ident:
-            f = unit_scale(tok_src(advance()))
-            if pk() == .caret:
-                advance()
-                pw = int(p_toks[expect(.int_lit, "an exponent")].ival)
-                g = f
-                loop _ in [1..pw): g = g * f
-                f = g
-            if div: scale = scale / f
-            else: scale = scale * f
-        else: fatal(cur_pos(), "unexpected token in a unit")
-    expect(.rparen, "")
-    scale
-
-scaled_literal = (e: int, scale: f64) -> int:
-    k = nodes[e].kind
-    if k != .int_lit and k != .float_lit:
-        # [x 0](m/s): any element times the scale
-        if scale == 1.0: return e
-        f = mk(.float_lit, nodes[e].pos)
-        nodes[f].fval = scale
-        add_flag(f, NF_LITERAL)
-        b = mk(.binary, nodes[e].pos)
-        nodes[b].op = i32(int(Tok.star))
-        nodes[b].a = i32(e)
-        nodes[b].b = i32(f)
-        return b
-    v = f64(nodes[e].ival)
-    if k == .float_lit: v = nodes[e].fval
-    n = mk(.float_lit, nodes[e].pos)
-    nodes[n].fval = v * scale
-    add_flag(n, NF_LITERAL)
-    n
-
-apply_unit = (e: int) -> int:
-    scale = unit_group_scale()
-    k = nodes[e].kind
-    if k == .array or k == .matrix:
-        # [1.2 0](m/s): each element
-        loop i in [0..nkids(e)): set_kid(e, i, scaled_literal(kid(e, i), scale))
-        return e
-    scaled_literal(e, scale)
 
 parse_prefix = () -> int:
     pos = cur_pos()
