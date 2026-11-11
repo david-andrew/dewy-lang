@@ -161,8 +161,7 @@ handle_type_member=(t:TypeMemberWord name:TypeMemberWord):>int64=>{
     let text=name_of(name)
     if text =? "types" {return outcomes}
     let found:TypeMemberWord=0
-    let alternatives:array<int64>=[]
-    if is_union(outcomes) {alternatives=union_members(outcomes)} else {alternatives.push(outcomes)}
+    let alternatives=value_members(outcomes)
     loop a in alternatives {
         if type_short_name(a) =? text {
             if found not=? 0 {return 0}

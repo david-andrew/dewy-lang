@@ -272,9 +272,7 @@ handle_type_member = (t: int, name: int) -> int:
     text = name_of(name)
     if text == "types": return outcomes
     found = 0
-    alternatives: int[]
-    if is_union(outcomes): alternatives = union_members(outcomes)
-    else: alternatives.push(outcomes)
+    alternatives = value_members(outcomes)
     loop a in alternatives:
         if type_short_name(a) == text:
             if found != 0: return 0

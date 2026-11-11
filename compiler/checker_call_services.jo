@@ -6,6 +6,7 @@ use 'soa_helpers.dewy'
 use 'expr_routes.dewy'
 use 'expr_rare.dewy'
 use 'select_checks.dewy'
+use 'merged_checks.dewy'
 use 'checks_thin_expr.dewy'
 use 'checks_call_errors.dewy'
 use 'checks_builders.dewy'
@@ -130,6 +131,7 @@ call_ident_special = (n: int, expected: int) -> int:
     # (`select(if open @a.receive else none ...)`: a wait turned off, decisions.md batch 7)
     if nkids(n) > 0 and int(nodes[callee].name) == select_id(): return select_conditions(n, expected)
     # (`race(xs...)`: the spread must not be empty, as select needs a wait)
+    if nkids(n) > 0 and int(nodes[callee].name) == ci(60, "merged"): merged_nested_waits(n)
     return race_spread(n, expected)
 
 call_dotname = (n: int, expected: int) -> int:

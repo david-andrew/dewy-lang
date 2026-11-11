@@ -1,0 +1,30 @@
+# modes: native native-release
+main = () => {
+    let a = channel<int>(2)
+    let b = channel<int>(2)
+    let c = channel<int>(2)
+    a.send(1) or_throw
+    a.send(2) or_throw
+    b.send(10) or_throw
+    c.send(100) or_throw
+    a.close()
+    b.close()
+    c.close()
+    let inner = merged(@a.receive @b.receive)
+    let outer = merged(@inner.next @c.receive)
+    let total = 0
+    let count = 0
+    loop value in outer or_throw {
+        total += value
+        count += 1
+    }
+    printl"nested {count} {total} open {outer.open}"
+    let d = channel<int>(1)
+    d.send(4) or_throw
+    d.close()
+    let leaf = merged(@d.receive)
+    let middle = merged(@leaf.next())
+    let root = merged(@middle.next)
+    printl"deep {root.next or_throw<Canceled> ?? 0}"
+    printl"end {root.next is? none} {root.open}"
+}

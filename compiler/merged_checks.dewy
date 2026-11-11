@@ -1,0 +1,52 @@
+$runtime_checks
+from p"ast.jo" import (NF_AT NF_CHECKED add_flag has_flag kid kids nkids nodes set_list)
+from p"check.jo" import (dewy_at fns lib_dir syms)
+from p"checker_expr.dewy" import (check_expr lookup)
+from p"checks_builders.dewy" import bc_call
+from p"expr.jo" import (AUX2_PARTIAL last_checked check_expr_in_module)
+from p"types.jo" import (prune structs tkind types)
+from p"util.jo" import (files intern pos_file)
+
+MergeCheckWord:type=int64<overflow='wrap'>
+# A nested inbox ends with none, while a receive ends with Closed<T>. Normalize only a
+# written @inbox.next at merged's boundary; the outer inbox keeps one opaque source.
+# O(arguments), demanded only by calls to the prelude's merged; no function-body walk.
+merged_nested_waits=(n:MergeCheckWord):>void=>$unsafe {
+    if not dewy_at(nodes.ptr[n].pos) {return}
+    let s=lookup(intern("merged"))
+    if s =? 0 or syms.ptr[s].kind not=? 'fns' {return}
+    let d=MergeCheckWord(syms.ptr[s].decl)
+    if d =? 0 or files[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/prelude/inbox.dewy" {return}
+    let args=kids(n)
+    loop i in [0..args.length) {
+        let a=args[i]
+        let receiver_arg:MergeCheckWord=0
+        let field:MergeCheckWord=0
+        if nodes.ptr[a].kind =? 'partial' and nodes.ptr[a].sym >? 0 and nkids(a) =? 1 {
+            let method=MergeCheckWord(fns.ptr[MergeCheckWord(nodes.ptr[a].sym)].decl)
+            if method not=? 0 and nodes.ptr[method].name =? int32(intern("next")) and files[pos_file(nodes.ptr[method].pos)].path =? "{lib_dir}/prelude/inbox.dewy" {receiver_arg=kid(a 0)}
+        } else {
+            field=a
+            let prepared=false
+            if nodes.ptr[a].kind =? 'call' and nodes.ptr[a].aux2 =? int32(AUX2_PARTIAL) and nkids(a) =? 0 {
+                field=MergeCheckWord(nodes.ptr[a].a)
+                prepared=true
+            }
+            if nodes.ptr[field].kind =? 'field' and (has_flag(field NF_AT) or prepared) and nodes.ptr[field].name =? int32(intern("next")) {receiver_arg=MergeCheckWord(nodes.ptr[field].a)}
+        }
+        if receiver_arg =? 0 {continue}
+        let t=prune(check_expr(receiver_arg 0))
+        let receiver=last_checked
+        if field not=? 0 {nodes.ptr[field].a=int32(receiver)}
+        add_flag(receiver NF_CHECKED)
+        if tkind(t) not=? 'struct_' {continue}
+        let decl=MergeCheckWord(structs.ptr[MergeCheckWord(types.ptr[t].st)].decl)
+        if decl =? 0 or nodes.ptr[decl].name not=? int32(intern("Merged")) or files[pos_file(nodes.ptr[decl].pos)].path not=? "{lib_dir}/prelude/inbox.dewy" {continue}
+        let adapted=bc_call("__merged_receive" [receiver] nodes.ptr[a].pos)
+        nodes.ptr[adapted].aux2=int32(AUX2_PARTIAL)
+        check_expr_in_module(adapted MergeCheckWord(nodes.ptr[decl].mod));
+        args[i]=last_checked
+        add_flag(last_checked NF_CHECKED)
+    }
+    set_list(n args)
+}

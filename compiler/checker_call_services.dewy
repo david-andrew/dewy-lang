@@ -8,6 +8,7 @@ from p"range_checks.dewy" import (dewy_range_ordered dewy_range_tail_ordered)
 from p"expr_routes.dewy" import (breakpoint_call dewy_byte_read dewy_console_call dewy_method_call dewy_static_call)
 from p"expr_rare.dewy" import (variant_ctor)
 from p"select_checks.dewy" import (select_conditions)
+from p"merged_checks.dewy" import merged_nested_waits
 from p"checks_thin_expr.dewy" import (call_search_name check_copy to_int_word_limit)
 from p"checks_call_errors.dewy" import (call_dispatch_error call_fixed_array_error call_type_member_error)
 from p"checks_builders.dewy" import (bc_field bc_ident release_call relocate_call take_call)
@@ -141,6 +142,7 @@ call_ident_special=(n:CDWord expected:CDWord):>CDWord=>$unsafe {
     if nkids(n) >? 0 and nodes.ptr[kid(n 0)].kind =? 'array' {return type_sequence_call(n expected)}
     # (`select(if open @a.receive else none ...)`: a wait turned off, decisions.md batch 7)
     if nkids(n) >? 0 and CDWord(nodes.ptr[callee].name) =? select_id() {return select_conditions(n expected)}
+    if nkids(n) >? 0 and CDWord(nodes.ptr[callee].name) =? ci(60 "merged") {merged_nested_waits(n)}
     # (`race(xs...)`: the spread must not be empty, as select needs a wait)
     race_spread(n expected)
 }

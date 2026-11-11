@@ -1,0 +1,22 @@
+# modes: native native-release
+main = () => {
+    let a = channel<int>(1)
+    let b = channel<int>(1)
+    a.send(3) or_throw
+    b.send(7) or_throw
+    a.close()
+    b.close()
+    let inner = merged(@a.receive)
+    let outer = merged(@inner.next @b.receive)
+    let from_inner = 0
+    let from_b = 0
+    loop outer.open {
+        match outer.next {
+            value:inner.int => {from_inner += value}
+            value:b.int => {from_b += value}
+            <Canceled> => return Canceled
+            <none> => break
+        }
+    }
+    printl"opaque {from_inner} {from_b}"
+}

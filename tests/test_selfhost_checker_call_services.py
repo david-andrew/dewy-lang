@@ -7,6 +7,9 @@ from tests.test_selfhost_checker_resolve import compare
 from tests.test_selfhost_checker_call_convert import DRIVER as CONVERT_DRIVER, JO as CONVERT_JO, DOUBLES as CONVERT_DOUBLES
 
 JO = dict(CONVERT_JO)
+# This driver exercises call routing; nested inbox adaptation has its own tests.
+JO['merged_checks.dewy'] = 'merged_nested_waits=(n:int64):>void=>{}\n'
+JO['merged_checks.jo'] = 'merged_nested_waits = (n: int): return\n'
 DOUBLES = {name: dict(pair) for name, pair in CONVERT_DOUBLES.items()}
 EXTRA = {
     'expr.jo': r'''

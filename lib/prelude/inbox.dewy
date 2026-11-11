@@ -86,3 +86,12 @@ Merged:type = <T>[
 # `merged(waits...)`; the sources are copied into the inbox's own array)
 merged = <T>(...sources:(():>T | Closed<T> | Canceled)):>Merged<T> => Merged<T>[[sources...] __merge_new(sources.length -1)]
 merged = <T D>(...sources:(():>T | Closed<T> | Canceled) stop_when_idle:D):>Merged<T> => Merged<T>[[sources...] __merge_new(sources.length __task_nanoseconds(stop_when_idle))]
+
+# A nested inbox is one receive source of its parent: retire it only once its own next
+# has finished, after all buffered payloads. The compiler prepares this for @inbox.next
+# inside merged; direct next and select still expose none at the end.
+__merged_receive = <T>(inbox:Merged<T>):>T | Closed<T> | Canceled => {
+    let value = inbox.next
+    if value is? none return Closed<T>[]
+    value
+}

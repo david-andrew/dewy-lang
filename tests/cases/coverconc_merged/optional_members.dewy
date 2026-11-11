@@ -1,0 +1,18 @@
+# modes: native native-release
+main = () => {
+    let c = channel<int?>(2)
+    c.send(none) or_throw
+    c.send(7) or_throw
+    c.close()
+    let count = 0
+    let total = 0
+    loop true {
+        match select(@c.receive) {
+            n:c.int => {count += 1; total += n}
+            <none> => {count += 1}
+            <c.Closed> => break
+            <Canceled> => return Canceled
+        }
+    }
+    printl"optional {count} {total}"
+}

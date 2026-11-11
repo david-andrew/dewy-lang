@@ -90,7 +90,7 @@ wait_partial=(a0:PartialWord):>int64=>$unsafe {
         let d=PartialWord(fns.ptr[PartialWord(nodes.ptr[a].sym)].decl)
         let name=name_of(PartialWord(nodes.ptr[d].name))
         let path=files[pos_file(nodes.ptr[d].pos)].path
-        if (name =? "receive" or name =? "next") and (path =? "{lib_dir}/prelude/channels.dewy" or path =? "{lib_dir}/prelude/inbox.dewy" or path =? "{lib_dir}/prelude/mpmc.dewy") or name =? "reserve" and (path =? "{lib_dir}/prelude/mpmc.dewy" or path =? "{lib_dir}/prelude/channels.dewy" or path =? "{lib_dir}/prelude/spsc.dewy") {
+        if (name =? "__merged_receive" and path =? "{lib_dir}/prelude/inbox.dewy") or (name =? "receive" or name =? "next") and (path =? "{lib_dir}/prelude/channels.dewy" or path =? "{lib_dir}/prelude/inbox.dewy" or path =? "{lib_dir}/prelude/mpmc.dewy") or name =? "reserve" and (path =? "{lib_dir}/prelude/mpmc.dewy" or path =? "{lib_dir}/prelude/channels.dewy" or path =? "{lib_dir}/prelude/spsc.dewy") {
             if not select_place(kid(a 0)) {fatal(nodes.ptr[a].pos "a wait's receiver is a local or a field chain: an index is not stable. Bind `let ch = channels[i]` and prepare `@ch.receive`")}
             return a
         }

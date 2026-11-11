@@ -1,0 +1,43 @@
+use 'ast.jo'
+use 'check.jo'
+use 'checker_expr.dewy'
+use 'checks_builders.dewy'
+use 'expr.jo'
+use 'types.jo'
+use 'util.jo'
+
+merged_nested_waits = (n: int):
+    if not dewy_at(nodes[n].pos): return
+    s = lookup(intern("merged"))
+    if s == 0 or syms[s].kind != .fns: return
+    d = int(syms[s].decl)
+    if d == 0 or files[pos_file(nodes[d].pos)].path != "{lib_dir}/prelude/inbox.dewy": return
+    args = kids(n)
+    loop i in [0..args.len()):
+        a = args[i]
+        receiver_arg = 0
+        field = 0
+        if nodes[a].kind == .partial and nodes[a].sym > 0 and nkids(a) == 1:
+            method = int(fns[int(nodes[a].sym)].decl)
+            if method != 0 and int(nodes[method].name) == intern("next") and files[pos_file(nodes[method].pos)].path == "{lib_dir}/prelude/inbox.dewy": receiver_arg = kid(a, 0)
+        else:
+            field = a
+            prepared = false
+            if nodes[a].kind == .call and nodes[a].aux2 == i32(AUX2_PARTIAL) and nkids(a) == 0:
+                field = int(nodes[a].a)
+                prepared = true
+            if nodes[field].kind == .field and (has_flag(field, NF_AT) or prepared) and int(nodes[field].name) == intern("next"): receiver_arg = int(nodes[field].a)
+        if receiver_arg == 0: continue
+        t = prune(check_expr(receiver_arg, 0))
+        receiver = last_checked
+        if field != 0: nodes[field].a = i32(receiver)
+        add_flag(receiver, NF_CHECKED)
+        if tkind(t) != .struct_: continue
+        decl = int(structs[int(types[t].st)].decl)
+        if decl == 0 or int(nodes[decl].name) != intern("Merged") or files[pos_file(nodes[decl].pos)].path != "{lib_dir}/prelude/inbox.dewy": continue
+        adapted = bc_call("__merged_receive", [receiver], nodes[a].pos)
+        nodes[adapted].aux2 = i32(AUX2_PARTIAL)
+        check_expr_in_module(adapted, int(nodes[decl].mod))
+        args[i] = last_checked
+        add_flag(last_checked, NF_CHECKED)
+    set_list(n, args)

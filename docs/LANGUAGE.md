@@ -3864,6 +3864,9 @@ then stops without waiting. `loop item in inbox or_throw { … }` leaves the fun
 `Canceled` and gives the loop the payload alone (`or_throw<Canceled>` names it); after an
 ordinary iterable, `or_throw` forwards that value's own failure before the loop starts.
 Inside `select`, `@inbox.next` is one wait, which gives `none` once the inbox has finished.
+A merged inbox can itself be a source, as in `merged(@inner.next @other.receive)`:
+it stays one source until it finishes; an inner channel closing does not retire it
+while inner payloads remain.
 
 ```dewy
 main = () => {
