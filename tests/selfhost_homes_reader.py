@@ -3,6 +3,7 @@
 # (a leaf moved out of a Jo module without state of its own: an isolated build that has that module but
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
+    'parser_errors': 'parse.jo',
     'parser_units': 'parse.jo',
     'lexer_units': 'lex.jo',
     'lexer_errors': 'lex.jo',

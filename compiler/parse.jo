@@ -11,6 +11,7 @@ use 'ast.jo'
 use 'literals.dewy'
 use 'node_store.dewy'
 use 'parser_units.dewy'
+use 'parser_errors.dewy'
 
 toks: Token[]
 # A parse unit owns its EOF-terminated stream. Borrow once on entry; recursive
@@ -190,18 +191,6 @@ expect_ident = (what: str) -> int:
 
 is_keyword_tok = (k: Tok) -> bool: int(k) < kw_kinds.len() and kw_kinds[int(k)]
 
-# a keyword where a name is declared (build = ..., a field `when: str`, a parameter `test: int`)
-keyword_name_error = (i: int):
-    w = tok_text(p_toks[i].kind)
-    if len(w) > 2 and w[0] == '\'': w = w[1..len(w) - 1)
-    role = ""
-    if w == "build": role = " (it starts a build block)"
-    else if w == "test": role = " (it starts a test)"
-    else if w == "when": role = " (it chooses code by the target, `when TARGET == ...:`)"
-    else if w == "use": role = " (it brings in a file's names)"
-    else if w == "match" and i > 0 and p_toks[i - 1].kind == .dot: role = " (for a regular expression: `s.find(r)`, a Match?, or `s.matches(r)` for all of s)"
-    else if w == "match" or w == "is" or w == "in" or w == "pass": role = ""
-    fatal(p_toks[i].pos, "'{w}' is a keyword{role}, so it cannot be a name: pick another, such as '{w}_info' or 'my_{w}'")
 # spacing comes from the gap between a token and the previous one (only asked about in a few places)
 space_before = (i: int) -> bool:
     if i == 0: return true
@@ -1286,15 +1275,9 @@ parse_block = () -> int:
     set_list(b, stmts)
     b
 
-# (update = (dt: f64): with nothing under it)
-__no_block = ():
-    j = ti - 1
-    loop j > 0 and p_toks[j].kind != .colon: j -= 1
-    fatal(p_toks[j].pos, "nothing is under this line: what it does goes on the lines below it, indented (or `pass` to leave it empty for now)")
-
 # the statements of an indented block, from its indent token on, into block b
 parse_indented_block = (b: int) -> int:
-    if pk() != .indent: __no_block()
+    if pk() != .indent: parse_empty_block()
     advance()
     stmts: int[]
     loop pk() != .dedent and pk() != .eof:
@@ -1810,7 +1793,7 @@ parse_top_block = () -> int:
         set_list(b, items)
         return b
     expect(.newline, "newline")
-    if pk() != .indent: __no_block()
+    if pk() != .indent: parse_empty_block()
     advance()
     items: int[]
     loop pk() != .dedent and pk() != .eof:

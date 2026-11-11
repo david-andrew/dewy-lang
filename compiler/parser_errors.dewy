@@ -1,0 +1,23 @@
+$runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"lex.jo" import (tok_text)
+from p"parse.jo" import (p_toks ti)
+
+ParserErrorWord:type=int64<overflow='wrap'>
+# a keyword where a name is declared (build = ..., a field `when: str`, a parameter `test: int`)
+keyword_name_error=(i:ParserErrorWord):>never=>$unsafe {
+    let w=tok_text(p_toks[i].kind)
+    if (w as array<uint8>).length >? 2 and (w as array<uint8>)[0] =? b'\'' {w=__str_slice(w 1 (w as array<uint8>).length - 1)}
+    let role=""
+    if w =? "build" {role=" (it starts a build block)"} else if w =? "test" {role=" (it starts a test)"}
+    else if w =? "when" {role=" (it chooses code by the target, `when TARGET == ...:`)"} else if w =? "use" {role=" (it brings in a file's names)"}
+    else if w =? "match" and i >? 0 and p_toks[i - 1].kind =? 'dot' {role=" (for a regular expression: `s.find(r)`, a Match?, or `s.matches(r)` for all of s)"} else if w =? "match" or w =? "is" or w =? "in" or w =? "pass" {role=""}
+    fatal(p_toks[i].pos "'{w}' is a keyword{role}, so it cannot be a name: pick another, such as '{w}_info' or 'my_{w}'");
+}
+# (update = (dt: f64): with nothing under it)
+parse_empty_block=():>never=>$unsafe {
+    let j=ti - 1
+    loop j >? 0 and p_toks[j].kind not=? 'colon' {j -= 1}
+    fatal(p_toks[j].pos "nothing is under this line: what it does goes on the lines below it, indented (or `pass` to leave it empty for now)");
+}
