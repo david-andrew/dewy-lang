@@ -126,6 +126,7 @@ main = ():
 def test_opt_rewrite_twins(compiler, tmp_path, release):  # noqa: F811
     original = (ROOT / 'compiler/opt.jo').read_text()
     decode = original[original.index('o_rewrite_mask ='):original.index('const MIN_INT')]
+    decode += function((ROOT / 'compiler/optimizer_queries.jo').read_text(), 'o_boolean_op')
     decode += '\n'.join(function(original, name) for name in (
         'o_pure_classify', 'cse_arity_classify', 'o_defines_classify',
         'kills_memory_classify', 'o_retargetable_classify', 'o_resize'))

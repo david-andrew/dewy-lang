@@ -1,0 +1,18 @@
+$runtime_checks
+from p"ir_types.dewy" import (Op)
+
+o_boolean_op=(op:Op):>bool=>{
+    match op {
+        <'eq'> => true
+        <'ne'> => true
+        <'lts'> => true
+        <'les'> => true
+        <'gts'> => true
+        <'ges'> => true
+        <'ltu'> => true
+        <'leu'> => true
+        <'gtu'> => true
+        <'geu'> => true
+        _ => false
+    }
+}
