@@ -145,6 +145,7 @@ use 'ffi_checks.dewy'
 use 'effect_contracts.dewy'
 use 'effect_sources.dewy'
 use 'isolation_ops.dewy'
+use 'lower_analysis.dewy'
 use 'concurrency_types.dewy'
 use 'concurrency_tasks.dewy'
 use 'checks_shaped.dewy'
@@ -280,6 +281,14 @@ nw_walk = (n: int):
     if k == .assign:
         nw_writes.push(n)
         nw_write_at.push(at)
+    if k == .call:
+        mutmask = checked_call_mutmask(n)
+        loop i in [0..nkids(n)):
+            if mutmask & (1 << i) == 0: continue
+            write = mk(.assign, nodes[kid(n, i)].pos)
+            nodes[write].a = i32(kid(n, i))
+            nw_writes.push(write)
+            nw_write_at.push(at)
     if k == .lambda:
         loop cap in lambda_captures(n):
             if has_flag(cap, NF_MUT):

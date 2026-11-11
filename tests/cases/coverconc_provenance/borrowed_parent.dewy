@@ -1,0 +1,11 @@
+Routes:type = [inbox:Channel<string> version:int]
+replace = (@routes:Routes) => {routes.inbox = channel<string>(1)}
+main = () => {
+    let routes = Routes[channel<string>(1) 0]
+    let ready = @routes.inbox.receive
+    replace(@routes)
+    match select(@ready timeout=0s) {
+        _:string => {}
+        _ => {}
+    }
+}

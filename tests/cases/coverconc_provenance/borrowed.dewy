@@ -1,0 +1,10 @@
+replace = (@a:Channel<string>) => {a = channel<string>(1)}
+main = () => {
+    let a = channel<string>(1)
+    let ready = @a.receive
+    replace(@a)
+    match select(@ready timeout=0s) {
+        _:a.string => {}
+        _ => {}
+    }
+}

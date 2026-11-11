@@ -1,0 +1,13 @@
+# modes: native native-release
+Routes:type = [inbox:Channel<string> version:int]
+bump = (@version:int) => {version += 1}
+main = () => {
+    let routes = Routes[channel<string>(1) 0]
+    let ready = @routes.inbox.receive
+    bump(@routes.version)
+    routes.inbox.send("message") or_throw
+    match select(@ready) {
+        s:(@ready).string => printl"{s} version {routes.version}"
+        _ => {}
+    }
+}

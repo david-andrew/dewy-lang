@@ -14,6 +14,7 @@ from p"partial_checks.dewy" import (wait_partial)
 from p"type_member_checks.dewy" import (handle_outcomes record_type_member)
 from p"facts.jo" import (fact_requests)
 from p"isolation_ops.dewy" import (isolation_children)
+from p"lower_analysis.dewy" import checked_call_mutmask
 from p"node_store.dewy" import (Node)
 from p"ownership.jo" import (ownership_consumers)
 from p"ownership_checks.dewy" import (NF_GLOBAL)
@@ -179,6 +180,18 @@ nw_walk=(n:SelectWord):>void=>$unsafe {
     if k =? 'assign' {
         nw_writes.push(n)
         nw_write_at.push(at)
+    }
+    if k =? 'call' {
+        let mutmask=checked_call_mutmask(n)
+        loop i in [0..nkids(n)) {
+            if mutmask & (1 << i) =? 0 {continue}
+            # A mutable argument can replace its place even when the callee's assignment
+            # is outside this function. Reuse the overlap check's write representation.
+            let write=mk('assign' nodes.ptr[kid(n i)].pos)
+            nodes.ptr[write].a=int32(kid(n i))
+            nw_writes.push(write)
+            nw_write_at.push(at)
+        }
     }
     if k =? 'lambda' {
         loop cap in lambda_captures(n) {
