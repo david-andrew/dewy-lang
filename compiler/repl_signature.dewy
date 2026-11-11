@@ -1,0 +1,25 @@
+$runtime_checks
+from p"@lib/core/str.jo" import (replace)
+from p"ast.jo" import (nodes)
+from p"check.jo" import (repl_sig syms values_collect_fns)
+from p"checker_expr.dewy" import (lookup)
+from p"ide_text.dewy" import (ide_doc_of ide_fn_header)
+from p"node_store.dewy" import (Node)
+
+ReplSignatureWord:type=int64<overflow='wrap'>
+# Expression statements run in checker_exprstmts.dewy; these are its services.
+# (`:type name` at the REPL, for a function: its versions as written, with their notes)
+exprstmt_repl=(e:int64):>void=>$unsafe {
+    let sy=lookup(ReplSignatureWord(nodes.ptr[e].name))
+    if sy not=? 0 and syms.ptr[sy].kind =? 'fns' {
+        let ds:array<int64>=[]
+        values_collect_fns(ReplSignatureWord(nodes.ptr[e].name) @ds)
+        loop d in ds {
+            if (repl_sig as array<uint8>).length >? 0 {repl_sig="{repl_sig}\n"}
+            repl_sig="{repl_sig}{ide_fn_header(d)}"
+            let doc=ide_doc_of(nodes.ptr[d].pos)
+            if (doc as array<uint8>).length >? 0 {repl_sig="{repl_sig}\n    {replace(doc "\n" "\n    ")}"}
+        }
+        nodes.ptr[e]=Node(kind='int_lit' pos=nodes.ptr[e].pos)
+    }
+}

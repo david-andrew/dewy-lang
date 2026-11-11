@@ -155,6 +155,7 @@ use 'check_cold_queries.dewy'
 use 'check_metadata.dewy'
 use 'checker_tree_queries.dewy'
 use 'open_globals.dewy'
+use 'repl_signature.dewy'
 
 struct Module:
     name: i32
@@ -2453,20 +2454,6 @@ stmt_assign = (s: int) -> bool:
     if nodes[int(nodes[s].b)].kind == .call and nodes[int(nodes[s].b)].aux2 == 17: spawn_value_error(nodes[int(nodes[s].b)].pos)
     check_late_global(s)
     false
-
-# Expression statements run in checker_exprstmts.dewy; these are its services.
-# (`:type name` at the REPL, for a function: its versions as written, with their notes)
-exprstmt_repl = (e: int):
-    sy = lookup(int(nodes[e].name))
-    if sy != 0 and syms[sy].kind == .fns:
-        ds: int[]
-        collect_fns(int(nodes[e].name), &ds)
-        loop d in ds:
-            if len(repl_sig) > 0: repl_sig += "\n"
-            repl_sig += ide_fn_header(d)
-            doc = ide_doc_of(nodes[d].pos)
-            if len(doc) > 0: repl_sig += "\n    " + replace(doc, "\n", "\n    ")
-        nodes[e] = Node(kind = .int_lit, pos = nodes[e].pos)
 
 # Sparse preorder events for lowering's integer write proofs. Negative loop
 # nodes close the enclosing-loop stack; nested closures contribute only their
