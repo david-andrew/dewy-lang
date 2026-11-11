@@ -3846,12 +3846,17 @@ main = () => {
 }
 ```
 
-In a loop, an arm that takes a close and changes nothing (no assignment, no `break`, `return`
-or `or_throw`, no call but printing) is an error: the closed channel is ready again on the next
-turn, so the loop would spin. Leave the loop, turn the wait off, or drain with `merged`, which
-retires each channel as it closes. Under a `timeout=0s` poll a `<Timeout>` arm that changes
-nothing is the same error. *Not yet built:* sends inside `select` through `reserve`, and a
-spread of waits. `select` takes up to four waits for now.
+In a loop, every arm that can take a close must advance that wait: leave with
+`break`, `return` or `or_throw`, turn its conditional wait off, replace its receiver,
+change what an enclosing loop tests, or call something besides printing. A wildcard
+arm counts too if it can take a close. Printing, changing an unrelated flag, or
+assigning the value that keeps the wait enabled does not prevent a spin: the closed
+channel stays ready. `merged` retires each channel as it closes. Under a `timeout=0s`
+poll, an arm that can take the poll's `Timeout` needs the same progress; a received
+`Timeout` payload is data and consumes a message.
+
+To send inside `select`, prepare `@c.reserve` and send through the winning permit.
+A spread of waits is not yet built; `select` takes up to four waits for now.
 
 `merged(@a.receive @b.receive)` drains any number of receives of one payload type as one
 inbox (decisions.md, batch 7); `merged(waits...)` spreads an array of them. `loop item in inbox` takes each value as it comes (an item is

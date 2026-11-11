@@ -1,0 +1,20 @@
+# modes: native native-release
+$runtime_checks
+main = () => {
+    let a = channel<int>(1)
+    let b = channel<int>(1)
+    a.close()
+    let a_open = true
+    let keep = true
+    let done = false
+    loop not done {
+        match select(if a_open @a.receive else none if keep @b.receive else none) {
+            <a.Closed> => {a_open = false}
+            _:int => {done = true}
+            <Closed> => break
+            <Canceled> => return Canceled
+        }
+        if not a_open and not done {b.send(1) or_throw}
+    }
+    printl"all conditional {a_open} {done}"
+}

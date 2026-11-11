@@ -1,0 +1,204 @@
+use 'ast.jo'
+use 'check.jo'
+use 'error_ops.dewy'
+use 'expr.jo'
+use 'isolation_ops.dewy'
+use 'select_checks.dewy'
+use 'partial_checks.dewy'
+use 'types.jo'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+
+progress_source_types: {int: int[]}
+progress_source_slots: {int: int}
+progress_match_parent: {int: int}
+progress_indices: {int: {int: int}}
+progress_parents: {int: int}
+progress_reads: {int: {str: int}}
+
+progress_index = (n: int, parent: int, index: mut {int: int}):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .lambda or k == .fnref: return
+    if k == .match_: index[n] = parent
+    if k == .while_ or k == .for_:
+        progress_parents[n] = parent
+        progress_index(int(nodes[n].a), parent, index)
+        progress_index(int(nodes[n].b), n, index)
+        return
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: progress_index(int(nodes[n].a), parent, index)
+    if mask & 2 != 0: progress_index(int(nodes[n].b), parent, index)
+    if mask & 4 != 0: progress_index(int(nodes[n].c), parent, index)
+    if mask & 16 != 0:
+        loop c in kids(n): progress_index(c, parent, index)
+
+progress_key = (path: int[]) -> str:
+    key = ""
+    loop part in path: key = "{key}/{part}"
+    key
+
+progress_read = (n0: int, truth: int, reads: mut {str: int}):
+    n = n0
+    loop nodes[n].kind == .conv or nodes[n].kind == .narrow: n = int(nodes[n].a)
+    k = nodes[n].kind
+    if k == .ident or k == .field:
+        path = nw_path(n)
+        key = ""
+        loop i in [0..path.len()):
+            key = "{key}/{path[i]}"
+            required = -1
+            if i == path.len() - 1 and prune(ntype(n)) == T_BOOL: required = truth
+            if reads.has(key) and reads[key] != required: reads[key] = -1
+            else: reads[key] = required
+        return
+    if k == .not_:
+        required = if truth < 0: -1 else: 1 - truth
+        progress_read(int(nodes[n].a), required, reads)
+        return
+    if k == .lambda or k == .fnref: return
+    required = -1
+    if k == .and_ and truth == 1 or k == .or_ and truth == 0: required = truth
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: progress_read(int(nodes[n].a), required, reads)
+    if mask & 2 != 0: progress_read(int(nodes[n].b), required, reads)
+    if mask & 4 != 0: progress_read(int(nodes[n].c), required, reads)
+    if mask & 16 != 0:
+        loop c in kids(n): progress_read(c, required, reads)
+
+progress_changes = (assignment: int, condition: int) -> bool:
+    if condition == 0: return false
+    if not progress_reads.has(condition):
+        reads: {str: int}
+        progress_read(condition, 1, reads)
+        progress_reads[condition] = reads
+    key = progress_key(nw_path(int(nodes[assignment].a)))
+    reads = progress_reads[condition]
+    if not reads.has(key): return false
+    value = int(nodes[assignment].b)
+    loop nodes[value].kind == .conv or nodes[value].kind == .narrow: value = int(nodes[value].a)
+    if nodes[value].kind == .bool_lit and reads[key] >= 0 and nodes[value].ival == reads[key]: return false
+    not select_same_place(int(nodes[assignment].a), value)
+
+progress_assignment = (n: int, m: int, call: int, slot: int) -> bool:
+    f = int(ctxs[cx].inst)
+    if not progress_indices.has(f):
+        index: {int: int}
+        progress_index(int(fns[f].body), 0, index)
+        progress_indices[f] = index
+    match_node = m
+    loop not progress_indices[f].has(match_node) and progress_match_parent.has(match_node): match_node = progress_match_parent[match_node]
+    enclosing = progress_indices[f].get(match_node) ?? 0
+    loop enclosing != 0:
+        if progress_changes(n, int(nodes[enclosing].a)): return true
+        enclosing = progress_parents.get(enclosing) ?? 0
+    if slot < 0 or slot >= nkids(call): return false
+    arg = kid(call, slot)
+    loop nodes[arg].kind == .conv: arg = int(nodes[arg].a)
+    wait = select_wait_arg(arg)
+    if wait != arg and nodes[arg].kind == .call and nkids(arg) == 2:
+        if progress_changes(n, kid(arg, 0)): return true
+    prepared = wait_partial(wait)
+    prepared != 0 and select_same_place(int(nodes[n].a), kid(prepared, 0)) and not select_same_place(int(nodes[n].a), int(nodes[n].b))
+
+progress_body = (n: int, m: int, call: int, slot: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .lambda or k == .fnref or k == .for_ or k == .while_: return false
+    if k == .break_ or k == .return_ or k == .propagate: return true
+    if k == .assign and progress_assignment(n, m, call, slot): return true
+    if k == .call:
+        f = int(nodes[n].sym)
+        if nodes[n].aux != 0 or f <= 0 or fns[f].decl == 0: return true
+        name = int(nodes[int(fns[f].decl)].name)
+        name != intern("printl") and name != intern("print") and name != intern("__print_str")
+    else if k == .if_ or k == .iflet:
+        if progress_body(int(nodes[n].a), m, call, slot): return true
+        condition = int(nodes[n].a)
+        loop nodes[condition].kind == .conv: condition = int(nodes[condition].a)
+        if nodes[condition].kind == .bool_lit:
+            chosen = if nodes[condition].ival == 1: int(nodes[n].b) else: int(nodes[n].c)
+            return progress_body(chosen, m, call, slot)
+        progress_body(int(nodes[n].b), m, call, slot) and progress_body(int(nodes[n].c), m, call, slot)
+    else if k == .match_:
+        if progress_body(int(nodes[n].a), m, call, slot): return true
+        if nkids(n) == 0: return false
+        loop arm in kids(n):
+            if not progress_body(int(nodes[arm].b), m, call, slot): return false
+        true
+    else:
+        mask = isolation_children(k)
+        if mask < 0: return false
+        if mask & 1 != 0 and progress_body(int(nodes[n].a), m, call, slot): return true
+        if mask & 2 != 0 and progress_body(int(nodes[n].b), m, call, slot): return true
+        if mask & 4 != 0 and progress_body(int(nodes[n].c), m, call, slot): return true
+        if mask & 16 != 0:
+            loop c in kids(n):
+                if progress_body(c, m, call, slot): return true
+        false
+
+progress_pattern = (p: int, t: int, whole: int) -> bool:
+    k = nodes[p].kind
+    if k == .pwild: return true
+    if k == .ptype and nodes[p].type != 0: return can_coerce(0, t, int(nodes[p].type))
+    if k == .pvariant:
+        if is_union(whole):
+            members = union_members(whole)
+            index = int(nodes[p].aux2)
+            if index >= 0 and index < members.len(): return can_coerce(0, t, members[index])
+        if standard_wait_outcome(t) == intern("Closed"): return select_pattern_closes(p)
+        if standard_wait_outcome(t) == intern("Timeout"): return select_pattern_named(p, "Timeout")
+    false
+
+select_progress_rule = (m: int):
+    if cx < 0 or ctxs[cx].loop_depth == 0: return
+    call = progress_call(m)
+    if call == 0: return
+    poll = select_poll(call)
+    incoming = value_members(prune(ntype(int(nodes[m].a))))
+    if progress_source_types.has(m):
+        incoming = []
+        loop t in progress_source_types[m]:
+            if can_coerce(0, t, ntype(int(nodes[m].a))): incoming.push(t)
+    remaining: int[]
+    loop t in incoming:
+        name = standard_wait_outcome(t)
+        if name == intern("Closed") or poll and name == intern("Timeout") and (not progress_source_slots.has(m) or progress_source_slots[m] < 0): remaining.push(t)
+    loop arm in kids(m):
+        taken: int[]
+        loop t in remaining:
+            holds = false
+            loop p in kids(arm):
+                if progress_pattern(p, t, prune(ntype(int(nodes[m].a)))): holds = true
+            if not holds: continue
+            taken.push(t)
+            slot = progress_source_slots.get(m) ?? -2
+            advances = true
+            if slot >= -1: advances = progress_body(int(nodes[arm].b), m, call, slot)
+            else:
+                source = false
+                loop i in [0..nkids(call)):
+                    a = select_wait_arg(kid(call, i))
+                    if tkind(ntype(a)) != .fn_: continue
+                    if t not in value_members(prune(telem(ntype(a)))): continue
+                    source = true
+                    if not progress_body(int(nodes[arm].b), m, call, i): advances = false
+                if not source: advances = progress_body(int(nodes[arm].b), m, call, -1)
+            if not advances:
+                message = if standard_wait_outcome(t) == intern("Closed"): "this close arm spins: a closed channel stays ready" else: "this Timeout arm spins: a `timeout=0s` poll stays empty"
+                fatal(nodes[arm].pos, "{message}; leave the loop (`break`), turn this wait off, change what the loop tests, or do work that advances it. Printing or changing another wait's flag does not advance this wait")
+        if nodes[arm].a == 0 and nodes[arm].c == 0:
+            rest: int[]
+            loop t in remaining:
+                if t not in taken: rest.push(t)
+            remaining = rest
+
+progress_call = (m: int) -> int:
+    call = select_source_calls.get(m) ?? int(nodes[m].a)
+    loop nodes[call].kind == .conv or nodes[call].kind == .propagate: call = int(nodes[call].a)
+    if nodes[call].kind == .block and nkids(call) > 0 and nodes[kid(call, nkids(call) - 1)].kind == .exprstmt: call = int(nodes[kid(call, nkids(call) - 1)].a)
+    loop nodes[call].kind == .conv: call = int(nodes[call].a)
+    if select_source_matches.has(m) or nodes[call].kind == .call and select_call(call): return call
+    0

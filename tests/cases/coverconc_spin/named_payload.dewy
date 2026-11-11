@@ -1,0 +1,14 @@
+# modes: native native-release
+import p"../../fixtures/coverconc_payload/status.dewy" as wire
+main = () => {
+    let c = channel<wire.Closed>(1)
+    c.send(wire.Closed[7]) or_throw
+    c.close()
+    loop true {
+        match select(@c.receive) {
+            value:c.<wire.Closed> => printl"payload {value.code}"
+            <Closed> => break
+            <Canceled> => return Canceled
+        }
+    }
+}

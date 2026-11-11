@@ -1,0 +1,226 @@
+$runtime_checks
+from p"ast.jo" import (kid kids nkids nodes)
+from p"check.jo" import (ctxs cx fns)
+from p"error_ops.dewy" import value_members
+from p"expr.jo" import (ntype select_source_calls select_source_matches can_coerce)
+from p"isolation_ops.dewy" import isolation_children
+from p"select_checks.dewy" import (nw_path select_call select_pattern_closes select_pattern_named select_poll select_same_place select_wait_arg standard_wait_outcome)
+from p"partial_checks.dewy" import wait_partial
+from p"types.jo" import (T_BOOL is_union prune telem tkind union_members)
+from p"util.jo" import intern
+from p"diagnostic_exit.dewy" import fatal
+
+ProgressWord:type=int64<overflow='wrap'>
+progress_source_types:dict<int64 array<int64>>=[]
+progress_source_slots:dict<int64 int64>=[]
+progress_match_parent:dict<int64 int64>=[]
+let progress_indices:dict<int64 dict<int64 int64>>=[]
+let progress_parents:dict<int64 int64>=[]
+let progress_reads:dict<int64 dict<string int64>>=[]
+
+# Build one index per demanded function: match node -> enclosing loop, and loop ->
+# parent. O(function nodes); generated source branches inherit their original match node.
+progress_index=(n:ProgressWord parent:ProgressWord @index:dict<int64 int64>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fnref' {return}
+    if k =? 'match_' {index[n]=parent}
+    if k =? 'while_' or k =? 'for_' {
+        progress_parents[n]=parent
+        progress_index(ProgressWord(nodes.ptr[n].a) parent @index)
+        progress_index(ProgressWord(nodes.ptr[n].b) n @index)
+        return
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {progress_index(ProgressWord(nodes.ptr[n].a) parent @index)}
+    if mask & 2 not=? 0 {progress_index(ProgressWord(nodes.ptr[n].b) parent @index)}
+    if mask & 4 not=? 0 {progress_index(ProgressWord(nodes.ptr[n].c) parent @index)}
+    if mask & 16 not=? 0 {loop c in kids(n) {progress_index(c parent @index)}}
+}
+progress_key=(path:array<int64>):>string=>{
+    let key=""
+    loop part in path {key="{key}/{part}"}
+    key
+}
+# Read places are indexed once per guard. A boolean guard's known active value lets the
+# check distinguish disabling it from assigning the value that keeps it enabled.
+progress_read=(n0:ProgressWord truth:ProgressWord @reads:dict<string int64>):>void=>$unsafe {
+    let n=n0
+    loop nodes.ptr[n].kind =? 'conv' or nodes.ptr[n].kind =? 'narrow' {n=ProgressWord(nodes.ptr[n].a)}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' or k =? 'field' {
+        let path=nw_path(n)
+        let key=""
+        loop i in [0..path.length) {
+            key="{key}/{path[i]}"
+            let required:ProgressWord=-1
+            if i =? path.length - 1 and prune(ntype(n)) =? T_BOOL {required=truth}
+            if reads.has(key) and reads[key] not=? required {reads[key]=-1} else {reads[key]=required}
+        }
+        return
+    }
+    if k =? 'not_' {
+        let required=if truth <? 0 {-1} else {1 - truth}
+        progress_read(ProgressWord(nodes.ptr[n].a) required @reads)
+        return
+    }
+    if k =? 'lambda' or k =? 'fnref' {return}
+    let required:ProgressWord=-1
+    if k =? 'and_' and truth =? 1 or k =? 'or_' and truth =? 0 {required=truth}
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {progress_read(ProgressWord(nodes.ptr[n].a) required @reads)}
+    if mask & 2 not=? 0 {progress_read(ProgressWord(nodes.ptr[n].b) required @reads)}
+    if mask & 4 not=? 0 {progress_read(ProgressWord(nodes.ptr[n].c) required @reads)}
+    if mask & 16 not=? 0 {loop c in kids(n) {progress_read(c required @reads)}}
+}
+progress_changes=(assignment:ProgressWord condition:ProgressWord):>bool=>$unsafe {
+    if condition =? 0 {return false}
+    if not progress_reads.has(condition) {
+        let reads:dict<string int64>=[]
+        progress_read(condition 1 @reads)
+        progress_reads[condition]=reads
+    }
+    let key=progress_key(nw_path(ProgressWord(nodes.ptr[assignment].a)))
+    let reads=progress_reads[condition]
+    if not reads.has(key) {return false}
+    let value=ProgressWord(nodes.ptr[assignment].b)
+    loop nodes.ptr[value].kind =? 'conv' or nodes.ptr[value].kind =? 'narrow' {value=ProgressWord(nodes.ptr[value].a)}
+    if nodes.ptr[value].kind =? 'bool_lit' and reads[key] >=? 0 and nodes.ptr[value].ival =? reads[key] {return false}
+    not select_same_place(ProgressWord(nodes.ptr[assignment].a) value)
+}
+progress_assignment=(n:ProgressWord m:ProgressWord call:ProgressWord slot:ProgressWord):>bool=>$unsafe {
+    let f=ProgressWord(ctxs[cx].inst)
+    if not progress_indices.has(f) {
+        let index:dict<int64 int64>=[]
+        progress_index(ProgressWord(fns.ptr[f].body) 0 @index)
+        progress_indices[f]=index
+    }
+    let match_node=m
+    loop not progress_indices[f].has(match_node) and progress_match_parent.has(match_node) {match_node=progress_match_parent[match_node]}
+    let enclosing=progress_indices[f].get(match_node) ?? 0
+    loop enclosing not=? 0 {
+        if progress_changes(n ProgressWord(nodes.ptr[enclosing].a)) {return true}
+        enclosing=progress_parents.get(enclosing) ?? 0
+    }
+    if slot <? 0 or slot >=? nkids(call) {return false}
+    let arg=kid(call slot)
+    loop nodes.ptr[arg].kind =? 'conv' {arg=ProgressWord(nodes.ptr[arg].a)}
+    let wait=select_wait_arg(arg)
+    if wait not=? arg and nodes.ptr[arg].kind =? 'call' and nkids(arg) =? 2 {
+        if progress_changes(n kid(arg 0)) {return true}
+    }
+    let prepared=wait_partial(wait)
+    prepared not=? 0 and select_same_place(ProgressWord(nodes.ptr[n].a) kid(prepared 0)) and not select_same_place(ProgressWord(nodes.ptr[n].a) ProgressWord(nodes.ptr[n].b))
+}
+# Only a step reached on every path counts. In particular printing, an unrelated store,
+# a continue, and a break hidden in a branch that might not run do not advance this wait.
+progress_body=(n:ProgressWord m:ProgressWord call:ProgressWord slot:ProgressWord):>bool=>$unsafe {
+    if n =? 0 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'lambda' or k =? 'fnref' or k =? 'for_' or k =? 'while_' {return false}
+    if k =? 'break_' or k =? 'return_' or k =? 'propagate' {return true}
+    if k =? 'assign' and progress_assignment(n m call slot) {return true}
+    if k =? 'call' {
+        let f=ProgressWord(nodes.ptr[n].sym)
+        if nodes.ptr[n].aux not=? 0 or f <=? 0 or fns.ptr[f].decl =? 0 {return true}
+        let name=nodes.ptr[ProgressWord(fns.ptr[f].decl)].name
+        return name not=? int32(intern("printl")) and name not=? int32(intern("print")) and name not=? int32(intern("__print_str"))
+    }
+    if k =? 'if_' or k =? 'iflet' {
+        if progress_body(ProgressWord(nodes.ptr[n].a) m call slot) {return true}
+        let condition=ProgressWord(nodes.ptr[n].a)
+        loop nodes.ptr[condition].kind =? 'conv' {condition=ProgressWord(nodes.ptr[condition].a)}
+        if nodes.ptr[condition].kind =? 'bool_lit' {
+            return progress_body(if nodes.ptr[condition].ival =? 1 {ProgressWord(nodes.ptr[n].b)} else {ProgressWord(nodes.ptr[n].c)} m call slot)
+        }
+        return progress_body(ProgressWord(nodes.ptr[n].b) m call slot) and progress_body(ProgressWord(nodes.ptr[n].c) m call slot)
+    }
+    if k =? 'match_' {
+        if progress_body(ProgressWord(nodes.ptr[n].a) m call slot) {return true}
+        if nkids(n) =? 0 {return false}
+        loop arm in kids(n) {if not progress_body(ProgressWord(nodes.ptr[arm].b) m call slot) {return false}}
+        return true
+    }
+    let mask=isolation_children(k)
+    if mask <? 0 {return false}
+    if mask & 1 not=? 0 and progress_body(ProgressWord(nodes.ptr[n].a) m call slot) {return true}
+    if mask & 2 not=? 0 and progress_body(ProgressWord(nodes.ptr[n].b) m call slot) {return true}
+    if mask & 4 not=? 0 and progress_body(ProgressWord(nodes.ptr[n].c) m call slot) {return true}
+    if mask & 16 not=? 0 {loop c in kids(n) {if progress_body(c m call slot) {return true}}}
+    false
+}
+progress_pattern=(p:ProgressWord t:ProgressWord whole:ProgressWord):>bool=>$unsafe {
+    let k=nodes.ptr[p].kind
+    if k =? 'pwild' {return true}
+    if k =? 'ptype' and nodes.ptr[p].type not=? 0 {return can_coerce(0 t ProgressWord(nodes.ptr[p].type))}
+    if k =? 'pvariant' {
+        if is_union(whole) {
+            let members=union_members(whole)
+            let index=ProgressWord(nodes.ptr[p].aux2)
+            if index >=? 0 and index <? members.length {return can_coerce(0 t members[index])}
+        }
+        if standard_wait_outcome(t) =? intern("Closed") {return select_pattern_closes(p)}
+        if standard_wait_outcome(t) =? intern("Timeout") {return select_pattern_named(p "Timeout")}
+    }
+    false
+}
+select_progress_rule=(m:ProgressWord):>void=>$unsafe {
+    if cx <? 0 or ctxs[cx].loop_depth =? 0 {return}
+    let call=progress_call(m)
+    if call =? 0 {return}
+    let poll=select_poll(call)
+    let incoming=value_members(prune(ntype(ProgressWord(nodes.ptr[m].a))))
+    if progress_source_types.has(m) {
+        incoming=[]
+        loop t in progress_source_types[m] {
+            if can_coerce(0 t ntype(ProgressWord(nodes.ptr[m].a))) {incoming.push(t)}
+        }
+    }
+    let remaining:array<int64>=[]
+    loop t in incoming {
+        let name=standard_wait_outcome(t)
+        if name =? intern("Closed") or poll and name =? intern("Timeout") and (not progress_source_slots.has(m) or progress_source_slots[m] <? 0) {remaining.push(t)}
+    }
+    loop arm in kids(m) {
+        let taken:array<int64>=[]
+        loop t in remaining {
+            let holds=false
+            loop p in kids(arm) {if progress_pattern(p t prune(ntype(ProgressWord(nodes.ptr[m].a)))) {holds=true}}
+            if not holds {continue}
+            taken.push(t)
+            let slot=progress_source_slots.get(m) ?? -2
+            let advances=true
+            if slot >=? -1 {advances=progress_body(ProgressWord(nodes.ptr[arm].b) m call slot)}
+            else {
+                let source=false
+                loop i in [0..nkids(call)) {
+                    let a=select_wait_arg(kid(call i))
+                    if tkind(ntype(a)) not=? 'fn_' {continue}
+                    if not value_members(prune(telem(ntype(a)))).contains(t) {continue}
+                    source=true
+                    if not progress_body(ProgressWord(nodes.ptr[arm].b) m call i) {advances=false}
+                }
+                if not source {advances=progress_body(ProgressWord(nodes.ptr[arm].b) m call -1)}
+            }
+            if not advances {
+                let message=if standard_wait_outcome(t) =? intern("Closed") {"this close arm spins: a closed channel stays ready"} else {"this Timeout arm spins: a `timeout=0s` poll stays empty"}
+                fatal(nodes.ptr[arm].pos "{message}; leave the loop (`break`), turn this wait off, change what the loop tests, or do work that advances it. Printing or changing another wait's flag does not advance this wait")
+            }
+        }
+        if nodes.ptr[arm].a =? 0 and nodes.ptr[arm].c =? 0 {
+            let rest:array<int64>=[]
+            loop t in remaining {if not taken.contains(t) {rest.push(t)}}
+            remaining=rest
+        }
+    }
+}
+progress_call=(m:ProgressWord):>int64=>$unsafe {
+    let call=select_source_calls.get(m) ?? ProgressWord(nodes.ptr[m].a)
+    loop nodes.ptr[call].kind =? 'conv' or nodes.ptr[call].kind =? 'propagate' {call=ProgressWord(nodes.ptr[call].a)}
+    if nodes.ptr[call].kind =? 'block' and nkids(call) >? 0 and nodes.ptr[kid(call nkids(call) - 1)].kind =? 'exprstmt' {call=ProgressWord(nodes.ptr[kid(call nkids(call) - 1)].a)}
+    loop nodes.ptr[call].kind =? 'conv' {call=ProgressWord(nodes.ptr[call].a)}
+    if select_source_matches.has(m) or nodes.ptr[call].kind =? 'call' and select_call(call) {return call}
+    0
+}

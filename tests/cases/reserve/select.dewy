@@ -14,7 +14,7 @@ main = () => {
                 printl"got {out.receive(timeout=5s) or_throw}"
             }
             _:bool => printl"stop"
-            _ => printl"other"
+            _ => break
         }
     }
     match select(@out.reserve @stop.receive timeout=0s) {

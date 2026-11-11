@@ -1,0 +1,15 @@
+# modes: native native-release
+main = () => {
+    let c = channel<Timeout>(2)
+    c.send(Timeout) or_throw
+    c.send(Timeout) or_throw
+    c.close()
+    loop true {
+        match select(@c.receive timeout=0s) {
+            <c.Timeout> => printl"payload"
+            <c.Closed> => break
+            <Canceled> => break
+            <Timeout> => break
+        }
+    }
+}

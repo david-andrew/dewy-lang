@@ -11,6 +11,7 @@ from p"errors.jo" import nominal_parent
 from p"expr.jo" import (IN bare_generic_set bc_bin last_checked ntype nw_at nw_call nw_call_at nw_call_end nw_call_loops nw_decl nw_decl_at nw_decl_loops nw_local nw_loop_end nw_loop_start nw_loops nw_name nw_write_at nw_writes select_source_calls select_source_matches)
 from p"expr_cold_queries.dewy" import (type_short_name)
 from p"partial_checks.dewy" import (wait_partial)
+from p"select_progress_checks.dewy" import (progress_source_types progress_source_slots progress_match_parent select_progress_rule)
 from p"type_member_checks.dewy" import (handle_outcomes record_type_member)
 from p"facts.jo" import (fact_requests)
 from p"isolation_ops.dewy" import (isolation_children)
@@ -601,7 +602,12 @@ source_dispatch=(m:SelectWord sc:SelectWord receivers:array<int64> named:array<i
         nodes.ptr[branch].a=int32(bc_ident(sel pos))
         if statement {add_flag(branch NF_STMT)}
         set_list(branch arms)
-        if on_select {select_source_matches[branch]=true}
+        if on_select {
+            select_source_matches[branch]=true
+            progress_source_types[branch]=gives
+            progress_match_parent[branch]=m
+            progress_source_slots[branch]=if k <? outcomes.length {k} else {-1}
+        }
         let prepared=sc
         loop nodes.ptr[prepared].kind =? 'conv' or nodes.ptr[prepared].kind =? 'propagate' {prepared=SelectWord(nodes.ptr[prepared].a)}
         select_source_calls[branch]=prepared
@@ -766,24 +772,8 @@ queue_payload_clash=(payload:SelectWord name:string):>string=>{
 # on select that takes a close and changes nothing (no assignment, no break, return or
 # or_throw, no call but printing) reaches the next turn, where the closed channel is ready
 # again: it spins. O(the arms' bodies), only for a match on select inside a loop.
-select_progress=(m:SelectWord):>void=>$unsafe {
-    if cx <? 0 or ctxs[cx].loop_depth =? 0 {return}
-    let sc=select_source_calls.get(m) ?? SelectWord(nodes.ptr[m].a)
-    loop nodes.ptr[sc].kind =? 'conv' or nodes.ptr[sc].kind =? 'propagate' {sc=SelectWord(nodes.ptr[sc].a)}
-    if not select_source_matches.has(m) and (nodes.ptr[sc].kind not=? 'call' or not select_call(sc)) {return}
-    # (`timeout=0s`, a poll: a Timeout stays ready as a close does)
-    let poll=select_poll(select_source_calls.get(m) ?? sc)
-    loop arm in kids(m) {
-        let closes=false
-        let idles=false
-        loop p in kids(arm) {
-            if select_pattern_closes(p) {closes=true}
-            if poll and select_pattern_named(p "Timeout") {idles=true}
-        }
-        if closes and not select_moves(SelectWord(nodes.ptr[arm].b)) {fatal(nodes.ptr[arm].pos "this close arm spins: a closed channel stays ready, so the next turn of the loop takes the close again; leave the loop (`break`), turn the wait off (`if open @c.receive else none`, then `open = false` here), change what the loop tests, or drain the channels with `merged(...)`, which retires each one as it closes")}
-        if idles and not select_moves(SelectWord(nodes.ptr[arm].b)) {fatal(nodes.ptr[arm].pos "this Timeout arm spins: a `timeout=0s` poll that finds nothing gives Timeout again on the next turn of the loop; leave the loop (`break`), wait with a real timeout, or do the work that makes a wait ready here")}
-    }
-}
+select_progress=(m:SelectWord):>void=>select_progress_rule(m)
+
 select_poll=(c0:SelectWord):>bool=>$unsafe {
     let c=c0
     loop nodes.ptr[c].kind =? 'conv' or nodes.ptr[c].kind =? 'propagate' {c=SelectWord(nodes.ptr[c].a)}
@@ -815,32 +805,6 @@ select_pattern_closes=(p:SelectWord):>bool=>$unsafe {
     }
     false
 }
-# (could n change what the loop does next: an assignment, a jump out, a failure forwarded, or a
-# call other than printing)
-select_moves=(n:SelectWord):>bool=>$unsafe {
-    if n =? 0 {return false}
-    let k=nodes.ptr[n].kind
-    if k =? 'lambda' {return false}
-    if k =? 'assign' or k =? 'break_' or k =? 'return_' or k =? 'propagate' {return true}
-    if k =? 'call' {
-        let f=SelectWord(nodes.ptr[n].sym)
-        if nodes.ptr[n].aux not=? 0 or f <=? 0 or fns.ptr[f].decl =? 0 {return true}
-        let name=name_of(SelectWord(nodes.ptr[SelectWord(fns.ptr[f].decl)].name))
-        if name not=? "printl" and name not=? "print" and name not=? "__print_str" {return true}
-    }
-    let mask=isolation_children(k)
-    if mask <? 0 {return true}
-    if mask & 1 not=? 0 and select_moves(SelectWord(nodes.ptr[n].a)) {return true}
-    if mask & 2 not=? 0 and select_moves(SelectWord(nodes.ptr[n].b)) {return true}
-    if mask & 4 not=? 0 and select_moves(SelectWord(nodes.ptr[n].c)) {return true}
-    if mask & 16 not=? 0 {
-        loop child in kids(n) {
-            if select_moves(child) {return true}
-        }
-    }
-    false
-}
-# (a local or a field chain on one)
 select_place=(n0:SelectWord):>bool=>$unsafe {
     let n=n0
     loop nodes.ptr[n].kind =? 'conv' or nodes.ptr[n].kind =? 'field' {n=SelectWord(nodes.ptr[n].a)}

@@ -1,0 +1,11 @@
+main = () => {
+    let c = channel<int>(1)
+    loop true {
+        match select(@c.receive timeout=0s) {
+            _:int => {}
+            <Closed> => break
+            <Canceled> => break
+            _ => printl"idle"
+        }
+    }
+}

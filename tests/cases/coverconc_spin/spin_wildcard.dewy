@@ -1,0 +1,10 @@
+main=()=>{
+ let a=channel<int>(1)
+ a.close()
+ loop true {
+  match select(@a.receive) {
+   _:int=>{}
+   _=>printl"closed"
+  }
+ }
+}

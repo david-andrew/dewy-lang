@@ -1,0 +1,13 @@
+# modes: native native-release
+main = () => {
+    let c = channel<int>(1)
+    c.close()
+    loop true {
+        match select(@c.receive timeout=0s) {
+            <Closed> => break
+            <Timeout> => break
+            _ => printl"value"
+        }
+    }
+    printl"done"
+}

@@ -14,7 +14,7 @@ main = () => {
                 printl"channel {out.receive(timeout=5s) or_throw}"
             }
             _:q.<Reserved<int64>> => printl"mpmc"
-            _ => printl"other"
+            _ => break
         }
     }
     out.send(0) or_throw

@@ -1,0 +1,26 @@
+# modes: native native-release
+main = () => {
+    let a = channel<int>(1)
+    let b = channel<int>(1)
+    let closed = channel<int>(1)
+    a.send(7) or_throw
+    a.close()
+    closed.close()
+    loop true {
+        match select(@a.receive @b.receive) {
+            value:int => {
+                let n = 0
+                loop n <? 1 {
+                    match select(@closed.receive) {
+                        <closed.Closed> => {n += 1}
+                        _ => break
+                    }
+                }
+                printl"nested progress {value} {n}"
+            }
+            <a.Closed> => break
+            <Closed> => break
+            <Canceled> => return Canceled
+        }
+    }
+}

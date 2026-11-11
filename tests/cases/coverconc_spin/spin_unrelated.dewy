@@ -1,0 +1,14 @@
+main=()=>{
+ let a=channel<int>(1)
+ let stop=channel<int>(1)
+ a.close()
+ let active=true
+ let changed=false
+ loop active {
+  match select(@a.receive if changed @stop.receive else none) {
+   <a.Closed>=>{changed=true}
+   _:int=>{active=false}
+   _=>break
+  }
+ }
+}

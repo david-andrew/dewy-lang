@@ -1,0 +1,10 @@
+# modes: native native-release
+main = () => {
+    let c = channel<int>(1)
+    loop _ in [0..1) {
+        match select(@c.receive timeout=1ms) or_throw<Canceled|Closed> {
+            _:c.int => printl"value"
+            _ => printl"timeout"
+        }
+    }
+}
