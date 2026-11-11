@@ -1,0 +1,108 @@
+# Tier 5 / 134 / milestone 37
+# Acceptance: Format a command-line inventory report from a typed input stream,
+# using rest arguments, spreads, type-valued members and proven exit status.
+Heading:type = [text:string]
+Stock:type = [sku:int label:string quantity:int cents:int]
+Note:type = [text:string]
+formats = [$named[Heading Stock Note]... version = 1]
+Row:type = formats.Heading | formats.Stock | formats.Note
+
+# Everything after the rest parameter is keyword-only. Callers can combine
+# written columns and a spread without manufacturing intermediate arrays.
+columns = (...parts:string sep:string=" | " prefix:string=""):>string => {
+    "{prefix}{parts.join(sep)}"
+}
+
+money = (cents:int<(>=? 0)>):>string => {
+    let whole = cents // 100
+    let fraction = cents % 100
+    "{fmt','(whole)}.{fmt'02d'(fraction)}"
+}
+
+parse_row = (line:string):>Row | none => {
+    let fields = line.split("|")
+    if fields.length =? 2 {
+        if fields[0] =? "title" return formats.Heading[fields[1]]
+        if fields[0] =? "note" return formats.Note[fields[1]]
+        return none
+    }
+    if fields.length not=? 5 return none
+    if fields[0] not=? "stock" return none
+    let sku = to_int(fields[1])
+    let quantity = to_int(fields[3])
+    let cents = to_int(fields[4])
+    if sku is? error or quantity is? error or cents is? error return none
+    if sku <? 0 or quantity <? 0 or cents <? 0 return none
+    return formats.Stock[sku fields[2] quantity cents]
+}
+
+render = (row:Row compact:bool):>string => {
+    match row {
+        title:formats.Heading => columns(title.text "INVENTORY" sep=" / ")
+        item:formats.Stock => {
+            let value = item.quantity * item.cents
+            # The parser guards incoming prices; repeat that real domain guard
+            # at this public formatting boundary for independently made rows.
+            if item.cents <? 0 or value <? 0 return "invalid price"
+            let details = [fmt'>8'(item.quantity) fmt'>10'(money(item.cents)) fmt'>12'(money(value))]
+            if compact return columns(item.label details... sep=";")
+            columns(fmt'#06x'(item.sku) fmt'<14'(item.label) details...)
+        }
+        note:formats.Note => columns(note.text prefix="# ")
+    }
+}
+
+summarize = (items:array<formats.Stock>):>string => {
+    let units:int = 0
+    let value:int = 0
+    loop item in items {
+        units += item.quantity
+        value += item.quantity * item.cents
+    }
+    if value <? 0 return "invalid total"
+    let counts = ["lines={items.length}" "units={fmt','(units)}"]
+    columns("TOTAL" counts... "value={money(value)}" sep=" ")
+}
+
+main = () => {
+    let argv = args
+    let compact = false
+    loop option in argv[$clamp 1..) {
+        if option =? "--help" {
+            printl"usage: inventory-format [--compact] < rows.txt"
+            exit(0)
+        }
+        if option =? "--compact" { compact = true }
+        else {
+            printl"unknown option: {option}"
+            exit(2)
+        }
+    }
+    let text = read_stdin or_throw
+    let stocks:array<formats.Stock> = []
+    let rows:array<Row> = []
+    let failures:int = 0
+    loop raw in text.split("\n") {
+        let line = raw.trim
+        if line.length =? 0 continue
+        let row = parse_row(line)
+        if row is? none {
+            failures += 1
+            continue
+        }
+        rows.push(row)
+        if row is? formats.Stock { stocks.push(row) }
+    }
+
+    if not compact {
+        let tail = [fmt'>8'("QTY") fmt'>10'("EACH") fmt'>12'("VALUE")]
+        printl(columns(fmt'<6'("SKU") fmt'<14'("ITEM") tail...))
+    }
+    loop row in rows { printl(render(row compact)) }
+    printl(summarize(stocks))
+    printl(columns("formatter" "v{formats.version}" sep="-"))
+    # A status derived from input still proves the portable 0..255 contract.
+    # The ordinary stream has no rejected lines, so the acceptance run exits 0.
+    let code = min(failures 255)
+    exit(code)
+}
