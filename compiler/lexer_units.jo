@@ -1,0 +1,39 @@
+use 'lex.jo'
+use 'checker_tokens.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'lexer_errors.dewy'
+
+# a number with a unit right after it (120ms, 2.5m, 90deg): the value in the base unit
+lx_unit = (s: int, v: f64):
+    p = lx_p
+    us = lx_i
+    i = us
+    loop lx_cls[p[i]] & 2 != 0: i += 1
+    name = lx_src[us..i)
+    f = unit_scale(name)
+    if f == 0.0: lx_err(us, "unknown unit '{name}' (a number cannot be followed directly by a name)")
+    lx_i = i
+    lx_emit(.float_lit, s, i - s)
+    lx_slots[lx_count - 1].fval = v * f
+    lx_slots[lx_count - 1].flags = i32(int(lx_slots[lx_count - 1].flags) | INTF_UNIT)
+# how many base units (s, m, kg, rad, N) one of these is; 0 for unknown names
+unit_scale = (u: str) -> f64:
+    match u:
+        "s", "sec", "second", "seconds": 1.0
+        "ms", "millisecond", "milliseconds": 0.001
+        "us", "microsecond", "microseconds": 0.000001
+        "ns", "nanosecond", "nanoseconds": 0.000000001
+        "min", "minute", "minutes": 60.0
+        "h", "hour", "hours": 3600.0
+        "m", "meter", "meters", "metre", "metres": 1.0
+        "cm", "centimeter", "centimeters": 0.01
+        "mm", "millimeter", "millimeters": 0.001
+        "km", "kilometer", "kilometers": 1000.0
+        "kg", "kilogram", "kilograms": 1.0
+        "g", "gram", "grams": 0.001
+        "rad", "radian", "radians": 1.0
+        "deg", "degree", "degrees": 0.017453292519943295
+        "turn", "turns": 6.283185307179586
+        "N", "newton", "newtons": 1.0
+        _: 0.0

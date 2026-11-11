@@ -1,0 +1,76 @@
+$runtime_checks
+from p"@lib/core/rt.jo" import (__str_slice)
+from p"lex.jo" import (INTF_UNIT lx_cls lx_count lx_emit lx_i lx_p lx_slots lx_src)
+from p"lexer_errors.dewy" import (lx_err)
+
+LexerUnitWord:type=int64<overflow='wrap'>
+# a number with a unit right after it (120ms, 2.5m, 90deg): the value in the base unit
+lx_unit=(s:LexerUnitWord v:float64):>void=>$unsafe {
+    let p=lx_p
+    let us=lx_i
+    let i=us
+    loop lx_cls[p[i]] & 2 not=? 0 {i += 1}
+    let name=__str_slice(lx_src us i)
+    let f=unit_scale(name)
+    if f =? 0.0 {lx_err(us "unknown unit '{name}' (a number cannot be followed directly by a name)");}
+    lx_i=i
+    lx_emit('float_lit' s i - s)
+    lx_slots[lx_count - 1].fval=v * f
+    lx_slots[lx_count - 1].flags=int32(LexerUnitWord(lx_slots[lx_count - 1].flags) | INTF_UNIT)
+}
+# how many base units (s, m, kg, rad, N) one of these is; 0 for unknown names
+unit_scale=(u:string):>float64=>{
+    match u {
+        <"s"> => 1.0
+        <"sec"> => 1.0
+        <"second"> => 1.0
+        <"seconds"> => 1.0
+        <"ms"> => 0.001
+        <"millisecond"> => 0.001
+        <"milliseconds"> => 0.001
+        <"us"> => 0.000001
+        <"microsecond"> => 0.000001
+        <"microseconds"> => 0.000001
+        <"ns"> => 0.000000001
+        <"nanosecond"> => 0.000000001
+        <"nanoseconds"> => 0.000000001
+        <"min"> => 60.0
+        <"minute"> => 60.0
+        <"minutes"> => 60.0
+        <"h"> => 3600.0
+        <"hour"> => 3600.0
+        <"hours"> => 3600.0
+        <"m"> => 1.0
+        <"meter"> => 1.0
+        <"meters"> => 1.0
+        <"metre"> => 1.0
+        <"metres"> => 1.0
+        <"cm"> => 0.01
+        <"centimeter"> => 0.01
+        <"centimeters"> => 0.01
+        <"mm"> => 0.001
+        <"millimeter"> => 0.001
+        <"millimeters"> => 0.001
+        <"km"> => 1000.0
+        <"kilometer"> => 1000.0
+        <"kilometers"> => 1000.0
+        <"kg"> => 1.0
+        <"kilogram"> => 1.0
+        <"kilograms"> => 1.0
+        <"g"> => 0.001
+        <"gram"> => 0.001
+        <"grams"> => 0.001
+        <"rad"> => 1.0
+        <"radian"> => 1.0
+        <"radians"> => 1.0
+        <"deg"> => 0.017453292519943295
+        <"degree"> => 0.017453292519943295
+        <"degrees"> => 0.017453292519943295
+        <"turn"> => 6.283185307179586
+        <"turns"> => 6.283185307179586
+        <"N"> => 1.0
+        <"newton"> => 1.0
+        <"newtons"> => 1.0
+        _ => 0.0
+    }
+}
