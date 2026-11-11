@@ -12,6 +12,7 @@ use 'literals.dewy'
 use 'node_store.dewy'
 use 'parser_units.dewy'
 use 'parser_errors.dewy'
+use 'parser_flow_nodes.dewy'
 
 toks: Token[]
 # A parse unit owns its EOF-terminated stream. Borrow once on entry; recursive
@@ -1992,37 +1993,6 @@ is_open_range = (h: int) -> bool:
     it = int(nodes[h].a)
     nodes[it].kind == .range and nodes[it].b == 0 and not has_flag(it, NF_STEP)
 
-# Conservative source control flow: 1 falls through, 2 returns, 4 exits a loop.
-# This preserves a loop/else's all-returning arms after introducing its entered
-# flag. Nested loop exits may reject a proof, but must never prove a return.
-lx_flow_effects = (n: int) -> int:
-    if n == 0: return 1
-    k = nodes[n].kind
-    if k == .lambda: return 1
-    if k == .break_ or k == .continue_: return 4
-    if has_flag(n, NF_FLOW_RETURNS): return 2
-    if k == .return_:
-        e = lx_flow_effects(int(nodes[n].a))
-        return (e & 6) | (if e & 1 != 0: 2 else: 0)
-    if k == .block:
-        e = 1
-        loop item in kids(n):
-            if e & 1 == 0: break
-            e = (e & 6) | lx_flow_effects(item)
-        return e
-    if k == .if_:
-        e = lx_flow_effects(int(nodes[n].a))
-        if e & 1 == 0: return e
-        return (e & 6) | lx_flow_effects(int(nodes[n].b)) | lx_flow_effects(int(nodes[n].c))
-    if k == .exprstmt: return lx_flow_effects(int(nodes[n].a))
-    # Other expressions can contain blocks, including loop exits in arguments
-    # or conditions. Keep fallthrough possible rather than proving termination.
-    e = 1
-    e |= lx_flow_effects(int(nodes[n].a)) | lx_flow_effects(int(nodes[n].b))
-    e |= lx_flow_effects(int(nodes[n].c)) | lx_flow_effects(int(nodes[n].d))
-    loop item in kids(n): e |= lx_flow_effects(item)
-    e
-
 desugar_loopx = (lx: int) -> int:
     pos = nodes[lx].pos
     h = int(nodes[lx].a)
@@ -2167,12 +2137,6 @@ lx_lower_head = (h: int, tag: str, setup: mut int[], head: mut int[], tail: mut 
         return
     lx_binder(h, tag, setup, head, tail, false, pos)
 
-lx_or_terms = (h: int, out: mut int[]):
-    if int(nodes[h].op) == 3:
-        lx_or_terms(int(nodes[h].a), out)
-        lx_or_terms(int(nodes[h].b), out)
-    else: out.push(h)
-
 # The extra operand is compile-time metadata for the hidden exhaustion check.
 lx_range_exhausted = (condition: int, message: int, start: int, pos: int) -> int:
     n = lx_call("$dewy_range_exhausted", [condition, message, clone(start)], pos)
@@ -2314,14 +2278,6 @@ lx_binder = (t: int, tag: str, setup: mut int[], head: mut int[], tail: mut int[
     head.push(lx_if(lx_ident(name_of(has), pos), lx_assign(lx_ident(k, pos), .pluseq, lx_int(1, pos), pos), pos))
     has
 
-# if has: value else: none
-lx_opt_value = (has: int, value: int, pos: int) -> int:
-    n = mk(.if_, pos)
-    nodes[n].a = i32(lx_ident(name_of(has), pos))
-    nodes[n].b = i32(lx_block([lx_expr_stmt(value, pos)], pos))
-    nodes[n].c = i32(lx_block([lx_expr_stmt(mk(.none_lit, pos), pos)], pos))
-    n
-
 lx_expr_stmt = (e: int, pos: int) -> int:
     s = mk(.exprstmt, pos)
     nodes[s].a = i32(e)
@@ -2449,17 +2405,6 @@ loop_unpack_many = (f: int):
     body = int(nodes[f].b)
     set_list(body, [a] + kids(body))
     set_list(f, [tmp])
-
-# does the parenthesized group at i contain a loop binding (`name in`) at its top level?
-head_has_binder = (i: int) -> bool:
-    c = partner(i)
-    j = i + 1
-    loop j < c:
-        if p_toks[j].kind == .ident and p_toks[j + 1].kind == .kw_in:
-            pk0 = p_toks[j - 1].kind
-            if j == i + 1 or pk0 == .kw_and or pk0 == .kw_or or pk0 == .kw_mut or pk0 == .lparen: return true
-        j += 1
-    false
 
 parse_stmt = () -> int:
     pos = cur_pos()

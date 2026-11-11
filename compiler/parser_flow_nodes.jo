@@ -1,0 +1,66 @@
+use 'parse.jo'
+use 'checker_tokens.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'lexer_units.dewy'
+use 'lexer_errors.dewy'
+use 'ast.jo'
+use 'literals.dewy'
+use 'node_store.dewy'
+use 'parser_units.dewy'
+use 'parser_errors.dewy'
+
+# Conservative source control flow: 1 falls through, 2 returns, 4 exits a loop.
+# This preserves a loop/else's all-returning arms after introducing its entered
+# flag. Nested loop exits may reject a proof, but must never prove a return.
+lx_flow_effects = (n: int) -> int:
+    if n == 0: return 1
+    k = nodes[n].kind
+    if k == .lambda: return 1
+    if k == .break_ or k == .continue_: return 4
+    if has_flag(n, NF_FLOW_RETURNS): return 2
+    if k == .return_:
+        e = lx_flow_effects(int(nodes[n].a))
+        return (e & 6) | (if e & 1 != 0: 2 else: 0)
+    if k == .block:
+        e = 1
+        loop item in kids(n):
+            if e & 1 == 0: break
+            e = (e & 6) | lx_flow_effects(item)
+        return e
+    if k == .if_:
+        e = lx_flow_effects(int(nodes[n].a))
+        if e & 1 == 0: return e
+        return (e & 6) | lx_flow_effects(int(nodes[n].b)) | lx_flow_effects(int(nodes[n].c))
+    if k == .exprstmt: return lx_flow_effects(int(nodes[n].a))
+    # Other expressions can contain blocks, including loop exits in arguments
+    # or conditions. Keep fallthrough possible rather than proving termination.
+    e = 1
+    e |= lx_flow_effects(int(nodes[n].a)) | lx_flow_effects(int(nodes[n].b))
+    e |= lx_flow_effects(int(nodes[n].c)) | lx_flow_effects(int(nodes[n].d))
+    loop item in kids(n): e |= lx_flow_effects(item)
+    e
+lx_or_terms = (h: int, out: mut int[]):
+    if int(nodes[h].op) == 3:
+        lx_or_terms(int(nodes[h].a), out)
+        lx_or_terms(int(nodes[h].b), out)
+    else: out.push(h)
+# if has: value else: none
+lx_opt_value = (has: int, value: int, pos: int) -> int:
+    n = mk(.if_, pos)
+    nodes[n].a = i32(lx_ident(name_of(has), pos))
+    nodes[n].b = i32(lx_block([lx_expr_stmt(value, pos)], pos))
+    nodes[n].c = i32(lx_block([lx_expr_stmt(mk(.none_lit, pos), pos)], pos))
+    n
+# does the parenthesized group at i contain a loop binding (`name in`) at its top level?
+head_has_binder = (i: int) -> bool:
+    c = partner(i)
+    j = i + 1
+    loop j < c:
+        if p_toks[j].kind == .ident and p_toks[j + 1].kind == .kw_in:
+            pk0 = p_toks[j - 1].kind
+            if j == i + 1 or pk0 == .kw_and or pk0 == .kw_or or pk0 == .kw_mut or pk0 == .lparen: return true
+        j += 1
+    false
