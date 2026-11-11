@@ -1,0 +1,51 @@
+$runtime_checks
+from p"ast.jo" import (NF_LITERAL add_flag clone mk nodes set_list)
+from p"checker_tokens.dewy" import (Tok)
+from p"parse.jo" import (cur_pos p_index p_ntoks p_src p_toks ti)
+from p"util.jo" import (files intern line_col pos_file pos_off)
+
+ParserPositionWord:type=int64<overflow='wrap'>
+# position just after the previous token (where a missing ':' or ')' belongs)
+prev_end=():>int64=>$unsafe {
+    if ti =? 0 {return cur_pos()}
+    p_toks[ti - 1].pos + ParserPositionWord(p_toks[ti - 1].len)
+}
+nk_is=(i:ParserPositionWord k:Tok):>bool=>$unsafe {
+    i + 1 <? p_ntoks and p_toks[i + 1].kind =? k
+}
+nl_before=(i:ParserPositionWord):>bool=>$unsafe {
+    if i =? 0 {return true}
+    let j=ParserPositionWord(p_toks[i - 1].start) + ParserPositionWord(p_toks[i - 1].len)
+    let e=ParserPositionWord(p_toks[i].start)
+    loop j <? e {
+        if (p_src as array<uint8>)[j] =? b'\n' {return true}
+        j += 1
+    }
+    false
+}
+# `end` inside xs[...]: the last index, xs.len() - 1
+index_end=(pos:ParserPositionWord):>int64=>$unsafe {
+    let base=clone(p_index[p_index.length - 1])
+    let ln=mk('call' pos)
+    let callee=mk('ident' pos)
+    nodes.ptr[callee].name=int32(intern("len"))
+    nodes.ptr[ln].a=int32(callee)
+    set_list(ln [base])
+    let one=mk('int_lit' pos)
+    nodes.ptr[one].ival=1
+    add_flag(one NF_LITERAL)
+    let b=mk('binary' pos)
+    nodes.ptr[b].op=int32(59)
+    nodes.ptr[b].a=int32(ln)
+    nodes.ptr[b].b=int32(one)
+    b
+}
+# the spaces before the first character of the line that p is on
+line_indent=(p:ParserPositionWord):>int64=>$unsafe {
+    let [ln c]=line_col(p)
+    let src=files[pos_file(p)].src
+    let i=pos_off(p) - (c - 1)
+    let n:ParserPositionWord=0
+    loop i + n <? (src as array<uint8>).length and ((src as array<uint8>)[i + n] =? b' ' or (src as array<uint8>)[i + n] =? b'\t') {n += 1}
+    n
+}

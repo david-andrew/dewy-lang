@@ -13,6 +13,7 @@ use 'node_store.dewy'
 use 'parser_units.dewy'
 use 'parser_errors.dewy'
 use 'parser_flow_nodes.dewy'
+use 'parser_positions.dewy'
 
 toks: Token[]
 # A parse unit owns its EOF-terminated stream. Borrow once on entry; recursive
@@ -51,17 +52,11 @@ accept = (k: Tok) -> bool:
 tok_src = (i: int) -> str:
     s = int(p_toks[i].start)
     p_src[s..s + int(p_toks[i].len))
-# position just after the previous token (where a missing ':' or ')' belongs)
-prev_end = () -> int:
-    if ti == 0: return cur_pos()
-    p_toks[ti - 1].pos + int(p_toks[ti - 1].len)
 
 word_in = (w: str, words: str[]) -> bool:
     loop x in words:
         if x == w: return true
     false
-
-nk_is = (i: int, k: Tok) -> bool: i + 1 < p_ntoks and p_toks[i + 1].kind == k
 
 # a mistake carried over from another language where parsing stopped at token i (wanting
 # `want`, or .eof for an expression): says what Sloppy writes instead, and stops
@@ -201,14 +196,6 @@ space_before = (i: int) -> bool:
     if p_toks[i].kind == .str_lit: s -= 1
     if p_toks[i - 1].kind == .str_lit: prev_end += 1
     s > prev_end
-nl_before = (i: int) -> bool:
-    if i == 0: return true
-    j = int(p_toks[i - 1].start) + int(p_toks[i - 1].len)
-    e = int(p_toks[i].start)
-    loop j < e:
-        if p_src[j] == '\n': return true
-        j += 1
-    false
 # The lexer records bracket partners in its existing nesting stack. Streams beyond
 # the packed token-index limit use this bounded fallback, cached on first demand.
 partner = (i: int) -> int:
@@ -779,23 +766,6 @@ parse_primary = () -> int:
     fatal(pos, "expected an expression, found {tok_name(k)}")
     0
 
-# `end` inside xs[...]: the last index, xs.len() - 1
-index_end = (pos: int) -> int:
-    base = clone(p_index[p_index.len() - 1])
-    ln = mk(.call, pos)
-    callee = mk(.ident, pos)
-    nodes[callee].name = i32(intern("len"))
-    nodes[ln].a = i32(callee)
-    set_list(ln, [base])
-    one = mk(.int_lit, pos)
-    nodes[one].ival = 1
-    add_flag(one, NF_LITERAL)
-    b = mk(.binary, pos)
-    nodes[b].op = i32(int(Tok.minus))
-    nodes[b].a = i32(ln)
-    nodes[b].b = i32(one)
-    b
-
 # one of several indexes: an expression, `..` (the whole axis) or `..b`
 parse_index_item = () -> int:
     if pk() != .dotdot: return parse_expr()
@@ -895,15 +865,6 @@ parse_bracket = () -> int:
         return m
     n = mk(.array, pos)
     set_list(n, elems)
-    n
-
-# the spaces before the first character of the line that p is on
-line_indent = (p: int) -> int:
-    ln, c = line_col(p)
-    src = files[pos_file(p)].src
-    i = pos_off(p) - (c - 1)
-    n = 0
-    loop i + n < len(src) and (src[i + n] == ' ' or src[i + n] == '\t'): n += 1
     n
 
 # does the '(' at i start a function literal: (params) -> R: ... or (params): ...?
