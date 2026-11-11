@@ -9,7 +9,7 @@ def test_fact_plan_dependencies(compiler, tmp_path):
     source.write_text(''.join(f"use '{ROOT / 'compiler' / name}'\n" for name in
                               ('facts.jo', 'facts_plans.dewy', 'facts_probes.dewy', 'effect_graph.dewy', 'effects.jo', 'places.jo', 'place_routes.dewy', 'types.jo', 'type_ops.dewy',
                                'checker_types.dewy', 'refinement_types.dewy', 'check.jo', 'effect_types.dewy',
-                               'exact.jo', 'ast.jo', 'floats.jo')) + '''
+                               'exact.jo', 'exact_cold_walk.dewy', 'ast.jo', 'floats.jo')) + '''
 init_types()
 fns.resize(4)
 effect_graph_reset()

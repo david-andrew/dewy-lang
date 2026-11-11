@@ -1,0 +1,22 @@
+$runtime_checks
+from p"ast.jo" import (kid nkids nodes)
+from p"exact.jo" import (exact_marks)
+from p"isolation_ops.dewy" import (isolation_children)
+
+ExactWalkWord:type=int64<overflow='wrap'>
+exact_reserve=(n:ExactWalkWord):>void=>{
+    if n >=? exact_marks.length {exact_marks.resize(max(n + 1 exact_marks.length * 2 + 64))}
+}
+exact_shader_calls=(n:ExactWalkWord @work:array<int64>):>void=>$unsafe {
+    if n =? 0 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'call' and nodes.ptr[n].aux =? 0 and nodes.ptr[n].sym >? 0 {work.push(ExactWalkWord(nodes.ptr[n].sym))}
+    let mask=isolation_children(k)
+    if mask <? 0 {return}
+    if mask & 1 not=? 0 {exact_shader_calls(ExactWalkWord(nodes.ptr[n].a) @work)}
+    if mask & 2 not=? 0 {exact_shader_calls(ExactWalkWord(nodes.ptr[n].b) @work)}
+    if mask & 4 not=? 0 {exact_shader_calls(ExactWalkWord(nodes.ptr[n].c) @work)}
+    if mask & 16 not=? 0 {
+        loop i in [0..nkids(n)) {exact_shader_calls(kid(n i) @work)}
+    }
+}

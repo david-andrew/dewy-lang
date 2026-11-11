@@ -52,6 +52,7 @@ use 'ir_builders.dewy'
 use 'math_ops.dewy'
 use 'isolation_ops.dewy'
 use 'exact_measure.dewy'
+use 'exact_cold_walk.dewy'
 
 # exact_potential and exact_math_operand run in checker_exact.dewy.
 exact_query_input = CheckerExactInput(&nodes, &lists, &types, &files, &T_INT, &T_U64, &T_MATH_INT)
@@ -125,8 +126,6 @@ exact_decided = (n: int) -> bool: exact_marks[n] & 8 != 0
 exact_proved = (n: int) -> bool: exact_marks[n] & 16 != 0
 exact_decide = (n: int, proven: bool):
     exact_marks[n] = (exact_marks[n] & 239) | 8 | (if proven: 16 else: 0)
-exact_reserve = (n: int):
-    if n >= exact_marks.len(): exact_marks.resize(max(n + 1, exact_marks.len() * 2 + 64))
 exact_mark = (n: int):
     if n >= exact_marks.len(): exact_reserve(n)
     if exact_marks[n] & 1 == 0: exact_nodes.push(n)
@@ -498,17 +497,6 @@ exact_shader_demand = () -> int[]:
         out.push(f)
         exact_shader_calls(int(fns[f].body), work)
     out
-exact_shader_calls = (n: int, work: mut int[]):
-    if n == 0: return
-    k = nodes[n].kind
-    if k == .call and nodes[n].aux == 0 and nodes[n].sym > 0: work.push(int(nodes[n].sym))
-    mask = isolation_children(k)
-    if mask < 0: return
-    if mask & 1 != 0: exact_shader_calls(int(nodes[n].a), work)
-    if mask & 2 != 0: exact_shader_calls(int(nodes[n].b), work)
-    if mask & 4 != 0: exact_shader_calls(int(nodes[n].c), work)
-    if mask & 16 != 0:
-        loop i in [0..nkids(n)): exact_shader_calls(kid(n, i), work)
 
 # A boundary wrapper has the same ABI and type as the value it stores.
 exact_store = (n: int, owner: int):

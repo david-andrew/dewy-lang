@@ -1,0 +1,64 @@
+use 'exact.jo'
+use 'lower_scalars.dewy'
+use 'lower_storage.dewy'
+use 'lower_group.dewy'
+use 'checker_signature.dewy'
+use 'checker_state.dewy'
+use 'checker_exact.dewy'
+use 'exact_reset_loop.jo'
+use 'ir_types.dewy'
+use 'checker_tokens.dewy'
+use 'refinement_types.dewy'
+use 'exact_guards.jo'
+use 'exact_guard_ops.dewy'
+use 'exact_loop.jo'
+use 'pcheck.jo'
+use 'pcheck_drive.dewy'
+use 'math_lower.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'expr.jo'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_assign_hooks.dewy'
+use 'ir.jo'
+use 'isolation.jo'
+use 'directives.jo'
+use 'directive_queries.dewy'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'effects.jo'
+use 'refine.jo'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'facts.jo'
+use 'facts_arith.dewy'
+use 'facts_ranges.dewy'
+use 'facts_joins.dewy'
+use 'facts_progress.dewy'
+use 'lower.jo'
+use 'node_store.dewy'
+use 'lower_primitives.dewy'
+use 'ir_builders.dewy'
+use 'math_ops.dewy'
+use 'isolation_ops.dewy'
+use 'exact_measure.dewy'
+
+exact_reserve = (n: int):
+    if n >= exact_marks.len(): exact_marks.resize(max(n + 1, exact_marks.len() * 2 + 64))
+exact_shader_calls = (n: int, work: mut int[]):
+    if n == 0: return
+    k = nodes[n].kind
+    if k == .call and nodes[n].aux == 0 and nodes[n].sym > 0: work.push(int(nodes[n].sym))
+    mask = isolation_children(k)
+    if mask < 0: return
+    if mask & 1 != 0: exact_shader_calls(int(nodes[n].a), work)
+    if mask & 2 != 0: exact_shader_calls(int(nodes[n].b), work)
+    if mask & 4 != 0: exact_shader_calls(int(nodes[n].c), work)
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)): exact_shader_calls(kid(n, i), work)
