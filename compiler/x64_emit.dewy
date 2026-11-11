@@ -1336,6 +1336,20 @@ emit_memeq=(d:XWord a:XWord bb:XWord count:XWord flags:bool=false strings:bool=f
     x_loop_depth=enclosing_depth
 }
 
+# One AVX2 vector from a proven readable span. Memory-source comparison uses
+# only the existing xmm0/xmm1 scratch pair; return the first-match branch fixup.
+findbyte_vector=(mask:XWord offset:XWord):>XWord=>$unsafe {
+    vex(0  1  RCX  1  1  0  1)
+    b(0x74) # vpcmpeqb ymm0, ymm1, [rcx + offset]
+    mem(0  RCX  offset)
+    vex(mask  0  0  1  1  0  1)
+    b(0xD7)
+    modrr(mask  0)
+    cmp_branch_pad(9)
+    op_rr(0x85  false  mask  mask)
+    jcc32(CC_NE)
+}
+
 # Dynamic byte search. Only scratch rax/rcx/rdx, xmm0/xmm1 and the destination
 # are clobbered. Unaligned vector reads stay inside the supplied span; the
 # tail uses one bounded eight-byte load and 0..7 scalar reads, including
@@ -1361,7 +1375,8 @@ emit_findbyte=(d:XWord p:XWord n:XWord byte:XWord invert:bool wide:bool=false):>
     sse_rr(0x66  0x61  1  1)
     sse_rr(0x66  0x70  1  1)
     b(0)
-    # (imm 2, the caller having checked for AVX2: long spans 32 bytes a step first)
+    # (imm 2, the caller having checked for AVX2: bounded 128-byte blocks first)
+    let found_bulk:array<int64>=[]
     let found_wide:XWord=-1
     let short_wide:XWord=-1
     if wide {
@@ -1372,18 +1387,31 @@ emit_findbyte=(d:XWord p:XWord n:XWord byte:XWord invert:bool wide:bool=false):>
         vex(1  0  1  2  1  0  1)
         b(0x78) # vpbroadcastb ymm1, xmm1
         modrr(1  1)
+        # Demand-driven, constant emission work per wide findbyte. One span
+        # guard covers four ordered vectors: no read passes the supplied end,
+        # and every match exits before a later vector can change its mask.
+        cmp_branch_pad(13)
+        b24(0xFA8148)
+        b32(128)
+        let small_bulk=jcc32(CC_L)
+        nop_pad((32 - XWord(x_code[0].length) % 32) % 32)
+        let bulk_top=XWord(x_code[0].length)
+        loop k in [0..4) {found_bulk.push(findbyte_vector(mask k * 32))}
+        lea(RAX  RAX  128)
+        lea(RCX  RCX  128)
+        lea(RDX  RDX  -128)
+        cmp_branch_pad(13)
+        b24(0xFA8148)
+        b32(128)
+        patch_branch(jcc32(CC_GE) bulk_top)
+        cmp_branch_pad(10)
+        b24(0xFA8348)
+        b(32)
+        let bulk_done=jcc32(CC_L)
+        patch_here(small_bulk)
         nop_pad((32 - XWord(x_code[0].length) % 32) % 32)
         let wide_top=XWord(x_code[0].length)
-        vmov_rm(0  RCX  0  VY)
-        vex(0  0  1  1  1  0  1)
-        b(0x74) # vpcmpeqb ymm0, ymm0, ymm1
-        modrr(0  1)
-        vex(mask  0  0  1  1  0  1)
-        b(0xD7) # vpmovmskb
-        modrr(mask  0)
-        cmp_branch_pad(9)
-        op_rr(0x85  false  mask  mask)
-        found_wide=jcc32(CC_NE)
+        found_wide=findbyte_vector(mask 0)
         lea(RAX  RAX  32)
         lea(RCX  RCX  32)
         lea(RDX  RDX  -32)
@@ -1391,6 +1419,7 @@ emit_findbyte=(d:XWord p:XWord n:XWord byte:XWord invert:bool wide:bool=false):>
         b24(0xFA8348)
         b(32)
         patch_branch(jcc32(CC_GE)  wide_top)
+        patch_here(bulk_done)
         b24(0x77F8C5) # vzeroupper
         cmp_branch_pad(10)
         b24(0xFA8348)
@@ -1464,6 +1493,12 @@ emit_findbyte=(d:XWord p:XWord n:XWord byte:XWord invert:bool wide:bool=false):>
     lea(RCX  RCX  1)
     jmp_back(tail)
     if found_wide >=? 0 {
+        # A later vector's offset falls through one increment per preceding
+        # vector, then shares the existing mask-to-first-byte exit.
+        loop k in [0..4) {
+            patch_here(found_bulk[3 - k])
+            if k <? 3 {lea(RAX RAX 32)}
+        }
         patch_here(found_wide)
         b24(0x77F8C5) # vzeroupper
     }
