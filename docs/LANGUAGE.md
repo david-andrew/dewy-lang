@@ -767,7 +767,11 @@ a strict upper bound. A checked helper that preserves or grows an array's length
 preserve a caller's guarded index; an append helper's returned index can be
 proven below the array's post-call length. Every return must establish the
 relation. Replacing or shrinking the array, an unknown callback, and pending
-return cleanup still invalidate facts they could falsify. Module `const` values,
+return cleanup still invalidate facts they could falsify. A call that runs a
+callback written in the call or named with `@f` (`map`, `filter`, `sorted(key=...)`,
+or a program's own function taking one) changes only what the callee and that
+callback write, so facts about other `@` places survive a write-free callback.
+Module `const` values,
 including their lengths and guarded elements, retain facts across calls.
 A scalar search result can also retain its strict upper bound against a
 module array's exit length when every return proves it; later replacement or

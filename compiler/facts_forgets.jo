@@ -39,6 +39,7 @@ use 'proofs.jo'
 use 'places.jo'
 use 'place_routes.dewy'
 use 'effects.jo'
+use 'effect_graph.dewy'
 use 'effect_library.jo'
 use 'ownership.jo'
 use 'witness.jo'
@@ -327,6 +328,19 @@ fact_call_effects = (n: int, s: mut FactState):
         return
     events = effect_summaries[f].events
     loop event in events:
+        if event.atom.kind != .opaque: continue
+        # (opaque only for calls of its own callbacks, known here: their rows
+        # instead, fact_callback_events)
+        # (with no exposed fact at stake the opaque call forgets nothing more)
+        known: EffectEvent[]
+        if not fact_exposed_bound(s) or not fact_callback_ready(f) or not fact_callback_events(n, f, known):
+            fact_forget_call(s, n, .call)
+            return
+        loop other in effect_summaries[f].events:
+            if other.atom.kind != .opaque: known.push(other)
+        events = known
+        break
+    loop event in events:
         # (a library caller's own facts may describe the output state a helper's text sink writes)
         if event.atom.kind == .opaque or event.atom.kind == .escape or event.atom.kind == .io and fact_owner_in_lib():
             fact_forget_call(s, n, .call)
@@ -386,20 +400,59 @@ fact_call_effects = (n: int, s: mut FactState):
         t = if p.root == .local: int(locals[p.declaration].type) else: int(globals[p.declaration].type)
         value = fact_call_write(s, old, t, group.paths, 0, n)
         fact_rebind(s, p, value, n, old)
-# A callback argument that writes no place outside its own locals: a literal
-# lambda or a named function whose settled effect row holds no write, escape
-# or opaque event. Calling it changes no caller place through any alias.
-# O(row) once the callee's row is settled, on demand; a summary run uses
-# only rows already settled.
-fact_callback_writes_nothing = (e0: int) -> bool:
+# The function a callback argument runs: a literal lambda or a named
+# function with no environment, whose effect row is settled (a summary run
+# uses only rows already settled; otherwise demanded here). 0 when unknown.
+fact_callback_fn = (e0: int) -> int:
     e = e0
     loop nodes[e].kind == .conv: e = int(nodes[e].a)
     f = 0
     if nodes[e].kind == .lambda and not has_flag(e, NF_GENERIC): f = int(nodes[e].sym)
     else if nodes[e].kind == .fnref and nodes[e].aux != 1 and nodes[e].aux != 2 and nodes[e].sym > 0 and not fns[int(nodes[e].sym)].has_env: f = int(nodes[e].sym)
-    if f <= 0 or f >= fns.len(): return false
-    if fact_summary_owner != 0 and (f >= effect_summaries.len() or not effect_summaries[f].done): return false
+    if f <= 0 or f >= fns.len(): return 0
+    if fact_summary_owner != 0 and (f >= effect_summaries.len() or not effect_summaries[f].done): return 0
+    if not effects_demand(f, true): return 0
+    f
+# Callee f's row is complete and opaque only for its own callbacks. A
+# footprint scan stops at a callback call (EffectSummary.cut) until a call
+# needs those rows: the first, outside summary runs and effect traversals,
+# rebuilds the footprint graph to scan past them for the rest of the compile
+# (once per compile; programs that never need it pay nothing).
+fact_callback_ready = (f: int) -> bool:
+    if effect_summaries[f].opaque_other or effect_summaries[f].callbacks == 0: return false
+    if not effect_summaries[f].cut: return true
+    if effect_callbacks_full or fact_summary_owner != 0 or not effect_footprints_only or effect_stack.len() > 0 or effect_solving or effect_inference_busy: return false
+    effect_callbacks_full = true
+    effect_graph_reset()
+    effect_footprints_only = true
     if not effects_demand(f, true): return false
+    not effect_summaries[f].opaque_other and effect_summaries[f].callbacks != 0 and not effect_summaries[f].cut
+# Call n's callee f is opaque only for calls of its own callbacks
+# (EffectSummary.callbacks). With each one's argument known here, those calls
+# do what the argument's settled row says: its events go to out, unless one
+# is opaque, escapes, or writes a place other than a global (a write to its
+# own formal reaches a place f chose). O(callbacks + their rows).
+fact_callback_events = (n: int, f: int, out: mut EffectEvent[]) -> bool:
+    mask = effect_summaries[f].callbacks
+    if effect_summaries[f].opaque_other or effect_summaries[f].cut or mask == 0: return false
+    loop i in [0..min(nkids(n), 62)):
+        if mask & (1 << i) == 0: continue
+        mask = mask & ~(1 << i)
+        g = fact_callback_fn(kid(n, i))
+        if g == 0: return false
+        loop event in effect_summaries[g].events:
+            kind = event.atom.kind
+            if kind == .opaque or kind == .escape or kind == .remainder: return false
+            if kind == .write and event.atom.place.root != .global: return false
+            out.push(event)
+    mask == 0
+# A callback argument that writes no place outside its own locals: a literal
+# lambda or a named function whose settled effect row holds no write, escape
+# or opaque event. Calling it changes no caller place through any alias.
+# O(row) once the callee's row is settled, on demand.
+fact_callback_writes_nothing = (e0: int) -> bool:
+    f = fact_callback_fn(e0)
+    if f == 0: return false
     loop event in effect_summaries[f].events:
         kind = event.atom.kind
         if kind == .write or kind == .escape or kind == .opaque or kind == .remainder: return false

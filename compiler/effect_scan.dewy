@@ -1,12 +1,12 @@
 $runtime_checks
 from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
-from p"effects.jo" import (EffectEdge effect_contracts effect_counters effect_exact_rep effect_footprints_only effect_for_marks effect_limit effect_moved_out effect_policy effect_seen effect_summaries effects_active)
+from p"effects.jo" import (EffectEdge effect_callback_add effect_contracts effect_counters effect_exact_rep effect_footprints_only effect_for_marks effect_limit effect_moved_out effect_policy effect_seen effect_summaries effects_active)
 from p"effect_costs.dewy" import (effect_bounds effect_cleanup effect_failure effect_intrinsic_cost effect_plan_cost)
 from p"dewy_reader_types.dewy" import (EffectKind)
 from p"expr.jo" import (IN ntype)
 from p"checks_thin_expr.dewy" import (is_fn_type is_map_type)
 from p"isolation.jo" import (IsolationReason)
-from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_PARAM LF_SHARED compound_op fns globals locals)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_PARAM LF_RESIZED LF_SHARED LF_VALUEPARAM compound_op fns globals locals)
 from p"checks_thin.dewy" import (readonly_global)
 from p"ast.jo" import (NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_MUT NF_SPREAD NF_STMT NF_U64 RANGE_EXHAUSTION has_flag kid kid2 nkids nkids2 nodes)
 from p"type_layout.dewy" import (TF_BOXED)
@@ -18,7 +18,7 @@ from p"effect_contracts.dewy" import (callable_base callable_contract)
 from p"copies.jo" import (copies_on copy_bindings)
 from p"copy_ops.dewy" import (copy_strict)
 from p"ir.jo" import (dbg_on)
-from p"effect_graph.dewy" import (effect_add effect_opaque)
+from p"effect_graph.dewy" import (effect_add effect_mark_callback effect_opaque)
 from p"effect_values.dewy" import (effect_count_literal effect_float effect_float_op effect_owner_record effect_plain effect_scalar effect_share effect_simple_enum effect_value effect_word_op)
 from p"effect_lattice.dewy" import (effect_intern place_base)
 from p"effect_control.dewy" import (effect_name)
@@ -376,8 +376,53 @@ effect_readonly_binding=(n:EffectScanWord):>bool=>$unsafe {
     if tkind(t) =? 'array' and effect_scalar(telem(t)) {return true}
     return is_fn_type(t) and effect_bare(a)
 }
+# The ordinal of f's own callable parameter e names (a Dewy value
+# parameter's own binding stands for the hidden parameter of its name), when
+# f never rebinds, shares or exposes it: a call of it runs whatever the
+# caller passed. -1 otherwise. O(parameters).
+effect_own_callback=(f:EffectScanWord e0:EffectScanWord):>int64=>$unsafe {
+    let e=e0
+    loop nodes.ptr[e].kind =? 'conv' {e=EffectScanWord(nodes.ptr[e].a)}
+    if nodes.ptr[e].kind not=? 'ident' or nodes.ptr[e].aux not=? int32<overflow='wrap'>(1) {return -1}
+    let l:EffectScanWord=EffectScanWord(nodes.ptr[e].sym)
+    let fl:EffectScanWord=EffectScanWord(locals.ptr[l].flags)
+    if fl & (LF_PARAM | LF_VALUEPARAM) =? 0 or EffectScanWord(locals.ptr[l].owner) not=? f {return -1}
+    if fl & (LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ADDR | LF_ASSIGNED | LF_RESIZED | LF_ALIAS | LF_SHARED | LF_EXPOSED | LF_BYREF) not=? 0 {return -1}
+    # (a declared callable row is the contract its calls already use)
+    if not is_fn_type(representation_type(EffectScanWord(locals.ptr[l].type))) or callable_contract(ntype(e0)) not=? 0 or callable_contract(ntype(e)) not=? 0 or callable_contract(EffectScanWord(locals.ptr[l].type)) not=? 0 {return -1}
+    loop i in [0..fns.ptr[f].params.length) {
+        let p=fns.ptr[f].params.ptr[i]
+        if p =? l or fl & LF_VALUEPARAM not=? 0 and locals.ptr[p].name =? locals.ptr[l].name {
+            if callable_contract(EffectScanWord(locals.ptr[p].type)) not=? 0 {return -1}
+            return i
+        }
+    }
+    return -1
+}
+# An opaque event at n standing for f's own callback parameter i (EffectSummary.callbacks).
+effect_callback=(f:EffectScanWord n:EffectScanWord i:EffectScanWord):>bool=>$unsafe {
+    if i <? 0 {return false}
+    effect_mark_callback(f i);
+    effect_callback_add=true
+    effect_opaque(f n);
+    effect_callback_add=false
+    return true
+}
 effect_indirect=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     let callee:EffectScanWord=EffectScanWord(nodes.ptr[n].a)
+    # (a call of f's own callback: opaque, standing for the callback's row,
+    # which a caller passing a known one substitutes: fact_call_effects)
+    let own=effect_own_callback(f callee)
+    if own >=? 0 {
+        let ft0=callable_base(ntype(callee))
+        loop i in [0..nkids(n)) {
+            let a=kid(n i)
+            if EffectScanWord(types.ptr[ft0].mutmask) & (1 << i) =? 0 {effect_scan_node(f a);}
+            else {effect_opaque(f a);}
+        }
+        effect_callback(f n own);
+        return
+    }
     let contract=callable_contract(ntype(callee))
     if contract =? 0 and (effects_active or effect_policy.prohibitions not=? 0) {contract=effect_source_row(callee)}
     effect_scan_node(f callee);
@@ -631,6 +676,9 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         if effect_small(n) >=? 0 {return}
         let t=representation_type(ntype(n))
         if is_fn_type(t) and effect_bare(n) {return}
+        # (passing f's own callback on: opaque, standing for that callback,
+        # effect_merge_callbacks)
+        if is_fn_type(t) and effect_callback(f n effect_own_callback(f n)) {return}
         if tkind(t) =? 'array' and effect_scalar(telem(t)) and EffectScanWord(locals.ptr[l].flags) & LF_PARAM not=? 0 {
             if EffectScanWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {return}
             # (a mutable parameter's storage is the caller's: reading it is a read of the formal)
@@ -711,6 +759,8 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
         if effect_readonly_binding(n) {return}
         supported=l >? 0 and (effect_value(EffectScanWord(locals.ptr[l].type)) or is_fn_type(EffectScanWord(locals.ptr[l].type)) and effect_bare(EffectScanWord(nodes.ptr[n].b))) and EffectScanWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) =? 0
+        # (a value parameter's own binding of f's callback: effect_own_callback)
+        if not supported and l >? 0 and EffectScanWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) =? 0 and is_fn_type(EffectScanWord(locals.ptr[l].type)) {supported=effect_callback(f n effect_own_callback(f EffectScanWord(nodes.ptr[n].b)))}
     }
     else if k =? 'binary' {
         let shift=nodes.ptr[n].op =? int32<overflow='wrap'>(67) or nodes.ptr[n].op =? int32<overflow='wrap'>(68)
@@ -874,7 +924,10 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     }
     else if k =? 'cast' and effect_footprints_only and not raw_view(n) and (effect_scalar(ntype(n)) or effect_float(ntype(n))) and (effect_scalar(ntype(EffectScanWord(nodes.ptr[n].a))) or effect_float(ntype(EffectScanWord(nodes.ptr[n].a)))) {supported=true}
     else if k =? 'conv' {
-        supported=(effect_scalar(ntype(n)) and effect_word(EffectScanWord(nodes.ptr[n].a)) or effect_small(n) >=? 0 or is_fn_type(ntype(n)) and effect_bare(EffectScanWord(nodes.ptr[n].a))) and (nodes.ptr[n].aux =? int32<overflow='wrap'>(0) or nodes.ptr[n].aux =? int32<overflow='wrap'>(1) or nodes.ptr[n].aux =? int32<overflow='wrap'>(19) or nodes.ptr[n].aux =? int32<overflow='wrap'>(20) or nodes.ptr[n].aux =? int32<overflow='wrap'>(21))
+        let plain=nodes.ptr[n].aux =? int32<overflow='wrap'>(0) or nodes.ptr[n].aux =? int32<overflow='wrap'>(1) or nodes.ptr[n].aux =? int32<overflow='wrap'>(19) or nodes.ptr[n].aux =? int32<overflow='wrap'>(20) or nodes.ptr[n].aux =? int32<overflow='wrap'>(21)
+        supported=(effect_scalar(ntype(n)) and effect_word(EffectScanWord(nodes.ptr[n].a)) or effect_small(n) >=? 0 or is_fn_type(ntype(n)) and effect_bare(EffectScanWord(nodes.ptr[n].a))) and plain
+        # (f's own callback passed on: effect_own_callback)
+        if not supported and plain and is_fn_type(ntype(n)) {supported=effect_callback(f n effect_own_callback(f n))}
     }
     if not supported {effect_opaque(f n);}
     # Hidden calls cannot be trusted by annotation or pathname. They remain

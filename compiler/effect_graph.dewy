@@ -2,9 +2,9 @@ $runtime_checks
 from p"effect_types.dewy" import (EffectAtom EffectEvent PlaceIdentity)
 from p"effect_library.jo" import EffectClass
 from p"isolation.jo" import IsolationReason
-from p"effects.jo" import (EffectBody EffectDelta EffectEdge EffectEdgeKey EffectEventKey EffectSummary effect_blocks_demanded effect_bodies effect_body_cache effect_body_owner effect_body_panics effect_bounds_proven effect_contracts effect_declared effect_event_index effect_exact_rep effect_final effect_footprints_only effect_for_marks effect_inference_busy effect_ix_locals effect_ix_nodes effect_limit effect_plain_cache effect_seen effect_serial effect_share_cache effect_solving effect_stack effect_stamps effect_summaries effect_ticks effect_unavailable effect_value_cache)
+from p"effects.jo" import (EffectBody EffectDelta EffectEdge EffectEdgeKey EffectEventKey EffectSummary effect_blocks_demanded effect_bodies effect_body_cache effect_body_owner effect_body_panics effect_bounds_proven effect_callback_add effect_callbacks_full effect_contracts effect_declared effect_event_index effect_exact_rep effect_final effect_footprints_only effect_for_marks effect_inference_busy effect_ix_locals effect_ix_nodes effect_limit effect_plain_cache effect_seen effect_serial effect_share_cache effect_solving effect_stack effect_stamps effect_summaries effect_ticks effect_unavailable effect_value_cache)
 from p"check.jo" import (FK_INIT FK_LAMBDA FK_PARTIAL LF_MUTPARAM decl_info decl_infos fns locals)
-from p"ast.jo" import (NF_EXTERN has_flag nodes)
+from p"ast.jo" import (NF_EXTERN has_flag kid nkids nodes)
 from p"types.jo" import (T_VOID)
 from p"arena_ops.dewy" import (arena_capacity_exempt)
 from p"arena.jo" import (arena_fns)
@@ -19,7 +19,7 @@ from p"effect_contracts.dewy" import (effect_subst)
 from p"effect_control.dewy" import (effect_prepare)
 from p"facts_forgets.dewy" import (fact_text_sink)
 from p"effect_costs.dewy" import (effect_borrowed_receiver effect_caller_obligation effect_library_summary effect_map_write effect_signature_opaque)
-from p"effect_scan.dewy" import (effect_body_moves_out effect_isolation_block effect_scan_node)
+from p"effect_scan.dewy" import (effect_body_moves_out effect_isolation_block effect_own_callback effect_scan_node)
 from p"concurrency_waits.dewy" import (concurrency_fn_blocks)
 # Demanded effect graph execution; shared state has one owner in effects.jo.
 GraphWord:type=int64<overflow='wrap'>
@@ -99,12 +99,70 @@ effect_restamp=(f:GraphWord):>void=>$unsafe {
     effect_summaries.ptr[f].stamp = effect_stamps;
     loop old in effect_summaries.ptr[f].events {effect_event_index[EffectEventKey[effect_stamps old.atom]] = true;}
 }
-effect_add=(f:GraphWord event:EffectEvent):>bool=>$unsafe {
-    if effect_footprints_only {
-        let kind=event.atom.kind
-        if kind =? 'opaque' or kind =? 'escape' {effect_summaries.ptr[f].footprint_opaque = true;}
-        else if kind not=? 'write' and kind not=? 'remainder' {return false}
+# Opacity other than calls of f's own callbacks (effect_callback_add): the
+# row then stands for anything, whatever its callbacks are. O(1).
+effect_mark_other=(f:GraphWord):>void=>$unsafe {
+    if effect_summaries.ptr[f].opaque_other {return}
+    effect_summaries.ptr[f].opaque_other = true;
+    effect_ticks = GraphWord(effect_ticks) + 1;
+    effect_summaries.ptr[f].changed_at = effect_ticks;
+}
+# (f calls its own parameter i, a callable: the row's opaque event stands for
+# that call when nothing else is opaque)
+# (a footprint scan of f stopped at a call of its callback: fact_callback_ready)
+effect_mark_cut=(f:GraphWord):>void=>$unsafe {
+    if effect_summaries.ptr[f].cut {return}
+    effect_summaries.ptr[f].cut = true;
+    effect_ticks = GraphWord(effect_ticks) + 1;
+    effect_summaries.ptr[f].changed_at = effect_ticks;
+}
+effect_mark_callback=(f:GraphWord i:GraphWord):>void=>$unsafe {
+    if i <? 0 or i >=? 62 {effect_mark_other(f); return}
+    let mask=GraphWord(effect_summaries.ptr[f].callbacks)
+    if mask & (GraphWord(1) << i) not=? 0 {return}
+    effect_summaries.ptr[f].callbacks = int64(mask | GraphWord(1) << i);
+    effect_ticks = GraphWord(effect_ticks) + 1;
+    effect_summaries.ptr[f].changed_at = effect_ticks;
+}
+# A callee's own callbacks are the caller's when the call passes the caller's
+# own callable parameters for them (`sorted` forwarding `key` to `sort_by`);
+# any other argument, or a non-call edge, is opacity the caller cannot
+# substitute. O(set bits) per propagation of the edge.
+effect_merge_callbacks=(f:GraphWord edge:EffectEdge):>bool=>$unsafe {
+    let g=edge.callee
+    let mask=GraphWord(effect_summaries.ptr[g].callbacks)
+    if not effect_summaries.ptr[g].opaque_other and mask =? 0 and not effect_summaries.ptr[g].cut {return false}
+    let before=effect_summaries.ptr[f].changed_at
+    if effect_summaries.ptr[g].cut {effect_mark_cut(f);}
+    if effect_summaries.ptr[g].opaque_other {effect_mark_other(f);}
+    else {
+        let n=edge.origin
+        let direct=n >? 0 and nodes.ptr[n].kind =? 'call' and nodes.ptr[n].aux =? 0 and GraphWord(nodes.ptr[n].sym) =? g
+        loop j in [0..62) {
+            if mask & (GraphWord(1) << j) =? 0 {continue}
+            let k:GraphWord=if direct and j <? nkids(n) {effect_own_callback(f kid(n j))} else {-1}
+            if k <? 0 {
+                effect_mark_other(f);
+                break
+            }
+            effect_mark_callback(f k);
+        }
     }
+    return effect_summaries.ptr[f].changed_at not=? before
+}
+effect_add=(f:GraphWord event:EffectEvent):>bool=>$unsafe {
+    let kind=event.atom.kind
+    if kind =? 'opaque' or kind =? 'escape' {
+        let other=kind =? 'escape' or not effect_callback_add
+        if other {effect_mark_other(f);}
+        # (a call of f's own callback ends a footprint scan too until callback
+        # rows are demanded: the row is cut, fact_callback_ready)
+        if effect_footprints_only and (other or not effect_callbacks_full) {
+            effect_summaries.ptr[f].footprint_opaque = true;
+            if not other {effect_mark_cut(f);}
+        }
+    }
+    else if effect_footprints_only and kind not=? 'write' and kind not=? 'remainder' {return false}
     if f =? effect_body_owner and event.atom.kind =? 'panic' {effect_body_panics.push(event);}
     # (allocation proven within an arena's acquired capacity is not hidden: arena.jo)
     if arena_fns.length >? 0 and arena_capacity_exempt(event) {return false}
@@ -155,6 +213,7 @@ effect_add=(f:GraphWord event:EffectEvent):>bool=>$unsafe {
         effect_summaries.ptr[f].events = kept;
         effect_restamp(f);
         effect_summaries.ptr[f].capped = true;
+        effect_mark_other(f);
         loop old in effect_summaries.ptr[f].events {
             if old.atom.kind =? 'opaque' {return false}
         }
@@ -282,11 +341,15 @@ effect_propagate=(f:GraphWord):>bool=>$unsafe {
             }
             let e=effect_edge_event(f edge event)
             if (e.atom.kind =? 'read' or e.atom.kind =? 'write') and e.atom.place.declaration not=? 0 and e.atom.place.root =? 'local' {continue}
+            # (the callee's own opacity reaches f through effect_merge_callbacks)
+            effect_callback_add=event.atom.kind =? 'opaque'
             if effect_add(f e) {changed=true}
+            effect_callback_add=false
         }
         delta.stamp = stamp;
         delta.end = events.length;
         effect_summaries.ptr[f].deltas.ptr[di] = delta;
+        if (effect_summaries.ptr[g].callbacks not=? 0 or effect_summaries.ptr[g].opaque_other or effect_summaries.ptr[g].cut) and effect_merge_callbacks(f edge) {changed=true}
     }
     return changed
 }
@@ -360,7 +423,7 @@ effect_visit=(f:GraphWord):>void=>$unsafe {
         }
         if effect_body_cache {
             let direct=effect_summaries.ptr[f]
-            if not direct.capped and direct.events.length <? 32 {effect_bodies[f] = EffectBody[direct.events effect_body_panics direct.edges direct.isolation direct.isolation_witness];}
+            if not direct.capped and direct.events.length <? 32 and direct.callbacks =? 0 {effect_bodies[f] = EffectBody[direct.events effect_body_panics direct.edges direct.isolation direct.isolation_witness];}
             effect_body_owner=old_owner
             effect_body_panics=old_panics
     # An opaque footprint already invalidates every exposed root. No edge

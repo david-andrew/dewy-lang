@@ -87,6 +87,15 @@ struct EffectSummary:
     # Modification tick, and the tick at which its last propagation began.
     changed_at: int = 0
     propagated_at: int = 0
+    # Its own callable parameters (bit i: parameter i) whose calls the row's
+    # opaque event stands for, and whether anything else made it opaque. With
+    # no other opacity, a call with known callbacks reads the row plus theirs
+    # (fact_call_effects). Monotone; a change restamps changed_at.
+    callbacks: int = 0
+    opaque_other: bool = false
+    # A footprint scan stopped at a callback call: the row is incomplete
+    # until effect_callbacks_full (fact_callback_ready).
+    cut: bool = false
 # Indexed event state: (function stamp, atom) -> present. A widened row takes
 # a fresh stamp, so its stale keys simply stop matching. O(1) expected per add.
 # Direct body inventories survive the bounds-settle restart. Only panic sites
@@ -101,6 +110,11 @@ struct EffectBody:
 
 effect_bodies: {int: EffectBody} = {}
 effect_body_cache = false
+# An opaque event effect_add records for a call of the function's own callback
+effect_callback_add = false
+# Footprint scans continue past callback calls: set, for the rest of the
+# compile, by the first call whose facts need its callbacks' rows.
+effect_callbacks_full = false
 effect_footprints_only = false
 effect_body_owner = 0
 effect_body_panics: EffectEvent[]

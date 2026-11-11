@@ -6,10 +6,11 @@ from p"check.jo" import (FK_INIT LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURE
 from p"checks_thin.dewy" import (library_exit_call)
 from p"effect_classifiers.dewy" import (effect_library_class)
 from p"effect_control.dewy" import (effects_demand)
+from p"effect_graph.dewy" import (effect_graph_reset)
 from p"effect_costs.dewy" import (effect_method_borrows effect_signature_opaque)
 from p"effect_lattice.dewy" import (place_base)
-from p"effect_types.dewy" import (PlaceIdentity)
-from p"effects.jo" import (effect_summaries)
+from p"effect_types.dewy" import (EffectEvent PlaceIdentity)
+from p"effects.jo" import (effect_callbacks_full effect_footprints_only effect_inference_busy effect_solving effect_stack effect_summaries)
 from p"expr.jo" import (is_nd ntype)
 from p"checks_thin_expr.dewy" import (is_map_type nd_elem)
 from p"checks_shaped.dewy" import (shape_field_type)
@@ -345,6 +346,22 @@ fact_call_effects=(n:ForgetWord @s:FactState):>void=>$unsafe {
     }
     let events=effect_summaries.ptr[f].events
     loop e in [0..events.length) {
+        if events.ptr[e].atom.kind not=? 'opaque' {continue}
+        # (opaque only for calls of its own callbacks, known here: their rows
+        # instead, fact_callback_events)
+        # (with no exposed fact at stake the opaque call forgets nothing more)
+        let known:array<EffectEvent>=[]
+        if not fact_exposed_bound(s) or not fact_callback_ready(f) or not fact_callback_events(n f @known) {
+            fact_forget_call(@s n 'call')
+            return
+        }
+        loop event in effect_summaries.ptr[f].events {
+            if event.atom.kind not=? 'opaque' {known.push(event);}
+        }
+        events=known
+        break
+    }
+    loop e in [0..events.length) {
         let kind=events.ptr[e].atom.kind
         # (a library caller's own facts may describe the output state a helper's text sink writes)
         if kind =? 'opaque' or kind =? 'escape' or kind =? 'io' and fact_owner_in_lib() {
@@ -421,20 +438,64 @@ fact_call_effects=(n:ForgetWord @s:FactState):>void=>$unsafe {
         fact_rebind(@s p value n old)
     }
 }
-# A callback argument that writes no place outside its own locals: a literal
-# lambda or a named function whose settled effect row holds no write, escape
-# or opaque event. Calling it changes no caller place through any alias.
-# O(row) once the callee's row is settled, on demand; a summary run uses
-# only rows already settled.
-fact_callback_writes_nothing=(e0:ForgetWord):>bool=>$unsafe {
+# The function a callback argument runs: a literal lambda or a named
+# function with no environment, whose effect row is settled (a summary run
+# uses only rows already settled; otherwise demanded here). 0 when unknown.
+fact_callback_fn=(e0:ForgetWord):>ForgetWord=>$unsafe {
     let e=e0
     loop nodes.ptr[e].kind =? 'conv' {e=ForgetWord(nodes.ptr[e].a)}
     let f:ForgetWord=0
     if nodes.ptr[e].kind =? 'lambda' and not has_flag(e NF_GENERIC) {f=ForgetWord(nodes.ptr[e].sym)}
     else if nodes.ptr[e].kind =? 'fnref' and nodes.ptr[e].aux not=? 1 and nodes.ptr[e].aux not=? 2 and nodes.ptr[e].sym >? 0 and not fns.ptr[ForgetWord(nodes.ptr[e].sym)].has_env {f=ForgetWord(nodes.ptr[e].sym)}
-    if f <=? 0 or f >=? fns.length {return false}
-    if fact_summary_owner not=? 0 and (f >=? effect_summaries.length or not effect_summaries.ptr[f].done) {return false}
+    if f <=? 0 or f >=? fns.length {return 0}
+    if fact_summary_owner not=? 0 and (f >=? effect_summaries.length or not effect_summaries.ptr[f].done) {return 0}
+    if not effects_demand(f true) {return 0}
+    f
+}
+# Callee f's row is complete and opaque only for its own callbacks. A
+# footprint scan stops at a callback call (EffectSummary.cut) until a call
+# needs those rows: the first, outside summary runs and effect traversals,
+# rebuilds the footprint graph to scan past them for the rest of the compile
+# (once per compile; programs that never need it pay nothing).
+fact_callback_ready=(f:ForgetWord):>bool=>$unsafe {
+    if effect_summaries.ptr[f].opaque_other or effect_summaries.ptr[f].callbacks =? 0 {return false}
+    if not effect_summaries.ptr[f].cut {return true}
+    if effect_callbacks_full or fact_summary_owner not=? 0 or not effect_footprints_only or effect_stack.length >? 0 or effect_solving or effect_inference_busy {return false}
+    effect_callbacks_full=true
+    effect_graph_reset()
+    effect_footprints_only=true
     if not effects_demand(f true) {return false}
+    not effect_summaries.ptr[f].opaque_other and effect_summaries.ptr[f].callbacks not=? 0 and not effect_summaries.ptr[f].cut
+}
+# Call n's callee f is opaque only for calls of its own callbacks
+# (EffectSummary.callbacks). With each one's argument known here, those calls
+# do what the argument's settled row says: its events go to out, unless one
+# is opaque, escapes, or writes a place other than a global (a write to its
+# own formal reaches a place f chose). O(callbacks + their rows).
+fact_callback_events=(n:ForgetWord f:ForgetWord @out:array<EffectEvent>):>bool=>$unsafe {
+    let mask=ForgetWord(effect_summaries.ptr[f].callbacks)
+    if effect_summaries.ptr[f].opaque_other or effect_summaries.ptr[f].cut or mask =? 0 {return false}
+    loop i in [0..min(nkids(n) 62)) {
+        if mask & (ForgetWord(1) << i) =? 0 {continue}
+        mask=mask & ~(ForgetWord(1) << i)
+        let g=fact_callback_fn(kid(n i))
+        if g =? 0 {return false}
+        loop event in effect_summaries.ptr[g].events {
+            let kind=event.atom.kind
+            if kind =? 'opaque' or kind =? 'escape' or kind =? 'remainder' {return false}
+            if kind =? 'write' and event.atom.place.root not=? 'global' {return false}
+            out.push(event);
+        }
+    }
+    mask =? 0
+}
+# A callback argument that writes no place outside its own locals: a literal
+# lambda or a named function whose settled effect row holds no write, escape
+# or opaque event. Calling it changes no caller place through any alias.
+# O(row) once the callee's row is settled, on demand.
+fact_callback_writes_nothing=(e0:ForgetWord):>bool=>$unsafe {
+    let f=fact_callback_fn(e0)
+    if f =? 0 {return false}
     loop event in effect_summaries.ptr[f].events {
         let kind=event.atom.kind
         if kind =? 'write' or kind =? 'escape' or kind =? 'opaque' or kind =? 'remainder' {return false}
