@@ -1,0 +1,4 @@
+# A monotonic-only program does not acquire a wall provider.
+import p"@lib/time/provider_mono.dewy" as mono_provider
+import p"@lib/time/clock.dewy" as clock
+monotonic=():>clock.MonoPoint=>clock.monotonic()

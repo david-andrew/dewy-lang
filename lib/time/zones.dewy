@@ -15,6 +15,10 @@ _rules=():>array<uint8>=>{
 Zone:type=[_entry:int64]
 Offset:type=[_seconds:int32]
 ZonedDateTime:type=[nominal:Instant zone:Zone offset:Offset]
+# A status for a pinned zone whose host rules are known to be newer and differ.
+# Its query remains private until the public access spelling is decided.
+ZonePackStale:type=[pinned:string host:string]
+_UnknownZonePackFreshness:type=[pinned:string host:string]
 
 # ---------------- reading the pack ----------------
 # `$time.zone_source = 'host'`: a zone's rules are the machine's, read when it is first reached and
@@ -26,7 +30,7 @@ _host_zones:array<int64>=[]
 _host_records:array<int64>=[]
 _host_said:bool=false
 _rule_byte=(at:int64):>int64=>$unsafe {
-    if _HOST and at >=? _rules().length {int64(_host_rules[at-_rules().length])} else {int64(_rules()[at])}
+    if at >=? _rules().length {int64(_host_rules[at-_rules().length])} else {int64(_rules()[at])}
 }
 _u8=(at:int64):>int64=>_rule_byte(at)
 _u32=(at:int64):>int64=>_rule_byte(at) + (_rule_byte(at+1) << 8) + (_rule_byte(at+2) << 16) + (_rule_byte(at+3) << 24)
@@ -224,23 +228,79 @@ _host_read=(zone_name:string):>int64=>$unsafe {
     record
 }
 _signed32=(v:int64):>int64=>if v >=? 2147483648 {v-4294967296} else {v}
-_host_record=(z:Zone):>int64=>$unsafe {
+_host_record_raw=(z:Zone):>int64=>$unsafe {
     let i:int64=0
     loop i <? _host_zones.length {
         if _host_zones[i] =? z._entry {return _host_records[i]}
         i=i+1
     }
     let record=_host_read(name(z))
+    _host_zones.push(z._entry)
+    _host_records.push(record)
+    record
+}
+_host_record=(z:Zone):>int64=>{
+    let record=_host_record_raw(z)
     if record <? 0 {
         if not _host_said {
             __write_err("warning: `$time.zone_source = 'host'`, but this machine has no rules for {name(z)}, so it keeps those of Dewy's own pack, {rules_version()}\n")
             _host_said=true
         }
-        record=_u32(_entry_at(z._entry)+8)
+        return _u32(_entry_at(z._entry)+8)
     }
-    _host_zones.push(z._entry)
-    _host_records.push(record)
     record
+}
+
+# The host's edition is evidence of ordering only when tzdata.zi names it. A differing host file
+# with no known publication order must not be called stale.
+_host_revision=():>string|none=>$unsafe {
+    let d=read_bytes(p("{env("TZDIR") ?? "/usr/share/zoneinfo"}/tzdata.zi"))
+    if d isnt? array<uint8> or d.length <? 16 {return none}
+    let prefix="# version " as array<uint8>
+    loop i in [0..10) {if d[i] not=? prefix[i] {return none}}
+    let last:int64=10
+    loop last <? d.length and d[last] not=? 10 {last=last+1}
+    if last-10 <? 5 {return none}
+    let revision:array<uint8>=[]
+    loop i in [10..last) {revision.push(d[i])}
+    "iana-{str_from_bytes(revision)}"
+}
+_rules_differ=(pinned:int64 host:int64):>bool=>{
+    if _u32(pinned) not=? _u32(host) or _u32(pinned+4) not=? _u32(host+4) or _u32(pinned+12) not=? _u32(host+12) {return true}
+    let bytes=_u32(pinned+4)*13
+    loop i in [0..bytes) {if _rule_byte(pinned+16+i) not=? _rule_byte(host+16+i) {return true}}
+    let n=_u32(pinned+12)
+    let a=_u32(pinned+8)
+    let b=_u32(host+8)
+    loop i in [0..n) {if _rule_byte(a+i) not=? _rule_byte(b+i) {return true}}
+    false
+}
+_status_from=(pinned:string host:string differs:bool newer:bool):>ZonePackStale|_UnknownZonePackFreshness|none=>{
+    if not differs {return none}
+    if newer {return ZonePackStale[pinned host]}
+    _UnknownZonePackFreshness[pinned host]
+}
+_host_identity=(z:Zone revision:string|none):>string=>{
+    let bytes=read_bytes(p("{env("TZDIR") ?? "/usr/share/zoneinfo"}/{name(z)}"))
+    if bytes isnt? array<uint8> {return "unidentified host rules"}
+    let digest=sha256(bytes)
+    match revision {
+        value:string=>"{value} sha256:{digest}"
+        <none>=>"sha256:{digest}"
+    }
+}
+_zone_pack_status=(z:Zone):>ZonePackStale|_UnknownZonePackFreshness|none=>{
+    let host=_host_record_raw(z)
+    if host <? 0 {return none}
+    let pack=_u32(_entry_at(z._entry)+8)
+    if not _rules_differ(pack host) {return none}
+    let pack_version=rules_version
+    let host_version=_host_revision
+    let identity=_host_identity(z host_version)
+    match host_version {
+        edition:string=>_status_from(pack_version identity true pack_version <? edition)
+        <none>=>_UnknownZonePackFreshness[pack_version identity]
+    }
 }
 # The number of changes at or before a POSIX second, by binary search.
 _changes_before=(record:int64 moment:int):>int64=>{

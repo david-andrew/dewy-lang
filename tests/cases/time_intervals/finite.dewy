@@ -1,0 +1,18 @@
+import p"@lib/ranges.dewy" as ranges
+import p"@lib/time/intervals.dewy" as intervals
+
+let start=instant"2026-01-01T00:00:00Z"
+let finish=instant"2026-01-01T00:00:01Z"
+let next_tick=instant"2026-01-01T00:00:01.000000001Z"
+let a=[start..finish]
+let b=[start..next_tick)
+printl(intervals.measure(a))
+printl(intervals.same_set(a b))
+printl(a =? b)
+printl(ranges.contains(a finish))
+printl(ranges.contains(b next_tick))
+printl(ranges.intersection(a [finish..next_tick]))
+printl(ranges.intersection([start..finish) [finish..next_tick]) is? none)
+printl(ranges.is_empty((finish..next_tick)))
+printl(intervals.same_set((finish..next_tick) [finish..finish)))
+printl(intervals.measure([finish..start)))

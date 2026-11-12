@@ -22,7 +22,17 @@ _of_wall=(wall:int64):>Instant=>{
     if row <? 0 {return instant_word(wall+_UNIX_ORIGIN)}
     instant_word(wall+_UNIX_ORIGIN+_SEGMENTS[row].a*100)
 }
-now=():>ClockReading=>ClockReading[_of_wall(__wall_ns()) time_ns() 1 0]
+wall_read=():>[Instant bool]=>{
+    let [wall stale]=__time_wall_read()
+    [_of_wall(wall) stale]
+}
+wall_now=():>Instant=>wall_read[0]
+now=():>ClockReading=>{
+    let [wall stale]=wall_read
+    let status=__time_wall_status
+    if stale {status=status | 5}
+    ClockReading[wall time_ns() 1 status]
+}
 monotonic=():>MonoPoint=>MonoPoint[time_ns()]
 # For `strict_today`: how far off the wall clock may be, negative when the system cannot say, and
 # whether it reads before 2017 (the last leap second), which a clock that was ever set has passed.
@@ -50,5 +60,10 @@ $check_constant _grid_error(q) "off the nanosecond grid"
 __add__=(r:ClockReading q:rational*Time):>MonoPoint|OffGrid=>r+(_of_rational(q) or_throw)
 $check_constant _grid_error(q) "off the nanosecond grid"
 __add__=(p:MonoPoint q:rational*Time):>MonoPoint|OffGrid=>p+(_of_rational(q) or_throw)
-__as__=(r:ClockReading):>string=>"~{r.nominal}"
+__as__=(r:ClockReading):>string=>{
+    if r._status & 4 not=? 0 {return "~{r.nominal}? (stale)"}
+    if r._status & 2 not=? 0 {return "~{r.nominal}? (unsynchronized)"}
+    if r._status & 1 not=? 0 {return "~{r.nominal}?"}
+    "~{r.nominal}"
+}
 __as__=(p:MonoPoint):>string=>"mono+{duration_word(p._mono)}"

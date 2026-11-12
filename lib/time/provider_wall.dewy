@@ -1,0 +1,5 @@
+# Entry check for a reached wall-clock operation. This module is imported only by those operations.
+if not __time_wall_acquire() {
+    __environment_failure("wall clock provider unavailable at entry")
+    exit(101)
+}

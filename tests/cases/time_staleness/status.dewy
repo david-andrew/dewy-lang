@@ -1,0 +1,21 @@
+import p"@lib/time/zones.dewy" as zones
+let a=zones._status_from("iana-2026a" "iana-2026b" true true)
+match a {
+    s:zones.ZonePackStale=>printl"{s.pinned} -> {s.host}"
+    s:zones._UnknownZonePackFreshness=>printl"unknown: {s.pinned} -> {s.host}"
+    <none>=>printl"not stale"
+}
+let b=zones._status_from("iana-2026b" "iana-2026a" true false)
+match b {
+    s:zones.ZonePackStale=>printl"stale: {s.pinned}"
+    s:zones._UnknownZonePackFreshness=>printl"unknown: {s.pinned} -> {s.host}"
+    <none>=>printl"same"
+}
+printl(zones._status_from("iana-2026a" "iana-2026b" false true) is? none)
+let utc=zone"UTC"
+let ny=zone"America/New_York"
+printl(not zones._rules_differ(zones._record(utc) zones._record(utc)))
+printl(zones._rules_differ(zones._record(utc) zones._record(ny)))
+let c=zones._zone_pack_status(zone"UTC")
+printl(c is? none or c is? zones.ZonePackStale or c is? zones._UnknownZonePackFreshness)
+printl(today('UTC') =? today('UTC'))

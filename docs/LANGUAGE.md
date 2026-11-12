@@ -1740,6 +1740,11 @@ let stamp = now.nominal                 # 2026-10-24T12:00:00.25Z
 
 `monotonic` is the monotonic sample alone. `sleep`, `within` and deadlines count
 actual time, including time the machine is suspended.
+For `now`, `monotonic` and `today`, provider checks run at entry only when the program reaches
+the operation: `now` checks both, `monotonic` checks only the monotonic provider, and `today`
+checks only the wall provider. A lost wall synchronization appears in a reading's status;
+printing it adds `? (unsynchronized)` to the nominal label. An unknown accuracy adds `?`.
+If a later wall read fails, it retains the last sample and prints `? (stale)`.
 
 `Instant` counts nanoseconds on one continuous axis in 128 bits, so it reaches any
 date anyone needs, and `Duration` is the difference of two. `+` and `-` take durations
@@ -1792,6 +1797,14 @@ its two ends as written, with `.first`, `.last`, `.includes_first`, `.includes_l
 `loop d in [date"2024-02-28"..date"2024-03-02")` visits February 28, February 29 and March 1.
 Stored Date ranges loop too. Other ordered ranges cannot be walked, and a written step
 is only for integer ranges so far.
+`ranges.intersection(a b)` returns the common range or `none`, respecting both endpoint
+flags. For `Range<Instant>`, `intervals.measure(r)` gives a `Duration` between its bounds;
+`intervals.same_set(a b)` compares the nanosecond points included, so `[a..b]` and
+`[a..b+1ns)` can have the same set while remaining different written ranges. Import
+`@lib/ranges.dewy` and `@lib/time/intervals.dewy` under those names to use these functions.
+`intervals.union(a b)` and `intervals.difference(a b)` return arrays of ranges; union merges
+only when no nanosecond point is missing between them.
+The measure of a reversed, empty range is `0s`.
 
 `instant"..."`, `utc"..."`, `date"..."`, `zone"..."` and `zoned"..."` with constant text are
 checked while compiling: a date that does not exist, a leap second that never happened, a

@@ -40,17 +40,81 @@ unix_time = () -> f64:
         f64(ts.0) + f64(ts.1) * 1e-9
 
 # (Dewy's `now`: the wall clock in whole nanoseconds since 1970)
-__wall_ns = () -> int:
+__time_wall_last = 0
+__time_wall_seeded = 0
+__time_wall_save = (value: int):
     when TARGET == "wasm":
-        return int(__wasm_clock() * 1000000.0)
+        __time_wall_last = value
+        __time_wall_seeded = 1
+    else:
+        loop:
+            old = __atomic_add(&__time_wall_last, 0)
+            if __atomic_cas(&__time_wall_last, old, value) == old: break
+        __atomic_cas(&__time_wall_seeded, 0, 1)
+
+__time_wall_cached = () -> int:
+    when TARGET == "wasm":
+        if __time_wall_seeded == 0: __environment_failure("wall clock provider unavailable before acquisition")
+        return __time_wall_last
+    else:
+        if __atomic_add(&__time_wall_seeded, 0) == 0: __environment_failure("wall clock provider unavailable before acquisition")
+        return __atomic_add(&__time_wall_last, 0)
+
+# The stale flag belongs to this sample, not shared state another thread can change before now
+# builds its ClockReading. A failed read retains the last acquired sample.
+__time_wall_read = () -> (int, bool):
+    when TARGET == "wasm":
+        sample = __wasm_clock()
+        if sample - sample == 0.0:
+            value = int(sample * 1000000.0)
+            __time_wall_save(value)
+            return (value, false)
     else when TARGET == "windows":
         ft = [0]
         GetSystemTimeAsFileTime(data(ft))
-        return (ft[0] - 116444736000000000) * 100
+        if ft[0] != 0:
+            value = (ft[0] - 116444736000000000) * 100
+            __time_wall_save(value)
+            return (value, false)
     else:
         ts: (int, int)
-        syscall(228, 0, &ts)
-        ts.0 * 1000000000 + ts.1
+        if syscall(228, 0, &ts) >= 0:
+            value = ts.0 * 1000000000 + ts.1
+            __time_wall_save(value)
+            return (value, false)
+    (__time_wall_cached(), true)
+
+__wall_ns = () -> int: __time_wall_read().0
+
+# A wall provider is checked before any dependent user code. A later read failure retains the
+# acquired sample and marks it stale; it never invents epoch zero.
+__time_wall_acquire = () -> bool:
+    when TARGET == "wasm":
+        sample = __wasm_clock()
+        if sample - sample != 0.0: return false
+        __time_wall_save(int(sample * 1000000.0))
+    else when TARGET == "windows":
+        ft = [0]
+        GetSystemTimeAsFileTime(data(ft))
+        if ft[0] == 0: return false
+        __time_wall_save((ft[0] - 116444736000000000) * 100)
+    else:
+        ts: (int, int)
+        if syscall(228, 0, &ts) < 0: return false
+        __time_wall_save(ts.0 * 1000000000 + ts.1)
+    true
+
+# Status bits stored in ClockReading: 1 accuracy unknown, 2 unsynchronized, 4 stale.
+# Linux adjtimex reports a lost synchronization on each reading; other hosts cannot certify one.
+__time_wall_status = () -> u32:
+    when TARGET == "linux":
+        tx = fill(0, 26)
+        state = syscall(159, data(tx))
+        if state < 0: return u32(1)
+        if state == 5 or tx[5] & 64 != 0: return u32(3)
+        return u32(0)
+    else:
+        return u32(1)
 
 # (Dewy's `strict_today`: how far off the wall clock may be, in nanoseconds; -1 when the system
 # cannot say. Linux keeps the bound its time sync maintains: 16 s and growing when unsynced)

@@ -1,0 +1,11 @@
+import p"@lib/time/intervals.dewy" as intervals
+import p"@lib/time/core.dewy" as core
+
+let start=instant"2026-01-01T00:00:00Z"
+let middle=instant"2026-01-01T00:00:01Z"
+let finish=instant"2026-01-01T00:00:02Z"
+printl(intervals.union([start..middle) [middle..finish)))
+printl(intervals.union([start..middle) (middle..finish)))
+printl(intervals.difference([start..finish] [middle..finish)))
+let highest=core.Instant[9223372036854775807 18446744073709551615]
+printl(intervals.union([highest..highest] (highest..highest)).length)

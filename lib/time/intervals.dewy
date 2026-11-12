@@ -1,0 +1,62 @@
+# Finite intervals over the nanosecond Instant grid. Endpoint flags stay in Range<T>.
+import p"@lib/ranges.dewy" as ranges
+import p"core.dewy" as core
+
+IntervalSet:type=array<ranges.Range<core.Instant>>
+measure=(r:ranges.Range<core.Instant>):>core.Duration=>if r.last <? r.first {core.duration_word(0)} else {r.last-r.first}
+measure=(r:ranges.Range<core.Duration>):>core.Duration=>if r.last <? r.first {core.duration_word(0)} else {r.last-r.first}
+
+_first_point=(r:ranges.Range<core.Instant>):>core.Instant|none=>{
+    if r.includes_first {return r.first}
+    match core.checked_add(r.first core.duration_word(1)) {
+        t:core.Instant=>t
+        <OutOfRange>=>none
+    }
+}
+_last_point=(r:ranges.Range<core.Instant>):>core.Instant|none=>{
+    if r.includes_last {return r.last}
+    match core.checked_add(r.last core.duration_word(-1)) {
+        t:core.Instant=>t
+        <OutOfRange>=>none
+    }
+}
+# Set equality on a grid can differ from written-range equality: [a,b] and [a,b+1ns) match.
+same_set=(a:ranges.Range<core.Instant> b:ranges.Range<core.Instant>):>bool=>{
+    let af=_first_point(a)
+    let al=_last_point(a)
+    let bf=_first_point(b)
+    let bl=_last_point(b)
+    let empty_a=af is? none or al is? none or al <? af
+    let empty_b=bf is? none or bl is? none or bl <? bf
+    if empty_a or empty_b {return empty_a and empty_b}
+    af =? bf and al =? bl
+}
+
+# Two finite ranges form one set exactly when there is no omitted nanosecond between them.
+union=(a:ranges.Range<core.Instant> b:ranges.Range<core.Instant>):>IntervalSet=>{
+    if ranges.is_empty(a) {return if ranges.is_empty(b) [] else [b]}
+    if ranges.is_empty(b) {return [a]}
+    let left=a
+    let right=b
+    if b.first <? a.first or (b.first =? a.first and b.includes_first and not a.includes_first) {
+        left=b
+        right=a
+    }
+    let left_last=_last_point(left) ?? return [left right]
+    let right_first=_first_point(right) ?? return [left right]
+    let following=core.checked_add(left_last core.duration_word(1))
+    if left_last <? right_first and (following is? OutOfRange or following <? right_first) {return [left right]}
+    let last=if left.last <? right.last right.last else left.last
+    let includes_last=if left.last =? right.last {left.includes_last or right.includes_last} else if left.last <? right.last {right.includes_last} else {left.includes_last}
+    [ranges.Range<core.Instant>[left.first last left.includes_first includes_last]]
+}
+
+difference=(a:ranges.Range<core.Instant> b:ranges.Range<core.Instant>):>IntervalSet=>{
+    if ranges.is_empty(a) {return []}
+    let shared=ranges.intersection(a b) ?? return [a]
+    let before=ranges.Range<core.Instant>[a.first shared.first a.includes_first not shared.includes_first]
+    let after=ranges.Range<core.Instant>[shared.last a.last not shared.includes_last a.includes_last]
+    if ranges.is_empty(before) {return if ranges.is_empty(after) [] else [after]}
+    if ranges.is_empty(after) {return [before]}
+    [before after]
+}

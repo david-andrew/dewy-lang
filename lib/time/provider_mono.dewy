@@ -1,0 +1,5 @@
+# Entry check for a reached suspend-inclusive monotonic operation.
+if not __time_mono_acquire() {
+    __environment_failure("suspend-inclusive monotonic clock unavailable at entry")
+    exit(101)
+}

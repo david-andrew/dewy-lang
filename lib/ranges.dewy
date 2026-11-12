@@ -19,6 +19,17 @@ _range_is_empty=<T>(first:T last:T includes_first:bool includes_last:bool):>bool
     if first =? last {return not (includes_first and includes_last)}
     false
 }
+# Intersection keeps the bounds as written by the tighter input. At a shared end both inputs
+# must include the point. An empty intersection has no range value.
+intersection=<T>(a:Range<T> b:Range<T>):>Range<T>|none=>{
+    let first=if a.first <? b.first b.first else a.first
+    let last=if a.last <? b.last a.last else b.last
+    let includes_first=if a.first =? b.first {a.includes_first and b.includes_first} else if b.first <? a.first {a.includes_first} else {b.includes_first}
+    let includes_last=if a.last =? b.last {a.includes_last and b.includes_last} else if a.last <? b.last {a.includes_last} else {b.includes_last}
+    let result=Range<T>[first last includes_first includes_last]
+    if is_empty(result) {return none}
+    result
+}
 __eq__=<T>(a:Range<T> b:Range<T>):>bool=>a.first =? b.first and a.last =? b.last and a.includes_first =? b.includes_first and a.includes_last =? b.includes_last
 __as__=<T>(r:Range<T>):>string=>{
     let open=if r.includes_first "[" else "("

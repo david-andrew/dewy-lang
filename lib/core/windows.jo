@@ -395,13 +395,21 @@ when TARGET == "windows":
 
     __w32_qpf = 0
 
+    __w32_time_acquire = () -> bool:
+        f = [0]
+        if QueryPerformanceFrequency(data(f)) == 0 or f[0] <= 0: return false
+        c = [0]
+        if QueryPerformanceCounter(data(c)) == 0: return false
+        __w32_qpf = f[0]
+        true
+
     __w32_time_ns = () -> int:
         if __w32_qpf == 0:
             f = [0]
-            QueryPerformanceFrequency(data(f))
+            if QueryPerformanceFrequency(data(f)) == 0 or f[0] <= 0: __environment_failure("monotonic clock provider lost after entry")
             __w32_qpf = f[0]
         c = [0]
-        QueryPerformanceCounter(data(c))
+        if QueryPerformanceCounter(data(c)) == 0: __environment_failure("monotonic clock provider lost after entry")
         # (in two parts: count * 1e9 overflows after some hours of uptime)
         (c[0] / __w32_qpf) * 1000000000 + (c[0] % __w32_qpf) * 1000000000 / __w32_qpf
 

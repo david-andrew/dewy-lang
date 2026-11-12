@@ -1,0 +1,11 @@
+# Written bounds and set equality are separate questions on a nanosecond grid.
+import p"@lib/ranges.dewy" as ranges
+import p"@lib/time/intervals.dewy" as intervals
+
+let opening=instant"2026-11-12T09:00:00Z"
+let closing=instant"2026-11-12T17:00:00Z"
+let shift=[opening..closing)
+let lunch=[instant"2026-11-12T12:00:00Z"..instant"2026-11-12T13:00:00Z")
+printl"shift length: {intervals.measure(shift)}"
+printl"working spans: {intervals.difference(shift lunch)}"
+printl"lunch overlaps shift: {ranges.intersection(shift lunch) isnt? none}"

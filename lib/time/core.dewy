@@ -255,6 +255,12 @@ __sub__=(a:Instant b:Instant):>Duration=>{
 }
 __lt__=(a:Instant b:Instant):>bool=>_less(a._hi a._lo b._hi b._lo)
 __eq__=(a:Instant b:Instant):>bool=>a._hi =? b._hi and a._lo =? b._lo
+# Instants are a nanosecond grid. There is no point strictly between adjacent ticks.
+_range_is_empty=(first:Instant last:Instant includes_first:bool includes_last:bool):>bool=>{
+    if last <? first {return true}
+    if first =? last {return not (includes_first and includes_last)}
+    not includes_first and not includes_last and last =? first+1ns
+}
 __add__=(t:Instant q:int*Time):>Instant=>t+_of_int(q)
 __add__=(q:int*Time t:Instant):>Instant=>t+_of_int(q)
 __sub__=(t:Instant q:int*Time):>Instant=>t-_of_int(q)

@@ -1,0 +1,5 @@
+# `now` needs both providers, acquired before dependent user code begins.
+import p"@lib/time/provider_wall.dewy" as wall_provider
+import p"@lib/time/provider_mono.dewy" as mono_provider
+import p"@lib/time/clock.dewy" as clock
+now=():>clock.ClockReading=>clock.now()

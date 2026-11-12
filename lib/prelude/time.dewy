@@ -4,7 +4,7 @@ from p"@lib/time/core.dewy" import (instant_error utc_error)
 import p"@lib/time/civil.dewy" as civil
 from p"@lib/time/civil.dewy" import (date_error time_of_day_error local_error date_read_error time_read_error local_read_error date_pattern_only time_pattern_only local_pattern_only)
 import p"@lib/time/zones.dewy" as zones
-from p"@lib/time/zones.dewy" import (zone_error zone_scope_error zoned_error zoned_text_error zoned_error_one zoned_text_error_one local_zone_error local_zone_error_one policy_gap _FoldPolicy _GapPolicy)
+from p"@lib/time/zones.dewy" import (zone_error zoned_error zoned_text_error zoned_error_one zoned_text_error_one local_zone_error local_zone_error_one policy_gap _FoldPolicy _GapPolicy)
 
 Instant:type=core.Instant
 Duration:type=core.Duration
@@ -65,6 +65,7 @@ age=(born:Date leap_day:civil._LeapDay='march_1' scope:string|none=$time.zone):>
 Zone:type=zones.Zone
 Offset:type=zones.Offset
 ZonedDateTime:type=zones.ZonedDateTime
+ZonePackStale:type=zones.ZonePackStale
 
 TimeOfDay:type=civil.TimeOfDay
 LocalDateTime:type=<C=Gregorian>(civil.LocalDateTime<C>)
@@ -114,10 +115,3 @@ zoned=(text:string zone:Zone|none fold:'all' gap:'skip' scope:string|none=$time.
 import p"@lib/time/clock.dewy" as clock
 ClockReading:type=clock.ClockReading
 MonoPoint:type=clock.MonoPoint
-now=():>ClockReading=>clock.now()
-monotonic=():>MonoPoint=>clock.monotonic()
-
-# What day it is, where the scope says.
-$warn_if scope is? none "`today` has no time zone here, so it assumes the zone of the machine it runs on: say so with `$time.zone = 'system'`, or name one: `$time.zone = 'America/New_York'`"
-$check_constant zone_scope_error(scope) "not a time zone"
-today=(scope:string|none=$time.zone):>Date=>civil._of_days(zones.local_days(now().nominal zones.today_zone(scope 'today')))

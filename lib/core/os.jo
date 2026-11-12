@@ -546,13 +546,25 @@ time = () -> f64:
 # what Dewy's relative waits and elapsed times mean; on Windows and macOS the counters do)
 time_ns = () -> int:
     when TARGET == "wasm":
-        return int(__wasm_now() * 1000000.0)
+        sample = __wasm_now()
+        if sample - sample != 0.0: __environment_failure("monotonic clock provider lost after entry")
+        return int(sample * 1000000.0)
     else when TARGET == "windows":
         return __w32_time_ns()
     else:
         ts: (int, int)
-        syscall(228, 7, &ts)
+        if syscall(228, 7, &ts) < 0: __environment_failure("monotonic clock provider lost after entry")
         ts.0 * 1000000000 + ts.1
+
+__time_mono_acquire = () -> bool:
+    when TARGET == "wasm":
+        sample = __wasm_now()
+        return sample - sample == 0.0
+    else when TARGET == "windows":
+        return __w32_time_acquire()
+    else:
+        ts: (int, int)
+        syscall(228, 7, &ts) >= 0
 
 # (Dewy's `$time.zone = 'system'`: what the machine calls its zone, "" when it has nothing to read:
 # the TZ variable, then where /etc/localtime points or /etc/timezone; on Windows its zone's name,

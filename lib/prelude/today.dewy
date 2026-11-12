@@ -1,0 +1,10 @@
+# The nominal civil date needs a wall provider and the scope's zone.
+import p"@lib/time/provider_wall.dewy" as wall_provider
+import p"@lib/time/clock.dewy" as clock
+import p"@lib/time/civil.dewy" as civil
+import p"@lib/time/zones.dewy" as zones
+from p"@lib/time/zones.dewy" import (zone_scope_error)
+
+$warn_if scope is? none "`today` has no time zone here, so it assumes the zone of the machine it runs on: say so with `$time.zone = 'system'`, or name one: `$time.zone = 'America/New_York'`"
+$check_constant zone_scope_error(scope) "not a time zone"
+today=(scope:string|none=$time.zone):>civil.Date=>civil._of_days(zones.local_days(clock.wall_now() zones.today_zone(scope 'today')))
