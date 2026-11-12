@@ -1,0 +1,292 @@
+$runtime_checks
+
+from p"checker_tokens.dewy" import (Tok)
+from p"lex.jo" import (keywords kw_kinds kw_tok lx_cls lx_ctx lx_count lx_decl_lines lx_i lx_indents lx_line_indent lx_line_tok0 lx_n lx_p lx_slots lx_tab_indent lx_space_indent)
+from p"lexer_errors.dewy" import (lx_err mixed_indent_note tok_name)
+from p"lexer_line_context.dewy" import (lx_emit lx_top_base lx_top_block)
+from p"util.jo" import (intern)
+from p"@lib/core/rt.jo" import (__str_from_bytes)
+
+LexHelpWord:type=int64<overflow='wrap'>
+
+tok_text=(k:Tok):>string=>match k {
+    <'kw_struct'> => "struct"
+    <'kw_enum'> => "enum"
+    <'kw_if'> => "if"
+    <'kw_else'> => "else"
+    <'kw_in'> => "in"
+    <'kw_break'> => "break"
+    <'kw_continue'> => "continue"
+    <'kw_return'> => "return"
+    <'kw_match'> => "match"
+    <'kw_import'> => "import"
+    <'kw_as'> => "as"
+    <'kw_const'> => "const"
+    <'kw_true'> => "true"
+    <'kw_false'> => "false"
+    <'kw_none'> => "none"
+    <'kw_null'> => "null"
+    <'kw_and'> => "and"
+    <'kw_or'> => "or"
+    <'kw_not'> => "not"
+    <'kw_mut'> => "mut"
+    <'kw_when'> => "when"
+    <'kw_defer'> => "defer"
+    <'kw_extern'> => "extern"
+    <'kw_test'> => "test"
+    <'kw_build'> => "build"
+    <'kw_use'> => "use"
+    <'kw_pass'> => "pass"
+    <'pluseq'> => "+="
+    <'minuseq'> => "-="
+    <'stareq'> => "*="
+    <'slasheq'> => "/="
+    <'percenteq'> => "%="
+    <'ampeq'> => "&="
+    <'pipeeq'> => "|="
+    <'careteq'> => "^="
+    <'shleq'> => "<<="
+    <'shreq'> => ">>="
+    <'plus'> => "+"
+    <'minus'> => "-"
+    <'star'> => "*"
+    <'slash'> => "/"
+    <'percent'> => "%"
+    <'amp'> => "&"
+    <'pipe'> => "|"
+    <'caret'> => "^"
+    <'tilde'> => "~"
+    <'shl'> => "<<"
+    <'shr'> => ">>"
+    <'eq'> => "=="
+    <'ne'> => "!="
+    <'lt'> => "<"
+    <'le'> => "<="
+    <'gt'> => ">"
+    <'ge'> => ">="
+    <'question'> => "?"
+    <'qq'> => "??"
+    <'bang'> => "!"
+    <'at'> => "@"
+    <'starstar'> => "**"
+    <'kw_loop'> => "loop"
+    <'kw_let'> => "let"
+    <'kw_xor'> => "xor"
+    <'kw_is'> => "is"
+    _ => tok_name(k)
+}
+
+init_keywords=():>void=>{
+    loop [k v] in keywords {
+        let id=intern(k)
+        loop kw_tok.length <=? id {kw_tok.push('ident')}
+        kw_tok[id]=v
+        let ordinal:LexHelpWord=match v {
+            _ => 0
+        }
+        loop kw_kinds.length <=? ordinal {kw_kinds.push(false)}
+        kw_kinds[ordinal]=true
+    }
+}
+
+# The lazy body extends through deeper lines and quoted text.
+lx_body_end=(from_:LexHelpWord header_indent:LexHelpWord):>int64=>$unsafe {
+    let p=lx_p
+    let i=from_
+    let first=true
+    loop i <? lx_n {
+        let j=i
+        let ind:LexHelpWord=0
+        loop j <? lx_n and (p[j] =? 32 or p[j] =? 9 or p[j] =? 13) {
+            if p[j] =? 32 {ind += 1}
+            else if p[j] =? 9 {ind=(ind + 4) & ~3}
+            j += 1
+        }
+        if j >=? lx_n {return lx_n}
+        let c=p[j]
+        if c =? 10 or c =? 35 {
+            i=__find_newline(p j lx_n) + 1
+            continue
+        }
+        if ind <=? header_indent {
+            if first {return -1}
+            return i
+        }
+        first=false
+        loop true {
+            if header_indent =? 0 {j=__find_line_delim(p j lx_n)}
+            else if header_indent =? 4 {j=__find_line_delim4(p j lx_n)}
+            else if header_indent =? 8 {j=__find_line_delim8(p j lx_n)}
+            else {j=__find_delim(p j lx_n)}
+            if j >=? lx_n {return lx_n}
+            let c2=p[j]
+            if c2 =? 10 {break}
+            if c2 =? 35 {
+                j=__find_newline(p j lx_n)
+                continue
+            }
+            let raw=j >? 0 and p[j - 1] =? 114 and (j <? 2 or not is_ident_char(p[j - 2]))
+            j=lx_skip_str(j raw)
+            if j <? 0 {return -1}
+        }
+        i=j + 1
+    }
+    lx_n
+}
+
+lx_skip_str=(i0:LexHelpWord raw:bool):>int64=>$unsafe {
+    let p=lx_p
+    let q=p[i0]
+    let triple=q =? 34 and i0 + 2 <? lx_n and p[i0 + 1] =? 34 and p[i0 + 2] =? 34
+    let i=i0 + 1
+    if triple {i=i0 + 3}
+    let depth:LexHelpWord=0
+    loop i <? lx_n {
+        let c=p[i]
+        if depth =? 0 {
+            if c =? 92 and not raw {i += 2; continue}
+            if triple {
+                if c =? 34 and i + 2 <? lx_n and p[i + 1] =? 34 and p[i + 2] =? 34 {return i + 3}
+            } else if c =? q {return i + 1}
+            if not raw and c =? 123 {
+                if i + 1 <? lx_n and p[i + 1] =? 123 {i += 2; continue}
+                depth=1
+            }
+        } else {
+            if c =? 123 {depth += 1}
+            else if c =? 125 {depth -= 1}
+            else if c =? 34 or c =? 39 {
+                let e=lx_skip_str(i false)
+                if e <? 0 {return -1}
+                i=e
+                continue
+            }
+        }
+        i += 1
+    }
+    -1
+}
+
+lx_line_start=():>void=>$unsafe {
+    let p=lx_p
+    loop true {
+        let ind:LexHelpWord=0
+        let q=LexHelpWord(lx_i)
+        let lx_i0=q
+        loop true {
+            let c=p[q]
+            if c =? 32 {ind += 1}
+            else if c =? 9 {ind=(ind + 4) & ~3}
+            else if c =? 13 {}
+            else {break}
+            q += 1
+        }
+        let c=p[q]
+        if q >=? lx_n {lx_i=q; return}
+        if c =? 10 or c =? 35 {
+            loop q <? lx_n and p[q] not=? 10 {q += 1}
+            if q <? lx_n {q += 1}
+            lx_i=q
+            continue
+        }
+        lx_i=q
+        lx_line_indent=ind
+        if q >? lx_i0 and p[lx_i0] =? 9 {lx_tab_indent=true}
+        else if q >? lx_i0 and p[lx_i0] =? 32 {lx_space_indent=true}
+        if not lx_top_block() {return}
+        let base=lx_top_base()
+        let top=lx_indents.ptr[LexHelpWord(lx_indents.length) - 1]
+        if ind >? top {
+            lx_indents.push(ind)
+            lx_emit('indent' q 0)
+        } else {
+            loop lx_indents.length >? base and ind <? lx_indents.ptr[LexHelpWord(lx_indents.length) - 1] {
+                lx_indents.pop();
+                lx_emit('dedent' q 0)
+            }
+            if lx_indents.length =? base and lx_ctx.length >? 1 {
+                lx_indents.pop();
+                lx_ctx.pop();
+                return
+            }
+            if ind not=? lx_indents.ptr[LexHelpWord(lx_indents.length) - 1] {
+                let mn=mixed_indent_note()
+                if (mn as array<uint8>).length >? 0 {lx_err(q "inconsistent indentation{mn}")}
+                let lv:array<int64>=[]
+                if lx_ctx.length =? 1 and (base >=? lx_indents.length or lx_indents.ptr[base] not=? 0) {lv.push(0)}
+                loop k in [base..lx_indents.length) {lv.push(lx_indents.ptr[k])}
+                if top not=? lx_indents.ptr[LexHelpWord(lx_indents.length) - 1] {lv.push(top)}
+                let at=""
+                loop j in 0.. and v in lv {
+                    if j >? 0 and j =? lv.length - 1 {at="{at} or "}
+                    else if j >? 0 {at="{at}, "}
+                    at="{at}{v}"
+                }
+                lx_err(q "this line is indented {ind} spaces, which matches no line above it: a line goes at the same place as one of the lines before it, indented {at}")
+            }
+        }
+        lx_line_tok0=lx_count
+        return
+    }
+}
+
+lx_init_classes=():>void=>$unsafe {
+    lx_cls=__alloc(256)
+    loop c in [0..256) {
+        let k=0
+        if (c >=? 97 and c <=? 122) or (c >=? 65 and c <=? 90) or c =? 95 or c >=? 0x80 {k=3}
+        else if c >=? 48 and c <=? 57 {k=2}
+        lx_cls[c]=uint8(k)
+    }
+}
+
+is_ident_start=(c:uint8):>bool=>c >=? 97 and c <=? 122 or c >=? 65 and c <=? 90 or c =? 95 or c >=? 0x80
+is_ident_char=(c:uint8):>bool=>is_ident_start(c) or c >=? 48 and c <=? 57
+
+lx_float=(s:LexHelpWord e:LexHelpWord):>float64=>$unsafe {
+    let p=lx_p
+    let mant:LexHelpWord=0
+    let nd:LexHelpWord=0
+    let exp:LexHelpWord=0
+    let i=s
+    let simple=true
+    let seen_dot=false
+    loop i <? e {
+        let c=p[i]
+        if c >=? 48 and c <=? 57 {
+            if nd >? 0 or c not=? 48 {
+                nd += 1
+                if nd <=? 15 {mant=mant * 10 + LexHelpWord(c - 48)}
+                else {simple=false}
+            }
+            if seen_dot {exp -= 1}
+        } else if c =? 46 {seen_dot=true}
+        else if c =? 101 or c =? 69 {
+            i += 1
+            let neg=false
+            if p[i] =? 45 or p[i] =? 43 {neg=p[i] =? 45; i += 1}
+            let x:LexHelpWord=0
+            loop i <? e {
+                if x <? 100000 {x=x * 10 + LexHelpWord(p[i] - 48)}
+                i += 1
+            }
+            if neg {exp -= x} else {exp += x}
+            break
+        }
+        i += 1
+    }
+    if simple and exp >=? -22 and exp <=? 22 {
+        if exp >=? 0 {return float64(mant) * __pow10(exp)}
+        return float64(mant) / __pow10(-exp)
+    }
+    let digits:array<uint8>=[]
+    loop k in [s..e) {if p[k] not=? 95 {digits.push(p[k])}}
+    to_float(__str_from_bytes(digits)) ?? 0.0
+}
+
+hexval=(c:uint8):>int64=>{
+    if c >=? 48 and c <=? 57 {return int64(c) - 48}
+    if c >=? 97 and c <=? 102 {return int64(c) - 87}
+    if c >=? 65 and c <=? 70 {return int64(c) - 55}
+    -1
+}

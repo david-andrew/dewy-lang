@@ -8,6 +8,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 
 DRIVER = r'''use 'main.jo'
 use 'lex.jo'
+use 'lexer_helpers.dewy'
 main = ():
     init_keywords()
     sources = [

@@ -11,6 +11,7 @@ use 'parser_cursor.dewy'
 use 'parse.jo'
 use 'parser_ops.dewy'
 use 'lex.jo'
+use 'lexer_helpers.dewy'
 use 'checker_tokens.dewy'
 main = ():
     init_keywords()

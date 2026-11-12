@@ -7,6 +7,7 @@ use 'lexer_errors.dewy'
 use 'lexer_units.dewy'
 use 'lexer_line_closes.dewy'
 use 'lexer_line_context.dewy'
+use 'lexer_helpers.dewy'
 
 const STRF_RAW = 1
 const STRF_TRIPLE = 2
@@ -25,76 +26,6 @@ struct Token:
     ival: int
     fval: f64
 
-tok_text = (k: Tok) -> str:
-    match k:
-        kw_struct: "struct"
-        kw_enum: "enum"
-        kw_if: "if"
-        kw_else: "else"
-        kw_in: "in"
-        kw_break: "break"
-        kw_continue: "continue"
-        kw_return: "return"
-        kw_match: "match"
-        kw_import: "import"
-        kw_as: "as"
-        kw_const: "const"
-        kw_true: "true"
-        kw_false: "false"
-        kw_none: "none"
-        kw_null: "null"
-        kw_and: "and"
-        kw_or: "or"
-        kw_not: "not"
-        kw_mut: "mut"
-        kw_when: "when"
-        kw_defer: "defer"
-        kw_extern: "extern"
-        kw_test: "test"
-        kw_build: "build"
-        kw_use: "use"
-        kw_pass: "pass"
-        pluseq: "+="
-        minuseq: "-="
-        stareq: "*="
-        slasheq: "/="
-        percenteq: "%="
-        ampeq: "&="
-        pipeeq: "|="
-        careteq: "^="
-        shleq: "<<="
-        shreq: ">>="
-        plus: "+"
-        minus: "-"
-        star: "*"
-        slash: "/"
-        percent: "%"
-        amp: "&"
-        pipe: "|"
-        caret: "^"
-        tilde: "~"
-        shl: "<<"
-        shr: ">>"
-        eq: "=="
-        ne: "!="
-        lt: "<"
-        le: "<="
-        gt: ">"
-        ge: ">="
-        question: "?"
-        qq: "??"
-        bang: "!"
-        at: "@"
-        starstar: "**"
-        kw_loop: "loop"
-        kw_let: "let"
-        kw_xor: "xor"
-        kw_is: "is"
-        _: tok_name(k)
-
-# The compiler's dictionaries hash with a fixed key, so that its instruction counts do not vary
-# between runs (and its output order never could). This module initializes first: the key is
-# pinned before any dictionary has an entry (`speed` reports unstable counts otherwise).
 hash_key_pinned = __hash_key_pin(0x6A09E667F3BCC909)
 
 keywords: {str: Tok} = {
@@ -146,161 +77,7 @@ kw_tok: Tok[]
 # token kinds that are keywords (by Tok number)
 kw_kinds: bool[]
 
-init_keywords = ():
-    loop k, v in keywords:
-        id = intern(k)
-        loop kw_tok.len() <= id: kw_tok.push(.ident)
-        kw_tok[id] = v
-        loop kw_kinds.len() <= int(v): kw_kinds.push(false)
-        kw_kinds[int(v)] = true
-
-# where the indented lines from offset `from` end (the next line at or outside the header's
-# indentation, other than a blank or comment), or -1 when they do not make a body
-# (not indented, or a string that does not end)
-lx_body_end = (from: int, header_indent: int) -> int:
-    p = lx_p
-    i = from
-    first = true
-    loop i < lx_n:
-        # a line: its indentation, then what is on it
-        j = i
-        ind = 0
-        loop j < lx_n and (p[j] == ' ' or p[j] == '\t' or p[j] == '\r'):
-            if p[j] == ' ': ind += 1
-            else if p[j] == '\t': ind = (ind + 4) & ~3
-            j += 1
-        if j >= lx_n: return lx_n
-        c = p[j]
-        if c == '\n' or c == '#':
-            i = __find_newline(p, j, lx_n) + 1
-            continue
-        if ind <= header_indent:
-            if first: return -1
-            return i
-        first = false
-        # (to the end of the line, past strings, which may span lines; then past the lines indented
-        # deeper than the header's next lines can be, sixteen bytes at a time)
-        loop true:
-            if header_indent == 0: j = __find_line_delim(p, j, lx_n)
-            else if header_indent == 4: j = __find_line_delim4(p, j, lx_n)
-            else if header_indent == 8: j = __find_line_delim8(p, j, lx_n)
-            else: j = __find_delim(p, j, lx_n)
-            if j >= lx_n: return lx_n
-            c2 = p[j]
-            if c2 == '\n': break
-            if c2 == '#':
-                j = __find_newline(p, j, lx_n)
-                continue
-            raw = j > 0 and p[j - 1] == 'r' and (j < 2 or not is_ident_char(p[j - 2]))
-            j = lx_skip_str(j, raw)
-            if j < 0: return -1
-        i = j + 1
-    lx_n
-
-# past the string starting at offset i (its quote), as lx_string reads it; -1 if it does not end
-lx_skip_str = (i0: int, raw: bool) -> int:
-    p = lx_p
-    q = p[i0]
-    triple = q == '"' and i0 + 2 < lx_n and p[i0 + 1] == '"' and p[i0 + 2] == '"'
-    i = i0 + 1
-    if triple: i = i0 + 3
-    depth = 0
-    loop i < lx_n:
-        c = p[i]
-        if depth == 0:
-            if c == '\\' and not raw:
-                i += 2
-                continue
-            if triple:
-                if c == '"' and i + 2 < lx_n and p[i + 1] == '"' and p[i + 2] == '"': return i + 3
-            else if c == q: return i + 1
-            if not raw and c == '{{':
-                if i + 1 < lx_n and p[i + 1] == '{{':
-                    i += 2
-                    continue
-                depth = 1
-        else:
-            if c == '{{': depth += 1
-            else if c == '}}': depth -= 1
-            else if c == '"' or c == '\'':
-                e = lx_skip_str(i, false)
-                if e < 0: return -1
-                i = e
-                continue
-        i += 1
-    -1
-
-# handle the start of a line (indentation)
-lx_line_start = ():
-    p = lx_p
-    loop true:
-        ind = 0
-        q = lx_i
-        lx_i0 = q
-        loop true:
-            c = p[q]
-            if c == ' ': ind += 1
-            else if c == '\t': ind = (ind + 4) & ~3
-            else if c == '\r': pass
-            else: break
-            q += 1
-        c = p[q]
-        if q >= lx_n:
-            lx_i = q
-            return
-        if c == '\n' or c == '#':
-            loop q < lx_n and p[q] != '\n': q += 1
-            if q < lx_n: q += 1
-            lx_i = q
-            continue
-        lx_i = q
-        lx_line_indent = ind
-        if q > lx_i0 and p[lx_i0] == '\t': lx_tab_indent = true
-        else if q > lx_i0 and p[lx_i0] == ' ': lx_space_indent = true
-        if not lx_top_block(): return
-        base = lx_top_base()
-        top = lx_indents[lx_indents.len() - 1]
-        if ind > top:
-            lx_indents.push(ind)
-            lx_emit(.indent, q, 0)
-        else:
-            loop lx_indents.len() > base and ind < lx_indents[lx_indents.len() - 1]:
-                lx_indents.pop()
-                lx_emit(.dedent, q, 0)
-            if lx_indents.len() == base and lx_ctx.len() > 1:
-                lx_indents.pop()
-                lx_ctx.pop()
-                return
-            if ind != lx_indents[lx_indents.len() - 1]:
-                mn = mixed_indent_note()
-                if len(mn) > 0: lx_err(q, "inconsistent indentation{mn}")
-                # (the places it could go: the blocks still open, and the one it ends)
-                lv: int[]
-                if lx_ctx.len() == 1 and (base >= lx_indents.len() or lx_indents[base] != 0): lv.push(0)
-                loop k in [base..lx_indents.len()): lv.push(lx_indents[k])
-                if top != lx_indents[lx_indents.len() - 1]: lv.push(top)
-                at = ""
-                loop j in 0.. and v in lv:
-                    if j > 0 and j == lv.len() - 1: at += " or "
-                    else if j > 0: at += ", "
-                    at += "{v}"
-                lx_err(q, "this line is indented {ind} spaces, which matches no line above it: a line goes at the same place as one of the lines before it, indented {at}")
-        lx_line_tok0 = lx_count
-        return
-
-# character classes for the lexer's hot loops: 1 = starts an identifier, 2 = continues one
 lx_cls: *u8 = null
-
-lx_init_classes = ():
-    lx_cls = __alloc(256)
-    loop c in [0..256):
-        k = 0
-        if (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_' or c >= 0x80: k = 3
-        else if c >= '0' and c <= '9': k = 2
-        lx_cls[c] = u8(k)
-
-is_ident_start = (c: u8) -> bool: (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_' or c >= 0x80
-is_ident_char = (c: u8) -> bool: is_ident_start(c) or (c >= '0' and c <= '9')
 
 lx_number = ():
     p = lx_p
@@ -368,51 +145,6 @@ lx_number = ():
 
 # value of the float literal at [s, e): short literals are exact with one operation (Clinger's
 # fast path); anything else goes through the correctly rounded library parser
-lx_float = (s: int, e: int) -> f64:
-    p = lx_p
-    mant = 0
-    nd = 0
-    exp = 0
-    i = s
-    simple = true
-    seen_dot = false
-    loop i < e:
-        c = p[i]
-        if c >= '0' and c <= '9':
-            if nd > 0 or c != '0':
-                nd += 1
-                if nd <= 15: mant = mant * 10 + int(c - '0')
-                else: simple = false
-            if seen_dot: exp -= 1
-        else if c == '.': seen_dot = true
-        else if c == 'e' or c == 'E':
-            i += 1
-            neg = false
-            if p[i] == '-' or p[i] == '+':
-                neg = p[i] == '-'
-                i += 1
-            x = 0
-            loop i < e:
-                if x < 100000: x = x * 10 + int(p[i] - '0')
-                i += 1
-            if neg: exp -= x
-            else: exp += x
-            break
-        i += 1
-    if simple and exp >= -22 and exp <= 22:
-        if exp >= 0: return f64(mant) * __pow10(exp)
-        return f64(mant) / __pow10(-exp)
-    digits: u8[]
-    loop k in [s..e):
-        if p[k] != '_': digits.push(p[k])
-    to_float(str_from_bytes(digits)) ?? 0.0
-
-hexval = (c: u8) -> int:
-    if c >= '0' and c <= '9': return int(c) - 48
-    if c >= 'a' and c <= 'f': return int(c) - 87
-    if c >= 'A' and c <= 'F': return int(c) - 55
-    -1
-
 lx_string = (raw: bool):
     p = lx_p
     s = lx_i

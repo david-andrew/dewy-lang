@@ -12,6 +12,7 @@ LEAF_HOMES = {
     'parser_shared': 'parse.jo',
     'parser_ops': 'parse.jo',
     'lexer_line_context': 'lex.jo',
+    'lexer_helpers': 'lex.jo',
     'parser_cursor': 'parse.jo',
     'lexer_line_closes': 'lex.jo',
     'parser_positions': 'parse.jo',

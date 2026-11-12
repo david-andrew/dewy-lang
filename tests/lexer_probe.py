@@ -33,11 +33,13 @@ def lexer_span_helpers(compiler, out):
         source_layout = ''
         source_start = util.index('struct SrcFile:')
     lex = (directory / 'lex.jo').read_text()
+    helpers = (directory / 'lexer_helpers.jo').read_text()
     payload = fast.index('dn_payload =')
     end = payload + len(re.match(r'[^\n]+\n(?:[ \t]+[^\n]*\n|\n)*', fast[payload:])[0])
     return '\n'.join([
         "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'\nuse 'dewy_lexer.dewy'\nuse 'intern.dewy'\nuse 'dewy_parser.dewy'",
-        lex[lex.index('lx_cls:'):lex.index('is_ident_start =')],
+        lex[lex.index('lx_cls:'):lex.index('\n', lex.index('lx_cls:')) + 1]
+        + helpers[helpers.index('lx_init_classes ='):helpers.index('is_ident_start =')],
         source_layout + util[source_start:util.index('# position encoding')],
         'mkpos = (file: int, off: int) -> int: (file << 40) | off\n'
         'fatal = (pos: int, message: str): panic(message)\n'
