@@ -67,10 +67,21 @@ def test_jo_parser_operator_ordinals(compiler, tmp_path):
                                      '    d = 2\n    d ^= 3\n'
                                      '    xs = [1, 2]\n    xs .+= [10, 20]\n'
                                      '    return p.y * 10000000 + a * 1000000 + b * 100000 + c * 10000 + d * 1000 + xs[0] + xs[1]\n')
+    # Combined and many-name loops unpack each element with a synthesized `=` (Tok.assign).
+    (tmp_path / 'unpack.jo').write_text('unpacked = () -> int:\n'
+                                        '    pairs = [(1, 2), (3, 4)]\n'
+                                        '    s = 0\n'
+                                        '    loop i in 0.. and p, q in pairs:\n'
+                                        '        s = s * 10 + p + q + i\n'
+                                        '    ts = [(1, 2, 3)]\n'
+                                        '    loop a, b, c in ts:\n'
+                                        '        s = s * 10 + a + b + c\n'
+                                        '    return s\n')
     path = tmp_path / 'user.dewy'
-    path.write_text('from p"ops.jo" import total\nmain=()=>printl(total())\n')
+    path.write_text('from p"ops.jo" import total\nfrom p"unpack.jo" import unpacked\n'
+                    'main=()=>{\n    printl(total())\n    printl(unpacked())\n}\n')
     binary = tmp_path / 'user'
     built = subprocess.run([compiler, 'build', path, '-o', binary], text=True, capture_output=True, timeout=120)
     assert built.returncode == 0, built.stdout + built.stderr
     ran = subprocess.run([binary], text=True, capture_output=True, timeout=30)
-    assert ran.stdout == '22558033\n', ran.stdout + ran.stderr
+    assert ran.stdout == '22558033\n386\n', ran.stdout + ran.stderr

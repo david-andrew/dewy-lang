@@ -1,0 +1,575 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_ALIASDECL NF_FLOW_RETURNS NF_INCLUSIVE NF_LOOP_SETUP NF_MUT NF_SOA NF_STEP RANGE_EXHAUSTION add_flag clone has_flag kid kids mk nkids nodes set_list)
+from p"checker_tokens.dewy" import (Tok)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"lex.jo" import (lx_count)
+from p"parse.jo" import (expect expect_ident head_collapse head_node lx_assign lx_bcount lx_bin lx_block lx_bool lx_call lx_expr_stmt lx_ident lx_if lx_index lx_int lx_len lx_let lx_not p_header p_ntoks p_toks ti tok_src)
+from p"parser_cursor.dewy" import (accept advance cur_pos pk)
+from p"parser_expr.dewy" import (parse_expr parse_not)
+from p"parser_flow_nodes.dewy" import (head_has_binder lx_flow_effects lx_opt_value lx_or_terms)
+from p"util.jo" import (files intern name_of pos_file)
+
+LoopWord:type=int64<overflow='wrap'>
+
+# Loop heads read the Jo parser's EOF-terminated token stream and node arena
+# directly; lowering builds with the shared Jo builders. Reacquire node slots
+# after builders or recursive calls, which may grow the arena.
+
+# A loop header: a condition, `x in xs`, `mut x in xs`, `k, v in m`, `let x = opt`, or
+# several joined by and/or; returns a while_, for_ or loopx node (body filled in by the caller).
+parse_loop_head=():>int64=>$unsafe {
+    let pos=cur_pos()
+    expect('kw_loop' "");
+    # (loop (k, v) in pairs: Python's and Rust's brackets around the names)
+    if pk() =? 'lparen' and p_toks[LoopWord(ti) + 1].kind =? 'ident' and p_toks[LoopWord(ti) + 2].kind =? 'comma' {
+        let j:LoopWord=LoopWord(ti) + 1
+        loop p_toks[j].kind =? 'ident' and (p_toks[j + 1].kind =? 'comma' or p_toks[j + 1].kind =? 'rparen') {
+            if p_toks[j + 1].kind =? 'rparen' {
+                if p_toks[j + 2].kind =? 'kw_in' {
+                    let nm:array<string>=[]
+                    let k:LoopWord=LoopWord(ti) + 1
+                    loop k <=? j {
+                        nm.push(tok_src(k))
+                        k += 2
+                    }
+                    let names=nm.join(", ")
+                    fatal(p_toks[ti].pos "the names before `in` are written without brackets: `loop {names} in ...:`")
+                }
+                break
+            }
+            j += 2
+        }
+    }
+    if pk() =? 'colon' {
+        # loop: forever
+        let w=mk('while_' pos)
+        let t=mk('bool_lit' pos)
+        nodes.ptr[t].ival=1
+        nodes.ptr[w].a=int32<overflow='wrap'>(t)
+        return w
+    }
+    if pk() =? 'kw_let' {
+        advance();
+        let w=mk('while_' pos)
+        nodes.ptr[w].name=int32<overflow='wrap'>(expect_ident("variable name"))
+        expect('assign' "'='");
+        nodes.ptr[w].aux=1
+        nodes.ptr[w].a=int32<overflow='wrap'>(parse_expr())
+        return w
+    }
+    let saved_h=p_header
+    p_header=true
+    # common forms first: a plain condition, or a single `x in xs`
+    if not head_has_in(ti) {
+        let w=mk('while_' pos)
+        nodes.ptr[w].a=int32<overflow='wrap'>(parse_expr())
+        p_header=saved_h
+        return w
+    }
+    let start=ti
+    let j:LoopWord=ti
+    if p_toks[j].kind =? 'kw_mut' {j += 1}
+    if p_toks[j].kind =? 'ident' and p_toks[j + 1].kind =? 'kw_in' {
+        let f=mk('for_' pos)
+        if accept('kw_mut') {add_flag(f NF_MUT)}
+        let v=mk('ident' cur_pos())
+        nodes.ptr[v].name=int32<overflow='wrap'>(expect_ident("loop variable"))
+        set_list(f [v])
+        advance();
+        let it=parse_not()
+        if pk() =? 'colon' or pk() =? 'rbrack' {
+            nodes.ptr[f].a=int32<overflow='wrap'>(it)
+            p_header=saved_h
+            return f
+        }
+        ti=start
+    }
+    let h=parse_head_or()
+    p_header=saved_h
+    let hk=nodes.ptr[h].op
+    if hk =? 4 {
+        # a plain condition
+        let w=mk('while_' pos)
+        nodes.ptr[w].a=nodes.ptr[h].a
+        return w
+    }
+    if hk =? 1 {
+        # the binder node itself becomes the loop
+        nodes.ptr[h].kind='for_'
+        nodes.ptr[h].op=0
+        nodes.ptr[h].pos=pos
+        return h
+    }
+    let lx=mk('loopx' pos)
+    nodes.ptr[lx].a=int32<overflow='wrap'>(h)
+    lx
+}
+
+# Flatten an and-chain into its terms.
+head_terms=(h:LoopWord @out:array<int64>):>bool=>$unsafe {
+    let op=nodes.ptr[h].op
+    if op =? 2 {return head_terms(LoopWord(nodes.ptr[h].a) @out) and head_terms(LoopWord(nodes.ptr[h].b) @out)}
+    if op =? 3 {return false}
+    out.push(h)
+    true
+}
+
+is_open_range=(h:LoopWord):>bool=>$unsafe {
+    let it=LoopWord(nodes.ptr[h].a)
+    nodes.ptr[it].kind =? 'range' and nodes.ptr[it].b =? 0 and not has_flag(it NF_STEP)
+}
+
+# Loops with combined iterators, rewritten into plain loops once the body is parsed.
+desugar_loopx=(lx:LoopWord):>int64=>$unsafe {
+    let pos=nodes.ptr[lx].pos
+    let h=LoopWord(nodes.ptr[lx].a)
+    let body=LoopWord(nodes.ptr[lx].b)
+    lx_count += 1
+    let tag="{lx_count}"
+    if nodes.ptr[lx].c not=? 0 {
+        # A Dewy loop is a flow arm: the next arm runs only if its body never
+        # enters. Mark entry after the lowered header's tests, before user code.
+        let fallback=LoopWord(nodes.ptr[lx].c)
+        nodes.ptr[lx].c=0
+        let returns=lx_flow_effects(body) =? 2 and lx_flow_effects(fallback) =? 2
+        let entered="$entered{tag}"
+        let stmts:array<int64>=[lx_assign(lx_ident(entered pos) 'assign' lx_bool(true pos) pos)]
+        loop item in kids(body) {stmts.push(item)}
+        nodes.ptr[lx].b=int32<overflow='wrap'>(lx_block(stmts pos))
+        let lowered=desugar_loopx(lx)
+        let parts:array<int64>=[lx_let(intern(entered) lx_bool(false pos) pos) lowered lx_if(lx_not(lx_ident(entered pos) pos) fallback pos)]
+        let block=lx_block(parts pos)
+        if returns {add_flag(block NF_FLOW_RETURNS)}
+        add_flag(block NF_LOOP_SETUP)
+        let st=mk('exprstmt' pos)
+        nodes.ptr[st].a=int32<overflow='wrap'>(block)
+        return st
+    }
+    let terms:array<int64>=[]
+    if head_terms(h @terms) {
+        # one sequence + counters + conditions: an indexed loop over the sequence
+        let seq:LoopWord=0
+        let nseq:LoopWord=0
+        let ok=true
+        loop t in terms {
+            if nodes.ptr[t].op =? 1 {
+                if terms.length >? 1 and has_flag(LoopWord(nodes.ptr[t].a) NF_STEP) {fatal(nodes.ptr[t].pos "stepped ranges are only supported in single loops for now")}
+                if nkids(t) not=? 1 or has_flag(t NF_MUT) {ok=false}
+                else if not is_open_range(t) {
+                    seq=t
+                    nseq += 1
+                }
+                else {
+                    let lo=LoopWord(nodes.ptr[LoopWord(nodes.ptr[t].a)].a)
+                    # Only a literal zero is exactly the sequence index.
+                    # Other offsets need one evaluation and checked exhaustion.
+                    if nodes.ptr[lo].kind not=? 'int_lit' or nodes.ptr[lo].ival not=? 0 {ok=false}
+                }
+            }
+        }
+        # One binder followed only by conditions is still a native for loop.
+        # Keep its typed iteration (including dictionary key/value bindings)
+        # and evaluate the conditions after binding each element.
+        # Restrict this to a leading binder so earlier conditions cannot see a
+        # newly shadowing name that was not in scope at their source position.
+        let first=terms[0]
+        let direct_binder=nodes.ptr[first].op =? 1 and (not has_flag(first NF_MUT) or terms.length =? 1)
+        loop i in [1..terms.length) {
+            if nodes.ptr[terms[i]].op not=? 4 {direct_binder=false}
+        }
+        if direct_binder {
+            let f=mk('for_' pos)
+            nodes.ptr[f].sval=nodes.ptr[lx].sval
+            nodes.ptr[f].a=nodes.ptr[first].a
+            if has_flag(first NF_MUT) {add_flag(f NF_MUT)}
+            set_list(f kids(first))
+            let stmts:array<int64>=[]
+            loop i in [1..terms.length) {stmts.push(lx_if(lx_not(LoopWord(nodes.ptr[terms[i]].a) pos) mk('break_' pos) pos))}
+            loop item in kids(body) {stmts.push(item)}
+            nodes.ptr[f].b=int32<overflow='wrap'>(lx_block(stmts pos))
+            return f
+        }
+        # The sequence element is bound by the outer for. A condition before
+        # that binder must still resolve any same-named outer variable.
+        if ok and nseq =? 1 {
+            loop t in terms {
+                if t =? seq {break}
+                if nodes.ptr[t].op =? 4 {ok=false}
+            }
+        }
+        if ok and nseq =? 1 and nodes.ptr[LoopWord(nodes.ptr[seq].a)].kind not=? 'range' {
+            let f=mk('for_' pos)
+            nodes.ptr[f].sval=nodes.ptr[lx].sval
+            let ixname=intern("__ix{tag}")
+            let pre:array<int64>=[]
+            loop t in terms {
+                let op=nodes.ptr[t].op
+                if op =? 1 and t not=? seq {
+                    let lo=LoopWord(nodes.ptr[LoopWord(nodes.ptr[t].a)].a)
+                    let v=LoopWord(nodes.ptr[kid(t 0)].name)
+                    pre.push(lx_let(v lx_bin('plus' lx_ident("__ix{tag}" pos) lo pos) pos))
+                }
+                else if op =? 4 {
+                    let brk=mk('break_' pos)
+                    pre.push(lx_if(lx_not(LoopWord(nodes.ptr[t].a) pos) brk pos))
+                }
+            }
+            let iv=mk('ident' pos)
+            nodes.ptr[iv].name=int32<overflow='wrap'>(ixname)
+            set_list(f [iv kid(seq 0)])
+            nodes.ptr[f].ival=1         # (index, element): not unpacking
+            nodes.ptr[f].a=nodes.ptr[seq].a
+            loop i in [0..nkids(body)) {pre.push(kid(body i))}
+            nodes.ptr[f].b=int32<overflow='wrap'>(lx_block(pre pos))
+            return f
+        }
+    }
+    # general form: snapshots and counters, advanced at the top of each iteration
+    let setup:array<int64>=[]
+    let head:array<int64>=[]
+    let tail:array<int64>=[]
+    lx_lower_head(h tag @setup @head @tail pos)
+    loop t in tail {head.push(t)}
+    let wl=mk('while_' pos)
+    let tr=mk('bool_lit' pos)
+    nodes.ptr[tr].ival=1
+    nodes.ptr[wl].a=int32<overflow='wrap'>(tr)
+    nodes.ptr[wl].sval=nodes.ptr[lx].sval
+    loop i in [0..nkids(body)) {head.push(kid(body i))}
+    nodes.ptr[wl].b=int32<overflow='wrap'>(lx_block(head pos))
+    setup.push(wl)
+    let blk=lx_block(setup pos)
+    add_flag(blk NF_LOOP_SETUP)
+    let st=mk('exprstmt' pos)
+    nodes.ptr[st].a=int32<overflow='wrap'>(blk)
+    st
+}
+
+# Statements that advance the iterators of h and break when the loop is over
+# (tail: statements after every binder and condition, still before the body).
+lx_lower_head=(h:LoopWord tag:string @setup:array<int64> @head:array<int64> @tail:array<int64> pos:LoopWord):>void=>$unsafe {
+    let op=nodes.ptr[h].op
+    if op =? 2 {
+        lx_lower_head(LoopWord(nodes.ptr[h].a) tag @setup @head @tail pos)
+        lx_lower_head(LoopWord(nodes.ptr[h].b) tag @setup @head @tail pos)
+        return
+    }
+    if op =? 4 {
+        head.push(lx_if(lx_not(LoopWord(nodes.ptr[h].a) pos) mk('break_' pos) pos))
+        return
+    }
+    if op =? 3 {
+        # each side advances; the loop ends when all of them have run out, and an exhausted
+        # side's variable is none
+        let alts:array<int64>=[]
+        lx_or_terms(h @alts)
+        let alive:array<int64>=[]
+        loop t in alts {
+            if nodes.ptr[t].op not=? 1 {fatal(nodes.ptr[t].pos "only loop variables (x in xs) can be combined with `or`")}
+            alive.push(lx_binder(t tag @setup @head @tail true pos))
+        }
+        let cond=lx_not(lx_ident(name_of(alive[0]) pos) pos)
+        loop i in [1..alive.length) {
+            let n=mk('and_' pos)
+            nodes.ptr[n].a=int32<overflow='wrap'>(cond)
+            nodes.ptr[n].b=int32<overflow='wrap'>(lx_not(lx_ident(name_of(alive[i]) pos) pos))
+            cond=n
+        }
+        head.push(lx_if(cond mk('break_' pos) pos))
+        return
+    }
+    lx_binder(h tag @setup @head @tail false pos);
+}
+
+# The extra operand is compile-time metadata for the hidden exhaustion check.
+lx_range_exhausted=(condition:LoopWord message:LoopWord start:LoopWord pos:LoopWord):>int64=>$unsafe {
+    let args:array<int64>=[condition message clone(start)]
+    let n=lx_call("$dewy_range_exhausted" args pos)
+    nodes.ptr[n].aux2=int32<overflow='wrap'>(RANGE_EXHAUSTION)
+    n
+}
+
+# One binder; returns the name of its "has a value" flag (optional binders) or 0.
+lx_binder=(t:LoopWord tag:string @setup:array<int64> @head:array<int64> @tail:array<int64> optional:bool pos:LoopWord):>int64=>$unsafe {
+    lx_bcount += 1
+    let id="{tag}_{lx_bcount}"
+    let v=LoopWord(nodes.ptr[kid(t 0)].name)
+    let it=LoopWord(nodes.ptr[t].a)
+    # (i in 0.. and name, cost in items: each element unpacked into the names)
+    let nested_single=nkids(t) =? 1 and nodes.ptr[kid(t 0)].kind =? 'tuple'
+    let many=nkids(t) >? 1 or nested_single
+    if many {
+        if optional or has_flag(t NF_MUT) or nodes.ptr[it].kind =? 'range' {fatal(nodes.ptr[t].pos "several names in a combined loop unpack an array's elements, joined with `and` (`i in 0.. and name, cost in items`)")}
+        v=intern("__each{id}")
+    }
+    let has=intern("__has{id}")
+    if has_flag(t NF_MUT) {
+        # (`mut x in xs`: x stands for xs[k], in xs itself, each time round)
+        if optional {fatal(nodes.ptr[t].pos "`mut` elements go with `and` in a combined loop, not `or`")}
+        if nodes.ptr[it].kind =? 'range' {fatal(nodes.ptr[t].pos "`mut` goes with an array: a range's numbers are not stored anywhere")}
+        let k="__k{id}"
+        setup.push(lx_let(intern(k) lx_int((-1) pos) pos))
+        head.push(lx_assign(lx_ident(k pos) 'pluseq' lx_int(1 pos) pos))
+        head.push(lx_if(lx_bin('ge' lx_ident(k pos) lx_len(clone(it) pos) pos) mk('break_' pos) pos))
+        let d=lx_let(v lx_index(clone(it) lx_ident(k pos) pos) pos)
+        add_flag(d NF_ALIASDECL)
+        head.push(d)
+        return 0
+    }
+    if nodes.ptr[it].kind =? 'range' {
+        if has_flag(it NF_STEP) {fatal(nodes.ptr[it].pos "stepped ranges are only supported in single loops for now")}
+        let cur="$range{id}"
+        setup.push(lx_let(intern(cur) LoopWord(nodes.ptr[it].a) pos))
+        if nodes.ptr[it].b not=? 0 and not optional {
+            # Test, bind, then step: the step needs `cur <? end`, so it
+            # cannot wrap, and the binding carries the end as a fact.
+            let end_name="$range_end{id}"
+            setup.push(lx_let(intern(end_name) LoopWord(nodes.ptr[it].b) pos))
+            let inc=lx_assign(lx_ident(cur pos) 'pluseq' lx_int(1 pos) pos)
+            if has_flag(it NF_INCLUSIVE) {
+                # The endpoint may be the integer maximum: stop after it
+                # instead of stepping past it.
+                let done_name="$range_done{id}"
+                setup.push(lx_let(intern(done_name) lx_bool(false pos) pos))
+                head.push(lx_if(lx_ident(done_name pos) mk('break_' pos) pos))
+                head.push(lx_if(lx_bin('gt' lx_ident(cur pos) lx_ident(end_name pos) pos) mk('break_' pos) pos))
+                head.push(lx_let(v lx_ident(cur pos) pos))
+                let step=lx_if(lx_bin('lt' lx_ident(cur pos) lx_ident(end_name pos) pos) inc pos)
+                let finish:array<int64>=[lx_assign(lx_ident(done_name pos) 'assign' lx_bool(true pos) pos)]
+                nodes.ptr[step].c=int32<overflow='wrap'>(lx_block(finish pos))
+                head.push(step)
+            }
+            else {
+                head.push(lx_if(lx_bin('ge' lx_ident(cur pos) lx_ident(end_name pos) pos) mk('break_' pos) pos))
+                head.push(lx_let(v lx_ident(cur pos) pos))
+                head.push(inc)
+            }
+            return 0
+        }
+        if nodes.ptr[it].b =? 0 and not optional {
+            # Bind, then step once every other binder has passed its test, so
+            # the counter moves in lockstep with them (and a bounded one
+            # proves the step cannot wrap). An exhausted type stops the next
+            # iteration at this binder, just where stepping first would.
+            let wrapped="$range_wrapped{id}"
+            setup.push(lx_let(intern(wrapped) lx_bool(false pos) pos))
+            let message=mk('str_lit' pos)
+            nodes.ptr[message].sval=int32<overflow='wrap'>(intern("range exhausted its integer type"))
+            head.push(lx_expr_stmt(lx_range_exhausted(lx_not(lx_ident(wrapped pos) pos) message LoopWord(nodes.ptr[it].a) pos) pos))
+            head.push(lx_let(v lx_ident(cur pos) pos))
+            let left=lx_ident(cur pos)
+            let max_args:array<int64>=[lx_ident(cur pos)]
+            let last=lx_bin('eq' left lx_call("$dewy_range_max" max_args pos) pos)
+            tail.push(lx_assign(lx_ident(wrapped pos) 'assign' last pos))
+            tail.push(lx_if(lx_not(lx_ident(wrapped pos) pos) lx_assign(lx_ident(cur pos) 'pluseq' lx_int(1 pos) pos) pos))
+            return 0
+        }
+        let first_name="$range_first{id}"
+        setup.push(lx_let(intern(first_name) lx_bool(true pos) pos))
+        let steps:array<int64>=[]
+        let cond:int64=0
+        if nodes.ptr[it].b not=? 0 {
+            let end_name="$range_end{id}"
+            let done_name="$range_done{id}"
+            setup.push(lx_let(intern(end_name) LoopWord(nodes.ptr[it].b) pos))
+            let inclusive=has_flag(it NF_INCLUSIVE)
+            let cmp:Tok=if inclusive {'gt'} else {'ge'}
+            setup.push(lx_let(intern(done_name) lx_bin(cmp lx_ident(cur pos) lx_ident(end_name pos) pos) pos))
+            let inc=lx_assign(lx_ident(cur pos) 'pluseq' lx_int(1 pos) pos)
+            if inclusive {
+                # Test the final value before incrementing; the endpoint may
+                # be the integer maximum. An exhausted OR arm stays exhausted.
+                let last=lx_if(lx_bin('eq' lx_ident(cur pos) lx_ident(end_name pos) pos) lx_assign(lx_ident(done_name pos) 'assign' lx_bool(true pos) pos) pos)
+                let bump:array<int64>=[inc]
+                nodes.ptr[last].c=int32<overflow='wrap'>(lx_block(bump pos))
+                steps.push(last)
+            }
+            else {
+                steps.push(inc)
+                steps.push(lx_assign(lx_ident(done_name pos) 'assign' lx_bin('ge' lx_ident(cur pos) lx_ident(end_name pos) pos) pos))
+            }
+            head.push(lx_if(lx_not(lx_ident(first_name pos) pos) lx_if(lx_not(lx_ident(done_name pos) pos) lx_block(steps pos) pos) pos))
+            cond=lx_ident(done_name pos)
+        }
+        else {
+            let message=mk('str_lit' pos)
+            nodes.ptr[message].sval=int32<overflow='wrap'>(intern("range exhausted its integer type"))
+            let left=lx_ident(cur pos)
+            let max_args:array<int64>=[lx_ident(cur pos)]
+            let last=lx_bin('eq' left lx_call("$dewy_range_max" max_args pos) pos)
+            steps.push(lx_expr_stmt(lx_range_exhausted(lx_not(last pos) message LoopWord(nodes.ptr[it].a) pos) pos))
+            steps.push(lx_assign(lx_ident(cur pos) 'pluseq' lx_int(1 pos) pos))
+            head.push(lx_if(lx_not(lx_ident(first_name pos) pos) lx_block(steps pos) pos))
+        }
+        head.push(lx_assign(lx_ident(first_name pos) 'assign' lx_bool(false pos) pos))
+        if not optional {
+            if cond not=? 0 {head.push(lx_if(cond mk('break_' pos) pos))}
+            head.push(lx_let(v lx_ident(cur pos) pos))
+            return 0
+        }
+        if cond =? 0 {head.push(lx_let(has lx_bool(true pos) pos))}
+        else {head.push(lx_let(has lx_not(cond pos) pos))}
+        head.push(lx_let(v lx_opt_value(has lx_ident(cur pos) pos) pos))
+        return has
+    }
+    let seq="__s{id}"
+    let k="__k{id}"
+    setup.push(lx_let(intern(seq) it pos))
+    let k0:int64=if optional {0} else {-1}
+    setup.push(lx_let(intern(k) lx_int(k0 pos) pos))
+    if not optional {head.push(lx_assign(lx_ident(k pos) 'pluseq' lx_int(1 pos) pos))}
+    let done=lx_bin('ge' lx_ident(k pos) lx_len(lx_ident(seq pos) pos) pos)
+    let value=lx_index(lx_ident(seq pos) lx_ident(k pos) pos)
+    if files[pos_file(pos)].is_dewy {
+        # Arrays keep indexed lowering; text advances a streaming grapheme cursor.
+        let done_args:array<int64>=[lx_ident(seq pos) lx_ident(k pos)]
+        done=lx_call("__dewy_iter_done" done_args pos)
+        let walk=if nkids(t) >? 1 {"__dewy_iter_pair"} else {"__dewy_iter_value"}
+        let value_args:array<int64>=[lx_ident(seq pos) lx_ident(k pos)]
+        value=lx_call(walk value_args pos)
+    }
+    if not optional {
+        head.push(lx_if(done mk('break_' pos) pos))
+        head.push(lx_let(v value pos))
+        if many {
+            let tp=mk('tuple' pos)
+            let names=if nested_single {kids(kid(t 0))} else {kids(t)}
+            set_list(tp names)
+            let a=mk('assign' pos)
+            nodes.ptr[a].op=47 # Frozen Tok.assign ordinal.
+            nodes.ptr[a].a=int32<overflow='wrap'>(tp)
+            nodes.ptr[a].b=int32<overflow='wrap'>(lx_ident(name_of(v) pos))
+            head.push(a)
+        }
+        return 0
+    }
+    head.push(lx_let(has lx_not(done pos) pos))
+    head.push(lx_let(v lx_opt_value(has value pos) pos))
+    # An exhausted side stays put, so a step always follows `k <? length`.
+    head.push(lx_if(lx_ident(name_of(has) pos) lx_assign(lx_ident(k pos) 'pluseq' lx_int(1 pos) pos) pos))
+    has
+}
+
+# Is there an `in` at the top level of the loop header starting at token i?
+head_has_in=(i:LoopWord):>bool=>$unsafe {
+    let j=i
+    let depth:LoopWord=0
+    loop j <? p_ntoks {
+        let k=p_toks[j].kind
+        if k =? 'lparen' or k =? 'lbrack' or k =? 'lbrace' {depth += 1}
+        else if k =? 'rparen' or k =? 'rbrack' or k =? 'rbrace' {depth -= 1}
+        else if depth =? 0 {
+            if k =? 'kw_in' {return true}
+            if k =? 'colon' or k =? 'newline' or k =? 'eof' {return false}
+        }
+        else if k =? 'kw_in' and depth =? 1 and p_toks[i].kind =? 'lparen' {return true}
+        j += 1
+    }
+    false
+}
+
+parse_head_or=():>int64=>$unsafe {
+    let l=parse_head_and()
+    loop pk() =? 'kw_or' {
+        let n=head_node(3 cur_pos())
+        advance();
+        nodes.ptr[n].a=int32<overflow='wrap'>(l)
+        nodes.ptr[n].b=int32<overflow='wrap'>(parse_head_and())
+        l=head_collapse(n)
+    }
+    l
+}
+
+parse_head_and=():>int64=>$unsafe {
+    let l=parse_head_term()
+    loop pk() =? 'kw_and' {
+        let n=head_node(2 cur_pos())
+        advance();
+        nodes.ptr[n].a=int32<overflow='wrap'>(l)
+        nodes.ptr[n].b=int32<overflow='wrap'>(parse_head_term())
+        l=head_collapse(n)
+    }
+    l
+}
+
+parse_head_term=():>int64=>$unsafe {
+    let pos=cur_pos()
+    # binder: [mut] name [, name] in iterable
+    let j:LoopWord=ti
+    if p_toks[j].kind =? 'kw_mut' {j += 1}
+    # (loop k, mut v in m: the same as loop mut k, v in m, the value being what can change)
+    let second_mut=p_toks[j + 1].kind =? 'comma' and p_toks[j + 2].kind =? 'kw_mut' and p_toks[j + 3].kind =? 'ident' and p_toks[j + 4].kind =? 'kw_in'
+    if p_toks[j].kind =? 'ident' and (p_toks[j + 1].kind =? 'kw_in' or names_then_in(j) or second_mut) {
+        let n=head_node(1 pos)
+        if accept('kw_mut') {add_flag(n NF_MUT)}
+        let vars:array<int64>=[]
+        loop true {
+            let v=mk('ident' cur_pos())
+            nodes.ptr[v].name=int32<overflow='wrap'>(expect_ident("loop variable"))
+            vars.push(v)
+            if not accept('comma') {break}
+            if accept('kw_mut') {add_flag(n NF_MUT)}
+        }
+        set_list(n vars)
+        expect('kw_in' "");
+        let it=parse_not()
+        if pk() =? 'comma' {
+            # a,b..c: stepped range
+            advance();
+            let r=parse_not()
+            if nodes.ptr[r].kind not=? 'range' {fatal(nodes.ptr[r].pos "expected a range after ',' (as in 0,2..10)")}
+            nodes.ptr[r].c=nodes.ptr[r].a
+            nodes.ptr[r].a=int32<overflow='wrap'>(it)
+            add_flag(r NF_STEP)
+            nodes.ptr[n].a=int32<overflow='wrap'>(r)
+            return n
+        }
+        nodes.ptr[n].a=int32<overflow='wrap'>(it)
+        return n
+    }
+    if pk() =? 'lparen' and head_has_binder(ti) {
+        advance();
+        let h=parse_head_or()
+        expect('rparen' "");
+        return h
+    }
+    let n=head_node(4 pos)
+    nodes.ptr[n].a=int32<overflow='wrap'>(parse_not())
+    n
+}
+
+# (name, name, ... in: a loop's names, two or more, before its `in`)
+names_then_in=(j0:LoopWord):>bool=>$unsafe {
+    let j=j0
+    if p_toks[j].kind not=? 'ident' {return false}
+    j += 1
+    let n:LoopWord=1
+    loop p_toks[j].kind =? 'comma' and p_toks[j + 1].kind =? 'ident' {
+        j += 2
+        n += 1
+    }
+    n >=? 2 and p_toks[j].kind =? 'kw_in'
+}
+
+# loop a, b, c in xs: one name for each element, unpacked at the top of the body (two names are
+# the loop's own: a map's key and value, or a pair)
+loop_unpack_many=(f:LoopWord):>void=>$unsafe {
+    if nodes.ptr[f].kind not=? 'for_' or nkids(f) <? 3 {return}
+    let pos=nodes.ptr[f].pos
+    if has_flag(f NF_MUT) {fatal(pos "`loop mut` takes one or two names; for more, `loop mut x in xs:` and its fields (x.0, x.1...)")}
+    lx_count += 1
+    let tmp=lx_ident("__each{lx_count}" pos)
+    let t=mk('tuple' pos)
+    set_list(t kids(f))
+    let a=mk('assign' pos)
+    nodes.ptr[a].op=47 # Frozen Tok.assign ordinal.
+    nodes.ptr[a].a=int32<overflow='wrap'>(t)
+    nodes.ptr[a].b=int32<overflow='wrap'>(lx_ident("__each{lx_count}" pos))
+    let body=LoopWord(nodes.ptr[f].b)
+    let items:array<int64>=[a]
+    loop item in kids(body) {items.push(item)}
+    set_list(body items)
+    let unpacked:array<int64>=[tmp]
+    set_list(f unpacked)
+}
