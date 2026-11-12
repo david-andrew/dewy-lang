@@ -1,0 +1,561 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_CABI NF_EXTERN NF_GENERIC NF_MUT NF_SOA NF_TERMINATED add_flag kid mk nkids nodes set_list set_list2)
+from p"checker_tokens.dewy" import (Tok)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"lexer_errors.dewy" import (tok_name)
+from p"module_paths.dewy" import (path_stem)
+from p"parse.jo" import (decode_str end_stmt expect expect_ident expect_name habit id_cfn id_from id_soa id_type id_void is_keyword_tok p_toks p_top_decl p_when_top parse_block parse_stmt struct_body ti tok_src word_in)
+from p"parser_cursor.dewy" import (accept advance cur_pos partner pk pkn skip_newlines space_before)
+from p"parser_errors.dewy" import (keyword_name_error parse_empty_block)
+from p"parser_expr.dewy" import (parse_expr)
+from p"parser_forms.dewy" import (is_fn_literal parse_fn_literal)
+from p"util.jo" import (intern name_of)
+
+DeclWord:type=int64<overflow='wrap'>
+
+# Types and declarations read the Jo parser's EOF-terminated token stream and
+# node arena directly. Reacquire node slots after builders or recursive calls,
+# which may grow the arena.
+parse_type_primary=():>int64=>$unsafe {
+    let pos=cur_pos()
+    let k=pk()
+    if k =? 'ident' and p_toks[ti].ival =? id_cfn and pkn(1) =? 'lparen' {
+        advance();
+        let n=mk('tfn' pos)
+        add_flag(n NF_CABI)
+        expect('lparen' "");
+        let ps:array<int64>=[]
+        loop pk() not=? 'rparen' {
+            ps.push(parse_type())
+            if not accept('comma') {break}
+        }
+        expect('rparen' "");
+        set_list(n ps)
+        if accept('arrow') {nodes.ptr[n].a=int32<overflow='wrap'>(parse_type())}
+        return n
+    }
+    if k =? 'ident' and p_toks[ti].ival =? id_soa and (pkn(1) =? 'ident' or pkn(1) =? 'lparen') {
+        advance();
+        let t=parse_type()
+        if nodes.ptr[t].kind not=? 'tarray' or nodes.ptr[t].aux not=? 1 {fatal(pos "soa applies to an array type: soa T[]")}
+        add_flag(t NF_SOA)
+        return t
+    }
+    if k =? 'ident' {
+        let n=mk('tname' pos)
+        nodes.ptr[n].name=int32<overflow='wrap'>(expect_ident(""))
+        if accept('dot') {
+            nodes.ptr[n].sval=nodes.ptr[n].name
+            nodes.ptr[n].name=int32<overflow='wrap'>(expect_ident("type name"))
+        }
+        # Name[T, U]; T[], T[,] and T[4] are array types (T[N] is told apart by the checker).
+        if pk() =? 'lbrack' and not space_before(ti) and pkn(1) not=? 'rbrack' and pkn(1) not=? 'comma' and pkn(1) not=? 'int_lit' {
+            advance();
+            let args:array<int64>=[]
+            loop true {
+                args.push(parse_type())
+                if not accept('comma') {break}
+            }
+            expect('rbrack' "");
+            set_list(n args)
+        }
+        return n
+    }
+    if k =? 'lbrack' {fatal(pos "array types are written T[] (for example int[])")}
+    if k =? 'lbrace' {
+        advance();
+        let n=mk('tmap' pos)
+        nodes.ptr[n].a=int32<overflow='wrap'>(parse_type())
+        if pk() =? 'rbrace' {fatal(cur_pos() "a set is a map to bool: `\{int: bool}` (`s[x] = true` adds x, `s.has(x)` asks, `s.remove(x)` takes it out)")}
+        expect('colon' "");
+        nodes.ptr[n].b=int32<overflow='wrap'>(parse_type())
+        expect('rbrace' "");
+        return n
+    }
+    if k =? 'lparen' {
+        let fnt=p_toks[DeclWord(partner(ti)) + 1].kind =? 'arrow'
+        advance();
+        let elems:array<int64>=[]
+        loop pk() not=? 'rparen' {
+            let m=accept('kw_mut')
+            let pt=parse_type()
+            if m {add_flag(pt NF_MUT)}
+            elems.push(pt)
+            if not accept('comma') {break}
+        }
+        expect('rparen' "");
+        if fnt {
+            let n=mk('tfn' pos)
+            set_list(n elems)
+            expect('arrow' "");
+            if pk() =? 'ident' and p_toks[ti].ival =? id_void {advance();}
+            else {nodes.ptr[n].a=int32<overflow='wrap'>(parse_type())}
+            return n
+        }
+        if elems.length =? 1 {return elems[0]}
+        let n=mk('ttuple' pos)
+        set_list(n elems)
+        return n
+    }
+    if k =? 'star' {
+        advance();
+        let n=mk('tptr' pos)
+        nodes.ptr[n].a=int32<overflow='wrap'>(parse_type_primary())
+        return n
+    }
+    if k =? 'starstar' {
+        advance();
+        let inner=mk('tptr' pos)
+        nodes.ptr[inner].a=int32<overflow='wrap'>(parse_type_primary())
+        let n=mk('tptr' pos)
+        nodes.ptr[n].a=int32<overflow='wrap'>(inner)
+        return n
+    }
+    if k =? 'kw_none' {
+        advance();
+        let n=mk('tname' pos)
+        nodes.ptr[n].name=int32<overflow='wrap'>(intern("none"))
+        return n
+    }
+    habit(ti 'eof')
+    if k =? 'kw_loop' and ti >=? 2 and p_toks[ti - 1].kind =? 'colon' and p_toks[ti - 2].kind =? 'ident' {
+        fatal(p_toks[ti - 2].pos "loops have no labels: to leave two loops at once, put them in a function and `return` from it, or set a flag the outer loop checks")
+    }
+    if (k =? 'newline' or k =? 'indent') and ti >=? 2 and p_toks[ti - 1].kind =? 'colon' and p_toks[ti - 2].kind =? 'ident' {
+        let fname=tok_src(ti - 2)
+        if fname =? "update" {fatal(p_toks[ti - 2].pos "a function is written `update = (dt: f64):` and its lines below it")}
+        if fname =? "forever" or fname =? "repeat" {fatal(p_toks[ti - 2].pos "`{fname}` is not a Dewy word: in a game, `update = (dt: f64):` runs every frame, as a forever loop does (and `draw = ():` draws); put the lines there. To repeat something 10 times: `loop i in [1..10]:`")}
+        fatal(p_toks[ti - 2].pos "a function is written `{fname} = ():` and its lines below it")
+    }
+    fatal(pos "expected a type, found {tok_name(k)}")
+}
+
+# Postfix type operators: T[] T[,] T[N] T?
+parse_type_postfix=(t0:DeclWord):>int64=>$unsafe {
+    let t=t0
+    loop true {
+        if pk() =? 'lbrack' and (pkn(1) =? 'int_lit' or pkn(1) =? 'ident') and pkn(2) =? 'rbrack' {
+            let a=mk('tarray' cur_pos())
+            advance();
+            if pk() =? 'int_lit' {
+                nodes.ptr[a].b=int32<overflow='wrap'>(mk('int_lit' cur_pos()))
+                nodes.ptr[DeclWord(nodes.ptr[a].b)].ival=p_toks[ti].ival
+                advance();
+            }
+            else {
+                nodes.ptr[a].b=int32<overflow='wrap'>(mk('ident' cur_pos()))
+                nodes.ptr[DeclWord(nodes.ptr[a].b)].name=int32<overflow='wrap'>(expect_ident(""))
+            }
+            expect('rbrack' "");
+            nodes.ptr[a].a=int32<overflow='wrap'>(t)
+            t=a
+        }
+        else if pk() =? 'question' {
+            let o=mk('topt' cur_pos())
+            advance();
+            nodes.ptr[o].a=int32<overflow='wrap'>(t)
+            t=o
+        }
+        else if pk() =? 'lbrack' and (pkn(1) =? 'rbrack' or pkn(1) =? 'comma') {
+            let a=mk('tarray' cur_pos())
+            advance();
+            let rank:DeclWord=1
+            loop accept('comma') {rank += 1}
+            expect('rbrack' "");
+            nodes.ptr[a].a=int32<overflow='wrap'>(t)
+            nodes.ptr[a].aux=int32<overflow='wrap'>(rank)
+            t=a
+        }
+        else {return t}
+    }
+    t
+}
+
+parse_type=():>int64=>$unsafe {
+    if pk() =? 'ident' and pkn(1) =? 'lt' and not space_before(DeclWord(ti) + 1) {
+        let w=tok_src(ti)
+        let hint="a type's arguments go in brackets: `{w}[T]`"
+        if word_in(w ["Array" "List" "Vec" "Vector" "ReadonlyArray" "ArrayList"]) {hint="an array type is `T[]` (`int[]`)"}
+        else if word_in(w ["Map" "Record" "Dictionary" "HashMap" "Dict"]) {hint="a map type is `\{K: V}` (`\{str: int}`)"}
+        else if word_in(w ["Set" "HashSet"]) {hint="a set is a map to bool: `\{str: bool}`"}
+        else if word_in(w ["Promise" "Optional" "Option" "Maybe"]) {hint="a value that may be missing is `T?`"}
+        fatal(p_toks[DeclWord(ti) + 1].pos hint)
+    }
+    let t=parse_type_postfix(parse_type_primary())
+    if pk() not=? 'pipe' {return t}
+    let u=mk('tunion' nodes.ptr[t].pos)
+    let alts:array<int64>=[t]
+    loop accept('pipe') {alts.push(parse_type_postfix(parse_type_primary()))}
+    set_list(u alts)
+    u
+}
+
+fn_decl_ahead=():>bool=>$unsafe {
+    let j:DeclWord=ti
+    if p_toks[j].kind =? 'lparen' {
+        # (op) = (   or   ([]) = (   or   ([]=) = (
+        let c=DeclWord(partner(j))
+        if c >? j + 4 {return false}
+        j=c + 1
+        if p_toks[j].kind =? 'lbrack' and not space_before(j) {j=DeclWord(partner(j)) + 1}
+    }
+    else {
+        if p_toks[j].kind not=? 'ident' {return false}
+        j += 1
+        if p_toks[j].kind =? 'lbrack' and not space_before(j) {j=DeclWord(partner(j)) + 1}
+    }
+    if p_toks[j].kind not=? 'assign' or p_toks[j + 1].kind not=? 'lparen' {return false}
+    let c=DeclWord(partner(j + 1))
+    let after=p_toks[c + 1].kind
+    after =? 'arrow' or (after =? 'colon' and is_fn_literal(j + 1))
+}
+
+parse_fn_decl=(extern_:bool):>int64=>$unsafe {
+    let pos=cur_pos()
+    let name:int64=0
+    let op_name=false
+    if pk() =? 'lparen' {
+        let close=partner(ti)
+        advance();
+        let txt=""
+        loop ti <? close {txt="{txt}{tok_src(advance())}"}
+        name=intern(txt)
+        expect('rparen' "");
+        op_name=true
+    }
+    else {name=expect_ident("function name")}
+    let tps:array<int64>=[]
+    if pk() =? 'lbrack' {
+        advance();
+        loop pk() not=? 'rbrack' {
+            let tp=mk('ident' cur_pos())
+            nodes.ptr[tp].name=int32<overflow='wrap'>(expect_ident("type parameter"))
+            tps.push(tp)
+            if not accept('comma') {break}
+        }
+        expect('rbrack' "");
+    }
+    expect('assign' "'='");
+    if pk() not=? 'lparen' {fatal(cur_pos() "expected the parameter list")}
+    let f=parse_fn_literal('fn_' name pos)
+    if op_name {nodes.ptr[f].aux2=1}
+    if tps.length >? 0 {
+        set_list2(f tps)
+        add_flag(f NF_GENERIC)
+    }
+    if extern_ {add_flag(f NF_EXTERN)}
+    f
+}
+
+parse_struct=():>int64=>$unsafe {
+    let pos=cur_pos()
+    expect('kw_struct' "");
+    let s=mk('struct_' pos)
+    nodes.ptr[s].name=int32<overflow='wrap'>(expect_ident("struct name"))
+    if pk() =? 'lparen' {fatal(cur_pos() "a struct does not inherit from another: it can hold one as a field (`base: Foe`), and a union (`type Enemy = Boss | Foe`) is one of several, told apart by `is` or `match`")}
+    if accept('lbrack') {
+        let tps:array<int64>=[]
+        loop pk() not=? 'rbrack' {
+            let tp=mk('ident' cur_pos())
+            nodes.ptr[tp].name=int32<overflow='wrap'>(expect_ident("type parameter"))
+            tps.push(tp)
+            if not accept('comma') {break}
+        }
+        expect('rbrack' "");
+        set_list2(s tps)
+        add_flag(s NF_GENERIC)
+    }
+    expect('colon' "");
+    struct_body=name_of(DeclWord(nodes.ptr[s].name))
+    let body=parse_block()
+    struct_body=""
+    let fields:array<int64>=[]
+    loop i in [0..nkids(body)) {
+        let f=kid(body i)
+        # (`pass`: a struct with no fields, as a message that is only its name)
+        if nodes.ptr[f].kind =? 'block' and nkids(f) =? 0 {continue}
+        # (a method, as in a class: functions are written apart, taking the struct first)
+        if nodes.ptr[f].kind =? 'fn_' or (nodes.ptr[f].kind =? 'assign' and nodes.ptr[f].b not=? 0 and nodes.ptr[DeclWord(nodes.ptr[f].b)].kind =? 'lambda') {
+            let sn=name_of(DeclWord(nodes.ptr[s].name))
+            fatal(nodes.ptr[f].pos "structs have no methods: write the function at the top level (not inside the struct), taking what it works on first, as `hurt = (e: mut {sn}, n: int): e.hp -= n`; `e.hurt(5)` calls it")
+        }
+        # name = default (47 is the frozen Tok.assign ordinal)
+        if nodes.ptr[f].kind =? 'assign' and nodes.ptr[f].op =? 47 and nodes.ptr[DeclWord(nodes.ptr[f].a)].kind =? 'ident' {
+            let lhs=DeclWord(nodes.ptr[f].a)
+            nodes.ptr[f].kind='vardecl'
+            nodes.ptr[f].name=nodes.ptr[lhs].name
+            nodes.ptr[f].a=0
+        }
+        if nodes.ptr[f].kind not=? 'vardecl' or nodes.ptr[f].nlist >? 0 {fatal(nodes.ptr[f].pos "expected a field declaration (name: Type, or name = default)")}
+        fields.push(f)
+    }
+    set_list(s fields)
+    add_flag(s NF_TERMINATED)
+    s
+}
+
+parse_variant=():>int64=>$unsafe {
+    let v=mk('variant' cur_pos())
+    nodes.ptr[v].name=int32<overflow='wrap'>(expect_name("variant name"))
+    if accept('lparen') {
+        let idx:DeclWord=0
+        let fs:array<int64>=[]
+        loop pk() not=? 'rparen' {
+            let f=mk('vardecl' cur_pos())
+            if pk() =? 'ident' and pkn(1) =? 'colon' {
+                nodes.ptr[f].name=int32<overflow='wrap'>(expect_ident(""))
+                advance();
+            }
+            else {nodes.ptr[f].name=int32<overflow='wrap'>(intern("{idx}"))}
+            nodes.ptr[f].a=int32<overflow='wrap'>(parse_type())
+            fs.push(f)
+            idx += 1
+            if not accept('comma') {break}
+        }
+        expect('rparen' "");
+        set_list(v fs)
+    }
+    if accept('assign') {nodes.ptr[v].a=int32<overflow='wrap'>(parse_expr())}
+    v
+}
+
+parse_enum=():>int64=>$unsafe {
+    let pos=cur_pos()
+    expect('kw_enum' "");
+    let e=mk('enum_' pos)
+    nodes.ptr[e].name=int32<overflow='wrap'>(expect_ident("enum name"))
+    if accept('lbrack') {
+        let tps:array<int64>=[]
+        loop pk() not=? 'rbrack' {
+            let tp=mk('ident' cur_pos())
+            nodes.ptr[tp].name=int32<overflow='wrap'>(expect_ident("type parameter"))
+            tps.push(tp)
+            if not accept('comma') {break}
+        }
+        expect('rbrack' "");
+        set_list2(e tps)
+        add_flag(e NF_GENERIC)
+    }
+    expect('colon' "");
+    let vs:array<int64>=[]
+    if accept('newline') {
+        expect('indent' "");
+        loop pk() not=? 'dedent' {
+            vs.push(parse_variant())
+            if accept('comma') {
+                if pk() =? 'newline' {advance();}
+                continue
+            }
+            if pk() not=? 'dedent' {expect('newline' "");}
+        }
+        expect('dedent' "");
+        add_flag(e NF_TERMINATED)
+    }
+    else {
+        loop true {
+            vs.push(parse_variant())
+            if not accept('comma') {break}
+        }
+    }
+    set_list(e vs)
+    e
+}
+
+# type Name = A | B   or   type Name[T, E] = T | E
+parse_type_alias=():>int64=>$unsafe {
+    let pos=cur_pos()
+    advance();
+    let d=mk('typealias' pos)
+    nodes.ptr[d].name=int32<overflow='wrap'>(expect_ident("type name"))
+    if accept('lbrack') {
+        let tps:array<int64>=[]
+        loop pk() not=? 'rbrack' {
+            let tp=mk('ident' cur_pos())
+            nodes.ptr[tp].name=int32<overflow='wrap'>(expect_ident("type parameter"))
+            tps.push(tp)
+            if not accept('comma') {break}
+        }
+        expect('rbrack' "");
+        set_list2(d tps)
+    }
+    expect('assign' "'='");
+    nodes.ptr[d].a=int32<overflow='wrap'>(parse_type())
+    d
+}
+
+# The module of an import: 'path/to/file.jo' (relative to this file; aux2 = 1) or a library
+# module's name (thread, std.json); sval is the path, name the module's name.
+parse_module_spec=(d:DeclWord):>void=>$unsafe {
+    if pk() =? 'str_lit' {
+        let t=advance()
+        let path=decode_str(tok_src(t) p_toks[t].pos false)
+        nodes.ptr[d].sval=int32<overflow='wrap'>(intern(path))
+        nodes.ptr[d].name=int32<overflow='wrap'>(intern(path_stem(path)))
+        nodes.ptr[d].aux2=1
+    }
+    else {
+        let nm=expect_ident("module name")
+        let path=name_of(nm)
+        let last=nm
+        loop accept('dot') {
+            last=expect_ident("module name")
+            path="{path}/{name_of(last)}"
+        }
+        nodes.ptr[d].sval=int32<overflow='wrap'>(intern(path))
+        nodes.ptr[d].name=int32<overflow='wrap'>(last)
+    }
+}
+
+parse_toplevel=():>int64=>$unsafe {
+    let pos=cur_pos()
+    if is_keyword_tok(pk()) and pkn(1) =? 'assign' {keyword_name_error(ti)}
+    let attrs:array<int64>=[]
+    loop pk() =? 'at' {
+        advance();
+        let attr=mk('ident' cur_pos())
+        nodes.ptr[attr].name=int32<overflow='wrap'>(expect_ident("attribute name"))
+        if accept('lparen') {
+            nodes.ptr[attr].a=int32<overflow='wrap'>(parse_expr())
+            # (`@warn_if(condition, "message")`: a second argument)
+            if accept('comma') {nodes.ptr[attr].b=int32<overflow='wrap'>(parse_expr())}
+            expect('rparen' "");
+        }
+        attrs.push(attr)
+        skip_newlines()
+    }
+    let k=pk()
+    let d:int64=0
+    if k =? 'ident' and p_toks[ti].ival =? id_type and pkn(1) =? 'ident' and (pkn(2) =? 'assign' or pkn(2) =? 'lbrack') {d=parse_type_alias()}
+    else if (k =? 'lparen' or (k =? 'ident' and (pkn(1) =? 'assign' or pkn(1) =? 'lbrack'))) and fn_decl_ahead() {
+        p_top_decl=true
+        d=parse_fn_decl(false)
+        p_top_decl=false
+    }
+    else if k =? 'kw_extern' {
+        advance();
+        d=parse_fn_decl(true)
+    }
+    else if k =? 'kw_struct' {d=parse_struct()}
+    else if k =? 'kw_enum' {d=parse_enum()}
+    else if k =? 'ident' and p_toks[ti].ival =? id_from and (pkn(1) =? 'str_lit' or pkn(1) =? 'ident') {
+        # from physics import step, Body as B: those names (aux 2; each an ident whose aux is
+        # its new name, or 0)
+        advance();
+        d=mk('import_' pos)
+        nodes.ptr[d].aux=2
+        parse_module_spec(d)
+        expect('kw_import' "'import' (from <module> import <names>)");
+        let paren=accept('lparen')
+        let names:array<int64>=[]
+        loop true {
+            if paren {skip_newlines()}
+            if paren and pk() =? 'rparen' {break}
+            let id=mk('ident' cur_pos())
+            nodes.ptr[id].name=int32<overflow='wrap'>(expect_name("a name to import"))
+            if accept('kw_as') {nodes.ptr[id].aux=int32<overflow='wrap'>(expect_name("the name to import it as"))}
+            names.push(id)
+            if not accept('comma') {break}
+        }
+        if paren {
+            skip_newlines()
+            expect('rparen' "");
+        }
+        set_list(d names)
+    }
+    else if k =? 'kw_import' or k =? 'kw_use' {
+        if pkn(1) =? 'lbrace' {fatal(cur_pos() "names are picked with `from 'file.jo' import f, g` (and `import 'file.jo'` gives them as file.f)")}
+        let is_use=p_toks[advance()].kind =? 'kw_use'
+        d=mk('import_' pos)
+        if is_use {nodes.ptr[d].aux=1}
+        parse_module_spec(d)
+        if accept('kw_as') {nodes.ptr[d].name=int32<overflow='wrap'>(expect_ident("alias"))}
+    }
+    else if k =? 'kw_test' {
+        advance();
+        d=mk('test_' pos)
+        let t=expect('str_lit' "test name")
+        nodes.ptr[d].sval=int32<overflow='wrap'>(intern(tok_src(t)))
+        expect('colon' "");
+        nodes.ptr[d].b=int32<overflow='wrap'>(parse_block())
+        add_flag(d NF_TERMINATED)
+    }
+    else if k =? 'kw_build' {
+        advance();
+        d=mk('build_' pos)
+        expect('colon' "");
+        nodes.ptr[d].b=int32<overflow='wrap'>(parse_block())
+        add_flag(d NF_TERMINATED)
+    }
+    else if k =? 'kw_when' {
+        let saved=p_when_top
+        p_when_top=true
+        d=parse_when()
+        p_when_top=saved
+        return d
+    }
+    else {return parse_stmt()}
+    if attrs.length >? 0 {
+        let ab=mk('block' pos)
+        set_list(ab attrs)
+        nodes.ptr[d].c=int32<overflow='wrap'>(ab)
+    }
+    end_stmt(d)
+    d
+}
+
+parse_top_block=():>int64=>{
+    let b=mk('block' cur_pos())
+    # (`when TARGET == "wasm": x = 1`: one line, as after if)
+    if pk() not=? 'newline' {
+        let s=parse_toplevel()
+        let items:array<int64>=[]
+        if s not=? 0 {items.push(s)}
+        add_flag(b NF_TERMINATED)
+        set_list(b items)
+        return b
+    }
+    expect('newline' "newline");
+    if pk() not=? 'indent' {parse_empty_block()}
+    advance();
+    let items:array<int64>=[]
+    loop pk() not=? 'dedent' and pk() not=? 'eof' {
+        let s=parse_toplevel()
+        if s not=? 0 {items.push(s)}
+        skip_newlines()
+    }
+    expect('dedent' "end of block");
+    add_flag(b NF_TERMINATED)
+    set_list(b items)
+    b
+}
+
+parse_when=():>int64=>$unsafe {
+    let pos=cur_pos()
+    expect('kw_when' "");
+    let w=mk('when_' pos)
+    nodes.ptr[w].a=int32<overflow='wrap'>(parse_expr())
+    expect('colon' "");
+    if p_when_top {nodes.ptr[w].b=int32<overflow='wrap'>(parse_top_block())}
+    else {nodes.ptr[w].b=int32<overflow='wrap'>(parse_block())}
+    let save=ti
+    if pk() =? 'newline' and pkn(1) =? 'kw_else' {advance();}
+    if pk() =? 'kw_else' {
+        advance();
+        if pk() =? 'kw_when' or pk() =? 'kw_if' {
+            if pk() =? 'kw_if' {p_toks[ti].kind='kw_when'}
+            let b=mk('block' cur_pos())
+            set_list(b [parse_when()])
+            add_flag(b NF_TERMINATED)
+            nodes.ptr[w].c=int32<overflow='wrap'>(b)
+        }
+        else {
+            expect('colon' "");
+            if p_when_top {nodes.ptr[w].c=int32<overflow='wrap'>(parse_top_block())}
+            else {nodes.ptr[w].c=int32<overflow='wrap'>(parse_block())}
+        }
+    }
+    else {ti=save}
+    add_flag(w NF_TERMINATED)
+    w
+}
