@@ -5,7 +5,8 @@ from p"checker_tokens.dewy" import (Tok)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"lexer_errors.dewy" import (tok_name)
 from p"module_paths.dewy" import (path_stem)
-from p"parse.jo" import (decode_str end_stmt expect expect_ident expect_name habit id_cfn id_from id_soa id_type id_void is_keyword_tok p_toks p_top_decl p_when_top parse_block parse_stmt struct_body ti tok_src word_in)
+from p"parse.jo" import (decode_str expect expect_ident expect_name habit id_cfn id_from id_soa id_type id_void is_keyword_tok p_toks p_top_decl p_when_top struct_body ti tok_src word_in)
+from p"parser_stmts.dewy" import (end_stmt parse_block parse_stmt)
 from p"parser_cursor.dewy" import (accept advance cur_pos partner pk pkn skip_newlines space_before)
 from p"parser_errors.dewy" import (keyword_name_error parse_empty_block)
 from p"parser_expr.dewy" import (parse_expr)
@@ -280,7 +281,7 @@ parse_struct=():>int64=>$unsafe {
             let sn=name_of(DeclWord(nodes.ptr[s].name))
             fatal(nodes.ptr[f].pos "structs have no methods: write the function at the top level (not inside the struct), taking what it works on first, as `hurt = (e: mut {sn}, n: int): e.hp -= n`; `e.hurt(5)` calls it")
         }
-        # name = default (47 is the frozen Tok.assign ordinal)
+        # name = default (frozen Tok.assign 47)
         if nodes.ptr[f].kind =? 'assign' and nodes.ptr[f].op =? 47 and nodes.ptr[DeclWord(nodes.ptr[f].a)].kind =? 'ident' {
             let lhs=DeclWord(nodes.ptr[f].a)
             nodes.ptr[f].kind='vardecl'
