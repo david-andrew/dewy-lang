@@ -1,0 +1,4 @@
+# modes: native native-release
+
+let c=channel<int64>(1)
+printl(select(@c.receive timeout=0s) is? Timeout)

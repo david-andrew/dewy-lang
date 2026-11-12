@@ -439,6 +439,7 @@ dewy_quantity_call = (n: int, name: int, a: int, expected: int) -> int:
     number = quantity_number(a)
     add_flag(number, NF_CHECKED)
     if fname == "sleep":
+        ensure_bundled_import("time/provider_mono.dewy", "$dewy_mono_provider", nodes[n].pos)
         if not is_quantity(t):
             d = time_record_duration(t, a, "sleep", "sleep(24hour)", nodes[n].pos)
             if d != 0:
@@ -929,6 +930,8 @@ quantity_array = (items: int[], elem: int, pos: int) -> int:
 task_sleep_type = () -> int:
     mk_union([T_VOID, int(syms[universe[intern("Canceled")]].ref)])
 task_duration_value = (n: int, a0: int) -> int:
+    if files[pos_file(nodes[n].pos)].path != "{lib_dir}/prelude/inbox.dewy":
+        ensure_bundled_import("time/provider_mono.dewy", "$dewy_mono_provider", nodes[n].pos)
     t = check_expr(a0, 0)
     a = last_checked
     add_flag(a, NF_CHECKED)

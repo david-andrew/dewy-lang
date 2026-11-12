@@ -9,6 +9,8 @@ CASES = [
     'dogfood/18_roman_tests',
     'dogfood31_proofs/string_brace_misspelling',
     'overload/unknown_named_argument',
+    'time_clock/waits_entry',
+    'time_clock/select_timeout_entry',
 ]
 
 

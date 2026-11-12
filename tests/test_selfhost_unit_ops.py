@@ -5,6 +5,8 @@ from tests.support import compiler  # noqa: F401
 CASES = [
     'units/functions',
     'units/sleep',
+    'time_clock/waits_entry',
+    'time_clock/ticker_entry',
     'units/format_shown_unit',
     'units/conversions',
     'no_deadlocks/certified_locks',

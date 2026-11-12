@@ -1,6 +1,7 @@
 # Dewy's prelude: waits over time and over several channels, loaded when named. `ticker(period)`
 # ticks; `merged(@a.receive @b.receive)` drains several receives as one inbox. Their runtime
 # is in lib/std/thread.jo; `select` is lib/std/tasks.jo.
+import p"@lib/time/provider_mono.dewy" as mono_provider
 
 # `ticker(period)` ticks every period from when it is made: `tick.next` waits for the next tick
 # and gives `Tick`, or `Canceled`; `tick.next(timeout=d)` gives `Timeout` when none comes in

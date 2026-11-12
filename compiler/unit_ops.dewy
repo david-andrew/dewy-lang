@@ -515,6 +515,7 @@ dewy_quantity_call=(n:UnitWord name:UnitWord a:UnitWord expected:UnitWord):>int6
     let number=quantity_number(a)
     add_flag(number NF_CHECKED)
     if fname =? "sleep" {
+        ensure_bundled_import("time/provider_mono.dewy" "$dewy_mono_provider" nodes.ptr[n].pos)
         if not is_quantity(t) {
             let d=time_record_duration(t a "sleep" "sleep(24hour)" nodes.ptr[n].pos)
             if d not=? 0 {
@@ -1075,6 +1076,9 @@ task_sleep_type=():>int64=>$unsafe {
     mk_union([T_VOID UnitWord(syms.ptr[universe[intern("Canceled")]].ref)])
 }
 task_duration_value=(n:UnitWord a0:UnitWord):>int64=>$unsafe {
+    if files[pos_file(nodes.ptr[n].pos)].path not=? "{lib_dir}/prelude/inbox.dewy" {
+        ensure_bundled_import("time/provider_mono.dewy" "$dewy_mono_provider" nodes.ptr[n].pos)
+    }
     let t=check_expr(a0 0)
     let a=last_checked
     add_flag(a NF_CHECKED)

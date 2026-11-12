@@ -1740,9 +1740,11 @@ let stamp = now.nominal                 # 2026-10-24T12:00:00.25Z
 
 `monotonic` is the monotonic sample alone. `sleep`, `within` and deadlines count
 actual time, including time the machine is suspended.
-For `now`, `monotonic` and `today`, provider checks run at entry only when the program reaches
-the operation: `now` checks both, `monotonic` checks only the monotonic provider, and `today`
-checks only the wall provider. A lost wall synchronization appears in a reading's status;
+Provider checks run at entry only when the program reaches a clock operation:
+`now` checks both providers; `monotonic`, `sleep`, `within`, `select`, ticker
+and timed channel waits check the suspend-inclusive monotonic provider; and
+`today` checks only the wall provider.
+A lost wall synchronization appears in a reading's status;
 printing it adds `? (unsynchronized)` to the nominal label. An unknown accuracy adds `?`.
 If a later wall read fails, it retains the last sample and prints `? (stale)`.
 

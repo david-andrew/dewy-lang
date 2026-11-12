@@ -13,6 +13,13 @@ def test_reached_clock_providers(compiler, tmp_path):
         "today": ("printl(today('UTC'))\n", True, False),
         "age_on": ('printl(age(date"2000-01-01" on=date"2026-01-01"))\n', False, False),
         "age_today": ('printl(age(date"2000-01-01" scope="UTC"))\n', True, False),
+        "sleep": ('sleep(0ms)\n', False, True),
+        "within": ('printl(within(1s @answer))\nanswer=()=>42\n', False, True),
+        "channel_only": ('let c=channel<int64>(1)\nprintl(c.try_receive is? Empty)\n', False, False),
+        "channel_timeout": ('let c=channel<int64>(1)\nprintl(c.receive(timeout=0s) is? Timeout)\n', False, True),
+        "select_timeout": ('let c=channel<int64>(1)\nprintl(select(@c.receive timeout=0s) is? Timeout)\n', False, True),
+        "select": ('let c=channel<int64>(1)\nc.send(7)\nprintl(select(@c.receive))\n', False, True),
+        "ticker": ('let t=ticker(1ms)\nprintl(t.next is? Tick)\n', False, True),
     }
     wall = b"wall clock provider unavailable at entry"
     mono = b"suspend-inclusive monotonic clock unavailable at entry"

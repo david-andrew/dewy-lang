@@ -3,7 +3,7 @@ $runtime_checks
 from p"@lib/core/rt.jo" import (__str_slice)
 from p"@lib/core/str.jo" import (ends_with starts_with)
 from p"ast.jo" import (nodes)
-from p"check.jo" import (lib_dir modules watch_build)
+from p"check.jo" import (ensure_bundled_import lib_dir modules watch_build)
 from p"ide.jo" import (ide_on)
 from p"main.jo" import (repl_image)
 from p"prelude.jo" import (demand_prelude_name dp_by_name dp_load dp_names dp_paths dp_scan dp_scanned pn_entries pn_find prelude_demand_entry prelude_known prelude_lazy)
@@ -76,6 +76,7 @@ prelude_shown_path=(path:string):>string=>{
 }
 # The Dewy prelude's binding of name, or 0
 dewy_prelude_lookup=(name:PreludeWord):>int64=>{
+    if name_of(name) =? "within" or name_of(name) =? "select" {ensure_bundled_import("time/provider_mono.dewy" "$dewy_mono_provider" 0)}
     let m=dewy_prelude_module(name)
     if m <? 0 {return 0}
     modules[m].names.get(name) ?? 0

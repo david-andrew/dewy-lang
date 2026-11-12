@@ -69,6 +69,7 @@ prelude_shown_path = (path: str) -> str:
     path
 # The Dewy prelude's binding of name, or 0
 dewy_prelude_lookup = (name: int) -> int:
+    if name_of(name) == "within" or name_of(name) == "select": ensure_bundled_import("time/provider_mono.dewy", "$dewy_mono_provider", 0)
     m = dewy_prelude_module(name)
     if m < 0: return 0
     modules[m].names.get(name) ?? 0
