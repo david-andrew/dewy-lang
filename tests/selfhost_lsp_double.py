@@ -20,7 +20,8 @@ def leaf_compilers(compiler, tmp_path, leaves):
             for name, text in modules.items():
                 for leaf in leaves:
                     if name != f'{leaf}.jo':
-                        text = text.replace(f"'{leaf}.dewy'", f"'{leaf}.jo'").replace(f'p"{leaf}.dewy"', f'p"{leaf}.jo"')
+                        text = (text.replace(f"'{leaf}.dewy'", f"'{leaf}.jo'")
+                                .replace(f'"{leaf}.dewy"', f'"{leaf}.jo"'))
                 modules[name] = text
         modules['driver.jo'] = DRIVER
         built.append(cached_driver(compiler, tmp_path, False, modules))

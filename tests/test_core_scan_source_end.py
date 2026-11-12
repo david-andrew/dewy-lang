@@ -20,6 +20,7 @@ use '{root}/compiler/lex.jo'
 use '{root}/compiler/scan.jo'
 use '{root}/compiler/scan_index.dewy'
 use '{root}/compiler/dewy_fast.jo'
+use '{root}/compiler/dewy_fast_lex.dewy'
 
 page = 4096
 base = syscall(9, 0, 2 * page, 3, 0x22, -1, 0)

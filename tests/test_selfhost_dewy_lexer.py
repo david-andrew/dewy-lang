@@ -37,7 +37,7 @@ def build_pair(seed, work, release):
         shutil.copytree(parser_diff.ROOT / name, tree / name)
     main = tree / 'compiler/main.jo'
     text = "use 'source_types.dewy'\n" + main.read_text().replace('build:\n    opt = release\n', '')
-    main.write_text("use 'dewy_fast.jo'\nuse 'dewy_context.jo'\n" +
+    main.write_text("use 'dewy_fast.jo'\nuse 'dewy_fast_lex.dewy'\nuse 'dewy_context.jo'\n" +
                     text.replace('    a = args()\n', '    a = args()\n' + PROBE, 1))
     binaries = []
     for side in ('dewy', 'twin'):

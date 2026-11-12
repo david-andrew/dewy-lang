@@ -34,8 +34,8 @@ def lexer_span_helpers(compiler, out):
         source_start = util.index('struct SrcFile:')
     lex = (directory / 'lex.jo').read_text()
     helpers = (directory / 'lexer_helpers.jo').read_text()
-    payload = fast.index('dn_payload =')
-    end = payload + len(re.match(r'[^\n]+\n(?:[ \t]+[^\n]*\n|\n)*', fast[payload:])[0])
+    twin = (directory / 'dewy_fast_lex.jo').read_text()
+    state_end = fast.index('const DN_EDIT_BIGINT')
     return '\n'.join([
         "use 'dewy_tokens.dewy'\nuse 'dewy_lex.dewy'\nuse 'dewy_lexer.dewy'\nuse 'intern.dewy'\nuse 'dewy_parser.dewy'",
         lex[lex.index('lx_cls:'):lex.index('\n', lex.index('lx_cls:')) + 1]
@@ -45,5 +45,5 @@ def lexer_span_helpers(compiler, out):
         'fatal = (pos: int, message: str): panic(message)\n'
         'err_notes: (int, str)[]',
         'dc_parser: ParserContext',
-        fast[fast.index('dn_word_tokens:'):end],
+        fast[fast.index('dn_word_tokens:'):state_end] + twin[twin.index('dn_init_words ='):],
     ])
