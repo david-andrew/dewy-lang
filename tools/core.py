@@ -316,7 +316,7 @@ def test(binary: Path, arguments: list[str], quick: bool, base: str | None = Non
     # build across the gate. A later --maxfail=0 requests every failure.
     command = [str(python), '-m', 'pytest', '-q', '-o', 'addopts=', '--maxfail=1',
                f"--basetemp={tempfile.mkdtemp(prefix='pytest-', dir=scratch.activate())}",
-               *test_runner_options(python, arguments), *TESTS, *tier, *arguments]
+               *test_runner_options(python, arguments), *(TESTS if not paths else ()), *tier, *arguments]
     status = subprocess.call(command, cwd=ROOT, env=env)
     if not quick:
         twin_scope_summary(env)
