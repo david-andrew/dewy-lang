@@ -1,0 +1,427 @@
+$runtime_checks
+
+from p"@lib/core/rt.jo" import (__str_from_bytes __str_slice)
+from p"@lib/core/str.jo" import (__has_byte byte_str find find_byte is_alnum join split starts_with trim trim_end trim_start)
+from p"ast.jo" import (NF_CHARLIKE NF_LAZY NF_SQUOTE add_flag has_flag mk nodes set_list)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"lex.jo" import (STRF_RAW STRF_SINGLE STRF_TRIPLE hexval lx_base lx_lazy)
+from p"literals.dewy" import (literal_spec_problem)
+from p"parse.jo" import (id_cfn id_end id_from id_soa id_type id_void p_base p_file p_header p_clear_unit p_lazy p_lex_unit p_matrix p_no_tuple p_ntoks p_src p_toks p_top_decl stop_after ti toks)
+from p"parser_cursor.dewy" import (cur_pos pk skip_newlines)
+from p"parser_decls.dewy" import (parse_toplevel)
+from p"parser_expr.dewy" import (parse_expr)
+from p"parser_stmts.dewy" import (parse_indented_block)
+from p"util.jo" import (files intern pl_on pl_reached pos_file)
+
+TextWord:type=int64<overflow='wrap'>
+
+# Source text is bytes: read it through byte views and cut it with the host's
+# byte slice, never by graphemes. The Jo parser owns each unit's token stream
+# (p_lex_unit); a unit parsed inside another saves and restores the borrow.
+
+tok_src=(i:TextWord):>string=>$unsafe {
+    let s=TextWord(p_toks[i].start)
+    __str_slice(p_src s s + TextWord(p_toks[i].len))
+}
+
+word_in=(w:string words:array<string>):>bool=>{
+    loop x in words {
+        if x =? w {return true}
+    }
+    false
+}
+
+decode_str=(s:string pos:TextWord raw:bool):>string=>{
+    if raw {return s}
+    if find_byte(s 92) <? 0 and find(s "\{\{") <? 0 and find_byte(s 125) <? 0 {return s}
+    let b=s as array<uint8>
+    let buf:array<uint8>=[]
+    let n:TextWord=b.length
+    let i:TextWord=0
+    loop i <? n {
+        let c=b[i]
+        if c =? 92 {
+            i += 1
+            let e=b[i]
+            if e =? 110 {buf.push(10)}
+            else if e =? 116 {buf.push(9)}
+            else if e =? 114 {buf.push(13)}
+            else if e =? 48 {buf.push(0)}
+            else if e =? 92 {buf.push(92)}
+            else if e =? 34 {buf.push(34)}
+            else if e =? 39 {buf.push(39)}
+            else if e =? 123 {buf.push(123)}
+            else if e =? 125 {buf.push(125)}
+            else if e =? 101 {buf.push(27)}
+            else if e =? 120 {
+                if i + 2 >=? n {fatal(pos "bad \\x escape")}
+                let h=hexval(b[i + 1])
+                let l=hexval(b[i + 2])
+                if h <? 0 or l <? 0 {fatal(pos "bad \\x escape")}
+                buf.push(uint8(h * 16 + l))
+                i += 2
+            }
+            else if e =? 10 {
+                loop i + 1 <? n and (b[i + 1] =? 32 or b[i + 1] =? 9) {i += 1}
+            }
+            else {
+                # (d w s b D W S .: a regular expression's escapes)
+                let regex=e =? 100 or e =? 119 or e =? 115 or e =? 98 or e =? 68 or e =? 87 or e =? 83 or e =? 46
+                let why=if regex {" (for a regular expression, a raw string keeps the backslash: r\"\\d+\")"} else {""}
+                fatal(pos "unknown escape \\{byte_str(e)}{why}")
+            }
+        }
+        else if (c =? 123 or c =? 125) and i + 1 <? n and b[i + 1] =? c {
+            buf.push(c)
+            i += 1
+        }
+        else {buf.push(c)}
+        i += 1
+    }
+    __str_from_bytes(buf)
+}
+
+dedent_triple=(s0:string):>string=>{
+    let s=s0
+    let b0=s as array<uint8>
+    if b0.length >? 0 and b0[0] =? 10 {s=__str_slice(s 1 b0.length)}
+    else if b0.length >? 1 and b0[0] =? 13 and b0[1] =? 10 {s=__str_slice(s 2 b0.length)}
+    let b1=s as array<uint8>
+    let e:TextWord=b1.length
+    loop e >? 0 and (b1[e - 1] =? 32 or b1[e - 1] =? 9) {e -= 1}
+    if e >? 0 and b1[e - 1] =? 10 {s=__str_slice(s 0 e - 1)}
+    let common:TextWord=-1
+    loop line in split(s "\n") {
+        let lb=line as array<uint8>
+        let ind:TextWord=0
+        loop ind <? lb.length and (lb[ind] =? 32 or lb[ind] =? 9) {ind += 1}
+        if ind <? lb.length {
+            if common <? 0 or ind <? common {common=ind}
+        }
+    }
+    if common <=? 0 {return s}
+    let out:array<string>=[]
+    loop line in split(s "\n") {
+        let lb=line as array<uint8>
+        let k:TextWord=0
+        loop k <? common and k <? lb.length and (lb[k] =? 32 or lb[k] =? 9) {k += 1}
+        out.push(__str_slice(line k lb.length))
+    }
+    join(out "\n")
+}
+
+# (a name: letters, digits and _, not starting with a digit)
+is_ident_plain=(s:string):>bool=>{
+    let b=s as array<uint8>
+    if b.length =? 0 or (b[0] >=? 48 and b[0] <=? 57) {return false}
+    loop c in b {
+        if not (is_alnum(c) or c =? 95) {return false}
+    }
+    true
+}
+
+# one character (one UTF-8 sequence): such a literal can stand for its character code
+__utf8_len1=(t:string):>bool=>{
+    let tb=t as array<uint8>
+    let n=tb.length
+    if n =? 1 {return true}
+    if n =? 0 {return false}
+    let b=tb[0]
+    (b >=? 0xc0 and b <? 0xe0 and n =? 2) or (b >=? 0xe0 and b <? 0xf0 and n =? 3) or (b >=? 0xf0 and n =? 4)
+}
+
+parse_string_token=(t:TextWord):>int64=>$unsafe {
+    let pos=p_toks[t].pos
+    let s=tok_src(t)
+    let flags=TextWord(p_toks[t].flags)
+    let raw=flags & STRF_RAW not=? 0
+    if flags & STRF_TRIPLE not=? 0 {s=dedent_triple(s)}
+    let sb=s as array<uint8>
+    let n=mk('str_lit' pos)
+    let n_len:TextWord=sb.length
+    let i:TextWord=0
+    let lit_start:TextWord=0
+    let has_interp=false
+    let parts:array<int64>=[]
+    loop i <? n_len and not raw {
+        let c=sb[i]
+        if c =? 92 {
+            i += 2
+            continue
+        }
+        if c =? 123 and i + 1 <? n_len and sb[i + 1] =? 123 {
+            i += 2
+            continue
+        }
+        if c =? 125 and i + 1 <? n_len and sb[i + 1] =? 125 {
+            i += 2
+            continue
+        }
+        if c =? 123 and n_len =? 1 and flags & STRF_TRIPLE =? 0 {break}       # ('{': a brace alone)
+        if c =? 123 {
+            has_interp=true
+            if i >? lit_start {
+                let lit=mk('str_lit' pos)
+                nodes.ptr[lit].sval=int32<overflow='wrap'>(intern(decode_str(__str_slice(s lit_start i) pos raw)))
+                parts.push(lit)
+            }
+            let depth:TextWord=1
+            let parens:TextWord=0             # ( and [ nesting: a ':' inside them is not a format spec
+            let j:TextWord=i + 1
+            let colon:TextWord=-1
+            loop j <? n_len and depth >? 0 {
+                let cj=sb[j]
+                if cj =? 123 {depth += 1}
+                else if cj =? 125 {
+                    depth -= 1
+                    if depth =? 0 {break}
+                }
+                else if cj =? 40 or cj =? 91 {parens += 1}
+                else if cj =? 41 or cj =? 93 {parens -= 1}
+                else if cj =? 34 {
+                    j += 1
+                    loop j <? n_len and sb[j] not=? 34 {
+                        if sb[j] =? 92 {j += 1}
+                        j += 1
+                    }
+                }
+                else if cj =? 58 and depth =? 1 and parens =? 0 and colon <? 0 and not (j + 1 <? n_len and sb[j + 1] =? 61) and not starts_with(trim_start(__str_slice(s i + 1 j)) "if ") {colon=j}
+                j += 1
+            }
+            let eend=if colon >=? 0 {colon} else {j}
+            let expr_src=__str_slice(s i + 1 eend)
+            # (C, GLSL or CSS in a string, "void main() { x = 1; }": braces of the text)
+            let inner=__str_slice(s i + 1 j)
+            if find(inner ";") >=? 0 and find(inner "\"") <? 0 {fatal(pos "`\{` in a string puts in a value, and this text is not one: for braces in the text, write \{\{ and \}\}, or make it a raw string, r\"...\" (a shader's or a page's code)")}
+            # ({n == 1 ? "" : "s"}: C's choice, as outside a string)
+            if find(expr_src " ? ") >? 0 {fatal(pos "a choice between two values is `if c: a else: b`, as \"\{if n == 1: \"\" else: \"s\"\}\"")}
+            # ({x=}: the text "x=" and then x's value, as Python's f-strings)
+            let shown=""
+            let te=trim_end(expr_src)
+            let tb=te as array<uint8>
+            if tb.length >=? 2 and tb[tb.length - 1] =? 61 and not __has_byte("=!<>" tb[tb.length - 2]) {
+                shown=expr_src
+                expr_src=__str_slice(te 0 tb.length - 1)
+            }
+            if (trim(expr_src) as array<uint8>).length =? 0 {
+                if colon >=? 0 {fatal(pos "the value goes inside the braces, with its format after a colon: \"\{x:.2f\}\" (there is no .format)")}
+                fatal(pos "'\{' in a string starts an interpolation like \"\{x\}\"; write \{\{ and \}\} for literal braces")
+            }
+            # lex and parse the embedded expression; its tokens keep their places in the file
+            let saved_toks=toks
+            let saved_p_toks=p_toks
+            let saved_p_ntoks=p_ntoks
+            let saved_ti=ti
+            let saved_src=p_src
+            let saved_file=p_file
+            let saved_base=p_base
+            # ({/i}, {color=#ff0}: tags as Ren'Py's, not values; the text needs its braces doubled)
+            let es=trim(expr_src)
+            let eb=es as array<uint8>
+            let eq=find(es "=")
+            if eb.length >? 0 and (eb[0] =? 47 or (eq >? 0 and eq + 1 <? eb.length and eb[eq + 1] not=? 61 and eb[eq - 1] not=? 33 and eb[eq - 1] not=? 60 and eb[eq - 1] not=? 62 and eb[eq - 1] not=? 61 and is_ident_plain(__str_slice(es 0 eq)))) {
+                fatal(pos "`\{{es}\}` in a string puts in the value of what is inside the braces, and this is not one; for the braces in the text (a tag, as Ren'Py's), write `\{\{{es}\}\}`, or make it a raw string, r\"...\"")
+            }
+            # (a string inside an interpolation: its tokens' starts are within that one's source;
+            # spaces before the value are not an indented line)
+            let whole=(expr_src as array<uint8>).length
+            let ws=TextWord(whole) - TextWord((trim_start(expr_src) as array<uint8>).length)
+            expr_src=__str_slice(expr_src ws whole)
+            p_base=TextWord(p_base) + TextWord(p_toks[t].start) + i + 1 + ws
+            lx_base=p_base
+            p_lex_unit(p_file expr_src)
+            lx_base=0
+            ti=0
+            p_src=expr_src
+            let e=parse_expr()
+            skip_newlines()
+            if pk() not=? 'eof' {
+                if find(expr_src "!r") >? 0 or find(expr_src "!s") >? 0 {fatal(pos "there are no conversions: \"\{x\}\" shows x, and \"\{x=\}\" its name too")}
+                if find(expr_src " if ") >? 0 and find(expr_src " else ") >? 0 {fatal(pos "a choice is written `if c: a else: b`, as \"\{if done: \"yes\" else: \"no\"\}\"")}
+                fatal(pos "invalid expression in string interpolation (a `\{` in a string starts one; for a brace in the text, write \{\{ or \}\})")
+            }
+            if nodes.ptr[e].kind =? 'str_lit' and nodes.ptr[e].nlist =? 0 and colon >=? 0 and colon + 1 <? j and sb[colon + 1] =? 32 and not (colon + 2 <? j and (sb[colon + 2] =? 60 or sb[colon + 2] =? 62 or sb[colon + 2] =? 94)) {
+                # ('{"a": 1}' is the text "a", formatted " 1")
+                fatal(pos "`\{{trim(__str_slice(s i + 1 j))}\}` in a string puts in the value of what is inside the braces; for braces in the text, write \{\{ and \}\}, or make it a raw string, r'...' (JSON: r'\{\"a\": 1\}', or to_json(value))")
+            }
+            toks=saved_toks
+            p_toks=saved_p_toks
+            p_ntoks=saved_p_ntoks
+            ti=saved_ti
+            p_src=saved_src
+            p_file=saved_file
+            p_base=saved_base
+            if (shown as array<uint8>).length >? 0 {
+                let lit=mk('str_lit' pos)
+                nodes.ptr[lit].sval=int32<overflow='wrap'>(intern(shown))
+                parts.push(lit)
+            }
+            let part=mk('pair' pos)
+            nodes.ptr[part].a=int32<overflow='wrap'>(e)
+            if colon >=? 0 {
+                let bad=literal_spec_problem(__str_slice(s colon + 1 j))
+                if bad not=? "" {fatal(pos "`\{{trim(__str_slice(s i + 1 j))}\}`: {bad} (a format is [[fill]align][+][#][0][width][,][.precision][type], as \{x:>8.2f\}; types f e E g G % (numbers), d x X b o (whole numbers), s (text))")}
+                nodes.ptr[part].sval=int32<overflow='wrap'>(intern(__str_slice(s colon + 1 j)))
+            }
+            else {nodes.ptr[part].sval=-1}
+            parts.push(part)
+            i=j + 1
+            lit_start=i
+            continue
+        }
+        i += 1
+    }
+    if not has_interp {
+        let txt=decode_str(s pos raw)
+        nodes.ptr[n].sval=int32<overflow='wrap'>(intern(txt))
+        if __utf8_len1(txt) {
+            add_flag(n NF_CHARLIKE)
+            if flags & STRF_SINGLE not=? 0 {add_flag(n NF_SQUOTE)}
+        }
+        return n
+    }
+    if lit_start <? n_len {
+        let lit=mk('str_lit' pos)
+        nodes.ptr[lit].sval=int32<overflow='wrap'>(intern(decode_str(__str_slice(s lit_start n_len) pos raw)))
+        parts.push(lit)
+    }
+    nodes.ptr[n].aux=1
+    set_list(n parts)
+    n
+}
+
+parse_file=(file:TextWord):>array<int64>=>{
+    if id_void =? 0 {
+        id_void=intern("void")
+        id_cfn=intern("cfn")
+        id_end=intern("end")
+        id_type=intern("type")
+        id_soa=intern("soa")
+        id_from=intern("from")
+    }
+    lx_lazy=p_lazy
+    p_lex_unit(file files[file].src)
+    lx_lazy=false
+    if stop_after =? "lex" {
+        p_clear_unit()
+        return []
+    }
+    ti=0
+    p_file=file
+    p_src=files[file].src
+    let decls:array<int64>=[]
+    skip_newlines()
+    loop pk() not=? 'eof' {
+        let d=parse_toplevel()
+        if d not=? 0 {decls.push(d)}
+        skip_newlines()
+    }
+    p_clear_unit()
+    decls
+}
+
+# The top-level declarations in src[start..stop) of file (a unit of compiler/scan.jo's index: it
+# starts a line that is not indented), function bodies left for later as in a library file
+parse_span=(file:TextWord start:TextWord stop:TextWord):>array<int64>=>{
+    if id_void =? 0 {
+        id_void=intern("void")
+        id_cfn=intern("cfn")
+        id_end=intern("end")
+        id_type=intern("type")
+        id_soa=intern("soa")
+        id_from=intern("from")
+    }
+    let saved_toks=toks
+    let saved_p_toks=p_toks
+    let saved_p_ntoks=p_ntoks
+    let saved_ti=ti
+    let saved_file=p_file
+    let saved_src=p_src
+    let saved_base=p_base
+    let saved_nt=p_no_tuple
+    let saved_m=p_matrix
+    let saved_h=p_header
+    let saved_lazy=p_lazy
+    let saved_top=p_top_decl
+    p_file=file
+    p_src=files[file].src
+    lx_lazy=true
+    p_lex_unit(file p_src start stop)
+    lx_lazy=false
+    ti=0
+    p_base=0
+    p_no_tuple=false
+    p_matrix=0
+    p_header=false
+    p_lazy=true
+    p_top_decl=false
+    let decls:array<int64>=[]
+    skip_newlines()
+    loop pk() not=? 'eof' {
+        let d=parse_toplevel()
+        if d not=? 0 {decls.push(d)}
+        skip_newlines()
+    }
+    toks=saved_toks
+    p_toks=saved_p_toks
+    p_ntoks=saved_p_ntoks
+    ti=saved_ti
+    p_file=saved_file
+    p_src=saved_src
+    p_base=saved_base
+    p_no_tuple=saved_nt
+    p_matrix=saved_m
+    p_header=saved_h
+    p_lazy=saved_lazy
+    p_top_decl=saved_top
+    decls
+}
+
+# The body of function declaration d, parsed now if it was left for later.
+ensure_body=(d:TextWord):>void=>$unsafe {
+    let b=TextWord(nodes.ptr[d].b)
+    if b =? 0 or not has_flag(b NF_LAZY) {return}
+    let saved_toks=toks
+    let saved_p_toks=p_toks
+    let saved_p_ntoks=p_ntoks
+    let saved_ti=ti
+    let saved_file=p_file
+    let saved_src=p_src
+    let saved_base=p_base
+    let saved_nt=p_no_tuple
+    let saved_m=p_matrix
+    let saved_h=p_header
+    let saved_lazy=p_lazy
+    let saved_top=p_top_decl
+    # (the body's lines alone, lexed where they are in the file: the indented block)
+    p_file=pos_file(nodes.ptr[d].pos)
+    let start=TextWord(nodes.ptr[b].ival)
+    p_src=files[p_file].src
+    if pl_on {
+        pl_reached.push(p_file)
+        pl_reached.push(start)
+        pl_reached.push(start + TextWord(nodes.ptr[b].aux))
+    }
+    p_lex_unit(p_file p_src start start + TextWord(nodes.ptr[b].aux))
+    ti=0
+    p_base=0
+    p_no_tuple=false
+    p_matrix=0
+    p_header=false
+    p_lazy=false
+    p_top_decl=false
+    let body=parse_indented_block(mk('block' cur_pos()))
+    nodes.ptr[d].b=int32<overflow='wrap'>(body)
+    toks=saved_toks
+    p_toks=saved_p_toks
+    p_ntoks=saved_p_ntoks
+    ti=saved_ti
+    p_file=saved_file
+    p_src=saved_src
+    p_base=saved_base
+    p_no_tuple=saved_nt
+    p_matrix=saved_m
+    p_header=saved_h
+    p_lazy=saved_lazy
+    p_top_decl=saved_top
+}

@@ -8,6 +8,7 @@ LEAF_HOMES = {
     'parser_decls': 'parse.jo',
     'parser_stmts': 'parse.jo',
     'parser_loops': 'parse.jo',
+    'parser_text': 'parse.jo',
     'lexer_line_context': 'lex.jo',
     'parser_cursor': 'parse.jo',
     'lexer_line_closes': 'lex.jo',
