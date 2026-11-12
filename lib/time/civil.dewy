@@ -2,7 +2,7 @@
 # Gregorian (arithmetic proleptic Gregorian, astronomical years, year zero) is the only calendar
 # so far. It maps no data.
 import p"format.dewy" as pattern
-from p"core.dewy" import (Instant Days Months days_from_civil civil_from_days days_in_month read_fields _Cursor Fields _year_text _fraction_text pad)
+from p"core.dewy" import (Instant Days Months _Recipe days_from_civil civil_from_days days_in_month read_fields _Cursor Fields _year_text _fraction_text pad)
 
 # `_days` counts from 1970-01-01, and the calendar is part of the type: bare `Date` is `Date<Gregorian>`.
 Gregorian:type=[]
@@ -106,6 +106,22 @@ __add__=(d:Date p:Months):>Date|InvalidDate=>{
     date_of(y m dd)
 }
 __sub__=(d:Date p:Months):>Date|InvalidDate=>d+(-p)
+__add__=(d:Date p:_Recipe):>Date|InvalidDate=>{
+    let current=d
+    loop step in p.steps {
+        match step {
+            days:Days=>{current=current+days}
+            months:Months=>{current=(current+months) or_throw}
+        }
+    }
+    current
+}
+__add__=(d:Date p:Days|Months|_Recipe|_DatePeriod):>Date|InvalidDate=>match p {
+    days:Days=>d+days
+    months:Months=>d+months
+    recipe:_Recipe=>d+recipe
+    span:_DatePeriod=>d+span
+}
 
 _Overflow:type='clamp'|'next'
 # `overflow='clamp'` takes the month's last day; `'next'` the first of the next month.

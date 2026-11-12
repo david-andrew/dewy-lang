@@ -2,8 +2,8 @@
 # local times resolved through gaps and folds, and zoned values. Only a program that reaches a
 # zone operation links the pack.
 import p"format.dewy" as pattern
-from p"civil.dewy" import (Date TimeOfDay LocalDateTime Gregorian date_of _of_days _LeapDay)
-from p"core.dewy" import (Instant Duration Days Months instant_at ns_count read_fields read_offset NO_OFFSET _Cursor Fields _byte _utc_to_axis _axis_to_utc civil_from_days days_from_civil days_in_month _year_text _fraction_text _DAY_NS _NS pad)
+from p"civil.dewy" import (Date TimeOfDay LocalDateTime Gregorian date_of _of_days _LeapDay _DatePeriod _Overflow)
+from p"core.dewy" import (Instant Duration Days Months _Recipe instant_at ns_count read_fields read_offset NO_OFFSET _Cursor Fields _byte _utc_to_axis _axis_to_utc civil_from_days days_from_civil days_in_month _year_text _fraction_text _DAY_NS _NS pad)
 import p"core.dewy" as core
 # (inside a function, so a program links the pack only if something still reads it when it runs:
 # a literal folded while compiling does not)
@@ -13,7 +13,8 @@ _rules=():>array<uint8>=>{
 }
 
 Zone:type=[_entry:int64]
-ZonedDateTime:type=[nominal:Instant zone:Zone offset:int64]
+Offset:type=[_seconds:int32]
+ZonedDateTime:type=[nominal:Instant zone:Zone offset:Offset]
 
 # ---------------- reading the pack ----------------
 # `$time.zone_source = 'host'`: a zone's rules are the machine's, read when it is first reached and
@@ -365,7 +366,7 @@ _posix_of=(t:Instant):>int64|OutsideCoverage=>{
     seconds.to_int64() ?? 0
 }
 # The old coverage-checked projection stays private until its public spelling is decided.
-_checked_in_zone=(t:Instant z:Zone):>ZonedDateTime|OutsideCoverage=>ZonedDateTime[t z offset_at(z _posix_of(t) or_throw)]
+_checked_in_zone=(t:Instant z:Zone):>ZonedDateTime|OutsideCoverage=>ZonedDateTime[t z Offset[int32<overflow='wrap'>(offset_at(z _posix_of(t) or_throw))]]
 # Provisional total projection: UTC where defined; otherwise the instant's TT civil label.
 # This does not extend the UTC reader or invent a historical UTC standard. The zone's first
 # offset is LMT, and its footer governs the future. Keep seconds exact across the whole axis.
@@ -380,11 +381,11 @@ _zone_seconds=(t:Instant):>int=>{
     let [mjd in_day]=_zone_label(t)
     (mjd-_MJD_1970)*86400+(if in_day >=? _DAY_NS {86399} else {in_day//_NS})
 }
-in_zone=(t:Instant z:Zone):>ZonedDateTime=>ZonedDateTime[t z offset_at(z _zone_seconds(t))]
+in_zone=(t:Instant z:Zone):>ZonedDateTime=>ZonedDateTime[t z Offset[int32<overflow='wrap'>(offset_at(z _zone_seconds(t)))]]
 _at=(moment:int64 nanos:int z:Zone offset:int64):>ZonedDateTime|OutsideCoverage|OffGrid|InvalidFields=>{
     let days=int(moment)//86400
     let axis=_utc_to_axis(days+_MJD_1970 (int(moment)%86400)*_NS+nanos) or_throw
-    ZonedDateTime[instant_at(axis) z offset]
+    ZonedDateTime[instant_at(axis) z Offset[int32<overflow='wrap'>(offset)]]
 }
 _local_text=(local:int):>string=>{
     let [y m d]=civil_from_days(int(local)//86400)
@@ -398,6 +399,9 @@ _pair_text=(offset:int64):>string=>{
     let seconds=if size%60 =? 0 {""} else {":{pad(size%60 2)}"}
     "{sign}{pad(size//3600 2)}:{pad((size%3600)//60 2)}{seconds}"
 }
+__as__=(o:Offset):>string=>_pair_text(int64(o._seconds))
+__eq__=(a:Offset b:Offset):>bool=>a._seconds =? b._seconds
+__lt__=(a:Offset b:Offset):>bool=>a._seconds <? b._seconds
 _FoldPolicy:type='earlier'|'later'|'reject'
 _GapPolicy:type='preserve_displacement'|'next'|'reject'
 _FoldChoice:type=_FoldPolicy|'all'
@@ -573,10 +577,10 @@ zoned_error=(text:string zone:Zone|none fold:_FoldChoice|none gap:_GapChoice|non
 zoned_text_error=(text:string fold:_FoldChoice|none gap:_GapChoice|none scope:string|none):>string?=>zoned_error(text none fold gap scope)
 
 # ---------------- zoned values ----------------
-_local=(z:ZonedDateTime):>int=>_zone_seconds(z.nominal)+int(z.offset)
+_local=(z:ZonedDateTime):>int=>_zone_seconds(z.nominal)+int(z.offset._seconds)
 __as__=(z:ZonedDateTime):>string=>{
     let [_m in_day]=_zone_label(z.nominal)
-    "{_local_text(_local(z))}{_fraction_text(in_day%_NS)}{_pair_text(z.offset)}[{name(z.zone)}]"
+    "{_local_text(_local(z))}{_fraction_text(in_day%_NS)}{z.offset}[{name(z.zone)}]"
 }
 # Elapsed time: a zoned value moves as its instant does.
 __add__=(z:ZonedDateTime d:Duration):>ZonedDateTime=>in_zone(z.nominal+d z.zone)
@@ -611,6 +615,26 @@ _month_add=(z:ZonedDateTime p:Months fold:_FoldChoice|none gap:_GapChoice|none):
     if d >? days_in_month(ny nm) {return InvalidDate["{_year_text(ny)}-{pad(nm 2)} has no day {d}"]}
     _civil(_resolve(((days_from_civil(ny nm d)*86400).to_int64() ?? 0)+t int(_nanos(z)) z.zone fold gap))
 }
+_month_add_named=(z:ZonedDateTime p:Months overflow:_Overflow fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>{
+    let local=_local(z)
+    let t=(local%86400).to_int64() ?? 0
+    let [y m d]=civil_from_days(int(local)//86400)
+    let total=y*12+int(m)-1+int(p.count)
+    let ny=total//12
+    let nm=((total%12).to_int64() ?? 0)+1
+    if d >? days_in_month(ny nm) {
+        if overflow =? 'clamp' {d=days_in_month(ny nm)}
+        else {
+            let next=total+1
+            ny=next//12
+            nm=((next%12).to_int64() ?? 0)+1
+            d=1
+        }
+    }
+    let day_start=(days_from_civil(ny nm d)*86400).to_int64() ?? 0
+    let resolved=_resolve(day_start+t int(_nanos(z)) z.zone fold gap)
+    _civil_one(_civil(resolved))
+}
 _civil_one=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous):>ZonedDateTime|Gap|Ambiguous=>match r {
     z:ZonedDateTime=>z
     zs:array<ZonedDateTime>=>Ambiguous["a single resolution cannot return every candidate" []]
@@ -619,10 +643,13 @@ _civil_one=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous):>ZonedDateT
     e:Ambiguous=>e
 }
 _day_add_one=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>_civil_one(_day_add(z p fold gap))
-_month_add_one=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>{
-    let r=_month_add(z p fold gap)
-    if r is? InvalidDate {return r}
-    _civil_one(r)
+_month_add_one=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>match _month_add(z p fold gap) {
+    zdt:ZonedDateTime=>zdt
+    zs:array<ZonedDateTime>=>Ambiguous["a single resolution cannot return every candidate" []]
+    <none>=>Gap["a single resolution cannot skip a local time" 0 0]
+    e:Gap=>e
+    e:Ambiguous=>e
+    e:InvalidDate=>e
 }
 # (what is wrong with these constants; none when the add resolves)
 day_add_error=(z:ZonedDateTime p:Days fold:_FoldChoice|none gap:_GapChoice|none):>string?=>match _day_add(z p fold gap) {
@@ -642,6 +669,31 @@ $check_constant day_add_error(z p fold gap) "this add has no one answer"
 $check_constant policy_gap(fold gap) "unused"
 __sub__=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add_one(z Days[-p.count] fold gap)
 __add__=(z:ZonedDateTime p:Months fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>_month_add_one(z p fold gap)
+_recipe_add=(z:ZonedDateTime p:_Recipe fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>{
+    let current=z
+    loop step in p.steps {
+        match step {
+            days:Days=>{current=_day_add_one(current days fold gap) or_throw}
+            months:Months=>{current=_month_add_one(current months fold gap) or_throw}
+        }
+    }
+    current
+}
+recipe_add_error=(z:ZonedDateTime p:_Recipe fold:_FoldPolicy|none gap:_GapPolicy|none):>string?=>match _recipe_add(z p fold gap) {
+    r:ZonedDateTime=>none
+    e:Gap=>e.message
+    e:Ambiguous=>e.message
+    e:InvalidDate=>e.message
+}
+$check_constant recipe_add_error(z p fold gap) "this period has no one answer"
+$check_constant policy_gap(fold gap) "unused"
+__add__=(z:ZonedDateTime p:_Recipe fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>_recipe_add(z p fold gap)
+__add__=(z:ZonedDateTime p:Days|Months|_Recipe|_DatePeriod fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>match p {
+    days:Days=>_day_add_one(z days fold gap)
+    months:Months=>_month_add_one(z months fold gap)
+    recipe:_Recipe=>_recipe_add(z recipe fold gap)
+    span:_DatePeriod=>_day_add_one(z Days[span.total_days] fold gap)
+}
 $check_constant day_add_error(z p fold gap) "this add has no one answer"
 $check_constant policy_gap(fold gap) "unused"
 add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add_one(z p fold gap)
@@ -651,6 +703,7 @@ $check_constant day_add_error(z p fold gap) "this add has no answer"
 add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:'skip'):>ZonedDateTime|none|Gap|Ambiguous=>_civil_skip(_day_add(z p fold gap))
 $check_constant day_add_error(z p fold gap) "this add has no answer"
 add=(z:ZonedDateTime p:Days fold:'all' gap:'skip'):>array<ZonedDateTime>|none|Gap|Ambiguous=>_civil_all_skip(_day_add(z p fold gap))
+add=(z:ZonedDateTime p:Months overflow:_Overflow fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_month_add_named(z p overflow fold gap)
 
 # The local date of an instant in a zone.
 local_days=(t:Instant z:Zone):>int=>{
@@ -720,14 +773,14 @@ zoned_pattern_only=(p:string):>string?=>zoned_pattern_error(p) ?? ""
 zoned_format_error=(z:ZonedDateTime p:string):>string?=>{
     let wrong=zoned_pattern_error(p)
     if wrong isnt? none {return wrong}
-    pattern.offset_loss_error(p z.offset)
+    pattern.offset_loss_error(p int64(z.offset._seconds))
 }
 $check_constant zoned_pattern_only(p) "not a pattern"
 $check_constant zoned_format_error(z p) "this pattern loses offset seconds"
 format=(z:ZonedDateTime p:string):>string|ParseError=>{
     let wrong=zoned_format_error(z p)
     if wrong isnt? none {return ParseError[wrong]}
-    pattern.render(pattern.Parts[true true true year(z) month(z) day(z) weekday(z) hour(z) minute(z) second(z) nanosecond(z) z.offset name(z.zone)] p)
+    pattern.render(pattern.Parts[true true true year(z) month(z) day(z) weekday(z) hour(z) minute(z) second(z) nanosecond(z) int64(z.offset._seconds) name(z.zone)] p)
 }
 
 # The scope's zone, for `today` and `strict_today` (who): a name known only when running, if

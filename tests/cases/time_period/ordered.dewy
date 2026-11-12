@@ -1,0 +1,18 @@
+# quick
+# Calendar recipes keep order: February does not have January's 30th.
+const start=date"2027-01-30"
+let forward=start+(2day+1month)
+printl"{forward}"
+let other=start+(1month+2day)
+printl"{other is? InvalidDate}"
+let longer=start+(1month+2day+1week)
+printl"{longer is? InvalidDate}"
+const meeting=zoned"2026-10-30T09:00[America/New_York]"
+printl"{meeting+(1month+2day)}"
+printl"{meeting+(2day+1month)}"
+let prefixed:Period=1week+(1month+2day)
+printl"{date"2027-01-21"+prefixed}"
+printl"{meeting+prefixed}"
+let joined=(1week+1month)+(2day+1month)
+printl"{date"2027-01-21"+joined}"
+printl"{(1month+2day) =? (1month+2day)} {(1month+2day) =? (2day+1month)}"

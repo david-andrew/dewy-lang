@@ -477,7 +477,32 @@ __eq__=(q:rational*Time a:Duration_width_64):>bool=>(a as Duration)=?q
 # `1day` is a Days and `1month` a Months, so a date add that cannot fail has the plain type.
 Days:type=[count:int64]
 Months:type=[count:int64]
-Period:type=Days|Months
+_Recipe:type=[steps:array<Days|Months>]
+Period:type=Days|Months|_Recipe
+__add__=(a:Days b:Months):>_Recipe=>_Recipe[[a b]]
+__add__=(a:Months b:Days):>_Recipe=>_Recipe[[a b]]
+__add__=(a:_Recipe b:Days|Months):>_Recipe=>{
+    let steps:array<Days|Months>=[]
+    loop step in a.steps {steps.push(step)}
+    steps.push(b)
+    _Recipe[steps]
+}
+__add__=(a:Days|Months b:_Recipe):>_Recipe=>{
+    let steps:array<Days|Months>=[a]
+    loop step in b.steps {steps.push(step)}
+    _Recipe[steps]
+}
+__add__=(a:_Recipe b:_Recipe):>_Recipe=>{
+    let steps:array<Days|Months>=[]
+    loop step in a.steps {steps.push(step)}
+    loop step in b.steps {steps.push(step)}
+    _Recipe[steps]
+}
+__eq__=(a:_Recipe b:_Recipe):>bool=>a.steps =? b.steps
+$error_if true "a calendar period is an ordered recipe: add it to a date or zoned time; an instant takes a duration such as `24hour`"
+__add__=(t:Instant p:_Recipe):>Instant=>t
+$error_if true "a calendar period is an ordered recipe: add it to a date or zoned time; a duration is an exact length such as `24hour`"
+__add__=(d:Duration p:_Recipe):>Duration=>d
 __mul__=(k:int64 p:Days):>Days=>Days[int64<overflow='saturate'>(k*p.count)]
 __mul__=(p:Days k:int64):>Days=>k*p
 __mul__=(k:int64 p:Months):>Months=>Months[int64<overflow='saturate'>(k*p.count)]

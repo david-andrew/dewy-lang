@@ -1,0 +1,8 @@
+# quick
+# An explicit overflow policy keeps the wall time and resolves the missing day.
+const jan=zoned"2027-01-31T09:15[America/New_York]"
+printl"{jan.add(1month overflow='clamp' fold='earlier' gap='next')}"
+printl"{jan.add(1month overflow='next' fold='earlier' gap='next')}"
+printl"{jan + 1month is? InvalidDate}"
+const october=zoned"2026-10-31T09:15[America/New_York]"
+printl"{october.add(1month overflow='clamp')}"

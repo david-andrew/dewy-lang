@@ -1,0 +1,7 @@
+# quick
+# An offset is its own four-byte value, including historical second precision.
+const ny=zoned"2026-11-01T01:30-04:00[America/New_York]"
+printl"{ny.offset} {size_of<Offset>} {size_of<ZonedDateTime>}"
+printl"{ny.offset =? Offset[-14400]}"
+const old=instant"1972-01-05T00:00:00Z".in_zone(zone"Africa/Monrovia")
+printl"{old.offset} {old.offset <? ny.offset}"

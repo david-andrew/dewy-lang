@@ -1809,6 +1809,12 @@ says what to do. `date - date` is a `Period` that knows its dates: `.total_days`
 anniversaries, to today when `on` is left out; a 29 February birthday counts on 1 March in a common year (or pass
 `leap_day='february_28'`).
 
+Mixed periods compose in order: `1month + 2day` and `2day + 1month` are different recipes.
+Adding either to a `Date` or `ZonedDateTime` applies each step in sequence; a month that lacks
+the requested day still gives `InvalidDate`.
+For a zoned month add, `.add(1month overflow='clamp')` takes the last day of the month and
+`overflow='next'` takes the first of the following month, keeping the local time.
+
 A zoned add that lands in a gap or repeated hour gives `ZonedDateTime | Gap | Ambiguous`, and
 naming the policies makes it a plain `ZonedDateTime`: `fold='earlier'` or `'later'`, and
 `gap='preserve_displacement'` (02:30 in a one-hour gap becomes 03:30) or `'next'` (03:00). They
@@ -1849,6 +1855,7 @@ Historical offsets with seconds print those seconds in `XXXXX`, for example `-00
 
 A zoned time reads as `.date`, `.time_of_day`, `.local`, `.year`, `.month`, `.day`, `.hour`, `.minute`,
 `.second`, `.nanosecond` and `.weekday` (0 is Monday).
+Its `.offset` is an `Offset`, a four-byte fixed UTC offset to the second; a zoned value is 32 bytes.
 **Provisional:** civil field types carry their ranges: month 1–12, day 1–31, weekday 0–6,
 hour 0–23, minute and second 0–59, and nanosecond 0–999999999. A `UtcLabel` permits second 60.
 These refinements can prove indexing and parameter bounds without caller runtime checks. `t.in_zone(z)` shows an `Instant` in a zone.
