@@ -1,0 +1,136 @@
+$runtime_checks
+
+from p"ast.jo" import (mk nodes)
+from p"checker_tokens.dewy" import (Tok)
+from p"lex.jo" import (kw_kinds)
+
+OpWord:type=int64<overflow='wrap'>
+
+# A token kind's frozen Jo ordinal (its declaration order in checker_tokens). An
+# exhaustive match on the kind with constant arms lowers to one table read.
+tok_ordinal=(k:Tok):>int32=>match k {
+    <'eof'> => 0
+    <'newline'> => 1
+    <'indent'> => 2
+    <'dedent'> => 3
+    <'ident'> => 4
+    <'int_lit'> => 5
+    <'float_lit'> => 6
+    <'str_lit'> => 7
+    <'kw_struct'> => 8
+    <'kw_enum'> => 9
+    <'kw_if'> => 10
+    <'kw_else'> => 11
+    <'kw_in'> => 12
+    <'kw_break'> => 13
+    <'kw_continue'> => 14
+    <'kw_return'> => 15
+    <'kw_match'> => 16
+    <'kw_import'> => 17
+    <'kw_as'> => 18
+    <'kw_const'> => 19
+    <'kw_true'> => 20
+    <'kw_false'> => 21
+    <'kw_none'> => 22
+    <'kw_null'> => 23
+    <'kw_and'> => 24
+    <'kw_or'> => 25
+    <'kw_not'> => 26
+    <'kw_mut'> => 27
+    <'kw_when'> => 28
+    <'kw_defer'> => 29
+    <'kw_extern'> => 30
+    <'kw_test'> => 31
+    <'kw_build'> => 32
+    <'kw_use'> => 33
+    <'kw_pass'> => 34
+    <'lparen'> => 35
+    <'rparen'> => 36
+    <'lbrack'> => 37
+    <'rbrack'> => 38
+    <'lbrace'> => 39
+    <'rbrace'> => 40
+    <'comma'> => 41
+    <'colon'> => 42
+    <'semi'> => 43
+    <'dot'> => 44
+    <'dotdot'> => 45
+    <'arrow'> => 46
+    <'assign'> => 47
+    <'pluseq'> => 48
+    <'minuseq'> => 49
+    <'stareq'> => 50
+    <'slasheq'> => 51
+    <'percenteq'> => 52
+    <'ampeq'> => 53
+    <'pipeeq'> => 54
+    <'careteq'> => 55
+    <'shleq'> => 56
+    <'shreq'> => 57
+    <'plus'> => 58
+    <'minus'> => 59
+    <'star'> => 60
+    <'slash'> => 61
+    <'percent'> => 62
+    <'amp'> => 63
+    <'pipe'> => 64
+    <'caret'> => 65
+    <'tilde'> => 66
+    <'shl'> => 67
+    <'shr'> => 68
+    <'eq'> => 69
+    <'ne'> => 70
+    <'lt'> => 71
+    <'le'> => 72
+    <'gt'> => 73
+    <'ge'> => 74
+    <'question'> => 75
+    <'qq'> => 76
+    <'bang'> => 77
+    <'at'> => 78
+    <'starstar'> => 79
+    <'kw_loop'> => 80
+    <'kw_let'> => 81
+    <'kw_xor'> => 82
+    <'kw_is'> => 83
+    <'ellipsis'> => 84
+    <'dotop'> => 85
+    <'lazy'> => 86
+}
+
+# (the length test bounds the read)
+is_keyword_tok=(k:Tok):>bool=>$unsafe {
+    let o=OpWord(tok_ordinal(k))
+    o <? kw_kinds.length and kw_kinds.ptr[o]
+}
+
+binprec_value=(k:Tok):>int64=>match k {
+    <'star' | 'slash' | 'percent'> => 10
+    <'plus' | 'minus'> => 9
+    <'shl' | 'shr'> => 8
+    <'amp'> => 7
+    <'pipe'> => 5
+    <'dotdot'> => 4
+    <'qq'> => 3
+    <'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'kw_in' | 'kw_is'> => 2
+    _ => -1
+}
+
+# Operator precedence by token kind: the match is the table.
+binprec=(k:Tok):>int64=>binprec_value(k)
+
+lx_bin=(op:Tok a:OpWord b:OpWord pos:OpWord):>int64=>$unsafe {
+    let n=mk('binary' pos)
+    nodes.ptr[n].op=tok_ordinal(op)
+    nodes.ptr[n].a=int32<overflow='wrap'>(a)
+    nodes.ptr[n].b=int32<overflow='wrap'>(b)
+    n
+}
+
+lx_assign=(target:OpWord op:Tok v:OpWord pos:OpWord):>int64=>$unsafe {
+    let a=mk('assign' pos)
+    nodes.ptr[a].op=tok_ordinal(op)
+    nodes.ptr[a].a=int32<overflow='wrap'>(target)
+    nodes.ptr[a].b=int32<overflow='wrap'>(v)
+    a
+}

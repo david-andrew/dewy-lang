@@ -1,0 +1,59 @@
+use 'parse.jo'
+use 'checker_tokens.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'lexer_units.dewy'
+use 'lexer_errors.dewy'
+use 'ast.jo'
+use 'literals.dewy'
+use 'node_store.dewy'
+use 'parser_units.dewy'
+use 'parser_errors.dewy'
+use 'parser_flow_nodes.dewy'
+use 'parser_positions.dewy'
+use 'parser_cursor.dewy'
+use 'parser_expr.dewy'
+use 'parser_forms.dewy'
+use 'parser_decls.dewy'
+use 'parser_stmts.dewy'
+use 'parser_loops.dewy'
+use 'parser_text.dewy'
+use 'parser_shared.dewy'
+
+tok_ordinal = (k: Tok) -> i32: i32(int(k))
+
+is_keyword_tok = (k: Tok) -> bool: int(k) < kw_kinds.len() and kw_kinds[int(k)]
+
+binprec_value = (k: Tok) -> int:
+    match k:
+        star, slash, percent: 10
+        plus, minus: 9
+        shl, shr: 8
+        amp: 7
+        pipe: 5
+        dotdot: 4
+        qq: 3
+        eq, ne, lt, le, gt, ge, kw_in, kw_is: 2
+        _: -1
+
+binprec = (k: Tok) -> int:
+    if p_binprec == null:
+        p_binprec = __alloc(int(Tok.lazy) + 1) as *i8
+        loop i in [0..int(Tok.lazy) + 1): p_binprec[i] = i8(binprec_value(i as Tok))
+    int(p_binprec[int(k)])
+
+lx_bin = (op: Tok, a: int, b: int, pos: int) -> int:
+    n = mk(.binary, pos)
+    nodes[n].op = i32(int(op))
+    nodes[n].a = i32(a)
+    nodes[n].b = i32(b)
+    n
+
+lx_assign = (target: int, op: Tok, v: int, pos: int) -> int:
+    a = mk(.assign, pos)
+    nodes[a].op = i32(int(op))
+    nodes[a].a = i32(target)
+    nodes[a].b = i32(v)
+    a

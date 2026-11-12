@@ -22,6 +22,7 @@ use 'parser_stmts.dewy'
 use 'parser_loops.dewy'
 use 'parser_text.dewy'
 use 'parser_shared.dewy'
+use 'parser_ops.dewy'
 
 toks: Token[]
 # A parse unit owns its EOF-terminated stream. Borrow once on entry; recursive
@@ -53,8 +54,6 @@ p_clear_unit = ():
     p_toks = data(toks)
     p_ntoks = toks.len()
 
-is_keyword_tok = (k: Tok) -> bool: int(k) < kw_kinds.len() and kw_kinds[int(k)]
-
 # ---------------- expressions ----------------
 p_header = false      # parsing an if/loop/match header: `(x): ...` is not a function there
 # (inside a call's parentheses `(x): ...` is a function again, in an if or loop header too:
@@ -75,47 +74,15 @@ p_id_async = 0
 p_id_await = 0
 
 
-binprec_value = (k: Tok) -> int:
-    match k:
-        star, slash, percent: 10
-        plus, minus: 9
-        shl, shr: 8
-        amp: 7
-        pipe: 5
-        dotdot: 4
-        qq: 3
-        eq, ne, lt, le, gt, ge, kw_in, kw_is: 2
-        _: -1
-
-# Operator precedence is immutable and indexed by the token enum. Build only
-# when expression parsing first needs it, instead of dispatching a match per term.
+# The frozen twin's operator precedence table, indexed by the token enum and built
+# when expression parsing first needs it (parser_ops.dewy's match is the table).
 p_binprec: *i8 = null
-binprec = (k: Tok) -> int:
-    if p_binprec == null:
-        p_binprec = __alloc(int(Tok.lazy) + 1) as *i8
-        loop i in [0..int(Tok.lazy) + 1): p_binprec[i] = i8(binprec_value(i as Tok))
-    int(p_binprec[int(k)])
-
 # (the comprehensions parsed so far: each names its accumulator __comp<n>)
 comp_count = 0
 
 # ---- loops with combined iterators, rewritten into plain loops ----
 # (called once the body is parsed)
 lx_count = 0
-
-lx_bin = (op: Tok, a: int, b: int, pos: int) -> int:
-    n = mk(.binary, pos)
-    nodes[n].op = i32(int(op))
-    nodes[n].a = i32(a)
-    nodes[n].b = i32(b)
-    n
-
-lx_assign = (target: int, op: Tok, v: int, pos: int) -> int:
-    a = mk(.assign, pos)
-    nodes[a].op = i32(int(op))
-    nodes[a].a = i32(target)
-    nodes[a].b = i32(v)
-    a
 
 lx_bcount = 0
 

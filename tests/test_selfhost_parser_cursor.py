@@ -9,6 +9,7 @@ from tests.support import ROOT, compiler  # noqa: F401
 DRIVER = r'''use 'main.jo'
 use 'parser_cursor.dewy'
 use 'parse.jo'
+use 'parser_ops.dewy'
 use 'lex.jo'
 use 'checker_tokens.dewy'
 main = ():
