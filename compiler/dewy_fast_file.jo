@@ -1,0 +1,37 @@
+use 'ast.jo'
+use 'dewy_context.jo'
+use 'oom.jo'
+use 'directives.jo'
+use 'lazy_bodies.jo'
+use 'proofs.jo'
+use 'dewy_ffi.jo'
+use 'dewy_fast.jo'
+use 'dewy_fast_lex.dewy'
+use 'dewy_file.dewy'
+use 'dewy_reader.dewy'
+use 'dewy_direct.jo'
+use 'dewy_directive_ops.dewy'
+use 'util.jo'
+use 'oom_ops.dewy'
+use 'directive_ops.dewy'
+use 'diagnostic_exit.dewy'
+
+dn_edits_clear = (mark: int = 0):
+    rd_dn_edits_clear(dc_parser, mark)
+
+# These services only update their own tables; none enters a reader.
+
+df_note_lazy = (file: int, deferred: bool, library: bool):
+    if deferred: dc_lazy_used = true
+    if library: dc_lib_lazy_files[file] = true
+
+df_finish_statement = (made: int[], shadowable: bool) -> int[]:
+    out = if oom_files.len() > 0: oom_wrap_all(made) else: made
+    if shadowable:
+        loop declaration in out: shadowable_decls[declaration] = true
+    out
+
+df_finish_checks = (offset: int):
+    if proof_pending: dn_error(offset, "$proof requires a following function declaration")
+    if dir_bundles.len() > 0: dir_bundles_resolve()
+    if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it before one, on its line or the line above")

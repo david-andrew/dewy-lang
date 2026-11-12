@@ -1,5 +1,6 @@
 use 'dewy_lexer.dewy'
 use 'dewy_fast_lex.dewy'
+use 'dewy_fast_file.dewy'
 use 'dewy_file.dewy'
 use 'dewy_reader.dewy'
 use 'dewy_reader_services.jo'
@@ -133,13 +134,6 @@ const DN_EDIT_METHODS = -36028797018963968
 # (`kept`: the direct nodes stay, compare mode's: their place and live-source marks stay too)
 
 
-dn_edits_clear = (mark: int = 0):
-    rd_dn_edits_clear(dc_parser, mark)
-
-
-
-
-
 dewy_fast_file = (file: int) -> int[]:
     dw_bigint_import = 0
     # (a reading may split generic closers: a retry restores them, dn_edits_undo)
@@ -157,22 +151,5 @@ dewy_fast_file = (file: int) -> int[]:
     dn_skip_bodies = false
     dw_dir_lexed(file)
     df_file(dc_parser, nodes, dc_file_host, saved_edits_on, lib_lazy, dc_lazy_allowed(file))
-
-# File/lexer setup above may load directive bundles before entering the driver.
-# These services only update their own tables; none enters a reader.
-df_note_lazy = (file: int, deferred: bool, library: bool):
-    if deferred: dc_lazy_used = true
-    if library: dc_lib_lazy_files[file] = true
-
-df_finish_statement = (made: int[], shadowable: bool) -> int[]:
-    out = if oom_files.len() > 0: oom_wrap_all(made) else: made
-    if shadowable:
-        loop declaration in out: shadowable_decls[declaration] = true
-    out
-
-df_finish_checks = (offset: int):
-    if proof_pending: dn_error(offset, "$proof requires a following function declaration")
-    if dir_bundles.len() > 0: dir_bundles_resolve()
-    if dw_export_pos != 0: fatal(dw_export_pos, "`$export` marks a module-level function: put it before one, on its line or the line above")
 
 dc_file_host = ParserFileHost(df_note_lazy, dw_top_declarations, df_finish_statement, dw_test_attach, df_finish_checks, dw_finish_declarations)

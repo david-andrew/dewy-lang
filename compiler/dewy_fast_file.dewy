@@ -1,0 +1,39 @@
+$runtime_checks
+
+# File completion services for the Dewy frontend. The parser and lexer state
+# remains owned by dewy_fast.jo.
+from p"ast.jo" import (shadowable_decls)
+from p"dewy_context.jo" import (dc_parser)
+from p"dewy_fast_lex.dewy" import (dn_error)
+from p"dewy_ffi.jo" import (dw_export_pos)
+from p"dewy_reader.dewy" import (rd_dn_edits_clear)
+from p"directive_ops.dewy" import (dir_bundles_resolve)
+from p"directives.jo" import (dir_bundles)
+from p"lazy_bodies.jo" import (dc_lazy_used dc_lib_lazy_files)
+from p"oom.jo" import (oom_files)
+from p"oom_ops.dewy" import (oom_wrap_all)
+from p"proofs.jo" import (proof_pending)
+from p"diagnostic_exit.dewy" import (fatal)
+
+dn_edits_clear=(mark:int64=0):>void=>{
+    rd_dn_edits_clear(@dc_parser mark)
+}
+
+df_note_lazy=(file:int64 deferred:bool library:bool):>void=>{
+    if deferred {dc_lazy_used=true}
+    if library {dc_lib_lazy_files[file]=true}
+}
+
+df_finish_statement=(made:array<int64> shadowable:bool):>array<int64>=>{
+    let out=if oom_files.length >? 0 {oom_wrap_all(made)} else {made}
+    if shadowable {
+        loop declaration in out {shadowable_decls[declaration]=true}
+    }
+    out
+}
+
+df_finish_checks=(offset:int64):>void=>{
+    if proof_pending {dn_error(offset "$proof requires a following function declaration");}
+    if dir_bundles.length >? 0 {dir_bundles_resolve()}
+    if dw_export_pos not=? 0 {fatal(dw_export_pos "`$export` marks a module-level function: put it before one, on its line or the line above")}
+}

@@ -14,6 +14,7 @@ LEAF_HOMES = {
     'lexer_line_context': 'lex.jo',
     'lexer_helpers': 'lex.jo',
     'dewy_fast_lex': 'dewy_fast.jo',
+    'dewy_fast_file': 'dewy_fast.jo',
     'parser_cursor': 'parse.jo',
     'lexer_line_closes': 'lex.jo',
     'parser_positions': 'parse.jo',
