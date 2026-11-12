@@ -38,6 +38,13 @@ both build modes; bootstrap, fixed point and `same_output` guard whole-compiler
 behavior. A seed cannot consume error unions: host-facing routines return status
 records until that boundary moves. It also needs numeric `123` instead of `'{'`.
 
+The landing twin guard checks each changed compiler leaf for a changed `.jo`
+twin and a named differential test. Its bootstrap-stub exemption list is:
+
+| Leaf | Reason |
+|---|---|
+| `call_forward.dewy` | The bootstrap frontend has no Dewy call-forwarding forms; `call_forward.jo` deliberately returns `-1` for both probes. |
+
 ## Leaves shipped (B3)
 
 All leaf names below are `compiler/*.dewy`; twins are `compiler/*.jo`. “Dewy”
