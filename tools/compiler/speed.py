@@ -533,12 +533,20 @@ def source_row(counter: Counter, candidate: Toolchain, base: Toolchain, counts: 
     """The candidate compiler builds the base's compiler source, then this checkout's (the self-build row's
     count): what the source change alone costs to compile."""
     name = 'self-build source cost'
+    # Source paths are hashed by the compiler. Build each tree from the same
+    # staging path so directory depth cannot masquerade as source growth.
+    source = CACHE / 'panel' / 'source-cost' / 'compiler'
+    def staged_count(tree: Path) -> int:
+        shutil.rmtree(source, ignore_errors=True)
+        shutil.copytree(tree / 'compiler', source)
+        return measure(counter, candidate, str(source / 'main.jo'), [], notes)
+
     try:
-        old = measure(counter, candidate, str(base.inputs / 'compiler/main.jo'), [], notes)
+        old = staged_count(base.inputs)
     except RuntimeError:
         notes.append('the candidate cannot build the base\'s compiler source; no source cost row')
         return
-    new = counts['self-build']
+    new = staged_count(ROOT)
     change = round(delta(old, new), 2) + 0.0
     over = change > limit
     if over:

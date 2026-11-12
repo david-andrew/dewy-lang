@@ -30,7 +30,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
                 group += f'::{getattr(item, "originalname", item.name)}'
                 callspec = getattr(item, 'callspec', None)
                 if callspec is not None:
-                    for mode in ('target', 'release'):
+                    for mode in ('target', 'release', 'slice_index'):
                         if mode in callspec.params:
                             group += f'::{mode}={callspec.params[mode]}'
         item.add_marker(pytest.mark.xdist_group(name=group))

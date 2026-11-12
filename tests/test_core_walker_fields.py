@@ -8,6 +8,7 @@ programs built that way must still build and print what they print.
 """
 import dataclasses
 import subprocess
+import pytest
 
 from tests.support import compiler  # noqa: F401 (fixture)
 from tools import cases
@@ -21,10 +22,12 @@ class CollidingRunner(cases.Runner):
                               errors='replace', timeout=cases.BUILD_TIMEOUT, check=False)
 
 
-def test_core_walker_fields(compiler, tmp_path):
+@pytest.mark.parametrize('slice_index', range(4))
+def test_core_walker_fields(compiler, tmp_path, slice_index):
     chosen = [dataclasses.replace(case, modes=('native',))
               for case in map(cases.parse, sorted((cases.CASES / 'dogfood').glob('*.dewy')))
               if 'native' in case.modes]
+    chosen = chosen[slice_index::4]
     runner = CollidingRunner(compiler, tmp_path, cases.clean_environment())
     outcomes = []
     for unit, mode, batch in cases.plan(chosen, node=False):
