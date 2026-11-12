@@ -1,0 +1,26 @@
+# A match on a parameter that is a union of records, held as a view of the
+# caller's value in release builds: its constant arms are a table or a map.
+Invalid:type=[problems:array<string>]
+Missing:type=[id:int64]
+Stale:type=[id:int64 current:int64]
+
+status_of=(failure:Invalid|Missing|Stale):>int64=>match failure {
+    <Invalid> => 422
+    <Missing> => 404
+    <Stale> => 409
+}
+rank_of=(failure:Invalid|Missing|Stale):>int64=>match failure {
+    <Invalid> => 7
+    <Missing> => 8
+    <Stale> => 9
+}
+describe=(failure:Invalid|Missing|Stale):>string=>match failure {
+    i:Invalid => i.problems.join("; ")
+    m:Missing => "note {m.id} not found"
+    s:Stale => "note {s.id} is at {s.current}"
+}
+
+report=(failure:Invalid|Missing|Stale):>string=>"{status_of(failure)} {rank_of(failure)} {describe(failure)}"
+
+let failures:array<Invalid|Missing|Stale>=[Invalid[["empty title" "long body"]] Missing[3] Stale[4 9]]
+loop failure in failures {printl(report(failure))}

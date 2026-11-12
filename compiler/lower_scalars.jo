@@ -77,12 +77,26 @@ match_arm_constant = (arm: int) -> (bool, int):
     (false, 0)
 
 gen_match_lookup = (m: int, st: int, rs: int, rtp: int, vals: int[], arms: int[], wild: int, lo: int, span: int) -> bool:
-    if exact_has_node(m) or wild < 0: return false
+    if exact_has_node(m): return false
+    # The table reads the subject from its slot; a held view (no slot) keeps the switch.
+    if locals[int(nodes[m].sym)].offset < 0: return false
     # Arbitrary-precision int results aren't plain words.
     if quantity_base(prune(rtp)) == T_MATH_INT: return false
     result_kind = types[prune(rtp)].kind
     if result_kind != .int_ and result_kind != .bool_ and result_kind != .enum_: return false
     if result_kind == .enum_ and not structs[int(types[prune(rtp)].st)].simple_enum: return false
+    # Without a wildcard the table needs an arm for every value the subject can
+    # hold: an enum whose variants all have one (O(arms + span)). Otherwise a
+    # missing value must still reach the no-arm failure.
+    if wild < 0:
+        if types[st].kind != .enum_: return false
+        seen = fill(false, span)
+        distinct = 0
+        loop v in vals:
+            if not seen[v - lo]:
+                seen[v - lo] = true
+                distinct += 1
+        if distinct != int(structs[int(types[st].st)].nvariants): return false
     results: int[]
     low = 0
     high = 0
@@ -102,13 +116,25 @@ gen_match_lookup = (m: int, st: int, rs: int, rtp: int, vals: int[], arms: int[]
         if low >= -128 and high <= 127: width = 1
         else if low >= -32768 and high <= 32767: width = 2
         else if low >= -2147483648 and high <= 2147483647: width = 4
-    fallback = results[wild]
+    # A sparse table stays small: at most 256 bytes of data.
+    if span > 2 * vals.len() + 16 and span * width > 256: return false
+    # (with no wildcard every index has an arm; the bound check stays)
+    fallback = if wild >= 0: results[wild] else: results[arms[0]]
     table = fill(fallback, span)
     # Earlier arms win, including an earlier wildcard.
     j = vals.len() - 1
     loop j >= 0:
-        if arms[j] < wild: table[vals[j] - lo] = results[arms[j]]
+        if wild < 0 or arms[j] < wild: table[vals[j] - lo] = results[arms[j]]
         j -= 1
+    # An exhaustive map whose value is its tag plus a constant is one addition.
+    affine = wild < 0
+    loop i in [0..span):
+        if table[i] != table[0] + i: affine = false
+    if affine:
+        hs = e_slot(int(locals[int(nodes[m].sym)].offset))
+        tag = if types[st].kind == .enum_: e_load(VI, hs, 0, 4) else: load_val(st, hs, 0)
+        store_val(rtp, e_slot(rs), 0, e_bin(.add, VI, tag, e_iconst(table[0] - lo)))
+        return true
     loop rodata.len() % width != 0: rodata.push(0)
     offset = rodata.len()
     ro_starts.push(offset)

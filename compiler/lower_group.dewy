@@ -1126,10 +1126,10 @@ gen_match_switch=(m:LGWord st0:LGWord rs:LGWord rtp:LGWord val:bool):>bool=>$uns
     let span=hi - lo + 1
     if span <=? 0 or span >? 4096 {return false}
     let dense=span <=? 2 * vals.length + 16
-    # Large boolean membership sets still need at most 256 bytes. Their
-    # otherwise sparse tags should not require a long linear branch chain.
-    let small_bool=val and vals.length >=? 8 and span <=? 256 and types.ptr[prune(rtp)].kind =? 'bool_'
-    if val and not dbg_on and (dense or small_bool) and gen_match_lookup(m st rs rtp vals arms wild lo span) {return true}
+    # Eight or more constant values over at most 256 tags need one small table
+    # (gen_match_lookup caps its bytes), not a long linear branch chain.
+    let small_table=val and vals.length >=? 8 and span <=? 256
+    if val and not dbg_on and (dense or small_table) and gen_match_lookup(m st rs rtp vals arms wild lo span) {return true}
     if na <? 3 or not dense {return false}
     if is_enum {layout(st);}
     # blocks: end, fail, then one per arm (arm 0 innermost)

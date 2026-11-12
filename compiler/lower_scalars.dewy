@@ -82,12 +82,29 @@ match_arm_constant=(arm:LCWord):>[bool int64]=>$unsafe {
     return [false 0]
 }
 gen_match_lookup=(m:LCWord st:LCWord rs:LCWord rtp:LCWord vals:array<int64> arms:array<int64> wild:LCWord lo:LCWord span:LCWord):>bool=>$unsafe {
-    if exact_has_node(m) or wild <? 0 {return false}
+    if exact_has_node(m) {return false}
+    # The table reads the subject from its slot; a held view (no slot) keeps the switch.
+    if locals.ptr[LCWord(nodes.ptr[m].sym)].offset <? 0 {return false}
     # Arbitrary-precision int results aren't plain words.
     if quantity_base(prune(rtp)) =? T_MATH_INT {return false}
     let result_kind=types.ptr[prune(rtp)].kind
     if result_kind not=? 'int_' and result_kind not=? 'bool_' and result_kind not=? 'enum_' {return false}
     if result_kind =? 'enum_' and not structs.ptr[LCWord(types.ptr[prune(rtp)].st)].simple_enum {return false}
+    # Without a wildcard the table needs an arm for every value the subject can
+    # hold: an enum whose variants all have one (O(arms + span)). Otherwise a
+    # missing value must still reach the no-arm failure.
+    if wild <? 0 {
+        if types.ptr[st].kind not=? 'enum_' {return false}
+        let seen:array<bool>=fill(false span)
+        let distinct:LCWord=0
+        loop v in vals {
+            if not seen[v - lo] {
+                seen[v - lo] = true
+                distinct += 1
+            }
+        }
+        if distinct not=? LCWord(structs.ptr[LCWord(types.ptr[st].st)].nvariants) {return false}
+    }
     let results:array<int64>=[]
     let low:LCWord=0
     let high:LCWord=0
@@ -110,13 +127,27 @@ gen_match_lookup=(m:LCWord st:LCWord rs:LCWord rtp:LCWord vals:array<int64> arms
         else if low >=? -32768 and high <=? 32767 {width=2}
         else if low >=? -2147483648 and high <=? 2147483647 {width=4}
     }
-    let fallback=results.ptr[wild]
+    # A sparse table stays small: at most 256 bytes of data.
+    if span >? 2 * vals.length + 16 and span * width >? 256 {return false}
+    # (with no wildcard every index has an arm; the bound check stays)
+    let fallback=if wild >=? 0 {results.ptr[wild]} else {results.ptr[arms.ptr[0]]}
     let table:array<int64>=fill(fallback span)
     # Earlier arms win, including an earlier wildcard.
     let j=vals.length - 1
     loop j >=? 0 {
-        if arms.ptr[j] <? wild {table.ptr[vals.ptr[j] - lo] = results.ptr[arms.ptr[j]];}
+        if wild <? 0 or arms.ptr[j] <? wild {table.ptr[vals.ptr[j] - lo] = results.ptr[arms.ptr[j]];}
         j -= 1;
+    }
+    # An exhaustive map whose value is its tag plus a constant is one addition.
+    let affine=wild <? 0
+    loop i in [0..span) {
+        if table.ptr[i] not=? table.ptr[0] + i {affine=false}
+    }
+    if affine {
+        let hs=e_slot(LCWord(locals.ptr[LCWord(nodes.ptr[m].sym)].offset))
+        let tag=if types.ptr[st].kind =? 'enum_' {e_load(VI hs 0 4)} else {load_val(st hs 0)}
+        store_val(rtp e_slot(rs) 0 e_bin('add' VI tag e_iconst(table.ptr[0] - lo)));
+        return true
     }
     loop rodata.length % width not=? 0 {rodata.push(0);}
     let offset=rodata.length
