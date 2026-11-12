@@ -478,7 +478,17 @@ __eq__=(q:rational*Time a:Duration_width_64):>bool=>(a as Duration)=?q
 Days:type=[count:int64]
 Months:type=[count:int64]
 _Recipe:type=[steps:array<Days|Months>]
-Period:type=Days|Months|_Recipe
+_DatePeriod:type=[total_days:int64 years:int64 months:int64 days:int64]
+Period:type=Days|Months|_Recipe|_DatePeriod
+__eq__=(a:_DatePeriod b:_DatePeriod):>bool=>a.total_days =? b.total_days
+__lt__=(a:_DatePeriod b:_DatePeriod):>bool=>a.total_days <? b.total_days
+__as__=(p:_DatePeriod):>string=>"{p.total_days}day"
+_period_divisor=(b:Days):>string?=>if b.count =? 0 "a period of no days divides nothing" else none
+$check_constant _period_divisor(b) "not a divisor"
+__truediv__=(a:_DatePeriod b:Days):>rational|OutOfRange=>{
+    if b.count =? 0 {return OutOfRange}
+    rational(int(a.total_days) int(b.count))
+}
 __add__=(a:Days b:Months):>_Recipe=>_Recipe[[a b]]
 __add__=(a:Months b:Days):>_Recipe=>_Recipe[[a b]]
 __add__=(a:_Recipe b:Days|Months):>_Recipe=>{
