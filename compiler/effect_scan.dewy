@@ -9,7 +9,7 @@ from p"checks_thin_expr.dewy" import (is_fn_type is_map_type)
 from p"isolation.jo" import (IsolationReason)
 from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_RESIZED LF_SHARED LF_VALUECAP LF_VALUEPARAM compound_op fns globals locals)
 from p"checks_thin.dewy" import (readonly_global)
-from p"ast.jo" import (NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_MUT NF_SPREAD NF_STMT NF_U64 RANGE_EXHAUSTION has_flag kid kid2 nkids nkids2 nodes)
+from p"ast.jo" import (NF_ALIASDECL NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_MUT NF_SPREAD NF_STMT NF_U64 RANGE_EXHAUSTION has_flag kid kid2 nkids nkids2 nodes)
 from p"type_layout.dewy" import (TF_BOXED)
 from p"types.jo" import (T_MATH_INT T_NEVER T_VOID fields is_int is_vec prune struct_targ structs telem tkind type_eq types)
 from p"type_ops.dewy" import (is_managed layout zonk)
@@ -495,13 +495,39 @@ effect_oom_frame=(n:EffectScanWord):>bool=>$unsafe {
     let name=effect_name(g)
     return name in? ["__oom_frame" "__oom_caught" "__oom_release" "__oom_unsupported"]
 }
-# An owner record built or returned as the function's result moves to the caller,
-# which drops it: effect_moved_out. O(1).
-effect_moves_out=(n:EffectScanWord):>void=>$unsafe {
-    if (nodes.ptr[n].kind =? 'call' and (nodes.ptr[n].aux =? 2 or nodes.ptr[n].aux =? 0)) and effect_owner_record(ntype(n)) {effect_moved_out[n]=true}
+# Returned values move to the caller, including a branch's chosen result.
+# Walk only the result spine, bounded at depth 32. Node-indexed marks reuse
+# the ordinary effect scan; no extra body walk or per-function allocation.
+effect_moves_out=(n:EffectScanWord depth:EffectScanWord=0):>void=>$unsafe {
+    if n =? 0 or depth >? 32 {return}
+    let k=nodes.ptr[n].kind
+    if k =? 'call' and (nodes.ptr[n].aux =? 2 or nodes.ptr[n].aux =? 0) and effect_owner_record(ntype(n)) {effect_moved_out[n]=true}
+    else if k =? 'if_' {
+        effect_moves_out(EffectScanWord(nodes.ptr[n].b) depth + 1)
+        effect_moves_out(EffectScanWord(nodes.ptr[n].c) depth + 1)
+    }
+    else if k =? 'block' {effect_body_moves_out(n depth + 1)}
 }
-effect_body_moves_out=(body:EffectScanWord):>void=>$unsafe {
-    if body not=? 0 and nodes.ptr[body].kind =? 'block' and nodes.ptr[body].aux not=? 0 and nkids(body) >? 0 {effect_moves_out(EffectScanWord(nodes.ptr[kid(body nkids(body) - 1)].a))}
+effect_body_moves_out=(body:EffectScanWord depth:EffectScanWord=0 result:bool=true):>void=>$unsafe {
+    if body =? 0 or depth >? 32 or nodes.ptr[body].kind not=? 'block' or nkids(body) =? 0 {return}
+    let last=kid(body nkids(body) - 1)
+    if nodes.ptr[last].kind not=? 'return_' and (not result or nodes.ptr[body].aux =? 0 or nodes.ptr[last].kind not=? 'exprstmt') {return}
+    let value=EffectScanWord(nodes.ptr[last].a)
+    effect_moves_out(value depth + 1)
+    # An immediately returned fresh local has no intervening operation that
+    # could drop it. Earlier locals, reassignment and nonadjacent returns keep
+    # their cleanup. A move/copy hook is excluded by effect_owner_record.
+    if value =? 0 or nodes.ptr[value].kind not=? 'ident' or nodes.ptr[value].aux not=? 1 or nkids(body) <? 2 {return}
+    let binding=kid(body nkids(body) - 2)
+    if nodes.ptr[binding].kind not=? 'vardecl' or nodes.ptr[binding].sym not=? nodes.ptr[value].sym or has_flag(binding NF_GLOBAL | NF_ALIASDECL) {return}
+    let source=EffectScanWord(nodes.ptr[binding].b)
+    if source =? 0 or not effect_owner_record(ntype(source)) {return}
+    # Only fresh call results are adopted here. Moving an existing local
+    # could leave another owning boundary or a conditional cleanup behind.
+    if nodes.ptr[source].kind not=? 'call' or nodes.ptr[source].aux not=? 0 and nodes.ptr[source].aux not=? 2 {return}
+    effect_moved_out[binding]=true
+    effect_moved_out[value]=true
+    effect_moves_out(source depth + 1)
 }
 effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     if n =? 0 or effect_footprints_only and effect_summaries.ptr[f].footprint_opaque {return}
@@ -529,6 +555,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         else if EffectScanWord(locals.ptr[EffectScanWord(nodes.ptr[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) not=? 0 {effect_isolation_block(f IsolationReason.capture n);}
     }
     if ownership_decls.length not=? 0 {
+        if k =? 'block' {effect_body_moves_out(n 0 false)}
         let source:EffectScanWord=0
         if k =? 'vardecl' or k =? 'assign' {source=EffectScanWord(nodes.ptr[n].b)}
         else if k =? 'return_' or k =? 'conv' and nodes.ptr[n].aux =? int32<overflow='wrap'>(13) {source=EffectScanWord(nodes.ptr[n].a)}
@@ -580,7 +607,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         layout(t);
         if EffectScanWord(types.ptr[t].flags) & TF_BOXED not=? 0 {effect_plan_cost(f n 1 << 2);}
     }
-    if k =? 'vardecl' and not has_flag(n NF_GLOBAL) and nodes.ptr[n].sym >? 0 {
+    if k =? 'vardecl' and not has_flag(n NF_GLOBAL) and nodes.ptr[n].sym >? 0 and not effect_moved_out.has(n) {
         let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
         effect_cleanup(f EffectScanWord(locals.ptr[l].type) n effect_export(f PlaceIdentity['local' f l]));
     }
@@ -689,6 +716,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
         return
     }
     if k =? 'ident' and nodes.ptr[n].aux =? int32<overflow='wrap'>(1) {
+        if effect_moved_out.has(n) {return}
         let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
         if exact_rep and prune(ntype(n)) =? T_MATH_INT and not exact_raw_value(n) and exact_local_width(l) >? 0 and effect_small(n) <? 0 {
             effect_plan_cost(f n 1 << 2);
@@ -780,7 +808,7 @@ effect_scan_node=(f:EffectScanWord n:EffectScanWord):>void=>$unsafe {
     else if k =? 'vardecl' {
         let l:EffectScanWord=EffectScanWord(nodes.ptr[n].sym)
         if effect_readonly_binding(n) {return}
-        supported=l >? 0 and (effect_value(EffectScanWord(locals.ptr[l].type)) or is_fn_type(EffectScanWord(locals.ptr[l].type)) and effect_bare(EffectScanWord(nodes.ptr[n].b))) and EffectScanWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) =? 0
+        supported=l >? 0 and (effect_moved_out.has(n) or effect_value(EffectScanWord(locals.ptr[l].type)) or is_fn_type(EffectScanWord(locals.ptr[l].type)) and effect_bare(EffectScanWord(nodes.ptr[n].b))) and EffectScanWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) =? 0
         # (a value parameter's own binding of f's callback: effect_own_callback)
         if not supported and l >? 0 and EffectScanWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) =? 0 and is_fn_type(EffectScanWord(locals.ptr[l].type)) {supported=effect_callback(f n effect_own_callback(f EffectScanWord(nodes.ptr[n].b)))}
     }

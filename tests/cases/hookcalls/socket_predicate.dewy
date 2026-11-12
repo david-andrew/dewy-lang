@@ -1,0 +1,14 @@
+# A predicate proves the packet index before acquiring the socket.
+let cursor:int64=0
+Socket=type of [fd:int64
+    $__drop__
+    close=():>void=>{cursor=99}
+]
+connect=():>Socket=>Socket[4]
+valid=(i:int64 packets:array<int64>):>bool=>0 <=? i and i <? packets.length
+receive=(packets:array<int64>):>int64=>{
+    if not valid(cursor packets) {return 0}
+    let socket=connect
+    packets[cursor]
+}
+main=()=>{printl(receive([71]))}

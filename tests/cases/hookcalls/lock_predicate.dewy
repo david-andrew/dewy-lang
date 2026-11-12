@@ -1,0 +1,14 @@
+# A helper checks the queue; a borrowed lock query preserves that proof.
+let released:int64=0
+Lock=type of [held:bool
+    $__drop__
+    unlock=():>void=>{released+=1}
+    owns=():>bool=>held
+]
+nonempty=(queue:array<int64>):>bool=>queue.length >? 0
+front=(@queue:array<int64>):>int64=>{
+    let lock=Lock[true]
+    if nonempty(queue) and lock.owns {return queue[0]}
+    0
+}
+main=()=>{let queue:array<int64>=[73] printl(front(@queue))}

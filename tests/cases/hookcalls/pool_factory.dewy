@@ -1,0 +1,15 @@
+# A pooled buffer contains a COW array; its factory returns the owner.
+let recycled:int64=0
+Buffer=type of [bytes:array<int64> pool:string
+    $__drop__
+    recycle=():>void=>{recycled+=1}
+    available=():>bool=>bytes.length >? 0
+]
+acquire=():>Buffer=>Buffer[[0 0] "packets"]
+copy_first=(@input:array<int64>):>int64=>{
+    if input.length =? 0 {return 0}
+    let buffer=acquire
+    if not buffer.available {return 0}
+    input[0]
+}
+main=()=>{let input:array<int64>=[59] printl(copy_first(@input))}

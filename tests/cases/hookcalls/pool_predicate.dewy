@@ -1,0 +1,15 @@
+# Prove both buffer windows through an ordinary shared helper.
+let recycled:int64=0
+Buffer=type of [bytes:array<int64>
+    $__drop__
+    recycle=():>void=>{recycled+=1}
+    available=():>bool=>bytes.length >? 0
+]
+acquire=():>Buffer=>Buffer[[0 0]]
+fits=(i:int64 input:array<int64> output:array<int64>):>bool=>0 <=? i and i <? input.length and i <? output.length
+copy_slot=(@input:array<int64> @output:array<int64> i:int64):>void=>{
+    if not fits(i input output) {return}
+    let buffer=acquire
+    if buffer.available {output[i]=input[i]}
+}
+main=()=>{let input:array<int64>=[79 83] let output:array<int64>=[0 0] copy_slot(@input @output 1) printl(output)}

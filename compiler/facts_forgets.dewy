@@ -710,8 +710,11 @@ fact_drop_exit=(f:ForgetWord):>array<int64>=>$unsafe {
     if known not=? none {return known}
     let out:array<int64>=[0]
     let settled=fact_drop_scan(body 0 @out true)
-    loop l in fns.ptr[f].params {
+    loop i in [0..fns.ptr[f].params.length) {
+        let l=fns.ptr[f].params.ptr[i]
         let t=ForgetWord(locals.ptr[l].type)
+        # A borrowed method receiver has no cleanup at this function's exit.
+        if i =? 0 and effect_method_borrows(f) {continue}
         if ForgetWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 and ownership_fact_type(t) {settled=fact_drop_add(@out t) and settled}
     }
     if settled {fact_drop_sites[key]=out}

@@ -1,0 +1,14 @@
+# Reading a held lock leaves the queue proof live until release.
+let released:int64=0
+Lock=type of [held:bool name:string
+    $__drop__
+    unlock=():>void=>{released+=1}
+    owns=():>bool=>held
+]
+front=(@queue:array<int64>):>int64=>{
+    let lock=Lock[true "queue"]
+    if queue.length =? 0 {return 0}
+    if not lock.owns {return 0}
+    queue[0]
+}
+main=()=>{let queue:array<int64>=[43] printl(front(@queue))}

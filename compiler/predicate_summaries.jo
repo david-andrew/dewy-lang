@@ -10,6 +10,7 @@ use 'check.jo'
 use 'types.jo'
 use 'facts.jo'
 use 'ownership.jo'
+use 'facts_forgets.dewy'
 use 'refine.jo'
 
 fact_predicate_tree = (n: int, params: {int: int}, budget: mut int) -> int:
@@ -78,7 +79,6 @@ fact_predicate_tree = (n: int, params: {int: int}, budget: mut int) -> int:
     fact_predicate_nodes.push(term)
     fact_predicate_nodes.len() - 1
 fact_predicate_summary = (f: int) -> int:
-    if ownership_fact_cleanup: return 0
     if let known = fact_predicates.get(f): return known
     if fns[f].state != 2: return 0
     fact_predicates[f] = 0
@@ -91,6 +91,8 @@ fact_predicate_summary = (f: int) -> int:
     start = fact_predicate_nodes.len()
     budget = 32
     root = fact_predicate_tree(int(fns[f].body), params, budget)
+    # Demand cleanup only for a recognized predicate; body/type footprints are cached.
+    if root != 0 and ownership_fact_cleanup and fact_drop_pending(f): root = 0
     if root == 0: fact_predicate_nodes.truncate(start)
     fact_predicates[f] = root
     root

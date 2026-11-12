@@ -8,6 +8,7 @@ from p"checker_tokens.dewy" import (Tok)
 from p"expr.jo" import (CV IN ntype)
 from p"facts.jo" import (FactState fact_comparison fact_constant fact_domain fact_new fact_project fact_scalar fact_type)
 from p"ownership.jo" import (ownership_fact_cleanup)
+from p"facts_forgets.dewy" import (fact_drop_pending)
 from p"predicate_facts.jo" import (FactPredicate fact_predicate_nodes fact_predicates)
 from p"refine.jo" import (ref_encoded)
 from p"refinement_types.dewy" import (FactTerm)
@@ -93,7 +94,6 @@ fact_predicate_tree=(n:PredicateWord params:dict<int64 int64> @budget:PredicateW
     fact_predicate_nodes.length - 1
 }
 fact_predicate_summary=(f:PredicateWord):>PredicateWord=>$unsafe {
-    if ownership_fact_cleanup {return 0}
     let known=fact_predicates.get(f)
     if known not=? none {return known}
     if fns.ptr[f].state not=? 2 {return 0}
@@ -108,6 +108,11 @@ fact_predicate_summary=(f:PredicateWord):>PredicateWord=>$unsafe {
     let start=fact_predicate_nodes.length
     let budget:PredicateWord=32
     let root=fact_predicate_tree(PredicateWord(fns.ptr[f].body) params @budget)
+    # Only a recognized predicate demands its exit footprint. Unrelated owners
+    # do not disable summaries; cleanup that may change their inputs does.
+    # The syntax walk is bounded at 32 nodes; footprint work is cached per
+    # body/type by facts_forgets, with indexed lookups on later demands.
+    if root not=? 0 and ownership_fact_cleanup and fact_drop_pending(f) {root=0}
     if root =? 0 {fact_predicate_nodes.truncate(start)}
     fact_predicates[f]=root
     root

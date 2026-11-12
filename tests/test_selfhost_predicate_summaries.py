@@ -8,7 +8,7 @@ from tests.selfhost_narrow import compare_narrow
 from tests.support import ROOT, compiler  # noqa: F401
 
 STEMS = ('source_types', 'node_store', 'checker_types', 'checker_state', 'checker_tokens', 'refinement_types', 'predicate_summaries')
-SERVICES = ('facts', 'expr', 'lex', 'util', 'ast', 'check', 'types', 'ownership', 'refine', 'checked_eval')
+SERVICES = ('facts', 'expr', 'lex', 'util', 'ast', 'check', 'types', 'ownership', 'refine', 'checked_eval', 'facts_forgets')
 STATE = re.sub(r"(?m)^(use '[^']*'|#.*)\n", '', (ROOT / 'compiler/predicate_facts.jo').read_text())
 
 EXTRA = r'''
@@ -20,6 +20,11 @@ const LF_MUTPARAM = 64
 enum CV: none_, int_, float_
 enum IN: none_, len, push
 ownership_fact_cleanup = false
+pending_drop = 0
+drop_queries = 0
+fact_drop_pending = (f: int) -> bool:
+    drop_queries += 1
+    f == pending_drop
 fns: FnInst[] = [FnInst()]
 locals: Local[] = [Local()]
 fact_type = (t: int) -> int: t
@@ -160,7 +165,16 @@ main = ():
     fns[f].state = 1
     print(fact_predicate_summary(f) == first)
     ownership_fact_cleanup = true
-    print(fact_predicate_summary(f))
+    assert(fact_predicate_summary(f) == first)
+    summary("unrelated hook", binary(.lt, p(next()), lit(3)))
+    assert(drop_queries == 1)
+    pending_drop = fns.len()
+    before = fact_predicate_nodes.len()
+    summary("pending cleanup", binary(.lt, p(next()), lit(3)))
+    assert(fact_predicate_nodes.len() == before)
+    assert(drop_queries == 2)
+    summary("unsupported with hook", n_(.call))
+    assert(drop_queries == 2)
     ownership_fact_cleanup = false
     # Instantiation.
     apply = (body: int, values: int[]):

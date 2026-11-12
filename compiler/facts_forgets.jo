@@ -628,8 +628,11 @@ fact_drop_exit = (f: int) -> int[]:
     if let known = fact_drop_sites.get(key): return known
     out = [0]
     settled = fact_drop_scan(body, 0, out, true)
-    loop l in fns[f].params:
+    loop i in [0..fns[f].params.len()):
+        l = fns[f].params[i]
         t = int(locals[l].type)
+        # A borrowed method receiver has no cleanup at this function's exit.
+        if i == 0 and effect_method_borrows(f): continue
         if int(locals[l].flags) & LF_MUTPARAM == 0 and ownership_fact_type(t): settled = fact_drop_add(out, t) and settled
     if settled: fact_drop_sites[key] = out
     out

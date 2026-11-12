@@ -1,0 +1,18 @@
+# An owner operation must invalidate the global reached by its hook.
+let data:array<int64>=[10 20]
+Handle=type of [fd:int64
+    $__drop__
+    close=():>void=>{data=[]}
+    ready=():>bool=>fd >=? 0
+    $__consume__
+    finish=():>void=>{}
+]
+store=(@pool:array<Handle> h:Handle):>void=>{if pool.length =? 0 {return} pool[0]=h}
+pick=(i:int64):>int64=>{
+    let pool:array<Handle>=[Handle[3]]
+    let h=Handle[7]
+    if i <? 0 or i >=? data.length {return 0}
+    store(@pool h)
+    data[i]
+}
+main=()=>{printl(pick(1))}

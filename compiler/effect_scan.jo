@@ -478,14 +478,31 @@ effect_oom_frame = (n: int) -> bool:
     name in ["__oom_frame", "__oom_caught", "__oom_release", "__oom_unsupported"]
 
 
-# An owner record built or returned as the function's result moves to the caller,
-# which drops it: effect_moved_out. O(1).
-effect_moves_out = (n: int):
-    if nodes[n].kind == .call and (nodes[n].aux == 2 or nodes[n].aux == 0) and effect_owner_record(ntype(n)): effect_moved_out[n] = true
-
-effect_body_moves_out = (body: int):
-    if body != 0 and nodes[body].kind == .block and nodes[body].aux != 0 and nkids(body) > 0: effect_moves_out(int(nodes[kid(body, nkids(body) - 1)].a))
-
+# Returned result spines only, depth 32; node-indexed marks reuse the scan.
+effect_moves_out = (n: int, depth: int = 0):
+    if n == 0 or depth > 32: return
+    k = nodes[n].kind
+    if k == .call and (nodes[n].aux == 2 or nodes[n].aux == 0) and effect_owner_record(ntype(n)): effect_moved_out[n] = true
+    else if k == .if_:
+        effect_moves_out(int(nodes[n].b), depth + 1)
+        effect_moves_out(int(nodes[n].c), depth + 1)
+    else if k == .block: effect_body_moves_out(n, depth + 1)
+effect_body_moves_out = (body: int, depth: int = 0, result: bool = true):
+    if body == 0 or depth > 32 or nodes[body].kind != .block or nkids(body) == 0: return
+    last = kid(body, nkids(body) - 1)
+    if nodes[last].kind != .return_ and (not result or nodes[body].aux == 0 or nodes[last].kind != .exprstmt): return
+    value = int(nodes[last].a)
+    effect_moves_out(value, depth + 1)
+    # An immediately returned fresh local has no intervening operation.
+    if value == 0 or nodes[value].kind != .ident or nodes[value].aux != 1 or nkids(body) < 2: return
+    binding = kid(body, nkids(body) - 2)
+    if nodes[binding].kind != .vardecl or nodes[binding].sym != nodes[value].sym or has_flag(binding, NF_GLOBAL | NF_ALIASDECL): return
+    source = int(nodes[binding].b)
+    if source == 0 or not effect_owner_record(ntype(source)): return
+    if nodes[source].kind != .call or nodes[source].aux != 0 and nodes[source].aux != 2: return
+    effect_moved_out[binding] = true
+    effect_moved_out[value] = true
+    effect_moves_out(source, depth + 1)
 effect_scan_node = (f: int, n: int):
     if n == 0 or effect_footprints_only and effect_summaries[f].footprint_opaque: return
     if effect_seen[n] == f: return
@@ -509,6 +526,7 @@ effect_scan_node = (f: int, n: int):
         else if nodes[n].aux != i32(int(SK.local)): effect_isolation_block(f, .node, n)
         else if int(locals[int(nodes[n].sym)].flags) & (LF_CAPTURE | LF_ADDR) != 0: effect_isolation_block(f, .capture, n)
     if ownership_decls.len() != 0:
+        if k == .block: effect_body_moves_out(n, 0, false)
         source = 0
         if k == .vardecl or k == .assign: source = int(nodes[n].b)
         else if k == .return_ or k == .conv and nodes[n].aux == i32(int(CV.explicit_copy)): source = int(nodes[n].a)
@@ -550,7 +568,7 @@ effect_scan_node = (f: int, n: int):
         t = representation_type(ntype(n))
         layout(t)
         if int(types[t].flags) & TF_BOXED != 0: effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
-    if k == .vardecl and not has_flag(n, NF_GLOBAL) and nodes[n].sym > 0:
+    if k == .vardecl and not has_flag(n, NF_GLOBAL) and nodes[n].sym > 0 and not effect_moved_out.has(n):
         l = int(nodes[n].sym)
         effect_cleanup(f, int(locals[l].type), n, effect_export(f, PlaceIdentity(.local, f, l)))
     if ownership_literal_print(n):
@@ -643,6 +661,7 @@ effect_scan_node = (f: int, n: int):
         effect_scan_node(f, int(nodes[n].b))
         return
     if k == .ident and nodes[n].aux == i32(int(SK.local)):
+        if effect_moved_out.has(n): return
         l = int(nodes[n].sym)
         if exact_rep and prune(ntype(n)) == T_MATH_INT and not exact_raw_value(n) and exact_local_width(l) > 0 and effect_small(n) < 0:
             effect_plan_cost(f, n, 1 << int(EffectKind.alloc))
@@ -721,7 +740,7 @@ effect_scan_node = (f: int, n: int):
     else if k == .vardecl:
         l = int(nodes[n].sym)
         if effect_readonly_binding(n): return
-        supported = l > 0 and (effect_value(int(locals[l].type)) or is_fn_type(int(locals[l].type)) and effect_bare(int(nodes[n].b))) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
+        supported = l > 0 and (effect_moved_out.has(n) or effect_value(int(locals[l].type)) or is_fn_type(int(locals[l].type)) and effect_bare(int(nodes[n].b))) and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0
         # (a value parameter's own binding of f's callback: effect_own_callback)
         if not supported and l > 0 and int(locals[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_BYREF) == 0 and is_fn_type(int(locals[l].type)): supported = effect_callback(f, n, effect_own_callback(f, int(nodes[n].b)))
     else if k == .binary:
