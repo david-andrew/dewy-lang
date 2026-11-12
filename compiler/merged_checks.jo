@@ -4,6 +4,8 @@ use 'checker_expr.dewy'
 use 'checks_builders.dewy'
 use 'expr.jo'
 use 'types.jo'
+use 'checks_thin_expr.dewy'
+use 'diagnostic_exit.dewy'
 use 'util.jo'
 
 merged_nested_waits = (n: int):
@@ -40,4 +42,22 @@ merged_nested_waits = (n: int):
         check_expr_in_module(adapted, int(nodes[decl].mod))
         args[i] = last_checked
         add_flag(last_checked, NF_CHECKED)
+    # The inbox uses none for EOF; reject nullable callback results before inference.
+    loop i in [0..args.len()):
+        a = args[i]
+        named = nodes[a].kind == .namedarg
+        if named and nodes[a].name == i32(intern("stop_when_idle")): continue
+        value = if named: int(nodes[a].a) else: a
+        spread = has_flag(value, NF_SPREAD)
+        t = prune(check_expr(value, 0))
+        checked = last_checked
+        add_flag(checked, NF_CHECKED)
+        if spread: add_flag(checked, NF_SPREAD)
+        if named: nodes[a].a = i32(checked)
+        else: args[i] = checked
+        if tkind(t) == .array or tkind(t) == .fixed: t = prune(telem(t))
+        if not is_fn_type(t): continue
+        output = prune(telem(t))
+        if output == T_NONE or tkind(output) == .opt:
+            fatal(nodes[a].pos, "`merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record")
     set_list(n, args)

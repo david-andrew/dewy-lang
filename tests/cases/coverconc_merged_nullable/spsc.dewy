@@ -1,0 +1,6 @@
+# modes: native native-release
+main = () => {
+    let [tx rx] = spsc<int? 1>().split
+    let inbox = merged(@rx.receive)
+    loop _ in inbox {}
+}

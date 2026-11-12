@@ -1,0 +1,7 @@
+# modes: native native-release
+main = () => {
+    let c = channel<int?>(1)
+    let waits = [@c.receive]
+    let inbox = merged(waits... stop_when_idle=0s)
+    loop _ in inbox {}
+}

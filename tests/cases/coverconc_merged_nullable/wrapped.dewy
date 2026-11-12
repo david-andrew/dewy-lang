@@ -1,0 +1,19 @@
+# modes: native native-release
+Item:type = [value:int?]
+main = () => {
+    let c = channel<Item>(2)
+    c.send(Item[none]) or_throw
+    c.send(Item[7]) or_throw
+    c.close()
+    let inner = merged(@c.receive)
+    let inbox = merged(@inner.next stop_when_idle=0s)
+    let count = 0
+    let empty = 0
+    let total = 0
+    loop item in inbox or_throw {
+        count += 1
+        if item.value is? none {empty += 1}
+        total += item.value ?? 0
+    }
+    printl"items {count} empty {empty} total {total}"
+}

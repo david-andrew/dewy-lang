@@ -1,0 +1,9 @@
+# modes: native native-release
+main = () => {
+    let c = channel<int?>(2)
+    c.send(none) or_throw
+    c.send(7) or_throw
+    c.close()
+    let inbox = merged(@c.receive)
+    loop _ in inbox {}
+}

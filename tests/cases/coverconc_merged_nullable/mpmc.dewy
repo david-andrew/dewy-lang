@@ -1,0 +1,6 @@
+# modes: native native-release
+main = () => {
+    let c = mpmc<int?>(1)
+    let inbox = merged(@c.receive)
+    loop _ in inbox {}
+}

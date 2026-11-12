@@ -3874,6 +3874,9 @@ A merged inbox can itself be a source, as in `merged(@inner.next @other.receive)
 it stays one source until it finishes; an inner channel closing does not retire it
 while inner payloads remain.
 
+A source with a nullable payload is rejected: `none` marks the end of the inbox.
+Wrap an optional value in a record to drain it, for example `[value:int?]`.
+
 ```dewy
 main = () => {
     let a = channel<int64>(4)

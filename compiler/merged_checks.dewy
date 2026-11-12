@@ -1,11 +1,13 @@
 $runtime_checks
 
-from p"ast.jo" import (NF_AT NF_CHECKED add_flag has_flag kid kids nkids nodes set_list)
+from p"ast.jo" import (NF_AT NF_CHECKED NF_SPREAD add_flag has_flag kid kids nkids nodes set_list)
 from p"check.jo" import (dewy_at fns lib_dir syms)
 from p"checker_expr.dewy" import (check_expr lookup)
 from p"checks_builders.dewy" import bc_call
 from p"expr.jo" import (AUX2_PARTIAL last_checked check_expr_in_module)
-from p"types.jo" import (prune structs tkind types)
+from p"types.jo" import (T_NONE prune structs telem tkind types)
+from p"checks_thin_expr.dewy" import is_fn_type
+from p"diagnostic_exit.dewy" import fatal
 from p"util.jo" import (files intern pos_file)
 
 MergeCheckWord:type=int64<overflow='wrap'>
@@ -48,6 +50,26 @@ merged_nested_waits=(n:MergeCheckWord):>void=>$unsafe {
         check_expr_in_module(adapted MergeCheckWord(nodes.ptr[decl].mod));
         args[i]=last_checked
         add_flag(last_checked NF_CHECKED)
+    }
+    # The inbox uses none for EOF. Reject nullable callback results before generic
+    # inference can try to fit both the payload and Closed<T> into that optional.
+    loop i in [0..args.length) {
+        let a=args[i]
+        let named=nodes.ptr[a].kind =? 'namedarg'
+        if named and nodes.ptr[a].name =? int32(intern("stop_when_idle")) {continue}
+        let value=if named {MergeCheckWord(nodes.ptr[a].a)} else {a}
+        let spread=has_flag(value NF_SPREAD)
+        let t=prune(check_expr(value 0))
+        let checked=last_checked
+        add_flag(checked NF_CHECKED)
+        if spread {add_flag(checked NF_SPREAD)}
+        if named {nodes.ptr[a].a=int32(checked)} else {args[i]=checked}
+        if tkind(t) =? 'array' or tkind(t) =? 'fixed' {t=prune(telem(t))}
+        if not is_fn_type(t) {continue}
+        let output=prune(telem(t))
+        if output =? T_NONE or tkind(output) =? 'opt' {
+            fatal(nodes.ptr[a].pos "`merged` cannot drain a nullable payload: `none` marks the end of the inbox; wrap the payload in a record")
+        }
     }
     set_list(n args)
 }

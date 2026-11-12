@@ -1,0 +1,5 @@
+# modes: native native-release
+# Isolated compiler drivers need nominal outcome declarations before function checking.
+import p"@lib/prelude/outcomes.jo" as _outcomes
+merged = (value:int?):>int => value ?? 9
+main = () => printl(merged(none))
