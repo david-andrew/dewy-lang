@@ -2,23 +2,31 @@ $runtime_checks
 
 # Direct reader entry points and lazy token expansion.
 from p"@lib/core/str.jo" import (starts_with)
-from p"ast.jo" import (nodes)
+from p"ast.jo" import (kids lists nodes set_list)
 from p"check.jo" import (check_all target_arm64 target_macos target_wasm target_windows test_mode watch_build)
 from p"dewy_context.jo" import (dc_parser)
+from p"dewy_direct.jo" import (DC_LAZY_BODY)
 from p"dewy_fast.jo" import (DN_EOF_SPARE dn_block_comments dn_lex)
+from p"dewy_fast_file.dewy" import (dn_edits_clear)
 from p"dewy_reader.dewy" import (rd_dc_body rd_dc_flush_report rd_dc_report rd_dc_unread)
+from p"directive_rules.dewy" import (dir_apply_rows)
 from p"driver_pipeline.dewy" import (queue_emit)
+from p"icount.jo" import (IC_LOAD)
+from p"icount_ops.dewy" import (ic_mod ic_restore)
 from p"ide.jo" import (ide_on)
 from p"ir.jo" import (dbg_on)
-from p"lazy_bodies.jo" import (dc_eager)
+from p"lazy_bodies.jo" import (DC_LAZY_SPAN dc_eager)
 from p"lower.jo" import (opt_release)
 from p"main.jo" import (host_ir lower_only repl_image)
 from p"par.jo" import (emit_workers)
+from p"parser_loops.dewy" import (desugar_loopx)
 from p"parse.jo" import (stop_after)
 from p"prelude.jo" import (prelude_lazy)
-from p"util.jo" import (errors_only files lib_root shown_warnings)
+from p"util.jo" import (errors_only files lib_root pos_file shown_warnings)
 from p"x64_allocate.dewy" import (ra_dump)
 from p"x64_emit.dewy" import (ra_stat)
+
+DirectWord:type=int64<overflow='wrap'>
 
 dc_report=(pos:int64 msg:string):>void=>{
     rd_dc_report(@dc_parser pos msg)
@@ -79,6 +87,76 @@ dn_expand_lazy=():>void=>$unsafe {
     out.extend(dc_parser.tokens[k..dc_parser.tokens.length))
     dn_block_comments=saved_comments
     dc_parser.tokens=out
+}
+
+dc_force_body=(d:int64):>void=>$unsafe {
+    let b=int64(nodes.ptr[d].b)
+    if b =? 0 or (nodes.ptr[b].aux2 not=? DC_LAZY_BODY and nodes.ptr[b].aux2 not=? DC_LAZY_SPAN) {return}
+    let icl=ic_mod(IC_LOAD int64(nodes.ptr[d].mod))
+    let saved_tokens=dc_parser.tokens
+    let saved_at=dc_parser.at
+    let saved_file=dc_parser.file
+    let saved_source=dc_parser.source
+    let saved_depth=dc_parser.depth
+    let saved_lib=dc_parser.reader.dc_lib_lazy
+    let saved_left=dc_parser.reader.dn_lazy_left
+    let saved_edits_on=dc_parser.reader.dn_edits_on
+    let edits=dc_parser.reader.dn_edit_at.length
+    dc_parser.reader.dn_edits_on=true
+    dc_parser.reader.dc_lib_lazy=false
+    dc_parser.reader.dn_lazy_left=false
+    dc_parser.file=pos_file(nodes.ptr[d].pos)
+    dc_parser.source=files.ptr[dc_parser.file].src
+    let first=int64(nodes.ptr[b].ival)
+    if nodes.ptr[b].aux2 =? DC_LAZY_SPAN {
+        let saved_comments=dn_block_comments
+        dc_parser.tokens=dn_lex(dc_parser.file first dc_parser.reader.dc_lazy_span_end[b] true)
+        dn_block_comments=saved_comments
+        first=0
+    } else {
+        dc_parser.tokens=dc_parser.reader.dc_lazy_tokens[dc_parser.file]
+    }
+    dc_parser.at=first
+    dc_parser.depth=2
+    let node_start:DirectWord=nodes.length
+    let list_start=lists.length
+    let saved_in_body=dc_parser.flags.fn_body
+    dc_parser.flags.fn_body=true
+    let saved_result=dc_parser.reader.dc_fn_result
+    dc_parser.reader.dc_fn_result=-1
+    let reports=dc_parser.status.reports
+    let saved_now=dc_parser.flags.report_now
+    dc_parser.flags.report_now=true
+    dc_parser.status.hint_pos=0
+    let body=dc_body()
+    if body =? 0 {dc_unread(first)}
+    dc_parser.flags.report_now=saved_now
+    dc_parser.reader.dc_fn_result=saved_result
+    dc_parser.flags.fn_body=saved_in_body
+    if dc_parser.status.reports not=? reports {dc_flush_report()}
+    let i:DirectWord=nodes.length - 1
+    loop i >=? node_start {
+        if nodes.ptr[i].kind =? 'loopx' {
+            let lowered=desugar_loopx(i)
+            nodes[i]=nodes.ptr[lowered]
+        }
+        i-=1
+    }
+    dir_apply_rows(node_start)
+    let prefix=kids(b)
+    loop st in kids(body) {prefix.push(st)}
+    set_list(body prefix)
+    nodes[b]=nodes.ptr[body]
+    dc_parser.tokens=saved_tokens
+    dc_parser.at=saved_at
+    dc_parser.file=saved_file
+    dc_parser.source=saved_source
+    dc_parser.depth=saved_depth
+    dc_parser.reader.dc_lib_lazy=saved_lib
+    dc_parser.reader.dn_lazy_left=saved_left
+    dn_edits_clear(edits)
+    dc_parser.reader.dn_edits_on=saved_edits_on
+    ic_restore(icl)
 }
 
 dc_body=():>int64=>rd_dc_body(@dc_parser @nodes)
