@@ -1,0 +1,483 @@
+use 'parse.jo'
+use 'checker_tokens.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'module_paths.dewy'
+use 'lex.jo'
+use 'lexer_units.dewy'
+use 'lexer_errors.dewy'
+use 'ast.jo'
+use 'literals.dewy'
+use 'node_store.dewy'
+use 'parser_units.dewy'
+use 'parser_errors.dewy'
+use 'parser_flow_nodes.dewy'
+use 'parser_positions.dewy'
+use 'parser_cursor.dewy'
+use 'parser_expr.dewy'
+
+parse_primary = () -> int:
+    t = ti
+    pos = cur_pos()
+    k = pk()
+    # (async (): ... and await x: JavaScript's, for a step that waits)
+    if p_id_async == 0:
+        p_id_async = intern("async")
+        p_id_await = intern("await")
+    if k == .ident and (p_toks[t].ival == p_id_async and p_toks[t + 1].kind == .lparen and partner(t + 1) > t and (p_toks[partner(t + 1) + 1].kind == .colon or p_toks[partner(t + 1) + 1].kind == .arrow) or p_toks[t].ival == p_id_await and p_toks[t + 1].kind == .ident):
+        fatal(pos, "there is no async or await: something that takes time is a state changed a little in update each frame, or steps in `Actions` (`steps.then(0.3, (): drop())`, `steps.update(dt)` in update)")
+    if k == .int_lit:
+        advance()
+        n = mk(.int_lit, pos)
+        nodes[n].ival = p_toks[t].ival
+        add_flag(n, NF_LITERAL)
+        if p_toks[t].ival < 0: add_flag(n, NF_U64)
+        return n
+    if k == .float_lit:
+        advance()
+        n = mk(.float_lit, pos)
+        nodes[n].fval = p_toks[t].fval
+        add_flag(n, NF_LITERAL)
+        return n
+    if k == .str_lit:
+        advance()
+        return parse_string_token(t)
+    if k == .kw_true or k == .kw_false:
+        advance()
+        n = mk(.bool_lit, pos)
+        if k == .kw_true: nodes[n].ival = 1
+        return n
+    if k == .kw_none:
+        advance()
+        return mk(.none_lit, pos)
+    if k == .kw_null:
+        advance()
+        return mk(.null_lit, pos)
+    if k == .ident:
+        advance()
+        if p_toks[t].len == 1 and p_src[int(p_toks[t].start)] == 95: return mk(.hole, pos)
+        if p_toks[t].ival == id_end and p_index.len() > 0: return index_end(pos)
+        n = mk(.ident, pos)
+        nodes[n].name = i32(p_toks[t].ival)
+        return n
+    if k == .dot:
+        advance()
+        # (key_pressed(.1): the number keys are .n0 to .n9)
+        if pk() == .int_lit and p_toks[ti].ival >= 0 and p_toks[ti].ival <= 9: fatal(cur_pos(), "the key {p_toks[ti].ival} is `.n{p_toks[ti].ival}` (a name cannot start with a digit)")
+        n = mk(.dotname, pos)
+        nodes[n].name = i32(expect_name("name after '.'"))
+        return n
+    if k == .lparen:
+        if is_fn_literal(ti): return parse_fn_literal(.lambda, 0, pos)
+        advance()
+        if accept(.rparen): return mk(.tuple, pos)
+        saved_m = p_matrix
+        p_matrix = 0
+        e = parse_expr()
+        p_matrix = saved_m
+        if pk() == .comma:
+            n = mk(.tuple, pos)
+            elems = [e]
+            p_matrix = 0
+            loop accept(.comma):
+                if pk() == .rparen: break
+                elems.push(parse_expr())
+            p_matrix = saved_m
+            expect(.rparen, "")
+            set_list(n, elems)
+            return n
+        if nodes[e].kind == .range and has_flag(e, NF_BARE) and (pk() == .rparen or pk() == .rbrack):
+            # (a..b) and (a..b]: the start is excluded
+            range_close(e, pos, false)
+            return e
+        expect(.rparen, "")
+        return e
+    if k == .lbrack: return parse_bracket()
+    if k == .lbrace:
+        advance()
+        if pk() == .kw_loop: return parse_comprehension(pos, true)
+        n = mk(.map_lit, pos)
+        pairs: int[]
+        saved_m = p_matrix
+        p_matrix = 0
+        loop pk() != .rbrace:
+            pr = mk(.pair, cur_pos())
+            nodes[pr].a = i32(parse_expr())
+            # ({x = 1, y = 2}: a Lua table or a JavaScript object)
+            if pk() == .assign: fatal(cur_pos(), "a map is `\{\"x\": 1, \"y\": 2}` (keys are values); for named fields, declare a struct and make one with `Point(x = 1, y = 2)`")
+            expect(.colon, "")
+            nodes[pr].b = i32(parse_expr())
+            if pk() == .ident and tok_src(ti) == "for": fatal(cur_pos(), "a map made by a loop is `\{loop w in ws: w: len(w)}`")
+            pairs.push(pr)
+            if not accept(.comma): break
+        p_matrix = saved_m
+        expect(.rbrace, "")
+        set_list(n, pairs)
+        return n
+    if k == .kw_if: return parse_if_expr()
+    if k == .kw_match: return parse_match()
+    habit(t, .eof)
+    if k == .ident or k == .int_lit: fatal(pos, "unexpected '{tok_src(t)}'")
+    if k == .indent:
+        if len(mixed_indent_note()) > 0: fatal(pos, "unexpected indentation{mixed_indent_note()}")
+        if t > 1 and p_toks[t - 1].kind == .newline and p_toks[t - 2].kind != .colon:
+            # (one space too many: a slip, not a missing `:`)
+            here = line_indent(p_toks[t + 1].pos)
+            above = line_indent(p_toks[t - 2].pos)
+            if here > above and here - above <= 2: fatal(pos, "this line is indented more than the line above ({here} spaces, the line above has {above})")
+            fatal(pos, "unexpected indentation (does the line above need a `:` at its end?)")
+        fatal(pos, "unexpected indentation (this line is indented deeper than the lines around it)")
+    if k == .newline or k == .eof: fatal(prev_end(), "expected an expression here")
+    if k == .colon and t >= 2 and p_toks[t - 1].kind == .assign and p_toks[t - 2].kind == .ident: fatal(pos, "a function is written `{tok_src(t - 2)} = ():` (its parameters, maybe none, in brackets before the colon)")
+    if k == .star: fatal(pos, "what a pointer points at is `p[0]` (its fields: `p.x`); there is no `*` before a value")
+    if k == .kw_loop: fatal(pos, "a loop cannot follow a `:` on the same line: put it on a line of its own, indented below")
+    # (score > 10 and < 20: the comparison's left side left out)
+    # (for (let i = 0; ...), for (const g of gems): C's and JavaScript's loops)
+    if t >= 2 and p_toks[t - 1].kind == .lparen and p_toks[t - 2].kind == .ident and tok_src(t - 2) == "for":
+        fatal(p_toks[t - 2].pos, "loops are `loop i in [0..8):` (i from 0 to 7) and `loop g in gems:` (each element)")
+    if (k == .lt or k == .gt or k == .le or k == .ge or k == .eq or k == .ne) and t >= 1 and (p_toks[t - 1].kind == .kw_and or p_toks[t - 1].kind == .kw_or):
+        fatal(pos, "after `{tok_src(t - 1)}`, write the whole comparison again: `score > 10 and score < 20`")
+    # (play(s, when = 0.1): a word Sloppy keeps for itself, as an argument's or a variable's name)
+    if nk_is(t, .assign) and keywords.get(tok_src(t)) != none: fatal(pos, "'{tok_src(t)}' is a word Dewy keeps for itself, so it cannot name an argument or a variable (call it something else)")
+    fatal(pos, "expected an expression, found {tok_name(k)}")
+    0
+
+# one of several indexes: an expression, `..` (the whole axis) or `..b`
+
+parse_index_item = () -> int:
+    if pk() != .dotdot: return parse_expr()
+    r = mk(.range, cur_pos())
+    advance()
+    add_flag(r, NF_INCLUSIVE)
+    if pk() != .comma and pk() != .rbrack: nodes[r].b = i32(parse_expr())
+    r
+
+# xs.len() or len(xs)
+
+is_len_call = (e: int) -> bool:
+    if e == 0 or nodes[e].kind != .call: return false
+    c = int(nodes[e].a)
+    if nodes[c].kind == .field and name_of(int(nodes[c].name)) == "len" and nodes[e].nlist == 0: return true
+    nodes[c].kind == .ident and name_of(int(nodes[c].name)) == "len" and nodes[e].nlist == 1
+
+# a range's closing bracket: ] keeps the end, ) excludes it; lo_open: the range began with (
+
+range_close = (r: int, pos: int, lo_closed: bool):
+    clear_flag(r, NF_BARE)
+    if pk() == .rparen: clear_flag(r, NF_INCLUSIVE)
+    else if pk() != .rbrack: fatal(cur_pos(), "expected ']' or ')' to close the range")
+    else if lo_closed and is_len_call(int(nodes[r].b)) and nodes[r].a != 0 and nodes[int(nodes[r].a)].kind == .int_lit and nodes[int(nodes[r].a)].ival == 0 and not pos_in_lib(pos):
+        # ([0..xs.len()]: one past the last element, which counts from 0)
+        warn(cur_pos(), "`]` keeps the end, and xs.len() is one past the last element (they count from 0): `[0..xs.len())` leaves it out")
+    advance()
+    if not lo_closed:
+        one = mk(.int_lit, pos)
+        nodes[one].ival = 1
+        add_flag(one, NF_LITERAL)
+        b = mk(.binary, pos)
+        nodes[b].op = i32(int(Tok.plus))
+        nodes[b].a = nodes[r].a
+        nodes[b].b = i32(one)
+        nodes[r].a = i32(b)
+
+# [ ... ]: an array literal, a range [a..b] / [a..b) / [a,b..c], or a comprehension [loop ...]
+
+parse_bracket = () -> int:
+    pos = cur_pos()
+    advance()
+    if pk() == .kw_loop: return parse_comprehension(pos)
+    elems: int[]
+    ncols = -1          # 2-D literal: elements per row (rows end at ';' or a line break)
+    row_start = 0
+    first_break = 0
+    p_matrix += 1
+    loop pk() != .rbrack and pk() != .rparen:
+        if pk() == .ident and tok_src(ti) == "for" and elems.len() > 0: fatal(cur_pos(), "an array made by a loop is `[loop w in ws: w.upper()]` (and with a condition, `[loop w in ws: if w != \"\": w]`)")
+        el = parse_expr()
+        k = pk()
+        if k == .ellipsis:
+            advance()
+            add_flag(el, NF_SPREAD)
+            k = pk()
+        if nodes[el].kind == .range and elems.len() <= 1 and has_flag(el, NF_BARE):
+            if elems.len() == 0 and (k == .rbrack or k == .rparen):
+                p_matrix -= 1
+                range_close(el, pos, true)
+                return el
+            if elems.len() == 1 and not has_flag(elems[0], NF_SPREAD):
+                # [a, b..c]: from a to c, stepping by b - a
+                nodes[el].c = nodes[el].a
+                nodes[el].a = i32(elems[0])
+                add_flag(el, NF_STEP)
+                p_matrix -= 1
+                range_close(el, pos, true)
+                return el
+        elems.push(el)
+        if k == .comma:
+            advance()
+            continue
+        if k == .rbrack: break
+        # ';' or a line break (without a ',' before it) ends a row of a 2-D array
+        semi = k == .semi
+        if semi or (nl_before(ti) and p_toks[ti - 1].kind != .comma):
+            if semi: advance()
+            else if first_break == 0: first_break = el
+            w = elems.len() - row_start
+            if ncols < 0: ncols = w
+            else if w != ncols:
+                if first_break != 0: fatal(nodes[first_break].pos, "a `,` is missing after this (a line break without one starts a new row of a 2-D array)")
+                fatal(nodes[el].pos, "the rows of a 2-D array must have the same length (this row has {w} elements, the first has {ncols})")
+            row_start = elems.len()
+            continue
+        # a space separates elements
+        if not space_before(ti): fatal(cur_pos(), "expected ',' or ']' in the array")
+    p_matrix -= 1
+    if pk() == .rparen: fatal(cur_pos(), "')' closes only a range here")
+    expect(.rbrack, "")
+    if ncols >= 0:
+        w = elems.len() - row_start
+        if w > 0 and w != ncols:
+            if first_break != 0: fatal(nodes[first_break].pos, "a `,` is missing after this (a line break without one starts a new row of a 2-D array)")
+            fatal(pos, "the rows of a 2-D array must have the same length (the last row has {w} elements, the first has {ncols})")
+        m = mk(.matrix, pos)
+        set_list(m, elems)
+        nodes[m].ival = ncols
+        return m
+    n = mk(.array, pos)
+    set_list(n, elems)
+    n
+
+# does the '(' at i start a function literal: (params) -> R: ... or (params): ...?
+
+is_fn_literal = (i: int) -> bool:
+    if p_toks[i].kind != .lparen: return false
+    close = partner(i)
+    if close <= i or close + 1 >= p_ntoks: return false
+    after = p_toks[close + 1].kind
+    if after == .arrow: return true
+    # ((x) => x * 2: JavaScript's arrow)
+    if after == .assign and close + 2 < p_ntoks and p_toks[close + 2].kind == .gt and not space_before(close + 2):
+        fatal(p_toks[close + 1].pos, "a function value is written `(x): x * 2` (a colon, not `=>`)")
+    # (double = (x: int) x * 2: the colon after the parameters left out)
+    if (after == .ident or after == .int_lit or after == .float_lit or after == .str_lit or after == .lparen) and not p_header and i + 2 < close and p_toks[i + 1].kind == .ident and p_toks[i + 2].kind == .colon and not nl_before(close + 1):
+        fatal(p_toks[close + 1].pos, "a function needs a `:` after its parameters: `(x: int): x * 2`")
+    # (update = (dt: f64) {: braces for a block)
+    if after == .lbrace and not p_header and (i + 1 == close or (p_toks[i + 1].kind == .ident and i + 2 < close and p_toks[i + 2].kind == .colon)):
+        fatal(p_toks[close + 1].pos, "a block is a `:` and the lines below it, indented (no braces): `(dt: f64):`")
+    # (f = (): int: a return type after a colon)
+    if after == .colon and close + 3 < p_ntoks and p_toks[close + 2].kind == .ident and p_toks[close + 3].kind == .colon:
+        tn = tok_src(close + 2)
+        if word_in(tn, ["int", "f64", "f32", "str", "bool", "void", "vec2", "vec3", "vec4", "float", "string", "double"]): fatal(p_toks[close + 1].pos, "a function's result type is written after `->`: `() -> {tn}:`")
+    if after != .colon or p_header: return false
+    # the contents must look like parameters: [mut] name [: Type] [= default], ...
+    j = i + 1
+    if j == close: return true
+    loop j < close:
+        if p_toks[j].kind == .kw_mut: j += 1
+        # ((test: int): a keyword as a parameter's name)
+        if p_toks[j].kind != .ident:
+            if is_keyword_tok(p_toks[j].kind) and j + 1 < close and p_toks[j + 1].kind == .colon: keyword_name_error(j)
+            return false
+        j += 1
+        nk = p_toks[j].kind
+        if nk != .comma and nk != .colon and nk != .assign and j != close: return false
+        # skip the rest of this parameter
+        depth = 0
+        loop j < close:
+            kk = p_toks[j].kind
+            if kk == .lparen or kk == .lbrack or kk == .lbrace: depth += 1
+            else if kk == .rparen or kk == .rbrack or kk == .rbrace: depth -= 1
+            else if kk == .comma and depth == 0: break
+            j += 1
+        if j < close: j += 1
+    true
+
+parse_postfix = (e0: int) -> int:
+    e = e0
+    loop true:
+        pos = cur_pos()
+        k = pk()
+        # inside array brackets a space before ( or [ starts a new element
+        if p_matrix > 0 and (k == .lparen or k == .lbrack) and space_before(ti): return e
+        if k == .lparen:
+            ek = nodes[e].kind
+            if (ek == .int_lit or ek == .float_lit or ek == .array or ek == .matrix) and not space_before(ti) and is_unit_group(ti):
+                e = apply_unit(e)
+                continue
+            advance()
+            c = mk(.call, pos)
+            nodes[c].a = i32(e)
+            parse_args(c)
+            e = c
+        else if k == .lbrack and pkn(1) == .rbrack and not space_before(ti):
+            # T[]: the array type, as a type argument (zero[int[]]())
+            advance()
+            advance()
+            a = mk(.array, pos)
+            set_list(a, [e])
+            add_flag(a, NF_TYPE_EXPR)
+            e = a
+        else if k == .lbrack:
+            advance()
+            ix = mk(.index, pos)
+            nodes[ix].a = i32(e)
+            saved_m = p_matrix
+            p_matrix = 0
+            p_index.push(e)
+            if pk() == .dotdot and pkn(1) != .comma:
+                # xs[..b] / xs[..b)
+                advance()
+                r = mk(.range, pos)
+                add_flag(r, NF_INCLUSIVE)
+                if pk() != .rbrack and pk() != .rparen and pk() != .comma: nodes[r].b = i32(parse_expr())
+                else: clear_flag(r, NF_INCLUSIVE)
+                if pk() == .comma:
+                    # m[..b, j]
+                    targs = [r]
+                    loop accept(.comma): targs.push(parse_index_item())
+                    set_list(ix, targs)
+                    expect(.rbrack, "")
+                else:
+                    if pk() == .rparen: clear_flag(r, NF_INCLUSIVE)
+                    nodes[ix].b = i32(r)
+                    advance()
+            else:
+                b = parse_index_item()
+                if pk() == .comma:
+                    targs = [b]
+                    loop accept(.comma): targs.push(parse_index_item())
+                    set_list(ix, targs)
+                    expect(.rbrack, "")
+                else if nodes[b].kind == .range and has_flag(b, NF_BARE):
+                    # xs[a..b] includes b, xs[a..b) does not, xs[a..] goes to the end
+                    if nodes[b].b == 0: clear_flag(b, NF_INCLUSIVE)
+                    clear_flag(b, NF_BARE)
+                    if pk() == .rparen:
+                        clear_flag(b, NF_INCLUSIVE)
+                        advance()
+                    else: expect(.rbrack, "")
+                    nodes[ix].b = i32(b)
+                else:
+                    nodes[ix].b = i32(b)
+                    expect(.rbrack, "")
+            p_index.pop()
+            p_matrix = saved_m
+            e = ix
+        else if k == .dot:
+            advance()
+            if pk() == .lparen:
+                # f.(xs): f applied to each element
+                c = mk(.call, pos)
+                nodes[c].a = i32(e)
+                add_flag(c, NF_BROADCAST)
+                advance()
+                parse_args(c)
+                e = c
+                continue
+            f = mk(.field, pos)
+            nodes[f].a = i32(e)
+            if pk() == .int_lit:
+                t = advance()
+                nodes[f].name = i32(intern(tok_src(t)))
+                nodes[f].aux = -2
+                nodes[f].ival = p_toks[t].ival
+            else if pk() == .float_lit:
+                # x.0.1 lexes as a float "0.1"
+                t = advance()
+                txt = tok_src(t)
+                d = find_byte(txt, 46)
+                ok = d > 0 and d < len(txt) - 1
+                loop i in [0..len(txt)):
+                    if i != d and (txt[i] < 48 or txt[i] > 57): ok = false
+                if not ok: fatal(p_toks[t].pos, "expected a field name or a tuple index after '.', found '{txt}'")
+                nodes[f].name = i32(intern(txt[..d)))
+                nodes[f].aux = -2
+                nodes[f].ival = to_int(txt[..d)) ?? 0
+                f2 = mk(.field, pos)
+                nodes[f2].a = i32(f)
+                nodes[f2].name = i32(intern(txt[d + 1..]))
+                nodes[f2].aux = -2
+                nodes[f2].ival = to_int(txt[d + 1..]) ?? 0
+                e = f2
+                continue
+            else: nodes[f].name = i32(expect_name("field name"))
+            e = f
+        else if k == .bang:
+            advance()
+            u = mk(.unwrap, pos)
+            nodes[u].a = i32(e)
+            e = u
+        else: return e
+    e
+
+parse_if_expr = () -> int:
+    saved = p_no_tuple
+    p_no_tuple = true
+    n = parse_if()
+    p_no_tuple = saved
+    n
+
+parse_params = (f: int):
+    expect(.lparen, "")
+    ps: int[]
+    saved_m = p_matrix
+    p_matrix = 0
+    loop pk() != .rparen:
+        p = mk(.param, cur_pos())
+        if accept(.kw_mut): add_flag(p, NF_MUT)
+        nodes[p].name = i32(expect_ident("parameter name"))
+        if accept(.colon):
+            if accept(.kw_mut): add_flag(p, NF_MUT)
+            nodes[p].a = i32(parse_type())
+        if accept(.assign): nodes[p].b = i32(parse_expr())
+        ps.push(p)
+        if not accept(.comma): break
+    p_matrix = saved_m
+    expect(.rparen, "")
+    set_list(f, ps)
+
+# (params) [-> R] : body   (a declaration if name != 0; extern functions have no body)
+
+parse_fn_literal = (kind: NK, name: int, pos: int) -> int:
+    f = mk(kind, pos)
+    nodes[f].name = i32(name)
+    lambda = kind == .lambda
+    parse_params(f)
+    if accept(.arrow):
+        if pk() == .ident and p_toks[ti].ival == id_void:
+            advance()
+            add_flag(f, NF_VOID)
+        else: nodes[f].a = i32(parse_type())
+    if pk() == .colon and pkn(1) == .newline and pkn(2) == .lazy and p_top_decl and kind == .fn_:
+        # (its text, parsed when used: ensure_body)
+        advance()
+        advance()
+        lz = advance()
+        b = mk(.block, pos)
+        add_flag(b, NF_LAZY)
+        add_flag(b, NF_TERMINATED)
+        nodes[b].ival = int(p_toks[lz].start)
+        nodes[b].aux = p_toks[lz].len
+        nodes[f].b = i32(b)
+        add_flag(f, NF_TERMINATED)
+    else if pk() == .colon:
+        advance()
+        saved = p_no_tuple
+        saved_m = p_matrix
+        saved_h = p_header
+        p_matrix = 0
+        p_header = false
+        p_no_tuple = lambda and pk() != .newline
+        nodes[f].b = i32(parse_block())
+        p_no_tuple = saved
+        p_matrix = saved_m
+        p_header = saved_h
+        if has_flag(int(nodes[f].b), NF_TERMINATED): add_flag(f, NF_TERMINATED)
+    else if not lambda and (pk() == .newline or pk() == .eof): pass
+    else: fatal(cur_pos(), "expected ':' and the function body")
+    loop i in [0..nkids(f)):
+        if nodes[kid(f, i)].a == 0: add_flag(f, NF_GENERIC)
+    f
+
+# a function declaration starts here: name = (...) ->/:, name[T] = (...), (+) = (...)
+

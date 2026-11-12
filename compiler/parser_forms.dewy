@@ -1,0 +1,488 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_BARE NF_BROADCAST NF_GENERIC NF_INCLUSIVE NF_LAZY NF_LITERAL NF_MUT NF_SPREAD NF_STEP NF_TERMINATED NF_TYPE_EXPR NF_U64 NF_VOID add_flag clear_flag has_flag kid mk nkids nodes set_list)
+from p"checker_tokens.dewy" import (Tok)
+from p"diagnostic_exit.dewy" import (fatal)
+from p"lex.jo" import (keywords)
+from p"lexer_errors.dewy" import (mixed_indent_note tok_name)
+from p"node_store.dewy" import (NK)
+from p"parse.jo" import (expect expect_ident expect_name habit id_end id_void is_keyword_tok p_header p_id_async p_id_await p_index p_matrix p_no_tuple p_ntoks p_src p_toks p_top_decl parse_block parse_comprehension parse_if parse_match parse_string_token parse_type ti tok_src word_in)
+from p"parser_cursor.dewy" import (accept advance cur_pos partner pk pkn space_before)
+from p"parser_errors.dewy" import (keyword_name_error)
+from p"parser_expr.dewy" import (parse_args parse_expr)
+from p"parser_positions.dewy" import (index_end line_indent nk_is nl_before prev_end)
+from p"parser_units.dewy" import (apply_unit is_unit_group)
+from p"util.jo" import (intern name_of pos_in_lib warn)
+from p"@lib/core/str.jo" import (find_byte)
+
+FormWord:type=int64<overflow='wrap'>
+
+# The Jo parser owns the EOF-terminated token stream and node arena. These
+# recursive forms read its indexed state directly and reacquire node slots after
+# builders or recursive calls, which may grow the arena.
+parse_primary=():>int64=>$unsafe {
+    let t=ti
+    let pos=cur_pos()
+    let k=pk()
+    if p_id_async =? 0 {
+        p_id_async=intern("async")
+        p_id_await=intern("await")
+    }
+    if k =? 'ident' and ((p_toks[t].ival =? p_id_async and p_toks[t + 1].kind =? 'lparen' and partner(t + 1) >? t and (p_toks[partner(t + 1) + 1].kind =? 'colon' or p_toks[partner(t + 1) + 1].kind =? 'arrow')) or (p_toks[t].ival =? p_id_await and p_toks[t + 1].kind =? 'ident')) {
+        fatal(pos "there is no async or await: something that takes time is a state changed a little in update each frame, or steps in `Actions` (`steps.then(0.3, (): drop())`, `steps.update(dt)` in update)")
+    }
+    if k =? 'int_lit' {
+        advance();
+        let n=mk('int_lit' pos)
+        nodes.ptr[n].ival=p_toks[t].ival
+        add_flag(n NF_LITERAL)
+        if p_toks[t].ival <? 0 {add_flag(n NF_U64)}
+        return n
+    }
+    if k =? 'float_lit' {
+        advance();
+        let n=mk('float_lit' pos)
+        nodes.ptr[n].fval=p_toks[t].fval
+        add_flag(n NF_LITERAL)
+        return n
+    }
+    if k =? 'str_lit' {advance(); return parse_string_token(t)}
+    if k =? 'kw_true' or k =? 'kw_false' {
+        advance();
+        let n=mk('bool_lit' pos)
+        if k =? 'kw_true' {nodes.ptr[n].ival=1}
+        return n
+    }
+    if k =? 'kw_none' {advance(); return mk('none_lit' pos)}
+    if k =? 'kw_null' {advance(); return mk('null_lit' pos)}
+    if k =? 'ident' {
+        advance();
+        if p_toks[t].len =? 1 and (p_src as array<uint8>)[p_toks[t].start] =? 95 {return mk('hole' pos)}
+        if p_toks[t].ival =? id_end and p_index.length >? 0 {return index_end(pos)}
+        let n=mk('ident' pos)
+        nodes.ptr[n].name=int32<overflow='wrap'>(p_toks[t].ival)
+        return n
+    }
+    if k =? 'dot' {
+        advance();
+        if pk() =? 'int_lit' and p_toks[ti].ival >=? 0 and p_toks[ti].ival <=? 9 {fatal(cur_pos() "the key {p_toks[ti].ival} is `.n{p_toks[ti].ival}` (a name cannot start with a digit)")}
+        let n=mk('dotname' pos)
+        nodes.ptr[n].name=int32<overflow='wrap'>(expect_name("name after '.'"))
+        return n
+    }
+    if k =? 'lparen' {
+        if is_fn_literal(ti) {return parse_fn_literal('lambda' 0 pos)}
+        advance();
+        if accept('rparen') {return mk('tuple' pos)}
+        let saved_m=p_matrix
+        p_matrix=0
+        let e=parse_expr()
+        p_matrix=saved_m
+        if pk() =? 'comma' {
+            let n=mk('tuple' pos)
+            let elems:array<int64>=[e]
+            p_matrix=0
+            loop accept('comma') {
+                if pk() =? 'rparen' {break}
+                elems.push(parse_expr())
+            }
+            p_matrix=saved_m
+            expect('rparen' "");
+            set_list(n elems)
+            return n
+        }
+        if nodes.ptr[e].kind =? 'range' and has_flag(e NF_BARE) and (pk() =? 'rparen' or pk() =? 'rbrack') {
+            range_close(e pos false)
+            return e
+        }
+        expect('rparen' "");
+        return e
+    }
+    if k =? 'lbrack' {return parse_bracket()}
+    if k =? 'lbrace' {
+        advance();
+        if pk() =? 'kw_loop' {return parse_comprehension(pos true)}
+        let n=mk('map_lit' pos)
+        let pairs:array<int64>=[]
+        let saved_m=p_matrix
+        p_matrix=0
+        loop pk() not=? 'rbrace' {
+            let pr=mk('pair' cur_pos())
+            nodes.ptr[pr].a=int32<overflow='wrap'>(parse_expr())
+            if pk() =? 'assign' {fatal(cur_pos() "a map is `\{\"x\": 1, \"y\": 2}` (keys are values); for named fields, declare a struct and make one with `Point(x = 1, y = 2)`")}
+            expect('colon' "");
+            nodes.ptr[pr].b=int32<overflow='wrap'>(parse_expr())
+            if pk() =? 'ident' and tok_src(ti) =? "for" {fatal(cur_pos() "a map made by a loop is `\{loop w in ws: w: len(w)}`")}
+            pairs.push(pr)
+            if not accept('comma') {break}
+        }
+        p_matrix=saved_m
+        expect('rbrace' "");
+        set_list(n pairs)
+        return n
+    }
+    if k =? 'kw_if' {return parse_if_expr()}
+    if k =? 'kw_match' {return parse_match()}
+    habit(t 'eof')
+    if k =? 'ident' or k =? 'int_lit' {fatal(pos "unexpected '{tok_src(t)}'")}
+    if k =? 'indent' {
+        if mixed_indent_note() not=? "" {fatal(pos "unexpected indentation{mixed_indent_note()}")}
+        if t >? 1 and p_toks[t - 1].kind =? 'newline' and p_toks[t - 2].kind not=? 'colon' {
+            let here=line_indent(p_toks[t + 1].pos)
+            let above=line_indent(p_toks[t - 2].pos)
+            if here >? above and here - above <=? 2 {fatal(pos "this line is indented more than the line above ({here} spaces, the line above has {above})")}
+            fatal(pos "unexpected indentation (does the line above need a `:` at its end?)")
+        }
+        fatal(pos "unexpected indentation (this line is indented deeper than the lines around it)")
+    }
+    if k =? 'newline' or k =? 'eof' {fatal(prev_end() "expected an expression here")}
+    if k =? 'colon' and t >=? 2 and p_toks[t - 1].kind =? 'assign' and p_toks[t - 2].kind =? 'ident' {fatal(pos "a function is written `{tok_src(t - 2)} = ():` (its parameters, maybe none, in brackets before the colon)")}
+    if k =? 'star' {fatal(pos "what a pointer points at is `p[0]` (its fields: `p.x`); there is no `*` before a value")}
+    if k =? 'kw_loop' {fatal(pos "a loop cannot follow a `:` on the same line: put it on a line of its own, indented below")}
+    if t >=? 2 and p_toks[t - 1].kind =? 'lparen' and p_toks[t - 2].kind =? 'ident' and tok_src(t - 2) =? "for" {fatal(p_toks[t - 2].pos "loops are `loop i in [0..8):` (i from 0 to 7) and `loop g in gems:` (each element)")}
+    if (k =? 'lt' or k =? 'gt' or k =? 'le' or k =? 'ge' or k =? 'eq' or k =? 'ne') and t >=? 1 and (p_toks[t - 1].kind =? 'kw_and' or p_toks[t - 1].kind =? 'kw_or') {fatal(pos "after `{tok_src(t - 1)}`, write the whole comparison again: `score > 10 and score < 20`")}
+    if nk_is(t 'assign') and keywords.get(tok_src(t)) not=? none {fatal(pos "'{tok_src(t)}' is a word Dewy keeps for itself, so it cannot name an argument or a variable (call it something else)")}
+    fatal(pos "expected an expression, found {tok_name(k)}")
+}
+
+parse_index_item=():>int64=>$unsafe {
+    if pk() not=? 'dotdot' {return parse_expr()}
+    let r=mk('range' cur_pos())
+    advance();
+    add_flag(r NF_INCLUSIVE)
+    if pk() not=? 'comma' and pk() not=? 'rbrack' {nodes.ptr[r].b=int32<overflow='wrap'>(parse_expr())}
+    r
+}
+is_len_call=(e:FormWord):>bool=>$unsafe {
+    if e =? 0 or nodes.ptr[e].kind not=? 'call' {return false}
+    let c=FormWord(nodes.ptr[e].a)
+    if nodes.ptr[c].kind =? 'field' and name_of(FormWord(nodes.ptr[c].name)) =? "len" and nodes.ptr[e].nlist =? 0 {return true}
+    nodes.ptr[c].kind =? 'ident' and name_of(FormWord(nodes.ptr[c].name)) =? "len" and nodes.ptr[e].nlist =? 1
+}
+range_close=(r:FormWord pos:FormWord lo_closed:bool):>void=>$unsafe {
+    clear_flag(r NF_BARE)
+    if pk() =? 'rparen' {clear_flag(r NF_INCLUSIVE)}
+    else if pk() not=? 'rbrack' {fatal(cur_pos() "expected ']' or ')' to close the range")}
+    else if lo_closed and is_len_call(FormWord(nodes.ptr[r].b)) and nodes.ptr[r].a not=? 0 and nodes.ptr[FormWord(nodes.ptr[r].a)].kind =? 'int_lit' and nodes.ptr[FormWord(nodes.ptr[r].a)].ival =? 0 and not pos_in_lib(pos) {
+        warn(cur_pos() "`]` keeps the end, and xs.len() is one past the last element (they count from 0): `[0..xs.len())` leaves it out")
+    }
+    advance();
+    if not lo_closed {
+        let one=mk('int_lit' pos)
+        nodes.ptr[one].ival=1
+        add_flag(one NF_LITERAL)
+        let b=mk('binary' pos)
+        nodes.ptr[b].op=59 # Frozen Tok.plus ordinal.
+        nodes.ptr[b].a=nodes.ptr[r].a
+        nodes.ptr[b].b=int32<overflow='wrap'>(one)
+        nodes.ptr[r].a=int32<overflow='wrap'>(b)
+    }
+}
+
+parse_bracket=():>int64=>$unsafe {
+    let pos=cur_pos()
+    advance();
+    if pk() =? 'kw_loop' {return parse_comprehension(pos)}
+    let elems:array<int64>=[]
+    let ncols:FormWord=-1
+    let row_start:FormWord=0
+    let first_break:FormWord=0
+    p_matrix += 1
+    loop pk() not=? 'rbrack' and pk() not=? 'rparen' {
+        if pk() =? 'ident' and tok_src(ti) =? "for" and elems.length >? 0 {fatal(cur_pos() "an array made by a loop is `[loop w in ws: w.upper()]` (and with a condition, `[loop w in ws: if w != \"\": w]`)")}
+        let el=parse_expr()
+        let k=pk()
+        if k =? 'ellipsis' {advance(); add_flag(el NF_SPREAD); k=pk()}
+        if nodes.ptr[el].kind =? 'range' and elems.length <=? 1 and has_flag(el NF_BARE) {
+            if elems.length =? 0 and (k =? 'rbrack' or k =? 'rparen') {
+                p_matrix -= 1
+                range_close(el pos true)
+                return el
+            }
+            if elems.length =? 1 and not has_flag(elems[0] NF_SPREAD) {
+                nodes.ptr[el].c=nodes.ptr[el].a
+                nodes.ptr[el].a=int32<overflow='wrap'>(elems[0])
+                add_flag(el NF_STEP)
+                p_matrix -= 1
+                range_close(el pos true)
+                return el
+            }
+        }
+        elems.push(el)
+        if k =? 'comma' {advance(); continue}
+        if k =? 'rbrack' {break}
+        let semi=k =? 'semi'
+        if semi or (nl_before(ti) and p_toks[ti - 1].kind not=? 'comma') {
+            if semi {advance();}
+            else if first_break =? 0 {first_break=el}
+            let w=FormWord(elems.length) - row_start
+            if ncols <? 0 {ncols=w}
+            else if w not=? ncols {
+                if first_break not=? 0 {fatal(nodes.ptr[first_break].pos "a `,` is missing after this (a line break without one starts a new row of a 2-D array)")}
+                fatal(nodes.ptr[el].pos "the rows of a 2-D array must have the same length (this row has {w} elements, the first has {ncols})")
+            }
+            row_start=elems.length
+            continue
+        }
+        if not space_before(ti) {fatal(cur_pos() "expected ',' or ']' in the array")}
+    }
+    p_matrix -= 1
+    if pk() =? 'rparen' {fatal(cur_pos() "')' closes only a range here")}
+    expect('rbrack' "");
+    if ncols >=? 0 {
+        let w=FormWord(elems.length) - row_start
+        if w >? 0 and w not=? ncols {
+            if first_break not=? 0 {fatal(nodes.ptr[first_break].pos "a `,` is missing after this (a line break without one starts a new row of a 2-D array)")}
+            fatal(pos "the rows of a 2-D array must have the same length (the last row has {w} elements, the first has {ncols})")
+        }
+        let m=mk('matrix' pos)
+        set_list(m elems)
+        nodes.ptr[m].ival=ncols
+        return m
+    }
+    let n=mk('array' pos)
+    set_list(n elems)
+    n
+}
+
+is_fn_literal=(i:FormWord):>bool=>$unsafe {
+    if p_toks[i].kind not=? 'lparen' {return false}
+    let close=partner(i)
+    if close <=? i or close + 1 >=? p_ntoks {return false}
+    let after=p_toks[close + 1].kind
+    if after =? 'arrow' {return true}
+    if after =? 'assign' and close + 2 <? p_ntoks and p_toks[close + 2].kind =? 'gt' and not space_before(close + 2) {fatal(p_toks[close + 1].pos "a function value is written `(x): x * 2` (a colon, not `=>`)")}
+    if (after =? 'ident' or after =? 'int_lit' or after =? 'float_lit' or after =? 'str_lit' or after =? 'lparen') and not p_header and i + 2 <? close and p_toks[i + 1].kind =? 'ident' and p_toks[i + 2].kind =? 'colon' and not nl_before(close + 1) {fatal(p_toks[close + 1].pos "a function needs a `:` after its parameters: `(x: int): x * 2`")}
+    if after =? 'lbrace' and not p_header and (i + 1 =? close or (p_toks[i + 1].kind =? 'ident' and i + 2 <? close and p_toks[i + 2].kind =? 'colon')) {fatal(p_toks[close + 1].pos "a block is a `:` and the lines below it, indented (no braces): `(dt: f64):`")}
+    if after =? 'colon' and close + 3 <? p_ntoks and p_toks[close + 2].kind =? 'ident' and p_toks[close + 3].kind =? 'colon' {
+        let tn=tok_src(close + 2)
+        if word_in(tn ["int" "f64" "f32" "str" "bool" "void" "vec2" "vec3" "vec4" "float" "string" "double"]) {fatal(p_toks[close + 1].pos "a function's result type is written after `->`: `() -> {tn}:`")}
+    }
+    if after not=? 'colon' or p_header {return false}
+    let j=i + 1
+    if j =? close {return true}
+    loop j <? close {
+        if p_toks[j].kind =? 'kw_mut' {j += 1}
+        if p_toks[j].kind not=? 'ident' {
+            if is_keyword_tok(p_toks[j].kind) and j + 1 <? close and p_toks[j + 1].kind =? 'colon' {keyword_name_error(j)}
+            return false
+        }
+        j += 1
+        let nk=p_toks[j].kind
+        if nk not=? 'comma' and nk not=? 'colon' and nk not=? 'assign' and j not=? close {return false}
+        let depth:FormWord=0
+        loop j <? close {
+            let kk=p_toks[j].kind
+            if kk =? 'lparen' or kk =? 'lbrack' or kk =? 'lbrace' {depth += 1}
+            else if kk =? 'rparen' or kk =? 'rbrack' or kk =? 'rbrace' {depth -= 1}
+            else if kk =? 'comma' and depth =? 0 {break}
+            j += 1
+        }
+        if j <? close {j += 1}
+    }
+    true
+}
+
+parse_postfix=(e0:FormWord):>int64=>$unsafe {
+    let e=e0
+    loop true {
+        let k=pk()
+        if p_matrix >? 0 and (k =? 'lparen' or k =? 'lbrack') and space_before(ti) {return e}
+        if k =? 'lparen' {
+            let ek=nodes.ptr[e].kind
+            if (ek =? 'int_lit' or ek =? 'float_lit' or ek =? 'array' or ek =? 'matrix') and not space_before(ti) and is_unit_group(ti) {
+                e=apply_unit(e)
+                continue
+            }
+            let pos=cur_pos()
+            advance();
+            let c=mk('call' pos)
+            nodes.ptr[c].a=int32<overflow='wrap'>(e)
+            parse_args(c)
+            e=c
+        }
+        else if k =? 'lbrack' and pkn(1) =? 'rbrack' and not space_before(ti) {
+            let pos=cur_pos()
+            advance(); advance();
+            let a=mk('array' pos)
+            set_list(a [e])
+            add_flag(a NF_TYPE_EXPR)
+            e=a
+        }
+        else if k =? 'lbrack' {
+            let pos=cur_pos()
+            advance();
+            let ix=mk('index' pos)
+            nodes.ptr[ix].a=int32<overflow='wrap'>(e)
+            let saved_m=p_matrix
+            p_matrix=0
+            p_index.push(e)
+            if pk() =? 'dotdot' and pkn(1) not=? 'comma' {
+                advance();
+                let r=mk('range' pos)
+                add_flag(r NF_INCLUSIVE)
+                if pk() not=? 'rbrack' and pk() not=? 'rparen' and pk() not=? 'comma' {nodes.ptr[r].b=int32<overflow='wrap'>(parse_expr())}
+                else {clear_flag(r NF_INCLUSIVE)}
+                if pk() =? 'comma' {
+                    let targs:array<int64>=[r]
+                    loop accept('comma') {targs.push(parse_index_item())}
+                    set_list(ix targs)
+                    expect('rbrack' "");
+                }
+                else {
+                    if pk() =? 'rparen' {clear_flag(r NF_INCLUSIVE)}
+                    nodes.ptr[ix].b=int32<overflow='wrap'>(r)
+                    advance();
+                }
+            }
+            else {
+                let b=parse_index_item()
+                if pk() =? 'comma' {
+                    let targs:array<int64>=[b]
+                    loop accept('comma') {targs.push(parse_index_item())}
+                    set_list(ix targs)
+                    expect('rbrack' "");
+                }
+                else if nodes.ptr[b].kind =? 'range' and has_flag(b NF_BARE) {
+                    if nodes.ptr[b].b =? 0 {clear_flag(b NF_INCLUSIVE)}
+                    clear_flag(b NF_BARE)
+                    if pk() =? 'rparen' {clear_flag(b NF_INCLUSIVE); advance();}
+                    else {expect('rbrack' "");}
+                    nodes.ptr[ix].b=int32<overflow='wrap'>(b)
+                }
+                else {
+                    nodes.ptr[ix].b=int32<overflow='wrap'>(b)
+                    expect('rbrack' "");
+                }
+            }
+            p_index.pop();
+            p_matrix=saved_m
+            e=ix
+        }
+        else if k =? 'dot' {
+            let pos=cur_pos()
+            advance();
+            if pk() =? 'lparen' {
+                let c=mk('call' pos)
+                nodes.ptr[c].a=int32<overflow='wrap'>(e)
+                add_flag(c NF_BROADCAST)
+                advance();
+                parse_args(c)
+                e=c
+                continue
+            }
+            let f=mk('field' pos)
+            nodes.ptr[f].a=int32<overflow='wrap'>(e)
+            if pk() =? 'int_lit' {
+                let t=advance()
+                nodes.ptr[f].name=int32<overflow='wrap'>(intern(tok_src(t)))
+                nodes.ptr[f].aux=-2
+                nodes.ptr[f].ival=p_toks[t].ival
+            }
+            else if pk() =? 'float_lit' {
+                let t=advance()
+                let txt=tok_src(t)
+                let d=find_byte(txt 46)
+                let ok=d >? 0 and d <? (txt as array<uint8>).length - 1
+                loop i in [0..(txt as array<uint8>).length) {
+                    let c=(txt as array<uint8>)[i]
+                    if i not=? d and (c <? 48 or c >? 57) {ok=false}
+                }
+                if not ok {fatal(p_toks[t].pos "expected a field name or a tuple index after '.', found '{txt}'")}
+                nodes.ptr[f].name=int32<overflow='wrap'>(intern(txt[..d)))
+                nodes.ptr[f].aux=-2
+                nodes.ptr[f].ival=to_int(txt[..d)) ?? 0
+                let f2=mk('field' pos)
+                nodes.ptr[f2].a=int32<overflow='wrap'>(f)
+                nodes.ptr[f2].name=int32<overflow='wrap'>(intern(txt[d + 1..]))
+                nodes.ptr[f2].aux=-2
+                nodes.ptr[f2].ival=to_int(txt[d + 1..]) ?? 0
+                e=f2
+                continue
+            }
+            else {nodes.ptr[f].name=int32<overflow='wrap'>(expect_name("field name"))}
+            e=f
+        }
+        else if k =? 'bang' {
+            let pos=cur_pos()
+            advance();
+            let u=mk('unwrap' pos)
+            nodes.ptr[u].a=int32<overflow='wrap'>(e)
+            e=u
+        }
+        else {return e}
+    }
+    e
+}
+
+parse_if_expr=():>int64=>{
+    let saved=p_no_tuple
+    p_no_tuple=true
+    let n=parse_if()
+    p_no_tuple=saved
+    n
+}
+
+parse_params=(f:FormWord):>void=>$unsafe {
+    expect('lparen' "");
+    let ps:array<int64>=[]
+    let saved_m=p_matrix
+    p_matrix=0
+    loop pk() not=? 'rparen' {
+        let p=mk('param' cur_pos())
+        if accept('kw_mut') {add_flag(p NF_MUT)}
+        nodes.ptr[p].name=int32<overflow='wrap'>(expect_ident("parameter name"))
+        if accept('colon') {
+            if accept('kw_mut') {add_flag(p NF_MUT)}
+            nodes.ptr[p].a=int32<overflow='wrap'>(parse_type())
+        }
+        if accept('assign') {nodes.ptr[p].b=int32<overflow='wrap'>(parse_expr())}
+        ps.push(p)
+        if not accept('comma') {break}
+    }
+    p_matrix=saved_m
+    expect('rparen' "");
+    set_list(f ps)
+}
+
+parse_fn_literal=(kind:NK name:FormWord pos:FormWord):>int64=>$unsafe {
+    let f=mk(kind pos)
+    nodes.ptr[f].name=int32<overflow='wrap'>(name)
+    let lambda=kind =? 'lambda'
+    parse_params(f)
+    if accept('arrow') {
+        if pk() =? 'ident' and p_toks[ti].ival =? id_void {advance(); add_flag(f NF_VOID)}
+        else {nodes.ptr[f].a=int32<overflow='wrap'>(parse_type())}
+    }
+    if pk() =? 'colon' and pkn(1) =? 'newline' and pkn(2) =? 'lazy' and p_top_decl and kind =? 'fn_' {
+        advance(); advance();
+        let lz=advance()
+        let b=mk('block' pos)
+        add_flag(b NF_LAZY)
+        add_flag(b NF_TERMINATED)
+        nodes.ptr[b].ival=p_toks[lz].start
+        nodes.ptr[b].aux=p_toks[lz].len
+        nodes.ptr[f].b=int32<overflow='wrap'>(b)
+        add_flag(f NF_TERMINATED)
+    }
+    else if pk() =? 'colon' {
+        advance();
+        let saved=p_no_tuple
+        let saved_m=p_matrix
+        let saved_h=p_header
+        p_matrix=0
+        p_header=false
+        p_no_tuple=lambda and pk() not=? 'newline'
+        nodes.ptr[f].b=int32<overflow='wrap'>(parse_block())
+        p_no_tuple=saved
+        p_matrix=saved_m
+        p_header=saved_h
+        if has_flag(FormWord(nodes.ptr[f].b) NF_TERMINATED) {add_flag(f NF_TERMINATED)}
+    }
+    else if not lambda and (pk() =? 'newline' or pk() =? 'eof') {}
+    else {fatal(cur_pos() "expected ':' and the function body")}
+    loop i in [0..nkids(f)) {
+        if nodes.ptr[kid(f i)].a =? 0 {add_flag(f NF_GENERIC)}
+    }
+    f
+}

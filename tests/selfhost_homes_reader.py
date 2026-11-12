@@ -4,6 +4,7 @@
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
     'parser_expr': 'parse.jo',
+    'parser_forms': 'parse.jo',
     'lexer_line_context': 'lex.jo',
     'parser_cursor': 'parse.jo',
     'lexer_line_closes': 'lex.jo',
