@@ -468,6 +468,55 @@ _resolve=(local:int64 nanos:int z:Zone fold:_FoldChoice|none gap:_GapChoice|none
     Ambiguous["{_local_text(local)} happens more than once in {name(z)}. Add fold='earlier' or fold='later'" [loop o in found int(o)]]
 }
 
+# The single-result path keeps the narrow policy types and result shape. Constant evaluation of
+# a zoned literal can then prove a named policy without widening a literal union during the call.
+_resolve_one=(local:int64 nanos:int z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields=>{
+    let record=_record(z)
+    let window:int64=93600
+    let early=offset_at(z local-window)
+    let late=offset_at(z local+window)
+    let seen:array<int64>=[early]
+    let first=_changes_before(record local-window)
+    let last=_changes_before(record local+window)
+    let i=first
+    loop i <? last {
+        let o=_offset_after(record i+1)
+        if not seen.contains(o) {seen.push(o)}
+        i=i+1
+    }
+    if not seen.contains(late) {seen.push(late)}
+    let found:array<int64>=[]
+    loop o in seen {
+        if offset_at(z local-o) =? o {found.push(o)}
+    }
+    found.sort(reverse=true)
+    if found.length =? 1 {return _at(local-found[0] nanos z found[0])}
+    if found.length =? 0 {
+        let widest=seen[0]
+        let narrowest=seen[0]
+        loop o in seen {
+            if o >? widest {widest=o}
+            if o <? narrowest {narrowest=o}
+        }
+        let before=offset_at(z local-widest)
+        let after=offset_at(z local-narrowest)
+        if gap =? 'preserve_displacement' {return _at(local-before nanos z after)}
+        if gap =? 'next' {
+            let low=local-widest
+            let high=local-narrowest
+            loop high-low >? 1 {
+                let middle=low+(high-low)//2
+                if offset_at(z middle) =? before {low=middle} else {high=middle}
+            }
+            return _at(high 0 z offset_at(z high))
+        }
+        return Gap["{_local_text(local)} does not exist in {name(z)}: the clocks jumped from {_pair_text(before)} to {_pair_text(after)}. Add gap='preserve_displacement' or gap='next'" int(before) int(after)]
+    }
+    if fold =? 'earlier' {return _at(local-found[0] nanos z found[0])}
+    if fold =? 'later' {return _at(local-found[found.length-1] nanos z found[found.length-1])}
+    Ambiguous["{_local_text(local)} happens more than once in {name(z)}. Add fold='earlier' or fold='later'" [loop o in found int(o)]]
+}
+
 # The zone of a time: written in its text, or given, or the scope's. A literal cannot assume.
 _zone_for=(written:Zone|none given:Zone|none scope:string|none running:bool):>Zone|UnknownZone|MissingContext=>{
     if written isnt? none {return written}
@@ -520,7 +569,32 @@ _zoned_one=(r:ZonedDateTime|array<ZonedDateTime>|none|ParseError|Gap|Ambiguous|U
     e:InvalidFields=>e
     <OffGrid>=>OffGrid
 }
-zoned_parse_one=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none running:bool=true):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>_zoned_one(zoned_parse(text zone fold gap scope running))
+zoned_parse_one=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none running:bool=true):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>{
+    let c=_Cursor[text 0]
+    let f=read_fields(@c) or_throw
+    if not f.has_time {return ParseError["a zoned time needs a time of day, as `2026-10-26T09:00[America/New_York]`"]}
+    let written=read_offset(@c) or_throw
+    let bytes=text as array<uint8>
+    let written_zone:Zone|none=none
+    if _byte(c c.at) =? 91 {
+        let close=c.at
+        loop close <? bytes.length and _byte(c close) not=? 93 {close=close+1}
+        if close =? bytes.length {return ParseError["a zone in brackets closes with `]`"]}
+        written_zone=zone_parse(text[c.at+1..close)) or_throw
+        c.at=close+1
+    }
+    if c.at not=? bytes.length {return ParseError["unexpected text after the time"]}
+    let chosen=_zone_for(written_zone zone scope running) or_throw
+    if f.second =? 60 {return InvalidFields["a :60 second is a UTC label: use `utc`"]}
+    let days=days_from_civil(f.year f.month f.day)
+    let local=(days*86400+int(f.hour)*3600+int(f.minute)*60+int(f.second)).to_int64() ?? 0
+    if written not=? NO_OFFSET {
+        let moment=local-written
+        if offset_at(chosen moment) not=? written {return ParseError["{name(chosen)} was not at {_pair_text(written)} then"]}
+        return _at(moment int(f.nanosecond) chosen written)
+    }
+    _resolve_one(local int(f.nanosecond) chosen fold gap)
+}
 _zoned_all=(r:ZonedDateTime|array<ZonedDateTime>|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields):>array<ZonedDateTime>|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>match r {
     z:ZonedDateTime=>[z]
     zs:array<ZonedDateTime>=>zs
@@ -556,6 +630,21 @@ zoned_parse_all_skip=(text:string zone:Zone|none scope:string|none running:bool=
 }
 # (a literal needs rules while compiling, and `'host'` has none until the program runs)
 const _HOST_LITERAL="`$time.zone_source = 'host'` follows this machine's rules when the program runs, so a literal cannot be worked out from them: read it from text at run time, as `zoned(text)`"
+zoned_error_one=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>{
+    if _HOST {return _HOST_LITERAL}
+    match zoned_parse_one(text zone fold gap scope false) {
+        z:ZonedDateTime=>none
+        e:ParseError=>e.message
+        e:Gap=>e.message
+        e:Ambiguous=>e.message
+        e:UnknownZone=>e.message
+        e:MissingContext=>e.message
+        e:OutsideCoverage=>e.message
+        e:InvalidFields=>e.message
+        <OffGrid>=>"that label falls between nanoseconds under the UTC rate of its time"
+    }
+}
+zoned_text_error_one=(text:string fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>zoned_error_one(text none fold gap scope)
 zoned_error=(text:string zone:Zone|none fold:_FoldChoice|none gap:_GapChoice|none scope:string|none):>string?=>{
     if _HOST {return _HOST_LITERAL}
     match zoned_parse(text zone fold gap scope false) {
@@ -580,7 +669,7 @@ zoned_text_error=(text:string fold:_FoldChoice|none gap:_GapChoice|none scope:st
 _local=(z:ZonedDateTime):>int=>_zone_seconds(z.nominal)+int(z.offset._seconds)
 __as__=(z:ZonedDateTime):>string=>{
     let [_m in_day]=_zone_label(z.nominal)
-    "{_local_text(_local(z))}{_fraction_text(in_day%_NS)}{z.offset}[{name(z.zone)}]"
+    "{_local_text(_local(z))}{_fraction_text(in_day%_NS)}{_pair_text(int64(z.offset._seconds))}[{name(z.zone)}]"
 }
 # Elapsed time: a zoned value moves as its instant does.
 __add__=(z:ZonedDateTime d:Duration):>ZonedDateTime=>in_zone(z.nominal+d z.zone)
@@ -737,7 +826,18 @@ local_in_zone=(l:LocalDateTime z:Zone fold:_FoldChoice|none gap:_GapChoice|none)
     let moment=(days*86400).to_int64() ?? 0
     _civil(_resolve(moment+whole int(l.time._ns%1000000000) z fold gap))
 }
-local_in_zone_one=(l:LocalDateTime z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>_civil_one(local_in_zone(l z fold gap))
+local_in_zone_one=(l:LocalDateTime z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>{
+    let moment=(int(l.date._days)*86400).to_int64() ?? 0
+    let whole=l.time._ns//1000000000
+    match _resolve_one(moment+whole int(l.time._ns%1000000000) z fold gap) {
+        value:ZonedDateTime=>value
+        e:Gap=>e
+        e:Ambiguous=>e
+        e:OutsideCoverage=>Gap[e.message 0 0]
+        e:InvalidFields=>Gap[e.message 0 0]
+        <OffGrid>=>Gap["that label falls between nanoseconds under the UTC rate of its time" 0 0]
+    }
+}
 _civil_all=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous):>array<ZonedDateTime>|Gap|Ambiguous=>match r {
     z:ZonedDateTime=>[z]
     zs:array<ZonedDateTime>=>zs
@@ -759,6 +859,11 @@ _civil_all_skip=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous):>array
     r
 }
 local_in_zone_all_skip=(l:LocalDateTime z:Zone):>array<ZonedDateTime>|none|Gap|Ambiguous=>_civil_all_skip(local_in_zone(l z 'all' 'skip'))
+local_zone_error_one=(l:LocalDateTime z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>string?=>match local_in_zone_one(l z fold gap) {
+    value:ZonedDateTime=>none
+    e:Gap=>e.message
+    e:Ambiguous=>e.message
+}
 local_zone_error=(l:LocalDateTime z:Zone fold:_FoldChoice|none gap:_GapChoice|none):>string?=>match local_in_zone(l z fold gap) {
     r:ZonedDateTime=>none
     rs:array<ZonedDateTime>=>none

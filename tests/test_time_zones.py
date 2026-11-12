@@ -248,7 +248,7 @@ def test_a_folded_literal_links_no_zone_data(compiler, tmp_path):
     assert built.returncode == 0, built.stderr
     assert b'America/New_York' not in (tmp_path / 'main').read_bytes()
     ran = subprocess.run([tmp_path / 'main'], capture_output=True, text=True, check=False)
-    assert ran.stdout == '2026-10-26T13:00:00Z -14400\n'
+    assert ran.stdout == '2026-10-26T13:00:00Z -04:00\n'
 
 
 def test_pack_covers_every_name_python_knows(compiler, tmp_path):
