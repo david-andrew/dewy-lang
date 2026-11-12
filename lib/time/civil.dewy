@@ -199,6 +199,15 @@ __lt__=(a:LocalDateTime b:LocalDateTime):>bool=>a.date <? b.date or (a.date =? b
 __as__=(l:LocalDateTime):>string=>"{l.date}T{l.time}"
 __add__=(l:LocalDateTime p:Days):>LocalDateTime=>LocalDateTime<Gregorian>[l.date+p l.time]
 __sub__=(l:LocalDateTime p:Days):>LocalDateTime=>LocalDateTime<Gregorian>[l.date-p l.time]
+__add__=(l:LocalDateTime p:Months):>LocalDateTime|InvalidDate=>LocalDateTime<Gregorian>[(l.date+p) or_throw l.time]
+__add__=(l:LocalDateTime p:_Recipe):>LocalDateTime|InvalidDate=>LocalDateTime<Gregorian>[(l.date+p) or_throw l.time]
+__add__=(l:LocalDateTime p:Days|Months|_Recipe|_DatePeriod):>LocalDateTime|InvalidDate=>match p {
+    days:Days=>l+days
+    months:Months=>l+months
+    recipe:_Recipe=>l+recipe
+    span:_DatePeriod=>LocalDateTime<Gregorian>[l.date+span l.time]
+}
+add=(l:LocalDateTime p:Months overflow:_Overflow):>LocalDateTime=>LocalDateTime<Gregorian>[add(l.date p overflow) l.time]
 
 # ---------------- by a pattern: `d.format("EEEE d MMMM y")`, `date(text "d/M/y")` ----------------
 _date_parts=(d:Date):>pattern.Parts=>{

@@ -1,0 +1,8 @@
+# A local time has no zone to resolve, but its date still follows ordered calendar steps.
+const start=local"2027-01-30T09:15"
+printl"{start+(2day+1month)}"
+printl"{(start+(1month+2day)) is? InvalidDate}"
+printl"{start.add(1month overflow='clamp')}"
+printl"{start.add(1month overflow='next')}"
+let recipe:Period=1week+1month
+printl"{start+recipe}"

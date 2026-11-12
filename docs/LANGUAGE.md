@@ -1812,6 +1812,8 @@ anniversaries, to today when `on` is left out; a 29 February birthday counts on 
 Mixed periods compose in order: `1month + 2day` and `2day + 1month` are different recipes.
 Adding either to a `Date` or `ZonedDateTime` applies each step in sequence; a month that lacks
 the requested day still gives `InvalidDate`.
+`LocalDateTime` follows the same calendar steps and keeps its time of day; its
+`.add(1month overflow='clamp'|'next')` resolves a missing date explicitly.
 For a zoned month add, `.add(1month overflow='clamp')` takes the last day of the month and
 `overflow='next'` takes the first of the following month, keeping the local time.
 
