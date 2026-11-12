@@ -161,7 +161,7 @@ nd_alternative = (n: int) -> str:
     ""
 nd_alternative_bad = (n: int, what: str):
     text = "waits on a choice among alternatives with {what}"
-    fix = "a certificate counts each wait on its own, not a choice between them; send and receive between tasks that are joined, which is certified"
+    fix = "a choice among waits has no certificate; structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`"
     nd_wait(nodes[n].pos, text)
     nd_bad(nodes[n].pos, text, fix)
 nd_walk = (n: int, held: mut DlHeld[]):
@@ -169,7 +169,7 @@ nd_walk = (n: int, held: mut DlHeld[]):
     k = nodes[n].kind
     if k == .lambda or k == .fnref: return
     if k == .partial and nd_reserve(n):
-        nd_bad(nodes[n].pos, "reserves a slot in the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a permit may be dropped unsent, so a reservation has no certificate; send with `send` from tasks that are joined, which is certified")
+        nd_bad(nodes[n].pos, "reserves a slot in the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a permit may be dropped unsent, so a reservation has no certificate; structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`")
         return
     if k == .partial:
         alt = nd_alternative(n)
@@ -260,14 +260,14 @@ nd_call = (n: int, held: mut DlHeld[]):
     if len(what) > 0: return
     if nodes[n].aux == 0 and nd_reserve(n):
         loop i in [1..nkids(n)): nd_walk(kid(n, i), held)
-        nd_bad(pos, "reserves a slot in the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a permit may be dropped unsent, so a reservation has no certificate; send with `send` from tasks that are joined, which is certified")
+        nd_bad(pos, "reserves a slot in the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a permit may be dropped unsent, so a reservation has no certificate; structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`")
         return
     op = dc_chan_call(n)
     if op == 1 or op == 2:
         loop i in [1..nkids(n)): nd_walk(kid(n, i), held)
         verb = if op == 1: "waits to send into" else: "waits to receive from"
         nd_wait(pos, "{verb} {dl_name(dl_resolve(kid(n, 0), nd_fn()))}")
-        nd_bad(pos, "{verb} the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "a raw channel's waits are not certified; spawn the work as tasks and join them, which is certified (`serve` and `pipeline` have no certificate until a library gate proves them)")
+        nd_bad(pos, "{verb} the channel {dl_name(dl_resolve(kid(n, 0), nd_fn()))}", "structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`")
         return
     if op > 0:
         loop c in kids(n): nd_walk(c, held)
@@ -333,7 +333,7 @@ nd_foreign = (n: int, g: int, d: int):
 # `serve` (with its `request`) and `pipeline` have no proof yet: until a library gate proves them,
 # their certificates are withdrawn, and the checks below are what the gate's certificate will add.
 nd_withdrawn = (pos: int, what: str):
-    nd_bad(pos, "{what}, whose protocol has no proof yet (its certificate waits for a library gate)", "spawn the work as tasks and join them, which is certified, or opt this scope out with `$no_deadlocks = false`")
+    nd_bad(pos, "{what}, whose protocol has no proof yet (its certificate waits for a library gate)", "structured joins certify the join only when the tasks' own waits are certified; raw channel waits have no certificate, even inside `concurrent`; use nonblocking `try_send`/`try_receive`, or opt this scope out with `$no_deadlocks = false`")
 
 nd_protocol = (n: int, gname: str, held: DlHeld[]):
     pos = nodes[n].pos

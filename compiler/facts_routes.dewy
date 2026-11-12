@@ -2,7 +2,7 @@ $runtime_checks
 
 from p"ast.jo" import NF_INDEX_CAPTURED
 from p"@lib/core/str.jo" import (starts_with)
-from p"ast.jo" import (NF_COMPREHENSION NF_INBOUNDS NF_RELOOKUP NF_SPREAD has_flag kid nkids nodes)
+from p"ast.jo" import (NF_GLOBAL NF_COMPREHENSION NF_INBOUNDS NF_RELOOKUP NF_SPREAD has_flag kid nkids nodes)
 from p"check.jo" import (LF_ALIAS globals locals)
 from p"checks_thin.dewy" import (readonly_global)
 from p"directive_queries.dewy" import (dir_index)
@@ -32,6 +32,17 @@ from p"util.jo" import (name_of)
 from p"witness_ops.dewy" import (wit_index)
 
 RouteWord:type=int64<overflow='wrap'>
+# A seed-language declaration without an initializer zero-initializes its
+# array header. Keep its length, not the scalar zero used for other defaults.
+# Only demanded declarations reach this O(1) transfer; no body walk or index.
+fact_default_value=(n:RouteWord @s:FactState):>RouteWord=>$unsafe {
+    let l=RouteWord(nodes.ptr[n].sym)
+    let t=if l =? 0 {0} else if has_flag(n NF_GLOBAL) {RouteWord(globals.ptr[l].type)} else {RouteWord(locals.ptr[l].type)}
+    if t =? 0 or tkind(fact_type(t)) not=? 'array' {return fact_constant(@s 0 n)}
+    let value=fact_new(@s FactBound() FactTerm(type=t))
+    if s.projections.length <? FACT_CAP {fact_add_projection(@s FactProjection(value (-1) false fact_constant(@s 0 n)))}
+    value
+}
 fact_replace=(@s:FactState base:RouteWord selector:RouteWord element:bool value:RouteWord t:RouteWord):>RouteWord=>{
     let v=fact_new(@s fact_domain(t) FactTerm(type=t))
     # (a pool's slot tables are its memberships: fact_pool_call)

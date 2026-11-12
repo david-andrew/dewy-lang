@@ -1,0 +1,8 @@
+let calls:int=0
+key=(v:int64):>int64=>{calls+=1; v}
+show=(@xs:array<int64>)=>{
+    let n=xs.length
+    xs.sort(key=@key)
+    if n >? 0 printl(xs[n-1])
+}
+main=()=>{let xs:array<int64>=[3 1 2]; show(@xs); printl(calls)}

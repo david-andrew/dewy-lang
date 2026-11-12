@@ -275,15 +275,36 @@ fact_path_call_effects=(n:ForgetWord @s:FactState):>void=>$unsafe {
         let high=if summary.lengths[i] =? 1 {min(b.hi old.hi)} else {b.hi}
         fact_set_bound(@s after FactBound(max(b.lo old.lo) high))
     }
-    # (a record's array field: its length is the same immutable evaluation)
+    # Record fields reuse exact lengths or carry the old length as a lower bound.
     loop entry in record_lengths {
-        if not fact_kept_field(summary.kept_fields entry[0] entry[1]) or s.projections.length >=? FACT_CAP {continue}
+        let mode=fact_field_mode(summary.kept_fields entry[0] entry[1])
+        if mode =? 0 or s.projections.length >=? FACT_CAP {continue}
         let v=fact_summary_actual(n entry[0] @s)
         if v =? 0 {continue}
         let pt=fact_type(ForgetWord(locals.ptr[fns.ptr[ForgetWord(nodes.ptr[n].sym)].params[entry[0]]].type))
         let field=fact_project(@s v entry[1] false fact_call_field_type(pt entry[1]))
-        if field not=? 0 {fact_add_projection(@s FactProjection(field (-1) false entry[2]))}
+        if field =? 0 {continue}
+        if mode =? 1 {fact_add_projection(@s FactProjection(field (-1) false entry[2]))}
+        else {
+            let after=fact_project(@s field (-1) false T_INT)
+            fact_difference(@s entry[2] after 0 n)
+            let b=fact_bound(s after)
+            fact_set_bound(@s after FactBound(max(b.lo fact_bound(s entry[2]).lo) b.hi))
+        }
     }
+}
+# Names are positive interned IDs; a negative field records growth only.
+# At most eight demanded fields per summary, no scan of unrelated state.
+fact_field_mode=(kept:array<int64> parameter:ForgetWord field:ForgetWord):>ForgetWord=>$unsafe {
+    let i:ForgetWord=0
+    loop i + 1 <? kept.length {
+        if kept.ptr[i] =? parameter {
+            if kept.ptr[i + 1] =? field {return 1}
+            if kept.ptr[i + 1] =? -field {return 2}
+        }
+        i += 2
+    }
+    0
 }
 fact_kept_field=(kept:array<int64> parameter:ForgetWord field:ForgetWord):>bool=>$unsafe {
     let i:ForgetWord=0

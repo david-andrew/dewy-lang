@@ -9,7 +9,7 @@ from p"checks_thin_expr.dewy" import (is_map_type)
 from p"checks_shaped.dewy" import (shape_field_type)
 from p"facts.jo" import (FACT_CAP fact_length_forced fact_length_strict FACT_STEPS FactPaths FactProjection FactState FactSummary fact_add_fits fact_add_projection fact_bind fact_binding fact_bound fact_capture fact_constructor_actuals fact_constructor_bodies fact_constructor_budget fact_constructor_types fact_difference fact_distance fact_domain fact_hull_owner fact_length_max fact_loop_exhausted fact_loop_steps fact_loops fact_new fact_owner fact_pair_key fact_pending_defers fact_place fact_probe_on fact_project fact_projection_find fact_push_frames fact_query fact_record_array_types fact_scalar fact_set_bound fact_shape_summaries fact_slice fact_slice_prepare fact_slice_push_children fact_speculating fact_step_limit fact_summaries fact_summary_acc fact_summary_assumed fact_summary_entry fact_summary_field fact_summary_fields fact_summary_owner fact_summary_shape_mask fact_summary_shapes fact_summary_used fact_terms fact_type)
 from p"directives.jo" import (dir_assumed_bounds_any)
-from p"facts_forgets.dewy" import (fact_call_field_type fact_drop_pending fact_kept_field)
+from p"facts_forgets.dewy" import (fact_call_field_type fact_drop_pending fact_kept_field fact_field_mode)
 from p"facts_routes.dewy" import (fact_read fact_route fact_route_values)
 from p"facts_conditions.dewy" import (fact_tag)
 from p"facts_joins.dewy" import (fact_host_finite fact_hull fact_hull_type fact_join)
@@ -248,23 +248,26 @@ fact_summary_record=(@s:FactState r0:SummaryWord):>void=>$unsafe {
         useful=useful or mode not=? 0
     }
     if not useful {lengths=[]}
-    # (a mutable record parameter's array field keeps its length on every return)
+    # Demanded record array fields: intersect exact and non-shrinking length
+    # certificates across returns. At most eight fields, bounded distance queries;
+    # no new traversal or state outside the existing summary demand/budget.
     let kept_fields:array<int64>=[]
     if fact_pending_defers =? 0 and not fact_drop_pending(fact_summary_owner) {
         loop entry in fact_summary_fields {
             let l=fns.ptr[fact_summary_owner].params[entry[0]]
             if SummaryWord(locals.ptr[l].flags) & LF_MUTPARAM =? 0 {continue}
-            if fact_summary_acc.seen and not fact_kept_field(fact_summary_acc.kept_fields entry[0] entry[1]) {continue}
+            let prior=if fact_summary_acc.seen {fact_field_mode(fact_summary_acc.kept_fields entry[0] entry[1])} else {1}
+            if prior =? 0 {continue}
             let b=fact_binding(s PlaceIdentity('local' SummaryWord(locals.ptr[l].owner) l))
             if b <? 0 {continue}
             let pt=fact_type(SummaryWord(locals.ptr[l].type))
             let field=fact_project(@s s.bindings[b].value entry[1] false fact_call_field_type(pt entry[1]))
             if field =? 0 {continue}
             let current=fact_project(@s field (-1) false T_INT)
-            if current =? entry[2] or fact_entails(s entry[2] current 0) and fact_entails(s current entry[2] 0) {
-                kept_fields.push(entry[0])
-                kept_fields.push(entry[1])
-            }
+            if current not=? entry[2] and not fact_entails(s entry[2] current 0) {continue}
+            let same=prior =? 1 and (current =? entry[2] or fact_entails(s current entry[2] 0))
+            kept_fields.push(entry[0])
+            kept_fields.push(if same {entry[1]} else {-entry[1]})
         }
     }
     if fact_summary_shapes.length >? 0 {fact_summary_record_shapes(@s)}

@@ -259,11 +259,11 @@ fact_map_literal=(n:MapWord @s:FactState map:MapWord keys:array<int64> raw:array
     loop j in [0..nkids(n)) {
         let pair=kid(n j)
         let key=domain_leaf(MapWord(nodes.ptr[pair].a))
-        if nodes.ptr[key].kind not=? 'int_lit' and nodes.ptr[key].kind not=? 'bool_lit' and not (nodes.ptr[key].kind =? 'str_lit' and nkids(key) =? 0 and nodes.ptr[key].sval >=? 0) {return}
+        if nodes.ptr[key].kind not=? 'int_lit' and nodes.ptr[key].kind not=? 'bool_lit' and not (nodes.ptr[key].kind =? 'str_lit' and nkids(key) =? 0 and nodes.ptr[key].sval >=? 0) {fact_map_nonempty(@s map keys.length); return}
     }
     loop key in keys {
         let b=fact_bound(s key)
-        if b.wide or b.lo not=? b.hi {return}
+        if b.wide or b.lo not=? b.hi {fact_map_nonempty(@s map keys.length); return}
     }
     let t=fact_type(ntype(n))
     let fields_at=MapWord(structs.ptr[MapWord(types.ptr[t].st)].fields)
@@ -302,6 +302,15 @@ fact_map_literal=(n:MapWord @s:FactState map:MapWord keys:array<int64> raw:array
     fact_add_projection(@s FactProjection(map FACT_MAP_POSITIONS false positions))
     fact_add_projection(@s FactProjection(map (-1) false length))
     fact_add_projection(@s FactProjection(map FACT_MAP_DENSE false fact_constant(@s 1)))
+}
+fact_map_nonempty=(@s:FactState map:MapWord count:MapWord):>void=>{
+    # Unknown equality can merge entries, but never removes the final key.
+    # A nonempty literal has 1..entries keys even when no dense inventory can
+    # be formed. O(1), only for an already demanded dictionary literal.
+    if s.projections.length <? FACT_CAP {
+        let length=fact_new(@s FactBound(1 count) FactTerm(type=T_INT))
+        fact_add_projection(@s FactProjection(map (-1) false length))
+    }
 }
 fact_map_snapshot_call=(n:MapWord):>bool=>$unsafe {
     if nodes.ptr[n].kind not=? 'call' or nodes.ptr[n].aux not=? 0 or nodes.ptr[n].sym <=? 0 or nkids(n) not=? 1 {return false}

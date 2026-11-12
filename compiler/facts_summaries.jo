@@ -248,8 +248,28 @@ fact_summary_record = (s: mut FactState, r0: int):
         lengths.push(mode)
         useful = useful or mode != 0
     if not useful: lengths = []
+    # Demanded record array fields: intersect exact and non-shrinking length
+    # certificates across returns. At most eight fields, bounded distance queries;
+    # no new traversal or state outside the existing summary demand/budget.
+    kept_fields: int[]
+    if fact_pending_defers == 0 and not fact_drop_pending(fact_summary_owner):
+        loop entry in fact_summary_fields:
+            l = fns[fact_summary_owner].params[entry.0]
+            if int(locals[l].flags) & LF_MUTPARAM == 0: continue
+            prior = if fact_summary_acc.seen: fact_field_mode(fact_summary_acc.kept_fields, entry.0, entry.1) else: 1
+            if prior == 0: continue
+            b = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
+            if b < 0: continue
+            pt = fact_type(int(locals[l].type))
+            field = fact_project(s, s.bindings[b].value, entry.1, false, fact_call_field_type(pt, entry.1))
+            if field == 0: continue
+            current = fact_project(s, field, -1, false, T_INT)
+            if current != entry.2 and not fact_entails(s, entry.2, current, 0): continue
+            same_length = prior == 1 and (current == entry.2 or fact_entails(s, current, entry.2, 0))
+            kept_fields.push(entry.0)
+            kept_fields.push(if same_length: entry.1 else: -entry.1)
     if fact_summary_shapes.len() > 0: fact_summary_record_shapes(s)
-    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host, post, lengths, upper_field, post_field, global_post)
+    fact_summary_acc = FactSummary(length, value, true, same, delta, upper, upper_delta, host, post, lengths, upper_field, post_field, global_post, kept_fields)
     # A hull only widens. Once it says nothing the result's own domain does
     # not, and no argument-length relation survives (once lost, it stays
     # lost), the rest of the run cannot bound anything a caller asks: stop it
@@ -278,7 +298,7 @@ fact_summary_payload = (t: int) -> int:
     e = fact_type(int(types[t].elem))
     if fact_scalar(e) and is_int(e) and e != T_U64: e else: 0
 fact_summary_vacuous = (acc: FactSummary, t: int) -> bool:
-    if acc.lengths.len() > 0: return false
+    if acc.lengths.len() > 0 or acc.kept_fields.len() > 0: return false
     if tkind(t) == .array: return acc.length.lo <= 0 and acc.length.hi >= fact_length_max()
     d = fact_domain(t)
     acc.value.lo <= d.lo and acc.value.hi >= d.hi and not acc.value.nz and not acc.host
@@ -439,7 +459,7 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
                 value = fact_read(state, mk_ident_local(l, locals[l].pos))
                 fact_summary_shapes.push((fact_summary_entry.len() - 1, fact_nd_shape(state, value), fact_nd_data_length(state, value)))
     fact_summary_fields = []
-    if fact_scalar(t) and is_int(t) and t != T_U64 and field == 0:
+    if (places or fact_scalar(t) and is_int(t) and t != T_U64) and field == 0:
         loop i in [0..fns[f].params.len()):
             l = fns[f].params[i]
             pt = fact_type(int(locals[l].type))

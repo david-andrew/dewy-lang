@@ -1,0 +1,9 @@
+Graph:type=[nodes:array<int64>]
+bump=(@g:Graph)=>{if g.nodes.length >? 1 {g.nodes.push(7)} else {g.nodes.clear()}}
+read=(@g:Graph i:int64):>int64=>{
+    if i <? 0 or i >=? g.nodes.length return -1
+    printl(g.nodes[i])
+    bump(@g)
+    g.nodes[i]
+}
+main=()=>{let g=Graph[[4]]; printl(read(@g 0))}

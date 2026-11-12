@@ -83,6 +83,16 @@ use 'facts_members.dewy'
 use 'facts_progress.dewy'
 use 'facts_probes.dewy'
 
+# A seed-language declaration without an initializer zero-initializes its
+# array header. Keep its length, not the scalar zero used for other defaults.
+# Only demanded declarations reach this O(1) transfer; no body walk or index.
+fact_default_value = (n: int, s: mut FactState) -> int:
+    l = int(nodes[n].sym)
+    t = if l == 0: 0 else if has_flag(n, NF_GLOBAL): int(globals[l].type) else: int(locals[l].type)
+    if t == 0 or tkind(fact_type(t)) != .array: return fact_constant(s, 0, n)
+    value = fact_new(s, FactBound(), FactTerm(type = t))
+    if s.projections.len() < FACT_CAP: fact_add_projection(s, FactProjection(value, -1, false, fact_constant(s, 0, n)))
+    value
 fact_replace = (s: mut FactState, base: int, selector: int, element: bool, value: int, t: int) -> int:
     v = fact_new(s, fact_domain(t), FactTerm(type = t))
     # (a pool's slot tables are its memberships: fact_pool_call)

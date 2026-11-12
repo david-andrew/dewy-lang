@@ -270,10 +270,10 @@ fact_map_literal = (n: int, s: mut FactState, map: int, keys: int[], raw: int[],
     loop j in [0..nkids(n)):
         pair = kid(n, j)
         key = domain_leaf(int(nodes[pair].a))
-        if nodes[key].kind != .int_lit and nodes[key].kind != .bool_lit and not (nodes[key].kind == .str_lit and nkids(key) == 0 and nodes[key].sval >= 0): return
+        if nodes[key].kind != .int_lit and nodes[key].kind != .bool_lit and not (nodes[key].kind == .str_lit and nkids(key) == 0 and nodes[key].sval >= 0): fact_map_nonempty(s, map, keys.len()); return
     loop key in keys:
         b = fact_bound(s, key)
-        if b.wide or b.lo != b.hi: return
+        if b.wide or b.lo != b.hi: fact_map_nonempty(s, map, keys.len()); return
     t = fact_type(ntype(n))
     fields_at = int(structs[int(types[t].st)].fields)
     key_type = int(fields[fields_at].type)
@@ -308,6 +308,13 @@ fact_map_literal = (n: int, s: mut FactState, map: int, keys: int[], raw: int[],
     fact_add_projection(s, FactProjection(map, FACT_MAP_POSITIONS, false, positions))
     fact_add_projection(s, FactProjection(map, -1, false, length))
     fact_add_projection(s, FactProjection(map, FACT_MAP_DENSE, false, fact_constant(s, 1)))
+fact_map_nonempty = (s: mut FactState, map: int, count: int):
+    # Unknown equality can merge entries, but never removes the final key.
+    # A nonempty literal has 1..entries keys even when no dense inventory can
+    # be formed. O(1), only for an already demanded dictionary literal.
+    if s.projections.len() < FACT_CAP:
+        length = fact_new(s, FactBound(1, count), FactTerm(type = T_INT))
+        fact_add_projection(s, FactProjection(map, -1, false, length))
 fact_map_snapshot_call = (n: int) -> bool:
     if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 1: return false
     d = int(fns[int(nodes[n].sym)].decl)

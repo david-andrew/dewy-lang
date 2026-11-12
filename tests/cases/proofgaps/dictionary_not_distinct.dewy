@@ -1,0 +1,7 @@
+Cache:type=[names:dict<string int64>]
+reset=(@c:Cache a:string b:string)=>{
+    c.names=[a -> 7 b -> 9]
+    let count=c.names.length
+    $assert count =? 2
+}
+main=()=>{let c=Cache[[]]; reset(@c "root" "root")}

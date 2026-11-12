@@ -1,0 +1,13 @@
+Graph:type=[nodes:array<int64>]
+bump=(@g:Graph)=>{g.nodes.clear()}
+read=(@g:Graph i:int64 rounds:int):>int64=>{
+    if i <? 0 or i >=? g.nodes.length return -1
+    let n=0
+    loop n <? rounds {
+        bump(@g)
+        printl(g.nodes[i])
+        n+=1
+    }
+    g.nodes[i]
+}
+main=()=>{let g=Graph[[4]]; printl(read(@g 0 3))}

@@ -1,0 +1,8 @@
+# The returned length is proved even when the callback row may write globals.
+let G:array<int64>=[3 1 2]
+f=(@xs:array<int64>)=>{
+    let n=xs.length
+    xs.sort(key=(v:int64)=>{G.clear(); v})
+    if n >? 0 printl(xs[n-1])
+}
+main=()=>{let xs:array<int64>=[3 1 2]; f(@xs)}

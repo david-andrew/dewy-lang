@@ -1,0 +1,19 @@
+# Seed-language arrays default to empty. Summaries must retain this length.
+rebuild = (xs: mut int[], key: (int) -> int):
+    n = xs.len()
+    out: int[]
+    loop i in [0..n): out.push(key(xs[i]))
+    xs = out
+filtered = (xs: mut int[], key: (int) -> int):
+    n = xs.len()
+    out: int[]
+    loop i in [0..n):
+        if key(xs[i]) > 0: out.push(xs[i])
+    xs = out
+shortened = (xs: mut int[]):
+    n = xs.len()
+    out: int[]
+    loop i in [0..n):
+        if i > 0: break
+        out.push(xs[i])
+    xs = out

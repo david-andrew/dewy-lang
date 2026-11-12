@@ -284,14 +284,21 @@ fact_path_call_effects = (n: int, s: mut FactState):
         b = fact_bound(s, after); old = fact_bound(s, pair.1)
         fact_set_bound(s, after, FactBound(max(b.lo, old.lo), (if summary.lengths[i] == 1: min(b.hi, old.hi) else: b.hi)))
 
-    # (a record's array field: its length is the same immutable evaluation)
+    # Record fields reuse exact lengths or carry the old length as a lower bound.
     loop entry in record_lengths:
-        if not fact_kept_field(summary.kept_fields, entry.0, entry.1) or s.projections.len() >= FACT_CAP: continue
+        mode = fact_field_mode(summary.kept_fields, entry.0, entry.1)
+        if mode == 0 or s.projections.len() >= FACT_CAP: continue
         v = fact_summary_actual(n, entry.0, s)
         if v == 0: continue
         pt = fact_type(int(locals[fns[int(nodes[n].sym)].params[entry.0]].type))
         field = fact_project(s, v, entry.1, false, fact_call_field_type(pt, entry.1))
-        if field != 0: fact_add_projection(s, FactProjection(field, -1, false, entry.2))
+        if field == 0: continue
+        if mode == 1: fact_add_projection(s, FactProjection(field, -1, false, entry.2))
+        else:
+            after = fact_project(s, field, -1, false, T_INT)
+            fact_difference(s, entry.2, after, 0, n)
+            b = fact_bound(s, after)
+            fact_set_bound(s, after, FactBound(max(b.lo, fact_bound(s, entry.2).lo), b.hi))
 # A settled summary can preserve exposed roots across read-only calls.
 # Opaque/callback/hidden-helper effects still invalidate every exposed root.
 fact_call_effects = (n: int, s: mut FactState):
@@ -515,6 +522,16 @@ fact_call_write = (s: mut FactState, old: int, t: int, paths: int[][], depth: in
     fresh
 
 
+# Names are positive interned IDs; a negative field records growth only.
+# At most eight demanded fields per summary, no scan of unrelated state.
+fact_field_mode = (kept: int[], parameter: int, field: int) -> int:
+    i = 0
+    loop i + 1 < kept.len():
+        if kept[i] == parameter:
+            if kept[i + 1] == field: return 1
+            if kept[i + 1] == -field: return 2
+        i += 2
+    0
 fact_kept_field = (kept: int[], parameter: int, field: int) -> bool:
     i = 0
     loop i + 1 < kept.len():

@@ -1115,7 +1115,7 @@ struct FactSummary:
     upper_field: int = 0     # upper (post) names that record parameter's array field
     post_field: int = 0
     global_post: int = 0    # scalar result < this module array's EXIT length
-    kept_fields: int[]      # (parameter, field) pairs: mutable record array fields whose length every return keeps
+    kept_fields: int[]      # (parameter, signed field) pairs: positive same length, negative non-shrinking
 
 fact_summaries: {int: FactSummary} = {}
 fact_summary_owner = 0
@@ -3160,7 +3160,7 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
         outer = fact_covered
         init = int(nodes[n].b)
         if index_update_arrays.len() > 0 and index_update_arrays.has(int(nodes[n].name)) and init != 0 and nodes[init].kind == .conv and nodes[init].aux == i32(int(CV.int_)): fact_covered = init
-        r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_constant(s, 0, n)
+        r = if nodes[n].b != 0: fact_capture(int(nodes[n].b), s) else: fact_default_value(n, s)
         fact_covered = outer
         fact_saving = saving
         # (the key's identity, still a member of any snapshot it came from)

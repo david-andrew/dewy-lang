@@ -566,8 +566,8 @@ fact_top=(s:FactState v:LoopWord):>bool=>{
 }
 # Two header aggregates whose contents changed (an element written each
 # iteration) are settled when they carry the same projection skeleton:
-# the same evaluated leaves under stable selectors, and no extra rows.
-fact_same_shape=(a:FactState b:FactState x:LoopWord y:LoopWord @steps:LoopWord depth:LoopWord=0):>bool=>{
+# the same leaves under stable selectors, and rows equal after renaming.
+fact_same_shape=(a:FactState b:FactState x:LoopWord y:LoopWord @steps:LoopWord @renamed:dict<int64 int64> depth:LoopWord=0):>bool=>{
     if depth >=? 32 {return false}
     let count:LoopWord=0
     let pi=fact_projection_first(a x)
@@ -585,7 +585,7 @@ fact_same_shape=(a:FactState b:FactState x:LoopWord y:LoopWord @steps:LoopWord d
             if fact_terms[other].type not=? t or fact_bound(a p.value) not=? fact_bound(b other) {return false}
             if t =? 0 and fact_projection_first(a p.value) >=? 0 {return false}
             # (fresh header scalars agree when their bounds and skeletons do)
-            if not fact_same_shape(a b p.value other @steps depth + 1) {return false}
+            if not fact_same_shape(a b p.value other @steps @renamed depth + 1) {return false}
         }
     }
     let qi=fact_projection_first(b y)
@@ -593,7 +593,21 @@ fact_same_shape=(a:FactState b:FactState x:LoopWord y:LoopWord @steps:LoopWord d
         count -= 1
         qi=fact_projection_after(b qi)
     }
-    count =? 0 and fact_incident(a x) <? 0 and fact_incident(b y) <? 0
+    if count not=? 0 {return false}
+    if fact_incident(a x) <? 0 and fact_incident(b y) <? 0 {return true}
+    # Fresh projected scalars (notably non-shrinking field lengths) can
+    # carry the same rows in consecutive headers. Rename them bijectively;
+    # fact_loop_stable checks every row after the entire shape is paired.
+    # O(demanded projections + rows), within the existing shape budget.
+    fact_scalar(fact_terms[x].type) and fact_shape_rename(@renamed x y)
+}
+fact_shape_rename=(@renamed:dict<int64 int64> x:LoopWord y:LoopWord):>bool=>{
+    let old=renamed.get(x)
+    let inverse=renamed.get(-y)
+    if old not=? none and old not=? y or inverse not=? none and inverse not=? x {return false}
+    renamed[x]=y
+    renamed[-y]=x
+    true
 }
 # A changing optional integer at a loop header: its payload's interval (the
 # paths' hull, widened as a changing scalar's) and implications from its tag
@@ -626,6 +640,7 @@ fact_loop_payload=(@s:FactState a:FactState x:LoopWord b:FactState y:LoopWord in
 }
 fact_loop_stable=(a:FactState b:FactState):>bool=>$unsafe {
     let shape_steps:LoopWord=FACT_CAP
+    let renamed=dict<int64 int64>()
     loop binding in a.bindings {
         let i=fact_binding(b binding.place)
         if i <? 0 {return false}
@@ -636,17 +651,24 @@ fact_loop_stable=(a:FactState b:FactState):>bool=>$unsafe {
         # alone is not evidence that a changed aggregate has stabilized. Two
         # header aggregates with no projections or rows are both top.
         let t=if binding.place.root =? 'local' {LoopWord(locals.ptr[binding.place.declaration].type)} else {LoopWord(globals.ptr[binding.place.declaration].type)}
-        if not fact_scalar(t) and binding.value not=? b.bindings[i].value and not (fact_top(a binding.value) and fact_top(b b.bindings[i].value)) and not fact_same_shape(a b binding.value b.bindings[i].value @shape_steps) {return false}
+        if not fact_scalar(t) and binding.value not=? b.bindings[i].value and not (fact_top(a binding.value) and fact_top(b b.bindings[i].value)) and not fact_same_shape(a b binding.value b.bindings[i].value @shape_steps @renamed) {return false}
     }
     # Carried rows must return unchanged, renamed into the next frame.
     if a.differences.length not=? b.differences.length {return false}
-    let renamed=dict<int64 int64>()
+    let shaped=renamed.length >? 0
     loop binding in a.bindings {
-        if renamed.has(binding.value) {continue}
+        if not shaped and renamed.has(binding.value) {continue}
         let i=fact_binding(b binding.place)
-        renamed[binding.value]=if i >=? 0 {b.bindings[i].value} else {0}
+        let other=if i >=? 0 {b.bindings[i].value} else {0}
+        if shaped {
+            if not fact_shape_rename(@renamed binding.value other) {return false}
+        }
+        else {renamed[binding.value]=other}
     }
     loop row in a.differences {
+        # An unrenamed snapshot remains itself, never the target of a fresh
+        # projection's renaming. This also prevents merging distinct terms.
+        if shaped and (renamed.has(-row.a) and not renamed.has(row.a) or renamed.has(-row.b) and not renamed.has(row.b)) {return false}
         let x=renamed.get(row.a) ?? row.a
         let y=renamed.get(row.b) ?? row.b
         let i=fact_row_find(b x y)

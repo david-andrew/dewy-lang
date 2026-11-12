@@ -1,0 +1,8 @@
+# modes: native native-release
+$no_deadlocks
+
+main=()=>{
+    let c=channel<int64>(1)
+    concurrent {spawn c.try_send(7)}
+    printl(c.try_receive or_throw)
+}
