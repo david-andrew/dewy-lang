@@ -1,0 +1,23 @@
+# quick
+# A repeated wall hour has two instants, in chronological order; a missing hour may be skipped.
+const ny=zone"America/New_York"
+let both=zoned("2026-11-01T01:30" zone=ny fold='all')
+if both.length =? 2 {printl"{both.length} {both[0]} {both[1]}"} else {printl"wrong candidate count"}
+let one=zoned("2026-11-02T09:00" zone=ny fold='all')
+if one.length =? 1 {printl"{one.length} {one[0]}"} else {printl"wrong unique count"}
+let missing=zoned("2027-03-14T02:30" zone=ny gap='skip')
+printl"{missing is? none}"
+let kept=zoned("2027-03-14T03:30" zone=ny gap='skip')
+printl"{kept}"
+const local_time=local"2026-11-01T01:30"
+let from_local=local_time.in_zone(ny fold='all')
+if from_local is? array<ZonedDateTime> and from_local.length =? 2 and both.length =? 2 {
+    printl"{from_local.length} {from_local[0].nominal =? both[0].nominal}"
+} else {printl"wrong local candidates"}
+const before_fold=zoned"2026-10-31T01:30[America/New_York]"
+let added=before_fold.add(1day fold='all')
+if added is? array<ZonedDateTime> and added.length =? 2 {printl"{added[0]} {added[1]}"} else {printl"wrong added candidates"}
+const before_gap=zoned"2027-03-13T02:30[America/New_York]"
+printl"{before_gap.add(1day gap='skip') is? none}"
+let combined=zoned("2027-03-14T02:30" zone=ny fold='all' gap='skip')
+printl"{combined is? none}"

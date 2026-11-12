@@ -1816,6 +1816,13 @@ can be arguments (`zoned(text zone=z fold='later')`), or settings for a scope: `
 'earlier'`, `$time.gap = 'next'`. A constant zoned time or `const` operand is proved while
 compiling, so it needs neither.
 
+For every reading of a repeated local time, pass `fold='all'`: `zoned(text zone=z fold='all')`
+and `local.in_zone(z fold='all')` return the candidates in instant order, including a
+one-element array for a unique time. `gap='skip'` returns `none` for a missing local time;
+otherwise it returns the resolved value or an unresolved fold. The same policies work with `zoned.add(1day ...)`.
+When both are passed, the result is an array or `none`. These explicit policies do not
+alter the ordinary single-result call's type.
+
 `$time.zone = 'America/New_York'` pins the program to one zone in every module.
 Like `$time.rules` and `$time.zone_source`, it is program-wide: write it at the top
 of the entry file or directly before any file's `main` declaration. A non-entry file's
@@ -1834,10 +1841,11 @@ zone files when the program runs instead (under `TZDIR`, else `/usr/share/zonein
 `d.format("EEEE d MMMM y")` writes a value by a pattern of Unicode's date letters, in English: `y`
 year; `M` month, `MM` with a zero, `MMM` and `MMMM` by name; `d` day; `EEE` and `EEEE` weekday; `H`
 hour; `h` and `a` a twelve-hour hour and AM or PM; `m`, `s`; `S` fraction digits; on a zoned time
-`XXX` offset and `VV` zone name. Other letters go in quotes (`'T'`). A letter the value has no field
+`XXX` offset, `XXXXX` offset including seconds when needed, and `VV` zone name. Other letters go in quotes (`'T'`). A letter the value has no field
 for is an error, while compiling for a constant pattern. An `Instant` writes in UTC. `date(text
 "d/M/y")`, `time_of_day(text "h:mm a")` and `local(text pattern)` read by the same letters, all of
 the text, with no guess: `yy` is not a form, so a two-digit year does not read.
+Historical offsets with seconds print those seconds in `XXXXX`, for example `-00:43:08`.
 
 A zoned time reads as `.date`, `.time_of_day`, `.local`, `.year`, `.month`, `.day`, `.hour`, `.minute`,
 `.second`, `.nanosecond` and `.weekday` (0 is Monday).

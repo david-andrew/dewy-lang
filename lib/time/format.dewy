@@ -42,7 +42,7 @@ _form=(letter:int64 count:int64):>int64=>{
     if letter =? 72 or letter =? 104 or letter =? 109 or letter =? 115 {return if count <=? 2 {2} else {0}} # H h m s
     if letter =? 83 {return if count <=? 9 {2} else {0}}                  # S
     if letter =? 97 {return if count =? 1 {2} else {0}}                   # a
-    if letter =? 88 {return if count =? 3 {3} else {0}}                   # XXX
+    if letter =? 88 {return if count =? 3 or count =? 5 {3} else {0}}     # XXX XXXXX
     if letter =? 86 {return if count =? 2 {3} else {0}}                   # VV
     0
 }
@@ -65,7 +65,7 @@ pattern_error=(pattern:string has_date:bool has_time:bool has_zone:bool):>string
         let count=_run(pattern at)
         let shown=_slice(pattern at at+count)
         let group=_form(b count)
-        if group =? 0 {return "'{shown}' is not a pattern field: there are y M d E H h a m s S XXX VV, and other text goes in quotes"}
+        if group =? 0 {return "'{shown}' is not a pattern field: there are y M d E H h a m s S XXX XXXXX VV, and other text goes in quotes"}
         if group =? 1 and not has_date {return "'{shown}' is part of a date, and this value has none"}
         if group =? 2 and not has_time {return "'{shown}' is part of a time of day, and this value has none"}
         if group =? 3 and not has_zone {return "'{shown}' is part of a zone, and this value has none"}
@@ -73,10 +73,32 @@ pattern_error=(pattern:string has_date:bool has_time:bool has_zone:bool):>string
     }
     none
 }
+# `XXX` has no seconds field. A historical offset with seconds needs `XXXXX`, so formatting
+# it with `XXX` would silently change the offset rather than merely shorten its display.
+offset_loss_error=(pattern:string offset:int64):>string?=>$unsafe {
+    if offset%60 =? 0 {return none}
+    let bytes=pattern as array<uint8>
+    let at:int64=0
+    loop at <? bytes.length {
+        let b=int64(bytes[at])
+        if b =? 39 {
+            at=_closing(pattern at)+1
+            continue
+        }
+        if b =? 88 {
+            let count=_run(pattern at)
+            if count =? 3 {return "XXX leaves out the seconds of this offset; write XXXXX to keep them"}
+            at=at+count
+        } else {at=at+1}
+    }
+    none
+}
 _two=(n:int64 count:int64):>string=>if count >=? 2 {pad(n 2)} else {"{n}"}
-_offset_text=(offset:int64):>string=>{
+_offset_text=(offset:int64 with_seconds:bool):>string=>{
+    if offset =? 0 {return "Z"}
     let size=if offset <? 0 {-offset} else {offset}
-    "{if offset <? 0 {"-"} else {"+"}}{pad(size//3600 2)}:{pad((size%3600)//60 2)}"
+    let seconds=if not with_seconds or size%60 =? 0 {""} else {":{pad(size%60 2)}"}
+    "{if offset <? 0 {"-"} else {"+"}}{pad(size//3600 2)}:{pad((size%3600)//60 2)}{seconds}"
 }
 # The value by the pattern. pattern_error names what this leaves out or writes as it stands.
 render=(p:Parts pattern:string):>string=>$unsafe {
@@ -108,7 +130,7 @@ render=(p:Parts pattern:string):>string=>$unsafe {
             <109>=>_two(p.minute count)
             <115>=>_two(p.second count)
             <83>=>pad(p.nanosecond 9)[0..count)
-            <88>=>_offset_text(p.offset)
+            <88>=>_offset_text(p.offset count =? 5)
             <86>=>p.zone
             _=>""
         }

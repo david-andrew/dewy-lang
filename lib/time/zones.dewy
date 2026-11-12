@@ -400,8 +400,10 @@ _pair_text=(offset:int64):>string=>{
 }
 _FoldPolicy:type='earlier'|'later'|'reject'
 _GapPolicy:type='preserve_displacement'|'next'|'reject'
+_FoldChoice:type=_FoldPolicy|'all'
+_GapChoice:type=_GapPolicy|'skip'
 # Local seconds in a zone: the moment under the policies, or the Gap or Ambiguous with no policy.
-_resolve=(local:int64 nanos:int z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields=>{
+_resolve=(local:int64 nanos:int z:Zone fold:_FoldChoice|none gap:_GapChoice|none):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields=>{
     let record=_record(z)
     let window:int64=93600
     let early=offset_at(z local-window)
@@ -422,7 +424,11 @@ _resolve=(local:int64 nanos:int z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none
         if offset_at(z local-o) =? o {found.push(o)}
     }
     found.sort(reverse=true)
-    if found.length =? 1 {return _at(local-found[0] nanos z found[0])}
+    if found.length =? 1 {
+        let resolved=_at(local-found[0] nanos z found[0]) or_throw
+        if fold =? 'all' {return [resolved]}
+        return resolved
+    }
     if found.length =? 0 {
         # (a gap: at local-largest the clocks had not yet jumped, and at local-smallest they had)
         let widest=seen[0]
@@ -445,10 +451,16 @@ _resolve=(local:int64 nanos:int z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none
             }
             return _at(high 0 z offset_at(z high))
         }
+        if gap =? 'skip' {return none}
         return Gap["{_local_text(local)} does not exist in {name(z)}: the clocks jumped from {_pair_text(before)} to {_pair_text(after)}. Add gap='preserve_displacement' or gap='next'" int(before) int(after)]
     }
     if fold =? 'earlier' {return _at(local-found[0] nanos z found[0])}
     if fold =? 'later' {return _at(local-found[found.length-1] nanos z found[found.length-1])}
+    if fold =? 'all' {
+        let candidates:array<ZonedDateTime>=[]
+        loop o in found {candidates.push(_at(local-o nanos z o) or_throw)}
+        return candidates
+    }
     Ambiguous["{_local_text(local)} happens more than once in {name(z)}. Add fold='earlier' or fold='later'" [loop o in found int(o)]]
 }
 
@@ -464,7 +476,7 @@ _zone_for=(written:Zone|none given:Zone|none scope:string|none running:bool):>Zo
     _machine_named(scope)
 }
 # `2026-10-26T09:00[America/New_York]`, or local text with a `zone`, or the scope's `$time.zone`.
-zoned_parse=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none running:bool=true):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>{
+zoned_parse=(text:string zone:Zone|none fold:_FoldChoice|none gap:_GapChoice|none scope:string|none running:bool=true):>ZonedDateTime|array<ZonedDateTime>|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>{
     let c=_Cursor[text 0]
     let f=read_fields(@c) or_throw
     if not f.has_time {return ParseError["a zoned time needs a time of day, as `2026-10-26T09:00[America/New_York]`"]}
@@ -491,12 +503,61 @@ zoned_parse=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|non
     }
     _resolve(local int(f.nanosecond) chosen fold gap)
 }
+_zoned_one=(r:ZonedDateTime|array<ZonedDateTime>|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>match r {
+    z:ZonedDateTime=>z
+    zs:array<ZonedDateTime>=>Ambiguous["a single resolution cannot return every candidate" []]
+    <none>=>Gap["a single resolution cannot skip a local time" 0 0]
+    e:ParseError=>e
+    e:Gap=>e
+    e:Ambiguous=>e
+    e:UnknownZone=>e
+    e:MissingContext=>e
+    e:OutsideCoverage=>e
+    e:InvalidFields=>e
+    <OffGrid>=>OffGrid
+}
+zoned_parse_one=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none running:bool=true):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>_zoned_one(zoned_parse(text zone fold gap scope running))
+_zoned_all=(r:ZonedDateTime|array<ZonedDateTime>|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields):>array<ZonedDateTime>|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>match r {
+    z:ZonedDateTime=>[z]
+    zs:array<ZonedDateTime>=>zs
+    <none>=>Gap["a resolution that returns all candidates cannot skip a local time" 0 0]
+    e:ParseError=>e
+    e:Gap=>e
+    e:Ambiguous=>e
+    e:UnknownZone=>e
+    e:MissingContext=>e
+    e:OutsideCoverage=>e
+    e:InvalidFields=>e
+    <OffGrid>=>OffGrid
+}
+_zoned_skip=(r:ZonedDateTime|array<ZonedDateTime>|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields):>ZonedDateTime|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>match r {
+    z:ZonedDateTime=>z
+    zs:array<ZonedDateTime>=>Ambiguous["a resolution with no fold policy cannot return every candidate" []]
+    <none>=>none
+    e:ParseError=>e
+    e:Gap=>e
+    e:Ambiguous=>e
+    e:UnknownZone=>e
+    e:MissingContext=>e
+    e:OutsideCoverage=>e
+    e:InvalidFields=>e
+    <OffGrid>=>OffGrid
+}
+zoned_parse_all=(text:string zone:Zone|none gap:_GapPolicy|none scope:string|none running:bool=true):>array<ZonedDateTime>|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>_zoned_all(zoned_parse(text zone 'all' gap scope running))
+zoned_parse_skip=(text:string zone:Zone|none fold:_FoldPolicy|none scope:string|none running:bool=true):>ZonedDateTime|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>_zoned_skip(zoned_parse(text zone fold 'skip' scope running))
+zoned_parse_all_skip=(text:string zone:Zone|none scope:string|none running:bool=true):>array<ZonedDateTime>|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>{
+    let r=zoned_parse(text zone 'all' 'skip' scope running)
+    if r is? ZonedDateTime {return [r]}
+    r
+}
 # (a literal needs rules while compiling, and `'host'` has none until the program runs)
 const _HOST_LITERAL="`$time.zone_source = 'host'` follows this machine's rules when the program runs, so a literal cannot be worked out from them: read it from text at run time, as `zoned(text)`"
-zoned_error=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>{
+zoned_error=(text:string zone:Zone|none fold:_FoldChoice|none gap:_GapChoice|none scope:string|none):>string?=>{
     if _HOST {return _HOST_LITERAL}
     match zoned_parse(text zone fold gap scope false) {
         z:ZonedDateTime=>none
+        z:array<ZonedDateTime>=>none
+        <none>=>none
         e:ParseError=>e.message
         e:Gap=>e.message
         e:Ambiguous=>e.message
@@ -509,7 +570,7 @@ zoned_error=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|non
 }
 
 # (the same with no zone given)
-zoned_text_error=(text:string fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>zoned_error(text none fold gap scope)
+zoned_text_error=(text:string fold:_FoldChoice|none gap:_GapChoice|none scope:string|none):>string?=>zoned_error(text none fold gap scope)
 
 # ---------------- zoned values ----------------
 _local=(z:ZonedDateTime):>int=>_zone_seconds(z.nominal)+int(z.offset)
@@ -527,18 +588,20 @@ __eq__=(a:ZonedDateTime b:ZonedDateTime):>bool=>a.nominal =? b.nominal and a.zon
 __lt__=(a:ZonedDateTime b:ZonedDateTime):>bool=>a.nominal <? b.nominal
 # The local fields on a date with the same time of day, under the scope's policies.
 # (a move past the table, or onto a pre-1972 label between nanoseconds, has no local time either)
-_civil=(r:ZonedDateTime|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields):>ZonedDateTime|Gap|Ambiguous=>match r {
+_civil=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous=>match r {
     z:ZonedDateTime=>z
+    zs:array<ZonedDateTime>=>zs
+    <none>=>none
     e:Gap=>e
     e:Ambiguous=>e
     e:OutsideCoverage=>Gap[e.message 0 0]
     e:InvalidFields=>Gap[e.message 0 0]
     <OffGrid>=>Gap["that label falls between nanoseconds under the UTC rate of its time" 0 0]
 }
-_day_add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>{
+_day_add=(z:ZonedDateTime p:Days fold:_FoldChoice|none gap:_GapChoice|none):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous=>{
     _civil(_resolve((_local(z)+int(p.count)*86400).to_int64() ?? 0 int(_nanos(z)) z.zone fold gap))
 }
-_month_add=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>{
+_month_add=(z:ZonedDateTime p:Months fold:_FoldChoice|none gap:_GapChoice|none):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous|InvalidDate=>{
     let local=_local(z)
     let t=(local%86400).to_int64() ?? 0
     let [y m d]=civil_from_days(int(local)//86400)
@@ -548,31 +611,51 @@ _month_add=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|none):
     if d >? days_in_month(ny nm) {return InvalidDate["{_year_text(ny)}-{pad(nm 2)} has no day {d}"]}
     _civil(_resolve(((days_from_civil(ny nm d)*86400).to_int64() ?? 0)+t int(_nanos(z)) z.zone fold gap))
 }
+_civil_one=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous):>ZonedDateTime|Gap|Ambiguous=>match r {
+    z:ZonedDateTime=>z
+    zs:array<ZonedDateTime>=>Ambiguous["a single resolution cannot return every candidate" []]
+    <none>=>Gap["a single resolution cannot skip a local time" 0 0]
+    e:Gap=>e
+    e:Ambiguous=>e
+}
+_day_add_one=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>_civil_one(_day_add(z p fold gap))
+_month_add_one=(z:ZonedDateTime p:Months fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>{
+    let r=_month_add(z p fold gap)
+    if r is? InvalidDate {return r}
+    _civil_one(r)
+}
 # (what is wrong with these constants; none when the add resolves)
-day_add_error=(z:ZonedDateTime p:Days fold:_FoldPolicy|none gap:_GapPolicy|none):>string?=>match _day_add(z p fold gap) {
+day_add_error=(z:ZonedDateTime p:Days fold:_FoldChoice|none gap:_GapChoice|none):>string?=>match _day_add(z p fold gap) {
     r:ZonedDateTime=>none
+    rs:array<ZonedDateTime>=>none
+    <none>=>none
     e:Gap=>e.message
     e:Ambiguous=>e.message
 }
 # (both policies written: nothing is left to fail. Empty text: no promise, and no error.)
-policy_gap=(fold:_FoldPolicy|none gap:_GapPolicy|none):>string?=>if fold is? none or gap is? none or fold =? 'reject' or gap =? 'reject' {""} else {none}
+policy_gap=(fold:_FoldChoice|none gap:_GapChoice|none):>string?=>if fold is? none or gap is? none or fold =? 'reject' or gap =? 'reject' {""} else {none}
 
 $check_constant day_add_error(z p fold gap) "this add has no one answer"
 $check_constant policy_gap(fold gap) "unused"
-__add__=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add(z p fold gap)
+__add__=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add_one(z p fold gap)
 $check_constant day_add_error(z p fold gap) "this add has no one answer"
 $check_constant policy_gap(fold gap) "unused"
-__sub__=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add(z Days[-p.count] fold gap)
-__add__=(z:ZonedDateTime p:Months fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>_month_add(z p fold gap)
+__sub__=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add_one(z Days[-p.count] fold gap)
+__add__=(z:ZonedDateTime p:Months fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous|InvalidDate=>_month_add_one(z p fold gap)
 $check_constant day_add_error(z p fold gap) "this add has no one answer"
 $check_constant policy_gap(fold gap) "unused"
-add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add(z p fold gap)
+add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>_day_add_one(z p fold gap)
+$check_constant day_add_error(z p fold gap) "this add has no candidates"
+add=(z:ZonedDateTime p:Days fold:'all' gap:_GapPolicy|none=$time.gap):>array<ZonedDateTime>|Gap|Ambiguous=>_civil_all(_day_add(z p fold gap))
+$check_constant day_add_error(z p fold gap) "this add has no answer"
+add=(z:ZonedDateTime p:Days fold:_FoldPolicy|none=$time.fold gap:'skip'):>ZonedDateTime|none|Gap|Ambiguous=>_civil_skip(_day_add(z p fold gap))
+$check_constant day_add_error(z p fold gap) "this add has no answer"
+add=(z:ZonedDateTime p:Days fold:'all' gap:'skip'):>array<ZonedDateTime>|none|Gap|Ambiguous=>_civil_all_skip(_day_add(z p fold gap))
 
 # The local date of an instant in a zone.
 local_days=(t:Instant z:Zone):>int=>{
-    let moment=_posix_of(t)
-    if moment is? OutsideCoverage {return ns_count(t)//_DAY_NS+2557}
-    int(moment+offset_at(z moment))//86400
+    let moment=_zone_seconds(t)
+    (moment+int(offset_at(z moment)))//86400
 }
 
 # ---------------- what a zoned time reads as ----------------
@@ -595,23 +678,54 @@ nanosecond=(z:ZonedDateTime):>int64<n => n >=? 0 and n <=? 999999999>=>_nanos(z)
 weekday=(z:ZonedDateTime):>int64<n => n >=? 0 and n <=? 6>=>((int(_local(z))//86400+3)%7).to_int64() ?? 0
 
 # A local time in a zone: the moment under the policies, or the Gap or Ambiguous with no policy.
-local_in_zone=(l:LocalDateTime z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>{
+local_in_zone=(l:LocalDateTime z:Zone fold:_FoldChoice|none gap:_GapChoice|none):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous=>{
     let days=int(l.date._days)
     let whole=l.time._ns//1000000000
     let moment=(days*86400).to_int64() ?? 0
     _civil(_resolve(moment+whole int(l.time._ns%1000000000) z fold gap))
 }
-local_zone_error=(l:LocalDateTime z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>string?=>match local_in_zone(l z fold gap) {
+local_in_zone_one=(l:LocalDateTime z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous=>_civil_one(local_in_zone(l z fold gap))
+_civil_all=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous):>array<ZonedDateTime>|Gap|Ambiguous=>match r {
+    z:ZonedDateTime=>[z]
+    zs:array<ZonedDateTime>=>zs
+    <none>=>Gap["a resolution that returns all candidates cannot skip a local time" 0 0]
+    e:Gap=>e
+    e:Ambiguous=>e
+}
+_civil_skip=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous):>ZonedDateTime|none|Gap|Ambiguous=>match r {
+    z:ZonedDateTime=>z
+    zs:array<ZonedDateTime>=>Ambiguous["a resolution with no fold policy cannot return every candidate" []]
+    <none>=>none
+    e:Gap=>e
+    e:Ambiguous=>e
+}
+local_in_zone_all=(l:LocalDateTime z:Zone gap:_GapPolicy|none):>array<ZonedDateTime>|Gap|Ambiguous=>_civil_all(local_in_zone(l z 'all' gap))
+local_in_zone_skip=(l:LocalDateTime z:Zone fold:_FoldPolicy|none):>ZonedDateTime|none|Gap|Ambiguous=>_civil_skip(local_in_zone(l z fold 'skip'))
+_civil_all_skip=(r:ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous):>array<ZonedDateTime>|none|Gap|Ambiguous=>{
+    if r is? ZonedDateTime {return [r]}
+    r
+}
+local_in_zone_all_skip=(l:LocalDateTime z:Zone):>array<ZonedDateTime>|none|Gap|Ambiguous=>_civil_all_skip(local_in_zone(l z 'all' 'skip'))
+local_zone_error=(l:LocalDateTime z:Zone fold:_FoldChoice|none gap:_GapChoice|none):>string?=>match local_in_zone(l z fold gap) {
     r:ZonedDateTime=>none
+    rs:array<ZonedDateTime>=>none
+    <none>=>none
     e:Gap=>e.message
     e:Ambiguous=>e.message
 }
 
 # By a pattern, with `XXX` and `VV` for its offset and zone.
 zoned_pattern_error=(p:string):>string?=>pattern.pattern_error(p true true true)
-$check_constant zoned_pattern_error(p) "not a pattern"
-format=(z:ZonedDateTime p:string):>string|ParseError=>{
+zoned_pattern_only=(p:string):>string?=>zoned_pattern_error(p) ?? ""
+zoned_format_error=(z:ZonedDateTime p:string):>string?=>{
     let wrong=zoned_pattern_error(p)
+    if wrong isnt? none {return wrong}
+    pattern.offset_loss_error(p z.offset)
+}
+$check_constant zoned_pattern_only(p) "not a pattern"
+$check_constant zoned_format_error(z p) "this pattern loses offset seconds"
+format=(z:ZonedDateTime p:string):>string|ParseError=>{
+    let wrong=zoned_format_error(z p)
     if wrong isnt? none {return ParseError[wrong]}
     pattern.render(pattern.Parts[true true true year(z) month(z) day(z) weekday(z) hour(z) minute(z) second(z) nanosecond(z) z.offset name(z.zone)] p)
 }

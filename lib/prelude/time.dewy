@@ -81,15 +81,34 @@ local=(text:string pattern:string):>LocalDateTime|ParseError=>civil.local_read(t
 in_zone=(t:Instant z:Zone):>ZonedDateTime=>zones.in_zone(t z)
 $check_constant local_zone_error(l z fold gap) "this local time has no one moment"
 $check_constant policy_gap(fold gap) "unused"
-in_zone=(l:LocalDateTime z:Zone fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>zones.local_in_zone(l z fold gap)
+in_zone=(l:LocalDateTime z:Zone fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap):>ZonedDateTime|Gap|Ambiguous=>zones.local_in_zone_one(l z fold gap)
+$check_constant local_zone_error(l z fold gap) "this local time has no candidates"
+in_zone=(l:LocalDateTime z:Zone fold:'all' gap:_GapPolicy|none=$time.gap):>array<ZonedDateTime>|Gap|Ambiguous=>zones.local_in_zone_all(l z gap)
+in_zone=(l:LocalDateTime z:Zone fold:_FoldPolicy|none=$time.fold gap:'skip'):>ZonedDateTime|none|Gap|Ambiguous=>zones.local_in_zone_skip(l z fold)
+in_zone=(l:LocalDateTime z:Zone fold:'all' gap:'skip'):>array<ZonedDateTime>|none|Gap|Ambiguous=>zones.local_in_zone_all_skip(l z)
 
 $check_constant zone_error(name) "not a time zone"
 zone=(name:string):>Zone|UnknownZone=>zones.zone_parse(name)
 $check_constant zoned_text_error(text fold gap scope) "not a zoned time"
 $warn_if scope is? none "`zoned` has no time zone here, so text that names none reads in the zone of the machine it runs on: say so with `$time.zone = 'system'`, pass `zone=`, or name one: `$time.zone = 'America/New_York'`"
-zoned=(text:string fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse(text none fold gap scope)
+zoned=(text:string fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse_one(text none fold gap scope)
 $check_constant zoned_error(text zone fold gap scope) "not a zoned time"
-zoned=(text:string zone:Zone|none fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse(text zone fold gap scope)
+zoned=(text:string zone:Zone|none fold:_FoldPolicy|none=$time.fold gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>ZonedDateTime|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse_one(text zone fold gap scope)
+$check_constant zoned_text_error(text fold gap scope) "not a zoned time"
+$warn_if scope is? none "`zoned` has no time zone here, so text that names none reads in the zone of the machine it runs on: say so with `$time.zone = 'system'`, pass `zone=`, or name one: `$time.zone = 'America/New_York'`"
+zoned=(text:string fold:'all' gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>array<ZonedDateTime>|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse_all(text none gap scope)
+$check_constant zoned_error(text zone fold gap scope) "not a zoned time"
+zoned=(text:string zone:Zone|none fold:'all' gap:_GapPolicy|none=$time.gap scope:string|none=$time.zone):>array<ZonedDateTime>|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse_all(text zone gap scope)
+$check_constant zoned_text_error(text fold gap scope) "not a zoned time"
+$warn_if scope is? none "`zoned` has no time zone here, so text that names none reads in the zone of the machine it runs on: say so with `$time.zone = 'system'`, pass `zone=`, or name one: `$time.zone = 'America/New_York'`"
+zoned=(text:string fold:_FoldPolicy|none=$time.fold gap:'skip' scope:string|none=$time.zone):>ZonedDateTime|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse_skip(text none fold scope)
+$check_constant zoned_error(text zone fold gap scope) "not a zoned time"
+zoned=(text:string zone:Zone|none fold:_FoldPolicy|none=$time.fold gap:'skip' scope:string|none=$time.zone):>ZonedDateTime|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse_skip(text zone fold scope)
+$check_constant zoned_text_error(text fold gap scope) "not a zoned time"
+$warn_if scope is? none "`zoned` has no time zone here, so text that names none reads in the zone of the machine it runs on: say so with `$time.zone = 'system'`, pass `zone=`, or name one: `$time.zone = 'America/New_York'`"
+zoned=(text:string fold:'all' gap:'skip' scope:string|none=$time.zone):>array<ZonedDateTime>|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse_all_skip(text none scope)
+$check_constant zoned_error(text zone fold gap scope) "not a zoned time"
+zoned=(text:string zone:Zone|none fold:'all' gap:'skip' scope:string|none=$time.zone):>array<ZonedDateTime>|none|ParseError|Gap|Ambiguous|UnknownZone|MissingContext|OutsideCoverage|OffGrid|InvalidFields=>zones.zoned_parse_all_skip(text zone scope)
 
 import p"@lib/time/clock.dewy" as clock
 ClockReading:type=clock.ClockReading

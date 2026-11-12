@@ -1,0 +1,14 @@
+# quick
+# Before UTC coverage, projection uses TT civil fields and the zone's first offset.
+import p"@lib/time/core.dewy" as core
+
+let monrovia = zone"Africa/Monrovia"
+let tt = core.instant_at((core.days_from_civil(1800 1 1)-2557)*86400000000000 + 30*60000000000 - 32184000000)
+let shown = tt.in_zone(monrovia)
+printl"{shown}"
+printl"{shown.date}"
+printl"{shown.format("yyyy-MM-dd HH:mm:ss XXXXX")}"
+loses_seconds=(z:ZonedDateTime):>bool=>z.format("XXX") is? ParseError
+printl"{loses_seconds(shown)}"
+let in_utc=instant"2026-10-24T12:00:00Z".in_zone(zone"UTC")
+printl"{in_utc.format("XXX")} {in_utc.format("XXXXX")}"
