@@ -1,4 +1,5 @@
 use 'checker_state.dewy'
+use 'check_constant.jo'
 # Frozen panic inventory from effects.jo.
 use 'directives.jo'
 use 'directive_queries.dewy'
@@ -222,6 +223,7 @@ panic_gpu_total = (n: int) -> bool:
     is_gpu_array(t) and tkind(nd_elem(t)) == .float_
 
 panic_literal_safe = (n: int) -> bool:
+    if cc_passed.len() > 0 and cc_passed.has(n): return true
     if k_call_args(n) < 2: return false
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0 or not pos_in_lib(nodes[d].pos): return false

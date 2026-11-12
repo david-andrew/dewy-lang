@@ -15,6 +15,7 @@ use 'ir.jo'
 use 'ast.jo'
 use 'ir_types.dewy'
 use 'types.jo'
+use 'secrets.jo'
 use 'type_ops.dewy'
 use 'checker_tokens.dewy'
 use 'checker_state.dewy'
@@ -567,7 +568,9 @@ gen_direct_call = (f: int, args: int[], order: int[] = [], call_node: int = 0) -
     mark = copy_backs.len()
     snaps = arg_snapshots.len()
     call_args(args, fns[f].ptypes, inst_mutmask(f), argv, f, order)
-    if refine_active: refine_gen_args(args, argv, if vc(ret) == VC_AGG: 1 else: 0)
+    if refine_active:
+        offset = if vc(ret) == VC_AGG: 1 else: 0
+        refine_gen_args(args, argv, offset, inst_mutmask(f))
     # Default builds can inline tiny checked helpers without expanding their
     # failure path. Release keeps its measured whole-function inlining policy.
     # Still unwind lowering's pending copy-back records; their unreachable
@@ -641,7 +644,9 @@ gen_closure_call = (callee: int, args: int[], order: int[] = []) -> Val:
     mark = copy_backs.len()
     snaps = arg_snapshots.len()
     call_args(args, pts, int(types[ft].mutmask), argv, order = order)
-    if refine_active: refine_gen_args(args, argv, if vc(ret) == VC_AGG: 2 else: 1)
+    if refine_active:
+        offset = if vc(ret) == VC_AGG: 2 else: 1
+        refine_gen_args(args, argv, offset, int(types[ft].mutmask))
     rv = if known >= 0: e_call(lf_of_inst(known), argv, ret_vt(ret)) else: e_calli(fp, argv, ret_vt(ret), false)
     copy_back(mark)
     release_arg_snapshots(snaps)
@@ -1111,7 +1116,7 @@ left_operand_addr = (a: int, t: int, keep: bool) -> int:
     if keep: return kept_operand_addr(a, t)
     place_addr(gen_place(a, false), t)
 
-gen_byte_eq = (a: int, b: int, t: int, keep_left: bool) -> int:
+gen_byte_eq = (a: int, b: int, t: int, keep_left: bool, secret: bool) -> int:
     # (a slice's source need be kept only if evaluating b could change it)
     keep = keep_left
     if is_slice(a): keep = not unchanged_by(text_source(int(nodes[a].a)), b)
@@ -1120,7 +1125,8 @@ gen_byte_eq = (a: int, b: int, t: int, keep_left: bool) -> int:
     r = vreg(VI)
     e_mov(r, e_iconst(0))
     iff(e_bin(.eq, VI, na, nb))
-    e_mov(r, e_call3(rt("__mem_eq"), da, db, e_bin(.mul, VI, na, e_iconst(owner_stride(int(types[t].elem)))), VI))
+    name = if secret: "__ct_mem_eq" else: "__mem_eq"
+    e_mov(r, e_call3(rt(name), da, db, e_bin(.mul, VI, na, e_iconst(owner_stride(int(types[t].elem)))), VI))
     endc()
     r
 
@@ -1169,7 +1175,7 @@ gen_binary = (e: int) -> Val:
         plain_resource = aux == 1 and ownership_type(lt) and plain_read(b)
         if not plain_string and not plain_resource and place_var(a) != 0: keep_left = not unchanged_by(a, b)
     if aux == 1 and byte_eq_type(lt):
-        r = gen_byte_eq(a, b, lt, keep_left)
+        r = gen_byte_eq(a, b, lt, keep_left, secret_compares.get(e) != none)
         if op == .ne: r = e_bin(.xor, VI, r, e_iconst(1))
         return V(r, false)
     if aux == 1:
@@ -1180,7 +1186,11 @@ gen_binary = (e: int) -> Val:
         bd = 0
         if is_slice(b): bd = kept_operand_addr(b, lt)
         else: bd = place_addr(gen_place(b, false), lt)
-        r = gen_eq(lt, ad, bd)
+        mode = 0
+        if secret_compares.get(e) != none:
+            if tkind(lt) == .array and telem(lt) == T_MATH_INT: mode = 1
+            else: mode = 2
+        r = if mode != 0: e_call2(lf_helper(.eq, lt, mode), ad, bd, VI) else: gen_eq(lt, ad, bd)
         if op == .ne: r = e_bin(.xor, VI, r, e_iconst(1))
         return V(r, false)
     if aux == 6:
@@ -1197,10 +1207,12 @@ gen_binary = (e: int) -> Val:
         vb = gen_borrowed(b).v
         if op == .plus: return V(e_call2(rt("__str_concat"), va, vb, VI), true)
         if op == .eq or op == .ne:
-            r = e_call2(rt("__str_eq"), va, vb, VI)
+            name = if secret_compares.get(e) != none: "__ct_str_eq" else: "__str_eq"
+            r = e_call2(rt(name), va, vb, VI)
             if op == .ne: r = e_bin(.xor, VI, r, e_iconst(1))
             return V(r, false)
-        c = e_call2(rt("__str_cmp"), va, vb, VI)
+        cmp = if secret_compares.get(e) != none: "__ct_str_cmp" else: "__str_cmp"
+        c = e_call2(rt(cmp), va, vb, VI)
         return V(e_bin(int_op(op, true), VI, c, e_iconst(0)), false)
     if aux == 3:
         va = gen_left(a, lt, keep_left)
@@ -1239,7 +1251,7 @@ gen_binary = (e: int) -> Val:
         va = gen_left(a, lt, keep_left)
         if op == .shl or op == .shr: return math_shift(op, va, math_shift_count(b), types[prune(ntype(b))].sign)
         vb = gen_borrowed(b).v
-        if is_cmp: return V(math_compare(op, va, vb), false)
+        if is_cmp: return V(math_compare(op, va, vb, secret_compares.get(e) != none), false)
         return math_binary(op, va, vb)
     if aux >= 7: return gen_vec_binary(e, keep_left)
     if vc(lt) == VC_FLT:

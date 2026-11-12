@@ -46,7 +46,7 @@ lf_of_inst = (f: int) -> int:
 
 lf_helper = (hk: HK, t0: int, p: int) -> int:
     # (a secret's helpers are its value's: secrets.jo)
-    t = if secrets_seen: secret_repr(t0) else: t0
+    t = if secrets_seen and hk != .eq: secret_repr(t0) else: t0
     if helper_slots.len() == 0: helper_slots = fill(0, 64)
     slot = helper_slot(hk, t, p)
     if helper_slots[slot] != 0:

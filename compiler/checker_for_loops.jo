@@ -84,7 +84,9 @@ fl_range = (s: int, it: int, nv: int, n1: int, is_mut: bool, pos: int):
         if la and lb and not fl_flag(int(fl_nodes[0][it].c), 256): t = int(fl_nodes[0][int(fl_nodes[0][it].c)].type)
     if la and lb and (not step or fl_flag(int(fl_nodes[0][it].c), 256)): t = lit_default(int(fl_nodes[0][it].a))
     if fl_kind(t) == .str_: for_error(it, 0, 2)
-    if fl_kind(t) != .int_ or fl_nodes[0][int(fl_nodes[0][it].a)].kind == .float_lit or fl_nodes[0][int(fl_nodes[0][it].b)].kind == .float_lit: for_error(it, t, 3)
+    if fl_kind(t) != .int_ or fl_nodes[0][int(fl_nodes[0][it].a)].kind == .float_lit or fl_nodes[0][int(fl_nodes[0][it].b)].kind == .float_lit:
+        if for_date_range(s, it, t): return
+        for_error(it, t, 3)
     fl_nodes[0][it].a = i32(coerce(int(fl_nodes[0][it].a), t))
     if fl_nodes[0][it].b != 0: fl_nodes[0][it].b = i32(coerce(int(fl_nodes[0][it].b), t))
     if step: fl_nodes[0][it].c = i32(coerce(int(fl_nodes[0][it].c), t))

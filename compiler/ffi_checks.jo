@@ -40,17 +40,29 @@ ffi_check_signature = (f: int, decl: int):
 
 
 ffi_check_type = (t0: int, pos: int, extern_: bool, param: bool):
+    seen: {int: bool}
+    ffi_check_nested_type(t0, pos, extern_, param, false, seen)
+
+ffi_check_nested_type = (t0: int, pos: int, extern_: bool, param: bool, nested: bool, seen: mut {int: bool}):
     t = prune(t0)
     k = types[t].kind
-    if k == .refined and extern_ and not param:
-        ffi_check_type(int(types[t].elem), pos, extern_, param)
+    if k == .refined and extern_ and not param and not nested:
+        ffi_check_nested_type(int(types[t].elem), pos, extern_, param, nested, seen)
         return
-    side = if extern_: "a `$extern` function" else: "a `$export` function"
+    side = if nested: "a C function pointer" else if extern_: "a `$extern` function" else: "a `$export` function"
     if t == T_MATH_INT: fatal(pos, "`int` cannot cross the C boundary (its size is not fixed): {side} uses int32, int64, uint8, … instead")
     if k == .ptr:
         ffi_check_pointee(int(types[t].elem), pos)
         return
-    if k == .int_ or k == .float_ or k == .bool_ or k == .cfn: return
+    if k == .cfn:
+        if seen.has(t): return
+        seen[t] = true
+        loop i in [0..int(types[t].nargs)):
+            ffi_check_nested_type(targ(t, i), pos, extern_, true, true, seen)
+        ret = int(types[t].elem)
+        if prune(ret) != T_VOID: ffi_check_nested_type(ret, pos, extern_, false, true, seen)
+        return
+    if k == .int_ or k == .float_ or k == .bool_: return
     if k == .opt and tkind(int(types[t].elem)) == .ptr:
         ffi_check_pointee(int(types[prune(int(types[t].elem))].elem), pos)
         return

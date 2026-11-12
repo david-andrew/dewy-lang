@@ -1,6 +1,7 @@
 use 'sequence_selectors.dewy'
 use 'facts.jo'
 use 'facts_forgets.dewy'
+use 'facts_routes.dewy'
 use 'facts_ranges.dewy'
 use 'facts_joins.dewy'
 use 'lower_scalars.dewy'
@@ -240,8 +241,18 @@ fact_hook_free_resize = (n: int) -> bool:
     id = nodes[n].aux as IN
     if id != .push and id != .pop and id != .insert and id != .remove and id != .clear and id != .extend and id != .resize and id != .truncate: return false
     nkids(n) > 0 and tkind(fact_type(ntype(kid(n, 0)))) == .array and effect_value(ntype(kid(n, 0)))
+fact_map_entries_name = 0
+fact_map_entries_call = (n: int) -> bool:
+    if nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 1: return false
+    d = int(fns[int(nodes[n].sym)].decl)
+    if fact_map_entries_name == 0: fact_map_entries_name = intern("__map_entries")
+    if d == 0 or int(nodes[d].name) != fact_map_entries_name or files[pos_file(nodes[d].pos)].path != lib_dir + "/core/map.jo": return false
+    m = representation_type(ntype(kid(n, 0)))
+    if not is_map_type(m) or ownership_decls.len() != 0 and ownership_fact_type(m): return false
+    st = int(types[m].st)
+    effect_value(struct_targ(st, 0)) and effect_value(struct_targ(st, 1))
 fact_reads_only = (id: IN) -> bool:
-    id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable or fact_pure_intrinsic(id)
+    id == .gpu_kernel or id == .len or id == .arrcap or id == .sizeof or id == .alignof or id == .static_assert or id == .runtime_assert or id == .assert or id == .panic or id == .unreachable or fact_pure_intrinsic(id)
 # A remainder or nonnegative constant mask has an unconditional finite range.
 # During loop havoc retain the hull with entry, so zero iterations and every
 # other store remain covered. No speculative source bound is used. Only visited
@@ -332,15 +343,16 @@ fact_changes_walk = (n: int, s: mut FactState, at: int, reason: FactReason = .lo
     if k == .assign and not fact_bounded_change(n, s, at, reason): fact_change_route(s, int(nodes[n].a), false, at, reason)
     if k == .intrinsic:
         id = nodes[n].aux as IN
-        if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .extend or id == .resize or id == .truncate or id == .setlen:
+        if (id == .push or id == .extend) and fact_growth_route(kid(n, 0)): fact_growth_change(n, s, at, reason)
+        else if id == .push or id == .pop or id == .insert or id == .remove or id == .clear or id == .extend or id == .resize or id == .truncate or id == .setlen:
             fact_change_route(s, kid(n, 0), true, at, reason)
     # (a direct call havocs what its summary writes; reading lengths and
     # erased or failing assertions write nothing; a record is built in place)
-    if k == .call and nodes[n].aux == 0 and fact_sequence_store_call(n): fact_sequence_store(n, s, at, reason)
+    if k == .call and nodes[n].aux == 0 and (fact_sequence_store_call(n) or fact_array_call(n) == 4): fact_sequence_store(n, s, at, reason)
     else if k == .call and nodes[n].aux == 0 and fact_nd_plain_store(n): fact_nd_store(n, s, at, reason)
     else if k == .call and nodes[n].aux == 0 and fact_pool_call(n) == 4: fact_pool_store_changes(n, s)
     else if k == .call and nodes[n].aux == 0 and (fact_map_store_call(n) or fact_map_insert_call(n)): fact_map_store_changes(n, s, at, reason)
-    else if k == .call and nodes[n].aux == 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n)): s = s
+    else if k == .call and nodes[n].aux == 0 and (fact_map_reads_only(n) or fact_nd_reads_only(n) or fact_map_entries_call(n)): s = s
     else if k == .call and nodes[n].aux == 0 and (nodes[n].sym == i32(fact_owner) or nd_mutable_call(n)): fact_path_call_effects(n, s)
     else if k == .call and nodes[n].aux == 0: fact_call_effects(n, s)
     else if k == .call and nodes[n].aux == 2: s = s
@@ -356,6 +368,37 @@ fact_changes_walk = (n: int, s: mut FactState, at: int, reason: FactReason = .lo
     if mask & 4 != 0: fact_changes_walk(int(nodes[n].c), s, at, reason)
     if mask & 16 != 0:
         loop i in [0..nkids(n)): fact_changes_walk(kid(n, i), s, at, reason)
+fact_growth_change = (n: int, s: mut FactState, at: int, reason: FactReason):
+    found = fact_held_length(s, kid(n, 0))
+    fact_change_route(s, kid(n, 0), true, at, reason)
+    if found == 0: return
+    was = fact_bound(s, found)
+    related = fact_incident(s, found) >= 0
+    if not related and was.lo <= 0: return
+    after = fact_route_values(s, fact_route(kid(n, 0), s))
+    if after.len() == 0: return
+    length = fact_project(s, after[after.len() - 1], -1, false, T_INT)
+    if related: fact_difference(s, found, length, 0, n)
+    b = fact_bound(s, length)
+    if was.lo > b.lo:
+        b.lo = was.lo
+        fact_set_bound(s, length, b)
+fact_growth_route = (e0: int) -> bool:
+    e = e0
+    field = false
+    loop nodes[e].kind == .addr or nodes[e].kind == .conv or nodes[e].kind == .field:
+        if nodes[e].kind == .field: field = true
+        e = int(nodes[e].a)
+    if nodes[e].kind != .ident: return false
+    if nodes[e].aux != i32(int(SK.local)): return true
+    flags = int(locals[int(nodes[e].sym)].flags)
+    flags & LF_ALIAS == 0 and (field or flags & LF_MUTPARAM != 0)
+fact_held_length = (s: mut FactState, e: int) -> int:
+    values = fact_route_values(s, fact_route(e, s))
+    if values.len() == 0: return 0
+    held = fact_projection_find(s, values[values.len() - 1], -1, false)
+    if held < 0: return 0
+    s.projections[held].value
 # Runtime children for loop havoc. A match arm's type pattern binds a fresh
 # arm-local and evaluates only its type (a refinement is pure); shape and
 # sequence patterns are their field and element patterns. O(1).

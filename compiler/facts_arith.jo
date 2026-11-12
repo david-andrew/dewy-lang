@@ -209,6 +209,7 @@ fact_sum_source = (n: int) -> int:
     e
 fact_arithmetic = (s: mut FactState, n: int, op: Tok, a: int, b: int) -> int:
     if fact_type(ntype(n)) == T_U64: return exact_unsigned_fact(s, n, op, a, b)
+    if op == .minus and a != 0 and a == b: return fact_constant(s, 0)
     x = fact_bound(s, a); y = fact_bound(s, b)
     # (a ceiling division's dividend `m + c - 1`: the wide sum minus one stays a
     # term, so fact_ceiling_operand can read it. Only a quotient's own dividend)

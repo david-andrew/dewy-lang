@@ -384,7 +384,10 @@ fact_summary_field_type = (t: int, field: int) -> int:
         return fact_type(type_args[int(types[t].args) + field - 1])
     fact_type(shape_field_type(t, field))
 fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
-    key = if field == 0: f else: fact_pair_key(f, field)
+    strict = dir_assumed_bounds_any and fact_length_strict()
+    key0 = if field == 0: f else: fact_pair_key(f, field)
+    # (a strict caller's summaries are cached apart: fact_length_max)
+    key = if strict: -1 - key0 else: key0
     if let known = fact_summaries.get(key): return known
     unknown = FactSummary(FactBound(), FactBound())
     d = int(fns[f].decl)
@@ -421,6 +424,8 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     saved_used = fact_summary_used
     fact_summary_assumed = []
     fact_summary_used = false
+    saved_forced = fact_length_forced
+    fact_length_forced = strict
     fact_owner = f
     fact_summary_owner = f
     fact_speculating += 1
@@ -506,6 +511,7 @@ fact_summary = (f: int, places: bool = false, field: int = 0) -> FactSummary:
     result = if fact_loop_exhausted or fact_constructor_budget == 0 or not fact_summary_acc.seen: unknown else: fact_summary_acc
     if fact_summary_shapes.len() > 0 and fact_constructor_budget < 0 and field == 0:
         fact_shape_summaries[f] = if result.seen: fact_summary_shape_mask else: 0
+    fact_length_forced = saved_forced
     fact_owner = saved.0
     fact_summary_owner = saved.1
     fact_speculating = saved.2

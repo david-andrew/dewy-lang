@@ -2,6 +2,7 @@
 use 'types.jo'
 use 'type_ops.dewy'
 use 'ast.jo'
+use 'node_store.dewy'
 use 'checker_call_cost.dewy'
 use 'expr.jo'
 use 'callable_checks.dewy'
@@ -11,6 +12,7 @@ use 'checks_call_errors.dewy'
 use 'check.jo'
 use 'checks_thin.dewy'
 use 'units.jo'
+use 'unit_rare.dewy'
 use 'unit_ops.dewy'
 use 'effects.jo'
 use 'checker_expr.dewy'
@@ -136,11 +138,17 @@ arg_cost_rest = (a: int, pat: int, binds: mut int[]) -> int:
             if pk == .fn_ or pk == .callable: return 0
             if pk == .cfn: return 0             # (a @cabi function for C: checked when given)
             if pk == .param: return 3        # a function passed to a generic parameter
+            if (pk == .opt or is_union(p)) and function_member(p) != 0: return 2
             return -1
         if k == .lambda:
             if pk == .param:
                 if nkids(a) > 0 and nodes[kid(a, 0)].a != 0: return 3
                 return -1
+            if pk == .opt or is_union(p):
+                member = lambda_member(a, p)
+                if prune(member) == p: return -1
+                r = arg_cost(a, member, binds)
+                return if r < 0: -1 else: r + 2
             if pk == .callable: p = callable_base(p); pk = types[p].kind
             if pk != .fn_ or int(types[p].nargs) != nkids(a): return -1
             if has_flag(a, NF_GENERIC): return 0
@@ -152,6 +160,7 @@ arg_cost_rest = (a: int, pat: int, binds: mut int[]) -> int:
                 pt = prune(targ(p, i))
                 if not has_var(at) and not has_var(pt) and not type_eq(at, pt): return -1
             return 0
+        if k == .call and call_waits_hook(a) != 0: return 1
         if k == .dotname or k == .call:
             name = int(nodes[a].name)
             if k == .call: name = int(nodes[int(nodes[a].a)].name)
@@ -171,10 +180,12 @@ arg_cost_rest = (a: int, pat: int, binds: mut int[]) -> int:
         if k == .array and nkids(a) > 0 and files[pos_file(nodes[a].pos)].is_dewy:
             target = p
             if pk == .param and binds[int(types[p].id)] != 0: target = prune(binds[int(types[p].id)])
+            if refine_active: target = representation_type(target)
             cost = 0
             if types[target].kind == .opt:
                 target = prune(int(types[target].elem))
                 cost = 2
+                if refine_active: target = representation_type(target)
             tk = types[target].kind
             # (`[1 "a"]` for a `[int64 string]`: each value fits its position)
             if tk == .tuple:
@@ -247,6 +258,9 @@ arg_cost_rest = (a: int, pat: int, binds: mut int[]) -> int:
             # A checked method receiver is already an array, though its empty
             # element type can still be inferred from the other arguments.
             if nkids(a) == 0 and not has_flag(a, NF_CHECKED) and dewy_record_target(p) != 0 and files[pos_file(nodes[a].pos)].is_dewy: return 0
+            if nkids(a) == 0 and not has_flag(a, NF_CHECKED) and nodes[a].b == 0 and files[pos_file(nodes[a].pos)].is_dewy:
+                if is_map_type(p): return 1
+                if pk == .opt and is_map_type(int(types[p].elem)): return 3
             if pk == .param: return 3
             return -1
         if k == .record_lit:
@@ -335,6 +349,7 @@ arg_cost_rest = (a: int, pat: int, binds: mut int[]) -> int:
         return 2
     # (an int quantity for a rational one of its dimension, as an int for a rational)
     if types[fp].kind == .quantity and nodes[a].type != 0 and quantity_int_promotes(ntype(a), fp): return 10
+    if types[fp].kind == .struct_ and nodes[a].type != 0 and time_constant_duration(a, ntype(a), fp): return 2
     if types[fp].kind == .fixed and nodes[a].kind == .array and tkind(ntype(a)) == .array and fixed_literal_ok(a, fp):
         # an array literal for a fixed-size array parameter
         et = int(types[fp].elem)
@@ -367,7 +382,10 @@ use 'partition_ops.dewy'
 use 'effect_contracts.dewy'
 use 'effect_sources.dewy'
 arg_finish_rest = (a: int, pt: int, is_mut: bool):
-    if is_mut and refine_active:
+    if is_mut and refine_active and not ref_nd_receivers.has(a):
+        if nodes[a].type == 0 and nodes[a].kind != .hole:
+            check_expr(a, 0)
+            add_flag(a, NF_CHECKED)
         ref_mutable_authority(a)
         storage = refine_storage(a, ntype(a))
         if not type_eq(storage, pt) and (ref_storage_contract(storage) or ref_storage_contract(pt)) and not ref_self_direct_place(a):
@@ -391,6 +409,7 @@ arg_finish_rest = (a: int, pt: int, is_mut: bool):
         if path_narrows > 0 and path_rooted(a): path_forget(path_key(a))
         actual = if refine_active: refine_storage(a, ntype(a)) else: ntype(a)
         if refine_active and is_total_dict(actual): actual = int(types[prune(actual)].elem)
+        if refine_active and ref_nd_receivers.has(a): actual = representation_type(actual)
         if ref_self_direct_place(a): actual = representation_type(actual)
         if not type_eq(actual, pt) and not unify(actual, pt): call_argument_error(4, a, pt)
         add_flag(a, NF_MUT)
@@ -401,11 +420,19 @@ arg_finish_rest = (a: int, pt: int, is_mut: bool):
     refine_arg_target = saved
 
 call_mutable_cost = (a: int, pt: int, binds: mut int[], recv_fits: mut bool, receiver: bool) -> int:
-    r = match_type(pt, ntype(a), binds, 0)
+    actual = ntype(a)
+    depth = 0
+    unbound = false
+    if refine_active:
+        actual = refine_storage(a, actual)
+        depth = 1
+        p = prune(pt)
+        unbound = types[p].kind == .param and binds[int(types[p].id)] == 0
+    r = match_type(pt, actual, binds, depth)
+    if unbound and r >= 0: r += 3
     if r < 0: return -1
     if receiver: recv_fits = true
     shape = subst(pt, binds)
-    actual = ntype(a)
     if refine_active: actual = representation_type(actual); shape = representation_type(shape)
     if not has_var(prune(shape)) and not has_var(prune(actual)) and not type_eq(shape, actual): return -1
     r

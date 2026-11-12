@@ -147,10 +147,15 @@ fact_key_callback = (n: int) -> int:
     callback = kid(n, 1)
     if nodes[callback].kind != .lambda or has_flag(callback, NF_GENERIC) or nodes[callback].sym <= 0: return 0
     f = int(nodes[callback].sym)
-    if fns[f].params.len() != 1 or tkind(fact_type(ntype(kid(n, 0)))) != .array: return 0
+    if fns[f].params.len() != 1: return 0
+    receiver = fact_type(ntype(kid(n, 0)))
+    element = 0
+    if tkind(receiver) == .array: element = telem(receiver)
+    else if is_dewy_set_type(receiver): element = struct_targ(int(types[receiver].st), 0)
+    if element == 0: return 0
     t = fact_type(int(locals[fns[f].params[0]].type))
-    if (not fact_scalar(t) or not is_int(t) or t == T_U64) and t != T_STR: return 0
-    if t != fact_type(telem(fact_type(ntype(kid(n, 0))))): return 0
+    if (not fact_scalar(t) or not is_int(t) or t == T_U64) and t != T_STR and not fact_reflexive_key(t): return 0
+    if t != fact_type(element): return 0
     callback
 # Each record describes this call's receiver; another evaluation of the call
 # hulls its bound and keeps only rows both give. O(captures).

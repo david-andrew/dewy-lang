@@ -294,7 +294,31 @@ helper_boxuniq = (t: int):
     endc()
     e_ret(r)
 
-helper_eq = (t: int):
+eq_has_secret = (t0: int) -> bool:
+    if not secrets_seen: return false
+    work = [t0]
+    seen: {int: bool} = {}
+    loop work.len() > 0:
+        t = prune(work.pop())
+        if tkind(t) == .secret: return true
+        t = quantity_base(t)
+        if seen.has(t): continue
+        seen[t] = true
+        k = tkind(t)
+        if k == .array or k == .fixed or k == .opt or k == .box: work.push(telem(t))
+        else if k == .struct_ or k == .tuple:
+            loop fo in field_list(t): work.push(fo.0)
+        else if k == .enum_:
+            si = int(types[t].st)
+            loop i in [0..int(structs[si].nvariants)):
+                vi = int(structs[si].variants) + i
+                loop j in [0..int(variants[vi].nfields)):
+                    work.push(int(fields[int(variants[vi].fields) + j].type))
+    false
+helper_eq = (t: int, force: bool = false, mode: int = 0):
+    if mode == 1:
+        helper_ct_int_array_eq(t)
+        return
     ps = helper_params(2)
     if t == T_MATH_INT:
         ir.ret = VI
@@ -320,20 +344,35 @@ helper_eq = (t: int):
     blk()
     fail = ctl
     k = types[t].kind
+    protected = false
     if k == .struct_ or k == .tuple:
-        loop fo in field_list(t): eq_member(fo.0, e_addi(a, fo.1), e_addi(b, fo.1), fail)
+        members = field_list(t)
+        protected = force or eq_has_secret(t)
+        if protected:
+            e_mov(r, e_iconst(1))
+            loop fo in members: e_mov(r, e_bin(.and_, VI, r, eq_member_value(fo.0, e_addi(a, fo.1), e_addi(b, fo.1), force)))
+        else:
+            loop fo in members: eq_member(fo.0, e_addi(a, fo.1), e_addi(b, fo.1), fail)
     else if k == .fixed:
         et = int(types[t].elem)
+        protected = force or eq_has_secret(et)
+        if protected: e_mov(r, e_iconst(1))
         i = fixed_loop_begin(t)
-        eq_member(et, fixed_elem_addr(a, i, et), fixed_elem_addr(b, i, et), fail)
+        if protected: e_mov(r, e_bin(.and_, VI, r, eq_member_value(et, fixed_elem_addr(a, i, et), fixed_elem_addr(b, i, et), force)))
+        else: eq_member(et, fixed_elem_addr(a, i, et), fixed_elem_addr(b, i, et), fail)
         fixed_loop_end(i)
     else if k == .opt:
         inner = int(types[t].elem)
         ha = opt_has(a, inner)
         hb = opt_has(b, inner)
         brif_to(e_bin(.ne, VI, ha, hb), fail)
+        protected = force or eq_has_secret(inner)
+        if protected: e_mov(r, e_iconst(1))
         iff(ha)
-        if math_optional(t):
+        if protected:
+            if math_optional(t): e_mov(r, math_compare(.eq, opt_value(a, inner), opt_value(b, inner), true))
+            else: e_mov(r, eq_member_value(inner, a, b, force))
+        else if math_optional(t):
             brif_to(e_bin(.eq, VI, math_compare(.eq, opt_value(a, inner), opt_value(b, inner)), e_iconst(0)), fail)
         else: eq_member(inner, a, b, fail)
         endc()
@@ -342,13 +381,16 @@ helper_eq = (t: int):
         layout(t)
         ta = e_load(VI, a, 0, 4)
         brif_to(e_bin(.ne, VI, ta, e_load(VI, b, 0, 4)), fail)
+        protected = force or eq_has_secret(t)
+        if protected: e_mov(r, e_iconst(1))
         loop v in [0..int(structs[si].nvariants)):
             vi = int(structs[si].variants) + v
             if variants[vi].nfields == 0: continue
             iff(e_bin(.eq, VI, ta, e_iconst(v)))
             loop i in [0..int(variants[vi].nfields)):
                 f = int(variants[vi].fields) + i
-                eq_member(field_store_type(f), e_addi(a, int(fields[f].offset)), e_addi(b, int(fields[f].offset)), fail)
+                if protected: e_mov(r, e_bin(.and_, VI, r, eq_member_value(field_store_type(f), e_addi(a, int(fields[f].offset)), e_addi(b, int(fields[f].offset)), force)))
+                else: eq_member(field_store_type(f), e_addi(a, int(fields[f].offset)), e_addi(b, int(fields[f].offset)), fail)
             endc()
     else if k == .array:
         et = int(types[t].elem)
@@ -356,57 +398,73 @@ helper_eq = (t: int):
         pb = e_load(VI, b, 0, ptr_size)
         na = arr_len(pa)
         brif_to(e_bin(.ne, VI, na, arr_len(pb)), fail)
-        ek = types[prune(et)].kind
-        bits_equal = (ek == .int_ and et != T_MATH_INT) or ek == .bool_
-        if bits_equal:
-            # A single scalar needs neither a word loop nor a tail loop.
-            iff(e_bin(.eq, VI, na, e_iconst(1)))
-            eq_member(et, e_addi(pa, 24), e_addi(pb, 24), fail)
+        protected = force or eq_has_secret(et)
+        if protected:
             e_mov(r, e_iconst(1))
-            br_to(fail)
-            endc()
-            # Only reflexive scalar equality: floats may contain NaN, and a
-            # record protocol may have effects even when storage is shared.
-            iff(e_bin(.eq, VI, pa, pb))
-            e_mov(r, e_iconst(1))
-            br_to(fail)
-            endc()
-        if bits_equal and owner_stride(et) < 8:
-            # Emit the word loop here so the equality helper stays a leaf and
-            # release builds can inline it. Finish with whole element loads.
-            bytes = e_bin(.mul, VI, na, e_iconst(owner_stride(et)))
-            i = vreg(VI)
-            e_mov(i, e_iconst(0))
-            blk()
-            lop()
-            brif_to(e_bin(.gts, VI, e_addi(i, 8), bytes), ctl - 1)
-            aa = e_bin(.add, VI, e_addi(pa, 24), i)
-            bb = e_bin(.add, VI, e_addi(pb, 24), i)
-            brif_to(e_bin(.ne, VI, e_load(VI, aa, 0, 8), e_load(VI, bb, 0, 8)), fail)
-            e_mov(i, e_addi(i, 8))
-            br_to(ctl)
-            endc()
-            endc()
-            blk()
-            lop()
-            brif_to(e_bin(.ges, VI, i, bytes), ctl - 1)
-            eq_member(et, e_bin(.add, VI, e_addi(pa, 24), i), e_bin(.add, VI, e_addi(pb, 24), i), fail)
-            e_mov(i, e_addi(i, owner_stride(et)))
-            br_to(ctl)
-            endc()
-            endc()
-        else:
             i = vreg(VI)
             e_mov(i, e_iconst(0))
             blk()
             lop()
             brif_to(e_bin(.ges, VI, i, na), ctl - 1)
             off = e_bin(.mul, VI, i, e_iconst(owner_stride(et)))
-            eq_member(et, e_bin(.add, VI, e_addi(pa, 24), off), e_bin(.add, VI, e_addi(pb, 24), off), fail)
+            e_mov(r, e_bin(.and_, VI, r, eq_member_value(et, e_bin(.add, VI, e_addi(pa, 24), off), e_bin(.add, VI, e_addi(pb, 24), off), force)))
             e_mov(i, e_addi(i, 1))
             br_to(ctl)
             endc()
             endc()
+        else:
+            ek = types[prune(et)].kind
+            bits_equal = (ek == .int_ and et != T_MATH_INT) or ek == .bool_
+            if bits_equal:
+                # A single scalar needs neither a word loop nor a tail loop.
+                iff(e_bin(.eq, VI, na, e_iconst(1)))
+                eq_member(et, e_addi(pa, 24), e_addi(pb, 24), fail)
+                e_mov(r, e_iconst(1))
+                br_to(fail)
+                endc()
+                # Only reflexive scalar equality: floats may contain NaN, and a
+                # record protocol may have effects even when storage is shared.
+                iff(e_bin(.eq, VI, pa, pb))
+                e_mov(r, e_iconst(1))
+                br_to(fail)
+                endc()
+            if bits_equal and owner_stride(et) < 8:
+                # Emit the word loop here so the equality helper stays a leaf and
+                # release builds can inline it. Finish with whole element loads.
+                bytes = e_bin(.mul, VI, na, e_iconst(owner_stride(et)))
+                i = vreg(VI)
+                e_mov(i, e_iconst(0))
+                blk()
+                lop()
+                brif_to(e_bin(.gts, VI, e_addi(i, 8), bytes), ctl - 1)
+                aa = e_bin(.add, VI, e_addi(pa, 24), i)
+                bb = e_bin(.add, VI, e_addi(pb, 24), i)
+                brif_to(e_bin(.ne, VI, e_load(VI, aa, 0, 8), e_load(VI, bb, 0, 8)), fail)
+                e_mov(i, e_addi(i, 8))
+                br_to(ctl)
+                endc()
+                endc()
+
+                blk()
+                lop()
+                brif_to(e_bin(.ges, VI, i, bytes), ctl - 1)
+                eq_member(et, e_bin(.add, VI, e_addi(pa, 24), i), e_bin(.add, VI, e_addi(pb, 24), i), fail)
+                e_mov(i, e_addi(i, owner_stride(et)))
+                br_to(ctl)
+                endc()
+                endc()
+            else:
+                i = vreg(VI)
+                e_mov(i, e_iconst(0))
+                blk()
+                lop()
+                brif_to(e_bin(.ges, VI, i, na), ctl - 1)
+                off = e_bin(.mul, VI, i, e_iconst(owner_stride(et)))
+                eq_member(et, e_bin(.add, VI, e_addi(pa, 24), off), e_bin(.add, VI, e_addi(pb, 24), off), fail)
+                e_mov(i, e_addi(i, 1))
+                br_to(ctl)
+                endc()
+                endc()
     else if k == .vec:
         loop i in [0..vec_comps(t)):
             if types[t].sign:
@@ -414,16 +472,88 @@ helper_eq = (t: int):
             else:
                 brif_to(e_bin(.fne, VS, e_load(VS, a, 4 * i, 4 | M_FLOAT), e_load(VS, b, 4 * i, 4 | M_FLOAT)), fail)
     else: eq_member(t, a, b, fail)
-    e_mov(r, e_iconst(1))
+    if not protected: e_mov(r, e_iconst(1))
     endc()
     if snapshot:
         drop_at(a, t)
         drop_at(b, t)
     e_ret(r)
 
+helper_ct_int_array_eq = (t: int):
+    ps = helper_params(2)
+    ir.ret = VI
+    a = e_load(VI, ps[0], 0, ptr_size)
+    b = e_load(VI, ps[1], 0, ptr_size)
+    n = arr_len(a)
+    r = vreg(VI)
+    e_mov(r, e_iconst(0))
+    blk()
+    brif_to(e_bin(.ne, VI, n, arr_len(b)), ctl)
+    e_mov(r, e_iconst(1))
+    i = vreg(VI)
+    e_mov(i, e_iconst(0))
+    blk()
+    lop()
+    brif_to(e_bin(.ges, VI, i, n), ctl - 1)
+    off = e_bin(.mul, VI, i, e_iconst(owner_stride(telem(t))))
+    left = e_load(VI, e_bin(.add, VI, a, off), 24, 8)
+    right = e_load(VI, e_bin(.add, VI, b, off), 24, 8)
+    e_mov(r, e_bin(.and_, VI, r, math_compare(.eq, left, right, true)))
+    e_mov(i, e_addi(i, 1))
+    br_to(ctl)
+    endc()
+    endc()
+    endc()
+    e_ret(r)
+
+eq_member_value = (t0: int, a: int, b: int, force: bool = false) -> int:
+    t = quantity_base(t0)
+    k = tkind(t)
+    secret = force or tkind(prune(t0)) == .secret
+    if k == .str_:
+        name = "__str_eq"
+        if secret: name = "__ct_str_eq"
+        return e_call2(rt(name), load_val(t, a, 0), load_val(t, b, 0), VI)
+    if t == T_MATH_INT: return math_compare(.eq, load_val(t, a, 0), load_val(t, b, 0), secret)
+    if vc(t) == VC_INT and k != .array: return e_bin(.eq, VI, load_val(t, a, 0), load_val(t, b, 0))
+    if vc(t) == VC_FLT: return e_bin(.feq, vt_of(t), load_val(t, a, 0), load_val(t, b, 0))
+    if secret and k == .array:
+        et = quantity_base(telem(t))
+        if et == T_MATH_INT: return e_call2(lf_helper(.eq, t, 1), a, b, VI)
+        if tkind(et) == .int_ or tkind(et) == .bool_:
+            pa = e_load(VI, a, 0, ptr_size)
+            pb = e_load(VI, b, 0, ptr_size)
+            na = arr_len(pa)
+            result = vreg(VI)
+            e_mov(result, e_iconst(0))
+            iff(e_bin(.eq, VI, na, arr_len(pb)))
+            bytes = e_bin(.mul, VI, na, e_iconst(owner_stride(et)))
+            e_mov(result, e_call(rt("__ct_mem_eq"), [e_addi(pa, 24), e_addi(pb, 24), bytes], VI))
+            endc()
+            return result
+    inst = 0
+    if secret: inst = 2
+    e_call2(lf_helper(.eq, t0, inst), a, b, VI)
+
 eq_member = (t0: int, a: int, b: int, fail: int):
     t = quantity_base(t0)
+    secret = tkind(prune(t0)) == .secret
     k = types[t].kind
+    if secret and k == .array:
+        et = quantity_base(telem(t))
+        if et == T_MATH_INT:
+            same = e_call2(lf_helper(.eq, t, 1), a, b, VI)
+            brif_to(e_bin(.eq, VI, same, e_iconst(0)), fail)
+            return
+        if (tkind(et) == .int_ and et != T_MATH_INT) or tkind(et) == .bool_:
+            pa = e_load(VI, a, 0, ptr_size)
+            pb = e_load(VI, b, 0, ptr_size)
+            na = arr_len(pa)
+            brif_to(e_bin(.ne, VI, na, arr_len(pb)), fail)
+            bytes = e_bin(.mul, VI, na, e_iconst(owner_stride(et)))
+            same = e_call(rt("__ct_mem_eq"), [e_addi(pa, 24), e_addi(pb, 24), bytes], VI)
+            brif_to(e_bin(.eq, VI, same, e_iconst(0)), fail)
+            return
     if k == .box:
         # (the same box, or both empty: equal without looking inside)
         pa = e_load(VI, a, 0, ptr_size)
@@ -447,7 +577,9 @@ eq_member = (t0: int, a: int, b: int, fail: int):
         endc()
         return
     if k == .str_:
-        r = e_call2(rt("__str_eq"), e_load(VI, a, 0, ptr_size), e_load(VI, b, 0, ptr_size), VI)
+        name = "__str_eq"
+        if secret: name = "__ct_str_eq"
+        r = e_call2(rt(name), e_load(VI, a, 0, ptr_size), e_load(VI, b, 0, ptr_size), VI)
         brif_to(e_bin(.eq, VI, r, e_iconst(0)), fail)
         return
     c = vc(t)
@@ -455,7 +587,7 @@ eq_member = (t0: int, a: int, b: int, fail: int):
         brif_to(e_bin(.eq, VI, e_call2(lf_helper(.eq, t, 0), a, b, VI), e_iconst(0)), fail)
         return
     if t == T_MATH_INT:
-        brif_to(e_bin(.eq, VI, math_compare(.eq, load_val(t, a, 0), load_val(t, b, 0)), e_iconst(0)), fail)
+        brif_to(e_bin(.eq, VI, math_compare(.eq, load_val(t, a, 0), load_val(t, b, 0), secret), e_iconst(0)), fail)
         return
     if c == VC_INT and k != .array:
         brif_to(e_bin(.ne, VI, load_val(t, a, 0), load_val(t, b, 0)), fail)
@@ -750,7 +882,7 @@ lower_helper = (lf: int):
         arrrel: helper_arrrel(t)
         arruniq: helper_arruniq(t)
         arrcopy: helper_owner_arrcopy(t)
-        eq: helper_eq(t)
+        eq: helper_eq(t, h.inst == 2 or tkind(prune(h.htype)) == .secret, h.inst)
         hash: helper_hash(t, h.inst != 0)
         thunk: helper_thunk(h.inst)
         partial: helper_partial(h.inst)

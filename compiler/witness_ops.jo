@@ -30,6 +30,7 @@ use 'refine_ops.dewy'
 use 'nd_contracts.jo'
 use 'proofs.jo'
 use 'directives.jo'
+use 'directive_queries.dewy'
 use 'directive_rules.dewy'
 use 'ide.jo'
 use 'isolation.jo'
@@ -767,7 +768,10 @@ wit_key = (n: int):
         if dir_defer(n, "cannot prove the value is in the set", true): return
         wit_fail(nodes[n].pos, "cannot prove the value is in the set")
         return
-    if base != "" and key != "": err_notes.push((-1, "help: or take the missing key as a value: `{base}.get({key})` gives none for it"))
+    callee = if nodes[n].kind == .call and nodes[n].aux == 0 and nodes[n].sym > 0: int(fns[int(nodes[n].sym)].decl) else: 0
+    popping = callee != 0 and name_of(int(nodes[callee].name)) == "pop"
+    if base != "" and key != "" and popping: err_notes.push((-1, "help: or take the missing key as a value: `{base}.pop({key} default=none)` gives none for it"))
+    else if base != "" and key != "": err_notes.push((-1, "help: or take the missing key as a value: `{base}.get({key})` gives none for it"))
     # (a key of a finite literal type, `p.severity` of `'a' | 'b'`, in a plain dict:
     # a totaldict has every key, so its reads need no guard)
     dict = representation_type(ntype(kid(n, 0)))
@@ -953,6 +957,7 @@ wit_refinement = (n: int, t: int, atom: RefAtom, self: int, a: int, b: int, s: F
             right = wit_formal_text(atom.b, f, at)
             if left != "" and right != "":
                 relation = "{left} {wit_op(atom.op)} {right}"
+    if relation == "" and (fact_query or dir_policy(nodes[n].pos) == DIR_STATIC): relation = wit_field_relation(t, atom)
     missing = if storage: "" else: wit_relation(s, s, op, x, y, refuted)
     if refuted:
         wit_context(contract)
@@ -961,6 +966,27 @@ wit_refinement = (n: int, t: int, atom: RefAtom, self: int, a: int, b: int, s: F
         return
     what = if relation != "" and ref_narrowing.has(n): "`{relation}` for the conversion to {dt(ref_narrowing[n])}" else if relation != "": "refinement `{relation}`" else: "refinement"
     wit_unknown(n, fact_bound(s, self), what, contract, relation, missing)
+wit_field_relation = (t: int, atom: RefAtom) -> str:
+    tt = prune(t)
+    loop si in [0..structs.len()):
+        base = int(structs[si].fields)
+        loop i in [0..int(structs[si].nfields)):
+            if prune(int(fields[base + i].type)) != tt: continue
+            left = wit_field_term(atom.a, si, i)
+            right = wit_field_term(atom.b, si, i)
+            if left == "" or right == "": return ""
+            return "{left} {wit_op(atom.op)} {right}"
+    ""
+wit_field_term = (term: RefTerm, si: int, self: int) -> str:
+    if term.kind == 1: return wit_ref_text(term, "")
+    index = if term.kind == 0: self else if term.kind == 5: term.value else: -1
+    if index < 0 or index >= int(structs[si].nfields): return ""
+    text = name_of(int(fields[int(structs[si].fields) + index].name))
+    loop selector in term.path:
+        if selector == -1: text += ".length"
+        else if selector > 0: text += ".{name_of(selector)}"
+        else: return ""
+    text + wit_offset_text(term.offset)
 wit_formal_text = (term: RefTerm, f: int, self: int) -> str:
     index = if term.kind == 0: self else if term.kind == 2 or term.kind == 5: term.value else: -1
     if term.kind == 1 or term.kind == 3: return wit_ref_text(term, "")

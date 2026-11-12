@@ -62,7 +62,24 @@ calendar_period_why = (a: int, b: int) -> str:
     if time_core_type(ntype(a), "Months") or time_core_type(ntype(b), "Months"): return " (`1month` and `1year` are calendar periods, whose length depends on the date, so they add to dates and zoned times: for a length of time write the hours it means, such as `30*24hour`)"
     ""
 # (`0s` with a local `s`: what a unit written against a number means here, for an operator's error)
+shadowed_unit_in = (x: int) -> int:
+    k = nodes[x].kind
+    if k == .binary:
+        if has_flag(x, NF_JUXT) and (nodes[int(nodes[x].a)].kind == .int_lit or nodes[int(nodes[x].a)].kind == .float_lit):
+            v = int(nodes[x].b)
+            if nodes[v].kind == .ident and nodes[v].aux == i32(int(SK.local)) and universe.has(int(nodes[v].name)): return v
+            return 0
+        left = shadowed_unit_in(int(nodes[x].a))
+        if left != 0: return left
+        return shadowed_unit_in(int(nodes[x].b))
+    0
 hidden_unit_why = (n: int, a: int, b: int) -> str:
+    found = shadowed_unit_in(a)
+    if found == 0: found = shadowed_unit_in(b)
+    if found != 0:
+        ln, c = line_col(locals[int(nodes[found].sym)].pos)
+        nm = name_of(int(nodes[found].name))
+        return " (`{nm}` in a product with a number is your variable from line {ln} (type {dt(ntype(found))}), which hides the unit `{nm}`: rename the variable to use the unit)"
     if not has_flag(n, NF_JUXT) or nodes[a].kind != .int_lit and nodes[a].kind != .float_lit or nodes[b].kind != .ident or nodes[b].aux != i32(int(SK.local)) or is_numeric(ntype(b)): return ""
     made = locals[int(nodes[b].sym)].pos
     ln, c = line_col(made)

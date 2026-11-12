@@ -354,6 +354,7 @@ fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) 
     # finite divisor alone. Division and right shift must retain it.
     if y.wide or x.wide and (kind == 1 or kind == 3 or not floor): return fact_unmodeled(s, n, .unsupported)
     if x.lo < 1: x.lo = max(x.lo, fact_relational(s, a, false))
+    if y.lo < 1 and y.hi >= 1: y.lo = max(y.lo, fact_relational(s, b, false))
     # Shrinking an unbounded mathematical value does not make it a word.
     # Endpoint sentinels must not become finite merely by division/shift.
     if (kind == 1 or kind == 3) and (not fact_host_endpoint(s, a, false) or not fact_host_endpoint(s, a, true)): return fact_unmodeled(s, n, .unsupported)
@@ -413,7 +414,18 @@ fact_floor = (s: mut FactState, n: int, kind: int, a: int, b: int, floor: bool) 
         distance = if kind == 1: x.lo / y.lo - x.lo else if kind == 3: (x.lo >> y.lo) - x.lo else if smaller: -1 else: 0
         fact_difference(s, v, a, distance, n)
     if (kind == 1 and y.lo == 2 or kind == 3 and y.lo == 1) and y.lo == y.hi and (floor or x.lo >= 0): fact_midpoint(s, n, v, a)
+    if kind == 1 and y.lo == y.hi and y.lo >= 1 and x.lo >= 0: fact_share(s, n, v, a, y.lo)
     v
+fact_share = (s: mut FactState, n: int, v: int, a: int, c: int):
+    t = fact_terms[a]
+    if t.op != .star or t.a == 0 or t.b == 0 or fact_slot(s, t.a) < 0 or fact_slot(s, t.b) < 0: return
+    loop factors in [(t.a, t.b), (t.b, t.a)]:
+        g = fact_bound(s, factors.0)
+        k = fact_bound(s, factors.1)
+        if g.wide or k.wide or g.lo < 0 or k.lo < 0 or k.hi > c: continue
+        distance = 0
+        if k.hi < c and g.lo >= 1: distance = -1
+        fact_difference(s, v, factors.0, distance, n)
 # The constant positive divisor of a floor quotient value (`d // c`, Dewy's
 # `__floor_div` or its power-of-two shift, or a nonnegative dividend's
 # truncating `/`), else 0: c*q <= d. O(1).
@@ -638,7 +650,7 @@ fact_extremum = (s: mut FactState, n: int, a: int, b: int, lower: bool) -> int:
             else if not lower and fact_compare(s, .le, other, peer) == 1: fact_difference(s, v, peer, 0, n)
     v
 fact_rational_zero_test = (n: int) -> int:
-    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2 or rational_constants.len() == 0: return -1
+    if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return -1
     d = int(fns[int(nodes[n].sym)].decl)
     if d == 0: return -1
     if fact_name_rational_eq == 0:
@@ -650,6 +662,9 @@ fact_rational_zero_test = (n: int) -> int:
         loop nodes[e].kind == .conv: e = int(nodes[e].a)
         if let parts = rational_constants.get(e):
             if parts.0 == 0: return 1 - i
+        if nodes[e].kind == .call and nodes[e].aux == 0 and nodes[e].sym > 0 and nkids(e) == 2:
+            sub = int(fns[int(nodes[e].sym)].decl)
+            if sub > 0 and nodes[sub].name == i32(intern("__sub__")) and files[pos_file(nodes[sub].pos)].path == lib_dir + "/rational.dewy" and same_value(kid(e, 0), kid(e, 1)): return 1 - i
     -1
 fact_rational_constructor = (n: int, count: int = 2) -> bool:
     if nodes[n].kind != .call or nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != count: return false

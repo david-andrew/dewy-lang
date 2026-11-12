@@ -35,6 +35,7 @@ type_intern_rehash = ():
     loop id in [1..ti_types[0].len()):
         if int(ti_types[0][id].flags) & TI_HAS_VAR != 0: continue
         if ti_types[0][id].kind == .var or ti_types[0][id].kind == .param: continue
+        if ti_types[0][id].kind == .typeval or ti_types[0][id].kind == .module: continue
         args: int[]
         loop i in [0..int(ti_types[0][id].nargs)): args.push(ti_targ(id, i))
         h = int(type_intern_hash(&ti_types[0][id], args)) & (n - 1)

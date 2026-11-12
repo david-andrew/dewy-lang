@@ -45,6 +45,7 @@ use 'witness.jo'
 use 'witness_ops.dewy'
 use 'directives.jo'
 use 'directive_rules.dewy'
+use 'directive_queries.dewy'
 use 'warn_if.jo'
 use 'string_domains.jo'
 use 'draw_context.jo'
@@ -277,9 +278,34 @@ fact_narrow_check = (n: int, s: mut FactState, value: int) -> bool:
         wit_fail(nodes[n].pos, "{shown} does not fit {dt(ntype(n))}")
         return false
     err_notes.push((-1, "help: widen the destination to `int`, state the domain as a refinement, or choose `overflow='wrap'|'saturate'`"))
+    held = ""
+    if fact_query or dir_policy(nodes[n].pos) == DIR_STATIC: held = fact_pushed_into(n)
+    if held != "": err_notes.push((-1, "help: the destination is an element of `{held}`, an array<{dt(ntype(n))}> by the values it was made from: make it hold `int` where it is made, `let {held}:array<int> = ...`"))
     repair = if lc != 1 and hc != 1: "{low} <=? {side.text} and {side.text} <=? {shown_limit}" else: relation
     wit_unknown(n, fact_bound(s, value), "`{relation}` for the conversion to {dt(ntype(n))}", 0, repair, missing)
     false
+fact_pushed_into = (n: int) -> str:
+    if fact_owner <= 0 or fact_owner >= fns.len() or fns[fact_owner].body == 0 or not dewy_at(nodes[n].pos): return ""
+    work = [int(fns[fact_owner].body)]
+    visits = 0
+    target = 0
+    unwritten: {int: bool} = {}
+    loop work.len() > 0 and visits < 100000:
+        e = work.pop()
+        visits += 1
+        if e <= 0 or e >= nodes.len() or nodes[e].kind == .lambda: continue
+        if nodes[e].kind == .vardecl and nodes[e].sym > 0: unwritten[int(nodes[e].sym)] = nodes[e].a == 0
+        if nodes[e].kind == .intrinsic and nodes[e].aux == i32(int(IN.push)) and nkids(e) == 2 and kid(e, 1) == n:
+            r = kid(e, 0)
+            l = int(nodes[r].sym)
+            if nodes[r].kind != .ident or nodes[r].aux != i32(int(SK.local)) or l <= 0 or int(locals[l].flags) & LF_DECL == 0: return ""
+            target = l
+        work.push(int(nodes[e].a))
+        work.push(int(nodes[e].b))
+        work.push(int(nodes[e].c))
+        loop i in [0..nkids(e)): work.push(kid(e, i))
+    if target == 0 or not (unwritten.get(target) ?? false): return ""
+    name_of(int(locals[target].name))
 # The builtin floor helper a Dewy `//` or `%` resolved to (fact_floor's kind), or 0.
 fact_floor_call = (n: int) -> int:
     if nodes[n].aux != 0 or nodes[n].sym <= 0 or nkids(n) != 2: return 0
@@ -292,6 +318,109 @@ fact_floor_call = (n: int) -> int:
     if name == "__floor_div_pow2": return 3
     if name == "__floor_mod_pow2": return 4
     0
+fact_range_push_rows = (n: int, body: mut FactState, lo: int, pushes: (int, int)[]):
+    l = int(nodes[n].sym)
+    if l == 0 or pushes.len() == 0 or not body.live: return
+    vi = fact_binding(body, PlaceIdentity(.local, int(locals[l].owner), l))
+    x = fact_bound(body, lo)
+    if vi < 0 or x.wide or x.lo != x.hi or x.lo < -(1 << 40) or x.lo > (1 << 40): return
+    loop entry in pushes:
+        e = fact_bound(body, entry.1)
+        if e.wide or e.lo != e.hi or e.lo < 0 or e.lo > (1 << 40): continue
+        i = fact_binding(body, PlaceIdentity(.local, int(locals[entry.0].owner), entry.0))
+        if i < 0 or body.projections.len() >= FACT_CAP: continue
+        length = fact_project(body, body.bindings[i].value, -1, false, T_INT)
+        v = body.bindings[vi].value
+        fact_difference(body, length, v, e.lo - x.lo, n)
+        fact_difference(body, v, length, x.lo - e.lo, n)
+fact_replaced_arrays = (n: int) -> int[]:
+    out: int[]
+    work = [int(nodes[n].b)]
+    loop work.len() > 0 and out.len() < 8:
+        e = work.pop()
+        if e == 0: continue
+        k = nodes[e].kind
+        if k == .lambda: continue
+        if k == .assign:
+            a = int(nodes[e].a)
+            l = int(nodes[a].sym)
+            if nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and l > 0 and tkind(fact_type(int(locals[l].type))) == .array and locals[l].pos < nodes[n].pos and l not in out: out.push(l)
+        mask = isolation_children(k)
+        if mask < 0: continue
+        if mask & 1 != 0: work.push(int(nodes[e].a))
+        if mask & 2 != 0: work.push(int(nodes[e].b))
+        if mask & 4 != 0: work.push(int(nodes[e].c))
+        if mask & 16 != 0:
+            loop i in [0..nkids(e)): work.push(kid(e, i))
+    out
+fact_row_side = (t: FactState, place: PlaceIdentity, length: bool) -> int:
+    i = fact_binding(t, place)
+    if i < 0: return 0
+    if not length: return t.bindings[i].value
+    p = fact_projection_find(t, t.bindings[i].value, -1, false)
+    if p < 0: return 0
+    t.projections[p].value
+fact_length_rows_assume = (t: mut FactState, rows: (PlaceIdentity, PlaceIdentity, bool, bool, int)[], at: int):
+    loop row in rows:
+        i = fact_binding(t, row.0)
+        other = fact_row_side(t, row.1, row.2)
+        if i < 0 or other == 0 or t.projections.len() >= FACT_CAP: continue
+        length = fact_project(t, t.bindings[i].value, -1, false, T_INT)
+        if row.3: fact_difference(t, length, other, row.4, at)
+        else: fact_difference(t, other, length, row.4, at)
+fact_length_row_holds = (t: FactState, row: (PlaceIdentity, PlaceIdentity, bool, bool, int)) -> bool:
+    length = fact_row_side(t, row.0, true)
+    other = fact_row_side(t, row.1, row.2)
+    if length == 0 or other == 0: return false
+    if row.3: fact_distance(t, length, other, row.4) else: fact_distance(t, other, length, row.4)
+fact_range_length_rows = (n: int, pre: FactState, s: mut FactState, lo: int, hi: int):
+    if fact_loop_exhausted: return
+    replaced = fact_replaced_arrays(n)
+    if replaced.len() == 0: return
+    rows: (PlaceIdentity, PlaceIdentity, bool, bool, int)[]
+    loop l in replaced:
+        place = PlaceIdentity(.local, int(locals[l].owner), l)
+        at = fact_row_side(pre, place, true)
+        if at == 0 or fact_incident(pre, at) < 0: continue
+        loop binding in s.bindings:
+            if rows.len() >= 8: break
+            if binding.place.root != .local or binding.place == place: continue
+            d = binding.place.declaration
+            j = fact_binding(pre, binding.place)
+            if j < 0 or pre.bindings[j].value != binding.value: continue
+            t = fact_type(int(locals[d].type))
+            length = tkind(t) == .array
+            if not length and not (fact_scalar(t) and is_int(t)): continue
+            other = fact_row_side(pre, binding.place, length)
+            if other == 0: continue
+            up = fact_shortest(pre, at, other)
+            down = fact_shortest(pre, other, at)
+            if up != FACT_MAX and up >= -(1 << 32) and up <= (1 << 32): rows.push((place, binding.place, length, true, up))
+            if down != FACT_MAX and down >= -(1 << 32) and down <= (1 << 32) and rows.len() < 8: rows.push((place, binding.place, length, false, down))
+    if rows.len() == 0: return
+    outer = fact_speculating
+    fact_speculating += 1
+    settled = false
+    loop round in [0..2):
+        trial = s
+        fact_length_rows_assume(trial, rows, n)
+        body = fact_range_body(n, trial, lo, hi)
+        edges = fact_loop_body(n, body)
+        if not edges.back.live and not edges.exits.live: break
+        kept: (PlaceIdentity, PlaceIdentity, bool, bool, int)[]
+        loop row in rows:
+            held = true
+            loop t in [edges.back, edges.exits]:
+                if not t.live: continue
+                if not fact_length_row_holds(t, row): held = false
+            if held: kept.push(row)
+        if kept.len() == rows.len():
+            settled = true
+            break
+        rows = kept
+        if rows.len() == 0: break
+    fact_speculating = outer
+    if settled and not fact_loop_exhausted: fact_length_rows_assume(s, rows, n)
 fact_range = (n: int, s: mut FactState):
     iterator = int(nodes[n].a)
     lo = fact_capture(int(nodes[iterator].a), s)
@@ -336,11 +465,13 @@ fact_range = (n: int, s: mut FactState):
         if entry.2: fact_difference(s, v, hi, -1, n)
     loop l in found: fact_found_payload(s, l, lo, hi)
     if s.live and int(nodes[n].sym) != 0: fact_range_invariants(n, pre, s, lo, hi)
+    if s.live and int(nodes[n].sym) != 0: fact_range_length_rows(n, pre, s, lo, hi)
     bounded = demands.len() > 0 and fact_loop_bounds(n, s, demands, FACT_PREP_RANGE, 0, lo, hi, pushes + growers)
     after = s
     body = fact_range_body(n, s, lo, hi)
     fact_growing_lengths(body, pushes)
     fact_growing_lengths(body, growers)
+    fact_range_push_rows(n, body, lo, pushes)
     # A nonempty iteration establishes lo < hi. Entry <= lo and every
     # replacement < hi therefore bound the carried value inside the body,
     # even when a zero-iteration exit cannot establish entry < hi.
@@ -359,7 +490,8 @@ fact_range = (n: int, s: mut FactState):
         # (the iteration count, hi-lo or hi-lo+1, when the range is not reversed)
         extra = if has_flag(iterator, NF_INCLUSIVE): 1 else: 0
         x = fact_bound(s, lo); y = fact_bound(s, hi)
-        if fact_compare(s, .le, lo, hi) == 1 or extra == 1 and fact_compare(s, .le, lo, hi) >= 0 and x.lo == x.hi and y.lo == y.hi and y.lo + 1 >= x.lo:
+        empty_ok = extra == 1 and x.lo == x.hi and fact_entails(s, lo, hi, 1)
+        if fact_compare(s, .le, lo, hi) == 1 or empty_ok or extra == 1 and fact_compare(s, .le, lo, hi) >= 0 and x.lo == x.hi and y.lo == y.hi and y.lo + 1 >= x.lo:
             if x.lo != FACT_MIN and y.lo != FACT_MIN and fact_add_fits(y.hi, -x.lo + extra) and fact_add_fits(y.lo, -x.hi + extra):
                 count = fact_new(s, FactBound(max(0, y.lo - x.hi + extra), y.hi - x.lo + extra), FactTerm(.minus, hi, lo, n, T_INT))
                 if x.lo == x.hi:

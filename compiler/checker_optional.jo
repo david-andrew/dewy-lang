@@ -1,5 +1,6 @@
 use 'node_store.dewy'
 use 'checker_types.dewy'
+use 'checker_coerce.dewy'
 use 'source_types.dewy'
 use 'type_inference.dewy'
 use 'type_constructors.dewy'
@@ -58,7 +59,7 @@ xo_check = (n: int, expected: int, ex: int) -> CheckerOptionalResult:
     if ex != 0: h2 = ex
     btt = int(tu_prune(xo_host[0].check(int(xo_nodes[0][n].b), h2)))
     t = inner
-    if xo_types[0][btt].kind == .opt:
+    if xo_types[0][btt].kind == .opt and (xo_types[0][int(tu_prune(inner))].kind != .opt or not cq_can_coerce(int(xo_nodes[0][n].b), btt, inner)):
         xo_host[0].coerce(int(xo_nodes[0][n].b), at)
         t = at
         xo_nodes[0][n].aux = 1

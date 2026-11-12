@@ -49,6 +49,11 @@ decl_literal = (s: int) -> int:
     nodes[s].b = i32(value)
     t
 
+decl_quantity_literal = (s: int, t: int) -> int:
+    wanted = decimal_quantity_start(nodes[s].pos, int(nodes[s].b), t)
+    if wanted != t: nodes[s].b = i32(coerce(int(nodes[s].b), wanted))
+    wanted
+
 decl_after = (s: int, l: int, t: int, code: int):
     if code == 1: growth_decl_before(s)
     else if code == 3: sibling_establish(l)

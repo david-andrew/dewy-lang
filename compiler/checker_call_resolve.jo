@@ -109,6 +109,21 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
         call_targs = targs_here
         return resolve_fn_call(n, name, decls, args, expected, closure, ufcs)
     if nfit == 0 and failure.rejected.len() > 0: call_rejection_text(failure)
+    if nfit > 1 and cc_any:
+        ds: int[]
+        xs: int[][]
+        ps: int[][]
+        loop cd in cands:
+            ds.push(cd.decl)
+            xs.push(cd.args)
+            ps.push(cd.sig.params)
+        kept = cc_choose(n, ds, xs, ps)
+        if kept.len() > 0:
+            chosen: Cand[]
+            loop i in kept: chosen.push(cands[i])
+            cands = chosen
+            nfit = chosen.len()
+            first = chosen[0]
     # pick the cheapest candidate; prefer non-generic ones, then the program's own definitions
     # over the standard library's; report real ties (the library's are settled by how many
     # arguments have exactly a parameter's type, then which comes first: min(x, 5) with x: i32
@@ -148,6 +163,9 @@ resolve_fn_call = (n: int, name: int, decls: int[], args: int[], expected: int, 
             j += 1
         if ok and cd.sig.ret != 0 and match_type(int(cd.sig.ret), int(types[prune(expected)].elem), rb, 0) < 0: ok = false
         if ok: cd.binds = rb
+    if expected != 0 and cd.plain and cd.sig.ret != 0 and cd.sig.ntp > 0:
+        loop a in cd.args:
+            if a != 0 and nodes[a].kind == .str_lit and nodes[a].aux != 1: cd.plain = false
     if not cd.plain and not partial and expected != 0 and cd.sig.ret != 0 and cd.sig.ntp > 0: expected_binds(cd, expected, targs_here)
     if not cd.plain:
         loop i in [0..np):

@@ -87,6 +87,28 @@ fact_mentions = (n: int, l: int) -> bool:
             c = kid(n, i)
             if fact_mentions(c, l): return true
     false
+# Whether call n may change local l: l passed whole or lent as a place.
+fact_call_may_write = (n: int, l: int) -> bool:
+    if not fact_mentions(n, l): return false
+    loop i in [0..nkids(n)):
+        c = kid(n, i)
+        loop nodes[c].kind == .conv or nodes[c].kind == .narrow or nodes[c].kind == .namedarg: c = int(nodes[c].a)
+        if nodes[c].kind == .ident and nodes[c].aux == i32(int(SK.local)) and nodes[c].sym == i32(l): return true
+    if nodes[n].a != 0 and fact_mentions(int(nodes[n].a), l): return true
+    fact_lends(n, l)
+fact_lends = (n: int, l: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .addr: return fact_mentions(n, l)
+    mask = isolation_children(k)
+    if mask < 0: return k != .lambda and fact_mentions(n, l)
+    if mask & 1 != 0 and fact_lends(int(nodes[n].a), l): return true
+    if mask & 2 != 0 and fact_lends(int(nodes[n].b), l): return true
+    if mask & 4 != 0 and fact_lends(int(nodes[n].c), l): return true
+    if mask & 16 != 0:
+        loop i in [0..nkids(n)):
+            if fact_lends(kid(n, i), l): return true
+    false
 fact_labeled_exit = (n: int) -> bool:
     if n == 0: return false
     k = nodes[n].kind
@@ -116,34 +138,51 @@ fact_push_then = (a: (int, int), b: (int, int)) -> (int, int):
     normal = if b.0 == -2: -2 else: a.0 + b.0
     continued = fact_push_merge(a.1, (if b.1 == -2: -2 else: a.0 + b.1))
     (normal, continued)
-fact_push_flow = (n: int, l: int) -> (int, int):
+fact_literal_trips = (n: int) -> int:
+    if nodes[n].kind != .for_: return -1
+    it = int(nodes[n].a)
+    loop it != 0 and nodes[it].kind == .conv: it = int(nodes[it].a)
+    if it == 0 or nodes[it].kind != .array or nodes[it].aux != 0 or nkids(it) > 64: return -1
+    loop i in [0..nkids(it)):
+        if has_flag(kid(it, i), NF_SPREAD): return -1
+    nkids(it)
+fact_push_flow = (n: int, l: int, trips: {int: FactBound} = {}, minimum: bool = false) -> (int, int):
     if n == 0: return (0, -2)
     k = nodes[n].kind
     if k == .break_: return (-1, -1)
     if k == .continue_:
         if nodes[n].name != 0 or nodes[n].ival != 0: return (-1, -1)
         return (-2, 0)
-    if k == .return_: return fact_push_then(fact_push_flow(int(nodes[n].a), l), (-2, -2))
+    if k == .return_: return fact_push_then(fact_push_flow(int(nodes[n].a), l, trips, minimum), (-2, -2))
     if k == .lambda: return (0, -2)
     if k == .intrinsic and nodes[n].aux == i32(int(IN.push)) and nkids(n) == 2 and fact_push_receiver(kid(n, 0)) == l:
-        return fact_push_then(fact_push_flow(kid(n, 1), l), (1, -2))
+        return fact_push_then(fact_push_flow(kid(n, 1), l, trips, minimum), (1, -2))
     if k == .assign and fact_mentions(int(nodes[n].a), l): return (-1, -1)
-    if (k == .call or k == .addr or k == .intrinsic and nodes[n].aux != i32(int(IN.len))) and fact_mentions(n, l): return (-1, -1)
+    if (k == .addr or k == .intrinsic and nodes[n].aux != i32(int(IN.len))) and fact_mentions(n, l): return (-1, -1)
+    if k == .call and fact_call_may_write(n, l): return (-1, -1)
     # A nested loop may exit this one only with a labeled edge. Any return
     # in it ends the function; a normal exit makes no change to this array.
     if k == .while_ or k == .for_:
-        if fact_mentions(n, l) or fact_labeled_exit(n): return (-1, -1)
-        return (0, -2)
+        if fact_labeled_exit(n): return (-1, -1)
+        if not fact_mentions(n, l): return (0, -2)
+        m = fact_literal_trips(n)
+        if m < 0:
+            if let known = trips.get(n):
+                if minimum or known.lo == known.hi: m = known.lo
+        if m < 0 or fact_mentions(int(nodes[n].a), l): return (-1, -1)
+        inner = fact_push_flow(int(nodes[n].b), l, trips, minimum)
+        if inner.0 < 0 or inner.0 > 64 or inner.1 != -2 and inner.1 != inner.0: return (-1, -1)
+        return (m * inner.0, -2)
     if k == .and_ or k == .or_ or k == .coalesce:
         if fact_mentions(n, l): return (-1, -1)
-        a = fact_push_flow(int(nodes[n].a), l)
-        b = fact_push_flow(int(nodes[n].b), l)
+        a = fact_push_flow(int(nodes[n].a), l, trips, minimum)
+        b = fact_push_flow(int(nodes[n].b), l, trips, minimum)
         return fact_push_then(a, (fact_push_merge(0, b.0), b.1))
     if k == .if_ or k == .iflet:
-        condition = fact_push_flow(int(nodes[n].a), l)
+        condition = fact_push_flow(int(nodes[n].a), l, trips, minimum)
         if fact_mentions(int(nodes[n].a), l): return (-1, -1)
-        y = fact_push_flow(int(nodes[n].b), l)
-        z = fact_push_flow(int(nodes[n].c), l)
+        y = fact_push_flow(int(nodes[n].b), l, trips, minimum)
+        z = fact_push_flow(int(nodes[n].c), l, trips, minimum)
         return fact_push_then(condition, (fact_push_merge(y.0, z.0), fact_push_merge(y.1, z.1)))
     if k == .match_:
         if fact_mentions(int(nodes[n].a), l): return (-1, -1)
@@ -153,16 +192,16 @@ fact_push_flow = (n: int, l: int) -> (int, int):
             arm = kid(n, i)
             if fact_mentions(int(nodes[arm].a), l) or fact_mentions(int(nodes[arm].c), l): return (-1, -1)
             loop guard in [int(nodes[arm].a), int(nodes[arm].c)]:
-                g = fact_push_flow(guard, l)
+                g = fact_push_flow(guard, l, trips, minimum)
                 if g.0 == -1 or g.1 != -2: return (-1, -1)
             loop j in [0..nkids(arm)):
                 p = kid(arm, j)
                 if fact_mentions(p, l): return (-1, -1)
                 if nodes[p].kind == .pwild and nodes[arm].a == 0 and nodes[arm].c == 0: exhaustive = true
-            c = fact_push_flow(int(nodes[arm].b), l)
+            c = fact_push_flow(int(nodes[arm].b), l, trips, minimum)
             common = (fact_push_merge(common.0, c.0), fact_push_merge(common.1, c.1))
         if not exhaustive: common.0 = fact_push_merge(common.0, 0)
-        return fact_push_then(fact_push_flow(int(nodes[n].a), l), common)
+        return fact_push_then(fact_push_flow(int(nodes[n].a), l, trips, minimum), common)
     if k == .ident: return (0, -2)
     mask = isolation_children(k)
     if mask < 0: return (-1, -1)
@@ -174,7 +213,7 @@ fact_push_flow = (n: int, l: int) -> (int, int):
     if mask & 16 != 0: parts += kids(n)
     loop c in parts:
         if total.0 == -2: break
-        total = fact_push_then(total, fact_push_flow(c, l))
+        total = fact_push_then(total, fact_push_flow(c, l, trips, minimum))
         if total.0 == -1 or total.1 == -1: return (-1, -1)
     total
 fact_push_count = (n: int, l: int) -> int:
@@ -194,18 +233,72 @@ fact_counted_pushes = (n: int, s: mut FactState) -> (int, int)[]:
         if i < 0: continue
         found.push((l, fact_project(s, s.bindings[i].value, -1, false, T_INT)))
     found
-# Each local of loop n that every iteration pushes onto a fixed k >= 2 times
-# (`[loop x in xs {x x*x}]`), with its entry length and k. O(candidate arrays).
+# Stable nested sources reuse their entry lengths after a whole-body havoc.
+fact_nested_push_trips = (body: int, s: FactState) -> {int: FactBound}:
+    result: {int: FactBound} = {}
+    nested: int[]
+    entry = s
+    work = [body]
+    loop work.len() > 0:
+        n = work.pop()
+        if n == 0: continue
+        k = nodes[n].kind
+        if k == .for_ and nodes[n].aux == 1 and fact_literal_trips(n) < 0:
+            source = int(nodes[n].a)
+            root = source
+            depth = 0
+            loop depth < 8:
+                depth += 1
+                kind = nodes[root].kind
+                if kind == .conv or kind == .addr or kind == .narrow or kind == .field: root = int(nodes[root].a)
+                else if kind == .call and (fact_same_length_call(root) or fact_copy_length_call(root)): root = kid(root, 0)
+                else: break
+            if nodes[root].kind == .ident and fact_binding(s, fact_place(root)) >= 0:
+                length = fact_length_through(source, entry, 0)
+                if length != 0:
+                    b = fact_bound(entry, length)
+                    if not b.wide and b.lo >= 0 and b.lo <= 64 and (b.lo > 0 or b.lo == b.hi): nested.push(n)
+        mask = isolation_children(k)
+        if mask < 0: continue
+        if mask & 1 != 0: work.push(int(nodes[n].a))
+        if mask & 2 != 0: work.push(int(nodes[n].b))
+        if mask & 4 != 0: work.push(int(nodes[n].c))
+        if mask & 16 != 0: work += kids(n)
+    if nested.len() == 0: return result
+    stable = s
+    fact_changes(body, stable, body)
+    loop n in nested:
+        source = int(nodes[n].a)
+        length = fact_length_through(source, stable, 0)
+        if length == 0: continue
+        bound = fact_bound(stable, length)
+        if not bound.wide and bound.lo >= 0 and bound.lo <= 64: result[n] = bound
+    result
+# Each local with a fixed k pushes per iteration, or a positive lower bound
+# through stable nested sources. A negative k encodes that lower bound only.
 fact_scaled_pushes = (n: int, s: mut FactState) -> (int, int, int)[]:
     found: (int, int, int)[]
     body = int(nodes[n].b)
     candidates: int[]
     fact_push_candidates(body, candidates)
+    queried = false
+    trips: {int: FactBound} = {}
     loop l in candidates:
         if int(locals[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF | LF_ALIAS | LF_MUTPARAM) != 0: continue
         if tkind(fact_type(int(locals[l].type))) != .array or fact_mentions(int(nodes[n].a), l): continue
         k = fact_push_count(body, l)
-        if k < 2 or k > 64: continue
+        if k == -1:
+            if not queried: trips = fact_nested_push_trips(body, s); queried = true
+            if trips.len() == 0: continue
+            exact = fact_push_flow(body, l, trips)
+            k = fact_push_merge(exact.0, exact.1)
+            if k < 1:
+                lower = fact_push_flow(body, l, trips, true)
+                k = fact_push_merge(lower.0, lower.1)
+                if k < 1 or k > 64: continue
+                k = -k
+        else if k < 2: continue
+        if k > 64: continue
         i = fact_binding(s, PlaceIdentity(.local, int(locals[l].owner), l))
         if i < 0: continue
         found.push((l, fact_project(s, s.bindings[i].value, -1, false, T_INT), k))
@@ -218,15 +311,23 @@ fact_scaled_lengths = (n: int, s: mut FactState, pushes: (int, int, int)[], coun
         if i < 0: continue
         c = fact_bound(s, count)
         e = fact_bound(s, entry.1)
-        k = entry.2
+        minimum = entry.2 < 0
+        k = if minimum: -entry.2 else: entry.2
         if c.wide or e.wide or c.lo < 0 or e.lo < 0 or e.lo != e.hi or c.hi > fact_length_max(): continue
         # (the array holds count*k elements, so the product is a length too:
         # within the enabled ceiling)
         cap = fact_length_max()
-        added = fact_new(s, FactBound(min(c.lo * k, cap), min(c.hi * k, cap)), FactTerm(.star, count, fact_constant(s, k), n, T_INT))
+        added_hi = cap
+        added_term = FactTerm(type = T_INT)
+        if not minimum:
+            added_hi = min(c.hi * k, cap)
+            added_term = FactTerm(.star, count, fact_constant(s, k), n, T_INT)
+        added = fact_new(s, FactBound(min(c.lo * k, cap), added_hi), added_term)
         total = added
         if e.lo != 0:
-            total = fact_new(s, FactBound(min(c.lo * k + e.lo, cap), min(c.hi * k + e.lo, cap)), FactTerm(.plus, entry.1, added, n, T_INT))
+            total_hi = cap
+            if not minimum: total_hi = min(c.hi * k + e.lo, cap)
+            total = fact_new(s, FactBound(min(c.lo * k + e.lo, cap), total_hi), FactTerm(.plus, entry.1, added, n, T_INT))
             fact_difference(s, total, added, e.lo, n)
             fact_difference(s, added, total, -e.lo, n)
         fact_add_projection(s, FactProjection(s.bindings[i].value, -1, false, total))

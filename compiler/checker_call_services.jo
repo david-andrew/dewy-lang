@@ -13,6 +13,7 @@ use 'checks_builders.dewy'
 use 'ast.jo'
 use 'node_store.dewy'
 use 'types.jo'
+use 'range_checks.dewy'
 use 'type_ops.dewy'
 use 'units.jo'
 use 'unit_ops.dewy'
@@ -309,6 +310,12 @@ call_name_early = (n: int, name: int, mod_scope: int, args: int[], expected: int
             nodes[n] = Node(kind = .intrinsic, pos = nodes[n].pos, aux = i32(int(IN.fixed_abs)), type = i32(t), flags = i32(NF_CHECKED))
             set_list(n, [a])
             return exact_int_result(n)
+    if not ufcs and mod_scope < 0 and args.len() == 5 and name == ci(58, "__dewy_range"):
+        r = dewy_range_ordered(n, args, expected)
+        if r >= 0: return r
+    if not ufcs and mod_scope < 0 and args.len() == 1 and name == ci(59, "__dewy_range_tail"):
+        r = dewy_range_tail_ordered(n, args, expected)
+        if r >= 0: return r
     -1
 
 call_name_intrinsic = (n: int, ii: int) -> int:

@@ -200,6 +200,9 @@ vd_decl = (s: int):
             if vd_flag(int(vd_nodes[0][s].b), 256):
                 t = decl_literal(s)
                 literal_init = true
+            if k == .quantity and vd_dewy_at(pos):
+                t = decl_quantity_literal(s, t)
+                literal_init = true
             if vd_kind(t) == .none_lit: decl_error(s, t, 1)
     if vd_effects[0] and not typed: t = decl_storage(s, t)
     if vd_nodes[0][s].aux2 == 1 and not typed and vd_refining[0] and vd_nodes[0][s].b != 0: t = decl_value_param(s, t)
@@ -213,7 +216,7 @@ vd_decl = (s: int):
     if vd_sibling_pending[0].len() > 0: decl_after(s, l, t, 3)
     if vd_flow_next[0] != 0: vd_flow_local[0] = l
     if unit != 0: vd_tk_bindings[0][l] = s
-    if literal_init and (vd_kind(t) == .struct_ or vd_watch[0].decimal_adapted > 0): decl_after(s, l, t, 4)
+    if literal_init and (vd_kind(t) == .struct_ or vd_kind(t) == .quantity or vd_watch[0].decimal_adapted > 0): decl_after(s, l, t, 4)
     if vd_growth_pending[0] != 0 or (not typed and vd_kind(t) == .struct_ and vd_dewy_at(pos) and not vd_flag(s, 262144)): decl_after(s, l, t, 5)
     b = int(vd_nodes[0][s].b)
     if b != 0 and vd_watch[0].quaternions > 0 and vd_quat_nodes[0].has(b): vd_quat_locals[0][l] = true

@@ -98,7 +98,8 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
                 if may_write_root(args[j], n): w = true
             mwr_direct = false
             return w
-        if not opt_release or callee <= 0: return true
+        if callee <= 0: return true
+        if not opt_release and not fn_leaves_globals(callee): return true
         w = fn_writes(callee)
         if w.all or w.globals.contains(int(nodes[n].sym)): return true
         loop j in [i + 1..args.len()):
@@ -132,7 +133,8 @@ borrow_may_change = (a: int, args: int[], i: int, callee: int) -> bool:
     # aliases and later argument writes are checked above/by shares_mut_root.
     if resource: return false
     # (the source copy policy cannot depend on the build: it consults writes always)
-    if not opt_release and not (copies_on and copy_strict(a)) or callee <= 0: return true
+    if callee <= 0: return true
+    if not opt_release and not (copies_on and copy_strict(a)) and not fn_leaves_globals(callee): return true
     w = fn_writes(callee)
     if w.all or w.globals.len() > 0: return true
     loop j in [i + 1..args.len()):
@@ -528,6 +530,24 @@ fn_writes = (f: int) -> FnWrites:
         if total.all: break
     fw_total[f] = total
     total
+
+fn_leaves_globals = (f: int) -> bool:
+    if let cached = fw_near.get(f): return cached
+    seen: int[]
+    todo = [f]
+    leaves = true
+    loop leaves and todo.len() > 0:
+        g = todo.pop()
+        if seen.contains(g): continue
+        if seen.len() >= FW_NEAR:
+            leaves = false
+            break
+        seen.push(g)
+        d = fn_writes_direct(g)
+        if d.all or d.globals.len() > 0: leaves = false
+        loop c in d.calls: todo.push(c)
+    fw_near[f] = leaves
+    leaves
 
 fn_writes_direct = (f: int) -> FnWrites:
     if let w = fw_direct.get(f): return w

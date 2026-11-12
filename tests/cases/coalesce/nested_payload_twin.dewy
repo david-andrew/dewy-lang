@@ -1,0 +1,7 @@
+# A fallback fitting the inner optional selects its payload, including none.
+wrap=(x:int?):>(int?)?=>x
+main=()=>{
+    let x=wrap(none)
+    let fallback:int?=7
+    printl((x ?? fallback) ?? 9)
+}

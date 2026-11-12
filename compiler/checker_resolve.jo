@@ -74,7 +74,7 @@ ct_resolve_type = (tn: int) -> int:
             loop i in [0..ct_nkids(tn)):
                 if i < ct_nkids2(d) and ct_input[0].nodes[0][ct_kid2(d, i)].aux == 1: targs.push(effect_argument(ct_kid(tn, i)))
                 else: targs.push(ct_resolve_type(ct_kid(tn, i)))
-            return nominal_family(ca_resolve_alias(d, targs, ct_input[0].nodes[0][tn].pos))
+            return nominal_family(ca_resolve_alias(d, type_param_defaults(d, targs), ct_input[0].nodes[0][tn].pos))
         if named.kind == 3:
             if ct_kind(named.ref) == .effect: resolve_type_error(5, tn, 0)
             if ct_input[0].nodes[0][tn].nlist > 0:
@@ -85,9 +85,11 @@ ct_resolve_type = (tn: int) -> int:
         ntp = ct_nkids2(d)
         if ntp == 0 and fixed_size_arg(tn):
             return mk_fixed_checked(get_struct_inst(d, []), fixed_size(ct_kid(tn, 0)), ct_input[0].nodes[0][tn].pos)
-        if ct_nkids(tn) != ntp: resolve_type_error(7, tn, ntp)
-        targs: int[]
-        loop i in [0..ntp): targs.push(ct_resolve_type(ct_kid(tn, i)))
+        given: int[]
+        if ct_nkids(tn) <= ntp:
+            loop i in [0..ct_nkids(tn)): given.push(ct_resolve_type(ct_kid(tn, i)))
+        targs = type_param_defaults(d, given)
+        if ct_nkids(tn) > ntp or targs.len() != ntp: resolve_type_error(7, tn, ntp)
         return nominal_family(get_struct_inst(d, targs))
     if k == .trecord:
         let fields = ct_kids(tn)

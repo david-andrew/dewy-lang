@@ -26,6 +26,7 @@ use 'checker_collections.dewy'
 use 'checker_cast.dewy'
 use 'checker_places.dewy'
 use 'checker_in_range.dewy'
+use 'range_checks.dewy'
 use 'checker_numeric.dewy'
 use 'checker_exact.dewy'
 use 'checker_coerce.dewy'
@@ -388,7 +389,10 @@ xe_char = (n: int):
     if xe_kind_of(tb) == .int_: binary_char_code(int(xe_nodes[0][n].a))
 xe_in = (n: int, expected: int) -> int:
     b = int(xe_nodes[0][n].b)
-    if xe_nodes[0][b].kind == .range and not xe_flag(b, 32768): return int(xy_check(n, expected))
+    if xe_nodes[0][b].kind == .range and not xe_flag(b, 32768):
+        ordered = range_membership_ordered(n, expected)
+        if ordered >= 0: return ordered
+        return int(xy_check(n, expected))
     binary_membership(n, expected)
 xe_decimals = (a: int, b: int):
     binary_decimal(a)
@@ -564,7 +568,7 @@ call_member = (n: int, expected: int) -> int:
     recv = int(xe_nodes[0][callee].a)
     saved_receiver = type_receiver_at
     type_receiver_at = recv
-    rt = tu_prune(check_expr(recv, receiver_literal_hint(recv, int(xe_nodes[0][callee].name), args.len(), expected, xe_nodes[0][n].pos)))
+    rt = int(tu_prune(check_expr(recv, receiver_literal_hint(recv, int(xe_nodes[0][callee].name), args.len(), expected, xe_nodes[0][n].pos))))
     type_receiver_at = saved_receiver
     recv = xe_last[0]
     xe_nodes[0][callee].a = i32(recv)

@@ -397,6 +397,15 @@ fact_literal_keys = (s: mut FactState, e0: int, map: int):
         e = int(nodes[int(globals[g].decl)].b)
         loop nodes[e].kind == .conv: e = int(nodes[e].a)
     if nodes[e].kind != .array or nodes[e].aux != 0 or nodes[e].b != 0: return
+    # Any ordinary element guarantees an insertion, even when keys repeat.
+    # A spread alone may be empty and establishes no lower bound.
+    loop i in [0..nkids(e)):
+        if has_flag(kid(e, i), NF_SPREAD): continue
+        length = fact_project(s, map, -1, false, T_INT)
+        bound = fact_bound(s, length)
+        bound.lo = max(1, bound.lo)
+        fact_set_bound(s, length, bound)
+        break
     loop i in [0..nkids(e)):
         c = kid(e, i)
         if has_flag(c, NF_SPREAD) or s.projections.len() >= FACT_CAP: continue

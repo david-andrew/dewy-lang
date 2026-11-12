@@ -81,42 +81,83 @@ cc_call = (n: int, f: int, decl: int) -> int:
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl]:
         if c.params.len() == 1 and c.params[0] < nkids(n) and time_grid_proven(c.validator, kid(n, c.params[0])): return cc_narrow(n, "OffGrid")
-        args = cc_arguments(n, c)
+        args = cc_arguments(kids(n), c)
         if args.len() != c.params.len(): continue
-        pos = nodes[n].pos
-        # (at the argument, or at the call when a parameter's default filled it in)
-        if nkids(n) > c.params[0] and not pos_in_lib(nodes[kid(n, c.params[0])].pos): pos = nodes[kid(n, c.params[0])].pos
-        # (one run for each validator and constant: `fmt'.2f'` asks the same of every call)
-        key = ""
-        if args.len() == 1 and nodes[args[0]].kind == .str_lit: key = "{c.validator}:{name_of(int(nodes[args[0]].sval))}"
-        said = "\x01"
-        if key != "" and cc_verdicts.has(key): said = cc_verdicts[key]
-        else:
-            v = get_fn_inst(c.validator, [], pos)
-            run = mk(.call, pos)
-            nodes[run].sym = i32(v)
-            nodes[run].type = fns[v].ret
-            add_flag(run, NF_CHECKED)
-            set_list(run, args)
-            why = ct_values[ct_run(run)]
-            if tkind(why.type) == .opt and why.i != 0: said = ct_values[why.items[0]].s
-            else if tkind(why.type) == .str_: said = why.s
-            if key != "": cc_verdicts[key] = said
-        # (empty text: no failure and no promise: the call stays as it is)
-        if said != "\x01":
+        pos = cc_check_pos(n, c)
+        if let said = cc_verdict(c, args, pos):
             if said == "": return 0
             fatal(pos, "{c.message}: {said}")
+        cc_passed[n] = true
         after = cc_fold_after(n, decl)
         if after != 0: return after
         return cc_narrow(n)
     0
 
 # The constants a check's parameters are given, as its validator takes them; short when one is not.
-cc_arguments = (n: int, c: CheckConstant) -> int[]:
+cc_check_pos = (n: int, c: CheckConstant) -> int:
+    pos = nodes[n].pos
+    if nkids(n) > c.params[0] and not pos_in_lib(nodes[kid(n, c.params[0])].pos): pos = nodes[kid(n, c.params[0])].pos
+    pos
+
+cc_verdict = (c: CheckConstant, args: int[], pos: int) -> str?:
+    key = ""
+    if args.len() == 1 and nodes[args[0]].kind == .str_lit: key = "{c.validator}:{name_of(int(nodes[args[0]].sval))}"
+    if key != "" and cc_verdicts.has(key):
+        said = cc_verdicts[key]
+        return if said == "\x01": none else: said
+    said = cc_verdict_run(c, args, pos)
+    if key != "": cc_verdicts[key] = said ?? "\x01"
+    said
+
+cc_verdict_run = (c: CheckConstant, args: int[], pos: int) -> str?:
+    v = get_fn_inst(c.validator, [], pos)
+    run = mk(.call, pos)
+    nodes[run].sym = i32(v)
+    nodes[run].type = fns[v].ret
+    add_flag(run, NF_CHECKED)
+    set_list(run, args)
+    why = ct_values[ct_run(run)]
+    if tkind(why.type) == .opt and why.i != 0: return ct_values[why.items[0]].s
+    if tkind(why.type) == .str_: return why.s
+    none
+
+cc_choose = (n: int, decls: int[], args: int[][], params: int[][]) -> int[]:
+    checked = 0
+    loop d in decls:
+        if cc_decls.has(d): checked += 1
+    if checked < 2: return []
+    passed: int[]
+    plain: int[]
+    failed = ""
+    failed_pos = 0
+    constant = true
+    loop i in [0..decls.len()):
+        if not cc_decls.has(decls[i]):
+            plain.push(i)
+            continue
+        c = cc_decls[decls[i]][0]
+        loop p in c.params:
+            if p >= params[i].len() or prune(params[i][p]) != T_STR: return []
+        given = cc_arguments(args[i], c)
+        if given.len() != c.params.len():
+            constant = false
+            continue
+        pos = nodes[n].pos
+        if args[i].len() > c.params[0] and not pos_in_lib(nodes[args[i][c.params[0]]].pos): pos = nodes[args[i][c.params[0]]].pos
+        if let said = cc_verdict(c, given, pos):
+            if failed_pos == 0 and said != "":
+                failed = "{c.message}: {said}"
+                failed_pos = pos
+        else: passed.push(i)
+    if passed.len() > 0: return passed
+    if constant and failed_pos != 0: fatal(failed_pos, failed)
+    plain
+
+cc_arguments = (xs: int[], c: CheckConstant) -> int[]:
     args: int[]
     loop p in c.params:
-        if p >= nkids(n): return args
-        x = kid(n, p)
+        if p >= xs.len(): return args
+        x = xs[p]
         text = cc_constant(x)
         # (a string the parameter takes as itself; in a wider type, the argument keeps its conversion)
         if text >= 0 and prune(ntype(x)) == T_STR:

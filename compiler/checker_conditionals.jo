@@ -182,7 +182,7 @@ xf_if = (n: int, ex: int) -> int:
     else_expected = branch_expected
     if else_expected == 0 and xf_nodes[0][n].aux2 != -8 and xf_container_tail(c) and t1 != xf_never_type[0] and int(xf_types[0][t1].flags) & 1 == 0:
         tk = xf_kind(t1)
-        if tk == .array or tk == .fixed or tk == .struct_ or (tk == .enum_ and xf_union(t1)): else_expected = t1
+        if tk == .array or tk == .fixed or (tk == .struct_ and not xf_structs[0][int(xf_types[0][t1].st)].record_) or (tk == .enum_ and xf_union(t1)): else_expected = t1
     if n == xf_sink[0]: cond_sink(n, c)
     t2 = xf_branch(c, else_expected, true, changes)
     xf_reset(mark)
