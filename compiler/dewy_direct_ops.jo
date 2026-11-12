@@ -1,0 +1,111 @@
+use 'dewy_direct.jo'
+use 'x64_emit.dewy'
+use 'driver_pipeline.dewy'
+use 'x64_allocate.dewy'
+use 'dewy_reader.dewy'
+use 'dewy_reader_services.jo'
+use 'dewy_parser.dewy'
+use 'dewy_context.jo'
+use 'dewy_walk.dewy'
+use 'dewy_reach.dewy'
+use 'check.jo'
+use 'decimals.jo'
+use 'expr.jo'
+use 'dewy_methods.jo'
+use 'effects.jo'
+use 'refine.jo'
+use 'x64.jo'
+use 'ir.jo'
+use 'parse.jo'
+use 'parser_loops.dewy'
+use 'ide.jo'
+use 'lower.jo'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'ast.jo'
+use 'lex.jo'
+use 'dewy_tokens.dewy'
+use 'dewy_grammar.dewy'
+use 'dewy_scan.dewy'
+use 'dewy_lex.dewy'
+use 'literals.dewy'
+use 'dewy_nodes.jo'
+use 'dewy_fast.jo'
+use 'dewy_fast_file.dewy'
+use 'dewy_fast_lex.dewy'
+use 'dewy_directives.jo'
+use 'dewy_ffi.jo'
+use 'proofs.jo'
+use 'module_paths.dewy'
+use 'place_split.dewy'
+use 'place_methods.jo'
+use 'ownership.jo'
+use 'par.jo'
+use 'pcheck.jo'
+use 'main.jo'
+use 'lazy_bodies.jo'
+use 'prelude.jo'
+use 'icount.jo'
+use 'icount_ops.dewy'
+use 'directives.jo'
+use 'directive_rules.dewy'
+use 'node_store.dewy'
+use 'targets.dewy'
+use 'isolation.jo'
+use 'concurrency.jo'
+use 'arena.jo'
+
+dc_report = (pos: int, msg: str):
+    rd_dc_report(dc_parser, pos, msg)
+
+dc_flush_report = ():
+    rd_dc_flush_report(dc_parser)
+
+# The direct parser reads no form that starts at token `at`: the mistake its readings gave up
+# on (dc_hint), else the first noted, else that the form is not read.
+
+dc_unread = (at: int):
+    rd_dc_unread(dc_parser, at)
+
+dc_lib_lazy_allowed = (file: int) -> bool:
+    prelude_lazy and len(lib_root) > 0 and starts_with(files[file].path, lib_root)
+
+dc_lazy_allowed = (file: int) -> bool:
+    when BOOTSTRAP or TARGET != "linux" or ARCH != "x86_64":
+        return false
+    else:
+        if dc_eager or emit_workers() < 2 or shown_warnings.len() > 0: return false
+        if len(files[file].src) < 100000 and env("DEWY_EMIT_FORCE") == none: return false
+        if (env("DEWY_PCHECK") ?? "") == "0" or (env("DEWY_FUSED") ?? "") == "0": return false
+        if target_wasm or target_arm64 or target_windows or target_macos or opt_release or dbg_on or watch_build or repl_image or lower_only or host_ir or ra_stat or len(ra_dump) > 0 or not queue_emit or ide_on or errors_only or test_mode or check_all or len(stop_after) > 0: return false
+        true
+
+dn_expand_lazy = ():
+    if not dc_parser.reader.dn_lazy_left: return
+    k = dc_parser.at
+    loop k < dc_parser.tokens.len() and dc_parser.tokens[k].kind != .lazy_body: k += 1
+    if k == dc_parser.tokens.len():
+        dc_parser.reader.dn_lazy_left = false
+        return
+    out = dc_parser.tokens[..k)
+    saved_comments = dn_block_comments
+    loop k < dc_parser.tokens.len():
+        t = dc_parser.tokens[k]
+        k += 1
+        if t.kind != .lazy_body:
+            out.push(t)
+            continue
+        inner = dn_lex(dc_parser.file, t.start, t.stop)
+        loop j in [0..inner.len() - 1 - DN_EOF_SPARE):
+            x = inner[j]
+            if j == 0:
+                x.space = t.space
+                x.newline = t.newline
+            out.push(x)
+        if k >= dc_parser.tokens.len() or dc_parser.tokens[k].newline: break
+    out.extend(dc_parser.tokens[k..dc_parser.tokens.len()))
+    dn_block_comments = saved_comments
+    dc_parser.tokens = out
+
+dc_body = () -> int:
+    rd_dc_body(dc_parser, nodes)
