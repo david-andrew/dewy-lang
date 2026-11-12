@@ -1,0 +1,214 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_BARE NF_INCLUSIVE NF_LITERAL NF_MUT NF_U64 add_flag clear_flag has_flag mk nodes set_list)
+from p"checker_tokens.dewy" import (Tok)
+from p"parse.jo" import (binprec expect expect_ident habit p_header p_matrix p_toks parse_postfix parse_primary parse_type ti)
+from p"parser_cursor.dewy" import (accept advance cur_pos dotop_prec pk pkn space_before word_assign_ahead)
+from p"util.jo" import (intern)
+
+ExprWord:type=int64<overflow='wrap'>
+
+# Calls and expressions recurse through the same parser cursor and node arena.
+# The owner keeps the token stream and indexed precedence table. Reacquire node
+# pointers after builders or recursive calls, since those can grow the arena.
+parse_args=(call:ExprWord):>void=>{
+    let saved_h=p_header
+    p_header=false
+    parse_args_in(call)
+    p_header=saved_h
+}
+parse_args_in=(call:ExprWord):>void=>$unsafe {
+    let args:array<int64>=[]
+    loop pk() not=? 'rparen' {
+        let pos=cur_pos()
+        if pk() =? 'ident' and pkn(1) =? 'assign' {
+            let na=mk('namedarg' pos)
+            nodes.ptr[na].name=int32<overflow='wrap'>(expect_ident(""))
+            advance();
+            nodes.ptr[na].a=int32<overflow='wrap'>(parse_expr())
+            args.push(na)
+        }
+        else {
+            let m=accept('kw_mut')
+            let e=parse_expr()
+            if m {add_flag(e NF_MUT)}
+            args.push(e)
+        }
+        if not accept('comma') {break}
+    }
+    expect('rparen' "");
+    set_list(call args)
+}
+
+parse_prefix=():>int64=>$unsafe {
+    let pos=cur_pos()
+    let k=pk()
+    if k =? 'minus' or k =? 'tilde' or k =? 'amp' {
+        let token_at=ti
+        if k =? 'amp' {habit(ti 'eof')}
+        if k =? 'minus' and ti >? 0 and p_toks[ExprWord(ti) - 1].kind =? 'minus' and not space_before(ti) and (pkn(1) =? 'newline' or pkn(1) =? 'eof' or pkn(1) =? 'semi') {habit(ti 'eof')}
+        advance();
+        let operand=parse_prefix()
+        let ok=nodes.ptr[operand].kind
+        if k =? 'minus' and (ok =? 'int_lit' or ok =? 'float_lit') and has_flag(operand NF_LITERAL) and nodes.ptr[operand].aux2 =? 0 {
+            nodes.ptr[operand].ival = -ExprWord(nodes.ptr[operand].ival)
+            nodes.ptr[operand].fval = -nodes.ptr[operand].fval
+            nodes.ptr[operand].pos = pos
+            nodes.ptr[operand].aux2 = 1
+            clear_flag(operand NF_U64)
+            return operand
+        }
+        let n=mk(if k =? 'amp' {'addr'} else {'unary'} pos)
+        # Tok is the first 32-bit field of the bounded token slot. Read its
+        # frozen Jo ordinal directly; a literal union has no numeric cast.
+        nodes.ptr[n].op=((p_toks + token_at) as ptr<int32>)[0]
+        nodes.ptr[n].a=int32<overflow='wrap'>(operand)
+        return n
+    }
+    parse_power()
+}
+# Power binds tighter than unary minus and associates to the right.
+parse_power=():>int64=>$unsafe {
+    let base=parse_postfix(parse_primary())
+    let k=pk()
+    if k not=? 'caret' {return base}
+    if p_matrix >? 0 and space_before(ti) and not space_before(ExprWord(ti) + 1) {return base}
+    let pos=cur_pos()
+    advance();
+    let exponent=parse_prefix()
+    let callee=mk('ident' pos)
+    nodes.ptr[callee].name=int32<overflow='wrap'>(intern("pow"))
+    let c=mk('call' pos)
+    nodes.ptr[c].a=int32<overflow='wrap'>(callee)
+    set_list(c [base exponent])
+    c
+}
+parse_unary=():>int64=>$unsafe {
+    let e=parse_prefix()
+    loop pk() =? 'kw_as' {
+        let c=mk('cast' cur_pos())
+        advance();
+        nodes.ptr[c].a=int32<overflow='wrap'>(e)
+        nodes.ptr[c].b=int32<overflow='wrap'>(parse_type())
+        e=c
+    }
+    e
+}
+parse_binary=(minprec:ExprWord):>int64=>$unsafe {
+    let lhs=parse_unary()
+    loop true {
+        let k=pk()
+        if k =? 'kw_not' and pkn(1) =? 'kw_in' {k='kw_in'}
+        let prec=ExprWord(binprec(k))
+        if prec <? minprec {
+            if k =? 'dotop' {
+                if pkn(1) =? 'assign' and not space_before(ExprWord(ti) + 1) {return lhs}
+                prec=dotop_prec(ti)
+            }
+            if prec <? minprec {return lhs}
+        }
+        if p_matrix >? 0 and (k =? 'minus' or k =? 'plus') and space_before(ti) and not space_before(ExprWord(ti) + 1) {return lhs}
+        let pos=cur_pos()
+        let negate=false
+        if pk() =? 'kw_not' {
+            advance();
+            negate=true
+        }
+        let optok=advance()
+        if k =? 'dotdot' {
+            let r=mk('range' pos)
+            nodes.ptr[r].a=int32<overflow='wrap'>(lhs)
+            add_flag(r NF_INCLUSIVE)
+            add_flag(r NF_BARE)
+            let nk=pk()
+            if nk not=? 'rbrack' and nk not=? 'rparen' and nk not=? 'comma' and nk not=? 'colon' and nk not=? 'newline' and nk not=? 'kw_and' and nk not=? 'kw_or' and nk not=? 'kw_xor' and nk not=? 'eof' and nk not=? 'semi' {
+                nodes.ptr[r].b=int32<overflow='wrap'>(parse_binary(prec + 1))
+            }
+            lhs=r
+            continue
+        }
+        if k =? 'kw_is' {
+            let isnot=false
+            if pk() =? 'kw_not' {
+                advance();
+                isnot=true
+            }
+            let n=mk('istype' pos)
+            nodes.ptr[n].a=int32<overflow='wrap'>(lhs)
+            nodes.ptr[n].b=int32<overflow='wrap'>(parse_type())
+            if isnot {
+                let nn=mk('not_' pos)
+                nodes.ptr[nn].a=int32<overflow='wrap'>(n)
+                n=nn
+            }
+            lhs=n
+            continue
+        }
+        let rp=prec + 1
+        if k =? 'qq' or (k =? 'dotop' and p_toks[optok].ival =? 94) {rp=prec}
+        let rhs=parse_binary(rp)
+        let b:ExprWord=0
+        if k =? 'qq' {b=mk('coalesce' pos)}
+        else {
+            b=mk('binary' pos)
+            nodes.ptr[b].op=((p_toks + optok) as ptr<int32>)[0]
+            if k =? 'dotop' {
+                nodes.ptr[b].aux=p_toks[optok].ival
+                if p_toks[optok].len =? 3 {nodes.ptr[b].aux2=1}
+            }
+        }
+        nodes.ptr[b].a=int32<overflow='wrap'>(lhs)
+        nodes.ptr[b].b=int32<overflow='wrap'>(rhs)
+        if negate {
+            let nn=mk('not_' pos)
+            nodes.ptr[nn].a=int32<overflow='wrap'>(b)
+            b=nn
+        }
+        lhs=b
+    }
+    lhs
+}
+parse_not=():>int64=>$unsafe {
+    if pk() =? 'kw_not' {
+        let pos=cur_pos()
+        advance();
+        let n=mk('not_' pos)
+        nodes.ptr[n].a=int32<overflow='wrap'>(parse_not())
+        return n
+    }
+    parse_binary(0)
+}
+parse_and=():>int64=>$unsafe {
+    let l=parse_not()
+    loop pk() =? 'kw_and' and not word_assign_ahead() {
+        let n=mk('and_' cur_pos())
+        advance();
+        nodes.ptr[n].a=int32<overflow='wrap'>(l)
+        nodes.ptr[n].b=int32<overflow='wrap'>(parse_not())
+        l=n
+    }
+    l
+}
+parse_or=():>int64=>$unsafe {
+    let l=parse_and()
+    loop true {
+        let k=pk()
+        if (k not=? 'kw_or' and k not=? 'kw_xor') or word_assign_ahead() {break}
+        if k =? 'kw_xor' {
+            let n=mk('binary' cur_pos())
+            nodes.ptr[n].op=82
+            advance();
+            nodes.ptr[n].a=int32<overflow='wrap'>(l)
+            nodes.ptr[n].b=int32<overflow='wrap'>(parse_and())
+            l=n
+            continue
+        }
+        let n=mk('or_' cur_pos())
+        advance();
+        nodes.ptr[n].a=int32<overflow='wrap'>(l)
+        nodes.ptr[n].b=int32<overflow='wrap'>(parse_and())
+        l=n
+    }
+    l
+}
+parse_expr=():>int64=>parse_or()

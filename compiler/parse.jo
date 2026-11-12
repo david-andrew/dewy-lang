@@ -15,6 +15,7 @@ use 'parser_errors.dewy'
 use 'parser_flow_nodes.dewy'
 use 'parser_positions.dewy'
 use 'parser_cursor.dewy'
+use 'parser_expr.dewy'
 
 toks: Token[]
 # A parse unit owns its EOF-terminated stream. Borrow once on entry; recursive
@@ -556,31 +557,6 @@ parse_string_token = (t: int) -> int:
 p_header = false      # parsing an if/loop/match header: `(x): ...` is not a function there
 # (inside a call's parentheses `(x): ...` is a function again, in an if or loop header too:
 # `if xs.any((x): x > 2): ...`)
-parse_args = (call: int):
-    saved_h = p_header
-    p_header = false
-    parse_args_in(call)
-    p_header = saved_h
-
-parse_args_in = (call: int):
-    args: int[]
-    loop pk() != .rparen:
-        pos = cur_pos()
-        if pk() == .ident and pkn(1) == .assign:
-            na = mk(.namedarg, pos)
-            nodes[na].name = i32(expect_ident(""))
-            advance()
-            nodes[na].a = i32(parse_expr())
-            args.push(na)
-        else:
-            m = accept(.kw_mut)
-            e = parse_expr()
-            if m: add_flag(e, NF_MUT)
-            args.push(e)
-        if not accept(.comma): break
-    expect(.rparen, "")
-    set_list(call, args)
-
 # names the parser recognizes (interned once)
 id_void = 0
 id_cfn = 0
@@ -984,58 +960,6 @@ parse_postfix = (e0: int) -> int:
         else: return e
     e
 
-parse_prefix = () -> int:
-    pos = cur_pos()
-    k = pk()
-    if k == .minus or k == .tilde or k == .amp:
-        # (a && b, i--)
-        if k == .amp: habit(ti, .eof)
-        if k == .minus and ti > 0 and p_toks[ti - 1].kind == .minus and not space_before(ti) and (pkn(1) == .newline or pkn(1) == .eof or pkn(1) == .semi): habit(ti, .eof)
-        advance()
-        operand = parse_prefix()
-        ok = nodes[operand].kind
-        if k == .minus and (ok == .int_lit or ok == .float_lit) and has_flag(operand, NF_LITERAL) and nodes[operand].aux2 == 0:
-            nodes[operand].ival = -nodes[operand].ival
-            nodes[operand].fval = -nodes[operand].fval
-            nodes[operand].pos = pos
-            nodes[operand].aux2 = 1
-            clear_flag(operand, NF_U64)
-            return operand
-        kind = NK.unary
-        if k == .amp: kind = .addr
-        n = mk(kind, pos)
-        nodes[n].op = i32(int(k))
-        nodes[n].a = i32(operand)
-        return n
-    parse_power()
-
-# x ^ y (right-associative, binds tighter than unary minus: -x ^ 2 is -(x ^ 2)) is pow(x, y)
-parse_power = () -> int:
-    base = parse_postfix(parse_primary())
-    k = pk()
-    if k != .caret:
-        return base
-    if p_matrix > 0 and space_before(ti) and not space_before(ti + 1): return base
-    pos = cur_pos()
-    advance()
-    exponent = parse_prefix()
-    callee = mk(.ident, pos)
-    nodes[callee].name = i32(intern("pow"))
-    c = mk(.call, pos)
-    nodes[c].a = i32(callee)
-    set_list(c, [base, exponent])
-    c
-
-parse_unary = () -> int:
-    e = parse_prefix()
-    loop pk() == .kw_as:
-        c = mk(.cast, cur_pos())
-        advance()
-        nodes[c].a = i32(e)
-        nodes[c].b = i32(parse_type())
-        e = c
-    e
-
 binprec_value = (k: Tok) -> int:
     match k:
         star, slash, percent: 10
@@ -1056,111 +980,6 @@ binprec = (k: Tok) -> int:
         p_binprec = __alloc(int(Tok.lazy) + 1) as *i8
         loop i in [0..int(Tok.lazy) + 1): p_binprec[i] = i8(binprec_value(i as Tok))
     int(p_binprec[int(k)])
-
-parse_binary = (minprec: int) -> int:
-    lhs = parse_unary()
-    loop true:
-        k = pk()
-        if k == .kw_not and pkn(1) == .kw_in: k = .kw_in
-        prec = binprec(k)
-        if prec < minprec:
-            # (rare tokens are only looked at when the common table says no)
-            if k == .dotop:
-                if pkn(1) == .assign and not space_before(ti + 1): return lhs      # xs .+= 1
-                prec = dotop_prec(ti)
-            if prec < minprec: return lhs
-        # inside array brackets, `a -b` is two elements (a space before the sign and none after)
-        if p_matrix > 0 and (k == .minus or k == .plus) and space_before(ti) and not space_before(ti + 1): return lhs
-        pos = cur_pos()
-        negate = false
-        if pk() == .kw_not:
-            advance()
-            negate = true
-        optok = advance()
-        if k == .dotdot:
-            r = mk(.range, pos)
-            nodes[r].a = i32(lhs)
-            add_flag(r, NF_INCLUSIVE)
-            add_flag(r, NF_BARE)
-            nk = pk()
-            if nk != .rbrack and nk != .rparen and nk != .comma and nk != .colon and nk != .newline and nk != .kw_and and nk != .kw_or and nk != .kw_xor and nk != .eof and nk != .semi:
-                nodes[r].b = i32(parse_binary(prec + 1))
-            lhs = r
-            continue
-        if k == .kw_is:
-            isnot = false
-            if pk() == .kw_not:                     # x is not T: not (x is T)
-                advance()
-                isnot = true
-            n = mk(.istype, pos)
-            nodes[n].a = i32(lhs)
-            nodes[n].b = i32(parse_type())
-            if isnot:
-                nn = mk(.not_, pos)
-                nodes[nn].a = i32(n)
-                n = nn
-            lhs = n
-            continue
-        rp = prec + 1
-        if k == .qq or (k == .dotop and p_toks[optok].ival == '^'): rp = prec      # (right-associative)
-        rhs = parse_binary(rp)
-        b = 0
-        if k == .qq: b = mk(.coalesce, pos)
-        else:
-            b = mk(.binary, pos)
-            nodes[b].op = i32(int(k))
-            if k == .dotop:
-                nodes[b].aux = i32(p_toks[optok].ival)
-                if int(p_toks[optok].len) == 3: nodes[b].aux2 = 1
-        nodes[b].a = i32(lhs)
-        nodes[b].b = i32(rhs)
-        if negate:
-            nn = mk(.not_, pos)
-            nodes[nn].a = i32(b)
-            b = nn
-        lhs = b
-    lhs
-
-parse_not = () -> int:
-    if pk() == .kw_not:
-        pos = cur_pos()
-        advance()
-        n = mk(.not_, pos)
-        nodes[n].a = i32(parse_not())
-        return n
-    parse_binary(0)
-
-parse_and = () -> int:
-    l = parse_not()
-    loop pk() == .kw_and and not word_assign_ahead():
-        n = mk(.and_, cur_pos())
-        advance()
-        nodes[n].a = i32(l)
-        nodes[n].b = i32(parse_not())
-        l = n
-    l
-
-parse_or = () -> int:
-    l = parse_and()
-    loop:
-        k = pk()
-        if (k != .kw_or and k != .kw_xor) or word_assign_ahead(): break
-        if k == .kw_xor:
-            n = mk(.binary, cur_pos())
-            nodes[n].op = i32(int(Tok.kw_xor))
-            advance()
-            nodes[n].a = i32(l)
-            nodes[n].b = i32(parse_and())
-            l = n
-            continue
-        n = mk(.or_, cur_pos())
-        advance()
-        nodes[n].a = i32(l)
-        nodes[n].b = i32(parse_and())
-        l = n
-    l
-
-parse_expr = () -> int: parse_or()
 
 # ---------------- blocks / statements ----------------
 parse_block = () -> int:
