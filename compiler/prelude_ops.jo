@@ -18,6 +18,13 @@ use 'ide.jo'
 use 'main.jo'
 use 'refine.jo'
 
+# A canonical Jo entry in the Dewy prelude always uses the shared namespace.
+prelude_jo_module = (key: str) -> bool:
+    if not ends_with(key, ".jo"): return false
+    directory = path_dir(key)
+    if not ends_with(directory, "/prelude"): return false
+    directory == module_key("{lib_dir}/prelude", cwd())
+
 # Whether the prelude is indexed: interactive sessions need future names and complete completion
 # lists, and so parse it all
 prelude_lazy_setup = ():

@@ -306,8 +306,7 @@ dp_load = (f: int) -> int:
         first_import = from_imports.len()
         active = refine_active
         m = load_module(dp_paths[f], false, 0)
-        # (a Jo file here joins the library's own prelude, as lib/std's do: lib/prelude/outcomes.jo)
-        if ends_with(dp_paths[f], ".jo"): modules[m].is_prelude = true
+        # load_module classifies Jo entries before registration, including explicit imports.
         dp_mods[f] = m
         dp_loaded.push(m)
         mi = first_module

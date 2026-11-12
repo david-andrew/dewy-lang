@@ -1,0 +1,10 @@
+run = () => {
+    let c = channel<int>(1)
+    c.send(1) or_throw
+    match c.try_send(2) {
+        missed:Unsent<int> => printl"unsent {missed.value} full {missed.reason is? Full}"
+        _ => printl"sent"
+    }
+    c.close()
+    printl"drain {c.receive or_throw} closed {c.receive is? Closed}"
+}

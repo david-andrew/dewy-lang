@@ -564,7 +564,8 @@ load_module = (path: str, is_prelude: bool, from: int) -> int:
     d = path_dir(path)
     files.push(SrcFile(path, d, src!, ends_with(path, ".dewy")))
     fi = files.len() - 1
-    m = Module(name = i32(intern(path_stem(path))), file = i32(fi), dir = d, is_prelude = is_prelude)
+    library_module = is_prelude or prelude_jo_module(key)
+    m = Module(name = i32(intern(path_stem(path))), file = i32(fi), dir = d, is_prelude = library_module)
     modules.push(m)
     mi = modules.len() - 1
     module_added(mi)
