@@ -1,0 +1,85 @@
+$runtime_checks
+
+from p"checker_tokens.dewy" import (Tok)
+from p"lex.jo" import (lx_base lx_cap lx_count lx_ctx lx_decl_lines lx_file lx_i lx_indents lx_line_tok0 lx_slots lx_toks)
+
+LexLineWord:type=int64<overflow='wrap'>
+
+# The lexer owns the token array and its zeroed spare slots. A growth refreshes
+# the borrowed pointer before the next write; no token slot escapes this group.
+lx_grow=():>void=>$unsafe {
+    lx_cap=LexLineWord(lx_cap) * 2 + 16
+    lx_toks.resize(lx_cap)
+    lx_slots=data(lx_toks)
+}
+lx_next=():>int64=>{
+    if lx_count =? lx_cap {lx_grow()}
+    lx_count=LexLineWord(lx_count) + 1
+    LexLineWord(lx_count) - 1
+}
+lx_emit=(kind:Tok start:LexLineWord n:LexLineWord):>void=>$unsafe {
+    let k=lx_next()
+    let t=lx_slots
+    t[k].kind=kind
+    t[k].pos=(LexLineWord(lx_file) << 40) | (LexLineWord(lx_base) + start)
+    t[k].start=int32<overflow='wrap'>(start)
+    t[k].len=int32<overflow='wrap'>(n)
+}
+lx_last_kind=():>Tok=>$unsafe {
+    if lx_count =? 0 {return 'newline'}
+    lx_slots[LexLineWord(lx_count) - 1].kind
+}
+lx_emit_newline=():>void=>{
+    let k=lx_last_kind()
+    if k not=? 'newline' and k not=? 'indent' and k not=? 'dedent' {lx_emit('newline' lx_i 0)}
+}
+# Lexing starts with one context entry; only the owning lexer grows or pops it.
+# The last entry is present throughout these queries.
+lx_top_block=():>bool=>$unsafe {
+    lx_ctx.ptr[LexLineWord(lx_ctx.length) - 1] & 1 not=? 0
+}
+lx_top_base=():>int64=>$unsafe {
+    (LexLineWord(lx_ctx.ptr[LexLineWord(lx_ctx.length) - 1]) >> 1) & 0x7FFFFF
+}
+
+# The current logical line begins a top-level function declaration.
+lx_decl_line=():>bool=>$unsafe {
+    let i=LexLineWord(lx_line_tok0)
+    let n=LexLineWord(lx_count)
+    let t=lx_slots
+    if i >=? n or (t[i].kind not=? 'ident' and t[i].kind not=? 'lparen') {return false}
+    let k=i + 1
+    loop k + 1 <? n and k <? i + 16 {
+        if t[k].kind =? 'assign' {return t[k + 1].kind =? 'lparen'}
+        k += 1
+    }
+    false
+}
+# A module's `when` branches contain declarations too. Headers at each depth
+# distinguish them from local runtime functions when lazy bodies are enabled.
+lx_decl_context=():>bool=>$unsafe {
+    let depth=LexLineWord(lx_indents.length)
+    let first=LexLineWord(lx_line_tok0)
+    if first >=? lx_count {return false}
+    let kind=lx_slots[first].kind
+    if kind =? 'kw_else' and depth <=? lx_decl_lines.length and lx_decl_lines[depth - 1] =? 'kw_when' {kind='kw_when'}
+    lx_decl_lines.resize(depth)
+    lx_decl_lines[depth - 1]=kind
+    loop i in [0..depth - 1) {
+        if lx_decl_lines[i] not=? 'kw_when' {return false}
+    }
+    true
+}
+
+lx_close_block_ctx=(at:LexLineWord):>void=>{
+    loop lx_ctx.length >? 1 and lx_top_block() {
+        let base=lx_top_base()
+        lx_emit_newline()
+        loop lx_indents.length >? base {
+            lx_indents.pop();
+            lx_emit('dedent' at 0)
+        }
+        lx_indents.pop();
+        lx_ctx.pop();
+    }
+}

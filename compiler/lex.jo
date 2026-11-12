@@ -6,6 +6,7 @@ use 'diagnostic_exit.dewy'
 use 'lexer_errors.dewy'
 use 'lexer_units.dewy'
 use 'lexer_line_closes.dewy'
+use 'lexer_line_context.dewy'
 
 const STRF_RAW = 1
 const STRF_TRIPLE = 2
@@ -137,25 +138,6 @@ const LX_SPARE = 8
 lx_count = 0
 lx_cap = 0
 
-lx_grow = ():
-    lx_cap = lx_cap * 2 + 16
-    lx_toks.resize(lx_cap)
-    lx_slots = data(lx_toks)
-
-# the next token's slot (its fields zero), counted
-lx_next = () -> int:
-    if lx_count == lx_cap: lx_grow()
-    lx_count += 1
-    lx_count - 1
-
-lx_emit = (kind: Tok, start: int, n: int):
-    k = lx_next()
-    t = lx_slots
-    t[k].kind = kind
-    t[k].pos = (lx_file << 40) | (lx_base + start)
-    t[k].start = i32(start)
-    t[k].len = i32(n)
-
 lx_open_tok: int[]      # token indexes of open brackets (each gets its partner's index)
 
 # keyword kinds by interned name id (Tok.ident for other names)
@@ -171,44 +153,6 @@ init_keywords = ():
         kw_tok[id] = v
         loop kw_kinds.len() <= int(v): kw_kinds.push(false)
         kw_kinds[int(v)] = true
-
-lx_last_kind = () -> Tok:
-    if lx_count == 0: return Tok.newline
-    lx_slots[lx_count - 1].kind
-
-lx_emit_newline = ():
-    k = lx_last_kind()
-    if k != .newline and k != .indent and k != .dedent: lx_emit(.newline, lx_i, 0)
-
-lx_top_block = () -> bool: lx_ctx[lx_ctx.len() - 1] & 1 != 0
-lx_top_base = () -> int: (lx_ctx[lx_ctx.len() - 1] >> 1) & 0x7FFFFF
-
-# the line just lexed (at the top level, not indented) starts a function: name = (, name[T] = (,
-# (op) = (
-lx_decl_line = () -> bool:
-    i = lx_line_tok0
-    n = lx_count
-    t = lx_slots
-    if i >= n or (t[i].kind != .ident and t[i].kind != .lparen): return false
-    k = i + 1
-    loop k + 1 < n and k < i + 16:
-        if t[k].kind == .assign: return t[k + 1].kind == .lparen
-        k += 1
-    false
-
-# A module's `when` branches contain declarations too. Remember their headers so a
-# local function in a runtime block never becomes a lazy top-level declaration.
-lx_decl_context = () -> bool:
-    depth = lx_indents.len()
-    first = lx_line_tok0
-    if first >= lx_count: return false
-    kind = lx_slots[first].kind
-    if kind == .kw_else and depth <= lx_decl_lines.len() and lx_decl_lines[depth - 1] == .kw_when: kind = .kw_when
-    lx_decl_lines.resize(depth)
-    lx_decl_lines[depth - 1] = kind
-    loop i in [0..depth - 1):
-        if lx_decl_lines[i] != .kw_when: return false
-    true
 
 # where the indented lines from offset `from` end (the next line at or outside the header's
 # indentation, other than a blank or comment), or -1 when they do not make a body
@@ -343,16 +287,6 @@ lx_line_start = ():
                 lx_err(q, "this line is indented {ind} spaces, which matches no line above it: a line goes at the same place as one of the lines before it, indented {at}")
         lx_line_tok0 = lx_count
         return
-
-lx_close_block_ctx = (at: int):
-    loop lx_ctx.len() > 1 and lx_top_block():
-        base = lx_top_base()
-        lx_emit_newline()
-        loop lx_indents.len() > base:
-            lx_indents.pop()
-            lx_emit(.dedent, at, 0)
-        lx_indents.pop()
-        lx_ctx.pop()
 
 # character classes for the lexer's hot loops: 1 = starts an identifier, 2 = continues one
 lx_cls: *u8 = null
