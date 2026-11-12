@@ -21,6 +21,7 @@ use 'parser_decls.dewy'
 use 'parser_stmts.dewy'
 use 'parser_loops.dewy'
 use 'parser_text.dewy'
+use 'parser_shared.dewy'
 
 toks: Token[]
 # A parse unit owns its EOF-terminated stream. Borrow once on entry; recursive
@@ -52,139 +53,7 @@ p_clear_unit = ():
     p_toks = data(toks)
     p_ntoks = toks.len()
 
-# a mistake carried over from another language where parsing stopped at token i (wanting
-# `want`, or .eof for an expression): says what Sloppy writes instead, and stops
-habit = (i: int, want: Tok):
-    k = p_toks[i].kind
-    p = Tok.eof
-    pw = ""
-    if i > 0:
-        p = p_toks[i - 1].kind
-        if p == .ident: pw = tok_src(i - 1)
-    glued = i > 0 and not space_before(i)
-    at = cur_pos()
-    if i > 0: at = p_toks[i - 1].pos
-    if word_in(pw, ["def", "fn", "func", "function", "fun"]):
-        name = "add"
-        if k == .ident: name = tok_src(i)
-        if len(struct_body) > 0: fatal(at, "structs have no methods (and there is no `{pw}`): write the function at the top level, not inside the struct, taking what it works on first, as `{name} = (p: mut {struct_body}): p.x += 1`; `p.{name}()` calls it")
-        fatal(at, "a function is written `{name} = (a: int, b: int) -> int: ...` (there is no `{pw}`)")
-    if pw == "local": fatal(at, "there is no `local`: `x = 5` in a function is the function's own (`let x = 5` always makes a new one)")
-    if k == .tilde and nk_is(i, .assign): fatal(p_toks[i].pos, "use `!=`")
-    if pw == "extends": fatal(at, "there is no inheritance: a struct can hold another as a field (`body: Body`), and functions take what they work on first (`e.hurt(5)` calls `hurt(e, 5)`)")
-    if pw == "signal": fatal(at, "there are no signals: call a function when it happens, or keep the functions to call in an array (`on_died: (() -> void)[]`) and call each")
-    if word_in(pw, ["class", "interface", "trait", "impl"]):
-        fatal(at, "a type with fields is `struct Name:` and its fields below it; functions are written apart and called with a dot (`p.move(dt)` calls `move(p, dt)`)")
-    if pw == "for" or pw == "foreach": fatal(at, "loops are `loop x in xs:` (and `loop i in [0..10):` counts from 0 to 9)")
-    if pw == "new" and k == .ident:
-        tn = tok_src(i)
-        if word_in(tn, ["List", "ArrayList", "Array"]): fatal(at, "there is no `new`: an array is `xs: Enemy[]` (empty), or `[a, b]`")
-        if word_in(tn, ["Dictionary", "HashMap", "Map"]): fatal(at, "there is no `new`: a map is `m: \{str: int}` (empty), or `\{\"a\": 1}`")
-        if tn == "Color": fatal(at, "there is no `new`: a color is `rgb(1, 0, 0)` (each part from 0 to 1)")
-        if word_in(tn, ["Vector2", "Vector3", "Vector4"]): fatal(at, "there is no `new`: `vec{tn[6..]}(...)`")
-        if tn == "Promise": fatal(at, "there are no promises: something that takes time is a state changed a little in update each frame, or steps in `Actions` (`steps.then(0.3, (): drop())`)")
-        fatal(at, "a value is made by calling its type: `{tn}(...)` (there is no `new`)")
-    if pw == "switch": fatal(at, "use `match` (`match x:` and an arm for each case below it)")
-    if pw == "yield" or pw == "await" or pw == "async": fatal(at, "there are no coroutines: keep a timer in a field and count it down each frame (`e.wait -= dt`, then act when it is below 0)")
-    if pw == "while": fatal(at, "`loop condition:` repeats while the condition holds")
-    if word_in(pw, ["elif", "elsif", "elseif"]): fatal(at, "use `else if`")
-    if pw == "var" or pw == "val": fatal(at, "`x = 5` declares x (`let x = 5` always makes a new variable)")
-    if pw == "lambda": fatal(at, "a function value is written `(x): x * 2`")
-    if pw == "print" and (k == .str_lit or k == .ident or k == .int_lit): fatal(at, "print is a function: `print(...)`")
-    if (pw == "f" or pw == "F") and k == .str_lit and glued: fatal(at, "strings put values in by themselves: \"n is {{n}}\" (no f before the quote)")
-    if k == .kw_mut and p == .kw_let: fatal(p_toks[i].pos, "a `let` variable can change already: `let x = 5`")
-    if k == .assign and p == .colon and glued: fatal(p_toks[i - 1].pos, "`x = 5` declares x (there is no `:=`)")
-    if k == .assign and (p == .eq or p == .ne) and glued: fatal(p_toks[i - 1].pos, "use `{tok_src(i - 1)}` (there is no `{tok_src(i - 1)}=`: values of different types are never equal)")
-    if k == .assign and i >= 2 and p_toks[i - 2].kind == .kw_loop: fatal(p_toks[i - 2].pos, "loops are `loop i in [0..n):` (i from 0 to n - 1), or `loop condition:` (while it holds)")
-    if k == .assign and want == .colon and i >= 2 and p_toks[i - 2].kind == .kw_enum: fatal(p_toks[i].pos, "an enum is written with a colon: `enum {tok_src(i - 1)}: title, play, won`")
-    if k == .assign and want == .colon: fatal(p_toks[i].pos, "compare with `==` (`=` assigns)")
-    # (repeat 5:, Scratch's)
-    if pw == "repeat" and (k == .int_lit or k == .ident): fatal(at, "to do something {tok_src(i)} times: `loop i in [1..{tok_src(i)}]:` and the lines below it")
-    if k == .lbrace and want != .eof: fatal(p_toks[i].pos, "blocks are a `:` and the indented lines after it, not braces")
-    if k == .ident and want != .eof and (tok_src(i) == "then" or tok_src(i) == "do"): fatal(p_toks[i].pos, "use `:` (as in `if x > 0: ...`)")
-    if k == .question and nk_is(i, .dot): fatal(p_toks[i].pos, "there is no `?.`: `if let v = x: v.f` uses the value when there is one, `(x ?? default).f` a default otherwise")
-    if k == .question and want != .eof: fatal(p_toks[i].pos, "a choice between two values is `if c: a else: b`")
-    if k == .kw_if and (want == .newline or want == .rparen or want == .comma or want == .rbrack): fatal(p_toks[i].pos, "a choice between two values is `if c: a else: b` (the condition first)")
-    if k == .colon and (p == .lbrack or want == .rbrack): fatal(p_toks[i].pos, "a slice is `xs[a..b)`, from a up to b (b left out): `xs[..2)` is the first two (`first(xs, 2)` when there may be fewer), `xs[1..]` all from 1 on")
-    nk = Tok.eof
-    if i + 1 < p_ntoks: nk = p_toks[i + 1].kind
-    if k == .slash and p == .slash and glued and i > 1 and space_before(i - 1) and (p_toks[i - 2].kind == .ident or p_toks[i - 2].kind == .int_lit or p_toks[i - 2].kind == .rparen or p_toks[i - 2].kind == .rbrack):
-        fatal(p_toks[i - 1].pos, "`/` on whole numbers already drops the fraction (7 / 2 is 3; `floor(x / y)` for floats); comments start with `#`")
-    if k == .slash and (p == .slash and glued or nk == .slash or nk == .star): fatal(p_toks[i].pos, "comments start with `#`")
-    if k == .bang: fatal(p_toks[i].pos, "use `not` (as in `if not done:`)")
-    if k == .pipe and p == .pipe and glued: fatal(p_toks[i - 1].pos, "use `or`")
-    if k == .amp and p == .amp and glued: fatal(p_toks[i - 1].pos, "use `and`")
-    if (k == .plus and p == .plus or k == .minus and p == .minus) and glued:
-        v = "x"
-        if i > 1 and p_toks[i - 2].kind == .ident: v = tok_src(i - 2)
-        fatal(p_toks[i - 1].pos, "use `{v} {tok_src(i)}= 1`")
-    if k == .gt and p == .assign and glued: fatal(p_toks[i - 1].pos, "a function value is written `(x): x * 2`")
-    if k == .starstar: fatal(p_toks[i].pos, "`x ^ y` is x to the power y")
-    if k == .arrow and p == .ident and nk_is(i, .ident) and glued: fatal(p_toks[i].pos, "a field through a pointer is `q.x` (or `q[0].x`): there is no `->`")
-    if k == .semi:
-        # (for (i = 0; i < n; i++): C's loop)
-        j = i - 1
-        loop j > 0 and not nl_before(j): j -= 1
-        if j >= 0 and p_toks[j].kind == .ident and (tok_src(j) == "for" or tok_src(j) == "while"): fatal(p_toks[j].pos, "loops are `loop i in [0..n):` (i from 0 to n - 1), or `loop condition:` (while it holds)")
-    if k == .ellipsis and want == .eof: fatal(p_toks[i].pos, "an array is spread with `...` after it: `[xs... 4 5]`, `f(args...)`")
-    if pw == "throw" or pw == "raise": fatal(at, "there are no exceptions: a function gives back what went wrong as a value (`-> Level | LoadError`), or `panic(\"...\")` stops the program")
-    if word_in(pw, ["public", "private", "protected", "static", "override", "virtual"]): fatal(at, "there is no `{pw}`: every name can be used from other files (one starting with `_` stays in its own), and a variable or field is written `speed: f64 = 5.0`")
-    if word_in(pw, ["export", "pub"]): fatal(at, "every top-level name can be imported already (`from 'file.jo' import name`); a name starting with `_` stays private to its file")
-    # (C#'s and Java's `void Start()`, `float speed = 5`: the type before the name)
-    if word_in(pw, ["void", "float", "double", "string", "int", "long", "char"]) and k == .ident:
-        nm = tok_src(i)
-        if nk_is(i, .lparen): fatal(at, "a function is written `{nm} = (): ...`, its type after it (`(x: f64) -> f64: ...`); the game calls `update` and `draw` by itself")
-        st = "f64"
-        if pw == "string": st = "str"
-        else if pw == "int" or pw == "long": st = "int"
-        else if pw == "char": st = "u8"
-        if pw != "void": fatal(at, "a variable is written `{nm} = ...`, or with its type after the name: `{nm}: {st} = ...`")
-    if pw == "delete" or pw == "del": fatal(at, "`xs.remove(i)` takes an element out of an array, `m.remove(k)` a key out of a map")
-    if pw == "typeof" or (k == .ident and tok_src(i) == "instanceof"): fatal(at, "`x is T` asks which member of a union x holds (the other types are known when compiling)")
-    value_start = k == .ident or k == .int_lit or k == .float_lit or k == .str_lit
-    # (Python's statements that are functions or nothing here)
-    if pw == "with" and value_start: fatal(at, "there is no `with`: `text = read_file(path)` (a `str?`: none when it cannot be read), `write_file(path, s)`, `append_file(path, s)`")
-    if (pw == "global" or pw == "nonlocal") and k == .ident: fatal(at, "no `{pw}` is needed: a function that gives a top-level variable a value changes it (`let x = ...` makes one of its own)")
-    if pw == "assert" and value_start: fatal(at, "assert is a function: `assert(x == 2, \"why\")`")
-    if pw == "print" and value_start: fatal(at, "print is a function: `print(x)`")
-    # (Scratch's blocks: set score to 0, change score by 1)
-    if (pw == "set" or pw == "change") and k == .ident and i + 1 < p_ntoks and p_toks[i + 1].kind == .ident:
-        nm = tok_src(i)
-        fatal(at, "a variable gets a value with `=`: `{nm} = 0`; to change it by 1: `{nm} += 1`")
-    if pw == "until" and i >= 2 and p_toks[i - 2].kind == .kw_loop: fatal(at, "there is no `until`: a loop repeats while something holds: `loop x <= 10:` (or `loop not (x > 10):`)")
-    if want == .newline and p == .ident and value_start and not glued: fatal(at, "to call '{pw}', write `{pw}({tok_src(i)})`")
-    # ("she said "hi"": the second " ended the text)
-    if p == .str_lit and k == .ident and glued and i + 1 < p_ntoks and p_toks[i + 1].kind == .str_lit and not space_before(i + 1):
-        fatal(p_toks[i].pos, "the `\"` before this ends the text: to put a `\"` inside text, write `\\\"`")
-    if want == .rparen and k == .ident and tok_src(i) == "for": fatal(p_toks[i].pos, "an array made by a loop is `[loop x in xs: x * x]` (and `sum([loop x in xs: x * x])`; there are no generators)")
-    if want == .rparen and k == .ident and p == .ident and not glued: fatal(p_toks[i].pos, "two names in a row: text goes in quotes (`\"{tok_src(i - 1)} {tok_src(i)}\"`), and values are separated with `,`")
-    if want == .rparen and value_start and (p == .ident or p == .int_lit or p == .float_lit or p == .str_lit or p == .rparen or p == .rbrack):
-        fatal(p_toks[i].pos, "a ',' is missing before this")
-
-expect = (k: Tok, what: str) -> int:
-    if p_toks[ti].kind != k:
-        habit(ti, k)
-        w = what
-        if len(w) == 0: w = tok_name(k)
-        tk = p_toks[ti].kind
-        if tk == .newline or tk == .indent or tk == .dedent or tk == .eof: fatal(prev_end(), "expected {w} at the end of this line")
-        if tk == .ident or tk == .int_lit: fatal(cur_pos(), "expected {w}, found '{tok_src(ti)}'")
-        fatal(cur_pos(), "expected {w}, found {tok_name(tk)}")
-    advance()
-# identifier tokens carry their interned name in ival
-expect_ident = (what: str) -> int:
-    if p_toks[ti].kind != .ident and is_keyword_tok(p_toks[ti].kind) and p_toks[ti].kind != .kw_mut: keyword_name_error(ti)
-    # (let [a, b] = pair, const {kind, x} = g: JavaScript's destructuring)
-    if p_toks[ti].kind == .lbrack and (what == "variable name" or what == "constant name"): fatal(p_toks[ti].pos, "an array is unpacked without brackets: `a, b = xs` (it must have exactly that many elements); a tuple the same way")
-    if p_toks[ti].kind == .lbrace and (what == "variable name" or what == "constant name"): fatal(p_toks[ti].pos, "a struct's fields are read one by one: `kind, x = g.kind, g.x`, or used as they are, `g.kind`")
-    int(p_toks[expect(.ident, what)].ival)
-
 is_keyword_tok = (k: Tok) -> bool: int(k) < kw_kinds.len() and kw_kinds[int(k)]
-
-# (also `none`, after a dot or as an enum variant: E.none, .none)
-expect_name = (what: str) -> int:
-    if is_soft_kw(pk()) or pk() == .kw_none: return intern(tok_src(advance()))
-    expect_ident(what)
 
 # ---------------- expressions ----------------
 p_header = false      # parsing an if/loop/match header: `(x): ...` is not a function there
@@ -230,30 +99,9 @@ binprec = (k: Tok) -> int:
 # (the comprehensions parsed so far: each names its accumulator __comp<n>)
 comp_count = 0
 
-comp_ident = (name: int, pos: int) -> int:
-    n = mk(.ident, pos)
-    nodes[n].name = i32(name)
-    n
-
 # ---- loops with combined iterators, rewritten into plain loops ----
 # (called once the body is parsed)
 lx_count = 0
-
-lx_ident = (name: str, pos: int) -> int:
-    n = mk(.ident, pos)
-    nodes[n].name = i32(intern(name))
-    n
-
-lx_int = (v: int, pos: int) -> int:
-    n = mk(.int_lit, pos)
-    nodes[n].ival = v
-    add_flag(n, NF_LITERAL)
-    n
-
-lx_bool = (value: bool, pos: int) -> int:
-    n = mk(.bool_lit, pos)
-    nodes[n].ival = if value: 1 else: 0
-    n
 
 lx_bin = (op: Tok, a: int, b: int, pos: int) -> int:
     n = mk(.binary, pos)
@@ -262,13 +110,6 @@ lx_bin = (op: Tok, a: int, b: int, pos: int) -> int:
     nodes[n].b = i32(b)
     n
 
-lx_let = (name: int, v: int, pos: int) -> int:
-    d = mk(.vardecl, pos)
-    nodes[d].name = i32(name)
-    nodes[d].b = i32(v)
-    add_flag(d, NF_LOOPCOUNT)
-    d
-
 lx_assign = (target: int, op: Tok, v: int, pos: int) -> int:
     a = mk(.assign, pos)
     nodes[a].op = i32(int(op))
@@ -276,63 +117,7 @@ lx_assign = (target: int, op: Tok, v: int, pos: int) -> int:
     nodes[a].b = i32(v)
     a
 
-lx_block = (stmts: int[], pos: int) -> int:
-    b = mk(.block, pos)
-    set_list(b, stmts)
-    b
-
-lx_if = (c: int, then: int, pos: int) -> int:
-    n = mk(.if_, pos)
-    nodes[n].a = i32(c)
-    nodes[n].b = i32(lx_block([then], pos))
-    add_flag(n, NF_STMT)
-    n
-
-lx_not = (c: int, pos: int) -> int:
-    n = mk(.not_, pos)
-    nodes[n].a = i32(c)
-    n
-
-lx_call = (name: str, args: int[], pos: int) -> int:
-    c = mk(.call, pos)
-    nodes[c].a = i32(lx_ident(name, pos))
-    set_list(c, args)
-    c
-
-lx_len = (seq: int, pos: int) -> int:
-    lx_call("len", [seq], pos)
-
-lx_index = (seq: int, k: int, pos: int) -> int:
-    ix = mk(.index, pos)
-    nodes[ix].a = i32(seq)
-    nodes[ix].b = i32(k)
-    ix
-
 lx_bcount = 0
-
-lx_expr_stmt = (e: int, pos: int) -> int:
-    s = mk(.exprstmt, pos)
-    nodes[s].a = i32(e)
-    s
-
-head_node = (op: int, pos: int) -> int:
-    n = mk(.lhead, pos)
-    nodes[n].op = i32(op)
-    n
-
-# two plain conditions joined by and/or are one condition
-head_collapse = (n: int) -> int:
-    a = int(nodes[n].a)
-    b = int(nodes[n].b)
-    if nodes[a].op != 4 or nodes[b].op != 4: return n
-    k = NK.and_
-    if nodes[n].op == 3: k = .or_
-    e = mk(k, nodes[n].pos)
-    nodes[e].a = nodes[a].a
-    nodes[e].b = nodes[b].a
-    c = head_node(4, nodes[n].pos)
-    nodes[c].a = i32(e)
-    c
 
 struct_body = ""                # (the struct whose fields are being parsed)
 # profiling aid: DEWY_STOP=lex or DEWY_STOP=parse makes `dewy check` stop after that phase
