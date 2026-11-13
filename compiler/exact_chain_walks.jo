@@ -1,0 +1,183 @@
+use 'exact.jo'
+use 'lower_scalars.dewy'
+use 'lower_storage.dewy'
+use 'lower_group.dewy'
+use 'checker_signature.dewy'
+use 'checker_state.dewy'
+use 'checker_exact.dewy'
+use 'exact_reset_loop.jo'
+use 'ir_types.dewy'
+use 'checker_tokens.dewy'
+use 'refinement_types.dewy'
+use 'exact_guards.jo'
+use 'exact_guard_ops.dewy'
+use 'exact_loop.jo'
+use 'pcheck.jo'
+use 'pcheck_drive.dewy'
+use 'math_lower.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'expr.jo'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_assign_hooks.dewy'
+use 'ir.jo'
+use 'isolation.jo'
+use 'directives.jo'
+use 'directive_queries.dewy'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'effects.jo'
+use 'refine.jo'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'facts.jo'
+use 'facts_arith.dewy'
+use 'facts_ranges.dewy'
+use 'facts_joins.dewy'
+use 'facts_progress.dewy'
+use 'lower.jo'
+use 'node_store.dewy'
+use 'lower_primitives.dewy'
+use 'ir_builders.dewy'
+use 'math_ops.dewy'
+use 'isolation_ops.dewy'
+use 'exact_measure.dewy'
+use 'exact_cold_walk.dewy'
+
+exact_chain_leaf = (n: int, depth: int = 0) -> bool:
+    if depth > 4: return false
+    k = nodes[n].kind
+    if k == .ident: return nodes[n].aux == i32(int(SK.local))
+    if k == .int_lit: return true
+    if k == .conv and (nodes[n].aux == i32(int(CV.none_)) or nodes[n].aux == i32(int(CV.int_))):
+        return exact_chain_leaf(int(nodes[n].a), depth + 1)
+    if k == .index and nodes[n].aux == 0:
+        return exact_chain_leaf(int(nodes[n].a), depth + 1) and exact_chain_leaf(int(nodes[n].b), depth + 1)
+    false
+exact_chain_plan = (n: int, plan: mut int[]) -> bool:
+    if plan.len() >= 16: return false
+    k = nodes[n].kind
+    if not exact_has_node(n):
+        if not exact_chain_leaf(n): return false
+        if exact_bits(n) > 64: return false
+        plan.push(n)
+        return true
+    if k != .binary or nodes[n].aux != 0: return false
+    op = nodes[n].op as Tok
+    if op != .plus and op != .minus and op != .star: return false
+    if not exact_chain_plan(int(nodes[n].a), plan) or not exact_chain_plan(int(nodes[n].b), plan): return false
+    plan.push(n)
+    true
+# For c*x+d, check the exact preimage of the destination interval once. This
+# includes cancellation at the endpoints and lets constant multiplication use
+# LEA instead of a flag-producing multiply. Constants outside this cheap host
+# calculation keep the general exact path.
+exact_affine_store = (n: int) -> int:
+    source = int(nodes[n].a)
+    if nodes[source].kind != .binary or nodes[source].aux != 0: return -1
+    op = nodes[source].op as Tok
+    if op != .plus and op != .minus: return -1
+    known, offset = integer_constant(int(nodes[source].b))
+    if not known or offset < -2147483647 or offset > 2147483647: return -1
+    if op == .minus: offset = -offset
+    product = int(nodes[source].a)
+    if nodes[product].kind != .binary or nodes[product].op != i32(int(Tok.star)) or nodes[product].aux != 0 or not exact_has_node(product): return -1
+    leaf = int(nodes[product].a)
+    fixed, scale = integer_constant(int(nodes[product].b))
+    if not fixed:
+        fixed, scale = integer_constant(leaf)
+        leaf = int(nodes[product].b)
+    if not fixed or scale < 2 or scale > 2147483647 or exact_has_node(leaf) or exact_bits(leaf) > 64 or not exact_chain_leaf(leaf): return -1
+    low_rest = FACT_MIN % scale - offset
+    high_rest = FACT_MAX % scale - offset
+    low = FACT_MIN / scale + low_rest / scale + int(low_rest % scale > 0)
+    high = FACT_MAX / scale + high_rest / scale - int(high_rest % scale < 0)
+    value = exact_low_word(leaf)
+    lower, upper = eg_bound(leaf)
+    if lower >= low:
+        if upper > high: math_int_guard(e_bin(.gts, VI, value, e_iconst(high)))
+    else if upper <= high: math_int_guard(e_bin(.lts, VI, value, e_iconst(low)))
+    else:
+        distance = e_bin(.sub, VI, value, e_iconst(low))
+        math_int_guard(e_bin(.gtu, VI, distance, e_iconst(int(u64(high) - u64(low)))))
+    scaled = e_bin(.mul, VI, value, e_iconst(scale))
+    e_bin(.add, VI, scaled, e_iconst(offset))
+
+# At a signed-word store, (x +/- c) +/- y with matching signs can combine
+# bounded nonnegative offsets before checking x once. The source intermediate
+# stays exact: no early narrowing, and x/y still evaluate once in source order.
+# Demand-only, constant-size shape check; bounds reuse the indexed range cache.
+exact_offset_store = (n: int) -> int:
+    source = int(nodes[n].a)
+    if nodes[source].kind != .binary or nodes[source].aux != 0: return -1
+    op = nodes[source].op as Tok
+    if op != .plus and op != .minus: return -1
+    inner = int(nodes[source].a)
+    if not exact_has_node(inner) or nodes[inner].kind != .binary or nodes[inner].aux != 0 or nodes[inner].op != nodes[source].op: return -1
+    x = int(nodes[inner].a); y = int(nodes[source].b)
+    known, offset = integer_constant(int(nodes[inner].b))
+    if not known or offset < 0 or exact_bits(x) > 64: return -1
+    bound = positive_bound(y, true)
+    if bound < 0 or offset > FACT_MAX - bound: return -1
+    value = freeze_scalar(exact_low_word(x), ntype(x))
+    by = e_addi(exact_low_word(y), offset)
+    result = vreg(VI)
+    emit((if op == .plus: Op.checked_add else: Op.checked_sub), VI, result, value, by, 0, rt("__int_overflow"))
+    result
+exact_chain_store = (n: int) -> int:
+    if target_wasm or target_arm64 or exact_chain_active: return -1
+    source = int(nodes[n].a)
+    # Narrowing may retain an identity conversion around the exact tree.
+    # The outer store still checks fit; this wrapper needs no arithmetic.
+    loop nodes[source].kind == .conv and nodes[source].aux == i32(int(CV.int_)) and ntype(source) == ntype(int(nodes[source].a)):
+        source = int(nodes[source].a)
+    plan: int[]
+    if not exact_chain_plan(source, plan): return -1
+    operations = 0
+    multiplies = 0
+    loop p in plan:
+        if exact_has_node(p):
+            operations += 1
+            if nodes[p].op == i32(int(Tok.star)): multiplies += 1
+    if operations < 2 or multiplies == 0: return -1
+    values: {int: int} = {}
+    exact_chain_saved = {}
+    loop p in plan:
+        if not exact_has_node(p):
+            value = freeze_scalar(gen_expr(p).v, ntype(p))
+            exact_chain_saved[p] = value
+            values[p] = value
+    result = vreg(VI)
+    e_block()
+    e_block()
+    loop p in plan:
+        if not exact_has_node(p): continue
+        op = nodes[p].op as Tok
+        a = values[int(nodes[p].a)]; b = values[int(nodes[p].b)]
+        value = e_bin((if op == .plus: Op.add else if op == .minus: Op.sub else: Op.mul), VI, a, b)
+        overflow = e_bin((if op == .plus: Op.overflow_add else if op == .minus: Op.overflow_sub else: Op.overflow_mul), VI, a, b)
+        e_brif(overflow, 0)
+        values[p] = value
+    e_mov(result, values[source])
+    e_br(1)
+    e_end()
+    cold = ir_cold
+    ir_cold = true
+    exact_chain_active = true
+    words = exact_value(source)
+    exact_chain_active = false
+    sign = e_bin(.shrs, VI, words[0], e_iconst(63))
+    bad = e_iconst(0)
+    loop i in [1..words.len()): bad = e_bin(.or_, VI, bad, e_bin(.ne, VI, words[i], sign))
+    math_int_guard(bad)
+    e_mov(result, words[0])
+    ir_cold = cold
+    e_end()
+    exact_chain_saved = {}
+    result

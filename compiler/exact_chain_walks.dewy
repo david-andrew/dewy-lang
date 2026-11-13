@@ -1,0 +1,169 @@
+$runtime_checks
+
+from p"ast.jo" import (nodes)
+from p"check.jo" import (target_arm64 target_wasm)
+from p"checked_eval.dewy" import (cx_divide cx_token_values)
+from p"exact.jo" import (exact_bits exact_chain_active exact_chain_saved exact_has_node exact_low_word exact_value)
+from p"exact_guard_ops.dewy" import (eg_bound)
+from p"expr.jo" import (CV integer_constant ntype)
+from p"facts.jo" import (positive_bound)
+from p"ir.jo" import (VI ir_cold)
+from p"ir_builders.dewy" import (e_addi e_bin e_block e_br e_brif e_end e_iconst e_mov emit vreg)
+from p"ir_types.dewy" import (Op)
+from p"lower_group.dewy" import (gen_expr)
+from p"lower_primitives.dewy" import (rt)
+from p"lower_scalars.dewy" import (math_int_guard)
+from p"lower_storage.dewy" import (freeze_scalar)
+from p"refinement_types.dewy" import (FACT_MAX FACT_MIN)
+
+ChainWord:type=int64<overflow='wrap'>
+
+# Small pure arithmetic trees use native flags and share one cold exact path.
+# Leaves are evaluated once before either path. The bounded plan visits at most
+# 16 nodes; the saved leaf index exists only while emitting its exact fallback.
+exact_chain_leaf=(n:ChainWord depth:ChainWord=0):>bool=>$unsafe {
+    if depth >? 4 {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'ident' {return nodes.ptr[n].aux =? int32(1)}
+    if k =? 'int_lit' {return true}
+    if k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.none_)) or nodes.ptr[n].aux =? int32(int64(CV.int_))) {return exact_chain_leaf(ChainWord(nodes.ptr[n].a) depth + 1)}
+    if k =? 'index' and nodes.ptr[n].aux =? 0 {return exact_chain_leaf(ChainWord(nodes.ptr[n].a) depth + 1) and exact_chain_leaf(ChainWord(nodes.ptr[n].b) depth + 1)}
+    false
+}
+exact_chain_plan=(n:ChainWord @plan:array<int64>):>bool=>$unsafe {
+    if plan.length >=? 16 {return false}
+    let k=nodes.ptr[n].kind
+    if not exact_has_node(n) {
+        if not exact_chain_leaf(n) {return false}
+        if exact_bits(n) >? 64 {return false}
+        plan.push(n)
+        return true
+    }
+    if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return false}
+    let op=cx_token_values.ptr[ChainWord(nodes.ptr[n].op)]
+    if op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return false}
+    if not exact_chain_plan(ChainWord(nodes.ptr[n].a) @plan) or not exact_chain_plan(ChainWord(nodes.ptr[n].b) @plan) {return false}
+    plan.push(n)
+    true
+}
+# For c*x+d, check the exact preimage of the destination interval once. This
+# includes cancellation at the endpoints and lets constant multiplication use
+# LEA instead of a flag-producing multiply. Constants outside this cheap host
+# calculation keep the general exact path. Quotients and remainders truncate.
+exact_affine_store=(n:ChainWord):>int64=>$unsafe {
+    let source=ChainWord(nodes.ptr[n].a)
+    if nodes.ptr[source].kind not=? 'binary' or nodes.ptr[source].aux not=? 0 {return -1}
+    let op=cx_token_values.ptr[ChainWord(nodes.ptr[source].op)]
+    if op not=? 'plus' and op not=? 'minus' {return -1}
+    let [known constant]=integer_constant(ChainWord(nodes.ptr[source].b))
+    if not known or constant <? -2147483647 or constant >? 2147483647 {return -1}
+    let offset:ChainWord=if op =? 'minus' {-constant} else {constant}
+    let product=ChainWord(nodes.ptr[source].a)
+    if nodes.ptr[product].kind not=? 'binary' or cx_token_values.ptr[ChainWord(nodes.ptr[product].op)] not=? 'star' or nodes.ptr[product].aux not=? 0 or not exact_has_node(product) {return -1}
+    let leaf:ChainWord=ChainWord(nodes.ptr[product].a)
+    let [right_fixed right_scale]=integer_constant(ChainWord(nodes.ptr[product].b))
+    let fixed=right_fixed
+    let scale:ChainWord=right_scale
+    if not fixed {
+        let [left_fixed left_scale]=integer_constant(leaf)
+        fixed=left_fixed
+        scale=left_scale
+        leaf=ChainWord(nodes.ptr[product].b)
+    }
+    if not fixed or scale <? 2 or scale >? 2147483647 or exact_has_node(leaf) or exact_bits(leaf) >? 64 or not exact_chain_leaf(leaf) {return -1}
+    let low_rest:ChainWord=mod(FACT_MIN scale kind='trunc') - offset
+    let high_rest:ChainWord=mod(FACT_MAX scale kind='trunc') - offset
+    let low=cx_divide(FACT_MIN scale) + cx_divide(low_rest scale) + (if mod(low_rest scale kind='trunc') >? 0 {ChainWord(1)} else {ChainWord(0)})
+    let high=cx_divide(FACT_MAX scale) + cx_divide(high_rest scale) - (if mod(high_rest scale kind='trunc') <? 0 {ChainWord(1)} else {ChainWord(0)})
+    let value=exact_low_word(leaf)
+    let [lower upper]=eg_bound(leaf)
+    if lower >=? low {
+        if upper >? high {math_int_guard(e_bin('gts' VI value e_iconst(high)));}
+    }
+    else if upper <=? high {math_int_guard(e_bin('lts' VI value e_iconst(low)));} else {
+        let distance=e_bin('sub' VI value e_iconst(low))
+        math_int_guard(e_bin('gtu' VI distance e_iconst(high - low)));
+    }
+    let scaled=e_bin('mul' VI value e_iconst(scale))
+    e_bin('add' VI scaled e_iconst(offset))
+}
+# At a signed-word store, (x +/- c) +/- y with matching signs can combine
+# bounded nonnegative offsets before checking x once. The source intermediate
+# stays exact: no early narrowing, and x/y still evaluate once in source order.
+# Demand-only, constant-size shape check; bounds reuse the indexed range cache.
+exact_offset_store=(n:ChainWord):>int64=>$unsafe {
+    let source=ChainWord(nodes.ptr[n].a)
+    if nodes.ptr[source].kind not=? 'binary' or nodes.ptr[source].aux not=? 0 {return -1}
+    let op=cx_token_values.ptr[ChainWord(nodes.ptr[source].op)]
+    if op not=? 'plus' and op not=? 'minus' {return -1}
+    let inner=ChainWord(nodes.ptr[source].a)
+    if not exact_has_node(inner) or nodes.ptr[inner].kind not=? 'binary' or nodes.ptr[inner].aux not=? 0 or nodes.ptr[inner].op not=? nodes.ptr[source].op {return -1}
+    let x=ChainWord(nodes.ptr[inner].a)
+    let y=ChainWord(nodes.ptr[source].b)
+    let [known offset]=integer_constant(ChainWord(nodes.ptr[inner].b))
+    if not known or offset <? 0 or exact_bits(x) >? 64 {return -1}
+    let bound=positive_bound(y true)
+    if bound <? 0 or offset >? FACT_MAX - bound {return -1}
+    let value=freeze_scalar(exact_low_word(x) ntype(x))
+    let by=e_addi(exact_low_word(y) offset)
+    let result=vreg(VI)
+    emit((if op =? 'plus' {Op.checked_add} else {Op.checked_sub}) VI result value by 0 rt("__int_overflow"));
+    result
+}
+exact_chain_store=(n:ChainWord):>int64=>$unsafe {
+    if target_wasm or target_arm64 or exact_chain_active {return -1}
+    let source=ChainWord(nodes.ptr[n].a)
+    # Narrowing may retain an identity conversion around the exact tree.
+    # The outer store still checks fit; this wrapper needs no arithmetic.
+    loop nodes.ptr[source].kind =? 'conv' and nodes.ptr[source].aux =? int32(int64(CV.int_)) and ntype(source) =? ntype(ChainWord(nodes.ptr[source].a)) {source=ChainWord(nodes.ptr[source].a)}
+    let plan:array<int64>=[]
+    if not exact_chain_plan(source @plan) {return -1}
+    let operations:ChainWord=0
+    let multiplies:ChainWord=0
+    loop p in plan {
+        if exact_has_node(p) {
+            operations+=1
+            if cx_token_values.ptr[ChainWord(nodes.ptr[p].op)] =? 'star' {multiplies+=1}
+        }
+    }
+    if operations <? 2 or multiplies =? 0 {return -1}
+    let values=dict<int64 int64>()
+    exact_chain_saved=dict<int64 int64>()
+    loop p in plan {
+        if not exact_has_node(p) {
+            let value=freeze_scalar(gen_expr(p).v ntype(p))
+            exact_chain_saved[p]=value
+            values[p]=value
+        }
+    }
+    let result=vreg(VI)
+    e_block();
+    e_block();
+    loop p in plan {
+        if not exact_has_node(p) {continue}
+        let op=cx_token_values.ptr[ChainWord(nodes.ptr[p].op)]
+        let a=values[ChainWord(nodes.ptr[p].a)]
+        let b=values[ChainWord(nodes.ptr[p].b)]
+        let value=e_bin((if op =? 'plus' {Op.add} else if op =? 'minus' {Op.sub} else {Op.mul}) VI a b)
+        let overflow=e_bin((if op =? 'plus' {Op.overflow_add} else if op =? 'minus' {Op.overflow_sub} else {Op.overflow_mul}) VI a b)
+        e_brif(overflow 0);
+        values[p]=value
+    }
+    e_mov(result values[source]);
+    e_br(1);
+    e_end();
+    let cold=ir_cold
+    ir_cold=true
+    exact_chain_active=true
+    let words=exact_value(source)
+    exact_chain_active=false
+    let sign=e_bin('shrs' VI words[0] e_iconst(63))
+    let bad=e_iconst(0)
+    loop i in [1..words.length) {bad=e_bin('or_' VI bad e_bin('ne' VI words[i] sign))}
+    math_int_guard(bad);
+    e_mov(result words[0]);
+    ir_cold=cold
+    e_end();
+    exact_chain_saved=dict<int64 int64>()
+    result
+}

@@ -16,6 +16,6 @@ def test_exact_loop_walks_matches_twin(compiler, tmp_path, monkeypatch):  # noqa
 
 
 def test_exact_walks_self_build_matches_twins(compiler, tmp_path, monkeypatch):  # noqa: F811
-    leaves = ('exact_loop_walks', 'exact_reset_walks')
+    leaves = ('exact_loop_walks', 'exact_reset_walks', 'exact_chain_walks')
     results = compare_builds(compiler, tmp_path, monkeypatch, leaves, ('compiler/main.jo',), flags=(('--release',),))
     assert results[0][2] == 0
