@@ -24,6 +24,7 @@
   - D40 Q1–Q3: cleanup failures as results, when cleanup runs, failure pairs.
 - **(b) New syntax or surface:**
   - D40 Q4: `$__abandon__` for owners whose drop throws work away;
+  - D41 Q1–Q3: `check_cancel()`, `protect_from_cancel(limit @work)`, `task.tasks(@body)` as ordinary calls;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D11 Q2: `check=` or `valid_if=`;
   - D11 Q3: `__read__` or `$reader`;
@@ -181,6 +182,55 @@ Without `defer`, each needs the line repeated before every `return` and `or_thro
   printl"all written"
   ```
 - **Dogfooded:** 24 programs over five rounds, a review and two independent regrades, no open must-fix. A safe wrapper around a C library still needs a separate decision about hiding its fields. Full rules: `proposals/cleanup/summary.md` and `amendments.md`.
+
+### D41. Cancellation helpers as ordinary calls: `check_cancel`, `protect_from_cancel`, `task.tasks`
+
+Ctrl-C, or a failing sibling in a `parallel` block, cancels work. Waits (channels, `sleep`, signals) notice it on their own. These three library calls cover the rest, with no new syntax. Batch 5 left them open ("being redesigned as visible scopes"); the scope-block form was not taken (batch 8), so they come back as ordinary calls.
+
+#### Q1 (b). A cancellation checkpoint in long computations
+
+```dewy
+loop i in [0..1_000_000_000) {
+    check_cancel() or_throw              # stops here once Ctrl-C arrives
+    total += score(i)
+}
+```
+
+A loop that never waits doesn't notice Ctrl-C until it reaches a checkpoint. Use `check_cancel()` for that?
+
+**Rec:** yes; reversible.
+
+#### Q2 (b). Finishing a save after Ctrl-C
+
+```dewy
+match protect_from_cancel(5s @save(best)) {
+    saved:Path => printl"saved to {saved}"
+    <Timeout> => printl("save didn't finish within 5 s" file=stderr)
+    problem:error => printl("save failed: {problem}" file=stderr)
+}
+```
+
+After Ctrl-C, `save` still runs, for up to 5 s, then the program exits with 130 as usual. Use `protect_from_cancel(limit @work)`? A save stuck inside a C call can't be interrupted, only waited for.
+
+**Rec:** yes; reversible.
+
+#### Q3 (b). A group of tasks started one by one
+
+```dewy
+import p"@lib/std/tasks.dewy" as task
+
+accept_all = (port:int group:Tasks) => loop true {
+    let conn = accept(port) or_throw
+    group.spawn(@handle(conn))           # one task per connection
+}
+serve = (port:int) => task.tasks(@accept_all(port))   # returns once every task has finished
+```
+
+`parallel` covers a known set of items; a server starts a task per connection. `task.tasks(@body)` runs `body` with a fresh group and returns after all of its tasks finish; if one fails, the rest are stopped and waited for, then the failure comes back. Use `task.tasks` from `@lib/std/tasks.dewy` for this?
+
+**Rec:** yes; reversible.
+
+Dogfooded in the concurrency and signals rounds; names read cold. Full rules: `proposals/concurrency/unified/proposal-v5.md`, `proposals/signals/summary.md`.
 
 ---
 
