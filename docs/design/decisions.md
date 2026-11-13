@@ -709,3 +709,24 @@ section linked. ROADMAP.md lists them in one line each.
     supported first-class (a valuable use case), but the Dewy-native interface is the idiomatic
     one, emphasized in docs and examples. Examples of the native design don't lean on SQL strings. A
     design round is queued.
+- Batch 10 (David, 2026-11-13):
+  - **`&` and `and` are the same operator** (standing): they mean exactly the same thing and
+    differ only in precedence and in which one is idiomatic where. Likewise operator sections
+    such as `(& x)` are an existing feature (refinements use them), not a new one.
+  - **Combining failures, David's design** (direction; replaces D42's `ErrorGroup` proposal as
+    the starting point, still to be designed in detail and compared):
+    - `e1 & e2` combines two failures; its type is `E1 & E2`, and a match arm can name it
+      (`<E1 & E2>`). It is an unordered set: no order is kept.
+    - `v as T` takes one part out of a combined value (`result as E1`), for any combined
+      value, not only errors. A field present in several parts is reached through `as`.
+    - Two failures of the same type (`e1a & e1b`) are a compile error pointing to the error
+      stack: `type of error & array`, ordered, whose `__and__` pushes and returns the stack.
+    - Errors carry metatag members such as where they occurred and stack traces, produced on
+      demand: demand-driven at compile time, not stored when nothing reads them.
+    - `or_throw` stays as it is for now; `or_throw(& previous)` is the shape if combining on
+      forward is wanted later.
+    - Open: whether `??<E>`/`or_throw<E>` match only an exact type or a combination whose parts
+      are all covered (a handler for `E1` must not silently swallow the `E2` in `E1 & E2`); how
+      cancellation interacts (David asked to see the D4 Q1 reasoning again); whether libraries
+      should give distinct error types per operation (`FileWriteFailed & FileCloseFailed`) so
+      automatic cleanup combines naturally, with the stack for genuine repeats.
