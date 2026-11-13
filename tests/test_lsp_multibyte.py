@@ -5,6 +5,8 @@ import os
 import select
 import time
 
+import pytest
+
 from tests.support import compiler  # noqa: F401
 from tests.test_core_editor import Client
 
@@ -129,20 +131,47 @@ def requests_at(uri, text):
     yield 'workspace/symbol', {'query': 'é'}
 
 
-def drive(client, uri, text):
-    for method, params in requests_at(uri, text):
-        ask(client, method, params)
+def ask_batch(client, requests):
+    """Send the requests together, then wait for every reply (error replies included: the server must
+    answer each one, not die). A batch stays far below the pipe's capacity, so neither side blocks."""
+    pending = set()
+    for method, params in requests:
+        client.serial += 1
+        client.send(method, params, client.serial)
+        pending.add(client.serial)
+    replies = {}
+    while pending:
+        message = client.receive()
+        if message.get('id') in pending:
+            pending.discard(message['id'])
+            replies[message['id']] = message
+        else:
+            client.messages.append(message)
+    return replies
+
+
+def drive(client, uri, text, batch=32, shard=0, shards=1):
+    requests = list(requests_at(uri, text))[shard::shards]
+    for start in range(0, len(requests), batch):
+        ask_batch(client, requests[start:start + batch])
     alive(client)
 
 
-def test_multibyte_documents(compiler, tmp_path):
+SHARDS = 2
+
+
+@pytest.mark.parametrize('name, shard', [
+    pytest.param(name, k, id=f'{name}-{k}of{SHARDS}', marks=pytest.mark.xdist_group(name=f'lsp-multibyte-{name}-{k}'))
+    for name in DOCUMENTS for k in range(SHARDS)])
+def test_multibyte_documents(compiler, tmp_path, name, shard):
+    # (each shard's server gets every second request of the document's list: together, all of them)
+    text = DOCUMENTS[name]
     client = Tolerant(compiler, tmp_path)
     try:
-        for name, text in DOCUMENTS.items():
-            path = tmp_path / name
-            path.write_text(text)
-            client.set_text(path.as_uri(), text, 1)
-            drive(client, path.as_uri(), text)
+        path = tmp_path / name
+        path.write_text(text)
+        client.set_text(path.as_uri(), text, 1)
+        drive(client, path.as_uri(), text, shard=shard, shards=SHARDS)
     finally:
         client.close()
 
