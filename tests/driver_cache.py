@@ -32,15 +32,20 @@ PROTECT_SECONDS = 3600
 STALE_STAGE_SECONDS = 86400
 # Variables of the test runner that no build reads (the compiler is keyed by its bytes).
 RUNNER_ONLY = {'DEWY_CORE_COMPILER', 'DEWY_CORE_LIB', 'DEWY_GATE_SLOT_HELD', 'DEWY_PYTEST_SHARD',
-               'DEWY_NO_AUDIO'}
+               'DEWY_NO_AUDIO', 'DEWY_TWIN_SCOPE_REPORT', 'DEWY_TWIN_SCOPED_OUT',
+               'DEWY_TEST_TRACE'}
 
 _digests: dict = {}
 
 
 def file_digest(path: Path) -> bytes:
-    """A file's SHA-256, remembered for this process while its size, time and inode stay."""
+    """A file's SHA-256, remembered for this process while its file metadata stays unchanged."""
+    # Windows ctime cannot detect an in-place edit whose mtime was restored.
+    if os.name == 'nt':
+        return hashlib.sha256(path.read_bytes()).digest()
     stat = path.stat()
-    stamp = (str(path), stat.st_size, stat.st_mtime_ns, stat.st_ino)
+    stamp = (str(path), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
+             stat.st_ctime_ns, stat.st_mode)
     if stamp not in _digests:
         _digests[stamp] = hashlib.sha256(path.read_bytes()).digest()
     return _digests[stamp]
@@ -82,7 +87,7 @@ def build_driver(compiler, modules, release=False, flags=(), cache=None, timeout
     cache = Path(cache) if cache else CACHE
     key = identity(compiler, modules, release, flags)
     entry = cache / key[:2] / key
-    binary = entry / 'driver'
+    binary = entry / ('driver.exe' if os.name == 'nt' else 'driver')
     if binary.exists():
         touch(entry)
         return binary

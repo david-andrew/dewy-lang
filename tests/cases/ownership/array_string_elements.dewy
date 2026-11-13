@@ -1,3 +1,4 @@
+# exit: 42
 # Arrays own their element strings: a string stored into one is a copy the
 # array releases with its buffer (static literals are shared, never freed);
 # an element read out and stored elsewhere or returned is copied again; a
@@ -14,7 +15,7 @@ let first = (xs:array<string>):>string => {
     if xs.length >? 0 { return xs[0] }    # an element of the caller's array: the caller gets a copy
     return ""
 }
-let main = ():>void => {
+run=():>int64=>{
     let total:int64 = 0
     let rounds:int64 = 0
     loop rounds <? 300 {
@@ -32,5 +33,7 @@ let main = ():>void => {
     if copy.length =? 4 and copy[0] =? "p0-0" { total += 1 }
     let words = "a,bb,ccc".split","
     let sizes = [loop w in words w.length]
-    exit((total + 7 - sizes.length) & 255)            # (4 + 27 + 6) + 1 + 7 - 3 = 42
+    return (total + 7 - sizes.length) & 255             # (4 + 27 + 6) + 1 + 7 - 3 = 42
 }
+
+main=()=>exit(run())

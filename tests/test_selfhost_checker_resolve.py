@@ -1,12 +1,9 @@
 """Recursive type syntax, binder restoration and service order match frozen Jo."""
-import re
-import subprocess
 
 import pytest
 
-from tests.driver_cache import build_driver
+from tests.leaf_driver import build_pair
 from tests.support import ROOT, compiler  # noqa: F401
-from tests.selfhost_effect_double import effect_services
 from tests.test_selfhost_type_constructors import DRIVER as CONSTRUCTORS
 
 DRIVER = CONSTRUCTORS.split('main = ():')[0] + r'''
@@ -183,59 +180,10 @@ main = ():
 
 
 def compare(compiler, tmp_path, release, driver, status=0, extra_stems=(), doubles=None, jo_doubles=None):
-    # doubles: {stem: {extension: text}}, modules standing in for compiler ones; jo_doubles:
-    # {file: text}, Jo modules a Dewy module imports by file name, in both builds.
-    # Supply the resolver's direct services to every derived leaf driver.
-    arguments = getattr(jo_doubles, 'arguments', ())
-    with_stderr = getattr(jo_doubles, 'with_stderr', False)
-    if arguments:
-        driver = jo_doubles.runtime_driver(driver)
-    jo_doubles = dict(jo_doubles or {})
-    # (a whole compiler supplies every service itself)
-    for module, functions in () if 'main.jo' in jo_doubles else RESOLVE_JO.items():
-        text = jo_doubles.get(module, "use 'driver.jo'\nuse 'checker_resolve.dewy'\n")
-        if module == 'effects.jo' and 'struct EffectSummary:' in text:
-            continue
-        for name, definition in functions.items():
-            if not re.search(r'(?m)^' + re.escape(name) + r'\s*=', text):
-                text += definition + '\n'
-        if "use 'checker_resolve.dewy'" not in text:
-            text = "use 'checker_resolve.dewy'\n" + text
-        if "use 'driver.jo'" not in text:
-            text = "use 'driver.jo'\n" + text
-        jo_doubles[module] = text
-    outputs = []
-    doubles = doubles or {}
-    stems = ('node_store', 'source_types', 'checker_types', 'checker_state', 'checker_tokens',
-             'refinement_types', 'refine_predicates', 'refine_queries', 'type_queries',
-             'type_intern', 'type_inference', 'type_constructors', 'type_labels',
-             'type_unions', 'checker_alias', 'checker_resolve', 'checker_coerce') + tuple(doubles) + extra_stems
-    for extension in ('dewy', 'jo'):
-        modules = {}
-        for stem in stems:
-            if stem in doubles:
-                text = doubles[stem][extension]
-            else:
-                text = (ROOT / f'compiler/{stem}.{extension}').read_text()
-            if extension == 'jo':
-                text = text.replace(".dewy'", ".jo'")
-            modules[f'{stem}.{extension}'] = effect_services(text, jo_doubles)
-        for name, text in (jo_doubles or {}).items():
-            if extension == 'jo':
-                text = text.replace(".dewy'", ".jo'")
-                # Real Dewy services may also import the leaf under comparison.
-                # Switch those edges too, so the graph has one implementation.
-                for stem in extra_stems:
-                    text = text.replace(f'p"{stem}.dewy"', f'p"{stem}.jo"')
-            modules[name] = effect_services(text, jo_doubles)
-        modules['driver.jo'] = ''.join(f"use '{s}.{extension}'\n" for s in stems) + driver
-        binary = build_driver(compiler, modules, release)
-        ran = subprocess.run([binary, *arguments], capture_output=True, timeout=60)
-        assert ran.returncode == status, ran.stdout[-6000:] + ran.stderr
-        outputs.append(ran.stdout + ran.stderr if with_stderr else ran.stdout)
-    assert outputs[0] == outputs[1]
-    return outputs[0]
-
+    pair = build_pair(compiler, release, driver, extra_stems, doubles, jo_doubles,
+                      services=RESOLVE_JO)
+    return pair.compare(getattr(jo_doubles, 'arguments', ()), status,
+                        with_stderr=getattr(jo_doubles, 'with_stderr', False))
 
 
 # The Jo services checker_resolve calls, routed to the driver.

@@ -3,8 +3,10 @@ const assert = require('node:assert/strict');
 const {spawn} = require('node:child_process');
 const {pathToFileURL} = require('node:url');
 const path = require('node:path');
-const [compiler, directory] = process.argv.slice(2);
-const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const {EventEmitter} = require('node:events');
+const waitFor = require('./wait_events.cjs');
+const [compiler, directory, selected] = process.argv.slice(2);
+let scenarios = 0;
 const frame = message => {
     const body = Buffer.from(JSON.stringify({jsonrpc: '2.0', ...message}));
     return Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`), body]);
@@ -21,6 +23,7 @@ const changed = version => ({method: 'textDocument/didChange', params: {
 
 class Client {
     constructor() {
+        this.events = new EventEmitter();
         this.process = spawn(compiler, ['lsp'], {
             env: {...process.env, DEWY_LSP_CHECK_DELAY_MS: '3000'},
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -30,10 +33,10 @@ class Client {
         this.stderr = '';
         this.error = null;
         this.ended = false;
-        this.process.on('error', error => { this.error = error; });
-        this.process.on('exit', () => { this.ended = true; });
-        this.process.stdin.on('error', error => { this.error = error; });
-        this.process.stderr.on('data', bytes => { this.stderr += bytes; });
+        this.process.on('error', error => { this.error = error; this.events.emit('state'); });
+        this.process.on('close', () => { this.ended = true; this.events.emit('state'); });
+        this.process.stdin.on('error', error => { this.error = error; this.events.emit('state'); });
+        this.process.stderr.on('data', bytes => { this.stderr += bytes; this.events.emit('state'); });
         this.process.stdout.on('data', bytes => {
             this.buffer = Buffer.concat([this.buffer, bytes]);
             for (;;) {
@@ -44,17 +47,17 @@ class Client {
                 this.messages.push(JSON.parse(this.buffer.subarray(end + 4, end + 4 + length)));
                 this.buffer = this.buffer.subarray(end + 4 + length);
             }
+            this.events.emit('state');
         });
     }
     send(...messages) { this.process.stdin.write(Buffer.concat(messages.map(frame))); }
     async until(predicate, timeout = 8000) {
-        const deadline = performance.now() + timeout;
-        while (!predicate()) {
+        await waitFor(this.events, () => {
+            if (predicate()) return true;
             if (this.error) throw this.error;
             assert(!this.ended, `server exited: ${this.stderr}`);
-            assert(performance.now() < deadline, `protocol timeout: ${JSON.stringify(this.messages)}\n${this.stderr}`);
-            await pause(10);
-        }
+            return false;
+        }, timeout, () => `protocol timeout: ${JSON.stringify(this.messages)}\n${this.stderr}`);
     }
     async reply(id, timeout) {
         await this.until(() => this.messages.some(m => m.id === id), timeout);
@@ -79,8 +82,7 @@ class Client {
         try {
             assert.equal((await this.reply('shutdown', 1500)).result, null);
             this.send({method: 'exit', params: null});
-            const deadline = performance.now() + 1500;
-            while (!this.ended && performance.now() < deadline) await pause(10);
+            await this.until(() => this.ended, 1500);
             assert(this.ended, 'server did not exit after shutdown');
         } finally {
             if (!this.ended) this.process.kill();
@@ -88,7 +90,9 @@ class Client {
     }
 }
 
-async function scenario(run) {
+async function scenario(name, run) {
+    if (selected && selected !== name) return;
+    scenarios++;
     const client = new Client();
     try {
         await client.initialize();
@@ -100,7 +104,7 @@ async function scenario(run) {
     // Both a handler that refreshes a dirty document and one that checks speculative completion
     // text must retain the request ID throughout checking and restore the document afterwards.
     for (const method of ['textDocument/hover', 'textDocument/completion', 'textDocument/prepareRename']) {
-        await scenario(async c => {
+        await scenario(`cancel-${method}`, async c => {
             const id = 'cancel "escaped" Ω id';
             const params = document;
             c.send(opened(), {id, method, params});
@@ -118,7 +122,7 @@ async function scenario(run) {
     }
     // A changed document interrupts background checking. Queued JSON must not overwrite the
     // active handler's parser nodes; method-like strings inside document text are ordinary data.
-    await scenario(async c => {
+    await scenario('changed', async c => {
         c.send(opened());
         await c.started(1);
         c.send(changed(2), {id: 1234, method: 'textDocument/hover', params: document});
@@ -132,7 +136,7 @@ async function scenario(run) {
     // A request already checking the old version is answered ContentModified, and closing
     // its document also stops it. Neither path may publish the abandoned version's findings.
     for (const method of ['textDocument/didChange', 'textDocument/didClose']) {
-        await scenario(async c => {
+        await scenario(`abandoned-${method}`, async c => {
             c.send(opened(), {id: 'old', method: 'textDocument/hover', params: document});
             await c.started(1);
             if (method === 'textDocument/didChange') {
@@ -145,7 +149,7 @@ async function scenario(run) {
             } else assert(c.diagnostics().every(m => m.params.diagnostics.length === 0));
         });
     }
-    await scenario(async c => {
+    await scenario('eof', async c => {
         c.send(opened());
         await c.started(1);
         c.process.stdin.end();
@@ -155,7 +159,7 @@ async function scenario(run) {
     // Receiving only part of a frame must not hold a finished checker hostage. Finish that
     // same frame afterwards and verify that framing and subsequent responses still work.
     for (const part of ['header', 'body']) {
-        await scenario(async c => {
+        await scenario(`fragment-${part}`, async c => {
             c.send(opened(), {id: 99, method: 'textDocument/hover', params: document});
             await c.started(1);
             const message = frame({method: 'ignored/notification', params: {text: 'fragmented'}});
@@ -165,5 +169,6 @@ async function scenario(run) {
             c.process.stdin.write(message.subarray(cut));
         });
     }
+    assert.equal(scenarios, selected ? 1 : 9, 'unknown scenario or missing coverage');
     console.log('running cancellation, changed text, parser state and fragmented frames passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -7,10 +7,12 @@ own `fmt` must agree with the oracle on a sample of them."""
 import random
 import re
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
+from tests.layout_corpus import layout_texts
 from tests.support import compiler  # noqa: F401 (fixture)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -176,6 +178,7 @@ def op_symbol(s, at, stop):
     return name
 
 
+@lru_cache(maxsize=4096)
 def lex(s):
     """dn_lex without interning: (kind, symbol, start, stop, space, newline) each, then eof, and
     the block comments' [start, end) pairs."""
@@ -291,7 +294,7 @@ def lex(s):
         out.append((kind, symbol, start, i, spaced, newline))
         spaced = newline = False
     out.append(('eof', None, n, n, spaced, newline))
-    return out, blocks
+    return tuple(out), tuple(blocks)
 
 
 # ---- the layout, as the oracle sees it ----
@@ -499,23 +502,8 @@ def corpus():
     files = sorted(p for p in (ROOT / 'tests').rglob('*.dewy') if '__dewycache__' not in p.parts)
     files = [*sorted((ROOT / 'compiler').glob('*.dewy')), *sorted((ROOT / 'lib').rglob('*.dewy')),
              *sorted((ROOT / 'examples').glob('*.dewy')), *rng.sample(files, 500)]
-    texts = []
-    for path in files:
-        src = path.read_bytes()
-        try:
-            src.decode()
-            lex(src)
-        except (UnicodeDecodeError, LexError):
-            continue
-        texts.append(src)
-        for _ in range(2):
-            if (d := disturbed(src, rng)) is not None:
-                texts.append(d)
-    texts += [b'', b'\n', b'f(\n', b')\n', b'x = [1\n  2}\n', b'#{ a\n b }# x=1\n  y=2\n', b'a = {\r\nb\r\n}',
-              b'let s="a\n   b" c=(\n1\n)\n', b'x:array<array<int64>>=[]\n', b'  # alone  \n\t\n',
-              b'm = [w = () => 1 v=2]\n', b'f(a=1 b = 2)\n', b'x = a\nand b\n', b'y=a +\nb\n',
-              b'(' * 300 + b')' * 300 + b'\n', b'p = <T>(x:T) => x\n', b'q:>int64=x>=?1\n']
-    return texts
+    return layout_texts(tuple(path.read_bytes() for path in files), rng.getstate(),
+                        lex, disturbed, LexError)
 
 
 def oracle(src):

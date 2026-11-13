@@ -1,15 +1,18 @@
+# exit: 42
 $runtime_checks
 
 let choose = (flag:bool):>int64|none =>
     if flag 40 else none
 
-let main = ():>void => {
+run=():>int64=>{
     let original:int64|none = choose(true)
     let copy:int64|none = original
     copy = none
     if original is? int64 {
-        exit(original + 2)
+        return original + 2
     } else {
-        return
+        return 0
     }
 }
+
+main=()=>exit(run())

@@ -4,17 +4,22 @@ import json
 from tests.selfhost_lower_double import cached_driver, modules_for
 from tests.test_core_editor import Client
 
-DRIVER = '''use 'main.jo'
+CLI_DRIVER = '''use 'main.jo'
 main = ():
     lower_test_cli()
 '''
+DRIVER = CLI_DRIVER
+_default_modules_for = modules_for
 
 
 def leaf_compilers(compiler, tmp_path, leaves):
     """The compiler built with the leaves, then with their twins."""
     built = []
     for extension in ('dewy', 'jo'):
-        modules = dict(modules_for(tmp_path / 'unused.dewy', tmp_path / 'unused', leaves))
+        # Custom probes keep their exact graph. Ordinary live CLI builds share one
+        # graph: its reachable modules never import a leaf's frozen .jo body.
+        live = extension == 'dewy' and DRIVER == CLI_DRIVER and modules_for is _default_modules_for
+        modules = dict(modules_for(tmp_path / 'unused.dewy', tmp_path / 'unused', () if live else leaves))
         if extension == 'jo':
             # (every edge to a leaf, from Jo and from Dewy, leads to its twin)
             for name, text in modules.items():

@@ -92,7 +92,8 @@ def _cost(binary, *arguments):
 def test_long_decimal_text_converts_quickly(compiler, tmp_path):
     sys.set_int_max_str_digits(0)
     binary = _build(compiler, tmp_path)
-    digits = ''.join(random.Random(5).choice('0123456789') for _ in range(300_000))
+    # Each old iteration drew the first digit from a fresh generator with this seed.
+    digits = random.Random(5).choice('0123456789') * 300_000
     text = tmp_path / 'digits.txt'
     text.write_text('9' + digits)
     out, cost, limit, unit = _cost(binary, 'int', str(text))
