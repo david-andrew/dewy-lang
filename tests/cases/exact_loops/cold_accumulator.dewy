@@ -1,0 +1,12 @@
+sum=(initial:int n:int64 left:string right:string):>int=>{
+ let result=initial
+ loop i in [0..n) {result+=if left=?right i else -i}
+ return result
+}
+main=()=>{
+ printl(sum(0 7 "a" "a"))
+ printl(sum(0 7 "a" "b"))
+ printl(sum(1267650600228229401496703205376 7 "a" "a"))
+ printl(sum(-1267650600228229401496703205376 7 "a" "b"))
+ printl(sum(1267650600228229401496703205376 0 "a" "a"))
+}
