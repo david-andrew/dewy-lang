@@ -681,3 +681,12 @@ section linked. ROADMAP.md lists them in one line each.
   - **`defer`** (D40 Q5), provisional: kept, but only for one-off actions that can't fail and
     don't `return`, `break` or `or_throw`; library resources never need it. David wants strong
     examples of where it earns its keep. [proposals/cleanup/](proposals/cleanup/)
+  - **`()` is an unscoped block, `{}` a scoped one** (David, standing; one of Dewy's original
+    designs, recorded here): the two are interchangeable for expressions. Names declared inside
+    `{ … }` stay inside; names declared inside `( … )` are visible after it. A call can even be
+    written `my_fn{arg1 arg2 true 'something'}`; that is unidiomatic unless something must be
+    declared inside the argument list. So `parallel ( … )` is the form whose bindings are used
+    after the block (`parallel ( let config = load_config or_throw; let sounds = load_sounds
+    or_throw )`, then `config` and `sounds`), and `parallel { … }` keeps its names inside. This
+    replaces D4's exception where top-level `let`s escaped a `parallel { … }` block. With D40 Q2,
+    an owner bound in `parallel ( … )` belongs to the enclosing block.
