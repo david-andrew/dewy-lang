@@ -730,3 +730,13 @@ section linked. ROADMAP.md lists them in one line each.
       cancellation interacts (David asked to see the D4 Q1 reasoning again); whether libraries
       should give distinct error types per operation (`FileWriteFailed & FileCloseFailed`) so
       automatic cleanup combines naturally, with the stack for genuine repeats.
+  - **`Canceled` is no longer special in `??`** (David, 2026-11-13; reverses batch 4's D4 Q1
+    rule that `Canceled` passes through `??`): `??` and `or_throw` treat `Canceled` like any
+    other failure. To handle everything except some type, invert the type with `~` (`~` is
+    `not`, as `&` is `and`): `x ??<~Canceled> 0` defaults every failure except cancellation.
+    Reason: Ctrl-C is handled in parallel with the work (`loop _ in signals.ctrl_c`, batch 9),
+    so ordinary code shouldn't need to watch for `Canceled`; and exceptions to Dewy's general
+    rules must earn their keep and be unavoidable. Still to settle in the errors round: type
+    complement `~E` in handler types, what `$explicit_cancellation` checks now, and the
+    cancellation spin case (`let job = jobs.receive ?? continue` keeps waking after a cancel;
+    the fix is `??<~Canceled> continue`, possibly with a compiler warning on such loops).
