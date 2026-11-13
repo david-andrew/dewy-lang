@@ -1,0 +1,24 @@
+# PAPER R4: existing owner arrays/records, now composing fallible cleanup.
+import p"@lib/std/files.dewy" as files
+Batch:type = [outputs:array<files.File> generation:int64]
+open_batch = () => {
+    let outputs:array<files.File> = []
+    loop path in [p"part-a.bin" p"part-b.bin" p"part-c.bin"] {
+        outputs.push(files.open(path 'w') or_throw)
+    }
+    return Batch[outputs 7]
+}
+main = () => {
+    {
+        let batch = open_batch or_throw
+        loop @output in batch.outputs {
+            output.write_bytes([1 2 3]) or_throw;
+        }
+    }
+    printl"all files completed"      # inner cleanup succeeded, or this is skipped
+}
+# open_batch transfers the live prefix/whole batch rather than closing it.
+# Failed third acquisition attempts completion of both earlier initialized files.
+# main owns completion: reverse element order, all files attempted, errors paired.
+# Mutable element places borrow each resource; they never copy a File.
+# A plain block gives the completion point without adding a scope construct.

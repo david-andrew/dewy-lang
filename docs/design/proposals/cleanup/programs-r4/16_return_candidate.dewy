@@ -1,0 +1,18 @@
+# PAPER R4: returned owners transfer only after other completion succeeds.
+import p"@lib/std/files.dewy" as files
+open_result = () => {
+    let earlier = files.open(p"/dev/full" 'w') or_throw
+    earlier.write_bytes([1 2 3]) or_throw;
+    let result = files.open(p"returned.bin" 'w') or_throw
+    result.write_bytes([4 5 6]) or_throw;
+    return result
+}
+main = () => {
+    let result = open_result or_throw
+    result.write_bytes([7 8 9]) or_throw;
+}
+# Success would transfer result without completing it in open_result.
+# In the Linux late-error trace, earlier's flush fails while result is pending.
+# Handoff is canceled: result is completed once, with that failure pending.
+# Any completion error from result is paired; its old local slot is already moved.
+# The file may contain its accepted bytes despite failure; this is not atomic save.

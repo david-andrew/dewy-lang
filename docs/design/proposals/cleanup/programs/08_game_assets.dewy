@@ -1,0 +1,20 @@
+# PAPER: game_assets is an illustrative application API, not a new std module.
+# Its GPU release/voice lifetime contracts are in ../contracts.md.
+import p"game_assets.dewy" as game
+
+Level:type = [ground:game.Texture player:game.Texture music:game.Sound]
+load_level = () => {
+    let ground = game.load_texture(p"ground.png") or_throw
+    let player = game.load_texture(p"player.png") or_throw
+    let music = game.load_sound(p"level.ogg") or_throw
+    return Level[ground player music]
+}
+main = () => {
+    let level = load_level or_throw
+    game.run(@level) or_throw
+}
+# If music loading fails, player and ground are released in reverse order.
+# The engine borrows level through its entire loop, including its last frame.
+# Dropping level retires GPU handles; in-flight submissions retain storage.
+# Playback holds its own buffer ownership. A PlayingSound observer's drop
+# must NOT change D11's "play(...); still plays to completion" behavior.

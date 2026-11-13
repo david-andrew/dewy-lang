@@ -1,0 +1,28 @@
+# PAPER R5: two owners with fallible deletion duties, one inside the other.
+import p"@lib/std/files.dewy" as files
+ArchiveError:type = type of error
+package = (target:Path) => {
+    let stage = files.temp_dir or_throw                      # owns the directory tree
+    p"{stage.path}/manifest.txt".write_text("level=7\nassets=12\n") or_throw;
+    let archive = stage.temp_file("package.tar") or_throw    # owns one entry in stage
+    let result = capture(p"/usr/bin/tar" ["-cf" (archive.path as string)
+        "-C" (stage.path as string) "manifest.txt"]) or_throw
+    if not result.status =? 0 return ArchiveError
+    target.write_bytes(archive.path.read_bytes or_throw) or_throw;   # atomic publish
+}   # archive's entry is removed first (acquired later), then stage's tree
+main = () => {
+    package(p"package.tar") or_throw
+    printl"archive complete"          # only after both removals succeeded
+}
+# Completion order at line 12: archive (reverse acquisition), then stage.
+# Traces (F1 = archive removal fails, F2 = stage removal fails):
+#   success, F1 only        -> package returns F1 (a FileError, as itself)
+#   success, F1 and F2      -> CleanupError[primary=F1 cleanup=F2]
+#   ArchiveError, F1        -> CleanupError[primary=ArchiveError cleanup=F1]
+#   ArchiveError, F1 and F2 -> CleanupError[primary=CleanupError[ArchiveError F1] cleanup=F2]
+#   Ctrl-C during capture   -> Canceled pending; both removals run in the shared
+#                              100 ms grace; a failure pairs and still counts as
+#                              cancellation (see 22).
+# stage's removal is anchored to the created directory's identity and does not
+# follow a swapped symlink. A copied Path never carries deletion authority.
+# The archive entry already gone when stage removes its tree is not an error.

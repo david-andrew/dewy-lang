@@ -1,0 +1,20 @@
+# PAPER R5 (unchanged from R4): failed old completion must not leave an @ destination uninitialized.
+import p"@lib/std/files.dewy" as files
+replace = (@output:files.File target:Path) => {
+    output = files.open(target 'w') or_throw
+}
+main = () => {
+    let output = files.open(p"/dev/full" 'w') or_throw
+    output.write_bytes([1 2 3]) or_throw;
+    let replaced = replace(@output p"replacement.bin")
+    if replaced is? error {
+        # An old flush error returns from replace AFTER publishing the new owner.
+        output.write_bytes([4 5 6]) or_throw;
+        printl"replacement remains valid; forwarding old completion error"
+    }
+    replaced or_throw
+}
+# RHS acquisition failure retains the original slot until normal unwind.
+# Successful RHS + old flush failure publishes valid replacement before forwarding.
+# main still owns the new file and completes it at exit; another error is paired.
+# Mutation is not transactional: handling the error does not restore the old handle.

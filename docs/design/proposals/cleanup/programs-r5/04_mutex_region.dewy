@@ -1,0 +1,32 @@
+# PAPER R5: a lending guard is held to the end of its block (changed loan rule).
+Ledger:type = [balance:int64 entries:int64=0]
+LedgerFull:type = type of error
+post_all = (ledger:Mutex<Ledger> amounts:array<int64> journal:string) => {
+    loop amount in amounts {
+        let book = @(ledger.lock())
+        if book.balance + amount <? 0 break      # unlocks, then leaves the loop
+        book.balance += amount
+        book.entries += 1
+        let count = book.entries                 # last use of book
+        append_file(journal "{amount}\n") or_throw;   # still locked: journal order = ledger order
+        if count >=? 100 return LedgerFull       # unlocks, then returns from post_all
+    }                                            # unlocks at the end of every iteration
+    printl"posted"
+}
+main = () => {
+    let ledger = mutex(Ledger[100])
+    post_all(ledger [10 -30 25 -500] "journal.txt") or_throw
+    {
+        let book = @(ledger.lock())
+        printl"balance {book.balance}"           # 105: the -500 stopped the loop
+    }                                            # braces end the hold here
+    sleep(10ms) or_throw                         # not locked
+}
+# Hover on book: "lock held to the end of this block (line 13); last use line 10".
+# Without the braces at lines 19-22, the sleep at line 23 would warn:
+#   "ledger's lock is held past its last use (line 21) across a wait; end the block
+#    after line 21 to release it".
+# Deadlock checks cover the whole held interval: a second ledger.lock() inside
+# the loop body is an error, as it is today before the last use.
+# The place book still ends at its last use for aliasing: after line 10,
+# ledger may be passed whole; only the guard is still held.

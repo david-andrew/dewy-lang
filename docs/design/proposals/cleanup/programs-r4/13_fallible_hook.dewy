@@ -1,0 +1,30 @@
+# PAPER R4: ordinary error values returned from the extended existing hook.
+FlushError:type = type of error
+CloseError:type = type of error
+InvariantFailed:type = type of error
+let closed = false
+Buffered = type of [flush_fails:bool close_fails:bool
+    $__drop__
+    complete = ():>void | FlushError | CloseError | CleanupError => {
+        # A real adapter tries flush, records its error, then still closes.
+        closed = true
+        if close_fails {
+            if flush_fails return CleanupError[primary=FlushError cleanup=CloseError]
+            return CloseError
+        }
+        if flush_fails return FlushError
+    }
+]
+work = () => {
+    let output = Buffered[true true]
+    return                         # both completion errors replace success
+}
+main = () => {
+    let result = work
+    if not closed return InvariantFailed
+    return result
+}
+# No callback, no mandatory finish, and no second close on an already closed slot.
+# The unused local is retained because its hook result can fail.
+# An explicit :>void on work would be rejected with cleanup-error notes.
+# Program models the two error phases; it does not pretend to be an OS driver.

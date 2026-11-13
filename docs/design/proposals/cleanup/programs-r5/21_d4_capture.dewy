@@ -1,0 +1,54 @@
+# PAPER R5: D4's capture program with no defer; one reporter on an spsc queue.
+# Example command: dewy 21_d4_capture.dewy /index.html count=3
+import argparse
+import p"@lib/std/tasks.dewy" as task
+import net
+
+fetch = (resource:string output:Path) => {
+    let stream = net.tcp_connect("127.0.0.1" 8080) or_throw
+    net.tcp_send(stream "GET {resource} HTTP/1.0\r\nHost: localhost\r\n\r\n") or_throw
+    let response:array<uint8> = []
+    loop true {
+        let received = net.tcp_receive(stream)
+        if received is? none break
+        response.extend(received or_throw)
+    }
+    output.write_bytes(response) or_throw;
+    output
+}
+
+const Args = [
+    resource = argparse.Positional<string>(help="HTTP resource at localhost:8080")
+    count = argparse.Named<int<1 <=? value <=? 100>>(default=1 help="number of captures")
+]
+progress = (completed:SpscReceiver<Path>) => {
+    loop true {
+        let output = completed.receive
+        if output is? Closed return
+        printl"completed {output or_throw}"
+    }
+}
+main = (argv:array<string> app:BackgroundTasks) => {
+    let args = argparse.parse(Args argv about="capture HTTP responses")
+    let [completed reports] = spsc<Path 4>.split
+    let reporter = app.spawn(() => progress(reports))   # the once-run task owns reports
+    loop i in [0..args.count) {
+        let output = within(5s @fetch(args.resource p"capture-{i}.http")) or_throw
+        completed.send(output) or_throw
+    }                                  # last use of completed: dropping it closes the queue
+    reporter.wait() ?? void            # joins: every report is printed before main returns
+    if reporter.error is? error printl"reporter failed: {reporter.error}"
+}
+# Removed from D4: `defer net.tcp_close(stream)` (the stream releases itself on
+# every exit), `defer completed.close()` and the explicit `completed.close()`
+# (the sender's drop closes the queue). Rewriting D4's `@progress(completed)`
+# as `@progress(reports)` would partially apply an owner, which is unsupported;
+# the once-run lambda moves reports into the task instead.
+# Ordering: completed is a release owner, so it drops after the loop (its last
+# use), before line 39 waits. A wait placed before that last use would be the
+# existing "waits forever" error.
+# A fetch failure leaves main through or_throw: completed drops (closing the
+# queue), and main's return stops and joins the reporter as program-owned work.
+# fetch now returns output (D4's version returned write_bytes's byte count,
+# which does not fit the Path queue).
+# reporter.wait() ?? void still forwards Canceled and a CleanupError carrying it.

@@ -1,0 +1,15 @@
+# PAPER R4: retained checked, non-failing one-off defer.
+InvalidRow:type = type of error
+scan = (rows:array<string>) => {
+    defer printl"done"
+    loop row in rows {
+        if row =? "stop" return
+        if row =? "bad" return InvalidRow
+        check_cancel() or_throw
+        printl(row)
+    }
+}
+main = () => scan(["alpha" "stop" "unread"])
+# Exactly one registration, LIFO on crossing its block, including error/cancel.
+# A forgotten arbitrary done action cannot be inferred from ordinary code.
+# Standard file/socket/timer safety must never depend on this registration.

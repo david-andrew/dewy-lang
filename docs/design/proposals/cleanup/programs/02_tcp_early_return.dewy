@@ -1,0 +1,20 @@
+# PAPER: existing net verbs, with TcpStream now an owner.
+import p"@lib/std/net.dewy" as net
+
+EmptyReply:type = type of error
+fetch_header = () => {
+    let stream = net.tcp_connect("127.0.0.1" 8080) or_throw
+    net.tcp_send(stream "HEAD / HTTP/1.0\r\nHost: localhost\r\n\r\n") or_throw
+    let reply = net.tcp_receive(stream)
+    if reply is? none return EmptyReply
+    let bytes = reply or_throw
+    if bytes.length =? 0 return EmptyReply
+    return bytes
+}
+main = () => {
+    let header = fetch_header or_throw
+    printl"received {header.length} bytes"
+}
+# No release step on the two early returns, NetError or Canceled.
+# Last-use release may precede printing: printing no longer needs the socket.
+# Sending bytes does not assert that the peer acknowledged or processed them.

@@ -1,0 +1,38 @@
+# PAPER R4: bounded PCRE2 adapter on a 64-bit native target.
+# Packaging/local-helper limitation is isolated, not part of main cleanup approval.
+$extern(name='pcre2_compile_8' lib='pcre2-8')
+pcre_compile = (pattern:string length:uint64 options:uint32 code:ptr<int32> offset:ptr<uint64> context:ptr<uint8>?):>ptr<uint8>?
+$extern(name='pcre2_code_free_8' lib='pcre2-8')
+pcre_free = (code:ptr<uint8>):>void & no panics & no allocates & no blocks
+$extern(name='pcre2_pattern_info_8' lib='pcre2-8')
+pcre_info = (code:ptr<uint8> what:uint32 output:ptr<uint32>):>int32
+RegexError:type = type of error
+compile = (pattern:string) => {
+    let Code:type = type of [handle:ptr<uint8>
+        $__drop__
+        release = ():>void => $unsafe pcre_free(handle)
+    ]
+    let error_code:array<int32> = [0]
+    let error_offset:array<uint64> = [0]
+    let raw = ($unsafe pcre_compile(pattern 18446744073709551615 0
+        error_code.ptr error_offset.ptr none)) ?? return RegexError
+    let owner = Code[raw]
+    return () => {
+        let count:array<uint32> = [0]
+        let status = $unsafe pcre_info(owner.handle 4 count.ptr)
+        if not status =? 0 return RegexError
+        if count.length >? 0 return count[0]
+        return RegexError
+    }
+}
+main = () => {
+    let group_count = compile("(first|second)-([0-9]+)") or_throw
+    printl"capture groups: {group_count or_throw}"
+}
+# Nongeneric callable privately owns Code; no raw pointer/constructor escapes.
+# Current reader rejects the local nominal hook at line 11. A production binding
+# needs an approved encapsulation route; this file is not a supported package.
+# R4 does NOT make a local-nominal extension a prerequisite of ordinary cleanup.
+# The trusted no-fail free row is only for default allocator/context=none.
+# C void by itself proves neither no panic nor no wait. 4 is CAPTURECOUNT;
+# UINT64_MAX is ZERO_TERMINATED (installed pcre2.h, checked in the previous round).

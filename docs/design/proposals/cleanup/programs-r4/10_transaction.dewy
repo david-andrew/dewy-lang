@@ -1,0 +1,22 @@
+# PAPER R4: ordinary transaction owner; illustrative app API, no callback scope.
+# Its outcome-aware $__drop__ commits for successful=true and rolls back otherwise.
+import p"db.dewy" as db
+InsufficientFunds:type = type of error
+MissingAccount:type = type of error
+main = () => {
+    let tx = db.begin(p"ledger.sqlite") or_throw
+    let debit = tx.execute(
+        "UPDATE accounts SET balance=balance-? WHERE id=? AND balance>=?"
+        [50 101 50]) or_throw
+    if not debit =? 1 return InsufficientFunds
+    let credit = tx.execute(
+        "UPDATE accounts SET balance=balance+? WHERE id=?" [50 202]) or_throw
+    if not credit =? 1 return MissingAccount
+    return
+}
+# Ordinary successful return commits before reaching the caller.
+# Both early failures and cancellation roll back. Failed rollback pairs.
+# Failed commit attempts rollback if still active, preserving both errors.
+# Driver-unknown commit outcome is reported; failed return does not promise
+# no money moved. This is not global atomicity across unrelated later cleanups.
+# Acquire tx before dependent resources so they complete before its commit.

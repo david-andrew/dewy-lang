@@ -1,0 +1,27 @@
+# PAPER: channel returns distinct move-only sending and receiving endpoints.
+produce = (out:Sender<int64>) => {
+    loop n in [0..1000) {
+        if n =? 400 return       # returning closes the sole sending endpoint
+        out.send(n) or_throw
+    }
+}
+consume = (input:Receiver<int64>) => {
+    let total:int64 = 0
+    loop true {
+        let item = input.receive
+        if item is? Closed break
+        total += item or_throw
+    }
+    printl"sum: {total}"          # 79800 after draining 0..399
+}
+main = () => {
+    let [tx rx] = channel<int64>(16)
+    parallel {
+        produce(tx) or_throw
+        consume(rx) or_throw
+    }
+}
+# tx is moved into produce, not copied into the consumer or a retained root.
+# Ordinary early return is success, so the consumer drains before the join.
+# If produce fails, fail-fast parallel may cancel the consumer before draining;
+# automatic close prevents a leak but does not promise processing on failure.

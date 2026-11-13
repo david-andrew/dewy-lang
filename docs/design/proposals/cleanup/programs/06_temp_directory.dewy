@@ -1,0 +1,15 @@
+# PAPER: temp_dir owns recursive deletion, not the copied Path naming it.
+import p"@lib/std/files.dewy" as files
+
+build_archive = (root:Path) => {
+    let manifest = p"{root}/manifest.txt"
+    manifest.write_text("level=7\nassets=12\n") or_throw;
+    let result = capture(p"/usr/bin/tar" ["-cf" "package.tar" "-C" root.path "."]) or_throw
+    if not result.status =? 0 return FileError[message="archive command failed"]
+    printl"archive complete"
+}
+main = () => files.temp_dir(@build_archive timeout=2s)
+# Normal return, FileError, Canceled, and an archive child failure all attempt
+# deletion. Permission refusal/timeout returns an error naming the leftover
+# directory through a diagnostic-safe field; removal is not falsely promised.
+# The explicit 2s is cancellation-cleanup grace, not a normal build timeout.

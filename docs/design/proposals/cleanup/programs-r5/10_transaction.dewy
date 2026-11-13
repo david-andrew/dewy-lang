@@ -1,0 +1,28 @@
+# PAPER R5: rollback is the automatic cleanup; commit is the operation's explicit step.
+import p"db.dewy" as db
+InsufficientFunds:type = type of error
+Receipt:type = [from:int64 to:int64 amount:int64]
+transfer = (from:int64 to:int64 amount:int64) => {
+    let tx = db.begin(p"ledger.sqlite") or_throw
+    let debit = tx.execute(
+        "UPDATE accounts SET balance=balance-? WHERE id=? AND balance>=?"
+        [amount from amount]) or_throw
+    if not debit =? 1 return InsufficientFunds            # rolls back
+    let target = tx.find_account(to) ??<none> return none   # no such account: rolls back
+    tx.execute("UPDATE accounts SET balance=balance+? WHERE id=?" [amount target]) or_throw;
+    tx.commit() or_throw                                  # the only publication
+    return Receipt[from to amount]
+}
+main = () => {
+    let result = transfer(101 202 50)
+    if result is? none { printl"no such account; nothing changed"; return }
+    printl"moved {(result or_throw).amount}"
+}
+# tx's drop hook is the rollback, marked $__abandon__ in db.dewy (see 20).
+# Every exit that does not reach line 13 rolls back: InsufficientFunds, none,
+# a failed execute, Canceled, panic and exit. A failed rollback pairs:
+#   CleanupError[primary=InsufficientFunds cleanup=RollbackError].
+# commit consumes tx. If COMMIT fails, commit's own exit drops what it still
+# owns, which rolls back; a rollback failure pairs with CommitError there.
+# A connection lost during COMMIT gives CommitUnknown: the driver cannot say
+# whether money moved, and nothing retries.

@@ -1,0 +1,27 @@
+# PAPER R4: existing decided spsc API, not new generic Sender/Receiver types.
+produce = (out:SpscSender<int64>) => {
+    loop n in [0..1000) {
+        if n =? 400 return             # existing endpoint drop closes sending
+        out.send(n) or_throw
+    }
+}
+consume = (input:SpscReceiver<int64>) => {
+    let total:int64 = 0
+    loop true {
+        let value = input.receive
+        if value is? Closed break
+        total += value or_throw
+    }
+    printl"sum: {total}"               # 79800 after draining 0..399
+}
+main = () => {
+    let [tx rx] = spsc<int64 16>.split
+    parallel {
+        produce(tx) or_throw
+        consume(rx) or_throw
+    }
+}
+# The endpoints move; neither a consumer nor a retained shared root owns sending.
+# Normal early return drains before success. Failure may cancel the consumer
+# before processing all buffered items under the existing fail-fast policy.
+# Shared Channel/Mpmc do not gain these endpoint semantics in this proposal.

@@ -1,0 +1,41 @@
+# PAPER R5: one generic, two lifetime categories; the editor shows which per instance.
+import p"@lib/std/files.dewy" as files
+import p"@lib/std/net.dewy" as net
+Empty:type = type of error
+first_chunk = <T>(source:T label:string) => {
+    let bytes = source.read_bytes(64) or_throw            # last use of source
+    append_file("audit.log" "{label}: {bytes.length} bytes\n") or_throw;
+    if bytes.length =? 0 return Empty
+    return bytes
+}
+strict_chunk = (source:files.File):>array<uint8> | FileError | Canceled => {
+    return source.read_bytes(64) or_throw                 # rejected: see the notes
+}
+main = (argv:array<string>) => {
+    let from_net = first_chunk(net.tcp_connect("127.0.0.1" 8080) or_throw "socket") or_throw
+    let read_file = @first_chunk<files.File>
+    let from_disk = read_file(files.open(p"input.bin" 'r') or_throw "file") or_throw
+    let lock_marker = files.open(p"app.lock" 'w') or_throw   # never read: held to line 22
+    let source:files.File | net.TcpStream = if argv.length >? 0
+        (net.tcp_connect("127.0.0.1" 8080) or_throw) else (files.open(p"input.bin" 'r') or_throw)
+    let extra = first_chunk(source "either") or_throw
+    printl"{from_net.length} {from_disk.length} {extra.length}"
+}
+# Hover on source at line 5, one line per instance the program uses:
+#   first_chunk<net.TcpStream>: released after its last use (line 6), before the append.
+#   first_chunk<files.File>: held to the end of first_chunk (lines 8-9); its
+#     completion may give FileError, or CleanupError when Empty or an append
+#     failure is already leaving.
+#   first_chunk<files.File | net.TcpStream>: held, because one alternative is.
+#     A union's category is fixed by its type; narrowing it does not change it.
+# Generated docs list the same lines for each documented instance, with the
+# result union; the generic itself never guesses a category for unseen types.
+# Line 12 is rejected: "source's close can fail while read_bytes's FileError is
+#   leaving; the pair CleanupError is not in :>array<uint8> | FileError | Canceled
+#   (source owned from line 11)". Adding CleanupError, or closing explicitly and
+#   handling it, fixes it.
+# lock_marker (line 18) is held because its completion can fail; the editor
+#   offers no "remove unused binding" fix. A never-read release owner (a socket)
+#   instead warns "released right after it is made; nothing reads it".
+# read_file (line 16) has the File instance's full result type; converting it to
+#   a function type without FileError | CleanupError is an error.

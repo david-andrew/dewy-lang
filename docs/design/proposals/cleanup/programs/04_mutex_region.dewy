@@ -1,0 +1,19 @@
+# PAPER: uses existing place-returning Mutex.lock; no new guard/pin syntax.
+State:type = [balance:int64 updating:bool=false]
+
+update_ledger = (@state:State) => {
+    state.updating = true
+    defer { state.updating = false }
+    state.balance += 10
+    # This I/O must remain inside the lock even after the last ordinary read.
+    p"ledger-note.txt".write_text("ledger updated") or_throw;
+}
+main = () => {
+    let state = mutex(State[100])
+    update_ledger(@(state.lock())) or_throw
+    printl"critical operation finished"
+}
+# The call statement holds the lent place until update_ledger returns.
+# Its flag-reset defer runs before the lending guard unlocks, on errors too.
+# There is intentionally no access to state after the I/O to fake liveness.
+# Holding a lock across filesystem I/O can block; that cost is visible here.

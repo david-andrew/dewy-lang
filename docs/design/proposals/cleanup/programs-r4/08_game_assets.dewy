@@ -1,0 +1,18 @@
+# PAPER R4: illustrative application module, not a naming approval request.
+import p"game_assets.dewy" as game
+Level:type = [ground:game.Texture player:game.Texture music:game.Sound]
+load_level = () => {
+    let ground = game.load_texture(p"ground.png") or_throw
+    let player = game.load_texture(p"player.png") or_throw
+    let music = game.load_sound(p"level.ogg") or_throw
+    return Level[ground player music]
+}
+main = () => {
+    let level = load_level or_throw
+    game.run(@level) or_throw
+}
+# Returned fields move; failed third load releases the completed prefix.
+# game.run borrows the state through its real loop, not an acquisition callback.
+# These no-fail asset owners still use last-use release, with GPU fences/voices
+# retaining physical storage. Retirement bookkeeping is acquired in advance.
+# A PlayingSound observer can be discarded without truncating one-shot playback.

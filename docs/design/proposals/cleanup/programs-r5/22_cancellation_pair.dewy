@@ -1,0 +1,39 @@
+# PAPER R5: a cleanup pair that carries Canceled still behaves as cancellation.
+import p"@lib/std/files.dewy" as files
+save = (path:Path text:string) => {
+    let out = files.open(path 'w') or_throw
+    out.write_text(text) or_throw;          # buffered
+    check_cancel() or_throw                  # Ctrl-C seen here: Canceled is leaving
+}                                            # flush fails: CleanupError[primary=Canceled cleanup=FileError]
+saved_size = (path:Path) => {
+    save(path "draft") or_throw
+    path.size or_throw
+}
+stop_quietly = () => {
+    (save(p"a.txt" "draft") ??<Canceled> void) or_throw    # bare Canceled only: a pair is forwarded
+    (save(p"b.txt" "draft") ??<Canceled | CleanupError> void) or_throw   # consumes a carrying pair
+    printl"stopped"
+}
+main = () => {
+    save(p"/dev/full" "text") ?? void        # forwards a carrying pair, as or_throw would
+    printl"saved, or there was nothing to save"   # not reached after Ctrl-C
+    let sizes = [loop path in [p"x.txt" p"y.txt"] saved_size(path) ?? void]   # collector forwards it too
+    printl"{sizes.length} files saved"
+    stop_quietly() or_throw
+}
+# Where the language passes bare Canceled on (??, ?? void, ?? return/break/
+# continue, ??<E> without Canceled, collectors), it passes on a pair carrying
+# Canceled too, whole, so the cleanup failure travels with it.
+#   ??<Canceled>                 bare Canceled only
+#   ??<CleanupError>             pairs that do not carry Canceled
+#   ??<Canceled | CleanupError>  both, including a carrying pair
+#   or_throw<Canceled>           forwards bare Canceled and carrying pairs
+#   is? error / an `error` arm   false for a carrying pair, as for Canceled
+# Under $explicit_cancellation, lines 18 and 20 are errors with the existing
+# fix-it: `save(p"/dev/full" "text") or_throw<Canceled> ?? void`.
+# Hover on line 18's ?? reads "covers FileError and CleanupError without
+# Canceled; forwards Canceled and CleanupError carrying Canceled".
+# Without Ctrl-C, line 18 defaults the plain FileError from the failed flush.
+# A carrying pair reaching main reports both causes and exits with the
+# cleanup failure's code, not as a plain interrupt.
+# Line 14 leaves the task canceled: its next cancellation point gives Canceled again.

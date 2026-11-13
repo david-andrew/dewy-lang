@@ -1,0 +1,17 @@
+# PAPER R4: temp_dir returns an owner, not a callback scope or bare Path.
+import p"@lib/std/files.dewy" as files
+ArchiveError:type = type of error
+main = () => {
+    let dir = files.temp_dir or_throw
+    let manifest = p"{dir.path}/manifest.txt"
+    manifest.write_text("level=7\nassets=12\n") or_throw;
+    let result = capture(p"/usr/bin/tar"
+        ["-cf" "package.tar" "-C" (dir.path as string) "."]) or_throw
+    if not result.status =? 0 return ArchiveError
+    printl"archive complete"
+}
+# dir owns the created directory identity and its manifest temp file.
+# Normal return removes the tree; failure/Canceled also attempts removal.
+# Failed deletion changes success or pairs with ArchiveError/Canceled.
+# A copied Path may outlive the directory without retaining deletion ownership.
+# Forced kill cannot guarantee removal; a refused cleanup reports the leftover.

@@ -1,0 +1,32 @@
+# PAPER R5: a binding lifted out of a parallel block belongs to the block around it.
+import p"@lib/std/files.dewy" as files
+load_rows = (path:Path) => {
+    let input = files.open(path 'r') or_throw     # owned by load_rows: completes there
+    let text = input.read_text or_throw
+    text.split("\n")
+}
+main = () => {
+    {
+        parallel {
+            let out = files.open(p"report.txt" 'w') or_throw   # lifted: usable after the join
+            let rows = load_rows(p"rows.txt") or_throw
+        }
+        loop row in rows { out.write_text("{row}\n") or_throw; }
+    }                                  # out flushes and closes here, not when its item ends
+    printl"report written"             # runs only if out completed
+}
+# Boundaries:
+#   - a top-level let in parallel (out, rows) belongs to the block enclosing the
+#     parallel (lines 9-15): it completes there, after every later use;
+#   - an item's own locals and temporaries (input, inside load_rows) complete
+#     when that item finishes, before the join;
+#   - the cleanup edge for out is generated at line 15 before dependency
+#     analysis, so its writes are ordered after line 14's writes.
+# Traces:
+#   load_rows fails before out is open  -> the open item is canceled; out may
+#     never be initialized, and then nothing completes; main returns the failure.
+#   load_rows fails after out is open   -> the failure leaves main (an item's
+#     or_throw targets main); out completes on the way out, and a flush failure
+#     pairs: CleanupError[primary=FileNotFound cleanup=FileError].
+#   open fails                          -> load_rows is canceled; its input
+#     completes inside its own item; main returns the open failure.

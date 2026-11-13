@@ -1,0 +1,18 @@
+# PAPER R4: ordinary task-affine restoration owner, no acquisition callback.
+import p"@lib/std/terminal.dewy" as terminal
+main = () => {
+    let mode = terminal.raw(signals=true) or_throw
+    terminal.write_bytes("Press q to leave; Ctrl-C cancels.\r\n") or_throw;
+    loop true {
+        let next = terminal.read_bytes(1)
+        if next is? none return
+        let bytes = next or_throw
+        if bytes =? [113] return       # ASCII q; return from main
+    }
+}
+# mode intentionally has no later source read: its fallible restoration
+# makes it scope-bound. The exact saved mode is restored on every exit.
+# signals=true retains ISIG; fully raw Ctrl-C would be byte 3, not SIGINT.
+# A restore failure after Canceled is CleanupError; it is not normal stop.
+# The factory/flag spellings illustrate a terminal library contract, not a
+# requested new language spelling; no listener masks default cancellation.

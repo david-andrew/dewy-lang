@@ -1,0 +1,11 @@
+# Cold-read passed (3/3 readers):
+CleanupError[primary=ReadError cleanup=FlushError]
+problem.primary
+problem.cleanup
+# New in round 5, NOT yet cold-read (run ~/dev/tmp/naming-1107/ before open_decisions):
+$__abandon__ rollback = ():>void | RollbackError => ...    # a drop hook that discards unfinished work
+# Library contract sketches, not a naming ballot:
+tx.commit() or_throw
+tx.rollback() or_throw
+server.stop() or_throw
+let archive = stage.temp_file("package.tar") or_throw

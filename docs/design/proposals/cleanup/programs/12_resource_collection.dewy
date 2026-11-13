@@ -1,0 +1,29 @@
+# PAPER: owner arrays/records use the existing lifecycle composition rules.
+import p"@lib/std/net.dewy" as net
+Peers:type = [streams:array<net.TcpStream> generation:int64]
+connect_peers = () => {
+    let streams:array<net.TcpStream> = []
+    loop port in [8080 8081 8082] {
+        streams.push(net.tcp_connect("127.0.0.1" port) or_throw)
+    }
+    return Peers[streams 7]
+}
+probe = (peers:Peers) => {
+    loop stream in peers.streams {
+        net.tcp_send(stream "PING\n") or_throw
+        let reply = net.tcp_receive(stream)
+        if reply is? none break
+        let bytes = reply or_throw
+        printl"generation {peers.generation}: {bytes.length} bytes"
+    }
+}
+main = () => {
+    let peers = connect_peers or_throw
+    probe(peers) or_throw
+}
+# A failed third connection drops the completed prefix in reverse order.
+# Return moves the array and record; connect_peers does not close returned peers.
+# probe takes the record; stable iteration borrows, never copies a socket.
+# break crosses the loop body, not an implicit owner-destroying boundary.
+# Liveness may release peers after the loop; or_throw exits and releases it.
+# It is not necessary to iterate again just to close the whole record.

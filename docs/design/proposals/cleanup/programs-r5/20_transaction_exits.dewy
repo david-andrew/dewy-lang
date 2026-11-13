@@ -1,0 +1,42 @@
+# PAPER R5: every exit before commit rolls back; nothing infers permission to publish.
+import p"db.dewy" as db
+import_rows = (rows:array<string>) => {
+    loop row in rows {
+        let tx = db.begin(p"ledger.sqlite") or_throw
+        tx.execute("INSERT INTO staging(line) VALUES (?)" [row]) or_throw;
+        if row =? "#stop" { tx.rollback() or_throw; break }   # explicit: we mean it
+        if row.startswith("#") continue    # warning: continue rolls back tx after a change
+        tx.commit() or_throw
+    }
+}
+lookup_or_none = (id:int64) => {
+    let tx = db.begin(p"ledger.sqlite") or_throw
+    tx.execute("UPDATE stats SET lookups=lookups+1" []) or_throw;
+    let row = tx.find_account(id) ??<none> return none      # rolls back; no warning
+    tx.commit() or_throw
+    return row
+}
+main = (argv:array<string>) => {
+    import_rows(["a" "#note" "b" "#stop" "c"]) or_throw
+    let tx = db.begin(p"ledger.sqlite") or_throw
+    tx.execute("DELETE FROM staging" []) or_throw;
+    if (argv.get(0) ?? "") =? "--dry-run" { tx.rollback() or_throw; exit(0) }
+    if argv.length >? 1 exit(0)            # warning: exit rolls back tx after a change
+    tx.commit() or_throw
+    let found = lookup_or_none(7)
+    if found is? none { printl"no account 7"; return }
+    found or_throw;
+}
+# Exit table for an $__abandon__ owner (tx):
+#   reaches commit           -> published; commit's failure is an ordinary result
+#   return E / or_throw      -> rolled back; no warning
+#   return none              -> rolled back; no warning (absence is not success)
+#   return value, fallthrough, break, continue or exit(0) after a change
+#     and without commit     -> rolled back, with a warning naming the exit,
+#                               unless the path writes tx.rollback() first
+#   Canceled, panic          -> rolled back inside the shared grace
+#   no path commits at all   -> warning at begin: "tx is never committed"
+# A failed rollback on any of these exits is a completion failure: it replaces
+# success, pairs with a failure, and turns exit(0) into a failure status.
+# "After a change" = after any call that borrows tx mutably (execute does;
+# find_account borrows it readonly).

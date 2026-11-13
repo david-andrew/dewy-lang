@@ -1,0 +1,45 @@
+# PAPER: proposed scoped files.open overloads; ../contracts.md.
+# A write succeeds here only after the wrapper has flushed AND closed.
+# Default: copy source.bin. On Linux, --flush-error uses a tiny /dev/full copy.
+import p"@lib/std/files.dewy" as files
+import p"@lib/std/cleanup.dewy" as cleanup
+
+copy_chunks = (@input:files.File @output:files.File) => {
+    loop true {
+        let next = input.read_bytes(65536)
+        if next is? none return
+        let bytes = next or_throw
+        output.write_bytes(bytes) or_throw;
+    }
+}
+copy_into = (@output:files.File) =>
+    files.open(p"source.bin" 'read' @copy_chunks @output)
+copy_from_path = (@output:files.File @source:Path) =>
+    files.open(source 'read' @copy_chunks @output)
+copy_to_full = (root:Path) => {
+    let source = p"{root}/three-bytes.bin"
+    source.write_bytes([1 2 3]) or_throw;
+    return files.open(p"/dev/full" 'write' @copy_from_path @source)
+}
+main = (argv:array<string>) => {
+    let force_flush_error = false
+    loop arg in argv { if arg =? "--flush-error" { force_flush_error = true } }
+    let result = if force_flush_error files.temp_dir(@copy_to_full)
+                 else files.open(p"copied.bin" 'write' @copy_into)
+    match result {
+        both:cleanup.CleanupError => {
+            printl"copy and/or completion failed; both causes retained"
+            return both
+        }
+        <FileError> => { printl"copy did not complete"; return result }
+        _ => result or_throw
+    }
+}
+# The proposed buffered writer retains these 3 bytes until completion; its
+# normal buffer is at least 4096 bytes. /dev/full then fails the flush ENOSPC.
+# Run mode assumes that Linux device exists; no device is created here.
+# This is a concrete late-error scenario, not a test claimed to have run.
+# Fail source read + destination flush => CleanupError with both failures.
+# Fail flush + close => nested CleanupError. All closes still attempted once.
+# Path.copy_to(target) is the shorter existing API for an unmodified copy;
+# it gets the same flush/close error guarantee, with no callback at the call site.

@@ -1,0 +1,32 @@
+# PAPER R5: a record owning a transaction and its audit file publishes in its own order.
+import p"db.dewy" as db
+import p"@lib/std/files.dewy" as files
+Posting = type of [tx:db.Transaction audit:files.File
+    $__consume__
+    publish = () => {
+        audit.close() or_throw            # the audit line reaches the disk first
+        tx.commit() or_throw              # then the sale becomes visible
+    }
+]
+record_sale = (amount:int64) => {
+    let posting = Posting[(db.begin(p"shop.sqlite") or_throw) (files.open(p"audit.log" 'a') or_throw)]
+    posting.tx.execute("INSERT INTO sales(amount) VALUES (?)" [amount]) or_throw;
+    posting.audit.write_text("sale {amount}\n") or_throw;
+    posting.publish() or_throw
+}
+main = () => {
+    record_sale(25) or_throw
+    record_sale(40) or_throw
+    printl"two sales recorded"
+}
+# Without a commit in any drop hook, field order cannot publish early:
+#   publish never reached       -> fields drop in reverse order: audit flushes
+#                                  and closes, tx rolls back. An audit failure
+#                                  pairs with whatever is leaving.
+#   audit.close fails (line 7)  -> publish returns it; tx, still owned by
+#                                  publish, rolls back on that exit.
+#   tx.commit fails (line 8)    -> the audit line is already on disk; the sale
+#                                  is not visible. Audit-then-commit is the
+#                                  chosen order (write-ahead), not atomicity.
+# Posting has no drop hook of its own, so publish may move its fields out.
+# Two postings are independent: the second can fail after the first committed.

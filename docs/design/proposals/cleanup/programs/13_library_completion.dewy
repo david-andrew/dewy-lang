@@ -1,0 +1,28 @@
+# PAPER: result composition, in ordinary Dewy, as used by a library author.
+# No phantom syntax for catching another function's return or or_throw.
+CleanupError:type = type of error & [
+    primary:exception
+    cleanup:exception
+    message:string="cleanup also failed"
+]
+combine = <R F>(body:R finished:F) => {
+    if finished is? exception {
+        if finished is? none return body       # optional success, if admitted
+        if body is? exception {
+            if body is? none return finished   # none is not a failed body
+            return CleanupError[body finished]
+        }
+        return finished
+    }
+    return body
+}
+# An acquisition adapter uses this shape (not an implementation of an OS API):
+# let owner = acquire_raw(...) or_throw
+# let outcome = body(@owner)             # obtain value, do NOT forward yet
+# let finished = finish_with_grace(@owner timeout)  # round3 continuation rule
+# return combine(outcome finished)
+# finish disarms a descriptor before returning even when close reports error.
+# If outcome owns a new resource and finished fails, ordinary last-use cleanup
+# drops that withheld result; it must not leak just because it wasn't returned.
+# Each concrete callback's result is inferred before selecting the overload;
+# a contextual void callback type must not silently discard its failure value.

@@ -1,0 +1,20 @@
+# PAPER: illustrative db library contract; not an accepted Dewy std module.
+import p"db.dewy" as db
+InsufficientFunds:type = type of error
+MissingAccount:type = type of error
+
+transfer = (@tx:db.Transaction) => {
+    let debit = tx.execute(
+        "UPDATE accounts SET balance=balance-? WHERE id=? AND balance>=?"
+        [50 101 50]) or_throw
+    if not debit =? 1 return InsufficientFunds
+    let credit = tx.execute(
+        "UPDATE accounts SET balance=balance+? WHERE id=?" [50 202]) or_throw
+    if not credit =? 1 return MissingAccount
+}
+main = () => db.transaction(p"ledger.sqlite" @transfer)
+# Successful callback => commit before reporting success.
+# Callback error/Canceled => rollback. Rollback failure pairs with that cause.
+# Commit failure is returned; a still-active transaction is rolled back too.
+# If the driver cannot tell whether commit took effect, CommitUnknown retains
+# that uncertainty; a failed return must never promise rollback succeeded.

@@ -1,0 +1,16 @@
+# PAPER: the deliberately retained, infallible, lock-free one-off.
+InvalidRow:type = type of error
+scan = (rows:array<string>) => {
+    defer printl"done"
+    loop row in rows {
+        if row =? "stop" return
+        if row =? "bad" return InvalidRow
+        check_cancel() or_throw
+        printl(row)
+    }
+}
+main = () => scan(["alpha" "stop" "unread"])
+# Exactly one "done" on normal end, early return, InvalidRow or Canceled.
+# No mutex/guard allocation and no fresh wrapper type/function per exit action.
+# Omitting the defer cannot be inferred to be wrong. It is an optional program
+# action, never a prerequisite for releasing a standard resource safely.

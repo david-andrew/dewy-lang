@@ -1,0 +1,22 @@
+# PAPER R5: dropping a Child stops and reaps it; wait is the consuming step.
+FetchFailed:type = type of error
+BuildFailed:type = type of error
+main = () => {
+    let build = spawn(p"/usr/bin/make" ["site"]) or_throw
+    let built = build.wait or_throw                 # consumes build; gives its status
+    if not built =? 0 return BuildFailed
+    let server = spawn(p"/usr/bin/python3" ["-m" "http.server" "8080"]) or_throw
+    sleep(200ms) or_throw
+    let fetched = run(p"/usr/bin/curl" ["-sf" "http://127.0.0.1:8080/"]) or_throw
+    if not fetched =? 0 return FetchFailed          # server is stopped and reaped here
+    server.stop() or_throw                          # explicit: report a failed stop here
+}
+# Child's drop hook is $__abandon__: request stop, wait the shared grace, kill,
+# reap. Dropping never leaves a zombie or a detached process. It runs on every
+# exit: BuildFailed, FetchFailed, Ctrl-C during sleep, panic, exit.
+# A failed stop or reap is a completion failure (replaces success, or pairs).
+# Warnings: a Child that no path waits for or stops warns at spawn ("server is
+# stopped at every exit; its status is never read"). Removing line 12 gives
+# that warning; behaviour stays safe.
+# Whole-value run and capture (line 10) wait before returning, as today.
+# A child meant to outlive this function moves into its supervisor.

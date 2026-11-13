@@ -1,0 +1,39 @@
+# PAPER R5: automatic fallible block-exit cleanup; no acquisition callbacks.
+# Proposed ordinary stream API, following David's open(path 'w') sketch.
+import p"@lib/std/files.dewy" as files
+
+copy = (source:Path target:Path) => {
+    let input = files.open(source 'r') or_throw
+    let output = files.open(target 'w') or_throw
+    loop true {
+        let next = input.read_bytes(65536)
+        if next is? none return        # returns from copy; output still flushes
+        output.write_bytes(next or_throw) or_throw;
+    }
+}
+main = (argv:array<string>) => {
+    let late_error = false
+    loop arg in argv { if arg =? "--flush-error" { late_error = true } }
+    if late_error {
+        let dir = files.temp_dir or_throw
+        let source = p"{dir.path}/three-bytes.bin"
+        source.write_bytes([1 2 3]) or_throw;
+        copy(source p"/dev/full") or_throw
+        return
+    }
+    copy(p"source.bin" p"copied.bin") or_throw
+}
+# With --flush-error on Linux, assume /dev/full exists and source setup/open
+# succeeds. The three bytes fit the ordinary output buffer (>=4096 bytes).
+# EOF requests a successful return; late flush gets ENOSPC/FileError instead.
+# Failed input read + failed output flush => CleanupError retaining both.
+# Failed flush + failed close are retained too; close is still attempted.
+# Existing source.copy_to(target) is shorter when no streaming transform is needed.
+# This is a paper trace, not an executed device test or invented fault-injection API.
+# R5 editor contract (cold-read lesson): hover on copy shows
+#   copy :> void | FileError | Canceled | CleanupError
+#     FileError  - open, read, write, or output's flush/close at the line 10 return
+#                  (returned as itself when nothing failed earlier)
+#     CleanupError - an earlier failure was already leaving and output's
+#                  completion failed too (.primary, .cleanup)
+# and an inlay at line 10 reads "output completes here: may give FileError".

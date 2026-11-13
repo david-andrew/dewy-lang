@@ -1,0 +1,25 @@
+# PAPER: library Tasks and once-run spawned body, not removed spawn syntax.
+import p"@lib/std/tasks.dewy" as task
+import p"@lib/std/net.dewy" as net
+
+read_forever = (stream:net.TcpStream) => {
+    loop true {
+        let next = net.tcp_receive(stream)
+        if next is? none return
+        let bytes = next or_throw
+        printl"received {bytes.length} bytes"
+    }
+}
+exercise = (group:Tasks) => {
+    let stream = net.tcp_connect("127.0.0.1" 8080) or_throw
+    let reader = group.spawn(() => read_forever(stream))
+    sleep(50ms) or_throw
+    reader.stop()
+    (reader.wait() ??<Canceled> void) or_throw
+    check_cancel() or_throw
+}
+main = () => task.tasks(@exercise)
+# The once-run task owns stream, including if stopped before its body starts.
+# stop does not release the descriptor while tcp_receive is using it.
+# wait joins cleanup; the task owns it until then. Explicitly consume the
+# expected child's Canceled, then still check for cancellation of this caller.

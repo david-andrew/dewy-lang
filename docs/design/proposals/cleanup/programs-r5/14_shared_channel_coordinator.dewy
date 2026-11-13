@@ -1,0 +1,29 @@
+# PAPER R5 (unchanged from R4): keep the decided shared Channel API; expose the remaining ceremony.
+produce = (q:Channel<int64> start:int64) => {
+    loop n in [0..10) { q.send(start+n) or_throw }
+}
+coordinate = (q:Channel<int64>) => {
+    defer q.close()                 # one close coordinator, after inner join
+    parallel {
+        produce(q 0) or_throw
+        produce(q 100) or_throw
+    }
+}
+consume = (q:Channel<int64>) => {
+    loop true {
+        let item = q.receive
+        if item is? Closed return
+        printl"{item or_throw}"
+    }
+}
+main = () => {
+    let q = channel<int64>(4)
+    parallel {
+        coordinate(q) or_throw
+        consume(q) or_throw
+    }
+}
+# Every handle can send, including the waiting receiver's. Last total drop
+# cannot implement end-of-input; the consumer keeps q alive while awaiting Closed.
+# Removing line 6 can hang. Existing checks diagnose what they can prove, not
+# every dynamic channel-identity graph. Automatic shared closure remains optional.

@@ -1,0 +1,22 @@
+# PAPER R4: the callback below is actual spawned task code, not acquisition scope.
+import p"@lib/std/net.dewy" as net
+main = (app:BackgroundTasks) => {
+    let stream = net.tcp_connect("127.0.0.1" 8080) or_throw
+    let reader = app.spawn(() => {
+        loop true {
+            let next = net.tcp_receive(stream)
+            if next is? none return
+            let bytes = next or_throw
+            printl"received {bytes.length} bytes"
+        }
+    })
+    sleep(50ms) or_throw
+    reader.stop()
+    (reader.wait() ??<Canceled> void) or_throw
+    check_cancel() or_throw
+}
+# Once-run task owns stream, even if canceled before body entry. Its result
+# exists only after captures/local cleanup; wait joins that real cleanup.
+# The caller consumes expected bare child Canceled, then checks its own stop.
+# A CleanupError is not matched by ??<Canceled> and therefore is not swallowed.
+# Function boundaries are real here; no enclosing return is promised in spawn.

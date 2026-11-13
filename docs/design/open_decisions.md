@@ -22,10 +22,12 @@
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
+  - D40 Q1–Q3, Q5: cleanup failures as results, owners held to block end, failure pairs, `defer` narrowed.
 - **(b) New syntax or surface:**
   - D4 Q4: signals as event sources handled in parallel (`signals.ctrl_c`, `.observe`), no new syntax;
   - D4 Q19: how a module header is told apart from a setting that prefixes the first declaration;
   - D4 Q18 (optional): `memory_left`;
+  - D40 Q4: `$__abandon__` for owners whose drop throws work away;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D11 Q2: `check=` or `valid_if=`;
   - D11 Q3: `__read__` or `$reader`;
@@ -310,6 +312,91 @@ main = () => { let r = repl; r.run() or_throw }
 ```
 
 Dogfooded; names read cold. Full rules: `proposals/signals/summary.md`, `proposals/runtime-settings/summary.md`, `proposals/concurrency/unified/proposal-v5.md`, `proposals/concurrency/unified/select-v6-round11.md`; settings follow the Q6/Q19 updates above.
+
+---
+
+### D40. Cleanup: values clean themselves up; `defer` only for one-off actions
+
+Resources clean up on every exit, with no second line to remember: files, temp entries, terminal modes, transactions, child processes and lock guards finish at the end of their block, and a cleanup failure becomes the function's result. Cleanup never publishes: a transaction rolls back unless the program commits. `defer` stays only for one-off actions that can't fail. No new syntax; `return`, `break` and `or_throw` act on your function as usual. If you accept, D4's three `defer`s go away.
+
+#### Q1 (a). A cleanup failure is the function's result
+
+```dewy
+save = () => {
+    let out = open(p"data.bin" 'w') or_throw
+    out.write_bytes(bytes) or_throw;
+}   # out flushes and closes here; a flush failure is save's result
+```
+
+Let `$__drop__` hooks fail, so the final flush or close of a file reaches the caller? Today a drop hook can't fail, so `defer out.close()` would lose this error. A lone cleanup failure is returned as itself, and hover on `save` says which line it comes from.
+
+**Rec:** yes; reversible.
+
+#### Q2 (a). Which owners last to the end of their block
+
+```dewy
+loop amount in amounts {
+    let book = @(ledger.lock())
+    if book.balance + amount <? 0 break        # unlocks, then leaves the loop
+    book.balance += amount                     # last use of book
+    append_file(journal "{amount}\n") or_throw;   # still locked
+}                                              # unlocks at the end of each iteration
+```
+
+Today a guard is released at its last use, so the journal write above would run unlocked, and the fix (moving the region into a helper) loses the `break`. Which values should run their cleanup at the end of their block (braces shorten it)?
+
+- (a) **Every value with a cleanup hook** (sockets and tickers too). Plain memory is still freed at its last use, which no program can see. This matches Python's `with`, Rust and Swift. A socket stays open until its block ends.
+- (b) Only lock guards and owners whose cleanup can fail; sockets, tickers and textures still release at their last use. Generic code then releases at two different times depending on the type, which the regrade scored 2 for obviousness.
+
+**Rec:** (a); reversible. Either one changes the decided loan rule (a place's aliasing limits still end at its last use).
+
+#### Q3 (a). Two failures at once
+
+```dewy
+match save() {
+    both:CleanupError => printl"{both.primary}, then {both.cleanup}"
+    problem:error => printl"{problem}"
+    _ => printl"saved"
+}
+```
+
+When a function is already failing and a cleanup also fails, return both as `CleanupError` with `.primary` (the first failure) and `.cleanup`? If either one is `Canceled`, the pair still counts as cancellation: `??` and `?? void` pass it on, and only `??<Canceled | CleanupError>` consumes it.
+
+**Rec:** yes; reversible. Names read cold correctly.
+
+#### Q4 (b). Owners whose drop throws the work away
+
+```dewy
+let tx = db.begin(p"ledger.sqlite") or_throw
+tx.execute(debit) or_throw;
+let target = tx.find_account(to) ??<none> return none   # rolls back
+tx.execute(credit(target)) or_throw;
+tx.commit() or_throw                     # the only way anything is published
+```
+
+A library marks such a hook `$__abandon__` instead of `$__drop__`: dropping the value rolls back (a transaction) or stops and reaps (a child process), and the work takes effect only through an explicit `commit`, `wait` or `stop()`. The compiler warns when no path commits, or when a success-shaped exit abandons changes. Use `$__abandon__` for this marker?
+
+**Rec:** yes; reversible. Read cold correctly; `$__discard__` read the same and is the alternative.
+
+#### Q5 (a). `defer` narrowed to one-off actions
+
+```dewy
+scan = (rows:array<string>) => {
+    defer printl"done"                    # runs once on every way out
+    loop row in rows { if row =? "bad" return Invalid }
+}
+```
+
+Keep `defer`, but only for actions that can't fail and don't `return`, `break` or `or_throw`? Library resources never need it. This replaces batch 7's "`defer` stays for now".
+
+**Rec:** yes; reversible.
+
+#### Other details
+
+- Shared `channel` and `mpmc` keep their explicit `close()`; a single-producer queue (`spsc`) closes when its sender is dropped. A closing rule for shared channels would be a separate design.
+- The 100 ms cleanup grace applies only after cancellation; normal-exit cleanup has no deadline. A child process's drop bounds its own wait for the child to stop, then kills it.
+- Known limits: a close that fails on `break` or `continue` returns from the function; a `CleanupError` carrying `Canceled` can be handled in three ways (graded 2 for obviousness). A safe wrapper for a C library still needs a separate encapsulation decision.
+- Dogfooded: 24 programs over five rounds, two independent reviews and regrades, no open must-fix. Full rules: `proposals/cleanup/summary.md` and `amendments.md`.
 
 ---
 

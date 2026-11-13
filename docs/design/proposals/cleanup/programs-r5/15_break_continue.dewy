@@ -1,0 +1,18 @@
+# PAPER R5 (unchanged from R4): ordinary loop jumps crossing fallible-owner scopes.
+import p"@lib/std/files.dewy" as files
+process = (paths:array<Path>) => {
+    loop path in paths {
+        let input = files.open(path 'r') or_throw
+        let next = input.read_bytes(16)
+        if next is? none continue
+        let bytes = next or_throw
+        if bytes =? [0] break
+        printl"prefix bytes accepted: {bytes.length}"
+    }
+    printl"loop finished"           # skipped if a close fails on break/continue
+}
+main = () => process([p"first.bin" p"second.bin"])
+# Successful cleanup takes the requested continue/break.
+# Failed cleanup returns its error from process; it does not run line 12.
+# To recover locally instead, consume input.close and handle its ordinary result
+# before issuing the jump. Close is optional, not a mandatory normal-path step.

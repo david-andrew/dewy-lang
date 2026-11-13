@@ -1,0 +1,17 @@
+# PAPER R4: existing lending call for one protected operation.
+State:type = [balance:int64 updating:bool=false]
+update_ledger = (@state:State) => {
+    state.updating = true
+    defer { state.updating = false }
+    state.balance += 10
+    p"ledger-note.txt".write_text("ledger updated") or_throw;
+}
+main = () => {
+    let state = mutex(State[100])
+    update_ledger(@(state.lock())) or_throw
+    printl"critical operation finished"
+}
+# The whole lending-call statement holds the acquisition, including tail I/O.
+# The helper's one-off flag-reset defer runs before the lending guard unlocks.
+# A let-place's final field use would not protect the later independent I/O.
+# No acquisition callback, new lock helper, pin annotation or guard type.

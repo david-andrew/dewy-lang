@@ -1,0 +1,18 @@
+# PAPER: proposed terminal.raw acquisition callback; standard task cancellation.
+import p"@lib/std/terminal.dewy" as terminal
+
+read_keys = (@tty:terminal.Terminal) => {
+    tty.write_bytes("Press q to exit; Ctrl-C cancels.\r\n") or_throw;
+    loop true {
+        let next = tty.read_bytes(1)
+        if next is? none return
+        let bytes = next or_throw
+        if bytes =? [113] return             # ASCII q
+    }
+}
+main = () => terminal.raw(@read_keys signals=true)
+# signals=true explicitly retains terminal signal generation. Fully raw POSIX
+# mode would instead deliver Ctrl-C as byte 3; do not mistake it for SIGINT.
+# No signal listener masks root cancellation. Canceled reaches the callback;
+# raw restores the exact saved settings under its finalization shield.
+# A restore error is returned, paired with Canceled if both happened.
