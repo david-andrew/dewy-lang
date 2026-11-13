@@ -1,0 +1,19 @@
+# An owner bound in `parallel ( ... )` belongs to the enclosing block: it lives past the
+# block, can be moved there, and drops once, at the enclosing block's end.
+let drops:int64=0
+Res=type of [n:int64
+    $__drop__=():>void=>{drops+=1}
+]
+consume = (r:Res):>int64 => r.n
+main = () => {
+    {
+        parallel (
+            let a = Res[1]
+            let b = Res[2]
+        )
+        printl"after block: {a.n} {b.n}, drops {drops}"
+        let moved = a
+        printl"moved {consume(moved)}"
+    }
+    printl"after scope: drops {drops}"
+}

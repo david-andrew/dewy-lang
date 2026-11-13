@@ -1,0 +1,14 @@
+# modes: native native-release
+# The decided Ctrl-C shape: the work and a listener in one block; the listener closes once
+# the work is done.
+import p"@lib/std/signals.dewy" as signals
+work = ():>void => {
+    loop step in [1..3] { printl"step {step}" }
+}
+main = () => {
+    parallel {
+        work()
+        loop _ in signals.ctrl_c { printl"stopping" }
+    }
+    printl"joined"
+}

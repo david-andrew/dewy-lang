@@ -108,6 +108,15 @@ pushed_type=(nm:string):>string=>$unsafe {
     }
     ""
 }
+# (a declaration at the top of a `parallel { ... }` block, marked 8192 by the reader)
+parallel_braced_decl=(nm:HintWord at:HintWord):>bool=>$unsafe {
+    let n=nodes.length - 1
+    loop n >? 0 {
+        if nodes.ptr[n].pos =? at and nodes.ptr[n].kind =? 'vardecl' and HintWord(nodes.ptr[n].name) =? nm and HintWord(nodes.ptr[n].flags) & 8192 not=? 0 {return true}
+        n -= 1
+    }
+    false
+}
 # a variable of this name was declared earlier in the function, in a block that has ended
 gone_local_hint=(nm:HintWord at:HintWord):>string=>$unsafe {
     if cx <? 0 {return ""}
@@ -116,6 +125,7 @@ gone_local_hint=(nm:HintWord at:HintWord):>string=>$unsafe {
     loop l >? 0 {
         if HintWord(locals.ptr[l].name) =? nm and HintWord(locals.ptr[l].owner) =? inst and locals.ptr[l].pos <? at and pos_file(locals.ptr[l].pos) =? pos_file(at) {
             let [ln c]=line_col(locals.ptr[l].pos)
+            if parallel_braced_decl(nm locals.ptr[l].pos) {return " (the '{name_of(nm)}' made on line {ln} is inside `parallel \{ ... }`, whose names stay inside; write `parallel ( ... )` to use it after the block)"}
             return " (the '{name_of(nm)}' made on line {ln} is inside a block that has ended; give it a value before that block to use it here)"
         }
         l -= 1

@@ -709,6 +709,11 @@ fact_drop_block=(n:ForgetWord):>array<int64>=>$unsafe {
     let known=fact_drop_sites.get(key)
     if known not=? none {return known}
     let out:array<int64>=[0]
+    if fact_drop_block_into(n @out) {fact_drop_sites[key]=out}
+    out
+}
+# (an unscoped `( ... )` block's declarations are its enclosing block's, NF_UNSCOPED 4)
+fact_drop_block_into=(n:ForgetWord @out:array<int64>):>bool=>$unsafe {
     let settled=true
     loop j in [0..nkids(n)) {
         let c=kid(n j)
@@ -718,9 +723,9 @@ fact_drop_block=(n:ForgetWord):>array<int64>=>$unsafe {
             if ownership_fact_type(t) {settled=fact_drop_add(@out t) and settled}
         }
         else if k =? 'defer_' {settled=fact_drop_scan(ForgetWord(nodes.ptr[c].a) 0 @out false) and settled}
+        else if k =? 'block' and has_flag(c 4) {settled=fact_drop_block_into(c @out) and settled}
     }
-    if settled {fact_drop_sites[key]=out}
-    out
+    settled
 }
 # Everything a function's exits may drop: every owner its body declares,
 # takes, copies or replaces, and its owned parameters. O(body nodes), once.

@@ -181,6 +181,8 @@ bk_block = (b: int, expected: int, want_value: bool) -> int:
         bk_bind_next[0] = 0
     counted = mode == 2 or mode == 6
     transparent = bk_nodes[0][b].aux == 5 and not want_value
+    # (`( ... )`, NF_UNSCOPED 4: its names stay visible after it, value or not)
+    unscoped = bk_flag(b, 4)
     n0 = int(bk_nodes[0][b].nlist)
     i = 0
     loop i < n0:
@@ -219,5 +221,5 @@ bk_block = (b: int, expected: int, want_value: bool) -> int:
     if mode >= 0: bk_discarding[0] = was_discarding
     bk_nodes[0][b].type = i32(result)
     if transparent: bk_nodes[0][b].aux = 5
-    else if bk_scopes[0].names.len() != mark: scope_reset(mark)
+    else if not unscoped and bk_scopes[0].names.len() != mark: scope_reset(mark)
     result

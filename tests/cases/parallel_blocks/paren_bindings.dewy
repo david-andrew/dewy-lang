@@ -1,0 +1,11 @@
+# `parallel ( ... )`: its bindings are used after the block (decisions.md, batch 9).
+load_config = (name:string):>string => "config:{name}"
+load_count = (n:int):>int => n * 3
+main = () => {
+    parallel (
+        let config = load_config("game")
+        let count = load_count(14)
+        printl"loading"
+    )
+    printl"{config} {count}"
+}

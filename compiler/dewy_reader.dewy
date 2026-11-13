@@ -49,6 +49,8 @@ const NF_COMPREHENSION:int64=67108864
 const NF_DISCARD:int64=NF_SQUOTE
 const NF_EXCL_FIRST:int64=536870912
 const NF_EXTERN:int64=4
+# (a block written `( ... )`: its names are visible after it)
+const NF_UNSCOPED:int64=NF_EXTERN
 const NF_GENERIC:int64=64
 const NF_INCLUSIVE:int64=2
 const NF_INDEX_CAPTURED:int64=268435456
@@ -1572,9 +1574,15 @@ rd_dc_body_metatag=(@reader_ctx:ParserContext @reader_nodes:array<Node> @stateme
 }
 
 rd_dc_body_read=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe {
+    rd_dc_body_within(@reader_ctx @reader_nodes 'lbrace' 'rbrace')
+}
+
+# A body between open and close: `{ ... }` scoped, or `( ... )`, a block whose names are
+# visible after it (decisions.md, batch 9); without open, the statement alone.
+rd_dc_body_within=(@reader_ctx:ParserContext @reader_nodes:array<Node> open:DewyToken close:DewyToken):>int64=>$unsafe {
     reader_ctx.reader.dc_top_level = false
     # (a braced body is a block of statements, an unbraced one the statement alone: dn_expr's depth)
-    let braced:bool=(rd_dn_peek(@reader_ctx) =? 'lbrace')
+    let braced:bool=(rd_dn_peek(@reader_ctx) =? open)
     if braced {
         reader_ctx.depth = (int64<overflow='wrap'>(reader_ctx.depth) + 1)
     }
@@ -1587,12 +1595,12 @@ rd_dc_body_read=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
     let statements:array<int64>=[]
     let settings:int64=reader_ctx.reader.dc_settings.length
     loop true {
-        if (braced and rd_dn_accept(@reader_ctx 'rbrace')) {
+        if (braced and rd_dn_accept(@reader_ctx close)) {
             break
         }
         if (reader_ctx.tokens[reader_ctx.at].kind =? 'eof') {
             if (braced and reader_ctx.flags.report_now) {
-                rd_dc_unclosed(@reader_ctx pos "}");
+                rd_dc_unclosed(@reader_ctx pos if close =? 'rparen' {")"} else {"}"});
             }
             return 0
         }
@@ -1703,7 +1711,7 @@ rd_dc_body_read=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$u
                 reader_nodes[statement].a = int32<overflow='wrap'>(value)
             }
         }
-        statements.push(statement);
+        statements.push(rd_dc_unscoped_binding(@reader_ctx @reader_nodes statement));
         if (not braced) {
             break
         }
@@ -3761,6 +3769,22 @@ rd_dc_expr=(@reader_ctx:ParserContext @reader_nodes:array<Node> minimum:int64):>
             juxt_head = false
             continue
         }
+        # `my_fn{a b}`: the call `my_fn(a b)`, unidiomatic (decisions.md, batch 9)
+        if (not token.space) and op =? 'lbrace' and minimum <=? 170 and left not=? group and (reader_nodes[left].kind =? 'ident' or reader_nodes[left].kind =? 'field') {
+            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+            let n:int64=node_mk(@reader_nodes 'call' pos)
+            reader_nodes[n].a = int32<overflow='wrap'>(left)
+            if (reader_nodes[left].kind =? 'field') {
+                rd_add_flag(@reader_nodes int64<overflow='wrap'>(reader_nodes[left].a) NF_MUT);
+            }
+            if (not rd_dc_arguments(@reader_ctx @reader_nodes n 'rbrace')) {
+                return 0
+            }
+            left = n
+            last_call = n
+            juxt_head = false
+            continue
+        }
         # `xs[i]`, `Point[x y]`, `Point[x=1 y=2]`; ranges, `end`, `new` and
         # `set[...]` are left unread (dc_unread).
         if (((not token.space) and (op =? 'lbrack')) and (minimum <=? 170)) {
@@ -5559,6 +5583,11 @@ rd_dc_granted=(@reader_ctx:ParserContext pos:int64 word:string):>bool=>$unsafe {
 }
 
 rd_dc_group=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64):>int64=>$unsafe {
+    # (`( let a = 1 ... )`: a block whose names are visible after it, dc_paren_block)
+    if rd_dc_paren_block_next(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) - 1)) {
+        reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) - 1)
+        return rd_dc_paren_block(@reader_ctx @reader_nodes)
+    }
     # (`(a b)`: several values, dw_values; each may be spread, `(xs... 1)`)
     let saved_spread:int64=reader_ctx.reader.dc_spread_depth
     reader_ctx.reader.dc_spread_depth = (int64<overflow='wrap'>(reader_ctx.depth) + 1)
@@ -5596,6 +5625,58 @@ rd_dc_group=(@reader_ctx:ParserContext @reader_nodes:array<Node> pos:int64):>int
     reader_nodes[values].aux = int32<overflow='wrap'>(TUPLE_VALUES)
     node_set_list(@reader_nodes @reader_ctx.stores.lists[0] values items);
     return values
+}
+
+# (the `(` here closes before no `in`: a block, not a loop's parenthesized binding)
+rd_dc_paren_not_header=(@reader_ctx:ParserContext):>bool=>$unsafe {
+    let close:int64=rd_dc_closing(@reader_ctx reader_ctx.at)
+    close >=? 0 and reader_ctx.tokens[int64<overflow='wrap'>(close) + 1].symbol not=? 'kw_in'
+}
+
+# Whether the `(` at `at` opens a block of statements: a declaration directly inside it, the
+# first thing in it or after a line break (scanned only then; `(a b)` stays several values).
+rd_dc_paren_block_next=(@reader_ctx:ParserContext at:int64):>bool=>$unsafe {
+    let first:DewyLexeme=reader_ctx.tokens[int64<overflow='wrap'>(at) + 1]
+    if first.symbol =? 'kw_let' or first.symbol =? 'kw_const' {return true}
+    if not first.newline {return false}
+    let close:int64=rd_dc_closing(@reader_ctx at)
+    if close <? 0 {return false}
+    let depth:int64=0
+    let k:int64=int64<overflow='wrap'>(at) + 1
+    loop k <? close {
+        let sym:DewyToken=reader_ctx.tokens[k].symbol
+        if sym =? 'lparen' or sym =? 'lbrack' or sym =? 'lbrace' {depth = int64<overflow='wrap'>(depth) + 1}
+        else if sym =? 'rparen' or sym =? 'rbrack' or sym =? 'rbrace' {depth = int64<overflow='wrap'>(depth) - 1}
+        else if depth =? 0 and (sym =? 'kw_let' or sym =? 'kw_const') {return true}
+        k = int64<overflow='wrap'>(k) + 1
+    }
+    false
+}
+
+# `( ... )` at its `(`: a block whose names are visible after it, as if written in the
+# enclosing block (aux 5, NF_UNSCOPED); `{ ... }` keeps them inside.
+rd_dc_paren_block=(@reader_ctx:ParserContext @reader_nodes:array<Node>):>int64=>$unsafe {
+    let n:int64=rd_dc_body_within(@reader_ctx @reader_nodes 'lparen' 'rparen')
+    if n =? 0 {return 0}
+    reader_nodes[n].aux = 5
+    rd_add_flag(@reader_nodes n NF_UNSCOPED);
+    n
+}
+
+# `let v = ( ... e )`: the block's statements, then `let v = e`, all unscoped, so what the
+# block declares lives as long as v's own scope does; any other statement as it is.
+rd_dc_unscoped_binding=(@reader_ctx:ParserContext @reader_nodes:array<Node> statement:int64):>int64=>$unsafe {
+    if statement =? 0 or reader_nodes[statement].kind not=? 'vardecl' {return statement}
+    let block:int64=int64(reader_nodes[statement].b)
+    if block =? 0 or reader_nodes[block].kind not=? 'block' or not rd_has_flag(@reader_nodes block NF_UNSCOPED) {return statement}
+    let statements:array<int64>=node_kids(@reader_nodes @reader_ctx.stores.lists[0] block)
+    if statements.length =? 0 {return statement}
+    let last:int64=statements[statements.length - 1]
+    if reader_nodes[last].kind not=? 'exprstmt' {return statement}
+    reader_nodes[statement].b = reader_nodes[last].a
+    statements[statements.length - 1] = statement
+    node_set_list(@reader_nodes @reader_ctx.stores.lists[0] block statements);
+    block
 }
 
 # `let (a) = (1)`: one name in parentheses, `)` at close (dw_declare's mistake, should nothing else
@@ -7759,6 +7840,11 @@ rd_dc_pack=(@reader_ctx:ParserContext @reader_nodes:array<Node> result:int64):>i
 # (`[parallel x in xs f(x)]`): the region dw_parallel makes. A form it reports is left unread
 # (dc_unread).
 rd_dc_parallel=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexeme collect:bool):>int64=>$unsafe {
+    # (`parallel { ... }`, `parallel ( ... )`: a block, dc_parallel_block; `parallel (a b) in ...`
+    # is a loop's header)
+    if not collect and (rd_dn_peek(@reader_ctx) =? 'lbrace' or (rd_dn_peek(@reader_ctx) =? 'lparen' and rd_dc_paren_not_header(@reader_ctx))) {
+        return rd_dc_parallel_block(@reader_ctx @reader_nodes token)
+    }
     let pos:int64=rd_mkpos(reader_ctx.file token.start)
     let mutable:bool=rd_dn_accept(@reader_ctx 'at')
     let binder:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
@@ -7835,6 +7921,121 @@ rd_dc_parallel=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLe
     reader_nodes[statement].a = int32<overflow='wrap'>(region)
     rd_add_flag(@reader_nodes statement NF_STMT);
     statement
+}
+
+# `parallel { ... }` and `parallel ( ... )` (decisions.md, D4 and batch 9): each top-level
+# statement is an item. A statement that declares nothing, writes no name it does not declare,
+# and neither leaves the block nor forwards a failure runs as a task of the block's group,
+# beside the others (its own transfer checks apply); every other item runs on the block's own
+# task in source order, after the items before it started. The block joins its tasks at its
+# end. `( ... )`'s names are visible after it; `{ ... }`'s stay inside (their declarations
+# marked 8192 for the misuse hint). The web target runs every item in order.
+rd_dc_parallel_block=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexeme):>int64=>$unsafe {
+    let pos:int64=rd_mkpos(reader_ctx.file token.start)
+    let paren:bool=rd_dn_peek(@reader_ctx) =? 'lparen'
+    let serial:int64=(int64<overflow='wrap'>((int64<overflow='wrap'>(int64(1)) << 32)) + int64<overflow='wrap'>(reader_nodes.length))
+    let name:string="$group{serial}"
+    let saved_unread:bool=reader_ctx.flags.unread_here
+    reader_ctx.flags.unread_here = false
+    let body:int64=if paren {rd_dc_body_within(@reader_ctx @reader_nodes 'lparen' 'rparen')} else {rd_dc_body_within(@reader_ctx @reader_nodes 'lbrace' 'rbrace')}
+    reader_ctx.flags.unread_here = saved_unread
+    if body =? 0 or not rd_dc_flow_ends(@reader_ctx) {return 0}
+    let items:array<int64>=node_kids(@reader_nodes @reader_ctx.stores.lists[0] body)
+    if not paren {
+        loop item in items {
+            if reader_nodes[item].kind =? 'vardecl' {rd_add_flag(@reader_nodes item 8192);}
+        }
+    }
+    if reader_ctx.stores.host[0].g_target_wasm() {
+        if paren {
+            reader_nodes[body].aux = 5
+            rd_add_flag(@reader_nodes body NF_UNSCOPED);
+        }
+        return body
+    }
+    let statements:array<int64>=[]
+    loop item in items {
+        if rd_dc_parallel_detached(@reader_ctx @reader_nodes item) {
+            let value:int64=int64(reader_nodes[item].a)
+            if reader_nodes[item].kind not=? 'exprstmt' {
+                value = node_mk(@reader_nodes 'block' reader_nodes[item].pos)
+                node_set_list(@reader_nodes @reader_ctx.stores.lists[0] value [item]);
+            }
+            let ipos:int64=reader_nodes[item].pos
+            let spawned:int64=reader_ctx.stores.host[0].dw_task_spawn(rd_bc_ident(@reader_ctx @reader_nodes name ipos) value ipos)
+            let statement:int64=node_mk(@reader_nodes 'exprstmt' ipos)
+            reader_nodes[statement].a = int32<overflow='wrap'>(spawned)
+            statements.push(statement);
+        }
+        else {statements.push(item);}
+    }
+    node_set_list(@reader_nodes @reader_ctx.stores.lists[0] body statements);
+    let group:int64=reader_ctx.stores.host[0].dw_task_group(pos name serial body true)
+    # (the group's block takes the body's node, which its settings' scopes name)
+    let at:int64=reader_nodes[body].pos
+    reader_nodes[body] = reader_nodes[group]
+    reader_nodes[body].pos = at
+    reader_nodes[body].aux = if paren {int32(5)} else {int32(0)}
+    if paren {rd_add_flag(@reader_nodes body NF_UNSCOPED);}
+    body
+}
+
+# Whether a parallel block's item may run as a task (dc_parallel_block): a statement declaring
+# nothing at its top, with no exit, `or_throw`, spawn, or write to a name it does not declare.
+rd_dc_parallel_detached=(@reader_ctx:ParserContext @reader_nodes:array<Node> item:int64):>bool=>$unsafe {
+    let k:NK=reader_nodes[item].kind
+    if k =? 'vardecl' or k =? 'const_' or k =? 'fn_' or k =? 'defer_' or k =? 'when_' {return false}
+    # (`f();`: a discarded value, the only update a detached item may be)
+    if k =? 'assign' and (reader_nodes[item].op not=? 47 or reader_nodes[int64(reader_nodes[item].a)].kind not=? 'hole') {return false}
+    if k =? 'exprstmt' {
+        let value:int64=int64(reader_nodes[item].a)
+        if value =? 0 or (reader_nodes[value].kind =? 'call' and reader_nodes[value].aux2 =? 17) {return false}
+    }
+    if not rd_dc_parallel_exits(@reader_ctx @reader_nodes item 0) {return false}
+    let declared:array<int64>=[]
+    rd_dc_parallel_declared(@reader_ctx @reader_nodes item @declared);
+    rd_dc_parallel_writes_own(@reader_ctx @reader_nodes item @declared)
+}
+
+# The names declared anywhere in n outside nested functions.
+rd_dc_parallel_declared=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 @declared:array<int64>):>void=>$unsafe {
+    if n <=? 0 {return}
+    let k:NK=reader_nodes[n].kind
+    if k =? 'lambda' or k =? 'fn_' {return}
+    if k =? 'vardecl' or k =? 'param' {declared.push(int64(reader_nodes[n].name));}
+    rd_dc_parallel_declared(@reader_ctx @reader_nodes int64(reader_nodes[n].a) @declared);
+    rd_dc_parallel_declared(@reader_ctx @reader_nodes int64(reader_nodes[n].b) @declared);
+    rd_dc_parallel_declared(@reader_ctx @reader_nodes int64(reader_nodes[n].c) @declared);
+    loop child in node_kids(@reader_nodes @reader_ctx.stores.lists[0] n) {rd_dc_parallel_declared(@reader_ctx @reader_nodes child @declared);}
+    loop child in node_kids2(@reader_nodes @reader_ctx.stores.lists[0] n) {rd_dc_parallel_declared(@reader_ctx @reader_nodes child @declared);}
+}
+
+# Whether n writes only names it declared (a parallel item's own): no `or_throw`, and every
+# update's or `@` place's root among declared.
+rd_dc_parallel_writes_own=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64 @declared:array<int64>):>bool=>$unsafe {
+    if n <=? 0 {return true}
+    let k:NK=reader_nodes[n].kind
+    if k =? 'lambda' or k =? 'fn_' {return true}
+    # (`( ... )` declares into the item's enclosing block, `parallel ( ... )` among them)
+    if k =? 'propagate' or (k =? 'block' and rd_has_flag(@reader_nodes n NF_UNSCOPED)) {return false}
+    if k =? 'call' and reader_nodes[n].aux2 =? 17 {return false}
+    let target:int64=0
+    if k =? 'assign' and reader_nodes[int64(reader_nodes[n].a)].kind not=? 'hole' {target = int64(reader_nodes[n].a)}
+    if rd_has_flag(@reader_nodes n NF_AT) {target = n}
+    if target not=? 0 {
+        loop reader_nodes[target].kind =? 'field' or reader_nodes[target].kind =? 'index' or reader_nodes[target].kind =? 'addr' {target = int64(reader_nodes[target].a)}
+        if reader_nodes[target].kind not=? 'ident' or not declared.contains(int64(reader_nodes[target].name)) {return false}
+    }
+    if not rd_dc_parallel_writes_own(@reader_ctx @reader_nodes int64(reader_nodes[n].a) @declared) {return false}
+    if not rd_dc_parallel_writes_own(@reader_ctx @reader_nodes int64(reader_nodes[n].b) @declared) {return false}
+    if not rd_dc_parallel_writes_own(@reader_ctx @reader_nodes int64(reader_nodes[n].c) @declared) {return false}
+    loop child in node_kids(@reader_nodes @reader_ctx.stores.lists[0] n) {
+        if not rd_dc_parallel_writes_own(@reader_ctx @reader_nodes child @declared) {return false}
+    }
+    loop child in node_kids2(@reader_nodes @reader_ctx.stores.lists[0] n) {
+        if not rd_dc_parallel_writes_own(@reader_ctx @reader_nodes child @declared) {return false}
+    }
+    true
 }
 
 # No `return` leaves a parallel body, nor a `break` or `continue` outside a loop in it

@@ -629,6 +629,10 @@ fact_drop_block = (n: int) -> int[]:
     key = n * 4 + 1
     if let known = fact_drop_sites.get(key): return known
     out = [0]
+    if fact_drop_block_into(n, out): fact_drop_sites[key] = out
+    out
+# (an unscoped `( ... )` block's declarations are its enclosing block's, NF_UNSCOPED 4)
+fact_drop_block_into = (n: int, out: mut int[]) -> bool:
     settled = true
     loop j in [0..nkids(n)):
         c = kid(n, j)
@@ -637,8 +641,8 @@ fact_drop_block = (n: int) -> int[]:
             t = int(locals[int(nodes[c].sym)].type)
             if ownership_fact_type(t): settled = fact_drop_add(out, t) and settled
         else if k == .defer_: settled = fact_drop_scan(int(nodes[c].a), 0, out, false) and settled
-    if settled: fact_drop_sites[key] = out
-    out
+        else if k == .block and has_flag(c, 4): settled = fact_drop_block_into(c, out) and settled
+    settled
 fact_drop_exit = (f: int) -> int[]:
     body = int(fns[f].body)
     key = body * 4 + 3

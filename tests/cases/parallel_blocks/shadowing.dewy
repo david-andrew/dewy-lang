@@ -1,0 +1,9 @@
+# A name declared in `parallel { ... }` shadows only inside it.
+main = () => {
+    let level:int = 1
+    parallel {
+        let level:int = 9
+        printl"inside {level}"
+    }
+    printl"outside {level}"
+}

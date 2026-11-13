@@ -285,6 +285,24 @@ count, in its type, `(():>(int64 int64))`, so a call through it gives that many
 values too (`f = @pair; add(f)` fills both parameters). A fixed number of values
 is returned in place, with no array.
 
+`{ ... }` is a scoped block and `( ... )` an unscoped one; either may stand wherever an
+expression block may. Names declared inside braces stay inside; names declared inside
+parentheses are visible after them, as if declared in the enclosing block, which also drops
+their owners at its end:
+
+```dewy
+(
+    let width:int = 3
+    let height:int = 4
+)
+printl(width * height)           # 12
+let total = (let base:int = 10
+    base + width)                # base is visible here too
+```
+
+A parenthesized group of values without declarations, `(a b)`, stays several values. A
+call may be written with braces, `add{1 2}` for `add(1 2)`; that is unidiomatic.
+
 Several values work wherever the same values written out would (substitution
 invariance). `(1 2)` is two values, not a container; `[1 2]` is an array, one
 value. A binding holds several values (`p = (1 2)` has type `(int int)`, which
@@ -3599,6 +3617,29 @@ sibling iteration sets. It warns where it cannot decide: two elements of one arr
 taken one inside the other, a function value called while a lock is held, or a
 parallel iteration polling an atomic set elsewhere.
 
+A `parallel` block runs its statements beside each other and waits for them all at its end.
+`parallel ( ... )` keeps what its statements declare for after the block, and
+`parallel { ... }` keeps those names inside it:
+
+```dewy
+parallel (
+    let config = load_config(path) or_throw
+    let sounds = load_sounds(dir) or_throw
+)
+start(config sounds)
+parallel {
+    work()
+    loop _ in signals.ctrl_c { printl"stopping" }
+}
+```
+
+An owner bound in `parallel ( ... )` belongs to the enclosing block. Each statement is an item.
+*Provisional:* an item that declares nothing, writes no variable from outside it, and has no
+`or_throw`, `return`, `break` or `continue` leaving it runs as a task (with a task's transfer
+checks); the other items run in source order on the block's own task, each after those before
+it have started. The web target runs every item in order. A name from `parallel { ... }` used
+after it is an error that suggests `parallel ( ... )`.
+
 Waiting work uses a structured task group on the Linux threads backend:
 
 ```dewy
@@ -3853,8 +3894,8 @@ iteration as it leaves a wait. Prepared `@source.next` operations work with
 This rule does not promise eventual shutdown while other ordinary activity
 continues: a timer loop or overlapping busy handlers can keep a group alive.
 Use an explicit done channel or a race when shutdown needs a written cutoff.
-See [the signal example](../examples/signals.dewy). The forthcoming scoped
-`parallel` blocks can use the same runtime ownership and closing rule.
+See [the signal example](../examples/signals.dewy). A `parallel` block uses the same
+runtime ownership and closing rule: its listener items end once only listeners remain.
 
 `select(...)` waits for the first of several waits (decisions.md, batch 7). Each argument
 is a wait written in the call, on a local or a field chain: a channel's or `mpmc` queue's

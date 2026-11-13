@@ -224,6 +224,8 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     }
     let counted=mode =? 2 or mode =? 6
     let transparent=bk_nodes[0].ptr[b].aux =? 5 and not want_value
+    # (`( ... )`, NF_UNSCOPED 4: its names stay visible after it, value or not)
+    let unscoped=bk_flag(b 4)
     let n0=BWord(bk_nodes[0].ptr[b].nlist)
     let i:BWord=0
     loop i <? n0 {
@@ -267,6 +269,6 @@ bk_block=(b:BWord expected:BWord want_value:bool):>BWord=>$unsafe {
     if mode >=? 0 {bk_discarding[0]=was_discarding}
     bk_nodes[0][b].type=int32<overflow='wrap'>(result)
     if transparent {bk_nodes[0][b].aux=5}
-    else if bk_scopes[0].names.length not=? mark {scope_reset(mark)}
+    else if not unscoped and bk_scopes[0].names.length not=? mark {scope_reset(mark)}
     result
 }

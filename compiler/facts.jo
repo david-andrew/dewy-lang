@@ -3124,9 +3124,11 @@ fact_capture_value = (n: int, s: mut FactState) -> int:
                     collect_at = s.ids.len() + max(32, s.ids.len())
         loop i in [0..defers.len()): fact_capture(defers[defers.len() - 1 - i], s)
         fact_pending_defers = pending
-        # (then the block's own owners drop)
-        if ownership_fact_cleanup and s.live: fact_drop_forget(s, n, fact_drop_block(n))
-        if s.live and s.bindings.len() > first: fact_scope_exit(s, n, first)
+        # (then the block's own owners drop; an unscoped `( ... )` block's belong to the
+        # enclosing block, as do its bindings)
+        unscoped = has_flag(n, NF_UNSCOPED)
+        if ownership_fact_cleanup and s.live and not unscoped: fact_drop_forget(s, n, fact_drop_block(n))
+        if s.live and s.bindings.len() > first and not unscoped: fact_scope_exit(s, n, first)
         if s.live and s.ids.len() > 64: fact_collect(s, boundary, r)
         return r
     if k == .return_:

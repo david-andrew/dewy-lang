@@ -849,7 +849,9 @@ gen_value_block = (b: int, rs: int, rt_: int, rv: int = -1):
         values = exact_extend(exact_value(b), out.len())
         loop i in [0..out.len()): e_mov(out[i], values[i])
         return
-    scope_push()
+    # (`( ... )`: its names belong to the enclosing scope, which drops them)
+    unscoped = has_flag(b, NF_UNSCOPED)
+    if not unscoped: scope_push()
     n = nkids(b)
     loop i in [0..n):
         s = kid(b, i)
@@ -865,7 +867,7 @@ gen_value_block = (b: int, rs: int, rt_: int, rv: int = -1):
             stmt_end()
             continue
         gen_stmt(s)
-    scope_pop()
+    if not unscoped: scope_pop()
 
 gen_match_test = (p: int, st0: int, hidden_addr: int) -> int:
     # Compare a refined payload through its storage representation.
@@ -4283,7 +4285,7 @@ gen_stmt = (s: int):
         else: br_to(lp.cont)
     else if k == .defer_: scope_defers[scope_defers.len() - 1].push(int(nodes[s].a))
     else if k == .block:
-        if nodes[s].aux == 5:
+        if nodes[s].aux == 5 or has_flag(s, NF_UNSCOPED):
             gen_block_stmts(s)
             return
         scope_push()

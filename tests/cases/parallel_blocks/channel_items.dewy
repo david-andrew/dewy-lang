@@ -1,0 +1,26 @@
+# modes: native native-release
+# A producer item runs beside the consumer's binding; the Ctrl-C listener item ends when
+# only listeners remain.
+import p"@lib/std/signals.dewy" as signals
+produce = (c:Channel<int64>):>void | Unsent<int64> => {
+    loop i in [0..3) { c.send(i) or_throw }
+    c.close()
+}
+consume = (c:Channel<int64>):>int | Canceled => {
+    let total:int = 0
+    loop true {
+        let v = c.receive
+        if v is? Closed break
+        total += v or_throw
+    }
+    total
+}
+main = () => {
+    let c = channel<int64>(1)
+    parallel (
+        produce(c) ?? void;
+        let total = consume(c) or_throw
+        loop _ in signals.ctrl_c { printl"interrupted" }
+    )
+    printl"total {total}"
+}

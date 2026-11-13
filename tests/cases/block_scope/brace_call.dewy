@@ -1,0 +1,10 @@
+# `f{a b}` is the call `f(a b)` (unidiomatic, but the same call).
+add = (a:int b:int):>int => a + b
+Counter:type = [n:int]
+main = () => {
+    printl(add{1 2})
+    printl(add(1 2) =? add{1 2})
+    let xs:array<int> = [1]
+    xs.push{5}
+    printl(xs)
+}

@@ -193,6 +193,13 @@ pushed_type = (nm: str) -> str:
             if cn == "rgb" or cn == "rgba" or cn == "hex": return "vec4"
             if cn == "vec2" or cn == "vec3" or cn == "vec4" or cn == "ivec2" or cn == "ivec3" or (len(cn) > 0 and cn[0] >= 'A' and cn[0] <= 'Z'): return cn
     ""
+# (a declaration at the top of a `parallel { ... }` block, marked 8192 by the reader)
+parallel_braced_decl = (nm: int, at: int) -> bool:
+    n = nodes.len() - 1
+    loop n > 0:
+        if nodes[n].pos == at and nodes[n].kind == .vardecl and int(nodes[n].name) == nm and int(nodes[n].flags) & 8192 != 0: return true
+        n -= 1
+    false
 # a variable of this name was declared earlier in the function, in a block that has ended
 gone_local_hint = (nm: int, at: int) -> str:
     if cx < 0: return ""
@@ -201,6 +208,7 @@ gone_local_hint = (nm: int, at: int) -> str:
     loop l > 0:
         if int(locals[l].name) == nm and int(locals[l].owner) == inst and locals[l].pos < at and pos_file(locals[l].pos) == pos_file(at):
             ln, c = line_col(locals[l].pos)
+            if parallel_braced_decl(nm, locals[l].pos): return " (the '{name_of(nm)}' made on line {ln} is inside `parallel \{ ... }`, whose names stay inside; write `parallel ( ... )` to use it after the block)"
             return " (the '{name_of(nm)}' made on line {ln} is inside a block that has ended; give it a value before that block to use it here)"
         l -= 1
     # (pos made in update, used in draw: each function's variables are its own)

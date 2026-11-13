@@ -1,0 +1,22 @@
+# Nested blocks: names leave every `( ... )` up to the nearest `{ ... }`.
+main = () => {
+    (
+        (
+            let deep:int = 1
+        )
+        let mid:int = deep + 1
+    )
+    printl"deep {deep} mid {mid}"
+    {
+        (
+            let held:int = 3
+        )
+        printl"held {held}"
+    }
+    (
+        {
+            let hidden:int = 4
+            printl"hidden {hidden}"
+        }
+    )
+}

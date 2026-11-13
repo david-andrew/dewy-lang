@@ -1,0 +1,14 @@
+# Shadowing: braces shadow and restore; parentheses declare in the enclosing scope.
+main = () => {
+    let x:int = 1
+    {
+        let x:int = 2
+        printl"inner {x}"
+    }
+    printl"outer {x}"
+    let y:int = 5
+    (
+        let y:int = y + 10
+    )
+    printl"after parens {y}"
+}

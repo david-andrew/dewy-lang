@@ -14,7 +14,7 @@ from p"checks_thin_expr.dewy" import (fmt_field_order fmt_hidden fmt_minted is_m
 from p"check.jo" import (target_wasm LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_CONST LF_EXPOSED LF_MUTPARAM LF_OWNERBORROW LF_PARAM LF_PARTBORROW LF_VALUECAP compound_op dewy_at fns globals lib_dir locals runtime_fn target_macos target_windows)
 from p"checks_thin.dewy" import (jd mutable_loop_syntax readonly_global)
 from p"ir.jo" import (M_FLOAT M_SIGNED VF VI VOP_SPLAT_B VOP_SPLAT_C VS dbg_on ir ir_cold mulh_ok)
-from p"ast.jo" import (NF_COMPREHENSION NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_INDEX_CAPTURED NF_INCLUSIVE NF_MUT NF_RELOOKUP NF_STEP NF_STMT NF_U64 has_flag kid kid2 kids lists mk nkids nkids2 nodes)
+from p"ast.jo" import (NF_COMPREHENSION NF_GENERIC NF_GLOBAL NF_INBOUNDS NF_INDEX_CAPTURED NF_INCLUSIVE NF_MUT NF_RELOOKUP NF_STEP NF_STMT NF_U64 NF_UNSCOPED has_flag kid kid2 kids lists mk nkids nkids2 nodes)
 from p"ir_types.dewy" import (Op)
 from p"types.jo" import (T_F32 T_I32 T_INT T_MAT4 T_MATH_INT T_NEVER T_RANGE T_STR T_U64 T_U8 T_VEC4 T_VOID fields is_int is_union is_vec prune ptr_size structs targ telem tkind ts_dewy tsize type_eq types union_members variants)
 from p"type_ops.dewy" import (fixed_len int_policy is_managed layout math_optional mk_array mk_box ptr_optional type_has_fn type_str union_holder union_index)
@@ -945,7 +945,9 @@ gen_value_block=(b:LGWord rs:LGWord rt_:LGWord rv:LGWord=-1):>void=>$unsafe {
         loop i in [0..out.length) {e_mov(out.ptr[i] values.ptr[i]);}
         return
     }
-    scope_push();
+    # (`( ... )`: its names belong to the enclosing scope, which drops them)
+    let unscoped=has_flag(b NF_UNSCOPED)
+    if not unscoped {scope_push();}
     let n=nkids(b)
     loop i in [0..n) {
         let s=kid(b i)
@@ -965,7 +967,7 @@ gen_value_block=(b:LGWord rs:LGWord rt_:LGWord rv:LGWord=-1):>void=>$unsafe {
         }
         gen_stmt(s);
     }
-    scope_pop();
+    if not unscoped {scope_pop();}
 }
 gen_match_test=(p:LGWord st0:LGWord hidden_addr:LGWord):>LGWord=>$unsafe {
     # Compare a refined payload through its storage representation.
@@ -4795,7 +4797,7 @@ gen_stmt=(s:LGWord):>void=>$unsafe {
     }
     else if k =? 'defer_' {scope_defers.ptr[scope_defers.length - 1].push(LGWord(nodes.ptr[s].a));}
     else if k =? 'block' {
-        if nodes.ptr[s].aux =? 5 {
+        if nodes.ptr[s].aux =? 5 or has_flag(s NF_UNSCOPED) {
             gen_block_stmts(s);
             return
         }

@@ -1,0 +1,23 @@
+# An owner declared in `( ... )` lives in the enclosing block: it is dropped at that block's
+# end, and may be moved after the parentheses; one in `{ ... }` drops at its brace.
+let drops:int64=0
+Res=type of [n:int64
+    $__drop__=():>void=>{drops+=1}
+]
+keep = (r:Res):>int64 => r.n
+main = () => {
+    (
+        let first = Res[1]
+    )
+    printl"after parens: {first.n}, drops {drops}"
+    {
+        let second = Res[2]
+        printl"inside braces: {second.n}"
+    }
+    printl"after braces: drops {drops}"
+    let moved = first
+    printl"moved {keep(moved)}"
+    let v = (let third = Res[3]
+        third.n + 1)
+    printl"v {v} third {third.n} drops {drops}"
+}

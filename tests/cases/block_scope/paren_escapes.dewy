@@ -1,0 +1,16 @@
+# `( ... )` is an unscoped block: what it declares is visible after it, as a statement,
+# as a binding's value, and inside a call's arguments (decisions.md, batch 9).
+twice = (n:int):>int => n * 2
+main = () => {
+    (
+        let width:int = 3
+        let height:int = 4
+    )
+    printl"area {width * height}"
+    let total = (let base:int = 10
+        base + width)
+    printl"total {total} base {base}"
+    printl(twice((let k:int = 5
+        k + 1)))
+    printl"k {k}"
+}

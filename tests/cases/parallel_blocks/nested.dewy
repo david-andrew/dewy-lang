@@ -1,0 +1,11 @@
+# A parallel block inside another: names leave each `( ... )` in turn.
+main = () => {
+    parallel (
+        let outer:int = 2
+        parallel (
+            let inner:int = outer * 5
+        )
+        let both = outer + inner
+    )
+    printl"{outer} {inner} {both}"
+}
