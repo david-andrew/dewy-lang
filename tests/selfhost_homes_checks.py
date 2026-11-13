@@ -39,6 +39,8 @@ LEAF_HOMES = {
     'prelude_ops': 'prelude.jo',
     'exact_loop_ops': 'exact_loop.jo',
     'exact_loop_rare': 'exact_loop.jo',
+    'exact_loop_walks': 'exact_loop.jo',
+    'exact_reset_walks': 'exact_reset_loop.jo',
     'error_display': 'util.jo',
     'refine_rare': 'refine.jo',
     'refine_siblings': 'refine.jo',

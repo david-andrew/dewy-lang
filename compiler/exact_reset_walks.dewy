@@ -1,0 +1,192 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_STEP has_flag kid nkids nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_EXPOSED LF_MUTPARAM LF_SHARED fns locals target_arm64 target_wasm)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"exact.jo" import (exact_lower_active)
+from p"exact_loop_ops.dewy" import (exl_strip)
+from p"exact_reset_loop.jo" import (EXR_BOUND exr_call_target exr_plans)
+from p"expr.jo" import (IN integer_constant ntype)
+from p"ir.jo" import (VI dbg_on)
+from p"ir_builders.dewy" import (e_addi e_bin e_iconst e_load e_mov vreg)
+from p"lower.jo" import (ctl)
+from p"lower_group.dewy" import (gen_place gen_while_scalar)
+from p"lower_storage.dewy" import (arr_len blk brif_to els endc iff lop read_place)
+from p"math_ops.dewy" import (math_local_is math_reset_interval)
+from p"ownership_types.dewy" import (ownership_type)
+from p"partition.jo" import (partition_active)
+from p"refine.jo" import (representation_type)
+from p"scanloops.dewy" import (scan_bound scan_inc scan_local scan_word)
+from p"type_ops.dewy" import (is_managed layout)
+from p"types.jo" import (T_INT T_VOID fields structs telem tkind tsize types)
+
+ResetWord:type=int64<overflow='wrap'>
+
+# A repeated, closed record update can preserve a small-field invariant.
+# Demand is a two-statement counted loop calling one mutable-array function.
+# Inspect at most four reset locals and four nested record levels; memoize the
+# callee plan. One O(array bytes) entry census proves all repeated calls, with
+# the original loop retained for outliers. No source fit obligation is added.
+exr_stmt=(n:ResetWord):>int64=>$unsafe {
+    if nodes.ptr[n].kind =? 'exprstmt' {return ResetWord(nodes.ptr[n].a)}
+    n
+}
+exr_record=(t0:ResetWord depth:ResetWord=0):>bool=>$unsafe {
+    let t=representation_type(t0)
+    if t =? T_INT {return true}
+    if depth >=? 4 or tkind(t) not=? 'struct_' or is_managed(t) or ownership_type(t) {return false}
+    layout(t);
+    if tsize(t) <=? 0 or tsize(t) >? 128 {return false}
+    let st=ResetWord(types.ptr[t].st)
+    let offset:ResetWord=0
+    loop i in [0..ResetWord(structs.ptr[st].nfields)) {
+        let field=ResetWord(structs.ptr[st].fields) + i
+        if ResetWord(fields.ptr[field].offset) not=? offset or not exr_record(ResetWord(fields.ptr[field].type) depth + 1) {return false}
+        offset+=tsize(ResetWord(fields.ptr[field].type))
+    }
+    offset =? tsize(t)
+}
+exr_field=(n0:ResetWord array:ResetWord index:ResetWord):>bool=>$unsafe {
+    let n:ResetWord=exl_strip(n0)
+    if representation_type(ntype(n)) not=? T_INT {return false}
+    let depth:ResetWord=0
+    loop nodes.ptr[n].kind =? 'field' and nodes.ptr[n].aux >=? 0 {
+        depth+=1
+        if depth >? 4 {return false}
+        n=ResetWord(nodes.ptr[n].a)
+    }
+    if depth =? 0 or nodes.ptr[n].kind not=? 'index' or nodes.ptr[n].aux not=? 0 {return false}
+    let a=exl_strip(ResetWord(nodes.ptr[n].a))
+    let i=exl_strip(ResetWord(nodes.ptr[n].b))
+    nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) and nodes.ptr[a].sym =? int32(array) and math_local_is(i index)
+}
+exr_control=(n0:ResetWord array:ResetWord index:ResetWord depth:ResetWord=0):>bool=>$unsafe {
+    if n0 =? 0 or depth >? 8 {return false}
+    let n=exl_strip(n0)
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' or k =? 'bool_lit' {return true}
+    if math_local_is(n index) {return true}
+    if k =? 'intrinsic' and nodes.ptr[n].aux =? int32(int64(IN.len)) and nkids(n) =? 1 {return math_local_is(kid(n 0) array)}
+    if k =? 'not_' {return exr_control(ResetWord(nodes.ptr[n].a) array index depth + 1)}
+    if k =? 'binary' and nodes.ptr[n].aux =? 0 {
+        let op=cx_token_values.ptr[ResetWord(nodes.ptr[n].op)]
+        if op not=? 'eq' and op not=? 'ne' and op not=? 'lt' and op not=? 'le' and op not=? 'gt' and op not=? 'ge' {return false}
+    }
+    else if k not=? 'and_' and k not=? 'or_' {return false}
+    exr_control(ResetWord(nodes.ptr[n].a) array index depth + 1) and exr_control(ResetWord(nodes.ptr[n].b) array index depth + 1)
+}
+exr_plan=(f:ResetWord):>array<int64>=>$unsafe {
+    let cached=exr_plans.get(f)
+    if cached not=? none {return cached}
+    let empty:array<int64>=[]
+    exr_plans[f]=empty
+    if f <=? 0 or fns.ptr[f].params.length not=? 1 or fns.ptr[f].caps.length not=? 0 or ResetWord(fns.ptr[f].ret) not=? T_VOID {return empty}
+    let array=ResetWord(fns.ptr[f].params[0])
+    if ResetWord(locals.ptr[array].flags) & LF_MUTPARAM =? 0 or ResetWord(locals.ptr[array].flags) & (LF_CAPTURED | LF_SHARED | LF_EXPOSED) not=? 0 {return empty}
+    let at=representation_type(ResetWord(fns.ptr[f].ptypes[0]))
+    if tkind(at) not=? 'array' or not exr_record(telem(at)) {return empty}
+    let body=ResetWord(fns.ptr[f].body)
+    if nodes.ptr[body].kind not=? 'block' or nkids(body) not=? 1 {return empty}
+    let loop_=exr_stmt(kid(body 0))
+    if nodes.ptr[loop_].kind not=? 'for_' or nodes.ptr[loop_].aux not=? 0 {return empty}
+    let index=ResetWord(nodes.ptr[loop_].sym)
+    let it=ResetWord(nodes.ptr[loop_].a)
+    if nodes.ptr[it].kind not=? 'range' or has_flag(it NF_STEP) {return empty}
+    if not exr_control(ResetWord(nodes.ptr[it].a) array index) {return empty}
+    if nodes.ptr[it].b not=? 0 and not exr_control(ResetWord(nodes.ptr[it].b) array index) {return empty}
+    let block=ResetWord(nodes.ptr[loop_].b)
+    if nodes.ptr[block].kind not=? 'block' or nkids(block) =? 0 {return empty}
+    let start:ResetWord=0
+    let first=exr_stmt(kid(block 0))
+    if nodes.ptr[first].kind =? 'if_' {
+        let arm=ResetWord(nodes.ptr[first].b)
+        if nodes.ptr[first].c not=? 0 or not exr_control(ResetWord(nodes.ptr[first].a) array index) or nkids(arm) not=? 1 or nodes.ptr[exr_stmt(kid(arm 0))].kind not=? 'break_' {return empty}
+        start=1
+    }
+    let count:ResetWord=0
+    loop start + count <? nkids(block) and nodes.ptr[exr_stmt(kid(block start + count))].kind =? 'vardecl' {count+=1}
+    if count =? 0 or count >? 4 or nkids(block) not=? start + count * 3 {return empty}
+    let plan:array<int64>=[]
+    loop j in [0..count) {
+        let decl=exr_stmt(kid(block start + j))
+        if nkids(decl) not=? 0 {return empty}
+        let l=ResetWord(nodes.ptr[decl].sym)
+        if ResetWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ADDR | LF_ALIAS | LF_BYREF | LF_EXPOSED) not=? 0 {return empty}
+        let init=exl_strip(ResetWord(nodes.ptr[decl].b))
+        if nodes.ptr[init].kind not=? 'binary' or nodes.ptr[init].aux not=? 0 {return empty}
+        let op=cx_token_values.ptr[ResetWord(nodes.ptr[init].op)]
+        if op not=? 'plus' and op not=? 'minus' and op not=? 'star' {return empty}
+        if not exr_field(ResetWord(nodes.ptr[init].a) array index) or not exr_field(ResetWord(nodes.ptr[init].b) array index) {return empty}
+        let branch=exr_stmt(kid(block start + count + j))
+        if nodes.ptr[branch].kind not=? 'if_' or nodes.ptr[branch].c not=? 0 {return empty}
+        let cond=ResetWord(nodes.ptr[branch].a)
+        let [known hi]=math_reset_interval(cond l)
+        if not known or hi >? EXR_BOUND + 1 {return empty}
+        let lower=ResetWord(nodes.ptr[cond].a)
+        let [known_lo lo]=integer_constant(ResetWord(nodes.ptr[lower].b))
+        if not known_lo or lo <? -EXR_BOUND {return empty}
+        let arm=ResetWord(nodes.ptr[branch].b)
+        if nkids(arm) <? 1 or nkids(arm) >? 5 {return empty}
+        loop k in [0..nkids(arm) - 1) {
+            let change=exr_stmt(kid(arm k))
+            if nodes.ptr[change].kind not=? 'assign' or cx_token_values.ptr[ResetWord(nodes.ptr[change].op)] not=? 'assign' or nodes.ptr[change].aux not=? 0 or not exr_field(ResetWord(nodes.ptr[change].a) array index) {return empty}
+            let value:ResetWord=exl_strip(ResetWord(nodes.ptr[change].b))
+            if nodes.ptr[value].kind =? 'unary' and cx_token_values.ptr[ResetWord(nodes.ptr[value].op)] =? 'minus' {value=ResetWord(nodes.ptr[value].a)}
+            else if nodes.ptr[value].kind =? 'binary' and cx_token_values.ptr[ResetWord(nodes.ptr[value].op)] =? 'minus' and nodes.ptr[value].aux =? 0 {
+                let [zero number]=integer_constant(ResetWord(nodes.ptr[value].a))
+                if not zero or number not=? 0 {return empty}
+                value=ResetWord(nodes.ptr[value].b)
+            }
+            else {return empty}
+            if not exr_field(value array index) {return empty}
+        }
+        let reset=exr_stmt(kid(arm nkids(arm) - 1))
+        if nodes.ptr[reset].kind not=? 'assign' or cx_token_values.ptr[ResetWord(nodes.ptr[reset].op)] not=? 'assign' or nodes.ptr[reset].aux not=? 0 or not math_local_is(ResetWord(nodes.ptr[reset].a) l) or not exr_field(ResetWord(nodes.ptr[reset].b) array index) {return empty}
+        let store=exr_stmt(kid(block start + count * 2 + j))
+        if nodes.ptr[store].kind not=? 'assign' or cx_token_values.ptr[ResetWord(nodes.ptr[store].op)] not=? 'assign' or nodes.ptr[store].aux not=? 0 or not exr_field(ResetWord(nodes.ptr[store].a) array index) or not math_local_is(exl_strip(ResetWord(nodes.ptr[store].b)) l) {return empty}
+        plan.push(l)
+    }
+    exr_plans[f]=plan
+    plan
+}
+exr_loop=(s:ResetWord):>bool=>$unsafe {
+    if not exact_lower_active or dbg_on or target_wasm or target_arm64 or partition_active or exr_call_target not=? 0 or nodes.ptr[s].aux not=? 0 {return false}
+    let body=ResetWord(nodes.ptr[s].b)
+    if nkids(body) not=? 2 {return false}
+    let call=exr_stmt(kid(body 0))
+    if nodes.ptr[call].kind not=? 'call' or nodes.ptr[call].aux not=? 0 or nkids(call) not=? 1 {return false}
+    let f=ResetWord(nodes.ptr[call].sym)
+    let cond=ResetWord(nodes.ptr[s].a)
+    if nodes.ptr[cond].kind not=? 'binary' or nodes.ptr[cond].aux not=? 0 or cx_token_values.ptr[ResetWord(nodes.ptr[cond].op)] not=? 'lt' {return false}
+    let counter=scan_local(ResetWord(nodes.ptr[cond].a))
+    if counter <? 0 or not scan_word(ResetWord(nodes.ptr[cond].a)) or not scan_bound(ResetWord(nodes.ptr[cond].b) counter) or not scan_inc(exr_stmt(kid(body 1)) counter) {return false}
+    let array=kid(call 0)
+    if nodes.ptr[array].kind not=? 'ident' or nodes.ptr[array].aux not=? int32(1) {return false}
+    let l=ResetWord(nodes.ptr[array].sym)
+    if l =? counter or ResetWord(locals.ptr[l].flags) & (LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_EXPOSED) not=? 0 {return false}
+    if exr_plan(f).length =? 0 {return false}
+    let pointer=read_place(gen_place(array false) ntype(array))
+    let length=arr_len(pointer)
+    let words=e_bin('mul' VI length e_iconst(tsize(telem(ntype(array))) // 8))
+    let combined=vreg(VI)
+    e_mov(combined e_iconst(0));
+    let index=vreg(VI)
+    e_mov(index e_iconst(0));
+    blk()
+    brif_to(e_bin('ges' VI index words) ctl);
+    lop()
+    let value=e_load(VI e_bin('add' VI pointer e_bin('shl' VI index e_iconst(3))) 24 8)
+    e_mov(combined e_bin('or_' VI combined e_bin('add' VI value e_iconst(EXR_BOUND))));
+    e_mov(index e_addi(index 1));
+    brif_to(e_bin('lts' VI index words) ctl);
+    endc();
+    endc();
+    iff(e_bin('ltu' VI combined e_iconst(EXR_BOUND * 2)));
+    exr_call_target=f
+    gen_while_scalar(s);
+    exr_call_target=0
+    els();
+    gen_while_scalar(s);
+    endc();
+    true
+}

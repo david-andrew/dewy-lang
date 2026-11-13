@@ -1,0 +1,354 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_BROADCAST NF_GLOBAL NF_INBOUNDS NF_INCLUSIVE NF_PRIVATE_COORD NF_SQUOTE NF_STEP NF_U64 has_flag kid kids nkids nodes)
+from p"check.jo" import (FK_NORMAL LF_ADDR LF_ALIAS LF_BYREF LF_CAPTURE LF_CAPTURED LF_MUTPARAM LF_PARAM LF_SHARED fns lib_dir locals target_arm64 target_wasm)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"exact.jo" import (exact_demands exact_has_store exact_initializers exact_representation)
+from p"exact_loop.jo" import (exact_loop_fast exact_map_active exact_map_functions exact_map_stores exl_aliases exl_arrays exl_locals exl_reductions exl_target exm_arrays exm_assignment exm_broadcast exm_elements exm_emitting exm_indices exm_math_output exm_obligation exm_produced_flags exm_produced_widths exm_scalars exm_steps exm_tagged_sources)
+from p"exact_loop_ops.dewy" import (exl_strip exl_word exm_magnitude)
+from p"exact_loop_rare.dewy" import (exl_array exl_independent exm_census exm_parameter exm_producer exm_stride_versions exm_width)
+from p"expr.jo" import (CV integer_constant is_nd mk_ident_local ntype)
+from p"facts_progress.dewy" import (fact_progress_same)
+from p"facts_pushes.dewy" import (fact_mentions)
+from p"ir.jo" import (VI dbg_on ir)
+from p"ir_builders.dewy" import (e_addi e_bin e_iconst e_load e_mov e_zero vreg)
+from p"lower.jo" import (ctl cur_fn lfuncs)
+from p"lower_group.dewy" import (gen_for gen_place local_place)
+from p"lower_storage.dewy" import (blk brif_to drop_at els endc iff lop place_addr read_place release store_type)
+from p"math_ops.dewy" import (math_count math_word_expr)
+from p"ownership_types.dewy" import (ownership_type)
+from p"refine.jo" import (representation_type)
+from p"type_ops.dewy" import (layout mk_array)
+from p"types.jo" import (T_INT T_MATH_INT fields structs telem tkind tsize types)
+from p"util.jo" import (files pos_file)
+
+ExactLoopWord:type=int64<overflow='wrap'>
+
+exl_expr=(n0:ExactLoopWord):>bool=>$unsafe {
+    if n0 <=? 0 {return false}
+    let n=exl_strip(n0)
+    if not exl_word(ntype(n0)) or not exl_word(ntype(n)) {return false}
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return nodes.ptr[n].ival >=? 0 and not has_flag(n NF_U64)}
+    if k =? 'ident' {
+        if nodes.ptr[n].aux not=? int32(1) {return false}
+        let l=ExactLoopWord(nodes.ptr[n].sym)
+        let fl=ExactLoopWord(locals.ptr[l].flags)
+        if fl & (LF_ALIAS | LF_CAPTURE | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_MUTPARAM | LF_BYREF) not=? 0 {return false}
+        return exl_locals.has(l) or fl & LF_PARAM not=? 0 and exact_representation(ntype(n)) =? T_INT
+    }
+    if k =? 'index' {return nodes.ptr[n].aux =? 0 and exl_array(ExactLoopWord(nodes.ptr[n].a)) and exl_expr(ExactLoopWord(nodes.ptr[n].b))}
+    if k not=? 'binary' or nodes.ptr[n].aux not=? 0 {return false}
+    let op=cx_token_values.ptr[ExactLoopWord(nodes.ptr[n].op)]
+    if op =? 'percent' {
+        let [known divisor]=integer_constant(ExactLoopWord(nodes.ptr[n].b))
+        if not known or divisor <=? 0 {return false}
+    }
+    else if op not=? 'plus' and op not=? 'star' and op not=? 'caret' and op not=? 'amp' and op not=? 'pipe' {return false}
+    exl_expr(ExactLoopWord(nodes.ptr[n].a)) and exl_expr(ExactLoopWord(nodes.ptr[n].b))
+}
+exl_plan=(n:ExactLoopWord depth:ExactLoopWord):>bool=>$unsafe {
+    if n =? 0 {return true}
+    let k=nodes.ptr[n].kind
+    if k =? 'block' {
+        loop c in kids(n) {
+            if not exl_plan(c depth) {return false}
+        }
+        return true
+    }
+    if k =? 'vardecl' {
+        if nkids(n) not=? 0 or has_flag(n NF_GLOBAL) or nodes.ptr[n].sym <=? 0 or nodes.ptr[n].b =? 0 {return false}
+        let l=ExactLoopWord(nodes.ptr[n].sym)
+        let value=ExactLoopWord(nodes.ptr[n].b)
+        if nodes.ptr[n].aux2 =? 1 {
+            if nodes.ptr[value].kind not=? 'ident' or nodes.ptr[value].aux not=? int32(1) {return false}
+            exl_aliases[l]=value
+            if tkind(ntype(value)) =? 'array' {return true}
+        }
+        if not exl_expr(value) {return false}
+        exl_locals[l]=true
+        return true
+    }
+    if k =? 'exprstmt' {return exl_plan(ExactLoopWord(nodes.ptr[n].a) depth)}
+    if k =? 'return_' {return depth =? 0 and exl_expr(ExactLoopWord(nodes.ptr[n].a))}
+    if k =? 'for_' {
+        let it=ExactLoopWord(nodes.ptr[n].a)
+        if depth >=? 3 or nodes.ptr[n].aux not=? 0 or nodes.ptr[it].kind not=? 'range' or has_flag(it NF_STEP) or has_flag(it NF_INCLUSIVE) {return false}
+        let [known start]=integer_constant(ExactLoopWord(nodes.ptr[it].a))
+        if not known or start not=? 0 or nodes.ptr[it].b =? 0 or not exl_expr(ExactLoopWord(nodes.ptr[it].b)) {return false}
+        let l=ExactLoopWord(nodes.ptr[n].sym)
+        if l <=? 0 {return false}
+        exl_locals[l]=true
+        return exl_plan(ExactLoopWord(nodes.ptr[n].b) depth + 1)
+    }
+    if k =? 'assign' {
+        let a=ExactLoopWord(nodes.ptr[n].a)
+        if depth =? 0 or nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32(1) {return false}
+        let l=ExactLoopWord(nodes.ptr[a].sym)
+        if not exl_locals.has(l) or ExactLoopWord(locals.ptr[l].flags) & (LF_PARAM | LF_CAPTURED | LF_SHARED | LF_ADDR | LF_BYREF) not=? 0 {return false}
+        let b=exl_strip(ExactLoopWord(nodes.ptr[n].b))
+        if nodes.ptr[b].kind not=? 'binary' or cx_token_values.ptr[ExactLoopWord(nodes.ptr[b].op)] not=? 'plus' or nodes.ptr[b].aux not=? 0 {return false}
+        let left=exl_strip(ExactLoopWord(nodes.ptr[b].a))
+        if nodes.ptr[left].kind not=? 'ident' or nodes.ptr[left].sym not=? int32(l) or nodes.ptr[left].aux not=? int32(1) {return false}
+        if fact_mentions(ExactLoopWord(nodes.ptr[b].b) l) or not exl_expr(ExactLoopWord(nodes.ptr[b].b)) {return false}
+        exl_reductions+=1
+        exl_target=l
+        return true
+    }
+    false
+}
+exact_loop_plan=(f:ExactLoopWord body:ExactLoopWord):>bool=>$unsafe {
+    if dbg_on or target_wasm or target_arm64 or not exact_demands.has(f) or fns.ptr[f].has_env or fns.ptr[f].kind not=? FK_NORMAL or exact_representation(ExactLoopWord(fns.ptr[f].ret)) not=? T_INT {return false}
+    exl_arrays=dict<int64 int64>()
+    exl_aliases=dict<int64 int64>()
+    exl_locals=dict<int64 bool>()
+    exl_reductions=0
+    if not exl_plan(body 0) or exl_arrays.length =? 0 or exl_reductions not=? 1 {return false}
+    exl_independent(body)
+}
+exl_mask=(value:ExactLoopWord):>int64=>{
+    let out:ExactLoopWord=value
+    loop shift in [1 2 4 8 16 32] {out=e_bin('or_' VI out e_bin('shru' VI out e_iconst(shift)))}
+    out
+}
+# Scope exit still releases the array object and every shape owner. A proven
+# immediate-only payload has no element owners. The runtime producer flag is
+# tied to this immutable local value, not to an address that could be reused.
+exm_drop_local=(l:ExactLoopWord):>bool=>$unsafe {
+    if exm_produced_widths.length =? 0 or ownership_type(ExactLoopWord(locals.ptr[l].type)) {return false}
+    let t=store_type(l)
+    let matrix=false
+    if tkind(t) =? 'array' {
+        if exact_representation(telem(t)) not=? T_MATH_INT {return false}
+    }
+    else {
+        if not is_nd(t) {return false}
+        let st=ExactLoopWord(types.ptr[representation_type(t)].st)
+        let d=ExactLoopWord(structs.ptr[st].decl)
+        if d =? 0 or files.ptr[pos_file(nodes.ptr[d].pos)].path not=? "{lib_dir}/std/nd.jo" {return false}
+        layout(t);
+        let first=ExactLoopWord(structs.ptr[st].fields)
+        if structs.ptr[st].nfields not=? 2 or fields.ptr[first].offset not=? 0 or fields.ptr[first + 1].offset not=? 8 or tsize(t) not=? 16 {return false}
+        if tkind(ExactLoopWord(fields.ptr[first].type)) not=? 'array' or exact_representation(telem(ExactLoopWord(fields.ptr[first].type))) not=? T_MATH_INT or ExactLoopWord(fields.ptr[first + 1].type) not=? mk_array(T_INT) {return false}
+        matrix=true
+    }
+    let node=mk_ident_local(l ExactLoopWord(locals.ptr[l].pos))
+    let flag=exm_producer(node 63)
+    if flag <? 0 {return false}
+    let place=local_place(l false)
+    iff(flag);
+    if matrix {
+        let address=place_addr(place t)
+        release(e_load(VI address 8 8) mk_array(T_INT));
+        release(e_load(VI address 0 8) mk_array(T_INT));
+    }
+    else {release(read_place(place t) mk_array(T_INT));}
+    els();
+    if place.mem {drop_at(place.v t);} else {release(place.v t);}
+    endc();
+    if place.mem {e_zero(place.v tsize(t));} else {e_mov(place.v e_iconst(0));}
+    true
+}
+exact_map_for=(s:ExactLoopWord):>bool=>$unsafe {
+    if exm_emitting or exact_loop_fast or dbg_on or target_wasm or target_arm64 or not exact_demands.has(cur_fn) {return false}
+    if nodes.ptr[s].aux not=? 0 {return false}
+    let it=ExactLoopWord(nodes.ptr[s].a)
+    let body=ExactLoopWord(nodes.ptr[s].b)
+    if nodes.ptr[it].kind not=? 'range' or has_flag(it NF_STEP) or has_flag(it NF_INCLUSIVE) or nodes.ptr[body].kind not=? 'block' {return false}
+    let [known start]=integer_constant(ExactLoopWord(nodes.ptr[it].a))
+    if not known or start not=? 0 or nodes.ptr[it].b =? 0 {return false}
+    let endnode=exl_strip(ExactLoopWord(nodes.ptr[it].b))
+    if nodes.ptr[endnode].kind not=? 'ident' and nodes.ptr[endnode].kind not=? 'int_lit' {return false}
+    exm_arrays=[]
+    exm_elements=[]
+    exm_indices=[]
+    exm_steps=[]
+    exm_scalars=[]
+    exm_broadcast=false
+    exm_obligation=false
+    exact_map_stores=dict<int64 bool>()
+    exm_math_output=false
+    exm_assignment=0
+    exm_tagged_sources=dict<int64 bool>()
+    let store:ExactLoopWord=0
+    let assignment:ExactLoopWord=0
+    loop stmt in kids(body) {
+        let n:ExactLoopWord=stmt
+        if nodes.ptr[n].kind =? 'exprstmt' {n=ExactLoopWord(nodes.ptr[n].a)}
+        if store not=? 0 {
+            if nodes.ptr[n].kind not=? 'assign' {return false}
+            let target=ExactLoopWord(nodes.ptr[n].a)
+            let value=exl_strip(ExactLoopWord(nodes.ptr[n].b))
+            if nodes.ptr[target].kind not=? 'ident' or nodes.ptr[target].aux not=? int32(1) {return false}
+            # A generated operand cursor: q = __bcast_index(1, q, stride) is q + stride.
+            if nodes.ptr[value].kind not=? 'call' or not has_flag(value NF_PRIVATE_COORD) or nkids(value) not=? 3 {return false}
+            let [scale_known scale]=integer_constant(kid(value 0))
+            if not scale_known or scale not=? 1 or not fact_progress_same(target kid(value 1)) {return false}
+            let step=kid(value 2)
+            if nodes.ptr[step].kind not=? 'ident' or exact_representation(ntype(step)) not=? T_INT {return false}
+            let found=false
+            loop j in [0..exm_indices.length) {
+                if exm_indices[j] not=? 0 and nodes.ptr[exm_indices[j]].sym =? nodes.ptr[target].sym {
+                    if exm_steps[j] not=? 0 {return false}
+                    exm_steps[j]=step
+                    found=true
+                }
+            }
+            if not found {return false}
+            # A checked element position followed by a 0/1 step is at most
+            # the array length. The version guard validates that step below.
+            if exact_has_store(ExactLoopWord(nodes.ptr[n].b)) {exact_map_stores[ExactLoopWord(nodes.ptr[n].b)]=true}
+            continue
+        }
+        if nodes.ptr[n].kind =? 'vardecl' and nkids(n) =? 0 {
+            let value=ExactLoopWord(nodes.ptr[n].b)
+            if value =? 0 or nodes.ptr[value].kind not=? 'index' or nodes.ptr[value].aux not=? 0 or not has_flag(value NF_INBOUNDS) or not exl_word(ntype(value)) {return false}
+            let index=exl_strip(ExactLoopWord(nodes.ptr[value].b))
+            let array=ExactLoopWord(nodes.ptr[value].a)
+            if nodes.ptr[index].kind not=? 'ident' or nodes.ptr[index].aux not=? int32(1) or nodes.ptr[array].kind not=? 'ident' or nodes.ptr[array].aux not=? int32(1) {return false}
+            if tkind(ntype(array)) not=? 'array' or not exl_word(telem(ntype(array))) {return false}
+            exm_arrays.push(array)
+            exm_elements.push(ExactLoopWord(nodes.ptr[n].sym))
+            exm_indices.push(if nodes.ptr[index].sym =? nodes.ptr[s].sym {ExactLoopWord(0)} else {index})
+            exm_steps.push(0)
+        }
+        else if nodes.ptr[n].kind =? 'assign' {
+            let target=ExactLoopWord(nodes.ptr[n].a)
+            if nodes.ptr[target].kind not=? 'index' or nodes.ptr[target].aux not=? 0 or not has_flag(target NF_INBOUNDS) {return false}
+            let index=ExactLoopWord(nodes.ptr[target].b)
+            let array=ExactLoopWord(nodes.ptr[target].a)
+            # Generated output positions are in bounds independently of the
+            # element census. Their exact result therefore fits a word too.
+            if exact_has_store(index) or (nodes.ptr[index].kind =? 'conv' and nodes.ptr[index].aux =? int32(int64(CV.int_))) {exact_map_stores[index]=true}
+            if nodes.ptr[array].kind not=? 'ident' or nodes.ptr[array].aux not=? int32(1) {return false}
+            let l=ExactLoopWord(nodes.ptr[array].sym)
+            if l >=? exact_initializers.length {return false}
+            let init=exact_initializers[l]
+            if init =? 0 or nodes.ptr[init].kind not=? 'array' or nkids(init) not=? 0 {return false}
+            if ExactLoopWord(locals.ptr[l].flags) & (LF_CAPTURED | LF_SHARED | LF_ALIAS | LF_ADDR | LF_BYREF | LF_MUTPARAM) not=? 0 {return false}
+            loop input in exm_arrays {
+                if nodes.ptr[input].sym =? nodes.ptr[array].sym {return false}
+            }
+            exm_math_output=exact_representation(ntype(target)) =? T_MATH_INT
+            if exm_math_output and not has_flag(init NF_BROADCAST) {return false}
+            store=ExactLoopWord(nodes.ptr[n].b)
+            assignment=n
+            exm_assignment=n
+        }
+        else {return false}
+    }
+    if store =? 0 or exm_arrays.length =? 0 or exm_arrays.length >? 8 {return false}
+    loop l in exm_elements {
+        if locals.ptr[l].offset >=? 0 and not exm_math_output {return false}
+    }
+    loop j in [0..exm_indices.length) {
+        if exm_indices[j] not=? 0 and exm_steps[j] =? 0 {return false}
+    }
+    let bits:ExactLoopWord=31
+    let limit_width:ExactLoopWord=if exm_math_output {63} else {64}
+    if exm_math_output {
+        let tagged_input=false
+        loop input in exm_arrays {
+            if exact_representation(telem(ntype(input))) =? T_MATH_INT {tagged_input=true}
+        }
+        if not tagged_input {limit_width=31}
+    }
+    loop bits >=? 2 and exm_width(store bits) >? limit_width {bits-=1}
+    if bits <? 2 or not exm_broadcast or not (exm_obligation or exm_math_output) {return false}
+    let output:ExactLoopWord=if exm_math_output {ExactLoopWord(nodes.ptr[ExactLoopWord(nodes.ptr[ExactLoopWord(nodes.ptr[assignment].a)].a)].sym)} else {0}
+    let output_flag:ExactLoopWord=exm_produced_flags.get(output) ?? -1
+    if output_flag >=? 0 {exm_produced_widths[output]=exm_width(store bits)}
+    # Adding the bias maps [-2^(bits-1), 2^(bits-1)) to [0, 2^bits).
+    # Modular arithmetic is intentional in this guard: every outlier retains
+    # a high bit, and OR cannot cancel it. The scan is itself SIMD-friendly.
+    let bias=e_iconst(ExactLoopWord(1) << (bits - 1))
+    let limit=e_iconst(ExactLoopWord(1) << bits)
+    let combined=vreg(VI)
+    e_mov(combined e_iconst(0));
+    loop node in exm_scalars {e_mov(combined e_bin('or_' VI combined e_bin('add' VI math_word_expr(node) bias)));}
+    let count=math_count(endnode)
+    let bad=vreg(VI)
+    e_mov(bad e_iconst(0));
+    let scanned:array<[int64 int64 int64]>=[]
+    loop j in [0..exm_arrays.length) {
+        let node=exm_arrays[j]
+        let parameter=exm_parameter(node)
+        if exm_steps[j] not=? 0 {
+            let stride=read_place(gen_place(exm_steps[j] false) T_INT)
+            e_mov(bad e_bin('or_' VI bad e_bin('gtu' VI stride e_iconst(1))));
+        }
+        if parameter not=? 0 {
+            let census=exm_census(parameter node bits)
+            e_mov(bad e_bin('or_' VI bad e_bin('geu' VI census limit)));
+            continue
+        }
+        let producer=exm_producer(node bits)
+        let pointer=read_place(gen_place(node false) ntype(node))
+        let start=if exm_indices[j] =? 0 {e_iconst(0)} else {read_place(gen_place(exm_indices[j] false) T_INT)}
+        let step=if exm_steps[j] =? 0 {e_iconst(1)} else {read_place(gen_place(exm_steps[j] false) T_INT)}
+        if producer >=? 0 {iff(e_bin('eq' VI producer e_iconst(0)));}
+        let duplicate:ExactLoopWord=e_iconst(0)
+        loop prior in scanned {
+            let same=e_bin('and_' VI e_bin('eq' VI pointer prior[0]) e_bin('and_' VI e_bin('eq' VI start prior[1]) e_bin('eq' VI step prior[2])))
+            duplicate=e_bin('or_' VI duplicate same)
+        }
+        if scanned.length >? 0 {iff(e_bin('eq' VI duplicate e_iconst(0)));}
+        iff(e_bin('gts' VI count e_iconst(0)));
+        let length=vreg(VI)
+        e_mov(length e_iconst(0));
+        iff(e_bin('ne' VI pointer e_iconst(0)));
+        e_mov(length e_load(VI pointer 8 8));
+        endc();
+        let valid=e_bin('and_' VI e_bin('ltu' VI start length) e_bin('or_' VI e_bin('eq' VI step e_iconst(0)) e_bin('and_' VI e_bin('eq' VI step e_iconst(1)) e_bin('leu' VI count e_bin('sub' VI length start)))))
+        iff(valid);
+        let base=e_bin('add' VI pointer e_bin('shl' VI start e_iconst(3)))
+        iff(e_bin('eq' VI step e_iconst(0)));
+        let splat=e_load(VI base 24 8)
+        e_mov(combined e_bin('or_' VI combined exm_magnitude(splat node bias bits)));
+        els();
+        let index=vreg(VI)
+        e_mov(index e_iconst(0));
+        blk()
+        brif_to(e_bin('geu' VI index count) ctl);
+        lop()
+        let address=e_bin('add' VI base e_bin('shl' VI index e_iconst(3)))
+        let value=e_load(VI address 24 8)
+        e_mov(combined e_bin('or_' VI combined exm_magnitude(value node bias bits)));
+        e_mov(index e_addi(index 1));
+        brif_to(e_bin('ltu' VI index count) ctl);
+        endc();
+        endc();
+        endc();
+        els();
+        e_mov(bad e_iconst(1));
+        endc();
+        endc();
+        if scanned.length >? 0 {endc();}
+        scanned.push([pointer start step])
+        if producer >=? 0 {endc();}
+    }
+    if ExactLoopWord(ir.fn_index) >=? exact_map_functions.length {exact_map_functions.resize(max(ExactLoopWord(ir.fn_index) + 1 lfuncs.length))}
+    exact_map_functions[ir.fn_index]=true
+    exm_emitting=true
+    iff(e_bin('and_' VI e_bin('ltu' VI combined limit) e_bin('eq' VI bad e_iconst(0))));
+    # Each version owns its block-local registers. Sharing them would make
+    # their live intervals span both disjoint loops and spill hot elements.
+    let versioned=exm_elements
+    let induction=ExactLoopWord(nodes.ptr[s].sym)
+    if exact_representation(ExactLoopWord(locals.ptr[induction].type)) =? T_INT and locals.ptr[induction].offset <? 0 {versioned.push(induction)}
+    let old_regs:array<int64>=[]
+    loop l in versioned {
+        old_regs.push(ExactLoopWord(locals.ptr[l].vreg))
+        locals.ptr[l].vreg=int32(vreg(VI))
+    }
+    exact_map_active=true
+    if not exm_stride_versions(s assignment count) {gen_for(s);}
+    exact_map_active=false
+    loop j in [0..versioned.length) {locals.ptr[versioned[j]].vreg=int32(old_regs[j])}
+    els();
+    if output_flag >=? 0 {e_mov(output_flag e_iconst(0));}
+    gen_for(s);
+    endc();
+    exm_emitting=false
+    true
+}
