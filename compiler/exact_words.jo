@@ -1,0 +1,296 @@
+use 'exact.jo'
+use 'lower_scalars.dewy'
+use 'lower_storage.dewy'
+use 'lower_group.dewy'
+use 'checker_signature.dewy'
+use 'checker_state.dewy'
+use 'checker_exact.dewy'
+use 'exact_reset_loop.jo'
+use 'ir_types.dewy'
+use 'checker_tokens.dewy'
+use 'refinement_types.dewy'
+use 'exact_guards.jo'
+use 'exact_guard_ops.dewy'
+use 'exact_loop.jo'
+use 'exact_chain_walks.dewy'
+use 'pcheck.jo'
+use 'pcheck_drive.dewy'
+use 'math_lower.jo'
+use 'lex.jo'
+use 'ast.jo'
+use 'types.jo'
+use 'type_ops.dewy'
+use 'word_overflow.dewy'
+use 'expr.jo'
+use 'check.jo'
+use 'checks_thin.dewy'
+use 'checks_assign_hooks.dewy'
+use 'ir.jo'
+use 'isolation.jo'
+use 'directives.jo'
+use 'directive_queries.dewy'
+use 'directive_rules.dewy'
+use 'directive_ops.dewy'
+use 'effects.jo'
+use 'refine.jo'
+use 'witness.jo'
+use 'witness_ops.dewy'
+use 'util.jo'
+use 'diagnostic_exit.dewy'
+use 'facts.jo'
+use 'facts_arith.dewy'
+use 'facts_ranges.dewy'
+use 'facts_joins.dewy'
+use 'facts_progress.dewy'
+use 'lower.jo'
+use 'node_store.dewy'
+use 'lower_primitives.dewy'
+use 'ir_builders.dewy'
+use 'math_ops.dewy'
+use 'isolation_ops.dewy'
+use 'exact_measure.dewy'
+use 'exact_cold_walk.dewy'
+
+# Statically sized two's-complement words. These are compiler arrays of vregs,
+# never runtime arrays or heap objects. The last word is sign extended.
+exact_extend = (words: int[], count: int) -> int[]:
+    let words = words
+    if words.len() == 0: return fill(e_iconst(0), count) # unreachable arm
+    if words.len() < count:
+        sign = e_bin(.shrs, VI, words[words.len() - 1], e_iconst(63))
+        loop words.len() < count: words.push(sign)
+    if words.len() > count: words.truncate(count)
+    words
+exact_add = (a0: int[], b0: int[], count: int, subtract: bool = false) -> int[]:
+    a = exact_extend(a0, count); b = exact_extend(b0, count)
+    out: int[]
+    carry = -1
+    operation = if subtract: Op.sub else: Op.add
+    loop i in [0..count):
+        sum = e_bin(operation, VI, a[i], b[i])
+        value = if i == 0: sum else: e_bin(operation, VI, sum, carry)
+        if i + 1 < count:
+            first = if subtract: e_bin(.ltu, VI, a[i], b[i]) else: e_bin(.ltu, VI, sum, a[i])
+            if i == 0: carry = first
+            else:
+                second = if subtract: e_bin(.ltu, VI, sum, carry) else: e_bin(.ltu, VI, value, sum)
+                carry = e_bin(.or_, VI, first, second)
+        out.push(value)
+    out
+exact_neg = (a: int[], count: int) -> int[]: exact_add([e_iconst(0)], a, count, true)
+exact_compare = (op: Tok, a0: int[], b0: int[]) -> int:
+    count = max(a0.len(), b0.len())
+    a = exact_extend(a0, count); b = exact_extend(b0, count)
+    if count == 1:
+        operation = if op == .eq: Op.eq else if op == .ne: Op.ne else if op == .lt: Op.lts else if op == .le: Op.les else if op == .ge: Op.ges else: Op.gts
+        return e_bin(operation, VI, a[0], b[0])
+    equal = -1
+    less = -1
+    i = count - 1
+    loop i >= 0:
+        if op != .eq and op != .ne:
+            lt = e_bin((if i == count - 1: Op.lts else: Op.ltu), VI, a[i], b[i])
+            less = if i == count - 1: lt else: e_bin(.or_, VI, less, e_bin(.and_, VI, equal, lt))
+        if i > 0 or op == .eq or op == .ne or op == .le or op == .gt:
+            same = e_bin(.eq, VI, a[i], b[i])
+            equal = if i == count - 1: same else: e_bin(.and_, VI, equal, same)
+        i -= 1
+    if op == .eq: return equal
+    if op == .ne: return e_bin(.xor, VI, equal, e_iconst(1))
+    if op == .lt: return less
+    if op == .le: return e_bin(.or_, VI, less, equal)
+    if op == .ge: return e_bin(.xor, VI, less, e_iconst(1))
+    e_bin(.xor, VI, e_bin(.or_, VI, less, equal), e_iconst(1))
+exact_mul = (a0: int[], b0: int[], count: int) -> int[]:
+    if count == 1: return [e_bin(.mul, VI, a0[0], b0[0])]
+    if count == 2 and a0.len() == 1 and b0.len() == 1 and mulh_ok:
+        return [e_bin(.mul, VI, a0[0], b0[0]), e_bin(.mulhs, VI, a0[0], b0[0])]
+    a = exact_extend(a0, count); b = exact_extend(b0, count)
+    out = fill(e_iconst(0), count)
+    loop i in [0..count):
+        carry = e_iconst(0)
+        loop j in [0..count - i):
+            low = e_bin(.mul, VI, a[i], b[j])
+            high = if i + j + 1 < count: fixed_mul_high(a[i], b[j]) else: e_iconst(0)
+            sum = if i == 0: low else: e_bin(.add, VI, low, out[i + j])
+            word = if j == 0: sum else: e_bin(.add, VI, sum, carry)
+            if i + j + 1 < count:
+                carry = high
+                if i > 0: carry = e_bin(.add, VI, carry, e_bin(.ltu, VI, sum, low))
+                if j > 0: carry = e_bin(.add, VI, carry, e_bin(.ltu, VI, word, sum))
+            out[i + j] = word
+    out
+exact_select = (condition: int, yes: int[], no: int[], count: int) -> int[]:
+    a = exact_extend(yes, count); b = exact_extend(no, count)
+    out: int[]
+    loop i in [0..count): out.push(vreg(VI))
+    iff(condition)
+    loop i in [0..count): e_mov(out[i], a[i])
+    els()
+    loop i in [0..count): e_mov(out[i], b[i])
+    endc()
+    out
+exact_shift_one = (a: int[]) -> int[]:
+    out: int[]
+    carry = e_iconst(0)
+    loop word in a:
+        out.push(e_bin(.or_, VI, e_bin(.shl, VI, word, e_iconst(1)), carry))
+        carry = e_bin(.shru, VI, word, e_iconst(63))
+    out
+# Restoring division of fixed-size magnitudes. O(bits * words), no allocation.
+# Scalar division stays one machine operation whenever its selected width fits.
+exact_div = (n: int, a0: int[], b0: int[], count: int, modulo: bool) -> int[]:
+    a = exact_extend(a0, count); b = exact_extend(b0, count)
+    iff(exact_compare(.eq, b, [e_iconst(0)]))
+    e_call_nr1(rt("__div_zero"), e_daddr(loc_data(nodes[n].pos)), -1)
+    endc()
+    if count == 1:
+        # Remainder is defined for MIN % -1 even though x86 idiv traps on
+        # the unrepresentable quotient. Guard only that divisor; no widening
+        # or full multiword division is needed for a word remainder.
+        (known_divisor, divisor_value) = integer_constant(int(nodes[n].b))
+        guarded_remainder = modulo and (not known_divisor or divisor_value == -1)
+        remainder_result = 0
+        if guarded_remainder:
+            remainder_result = vreg(VI)
+            e_mov(remainder_result, e_iconst(0))
+            iff(e_bin(.ne, VI, b[0], e_iconst(-1)))
+        q = if modulo: e_iconst(0) else: e_bin(.divs, VI, a[0], b[0])
+        r = e_bin(.rems, VI, a[0], b[0])
+        result = vreg(VI)
+        e_mov(result, if modulo: r else: q)
+        if dewy_at(nodes[n].pos):
+            if known_divisor and divisor_value > 0:
+                changed = if modulo: e_bin(.add, VI, r, b[0]) else: e_addi(q, -1)
+                emit(.select, VI, result, e_bin(.lts, VI, r, e_iconst(0)), changed, (if modulo: r else: q), 0)
+            else:
+                iff(e_bin(.and_, VI, e_bin(.ne, VI, r, e_iconst(0)), e_bin(.lts, VI, e_bin(.xor, VI, r, b[0]), e_iconst(0))))
+                e_mov(result, if modulo: e_bin(.add, VI, r, b[0]) else: e_addi(q, -1))
+                endc()
+        if guarded_remainder:
+            e_mov(remainder_result, result)
+            endc()
+            return [remainder_result]
+        return [result]
+    out: int[]
+    loop i in [0..count): out.push(vreg(VI))
+    high = e_iconst(0)
+    loop i in [1..count): high = e_bin(.or_, VI, high, e_bin(.or_, VI, a[i], b[i]))
+    iff(e_bin(.eq, VI, high, e_iconst(0)))
+    e_mov(out[0], e_bin((if modulo: Op.remu else: Op.divu), VI, a[0], b[0]))
+    loop i in [1..count): e_mov(out[i], e_iconst(0))
+    els()
+    sign_a = e_bin(.shrs, VI, a[0], e_iconst(63))
+    sign_b = e_bin(.shrs, VI, b[0], e_iconst(63))
+    mismatch = e_iconst(0)
+    loop i in [1..count):
+        mismatch = e_bin(.or_, VI, mismatch, e_bin(.or_, VI, e_bin(.ne, VI, a[i], sign_a), e_bin(.ne, VI, b[i], sign_b)))
+    iff(e_bin(.eq, VI, mismatch, e_iconst(0)))
+    iff(e_bin(.eq, VI, b[0], e_iconst(-1)))
+    negated = if modulo: fill(e_iconst(0), count) else: exact_neg(a, count)
+    loop i in [0..count): e_mov(out[i], negated[i])
+    els()
+    native = exact_extend(exact_div(n, [a[0]], [b[0]], 1, modulo), count)
+    loop i in [0..count): e_mov(out[i], native[i])
+    endc()
+    els()
+    wide = exact_div_restoring(n, a, b, count, modulo)
+    loop i in [0..count): e_mov(out[i], wide[i])
+    endc()
+    endc()
+    out
+exact_div_restoring = (n: int, a: int[], b: int[], count: int, modulo: bool) -> int[]:
+    negative_a = e_bin(.lts, VI, a[count - 1], e_iconst(0))
+    negative_b = e_bin(.lts, VI, b[count - 1], e_iconst(0))
+    # An extra sign word keeps magnitude comparisons unsigned-safe.
+    size = count + 1
+    am = exact_select(negative_a, exact_neg(a, size), a, size)
+    bm = exact_select(negative_b, exact_neg(b, size), b, size)
+    quotient: int[]
+    remainder: int[]
+    input: int[]
+    loop i in [0..size):
+        quotient.push(vreg(VI)); e_mov(quotient[i], e_iconst(0))
+        remainder.push(vreg(VI)); e_mov(remainder[i], e_iconst(0))
+        input.push(vreg(VI)); e_mov(input[i], am[i])
+    remaining = vreg(VI)
+    e_mov(remaining, e_iconst(size * 64))
+    blk()
+    lop()
+    brif_to(e_bin(.eq, VI, remaining, e_iconst(0)), ctl - 1)
+    bit = e_bin(.shru, VI, input[size - 1], e_iconst(63))
+    shifted = exact_shift_one(remainder)
+    shifted[0] = e_bin(.or_, VI, shifted[0], bit)
+    enough = exact_compare(.ge, shifted, bm)
+    difference = exact_add(shifted, bm, size, true)
+    reduced = exact_select(enough, difference, shifted, size)
+    nextq = exact_shift_one(quotient)
+    nextq[0] = e_bin(.or_, VI, nextq[0], enough)
+    nextinput = exact_shift_one(input)
+    loop i in [0..size):
+        e_mov(remainder[i], reduced[i]); e_mov(quotient[i], nextq[i]); e_mov(input[i], nextinput[i])
+    e_mov(remaining, e_addi(remaining, -1))
+    br_to(ctl)
+    endc(); endc()
+    sign = e_bin(.xor, VI, negative_a, negative_b)
+    q = exact_select(sign, exact_neg(quotient, size), quotient, size)
+    r = exact_select(negative_a, exact_neg(remainder, size), remainder, size)
+    result = if modulo: r else: q
+    if dewy_at(nodes[n].pos):
+        adjust = e_bin(.and_, VI, sign, exact_compare(.ne, remainder, [e_iconst(0)]))
+        changed = if modulo: exact_add(r, b, size) else: exact_add(q, [e_iconst(1)], size, true)
+        result = exact_select(adjust, changed, result, size)
+    exact_extend(result, count)
+# A constant count selects word offsets while compiling, not a runtime barrel.
+# Retain every source word until shifting, even when the proven result narrows.
+exact_shift_literal = (a0: int[], by: int, count: int, right: bool) -> int[]:
+    if count == 1 and a0.len() == 1:
+        if by < 0 or by >= 64: return [if right: e_bin(.shrs, VI, a0[0], e_iconst(63)) else: e_iconst(0)]
+        return [e_bin((if right: Op.shrs else: Op.shl), VI, a0[0], e_iconst(by))]
+    size = max(count, a0.len())
+    a = exact_extend(a0, size)
+    sign = e_bin(.shrs, VI, a[size - 1], e_iconst(63))
+    if by < 0 or by >= size * 64: return fill((if right: sign else: e_iconst(0)), count)
+    words = by / 64
+    bits = by % 64
+    out: int[]
+    loop i in [0..count):
+        at = if right: i + words else: i - words
+        value = if at < 0: e_iconst(0) else if at >= size: sign else: a[at]
+        if bits != 0:
+            other = if right: at + 1 else: at - 1
+            neighbor = if other < 0: e_iconst(0) else if other >= size: sign else: a[other]
+            value = e_bin(.or_, VI, e_bin((if right: Op.shru else: Op.shl), VI, value, e_iconst(bits)), e_bin((if right: Op.shl else: Op.shru), VI, neighbor, e_iconst(64 - bits)))
+        out.push(value)
+    out
+# A bounded shift uses a logarithmic barrel shifter. Each stage is selected
+# once; excess right counts produce the sign continuation, never mask modulo 64.
+exact_shift = (a0: int[], by: int, count: int, right: bool) -> int[]:
+    if count == 1 and a0.len() == 1:
+        value = e_bin((if right: Op.shrs else: Op.shl), VI, a0[0], by)
+        continuation = if right: e_bin(.shrs, VI, a0[0], e_iconst(63)) else: e_iconst(0)
+        result = vreg(VI)
+        emit(.select, VI, result, e_bin(.geu, VI, by, e_iconst(64)), continuation, value, 0)
+        return [result]
+    size = max(count, a0.len())
+    a = exact_extend(a0, size)
+    step = 1
+    loop step < size * 64:
+        shifted: int[]
+        words = step / 64
+        bits = step % 64
+        sign = e_bin(.shrs, VI, a[size - 1], e_iconst(63))
+        loop i in [0..size):
+            at = if right: i + words else: i - words
+            value = if at < 0: e_iconst(0) else if at >= size: sign else: a[at]
+            if bits != 0:
+                other = if right: at + 1 else: at - 1
+                neighbor = if other < 0: e_iconst(0) else if other >= size: sign else: a[other]
+                value = e_bin(.or_, VI, e_bin((if right: Op.shru else: Op.shl), VI, value, e_iconst(bits)), e_bin((if right: Op.shl else: Op.shru), VI, neighbor, e_iconst(64 - bits)))
+            shifted.push(value)
+        a = exact_select(e_bin(.and_, VI, by, e_iconst(step)), shifted, a, size)
+        step *= 2
+    if right:
+        continuation = fill(e_bin(.shrs, VI, a[size - 1], e_iconst(63)), size)
+        a = exact_select(e_bin(.geu, VI, by, e_iconst(size * 64)), continuation, a, size)
+    exact_extend(a, count)

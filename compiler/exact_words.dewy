@@ -1,0 +1,306 @@
+$runtime_checks
+
+from p"ast.jo" import (nodes)
+from p"check.jo" import (dewy_at)
+from p"checker_tokens.dewy" import (Tok)
+from p"expr.jo" import (integer_constant)
+from p"ir.jo" import (VI mulh_ok)
+from p"ir_builders.dewy" import (e_addi e_bin e_iconst e_mov emit vreg)
+from p"ir_types.dewy" import (Op)
+from p"lower.jo" import (ctl)
+from p"lower_primitives.dewy" import (e_call_nr1 e_daddr loc_data rt)
+from p"lower_scalars.dewy" import (fixed_mul_high)
+from p"lower_storage.dewy" import (blk br_to brif_to els endc iff lop)
+
+ExactWord:type=int64<overflow='wrap'>
+
+# Statically sized two's-complement words. These are compiler arrays of vregs,
+# never runtime arrays or heap objects. The last word is sign extended.
+exact_extend=(words0:array<int64> count:ExactWord):>array<int64>=>{
+    let words=words0
+    if words.length =? 0 {return fill(e_iconst(0) count)}
+    if words.length <? count {
+        let sign=e_bin('shrs' VI words[words.length - 1] e_iconst(63))
+        loop words.length <? count {words.push(sign)}
+    }
+    if words.length >? count {words.truncate(count)}
+    words
+}
+exact_add=(a0:array<int64> b0:array<int64> count:ExactWord subtract:bool=false):>array<int64>=>{
+    let a=exact_extend(a0 count)
+    let b=exact_extend(b0 count)
+    let out:array<int64>=[]
+    let carry:ExactWord=-1
+    let operation=if subtract {Op.sub} else {Op.add}
+    loop i in [0..count) {
+        let sum=e_bin(operation VI a[i] b[i])
+        let value=if i =? 0 {sum} else {e_bin(operation VI sum carry)}
+        if i + 1 <? count {
+            let first=if subtract {e_bin('ltu' VI a[i] b[i])} else {e_bin('ltu' VI sum a[i])}
+            if i =? 0 {carry=first} else {
+                let second=if subtract {e_bin('ltu' VI sum carry)} else {e_bin('ltu' VI value sum)}
+                carry=e_bin('or_' VI first second)
+            }
+        }
+        out.push(value)
+    }
+    out
+}
+exact_neg=(a:array<int64> count:ExactWord):>array<int64>=>exact_add([e_iconst(0)] a count true)
+exact_compare=(op:Tok a0:array<int64> b0:array<int64>):>int64=>{
+    let count:ExactWord=max(a0.length b0.length)
+    let a=exact_extend(a0 count)
+    let b=exact_extend(b0 count)
+    if count =? 1 {
+        let operation=if op =? 'eq' {Op.eq} else if op =? 'ne' {Op.ne} else if op =? 'lt' {Op.lts} else if op =? 'le' {Op.les} else if op =? 'ge' {Op.ges} else {Op.gts}
+        return e_bin(operation VI a[0] b[0])
+    }
+    let equal:ExactWord=-1
+    let less:ExactWord=-1
+    let i:ExactWord=count - 1
+    loop i >=? 0 {
+        if op not=? 'eq' and op not=? 'ne' {
+            let lt=e_bin((if i =? count - 1 {Op.lts} else {Op.ltu}) VI a[i] b[i])
+            less=if i =? count - 1 {lt} else {e_bin('or_' VI less e_bin('and_' VI equal lt))}
+        }
+        if i >? 0 or op =? 'eq' or op =? 'ne' or op =? 'le' or op =? 'gt' {
+            let same=e_bin('eq' VI a[i] b[i])
+            equal=if i =? count - 1 {same} else {e_bin('and_' VI equal same)}
+        }
+        i-=1
+    }
+    if op =? 'eq' {return equal}
+    if op =? 'ne' {return e_bin('xor' VI equal e_iconst(1))}
+    if op =? 'lt' {return less}
+    if op =? 'le' {return e_bin('or_' VI less equal)}
+    if op =? 'ge' {return e_bin('xor' VI less e_iconst(1))}
+    e_bin('xor' VI e_bin('or_' VI less equal) e_iconst(1))
+}
+exact_mul=(a0:array<int64> b0:array<int64> count:ExactWord):>array<int64>=>{
+    if count =? 1 {return [e_bin('mul' VI a0[0] b0[0])]}
+    if count =? 2 and a0.length =? 1 and b0.length =? 1 and mulh_ok {return [e_bin('mul' VI a0[0] b0[0]) e_bin('mulhs' VI a0[0] b0[0])]}
+    let a=exact_extend(a0 count)
+    let b=exact_extend(b0 count)
+    let out=fill(e_iconst(0) count)
+    loop i in [0..count) {
+        let carry:ExactWord=e_iconst(0)
+        loop j in [0..count - i) {
+            let low=e_bin('mul' VI a[i] b[j])
+            let high=if i + j + 1 <? count {fixed_mul_high(a[i] b[j])} else {e_iconst(0)}
+            let sum=if i =? 0 {low} else {e_bin('add' VI low out[i + j])}
+            let word=if j =? 0 {sum} else {e_bin('add' VI sum carry)}
+            if i + j + 1 <? count {
+                carry=high
+                if i >? 0 {carry=e_bin('add' VI carry e_bin('ltu' VI sum low))}
+                if j >? 0 {carry=e_bin('add' VI carry e_bin('ltu' VI word sum))}
+            }
+            out[i + j]=word
+        }
+    }
+    out
+}
+exact_select=(condition:ExactWord yes:array<int64> no:array<int64> count:ExactWord):>array<int64>=>{
+    let a=exact_extend(yes count)
+    let b=exact_extend(no count)
+    let out:array<int64>=[]
+    loop i in [0..count) {out.push(vreg(VI))}
+    iff(condition);
+    loop i in [0..count) {e_mov(out[i] a[i]);}
+    els();
+    loop i in [0..count) {e_mov(out[i] b[i]);}
+    endc();
+    out
+}
+exact_shift_one=(a:array<int64>):>array<int64>=>{
+    let out:array<int64>=[]
+    let carry:ExactWord=e_iconst(0)
+    loop word in a {
+        out.push(e_bin('or_' VI e_bin('shl' VI word e_iconst(1)) carry))
+        carry=e_bin('shru' VI word e_iconst(63))
+    }
+    out
+}
+# Restoring division of fixed-size magnitudes. O(bits * words), no allocation.
+# Scalar division stays one machine operation whenever its selected width fits.
+exact_div=(n:ExactWord a0:array<int64> b0:array<int64> count:ExactWord modulo:bool):>array<int64>=>$unsafe {
+    let a=exact_extend(a0 count)
+    let b=exact_extend(b0 count)
+    iff(exact_compare('eq' b [e_iconst(0)]));
+    e_call_nr1(rt("__div_zero") e_daddr(loc_data(nodes.ptr[n].pos)) -1);
+    endc();
+    if count =? 1 {
+        # Remainder is defined for MIN % -1 even though x86 idiv traps on
+        # the unrepresentable quotient. Guard only that divisor; no widening
+        # or full multiword division is needed for a word remainder.
+        let [known_divisor divisor_value]=integer_constant(ExactWord(nodes.ptr[n].b))
+        let guarded_remainder=modulo and (not known_divisor or divisor_value =? -1)
+        let remainder_result:ExactWord=0
+        if guarded_remainder {
+            remainder_result=vreg(VI)
+            e_mov(remainder_result e_iconst(0));
+            iff(e_bin('ne' VI b[0] e_iconst(-1)));
+        }
+        let q=if modulo {e_iconst(0)} else {e_bin('divs' VI a[0] b[0])}
+        let r=e_bin('rems' VI a[0] b[0])
+        let result=vreg(VI)
+        e_mov(result (if modulo {r} else {q}));
+        if dewy_at(nodes.ptr[n].pos) {
+            if known_divisor and divisor_value >? 0 {
+                let changed=if modulo {e_bin('add' VI r b[0])} else {e_addi(q -1)}
+                emit('select' VI result e_bin('lts' VI r e_iconst(0)) changed (if modulo {r} else {q}) 0);
+            }
+            else {
+                iff(e_bin('and_' VI e_bin('ne' VI r e_iconst(0)) e_bin('lts' VI e_bin('xor' VI r b[0]) e_iconst(0))));
+                e_mov(result (if modulo {e_bin('add' VI r b[0])} else {e_addi(q -1)}));
+                endc();
+            }
+        }
+        if guarded_remainder {
+            e_mov(remainder_result result);
+            endc();
+            return [remainder_result]
+        }
+        return [result]
+    }
+    let out:array<int64>=[]
+    loop i in [0..count) {out.push(vreg(VI))}
+    let high:ExactWord=e_iconst(0)
+    loop i in [1..count) {high=e_bin('or_' VI high e_bin('or_' VI a[i] b[i]))}
+    iff(e_bin('eq' VI high e_iconst(0)));
+    e_mov(out[0] e_bin((if modulo {Op.remu} else {Op.divu}) VI a[0] b[0]));
+    loop i in [1..count) {e_mov(out[i] e_iconst(0));}
+    els();
+    let sign_a=e_bin('shrs' VI a[0] e_iconst(63))
+    let sign_b=e_bin('shrs' VI b[0] e_iconst(63))
+    let mismatch:ExactWord=e_iconst(0)
+    loop i in [1..count) {mismatch=e_bin('or_' VI mismatch e_bin('or_' VI e_bin('ne' VI a[i] sign_a) e_bin('ne' VI b[i] sign_b)))}
+    iff(e_bin('eq' VI mismatch e_iconst(0)));
+    iff(e_bin('eq' VI b[0] e_iconst(-1)));
+    let negated=if modulo {fill(e_iconst(0) count)} else {exact_neg(a count)}
+    loop i in [0..count) {e_mov(out[i] negated[i]);}
+    els();
+    let native=exact_extend(exact_div(n [a[0]] [b[0]] 1 modulo) count)
+    loop i in [0..count) {e_mov(out[i] native[i]);}
+    endc();
+    els();
+    let wide=exact_div_restoring(n a b count modulo)
+    loop i in [0..count) {e_mov(out[i] wide[i]);}
+    endc();
+    endc();
+    out
+}
+exact_div_restoring=(n:ExactWord a:array<int64> b:array<int64> count:ExactWord modulo:bool):>array<int64>=>$unsafe {
+    let negative_a=e_bin('lts' VI a[count - 1] e_iconst(0))
+    let negative_b=e_bin('lts' VI b[count - 1] e_iconst(0))
+    # An extra sign word keeps magnitude comparisons unsigned-safe.
+    let size=count + 1
+    let am=exact_select(negative_a exact_neg(a size) a size)
+    let bm=exact_select(negative_b exact_neg(b size) b size)
+    let quotient:array<int64>=[]
+    let remainder:array<int64>=[]
+    let input:array<int64>=[]
+    loop i in [0..size) {
+        quotient.push(vreg(VI))
+        e_mov(quotient[i] e_iconst(0));
+        remainder.push(vreg(VI))
+        e_mov(remainder[i] e_iconst(0));
+        input.push(vreg(VI))
+        e_mov(input[i] am[i]);
+    }
+    let remaining=vreg(VI)
+    e_mov(remaining e_iconst(size * 64));
+    blk()
+    lop()
+    brif_to(e_bin('eq' VI remaining e_iconst(0)) ctl - 1);
+    let bit=e_bin('shru' VI input[size - 1] e_iconst(63))
+    let shifted=exact_shift_one(remainder)
+    shifted[0]=e_bin('or_' VI shifted[0] bit)
+    let enough=exact_compare('ge' shifted bm)
+    let difference=exact_add(shifted bm size true)
+    let reduced=exact_select(enough difference shifted size)
+    let nextq=exact_shift_one(quotient)
+    nextq[0]=e_bin('or_' VI nextq[0] enough)
+    let nextinput=exact_shift_one(input)
+    loop i in [0..size) {
+        e_mov(remainder[i] reduced[i]);
+        e_mov(quotient[i] nextq[i]);
+        e_mov(input[i] nextinput[i]);
+    }
+    e_mov(remaining e_addi(remaining -1));
+    br_to(ctl);
+    endc();
+    endc();
+    let sign=e_bin('xor' VI negative_a negative_b)
+    let q=exact_select(sign exact_neg(quotient size) quotient size)
+    let r=exact_select(negative_a exact_neg(remainder size) remainder size)
+    let result=if modulo {r} else {q}
+    if dewy_at(nodes.ptr[n].pos) {
+        let adjust=e_bin('and_' VI sign exact_compare('ne' remainder [e_iconst(0)]))
+        let changed=if modulo {exact_add(r b size)} else {exact_add(q [e_iconst(1)] size true)}
+        result=exact_select(adjust changed result size)
+    }
+    exact_extend(result count)
+}
+# A constant count selects word offsets while compiling, not a runtime barrel.
+# Retain every source word until shifting, even when the proven result narrows.
+exact_shift_literal=(a0:array<int64> by:ExactWord count:ExactWord right:bool):>array<int64>=>{
+    if count =? 1 and a0.length =? 1 {
+        if by <? 0 or by >=? 64 {return [if right {e_bin('shrs' VI a0[0] e_iconst(63))} else {e_iconst(0)}]}
+        return [e_bin((if right {Op.shrs} else {Op.shl}) VI a0[0] e_iconst(by))]
+    }
+    let size:ExactWord=max(count a0.length)
+    let a=exact_extend(a0 size)
+    let sign=e_bin('shrs' VI a[size - 1] e_iconst(63))
+    if by <? 0 or by >=? size * 64 {return fill((if right {sign} else {e_iconst(0)}) count)}
+    let words=by // 64
+    let bits=by % 64
+    let out:array<int64>=[]
+    loop i in [0..count) {
+        let at=if right {i + words} else {i - words}
+        let value:ExactWord=if at <? 0 {e_iconst(0)} else if at >=? size {sign} else {a[at]}
+        if bits not=? 0 {
+            let other=if right {at + 1} else {at - 1}
+            let neighbor=if other <? 0 {e_iconst(0)} else if other >=? size {sign} else {a[other]}
+            value=e_bin('or_' VI e_bin((if right {Op.shru} else {Op.shl}) VI value e_iconst(bits)) e_bin((if right {Op.shl} else {Op.shru}) VI neighbor e_iconst(64 - bits)))
+        }
+        out.push(value)
+    }
+    out
+}
+# A bounded shift uses a logarithmic barrel shifter. Each stage is selected
+# once; excess right counts produce the sign continuation, never mask modulo 64.
+exact_shift=(a0:array<int64> by:ExactWord count:ExactWord right:bool):>array<int64>=>{
+    if count =? 1 and a0.length =? 1 {
+        let value=e_bin((if right {Op.shrs} else {Op.shl}) VI a0[0] by)
+        let continuation=if right {e_bin('shrs' VI a0[0] e_iconst(63))} else {e_iconst(0)}
+        let result=vreg(VI)
+        emit('select' VI result e_bin('geu' VI by e_iconst(64)) continuation value 0);
+        return [result]
+    }
+    let size:ExactWord=max(count a0.length)
+    let a=exact_extend(a0 size)
+    let step:ExactWord=1
+    loop step <? size * 64 {
+        let shifted:array<int64>=[]
+        let words=step // 64
+        let bits=step % 64
+        let sign=e_bin('shrs' VI a[size - 1] e_iconst(63))
+        loop i in [0..size) {
+            let at=if right {i + words} else {i - words}
+            let value:ExactWord=if at <? 0 {e_iconst(0)} else if at >=? size {sign} else {a[at]}
+            if bits not=? 0 {
+                let other=if right {at + 1} else {at - 1}
+                let neighbor=if other <? 0 {e_iconst(0)} else if other >=? size {sign} else {a[other]}
+                value=e_bin('or_' VI e_bin((if right {Op.shru} else {Op.shl}) VI value e_iconst(bits)) e_bin((if right {Op.shl} else {Op.shru}) VI neighbor e_iconst(64 - bits)))
+            }
+            shifted.push(value)
+        }
+        a=exact_select(e_bin('and_' VI by e_iconst(step)) shifted a size)
+        step*=2
+    }
+    if right {
+        let continuation=fill(e_bin('shrs' VI a[size - 1] e_iconst(63)) size)
+        a=exact_select(e_bin('geu' VI by e_iconst(size * 64)) continuation a size)
+    }
+    exact_extend(a count)
+}
