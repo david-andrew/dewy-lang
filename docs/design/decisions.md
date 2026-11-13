@@ -711,7 +711,10 @@ section linked. ROADMAP.md lists them in one line each.
     design round is queued.
 - Batch 10 (David, 2026-11-13):
   - **`&`/`and`, `|`/`or` and `~`/`not` are each the same operator** (standing): each pair means
-    exactly the same thing and differs only in precedence and in which one is idiomatic where. Likewise operator sections
+    exactly the same thing and differs only in precedence and in which one is idiomatic where.
+    The idiom (standing): `&`, `|`, `~` in type expressions (`E1 & E2`, `??<~Canceled>`);
+    `and`, `or`, `not` in value expressions (`e1 and e2`). Bitwise work on integers may use the
+    symbols for their tighter precedence (`~flags & 3`, LANGUAGE.md). Likewise operator sections
     such as `(& x)` are an existing feature (refinements use them), not a new one.
   - **Combining failures, David's design** (direction; replaces D42's `ErrorGroup` proposal as
     the starting point, still to be designed in detail and compared):
