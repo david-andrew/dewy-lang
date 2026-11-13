@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.corpus_cache import SHARDS, built_once, cached, digest, shard_of
 from tests.support import compiler  # noqa: F401 (fixture)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -284,8 +285,7 @@ def corpus(full=True):
     """Every Dewy file of the repository and the generated texts; the landing tier takes every
     second file (the full corpus is the nightly tier's). The oracle's lines hit are the same
     with the half corpus: the generated texts and the other half cover every scanner branch."""
-    files = [*sorted((ROOT / 'compiler').glob('*.dewy')), *sorted((ROOT / 'lib').rglob('*.dewy')),
-             *sorted((ROOT / 'tests/ladder').rglob('*.dewy'))]
+    files = corpus_paths()
     files = files if full else files[::2]
     texts = [p.read_text(encoding='utf-8') for p in files]
     return texts + generated(random.Random(11), 600)
@@ -299,16 +299,44 @@ def build(compiler, source, binary, release):
     return binary
 
 
-@pytest.mark.parametrize('release, full', [
-    pytest.param(False, False, id='default'),
-    pytest.param(True, True, id='release'),
-    pytest.param(False, True, id='full', marks=pytest.mark.nightly),
+def lex_inputs(full):
+    """The corpus texts (cached: reading every file and generating the texts)."""
+    return cached('lex-corpus', digest(Path(__file__).read_bytes(), full,
+                                       *(p.read_bytes() for p in corpus_paths())),
+                  lambda: corpus(full))
+
+
+def corpus_paths():
+    return [*sorted((ROOT / 'compiler').glob('*.dewy')), *sorted((ROOT / 'lib').rglob('*.dewy')),
+            *sorted((ROOT / 'tests/ladder').rglob('*.dewy'))]
+
+
+def shard_oracle(texts, index, full):
+    """The shard's texts and the oracle's lines for each (cached by content)."""
+    mine = shard_of(texts, index)
+    key = digest(Path(__file__).read_bytes(), *mine)
+    return mine, cached('lex-oracle', key, lambda: [oracle(t.encode()) for t in mine])
+
+
+@pytest.mark.parametrize('release, full, shard', [
+    *[pytest.param(False, False, k, id=f'default-{k}of{SHARDS}', marks=pytest.mark.xdist_group(name=f'lex-default-{k}'))
+      for k in range(SHARDS)],
+    *[pytest.param(True, True, k, id=f'release-{k}of{SHARDS}', marks=pytest.mark.xdist_group(name=f'lex-release-{k}'))
+      for k in range(SHARDS)],
+    *[pytest.param(False, True, k, id=f'full-{k}of{SHARDS}',
+                   marks=[pytest.mark.nightly, pytest.mark.xdist_group(name=f'lex-full-{k}')])
+      for k in range(SHARDS)],
 ])
-def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full):
+def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full, shard):
+    # (interleaved shards, one xdist group each: every shard samples the whole corpus)
     sys.setrecursionlimit(20000)
-    dewy = build(compiler, FIXTURES / 'dewy_lex_dewy.dewy', tmp_path / 'lex-dewy', release)
-    jo = build(compiler, FIXTURES / 'dewy_lex_jo.jo', tmp_path / 'lex-jo', release)
-    texts = corpus(full)
+
+    def make(directory):
+        return (build(compiler, FIXTURES / 'dewy_lex_dewy.dewy', directory / 'lex-dewy', release),
+                build(compiler, FIXTURES / 'dewy_lex_jo.jo', directory / 'lex-jo', release))
+    dewy, jo = built_once(('lex', str(compiler), release), make)
+    all_texts = lex_inputs(full)
+    texts, expected = shard_oracle(all_texts, shard, full)
     cases = tmp_path / 'cases'
     cases.mkdir()
     paths = []
@@ -325,12 +353,12 @@ def test_selfhost_dewy_lex_match_jo(compiler, tmp_path, release, full):
         outputs.append(ran.stdout)
     assert outputs[0] == outputs[1]
     got = (outputs[0].decode()).splitlines()
-    want = [line for text in texts for line in oracle(text.encode())]
+    want = [line for lines in expected for line in lines]
     assert len(got) == len(want)
     for k, (a, b) in enumerate(zip(got, want)):
         assert a == b, (k, a, b)
-    # (the texts reach every outcome)
-    assert sum(line.startswith('! ') for line in want) > 100
+    # (each shard's texts reach the failure outcomes)
+    assert sum(line.startswith('! ') for line in want) > 100 // SHARDS
     assert any(line.startswith('! ') and line.split()[2] != '-1' for line in want)
 
 
