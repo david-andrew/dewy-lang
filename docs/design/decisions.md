@@ -653,3 +653,31 @@ section linked. ROADMAP.md lists them in one line each.
     utilize Dewy's strengths and style" rather than inventing syntax. The names
     (`signals.ctrl_c`, `.next()`) and how the handler stops when the work is done are open.
     The `inline` scope-block proposal (`proposals/scope-blocks/`) is not taken.
+- Batch 9 (David, 2026-11-12), from D4 and D40:
+  - **Signals as event sources** (D4 Q4): accepted. `@lib/std/signals.dewy` gives `ctrl_c`,
+    `sigterm`, `sighup`, `sigwinch`, `sigusr1`, `sigusr2`, `ctrl_break` and `console_close`;
+    `loop _ in signals.ctrl_c { … }` in a `parallel` block with the work. The first wait takes
+    the signal over until its block ends; `.observe` watches without taking it over; once only
+    signal listeners remain, their sources close and the loops end. The REPL races `readl`
+    against `signals.ctrl_c.next`. David asked why the loop needed `or_throw`: it forwarded
+    `SignalUnavailable` (no console, or a target without signals). Taken (two-question test):
+    an unavailable signal source never fires, since nothing can send that signal, so there is
+    no `SignalUnavailable` and the loop needs no `or_throw`. Cancellation leaves the loop as it
+    leaves any wait. [proposals/signals/](proposals/signals/)
+  - **Settings scoped to a function** (D4 Q7, Q19): a setting that applies to a function is
+    written at the top of that function's body, and a setting at the top of a file applies to
+    the whole file. It applies to the function's calls, everything they call and the tasks they
+    start, so one entry file with a function per environment works, chosen at run time by
+    `main`. No whitespace decides what a setting applies to: blank lines carry no meaning here
+    (whitespace stays significant only in a few well-known places, such as juxtaposition and
+    n-D array literals). Considered: a setting prefixing the next declaration, with a blank line
+    ending the file header (rejected for depending on spacing). This narrows batch 8's prefix
+    rule: scope-wide settings sit at the top of their scope; tags on a single construct (a loop,
+    a statement) still prefix it. The rest of the run-time settings design stands (caps only
+    tighten, `$runtime_checks` fixed at compile time, `$fast_math = flag` compiles both bodies).
+    [proposals/runtime-settings/](proposals/runtime-settings/)
+  - **`$memory_left`** (D4 Q18): the bytes a call can still allocate under the tightest memory
+    cap in force, as a metatag rather than a function (`memory_left` read correctly cold).
+  - **`defer`** (D40 Q5), provisional: kept, but only for one-off actions that can't fail and
+    don't `return`, `break` or `or_throw`; library resources never need it. David wants strong
+    examples of where it earns its keep. [proposals/cleanup/](proposals/cleanup/)

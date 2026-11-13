@@ -17,16 +17,12 @@
 
 **Questions at a glance**
 - **(a) Changes something you decided:**
-  - D4 Q7: settings chosen by a run-time value; your one-file idiom works (changes the entry-point rule);
   - D38 Q1: snake_case naming style;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
-  - D40 Q1–Q3, Q5: cleanup failures as results, owners held to block end, failure pairs, `defer` narrowed.
+  - D40 Q1–Q3: cleanup failures as results, when cleanup runs, failure pairs.
 - **(b) New syntax or surface:**
-  - D4 Q4: signals as event sources handled in parallel (`signals.ctrl_c`, `.observe`), no new syntax;
-  - D4 Q19: how a module header is told apart from a setting that prefixes the first declaration;
-  - D4 Q18 (optional): `memory_left`;
   - D40 Q4: `$__abandon__` for owners whose drop throws work away;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D11 Q2: `check=` or `valid_if=`;
@@ -53,350 +49,138 @@
 
 ## P1: blocking current work
 
-### D4. One unified `parallel` surface: v5
-
-`parallel` covers dependent steps, parallel iteration and owned background work. `select` waits for one operation; `race` cancels losing work. Signals are event sources, and settings prefix their target.
-
-**Decided by you:** `select`, `race` and channel waits: [decisions.md](decisions.md), batches 7 and 8; `$explicit_cancellation` and `main`'s `BackgroundTasks` parameter stay.
-
-#### Q4 (b). Signals handled alongside work
-
-```dewy
-import p"@lib/std/signals.dewy" as signals
-parallel {
-    regular_work() or_throw
-    loop _ in signals.ctrl_c or_throw { printl"Ctrl-C received" }
-}   # signal-only listeners close when the other work finishes
-```
-
-Use signals as event sources handled in parallel with the work, following your direction, with no new syntax? The first wait intercepts Ctrl-C until the block ends; `signals.ctrl_c.observe` watches while keeping the default cancellation.
-
-**Rec:** yes; reversible.
-
-**Details:**
-
-- Before the first wait, Ctrl-C cancels the root; an unhandled Ctrl-C cancellation exits 130. Each listening block gets each press; three rapid presses force exit.
-- Closure needs all remaining work to be waiting only on signals. A handler waiting on a timer, or handlers kept busy by presses, can keep the block alive; use a done channel or `race` to end it. A manual `.next` loop must break on `Closed`.
-- Outside a parallel block, interception lasts until the task ends. Libraries should use `.observe`. Foreground ownership prevents unrelated background tasks racing to set process signal policy.
-- `console_close` on Windows allows only bounded, best-effort cleanup; it does not stop the window closing. Shell job control and terminal size remain platform-limited.
-
-#### Q7 (a). Settings chosen at run time
-
-```dewy
-$program.max_cores = 2              # the entry file's default
-
-laptop = () => run()                # runs at 2
-$program.max_cores = 8              # prefixes server
-server = () => run()                # runs at 8, and so do the tasks it starts
-main = (argv:array<string>) => if (argv.get(0) ?? "laptop") =? "laptop" laptop() else server()
-```
-
-Let `main` choose settings at run time, as in your one-file idiom, with each setting prefixing the next function, block or statement? This changes the entry-only rule: an entry-file function may replace its header default, while libraries and nested caps can only tighten the cap.
-
-**Rec:** yes; reversible.
-
-**Details:**
-
-- A prefix covers the call, its callees and tasks it starts, even after the call returns. Inside a body, `$program.max_cores = cores` prefixes the next statement; use a block for several statements. This follows your Q6 answer, replacing the proposals' older rest-of-scope rule.
-- Calling another file's `main` under different caps uses the tighter cap rather than failing to compile. Different `$target` or `$build.mode` still requires separate entry files and is an error in such a call. Code settings such as `$runtime_checks` also follow Q6.
-- A looser cap warns and runs at the tighter cap. `$runtime_checks` cannot depend on a run-time value. `$fast_math = flag` compiles both bodies and selects at the call, with a warning; it does not recompile another module's concrete functions. A library generic follows its caller unless pinned to `$fast_math = false`, with a warning.
-- A memory cap counts heap blocks allocated under it and warns once per build about accounting cost. Exceeding it ends the program unless the module uses `$explicit_allocation_failure`.
-- A function handle keeps the zone where its `@` was written; caps follow whoever runs it. Calls do not repeat their caps or zone, and a handler table does not show which function runs.
-
-#### Q19 (b). Module header or declaration prefix
-
-```dewy
-$program.max_cores = 2              # blank line follows: the module header
-
-run = () => printl"working"
-$program.max_cores = 8              # no blank line: prefixes server
-server = () => run()
-```
-
-How should the module header be distinguished from a setting on the first declaration? Without a boundary, Q6 would make the header a prefix on that declaration.
-
-**Rec:** a blank line ends the module header; a setting with no blank line before its declaration prefixes it. **Reversible:** yes.
-
-**Details:**
-
-- Alternatives are to require the header before imports, or to end it at the first blank line or declaration and reject ambiguity. Blank lines already have meaning in array literals (batch 6).
-
-#### Q18 (b). Optional: bytes left under the memory cap
-
-```dewy
-if asset_bytes <=? memory_left { load_asset() or_throw }
-else printl"asset exceeds the remaining cap"
-```
-
-Add `memory_left`, the bytes a call can still allocate under the tightest memory cap in force? It lets a game skip an asset rather than exceed its cap.
-
-**Rec:** add it; reversible.
-
-**Details:**
-
-- `available_memory` was read as machine-wide free RAM; `memory_budget` was read as the cap itself.
-
-#### Other details
-
-- Top-level `let`s in a parallel block remain visible after it; this binding scope is unusual. Ordering, write permissions, select diagnostics and task failure policies remain in the full proposal.
-- `task.tasks(@body)` joins and returns the body's value; child failure or parent cancellation joins before returning failure. Useful values need a binding or `;`.
-- `check_cancel() or_throw` is an explicit checkpoint with `Canceled` in the result. `protect_from_cancel` and `within` are cooperative: compute or foreign calls may exceed their deadlines while being joined. Protection does not guarantee persistence; report save failures.
-- Frame code uses `ch.drain` and background jobs; channel/task/timer waits remain errors. The injected group lives until the window closes. Full HTTP and shell job control remain library work; this is a paper design, not implementation validation.
-
-#### The whole design in programs
-
-```dewy
-# v5 design program; standard concurrency API is explicit at its use.
-import p"@lib/std/tasks.dewy" as task
-
-Config:type = [root:string]
-Invalid:type = type of error
-load_config = () => {
-    sleep(20ms) or_throw
-    Config["assets"]
-}
-load_map = (c:Config) => {
-    sleep(50ms) or_throw
-    "{c.root}/map"
-}
-load_sounds = () => {
-    sleep(30ms) or_throw
-    "sounds"
-}
-parse_age = (text:string):>int | Invalid => to_int(text) ?? Invalid
-score = (n:int):>int => (n * n) % 7
-autosave = () => loop true {
-    sleep(30s) or_throw
-    printl"saved"
-}
-ticks_with_autosave = (group:Tasks) => {
-    let saver = group.spawn(@autosave)
-    let tick = ticker(500ms)
-    defer tick.stop()
-    loop i in [0..4) tick.next or_throw;
-    saver.stop()
-}
-Command:type = [verb:string]
-relay = (commands:Channel<Command> chat:Channel<string>) => {
-    loop item in merged(@commands.receive @chat.receive stop_when_idle=30s) or_throw {
-        match item {
-            command:Command => printl"command: {command.verb}"
-            message:string => printl"chat: {message}"
-        }
-    }
-}
-main = () => {
-    parallel {
-        let config = load_config or_throw
-        let map = load_map(config) or_throw
-        let sounds = load_sounds or_throw
-    }
-    let ages = [parallel t in ["31" "abc" "45"] parse_age(t) ?? void]
-    let rounds = input_int("rounds? ") ?? 10
-    let total = sum([parallel i in [0..rounds * 100_000) {
-        check_cancel() or_throw
-        score(i)
-    }])
-    let commands = channel<Command>(4)
-    let chat = channel<string>(4)
-    parallel {
-        {
-            chat.send("hi") or_throw
-            chat.close()
-        }
-        {
-            commands.send(Command["quit"]) or_throw
-            commands.close()
-        }
-        relay(commands chat) or_throw
-    }
-    task.tasks(@ticks_with_autosave) or_throw
-    printl"{map} {sounds} {ages} {total}"
-}
-```
-
-```dewy
-# Example command: dewy 08_cli_arguments_and_tasks.dewy /index.html count=3
-import argparse
-import p"@lib/std/tasks.dewy" as task
-import net
-
-fetch = (resource:string output:Path) => {
-    let stream = net.tcp_connect("127.0.0.1" 8080) or_throw
-    defer net.tcp_close(stream)
-    net.tcp_send(stream "GET {resource} HTTP/1.0\r\nHost: localhost\r\n\r\n") or_throw
-    let response:array<uint8> = []
-    loop true {
-        let received = net.tcp_receive(stream)
-        if received is? none break
-        let bytes = received or_throw
-        response.extend(bytes)
-    }
-    output.write_bytes(response) or_throw
-}
-
-const Args = [
-    resource = argparse.Positional<string>(help="HTTP resource at localhost:8080")
-    count = argparse.Named<int<1 <=? value <=? 100>>(default=1 help="number of captures")
-]
-progress = (completed:Channel<Path>) => {
-    loop output in completed { printl"completed {output}" } or_throw
-}
-main = (argv:array<string> app:BackgroundTasks) => {
-    let args = argparse.parse(Args argv about="capture HTTP responses")
-    let completed = channel<Path>(4)
-    let reporter = app.spawn(@progress(completed))
-    defer completed.close()
-    loop i in [0..args.count) {
-        let output = within(5s @fetch(args.resource p"capture-{i}.http")) or_throw
-        completed.send(output) or_throw
-    }
-    completed.close()
-    reporter.wait() ?? void
-    if reporter.error is? error printl"reporter failed: {reporter.error}"
-}
-```
-
-```dewy
-from units import MiB
-
-$program.max_cores = 2              # the entry file's default
-$program.max_memory = 512MiB
-
-run = () => printl"{available_cores} cores allowed"
-laptop = () => run()                # runs at 2
-$program.max_cores = 8              # prefixes server (Q6): replaces the default for its calls
-server = () => run()                # runs at 8, and so do the tasks it starts
-main = (argv:array<string>) => {
-    let environment = argv.get(0) ?? "laptop"
-    if environment =? "laptop" laptop()
-    else if environment =? "server" server()
-    else { printl("choose laptop or server" file=stderr); exit(2) }
-}
-```
-
-```dewy
-import p"@lib/std/signals.dewy" as signals
-
-main = () => parallel {
-    regular_work() or_throw
-    loop _ in signals.ctrl_c or_throw { printl"Ctrl-C received" }   # ends when regular_work is done
-}
-```
-
-A server handles termination alongside its accept loop:
-
-```dewy
-serve = (port:int) => parallel {
-    accept_loop(port) or_throw
-    loop _ in signals.sigterm or_throw { stop_accepting() }        # graceful shutdown
-}
-```
-
-The REPL keeps prompt and interrupt output in one place:
-
-```dewy
-repl:type = [
-    run = () => loop true {
-        match race(@readl(">>> ") @signals.ctrl_c.next) {         # race cancels the loser
-            line:string => printl"you said {line}"
-            <Interrupted | CtrlC> => printl"KeyboardInterrupt"
-            <EndOfInput> => break
-            <Closed> => break
-            <Canceled> => Canceled or_throw
-            problem:error => problem or_throw
-        }
-    }
-]
-main = () => { let r = repl; r.run() or_throw }
-```
-
-Dogfooded; names read cold. Full rules: `proposals/signals/summary.md`, `proposals/runtime-settings/summary.md`, `proposals/concurrency/unified/proposal-v5.md`, `proposals/concurrency/unified/select-v6-round11.md`; settings follow the Q6/Q19 updates above.
-
----
-
 ### D40. Cleanup: values clean themselves up; `defer` only for one-off actions
 
-Resources clean up on every exit, with no second line to remember: files, temp entries, terminal modes, transactions, child processes and lock guards finish at the end of their block, and a cleanup failure becomes the function's result. Cleanup never publishes: a transaction rolls back unless the program commits. `defer` stays only for one-off actions that can't fail. No new syntax; `return`, `break` and `or_throw` act on your function as usual. If you accept, D4's three `defer`s go away.
+Resources clean up on every way out of a function, with no second line to remember: a file flushes and closes, a socket closes, a lock unlocks, a transaction rolls back unless it was committed. No new syntax; `return`, `break` and `or_throw` act on your function as usual. If you accept, D4's three `defer`s go away. `defer` stays (your answer to Q5, provisional) for one-off actions; its strongest cases are at the end of this item.
 
 #### Q1 (a). A cleanup failure is the function's result
 
 ```dewy
-save = () => {
-    let out = open(p"data.bin" 'w') or_throw
-    out.write_bytes(bytes) or_throw;
-}   # out flushes and closes here; a flush failure is save's result
+save = (data:array<uint8>) => {
+    let out = open(p"/mnt/usb/data.bin" 'w') or_throw
+    out.write_bytes(data) or_throw;     # buffered: nothing is on the disk yet
+}                                        # out flushes and closes here
+main = () => {
+    save(readings) ?? { printl"save failed"; return }
+    printl"saved"
+}
 ```
 
-Let `$__drop__` hooks fail, so the final flush or close of a file reaches the caller? Today a drop hook can't fail, so `defer out.close()` would lose this error. A lone cleanup failure is returned as itself, and hover on `save` says which line it comes from.
+If the USB stick is full, the failure only shows up at the final flush. Today a cleanup hook can't fail, so that error is lost and this program prints "saved". With this change the flush failure becomes `save`'s result, and `main` prints "save failed". Let cleanup hooks fail, with the failure becoming the function's result? (The alternative is requiring `out.close() or_throw` before every exit, which is the second step you want to avoid.)
 
 **Rec:** yes; reversible.
 
-#### Q2 (a). Which owners last to the end of their block
+#### Q2 (a). When cleanup runs: the end of the block, or the last use
+
+```dewy
+log_reply = (host:string) => {
+    let s = net.tcp_connect(host 80) or_throw
+    let reply = s.request("GET /") or_throw     # last use of s
+    process(reply)                               # 10 seconds of work
+}
+```
+
+- (a) **At the end of the block, for every value with cleanup.** `s` closes after `process`. A lock is held to the end of its block too, so everything written inside it is protected. Use braces to release earlier. This is how Python's `with`, Rust and Swift behave.
+- (b) **At the end of the block only for locks and cleanup that can fail (files, transactions); at the last use for the rest.** `s` closes right after `request`, before `process`. Generic code then behaves differently by type: in `(x:T) => { x.use(); sleep(10s) }`, a socket passed as `x` closes before the sleep, a file after it.
+
+Today a lock is released at its last use, so in this loop the journal write runs unlocked under the current rule; both (a) and (b) fix that:
 
 ```dewy
 loop amount in amounts {
     let book = @(ledger.lock())
     if book.balance + amount <? 0 break        # unlocks, then leaves the loop
     book.balance += amount                     # last use of book
-    append_file(journal "{amount}\n") or_throw;   # still locked
-}                                              # unlocks at the end of each iteration
+    append_file(journal "{amount}\n") or_throw;   # (a) and (b): still locked
+}
 ```
 
-Today a guard is released at its last use, so the journal write above would run unlocked, and the fix (moving the region into a helper) loses the `break`. Which values should run their cleanup at the end of their block (braces shorten it)?
+Which should it be? Plain memory is freed at its last use either way; no program can tell.
 
-- (a) **Every value with a cleanup hook** (sockets and tickers too). Plain memory is still freed at its last use, which no program can see. This matches Python's `with`, Rust and Swift. A socket stays open until its block ends.
-- (b) Only lock guards and owners whose cleanup can fail; sockets, tickers and textures still release at their last use. Generic code then releases at two different times depending on the type, which the regrade scored 2 for obviousness.
-
-**Rec:** (a); reversible. Either one changes the decided loan rule (a place's aliasing limits still end at its last use).
+**Rec:** (a); reversible. (b) was dogfooded; (a) was not tested as its own round, but it removes the type-dependent timing the regrade scored 2.
 
 #### Q3 (a). Two failures at once
 
 ```dewy
-match save() {
-    both:CleanupError => printl"{both.primary}, then {both.cleanup}"
+let saved = save(readings) ?? false
+```
+
+Your D4 Q1 rule already applies: if Ctrl-C cancels `save`, `??` doesn't turn that into `false`; the cancellation leaves the function. A disk-full failure is defaulted as usual. The new case is two failures together: Ctrl-C cancels `save`, then the final flush fails too.
+
+```dewy
+match save(readings) {
+    both:CleanupError => printl"{both.primary}, then {both.cleanup}"   # Canceled, then the flush error
     problem:error => printl"{problem}"
     _ => printl"saved"
 }
 ```
 
-When a function is already failing and a cleanup also fails, return both as `CleanupError` with `.primary` (the first failure) and `.cleanup`? If either one is `Canceled`, the pair still counts as cancellation: `??` and `?? void` pass it on, and only `??<Canceled | CleanupError>` consumes it.
+Return both as `CleanupError` with `.primary` (what failed first) and `.cleanup` (the cleanup that failed after it)? If either one is `Canceled`, the pair counts as cancellation under your D4 Q1 rule, so `save(readings) ?? false` still lets it leave.
 
 **Rec:** yes; reversible. Names read cold correctly.
 
-#### Q4 (b). Owners whose drop throws the work away
+#### Q4 (b). Values whose cleanup throws the work away
 
 ```dewy
-let tx = db.begin(p"ledger.sqlite") or_throw
-tx.execute(debit) or_throw;
-let target = tx.find_account(to) ??<none> return none   # rolls back
-tx.execute(credit(target)) or_throw;
-tx.commit() or_throw                     # the only way anything is published
-```
-
-A library marks such a hook `$__abandon__` instead of `$__drop__`: dropping the value rolls back (a transaction) or stops and reaps (a child process), and the work takes effect only through an explicit `commit`, `wait` or `stop()`. The compiler warns when no path commits, or when a success-shaped exit abandons changes. Use `$__abandon__` for this marker?
-
-**Rec:** yes; reversible. Read cold correctly; `$__discard__` read the same and is the alternative.
-
-#### Q5 (a). `defer` narrowed to one-off actions
-
-```dewy
-scan = (rows:array<string>) => {
-    defer printl"done"                    # runs once on every way out
-    loop row in rows { if row =? "bad" return Invalid }
+transfer = (from:int64 to:int64 amount:int64) => {
+    let tx = db.begin(p"bank.sqlite") or_throw
+    tx.execute("UPDATE accounts SET balance = balance - {amount} WHERE id = {from}") or_throw;
+    if not tx.exists(to) return MissingAccount          # rolls back: the debit is undone
+    tx.execute("UPDATE accounts SET balance = balance + {amount} WHERE id = {to}") or_throw;
+    tx.commit() or_throw                                # the only way anything is saved
 }
 ```
 
-Keep `defer`, but only for actions that can't fail and don't `return`, `break` or `or_throw`? Library resources never need it. This replaces batch 7's "`defer` stays for now".
+A file's cleanup finishes its work (flush, then close). A transaction's cleanup must do the opposite: every exit that doesn't reach `tx.commit()` (the early `return`, a failed `execute`, Ctrl-C) rolls back. Forgetting `commit` is safe (nothing is saved), and the compiler warns when no path commits. The library marks the hook differently so the compiler knows which kind it is:
 
-**Rec:** yes; reversible.
+```dewy
+Transaction:type = [handle:DbHandle
+    $__abandon__                                       # a file's hook is $__drop__
+    rollback = ():>void | DbError => db_rollback(handle)
+]
+```
+
+Use `$__abandon__` for this marker? Child processes use it too: one the program never waits for is stopped when its owner ends.
+
+**Rec:** yes; reversible. Read cold correctly; `$__discard__` read the same and is the alternative.
+
+#### Where `defer` still earns its keep
+
+Each of these is a one-off action that belongs to this function, not to a value, so there is no type to give a cleanup hook:
+
+```dewy
+render = (node:Node) => {
+    indent += 1
+    defer indent -= 1                     # restored on every way out, including errors
+    loop child in node.children render(child) or_throw
+}
+
+handle = (request:Request) => {
+    let started = now
+    defer printl"{request.path} took {now - started}"   # timed even when it fails
+    route(request) or_throw
+}
+```
+
+Without `defer`, each needs the line repeated before every `return` and `or_throw`, or a single-use type with a cleanup hook. Resources never need it.
 
 #### Other details
 
-- Shared `channel` and `mpmc` keep their explicit `close()`; a single-producer queue (`spsc`) closes when its sender is dropped. A closing rule for shared channels would be a separate design.
-- The 100 ms cleanup grace applies only after cancellation; normal-exit cleanup has no deadline. A child process's drop bounds its own wait for the child to stop, then kills it.
-- Known limits: a close that fails on `break` or `continue` returns from the function; a `CleanupError` carrying `Canceled` can be handled in three ways (graded 2 for obviousness). A safe wrapper for a C library still needs a separate encapsulation decision.
-- Dogfooded: 24 programs over five rounds, two independent reviews and regrades, no open must-fix. Full rules: `proposals/cleanup/summary.md` and `amendments.md`.
+- **Shared channels keep `close()`.** A single-producer queue closes when its sender is gone; a shared channel has many senders, so the last one still closes it:
+  ```dewy
+  produce = (out:SpscSender<int64>) => loop n in [0..10) out.send(n) or_throw   # out is dropped here: the queue closes
+  let [tx rx] = spsc<int64 16>.split
+  parallel { produce(tx) or_throw; loop n in rx printl(n) }
+  ```
+- **A failed close on `break` leaves the function.** If the file below fails to flush when the loop breaks, the code after the loop doesn't run; the failure is the function's result:
+  ```dewy
+  loop name in names {
+      let out = open(p"{name}.txt" 'w') or_throw
+      out.write_text(name) or_throw;
+      if name =? "last" break             # out closes here; a flush failure returns from the function
+  }
+  printl"all written"
+  ```
+- **Dogfooded:** 24 programs over five rounds, a review and two independent regrades, no open must-fix. A safe wrapper around a C library still needs a separate decision about hiding its fields. Full rules: `proposals/cleanup/summary.md` and `amendments.md`.
 
 ---
 
@@ -903,7 +687,7 @@ Replace `$time.zone`, `$time.rules` and `$time.zone_source` with these `$program
 **Details:**
 
 - This narrows D15a: a main file with no zone no longer leaves libraries and scopes free to choose the program's zone. A library may set its own test `main`'s zone, or pass `zone=` / call `t.in_zone(z)` for a particular zone.
-- If you accept D4 Q7, zone settings follow its prefix rule too (a function can set a per-user zone), and the entry-only rule here applies only to the header.
+- Your D4 Q7 answer (batch 9) lets any function set a zone at the top of its body, for its calls and tasks (a per-user zone, say). With it, the entry-only rule here applies only to the file header; a library's own header can't set the program's zone.
 
 #### Q4 (c). Range bound names
 
