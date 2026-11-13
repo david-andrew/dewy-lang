@@ -1,0 +1,109 @@
+$runtime_checks
+
+from p"ir_types.dewy" import (Ins)
+from p"ir.jo" import (ir)
+from p"ir_builders.dewy" import (is_kv k_vreg)
+from p"loops.jo" import (CLoop LCheck lx_def_at lx_defined_in lx_bin)
+from p"opt.jo" import (o_defines o_rewrite)
+
+EmitWord:type=int64<overflow='wrap'>
+
+# Materialize a loop invariant before its fast copy. The borrowed IR remains
+# shared with the original loop until the versioning pass publishes its output.
+lx_mat=(code:array<Ins> L:CLoop v:EmitWord @out:array<Ins>):>EmitWord=>$unsafe {
+    if is_kv(v) or not lx_defined_in(code v L.pl+1 L.pe) {return v}
+    let xi=code[lx_def_at(code v L.pl+1 L.inc)]
+    if xi.op =? 'mov' {return lx_mat(code L int64(xi.a) @out)}
+    let a=lx_mat(code L int64(xi.a) @out)
+    let b=lx_mat(code L int64(xi.b) @out)
+    lx_bin(@out xi.op a b)
+}
+
+lx_sum=(code:array<Ins> L:CLoop terms:array<int64> k:EmitWord @out:array<Ins>):>EmitWord=>$unsafe {
+    let acc=k_vreg(k)
+    loop t in terms {
+        if t >? 0 {acc=lx_bin(@out 'add' acc lx_mat(code L t-1 @out))}
+        else {acc=lx_bin(@out 'sub' acc lx_mat(code L -t-1 @out))}
+    }
+    acc
+}
+
+# Exact endpoint guards use a low word and a signed high word.
+lx_endpoint_add=(@out:array<Ins> lo:EmitWord hi:EmitWord value:EmitWord signed:bool subtract:bool):>[int64 int64]=>{
+    let upper=if signed {lx_bin(@out 'shrs' value k_vreg(63))} else {k_vreg(0)}
+    let result=lx_bin(@out (if subtract {'sub'} else {'add'}) lo value)
+    let carry=lx_bin(@out 'ltu' (if subtract {lo} else {result}) (if subtract {value} else {lo}))
+    let high=lx_bin(@out (if subtract {'sub'} else {'add'}) hi upper)
+    high=lx_bin(@out (if subtract {'sub'} else {'add'}) high carry)
+    [result high]
+}
+
+lx_endpoint=(code:array<Ins> L:CLoop value:EmitWord terms:array<int64> k:EmitWord @out:array<Ins>):>[int64 int64]=>{
+    let lo=value
+    let hi=if L.signed {lx_bin(@out 'shrs' value k_vreg(63))} else {k_vreg(0)}
+    if k not=? 0 {[lo hi]=lx_endpoint_add(@out lo hi k_vreg(k) true false)}
+    loop t in terms {
+        let v=lx_mat(code L abs(t)-1 @out)
+        [lo hi]=lx_endpoint_add(@out lo hi v true t <? 0)
+    }
+    [lo hi]
+}
+
+# Clone a loop with selected checks removed and branch depths adjusted.
+lx_copy=(code:array<Ins> s:EmitWord e:EmitWord checks:array<LCheck> ren:array<int64> @out:array<Ins> wrap:EmitWord):>void=>$unsafe {
+    let depth:EmitWord=-1
+    let p=s
+    loop p <=? e {
+        let skipped=false
+        loop ch in checks {
+            if p =? ch.pi and ch.kind not=? 5 {
+                p=ch.pend+1
+                skipped=true
+                break
+            }
+        }
+        if skipped {continue}
+        p+=1
+        let ins=code[p-1]
+        loop ch in checks {
+            if ch.kind =? 5 and ch.pi =? p-1 {
+                ins.op=if ins.op =? 'checked_add' {'add'} else {'sub'}
+                ins.imm=0
+            }
+        }
+        let op=ins.op
+        if ren.length >? 0 {
+            if op =? 'call' or op =? 'calli' or op =? 'callc' or op =? 'syscall' or op =? 'intr' or op =? 'zeroslots' {
+                let st=ir.args.length
+                loop k in [0..int64(ins.b)) {
+                    let item=ir.args[int64(ins.a)+k]
+                    if op =? 'zeroslots' and int64(item) & 1 =? 1 and ren[int64(item) >> 1] >=? 0 {
+                        item=int32((ren[int64(item) >> 1] << 1) | 1)
+                    }
+                    ir.args.push(item)
+                }
+                ins.a=int32(st)
+            }
+            o_rewrite(@ins)
+            if o_defines(op) and int64(ins.dst) >=? 0 and int64(ins.dst) <? ren.length and ren[int64(ins.dst)] >=? 0 {
+                ins.dst=int32(ren[int64(ins.dst)])
+            }
+        }
+        if op =? 'br' or op =? 'brif' {
+            if ins.imm >? depth {ins.imm+=wrap}
+        }
+        if op =? 'brtable' {
+            let st=ir.args.length
+            loop k in [0..int64(ins.b)) {
+                let t=int64(ir.args[int64(ins.c)+k])
+                if t >? depth {t+=wrap}
+                ir.args.push(int32(t))
+            }
+            ins.c=int32(st)
+            if ins.imm >? depth {ins.imm+=wrap}
+        }
+        out.push(ins)
+        if op =? 'block' or op =? 'loop' or op =? 'if_' {depth+=1}
+        else if op =? 'end' {depth-=1}
+    }
+}
