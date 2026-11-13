@@ -1,0 +1,25 @@
+# A spinner that runs only while the real work runs; the result prints after the spinner has
+# cleared its line.
+spaces = (n:int) => join([loop _ in [0..n) " "] "")
+
+spin = (label:string) => {
+    let frames = ["|" "/" "-" "\\"]
+    loop i in 0.. {
+        print("\r{frames[i % 4]} {label}")
+        if sleep(100ms) is? Canceled break           # void | Canceled: spin is a parallel item
+    }
+    print("\r{spaces(label.length + 2)}\r")          # blank the spinner's line
+}
+
+count_lines = (path:Path) => {
+    let text = read_text(path) ?? ""
+    text.lines.length
+}
+
+main = () => {
+    parallel (
+        $until_others_finish spin("counting")
+        let n = count_lines(p"big.txt")              # int, read after the block
+    )
+    printl"{n} lines"                                # after spin has ended and cleared its line
+}

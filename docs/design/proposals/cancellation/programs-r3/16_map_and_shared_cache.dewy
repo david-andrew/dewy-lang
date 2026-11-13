@@ -1,0 +1,24 @@
+# A shared page cache used by parallel workers, and a map over a waiting callback.
+import p"@lib/std/http.dewy" as http
+
+cached_get = (cache:Mutex<dict<string string>> url:string) => {
+    if @(cache.lock).get(url) is? string return @(cache.lock)[url]
+    let page = http.get_text(url) or_throw         # string here; HttpError and Canceled leave
+    @(cache.lock)[url] = page                      # the cache outlives every item: only a string goes in
+    page
+}
+# Writing the raw result instead, with a dict<string string | HttpError> cache:
+#   @(cache.lock)[url] = http.get_text(url)
+# is an error where cached_get is cancellable (line 19): "this can store a Canceled in cache, a
+# mutex shared beyond this item; forward or handle it first". The error is reported at that
+# store, and names the cancellable call that reaches it (line 19).
+
+main = () => {
+    let cache = mutex(dict<string string>())
+    let sizes = [parallel u in ["https://a.example" "https://b.example" "https://a.example"]
+        (cached_get(cache u) ?? "").length]
+    printl(sizes)
+    let titles = ["https://a.example" "https://b.example"].map(@http.get_title)
+    # array<string | HttpError> here; inside an item it would hold Canceled too, as a local array
+    printl(titles)
+}

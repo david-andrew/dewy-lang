@@ -1,0 +1,23 @@
+# A price check: a remote quote under a deadline, and a cache-or-database lookup that nests
+# within inside first_ok.
+import p"@lib/std/http.dewy" as http
+
+quote = (symbol:string) => {
+    let body = within(2s @http.get_text("https://quotes.example/{symbol}")) or_throw
+    to_rational(body) or_throw                       # rational | HttpError | Timeout | ParseError
+}
+
+price = (key:string) => first_ok(@within(50ms @cache_get(key)) @db_get(key))
+# rational | CacheError | Timeout | DbError
+# within's child is canceled by its own deadline (giving Timeout) or by first_ok once db_get
+# succeeds (giving Canceled, which first_ok drops); first_ok's own Canceled appears only where
+# price itself is cancellable
+
+main = () => {
+    match quote("ACME") {
+        q:rational => printl"ACME {fmt'.2f'q}"
+        <Timeout> => printl"quote service too slow"
+        problem:error => printl("no quote: {problem}" file=stderr)
+    }                                                # no <Canceled> arm: nothing can cancel main
+    printl"cached ACME {fmt'.2f'(price("ACME") ?? 0)}"
+}

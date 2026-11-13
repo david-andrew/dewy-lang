@@ -1,0 +1,25 @@
+# Resolve a host with two resolvers (first answer wins), then download from the first mirror that works.
+import p"@lib/std/dns.dewy" as dns
+import p"@lib/std/http.dewy" as http
+
+const mirrors = ["https://a.example.org" "https://b.example.org" "https://c.example.org"]
+
+from_mirror = (mirror:string name:string) => http.get_bytes("{mirror}/{name}")
+# hover: array<uint8> | HttpError
+#        + Canceled when called from first_ok (line 17): canceled once another mirror succeeds
+
+main = () => {
+    let ip = race(@dns.lookup("example.org" via="1.1.1.1") @dns.lookup("example.org" via="8.8.8.8"))
+    # Ip | DnsError: the first answer, even a failure; the other lookup is canceled and joined,
+    # and its Canceled is race's own, so it never appears here
+    printl"example.org is {ip ?? "unresolved"}"
+
+    let bytes = first_ok(@from_mirror.(mirrors "pkg.tar")...) or_throw   # one call per mirror
+    # array<uint8> | HttpError: the first success, else the first failure; losers canceled and joined
+    p"pkg.tar".write_bytes(bytes) or_throw;
+}
+
+# Inside a cancellable context the same calls also carry the context's own Canceled:
+prefetch = (names:array<string>) => [parallel n in names first_ok(@from_mirror.(mirrors n)...)]
+# array<array<uint8> | HttpError | Canceled> inside the comprehension's items;
+# after the comprehension, in a caller nothing can cancel: array<array<uint8> | HttpError>

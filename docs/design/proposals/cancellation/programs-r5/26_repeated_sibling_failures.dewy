@@ -1,0 +1,25 @@
+# Two workers that each report a non-error stop, beside an item that leaves early.
+Stopped:type = type of exception & [id:int]
+
+worker = (ready:Channel<int> id:int) => {
+    ready.send(id) or_throw
+    if sleep(1s) is? Canceled Stopped[id] or_throw      # forwards a Stopped, not the Canceled
+}
+
+run = () => {
+    let ready = channel<int>(2)
+    parallel {
+        worker(ready 1) or_throw
+        worker(ready 2) or_throw
+        { ready.receive or_throw; ready.receive or_throw; return }
+    }
+}
+
+main = () => match run() {
+    stops:ErrorStack<Stopped> => loop s in stops printl"worker {s.id} stopped"
+    one:Stopped => printl"worker {one.id} stopped"
+    _ => printl"done"
+}
+# Both canceled workers forward a Stopped. The block keeps each forwarded failure beside the
+# return, so run gives ErrorStack[Stopped[1] Stopped[2]]: the stack may now hold any exception
+# but Canceled. A worker's unforwarded value would be dropped with it.

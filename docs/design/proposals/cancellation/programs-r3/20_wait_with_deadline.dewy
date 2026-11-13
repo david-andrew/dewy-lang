@@ -1,0 +1,13 @@
+# Wait up to 2 s for a background indexer; if it isn't done, carry on and let it keep running.
+main = (app:BackgroundTasks) => {
+    let indexer = app.spawn(@build_index(p"docs"))
+    match within(2s @indexer.wait) {                 # void | IndexError | Timeout
+        <Timeout> => printl"still indexing; serving without the index for now"
+        problem:error => printl("indexing failed: {problem}" file=stderr)
+        _ => printl"index ready"
+    }
+    serve_requests() or_throw                       # the indexer is still running if it timed out
+}
+# Task.wait is an ordinary wait, not a group join: when within's deadline closes the waiter's
+# request, the wait gives up at once and the indexer keeps running. It never reports the
+# indexer's own Canceled, whoever stopped it.

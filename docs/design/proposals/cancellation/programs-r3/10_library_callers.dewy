@@ -1,0 +1,32 @@
+# A library function, `retry`, and two callers that differ: a CLI path nothing can cancel, and a
+# batch whose items are cancellable. One source, two typed instances, one compiled body.
+import p"@lib/std/http.dewy" as http
+
+retry = (attempts:int pause:Duration op) => {
+    loop i in [1..attempts) {
+        match op() {
+            problem:error => printl("attempt {i} failed: {problem}" file=stderr)
+            done => return done
+        }
+        sleep(pause * i) or_throw                    # needed where retry is cancellable
+    }
+    op()                                             # the last attempt, success or failure
+}
+# hover on retry: the result of op
+#   + Canceled at line 25 (parallel items of batch): while sleeping between attempts, or if op is
+#     canceled. Not at line 21 (cli, called from main).
+# generated docs: "retry: can be canceled while it sleeps between attempts."
+
+cli = () => {
+    let status = retry(3 1s @http.get_text("https://example.org/status")) or_throw   # string | HttpError
+    printl(status)
+}
+
+batch = (urls:array<string>) => [parallel u in urls retry(3 1s @http.get_text(u)) ?? "unavailable"]
+# inside each item: string | HttpError | Canceled, with the note "nothing in this comprehension can
+# cancel it now: no item leaves early". After it: array<string>.
+
+main = () => {
+    cli() or_throw
+    printl(batch(["https://a.example" "https://b.example"]))
+}

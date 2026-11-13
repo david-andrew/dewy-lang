@@ -1,0 +1,28 @@
+# Back up to whichever of two disks takes the write first. Each write is an atomic replace
+# (temporary file, then rename), so a canceled or failed write leaves that disk's old backup intact.
+# Removing the abandoned temporary file can fail: that is an $__abandon__ failure, which a group
+# never discards, so the losing item must handle it itself (round3 Q6).
+
+backup_to = (dir:Path data:array<uint8>) => {
+    match p"{dir}/backup.bin".write_bytes(data) {        # Path | FileError, + Canceled when it loses
+        saved:Path => saved
+        left:FileRemoveFailed => {                       # its temporary file stayed behind
+            printl("temporary file left on {dir}: {left as FileRemoveFailed}" file=stderr)
+            left as ~FileRemoveFailed                    # pass on the rest: the write failure, or Canceled
+        }
+        other => other
+    }
+}
+
+main = () => {
+    let data = p"state.bin".read_bytes or_throw
+    match first_ok(@backup_to(p"/mnt/a" data) @backup_to(p"/mnt/b" data)) {
+        saved:Path => printl"backed up to {saved}"
+        problem:error => printl("no backup written: {problem}" file=stderr)
+    }
+}
+# first_ok: Path | FileError. Without the `left` arm (line 9), line 19 is an error: "backup_to can
+# give FileRemoveFailed, an abandon failure (undo that didn't happen), which first_ok would discard
+# with a loser's or an earlier failure's result; handle it in backup_to". A failed close of an
+# ordinary file is not an abandon failure: first_ok discards it with the loser's result.
+# `as ~FileRemoveFailed` keeps every other part (D42 Q4's `as`, with batch 10's `~`).

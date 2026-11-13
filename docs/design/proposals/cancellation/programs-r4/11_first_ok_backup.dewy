@@ -1,0 +1,15 @@
+# Back up to whichever of two disks takes the write first. Each write is an atomic replace
+# (temporary file, then rename), so a canceled or failed write leaves that disk's old backup intact.
+backup_to = (dir:Path data:array<uint8>) => p"{dir}/backup.bin".write_bytes(data)
+# Path | FileError, + Canceled when it loses. A loser's temporary file is removed by its drop hook;
+# if that removal fails it is litter beside an intact backup, discarded with the loser's result
+# like a failed close. Hover on line 11 lists it; $no_discarded_failures (in $bulletproof) makes it
+# an error to discard.
+
+main = () => {
+    let data = p"state.bin".read_bytes or_throw
+    match first_ok(@backup_to(p"/mnt/a" data) @backup_to(p"/mnt/b" data)) {
+        saved:Path => printl"backed up to {saved}"
+        problem:error => printl("no backup written: {problem}" file=stderr)
+    }
+}

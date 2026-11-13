@@ -1,0 +1,15 @@
+# A cache lookup under a deadline, beside the database: a default must not hide a missed deadline.
+from_cache = (key:string) => cache_lookup(key) ?? none          # none: "not cached"
+from_cache_on_time = (key:string) => cache_lookup(key) ??<~Canceled> none
+
+price = (key:string) => first_ok(@within(50ms @from_cache(key)) @db_get(key))
+# At 50 ms the lookup's wait gives Canceled and ?? none consumes it, without naming it. So within
+# gives Timeout, a failure, and first_ok waits for db_get. (Round 4 published none here.)
+
+main = () => {
+    printl"{price("ACME") ?? "no price"}"
+    match within(50ms @from_cache_on_time("ACME")) {   # Canceled not consumed: also Timeout
+        <Timeout> => printl"cache too slow"
+        hit => printl"cache: {hit}"
+    }
+}

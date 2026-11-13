@@ -1,0 +1,27 @@
+# A long CPU loop with no waits, stoppable through check_cancel when something can cancel it.
+is_prime = (n:int) => {
+    if n <? 2 return false
+    loop d in [2..isqrt(n)] if n % d =? 0 return false
+    true
+}
+
+count_primes = (limit:int) => {
+    let found = 0
+    loop n in [2..limit) {
+        check_cancel() or_throw                      # void at line 18; void | Canceled under within (line 19)
+        if is_prime(n) found += 1
+    }
+    found
+}
+
+main = () => {
+    printl"{count_primes(1000)} primes below 1000"   # int: runs to the end
+    match within(3s @count_primes(1_000_000_000)) {
+        n:int => printl"{n} primes below a billion"
+        <Timeout> => printl"gave up after 3 s"
+    }
+}
+
+# The same loop only in main warns:
+#   check_cancel() or_throw   # warning: nothing can cancel this; Ctrl-C ends the process.
+#                             # To stop cleanly on Ctrl-C, run it beside a signals.ctrl_c item.

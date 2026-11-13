@@ -1,0 +1,24 @@
+# Write a backup to two disks and keep whichever finishes first. The slower write is canceled;
+# if its file then fails to close, that failure is not lost with its Canceled.
+import p"@lib/std/files.dewy" as files
+
+write_backup = (dir:Path data:array<uint8>) => {
+    let out = files.open(p"{dir}/backup.bin" 'w') or_throw
+    out.write_bytes(data) or_throw;
+}   # canceled mid-write, then the close fails: Canceled & FileCloseFailed
+
+main = () => {
+    let data = p"state.bin".read_bytes or_throw
+    match race(@write_backup(p"/mnt/a" data) @write_backup(p"/mnt/b" data)) {
+        <void> => printl"backed up"
+        both:FileError & AfterCancel<FileCloseFailed> => printl("backup failed; so did the other copy's close: {both}" file=stderr)
+        lost:AfterCancel<FileCloseFailed> => printl("backed up; the other copy failed to close: {lost.failure}" file=stderr)
+        problem:error => printl("backup failed: {problem}" file=stderr)
+    }
+}
+# race's result: void | FileError                     (the winner's own result)
+#              | AfterCancel<FileCloseFailed>         (a loser's cleanup, kept after race drops its Canceled)
+#              | FileError & AfterCancel<FileCloseFailed>   (both)
+# The pair needs its own arm first: under D42 Q1 the AfterCancel arm would otherwise also take it
+# and drop its FileError unnamed, which is an error.
+# The loser's half-written backup.bin stays on its disk: plain files have no $__abandon__.

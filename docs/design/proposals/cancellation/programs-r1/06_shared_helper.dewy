@@ -1,0 +1,19 @@
+# One helper called both where nothing can cancel and from parallel items.
+Config:type = [theme:string width:int]
+
+load_config = (path:Path) => {
+    let text = path.read_text or_throw
+    parse_config(text) or_throw
+}
+# hover: Config | FileError | ParseError
+#   + Canceled at 2 of 3 call sites: line 15 and line 16 (parallel items; canceled if line 16
+#     leaves main early). Not at line 13 (main: nothing can cancel it).
+
+main = () => {
+    let base = load_config(p"app.toml") or_throw            # Config | FileError | ParseError
+    parallel (
+        let local = load_config(p"local.toml") ?? base      # this ?? also covers its Canceled
+        let theme = load_theme(base.theme) or_throw         # leaves main on failure: cancels line 15
+    )
+    run(merge(base local) theme)                            # local:Config, theme:Theme
+}

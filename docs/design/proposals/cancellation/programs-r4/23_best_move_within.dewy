@@ -1,0 +1,19 @@
+# Iterative deepening under a deadline: return the best move found when time runs out.
+best_move = (board:Board) => {
+    let best = first_move(board)
+    loop depth in [1..) {
+        match search(board depth) {                 # Move | Canceled
+            m:Move => best = m
+            <Canceled> => return best               # handled: best is a plain Move
+        }
+    }
+}
+
+main = () => {
+    let board = start_board
+    let move = within(1s @best_move(board))         # Move: best_move handles its cancellation, and
+    printl"playing {move}"                          # Move can't hold Canceled, so within keeps it
+}
+# A child that forwards its Canceled gives Timeout instead: within(1s @search(board 9)) is
+# Move | Timeout. A child whose result might hold Canceled inside it (say [move:Move score:Score |
+# Canceled]) is an error at the within call: handle it in the child.

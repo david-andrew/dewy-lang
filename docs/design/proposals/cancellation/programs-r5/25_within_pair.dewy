@@ -1,0 +1,14 @@
+# Two fetches paired in a record, under one deadline.
+import p"@lib/std/http.dewy" as http
+
+load_both = () => [user=http.get_text("https://a.example/user") prefs=http.get_text("https://a.example/prefs")]
+# fields: string | HttpError, + Canceled where load_both is cancellable
+
+main = () => {
+    match within(2s @load_both) {
+        both:[user:string | HttpError prefs:string | HttpError] => printl"{both.user ?? "?"} / {both.prefs ?? "?"}"
+        <Timeout> => printl"slow"
+    }
+}
+# Not canceled: within publishes the record as a narrowed view, with no Canceled in its fields.
+# Canceled by the deadline: the record may hold Canceled, so within gives Timeout.

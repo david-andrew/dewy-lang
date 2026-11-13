@@ -1,0 +1,34 @@
+# A line-echo server: one task per connection; SIGTERM stops accepting and lets open
+# connections finish (each has a 30 s idle timeout).
+import p"@lib/std/tasks.dewy" as task
+import p"@lib/std/signals.dewy" as signals
+import p"@lib/std/net.dewy" as net
+
+echo = (conn:net.Conn) => {
+    loop true {
+        let line = conn.read_line(timeout=30s) or_throw   # string | none | NetError | Timeout | Canceled
+        if line is? none break
+        conn.write_text("{line}\n") or_throw;
+    }
+}
+
+serve_one = (conn:net.Conn) => match echo(conn) {
+    problem:error => printl("connection {conn.peer}: {problem}" file=stderr)
+    _ => {}                                                # done, or canceled: the task ends
+}   # a broken connection is logged and never fails the group
+
+accept_all = (listener:net.Listener group:Tasks) => loop true {
+    let conn = listener.accept or_throw
+    group.spawn(@serve_one(conn))
+}
+
+serve = (listener:net.Listener) => task.tasks((group:Tasks) => {
+    race(@accept_all(listener group) @signals.sigterm.next) or_throw;   # SIGTERM wins: stop accepting
+    printl"draining"
+})   # tasks returns once every connection task has finished
+
+main = () => {
+    let listener = net.listen(8080) or_throw
+    serve(listener) or_throw                               # void | NetError
+    printl"stopped"
+}

@@ -1,0 +1,23 @@
+# A spinner that runs only while the real work runs.
+spin = (label:string) => {
+    let frames = ["|" "/" "-" "\\"]
+    loop i in 0.. {
+        print("\r{frames[i % 4]} {label}")
+        if sleep(100ms) is? Canceled {               # void | Canceled: spin is a parallel item
+            print("\r")                              # clear the spinner's line, then end the item
+            break
+        }
+    }
+}
+
+count_lines = (path:Path) => {
+    let text = read_text(path) ?? ""                 # handles every failure itself
+    printl"{text.lines.length} lines"
+}
+
+main = () => parallel {
+    $incidental spin("counting")                     # doesn't keep the block alive
+    count_lines(p"big.txt") or_throw                 # warning: count_lines gives void, so this
+}                                                    # or_throw forwards nothing; remove it
+# When count_lines ends, only incidental work remains: the block cancels spin, which clears its
+# line and ends; the block drops spin's Canceled and main returns.

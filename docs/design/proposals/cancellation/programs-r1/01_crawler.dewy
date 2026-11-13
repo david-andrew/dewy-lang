@@ -1,0 +1,43 @@
+# A crawler: one feeder and four workers share a channel of URLs; a collector prints pages.
+# main is not cancellable (nothing above it can cancel it); every parallel item is.
+import p"@lib/std/http.dewy" as http
+
+Page:type = [url:string links:int bytes:int]
+
+fetch_page = (url:string) => {
+    let body = within(10s @http.get_text(url)) or_throw   # string | HttpError | Timeout,
+    Page[url find_links(body).length body.length]          # plus Canceled where cancellable
+}
+
+worker = (urls:Channel<string> pages:Channel<Page>) => {
+    loop url in urls {                                     # ends when urls closes, or when canceled
+        match fetch_page(url) {
+            page:Page => pages.send(page) or_throw         # void | Unsent<Page> | Canceled
+            <Timeout> => printl("slow, skipped: {url}" file=stderr)
+            problem:error => printl("skipped {url}: {problem}" file=stderr)
+            <Canceled> => break                            # required: worker runs as a parallel item
+        }
+    }
+}
+
+main = () => {
+    let seeds = p"seeds.txt".read_text or_throw            # string | FileError: nothing can cancel main
+    let urls = channel<string>(64)
+    let pages = channel<Page>(64)
+    let total = 0
+    parallel {
+        {                                                  # feeder
+            loop url in seeds.lines urls.send(url) or_throw   # a failed send leaves main, canceling the rest
+            urls.close()
+        }
+        {                                                  # four workers, then close pages
+            parallel i in [0..4) worker(urls pages) or_throw
+            pages.close()
+        }
+        loop page in pages {                               # collector
+            total += page.bytes
+            printl"{page.url}: {page.links} links"
+        }
+    }
+    printl"{total} bytes"                                  # total:int, never Canceled after the block
+}

@@ -1,0 +1,26 @@
+# 06. Two output files of the same kind: one failed close comes back bare, two come back as a stack.
+import p"@lib/std/files.dewy" as files
+Row:type = [name:string score:int]
+split_scores = (rows:array<Row> passed_path:Path failed_path:Path) => {
+    let passed = files.open(passed_path 'w') or_throw
+    let failed = files.open(failed_path 'w') or_throw
+    loop row in rows {
+        if row.score >=? 50 { passed.write_text("{row.name}\n") or_throw; }
+        else { failed.write_text("{row.name}\n") or_throw; }
+    }
+}   # One failed close: FileCloseFailed. Both: ErrorStack<FileCloseFailed>, in close order.
+    # The same whether cleanup runs at block end or after last use (D40 Q2). Inferred:
+    #   void | FileError | Canceled | FileCloseFailed | ErrorStack<FileCloseFailed>
+    #   | FileWriteFailed & FileCloseFailed | FileWriteFailed & ErrorStack<FileCloseFailed>
+    #   | Canceled & FileCloseFailed | Canceled & ErrorStack<FileCloseFailed>
+    #   | FileNotFound & FileCloseFailed (second open fails; only `passed` is live), and the like
+main = () => {
+    let rows = [Row["ana" 91] Row["ben" 38]]
+    let result = split_scores(rows p"passed.txt" p"failed.txt")
+    if result is? exception {
+        loop part in result.$parts {             # a stack's entries come out one by one
+            if part is? FileCloseFailed printl("{(part as FileCloseFailed).path} may be incomplete" file=stderr)
+        }
+    }
+    result or_throw                              # every shape still goes on, nothing swallowed
+}

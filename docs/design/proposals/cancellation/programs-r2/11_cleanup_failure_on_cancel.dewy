@@ -1,0 +1,18 @@
+# Back up to whichever of two disks takes the write first. Each write is an atomic replace
+# (temporary file, then rename), so a canceled or failed write leaves that disk's old backup intact.
+backup_to = (dir:Path data:array<uint8>) => p"{dir}/backup.bin".write_bytes(data)
+# Path | FileError. Canceled mid-write, its cleanup removes the temporary file, and that
+# removal can fail: Canceled & FileRemoveFailed.
+
+main = () => {
+    let data = p"state.bin".read_bytes or_throw
+    match first_ok(@backup_to(p"/mnt/a" data) @backup_to(p"/mnt/b" data)) {
+        saved:Path => printl"backed up to {saved}"
+        problem:error => printl("no backup written: {problem}" file=stderr)
+    }
+}
+# first_ok: Path | FileError. It discards the slower write's whole result, including a failed
+# removal of its temporary file; hover on first_ok lists "discards: FileRemoveFailed (losers'
+# cleanup)", and a debug build logs a discarded failure once.
+# Under $explicit_cancellation (in $bulletproof) line 9 is an error: "first_ok may discard
+# backup_to's FileRemoveFailed after it loses; handle it inside backup_to".

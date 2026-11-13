@@ -1,0 +1,27 @@
+# The echo server of program 09, with a stats reporter that must not keep the drain alive.
+import p"@lib/std/tasks.dewy" as task
+import p"@lib/std/signals.dewy" as signals
+import p"@lib/std/net.dewy" as net
+
+report_stats = (open:Atomic<int>) => {
+    let heart = ticker(10s)
+    loop heart.next is? Tick printl"{open.load'relaxed'} connections open"
+}
+
+accept_all = (listener:net.Listener group:Tasks open:Atomic<int>) => loop true {
+    let conn = listener.accept or_throw
+    open.add(1 'relaxed')
+    group.spawn(() => { serve_one(conn); open.sub(1 'relaxed') })   # serve_one as in program 09
+}
+
+serve = (listener:net.Listener open:Atomic<int>) => task.tasks((group:Tasks) => {
+    $until_others_finish group.spawn(@report_stats(open))   # canceled once only marked tasks remain
+    race(@accept_all(listener group open) @signals.sigterm.next) or_throw;
+    printl"draining"
+})   # the body returns; tasks joins the connections, then cancels the reporter
+
+main = () => {
+    let listener = net.listen(8080) or_throw
+    serve(listener atomic(0)) or_throw
+    printl"stopped"
+}

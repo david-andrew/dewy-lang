@@ -1,0 +1,34 @@
+# A route optimizer that runs until it is done or Ctrl-C is pressed, and saves the best route either way.
+# Without the ctrl_c item, Ctrl-C would end the process at once (the OS default), saving nothing.
+import p"@lib/std/signals.dewy" as signals
+
+Route:type = [cost:int order:array<int>]
+
+improve = (best:Mutex<Route> cities:array<City>) => {
+    loop round in [0..200_000) {
+        check_cancel() or_throw                       # void | Canceled: improve is a parallel item
+        let current = @(best.lock)
+        let next = mutate(current cities round)
+        if next.cost <? current.cost current = next
+    }
+}
+
+save_route = (route:Route path:Path) => path.write_text(fmt_route(route))   # Path | FileError (atomic replace)
+
+optimize = (best:Mutex<Route> cities:array<City>) => parallel {
+    improve(best cities)                              # its Canceled is this block's own: dropped
+    loop _ in signals.ctrl_c {                        # a signal wait never keeps the block alive alone
+        printl"stopping early"
+        return
+    }
+}
+
+main = () => {
+    let cities = load_cities(p"cities.csv") or_throw  # array<City> | FileError | ParseError
+    let best = mutex(first_route(cities))
+    optimize(best cities)                             # void: nothing can cancel main, and optimize
+                                                      # consumes the cancellation it causes
+    let route = @(best.lock)
+    let saved = save_route(route p"best-route.txt") or_throw
+    printl"saved {saved}"
+}

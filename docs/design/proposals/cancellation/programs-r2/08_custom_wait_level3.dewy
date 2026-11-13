@@ -1,0 +1,40 @@
+# A thumbnail service: one worker owns an expensive codec; each caller puts its own cancel
+# request in the job, so a caller that gives up also stops its job inside the worker.
+# Only channel waits are selected (batch 7); the codec reports through a channel.
+import p"@lib/std/tasks.dewy" as task
+
+Reply:type = [result:Thumb | CodecError]
+Job:type = [path:Path reply:Channel<Reply> cancel:task.CancelRequest]
+
+serve_jobs = (jobs:Channel<Job>) => {
+    let codec = open_codec or_throw
+    loop job in jobs or_throw {                                    # this worker canceled: leaves
+        if job.cancel.receive(timeout=0s) is? Closed continue      # gave up while queued: skip
+        let done = codec.start(job.path)                           # Channel<Reply>, one reply
+        match select(@done.receive @job.cancel.receive) {
+            reply:Reply => job.reply.send(reply) ?? void           # the caller may be gone
+            <Closed<task.CancelRequest>> => codec.abort()          # this caller gave up
+            <Closed<Reply>> => job.reply.send(Reply[CodecError["codec stopped"]]) ?? void
+            <Canceled> => break                                    # this worker was canceled
+        }
+    }
+}
+
+thumbnail = (jobs:Channel<Job> path:Path) => {
+    let reply = channel<Reply>(1)
+    jobs.send(Job[path reply task.cancel_request]) or_throw       # this task's own request
+    let answer = reply.receive or_throw
+    answer.result
+}
+
+main = () => {
+    let jobs = channel<Job>(16)
+    parallel {
+        serve_jobs(jobs) or_throw
+        {
+            let thumbs = [loop f in p"photos".glob"*.jpg" within(2s @thumbnail(jobs f)) ?? void]
+            jobs.close()
+            printl"{thumbs.length} thumbnails"
+        }
+    }
+}

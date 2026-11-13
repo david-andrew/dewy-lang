@@ -1,0 +1,29 @@
+# Generic helpers wrapping a wait's result.
+import p"@lib/std/http.dewy" as http
+identity = <T>(x:T):>T => x
+
+timed = <T>(label:string op:(():>T)) => {
+    let start = clock.now
+    let r = op()                                   # T, plus Canceled where cancellable (the effect)
+    printl"{label}: {clock.now - start}"
+    r
+}
+
+count_alternatives = <T>(x:T) => {
+    let n = 0
+    loop t in members(T | string) n += 1
+    n
+}
+
+main = () => {
+    let a = identity(sleep(0ns))                   # T = void
+    let t = timed("status" @http.get_text("https://example.org"))   # string | HttpError
+    printl"{count_alternatives(sleep(0ns))}"       # 2: T = void
+    parallel {
+        identity(sleep(0ns));                      # T = void | Canceled: identity's second body
+        printl"{count_alternatives(sleep(0ns))}"   # 3: T = void | Canceled; a second body, correct
+    }
+}
+# identity and count_alternatives each get two bodies, because their type argument differs by
+# context. Under $no_hidden_costs that is a warning naming the call sites; timed gets one body,
+# since T comes from op's written type and the Canceled is the effect.

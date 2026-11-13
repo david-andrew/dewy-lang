@@ -1,0 +1,30 @@
+# Generic helpers wrapping a wait's result.
+import p"@lib/std/http.dewy" as http
+identity = <T>(x:T):>T => x
+
+timed = <T>(label:string op:(():>T)) => {
+    let start = clock.now
+    let r = op()                                   # T, plus Canceled where cancellable (the effect)
+    printl"{label}: {clock.now - start}"
+    r
+}
+
+count_alternatives = <T>(x:T) => {
+    let n = 0
+    loop t in members(T | string) n += 1
+    n
+}
+
+main = () => {
+    let a = identity(sleep(0ns))                   # T = void
+    let t = timed("status" @http.get_text("https://example.org"))   # string | HttpError
+    printl"{count_alternatives(sleep(0ns))}"       # 2
+    parallel {
+        identity(sleep(0ns));                      # T = void | Canceled: identity's second body
+        printl"{count_alternatives(sleep(0ns) or_throw)}"   # 2: forwarded first, so T = void again
+    }
+}
+# Without the `or_throw` on line 24, that line warns by default:
+#   "count_alternatives inspects T, which is void | Canceled here and void at line 21: members
+#    gives 3 here and 2 there. Forward or handle Canceled before the call if they should agree."
+# Hover on the call shows both answers. identity's second body is listed under $no_hidden_costs.

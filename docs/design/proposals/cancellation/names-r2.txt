@@ -1,0 +1,2 @@
+parallel { $until_others_finish { let heart = ticker(10s); loop heart.next is? Tick printl"alive" }; process_queue() or_throw }
+match select(@done.receive @job.cancel.receive) { reply:Reply => send(reply); <Closed<task.CancelRequest>> => codec.abort(); <Canceled> => break }

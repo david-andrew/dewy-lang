@@ -1,0 +1,16 @@
+# Fetch many pages and keep each URL beside its result: the most common comprehension shape.
+import p"@lib/std/http.dewy" as http
+
+main = () => {
+    let text = p"urls.txt".read_text or_throw
+    let results = [parallel u in text.lines [url=u page=http.get_text(u)]]
+    # inside each item: [url:string page:string | HttpError | Canceled], a local record: allowed.
+    # after the join: array<[url:string page:string | HttpError]>. The join publishes an item's value
+    # only if this block did not cancel it, so no element holds Canceled.
+    loop r in results {
+        match r.page {
+            body:string => printl"{r.url}: {body.length} bytes"
+            problem:error => printl("{r.url}: {problem}" file=stderr)
+        }
+    }
+}

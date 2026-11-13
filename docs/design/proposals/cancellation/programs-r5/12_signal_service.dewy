@@ -1,0 +1,31 @@
+# A queue processor with a status ticker and early stop on SIGTERM. SIGTERM lets the job in
+# progress finish (for up to 30 s after SIGTERM), starts no new one, and ends the program.
+import p"@lib/std/signals.dewy" as signals
+
+process_queue = (dir:Path done:Atomic<int>) => {
+    loop file in dir.glob"*.job" {
+        check_cancel() or_throw                              # stop between jobs, not inside one
+        protect_from_cancel(30s @run_job(file)) or_throw     # 30 s counted from the cancellation;
+        done.add(1 'relaxed')                                # with no SIGTERM, a job takes as long as it takes
+    }
+}
+
+main = () => {
+    let done = atomic(0)
+    parallel {
+        process_queue(p"queue" done) or_throw
+        $until_others_finish {
+            let heart = ticker(10s)
+            loop heart.next is? Tick printl"{done.load'relaxed'} jobs so far"
+        }
+        loop _ in signals.sigterm {
+            printl"SIGTERM: finishing the current job, then stopping"
+            return
+        }
+    }
+    printl"all {done.load'relaxed'} jobs done"
+}
+# main: void | RunError | Timeout | ... A job that fails or is still running 30 s after SIGTERM is
+# not lost: the canceled sibling's failure is kept beside the handler's return (line 23), so main
+# exits with that failure's code instead of 0. A second SIGTERM during the wait is intercepted
+# (batch 9); SIGKILL is the escalation.

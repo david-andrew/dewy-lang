@@ -1,0 +1,25 @@
+# Ping hosts in parallel, log every outcome, and keep the round-trip times.
+import p"@lib/std/net.dewy" as net
+
+report = (host:string outcome) => printl"{host}: {outcome}"
+
+check = (host:string) => {
+    let r = net.ping(host)                     # Duration | NetError | Canceled, in an item
+    report(host r)                             # allowed: logging a possible Canceled
+    match r {
+        d:Duration => d
+        e:exception => {                       # the catch-all also takes Canceled: allowed
+            printl("{host} failed: {e}" file=stderr)
+            e                                  # forwarded as check's result
+        }
+    }
+}
+
+main = () => {
+    let hosts = ["a.example" "b.example" "c.example"]
+    let times = [parallel h in hosts check(h)]     # array<Duration | NetError>
+    let ok = [loop t in times if t is? Duration t]
+    printl"{ok.length} of {hosts.length} hosts answered"
+}
+# Stored outside the item, a possible Canceled is an error:
+#   failures.lock.push(e)     # where failures is a Mutex shared with main

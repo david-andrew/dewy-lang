@@ -1,0 +1,16 @@
+# A game with a background asset watcher that is stopped when the game ends.
+main = (app:BackgroundTasks) => {
+    let watcher = app.spawn(@watch_assets(p"assets"))   # watch_assets is cancellable: its group can stop it
+    run_game() or_throw                                  # void | GameError: nothing can cancel main
+    watcher.stop()
+    watcher.wait() or_throw                              # void | WatchError: the Canceled that stop
+}                                                        # caused is not reported back
+
+watch_assets = (dir:Path) => {
+    loop change in dir.watch {                           # ends when the task is stopped
+        match reload(change.path) {
+            problem:error => printl("reload failed: {problem}" file=stderr)
+            _ => {}
+        }
+    }
+}

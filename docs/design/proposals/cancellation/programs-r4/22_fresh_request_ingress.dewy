@@ -1,0 +1,21 @@
+# A canceled upload step that still saves progress and hands work to a background task.
+# Protected bodies, cleanup and tasks spawned into an outside group run under a different
+# request, so a possible Canceled may not be carried into them (rule 4).
+upload_step = (app:BackgroundTasks file:Path progress:Path) => {
+    let paused = sleep(1s)                                    # void | Canceled
+    let was_canceled = paused is? Canceled                    # a bool: fine to carry anywhere
+    protect_from_cancel(2s () => progress.write_text("stopped={was_canceled}")) or_throw;
+    if not was_canceled app.spawn(@upload(file));             # only real work goes to the background
+    paused                                                    # forward the cancellation, if any
+}
+# Capturing `paused` itself is an error at line 7 or line 8:
+#   protect_from_cancel(2s () => { paused or_throw; … })
+#   "paused may hold this work's Canceled; the protected body runs under a fresh request.
+#    Capture `paused is? Canceled` instead."
+# The same check covers a value with a drop hook: Logged[value=paused] is an error, because the
+# hook reads it during cleanup, under the cleanup's own request.
+
+main = (app:BackgroundTasks) => {
+    within(500ms @upload_step(app p"a.bin" p"a.progress")) ?? void
+    printl"step done"
+}

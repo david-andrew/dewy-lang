@@ -1,0 +1,19 @@
+# A digest per feed: each feed is a parallel item that fetches its posts one by one.
+import p"@lib/std/http.dewy" as http
+
+fetch_all = (links:array<string>) => [loop u in links http.get_text(u)]
+# array<string | HttpError> from main; array<string | HttpError | Canceled> in an item: a local
+# array, so both are allowed.
+
+digest = (pages) => {
+    let ok = [loop p in pages if p is? string p]
+    "{ok.length} of {pages.length} posts fetched"
+}   # takes an array that may hold Canceled: allowed, it stays in this request's work
+
+main = () => {
+    let feeds = ["https://a.example/feed" "https://b.example/feed"]
+    let digests = [parallel f in feeds digest(fetch_all(feed_links(f) ?? []))]
+    loop d in digests printl(d)                    # array<string>
+}
+# To stop fetching as soon as an item is canceled, rather than letting each later get return
+# Canceled at once: [loop u in links http.get_text(u) or_throw<Canceled>].

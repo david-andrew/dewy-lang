@@ -1,0 +1,4 @@
+$no_discarded_failures first_ok(@backup_to(a data) @backup_to(b data))
+match select(@done.receive @job.cancel.receive) { <Closed<task.CancelRequest>> => codec.abort()  <Canceled> => break }   # hover on the first arm: "the caller's cancel request closed: the caller was canceled or has ended. This worker keeps running. Its own cancellation is the <Canceled> arm." Hover on the second: "this worker's own request closed: its group is stopping it."
+$keep_all_failures first_ok(@backup_to(a data) @backup_to(b data))
+$explicit_discards first_ok(@backup_to(a data) @backup_to(b data))

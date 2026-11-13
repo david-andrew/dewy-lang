@@ -1,0 +1,21 @@
+# Filling an array by index from a parallel loop, the v4/v5 partition-write form.
+import p"@lib/std/http.dewy" as http
+
+fetch_into = (urls:array<string>) => {
+    let pages:array<string | HttpError> = [loop _ in urls HttpError["not fetched"]]
+    parallel i in [0..urls.length) {
+        pages[i] = http.get_text(urls[i]) or_throw<Canceled>   # string | HttpError: Canceled leaves
+    }
+    pages
+}
+# Without `or_throw<Canceled>` the write is an error in every item: "this can store a Canceled in
+# pages, which outlives this item (an item canceled by a break would leave it there); forward it
+# with or_throw<Canceled>, or build the array with [parallel i in … http.get_text(urls[i])]".
+
+fetch_all = (urls:array<string>) => [parallel u in urls http.get_text(u)]   # the shorter form
+
+main = () => {
+    let urls = ["https://a.example" "https://b.example"]
+    printl(fetch_into(urls))
+    printl(fetch_all(urls))
+}
