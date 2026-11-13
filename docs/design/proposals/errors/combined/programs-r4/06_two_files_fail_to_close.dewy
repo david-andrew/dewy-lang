@@ -1,0 +1,25 @@
+# 06. Two output files of the same kind: when both closes fail, both failures come back, in close order.
+import p"@lib/std/files.dewy" as files
+Row:type = [name:string score:int]
+split_scores = (rows:array<Row> passed_path:Path failed_path:Path) => {
+    let passed = files.open(passed_path 'w') or_throw
+    let failed = files.open(failed_path 'w') or_throw
+    loop row in rows {
+        if row.score >=? 50 { passed.write_text("{row.name}\n") or_throw; }
+        else { failed.write_text("{row.name}\n") or_throw; }
+    }
+}   # `failed` closes, then `passed`. Where both owners are live, their close failures form an
+    # ErrorStack<FileCloseFailed> (one or two entries, in close order), held in the owners' own
+    # failure slots, so building it never allocates (round3.md, M5). Inferred:
+    #   void | FileError | Canceled | ErrorStack<FileCloseFailed>
+    #   | FileWriteFailed & ErrorStack<FileCloseFailed> | Canceled & ErrorStack<FileCloseFailed>
+    #   | FileNotFound & FileCloseFailed (second open fails; only `passed` is live), and the like
+main = () => {
+    let rows = [Row["ana" 91] Row["ben" 38]]
+    let result = split_scores(rows p"passed.txt" p"failed.txt")
+    if result is? ErrorStack<FileCloseFailed> {   # also when canceled or when a write failed too
+        let closes = result as ErrorStack<FileCloseFailed>
+        loop close in closes printl("{close.path} may be incomplete" file=stderr)
+    }
+    result or_throw
+}

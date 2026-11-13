@@ -1,0 +1,29 @@
+# 07. Check many uploads in parallel; report every bad one, in upload order, not only the first.
+CheckFailed:type = type of error & [path:Path message:string]
+check = (path:Path) => {
+    let bytes = path.read_bytes or_throw
+    if bytes.length =? 0 return CheckFailed[path "empty upload"]
+    if bytes.length >? 50_000_000 return CheckFailed[path "larger than 50 MB"]
+    return bytes.length
+}   # int | CheckFailed | FileError | Canceled (a one-shot read returns no combination: round3.md, M4)
+check_all = (paths:array<Path>) => {
+    let results = [parallel path in paths check(path)]   # one result per path, Canceled included
+    let checked = [loop r in results r or_throw<Canceled>]  # stop on cancellation, keep the rest
+    let [sizes failed] = checked.partition_failures
+    if failed.length >? 0 return ErrorStack[failed...]   # ErrorStack<CheckFailed | FileError>, upload order
+    return sum(sizes)
+}
+# A parallel block whose two items fail independently (extension proposed in round1.md, not decided):
+load_both = () => {
+    parallel (
+        let config = p"app.toml".read_text or_throw
+        let theme = p"theme.toml".read_text or_throw
+    )
+    return config.length + theme.length
+}   # both reads fail: FileNotFound & FileAccessDenied (distinct kinds), or ErrorStack<FileNotFound>
+    # (same kind, item order). A sibling stopped by the first failure adds no Canceled.
+main = () => {
+    let total = check_all([p"a.png" p"b.png" p"c.png"]) or_throw
+    printl"{total} bytes accepted"
+    printl"{load_both or_throw} bytes of settings"
+}

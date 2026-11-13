@@ -1,0 +1,27 @@
+# 11. Combined objects (not errors): one value is both a User and its Settings; `as` takes either back.
+# Each minted operand is its own facet with its own fields; plain records merge into one record;
+# a field that more than one of these declares is reached with `as` (round4.md, D4).
+User:type = type of any & [id:int name:string]
+Settings:type = type of any & [id:int theme:'light' | 'dark' font_size:int]
+greet = (user:User):>string => "hello {user.name}"
+save_settings = (settings:Settings):>void => printl"saving settings row {settings.id}"
+render = (profile:User & Settings):>void => {
+    printl(greet(profile))                                    # the User facet is what greet takes
+    printl"{profile.name}: {profile.theme} theme, {profile.font_size}pt"   # one facet has it: direct
+    printl"user {(profile as User).id}, settings {(profile as Settings).id}"   # both have `id`: name one
+    save_settings(profile)
+}
+Size:type = [width:int height:int]                           # plain records merge into one record
+Place:type = [x:int y:int]
+area = (box:Size & Place):>int => box.width * box.height
+Marker:type = type of any & [x:int label:string]              # minted, beside a plain Place
+describe = (m:Marker & Place):>string => {
+    return "{m.label} drawn at {(m as Place).x}, anchored at {(m as Marker).x}"   # two x's, two sources
+}
+main = () => {
+    render(User[7 "ana"] and Settings[31 'dark' 14])
+    printl(area(Size[3 4] and Place[0 0]))                     # one record with four fields
+    printl(describe(Marker[2 "pin"] and Place[10 20]))
+}
+# `Place[1 2] and [x=3]` is an error: two plain records merge into one, which has one `x`.
+# The fix-it mints one of them (as Marker above) or builds one record.

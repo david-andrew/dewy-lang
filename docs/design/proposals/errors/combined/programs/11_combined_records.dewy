@@ -1,0 +1,16 @@
+# 11. Combined records (not errors): one value is both a User and its Settings; `as` takes either back.
+User:type = [id:int name:string]
+Settings:type = [id:int theme:'light' | 'dark' font_size:int]
+greet = (user:User):>string => "hello {user.name}"
+save_settings = (settings:Settings):>void => printl"saving settings row {settings.id}"
+render = (profile:User & Settings):>void => {
+    printl(greet(profile))                                    # the User part is what greet takes
+    printl"{profile.name}: {profile.theme} theme, {profile.font_size}pt"   # fields in one part: direct
+    printl"user {(profile as User).id}, settings {(profile as Settings).id}"   # `id` is in both: name the part
+    save_settings(profile)
+}
+main = () => {
+    let user = User[7 "ana"]
+    let settings = Settings[31 'dark' 14]
+    render(user & settings)
+}

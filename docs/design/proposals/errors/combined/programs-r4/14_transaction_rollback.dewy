@@ -1,0 +1,24 @@
+# 14. A transfer whose update fails and whose automatic rollback also fails.
+import p"@lib/std/db.dewy" as db
+Account:type = [id:int balance:int]
+NotEnough:type = type of error & [account:int balance:int]
+transfer = (store:db.Store from:int to:int amount:int<(>? 0)>) => {
+    let tx = store.begin or_throw
+    let source = tx.get<Account>(from) or_throw
+    if source.balance <? amount return NotEnough[from source.balance]
+    tx.put(Account[from source.balance - amount]) or_throw
+    let target = tx.get<Account>(to) or_throw
+    tx.put(Account[to target.balance + amount]) or_throw
+    tx.commit() or_throw                 # consumes `tx` either way; a failed commit rolls back itself
+}   # if `tx` is still owned here (an earlier failure), it rolls back ($__abandon__). Inferred:
+    #   void | db.DbError | NotEnough | Canceled
+    #   | db.QueryFailed & db.RollbackFailed | db.CommitFailed & db.RollbackFailed
+    #   | NotEnough & db.RollbackFailed | Canceled & db.RollbackFailed
+main = () => {
+    let store = db.open(p"bank.db") or_throw
+    let moved = transfer(store 1 2 500)
+    if moved is? db.RollbackFailed {
+        printl("the transfer failed and could not be undone; check accounts 1 and 2" file=stderr)
+    }
+    moved or_throw
+}

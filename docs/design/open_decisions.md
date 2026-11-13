@@ -22,7 +22,9 @@
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
+  - D42 Q3, Q5: `$explicit_cancellation` now; per-operation error types under `FileError`.
 - **(b) New syntax or surface:**
+  - D42 Q1, Q2, Q4, Q7: no part lost silently; the spin warning; facets and `as`; exit code of a combination;
   - D43 Q1, Q2: native database v1 and a database-filter inspection pilot;
   - D41 Q1–Q3: `check_cancel()`, `protect_from_cancel(limit @work)`, `task.tasks(@body)` as ordinary calls;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
@@ -33,6 +35,7 @@
   - D33 Q1: a self-naming alias;
   - D37 Q1: `iso_basic` and `""`.
 - **(c) Names only:**
+  - D42 Q6, Q8: `ErrorStack` or `ErrorList`; `$origin`, `$trace`, `$parts`, `$origin_at_caller`;
   - D43 Q3: core database names, with `related` being renamed;
   - D10 Q4–Q8;
   - D11 Q5, Q6;
@@ -99,7 +102,7 @@ write_all = (names:array<string>) => {
 
 Reject a locally continuing exit (`break`, `continue`, or an inner block's end) while fallible cleanup remains unmarked, with a fix-it offering A or B? In B and C the block's `or_throw` acknowledges cleanup on every exit, including jumps that skip its textual end.
 
-**Rec:** A for simple loops, B for complex bodies; this is also the independent review's preference. A places `or_throw` at the failing operation; successful or failed consuming close removes the duty, so cleanup never closes it twice. When conditions or work cannot move after close, B keeps one cleanup region across the existing jumps. C is coherent, but a reader must know that `loop … { … } or_throw` attaches to the whole loop and cannot mark its body. If body failure and cleanup failure both occur, both survive in that order; D42 Q1 decides their representation. **Reversible:** before release; the checked marker rule becomes a control-flow contract afterward.
+**Rec:** A for simple loops, B for complex bodies; this is also the independent review's preference. A places `or_throw` at the failing operation; successful or failed consuming close removes the duty, so cleanup never closes it twice. When conditions or work cannot move after close, B keeps one cleanup region across the existing jumps. C is coherent, but a reader must know that `loop … { … } or_throw` attaches to the whole loop and cannot mark its body. If a body failure and a cleanup failure both occur, both survive as `body & cleanup` (D42). **Reversible:** before release; the checked marker rule becomes a control-flow contract afterward.
 
 #### Q5 (a). Does `defer` still earn its place?
 
@@ -132,7 +135,158 @@ Paper dogfood, surprise panel and independent review, with remaining implementat
 
 ### D42. Combining failures and seeing where each came from
 
-**Being redesigned around your 2026-11-13 design** (batch 10): `e1 & e2` typed `E1 & E2` as an unordered set, `as` to take a part out, the error stack (`type of error & array`) for repeats, metatag members produced on demand. It comes back compared with the earlier `ErrorGroup` proposal (`proposals/errors/round4.md`), with answers on how `??<E>` treats a combination, how cancellation fits, and distinct error types per operation for cleanup.
+Your design (batch 10): failure values combine with `and`, the type is `E1 & E2`, `as` takes a part out, two failures of one type need the error stack, and `Canceled` is an ordinary failure (`??<~Canceled>` excludes it). These questions settle the rest. The type laws, the compiler's check that no part is lost, and cleanup storage are implementation contracts in the proposal, not questions.
+
+#### Q1 (b). A failure part disappears only through an action that names it
+
+`is?`, `match` arms and `or_throw<E>` select a failure that has an `E` part. `??<E>` consumes a
+failure only when every part of it is needed to make an `E`; `~` is no exception, so
+`??<~Canceled>` never consumes `Canceled & E1`. A `match` arm binds the whole value, so the arm must
+forward, handle or drop with `;` whatever its type doesn't name.
+
+```dewy
+report = ():>void => {
+    match total_bytes {                       # int | QuotaExceeded | Offline | QuotaExceeded & Offline
+        both:QuotaExceeded & Offline => printl"both failed: {both}"
+        quota:QuotaExceeded => printl"quota: {quota.message}"    # only QuotaExceeded alone reaches here
+        offline:Offline => printl"network: {offline.message}"
+        n:int => printl"{n} bytes"
+    }
+}
+careless = ():>void => {
+    match total_bytes {
+        quota:QuotaExceeded => printl"quota: {quota.message}"    # error: this arm also takes the pair,
+        offline:Offline => printl"network: {offline.message}"    # and its Offline is dropped unnamed
+        n:int => printl"{n} bytes"
+    }
+}
+poll = (sensor:Sensor) => {
+    loop true {
+        let reading = sensor.read(timeout=1s) ??<~Canceled> continue or_throw   # Canceled, alone or
+        record(reading)                                                      # combined, leaves poll
+    }
+}
+```
+
+**Rec:** yes. Reversible before release.
+
+#### Q2 (b). A warning for a loop that may retry at once after cancellation
+
+```dewy
+worker = (jobs:Receiver<Job>) => {
+    loop true {
+        let job = jobs.receive ?? continue    # warning: this loop may retry immediately after
+        process(job)                          # cancellation; write ??<~Canceled> continue or_throw
+    }
+}
+```
+
+It fires when a `??` that can consume `Canceled` is on a wait (directly or through a call that can
+return `Canceled` from a wait) and its fallback goes back round the loop. It is a hint, not a
+proof: a wait inside a callback isn't seen, and a loop with its own deadline is fine. **Rec:** yes.
+
+#### Q3 (a). What `$explicit_cancellation` checks now
+
+```dewy
+ask = () => {
+    $explicit_cancellation
+    let rounds = input_int("rounds? ") ?? 10     # error: this `??` can consume Canceled; write
+    play(rounds)                                 # ??<~Canceled> 10 or ??<Canceled | …> 10
+}
+```
+
+Under the tag (in `$bulletproof`), a handler or arm that can consume `Canceled` must name it,
+positively or as `~Canceled`, after aliases are expanded. Storing `Canceled` in a collection isn't
+consuming it, so collectors need nothing. **Rec:** yes.
+
+#### Q4 (b). Combined values: facets, merged plain records, and `as`
+
+```dewy
+User:type = type of any & [id:int name:string]
+Settings:type = type of any & [id:int theme:'light' | 'dark']
+both_ids = (profile:User & Settings):>string => {
+    return "{(profile as User).id}/{(profile as Settings).id}"   # each minted type keeps its own id
+}
+Size:type = [width:int height:int]
+Place:type = [x:int y:int]
+area = (box:Size & Place):>int => box.width * box.height      # plain records merge, as today
+wrap = (job:int result:Canceled & FileCloseFailed & SocketCloseFailed) => {
+    return (result as Canceled) and UploadFailed[job "upload failed" (result as error)]
+}   # `as error` takes every error part: FileCloseFailed & SocketCloseFailed
+```
+
+One rule for every `&`: each minted operand is its own facet with its own fields, and all plain
+records merge into one record (today's rule). A field more than one of these declares is reached
+with `as`. `v as T` keeps every facet that is a `T` (the "subset" David described), and is an error
+when the kept facets can't form a `T` (two `FileError`s, whose shared `path` would be ambiguous).
+**Rec:** yes. It changes nothing existing: plain-record intersections behave as LANGUAGE.md says.
+
+#### Q5 (a). Library failure vocabulary
+
+```dewy
+save = (path:Path rows:array<Row>) => {
+    let out = files.open(path 'w') or_throw
+    loop row in rows out.write_text("{row}\n") or_throw;
+}   # a write fails, then the close fails: FileWriteFailed & FileCloseFailed
+count_lines = (path:Path) => {
+    let text = path.read_text or_throw   # includes FileReadFailed & FileCloseFailed: reads report closes too
+    return text.split("\n").length
+}
+```
+
+One type per operation, under a family per resource: `FileReadFailed`, `FileWriteFailed`,
+`FileCloseFailed`, `FileRemoveFailed` (new this round, for removing a file, including the
+temporary file an atomic write abandons) under `FileError`, which becomes their parent (today it
+is a sibling); `SocketConnectFailed`, `SocketListenFailed`, `SocketSendFailed`,
+`SocketReceiveFailed`, `SocketCloseFailed` under `NetError`; `ProcessWaitFailed`,
+`ProcessStopFailed` with `SpawnError` under `ProcessError`; `QueryFailed`, `CommitFailed`,
+`RollbackFailed` under `DbError`. The cold read read every tested one correctly, mostly 5/5
+(`FileRemoveFailed` follows the pattern but is untested). **Rec:** yes.
+
+#### Q6 (c). The error stack's name
+
+```dewy
+check_rows = (rows:array<string>) => {
+    let problems:array<RowError> = []
+    loop i in [0..rows.length) {
+        if to_int(rows[i]) is? error problems.push(RowError[i+1 "not a whole number"])
+    }
+    if problems.length >? 0 return ErrorStack[problems...]
+    return rows.length
+}
+```
+
+Cold read: `ErrorStack` 3/3/3 (readers unsure which end is the top), `ErrorList` 4/4/3 ("kept in
+the order written"), `Errors` 3/4/3. **Rec:** `ErrorStack`, your word; `ErrorList` if you'd rather
+the name say the order.
+
+#### Q7 (b). The exit status of a combined failure: the highest code among its parts
+
+```dewy
+main = () => {
+    save_frames(frames p"capture.bin") or_throw   # Ctrl-C, then the close fails:
+}                                                 # Canceled & FileCloseFailed, exit 130
+```
+
+A failure reaching the end of `main` is reported part by part, as today, and exits with its kinds'
+code; a combination or stack exits with the highest of its parts' codes, so a cancellation (130)
+outranks the cleanup failures it caused, by number and not by a special case. A successful `main`
+exits 0; `exit(n)` exits `n`. **Rec:** highest code. The alternative, the lowest code, makes the
+close failure's code win here.
+
+#### Q8 (c). Metatag names
+
+```dewy
+show = (failure:exception):>void => {
+    loop part in failure.$parts printl("{part.$origin}: {part}" file=stderr)
+}
+```
+
+Cold read: `$origin` 4/4/4 (as good as `$location`, better than `$where`); `$trace` and
+`$backtrace` both good; `$parts` and `$failures` tie; `$origin_at_caller` 4/4/3, the best of its
+three. **Rec:** `$origin`, `$trace`, `$parts`, `$origin_at_caller`.
+
+Dogfooded: 15 programs over four rounds, two independent reviews; lowest grade 3, for discoverability (whether a close failure comes back alone or as a stack depends on how many owners are live; a library wrapping failures uses `as error` and `as Canceled`). Names read cold except `FileRemoveFailed`. Full design and contracts: `proposals/errors/combined/round4.md`; the earlier `ErrorGroup` proposal it replaces is `proposals/errors/round4.md`.
 
 ### D43. A native database first version, and ordinary lambdas later
 

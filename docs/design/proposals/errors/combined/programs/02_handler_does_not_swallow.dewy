@@ -1,0 +1,19 @@
+# 02. A typed fallback handles only failures it names in full; a close failure is never hidden.
+import p"@lib/std/files.dewy" as files
+ParseError:type = type of error & [path:Path message:string]
+read_limit = (path:Path) => {
+    let file = files.open(path 'r') or_throw
+    let text = file.read_text or_throw
+    let n = to_int(text.trim)
+    if n is? error return ParseError[path "limit must be a whole number"]
+    return n
+}   # `file` closes here. Inferred, as hover shows it:
+    #   int | FileError | ParseError | Canceled
+    #   | FileReadFailed & FileCloseFailed | ParseError & FileCloseFailed | Canceled & FileCloseFailed
+limit_or_default = (path:Path) => {
+    return read_limit(path) ??<ParseError | FileNotFound> 100
+}   # int | the rest: ParseError & FileCloseFailed is not covered (FileCloseFailed isn't named), so it stays
+main = () => {
+    let limit = limit_or_default(p"limit.txt") or_throw
+    printl"limit {limit}"
+}

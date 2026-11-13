@@ -1,0 +1,24 @@
+# 04. Count lines in many files: skip bad files, report them all at the end, stop at once on Ctrl-C.
+count_lines = (path:Path) => {
+    let text = path.read_text or_throw
+    return text.split("\n").length
+}   # int | FileError | InvalidUtf8 | Canceled: read_text closes its read-only handle before decoding,
+    # and closing a read-only handle can't fail (round3.md, M4), so no combination comes back
+count_all = (paths:array<Path>) => {
+    let skipped:array<FileError | InvalidUtf8> = []
+    let total = 0
+    loop path in paths {
+        let n = count_lines(path) or_throw<Canceled>
+        if n is? error {
+            skipped.push(n)
+            continue
+        }
+        total += n
+    }
+    printl"{total} lines in {paths.length - skipped.length} files"
+    if skipped.length >? 0 return ErrorStack[skipped...]
+}                                        # void | ErrorStack<FileError | InvalidUtf8> | Canceled
+main = () => {
+    let paths = p"logs".glob"*.log" or_throw
+    count_all(paths) or_throw            # an unhandled stack prints one line per file
+}

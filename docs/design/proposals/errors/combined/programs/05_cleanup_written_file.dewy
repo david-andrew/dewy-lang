@@ -1,0 +1,22 @@
+# 05. Write a report; a failed write and the failed close that follows both reach the caller.
+import p"@lib/std/files.dewy" as files
+Row:type = [name:string score:int]
+write_report = (path:Path rows:array<Row>) => {
+    let out = files.open(path 'w') or_throw
+    loop row in rows out.write_text("{row.name},{row.score}\n") or_throw;
+    printl"wrote {rows.length} rows"
+}   # `out` closes here. Inferred: void | FileError | Canceled
+    #   | FileWriteFailed & FileCloseFailed | Canceled & FileCloseFailed
+main = () => {
+    let rows = [Row["ana" 91] Row["ben" 78]]
+    let written = write_report(p"report.csv" rows) or_throw<Canceled>
+    match written {
+        <void> => ()
+        both:FileWriteFailed & FileCloseFailed => {
+            printl("write failed: {(both as FileWriteFailed).message}" file=stderr)
+            printl("closing also failed, so {(both as FileCloseFailed).path} is incomplete" file=stderr)
+            return both
+        }
+        problem:FileError => return problem
+    }
+}

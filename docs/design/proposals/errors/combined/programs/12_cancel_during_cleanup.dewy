@@ -1,0 +1,23 @@
+# 12. Ctrl-C while a paced writer runs: the cancellation and a failed close both reach main.
+import p"@lib/std/files.dewy" as files
+Frame:type = [index:int pixels:array<uint8>]
+save_frames = (frames:array<Frame> path:Path) => {
+    let out = files.open(path 'w') or_throw
+    loop frame in frames {
+        out.write_bytes(frame.pixels) or_throw;
+        sleep(10ms) or_throw             # a cancellation point: Ctrl-C ends the loop here
+    }
+}   # `out` closes here (shielded, as all cleanup is). Inferred:
+    # void | FileError | Canceled | FileWriteFailed & FileCloseFailed | Canceled & FileCloseFailed
+main = () => {
+    let frames = [loop i in [0..100) Frame[i [0 0 0]]]
+    let saved = save_frames(frames p"capture.bin")
+    match saved {
+        <void> => printl"saved"
+        stopped:Canceled | Canceled & FileCloseFailed => {
+            printl("stopped ({stopped}); capture.bin may end early" file=stderr)
+            return stopped
+        }
+        problem:FileError => return problem
+    }
+}

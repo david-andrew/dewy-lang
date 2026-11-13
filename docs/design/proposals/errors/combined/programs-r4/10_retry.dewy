@@ -1,0 +1,20 @@
+# 10. Retry a connection with backoff; keep every failed attempt; stop at once on Ctrl-C.
+import net
+connect_with_retry = (host:string port:int attempts:int<(>? 0)>) => {
+    let failures:array<net.SocketConnectFailed> = []
+    loop true {
+        let conn = net.tcp_connect(host port) or_throw<Canceled>
+        if conn is? net.TcpStream return conn
+        failures.push(conn)
+        if failures.length >=? attempts return ErrorStack[failures...]   # nonempty: just pushed
+        sleep(100ms * 2^failures.length) or_throw
+    }
+}                                        # net.TcpStream | ErrorStack<net.SocketConnectFailed> | Canceled
+main = () => {
+    let conn = connect_with_retry("127.0.0.1" 8080 5)
+    if conn is? ErrorStack<net.SocketConnectFailed> {
+        printl("gave up after {conn.length} attempts; last: {conn.last.message}" file=stderr)
+        exit(1)
+    }
+    net.tcp_send(conn or_throw "hello") or_throw
+}

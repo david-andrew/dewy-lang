@@ -1,0 +1,23 @@
+# 13. Generic code combining T & U: run two independent checks and return both failures.
+run_both = <T U>(first:(():>void | T) second:(():>void | U)) => {
+    let a = first()
+    let b = second()
+    if a is? T and b is? U return a & b  # T & U; where T and U are one type, ErrorStack<T> holding a then b
+    if a is? T return a
+    if b is? U return b
+}
+DiskLow:type = type of error & [mount:string free_mb:int]
+Offline:type = type of error & [host:string]
+root_disk = ():>void | DiskLow => DiskLow["/" 120]
+data_disk = ():>void | DiskLow => DiskLow["/data" 40]
+backup_host = ():>void | Offline => Offline["backup.local"]
+main = () => {
+    let mixed = run_both(@root_disk @backup_host)   # void | DiskLow | Offline | DiskLow & Offline
+    if mixed is? DiskLow & Offline printl"disk {(mixed as DiskLow).mount} low and {(mixed as Offline).host} down"
+    let disks = run_both(@root_disk @data_disk)     # void | DiskLow | ErrorStack<DiskLow>
+    if disks is? ErrorStack<DiskLow> {
+        loop disk in (disks as ErrorStack<DiskLow>) printl"{disk.mount}: {disk.free_mb} MB free"
+    }
+    mixed or_throw
+    disks or_throw
+}

@@ -1,0 +1,33 @@
+# 13. Generic code combining T & U: run two independent checks and return both failures.
+run_both = <T U>(first:(():>void | T) second:(():>void | U)) => {
+    let a = first()
+    let b = second()
+    if a is? exception and b is? exception return a and b # each use must give T and U different types
+    if a is? exception return a
+    if b is? exception return b
+}
+DiskLow:type = type of error & [mount:string free_mb:int]
+Offline:type = type of error & [host:string]
+root_disk = ():>void | DiskLow => DiskLow["/" 120]
+data_disk = ():>void | DiskLow => DiskLow["/data" 40]
+backup_host = ():>void | Offline => Offline["backup.local"]
+check_all = <E>(checks:array<(():>void | E)>) => {   # repeats of one type: an explicit stack
+    let failed:array<E> = []
+    loop check in checks {
+        let r = check()
+        if r is? E failed.push(r)
+    }
+    if failed.length >? 0 return ErrorStack[failed...]   # E must be an error type (checked at each use)
+}
+main = () => {
+    let mixed = run_both(@root_disk @backup_host)   # void | DiskLow | Offline | DiskLow & Offline
+    if mixed is? DiskLow & Offline printl"disk {(mixed as DiskLow).mount} low and {(mixed as Offline).host} down"
+    mixed or_throw
+    # run_both(@root_disk @data_disk) is an error here: "run_both combines a DiskLow with a DiskLow;
+    # two failures of one type go in an ErrorStack (check_all)".
+    let disks = check_all([@root_disk @data_disk])  # void | ErrorStack<DiskLow>
+    if disks is? ErrorStack<DiskLow> {
+        loop disk in (disks as ErrorStack<DiskLow>) printl"{disk.mount}: {disk.free_mb} MB free"
+    }
+    disks or_throw
+}

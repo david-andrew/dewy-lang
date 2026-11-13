@@ -1,0 +1,29 @@
+# 01. David's sketch, completed: combine two failures, match all four cases, take parts out.
+QuotaExceeded:type = type of error & [message:string]
+Offline:type = type of error & [message:string]
+used_bytes = ():>int | QuotaExceeded => QuotaExceeded["disk quota reached"]
+remote_bytes = ():>int | Offline => Offline["backup host unreachable"]
+total_bytes = () => {
+    let local = used_bytes
+    let remote = remote_bytes
+    if local is? error and remote is? error return local & remote
+    if local is? error return local
+    if remote is? error return remote
+    return local + remote
+}                                        # inferred: int | QuotaExceeded | Offline | QuotaExceeded & Offline
+log_quota = (problem:QuotaExceeded):>void => printl("quota: {problem.message}" file=stderr)
+main = () => {
+    let result = total_bytes
+    match result {
+        both:QuotaExceeded & Offline => printl"both failed: {both}"
+        quota:QuotaExceeded => printl"just the quota: {quota.message}"
+        offline:Offline => printl"just the network: {offline.message}"
+        n:int => printl"{n} bytes in use"
+    }
+    if result is? QuotaExceeded log_quota(result)    # QuotaExceeded alone, or the part of the pair
+    if result is? QuotaExceeded & Offline {
+        let quota = result as QuotaExceeded
+        let offline = result as Offline
+        printl"first fix {quota.message}, then {offline.message}"
+    }
+}

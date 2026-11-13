@@ -1,0 +1,40 @@
+# Names for combining failures, after the round-24 cold read (~/dev/tmp/naming-1107/r24/).
+# Each line: usage, then the three readers' scores and the recommendation.
+# Round 3 adds no new names: `~` in selectors is David's, `.first`/`.last` are existing array members.
+
+# The error stack: an ordered list of failures of one kind, never empty
+let problems = ErrorStack[name_missing email_invalid]        # 3/3/3: unsure which end is the "top". Recommended (David's word)
+let problems = ErrorList[name_missing email_invalid]         # 4/4/3: "kept in the order written". The alternative to offer
+let problems = Errors[name_missing email_invalid]            # 3/4/3
+problems and= age_invalid                                     # tested as `&=`, read as merging (4); `and=` is the idiom
+if result is? ErrorStack<FileCloseFailed> printl"{result.length} files did not close"   # 4
+
+# Metatag members on a failure
+printl("failed at {failure.$origin}")                        # 4/4/4. Recommended
+printl("failed at {failure.$location}")                      # as good as $origin
+printl("failed at {failure.$where}")                         # weaker
+loop frame in failure.$trace printl(frame)                   # good. Recommended
+loop frame in failure.$backtrace printl(frame)               # good
+loop part in failure.$parts printl(part)                     # ties with $failures. Recommended
+loop part in failure.$failures printl(part)                  # ties with $parts
+let site:SourceLocation = failure.$origin                    # 4
+
+# A function whose failures report the line that called it
+$origin_at_caller open = (path:Path mode:string) => …        # 4/4/3, best. Recommended
+$track_caller open = (path:Path mode:string) => …            # once read as recording the whole call chain
+$blame_caller open = (path:Path mode:string) => …            # weakest
+
+# Per-operation failure types: all read correctly, mostly 5
+let text = file.read_text ??<FileReadFailed> ""
+file.write_text(row) ??<FileWriteFailed> return
+both:FileWriteFailed & FileCloseFailed => printl"the write failed and so did the close"
+let conn = net.tcp_connect(host port) ??<SocketConnectFailed> return none
+let server = net.tcp_listen(8080) ??<SocketListenFailed> return
+net.tcp_send(conn data) ??<SocketSendFailed> return
+let got = net.tcp_receive(conn) ??<SocketReceiveFailed> none
+<SocketCloseFailed> => printl"the connection did not close cleanly"
+let status = child.wait ??<ProcessWaitFailed> -1
+<ProcessStopFailed> => printl"the child process could not be stopped"
+tx.put(row) ??<QueryFailed> return
+tx.commit() ??<CommitFailed> return
+<RollbackFailed> => printl"the transaction could not be undone"

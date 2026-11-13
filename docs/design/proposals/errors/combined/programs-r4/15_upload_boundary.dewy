@@ -1,0 +1,33 @@
+# 15. A library function with four live resources declares a small result by wrapping its failures,
+# keeping cancellation as its own part.
+import p"@lib/std/files.dewy" as files
+import p"@lib/std/process.dewy" as process
+import p"@lib/std/db.dewy" as db
+import net
+UploadFailed:type = type of error & [job:int message:string cause:error]
+Job:type = [id:int path:Path host:string]
+send_job = (job:Job store:db.Store) => {
+    let scan = process.spawn(p"/usr/local/bin/scan" [job.path.path]) or_throw   # abandoned: stopped
+    let staging = files.open(p"/var/spool/up/{job.id}.part" 'w') or_throw
+    let conn = net.tcp_connect(job.host 9000) or_throw
+    let tx = store.begin or_throw
+    let bytes = job.path.read_bytes or_throw
+    staging.write_bytes(bytes) or_throw;
+    net.tcp_send(conn bytes) or_throw
+    tx.put(job) or_throw
+    scan.wait or_throw;                  # consumes `scan`: nothing left to stop
+    tx.commit() or_throw
+}   # exact inferred result: success or one body failure, combined with any subset of
+    # ProcessStopFailed, FileCloseFailed, SocketCloseFailed and RollbackFailed: well over a hundred shapes
+upload = (job:Job store:db.Store):>void | UploadFailed | Canceled | Canceled & UploadFailed => {
+    let result = send_job(job store)
+    if result isnt? exception return
+    if result isnt? error return result                    # Canceled and nothing else
+    let failed = UploadFailed[job.id "upload {job.id} failed: {result}" (result as error)]
+    if result is? Canceled return (result as Canceled) and failed
+    return failed
+}
+main = () => {
+    let store = db.open(p"jobs.db") or_throw
+    upload(Job[1 p"report.pdf" "10.0.0.5"] store) or_throw
+}

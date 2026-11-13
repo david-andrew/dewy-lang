@@ -1,0 +1,24 @@
+# 03. Form validation: every problem, in field order, in an error stack.
+FieldError:type = type of error & [field:string message:string]
+Signup:type = [name:string email:string age_text:string]
+User:type = [name:string email:string age:int]
+validate = (form:Signup) => {
+    let problems:array<FieldError> = []
+    let name = form.name.trim
+    if name =? "" problems.push(FieldError["name" "is required"])
+    if "@" not in? form.email problems.push(FieldError["email" "needs an @"])
+    let age = to_int(form.age_text) ?? 0
+    if age <? 13 or age >? 130 problems.push(FieldError["age" "must be a whole number from 13 to 130"])
+    if problems.length >? 0 return ErrorStack[problems...]
+    return User[name form.email age]
+}                                        # User | ErrorStack<FieldError>
+show = (form:Signup):>void => {
+    match validate(form) {
+        user:User => printl"welcome, {user.name}"
+        problems:ErrorStack<FieldError> => loop problem in problems printl"{problem.field}: {problem.message}"
+    }
+}
+main = () => {
+    show(Signup["" "ana.example.com" "twelve"])   # name, email and age, in that order
+    show(Signup["Ana" "ana@example.com" "34"])
+}

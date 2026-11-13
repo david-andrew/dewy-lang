@@ -1,0 +1,27 @@
+# 08. A config library: callers handle one ConfigError; the low-level failures ride inside it whole.
+# A cause field, not `and`: combining would make FileNotFound a peer that every caller's handler must name.
+import p"@lib/std/files.dewy" as files
+ConfigError:type = type of error & [path:Path message:string cause:error]
+Config:type = [host:string port:int]
+read_all = (path:Path) => {
+    let file = files.open(path 'r') or_throw
+    return file.read_text or_throw
+}   # string | FileError | Canceled: a read-only handle's close can't fail (round3.md, M4)
+ParseFailed:type = type of error & [message:string]
+parse = (text:string) => {
+    let lines = text.split("\n")
+    if lines.length <? 2 return ParseFailed["need a host line and a port line"]
+    let port = to_int(lines[1].trim) ?? return ParseFailed["port must be a whole number"]
+    return Config[lines[0].trim port]
+}
+load = (path:Path) => {
+    let text = read_all(path) or_throw<Canceled>
+    if text is? error return ConfigError[path "cannot read {path}: {text}" text]
+    let config = parse(text)
+    if config is? error return ConfigError[path "bad settings in {path}: {config}" config]
+    return config
+}   # Config | ConfigError | Canceled
+main = () => {
+    let config = load(p"server.conf") or_throw
+    printl"serving on {config.host}:{config.port}"
+}

@@ -1,0 +1,21 @@
+# 09. A copy tool that prints where each failure came from.
+import p"@lib/std/files.dewy" as files
+UsageError:type = type of error & [message:string]
+copy_file = (from:Path to:Path) => {
+    let input = files.open(from 'r') or_throw
+    let output = files.open(to 'w') or_throw
+    output.write_bytes(input.read_bytes or_throw) or_throw;
+}   # both owners close here, `output` first; only `output`'s close can fail (`input` is read-only).
+    # Possible results include FileWriteFailed & FileCloseFailed
+main = (argv:array<string>) => {
+    if argv.length <? 3 return UsageError["usage: copy FROM TO"]
+    let copied = copy_file(p(argv[1]) p(argv[2])) or_throw<Canceled>
+    if copied is? error {
+        loop part in copied.$parts printl("{part.$origin}: {part}" file=stderr)
+        exit(1)
+    }
+}
+# For a missing input:   copy.dewy:5:17 in copy_file: FileNotFound: no such file (a.bin)
+# For a full disk:       copy.dewy:7:5 in copy_file: FileWriteFailed: no space left on device (b.bin)
+#                        copy.dewy:6:5 in copy_file: FileCloseFailed: the last writes may not be on disk (b.bin)
+# A failure made by the standard library reports the line in this program that called it.
