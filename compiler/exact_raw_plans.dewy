@@ -1,0 +1,127 @@
+$runtime_checks
+
+from p"ast.jo" import (NF_GLOBAL NF_U64 has_flag nodes)
+from p"check.jo" import (LF_ADDR LF_ALIAS LF_ASSIGNED LF_BYREF LF_CAPTURE LF_CAPTURED LF_ELEMALIAS LF_EXPOSED LF_MUTPARAM LF_PARAM LF_QUIET LF_SHARED LF_SOAELEM locals)
+from p"checked_eval.dewy" import (cx_token_values)
+from p"checks_assign_hooks.dewy" import (block_value)
+from p"exact.jo" import (exact_initializers exact_local_widths exact_raw_values exact_representation exact_type_width exact_write_heads exact_write_next exact_write_plain exact_write_targets exact_write_values)
+from p"expr.jo" import (CV ntype)
+from p"facts.jo" import (fact_comparison)
+from p"types.jo" import (T_MATH_INT is_int prune)
+
+RawWord:type=int64<overflow='wrap'>
+
+# Representation plans are shared by effect checking and lowering. Only demanded
+# nonescaping locals are indexed; recursive definitions and growing writes stay
+# tagged. Finite trees use at most four signed words, never a heap allocation.
+# Queries memoize locals, with a 32-edge recursion budget. Marking raw consumers
+# visits each demanded expression edge once; unrelated bodies are not walked.
+exact_raw_value=(n:RawWord):>bool=>n >? 0 and n <? exact_raw_values.length and exact_raw_values[n] & 1 not=? 0
+exact_local_width=(l:RawWord depth:RawWord=0):>int64=>$unsafe {
+    if l >? 0 and l <? exact_local_widths.length and exact_local_widths[l] not=? 0 {return max(0 exact_local_widths[l])}
+    if depth >? 32 or l <=? 0 or l >=? exact_initializers.length or prune(RawWord(locals.ptr[l].type)) not=? T_MATH_INT {return 0}
+    if l >=? exact_local_widths.length {exact_local_widths.resize(locals.length)}
+    exact_local_widths[l]=-1
+    let flags=RawWord(locals.ptr[l].flags)
+    if flags & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) not=? 0 {return 0}
+    let width=exact_plan_bits(exact_initializers[l] depth + 1)
+    if width <=? 0 or width >? 256 {return 0}
+    let at:RawWord=if l <? exact_write_heads.length {exact_write_heads[l]} else {0}
+    if flags & LF_ASSIGNED not=? 0 and at =? 0 {return 0}
+    loop at >? 0 {
+        let target=exact_write_targets[at - 1]
+        if not exact_write_plain[at - 1] {return 0}
+        if nodes.ptr[target].kind not=? 'ident' or nodes.ptr[target].sym not=? int32(l) {return 0}
+        let w=exact_plan_bits(exact_write_values[at - 1] depth + 1)
+        if w <=? 0 or w >? width {return 0}
+        at=exact_write_next[at - 1]
+    }
+    exact_local_widths[l]=width
+    width
+}
+exact_plan_bits=(n:RawWord depth:RawWord=0):>int64=>$unsafe {
+    if n <=? 0 or depth >? 32 {return 0}
+    let t=exact_representation(ntype(n))
+    if not is_int(t) {return 0}
+    if t not=? T_MATH_INT {
+        let width=exact_type_width(n)
+        return if width >? 0 {width // 2} else {0}
+    }
+    let k=nodes.ptr[n].kind
+    if k =? 'int_lit' {return if has_flag(n NF_U64) and nodes.ptr[n].ival <? 0 {65} else {64}}
+    if k =? 'ident' and nodes.ptr[n].aux =? int32(1) {return exact_local_width(RawWord(nodes.ptr[n].sym) depth + 1)}
+    if k =? 'conv' and (nodes.ptr[n].aux =? int32(int64(CV.int_)) or nodes.ptr[n].aux =? int32(int64(CV.none_))) {return exact_plan_bits(RawWord(nodes.ptr[n].a) depth + 1)}
+    if k =? 'binary' and nodes.ptr[n].aux =? 0 {
+        let a=exact_plan_bits(RawWord(nodes.ptr[n].a) depth + 1)
+        let b=exact_plan_bits(RawWord(nodes.ptr[n].b) depth + 1)
+        if a =? 0 or b =? 0 {return 0}
+        let op=cx_token_values.ptr[RawWord(nodes.ptr[n].op)]
+        if op =? 'plus' or op =? 'minus' {return max(a b) + 1}
+        if op =? 'star' {return a + b}
+        if op =? 'amp' or op =? 'pipe' or op =? 'caret' {return max(a b)}
+    }
+    if k =? 'unary' {
+        let a=exact_plan_bits(RawWord(nodes.ptr[n].a) depth + 1)
+        if a >? 0 {return a + (if cx_token_values.ptr[RawWord(nodes.ptr[n].op)] =? 'minus' {1} else {0})}
+    }
+    if k =? 'block' and nodes.ptr[n].aux not=? 0 {return exact_plan_bits(block_value(n) depth + 1)}
+    if k =? 'if_' {
+        let a=exact_plan_bits(RawWord(nodes.ptr[n].b) depth + 1)
+        let b=exact_plan_bits(RawWord(nodes.ptr[n].c) depth + 1)
+        if a >? 0 and b >? 0 {return max(a b)}
+    }
+    0
+}
+# Mark only consumers that lowering evaluates directly as word vectors.
+# Calls, returns, aggregate stores and other escaping uses still pack the ABI.
+exact_raw_tree=(n:RawWord):>void=>$unsafe {
+    if n <=? 0 or exact_raw_value(n) {return}
+    # A fixed conversion can hide an unbounded operand. Its own result is
+    # finite, but producing that operand still uses the tagged allocating ABI.
+    if prune(ntype(n)) =? T_MATH_INT {
+        let width=exact_plan_bits(n)
+        if width <=? 0 or width >? 256 {return}
+    }
+    if n >=? exact_raw_values.length {exact_raw_values.resize(nodes.length)}
+    exact_raw_values[n]|=1
+    let k=nodes.ptr[n].kind
+    if k =? 'binary' {
+        exact_raw_tree(RawWord(nodes.ptr[n].a))
+        exact_raw_tree(RawWord(nodes.ptr[n].b))
+    }
+    else if k =? 'unary' or k =? 'conv' {exact_raw_tree(RawWord(nodes.ptr[n].a))} else if k =? 'block' and nodes.ptr[n].aux not=? 0 {exact_raw_tree(block_value(n))} else if k =? 'if_' {
+        exact_raw_tree(RawWord(nodes.ptr[n].b))
+        exact_raw_tree(RawWord(nodes.ptr[n].c))
+    }
+}
+exact_effect_representation=(n:RawWord):>void=>$unsafe {
+    if n <? exact_raw_values.length and exact_raw_values[n] & 2 not=? 0 {return}
+    if n >=? exact_raw_values.length {exact_raw_values.resize(nodes.length)}
+    exact_raw_values[n]|=2
+    let k=nodes.ptr[n].kind
+    if k =? 'vardecl' and nodes.ptr[n].sym >? 0 and not has_flag(n NF_GLOBAL) {
+        if prune(RawWord(locals.ptr[RawWord(nodes.ptr[n].sym)].type)) not=? T_MATH_INT {return}
+        if exact_local_width(RawWord(nodes.ptr[n].sym)) >? 0 {exact_raw_tree(RawWord(nodes.ptr[n].b))}
+    }
+    else if k =? 'assign' {
+        let a=RawWord(nodes.ptr[n].a)
+        if prune(ntype(a)) =? T_MATH_INT and nodes.ptr[a].kind =? 'ident' and nodes.ptr[a].aux =? int32(1) and exact_local_width(RawWord(nodes.ptr[a].sym)) >? 0 {exact_raw_tree(RawWord(nodes.ptr[n].b))}
+    }
+    else if k =? 'binary' and nodes.ptr[n].aux =? 0 and fact_comparison(cx_token_values.ptr[RawWord(nodes.ptr[n].op)]) {
+        let a=RawWord(nodes.ptr[n].a)
+        let b=RawWord(nodes.ptr[n].b)
+        if prune(ntype(a)) not=? T_MATH_INT and prune(ntype(b)) not=? T_MATH_INT {return}
+        let aw=exact_plan_bits(a)
+        let bw=exact_plan_bits(b)
+        if aw >? 0 and bw >? 0 and aw <=? 256 and bw <=? 256 {
+            exact_raw_tree(a)
+            exact_raw_tree(b)
+        }
+    }
+    else if k =? 'conv' and nodes.ptr[n].aux =? int32(int64(CV.int_)) and exact_representation(ntype(n)) not=? T_MATH_INT {
+        let a=RawWord(nodes.ptr[n].a)
+        if prune(ntype(a)) not=? T_MATH_INT {return}
+        let width=exact_plan_bits(a)
+        if width >? 0 and width <=? 256 {exact_raw_tree(a)}
+    }
+}

@@ -13,6 +13,7 @@ use 'exact_guard_ops.dewy'
 use 'exact_loop.jo'
 use 'exact_chain_walks.dewy'
 use 'exact_words.dewy'
+use 'exact_raw_plans.dewy'
 use 'pcheck.jo'
 use 'pcheck_drive.dewy'
 use 'math_lower.jo'
@@ -887,103 +888,6 @@ exact_prepare = ():
     if effect_seen.len() > 0: effect_seen.resize(nodes.len())
     exact_local_widths = []
     exact_raw_values = []
-
-# Representation plans are shared by effect checking and lowering. Only demanded
-# nonescaping locals are indexed; recursive definitions and growing writes stay
-# tagged. Finite trees use at most four signed words, never a heap allocation.
-# Queries memoize locals, with a 32-edge recursion budget. Marking raw consumers
-# visits each demanded expression edge once; unrelated bodies are not walked.
-exact_raw_value = (n: int) -> bool: n > 0 and n < exact_raw_values.len() and exact_raw_values[n] & 1 != 0
-
-exact_local_width = (l: int, depth: int = 0) -> int:
-    if l > 0 and l < exact_local_widths.len() and exact_local_widths[l] != 0: return max(0, exact_local_widths[l])
-    if depth > 32 or l <= 0 or l >= exact_initializers.len() or prune(int(locals[l].type)) != T_MATH_INT: return 0
-    if l >= exact_local_widths.len(): exact_local_widths.resize(locals.len())
-    exact_local_widths[l] = -1
-    flags = int(locals[l].flags)
-    if flags & (LF_PARAM | LF_MUTPARAM | LF_CAPTURE | LF_CAPTURED | LF_ALIAS | LF_BYREF | LF_ADDR | LF_SHARED | LF_QUIET | LF_EXPOSED | LF_SOAELEM | LF_ELEMALIAS) != 0: return 0
-    width = exact_plan_bits(exact_initializers[l], depth + 1)
-    if width <= 0 or width > 256: return 0
-    at = if l < exact_write_heads.len(): exact_write_heads[l] else: 0
-    if flags & LF_ASSIGNED != 0 and at == 0: return 0
-    loop at > 0:
-        target = exact_write_targets[at - 1]
-        if not exact_write_plain[at - 1]: return 0
-        if nodes[target].kind != .ident or nodes[target].sym != i32(l): return 0
-        w = exact_plan_bits(exact_write_values[at - 1], depth + 1)
-        if w <= 0 or w > width: return 0
-        at = exact_write_next[at - 1]
-    exact_local_widths[l] = width
-    width
-
-exact_plan_bits = (n: int, depth: int = 0) -> int:
-    if n <= 0 or depth > 32: return 0
-    t = exact_representation(ntype(n))
-    if not is_int(t): return 0
-    if t != T_MATH_INT:
-        width = exact_type_width(n)
-        return if width > 0: width / 2 else: 0
-    k = nodes[n].kind
-    if k == .int_lit: return if has_flag(n, NF_U64) and nodes[n].ival < 0: 65 else: 64
-    if k == .ident and nodes[n].aux == i32(int(SK.local)): return exact_local_width(int(nodes[n].sym), depth + 1)
-    if k == .conv and (nodes[n].aux == i32(int(CV.int_)) or nodes[n].aux == i32(int(CV.none_))): return exact_plan_bits(int(nodes[n].a), depth + 1)
-    if k == .binary and nodes[n].aux == 0:
-        a = exact_plan_bits(int(nodes[n].a), depth + 1); b = exact_plan_bits(int(nodes[n].b), depth + 1)
-        if a == 0 or b == 0: return 0
-        op = nodes[n].op as Tok
-        if op == .plus or op == .minus: return max(a, b) + 1
-        if op == .star: return a + b
-        if op == .amp or op == .pipe or op == .caret: return max(a, b)
-    if k == .unary:
-        a = exact_plan_bits(int(nodes[n].a), depth + 1)
-        if a > 0: return a + int(nodes[n].op == i32(int(Tok.minus)))
-    if k == .block and nodes[n].aux != 0: return exact_plan_bits(block_value(n), depth + 1)
-    if k == .if_:
-        a = exact_plan_bits(int(nodes[n].b), depth + 1); b = exact_plan_bits(int(nodes[n].c), depth + 1)
-        if a > 0 and b > 0: return max(a, b)
-    0
-
-# Mark only consumers that lowering evaluates directly as word vectors.
-# Calls, returns, aggregate stores and other escaping uses still pack the ABI.
-exact_raw_tree = (n: int):
-    if n <= 0 or exact_raw_value(n): return
-    # A fixed conversion can hide an unbounded operand. Its own result is
-    # finite, but producing that operand still uses the tagged allocating ABI.
-    if prune(ntype(n)) == T_MATH_INT:
-        width = exact_plan_bits(n)
-        if width <= 0 or width > 256: return
-    if n >= exact_raw_values.len(): exact_raw_values.resize(nodes.len())
-    exact_raw_values[n] |= 1
-    k = nodes[n].kind
-    if k == .binary:
-        exact_raw_tree(int(nodes[n].a)); exact_raw_tree(int(nodes[n].b))
-    else if k == .unary or k == .conv: exact_raw_tree(int(nodes[n].a))
-    else if k == .block and nodes[n].aux != 0: exact_raw_tree(block_value(n))
-    else if k == .if_:
-        exact_raw_tree(int(nodes[n].b)); exact_raw_tree(int(nodes[n].c))
-
-exact_effect_representation = (n: int):
-    if n < exact_raw_values.len() and exact_raw_values[n] & 2 != 0: return
-    if n >= exact_raw_values.len(): exact_raw_values.resize(nodes.len())
-    exact_raw_values[n] |= 2
-    k = nodes[n].kind
-    if k == .vardecl and nodes[n].sym > 0 and not has_flag(n, NF_GLOBAL):
-        if prune(int(locals[int(nodes[n].sym)].type)) != T_MATH_INT: return
-        if exact_local_width(int(nodes[n].sym)) > 0: exact_raw_tree(int(nodes[n].b))
-    else if k == .assign:
-        a = int(nodes[n].a)
-        if prune(ntype(a)) == T_MATH_INT and nodes[a].kind == .ident and nodes[a].aux == i32(int(SK.local)) and exact_local_width(int(nodes[a].sym)) > 0: exact_raw_tree(int(nodes[n].b))
-    else if k == .binary and nodes[n].aux == 0 and fact_comparison(nodes[n].op as Tok):
-        a = int(nodes[n].a); b = int(nodes[n].b)
-        if prune(ntype(a)) != T_MATH_INT and prune(ntype(b)) != T_MATH_INT: return
-        aw = exact_plan_bits(a); bw = exact_plan_bits(b)
-        if aw > 0 and bw > 0 and aw <= 256 and bw <= 256:
-            exact_raw_tree(a); exact_raw_tree(b)
-    else if k == .conv and nodes[n].aux == i32(int(CV.int_)) and exact_representation(ntype(n)) != T_MATH_INT:
-        a = int(nodes[n].a)
-        if prune(ntype(a)) != T_MATH_INT: return
-        width = exact_plan_bits(a)
-        if width > 0 and width <= 256: exact_raw_tree(a)
 
 # Shift extents first ask immutable definitions and declared scalar contracts.
 # This sparse, demand-only interval cache visits each expression/dependency
