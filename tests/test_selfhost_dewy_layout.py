@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.corpus_cache import SHARDS, built_once, cached, digest, shard_of
+from tests import layout_corpus
 from tests.layout_corpus import layout_texts
 from tests.support import compiler  # noqa: F401 (fixture)
 
@@ -178,7 +180,7 @@ def op_symbol(s, at, stop):
     return name
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=None)
 def lex(s):
     """dn_lex without interning: (kind, symbol, start, stop, space, newline) each, then eof, and
     the block comments' [start, end) pairs."""
@@ -497,13 +499,27 @@ def disturbed(src, rng):
     return text
 
 
-def corpus():
+def corpus_inputs():
     rng = random.Random(10)
     files = sorted(p for p in (ROOT / 'tests').rglob('*.dewy') if '__dewycache__' not in p.parts)
     files = [*sorted((ROOT / 'compiler').glob('*.dewy')), *sorted((ROOT / 'lib').rglob('*.dewy')),
              *sorted((ROOT / 'examples').glob('*.dewy')), *rng.sample(files, 500)]
-    return layout_texts(tuple(path.read_bytes() for path in files), rng.getstate(),
-                        lex, disturbed, LexError)
+    return tuple(path.read_bytes() for path in files), rng.getstate()
+
+
+@lru_cache(maxsize=1)
+def corpus():
+    sources, state = corpus_inputs()
+    key = digest(Path(__file__).read_bytes(), Path(layout_corpus.__file__).read_bytes(), state, *sources)
+    return cached('layout-corpus', key, lambda: layout_texts(sources, state, lex, disturbed, LexError))
+
+
+@lru_cache(maxsize=SHARDS)
+def shard_oracle(index):
+    """The shard's texts and the oracle's layout of each."""
+    texts = shard_of(corpus(), index)
+    key = digest(Path(__file__).read_bytes(), *texts)
+    return texts, cached('layout-oracle', key, lambda: [oracle(t) for t in texts])
 
 
 def oracle(src):
@@ -549,11 +565,20 @@ def results(output):
     return out
 
 
+def layout_binaries(compiler, release):
+    def make(directory):
+        return (build(compiler, FIXTURES / 'dewy_layout_dewy.dewy', directory / 'layout-dewy', release),
+                build(compiler, FIXTURES / 'dewy_layout_jo.jo', directory / 'layout-jo', release))
+    return built_once(('layout', str(compiler), release), make)
+
+
 @pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
-def test_selfhost_dewy_layout_match_jo(compiler, tmp_path, release):
-    dewy = build(compiler, FIXTURES / 'dewy_layout_dewy.dewy', tmp_path / 'layout-dewy', release)
-    jo = build(compiler, FIXTURES / 'dewy_layout_jo.jo', tmp_path / 'layout-jo', release)
-    texts = corpus()
+@pytest.mark.parametrize('shard', [pytest.param(k, id=f'{k}of{SHARDS}', marks=pytest.mark.xdist_group(name=f'layout-{k}'))
+                                   for k in range(SHARDS)])
+def test_selfhost_dewy_layout_match_jo(compiler, tmp_path, release, shard):
+    # (the corpus is split into interleaved shards, one xdist group each, so workers share it)
+    dewy, jo = layout_binaries(compiler, release)
+    texts, expected = shard_oracle(shard)
     cases = tmp_path / 'cases'
     cases.mkdir()
     listed = write_cases(cases, texts)
@@ -565,11 +590,16 @@ def test_selfhost_dewy_layout_match_jo(compiler, tmp_path, release):
     assert outputs[0] == outputs[1]
     got = results(outputs[0])
     assert len(got) == len(texts)
-    expected = [oracle(t) for t in texts]
     for k, (a, b) in enumerate(zip(got, expected)):
         assert a == b, (k, texts[k][:400])
-    assert sum(g is None for g in got) >= 4
+    # (each shard samples the whole corpus: each changes over a third of its texts)
     assert sum(g is not None and g != t for g, t in zip(got, texts)) > len(texts) // 3
+
+
+def test_selfhost_dewy_layout_corpus_refusals():
+    # (the corpus reaches the refusal outcome: its fixed tail of malformed texts, which no shard owns alone)
+    tail = [oracle(t) for t in corpus()[-17:]]
+    assert sum(g is None for g in tail) >= 4, tail
 
 
 def test_selfhost_dewy_layout_fmt_agrees(compiler, tmp_path):
