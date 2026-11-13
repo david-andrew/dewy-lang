@@ -1,0 +1,85 @@
+$runtime_checks
+
+from p"ir_types.dewy" import (Ins Op)
+from p"ir.jo" import (VI VF VS VX VY)
+from p"ir_builders.dewy" import (is_kv kv_of k_vreg vreg new_slot)
+from p"loops.jo" import (CLoop LCheck VPlan lx_reds lx_red_ops lx_kind_of_mode lx_in_check lx_minmax lx_fail lx_vloop lx_bin)
+from p"loops_emit.dewy" import (lx_sum)
+from p"check.jo" import (prelude syms)
+from p"util.jo" import (intern)
+from p"lower_primitives.dewy" import (global_addr_off)
+from p"diagnostic_exit.dewy" import (ice)
+from p"opt.jo" import (o_defines)
+
+VecWord:type=int64<overflow='wrap'>
+VecI32:type=int32<overflow='wrap'>
+
+lx_splat=(@pre:array<Ins> @vmap:dict<int64 int64> u:VecWord k:VecWord ty:VecWord):>VecWord=>$unsafe {
+    if vmap.has(u) {return vmap[u]}
+    let src=u
+    if is_kv(u) {
+        src=vreg(VI)
+        pre.push(Ins('iconst' VI VecI32(src) 0 0 0 kv_of(u)))
+    }
+    let v=vreg(ty)
+    pre.push(Ins('vsplat' VecI32(ty) VecI32(v) VecI32(src) 0 0 k))
+    vmap[u]=v
+    v
+}
+
+lx_vec_emit=(code:array<Ins> L:CLoop checks:array<LCheck> plan:VPlan @out:array<Ins>):>void=>$unsafe {
+    out.push(Ins('block'))
+    let es=k_vreg(plan.es)
+    let bases=plan.bases
+    loop i in [0..bases.length) {
+        let ix=plan.indexes.ptr[i]
+        if ix =? L.ctr {continue}
+        let reused=false
+        loop j in [0..i) {
+            if plan.bases.ptr[i] =? plan.bases.ptr[j] and ix =? plan.indexes.ptr[j] {
+                bases[i]=bases.ptr[j]
+                reused=true
+                break
+            }
+        }
+        if reused {continue}
+        loop ci in [0..checks.length) {
+            let ch=checks.ptr[ci]
+            if (ch.kind =? 3 or ch.kind =? 6) and ch.x =? ix {
+                let offset=lx_sum(code L ch.terms ch.k @out)
+                bases[i]=lx_bin(@out 'add' plan.bases.ptr[i] lx_bin(@out 'mul' offset es))
+                break
+            }
+        }
+    }
+    loop i in [0..bases.length) {
+        let bi=bases.ptr[i]
+        loop j in [0..bases.length) {
+            let bj=bases.ptr[j]
+            if j <=? i or bi =? bj or not (plan.stores.ptr[i] or plan.stores.ptr[j]) {continue}
+            let ai=lx_bin(@out 'add' bi k_vreg(plan.offs.ptr[i]))
+            let aj=lx_bin(@out 'add' bj k_vreg(plan.offs.ptr[j]))
+            let lo=lx_bin(@out 'mul' L.ctr es)
+            let hi=lx_bin(@out 'mul' L.endv es)
+            let lo_i=lx_bin(@out 'add' ai lo)
+            let hi_i=lx_bin(@out 'add' ai hi)
+            let lo_j=lx_bin(@out 'add' aj lo)
+            let hi_j=lx_bin(@out 'add' aj hi)
+            lx_fail(@out lx_bin(@out 'and_' lx_bin(@out 'ltu' lo_i hi_j) lx_bin(@out 'ltu' lo_j hi_i)))
+        }
+    }
+    let s=prelude.get(intern("__cpu_avx2")) ?? 0
+    if s =? 0 or syms.ptr[s].kind not=? 'global' {ice("missing runtime global __cpu_avx2")}
+    let ga=vreg(VI)
+    out.push(Ins('gaddr' VI VecI32(ga) 0 0 0 global_addr_off(VecWord(syms.ptr[s].ref))))
+    let avx=vreg(VI)
+    out.push(Ins('load' VI VecI32(avx) VecI32(ga) 0 1 0))
+    out.push(Ins('block'))
+    lx_fail(@out lx_bin(@out 'eq' avx k_vreg(0)))
+    lx_vloop(code L checks plan bases VY @out)
+    out.push(Ins('vzu'))
+    out.push(Ins('br' 0 0 0 0 0 1))
+    out.push(Ins('end'))
+    if not plan.avx_only {lx_vloop(code L checks plan bases VX @out)}
+    out.push(Ins('end'))
+}

@@ -12,6 +12,7 @@ use 'ir_types.dewy'
 use 'exact_loop.jo'
 use 'loop_ordered.dewy'
 use 'loops_emit.dewy'
+use 'loops_vector_emit.dewy'
 use 'util.jo'
 use 'diagnostic_exit.dewy'
 use 'ir.jo'
@@ -540,19 +541,6 @@ lx_appears = (code: Ins[], v: int, lo: int, hi: int) -> int:
     n
 
 # the vector of u: its own if made in the loop, else u in every lane (made once, in front)
-lx_splat = (pre: mut Ins[], vmap: mut {int: int}, u: int, k: int, ty: int) -> int:
-    if let v = vmap.get(u): return v
-    src = u
-    if is_kv(u):
-        src = vreg(VI)
-        pre.push(Ins(.iconst, VI, i32(src), 0, 0, 0, kv_of(u)))
-    v = vreg(ty)
-    pre.push(Ins(.vsplat, i32(ty), i32(v), i32(src), 0, 0, k))
-    vmap[u] = v
-    v
-
-# the vector loop of width ty (VY or VX) over the body of L; in a block that it leaves when
-# fewer than a vector's worth of elements remain
 lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], ty: int, out: mut Ins[]):
     lanes = 16 / plan.es
     if ty == VY: lanes = 32 / plan.es
@@ -710,58 +698,6 @@ lx_vloop = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, bases: int[], 
     out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
 
 # the vectorized part of L, in front of what finishes it one element at a time
-lx_vec_emit = (code: Ins[], L: CLoop, checks: LCheck[], plan: VPlan, out: mut Ins[]):
-    out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
-    # arrays at different bases that are written: the ranges the loop touches must not overlap
-    es = k_vreg(plan.es)
-    bases = plan.bases
-    loop i in [0..bases.len()):
-        ix = plan.indexes[i]
-        if ix == L.ctr: continue
-        reused = false
-        loop j in [0..i):
-            if plan.bases[i] == plan.bases[j] and ix == plan.indexes[j]:
-                bases[i] = bases[j]
-                reused = true
-                break
-        if reused: continue
-        loop ch in checks:
-            if (ch.kind == 3 or ch.kind == 6) and ch.x == ix:
-                offset = lx_sum(code, L, ch.terms, ch.k, out)
-                bases[i] = lx_bin(out, .add, plan.bases[i], lx_bin(out, .mul, offset, es))
-                break
-    loop i in 0.. and bi in bases:
-        loop j in 0.. and bj in bases:
-            if j <= i or bi == bj or not (plan.stores[i] or plan.stores[j]): continue
-            ai = lx_bin(out, .add, bi, k_vreg(plan.offs[i]))
-            aj = lx_bin(out, .add, bj, k_vreg(plan.offs[j]))
-            lo = lx_bin(out, .mul, L.ctr, es)
-            hi = lx_bin(out, .mul, L.endv, es)
-            lo_i = lx_bin(out, .add, ai, lo)
-            hi_i = lx_bin(out, .add, ai, hi)
-            lo_j = lx_bin(out, .add, aj, lo)
-            hi_j = lx_bin(out, .add, aj, hi)
-            lx_fail(out, lx_bin(out, .and_, lx_bin(out, .ltu, lo_i, hi_j), lx_bin(out, .ltu, lo_j, hi_i)))
-    s = prelude.get(intern("__cpu_avx2")) ?? 0
-    if s == 0 or syms[s].kind != .global: ice("missing runtime global __cpu_avx2")
-    ga = vreg(VI)
-    out.push(Ins(.gaddr, VI, i32(ga), 0, 0, 0, global_addr_off(int(syms[s].ref))))
-    avx = vreg(VI)
-    out.push(Ins(.load, VI, i32(avx), i32(ga), 0, 1, 0))
-    out.push(Ins(.block, 0, 0, 0, 0, 0, 0))
-    lx_fail(out, lx_bin(out, .eq, avx, k_vreg(0)))
-    lx_vloop(code, L, checks, plan, bases, VY, out)
-    out.push(Ins(.vzu, 0, 0, 0, 0, 0, 0))
-    out.push(Ins(.br, 0, 0, 0, 0, 0, 1))
-    out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
-    if not plan.avx_only: lx_vloop(code, L, checks, plan, bases, VX, out)
-    out.push(Ins(.end, 0, 0, 0, 0, 0, 0))
-
-# Default builds consider short array/float loops with a vector plan. A large
-# function may wrap a small floating-point kernel in shape and exact-index
-# guards: cap the loop body, not its enclosing function. Keep the large integer
-# path demand-driven through exact maps. Bounds and overlap guards retain the
-# scalar path when a whole loop is not safe.
 fast_vectorize = ():
     if not lx_vec_on: return
     large = ir.code.len() > 400 and (ir.fn_index < 0 or ir.fn_index >= exact_map_functions.len() or not exact_map_functions[ir.fn_index])

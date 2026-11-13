@@ -4,6 +4,7 @@
 # not the leaf reads the leaf's functions from the module, a double or the real one)
 LEAF_HOMES = {
     'loops_emit': 'loops.jo',
+    'loops_vector_emit': 'loops.jo',
     'opt_copy_forward': 'opt.jo',
     'opt_licm': 'opt.jo',
     'optimizer_queries': 'opt.jo',

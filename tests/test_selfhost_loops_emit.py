@@ -45,6 +45,8 @@ def test_loops_emit_direct_twins(compiler, tmp_path, monkeypatch, release):  # n
         if extension == 'jo':
             path = source_dir / 'loops.jo'
             path.write_text(path.read_text().replace("'loops_emit.dewy'", "'loops_emit.jo'"))
+            path = source_dir / 'loops_vector_emit.dewy'
+            path.write_text(path.read_text().replace('"loops_emit.dewy"', '"loops_emit.jo"'))
         source = directory / 'driver.jo'
         binary = directory / 'driver'
         imports = ''.join(f"use '{source_dir / name}'\n" for name in
