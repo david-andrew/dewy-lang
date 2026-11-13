@@ -1,0 +1,25 @@
+# Design specimen: typed aggregate nodes, no inspection of a grouping callback.
+import p"@lib/std/database.dewy" as database
+
+Sale:type = [id:string region:string day:int net_cents:int]
+const S = database.fields_of<Sale>
+const schema = [sales=database.collection<Sale>(key=S.id
+    indexes=[database.index(database.tuple(S.day S.region))])]
+report = <DB>(store:DB first_day:int last_day:int) => {
+    let rows = store.sales.where(database.all_of([S.day.ge(first_day) S.day.lt(last_day)]))
+        .group_by(S.region).summarize([orders=database.count cents=database.sum(S.net_cents)])
+        .all(max_scanned=100000) or_throw
+    loop row in rows.sorted(key=(r) => r.key) {
+        printl"{row.key}: {row.values.orders} orders, {row.values.cents} cents"
+    }
+    # Result: east 2 orders / 800 cents; west 1 order / 350 cents. No retained items arrays.
+}
+main = () => {
+    let store = database.memory(schema) or_throw
+    let tx = store.begin or_throw
+    loop sale in [Sale["a" "east" 1 1000] Sale[id="b" region="east" day=1 net_cents=-200] Sale["c" "west" 2 350]] {
+        tx.sales.insert(sale) or_throw;
+    }
+    tx.commit() or_throw
+    report(store 1 3) or_throw
+}

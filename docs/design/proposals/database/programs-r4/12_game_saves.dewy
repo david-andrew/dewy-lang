@@ -1,0 +1,35 @@
+# Design specimen: no graphics/audio; a revision check prevents stale save overwrites.
+import p"@lib/std/database.dewy" as database
+
+Item:type = [kind:'potion'|'key' quantity:int]
+Save:type = [slot:string level:int x:rational y:rational inventory:array<Item> revision:int=0]
+StaleSave:type = type of error
+const S = database.fields_of<Save>
+const schema = [saves=database.collection<Save>(key=S.slot)]
+load = <S>(store:S slot:string) => {
+    let saved = store.saves.get(slot) or_throw<error | Canceled>
+    return saved ??<none> Save[slot 1 0 0 []]
+}
+save = <S>(store:S state:Save) => {
+    let tx = store.begin(timeout=1s) or_throw
+    let current = tx.saves.get(state.slot) or_throw<error | Canceled>
+    let revision = current.revision ??<none> 0
+    if revision not=? state.revision return StaleSave
+    let next_state:Save = [state... revision=state.revision+1]
+    tx.saves.put(next_state) or_throw;
+    tx.commit() or_throw
+    return next_state
+}
+main = () => {
+    let store = database.open(schema p"savegame.db") or_throw
+    let state = load(store "slot-1") or_throw
+    state.x += 3
+    state.inventory.push(Item['potion' 1])
+    state = save(store state) or_throw
+    printl"saved level {state.level}"
+    store.backup(p"savegame-after-{state.revision}.backup.db") or_throw
+    # Backup captures its own later snapshot, possibly including another writer's newer save.
+    # Only none means new game. Corruption, incompatible schema and disk errors propagate.
+}
+# Slots are never deleted/recreated in this example; revision alone is not an incarnation token.
+# A backup failure occurs after the save. Do not retry the gameplay mutation to retry backup.

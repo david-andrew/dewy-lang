@@ -1,0 +1,14 @@
+# PAPER R4: report the complete v1 context/group tree and origins, without a trace subsystem.
+import p"@lib/std/errors.dewy" as errors
+import p"03_batch_files.dewy" as batch
+main = () => {
+    let result = batch.scan([p"primary.ini" p"fallback.ini"])
+    if result is? exception {
+        errors.report(result file=stderr locations=true)
+        exit(1)                            # explicit CLI policy; no second main report
+    }
+    printl("checked {result} bytes")
+}
+# Both branches, their inherited context and individual origins are shown.
+# Locations are requested; unknown origins say unavailable. Terminal controls are escaped.
+# This is the complete v1 diagnostic tree, not a promised stack trace or domain-cause chain.

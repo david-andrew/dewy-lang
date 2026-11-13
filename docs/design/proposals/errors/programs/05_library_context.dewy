@@ -1,0 +1,20 @@
+# PAPER library: retain FileNotFound/FileError/etc. identity while adding operation context.
+import p"@lib/std/errors.dewy" as errors
+InvalidPort:type = type of error & [message:string]
+load_port = (path:Path) => {
+    let text = path.read_text
+    if text is? exception return errors.with_context(text "loading service configuration")
+    let number = to_int(text.trim)
+    if number is? error {
+        return errors.with_context(number "parsing the configured port in {path}")
+    }
+    if number <? 1 or number >? 65535 return InvalidPort["port must be in 1..65535"]
+    return number
+}
+main = () => {
+    let port = load_port(p"service-port.txt") or_throw
+    printl("service port is {port}")
+}
+# File failures remain their own kind; a caller can still select FileNotFound directly.
+# Canceled remains Canceled, with an explanatory context frame; ?? still forwards it.
+# The context call's site is separate from the adapter's original failure site.

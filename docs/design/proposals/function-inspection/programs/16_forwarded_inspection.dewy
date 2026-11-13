@@ -1,0 +1,11 @@
+# Positive: a helper preserves the inspection contract rather than erasing it.
+import p"@lib/std/code.dewy" as code
+import p"fixtures.dewy" as fixture
+owing = <S>(db:S predicate:code.Function<(fixture.Account:>bool)>) => {
+    db.accounts.where(predicate).all or_throw
+}
+main = () => {
+    let db = fixture.seed or_throw
+    let rows = owing(db (a) => a.balance <? 0) or_throw
+    printl([loop a in rows a.id]) # ["a" "c"], still eligible for an index.
+}

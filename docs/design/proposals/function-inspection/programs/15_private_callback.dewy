@@ -1,0 +1,11 @@
+# Positive opaque fallback: a returned ordinary closure is not a public record.
+import p"@lib/std/check.dewy" as check
+make_verifier = (expected:secret<string>):>(():>bool) => {
+    () => expected =? "approved"
+}
+main = () => {
+    let verify:(():>bool) = make_verifier(secret("rejected"))
+    check.that(@verify) or_throw
+    # Expected AssertionFailed with site and false only; never "rejected".
+    # Neither a capture walker nor a diagnostic source printer may recover it.
+}

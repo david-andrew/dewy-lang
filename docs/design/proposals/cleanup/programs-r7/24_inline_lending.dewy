@@ -1,0 +1,36 @@
+FinishError:type = type of error
+Kept:type = type of [
+    $__drop__ = ():>void | FinishError => FinishError
+]
+Host:type = [value:int
+    view = ():> @int => {
+        let guard = Kept[]
+        return @value
+    }
+]
+inspect = (@value:int):>void => { printl(value) }
+rejected_inline = (host:Host) => {
+    inspect(@(host.view))
+    printl("continued")
+}
+# EXPECT REJECT at inline view: kept cleanup can fail at a statement boundary.
+# Adding or_throw to inspect, to the function, or to an outer brace does not fix it.
+# Bounded R7 rule rejects ALL fallible inline kept guards, even in return expressions.
+
+run = (host:Host) => {
+    {
+        let value = @(host.view)
+        inspect(@value)
+    } or_throw
+    printl("continued")
+}
+# Named place transfers the kept guard's duty to this block; inspection prints once.
+# FinishError on line 24's completion leaves run; line 25 never executes.
+# inspect failure E (if generalized) plus FinishError -> errors.join(E FinishError).
+
+infallible_inline = (m:Mutex<int>) => {
+    inspect(@(m.lock))
+    printl("continued")
+}
+# Infallible unlock still occurs at the end of the inspect statement, before the print.
+# Unknown kept-completion summary is not proof of infallibility: use a named place.

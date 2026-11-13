@@ -1,0 +1,41 @@
+# Design specimen: shared store, private serializable transactions, no automatic retry.
+import p"@lib/std/database.dewy" as database
+
+Stock:type = [id:string remaining:int]
+Order:type = [id:string sku:string quantity:int]
+OutOfStock:type = type of error
+InvalidOrder:type = type of error
+RequestMismatch:type = type of error
+const schema = [
+    stock=database.collection<Stock>(key=(s) => s.id)
+    orders=database.collection<Order>(key=(o) => o.id)
+]
+reserve = <S>(store:S order:Order) => {
+    if order.quantity <=? 0 return InvalidOrder
+    let tx = store.begin(timeout=2s) or_throw
+    let previous = tx.orders.get(order.id) or_throw<error | Canceled>
+    if previous isnt? none {
+        if previous not=? order return RequestMismatch
+        tx.rollback() or_throw
+        return
+    }
+    let item = tx.stock.get(order.sku) or_throw
+    if item.remaining <? order.quantity return OutOfStock
+    tx.stock.replace([item... remaining=item.remaining-order.quantity]) or_throw
+    tx.orders.insert(order) or_throw;
+    tx.commit() or_throw
+}
+main = () => {
+    let store = database.memory(schema) or_throw
+    store.stock.insert(Stock["battery" 2]) or_throw;
+    let orders = [Order["a" "battery" 1] Order["b" "battery" 1] Order["c" "battery" 1]]
+    parallel order in orders {
+        match reserve(store order) {
+            <OutOfStock> => printl"{order.id}: sold out"
+            problem:exception => return problem
+            _ => printl"{order.id}: reserved"
+        }
+    }
+    printl(store.stock.get("battery") or_throw)
+    # Only database work occurs before commit; payment/email belongs after a durable outbox write.
+}

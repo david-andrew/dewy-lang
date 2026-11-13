@@ -1,0 +1,39 @@
+# Design specimen: these are acceptance tests, not tests run against an implementation.
+import p"@lib/std/database.dewy" as database
+import p"02_bank_ledger.dewy" as bank
+
+$test
+rollback_on_insufficient_funds = () => {
+    let store = database.memory(bank.schema) or_throw
+    store.accounts.insert(bank.Account["a" 10 'USD']) or_throw;
+    store.accounts.insert(bank.Account["b" 5 'USD']) or_throw;
+    let result = bank.transfer(store bank.Transfer["too-large" "a" "b" 11])
+    $runtime_assert(result is? bank.InsufficientFunds)
+    $runtime_assert((store.accounts.get("a") or_throw).balance =? 10)
+    $runtime_assert((store.accounts.get("b") or_throw).balance =? 5)
+    $runtime_assert((store.entries.count or_throw) =? 0)
+}
+$test
+idempotent_transfer = () => {
+    let store = database.memory(bank.schema) or_throw
+    store.accounts.insert(bank.Account["a" 10 'USD']) or_throw;
+    store.accounts.insert(bank.Account["b" 0 'USD']) or_throw;
+    let request = bank.Transfer["once" "a" "b" 3]
+    bank.transfer(store request) or_throw
+    bank.transfer(store request) or_throw
+    $runtime_assert((store.accounts.get("a") or_throw).balance =? 7)
+    $runtime_assert((store.entries.count or_throw) =? 2)
+}
+abandon = <S>(store:S) => {
+    let tx = store.begin or_throw
+    tx.accounts.insert(bank.Account["uncommitted" 99 'USD']) or_throw;
+    return none
+}
+$test
+abandoned_write_is_absent = () => {
+    let store = database.memory(bank.schema) or_throw
+    let result = abandon(store)
+    $runtime_assert(result is? none)
+    let found = store.accounts.get("uncommitted") or_throw<error | Canceled>
+    $runtime_assert(found is? none)
+}

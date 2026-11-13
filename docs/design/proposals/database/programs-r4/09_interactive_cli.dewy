@@ -1,0 +1,22 @@
+# Design specimen: capped record visits; page size alone does not cap query work.
+import p"@lib/std/database.dewy" as database
+import p"01_todo.dewy" as todo
+
+main = () => {
+    let store = database.open(todo.schema p"todo.db" read_only=true) or_throw
+    printl"Enter a title fragment; :quit exits. At most 20 matches / 10000 record visits."
+    loop true {
+        let input_line = read_line() or_throw<error | Canceled>
+        if input_line is? none break
+        if input_line =? ":quit" break
+        let query = store.todos.where(todo.T.title.contains(input_line)).sorted(key=todo.T.id)
+        printl(query.explain)
+        match query.page(size=20 max_scanned=10000 max_bytes=8000000 timeout=2s) {
+            <database.QueryLimit> => printl"Search exceeded its budget; narrow the fragment."
+            problem:exception => problem or_throw
+            page => loop row in page.items { printl"{row.id}: {row.title}" }
+        }
+        # Warn once per prepared plan shape; QueryLimit returns no partial page.
+        # Timeout is cooperative. Byte budget covers query buffers, not total file reads.
+    }
+}

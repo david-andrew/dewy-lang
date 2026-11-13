@@ -1,0 +1,9 @@
+# Positive fallback: an exact integer is not a backend fixed-width number.
+import p"fixtures.dewy" as fixture
+main = () => {
+    let db = fixture.seed or_throw
+    db.accounts.insert(fixture.Account["d" "Dee" 9223372036854775808 none]) or_throw;
+    let rows = db.accounts.where((a) => a.balance+1 >? 9223372036854775808).all or_throw
+    printl([loop a in rows a.id]) # ["d"]
+    # Backend must use exact arithmetic or evaluate locally; no REAL conversion.
+}

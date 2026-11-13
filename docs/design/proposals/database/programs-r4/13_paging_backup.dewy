@@ -1,0 +1,31 @@
+# Design specimen: local continuation leases, read-only backup, explicit writable restore.
+import p"@lib/std/database.dewy" as database
+
+Event:type = [id:string recorded:int kind:string]
+const E = database.fields_of<Event>
+const schema = [events=database.collection<Event>(key=E.id
+    indexes=[database.index(database.tuple(E.recorded E.id))])]
+reference_order = (events:array<Event>) => {
+    return events.sorted(key=(e):>[int string] => [e.recorded e.id])
+}
+main = () => {
+    let store = database.open(schema p"events.db") or_throw
+    let view = store.snapshot or_throw
+    let query = view.events.sorted(key=database.tuple(E.recorded E.id))
+    let page = query.page(size=100 max_scanned=10000) or_throw
+    loop true {
+        loop event in page.items { printl"{event.recorded}: {event.kind}" }
+        if page.next is? none break
+        page = query.page(size=100 after=page.next max_scanned=10000) or_throw
+    }
+    view.close() or_throw
+    # Both destinations must be new; a repeated demo deliberately refuses overwrite.
+    store.backup(p"events.backup.db") or_throw
+    let inspection = database.open(schema p"events.backup.db" read_only=true) or_throw
+    printl"backup contains {inspection.events.count or_throw} events"
+    inspection.close() or_throw
+    database.restore(p"events.backup.db" p"events-restored.db") or_throw
+    # Restore allocates new lineage + remaps internal refs; old external refs/cursors fail.
+    let restored = database.open(schema p"events-restored.db" create=false) or_throw
+    printl"writable copy contains {restored.events.count or_throw} events"
+}

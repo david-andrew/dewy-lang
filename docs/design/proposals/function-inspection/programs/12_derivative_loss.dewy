@@ -1,0 +1,14 @@
+# Positive: a scalar model parameter with a small fixed calibration dataset.
+import p"@lib/std/diff.dewy" as diff
+main = () => {
+    let first:float64 = 3.0
+    let second:float64 = 5.0
+    let loss = (weight:float64):>float64 => {
+        let e1 = weight-first
+        let e2 = 2.0*weight-second
+        e1*e1+e2*e2
+    }
+    let slope = diff.derivative(@loss)
+    let gradient = slope(2.0) or_throw
+    printl(gradient) # -6.0; locals are graph bindings, not substituted strings.
+}

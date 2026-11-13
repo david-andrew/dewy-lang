@@ -1,0 +1,40 @@
+import p"@lib/std/files.dewy" as files
+choose = (flag:bool) => {
+    let n = if flag ({
+        let out = files.open(p"yes.txt" 'w') or_throw
+        out.write_text("yes") or_throw;
+        1
+    } or_throw) else ({
+        let out = files.open(p"no.txt" 'w') or_throw
+        out.write_text("no") or_throw;
+        2
+    } or_throw)
+    return n
+}
+# (e1) Each selected arm completes its own File; the other arm constructs nothing.
+# Parse shape: if(flag, suffix(blockA), suffix(blockB)), fixed before type checking.
+
+rejected_outer_only = (flag:bool) => {
+    let n = if flag {
+        let out = files.open(p"yes.txt" 'w') or_throw
+        1
+    } else { 2 } or_throw
+    return n
+}
+# EXPECT REJECT: suffix(if(...)), not suffix(blockA). It cannot cover blockA's cleanup.
+# The rule is the same if both arms own Files: both require their own grouped marker.
+
+collect_or_fallback = (paths:array<Path>) => {
+    return [loop path in paths ({
+        let input = files.open(path 'r') or_throw
+        if path =? p"stop.txt" break
+        input.read_text or_throw
+    } or_throw) else ({
+        let input = files.open(p"default.txt" 'r') or_throw
+        input.read_text or_throw
+    } or_throw)]
+}
+# (e2) Nonempty input uses the first marker each iteration; break does NOT run else.
+# Empty input uses fallback once, with its own marker; no iteration File is acquired.
+# Failure on either active body's completion leaves collect_or_fallback, before result handoff.
+# An ungrouped trailing suffix after the entire loop/else chain would mark neither body.

@@ -1,0 +1,24 @@
+# PAPER R4: nonwaiting CPU validation; per-item failures remain values, not thrown item exits.
+import p"@lib/std/errors.dewy" as errors
+Row:type = [number:int text:string]
+RowError:type = type of error & [row:int message:string]
+parse_row = (row:Row) => {
+    let n = to_int(row.text)
+    if n is? error return RowError[row.number "quantity must be a whole number"]
+    if n <? 0 return RowError[row.number "quantity cannot be negative"]
+    return n
+}
+load_quantities = (rows:array<Row>) => {
+    let outcomes = [parallel row in rows parse_row(row)]
+    let [quantities failed] = outcomes.partition_failures
+    errors.join(failed...) or_throw
+    return quantities
+}
+main = () => {
+    let rows = [Row[1 "5"] Row[2 "bad"] Row[3 "-1"] Row[4 "8"]]
+    let quantities = load_quantities(rows) or_throw
+    printl("accepted {quantities.length} quantities")
+}
+# RowError(row=2), then RowError(row=3), regardless of completion order.
+# Parsing details are mapped to typed row messages; no deferred cause API is needed.
+# Not evidence for waiting collect-all after cancellation or automatic multi-error parallel joins.

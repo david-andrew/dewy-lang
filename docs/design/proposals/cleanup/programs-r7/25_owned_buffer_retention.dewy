@@ -1,0 +1,37 @@
+# PAPER: decode borrows bytes and returns a small independent Summary; no buffer alias escapes.
+# audit_bytes is non-failing and observes ALL buffer contents during the hook.
+import p"buffer_case.dewy" as data
+Batch:type = type of [bytes:array<uint8>
+    $__drop__ = ():>void => data.audit_bytes(@bytes)
+]
+retain_through_tail = (path:Path) => {
+    let batch = Batch[path.read_bytes or_throw]
+    let summary = data.decode(@batch.bytes) or_throw
+    data.long_tail(summary) or_throw
+    return summary
+}
+# Block-end: batch and hook-required bytes remain throughout long_tail.
+# Last-use/mixed: infallible Batch can complete after decode, before long_tail.
+# Concurrent callers can retain N buffers, not just N summaries, under a memory cap.
+
+decode_short = (path:Path) => {
+    let summary = {
+        let batch = Batch[path.read_bytes or_throw]
+        data.decode(@batch.bytes) or_throw
+    }
+    data.long_tail(summary) or_throw
+    return summary
+}
+# Own hook cannot fail, so a cleanup marker is unnecessary. Closing brace ends buffer duty.
+# A selected decode failure still finishes Batch on the already-visible function exit.
+
+plain_buffer = (path:Path) => {
+    let bytes = path.read_bytes or_throw
+    let summary = data.decode(@bytes) or_throw
+    data.long_tail(summary) or_throw
+    return summary
+}
+# Hook-free control: early storage reclamation is permitted when unobservable; block-end
+# does NOT promise to retain it. This is an optimization permission, not a peak-memory bound.
+# The owning case cannot free bytes before its hook: the hook observes their contents.
+# No claim about allocation success, inferred workload frequency, or measured retention.

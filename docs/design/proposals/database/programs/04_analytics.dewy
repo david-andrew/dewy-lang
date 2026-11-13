@@ -1,0 +1,23 @@
+# Design specimen: exact sums; group projections remain ordinary records.
+import p"@lib/std/database.dewy" as database
+
+Sale:type = [id:string region:string day:int net_cents:int]
+const schema = [sales=database.collection<Sale>(key=(s) => s.id
+    indexes=[database.index((s) => [s.day s.region])])]
+report = <S>(store:S first_day:int last_day:int) => {
+    let rows = store.sales.where((s) => first_day <=? s.day and s.day <? last_day)
+        .group_by((s) => s.region)
+        .map((g) => [region=g.key orders=g.items.length
+            cents=sum([loop sale in g.items sale.net_cents])])
+        .sorted(key=(r) => r.region).all or_throw
+    loop row in rows { printl"{row.region}: {row.orders} orders, {row.cents} cents" }
+}
+main = () => {
+    let store = database.memory(schema) or_throw
+    let tx = store.begin or_throw
+    loop sale in [Sale["a" "east" 1 1000] Sale[id="b" region="east" day=1 net_cents=-200] Sale["c" "west" 2 350]] {
+        tx.sales.insert(sale) or_throw;
+    }
+    tx.commit() or_throw
+    report(store 1 3) or_throw
+}

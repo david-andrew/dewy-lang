@@ -1,0 +1,26 @@
+# PAPER: a serialized legacy C renderer has a process-global diagnostic flag.
+# Binding contracts: get/set are no-fail/no-alloc/no-block; render may fail or panic.
+# All access, including callbacks, obeys the same host mutex; no yielding inside ABI.
+import p"legacy_case.dewy" as legacy
+render_quiet = (gate:Mutex<int64> scene:legacy.Scene) => {
+    let held = @(gate.lock)
+    let prior = $unsafe legacy.get_diagnostics
+    $unsafe legacy.set_diagnostics(false)
+    defer $unsafe legacy.set_diagnostics(prior)
+    return $unsafe legacy.render(scene) or_throw
+}
+# Defer runs before local owner cleanup: restoration precedes held's unlock.
+
+render_quiet_without_defer = (gate:Mutex<int64> scene:legacy.Scene) => {
+    let held = @(gate.lock)
+    let prior = $unsafe legacy.get_diagnostics
+    $unsafe legacy.set_diagnostics(false)
+    let result = $unsafe legacy.render(scene)
+    $unsafe legacy.set_diagnostics(prior)
+    return result
+}
+# Straight-line version forwards ordinary failures but misses supported unwinding.
+# Passing a flag/depth parameter cannot fix an ABI whose internals read global state.
+# A library-owned restoring guard is best once this pattern is reused; for one
+# adapter, introducing a nominal owner just to hold prior re-encodes this defer.
+# No claim of safety against outside threads bypassing gate, longjmp, or process kill.

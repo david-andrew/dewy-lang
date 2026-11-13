@@ -1,0 +1,14 @@
+# Expected compile rejection: inspection never makes an impure query legal.
+import p"fixtures.dewy" as fixture
+main = () => {
+    let db = fixture.seed or_throw
+    let seen = 0
+    let keep = (a:fixture.Account $capture @seen) => {
+        seen += 1
+        a.balance <? 0
+    }
+    let rows = db.accounts.where(@keep).all or_throw
+    printl(rows)
+    # Diagnostic: shared mutation violates where's predicate requirement.
+    # Remedy: materialize and use an ordinary loop, as in program 05.
+}

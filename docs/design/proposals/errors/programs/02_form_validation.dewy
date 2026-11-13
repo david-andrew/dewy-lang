@@ -1,0 +1,34 @@
+# PAPER: collect independent field issues and return a User only if every field is valid.
+import p"@lib/std/errors.dewy" as errors
+FieldError:type = type of error & [field:string message:string]
+User:type = [name:string age:int]
+validate = (name:string age_text:string) => {
+    let failed:array<error> = []
+    if name.trim.length =? 0 failed.push(FieldError["name" "name is required"])
+    let parsed = to_int(age_text)
+    let age:int = 0
+    if parsed is? error {
+        failed.push(errors.caused_by(FieldError["age" "enter a whole number"] parsed))
+    } else {
+        age = parsed
+        if age <? 18 failed.push(FieldError["age" "must be at least 18"])
+        if age >? 130 failed.push(FieldError["age" "check the birth year"])
+    }
+    errors.join(failed...) or_throw
+    return User[name.trim age]
+}
+show_issues = (failure:error):>void => {
+    loop issue in errors.leaves(failure) {
+        if issue is? FieldError printl("{issue.field}: {issue.message}")
+    }
+}
+main = () => {
+    let user = validate("" "seventeen")
+    if user is? error {
+        show_issues(user)
+        exit(1)
+    }
+    printl("registered {user.name}")
+}
+# Expected two FieldError values, in name/age order; the parse error is an age cause.
+# It is not a third independent field error, and the age sentinel cannot escape as a User.

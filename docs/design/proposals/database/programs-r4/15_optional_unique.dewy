@@ -1,0 +1,23 @@
+# Design acceptance specimen: optional uniqueness follows Dewy equality, not SQL NULL.
+import p"@lib/std/database.dewy" as database
+User:type = [id:string email:string? = none]
+const U = database.fields_of<User>
+const strict = [users=database.collection<User>(key=U.id indexes=[database.unique(U.email)])]
+const present = [users=database.collection<User>(key=U.id
+    indexes=[database.unique(U.email present_only=true)])]
+$test
+none_participates_by_default = () => {
+    let store = database.memory(strict) or_throw
+    store.users.insert(User[id="a"]) or_throw;
+    let conflict = store.users.insert(User[id="b"])
+    $runtime_assert(conflict is? database.UniqueViolation)
+}
+$test
+present_values_only_when_requested = () => {
+    let store = database.memory(present) or_throw
+    store.users.insert(User[id="a"]) or_throw;
+    store.users.insert(User[id="b"]) or_throw;
+    store.users.insert(User["c" "same@example.test"]) or_throw;
+    let conflict = store.users.insert(User["d" "same@example.test"])
+    $runtime_assert(conflict is? database.UniqueViolation)
+}

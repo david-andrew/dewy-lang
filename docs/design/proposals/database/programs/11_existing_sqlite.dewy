@@ -1,0 +1,15 @@
+# Design specimen: reads an existing Chinook-style SQLite file, never adopts its schema.
+import p"@lib/std/sql.dewy" as sql
+
+AlbumRow:type = [album_id:int64 title:string artist_name:string]
+main = () => {
+    let conn = sql.sqlite(p"Chinook.sqlite" read_only=true) or_throw
+    let statement = conn.prepare<AlbumRow>(
+        "SELECT Album.AlbumId AS album_id, Album.Title AS title, Artist.Name AS artist_name FROM Album JOIN Artist ON Artist.ArtistId = Album.ArtistId WHERE Artist.Name = :artist ORDER BY Album.AlbumId LIMIT :limit"
+    ) or_throw
+    let artist = input("Artist (exact name): ") or_throw
+    let rows = statement.all([artist=artist limit=20]) or_throw
+    loop album in rows { printl"{album.album_id}: {album.title} — {album.artist_name}" }
+    # Result names and every value are checked; NULL in title is RowDecodeError.
+    # An artist containing quotes or SQL text remains one bound parameter value.
+}

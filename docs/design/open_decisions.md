@@ -17,11 +17,14 @@
 
 **Questions at a glance**
 - **(a) Changes something you decided:**
+  - D40 Q2, Q5, Q6: cleanup timing, `defer`, and visible cleanup exits;
   - D38 Q1: snake_case naming style;
   - D31 Q1: default gap and fold policies;
   - D31 Q2: `$program.time_zone*` settings under your entry-point rule;
   - D31 Q6: the prefix (`strict_`, `try_`, or per function).
 - **(b) New syntax or surface:**
+  - D42 Q1–Q3: failure groups, selective recovery and origins;
+  - D43 Q1, Q2: native database v1 and a database-filter inspection pilot;
   - D41 Q1–Q3: `check_cancel()`, `protect_from_cancel(limit @work)`, `task.tasks(@body)` as ordinary calls;
   - D39 Q1: brackets nest, separators make dimensions (n-D from a nest by shaped type or `stack`);
   - D11 Q2: `check=` or `valid_if=`;
@@ -31,6 +34,8 @@
   - D33 Q1: a self-naming alias;
   - D37 Q1: `iso_basic` and `""`.
 - **(c) Names only:**
+  - D42 Q4: first-version failure names;
+  - D43 Q3: core database names, with `related` being renamed;
   - D10 Q4–Q8;
   - D11 Q5, Q6;
   - D28 Q1–Q4;
@@ -48,26 +53,263 @@
 
 ## P1: blocking current work
 
-### D40. Cleanup: values clean themselves up; `defer` only for one-off actions
+### D40. Cleanup: timing, visible exits and whether `defer` stays
 
-Resources clean up on every way out of a function, with no second line to remember: a file flushes and closes, a socket closes, a lock unlocks, a transaction rolls back unless it was committed. Decided so far (batch 9): a cleanup failure is the function's result, shown by hover and highlighting (Q1); `$__abandon__` (Q4); `defer` kept provisionally (Q5).
+Resources clean themselves up: files flush and close, sockets close, locks unlock, and uncommitted transactions roll back. You decided that a cleanup failure becomes the function's result, with hover and highlighting showing the cleanup (Q1), and that `$__abandon__` discards unpublished work (Q4). `defer` is kept provisionally (Q5). Shared `channel` and `mpmc` keep explicit `close()` (agreed). Combining failures moves from the old Q3 to D42.
 
-**Being reworked after your 2026-11-12 answers** (coming back with new examples):
-- Q2: which timing (end of block or last use) gives programmers the fewest surprises.
-- Q3: a general way to combine several errors into one value and split them back out, replacing the two-field `CleanupError`.
-- A cleanup failure on `break`, `continue` or an inner block's end must show a visible exit; today's draft leaves the function with nothing written there:
-  ```dewy
-  write_all = (names:array<string>) => {
-      loop name in names {
-          let out = open(p"{name}.txt" 'w') or_throw
-          out.write_text(name) or_throw;
-          if name =? "last" break             # out closes here; a flush failure leaves write_all
-      }
-      printl"all written"                     # skipped then, with nothing above saying so
-  }
-  ```
-- `defer`'s strongest cases, rewritten without it, to show whether it earns its place.
-- Shared `channel` and `mpmc` keep `close()` (agreed).
+#### Q2 (a). Clean up at block end or after last use?
+
+A session must stay open while a separate service applies an update. `Batch` owns a large buffer that its cleanup hook audits; `decode` returns a small summary without borrowing that buffer.
+
+| Last use can close too early | Block end can retain too long |
+|---|---|
+| `update = () => {`<br>`    let session = service.connect or_throw`<br>`    session.send("begin") or_throw`<br>`    service.apply_side_channel_update() or_throw`<br>`} # Last use closes before the update.` | `summarize = (path:Path) => {`<br>`    let batch = Batch[path.read_bytes or_throw]`<br>`    let summary = decode(@batch.bytes) or_throw`<br>`    long_tail(summary) or_throw`<br>`    return summary`<br>`} # Block end retains the buffer through long_tail.` |
+
+A shorter scoped block repairs the second case:
+
+```dewy
+summarize = (path:Path) => {
+    let summary = {
+        let batch = Batch[path.read_bytes or_throw]
+        decode(@batch.bytes) or_throw
+    }
+    long_tail(summary) or_throw
+    return summary
+}
+```
+
+Run observable cleanup at the owning block's end, or after the owner's last use? Moves transfer the duty and consuming operations can finish it earlier under either rule.
+
+**Rec:** block end, with braces to shorten the lifetime. Its visible boundary stays stable when a later use is added, a generic function gets a different type, or a record gains a fallible field. The adversarial surprise panel slightly favors last use: raw counts **6/7/7**, severity **15/15/17**, for last-use/mixed/block-end; those judgments do not establish real-world frequencies. The recommendation rests on stability under edits and generic code. Plain storage may still be reclaimed early when unobservable. **Reversible:** before implementation; changing observable timing after release can break programs.
+
+#### Q6 (a, new). Show a possible function exit at local cleanup boundaries
+
+```dewy
+write_all = (names:array<string>) => {
+    loop name in names {
+        let out = open(p"{name}.txt" 'w') or_throw
+        out.write_text(name) or_throw;
+        if name =? "last" break   # Failed close would leave write_all here.
+    }
+    printl("all written")        # Then this is skipped, without a visible exit above.
+}
+```
+
+| A. Explicit consuming close | B. Mark an inner block | C. Group the loop body |
+|---|---|---|
+| `write_all = (names:array<string>) => {`<br>`    loop name in names {`<br>`        let out = open(p"{name}.txt" 'w') or_throw`<br>`        out.write_text(name) or_throw;`<br>`        out.close() or_throw`<br>`        if name =? "last" break`<br>`    }`<br>`    printl("all written")`<br>`}` | `write_all = (names:array<string>) => {`<br>`    loop name in names {`<br>`        {`<br>`            let out = open(p"{name}.txt" 'w') or_throw`<br>`            out.write_text(name) or_throw;`<br>`            if name =? "last" break`<br>`        } or_throw`<br>`    }`<br>`    printl("all written")`<br>`}` | `write_all = (names:array<string>) => {`<br>`    loop name in names ({`<br>`        let out = open(p"{name}.txt" 'w') or_throw`<br>`        out.write_text(name) or_throw;`<br>`        if name =? "last" break`<br>`    } or_throw)`<br>`    printl("all written")`<br>`}` |
+
+Reject a locally continuing exit (`break`, `continue`, or an inner block's end) while fallible cleanup remains unmarked, with a fix-it offering A or B? In B and C the block's `or_throw` acknowledges cleanup on every exit, including jumps that skip its textual end.
+
+**Rec:** A for simple loops, B for complex bodies; this is also the independent review's preference. A places `or_throw` at the failing operation; successful or failed consuming close removes the duty, so cleanup never closes it twice. When conditions or work cannot move after close, B keeps one cleanup region across the existing jumps. C is coherent, but a reader must know that `loop … { … } or_throw` attaches to the whole loop and cannot mark its body. If body failure and cleanup failure both occur, both survive in that order; D42 Q1 decides their representation. **Reversible:** before release; the checked marker rule becomes a control-flow contract afterward.
+
+#### Q5 (a). Does `defer` still earn its place?
+
+These two cases get simpler without restoration. Timing here covers every ordinary result, including errors and cancellation; `serve` owns its internal cleanup.
+
+| With `defer` | Functional rewrite |
+|---|---|
+| `render = (node:Tree @indent:int64) => {`<br>`    draw(node.label indent) or_throw`<br>`    indent += 1`<br>`    defer indent -= 1`<br>`    loop child in node.children { render(child @indent) or_throw }`<br>`}` | `render = (node:Tree depth:int64=0) => {`<br>`    draw(node.label depth) or_throw`<br>`    loop child in node.children { render(child depth+1) or_throw }`<br>`}` |
+| `handle = (request:Request) => {`<br>`    let start = clock.now`<br>`    defer metrics.observe(clock.now-start)`<br>`    return serve(request) or_throw`<br>`}` | `handle = (request:Request) => {`<br>`    let start = clock.now`<br>`    let result = serve(request)`<br>`    metrics.observe(clock.now-start)`<br>`    return result`<br>`}` |
+
+The remaining case restores a C library's global flag across all supported unwinding. Both versions require the same process-wide lock; getting and setting the flag cannot fail, allocate, block or panic.
+
+| One-off `defer` | Small reusable owner |
+|---|---|
+| `render_quiet = (gate:Mutex<int> scene:Scene) => {`<br>`    let held = @(gate.lock)`<br>`    let prior = $unsafe legacy.get_diagnostics`<br>`    $unsafe legacy.set_diagnostics(false)`<br>`    defer $unsafe legacy.set_diagnostics(prior)`<br>`    return $unsafe legacy.render(scene) or_throw`<br>`}` | `SavedDiagnostics:type = type of [prior:bool`<br>`    $__drop__ = ():>void => { $unsafe legacy.set_diagnostics(prior) }`<br>`]`<br>`render_quiet = (gate:Mutex<int> scene:Scene) => {`<br>`    let held = @(gate.lock)`<br>`    let saved = SavedDiagnostics[$unsafe legacy.get_diagnostics]`<br>`    $unsafe legacy.set_diagnostics(false)`<br>`    return $unsafe legacy.render(scene) or_throw`<br>`}` |
+
+Drop `defer`, using parameters, result capture and small owners instead, or keep its checked one-line form for one-off restoration? Result capture does not cover panic unwinding; the owner does, and it restores the flag before unlocking.
+
+**Rec:** drop, unless you value the one-line form for one-off restorations. Round 7 recommends dropping it; the independent review would keep it provisionally because restoring one borrowed value is shorter with `defer` (the example below). If kept, it remains non-failing and cannot `return`, `break` or `or_throw`. Removal must wait for validation that a local callback owner preserves the caller's borrow and effects and cannot escape; copying the bool is not equivalent. **Reversible:** before release; deletion later breaks source.
+
+#### One borrowed value, both ways
+
+`paint` may fail. Both versions restore the caller's `busy` value on return and supported unwinding; the callback owner must stay local.
+
+| One-off `defer` | Local callback owner |
+|---|---|
+| `refresh = (@busy:bool) => {`<br>`    let prior = busy`<br>`    busy = true`<br>`    defer busy = prior`<br>`    paint() or_throw`<br>`}` | `RestoreAction:type = type of [action:(():>void & no panics & no allocates & no blocks)`<br>`    $__drop__ = ():>void => action()`<br>`]`<br>`refresh = (@busy:bool) => {`<br>`    let prior = busy`<br>`    let restore = ($capture @busy):>void => { busy = prior }`<br>`    let saved = RestoreAction[@restore]`<br>`    busy = true`<br>`    paint() or_throw`<br>`}` |
+
+Paper dogfood, surprise panel and independent review, with remaining implementation limits: [cleanup proposal](proposals/cleanup/) (round 7 and its review; not all-5).
+
+### D42. Combining failures and seeing where each came from
+
+These examples use `import p"@lib/std/errors.dewy" as errors`. A group keeps failure values separately rather than merging their payload fields; it can contain cancellation as well as ordinary errors.
+
+#### Q1 (b). `a & b` combines values into one `ErrorGroup`
+
+| Recommended: separate payloads | Literal intersection: invalid for these errors |
+|---|---|
+| `CodeNumber:type = type of error & [code:int]`<br>`CodeText:type = type of error & [code:string]`<br>`combine = (a:CodeNumber b:CodeText):>errors.ErrorGroup => {`<br>`    return a & b`<br>`}` | `CodeNumber:type = type of error & [code:int]`<br>`CodeText:type = type of error & [code:string]`<br>`combine = (a:CodeNumber b:CodeText):>CodeNumber & CodeText => {`<br>`    return a & b # No code value can be both int and string.`<br>`}` |
+
+```dewy
+inspect = (group:errors.ErrorGroup):>void => {
+    loop child in group.errors { errors.report(child) }  # Immediate children.
+    loop leaf in errors.leaves(group) { errors.report(leaf) } # Nested leaves, left to right.
+}
+fold = (first:exception rest:array<exception>) => {
+    let acc:exception = first
+    loop e in rest { acc &= e }
+    return acc
+}
+```
+
+```dewy
+combine_many = (failures:array<exception>) => {
+    return errors.join(failures...)  # Zero: void; one: original; many: ErrorGroup.
+}
+```
+
+Use `a & b` to preserve both failures in order, including duplicates, with `.errors` for immediate children and `errors.leaves` for all leaves? Its result type would be `ErrorGroup`, not the type intersection `A & B`.
+
+**Rec:** yes. Under Dewy's shared-field intersection rule, a `code` field cannot be both `int` and `string`, so `CodeNumber & CodeText` has no valid record value. A group preserves both payloads without changing that rule; order and duplicates alone are not an argument against intersection typing. `&` is eager, so combine already obtained failures; use `or_throw` between operations that should stop on failure. A nonempty accumulator uses `acc &= e` in storage that admits a group; an empty batch uses an array and `join`, never `none` as a neutral failure. Cleanup uses this same rule: body failure plus failed close gives `body & close`; a lone cleanup failure stays itself. Lossless construction when allocation fails remains an implementation gate. **Reversible:** before release; value-operator and matching contracts are costly to change later.
+
+#### Q2 (b). Handle the outer group explicitly; recover selected parts with a helper
+
+Here `failure` can be one file error or a whole group. An ordinary typed fallback handles only the former; `match` likewise tests the whole value's kind.
+
+```dewy
+use_default = (failure:FileError | errors.ErrorGroup) => {
+    return failure ??<FileError> void    # A group is not consumed by this FileError handler.
+}
+handle = (failure:FileError | errors.ErrorGroup):>void => {
+    match failure {
+        single:FileError => errors.report(single)
+        group:errors.ErrorGroup => errors.report(group)
+    }
+}
+```
+
+```dewy
+CloseFailed:type = type of error
+canceled = () => {
+    (Canceled & CloseFailed) ?? void   # Leaves canceled with the whole group.
+    printl("unreachable")
+}
+```
+
+```dewy
+MissingAsset:type = type of error & [path:Path message:string]
+regenerate = (missing:MissingAsset) => {
+    missing.path.write_text("generated placeholder") or_throw;
+}
+repair = (failure:exception) => {
+    return errors.recover<MissingAsset>(failure @regenerate)
+}
+```
+
+Keep `??<FileError>` and `match` as tests of the outer kind, and offer provisional `recover<E>` for repairing matching leaves while returning the remainder automatically? A group containing `Canceled` still passes through `??`, preserving your D4 Q1 rule.
+
+**Rec:** yes to the behavior; `recover<E>` is **not yet cold-read**. One `ErrorGroup` derives from `exception`, outside `error`: even an all-ordinary group does not match an `error` arm or fit an `error` parameter. A group-only `??<FileError>` is an impossible-selector error; the union above makes that selector legal. Recovery returns incoming cancellation unchanged before calling any repair; new cancellation stops further repair starts. Unmatched failures survive, and a failed repair retains both its original and new failure. V1 selects only independently copyable error payloads. `or_throw<Canceled>` also forwards a carrying group although `is? Canceled` is false; explicitly defaulting it requires naming both `Canceled` and `ErrorGroup`. **Reversible:** helper spelling is easy to change before release; matching and cancellation behavior are compatibility commitments.
+
+#### Q3 (b). An error's construction site and added context
+
+```dewy
+show_origin = (failure:exception):>void => {
+    let site = failure.$origin
+    if site is? none printl("origin unavailable")
+    else printl(fmt"{site.file}:{site.line}:{site.column} in {site.function}")
+}
+loading_config = (failure:exception) => {
+    return errors.with_context(failure "loading configuration")
+}
+```
+
+Record a construction site by default and expose it as `failure.$origin` (file, line, column, function), with `with_context` adding a note without changing the failure's kind? Round 4 defers stack capture and `$trace` from v1; a later opt-in trace would be separate from this origin.
+
+**Rec:** yes provisionally, subject to measuring result sizes, binary source tables and instruction counts. The token is intended to be small, but it can enlarge success/error unions and their successful returns too; small total cost has not been demonstrated. Copies keep the original site; groups record their combination site and retain child origins. `none` is exempt, and unknown foreign origins are unavailable. Context preserves kind, payload and cancellation. **Reversible:** default capture is adjustable before release; public metadata names become an API contract.
+
+#### Q4 (c). First-version names
+
+```dewy
+report = (failure:exception):>void => {
+    loop leaf in errors.leaves(failure) {
+        let site:errors.SourceLocation? = leaf.$origin
+        errors.report(leaf file=stderr locations=true)
+    }
+}
+```
+
+Use `ErrorGroup`, `.errors`, `.message`, `join`, `leaves`, `with_context`, `report(file= locations=)`, `$origin` and `SourceLocation` with `.file`, `.line`, `.column`, `.function` for v1? Keep `recover<E>` provisional and defer advanced `split`, causes, public context frames and traces.
+
+**Rec:** yes to the tested names; separately test `recover<E>` and the new error-value `&` / `&=` usage. `ExceptionGroup` is removed, not a second pending group name. **Reversible:** names can change before release.
+
+Paper dogfood remains below all-5; the 27-line cold read conveyed broad roles, but no reader distinguished the two group names and it did not test `recover` or the operator use: [errors proposal](proposals/errors/).
+
+### D43. A native database first version, and ordinary lambdas later
+
+The native interface uses Dewy records, functions and methods. It may start on SQLite and later use a Dewy engine; SQL remains a separate first-class interface, as you decided. A selector is a typed value describing a record field; methods such as `lt` build a predicate the database can execute.
+
+#### Q1 (b). Typed storage, indexed queries and explicit commit
+
+```dewy
+import p"@lib/std/database.dewy" as database
+Account:type = [id:string balance:int]
+const A = database.fields_of<Account>
+const accounts = [accounts=database.collection<Account>(key=A.id
+    indexes=[database.index(A.balance)])]
+open_accounts = () => {
+    return database.open(accounts p"accounts.db") or_throw
+}
+```
+
+```dewy
+overdrawn = <S>(store:S) => {
+    return store.accounts.where(A.balance.lt(0))
+        .page(size=20 max_scanned=1000) or_throw
+}
+```
+
+```dewy
+move_one = <S>(store:S) => {
+    let tx = store.begin(timeout=2s) or_throw
+    let a = tx.accounts.require("ada") or_throw
+    let b = tx.accounts.require("bea") or_throw
+    tx.accounts.replace([a... balance=a.balance-1]) or_throw
+    tx.accounts.replace([b... balance=b.balance+1]) or_throw
+    tx.commit() or_throw
+}
+```
+
+Take this library-only v1 shape: typed collections and references, selectors for planned queries, and task-owned transactions with explicit `commit()`? Other exits abandon unpublished work; cleanup never commits.
+
+**Rec:** yes. Adding an index must preserve values and order; unsupported exact operations use a warned exact local evaluator or fail explicitly. A page size bounds output, while `max_scanned` bounds logical visits; it does not bound bytes or all execution time. The full first release also includes related records, aggregates, structural migrations, backup/restore, search and the separate SQL adapter; those are separable library modules, not prerequisites for the first storage slice. **Reversible:** library surface can evolve before release; stored schema and reference identity need migration contracts afterward.
+
+#### Q2 (b). Ship selectors, then pilot inspection for database filters?
+
+Left and right are alternatives using the same schemas. `S` in the date-range example is the Sale field-selector record; `P.author` is a stored reference, and `A.email` selects its author's email.
+
+| Query | Selectors in v1 | Ordinary lambdas with future inspection |
+|---|---|---|
+| Negative balances | `negative = <DB>(store:DB) => {`<br>`    return store.accounts.where(A.balance.lt(0)).all or_throw`<br>`}` | `negative = <DB>(store:DB) => {`<br>`    return store.accounts.where((a) => a.balance <? 0).all or_throw`<br>`}` |
+| Date range and compound order | `by_day = <DB>(store:DB lo:int hi:int) => {`<br>`    return store.sales.where(database.all_of([S.day.ge(lo) S.day.lt(hi)]))`<br>`        .sorted(key=database.tuple(S.day S.id)).all or_throw`<br>`}` | `by_day = <DB>(store:DB lo:int hi:int) => {`<br>`    return store.sales.where((s) => lo <=? s.day and s.day <? hi)`<br>`        .sorted(key=(s):>[int string] => [s.day s.id]).all or_throw`<br>`}` |
+| Posts with an author's email | `by_author = <DB>(store:DB email:string) => {`<br>`    return store.posts.where(database.related(P.author A.email).eq(email))`<br>`        .include([author=P.author tags=P.tags]).all or_throw`<br>`}` | `by_author = <DB>(store:DB email:string) => {`<br>`    return store.posts.include([author=P.author tags=P.tags])`<br>`        .where((row) => row.related.author.email =? email).all or_throw`<br>`}` |
+
+Function inspection would let a `code.Function<F>` parameter receive the callable's resolved typed body and capture descriptions as read-only compile-time data, plus its original executable function at run time. Ordinary lambda type checking happens first, and capture values stay at run time under explicit access and privacy rules.
+
+Ship only selectors first, or also pilot this general language feature for database filters? The lambda column shows the longer-term convenience; its tuple-key translation and included-row filter are beyond the initial one-comparison pilot.
+
+**Rec:** ship v1 on selectors; pilot inspection for database filters only. It could later support test assertions showing a failing subexpression, automatic differentiation and GPU kernels, but needs substantial compiler work. Translation must never change values, errors, ordering or observable effects; unsupported translation or exhausted planning falls back to running the original checked pure, terminating lambda locally, with a warning. Effectful or unproved callbacks instead require an ordinary loop over materialized rows. The compiler cannot prove an arbitrary translator correct merely from its signature; primitive mappings and backend validation belong to the trusted implementation. Before the pilot, specify the typed planning/fallback interface and bound compiler work and retained/emitted size. Optional planning must not drain a budget needed by a future demanded transformation with no fallback, such as differentiation. Keep `$__collect__` and direct comprehension translation, assertions, differentiation and GPU execution out of this pilot. **Reversible:** the experiment can be dropped; a released inspection interface is a substantial language commitment.
+
+#### Q3 (c). Core database names
+
+```dewy
+lookup = <S>(store:S id:string) => {
+    let account = store.accounts.get(id) or_throw   # May be none.
+    return account
+}
+reference = <S>(store:S id:string) => {
+    return store.accounts.reference(id) or_throw   # Checks existence; may fail.
+}
+```
+
+Use the core names below, while renaming the related-field selector currently spelled `database.related(P.author A.email)`? Round 4 offers no replacement candidate, so that spelling is being renamed rather than put forward as approved.
+
+**Rec:** yes to the remaining core names, with the low-confidence `reference` and `present_only` contracts made explicit before release. `unique(A.email)` permits only one `none`; `unique(A.email present_only=true)` constrains present values only. **Reversible:** names are easy to change before release.
+
+Core names: `fields_of`, `collection`, `Ref`, `open(create= read_only=)`, `memory`, `get`, `require`, `insert`, `reference`, `replace`, `put`, `begin(timeout=)`, `commit`, `rollback`, `snapshot`, `close`; `index`, `unique(present_only=)`, `tuple`, `eq`, `lt`, `ge`, `contains`, `all_of`, `where`, `sorted(key= reverse=)`, `all`, `count`, `page(size= after= max_scanned= max_bytes= timeout=)`, `explain`, `include`, `update`, `delete`; result `.items`, `.next`, `.record`, `.related`. Additional release-module names and error names are not covered by this core ballot.
+
+Paper dogfood remains below all-5; the 45-line core cold read conveyed broad roles except `related` (two readers inferred a join), with low confidence for `present_only` and `reference`; inspection names have not been cold-read: [database proposal](proposals/database/), [function-inspection proposal](proposals/function-inspection/).
 
 ### D41. Cancellation helpers as ordinary calls: `check_cancel`, `protect_from_cancel`, `task.tasks`
 

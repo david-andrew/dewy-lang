@@ -1,0 +1,16 @@
+import p"socket_case.dewy" as service
+session_update = (verbose:bool) => {
+    let stream = service.connect or_throw
+    stream.send("begin") or_throw
+    if verbose {
+        stream.send("trace") or_throw
+    }
+    service.apply_side_channel_update() or_throw
+}
+# Block-end: session lives through line 8 on both paths.
+# Path-sensitive last-use: release after line 6 on true; when false is selected
+# on false (not before testing verbose if that test still separates future uses).
+# A conservative last-use plan may instead choose the join at line 7.
+# Both close before line 8; neither may guess a shorter point across a real future use.
+# Mixed behaves like last-use for this infallible stream. Adding a final diagnostic
+# read of stream AFTER line 8 can make the protocol start working: a bad dependency.

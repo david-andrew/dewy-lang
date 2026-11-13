@@ -1,0 +1,11 @@
+# Expected compile rejection: a type-erased function has no derivative body.
+import p"@lib/std/diff.dewy" as diff
+differentiate = (f:(float64:>float64) at:float64) => {
+    let slope = diff.derivative(@f)
+    slope(at) or_throw
+}
+main = () => {
+    printl(differentiate((x:float64):>float64 => x*x 2.0) or_throw)
+    # Diagnostic at derivative: opaque callable, no sound derivative fallback.
+    # Change this helper's parameter to code.Function<(float64:>float64)>.
+}

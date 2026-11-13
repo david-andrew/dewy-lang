@@ -1,0 +1,25 @@
+# Design specimen: no graphics or audio; nested value data is saved atomically.
+import p"@lib/std/database.dewy" as database
+
+Item:type = [kind:'potion'|'key' quantity:int]
+Save:type = [slot:string level:int x:rational y:rational inventory:array<Item>]
+const schema = [saves=database.collection<Save>(key=(s) => s.slot)]
+load = <S>(store:S slot:string) => {
+    let saved = store.saves.get(slot) or_throw<error | Canceled>
+    return saved ??<none> Save[slot 1 0 0 []]
+}
+save = <S>(store:S state:Save) => {
+    let tx = store.begin(timeout=1s) or_throw
+    tx.saves.put(state) or_throw;
+    tx.commit() or_throw
+}
+main = () => {
+    let store = database.open(schema p"savegame.db") or_throw
+    let state = load(store "slot-1") or_throw
+    state.x += 3
+    state.inventory.push(Item['potion' 1])
+    save(store state) or_throw
+    store.backup(p"savegame.backup.db") or_throw
+    printl"saved level {state.level}"
+    # Only none means new game. Corruption, incompatible schema and disk errors propagate.
+}

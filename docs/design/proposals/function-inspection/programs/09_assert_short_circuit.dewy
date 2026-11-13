@@ -1,0 +1,10 @@
+# Intentional failure; short-circuiting must prevent the division by zero.
+import p"@lib/std/check.dewy" as check
+check_average = (total:int count:int) => {
+    check.that(() => count not=? 0 and total/count >? 10) or_throw
+}
+main = () => {
+    check_average(20 0) or_throw
+    # Expected AssertionFailed: count not=? 0 was false; right side not evaluated.
+    # Never evaluate total/count to decorate the error message.
+}

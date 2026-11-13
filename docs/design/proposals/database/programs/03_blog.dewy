@@ -1,0 +1,32 @@
+# Design specimen: one-to-many author reference, many-to-many set of tag references.
+import p"@lib/std/database.dewy" as database
+
+Author:type = [id:string name:string email:string]
+Tag:type = [id:string label:string]
+Post:type = [id:string author:database.Ref<Author> title:string body:string
+    tags:set<database.Ref<Tag>> = set[]]
+const schema = [
+    authors=database.collection<Author>(key=(a) => a.id
+        indexes=[database.unique((a) => a.email)])
+    posts=database.collection<Post>(key=(p) => p.id)
+    tags=database.collection<Tag>(key=(t) => t.id)
+]
+main = () => {
+    let store = database.memory(schema) or_throw
+    let tx = store.begin or_throw
+    let author = tx.authors.insert(Author["ada" "Ada" "ada@example.org"]) or_throw
+    let tag = tx.tags.insert(Tag["language" "Language design"]) or_throw
+    tx.posts.insert(Post["first" author "Dewy storage" "Ordinary values." set[tag]]) or_throw;
+    tx.posts.insert(Post["second" author "A second post" "Same tag, another post." set[tag]]) or_throw;
+    tx.commit() or_throw
+    let view = store.snapshot or_throw
+    let by_author = view.posts.where((p) => p.author =? author).all or_throw
+    loop p in by_author { printl(p.title) }
+    let tagged = view.posts.where((p) => tag in? p.tags).all or_throw
+    loop p in tagged { printl"tagged: {p.title}" }
+    let tags = view.posts.where((p) => p.author =? author).follow((p) => p.tags).all or_throw
+    printl(tags) # Multiplicity is preserved: one tag per post-to-tag edge.
+    let writer = view.authors.get(author) or_throw<error | Canceled> ??<none> return database.RecordMissing
+    printl"written by {writer.name}"
+    # Deleting this author or a referenced tag returns Referenced; nothing cascades implicitly.
+}

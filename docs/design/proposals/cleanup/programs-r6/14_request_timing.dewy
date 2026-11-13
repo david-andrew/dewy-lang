@@ -1,0 +1,25 @@
+# PAPER: Request/Response have no cleanup hooks. serve owns its internal resources.
+# clock.now and metrics.observe are non-failing; observe uses a bounded ring buffer.
+import p"request_case.dewy" as api
+import p"clock_case.dewy" as clock
+import p"metrics_case.dewy" as metrics
+handle_with_defer = (request:api.Request) => {
+    let start = clock.now
+    defer metrics.observe(clock.now-start)
+    return api.serve(request) or_throw
+}
+
+handle = (request:api.Request) => {
+    let start = clock.now
+    let result = api.serve(request)
+    metrics.observe(clock.now-start)
+    return result
+}
+# A plain binding captures Response, ServeError, Canceled, or Q3's combined error
+# without defaulting/handling it. Returning the same value preserves it unchanged.
+# api.serve's own cleanup finishes before either caller records the duration.
+# Capturing the result beats defer for this ordinary-result requirement.
+# Panic or process exit cannot be captured as ordinary values; defer participates
+# in supported unwinding, the straight-line version does not. SIGKILL is neither.
+# If timing must include OWN local cleanup, defer-before-locals is also too early;
+# put that work in serve (as here) or use an appropriately ordered owner.

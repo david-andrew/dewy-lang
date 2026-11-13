@@ -1,0 +1,35 @@
+import p"@lib/std/files.dewy" as files
+ParseError:type = type of error
+parse = (text:string):>int | ParseError => {
+    if text =? "12" return 12
+    return ParseError
+}
+without_owner = () => {
+    return [loop text in ["12" "bad"] ({ parse(text) } or_throw)]
+}
+with_owner = (paths:array<Path>) => {
+    return [loop path in paths ({
+        let input = files.open(path 'r') or_throw
+        parse(input.read_text or_throw)
+    } or_throw)]
+}
+# (a) First value 12 proceeds. ParseError selects function propagation before body cleanup.
+# (b) Same selection with a File; successful close leaves the original ParseError itself.
+# (c) Failed close F joins after selected ParseError P: errors.join(P F), an ErrorGroup.
+# The joined group is NOT re-tested against the suffix. Other cleanup appends in order.
+
+ordinary_outer_suffix = () => {
+    return [loop text in ["12" "bad"] { parse(text) } or_throw]
+}
+# Outer suffix has the loop as operand, propagating its values; it marks no body scope.
+# Adding a File to that UNGROUPED body requires a marker; it does not change the parse.
+# Canonical correction is with_owner above. No owner-based parsing or implicit relocation.
+
+Sample:type = [value:int | ParseError]
+inspect_samples = () => {
+    return [loop text in ["12" "bad"] ({ Sample[parse(text)] } or_throw)]
+}
+# Records remain data. No scanning fields/arrays for exceptions.
+# Successful scalar values can flow to a collector before later cleanup fails; no
+# per-iteration buffering is introduced. An incomplete returned array is not returned.
+# Already observed streaming values or side effects are not rolled back.

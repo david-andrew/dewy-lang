@@ -1,0 +1,40 @@
+# Design specimen; proposed database API, not executable with today's library.
+import p"@lib/std/database.dewy" as database
+
+Todo:type = [id:string title:string done:bool=false priority:int=0]
+const schema = [todos=database.collection<Todo>(
+    key=(t) => t.id
+    indexes=[database.index((t) => [t.done t.priority t.id])]
+)]
+
+add = <S>(store:S id:string title:string) => {
+    store.todos.insert(Todo[id=id title=title]) or_throw;
+}
+finish = <S>(store:S id:string) => {
+    let changed = store.todos.where((t) => t.id =? id)
+        .update((t) => [t... done=true]) or_throw
+    if changed =? 0 return database.RecordMissing
+}
+show = <S>(store:S) => {
+    let query = store.todos.where((t) => not t.done)
+        .sorted(key=(t) => [t.priority t.id] reverse=true)
+    let page = query.page(size=20) or_throw
+    loop true {
+        loop todo in page.items { printl"{todo.id}: {todo.title}" }
+        if page.next is? none break
+        page = query.page(size=20 after=page.next) or_throw
+    }
+}
+main = () => {
+    let store = database.open(schema p"todo.db") or_throw
+    let argv = args[$clamp 1..]
+    if argv.length =? 3 and argv[0] =? "add" {
+        add(store argv[1] argv[2]) or_throw
+    } else if argv.length =? 2 and argv[0] =? "done" {
+        finish(store argv[1]) or_throw
+    } else if argv.length =? 1 and argv[0] =? "prune" {
+        printl(store.todos.where((t) => t.done).delete() or_throw)
+    } else {
+        show(store) or_throw
+    }
+}

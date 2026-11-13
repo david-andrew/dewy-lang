@@ -1,0 +1,32 @@
+# PAPER R4: the recommended & must combine even payloads whose true intersection is empty.
+import p"@lib/std/errors.dewy" as errors
+ReadMessage:type = type of error & [message:'read failed']
+CloseMessage:type = type of error & [message:'close failed']
+CodeNumber:type = type of error & [code:int]
+CodeText:type = type of error & [code:string]
+InvariantFailed:type = type of error & [message:string]
+refined_pair = () => ReadMessage['read failed'] & CloseMessage['close failed']
+conflicting_codes = () => CodeNumber[17] & CodeText["disk-full"]
+fold_more = (first:exception more:array<exception>) => {
+    let acc:exception = first
+    loop next in more { acc &= next }
+    return acc
+}
+verify = ():>void | InvariantFailed => {
+    let pair = refined_pair
+    if pair.message not=? "multiple failures" return InvariantFailed["wrong group summary"]
+    let parts = pair.errors
+    if parts.length not=? 2 return InvariantFailed["pair lost an occurrence"]
+    if parts[0] isnt? ReadMessage return InvariantFailed["first kind changed"]
+    if parts[1] isnt? CloseMessage return InvariantFailed["second kind changed"]
+    let same = CodeNumber[17]
+    let repeated = same & same
+    if repeated.errors.length not=? 2 return InvariantFailed["duplicates were deduplicated"]
+    errors.report(conflicting_codes)
+    let nested = fold_more(same [CodeText["first"] CodeText["second"]])
+    errors.report(nested)
+}
+main = () => { verify or_throw }
+# In candidate I, ReadMessage & CloseMessage and CodeNumber & CodeText are invalid result types.
+# Here both values have type ErrorGroup. The original two message/code values remain in parts.
+# With a seed, &= works; do not seed an empty accumulator with none, which is a real exception.

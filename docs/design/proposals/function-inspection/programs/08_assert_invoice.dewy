@@ -1,0 +1,10 @@
+# Intentional runtime failure with operand detail, no language trap.
+import p"@lib/std/check.dewy" as check
+Invoice:type = [subtotal:int tax:int paid:int]
+validate = (bill:Invoice) => {
+    check.that(() => bill.subtotal+bill.tax =? bill.paid) or_throw
+}
+main = () => {
+    validate(Invoice[100 20 119]) or_throw
+    # Expected AssertionFailed: left=120, right=119, comparison location.
+}

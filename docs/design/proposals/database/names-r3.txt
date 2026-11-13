@@ -1,0 +1,74 @@
+import p"@lib/std/database.dewy" as database
+import p"@lib/std/sql.dewy" as sql
+accounts = database.collection<Account>(key=(a) => a.id)
+accounts = database.collection<Account>(key=(a) => a.id indexes=[database.index((a) => a.balance)])
+accounts = database.collection<Account>(key=(a) => a.id indexes=[database.unique((a) => a.email)])
+notes = database.collection<Note>(key=(n) => n.id indexes=[database.full_text((n) => [n.title n.body] language='en')])
+author:database.Ref<Author>
+store = database.open(schema p"app.db")
+store = database.open(schema p"app.db" create=false)
+store = database.open(schema p"app.db" read_only=true)
+store = database.memory(schema)
+account = store.accounts.insert(Account["ada" 100])
+account = store.accounts.get("ada")
+account = store.accounts.reference("ada")
+query = store.accounts.where((a) => a.balance <? 0)
+query = query.map((a) => [id=a.id balance=a.balance])
+query = query.sorted(key=(a) => a.balance reverse=true)
+query = store.sales.group_by((s) => s.region)
+query = query.map((g) => [region=g.key orders=g.items.length])
+query = store.posts.follow((p) => p.author)
+query = store.posts.follow((p) => p.tags)
+query.explain
+query.all
+query.count
+query.sum((sale) => sale.net_cents)
+query.page(size=20)
+query.page(size=20 after=page.next max_scanned=1000)
+page.items
+page.next
+query.update((a) => [a... balance=a.balance+1])
+query.delete()
+tx = store.begin
+tx = store.begin(timeout=2s)
+tx.accounts.replace(account)
+tx.accounts.put(account)
+tx.commit()
+tx.rollback()
+view = store.snapshot
+view.close()
+store.close()
+store.backup(p"before.db")
+change = database.migration(old_schema new_schema)
+change.contacts.rename((c:Old) => c.name (c:New) => c.display_name)
+change.contacts.remove((c:Old) => c.note)
+change.contacts.transform(@convert)
+change.describe
+database.migrate(p"app.db" change)
+store.notes.search(text)
+hit.record
+hit.score
+hit.excerpt
+conn = sql.sqlite(p"legacy.sqlite" read_only=true)
+statement = conn.prepare<Row>("SELECT name FROM accounts WHERE id = :id")
+statement.all([id=account_id])
+statement = conn.prepare<void>("DELETE FROM accounts WHERE id = :id")
+statement.execute([id=account_id])
+database.RecordMissing
+database.DuplicateKey
+database.UniqueViolation
+database.Referenced
+database.ReferenceMismatch
+database.SchemaMismatch
+database.UnsupportedFeature
+database.CorruptStore
+database.DecodeError
+database.QueryLimit
+database.CursorMismatch
+database.CursorExpired
+database.TransactionFailed
+database.CommitUnknown
+database.MigrationConflict
+sql.SqlError
+sql.StatementShapeError
+sql.RowDecodeError

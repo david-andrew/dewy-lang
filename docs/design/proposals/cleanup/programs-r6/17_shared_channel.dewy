@@ -1,0 +1,39 @@
+produce = (q:Channel<int64> start:int64) => {
+    loop n in [0..10) { q.send(start+n) or_throw }
+}
+coordinate = (q:Channel<int64>) => {
+    defer q.close()
+    parallel {
+        produce(q 0) or_throw
+        produce(q 100) or_throw
+    }
+}
+coordinate_body = (q:Channel<int64>) => {
+    parallel {
+        produce(q 0) or_throw
+        produce(q 100) or_throw
+    }
+}
+coordinate_without_defer = (q:Channel<int64>) => {
+    let result = coordinate_body(q)
+    q.close()
+    return result
+}
+consume = (q:Channel<int64>) => {
+    loop true {
+        let next = q.receive
+        if next is? Closed return
+        printl(next or_throw)
+    }
+}
+main = () => {
+    let q = channel<int64>(4)
+    parallel {
+        coordinate(q) or_throw
+        consume(q) or_throw
+    }
+}
+# Bidirectional handles cannot infer which caller ends all sending.
+# Missing line 5 can hang; ordinary resource release is automatic, this protocol
+# completion is explicit. The no-defer helper version works for ordinary results.
+# Document this carve-out; do not promise that every library protocol needs no defer.

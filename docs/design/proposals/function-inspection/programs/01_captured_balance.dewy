@@ -1,0 +1,13 @@
+# Positive: threshold is captured at closure creation, not execution.
+import p"fixtures.dewy" as fixture
+main = () => {
+    let db = fixture.seed or_throw
+    let threshold:int = 0
+    let owing = (a:fixture.Account) => a.balance <? threshold
+    threshold = -100
+    let query = db.accounts.where(@owing)
+    let rows = query.all or_throw
+    printl([loop a in rows a.id]) # ["a" "c"], primary-key order
+    let later = db.accounts.where((a) => a.balance <? threshold).all or_throw
+    printl([loop a in later a.id]) # ["a"]
+}

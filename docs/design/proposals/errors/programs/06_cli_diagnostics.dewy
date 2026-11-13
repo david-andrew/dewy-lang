@@ -1,0 +1,27 @@
+# PAPER: two independent library calls, then one full diagnostic report.
+import p"@lib/std/errors.dewy" as errors
+import p"05_library_context.dewy" as config
+load_both = () => {
+    let failed:array<exception> = []
+    let first = config.load_port(p"primary-port.txt")
+    if first is? exception {
+        failed.push(first)
+        if first is? Canceled return errors.join(failed...)
+    }
+    let second = config.load_port(p"fallback-port.txt")
+    if second is? exception failed.push(second)
+    errors.join(failed...)
+}
+main = () => {
+    $errors.trace = true
+    let result = load_both
+    if result is? exception {
+        errors.report(result file=stderr locations=true trace=true)
+        exit(1)                         # explicit CLI policy; avoids reporting twice
+    }
+    printl("configuration checked")
+}
+# Report: both branches, context messages, parse causes if present, and each origin.
+# Trace status is printed when disabled/unavailable/truncated, never presented as complete.
+# No arbitrary payload dump; context/message strings themselves must be suitable to disclose.
+# Returning result here would invoke main's reporter again, so the explicit exit is intentional.

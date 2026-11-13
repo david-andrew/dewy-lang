@@ -1,0 +1,9 @@
+# Positive whole-thunk fallback; report loss of operand detail at compile time.
+import p"@lib/std/check.dewy" as check
+main = () => {
+    let attempts = 0
+    let once = ($capture @attempts) => { attempts += 1; attempts =? 1 }
+    check.that(@once) or_throw
+    $runtime_assert attempts =? 1
+    printl(attempts) # 1; no diagnostic replay and no extra closure invocation.
+}

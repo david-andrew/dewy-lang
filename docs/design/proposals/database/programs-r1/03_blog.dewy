@@ -1,0 +1,33 @@
+# Design specimen: typed links; many-to-many membership is an ordinary record.
+import p"@lib/std/database.dewy" as database
+
+Author:type = [id:string name:string email:string]
+Post:type = [id:string author:database.Ref<Author> title:string body:string]
+Tag:type = [id:string label:string]
+PostTag:type = [id:[database.Ref<Post> database.Ref<Tag>]
+    post:database.Ref<Post> tag:database.Ref<Tag>]
+const schema = [
+    authors=database.collection<Author>(key=(a) => a.id
+        indexes=[database.unique((a) => a.email)])
+    posts=database.collection<Post>(key=(p) => p.id)
+    tags=database.collection<Tag>(key=(t) => t.id)
+    post_tags=database.collection<PostTag>(key=(m) => m.id)
+]
+main = () => {
+    let store = database.memory(schema) or_throw
+    let tx = store.begin or_throw
+    let author = tx.authors.insert(Author["ada" "Ada" "ada@example.org"]) or_throw
+    let post = tx.posts.insert(Post["first" author "Dewy storage" "Ordinary values."]) or_throw
+    let tag = tx.tags.insert(Tag["language" "Language design"]) or_throw
+    tx.post_tags.insert(PostTag[[post tag] post tag]) or_throw;
+    tx.commit() or_throw
+    let view = store.snapshot or_throw
+    let by_author = view.posts.where((p) => p.author =? author).all or_throw
+    loop p in by_author { printl(p.title) }
+    let tagged = view.post_tags.where((m) => m.tag =? tag)
+        .follow((m) => m.post).all or_throw
+    loop p in tagged { printl"tagged: {p.title}" }
+    let writer = view.authors.get(author) or_throw
+    printl"written by {writer.name}"
+    # Deleting this author returns Referenced; deleting posts is a deliberate separate operation.
+}

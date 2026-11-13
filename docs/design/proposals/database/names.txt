@@ -1,0 +1,97 @@
+# Round 4 cold-read usages. Provisional; no cold test has been run.
+# Each line has an enclosing function; demo function/parameter names are not API proposals.
+# Account, Sale, Post, Note, Row, old_schema/new_schema, A/S/P/N and schema are fixture declarations.
+# Essential native storage and query core:
+import p"@lib/std/database.dewy" as database
+field_record = () => database.fields_of<Account>
+definition = () => database.collection<Account>(key=A.id)
+indexed = () => database.collection<Account>(key=A.id indexes=[database.index(A.balance)])
+unique_value = () => database.unique(A.email)
+unique_present = () => database.unique(A.email present_only=true)
+compound_two = () => database.tuple(S.day S.id)
+compound_three = () => database.tuple(A.enabled A.balance A.id)
+reference_type = (value:database.Ref<Account>) => value
+open_file = () => database.open(schema p"app.db")
+open_existing = () => database.open(schema p"app.db" create=false)
+open_readonly = () => database.open(schema p"app.db" read_only=true)
+open_memory = () => database.memory(schema)
+add_record = <S>(store:S account:Account) => store.accounts.insert(account)
+optional_record = <S>(store:S id:string) => store.accounts.get(id)
+required_record = <S>(store:S id:string) => store.accounts.require(id)
+reference_record = <S>(store:S id:string) => store.accounts.reference(id)
+equal = (id:string) => A.id.eq(id)
+less = (balance:int) => A.balance.lt(balance)
+at_least = (balance:int) => A.balance.ge(balance)
+substring = (text:string) => N.title.contains(text)
+conjunction = (lo:int hi:int) => database.all_of([A.balance.ge(lo) A.balance.lt(hi)])
+select_rows = <S>(store:S) => store.accounts.where(A.balance.lt(0))
+order_rows = <Q>(query:Q) => query.sorted(key=A.balance reverse=true)
+read_rows = <Q>(query:Q) => query.all
+count_rows = <Q>(query:Q) => query.count
+first_page = <Q>(query:Q) => query.page(size=20)
+next_page = <Q R>(query:Q page:R) => query.page(size=20 after=page.next)
+limited_page = <Q>(query:Q) => query.page(size=20 max_scanned=1000 max_bytes=8000000 timeout=2s)
+page_rows = <P>(page:P) => page.items
+page_continuation = <P>(page:P) => page.next
+plan = <Q>(query:Q) => query.explain
+related_field = () => database.related(P.author A.email)
+related_records = <Q>(query:Q) => query.include([author=P.author tags=P.tags editor=P.editor])
+source_record = <R>(row:R) => row.record
+related_values = <R>(row:R) => row.related
+patch_rows = <Q>(query:Q) => query.update([done=true])
+remove_rows = <Q>(query:Q) => query.delete()
+transaction = <S>(store:S) => store.begin(timeout=2s)
+replace_record = <T>(tx:T account:Account) => tx.accounts.replace(account)
+put_record = <T>(tx:T account:Account) => tx.accounts.put(account)
+publish = <T>(tx:T) => tx.commit()
+discard = <T>(tx:T) => tx.rollback()
+read_view = <S>(store:S) => store.snapshot
+close_view = <S>(view:S) => view.close()
+close_store = <S>(store:S) => store.close()
+# First-release coverage modules (separable from the storage/query core):
+groups = <Q>(query:Q) => query.group_by(S.region)
+aggregate_rows = <Q>(groups:Q) => groups.summarize([orders=database.count cents=database.sum(S.net_cents)])
+group_key = <R>(row:R) => row.key
+group_values = <R>(row:R) => row.values
+backup = <S>(store:S) => store.backup(p"before.db")
+restore = () => database.restore(p"before.db" p"restored.db")
+change_plan = () => database.migration(old_schema new_schema)
+rename_field = <M>(change:M) => change.contacts.rename(C1.name C2.display_name)
+remove_field = <M>(change:M) => change.contacts.remove(C1.obsolete_note)
+change_description = <M>(change:M) => change.describe
+apply_change = <M>(change:M) => database.migrate(p"app.db" change backup_dir=p"backups")
+search_index = () => database.full_text([N.title N.body] tokenizer='unicode61_v1')
+search_words = <S>(store:S text:string) => store.notes.search(text)
+search_record = <H>(hit:H) => hit.record
+search_score = <H>(hit:H) => hit.score
+search_excerpt = <H>(hit:H) => hit.excerpt
+import p"@lib/std/sql.dewy" as sql
+sql_connection = () => sql.sqlite(p"legacy.sqlite" read_only=true)
+sql_read = <C>(conn:C) => conn.prepare<Row>("SELECT name FROM accounts WHERE id = :id")
+sql_rows = <S>(statement:S id:string) => statement.all([id=id])
+sql_write = <C>(conn:C) => conn.prepare<void>("DELETE FROM accounts WHERE id = :id")
+sql_execute = <S>(statement:S id:string) => statement.execute([id=id])
+# Error vocabulary; ordinary platform I/O and cancellation outcomes also propagate.
+missing = () => database.RecordMissing
+duplicate = () => database.DuplicateKey
+unique_failure = () => database.UniqueViolation
+still_referenced = () => database.Referenced
+wrong_reference = () => database.ReferenceMismatch
+wrong_schema = () => database.SchemaMismatch
+unsupported = () => database.UnsupportedFeature
+corrupt = () => database.CorruptStore
+decode_failure = () => database.DecodeError
+invalid_value = () => database.ValidationError
+query_limit = () => database.QueryLimit
+wrong_cursor = () => database.CursorMismatch
+expired_cursor = () => database.CursorExpired
+failed_transaction = () => database.TransactionFailed
+unknown_commit = () => database.CommitUnknown
+conflicting_migration = () => database.MigrationConflict
+sql_failure = () => sql.SqlError
+sql_shape = () => sql.StatementShapeError
+sql_decode = () => sql.RowDecodeError
+# Deferred, NOT v1 naming candidates: query map/follow; transform; compare-and-replace;
+# savepoints; any_of/negation; lambda query overloads; direct query iteration;
+# online migration; identity-preserving takeover; advanced search grammar.
+# task.tasks / Tasks / group.spawn belong to D41, not this database naming ballot.

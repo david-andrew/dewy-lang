@@ -1,0 +1,18 @@
+# Design specimen: search text is data, never the backend's query grammar.
+import p"@lib/std/database.dewy" as database
+
+Note:type = [id:string title:string body:string]
+const schema = [notes=database.collection<Note>(key=(n) => n.id
+    indexes=[database.full_text((n) => [n.title n.body] language='en')])]
+main = () => {
+    let store = database.memory(schema) or_throw
+    store.notes.insert(Note["n1" "Bike repair" "Replace the rear brake cable."]) or_throw;
+    store.notes.insert(Note["n2" "Trip" "Pack a spare cable and a pump."]) or_throw;
+    let text = input("Search notes: ") or_throw
+    let page = store.notes.search(text).page(size=10) or_throw
+    loop hit in page.items {
+        printl"{hit.record.title} ({fmt'.3f'(hit.score)})"
+        printl(hit.excerpt)
+    }
+    # Default is all literal words; quotes, OR and '*' are not commands.
+}

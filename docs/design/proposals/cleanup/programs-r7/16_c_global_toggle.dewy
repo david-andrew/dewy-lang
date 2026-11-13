@@ -1,0 +1,29 @@
+# PAPER: one internal module, one externally enforced process-wide serialization gate.
+# Same ABI contract in BOTH versions: get/set non-failing, nonblocking, no panic/allocation.
+# render can return an error or participate in supported host unwinding; not raw longjmp.
+import p"legacy_case.dewy" as legacy
+SavedDiagnostics:type = type of [prior:bool
+    $__drop__ = ():>void => { $unsafe legacy.set_diagnostics(prior) }
+]
+render_with_owner = (gate:Mutex<int> scene:legacy.Scene) => {
+    let held = @(gate.lock)
+    let saved = SavedDiagnostics[$unsafe legacy.get_diagnostics]
+    $unsafe legacy.set_diagnostics(false)
+    return $unsafe legacy.render(scene) or_throw
+}
+# saved is constructed before mutation, after held: reverse cleanup restores then unlocks.
+# Owns the same supported unwinding obligation as defer, not merely ordinary result cleanup.
+
+render_with_defer = (gate:Mutex<int> scene:legacy.Scene) => {
+    let held = @(gate.lock)
+    let prior = $unsafe legacy.get_diagnostics
+    $unsafe legacy.set_diagnostics(false)
+    defer $unsafe legacy.set_diagnostics(prior)
+    return $unsafe legacy.render(scene) or_throw
+}
+# Definition: 3 nonblank lines for SavedDiagnostics. Owner call site: 4 body statements.
+# Defer call site: 5 body statements, no type definition. First use costs owner 2 more lines;
+# each reuse saves one call-site statement and centralizes the restoration invariant.
+# Both require the SAME gate for all callers; an arbitrary supplied gate proves nothing.
+# Neither is a verified public FFI wrapper. The owner needs no local nominal declaration.
+# Verdict for this case: owner is as good; there is no remaining case for defer here.

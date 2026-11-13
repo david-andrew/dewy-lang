@@ -1,0 +1,39 @@
+# Internal coordinator owner: explicit protocol duty, not a change to shared Channel semantics.
+CloseSending:type = type of [q:Channel<int>
+    $__drop__ = ():>void => q.close()
+]
+produce = (q:Channel<int> start:int) => {
+    loop n in [0..10) { q.send(start+n) or_throw }
+}
+coordinate = (q:Channel<int>) => {
+    let completion = CloseSending[q]
+    parallel {
+        produce(q 0) or_throw
+        produce(q 100) or_throw
+    }
+}
+coordinate_with_defer = (q:Channel<int>) => {
+    defer q.close()
+    parallel {
+        produce(q 0) or_throw
+        produce(q 100) or_throw
+    }
+}
+consume = (q:Channel<int>) => {
+    loop true {
+        let next = q.receive
+        if next is? Closed return
+        printl(next or_throw)
+    }
+}
+main = () => {
+    let q = channel<int>(4)
+    parallel {
+        coordinate(q) or_throw
+        consume(q) or_throw
+    }
+}
+# The coordinator joins before its owner completes, also during supported unwind.
+# Owner is as capable as defer; both require an explicit end-of-sending responsibility.
+# Dropping arbitrary bidirectional handles still cannot infer who finishes all sending.
+# Removing completion at line 9 can hang. Do not claim automatic protocol correctness.

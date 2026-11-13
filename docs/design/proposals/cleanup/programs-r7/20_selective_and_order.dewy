@@ -1,0 +1,44 @@
+# PAPER MODEL: File below models a fallible close; it is not an OS file implementation.
+import p"@lib/std/errors.dewy" as errors
+ParseError:type = type of error
+FileError:type = type of error
+File:type = type of [fail_close:bool
+    $__drop__ = ():>void | FileError => { if fail_close return FileError }
+]
+selected_both = (fail:bool) => {
+    return [loop _ in [0..1) ({
+        let input = File[fail]
+        ParseError
+    } or_throw<ParseError | FileError>)]
+}
+# (d1) ParseError selected BEFORE close. fail=false: ParseError; fail=true: ErrorGroup[P F].
+# ErrorGroup is not in the selector, but propagation is already pending; no second test.
+
+selected_close_only = (fail:bool) => {
+    return [loop _ in [0..1) ({
+        let input = File[fail]
+        ParseError
+    } or_throw<FileError>)]
+}
+# (d2) ParseError is intentionally unselected DATA. Successful close -> [ParseError].
+# Failed close -> lone FileError; no pending body failure to join. Array prefix is abandoned.
+# This distinction is intentional; use bare or_throw to treat every body failure as failure.
+
+rejected_incomplete_marker = (fail:bool) => {
+    return [loop _ in [0..1) ({
+        let input = File[fail]
+        ParseError
+    } or_throw<ParseError>)]
+}
+# EXPECT REJECT: selector does not cover possible direct FileError completion.
+# Fix: bare or_throw or the union at line 12. Never infer fail=false without proof.
+
+explicit_return = (fail:bool) => {
+    {
+        let input = File[fail]
+        return ParseError
+    }
+}
+# Explicit return already establishes pending ParseError: close failure joins even without suffix.
+# Success candidates, records containing errors, and unselected data are not mined for causes.
+# Two cleanup errors F1,F2 after P fold errors.join(errors.join(P F1) F2), preserving nesting.

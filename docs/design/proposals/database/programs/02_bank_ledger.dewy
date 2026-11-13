@@ -1,0 +1,47 @@
+# Design specimen: integer minor units; every transfer has an idempotency key.
+import p"@lib/std/database.dewy" as database
+
+Account:type = [id:string balance:int currency:'USD']
+Transfer:type = [id:string debit:string credit:string cents:int]
+Entry:type = [id:[string string] account:database.Ref<Account> cents:int]
+InvalidTransfer:type = type of error
+InsufficientFunds:type = type of error
+RequestMismatch:type = type of error
+const schema = [
+    accounts=database.collection<Account>(key=(a) => a.id)
+    transfers=database.collection<Transfer>(key=(t) => t.id)
+    entries=database.collection<Entry>(key=(e) => e.id)
+]
+
+transfer = <S>(store:S request:Transfer) => {
+    if request.cents <=? 0 or request.debit =? request.credit return InvalidTransfer
+    let tx = store.begin(timeout=2s) or_throw
+    let previous = tx.transfers.get(request.id) or_throw<error | Canceled>
+    if previous isnt? none {
+        if previous not=? request return RequestMismatch
+        tx.rollback() or_throw
+        return
+    }
+    let debit = tx.accounts.get(request.debit) or_throw<error | Canceled> ??<none> return database.RecordMissing
+    let credit = tx.accounts.get(request.credit) or_throw<error | Canceled> ??<none> return database.RecordMissing
+    if debit.balance <? request.cents return InsufficientFunds
+    tx.accounts.replace([debit... balance=debit.balance-request.cents]) or_throw
+    tx.accounts.replace([credit... balance=credit.balance+request.cents]) or_throw
+    let debit_ref = tx.accounts.reference(debit.id) or_throw
+    let credit_ref = tx.accounts.reference(credit.id) or_throw
+    tx.entries.insert(Entry[id=[request.id "debit"] account=debit_ref cents=-request.cents]) or_throw;
+    tx.entries.insert(Entry[id=[request.id "credit"] account=credit_ref cents=request.cents]) or_throw;
+    tx.transfers.insert(request) or_throw;
+    tx.commit() or_throw
+}
+main = () => {
+    let store = database.memory(schema) or_throw
+    store.accounts.insert(Account["checking" 10000 'USD']) or_throw;
+    store.accounts.insert(Account["savings" 0 'USD']) or_throw;
+    let request = Transfer["request-42" "checking" "savings" 1250]
+    transfer(store request) or_throw
+    transfer(store request) or_throw
+    let view = store.snapshot or_throw
+    printl(view.accounts.get("checking") or_throw<error | Canceled>)
+    printl(view.accounts.get("savings") or_throw<error | Canceled>)
+}

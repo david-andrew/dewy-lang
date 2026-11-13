@@ -1,0 +1,31 @@
+import p"@lib/std/files.dewy" as files
+read_rows = (path:Path) => {
+    let input = files.open(path 'r') or_throw
+    let text = input.read_text or_throw
+    return text.split("\n")
+} # input cleanup belongs to this function, before its result is published.
+
+report = () => {
+    {
+        parallel (
+            let out = files.open(p"report.txt" 'w') or_throw
+            let rows = read_rows(p"rows.txt") or_throw
+        )
+        loop row in rows { out.write_text(row) or_throw; }
+    } or_throw
+    printl("report complete")
+}
+# Parentheses create no owner scope; out belongs to lines 9-15, not the join.
+# read_rows's own input belongs to its real function/item, not the caller scope.
+# If the other item fails before open initializes out: clean only initialized slots.
+# If it fails after acquisition: item or_throw already exits report; out completes
+# on that unwind and its error follows the original via errors.join(original cleanup).
+# Cleanup effects enter dependency analysis before parallel scheduling.
+
+report_at_function_exit = () => {
+    parallel (
+        let out = files.open(p"report.txt" 'w') or_throw
+        let rows = read_rows(p"rows.txt") or_throw
+    )
+    loop row in rows { out.write_text(row) or_throw; }
+} # out completes at function exit; no fake or_throw on the unscoped parenthesis.

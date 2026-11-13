@@ -1,0 +1,29 @@
+import p"@lib/std/files.dewy" as files
+try_one = (path:Path) => {
+    let out = files.open(path 'w') or_throw
+    out.write_text("row\n") or_throw;
+} # Result includes cleanup failure; a real function boundary permits recovery.
+
+try_each = (paths:array<Path>) => {
+    loop path in paths {
+        let result = try_one(path)
+        if result is? FileError { printl("file failed; continuing"); continue }
+        result or_throw
+    }
+}
+# The selective branch handles a plain FileError, not Canceled or a combined error.
+# Q3 decides how to inspect/handle a combined value without swallowing cancellation.
+
+close_locally = (paths:array<Path>) => {
+    loop path in paths {
+        let out = files.open(path 'w') or_throw
+        out.write_text("row\n") or_throw;
+        let closed = out.close()
+        if closed is? FileError { printl("close failed; continuing"); continue }
+        closed or_throw
+    }
+}
+# Consuming close has ended the duty even on failure: never retry an ambiguous close.
+# On every path that could continue inside this function, out was already consumed.
+# A failed write leaves through visible or_throw and completes out on that return.
+# Consequently no implicit fallible cleanup on a local continuation needs a suffix.

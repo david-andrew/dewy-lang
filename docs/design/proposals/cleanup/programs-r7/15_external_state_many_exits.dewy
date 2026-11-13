@@ -1,0 +1,43 @@
+# PAPER: editor is task-confined; its busy flag is a non-owning bool place.
+import p"editor_case.dewy" as ui
+RestoreFlag:type = type of [action:(():>void & no panics & no allocates & no blocks)
+    $__drop__ = ():>void => action()
+]
+refresh = (@editor:ui.Editor rows:array<string>) => {
+    let busy = @editor.busy
+    let prior = busy
+    let restore = ($capture @busy):>void => { busy = prior }
+    let saved = RestoreFlag[@restore]
+    busy = true
+    loop row in rows {
+        if row =? "stop" return
+        if row =? "bad" return ui.Invalid
+        if row =? "missing" return none
+        check_cancel() or_throw
+        ui.paint(@editor row) or_throw
+    }
+}
+# Borrowed callback remains in this local aggregate; no owner or caller-place escape.
+# It is invoked only at scope exit; paint retains no conflicting loan beyond its call.
+# This requires checked place provenance/effects through the record, not a raw pointer.
+
+refresh_body = (@editor:ui.Editor rows:array<string>) => {
+    loop row in rows {
+        if row =? "stop" return
+        if row =? "bad" return ui.Invalid
+        if row =? "missing" return none
+        check_cancel() or_throw
+        ui.paint(@editor row) or_throw
+    }
+}
+refresh_capture = (@editor:ui.Editor rows:array<string>) => {
+    let prior = editor.busy
+    editor.busy = true
+    let result = refresh_body(@editor rows)
+    editor.busy = prior
+    return result
+}
+# Capture/restore covers ordinary results; owner also covers supported panic/exit unwind.
+# Saved previous value handles reentry; neither version supplies cross-task synchronization.
+# Removing owner registration still breaks restoration. A reused owner helper should pair
+# activation with construction; this sketch claims no inferred missing-registration check.

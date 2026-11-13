@@ -1,0 +1,25 @@
+# PAPER: both Source implementations expose read_bytes; ownership is by value.
+import p"source_case.dewy" as source
+first_chunk = <T>(input:T audit:Path) => {
+    let bytes = input.read_bytes(64) or_throw
+    audit.append_text("read accepted\n") or_throw;
+    return bytes
+}
+main = () => {
+    let from_socket = first_chunk(source.socket or_throw p"audit.log") or_throw
+    let read_file = @first_chunk<source.File>
+    let from_file = read_file(source.file or_throw p"audit.log") or_throw
+    source.show_sizes(from_socket.length from_file.length)
+}
+# Mixed: socket closes before line 5, File after line 5; generic text never changes.
+# Block-end: both close at line 6's return, with instance-specific failure types.
+# Pure last-use: both close before line 5; a File close failure skips the append.
+
+hold_pair = (pair:source.Pair audit:Path) => {
+    let bytes = pair.socket.read_bytes(64) or_throw
+    audit.append_text("pair read\n") or_throw;
+    return bytes
+} # Pair owns the socket AND a fallible File; no field is explicitly moved out.
+# Mixed holds both fields through line 20, unlike the bare socket instantiation.
+# A union File|Socket likewise has a fixed conservative category even after narrowing.
+# Block-end never changes a hook's boundary just because a sibling's hook can fail.

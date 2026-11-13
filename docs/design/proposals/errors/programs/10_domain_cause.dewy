@@ -1,0 +1,26 @@
+# PAPER: a public configuration error deliberately hides low-level kinds from ordinary matching.
+import p"@lib/std/errors.dewy" as errors
+ConfigError:type = type of error & [message:string]
+read_limit = (path:Path) => {
+    let text = path.read_text or_throw<Canceled>
+    if text is? error return errors.caused_by(ConfigError["cannot load request limit"] text)
+    let number = to_int(text.trim)
+    if number is? error return errors.caused_by(ConfigError["invalid request limit"] number)
+    return number
+}
+inspect = (failure:ConfigError):>void => {
+    let cause = failure.$cause
+    if cause is? error errors.report(cause locations=true)
+}
+main = () => {
+    let result = read_limit(p"request-limit.txt")
+    if result is? ConfigError {
+        errors.report(result locations=true)
+        exit(2)
+    }
+    result or_throw<Canceled>;
+}
+# The public outer kind is ConfigError. split<FileError> does not split a causal edge.
+# Canceled is forwarded before wrapping, so it cannot be hidden in an error-typed cause.
+# NEGATIVE: errors.caused_by(ConfigError["stopped"] Canceled) is rejected, not normalized.
+# A caller wanting the original type uses with_context instead of domain translation.

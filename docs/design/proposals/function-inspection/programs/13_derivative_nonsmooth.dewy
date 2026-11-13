@@ -1,0 +1,11 @@
+# Expected compile rejection in v1: no derivative rule for a conditional.
+import p"@lib/std/diff.dewy" as diff
+main = () => {
+    let penalty = (x:float64):>float64 => {
+        if x <? 0.0 { -x } else { x }
+    }
+    let slope = diff.derivative(@penalty)
+    printl(slope(0.0) or_throw)
+    # Diagnostic points at the conditional, offers a supported abs primitive.
+    # It must not silently report +1, -1, 0, or a finite-difference estimate.
+}

@@ -1,0 +1,29 @@
+import p"@lib/std/files.dewy" as files
+prefix_lengths = (paths:array<Path>) => {
+    let lengths = [loop path in paths {
+        let input = files.open(path 'r') or_throw
+        let bytes = input.read_bytes(64) or_throw
+        bytes.length
+    } or_throw]
+    return lengths
+}
+# The suffix belongs to the braced iteration body, not a scan of lengths afterward.
+# Successful cleanup publishes this iteration's pending length to the collector.
+# Failed cleanup leaves prefix_lengths; it does not insert FileError into lengths.
+# Earlier array entries are internal and are discarded with the incomplete result.
+# Effects already performed inside a body are not undone, nor are values already
+# delivered by a streaming producer in a different program retracted.
+
+ParseError:type = type of error
+Sample:type = [value:int64 | ParseError]
+inspect_samples = () => {
+    let samples = [loop n in [0..3) {
+        if n =? 1 Sample[ParseError] else Sample[n]
+    } or_throw]
+    return samples
+}
+# Ordinary successful records are untouched; no recursive scan for exceptions.
+# No cleanup duty requires this second suffix; it is permitted as a no-op for
+# a body whose values and cleanup cannot themselves fail.
+# Bare exception-valued body results retain the ordinary explicit or_throw policy;
+# this proposal does not make them exceptions 'from the loop itself' by scanning.

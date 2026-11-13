@@ -1,0 +1,16 @@
+# Design specimen: a local strict parser makes the validation boundary explicit.
+import p"@lib/std/database.dewy" as database
+import p"csv_products.dewy" as csv
+
+const schema = [products=database.collection<csv.Product>(key=(p) => p.id)]
+main = () => {
+    let text = p"products.csv".read_text or_throw
+    let products = csv.decode(text) or_throw
+    let store = database.open(schema p"products.db") or_throw
+    let tx = store.begin or_throw
+    loop product in products {
+        tx.products.insert(product) or_throw;
+    }
+    tx.commit() or_throw
+    printl"imported {products.length} products"
+}

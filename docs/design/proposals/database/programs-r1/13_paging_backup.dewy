@@ -1,0 +1,22 @@
+# Design specimen: a pinned snapshot makes repeated pages stable during concurrent writes.
+import p"@lib/std/database.dewy" as database
+
+Event:type = [id:string recorded:int kind:string]
+const schema = [events=database.collection<Event>(key=(e) => e.id
+    indexes=[database.index((e) => [e.recorded e.id])])]
+main = () => {
+    let store = database.open(schema p"events.db") or_throw
+    let view = store.snapshot or_throw
+    let query = view.events.sorted(key=(e) => [e.recorded e.id])
+    let page = query.page(size=100) or_throw
+    loop true {
+        loop event in page.items { printl"{event.recorded}: {event.kind}" }
+        if page.next is? none break
+        page = query.page(size=100 after=page.next) or_throw
+    }
+    view.close() or_throw
+    store.backup(p"events.backup.db") or_throw
+    let restored = database.open(schema p"events.backup.db" read_only=true) or_throw
+    printl"backup contains {restored.events.count or_throw} events"
+    # Long snapshots retain old pages; backup is a separately identified consistent snapshot.
+}

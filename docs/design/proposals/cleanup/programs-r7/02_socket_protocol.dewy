@@ -1,0 +1,23 @@
+# PAPER: server returns its final status through a separate status service after EOF.
+import p"socket_case.dewy" as service
+upload_before = (bytes:array<uint8>) => {
+    let stream = service.connect or_throw
+    stream.send(bytes) or_throw
+    return service.wait_for_upload_status or_throw
+} # Block-end keeps stream alive while the service waits for its EOF: hang.
+
+upload = (bytes:array<uint8>) => {
+    {
+        let stream = service.connect or_throw
+        stream.send(bytes) or_throw
+    } # Infallible release sends EOF before the wait.
+    return service.wait_for_upload_status or_throw
+}
+
+hold_session = () => {
+    let stream = service.connect or_throw
+    stream.send("begin") or_throw
+    service.apply_side_channel_update() or_throw
+} # Service requires the session alive through its side-channel update.
+# Last-use/mixed close at line 19, so line 20 can be rejected by the service.
+# Same resource, opposite desired timing: neither rule infers protocol intent.

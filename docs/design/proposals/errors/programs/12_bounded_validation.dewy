@@ -1,0 +1,28 @@
+# PAPER: retain bounded summaries for a large import instead of unbounded diagnostic payloads.
+import p"@lib/std/errors.dewy" as errors
+RowFailure:type = type of error & [row:int message:string]
+OmittedFailures:type = type of error & [count:int message:string="additional invalid rows omitted"]
+validate_import = (lines:array<string> keep:int<(>? 0)>) => {
+    let failed:array<error> = []
+    let omitted:int = 0
+    loop number in 0.. and text in lines {
+        let parsed = to_int(text)
+        if parsed is? error {
+            if failed.length <? keep {
+                failed.push(RowFailure[number + 1 "quantity is not an integer"])
+            } else {
+                omitted += 1
+            }
+        }
+    }
+    if omitted >? 0 failed.push(OmittedFailures[omitted])
+    errors.join(failed...)
+}
+main = () => {
+    validate_import(["bad" "10" "wrong" "invalid"] 2) or_throw
+}
+# Expected rows 1 and 3, followed by OmittedFailures(count=1); order is stable.
+# At most keep+1 diagnostics, with fixed messages; raw input and parse causes are not retained.
+# This is an explicitly lossy boundary chosen by the application, not silent group truncation.
+# It bounds retained diagnostic count, not total input memory or physical allocation success.
+# A stronger explicit-allocation guarantee still needs the representation work in round2.

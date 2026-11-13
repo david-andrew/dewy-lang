@@ -1,0 +1,12 @@
+# Positive fallback: a body with observable effects is not a planning region.
+import p"fixtures.dewy" as fixture
+main = () => {
+    let db = fixture.seed or_throw
+    let ids = [loop item in db.accounts {
+        let a = item or_throw
+        printl("visited {a.id}")
+        if a.balance <? 0 a.id
+    }]
+    # Must print a, b, c in that order, even if an index could skip b.
+    printl(ids) # ["a" "c"]
+}

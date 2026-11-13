@@ -1,0 +1,21 @@
+import p"ticker_case.dewy" as ticks
+import p"@lib/std/terminal.dewy" as terminal
+first_tick_then_compute = () => {
+    let ticker = ticks.every(1s)
+    let first = ticker.next or_throw
+    return ticks.compute_report(first) or_throw
+} # Report takes a long time; block-end retains the ticker's timer/queue throughout.
+# Last-use/mixed cancel its infallible timer immediately after line 5.
+
+read_key = () => {
+    let mode = terminal.raw(signals=true) or_throw
+    return terminal.read_bytes(1) or_throw
+} # mode has no source reads, but its restoration duty must span the read.
+# Pure last-use restores immediately after acquisition: the read is no longer raw.
+# Mixed avoids that only because restoration is fallible, not because raw mode is a region.
+
+read_key_discarded = () => {
+    terminal.raw(signals=true) or_throw;
+    return terminal.read_bytes(1) or_throw
+} # R5 amendment/R6: anonymous owner belongs to this scope, not just line 18.
+# Diagnostic: effectful discarded value retained to block exit; offer a named binding.

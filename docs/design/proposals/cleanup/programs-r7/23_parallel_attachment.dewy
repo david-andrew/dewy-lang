@@ -1,0 +1,37 @@
+import p"@lib/std/files.dewy" as files
+ParseError:type = type of error
+parse = (text:string):>int | ParseError => {
+    if text =? "12" return 12
+    return ParseError
+}
+scoped = (text:string) => {
+    let n = parallel {
+        let out = files.open(p"scoped.txt" 'w') or_throw
+        out.write_text("row") or_throw;
+        parse(text)
+    } or_throw
+    printl("scoped output completed")
+    return n
+}
+# (g1) Operand is scoped parallel itself: its suffix acknowledges its OWN scope.
+# A selected ParseError becomes pending; existing fail-fast cancellation joins siblings.
+# Join all started items before out's enclosing cleanup; never close while an item borrows it.
+# out initialized + close F -> errors.join(ParseError F); no initialization -> no out cleanup.
+# Other observed item failures follow trigger-first/source-index order from errors round 2.
+# Successful scalar n is published after parallel's own scope cleanup; out cannot escape it.
+
+unscoped = (text:string) => {
+    let n = parallel (
+        let out = files.open(p"unscoped.txt" 'w') or_throw
+        out.write_text("row") or_throw;
+        parse(text)
+    ) or_throw
+    printl("accepted; output still owned here")
+    return n
+}
+# (g2) Operand has NO own scope. Suffix propagates its ordinary values, not out's cleanup.
+# Successful parse: out remains owned until unscoped's return, after line 29.
+# ParseError: explicit suffix leaves unscoped; out completes on THAT function unwind.
+# Thus P + close F still joins, but not because parentheses created a cleanup boundary.
+# Let-bindings alone contribute no error value: binding parse's result instead would not forward it.
+# No new cross-task break/continue/return permissions are supplied by either suffix.

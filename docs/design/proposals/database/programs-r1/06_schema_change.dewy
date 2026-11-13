@@ -1,0 +1,22 @@
+# Design specimen: old and new schemas remain in source; open never guesses a rename.
+import p"@lib/std/database.dewy" as database
+
+Contact1:type = [id:string name:string obsolete_note:string]
+Contact2:type = [id:string display_name:string email:string?]
+const v1 = [contacts=database.collection<Contact1>(key=(c) => c.id)]
+const v2 = [contacts=database.collection<Contact2>(key=(c) => c.id)]
+convert = (old:Contact1):>Contact2 => [id=old.id display_name=old.name email=none]
+main = () => {
+    let old = database.open(v1 p"contacts.db") or_throw
+    old.backup(p"contacts-before-v2.db") or_throw
+    old.close() or_throw
+    let change = database.migration(v1 v2)
+    change.contacts.rename((c:Contact1) => c.name (c:Contact2) => c.display_name)
+    change.contacts.remove((c:Contact1) => c.obsolete_note)
+    change.contacts.transform(@convert)
+    # Added optional email has a generated none default; removal is deliberate above.
+    printl(change.describe)
+    database.migrate(p"contacts.db" change) or_throw
+    let store = database.open(v2 p"contacts.db") or_throw
+    loop contact in store.contacts.all or_throw { printl(contact.display_name) }
+}

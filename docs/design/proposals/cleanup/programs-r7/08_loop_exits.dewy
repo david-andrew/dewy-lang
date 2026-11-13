@@ -1,0 +1,26 @@
+import p"@lib/std/files.dewy" as files
+write_all_before = (paths:array<Path>) => {
+    loop path in paths {
+        let out = files.open(path 'w') or_throw
+        out.write_text("row\n") or_throw;
+        if path =? p"skip.txt" continue
+        if path =? p"last.txt" break
+    }
+    printl("all completed")
+} # R5: close failure on 6/7/8 silently returns from write_all_before.
+# R7 expected diagnostic: body owns fallible out; group its braced body and append or_throw inside that group.
+
+write_all = (paths:array<Path>) => {
+    loop path in paths ({
+        let out = files.open(path 'w') or_throw
+        out.write_text("row\n") or_throw;
+        if path =? p"skip.txt" continue
+        if path =? p"last.txt" break
+    } or_throw)
+    printl("all completed")
+}
+# Each iteration completes out BEFORE the next iteration; no deferred error list.
+# continue + failed close -> function failure, never next iteration.
+# break + failed close -> function failure, never line 20.
+# Success + break -> line 20; empty input -> line 20; at most one live out.
+# Grouping makes the block itself the operand: or_throw checks values and cleanup exits.

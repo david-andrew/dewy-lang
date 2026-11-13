@@ -1,0 +1,21 @@
+# Design specimen: repeatable structural migration; no function-body fingerprint needed.
+import p"@lib/std/database.dewy" as database
+
+Contact1:type = [id:string name:string obsolete_note:string]
+Contact2:type = [id:string display_name:string email:string?]
+const C1 = database.fields_of<Contact1>
+const C2 = database.fields_of<Contact2>
+const v1 = [contacts=database.collection<Contact1>(key=C1.id)]
+const v2 = [contacts=database.collection<Contact2>(key=C2.id)]
+main = () => {
+    let change = database.migration(v1 v2)
+    change.contacts.rename(C1.name C2.display_name)
+    change.contacts.remove(C1.obsolete_note)
+    # New optional email defaults to none; rename supplies its value mapping once.
+    printl(change.describe)
+    database.migrate(p"contacts.db" change backup_dir=p"contact-backups") or_throw
+    # Identical completed history is a no-op. No old-schema open precedes this runner.
+    let store = database.open(v2 p"contacts.db" create=false) or_throw
+    loop contact in store.contacts.all or_throw { printl(contact.display_name) }
+    # V1 rejects key changes, collection rename/removal, and arbitrary type conversions.
+}

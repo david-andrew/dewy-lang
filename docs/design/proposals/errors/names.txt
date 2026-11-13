@@ -1,0 +1,49 @@
+# ROUND 4 — Essential for the proposed first version.
+# Broad roles of the older names were cold-read in r22; exact semantics were not established.
+# errors.recover and the error-value & / &= usages are NEW and still require cold reads.
+import p"@lib/std/errors.dewy" as errors
+let group:errors.ErrorGroup = first & second
+printl(group.message)
+loop child in group.errors { errors.report(child) }
+let failure = errors.join(failures...)
+loop leaf in errors.leaves(failure) { errors.report(leaf) }
+return errors.with_context(failure "loading configuration")
+let site = failure.$origin
+let site:errors.SourceLocation = known_site
+printl(site.file)
+printl(site.line)
+printl(site.column)
+printl(site.function)
+errors.report(failure file=stderr locations=true)
+return errors.recover<MissingAsset>(failure @regenerate)
+
+# Reused constructs; new error-combination semantics, no new spelling.
+# & keeps ordered occurrences, not a type intersection; &= needs a nonempty seed.
+let acc:exception = first
+loop next in more { acc &= next }
+let failed:array<exception> = []
+failed.push(failure)
+
+# DEFERRED — useful extensions, NOT dependencies of the first-version programs.
+let parts = errors.split<FileError>(failure)
+loop handled in parts.matched { errors.report(handled) }
+errors.join(parts.rest...) or_throw
+return errors.caused_by(ConfigError["cannot load configuration"] failure)
+let cause = failure.$cause
+loop frame in failure.$context { printl(frame.message) }
+let site = frame.location
+$errors.trace = true
+let trace:errors.ErrorTrace = failure.$trace
+loop frame in trace.frames { printl(frame.file) }
+if trace.status is? 'disabled' printl("trace disabled")
+if trace.status is? 'captured' printl("trace captured")
+if trace.status is? 'truncated' printl("trace truncated")
+if trace.status is? 'unavailable' printl("trace unavailable")
+errors.report(failure file=stderr locations=true trace=true)
+
+# REMOVED, not deferred: ExceptionGroup. One ErrorGroup derives from exception, not error.
+# Candidate-I-only errors.parts is not recommended; use .errors and errors.leaves in v1.
+# Deferred cause attachment has no accepted fresh/replace/append policy.
+# Context-frame .message/.location and trace .frames/.status are deferred with their parents.
+# ErrorGroup .message and SourceLocation .file/.line/.column/.function are essential above.
+# Canceled, exception, error, @f, or_throw, ??, $explicit_cancellation and array.push already exist.

@@ -1,0 +1,49 @@
+# PAPER: a non-owning bool place, with a checked nonescaping shared capture.
+# The owner stays local; its callable/record conversions must retain the borrow provenance.
+import p"paint_case.dewy" as ui
+RestoreAction:type = type of [action:(():>void & no panics & no allocates & no blocks)
+    $__drop__ = ():>void => action()
+]
+refresh_with_owner = (@busy:bool) => {
+    let prior = busy
+    let restore = ($capture @busy):>void => { busy = prior }
+    let saved = RestoreAction[@restore]
+    busy = true
+    ui.paint() or_throw
+}
+# Construct capture and owner before mutation; cleanup invokes the shared-place setter.
+# Restore before returning/unwinding to caller, while caller's place is necessarily alive.
+# action writes bool only; no failing conversion/arithmetic or captured owning payload.
+# A field/element is lent as @busy by the caller; the closure does not copy that bool.
+
+refresh_with_defer = (@busy:bool) => {
+    let prior = busy
+    busy = true
+    defer busy = prior
+    ui.paint() or_throw
+}
+# Owner: 3-line shared definition, 5 body statements. Defer: 4 body statements.
+# One extra call-site statement plus definition is real ceremony, not lost unwind capability.
+
+escape_rejected = (@busy:bool) => {
+    let prior = busy
+    let restore = ($capture @busy):>void => { busy = prior }
+    return RestoreAction[@restore]
+}
+# EXPECT REJECT: enclosing parameter's borrow may not escape inside the returned record.
+# Assigning a callback type or wrapping it in an owner cannot erase that lifetime restriction.
+# Known local aggregate storage at line 10 is not itself escape from the function.
+# If an implementation rejects all such storage conservatively, implement/prove this
+# scoped case before deleting defer; this paper is not a successful compiler test.
+
+SavedCopy:type = type of [value:bool prior:bool
+    $__drop__ = ():>void => { value = prior }
+]
+wrong_copy = (@busy:bool) => {
+    let saved = SavedCopy[busy busy]
+    busy = true
+    ui.paint() or_throw
+}
+# Wrong: restoring saved.value does not change the caller. The explicit shared capture matters.
+# Only a non-owning bool place is captured; this does not approve stored borrowed-owner
+# closures or method-member captures prohibited by the existing stricter rules.

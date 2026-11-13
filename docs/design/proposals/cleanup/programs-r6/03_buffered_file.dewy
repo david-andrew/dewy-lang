@@ -1,0 +1,22 @@
+import p"@lib/std/files.dewy" as files
+read_back_before = (path:Path) => {
+    let out = files.open(path 'w') or_throw
+    out.write_text("new contents") or_throw;
+    return path.read_text or_throw
+} # Block-end/mixed may read stale/incomplete data before flushing out.
+
+read_back = (path:Path) => {
+    {
+        let out = files.open(path 'w') or_throw
+        out.write_text("new contents") or_throw;
+    } or_throw
+    return path.read_text or_throw
+}
+
+write_then_audit = (path:Path audit:Path) => {
+    let out = files.open(path 'w') or_throw
+    out.write_text("new contents") or_throw;
+    audit.append_text("write accepted\n") or_throw;
+} # Last-use failure at line 18 would skip line 19 with no new visible exit.
+# Block-end runs line 19 first: it must say 'accepted', never 'flushed/durable'.
+# A scope-end flush is not an fsync/durability promise, under any rule.

@@ -1,0 +1,36 @@
+# PAPER R4: retain typed field problems; no deferred caused_by API.
+import p"@lib/std/errors.dewy" as errors
+FieldError:type = type of error & [field:string message:string]
+User:type = [name:string age:int]
+validate = (name:string age_text:string) => {
+    let failed:array<exception> = []
+    if name.trim.length =? 0 failed.push(FieldError["name" "name is required"])
+    let parsed = to_int(age_text)
+    let age:int = 0
+    if parsed is? error {
+        failed.push(FieldError["age" "enter a whole number"])
+    } else {
+        age = parsed
+        if age <? 18 failed.push(FieldError["age" "must be at least 18"])
+        if age >? 130 failed.push(FieldError["age" "check the birth year"])
+    }
+    errors.join(failed...) or_throw
+    return User[name.trim age]
+}
+show_issues = (failure:exception):>void => {
+    loop issue in errors.leaves(failure) {
+        if issue is? FieldError printl("{issue.field}: {issue.message}")
+        else errors.report(issue)          # never silently omit an unexpected leaf
+    }
+}
+main = () => {
+    let user = validate("" "seventeen") or_throw<Canceled>
+    if user is? exception {
+        show_issues(user)
+        exit(1)
+    }
+    printl("registered {user.name}")
+}
+# Two typed field issues, in name/age order. Group is exception, not error.
+# The parse failure is deliberately translated to a field message; no cause chain is claimed.
+# An unexpected leaf is reported at line 23; cancellation never becomes a validation fallback.

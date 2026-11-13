@@ -1,0 +1,29 @@
+consume = (input:SpscReceiver<int64>) => {
+    loop true {
+        let next = input.receive
+        if next is? Closed return
+        printl(next or_throw)
+    }
+}
+main_before = (app:BackgroundTasks) => {
+    let [tx rx] = spsc<int64 16>.split
+    let reporter = app.spawn(() => consume(rx))
+    loop n in [0..10) { tx.send(n) or_throw }
+    reporter.wait or_throw
+} # Block-end tx is alive at line 12, so reporter waits for Closed: hang.
+# R5 last-use/mixed close tx after line 11; this is a genuine regression to repair.
+
+produce = (out:SpscSender<int64>) => {
+    loop n in [0..10) { out.send(n) or_throw }
+} # Moving tx here makes its duty end before produce returns.
+main = (app:BackgroundTasks) => {
+    let [tx rx] = spsc<int64 16>.split
+    let reporter = app.spawn(() => consume(rx))
+    produce(tx) or_throw
+    reporter.wait or_throw
+}
+# The receiver is moved into a once-run lambda, not partially applied by @consume(rx).
+# Ordinary success drains all accepted elements before the join completes.
+# Failure/cancellation need not drain: owner cleanup and task cancellation still run.
+# Existing provable-deadlock diagnostics should reject main_before; not all dynamic
+# channel identity graphs are provable, so the repair cannot depend on that check.

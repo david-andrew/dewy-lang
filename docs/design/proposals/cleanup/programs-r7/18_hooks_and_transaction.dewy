@@ -1,0 +1,24 @@
+# PAPER: model hooks, not a public native database API proposal.
+import p"db_case.dewy" as db
+Probe:type = type of [
+    $__drop__ = ():>void => printl("probe released")
+]
+Transaction:type = type of [handle:db.Handle
+    $__abandon__ = ():>void | db.RollbackError => db.rollback(handle)
+]
+observe_unused = () => {
+    let probe = Probe[]
+    printl("body")
+} # Block-end: body then probe released. Last-use/mixed reverse that order.
+
+transfer = (from:int64 to:int64 amount:int64) => {
+    let tx = db.begin or_throw
+    tx.debit(from amount) or_throw
+    let target = tx.find_account(to) ??<none> return none
+    tx.credit(target amount) or_throw
+    tx.commit() or_throw
+}
+# Library transaction's assigned $__abandon__ rolls back on every unconsumed exit.
+# Explicit commit consumes it; neither return none nor hook completion publishes.
+# If debit fails and rollback fails, return errors.join(debit_failure rollback_failure).
+# A successful commit followed by an unrelated outer failure cannot be undone.

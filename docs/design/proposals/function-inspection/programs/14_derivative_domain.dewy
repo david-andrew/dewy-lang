@@ -1,0 +1,7 @@
+# Intentional runtime domain failure on a supported primitive.
+import p"@lib/std/diff.dewy" as diff
+main = () => {
+    let slope = diff.derivative((x:float64):>float64 => abs(x))
+    printl(slope(0.0) or_throw)
+    # Expected NotDifferentiable at abs: explicit library math-domain contract.
+}

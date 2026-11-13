@@ -1,0 +1,41 @@
+# Design specimen; library-only descriptors, not an implemented database library.
+import p"@lib/std/database.dewy" as database
+
+Todo:type = [id:string title:string done:bool=false priority:int=0]
+const T = database.fields_of<Todo>
+const schema = [todos=database.collection<Todo>(key=T.id
+    indexes=[database.index(database.tuple(T.done T.priority T.id))])]
+add = <S>(store:S id:string title:string) => {
+    store.todos.insert(Todo[id=id title=title]) or_throw;
+}
+finish = <S>(store:S id:string) => {
+    let changed = store.todos.where(T.id.eq(id)).update([done=true]) or_throw
+    if changed =? 0 return database.RecordMissing
+}
+show = <S>(store:S) => {
+    let query = store.todos.where(T.done.eq(false))
+        .sorted(key=database.tuple(T.priority T.id) reverse=true)
+    let page = query.page(size=20 max_scanned=10000) or_throw
+    loop true {
+        loop todo in page.items { printl"{todo.id}: {todo.title}" }
+        if page.next is? none break
+        page = query.page(size=20 after=page.next max_scanned=10000) or_throw
+    }
+}
+# The ordinary reference sort uses the same explicitly typed tuple comparator.
+reference_order = (todos:array<Todo>) => {
+    return todos.sorted(key=(t):>[int string] => [t.priority t.id] reverse=true)
+}
+main = () => {
+    let store = database.open(schema p"todo.db") or_throw
+    let argv = args[$clamp 1..]
+    if argv.length =? 3 and argv[0] =? "add" {
+        add(store argv[1] argv[2]) or_throw
+    } else if argv.length =? 2 and argv[0] =? "done" {
+        finish(store argv[1]) or_throw
+    } else if argv.length =? 1 and argv[0] =? "prune" {
+        printl(store.todos.where(T.done.eq(true)).delete() or_throw)
+    } else {
+        show(store) or_throw
+    }
+}

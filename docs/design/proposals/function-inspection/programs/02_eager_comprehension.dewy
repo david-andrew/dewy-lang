@@ -1,0 +1,14 @@
+# Positive proposed protocol: same plan and snapshot semantics as where.
+import p"fixtures.dewy" as fixture
+main = () => {
+    let db = fixture.seed or_throw
+    let rows = [loop item in db.accounts {
+        let a = item or_throw
+        if a.balance <? 0 a
+    }]
+    # Storage errors leave main; no error may become an empty result.
+    printl([loop a in rows a.id]) # ["a" "c"]
+    let ordinary = db.accounts.all or_throw
+    let expected = [loop a in ordinary if a.balance <? 0 a]
+    $runtime_assert rows =? expected
+}

@@ -1,0 +1,10 @@
+# Positive: optional equality/defaulting uses Dewy, not SQL NULL rules.
+import p"fixtures.dewy" as fixture
+main = () => {
+    let db = fixture.seed or_throw
+    let missing = db.accounts.where((a) => a.limit =? none).all or_throw
+    printl([loop a in missing a.id]) # ["b"]
+    let uncovered = db.accounts.where((a) => a.balance <? -(a.limit ?? 0)).all or_throw
+    printl([loop a in uncovered a.id]) # []
+    # Optional/default nodes unsupported by a backend stay local with a warning.
+}

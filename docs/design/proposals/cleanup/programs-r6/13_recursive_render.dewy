@@ -1,0 +1,17 @@
+# PAPER: Tree has label:string and children:array<Tree>; draw can return RenderError.
+import p"render_case.dewy" as view
+render_with_defer = (node:view.Tree @indent:int64) => {
+    view.draw(node.label indent) or_throw
+    indent += 1
+    defer indent -= 1
+    loop child in node.children { render_with_defer(child @indent) or_throw }
+}
+
+render = (node:view.Tree depth:int64=0) => {
+    view.draw(node.label depth) or_throw
+    loop child in node.children { render(child depth+1) or_throw }
+}
+# Both handle an early draw failure and a failing descendant correctly.
+# Parameter version has no mutable restoration obligation and is easier to reuse
+# concurrently. Defer wins no capability here. A realistic depth bound prevents
+# integer overflow in either version; this does not solve arbitrary-depth stacks.

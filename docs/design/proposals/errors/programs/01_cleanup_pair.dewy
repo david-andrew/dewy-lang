@@ -1,0 +1,31 @@
+# PAPER: real control flow; device calls below are deterministic fault injection.
+# Uses accepted fallible cleanup direction, not the unsettled loop-jump exit rule.
+import p"@lib/std/errors.dewy" as errors
+WriteFailed:type = type of error & [message:string]
+FlushFailed:type = type of error & [message:string]
+CloseFailed:type = type of error & [message:string]
+flush_device = ():>void | FlushFailed => FlushFailed["device full during flush"]
+close_device = ():>void | CloseFailed => CloseFailed["close could not confirm durability"]
+Buffered:type = type of any & [
+    $__drop__ = () => {
+        let failed:array<error> = []
+        let flushed = flush_device
+        if flushed is? error failed.push(flushed)
+        let closed = close_device          # still attempted after failed flush
+        if closed is? error failed.push(closed)
+        errors.join(failed...)
+    }
+]
+save = () => {
+    let output = Buffered[]
+    return WriteFailed["write stopped after 4096 bytes"]
+}                                         # output's completion joins the pending failure
+main = () => {
+    save or_throw
+}
+# Expected tree: WriteFailed, then context("completing output", [FlushFailed, CloseFailed]).
+# leaves: WriteFailed, FlushFailed, CloseFailed, in that order. No error is replaced.
+# A successful body with failed flush returns FlushFailed alone when close succeeds.
+# Body success + flush/close success returns void. No empty failure group.
+# No rollback is promised: a real device may contain a partial write.
+# Explicit allocation-exhaustion support remains blocked on the representation gate.

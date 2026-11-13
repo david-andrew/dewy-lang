@@ -1,0 +1,34 @@
+# PAPER R4: deterministic device failures; ordinary function return, not a loop-jump rule.
+import p"@lib/std/errors.dewy" as errors
+WriteFailed:type = type of error & [message:string exit_code:int64=41]
+FlushFailed:type = type of error & [message:string exit_code:int64=42]
+CloseFailed:type = type of error & [message:string exit_code:int64=43]
+flush_device = ():>void | FlushFailed => FlushFailed["device full during flush"]
+close_device = ():>void | CloseFailed => CloseFailed["close could not confirm durability"]
+Buffered:type = type of any & [
+    $__drop__ = () => {
+        let failed:array<exception> = []
+        let flushed = flush_device
+        if flushed is? exception failed.push(flushed)
+        let closed = close_device
+        if closed is? exception failed.push(closed)
+        errors.join(failed...)
+    }
+]
+save = () => {
+    let output = Buffered[]
+    return WriteFailed["write stopped after 4096 bytes"]
+}                                       # body & contextualized completion failure
+explicit_pair = () => {
+    let primary = WriteFailed["write failed"]
+    let cleanup = CloseFailed["close failed"]
+    return primary & cleanup
+}
+main = () => { save or_throw }
+# Expected leaves: WriteFailed, FlushFailed, CloseFailed, in actual completion order.
+# The flush/close group remains a subtree; no special CleanupError type.
+# Main chooses code 41 for a WriteFailed + CloseFailed pair (body error first).
+# A Canceled + CloseFailed pair chooses 43; this is a different, explicit case.
+# These codes are a proposed entrypoint integration rule, not already accepted policy.
+# Grouping preserves failures, not rollback: a real target may contain a partial write.
+# K3: lossless grouping during explicit allocation exhaustion still needs a representation.

@@ -1,0 +1,24 @@
+# PAPER: Path.append_text completes its own file; no buffered owner escapes it.
+Ledger:type = [balance:int entries:int=0]
+post = (ledger:Mutex<Ledger> amount:int journal:Path) => {
+    let book = @(ledger.lock)
+    book.balance += amount
+    book.entries += 1
+    journal.append_text("posted\n") or_throw;
+} # Block-end keeps the journal ordered with balance; last-use unlocks at line 6.
+
+post_then_wait = (ledger:Mutex<Ledger> amount:int journal:Path) => {
+    let book = @(ledger.lock)
+    book.balance += amount
+    journal.append_text("posted\n") or_throw;
+    sleep(1s) or_throw
+} # Block-end/mixed unnecessarily hold the lock during sleep; warn on that wait.
+
+post_short = (ledger:Mutex<Ledger> amount:int journal:Path) => {
+    {
+        let book = @(ledger.lock)
+        book.balance += amount
+        journal.append_text("posted\n") or_throw;
+    } # Infallible unlock: no completion or_throw required.
+    sleep(1s) or_throw
+}

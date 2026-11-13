@@ -1,0 +1,38 @@
+# PAPER: T may own fallible cleanup; .close consumes it, even on failure.
+finish = <T>(input:T) => { } # input completes at this real function boundary.
+consume_every_path = <T>(input:T first:bool) => {
+    {
+        let local = input
+        if first { local.close() or_throw }
+        else { finish(local) or_throw }
+    }
+    printl("consumed on either locally continuing path")
+}
+# ACCEPT: dataflow proves the inner duty absent at its continuing edge, for every T.
+# A failing close/helper is already a function exit, not a local continuation.
+
+maybe_live = <T>(input:T first:bool) => {
+    {
+        let local = input
+        if first { local.close() or_throw }
+        else { printl("retained") }
+    }
+    printl("continued")
+}
+# EXPECT REJECT when T may fail on cleanup: false branch leaves local live at line 19.
+# Infallible instantiation may pass. Template records the conditional obligation;
+# instantiation reports the owner origin, missing boundary and concrete failure summary.
+
+maybe_live_fixed = <T>(input:T first:bool) => {
+    {
+        let local = input
+        if first { local.close() or_throw }
+        else { printl("retained") }
+    } or_throw
+    printl("continued after completion")
+}
+# Full marker covers all known failure alternatives; it is harmless for infallible T.
+# Unknown/recursive summaries widen to may-live/may-fail, never consumed/infallible.
+# Budget exhaustion needs the marker or a checked signature/helper; no runtime guess.
+# If even a sound callable/result summary cannot be established, reject the boundary.
+# Type erasure preserves ownership, completion effects, and cancellation-carrying summaries.

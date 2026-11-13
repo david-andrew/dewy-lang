@@ -1,0 +1,13 @@
+# Positive: a query selected at runtime stays an opaque residual.
+import p"fixtures.dewy" as fixture
+report = <S>(db:S keep:(fixture.Account:>bool)) => {
+    # Contract: keep is pure and total; an unchecked caller cannot satisfy it.
+    let query = db.accounts.where((a) => a.balance <? 0).where(@keep)
+    let page = query.page(size=20 max_scanned=1000) or_throw
+    # Residual precedes the page limit; continuation stays snapshot-bound.
+    printl([loop a in page.items a.id])
+}
+main = () => {
+    let db = fixture.seed or_throw
+    report(db (a:fixture.Account) => a.name.length >? 3) or_throw
+}

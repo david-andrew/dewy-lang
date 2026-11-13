@@ -1,0 +1,43 @@
+# PAPER R4: grouped failures and cancellation during the backoff are part of the contract.
+import p"@lib/std/errors.dewy" as errors
+ConnectFailed:type = type of error & [message:string]
+CloseFailed:type = type of error & [message:string]
+connect_attempt = (attempt:int):>int | exception => {
+    if attempt <? 3 return ConnectFailed["refused"] & CloseFailed["socket close failed"]
+    return 42
+}
+retry = (max_attempts:int<(>? 0)> connect:(int :>int | exception)) => {
+    let failed:array<exception> = []
+    loop attempt in [1..max_attempts] {
+        let stopped = check_cancel()
+        if stopped is? exception {
+            failed.push(stopped)
+            return errors.join(failed...)
+        }
+        let result = connect(attempt)
+        if result is? exception {
+            failed.push(errors.with_context(result "attempt {attempt}"))
+            loop leaf in errors.leaves(result) {
+                if leaf is? Canceled return errors.join(failed...)
+            }
+        } else {
+            return result
+        }
+        if attempt <? max_attempts {
+            let waited = sleep(10ms)
+            if waited is? exception {
+                failed.push(errors.with_context(waited "waiting before the next attempt"))
+                return errors.join(failed...)
+            }
+        }
+    }
+    errors.join(failed...)
+}
+main = () => {
+    let connection = retry(2 @connect_attempt) or_throw
+    printl("connected: {connection}")
+}
+# Two retained per-attempt groups, preserving their order, if both attempts fail.
+# A canceled backoff preserves all earlier attempts and starts no next attempt.
+# The entry checkpoint uses D41's proposed check_cancel; its integration remains a dependency.
+# After a successful connection, normal caller cancellation policy applies; retries have finished.

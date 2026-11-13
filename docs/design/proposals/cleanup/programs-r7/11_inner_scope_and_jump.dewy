@@ -1,0 +1,51 @@
+import p"@lib/std/files.dewy" as files
+save = (path:Path) => {
+    {
+        let out = files.open(path 'w') or_throw
+        out.write_text("hello") or_throw;
+    } or_throw
+    printl("closed successfully")
+}
+
+nested = (groups:array<array<Path>>) => {
+    $groups
+    loop paths in groups {
+        loop path in paths {
+            {
+                let out = files.open(path 'w') or_throw
+                out.write_text("hello") or_throw;
+                if path =? p"stop.txt" break $groups
+            } or_throw
+            printl("inner file completed")
+        }
+    }
+    printl("groups finished")
+}
+# Line 18 owns out's completion policy; a label does not bypass it.
+# Cleanup success takes the requested break, skipping line 19 but reaching line 22.
+# Cleanup failure replaces the jump by a return from nested; neither print runs.
+# Removing line 18's suffix is an error even if line 21 gets an outer or_throw.
+# Mark the actual owner scope; an enclosing handler cannot hide intermediate work.
+
+save_then_return = (path:Path) => {
+    {
+        let out = files.open(path 'w') or_throw
+        out.write_text("hello") or_throw;
+        return 7
+    }
+} # Every successful path is already an explicit function exit: no suffix needed.
+# Failed completion replaces pending 7; it never resumes after the inner brace.
+
+multiple_crossed = (paths:array<Path>) => {
+    $rows
+    loop path in paths ({
+        let outer = files.open(p"outer.txt" 'w') or_throw
+        {
+            let inner = files.open(path 'w') or_throw
+            continue $rows
+        } or_throw
+    } or_throw)
+}
+# Both normal-jump boundaries need markers. Complete inner, then outer, then next iteration.
+# Inner failure F1 suppresses continue; outer failure F2 joins via errors.join(F1 F2).
+# Once F1 establishes a function exit, all remaining cleanup still runs, not another iteration.

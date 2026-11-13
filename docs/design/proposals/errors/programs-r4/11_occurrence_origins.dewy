@@ -1,0 +1,27 @@
+# PAPER R4: v1 exposes origin; context frames are rendered privately, not a public API.
+import p"@lib/std/errors.dewy" as errors
+ProbeFailed:type = type of error & [message:string]
+InvariantFailed:type = type of error & [message:string]
+probe_twice = () => {
+    let first = ProbeFailed["unreachable"]
+    let second = ProbeFailed["unreachable"]
+    if not (first =? second) return InvariantFailed["metadata changed payload equality"]
+    let described = errors.with_context(first "checking the primary endpoint")
+    errors.report(first locations=true)     # original has no added context frame
+    errors.report(described locations=true) # copy does; the original origin stays line 6
+    return described & second
+}
+show_origin = (failure:exception):>void => {
+    let site = failure.$origin
+    if site is? none printl("origin unavailable")
+    else printl("{site.file}:{site.line}:{site.column} in {site.function}")
+}
+main = () => {
+    let failure = probe_twice
+    loop leaf in errors.leaves(failure) { show_origin(leaf) }
+    show_origin(none)                      # absence is deliberately not recorded per occurrence
+}
+# The two ProbeFailed origins are lines 6 and 7; context adds its own private call site.
+# none has no origin token. Ordinary optionals do not acquire one just because they can be absent.
+# Error-bearing unions can still grow on SUCCESS paths because their storage/ABI must fit errors.
+# Constant reuse retains construction origin; no stack capture or retroactive origin is implied.

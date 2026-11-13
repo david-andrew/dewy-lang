@@ -1,0 +1,12 @@
+# Proposed database module; common setup, not an extra graded scenario.
+import p"@lib/std/database.dewy" as database
+Account:type = [id:string name:string balance:int limit:int?]
+const schema = [accounts=database.collection<Account>(key=(a) => a.id
+    indexes=[database.index((a) => a.balance)])]
+seed = () => {
+    let db = database.memory(schema) or_throw
+    db.accounts.insert(Account["a" "Ada" -200 500]) or_throw;
+    db.accounts.insert(Account["b" "Ben" 50 none]) or_throw;
+    db.accounts.insert(Account["c" "Cleo" -20 100]) or_throw;
+    db
+}

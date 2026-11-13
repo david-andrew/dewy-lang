@@ -1,0 +1,23 @@
+# Design specimen: explicit materialization boundary before arbitrary application code.
+import p"@lib/std/database.dewy" as database
+
+Account:type = [id:string balance:int]
+const A = database.fields_of<Account>
+const schema = [accounts=database.collection<Account>(key=A.id
+    indexes=[database.index(A.balance)])]
+interesting = (a:Account):>bool => a.id.endswith("7")
+inspect = <S>(store:S check:(Account:>bool)) => {
+    let query = store.accounts.where(A.balance.lt(0))
+    printl(query.explain)
+    let candidates = query.all(max_scanned=1000 max_bytes=8000000 timeout=2s) or_throw
+    let matches = [loop a in candidates if check(a) a]
+    loop a in matches[$clamp ..20] { printl(a) }
+    # The indexed portion is entirely library-defined; check is ordinary local execution.
+    # The cap does not bound check's CPU. This is trusted code, not a sandbox endpoint.
+}
+main = () => {
+    let store = database.memory(schema) or_throw
+    store.accounts.insert(Account[id="customer-7" balance=-50]) or_throw;
+    store.accounts.insert(Account["customer-8" 100]) or_throw;
+    inspect(store @interesting) or_throw
+}

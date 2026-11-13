@@ -1,0 +1,19 @@
+# Design specimen: bounded interactive inspection; user input is never evaluated as source.
+import p"@lib/std/database.dewy" as database
+import p"01_todo.dewy" as todo
+
+main = () => {
+    let store = database.open(todo.schema p"todo.db" read_only=true) or_throw
+    printl"Enter a title fragment; :quit exits. Showing at most 20 matches."
+    loop true {
+        let input_line = read_line() or_throw<error | Canceled>
+        if input_line is? none break
+        if input_line =? ":quit" break
+        let query = store.todos.where((t) => input_line in? t.title)
+            .sorted(key=(t) => t.id)
+        printl(query.explain)
+        let page = query.page(size=20) or_throw
+        loop row in page.items { printl"{row.id}: {row.title}" }
+        # Unindexed substring search warns once at this source site, not once per input.
+    }
+}

@@ -1,0 +1,25 @@
+# PAPER: CPU validation has no cancellation checkpoints; failures stay per-item values.
+import p"@lib/std/errors.dewy" as errors
+Row:type = [number:int text:string]
+RowError:type = type of error & [row:int message:string]
+parse_row = (row:Row) => {
+    let n = to_int(row.text)
+    if n is? error return errors.caused_by(RowError[row.number "invalid quantity"] n)
+    if n <? 0 return RowError[row.number "quantity cannot be negative"]
+    return n
+}
+load_quantities = (rows:array<Row>) => {
+    let outcomes = [parallel row in rows parse_row(row)]
+    let [quantities failed] = outcomes.partition_failures
+    errors.join(failed...) or_throw
+    return quantities
+}
+main = () => {
+    let rows = [Row[1 "5"] Row[2 "bad"] Row[3 "-1"] Row[4 "8"]]
+    let quantities = load_quantities(rows) or_throw
+    printl("accepted {quantities.length} quantities")
+}
+# Expected RowError(row=2), RowError(row=3), irrespective of worker completion order.
+# There is no or_throw in parse_row's caller item, so ordinary failures don't cancel siblings.
+# Replacing parse_row with waiting I/O introduces Canceled and the collector's exit rule.
+# This example does NOT claim to solve collect-all after external cancellation.

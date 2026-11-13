@@ -1,0 +1,25 @@
+import p"source_case.dewy" as source
+make_reader = () => {
+    let input = source.socket or_throw
+    return () => input.read_bytes(64)
+} # Closure owns input. Returning it moves the duty; it does not close here.
+
+read_then_wait = () => {
+    let read = make_reader or_throw
+    let bytes = read or_throw
+    source.wait_for_reader_eof() or_throw
+    return bytes
+} # Block-end holds closure/capture across line 10: protocol wait can hang.
+# Pure last-use/mixed can release this infallible capture after line 9.
+
+read_chunk = () => {
+    let read = make_reader or_throw
+    return read or_throw
+} # All rules close the capture before this function returns its byte array.
+read_then_wait_fixed = () => {
+    let bytes = read_chunk or_throw
+    source.wait_for_reader_eof() or_throw
+    return bytes
+}
+# Replacing source.socket by fallible source.file makes mixed hold the closure.
+# Adding a later call of read moves last-use cleanup; block-end is stable.

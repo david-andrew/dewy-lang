@@ -1,0 +1,43 @@
+# Design specimen: one result per post, including empty and multiple related records.
+import p"@lib/std/database.dewy" as database
+
+Author:type = [id:string name:string email:string]
+Tag:type = [id:string label:string]
+Post:type = [id:string author:database.Ref<Author> title:string body:string
+    tags:set<database.Ref<Tag>> = set[] editor:database.Ref<Author>? = none]
+const A = database.fields_of<Author>
+const T = database.fields_of<Tag>
+const P = database.fields_of<Post>
+const schema = [
+    authors=database.collection<Author>(key=A.id indexes=[database.unique(A.email)])
+    tags=database.collection<Tag>(key=T.id)
+    posts=database.collection<Post>(key=P.id)
+]
+feed = <S>(store:S email:string) => {
+    let page = store.posts.where(database.related(P.author A.email).eq(email))
+        .sorted(key=P.id).include([author=P.author tags=P.tags editor=P.editor])
+        .page(size=20 max_scanned=1000) or_throw
+    loop row in page.items {
+        printl"{row.record.title} — {row.related.author.name}"
+        printl([loop tag in row.related.tags tag.label])
+        if row.related.editor isnt? none { printl"edited by {row.related.editor.name}" }
+    }
+    # A page is one snapshot. See round4: batched authors/editors, then batched tags.
+}
+main = () => {
+    let store = database.memory(schema) or_throw
+    let tx = store.begin or_throw
+    let author = tx.authors.insert(Author["a" "Ada" "ada@example.test"]) or_throw
+    let editor = tx.authors.insert(Author["e" "Eli" "eli@example.test"]) or_throw
+    let dewy = tx.tags.insert(Tag["d" "Dewy"]) or_throw
+    let data = tx.tags.insert(Tag["b" "Databases"]) or_throw
+    tx.posts.insert(Post[id="1" author=author title="First post" body="No tags yet."]) or_throw;
+    tx.posts.insert(Post[id="2" author=author title="Typed data" body="Related records."
+        tags=set[dewy data] editor=editor]) or_throw;
+    tx.posts.insert(Post[id="3" author=author title="Another post" body="Shared tag."
+        tags=set[dewy]]) or_throw;
+    tx.commit() or_throw
+    feed(store "ada@example.test") or_throw
+    # Prints three posts: [] / [Dewy Databases] / [Dewy]; only post 2 has an editor.
+    # Deleting a referenced author/tag fails; explicit unlink precedes deletion.
+}

@@ -1,0 +1,20 @@
+# Design specimen: strict CSV adapter is a separate dependency; see round2.
+import p"@lib/std/database.dewy" as database
+import p"@lib/std/csv.dewy" as csv
+
+Product:type = [id:string title:string price_cents:int stock:int]
+InvalidProduct:type = type of error & [id:string]
+const schema = [products=database.collection<Product>(key=(p) => p.id)]
+main = () => {
+    let text = p"products.csv".read_text or_throw
+    let products = csv.from_csv<Product>(text) or_throw
+    # Required: reject malformed quoting, missing headers, duplicate headers and bad field values.
+    let store = database.open(schema p"products.db") or_throw
+    let tx = store.begin or_throw
+    loop product in products {
+        if product.price_cents <? 0 or product.stock <? 0 return InvalidProduct[product.id]
+        tx.products.insert(product) or_throw;
+    }
+    tx.commit() or_throw
+    printl"imported {products.length} products"
+}

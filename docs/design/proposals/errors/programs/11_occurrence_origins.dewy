@@ -1,0 +1,28 @@
+# PAPER: same kind and payload, different construction sites; copies preserve an occurrence.
+import p"@lib/std/errors.dewy" as errors
+ProbeFailed:type = type of error & [message:string]
+InvariantFailed:type = type of error & [message:string]
+probe_twice = () => {
+    let first = ProbeFailed["unreachable"]
+    let second = ProbeFailed["unreachable"]
+    if not (first =? second) return InvariantFailed["metadata changed payload equality"]
+    let described = errors.with_context(first "checking the primary endpoint")
+    if first.$context.length not=? 0 return InvariantFailed["annotation mutated the original"]
+    return errors.join(described second)
+}
+show_origin = (failure:exception):>void => {
+    let site = failure.$origin
+    if site is? none {
+        printl("origin unavailable")
+    } else {
+        printl("{site.file}:{site.line}:{site.column} in {site.function}")
+    }
+}
+main = () => {
+    let failure = probe_twice
+    loop leaf in errors.leaves(failure) { show_origin(leaf) }
+}
+# The two ProbeFailed origins are lines 6 and 7; with_context has its own site at line 9.
+# Both values may compare equal; equality must not be used to key a metadata side table.
+# Requesting $trace now doesn't reconstruct a stack: capture was disabled at construction.
+# A reused constant would keep its declaration site; explicit context marks a new operation.

@@ -1,0 +1,9 @@
+# Positive fallback: strict float64 must not be demoted to GPU float32.
+import p"@lib/std/compute.dewy" as compute
+main = () => {
+    let balances:array<float64> = [16777217.0 16777218.0]
+    let adjusted = compute.map(balances (x:float64):>float64 => x+1.0) or_throw
+    # A float32-only or otherwise incompatible device runs the CPU callback.
+    $runtime_assert adjusted =? [16777218.0 16777219.0]
+    printl(adjusted)
+}

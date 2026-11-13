@@ -1,0 +1,9 @@
+# Positive mathematical AD, with a captured calibration coefficient.
+import p"@lib/std/diff.dewy" as diff
+main = () => {
+    let coefficient:float64 = 3.0
+    let curve = (x:float64):>float64 => x*x+coefficient*x
+    coefficient = 100.0
+    let slope = diff.derivative(@curve)
+    printl(slope(2.0) or_throw) # 7.0, using the captured 3.0
+}

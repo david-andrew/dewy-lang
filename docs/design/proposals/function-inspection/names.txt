@@ -1,0 +1,30 @@
+# Candidate usage inventory, NOT a cold-read result. All new names are provisional.
+# A separate names-only shuffled test with three fresh readers is still required.
+
+predicate:code.Function<(Account:>bool)>
+condition:code.Function<(():>bool)>
+function:code.Function<(float64:>float64)>
+let metadata = function.body
+let prepared = function.prepare(@planner)
+let value = function.call(2.0)
+$__collect__ = (recipe) => planner(recipe)
+
+# Proposed consumer-library names; these are not additional compiler metatags.
+let pixels = compute.map(pixels (x:Word):>Word => x*3+1) or_throw
+check.that(() => subtotal+tax =? paid) or_throw
+let slope = diff.derivative((x:float64):>float64 => x*x)
+let slope_here = slope(0.0) or_throw
+result is? check.AssertionFailed
+result is? diff.NotDifferentiable
+
+# Draft outcome vocabulary for library authors, not finalized generic signatures.
+result is? code.BudgetExceeded
+reason = 'body unavailable'
+reason = 'private capture'
+reason = 'unsupported operation'
+reason = 'planning budget exhausted'
+
+# Existing/dependency names shown to distinguish them from this proposal's additions.
+db.accounts.where((a) => a.balance <? threshold)
+query.page(size=20 max_scanned=1000) or_throw
+query.explain

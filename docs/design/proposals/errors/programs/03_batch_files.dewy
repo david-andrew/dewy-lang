@@ -1,0 +1,28 @@
+# PAPER: inspect every readable file; keep failures with their path context.
+import p"@lib/std/errors.dewy" as errors
+scan = (paths:array<Path>) => {
+    let failed:array<exception> = []
+    let bytes:int = 0
+    loop path in paths {
+        let text = path.read_text
+        if text is? Canceled {
+            failed.push(errors.with_context(text "reading {path}"))
+            return errors.join(failed...)
+        }
+        if text is? error {
+            failed.push(errors.with_context(text "reading {path}"))
+        } else {
+            bytes += (text as array<uint8>).length
+        }
+    }
+    errors.join(failed...) or_throw
+    return bytes
+}
+main = () => {
+    let count = scan([p"settings.ini" p"rules.ini" p"overrides.ini"]) or_throw
+    printl("read {count} bytes")
+}
+# If files 1 and 3 fail, their two errors are returned in input order.
+# Cancellation after file 1 failed returns both, without reading further paths.
+# Partial successful data is intentionally not part of this all-or-failure API.
+# read_text's concrete file failures are siblings, not all subtypes of FileError.

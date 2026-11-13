@@ -1,0 +1,20 @@
+# Design specimen: literal word intersection, pinned tokenizer, lower score ranks first.
+import p"@lib/std/database.dewy" as database
+
+Note:type = [id:string title:string body:string]
+const N = database.fields_of<Note>
+const schema = [notes=database.collection<Note>(key=N.id
+    indexes=[database.full_text([N.title N.body] tokenizer='unicode61_v1')])]
+main = () => {
+    let store = database.memory(schema) or_throw
+    store.notes.insert(Note["n1" "Bike repair" "Replace the rear brake cable."]) or_throw;
+    store.notes.insert(Note["n2" "Trip" "Pack a spare cable and a pump."]) or_throw;
+    let text = input("Search notes: ") or_throw
+    let page = store.notes.search(text).page(size=10 max_scanned=10000) or_throw
+    loop hit in page.items {
+        printl"{hit.record.title} ({fmt'.3f'(hit.score)})"
+        printl(hit.excerpt)
+    }
+    # No stemming/stop words. Quotes, OR and '*' are text, never backend commands.
+    # Equal scores break by primary key. Unsupported tokenizer => UnsupportedFeature.
+}

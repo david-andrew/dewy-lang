@@ -1,0 +1,21 @@
+# Design specimen: dynamically supplied pure code is legal, with an explicit cost report.
+import p"@lib/std/database.dewy" as database
+
+Account:type = [id:string balance:int]
+const schema = [accounts=database.collection<Account>(key=(a) => a.id
+    indexes=[database.index((a) => a.balance)])]
+interesting = (a:Account):>bool => a.id.endswith("7")
+inspect = <S>(store:S check:(Account:>bool)) => {
+    let query = store.accounts.where((a) => a.balance <? 0).where(check)
+    printl(query.explain)
+    let result = query.page(size=20 max_scanned=1000) or_throw
+    loop account in result.items { printl(account) }
+    # At an opaque call boundary: index balance, then evaluate check locally in key order.
+    # If 1000 candidates cannot establish the next page, QueryLimit returns no partial page.
+}
+main = () => {
+    let store = database.memory(schema) or_throw
+    store.accounts.insert(Account["customer-7" -50]) or_throw;
+    store.accounts.insert(Account["customer-8" 100]) or_throw;
+    inspect(store @interesting) or_throw
+}

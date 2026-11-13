@@ -1,0 +1,35 @@
+# PAPER R4: the library owns the remainder and cancellation checks, not each caller.
+import p"@lib/std/errors.dewy" as errors
+MissingAsset:type = type of error & [path:Path message:string]
+InvalidAsset:type = type of error & [path:Path message:string]
+regenerate = (missing:MissingAsset) => {
+    missing.path.write_text("generated placeholder") or_throw;
+}
+recover_missing = (failure:exception) => {
+    return errors.recover<MissingAsset>(failure @regenerate)
+}
+recover_explicit = (failure:exception) => {
+    $explicit_cancellation
+    return errors.recover<MissingAsset>(failure or_throw<Canceled> @regenerate)
+}
+make_failure = () => {
+    return errors.with_context(
+        MissingAsset[p"thumb.txt" "missing thumbnail"] & InvalidAsset[p"index.txt" "bad index"]
+        "loading derived assets"
+    )
+}
+incoming_canceled = () => {
+    let transported:exception = Canceled & make_failure
+    return recover_missing(transported)
+}
+main = () => {
+    incoming_canceled or_throw
+    printl("UNREACHABLE: recovery succeeded")
+}
+# M1: incoming_canceled calls regenerate ZERO times, even in a task that is not itself canceled.
+# Normal recover_missing(make_failure) attempts only thumb.txt and retains InvalidAsset.
+# Failure of regeneration retains MissingAsset and the repair failure at that leaf's position.
+# Cancellation before a later start keeps all unattempted matches; cancellation after the last
+# callback is checked before success. Callback admission orders each start against cancellation.
+# E is copyable here (Path/string). V1 recover rejects a selected move-only error payload.
+# errors.recover is a provisional new name: r22 did not cold-read it.

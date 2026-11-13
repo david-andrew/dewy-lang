@@ -1,0 +1,30 @@
+import p"@lib/std/files.dewy" as files
+read_choice = (choice:bool) => {
+    let text = match choice {
+        <true> => ({
+            let input = files.open(p"left.txt" 'r') or_throw
+            input.read_text or_throw
+        } or_throw)
+        <false> => ({
+            let input = files.open(p"right.txt" 'r') or_throw
+            input.read_text or_throw
+        } or_throw)
+    }
+    return text
+}
+# (f) Each suffix has its braced arm expression as operand. Only the chosen arm runs.
+# Success: text reaches line 13 after the chosen input completes.
+# Read failure E + close failure F: return errors.join(E F); do not reach line 13.
+
+rejected_match_suffix = (choice:bool) => {
+    let text = match choice {
+        <true> => {
+            let input = files.open(p"left.txt" 'r') or_throw
+            input.read_text or_throw
+        }
+        <false> => "empty"
+    } or_throw
+    return text
+}
+# EXPECT REJECT: a match's arm-list braces are NOT an owning block for arm locals.
+# suffix(match(...)) propagates match values; it does not acknowledge nested arm cleanup.

@@ -1,0 +1,38 @@
+# PAPER adversarial scenario: canceled body plus a failed close must not become success.
+import p"@lib/std/errors.dewy" as errors
+CloseFailed:type = type of error & [message:string]
+interrupted = () => errors.join(Canceled CloseFailed["flush failed"])
+default_attempt = () => {
+    interrupted ?? void
+    printl("UNREACHABLE: saved")
+}
+explicit_forward = () => {
+    $explicit_cancellation
+    interrupted or_throw<Canceled> ?? void
+    printl("UNREACHABLE: saved")
+}
+inspect_explicitly = ():>void => {
+    match interrupted {
+        group:errors.ExceptionGroup => {
+            errors.report(group locations=true)
+            loop item in group.errors {
+                if item is? Canceled printl("cancellation retained")
+                if item is? CloseFailed printl("close failure retained")
+            }
+        }
+    }
+}
+store_deliberately = () => {
+    let failed:array<exception> = []
+    failed.push(Canceled)
+    failed.push(CloseFailed["flush failed"])
+    return errors.join(failed...)
+}
+main = () => {
+    default_attempt or_throw
+}
+# join(Canceled close) passes ordinary arguments, so both reach join.
+# NEGATIVE EXAMPLE, not code to enable: join([Canceled close]...) exits during collection.
+# is? error is false for interrupted; is? Canceled is also false; is? exception is true.
+# ??<Canceled> alone forwards the group; ??<Canceled | errors.ExceptionGroup> may default it.
+# Catching an explicitly returned synthetic Canceled here does not reset any real task state.

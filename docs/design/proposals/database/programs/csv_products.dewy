@@ -1,0 +1,73 @@
+# Local importer support, not a proposed standard-library name.
+# Strict UTF-8 text CSV subset: LF or CRLF; exact header order; quoted newlines allowed.
+Product:type = [id:string title:string price_cents:int stock:int]
+CsvError:type = type of error & [message:string]
+
+rows = (text:string) => {
+    let result:array<array<string>> = []
+    let row:array<string> = []
+    let field:array<uint8> = []
+    let quoted = false
+    let closed = false
+    let pending_cr = false
+    loop c in (text as array<uint8>) {
+        if pending_cr {
+            if c not=? b'\n' return CsvError["bare CR outside quoted field"]
+            pending_cr = false
+            continue
+        }
+        if quoted {
+            if c =? b'"' { quoted = false closed = true }
+            else { field.push(c) }
+            continue
+        }
+        if closed and c =? b'"' {
+            field.push(b'"')
+            quoted = true
+            closed = false
+            continue
+        }
+        if c =? b',' or c =? b'\n' or c =? b'\r' {
+            row.push((field as string | none) ??<none> return CsvError["invalid UTF-8 field"])
+            field = []
+            closed = false
+            if c not=? b',' {
+                result.push(row)
+                row = []
+                pending_cr = c =? b'\r'
+            }
+            continue
+        }
+        if closed return CsvError["text after closing quote"]
+        if c =? b'"' {
+            if not field.is_empty return CsvError["quote inside unquoted field"]
+            quoted = true
+        } else {
+            field.push(c)
+        }
+    }
+    if quoted or pending_cr return CsvError["incomplete quoted field or CRLF"]
+    if not field.is_empty or closed or not row.is_empty {
+        row.push((field as string | none) ??<none> return CsvError["invalid UTF-8 field"])
+        result.push(row)
+    }
+    return result
+}
+decode = (text:string) => {
+    let data = rows(text) or_throw
+    if data.length =? 0 return CsvError["missing header"]
+    if data[0] not=? ["id" "title" "price_cents" "stock"] {
+        return CsvError["expected exactly: id,title,price_cents,stock"]
+    }
+    let products:array<Product> = []
+    loop row in data[1..] {
+        if row.length not=? 4 return CsvError["expected four fields"]
+        let price = to_int(row[2]) or_throw
+        let stock = to_int(row[3]) or_throw
+        if row[0].is_empty or price <? 0 or stock <? 0 {
+            return CsvError["empty id, negative price or negative stock"]
+        }
+        products.push(Product[row[0] row[1] price stock])
+    }
+    return products
+}

@@ -1,0 +1,50 @@
+# Design specimen: shared store, private serializable transactions, no automatic retry.
+import p"@lib/std/database.dewy" as database
+import p"@lib/std/tasks.dewy" as task
+
+Stock:type = [id:string remaining:int]
+Order:type = [id:string sku:string quantity:int]
+OutOfStock:type = type of error
+InvalidOrder:type = type of error
+RequestMismatch:type = type of error
+const S = database.fields_of<Stock>
+const O = database.fields_of<Order>
+const schema = [
+    stock=database.collection<Stock>(key=S.id)
+    orders=database.collection<Order>(key=O.id)
+]
+reserve = <S>(store:S order:Order) => {
+    if order.quantity <=? 0 return InvalidOrder
+    let tx = store.begin(timeout=2s) or_throw
+    let previous = tx.orders.get(order.id) or_throw<error | Canceled>
+    if previous isnt? none {
+        if previous not=? order return RequestMismatch
+        tx.rollback() or_throw
+        return
+    }
+    let item = tx.stock.require(order.sku) or_throw
+    if item.remaining <? order.quantity return OutOfStock
+    tx.stock.replace([item... remaining=item.remaining-order.quantity]) or_throw
+    tx.orders.insert(order) or_throw;
+    tx.commit() or_throw
+}
+main = () => {
+    let store = database.memory(schema) or_throw
+    store.stock.insert(Stock["battery" 2]) or_throw;
+    let orders = [Order["a" "battery" 1] Order["b" "battery" 1] Order["c" "battery" 1]]
+    task.tasks((group:Tasks) => {
+        loop order in orders {
+            group.spawn(() => {
+                match reserve(store order) {
+                    <OutOfStock> => printl"{order.id}: sold out"
+                    problem:exception => problem or_throw
+                    _ => printl"{order.id}: reserved"
+                }
+            });
+        }
+    }) or_throw
+    # Unexpected failure cancels and joins siblings; prior commits remain committed.
+    # Each lambda owns its tx, captures its order value, and only shares the store handle.
+    printl(store.stock.get("battery") or_throw<error | Canceled>)
+    # Only database work occurs before commit; payment/email belongs after a durable outbox write.
+}

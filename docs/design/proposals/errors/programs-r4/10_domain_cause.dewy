@@ -1,0 +1,26 @@
+# PAPER R4: layered transparent context; domain cause translation is explicitly deferred.
+import p"@lib/std/errors.dewy" as errors
+read_limit = (path:Path) => {
+    let text = path.read_text
+    if text is? exception return errors.with_context(text "reading the request limit")
+    let number = to_int(text.trim)
+    if number is? exception return errors.with_context(number "parsing the request limit")
+    return number
+}
+configure_service = (path:Path) => {
+    let result = read_limit(path)
+    if result is? exception return errors.with_context(result "configuring the service")
+    return result
+}
+main = () => {
+    let result = configure_service(p"request-limit.txt")
+    if result is? exception {
+        errors.report(result locations=true)
+        exit(2)
+    }
+    printl("request limit is {result}")
+}
+# On failure, report outer "configuring" then inner "reading" or "parsing", with both sites.
+# Underlying failure kind is unchanged. This is NOT a new ConfigError with a typed cause.
+# There is no repeated caused_by overwrite and no dependency on public $cause/$context.
+# Canceled remains Canceled, or remains carried by the same ErrorGroup.

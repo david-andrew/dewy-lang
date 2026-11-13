@@ -1,0 +1,32 @@
+# PAPER: retries keep diagnostic history only on ultimate failure; success ends the history.
+import p"@lib/std/errors.dewy" as errors
+ConnectFailed:type = type of error & [message:string]
+# This adapter is intentionally a deterministic stand-in for a transient network operation.
+connect_attempt = (attempt:int):>int | ConnectFailed | Canceled => {
+    if attempt <? 3 return ConnectFailed["connection refused"]
+    return 42
+}
+retry = (max_attempts:int<(>? 0)> connect:(int :>int | ConnectFailed | Canceled)) => {
+    let failed:array<exception> = []
+    loop attempt in [1..max_attempts] {
+        let result = connect(attempt)
+        if result is? Canceled {
+            failed.push(errors.with_context(result "attempt {attempt}"))
+            return errors.join(failed...)
+        }
+        if result is? error {
+            failed.push(errors.with_context(result "attempt {attempt}"))
+        } else {
+            return result
+        }
+    }
+    errors.join(failed...)
+}
+main = () => {
+    let connection = retry(2 @connect_attempt) or_throw
+    printl("connected: {connection}")
+}
+# Expected two ConnectFailed occurrences, not one deduplicated error.
+# retry(3 @connect_attempt) succeeds with 42 and intentionally discards historical failures.
+# No delays are claimed here. A backoff sleep would add its own cancellation check/history.
+# The callback contract deliberately excludes grouped failures; see the broader split example.

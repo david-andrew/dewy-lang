@@ -1,0 +1,27 @@
+# PAPER R4: a read may itself return a group, including a cleanup/cancellation combination.
+import p"@lib/std/errors.dewy" as errors
+scan = (paths:array<Path>) => {
+    let failed:array<exception> = []
+    let bytes:int = 0
+    loop path in paths {
+        let text = path.read_text
+        if text is? exception {
+            failed.push(errors.with_context(text "reading {path}"))
+            loop leaf in errors.leaves(text) {
+                if leaf is? Canceled return errors.join(failed...)
+            }
+        } else {
+            bytes += (text as array<uint8>).length
+        }
+    }
+    errors.join(failed...) or_throw
+    return bytes
+}
+main = () => {
+    let count = scan([p"settings.ini" p"rules.ini" p"overrides.ini"]) or_throw
+    printl("read {count} bytes")
+}
+# Retains all observed read failures in path order, with their own nested structure.
+# Scans only the current failure for cancellation, never rejoins the growing prefix each time.
+# A cancellation-bearing read appends the whole read result and starts no further read.
+# The next file operation is itself a cancellation point for task cancellation arriving later.

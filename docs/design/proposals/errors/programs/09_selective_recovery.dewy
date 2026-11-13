@@ -1,0 +1,41 @@
+# PAPER: regenerate missing derived assets; keep corruption and failed regeneration errors.
+import p"@lib/std/errors.dewy" as errors
+MissingAsset:type = type of error & [path:Path message:string]
+InvalidAsset:type = type of error & [path:Path message:string]
+regenerate = (path:Path) => path.write_text("generated placeholder")
+recover_missing = (failure:exception) => {
+    let parts = errors.split<MissingAsset>(failure)
+    let pending = parts.rest
+    let stopped = false
+    loop branch in parts.matched {
+        loop leaf in errors.leaves(branch) {
+            if leaf is? MissingAsset {
+                if stopped {
+                    pending.push(leaf)         # retain matched leaves not retried after cancellation
+                } else {
+                    let result = regenerate(leaf.path)
+                    if result is? exception {
+                        pending.push(errors.join(leaf errors.with_context(result "regenerating {leaf.path}")))
+                        if result is? Canceled stopped = true
+                    }
+                }
+            }
+        }
+    }
+    errors.join(pending...)
+}
+make_failure = () => {
+    return errors.with_context(
+        errors.join(MissingAsset[p"thumb.txt" "missing thumbnail"] InvalidAsset[p"index.txt" "bad index"])
+        "loading derived assets"
+    )
+}
+main = () => {
+    recover_missing(make_failure) or_throw
+    printl("all assets ready")
+}
+# Successful regeneration removes only MissingAsset. InvalidAsset still leaves main.
+# A failed regeneration keeps both the original missing failure and the new write failure.
+# split preserves "loading derived assets" around the remaining InvalidAsset subtree.
+# Deliberately ignoring parts.rest would lose failures; this is not a linear error type system.
+# Round 3: traversing a matched leaf retains its ancestor context on failed recovery.

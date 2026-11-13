@@ -1,0 +1,11 @@
+# Positive: GPU arithmetic must match the same wrapping-word CPU callback.
+import p"@lib/std/compute.dewy" as compute
+Word:type = uint32<overflow='wrap'>
+main = () => {
+    let channel:array<Word> = [0 1 255 4294967295]
+    let gain:Word = 3
+    let adjusted = compute.map(channel (x:Word):>Word => x*gain+1) or_throw
+    let expected = [loop x in channel x*gain+1]
+    $runtime_assert adjusted =? expected # [1 4 766 4294967294]
+    printl(adjusted)
+}

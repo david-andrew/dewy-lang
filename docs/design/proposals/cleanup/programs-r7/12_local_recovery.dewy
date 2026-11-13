@@ -1,0 +1,39 @@
+import p"@lib/std/files.dewy" as files
+import p"@lib/std/errors.dewy" as errors
+try_one = (path:Path) => {
+    let out = files.open(path 'w') or_throw
+    out.write_text("row\n") or_throw;
+}
+# Policy: report/accept failed files; forward all non-FileError failures, including cancellation.
+try_each = (paths:array<Path>) => {
+    loop path in paths {
+        let result = try_one(path)
+        if result is? exception {
+            let parts = errors.split<FileError>(result)
+            loop branch in parts.matched { errors.report(branch) }
+            errors.join(parts.rest...) or_throw
+        }
+    }
+}
+# Split tests leaves, not the outer group kind; it consumes an owning root when needed.
+# FileError + FileError -> report both, empty rest joins to void; next file.
+# Canceled + FileError -> report FileError, return Canceled; no next file.
+# ParseError + FileError -> report FileError, return ParseError.
+# Inherited context survives the split; reporting borrows, never duplicates owners.
+# This policy accepts failed files, not a claim that their data was recovered or retried.
+
+close_locally = (paths:array<Path>) => {
+    loop path in paths {
+        let out = files.open(path 'w') or_throw
+        out.write_text("row\n") or_throw;
+        let closed = out.close()
+        if closed is? exception {
+            let parts = errors.split<FileError>(closed)
+            loop branch in parts.matched { errors.report(branch) }
+            errors.join(parts.rest...) or_throw
+        }
+    }
+}
+# Close consumes even on failure. A failed write instead leaves at line 28 and
+# completes out during that return. No suffix required: locally continuing paths
+# prove out was consumed. An unavailable proof would conservatively require it.

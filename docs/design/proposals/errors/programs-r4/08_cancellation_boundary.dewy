@@ -1,0 +1,36 @@
+# PAPER R4: one group type; actual functions exercise ordinary and carrying paths.
+import p"@lib/std/errors.dewy" as errors
+CloseFailed:type = type of error & [message:string]
+WriteFailed:type = type of error & [message:string]
+interrupted = () => Canceled & CloseFailed["flush failed"]
+ordinary = () => WriteFailed["write failed"] & CloseFailed["close failed"]
+default_attempt = () => {
+    interrupted ?? void
+    printl("UNREACHABLE: saved")
+}
+checked_default = (failure:errors.ErrorGroup):>int | errors.ErrorGroup => {
+    $explicit_cancellation
+    let remaining = failure or_throw<Canceled>
+    return remaining ??<errors.ErrorGroup> 0
+}
+acknowledge_all = ():>void => {
+    interrupted ??<Canceled | errors.ErrorGroup> void
+}
+inspect = (failure:errors.ErrorGroup):>void => {
+    loop child in failure.errors { errors.report(child locations=true) }
+}
+main = () => {
+    acknowledge_all()
+    let n = checked_default(ordinary) or_throw
+    printl("ordinary failures explicitly defaulted to {n}")
+    let stopped = checked_default(interrupted)
+    if stopped is? errors.ErrorGroup {
+        inspect(stopped)
+        return stopped
+    }
+}
+# checked_default(ordinary) gives 0; checked_default(interrupted) forwards the exact group.
+# For either group, is? error and is? Canceled are false; is? exception is true.
+# or_throw<Canceled> deliberately differs from the nominal is? test when the group carries it.
+# acknowledge_all is an explicit choice to discard BOTH cancellation and the close failure.
+# & combines already obtained failures eagerly; it is not a fail-fast sequence of operations.
