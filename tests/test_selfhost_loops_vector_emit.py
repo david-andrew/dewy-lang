@@ -1,4 +1,4 @@
-"""Vector splats and guarded AVX/SSE emission match their frozen Jo twin."""
+"""Vector planning, loop bodies and guarded AVX/SSE emission match their Jo twin."""
 
 from tests.selfhost_build_double import compare_builds
 from tests.support import compiler  # noqa: F401
@@ -14,8 +14,10 @@ def test_loops_vector_emit_twins(compiler, tmp_path, monkeypatch):  # noqa: F811
          'tests/cases/product_bounds/vector_lanes.dewy',
          'tests/cases/product_bounds/vector_lane_written.dewy',
          'tests/cases/product_bounds/row_major.dewy',
+         'tests/cases/product_bounds/row_major_int32.dewy',
+         'tests/cases/product_bounds/row_major_int64.dewy',
          'compiler/main.jo'),
         flags=((), ('--release',)),
     )
-    assert len(results) == 16
-    assert all(results[i][2] == 0 for i in (0, 1, 2, 3, 4, 5, 14, 15))
+    assert len(results) == 20
+    assert all(results[i][2] == 0 for i in (0, 1, 2, 3, 4, 5, 18, 19))

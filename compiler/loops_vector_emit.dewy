@@ -1,9 +1,10 @@
 $runtime_checks
 
 from p"ir_types.dewy" import (Ins Op)
-from p"ir.jo" import (VI VF VS VX VY)
-from p"ir_builders.dewy" import (is_kv kv_of k_vreg vreg new_slot)
-from p"loops.jo" import (CLoop LCheck VPlan lx_reds lx_red_ops lx_kind_of_mode lx_in_check lx_minmax lx_fail lx_vloop lx_bin)
+from p"ir.jo" import (VI VF VS VX VY M_INDEX M_HDR M_FLOAT)
+from p"ir_builders.dewy" import (is_kv kv_of k_vreg vreg new_slot mem_index mem_scale)
+from p"loops.jo" import (CLoop LCheck VPlan lx_reds lx_red_ops lx_kind_of_mode lx_in_check lx_minmax lx_fail lx_bin lx_vec_op lx_vec_index lx_after lx_defined_in lx_within lx_appears)
+from p"loop_ordered.dewy" import (lx_record_index lx_record_stride)
 from p"loops_emit.dewy" import (lx_sum)
 from p"check.jo" import (prelude syms)
 from p"util.jo" import (intern)
@@ -81,5 +82,330 @@ lx_vec_emit=(code:array<Ins> L:CLoop checks:array<LCheck> plan:VPlan @out:array<
     out.push(Ins('br' 0 0 0 0 0 1))
     out.push(Ins('end'))
     if not plan.avx_only {lx_vloop(code L checks plan bases VX @out)}
+    out.push(Ins('end'))
+}
+
+lx_vec_plan=(code:array<Ins> L:CLoop checks:array<LCheck>):>VPlan=>$unsafe {
+    let pl=VecWord(L.pl)
+    let inc=VecWord(L.inc)
+    let pe=VecWord(L.pe)
+    let ctr=VecWord(L.ctr)
+    let no=VPlan(false 0 false [] [] [] [] [])
+    let plan=VPlan(true 0 false [] [] [] [] [])
+    lx_reds.clear()
+    lx_red_ops.clear()
+    loop p in [pl+1..inc) {
+        if not lx_vec_op(code.ptr[p].op) and not lx_in_check(p checks) {return no}
+    }
+    let affine=false
+    loop ch in checks {
+        if ch.kind =? 3 or ch.kind =? 6 {affine=true}
+    }
+    let indexes:array<int64>=[]
+    let kinds:dict<int64 int64>=dict<int64 int64>()
+    loop p in [pl+1..inc) {
+        if lx_in_check(p checks) {continue}
+        let ins=code.ptr[p]
+        let op=ins.op
+        let d=VecWord(ins.dst)
+        if op =? 'block' or op =? 'end' or op =? 'nop' {continue}
+        if (op =? 'gts' or op =? 'lts' or op =? 'ges' or op =? 'les') and p+1 <? inc and lx_minmax(code L p+1) not=? 0 {continue}
+        let minmax=lx_minmax(code L p)
+        if minmax not=? 0 {
+            ins.a=ins.b
+            ins.b=ins.c
+        }
+        if op =? 'shl' and lx_record_index(code L p) {
+            indexes.push(d)
+            continue
+        }
+        if affine and (op =? 'add' or op =? 'sub') and lx_vec_index(code L checks p 0) {
+            indexes.push(d)
+            continue
+        }
+        if op =? 'fconst' or op =? 'iconst' {
+            if lx_after(code d L) {return no}
+            kinds[d]=-1
+            continue
+        }
+        if op =? 'load' or op =? 'store' {
+            let c=VecWord(ins.c)
+            if c & M_INDEX =? 0 or c & M_HDR not=? 0 {return no}
+            let size=c & 15
+            if size not=? 4 and size not=? 8 {return no}
+            let ix=mem_index(ins)
+            let sc:VecWord=if size =? 4 {2} else {3}
+            let stride=lx_record_stride(code L ins)
+            if stride =? 0 and ((ix not=? ctr and not indexes.contains(ix)) or mem_scale(ins) not=? sc) {return no}
+            if stride not=? 0 and (op not=? 'load' or c & M_FLOAT =? 0 or size not=? 8) {return no}
+            let base=VecWord(ins.a)
+            if lx_defined_in(code base pl+1 pe) {return no}
+            if plan.es =? 0 {plan.es=size}
+            if plan.es not=? size {return no}
+            let k=lx_kind_of_mode(c)
+            plan.bases.push(base)
+            plan.offs.push(ins.imm)
+            plan.stores.push(op =? 'store')
+            plan.indexes.push(if stride not=? 0 {ctr} else {ix})
+            plan.strides.push(stride)
+            if op =? 'load' {
+                if not lx_within(code d L) {return no}
+                kinds[d]=k
+            } else {
+                let v=VecWord(ins.b)
+                let vk=kinds.get(v) ?? -2
+                if vk not=? -2 {
+                    if vk not=? k and vk >=? 0 {return no}
+                } else if lx_defined_in(code v pl+1 pe) or is_kv(v) {return no}
+            }
+            continue
+        }
+        if op =? 'shl' or op =? 'shrs' or op =? 'shru' {
+            let count=VecWord(ins.b)
+            if not is_kv(count) or kv_of(count) <? 0 or kv_of(count) >=? 64 {return no}
+            if (kinds.get(VecWord(ins.a)) ?? -1) not=? 3 or not lx_within(code d L) {return no}
+            kinds[d]=3
+            continue
+        }
+        if op =? 'sext32' or op =? 'zext32' {
+            let uk=kinds.get(VecWord(ins.a)) ?? -2
+            if uk not=? -2 {
+                if uk =? 2 and lx_within(code d L) {
+                    kinds[d]=2
+                    continue
+                }
+            }
+            return no
+        }
+        if op =? 'fneg' or op =? 'fsqrt' {
+            if not lx_within(code d L) {return no}
+            let fk:VecWord=if VecWord(ins.ty) =? VS {0} else {1}
+            let uk=kinds.get(VecWord(ins.a)) ?? -2
+            if uk not=? -2 {
+                if uk =? fk or uk =? -1 {
+                    kinds[d]=fk
+                    continue
+                }
+            }
+            return no
+        }
+        if op =? 'fadd' and ins.ty =? VF and (ins.a =? ins.dst or ins.b =? ins.dst) and ins.a not=? ins.b {
+            let x=if ins.a =? ins.dst {VecWord(ins.b)} else {VecWord(ins.a)}
+            if (kinds.get(x) ?? -1) not=? 1 or lx_appears(code d pl pe) not=? 1 {return no}
+            lx_reds.push(d)
+            lx_red_ops.push(op)
+            continue
+        }
+        if (op =? 'add' or op =? 'xor' or op =? 'or_' or op =? 'and_') and VecWord(ins.ty) =? VI and (VecWord(ins.a) =? d or VecWord(ins.b) =? d) and ins.a not=? ins.b {
+            let x=if VecWord(ins.a) =? d {VecWord(ins.b)} else {VecWord(ins.a)}
+            let xk=kinds.get(x) ?? -2
+            if xk not=? -2 {
+                if xk =? 3 and lx_appears(code d pl pe) =? 1 {
+                    lx_reds.push(d)
+                    lx_red_ops.push(op)
+                    continue
+                }
+            }
+            return no
+        }
+        let fl=op =? 'fadd' or op =? 'fsub' or op =? 'fmul' or op =? 'fdiv' or op =? 'fmin' or op =? 'fmax'
+        let il=op =? 'add' or op =? 'sub' or op =? 'mul' or op =? 'and_' or op =? 'or_' or op =? 'xor' or minmax not=? 0
+        if not fl and not il {return no}
+        if not lx_within(code d L) {return no}
+        let k:VecWord=-1
+        let lanes:VecWord=0
+        loop u in [VecWord(ins.a) VecWord(ins.b)] {
+            if u =? ctr {return no}
+            let uk=kinds.get(u) ?? -2
+            if uk not=? -2 {
+                if uk >=? 0 {
+                    if k >=? 0 and k not=? uk {return no}
+                    k=uk
+                }
+                lanes+=1
+            } else if lx_defined_in(code u pl+1 pe) {return no}
+        }
+        let fk:VecWord=if VecWord(ins.ty) =? VS {0} else {1}
+        if lanes =? 0 {return no}
+        if k <? 0 {k=if fl {fk} else {3}}
+        if fl and k not=? fk {return no}
+        if fl and k >=? 2 {return no}
+        if il and k <? 2 {return no}
+        if minmax not=? 0 and k not=? 3 {return no}
+        if op =? 'mul' {
+            if k not=? 2 and k not=? 3 {return no}
+            plan.avx_only=true
+        }
+        kinds[d]=k
+    }
+    if plan.es =? 0 {return no}
+    loop stride in plan.strides {
+        if stride not=? 0 and plan.stores.contains(true) {return no}
+    }
+    loop i in [0..plan.bases.length) {
+        let bi=plan.bases.ptr[i]
+        loop j in [0..plan.bases.length) {
+            let bj=plan.bases.ptr[j]
+            if i <? j and bi =? bj and (plan.stores.ptr[i] or plan.stores.ptr[j]) and (plan.offs.ptr[i] not=? plan.offs.ptr[j] or plan.indexes.ptr[i] not=? plan.indexes.ptr[j]) {return no}
+        }
+    }
+    plan.index_defs=indexes
+    plan
+}
+
+lx_vloop=(code:array<Ins> L:CLoop checks:array<LCheck> plan:VPlan bases:array<int64> ty:VecWord @out:array<Ins>):>void=>$unsafe {
+    let pl=VecWord(L.pl)
+    let inc=VecWord(L.inc)
+    let ctr=VecWord(L.ctr)
+    let endv=VecWord(L.endv)
+    let lanes:VecWord=16 // VecWord(plan.es)
+    if ty =? VY {lanes=32 // VecWord(plan.es)}
+    out.push(Ins('block'))
+    let t=lx_bin(@out 'sub' endv ctr)
+    out.push(Ins('brif' 0 0 VecI32(lx_bin(@out 'ltu' t k_vreg(lanes))) 0 0 0))
+    let last=if is_kv(endv) {k_vreg(kv_of(endv)-lanes)} else {lx_bin(@out 'sub' endv k_vreg(lanes))}
+    let vmap:dict<int64 int64>=dict<int64 int64>()
+    let kind:dict<int64 int64>=dict<int64 int64>()
+    let pre:array<Ins>=[]
+    let body:array<Ins>=[]
+    let memory_index:VecWord=0
+    let racc:array<int64>=fill(-1 lx_reds.length)
+    loop p in [pl+1..inc) {
+        if lx_in_check(p checks) {continue}
+        let ins=code.ptr[p]
+        let op=ins.op
+        let d=VecWord(ins.dst)
+        if op =? 'block' or op =? 'end' or op =? 'nop' {continue}
+        if (op =? 'gts' or op =? 'lts' or op =? 'ges' or op =? 'les') and p+1 <? inc and lx_minmax(code L p+1) not=? 0 {continue}
+        let minmax=lx_minmax(code L p)
+        if minmax not=? 0 {
+            ins.a=ins.b
+            ins.b=ins.c
+        }
+        if o_defines(op) and d not=? ctr and plan.index_defs.contains(d) {continue}
+        if op =? 'fconst' or op =? 'iconst' {
+            let c=vreg(VecWord(ins.ty))
+            pre.push(Ins(op ins.ty VecI32(c) 0 0 0 ins.imm))
+            let k:VecWord=if op =? 'iconst' {if plan.es =? 4 {2} else {3}} else if VecWord(ins.ty) =? VS {0} else {1}
+            let v=vreg(ty)
+            pre.push(Ins('vsplat' VecI32(ty) VecI32(v) VecI32(c) 0 0 k))
+            vmap[d]=v
+            kind[d]=k
+            continue
+        }
+        if op =? 'load' {
+            let k=lx_kind_of_mode(VecWord(ins.c))
+            let v=vreg(ty)
+            let stride=plan.strides.ptr[memory_index]
+            let index=if stride =? 0 {ctr} else {lx_bin(@body 'mul' ctr k_vreg(stride))}
+            body.push(Ins('vld' VecI32(ty) VecI32(v) VecI32(bases.ptr[memory_index]) VecI32(index) VecI32(k | (stride << 8)) ins.imm))
+            memory_index+=1
+            vmap[d]=v
+            kind[d]=k
+            continue
+        }
+        if op =? 'store' {
+            let k=lx_kind_of_mode(VecWord(ins.c))
+            let val=VecWord(ins.b)
+            let vv=lx_splat(@pre @vmap val k ty)
+            body.push(Ins('vst' VecI32(ty) VecI32(ctr) VecI32(bases.ptr[memory_index]) VecI32(vv) VecI32(k) ins.imm))
+            memory_index+=1
+            continue
+        }
+        if op =? 'sext32' or op =? 'zext32' {
+            vmap[d]=vmap[VecWord(ins.a)]
+            kind[d]=2
+            continue
+        }
+        if op =? 'shl' or op =? 'shrs' or op =? 'shru' {
+            let xa=lx_splat(@pre @vmap VecWord(ins.a) 3 ty)
+            let v=vreg(ty)
+            body.push(Ins('vbin' VecI32(ty) VecI32(v) VecI32(xa) ins.b VecI32(if op =? 'shl' {12} else if op =? 'shru' {13} else {14}) 3))
+            vmap[d]=v
+            kind[d]=3
+            continue
+        }
+        if op =? 'fsqrt' {
+            let k:VecWord=if VecWord(ins.ty) =? VS {0} else {1}
+            let xa=lx_splat(@pre @vmap VecWord(ins.a) k ty)
+            let v=vreg(ty)
+            body.push(Ins('vbin' VecI32(ty) VecI32(v) VecI32(xa) VecI32(xa) 9 k))
+            vmap[d]=v
+            kind[d]=k
+            continue
+        }
+        if op =? 'fneg' {
+            let k:VecWord=if VecWord(ins.ty) =? VS {0} else {1}
+            let xa=lx_splat(@pre @vmap VecWord(ins.a) k ty)
+            let signbit:VecWord=if k =? 0 {2147483648} else {-9223372036854775807-1}
+            let mask=lx_splat(@pre @vmap k_vreg(signbit) k+2 ty)
+            let v=vreg(ty)
+            body.push(Ins('vbin' VecI32(ty) VecI32(v) VecI32(xa) VecI32(mask) 8 k))
+            vmap[d]=v
+            kind[d]=k
+            continue
+        }
+        let ri=lx_reds.index_of(d) ?? (-1)
+        if ri >=? 0 and ins.ty =? VF {
+            let x=if ins.a =? ins.dst {VecWord(ins.b)} else {VecWord(ins.a)}
+            body.push(Ins('vbin' VF VecI32(d) VecI32(d) VecI32(vmap[x]) VecI32(if ins.a =? ins.dst {10} else {11}) 1))
+            continue
+        }
+        if ri >=? 0 and ins.ty =? VI {
+            if racc.ptr[ri] <? 0 {
+                let z=vreg(VI)
+                let iden:VecWord=if lx_red_ops.ptr[ri] =? 'and_' {-1} else {0}
+                pre.push(Ins('iconst' VI VecI32(z) 0 0 0 iden))
+                racc[ri]=vreg(ty)
+                pre.push(Ins('vsplat' VecI32(ty) VecI32(racc.ptr[ri]) VecI32(z) 0 0 3))
+            }
+            let x=if VecWord(ins.a) =? d {VecWord(ins.b)} else {VecWord(ins.a)}
+            let ro:VecWord=if lx_red_ops.ptr[ri] =? 'and_' {6} else if lx_red_ops.ptr[ri] =? 'or_' {7} else if lx_red_ops.ptr[ri] =? 'xor' {8} else {0}
+            body.push(Ins('vbin' VecI32(ty) VecI32(racc.ptr[ri]) VecI32(racc.ptr[ri]) VecI32(vmap[x]) VecI32(ro) 3))
+            continue
+        }
+        let k:VecWord=-1
+        loop u in [VecWord(ins.a) VecWord(ins.b)] {
+            let uk=kind.get(u) ?? -2
+            if uk not=? -2 {k=uk; break}
+        }
+        let vo:VecWord=8
+        if op =? 'fadd' or op =? 'add' {vo=0}
+        else if op =? 'fsub' or op =? 'sub' {vo=1}
+        else if op =? 'fmul' or op =? 'mul' {vo=2}
+        else if op =? 'fdiv' {vo=3}
+        else if op =? 'fmin' {vo=4}
+        else if op =? 'fmax' {vo=5}
+        else if op =? 'and_' {vo=6}
+        else if op =? 'or_' {vo=7}
+        if minmax not=? 0 {vo=minmax}
+        let xa=lx_splat(@pre @vmap VecWord(ins.a) k ty)
+        let xb=lx_splat(@pre @vmap VecWord(ins.b) k ty)
+        let v=vreg(ty)
+        body.push(Ins('vbin' VecI32(ty) VecI32(v) VecI32(xa) VecI32(xb) VecI32(vo) k))
+        vmap[d]=v
+        kind[d]=k
+    }
+    loop x in pre {out.push(x)}
+    out.push(Ins('loop'))
+    loop x in body {out.push(x)}
+    out.push(Ins('add' VI VecI32(ctr) VecI32(ctr) VecI32(k_vreg(lanes)) 0 0))
+    out.push(Ins('brif' 0 0 VecI32(lx_bin(@out (if L.signed {'les'} else {'leu'}) ctr last)) 0 0 0))
+    out.push(Ins('end'))
+    loop ri in [0..lx_reds.length) {
+        let acc=lx_reds.ptr[ri]
+        if racc.ptr[ri] <? 0 {continue}
+        let sl=new_slot(32 32)
+        let sa=vreg(VI)
+        out.push(Ins('slot' VI VecI32(sa) VecI32(sl) 0 0 0))
+        let z=vreg(VI)
+        out.push(Ins('iconst' VI VecI32(z) 0 0 0 0))
+        out.push(Ins('vst' VecI32(ty) VecI32(z) VecI32(sa) VecI32(racc.ptr[ri]) 3 0))
+        loop j in [0..lanes) {
+            let t=vreg(VI)
+            out.push(Ins('load' VI VecI32(t) VecI32(sa) 0 8 j*8))
+            out.push(Ins(lx_red_ops.ptr[ri] VI VecI32(acc) VecI32(acc) VecI32(t) 0 0))
+        }
+    }
     out.push(Ins('end'))
 }
