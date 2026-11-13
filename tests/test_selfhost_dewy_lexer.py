@@ -11,6 +11,7 @@ import subprocess
 
 import pytest
 
+from tests.corpus_cache import SHARDS, built_once, shard_of
 from tests.support import compiler  # noqa: F401
 from tools.compiler import parser_diff
 
@@ -67,13 +68,25 @@ def compare(pair, source, mode, begin=None, stop=None):
     assert b'panic:' not in a.stderr, (source, a.stderr)
 
 
-@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
-def test_lexer_matches_frozen_corpus(compiler, tmp_path, release):
-    pair = build_pair(compiler, tmp_path, release)
+def shared_pair(compiler, release):
+    return built_once(('lexer', str(compiler), release), lambda directory: build_pair(compiler, directory, release))
+
+
+@pytest.mark.parametrize('release, shard', [
+    pytest.param(release, k, id=f'{name}-{k}of{SHARDS}', marks=pytest.mark.xdist_group(name=f'lexer-{name}-{k}'))
+    for release, name in ((False, 'default'), (True, 'release')) for k in range(SHARDS)])
+def test_lexer_matches_frozen_corpus(compiler, release, shard):
+    # (interleaved shards of the tracked sources, one xdist group each)
+    pair = shared_pair(compiler, release)
     sources = parser_diff.corpus()
     assert sources
-    for source in sources:
+    for source in shard_of(sources, shard):
         compare(pair, source, 'intern')
+
+
+@pytest.mark.parametrize('release', [False, True], ids=['default', 'release'])
+def test_lexer_matches_frozen_generated(compiler, tmp_path, release):
+    pair = shared_pair(compiler, release)
     rng = random.Random(117)
     examples = [b'', b'()[]{}' * 2000, b'#!\n#{outer\n#{inner}#}# x\\ \n+y',
                 b'let x="{if true {"{1}"} else {"x"}}"',
