@@ -1,7 +1,7 @@
 $runtime_checks
 
 from p"ast.jo" import (kid nkids nodes)
-from p"directives.jo" import (dir_code_any dir_code_by_inst dir_code_priority dir_code_current DIR_DEFAULT DIR_IMPLICIT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC dir_assumed_bounds_any dir_bounds_files dir_bounds_gen dir_copies_any dir_entry_positions dir_find dir_forced dir_mixed_files dir_name_assumed_bounds dir_name_copies dir_name_prototype dir_name_runtime dir_prior_static dir_proven dir_scopes dir_scopes_gen dir_uniform_files dir_value)
+from p"directives.jo" import (dir_code_any dir_code_by_inst dir_code_current dir_code_never_static dir_code_policy DIR_DEFAULT DIR_IMPLICIT DIR_PROTOTYPE DIR_RUNTIME DIR_STATIC dir_assumed_bounds_any dir_bounds_files dir_bounds_gen dir_copies_any dir_entry_positions dir_find dir_forced dir_mixed_files dir_name_assumed_bounds dir_name_copies dir_name_prototype dir_name_runtime dir_prior_static dir_proven dir_scopes dir_scopes_gen dir_uniform_files dir_value)
 from p"facts.jo" import (fact_member_failed fact_member_shared fact_policy fact_speculating)
 from p"isolation_ops.dewy" import (isolation_children)
 from p"util.jo" import (files pos_file pos_in_lib)
@@ -37,10 +37,14 @@ dir_policy=(p:DirWord):>DirWord=>{
     let rv=if r >=? 0 {dir_scopes[r].value} else {-1}
     let qv=if q >=? 0 {dir_scopes[q].value} else {-1}
     let priority=q >=? 0 and (r <? 0 or dir_scopes[q].start >=? dir_scopes[r].start)
-    if dir_code_any and dir_code_by_inst.length not=? 0 and dir_code_current not=? 0 {
-        rv=dir_value(dir_name_runtime at)
-        qv=dir_value(dir_name_prototype at)
-        priority=dir_code_priority(at)
+    if dir_code_any and dir_code_by_inst.length not=? 0 {
+        let code=dir_code_current
+        if code not=? 0 {
+            let coded=dir_code_policy(code r q at)
+            if coded >=? 0 {return coded}
+            rv=-1
+            qv=-1
+        }
     }
     if qv =? 1 and (rv =? -1 or priority) {return DIR_PROTOTYPE}
     if rv =? 1 {return DIR_RUNTIME}
@@ -69,20 +73,25 @@ dir_explicit_copies=(p:DirWord):>bool=>{
 }
 # Only bodies containing a no-traps scope demand the panic graph.
 # O(body nodes), stopping at the first such scope; nested lambdas own their bodies.
-dir_static_body=(n:DirWord):>bool=>$unsafe {
+# O(1) for an instance whose inherited vector keeps checks on everywhere.
+dir_static_body=(n:DirWord):>bool=>{
+    if n <=? 0 or dir_code_any and dir_code_never_static {return false}
+    dir_static_walk(n)
+}
+dir_static_walk=(n:DirWord):>bool=>$unsafe {
     if n <=? 0 {return false}
     if dir_uniform_runtime(nodes.ptr[n].pos) {return false}
     if nodes.ptr[n].pos >? 0 and dir_policy(nodes.ptr[n].pos) =? DIR_STATIC {return true}
     if nodes.ptr[n].kind =? 'lambda' {return false}
     let mask=isolation_children(nodes.ptr[n].kind)
     if mask <? 0 {return false}
-    if mask & 1 not=? 0 and dir_static_body(DirWord(nodes.ptr[n].a)) {return true}
-    if mask & 2 not=? 0 and dir_static_body(DirWord(nodes.ptr[n].b)) {return true}
-    if mask & 4 not=? 0 and dir_static_body(DirWord(nodes.ptr[n].c)) {return true}
+    if mask & 1 not=? 0 and dir_static_walk(DirWord(nodes.ptr[n].a)) {return true}
+    if mask & 2 not=? 0 and dir_static_walk(DirWord(nodes.ptr[n].b)) {return true}
+    if mask & 4 not=? 0 and dir_static_walk(DirWord(nodes.ptr[n].c)) {return true}
     if mask & 16 not=? 0 {
         loop i in [0..nkids(n)) {
             let child=kid(n i)
-            if dir_static_body(child) {return true}
+            if dir_static_walk(child) {return true}
         }
     }
     false

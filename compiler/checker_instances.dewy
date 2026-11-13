@@ -14,7 +14,7 @@ from p"checks_thin.dewy" import (ensure_ret)
 from p"frontend.jo" import source_force_body
 from p"checks_type_hooks.dewy" import (instance_preflight instance_create instance_bad_arg instance_depth_error instance_load instance_validate instance_attributes)
 from p"ast.jo" import (clone kid)
-from p"directives.jo" import (dir_code_runtime_keys dir_code_generic_warn dir_code_generic dir_code_foreign_warn dir_code_context dir_code_contexts dir_code_origin dir_code_origins dir_code_any dir_code_files dir_mixed_files dir_code_uniform dir_code_can_vary dir_code_sources dir_code_by_inst dir_code_request)
+from p"directives.jo" import (dir_code_runtime_keys dir_code_generic_warn dir_code_generic dir_code_foreign_warn dir_code_context dir_code_contexts dir_code_origin dir_code_origins dir_code_any dir_code_mask dir_code_masks dir_mixed_files dir_code_uniform dir_code_can_vary dir_code_sources dir_code_by_inst dir_code_request)
 # Demand-only instance resolution. Concrete lookup is indexed; unresolved lookup
 # scans this declaration's instances and type arguments. Substitution and body
 # walks retain their existing costs. Hosts may reenter and grow every arena.
@@ -33,7 +33,10 @@ CheckerInstanceInput:type=[
 let ci_input:ptr<CheckerInstanceInput>=$unsafe (uint64(0) as ptr<CheckerInstanceInput>)
 checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>{ci_input=input;0}
 ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
-    if dir_code_any and dir_code_files.has(ci_input[0].nodes[0].ptr[decl].pos >> 40) {return ci_get_policy_inst(decl targs use_pos)}
+    if dir_code_any {
+        let file=ci_input[0].nodes[0].ptr[decl].pos >> 40
+        if file >=? 0 and file <? dir_code_masks.length and dir_code_masks[file] not=? 0 {return ci_get_policy_inst(decl targs use_pos)}
+    }
     if ci_input[0].nodes[0].ptr[decl].kind =? 'lambda' {return poly_inst(decl targs use_pos)}
     # The host's preflight only acts on extern or attributed declarations.
     if (CIWord(ci_input[0].nodes[0].ptr[decl].flags) & 4) not=? 0 or ci_input[0].nodes[0].ptr[decl].c not=? 0 {instance_preflight(decl use_pos)}
@@ -43,7 +46,7 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
     if di =? 0 {di=cs_decl_info(decl)}
     let sig=ci_input[0].declarations[0].ptr[di].sig
     if not sig.done {sig=fn_sig(decl)}
-    if dir_code_any and (dir_code_files.has(use_pos >> 40) or dir_code_by_inst.length not=? 0) {
+    if dir_code_any and (dir_code_by_inst.length not=? 0 or dir_code_mask(use_pos >> 40) not=? 0) {
         if sig.generic and dir_code_generic(decl use_pos) {return ci_get_policy_inst(decl targs use_pos)}
         if not sig.generic {dir_code_foreign_warn(decl use_pos)}
     }
@@ -127,15 +130,15 @@ ci_get_policy_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$uns
     if di =? 0 {di=cs_decl_info(decl)}
     let sig=ci_input[0].declarations[0].ptr[di].sig
     if not sig.done {sig=fn_sig(decl)}
-    if dir_code_any and not sig.generic {dir_code_foreign_warn(decl use_pos)}
+    let origin=dir_code_origin(use_pos)
+    if dir_code_any and not sig.generic {dir_code_foreign_warn(decl use_pos origin)}
     let code=0
-    let scoped=dir_code_any and (dir_code_files.has(ci_input[0].nodes[0].ptr[decl].pos >> 40) or sig.generic and dir_code_generic(decl use_pos))
+    let scoped=dir_code_any and (dir_code_mask(ci_input[0].nodes[0].ptr[decl].pos >> 40) not=? 0 or sig.generic and dir_code_generic(decl use_pos))
     if scoped and not dir_code_uniform(decl use_pos) {
         source_force_body(decl)
-        code=dir_code_request(decl use_pos sig.generic)
+        code=dir_code_request(decl use_pos sig.generic true origin)
         if sig.generic and code not=? 0 {dir_code_generic_warn(decl use_pos)}
     }
-    let origin=dir_code_origin(use_pos)
     let foreign=sig.generic and origin not=? (ci_input[0].nodes[0].ptr[decl].pos >> 40)
     let context=dir_code_context(code origin foreign)
     let reuse_static=code not=? 0 and not foreign and (dir_code_runtime_keys.get(decl) ?? 0) =? code

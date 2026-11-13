@@ -28,13 +28,13 @@ checker_instances_bind = (input: *CheckerInstanceInput) -> int:
     ci_input = input
     0
 ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
-    if dir_code_any and dir_code_files.has(ci_input[0].nodes[0][decl].pos >> 40): return ci_get_policy_inst(decl, targs, use_pos)
+    if dir_code_any and dir_code_masks.len() > ci_input[0].nodes[0][decl].pos >> 40 and dir_code_masks[ci_input[0].nodes[0][decl].pos >> 40] != 0: return ci_get_policy_inst(decl, targs, use_pos)
     if ci_input[0].nodes[0][decl].kind == .lambda: return poly_inst(decl, targs, use_pos)
     # (the host's preflight acts only on extern or attributed declarations)
     if int(ci_input[0].nodes[0][decl].flags) & 4 != 0 or ci_input[0].nodes[0][decl].c != 0: instance_preflight(decl, use_pos)
     di = cs_decl_info(decl)
     sig = fn_sig(decl)
-    if dir_code_any and (dir_code_files.has(use_pos >> 40) or dir_code_by_inst.len() != 0):
+    if dir_code_any and (dir_code_by_inst.len() != 0 or dir_code_mask(use_pos >> 40) != 0):
         if sig.generic and dir_code_generic(decl, use_pos): return ci_get_policy_inst(decl, targs, use_pos)
         if not sig.generic: dir_code_foreign_warn(decl, use_pos)
     concrete = targs.len() > 0
@@ -100,14 +100,14 @@ ci_get_policy_inst = (decl: int, targs: int[], use_pos: int) -> int:
     if int(ci_input[0].nodes[0][decl].flags) & 4 != 0 or ci_input[0].nodes[0][decl].c != 0: instance_preflight(decl, use_pos)
     di = cs_decl_info(decl)
     sig = fn_sig(decl)
-    if dir_code_any and not sig.generic: dir_code_foreign_warn(decl, use_pos)
+    origin = dir_code_origin(use_pos)
+    if dir_code_any and not sig.generic: dir_code_foreign_warn(decl, use_pos, origin)
     code = 0
-    scoped = dir_code_any and (dir_code_files.has(ci_input[0].nodes[0][decl].pos >> 40) or sig.generic and dir_code_generic(decl, use_pos))
+    scoped = dir_code_any and (dir_code_mask(ci_input[0].nodes[0][decl].pos >> 40) != 0 or sig.generic and dir_code_generic(decl, use_pos))
     if scoped and not dir_code_uniform(decl, use_pos):
         source_force_body(decl)
-        code = dir_code_request(decl, use_pos, sig.generic)
+        code = dir_code_request(decl, use_pos, sig.generic, true, origin)
         if sig.generic and code != 0: dir_code_generic_warn(decl, use_pos)
-    origin = dir_code_origin(use_pos)
     foreign = sig.generic and origin != (ci_input[0].nodes[0][decl].pos >> 40)
     context = dir_code_context(code, origin, foreign)
     reuse_static = code != 0 and not foreign and (dir_code_runtime_keys.get(decl) ?? 0) == code

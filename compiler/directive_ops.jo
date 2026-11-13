@@ -37,6 +37,7 @@ directives_reset = ():
     dir_code_warnings = {}
     dir_code_owner = 0
     dir_code_names = []
+    dir_code_reset()
     dir_code_files = {}
     dir_code_runtime_keys = {}
     dir_code_sources = {}
@@ -216,17 +217,11 @@ dir_conflict = (i: int):
     b = name_of(outer.bundle)
     fatal(s.at, "{dir_spelled(s)} is not allowed inside `${b}`, which sets {dir_spelled(outer)}; opt this scope out first with `${b}=false`")
 dir_push = (s: DirScope):
+    dir_code_note(s)
     if dir_program_any and s.start == dir_module_start(pos_file(s.start)) and s.setting == intern("program.max_cores") and files[pos_file(s.start)].path == settings_path:
         dir_header_cores = true
         dir_runtime_caps = true
         dir_runtime_settings = true
-    if not pos_in_lib(s.start) and (s.start != dir_module_start(pos_file(s.start)) or s.setting == dir_name_fast_math or s.setting == dir_name_no_nan or s.setting == dir_name_no_inf):
-        dir_code_init()
-        slot = dir_code_slot(s.setting)
-        if slot >= 0:
-            dir_code_any = true
-            file = pos_file(s.start)
-            dir_code_files[file] = (dir_code_files.get(file) ?? 0) | (1 << slot)
     dir_scopes.push(s)
     dir_scopes_gen += 1
     if s.setting == dir_name_runtime or s.setting == dir_name_prototype or s.setting == dir_name_warnings:

@@ -211,8 +211,9 @@ dir_value = (setting: int, p: int) -> int:
     if dir_code_any and dir_code_by_inst.len() != 0:
         if i >= 0 and dir_scopes[i].start != dir_module_start(pos_file(p)): return dir_scopes[i].value
         code = dir_code_current()
-        slot = dir_code_slot(setting)
-        if code != 0 and slot >= 0: return ((code >> (slot * 2)) & 3) - 1
+        if code != 0:
+            slot = dir_code_slot(setting)
+            if slot >= 0: return ((code >> (slot * 2)) & 3) - 1
     if i < 0: return -1
     dir_scopes[i].value
 
@@ -226,6 +227,11 @@ dir_code_any = false
 dir_code_owner = 0
 dir_code_names: int[]
 dir_code_files: {int: int}
+# (dir_code_files indexed by file, for the per-call queries)
+dir_code_masks: int[]
+dir_code_mask = (file: int) -> int:
+    if file < 0 or file >= dir_code_masks.len(): return 0
+    dir_code_masks[file]
 dir_code_by_inst: {int: int}
 dir_code_runtime_keys: {int: int}
 dir_code_sources: {int: int}
@@ -234,6 +240,76 @@ dir_code_origins: {int: int}
 dir_code_contexts: {int: int}
 dir_code_context_keys: {int: int}
 dir_code_warnings: {int: bool}
+
+# dir_code_inst's remembered instance, the map's size then and its vector.
+dir_code_memo_f = -1
+dir_code_memo_size = -1
+dir_code_memo = 0
+# Settings that some scope has ever set (a bit per slot, never cleared until
+# reset): an unset slot is -1 in every vector and every scope query.
+dir_code_seen = 0
+# Some trap-policy scope below a module header (or spanning files) turns
+# checks off or opts out; without one, a vector that decides a runtime or
+# prototype policy decides it at every position of the instance.
+dir_code_trap_off = false
+
+dir_code_note = (s: DirScope):
+    dir_code_init()
+    slot = dir_code_slot(s.setting)
+    if slot < 0: return
+    dir_code_seen |= 1 << slot
+    # (a module's code vector: only from a scope below its header, or a float policy)
+    if not pos_in_lib(s.start) and (s.start != dir_module_start(pos_file(s.start)) or s.setting == dir_name_fast_math or s.setting == dir_name_no_nan or s.setting == dir_name_no_inf):
+        dir_code_any = true
+        file = pos_file(s.start)
+        if file >= dir_code_masks.len(): dir_code_masks.resize(file + 1)
+        dir_code_masks[file] = dir_code_masks[file] | (1 << slot)
+        dir_code_files[file] = dir_code_masks[file]
+    if slot < 2 and s.value != 1:
+        file = pos_file(s.start)
+        if s.start != dir_module_start(file) or pos_file(s.end) != file: dir_code_trap_off = true
+
+dir_code_reset = ():
+    dir_code_masks = []
+    dir_code_seen = 0
+    dir_code_trap_off = false
+    dir_code_memo_f = -1
+    dir_code_memo_size = -1
+    dir_code_memo = 0
+
+# The trap policy a vector and the innermost runtime (r) and prototype (q)
+# scopes give at p: dir_policy's order of rules, scopes below the header
+# winning over the vector; -1 when none applies (the positional default).
+dir_code_policy = (code: int, r: int, q: int, p: int) -> int:
+    rv = ((code & 3)) - 1
+    qv = ((code >> 2) & 3) - 1
+    priority = (code & __CODE_PRIORITY) != 0
+    if dir_scopes.len() == 0: rv = -1
+    if dir_scopes.len() == 0: qv = -1
+    start = dir_module_start(pos_file(p))
+    local_r = r >= 0 and dir_scopes[r].start != start
+    local_q = q >= 0 and dir_scopes[q].start != start
+    if local_r: rv = dir_scopes[r].value
+    if local_q: qv = dir_scopes[q].value
+    if local_r or local_q: priority = local_q and (not local_r or dir_scopes[q].start >= dir_scopes[r].start)
+    dir_trap_rules(rv, qv, priority)
+
+dir_trap_rules = (rv: int, qv: int, priority: bool) -> int:
+    if qv == 1 and (rv == -1 or priority): return DIR_PROTOTYPE
+    if rv == 1: return DIR_RUNTIME
+    if rv == 0: return DIR_STATIC
+    if qv == 1: return DIR_PROTOTYPE
+    -1
+
+# Whether no position can be static under the current vector: it decides a
+# runtime or prototype policy and every scope that could override it keeps
+# checks on. O(1).
+dir_code_never_static = () -> bool:
+    if not dir_code_any or dir_code_trap_off or dir_code_by_inst.len() == 0: return false
+    code = dir_code_current()
+    if code == 0: return false
+    policy = dir_trap_rules((code & 3) - 1, ((code >> 2) & 3) - 1, (code & __CODE_PRIORITY) != 0)
+    policy == DIR_RUNTIME or policy == DIR_PROTOTYPE
 
 dir_code_init = ():
     if dir_code_names.len() != 0: return
@@ -244,21 +320,35 @@ dir_code_slot = (setting: int) -> int:
         if dir_code_names[i] == setting: return i
     -1
 
+# One remembered answer: policy queries ask about the same instance in runs.
+# Entries are only added (each at its instance's creation), so the map's size
+# tells whether the answer still holds. O(1) on a repeat, O(lambda depth) else.
 dir_code_inst = (f: int) -> int:
+    size = dir_code_by_inst.len()
+    if f == dir_code_memo_f and size == dir_code_memo_size: return dir_code_memo
+    code = 0
     let current = f
     loop current > 0 and current < fns.len():
-        if let code = dir_code_by_inst.get(current): return code
+        if let found = dir_code_by_inst.get(current):
+            code = found
+            break
         d = int(fns[current].decl)
-        if d == 0 or nodes[d].kind != .lambda: return 0
+        if d == 0 or nodes[d].kind != .lambda: break
         current = int(fns[current].made_in)
-    0
+    dir_code_memo_f = f
+    dir_code_memo_size = size
+    dir_code_memo = code
+    code
 
 dir_code_current = () -> int:
-    if not dir_code_any or dir_code_by_inst.len() == 0: return 0
+    if not dir_code_any: return 0
+    size = dir_code_by_inst.len()
+    if size == 0: return 0
     f = fact_owner
     if f <= 0: f = fact_retry_owner
     if f <= 0 and cx >= 0: f = int(ctxs[cx].inst)
     if f <= 0: f = dir_code_owner
+    if f == dir_code_memo_f and size == dir_code_memo_size: return dir_code_memo
     dir_code_inst(f)
 
 # -2 means no inherited vector; -1 is an explicit/default absent component.
@@ -297,7 +387,7 @@ dir_code_pin = (decl: int, setting: int, body: int) -> int:
     -1
 
 dir_code_can_vary = (decl: int) -> bool:
-    mask = dir_code_files.get(pos_file(nodes[decl].pos)) ?? 0
+    mask = dir_code_mask(pos_file(nodes[decl].pos))
     if mask == 0 or nodes[decl].b == 0: return false
     # A required static body is itself the proof for runtime-only sharing;
     # preserve syntax only when a genuinely different body can be requested.
@@ -336,25 +426,28 @@ dir_code_context = (code: int, origin: int, foreign: bool = false) -> int:
 
 dir_code_generic = (decl: int, at: int) -> bool:
     if at <= 0 or not files[pos_file(nodes[decl].pos)].is_dewy: return false
-    dir_code_current() != 0 or dir_code_files.has(pos_file(at))
+    dir_code_current() != 0 or dir_code_mask(pos_file(at)) != 0
 
 dir_code_uniform = (decl: int, at: int) -> bool:
     file = pos_file(nodes[decl].pos)
     if at <= 0: return true
     if dir_code_current() != 0: return false
-    if pos_file(at) != file: return not dir_code_files.has(pos_file(at))
-    mask = dir_code_files.get(file) ?? 0
+    if pos_file(at) != file: return dir_code_mask(pos_file(at)) == 0
+    mask = dir_code_mask(file)
     loop i in [0..dir_code_names.len()):
+        if mask >> i == 0: break
         if (mask & (1 << i)) != 0 and dir_code_local(dir_code_names[i], at) >= 0: return false
     true
 
-dir_code_request = (decl: int, at: int, generic: bool = false) -> int:
+# (`mixed`: the caller has already found the call not uniform)
+dir_code_request = (decl: int, at: int, generic: bool = false, mixed: bool = false, origin: int = -1) -> int:
     if not dir_code_any or nodes[decl].b == 0 or at <= 0: return 0
     file = pos_file(nodes[decl].pos)
-    if not generic and (dir_code_origin(at) != file or not dir_code_files.has(file)): return 0
+    let origin = if not generic and origin < 0: dir_code_origin(at) else: origin
+    if not generic and (origin != file or dir_code_mask(file) == 0): return 0
     # A generic closure passed as a value retains its declaration's vector.
     if nodes[decl].kind == .lambda: return dir_code_inst(int(nodes[decl].aux))
-    if dir_code_uniform(decl, at): return 0
+    if not mixed and dir_code_uniform(decl, at): return 0
     body = nodes[int(nodes[decl].b)].pos
     baseline = __CODE_PRESENT | __CODE_PRIORITY
     result = __CODE_PRESENT
@@ -366,7 +459,12 @@ dir_code_request = (decl: int, at: int, generic: bool = false) -> int:
         if r >= 0 and q >= 0: priority = dir_scopes[q].start >= dir_scopes[r].start
     if priority: result |= __CODE_PRIORITY
     if r >= 0 and q < 0: baseline &= ~__CODE_PRIORITY
+    # (a setting no scope has set: -1 in the body, the caller's vector at the call)
+    current = dir_code_current()
     loop i in [0..dir_code_names.len()):
+        if dir_code_seen & (1 << i) == 0:
+            result |= current & (3 << (2 * i))
+            continue
         setting = dir_code_names[i]
         own = dir_find(setting, body)
         value = -1
@@ -388,13 +486,17 @@ dir_code_request = (decl: int, at: int, generic: bool = false) -> int:
     result
 
 # Concrete foreign numerics keep their declared policy; report each call once.
-dir_code_foreign_warn = (decl: int, at: int):
-    if at <= 0 or pos_in_lib(at) or starts_with(name_of(int(nodes[decl].name)), "__"): return
-    if dir_code_origin(at) == pos_file(nodes[decl].pos): return
-    if not files[pos_file(nodes[decl].pos)].is_dewy or dir_code_warnings.has(at): return
-    if not dir_code_files.has(pos_file(at)) and dir_code_current() == 0: return
+# (the cheapest of its pure tests first; `origin` when the caller has it)
+dir_code_foreign_warn = (decl: int, at: int, origin: int = -1):
+    if at <= 0: return
+    file = pos_file(nodes[decl].pos)
+    if not files[file].is_dewy or origin == file: return
+    if pos_in_lib(at) or starts_with(name_of(int(nodes[decl].name)), "__"): return
+    let origin = if origin < 0: dir_code_origin(at) else: origin
+    if origin == file or dir_code_warnings.has(at): return
+    if dir_code_mask(pos_file(at)) == 0 and dir_code_current() == 0: return
     source_force_body(decl)
-    if nodes[decl].b == 0: return
+    if nodes[decl].b == 0 or dir_code_seen & (7 << 4) == 0: return
     body = nodes[int(nodes[decl].b)].pos
     loop slot in [4..7):
         setting = dir_code_names[slot]
@@ -410,6 +512,7 @@ dir_code_foreign_warn = (decl: int, at: int):
 # A parameter's callable contract retains its declared code, while settings
 # frames still flow through the call. The warning is per source call.
 dir_code_parameter = (n: int, callee: int):
+    if dir_code_seen & (7 << 4) == 0: return
     let target = callee
     loop nodes[target].kind == .conv: target = int(nodes[target].a)
     if nodes[target].kind != .ident or nodes[target].aux != 1: return
@@ -424,6 +527,7 @@ dir_code_parameter = (n: int, callee: int):
 
 # Imported generic numerics are specialized, with one IEEE warning per target.
 dir_code_generic_warn = (decl: int, at: int):
+    if dir_code_seen & (7 << 4) == 0: return
     if at <= 0 or pos_in_lib(at) or dir_code_origin(at) == pos_file(nodes[decl].pos): return
     key = -decl - 1
     if dir_code_warnings.has(key) or nodes[decl].b == 0: return
