@@ -1,7 +1,6 @@
 let dropped:int64=0
 BufferedHandle=type of [text:string values:array<int64>
-$__drop__
-release=():>void=>{
+$__drop__=():>void=>{
     # The fields remain live until the hook finishes, including replacement
     # and growth. Ordinary field storage is reclaimed afterward.
     dropped+=values.length as int64

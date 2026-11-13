@@ -96,8 +96,7 @@ main=()=>{
 }''',
     'owner-capture-drop': '''drops:int64=0
 Handle=type of [value:int64
- $__drop__
- release=():>void=>{drops+=1}
+ $__drop__=():>void=>{drops+=1}
 ]
 exercise=()=>{
  let owner=Handle[42]

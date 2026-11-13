@@ -2,8 +2,7 @@
 $runtime_checks
 
 Owner=type of [value:int64
-    $__drop__
-    release=():>void=>{printl"drop pending argument"}
+    $__drop__=():>void=>{printl"drop pending argument"}
 ]
 consume=(owner:Owner n:int64):>int64=>owner.value+n
 fail=():>int64=>panic("argument panic")

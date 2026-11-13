@@ -7,8 +7,7 @@ heap_owner=():>int64=>{
 }
 let observed:int64=0
 Handle=type of [id:int64
-    $__drop__
-    release=():>void=>{observed=heap_owner()}
+    $__drop__=():>void=>{observed=heap_owner()}
 ]
 work=(@arena:Arena):>int64=>{
     $allocator(@arena) {let value=Handle[42] return value.id}

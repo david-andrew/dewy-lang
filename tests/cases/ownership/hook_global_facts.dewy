@@ -1,8 +1,7 @@
 # A drop hook can change a global: its earlier facts end at the drop.
 let count:int64=0
 Owner=type of [value:int64
-    $__drop__
-    release=():>void=>{count+=1}
+    $__drop__=():>void=>{count+=1}
 ]
 main=()=>{
     let xs=[10 20 30]

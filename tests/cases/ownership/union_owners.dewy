@@ -5,8 +5,7 @@ let drops:int64 = 0
 let sent:int64 = 0
 Permit:type = [
     id:int64
-    $__drop__
-    release = ():>void => {drops += 1}
+    $__drop__ = ():>void => {drops += 1}
     $__consume__
     use = ():>int64 => {sent += 1 return id}
 ]

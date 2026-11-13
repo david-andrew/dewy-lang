@@ -1,7 +1,6 @@
 let dropped:int64=0
 ValueHandle=type of [value:int64
-$__drop__
-release=():>void=>{value=0 dropped+=1}
+$__drop__=():>void=>{value=0 dropped+=1}
 ]
 read=():>int64=>{let h=ValueHandle[42] h.value}
 branch=(yes:bool):>int64=>if yes {let h=ValueHandle[42] h.value} else 0

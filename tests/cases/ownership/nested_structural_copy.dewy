@@ -3,10 +3,8 @@ $runtime_checks
 let copies:int64=0
 let drops:int64=0
 Leaf=type of [value:int64
-    $__drop__
-    release=():>void=>{drops+=1}
-    $__copy__
-    duplicate=():>Leaf=>{copies+=1 return Leaf[value+1]}
+    $__drop__=():>void=>{drops+=1}
+    $__copy__=():>Leaf=>{copies+=1 return Leaf[value+1]}
 ]
 Envelope:type=[leaf:Leaf extra:int64]
 main=()=>{

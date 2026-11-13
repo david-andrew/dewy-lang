@@ -1,6 +1,6 @@
 # Dynamic selection retains unrelated sibling lifetimes and lexical cleanup.
 let trace:int64=0
-Token=type of [id:int64 $__drop__ release=():>void=>{trace=trace*10+id}]
+Token=type of [id:int64 $__drop__=():>void=>{trace=trace*10+id}]
 Bundle:type=[items:array<Token> sibling:Token]
 consume=(value:Token):>void=>{}
 probe=(flag:bool index:int64):>int64=>{

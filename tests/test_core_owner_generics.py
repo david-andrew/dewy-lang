@@ -13,10 +13,8 @@ def test_generic_owner_hooks(compiler, tmp_path, release, copyable):
     source.write_text('''drops:int64=0
 copies:int64=0
 let Handle:type=<T>[value:T
-    $__drop__
-    release=():>void=>{drops+=1}
-''' + ('''    $__copy__
-    duplicate=():>Handle<T>=>{copies+=1 Handle<T>[value]}
+    $__drop__=():>void=>{drops+=1}
+''' + ('''    $__copy__=():>Handle<T>=>{copies+=1 Handle<T>[value]}
 ''' if copyable else '') + ''']
 let Box:type=<T>[value:T]
 forward=<T>(value:T):>T=>value
@@ -49,8 +47,7 @@ main=()=>{
 def test_generic_function_rejects_owner_copy(compiler, tmp_path, release):
     source = tmp_path / 'copy.dewy'
     source.write_text('''let Handle:type=<T>[value:T
-    $__drop__
-    release=():>void=>{}
+    $__drop__=():>void=>{}
 ]
 duplicate=<T>(value:T):>[first:T second:T]=>[first=value second=value]
 main=()=>{let pair=duplicate(Handle<int64>[7]) printl"{pair.first.value}"}

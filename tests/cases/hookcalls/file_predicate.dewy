@@ -1,8 +1,7 @@
 # A bounds helper remains useful in a program that closes files.
 let closed:int64=0
 File=type of [fd:int64
-    $__drop__
-    close=():>void=>{closed+=1}
+    $__drop__=():>void=>{closed+=1}
     ready=():>bool=>fd >=? 0
     valid=(i:int64 rows:array<int64>):>bool=>0 <=? i and i <? rows.length
 ]

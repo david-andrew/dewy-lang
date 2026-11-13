@@ -3,8 +3,7 @@ let released:int64 = 0
 Batch:type = <T N>[
     items:array<T>
     capacity = ():>int => N
-    $__drop__
-    release = ():>void => { released += 1 }
+    $__drop__ = ():>void => { released += 1 }
 ]
 report = (b:Batch<int64 8>):>void => {
     let total = 0

@@ -1120,8 +1120,7 @@ exit:
 ```dewy
 let held = false
 Held = type of [id:int64
-    $__drop__
-    release = ():>void => { held = false }
+    $__drop__ = ():>void => { held = false }
 ]
 Busy:type = type of error
 Account:type = [
@@ -2097,14 +2096,14 @@ harmonic sums, dice probabilities and exact time steps.
 
 ## Records and collections
 
-A scalar nominal record can declare a compiler-only `$__drop__` method with
-no explicit parameters and a `void` result:
+A scalar nominal record can declare a compiler-only `$__drop__` hook, a
+function assigned to the tag, like a Python dunder method, with no parameters
+and a `void` result:
 
 ```dewy
 let released:int64 = 0
 Ticket = type of [id:int64
-    $__drop__
-    release = ():>void => { released += id }
+    $__drop__ = ():>void => { released += id }
 ]
 ```
 
@@ -2165,8 +2164,9 @@ than expose uninitialized elements with `resize`.
 The current implementation requires inline record/scalar/fixed-array resource
 elements and a proven no-failure drop summary. Scalar mutation and literal-string logging are supported; unknown calls
 and potentially failing formatting are rejected. Hooks cannot be called or
-referenced directly. `$__copy__` and `$__move__` methods also take no explicit
-parameters and return the same nominal type. An explicit `.copy()` runs its
+referenced directly. `$__copy__` and `$__move__` hooks are assigned the same way;
+they take no parameters and return the record's own type
+(`$__copy__ = ():>Ticket => Ticket[id]`). An explicit `.copy()` runs its
 hook even on a fresh temporary, which is then cleaned up separately.
 Copy borrows a readonly receiver;
 move consumes the source and skips its outer drop. Both currently require a

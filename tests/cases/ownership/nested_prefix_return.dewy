@@ -1,11 +1,9 @@
 let drops:int64=0
 Leaf=type of [value:int64
-    $__drop__
-    release=():>void=>{drops+=1}
+    $__drop__=():>void=>{drops+=1}
 ]
 Whole=type of [first:Leaf second:Leaf
-    $__drop__
-    release=():>void=>{drops+=100}
+    $__drop__=():>void=>{drops+=100}
 ]
 exercise=():>int64=>{
     let whole=Whole[Leaf[1] {return 7}]

@@ -1,8 +1,7 @@
 # Exits before the last use drop the guard with the block; after it, the guard is already released.
 let drops:int64 = 0
 Guard = type of [id:int64
-    $__drop__
-    release = ():>void => {
+    $__drop__ = ():>void => {
         drops += 1
     }
 ]

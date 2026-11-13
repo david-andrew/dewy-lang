@@ -1,6 +1,6 @@
 # modes: native native-release
 import p"@lib/std/signals.dewy" as signals
-Cleanup:type = [word:int64 $__drop__ finish=():>void=>printl"cleanup"]
+Cleanup:type = [word:int64 $__drop__=():>void=>printl"cleanup"]
 watch = () => {
     let cleanup = Cleanup[0]
     loop _ in signals.sigterm {}

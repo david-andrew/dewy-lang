@@ -3,8 +3,7 @@ let data:array<int64>=[1 2 3]
 $extern
 getpid=():>int32
 Handle=type of [id:int64
-    $__drop__
-    release=():>void=>{$unsafe getpid();}
+    $__drop__=():>void=>{$unsafe getpid();}
 ]
 pick=(@xs:array<int64> i:int64):>int64=>{
     if 0 <=? i and i <? xs.length {

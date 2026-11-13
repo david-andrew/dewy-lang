@@ -4,8 +4,7 @@ let selections:int64=0
 select=():>int64<(=? 0)>=>{selections+=1 return 0}
 let drops:int64=0
 Handle=type of [id:int64
-    $__drop__
-    release=():>void=>{drops+=1}
+    $__drop__=():>void=>{drops+=1}
 ]
 replace_resource=():>int64=>{
     let handles:array<Handle>=[Handle[1]]

@@ -1,7 +1,7 @@
 let trace:int64=0
-Token=type of [id:int64 $__drop__ release=():>void=>{trace=trace*10+id}]
+Token=type of [id:int64 $__drop__=():>void=>{trace=trace*10+id}]
 Wrapper=type of [first:Token second:Token marker:int64
-    $__drop__ release=():>void=>{trace=trace*10+marker}
+    $__drop__=():>void=>{trace=trace*10+marker}
 ]
 consume=(value:Token):>int64=>value.id
 work=(flag:bool):>int64=>{

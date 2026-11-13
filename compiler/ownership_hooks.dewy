@@ -25,12 +25,19 @@ HookWord:type=int64<overflow='wrap'>
 ownership_check_error=(pos:int64 message:string):>void=>fatal(pos message)
 ownership_check_escapes=(body:int64 l:int64):>bool=>copy_escapes(body l)
 ownership_check_callable=(t:int64 contract:int64 capability:int64):>int64=>mk_callable_contract(t contract capability)
+# A lifecycle hook's assigned form, which its signature diagnostics show.
+ownership_hook_form=(role:HookWord type_name:string):>string=>{
+    if role =? 1 {return "`$__drop__ = ():>void => ...`"}
+    let name="move"
+    if role =? 2 {name="copy"}
+    "`$__{name}__ = ():>{type_name} => ...`"
+}
 ownership_declare=(decl:HookWord hook:HookWord role:HookWord):>void=>$unsafe {
     if role =? 4 {
         ownership_consumers[hook]=true;
         return
     }
-    if nkids(hook) not=? 1 {fatal(nodes.ptr[hook].pos "lifecycle hooks have no explicit parameters")}
+    if nkids(hook) not=? 1 {fatal(nodes.ptr[hook].pos "lifecycle hooks have no explicit parameters: {ownership_hook_form(role name_of(HookWord(nodes.ptr[decl].name)))}")}
     if nkids2(hook) not=? nkids2(decl) {fatal(nodes.ptr[hook].pos "lifecycle hooks cannot declare additional type parameters")}
     let key=decl * 4 + role
     if ownership_decls.has(key) {
@@ -46,7 +53,10 @@ ownership_finalize_hook=(f:HookWord):>void=>$unsafe {
     let hook=HookWord(fns.ptr[f].decl)
     check_fn_body(f)
     let role=ownership_hooks[hook]
-    if role =? 1 and HookWord(fns.ptr[f].ret) not=? T_VOID {fatal(nodes.ptr[hook].pos "a $__drop__ hook must return void")}
+    if role =? 1 and HookWord(fns.ptr[f].ret) not=? T_VOID {
+        let form=ownership_hook_form(role "")
+        fatal(nodes.ptr[hook].pos "a $__drop__ hook must return void: {form}")
+    }
     let t=prune(fns.ptr[f].ptypes.ptr[0])
     if tkind(t) not=? 'struct_' {fatal(nodes.ptr[hook].pos "a lifecycle receiver must be nominal")}
     layout(t)
@@ -55,7 +65,7 @@ ownership_finalize_hook=(f:HookWord):>void=>$unsafe {
         let ft=field_store_type(HookWord(structs.ptr[si].fields) + i)
         if not ownership_layout(ft) {fatal(nodes.ptr[hook].pos "unsupported resource field layout; elements with lifecycle hooks in arrays must be inline")}
     }
-    if role not=? 1 and prune(HookWord(fns.ptr[f].ret)) not=? t {fatal(nodes.ptr[hook].pos "copy and move hooks must return the same nominal type")}
+    if role not=? 1 and prune(HookWord(fns.ptr[f].ret)) not=? t {fatal(nodes.ptr[hook].pos "copy and move hooks must return the same nominal type: {ownership_hook_form(role name_of(HookWord(nodes.ptr[HookWord(structs.ptr[si].decl)].name)))}")}
     if role =? 1 {structs[si].drop_fn=int32(f)}
     else if role =? 2 {ownership_copies[t]=f;}
     else {ownership_moves[t]=f;}

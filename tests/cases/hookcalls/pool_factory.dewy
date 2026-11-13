@@ -1,8 +1,7 @@
 # A pooled buffer contains a COW array; its factory returns the owner.
 let recycled:int64=0
 Buffer=type of [bytes:array<int64> pool:string
-    $__drop__
-    recycle=():>void=>{recycled+=1}
+    $__drop__=():>void=>{recycled+=1}
     available=():>bool=>bytes.length >? 0
 ]
 acquire=():>Buffer=>Buffer[[0 0] "packets"]

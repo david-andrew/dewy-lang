@@ -2,8 +2,7 @@
 # Acceptance: Move last-use owners and release actual resources exactly once on return, break and continue; do not assert elidable copy-hook counts.
 let released:int64 = 0
 Ticket = type of [id:int64
-    $__drop__
-    release = ():>void => {
+    $__drop__ = ():>void => {
         released += id
     }
 ]

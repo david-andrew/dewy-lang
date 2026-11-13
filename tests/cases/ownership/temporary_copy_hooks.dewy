@@ -3,10 +3,8 @@ $runtime_checks
 let copies:int64=0
 let drops:int64=0
 Owner=type of [value:int64
-    $__drop__
-    release=():>void=>{drops+=1}
-    $__copy__
-    duplicate=():>Owner=>{copies+=1 return Owner[value+1]}
+    $__drop__=():>void=>{drops+=1}
+    $__copy__=():>Owner=>{copies+=1 return Owner[value+1]}
 ]
 Child=type of Owner & [extra:int64]
 make=():>Child=>Child[10 20]

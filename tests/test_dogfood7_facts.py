@@ -205,7 +205,7 @@ Outer:type=[c:C]
 __eq__=(a:C b:C):>bool=>{d.clear() return a.id =? b.id}
 main=()=>{d["a"]=1 if Outer[C[1]] =? Outer[C[1]] printl(d["a"])}''',
     'user_hook': '''let count:int64=0
-Owner=type of [value:int64 $__drop__ release=():>void=>{count+=1}]
+Owner=type of [value:int64 $__drop__=():>void=>{count+=1}]
 main=()=>{let m=mutex(1) let v=@(m.lock()) printl(v)
 let xs=[10 20 30] count=0 let d:dict<int64 Owner>=[] d[0]=Owner[0] d[0]=Owner[1] printl(xs[count])}''',
 }

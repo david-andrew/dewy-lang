@@ -1,0 +1,20 @@
+# Lifecycle hooks are functions assigned to their tags, alone on a row or beside fields.
+$runtime_checks
+
+let log:int64=0
+Ticket=type of [id:int64
+    $__drop__ = ():>void => { log += id }
+    $__copy__ = ():>Ticket => Ticket[id + 1]
+    $__move__ = ():>Ticket => Ticket[id]
+    get = ():>int64 => id
+]
+Pass=type of [id:int64 $__drop__=():>void=>{log += 100}]
+main=()=>{
+    {
+        let a=Ticket[1]
+        let b=a.copy()
+        printl(a.get + b.get)
+    }
+    { let p=Pass[1] }
+    printl(log)
+}

@@ -5,8 +5,7 @@ $runtime_checks
 $explicit_allocation_failure
 let drops:int64=0
 Guard=type of [id:int64
-    $__drop__
-    release=():>void=>{drops+=1}
+    $__drop__=():>void=>{drops+=1}
 ]
 fill=(@a:Arena n:int64):>int64=>{
     let g=Guard[n]

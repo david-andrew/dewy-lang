@@ -2,8 +2,7 @@
 # removed value ends its lifetime. Capacity changes do not run hooks.
 let trace:int64=0
 Handle=type of [id:int64 values:array<int64>
-$__drop__
-release=():>void=>{trace=trace*10+id values.clear}
+$__drop__=():>void=>{trace=trace*10+id values.clear}
 ]
 make=(id:int64):>Handle=>Handle[id [id]]
 exercise=():>int64=>{

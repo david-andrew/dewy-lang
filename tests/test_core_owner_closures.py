@@ -12,13 +12,11 @@ RUNTIME_CHECKS = '$runtime_checks\n\n'
 HEADER = '''drops:int64=0
 copies:int64=0
 Handle=type of [value:int64
-    $__drop__
-    release=():>void=>{drops+=1}
+    $__drop__=():>void=>{drops+=1}
 COPY_HOOK
 ]
 '''
-COPY_HOOK = '''    $__copy__
-    duplicate=():>Handle=>{copies+=1 Handle[value+1]}
+COPY_HOOK = '''    $__copy__=():>Handle=>{copies+=1 Handle[value+1]}
 '''
 
 CASES = {
@@ -122,10 +120,8 @@ def test_owner_closure_rejects(compiler, tmp_path, release, case):
 def test_owner_closure_panic_cleanup(compiler, tmp_path, release):
     source = tmp_path / 'panic.dewy'
     source.write_text(('$runtime_checks\n\n') + ('''Handle=type of [value:int64
-    $__drop__
-    release=():>void=>{printl"drop"}
-    $__copy__
-    duplicate=():>Handle=>Handle[value]
+    $__drop__=():>void=>{printl"drop"}
+    $__copy__=():>Handle=>Handle[value]
 ]
 main=()=>{
     let first=Handle[1]

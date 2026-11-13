@@ -47,9 +47,8 @@ def test_owner_growth_failure(compiler, tmp_path, release, operation):
     runtime.write_text(text)
     source = tmp_path / 'failure.dewy'
     source.write_text(('$runtime_checks\n\n') + ('''Owner=type of [value:int64
-    $__drop__
-    release=():>void=>{printl"drop"}
-''' + ('    $__copy__\n    duplicate=():>Owner=>Owner[value]\n' if operation in ('copy', 'map_copy') else '') + ''']
+    $__drop__=():>void=>{printl"drop"}
+''' + ('    $__copy__=():>Owner=>Owner[value]\n' if operation in ('copy', 'map_copy') else '') + ''']
 main=()=>{''' + body + '}\n'))
     binary = tmp_path / 'failure'
     built = subprocess.run([compiler, 'build', source, '-o', binary,

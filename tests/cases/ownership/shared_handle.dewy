@@ -8,8 +8,7 @@ Shared:type = <T>[items:array<T>]
 End:type = <T>[
     shared:Shared<T>
     name:string
-    $__drop__
-    release = ():>void => { dropped += 1 }
+    $__drop__ = ():>void => { dropped += 1 }
 ]
 total = (e:End<int64>):>int64 => {
     let sum:int64 = 0

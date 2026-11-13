@@ -3,14 +3,11 @@
 let drops:int64=0
 let moves:int64=0
 Handle=type of [value:int64
-    $__drop__
-    release=():>void=>{drops+=1}
+    $__drop__=():>void=>{drops+=1}
 ]
 Moving=type of [value:int64 values:array<int64>
-    $__drop__
-    release=():>void=>{drops+=1 values.clear}
-    $__move__
-    relocate=():>Moving=>{moves+=1 Moving[value+1 values.copy()]}
+    $__drop__=():>void=>{drops+=1 values.clear}
+    $__move__=():>Moving=>{moves+=1 Moving[value+1 values.copy()]}
 ]
 Box:type=[item:Handle]
 consume=(h:Handle):>int64=>h.value

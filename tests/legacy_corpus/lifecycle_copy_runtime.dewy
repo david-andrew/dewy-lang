@@ -1,17 +1,14 @@
 let copied:int64=0
 let dropped:int64=0
 BufferHandle=type of [token:int64 text:string values:array<int64>
-$__drop__
-release=():>void=>{dropped+=1 values.clear text="released"}
-$__copy__
-duplicate=():>BufferHandle=>{
+$__drop__=():>void=>{dropped+=1 values.clear text="released"}
+$__copy__=():>BufferHandle=>{
     copied+=1
     return BufferHandle[token text values.copy()]
 }
 ]
 Envelope=type of [inner:BufferHandle
-$__copy__
-duplicate=():>Envelope=>Envelope[inner.copy()]
+$__copy__=():>Envelope=>Envelope[inner.copy()]
 ]
 nested=(n:int64):>int64=>{
     let first=Envelope[BufferHandle[42 "nested {n}" [1 2 3]]]

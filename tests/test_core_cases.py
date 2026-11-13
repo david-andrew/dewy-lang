@@ -50,7 +50,7 @@ def test_core_case_batch_fallbacks(compiler, tmp_path, monkeypatch):
           out='3\n')
     # Guessed void, but main has a result: the guess must not drop the exit code.
     write(root, 'hidden', '# exit: 5\nmain=()=>{let five=5 printl"hidden" five}\n', out='hidden\n')
-    write(root, 'owned', 'let drops:int64=0\nOwner=type of [value:int64\n    $__drop__\n    release=():>void=>{drops+=1}\n]\n'
+    write(root, 'owned', 'let drops:int64=0\nOwner=type of [value:int64\n    $__drop__=():>void=>{drops+=1}\n]\n'
           'main=()=>{{let o=Owner[1]} printl"drops {drops}"}\n', out='drops 1\n')
     assert run(compiler, root, tmp_path, monkeypatch) == 0
 

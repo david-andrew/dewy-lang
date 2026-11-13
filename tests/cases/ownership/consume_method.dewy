@@ -2,13 +2,11 @@
 # owns (and drops) it, and the caller cannot use it afterwards. Other methods borrow.
 End:type = [
     id:int64
-    $__drop__
-    release = ():>void => printl"drop end"
+    $__drop__ = ():>void => printl"drop end"
 ]
 Whole:type = [
     id:int64
-    $__drop__
-    release = ():>void => printl"drop whole"
+    $__drop__ = ():>void => printl"drop whole"
     get = ():>int64 => id
     $__consume__
     split = ():>[End End] => [End[id] End[id]]

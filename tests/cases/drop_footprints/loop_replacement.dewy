@@ -2,10 +2,8 @@
 let data:array<int64>=[1 2 3]
 let copies:int64=0
 Token=type of [id:int64
-    $__copy__
-    dup=():>Token=>{copies+=1 return Token[id]}
-    $__drop__
-    release=():>void=>{data=[]}
+    $__copy__=():>Token=>{copies+=1 return Token[id]}
+    $__drop__=():>void=>{data=[]}
 ]
 total=(i:int64):>int64=>{
     let tokens=[Token[1] Token[2]]

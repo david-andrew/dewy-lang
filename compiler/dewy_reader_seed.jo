@@ -5575,7 +5575,7 @@ rt_dc_refinement_next_at = (at: int) -> bool:
     yes
 
 # A record type's rows after its `[`, through its `]` (dw_param of each field): its fields, the
-# rows' names in order; methods (`name = (params) => body`, a lifecycle tag before one) wait in
+# rows' names in order; methods (`name = (params) => body`, `$__drop__ = () => body`) wait in
 # dc_methods for dc_record_members. Transfer rows and other tags are left unread (dc_unread).
 
 # (dw_record_type's mistakes, should nothing else read the type)
@@ -5595,25 +5595,34 @@ rt_dc_record_fields = (n: int, names: mut int[]) -> bool:
         first = dc_parser.tokens[dc_parser.at]
         # (`$send`, `$sync=false`, `$unsafe` among the rows: the type's transfer claims, dw_transfer_row)
         if first.kind == .metatag and hook == 0 and rt_dc_transfer_row(first): continue
+        # (`$__drop__ = ():>void => ...`: a lifecycle hook, a function assigned to its tag)
+        assigned = false
         if first.kind == .metatag:
-            # (`$__drop__`, `$__copy__`, `$__move__` before a method, on the line before it or not)
             tag = rt_dc_lifecycle_tag(first)
             next = dc_parser.tokens[dc_parser.at + 1]
-            if tag != 0 and hook != 0: return rt_dc_record_mistake(first.start, "a lifecycle tag must precede one method")
-            if tag == 0 or not (next.newline or next.space and next.kind == .identifier): return false
-            hook = tag
-            dc_parser.at += 1
-            continue
-        by_place = rt_dn_accept(.at)
+            if tag != 0 and hook != 0: return rt_dc_record_mistake(first.start, "`$__consume__` must precede one method")
+            if tag > 0 and tag < 4:
+                if not (next.symbol == .assign and dc_parser.tokens[dc_parser.at + 2].symbol == .lparen and rt_dc_lambda_next_at(dc_parser.at + 2)): return rt_dc_record_mistake(first.start, rt_dc_hook_form(tag, nodes[n].name))
+                hook = tag
+                assigned = true
+            else:
+                # (`$__consume__` before a method, on the line before it or not)
+                if tag == 0 or not (next.newline or next.space and next.kind == .identifier): return false
+                hook = tag
+                dc_parser.at += 1
+                continue
+        by_place = not assigned and rt_dn_accept(.at)
         field = dc_parser.tokens[dc_parser.at]
-        if field.kind != .identifier or (field.symbol != .none and field.symbol != .kw_test): return false
+        label = int(field.name)
+        if assigned: label = intern(rt_dn_payload(field))
+        else if field.kind != .identifier or (field.symbol != .none and field.symbol != .kw_test): return false
         # (`[start:int64 end:int64]`: dw_row_names' mistake)
-        if rt_dn_reserved(int(field.name)) and (dc_parser.tokens[dc_parser.at + 1].symbol == .colon or dc_parser.tokens[dc_parser.at + 1].symbol == .assign): rt_dc_reserved_at(field)
-        else if rt_dn_reserved(int(field.name)): return false
+        if not assigned and rt_dn_reserved(label) and (dc_parser.tokens[dc_parser.at + 1].symbol == .colon or dc_parser.tokens[dc_parser.at + 1].symbol == .assign): rt_dc_reserved_at(field)
+        else if not assigned and rt_dn_reserved(label): return false
         # (`pair = <U>(other:U) => ...`: a generic method, its own type parameters after the type's)
-        generic = not by_place and dc_parser.tokens[dc_parser.at + 1].symbol == .assign and dc_parser.tokens[dc_parser.at + 2].symbol == .langle and rt_dc_generic_lambda_next_at(dc_parser.at + 2)
-        if generic or not by_place and dc_parser.tokens[dc_parser.at + 1].symbol == .assign and dc_parser.tokens[dc_parser.at + 2].symbol == .lparen and rt_dc_lambda_next_at(dc_parser.at + 2):
-            if rt_dc_word(int(field.name)) == DC_MAIN: return rt_dc_record_mistake(field.start, "a method cannot be named main")
+        generic = not assigned and not by_place and dc_parser.tokens[dc_parser.at + 1].symbol == .assign and dc_parser.tokens[dc_parser.at + 2].symbol == .langle and rt_dc_generic_lambda_next_at(dc_parser.at + 2)
+        if assigned or generic or not by_place and dc_parser.tokens[dc_parser.at + 1].symbol == .assign and dc_parser.tokens[dc_parser.at + 2].symbol == .lparen and rt_dc_lambda_next_at(dc_parser.at + 2):
+            if rt_dc_word(label) == DC_MAIN: return rt_dc_record_mistake(field.start, "a method cannot be named main")
             dc_parser.at += 2
             opening = dc_parser.tokens[dc_parser.at]
             type_params: int[]
@@ -5624,15 +5633,15 @@ rt_dc_record_fields = (n: int, names: mut int[]) -> bool:
             dc_parser.depth += 3
             saved = dc_parser.reader.dc_method_body
             dc_parser.reader.dc_method_body = true
-            method = rt_dc_function_literal(field.name, opening, type_params)
+            method = rt_dc_function_literal(i32(label), opening, type_params)
             dc_parser.reader.dc_method_body = saved
             if method == 0 or rt_dn_peek() == .semi: return false
             dc_parser.reader.dc_methods.push(method)
             dc_parser.reader.dc_method_hooks.push(hook)
             hook = 0
-            names.push(int(field.name))
+            names.push(label)
             continue
-        if hook != 0: return rt_dc_record_mistake(first.start, "a lifecycle tag requires a method")
+        if hook != 0: return rt_dc_record_mistake(first.start, "`$__consume__` requires a method")
         dc_parser.at += 1
         f = mk(.vardecl, mkpos(dc_parser.file, first.start))
         nodes[f].name = field.name
@@ -5701,7 +5710,16 @@ rt_dc_lifecycle_tag = (token: DewyLexeme) -> int:
     if name == "__drop__": return 1
     if name == "__copy__": return 2
     if name == "__move__": return 3
+    # (`$__consume__`: a method that takes its receiver, which the call moves)
+    if name == "__consume__": return 4
     0
+
+# The form a lifecycle hook is written in, for a tag before a method (or one assigned no function).
+
+rt_dc_hook_form = (tag: int, type_name: i32) -> str:
+    if tag == 1: return "a lifecycle hook is a function assigned to its tag: write `$__drop__ = ():>void => ...`"
+    role = if tag == 2: "copy" else: "move"
+    "a lifecycle hook is a function assigned to its tag: write `$__{role}__ = ():>{name_of(int(type_name))} => ...`"
 
 # `import m`, `import m as n`, `import p"file.dewy"`, `from m import a, b as c` (dw_import); a
 # parenthesized selection and the reversed order are left unread (dc_unread).

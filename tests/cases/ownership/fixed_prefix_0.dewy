@@ -2,8 +2,7 @@
 $runtime_checks
 
 Owner=type of [value:int64
-    $__drop__
-    release=():>void=>{printl"drop"}
+    $__drop__=():>void=>{printl"drop"}
 ]
 fail=():>int64=>panic("array prefix")
 main=()=>{let xs:array<Owner length=3>=[Owner[fail()] Owner[0] Owner[0]]}

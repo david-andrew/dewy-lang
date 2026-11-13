@@ -35,8 +35,7 @@ Account:type = [
     }
 ]
 Owner = type of [value:int64
-    $__drop__
-    release = ():>void => { drops += 1 }
+    $__drop__ = ():>void => { drops += 1 }
 ]
 apply = (f:(x:int64:>int64) v:int64):>(int64 | Oops) => f(v)
 $unsafe

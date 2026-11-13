@@ -1,10 +1,8 @@
 let drops:int64=0
 let copies:int64=0
 Handle=type of [token:int64 text:string values:array<int64>
-$__drop__
-release=():>void=>{drops+=1 token=0 text='released' values.clear}
-$__copy__
-duplicate=():>Handle=>{
+$__drop__=():>void=>{drops+=1 token=0 text='released' values.clear}
+$__copy__=():>Handle=>{
     # A scratch owner is released after the result has been constructed.
     let scratch=make(9)
     copies+=1

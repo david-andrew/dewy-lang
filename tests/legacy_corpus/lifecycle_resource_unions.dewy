@@ -2,12 +2,10 @@
 # no lifecycle hook, including the absence of an optional owner.
 let trace:int64=0
 One=type of [id:int64 values:array<int64>
-$__drop__
-release=():>void=>{trace=trace*10+id values.clear}
+$__drop__=():>void=>{trace=trace*10+id values.clear}
 ]
 Two=type of [id:int64 text:string
-$__drop__
-release=():>void=>{trace=trace*10+id text=''}
+$__drop__=():>void=>{trace=trace*10+id text=''}
 ]
 make=(tag:int64):>One|Two|none=>{
     if tag=?1 return One[1 [40 2]]
@@ -26,10 +24,8 @@ exercise=():>int64=>{
 }
 let moves:int64=0
 Moved=type of [id:int64 child:One
-$__drop__
-release=():>void=>{trace=trace*10+id}
-$__move__
-relocate=():>Moved=>{moves+=1 Moved[id+1 One[3 [30]]]}
+$__drop__=():>void=>{trace=trace*10+id}
+$__move__=():>Moved=>{moves+=1 Moved[id+1 One[3 [30]]]}
 ]
 Wrapped=type of [child:One]
 choice=(custom:bool):>Moved|Wrapped=>if custom Moved[1 One[2 [20]]] else Wrapped[One[4 [40]]]

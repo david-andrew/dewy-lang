@@ -4,10 +4,8 @@ $runtime_checks
 let drops:int64 = 0
 let copies:int64 = 0
 Leaf:type = [id:int64
-    $__drop__
-    release = ():>void => { drops += 1 }
-    $__copy__
-    duplicate = ():>Leaf => { copies += 1; return Leaf[id] }
+    $__drop__ = ():>void => { drops += 1 }
+    $__copy__ = ():>Leaf => { copies += 1; return Leaf[id] }
 ]
 Envelope:type = [leaf:Leaf xs:array<int> value:int fraction:rational]
 exercise = (n:int):>void => {

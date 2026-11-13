@@ -1,9 +1,7 @@
 let drops:int64=0
 Handle=type of [token:int64 values:array<int64>
-$__drop__
-release=():>void=>{drops+=1 token=0 values.clear}
-$__copy__
-copy=():>Handle=>Handle[token values.copy()]
+$__drop__=():>void=>{drops+=1 token=0 values.clear}
+$__copy__=():>Handle=>Handle[token values.copy()]
 ]
 consume=(owner:Handle):>int64=>owner.token
 explicit=(owner:Handle):>int64=>{return owner.token}

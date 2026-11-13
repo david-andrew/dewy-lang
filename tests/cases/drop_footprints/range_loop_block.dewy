@@ -1,8 +1,7 @@
 # A drop inside a while loop invalidates the guard made before the loop.
 let data:array<int64>=[1 2 3]
 Shrink=type of [id:int64
-    $__drop__
-    release=():>void=>{data=[]}
+    $__drop__=():>void=>{data=[]}
 ]
 total=(n:int64):>int64=>{
     let last:int64=0

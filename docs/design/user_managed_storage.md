@@ -37,7 +37,8 @@ A resource-bearing type needs compiler-recognized operations for:
 - releasing a fully initialized value exactly once;
 - replacing an initialized destination, which is release followed by copy or transfer.
 
-The approved members carry `$__copy__`, `$__move__`, or `$__drop__` and have
+The approved members are functions assigned to `$__copy__`, `$__move__`, or
+`$__drop__` (`$__drop__ = ():>void => …`, decisions.md batch 9) and have
 no explicit parameters. They are compiler-only operations with an internal,
 nonescaping borrowed receiver: passing a value to its own release operation
 never copies it first. Copy borrows read-only; move and drop may consume or

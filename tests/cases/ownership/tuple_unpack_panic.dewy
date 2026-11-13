@@ -4,8 +4,7 @@ $runtime_checks
 
 End:type = [
     id:int64
-    $__drop__
-    release = ():>void => printl"drop"
+    $__drop__ = ():>void => printl"drop"
 ]
 pair = (n:int64):>[End End] => [End[n] End[n + 1]]
 main = () => {

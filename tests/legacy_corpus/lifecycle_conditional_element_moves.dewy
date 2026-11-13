@@ -5,14 +5,11 @@ let dropped:array<int64>=[]
 let children:array<int64>=[]
 let moves:int64=0
 MovePayload=type of [id:int64
-    $__drop__
-    release=():>void=>{children.push(id)}
+    $__drop__=():>void=>{children.push(id)}
 ]
 Handle=type of [id:int64 child:MovePayload
-    $__move__
-    relocate=():>Handle=>{moves+=1 return Handle[id+100 MovePayload[child.id+100]]}
-    $__drop__
-    release=():>void=>{dropped.push(id)}
+    $__move__=():>Handle=>{moves+=1 return Handle[id+100 MovePayload[child.id+100]]}
+    $__drop__=():>void=>{dropped.push(id)}
 ]
 consume=(value:Handle):>int64=>value.id
 exercise=(take:bool):>int64=>{

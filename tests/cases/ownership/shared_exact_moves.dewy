@@ -2,8 +2,7 @@ $runtime_checks
 
 let drops:int64 = 0
 Owner:type = <T>[value:T
-    $__drop__
-    release = ():>void => { drops += 1 }
+    $__drop__ = ():>void => { drops += 1 }
 ]
 Item:type = [value:int]
 make = (n:int):>Owner<array<int>> => Owner<array<int>>[[n n+1]]

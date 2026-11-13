@@ -6,8 +6,7 @@ let dropped:int64 = 0
 End:type = [
     id:int64
     shared:array<int64>
-    $__drop__
-    release = ():>void => { dropped += 1 }
+    $__drop__ = ():>void => { dropped += 1 }
 ]
 pair = (n:int64):>[End End] => {
     let s:array<int64> = [n n]

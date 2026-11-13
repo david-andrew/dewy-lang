@@ -1,8 +1,7 @@
 # A statement's temporary drops at its end, before the next statement.
 let data:array<int64>=[1 2 3]
 Shrink=type of [id:int64
-    $__drop__
-    release=():>void=>{data=[]}
+    $__drop__=():>void=>{data=[]}
     ok=():>bool=>id >? 0
 ]
 pick=(i:int64):>int64=>{

@@ -4,8 +4,7 @@
 # method that drops its receiver all run code that writes `cursor`.
 let cursor:int64=0
 File=type of [fd:int64 path:string
-    $__drop__
-    close=():>void=>{cursor+=1}
+    $__drop__=():>void=>{cursor+=1}
     ready=():>bool=>fd >=? 0
     advance=():>bool=>{
         cursor+=1

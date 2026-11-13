@@ -1,6 +1,5 @@
 # Resource array elements still need inline lifecycle storage.
 Owner:type = [value:int
-    $__drop__
-    release = ():>void => {}
+    $__drop__ = ():>void => {}
 ]
 main = () => { let xs:array<Owner> = [Owner[18446744073709551617]]; printl(xs[0].value) }

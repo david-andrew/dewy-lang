@@ -1,6 +1,6 @@
 # Each disjoint runtime selection retains its own cleanup presence condition.
 let trace:int64=0
-Token=type of [id:int64 $__drop__ release=():>void=>{trace=trace*10+id}]
+Token=type of [id:int64 $__drop__=():>void=>{trace=trace*10+id}]
 Both:type=[left:array<array<Token>> right:array<array<Token>> sibling:Token]
 consume=(value:Token):>void=>{}
 probe=(first:bool second:bool i:int64 j:int64):>void=>{

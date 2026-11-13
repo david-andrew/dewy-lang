@@ -15,8 +15,7 @@ DuplicateLock:type = type of error
 
 __Held:type = type of [
     word:int64
-    $__drop__
-    release = ():>void => __lock_release_word(word)
+    $__drop__ = ():>void => __lock_release_word(word)
 ]
 
 # (the payload lives in the shared allocation, reached through the handle's pointer)

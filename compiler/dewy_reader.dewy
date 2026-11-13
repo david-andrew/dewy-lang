@@ -6605,6 +6605,19 @@ rd_dc_lifecycle_tag=(@reader_ctx:ParserContext token:DewyLexeme):>int64=>$unsafe
     0
 }
 
+# The form a lifecycle hook is written in, for a tag before a method (or one assigned no function).
+rd_dc_hook_form=(@reader_ctx:ParserContext tag:int64 type_name:int32):>string=>$unsafe {
+    let word:string=rd_name_of(@reader_ctx int64<overflow='wrap'>(type_name))
+    if (tag =? 1) {
+        return "a lifecycle hook is a function assigned to its tag: write `$__drop__ = ():>void => ...`"
+    }
+    let role:string="move"
+    if (tag =? 2) {
+        role = "copy"
+    }
+    "a lifecycle hook is a function assigned to its tag: write `$__{role}__ = ():>{word} => ...`"
+}
+
 # `x ??<A | B> fallback` at `??`: the fallback only for the kinds listed, one type (c).
 # What `??` falls back to: a value, or `return x`, `break` or `continue`, a block holding the
 # jump, which leaves the expression with no value.
@@ -8583,36 +8596,51 @@ rd_dc_record_fields=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64
         if (((first.kind =? 'metatag') and (hook =? 0)) and rd_dc_transfer_row(@reader_ctx first)) {
             continue
         }
+        # (`$__drop__ = ():>void => ...`: a lifecycle hook, a function assigned to its tag)
+        let assigned:bool=false
         if (first.kind =? 'metatag') {
-            # (`$__drop__`, `$__copy__`, `$__move__` before a method, on the line before it or not)
             let tag:int64=rd_dc_lifecycle_tag(@reader_ctx first)
             let next:DewyLexeme=reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)]
             if ((tag not=? 0) and (hook not=? 0)) {
-                return rd_dc_record_mistake(@reader_ctx first.start "a lifecycle tag must precede one method")
+                return rd_dc_record_mistake(@reader_ctx first.start "`$__consume__` must precede one method")
             }
-            if ((tag =? 0) or (not (next.newline or (next.space and (next.kind =? 'identifier'))))) {
-                return false
+            if ((tag >? 0) and (tag <? 4)) {
+                if (not ((next.symbol =? 'assign') and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'lparen') and rd_dc_lambda_next_at(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) + 2)))) {
+                    return rd_dc_record_mistake(@reader_ctx first.start rd_dc_hook_form(@reader_ctx tag reader_nodes[n].name))
+                }
+                hook = tag
+                assigned = true
             }
-            hook = tag
-            reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
-            continue
+            else {
+                # (`$__consume__` before a method, on the line before it or not)
+                if ((tag =? 0) or (not (next.newline or (next.space and (next.kind =? 'identifier'))))) {
+                    return false
+                }
+                hook = tag
+                reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
+                continue
+            }
         }
-        let by_place:bool=rd_dn_accept(@reader_ctx 'at')
+        let by_place:bool=(not assigned) and rd_dn_accept(@reader_ctx 'at')
         let field:DewyLexeme=reader_ctx.tokens[reader_ctx.at]
-        if ((field.kind not=? 'identifier') or ((field.symbol not=? 'none') and (field.symbol not=? 'kw_test'))) {
+        let label:int64=int64<overflow='wrap'>(field.name)
+        if assigned {
+            label = reader_ctx.stores.host[0].intern(rd_dn_payload(@reader_ctx field))
+        }
+        else if ((field.kind not=? 'identifier') or ((field.symbol not=? 'none') and (field.symbol not=? 'kw_test'))) {
             return false
         }
         # (`[start:int64 end:int64]`: dw_row_names' mistake)
-        if (rd_dn_reserved(@reader_ctx int64<overflow='wrap'>(field.name)) and ((reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'colon') or (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'assign'))) {
+        if ((not assigned) and rd_dn_reserved(@reader_ctx label) and ((reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'colon') or (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'assign'))) {
             rd_dc_reserved_at(@reader_ctx field);
         }
-        else if rd_dn_reserved(@reader_ctx int64<overflow='wrap'>(field.name)) {
+        else if ((not assigned) and rd_dn_reserved(@reader_ctx label)) {
             return false
         }
         # (`pair = <U>(other:U) => ...`: a generic method, its own type parameters after the type's)
-        let generic:bool=((((not by_place) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'assign')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'langle')) and rd_dc_generic_lambda_next_at(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) + 2)))
-        if (generic or ((((not by_place) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'assign')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'lparen')) and rd_dc_lambda_next_at(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) + 2)))) {
-            if (rd_dc_word(@reader_ctx int64<overflow='wrap'>(field.name)) =? DC_MAIN) {
+        let generic:bool=(((((not assigned) and (not by_place)) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'assign')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'langle')) and rd_dc_generic_lambda_next_at(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) + 2)))
+        if (assigned or generic or ((((not by_place) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 1)].symbol =? 'assign')) and (reader_ctx.tokens[(int64<overflow='wrap'>(reader_ctx.at) + 2)].symbol =? 'lparen')) and rd_dc_lambda_next_at(@reader_ctx (int64<overflow='wrap'>(reader_ctx.at) + 2)))) {
+            if (rd_dc_word(@reader_ctx label) =? DC_MAIN) {
                 return rd_dc_record_mistake(@reader_ctx field.start "a method cannot be named main")
             }
             reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 2)
@@ -8630,7 +8658,7 @@ rd_dc_record_fields=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64
             reader_ctx.depth = (int64<overflow='wrap'>(reader_ctx.depth) + 3)
             let saved:bool=reader_ctx.reader.dc_method_body
             reader_ctx.reader.dc_method_body = true
-            let method:int64=rd_dc_function_literal(@reader_ctx @reader_nodes field.name opening type_params)
+            let method:int64=rd_dc_function_literal(@reader_ctx @reader_nodes int32<overflow='wrap'>(label) opening type_params)
             reader_ctx.reader.dc_method_body = saved
             if ((method =? 0) or (rd_dn_peek(@reader_ctx) =? 'semi')) {
                 return false
@@ -8638,11 +8666,11 @@ rd_dc_record_fields=(@reader_ctx:ParserContext @reader_nodes:array<Node> n:int64
             reader_ctx.reader.dc_methods.push(method);
             reader_ctx.reader.dc_method_hooks.push(hook);
             hook = 0
-            names.push(int64<overflow='wrap'>(field.name));
+            names.push(label);
             continue
         }
         if (hook not=? 0) {
-            return rd_dc_record_mistake(@reader_ctx first.start "a lifecycle tag requires a method")
+            return rd_dc_record_mistake(@reader_ctx first.start "`$__consume__` requires a method")
         }
         reader_ctx.at = (int64<overflow='wrap'>(reader_ctx.at) + 1)
         let f:int64=node_mk(@reader_nodes 'vardecl' rd_mkpos(reader_ctx.file first.start))
@@ -8839,7 +8867,7 @@ rd_dc_record_members=(@reader_ctx:ParserContext @reader_nodes:array<Node> struct
 }
 
 # A record type's rows after its `[`, through its `]` (dw_param of each field): its fields, the
-# rows' names in order; methods (`name = (params) => body`, a lifecycle tag before one) wait in
+# rows' names in order; methods (`name = (params) => body`, `$__drop__ = () => body`) wait in
 # dc_methods for dc_record_members. Transfer rows and other tags are left unread (dc_unread).
 # (dw_record_type's mistakes, should nothing else read the type)
 rd_dc_record_mistake=(@reader_ctx:ParserContext at:int64 msg:string):>bool=>$unsafe {

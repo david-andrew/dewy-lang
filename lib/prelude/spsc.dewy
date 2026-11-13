@@ -14,8 +14,7 @@
 $unsafe
 Spsc:type = <T N>[
     __h:__Spsc<T>
-    $__drop__
-    __release = ():>void => {}
+    $__drop__ = ():>void => {}
     $__consume__
     split = ():>[SpscSender<T> SpscReceiver<T>] => [SpscSender<T>[__h] SpscReceiver<T>[__h]]
 ]
@@ -23,8 +22,7 @@ Spsc:type = <T N>[
 $unsafe
 SpscSender:type = <T>[
     __h:__Spsc<T>
-    $__drop__
-    __release = ():>void => __spsc_close(__h)
+    $__drop__ = ():>void => __spsc_close(__h)
     try_send = (value:T):>void | Unsent<T> => {
         let code = __spsc_try_send(__h value)
         if code not=? 0 return __unsent<T>(value code)
@@ -62,8 +60,7 @@ SpscSender:type = <T>[
 $unsafe
 SpscReceiver:type = <T>[
     __h:__Spsc<T>
-    $__drop__
-    __release = ():>void => __spsc_close(__h)
+    $__drop__ = ():>void => __spsc_close(__h)
     try_receive = ():>T | Empty | Closed<T> | Canceled => {
         let code = __spsc_try_receive(__h)
         if code =? 1 return Closed<T>[]

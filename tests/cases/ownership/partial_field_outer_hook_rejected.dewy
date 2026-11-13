@@ -1,10 +1,8 @@
 Leaf=type of [value:int64
-    $__drop__
-    release=():>void=>{}
+    $__drop__=():>void=>{}
 ]
 Pair=type of [left:Leaf right:Leaf
-    $__drop__
-    release=():>void=>{let n=left.value}
+    $__drop__=():>void=>{let n=left.value}
 ]
 consume=(x:Leaf)=>{}
 main=()=>{let p=Pair[Leaf[1] Leaf[2]] consume(p.left)}

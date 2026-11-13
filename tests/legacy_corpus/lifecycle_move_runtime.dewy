@@ -2,16 +2,12 @@ let moved:int64=0
 let dropped:int64=0
 let leaf_drops:int64=0
 LeafHandle=type of [token:int64
-$__drop__
-release=():>void=>{leaf_drops+=1}
-$__copy__
-duplicate=():>LeafHandle=>LeafHandle[token]
+$__drop__=():>void=>{leaf_drops+=1}
+$__copy__=():>LeafHandle=>LeafHandle[token]
 ]
 MovingHandle=type of [token:int64 leaf:LeafHandle values:array<int64>
-$__drop__
-release=():>void=>{dropped+=1 token=0 values.clear}
-$__move__
-transfer=():>MovingHandle=>{
+$__drop__=():>void=>{dropped+=1 token=0 values.clear}
+$__move__=():>MovingHandle=>{
     moved+=1
     token+=1
     return MovingHandle[token leaf.copy() values.copy()]

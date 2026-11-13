@@ -2,7 +2,7 @@
 # fields, with array elements released in reverse order.
 let trace:int64=0
 Node=type of [id:int64 children:array<Node>
-    $__drop__ release=():>void=>{trace=trace*10+id}
+    $__drop__=():>void=>{trace=trace*10+id}
 ]
 work=():>void=>{let tree=Node[1 [Node[2 []] Node[3 []]]]}
 main=():>int64=>{

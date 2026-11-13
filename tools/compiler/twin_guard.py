@@ -39,7 +39,9 @@ def changed_leaf_errors(changed: set[str], has_test: Callable[[str], bool]) -> l
         if stem in BOOTSTRAP_STUBS:
             continue
         twin = str(Path(leaf).with_suffix(".jo"))
-        if twin not in changed:
+        # (dewy_reader.jo only forwards to its implementation, dewy_reader_seed.jo)
+        seed = str(Path(leaf).with_name(f"{stem}_seed.jo"))
+        if twin not in changed and seed not in changed:
             errors.append(f"{leaf}: frozen twin {twin} did not change")
         if not has_test(stem):
             errors.append(f"{leaf}: no named differential test in tests/test_*.py")

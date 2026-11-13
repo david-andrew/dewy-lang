@@ -3,10 +3,8 @@
 let copies:int64=0
 let drops:int64=0
 Handle=type of [id:int64 values:array<int64>
-$__drop__
-release=():>void=>{drops+=1 values.clear}
-$__copy__
-duplicate=():>Handle=>{copies+=1 Handle[id+1 values.copy()]}
+$__drop__=():>void=>{drops+=1 values.clear}
+$__copy__=():>Handle=>{copies+=1 Handle[id+1 values.copy()]}
 ]
 consume=(owner:Handle):>int64=>owner.id
 exercise=():>int64=>{

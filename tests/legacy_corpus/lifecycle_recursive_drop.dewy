@@ -2,8 +2,7 @@
 # cleanup helpers recurse through the active optional links without copies.
 let drops:int64=0
 Node=type of [id:int64 next:Node|none
-    $__drop__
-    release=():>void=>{drops+=1}
+    $__drop__=():>void=>{drops+=1}
 ]
 work=():>int64=>{
     let node=Node[42 Node[1 Node[2 none]]]

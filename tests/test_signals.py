@@ -70,7 +70,7 @@ def test_delivery(compiler, tmp_path, release, case, sig, label):
 
 def test_observer_preserves_ctrl_c_default(compiler, tmp_path):
     binary = build(compiler, tmp_path, source='''import p"@lib/std/signals.dewy" as signals
-Cleanup:type = [word:int64 $__drop__ finish=():>void=>printl"cleaned"]
+Cleanup:type = [word:int64 $__drop__=():>void=>printl"cleaned"]
 main = () => {
     let cleanup = Cleanup[0]
     _ = signals.ctrl_c.observe.next(timeout=0s)

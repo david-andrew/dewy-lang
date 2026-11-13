@@ -1,10 +1,8 @@
 # An owner operation must invalidate the global reached by its hook.
 let data:array<int64>=[10 20]
 Handle=type of [fd:int64
-    $__drop__
-    close=():>void=>{data=[]}
-    $__move__
-    transfer=():>Handle=>{data=[] return Handle[fd]}
+    $__drop__=():>void=>{data=[]}
+    $__move__=():>Handle=>{data=[] return Handle[fd]}
     ready=():>bool=>fd >=? 0
     $__consume__
     finish=():>void=>{}

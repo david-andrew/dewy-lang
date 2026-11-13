@@ -1,13 +1,11 @@
 let changed:int64=0
 ExtraHandle = type of [
     token:int64
-    $__copy__
-    duplicate = ():>ExtraHandle => {changed=1 return ExtraHandle[token]}
+    $__copy__ = ():>ExtraHandle => {changed=1 return ExtraHandle[token]}
 ]
 BaseHandle = type of [
     token:int64
-    $__copy__
-    duplicate = ():>BaseHandle => BaseHandle[token]
+    $__copy__ = ():>BaseHandle => BaseHandle[token]
 ]
 DerivedHandle = type of BaseHandle & [extra:ExtraHandle]
 # Added fields keep their own lifecycle operations, including effects.

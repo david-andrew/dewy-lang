@@ -1,8 +1,7 @@
 # Acquiring a socket does not close it or change the guarded cursor.
 let cursor:int64=0
 Socket=type of [fd:int64 peer:string
-    $__drop__
-    close=():>void=>{cursor=99}
+    $__drop__=():>void=>{cursor=99}
     connected=():>bool=>fd >=? 0
 ]
 connect=():>Socket=>Socket[4 "local"]

@@ -1,8 +1,7 @@
 # A drop hook that empties a global array the index proof depends on.
 let data:array<int64>=[1 2 3]
 Shrink=type of [id:int64
-    $__drop__
-    release=():>void=>{data=[]}
+    $__drop__=():>void=>{data=[]}
 ]
 pick=(i:int64):>int64=>{
     if 0 <=? i and i <? data.length {

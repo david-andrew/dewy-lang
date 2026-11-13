@@ -22,6 +22,11 @@ def test_paired_leaf_with_named_differential_passes():
     assert not names_leaf('tests/test_other.py', 'assert compare_builds(...)', 'example')
 
 
+def test_forwarding_twin_counts_its_seed():
+    assert changed_leaf_errors({'compiler/example.dewy', 'compiler/example_seed.jo'},
+                               lambda stem: stem == 'example') == []
+
+
 def test_documented_bootstrap_stub_is_exempt():
     assert changed_leaf_errors({'compiler/call_forward.dewy'}, lambda stem: False) == []
 

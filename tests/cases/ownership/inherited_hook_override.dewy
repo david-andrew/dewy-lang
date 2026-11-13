@@ -3,16 +3,12 @@ let child_drops:int64=0
 let parent_copies:int64=0
 let child_copies:int64=0
 Parent=type of [value:int64
-    $__drop__
-    release=():>void=>{parent_drops+=1}
-    $__copy__
-    duplicate=():>Parent=>{parent_copies+=1 return Parent[value]}
+    $__drop__=():>void=>{parent_drops+=1}
+    $__copy__=():>Parent=>{parent_copies+=1 return Parent[value]}
 ]
 Child=type of Parent & [extra:int64
-    $__drop__
-    release_child=():>void=>{child_drops+=1}
-    $__copy__
-    duplicate_child=():>Child=>{child_copies+=1 return Child[value extra]}
+    $__drop__=():>void=>{child_drops+=1}
+    $__copy__=():>Child=>{child_copies+=1 return Child[value extra]}
 ]
 main=()=>{
     {let first=Child[3 4] let second=first.copy() $runtime_assert(first.extra=?second.extra)}

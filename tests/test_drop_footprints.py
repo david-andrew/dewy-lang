@@ -8,8 +8,7 @@ from tests.support import compiler
 LADDER = Path(__file__).parent / 'ladder' / '95_kv_store'
 DUMMY = '''
 Dummy = type of [id:int64
-    $__drop__
-    release = ():>void => {}
+    $__drop__ = ():>void => {}
 ]
 '''
 

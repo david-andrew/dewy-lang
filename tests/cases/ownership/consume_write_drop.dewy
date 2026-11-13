@@ -4,16 +4,14 @@
 # changes no caller's place, so it runs on a temporary or a value a spawn captured.
 Flag:type = [
     sent:bool
-    $__drop__
-    release = ():>void => if sent printl"flag: sent" else printl"flag: given up"
+    $__drop__ = ():>void => if sent printl"flag: sent" else printl"flag: given up"
     $__consume__
     send = ():>void => { sent = true }
 ]
 Permit:type = [
     id:int64
     sent:bool
-    $__drop__
-    release = ():>void => if sent printl"permit: sent" else printl"permit: given up"
+    $__drop__ = ():>void => if sent printl"permit: sent" else printl"permit: given up"
     $__consume__
     send = (value:int64):>void => {
         sent = true
@@ -23,8 +21,7 @@ Permit:type = [
 Held:type = <T>[
     value:T
     count:int64
-    $__drop__
-    release = ():>void => if count =? 2 printl"held: counted twice" else printl"held: not counted"
+    $__drop__ = ():>void => if count =? 2 printl"held: counted twice" else printl"held: not counted"
     $__consume__
     finish = ():>void => {
         count += 1

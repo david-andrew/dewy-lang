@@ -3,14 +3,11 @@
 let dropped:array<int64>=[]
 let moves:int64=0
 Token=type of [id:int64
-    $__drop__
-    release=():>void=>{dropped.push(id)}
+    $__drop__=():>void=>{dropped.push(id)}
 ]
 Moved=type of [id:int64
-    $__move__
-    relocate=():>Moved=>{moves+=1 return Moved[id+100]}
-    $__drop__
-    release=():>void=>{dropped.push(id)}
+    $__move__=():>Moved=>{moves+=1 return Moved[id+100]}
+    $__drop__=():>void=>{dropped.push(id)}
 ]
 Bundle:type=[items:array<Token> maybe:Moved|Token|none other:Token]
 take_array=(items:array<Token>):>int64=>items.length

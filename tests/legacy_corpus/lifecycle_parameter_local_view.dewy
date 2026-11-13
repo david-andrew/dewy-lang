@@ -1,8 +1,7 @@
 # A read-only local alias of a borrowed parameter is a view, not a new owner.
 let drops:int64=0
 Handle=type of [token:int64 values:array<int64>
-$__drop__
-release=():>void=>{drops+=1 token=0 values.clear}
+$__drop__=():>void=>{drops+=1 token=0 values.clear}
 ]
 read=(@h:Handle):>int64=>{
     let unused=h

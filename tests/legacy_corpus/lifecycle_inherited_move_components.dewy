@@ -2,14 +2,11 @@
 # with the generated child constructor and are dropped only by the result.
 let trace:int64=0
 Token=type of [id:int64
-$__drop__
-release=():>void=>{trace=trace*10+id}
+$__drop__=():>void=>{trace=trace*10+id}
 ]
 Parent=type of [value:int64 token:Token
-$__drop__
-release=():>void=>{trace=trace*10+9}
-$__move__
-relocate=():>Parent=>Parent[value+1 Token[2]]
+$__drop__=():>void=>{trace=trace*10+9}
+$__move__=():>Parent=>Parent[value+1 Token[2]]
 ]
 Derived=type of Parent & [added:Token]
 Leaf=type of Derived & [last:Token]

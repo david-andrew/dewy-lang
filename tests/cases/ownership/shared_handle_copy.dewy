@@ -1,8 +1,7 @@
 # Holding a shared handle does not make a move-only record copyable.
 End:type = [
     shared:array<int64>
-    $__drop__
-    release = ():>void => {}
+    $__drop__ = ():>void => {}
 ]
 main = () => {
     let a = End[[1 2 3]]

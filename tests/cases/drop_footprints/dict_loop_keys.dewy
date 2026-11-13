@@ -4,8 +4,7 @@ COLUMNS = ["todo" "doing" "done"]
 Task:type = type of [
     id:int64
     column:int64
-    $__drop__
-    release = ():>void => { COLUMNS = [] }
+    $__drop__ = ():>void => { COLUMNS = [] }
 ]
 main = () => {
     let tasks:dict<int64 Task> = []

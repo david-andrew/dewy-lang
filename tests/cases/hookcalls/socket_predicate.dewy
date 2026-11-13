@@ -1,8 +1,7 @@
 # A predicate proves the packet index before acquiring the socket.
 let cursor:int64=0
 Socket=type of [fd:int64
-    $__drop__
-    close=():>void=>{cursor=99}
+    $__drop__=():>void=>{cursor=99}
 ]
 connect=():>Socket=>Socket[4]
 valid=(i:int64 packets:array<int64>):>bool=>0 <=? i and i <? packets.length

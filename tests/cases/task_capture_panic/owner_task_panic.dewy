@@ -2,5 +2,5 @@
 # modes: native native-release
 $runtime_checks
 
-End:type=[id:int $__drop__ release=():>void=>printl("drop")]
+End:type=[id:int $__drop__=():>void=>printl("drop")]
 main=()=>{let e=End[42] concurrent {spawn {printl(e.id) panic("owner child")}}}

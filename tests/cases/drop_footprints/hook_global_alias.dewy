@@ -1,8 +1,7 @@
 # The array is lent: the hook empties the global it may be.
 let data:array<int64>=[1 2 3]
 Shrink=type of [id:int64
-    $__drop__
-    release=():>void=>{data=[]}
+    $__drop__=():>void=>{data=[]}
 ]
 pick=(@xs:array<int64> i:int64):>int64=>{
     if 0 <=? i and i <? xs.length {

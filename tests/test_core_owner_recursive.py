@@ -22,10 +22,8 @@ def test_recursive_owner_allocation_failure(compiler, tmp_path, release, fail_at
     runtime.write_text(text)
     source = tmp_path / 'failure.dewy'
     source.write_text('''Leaf=type of [value:int64
-    $__drop__
-    release=():>void=>{printl"drop"}
-    $__copy__
-    duplicate=():>Leaf=>Leaf[value]
+    $__drop__=():>void=>{printl"drop"}
+    $__copy__=():>Leaf=>Leaf[value]
 ]
 Node:type=[next:Node?=none owner:Leaf]
 main=()=>{

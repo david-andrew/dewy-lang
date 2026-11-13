@@ -1,14 +1,11 @@
 let drops:int64=0
 let moves:int64=0
 Handle=type of [token:int64 values:array<int64>
-$__drop__
-release=():>void=>{drops+=1 token=0 values.clear}
+$__drop__=():>void=>{drops+=1 token=0 values.clear}
 ]
 Moving=type of [token:int64 values:array<int64>
-$__drop__
-release=():>void=>{drops+=1 token=0 values.clear}
-$__move__
-relocate=():>Moving=>{moves+=1 Moving[token+1 values.copy()]}
+$__drop__=():>void=>{drops+=1 token=0 values.clear}
+$__move__=():>Moving=>{moves+=1 Moving[token+1 values.copy()]}
 ]
 exercise=():>int64=>{
     let first=Handle[40 [1 2]]

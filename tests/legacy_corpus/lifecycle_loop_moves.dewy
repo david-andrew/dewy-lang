@@ -1,6 +1,6 @@
 # Each iteration creates an owner; a taken branch consumes it exactly once.
 let drops:int64=0
-Token=type of [id:int64 $__drop__ release=():>void=>{drops+=1}]
+Token=type of [id:int64 $__drop__=():>void=>{drops+=1}]
 consume=(item:Token):>int64=>item.id
 main=():>int64=>{let before:int64=_arena_live_bytes
 loop i in [0..20) {let owner=Token[42]

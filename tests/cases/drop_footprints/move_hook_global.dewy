@@ -1,8 +1,7 @@
 # A move hook that empties a global runs at the transfer.
 let data:array<int64>=[1 2 3]
 Mover=type of [id:int64
-    $__move__
-    shift=():>Mover=>{
+    $__move__=():>Mover=>{
         data=[]
         return Mover[id]
     }

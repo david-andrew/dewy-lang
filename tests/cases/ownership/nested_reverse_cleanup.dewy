@@ -1,17 +1,13 @@
 Leaf=type of [id:int64
-    $__drop__
-    release=():>void=>{printl"leaf"}
+    $__drop__=():>void=>{printl"leaf"}
 ]
 Left=type of [leaf:Leaf
-    $__drop__
-    release=():>void=>{printl"left"}
+    $__drop__=():>void=>{printl"left"}
 ]
 Right=type of [leaf:Leaf
-    $__drop__
-    release=():>void=>{printl"right"}
+    $__drop__=():>void=>{printl"right"}
 ]
 Tree=type of [left:Left right:Right
-    $__drop__
-    release=():>void=>{printl"tree"}
+    $__drop__=():>void=>{printl"tree"}
 ]
 main=()=>{let tree=Tree[Left[Leaf[1]] Right[Leaf[2]]] printl"ready"}

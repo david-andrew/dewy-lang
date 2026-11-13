@@ -1,11 +1,11 @@
 let trace:int64=0
 let hook_calls:int64=0
-Token=type of [id:int64 $__drop__ release=():>void=>{trace=trace*10+id}]
+Token=type of [id:int64 $__drop__=():>void=>{trace=trace*10+id}]
 # Moving a field does not invoke these whole-wrapper operations. With no
 # wrapper drop hook, cleanup can release just the fields that remain live.
 Wrapper=type of [first:Token second:Token
-$__copy__ duplicate=():>Wrapper=>{hook_calls+=1 return Wrapper[Token[8] Token[9]]}
-$__move__ relocate=():>Wrapper=>{hook_calls+=1 return Wrapper[Token[8] Token[9]]}
+$__copy__=():>Wrapper=>{hook_calls+=1 return Wrapper[Token[8] Token[9]]}
+$__move__=():>Wrapper=>{hook_calls+=1 return Wrapper[Token[8] Token[9]]}
 ]
 consume=(value:Token):>int64=>value.id
 work=(flag:bool):>int64=>{

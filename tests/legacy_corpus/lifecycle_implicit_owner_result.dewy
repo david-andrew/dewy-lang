@@ -1,8 +1,7 @@
 # The final value of a function has the same ownership contract as return.
 let drops:int64=0
 Handle=type of [token:int64 values:array<int64>
-$__drop__
-release=():>void=>{drops+=1 token=0 values.clear}
+$__drop__=():>void=>{drops+=1 token=0 values.clear}
 ]
 make=():>Handle=>{let owner=Handle[42 [1 2]] owner}
 choose=(yes:bool):>Handle=>{

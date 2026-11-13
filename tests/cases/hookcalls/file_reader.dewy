@@ -1,8 +1,7 @@
 # A file descriptor borrows its metadata while a guarded row is read.
 let closed:int64=0
 File=type of [fd:int64 path:string
-    $__drop__
-    close=():>void=>{closed+=1}
+    $__drop__=():>void=>{closed+=1}
     ready=():>bool=>fd >=? 0
 ]
 read_row=(@rows:array<int64> i:int64):>int64=>{

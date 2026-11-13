@@ -83,8 +83,7 @@ def test_effect_early_drop(compiler, tmp_path, mode):
     source = tmp_path / 'drop.dewy'
     source.write_text('''let released:int64=0
 Ticket=type of [id:int64
-    $__drop__
-    release=():>void=>{released+=id}
+    $__drop__=():>void=>{released+=id}
 ]
 bad=(n:int64):>int64 & no_effects=>{
     let ticket=Ticket[n]
@@ -143,8 +142,7 @@ def test_effect_pending_argument_cleanup(compiler, tmp_path, mode):
     source = tmp_path / 'pending.dewy'
     source.write_text('''let released:int64=0
 Owner=type of [value:int64
-    $__drop__
-    release=():>void=>{released+=value}
+    $__drop__=():>void=>{released+=value}
 ]
 consume=(owner:Owner n:int64):>int64=>owner.value+n
 fail=():>int64=>panic("argument panic")

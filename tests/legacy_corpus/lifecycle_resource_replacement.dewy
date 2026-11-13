@@ -2,8 +2,7 @@
 # still owns its current value on every exit, including optional absence.
 let trace:int64=0
 Handle=type of [id:int64 values:array<int64>
-$__drop__
-release=():>void=>{trace=trace*10+id id=99 values.clear}
+$__drop__=():>void=>{trace=trace*10+id id=99 values.clear}
 ]
 exercise=():>int64=>{
     let owner=Handle[1 [40 2]]

@@ -1,8 +1,7 @@
 let changed:int64=0
 BaseHandle = type of [
     token:int64
-    $__copy__
-    duplicate = ():>BaseHandle => {changed=1 return BaseHandle[0]}
+    $__copy__ = ():>BaseHandle => {changed=1 return BaseHandle[0]}
 ]
 DerivedHandle = type of BaseHandle & [extra:string]
 # Composition must retain both the child's type and the parent's effects.

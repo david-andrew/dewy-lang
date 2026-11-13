@@ -2,16 +2,12 @@
 let leaf_drops:int64=0
 let parent_drops:int64=0
 Leaf=type of [value:int64
-    $__drop__
-    release=():>void=>{leaf_drops+=1}
-    $__copy__
-    duplicate=():>Leaf=>Leaf[value]
+    $__drop__=():>void=>{leaf_drops+=1}
+    $__copy__=():>Leaf=>Leaf[value]
 ]
 Parent=type of [leaf:Leaf
-    $__drop__
-    release=():>void=>{parent_drops+=1}
-    $__move__
-    transfer=():>Parent=>Parent[leaf.copy()]
+    $__drop__=():>void=>{parent_drops+=1}
+    $__move__=():>Parent=>Parent[leaf.copy()]
 ]
 Child=type of Parent & [extra:Leaf]
 main=()=>{

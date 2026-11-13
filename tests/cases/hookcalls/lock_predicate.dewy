@@ -1,8 +1,7 @@
 # A helper checks the queue; a borrowed lock query preserves that proof.
 let released:int64=0
 Lock=type of [held:bool
-    $__drop__
-    unlock=():>void=>{released+=1}
+    $__drop__=():>void=>{released+=1}
     owns=():>bool=>held
 ]
 nonempty=(queue:array<int64>):>bool=>queue.length >? 0

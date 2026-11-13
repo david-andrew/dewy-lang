@@ -1,3 +1,3 @@
 # modes: native native-release
-End:type=[id:int64 $__drop__ release=():>void=>printl("drop")]
+End:type=[id:int64 $__drop__=():>void=>printl("drop")]
 main=()=>{let e=End[42] concurrent g {cancel(g) spawn {printl(e.id)}} printl("joined")}

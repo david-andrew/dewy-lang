@@ -5,8 +5,7 @@ $runtime_checks
 # there, and dropped once, when the group releases the task.
 End:type = [
     id:int64
-    $__drop__
-    release = ():>void => printl"drop"
+    $__drop__ = ():>void => printl"drop"
 ]
 main = () => {
     let e = End[3]

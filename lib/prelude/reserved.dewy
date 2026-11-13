@@ -19,8 +19,7 @@ Reserved:type = <T>[
     __s:__Spsc<T>
     __pos:int64
     __sent:bool
-    $__drop__
-    __release = ():>void => if not __sent {
+    $__drop__ = ():>void => if not __sent {
         if __pos >=? 0 __mpmc_unreserve(__q __pos) else if __pos =? -1 __chan_unreserve(__c) else __spsc_unreserve(__s)
     }
     $__consume__

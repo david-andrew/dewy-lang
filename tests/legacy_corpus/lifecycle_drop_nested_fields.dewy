@@ -1,11 +1,9 @@
 let dropped:int64=0
 Leaf=type of [token:int64 text:string
-$__drop__
-release=():>void=>{dropped=dropped*10+token text="released"}
+$__drop__=():>void=>{dropped=dropped*10+token text="released"}
 ]
 Pair=type of [first:Leaf second:Leaf
-$__drop__
-release=():>void=>{dropped=dropped*10+3 second.token=2}
+$__drop__=():>void=>{dropped=dropped*10+3 second.token=2}
 ]
 # This outer record has no hook; its resource fields still require cleanup.
 Outer=type of [pair:Pair extra:Leaf]

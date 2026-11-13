@@ -1,8 +1,7 @@
 # An unpacked owner is moved like any other: a read after the move is refused.
 End:type = [
     id:int64
-    $__drop__
-    release = ():>void => {}
+    $__drop__ = ():>void => {}
 ]
 pair = ():>[End End] => [End[1] End[2]]
 consume = (e:End):>int64 => e.id

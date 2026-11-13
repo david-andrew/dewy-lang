@@ -3,16 +3,12 @@ let leaf_drops:int64=0
 let parent_copies:int64=0
 let leaf_copies:int64=0
 LeafHandle=type of [token:int64 values:array<int64>
-$__drop__
-release=():>void=>{leaf_drops+=1 token=0 values.clear}
-$__copy__
-duplicate=():>LeafHandle=>{leaf_copies+=1 return LeafHandle[token values.copy()]}
+$__drop__=():>void=>{leaf_drops+=1 token=0 values.clear}
+$__copy__=():>LeafHandle=>{leaf_copies+=1 return LeafHandle[token values.copy()]}
 ]
 ParentHandle=type of [leaf:LeafHandle
-$__drop__
-release=():>void=>{parent_drops+=1}
-$__copy__
-duplicate=():>ParentHandle=>{parent_copies+=1 return ParentHandle[leaf.copy()]}
+$__drop__=():>void=>{parent_drops+=1}
+$__copy__=():>ParentHandle=>{parent_copies+=1 return ParentHandle[leaf.copy()]}
 ]
 DerivedHandle=type of ParentHandle & [extra:LeafHandle]
 FinalHandle=type of DerivedHandle & [text:string]

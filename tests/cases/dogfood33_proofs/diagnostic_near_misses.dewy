@@ -1,5 +1,5 @@
 let released:int64 = 0
-Batch:type = type of [id:int64 $__drop__ release = ():>void => { released += 1 }]
+Batch:type = type of [id:int64 $__drop__ = ():>void => { released += 1 }]
 use_batch = ():>void => { let batch = Batch[1]; printl(batch.id) }
 main = () => {
     use_batch()

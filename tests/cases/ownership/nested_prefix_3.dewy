@@ -2,20 +2,16 @@
 $runtime_checks
 
 A=type of [value:int64
-    $__drop__
-    release=():>void=>{printl"a"}
+    $__drop__=():>void=>{printl"a"}
 ]
 B=type of [value:int64
-    $__drop__
-    release=():>void=>{printl"b"}
+    $__drop__=():>void=>{printl"b"}
 ]
 C=type of [value:int64
-    $__drop__
-    release=():>void=>{printl"c"}
+    $__drop__=():>void=>{printl"c"}
 ]
 Whole=type of [a:A b:B c:C tail:int64
-    $__drop__
-    release=():>void=>{printl"whole"}
+    $__drop__=():>void=>{printl"whole"}
 ]
 fail=():>int64=>panic("construction prefix")
 main=()=>{let whole=Whole[A[1] B[2] C[3] fail()]}
