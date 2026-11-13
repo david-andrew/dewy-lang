@@ -1,3 +1,4 @@
+use 'directives.jo'
 use 'poly_closure.jo'
 use 'lower_storage.dewy'
 use 'checker_signature.dewy'
@@ -95,7 +96,8 @@ poly_inst = (decl: int, targs: int[], use_pos: int) -> int:
         z = zonk(t)
         if has_var(z): fatal(use_pos, "cannot infer a generic closure's type argument; give its argument or result a type")
         zs.push(z)
-    key = FnInstanceKey(decl, zs)
+    code = dir_code_request(decl, use_pos)
+    key = FnInstanceKey(decl | (code << 32), zs)
     if let f = fn_instances.get(key):
         if fns[f].ret == 0:
             # (called again while its body is checked: one returning no value is void,
@@ -110,6 +112,7 @@ poly_inst = (decl: int, targs: int[], use_pos: int) -> int:
         return f
     family = int(nodes[decl].aux)
     f = new_inst(FK_LAMBDA, int(nodes[decl].mod), "generic_lambda")
+    if dir_code_any and (code != 0 or (cx >= 0 and dir_code_inst(int(ctxs[cx].inst)) != 0)): dir_code_by_inst[f] = code
     fns[f].decl = i32(decl)
     fns[f].target = i32(family)
     fns[f].has_env = true

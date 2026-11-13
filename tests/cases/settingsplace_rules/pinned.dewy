@@ -1,0 +1,19 @@
+$runtime_checks
+resolve=(text:string)=>zone(text) or_throw
+make=()=>{
+ $time.rules='a.bin'
+ resolve("Test/Zone") or_throw
+}
+other=(saved:Zone)=>{
+ $time.rules='b.bin'
+ let current=resolve("Test/Zone") or_throw
+ printl(saved)
+ printl(current)
+ printl(zoned("2026-07-01T12:00" zone=saved) or_throw)
+ printl(zoned("2026-07-01T12:00" zone=current) or_throw)
+}
+main=()=>{
+ let saved=make or_throw
+ other(saved) or_throw
+ printl(saved)
+}

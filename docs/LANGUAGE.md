@@ -1856,7 +1856,16 @@ name of the machine's zone when the program runs, and `'build'` pins the zone of
 Dewy version ships its own (IANA data in `lib/time/rules`), so a program means the same thing
 anywhere, and a program links them only if it reaches a zone operation. For an urgent law change
 or test data, `$time.rules = 'urgent.bin'` in the entry configuration names a pack beside that file,
-made with `tools/time/gen_rules.py`. `$time.zone_source = 'host'` there follows the machine's own
+made with `tools/time/gen_rules.py`. A literal pack setting at the top of a function
+embeds that pack and installs it for the function's calls and tasks; `main` can
+choose between such profiles at run time. A `Zone` retains the pinned pack in
+which its name was resolved, even after that scope returns or another pack is
+active. A new name resolution uses the active pack. Existing zones never
+silently resolve their names again. A scoped zone source is likewise retained
+by zones resolved inside it; existing zone values keep their source. Paths selected from arbitrary runtime
+strings are not yet supported. Zone literals under scoped packs or sources are also
+explicitly deferred; use the ordinary fallible `zone(text)` or `zoned(text)`
+form in those profiles. `$time.zone_source = 'host'` there follows the machine's own
 zone files when the program runs instead (under `TZDIR`, else `/usr/share/zoneinfo`), so a
 `zoned` literal is a compile error; a machine without a zone's file keeps Dewy's rules and says so once.
 
@@ -3509,10 +3518,7 @@ call of that function.
 
 Native programs use a persistent worker pool. `$program.max_cores = 2` at the
 top of the entry file supplies a default allowance of two cores, including the
-caller. The existing literal setting at the top of the entry `main` body also
-sets the whole program's pool. Scoped or run-time-selected core caps are not
-yet supported and give an error; shared permits are required before enabling
-them. `$program.max_cores = 1` runs work on the caller. Nested operations share the same pool, and a caller waiting at a join helps run ready
+caller. A function cap replaces the entry-file default, then takes the minimum with any active ancestor cap. A setting at the top of a function or block caps its dynamic extent. Nested work and waiting-lane tasks share permits from every ancestor cap; blocked waits release their permits and reacquire them before continuing. `$program.max_cores = 1` runs work on the caller. Nested operations share the same pool, and a caller waiting at a join helps run ready
 work. Forks stay local until a heartbeat exposes work to another worker; small
 scoped joins use direct calls on the sequential path. Web builds run serially with
 the same result order and copy semantics. Parallel work may always execute
@@ -4284,10 +4290,10 @@ callable function.
 
 Settings go at the top of a file or inside the top of a function or block;
 blank lines do not change their meaning. Time policy frames (`$time.zone`, `$time.gap` and `$time.fold`) govern calls and tasks and
-restore the caller's policy on return. Core limits and rule packs currently
-keep their existing program-wide literal entry-file or entry-`main` forms.
-Scoped core caps, rule-source changes and run-time rule-pack selection give a "not yet supported"
-error rather than an incomplete dynamic policy.
+restore the caller's policy on return. Scoped core limits share permits with
+ancestor caps. Literal rule-pack settings embed their packs; choose between
+functions with different packs to select one at run time. Unbounded rule-pack
+paths still give a "not yet supported" error.
 
 `main` returns `void` or the errors that reach it, an ordinary `void | E` type,
 declared or inferred. It gives no exit code: success exits 0, and a script that
@@ -5651,14 +5657,29 @@ main = (argv:array<string>):>void => {
 }
 ```
 
-Policy settings, such as a time zone, use the innermost value. Scoped core caps, rule-source changes
-and dynamic rule-pack selection are not yet supported; their literal
-entry-file and entry-`main` forms keep their existing program-wide behavior.
-Computed zone values and literal validation through inherited runtime policies are not yet supported; choose literal zone profiles or use fallible delimited time calls. Code policies keep their existing lexical behavior until complete inheritance
-lands: a caller's `$runtime_checks`, `$prototype`, or other code policy does
-not retarget a callee. `$runtime_checks` takes a literal Boolean, never a
-runtime flag. `$fast_math = flag` permits runtime selection; identical bodies
-are merged. The command line sets only the build mode and target (under
+Policy settings use the innermost value. An entry-file function can replace
+its file's default core cap; library functions and nested caps only tighten
+the limit already in force. Direct calls inherit code settings unless the
+callee sets its own. Concrete functions in another module keep their numerics,
+with a warning when the caller requests different ones. Imported generics
+inherit the caller's code vector, with one IEEE warning per function; a setting
+such as `$fast_math = false` in the generic's body pins its own choice.
+Function parameters retain their declared code policy and warn when a numeric
+setting cannot apply to them.
+
+A function value captures its zone, gap, fold, rule pack and zone source where
+its `@` or lambda is created, including an absence of those settings. Calling
+it from another policy scope preserves that captured context. Core caps follow
+the caller instead. C ABI function pointers use their executing thread's active
+policy. Named function handles with runtime policies currently support simple
+literal defaults. Computed defaults on function values, including calls through helpers, give an
+explicit unsupported error. Use a parameterless lambda such as `()=>today` to
+evaluate those defaults inside the captured scope. Tasks retain their inherited frames after the launching
+scope returns; zone operations use thread-local caches. `$runtime_checks`
+takes a literal Boolean, never a runtime flag. `$fast_math = flag` permits runtime selection; identical bodies
+are merged. `$memory_left` is reserved for the bytes still allocatable under
+the tightest active memory cap; it currently reports an explicit unsupported
+error while reserved-block accounting is implemented. The command line sets only the build mode and target (under
 "Modules and games").
 
 An obligation is a fact an operation needs: an index or slice in bounds (a

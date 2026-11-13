@@ -1,3 +1,4 @@
+use 'directives.jo'
 use 'copies.jo'
 use 'ownership_lower.dewy'
 use 'lower_closures.dewy'
@@ -120,6 +121,7 @@ copies_parameters = ():
         loop changed:
             changed = false
             loop f in [1..fns.len()):
+                dir_code_owner = f
                 body = int(fns[f].body)
                 if body == 0 or not copy_strict(body) or fns[f].kind != FK_NORMAL or fns[f].cabi or len(fns[f].export_name) > 0 or indirect.has(f): continue
                 loop i in [0..nkids(body)):
@@ -138,6 +140,8 @@ copies_parameters = ():
                         copy_inputs[p] = true
                         copy_bindings[l] = true
                         changed = true
+    dir_code_owner = 0
+
 copy_strict = (e: int) -> bool:
     e > 0 and dir_copies_any and dir_explicit_copies(nodes[e].pos)
 costly_copy = (t0: int) -> bool:

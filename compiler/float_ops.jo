@@ -208,7 +208,7 @@ ff_note_conversion = ():
 # expr.jo, a direct call of f from the function being checked: its caller is walked when f's body
 # has a float policy and takes a float
 ff_note_call = (f: int, decl: int):
-    if ff_scope_decl(decl) == 0 or cx < 0: return
+    if ff_scope_decl(decl, f) == 0 or cx < 0: return
     has_float = false
     loop t in fns[f].ptypes:
         if is_float(quantity_base(prune(t))): has_float = true
@@ -217,11 +217,24 @@ ff_note_call = (f: int, decl: int):
 ff_note_ref = (decl: int):
     if decl != 0: ff_indirect[decl] = true
 # The declaration's body's float policy (0 if neither setting holds).
-ff_scope_decl = (decl: int) -> int:
+ff_scope_decl = (decl: int, instance: int = 0) -> int:
     if decl == 0 or nodes[decl].kind != .fn_ or nodes[decl].b == 0: return 0
-    if let k = ff_direct.get(decl): return k - 1
-    mode = ff_mode_at(nodes[int(nodes[decl].b)].pos)
-    ff_direct[decl] = mode + 1
+    key = decl | (instance << 32)
+    if let known = ff_direct.get(key): return known - 1
+    body = nodes[int(nodes[decl].b)].pos
+    code = dir_code_inst(instance)
+    mode = 0
+    loop slot in [5..7):
+        setting = if slot == 5: dir_name_no_nan else: dir_name_no_inf
+        own = dir_find(setting, body)
+        value = -1
+        if own >= 0: value = dir_scopes[own].value
+        if code != 0 and (own < 0 or dir_scopes[own].start == dir_module_start(pos_file(body))): value = ((code >> (slot * 2)) & 3) - 1
+        if value == 1:
+            bit = FF_INF
+            if slot == 5: bit = FF_NAN
+            mode |= bit
+    ff_direct[key] = mode + 1
     mode
 ff_mode_at = (p: int) -> int:
     m = 0
@@ -499,7 +512,7 @@ ff_eval_node = (n: int) -> FR:
         f = int(nodes[n].sym)
         decl = int(fns[f].decl)
         # A direct call proves the properties its callee's float policy requires.
-        scope = ff_scope_decl(decl)
+        scope = ff_scope_decl(decl, f)
         if decl > 0 and fns[f].kind != i32(FK_LAMBDA) and scope != 0:
             loop i in 0.. and c in kids(n):
                 if ff_float(c):
@@ -884,12 +897,14 @@ floats_after_facts = ():
         body = int(fns[f].body)
         if body == 0 or fns[f].state != 2: continue
         p = nodes[body].pos
-        if pos_in_lib(p): continue
+        if pos_in_lib(p) and dir_code_inst(f) == 0: continue
+        dir_code_owner = f
         ff_assume = ff_mode_at(p)
         if not ff_callers.has(f) and not (conversions and ff_conversions.has(f)):
-            if not ff_files.has(pos_file(p)): continue
+            if ff_assume == 0 and not ff_files.has(pos_file(p)): continue
             if ff_assume == 0 and not ff_owners.has(f): continue
         ff_walk(f)
+    dir_code_owner = 0
     ff_env = {}
     ff_fn = 0
 # effects.jo: the float-to-integer conversions f's body proves, reporting nothing.
@@ -898,12 +913,18 @@ ff_probe_function = (f: int) -> {int: bool}:
     body = int(fns[f].body)
     if body == 0 or fns[f].state != 2 or ff_probing: return ff_probe
     ff_probing = true
-    saved = (ff_env, ff_assume, ff_fn)
+    saved = (ff_env, ff_assume, ff_fn, dir_code_owner, fact_owner, fact_retry_owner)
+    dir_code_owner = f
+    fact_owner = 0
+    fact_retry_owner = 0
     ff_assume = ff_mode_at(nodes[body].pos)
     ff_walk(f)
     ff_env = saved.0
     ff_assume = saved.1
     ff_fn = saved.2
+    dir_code_owner = saved.3
+    fact_owner = saved.4
+    fact_retry_owner = saved.5
     ff_probing = false
     ff_probe
 # facts.jo: the range of a float-to-integer conversion's operand in f, from
@@ -916,7 +937,10 @@ ff_conversion_operand = (f: int, n: int) -> FR?:
         ff_ranged[f] = true
         body = int(fns[f].body)
         if body == 0 or fns[f].state != 2: return none
-        saved = (ff_env, ff_assume, ff_fn, ff_probe)
+        saved = (ff_env, ff_assume, ff_fn, ff_probe, dir_code_owner, fact_owner, fact_retry_owner)
+        dir_code_owner = f
+        fact_owner = 0
+        fact_retry_owner = 0
         ff_probing = true
         ff_ranging = true
         ff_probe = {}
@@ -926,6 +950,9 @@ ff_conversion_operand = (f: int, n: int) -> FR?:
         ff_assume = saved.1
         ff_fn = saved.2
         ff_probe = saved.3
+        dir_code_owner = saved.4
+        fact_owner = saved.5
+        fact_retry_owner = saved.6
         ff_probing = false
         ff_ranging = false
     ff_operands.get(n)
@@ -936,7 +963,7 @@ ff_walk = (f: int):
     # (direct callers prove the properties demanded by the body's scope; a lambda or function
     # used as a value still receives unchecked parameters)
     decl = int(fns[f].decl)
-    entering = fns[f].kind == i32(FK_LAMBDA) or ff_scope_decl(decl) == 0 or ff_indirect.has(decl)
+    entering = fns[f].kind == i32(FK_LAMBDA) or ff_scope_decl(decl, f) == 0 or ff_indirect.has(decl)
     loop l in fns[f].params:
         if ff_tracked(l) and int(locals[l].type) > 0 and is_float(int(locals[l].type)): ff_env[l] = if entering: ff_enter() else: ff_top()
     r = ff_eval(body)

@@ -1,6 +1,6 @@
 $runtime_checks
 
-from p"expr.jo" import (IN ntype)
+from p"expr.jo" import (setting_value_target IN ntype)
 from p"check.jo" import (FK_NORMAL LF_CAPTURE fns lib_dir locals)
 from p"ast.jo" import (NF_MUT has_flag kid kid2 kids nkids nkids2 nodes)
 from p"lower_analysis.dewy" import (checked_call_mutmask place_var)
@@ -22,6 +22,8 @@ race_check=(callee:LRWord args:array<int64> pos:LRWord):>void=>$unsafe {
     }
 }
 race_arg=(a:LRWord who:string):>void=>$unsafe {
+    let target=setting_value_target(a)
+    if target not=? a {race_arg(target who);return}
     let k=nodes.ptr[a].kind
     if k =? 'conv' {race_arg(LRWord(nodes.ptr[a].a) who);}
     else if k =? 'lambda' {race_scan(LRWord(fns.ptr[LRWord(nodes.ptr[a].sym)].body) LRWord(nodes.ptr[a].sym) who true);}
@@ -55,7 +57,7 @@ race_root_callbacks=(f:LRWord who:string pos:LRWord):>void=>$unsafe {
 # A function value a call in checked code gives: visible where it is written, or a parameter of
 # the checked function, whose own callers were checked the same way. O(conversions).
 race_given=(a0:LRWord who:string):>void=>$unsafe {
-    let a=a0
+    let a=setting_value_target(a0)
     loop nodes.ptr[a].kind =? 'conv' {a=LRWord(nodes.ptr[a].a)}
     let k=nodes.ptr[a].kind
     if k =? 'lambda' or k =? 'fnref' or k =? 'partial' or k =? 'hole' or race_direct_param(a) or parsafe_vouched(a) or who.startswith("spawn") and parsafe_demand_task(a a) {return}
@@ -64,7 +66,7 @@ race_given=(a0:LRWord who:string):>void=>$unsafe {
 # A parameter of the named function being checked, itself: reached only through a call whose
 # argument race_given checked (race_root_callbacks turns away the other way in).
 race_direct_param=(a0:LRWord):>bool=>$unsafe {
-    let a=a0
+    let a=setting_value_target(a0)
     loop nodes.ptr[a].kind =? 'conv' {a=LRWord(nodes.ptr[a].a)}
     if nodes.ptr[a].kind not=? 'ident' or nodes.ptr[a].aux not=? int32<overflow='wrap'>(1) {return false}
     let l:LRWord=LRWord(nodes.ptr[a].sym)

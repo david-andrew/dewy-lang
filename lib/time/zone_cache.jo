@@ -1,0 +1,62 @@
+# Host rule records and the system-zone handle belong to the executing thread.
+# A task releases its cache before publishing completion; worker caches live
+# until process exit. No cache pointer or host-record offset escapes in a Zone.
+struct __TimeZoneCache:
+    drop: cfn(*u8)
+    rules: u8[]
+    zones: int[]
+    records: int[]
+    system: int
+
+@cabi
+__time_zone_cache_drop = (raw: *u8):
+    p = raw as *__TimeZoneCache
+    p.rules = []
+    p.zones = []
+    p.records = []
+    __free(raw)
+
+__time_zone_cache = () -> *__TimeZoneCache:
+    t = __ts()
+    p = t[__TS_ZONE_CACHE] as *__TimeZoneCache
+    if p == null:
+        arena = t[__TS_ARENA]
+        t[__TS_ARENA] = 0
+        p = __alloc(size_of(__TimeZoneCache)) as *__TimeZoneCache
+        t[__TS_ARENA] = arena
+        p[0] = __TimeZoneCache(__time_zone_cache_drop, [], [], [], -1)
+        t[__TS_ZONE_CACHE] = p as int
+    p
+
+rule_count = () -> int: __time_zone_cache().rules.len()
+rule_byte = (at: int) -> int:
+    p = __time_zone_cache()
+    if at < 0 or at >= p.rules.len(): __panic("invalid time rule-pack offset")
+    int(p.rules[at])
+push_rule = (value: u8):
+    p = __time_zone_cache()
+    t = __ts()
+    arena = t[__TS_ARENA]
+    t[__TS_ARENA] = 0
+    p.rules.push(value)
+    t[__TS_ARENA] = arena
+find_record = (zone: int) -> int?:
+    p = __time_zone_cache()
+    loop i in [0..p.zones.len()):
+        if p.zones[i] == zone: return p.records[i]
+    none
+save_record = (zone: int, record: int):
+    p = __time_zone_cache()
+    t = __ts()
+    arena = t[__TS_ARENA]
+    t[__TS_ARENA] = 0
+    p.zones.push(zone)
+    p.records.push(record)
+    t[__TS_ARENA] = arena
+# Warning publication is shared, atomically; the cache data remains private.
+__time_host_warned = atomic(0)
+__time_system_warned = atomic(0)
+warn_once = () -> bool: compare_swap(__time_host_warned, 0, 1)
+system_warn_once = () -> bool: compare_swap(__time_system_warned, 0, 1)
+system_get = () -> int: __time_zone_cache().system
+system_set = (handle: int): __time_zone_cache().system = handle

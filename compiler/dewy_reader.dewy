@@ -1741,6 +1741,7 @@ rd_dc_body_setting=(@reader_ctx:ParserContext @reader_nodes:array<Node> place_st
 # noted, once the block is read (1, the tag and an `=` read): `$shadowable` or `$supported_targets`
 # (dw_metatag_fail), a label before no loop (dw_label_fail); -1 a form left unread (dc_unread).
 rd_dc_body_tag=(@reader_ctx:ParserContext name:string tag:DewyLexeme):>int64=>$unsafe {
+    if name =? "memory_left" {reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file tag.start) "`$memory_left` is not yet supported: memory caps need reserved-block accounting and budget ownership")}
     if name =? "extern" or name =? "intrinsic" {
         reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file tag.start) "`${name}` declares a module-level function: prefix its declaration with `${name}`, then `name = (...):>Result`")
     }
@@ -7081,6 +7082,10 @@ rd_dc_membership=(@reader_nodes:array<Node> n:int64 top:bool=true):>bool=>$unsaf
 # (dc_unread), -1 for none of these (dc_atom goes on).
 rd_dc_metatag_atom=(@reader_ctx:ParserContext @reader_nodes:array<Node> token:DewyLexeme pos:int64):>int64=>$unsafe {
     let width:int64=(int64<overflow='wrap'>(token.stop) - int64<overflow='wrap'>(token.start))
+    if width =? 12 and rd_dn_payload(@reader_ctx token) =? "memory_left" {
+        reader_ctx.stores.host[0].fatal(pos "`$memory_left` is not yet supported: memory caps need reserved-block accounting and budget ownership")
+        return 0
+    }
     if ((width =? 7) and (rd_dn_payload(@reader_ctx token) =? "target")) {
         return rd_dc_target_value(@reader_ctx @reader_nodes 0 pos (-1))
     }
@@ -11708,6 +11713,9 @@ rd_dn_statement=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bool=fa
 }
 
 rd_dn_statement_read=(@reader_ctx:ParserContext @reader_nodes:array<Node> top:bool):>int64=>$unsafe {
+    if top and reader_ctx.tokens[reader_ctx.at].kind =? 'metatag' and reader_ctx.tokens[reader_ctx.at].stop-reader_ctx.tokens[reader_ctx.at].start =? 12 and rd_dn_payload(@reader_ctx reader_ctx.tokens[reader_ctx.at]) =? "memory_left" {
+        reader_ctx.stores.host[0].fatal(rd_mkpos(reader_ctx.file reader_ctx.tokens[reader_ctx.at].start) "`$memory_left` is not yet supported: memory caps need reserved-block accounting and budget ownership")
+    }
     if top and reader_ctx.tokens[reader_ctx.at].kind =? 'metatag' and reader_ctx.tokens[reader_ctx.at + 1].symbol =? 'kw_loop' {
         let tag=reader_ctx.tokens[reader_ctx.at]
         let name=rd_dn_payload(@reader_ctx tag)

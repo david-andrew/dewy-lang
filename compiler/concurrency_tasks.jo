@@ -31,6 +31,10 @@ concurrency_calls_c = () -> bool:
 
 
 concurrency_callback = (a: int, waiting: bool = false):
+    target = setting_value_target(a)
+    if target != a:
+        concurrency_callback(target, waiting)
+        return
     if nodes[a].kind == .conv:
         concurrency_callback(int(nodes[a].a), waiting)
         return
@@ -117,7 +121,7 @@ concurrency_finalize = ():
             concurrency_callback(callback, true)
             race_arg(callback, "spawn")
             visited: {int: bool}
-            callee = callback
+            callee = setting_value_target(callback)
             loop nodes[callee].kind == .conv: callee = int(nodes[callee].a)
             concurrency_task_globals(int(nodes[callee].sym), visited)
     parsafe_finalize()

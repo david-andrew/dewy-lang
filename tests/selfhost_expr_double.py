@@ -48,6 +48,17 @@ def jo_doubles(*tables):
         for name, functions in table.items():
             for function, line in functions.items():
                 merged.setdefault(name, {}).setdefault(function, line)
+    # Disabled policy services are identities in expression-service doubles.
+    # Full compiler differential programs exercise snapshot construction.
+    if 'expr.jo' in merged:
+        defaults = {
+            'setting_value_target': 'setting_value_target = (n: int) -> int: n',
+            'setting_value_needed': 'setting_value_needed = (n: int) -> bool: false',
+            'setting_value_lambda': 'setting_value_lambda = (n: int, expected: int) -> int: 0',
+            'setting_value_partial': 'setting_value_partial = (n: int, t: int, pts: int[], mm: int, ret: int) -> int: t',
+        }
+        for name, definition in defaults.items():
+            merged['expr.jo'].setdefault(name, definition)
     # (a `use` entry, keyed by its module, brings a type a double's signature names)
     return {name: "use 'driver.jo'\n" + ''.join(line + '\n' for line in sorted(functions.values(), key=lambda line: not line.startswith('use ')))
             for name, functions in merged.items()}

@@ -1,0 +1,115 @@
+# One credit per executing thread on every core budget in its dynamic chain.
+# Admission walks only capped chains. Joins and blocking waits suspend credits;
+# a claimed job owns its stack descriptor until it signals completion, so its
+# frame can be inspected safely after the deque CAS.
+__settings_core_held = () -> *__SettingsFrame:
+    when __CORE_CAPS: return __ts()[__TS_CORE_PERMITS] as *__SettingsFrame
+    else: return null
+
+__settings_core_install = (p: *__SettingsFrame):
+    when __CORE_CAPS:
+        # Policy overlays can end while an outer permit stays held. Keeping a
+        # pointer to an overlay here would outlive that frame after its cleanup.
+        let held = p
+        loop held != null and held.kind != 0 and held.kind != 6: held = held.parent
+        __ts()[__TS_CORE_PERMITS] = held as int
+
+__settings_core_contains = (chain: *__SettingsFrame, frame: *__SettingsFrame) -> bool:
+    let p = chain
+    loop p != null:
+        if p == frame: return true
+        p = p.parent
+    false
+
+__settings_core_take_one = (p: *__SettingsFrame) -> bool:
+    when TARGET == "wasm":
+        if p.active >= p.cores: return false
+        p.active += 1
+        return true
+    else:
+        loop:
+            old = __atomic_add(&p.active, 0)
+            if old >= p.cores: return false
+            if __atomic_cas(&p.active, old, old + 1) == old: return true
+        false
+
+__settings_core_release_one = (p: *__SettingsFrame):
+    when TARGET == "wasm": p.active -= 1
+    else:
+        __atomic_add(&p.active, -1)
+        __futex_wake(&p.active)
+
+# A default header budget is replaced only by an entry scope entered without
+# another active cap. Its immutable ancestry still owns policy frames.
+__settings_core_uses = (chain: *__SettingsFrame, frame: *__SettingsFrame) -> bool:
+    let p = chain
+    loop p != null:
+        if frame.kind == 6 and p.kind == 0 and p.entry: return false
+        if p == frame: return true
+        p = p.parent
+    false
+
+__settings_core_release = (target: *__SettingsFrame, kept: *__SettingsFrame):
+    let p = target
+    loop p != null:
+        if (p.kind == 0 or p.kind == 6) and __settings_core_uses(target, p) and not __settings_core_uses(kept, p): __settings_core_release_one(p)
+        p = p.parent
+
+__settings_core_try = (target: *__SettingsFrame, kept: *__SettingsFrame) -> bool:
+    let p = target
+    loop p != null:
+        if (p.kind == 0 or p.kind == 6) and __settings_core_uses(target, p) and not __settings_core_uses(kept, p):
+            if not __settings_core_take_one(p):
+                let undo = target
+                loop undo != p:
+                    if (undo.kind == 0 or undo.kind == 6) and __settings_core_uses(target, undo) and not __settings_core_uses(kept, undo): __settings_core_release_one(undo)
+                    undo = undo.parent
+                return false
+        p = p.parent
+    true
+
+__settings_core_pause = ():
+    when TARGET == "windows": __w32_sleep(0.001)
+    else when TARGET != "wasm":
+        timeout = (0, 1000000)
+        syscall(35, &timeout, 0)
+
+__settings_core_resume = (target: *__SettingsFrame):
+    held = __settings_core_held()
+    __settings_core_release(held, target)
+    loop not __settings_core_try(target, held): __settings_core_pause()
+    __settings_core_install(target)
+
+__settings_core_suspend = () -> *__SettingsFrame:
+    held = __settings_core_held()
+    __settings_core_install(null)
+    __settings_core_release(held, null)
+    held
+
+
+
+# One immortal process default, published before or during the first entry.
+# A failed CAS frees only its unpublished candidate. Ordinary programs never
+# load this module or call the default initializer.
+__settings_core_default_pointer = 0
+__settings_core_default = () -> *__SettingsFrame:
+    when TARGET == "wasm": old = __settings_core_default_pointer
+    else: old = __atomic_add(&__settings_core_default_pointer, 0)
+    if old != 0: return old as *__SettingsFrame
+    t = __ts()
+    arena = t[__TS_ARENA]
+    t[__TS_ARENA] = 0
+    p = __alloc(size_of(__SettingsFrame)) as *__SettingsFrame
+    t[__TS_ARENA] = arena
+    p[0] = __SettingsFrame(null, 1, 6, __settings_default_cores(), false, "")
+    when TARGET == "wasm":
+        __settings_core_default_pointer = p as int
+        return p
+    else:
+        prior = __atomic_cas(&__settings_core_default_pointer, 0, p as int)
+        if prior == 0: return p
+        __settings_release(p)
+        prior as *__SettingsFrame
+
+__settings_core_root = ():
+    __settings_core_resume(__settings_core_default())

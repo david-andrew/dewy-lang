@@ -22,6 +22,10 @@ race_check = (callee: int, args: int[], pos: int):
 
 
 race_arg = (a: int, who: str):
+    target = setting_value_target(a)
+    if target != a:
+        race_arg(target, who)
+        return
     k = nodes[a].kind
     if k == .conv: race_arg(int(nodes[a].a), who)
     else if k == .lambda: race_scan(int(fns[int(nodes[a].sym)].body), int(nodes[a].sym), who, true)
@@ -51,7 +55,7 @@ race_root_callbacks = (f: int, who: str, pos: int):
 # A function value a call in checked code gives: visible where it is written, or a parameter of
 # the checked function, whose own callers were checked the same way. O(conversions).
 race_given = (a0: int, who: str):
-    a = a0
+    a = setting_value_target(a0)
     loop nodes[a].kind == .conv: a = int(nodes[a].a)
     k = nodes[a].kind
     if k == .lambda or k == .fnref or k == .partial or k == .hole or race_direct_param(a) or concurrency.parsafe_vouched(a) or starts_with(who, "spawn") and concurrency.parsafe_demand_task(a, a): return
@@ -60,7 +64,7 @@ race_given = (a0: int, who: str):
 # A parameter of the named function being checked, itself: reached only through a call whose
 # argument race_given checked (race_root_callbacks turns away the other way in).
 race_direct_param = (a0: int) -> bool:
-    a = a0
+    a = setting_value_target(a0)
     loop nodes[a].kind == .conv: a = int(nodes[a].a)
     if nodes[a].kind != .ident or nodes[a].aux != i32(int(SK.local)): return false
     l = int(nodes[a].sym)

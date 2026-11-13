@@ -4,7 +4,7 @@ from p"check.jo" import (LF_ADDR LF_PARTBORROW fns globals lib_dir locals module
 from p"checks_thin.dewy" import (check_pending_functions)
 from p"ast.jo" import (NF_CHECKED NF_EXTERN NF_STMT add_flag has_flag kid kid2 kids mk nkids nkids2 nodes)
 from p"types.jo" import (T_MATH_INT T_NONE T_VOID tkind)
-from p"expr.jo" import (last_checked ntype type_node_of task_failure_calls)
+from p"expr.jo" import (setting_value_target last_checked ntype type_node_of task_failure_calls)
 from p"select_checks.dewy" import (select_call select_check queue_payload_clash)
 from p"checks_builders.dewy" import (bc_block bc_call bc_field bc_ident bc_let bc_stmt)
 from p"checker_expr.dewy" import (check_expr)
@@ -31,6 +31,8 @@ concurrency_calls_c=():>bool=>$unsafe {
     return false
 }
 concurrency_callback=(a:TaskWord waiting:bool=false):>void=>$unsafe {
+    let target=setting_value_target(a)
+    if target not=? a {concurrency_callback(target waiting);return}
     if nodes.ptr[a].kind =? 'conv' {
         concurrency_callback(TaskWord(nodes.ptr[a].a) waiting);
         return
@@ -127,7 +129,7 @@ concurrency_finalize=():>void=>$unsafe {
             concurrency_callback(callback true);
             race_arg(callback "spawn");
             let visited:dict<int64 bool>=dict<int64 bool>()
-            let callee=callback
+            let callee=setting_value_target(callback)
             loop nodes.ptr[callee].kind =? 'conv' {callee=TaskWord(nodes.ptr[callee].a)}
             concurrency_task_globals(TaskWord(nodes.ptr[callee].sym) @visited);
         }

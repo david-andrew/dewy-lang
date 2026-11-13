@@ -14,8 +14,8 @@ match b {
 printl(zones._status_from("iana-2026a" "iana-2026b" false true) is? none)
 let utc=zone"UTC"
 let ny=zone"America/New_York"
-printl(not zones._rules_differ(zones._record(utc) zones._record(utc)))
-printl(zones._rules_differ(zones._record(utc) zones._record(ny)))
+printl(not zones._rules_differ(zones._record(utc) zones._record(utc) zones._zone_rules(utc)))
+printl(zones._rules_differ(zones._record(utc) zones._record(ny) zones._zone_rules(utc)))
 let c=zones._zone_pack_status(zone"UTC")
 printl(c is? none or c is? zones.ZonePackStale or c is? zones._UnknownZonePackFreshness)
 printl(today('UTC') =? today('UTC'))

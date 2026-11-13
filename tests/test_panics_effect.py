@@ -51,7 +51,10 @@ pick=(x:int64):>int64=>{
     $runtime_assert(x >? 0)
     return x
 }
-twice=(x:int64):>int64 & no panics=>pick(x)*2
+twice=(x:int64):>int64 & no panics=>{
+    $no_hidden_costs
+    pick(x)*2
+}
 main=()=>{
     $no_hidden_costs=false
     $runtime_checks

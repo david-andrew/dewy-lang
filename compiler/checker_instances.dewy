@@ -1,3 +1,4 @@
+from p"util.jo" import pos_in_lib
 $runtime_checks
 
 from p"checker_sinks.dewy" import (pack_written)
@@ -10,8 +11,10 @@ from p"checker_results.dewy" import (cr_syntactic_void cr_may_express cr_has_pro
 from p"poly_ops.dewy" import (poly_inst)
 from p"check.jo" import (dewy_at)
 from p"checks_thin.dewy" import (ensure_ret)
+from p"frontend.jo" import source_force_body
 from p"checks_type_hooks.dewy" import (instance_preflight instance_create instance_bad_arg instance_depth_error instance_load instance_validate instance_attributes)
 from p"ast.jo" import (clone kid)
+from p"directives.jo" import (dir_code_runtime_keys dir_code_generic_warn dir_code_generic dir_code_foreign_warn dir_code_context dir_code_contexts dir_code_origin dir_code_origins dir_code_any dir_code_files dir_mixed_files dir_code_uniform dir_code_can_vary dir_code_sources dir_code_by_inst dir_code_request)
 # Demand-only instance resolution. Concrete lookup is indexed; unresolved lookup
 # scans this declaration's instances and type arguments. Substitution and body
 # walks retain their existing costs. Hosts may reenter and grow every arena.
@@ -30,6 +33,7 @@ CheckerInstanceInput:type=[
 let ci_input:ptr<CheckerInstanceInput>=$unsafe (uint64(0) as ptr<CheckerInstanceInput>)
 checker_instances_bind=(input:ptr<CheckerInstanceInput>):>CIWord=>{ci_input=input;0}
 ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
+    if dir_code_any and dir_code_files.has(ci_input[0].nodes[0].ptr[decl].pos >> 40) {return ci_get_policy_inst(decl targs use_pos)}
     if ci_input[0].nodes[0].ptr[decl].kind =? 'lambda' {return poly_inst(decl targs use_pos)}
     # The host's preflight only acts on extern or attributed declarations.
     if (CIWord(ci_input[0].nodes[0].ptr[decl].flags) & 4) not=? 0 or ci_input[0].nodes[0].ptr[decl].c not=? 0 {instance_preflight(decl use_pos)}
@@ -39,6 +43,10 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
     if di =? 0 {di=cs_decl_info(decl)}
     let sig=ci_input[0].declarations[0].ptr[di].sig
     if not sig.done {sig=fn_sig(decl)}
+    if dir_code_any and (dir_code_files.has(use_pos >> 40) or dir_code_by_inst.length not=? 0) {
+        if sig.generic and dir_code_generic(decl use_pos) {return ci_get_policy_inst(decl targs use_pos)}
+        if not sig.generic {dir_code_foreign_warn(decl use_pos)}
+    }
     let concrete=targs.length >? 0
     loop t in targs {if tu_has_var(t) {concrete=false}}
     if concrete {
@@ -104,6 +112,109 @@ ci_get_fn_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe 
     instance_attributes(decl f zt use_pos)
     ci_input[0].declarations[0][di].insts.push(f)
     if zt.length >? 0 {ci_input[0].index[0][FnInstanceKey[decl zt]]=f}
+    if ci_input[0].functions[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
+    f
+}
+
+# Only functions in a module with a scoped code setting reach this path.
+ci_get_policy_inst=(decl:CIWord targs:array<int64> use_pos:CIWord):>CIWord=>$unsafe {
+    if ci_input[0].nodes[0].ptr[decl].kind =? 'lambda' {return poly_inst(decl targs use_pos)}
+    # The host's preflight only acts on extern or attributed declarations.
+    if (CIWord(ci_input[0].nodes[0].ptr[decl].flags) & 4) not=? 0 or ci_input[0].nodes[0].ptr[decl].c not=? 0 {instance_preflight(decl use_pos)}
+    # Preserve the original hot cached-signature guard without entering the
+    # recursive signature constructor (which saves a full working frame).
+    let di=CIWord(ci_input[0].nodes[0].ptr[decl].sym)
+    if di =? 0 {di=cs_decl_info(decl)}
+    let sig=ci_input[0].declarations[0].ptr[di].sig
+    if not sig.done {sig=fn_sig(decl)}
+    if dir_code_any and not sig.generic {dir_code_foreign_warn(decl use_pos)}
+    let code=0
+    let scoped=dir_code_any and (dir_code_files.has(ci_input[0].nodes[0].ptr[decl].pos >> 40) or sig.generic and dir_code_generic(decl use_pos))
+    if scoped and not dir_code_uniform(decl use_pos) {
+        source_force_body(decl)
+        code=dir_code_request(decl use_pos sig.generic)
+        if sig.generic and code not=? 0 {dir_code_generic_warn(decl use_pos)}
+    }
+    let origin=dir_code_origin(use_pos)
+    let foreign=sig.generic and origin not=? (ci_input[0].nodes[0].ptr[decl].pos >> 40)
+    let context=dir_code_context(code origin foreign)
+    let reuse_static=code not=? 0 and not foreign and (dir_code_runtime_keys.get(decl) ?? 0) =? code
+    let code_decl=decl | (context << 32)
+    let concrete=targs.length >? 0
+    loop t in targs {if tu_has_var(t) {concrete=false}}
+    if concrete {
+        let found=ci_input[0].index[0].get(FnInstanceKey[code_decl targs])
+        if found =? none and reuse_static {found=ci_input[0].index[0].get(FnInstanceKey[decl targs])}
+        if found not=? none {
+            let f=found ?? 0
+            if ci_input[0].functions[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
+            return f
+        }
+    } else {
+        loop f in ci_input[0].declarations[0].ptr[di].insts {
+            let same=ci_input[0].functions[0].ptr[f].targs.length =? targs.length
+            if same and scoped and (context not=? 0 or dir_code_contexts.length not=? 0) {
+                let previous=dir_code_contexts.get(f) ?? 0
+                same=previous =? context or reuse_static and previous =? 0
+            }
+            loop k in [0..targs.length) {
+                if not same {break}
+                if not tu_equal(ci_input[0].functions[0].ptr[f].targs[k] targs[k]) {same=false;break}
+            }
+            if same {
+                if ci_input[0].functions[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
+                return f
+            }
+        }
+    }
+    let f=instance_create(decl use_pos)
+    if code not=? 0 {dir_code_by_inst[f]=code}
+    if context not=? 0 {dir_code_contexts[f]=context;dir_code_origins[f]=origin}
+    let zt:array<int64>=[]
+    loop t in targs {
+        let z=tu_zonk(t)
+        if tu_has_var(tu_prune(z)) {instance_bad_arg(decl z use_pos)}
+        zt.push(z)
+    }
+    ci_input[0].functions[0][f].targs=zt
+    if ci_input[0].context[0] >=? 0 {
+        let parent=CIWord(ci_input[0].contexts[0].ptr[ci_input[0].context[0]].inst)
+        if parent >? 0 and ci_input[0].functions[0].ptr[parent].targs.length >? 0 {
+            ci_input[0].functions[0][f].gdepth=ci_input[0].functions[0].ptr[parent].gdepth + 1
+            if ci_input[0].functions[0].ptr[f].gdepth >? 500 {instance_depth_error(decl use_pos)}
+        }
+    }
+    # (a rest parameter, NF_SPREAD: the extra type argument is its type, expr.jo's rest_inst_binds)
+    let rest_type:CIWord=if zt.length >? CIWord(sig.ntp) zt[CIWord(sig.ntp)] else 0
+    loop i in [0..CIWord(ci_input[0].nodes[0].ptr[decl].nlist)) {
+        let pt=ts_subst(sig.params[i] zt)
+        let param:CIWord=kid(decl i)
+        if rest_type not=? 0 and (CIWord(ci_input[0].nodes[0].ptr[param].flags) & 1024) not=? 0 {pt=rest_type}
+        ci_input[0].functions[0][f].ptypes.push(pt)
+    }
+    instance_load(decl f sig.generic or rest_type not=? 0)
+    if sig.ret not=? 0 {
+        let ret=ts_subst(CIWord(sig.ret) zt)
+        ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ret)
+    }
+    pack_written(f CIWord(ci_input[0].nodes[0].ptr[decl].a))
+    if sig.ret =? 0 and ci_input[0].nodes[0].ptr[decl].b not=? 0 and cr_syntactic_void(CIWord(ci_input[0].nodes[0].ptr[decl].b)) and not (dewy_at(ci_input[0].nodes[0].ptr[decl].pos) and (cr_may_express(CIWord(ci_input[0].nodes[0].ptr[decl].b)) or cr_has_propagate(CIWord(ci_input[0].nodes[0].ptr[decl].b)))) {
+        ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ci_input[0].void_type[0])
+    }
+    instance_validate(f sig use_pos)
+    let body=CIWord(ci_input[0].nodes[0].ptr[decl].b)
+    if dir_code_any {
+        if code =? 0 and not sig.generic and dir_code_can_vary(decl) and not dir_code_sources.has(decl) {dir_code_sources[decl]=clone(body)}
+        if code not=? 0 {body=dir_code_sources.get(decl) ?? body}
+    }
+    if sig.generic or rest_type not=? 0 or code not=? 0 {ci_input[0].functions[0][f].body=int32<overflow='wrap'>(clone(body))}
+    else {ci_input[0].functions[0][f].body=int32<overflow='wrap'>(body)}
+    if (CIWord(ci_input[0].nodes[0].ptr[decl].flags) & 4) not=? 0 and ci_input[0].functions[0].ptr[f].ret =? 0 {
+        ci_input[0].functions[0][f].ret=int32<overflow='wrap'>(ci_input[0].void_type[0])
+    }
+    instance_attributes(decl f zt use_pos)
+    ci_input[0].declarations[0][di].insts.push(f)
+    if zt.length >? 0 {ci_input[0].index[0][FnInstanceKey[code_decl zt]]=f}
     if ci_input[0].functions[0].ptr[f].ret =? 0 {ensure_ret(f use_pos)}
     f
 }

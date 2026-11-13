@@ -3,8 +3,10 @@ $runtime_checks
 
 from p"ast.jo" import (kids mk nodes set_list)
 from p"checks_builders.dewy" import (bc_bool bc_call bc_ident bc_int bc_let bc_stmt bc_str)
-from p"directives.jo" import (dir_runtime_policies dir_runtime_settings)
+from p"directives.jo" import (dir_scoped_cores dir_runtime_caps dir_runtime_policies dir_runtime_settings)
 from p"settings.jo" import settings_path
+from p"@lib/core/os.jo" import (read_file __system_zone_name)
+from p"module_paths.dewy" import is_abs_path
 from p"util.jo" import (files intern name_of pos_file)
 
 # Demand-driven desugaring: only scopes that write a runtime policy get frames.
@@ -18,14 +20,20 @@ dw_setting_scope=(name:string value:int64 at:int64 body:int64):>void=>$unsafe {
     else if name =? "time.zone_source" {kind=4}
     else if name =? "time.rules" {kind=5}
     # Resource permits and dynamic rule packs are gated in dir_program_prepare.
-    if kind =? 0 or kind =? 4 or kind =? 5 {return}
-    if kind =? 1 and value <? 2 {fatal(at "computed zone settings are not yet supported; choose between functions with literal `$time.zone` settings in main")}
+    if kind =? 5 and value <? 2 {
+        fatal(at "run-time rule-pack paths are not yet supported; choose in main between functions with literal `$time.rules` settings")
+    }
     let fast=name =? "fast_math" and value <? -1
     if kind <? 0 and not fast {return}
     let expression=0
     if value <? -1 {expression=-value-2}
     else if kind =? 0 {expression=bc_int(to_int(name_of(value-2)) ?? 1 at)}
     else {expression=bc_str(name_of(value-2) at)}
+    if kind =? 1 and value >=? 2 and name_of(value-2) =? "build" {
+        let pinned=__system_zone_name
+        if pinned.length =? 0 {fatal(at "`$time.zone = 'build'` needs the building machine to name its zone; set an explicit zone instead")}
+        expression=bc_str(pinned at)
+    }
     let before:array<int64>=[]
     if value <? -1 {
         let value_name="$setting_value{at}"
@@ -36,15 +44,31 @@ dw_setting_scope=(name:string value:int64 at:int64 body:int64):>void=>$unsafe {
     if fast {before.push(bc_stmt(bc_call("__settings_fast_math" [expression] at) at))}
     else {
         dir_runtime_settings=true
+        if kind =? 0 {dir_runtime_caps=true;dir_scoped_cores=true}
         if kind >? 0 {dir_runtime_policies[intern(name)]=true}
+        if kind =? 1 and value <? -1 {dir_runtime_policies[intern("__zone_values")]=true}
         let frame="$setting_frame{at}"
         let entry=files[pos_file(at)].path =? settings_path
         let call=0
         if kind =? 0 {call=bc_call("__settings_enter_cores" [expression bc_bool(entry at)] at)}
-        else if kind =? 1 {call=bc_call("__settings_enter_zone" [expression] at)}
+        else if kind =? 1 {
+            let helper="__settings_enter_zone"
+            if value <? -1 {helper="__settings_enter_zone_value"}
+            call=bc_call(helper [expression] at)
+        }
         else if kind =? 2 {call=bc_call("__settings_enter_gap" [expression] at)}
         else if kind =? 3 {call=bc_call("__settings_enter_fold" [expression] at)}
         else if kind =? 4 {call=bc_call("__settings_enter_source" [expression] at)}
+        else if kind =? 5 {
+            let rel=name_of(value-2)
+            let chosen=if is_abs_path(rel) {rel} else {"{files[pos_file(at)].dir}/{rel}"}
+            let bytes=read_file(chosen)
+            if bytes is? none {fatal(at "`$time.rules`: cannot read '{chosen}'")}
+            let raw=bytes as array<uint8>
+            if raw.length <? 4 or raw[0] not=? 68 or raw[1] not=? 90 or raw[2] not=? 80 or raw[3] not=? 50 {fatal(at "`$time.rules`: '{chosen}' is not a rule pack; tools/time/gen_rules.py makes one")}
+            let data=bc_call("embed" [bc_str(name_of(value-2) at)] at)
+            call=bc_call("__settings_enter_rules_bytes" [expression data] at)
+        }
         else {call=bc_call("__settings_enter_policy" [bc_int(kind at) expression] at)}
         before.push(bc_let(frame call at))
         let cleanup=mk('defer_' at)

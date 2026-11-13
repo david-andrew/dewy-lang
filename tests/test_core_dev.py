@@ -193,6 +193,8 @@ def stub_stages(monkeypatch):
     """Record the golden-case and ladder stages instead of running them."""
     from tools import cases, ladder
     calls = []
+    # The stages are mocked: never acquire a real shared full-gate slot.
+    monkeypatch.setattr(core, 'gate_slot', lambda: None)
     # (the interpreter probe runs subprocesses some of these tests intercept)
     monkeypatch.setattr(core, 'pytest_python', lambda: Path(core.sys.executable))
     monkeypatch.setattr(cases, 'run', lambda binary, chosen, **options: calls.append(

@@ -53,6 +53,7 @@ constant_checked=(e:int64):>CVal=>$unsafe {
         checked=last_checked
         finalize_literal(checked);
     }
-    let value=ct_values[ct_run(checked)]
+    let result=ct_run(checked)
+    let value=ct_values[result]
     CVal(tkind(value.type) =? 'str_' value.i value.s)
 }

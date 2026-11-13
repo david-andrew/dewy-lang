@@ -1,3 +1,4 @@
+from p"directives.jo" import (dir_code_owner dir_code_inst dir_find dir_module_start)
 $runtime_checks
 
 from p"@lib/core/rt.jo" import (__str_slice)
@@ -9,7 +10,7 @@ from p"directives.jo" import (dir_floats_any dir_name_no_inf dir_name_no_nan dir
 from p"directive_rules.dewy" import (dir_defer dir_panics_demanded)
 from p"expr.jo" import (CV IN is_dewy_set_type ntype rational_constants)
 from p"checks_thin_expr.dewy" import (array_has_spread is_map_type)
-from p"facts.jo" import (FactState fact_bound fact_domain fact_open_endpoint fact_owner fact_speculating fact_type)
+from p"facts.jo" import (fact_retry_owner FactState fact_bound fact_domain fact_open_endpoint fact_owner fact_speculating fact_type)
 from p"floats.jo" import (FF_ENTER FF_ENTER_INF FF_INF FF_MAX FF_NAN FK_EACH FK_ELEMENT FK_KEY FR ff_assume ff_callers ff_checks ff_checks_any ff_conversions ff_direct ff_env ff_files ff_fn ff_indirect ff_int_proven ff_integer_bounds ff_keys ff_operands ff_owners ff_probe ff_probing ff_ranged ff_ranging float_keys float_keys_any key_float_types)
 from p"ir.jo" import (VF VI VS)
 from p"ir_builders.dewy" import (e_addi e_bin e_fconst e_iconst e_mov e_un emit vreg)
@@ -239,7 +240,7 @@ ff_note_conversion=():>void=>{
 # expr.jo, a direct call of f from the function being checked: its caller is walked when f's body
 # has a float policy and takes a float
 ff_note_call=(f:FloatWord decl:FloatWord):>void=>$unsafe {
-    if ff_scope_decl(decl) =? 0 or cx <? 0 {return}
+    if ff_scope_decl(decl f) =? 0 or cx <? 0 {return}
     let has_float=false
     loop t in fns.ptr[f].ptypes {
         if is_float(quantity_base(prune(t))) {has_float=true}
@@ -251,12 +252,23 @@ ff_note_ref=(decl:FloatWord):>void=>{
     if decl not=? 0 {ff_indirect[decl]=true}
 }
 # The declaration's body's float policy (0 if neither setting holds).
-ff_scope_decl=(decl:FloatWord):>FloatWord=>$unsafe {
+ff_scope_decl=(decl:FloatWord instance:FloatWord=0):>FloatWord=>$unsafe {
     if decl =? 0 or nodes.ptr[decl].kind not=? 'fn_' or nodes.ptr[decl].b =? 0 {return 0}
-    let k=ff_direct.get(decl)
-    if k not=? none {return k - 1}
-    let mode=ff_mode_at(nodes.ptr[FloatWord(nodes.ptr[decl].b)].pos)
-    ff_direct[decl]=mode + 1
+    let key=decl | (instance << 32)
+    let known=ff_direct.get(key)
+    if known not=? none {return known-1}
+    let body=nodes.ptr[FloatWord(nodes.ptr[decl].b)].pos
+    let code=dir_code_inst(instance)
+    let mode:FloatWord=0
+    loop slot in [5..7) {
+        let setting=if slot =? 5 {dir_name_no_nan} else {dir_name_no_inf}
+        let own=dir_find(setting body)
+        let value:FloatWord=-1
+        if own >=? 0 {value=dir_scopes[own].value}
+        if code not=? 0 and (own <? 0 or dir_scopes[own].start =? dir_module_start(pos_file(body))) {value=((code >> (slot*2)) & 3)-1}
+        if value =? 1 {mode=mode | (if slot =? 5 {FF_NAN} else {FF_INF})}
+    }
+    ff_direct[key]=mode+1
     mode
 }
 ff_mode_at=(p:FloatWord):>FloatWord=>{
@@ -605,7 +617,7 @@ ff_eval_node=(n:FloatWord):>FR=>$unsafe {
         let f=FloatWord(nodes.ptr[n].sym)
         let decl=FloatWord(fns.ptr[f].decl)
         # A direct call proves the properties its callee's float policy requires.
-        let scope=ff_scope_decl(decl)
+        let scope=ff_scope_decl(decl f)
         if decl >? 0 and fns.ptr[f].kind not=? int32(FK_LAMBDA) and scope not=? 0 {
             loop i in 0.. and c in kids(n) {
                 if ff_float(c) {
@@ -1083,14 +1095,16 @@ floats_after_facts=():>void=>$unsafe {
         let body=FloatWord(fns.ptr[f].body)
         if body =? 0 or fns.ptr[f].state not=? 2 {continue}
         let p=nodes.ptr[body].pos
-        if pos_in_lib(p) {continue}
+        if pos_in_lib(p) and dir_code_inst(f) =? 0 {continue}
+        dir_code_owner=f
         ff_assume=ff_mode_at(p)
         if not ff_callers.has(f) and not (conversions and ff_conversions.has(f)) {
-            if not ff_files.has(pos_file(p)) {continue}
+            if ff_assume =? 0 and not ff_files.has(pos_file(p)) {continue}
             if ff_assume =? 0 and not ff_owners.has(f) {continue}
         }
         ff_walk(f)
     }
+    dir_code_owner=0
     ff_env=dict<int64 FR>()
     ff_fn=0
 }
@@ -1103,11 +1117,20 @@ ff_probe_function=(f:FloatWord):>dict<int64 bool>=>$unsafe {
     let saved_env=ff_env
     let saved_assume=ff_assume
     let saved_fn=ff_fn
+    let saved_owner=dir_code_owner
+    let saved_fact=fact_owner
+    let saved_retry=fact_retry_owner
+    fact_owner=0
+    fact_retry_owner=0
+    dir_code_owner=f
     ff_assume=ff_mode_at(nodes.ptr[body].pos)
     ff_walk(f)
     ff_env=saved_env
     ff_assume=saved_assume
     ff_fn=saved_fn
+    dir_code_owner=saved_owner
+    fact_owner=saved_fact
+    fact_retry_owner=saved_retry
     ff_probing=false
     ff_probe
 }
@@ -1124,6 +1147,12 @@ ff_conversion_operand=(f:FloatWord n:FloatWord):>FR | none=>$unsafe {
         let saved_env=ff_env
         let saved_assume=ff_assume
         let saved_fn=ff_fn
+        let saved_owner=dir_code_owner
+        let saved_fact=fact_owner
+        let saved_retry=fact_retry_owner
+        fact_owner=0
+        fact_retry_owner=0
+        dir_code_owner=f
         let saved_probe=ff_probe
         ff_probing=true
         ff_ranging=true
@@ -1133,6 +1162,9 @@ ff_conversion_operand=(f:FloatWord n:FloatWord):>FR | none=>$unsafe {
         ff_env=saved_env
         ff_assume=saved_assume
         ff_fn=saved_fn
+        dir_code_owner=saved_owner
+        fact_owner=saved_fact
+        fact_retry_owner=saved_retry
         ff_probe=saved_probe
         ff_probing=false
         ff_ranging=false
@@ -1146,7 +1178,7 @@ ff_walk=(f:FloatWord):>void=>$unsafe {
     # (direct callers prove the properties demanded by the body's scope; a lambda or function
     # used as a value still receives unchecked parameters)
     let decl=FloatWord(fns.ptr[f].decl)
-    let entering=fns.ptr[f].kind =? int32(FK_LAMBDA) or ff_scope_decl(decl) =? 0 or ff_indirect.has(decl)
+    let entering=fns.ptr[f].kind =? int32(FK_LAMBDA) or ff_scope_decl(decl f) =? 0 or ff_indirect.has(decl)
     loop l in fns.ptr[f].params {
         if ff_tracked(l) and FloatWord(locals.ptr[l].type) >? 0 and is_float(FloatWord(locals.ptr[l].type)) {ff_env[l]=if entering {ff_enter()} else {ff_top()}}
     }

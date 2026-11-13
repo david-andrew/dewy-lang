@@ -1,3 +1,4 @@
+from p"expr.jo" import (setting_value_needed setting_value_lambda)
 $runtime_checks
 
 from p"ast.jo" import NF_SQUOTE
@@ -280,6 +281,7 @@ int_intervals_wide=(t0:ThinExprWord):>[bool array<int64> array<int64>]=>{
 # ---------------- lambdas ----------------
 # Lambdas run in checker_lambdas.dewy; these are its services.
 check_lambda=(lam:ThinExprWord expected:ThinExprWord):>int64=>{
+    if setting_value_needed(lam) {return setting_value_lambda(lam expected)}
     xm_lambda(lam expected)
 }
 is_fn_type=(t:ThinExprWord):>bool=>{

@@ -4930,6 +4930,15 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         # __setting_read("time.zone"), `$time.zone`: the setting where this is read, or at the
         # call a parameter's default is filled in for; none when no scope sets it
         setting = int(nodes[args[0]].sval)
+        if setting == intern("__zone_values"):
+            nodes[n] = Node(kind = .bool_lit, pos = nodes[n].pos, ival = int(dir_runtime_policies.has(setting)))
+            return check_expr(n, expected)
+        if setting == intern("__rule_packs"):
+            nodes[n] = Node(kind = .bool_lit, pos = nodes[n].pos, ival = int(dir_runtime_policies.has(intern("time.rules"))))
+            return check_expr(n, expected)
+        if setting == intern("__core_caps"):
+            nodes[n] = Node(kind = .bool_lit, pos = nodes[n].pos, ival = int(dir_runtime_caps))
+            return check_expr(n, expected)
         if setting == intern("__runtime_settings"):
             nodes[n] = Node(kind = .bool_lit, pos = nodes[n].pos, ival = int(dir_runtime_settings))
             return check_expr(n, expected)
@@ -4957,7 +4966,13 @@ intrinsic_rest = (n: int, iid: int, args0: int[], expected: int) -> int:
         if runtime_kind >= 0:
             fallback = mk(.none_lit, nodes[n].pos)
             held = dir_program_values.get(setting) ?? dir_find(setting, nodes[n].pos)
-            if held >= 0 and dir_scopes[held].value >= 2: fallback = bc_str(name_of(dir_scopes[held].value - 2), nodes[n].pos)
+            if held >= 0 and dir_scopes[held].value >= 2:
+                value = dir_scopes[held].value - 2
+                if setting == intern("time.zone") and value == intern("build"):
+                    pinned = __system_zone_name()
+                    if len(pinned) == 0: fatal(dir_scopes[held].at, "`$time.zone = 'build'` needs the building machine to name its zone; set an explicit zone instead")
+                    value = intern(pinned)
+                fallback = bc_str(name_of(value), nodes[n].pos)
             call = bc_call("__settings_policy_read", [bc_int(runtime_kind, nodes[n].pos), fallback], nodes[n].pos)
             policy_type = prune(expected)
             if expected != 0 and types[policy_type].kind == .opt: policy_type = prune(int(types[policy_type].elem))
@@ -5975,6 +5990,157 @@ struct ShapeArm:
     gmember: int   # a guard on one union member (`small:int64<small <? 100>`): that member
     guard: int[]   # and the intervals of its values the guard admits
 
+# A function value captures time policies at construction, never resource caps.
+# Named targets become an ordinary closure calling a fixed checked instance.
+# Lambda bodies capture the same managed snapshot directly. No new callable ABI.
+setting_value_wrapped: {int: bool}
+setting_value_targets: {int: int}
+setting_value_target = (n: int) -> int:
+    # A later callable conversion may replace a generated value. Follow only
+    # the exact construction tail that was recorded, never stale metadata.
+    if nodes[n].kind != .block or nkids(n) == 0: return n
+    target = setting_value_targets.get(n) ?? 0
+    if target == 0: return n
+    tail = kid(n, nkids(n) - 1)
+    if nodes[tail].kind == .exprstmt: tail = int(nodes[tail].a)
+    if tail == target: return target
+    if tail != n and setting_value_target(tail) == target: return target
+    n
+setting_value_needed = (n: int) -> bool:
+    dir_runtime_policies.len() != 0 and not setting_value_wrapped.has(n) and dewy_at(nodes[n].pos) and not pos_in_lib(nodes[n].pos)
+
+setting_value_body = (body: int, snapshot: str, pos: int) -> int:
+    active = "$policy_active{body}"
+    enter = bc_let(active, bc_call("__settings_policy_enter", [bc_ident(snapshot, pos)], pos), pos)
+    cleanup = mk(.defer_, pos)
+    nodes[cleanup].a = i32(bc_stmt(bc_call("__settings_policy_leave", [bc_ident(active, pos)], pos), pos))
+    if nodes[body].kind == .block:
+        statements = [enter, cleanup]
+        loop child in kids(body): statements.push(child)
+        set_list(body, statements)
+        return body
+    bc_block([enter, cleanup, bc_stmt(body, pos)], pos)
+
+setting_value_lambda = (n: int, expected: int) -> int:
+    pos = nodes[n].pos
+    setting_value_defaults(n, pos)
+    snapshot = "$policy_snapshot{n}"
+    lam = nodes.len()
+    nodes.push(nodes[n])
+    nodes[lam].b = i32(setting_value_body(int(nodes[lam].b), snapshot, pos))
+    block = bc_block([bc_let(snapshot, bc_call("__settings_policy_capture", [], pos), pos), bc_stmt(lam, pos)], pos)
+    nodes[n] = nodes[block]
+    setting_value_wrapped[lam] = true
+    result = check_expr(n, expected)
+    setting_value_targets[n] = lam
+    result
+
+# Default keepers execute before the closure installs its captured policy.
+# Only simple literals are independent of that ordering. Computed defaults can
+# read time transitively, including through implicit zero-argument calls.
+setting_default_policy = (n: int) -> bool:
+    if n == 0: return false
+    k = nodes[n].kind
+    if k == .int_lit or k == .float_lit or k == .bool_lit or k == .none_lit or k == .null_lit: return false
+    if k == .str_lit: return nkids(n) != 0
+    if k == .unary or k == .not_:
+        inner = nodes[int(nodes[n].a)].kind
+        return inner != .int_lit and inner != .float_lit and inner != .bool_lit
+    true
+
+setting_value_defaults = (decl: int, pos: int):
+    loop param in kids(decl):
+        if nodes[param].kind == .param and setting_default_policy(int(nodes[param].b)):
+            fatal(pos, "capturing time policies in a function value with computed or setting-dependent defaults is not yet supported; use a lambda such as `()=>today` so its defaults run under the captured policy")
+
+setting_value_named = (n: int, t: int, expected: int) -> int:
+    if nodes[n].aux == 1: return t  # C ABI function pointers have no policy environment.
+    if nodes[n].aux == 2: return t  # The generic lambda body already captures its creation policy.
+    pos = nodes[n].pos
+    f = int(nodes[n].sym)
+    decl = int(fns[f].decl)
+    if int(types[callable_base(t)].bits) != 0: setting_value_defaults(decl, pos)
+    params: int[]
+    args: int[]
+    loop i in [0..fns[f].ptypes.len()):
+        param = mk(.param, pos)
+        nodes[param].name = i32(intern("$policy_arg{i}"))
+        nodes[param].a = i32(type_node_of(fns[f].ptypes[i], pos))
+        if int(types[callable_base(t)].mutmask) & (1 << i) != 0: add_flag(param, NF_MUT)
+        params.push(param)
+        arg = bc_ident("$policy_arg{i}", pos)
+        if int(types[callable_base(t)].mutmask) & (1 << i) != 0: add_flag(arg, NF_MUT)
+        args.push(arg)
+    call = mk(.call, pos)
+    nodes[call].sym = i32(f)
+    nodes[call].type = fns[f].ret
+    add_flag(call, NF_CHECKED)
+    set_list(call, args)
+    # The arguments need binding in the wrapper before the direct call is checked.
+    nodes[call].flags = 0
+    nodes[call].type = 0
+    head = mk(.fnref, pos)
+    nodes[head].sym = i32(f)
+    nodes[head].type = i32(t)
+    add_flag(head, NF_CHECKED)
+    nodes[call].a = i32(head)
+    nodes[call].aux = 1
+    lam = mk(.lambda, pos)
+    set_list(lam, params)
+    nodes[lam].b = i32(bc_block([bc_stmt(call, pos)], pos))
+    nodes[n] = nodes[lam]
+    result = setting_value_lambda(n, t)
+    # Retain the named target's defaults and callable contract on the wrapper.
+    nodes[n].type = i32(t)
+    t
+
+# Partial arguments are evaluated once at creation; the wrapper captures the
+# same values together with the policy snapshot. Mutable bound arguments have
+# the language's existing partial-application diagnostic.
+setting_value_partial = (n: int, t: int, ptypes: int[], mutmask: int, ret: int) -> int:
+    pos = nodes[n].pos
+    prefix: int[]
+    params: int[]
+    args: int[]
+    target = int(nodes[n].sym)
+    head = int(nodes[n].a)
+    if nodes[n].aux == 0 and target > 0:
+        head = mk(.fnref, pos)
+        nodes[head].sym = i32(target)
+        nodes[head].type = i32(mk_fn(ptypes, ret, mutmask))
+        add_flag(head, NF_CHECKED)
+    else:
+        name = "$policy_target{n}"
+        prefix.push(bc_let(name, head, pos))
+        head = bc_ident(name, pos)
+    loop i in [0..nkids(n)):
+        arg = kid(n, i)
+        name = "$policy_bound{n}_{i}"
+        if nodes[arg].kind == .hole:
+            param = mk(.param, pos)
+            nodes[param].name = i32(intern(name))
+            nodes[param].a = i32(type_node_of(ptypes[i], pos))
+            if mutmask & (1 << i) != 0: add_flag(param, NF_MUT)
+            params.push(param)
+        else:
+            if mutmask & (1 << i) != 0: fatal(nodes[arg].pos, "cannot partially apply a `mut` argument; use `_` for it")
+            prefix.push(bc_let(name, arg, pos))
+        value = bc_ident(name, pos)
+        if mutmask & (1 << i) != 0: add_flag(value, NF_MUT)
+        args.push(value)
+    call = mk(.call, pos)
+    nodes[call].a = i32(head)
+    set_list(call, args)
+    lam = mk(.lambda, pos)
+    set_list(lam, params)
+    nodes[lam].b = i32(bc_block([bc_stmt(call, pos)], pos))
+    prefix.push(bc_stmt(lam, pos))
+    block = bc_block(prefix, pos)
+    nodes[n] = nodes[block]
+    result = check_expr(n, t)
+    setting_value_targets[n] = setting_value_target(lam)
+    result
+
 # `(a b) => f(a b)` in place of `@f`, checked against the expected function type.
 fn_adapter = (n: int, et: int, expected: int) -> int:
     pos = nodes[n].pos
@@ -6116,6 +6282,7 @@ fn_value = (n: int, expected: int, explicit_types: int[] = [], mod: int = -1, cl
     if effects_active: t = effect_infer_callable(n, expected)
     if callable_contract(expected) != 0 and not has_var(expected) and not effect_contract_fits(t, expected): fatal(nodes[n].pos, "cannot prove callable effect contract")
     nodes[n].type = i32(t)
+    if dir_runtime_policies.len() != 0 and setting_value_needed(n): return setting_value_named(n, t, expected)
     t
 
 # Dewy function names. A bare name calls its function; `@f` is the function

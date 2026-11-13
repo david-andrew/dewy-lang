@@ -86,6 +86,21 @@ cc_constant=(x0:ConstantWord):>ConstantWord=>$unsafe {
 cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe {
     if cc_errors.has(decl) {fatal(nodes.ptr[n].pos cc_errors[decl])}
     if not cc_decls.has(decl) {return 0}
+    if dir_runtime_policies.has(intern("time.rules")) or dir_runtime_policies.has(intern("__zone_values")) or dir_runtime_policies.has(intern("time.zone_source")) {
+        loop c in cc_decls[decl] {
+            if files[pos_file(nodes[c.validator].pos)].path =? "{lib_dir}/time/zones.dewy" and (dir_runtime_policies.has(intern("time.rules")) or dir_runtime_policies.has(intern("time.zone_source")) or name_of(ConstantWord(nodes[c.validator].name)) not=? "zone_error") {
+                if nkids(n) >? 0 and nodes[kid(n 0)].kind =? 'str_lit' and not pos_in_lib(nodes[n].pos) {
+                    let start=pos_off(nodes[n].pos)
+                    let stop=pos_off(nodes[kid(n 0)].pos)
+                    let src=files[pos_file(nodes[n].pos)].src as array<uint8>
+                    let literal=pos_file(nodes[kid(n 0)].pos) =? pos_file(nodes[n].pos) and start >=? 0 and stop >? start and stop <=? src.length
+                    if literal {loop i in [start..stop) {if src[i] =? 40 {literal=false;break}}}
+                    if literal {fatal(nodes[n].pos "time-zone literals under scoped rule packs, zone sources or computed zones are not yet supported; use a delimited zone(text) or zoned(text) call and handle its failures")}
+                }
+                return 0
+            }
+        }
+    }
     # (every argument constant and the value a plain record: the value, nothing at run time)
     let folded=cc_fold_first(n decl)
     if folded not=? 0 {return folded}

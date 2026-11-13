@@ -1,3 +1,6 @@
+use 'util.jo'
+use 'frontend.jo'
+use 'directives.jo'
 use 'checker_sinks.dewy'
 # Frozen instance resolver extracted from check.jo.
 use 'node_store.dewy'
@@ -25,11 +28,15 @@ checker_instances_bind = (input: *CheckerInstanceInput) -> int:
     ci_input = input
     0
 ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
+    if dir_code_any and dir_code_files.has(ci_input[0].nodes[0][decl].pos >> 40): return ci_get_policy_inst(decl, targs, use_pos)
     if ci_input[0].nodes[0][decl].kind == .lambda: return poly_inst(decl, targs, use_pos)
     # (the host's preflight acts only on extern or attributed declarations)
     if int(ci_input[0].nodes[0][decl].flags) & 4 != 0 or ci_input[0].nodes[0][decl].c != 0: instance_preflight(decl, use_pos)
     di = cs_decl_info(decl)
     sig = fn_sig(decl)
+    if dir_code_any and (dir_code_files.has(use_pos >> 40) or dir_code_by_inst.len() != 0):
+        if sig.generic and dir_code_generic(decl, use_pos): return ci_get_policy_inst(decl, targs, use_pos)
+        if not sig.generic: dir_code_foreign_warn(decl, use_pos)
     concrete = targs.len() > 0
     loop t in targs:
         if tu_has_var(t): concrete = false
@@ -82,6 +89,94 @@ ci_get_fn_inst = (decl: int, targs: int[], use_pos: int) -> int:
     instance_attributes(decl, f, zt, use_pos)
     ci_input[0].declarations[0][di].insts.push(f)
     if zt.len() > 0: ci_input[0].index[0][FnInstanceKey(decl, zt)] = f
+    if ci_input[0].functions[0][f].ret == 0: ensure_ret(f, use_pos)
+    f
+
+
+# Only functions in a module with a scoped code setting reach this path.
+ci_get_policy_inst = (decl: int, targs: int[], use_pos: int) -> int:
+    if ci_input[0].nodes[0][decl].kind == .lambda: return poly_inst(decl, targs, use_pos)
+    # (the host's preflight acts only on extern or attributed declarations)
+    if int(ci_input[0].nodes[0][decl].flags) & 4 != 0 or ci_input[0].nodes[0][decl].c != 0: instance_preflight(decl, use_pos)
+    di = cs_decl_info(decl)
+    sig = fn_sig(decl)
+    if dir_code_any and not sig.generic: dir_code_foreign_warn(decl, use_pos)
+    code = 0
+    scoped = dir_code_any and (dir_code_files.has(ci_input[0].nodes[0][decl].pos >> 40) or sig.generic and dir_code_generic(decl, use_pos))
+    if scoped and not dir_code_uniform(decl, use_pos):
+        source_force_body(decl)
+        code = dir_code_request(decl, use_pos, sig.generic)
+        if sig.generic and code != 0: dir_code_generic_warn(decl, use_pos)
+    origin = dir_code_origin(use_pos)
+    foreign = sig.generic and origin != (ci_input[0].nodes[0][decl].pos >> 40)
+    context = dir_code_context(code, origin, foreign)
+    reuse_static = code != 0 and not foreign and (dir_code_runtime_keys.get(decl) ?? 0) == code
+    code_decl = decl | (context << 32)
+    concrete = targs.len() > 0
+    loop t in targs:
+        if tu_has_var(t): concrete = false
+    if concrete:
+        found = ci_input[0].index[0].get(FnInstanceKey(code_decl, targs))
+        if found == none and reuse_static: found = ci_input[0].index[0].get(FnInstanceKey(decl, targs))
+        if let f = found:
+            if ci_input[0].functions[0][f].ret == 0: ensure_ret(f, use_pos)
+            return f
+    else:
+        loop f in ci_input[0].declarations[0][di].insts:
+            same = ci_input[0].functions[0][f].targs.len() == targs.len()
+            if same and scoped and (context != 0 or dir_code_contexts.len() != 0):
+                previous = dir_code_contexts.get(f) ?? 0
+                same = previous == context or reuse_static and previous == 0
+            loop k in [0..targs.len()):
+                if not same: break
+                if not tu_equal(ci_input[0].functions[0][f].targs[k], targs[k]):
+                    same = false
+                    break
+            if same:
+                if ci_input[0].functions[0][f].ret == 0: ensure_ret(f, use_pos)
+                return f
+    f = instance_create(decl, use_pos)
+    if code != 0: dir_code_by_inst[f] = code
+    if context != 0:
+        dir_code_contexts[f] = context
+        dir_code_origins[f] = origin
+    zt: int[]
+    loop t in targs:
+        z = tu_zonk(t)
+        if tu_has_var(tu_prune(z)):
+            instance_bad_arg(decl, z, use_pos)
+        # (a generic function that calls itself with bigger type arguments would expand without end)
+        zt.push(z)
+    ci_input[0].functions[0][f].targs = zt
+    # (made while checking another generic instance: one more link of a chain of them, which a
+    # function calling itself with ever bigger types makes without end)
+    if ci_input[0].context[0] >= 0 and int(ci_input[0].contexts[0][ci_input[0].context[0]].inst) > 0 and ci_input[0].functions[0][int(ci_input[0].contexts[0][ci_input[0].context[0]].inst)].targs.len() > 0:
+        ci_input[0].functions[0][f].gdepth = ci_input[0].functions[0][int(ci_input[0].contexts[0][ci_input[0].context[0]].inst)].gdepth + 1
+        if ci_input[0].functions[0][f].gdepth > 500: instance_depth_error(decl, use_pos)
+    # (a rest parameter, NF_SPREAD: the extra type argument is its type, expr.jo's rest_inst_binds)
+    rest_type = 0
+    if zt.len() > int(sig.ntp): rest_type = zt[int(sig.ntp)]
+    loop i in [0..int(ci_input[0].nodes[0][decl].nlist)):
+        pt = ts_subst(sig.params[i], zt)
+        param = kid(decl, i)
+        if rest_type != 0 and int(ci_input[0].nodes[0][param].flags) & 1024 != 0: pt = rest_type
+        ci_input[0].functions[0][f].ptypes.push(pt)
+    instance_load(decl, f, sig.generic or rest_type != 0)
+    if sig.ret != 0: ci_input[0].functions[0][f].ret = i32(ts_subst(int(sig.ret), zt))
+    pack_written(f, int(ci_input[0].nodes[0][decl].a))
+    if sig.ret != 0: pass
+    else if ci_input[0].nodes[0][decl].b != 0 and cr_syntactic_void(int(ci_input[0].nodes[0][decl].b)) and not (dewy_at(ci_input[0].nodes[0][decl].pos) and (cr_may_express(int(ci_input[0].nodes[0][decl].b)) or cr_has_propagate(int(ci_input[0].nodes[0][decl].b)))): ci_input[0].functions[0][f].ret = i32(ci_input[0].void_type[0])
+    instance_validate(f, sig, use_pos)
+    body = int(ci_input[0].nodes[0][decl].b)
+    if dir_code_any:
+        if code == 0 and not sig.generic and dir_code_can_vary(decl) and not dir_code_sources.has(decl): dir_code_sources[decl] = clone(body)
+        if code != 0: body = dir_code_sources.get(decl) ?? body
+    if sig.generic or rest_type != 0 or code != 0: ci_input[0].functions[0][f].body = i32(clone(body))
+    else: ci_input[0].functions[0][f].body = i32(body)
+    if int(ci_input[0].nodes[0][decl].flags) & 4 != 0 and ci_input[0].functions[0][f].ret == 0: ci_input[0].functions[0][f].ret = i32(ci_input[0].void_type[0])
+    instance_attributes(decl, f, zt, use_pos)
+    ci_input[0].declarations[0][di].insts.push(f)
+    if zt.len() > 0: ci_input[0].index[0][FnInstanceKey(code_decl, zt)] = f
     if ci_input[0].functions[0][f].ret == 0: ensure_ret(f, use_pos)
     f
 

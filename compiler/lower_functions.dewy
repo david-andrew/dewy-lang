@@ -1,3 +1,4 @@
+from p"directives.jo" import (dir_code_any dir_code_owner)
 $runtime_checks
 
 from p"lower_primitives.dewy" import (e_gaddr global_addr_off rt_global)
@@ -314,6 +315,7 @@ lower_inst_body=(f:LFnWord body:LFnWord):>void=>$unsafe {
     scope_pop();
 }
 lower_function=(lf:LFnWord):>void=>$unsafe {
+    if dir_code_any {dir_code_owner=int64(lfuncs.ptr[lf].inst)}
     lower_epoch += 1;
     lower_planning=true
     exr_fast=lfuncs.ptr[lf].kind =? LK_HELPER and lfuncs.ptr[lf].hkind =? HK.reset_words
@@ -346,6 +348,7 @@ lower_function=(lf:LFnWord):>void=>$unsafe {
     lower_finish();
     lower_planning=false
     exr_fast=false
+    dir_code_owner=0
 }
 lower_finish=():>void=>$unsafe {
     if lower_zeros.length =? 0 {

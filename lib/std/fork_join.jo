@@ -207,14 +207,19 @@ __fj_link = (j: *int):
 # activation cannot leave its join until every descendant has finished.
 @noinline
 __fj_execute = (j: *int):
-    when __setting_read("__runtime_settings"):
+    when __RUNTIME_SETTINGS:
         previous_settings = __settings_current()
         __settings_install(j[10] as *__SettingsFrame)
+    when __CORE_CAPS:
+        previous_credits = __settings_core_held()
+        __settings_core_resume(j[10] as *__SettingsFrame)
     promoted = j[7] != 0
     if promoted: __fj_work(j, j[2], j[3])
     else: __call_raw(j[5] as *u8, null, j as *u8)
 
-    when __setting_read("__runtime_settings"): __settings_install(previous_settings)
+    when __CORE_CAPS:
+        __settings_core_resume(previous_credits)
+    when __RUNTIME_SETTINGS: __settings_install(previous_settings)
     if promoted:
         # Last access to the stack job. Signal uses only pool storage: the
         # owner can return immediately after observing this release.
@@ -242,9 +247,12 @@ __fj_join = (j: *int):
 # checking completion/work, so publication between that check and parking
 # makes futex wait return immediately instead of losing the wakeup.
 __fj_wait = (joined: *int, id: int):
+    when __CORE_CAPS: suspended = __settings_core_suspend()
     loop true:
         epoch = __atomic_add(__fj_ctl, 0)
-        if joined != null and __atomic_add(joined + 6, 0) != 0: return
+        if joined != null and __atomic_add(joined + 6, 0) != 0:
+            when __CORE_CAPS: __settings_core_resume(suspended)
+            return
         other = __fj_take(id)
         if other != null: __fj_execute(other)
         else: __fj_park(epoch)
@@ -260,7 +268,7 @@ __fj_range_invoke = (j: *int):
 # a wide scalar join can use every worker, not just one worker for its tail.
 @noinline
 __fj_work = (parent: *int, lo: int, hi: int):
-    when __setting_read("__runtime_settings"):
+    when __RUNTIME_SETTINGS:
         job = __fj_SettingsJob(parent[0], parent[1], lo, hi, parent[4], parent[5], 0, 0, 0, 0, parent[10] as *__SettingsFrame)
     else:
         job = __fj_Job(parent[0], parent[1], lo, hi, parent[4], parent[5], 0, 0, 0, 0)
@@ -276,7 +284,7 @@ __fj_work = (parent: *int, lo: int, hi: int):
 
 __fj_range = (fn: *u8, env: *u8, lo: int, hi: int):
     entry = ((&__fj_range_body) as *int)[0]
-    when __setting_read("__runtime_settings"):
+    when __RUNTIME_SETTINGS:
         job = __fj_SettingsJob(entry, env as int, lo, hi, fn as int, entry, 0, 0, 0, 0, __settings_current())
     else:
         job = __fj_Job(entry, env as int, lo, hi, fn as int, entry, 0, 0, 0, 0)
@@ -292,8 +300,9 @@ __fj_start = ():
     when TARGET != "wasm":
         n = cpu_count() - 1
         # (`$program.max_cores = N` in the entry file: N threads including the caller)
-        cap: str? = __setting_read("program.max_cores")
-        if let t = cap: n = (to_int(t) ?? (n + 1)) - 1
+        when not __SCOPED_CORES:
+            cap: str? = __setting_read("program.max_cores")
+            if let t = cap: n = (to_int(t) ?? (n + 1)) - 1
         if n > __MAX_THREADS: n = __MAX_THREADS
         if n < 1: return
         __fj_ctl = __alloc(64) as *int
@@ -392,7 +401,7 @@ __fj_scalar = (j: *int, fn: *u8, env: *u8, first: int, count: int, out: *u8, ser
     j[3] = first + count
     j[4] = (out as int) - (first + 1) * 8
     j[5] = serial as int
-    when __setting_read("__runtime_settings"):
+    when __RUNTIME_SETTINGS:
         j[10] = __settings_current() as int
     __fj_link(j)
 

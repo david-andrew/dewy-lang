@@ -1,3 +1,4 @@
+from p"directives.jo" import dir_code_owner
 $runtime_checks
 
 from p"lower.jo" import HK
@@ -137,6 +138,7 @@ copies_parameters=():>void=>$unsafe {
         loop changed {
             changed=false
             loop f in [1..fns.length) {
+                dir_code_owner=f
                 let body=CopyWord(fns.ptr[f].body)
                 if body =? 0 or not copy_strict(body) or fns.ptr[f].kind not=? FK_NORMAL or fns.ptr[f].cabi or (fns.ptr[f].export_name as array<uint8>).length >? 0 or indirect.has(f) {continue}
                 loop i in [0..nkids(body)) {
@@ -161,6 +163,7 @@ copies_parameters=():>void=>$unsafe {
             }
         }
     }
+    dir_code_owner=0
 }
 copy_strict=(e:CopyWord):>bool=>$unsafe {
     e >? 0 and dir_copies_any and dir_explicit_copies(nodes.ptr[e].pos)

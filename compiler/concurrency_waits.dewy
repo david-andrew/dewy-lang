@@ -12,7 +12,7 @@ from p"util.jo" import (files name_of pos_file)
 from p"diagnostic_exit.dewy" import (fatal)
 from p"check.jo" import (fns lib_dir modules)
 from p"isolation_ops.dewy" import (isolation_children)
-from p"expr.jo" import (ntype)
+from p"expr.jo" import (setting_value_target ntype)
 from p"types.jo" import (tkind)
 from p"ownership_hooks.dewy" import (ownership_literal_print)
 from p"lower_helpers.dewy" import (value_helper_calls)
@@ -52,6 +52,11 @@ concurrency_blocks=(f:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bo
         # (the running task's state; its input operations wait)
         if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/task_core.jo" and name in? ["__task_slot" "__task_context" "__task_scope_canceled" "__task_canceled" "__task_shield_enter" "__task_shield_leave" "__task_file_code" "__task_file_begin" "__task_lock" "__task_unlock"] {return false}
         if name.startswith("__fj_") {return false}
+        # Core admission is scheduler coordination; joins release credits before
+        # waiting, so it cannot wait on a user sibling while holding its slot.
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/std/settings.jo" {return false}
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/runtime/settings_frames.jo" {return false}
+        if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/runtime/settings_permits.jo" {return false}
         if files.ptr[pos_file(nodes.ptr[d].pos)].path =? "{lib_dir}/core/rt.jo" {return false}
         if name =? "panic" {return false}
     }
@@ -65,7 +70,7 @@ concurrency_blocks=(f:WaitingWord @seen:dict<int64 bool> sharing:bool=false):>bo
 concurrency_given_blocks=(n:WaitingWord @seen:dict<int64 bool>):>bool=>$unsafe {
     loop a in kids(n) {
         if tkind(ntype(a)) not=? 'fn_' {continue}
-        let b=a
+        let b=setting_value_target(a)
         loop nodes.ptr[b].kind =? 'conv' {b=WaitingWord(nodes.ptr[b].a)}
         let k=nodes.ptr[b].kind
         if k =? 'lambda' or k =? 'fnref' or k =? 'partial' and nodes.ptr[b].aux not=? 1 {

@@ -25,7 +25,7 @@ __oom_frame = () -> *u8:
     f = s + 1 + d * __OOM_FRAME
     f[24] = t[__TS_OWNERS]
     f[25] = t[__TS_ARENA]
-    when __setting_read("__runtime_settings"): f[26] = __settings_current() as int
+    when __RUNTIME_SETTINGS: f[26] = __settings_current() as int
     f as *u8
 
 # (the body returned)
@@ -38,7 +38,7 @@ __oom_caught = ():
     t = __ts()
     s = t[__TS_OOM] as *int
     f = s + 1 + (s[0] - 1) * __OOM_FRAME
-    when __setting_read("__runtime_settings"): __settings_unwind(f[26] as *__SettingsFrame)
+    when __RUNTIME_SETTINGS: __settings_unwind(f[26] as *__SettingsFrame)
     t[__TS_ARENA] = f[25]
     s[0] -= 1
 

@@ -1,3 +1,4 @@
+from p"directives.jo" import dir_code_owner
 $runtime_checks
 
 from p"deadlock_channels.dewy" import (dc_module dc_chan_call)
@@ -68,6 +69,8 @@ nd_summary=(f:CertificateWord):>NdSum=>$unsafe {
         return nd_empty()
     }
     if fns.ptr[f].body =? 0 or pos_in_lib(nodes.ptr[CertificateWord(fns.ptr[f].body)].pos) {return nd_empty()}
+    let saved_owner=dir_code_owner
+    dir_code_owner=f
     let i=CertificateWord(nd_path.length)
     nd_index[f]=i
     nd_path.push(f)
@@ -94,6 +97,7 @@ nd_summary=(f:CertificateWord):>NdSum=>$unsafe {
         }
         loop nd_path.length >? i {nd_path.pop();}
     }
+    dir_code_owner=saved_owner
     s
 }
 nd_callee=(h:CertificateWord held:array<DlHeld> pos:CertificateWord name:string):>void=>$unsafe {

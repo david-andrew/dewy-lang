@@ -1,3 +1,4 @@
+use 'directives.jo'
 use 'deadlock.jo'
 use 'deadlock_channels.dewy'
 use 'ast.jo'
@@ -63,6 +64,8 @@ nd_summary = (f: int) -> NdSum:
         return nd_empty()
     # (the library's own waits are classified at its calls, nd_call)
     if fns[f].body == 0 or pos_in_lib(nodes[int(fns[f].body)].pos): return nd_empty()
+    saved_owner = dir_code_owner
+    dir_code_owner = f
     i = nd_path.len()
     nd_index[f] = i
     nd_path.push(f)
@@ -87,6 +90,7 @@ nd_summary = (f: int) -> NdSum:
             nd_sums[nd_path[j]] = s
             nd_index.remove(nd_path[j])
         loop nd_path.len() > i: nd_path.pop()
+    dir_code_owner = saved_owner
     s
 
 nd_callee = (h: int, held: DlHeld[], pos: int, name: str):

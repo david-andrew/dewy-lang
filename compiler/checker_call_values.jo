@@ -1,3 +1,4 @@
+use 'directives.jo'
 # Frozen callable-value checking from expr.jo.
 use 'effects.jo'
 use 'checker_call_queries.dewy'
@@ -20,6 +21,7 @@ use 'checker_call_resolve.dewy'
 use 'effect_contracts.dewy'
 
 value_call = (n: int, callee: int, args: int[], expected: int = 0) -> int:
+    if dir_code_any: dir_code_parameter(n, callee)
     ft = prune(ntype(callee))
     if types[ft].kind == .polyfn:
         d = poly_families[int(types[ft].st)].decl

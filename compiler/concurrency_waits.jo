@@ -52,6 +52,10 @@ concurrency_blocks = (f: int, seen: mut {int: bool}, sharing: bool = false) -> b
         # (the running task's state; its input operations wait)
         if files[pos_file(nodes[d].pos)].path == lib_dir + "/std/task_core.jo" and name in ["__task_slot", "__task_context", "__task_scope_canceled", "__task_canceled", "__task_shield_enter", "__task_shield_leave", "__task_file_code", "__task_file_begin", "__task_lock", "__task_unlock"]: return false
         if starts_with(name, "__fj_"): return false
+        # Core admission is scheduler coordination; joins release credits before waiting.
+        if files[pos_file(nodes[d].pos)].path == lib_dir + "/std/settings.jo": return false
+        if files[pos_file(nodes[d].pos)].path == lib_dir + "/runtime/settings_frames.jo": return false
+        if files[pos_file(nodes[d].pos)].path == lib_dir + "/runtime/settings_permits.jo": return false
         if files[pos_file(nodes[d].pos)].path == lib_dir + "/core/rt.jo": return false
         if name == "panic": return false
     if has_flag(d, NF_EXTERN): return true
@@ -65,7 +69,7 @@ concurrency_blocks = (f: int, seen: mut {int: bool}, sharing: bool = false) -> b
 concurrency_given_blocks = (n: int, seen: mut {int: bool}) -> bool:
     loop a in kids(n):
         if tkind(ntype(a)) != .fn_: continue
-        b = a
+        b = setting_value_target(a)
         loop nodes[b].kind == .conv: b = int(nodes[b].a)
         k = nodes[b].kind
         if k == .lambda or k == .fnref or k == .partial and nodes[b].aux != 1:

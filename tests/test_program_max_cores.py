@@ -56,7 +56,7 @@ def test_cap_is_a_whole_number_of_at_least_one(compiler, tmp_path, value):
     assert '`$program.max_cores` is a whole number of at least 1' in result.stderr, result.stderr
 
 
-def test_function_cap_reports_missing_shared_permits(compiler, tmp_path):
+def test_function_cap_reaches_calls(compiler, tmp_path):
     result = run(compiler, tmp_path, '''report=()=>printl(available_cores)
 work=()=>{
  $program.max_cores=1
@@ -64,13 +64,13 @@ work=()=>{
 }
 main=()=>work()
 ''')
-    assert result.returncode != 0
-    assert "scoped `$program.max_cores` is not yet supported" in result.stderr, result.stderr
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == '1\n'
 
 
-def test_imported_main_cap_reports_missing_shared_permits(compiler, tmp_path):
+def test_library_cannot_raise_the_callers_cap(compiler, tmp_path):
     (tmp_path / 'lib.dewy').write_text('main=()=>{\n$program.max_cores=4\nprintl(available_cores)\n}\n')
     result = run(compiler, tmp_path,
                  'import p"lib.dewy" as lib\nmain=()=>{\n$program.max_cores=1\nlib.main()\nprintl(available_cores)\n}\n')
-    assert result.returncode != 0
-    assert "scoped `$program.max_cores` is not yet supported" in result.stderr, result.stderr
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == '1\n1\n'

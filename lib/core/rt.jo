@@ -1,3 +1,10 @@
+const __CORE_CAPS = false
+const __HEADER_CORES = false
+const __SCOPED_CORES = false
+const __RUNTIME_SETTINGS = false
+const __RULE_PACKS = false
+const __ZONE_VALUES = false
+const __ZONE_SOURCES = false
 use 'overflow.jo'
 # Core runtime: memory, refcounted objects, arrays, strings.
 # Everything here is called by compiler-generated code. Heap objects (arrays, strings)
@@ -101,7 +108,9 @@ __tid = () -> int:
 # per-thread allocator state: [heap_cur, heap_end, live count, free list heads (64 size classes),
 # large blocks freed for reuse (a list), the bytes in that list, boxes waiting to be dropped (a
 # list, its length and capacity), a box being dropped, the context allocator]
-const __TS_WORDS = 87
+const __TS_WORDS = 89
+const __TS_ZONE_CACHE = 88
+const __TS_CORE_PERMITS = 87
 const __TS_SETTINGS = 86
 const __TS_OWNERS = 76
 const __TS_DROPPING = 77
@@ -614,7 +623,9 @@ __write_fd = (fd: int, p: *u8, n: int):
     else:
         off = 0
         loop off < n:
+            when __CORE_CAPS: suspended = __settings_core_suspend()
             r = syscall(1, fd, p + off, n - off)
+            when __CORE_CAPS: __settings_core_resume(suspended)
             # (a task's cancellation signal interrupts the wait; output is no cancellation point)
             if r == -4: continue
             if r <= 0:
@@ -637,6 +648,12 @@ __loop_watchdog = ():
         if __wasm_busy() > 5000.0: panic("this has run for 5 seconds without stopping, in a web page: a loop that never ends? (the page stops it here; what it printed is above)")
 
 __read_fd = (fd: int, p: *u8, n: int) -> int:
+    when __CORE_CAPS: suspended = __settings_core_suspend()
+    result = __read_fd_unbudgeted(fd, p, n)
+    when __CORE_CAPS: __settings_core_resume(suspended)
+    result
+
+__read_fd_unbudgeted = (fd: int, p: *u8, n: int) -> int:
     when TARGET == "wasm":
         if fd == 0: return __wasm_read_stdin(p, n)
         return -1

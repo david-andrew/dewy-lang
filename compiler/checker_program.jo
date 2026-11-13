@@ -1,3 +1,4 @@
+use 'directives.jo'
 use 'data_access.dewy'
 use 'checker_hooks.dewy'
 # Frozen program checking and phase orchestration from check.jo.
@@ -108,6 +109,14 @@ check_program = (main_path: str):
         ic_restore(icb)
         i += 1
     # (dictionaries hash keys with the keyed value hash: lib/core/map.jo)
+    if dir_header_cores: runtime_switch_on("__HEADER_CORES")
+    if dir_scoped_cores: runtime_switch_on("__SCOPED_CORES")
+    if dir_runtime_caps: runtime_switch_on("__CORE_CAPS")
+    if dir_runtime_settings: runtime_switch_on("__RUNTIME_SETTINGS")
+    if dir_runtime_policies.len() > 0:
+        if dir_runtime_policies.has(intern("time.rules")): runtime_switch_on("__RULE_PACKS")
+        if dir_runtime_policies.has(intern("__zone_values")): runtime_switch_on("__ZONE_VALUES")
+        if dir_runtime_policies.has(intern("time.zone_source")): runtime_switch_on("__ZONE_SOURCES")
     runtime_switch_on("__KEYED_HASH")
     runtime_switch_on("__MUL_HI")
     runtime_switch_on("__SECRETS")
@@ -165,6 +174,7 @@ check_program = (main_path: str):
     if test_mode: test_start = runtime_fn("__test_run_begin")
     order = init_module_order(mainm)
     init_fns = [prelude_init]
+    if dir_header_cores: init_fns.push(runtime_fn("__settings_core_root"))
     if test_start != 0: init_fns.push(test_start)
     loop m in order:
         if not modules[m].is_prelude: init_fns.push(int(modules[m].init_fn))
@@ -206,10 +216,13 @@ check_program = (main_path: str):
     # the program's own functions are all checked, called or not (errors should not hide in
     # unused code); only what is reachable is compiled
     if ide_on: ide_force = ide_find_file(ide_doc)
+    settings_pending: int[]
     loop m in modules:
         if m.is_prelude and int(m.file) != ide_force: continue
         loop d in m.decls:
-            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic and not decl_has_rest(d): get_fn_inst(d, [], nodes[d].pos)
+            if nodes[d].kind == .fn_ and not has_flag(d, NF_EXTERN) and not fn_sig(d).generic and not decl_has_rest(d):
+                if dir_code_any and dir_code_files.has(nodes[d].pos >> 40): settings_pending.push(d)
+                else: get_fn_inst(d, [], nodes[d].pos)
     loop nm in runtime_names: runtime_fn(nm)
     runtime_memeq = runtime_fn("__mem_eq")
     runtime_streq = runtime_fn("__str_eq")
@@ -247,6 +260,14 @@ check_program = (main_path: str):
                 exp_added[ei] = true
                 export_fns.push(get_fn_inst(d, [], nodes[d].pos))
                 more = true
+        if not more and settings_pending.len() > 0:
+            pending = settings_pending
+            settings_pending = []
+            loop d in pending:
+                di = int(nodes[d].sym)
+                if di == 0 or decl_infos[di].insts.len() == 0:
+                    get_fn_inst(d, [], nodes[d].pos)
+                    more = true
         if not more: break
     pc_finish()
     string_domains_finish()

@@ -172,7 +172,7 @@ EXTRA['check.jo']['Module'] = '''struct Module:
     names: {int: int}
     inits: int[]
 '''
-EXTRA['directives.jo'].update({'dir_code_any': 'dir_code_any = false', 'dir_find': 'dir_find = (setting: int, p: int) -> int: -1', 'dir_name_runtime': 'dir_name_runtime = 1', 'dir_name_prototype': 'dir_name_prototype = 2'})
+EXTRA['directives.jo'].update({'dir_code_files': 'dir_code_files: {int: int} = {}', 'dir_scoped_cores': 'dir_scoped_cores = false', 'dir_header_cores': 'dir_header_cores = false', 'dir_runtime_caps': 'dir_runtime_caps = false', 'dir_runtime_settings': 'dir_runtime_settings = false', 'dir_runtime_policies': 'dir_runtime_policies: {int: bool} = {}', 'dir_code_can_vary': 'dir_code_can_vary = (d: int) -> bool: false', 'dir_code_any': 'dir_code_any = false', 'dir_find': 'dir_find = (setting: int, p: int) -> int: -1', 'dir_name_runtime': 'dir_name_runtime = 1', 'dir_name_prototype': 'dir_name_prototype = 2'})
 EXTRA['dewy_methods.jo']['dewy_methods'] = 'dewy_methods: int[]'
 EXTRA['poly_closure.jo']['poly_families'] = 'poly_families: int[]'
 EXTRA['check.jo'].update({

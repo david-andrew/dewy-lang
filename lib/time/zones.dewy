@@ -2,17 +2,23 @@
 # local times resolved through gaps and folds, and zoned values. Only a program that reaches a
 # zone operation links the pack.
 import p"format.dewy" as pattern
+import p"zone_cache.jo" as cache
+from p"../runtime/settings_zones.jo" import (__settings_rule_id __settings_rule_data __settings_zone_pack __settings_zone_handle __settings_zone_index __settings_rule_dynamic __settings_zone_bound __settings_zone_host)
 from p"civil.dewy" import (Date TimeOfDay LocalDateTime Gregorian date_of _of_days _LeapDay _Overflow)
 from p"core.dewy" import (Instant Duration Days Months _Recipe _DatePeriod instant_at ns_count read_fields read_offset NO_OFFSET _Cursor Fields _byte _utc_to_axis _axis_to_utc civil_from_days days_from_civil days_in_month _year_text _fraction_text _DAY_NS _NS pad)
 import p"core.dewy" as core
 # (inside a function, so a program links the pack only if something still reads it when it runs:
 # a literal folded while compiling does not)
-_rules=():>array<uint8>=>{
+_rules=(id:int64=__settings_rule_id):>array<uint8>=>{
     const pack=$include_bytes(p"rules/current.bin")
-    pack
+    if id =? 0 {return pack}
+    __settings_rule_data(id)
 }
 
 Zone:type=[_entry:int64]
+# A handle contains both the pack identity and its zone index. The representation
+# stays one word; existing values never consult the caller's active rule pack.
+_zone_rules=(z:Zone):>array<uint8>=>_rules(__settings_zone_pack(z._entry))
 Offset:type=[_seconds:int32]
 ZonedDateTime:type=[nominal:Instant zone:Zone offset:Offset]
 # A status for a pinned zone whose host rules are known to be newer and differ.
@@ -23,60 +29,68 @@ _UnknownZonePackFreshness:type=[pinned:string host:string]
 # ---------------- reading the pack ----------------
 # `$time.zone_source = 'host'`: a zone's rules are the machine's, read when it is first reached and
 # kept past the pack's end. The pack still names the zones, and a literal cannot fold against them.
-_SOURCE=():>string|none=>$time.zone_source
-_HOST=():>bool=>_SOURCE =? 'host'
-_host_rules:array<uint8>=[]
-_host_zones:array<int64>=[]
-_host_records:array<int64>=[]
-_host_said:bool=false
-_rule_byte=(at:int64):>int64=>$unsafe {
-    if at >=? _rules().length {int64(_host_rules[at-_rules().length])} else {int64(_rules()[at])}
+_use_host=():>bool=>{
+    let source:string|none=$time.zone_source
+    source =? 'host'
 }
-_u8=(at:int64):>int64=>_rule_byte(at)
-_u32=(at:int64):>int64=>_rule_byte(at) + (_rule_byte(at+1) << 8) + (_rule_byte(at+2) << 16) + (_rule_byte(at+3) << 24)
-_i32=(at:int64):>int64=>{
-    let v=_u32(at)
+_rule_byte=(at:int64 pack_bytes:array<uint8>):>int64=>$unsafe {
+    if at <? 0 {__panic("invalid time rule-pack offset")}
+    if at >=? pack_bytes.length {
+        let host=at-pack_bytes.length
+        return cache.rule_byte(host)
+    }
+    int64(pack_bytes[at])
+}
+_u8=(at:int64 pack_bytes:array<uint8>):>int64=>_rule_byte(at pack_bytes)
+_u32=(at:int64 pack_bytes:array<uint8>):>int64=>_rule_byte(at pack_bytes) + (_rule_byte(at+1 pack_bytes) << 8) + (_rule_byte(at+2 pack_bytes) << 16) + (_rule_byte(at+3 pack_bytes) << 24)
+_i32=(at:int64 pack_bytes:array<uint8>):>int64=>{
+    let v=_u32(at pack_bytes)
     if v >=? 2147483648 {v-4294967296} else {v}
 }
-_i64=(at:int64):>int64=>$unsafe {
+_i64=(at:int64 pack_bytes:array<uint8>):>int64=>$unsafe {
     let v:int64<overflow='wrap'>=0
     loop i in [0..8) {
-        v=v+(int64<overflow='wrap'>(_rule_byte(at+i)) << (8*i))
+        v=v+(int64<overflow='wrap'>(_rule_byte(at+i pack_bytes)) << (8*i))
     }
     int64<overflow='wrap'>(v)
 }
-_zone_count=():>int64=>_u32(4)
+_zone_count=(pack_bytes:array<uint8>):>int64=>_u32(4 pack_bytes)
 _entry_at=(entry:int64):>int64=>24+entry*12
 # (the name's bytes against text: negative, zero or positive)
-_compare=(entry:int64 text:string):>int64=>$unsafe {
-    let at=_u32(_entry_at(entry))
-    let len=_u32(_entry_at(entry)+4)
+_compare=(entry:int64 text:string pack_bytes:array<uint8>):>int64=>$unsafe {
+    let at=_u32(_entry_at(entry) pack_bytes)
+    let len=_u32(_entry_at(entry)+4 pack_bytes)
     let bytes=text as array<uint8>
     let i:int64=0
     loop i <? len and i <? bytes.length {
-        let a=int64(_rules()[at+i])
+        let a=int64(pack_bytes[at+i])
         let b=int64(bytes[i])
         if a not=? b {return a-b}
         i=i+1
     }
     len-bytes.length
 }
-_text_at=(at:int64 len:int64):>string=>$unsafe {
+_text_at=(at:int64 len:int64 pack_bytes:array<uint8>):>string=>$unsafe {
     # (pack names and rules are ASCII; this also runs at compile time, for a literal's message)
     let out:array<uint8>=[]
-    loop i in [0..len) {out.push(_rules()[at+i])}
+    loop i in [0..len) {out.push(pack_bytes[at+i])}
     str_from_bytes(out)
 }
 # The rule data this program's zones come from.
-rules_version=():>string=>_text_at(_u32(8) _u32(12))
+rules_version=():>string=>{
+    let pack_bytes=_rules
+    _text_at(_u32(8 pack_bytes) _u32(12 pack_bytes) pack_bytes)
+}
 
 zone_parse=(name:string):>Zone|UnknownZone=>{
+    let pack=__settings_rule_id
+    let pack_bytes=_rules(pack)
     let lo:int64=0
-    let hi=_zone_count
+    let hi=_zone_count(pack_bytes)
     loop lo <? hi {
         let mid=(lo+hi)//2
-        let c=_compare(mid name)
-        if c =? 0 {return Zone[mid]}
+        let c=_compare(mid name pack_bytes)
+        if c =? 0 {return Zone[__settings_zone_handle(mid pack)]}
         if c <? 0 {lo=mid+1} else {hi=mid}
     }
     UnknownZone["no time zone is called {name}"]
@@ -85,29 +99,34 @@ zone_error=(name:string):>string?=>match zone_parse(name) {
     z:Zone=>none
     e:UnknownZone=>e.message
 }
-name=(z:Zone):>string=>_text_at(_u32(_entry_at(z._entry)) _u32(_entry_at(z._entry)+4))
+name=(z:Zone):>string=>{
+    let pack_bytes=_zone_rules(z)
+    _text_at(_u32(_entry_at(__settings_zone_index(z._entry)) pack_bytes) _u32(_entry_at(__settings_zone_index(z._entry))+4 pack_bytes) pack_bytes)
+}
 __as__=(z:Zone):>string=>name(z)
 __eq__=(a:Zone b:Zone):>bool=>a._entry =? b._entry
 
 # A Windows name for a zone (CLDR's table, in the pack): the machine says "Eastern Standard Time".
 _windows_zone=(name:string):>Zone|UnknownZone=>$unsafe {
-    let table=_u32(20)
+    let pack=__settings_rule_id
+    let pack_bytes=_rules(pack)
+    let table=_u32(20 pack_bytes)
     let bytes=name as array<uint8>
     let lo:int64=0
-    let hi=_u32(16)
+    let hi=_u32(16 pack_bytes)
     loop lo <? hi {
         let mid=(lo+hi)//2
         let row=table+mid*12
-        let at=_u32(row)
-        let len=_u32(row+4)
+        let at=_u32(row pack_bytes)
+        let len=_u32(row+4 pack_bytes)
         let order:int64=0
         let i:int64=0
         loop order =? 0 and i <? len and i <? bytes.length {
-            order=int64(_rules()[at+i])-int64(bytes[i])
+            order=int64(pack_bytes[at+i])-int64(bytes[i])
             i=i+1
         }
         if order =? 0 {order=len-bytes.length}
-        if order =? 0 {return Zone[_u32(row+8)]}
+        if order =? 0 {return Zone[__settings_zone_handle(_u32(row+8 pack_bytes) pack)]}
         if order <? 0 {lo=mid+1} else {hi=mid}
     }
     UnknownZone["no time zone is called {name}"]
@@ -121,19 +140,24 @@ _machine_named=(name:string):>Zone|UnknownZone=>{
 
 # The machine's zone, read once by name; its rules still come from the pack. A machine with no zone
 # to read, or a name the pack does not know, is read as UTC, and the program says so once.
-_system:Zone|none=none
 system_zone=():>Zone=>{
-    if _system isnt? none {return _system}
+    let pack=__settings_rule_id
+    if not __settings_rule_dynamic {
+        let saved=cache.system_get
+        if saved >=? 0 {return Zone[saved]}
+    }
     let name=__system_zone_name
     let chosen:Zone=match _machine_named(name) {
         z:Zone=>z
         e:UnknownZone=>{
             let why=if name =? "" "this machine names no time zone" else "this machine's time zone is called '{name}', which the time rules do not know"
-            __write_err("warning: {why}, so times here read as UTC: set the TZ variable, or name a zone with `$time.zone = 'America/New_York'`\n")
-            zone_parse("UTC") ?? Zone[0]
+            if cache.system_warn_once {
+                __write_err("warning: {why}, so times here read as UTC: set the TZ variable, or name a zone with `$time.zone = 'America/New_York'`\n")
+            }
+            zone_parse("UTC") ?? Zone[__settings_zone_handle(0 pack)]
         }
     }
-    _system=chosen
+    if not __settings_rule_dynamic {cache.system_set(chosen._entry)}
     chosen
 }
 # (what is wrong with a `$time.zone` value; only a name can be)
@@ -146,12 +170,19 @@ zone_scope_error=(scope:string|none):>string?=>{
 }
 # A named zone or the machine's, as `$time.zone` says.
 scope_zone=(scope:string|none):>Zone|UnknownZone=>{
+    if scope isnt? none {
+        let bound=__settings_zone_bound(scope)
+        if bound >=? 0 {return Zone[bound]}
+    }
     if scope is? none or scope =? 'system' {return system_zone}
     _machine_named(scope)
 }
 
 # ---------------- offsets ----------------
-_record=(z:Zone):>int64=>if _HOST {_host_record(z)} else {_u32(_entry_at(z._entry)+8)}
+_record=(z:Zone):>int64=>{
+    let pack_bytes=_zone_rules(z)
+    if __settings_zone_host(z._entry) {_host_record(z)} else {_u32(_entry_at(__settings_zone_index(z._entry))+8 pack_bytes)}
+}
 _be32=(d:array<uint8> at:int64):>int64=>$unsafe {
     (int64(d[at]) << 24) + (int64(d[at+1]) << 16) + (int64(d[at+2]) << 8) + int64(d[at+3])
 }
@@ -163,14 +194,14 @@ _be64=(d:array<uint8> at:int64):>int64=>$unsafe {
     int64<overflow='wrap'>(v)
 }
 _put32=(v:int64):>void=>{
-    loop i in [0..4) {_host_rules.push(uint8((v >> (8*i)) & 255))}
+    loop i in [0..4) {cache.push_rule(uint8((v >> (8*i)) & 255))}
 }
 _put64=(v:int64):>void=>{
-    loop i in [0..8) {_host_rules.push(uint8((v >> (8*i)) & 255))}
+    loop i in [0..8) {cache.push_rule(uint8((v >> (8*i)) & 255))}
 }
 # A zone's TZif file as a record of the pack's form, kept past its end (tools/time/gen_rules.py makes
 # the same from the same files), or -1 when this machine has no such file. O(file).
-_host_read=(zone_name:string):>int64=>$unsafe {
+_host_read=(zone_name:string pack_bytes:array<uint8>):>int64=>$unsafe {
     let d=read_bytes(p("{env("TZDIR") ?? "/usr/share/zoneinfo"}/{zone_name}"))
     if d isnt? array<uint8> or d.length <? 44 or d[0] not=? 84 or d[1] not=? 90 or d[2] not=? 105 or d[3] not=? 102 or d[4] <? 50 {return -1}
     let at=44+_be32(d 32)*5+_be32(d 36)*6+_be32(d 40)+_be32(d 28)*8+_be32(d 24)+_be32(d 20)
@@ -215,7 +246,7 @@ _host_read=(zone_name:string):>int64=>$unsafe {
     let rule_stop=d.length
     loop rule_start <? rule_stop and d[rule_start] =? 10 {rule_start=rule_start+1}
     loop rule_stop >? rule_start and d[rule_stop-1] =? 10 {rule_stop=rule_stop-1}
-    let record=_rules().length+_host_rules.length
+    let record=pack_bytes.length+cache.rule_count
     let size=16+changes.length*13
     _put32(first)
     _put32(changes.length)
@@ -223,30 +254,27 @@ _host_read=(zone_name:string):>int64=>$unsafe {
     _put32(rule_stop-rule_start)
     loop c in changes {_put64(c)}
     loop o in offsets {_put32(o)}
-    loop f in flags {_host_rules.push(uint8(f))}
-    loop i in [rule_start..rule_stop) {_host_rules.push(d[i])}
+    loop f in flags {cache.push_rule(uint8(f))}
+    loop i in [rule_start..rule_stop) {cache.push_rule(d[i])}
     record
 }
 _signed32=(v:int64):>int64=>if v >=? 2147483648 {v-4294967296} else {v}
 _host_record_raw=(z:Zone):>int64=>$unsafe {
-    let i:int64=0
-    loop i <? _host_zones.length {
-        if _host_zones[i] =? z._entry {return _host_records[i]}
-        i=i+1
-    }
-    let record=_host_read(name(z))
-    _host_zones.push(z._entry)
-    _host_records.push(record)
+    let pack_bytes=_zone_rules(z)
+    let saved=cache.find_record(z._entry)
+    if saved isnt? none {return saved}
+    let record=_host_read(name(z) pack_bytes)
+    cache.save_record(z._entry record)
     record
 }
 _host_record=(z:Zone):>int64=>{
+    let pack_bytes=_zone_rules(z)
     let record=_host_record_raw(z)
     if record <? 0 {
-        if not _host_said {
+        if cache.warn_once {
             __write_err("warning: `$time.zone_source = 'host'`, but this machine has no rules for {name(z)}, so it keeps those of Dewy's own pack, {rules_version()}\n")
-            _host_said=true
         }
-        return _u32(_entry_at(z._entry)+8)
+        return _u32(_entry_at(__settings_zone_index(z._entry))+8 pack_bytes)
     }
     record
 }
@@ -265,14 +293,14 @@ _host_revision=():>string|none=>$unsafe {
     loop i in [10..last) {revision.push(d[i])}
     "iana-{str_from_bytes(revision)}"
 }
-_rules_differ=(pinned:int64 host:int64):>bool=>{
-    if _u32(pinned) not=? _u32(host) or _u32(pinned+4) not=? _u32(host+4) or _u32(pinned+12) not=? _u32(host+12) {return true}
-    let bytes=_u32(pinned+4)*13
-    loop i in [0..bytes) {if _rule_byte(pinned+16+i) not=? _rule_byte(host+16+i) {return true}}
-    let n=_u32(pinned+12)
-    let a=_u32(pinned+8)
-    let b=_u32(host+8)
-    loop i in [0..n) {if _rule_byte(a+i) not=? _rule_byte(b+i) {return true}}
+_rules_differ=(pinned:int64 host:int64 pack_bytes:array<uint8>):>bool=>{
+    if _u32(pinned pack_bytes) not=? _u32(host pack_bytes) or _u32(pinned+4 pack_bytes) not=? _u32(host+4 pack_bytes) or _u32(pinned+12 pack_bytes) not=? _u32(host+12 pack_bytes) {return true}
+    let bytes=_u32(pinned+4 pack_bytes)*13
+    loop i in [0..bytes) {if _rule_byte(pinned+16+i pack_bytes) not=? _rule_byte(host+16+i pack_bytes) {return true}}
+    let n=_u32(pinned+12 pack_bytes)
+    let a=_u32(pinned+8 pack_bytes)
+    let b=_u32(host+8 pack_bytes)
+    loop i in [0..n) {if _rule_byte(a+i pack_bytes) not=? _rule_byte(b+i pack_bytes) {return true}}
     false
 }
 _status_from=(pinned:string host:string differs:bool newer:bool):>ZonePackStale|_UnknownZonePackFreshness|none=>{
@@ -290,11 +318,12 @@ _host_identity=(z:Zone revision:string|none):>string=>{
     }
 }
 _zone_pack_status=(z:Zone):>ZonePackStale|_UnknownZonePackFreshness|none=>{
+    let pack_bytes=_zone_rules(z)
     let host=_host_record_raw(z)
     if host <? 0 {return none}
-    let pack=_u32(_entry_at(z._entry)+8)
-    if not _rules_differ(pack host) {return none}
-    let pack_version=rules_version
+    let pack=_u32(_entry_at(__settings_zone_index(z._entry))+8 pack_bytes)
+    if not _rules_differ(pack host pack_bytes) {return none}
+    let pack_version=_text_at(_u32(8 pack_bytes) _u32(12 pack_bytes) pack_bytes)
     let host_version=_host_revision
     let identity=_host_identity(z host_version)
     match host_version {
@@ -303,44 +332,45 @@ _zone_pack_status=(z:Zone):>ZonePackStale|_UnknownZonePackFreshness|none=>{
     }
 }
 # The number of changes at or before a POSIX second, by binary search.
-_changes_before=(record:int64 moment:int):>int64=>{
-    let count=_u32(record+4)
+_changes_before=(record:int64 moment:int pack_bytes:array<uint8>):>int64=>{
+    let count=_u32(record+4 pack_bytes)
     let lo:int64=0
     let hi=count
     loop lo <? hi {
         let mid=(lo+hi)//2
-        if _i64(record+16+mid*8) <=? moment {lo=mid+1} else {hi=mid}
+        if _i64(record+16+mid*8 pack_bytes) <=? moment {lo=mid+1} else {hi=mid}
     }
     lo
 }
-_offset_after=(record:int64 changes:int64):>int64=>{
-    if changes =? 0 {return _i32(record)}
-    _i32(record+16+_u32(record+4)*8+(changes-1)*4)
+_offset_after=(record:int64 changes:int64 pack_bytes:array<uint8>):>int64=>{
+    if changes =? 0 {return _i32(record pack_bytes)}
+    _i32(record+16+_u32(record+4 pack_bytes)*8+(changes-1)*4 pack_bytes)
 }
 # Seconds east of UTC at a POSIX second, by the table and then by the zone's POSIX rule.
 offset_at=(z:Zone moment:int):>int64=>{
+    let pack_bytes=_zone_rules(z)
     let record=_record(z)
-    let count=_u32(record+4)
-    let changes=_changes_before(record moment)
-    if changes <? count or _u32(record+12) =? 0 {return _offset_after(record changes)}
-    _rule_offset(record moment)
+    let count=_u32(record+4 pack_bytes)
+    let changes=_changes_before(record moment pack_bytes)
+    if changes <? count or _u32(record+12 pack_bytes) =? 0 {return _offset_after(record changes pack_bytes)}
+    _rule_offset(record moment pack_bytes)
 }
 
 # ---------------- the POSIX TZ rule after the table ----------------
 # `std offset [dst [offset] [,start[/time],end[/time]]]`, read from the pack in place.
-_Rule:type=[at:int64 stop:int64]
+_Rule:type=[at:int64 stop:int64 pack_bytes:array<uint8>]
 _skip_name=(@r:_Rule):>void=>{
-    if _u8(r.at) =? 60 {
-        loop _u8(r.at) not=? 62 {r.at=r.at+1}
+    if _u8(r.at r.pack_bytes) =? 60 {
+        loop r.at <? r.stop and _u8(r.at r.pack_bytes) not=? 62 {r.at=r.at+1}
         r.at=r.at+1
         return
     }
-    loop r.at <? r.stop and ((_u8(r.at) >=? 65 and _u8(r.at) <=? 90) or (_u8(r.at) >=? 97 and _u8(r.at) <=? 122)) {r.at=r.at+1}
+    loop r.at <? r.stop and ((_u8(r.at r.pack_bytes) >=? 65 and _u8(r.at r.pack_bytes) <=? 90) or (_u8(r.at r.pack_bytes) >=? 97 and _u8(r.at r.pack_bytes) <=? 122)) {r.at=r.at+1}
 }
 _number=(@r:_Rule):>int64=>{
     let v:int64=0
-    loop r.at <? r.stop and _u8(r.at) >=? 48 and _u8(r.at) <=? 57 {
-        v=v*10+_u8(r.at)-48
+    loop r.at <? r.stop and _u8(r.at r.pack_bytes) >=? 48 and _u8(r.at r.pack_bytes) <=? 57 {
+        v=v*10+_u8(r.at r.pack_bytes)-48
         r.at=r.at+1
     }
     v
@@ -348,15 +378,15 @@ _number=(@r:_Rule):>int64=>{
 # hh[:mm[:ss]], signed: seconds.
 _hms=(@r:_Rule):>int64=>{
     let sign:int64=1
-    if r.at <? r.stop and _u8(r.at) =? 45 {
+    if r.at <? r.stop and _u8(r.at r.pack_bytes) =? 45 {
         sign=-1
         r.at=r.at+1
-    } else if r.at <? r.stop and _u8(r.at) =? 43 {r.at=r.at+1}
+    } else if r.at <? r.stop and _u8(r.at r.pack_bytes) =? 43 {r.at=r.at+1}
     let v=_number(@r)*3600
-    if r.at <? r.stop and _u8(r.at) =? 58 {
+    if r.at <? r.stop and _u8(r.at r.pack_bytes) =? 58 {
         r.at=r.at+1
         v=v+_number(@r)*60
-        if r.at <? r.stop and _u8(r.at) =? 58 {
+        if r.at <? r.stop and _u8(r.at r.pack_bytes) =? 58 {
             r.at=r.at+1
             v=v+_number(@r)
         }
@@ -367,7 +397,7 @@ _weekday_of=(days:int):>int64=>((days+4)%7).to_int64() ?? 0
 # A `Mm.n.d[/time]`, `Jn` or `n` date in a year: local seconds since 1970 at which it falls.
 _rule_date=(@r:_Rule year:int):>int=>{
     let days:int=0
-    let b=_u8(r.at)
+    let b=_u8(r.at r.pack_bytes)
     if b =? 77 {
         r.at=r.at+1
         let month=_number(@r)
@@ -390,21 +420,21 @@ _rule_date=(@r:_Rule year:int):>int=>{
         days=days_from_civil(year 1 1)+int(_number(@r))
     }
     let time:int64=7200
-    if r.at <? r.stop and _u8(r.at) =? 47 {
+    if r.at <? r.stop and _u8(r.at r.pack_bytes) =? 47 {
         r.at=r.at+1
         time=_hms(@r)
     }
     days*86400+int(time)
 }
-_rule_offset=(record:int64 moment:int):>int64=>{
-    let start=_u32(record+8)
-    let r=_Rule[start start+_u32(record+12)]
+_rule_offset=(record:int64 moment:int pack_bytes:array<uint8>):>int64=>{
+    let start=_u32(record+8 pack_bytes)
+    let r=_Rule[start start+_u32(record+12 pack_bytes) pack_bytes]
     _skip_name(@r)
     let standard=-_hms(@r)
     if r.at >=? r.stop {return standard}
     _skip_name(@r)
     let daylight=standard+3600
-    if r.at <? r.stop and _u8(r.at) not=? 44 {daylight=-_hms(@r)}
+    if r.at <? r.stop and _u8(r.at pack_bytes) not=? 44 {daylight=-_hms(@r)}
     if r.at >=? r.stop {return standard}
     r.at=r.at+1
     let [year _m _d]=civil_from_days(int(moment+standard)//86400)
@@ -468,16 +498,17 @@ _FoldChoice:type=_FoldPolicy|'all'
 _GapChoice:type=_GapPolicy|'skip'
 # Local seconds in a zone: the moment under the policies, or the Gap or Ambiguous with no policy.
 _resolve=(local:int64 nanos:int z:Zone fold:_FoldChoice|none gap:_GapChoice|none):>ZonedDateTime|array<ZonedDateTime>|none|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields=>{
+    let pack_bytes=_zone_rules(z)
     let record=_record(z)
     let window:int64=93600
     let early=offset_at(z local-window)
     let late=offset_at(z local+window)
     let seen:array<int64>=[early]
-    let first=_changes_before(record local-window)
-    let last=_changes_before(record local+window)
+    let first=_changes_before(record local-window pack_bytes)
+    let last=_changes_before(record local+window pack_bytes)
     let i=first
     loop i <? last {
-        let o=_offset_after(record i+1)
+        let o=_offset_after(record i+1 pack_bytes)
         if not seen.contains(o) {seen.push(o)}
         i=i+1
     }
@@ -531,16 +562,17 @@ _resolve=(local:int64 nanos:int z:Zone fold:_FoldChoice|none gap:_GapChoice|none
 # The single-result path keeps the narrow policy types and result shape. Constant evaluation of
 # a zoned literal can then prove a named policy without widening a literal union during the call.
 _resolve_one=(local:int64 nanos:int z:Zone fold:_FoldPolicy|none gap:_GapPolicy|none):>ZonedDateTime|Gap|Ambiguous|OutsideCoverage|OffGrid|InvalidFields=>{
+    let pack_bytes=_zone_rules(z)
     let record=_record(z)
     let window:int64=93600
     let early=offset_at(z local-window)
     let late=offset_at(z local+window)
     let seen:array<int64>=[early]
-    let first=_changes_before(record local-window)
-    let last=_changes_before(record local+window)
+    let first=_changes_before(record local-window pack_bytes)
+    let last=_changes_before(record local+window pack_bytes)
     let i=first
     loop i <? last {
-        let o=_offset_after(record i+1)
+        let o=_offset_after(record i+1 pack_bytes)
         if not seen.contains(o) {seen.push(o)}
         i=i+1
     }
@@ -585,6 +617,10 @@ _zone_for=(written:Zone|none given:Zone|none scope:string|none running:bool):>Zo
         return MissingContext["there is no zone to read this in, and a literal cannot assume one: write it in the text, `2026-10-26T09:00[America/New_York]`, pass `zone=`, or set `$time.zone`"]
     }
     # (unspecified means the running machine, and the call has already warned)
+    if scope isnt? none {
+        let bound=__settings_zone_bound(scope)
+        if bound >=? 0 {return Zone[bound]}
+    }
     if scope is? none or scope =? 'system' {return system_zone}
     _machine_named(scope)
 }
@@ -691,7 +727,7 @@ zoned_parse_all_skip=(text:string zone:Zone|none scope:string|none running:bool=
 # (a literal needs rules while compiling, and `'host'` has none until the program runs)
 const _HOST_LITERAL="`$time.zone_source = 'host'` follows this machine's rules when the program runs, so a literal cannot be worked out from them: read it from text at run time, as `zoned(text)`"
 zoned_error_one=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>{
-    if _HOST {return _HOST_LITERAL}
+    if _use_host {return _HOST_LITERAL}
     match zoned_parse_one(text zone fold gap scope false) {
         z:ZonedDateTime=>none
         e:ParseError=>e.message
@@ -706,7 +742,7 @@ zoned_error_one=(text:string zone:Zone|none fold:_FoldPolicy|none gap:_GapPolicy
 }
 zoned_text_error_one=(text:string fold:_FoldPolicy|none gap:_GapPolicy|none scope:string|none):>string?=>zoned_error_one(text none fold gap scope)
 zoned_error=(text:string zone:Zone|none fold:_FoldChoice|none gap:_GapChoice|none scope:string|none):>string?=>{
-    if _HOST {return _HOST_LITERAL}
+    if _use_host {return _HOST_LITERAL}
     match zoned_parse(text zone fold gap scope false) {
         z:ZonedDateTime=>none
         z:array<ZonedDateTime>=>none

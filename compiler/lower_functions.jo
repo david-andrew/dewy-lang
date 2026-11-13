@@ -1,3 +1,4 @@
+use 'directives.jo'
 use 'ownership_lower.dewy'
 use 'lower_closures.dewy'
 # Frozen recursive lowering from lower.jo.
@@ -277,6 +278,7 @@ lower_inst_body = (f: int, body: int) -> void:
 
 
 lower_function = (lf: int):
+    if dir_code_any: dir_code_owner = int(lfuncs[lf].inst)
     lower_epoch += 1
     lower_planning = true
     exr_fast = lfuncs[lf].kind == LK_HELPER and lfuncs[lf].hkind == HK.reset_words
@@ -307,7 +309,7 @@ lower_function = (lf: int):
     lower_finish()
     lower_planning = false
     exr_fast = false
-
+    dir_code_owner = 0
 
 lower_finish = ():
     if lower_zeros.len() == 0:

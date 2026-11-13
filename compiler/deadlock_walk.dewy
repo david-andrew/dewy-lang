@@ -1,3 +1,4 @@
+from p"directives.jo" import dir_code_owner
 $runtime_checks
 
 from p"deadlock.jo" import (DlLoc DlAcq DlHeld DlEdge DlCallback dl_fn dl_cur dl_groups dl_summaries dl_inits dl_param_index dl_changed dl_report dl_relevant deadlock_parallel)
@@ -22,12 +23,15 @@ dl_lock_call=(n:LockWalkWord):>string=>$unsafe {
     ""
 }
 dl_walk_fn=(f:LockWalkWord):>void=>$unsafe {
+    let saved_owner=dir_code_owner
+    dir_code_owner=f
     dl_fn=f
     dl_cur=dl_summary(f)
     let held:array<DlHeld>=[]
     dl_groups=dict<int64 array<int64>>()
     dl_walk(LockWalkWord(fns.ptr[f].body) @held)
     dl_summaries[f]=dl_cur
+    dir_code_owner=saved_owner
 }
 dl_walk=(n:LockWalkWord @held:array<DlHeld>):>void=>$unsafe {
     if n =? 0 {return}

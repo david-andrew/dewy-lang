@@ -136,8 +136,10 @@ __task_unlock = (p: *int) -> void: __atomic_cas(p, 1, 0)
 
 __task_pause = ():
     when TARGET == "linux":
+        when __CORE_CAPS: suspended = __settings_core_suspend()
         ts = (0, 1000000)
         syscall(35, &ts, 0)
+        when __CORE_CAPS: __settings_core_resume(suspended)
     else: __sleep_ns(1000000)
 
 # Race helpers inherit their caller's owner; their group body is still tracked.

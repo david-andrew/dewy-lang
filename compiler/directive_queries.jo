@@ -48,7 +48,12 @@ dir_policy = (p: int) -> int:
         q = dir_find(dir_name_prototype, p)
     rv = if r >= 0: dir_scopes[r].value else: -1
     qv = if q >= 0: dir_scopes[q].value else: -1
-    if qv == 1 and (rv == -1 or dir_scopes[q].start >= dir_scopes[r].start): return DIR_PROTOTYPE
+    priority = q >= 0 and (r < 0 or dir_scopes[q].start >= dir_scopes[r].start)
+    if dir_code_any and dir_code_by_inst.len() != 0 and dir_code_current() != 0:
+        rv = dir_value(dir_name_runtime, p)
+        qv = dir_value(dir_name_prototype, p)
+        priority = dir_code_priority(p)
+    if qv == 1 and (rv == -1 or priority): return DIR_PROTOTYPE
     if rv == 1: return DIR_RUNTIME
     if rv == 0: return DIR_STATIC
     if qv == 1: return DIR_PROTOTYPE
@@ -95,6 +100,7 @@ dir_uniform_runtime = (p: int) -> bool:
     file = pos_file(p)
     if dir_mixed_files.has(file): return false
     if let cached = dir_uniform_files.get(file): return cached
+    if dir_code_any and dir_code_by_inst.len() != 0 and dir_code_current() != 0: return false
     policy = dir_policy(p)
     runtime = policy == DIR_RUNTIME or policy == DIR_IMPLICIT
     dir_uniform_files[file] = runtime

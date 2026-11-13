@@ -1,0 +1,101 @@
+# Only programs with scoped packs load and scan this registry.
+struct __SettingsRulePack:
+    bytes: u8[]
+    id: int
+    next: *__SettingsRulePack
+
+__settings_rule_head = 0
+__settings_rule_serial = 0
+
+__settings_pack_u32 = (bytes: u8[], at: int) -> int:
+    int(bytes[at]) | (int(bytes[at + 1]) << 8) | (int(bytes[at + 2]) << 16) | (int(bytes[at + 3]) << 24)
+
+__settings_rule_error = (bytes: u8[]) -> str?:
+    n = bytes.len()
+    if n < 24 or bytes[0] != 68 or bytes[1] != 90 or bytes[2] != 80 or bytes[3] != 50: return "expected a DZP2 rule pack"
+    zones = __settings_pack_u32(bytes, 4)
+    if zones > (n - 24) / 12: return "truncated zone table"
+    version = __settings_pack_u32(bytes, 8)
+    length = __settings_pack_u32(bytes, 12)
+    if version > n or length > n - version: return "invalid pack version"
+    count = __settings_pack_u32(bytes, 16)
+    table = __settings_pack_u32(bytes, 20)
+    if table > n or count > (n - table) / 12: return "truncated Windows zone table"
+    loop i in [0..zones):
+        at = 24 + i * 12
+        name = __settings_pack_u32(bytes, at)
+        size = __settings_pack_u32(bytes, at + 4)
+        if name > n or size > n - name: return "invalid zone name"
+        record = __settings_pack_u32(bytes, at + 8)
+        if record > n - 16: return "invalid zone record"
+        changes = __settings_pack_u32(bytes, record + 4)
+        if changes > (n - record - 16) / 13: return "truncated transition table"
+        tail = __settings_pack_u32(bytes, record + 8)
+        size = __settings_pack_u32(bytes, record + 12)
+        if tail > n or size > n - tail: return "invalid POSIX rule"
+    loop i in [0..count):
+        at = table + i * 12
+        name = __settings_pack_u32(bytes, at)
+        size = __settings_pack_u32(bytes, at + 4)
+        if name > n or size > n - name or __settings_pack_u32(bytes, at + 8) >= zones: return "invalid Windows zone name"
+    none
+
+__settings_rule_register = (bytes: u8[]) -> int:
+    const bundled = embed("rules/current.bin")
+    if data(bytes) == data(bundled): return 0
+    let node: *__SettingsRulePack = null
+    loop:
+        head = __settings_rule_head_load()
+        let p = head as *__SettingsRulePack
+        loop p != null:
+            # Embedded byte strings are interned by content by the compiler.
+            if data(p.bytes) == data(bytes):
+                if node != null:
+                    node.bytes = []
+                    __free(node as *u8)
+                return p.id
+            p = p.next
+        if node == null:
+            t = __ts()
+            arena = t[__TS_ARENA]
+            t[__TS_ARENA] = 0
+            node = __alloc(size_of(__SettingsRulePack)) as *__SettingsRulePack
+            t[__TS_ARENA] = arena
+            id = __settings_rule_next_id()
+            if id > 0x3FFFFFFF: __panic("too many pinned time rule packs")
+            node[0] = __SettingsRulePack(bytes, id, null)
+        node.next = head as *__SettingsRulePack
+        if __settings_rule_publish(head, node as int): return node.id
+    0
+
+__settings_rule_data_in_pack = (id: int) -> u8[]:
+    let p = __settings_rule_head_load() as *__SettingsRulePack
+    loop p != null:
+        if p.id == id: return p.bytes
+        p = p.next
+    __panic("invalid pinned time rule pack")
+    []
+
+__settings_rule_frame = (name: str, bytes: u8[]) -> *__SettingsFrame:
+    if let why = __settings_rule_error(bytes): __panic("invalid time rule pack: {why}")
+    id = __settings_rule_register(bytes)
+    frame = __settings_enter_policy(5, name)
+    frame.rule_pack = id
+    frame
+
+__settings_rule_head_load = () -> int:
+    when TARGET == "wasm": return __settings_rule_head
+    else: return __atomic_add(&__settings_rule_head, 0)
+
+__settings_rule_next_id = () -> int:
+    when TARGET == "wasm":
+        __settings_rule_serial += 1
+        return __settings_rule_serial
+    else: return __atomic_add(&__settings_rule_serial, 1) + 1
+
+__settings_rule_publish = (old: int, next: int) -> bool:
+    when TARGET == "wasm":
+        if __settings_rule_head != old: return false
+        __settings_rule_head = next
+        return true
+    else: return __atomic_cas(&__settings_rule_head, old, next) == old

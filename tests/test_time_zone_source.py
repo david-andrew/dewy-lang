@@ -83,9 +83,8 @@ def test_where_and_what_it_can_say(compiler, tmp_path):
     assert ran.returncode != 0
     assert "`$time.zone_source` is 'host'" in ran.stderr
     ran = run(compiler, tmp_path, "f=()=>{\n    $time.zone_source = 'host'\nprintl(1)\n}\nf\n")
-    assert ran.returncode != 0
-    assert "scoped `$time.zone_source` is not yet supported" in ran.stderr
-    assert 'top of the entry file or its main body' in ran.stderr
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout == '1\n'
 
 
 @same_rules

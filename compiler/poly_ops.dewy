@@ -1,3 +1,4 @@
+from p"directives.jo" import (dir_code_any dir_code_inst dir_code_request dir_code_by_inst)
 $runtime_checks
 
 from p"ast.jo" import (NF_CHECKED NF_MUT add_flag clone has_flag kid mk nkids nodes set_list)
@@ -108,7 +109,8 @@ poly_inst=(decl:PolyWord targs:array<int64> use_pos:PolyWord):>PolyWord=>$unsafe
         if has_var(z) {fatal(use_pos "cannot infer a generic closure's type argument; give its argument or result a type")}
         zs.push(z)
     }
-    let key=FnInstanceKey(decl zs)
+    let code=dir_code_request(decl use_pos)
+    let key=FnInstanceKey(decl | (code << 32) zs)
     let found=fn_instances.get(key)
     if found not=? none {
         let f:PolyWord=found
@@ -128,6 +130,7 @@ poly_inst=(decl:PolyWord targs:array<int64> use_pos:PolyWord):>PolyWord=>$unsafe
     }
     let family=PolyWord(nodes.ptr[decl].aux)
     let f=new_inst(FK_LAMBDA PolyWord(nodes.ptr[decl].mod) "generic_lambda")
+    if dir_code_any and (code not=? 0 or (cx >=? 0 and dir_code_inst(PolyWord(ctxs[cx].inst)) not=? 0)) {dir_code_by_inst[f]=code}
     fns.ptr[f].decl=int32(decl)
     fns.ptr[f].target=int32(family)
     fns.ptr[f].has_env=true

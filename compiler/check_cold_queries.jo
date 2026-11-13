@@ -185,5 +185,6 @@ constant_checked = (e: int) -> CVal:
         check_expr(e, 0)
         checked = last_checked
         finalize_literal(checked)
-    value = ct_values[ct_run(checked)]
+    result = ct_run(checked)
+    value = ct_values[result]
     CVal(tkind(value.type) == .str_, value.i, value.s)

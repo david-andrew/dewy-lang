@@ -436,6 +436,9 @@ rt_dc_long_real = (token: DewyLexeme, pos: int) -> int:
 
 rt_dc_metatag_atom = (token: DewyLexeme, pos: int) -> int:
     width = token.stop - token.start
+    if width == 12 and rt_dn_payload(token) == "memory_left":
+        fatal(pos, "`$memory_left` is not yet supported: memory caps need reserved-block accounting and budget ownership")
+        return 0
     if width == 7 and rt_dn_payload(token) == "target": return rt_dc_target_value(0, pos, -1)
     if width == 6 and rt_dn_payload(token) == "build":
         dot = dc_parser.tokens[dc_parser.at]
@@ -3856,6 +3859,7 @@ rt_dc_body_metatag = (statements: mut int[]) -> int:
 # (dw_metatag_fail), a label before no loop (dw_label_fail); -1 a form left unread (dc_unread).
 
 rt_dc_body_tag = (name: str, tag: DewyLexeme) -> int:
+    if name == "memory_left": fatal(mkpos(dc_parser.file, tag.start), "`$memory_left` is not yet supported: memory caps need reserved-block accounting and budget ownership")
     if name == "extern" or name == "intrinsic": fatal(mkpos(dc_parser.file, tag.start), "`${name}` declares a module-level function: prefix its declaration with `${name}`, then `name = (...):>Result`")
     if (name == "shadowable" or name == "supported_targets") and dc_parser.flags.report_now:
         if name == "shadowable": rt_dc_report(mkpos(dc_parser.file, tag.start), "`$shadowable` marks a module-level const: `$shadowable const name = ...` at the top of the file")
@@ -7139,6 +7143,8 @@ rt_dn_statement = (top: bool = false) -> int:
     read
 
 rt_dn_statement_read = (top: bool) -> int:
+    if top and dc_parser.tokens[dc_parser.at].kind == .metatag and dc_parser.tokens[dc_parser.at].stop - dc_parser.tokens[dc_parser.at].start == 12 and rt_dn_payload(dc_parser.tokens[dc_parser.at]) == "memory_left":
+        fatal(mkpos(dc_parser.file, dc_parser.tokens[dc_parser.at].start), "`$memory_left` is not yet supported: memory caps need reserved-block accounting and budget ownership")
     if top and dc_parser.tokens[dc_parser.at].kind == .metatag and dc_parser.tokens[dc_parser.at + 1].symbol == .kw_loop:
         tag = dc_parser.tokens[dc_parser.at]
         name = rt_dn_payload(tag)

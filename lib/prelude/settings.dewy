@@ -40,4 +40,7 @@ __settings_gap_one_read=(fallback:_SettingGapOne|none):>_SettingGapOne|none=>{
     none
 }
 
-__settings_enter_source=(value:'host'):>ptr<__SettingsFrame>=>__settings_enter_policy(4 string(value))
+__settings_enter_source=(value:'host'|none):>ptr<__SettingsFrame>=>{
+    let text=if value is? none {""} else {string(value)}
+    __settings_enter_policy(4 text)
+}

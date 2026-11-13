@@ -223,21 +223,73 @@ prelude_demand_entry = (e: int):
 # this list whole)
 prelude_known = ["Map", "NDArray", "Missing", "Console", "Set", "__crash_install", "__c_threads", "__cpu_avx2", "__loop_budget", "__mt_active", "__hash_key"]
 
+settings_frames_loaded = false
 settings_runtime_loaded = false
 settings_zone_loaded = false
+settings_rules_loaded = false
+settings_rule_data_loaded = false
+settings_permits_loaded = false
+settings_values_loaded = false
 math_runtime_loaded = false
 math_eval_loaded = false
 
 demand_prelude_name = (name: int):
-    if dir_runtime_settings and name_of(name) in ["__settings_enter_cores", "__settings_enter_gap", "__settings_enter_fold", "__settings_enter_source", "__settings_enter_zone", "__settings_gap_read", "__settings_gap_one_read", "__settings_fold_read"]:
-        zone = name_of(name) == "__settings_enter_zone"
+    if dir_runtime_settings and not settings_frames_loaded and (name_of(name) == "__SettingsFrame" or starts_with(name_of(name), "__settings_")):
+        settings_frames_loaded = true
+        first_module = modules.len()
+        register_module(load_module(lib_dir + "/runtime/settings_frames.jo", true, -1))
+        mi = first_module
+        loop mi < modules.len():
+            register_module(mi)
+            mi += 1
+        if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+        late_module_imports = true
+    if dir_runtime_settings and not settings_values_loaded and name_of(name) in ["__settings_policy_capture", "__settings_policy_enter", "__settings_policy_leave"]:
+        settings_values_loaded = true
+        first_module = modules.len()
+        register_module(load_module(lib_dir + "/runtime/settings_values.jo", true, -1))
+        mi = first_module
+        loop mi < modules.len():
+            register_module(mi)
+            mi += 1
+        if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+        late_module_imports = true
+    if dir_runtime_caps and not settings_permits_loaded and starts_with(name_of(name), "__settings_core_"):
+        settings_permits_loaded = true
+        first_module = modules.len()
+        register_module(load_module(lib_dir + "/runtime/settings_permits.jo", true, -1))
+        mi = first_module
+        loop mi < modules.len():
+            register_module(mi)
+            mi += 1
+        if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+        late_module_imports = true
+    if dir_runtime_settings and not settings_rule_data_loaded and name_of(name) in ["__settings_rule_data_in_pack", "__settings_rule_frame", "__settings_rule_error"]:
+        settings_rule_data_loaded = true
+        first_module = modules.len()
+        first_import = from_imports.len()
+        register_module(load_module(lib_dir + "/time/rule_registry.jo", true, -1))
+        mi = first_module
+        loop mi < modules.len():
+            register_module(mi)
+            mi += 1
+        bind_from_imports(first_import)
+        if module_ctx.len() > 0: setup_module_contexts(init_fns[0])
+        late_module_imports = true
+    if dir_runtime_settings and name_of(name) in ["__settings_enter_rules_bytes", "__settings_enter_cores", "__settings_enter_gap", "__settings_enter_fold", "__settings_enter_source", "__settings_enter_zone", "__settings_enter_zone_value", "__settings_gap_read", "__settings_gap_one_read", "__settings_fold_read"]:
+        zone = name_of(name) == "__settings_enter_zone" or name_of(name) == "__settings_enter_zone_value"
+        rules = name_of(name) == "__settings_enter_rules_bytes"
         loaded = settings_runtime_loaded
         if zone: loaded = settings_zone_loaded
+        if rules: loaded = settings_rules_loaded
         if not loaded:
             file = "settings.dewy"
             if zone:
                 settings_zone_loaded = true
                 file = "setting_zone.dewy"
+            else if rules:
+                settings_rules_loaded = true
+                file = "setting_rules.dewy"
             else: settings_runtime_loaded = true
             first_module = modules.len()
             first_import = from_imports.len()

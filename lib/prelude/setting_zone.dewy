@@ -1,3 +1,8 @@
+import p"@lib/time/zones.dewy" as setting_zones
 # A dynamic zone is a Zone; quoted constant names remain convenient.
 __settings_enter_zone=(value:string):>ptr<__SettingsFrame>=>__settings_enter_policy(1 value)
-__settings_enter_zone=<T>(value:T):>ptr<__SettingsFrame>=>__settings_enter_policy(1 value.name)
+__settings_enter_zone_value=(value:setting_zones.Zone):>ptr<__SettingsFrame>=>$unsafe {
+    let frame=__settings_enter_policy(1 value.name)
+    frame.zone_handle=value._entry
+    frame
+}

@@ -1,0 +1,31 @@
+import 'settings_zones.jo' as __settings_zones
+# Values capture policy, while resource caps continue to follow the caller.
+# Managed snapshots own strings, not frame pointers, and outlive their scope.
+struct __SettingsPolicy:
+    values: str[]
+    rule_pack: int
+    zone_handle: int
+
+__settings_policy_capture = () -> __SettingsPolicy:
+    zone: str? = __setting_read("time.zone")
+    gap: str? = __setting_read("time.gap")
+    fold: str? = __setting_read("time.fold")
+    source: str? = __setting_read("time.zone_source")
+    rules: str? = __setting_read("time.rules")
+    values = [zone ?? "", gap ?? "", fold ?? "", source ?? "", rules ?? ""]
+    __SettingsPolicy(values, __settings_zones.__settings_rule_id(), __settings_zones.__settings_zone_bound(zone ?? ""))
+
+__settings_policy_enter = (policy: __SettingsPolicy) -> *__SettingsFrame:
+    saved = __settings_current()
+    loop i in [0..5):
+        p = __settings_enter_policy(i + 1, policy.values[i])
+        if i == 0: p.zone_handle = policy.zone_handle
+        if i == 4: p.rule_pack = policy.rule_pack
+    saved
+
+__settings_policy_leave = (saved: *__SettingsFrame):
+    let current = __settings_current()
+    loop current != saved:
+        parent = current.parent
+        __settings_leave(current)
+        current = parent

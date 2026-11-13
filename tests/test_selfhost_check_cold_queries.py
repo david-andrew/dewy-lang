@@ -12,3 +12,9 @@ PATHS = (
 
 def test_check_cold_queries_match_twin(compiler, tmp_path, monkeypatch):
     compare_builds(compiler, tmp_path, monkeypatch, ('check_cold_queries',), PATHS)
+
+
+def test_constant_query_reloads_values_after_evaluation(compiler, tmp_path, monkeypatch):
+    source=tmp_path/'constant.jo'
+    source.write_text('const enabled = not BOOTSTRAP and __setting_read("__core_caps")\nmain = (): print(enabled)\n')
+    compare_builds(compiler, tmp_path, monkeypatch, ('check_cold_queries',), [source])

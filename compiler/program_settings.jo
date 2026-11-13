@@ -25,15 +25,13 @@ dir_program_prepare = ():
         if not dir_program_setting(name): continue
         header = s.start == dir_module_start(pos_file(s.start))
         legacy = s.start == entry_main and s.value >= 2
-        if (name == "program.max_cores" or name == "time.rules" or name == "time.zone_source") and not header and not legacy:
-            fatal(s.at, "scoped `${name}` is not yet supported; use a literal setting at the top of the entry file or its main body")
         if files[pos_file(s.start)].path != settings_path: continue
-        # Keep the existing entry-main forms process-wide until scoped caps and packs land.
-        if legacy and (name == "time.rules" or name == "program.max_cores" or name == "time.zone_source"):
-            dir_program_values[s.setting] = i
-            if name == "time.zone_source": dir_rules_from_host = true
         if not header: continue
         dir_program_values[s.setting] = i
+        if name == "program.max_cores":
+            dir_header_cores = true
+            dir_runtime_caps = true
+            dir_runtime_settings = true
         if name == "time.zone_source": dir_rules_from_host = true
 
 dir_program_finalize = (): dir_program_prepare()

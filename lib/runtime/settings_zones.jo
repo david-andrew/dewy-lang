@@ -1,0 +1,54 @@
+# Loaded only by the time library or a captured time policy.
+__settings_rule_id = () -> int:
+    when not __RULE_PACKS: return 0
+    else:
+        let p = __settings_current()
+        loop p != null:
+            if p.kind == 5: return p.rule_pack
+            p = p.parent
+        0
+
+__settings_zone_handle = (entry: int, pack: int) -> int:
+    when __RULE_PACKS or __ZONE_SOURCES:
+        handle = (pack << 32) | entry
+        when __ZONE_SOURCES:
+            source: str? = __setting_read("time.zone_source")
+            if source == "host": handle |= 1 << 62
+        return handle
+    else: return entry
+
+__settings_zone_index = (handle: int) -> int:
+    when __RULE_PACKS or __ZONE_SOURCES: return handle & 0xFFFFFFFF
+    else: return handle
+
+__settings_zone_pack = (handle: int) -> int:
+    when __RULE_PACKS: return (handle >> 32) & 0x3FFFFFFF
+    else: return 0
+
+__settings_rule_dynamic = () -> bool: __RULE_PACKS or __ZONE_SOURCES
+
+
+__settings_rule_data = (id: int) -> u8[]:
+    when __RULE_PACKS: return __settings_rule_data_in_pack(id)
+    else:
+        __panic("invalid pinned time rule pack")
+        []
+
+# A computed Zone keeps its original pack; names resolved later use the active pack.
+__settings_zone_bound = (name: str) -> int:
+    when not __ZONE_VALUES: return -1
+    else:
+        let p = __settings_current()
+        loop p != null:
+            if p.kind == 1:
+                if p.value == name: return p.zone_handle
+                return -1
+            p = p.parent
+        -1
+
+# The source, like the pack identity, is selected when the name is resolved.
+__settings_zone_host = (handle: int) -> bool:
+    when __ZONE_SOURCES: return handle & (1 << 62) != 0
+    else:
+        source: str? = __setting_read("time.zone_source")
+        source == "host"

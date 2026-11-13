@@ -26,8 +26,24 @@ use 'panic_inventory.dewy'
 use 'isolation_ops.dewy'
 
 directives_reset = ():
+    setting_value_targets = {}
+    setting_value_wrapped = {}
     dir_program_any = false
     dir_runtime_settings = false
+    dir_code_any = false
+    dir_code_origins = {}
+    dir_code_contexts = {}
+    dir_code_context_keys = {}
+    dir_code_warnings = {}
+    dir_code_owner = 0
+    dir_code_names = []
+    dir_code_files = {}
+    dir_code_runtime_keys = {}
+    dir_code_sources = {}
+    dir_code_by_inst = {}
+    dir_scoped_cores = false
+    dir_header_cores = false
+    dir_runtime_caps = false
     dir_runtime_policies = {}
     dir_program_values = {}
     dir_rules_from_host = false
@@ -62,6 +78,7 @@ dir_names = ():
     dir_name_copies = intern("explicit_copies")
     dir_name_row = intern("default_row")
     dir_name_no_nan = intern("no_nan")
+    dir_name_fast_math = intern("fast_math")
     dir_name_no_inf = intern("no_inf")
     dir_name_local_asserts = intern("assume_local_asserts")
     dir_name_confine = intern("confine_external_paths")
@@ -199,6 +216,17 @@ dir_conflict = (i: int):
     b = name_of(outer.bundle)
     fatal(s.at, "{dir_spelled(s)} is not allowed inside `${b}`, which sets {dir_spelled(outer)}; opt this scope out first with `${b}=false`")
 dir_push = (s: DirScope):
+    if dir_program_any and s.start == dir_module_start(pos_file(s.start)) and s.setting == intern("program.max_cores") and files[pos_file(s.start)].path == settings_path:
+        dir_header_cores = true
+        dir_runtime_caps = true
+        dir_runtime_settings = true
+    if not pos_in_lib(s.start) and (s.start != dir_module_start(pos_file(s.start)) or s.setting == dir_name_fast_math or s.setting == dir_name_no_nan or s.setting == dir_name_no_inf):
+        dir_code_init()
+        slot = dir_code_slot(s.setting)
+        if slot >= 0:
+            dir_code_any = true
+            file = pos_file(s.start)
+            dir_code_files[file] = (dir_code_files.get(file) ?? 0) | (1 << slot)
     dir_scopes.push(s)
     dir_scopes_gen += 1
     if s.setting == dir_name_runtime or s.setting == dir_name_prototype or s.setting == dir_name_warnings:
@@ -283,7 +311,12 @@ dir_panics_finalize = ():
     dir_panic_sites = []
     if not dir_panics_demanded(): return
     effect_panics_settled = true
+    saved_owner = fact_owner
+    saved_retry = fact_retry_owner
+    fact_owner = 0
+    fact_retry_owner = 0
     loop f in [1..fns.len()):
+        dir_code_owner = f
         if fns[f].body == 0 or fns[f].state != 2 or fn_in_lib(f): continue
         if not dir_obligations and not ide_on and not dir_static_body(int(fns[f].body)): continue
         effect_panics(f)
@@ -309,7 +342,11 @@ dir_panics_finalize = ():
             loop depth in [0..64):
                 h = panic_via[g]
                 w = panic_witness[g]
-                if h == 0 or fn_in_lib(g) or nodes[w].kind == .lambda or dir_policy(nodes[w].pos) != DIR_STATIC or not panic_reaches(g, h): break
+                if h == 0 or fn_in_lib(g) or nodes[w].kind == .lambda: break
+                dir_code_owner = g
+                nested = dir_policy(nodes[w].pos)
+                dir_code_owner = f
+                if nested != DIR_STATIC or not panic_reaches(g, h): break
                 n = w
                 g = h
             p = nodes[n].pos
@@ -319,6 +356,9 @@ dir_panics_finalize = ():
             # (an atomic counter's add: a payload that wraps never fails)
             wrap = if contains(reason, "exact atomic result does not fit"): "; or keep a counter whose payload wraps, `atomic<int64<overflow='wrap'>>(0)`" else: ""
             fatal(p, "{dir_panic_call(n, g)} may panic ({reason}), and this scope has no runtime checks (no traps): {dir_panic_fix(p)}{wrap}")
+    dir_code_owner = 0
+    fact_owner = saved_owner
+    fact_retry_owner = saved_retry
     loop f in [1..fns.len()):
         d = int(fns[f].decl)
         if d == 0 or nodes[d].sval == 0 or fns[f].state != 2 or fns[f].body == 0: continue

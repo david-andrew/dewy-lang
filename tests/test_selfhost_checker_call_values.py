@@ -7,6 +7,7 @@ from tests.selfhost_expr_double import jo_doubles
 from tests.test_selfhost_checker_call_convert import DRIVER as BASE, JO as BASE_JO, DOUBLES
 
 JO = dict(BASE_JO)
+JO["directives.jo"] = "dir_code_any = false\ndir_code_parameter = (n: int, callee: int): pass\n"
 def replace(module, name, definition):
     JO[module] = re.sub(r'(?m)^' + name + r' = [^\n]*(?:\n(?:    [^\n]*|[ \t]*))*', definition.rstrip() + '\n', JO[module])
 EXTRA = {

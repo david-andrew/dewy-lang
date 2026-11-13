@@ -1,3 +1,4 @@
+use 'directives.jo'
 use 'deadlock.jo'
 use 'deadlock_waits.dewy'
 use 'ast.jo'
@@ -19,12 +20,15 @@ dl_lock_call = (n: int) -> str:
     ""
 
 dl_walk_fn = (f: int):
+    saved_owner = dir_code_owner
+    dir_code_owner = f
     dl_fn = f
     dl_cur = dl_summary(f)
     held: DlHeld[]
     dl_groups = {}
     dl_walk(int(fns[f].body), held)
     dl_summaries[f] = dl_cur
+    dir_code_owner = saved_owner
 
 dl_walk = (n: int, held: mut DlHeld[]):
     if n == 0: return

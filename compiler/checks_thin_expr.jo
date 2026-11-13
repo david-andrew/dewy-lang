@@ -307,7 +307,9 @@ int_intervals_wide = (t0: int) -> (bool, int[], int[]):
     ref_type_intervals_wide(types, ref_predicates, t0, T_MATH_INT)
 # ---------------- lambdas ----------------
 # Lambdas run in checker_lambdas.dewy; these are its services.
-check_lambda = (lam: int, expected: int) -> int: xm_lambda(lam, expected)
+check_lambda = (lam: int, expected: int) -> int:
+    if setting_value_needed(lam): return setting_value_lambda(lam, expected)
+    xm_lambda(lam, expected)
 is_fn_type = (t: int) -> bool:
     k = tkind(t)
     k == .fn_ or k == .cfn or k == .polyfn or k == .callable

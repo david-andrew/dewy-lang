@@ -1,3 +1,4 @@
+from p"directives.jo" import (dir_code_any dir_code_parameter)
 $runtime_checks
 
 from p"checker_call_queries.dewy" import (check_mutable_arguments save_call_order)
@@ -20,6 +21,7 @@ from p"effect_contracts.dewy" import (callable_base)
 # O(arguments), preserving call order and retaining indices across arena growth.
 HVWord:type=int64<overflow='wrap'>
 value_call=(n:int64 callee:int64 args:array<int64> expected:int64=0):>int64=>$unsafe {
+    if dir_code_any {dir_code_parameter(n callee)}
     let ft:HVWord=prune(ntype(callee))
     if types.ptr[ft].kind =? 'polyfn' {
         let d=poly_families.ptr[HVWord(types.ptr[ft].st)].decl

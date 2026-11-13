@@ -76,6 +76,21 @@ cc_constant = (x0: int) -> int:
 cc_call = (n: int, f: int, decl: int) -> int:
     if cc_errors.has(decl): fatal(nodes[n].pos, cc_errors[decl])
     if not cc_decls.has(decl): return 0
+    if dir_runtime_policies.has(intern("time.rules")) or dir_runtime_policies.has(intern("__zone_values")) or dir_runtime_policies.has(intern("time.zone_source")):
+        loop c in cc_decls[decl]:
+            if files[pos_file(nodes[c.validator].pos)].path == lib_dir + "/time/zones.dewy" and (dir_runtime_policies.has(intern("time.rules")) or dir_runtime_policies.has(intern("time.zone_source")) or name_of(int(nodes[c.validator].name)) != "zone_error"):
+                if nkids(n) > 0 and nodes[kid(n, 0)].kind == .str_lit and not pos_in_lib(nodes[n].pos):
+                    start = pos_off(nodes[n].pos)
+                    stop = pos_off(nodes[kid(n, 0)].pos)
+                    src = files[pos_file(nodes[n].pos)].src
+                    literal = pos_file(nodes[kid(n, 0)].pos) == pos_file(nodes[n].pos) and start >= 0 and stop > start and stop <= len(src)
+                    if literal:
+                        loop i in [start..stop):
+                            if src[i] == 40:
+                                literal = false
+                                break
+                    if literal: fatal(nodes[n].pos, "time-zone literals under scoped rule packs, zone sources or computed zones are not yet supported; use a delimited zone(text) or zoned(text) call and handle its failures")
+                return 0
     # (every argument constant and the value a plain record: the value, nothing at run time)
     folded = cc_fold_first(n, decl)
     if folded != 0: return folded

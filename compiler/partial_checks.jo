@@ -202,6 +202,7 @@ finish_partial = (n: int, ptypes: int[], mutmask: int, ret: int) -> int:
     nodes[n].d = i32(th)
     # (checked: a comprehension's push takes it as it is, `[loop s in xs @load(s)]`)
     add_flag(n, NF_CHECKED)
+    if setting_value_needed(n): return setting_value_partial(n, t, ptypes, mutmask, ret)
     t
 # Named waits (decisions.md, batch 7, provenance rules 3-5): `let w = @c.receive` declared in
 # this function, then `select(@w)`. A wait given as an argument a (conversions stripped): the

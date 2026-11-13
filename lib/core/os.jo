@@ -154,7 +154,9 @@ read_file = (path: str) -> str?:
     else when TARGET == "windows":
         return __w32_read_file(path)
     else:
+        when __CORE_CAPS: suspended = __settings_core_suspend()
         fd = syscall(2, data(__zstr(path)), 0, 0)
+        when __CORE_CAPS: __settings_core_resume(suspended)
         if fd < 0: return __ferr_none(fd)
         defer syscall(3, fd)
         size = syscall(8, fd, 0, 2)
@@ -163,7 +165,7 @@ read_file = (path: str) -> str?:
             out: u8[]
             chunk = fill(u8(0), 65536)
             loop:
-                r = syscall(0, fd, data(chunk), chunk.len())
+                r = __read_fd(fd, data(chunk), chunk.len())
                 if r == -21: return __ferr_none(r)
                 if r <= 0: break
                 loop i in [0..r): out.push(chunk[i])      # (not extend: the C bootstrap compiles this)
@@ -171,11 +173,11 @@ read_file = (path: str) -> str?:
         syscall(8, fd, 0, 0)
         # (a directory: a read of nothing says so. Its size means nothing: 0 on tmpfs, 2^63 - 1
         # on ext4)
-        if syscall(0, fd, data(path), 0) == -21: return __ferr_none(-21)
+        if __read_fd(fd, data(path), 0) == -21: return __ferr_none(-21)
         p = __str_new(size)
         got = 0
         loop got < size:
-            r = syscall(0, fd, p + 24 + got, size - got)
+            r = __read_fd(fd, p + 24 + got, size - got)
             if r == -21: return __ferr_none(r)        # (EISDIR: a directory)
             if r <= 0: break
             got += r
@@ -251,13 +253,15 @@ open_file = (path: str) -> File?:
         if h == null: return none
         return File(handle = h as int)
     else:
+        when __CORE_CAPS: suspended = __settings_core_suspend()
         fd = syscall(2, data(__zstr(path)), 0, 0)
+        when __CORE_CAPS: __settings_core_resume(suspended)
         if fd < 0:
             __ferr(fd)
             return none
         # (a directory opens, and reads nothing: not a file)
         b = [u8(0)]
-        if syscall(0, fd, data(b), 0) == -21:
+        if __read_fd(fd, data(b), 0) == -21:
             syscall(3, fd)
             __ferr(-21)
             return none
@@ -357,8 +361,8 @@ __file_fill = (f: mut File):
         if ReadFile(f.handle as *u8, data(f.buf) + old, u32(65536), data(r), null) != 0: got = int(r[0])
         else if int(GetLastError()) != 109: f.err = -5          # (109: a pipe's other end closed)
     else when TARGET != "wasm":
-        got = syscall(0, f.handle, data(f.buf) + old, 65536)
-        loop got == -4: got = syscall(0, f.handle, data(f.buf) + old, 65536)    # (EINTR: again)
+        got = __read_fd(f.handle, data(f.buf) + old, 65536)
+        loop got == -4: got = __read_fd(f.handle, data(f.buf) + old, 65536)    # (EINTR: again)
         if got < 0: f.err = got
     if got <= 0:
         got = 0
@@ -499,7 +503,9 @@ file_size = (path: str) -> int?:
         return none
     else:
         if is_dir(path): return none
+        when __CORE_CAPS: suspended = __settings_core_suspend()
         fd = syscall(2, data(__zstr(path)), 0, 0)
+        when __CORE_CAPS: __settings_core_resume(suspended)
         if fd < 0: return none
         n = syscall(8, fd, 0, 2)
         syscall(3, fd)
@@ -589,20 +595,24 @@ __system_zone_name = () -> str:
 __sleep_ns = (ns: int):
     __out_flush()
     if ns <= 0: return
+    when __CORE_CAPS: suspended = __settings_core_suspend()
     when TARGET == "windows":
         __w32_sleep(f64(ns) * 1e-9)
     else when TARGET != "wasm":
         ts = (ns / 1000000000, ns % 1000000000)
         syscall(35, &ts, 0)
+    when __CORE_CAPS: __settings_core_resume(suspended)
 
 @no_web("does nothing in a web page (a page cannot pause: count the time in update(dt), or use every())")
 sleep = (seconds: f64):
     __out_flush()
+    when __CORE_CAPS: suspended = __settings_core_suspend()
     when TARGET == "windows":
         __w32_sleep(seconds)
     else when TARGET != "wasm":
         ts = (int(seconds), int((seconds - floor(seconds)) * 1e9))
         syscall(35, &ts, 0)
+    when __CORE_CAPS: __settings_core_resume(suspended)
 
 # print without a trailing newline
 write = (s: str): __out(data(s), len(s), true)
@@ -808,7 +818,7 @@ run_program = (program: str, args: str[] = [], show: bool = false, cwd: str = ""
             loop true:
                 n = out.len()
                 out.resize(n + 65536)
-                r = syscall(0, rfd, data(out) + n, 65536)
+                r = __read_fd(rfd, data(out) + n, 65536)
                 out.resize(n + max(r, 0))
                 if r == -4: continue                 # (EINTR: again)
                 if r <= 0: break
@@ -1165,7 +1175,7 @@ __test_collect = (both_fd: int, out_fd: int, running: bool) -> (str, str):
         loop i in [0..2):
             fd = fds[i] & 0xFFFFFFFF
             if fd == 0xFFFFFFFF or (fds[i] >> 48) & 0xFFFF == 0: continue
-            n = syscall(0, fd, data(chunk), 65536)
+            n = __read_fd(fd, data(chunk), 65536)
             if n == -4: continue
             if n <= 0:
                 syscall(3, fd)

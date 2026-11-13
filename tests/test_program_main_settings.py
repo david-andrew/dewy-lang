@@ -91,12 +91,12 @@ def test_entry_header_is_a_default_for_main(compiler, tmp_path):
     assert result.stdout == 'Asia/Tokyo\n'
 
 
-def test_main_rule_pack_is_program_wide(compiler, tmp_path):
+def test_main_rule_pack_reaches_runtime_zone_resolution(compiler, tmp_path):
     from tests.test_time_rules import make_pack
     make_pack(tmp_path)
     entry, _ = files(tmp_path,
-        'import p"lib.dewy" as lib\nmain=()=>{\n    $time.rules = \'test.bin\'\nprintl(lib.shown)\n}\n',
-        '$time.rules = \'missing.bin\'\nshown=()=>zone"Test/Zone"\nmain=()=>printl"test"\n')
+        'import p"lib.dewy" as lib\nmain=()=>{\n    $time.rules = \'test.bin\'\nprintl(lib.shown("Test/Zone"))\n}\n',
+        '$time.rules = \'missing.bin\'\nshown=(text:string)=>zone(text)\nmain=()=>printl"test"\n')
     result = invoke(compiler, entry)
     assert result.returncode == 0, result.stderr
     assert result.stdout == 'Test/Zone\n'

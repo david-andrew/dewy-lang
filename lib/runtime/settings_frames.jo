@@ -1,0 +1,137 @@
+# Dynamic settings are immutable frames. A scope owns one reference; a task
+# owns another until it has finished. Unrelated programs compile these paths out.
+struct __SettingsFrame:
+    parent: *__SettingsFrame
+    refs: int
+    kind: int
+    cores: int
+    entry: bool
+    value: str
+    active: int = 0
+    rule_pack: int = 0
+    zone_handle: int = -1
+
+__settings_machine = 0
+__settings_machine_cores = () -> int:
+    when TARGET == "wasm": return 1
+    found = __atomic_add(&__settings_machine, 0)
+    if found == 0:
+        __atomic_cas(&__settings_machine, 0, cpu_count())
+        found = __atomic_add(&__settings_machine, 0)
+    found
+
+__settings_current = () -> *__SettingsFrame:
+    when not __RUNTIME_SETTINGS: return null
+    else:
+        p = __ts()[__TS_SETTINGS] as *__SettingsFrame
+        when __HEADER_CORES:
+            if p == null: return __settings_core_default()
+        p
+
+__settings_install = (p: *__SettingsFrame):
+    when __RUNTIME_SETTINGS: __ts()[__TS_SETTINGS] = p as int
+
+__settings_retain = (p: *__SettingsFrame):
+    if p != null: __settings_refs(p, 1)
+
+__settings_release = (p: *__SettingsFrame):
+    let current = p
+    loop current != null:
+        if __settings_refs(current, -1) != 1: return
+        parent = current.parent
+        current.value = ""
+        __free(current as *u8)
+        current = parent
+
+__settings_capture = () -> *__SettingsFrame:
+    p = __settings_current()
+    __settings_retain(p)
+    p
+
+__settings_default_cores = () -> int:
+    n = __settings_machine_cores()
+    cap: str? = __setting_read("program.max_cores")
+    if let text = cap: n = min(n, to_int(text) ?? n)
+    max(n, 1)
+
+__settings_cores_at = (p: *__SettingsFrame) -> int:
+    let current = p
+    loop current != null:
+        if current.kind == 0 or current.kind == 6: return current.cores
+        current = current.parent
+    __settings_default_cores()
+
+
+__settings_cores_unchecked = (cores: int, entry: bool) -> *__SettingsFrame:
+    parent = __settings_current()
+    limit = __settings_machine_cores()
+    let held = parent
+    has_cap = false
+    loop held != null:
+        if held.kind == 0: has_cap = true
+        held = held.parent
+    if has_cap or not entry: limit = __settings_cores_at(parent)
+    limit = min(limit, cores)
+    t = __ts()
+    arena = t[__TS_ARENA]
+    t[__TS_ARENA] = 0
+    p = __alloc(size_of(__SettingsFrame)) as *__SettingsFrame
+    t[__TS_ARENA] = arena
+    __settings_retain(parent)
+    p[0] = __SettingsFrame(parent, 1, 0, limit, entry and not has_cap, "")
+    __settings_install(p)
+    when __CORE_CAPS: __settings_core_resume(p)
+    p
+
+__settings_enter_policy = (kind: int, value: str) -> *__SettingsFrame:
+    parent = __settings_current()
+    t = __ts()
+    arena = t[__TS_ARENA]
+    t[__TS_ARENA] = 0
+    p = __alloc(size_of(__SettingsFrame)) as *__SettingsFrame
+    __settings_retain(parent)
+    p[0] = __SettingsFrame(parent, 1, kind, 0, false, "")
+    # Register the empty frame before copying text: an allocation refusal must
+    # unwind its allocation and parent reference too.
+    __settings_install(p)
+    p.value = __settings_heap_text(value)
+    t[__TS_ARENA] = arena
+    p
+
+__settings_leave = (p: *__SettingsFrame):
+    when __CORE_CAPS:
+        if p.kind == 0: __settings_core_resume(p.parent)
+    __settings_install(p.parent)
+    __settings_release(p)
+
+__settings_policy_read = (kind: int, fallback: str?) -> str?:
+    let p = __settings_current()
+    loop p != null:
+        if p.kind == kind:
+            if p.value == "": return none
+            return p.value
+        p = p.parent
+    fallback
+
+# Restore scopes abandoned by the explicit allocation-failure jump.
+__settings_unwind = (saved: *__SettingsFrame):
+    when __CORE_CAPS: __settings_core_resume(saved)
+    let p = __settings_current()
+    loop p != saved and p != null:
+        parent = p.parent
+        __settings_release(p)
+        p = parent
+    __settings_install(saved)
+
+__settings_refs = (p: *__SettingsFrame, delta: int) -> int:
+    when TARGET == "wasm":
+        old = p.refs
+        p.refs += delta
+        return old
+    else: return __atomic_add(&p.refs, delta)
+
+__settings_heap_text = (value: str) -> str:
+    if len(value) == 0: return ""
+    p = __str_new(len(value))
+    mem_copy(p + 24, data(value), len(value))
+    p as str

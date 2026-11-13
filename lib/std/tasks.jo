@@ -105,7 +105,15 @@ __task_worker = (slot: int) -> void:
     c.rng = rng(__rng_seed + slot * 1000003)
     __task_states[slot * __TS_WORDS + __TS_FILE_CODE] = 0
     __task_states[slot * __TS_WORDS + __TS_SELECT] = 0
+    when __CORE_CAPS: __settings_core_resume(__settings_current())
     p.run()
+    # The cache is private to this task; destroy it on its allocating thread.
+    zone_cache = __ts()[__TS_ZONE_CACHE] as *int
+    if zone_cache != null:
+        drop = zone_cache[0] as cfn(*u8)
+        drop(zone_cache as *u8)
+        __ts()[__TS_ZONE_CACHE] = 0
+    when __CORE_CAPS: __settings_core_suspend()
     # The callback owns the task's captures. Release them on this worker,
     # before publishing completion, so a dropped queue end wakes its peer.
     # Cancellation can skip the body; the callback still owns those captures.
@@ -118,7 +126,7 @@ __task_worker = (slot: int) -> void:
         c.signal_root = TaskGroup()
     p.finished = true
     __task_unlock(&__task_frontier_lock)
-    when __setting_read("__runtime_settings"):
+    when __RUNTIME_SETTINGS:
         inherited = __settings_current()
         __settings_install(null)
         __settings_release(inherited)
@@ -146,8 +154,9 @@ __task_launch = (g: TaskGroup, f: () -> void) -> bool:
     j.group = g
     j.alive = 1
     j.slot = slot
-    when __setting_read("__runtime_settings"):
+    when __RUNTIME_SETTINGS:
         __task_states[slot * __TS_WORDS + __TS_SETTINGS] = __settings_capture() as int
+    when __CORE_CAPS: __task_states[slot * __TS_WORDS + __TS_CORE_PERMITS] = 0
     c = __task_data(__task_contexts) + slot + 1
     c.job = job
     c.address = j
@@ -166,7 +175,7 @@ __task_launch = (g: TaskGroup, f: () -> void) -> bool:
     if id < 0:
         p.pending -= 1
         __task_unlock(&__task_frontier_lock)
-        when __setting_read("__runtime_settings"):
+        when __RUNTIME_SETTINGS:
             __settings_release(__task_states[slot * __TS_WORDS + __TS_SETTINGS] as *__SettingsFrame)
             __task_states[slot * __TS_WORDS + __TS_SETTINGS] = 0
         j.run = __task_noop
@@ -228,7 +237,7 @@ __task_join = (g: TaskGroup) -> (bool | exception):
     loop j in p.addresses:
         loop __atomic_add(&j.alive, 0) != 0: __task_wait(&j.alive, 1, false)
         slot = j.slot
-        when __setting_read("__runtime_settings"):
+        when __RUNTIME_SETTINGS:
             __settings_release(__task_states[slot * __TS_WORDS + __TS_SETTINGS] as *__SettingsFrame)
             __task_states[slot * __TS_WORDS + __TS_SETTINGS] = 0
         j.run = __task_noop
@@ -639,7 +648,9 @@ __task_interrupt_group = (g: TaskGroup) -> void:
 # Kernel clear_tid wakes a shared futex, whereas group state uses private waits.
 __task_wait = (address: *int, expected: int, private: bool):
     when TARGET == "linux":
+        when __CORE_CAPS: suspended = __settings_core_suspend()
         timeout = (0, 1000000)
         syscall(202, address, (if private: 128 else: 0), expected, &timeout)
+        when __CORE_CAPS: __settings_core_resume(suspended)
     else: __task_pause()
 
