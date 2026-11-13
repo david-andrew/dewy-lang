@@ -95,8 +95,8 @@ cc_call=(n:ConstantWord f:ConstantWord decl:ConstantWord):>ConstantWord=>$unsafe
             let start=pos_off(nodes[n].pos)
             let stop=pos_off(nodes[kid(n 0)].pos)
             let src=files[pos_file(nodes[n].pos)].src as array<uint8>
-            let literal=stop >? start
-            loop i in [start..stop) {if src[i] =? 40 {literal=false;break}}
+            let literal=pos_file(nodes[kid(n 0)].pos) =? pos_file(nodes[n].pos) and start >=? 0 and stop >? start and stop <=? src.length
+            if literal {loop i in [start..stop) {if src[i] =? 40 {literal=false;break}}}
             if literal {fatal(nodes[n].pos "literal validation through inherited run-time time policies is not yet supported; use a delimited zoned(text) call and handle its failures")}
         }
     }

@@ -85,11 +85,12 @@ cc_call = (n: int, f: int, decl: int) -> int:
             start = pos_off(nodes[n].pos)
             stop = pos_off(nodes[kid(n, 0)].pos)
             src = files[pos_file(nodes[n].pos)].src
-            literal = stop > start
-            loop i in [start..stop):
-                if src[i] == 40:
-                    literal = false
-                    break
+            literal = pos_file(nodes[kid(n, 0)].pos) == pos_file(nodes[n].pos) and start >= 0 and stop > start and stop <= len(src)
+            if literal:
+                loop i in [start..stop):
+                    if src[i] == 40:
+                        literal = false
+                        break
             if literal: fatal(nodes[n].pos, "literal validation through inherited run-time time policies is not yet supported; use a delimited zoned(text) call and handle its failures")
     # (the first check whose arguments are all closed decides)
     loop c in cc_decls[decl]:
