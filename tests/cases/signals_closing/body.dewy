@@ -1,0 +1,6 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+main = () => {
+    concurrent { loop _ in signals.ctrl_c {} printl"body tail" }
+    printl"joined"
+}

@@ -136,6 +136,7 @@ __mpmc_send_wait[T] = (q: __Mpmc[T], v: T) -> int: __mpmc_send_wait_until(q, v, 
 # The same, with 5: the deadline (time_ns; 0 for none) passed first. A deadline already past
 # still sends where there is room now: a `0s` timeout is a poll.
 __mpmc_send_wait_until[T] = (q: __Mpmc[T], v: T, deadline: int) -> int:
+    if __wait_probe_ordinary(): return 2
     p = q.__p
     spins = 0
     loop:
@@ -154,6 +155,7 @@ __mpmc_receive_wait[T] = (q: __Mpmc[T]) -> int: __mpmc_receive_wait_until(q, 0)
 # The same, with -5: the deadline (time_ns; 0 for none) passed first. A value claimed now wins
 # a deadline already past.
 __mpmc_receive_wait_until[T] = (q: __Mpmc[T], deadline: int) -> int:
+    if __wait_probe_ordinary(): return 2
     p = q.__p
     spins = 0
     loop:
@@ -190,6 +192,7 @@ __mpmc_try_reserve[T] = (q: __Mpmc[T]) -> int:
 # none) passed first. Inside select a full queue is a miss (-2), so a losing reserve claims
 # nothing.
 __mpmc_reserve_wait_until[T] = (q: __Mpmc[T], deadline: int) -> int:
+    if __wait_probe_ordinary(): return 2
     p = q.__p
     spins = 0
     loop:

@@ -1,0 +1,16 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+main = () => {
+    let started = channel<bool>(1)
+    let result = concurrent group {
+        spawn {
+            _ = signals.sigterm.next(timeout=0s)
+            started.send(true) or_throw
+            loop _ in signals.sigterm {}
+            printl"unexpected normal tail"
+        }
+        started.receive or_throw;
+        cancel(group)
+    }
+    printl"{result is? Canceled}"
+}

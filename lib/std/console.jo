@@ -64,4 +64,5 @@ __main_error_text = (kind: str, message: str) -> str: "{kind}: {message}"
 # An error that reached main: said on standard error, and main's exit code.
 __main_failed = (message: str, code: int) -> int:
     __console_line(2, "error: {message}", "31")
+    if __atomic_add(&__task_root_interrupted, 0) != 0: return 130
     code

@@ -34,18 +34,44 @@ Merged:type = <T>[
     __m:__Merge
     open = ():>bool => __merge_open(__m)
     next = ():>T | Canceled | none => {
-        if __merge_done(__m) return none
+        if __merge_done(__m) {
+            # A finished inbox is an immediately ready continuation, not a
+            # parked signal leaf in an enclosing selector's frontier.
+            if __wait_probe_active() { __wait_probe_ordinary(); }
+            return none
+        }
         # (inside select: one pass, and what it found left for select)
         let probing = __select_trying()
         # (outside select: which source gave the value, for a match naming its waits)
         if not probing __select_took(-1)
         let n = __sources.length
+        if __wait_probe_active() {
+            if __merge_timed(__m) { __wait_probe_ordinary(); }
+            loop j in [0..n) {
+                if __merge_live(__m j) {
+                    __select_try_on()
+                    __sources[j]();
+                }
+            }
+            __select_leave(probing false)
+            return Canceled
+        }
         let spins:int64 = 0
         loop true {
             if __task_canceled() {
                 __merge_finish(__m)
                 __select_leave(probing true)
                 return Canceled
+            }
+            if not probing and __wait_frontier_enabled() {
+                __wait_probe_begin(__merge_timed(__m))
+                loop j in [0..n) {
+                    if __merge_live(__m j) {
+                        __select_try_on()
+                        __sources[j]();
+                    }
+                }
+                __wait_probe_end()
             }
             let first = __merge_first(__m n)
             loop k in [0..n) {

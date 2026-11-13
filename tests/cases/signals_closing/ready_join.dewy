@@ -1,0 +1,16 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+ready = ():>bool => true
+work = (phase:Atomic<int64>) => {
+    loop i in [0..80) {
+        race(@ready @ready);
+        phase.store(i+1)
+    }
+}
+main = () => {
+    let phase = atomic(0)
+    concurrent {
+        spawn work(phase)
+        spawn { loop _ in signals.ctrl_c {} printl"{phase.load}" }
+    }
+}

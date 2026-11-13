@@ -9,7 +9,7 @@ from p"checker_expr.dewy" import (check_args_untyped check_call check_expr looku
 from p"checker_signature.dewy" import (fn_sig)
 from p"checks_thin.dewy" import (new_inst)
 from p"checks_thin_expr.dewy" import (constant_default)
-from p"dewy_method_ops.dewy" import (dewy_type_method)
+from p"dewy_method_ops.dewy" import (dewy_type_method dewy_is_method)
 from p"expr.jo" import (AUX2_PARTIAL call_collect_fns call_collect_module call_collect_named callee_at decl_in_prelude dewy_member_name intrinsics last_checked map_args match_type)
 from p"refine.jo" import (ref_has_formals refine_active)
 from p"select_checks.dewy" import (select_place)
@@ -82,7 +82,9 @@ finish_partial=(n:PartialWord ptypes:array<int64> mutmask:PartialWord ret:Partia
 # Named waits (decisions.md, batch 7, provenance rules 3-5): `let w = @c.receive` declared in
 # this function, then `select(@w)`. A wait given as an argument a (conversions stripped): the
 # prepared operation, `@c.receive` as written in the call or in w's declaration; 0 when a is no
-# such wait. A local that is not a wait prepared in this function is an error with its fix-it.
+# such wait. Bundled source methods follow the non-consuming runtime probe
+# protocol; an arbitrary user iterator does not become a prepared wait. A local
+# that is not a wait prepared in this function is an error with its fix-it.
 wait_partial=(a0:PartialWord):>int64=>$unsafe {
     let a=a0
     loop nodes.ptr[a].kind =? 'conv' {a=PartialWord(nodes.ptr[a].a)}
@@ -90,7 +92,7 @@ wait_partial=(a0:PartialWord):>int64=>$unsafe {
         let d=PartialWord(fns.ptr[PartialWord(nodes.ptr[a].sym)].decl)
         let name=name_of(PartialWord(nodes.ptr[d].name))
         let path=files[pos_file(nodes.ptr[d].pos)].path
-        if (name =? "__merged_receive" and path =? "{lib_dir}/prelude/inbox.dewy") or (name =? "receive" or name =? "next") and (path =? "{lib_dir}/prelude/channels.dewy" or path =? "{lib_dir}/prelude/inbox.dewy" or path =? "{lib_dir}/prelude/mpmc.dewy") or name =? "reserve" and (path =? "{lib_dir}/prelude/mpmc.dewy" or path =? "{lib_dir}/prelude/channels.dewy" or path =? "{lib_dir}/prelude/spsc.dewy") {
+        if (name =? "__merged_receive" and path =? "{lib_dir}/prelude/inbox.dewy") or (name =? "receive" or name =? "next") and (path =? "{lib_dir}/prelude/channels.dewy" or path =? "{lib_dir}/prelude/inbox.dewy" or path =? "{lib_dir}/prelude/mpmc.dewy" or path.startswith("{lib_dir}/std/") and files.ptr[pos_file(nodes.ptr[d].pos)].is_dewy and dewy_is_method(d)) or name =? "reserve" and (path =? "{lib_dir}/prelude/mpmc.dewy" or path =? "{lib_dir}/prelude/channels.dewy" or path =? "{lib_dir}/prelude/spsc.dewy") {
             if not select_place(kid(a 0)) {fatal(nodes.ptr[a].pos "a wait's receiver is a local or a field chain: an index is not stable. Bind `let ch = channels[i]` and prepare `@ch.receive`")}
             return a
         }

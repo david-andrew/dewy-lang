@@ -1,0 +1,22 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+main = (argv:array<string>) => {
+    let started = channel<bool>(1)
+    let received = channel<bool>(1)
+    concurrent {
+        spawn {
+            let source = signals.sigwinch.observe
+            _ = source.next(timeout=0s)
+            started.send(true) or_throw
+            loop _ in source {
+                printl"resize"
+                received.send(true) or_throw
+            }
+            printl"closed"
+        }
+        started.receive or_throw;
+        printl"ready"
+        if argv.length >? 1 { received.receive or_throw; }
+    }
+    printl"joined"
+}

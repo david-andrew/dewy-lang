@@ -4,6 +4,20 @@
 # up, and lib/std/task_input.jo (cancelable standard input and file opening) are;
 # what every program's runtime reads (the task stacks) is in lib/core/rt.jo.
 
+# Integration contract for scoped parallel blocks (tasks.jo owns the backend):
+# - Make/enter an ordinary group to establish a signal owner. Its body context
+#   is live until join; owned task slots start as ordinary/runnable.
+# - Publish operation/frontier transitions under __task_frontier_lock. An owned
+#   join points at its child group; inherited helpers call
+#   __task_inherit_signal_owner before starting children. A deadline is ordinary.
+# - Publish ready continuations before completing their prerequisites. Future
+#   dependency scheduling must include unresolved same-owner prerequisites in
+#   this frontier; independently owned task waits remain ordinary/opaque.
+# - Run __task_cleanup on every exit, after owned work and body cleanup. It
+#   releases subscriptions after joining. Descriptor copies own no registration.
+# Signal closure is demand-driven in signal_core.jo, with no compiler knowledge
+# of signal names, syntax, or future statements.
+
 # A group's scope; tasks.jo makes and joins them.
 struct TaskGroup:
     __state: int[]
@@ -21,6 +35,16 @@ struct __TaskScope:
     failed: bool
     first: exception = none
     owner: int
+    # The signal owner is this scope for an explicit group, or an ancestor for
+    # structured race/deadline helpers. The body remains live until join starts.
+    signal_owner: *__TaskScope
+    signal_root_context: *__TaskContext
+    signal_is_root: bool
+    background: bool
+    body_joined: bool
+    body_context: *__TaskContext
+    signals_closed: bool
+    signal_views: int[][]
 
 struct __TaskJob:
     run: () -> void
@@ -28,12 +52,18 @@ struct __TaskJob:
     alive: int = 1
     tid: int
     slot: int
+    finished: bool
 
 # Context is separate from the backend stack. The first backend reserves
 # virtual stacks and uses a stack-range lookup, avoiding platform TLS in the
 # compiler's freestanding executables. Slots are reused only after kernel exit.
 struct __TaskContext:
     scope: TaskGroup
+    signal_root: TaskGroup
+    # Published current operation, including the entry task/group body.
+    activity: int
+    waiting: *__TaskScope
+    signal_wait: *__TaskScope
     job: int[]
     address: *__TaskJob
     rng: Rng
@@ -42,11 +72,20 @@ struct __TaskContext:
 
 __task_contexts: __TaskContext[]
 
+# One publication lock covers the live frontier, admission and signal views.
+# OS handlers never take it. No signal use: the callback stays a no-op.
+__task_frontier_lock = 0
+__task_signal_frontier = false
+__task_signal_noop = (p: *__TaskScope) -> void: pass
+__task_signal_release_hook: (*__TaskScope) -> void = __task_signal_noop
+__task_root_interrupted = 0
+
 __task_context = () -> *__TaskContext:
     if __task_contexts.len() == 0: return null
     __task_data(__task_contexts) + __task_slot() + 1
 
 __task_scope_canceled = (g: TaskGroup) -> bool:
+    if __atomic_add(&__task_root_interrupted, 0) != 0: return true
     let current = g
     loop current.__state.len() != 0:
         p = current.__p
@@ -66,7 +105,7 @@ __task_slot = () -> int:
 
 __task_canceled = () -> bool:
     c = __task_context()
-    if c == null: return false
+    if c == null: return __atomic_add(&__task_root_interrupted, 0) != 0
     if c.shield != 0: return c.grace != 0 and time_ns() >= c.grace
     __task_scope_canceled(__task_context().scope)
 
@@ -99,3 +138,62 @@ __task_pause = ():
     when TARGET == "linux":
         ts = (0, 1000000)
         syscall(35, &ts, 0)
+    else: __sleep_ns(1000000)
+
+# Race helpers inherit their caller's owner; their group body is still tracked.
+__task_inherit_signal_owner = (g: TaskGroup):
+    p = g.__p
+    p.signal_owner = null
+    p.signal_root_context = __task_context()
+    if p.parent.__state.len() != 0:
+        p.signal_owner = p.parent.__p.signal_owner
+        if not p.parent.__p.background: p.signal_root_context = p.parent.__p.signal_root_context
+
+# Selection preflight registers every active leaf before any ready receive can
+# commit. Leaf runtime hooks return a missed probe without taking a payload.
+# Disabled waits contribute nothing; timers contribute ordinary activity.
+__wait_probe_begin = (ordinary: bool):
+    s = __ts()
+    s[__TS_WAIT_PROBE] = 1
+    s[__TS_WAIT_FLAGS] = if ordinary: 2 else: 0
+    s[__TS_WAIT_OWNER] = 0
+
+__wait_frontier_enabled = () -> bool: __task_signal_frontier
+
+__wait_probe_active = () -> bool: __ts()[__TS_WAIT_PROBE] != 0
+
+__wait_probe_ordinary = () -> bool:
+    if not __task_signal_frontier: return false
+    s = __ts()
+    if s[__TS_WAIT_PROBE] == 0: return false
+    s[__TS_WAIT_FLAGS] = s[__TS_WAIT_FLAGS] | 2
+    __select_missed()
+    true
+
+__wait_probe_signal = (owner: *__TaskScope, timed: bool):
+    s = __ts()
+    s[__TS_WAIT_FLAGS] = s[__TS_WAIT_FLAGS] | 1
+    if timed or s[__TS_WAIT_OWNER] != 0 and s[__TS_WAIT_OWNER] != owner as int:
+        s[__TS_WAIT_FLAGS] = s[__TS_WAIT_FLAGS] | 2
+    s[__TS_WAIT_OWNER] = owner as int
+    __select_missed()
+
+__wait_probe_end = ():
+    s = __ts()
+    s[__TS_WAIT_PROBE] = 0
+    c = __task_context()
+    if c == null: return
+    __task_lock(&__task_frontier_lock)
+    c.activity = 0
+    if s[__TS_WAIT_FLAGS] == 1:
+        c.signal_wait = s[__TS_WAIT_OWNER] as *__TaskScope
+        c.activity = 1
+    __task_unlock(&__task_frontier_lock)
+
+__wait_frontier_end = ():
+    if not __task_signal_frontier: return
+    c = __task_context()
+    if c == null: return
+    __task_lock(&__task_frontier_lock)
+    c.activity = 0
+    __task_unlock(&__task_frontier_lock)

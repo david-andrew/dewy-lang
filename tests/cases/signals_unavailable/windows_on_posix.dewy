@@ -1,0 +1,10 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+main = () => {
+    match signals.ctrl_break.next(timeout=0s) {
+        <Timeout> => printl"never fires"
+        _ => printl"unexpected event"
+    }
+    concurrent { spawn { loop _ in signals.console_close {} } }
+    printl"closed"
+}

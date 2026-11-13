@@ -1,0 +1,4 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+watch = () => { concurrent { loop _ in signals.ctrl_c {} } printl"inner" }
+main = () => { concurrent { spawn watch() } printl"outer" }

@@ -22,6 +22,7 @@ first_ok = <A B>(a:(():>A) b:(():>B)):>A | B | Canceled => {
     let winner = atomic(-1)
     let failure = atomic(-1)
     concurrent g {
+        __task_inherit_signal_owner(g)
         let ra = spawn __first_ok_run<A>(a 0 winner failure g)
         let rb = spawn __first_ok_run<B>(b 1 winner failure g)
     }
@@ -37,6 +38,7 @@ first_ok = <A B C>(a:(():>A) b:(():>B) c:(():>C)):>A | B | C | Canceled => {
     let winner = atomic(-1)
     let failure = atomic(-1)
     concurrent g {
+        __task_inherit_signal_owner(g)
         let ra = spawn __first_ok_run<A>(a 0 winner failure g)
         let rb = spawn __first_ok_run<B>(b 1 winner failure g)
         let rc = spawn __first_ok_run<C>(c 2 winner failure g)
@@ -54,6 +56,7 @@ first_ok = <A B C D>(a:(():>A) b:(():>B) c:(():>C) d:(():>D)):>A | B | C | D | C
     let winner = atomic(-1)
     let failure = atomic(-1)
     concurrent g {
+        __task_inherit_signal_owner(g)
         let ra = spawn __first_ok_run<A>(a 0 winner failure g)
         let rb = spawn __first_ok_run<B>(b 1 winner failure g)
         let rc = spawn __first_ok_run<C>(c 2 winner failure g)
@@ -104,6 +107,7 @@ first_ok = <R>(...calls:(():>R)):>R | Canceled => {
     let empty:array<__OkSlot<R>> = []
     let out = mutex(empty)
     concurrent g {
+        __task_inherit_signal_owner(g)
         loop i in [0..calls.length) { spawn __first_ok_slot<R>(calls[i] i winner failure g out) }
     }
     __ok_slot_take<R>(out if winner.load >=? 0 winner.load else failure.load)
@@ -124,6 +128,7 @@ __race_lost = ():>Canceled | OutOfMemory => if __task_canceled() Canceled else O
 race = <A B>(a:(():>A) b:(():>B)):>A | B | Canceled | OutOfMemory => {
     let winner = atomic(-1)
     concurrent g {
+        __task_inherit_signal_owner(g)
         let ra = spawn __race_run<A>(a 0 winner g)
         let rb = spawn __race_run<B>(b 1 winner g)
     }
@@ -138,6 +143,7 @@ race = <A B>(a:(():>A) b:(():>B)):>A | B | Canceled | OutOfMemory => {
 race = <A B C>(a:(():>A) b:(():>B) c:(():>C)):>A | B | C | Canceled | OutOfMemory => {
     let winner = atomic(-1)
     concurrent g {
+        __task_inherit_signal_owner(g)
         let ra = spawn __race_run<A>(a 0 winner g)
         let rb = spawn __race_run<B>(b 1 winner g)
         let rc = spawn __race_run<C>(c 2 winner g)
@@ -154,6 +160,7 @@ race = <A B C>(a:(():>A) b:(():>B) c:(():>C)):>A | B | C | Canceled | OutOfMemor
 race = <A B C D>(a:(():>A) b:(():>B) c:(():>C) d:(():>D)):>A | B | C | D | Canceled | OutOfMemory => {
     let winner = atomic(-1)
     concurrent g {
+        __task_inherit_signal_owner(g)
         let ra = spawn __race_run<A>(a 0 winner g)
         let rb = spawn __race_run<B>(b 1 winner g)
         let rc = spawn __race_run<C>(c 2 winner g)
@@ -179,6 +186,7 @@ race = <R>(...calls:(():>R)):>R | Canceled | OutOfMemory => {
     let empty:array<__OkSlot<R>> = []
     let out = mutex(empty)
     concurrent g {
+        __task_inherit_signal_owner(g)
         loop i in [0..calls.length) { spawn __race_slot<R>(calls[i] i winner g out) }
     }
     if winner.load <? 0 {

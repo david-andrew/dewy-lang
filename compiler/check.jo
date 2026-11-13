@@ -1663,6 +1663,23 @@ dewy_iterator_loop = (s: int, place: int = 0) -> bool:
     none_type = mk(.tname, pos)
     nodes[none_type].name = i32(intern("none"))
     nodes[finished].b = i32(none_type)
+    # Event sources use Closed<T> for normal exhaustion. This is the ordinary
+    # iterator protocol, independent of the source's module or concrete type.
+    outcomes = handle_outcomes(prune(ntype(it)))
+    terminal: int[]
+    canceled = false
+    event_source = false
+    if outcomes != 0:
+        loop outcome in value_members(outcomes):
+            if outcome == T_NONE: terminal.push(none_type)
+            if standard_wait_outcome(outcome) == intern("Closed"):
+                terminal.push(type_node_of(outcome, pos))
+                event_source = true
+            if outcome == int(syms[universe[intern("Canceled")]].ref): canceled = true
+    if terminal.len() > 0:
+        end_types = mk(.tunion, pos)
+        set_list(end_types, terminal)
+        nodes[finished].b = i32(end_types)
     binder = kid(s, 0)
     element = mk(.vardecl, nodes[binder].pos)
     if nodes[binder].kind == .tuple: set_list(element, kids(binder))
@@ -1670,6 +1687,11 @@ dewy_iterator_loop = (s: int, place: int = 0) -> bool:
         nodes[element].name = nodes[binder].name
         nodes[element].a = nodes[binder].a
     nodes[element].b = i32(bc_ident(step, pos))
+    if not throwing and event_source and canceled:
+        propagated = mk(.propagate, nodes[binder].pos)
+        nodes[propagated].a = nodes[element].b
+        nodes[propagated].b = i32(type_node_of(int(syms[universe[intern("Canceled")]].ref), pos))
+        nodes[element].b = i32(propagated)
     if throwing:
         # (after the none test, so only the payload and its failures remain)
         thrown = mk(.propagate, nodes[binder].pos)

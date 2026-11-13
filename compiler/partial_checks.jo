@@ -206,7 +206,9 @@ finish_partial = (n: int, ptypes: int[], mutmask: int, ret: int) -> int:
 # Named waits (decisions.md, batch 7, provenance rules 3-5): `let w = @c.receive` declared in
 # this function, then `select(@w)`. A wait given as an argument a (conversions stripped): the
 # prepared operation, `@c.receive` as written in the call or in w's declaration; 0 when a is no
-# such wait. A local that is not a wait prepared in this function is an error with its fix-it.
+# such wait. Bundled source methods follow the non-consuming runtime probe
+# protocol; an arbitrary user iterator does not become a prepared wait. A local
+# that is not a wait prepared in this function is an error with its fix-it.
 wait_partial = (a0: int) -> int:
     a = a0
     loop nodes[a].kind == .conv: a = int(nodes[a].a)
@@ -214,7 +216,7 @@ wait_partial = (a0: int) -> int:
         d = int(fns[int(nodes[a].sym)].decl)
         name = name_of(int(nodes[d].name))
         path = files[pos_file(nodes[d].pos)].path
-        if (name == "__merged_receive" and path == "{lib_dir}/prelude/inbox.dewy") or (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy" or path == lib_dir + "/prelude/mpmc.dewy") or name == "reserve" and (path == lib_dir + "/prelude/mpmc.dewy" or path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/spsc.dewy"):
+        if (name == "__merged_receive" and path == "{lib_dir}/prelude/inbox.dewy") or (name == "receive" or name == "next") and (path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/inbox.dewy" or path == lib_dir + "/prelude/mpmc.dewy" or starts_with(path, lib_dir + "/std/") and files[pos_file(nodes[d].pos)].is_dewy and dewy_is_method(d)) or name == "reserve" and (path == lib_dir + "/prelude/mpmc.dewy" or path == lib_dir + "/prelude/channels.dewy" or path == lib_dir + "/prelude/spsc.dewy"):
             if not select_place(kid(a, 0)): fatal(nodes[a].pos, "a wait's receiver is a local or a field chain: an index is not stable. Bind `let ch = channels[i]` and prepare `@ch.receive`")
             return a
     0

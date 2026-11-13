@@ -3785,6 +3785,74 @@ main = () => {
 }
 ```
 
+`@lib/std/signals.dewy` provides library event sources for OS signals:
+
+```dewy
+import p"@lib/std/signals.dewy" as signals
+main = () => {
+    concurrent {
+        spawn {
+            loop _ in signals.ctrl_c { printl"Ctrl-C received" }
+            printl"listener closed"
+        }
+        sleep(2s) or_throw
+        printl"work complete"
+    }
+}
+```
+
+`ctrl_c` gives `CtrlC`. `sigterm`, `sighup`, `sigwinch`, `sigusr1`, `sigusr2`,
+`ctrl_break` and `console_close` give `signals.Signal` with the corresponding
+`.name`. The POSIX sources receive their native signals; Windows provides Ctrl-C,
+Ctrl-Break and console close. A source unavailable on a platform never fires:
+there is no `SignalUnavailable` and iteration needs no `or_throw`. A timed wait
+on such a source gives `Timeout`; normal group closure can still close it.
+
+Descriptors, copies and `source.observe` are inert. The first executed wait
+attaches a subscription to the nearest running `concurrent` group, including
+waits inside ordinary helpers. OS handlers are installed then and restored at
+owner exit, after the group's tasks and cleanup. Startup-sensitive code can
+first execute `source.next(timeout=0s)` in that owner. Owned `race` and `within`
+helpers inherit its signal owner; a nested explicit group has its own owner.
+Outside a group, the entry task's root subscription lasts until program exit
+and does not close merely because it is waiting only for signals.
+
+A direct source intercepts its signal's default action until owner exit,
+including between waits and while handling an event. `source.observe` receives
+notifications without suppressing the default: for example, observing SIGTERM
+still allows SIGTERM to terminate the process. Different owners receive
+independently. Within one owner, copies of the same source and mode share a
+mailbox and receivers compete; observing and intercepting have separate
+mailboxes. Each view retains at most one pending notification while its handler
+is busy; further arrivals coalesce. An attached Ctrl-C observer without an
+interceptor requests root cancellation and exits 130 if unhandled; a further
+press during that shutdown, or three observed presses within one second, forces
+exit. Before any Ctrl-C wait attaches and after the last owner exits, its native
+OS default is unchanged. Windows console close
+offers bounded best-effort cleanup and cannot veto the OS closing the process.
+
+A group's signal sources close together once all its unfinished activity is
+signal-only waits, including owned joins whose complete live frontier is such
+waits. The group body participates too. Compute, runnable code, active handler
+bodies, timers, channels, I/O and independently owned task waits keep it alive.
+An all-signal `select` qualifies; a timeout does not. A `merged` inbox can become
+signal-only when its ordinary sources retire. A nested group's views belong to
+that group, so an outer join does not close them.
+
+Closure preserves one already pending notification per view, then gives
+`Closed<E>`. Iteration drains it and ends visibly; code after the loop and
+cleanup run normally. New waits in that owner start closed and install nothing;
+continuations never reopen it. Manual `source.next` gives `E | Closed<E> | Canceled`,
+with `Timeout` added by `timeout=`. Cancellation has priority and leaves source
+iteration as it leaves a wait. Prepared `@source.next` operations work with
+`select`, `race` and `merged`.
+
+This rule does not promise eventual shutdown while other ordinary activity
+continues: a timer loop or overlapping busy handlers can keep a group alive.
+Use an explicit done channel or a race when shutdown needs a written cutoff.
+See [the signal example](../examples/signals.dewy). The forthcoming scoped
+`parallel` blocks can use the same runtime ownership and closing rule.
+
 `select(...)` waits for the first of several waits (decisions.md, batch 7). Each argument
 is a wait written in the call, on a local or a field chain: a channel's or `mpmc` queue's
 `@lines.receive`, or a ticker's `@heart.next` (`@x.method` is the method itself, with `x`

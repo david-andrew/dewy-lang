@@ -1,0 +1,23 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+listen = (source:signals.SignalSource<signals.Signal> started:Channel<bool> done:Channel<bool>) => {
+    _ = source.next(timeout=0s)
+    started.send(true) or_throw
+    loop event in source {
+        printl(event.name)
+        done.send(true) or_throw
+    }
+}
+main = (argv:array<string>) => {
+    let started = channel<bool>(2)
+    let done = channel<bool>(2)
+    concurrent {
+        spawn listen(signals.sigterm started done)
+        spawn listen(signals.sigusr1 started done)
+        started.receive or_throw;
+        started.receive or_throw;
+        printl"ready"
+        if argv.length >? 1 { done.receive or_throw; done.receive or_throw; }
+    }
+    printl"joined"
+}

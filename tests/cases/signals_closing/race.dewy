@@ -1,0 +1,7 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+watch = () => {
+    let result = race(@signals.ctrl_c.next @signals.sigterm.next)
+    printl"{result is? Closed}"
+}
+main = () => { concurrent { spawn watch() } printl"joined" }

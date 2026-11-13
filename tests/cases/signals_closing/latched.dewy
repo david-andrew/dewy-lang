@@ -1,0 +1,10 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+watch = () => {
+    loop _ in signals.ctrl_c {}
+    printl"first closed"
+    printl"{signals.sigterm.next(timeout=0s) is? Closed}"
+    loop _ in signals.sighup {}
+    printl"second closed"
+}
+main = () => { concurrent { spawn watch() } printl"joined" }

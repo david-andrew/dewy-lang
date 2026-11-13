@@ -1,0 +1,24 @@
+# Ctrl-C stops this batch through its ordinary structured task group. Without
+# an interrupt, completion closes the listener and joins it normally.
+import p"@lib/std/signals.dewy" as signals
+
+main = () => {
+    let result = concurrent batch {
+        spawn {
+            loop step in [1..5] {
+                sleep(250ms) or_throw
+                printl"finished step {step}"
+            }
+        }
+        spawn {
+            loop _ in signals.ctrl_c {
+                printl"stopping the batch"
+                cancel(batch)
+            }
+            printl"signal listener closed"
+        }
+    }
+    if result is? bool { printl"batch complete" }
+    else if result is? Canceled { printl"batch stopped" }
+    else { printl"batch failed" exit(1) }
+}

@@ -1,0 +1,12 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+watch = (ordinary:Channel<signals.Signal>) => {
+    let inbox = merged(@ordinary.receive @signals.sigusr1.next)
+    loop _ in inbox {}
+    printl"retired then closed"
+}
+main = () => {
+    let ordinary = channel<signals.Signal>(1)
+    concurrent { spawn watch(ordinary) ordinary.close() }
+    printl"joined"
+}

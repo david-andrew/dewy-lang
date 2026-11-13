@@ -1,0 +1,7 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+watch = () => {
+    let result = within(5ms @signals.ctrl_c.next)
+    printl"{result is? Timeout}"
+}
+main = () => { concurrent { spawn watch() } printl"joined" }

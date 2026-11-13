@@ -1,0 +1,16 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+listen = () => {
+    loop true {
+        match select(@signals.ctrl_c.next @signals.sigterm.next) {
+            <Closed> => break
+            <Canceled> => Canceled or_throw
+            _ => printl"signal"
+        }
+    }
+    printl"closed"
+}
+main = () => {
+    concurrent { spawn listen() }
+    printl"joined"
+}

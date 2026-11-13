@@ -67,6 +67,7 @@ __spsc_try_reserve[T] = (q: __Spsc[T]) -> int:
 # The same, waiting while the ring is full, with 5: the deadline (time_ns; 0 for none) passed
 # first. Inside select a full ring is a miss (2), so a losing reserve holds nothing.
 __spsc_reserve_wait_until[T] = (q: __Spsc[T], deadline: int) -> int:
+    if __wait_probe_ordinary(): return 2
     p = q.__p
     spins = 0
     loop:
@@ -127,6 +128,7 @@ __spsc_send_wait[T] = (q: __Spsc[T], v: T) -> int: __spsc_send_wait_until(q, v, 
 # The same, with 5: the deadline (time_ns; 0 for none) passed first. A deadline already past
 # still sends where there is room now: a `0s` timeout is a poll.
 __spsc_send_wait_until[T] = (q: __Spsc[T], v: T, deadline: int) -> int:
+    if __wait_probe_ordinary(): return 2
     p = q.__p
     spins = 0
     loop:
@@ -144,6 +146,7 @@ __spsc_receive_wait[T] = (q: __Spsc[T]) -> int: __spsc_receive_wait_until(q, 0)
 # The same, with 5: the deadline (time_ns; 0 for none) passed first. A buffered value wins a
 # deadline already past.
 __spsc_receive_wait_until[T] = (q: __Spsc[T], deadline: int) -> int:
+    if __wait_probe_ordinary(): return 2
     p = q.__p
     spins = 0
     loop:

@@ -1,0 +1,13 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+watch = () => {
+    let ordinary = channel<signals.Signal>(1)
+    ordinary.close()
+    let finished = merged(@ordinary.receive)
+    loop _ in finished {}
+    let term = signals.sigterm
+    let outcome = select(@term.next @finished.next priority='index')
+    printl"{outcome is? none}"
+    printl"{term.next(timeout=0s) is? Timeout}"
+}
+main = () => { concurrent { spawn watch() } }

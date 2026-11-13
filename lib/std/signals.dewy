@@ -1,0 +1,34 @@
+# Signal descriptors are inert. First wait attaches the current structured
+# owner; copies and `.observe` alone neither install nor retain OS handlers.
+__signal_enable()
+
+Signal:type = [name:string]
+
+SignalSource:type = <E>[
+    __id:int64
+    __mode:int64
+    __event:E
+    observe = ():>SignalSource<E> => SignalSource<E>[__id 1 __event]
+    next = ():>E | Closed<E> | Canceled => {
+        let code = __signal_wait(__id __mode 0)
+        if code =? 1 return Closed<E>[]
+        if code =? 2 return Canceled
+        __event
+    }
+    next = <D>(... timeout:D):>E | Closed<E> | Canceled | Timeout => {
+        let code = __signal_wait(__id __mode __chan_deadline(__task_nanoseconds(timeout)))
+        if code =? 1 return Closed<E>[]
+        if code =? 2 return Canceled
+        if code =? 3 return Timeout
+        __event
+    }
+]
+
+let ctrl_c = SignalSource<CtrlC>[0 0 CtrlC[]]
+let sigterm = SignalSource<Signal>[1 0 Signal['sigterm']]
+let sighup = SignalSource<Signal>[2 0 Signal['sighup']]
+let sigwinch = SignalSource<Signal>[3 0 Signal['sigwinch']]
+let sigusr1 = SignalSource<Signal>[4 0 Signal['sigusr1']]
+let sigusr2 = SignalSource<Signal>[5 0 Signal['sigusr2']]
+let ctrl_break = SignalSource<Signal>[6 0 Signal['ctrl_break']]
+let console_close = SignalSource<Signal>[7 0 Signal['console_close']]

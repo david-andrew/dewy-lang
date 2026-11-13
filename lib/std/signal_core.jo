@@ -1,0 +1,313 @@
+# Native delivery records an atomic generation and the default/force-exit
+# policy. No locks, allocation or application callbacks run on its stack.
+# Each owner remembers its last consumed generation; arrivals coalesce.
+__signal_words: *int = null
+__signal_trampoline = 0
+__signal_root = TaskGroup()
+
+# Enable composite frontier registration when the ordinary module is imported.
+# This installs no native handler and allocates no runtime signal state.
+__signal_enable = (): __task_signal_frontier = true
+
+__signal_number = (id: int) -> int:
+    when TARGET == "linux" or TARGET == "macos":
+        if id == 0: return 2
+        if id == 1: return 15
+        if id == 2: return 1
+        if id == 3: return 28
+        when TARGET == "macos":
+            if id == 4: return 30
+            if id == 5: return 31
+        else:
+            if id == 4: return 10
+            if id == 5: return 12
+    -1
+
+# clock_gettime is async-signal-safe; provider diagnostics/formatting are not.
+__signal_clock = () -> int:
+    ts: (int, int)
+    when TARGET == "windows":
+        count = 0
+        QueryPerformanceCounter(&count)
+        frequency = __w32_qpf
+        if frequency == 0: return 0
+        return (count / frequency) * 1000000000 + (count % frequency) * 1000000000 / frequency
+    else when TARGET == "linux" or TARGET == "macos": syscall(228, 7, &ts)
+    ts.0 * 1000000000 + ts.1
+
+__signal_force_exit = (code: int):
+    when TARGET == "windows": TerminateProcess((-1) as *u8, u32(code))
+    else: __exit_raw(code)
+
+__signal_ctrl_c = ():
+    p = __signal_words
+    # A lock-free three-arrival ring also works when the kernel delivers to
+    # different native threads concurrently. Count before mailbox coalescing.
+    now = __signal_clock()
+    slot = 64 + __atomic_add(p + 67, 1) % 3
+    previous = __atomic_add(p + slot, 0)
+    loop previous < now and __atomic_cas(p + slot, previous, now) != previous: previous = __atomic_add(p + slot, 0)
+    if __atomic_add(p + 67, 0) >= 3:
+        a = __atomic_add(p + 64, 0)
+        b = __atomic_add(p + 65, 0)
+        c = __atomic_add(p + 66, 0)
+        if a != 0 and b != 0 and c != 0 and max(a, max(b, c)) - min(a, min(b, c)) <= 1000000000: __signal_force_exit(130)
+
+
+@cabi
+__signal_arrive = (sig: int, info: *u8, context: *u8) -> void:
+    p = __signal_words
+    loop id in [0..8):
+        if __signal_number(id) != sig: continue
+        __atomic_add(p + id, 1)
+        if id == 0: __signal_ctrl_c()
+        if __atomic_add(p + 8 + id, 0) == 0:
+            if id == 0:
+                if __atomic_add(&__task_root_interrupted, 1) != 0: __signal_force_exit(130)
+                when TARGET == "linux":
+                    message = "Stopping (Ctrl-C)\n"
+                    syscall(1, 2, data(message), len(message))
+            else:
+                old = p[32 + id * 4]
+                if old == 0 and id != 3:
+                    # Restore and re-raise: keep the native termination status,
+                    # rather than replacing the default with an exit-code copy.
+                    when TARGET == "linux": syscall(13, sig, p + 32 + id * 4, 0, 8)
+                    else when TARGET == "macos": __c_sigaction(i32(sig), (p + 32 + id * 4) as *u8, null)
+                    syscall(62, syscall(39), sig)
+                if old > 1:
+                    flags = p[33 + id * 4]
+                    siginfo = flags & 4 != 0
+                    when TARGET == "macos": siginfo = (flags >> 32) & 0x40 != 0
+                    if siginfo:
+                        handler = old as *u8 as cfn(int, *u8, *u8)
+                        handler(sig, info, context)
+                    else:
+                        handler = old as *u8 as cfn(int)
+                        handler(sig)
+        return
+
+# Called under the frontier lock. Save/restore each original action independently.
+__signal_install = (id: int) -> bool:
+    when TARGET == "windows":
+        if id != 0 and id != 6 and id != 7: return false
+        if __signal_words[24] != 0: return true
+        if not __w32_time_acquire(): return false
+        handler: cfn(u32) -> i32 = __signal_console
+        if SetConsoleCtrlHandler(handler as *u8, 1) == 0: return false
+        __signal_words[24] = 1
+        return true
+    else when TARGET == "macos":
+        sig = __signal_number(id)
+        if sig < 0: return false
+        __signal_clock()
+        handler: cfn(int, *u8, *u8) = __signal_arrive
+        # Darwin sigaction: handler, then a 32-bit mask and 32-bit flags.
+        action = [handler as int, (0x40 << 32) | 0xFFFFFFFF]
+        old = (__signal_words + 32 + id * 4) as *u8
+        if __c_sigaction(i32(sig), null, old) != 0: return false
+        return __c_sigaction(i32(sig), data(action) as *u8, null) == 0
+    else when TARGET != "linux": return false
+    else:
+        sig = __signal_number(id)
+        if sig < 0: return false
+        if __signal_trampoline == 0:
+            trampoline = syscall(9, 0, 4096, 3, 0x22, -1, 0)
+            if trampoline < 0 and trampoline > -4096: return false
+            when ARCH == "arm64":
+                words = trampoline as *u32
+                words[0] = u32(0xD2801168)
+                words[1] = u32(0xD4000001)
+                __code_sync(trampoline as *u8, 8)
+            else:
+                bytes = trampoline as *u8
+                loop i in 0.. and b in [u8(0xB8), u8(15), u8(0), u8(0), u8(0), u8(0x0F), u8(0x05)]: bytes[i] = b
+            if syscall(10, trampoline, 4096, 5) < 0:
+                syscall(11, trampoline, 4096)
+                return false
+            __signal_trampoline = trampoline
+        handler: cfn(int, *u8, *u8) = __signal_arrive
+        # Mask all public signals while in the handler; no SA_RESTART, so a
+        # cancelable syscall can notice the root's Ctrl-C transition.
+        action = [handler as int, 4 | 0x04000000, __signal_trampoline, -1]
+        old = __signal_words + 32 + id * 4
+        # Publish the saved action before any other thread can enter our
+        # handler. Asking installation to copy it out leaves a delivery race.
+        if syscall(13, sig, 0, old, 8) != 0: return false
+        syscall(13, sig, data(action), 0, 8) == 0
+
+__signal_release = (p: *__TaskScope) -> void:
+    loop view in p.signal_views:
+        v = __task_data(view)
+        id = v[0]
+        if v[5] != 0:
+            if v[1] == 0: __atomic_add(__signal_words + 8 + id, -1)
+            if __atomic_add(__signal_words + 16 + id, -1) == 1:
+                when TARGET == "linux": syscall(13, __signal_number(id), __signal_words + 32 + id * 4, 0, 8)
+                else when TARGET == "macos": __c_sigaction(i32(__signal_number(id)), (__signal_words + 32 + id * 4) as *u8, null)
+    when TARGET == "windows":
+        if __signal_words[24] != 0 and __atomic_add(__signal_words + 16, 0) == 0 and __atomic_add(__signal_words + 22, 0) == 0 and __atomic_add(__signal_words + 23, 0) == 0:
+            handler: cfn(u32) -> i32 = __signal_console
+            SetConsoleCtrlHandler(handler as *u8, 0)
+            __signal_words[24] = 0
+    # The scope is raw backing storage: release the outer buffer too.
+    p.signal_views = []
+
+__signal_root_end = () -> void:
+    __task_lock(&__task_frontier_lock)
+    if __signal_root.__state.len() != 0: __signal_release(__signal_root.__p)
+    __task_unlock(&__task_frontier_lock)
+
+__signal_owner = () -> *__TaskScope:
+    c = __task_context()
+    root = c
+    if c != null and c.scope.__state.len() != 0:
+        scope = c.scope.__p
+        if scope.signal_owner != null: return scope.signal_owner
+        if not scope.background: root = scope.signal_root_context
+    # Inherited race/deadline tasks share the entry task's root. Independently
+    # app-owned tasks have their own automatic roots, released by their entry.
+    if root != null and root.address != null:
+        if root.signal_root.__state.len() == 0:
+            state = fill(0, (size_of(__TaskScope) + 7) / 8)
+            p = __task_data(state) as *__TaskScope
+            p.signal_is_root = true
+            root.signal_root = TaskGroup(state, p)
+        return root.signal_root.__p
+    if __signal_root.__state.len() == 0:
+        state = fill(0, (size_of(__TaskScope) + 7) / 8)
+        p = __task_data(state) as *__TaskScope
+        p.signal_is_root = true
+        __signal_root = TaskGroup(state, p)
+        __at_end(__signal_root_end)
+    __signal_root.__p
+
+# All live leaves must be waits on this exact owner. A nested owner, a
+# still-running group body or a ready continuation is ordinary activity.
+# Called under the publication lock; O(admitted jobs in the owned frontier),
+# with at most sixteen views per owner. It runs only when a
+# signal operation is reached. It runs no analysis on ordinary programs.
+__signal_leaf = (c: *__TaskContext, owner: *__TaskScope) -> bool:
+    if c == null: return false
+    if c.activity == 1 and c.signal_wait == owner: return true
+    c.activity == 2 and c.waiting != null and __signal_only(c.waiting, owner)
+
+__signal_only = (group: *__TaskScope, owner: *__TaskScope) -> bool:
+    if group.signal_owner != owner or group.deadline != 0: return false
+    if not group.body_joined and not __signal_leaf(group.body_context, owner): return false
+    live = not group.body_joined
+    loop job in group.addresses:
+        if job.finished: continue
+        live = true
+        if not __signal_leaf(__task_data(__task_contexts) + job.slot + 1, owner): return false
+    # An empty frontier is a completed join with a ready continuation, not a
+    # parked signal-only join. Publish that readiness before closing anything.
+    live
+
+__signal_close = (owner: *__TaskScope):
+    if owner.signal_is_root or owner.signals_closed or not __signal_only(owner, owner): return
+    # Capture each native source once: observing and intercepting views must
+    # share a cutoff even if an arrival races the cohort's closing operation.
+    snapshot: (int, int, int, int, int, int, int, int)
+    cutoffs = &snapshot as *int
+    loop id in [0..8): cutoffs[id] = __atomic_add(__signal_words + id, 0)
+    owner.signals_closed = true
+    loop view in owner.signal_views:
+        v = __task_data(view)
+        v[3] = 1
+        v[4] = cutoffs[v[0]]
+
+# 0 payload, 1 closed/drained, 2 canceled/missed probe, 3 timeout.
+__signal_wait = (id: int, mode: int, deadline: int) -> int:
+    if __task_canceled(): return 2
+    if id < 0 or id >= 8 or mode < 0 or mode > 1: __panic("invalid signal source descriptor")
+    __task_initialize()
+    __task_lock(&__task_frontier_lock)
+    if __signal_words == null:
+        __signal_words = __os_pages(4096) as *int
+        __task_signal_release_hook = __signal_release
+    owner = __signal_owner()
+    v: *int = null
+    loop view in owner.signal_views:
+        p = __task_data(view)
+        if p[0] == id and p[1] == mode: v = p
+    if v == null:
+        view = [id, mode, __atomic_add(__signal_words + id, 0), 0, 0, 0]
+        v = __task_data(view)
+        if owner.signals_closed:
+            v[3] = 1
+            v[4] = v[2]   # late views start drained; no historical replay
+        else:
+            # Publish interception before the kernel can call the new
+            # handler; installation failure rolls it back under this lock.
+            if mode == 0: __atomic_add(__signal_words + 8 + id, 1)
+            references = __atomic_add(__signal_words + 16 + id, 1)
+            available = references != 0
+            if not available: available = __signal_install(id)
+            if available: v[5] = 1
+            else:
+                __atomic_add(__signal_words + 16 + id, -1)
+                if mode == 0: __atomic_add(__signal_words + 8 + id, -1)
+        owner.signal_views.push(view)
+    if __wait_probe_active():
+        __wait_probe_signal(owner, deadline != 0)
+        __task_unlock(&__task_frontier_lock)
+        return 2
+    c = __task_context()
+    probing = __select_trying()
+    # A finite timeout and an individual probe are ordinary. The enclosing
+    # select/merged operation publishes its complete frontier separately.
+    classify = deadline == 0 and not probing
+    if classify and c != null:
+        c.signal_wait = owner
+        c.activity = 1
+    __task_unlock(&__task_frontier_lock)
+    code = 2
+    loop:
+        if __task_canceled(): break
+        __task_lock(&__task_frontier_lock)
+        if classify or c != null and c.activity == 1 and c.signal_wait == owner: __signal_close(owner)
+        arrived = if v[3] != 0: v[4] else: __atomic_add(__signal_words + id, 0)
+        if v[2] != arrived:
+            v[2] = arrived
+            code = 0
+        else if v[3] != 0: code = 1
+        if code != 2:
+            if c != null: c.activity = 0
+            __task_unlock(&__task_frontier_lock)
+            return code
+        __task_unlock(&__task_frontier_lock)
+        if __select_missed(): break
+        if deadline != 0 and time_ns() >= deadline:
+            code = 3
+            break
+        __task_pause()
+    __task_lock(&__task_frontier_lock)
+    if classify and c != null: c.activity = 0
+    __task_unlock(&__task_frontier_lock)
+    code
+
+when TARGET == "windows":
+    @cabi
+    __signal_console = (kind: u32) -> i32:
+        id = -1
+        if kind == 0: id = 0
+        if kind == 1: id = 6
+        if kind == 2: id = 7
+        if id < 0: return 0
+        p = __signal_words
+        if __atomic_add(p + 16 + id, 0) == 0: return 0
+        __atomic_add(p + id, 1)
+        if id == 0:
+            __signal_ctrl_c()
+            if __atomic_add(p + 8, 0) == 0:
+                if __atomic_add(&__task_root_interrupted, 1) != 0: __signal_force_exit(130)
+            return 1
+        if id == 7:
+            # A close cannot be vetoed. Keep the native callback alive for a
+            # bounded cleanup opportunity, then let Windows finish closing.
+            until = __signal_clock() + 4500000000
+            loop __atomic_add(p + 23, 0) != 0 and __signal_clock() < until: Sleep(u32(1))
+            return 0
+        if __atomic_add(p + 8 + id, 0) != 0: return 1
+        0

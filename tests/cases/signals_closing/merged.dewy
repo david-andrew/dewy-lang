@@ -1,0 +1,8 @@
+# modes: native native-release
+import p"@lib/std/signals.dewy" as signals
+watch = () => {
+    let inbox = merged(@signals.sigusr1.next @signals.sigusr2.next)
+    loop _ in inbox {}
+    printl"closed"
+}
+main = () => { concurrent { spawn watch() } printl"joined" }

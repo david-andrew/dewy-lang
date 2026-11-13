@@ -1,0 +1,7 @@
+# modes: native native-release
+# exit: 101
+import p"@lib/std/signals.dewy" as signals
+main = () => {
+    let invalid = signals.SignalSource<CtrlC>[-1 0 CtrlC[]]
+    _ = invalid.next(timeout=0s)
+}

@@ -1,0 +1,12 @@
+# modes: native native-release
+# quick
+import p"@lib/std/signals.dewy" as signals
+main = () => {
+    let ended = atomic(0)
+    concurrent {
+        spawn { loop _ in signals.ctrl_c {} ended.add(1); }
+        spawn { loop _ in signals.sigterm {} ended.add(1); }
+        spawn { loop _ in signals.ctrl_break {} ended.add(1); }
+    }
+    printl"{ended.load} listeners ended"
+}

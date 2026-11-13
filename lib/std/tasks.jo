@@ -8,6 +8,8 @@ struct Task[T]:
 __task_slots: *int = null
 __task_slot_lock = 0
 __task_next_slot = 0
+# Private scheduler wakeup. SIGUSR2 belongs to the public signal sources.
+const __TASK_WAKE_SIGNAL = 34
 
 __task_initialize = () -> bool:
     if __task_contexts.len() != 0: return true
@@ -37,13 +39,15 @@ __task_initialize = () -> bool:
         __mt_active = true
         true
 
-__task_new_group = (deadline: int = 0) -> TaskGroup:
+__task_new_group = (deadline: int = 0, signal_owner: bool = true) -> TaskGroup:
     if not __task_initialize(): return TaskGroup()
     state = fill(0, (size_of(__TaskScope) + 7) / 8)
     p = __task_data(state) as *__TaskScope
     p.parent = __task_context().scope
     p.deadline = deadline
     p.owner = syscall(186)
+    p.signal_owner = p
+    if not signal_owner: __task_inherit_signal_owner(TaskGroup(state, p))
     TaskGroup(state, p)
 
 __task_enter = (g: TaskGroup) -> TaskGroup:
@@ -51,6 +55,7 @@ __task_enter = (g: TaskGroup) -> TaskGroup:
     if c == null: return TaskGroup()
     previous = c.scope
     c.scope = g
+    g.__p.body_context = c
     previous
 
 __task_restore = (previous: TaskGroup):
@@ -107,6 +112,12 @@ __task_worker = (slot: int) -> void:
     __task_shield_enter()
     p.run = __task_noop
     __task_shield_leave()
+    __task_lock(&__task_frontier_lock)
+    if c.signal_root.__state.len() != 0:
+        __task_signal_release_hook(c.signal_root.__p)
+        c.signal_root = TaskGroup()
+    p.finished = true
+    __task_unlock(&__task_frontier_lock)
     c.scope = TaskGroup()
     g = p.group.__p
     __task_lock(&g.lock)
@@ -134,16 +145,21 @@ __task_launch = (g: TaskGroup, f: () -> void) -> bool:
     c = __task_data(__task_contexts) + slot + 1
     c.job = job
     c.address = j
+    c.activity = 0
+    c.waiting = null
+    c.signal_wait = null
     entry: cfn(int) = __task_worker
     top = __task_stacks + ((slot + 1) << __TASK_SHIFT)
     # The low page is a guard, then 64 KB of signal stack and another guard; reserved virtual
     # stacks commit on demand.
     low = top - (1 << __TASK_SHIFT)
     guarded = syscall(10, low, 4096, 0) == 0 and syscall(10, low + 4096 + 65536, 4096, 0) == 0
+    __task_lock(&__task_frontier_lock)
     p.pending += 1
     id = if guarded: __clone_thread(entry as *u8, slot, top) else: -1
     if id < 0:
         p.pending -= 1
+        __task_unlock(&__task_frontier_lock)
         j.run = __task_noop
         j.group = TaskGroup()
         c.job = []
@@ -154,6 +170,7 @@ __task_launch = (g: TaskGroup, f: () -> void) -> bool:
         return false
     p.jobs.push(job)
     p.addresses.push(c.address)
+    __task_unlock(&__task_frontier_lock)
     __task_unlock(&p.lock)
     true
 
@@ -175,13 +192,26 @@ __task_spawn[T] = (g: TaskGroup, f: () -> T) -> Task[T]:
 __task_join = (g: TaskGroup) -> (bool | exception):
     if g.__state.len() == 0: return OutOfMemory
     p = g.__p
+    c = __task_context()
+    __task_lock(&__task_frontier_lock)
+    p.body_joined = true
+    if c != null:
+        c.waiting = p
+        c.activity = 2
+    __task_unlock(&__task_frontier_lock)
     loop:
         __task_lock(&p.lock)
         pending = p.pending
         done = pending == 0
         if done: p.closed = true
         __task_unlock(&p.lock)
-        if done: break
+        if done:
+            __task_lock(&__task_frontier_lock)
+            if c != null:
+                c.activity = 0
+                c.waiting = null
+            __task_unlock(&__task_frontier_lock)
+            break
         if __task_scope_canceled(g): cancel(g)
         __task_wait(&p.pending, pending, true)
     # Every worker has finished its callback. Wait for the kernel's exit
@@ -226,6 +256,10 @@ __task_cleanup = (g: TaskGroup, previous: TaskGroup):
     if g.__state.len() != 0 and not g.__p.closed:
         cancel(g)
         __task_join(g)
+    if g.__state.len() != 0:
+        __task_lock(&__task_frontier_lock)
+        __task_signal_release_hook(g.__p)
+        __task_unlock(&__task_frontier_lock)
     __task_restore(previous)
 
 __task_noop = () -> void: pass
@@ -240,8 +274,10 @@ __program_group = TaskGroup()
 
 __program_tasks = () -> BackgroundTasks:
     if __program_group.__state.len() == 0:
-        __program_group = __task_new_group()
-        if __program_group.__state.len() != 0: __at_end(__program_tasks_end)
+        __program_group = __task_new_group(0, false)
+        if __program_group.__state.len() != 0:
+            __program_group.__p.background = true
+            __at_end(__program_tasks_end)
     BackgroundTasks(__program_group)
 
 __program_tasks_end = () -> void:
@@ -259,7 +295,7 @@ __task_deadline = (ns: int) -> int:
     now + ns
 
 within[D, T] = (duration: D, f: () -> T) -> (T | Timeout | Canceled | OutOfMemory):
-    g = __task_new_group(__task_deadline(__task_nanoseconds(duration)))
+    g = __task_new_group(__task_deadline(__task_nanoseconds(duration)), false)
     previous = __task_enter(g)
     task = __task_spawn(g, f)
     __task_join(g)
@@ -290,7 +326,9 @@ __select_order = (priority: str) -> int:
 __select_won = (s: *int, k: int) -> bool:
     won = s[__TS_SELECT] == 1
     s[__TS_SELECT] = 0
-    if won: s[__TS_SELECT_WON] = k + 1
+    if won:
+        s[__TS_SELECT_WON] = k + 1
+        __wait_frontier_end()
     won
 # The wait the last select on this thread took (its argument's index), -1 for the select's own
 # Canceled or Timeout: read right after the call by a match with source arms (compiler/expr.jo's
@@ -311,19 +349,33 @@ __select_when[A] = (on: bool, w: () -> A) -> (() -> A):
 __select_nap = (spins: int):
     if spins >= 16: __task_pause()
 
+# Publish runnable state on every exit, including owning permit results. A
+# defer here would require D40's undecided general owner/unwind machinery.
+__select_canceled = () -> Canceled:
+    __wait_frontier_end()
+    Canceled
+__select_timeout = () -> Timeout:
+    __wait_frontier_end()
+    Timeout
+
 select[A] = (a: () -> A, priority: str = "fair") -> (A | Canceled):
     s = __ts()
     s[__TS_SELECT_WON] = 0
     first = 0
     if priority == "fair": first = __select_first(1)
     loop spins in 0..:
-        if __task_canceled(): return Canceled
+        if __task_canceled(): return __select_canceled()
+        if __task_signal_frontier:
+            __wait_probe_begin(false)
+            s[__TS_SELECT] = 1
+            a()
+            __wait_probe_end()
         loop k in [0..1):
             s[__TS_SELECT] = 1
             ra = a()
             if __select_won(s, 0): return ra
         __select_nap(spins)
-    Canceled
+    __select_canceled()
 select[A, D] = (a: () -> A, timeout: D, priority: str = "fair") -> (A | Canceled | Timeout):
     s = __ts()
     s[__TS_SELECT_WON] = 0
@@ -331,14 +383,19 @@ select[A, D] = (a: () -> A, timeout: D, priority: str = "fair") -> (A | Canceled
     first = 0
     if priority == "fair": first = __select_first(1)
     loop spins in 0..:
-        if __task_canceled(): return Canceled
+        if __task_canceled(): return __select_canceled()
+        if __task_signal_frontier:
+            __wait_probe_begin(true)
+            s[__TS_SELECT] = 1
+            a()
+            __wait_probe_end()
         loop k in [0..1):
             s[__TS_SELECT] = 1
             ra = a()
             if __select_won(s, 0): return ra
-        if time_ns() >= deadline: return Timeout
+        if time_ns() >= deadline: return __select_timeout()
         __select_nap(spins)
-    Canceled
+    __select_canceled()
 select[A, B] = (a: () -> A, b: () -> B, priority: str = "fair") -> (A | B | Canceled):
     s = __ts()
     s[__TS_SELECT_WON] = 0
@@ -346,7 +403,14 @@ select[A, B] = (a: () -> A, b: () -> B, priority: str = "fair") -> (A | B | Canc
     if priority == "fair": first = __select_first(2)
     order = __select_order(priority)
     loop spins in 0..:
-        if __task_canceled(): return Canceled
+        if __task_canceled(): return __select_canceled()
+        if __task_signal_frontier:
+            __wait_probe_begin(false)
+            s[__TS_SELECT] = 1
+            a()
+            s[__TS_SELECT] = 1
+            b()
+            __wait_probe_end()
         loop k in [0..2):
             s[__TS_SELECT] = 1
             if ((order >> (2 * ((first + k) % 2))) & 3) == 0:
@@ -356,7 +420,7 @@ select[A, B] = (a: () -> A, b: () -> B, priority: str = "fair") -> (A | B | Canc
                 rb = b()
                 if __select_won(s, 1): return rb
         __select_nap(spins)
-    Canceled
+    __select_canceled()
 select[A, B, D] = (a: () -> A, b: () -> B, timeout: D, priority: str = "fair") -> (A | B | Canceled | Timeout):
     s = __ts()
     s[__TS_SELECT_WON] = 0
@@ -365,7 +429,14 @@ select[A, B, D] = (a: () -> A, b: () -> B, timeout: D, priority: str = "fair") -
     if priority == "fair": first = __select_first(2)
     order = __select_order(priority)
     loop spins in 0..:
-        if __task_canceled(): return Canceled
+        if __task_canceled(): return __select_canceled()
+        if __task_signal_frontier:
+            __wait_probe_begin(true)
+            s[__TS_SELECT] = 1
+            a()
+            s[__TS_SELECT] = 1
+            b()
+            __wait_probe_end()
         loop k in [0..2):
             s[__TS_SELECT] = 1
             if ((order >> (2 * ((first + k) % 2))) & 3) == 0:
@@ -374,9 +445,9 @@ select[A, B, D] = (a: () -> A, b: () -> B, timeout: D, priority: str = "fair") -
             else:
                 rb = b()
                 if __select_won(s, 1): return rb
-        if time_ns() >= deadline: return Timeout
+        if time_ns() >= deadline: return __select_timeout()
         __select_nap(spins)
-    Canceled
+    __select_canceled()
 select[A, B, C] = (a: () -> A, b: () -> B, c: () -> C, priority: str = "fair") -> (A | B | C | Canceled):
     s = __ts()
     s[__TS_SELECT_WON] = 0
@@ -384,7 +455,16 @@ select[A, B, C] = (a: () -> A, b: () -> B, c: () -> C, priority: str = "fair") -
     if priority == "fair": first = __select_first(3)
     order = __select_order(priority)
     loop spins in 0..:
-        if __task_canceled(): return Canceled
+        if __task_canceled(): return __select_canceled()
+        if __task_signal_frontier:
+            __wait_probe_begin(false)
+            s[__TS_SELECT] = 1
+            a()
+            s[__TS_SELECT] = 1
+            b()
+            s[__TS_SELECT] = 1
+            c()
+            __wait_probe_end()
         loop k in [0..3):
             s[__TS_SELECT] = 1
             if ((order >> (2 * ((first + k) % 3))) & 3) == 0:
@@ -397,7 +477,7 @@ select[A, B, C] = (a: () -> A, b: () -> B, c: () -> C, priority: str = "fair") -
                 rc = c()
                 if __select_won(s, 2): return rc
         __select_nap(spins)
-    Canceled
+    __select_canceled()
 select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, timeout: D, priority: str = "fair") -> (A | B | C | Canceled | Timeout):
     s = __ts()
     s[__TS_SELECT_WON] = 0
@@ -406,7 +486,16 @@ select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, timeout: D, priority: 
     if priority == "fair": first = __select_first(3)
     order = __select_order(priority)
     loop spins in 0..:
-        if __task_canceled(): return Canceled
+        if __task_canceled(): return __select_canceled()
+        if __task_signal_frontier:
+            __wait_probe_begin(true)
+            s[__TS_SELECT] = 1
+            a()
+            s[__TS_SELECT] = 1
+            b()
+            s[__TS_SELECT] = 1
+            c()
+            __wait_probe_end()
         loop k in [0..3):
             s[__TS_SELECT] = 1
             if ((order >> (2 * ((first + k) % 3))) & 3) == 0:
@@ -418,9 +507,9 @@ select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, timeout: D, priority: 
             else:
                 rc = c()
                 if __select_won(s, 2): return rc
-        if time_ns() >= deadline: return Timeout
+        if time_ns() >= deadline: return __select_timeout()
         __select_nap(spins)
-    Canceled
+    __select_canceled()
 select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, priority: str = "fair") -> (A | B | C | D | Canceled):
     s = __ts()
     s[__TS_SELECT_WON] = 0
@@ -428,7 +517,18 @@ select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, priority: 
     if priority == "fair": first = __select_first(4)
     order = __select_order(priority)
     loop spins in 0..:
-        if __task_canceled(): return Canceled
+        if __task_canceled(): return __select_canceled()
+        if __task_signal_frontier:
+            __wait_probe_begin(false)
+            s[__TS_SELECT] = 1
+            a()
+            s[__TS_SELECT] = 1
+            b()
+            s[__TS_SELECT] = 1
+            c()
+            s[__TS_SELECT] = 1
+            d()
+            __wait_probe_end()
         loop k in [0..4):
             s[__TS_SELECT] = 1
             if ((order >> (2 * ((first + k) % 4))) & 3) == 0:
@@ -444,7 +544,7 @@ select[A, B, C, D] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, priority: 
                 rd = d()
                 if __select_won(s, 3): return rd
         __select_nap(spins)
-    Canceled
+    __select_canceled()
 select[A, B, C, D, E] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, timeout: E, priority: str = "fair") -> (A | B | C | D | Canceled | Timeout):
     s = __ts()
     s[__TS_SELECT_WON] = 0
@@ -453,7 +553,18 @@ select[A, B, C, D, E] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, timeout
     if priority == "fair": first = __select_first(4)
     order = __select_order(priority)
     loop spins in 0..:
-        if __task_canceled(): return Canceled
+        if __task_canceled(): return __select_canceled()
+        if __task_signal_frontier:
+            __wait_probe_begin(true)
+            s[__TS_SELECT] = 1
+            a()
+            s[__TS_SELECT] = 1
+            b()
+            s[__TS_SELECT] = 1
+            c()
+            s[__TS_SELECT] = 1
+            d()
+            __wait_probe_end()
         loop k in [0..4):
             s[__TS_SELECT] = 1
             if ((order >> (2 * ((first + k) % 4))) & 3) == 0:
@@ -468,9 +579,9 @@ select[A, B, C, D, E] = (a: () -> A, b: () -> B, c: () -> C, d: () -> D, timeout
             else:
                 rd = d()
                 if __select_won(s, 3): return rd
-        if time_ns() >= deadline: return Timeout
+        if time_ns() >= deadline: return __select_timeout()
         __select_nap(spins)
-    Canceled
+    __select_canceled()
 
 # The signal handler only returns. No allocator, locks or user callbacks run
 # on its signal stack. Repeated acknowledgement closes the check/syscall race.
@@ -495,7 +606,7 @@ __task_install_interrupt = () -> bool:
             return false
         handler: cfn(int) = __task_interrupt
         action = [handler as int, 0x04000000, trampoline, 0]
-        if syscall(13, 12, data(action), 0, 8) != 0:
+        if syscall(13, __TASK_WAKE_SIGNAL, data(action), 0, 8) != 0:
             syscall(11, trampoline, 4096)
             return false
         true
@@ -506,10 +617,10 @@ __task_interrupt_group = (g: TaskGroup) -> void:
         __task_lock(&p.lock)
         if not p.closed:
             pid = syscall(39)
-            syscall(234, pid, p.owner, 12)
+            syscall(234, pid, p.owner, __TASK_WAKE_SIGNAL)
             loop job in p.addresses:
                 tid = __atomic_add(&job.tid, 0)
-                if tid != 0 and __atomic_add(&job.alive, 0) != 0: syscall(234, pid, tid, 12)
+                if tid != 0 and __atomic_add(&job.alive, 0) != 0: syscall(234, pid, tid, __TASK_WAKE_SIGNAL)
         __task_unlock(&p.lock)
 
 # Wake on completion; the timeout also notices a deadline when no task finishes.
