@@ -705,5 +705,7 @@ section linked. ROADMAP.md lists them in one line each.
   - **Databases** (direction): David dislikes SQL and wants a Dewy-native database interface
     built from plain functions, methods and Dewy types, without SQL or relational cruft, that
     covers the major uses of databases and plugs into Dewy's safety and typing. It may start
-    backed by SQLite; the long-term goal is a pure Dewy database. Examples should not lean on SQL
-    strings. A design round is queued.
+    backed by SQLite; the long-term goal is a pure Dewy database. SQL databases are still
+    supported first-class (a valuable use case); the Dewy-native interface is meant to be wholly
+    better, not the only option. Examples of the native design don't lean on SQL strings. A
+    design round is queued.
